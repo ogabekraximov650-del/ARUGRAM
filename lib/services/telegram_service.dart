@@ -111,6 +111,14 @@ class TelegramService extends ChangeNotifier {
 
   /// Server Telegram orqali video berishga tayyormi (sirlar qo'yilgan).
   bool _serverEnabled = false;
+
+  /// Kirish boti (`/start <token>` shunga yuboriladi).
+  String _bot = '';
+
+  /// Server videolarni Telegram'dan beradimi (kanal sozlanganmi).
+  /// Sozlama kelguncha `true` — aks holda ilova ochilgan zahoti
+  /// ko'rilgan birinchi qism bekorga B2'dan ketardi.
+  bool _video = true;
   bool _configured = false;
   bool _authorized = false;
 
@@ -128,7 +136,7 @@ class TelegramService extends ChangeNotifier {
   bool get authorized => _authorized;
 
   /// Videolar Telegram'dan olinadimi.
-  bool get active => _authorized && _configured;
+  bool get active => _authorized && _configured && _video;
 
   String get _dir {
     final root = RustCore.instance.rootDirPath ?? '';
@@ -173,19 +181,21 @@ class TelegramService extends ChangeNotifier {
     }
   }
 
-  /// `api_id`/`api_hash` ni serverdan oladi. Faqat kirgan
-  /// foydalanuvchiga beriladi.
-  Future<void> refreshConfig() async {
-    final s = AuthService.instance.sessionToken;
-    if (s == null || !_started) return;
+  /// `api_id`/`api_hash` ni serverdan oladi. Sessiya shart emas:
+  /// ilovaga telefon raqami bilan KIRISHning o'zi shu qiymatlar
+  /// bilan bo'ladi. `true` — Telegram orqali kirish mumkin.
+  Future<bool> refreshConfig() async {
+    if (!_started) await start();
+    if (!_started) return false;
     try {
-      final r = await http.get(
-        Uri.parse('$kApiBase/api/tg/config'),
-        headers: {'Authorization': 'Bearer $s'},
-      ).timeout(const Duration(seconds: 15));
-      if (r.statusCode != 200) return;
+      final r = await http
+          .get(Uri.parse('$kApiBase/api/tg/config'))
+          .timeout(const Duration(seconds: 15));
+      if (r.statusCode != 200) return _configured;
       final j = jsonDecode(r.body) as Map<String, dynamic>;
       _serverEnabled = j['enabled'] == true;
+      _bot = (j['bot'] as String?) ?? _bot;
+      _video = j['video'] != false;
       if (_serverEnabled) {
         final id = (j['api_id'] as num?)?.toInt() ?? 0;
         final hash = (j['api_hash'] as String?) ?? '';
@@ -195,6 +205,7 @@ class TelegramService extends ChangeNotifier {
     } catch (_) {
       // Tarmoq yo'q — saqlangan sozlama bilan ishlayveradi.
     }
+    return _configured;
   }
 
   // ── KIRISH ──────────────────────────────────────────────────
@@ -221,6 +232,30 @@ class TelegramService extends ChangeNotifier {
         await _callBlocking('rust_tg_check_password', password));
     if (step.done) _afterLogin();
     return step;
+  }
+
+  /// Ilovaga KIRISH: Telegram hisobi ulangach, foydalanuvchi nomidan
+  /// botga `/start <token>` yuboriladi (`rust_tg_start_bot` izohi).
+  Future<String?> startBot(String token) async {
+    if (_bot.isEmpty) await refreshConfig();
+    if (_bot.isEmpty) return 'Bot nomi serverdan olinmadi';
+    final bot = _bot;
+    final j = await Isolate.run(() {
+      final lib = _openLib();
+      final f = lib.lookupFunction<
+          Pointer<Utf8> Function(Pointer<Utf8>, Pointer<Utf8>),
+          Pointer<Utf8> Function(
+              Pointer<Utf8>, Pointer<Utf8>)>('rust_tg_start_bot');
+      final b = bot.toNativeUtf8();
+      final t = token.toNativeUtf8();
+      try {
+        return _json(_take(lib, f(b, t)));
+      } finally {
+        malloc.free(b);
+        malloc.free(t);
+      }
+    });
+    return j['ok'] == true ? null : (j['error'] as String? ?? 'Xato');
   }
 
   void _afterLogin() {

@@ -988,6 +988,51 @@ pub extern "C" fn rust_tg_check_password(pw_ptr: *const c_char) -> *mut c_char {
     }))
 }
 
+/// Ilovaga KIRISH: foydalanuvchi nomidan botga `/start <token>`
+/// yuboradi (xuddi odam botda START bosgandek).
+///
+/// Worker'dagi bot orqali kirish tizimi o'zgarmaydi: webhook
+/// `/start <token>` ni ko'radi, xabarni yuborgan HAQIQIY Telegram
+/// hisobini (`from.id`) oladi va sessiya ochadi. Ya'ni ilova
+/// hech narsani "da'vo qilmaydi" — shaxsni Telegram'ning o'zi
+/// tasdiqlaydi.
+#[no_mangle]
+pub extern "C" fn rust_tg_start_bot(bot_ptr: *const c_char, param_ptr: *const c_char) -> *mut c_char {
+    let bot = unsafe { cstr_to_str(bot_ptr) }.unwrap_or("").trim_start_matches('@').to_string();
+    let param = unsafe { cstr_to_str(param_ptr) }.unwrap_or("").to_string();
+    string_to_cptr(with_client(|t, client| {
+        if bot.is_empty() || param.is_empty() {
+            return Err("bot yoki token berilmagan".to_string());
+        }
+        t.rt.block_on(async {
+            let tl::enums::contacts::ResolvedPeer::Peer(rp) = client
+                .invoke(&tl::functions::contacts::ResolveUsername { username: bot.clone(), referer: None })
+                .await
+                .map_err(|e| e.to_string())?;
+            let (id, hash) = rp
+                .users
+                .iter()
+                .find_map(|u| match u {
+                    tl::enums::User::User(u) if u.bot => u.access_hash.map(|h| (u.id, h)),
+                    _ => None,
+                })
+                .ok_or("bot topilmadi")?;
+            let mut rnd = [0u8; 8];
+            getrandom::getrandom(&mut rnd).map_err(|e| e.to_string())?;
+            client
+                .invoke(&tl::functions::messages::StartBot {
+                    bot: tl::enums::InputUser::User(tl::types::InputUser { user_id: id, access_hash: hash }),
+                    peer: tl::enums::InputPeer::User(tl::types::InputPeerUser { user_id: id, access_hash: hash }),
+                    random_id: i64::from_le_bytes(rnd),
+                    start_param: param.clone(),
+                })
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(json!({"ok": true}).to_string())
+        })
+    }))
+}
+
 /// Telegram hisobidan chiqadi va sessiyani o'chiradi.
 #[no_mangle]
 pub extern "C" fn rust_tg_logout() -> *mut c_char {

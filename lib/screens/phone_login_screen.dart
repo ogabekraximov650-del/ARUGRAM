@@ -1,0 +1,447 @@
+// lib/screens/phone_login_screen.dart — TELEGRAM ORQALI KIRISH
+//
+// TALAB (foydalanuvchi): "profil sahifasiga o'tganda xuddi
+// Telegramdagidek raqam yozadigan, keyin kod yozadigan va agar
+// bo'lsa ikki bosqichli parol yozadigan oyna tizimi bo'lsin.
+// Raqam yozadigan oynada faqat + bo'lsin, foydalanuvchi qolganini
+// o'zi yozsin".
+//
+// ── QANDAY ISHLAYDI ────────────────────────────────────────────
+//
+//   1. Raqam -> Telegram kod yuboradi (Telegram ilovasiga yoki SMS).
+//   2. Kod -> (yoqilgan bo'lsa) ikki bosqichli parol.
+//   3. Telegram hisobi ulangach ilova foydalanuvchi NOMIDAN botga
+//      `/start <token>` yuboradi (`rust_tg_start_bot`). Worker'dagi
+//      bot orqali kirish tizimi o'zgarmagan: u xabarni kim
+//      yuborganini Telegram'ning o'zidan biladi va sessiya ochadi.
+//      Ilova esa kirish holatini so'rab turadi.
+//
+// Natijada bitta kirish bilan ikkisi bo'ladi: ilova hisobi ochiladi
+// VA videolar uchun Telegram ulanadi (`telegram_service.dart`).
+//
+// [connectOnly] — ilovaga allaqachon kirilgan, faqat Telegram
+// ulanadi (3-qadam yo'q).
+//
+// Ekran `true` qaytaradi — kirildi; `'bot'` — foydalanuvchi eski
+// bot orqali kirishni tanladi.
+
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+import '../services/auth_service.dart';
+import '../services/telegram_service.dart';
+import '../theme/app_background.dart';
+import '../widgets/glass.dart';
+import '../widgets/telegram_logo.dart';
+
+enum _Step { phone, code, password, finishing }
+
+class PhoneLoginScreen extends StatefulWidget {
+  final bool connectOnly;
+  const PhoneLoginScreen({super.key, this.connectOnly = false});
+
+  @override
+  State<PhoneLoginScreen> createState() => _PhoneLoginScreenState();
+}
+
+/// Raqam maydoni: boshida DOIM `+`, keyin faqat raqamlar.
+/// `+` ni o'chirib bo'lmaydi.
+class PhoneNumberFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+      TextEditingValue oldValue, TextEditingValue newValue) {
+    final digits = newValue.text.replaceAll(RegExp(r'[^0-9]'), '');
+    final cut = digits.length > 15 ? digits.substring(0, 15) : digits;
+    final text = '+$cut';
+    return TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
+    );
+  }
+}
+
+class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
+  final _phone = TextEditingController(text: '+');
+  final _code = TextEditingController();
+  final _password = TextEditingController();
+  final _focus = FocusNode();
+
+  _Step _step = _Step.phone;
+  bool _busy = false;
+  bool _showPassword = false;
+  String? _error;
+  String _hint = '';
+  bool _available = true;
+
+  TelegramService get _tg => TelegramService.instance;
+
+  @override
+  void initState() {
+    super.initState();
+    _check();
+  }
+
+  Future<void> _check() async {
+    final ok = await _tg.refreshConfig();
+    if (!mounted) return;
+    // Telegram allaqachon ulangan (masalan oldingi urinish 3-qadamda
+    // uzilgan) — raqamni qayta so'rashning hojati yo'q.
+    if (_tg.authorized) {
+      _finish();
+      return;
+    }
+    setState(() => _available = ok);
+  }
+
+  @override
+  void dispose() {
+    _phone.dispose();
+    _code.dispose();
+    _password.dispose();
+    _focus.dispose();
+    super.dispose();
+  }
+
+  void _go(_Step s) {
+    setState(() {
+      _step = s;
+      _error = null;
+    });
+    // Yangi maydonga klaviatura o'zi ochilsin.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && s != _Step.finishing) _focus.requestFocus();
+    });
+  }
+
+  void _fail(String? e) {
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _error = e;
+    });
+  }
+
+  Future<void> _submit() async {
+    if (_busy) return;
+    switch (_step) {
+      case _Step.phone:
+        if (_phone.text.length < 8) {
+          _fail('Raqamni to\'liq kiriting');
+          return;
+        }
+        setState(() {
+          _busy = true;
+          _error = null;
+        });
+        final r = await _tg.requestCode(_phone.text);
+        if (!mounted) return;
+        if (r.error != null) return _fail(r.error);
+        setState(() => _busy = false);
+        _go(_Step.code);
+      case _Step.code:
+        final code = _code.text.trim();
+        if (code.isEmpty) return;
+        setState(() {
+          _busy = true;
+          _error = null;
+        });
+        final r = await _tg.signIn(code);
+        if (!mounted) return;
+        if (r.needPassword) {
+          _hint = r.hint;
+          setState(() => _busy = false);
+          _go(_Step.password);
+          return;
+        }
+        if (!r.done) return _fail(r.error);
+        _finish();
+      case _Step.password:
+        if (_password.text.isEmpty) return;
+        setState(() {
+          _busy = true;
+          _error = null;
+        });
+        final r = await _tg.checkPassword(_password.text);
+        if (!mounted) return;
+        if (!r.done) {
+          _password.clear();
+          return _fail(r.error ?? 'Parol noto\'g\'ri');
+        }
+        _finish();
+      case _Step.finishing:
+        _finish();
+    }
+  }
+
+  /// Telegram ulandi. Ilova hisobi ham kerak bo'lsa — bot orqali
+  /// sessiya ochiladi.
+  Future<void> _finish() async {
+    if (widget.connectOnly || AuthService.instance.isLoggedIn) {
+      if (mounted) Navigator.of(context).pop(true);
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _error = null;
+      _step = _Step.finishing;
+    });
+    final req = await AuthService.instance.start();
+    if (!mounted) return;
+    if (req == null) return _fail('Server bilan bog\'lanib bo\'lmadi');
+    final err = await _tg.startBot(req.token);
+    if (!mounted) return;
+    if (err != null) return _fail(err);
+    // Bot xabarni bir-ikki soniyada oladi.
+    for (var i = 0; i < 40; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 750));
+      if (!mounted) return;
+      final st = await AuthService.instance.check(req.token);
+      if (!mounted) return;
+      if (st == LoginStatus.ok) {
+        Navigator.of(context).pop(true);
+        return;
+      }
+      if (st == LoginStatus.expired) break;
+    }
+    _fail('Kirish tasdiqlanmadi — qayta urinib ko\'ring');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AppBackground(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          iconTheme: const IconThemeData(color: Colors.white),
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back_rounded),
+            onPressed: () {
+              if (_step == _Step.code || _step == _Step.password) {
+                _code.clear();
+                _password.clear();
+                _go(_Step.phone);
+              } else {
+                Navigator.of(context).maybePop();
+              }
+            },
+          ),
+        ),
+        floatingActionButton: _step == _Step.finishing && _error == null
+            ? null
+            : FloatingActionButton(
+                onPressed: _busy || !_available ? null : _submit,
+                backgroundColor: AppColors.telegram,
+                shape: const CircleBorder(),
+                child: _busy
+                    ? const SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2.4, color: Colors.white),
+                      )
+                    : const Icon(Icons.arrow_forward_rounded,
+                        color: Colors.white),
+              ),
+        body: SafeArea(
+          top: false,
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(28, 12, 28, 120),
+            children: [
+              const Center(child: TelegramLogo(size: 92)),
+              const SizedBox(height: 28),
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 220),
+                child: KeyedSubtree(
+                  key: ValueKey(_step),
+                  child: _stepBody(),
+                ),
+              ),
+              if (_error != null) ...[
+                const SizedBox(height: 16),
+                Text(
+                  _error!,
+                  textAlign: TextAlign.center,
+                  style:
+                      const TextStyle(color: Colors.redAccent, fontSize: 13.5),
+                ),
+              ],
+              if (!_available) ...[
+                const SizedBox(height: 16),
+                Text(
+                  'Telegram orqali kirish hozircha yoqilmagan.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.6),
+                      fontSize: 13.5),
+                ),
+              ],
+              if (!widget.connectOnly && _step == _Step.phone) ...[
+                const SizedBox(height: 28),
+                Center(
+                  child: TextButton(
+                    onPressed: () => Navigator.of(context).pop('bot'),
+                    child: const Text(
+                      'Bot orqali kirish',
+                      style: TextStyle(color: AppColors.telegramLight),
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _title(String title, String subtitle) {
+    return Column(
+      children: [
+        Text(
+          title,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 22,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 10),
+        Text(
+          subtitle,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.6),
+            fontSize: 14,
+            height: 1.45,
+          ),
+        ),
+        const SizedBox(height: 28),
+      ],
+    );
+  }
+
+  InputDecoration _decoration(String label, {Widget? suffix}) {
+    return InputDecoration(
+      labelText: label,
+      labelStyle: const TextStyle(color: Colors.white54),
+      floatingLabelStyle: const TextStyle(color: AppColors.telegramLight),
+      suffixIcon: suffix,
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: Colors.white24),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: AppColors.telegram, width: 1.6),
+      ),
+      disabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: Colors.white12),
+      ),
+    );
+  }
+
+  Widget _stepBody() {
+    const fieldStyle = TextStyle(
+      color: Colors.white,
+      fontSize: 20,
+      letterSpacing: 1.2,
+    );
+    switch (_step) {
+      case _Step.phone:
+        return Column(
+          children: [
+            _title('Telefon raqamingiz',
+                'Telegram hisobingiz ulangan raqamni xalqaro formatda kiriting.'),
+            TextField(
+              controller: _phone,
+              focusNode: _focus,
+              autofocus: true,
+              enabled: !_busy && _available,
+              keyboardType: TextInputType.phone,
+              inputFormatters: [PhoneNumberFormatter()],
+              style: fieldStyle,
+              onSubmitted: (_) => _submit(),
+              decoration: _decoration('Telefon raqami'),
+            ),
+          ],
+        );
+      case _Step.code:
+        return Column(
+          children: [
+            _title(
+                'Kodni kiriting',
+                'Telegram ${_phone.text} raqamiga kirish kodini yubordi.\n'
+                    'Kod Telegram ilovasidagi "Telegram" chatida.'),
+            TextField(
+              controller: _code,
+              focusNode: _focus,
+              autofocus: true,
+              enabled: !_busy,
+              keyboardType: TextInputType.number,
+              inputFormatters: [
+                FilteringTextInputFormatter.digitsOnly,
+                LengthLimitingTextInputFormatter(6),
+              ],
+              textAlign: TextAlign.center,
+              style: fieldStyle.copyWith(fontSize: 26, letterSpacing: 10),
+              // Telegram kodi 5 xonali — to'lishi bilan o'zi yuboriladi.
+              onChanged: (v) {
+                if (v.length == 5) _submit();
+              },
+              onSubmitted: (_) => _submit(),
+              decoration: _decoration('Kod'),
+            ),
+          ],
+        );
+      case _Step.password:
+        return Column(
+          children: [
+            _title(
+                'Ikki bosqichli parol',
+                _hint.isEmpty
+                    ? 'Hisobingizda qo\'shimcha parol yoqilgan.'
+                    : 'Hisobingizda qo\'shimcha parol yoqilgan.\nEslatma: $_hint'),
+            TextField(
+              controller: _password,
+              focusNode: _focus,
+              autofocus: true,
+              enabled: !_busy,
+              obscureText: !_showPassword,
+              keyboardType: TextInputType.visiblePassword,
+              style: fieldStyle.copyWith(letterSpacing: 0.5),
+              onSubmitted: (_) => _submit(),
+              decoration: _decoration(
+                'Parol',
+                suffix: IconButton(
+                  icon: Icon(
+                    _showPassword
+                        ? Icons.visibility_off_rounded
+                        : Icons.visibility_rounded,
+                    color: Colors.white54,
+                  ),
+                  onPressed: () =>
+                      setState(() => _showPassword = !_showPassword),
+                ),
+              ),
+            ),
+          ],
+        );
+      case _Step.finishing:
+        return Column(
+          children: [
+            _title('Kirilmoqda', 'Hisobingiz tasdiqlanmoqda...'),
+            if (_error == null)
+              const Center(
+                child: CircularProgressIndicator(color: AppColors.telegram),
+              ),
+          ],
+        );
+    }
+  }
+}

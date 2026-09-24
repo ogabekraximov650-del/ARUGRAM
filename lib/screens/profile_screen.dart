@@ -30,7 +30,8 @@ import 'sessions_screen.dart';
 import 'settings_screen.dart';
 import 'stat_detail_screen.dart';
 import 'telegram_login_screen.dart';
-import 'telegram_video_screen.dart';
+import 'phone_login_screen.dart';
+import '../services/telegram_service.dart';
 
 /// PROFIL.
 ///
@@ -68,6 +69,19 @@ class _LoginBody extends StatelessWidget {
   const _LoginBody();
 
   Future<void> _login(BuildContext context) async {
+    // ── TELEGRAM'DAGIDEK: RAQAM -> KOD -> PAROL ─────────────────
+    // (`phone_login_screen.dart`). Foydalanuvchi u yerda "Bot orqali
+    // kirish"ni tanlasa — eski oyna ochiladi.
+    final r = await Navigator.of(context).push<Object?>(
+      MaterialPageRoute(builder: (_) => const PhoneLoginScreen()),
+    );
+    if (!context.mounted) return;
+    if (r == true) {
+      _welcome(context);
+      return;
+    }
+    if (r != 'bot') return;
+
     final ok = await Navigator.of(context).push<bool>(
       PageRouteBuilder(
         transitionDuration: const Duration(milliseconds: 300),
@@ -88,19 +102,21 @@ class _LoginBody extends StatelessWidget {
       ),
     );
 
-    if (ok == true && context.mounted) {
-      final name = AuthService.instance.user?.firstName ?? '';
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          behavior: SnackBarBehavior.floating,
-          backgroundColor: AppColors.card,
-          content: Text(
-            name.isEmpty ? 'Xush kelibsiz!' : 'Xush kelibsiz, $name!',
-            style: const TextStyle(color: Colors.white),
-          ),
+    if (ok == true && context.mounted) _welcome(context);
+  }
+
+  void _welcome(BuildContext context) {
+    final name = AuthService.instance.user?.firstName ?? '';
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: AppColors.card,
+        content: Text(
+          name.isEmpty ? 'Xush kelibsiz!' : 'Xush kelibsiz, $name!',
+          style: const TextStyle(color: Colors.white),
         ),
-      );
-    }
+      ),
+    );
   }
 
   @override
@@ -501,14 +517,28 @@ class _ProfileBody extends StatelessWidget {
                   onTap: () => _open(context, const SettingsScreen()),
                 ),
                 _divider(),
-                // Videolarni Telegram serveridan olish uchun o'z
-                // Telegram hisobini ulash (`telegram_video_screen`).
-                _ProfileTile(
-                  icon: Icons.send_rounded,
-                  label: 'Telegram orqali ko\'rish',
-                  onTap: () => _open(context, const TelegramVideoScreen()),
+                // Bot orqali kirgan (yoki Telegram'ni uzgan)
+                // foydalanuvchi videolar uchun Telegram'ni shu yerdan
+                // ulaydi. Ulangach qator yo'qoladi.
+                AnimatedBuilder(
+                  animation: TelegramService.instance,
+                  builder: (context, _) {
+                    if (TelegramService.instance.authorized) {
+                      return const SizedBox.shrink();
+                    }
+                    return Column(
+                      children: [
+                        _ProfileTile(
+                          icon: Icons.send_rounded,
+                          label: 'Telegram\'ni ulash',
+                          onTap: () => _open(context,
+                              const PhoneLoginScreen(connectOnly: true)),
+                        ),
+                        _divider(),
+                      ],
+                    );
+                  },
                 ),
-                _divider(),
                 _ProfileTile(
                   icon: Icons.devices_rounded,
                   label: 'Qurilmalar',

@@ -9745,29 +9745,37 @@ async fn tg_channel_post(env: &Env, post: &Value) {
 }
 
 async fn tg_route(mut req: Request, env: &Env, path: &str, method: Method) -> Result<Response> {
+    // Ilova Telegram'ga ulanishi uchun kerakli qiymatlar.
+    //
+    // SESSIYASIZ beriladi: ilovaga telefon raqami bilan KIRISHning
+    // o'zi shu qiymatlar bilan bo'ladi (kirishdan oldin sessiya yo'q).
+    // Himoya — `app_gate`: so'rov imzosiz (ilovadan emas) bo'lsa bu
+    // yerga yetib kelmaydi. Qiymatlar baribir APK ichidagi ilovaga
+    // beriladi, ya'ni ular parol emas (`telegram.rs` ularni
+    // telefonda shifrlab saqlaydi).
+    if method == Method::Get && path == "/api/tg/config" {
+        let api_id: i64 = tg_secret(env, "TG_API_ID").parse().unwrap_or(0);
+        let api_hash = tg_secret(env, "TG_API_HASH");
+        if api_id <= 0 || api_hash.is_empty() {
+            return ok_nostore(json!({"enabled": false}));
+        }
+        return ok_nostore(json!({
+            "enabled": true,
+            // Kanal hali sozlanmagan bo'lsa ham telefon orqali
+            // kirish ishlaydi — faqat videolar B2'dan.
+            "video": tg_channel_id(env) != 0,
+            "api_id": api_id,
+            "api_hash": api_hash,
+            "bot": BOT_USERNAME,
+        }));
+    }
+
     let Some(u) = session_user(env, &bearer(&req)).await? else {
         return json_resp(&json!({"error": "unauthorized"}), 401);
     };
     let me = u["id"].as_i64().unwrap_or(0);
 
     match (method, path) {
-        // Ilova Telegram'ga ulanishi uchun kerakli qiymatlar. Faqat
-        // kirgan foydalanuvchiga beriladi (`telegram.rs` ularni
-        // telefonda shifrlab saqlaydi).
-        (Method::Get, "/api/tg/config") => {
-            let api_id: i64 = tg_secret(env, "TG_API_ID").parse().unwrap_or(0);
-            let api_hash = tg_secret(env, "TG_API_HASH");
-            let enabled = api_id > 0 && !api_hash.is_empty() && tg_channel_id(env) != 0;
-            if !enabled {
-                return ok_nostore(json!({"enabled": false}));
-            }
-            ok_nostore(json!({
-                "enabled": true,
-                "api_id": api_id,
-                "api_hash": api_hash,
-                "bot": BOT_USERNAME,
-            }))
-        }
 
         // Videoni foydalanuvchining bot chatiga yuboradi.
         // Javob: {"msg_id": N} — ilova faylni shu xabardan oladi.

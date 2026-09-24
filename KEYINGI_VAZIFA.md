@@ -60,6 +60,16 @@ serveri orqali uzatilsin. Ilova nomi **ARUmedia** (TV yo'q).
 5. Telegram ulanmagan / qism kanalda yo'q / xato — hammasi avtomatik
    odatdagi worker (B2) yo'liga qaytadi.
 
+**Ilovaga kirish ham Telegram raqami bilan** (Profil → raqam → kod →
+kerak bo'lsa 2 bosqichli parol, `phone_login_screen.dart`). Telegram
+ulangach ilova foydalanuvchi nomidan botga `/start <token>` yuboradi
+(`rust_tg_start_bot`) — worker'dagi bot orqali kirish o'zgarmagan,
+shaxsni Telegram'ning o'zi tasdiqlaydi. `/api/tg/config` shu sabab
+SESSIYASIZ (faqat ilova imzosi bilan). Eski bot oynasi "Bot orqali
+kirish" tugmasi ortida qoldi.
+
+**Push:** foydalanuvchi talabi — bundan keyin FAQAT `main` ga.
+
 **Sirlar** (GitHub → `secret` environment, deploy ularni worker'ga
 qo'yadi): `TG_API_ID`, `TG_API_HASH` (my.telegram.org),
 `TG_CHANNEL_ID` (-100... ko'rinishida). Uchalasi qo'yilmaguncha
