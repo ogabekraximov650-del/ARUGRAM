@@ -1177,6 +1177,8 @@ async fn init_db(env: &Env) -> bool {
             user_id INTEGER NOT NULL,
             file_name TEXT NOT NULL,
             msg_id INTEGER NOT NULL,
+            tg_user INTEGER DEFAULT 0,
+            sent_at INTEGER DEFAULT 0,
             PRIMARY KEY (user_id, file_name)
         )", vec![]),
     ]).await.is_ok();
@@ -1185,6 +1187,12 @@ async fn init_db(env: &Env) -> bool {
     // yaratilgan bazalar uchun (xato "ustun bor" — normal holat).
     let _ = turso_exec(env,
         "ALTER TABLE tg_files ADD COLUMN file_id TEXT DEFAULT ''", vec![]).await;
+    // `tg_sent` ga ham: kimga (Telegram chat) va qachon yuborilgani —
+    // bot nusxani keyin o'chira olishi uchun (`tg_release`).
+    let _ = turso_exec(env,
+        "ALTER TABLE tg_sent ADD COLUMN tg_user INTEGER DEFAULT 0", vec![]).await;
+    let _ = turso_exec(env,
+        "ALTER TABLE tg_sent ADD COLUMN sent_at INTEGER DEFAULT 0", vec![]).await;
 
     ok
 }
@@ -9989,6 +9997,47 @@ async fn tg_serve(env: &Env, origin: &str, fname: &str, range: Option<&str>) -> 
     Ok(Some(out))
 }
 
+/// Foydalanuvchining bot chatidagi nusxani o'chiradi va yozuvni
+/// olib tashlaydi.
+async fn tg_release(env: &Env, user_id: i64, name: &str, chat: i64, msg_id: i64) {
+    if chat != 0 && msg_id > 0 {
+        let _ = tg_api(env, "deleteMessage", json!({"chat_id": chat, "message_id": msg_id})).await;
+    }
+    let _ = turso_exec(env, "DELETE FROM tg_sent WHERE user_id=? AND file_name=?",
+        vec![TursoArg::int(user_id), TursoArg::text(name)]).await;
+}
+
+/// Ilova yopilib qolgan (pleyerdan chiqish xabari kelmagan) nusxalar
+/// shuncha vaqtdan keyin avtomatik o'chiriladi. Uzun qism ham ko'rib
+/// bo'linishiga yetadi; Telegram botga o'z xabarini 48 soat ichida
+/// o'chirishga ruxsat beradi.
+const TG_SENT_MAX_AGE_MS: i64 = 3 * 3600 * 1000;
+
+/// Har daqiqada (cron): eskirgan nusxalarni bot chatlaridan tozalaydi.
+async fn tg_sweep(env: &Env) {
+    ensure_db(env).await;
+    let res = turso_exec(env,
+        "SELECT user_id, file_name, msg_id, tg_user FROM tg_sent
+          WHERE COALESCE(sent_at,0) < ? LIMIT 50",
+        vec![TursoArg::int(now_ms() - TG_SENT_MAX_AGE_MS)]).await;
+    let Ok(res) = res else { return };
+    let cols = res["cols"].as_array().cloned().unwrap_or_default();
+    let rows = res["rows"].as_array().cloned().unwrap_or_default();
+    for row in rows {
+        let o = row_to_obj(&cols, row.as_array().unwrap_or(&vec![]));
+        tg_release(env,
+            o["user_id"].as_i64().unwrap_or(0),
+            o["file_name"].as_str().unwrap_or(""),
+            o["tg_user"].as_i64().unwrap_or(0),
+            o["msg_id"].as_i64().unwrap_or(0)).await;
+    }
+}
+
+#[event(scheduled)]
+pub async fn scheduled(_event: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
+    tg_sweep(&env).await;
+}
+
 /// Qism (yoki uning bitta sifati) o'chirildi — kanal posti ham,
 /// yozuvlar ham o'chadi. Foydalanuvchilarning bot chatidagi
 /// nusxalariga tegilmaydi: ular endi hech qayerdan ochilmaydi.
@@ -10150,10 +10199,34 @@ async fn tg_route(mut req: Request, env: &Env, path: &str, method: Method) -> Re
                 return json_resp(&json!({"error": "send_failed"}), 409);
             }
             let _ = turso_exec(env,
-                "INSERT INTO tg_sent (user_id, file_name, msg_id) VALUES (?, ?, ?)
-                 ON CONFLICT(user_id, file_name) DO UPDATE SET msg_id=excluded.msg_id",
-                vec![TursoArg::int(me), TursoArg::text(&name), TursoArg::int(msg_id)]).await;
+                "INSERT INTO tg_sent (user_id, file_name, msg_id, tg_user, sent_at) VALUES (?, ?, ?, ?, ?)
+                 ON CONFLICT(user_id, file_name) DO UPDATE SET
+                   msg_id=excluded.msg_id, tg_user=excluded.tg_user, sent_at=excluded.sent_at",
+                vec![TursoArg::int(me), TursoArg::text(&name), TursoArg::int(msg_id),
+                     TursoArg::int(tg_user), TursoArg::int(now_ms())]).await;
             ok_nostore(json!({"msg_id": msg_id}))
+        }
+
+        // Pleyer yopildi / yuklab olish tugadi — bot chatidagi nusxa
+        // o'chiriladi (foydalanuvchi talabi). Keyingi ko'rishda bot
+        // uni qayta yuboradi.
+        (Method::Post, "/api/tg/release") => {
+            let body: Value = req.json().await.unwrap_or(json!({}));
+            let name = body["file"].as_str().unwrap_or("").trim().to_string();
+            if !tg_safe_name(&name) {
+                return json_resp(&json!({"error": "bad_file"}), 400);
+            }
+            let res = turso_exec(env,
+                "SELECT msg_id, tg_user FROM tg_sent WHERE user_id=? AND file_name=?",
+                vec![TursoArg::int(me), TursoArg::text(&name)]).await?;
+            if let Some(r) = first_row(&res) {
+                let chat = match r["tg_user"].as_i64().unwrap_or(0) {
+                    0 => u["telegram_id"].as_i64().unwrap_or(0),
+                    c => c,
+                };
+                tg_release(env, me, &name, chat, r["msg_id"].as_i64().unwrap_or(0)).await;
+            }
+            ok_nostore(json!({"ok": true}))
         }
 
         // ADMIN: ilova videoni kanalga yukladi — fayl nomini postga

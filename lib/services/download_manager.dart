@@ -95,8 +95,7 @@ class VideoCacheStat {
 
   static const empty = VideoCacheStat();
 
-  double get ratio =>
-      total > 0 ? (downloaded / total).clamp(0.0, 1.0) : 0.0;
+  double get ratio => total > 0 ? (downloaded / total).clamp(0.0, 1.0) : 0.0;
 
   int get percent => (ratio * 100).round();
 
@@ -124,9 +123,8 @@ class VideoCacheStat {
       other.streams == streams;
 
   @override
-  int get hashCode =>
-      Object.hash(
-          total, downloaded, downloading, retrying, queued, speed, streams);
+  int get hashCode => Object.hash(
+      total, downloaded, downloading, retrying, queued, speed, streams);
 }
 
 class DownloadManager extends ChangeNotifier {
@@ -181,10 +179,27 @@ class DownloadManager extends ChangeNotifier {
   /// Faol yuklashlarni uyg'otadi (kutishni bekor qiladi).
   void _resumeActive() {
     if (_active.isEmpty) return;
-    for (final url in _active) {
-      RustCore.instance.videoDownload(url);
+    for (final url in _active.toList()) {
+      // Telegram'dagi qism: bot nusxasi tozalangan bo'lishi mumkin —
+      // avval qayta tayyorlanadi.
+      _prepareTg(url).then((_) => RustCore.instance.videoDownload(url));
     }
     _poll();
+  }
+
+  /// Telegram orqali yuklanayotgan qismlar (bot chatidagi nusxa
+  /// yuklash tugaguncha ushlab turiladi — `TelegramService.hold`).
+  final Set<String> _tgHeld = {};
+
+  Future<void> _prepareTg(String url) async {
+    final tg = TelegramService.instance;
+    if (!tg.active) return;
+    final ok = await tg.prepare(url);
+    if (ok != null && _tgHeld.add(url)) tg.hold(url);
+  }
+
+  void _releaseTg(String url) {
+    if (_tgHeld.remove(url)) TelegramService.instance.unhold(url);
   }
 
   VideoCacheStat statOf(String url) => _stats[url] ?? VideoCacheStat.empty;
@@ -310,6 +325,10 @@ class DownloadManager extends ChangeNotifier {
       if (!stat.downloading && _active.contains(entry.key)) {
         _active.remove(entry.key);
       }
+      // To'liq yuklandi — Telegram bot chatidagi nusxa endi keraksiz.
+      if (stat.total > 0 && stat.downloaded >= stat.total) {
+        _releaseTg(entry.key);
+      }
     }
     if (changed) notifyListeners();
     // Yuklash boshlangan/tugagan bo'lsa oraliq o'zgaradi.
@@ -336,7 +355,7 @@ class DownloadManager extends ChangeNotifier {
     // buyruqni QAYTA yuboramiz — shu sabab tugma hech qachon
     // "ishlamay qolmaydi". Buyruq takrorlansa ham yangi yuklash
     // boshlanmaydi: Rust tomonida vazifa bitta va o'zgarmaydi.
-    (viaTg ? tg.prepare(url) : Future<void>.value())
+    (viaTg ? _prepareTg(url) : Future<void>.value())
         .then((_) => VideoCacheServer.instance.ensureStarted())
         .then((_) {
       RustCore.instance.videoDownload(url);
@@ -362,6 +381,7 @@ class DownloadManager extends ChangeNotifier {
     if (url.isEmpty) return;
     RustCore.instance.videoPause(url);
     _active.remove(url);
+    _releaseTg(url);
     final cur = _stats[url] ?? VideoCacheStat.empty;
     _stats[url] = VideoCacheStat(
       total: cur.total,
@@ -376,6 +396,7 @@ class DownloadManager extends ChangeNotifier {
     if (url.isEmpty) return;
     RustCore.instance.videoDelete(url);
     _active.remove(url);
+    _releaseTg(url);
     final cur = _stats[url] ?? VideoCacheStat.empty;
     _stats[url] = VideoCacheStat(total: cur.total, downloaded: 0);
     notifyListeners();

@@ -37,6 +37,11 @@ deleted_classes = ["PresenceHub"]
 name = "arugram"
 workers_dev = true
 
+# Har daqiqada: foydalanuvchilarga yuborilgan eski video nusxalarini
+# bot chatlaridan tozalash (`tg_sweep`).
+[env.production.triggers]
+crons = ["* * * * *"]
+
 # Secrets (GitHub Actions orqali o'rnatiladi):
 # wrangler secret put TURSO_URL --env production
 # wrangler secret put TURSO_TOKEN --env production

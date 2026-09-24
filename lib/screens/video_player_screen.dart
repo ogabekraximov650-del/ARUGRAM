@@ -268,6 +268,19 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   /// "isitish" umuman kerak emas: B2'ga bitta ham so'rov ketmaydi.
   bool _playViaTelegram = false;
 
+  /// Bot chatidagi qaysi nusxani shu pleyer ushlab turibdi. Pleyer
+  /// yopilganda (yoki boshqa qismga o'tilganda) qo'yib yuboriladi va
+  /// bot nusxani o'chiradi (`TelegramService.hold`).
+  String? _tgHeldUrl;
+
+  void _setTgHeld(String? url) {
+    if (_tgHeldUrl == url) return;
+    final old = _tgHeldUrl;
+    _tgHeldUrl = url;
+    if (url != null) TelegramService.instance.hold(url);
+    if (old != null) TelegramService.instance.unhold(old);
+  }
+
   /// Oyna isitish (worker keshi) kerak EMASmi.
   bool get _noWarm => _playViaLocal || _playViaTelegram;
 
@@ -536,6 +549,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   @override
   void dispose() {
     VideoGate.leave();
+    // Pleyerdan chiqildi — bot chatidagi nusxa o'chiriladi.
+    _setTgHeld(null);
     BillingService.instance.removeListener(_onBillingChanged);
     // `late final` — Izohlar oynasi umuman ochilmagan bo'lsa
     // nazoratchi yaratilmagan ham bo'ladi.
@@ -1159,8 +1174,10 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       if (tgUrl != null) {
         source = Uri.parse(tgUrl);
         _playViaTelegram = true;
+        _setTgHeld(url);
       } else {
         source = Uri.parse(_workerPlayUrl(url));
+        _setTgHeld(null);
       }
     }
     _currentSource = source.toString();
@@ -1241,6 +1258,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       VideoCacheServer.log(
           'Telegram ishlamadi — worker orqali qayta urinilyapti...');
       TelegramService.instance.invalidate(url);
+      _setTgHeld(null);
       _playViaTelegram = false;
       source = Uri.parse(_workerPlayUrl(url));
       _currentSource = source.toString();

@@ -59,7 +59,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use grammers_client::client::{LoginToken, PasswordToken};
+use grammers_client::client::PasswordToken;
 use grammers_client::session::types::{DcOption, PeerId, PeerInfo, UpdateState, UpdatesState};
 use grammers_client::session::{BoxFuture, Session, SessionData};
 use grammers_client::{tl, Client, InvocationError, SenderPool, SignInError};
@@ -106,6 +106,11 @@ const SESSION_DEAD: [&str; 4] = [
 const LABEL_CONFIG: &str = "tg-config-v1";
 const LABEL_SESSION: &str = "tg-session-v1";
 const LABEL_ROUTES: &str = "tg-routes-v1";
+const LABEL_LOGIN: &str = "tg-login-v1";
+
+/// Kod bosqichi shuncha vaqt saqlanadi (Telegram kodi ham shuncha
+/// yashaydi) — undan keyin ilova yana raqam so'raydi.
+const LOGIN_STATE_TTL_MS: i64 = 30 * 60 * 1000;
 
 // ═══════════════════════════════════════════════════════════════
 //  HOLAT
@@ -131,11 +136,14 @@ struct Tg {
     api_id: Mutex<i32>,
     api_hash: Mutex<String>,
     authorized: AtomicBool,
-    login_token: Mutex<Option<LoginToken>>,
     password_token: Mutex<Option<PasswordToken>>,
-    /// xabar id -> fayl ma'lumoti (xotirada; `file_reference` eskirsa
+    /// fayl nomi -> fayl ma'lumoti (xotirada; `file_reference` eskirsa
     /// qayta olinadi).
-    docs: Mutex<HashMap<i32, DocInfo>>,
+    docs: Mutex<HashMap<String, DocInfo>>,
+    /// Kirish boti username'i (videolar shu bot chatidan olinadi).
+    bot: Mutex<String>,
+    /// Bot foydalanuvchisi: (id, access_hash) — `ResolveUsername` bir marta.
+    bot_peer: Mutex<Option<(i64, i64)>>,
     /// kesh kaliti (fayl nomi) -> bot chatidagi xabar id.
     routes: Mutex<HashMap<String, i32>>,
     failed: Mutex<HashMap<String, Instant>>,
@@ -450,12 +458,74 @@ fn note_failure(key: &str) {
 //  FAYLNI OLISH
 // ═══════════════════════════════════════════════════════════════
 
-/// Bot chatidagi xabardan faylni topadi. Shaxsiy chatlarda xabar id
-/// hisob bo'yicha yagona, ya'ni peer kerak emas.
-async fn fetch_doc(client: &Client, msg_id: i32) -> Result<DocInfo, String> {
+/// Kirish botini (foydalanuvchi sifatida) topadi.
+async fn bot_peer(t: &Tg, client: &Client) -> Result<(i64, i64), String> {
+    if let Some(p) = t.bot_peer.lock().ok().and_then(|p| *p) {
+        return Ok(p);
+    }
+    let bot = t.bot.lock().map(|b| b.clone()).unwrap_or_default();
+    if bot.is_empty() {
+        return Err("bot nomi noma'lum".to_string());
+    }
+    let tl::enums::contacts::ResolvedPeer::Peer(rp) = client
+        .invoke(&tl::functions::contacts::ResolveUsername { username: bot, referer: None })
+        .await
+        .map_err(|e| e.to_string())?;
+    let p = rp
+        .users
+        .iter()
+        .find_map(|u| match u {
+            tl::enums::User::User(u) if u.bot => u.access_hash.map(|h| (u.id, h)),
+            _ => None,
+        })
+        .ok_or("bot topilmadi")?;
+    if let Ok(mut c) = t.bot_peer.lock() {
+        *c = Some(p);
+    }
+    Ok(p)
+}
+
+/// Xabardagi fayl shu nomdagi faylmi (fayl nomi yoki izoh bo'yicha).
+fn doc_matches(m: &tl::types::Message, name: &str) -> Option<DocInfo> {
+    let Some(tl::enums::MessageMedia::Document(md)) = &m.media else { return None };
+    let Some(tl::enums::Document::Document(d)) = &md.document else { return None };
+    let by_attr = d.attributes.iter().any(|a| {
+        matches!(a, tl::enums::DocumentAttribute::Filename(f) if f.file_name == name)
+    });
+    if !by_attr && m.message.trim() != name {
+        return None;
+    }
+    Some(DocInfo {
+        id: d.id,
+        access_hash: d.access_hash,
+        file_reference: d.file_reference.clone(),
+        dc_id: d.dc_id,
+        size: d.size.max(0) as u64,
+        mime: if d.mime_type.is_empty() { "video/mp4".to_string() } else { d.mime_type.clone() },
+    })
+}
+
+/// Bot chatidan shu nomdagi faylni topadi.
+///
+/// TOPILGAN XATO (foydalanuvchi: "video kanalga yuklanyapti, lekin
+/// pleyerda ochilmayapti"): ilgari fayl worker qaytargan XABAR
+/// RAQAMI bilan olinardi. Lekin shaxsiy chatlarda raqamlar HAR BIR
+/// HISOB uchun alohida: botning `copyMessage` bergan raqami
+/// foydalanuvchi hisobida BOSHQA xabarni ko'rsatadi. Endi fayl bot
+/// chatining oxirgi xabarlari orasidan NOMI bo'yicha topiladi
+/// (bot izohga ham, fayl nomiga ham shu nomni qo'yadi).
+async fn fetch_doc(t: &Tg, client: &Client, name: &str) -> Result<DocInfo, String> {
+    let (id, hash) = bot_peer(t, client).await?;
     let res = client
-        .invoke(&tl::functions::messages::GetMessages {
-            id: vec![tl::enums::InputMessage::Id(tl::types::InputMessageId { id: msg_id })],
+        .invoke(&tl::functions::messages::GetHistory {
+            peer: tl::enums::InputPeer::User(tl::types::InputPeerUser { user_id: id, access_hash: hash }),
+            offset_id: 0,
+            offset_date: 0,
+            add_offset: 0,
+            limit: 100,
+            max_id: 0,
+            min_id: 0,
+            hash: 0,
         })
         .await
         .map_err(|e| e.to_string())?;
@@ -465,36 +535,25 @@ async fn fetch_doc(client: &Client, msg_id: i32) -> Result<DocInfo, String> {
         tl::enums::messages::Messages::ChannelMessages(m) => m.messages,
         tl::enums::messages::Messages::NotModified(_) => Vec::new(),
     };
-    for m in messages {
-        let tl::enums::Message::Message(m) = m else { continue };
-        if m.id != msg_id {
-            continue;
+    // Javob eng yangisidan boshlanadi — qayta yuborilgan bo'lsa ham
+    // eng oxirgi nusxa olinadi.
+    for m in &messages {
+        if let tl::enums::Message::Message(m) = m {
+            if let Some(d) = doc_matches(m, name) {
+                return Ok(d);
+            }
         }
-        let Some(tl::enums::MessageMedia::Document(md)) = m.media else {
-            return Err("xabarda fayl yo'q".to_string());
-        };
-        let Some(tl::enums::Document::Document(d)) = md.document else {
-            return Err("fayl o'chirilgan".to_string());
-        };
-        return Ok(DocInfo {
-            id: d.id,
-            access_hash: d.access_hash,
-            file_reference: d.file_reference,
-            dc_id: d.dc_id,
-            size: d.size.max(0) as u64,
-            mime: if d.mime_type.is_empty() { "video/mp4".to_string() } else { d.mime_type },
-        });
     }
-    Err("xabar topilmadi".to_string())
+    Err("bot chatida fayl topilmadi".to_string())
 }
 
-async fn doc_for(t: &'static Tg, client: &Client, msg_id: i32, refresh: bool) -> Result<DocInfo, String> {
+async fn doc_for(t: &'static Tg, client: &Client, name: &str, refresh: bool) -> Result<DocInfo, String> {
     if !refresh {
-        if let Some(d) = t.docs.lock().ok().and_then(|m| m.get(&msg_id).cloned()) {
+        if let Some(d) = t.docs.lock().ok().and_then(|m| m.get(name).cloned()) {
             return Ok(d);
         }
     }
-    let d = match fetch_doc(client, msg_id).await {
+    let d = match fetch_doc(t, client, name).await {
         Ok(d) => d,
         Err(e) => {
             // Sessiya Telegram tomonidan bekor qilingan (masalan
@@ -522,7 +581,7 @@ async fn doc_for(t: &'static Tg, client: &Client, msg_id: i32, refresh: bool) ->
         }
     };
     if let Ok(mut m) = t.docs.lock() {
-        m.insert(msg_id, d.clone());
+        m.insert(name.to_string(), d.clone());
     }
     Ok(d)
 }
@@ -551,9 +610,9 @@ async fn copy_auth(t: &Tg, client: &Client, dc_id: i32) -> Result<(), String> {
 
 /// Faylning `offset` dan boshlanadigan bitta qismini (eng ko'pi
 /// `PART` bayt) XOTIRAGA oladi.
-async fn fetch_part(t: &'static Tg, client: Client, msg_id: i32, offset: u64) -> Result<Vec<u8>, String> {
+async fn fetch_part(t: &'static Tg, client: Client, name: String, offset: u64) -> Result<Vec<u8>, String> {
     let _permit = t.inflight.acquire().await.map_err(|e| e.to_string())?;
-    let mut doc = doc_for(t, &client, msg_id, false).await?;
+    let mut doc = doc_for(t, &client, &name, false).await?;
     let mut dc = doc.dc_id;
     let mut last_err = String::new();
     for _ in 0..PART_ATTEMPTS {
@@ -581,7 +640,7 @@ async fn fetch_part(t: &'static Tg, client: Client, msg_id: i32, offset: u64) ->
                 match rpc_name(&e) {
                     // Fayl havolasi eskirgan — xabarni qayta olamiz.
                     Some(n) if n.starts_with("FILE_REFERENCE_") => {
-                        doc = doc_for(t, &client, msg_id, true).await?;
+                        doc = doc_for(t, &client, &name, true).await?;
                     }
                     // Boshqa DC: hisobni o'sha yerga ko'chiramiz.
                     Some("AUTH_KEY_UNREGISTERED") => {
@@ -677,26 +736,25 @@ async fn handle(t: &'static Tg, mut stream: TcpStream) {
         respond(&mut stream, "405 Method Not Allowed", "").await;
         return;
     }
-    // /tg/<xabar_id>/<fayl_nomi>
+    // /tg/<belgi>/<fayl_nomi> — fayl NOMI bo'yicha topiladi
+    // (`fetch_doc` izohiga qarang); o'rtadagi belgi faqat manzilni
+    // yangilash uchun.
     let path = path.split('?').next().unwrap_or("");
     let mut seg = path.trim_start_matches('/').split('/');
-    let (Some("tg"), Some(id), Some(key)) = (seg.next(), seg.next(), seg.next()) else {
+    let (Some("tg"), Some(_), Some(key)) = (seg.next(), seg.next(), seg.next()) else {
         respond(&mut stream, "404 Not Found", "").await;
         return;
     };
-    let Ok(msg_id) = id.parse::<i32>() else {
-        respond(&mut stream, "404 Not Found", "").await;
-        return;
-    };
+    let key = key.to_string();
     let Some(client) = connect(t) else {
         respond(&mut stream, "503 Service Unavailable", "").await;
         return;
     };
-    let doc = match doc_for(t, &client, msg_id, false).await {
+    let doc = match doc_for(t, &client, &key, false).await {
         Ok(d) => d,
         Err(e) => {
-            crate::video_cache::tg_log(format!("Telegram: xabar #{msg_id} ochilmadi: {e}"));
-            note_failure(key);
+            crate::video_cache::tg_log(format!("Telegram: {key} ochilmadi: {e}"));
+            note_failure(&key);
             respond(&mut stream, "502 Bad Gateway", "").await;
             return;
         }
@@ -727,11 +785,11 @@ async fn handle(t: &'static Tg, mut stream: TcpStream) {
         return;
     }
 
-    let spawn = |off: u64| t.rt.spawn(fetch_part(t, client.clone(), msg_id, off));
+    let spawn = |off: u64| t.rt.spawn(fetch_part(t, client.clone(), key.clone(), off));
     if let Err(e) = pump(&mut stream, start, end, spawn).await {
         if let PumpError::Source(e) = e {
-            crate::video_cache::tg_log(format!("Telegram: #{msg_id} olinmadi: {e}"));
-            note_failure(key);
+            crate::video_cache::tg_log(format!("Telegram: {key} olinmadi: {e}"));
+            note_failure(&key);
         }
     }
 }
@@ -831,9 +889,10 @@ fn init(dir: &str, api_id: i32, api_hash: &str) -> Result<&'static Tg, String> {
             api_id: Mutex::new(cfg_id),
             api_hash: Mutex::new(cfg_hash),
             authorized: AtomicBool::new(authorized),
-            login_token: Mutex::new(None),
             password_token: Mutex::new(None),
             docs: Mutex::new(HashMap::new()),
+            bot: Mutex::new(String::new()),
+            bot_peer: Mutex::new(None),
             routes: Mutex::new(routes),
             failed: Mutex::new(HashMap::new()),
             auth_dcs: tokio::sync::Mutex::new(HashSet::new()),
@@ -898,31 +957,6 @@ fn after_login(t: &Tg) -> String {
     json!({"ok": true}).to_string()
 }
 
-fn sign_in_result(t: &Tg, r: Result<grammers_client::peer::User, SignInError>) -> Result<String, String> {
-    match r {
-        Ok(_) => Ok(after_login(t)),
-        Err(SignInError::PasswordRequired(pt)) => {
-            let hint = pt.hint().unwrap_or("").to_string();
-            if let Ok(mut p) = t.password_token.lock() {
-                *p = Some(pt);
-            }
-            Ok(json!({"password": true, "hint": hint}).to_string())
-        }
-        Err(SignInError::InvalidPassword(pt)) => {
-            let hint = pt.hint().unwrap_or("").to_string();
-            if let Ok(mut p) = t.password_token.lock() {
-                *p = Some(pt);
-            }
-            Ok(json!({"password": true, "hint": hint, "error": "Parol noto'g'ri"}).to_string())
-        }
-        Err(SignInError::InvalidCode) => Err("Kod noto'g'ri".to_string()),
-        Err(SignInError::SignUpRequired) => {
-            Err("Bu raqamda Telegram hisobi yo'q — avval Telegram ilovasida ro'yxatdan o'ting".to_string())
-        }
-        Err(e) => Err(e.to_string()),
-    }
-}
-
 // ═══════════════════════════════════════════════════════════════
 //  FFI (Dart tomoni)
 // ═══════════════════════════════════════════════════════════════
@@ -954,27 +988,124 @@ pub extern "C" fn rust_tg_status() -> *mut c_char {
     })
 }
 
+// ── KIRISH BOSQICHI DISKDA SAQLANADI ───────────────────────────
+//
+// TALAB (foydalanuvchi): "kod yozish oynasi sessiya qilib saqlab
+// qolinsin — ilova yopilgan bo'lsa ham qaytib kirganda kod yozadigan
+// joy avtomatik ochilsin".
+//
+// Kod so'ralgach `{bosqich, raqam, phone_code_hash}` shifrlangan
+// faylga (`login.bin`) yoziladi. Ilova qayta ochilganda
+// `rust_tg_login_state` shu bosqichni qaytaradi va ekran to'g'ridan-
+// to'g'ri kod (yoki parol) oynasidan boshlanadi.
+//
+// `grammers` ning `LoginToken`i diskka saqlanmaydi (maydonlari
+// yopiq), shu sabab kod yuborish va kirish Telegram API'ning o'zi
+// bilan (`auth.sendCode` / `auth.signIn`) bajariladi.
+
+fn login_path(t: &Tg) -> PathBuf {
+    t.dir.join("login.bin")
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+fn load_login(t: &Tg) -> Option<Value> {
+    let v: Value = serde_json::from_slice(&read_sealed(&login_path(t), LABEL_LOGIN)?).ok()?;
+    if now_ms() - v["at"].as_i64().unwrap_or(0) > LOGIN_STATE_TTL_MS {
+        let _ = fs::remove_file(login_path(t));
+        return None;
+    }
+    Some(v)
+}
+
+fn save_login(t: &Tg, stage: &str, phone: &str, hash: &str, hint: &str) {
+    let body = json!({"stage": stage, "phone": phone, "hash": hash, "hint": hint, "at": now_ms()});
+    let _ = write_sealed(&login_path(t), LABEL_LOGIN, body.to_string().as_bytes());
+}
+
+fn clear_login(t: &Tg) {
+    let _ = fs::remove_file(login_path(t));
+    if let Ok(mut p) = t.password_token.lock() {
+        *p = None;
+    }
+}
+
+fn code_settings() -> tl::enums::CodeSettings {
+    tl::types::CodeSettings {
+        allow_flashcall: false,
+        current_number: false,
+        allow_app_hash: false,
+        allow_missed_call: false,
+        allow_firebase: false,
+        logout_tokens: None,
+        token: None,
+        app_sandbox: None,
+        unknown_number: false,
+    }
+    .into()
+}
+
+fn friendly(e: &InvocationError) -> String {
+    match rpc_name(e) {
+        Some("PHONE_NUMBER_INVALID") => "Telefon raqami noto'g'ri".to_string(),
+        Some("PHONE_NUMBER_BANNED") => "Bu raqam Telegram'da bloklangan".to_string(),
+        Some("PHONE_NUMBER_FLOOD") | Some("FLOOD_WAIT") => {
+            "Juda ko'p urinish — birozdan keyin qayta urining".to_string()
+        }
+        _ => e.to_string(),
+    }
+}
+
+async fn send_code(t: &Tg, client: &Client, phone: &str) -> Result<String, String> {
+    let api_id = t.api_id.lock().map(|v| *v).unwrap_or(0);
+    let api_hash = t.api_hash.lock().map(|v| v.clone()).unwrap_or_default();
+    let req = tl::functions::auth::SendCode {
+        phone_number: phone.to_string(),
+        api_id,
+        api_hash,
+        settings: code_settings(),
+    };
+    let res = match client.invoke(&req).await {
+        Err(InvocationError::Rpc(e)) if e.code == 303 => {
+            // Raqam boshqa DC ga tegishli — o'sha DC asosiy bo'ladi.
+            let dc = e.value.unwrap_or(2) as i32;
+            let session = t.session.lock().ok().and_then(|s| s.clone()).ok_or("sessiya yo'q")?;
+            session.set_home_dc_id(dc).await.map_err(|e| e.to_string())?;
+            client.invoke(&req).await
+        }
+        other => other,
+    }
+    .map_err(|e| friendly(&e))?;
+    match res {
+        tl::enums::auth::SentCode::Code(c) => Ok(c.phone_code_hash),
+        _ => Err("Telegram kutilmagan javob berdi — qayta urining".to_string()),
+    }
+}
+
+async fn password_token(client: &Client) -> Result<PasswordToken, String> {
+    let pw: tl::types::account::Password = client
+        .invoke(&tl::functions::account::GetPassword {})
+        .await
+        .map_err(|e| e.to_string())?
+        .into();
+    Ok(PasswordToken::new(pw))
+}
+
 /// Telefon raqamiga kirish kodini yuboradi.
 #[no_mangle]
 pub extern "C" fn rust_tg_request_code(phone_ptr: *const c_char) -> *mut c_char {
     let phone = unsafe { cstr_to_str(phone_ptr) }.unwrap_or("").trim().to_string();
     string_to_cptr(with_client(|t, client| {
-        if phone.is_empty() {
+        if phone.len() < 6 {
             return Err("Telefon raqamini kiriting".to_string());
         }
-        let hash = t.api_hash.lock().map(|v| v.clone()).unwrap_or_default();
-        let token = t
-            .rt
-            .block_on(client.request_login_code(&phone, &hash))
-            .map_err(|e| match rpc_name(&e) {
-                Some("PHONE_NUMBER_INVALID") => "Telefon raqami noto'g'ri".to_string(),
-                Some("PHONE_NUMBER_BANNED") => "Bu raqam Telegram'da bloklangan".to_string(),
-                Some("FLOOD_WAIT") => "Juda ko'p urinish — birozdan keyin qayta urining".to_string(),
-                _ => e.to_string(),
-            })?;
-        if let Ok(mut l) = t.login_token.lock() {
-            *l = Some(token);
-        }
+        let hash = t.rt.block_on(send_code(t, &client, &phone))?;
+        save_login(t, "code", &phone, &hash, "");
         Ok(json!({"ok": true}).to_string())
     }))
 }
@@ -986,20 +1117,40 @@ pub extern "C" fn rust_tg_request_code(phone_ptr: *const c_char) -> *mut c_char 
 pub extern "C" fn rust_tg_sign_in(code_ptr: *const c_char) -> *mut c_char {
     let code = unsafe { cstr_to_str(code_ptr) }.unwrap_or("").trim().to_string();
     string_to_cptr(with_client(|t, client| {
-        let token = t
-            .login_token
-            .lock()
-            .ok()
-            .and_then(|mut l| l.take())
-            .ok_or("Avval kod so'rang")?;
-        let r = t.rt.block_on(client.sign_in(&token, &code));
-        if matches!(r, Err(SignInError::InvalidCode)) {
-            // Kod xato — xuddi shu token bilan qayta urinish mumkin.
-            if let Ok(mut l) = t.login_token.lock() {
-                *l = Some(token);
+        let st = load_login(t).ok_or("Kod muddati tugadi — raqamni qayta kiriting")?;
+        let phone = st["phone"].as_str().unwrap_or("").to_string();
+        let hash = st["hash"].as_str().unwrap_or("").to_string();
+        let r = t.rt.block_on(client.invoke(&tl::functions::auth::SignIn {
+            phone_number: phone.clone(),
+            phone_code_hash: hash.clone(),
+            phone_code: Some(code),
+            email_verification: None,
+        }));
+        match r {
+            Ok(tl::enums::auth::Authorization::Authorization(_)) => {
+                clear_login(t);
+                Ok(after_login(t))
             }
+            Ok(tl::enums::auth::Authorization::SignUpRequired(_)) => {
+                clear_login(t);
+                Err("Bu raqamda Telegram hisobi yo'q — avval Telegram ilovasida ro'yxatdan o'ting".to_string())
+            }
+            Err(e) if e.is("SESSION_PASSWORD_NEEDED") => {
+                let pt = t.rt.block_on(password_token(&client))?;
+                let hint = pt.hint().unwrap_or("").to_string();
+                if let Ok(mut p) = t.password_token.lock() {
+                    *p = Some(pt);
+                }
+                save_login(t, "password", &phone, &hash, &hint);
+                Ok(json!({"password": true, "hint": hint}).to_string())
+            }
+            Err(e) if e.is("PHONE_CODE_EXPIRED") => {
+                clear_login(t);
+                Err("Kod muddati tugadi — raqamni qayta kiriting".to_string())
+            }
+            Err(e) if e.is("PHONE_CODE_*") => Err("Kod noto'g'ri".to_string()),
+            Err(e) => Err(friendly(&e)),
         }
-        sign_in_result(t, r)
     }))
 }
 
@@ -1008,15 +1159,74 @@ pub extern "C" fn rust_tg_sign_in(code_ptr: *const c_char) -> *mut c_char {
 pub extern "C" fn rust_tg_check_password(pw_ptr: *const c_char) -> *mut c_char {
     let pw = unsafe { cstr_to_str(pw_ptr) }.unwrap_or("").to_string();
     string_to_cptr(with_client(|t, client| {
-        let pt = t
-            .password_token
-            .lock()
-            .ok()
-            .and_then(|mut p| p.take())
-            .ok_or("Avval kod bilan kiring")?;
-        let r = t.rt.block_on(client.check_password(pt, pw.as_bytes()));
-        sign_in_result(t, r)
+        // Ilova qayta ochilgan bo'lsa parol ma'lumoti xotirada yo'q —
+        // Telegram'dan qayta olinadi (kod allaqachon qabul qilingan).
+        let pt = match t.password_token.lock().ok().and_then(|mut p| p.take()) {
+            Some(pt) => pt,
+            None => t.rt.block_on(password_token(&client))?,
+        };
+        match t.rt.block_on(client.check_password(pt, pw.as_bytes())) {
+            Ok(_) => {
+                clear_login(t);
+                Ok(after_login(t))
+            }
+            Err(SignInError::InvalidPassword(pt)) => {
+                let hint = pt.hint().unwrap_or("").to_string();
+                if let Ok(mut p) = t.password_token.lock() {
+                    *p = Some(pt);
+                }
+                Ok(json!({"password": true, "hint": hint, "error": "Parol noto'g'ri"}).to_string())
+            }
+            Err(e) => Err(e.to_string()),
+        }
     }))
+}
+
+/// Saqlangan kirish bosqichi: `{"stage":"phone"|"code"|"password",
+/// "phone":"..","hint":".."}` (tarmoqqa chiqmaydi).
+#[no_mangle]
+pub extern "C" fn rust_tg_login_state() -> *mut c_char {
+    let Some(t) = tg() else {
+        return string_to_cptr(json!({"stage": "phone"}).to_string());
+    };
+    if t.authorized.load(Ordering::SeqCst) {
+        return string_to_cptr(json!({"stage": "done"}).to_string());
+    }
+    string_to_cptr(match load_login(t) {
+        Some(v) => json!({
+            "stage": v["stage"].as_str().unwrap_or("phone"),
+            "phone": v["phone"].as_str().unwrap_or(""),
+            "hint": v["hint"].as_str().unwrap_or(""),
+        })
+        .to_string(),
+        None => json!({"stage": "phone"}).to_string(),
+    })
+}
+
+/// "Raqamni o'zgartirish" — saqlangan bosqich o'chadi.
+#[no_mangle]
+pub extern "C" fn rust_tg_login_reset() {
+    if let Some(t) = tg() {
+        clear_login(t);
+    }
+}
+
+/// Kirish boti username'i (videolar shu bot chatidan olinadi).
+#[no_mangle]
+pub extern "C" fn rust_tg_set_bot(bot_ptr: *const c_char) {
+    let Some(t) = tg() else { return };
+    let bot = unsafe { cstr_to_str(bot_ptr) }.unwrap_or("").trim_start_matches('@').to_string();
+    if bot.is_empty() {
+        return;
+    }
+    if let Ok(mut b) = t.bot.lock() {
+        if *b != bot {
+            *b = bot;
+            if let Ok(mut p) = t.bot_peer.lock() {
+                *p = None;
+            }
+        }
+    }
 }
 
 /// Ilovaga KIRISH: foydalanuvchi nomidan botga `/start <token>`
@@ -1348,6 +1558,11 @@ pub extern "C" fn rust_tg_route(key_ptr: *const c_char, msg_id: i32) -> i32 {
     let Some(key) = (unsafe { cstr_to_str(key_ptr) }) else { return 0 };
     if key.is_empty() || key.contains('/') {
         return 0;
+    }
+    // Xabar almashdi yoki olib tashlandi — eski fayl havolasi endi
+    // yaroqsiz (bot xabarni o'chirgan bo'lishi mumkin).
+    if let Ok(mut d) = t.docs.lock() {
+        d.remove(key);
     }
     if let Ok(mut r) = t.routes.lock() {
         if msg_id > 0 {

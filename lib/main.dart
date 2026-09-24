@@ -20,6 +20,7 @@ import 'services/traffic_service.dart';
 import 'services/video_cache_server.dart';
 import 'services/watch_history.dart';
 import 'services/telegram_service.dart';
+import 'widgets/auth_gate.dart';
 
 // ── HAMMA SO'ROV SANALADI ───────────────────────────────────────
 //
@@ -263,7 +264,7 @@ class FulutterApp extends StatelessWidget {
         splashFactory: InkRipple.splashFactory,
         useMaterial3: true,
       ),
-      home: const RootScreen(),
+      home: const AuthGate(child: RootScreen()),
     );
   }
 }

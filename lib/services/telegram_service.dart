@@ -201,6 +201,7 @@ class TelegramService extends ChangeNotifier {
       final j = jsonDecode(r.body) as Map<String, dynamic>;
       _serverEnabled = j['enabled'] == true;
       _bot = (j['bot'] as String?) ?? _bot;
+      _setBot(_bot);
       _video = j['video'] != false;
       _channel = (j['channel'] as num?)?.toInt() ?? 0;
       if (_serverEnabled) {
@@ -346,6 +347,94 @@ class TelegramService extends ChangeNotifier {
     }
     // Post kanalda bor — bot uni baribir ro'yxatga oladi.
     return null;
+  }
+
+  /// Rust yadrosiga bot nomini beradi — videolar shu bot chatidan
+  /// fayl NOMI bo'yicha topiladi (`fetch_doc` izohi).
+  void _setBot(String bot) {
+    final lib = _lib;
+    if (lib == null || bot.isEmpty) return;
+    final f = lib.lookupFunction<Void Function(Pointer<Utf8>),
+        void Function(Pointer<Utf8>)>('rust_tg_set_bot');
+    final b = bot.toNativeUtf8();
+    try {
+      f(b);
+    } finally {
+      malloc.free(b);
+    }
+  }
+
+  // ── SAQLANGAN KIRISH BOSQICHI ───────────────────────────────
+  //
+  // TALAB: ilova yopilib qayta ochilsa ham kod (yoki parol) oynasi
+  // o'zi ochilsin. Bosqich Rust yadrosida shifrlangan faylda turadi.
+
+  /// `{"stage": "phone"|"code"|"password"|"done", "phone", "hint"}`.
+  Map<String, dynamic> loginState() {
+    final lib = _lib;
+    if (lib == null) return const {'stage': 'phone'};
+    return _json(_take(
+        lib, lib.lookupFunction<_NoArgC, _NoArgC>('rust_tg_login_state')()));
+  }
+
+  /// "Raqamni o'zgartirish".
+  void resetLogin() {
+    final lib = _lib;
+    if (lib == null) return;
+    lib.lookupFunction<Void Function(), void Function()>(
+        'rust_tg_login_reset')();
+  }
+
+  // ── BOT CHATIDAGI NUSXALARNI TOZALASH ───────────────────────
+  //
+  // TALAB (foydalanuvchi): "foydalanuvchi pleyerdan chiqishi bilan bot
+  // yuborgan fayllarni tozalab tashlashi kerak".
+  //
+  // Nusxa ikki joyda ishlatiladi: pleyer va yuklab olish. Ikkalasi
+  // ham "ushlab turadi" (`hold`), ikkalasi qo'yib yuborgach (`unhold`)
+  // worker bot chatidagi xabarni o'chiradi. Ilova qulab qolsa ham
+  // worker eski nusxalarni o'zi tozalaydi (har daqiqada, `tg_sweep`).
+
+  final Map<String, int> _holds = {};
+
+  void hold(String url) {
+    final name = fileNameOf(url);
+    if (name.isEmpty) return;
+    _holds[name] = (_holds[name] ?? 0) + 1;
+  }
+
+  void unhold(String url) {
+    final name = fileNameOf(url);
+    if (name.isEmpty) return;
+    final left = (_holds[name] ?? 0) - 1;
+    if (left > 0) {
+      _holds[name] = left;
+      return;
+    }
+    _holds.remove(name);
+    unawaited(_release(name));
+  }
+
+  Future<void> _release(String name) async {
+    // Bog'lanish darhol olib tashlanadi — keyingi ochilishda bot
+    // videoni qayta yuboradi.
+    _route(name, 0);
+    final s = AuthService.instance.sessionToken;
+    if (s == null) return;
+    try {
+      await http
+          .post(
+            Uri.parse('$kApiBase/api/tg/release'),
+            headers: {
+              'Authorization': 'Bearer $s',
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode({'file': name}),
+          )
+          .timeout(const Duration(seconds: 15));
+    } catch (_) {
+      // Tarmoq yo'q — worker baribir o'zi tozalaydi.
+    }
   }
 
   void _afterLogin() {

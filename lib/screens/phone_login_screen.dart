@@ -22,8 +22,10 @@
 // [connectOnly] — ilovaga allaqachon kirilgan, faqat Telegram
 // ulanadi (3-qadam yo'q).
 //
-// Ekran `true` qaytaradi — kirildi; `'bot'` — foydalanuvchi eski
-// bot orqali kirishni tanladi.
+// [gate] — ilovaning o'zi shu oyna (`AuthGate`), kirilmaguncha
+// boshqa hech narsa ochilmaydi.
+//
+// Ekran `true` qaytaradi — kirildi.
 
 import 'dart:async';
 
@@ -40,7 +42,12 @@ enum _Step { phone, code, password, finishing }
 
 class PhoneLoginScreen extends StatefulWidget {
   final bool connectOnly;
-  const PhoneLoginScreen({super.key, this.connectOnly = false});
+
+  /// Ilovaning O'ZI shu oyna (`AuthGate`): orqaga tugmasi yo'q va
+  /// kirilgach sahifa yopilmaydi — ilova o'zi ochiladi.
+  final bool gate;
+  const PhoneLoginScreen(
+      {super.key, this.connectOnly = false, this.gate = false});
 
   @override
   State<PhoneLoginScreen> createState() => _PhoneLoginScreenState();
@@ -84,6 +91,10 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
   }
 
   Future<void> _check() async {
+    // ── SAQLANGAN BOSQICH (tarmoqsiz, darhol) ─────────────────
+    // Ilova kod kutilayotgan paytda yopilgan bo'lsa — to'g'ridan-
+    // to'g'ri kod (yoki parol) oynasi ochiladi.
+    _restoreStage();
     final ok = await _tg.refreshConfig();
     if (!mounted) return;
     // Telegram allaqachon ulangan (masalan oldingi urinish 3-qadamda
@@ -93,6 +104,27 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
       return;
     }
     setState(() => _available = ok);
+  }
+
+  void _restoreStage() {
+    final st = _tg.loginState();
+    final phone = (st['phone'] as String?) ?? '';
+    if (phone.isNotEmpty) _phone.text = phone;
+    switch (st['stage']) {
+      case 'code':
+        _go(_Step.code);
+      case 'password':
+        _hint = (st['hint'] as String?) ?? '';
+        _go(_Step.password);
+    }
+  }
+
+  /// Raqam bosqichiga qaytish ("Raqamni o'zgartirish").
+  void _backToPhone() {
+    _tg.resetLogin();
+    _code.clear();
+    _password.clear();
+    _go(_Step.phone);
   }
 
   @override
@@ -179,7 +211,8 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
   /// sessiya ochiladi.
   Future<void> _finish() async {
     if (widget.connectOnly || AuthService.instance.isLoggedIn) {
-      if (mounted) Navigator.of(context).pop(true);
+      // Darvoza rejimida ilova o'zi ochiladi (`AuthGate` tinglaydi).
+      if (mounted && !widget.gate) Navigator.of(context).pop(true);
       return;
     }
     setState(() {
@@ -200,7 +233,7 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
       final st = await AuthService.instance.check(req.token);
       if (!mounted) return;
       if (st == LoginStatus.ok) {
-        Navigator.of(context).pop(true);
+        if (!widget.gate) Navigator.of(context).pop(true);
         return;
       }
       if (st == LoginStatus.expired) break;
@@ -217,18 +250,22 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
           backgroundColor: Colors.transparent,
           elevation: 0,
           iconTheme: const IconThemeData(color: Colors.white),
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back_rounded),
-            onPressed: () {
-              if (_step == _Step.code || _step == _Step.password) {
-                _code.clear();
-                _password.clear();
-                _go(_Step.phone);
-              } else {
-                Navigator.of(context).maybePop();
-              }
-            },
-          ),
+          automaticallyImplyLeading: false,
+          // Darvoza rejimida raqam bosqichida orqaga yo'l yo'q —
+          // ilovaga faqat kirib o'tiladi.
+          leading:
+              (widget.gate && _step == _Step.phone) || _step == _Step.finishing
+                  ? null
+                  : IconButton(
+                      icon: const Icon(Icons.arrow_back_rounded),
+                      onPressed: () {
+                        if (_step == _Step.code || _step == _Step.password) {
+                          _backToPhone();
+                        } else {
+                          Navigator.of(context).maybePop();
+                        }
+                      },
+                    ),
         ),
         floatingActionButton: _step == _Step.finishing && _error == null
             ? null
@@ -279,13 +316,16 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
                       fontSize: 13.5),
                 ),
               ],
-              if (!widget.connectOnly && _step == _Step.phone) ...[
-                const SizedBox(height: 28),
+              // "Bot orqali kirish" OLIB TASHLANDI (foydalanuvchi
+              // talabi): bot orqali kirish endi faqat Telegram
+              // hisobiga kirilgach, avtomatik (`_finish`).
+              if (_step == _Step.code || _step == _Step.password) ...[
+                const SizedBox(height: 24),
                 Center(
                   child: TextButton(
-                    onPressed: () => Navigator.of(context).pop('bot'),
+                    onPressed: _busy ? null : _backToPhone,
                     child: const Text(
-                      'Bot orqali kirish',
+                      'Raqamni o\'zgartirish',
                       style: TextStyle(color: AppColors.telegramLight),
                     ),
                   ),
