@@ -85,6 +85,11 @@ jobs:
           # ham berilishi shart (`build-flutter-apk.yml`), aks holda
           # ilovaning hamma so'rovi 403 oladi.
           put APP_SIGN_SECRET "${{ secrets.APP_SIGN_SECRET }}"
+          # Telegram orqali video (`worker/src/lib.rs` -> `tg_route`).
+          # Uchalasi ham qo'yilmasa ilova odatdagidek B2'dan ishlaydi.
+          put TG_API_ID "${{ secrets.TG_API_ID }}"
+          put TG_API_HASH "${{ secrets.TG_API_HASH }}"
+          put TG_CHANNEL_ID "${{ secrets.TG_CHANNEL_ID }}"
 
       - name: Deploy to Cloudflare Workers
         working-directory: worker

@@ -1162,6 +1162,24 @@ async fn init_db(env: &Env) -> bool {
         "ALTER TABLE chat_messages ADD COLUMN media_thumb TEXT DEFAULT ''",
         vec![]).await;
 
+    // ── 5. TELEGRAM ORQALI VIDEO (`tg_route` izohiga qarang) ───
+    ok &= turso_batch(env, &[
+        // Yopiq kanaldagi video: fayl nomi (B2 dagi bilan bir xil)
+        // -> kanal xabari. Bot kanal postini ko'rganda yoziladi.
+        ("CREATE TABLE IF NOT EXISTS tg_files (
+            file_name TEXT PRIMARY KEY,
+            msg_id INTEGER NOT NULL
+        )", vec![]),
+        // Foydalanuvchiga allaqachon yuborilgan nusxa: har ko'rishda
+        // bot chatiga YANGI xabar tashlanmasin.
+        ("CREATE TABLE IF NOT EXISTS tg_sent (
+            user_id INTEGER NOT NULL,
+            file_name TEXT NOT NULL,
+            msg_id INTEGER NOT NULL,
+            PRIMARY KEY (user_id, file_name)
+        )", vec![]),
+    ]).await.is_ok();
+
     ok
 }
 
@@ -3661,7 +3679,10 @@ async fn ensure_webhook(env: &Env, origin: &str) {
     // Kalit ATAYLAB yangi (`tg_webhook_for`): eskisida faqat
     // manzil yotibdi va uni shu yerda qayta ishlatish eski
     // xatoni tirilishtirib qo'yishi mumkin edi.
-    let want = format!("{bot_id}|{url}");
+    // `|v2`: kanal postlari (`channel_post`) ham kerak bo'ldi —
+    // eski ro'yxatdan o'tish ularni olmasdi, shu sabab kalit
+    // almashtirildi va webhook bir marta qayta o'rnatiladi.
+    let want = format!("{bot_id}|{url}|v2");
     if config_get(env, "tg_webhook_for").await.as_deref() == Some(want.as_str()) {
         WEBHOOK_READY.store(true, Ordering::Relaxed);
         return;
@@ -3670,7 +3691,7 @@ async fn ensure_webhook(env: &Env, origin: &str) {
     let res = tg_api(env, "setWebhook", json!({
         "url": url,
         "secret_token": secret,
-        "allowed_updates": ["message"],
+        "allowed_updates": ["message", "channel_post", "edited_channel_post"],
         "drop_pending_updates": true,
     })).await;
 
@@ -4391,6 +4412,13 @@ async fn handle_tg_webhook(env: &Env, mut req: Request) -> Result<Response> {
     }
 
     let update: Value = req.json().await.unwrap_or(json!({}));
+    // Yopiq video kanalidagi yangi post (`tg_channel_post`).
+    for k in ["channel_post", "edited_channel_post"] {
+        if update[k].is_object() {
+            tg_channel_post(env, &update[k]).await;
+            return ok(json!({"ok": true}));
+        }
+    }
     let msg = update["message"].clone();
     let chat_id = msg["chat"]["id"].as_i64().unwrap_or(0);
     let text = msg["text"].as_str().unwrap_or("").trim().to_string();
@@ -9628,6 +9656,188 @@ async fn app_gate(req: &Request, env: &Env, path: &str) -> Option<Response> {
     None
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  TELEGRAM ORQALI VIDEO
+// ═══════════════════════════════════════════════════════════════
+//
+// TALAB (foydalanuvchi): xarajatni kamaytirish uchun videolar
+// Telegram serveri orqali uzatilsin.
+//
+// ── TIZIM ───────────────────────────────────────────────────────
+//
+// 1. Admin videoni YOPIQ kanalga yuklaydi (Telegram ilovasidan,
+//    2 GB gacha). Kanalda faqat admin va bot. Izoh (caption) —
+//    B2 dagi fayl nomi (izoh bo'lmasa faylning o'z nomi olinadi).
+//    Bot postni ko'rib `tg_files` ga yozadi va adminga xabar beradi.
+// 2. Ilova `/api/tg/deliver` ni chaqiradi. Obuna tekshiriladi va
+//    bot videoni kanaldan foydalanuvchining bot bilan chatiga
+//    `copyMessage` qiladi (`protect_content` — Telegram ichida
+//    forward/saqlash yopiq). Foydalanuvchi kanalga A'ZO EMAS.
+// 3. Ilova foydalanuvchining O'Z Telegram hisobi bilan faylni shu
+//    chatdan oladi (`rust/src/telegram.rs`). Trafik Telegram'dan
+//    ketadi — B2 ham, worker ham ishtirok etmaydi.
+//
+// ── SIRLAR ──────────────────────────────────────────────────────
+//
+//   TG_API_ID, TG_API_HASH — my.telegram.org dan (ilova Telegram'ga
+//                            shu bilan ulanadi);
+//   TG_CHANNEL_ID          — yopiq kanal (-100...). FAQAT shu
+//                            kanal postlari qabul qilinadi: aks
+//                            holda botni o'z kanaliga qo'shgan
+//                            begona odam fayl nomlarini
+//                            almashtirib qo'yishi mumkin edi.
+
+fn tg_secret(env: &Env, name: &str) -> String {
+    env.secret(name)
+        .map(|s| s.to_string().trim().to_string())
+        .or_else(|_| env.var(name).map(|s| s.to_string().trim().to_string()))
+        .unwrap_or_default()
+}
+
+fn tg_channel_id(env: &Env) -> i64 {
+    tg_secret(env, "TG_CHANNEL_ID").parse().unwrap_or(0)
+}
+
+/// Fayl nomi xavfsizmi: faqat harf, raqam, `.`, `_`, `-`.
+fn tg_safe_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 200
+        && name != "."
+        && name != ".."
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
+}
+
+/// Kanal posti: videoni fayl nomiga bog'laydi.
+async fn tg_channel_post(env: &Env, post: &Value) {
+    let channel = tg_channel_id(env);
+    if channel == 0 || post["chat"]["id"].as_i64() != Some(channel) {
+        return;
+    }
+    let Some(msg_id) = post["message_id"].as_i64() else { return };
+    let media = if post["video"].is_object() { &post["video"] } else { &post["document"] };
+    if !media.is_object() {
+        return;
+    }
+    let caption = post["caption"].as_str().unwrap_or("").lines().next().unwrap_or("").trim();
+    let name = if caption.is_empty() { media["file_name"].as_str().unwrap_or("").trim() } else { caption };
+    if !tg_safe_name(name) {
+        tg_send(env, ADMIN_TELEGRAM_ID, &format!(
+            "\u{26A0}\u{FE0F} Kanal posti #{msg_id} qabul qilinmadi: izohga B2 dagi fayl nomini yozing \
+             (faqat harf, raqam, <code>. _ -</code>). Hozirgi: <code>{}</code>",
+            html_escape(name)
+        )).await;
+        return;
+    }
+    let res = turso_batch(env, &[
+        ("INSERT INTO tg_files (file_name, msg_id) VALUES (?, ?)
+          ON CONFLICT(file_name) DO UPDATE SET msg_id=excluded.msg_id",
+         vec![TursoArg::text(name), TursoArg::int(msg_id)]),
+        // Kanal xabari almashdi — eski nusxalar endi boshqa faylni
+        // ko'rsatishi mumkin, qayta yuboriladi.
+        ("DELETE FROM tg_sent WHERE file_name=?", vec![TursoArg::text(name)]),
+    ]).await;
+    let text = if res.is_ok() {
+        format!("\u{2705} <code>{}</code> \u{2192} kanal posti #{msg_id}", html_escape(name))
+    } else {
+        format!("\u{274C} <code>{}</code> saqlanmadi (baza xatosi)", html_escape(name))
+    };
+    tg_send(env, ADMIN_TELEGRAM_ID, &text).await;
+}
+
+async fn tg_route(mut req: Request, env: &Env, path: &str, method: Method) -> Result<Response> {
+    let Some(u) = session_user(env, &bearer(&req)).await? else {
+        return json_resp(&json!({"error": "unauthorized"}), 401);
+    };
+    let me = u["id"].as_i64().unwrap_or(0);
+
+    match (method, path) {
+        // Ilova Telegram'ga ulanishi uchun kerakli qiymatlar. Faqat
+        // kirgan foydalanuvchiga beriladi (`telegram.rs` ularni
+        // telefonda shifrlab saqlaydi).
+        (Method::Get, "/api/tg/config") => {
+            let api_id: i64 = tg_secret(env, "TG_API_ID").parse().unwrap_or(0);
+            let api_hash = tg_secret(env, "TG_API_HASH");
+            let enabled = api_id > 0 && !api_hash.is_empty() && tg_channel_id(env) != 0;
+            if !enabled {
+                return ok_nostore(json!({"enabled": false}));
+            }
+            ok_nostore(json!({
+                "enabled": true,
+                "api_id": api_id,
+                "api_hash": api_hash,
+                "bot": BOT_USERNAME,
+            }))
+        }
+
+        // Videoni foydalanuvchining bot chatiga yuboradi.
+        // Javob: {"msg_id": N} — ilova faylni shu xabardan oladi.
+        (Method::Post, "/api/tg/deliver") => {
+            let body: Value = req.json().await.unwrap_or(json!({}));
+            let name = body["file"].as_str().unwrap_or("").trim().to_string();
+            let force = body["force"].as_bool().unwrap_or(false);
+            if !tg_safe_name(&name) {
+                return json_resp(&json!({"error": "bad_file"}), 400);
+            }
+            // Obuna SERVERDA tekshiriladi: ilovadagi tekshiruvni
+            // chetlab o'tgan odam ham videoni ololmaydi.
+            if !is_admin(&u) && sub_until(env, me).await <= now_ms() {
+                return json_resp(&json!({"error": "subscription"}), 402);
+            }
+            let tg_user = u["telegram_id"].as_i64().unwrap_or(0);
+            let channel = tg_channel_id(env);
+            if tg_user == 0 || channel == 0 {
+                return json_resp(&json!({"error": "disabled"}), 503);
+            }
+
+            let res = turso_many(env, &[
+                ("SELECT msg_id FROM tg_files WHERE file_name=?", vec![TursoArg::text(&name)]),
+                ("SELECT msg_id FROM tg_sent WHERE user_id=? AND file_name=?",
+                 vec![TursoArg::int(me), TursoArg::text(&name)]),
+            ]).await?;
+            let Some(src) = res.first().and_then(first_row).and_then(|r| r["msg_id"].as_i64()) else {
+                return json_resp(&json!({"error": "not_on_telegram"}), 404);
+            };
+            if !force {
+                if let Some(sent) = res.get(1).and_then(first_row).and_then(|r| r["msg_id"].as_i64()) {
+                    return ok_nostore(json!({"msg_id": sent}));
+                }
+            }
+
+            let copied = tg_api(env, "copyMessage", json!({
+                "chat_id": tg_user,
+                "from_chat_id": channel,
+                "message_id": src,
+                "protect_content": true,
+                "disable_notification": true,
+            })).await;
+            let msg_id = match copied {
+                Ok(v) => v["message_id"].as_i64().unwrap_or(0),
+                Err(e) => {
+                    let e = e.to_string();
+                    // Foydalanuvchi botni to'xtatgan (blocked) — qayta
+                    // ishga tushirmaguncha yuborib bo'lmaydi.
+                    let code = if e.contains("blocked") || e.contains("initiate") {
+                        "bot_blocked"
+                    } else {
+                        "send_failed"
+                    };
+                    return json_resp(&json!({"error": code, "detail": e}), 409);
+                }
+            };
+            if msg_id <= 0 {
+                return json_resp(&json!({"error": "send_failed"}), 409);
+            }
+            let _ = turso_exec(env,
+                "INSERT INTO tg_sent (user_id, file_name, msg_id) VALUES (?, ?, ?)
+                 ON CONFLICT(user_id, file_name) DO UPDATE SET msg_id=excluded.msg_id",
+                vec![TursoArg::int(me), TursoArg::text(&name), TursoArg::int(msg_id)]).await;
+            ok_nostore(json!({"msg_id": msg_id}))
+        }
+
+        _ => json_resp(&json!({"error": "not_found"}), 404),
+    }
+}
+
 // ── Router ─────────────────────────────────────────────────────
 
 #[event(fetch)]
@@ -9694,7 +9904,9 @@ async fn main(req: Request, env: Env, ctx: Context) -> Result<Response> {
         // kuydirmaydi.
         || path.starts_with("/api/admin/")
         // Shikoyat yuborish ham katalogga tegmaydi.
-        || path.starts_with("/api/reports");
+        || path.starts_with("/api/reports")
+        // Telegram orqali video — shaxsiy, katalogga tegmaydi.
+        || path.starts_with("/api/tg/");
     let write = matches!(method, Method::Post | Method::Put | Method::Delete) && !auth_path;
     let mut resp = route(req, env, ctx).await?;
 
@@ -9794,6 +10006,10 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
 
     if path.starts_with("/api/auth/") || path.starts_with("/api/telegram/") {
         return auth_route(req, &env, &origin, path, method.clone()).await;
+    }
+
+    if path.starts_with("/api/tg/") {
+        return tg_route(req, &env, path, method.clone()).await;
     }
 
     // ── SHAFFOF STATISTIKA ────────────────────────────────────
