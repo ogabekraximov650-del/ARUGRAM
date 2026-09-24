@@ -333,7 +333,7 @@ jobs:
       # NOMI: `flutter create` nomni loyiha papkasidan oladi va
       # manifestga `android:label="soft"` deb yozadi (loyiha nomi)
       # — telefonda belgi ostida aynan shu yozuv turardi.
-      # Ilovaning nomi esa ARUmediaTV.
+      # Ilovaning nomi esa ARUmedia.
       #
       # YUMALOQ BELGI (`android:roundIcon`): Android 7.1 dan beri
       # qobiqlar (ayniqsa MIUI, Samsung One UI) belgini YUMALOQ
@@ -349,8 +349,8 @@ jobs:
           set -e
           MANIFEST="android/app/src/main/AndroidManifest.xml"
 
-          sed -i 's/android:label="[^"]*"/android:label="ARUmediaTV"/' "$MANIFEST"
-          grep -q 'android:label="ARUmediaTV"' "$MANIFEST" \
+          sed -i 's/android:label="[^"]*"/android:label="ARUmedia"/' "$MANIFEST"
+          grep -q 'android:label="ARUmedia"' "$MANIFEST" \
             || { echo "❌ Ilova nomi o'zgarmadi"; exit 1; }
 
           if ! grep -q 'android:roundIcon' "$MANIFEST"; then
@@ -359,7 +359,7 @@ jobs:
           grep -q 'android:roundIcon="@mipmap/ic_launcher_round"' "$MANIFEST" \
             || { echo "❌ roundIcon qo'shilmadi"; exit 1; }
 
-          echo "✅ Ilova nomi: ARUmediaTV, yumaloq belgi ulandi"
+          echo "✅ Ilova nomi: ARUmedia, yumaloq belgi ulandi"
 
       # ── TOMOSHA TARIXI UCHUN KADR AJRATUVCHI ──────────────────
       #
@@ -708,8 +708,8 @@ jobs:
           # 1) Ilova nomi
           LABEL=$("$AAPT" dump badging "$APK" | grep -m1 "^application-label:" || true)
           echo "$LABEL"
-          echo "$LABEL" | grep -q "'ARUmediaTV'" \
-            || { echo "❌ XATO: ilova nomi ARUmediaTV emas"; exit 1; }
+          echo "$LABEL" | grep -q "'ARUmedia'" \
+            || { echo "❌ XATO: ilova nomi ARUmedia emas"; exit 1; }
 
           # 2) Barcha PNG resurslar ochiladi
           TMP=$(mktemp -d)
@@ -919,7 +919,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
-          name: ARUmediaTV (build ${{ github.run_number }})
+          name: ARUmedia (build ${{ github.run_number }})
           body: |
             Telefonga to'g'ridan-to'g'ri o'rnatish uchun `.apk`
             faylini yuklab oling (ZIP emas).
@@ -940,7 +940,7 @@ jobs:
 
             **"Ilova o'rnatilmadi" chiqsa:**
 
-            1. Telefondagi eski ARUmediaTV ni butunlay o'chiring
+            1. Telefondagi eski ARUmedia ni butunlay o'chiring
                (MIUI'da "Ikkinchi makon"/"Ikki ilova" ichidagisini
                ham) va qaytadan urinib ko'ring.
             2. Baribir chiqsa — `arumedia-user-64.apk` ni

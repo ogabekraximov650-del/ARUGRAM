@@ -210,7 +210,7 @@ class FulutterApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'ARUmediaTV',
+      title: 'ARUmedia',
       debugShowCheckedModeBanner: false,
       // ── MAVZU HAM O'SHA PALITRADAN ─────────────────────────
       //
