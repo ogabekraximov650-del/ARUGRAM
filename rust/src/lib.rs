@@ -15,6 +15,7 @@ mod validate;
 mod crypto;
 mod mp4;
 mod video_cache;
+mod telegram;
 
 use ffi_utils::string_to_cptr;
 use std::os::raw::c_char;

@@ -136,6 +136,11 @@ static SERVED_BYTES: AtomicU64 = AtomicU64::new(0);
 /// Xotiradagi ro'yxat ishlab chiqish uchun qoldirildi (arzon, ~30 KB)
 /// va `rust_video_cache_pull_logs` orqali o'qish mumkin, lekin ishlab
 /// chiqarish versiyasida uni hech kim so'ramaydi.
+/// `telegram.rs` jurnalga shu orqali yozadi.
+pub(crate) fn tg_log(msg: String) {
+    log(msg);
+}
+
 fn log(msg: impl Into<String>) {
     if let Some(s) = SHARED.get() {
         let elapsed = s.start.elapsed().as_millis();
@@ -2656,17 +2661,32 @@ fn run_download(key: &str, url: &str) -> Result<DlOutcome, String> {
     let dir = shared.cache_root.join(key);
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
 
+    // ── TELEGRAM MANBASI ───────────────────────────────────────
+    // Fayl Telegram'ga bog'langan bo'lsa (`telegram::route_url`)
+    // butun yuklash mahalliy Telegram manbasidan ketadi. Bo'laklar
+    // xuddi worker'dan kelgandek 1 MB lab shifrlanib yoziladi.
+    // Worker keshini isitish bu holda umuman kerak emas — B2'ga
+    // bitta ham so'rov ketmaydi.
+    let routed = crate::telegram::route_url(key);
+    let via_tg = routed.is_some();
+    let url: &str = routed.as_deref().unwrap_or(url);
+    if via_tg {
+        log(format!("{key}: yuklash Telegram'dan"));
+    }
+
     // B2'ga bitta ham ortiqcha so'rov ketmasligi uchun: avval oyna
     // keshga isitiladi (va hajm ham o'sha javobdan olinadi), keyin
     // yuklash BUTUNLAY keshdan ketadi. Takroriy chaqiruv bepul.
-    start_prepare(url);
+    if !via_tg {
+        start_prepare(url);
+    }
 
     // ── TAYYORLASH TUGASHINI KUTAMIZ ───────────────────────────
     // Oyna keshga tushmaguncha boshlamaymiz: aks holda `ensure_meta`
     // hajmni aniqlash uchun B2'ga alohida so'rov yuborardi va
     // bo'laklar ham to'g'ridan-to'g'ri B2'dan kelardi. Kutish
     // chegaralangan va pauza bosilsa darhol uziladi.
-    {
+    if !via_tg {
         let deadline = Instant::now() + WARM_WAIT_MAX;
         while Instant::now() < deadline {
             if prepare_ready(key) || !download_active(key) {
@@ -3558,6 +3578,9 @@ fn warm_url_for_force(url: &str, widx: u64, force: bool) -> Option<String> {
 /// Kerakli oynani keshga isitishni BIR MARTA boshlaydi. Darhol
 /// qaytadi — kutish fon ish oqimida.
 fn maybe_warm(url: &str, key: &str, byte_pos: u64) {
+    if crate::telegram::is_origin_url(url) {
+        return;
+    }
     let widx = byte_pos / WARM_WINDOW;
     let tag = format!("{key}#w{widx}");
     {
@@ -4166,6 +4189,9 @@ fn window_state_of(key: &str, widx: u64) -> Option<WarmState> {
 /// tugagan bo'lsa — hech narsa qilmaydi (B2'ga takroriy so'rov
 /// KETMAYDI).
 fn warm_window_bg(url: &str, widx: u64) -> bool {
+    if crate::telegram::is_origin_url(url) {
+        return false;
+    }
     if SHARED.get().is_none() {
         return false;
     }
@@ -4460,6 +4486,9 @@ fn wait_for_warm(key: &str, byte_pos: u64) {
 /// Kutish CHEGARALANGAN va pauza bosilsa darhol uziladi.
 /// `true` — oyna keshda (yoki kutish tugadi, baribir davom etamiz).
 fn ensure_window_for_download(url: &str, key: &str, byte_pos: u64) {
+    if crate::telegram::is_origin_url(url) {
+        return;
+    }
     let widx = byte_pos / WARM_WINDOW;
     if window_state_of(key, widx) == Some(WarmState::Done) {
         return;

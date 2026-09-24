@@ -29,6 +29,21 @@ hmac = "0.12"
 getrandom = "0.2"
 hex = "0.4"
 
+# ── Telegram (videoni Telegram serveridan olish, `telegram.rs`) ───
+# grammers — Rust'dagi Telegram (MTProto) klienti. TDLib emas: TDLib
+#            yuklangan faylni diskka OCHIQ yozadi, grammers esa
+#            baytlarni faqat xotiraga qaytaradi.
+# Versiyalar QAT'IY: 0.x kutubxonada kichik versiya ham API'ni
+# o'zgartirishi mumkin.
+grammers-client = { version = "=0.10.0", default-features = false }
+grammers-mtsender = "=0.10.0"
+grammers-session = { version = "=0.10.0", default-features = false, features = ["serde"] }
+# grammers-crypto `glass_pumpkin = "2.0.0-rc0"` so'raydi va Cargo
+# 2.0.0-rc1 ni tanlaydi — u API'ni buzgan, kompilyatsiya yiqiladi.
+# Cargo.lock repoda saqlanmaydi, shu sabab versiya shu yerda qotiriladi.
+glass_pumpkin = "=2.0.0-rc0"
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync", "time"] }
+
 [profile.release]
 opt-level = 3
 lto = true
