@@ -1,0 +1,45 @@
+[package]
+name = "rust_core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+# cdylib — Android uchun .so, Dart FFI shu bilan ishlaydi
+crate-type = ["cdylib"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ureq = "2"
+
+# ── Shifrlash ───────────────────────────────────────────────────────
+# ring       — BARCHA shifrlash (AES-GCM): video bo'laklari (AES-128) va
+#              kichik fayllar — ro'yxatlar, rasmlar (AES-256). Ilovada
+#              HTTPS (ureq/rustls) uchun allaqachon bor; 64-bit da
+#              apparat AES, 32-bit da NEON bilan ishlaydi
+#              (`crypto.rs` dagi "NEGA CBC EMAS" izohi).
+# hkdf+sha2  — bitta asosiy kalitdan har bir fayl uchun ALOHIDA kalit
+#              hosil qilish (kalitni qayta ishlatmaslik uchun).
+# getrandom  — kriptografik tasodifiy sonlar (asosiy kalit, nonce).
+ring = "0.17"
+hkdf = "0.12"
+sha2 = "0.10"
+# hmac — serverga yuboriladigan so'rov imzosi (`app_sign`).
+hmac = "0.12"
+getrandom = "0.2"
+hex = "0.4"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+# Testlar optimallashgan holda yig'iladi: yuklab olish testlaridagi
+# sinov serverlari baytlarni birma-bir hosil qiladi va debug
+# rejimida "tez manba" amalda sekin bo'lib qolardi — natijada ish
+# o'g'irlash (haqli ravishda) ishga tushib, so'rovlar sonini
+# o'lchaydigan testlar noto'g'ri sharoitda tekshirilardi.
+[profile.test]
+opt-level = 2

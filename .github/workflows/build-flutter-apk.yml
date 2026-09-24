@@ -1,0 +1,978 @@
+name: Build Flutter APK
+
+on:
+  push:
+    # `main`dan tashqari ish (feature) branchlari uchun ham APK
+    # yig'iladi — o'zgarishni main'ga qo'shishdan OLDIN qurilmada
+    # sinab ko'rish uchun.
+    branches: [main, 'claude/**']
+    paths:
+      - 'lib/**'
+      - 'rust/**'
+      - 'assets/**'
+      # TOPILGAN XATO: `branding/**` bu ro'yxatda YO'Q edi. Shu
+      # sabab logotipni o'zgartirgan commit'lar (masalan "plita
+      # to'liq qora" va "burchagi yumaloq") HECH QANDAY APK
+      # yig'masdi — telefonda esa eski, belgisiz APK turaverardi
+      # va "ARU logotipi ko'rinmayapti" deb tushunilardi.
+      - 'branding/**'
+      - 'android-template/**'
+      - 'pubspec.yaml'
+      - '.github/workflows/build-flutter-apk.yml'
+  workflow_dispatch:
+
+# Bir vaqtda FAQAT BITTA build ishlaydi. Avval push va qo'lda ishga
+# tushirish (workflow_dispatch) bir vaqtda kelib, bir xil commit uchun
+# IKKITA build paydo bo'lardi. Endi yangi build boshlansa, o'sha
+# branch uchun eskisi avtomatik bekor qilinadi — ro'yxatda chalkashlik
+# bo'lmaydi va CI resursi ham behuda sarflanmaydi.
+concurrency:
+  group: build-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+# APK'ni Release sifatida chiqarish uchun yozish ruxsati kerak.
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    # ── SIRLAR BITTA JOYDAN OLINADI ──────────────────────────
+    #
+    # TALAB (foydalanuvchi): "hammasi bitta joydan oladigan qil,
+    # hozirgi Environment secretdan".
+    #
+    # MUHIM: "Environment secrets" ga kirish uchun job AYNAN shu
+    # environment nomini e'lon qilishi shart — `deploy-worker.yml`
+    # da bu allaqachon bor edi, bu yerda esa YO'Q edi.
+    #
+    # Oqibati jimgina bo'lardi: `APP_SIGN_SECRET` environment
+    # ichida tursa, worker uni ko'rar, APK esa KO'RMASDI. Natijada
+    # ilova kalitsiz yig'ilib chiqar va yangi imzo hech qachon
+    # ishlamasdi — hech qanday xato xabarisiz.
+    environment: secret
+
+    # ── TO'RTTA ALOHIDA APK (foydalanuvchi talabi) ────────────
+    #
+    # TALAB 1: "ikkita build qil, bittasida admin paneliga tegishli
+    # kodlar bo'lmasin, ikkinchisida esa men uchun admin paneli
+    # bor ilova build qil".
+    # TALAB 2: "APK tayyorlanganda barchasi alohida tayyorlanishi
+    # kerak — admin uchun ikkita 32 va 64 bit alohida, user uchun
+    # ikkita 32 va 64 bit alohida; hozir ikkitasi bitta APK ichida
+    # va shu sababli hajmi katta bo'lib ketgan".
+    #
+    # Ya'ni har bir APK FAQAT BITTA arxitektura uchun quriladi:
+    # Rust yadrosi ham, Flutter kodi ham faqat o'shanisi. Shu
+    # sababli har bir fayl ~2 barobar kichik bo'ladi.
+    #
+    # `ADMIN_BUILD` `--dart-define` orqali beriladi va ilovada
+    # `const bool` bo'lib tushadi. `false` bo'lsa Dart kompilyatori
+    # admin ekranlariga boradigan yo'lni topmaydi va ularni
+    # APK'dan butunlay chiqarib tashlaydi (`app_build.dart`).
+    strategy:
+      # Bittasi yiqilsa qolganlari baribir qurilsin — admin
+      # buildidagi xato oddiy foydalanuvchilar APK'sini
+      # to'xtatmasin.
+      fail-fast: false
+      # KETMA-KET: joblar bir vaqtda bitta Release'ga yozsa
+      # to'qnashadi va bittasi "tag allaqachon bor" xatosi bilan
+      # yiqilardi.
+      max-parallel: 1
+      matrix:
+        include:
+          # IKKITA APK (foydalanuvchi talabi):
+          #   1. admin paneli KODI BOR — faqat 32-bit (o'zim uchun);
+          #   2. foydalanuvchi uchun 64-bit.
+          #
+          # Foydalanuvchi APK'sida admin paneli kodi BUTUNLAY
+          # chiqarib tashlanadi (`admin: 'false'`, ya'ni
+          # `ADMIN_BUILD=false` -> `app_build.dart` dagi
+          # `const bool` false bo'ladi va Dart kompilyatori admin
+          # ekranlariga boradigan yo'lni topmay, ularni APK'ga
+          # umuman qo'shmaydi).
+          #
+          # `user-32` va `admin-64` kerak bo'lganda shu ro'yxatga
+          # qo'shiladi.
+          #
+          # (`admin-64` bir marta qo'shilib, DARHOL olib tashlandi:
+          # u "admin-32 o'rnatilmayapti, balki telefon 32-bitni
+          # qo'llamaydi" degan TAXMIN uchun edi. Foydalanuvchi
+          # telefoni AYNAN 32-bit ekanini aytdi — ya'ni taxmin
+          # noto'g'ri, 64-bit variant esa bekorga har build'da
+          # bitta qo'shimcha ish bo'lib turardi.)
+          - name: admin-32
+            admin: 'true'
+            abi: armeabi-v7a
+            platform: android-arm
+          - name: user-64
+            admin: 'false'
+            abi: arm64-v8a
+            platform: android-arm64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ── Rust yadrosini Android uchun kompilyatsiya qilish ──────
+      - name: Setup Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: armv7-linux-androideabi, aarch64-linux-android
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "rust -> target"
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      # FAQAT SHU JOB'NING ABI'si quriladi — har APK bitta
+      # arxitektura uchun (foydalanuvchi talabi: "barchasi alohida
+      # tayyorlanishi kerak ... hajmi katta bo'lib ketgan").
+      - name: Build rust_core for Android (${{ matrix.abi }})
+        working-directory: rust
+        env:
+          # ── SO'ROV IMZOSINING SIRI ──────────────────────────
+          #
+          # Yadro ichiga KOMPILYATSIYA paytida kiritiladi
+          # (`rust/src/lib.rs` -> `APP_SIGN_SECRET`). Dart
+          # kodiga umuman tushmaydi.
+          #
+          # Server tomonda AYNAN shu qiymat `wrangler secret put
+          # APP_SIGN_SECRET` bilan turishi shart — aks holda
+          # hamma so'rov 403 oladi.
+          #
+          # Berilmasa yadro imzosiz yig'iladi va ilova eski
+          # usulga qaytadi (server ham tekshiruvni o'chirgan
+          # bo'lishi kerak).
+          APP_SIGN_SECRET: ${{ secrets.APP_SIGN_SECRET }}
+        run: |
+          if [ -z "$APP_SIGN_SECRET" ]; then
+            echo "⚠️  APP_SIGN_SECRET yo'q — yadro imzosiz yig'ilmoqda"
+          fi
+          cargo ndk \
+            -t ${{ matrix.abi }} \
+            -o ../jniLibs-out \
+            build --release
+
+      # ── Flutter ─────────────────────────────────────────────────
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Generate android folder (agar yo'q bo'lsa)
+        run: |
+          if [ ! -f "android/app/build.gradle" ]; then
+            flutter create --platforms=android --org uz.arumediatv .
+          fi
+
+      # Kompilyatsiya qilingan .so fayllarni Android loyihasiga joylash —
+      # flutter APK build vaqtida ularni avtomatik jniLibs sifatida qo'shadi.
+      - name: Copy librust_core.so into jniLibs
+        run: |
+          set -e
+          mkdir -p "android/app/src/main/jniLibs/${{ matrix.abi }}"
+          cp "jniLibs-out/${{ matrix.abi }}/librust_core.so" \
+             "android/app/src/main/jniLibs/${{ matrix.abi }}/"
+          echo "✅ Rust .so fayl joylashtirildi:"
+          find android/app/src/main/jniLibs -name "*.so"
+
+      - name: INTERNET ruxsatini qo'shish (agar yo'q bo'lsa)
+        run: |
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          if ! grep -q "android.permission.INTERNET" "$MANIFEST"; then
+            sed -i '/<manifest /a\    <uses-permission android:name="android.permission.INTERNET" />' "$MANIFEST"
+            echo "✅ INTERNET ruxsati qo'shildi"
+          else
+            echo "✅ INTERNET ruxsati allaqachon bor"
+          fi
+
+      # Chatdagi ovozli xabar uchun mikrofon ruxsati. `record`
+      # paketining o'z manifestida ham bor va birlashtirishda
+      # qo'shiladi — bu yerdagi qadam ishonch uchun (paket
+      # almashsa ham ruxsat joyida qoladi).
+      - name: RECORD_AUDIO ruxsatini qo'shish (agar yo'q bo'lsa)
+        run: |
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          if ! grep -q "android.permission.RECORD_AUDIO" "$MANIFEST"; then
+            sed -i '/<manifest /a\    <uses-permission android:name="android.permission.RECORD_AUDIO" />' "$MANIFEST"
+            echo "✅ RECORD_AUDIO ruxsati qo'shildi"
+          else
+            echo "✅ RECORD_AUDIO ruxsati allaqachon bor"
+          fi
+
+      # Video kesh-server (lib/services/video_cache_server.dart) ilova
+      # ichida mahalliy http://127.0.0.1 manzilda ishlaydi. Android
+      # targetSdk 28+ da standart holatda BARCHA shifrlanmagan (cleartext)
+      # HTTP ulanishlar (localhost ham) bloklanadi — shu sabab bu yerga
+      # faqat 127.0.0.1/localhost uchun cleartext'ga ruxsat beruvchi
+      # network_security_config.xml qo'shiladi va manifestga ulanadi.
+      - name: Mahalliy kesh-server uchun cleartext (127.0.0.1) ruxsatini qo'shish
+        run: |
+          RES_XML_DIR="android/app/src/main/res/xml"
+          mkdir -p "$RES_XML_DIR"
+          cat > "$RES_XML_DIR/network_security_config.xml" << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <network-security-config>
+              <domain-config cleartextTrafficPermitted="true">
+                  <domain includeSubdomains="false">127.0.0.1</domain>
+                  <domain includeSubdomains="false">localhost</domain>
+              </domain-config>
+          </network-security-config>
+          EOF
+
+          # E'TIBOR: flutter create shablonida <application so'zidan keyin
+          # ko'pincha bevosita yangi qator keladi (probel emas) — shu
+          # sabab probelga tayanmasdan, <application'dan keyin YANGI
+          # qatorga alohida atribut sifatida qo'shiladi (ikkala holatda
+          # ham ishlaydi).
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          if ! grep -q "networkSecurityConfig" "$MANIFEST"; then
+            sed -i '0,/<application/s//<application\n        android:networkSecurityConfig="@xml\/network_security_config"/' "$MANIFEST"
+            echo "✅ networkSecurityConfig manifestga ulandi"
+          else
+            echo "✅ networkSecurityConfig allaqachon bor"
+          fi
+
+      # ── TELEGRAM HAVOLASINI OCHISH UCHUN (Android 11+) ────────
+      #
+      # Android 11 dan boshlab ilova boshqa ilovalarni "ko'ra"
+      # olishi uchun manifestda <queries> e'loni bo'lishi kerak.
+      # Usiz `url_launcher` t.me havolasini ochishga urinsa, tizim
+      # mos ilovani topa olmasligi mumkin. Shu sabab bu yerga
+      # https va tg sxemalari qo'shiladi.
+      #
+      # flutter create shabloni allaqachon <queries> blokini
+      # (PROCESS_TEXT uchun) qo'shadi — shu sabab blok bo'lsa
+      # ichiga qo'shamiz, bo'lmasa yangisini yaratamiz.
+      - name: Telegram havolasi uchun <queries> qo'shish
+        run: |
+          python3 - <<'PYEOF'
+          p = 'android/app/src/main/AndroidManifest.xml'
+          s = open(p, encoding='utf-8').read()
+
+          # `<package>` e'lonlari: Android 11+ da ilova boshqa
+          # ilovaning BORLIGINI faqat shu ro'yxatdagilar uchun
+          # bilib oladi. Ular bo'lmasa ilova "qaysi Telegram
+          # o'rnatilgan?" degan savolga javob ololmaydi va
+          # foydalanuvchiga tanlash ro'yxatini ko'rsata olmaydi.
+          intents = """
+                  <intent>
+                      <action android:name="android.intent.action.VIEW" />
+                      <data android:scheme="https" />
+                  </intent>
+                  <intent>
+                      <action android:name="android.intent.action.VIEW" />
+                      <data android:scheme="tg" />
+                  </intent>
+                  <package android:name="org.telegram.messenger" />
+                  <package android:name="org.telegram.messenger.web" />
+                  <package android:name="org.telegram.messenger.beta" />
+                  <package android:name="org.thunderdog.challegram" />
+                  <package android:name="org.telegram.plus" />
+                  <package android:name="nekox.messenger" />
+                  <package android:name="ir.ilmili.telegraph" />
+                  <package android:name="org.forkgram.messenger" />"""
+
+          if 'org.thunderdog.challegram' in s:
+              print("✅ <queries> allaqachon bor")
+          elif '<queries>' in s:
+              s = s.replace('<queries>', '<queries>' + intents, 1)
+              open(p, 'w', encoding='utf-8').write(s)
+              print("✅ intent'lar mavjud <queries> blokiga qo'shildi")
+          else:
+              s = s.replace('</manifest>',
+                            '    <queries>' + intents + '\n    </queries>\n</manifest>', 1)
+              open(p, 'w', encoding='utf-8').write(s)
+              print("✅ yangi <queries> bloki qo'shildi")
+          PYEOF
+
+      # ── ILOVA BELGISI (ARU logotipi) ──────────────────────────
+      #
+      # `android/` papkasi har build'da `flutter create` bilan
+      # qaytadan yaratiladi va u BILAN BIRGA Flutter'ning standart
+      # ko'k belgisi keladi. Shu sabab bizning belgimiz har safar
+      # shu yerda ustiga yoziladi.
+      #
+      # Fayllar `branding/android-res/` da tayyor turadi (ular
+      # `node branding/build-icons.js` bilan SVG'dan chiqarilgan),
+      # ya'ni CI'da hech narsa qayta chizilmaydi — faqat ko'chiriladi.
+      - name: Ilova belgisini va ochilish ekranini o'rnatish
+        run: |
+          set -e
+          RES="android/app/src/main/res"
+
+          # 1) Flutter shabloni qo'ygan BARCHA eski belgi fayllari
+          #    avval O'CHIRILADI. Ilgari faqat ustiga ko'chirilardi:
+          #    shablon boshqa nomdagi yoki boshqa zichlikdagi fayl
+          #    qo'ysa, u joyida qolib ketardi va Android aynan
+          #    o'shani tanlab, ekranda Flutter belgisi ko'rinardi.
+          find "$RES" -name 'ic_launcher*' -delete
+          rm -f "$RES"/mipmap-anydpi-v26/ic_launcher.xml
+
+          # 2) Bizning fayllar joyiga qo'yiladi (belgi + ARU
+          #    logotipli qora ochilish ekrani).
+          cp -r branding/android-res/. "$RES"/
+
+          echo "── O'rnatilgan fayllar ──"
+          find "$RES" \( -name 'ic_launcher*' -o -name 'launch_background.xml' \
+            -o -name 'aru_splash.png' \) | sort
+
+          # 3) Manifest belgiga murojaat qilishiga ishonch hosil qilamiz
+          grep -q 'android:icon="@mipmap/ic_launcher"' \
+            android/app/src/main/AndroidManifest.xml \
+            || { echo "❌ Manifest @mipmap/ic_launcher ga murojaat qilmayapti"; exit 1; }
+          echo "✅ Belgi va ochilish ekrani o'rnatildi"
+
+      # ── ILOVA NOMI VA YUMALOQ BELGI ───────────────────────────
+      #
+      # NOMI: `flutter create` nomni loyiha papkasidan oladi va
+      # manifestga `android:label="soft"` deb yozadi (loyiha nomi)
+      # — telefonda belgi ostida aynan shu yozuv turardi.
+      # Ilovaning nomi esa ARUmediaTV.
+      #
+      # YUMALOQ BELGI (`android:roundIcon`): Android 7.1 dan beri
+      # qobiqlar (ayniqsa MIUI, Samsung One UI) belgini YUMALOQ
+      # qilib ko'rsatadi va agar ilova alohida yumaloq belgi bersa,
+      # AYNAN SHUNI oladi. Bizda u yo'q edi — qobiq kvadrat belgini
+      # o'zi qirqishga majbur bo'lardi.
+      #
+      # Ustiga bu yangi resurs qobiqning ESKI belgini eslab qolgan
+      # keshini ham chetlab o'tadi: `ic_launcher_round` ilgari
+      # umuman mavjud bo'lmagan, ya'ni uning eski nusxasi ham yo'q.
+      - name: Ilova nomi va yumaloq belgi
+        run: |
+          set -e
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+
+          sed -i 's/android:label="[^"]*"/android:label="ARUmediaTV"/' "$MANIFEST"
+          grep -q 'android:label="ARUmediaTV"' "$MANIFEST" \
+            || { echo "❌ Ilova nomi o'zgarmadi"; exit 1; }
+
+          if ! grep -q 'android:roundIcon' "$MANIFEST"; then
+            sed -i 's|android:icon="@mipmap/ic_launcher"|android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round"|' "$MANIFEST"
+          fi
+          grep -q 'android:roundIcon="@mipmap/ic_launcher_round"' "$MANIFEST" \
+            || { echo "❌ roundIcon qo'shilmadi"; exit 1; }
+
+          echo "✅ Ilova nomi: ARUmediaTV, yumaloq belgi ulandi"
+
+      # ── TOMOSHA TARIXI UCHUN KADR AJRATUVCHI ──────────────────
+      #
+      # `android/` papkasi `.gitignore` da va CI uni har safar
+      # `flutter create` bilan qaytadan yaratadi. Shu sabab
+      # `MainActivity.kt` shablon sifatida repoda turadi
+      # (`android-template/`) va shu yerda o'rniga ko'chiriladi.
+      #
+      # Paket nomi yaratilgan fayldan O'QIB OLINADI — qo'lda
+      # yozilsa, `--org` o'zgargan kuni jimgina buzilardi.
+      - name: Kadr ajratuvchini (MediaMetadataRetriever) joylashtirish
+        run: |
+          MA=$(find android/app/src/main -name "MainActivity.kt" | head -1)
+          if [ -z "$MA" ]; then
+            echo "❌ MainActivity.kt topilmadi"
+            exit 1
+          fi
+          PKG=$(grep -m1 '^package ' "$MA" | sed 's/^package //' | tr -d '\r;')
+          if [ -z "$PKG" ]; then
+            echo "❌ paket nomi aniqlanmadi"
+            exit 1
+          fi
+          sed "s/__PKG__/$PKG/" android-template/MainActivity.kt > "$MA"
+          echo "✅ Kadr ajratuvchi joylashtirildi (paket: $PKG)"
+          grep -n "aru/thumb" "$MA"
+
+      - name: Kotlin va compileSdk versiyalarini eng yangisiga moslash
+        run: |
+          if [ -f "android/build.gradle" ]; then
+            sed -i "s/ext.kotlin_version = '[0-9.]*'/ext.kotlin_version = '1.9.24'/" android/build.gradle || true
+          fi
+          if [ -f "android/app/build.gradle" ]; then
+            sed -i "s/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 35/" android/app/build.gradle || true
+            sed -i "s/compileSdk = flutter.compileSdkVersion/compileSdk = 35/" android/app/build.gradle || true
+          fi
+          echo "✅ Gradle sozlamalari yangilandi"
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      # HAR APK FAQAT BITTA ARXITEKTURA UCHUN (foydalanuvchi
+      # talabi). `--split-per-abi` ISHLATILMAYDI: u bir job ichida
+      # bir nechta APK chiqaradi va ularning nomini boshqarish
+      # qiyin; bu yerda ABI matritsadan keladi, ya'ni har job
+      # bitta toza APK beradi.
+      - name: Build APK (Release — ${{ matrix.abi }})
+        run: |
+          # ── VERSIYA TO'LIQ `pubspec.yaml` DAN ────────────────
+          #
+          # TALAB (foydalanuvchi): "version name 0.0.1 bo'lsin,
+          # version code 1 bo'lsin".
+          #
+          # Ya'ni ikkala raqam ham `pubspec.yaml` dagi
+          # `version: 0.0.1+1` dan olinadi:
+          #   * `0.0.1` -> `versionName` (ko'rinadigan yozuv);
+          #   * `1`     -> `versionCode` (Android o'rnatish
+          #                qarorini shu bo'yicha qabul qiladi).
+          #
+          # ⚠️ BILIB QO'YISH KERAK. 265-build'gacha `versionCode`
+          # `github.run_number` edi, ya'ni telefonlarga 265 gacha
+          # raqamlar o'rnatilgan. 1 esa undan KICHIK — agar
+          # telefonda o'sha davrdagi ilova TURGAN bo'lsa, Android
+          # buni downgrade deb rad etadi va MIUI hech qanday
+          # tushuntirishsiz "Ilova o'rnatilmadi" deydi.
+          #
+          # TOZA o'rnatishda (eski ilova butunlay o'chirilgan)
+          # `versionCode` ning kattaligi ahamiyatsiz — 1 bemalol
+          # o'rnatiladi.
+          #
+          # Keyingi APK chiqarganda `pubspec.yaml` dagi `+1` ni
+          # OSHIRISHNI unutmang, aks holda telefondagi ilova
+          # ustiga yangisi tushmaydi.
+          FULL=$(grep '^version:' pubspec.yaml | sed 's/version: *//')
+          BUILD_NAME=$(echo "$FULL" | cut -d+ -f1)
+          VERSION_CODE=$(echo "$FULL" | cut -d+ -f2)
+
+          # Serverga (`X-App-Version`) va admin panelidagi "eng
+          # past versiya" tekshiruviga AYNAN shu yozuv boradi.
+          APP_VERSION="${BUILD_NAME}+${VERSION_CODE}"
+
+          # Raqam ekaniga ishonch: `pubspec.yaml` xato tahrirlansa
+          # build bu yerda yiqilsin, tushunarsiz Gradle xatosi
+          # bilan emas.
+          case "$VERSION_CODE" in
+            ''|*[!0-9]*)
+              echo "❌ XATO: pubspec.yaml dagi '+' dan keyingi qism butun son emas: '$VERSION_CODE'"
+              exit 1 ;;
+          esac
+
+          echo "versionName (ko'rinadigan) : $BUILD_NAME"
+          echo "versionCode                : $VERSION_CODE"
+          echo "serverga boradigan versiya : $APP_VERSION"
+          echo "admin paneli               : ${{ matrix.admin }}"
+
+          echo "VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
+          echo "APP_VERSION=$APP_VERSION" >> "$GITHUB_ENV"
+          echo "BUILD_NAME_EXPECTED=$BUILD_NAME" >> "$GITHUB_ENV"
+
+          flutter build apk --release \
+            --target-platform ${{ matrix.platform }} \
+            --build-name "$BUILD_NAME" \
+            --build-number "$VERSION_CODE" \
+            --dart-define=ADMIN_BUILD=${{ matrix.admin }} \
+            --dart-define=APP_VERSION="$APP_VERSION"
+
+      # ── APK'DA FAQAT SHU ABI QOLSIN ──────────────────────────
+      #
+      # TOPILGAN JIDDIY XATO (avvalgi versiyalarda bor edi):
+      # `--target-platform` berilganiga QARAMAY, tayyor APK ichida
+      # ortiqcha arxitektura papkalari qolardi (Flutter embedding
+      # AAR'idan). Rust yadrosi (`librust_core.so`) esa faqat
+      # bittasida bo'lardi — Android boshqa papkani tanlab,
+      # kutubxonani topa olmay ilova ochilishida yiqilardi.
+      #
+      # Shu sabab BEGONA papkalar o'chiriladi va shu ABI'da
+      # uchchala .so borligi tekshiriladi. Bu APK hajmini ham
+      # keskin kichraytiradi.
+      - name: ABI tozalash va tekshiruv (faqat ${{ matrix.abi }})
+        run: |
+          set -e
+          APK="build/app/outputs/flutter-apk/app-release.apk"
+          KEEP="${{ matrix.abi }}"
+
+          echo "── O'zgartirishdan OLDIN ──"
+          unzip -l "$APK" | grep "lib/" || true
+
+          # KERAKLI kutubxonalar shu ABI'da borligini tekshiramiz.
+          # Bo'lmasa — o'chirish ilovani buzardi, shu sabab build
+          # ATAYLAB yiqiladi (jimgina buzuq APK chiqarishdan
+          # yaxshiroq).
+          for so in libapp.so libflutter.so librust_core.so; do
+            if ! unzip -l "$APK" | grep -q "lib/$KEEP/$so"; then
+              echo "❌ XATO: lib/$KEEP/$so topilmadi — APK to'liq emas"
+              exit 1
+            fi
+          done
+
+          # Qolgan barcha arxitekturalar olib tashlanadi.
+          for abi in armeabi-v7a arm64-v8a x86 x86_64; do
+            [ "$abi" = "$KEEP" ] && continue
+            zip -q -d "$APK" "lib/$abi/*" || true
+          done
+
+          # `zip -d` fayllar joylashuvini buzadi — .so fayllar
+          # xotiraga to'g'ridan-to'g'ri joylashishi (memory-map)
+          # uchun APK qaytadan tekislanishi kerak.
+          ZIPALIGN=$(ls "$ANDROID_HOME"/build-tools/*/zipalign | sort -V | tail -1)
+          "$ZIPALIGN" -f -p 4 "$APK" "$APK.aligned"
+          mv "$APK.aligned" "$APK"
+
+          echo "── O'zgartirishdan KEYIN ──"
+          unzip -l "$APK" | grep "lib/" || true
+
+      # ── APK'ni ESKI IMZO SXEMASI (v1) BILAN HAM IMZOLASH ──────
+      #
+      # Android 7.0 dan boshlab APK "v2" sxemasi bilan imzolanadi va
+      # zamonaviy Gradle standart holatda FAQAT v2/v3 imzo qo'yadi.
+      # Lekin:
+      #   * Android 6 va undan eskilar v2 ni UMUMAN bilmaydi — ular
+      #     uchun APK "imzosiz" ko'rinadi va o'rnatgichda aynan
+      #     "Paketni tahlil qilishda muammo yuz berdi" chiqadi;
+      #   * ba'zi qobiqlar (MIUI kabi) va fayl menejerlaridagi
+      #     o'rnatgichlar ham v1 imzoni talab qilib qoladi.
+      #
+      # Shu sabab APK build'dan keyin apksigner bilan QAYTA imzolanadi:
+      # v1 + v2 + v3 — ya'ni eski ham, yangi ham qurilmalar qabul
+      # qiladi. Kalit — Gradle yaratgan standart debug kaliti.
+      - name: APK'ni BARCHA imzo sxemalari bilan (v1..v4) qayta imzolash
+        env:
+          # Secrets qo'yilgan bo'lsa USTUN turadi (`ci/README.md`).
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
+        run: |
+          set -e
+          APK="build/app/outputs/flutter-apk/app-release.apk"
+
+          # ── BARQAROR IMZO KALITI (TUZATILGAN JIDDIY XATO) ────
+          #
+          # TOPILGAN XATO (foydalanuvchi: "yangi versiyani
+          # o'rnatmoqchi bo'lganimda ilova yangilanmayapti ...
+          # versiya katta bo'lsa ham yangilanmasdi").
+          #
+          # Ilgari bu yerda shunday edi:
+          #     KS="$HOME/.android/debug.keystore"
+          #     if [ ! -f "$KS" ]; then keytool -genkeypair ...
+          #
+          # GitHub runner har build'da TOZA mashina — ya'ni bu
+          # fayl hech qachon topilmasdi va HAR APK BOSHQA KALIT
+          # bilan imzolanardi.
+          #
+          # Android qoidasi qat'iy: yangi APK eskisi bilan AYNAN
+          # BIR XIL kalit bilan imzolangan bo'lishi kerak. Aks
+          # holda tizim o'rnatishni rad etadi
+          # (INSTALL_FAILED_UPDATE_INCOMPATIBLE) — versiya raqami
+          # katta bo'lsa ham. Aynan shu sabab 8 dan 9 ga
+          # o'tganda ham yangilanmagan.
+          #
+          # Endi kalit repoda (`ci/release.keystore`) va u
+          # o'zgarmaydi. Secrets qo'yilgan bo'lsa undan olinadi.
+          KS="$RUNNER_TEMP/release.keystore"
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > "$KS"
+            STOREPASS="${KS_PASS:-arumedia}"
+            echo "imzo kaliti: GitHub Secrets"
+          else
+            cp ci/release.keystore "$KS"
+            STOREPASS="arumedia"
+            echo "imzo kaliti: ci/release.keystore"
+          fi
+          ALIAS="arumedia"
+
+          # Kalit HAQIQATAN o'sha ekanini yozib qo'yamiz — imzo
+          # almashib qolsa loglardan darhol ko'rinadi.
+          keytool -list -v -keystore "$KS" -storepass "$STOREPASS" \
+            -alias "$ALIAS" 2>/dev/null | grep "SHA256:" || true
+
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          echo "apksigner: $APKSIGNER"
+
+          # v1 — Android 6 va undan eskilar UCHUN SHART (aks holda
+          #      "Paketni tahlil qilishda muammo" chiqadi);
+          # v2 — Android 7+;
+          # v3 — Android 9+ (kalitni almashtirishga ruxsat beradi);
+          # v4 — Android 11+ (adb bilan tezkor o'rnatish uchun; alohida
+          #      .idsig fayl yaratadi va oddiy o'rnatishga xalaqit
+          #      bermaydi). Eski build-tools v4 ni bilmasligi mumkin —
+          #      shunday holatda v1+v2+v3 bilan qayta imzolanadi.
+          # ── NEGA `--min-sdk-version 21` (tuzatilgan xato) ──────
+          #
+          # Avval imzo tekshiruvi HAR SAFAR shuni ko'rsatardi:
+          #   Verified using v1 scheme (JAR signing): FALSE
+          # ya'ni `--v1-signing-enabled true` berilgan bo'lsa ham
+          # v1 imzo AMALDA QO'YILMASDI. Sabab: apksigner v1 kerakmi
+          # yoki yo'qmi degan qarorni APK'ning `minSdkVersion`iga
+          # qarab qabul qiladi — u 24 (Android 7) bo'lgani uchun
+          # v1 ni "keraksiz" deb o'tkazib yuborardi.
+          #
+          # Endi apksigner'ga eng past qo'llab-quvvatlanadigan
+          # versiya ANIQ aytiladi, shu sabab v1 imzo HAQIQATAN
+          # qo'yiladi. Bu ba'zi qobiqlar (MIUI kabi) va fayl
+          # menejerlaridagi o'rnatgichlar uchun muhim — ular
+          # v1 imzoni talab qilib qoladi va usiz "Paketni tahlil
+          # qilishda muammo" deb chiqaradi.
+          MIN_SDK=21
+          sign_apk() {
+            "$APKSIGNER" sign \
+              --ks "$KS" --ks-pass "pass:$STOREPASS" \
+              --key-pass "pass:$STOREPASS" \
+              --ks-key-alias "$ALIAS" \
+              --min-sdk-version "$MIN_SDK" \
+              --v1-signing-enabled true \
+              --v2-signing-enabled true \
+              --v3-signing-enabled true \
+              "$@" "$APK"
+          }
+          if ! sign_apk --v4-signing-enabled true; then
+            echo "⚠️  v4 imzo qo'llab-quvvatlanmadi — v1+v2+v3 bilan imzolanmoqda"
+            sign_apk
+          fi
+          echo "── Imzo tekshiruvi ──"
+          "$APKSIGNER" verify -v --min-sdk-version "$MIN_SDK" "$APK" | tee /tmp/verify.txt
+
+          # v1 va v2 HAQIQATAN qo'yilganini TASDIQLAYMIZ — aks holda
+          # build ataylab yiqiladi (jimgina yarim imzolangan APK
+          # chiqarishdan yaxshiroq).
+          for scheme in "v1 scheme (JAR signing)" "v2 scheme (APK Signature Scheme v2)"; do
+            if ! grep -q "Verified using $scheme: true" /tmp/verify.txt; then
+              echo "❌ XATO: $scheme imzosi qo'yilmadi"
+              exit 1
+            fi
+          done
+          echo "✅ v1 va v2 imzolar tasdiqlandi"
+
+      - name: APK tarkibini tekshirish (versiya, arxitektura)
+        run: |
+          set -e
+          APK="build/app/outputs/flutter-apk/app-release.apk"
+          AAPT=$(ls "$ANDROID_HOME"/build-tools/*/aapt2 | sort -V | tail -1)
+          "$AAPT" dump badging "$APK" | grep -E "^(package|sdkVersion|targetSdkVersion|native-code)" || true
+
+          # ── TAYYOR APK'DAGI `versionCode` TEKSHIRUVI ─────────
+          #
+          # `pubspec.yaml` da yozilgan raqamlar TAYYOR FAYLGA
+          # ham tushganini tasdiqlaymiz — build buyrug'iga
+          # to'g'ri raqam berilgani YETARLI emas.
+          CODE=$("$AAPT" dump badging "$APK" \
+            | grep -m1 "^package:" \
+            | sed "s/.*versionCode='\([0-9]*\)'.*/\1/")
+          NAME=$("$AAPT" dump badging "$APK" \
+            | grep -m1 "^package:" \
+            | sed "s/.*versionName='\([^']*\)'.*/\1/")
+          echo "versionCode = $CODE (ko'rinadigan versiya: $NAME)"
+
+          if [ "$CODE" != "$VERSION_CODE" ]; then
+            echo "❌ XATO: versionCode $VERSION_CODE bo'lishi kerak edi, APK'da: $CODE"
+            exit 1
+          fi
+          if [ "$NAME" != "$BUILD_NAME_EXPECTED" ] && [ -n "$BUILD_NAME_EXPECTED" ]; then
+            echo "❌ XATO: versionName $BUILD_NAME_EXPECTED bo'lishi kerak edi, APK'da: $NAME"
+            exit 1
+          fi
+          echo "✅ versiya raqamlari pubspec.yaml bilan mos"
+
+          echo "── Ichidagi kutubxonalar ──"
+          ABIS=$(unzip -l "$APK" | grep "lib/" | awk '{print $4}' | cut -d/ -f2 | sort -u)
+          echo "$ABIS"
+
+          # QAT'IY TEKSHIRUV: APK ichida AYNAN BITTA ABI
+          # bo'lishi SHART. Boshqasi qolib ketsa, Android o'shani
+          # tanlab, Rust yadrosini topa olmasdi.
+          if [ "$ABIS" != "${{ matrix.abi }}" ]; then
+            echo "❌ XATO: faqat ${{ matrix.abi }} bo'lishi kerak edi, ichidagisi: $ABIS"
+            exit 1
+          fi
+          echo "✅ APK faqat ${{ matrix.abi }}"
+
+      # ── APK ICHIDA HAQIQATAN ARU BELGISI BORMI ────────────────
+      #
+      # NEGA BU QADAM BOR. Ilgari belgini ko'chirish qadami
+      # "muvaffaqiyatli" tugagani bilan tayyor APK'da belgi
+      # bo'lishiga KAFOLAT yo'q edi: build yashil chiqardi va
+      # faqat telefonda "Flutter belgisi turibdi" deb bilinardi.
+      #
+      # NEGA FAYL NOMI BO'YICHA QIDIRILMAYDI: tayyor APK'da
+      # resurslar nomi QISQARTIRILGAN bo'ladi — `res/mipmap-xxhdpi/
+      # ic_launcher.png` emas, oddiygina `res/BW.xml`, `res/A1.png`.
+      # Shu sabab belgi fayllari O'LCHAMI bo'yicha topiladi (Android
+      # belgilari aniq o'lchamlarda: 48/72/96/144/192 va adaptiv
+      # belgi uchun 108/162/216/324/432).
+      #
+      # NEGA BAYT SOLISHTIRILMAYDI: `aapt2` PNG'larni qayta siqadi
+      # (masalan palitrali formatga o'tkazadi), shu sabab bayt har
+      # doim farq qiladi. Shuning uchun RASMNING O'ZI ochib
+      # ko'riladi:
+      #
+      #   * ARU belgisi — faqat qora va oq;
+      #   * Flutter'ning standart belgisi — KO'K (#42A5F5).
+      #
+      # Ya'ni ko'k belgi topilsa, demak belgi almashmagan.
+      - name: APK ichidagi belgi ARU ekanini tasdiqlash
+        run: |
+          set -e
+          APK="build/app/outputs/flutter-apk/app-release.apk"
+          AAPT=$(ls "$ANDROID_HOME"/build-tools/*/aapt2 | sort -V | tail -1)
+
+          # 1) Ilova nomi
+          LABEL=$("$AAPT" dump badging "$APK" | grep -m1 "^application-label:" || true)
+          echo "$LABEL"
+          echo "$LABEL" | grep -q "'ARUmediaTV'" \
+            || { echo "❌ XATO: ilova nomi ARUmediaTV emas"; exit 1; }
+
+          # 2) Barcha PNG resurslar ochiladi
+          TMP=$(mktemp -d)
+          unzip -o -q "$APK" -d "$TMP" 'res/*' || true
+
+          python3 - "$TMP" <<'PYEOF'
+          import sys, os, zlib, struct
+
+          # Android ilova belgilari aynan shu o'lchamlarda bo'ladi:
+          # oddiy belgi (mdpi..xxxhdpi) va adaptiv belgining oldingi
+          # qatlami (foreground).
+          ICON_SIZES = {48, 72, 96, 144, 192, 108, 162, 216, 324, 432}
+
+          def header(path):
+              """IHDR — butun faylni ochmasdan o'lchamni bilish."""
+              with open(path, 'rb') as f:
+                  d = f.read(26)
+              if d[:8] != b'\x89PNG\r\n\x1a\n' or d[12:16] != b'IHDR':
+                  return None
+              w, h = struct.unpack('>II', d[16:24])
+              return w, h
+
+          def decode(path):
+              """Tashqi kutubxonasiz PNG o'qish (faqat zlib)."""
+              d = open(path, 'rb').read()
+              i, idat, pal, hdr = 8, b'', b'', None
+              while i < len(d):
+                  ln = struct.unpack('>I', d[i:i+4])[0]
+                  typ = d[i+4:i+8]; body = d[i+8:i+8+ln]
+                  if typ == b'IHDR': hdr = struct.unpack('>IIBBBBB', body)
+                  elif typ == b'PLTE': pal = body
+                  elif typ == b'IDAT': idat += body
+                  elif typ == b'IEND': break
+                  i += 12 + ln
+              if hdr is None: return None
+              w, h, depth, color, _, _, inter = hdr
+              if inter: return None
+              ch = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}.get(color)
+              if ch is None: return None
+              if depth == 8:
+                  bpp, stride = ch, w * ch
+              elif color == 3 and depth in (1, 2, 4):
+                  bpp, stride = 1, (w * depth + 7) // 8
+              else:
+                  return None
+              try:
+                  raw = zlib.decompress(idat)
+              except Exception:
+                  return None
+              rows, prev, pos = [], bytearray(stride), 0
+              for _y in range(h):
+                  if pos >= len(raw): return None
+                  f = raw[pos]; pos += 1
+                  line = bytearray(raw[pos:pos+stride]); pos += stride
+                  for x in range(stride):
+                      a = line[x-bpp] if x >= bpp else 0
+                      b = prev[x]
+                      c = prev[x-bpp] if x >= bpp else 0
+                      if f == 1: line[x] = (line[x] + a) & 255
+                      elif f == 2: line[x] = (line[x] + b) & 255
+                      elif f == 3: line[x] = (line[x] + (a + b) // 2) & 255
+                      elif f == 4:
+                          pa, pb, pc = abs(b-c), abs(a-c), abs(a+b-2*c)
+                          pr = a if (pa <= pb and pa <= pc) else (b if pb <= pc else c)
+                          line[x] = (line[x] + pr) & 255
+                  rows.append(bytes(line)); prev = line
+              px = []
+              for line in rows:
+                  if depth == 8:
+                      for x in range(w):
+                          p = line[x*ch:(x+1)*ch]
+                          if color == 3:
+                              k = p[0]*3
+                              px.append((pal[k], pal[k+1], pal[k+2], 255))
+                          elif color == 0: px.append((p[0], p[0], p[0], 255))
+                          elif color == 4: px.append((p[0], p[0], p[0], p[1]))
+                          elif color == 2: px.append((p[0], p[1], p[2], 255))
+                          else: px.append((p[0], p[1], p[2], p[3]))
+                  else:
+                      per = 8 // depth; mask = (1 << depth) - 1
+                      for x in range(w):
+                          byte = line[x // per]
+                          shift = 8 - depth * (x % per + 1)
+                          k = ((byte >> shift) & mask) * 3
+                          px.append((pal[k], pal[k+1], pal[k+2], 255))
+              return px
+
+          def pixels(path):
+              px = decode(path)
+              return px
+
+          root = sys.argv[1]
+          cands = []
+          for dp, _, fs in os.walk(root):
+              for name in fs:
+                  if not name.lower().endswith('.png'):
+                      continue
+                  path = os.path.join(dp, name)
+                  hd = header(path)
+                  if hd and hd[0] == hd[1] and hd[0] in ICON_SIZES:
+                      cands.append((path, hd[0]))
+
+          if not cands:
+              print("❌ XATO: APK ichida belgi o'lchamidagi PNG topilmadi.")
+              sys.exit(1)
+          print(f"── Belgi o'lchamidagi {len(cands)} ta rasm topildi ──")
+
+          # ── 1) ASOSIY TEKSHIRUV: bizning belgi APK ichida bormi ──
+          #
+          # `branding/` dagi manba rasm bilan piksel-piksel
+          # solishtiriladi. `aapt2` faylni qayta siqadi, lekin
+          # RANGLARNI o'zgartirmaydi — shu sabab noshaffof
+          # piksellar aynan mos tushishi kerak.
+          sources = [
+              'branding/android-res/mipmap-mdpi/ic_launcher.png',
+              'branding/android-res/mipmap-mdpi/ic_launcher_foreground.png',
+              'branding/android-res/mipmap-hdpi/ic_launcher.png',
+              'branding/android-res/mipmap-mdpi/ic_launcher_round.png',
+          ]
+          matched = []
+          for src in sources:
+              if not os.path.exists(src):
+                  continue
+              shd = header(src)
+              spx = decode(src)
+              if not shd or spx is None:
+                  continue
+              # Faqat noshaffof piksellar solishtiriladi: palitrali
+              # formatga o'tganda shaffoflik boshqacha yozilishi
+              # mumkin, rang esa o'zgarmaydi.
+              idx = [k for k, p in enumerate(spx) if p[3] > 200]
+              if not idx:
+                  continue
+              for path, size in cands:
+                  if size != shd[0]:
+                      continue
+                  apx = decode(path)
+                  if apx is None or len(apx) != len(spx):
+                      continue
+                  same = sum(1 for k in idx if apx[k][:3] == spx[k][:3])
+                  if same >= 0.98 * len(idx):
+                      matched.append((os.path.basename(src), os.path.basename(path)))
+                      break
+
+          if matched:
+              for src, got in matched:
+                  print(f"   ✅ {src} -> APK ichida {got}")
+              print(f"✅ ARU belgisi APK ichida ({len(matched)} ta mos rasm)")
+              sys.exit(0)
+
+          # ── 2) ZAXIRA TEKSHIRUV: KO'K belgi qolib ketmaganmi ──
+          #
+          # Piksel solishtiruvi natija bermasa (masalan qurish
+          # tizimi rasmni kutilmaganda o'zgartirsa), hech bo'lmasa
+          # Flutter'ning KO'K belgisi qolib ketmaganini tekshiramiz.
+          print("   ⚠️  Aniq moslik topilmadi — ko'k belgi bor-yo'qligi tekshirilmoqda")
+          for path, size in sorted(cands, key=lambda c: c[1]):
+              px = decode(path)
+              if px is None:
+                  continue
+              vis = [(r, g, b) for r, g, b, a in px if a > 40]
+              if not vis:
+                  continue
+              blue = sum(1 for r, g, b in vis if b > 90 and b > r + 40 and b > g + 20)
+              share = 100.0 * blue / len(vis)
+              if share > 50.0:
+                  print(f"   {os.path.basename(path)} ({size}px): ko'k {share:.0f}%")
+                  print("❌ XATO: belgi KO'K — bu Flutter'ning standart belgisi.")
+                  print("   ARU belgisi APK'ga tushmagan.")
+                  sys.exit(1)
+          # Ko'k belgi ham yo'q — build to'xtatilmaydi, lekin
+          # ogohlantirish qoldiriladi.
+          print("⚠️  Belgi aniq tasdiqlanmadi, lekin Flutter'ning ko'k belgisi ham yo'q")
+          PYEOF
+
+          rm -rf "$TMP"
+
+      - name: APK hajmini ko'rsatish
+        run: |
+          echo "📦 Tayyor APK:"
+          ls -lh build/app/outputs/flutter-apk/app-release.apk
+
+
+      # ── APK'ni TO'G'RIDAN-TO'G'RI yuklab olinadigan qilib chiqarish ──
+      #
+      # Muammo: GitHub "Artifacts" bo'limidagi fayl HAR DOIM ZIP ichida
+      # beriladi. Telefonda uni avval ochish (extract) kerak; ochilmagan
+      # ZIP'ni o'rnatishga urinilsa Android "Paketni tahlil qilishda
+      # muammo yuz berdi" deydi — bu APK buzuq degani EMAS.
+      #
+      # Shu sabab APK Release sifatida ham chiqariladi: u yerdan
+      # telefonga TO'G'RIDAN-TO'G'RI .apk fayli yuklanadi va darhol
+      # o'rnatiladi, hech narsani ochish shart emas.
+      # To'rtala APK bitta Release'ga tushadi, lekin NOMI boshqacha
+      # (`arumedia-user-32.apk` kabi) — aks holda keyingisi
+      # oldingisining ustiga yozilardi.
+      - name: APK nomini belgilash
+        id: rename
+        run: |
+          SRC="build/app/outputs/flutter-apk/app-release.apk"
+          OUT="build/app/outputs/flutter-apk/arumedia-${{ matrix.name }}.apk"
+          cp "$SRC" "$OUT"
+          echo "out=$OUT" >> "$GITHUB_OUTPUT"
+          ls -lh "$OUT"
+
+      - name: APK'ni Release sifatida chiqarish
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: ARUmediaTV (build ${{ github.run_number }})
+          body: |
+            Telefonga to'g'ridan-to'g'ri o'rnatish uchun `.apk`
+            faylini yuklab oling (ZIP emas).
+
+            Har bir APK FAQAT bitta arxitektura uchun — shu sabab
+            hajmi kichik. Telefoningiz 64-bitli bo'lsa `-64`,
+            eskiroq bo'lsa `-32` ni oling.
+
+            * `arumedia-admin-32.apk` — admin paneli bilan, 32-bit (armeabi-v7a)
+            * `arumedia-user-64.apk`  — foydalanuvchi, 64-bit (arm64-v8a)
+
+            Foydalanuvchi APK'sida admin paneli kodi umuman yo'q.
+
+            Versiya: ${{ env.APP_VERSION }} (versionCode ${{ env.VERSION_CODE }})
+            Commit: ${{ github.sha }}
+
+            ---
+
+            **"Ilova o'rnatilmadi" chiqsa:**
+
+            1. Telefondagi eski ARUmediaTV ni butunlay o'chiring
+               (MIUI'da "Ikkinchi makon"/"Ikki ilova" ichidagisini
+               ham) va qaytadan urinib ko'ring.
+            2. Baribir chiqsa — `arumedia-user-64.apk` ni
+               o'rnatib ko'ring. AGAR U O'RNATILSA, telefoningiz
+               32-bit ilovalarni qo'llab-quvvatlamaydi va
+               `-32` APK shu sabab rad etilyapti.
+          prerelease: true
+          files: ${{ steps.rename.outputs.out }}
+
+      # ── ARTIFACT YUKLASH — MAJBURIY EMAS ──────────────────────
+      #
+      # TUZATILGAN XATO: bu qadam ilgari Release'dan OLDIN turardi
+      # va "Artifact storage quota has been hit" xatosi bilan
+      # yiqilardi. Natijada APK muvaffaqiyatli qurilib, imzolanib
+      # turgani holda Release qadami umuman ishga tushmasdi — ya'ni
+      # tayyor APK'ni HECH QAYERDAN yuklab bo'lmasdi.
+      #
+      # Endi:
+      #   * Release BIRINCHI chiqadi (telefonga to'g'ridan-to'g'ri
+      #     yuklab olinadigan asosiy yo'l);
+      #   * artifact esa qo'shimcha nusxa va `continue-on-error`
+      #     bilan — kvota to'lgan bo'lsa build baribir muvaffaqiyatli
+      #     hisoblanadi.
+      - name: Upload APK Artifact (qo'shimcha nusxa)
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: arumedia-${{ matrix.name }}
+          path: ${{ steps.rename.outputs.out }}
+          retention-days: 30
+
+      - name: Done
+        run: |
+          echo "✅ APK tayyor: arumedia-${{ matrix.name }}.apk"
+          echo "   Faqat ${{ matrix.abi }}, imzolar: v1+v2+v3(+v4)."

@@ -1,0 +1,61 @@
+name = "arumediatv"
+main = "build/worker/shim.mjs"
+compatibility_date = "2024-01-01"
+workers_dev = true
+
+[build]
+command = "cargo install -q worker-build && worker-build --release"
+
+# ══════════════════════════════════════════════════════════════
+#  ESKI DURABLE OBJECT'NI TOZA OLIB TASHLASH
+# ══════════════════════════════════════════════════════════════
+#
+# Bir muddat `PresenceHub` nomli Durable Object bor edi (onlayn
+# holat va qo'ng'iroq uchun). U KODDAN OLIB TASHLANDI, lekin
+# Cloudflare hisobida sinf ro'yxatda qolgan.
+#
+# BU BLOKNI O'CHIRMANG. Usiz keyingi `wrangler deploy` xato
+# bilan to'xtaydi: kod sinfni endi eksport qilmaydi, Cloudflare
+# esa uni hali ham kutadi.
+#
+# `deleted_classes` aynan shu holat uchun: Cloudflare sinfni va
+# uning omborini o'zi tozalaydi. Migratsiya BIR MARTA
+# qo'llaniladi, keyin bu blok shunchaki tarix bo'lib qoladi.
+#
+# Tartib MUHIM: `v1` allaqachon qo'llangan, shu sabab u ham
+# ro'yxatda turishi kerak — wrangler zanjirni boshidan
+# tekshiradi.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["PresenceHub"]
+
+[[migrations]]
+tag = "v2"
+deleted_classes = ["PresenceHub"]
+
+[env.production]
+name = "arumediatv"
+workers_dev = true
+
+# Secrets (GitHub Actions orqali o'rnatiladi):
+# wrangler secret put TURSO_URL --env production
+# wrangler secret put TURSO_TOKEN --env production
+# wrangler secret put B2_KEY_ID --env production
+# wrangler secret put B2_APPLICATION_KEY --env production
+# wrangler secret put TELEGRAM_BOT_TOKEN --env production
+# wrangler secret put TEZCHECK_TOKEN --env production
+# wrangler secret put TEZCHECK_DESK --env production
+# wrangler secret put TEZCHECK_WEBHOOK_SECRET --env production
+#
+# TEZCHECK_TOKEN  — hisob tokeni (`aps_...`). MAXFIY: tezcheck.uz
+#                   faqat uning SHA-256 xeshini saqlaydi, ya'ni
+#                   yo'qotilsa qaytarib bo'lmaydi, yangisi
+#                   yaratiladi.
+# TEZCHECK_DESK   — kassa kodi (`cdk_...`).
+# TEZCHECK_WEBHOOK_SECRET — webhook imzosi kaliti (`wbs_...`).
+#                   Qo'yilmasa webhook manzili UMUMAN ishlamaydi
+#                   (503) va pul faqat "Tekshirish" tugmasi bilan
+#                   hisobga olinadi.
+#
+# Uchalasi ham FAQAT worker ichida ishlatiladi va ilovaga hech
+# qachon chiqmaydi.

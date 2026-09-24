@@ -1,0 +1,107 @@
+name: soft
+description: "ARUmediaTV — anime kontent ko'rish ilovasi"
+publish_to: 'none'
+version: 0.0.1+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.6
+  # Ismdagi belgilarni KO'ZGA KO'RINGANI bo'yicha sanash uchun
+  # (bitta emoji = bitta belgi). `String.length` buni uddalay
+  # olmaydi: u UTF-16 birliklarini sanaydi.
+  characters: ^1.3.0
+  http: ^1.2.0
+  image_picker: ^1.1.2
+  connectivity_plus: ^7.3.1
+  path_provider: ^2.1.4
+  cached_network_image: ^3.4.1
+  # ── POSTERLAR KESHI ─────────────────────────────────────────
+  # `cached_network_image` allaqachon shu paketni ishlatadi, lekin
+  # ODATIY sozlama bilan: keshda ENG KO'PI 200 ta fayl turadi va
+  # 201-chisi kelganda eng eskisi o'chiriladi. Posterlar, avatarlar
+  # va izohlardagi rasmlar birgalikda bu chegaradan tez oshib
+  # ketadi — shu sabab poster har ochilishda qaytadan yuklanardi.
+  #
+  # O'z sozlamamizni berish uchun paket ochiq yoziladi
+  # (`image_cache.dart`).
+  flutter_cache_manager: ^3.3.1
+  # Posterlar keshining papkasini O'ZIMIZ tanlaymiz (vaqtinchalik
+  # emas, doimiy papka) — buning uchun `FileSystem` interfeysi
+  # kerak, u esa shu paketdan keladi.
+  file: ^7.0.0
+  path: ^1.9.0
+  # Video yuklashda real-time progress uchun
+  dio: ^5.4.0
+  # ── VIDEO PLEYER ────────────────────────────────────────────
+  # Flutter jamoasining RASMIY paketi. Android'da u ExoPlayer
+  # (androidx.media3) ustida ishlaydi — YouTube va boshqa yirik
+  # Android pleyerlari ishlatadigan dvigatel; iOS/macOS'da AVPlayer.
+  #
+  # Avval `fvp` (mdk-sdk) ishlatilardi va pleyer boshqaruvi QO'LDA
+  # yozilgan edi (Player yaratish/o'chirish, native surface, media
+  # almashtirish, EOF). Amalda bu ketma-ket crash va qotib qolishlarga
+  # olib keldi. Batafsil sabablar:
+  # lib/screens/video_player_screen.dart faylining boshidagi izohda.
+  video_player: ^2.9.2
+  # Asosiy shifrlash kalitini xavfsiz saqlash uchun. Android'da
+  # EncryptedSharedPreferences (Keystore bilan himoyalangan) ishlatadi,
+  # ya'ni kalit qurilmadan chiqmaydi va root'siz o'qib bo'lmaydi.
+  flutter_secure_storage: ^9.2.4
+  # ── TELEGRAM ORQALI KIRISH ──────────────────────────────────
+  # Kirish tugmasi bosilganda Telegram ilovasini ochish uchun.
+  url_launcher: ^6.3.0
+  # Sessiyalar jurnalidagi "qaysi qurilma bilan kirgan" ustunini
+  # to'ldirish uchun (brend + model + Android versiyasi).
+  device_info_plus: ^11.1.0
+  # ── QAYSI TELEGRAM BILAN KIRISH ──────────────────────────────
+  # Telefonda bir nechta Telegram bo'lishi mumkin (Telegram,
+  # Telegram X, Plus Messenger...). `url_launcher` havolani
+  # tizimning STANDART ilovasiga beradi — foydalanuvchi tanlay
+  # olmaydi. Bu paket esa havolani ANIQ paketga yubora oladi,
+  # shu sabab ilova o'zi ro'yxat ko'rsatib, tanlashni so'raydi.
+  android_intent_plus: ^6.1.0
+  # ── OVOZLI XABAR ────────────────────────────────────────────
+  # Chatda ovoz yozib yuborish uchun. Android'da MediaRecorder
+  # (AAC/m4a), iOS'da AVAudioRecorder ustida ishlaydi va mikrofon
+  # ruxsatini o'zi so'raydi.
+  #
+  # Ijro uchun ALOHIDA paket olinmadi: `video_player` (ExoPlayer)
+  # audio faylni ham o'ynatadi, ya'ni ilovada allaqachon bor va
+  # sinalgan dvigatel ishlatiladi.
+  #
+  # NEGA 6.x (5.x EMAS): `record` 5.2.1 eskirgan `record_linux`
+  # (0.7.2) ni tortadi, u esa yangi `record_platform_interface`
+  # bilan mos kelmaydi va ANDROID uchun yig'ishda ham kompilyatsiya
+  # xatosi beradi (`RecordLinux` sinfi interfeysni to'liq
+  # bajarmaydi). 6.2.1 da butun oila o'zaro mos.
+  record: ^6.2.1
+  # ── OVOZLI XABARNI IJRO ETISH ───────────────────────────────
+  #
+  # NEGA `video_player` EMAS: u tasvir yo'lagi bor faylga
+  # mo'ljallangan. Android'da audio faylni ochganda ba'zan
+  # `initialize()` umuman tugamaydi (tasvir o'lchami hech qachon
+  # kelmaydi) yoki uzunlik noto'g'ri chiqadi — ovozli xabar
+  # ishlamasligining sababi aynan shu edi.
+  #
+  # `just_audio` — Flutter'dagi audio uchun eng keng ishlatiladigan
+  # paket. Android'da u ham ExoPlayer ustida ishlaydi, ya'ni
+  # dvigatel o'sha-o'sha; lekin audio uchun to'g'ri yo'l bilan.
+  just_audio: ^0.10.6
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    # ARU logotipi (oq harflar, shaffof fon) — ilova ichida
+    # ishlatiladi: ochilish ekrani va bosh sahifa sarlavhasi.
+    # Manba: branding/aru-mark.png
+    - assets/aru-mark.png

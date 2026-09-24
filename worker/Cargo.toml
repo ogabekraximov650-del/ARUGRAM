@@ -1,0 +1,30 @@
+[package]
+name = "arumedia-worker"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# Cloudflare Workers Rust SDK — worker-build talab qiladigan versiya
+worker = "0.8.5"
+# Oqim ichida (sanovchi quvurda) fon vazifasini boshlash uchun
+wasm-bindgen-futures = "0.4"
+# JSON serialize/deserialize
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Webhook imzosini tekshirish uchun (tezcheck.uz HMAC-SHA256).
+#
+# NEGA TAYYOR PAKET: imzo tekshiruvi — xavfsizlik kodi. Uni qo'lda
+# yozish (SHA-256 ni o'zi) bitta xato bilan butun tekshiruvni
+# ma'nosiz qilib qo'yadi. Ikkala paket ham sof Rust, `no_std` ga
+# mos va WASM ga muammosiz yig'iladi; hajmga qo'shadigani ~10 KB.
+hmac = "0.12"
+sha2 = "0.10"
+
+[profile.release]
+# WASM hajmini kamaytirish va tezlikni oshirish
+opt-level = "s"
+lto = true
+codegen-units = 1

@@ -1,36 +1,32 @@
-.idea/
-.gradle/
-.cxx/
-afat/
+# ── Flutter / Dart ──────────────────────────────────────────────
+.dart_tool/
+.packages
 build/
-obj/
-TMessagesProj/jni/colorado
-TMessagesProj/jni/security
-/TMessagesProj/src/main/java/uz/unnarsx/cherrygram/Extra.kt
-/TMessagesProj/src/main/java/uz/unnarsx/cherrygram/camera/CameraXController.java
-/TMessagesProj/src/main/java/uz/unnarsx/cherrygram/camera/VideoMessagesHelper.java
-/TMessagesProj/src/main/java/uz/unnarsx/cherrygram/chats/filters/MessagesFilterHelper.kt
-/TMessagesProj/src/main/java/uz/unnarsx/cherrygram/chats/ui/MessageMenuCompactView.java
-/TMessagesProj/src/main/java/uz/unnarsx/cherrygram/chats/ui/MessageMenuHelper.java
-/TMessagesProj/src/main/java/uz/unnarsx/cherrygram/chats/ui/MessageMenuMessageCells.java
-/TMessagesProj/src/main/java/uz/unnarsx/cherrygram/chats/ui/MessageMenuRoundVideoPlayer.java
-/TMessagesProj/src/main/java/uz/unnarsx/cherrygram/chats/ui/MessageMenuScrollView.java
-/TMessagesProj/src/main/java/uz/unnarsx/cherrygram/core/ui/folders/FoldersHelper.kt
-/TMessagesProj/src/main/java/uz/unnarsx/cherrygram/preferences/tabs/MainTabsPreviewCell.java
+pubspec.lock
+.flutter-plugins
+.flutter-plugins-dependencies
 *.iml
-local.properties
-TMessagesProj/.cxx/
-TMessagesProj/jniLibs/
-TMessagesProj/jniRes/
-**/.DS_Store
-TMessagesProj/afat/
-TMessagesProj_App/afat/
-TMessagesProj_AppHockeyApp/afat/
-TMessagesProj_AppStandalone/afat/
-TMessagesProj_AppHuawei/afat/
-TMessagesProj/jni/ffmpeg/build_android
-Keytool.zip
-Cherrygram.jks
-mykey.jks
-actions-runner
-secrets_for_ci.env
+
+# ── Android (CI'da `flutter create` bilan qaytadan yaratiladi) ──
+android/
+jniLibs-out/
+
+# ── Rust ────────────────────────────────────────────────────────
+# target/ — kompilyatsiya natijalari (yuzlab MB).
+# Cargo.lock — bu loyiha kutubxona emas, ilova; lekin uni saqlash
+# CI'da versiya farqiga olib kelmasligi uchun hozircha chetlab
+# turiladi (avvalgi holat shunday edi).
+rust/target/
+worker/target/
+worker/Cargo.lock
+rust/Cargo.lock
+
+# ── Muharrir / OS ───────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# ── Python ─────────────────────────────────────────────────────
+__pycache__/
+*.pyc
