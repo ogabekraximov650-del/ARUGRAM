@@ -10,11 +10,12 @@ import 'package:http/http.dart' as http;
 
 import 'app_build.dart';
 import 'account_data.dart';
+import 'api_base.dart';
 import 'rust_bridge.dart';
 import 'sync_queue.dart';
 import 'telegram_service.dart';
 
-const String kApiBase = 'https://arumediatv.uzcom.workers.dev';
+export 'api_base.dart';
 
 /// Ism eng ko'pi shuncha belgidan iborat bo'lishi mumkin.
 /// `TextField` ning `maxLength` i ham, tekshiruv ham shu qiymatga

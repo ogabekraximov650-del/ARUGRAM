@@ -70,6 +70,19 @@ kirish" tugmasi ortida qoldi.
 
 **Push:** foydalanuvchi talabi — bundan keyin FAQAT `main` ga.
 
+**Nom va server (2026-09):** ilova nomi **ARUGRAM**, paket
+`uz.arugram.soft`, worker nomi `arugram` (eski `arumediatv` ga
+TEGILMAYDI). Ilovadagi server manzili `lib/services/api_base.dart`
+da — CI uni Cloudflare subdomenidan o'zi hisoblab `--dart-define`
+bilan beradi. Bot nomi kodda yo'q: `getMe` dan olinadi.
+
+**Admin videoni ilovadan kanalga yuklaydi** (qism qo'shish ekrani,
+admin Telegram hisobini ulagan bo'lsa): `rust_tg_upload_start` —
+MTProto, 4 GB gacha, izoh = fayl nomi; so'ng
+`POST /api/tg/admin/file`. Qism/sifat o'chirilsa kanal posti ham
+o'chadi (`tg_forget_file`). Kanalda "Restrict saving content"
+YOQILMASIN — aks holda bot `copyMessage` qila olmaydi.
+
 **Sirlar** (GitHub → `secret` environment, deploy ularni worker'ga
 qo'yadi): `TG_API_ID`, `TG_API_HASH` (my.telegram.org),
 `TG_CHANNEL_ID` (-100... ko'rinishida). Uchalasi qo'yilmaguncha

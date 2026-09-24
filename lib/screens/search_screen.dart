@@ -5,8 +5,9 @@ import 'dart:convert';
 import '../widgets/glass.dart';
 import '../services/rust_bridge.dart';
 import 'anime_detail_screen.dart';
+import '../services/api_base.dart';
 
-const String API_BASE = 'https://arumediatv.uzcom.workers.dev';
+const String API_BASE = kApiBase;
 
 class SearchScreen extends StatefulWidget {
   const SearchScreen({super.key});

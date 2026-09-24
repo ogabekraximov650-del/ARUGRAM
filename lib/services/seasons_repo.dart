@@ -29,8 +29,9 @@ import 'package:http/http.dart' as http;
 
 import 'offline_library.dart';
 import 'rust_bridge.dart';
+import 'api_base.dart';
 
-const String _apiBase = 'https://arumediatv.uzcom.workers.dev';
+const String _apiBase = kApiBase;
 
 class SeasonsRepo extends ChangeNotifier {
   SeasonsRepo._();

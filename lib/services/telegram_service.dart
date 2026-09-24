@@ -119,6 +119,12 @@ class TelegramService extends ChangeNotifier {
   /// Sozlama kelguncha `true` — aks holda ilova ochilgan zahoti
   /// ko'rilgan birinchi qism bekorga B2'dan ketardi.
   bool _video = true;
+
+  /// Yopiq video kanali (`-100...`). Admin videoni shu yerga yuklaydi.
+  int _channel = 0;
+
+  /// Admin videoni ilovadan to'g'ridan-to'g'ri kanalga yuklay oladimi.
+  bool get canUpload => _authorized && _configured && _channel != 0;
   bool _configured = false;
   bool _authorized = false;
 
@@ -196,6 +202,7 @@ class TelegramService extends ChangeNotifier {
       _serverEnabled = j['enabled'] == true;
       _bot = (j['bot'] as String?) ?? _bot;
       _video = j['video'] != false;
+      _channel = (j['channel'] as num?)?.toInt() ?? 0;
       if (_serverEnabled) {
         final id = (j['api_id'] as num?)?.toInt() ?? 0;
         final hash = (j['api_hash'] as String?) ?? '';
@@ -256,6 +263,89 @@ class TelegramService extends ChangeNotifier {
       }
     });
     return j['ok'] == true ? null : (j['error'] as String? ?? 'Xato');
+  }
+
+  /// ADMIN: videoni yopiq kanalga yuklaydi (adminning o'z Telegram
+  /// hisobi bilan, 4 GB gacha) va fayl nomini serverda postga
+  /// bog'laydi. [onProgress] — (yuborilgan, jami) baytlar.
+  ///
+  /// Muvaffaqiyatda `null`, aks holda xato matni.
+  Future<String?> uploadToChannel(
+    String path,
+    String fileName,
+    String mime,
+    void Function(int sent, int total) onProgress,
+  ) async {
+    if (!canUpload) await refreshConfig();
+    if (!canUpload) return 'Telegram ulanmagan yoki kanal sozlanmagan';
+    final lib = _lib;
+    if (lib == null) return 'Telegram ishga tushmagan';
+
+    final start = lib.lookupFunction<
+        Pointer<Utf8> Function(
+            Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>, Int64),
+        Pointer<Utf8> Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>,
+            int)>('rust_tg_upload_start');
+    final status = lib.lookupFunction<Pointer<Utf8> Function(Uint64),
+        Pointer<Utf8> Function(int)>('rust_tg_upload_status');
+
+    final p = path.toNativeUtf8();
+    final n = fileName.toNativeUtf8();
+    final m = mime.toNativeUtf8();
+    Map<String, dynamic> started;
+    try {
+      started = _json(_take(lib, start(p, n, m, _channel)));
+    } finally {
+      malloc.free(p);
+      malloc.free(n);
+      malloc.free(m);
+    }
+    final job = (started['job'] as num?)?.toInt() ?? 0;
+    if (job <= 0) return (started['error'] as String?) ?? 'Yuklash boshlanmadi';
+
+    // Yuklash Rust'da fon'da ketadi — holatni so'rab turamiz.
+    var msgId = 0;
+    while (true) {
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      final st = _json(_take(lib, status(job)));
+      final sent = (st['sent'] as num?)?.toInt() ?? 0;
+      final total = (st['total'] as num?)?.toInt() ?? 0;
+      if (total > 0) onProgress(sent, total);
+      if (st['done'] == true) {
+        final err = st['error'];
+        if (err is String && err.isNotEmpty) return err;
+        msgId = (st['msg_id'] as num?)?.toInt() ?? 0;
+        break;
+      }
+    }
+    if (msgId <= 0) return 'Kanal xabari raqami olinmadi';
+
+    // Serverda fayl nomi -> kanal posti. Bot postni ko'rib o'zi ham
+    // yozadi; bu esa webhook kechiksa ham qism darhol ishlashi uchun.
+    final s = AuthService.instance.sessionToken;
+    if (s == null) return 'Ilova hisobiga kirilmagan';
+    for (var attempt = 0; attempt < 3; attempt++) {
+      try {
+        final r = await http
+            .post(
+              Uri.parse('$kApiBase/api/tg/admin/file'),
+              headers: {
+                'Authorization': 'Bearer $s',
+                'Content-Type': 'application/json',
+              },
+              body: jsonEncode({'file': fileName, 'msg_id': msgId}),
+            )
+            .timeout(const Duration(seconds: 20));
+        if (r.statusCode == 200) {
+          _missing.remove(fileName);
+          return null;
+        }
+        if (r.statusCode == 403) return 'Faqat admin yuklay oladi';
+      } catch (_) {}
+      await Future<void>.delayed(const Duration(seconds: 2));
+    }
+    // Post kanalda bor — bot uni baribir ro'yxatga oladi.
+    return null;
   }
 
   void _afterLogin() {

@@ -10,8 +10,10 @@ import '../services/ui_state.dart';
 import '../theme/app_background.dart';
 import '../services/intro_times.dart';
 import '../widgets/glass.dart';
+import '../services/api_base.dart';
+import '../services/telegram_service.dart';
 
-const String _apiBase = 'https://arumediatv.uzcom.workers.dev';
+const String _apiBase = kApiBase;
 
 // Worker javobi (yoki eski qatorlar) to'liq URL bo'lishi mumkin —
 // '/api/image/' dan keyingi qismini ajratib, bare fayl nomini oladi.
@@ -118,8 +120,7 @@ class _AddEpizodScreenState extends State<AddEpizodScreen> {
       _QualityState(label: '1080p', urlKey: 'url_1080p', sizeKey: 'size_1080p'),
     ];
 
-    _introFrom =
-        List.generate(kIntroRows, (_) => TextEditingController());
+    _introFrom = List.generate(kIntroRows, (_) => TextEditingController());
     _introTo = List.generate(kIntroRows, (_) => TextEditingController());
 
     final ep = widget.initialEpizod;
@@ -153,8 +154,6 @@ class _AddEpizodScreenState extends State<AddEpizodScreen> {
     super.dispose();
   }
 
-
-
   // ── Fayl tanlash va B2'ga yuklash (Dio — real progress) ─────────
   Future<void> _pickAndUpload(_QualityState q) async {
     final picker = ImagePicker();
@@ -179,6 +178,17 @@ class _AddEpizodScreenState extends State<AddEpizodScreen> {
     final fileName =
         'ep_${widget.animeId}_${widget.seasonId}_${q.label}_${DateTime.now().millisecondsSinceEpoch}.$ext';
 
+    // ── TELEGRAM KANALIGA (ARUGRAM) ─────────────────────────────
+    // Admin Telegram hisobini ulagan bo'lsa video yopiq kanalga
+    // yuklanadi (4 GB gacha). Bazaga B2 dagi kabi BARE fayl nomi
+    // yoziladi — ko'rish tizimi shu nom bo'yicha Telegram'dan oladi.
+    if (TelegramService.instance.authorized) {
+      await _uploadToTelegram(
+          q, picked.path, fileName, contentType, fileSizeBytes);
+      await dropCopy();
+      return;
+    }
+
     // 1. B2 upload token olish
     http.Response tokenRes;
     try {
@@ -194,8 +204,9 @@ class _AddEpizodScreenState extends State<AddEpizodScreen> {
     if (tokenRes.statusCode != 200) {
       await dropCopy();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Upload token olib bo\'lmadi')));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Upload token olib bo\'lmadi. Videoni Telegram '
+                'kanaliga yuklash uchun Profil → "Telegram\'ni ulash"')));
       }
       return;
     }
@@ -283,6 +294,49 @@ class _AddEpizodScreenState extends State<AddEpizodScreen> {
       // Yuklash qanday tugashidan qat'i nazar — nusxa o'chadi.
       await dropCopy();
     }
+  }
+
+  Future<void> _uploadToTelegram(_QualityState q, String path, String fileName,
+      String mime, int size) async {
+    if (!mounted) return;
+    setState(() {
+      q.isUploading = true;
+      q.progress = 0;
+      q.uploadedBytes = 0;
+      q.totalBytes = size;
+    });
+    final err = await TelegramService.instance.uploadToChannel(
+      path,
+      fileName,
+      mime,
+      (sent, total) {
+        if (!mounted) return;
+        setState(() {
+          q.uploadedBytes = sent;
+          q.totalBytes = total;
+          q.progress = total > 0 ? sent / total : 0;
+        });
+      },
+    );
+    if (!mounted) return;
+    if (err != null) {
+      setState(() {
+        q.isUploading = false;
+        q.progress = 0;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('${q.label}: Telegram\'ga yuklanmadi — $err')));
+      return;
+    }
+    setState(() {
+      q.url = fileName;
+      q.size = _formatSize(size);
+      q.isUploading = false;
+      q.progress = 1.0;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('${q.label} Telegram kanaliga yuklandi — '
+            'endi "Saqlash"ni bosing')));
   }
 
   // ── Bitta sifat faylini o'chirish ──────────────────────────────
@@ -473,8 +527,8 @@ class _AddEpizodScreenState extends State<AddEpizodScreen> {
                           decoration: BoxDecoration(
                             color: Colors.red.withValues(alpha: 0.2),
                             borderRadius: BorderRadius.circular(12),
-                            border:
-                                Border.all(color: Colors.red.withValues(alpha: 0.5)),
+                            border: Border.all(
+                                color: Colors.red.withValues(alpha: 0.5)),
                           ),
                           child: Text(_errorMsg!,
                               style: const TextStyle(
@@ -731,8 +785,8 @@ class _QualityCard extends StatelessWidget {
             const SizedBox(height: 8),
             Text(
               progressText,
-              style:
-                  TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.7)),
+              style: TextStyle(
+                  fontSize: 12, color: Colors.white.withValues(alpha: 0.7)),
             ),
           ] else if (q.hasFile) ...[
             // ── Yuklangan ──
@@ -745,7 +799,8 @@ class _QualityCard extends StatelessWidget {
                   child: Text(
                     q.size ?? '',
                     style: TextStyle(
-                        fontSize: 13, color: Colors.white.withValues(alpha: 0.8)),
+                        fontSize: 13,
+                        color: Colors.white.withValues(alpha: 0.8)),
                   ),
                 ),
                 GlassTappable(

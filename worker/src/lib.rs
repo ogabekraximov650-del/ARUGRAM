@@ -2947,6 +2947,10 @@ async fn b2_proxy_full(env: &Env, file_name: &str) -> Result<Response> {
 /// Natijaga qaralmaydigan joylar uchun (anime/epizod o'chirilganda).
 async fn b2_delete(env: &Env, value: &str) {
     let _ = b2_delete_checked(env, value).await;
+    // Fayl Telegram kanalida ham bo'lsa — o'sha post ham o'chadi
+    // (`tg_forget_file`). Rasmlar kabi Telegram'da yo'q fayllar
+    // uchun bu bitta bo'sh SELECT.
+    tg_forget_file(env, value).await;
 }
 
 /// O'shaning O'ZI, lekin NATIJANI QAYTARADI.
@@ -3499,22 +3503,34 @@ async fn purge_list_cache(path: &str) {
 //     — Telegram'ning fayl manzilida bot tokeni bo'lgani uchun u
 //     manzil hech qachon ilovaga chiqarilmaydi.
 
-/// DIQQAT: bu ilovaning nomi EMAS — Telegram'dagi HAQIQIY bot
-/// manzili. Uni o'zgartirish botni qayta nomlamaydi: avval
-/// @BotFather -> /setusername orqali bot rostdan qayta nomlanadi,
-/// SO'NG shu yerdagi qiymat almashtiriladi va worker qayta deploy
-/// qilinadi. Aks holda kirish butunlay ishlamay qoladi.
+/// Kirish botining username'i.
 ///
-/// DIQQAT: bot ALMASHGANI uchun `TELEGRAM_BOT_TOKEN` siri ham
-/// yangi botnikiga almashtirilishi SHART (wrangler secret put),
-/// aks holda webhook eski botda qolib ketadi.
+/// ARUGRAM (foydalanuvchi talabi): bot nomi kodda QOTIRILMAYDI —
+/// `TELEGRAM_BOT_TOKEN` qaysi botniki bo'lsa, username o'sha
+/// botning `getMe` javobidan olinadi. Ilgari nom qo'lda yozilardi
+/// va bot almashganda kirish havolasi eski botga olib borardi.
 ///
-/// Qiymat @BotFather'dagi AYNAN o'sha yozuvda (katta-kichik
-/// harfi bilan). Havolada bu muhim emas — Telegram username'ni
-/// katta-kichik harfga qaramay topadi — lekin sog'liq tekshiruvi
-/// `getMe` qaytargan nom bilan solishtiradi, shu sabab bu yerda
-/// ham haqiqiy yozuv turgani tushunarliroq.
-const BOT_USERNAME: &str = "ARUmediaTvloginbot";
+/// Natija izolyat umri davomida xotirada turadi (`getMe` har
+/// so'rovda chaqirilmaydi); tarmoq xatosida bo'sh satr qaytadi va
+/// keyingi chaqiruv qayta urinadi.
+async fn bot_username(env: &Env) -> String {
+    thread_local! {
+        static NAME: core::cell::RefCell<String> = const { core::cell::RefCell::new(String::new()) };
+    }
+    let cached = NAME.with(|n| n.borrow().clone());
+    if !cached.is_empty() {
+        return cached;
+    }
+    let name = tg_api(env, "getMe", json!({}))
+        .await
+        .ok()
+        .and_then(|me| me["username"].as_str().map(|s| s.to_string()))
+        .unwrap_or_default();
+    if !name.is_empty() {
+        NAME.with(|n| *n.borrow_mut() = name.clone());
+    }
+    name
+}
 
 /// Login tokeni necha millisekund yashaydi (5 daqiqa).
 const LOGIN_TOKEN_TTL_MS: i64 = 5 * 60 * 1000;
@@ -4381,7 +4397,7 @@ async fn tg_avatar(env: &Env, user_id: i64) -> Result<Response> {
 /// QILISH kerak. "Xatolik: Telegram xatosi (sendMessage)" kabi
 /// ichki matnlar hech qachon tashqariga chiqmaydi: ular
 /// foydalanuvchiga hech narsa tushuntirmaydi, faqat qo'rqitadi.
-const MSG_HELP: &str = "\u{1F44B} Salom! Men \u{2014} <b>ARUmedia</b> ilovasining kirish yordamchisiman.\n\n\
+const MSG_HELP: &str = "\u{1F44B} Salom! Men \u{2014} <b>ARUGRAM</b> ilovasining kirish yordamchisiman.\n\n\
      Kirish uchun: ilovani oching \u{2192} pastdagi <b>Profil</b> bo'limi \u{2192} \u{AB}Telegram orqali kirish\u{BB} tugmasi.\n\n\
      O'sha tugma meni o'zi ochadi \u{2014} bu yerda hech narsa yozishingiz shart emas.";
 
@@ -5474,7 +5490,7 @@ async fn billing_create(mut req: Request, env: &Env) -> Result<Response> {
 
     let mut body = json!({
         "amount_minor": to_minor(amount),
-        "title": format!("ARUmedia — balans to'ldirish ({amount} so'm)"),
+        "title": format!("ARUGRAM — balans to'ldirish ({amount} so'm)"),
         "external_reference": reference,
     });
     // Bitta to'lov usuli tanlab qo'yilgan bo'lsa — foydalanuvchi
@@ -8769,10 +8785,11 @@ async fn auth_route(req: Request, env: &Env, origin: &str, path: &str, method: M
                     TursoArg::int(now + LOGIN_TOKEN_TTL_MS),
                 ]).await?;
 
+            let bot = bot_username(env).await;
             ok_nostore(json!({
                 "token": token,
-                "bot": BOT_USERNAME,
-                "deep_link": format!("https://t.me/{BOT_USERNAME}?start={token}"),
+                "bot": bot,
+                "deep_link": format!("https://t.me/{bot}?start={token}"),
                 "expires_in": LOGIN_TOKEN_TTL_MS / 1000,
             }))
         }
@@ -8865,7 +8882,7 @@ async fn auth_route(req: Request, env: &Env, origin: &str, path: &str, method: M
                 "bot_token_configured": token_ok,
                 "bot_reachable": bot_ok,
                 "bot_username": bot_username,
-                "expected_bot": BOT_USERNAME,
+                "expected_bot": bot_username.clone(),
                 // Telegram AYTGAN manzil (workerning taxmini emas).
                 "webhook_registered": hook_ok,
                 "webhook_url": hook_url,
@@ -8881,7 +8898,7 @@ async fn auth_route(req: Request, env: &Env, origin: &str, path: &str, method: M
                 // Webhook ham shartga KIRDI: usiz bot jim turadi,
                 // lekin tekshiruv "hammasi joyida" derdi.
                 "ok": token_ok && bot_ok && hook_ok
-                    && bot_username.eq_ignore_ascii_case(BOT_USERNAME),
+                    && !bot_username.is_empty(),
             }))
         }
 
@@ -9707,6 +9724,32 @@ fn tg_safe_name(name: &str) -> bool {
         && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
 }
 
+/// Qism (yoki uning bitta sifati) o'chirildi — kanal posti ham,
+/// yozuvlar ham o'chadi. Foydalanuvchilarning bot chatidagi
+/// nusxalariga tegilmaydi: ular endi hech qayerdan ochilmaydi.
+async fn tg_forget_file(env: &Env, value: &str) {
+    let name = match value.find("/api/image/") {
+        Some(p) => &value[p + 11..],
+        None => value,
+    };
+    if !tg_safe_name(name) {
+        return;
+    }
+    let res = turso_exec(env, "SELECT msg_id FROM tg_files WHERE file_name=?",
+        vec![TursoArg::text(name)]).await;
+    let Some(msg_id) = res.ok().and_then(|r| first_row(&r)).and_then(|r| r["msg_id"].as_i64()) else {
+        return;
+    };
+    let channel = tg_channel_id(env);
+    if channel != 0 {
+        let _ = tg_api(env, "deleteMessage", json!({"chat_id": channel, "message_id": msg_id})).await;
+    }
+    let _ = turso_batch(env, &[
+        ("DELETE FROM tg_files WHERE file_name=?", vec![TursoArg::text(name)]),
+        ("DELETE FROM tg_sent WHERE file_name=?", vec![TursoArg::text(name)]),
+    ]).await;
+}
+
 /// Kanal posti: videoni fayl nomiga bog'laydi.
 async fn tg_channel_post(env: &Env, post: &Value) {
     let channel = tg_channel_id(env);
@@ -9764,9 +9807,11 @@ async fn tg_route(mut req: Request, env: &Env, path: &str, method: Method) -> Re
             // Kanal hali sozlanmagan bo'lsa ham telefon orqali
             // kirish ishlaydi — faqat videolar B2'dan.
             "video": tg_channel_id(env) != 0,
+            // Admin ilovadan videoni shu kanalga yuklaydi.
+            "channel": tg_channel_id(env),
             "api_id": api_id,
             "api_hash": api_hash,
-            "bot": BOT_USERNAME,
+            "bot": bot_username(env).await,
         }));
     }
 
@@ -9840,6 +9885,28 @@ async fn tg_route(mut req: Request, env: &Env, path: &str, method: Method) -> Re
                  ON CONFLICT(user_id, file_name) DO UPDATE SET msg_id=excluded.msg_id",
                 vec![TursoArg::int(me), TursoArg::text(&name), TursoArg::int(msg_id)]).await;
             ok_nostore(json!({"msg_id": msg_id}))
+        }
+
+        // ADMIN: ilova videoni kanalga yukladi — fayl nomini postga
+        // bog'laydi (bot kanal postini ko'rib ham shuni qiladi, bu
+        // esa kafolat: webhook kechiksa ham qism darhol ishlaydi).
+        (Method::Post, "/api/tg/admin/file") => {
+            if !is_admin(&u) {
+                return json_resp(&json!({"error": "forbidden"}), 403);
+            }
+            let body: Value = req.json().await.unwrap_or(json!({}));
+            let name = body["file"].as_str().unwrap_or("").trim().to_string();
+            let msg_id = body["msg_id"].as_i64().unwrap_or(0);
+            if !tg_safe_name(&name) || msg_id <= 0 {
+                return json_resp(&json!({"error": "bad_request"}), 400);
+            }
+            turso_batch(env, &[
+                ("INSERT INTO tg_files (file_name, msg_id) VALUES (?, ?)
+                  ON CONFLICT(file_name) DO UPDATE SET msg_id=excluded.msg_id",
+                 vec![TursoArg::text(&name), TursoArg::int(msg_id)]),
+                ("DELETE FROM tg_sent WHERE file_name=?", vec![TursoArg::text(&name)]),
+            ]).await?;
+            ok_nostore(json!({"ok": true}))
         }
 
         _ => json_resp(&json!({"error": "not_found"}), 404),

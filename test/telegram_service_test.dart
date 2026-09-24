@@ -9,7 +9,7 @@ void main() {
     test('worker manzilidan fayl nomi', () {
       expect(
           TelegramService.fileNameOf(
-              'https://arumediatv.uzcom.workers.dev/api/image/ep_12_720p_1700000000.mp4'),
+              'https://arugram.example.workers.dev/api/image/ep_12_720p_1700000000.mp4'),
           'ep_12_720p_1700000000.mp4');
     });
 

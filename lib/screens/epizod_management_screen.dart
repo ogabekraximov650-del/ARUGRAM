@@ -7,8 +7,9 @@ import 'dart:convert';
 import '../theme/app_background.dart';
 import '../widgets/glass.dart';
 import 'add_epizod_screen.dart';
+import '../services/api_base.dart';
 
-const String _apiBase = 'https://arumediatv.uzcom.workers.dev';
+const String _apiBase = kApiBase;
 
 /// Bitta bo'limga tegishli epizodlarni ADMIN boshqarish sahifasi.
 /// Faqat admin uchun: qo'shish / tahrirlash / o'chirish.

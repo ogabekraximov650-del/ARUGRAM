@@ -96,16 +96,21 @@ Future<void> _main() async {
   // birinchi video ochilganda ishga tushardi). Shu sabab endi
   // foydalanuvchi videoni umuman ochmasdan ham "yuklab olish"ni bosa
   // oladi — kesh tizimi ilova ochilishi bilan tayyor turadi.
+  // Telegram orqali video: saqlangan sessiya o'qiladi (tarmoqsiz),
+  // sozlama esa fon'da serverdan olinadi.
+  //
+  // KESH-SERVERDAN OLDIN: server ishga tushishi bilan uzilgan
+  // yuklab olishlar navbatdan qayta boshlanadi. Telegram hali
+  // ishga tushmagan bo'lsa ular Telegram'ga emas, worker'ga
+  // (B2) ketib qolardi. `start()` ning tarmoqsiz qismi sinxron.
+  unawaited(TelegramService.instance.start());
+
   await VideoCacheServer.instance.ensureStarted();
 
   // Saqlangan hisobni (agar bo'lsa) tiklaymiz. Xavfsiz ombordan
   // o'qish tez — tarmoq kutilmaydi: sessiya haqiqiyligi keyin,
   // fon'da tekshiriladi.
   await AuthService.instance.restore();
-
-  // Telegram orqali video: saqlangan sessiya o'qiladi (tarmoqsiz),
-  // sozlama esa fon'da serverdan olinadi.
-  unawaited(TelegramService.instance.start());
 
   // ── BIR MARTALIK TOZALASH (foydalanuvchi talabi) ────────────
   //
@@ -215,7 +220,7 @@ class FulutterApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'ARUmedia',
+      title: 'ARUGRAM',
       debugShowCheckedModeBanner: false,
       // ── MAVZU HAM O'SHA PALITRADAN ─────────────────────────
       //
@@ -262,4 +267,3 @@ class FulutterApp extends StatelessWidget {
     );
   }
 }
-

@@ -135,8 +135,9 @@ import '../theme/app_background.dart';
 import 'billing_screen.dart';
 import '../widgets/glass.dart';
 import '../widgets/comments_tab.dart';
+import '../services/api_base.dart';
 
-const String _apiBase = 'https://arumediatv.uzcom.workers.dev';
+const String _apiBase = kApiBase;
 
 class VideoPlayerScreen extends StatefulWidget {
   final Map<String, dynamic> season;
@@ -346,7 +347,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   // so'rovini debounce qilish uchun: tez-tez ketma-ket bosilganda
   // faqat OXIRGI holatga BITTA marta sek qilinadi.
 
-
   bool _isFullscreen = false;
   bool _showControls = true;
   Timer? _hideTimer;
@@ -443,7 +443,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       if (mounted) _startLoading();
     });
   }
-
 
   // ══════════════════════════════════════════════════════════
   //  OYNALAR ORASIDA O'TISH
@@ -869,9 +868,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
         ? 'Yuklab olindi — endi telefondan ko\'rsatilmoqda'
         : 'Fayl o\'chirildi — onlayn davom etilmoqda');
     _playEpisode(ep,
-            resumeAt: at,
-            resumePlaying: _intendedPlaying,
-            isRecovery: true)
+            resumeAt: at, resumePlaying: _intendedPlaying, isRecovery: true)
         .whenComplete(() => _switchingSource = false);
   }
 
@@ -1008,8 +1005,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     // Sifat almashtirilganda yoki pleyer qayta ochilganda nuqta
     // chaqiruvchidan keladi; oddiy ochilishda esa eslab qolingan
     // nuqta ishlatiladi (`WatchProgress`).
-    final startAt =
-        resumeAt ?? (isRecovery ? null : WatchProgress.instance.positionOf(url));
+    final startAt = resumeAt ??
+        (isRecovery ? null : WatchProgress.instance.positionOf(url));
 
     if (!isRecovery) {
       _recoveryStreakResetTimer?.cancel();
@@ -1241,7 +1238,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     // yuboradi (eski xabar o'chirilgan bo'lishi mumkin).
     if (ctrl == null && _playViaTelegram && !_offline) {
       if (!mounted || myToken != _playToken) return;
-      VideoCacheServer.log('Telegram ishlamadi — worker orqali qayta urinilyapti...');
+      VideoCacheServer.log(
+          'Telegram ishlamadi — worker orqali qayta urinilyapti...');
       TelegramService.instance.invalidate(url);
       _playViaTelegram = false;
       source = Uri.parse(_workerPlayUrl(url));
@@ -1302,7 +1300,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     if (ctrl == null) {
       setState(() {
         _playerLoading = false;
-        _playerError = 'Videoni yuklab bo\'lmadi';
+        // ARUGRAM'da videolar Telegram'dan keladi — hisob ulanmagan
+        // bo'lsa sababini aniq aytamiz.
+        _playerError = TelegramService.instance.authorized
+            ? 'Videoni yuklab bo\'lmadi'
+            : 'Videoni ko\'rish uchun Profil → "Telegram\'ni ulash"';
       });
       return;
     }
@@ -1991,9 +1993,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       // Sakrash katta farq beradi — u ham tashlab yuboriladi.
       final prev = _watchTickPos;
       _watchTickPos = v.position;
-      if (prev != null &&
-          v.isPlaying &&
-          (v.playbackSpeed - 1.0).abs() < 0.01) {
+      if (prev != null && v.isPlaying && (v.playbackSpeed - 1.0).abs() < 0.01) {
         final step = v.position.inMilliseconds - prev.inMilliseconds;
         if (step > 0 && step <= 2000) {
           WatchHistory.instance.addWatched(step);
@@ -2146,7 +2146,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     _stuckTicks = 0;
     _lastWatchPosition = null;
     try {
-      await _playEpisode(ep, resumeAt: at, resumePlaying: true, isRecovery: true);
+      await _playEpisode(ep,
+          resumeAt: at, resumePlaying: true, isRecovery: true);
       // Muvaffaqiyatli ochilgandan keyin 20 soniya davomida yana qayta
       // ochish kerak bo'lmasa — demak muammo hal bo'lgan, hisoblagich
       // tozalanadi (aks holda uzoq ko'rish seansida vaqti-vaqti bilan
@@ -2395,6 +2396,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   Timer? _healthTimer;
   DateTime _lastSeekRequest = DateTime.fromMillisecondsSinceEpoch(0);
   DateTime _lastSeekDone = DateTime.fromMillisecondsSinceEpoch(0);
+
   /// "Qayerda to'xtagan" nuqtasi oxirgi marta qachon saqlangan.
   DateTime _lastProgressSave = DateTime.fromMillisecondsSinceEpoch(0);
 
@@ -2644,14 +2646,14 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     final v = ctrl.value;
     final base = _seekBase;
     final dur = v.duration;
-    final maxForward = dur > Duration.zero
-        ? (_clampSeekTarget(dur, dur) - base).inSeconds
-        : 0;
+    final maxForward =
+        dur > Duration.zero ? (_clampSeekTarget(dur, dur) - base).inSeconds : 0;
     final maxBack = base.inSeconds;
 
     setState(() {
       if (isLeft) {
-        _leftSeekAccum = (_leftSeekAccum + 5).clamp(0, maxBack < 0 ? 0 : maxBack);
+        _leftSeekAccum =
+            (_leftSeekAccum + 5).clamp(0, maxBack < 0 ? 0 : maxBack);
         _showLeftSeek = true;
       } else {
         _rightSeekAccum =
@@ -2669,7 +2671,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       // Sek qisqa tinchlikdan keyin bajarilgani uchun ko'rsatkich
       // ham shu vaqtgacha turadi (avval 2 soniyada yo'qolib, hali
       // sek bo'lmagan holda foydalanuvchini chalg'itardi).
-      _leftSeekHideTimer = Timer(_seekIdleTap + const Duration(milliseconds: 400), () {
+      _leftSeekHideTimer =
+          Timer(_seekIdleTap + const Duration(milliseconds: 400), () {
         if (mounted) {
           setState(() {
             _showLeftSeek = false;
@@ -2679,7 +2682,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       });
     } else {
       _rightSeekHideTimer?.cancel();
-      _rightSeekHideTimer = Timer(_seekIdleTap + const Duration(milliseconds: 400), () {
+      _rightSeekHideTimer =
+          Timer(_seekIdleTap + const Duration(milliseconds: 400), () {
         if (mounted) {
           setState(() {
             _showRightSeek = false;
@@ -3260,8 +3264,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 360),
               child: _PlayerPanel(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 20, vertical: 20),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
                 child: SingleChildScrollView(
                   child: _sleepCustomInput
                       ? _buildSleepCustomInput()
@@ -3348,8 +3352,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.15)),
+                  border:
+                      Border.all(color: Colors.white.withValues(alpha: 0.15)),
                 ),
                 child: const Text('Qo\'lda kiritish',
                     style: TextStyle(
@@ -3392,8 +3396,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
           decoration: BoxDecoration(
             color: Colors.white.withValues(alpha: 0.08),
             borderRadius: BorderRadius.circular(14),
-            border:
-                Border.all(color: Colors.white.withValues(alpha: 0.2)),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
           ),
           child: Text(
             _sleepCustomValue.isEmpty ? '0' : _sleepCustomValue,
@@ -3425,14 +3428,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                           setState(() {
                             if (key == '⌫') {
                               if (_sleepCustomValue.isNotEmpty) {
-                                _sleepCustomValue = _sleepCustomValue
-                                    .substring(
-                                        0,
-                                        _sleepCustomValue.length - 1);
+                                _sleepCustomValue = _sleepCustomValue.substring(
+                                    0, _sleepCustomValue.length - 1);
                               }
                             } else if (key == '✓') {
-                              final val =
-                                  int.tryParse(_sleepCustomValue) ?? 0;
+                              final val = int.tryParse(_sleepCustomValue) ?? 0;
                               if (val > 0) _setSleepTimer(val);
                             } else {
                               if (_sleepCustomValue.length < 4) {
@@ -3454,9 +3454,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                           child: Text(
                             key,
                             style: TextStyle(
-                              color: key == '✓'
-                                  ? AppColors.accent
-                                  : Colors.white,
+                              color:
+                                  key == '✓' ? AppColors.accent : Colors.white,
                               fontSize: 24,
                               fontWeight: FontWeight.w600,
                             ),
@@ -3793,9 +3792,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
             // qolishi mumkin.
             fit: StackFit.expand,
             children: [
-              _isFullscreen
-                  ? _buildFullscreenPlayer()
-                  : _buildNormalScreen(),
+              _isFullscreen ? _buildFullscreenPlayer() : _buildNormalScreen(),
               // Uch nuqta menyusi — butun ekran ustida, ya'ni
               // pleyerdan tashqariga bosilsa ham yopiladi.
               if (_menuOpen && _currentEp != null && _playerError == null)
@@ -3856,96 +3853,96 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-                child: Row(
-                  children: [
-                    GlassTappable(
-                      onTap: () => Navigator.of(context).pop(),
-                      child: const Glass(
-                        borderRadius: 14,
-                        blur: 14,
-                        padding: EdgeInsets.all(8),
-                        child:
-                            Icon(Icons.arrow_back_rounded, color: Colors.white),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                        child: Row(
+                          children: [
+                            GlassTappable(
+                              onTap: () => Navigator.of(context).pop(),
+                              child: const Glass(
+                                borderRadius: 14,
+                                blur: 14,
+                                padding: EdgeInsets.all(8),
+                                child: Icon(Icons.arrow_back_rounded,
+                                    color: Colors.white),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                      fontSize: 17,
+                                      fontWeight: FontWeight.w700,
+                                      color: Colors.white)),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                              fontSize: 17,
-                              fontWeight: FontWeight.w700,
-                              color: Colors.white)),
-                    ),
-                  ],
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                // ── ALOHIDA QATLAM ──────────────────────────────
-                // Pleyer o'z vaqti bilan (pozitsiya, bufer, halqa)
-                // qayta chiziladi. Alohida qatlamsiz bu qayta
-                // chizish PASTDAGI ro'yxatni ham sudrab ketardi —
-                // aynan surish paytida bu sezilarli qotish beradi.
-                child: RepaintBoundary(
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(16),
-                    child: _buildInlinePlayer(),
-                  ),
-                ),
-              ),
-              // Pleyer bilan qism o'tkazish orasida: qaysi bo'lim va
-              // qism ko'rilyapti, u necha marta ko'rilgan, qancha
-              // vaqt tomosha qilingan va qachon qo'shilgan.
-              RepaintBoundary(child: _buildNowPlayingBar()),
-              const SizedBox(height: 8),
-              // Tartib (foydalanuvchi talabi):
-              //   video -> tablar -> [<] N-qism [>] -> qismlar ro'yxati
-              //
-              // ── BO'YI KICHRAYTIRILDI (foydalanuvchi talabi) ────
-              // Avval `Tab` o'zining standart bo'yida (46 dp) edi va
-              // atrofida 4 dp to'ldirish bilan butun panel 54 dp joy
-              // egallardi. Yozuvlar bir qatorli bo'lgani uchun bu
-              // ortiqcha edi — endi `Tab(height: 32)` va 3 dp
-              // to'ldirish, ya'ni 38 dp. Qismlar ro'yxatiga 16 dp
-              // qo'shimcha joy chiqdi.
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Glass(
-                  borderRadius: 14,
-                  blur: 12,
-                  padding: const EdgeInsets.all(3),
-                  child: TabBar(
-                    controller: _tabCtrl,
-                    indicator: BoxDecoration(
-                        color: AppColors.accent,
-                        borderRadius: BorderRadius.circular(11)),
-                    labelColor: Colors.white,
-                    unselectedLabelColor: Colors.white54,
-                    labelPadding: EdgeInsets.zero,
-                    labelStyle: const TextStyle(
-                        fontWeight: FontWeight.w600, fontSize: 13),
-                    unselectedLabelStyle: const TextStyle(fontSize: 13),
-                    dividerColor: Colors.transparent,
-                    // Tartib (foydalanuvchi talabi):
-                    // Ma'lumot | Qismlar | Bo'limlar.
-                    onTap: _goToTab,
-                    tabs: const [
-                      Tab(height: 32, text: 'Ma\'lumot'),
-                      Tab(height: 32, text: 'Qismlar'),
-                      Tab(height: 32, text: 'Bo\'limlar'),
-                      Tab(height: 32, text: 'Izohlar'),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 6),
-              // [<]  N-qism  [>] — tablarning TAGIDA, ro'yxat ustida.
-              _buildEpisodeNav(),
-              const SizedBox(height: 6),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        // ── ALOHIDA QATLAM ──────────────────────────────
+                        // Pleyer o'z vaqti bilan (pozitsiya, bufer, halqa)
+                        // qayta chiziladi. Alohida qatlamsiz bu qayta
+                        // chizish PASTDAGI ro'yxatni ham sudrab ketardi —
+                        // aynan surish paytida bu sezilarli qotish beradi.
+                        child: RepaintBoundary(
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(16),
+                            child: _buildInlinePlayer(),
+                          ),
+                        ),
+                      ),
+                      // Pleyer bilan qism o'tkazish orasida: qaysi bo'lim va
+                      // qism ko'rilyapti, u necha marta ko'rilgan, qancha
+                      // vaqt tomosha qilingan va qachon qo'shilgan.
+                      RepaintBoundary(child: _buildNowPlayingBar()),
+                      const SizedBox(height: 8),
+                      // Tartib (foydalanuvchi talabi):
+                      //   video -> tablar -> [<] N-qism [>] -> qismlar ro'yxati
+                      //
+                      // ── BO'YI KICHRAYTIRILDI (foydalanuvchi talabi) ────
+                      // Avval `Tab` o'zining standart bo'yida (46 dp) edi va
+                      // atrofida 4 dp to'ldirish bilan butun panel 54 dp joy
+                      // egallardi. Yozuvlar bir qatorli bo'lgani uchun bu
+                      // ortiqcha edi — endi `Tab(height: 32)` va 3 dp
+                      // to'ldirish, ya'ni 38 dp. Qismlar ro'yxatiga 16 dp
+                      // qo'shimcha joy chiqdi.
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: Glass(
+                          borderRadius: 14,
+                          blur: 12,
+                          padding: const EdgeInsets.all(3),
+                          child: TabBar(
+                            controller: _tabCtrl,
+                            indicator: BoxDecoration(
+                                color: AppColors.accent,
+                                borderRadius: BorderRadius.circular(11)),
+                            labelColor: Colors.white,
+                            unselectedLabelColor: Colors.white54,
+                            labelPadding: EdgeInsets.zero,
+                            labelStyle: const TextStyle(
+                                fontWeight: FontWeight.w600, fontSize: 13),
+                            unselectedLabelStyle: const TextStyle(fontSize: 13),
+                            dividerColor: Colors.transparent,
+                            // Tartib (foydalanuvchi talabi):
+                            // Ma'lumot | Qismlar | Bo'limlar.
+                            onTap: _goToTab,
+                            tabs: const [
+                              Tab(height: 32, text: 'Ma\'lumot'),
+                              Tab(height: 32, text: 'Qismlar'),
+                              Tab(height: 32, text: 'Bo\'limlar'),
+                              Tab(height: 32, text: 'Izohlar'),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      // [<]  N-qism  [>] — tablarning TAGIDA, ro'yxat ustida.
+                      _buildEpisodeNav(),
+                      const SizedBox(height: 6),
                     ],
                   ),
                 ),
@@ -4171,11 +4168,10 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     if (!isFullscreen) return 1.0;
     final m = MediaQuery.of(context).size;
     final ctrl = _controller;
-    final ar = (ctrl != null &&
-            ctrl.value.isInitialized &&
-            ctrl.value.aspectRatio > 0)
-        ? ctrl.value.aspectRatio
-        : 16 / 9;
+    final ar =
+        (ctrl != null && ctrl.value.isInitialized && ctrl.value.aspectRatio > 0)
+            ? ctrl.value.aspectRatio
+            : 16 / 9;
     var vw = m.width;
     var vh = m.height;
     if (vw / vh > ar) {
@@ -4406,8 +4402,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
               child: IgnorePointer(
                 child: Container(
                   margin: const EdgeInsets.symmetric(horizontal: 24),
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 14, vertical: 9),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
                   decoration: BoxDecoration(
                     color: Colors.black.withValues(alpha: 0.72),
                     borderRadius: BorderRadius.circular(12),
@@ -4424,7 +4420,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                 ),
               ),
             ),
-
 
           // ── Sek ko'rsatkichlari — asosiy kontrollardan mustaqil,
           // faqat bosilgan tarafda chiqadi va 2s dan keyin yo'qoladi.
@@ -4498,9 +4493,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                   // Tugmalar kadr o'lchamiga qarab kattalashadi —
                   // ular ustidagi "sek qilinmaydigan" zona ham
                   // xuddi shunday o'zgaradi.
-                  final bottomGuard = _showControls
-                      ? (isFullscreen ? 78.0 * btnS : 86.0)
-                      : 0.0;
+                  final bottomGuard =
+                      _showControls ? (isFullscreen ? 78.0 * btnS : 86.0) : 0.0;
                   final topGuard =
                       (_showControls && isFullscreen) ? 60.0 * btnS : 0.0;
                   return Listener(
@@ -4587,7 +4581,10 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
           // "orqaga" tugmasi turadi — shu sabab intro tugmasi
           // o'sha qatorning TAGIGA tushadi, aks holda ular
           // ustma-ust kelardi.
-          if (_currentEp != null && _playerError == null && _introVisible && !_isLocked)
+          if (_currentEp != null &&
+              _playerError == null &&
+              _introVisible &&
+              !_isLocked)
             _inVideoFrame(Align(
               alignment: Alignment.topLeft,
               child: Padding(
@@ -4643,19 +4640,25 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
               child: Padding(
                 padding: const EdgeInsets.only(right: 24),
                 child: _PlayerPanel(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 8, vertical: 6),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                   child: ConstrainedBox(
                     constraints: BoxConstraints(
-                      maxHeight:
-                          MediaQuery.of(context).size.height * 0.85,
+                      maxHeight: MediaQuery.of(context).size.height * 0.85,
                     ),
                     child: SingleChildScrollView(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           for (final s in const [
-                            0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0
+                            0.25,
+                            0.5,
+                            0.75,
+                            1.0,
+                            1.25,
+                            1.5,
+                            1.75,
+                            2.0
                           ])
                             GestureDetector(
                               behavior: HitTestBehavior.opaque,
@@ -4666,13 +4669,12 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                                 // sakkizta qator ekranda juda
                                 // baland turardi (foydalanuvchi
                                 // talabi). Eni o'zgarmadi.
-                                padding: const EdgeInsets.symmetric(
-                                    vertical: 5),
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 5),
                                 alignment: Alignment.center,
                                 decoration: BoxDecoration(
                                   color: _playbackSpeed == s
-                                      ? AppColors.accent
-                                          .withValues(alpha: 0.2)
+                                      ? AppColors.accent.withValues(alpha: 0.2)
                                       : Colors.transparent,
                                   borderRadius: BorderRadius.circular(8),
                                 ),
@@ -4716,12 +4718,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
               child: Padding(
                 padding: const EdgeInsets.only(right: 24),
                 child: _PlayerPanel(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 10),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
                   child: ConstrainedBox(
                     constraints: BoxConstraints(
-                      maxHeight:
-                          MediaQuery.of(context).size.height * 0.85,
+                      maxHeight: MediaQuery.of(context).size.height * 0.85,
                     ),
                     child: SingleChildScrollView(
                       child: Column(
@@ -4811,11 +4812,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                 width: (MediaQuery.of(context).size.width * 0.5)
                     .clamp(300.0, 460.0)
                     .toDouble(),
-                margin: const EdgeInsets.symmetric(
-                    vertical: 12, horizontal: 16),
+                margin:
+                    const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
                 child: _PlayerPanel(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 12),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -4879,12 +4880,10 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                               child: Container(
                                 padding: const EdgeInsets.symmetric(
                                     horizontal: 12, vertical: 13),
-                                margin:
-                                    const EdgeInsets.symmetric(vertical: 2),
+                                margin: const EdgeInsets.symmetric(vertical: 2),
                                 decoration: BoxDecoration(
                                   color: isCurrent
-                                      ? AppColors.accent
-                                          .withValues(alpha: 0.2)
+                                      ? AppColors.accent.withValues(alpha: 0.2)
                                       : Colors.transparent,
                                   borderRadius: BorderRadius.circular(8),
                                 ),
@@ -4894,10 +4893,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                                       Padding(
                                         padding:
                                             const EdgeInsets.only(right: 6),
-                                        child: Icon(
-                                            Icons.play_arrow_rounded,
-                                            size: 20,
-                                            color: AppColors.accent),
+                                        child: Icon(Icons.play_arrow_rounded,
+                                            size: 20, color: AppColors.accent),
                                       ),
                                     Text(
                                       '$num_-qism',
@@ -5005,8 +5002,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                           _isLocked
                               ? Icons.lock_rounded
                               : Icons.lock_open_rounded,
-                          color:
-                              _isLocked ? AppColors.accent : Colors.white,
+                          color: _isLocked ? AppColors.accent : Colors.white,
                           size: 22 * btnS,
                         ),
                       ),
@@ -5076,8 +5072,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
               child: Padding(
                 padding: const EdgeInsets.only(right: 8, top: 50),
                 child: _PlayerPanel(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 14, vertical: 6),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                   // Aniq kenglik: qatorlar bir xil uzunlikda
                   // bo'ladi va oyna yozuv uzunligiga qarab
                   // sakramaydi. Chapdan tekislangan — o'ngdan
@@ -5098,82 +5094,82 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                           crossAxisAlignment: CrossAxisAlignment.start,
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                      _MenuToggleRow(
-                        icon: Icons.fast_forward_rounded,
-                        label: 'Avto intro o\'tkazish',
-                        on: AppSettings.instance.autoSkipIntro,
-                        onToggle: _toggleAutoSkipIntro,
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4),
-                        child: Divider(
-                          height: 1,
-                          color: Colors.white.withValues(alpha: 0.12),
-                        ),
-                      ),
-                      _MenuToggleRow(
-                        icon: Icons.skip_next_rounded,
-                        label: 'Avto qism o\'tkazish',
-                        on: AppSettings.instance.autoNextEpisode,
-                        onToggle: _toggleAutoNextEpisode,
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4),
-                        child: Divider(
-                          height: 1,
-                          color: Colors.white.withValues(alpha: 0.12),
-                        ),
-                      ),
-                      // ── UXLASH VAQTI (fullscreen sozlamalari) ──
-                      //
-                      // TALAB (foydalanuvchi): "sozlamalardagi vaqt
-                      // tugmasini ham kattalashtir — faqat uch
-                      // nuqtadagini kattalashtiribsan".
-                      //
-                      // Endi u yuqoridagi ikki qator bilan BIR XIL:
-                      // 46 px balandlik, belgi 20, yozuv 14/w600
-                      // va butun eni bo'ylab bosiladi.
-                      GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: () {
-                          _closeSettingsPanel();
-                          _showSleepPanel();
-                        },
-                        child: SizedBox(
-                          height: 46,
-                          child: Row(
-                            children: [
-                              Icon(Icons.schedule_rounded,
-                                  size: 20,
-                                  color: _sleepMinutes > 0
-                                      ? AppColors.accent
-                                      : Colors.white70),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Text(
-                                  _sleepMinutes > 0
-                                      ? 'Uxlash: ${_sleepTimeLabel()}'
-                                      : 'Uxlash vaqti',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    color: _sleepMinutes > 0
-                                        ? AppColors.accent
-                                        : Colors.white,
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w600,
-                                  ),
+                            _MenuToggleRow(
+                              icon: Icons.fast_forward_rounded,
+                              label: 'Avto intro o\'tkazish',
+                              on: AppSettings.instance.autoSkipIntro,
+                              onToggle: _toggleAutoSkipIntro,
+                            ),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 4),
+                              child: Divider(
+                                height: 1,
+                                color: Colors.white.withValues(alpha: 0.12),
+                              ),
+                            ),
+                            _MenuToggleRow(
+                              icon: Icons.skip_next_rounded,
+                              label: 'Avto qism o\'tkazish',
+                              on: AppSettings.instance.autoNextEpisode,
+                              onToggle: _toggleAutoNextEpisode,
+                            ),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 4),
+                              child: Divider(
+                                height: 1,
+                                color: Colors.white.withValues(alpha: 0.12),
+                              ),
+                            ),
+                            // ── UXLASH VAQTI (fullscreen sozlamalari) ──
+                            //
+                            // TALAB (foydalanuvchi): "sozlamalardagi vaqt
+                            // tugmasini ham kattalashtir — faqat uch
+                            // nuqtadagini kattalashtiribsan".
+                            //
+                            // Endi u yuqoridagi ikki qator bilan BIR XIL:
+                            // 46 px balandlik, belgi 20, yozuv 14/w600
+                            // va butun eni bo'ylab bosiladi.
+                            GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onTap: () {
+                                _closeSettingsPanel();
+                                _showSleepPanel();
+                              },
+                              child: SizedBox(
+                                height: 46,
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.schedule_rounded,
+                                        size: 20,
+                                        color: _sleepMinutes > 0
+                                            ? AppColors.accent
+                                            : Colors.white70),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Text(
+                                        _sleepMinutes > 0
+                                            ? 'Uxlash: ${_sleepTimeLabel()}'
+                                            : 'Uxlash vaqti',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          color: _sleepMinutes > 0
+                                              ? AppColors.accent
+                                              : Colors.white,
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
                       ),
-                    ],
-                  ),
-                  ),
                     ),
-                    ),
+                  ),
                 ),
               ),
             )),
@@ -5246,8 +5242,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                           Text(
                             _seasonStr('nomi').isNotEmpty
                                 ? _seasonStr('nomi')
-                                : (_currentEp?['epizod_name'] ?? '')
-                                    .toString(),
+                                : (_currentEp?['epizod_name'] ?? '').toString(),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
@@ -5465,8 +5460,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   ///     hisobi bu yerda 0 bo'lardi va chiziq bo'sh ko'rinardi.
 
   // Faqat slayder/vaqtni eng tor ko'lamda yangilaydi.
-  Widget _bottomBarReactive(
-      {required bool isFullscreen, double scale = 1.0}) {
+  Widget _bottomBarReactive({required bool isFullscreen, double scale = 1.0}) {
     final ctrl = _controller;
     // Progress chizig'idagi OQ (tayyor) qism uchun: mahalliy
     // ijroda DownloadManager hisobi kerak bo'ladi.
@@ -5520,39 +5514,39 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     final hasNext = i > 0;
     final hasPrev = i >= 0 && i < eps.length - 1;
     return _BottomBar(
-          scale: scale,
-          position: _pendingTarget ?? value?.position ?? Duration.zero,
-          duration: value?.duration ?? Duration.zero,
-          buffered: bufferedRatio,
-          fmt: _fmt,
-          onSeek: (d) {
-            _scheduleSeekTo(d);
-            _scheduleHide();
-          },
-          onQualityTap: isFullscreen ? _showQualityPanel : _showQualityDialog,
-          onFullscreen: _toggleFullscreen,
-          isFullscreen: isFullscreen,
-          onSpeedTap: isFullscreen ? _showSpeedPanel : null,
-          onPrev: isFullscreen && hasPrev ? () => _stepEpisode(-1) : null,
-          onNext: isFullscreen && hasNext ? () => _stepEpisode(1) : null,
-          onPlayPause: isFullscreen ? _togglePlayPause : null,
-          onEpisodeList: isFullscreen ? _showEpisodeListPanel : null,
-          isPlaying: _intendedPlaying,
-          hasPrev: hasPrev,
-          hasNext: hasNext,
-          // "1x" / "1.5x" — tugmada aynan shu yoziladi.
-          speedLabel: _playbackSpeed == _playbackSpeed.roundToDouble()
-              ? '${_playbackSpeed.toInt()}x'
-              : '${_playbackSpeed}x',
-          onScrubStart: () {
-            _hideTimer?.cancel();
-            if (!_isScrubbing) setState(() => _isScrubbing = true);
-          },
-          onScrubEnd: () {
-            if (_isScrubbing) setState(() => _isScrubbing = false);
-            _scheduleHide();
-          },
-        );
+      scale: scale,
+      position: _pendingTarget ?? value?.position ?? Duration.zero,
+      duration: value?.duration ?? Duration.zero,
+      buffered: bufferedRatio,
+      fmt: _fmt,
+      onSeek: (d) {
+        _scheduleSeekTo(d);
+        _scheduleHide();
+      },
+      onQualityTap: isFullscreen ? _showQualityPanel : _showQualityDialog,
+      onFullscreen: _toggleFullscreen,
+      isFullscreen: isFullscreen,
+      onSpeedTap: isFullscreen ? _showSpeedPanel : null,
+      onPrev: isFullscreen && hasPrev ? () => _stepEpisode(-1) : null,
+      onNext: isFullscreen && hasNext ? () => _stepEpisode(1) : null,
+      onPlayPause: isFullscreen ? _togglePlayPause : null,
+      onEpisodeList: isFullscreen ? _showEpisodeListPanel : null,
+      isPlaying: _intendedPlaying,
+      hasPrev: hasPrev,
+      hasNext: hasNext,
+      // "1x" / "1.5x" — tugmada aynan shu yoziladi.
+      speedLabel: _playbackSpeed == _playbackSpeed.roundToDouble()
+          ? '${_playbackSpeed.toInt()}x'
+          : '${_playbackSpeed}x',
+      onScrubStart: () {
+        _hideTimer?.cancel();
+        if (!_isScrubbing) setState(() => _isScrubbing = true);
+      },
+      onScrubEnd: () {
+        if (_isScrubbing) setState(() => _isScrubbing = false);
+        _scheduleHide();
+      },
+    );
   }
 
   // ── QISMLAR RO'YXATI ────────────────────────────────────────────
@@ -6292,7 +6286,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                     formatCount(_seasonNum('views_total'))),
                 _statLine(Icons.schedule_rounded, 'Tomosha vaqti',
                     '${formatHours(_seasonNum('watch_ms_total'))} soat'),
-                _statLine(Icons.favorite_border_rounded,
+                _statLine(
+                    Icons.favorite_border_rounded,
                     'Sevimlilarga qo\'shilgan',
                     formatCount(_seasonNum('fav_count'))),
                 _statLine(
@@ -6447,7 +6442,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
               width: 90,
               child: Text(label,
                   style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.5), fontSize: 13))),
+                      color: Colors.white.withValues(alpha: 0.5),
+                      fontSize: 13))),
           Expanded(
               child: Text(value,
                   style: const TextStyle(color: Colors.white, fontSize: 13))),
@@ -6587,8 +6583,8 @@ class _EpisodeTile extends StatelessWidget {
                   child: Container(
                     // Uch ikonkali tugma KATTALASHTIRILDI — barmoq
                     // bilan tegish qulay bo'lsin (foydalanuvchi talabi).
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 11, vertical: 8),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
                     decoration: BoxDecoration(
                       color: Colors.white.withValues(alpha: 0.08),
                       borderRadius: BorderRadius.circular(11),
@@ -6678,8 +6674,7 @@ class _QualityRow extends StatelessWidget {
                                 fontSize: 13,
                                 fontWeight: FontWeight.w800)),
                         const SizedBox(width: 8),
-                        Text(
-                            '${_mb(st.downloaded)} / $totalLabel',
+                        Text('${_mb(st.downloaded)} / $totalLabel',
                             style: TextStyle(
                                 color: Colors.white.withValues(alpha: 0.65),
                                 fontSize: 11.5,
@@ -6786,9 +6781,8 @@ class _QualityRow extends StatelessWidget {
                             ? Icons.pause_rounded
                             : Icons.download_rounded,
                         size: 23,
-                        color: st.downloading
-                            ? AppColors.accent
-                            : Colors.white),
+                        color:
+                            st.downloading ? AppColors.accent : Colors.white),
                   ),
                 ),
               const SizedBox(width: 2),
@@ -6830,8 +6824,7 @@ class _MiniIconButton extends StatelessWidget {
           borderRadius: BorderRadius.circular(12),
         ),
         child: Icon(icon,
-            size: 23,
-            color: highlighted ? AppColors.accent : Colors.white70),
+            size: 23, color: highlighted ? AppColors.accent : Colors.white70),
       ),
     );
   }
@@ -6962,7 +6955,8 @@ class _PlayerRingPainter extends CustomPainter {
     // Dumi — ikkinchi yarmida quvib yetadi (yoy qisqaradi).
     final tail = _seg(t, 0.45, 1.0);
 
-    final sweep = (_minArc + (head - tail).clamp(0.0, 1.0) * _maxArc) * 2 * math.pi;
+    final sweep =
+        (_minArc + (head - tail).clamp(0.0, 1.0) * _maxArc) * 2 * math.pi;
     final start =
         (tail * _maxArc + t * (1 - _maxArc)) * 2 * math.pi - math.pi / 2;
     canvas.drawArc(rect, start, sweep, false, arc);
@@ -7149,10 +7143,7 @@ class _FsChip extends StatelessWidget {
   final double scale;
 
   const _FsChip(
-      {required this.label,
-      this.icon,
-      required this.onTap,
-      this.scale = 1.0});
+      {required this.label, this.icon, required this.onTap, this.scale = 1.0});
 
   @override
   Widget build(BuildContext context) {
@@ -7211,6 +7202,7 @@ class _BottomBar extends StatefulWidget {
   final bool isPlaying;
   final bool hasPrev;
   final bool hasNext;
+
   /// Hozirgi tezlik ("1x", "1.5x"). Tugmada AYNAN shu ko'rinadi —
   /// "Tezlik" so'zidan ko'ra foydaliroq: qaysi tezlik yoqilganini
   /// oynani ochmasdan bilish mumkin (yirik pleyerlar shunday qiladi).
@@ -7250,8 +7242,8 @@ class _BottomBarState extends State<_BottomBar> {
 
   void _commit(double v) {
     if (widget.duration.inMilliseconds > 0) {
-      widget.onSeek(Duration(
-          milliseconds: (v * widget.duration.inMilliseconds).round()));
+      widget.onSeek(
+          Duration(milliseconds: (v * widget.duration.inMilliseconds).round()));
     }
     setState(() => _dragValue = null);
     widget.onScrubEnd();
@@ -7337,8 +7329,7 @@ class _BottomBarState extends State<_BottomBar> {
                 ],
                 // HQ — sifat tugmasi ataylab YOZUV bo'lib qoladi:
                 // foydalanuvchi uni aynan "HQ" deb so'ragan.
-                _FsChip(
-                    label: 'HQ', onTap: widget.onQualityTap, scale: s),
+                _FsChip(label: 'HQ', onTap: widget.onQualityTap, scale: s),
               ],
             ),
             SizedBox(height: 6 * s),
@@ -7468,8 +7459,7 @@ class _BottomBarState extends State<_BottomBar> {
           GestureDetector(
             onTap: widget.onQualityTap,
             child: Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 7, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
               decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(7),
@@ -7485,8 +7475,7 @@ class _BottomBarState extends State<_BottomBar> {
           GestureDetector(
             onTap: widget.onFullscreen,
             child: Padding(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 3, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 4),
               child: Icon(Icons.fullscreen_rounded,
                   color: Colors.white, size: iconSize),
             ),
@@ -7732,9 +7721,8 @@ class _RatingSheetState extends State<_RatingSheet> {
                               ? Icons.star_rounded
                               : Icons.star_border_rounded,
                           size: 28,
-                          color: star <= _hover
-                              ? AppColors.gold
-                              : Colors.white24,
+                          color:
+                              star <= _hover ? AppColors.gold : Colors.white24,
                         ),
                       ),
                     ),
@@ -7987,9 +7975,9 @@ class _AlwaysVisibleProgress extends StatelessWidget {
         if (!value.isInitialized || value.duration.inMilliseconds <= 0) {
           return const SizedBox.shrink();
         }
-        final played = (value.position.inMilliseconds /
-                value.duration.inMilliseconds)
-            .clamp(0.0, 1.0);
+        final played =
+            (value.position.inMilliseconds / value.duration.inMilliseconds)
+                .clamp(0.0, 1.0);
         Duration ahead = Duration.zero;
         for (final r in value.buffered) {
           if (r.end > ahead) ahead = r.end;
@@ -8103,8 +8091,7 @@ class _SubRequiredScreen extends StatelessWidget {
                       ),
                       boxShadow: [
                         BoxShadow(
-                          color:
-                              AppColors.gold.withValues(alpha: 0.30),
+                          color: AppColors.gold.withValues(alpha: 0.30),
                           blurRadius: 26,
                           offset: const Offset(0, 10),
                         ),
@@ -8164,8 +8151,7 @@ class _SubRequiredScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 10),
                   TextButton(
-                    onPressed: () =>
-                        BillingService.instance.load(force: true),
+                    onPressed: () => BillingService.instance.load(force: true),
                     child: Text(
                       'Obunani yangilash',
                       style: TextStyle(

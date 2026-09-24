@@ -1,4 +1,4 @@
-name = "arumediatv"
+name = "arugram"
 main = "build/worker/shim.mjs"
 compatibility_date = "2024-01-01"
 workers_dev = true
@@ -34,7 +34,7 @@ tag = "v2"
 deleted_classes = ["PresenceHub"]
 
 [env.production]
-name = "arumediatv"
+name = "arugram"
 workers_dev = true
 
 # Secrets (GitHub Actions orqali o'rnatiladi):

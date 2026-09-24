@@ -42,7 +42,7 @@ grammers-session = { version = "=0.10.0", default-features = false, features = [
 # 2.0.0-rc1 ni tanlaydi — u API'ni buzgan, kompilyatsiya yiqiladi.
 # Cargo.lock repoda saqlanmaydi, shu sabab versiya shu yerda qotiriladi.
 glass_pumpkin = "=2.0.0-rc0"
-tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync", "time", "fs"] }
 
 [profile.release]
 opt-level = 3

@@ -315,10 +315,11 @@ impl Session for SealedSession {
 // ═══════════════════════════════════════════════════════════════
 
 fn connect(t: &Tg) -> Option<Client> {
-    if let Ok(c) = t.client.lock() {
-        if let Some(c) = c.as_ref() {
-            return Some(c.clone());
-        }
+    // Qulf butun yaratish davomida ushlanadi: ikki oqim bir vaqtda
+    // kelsa ikkita ulanish (va ikkita sessiya yozuvchisi) ochilmasin.
+    let mut slot = t.client.lock().ok()?;
+    if let Some(c) = slot.as_ref() {
+        return Some(c.clone());
     }
     let api_id = *t.api_id.lock().ok()?;
     if api_id <= 0 {
@@ -336,13 +337,25 @@ fn connect(t: &Tg) -> Option<Client> {
     t.rt.spawn(runner.run());
     // Yangilanishlar kanali o'qilmasa xotirada cheksiz o'sadi.
     t.rt.spawn(async move { while updates.recv().await.is_some() {} });
-    if let Ok(mut c) = t.client.lock() {
-        *c = Some(client.clone());
-    }
+    *slot = Some(client.clone());
+    drop(slot);
     if let Ok(mut s) = t.session.lock() {
         *s = Some(session);
     }
     Some(client)
+}
+
+/// Hisobga bog'liq xotiradagi narsalarni tozalaydi (boshqa hisob
+/// bilan kirilganda eskisi ishlatilib qolmasin).
+fn forget_account_state(t: &Tg) {
+    if let Ok(mut d) = t.docs.lock() {
+        d.clear();
+    }
+    if let Ok(mut f) = t.failed.lock() {
+        f.clear();
+    }
+    // Boshqa DC larga ko'chirilgan avtorizatsiya ESKI hisobniki.
+    t.rt.block_on(async { t.auth_dcs.lock().await.clear() });
 }
 
 fn disconnect(t: &Tg) {
@@ -491,6 +504,18 @@ async fn doc_for(t: &'static Tg, client: &Client, msg_id: i32, refresh: bool) ->
             if SESSION_DEAD.iter().any(|k| e.contains(k)) {
                 t.authorized.store(false, Ordering::SeqCst);
                 save_config(t);
+                // O'lik kalit bilan qayta kirib bo'lmaydi (masalan
+                // AUTH_KEY_DUPLICATED) — sessiya butunlay tashlanadi,
+                // keyingi kirish toza boshlanadi.
+                if let Ok(s) = t.session.lock() {
+                    if let Some(s) = s.as_ref() {
+                        s.wipe();
+                    }
+                }
+                disconnect(t);
+                if let Ok(mut d) = t.auth_dcs.try_lock() {
+                    d.clear();
+                }
                 crate::video_cache::tg_log(format!("Telegram sessiyasi bekor qilingan: {e}"));
             }
             return Err(e);
@@ -858,6 +883,12 @@ where
 
 fn after_login(t: &Tg) -> String {
     t.authorized.store(true, Ordering::SeqCst);
+    if let Ok(mut d) = t.docs.lock() {
+        d.clear();
+    }
+    if let Ok(mut f) = t.failed.lock() {
+        f.clear();
+    }
     if let Ok(s) = t.session.lock() {
         if let Some(s) = s.as_ref() {
             s.save();
@@ -1033,6 +1064,253 @@ pub extern "C" fn rust_tg_start_bot(bot_ptr: *const c_char, param_ptr: *const c_
     }))
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  ADMIN: VIDEONI KANALGA YUKLASH
+// ═══════════════════════════════════════════════════════════════
+//
+// TALAB (foydalanuvchi): "telegramga kanalga fayl yuklash tizimi".
+//
+// Admin qism qo'shish ekranida video tanlaydi va ilova uni ADMINNING
+// O'Z Telegram hisobi bilan yopiq kanalga yuklaydi (MTProto, 2 GB
+// gacha — Bot API ning 50 MB chegarasi yo'q). Izoh (caption) —
+// fayl nomi, ya'ni bot kanal postini ko'rib uni o'zi ham
+// ro'yxatga oladi (`tg_channel_post`). Ilova esa kafolat uchun
+// natijani worker'ga to'g'ridan-to'g'ri yozadi.
+//
+// Yuklash fon'da ketadi; Dart holatni `rust_tg_upload_status` bilan
+// so'rab turadi (foiz chizig'i).
+
+struct UploadJob {
+    sent: Arc<std::sync::atomic::AtomicU64>,
+    total: u64,
+    state: Arc<Mutex<UploadState>>,
+    task: Option<tokio::task::JoinHandle<()>>,
+}
+
+#[derive(Default, Clone)]
+struct UploadState {
+    done: bool,
+    msg_id: i32,
+    error: Option<String>,
+}
+
+static UPLOADS: OnceLock<Mutex<HashMap<u64, UploadJob>>> = OnceLock::new();
+static UPLOAD_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+fn uploads() -> &'static Mutex<HashMap<u64, UploadJob>> {
+    UPLOADS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// O'qilgan baytlarni sanaydigan o'quvchi (yuklash foizi uchun).
+struct Counting<R> {
+    inner: R,
+    n: Arc<std::sync::atomic::AtomicU64>,
+}
+
+impl<R: tokio::io::AsyncRead + Unpin> tokio::io::AsyncRead for Counting<R> {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        let before = buf.filled().len();
+        let r = std::pin::Pin::new(&mut self.inner).poll_read(cx, buf);
+        let got = buf.filled().len() - before;
+        if got > 0 {
+            self.n.fetch_add(got as u64, Ordering::Relaxed);
+        }
+        r
+    }
+}
+
+/// Kanalni adminning suhbatlari orasidan topadi (yopiq kanalga
+/// murojaat uchun `access_hash` kerak, u faqat shu yo'l bilan
+/// olinadi).
+async fn find_channel(client: &Client, channel_id: i64) -> Result<grammers_client::session::types::PeerRef, String> {
+    let mut dialogs = client.iter_dialogs();
+    while let Some(d) = dialogs.next().await.map_err(|e| e.to_string())? {
+        if d.peer_id().bot_api_dialog_id() == Some(channel_id) {
+            return Ok(d.peer_ref());
+        }
+    }
+    Err("Kanal topilmadi — shu Telegram hisobi kanalda admin ekanini tekshiring".to_string())
+}
+
+async fn upload_to_channel(
+    client: Client,
+    path: String,
+    name: String,
+    mime: String,
+    channel_id: i64,
+    sent: Arc<std::sync::atomic::AtomicU64>,
+    total: u64,
+) -> Result<i32, String> {
+    let peer = find_channel(&client, channel_id).await?;
+    let file = tokio::fs::File::open(&path).await.map_err(|e| format!("fayl ochilmadi: {e}"))?;
+    let mut reader = Counting { inner: file, n: Arc::clone(&sent) };
+    let uploaded = client
+        .upload_stream(&mut reader, total as usize, name.clone())
+        .await
+        .map_err(|e| format!("yuklashda xato: {e}"))?;
+    let mut rnd = [0u8; 8];
+    getrandom::getrandom(&mut rnd).map_err(|e| e.to_string())?;
+    let random_id = i64::from_le_bytes(rnd);
+    let res = client
+        .invoke(&tl::functions::messages::SendMedia {
+            silent: true,
+            background: false,
+            clear_draft: false,
+            noforwards: false,
+            update_stickersets_order: false,
+            invert_media: false,
+            allow_paid_floodskip: false,
+            peer: peer.into(),
+            reply_to: None,
+            // FAYL sifatida (qayta kodlanmaydi, sifat buzilmaydi).
+            media: tl::enums::InputMedia::UploadedDocument(tl::types::InputMediaUploadedDocument {
+                nosound_video: false,
+                force_file: true,
+                spoiler: false,
+                file: uploaded.raw,
+                thumb: None,
+                mime_type: mime,
+                attributes: vec![tl::enums::DocumentAttribute::Filename(
+                    tl::types::DocumentAttributeFilename { file_name: name.clone() },
+                )],
+                stickers: None,
+                video_cover: None,
+                video_timestamp: None,
+                ttl_seconds: None,
+            }),
+            // Izoh = fayl nomi: bot shu bo'yicha postni taniydi.
+            message: name,
+            random_id,
+            reply_markup: None,
+            entities: None,
+            schedule_date: None,
+            schedule_repeat_period: None,
+            send_as: None,
+            quick_reply_shortcut: None,
+            effect: None,
+            allow_paid_stars: None,
+            suggested_post: None,
+        })
+        .await
+        .map_err(|e| format!("kanalga yuborilmadi: {e}"))?;
+    msg_id_of(&res, random_id).ok_or_else(|| "xabar raqami olinmadi".to_string())
+}
+
+/// `SendMedia` javobidan yangi xabarning raqamini oladi.
+fn msg_id_of(res: &tl::enums::Updates, random_id: i64) -> Option<i32> {
+    let updates: &[tl::enums::Update] = match res {
+        tl::enums::Updates::Updates(u) => &u.updates,
+        tl::enums::Updates::Combined(u) => &u.updates,
+        tl::enums::Updates::UpdateShort(u) => std::slice::from_ref(&u.update),
+        _ => &[],
+    };
+    let mut fallback = None;
+    for u in updates {
+        match u {
+            tl::enums::Update::MessageId(m) if m.random_id == random_id => return Some(m.id),
+            tl::enums::Update::NewChannelMessage(m) => {
+                if let tl::enums::Message::Message(m) = &m.message {
+                    fallback = Some(m.id);
+                }
+            }
+            _ => {}
+        }
+    }
+    fallback
+}
+
+/// Yuklashni boshlaydi. Javob: `{"job": N}` yoki `{"error": ".."}`.
+#[no_mangle]
+pub extern "C" fn rust_tg_upload_start(
+    path_ptr: *const c_char,
+    name_ptr: *const c_char,
+    mime_ptr: *const c_char,
+    channel_id: i64,
+) -> *mut c_char {
+    let path = unsafe { cstr_to_str(path_ptr) }.unwrap_or("").to_string();
+    let name = unsafe { cstr_to_str(name_ptr) }.unwrap_or("").to_string();
+    let mime = unsafe { cstr_to_str(mime_ptr) }.unwrap_or("").to_string();
+    string_to_cptr(with_client(|t, client| {
+        if !t.authorized.load(Ordering::SeqCst) {
+            return Err("Avval Telegram hisobini ulang".to_string());
+        }
+        if channel_id == 0 {
+            return Err("Kanal sozlanmagan (TG_CHANNEL_ID)".to_string());
+        }
+        if name.is_empty() || name.contains('/') {
+            return Err("Fayl nomi noto'g'ri".to_string());
+        }
+        let total = fs::metadata(&path).map_err(|e| format!("fayl topilmadi: {e}"))?.len();
+        if total == 0 {
+            return Err("Fayl bo'sh".to_string());
+        }
+        // Telegram chegarasi: 2 GB (Premium hisobda 4 GB).
+        if total > 4000 * 1024 * 1024 {
+            return Err("Fayl juda katta (4 GB dan oshmasin)".to_string());
+        }
+        let id = UPLOAD_SEQ.fetch_add(1, Ordering::SeqCst);
+        let sent = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let state = Arc::new(Mutex::new(UploadState::default()));
+        let st = Arc::clone(&state);
+        let s2 = Arc::clone(&sent);
+        let mime = if mime.is_empty() { "video/mp4".to_string() } else { mime };
+        let task = t.rt.spawn(async move {
+            let r = upload_to_channel(client, path, name, mime, channel_id, s2, total).await;
+            if let Ok(mut s) = st.lock() {
+                s.done = true;
+                match r {
+                    Ok(m) => s.msg_id = m,
+                    Err(e) => s.error = Some(e),
+                }
+            }
+        });
+        if let Ok(mut m) = uploads().lock() {
+            m.insert(id, UploadJob { sent, total, state, task: Some(task) });
+        }
+        Ok(json!({"job": id}).to_string())
+    }))
+}
+
+/// Yuklash holati: `{"sent","total","done","msg_id","error"}`.
+/// Tugagan ish shu chaqiruvda ro'yxatdan o'chiriladi.
+#[no_mangle]
+pub extern "C" fn rust_tg_upload_status(job: u64) -> *mut c_char {
+    let Ok(mut m) = uploads().lock() else {
+        return string_to_cptr(err_json("holat qulfi"));
+    };
+    let Some(j) = m.get(&job) else {
+        return string_to_cptr(json!({"done": true, "error": "yuklash topilmadi"}).to_string());
+    };
+    let st = j.state.lock().map(|s| s.clone()).unwrap_or_default();
+    let body = json!({
+        "sent": j.sent.load(Ordering::Relaxed).min(j.total),
+        "total": j.total,
+        "done": st.done,
+        "msg_id": st.msg_id,
+        "error": st.error,
+    });
+    if st.done {
+        m.remove(&job);
+    }
+    string_to_cptr(body.to_string())
+}
+
+/// Yuklashni bekor qiladi.
+#[no_mangle]
+pub extern "C" fn rust_tg_upload_cancel(job: u64) {
+    if let Ok(mut m) = uploads().lock() {
+        if let Some(mut j) = m.remove(&job) {
+            if let Some(t) = j.task.take() {
+                t.abort();
+            }
+        }
+    }
+}
+
 /// Telegram hisobidan chiqadi va sessiyani o'chiradi.
 #[no_mangle]
 pub extern "C" fn rust_tg_logout() -> *mut c_char {
@@ -1052,9 +1330,7 @@ pub extern "C" fn rust_tg_logout() -> *mut c_char {
     let _ = fs::remove_file(t.dir.join("session.bin"));
     disconnect(t);
     t.authorized.store(false, Ordering::SeqCst);
-    if let Ok(mut d) = t.docs.lock() {
-        d.clear();
-    }
+    forget_account_state(t);
     if let Ok(mut r) = t.routes.lock() {
         r.clear();
     }
@@ -1168,6 +1444,34 @@ mod tests {
             let r = pump(&mut out, 0, 3 * PART - 1, spawn).await;
             assert!(matches!(r, Err(PumpError::Source(_))));
             assert_eq!(out.len(), PART as usize);
+        });
+    }
+
+    #[test]
+    fn yuborilgan_xabar_raqami_topiladi() {
+        let res = tl::enums::Updates::Updates(tl::types::Updates {
+            updates: vec![tl::enums::Update::MessageId(tl::types::UpdateMessageId { id: 77, random_id: 5 })],
+            users: vec![],
+            chats: vec![],
+            date: 0,
+            seq: 0,
+        });
+        assert_eq!(msg_id_of(&res, 5), Some(77));
+        // Boshqa random_id — bu bizning xabar emas.
+        assert_eq!(msg_id_of(&res, 6), None);
+    }
+
+    #[test]
+    fn yuklash_foizi_sanaladi() {
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        rt.block_on(async {
+            let data = vec![7u8; 300_000];
+            let n = Arc::new(std::sync::atomic::AtomicU64::new(0));
+            let mut r = Counting { inner: &data[..], n: Arc::clone(&n) };
+            let mut out = Vec::new();
+            r.read_to_end(&mut out).await.unwrap();
+            assert_eq!(out.len(), 300_000);
+            assert_eq!(n.load(Ordering::Relaxed), 300_000);
         });
     }
 

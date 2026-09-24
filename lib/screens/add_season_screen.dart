@@ -11,8 +11,9 @@ import '../services/storage_janitor.dart';
 import '../services/ui_state.dart';
 import '../theme/app_background.dart';
 import '../widgets/glass.dart';
+import '../services/api_base.dart';
 
-const String API_BASE = 'https://arumediatv.uzcom.workers.dev';
+const String API_BASE = kApiBase;
 
 const List<String> _turlar = ['TV', 'FILM', 'OVA'];
 const List<String> _holatlar = ['Davom etmoqda', 'Tugallangan'];
