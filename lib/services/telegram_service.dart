@@ -29,6 +29,7 @@ import 'dart:ffi';
 import 'dart:io';
 import 'dart:isolate';
 
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -132,10 +133,6 @@ class TelegramService extends ChangeNotifier {
   /// so'ralmasin).
   final Set<String> _missing = {};
 
-  /// Shu fayl uchun keyingi so'rov bot chatiga QAYTA yuborishni
-  /// talab qiladi (eski xabar o'chirilgan bo'lishi mumkin).
-  final Set<String> _force = {};
-
   bool get serverEnabled => _serverEnabled;
 
   /// Telegram hisobi ulanganmi.
@@ -170,7 +167,12 @@ class TelegramService extends ChangeNotifier {
       return;
     }
     notifyListeners();
-    unawaited(refreshConfig());
+    unawaited(refreshConfig().then((_) {
+      // Oldingi seansdan (ilova yiqilgan bo'lsa) qolgan nusxalar.
+      _cleanPending = true;
+      return _cleanIfPending();
+    }));
+    _watchConnectivity();
   }
 
   void _init(String dir, int apiId, String apiHash) {
@@ -190,25 +192,48 @@ class TelegramService extends ChangeNotifier {
   /// `api_id`/`api_hash` ni serverdan oladi. Sessiya shart emas:
   /// ilovaga telefon raqami bilan KIRISHning o'zi shu qiymatlar
   /// bilan bo'ladi. `true` — Telegram orqali kirish mumkin.
-  Future<bool> refreshConfig() async {
+  /// Sozlama telefonda shuncha vaqt saqlanadi — har ishga tushishda
+  /// worker'ga so'rov ketmasin (foydalanuvchi talabi: kamroq so'rov).
+  static const _configTtl = Duration(hours: 12);
+
+  void _applyConfig(Map<String, dynamic> j) {
+    _serverEnabled = j['enabled'] == true;
+    _bot = (j['bot'] as String?) ?? _bot;
+    _setBot(_bot);
+    _video = j['video'] != false;
+    _channel = (j['channel'] as num?)?.toInt() ?? 0;
+    if (_serverEnabled) {
+      final id = (j['api_id'] as num?)?.toInt() ?? 0;
+      final hash = (j['api_hash'] as String?) ?? '';
+      if (id > 0 && hash.isNotEmpty) _init(_dir, id, hash);
+    }
+  }
+
+  Future<bool> refreshConfig({bool force = false}) async {
     if (!_started) await start();
     if (!_started) return false;
+    if (!force) {
+      final cached = RustCore.instance.getCachedList('tg_config');
+      final c = (cached != null && cached.isNotEmpty) ? cached.first : null;
+      final at = (c?['at'] as num?)?.toInt() ?? 0;
+      final fresh = DateTime.now().millisecondsSinceEpoch - at <
+          _configTtl.inMilliseconds;
+      if (c != null && fresh && c['enabled'] == true) {
+        _applyConfig(c);
+        notifyListeners();
+        return _configured;
+      }
+    }
     try {
       final r = await http
           .get(Uri.parse('$kApiBase/api/tg/config'))
           .timeout(const Duration(seconds: 15));
       if (r.statusCode != 200) return _configured;
       final j = jsonDecode(r.body) as Map<String, dynamic>;
-      _serverEnabled = j['enabled'] == true;
-      _bot = (j['bot'] as String?) ?? _bot;
-      _setBot(_bot);
-      _video = j['video'] != false;
-      _channel = (j['channel'] as num?)?.toInt() ?? 0;
-      if (_serverEnabled) {
-        final id = (j['api_id'] as num?)?.toInt() ?? 0;
-        final hash = (j['api_hash'] as String?) ?? '';
-        if (id > 0 && hash.isNotEmpty) _init(_dir, id, hash);
-      }
+      _applyConfig(j);
+      RustCore.instance.saveListCache('tg_config', [
+        {...j, 'at': DateTime.now().millisecondsSinceEpoch}
+      ]);
       notifyListeners();
     } catch (_) {
       // Tarmoq yo'q — saqlangan sozlama bilan ishlayveradi.
@@ -245,7 +270,7 @@ class TelegramService extends ChangeNotifier {
   /// Ilovaga KIRISH: Telegram hisobi ulangach, foydalanuvchi nomidan
   /// botga `/start <token>` yuboriladi (`rust_tg_start_bot` izohi).
   Future<String?> startBot(String token) async {
-    if (_bot.isEmpty) await refreshConfig();
+    if (_bot.isEmpty) await refreshConfig(force: true);
     if (_bot.isEmpty) return 'Bot nomi serverdan olinmadi';
     final bot = _bot;
     final j = await Isolate.run(() {
@@ -277,7 +302,7 @@ class TelegramService extends ChangeNotifier {
     String mime,
     void Function(int sent, int total) onProgress,
   ) async {
-    if (!canUpload) await refreshConfig();
+    if (!canUpload) await refreshConfig(force: true);
     if (!canUpload) return 'Telegram ulanmagan yoki kanal sozlanmagan';
     final lib = _lib;
     if (lib == null) return 'Telegram ishga tushmagan';
@@ -385,56 +410,92 @@ class TelegramService extends ChangeNotifier {
         'rust_tg_login_reset')();
   }
 
-  // ── BOT CHATIDAGI NUSXALARNI TOZALASH ───────────────────────
+  // ── BOT CHATINI TOZALASH ────────────────────────────────────
   //
-  // TALAB (foydalanuvchi): "foydalanuvchi pleyerdan chiqishi bilan bot
-  // yuborgan fayllarni tozalab tashlashi kerak".
+  // TALAB (foydalanuvchi): "pleyerni tark etganda yoki internetni
+  // o'chirishi bilan bot tarixni avtomatik o'chirsin" va "workerga,
+  // tursoga iloji boricha kamroq so'rov".
   //
-  // Nusxa ikki joyda ishlatiladi: pleyer va yuklab olish. Ikkalasi
-  // ham "ushlab turadi" (`hold`), ikkalasi qo'yib yuborgach (`unhold`)
-  // worker bot chatidagi xabarni o'chiradi. Ilova qulab qolsa ham
-  // worker eski nusxalarni o'zi tozalaydi (har daqiqada, `tg_sweep`).
+  // Chat foydalanuvchining O'Z hisobi bilan tozalanadi
+  // (`rust_tg_clear_bot_chat`) — worker va bazaga so'rov YO'Q.
+  //
+  // Bot yuborgan nusxani pleyer va yuklab olish "band qiladi"
+  // (`hold`). Oxirgisi qo'yib yuborgach (`unhold`) chat tozalanadi.
+  //
+  //   * Internet uzilsa — hamma band bekor, tozalash NAVBATGA
+  //     qo'yiladi va internet qaytishi bilan (keyingi video
+  //     so'ralishidan OLDIN) bajariladi.
+  //   * Ilova yiqilib qolsa — keyingi ishga tushishda tozalanadi.
 
-  final Map<String, int> _holds = {};
+  final Map<Object, String> _holders = {};
+  bool _cleanPending = false;
+  Future<void>? _cleaning;
+  Timer? _cleanTimer;
+  StreamSubscription<List<ConnectivityResult>>? _connSub;
 
-  void hold(String url) {
+  /// [owner] shu nusxani ishlatyapti (pleyer ekrani, yuklab olish).
+  void hold(Object owner, String url) {
     final name = fileNameOf(url);
     if (name.isEmpty) return;
-    _holds[name] = (_holds[name] ?? 0) + 1;
+    _holders[owner] = name;
+    _cleanTimer?.cancel();
   }
 
-  void unhold(String url) {
-    final name = fileNameOf(url);
-    if (name.isEmpty) return;
-    final left = (_holds[name] ?? 0) - 1;
-    if (left > 0) {
-      _holds[name] = left;
-      return;
-    }
-    _holds.remove(name);
-    unawaited(_release(name));
+  /// [owner] nusxani qo'yib yubordi.
+  void unhold(Object owner) {
+    if (_holders.remove(owner) == null) return;
+    if (_holders.isNotEmpty) return;
+    // Bir zum kutamiz: boshqa qismga o'tilayotgan bo'lsa yangi
+    // nusxa kelib, darhol yana band bo'ladi.
+    _cleanTimer?.cancel();
+    _cleanTimer = Timer(const Duration(seconds: 2), () {
+      if (_holders.isEmpty) {
+        _cleanPending = true;
+        unawaited(_cleanIfPending());
+      }
+    });
   }
 
-  Future<void> _release(String name) async {
-    // Bog'lanish darhol olib tashlanadi — keyingi ochilishda bot
-    // videoni qayta yuboradi.
-    _route(name, 0);
-    final s = AuthService.instance.sessionToken;
-    if (s == null) return;
+  void _watchConnectivity() {
+    if (_connSub != null) return;
     try {
-      await http
-          .post(
-            Uri.parse('$kApiBase/api/tg/release'),
-            headers: {
-              'Authorization': 'Bearer $s',
-              'Content-Type': 'application/json',
-            },
-            body: jsonEncode({'file': name}),
-          )
-          .timeout(const Duration(seconds: 15));
-    } catch (_) {
-      // Tarmoq yo'q — worker baribir o'zi tozalaydi.
+      _connSub = Connectivity().onConnectivityChanged.listen((r) {
+        final online =
+            r.isNotEmpty && !r.every((e) => e == ConnectivityResult.none);
+        if (!online) {
+          // Internet yo'q — hamma band bekor, tozalash navbatda.
+          _holders.clear();
+          _cleanPending = true;
+        } else {
+          unawaited(_cleanIfPending());
+        }
+      });
+    } catch (_) {}
+  }
+
+  /// Navbatdagi tozalashni bajaradi (bir vaqtda faqat bittasi).
+  Future<void> _cleanIfPending() {
+    final running = _cleaning;
+    if (running != null) return running;
+    if (!_cleanPending || !_authorized || _holders.isNotEmpty) {
+      return Future.value();
     }
+    final f = () async {
+      try {
+        final j = await Isolate.run(() {
+          final lib = _openLib();
+          return _json(_take(
+              lib,
+              lib.lookupFunction<_NoArgC, _NoArgC>(
+                  'rust_tg_clear_bot_chat')()));
+        });
+        if (j['ok'] == true) _cleanPending = false;
+      } catch (_) {
+        // Tarmoq yo'q — navbatda qoladi.
+      }
+    }();
+    _cleaning = f.whenComplete(() => _cleaning = null);
+    return _cleaning!;
   }
 
   void _afterLogin() {
@@ -517,25 +578,25 @@ class TelegramService extends ChangeNotifier {
   Future<String?> _prepare(String url) async {
     _syncStatus();
     if (!active) return null;
+    // Navbatdagi tozalash YANGI nusxa kelishidan oldin tugasin —
+    // aks holda u yangi nusxani ham o'chirib yuborardi.
+    await _cleanIfPending();
     final name = fileNameOf(url);
     if (name.isEmpty || _missing.contains(name)) return null;
 
-    // Avval bog'langan va hali ishlayotgan bo'lsa — tarmoqsiz.
-    if (!_force.contains(name)) {
-      final ready = _playUrl(name);
-      if (ready.isNotEmpty) return ready;
-    }
+    // Nusxa bot chatida hali turibdi — worker'ga so'rov YO'Q.
+    final ready = _playUrl(name);
+    if (ready.isNotEmpty) return ready;
 
     final s = AuthService.instance.sessionToken;
     if (s == null) return null;
-    final force = _force.remove(name);
     final r = await http.post(
       Uri.parse('$kApiBase/api/tg/deliver'),
       headers: {
         'Authorization': 'Bearer $s',
         'Content-Type': 'application/json',
       },
-      body: jsonEncode({'file': name, 'force': force}),
+      body: jsonEncode({'file': name}),
     );
     if (r.statusCode == 404) {
       // Bu qism hali kanalga yuklanmagan — B2'dan ko'riladi.
@@ -560,6 +621,5 @@ class TelegramService extends ChangeNotifier {
     final name = fileNameOf(url);
     if (name.isEmpty) return;
     _route(name, 0);
-    _force.add(name);
   }
 }

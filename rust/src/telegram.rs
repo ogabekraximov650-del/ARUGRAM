@@ -1211,6 +1211,56 @@ pub extern "C" fn rust_tg_login_reset() {
     }
 }
 
+/// BOT CHATINI TOZALAYDI (foydalanuvchi talabi: "pleyerni tark
+/// etganda bot tarixni o'chirsin").
+///
+/// Foydalanuvchining O'Z hisobi bilan (`messages.deleteHistory`,
+/// `revoke` — ikkala tomondan) — worker'ga ham, bazaga ham bitta
+/// so'rov ketmaydi. Keyingi ko'rishda bot videoni qayta yuboradi.
+/// Tarmoq bo'lmasa xato qaytadi va Dart tomoni internet qaytgach
+/// qayta uradi.
+#[no_mangle]
+pub extern "C" fn rust_tg_clear_bot_chat() -> *mut c_char {
+    string_to_cptr(with_client(|t, client| {
+        if !t.authorized.load(Ordering::SeqCst) {
+            return Ok(json!({"ok": true}).to_string());
+        }
+        t.rt.block_on(async {
+            let (id, hash) = bot_peer(t, &client).await?;
+            // Katta tarix bir necha qadamda o'chadi (`offset > 0`).
+            for _ in 0..20 {
+                let tl::enums::messages::AffectedHistory::History(r) = client
+                    .invoke(&tl::functions::messages::DeleteHistory {
+                        just_clear: false,
+                        revoke: true,
+                        peer: tl::enums::InputPeer::User(tl::types::InputPeerUser {
+                            user_id: id,
+                            access_hash: hash,
+                        }),
+                        max_id: 0,
+                        min_date: None,
+                        max_date: None,
+                    })
+                    .await
+                    .map_err(|e| e.to_string())?;
+                if r.offset <= 0 {
+                    break;
+                }
+            }
+            Ok::<(), String>(())
+        })?;
+        // Eski havolalar endi yaroqsiz.
+        if let Ok(mut d) = t.docs.lock() {
+            d.clear();
+        }
+        if let Ok(mut r) = t.routes.lock() {
+            r.clear();
+        }
+        save_routes(t);
+        Ok(json!({"ok": true}).to_string())
+    }))
+}
+
 /// Kirish boti username'i (videolar shu bot chatidan olinadi).
 #[no_mangle]
 pub extern "C" fn rust_tg_set_bot(bot_ptr: *const c_char) {

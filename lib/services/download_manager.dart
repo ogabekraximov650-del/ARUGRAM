@@ -187,20 +187,16 @@ class DownloadManager extends ChangeNotifier {
     _poll();
   }
 
-  /// Telegram orqali yuklanayotgan qismlar (bot chatidagi nusxa
-  /// yuklash tugaguncha ushlab turiladi — `TelegramService.hold`).
-  final Set<String> _tgHeld = {};
-
+  /// Telegram orqali yuklanayotgan qism bot chatidagi nusxani
+  /// yuklash tugaguncha "band qiladi" (`TelegramService.hold`).
   Future<void> _prepareTg(String url) async {
     final tg = TelegramService.instance;
     if (!tg.active) return;
     final ok = await tg.prepare(url);
-    if (ok != null && _tgHeld.add(url)) tg.hold(url);
+    if (ok != null) tg.hold('dl:$url', url);
   }
 
-  void _releaseTg(String url) {
-    if (_tgHeld.remove(url)) TelegramService.instance.unhold(url);
-  }
+  void _releaseTg(String url) => TelegramService.instance.unhold('dl:$url');
 
   VideoCacheStat statOf(String url) => _stats[url] ?? VideoCacheStat.empty;
 

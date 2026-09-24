@@ -268,17 +268,15 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   /// "isitish" umuman kerak emas: B2'ga bitta ham so'rov ketmaydi.
   bool _playViaTelegram = false;
 
-  /// Bot chatidagi qaysi nusxani shu pleyer ushlab turibdi. Pleyer
-  /// yopilganda (yoki boshqa qismga o'tilganda) qo'yib yuboriladi va
-  /// bot nusxani o'chiradi (`TelegramService.hold`).
-  String? _tgHeldUrl;
-
+  /// Bot chatidagi nusxani shu pleyer "band qiladi". Pleyer yopilganda
+  /// (yoki qism Telegram'dan emas ochilganda) qo'yib yuboriladi va bot
+  /// chati tozalanadi (`TelegramService.hold`).
   void _setTgHeld(String? url) {
-    if (_tgHeldUrl == url) return;
-    final old = _tgHeldUrl;
-    _tgHeldUrl = url;
-    if (url != null) TelegramService.instance.hold(url);
-    if (old != null) TelegramService.instance.unhold(old);
+    if (url != null) {
+      TelegramService.instance.hold(this, url);
+    } else {
+      TelegramService.instance.unhold(this);
+    }
   }
 
   /// Oyna isitish (worker keshi) kerak EMASmi.

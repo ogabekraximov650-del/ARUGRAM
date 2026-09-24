@@ -37,11 +37,6 @@ deleted_classes = ["PresenceHub"]
 name = "arugram"
 workers_dev = true
 
-# Har daqiqada: foydalanuvchilarga yuborilgan eski video nusxalarini
-# bot chatlaridan tozalash (`tg_sweep`).
-[env.production.triggers]
-crons = ["* * * * *"]
-
 # Secrets (GitHub Actions orqali o'rnatiladi):
 # wrangler secret put TURSO_URL --env production
 # wrangler secret put TURSO_TOKEN --env production
@@ -64,3 +59,8 @@ crons = ["* * * * *"]
 #
 # Uchalasi ham FAQAT worker ichida ishlatiladi va ilovaga hech
 # qachon chiqmaydi.
+
+# Cron YO'Q (kamroq so'rov): bot nusxalarini ilova o'zi tozalaydi.
+# Bo'sh ro'yxat — avval qo'yilgan daqiqalik cron'ni ham o'chiradi.
+[env.production.triggers]
+crons = []

@@ -76,6 +76,16 @@ TEGILMAYDI). Ilovadagi server manzili `lib/services/api_base.dart`
 da — CI uni Cloudflare subdomenidan o'zi hisoblab `--dart-define`
 bilan beradi. Bot nomi kodda yo'q: `getMe` dan olinadi.
 
+**Kamroq so'rov + bot chatini tozalash (2026-09):** bot nusxalarini
+ILOVA o'zi foydalanuvchi hisobi bilan o'chiradi
+(`rust_tg_clear_bot_chat`, `messages.deleteHistory`) — pleyerdan
+chiqqanda, yuklab olish tugaganda, internet qaytganda (uzilganda
+navbatga qo'yiladi) va har ishga tushishda. Worker'da `tg_sent`,
+`/api/tg/release` va cron YO'Q. `/api/tg/deliver` — bazaga bitta
+o'qish, yozish yo'q. Video bot chatidan fayl NOMI bo'yicha topiladi
+(shaxsiy chat xabar raqamlari har hisobda boshqa). Sozlama
+(`/api/tg/config`) telefonda 12 soat keshlanadi.
+
 **Admin videoni ilovadan kanalga yuklaydi** (qism qo'shish ekrani,
 admin Telegram hisobini ulagan bo'lsa): `rust_tg_upload_start` —
 MTProto, 4 GB gacha, izoh = fayl nomi; so'ng
