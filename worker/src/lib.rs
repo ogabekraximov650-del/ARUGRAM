@@ -1168,7 +1168,8 @@ async fn init_db(env: &Env) -> bool {
         // -> kanal xabari. Bot kanal postini ko'rganda yoziladi.
         ("CREATE TABLE IF NOT EXISTS tg_files (
             file_name TEXT PRIMARY KEY,
-            msg_id INTEGER NOT NULL
+            msg_id INTEGER NOT NULL,
+            file_id TEXT DEFAULT ''
         )", vec![]),
         // Foydalanuvchiga allaqachon yuborilgan nusxa: har ko'rishda
         // bot chatiga YANGI xabar tashlanmasin.
@@ -1179,6 +1180,11 @@ async fn init_db(env: &Env) -> bool {
             PRIMARY KEY (user_id, file_name)
         )", vec![]),
     ]).await.is_ok();
+
+    // `tg_files.file_id` keyinroq qo'shildi — jadval allaqachon
+    // yaratilgan bazalar uchun (xato "ustun bor" — normal holat).
+    let _ = turso_exec(env,
+        "ALTER TABLE tg_files ADD COLUMN file_id TEXT DEFAULT ''", vec![]).await;
 
     ok
 }
@@ -9332,6 +9338,12 @@ fn needs_app_check(path: &str) -> bool {
     if path.starts_with("/api/telegram/") {
         return false;
     }
+    // Faylni kanalga joylash — ruxsat manzildagi bir martalik
+    // TOKEN bilan (`tg_store_token`). Ilovaning video yuklovchisi
+    // (Dio) imzo sarlavhasini qo'ymaydi, B2 da ham shunday edi.
+    if path == "/api/tg/store" {
+        return false;
+    }
     // ── TO'LOV WEBHOOK'I ─────────────────────────────────────
     //
     // TOPILGAN XATO: ilova imzosi tekshiruvi yoqilganda bu yo'l
@@ -9712,7 +9724,28 @@ fn tg_secret(env: &Env, name: &str) -> String {
 }
 
 fn tg_channel_id(env: &Env) -> i64 {
-    tg_secret(env, "TG_CHANNEL_ID").parse().unwrap_or(0)
+    normalize_channel_id(&tg_secret(env, "TG_CHANNEL_ID"))
+}
+
+/// Kanal ID sini Bot API ko'rinishiga (`-100...`) keltiradi.
+///
+/// TOPILGAN XATO (foydalanuvchi): ID secret'ga `-` belgisisiz
+/// yozilgan edi va ilova "Kanal topilmadi" dedi. Endi uchala
+/// yozuv ham to'g'ri tushuniladi:
+///   `-1001234567890` — tayyor;
+///   `1001234567890`  — faqat minus yetishmaydi;
+///   `1234567890`     — kanalning "yalang" raqami.
+fn normalize_channel_id(raw: &str) -> i64 {
+    let t = raw.trim();
+    let Ok(n) = t.parse::<i64>() else { return 0 };
+    if n <= 0 {
+        return n;
+    }
+    if t.starts_with("100") && t.len() >= 13 {
+        -n
+    } else {
+        -(1_000_000_000_000 + n)
+    }
 }
 
 /// Fayl nomi xavfsizmi: faqat harf, raqam, `.`, `_`, `-`.
@@ -9722,6 +9755,238 @@ fn tg_safe_name(name: &str) -> bool {
         && name != "."
         && name != ".."
         && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
+}
+
+// ── FAYLLARNI KANALDA SAQLASH (B2 o'rniga) ─────────────────────
+//
+// TALAB (foydalanuvchi): "rasmlar ham kanalga yuklanishi kerak".
+//
+// `/api/upload-token` endi `/api/tg/store` manzilini beradi. Ilova
+// faylni (B2 dagi kabi `X-Bz-File-Name` sarlavhasi bilan) shu yerga
+// yuboradi, bot uni yopiq kanalga HUJJAT sifatida joylaydi (sifat
+// buzilmaydi) va `tg_files` ga `file_id` bilan yozadi. Berishda
+// (`tg_serve`) fayl Bot API orqali olinib, Cloudflare keshida
+// saqlanadi — Telegram'ga har safar murojaat qilinmaydi.
+//
+// Chegara: Bot API bot yuklaydigan faylni 50 MB, beradigan faylni
+// 20 MB bilan cheklaydi. Rasmlar uchun bu yetarli; VIDEOLAR esa
+// ilovadan adminning o'z Telegram hisobi bilan yuklanadi
+// (`rust_tg_upload_start`, 4 GB gacha).
+
+const TG_STORE_MAX: usize = 50 * 1024 * 1024;
+const TG_SERVE_MAX: i64 = 20 * 1024 * 1024;
+/// Yuklash tokenining umri (B2 niki ham shunday — 24 soat).
+const TG_STORE_TTL_SECS: i64 = 24 * 3600;
+
+fn tg_store_key(env: &Env) -> String {
+    let k = tg_secret(env, "APP_SIGN_SECRET");
+    if !k.is_empty() {
+        return k;
+    }
+    tg_secret(env, "TELEGRAM_BOT_TOKEN")
+}
+
+fn tg_store_mac(env: &Env, exp: i64) -> String {
+    let key = tg_store_key(env);
+    let Ok(mut h) = <hmac::Hmac<sha2::Sha256> as hmac::Mac>::new_from_slice(key.as_bytes()) else {
+        return String::new();
+    };
+    hmac::Mac::update(&mut h, format!("tg-store.{exp}").as_bytes());
+    hmac::Mac::finalize(h)
+        .into_bytes()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// Yuklash tokeni (24 soat): `<muddat>.<imzo>`.
+fn tg_store_token(env: &Env) -> String {
+    let exp = now_ms() / 1000 + TG_STORE_TTL_SECS;
+    format!("{exp}.{}", tg_store_mac(env, exp))
+}
+
+fn tg_store_token_ok(env: &Env, token: &str) -> bool {
+    let Some((exp, mac)) = token.trim().split_once('.') else { return false };
+    let Ok(exp) = exp.parse::<i64>() else { return false };
+    if exp < now_ms() / 1000 || tg_store_key(env).is_empty() {
+        return false;
+    }
+    let want = tg_store_mac(env, exp);
+    // Doimiy vaqtli solishtirish.
+    want.len() == mac.len()
+        && want.bytes().zip(mac.bytes()).fold(0u8, |a, (x, y)| a | (x ^ y)) == 0
+}
+
+/// multipart/form-data tanasini qo'lda yig'adi (Bot API `sendDocument`).
+fn multipart_body(boundary: &str, fields: &[(&str, String)], file_field: &str,
+                  file_name: &str, mime: &str, data: &[u8]) -> Vec<u8> {
+    let mut b = Vec::with_capacity(data.len() + 1024);
+    for (k, v) in fields {
+        b.extend_from_slice(format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n"
+        ).as_bytes());
+    }
+    b.extend_from_slice(format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"{file_field}\"; filename=\"{file_name}\"\r\nContent-Type: {mime}\r\n\r\n"
+    ).as_bytes());
+    b.extend_from_slice(data);
+    b.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    b
+}
+
+async fn tg_store(mut req: Request, env: &Env) -> Result<Response> {
+    let head = |k: &str| req.headers().get(k).ok().flatten().unwrap_or_default();
+    if !tg_store_token_ok(env, &head("Authorization")) {
+        return json_resp(&json!({"error": "unauthorized"}), 401);
+    }
+    let name = head("X-Bz-File-Name").trim().to_string();
+    if !tg_safe_name(&name) {
+        return json_resp(&json!({"error": "bad_file_name"}), 400);
+    }
+    let mime = {
+        let m = head("Content-Type");
+        if m.is_empty() { "application/octet-stream".to_string() } else { m }
+    };
+    let channel = tg_channel_id(env);
+    if channel == 0 {
+        return json_resp(&json!({"error": "channel_not_configured"}), 503);
+    }
+    let data = req.bytes().await?;
+    if data.is_empty() {
+        return json_resp(&json!({"error": "empty"}), 400);
+    }
+    if data.len() > TG_STORE_MAX {
+        return json_resp(&json!({
+            "error": "too_large",
+            "detail": "Bot orqali 50 MB gacha. Videoni admin Telegram hisobi bilan yuklang.",
+        }), 413);
+    }
+
+    let token = env.secret("TELEGRAM_BOT_TOKEN")?.to_string();
+    let boundary = format!("aru{}", random_hex(24));
+    let body = multipart_body(&boundary, &[
+        ("chat_id", channel.to_string()),
+        ("caption", name.clone()),
+        ("disable_notification", "true".to_string()),
+        ("disable_content_type_detection", "true".to_string()),
+    ], "document", &name, &mime, &data);
+    let h = Headers::new();
+    h.set("Content-Type", &format!("multipart/form-data; boundary={boundary}"))?;
+    let arr = js_sys::Uint8Array::from(&body[..]);
+    let r = Request::new_with_init(
+        &format!("https://api.telegram.org/bot{token}/sendDocument"),
+        RequestInit::new().with_method(Method::Post).with_headers(h).with_body(Some(arr.into())),
+    )?;
+    let mut resp = Fetch::Request(r).send().await?;
+    let d: Value = resp.json().await.unwrap_or(json!({}));
+    if d["ok"] != json!(true) {
+        return json_resp(&json!({
+            "error": "telegram",
+            "detail": d["description"].as_str().unwrap_or("noma'lum"),
+        }), 502);
+    }
+    let msg_id = d["result"]["message_id"].as_i64().unwrap_or(0);
+    let file_id = d["result"]["document"]["file_id"].as_str().unwrap_or("").to_string();
+    turso_exec(env,
+        "INSERT INTO tg_files (file_name, msg_id, file_id) VALUES (?, ?, ?)
+         ON CONFLICT(file_name) DO UPDATE SET msg_id=excluded.msg_id, file_id=excluded.file_id",
+        vec![TursoArg::text(&name), TursoArg::int(msg_id), TursoArg::text(&file_id)]).await?;
+    // B2 javobi bilan bir xil maydonlar (ilova `fileName` ni o'qiydi).
+    ok_nostore(json!({
+        "fileName": name,
+        "contentLength": data.len(),
+        "contentType": mime,
+    }))
+}
+
+fn tg_mime_for(name: &str) -> &'static str {
+    let ext = name.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    match ext.as_str() {
+        "jpg" | "jpeg" => "image/jpeg",
+        "png" => "image/png",
+        "webp" => "image/webp",
+        "gif" => "image/gif",
+        "mp4" => "video/mp4",
+        "m4a" => "audio/mp4",
+        "ogg" | "oga" => "audio/ogg",
+        "mp3" => "audio/mpeg",
+        _ => "application/octet-stream",
+    }
+}
+
+/// Kanalda (bot orqali) saqlangan faylni beradi. Fayl Telegram'da
+/// bo'lmasa `None` — chaqiruvchi B2 ga o'tadi.
+async fn tg_serve(env: &Env, origin: &str, fname: &str, range: Option<&str>) -> Result<Option<Response>> {
+    let name = fname.split('?').next().unwrap_or(fname);
+    if !tg_safe_name(name) {
+        return Ok(None);
+    }
+    // 1) Chekka kesh — bazaga ham, Telegram'ga ham chiqilmaydi.
+    let key = format!("{origin}/__tgfile/{name}");
+    let cached = match Request::new(&key, Method::Get) {
+        Ok(k) => Cache::default().get(&k, false).await.ok().flatten(),
+        Err(_) => None,
+    };
+    let bytes: Vec<u8> = if let Some(mut c) = cached {
+        c.bytes().await?
+    } else {
+        // 2) Bazada bormi (faqat bot joylagan — `file_id` bor fayllar).
+        let res = turso_exec(env,
+            "SELECT file_id FROM tg_files WHERE file_name=? AND COALESCE(file_id,'') <> ''",
+            vec![TursoArg::text(name)]).await;
+        let Some(file_id) = res.ok().and_then(|r| first_row(&r))
+            .and_then(|r| r["file_id"].as_str().map(|s| s.to_string())) else {
+            return Ok(None);
+        };
+        // 3) Telegram'dan.
+        let f = match tg_api(env, "getFile", json!({"file_id": file_id})).await {
+            Ok(f) => f,
+            Err(e) => return Ok(Some(json_resp(&json!({"error": e.to_string()}), 502)?)),
+        };
+        if f["file_size"].as_i64().unwrap_or(0) > TG_SERVE_MAX {
+            return Ok(Some(json_resp(&json!({"error": "too_large"}), 413)?));
+        }
+        let path = f["file_path"].as_str().unwrap_or("").to_string();
+        let token = env.secret("TELEGRAM_BOT_TOKEN")?.to_string();
+        let mut r = Fetch::Url(Url::parse(&format!(
+            "https://api.telegram.org/file/bot{token}/{path}"))?).send().await?;
+        if r.status_code() != 200 {
+            return Ok(Some(json_resp(&json!({"error": "telegram_file"}), 502)?));
+        }
+        let b = r.bytes().await?;
+        if let Ok(k) = Request::new(&key, Method::Get) {
+            if let Ok(mut to_cache) = Response::from_bytes(b.clone()) {
+                let _ = to_cache.headers_mut().set("Cache-Control", "public, max-age=2592000");
+                let _ = Cache::default().put(&k, to_cache).await;
+            }
+        }
+        b
+    };
+
+    let total = bytes.len();
+    let mime = tg_mime_for(name);
+    let (start, end) = match range.and_then(parse_range) {
+        Some((s, e)) if total > 0 && (s as usize) < total => {
+            let e = e.map(|e| (e as usize).min(total - 1)).unwrap_or(total - 1);
+            (s as usize, e)
+        }
+        _ => {
+            let mut out = Response::from_bytes(bytes)?;
+            let h = out.headers_mut();
+            h.set("Content-Type", mime)?;
+            h.set("Accept-Ranges", "bytes")?;
+            h.set("Cache-Control", "public, max-age=2592000")?;
+            set_cors(&mut out);
+            return Ok(Some(out));
+        }
+    };
+    let mut out = Response::from_bytes(bytes[start..=end].to_vec())?.with_status(206);
+    let h = out.headers_mut();
+    h.set("Content-Type", mime)?;
+    h.set("Accept-Ranges", "bytes")?;
+    h.set("Content-Range", &format!("bytes {start}-{end}/{total}"))?;
+    set_cors(&mut out);
+    Ok(Some(out))
 }
 
 /// Qism (yoki uning bitta sifati) o'chirildi — kanal posti ham,
@@ -9813,6 +10078,10 @@ async fn tg_route(mut req: Request, env: &Env, path: &str, method: Method) -> Re
             "api_hash": api_hash,
             "bot": bot_username(env).await,
         }));
+    }
+
+    if method == Method::Post && path == "/api/tg/store" {
+        return tg_store(req, env).await;
     }
 
     let Some(u) = session_user(env, &bearer(&req)).await? else {
@@ -10039,6 +10308,16 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
 
     // B2 proxy — Range header bilan uzatiladi (video seek)
     if method == Method::Get {
+        // ── TELEGRAM KANALIDAGI FAYL (rasmlar) ────────────────
+        // Kanalga bot orqali joylangan fayllar shu yerdan beriladi;
+        // qolganlari (B2) odatdagidek pastda.
+        for pre in ["/api/image/", "/api/media/", "/api/play/"] {
+            if let Some(fname) = path.strip_prefix(pre) {
+                if let Some(r) = tg_serve(&env, &origin, fname, range_header.as_deref()).await? {
+                    return Ok(r);
+                }
+            }
+        }
         if let Some(fname) = path.strip_prefix("/api/image/") {
             // Javob HECH O'ZGARTIRILMASDAN uzatiladi — trafikni
             // endi ilovaning o'zi sanaydi (`note_traffic` izohi).
@@ -10340,6 +10619,15 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
         }
 
         (Method::Post, "/api/upload-token") => {
+            // ARUGRAM: kanal sozlangan bo'lsa fayllar (rasmlar va h.k.)
+            // B2 o'rniga Telegram kanaliga joylanadi. Javob B2 niki
+            // bilan BIR XIL shaklda — ilovadagi yuklovchilar o'zgarmaydi.
+            if tg_channel_id(&env) != 0 {
+                return ok_nostore(json!({
+                    "uploadUrl": format!("{origin}/api/tg/store"),
+                    "authorizationToken": tg_store_token(&env),
+                }));
+            }
             match b2_get_upload_url(&env).await {
                 Ok(d) => ok(d),
                 Err(e) => err500(&format!("B2 xatosi: {e}")),
@@ -10714,3 +11002,18 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
     }
 }
 
+
+#[cfg(test)]
+mod tg_tests {
+    use super::normalize_channel_id;
+
+    #[test]
+    fn kanal_id_har_qanday_yozuvda_tushuniladi() {
+        assert_eq!(normalize_channel_id("-1001234567890"), -1001234567890);
+        assert_eq!(normalize_channel_id("1001234567890"), -1001234567890);
+        assert_eq!(normalize_channel_id("1234567890"), -1001234567890);
+        assert_eq!(normalize_channel_id(" 1001234567890 "), -1001234567890);
+        assert_eq!(normalize_channel_id(""), 0);
+        assert_eq!(normalize_channel_id("abc"), 0);
+    }
+}
