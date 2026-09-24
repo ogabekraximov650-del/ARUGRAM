@@ -684,10 +684,9 @@ class AuthService extends ChangeNotifier {
 
   /// Foydalanuvchi tanlagan rasmni profil rasmi qilib qo'yadi.
   ///
-  /// Yo'l anime rasmlari bilan BIR XIL: fayl B2'ga to'g'ridan-to'g'ri
-  /// yuklanadi (`/api/upload-token` bergan bir martalik manzil bilan),
-  /// keyin workerga faqat FAYL NOMI aytiladi. Ya'ni rasm baytlari
-  /// worker orqali o'tmaydi.
+  /// Yo'l anime rasmlari bilan BIR XIL: fayl Telegram'ga ilovaning
+  /// o'zi orqali yuklanadi, keyin workerga faqat FAYL NOMI aytiladi.
+  /// Ya'ni rasm baytlari worker orqali o'tmaydi.
   ///
   /// Eski rasmni B2'dan o'chirishni WORKER bajaradi — u eski fayl
   /// nomini bazadan biladi va yangisini saqlagandan KEYIN o'chiradi.
@@ -703,33 +702,25 @@ class AuthService extends ChangeNotifier {
     if (s == null || s.isEmpty || u == null) return 'Avval hisobga kiring';
 
     try {
-      final tokenRes = await http
-          .post(Uri.parse('$kApiBase/api/upload-token'))
-          .timeout(const Duration(seconds: 20));
-      if (tokenRes.statusCode != 200) return 'Yuklash manzili olinmadi';
-      final td = jsonDecode(tokenRes.body) as Map<String, dynamic>;
-      final uploadUrl = (td['uploadUrl'] ?? '').toString();
-      final authToken = (td['authorizationToken'] ?? '').toString();
-      if (uploadUrl.isEmpty || authToken.isEmpty) {
-        return 'Yuklash manzili olinmadi';
-      }
-
       final fileName =
           'avatar_${u.id}_${DateTime.now().millisecondsSinceEpoch}.jpg';
 
-      final up = await http
-          .post(
-            Uri.parse(uploadUrl),
-            headers: {
-              'Authorization': authToken,
-              'X-Bz-File-Name': fileName,
-              'Content-Type': 'image/jpeg',
-              'X-Bz-Content-Sha1': 'do_not_verify',
-            },
-            body: jpegBytes,
-          )
-          .timeout(const Duration(seconds: 60));
-      if (up.statusCode != 200) return 'Rasm yuklanmadi';
+      // ── TELEGRAM'GA (ilovaning o'zi orqali) ──────────────────
+      // Rasm worker'dan o'tmaydi: foydalanuvchi uni o'z bot chatiga
+      // yuboradi, bot kanalga ko'chiradi (`TelegramService.uploadFile`).
+      // Yuklovchi fayl yo'lini so'raydi — baytlar bir zumga
+      // vaqtinchalik faylga yoziladi va darhol o'chiriladi.
+      final tmp = File('${Directory.systemTemp.path}/$fileName');
+      await tmp.writeAsBytes(jpegBytes, flush: true);
+      try {
+        final err = await TelegramService.instance
+            .uploadFile(tmp.path, fileName, 'image/jpeg');
+        if (err != null) return err;
+      } finally {
+        try {
+          await tmp.delete();
+        } catch (_) {}
+      }
 
       final save = await http
           .post(

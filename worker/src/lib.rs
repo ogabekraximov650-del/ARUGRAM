@@ -3858,7 +3858,7 @@ fn user_public(origin: &str, u: &Value) -> Value {
     let id = u["id"].as_i64().unwrap_or(0);
     let avatar = u["avatar_file"].as_str().unwrap_or("");
     let photo_url = if avatar.is_empty() {
-        format!("{origin}/api/avatar/{id}")
+        String::new() /* ARUGRAM: Telegram avatari worker orqali uzatilmaydi */
     } else {
         format!("{origin}/api/image/{avatar}")
     };
@@ -4332,6 +4332,7 @@ fn ok_nostore(v: Value) -> Result<Response> {
 
 // ── Avatar (Telegram → worker → ilova) ─────────────────────────
 
+#[allow(dead_code)] // ARUGRAM: Telegram avatari endi uzatilmaydi.
 async fn tg_avatar(env: &Env, user_id: i64) -> Result<Response> {
     let cache = Cache::default();
     let key_url = format!("https://fulutter-chunk-cache.internal/_avatar/{user_id}");
@@ -4434,6 +4435,12 @@ async fn handle_tg_webhook(env: &Env, mut req: Request) -> Result<Response> {
         }
     }
     let msg = update["message"].clone();
+    // Foydalanuvchi ilovadan bot chatiga yuborgan fayl (surat, video,
+    // ovozli xabar) — bot uni kanalga ko'chiradi (`tg_user_media`).
+    if tg_has_media(&msg) {
+        tg_user_media(env, &msg).await;
+        return ok(json!({"ok": true}));
+    }
     let chat_id = msg["chat"]["id"].as_i64().unwrap_or(0);
     let text = msg["text"].as_str().unwrap_or("").trim().to_string();
     if chat_id == 0 {
@@ -5980,7 +5987,7 @@ fn comment_public(origin: &str, r: &Value) -> Value {
     let uid = r["user_id"].as_i64().unwrap_or(0);
     let avatar = r["avatar_file"].as_str().unwrap_or("");
     let photo = if avatar.is_empty() {
-        format!("{origin}/api/avatar/{uid}")
+        String::new() /* ARUGRAM: Telegram avatari worker orqali uzatilmaydi */
     } else {
         format!("{origin}/api/image/{avatar}")
     };
@@ -6172,7 +6179,7 @@ async fn comments_add(mut req: Request, env: &Env, origin: &str) -> Result<Respo
 
     let avatar = u["avatar_file"].as_str().unwrap_or("");
     let photo = if avatar.is_empty() {
-        format!("{origin}/api/avatar/{me}")
+        String::new() /* ARUGRAM: Telegram avatari worker orqali uzatilmaydi */
     } else {
         format!("{origin}/api/image/{avatar}")
     };
@@ -7005,7 +7012,7 @@ async fn chat_threads(req: &Request, env: &Env, origin: &str) -> Result<Response
         let uid = o["user_id"].as_i64().unwrap_or(0);
         let avatar = o["avatar_file"].as_str().unwrap_or("");
         let photo = if avatar.is_empty() {
-            format!("{origin}/api/avatar/{uid}")
+            String::new() /* ARUGRAM: Telegram avatari worker orqali uzatilmaydi */
         } else {
             format!("{origin}/api/image/{avatar}")
         };
@@ -7403,9 +7410,9 @@ async fn report_add(mut req: Request, env: &Env) -> Result<Response> {
 
 /// Shikoyat qatorini ilova kutgan ko'rinishga aylantiradi.
 fn report_public(origin: &str, r: &Value) -> Value {
-    let photo = |uid: i64, file: &str| -> String {
+    let photo = |_uid: i64, file: &str| -> String {
         if file.is_empty() {
-            format!("{origin}/api/avatar/{uid}")
+            String::new() /* ARUGRAM: Telegram avatari worker orqali uzatilmaydi */
         } else {
             format!("{origin}/api/image/{file}")
         }
@@ -7759,7 +7766,7 @@ async fn public_profile(
     };
     let avatar = u["avatar_file"].as_str().unwrap_or("");
     let photo = if avatar.is_empty() {
-        format!("{origin}/api/avatar/{id}")
+        String::new() /* ARUGRAM: Telegram avatari worker orqali uzatilmaydi */
     } else {
         format!("{origin}/api/image/{avatar}")
     };
@@ -8103,7 +8110,7 @@ async fn admin_users(req: &Request, env: &Env, origin: &str) -> Result<Response>
         let uid = o["id"].as_i64().unwrap_or(0);
         let avatar = o["avatar_file"].as_str().unwrap_or("");
         let photo = if avatar.is_empty() {
-            format!("{origin}/api/avatar/{uid}")
+            String::new() /* ARUGRAM: Telegram avatari worker orqali uzatilmaydi */
         } else {
             format!("{origin}/api/image/{avatar}")
         };
@@ -9330,12 +9337,6 @@ fn needs_app_check(path: &str) -> bool {
     if path.starts_with("/api/telegram/") {
         return false;
     }
-    // Faylni kanalga joylash — ruxsat manzildagi bir martalik
-    // TOKEN bilan (`tg_store_token`). Ilovaning video yuklovchisi
-    // (Dio) imzo sarlavhasini qo'ymaydi, B2 da ham shunday edi.
-    if path == "/api/tg/store" {
-        return false;
-    }
     // ── TO'LOV WEBHOOK'I ─────────────────────────────────────
     //
     // TOPILGAN XATO: ilova imzosi tekshiruvi yoqilganda bu yo'l
@@ -9749,236 +9750,74 @@ fn tg_safe_name(name: &str) -> bool {
         && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
 }
 
-// ── FAYLLARNI KANALDA SAQLASH (B2 o'rniga) ─────────────────────
+// ── FOYDALANUVCHI FAYLI: BOT CHATI -> KANAL ──────────────────
 //
-// TALAB (foydalanuvchi): "rasmlar ham kanalga yuklanishi kerak".
+// TALAB (foydalanuvchi): "worker orqali umuman fayl o'tmasin —
+// Telegram'ga yuklanadigan barcha narsalar ilovaning o'zidan
+// o'tkazilsin" va "kanalga admin bo'lmagan odam ham fayl yubora
+// olsin".
 //
-// `/api/upload-token` endi `/api/tg/store` manzilini beradi. Ilova
-// faylni (B2 dagi kabi `X-Bz-File-Name` sarlavhasi bilan) shu yerga
-// yuboradi, bot uni yopiq kanalga HUJJAT sifatida joylaydi (sifat
-// buzilmaydi) va `tg_files` ga `file_id` bilan yozadi. Berishda
-// (`tg_serve`) fayl Bot API orqali olinib, Cloudflare keshida
-// saqlanadi — Telegram'ga har safar murojaat qilinmaydi.
+// Ilova faylni foydalanuvchining O'Z Telegram hisobi bilan BOT
+// CHATIGA yuboradi (izoh = fayl nomi). Bot xabarni ko'rib uni yopiq
+// kanalga NUSXALAYDI (`copyMessage` — fayl qayta yuklanmaydi, hajm
+// chegarasi yo'q) va `tg_files` ga yozadi. Fayl baytlari worker'dan
+// bir marta ham o'tmaydi.
 //
-// Chegara: Bot API bot yuklaydigan faylni 50 MB, beradigan faylni
-// 20 MB bilan cheklaydi. Rasmlar uchun bu yetarli; VIDEOLAR esa
-// ilovadan adminning o'z Telegram hisobi bilan yuklanadi
-// (`rust_tg_upload_start`, 4 GB gacha).
+// ── KIM QAYSI NOMNI YOZA OLADI ─────────────────────────────────
+//
+// Aks holda istalgan odam botga "ep_1_1_720p_...mp4" izohli fayl
+// yuborib, boshqalarga o'z videosini ko'rsatib qo'yardi:
+//   * admin — istalgan nom;
+//   * boshqalar — faqat O'Z nomlari: `avatar_<id>_...`,
+//     `chat_<id>_...` (id — ilovadagi hisob raqami);
+//   * bor nom QAYTA yozilmaydi (admin'dan boshqasi uchun).
 
-const TG_STORE_MAX: usize = 50 * 1024 * 1024;
-const TG_SERVE_MAX: i64 = 20 * 1024 * 1024;
-/// Yuklash tokenining umri (B2 niki ham shunday — 24 soat).
-const TG_STORE_TTL_SECS: i64 = 24 * 3600;
-
-fn tg_store_key(env: &Env) -> String {
-    let k = tg_secret(env, "APP_SIGN_SECRET");
-    if !k.is_empty() {
-        return k;
-    }
-    tg_secret(env, "TELEGRAM_BOT_TOKEN")
-}
-
-fn tg_store_mac(env: &Env, exp: i64) -> String {
-    let key = tg_store_key(env);
-    let Ok(mut h) = <hmac::Hmac<sha2::Sha256> as hmac::Mac>::new_from_slice(key.as_bytes()) else {
-        return String::new();
-    };
-    hmac::Mac::update(&mut h, format!("tg-store.{exp}").as_bytes());
-    hmac::Mac::finalize(h)
-        .into_bytes()
+fn tg_has_media(msg: &Value) -> bool {
+    ["photo", "video", "document", "voice", "audio", "animation", "video_note"]
         .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
+        .any(|k| !msg[*k].is_null())
 }
 
-/// Yuklash tokeni (24 soat): `<muddat>.<imzo>`.
-fn tg_store_token(env: &Env) -> String {
-    let exp = now_ms() / 1000 + TG_STORE_TTL_SECS;
-    format!("{exp}.{}", tg_store_mac(env, exp))
-}
-
-fn tg_store_token_ok(env: &Env, token: &str) -> bool {
-    let Some((exp, mac)) = token.trim().split_once('.') else { return false };
-    let Ok(exp) = exp.parse::<i64>() else { return false };
-    if exp < now_ms() / 1000 || tg_store_key(env).is_empty() {
-        return false;
-    }
-    let want = tg_store_mac(env, exp);
-    // Doimiy vaqtli solishtirish.
-    want.len() == mac.len()
-        && want.bytes().zip(mac.bytes()).fold(0u8, |a, (x, y)| a | (x ^ y)) == 0
-}
-
-/// multipart/form-data tanasini qo'lda yig'adi (Bot API `sendDocument`).
-fn multipart_body(boundary: &str, fields: &[(&str, String)], file_field: &str,
-                  file_name: &str, mime: &str, data: &[u8]) -> Vec<u8> {
-    let mut b = Vec::with_capacity(data.len() + 1024);
-    for (k, v) in fields {
-        b.extend_from_slice(format!(
-            "--{boundary}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n"
-        ).as_bytes());
-    }
-    b.extend_from_slice(format!(
-        "--{boundary}\r\nContent-Disposition: form-data; name=\"{file_field}\"; filename=\"{file_name}\"\r\nContent-Type: {mime}\r\n\r\n"
-    ).as_bytes());
-    b.extend_from_slice(data);
-    b.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
-    b
-}
-
-async fn tg_store(mut req: Request, env: &Env) -> Result<Response> {
-    let head = |k: &str| req.headers().get(k).ok().flatten().unwrap_or_default();
-    if !tg_store_token_ok(env, &head("Authorization")) {
-        return json_resp(&json!({"error": "unauthorized"}), 401);
-    }
-    let name = head("X-Bz-File-Name").trim().to_string();
-    if !tg_safe_name(&name) {
-        return json_resp(&json!({"error": "bad_file_name"}), 400);
-    }
-    let mime = {
-        let m = head("Content-Type");
-        if m.is_empty() { "application/octet-stream".to_string() } else { m }
-    };
+async fn tg_user_media(env: &Env, msg: &Value) {
+    let from = msg["from"]["id"].as_i64().unwrap_or(0);
+    let chat = msg["chat"]["id"].as_i64().unwrap_or(0);
+    let msg_id = msg["message_id"].as_i64().unwrap_or(0);
     let channel = tg_channel_id(env);
-    if channel == 0 {
-        return json_resp(&json!({"error": "channel_not_configured"}), 503);
+    let name = msg["caption"].as_str().unwrap_or("").lines().next().unwrap_or("").trim().to_string();
+    if from == 0 || chat == 0 || msg_id == 0 || channel == 0 || !tg_safe_name(&name) {
+        return;
     }
-    let data = req.bytes().await?;
-    if data.is_empty() {
-        return json_resp(&json!({"error": "empty"}), 400);
+    let admin = from == ADMIN_TELEGRAM_ID;
+    if !admin {
+        let res = turso_exec(env, "SELECT id FROM users_db WHERE telegram_id=?",
+            vec![TursoArg::int(from)]).await;
+        let Some(uid) = res.ok().and_then(|r| first_row(&r)).and_then(|r| r["id"].as_i64()) else {
+            return;
+        };
+        let own = name.starts_with(&format!("avatar_{uid}_")) || name.starts_with(&format!("chat_{uid}_"));
+        if !own {
+            return;
+        }
     }
-    if data.len() > TG_STORE_MAX {
-        return json_resp(&json!({
-            "error": "too_large",
-            "detail": "Bot orqali 50 MB gacha. Videoni admin Telegram hisobi bilan yuklang.",
-        }), 413);
+    let copied = tg_api(env, "copyMessage", json!({
+        "chat_id": channel,
+        "from_chat_id": chat,
+        "message_id": msg_id,
+        "disable_notification": true,
+    })).await;
+    let Ok(c) = copied else { return };
+    let ch_msg = c["message_id"].as_i64().unwrap_or(0);
+    if ch_msg <= 0 {
+        return;
     }
-
-    let token = env.secret("TELEGRAM_BOT_TOKEN")?.to_string();
-    let boundary = format!("aru{}", random_hex(24));
-    let body = multipart_body(&boundary, &[
-        ("chat_id", channel.to_string()),
-        ("caption", name.clone()),
-        ("disable_notification", "true".to_string()),
-        ("disable_content_type_detection", "true".to_string()),
-    ], "document", &name, &mime, &data);
-    let h = Headers::new();
-    h.set("Content-Type", &format!("multipart/form-data; boundary={boundary}"))?;
-    let arr = js_sys::Uint8Array::from(&body[..]);
-    let r = Request::new_with_init(
-        &format!("https://api.telegram.org/bot{token}/sendDocument"),
-        RequestInit::new().with_method(Method::Post).with_headers(h).with_body(Some(arr.into())),
-    )?;
-    let mut resp = Fetch::Request(r).send().await?;
-    let d: Value = resp.json().await.unwrap_or(json!({}));
-    if d["ok"] != json!(true) {
-        return json_resp(&json!({
-            "error": "telegram",
-            "detail": d["description"].as_str().unwrap_or("noma'lum"),
-        }), 502);
-    }
-    let msg_id = d["result"]["message_id"].as_i64().unwrap_or(0);
-    let file_id = d["result"]["document"]["file_id"].as_str().unwrap_or("").to_string();
-    turso_exec(env,
-        "INSERT INTO tg_files (file_name, msg_id, file_id) VALUES (?, ?, ?)
-         ON CONFLICT(file_name) DO UPDATE SET msg_id=excluded.msg_id, file_id=excluded.file_id",
-        vec![TursoArg::text(&name), TursoArg::int(msg_id), TursoArg::text(&file_id)]).await?;
-    // B2 javobi bilan bir xil maydonlar (ilova `fileName` ni o'qiydi).
-    ok_nostore(json!({
-        "fileName": name,
-        "contentLength": data.len(),
-        "contentType": mime,
-    }))
-}
-
-fn tg_mime_for(name: &str) -> &'static str {
-    let ext = name.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
-    match ext.as_str() {
-        "jpg" | "jpeg" => "image/jpeg",
-        "png" => "image/png",
-        "webp" => "image/webp",
-        "gif" => "image/gif",
-        "mp4" => "video/mp4",
-        "m4a" => "audio/mp4",
-        "ogg" | "oga" => "audio/ogg",
-        "mp3" => "audio/mpeg",
-        _ => "application/octet-stream",
-    }
-}
-
-/// Kanalda (bot orqali) saqlangan faylni beradi. Fayl Telegram'da
-/// bo'lmasa `None` — chaqiruvchi B2 ga o'tadi.
-async fn tg_serve(env: &Env, origin: &str, fname: &str, range: Option<&str>) -> Result<Option<Response>> {
-    let name = fname.split('?').next().unwrap_or(fname);
-    if !tg_safe_name(name) {
-        return Ok(None);
-    }
-    // 1) Chekka kesh — bazaga ham, Telegram'ga ham chiqilmaydi.
-    let key = format!("{origin}/__tgfile/{name}");
-    let cached = match Request::new(&key, Method::Get) {
-        Ok(k) => Cache::default().get(&k, false).await.ok().flatten(),
-        Err(_) => None,
-    };
-    let bytes: Vec<u8> = if let Some(mut c) = cached {
-        c.bytes().await?
+    let sql = if admin {
+        "INSERT INTO tg_files (file_name, msg_id) VALUES (?, ?)
+         ON CONFLICT(file_name) DO UPDATE SET msg_id=excluded.msg_id"
     } else {
-        // 2) Bazada bormi (faqat bot joylagan — `file_id` bor fayllar).
-        let res = turso_exec(env,
-            "SELECT file_id FROM tg_files WHERE file_name=? AND COALESCE(file_id,'') <> ''",
-            vec![TursoArg::text(name)]).await;
-        let Some(file_id) = res.ok().and_then(|r| first_row(&r))
-            .and_then(|r| r["file_id"].as_str().map(|s| s.to_string())) else {
-            return Ok(None);
-        };
-        // 3) Telegram'dan.
-        let f = match tg_api(env, "getFile", json!({"file_id": file_id})).await {
-            Ok(f) => f,
-            Err(e) => return Ok(Some(json_resp(&json!({"error": e.to_string()}), 502)?)),
-        };
-        if f["file_size"].as_i64().unwrap_or(0) > TG_SERVE_MAX {
-            return Ok(Some(json_resp(&json!({"error": "too_large"}), 413)?));
-        }
-        let path = f["file_path"].as_str().unwrap_or("").to_string();
-        let token = env.secret("TELEGRAM_BOT_TOKEN")?.to_string();
-        let mut r = Fetch::Url(Url::parse(&format!(
-            "https://api.telegram.org/file/bot{token}/{path}"))?).send().await?;
-        if r.status_code() != 200 {
-            return Ok(Some(json_resp(&json!({"error": "telegram_file"}), 502)?));
-        }
-        let b = r.bytes().await?;
-        if let Ok(k) = Request::new(&key, Method::Get) {
-            if let Ok(mut to_cache) = Response::from_bytes(b.clone()) {
-                let _ = to_cache.headers_mut().set("Cache-Control", "public, max-age=2592000");
-                let _ = Cache::default().put(&k, to_cache).await;
-            }
-        }
-        b
+        "INSERT INTO tg_files (file_name, msg_id) VALUES (?, ?)
+         ON CONFLICT(file_name) DO NOTHING"
     };
-
-    let total = bytes.len();
-    let mime = tg_mime_for(name);
-    let (start, end) = match range.and_then(parse_range) {
-        Some((s, e)) if total > 0 && (s as usize) < total => {
-            let e = e.map(|e| (e as usize).min(total - 1)).unwrap_or(total - 1);
-            (s as usize, e)
-        }
-        _ => {
-            let mut out = Response::from_bytes(bytes)?;
-            let h = out.headers_mut();
-            h.set("Content-Type", mime)?;
-            h.set("Accept-Ranges", "bytes")?;
-            h.set("Cache-Control", "public, max-age=2592000")?;
-            set_cors(&mut out);
-            return Ok(Some(out));
-        }
-    };
-    let mut out = Response::from_bytes(bytes[start..=end].to_vec())?.with_status(206);
-    let h = out.headers_mut();
-    h.set("Content-Type", mime)?;
-    h.set("Accept-Ranges", "bytes")?;
-    h.set("Content-Range", &format!("bytes {start}-{end}/{total}"))?;
-    set_cors(&mut out);
-    Ok(Some(out))
+    let _ = turso_exec(env, sql, vec![TursoArg::text(&name), TursoArg::int(ch_msg)]).await;
 }
 
 /// Qism (yoki uning bitta sifati) o'chirildi — kanal posti ham,
@@ -10070,10 +9909,6 @@ async fn tg_route(mut req: Request, env: &Env, path: &str, method: Method) -> Re
         }));
     }
 
-    if method == Method::Post && path == "/api/tg/store" {
-        return tg_store(req, env).await;
-    }
-
     let Some(u) = session_user(env, &bearer(&req)).await? else {
         return json_resp(&json!({"error": "unauthorized"}), 401);
     };
@@ -10089,10 +9924,24 @@ async fn tg_route(mut req: Request, env: &Env, path: &str, method: Method) -> Re
         // va bazaga hech narsa YOZILMAYDI. Nusxani ilova o'zi
         // foydalanuvchi hisobi bilan o'chiradi (`rust_tg_clear_bot_chat`),
         // ya'ni worker nusxalarni kuzatmaydi va cron ham kerak emas.
+        // Fayllarni foydalanuvchining bot chatiga yuboradi (bittasi
+        // `file` yoki ko'pi `files` — masalan ekrandagi hamma
+        // posterlar BITTA so'rovda, 100 tagacha).
+        //
+        // KAMROQ SO'ROV: bazaga BITTA so'rov (pipeline), bazaga hech
+        // narsa YOZILMAYDI, Telegram'ga bitta `copyMessages`. Nusxani
+        // ilova o'zi o'chiradi (`rust_tg_clear_bot_chat`).
         (Method::Post, "/api/tg/deliver") => {
             let body: Value = req.json().await.unwrap_or(json!({}));
-            let name = body["file"].as_str().unwrap_or("").trim().to_string();
-            if !tg_safe_name(&name) {
+            let mut names: Vec<String> = match body["files"].as_array() {
+                Some(a) => a.iter().filter_map(|v| v.as_str().map(|s| s.trim().to_string())).collect(),
+                None => vec![body["file"].as_str().unwrap_or("").trim().to_string()],
+            };
+            names.retain(|n| tg_safe_name(n));
+            names.sort();
+            names.dedup();
+            names.truncate(100);
+            if names.is_empty() {
                 return json_resp(&json!({"error": "bad_file"}), 400);
             }
             let tg_user = u["telegram_id"].as_i64().unwrap_or(0);
@@ -10100,30 +9949,43 @@ async fn tg_route(mut req: Request, env: &Env, path: &str, method: Method) -> Re
             if tg_user == 0 || channel == 0 {
                 return json_resp(&json!({"error": "disabled"}), 503);
             }
+            let marks = vec!["?"; names.len()].join(",");
+            let sql = format!("SELECT file_name, msg_id FROM tg_files WHERE file_name IN ({marks})");
+            let args: Vec<TursoArg> = names.iter().map(|n| TursoArg::text(n)).collect();
             let res = turso_many(env, &[
-                ("SELECT msg_id FROM tg_files WHERE file_name=?", vec![TursoArg::text(&name)]),
+                (sql.as_str(), args),
                 ("SELECT expires_at FROM subs_db WHERE user_id=?", vec![TursoArg::int(me)]),
             ]).await?;
-            let Some(src) = res.first().and_then(first_row).and_then(|r| r["msg_id"].as_i64()) else {
+            let found = res.first().cloned().unwrap_or(json!({}));
+            let cols = found["cols"].as_array().cloned().unwrap_or_default();
+            let mut pairs: Vec<(String, i64)> = found["rows"].as_array().cloned().unwrap_or_default()
+                .iter()
+                .map(|r| row_to_obj(&cols, r.as_array().unwrap_or(&vec![])))
+                .filter_map(|o| Some((o["file_name"].as_str()?.to_string(), o["msg_id"].as_i64()?)))
+                .collect();
+            if pairs.is_empty() {
                 return json_resp(&json!({"error": "not_on_telegram"}), 404);
-            };
-            // Obuna SERVERDA tekshiriladi: ilovadagi tekshiruvni
-            // chetlab o'tgan odam ham videoni ololmaydi.
+            }
+            // Obuna faqat QISMLAR (ep_) uchun, SERVERDA tekshiriladi —
+            // rasmlar va yozishma fayllari obunasiz ham ko'rinadi.
             let until = res.get(1).and_then(first_row)
                 .and_then(|r| r["expires_at"].as_i64()).unwrap_or(0);
-            if !is_admin(&u) && until <= now_ms() {
+            if !is_admin(&u) && until <= now_ms() && pairs.iter().any(|(n, _)| n.starts_with("ep_")) {
                 return json_resp(&json!({"error": "subscription"}), 402);
             }
-
-            let copied = tg_api(env, "copyMessage", json!({
+            // `copyMessages` raqamlar O'SIB boradigan tartibda bo'lishini talab qiladi.
+            pairs.sort_by_key(|(_, id)| *id);
+            pairs.dedup_by_key(|(_, id)| *id);
+            let ids: Vec<i64> = pairs.iter().map(|(_, id)| *id).collect();
+            let copied = tg_api(env, "copyMessages", json!({
                 "chat_id": tg_user,
                 "from_chat_id": channel,
-                "message_id": src,
+                "message_ids": ids,
                 "protect_content": true,
                 "disable_notification": true,
             })).await;
-            let msg_id = match copied {
-                Ok(v) => v["message_id"].as_i64().unwrap_or(0),
+            let sent = match copied {
+                Ok(v) => v.as_array().map(|a| a.len()).unwrap_or(0),
                 Err(e) => {
                     let e = e.to_string();
                     // Foydalanuvchi botni to'xtatgan (blocked) — qayta
@@ -10136,10 +9998,27 @@ async fn tg_route(mut req: Request, env: &Env, path: &str, method: Method) -> Re
                     return json_resp(&json!({"error": code, "detail": e}), 409);
                 }
             };
-            if msg_id <= 0 {
-                return json_resp(&json!({"error": "send_failed"}), 409);
+            let delivered: Vec<&String> = pairs.iter().map(|(n, _)| n).collect();
+            ok_nostore(json!({
+                // Eski ilova bitta fayl uchun shu maydonni kutadi.
+                "msg_id": if sent > 0 { 1 } else { 0 },
+                "sent": sent,
+                "files": delivered,
+            }))
+        }
+
+        // Fayl kanalga joylanganmi (bot chatidan ko'chirildimi) —
+        // ilova yuklashdan keyin shuni kutadi.
+        (Method::Get, "/api/tg/claim") => {
+            let url = req.url()?;
+            let name = url.query_pairs().find(|(k, _)| k == "file")
+                .map(|(_, v)| v.to_string()).unwrap_or_default();
+            if !tg_safe_name(&name) {
+                return json_resp(&json!({"error": "bad_file"}), 400);
             }
-            ok_nostore(json!({"msg_id": msg_id}))
+            let res = turso_exec(env, "SELECT 1 AS ok FROM tg_files WHERE file_name=?",
+                vec![TursoArg::text(&name)]).await?;
+            ok_nostore(json!({"ready": first_row(&res).is_some()}))
         }
 
         // ADMIN: ilova videoni kanalga yukladi — fayl nomini postga
@@ -10293,16 +10172,6 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
 
     // B2 proxy — Range header bilan uzatiladi (video seek)
     if method == Method::Get {
-        // ── TELEGRAM KANALIDAGI FAYL (rasmlar) ────────────────
-        // Kanalga bot orqali joylangan fayllar shu yerdan beriladi;
-        // qolganlari (B2) odatdagidek pastda.
-        for pre in ["/api/image/", "/api/media/", "/api/play/"] {
-            if let Some(fname) = path.strip_prefix(pre) {
-                if let Some(r) = tg_serve(&env, &origin, fname, range_header.as_deref()).await? {
-                    return Ok(r);
-                }
-            }
-        }
         if let Some(fname) = path.strip_prefix("/api/image/") {
             // Javob HECH O'ZGARTIRILMASDAN uzatiladi — trafikni
             // endi ilovaning o'zi sanaydi (`note_traffic` izohi).
@@ -10562,10 +10431,11 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
     // chekkada 1 kun keshlanadi. Telegram fayl manzilida bot
     // tokeni bo'lgani uchun u manzil ilovaga chiqarilmaydi.
     if method == Method::Get {
-        if let Some(ids) = path.strip_prefix("/api/avatar/") {
-            if let Ok(uid) = ids.parse::<i64>() {
-                return tg_avatar(&env, uid).await;
-            }
+        // ARUGRAM: fayl worker orqali o'tmaydi (foydalanuvchi talabi) —
+        // Telegram profil rasmi endi uzatilmaydi; ilova rasm o'rnida
+        // ismning bosh harfini ko'rsatadi.
+        if path.starts_with("/api/avatar/") {
+            return json_resp(&json!({"error": "not_found"}), 404);
         }
     }
 
@@ -10607,11 +10477,11 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
             // ARUGRAM: kanal sozlangan bo'lsa fayllar (rasmlar va h.k.)
             // B2 o'rniga Telegram kanaliga joylanadi. Javob B2 niki
             // bilan BIR XIL shaklda — ilovadagi yuklovchilar o'zgarmaydi.
+            // ARUGRAM: kanal sozlangan bo'lsa fayllar FAQAT ilova orqali
+            // Telegram'ga yuklanadi (foydalanuvchi talabi: "worker
+            // orqali umuman fayl o'tmasin").
             if tg_channel_id(&env) != 0 {
-                return ok_nostore(json!({
-                    "uploadUrl": format!("{origin}/api/tg/store"),
-                    "authorizationToken": tg_store_token(&env),
-                }));
+                return json_resp(&json!({"error": "use_telegram"}), 409);
             }
             match b2_get_upload_url(&env).await {
                 Ok(d) => ok(d),

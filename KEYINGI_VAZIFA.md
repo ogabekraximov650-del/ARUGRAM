@@ -86,6 +86,21 @@ o'qish, yozish yo'q. Video bot chatidan fayl NOMI bo'yicha topiladi
 (shaxsiy chat xabar raqamlari har hisobda boshqa). Sozlama
 (`/api/tg/config`) telefonda 12 soat keshlanadi.
 
+**Worker orqali FAYL O'TMAYDI (2026-09, foydalanuvchi talabi):**
+yuklash ham, ko'rsatish ham ilovaning o'zi orqali (MTProto).
+- Yuklash: `TelegramService.uploadFile` — admin to'g'ridan-to'g'ri
+  kanalga (+ `/api/tg/admin/file`), boshqalar o'z BOT CHATIGA; bot
+  webhook'da (`tg_user_media`) uni kanalga `copyMessage` qiladi va
+  ilova `/api/tg/claim` bilan kutadi. Oddiy foydalanuvchi faqat
+  `avatar_<id>_...` va `chat_<id>_...` nomlarini yoza oladi.
+- Fayllar HUJJAT emas, ODDIY ko'rinishda: rasm — surat, video — oqimli
+  video (`media_for`).
+- Ko'rsatish: rasm keshi (`_TelegramFileService`) ekrandagi rasmlarni
+  BITTA `/api/tg/deliver {files:[..]}` (`copyMessages`) bilan bot
+  chatiga oladi, `127.0.0.1/tg/0/<nom>` dan o'qiydi, so'ng chat
+  tozalanadi. Worker'dagi `tg_store`/`tg_serve` va Telegram avatar
+  proksisi (`/api/avatar`) O'CHIRILGAN.
+
 **Admin videoni ilovadan kanalga yuklaydi** (qism qo'shish ekrani,
 admin Telegram hisobini ulagan bo'lsa): `rust_tg_upload_start` —
 MTProto, 4 GB gacha, izoh = fayl nomi; so'ng

@@ -25,6 +25,7 @@ import 'package:video_player/video_player.dart';
 import '../services/app_http.dart';
 import '../services/image_cache.dart';
 import '../services/video_gate.dart';
+import '../services/telegram_service.dart';
 
 class MediaViewScreen extends StatefulWidget {
   final String url;
@@ -122,11 +123,17 @@ class _MediaViewScreenState extends State<MediaViewScreen> {
     // o'tkazish, qismlar, tezlik va to'liq ekran — yozishmadagi
     // qisqa video uchun ularning hammasi ortiqcha.
     setState(() => _error = false);
+    // ── TELEGRAM'DAN (worker orqali EMAS) ─────────────────────
+    // Video bot chatiga keladi va mahalliy Telegram manbasidan
+    // o'ynaydi; oyna yopilganda bot chati tozalanadi.
+    final tg = await TelegramService.instance.prepare(widget.url);
+    if (!mounted) return;
+    if (tg != null) TelegramService.instance.hold(this, widget.url);
     final c = VideoPlayerController.networkUrl(
       // Manzilni ExoPlayer ochadi — unga sarlavha qo'shib
       // bo'lmaydi, shu sabab ruxsat manzilning o'zida keladi
       // (`nativeMediaUrl` izohiga qarang).
-      Uri.parse(nativeMediaUrl(widget.url)),
+      Uri.parse(tg ?? nativeMediaUrl(widget.url)),
       viewType: VideoViewType.platformView,
       videoPlayerOptions: VideoPlayerOptions(
         allowBackgroundPlayback: false,
@@ -158,6 +165,7 @@ class _MediaViewScreenState extends State<MediaViewScreen> {
 
   @override
   void dispose() {
+    TelegramService.instance.unhold(this);
     if (_isVideo) VideoGate.leave();
     _tick?.cancel();
     _pos.dispose();
@@ -191,7 +199,8 @@ class _MediaViewScreenState extends State<MediaViewScreen> {
         placeholder: (_, __) => const SizedBox(
           width: 34,
           height: 34,
-          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white54),
+          child:
+              CircularProgressIndicator(strokeWidth: 2, color: Colors.white54),
         ),
         errorWidget: (_, __, ___) => const Icon(Icons.broken_image_outlined,
             size: 54, color: Colors.white30),

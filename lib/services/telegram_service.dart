@@ -150,7 +150,11 @@ class TelegramService extends ChangeNotifier {
     if (j['error'] != null) return;
     _configured = j['configured'] == true;
     _authorized = j['authorized'] == true;
+    _port = (j['port'] as num?)?.toInt() ?? _port;
   }
+
+  /// Rust yadrosidagi mahalliy Telegram manbasi porti.
+  int _port = 0;
 
   /// Ilova ishga tushganda (`main`) chaqiriladi. Tarmoqqa chiqmaydi:
   /// saqlangan sessiya o'qiladi, serverdan sozlama esa fon'da olinadi.
@@ -291,19 +295,34 @@ class TelegramService extends ChangeNotifier {
     return j['ok'] == true ? null : (j['error'] as String? ?? 'Xato');
   }
 
-  /// ADMIN: videoni yopiq kanalga yuklaydi (adminning o'z Telegram
-  /// hisobi bilan, 4 GB gacha) va fayl nomini serverda postga
-  /// bog'laydi. [onProgress] — (yuborilgan, jami) baytlar.
-  ///
-  /// Muvaffaqiyatda `null`, aks holda xato matni.
-  Future<String?> uploadToChannel(
+  // ── FAYL YUKLASH (hammasi ilova orqali) ─────────────────────
+  //
+  // TALAB (foydalanuvchi): "worker orqali umuman fayl o'tmasin —
+  // Telegram'ga yuklanadigan va yuklab olinadigan barcha narsalar
+  // ilovaning o'zidan o'tkazilsin" hamda "fayllar HUJJAT emas, ODDIY
+  // ko'rinishda yuborilsin".
+  //
+  //   * ADMIN — to'g'ridan-to'g'ri yopiq kanalga (u kanalda admin),
+  //     so'ng `/api/tg/admin/file` nomni postga bog'laydi;
+  //   * BOSHQALAR — o'z bot chatiga; bot uni kanalga nusxalaydi
+  //     (worker'dagi `tg_user_media`), ilova esa `/api/tg/claim` bilan
+  //     tayyor bo'lishini kutadi.
+  //
+  // Ikkala yo'lda ham fayl baytlari worker'dan o'tmaydi; hajm
+  // chegarasi Telegram'niki (2 GB, Premium'da 4 GB).
+
+  /// Faylni Telegram'ga yuklaydi. Muvaffaqiyatda `null`, aks holda
+  /// xato matni. [onProgress] — (yuborilgan, jami) baytlar.
+  Future<String?> uploadFile(
     String path,
     String fileName,
-    String mime,
-    void Function(int sent, int total) onProgress,
-  ) async {
-    if (!canUpload) await refreshConfig(force: true);
-    if (!canUpload) return 'Telegram ulanmagan yoki kanal sozlanmagan';
+    String mime, {
+    void Function(int sent, int total)? onProgress,
+  }) async {
+    if (!_authorized) return 'Telegram hisobi ulanmagan';
+    if (_channel == 0) await refreshConfig(force: true);
+    if (_channel == 0) return 'Kanal sozlanmagan';
+    final admin = AuthService.instance.user?.isAdmin ?? false;
     final lib = _lib;
     if (lib == null) return 'Telegram ishga tushmagan';
 
@@ -320,7 +339,8 @@ class TelegramService extends ChangeNotifier {
     final m = mime.toNativeUtf8();
     Map<String, dynamic> started;
     try {
-      started = _json(_take(lib, start(p, n, m, _channel)));
+      // 0 — bot chatiga (kanalga admin bo'lmagan foydalanuvchi).
+      started = _json(_take(lib, start(p, n, m, admin ? _channel : 0)));
     } finally {
       malloc.free(p);
       malloc.free(n);
@@ -336,7 +356,7 @@ class TelegramService extends ChangeNotifier {
       final st = _json(_take(lib, status(job)));
       final sent = (st['sent'] as num?)?.toInt() ?? 0;
       final total = (st['total'] as num?)?.toInt() ?? 0;
-      if (total > 0) onProgress(sent, total);
+      if (total > 0) onProgress?.call(sent, total);
       if (st['done'] == true) {
         final err = st['error'];
         if (err is String && err.isNotEmpty) return err;
@@ -344,34 +364,151 @@ class TelegramService extends ChangeNotifier {
         break;
       }
     }
-    if (msgId <= 0) return 'Kanal xabari raqami olinmadi';
-
-    // Serverda fayl nomi -> kanal posti. Bot postni ko'rib o'zi ham
-    // yozadi; bu esa webhook kechiksa ham qism darhol ishlashi uchun.
+    _missing.remove(fileName);
     final s = AuthService.instance.sessionToken;
     if (s == null) return 'Ilova hisobiga kirilmagan';
-    for (var attempt = 0; attempt < 3; attempt++) {
-      try {
+
+    if (admin) {
+      if (msgId <= 0) return 'Kanal xabari raqami olinmadi';
+      for (var attempt = 0; attempt < 3; attempt++) {
+        try {
+          final r = await http
+              .post(
+                Uri.parse('$kApiBase/api/tg/admin/file'),
+                headers: {
+                  'Authorization': 'Bearer $s',
+                  'Content-Type': 'application/json',
+                },
+                body: jsonEncode({'file': fileName, 'msg_id': msgId}),
+              )
+              .timeout(const Duration(seconds: 20));
+          if (r.statusCode == 200) return null;
+        } catch (_) {}
+        await Future<void>.delayed(const Duration(seconds: 2));
+      }
+      // Post kanalda bor — bot uni baribir ro'yxatga oladi.
+      return null;
+    }
+
+    // Bot chatidan kanalga ko'chirilishini kutamiz (odatda 1-2 s).
+    try {
+      for (final wait in const [1, 1, 2, 2, 3, 4, 5]) {
+        await Future<void>.delayed(Duration(seconds: wait));
+        final r = await http.get(
+          Uri.parse(
+              '$kApiBase/api/tg/claim?file=${Uri.encodeQueryComponent(fileName)}'),
+          headers: {'Authorization': 'Bearer $s'},
+        ).timeout(const Duration(seconds: 15));
+        if (r.statusCode == 200 &&
+            (jsonDecode(r.body) as Map<String, dynamic>)['ready'] == true) {
+          return null;
+        }
+      }
+      return 'Fayl kanalga joylanmadi — qayta urinib ko\'ring';
+    } catch (e) {
+      return 'Tarmoq xatosi: $e';
+    } finally {
+      // Bot chatidagi yuborilgan nusxa endi keraksiz.
+      _cleanPending = true;
+      if (_holders.isEmpty) unawaited(_cleanIfPending());
+    }
+  }
+
+  /// Eski nom (qism qo'shish ekrani shu bilan chaqiradi).
+  Future<String?> uploadToChannel(
+    String path,
+    String fileName,
+    String mime,
+    void Function(int sent, int total) onProgress,
+  ) =>
+      uploadFile(path, fileName, mime, onProgress: onProgress);
+
+  // ── FAYLNI KO'RSATISH (rasmlar va h.k.) ─────────────────────
+  //
+  // Rasmlar ham worker'dan EMAS, Telegram'dan olinadi: ekranda
+  // bir vaqtda so'ralgan hamma fayllar BITTA `/api/tg/deliver`
+  // so'rovi bilan bot chatiga keladi (`copyMessages`), ilova ularni
+  // mahalliy Telegram manbasidan (`127.0.0.1/tg/...`) oladi va o'z
+  // shifrlangan keshiga yozadi. So'ng bot chati tozalanadi.
+
+  final Map<String, List<Completer<Uint8List?>>> _batch = {};
+  Timer? _batchTimer;
+
+  /// Faylning baytlari (Telegram'da bo'lmasa yoki olib bo'lmasa `null`).
+  Future<Uint8List?> fetchBytes(String url) {
+    final name = fileNameOf(url);
+    if (name.isEmpty || !active || _port == 0 || _missing.contains(name)) {
+      return Future.value(null);
+    }
+    final c = Completer<Uint8List?>();
+    _batch.putIfAbsent(name, () => []).add(c);
+    _batchTimer ??= Timer(const Duration(milliseconds: 150), _runBatch);
+    return c.future;
+  }
+
+  Future<void> _runBatch() async {
+    _batchTimer = null;
+    final batch = Map.of(_batch);
+    _batch.clear();
+    if (batch.isEmpty) return;
+    void finish(String name, Uint8List? v) {
+      for (final c in batch[name] ?? const <Completer<Uint8List?>>[]) {
+        if (!c.isCompleted) c.complete(v);
+      }
+    }
+
+    final owner = Object();
+    try {
+      await _cleanIfPending();
+      final s = AuthService.instance.sessionToken;
+      if (s == null) throw 'kirilmagan';
+      final names = batch.keys.toList();
+      hold(owner, names.first);
+      final got = <String>{};
+      for (var i = 0; i < names.length; i += 100) {
+        final part = names.sublist(i, (i + 100).clamp(0, names.length));
         final r = await http
             .post(
-              Uri.parse('$kApiBase/api/tg/admin/file'),
+              Uri.parse('$kApiBase/api/tg/deliver'),
               headers: {
                 'Authorization': 'Bearer $s',
                 'Content-Type': 'application/json',
               },
-              body: jsonEncode({'file': fileName, 'msg_id': msgId}),
+              body: jsonEncode({'files': part}),
             )
-            .timeout(const Duration(seconds: 20));
+            .timeout(const Duration(seconds: 25));
         if (r.statusCode == 200) {
-          _missing.remove(fileName);
-          return null;
+          final files = (jsonDecode(r.body) as Map<String, dynamic>)['files'];
+          if (files is List) got.addAll(files.whereType<String>());
         }
-        if (r.statusCode == 403) return 'Faqat admin yuklay oladi';
-      } catch (_) {}
-      await Future<void>.delayed(const Duration(seconds: 2));
+      }
+      for (final n in names) {
+        if (!got.contains(n)) {
+          _missing.add(n);
+          finish(n, null);
+        }
+      }
+      // Mahalliy manbadan — bir vaqtda 4 tadan.
+      final todo = names.where(got.contains).toList();
+      for (var i = 0; i < todo.length; i += 4) {
+        await Future.wait(todo.skip(i).take(4).map((n) async {
+          try {
+            final r = await http
+                .get(Uri.parse('http://127.0.0.1:$_port/tg/0/$n'))
+                .timeout(const Duration(seconds: 60));
+            finish(n, r.statusCode == 200 ? r.bodyBytes : null);
+          } catch (_) {
+            finish(n, null);
+          }
+        }));
+      }
+    } catch (_) {
+      for (final n in batch.keys) {
+        finish(n, null);
+      }
+    } finally {
+      unhold(owner);
     }
-    // Post kanalda bor — bot uni baribir ro'yxatga oladi.
-    return null;
   }
 
   /// Rust yadrosiga bot nomini beradi — videolar shu bot chatidan

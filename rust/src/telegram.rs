@@ -125,6 +125,9 @@ struct DocInfo {
     dc_id: i32,
     size: u64,
     mime: String,
+    /// `Some` — bu SURAT (oddiy ko'rinishda yuborilgan), qiymati eng
+    /// katta o'lcham turi; `None` — video/hujjat.
+    photo_size: Option<String>,
 }
 
 struct Tg {
@@ -485,14 +488,57 @@ async fn bot_peer(t: &Tg, client: &Client) -> Result<(i64, i64), String> {
     Ok(p)
 }
 
+/// Xabardagi faylning nomi: izoh (birinchi qator) yoki fayl nomi.
+fn message_name(m: &tl::types::Message) -> Option<String> {
+    let cap = m.message.lines().next().unwrap_or("").trim();
+    if !cap.is_empty() {
+        return Some(cap.to_string());
+    }
+    let Some(tl::enums::MessageMedia::Document(md)) = &m.media else { return None };
+    let Some(tl::enums::Document::Document(d)) = &md.document else { return None };
+    d.attributes.iter().find_map(|a| match a {
+        tl::enums::DocumentAttribute::Filename(f) => Some(f.file_name.clone()),
+        _ => None,
+    })
+}
+
 /// Xabardagi fayl shu nomdagi faylmi (fayl nomi yoki izoh bo'yicha).
 fn doc_matches(m: &tl::types::Message, name: &str) -> Option<DocInfo> {
+    // Surat: nomi faqat izohda (suratda fayl nomi bo'lmaydi).
+    if let Some(tl::enums::MessageMedia::Photo(mp)) = &m.media {
+        if m.message.lines().next().unwrap_or("").trim() != name {
+            return None;
+        }
+        let Some(tl::enums::Photo::Photo(p)) = &mp.photo else { return None };
+        // Eng katta o'lcham.
+        let (kind, size) = p
+            .sizes
+            .iter()
+            .filter_map(|s| match s {
+                tl::enums::PhotoSize::Size(s) => Some((s.r#type.clone(), s.size.max(0) as u64, s.w * s.h)),
+                tl::enums::PhotoSize::Progressive(s) => {
+                    Some((s.r#type.clone(), s.sizes.last().copied().unwrap_or(0).max(0) as u64, s.w * s.h))
+                }
+                _ => None,
+            })
+            .max_by_key(|(_, _, area)| *area)
+            .map(|(k, s, _)| (k, s))?;
+        return Some(DocInfo {
+            id: p.id,
+            access_hash: p.access_hash,
+            file_reference: p.file_reference.clone(),
+            dc_id: p.dc_id,
+            size,
+            mime: "image/jpeg".to_string(),
+            photo_size: Some(kind),
+        });
+    }
     let Some(tl::enums::MessageMedia::Document(md)) = &m.media else { return None };
     let Some(tl::enums::Document::Document(d)) = &md.document else { return None };
     let by_attr = d.attributes.iter().any(|a| {
         matches!(a, tl::enums::DocumentAttribute::Filename(f) if f.file_name == name)
     });
-    if !by_attr && m.message.trim() != name {
+    if !by_attr && m.message.lines().next().unwrap_or("").trim() != name {
         return None;
     }
     Some(DocInfo {
@@ -502,6 +548,7 @@ fn doc_matches(m: &tl::types::Message, name: &str) -> Option<DocInfo> {
         dc_id: d.dc_id,
         size: d.size.max(0) as u64,
         mime: if d.mime_type.is_empty() { "video/mp4".to_string() } else { d.mime_type.clone() },
+        photo_size: None,
     })
 }
 
@@ -537,14 +584,25 @@ async fn fetch_doc(t: &Tg, client: &Client, name: &str) -> Result<DocInfo, Strin
     };
     // Javob eng yangisidan boshlanadi — qayta yuborilgan bo'lsa ham
     // eng oxirgi nusxa olinadi.
-    for m in &messages {
-        if let tl::enums::Message::Message(m) = m {
-            if let Some(d) = doc_matches(m, name) {
-                return Ok(d);
+    //
+    // KAMROQ SO'ROV: bitta javobdagi HAMMA fayl eslab qolinadi — bot
+    // bir yo'la 20 ta poster yuborgan bo'lsa, qolgan 19 tasi uchun
+    // Telegram'ga qayta so'rov ketmaydi.
+    let mut wanted = None;
+    for m in messages.iter().rev() {
+        let tl::enums::Message::Message(m) = m else { continue };
+        let key = message_name(m);
+        let Some(key) = key else { continue };
+        if let Some(d) = doc_matches(m, &key) {
+            if key == name {
+                wanted = Some(d.clone());
+            }
+            if let Ok(mut c) = t.docs.lock() {
+                c.insert(key, d);
             }
         }
     }
-    Err("bot chatida fayl topilmadi".to_string())
+    wanted.ok_or_else(|| "bot chatida fayl topilmadi".to_string())
 }
 
 async fn doc_for(t: &'static Tg, client: &Client, name: &str, refresh: bool) -> Result<DocInfo, String> {
@@ -619,14 +677,24 @@ async fn fetch_part(t: &'static Tg, client: Client, name: String, offset: u64) -
         let req = tl::functions::upload::GetFile {
             precise: false,
             cdn_supported: false,
-            location: tl::enums::InputFileLocation::InputDocumentFileLocation(
-                tl::types::InputDocumentFileLocation {
-                    id: doc.id,
-                    access_hash: doc.access_hash,
-                    file_reference: doc.file_reference.clone(),
-                    thumb_size: String::new(),
-                },
-            ),
+            location: match &doc.photo_size {
+                Some(kind) => tl::enums::InputFileLocation::InputPhotoFileLocation(
+                    tl::types::InputPhotoFileLocation {
+                        id: doc.id,
+                        access_hash: doc.access_hash,
+                        file_reference: doc.file_reference.clone(),
+                        thumb_size: kind.clone(),
+                    },
+                ),
+                None => tl::enums::InputFileLocation::InputDocumentFileLocation(
+                    tl::types::InputDocumentFileLocation {
+                        id: doc.id,
+                        access_hash: doc.access_hash,
+                        file_reference: doc.file_reference.clone(),
+                        thumb_size: String::new(),
+                    },
+                ),
+            },
             offset: offset as i64,
             limit: PART as i32,
         };
@@ -1396,7 +1464,97 @@ async fn find_channel(client: &Client, channel_id: i64) -> Result<grammers_clien
     Err("Kanal topilmadi — shu Telegram hisobi kanalda admin ekanini tekshiring".to_string())
 }
 
+/// MP4 videoning (davomiyligi soniyada, eni, bo'yi) — `moov` dan.
+/// Telegram'ga ODDIY VIDEO sifatida yuborish uchun kerak.
+fn video_meta(path: &str) -> Option<(f64, i32, i32)> {
+    use std::io::{Read, Seek, SeekFrom};
+    const MAX_BOXES: usize = 64;
+    const MAX_MOOV: u64 = 32 * 1024 * 1024;
+    let mut f = fs::File::open(path).ok()?;
+    let total = f.metadata().ok()?.len();
+    let mut at: u64 = 0;
+    for _ in 0..MAX_BOXES {
+        if at + 8 > total {
+            return None;
+        }
+        let mut head = vec![0u8; 16.min((total - at) as usize)];
+        f.seek(SeekFrom::Start(at)).ok()?;
+        f.read_exact(&mut head).ok()?;
+        let (body_in_head, raw_len, kind) = crate::mp4::box_header(&head, 0)?;
+        let body_start = at + body_in_head as u64;
+        let body_len = if raw_len == u64::MAX { total.saturating_sub(body_start) } else { raw_len };
+        if &kind == b"moov" {
+            if body_len == 0 || body_len > MAX_MOOV {
+                return None;
+            }
+            let mut moov = vec![0u8; body_len as usize];
+            f.seek(SeekFrom::Start(body_start)).ok()?;
+            f.read_exact(&mut moov).ok()?;
+            let t = crate::mp4::parse_moov(&moov)?;
+            return Some((t.duration_secs(), t.width as i32, t.height as i32));
+        }
+        let next = body_start.checked_add(body_len)?;
+        if next <= at {
+            return None;
+        }
+        at = next;
+    }
+    None
+}
+
+/// Yuklanadigan faylning Telegram'dagi ko'rinishi.
+///
+/// TALAB (foydalanuvchi): fayllar HUJJAT sifatida emas, ODDIY
+/// ko'rinishda yuborilsin — hujjatni Telegram'da yuklab olib boshqa
+/// dastur bilan ochish oson. Video — oddiy (oqimli) video. Fayl nomi
+/// (`Filename`) baribir qo'shiladi: ilova nusxani bot chatidan shu nom
+/// bo'yicha topadi (`doc_matches`).
+fn media_for(uploaded: tl::enums::InputFile, path: &str, name: &str, mime: &str) -> tl::enums::InputMedia {
+    // Rasm — oddiy SURAT (izoh = nom, `doc_matches` shu bo'yicha topadi).
+    if mime.starts_with("image/") {
+        return tl::enums::InputMedia::UploadedPhoto(tl::types::InputMediaUploadedPhoto {
+            spoiler: false,
+            live_photo: false,
+            file: uploaded,
+            stickers: None,
+            ttl_seconds: None,
+            video: None,
+        });
+    }
+    let mut attributes = vec![tl::enums::DocumentAttribute::Filename(
+        tl::types::DocumentAttributeFilename { file_name: name.to_string() },
+    )];
+    if mime.starts_with("video/") {
+        let (duration, w, h) = video_meta(path).unwrap_or((0.0, 0, 0));
+        attributes.push(tl::enums::DocumentAttribute::Video(tl::types::DocumentAttributeVideo {
+            round_message: false,
+            supports_streaming: true,
+            nosound: false,
+            duration,
+            w,
+            h,
+            preload_prefix_size: None,
+            video_start_ts: None,
+            video_codec: None,
+        }));
+    }
+    tl::enums::InputMedia::UploadedDocument(tl::types::InputMediaUploadedDocument {
+        nosound_video: false,
+        force_file: false,
+        spoiler: false,
+        file: uploaded,
+        thumb: None,
+        mime_type: mime.to_string(),
+        attributes,
+        stickers: None,
+        video_cover: None,
+        video_timestamp: None,
+        ttl_seconds: None,
+    })
+}
+
 async fn upload_to_channel(
+    t: &'static Tg,
     client: Client,
     path: String,
     name: String,
@@ -1405,7 +1563,15 @@ async fn upload_to_channel(
     sent: Arc<std::sync::atomic::AtomicU64>,
     total: u64,
 ) -> Result<i32, String> {
-    let peer = find_channel(&client, channel_id).await?;
+    // `channel_id == 0` — BOT CHATIGA (kanalga admin bo'lmagan
+    // foydalanuvchi: yozishmadagi katta video). Bot uni o'zi kanalga
+    // ko'chiradi (worker'dagi `tg_user_media`).
+    let peer: tl::enums::InputPeer = if channel_id != 0 {
+        find_channel(&client, channel_id).await?.into()
+    } else {
+        let (id, hash) = bot_peer(t, &client).await?;
+        tl::enums::InputPeer::User(tl::types::InputPeerUser { user_id: id, access_hash: hash })
+    };
     let file = tokio::fs::File::open(&path).await.map_err(|e| format!("fayl ochilmadi: {e}"))?;
     let mut reader = Counting { inner: file, n: Arc::clone(&sent) };
     let uploaded = client
@@ -1424,24 +1590,10 @@ async fn upload_to_channel(
             update_stickersets_order: false,
             invert_media: false,
             allow_paid_floodskip: false,
-            peer: peer.into(),
+            peer,
             reply_to: None,
-            // FAYL sifatida (qayta kodlanmaydi, sifat buzilmaydi).
-            media: tl::enums::InputMedia::UploadedDocument(tl::types::InputMediaUploadedDocument {
-                nosound_video: false,
-                force_file: true,
-                spoiler: false,
-                file: uploaded.raw,
-                thumb: None,
-                mime_type: mime,
-                attributes: vec![tl::enums::DocumentAttribute::Filename(
-                    tl::types::DocumentAttributeFilename { file_name: name.clone() },
-                )],
-                stickers: None,
-                video_cover: None,
-                video_timestamp: None,
-                ttl_seconds: None,
-            }),
+            // Oddiy video sifatida (hujjat emas — `media_for` izohi).
+            media: media_for(uploaded.raw, &path, &name, &mime),
             // Izoh = fayl nomi: bot shu bo'yicha postni taniydi.
             message: name,
             random_id,
@@ -1498,9 +1650,6 @@ pub extern "C" fn rust_tg_upload_start(
         if !t.authorized.load(Ordering::SeqCst) {
             return Err("Avval Telegram hisobini ulang".to_string());
         }
-        if channel_id == 0 {
-            return Err("Kanal sozlanmagan (TG_CHANNEL_ID)".to_string());
-        }
         if name.is_empty() || name.contains('/') {
             return Err("Fayl nomi noto'g'ri".to_string());
         }
@@ -1519,7 +1668,7 @@ pub extern "C" fn rust_tg_upload_start(
         let s2 = Arc::clone(&sent);
         let mime = if mime.is_empty() { "video/mp4".to_string() } else { mime };
         let task = t.rt.spawn(async move {
-            let r = upload_to_channel(client, path, name, mime, channel_id, s2, total).await;
+            let r = upload_to_channel(t, client, path, name, mime, channel_id, s2, total).await;
             if let Ok(mut s) = st.lock() {
                 s.done = true;
                 match r {

@@ -64,6 +64,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import 'rust_bridge.dart';
+import 'telegram_service.dart';
 
 /// Muhrlash yorlig'i — har bir fayl o'z kalitini oladi.
 ///
@@ -246,8 +247,7 @@ class _SealingSink implements io.IOSink {
   }
 
   @override
-  Future<void> addStream(Stream<List<int>> stream) =>
-      stream.forEach(_buf.add);
+  Future<void> addStream(Stream<List<int>> stream) => stream.forEach(_buf.add);
 
   @override
   Future<void> flush() async {}
@@ -310,6 +310,8 @@ class AppImageCache {
       // uni `readAsString`/`writeAsString` (qo'shni `.tmp` orqali)
       // bilan o'qib-yozadi.
       repo: JsonCacheInfoRepository.withFile(_indexFile()),
+      // Rasmlar worker'dan EMAS, Telegram'dan (`_TelegramFileService`).
+      fileService: _TelegramFileService(),
     ),
   );
 
@@ -373,3 +375,57 @@ class AppImageCache {
 /// ishlatiladi.
 CachedNetworkImageProvider appImageProvider(String url) =>
     CachedNetworkImageProvider(url, cacheManager: AppImageCache.manager);
+
+/// ── RASMLAR TELEGRAM'DAN ─────────────────────────────────────
+///
+/// TALAB (foydalanuvchi): "worker orqali umuman fayl o'tmasin".
+///
+/// Kesh yangi rasm so'raganda u avval Telegram'dan olinadi
+/// (`TelegramService.fetchBytes` — ekrandagi hamma rasm bitta
+/// so'rovda). Telegram'da yo'q rasm (masalan eski B2 fayllari yoki
+/// Telegram'ning o'z profil rasmlari) odatdagidek HTTP bilan olinadi.
+class _TelegramFileService extends FileService {
+  final HttpFileService _http = HttpFileService();
+
+  @override
+  Future<FileServiceResponse> get(String url,
+      {Map<String, String>? headers}) async {
+    final isOurs = url.contains('/api/image/') || url.contains('/api/media/');
+    if (isOurs) {
+      final bytes = await TelegramService.instance.fetchBytes(url);
+      if (bytes != null) return _BytesResponse(bytes, url);
+    }
+    return _http.get(url, headers: headers);
+  }
+}
+
+class _BytesResponse implements FileServiceResponse {
+  _BytesResponse(this._bytes, this._url);
+
+  final Uint8List _bytes;
+  final String _url;
+
+  @override
+  Stream<List<int>> get content => Stream.value(_bytes);
+
+  @override
+  int? get contentLength => _bytes.length;
+
+  @override
+  int get statusCode => 200;
+
+  // Rasm nomi o'zgarmas (har yangi rasm — yangi nom), ya'ni kesh
+  // abadiy yaroqli.
+  @override
+  DateTime get validTill => DateTime.now().add(const Duration(days: 36500));
+
+  @override
+  String? get eTag => null;
+
+  @override
+  String get fileExtension {
+    final name = _url.split('?').first.split('/').last;
+    final dot = name.lastIndexOf('.');
+    return dot < 0 ? 'jpg' : name.substring(dot + 1);
+  }
+}

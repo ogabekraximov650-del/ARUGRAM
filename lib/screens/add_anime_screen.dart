@@ -4,12 +4,13 @@ import 'dart:io';
 import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import '../services/app_http.dart';
 import '../services/storage_janitor.dart';
 import '../services/ui_state.dart';
 import '../theme/app_background.dart';
 import '../widgets/glass.dart';
 import '../services/api_base.dart';
+import '../services/telegram_service.dart';
+import '../services/image_cache.dart';
 
 const String API_BASE = kApiBase;
 
@@ -105,45 +106,17 @@ class _AddAnimeScreenState extends State<AddAnimeScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final tokenRes = await http.post(Uri.parse('$API_BASE/api/upload-token'));
-      if (tokenRes.statusCode != 200) {
-        throw 'Upload token olib bo\'lmadi: ${tokenRes.body}';
-      }
-
-      final tokenData = jsonDecode(tokenRes.body);
-      // MUHIM TUZATISH: B2'ning haqiqiy javob maydoni "authToken" emas,
-      // balki "authorizationToken" deb ataladi. Noto'g'ri kalit tufayli
-      // qiymat har doim null bo'lib, keyin String'ga cast qilishda
-      // "type 'Null' is not a subtype of type 'String'" xatosi kelib
-      // chiqqan edi.
-      final uploadUrl = tokenData['uploadUrl'] as String;
-      final authToken = tokenData['authorizationToken'] as String;
-
-      final fileName = 'anime_${DateTime.now().millisecondsSinceEpoch}.jpg';
-      final fileBytes = await _selectedImage!.readAsBytes();
-
-      final uploadRes = await http.post(
-        Uri.parse(uploadUrl),
-        headers: {
-          'Authorization': authToken,
-          'X-Bz-File-Name': fileName,
-          'Content-Type': 'image/jpeg',
-          'X-Bz-Content-Sha1': 'do_not_verify',
-        },
-        body: fileBytes,
-      );
-
-      if (uploadRes.statusCode != 200) {
-        throw 'Rasm B2ga yuklashda xato (${uploadRes.statusCode}): ${uploadRes.body}';
-      }
-
-      final uploadData = jsonDecode(uploadRes.body);
-      final b2FileName = uploadData['fileName'] as String;
-
+      // ── TELEGRAM KANALIGA (ilovaning o'zi orqali) ────────────
+      // Fayl worker'dan o'tmaydi (foydalanuvchi talabi); bazaga
+      // hozirgidek BARE fayl nomi yoziladi.
+      final b2FileName = 'anime_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final err = await TelegramService.instance
+          .uploadFile(_selectedImage!.path, b2FileName, 'image/jpeg');
+      if (err != null) throw err;
       // Lokal oldindan ko'rish uchun to'liq URL, serverga esa bare nom.
       _photoUrl = '$API_BASE/api/image/$b2FileName';
       _photoFileName = b2FileName;
-      // Rasm B2'ga o'tdi — ilovaning vaqtinchalik papkasidagi
+      // Rasm Telegram'ga o'tdi — ilovaning vaqtinchalik papkasidagi
       // nusxa endi keraksiz. XATO bo'lganda o'chirilmaydi:
       // foydalanuvchi qayta urinib ko'rishi mumkin.
       final copy = _selectedImage;
@@ -278,14 +251,9 @@ class _AddAnimeScreenState extends State<AddAnimeScreen> {
                                 : _photoUrl != null
                                     ? ClipRRect(
                                         borderRadius: BorderRadius.circular(16),
-                                        child: Image.network(
-                                            // `Image.network` ni tizim
-                                            // yuklaydi — unga sarlavha
-                                            // qo'shib bo'lmaydi, shu sabab
-                                            // ruxsat manzilda keladi
-                                            // (`nativeMediaUrl` izohi).
-                                            nativeMediaUrl(_photoUrl!),
-                                            cacheWidth: 1080,
+                                        child: Image(
+                                            // Rasm keshi orqali (Telegram'dan).
+                                            image: appImageProvider(_photoUrl!),
                                             fit: BoxFit.cover),
                                       )
                                     : Column(

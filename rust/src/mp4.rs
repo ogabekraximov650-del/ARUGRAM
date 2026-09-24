@@ -204,6 +204,17 @@ fn traks(moov: &[u8]) -> Vec<&[u8]> {
 /// (masalan bo'lakli/fragmented MP4 — unda `stbl` bo'sh bo'ladi)
 /// `None` qaytaradi. Chaqiruvchi bunday holatda posterga qaytadi —
 /// hech qachon yiqilmaydi.
+impl VideoTrack {
+    /// Video yo'lakchaning davomiyligi (soniya) — `stts` dan.
+    pub fn duration_secs(&self) -> f64 {
+        if self.timescale == 0 {
+            return 0.0;
+        }
+        let ticks: u64 = self.stts.iter().map(|(c, d)| *c as u64 * *d as u64).sum();
+        ticks as f64 / self.timescale as f64
+    }
+}
+
 pub fn parse_moov(moov: &[u8]) -> Option<VideoTrack> {
     for trak in traks(moov) {
         let mdia = match child(trak, b"mdia") {

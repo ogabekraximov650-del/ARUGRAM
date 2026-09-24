@@ -98,6 +98,7 @@ import 'package:flutter/services.dart';
 import 'rust_bridge.dart';
 import 'video_cache_server.dart';
 import 'video_gate.dart';
+import 'telegram_service.dart';
 
 class ChatVideoThumb extends ChangeNotifier {
   /// Kadr ajratuvchi bilan aloqa kanali (`MainActivity.kt`).
@@ -214,7 +215,6 @@ class ChatVideoThumb extends ChangeNotifier {
   /// qanday kutish bo'lmaydi.
   Uint8List? peek(String url) => _memory[_keyOf(url)];
 
-
   /// Kadrni so'raydi. Tayyor bo'lgach `notifyListeners()` chaqiriladi
   /// va puffak o'zini qaytadan chizadi.
   ///
@@ -311,9 +311,15 @@ class ChatVideoThumb extends ChangeNotifier {
 
     _running++;
     _spent++;
+    // Video Telegram'da — kadr uchun kerakli baytlar ham worker'dan
+    // EMAS, ilovaning o'zi orqali Telegram'dan olinadi.
+    final owner = Object();
     try {
+      final tg = await TelegramService.instance.prepare(url);
+      if (tg != null) TelegramService.instance.hold(owner, url);
+      if (_disposed) return const _GrabResult();
       // Kerakli lahza (`_atMsList` izohiga qarang).
-      final uri = await VideoCacheServer.instance.thumbUri(url, atMs);
+      final uri = await VideoCacheServer.instance.thumbUri(tg ?? url, atMs);
       if (_disposed) return const _GrabResult();
       final data = await _channel.invokeMethod<Uint8List>('grab', {
         'url': uri.toString(),
@@ -330,6 +336,7 @@ class ChatVideoThumb extends ChangeNotifier {
       if (kDebugMode) debugPrint('ChatVideoThumb: kadr olinmadi — $e');
       return const _GrabResult();
     } finally {
+      TelegramService.instance.unhold(owner);
       _running--;
     }
   }

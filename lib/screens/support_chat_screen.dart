@@ -15,13 +15,10 @@
 // xabari O'NGDA, suhbatdoshiniki CHAPDA — Telegram'dagidek.
 
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
@@ -37,6 +34,7 @@ import '../theme/app_background.dart';
 import '../widgets/glass.dart';
 import 'media_view_screen.dart';
 import 'public_profile_screen.dart';
+import '../services/telegram_service.dart';
 
 class SupportChatScreen extends StatefulWidget {
   /// Admin boshqa odamning suhbatini ochsa — o'sha odamning raqami.
@@ -294,14 +292,17 @@ class _SupportChatScreenState extends State<SupportChatScreen>
     Future<void> Function()? cleanup,
   }) async {
     if (_uploading) return;
-    final size = await file.length();
     Future<void> dropCopy() async {
       if (cleanup != null) await cleanup();
     }
 
     final ct = contentType;
-    final name =
-        'chat_${DateTime.now().millisecondsSinceEpoch}_${_chat.userId ?? 0}.$ext';
+    // Nom YUBORUVCHINING hisob raqami bilan boshlanadi: worker
+    // boshqalarga faqat o'z nomlarini yozishga ruxsat beradi
+    // (`tg_user_media`), ikki odamning fayli esa hech qachon bir xil
+    // nom olmaydi.
+    final me = AuthService.instance.user?.id ?? 0;
+    final name = 'chat_${me}_${DateTime.now().millisecondsSinceEpoch}.$ext';
 
     setState(() {
       _uploading = true;
@@ -326,36 +327,20 @@ class _SupportChatScreenState extends State<SupportChatScreen>
     // kerak emas — yuborish endi soddaroq va tezroq.
 
     try {
-      final tok = await http
-          .post(Uri.parse('$kApiBase/api/upload-token'))
-          .timeout(const Duration(seconds: 25));
-      if (tok.statusCode != 200) throw 'Token olinmadi';
-      final td = jsonDecode(tok.body) as Map<String, dynamic>;
-
-      final res = await Dio().post(
-        td['uploadUrl'] as String,
-        data: file.openRead(),
-        options: Options(
-          headers: {
-            'Authorization': td['authorizationToken'],
-            'X-Bz-File-Name': name,
-            'Content-Type': ct,
-            'X-Bz-Content-Sha1': 'do_not_verify',
-            'Content-Length': size,
-          },
-          receiveDataWhenStatusError: true,
-        ),
-        onSendProgress: (sent, total) {
+      // ── TELEGRAM'GA (ilovaning o'zi orqali) ─────────────────
+      // Fayl worker'dan o'tmaydi va hujjat emas, ODDIY ko'rinishda
+      // (surat/video) yuboriladi. Hajm chegarasi — Telegram'niki.
+      final upErr = await TelegramService.instance.uploadFile(
+        file.path,
+        name,
+        ct,
+        onProgress: (sent, total) {
           if (!mounted) return;
-          setState(() =>
-              _upProgress = total > 0 ? sent / total : sent / (size == 0 ? 1 : size));
+          setState(() => _upProgress = total > 0 ? sent / total : 0);
         },
       );
-      if (res.statusCode != 200) throw 'B2 xato (${res.statusCode})';
-      final data = res.data is String
-          ? jsonDecode(res.data as String)
-          : res.data as Map;
-      final b2Name = '${data['fileName']}';
+      if (upErr != null) throw upErr;
+      final b2Name = name;
 
       // Fayl joyida — endi xabarning o'zi yuboriladi.
       final err = await _chat.send(
