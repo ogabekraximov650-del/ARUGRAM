@@ -34,6 +34,41 @@
 - Commit qilishdan oldin: `rm -rf rust/target rust/Cargo.lock
   worker/target worker/Cargo.lock`.
 
+## TELEGRAM ORQALI VIDEO (ARUGRAM, 2026-09)
+
+TALAB (foydalanuvchi): xarajatni kamaytirish uchun videolar Telegram
+serveri orqali uzatilsin. Ilova nomi **ARUmedia** (TV yo'q).
+
+**Qanday ishlaydi**
+
+1. Admin videoni YOPIQ kanalga yuklaydi (Telegram ilovasidan, 2 GB
+   gacha, shifrlanmagan). Kanalda faqat admin va bot (bot — ADMIN).
+   Izoh (caption) = B2 dagi fayl nomi (izoh bo'lmasa faylning o'z
+   nomi). Bot postni ko'rib `tg_files` ga yozadi va adminga
+   "✅ nom → #post" deb xabar beradi.
+2. Foydalanuvchi ilovada Profil → "Telegram orqali ko'rish" dan o'z
+   Telegram hisobini ulaydi (raqam, kod, parol).
+3. Qism ochilganda ilova `/api/tg/deliver` ni chaqiradi: worker
+   obunani SERVERDA tekshiradi, bot videoni kanaldan foydalanuvchining
+   bot chatiga `copyMessage` qiladi (`protect_content`). Foydalanuvchi
+   kanalga a'zo emas.
+4. Rust yadrosi (`rust/src/telegram.rs`, kutubxona `grammers`) faylni
+   o'sha chatdan oladi va telefonda `127.0.0.1/tg/<xabar>/<fayl>`
+   manbasini ochadi. Onlayn ko'rishda baytlar faqat XOTIRADA; yuklab
+   olishda hozirgidek 1 MB lab AES-128-GCM bilan shifrlanib yoziladi.
+   Worker keshini "isitish" bu holda o'chiq — B2'ga so'rov ketmaydi.
+5. Telegram ulanmagan / qism kanalda yo'q / xato — hammasi avtomatik
+   odatdagi worker (B2) yo'liga qaytadi.
+
+**Sirlar** (GitHub → `secret` environment, deploy ularni worker'ga
+qo'yadi): `TG_API_ID`, `TG_API_HASH` (my.telegram.org),
+`TG_CHANNEL_ID` (-100... ko'rinishida). Uchalasi qo'yilmaguncha
+Telegram yo'li o'chiq.
+
+**Muhim:** `glass_pumpkin = "=2.0.0-rc0"` Cargo.toml da QOTIRILGAN —
+rc1 grammers-crypto'ni buzadi. Cargo.lock repoda yo'q, shu sabab
+olib tashlamang.
+
 ## BAZA TOZALANDI VA SXEMA IXCHAMLASHTIRILDI (2026-09)
 
 B2 ombori va Turso bazasi **ikkinchi marta butunlay bo'shatildi**

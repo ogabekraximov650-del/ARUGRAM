@@ -19,6 +19,7 @@ import 'services/sync_queue.dart';
 import 'services/traffic_service.dart';
 import 'services/video_cache_server.dart';
 import 'services/watch_history.dart';
+import 'services/telegram_service.dart';
 
 // ── HAMMA SO'ROV SANALADI ───────────────────────────────────────
 //
@@ -101,6 +102,10 @@ Future<void> _main() async {
   // o'qish tez — tarmoq kutilmaydi: sessiya haqiqiyligi keyin,
   // fon'da tekshiriladi.
   await AuthService.instance.restore();
+
+  // Telegram orqali video: saqlangan sessiya o'qiladi (tarmoqsiz),
+  // sozlama esa fon'da serverdan olinadi.
+  unawaited(TelegramService.instance.start());
 
   // ── BIR MARTALIK TOZALASH (foydalanuvchi talabi) ────────────
   //

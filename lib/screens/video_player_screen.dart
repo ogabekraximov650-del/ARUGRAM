@@ -119,6 +119,7 @@ import '../services/image_cache.dart';
 
 import '../services/app_settings.dart';
 import '../services/billing_service.dart';
+import '../services/telegram_service.dart';
 import '../services/comments_service.dart';
 import '../services/download_manager.dart';
 import '../services/app_http.dart';
@@ -260,6 +261,14 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   //   true  — telefondagi mahalliy server (fayl to'liq yuklangan);
   //   false — to'g'ridan-to'g'ri worker (internet orqali).
   bool _playViaLocal = false;
+
+  /// Video Telegram serveridan (`telegram_service.dart`) — telefondagi
+  /// mahalliy Telegram manbasi orqali. Bu holda worker keshini
+  /// "isitish" umuman kerak emas: B2'ga bitta ham so'rov ketmaydi.
+  bool _playViaTelegram = false;
+
+  /// Oyna isitish (worker keshi) kerak EMASmi.
+  bool get _noWarm => _playViaLocal || _playViaTelegram;
 
   // Worker 480 MiB'lik oynani B2'dan Cloudflare keshiga
   // ko'chirayotgan payt `true`. Shu paytda ekranda aylanma halqa va
@@ -1121,6 +1130,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     //   * fayl to'liq emas + internet yo'q -> ijro etib bo'lmaydi.
     final complete = _isFullyDownloaded(url);
     Uri? source;
+    _playViaTelegram = false;
     if (complete) {
       try {
         source = await VideoCacheServer.instance.proxyUri(url);
@@ -1143,13 +1153,25 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
         });
         return;
       }
-      source = Uri.parse(_workerPlayUrl(url));
       _playViaLocal = false;
+      // ── TELEGRAM ─────────────────────────────────────────────
+      // Telegram ulangan va qism kanalda bo'lsa — video Telegram
+      // serveridan. Bo'lmasa (yoki xato) odatdagi worker yo'li.
+      final tgUrl = await TelegramService.instance.prepare(url);
+      if (!mounted || myToken != _playToken) return;
+      if (tgUrl != null) {
+        source = Uri.parse(tgUrl);
+        _playViaTelegram = true;
+      } else {
+        source = Uri.parse(_workerPlayUrl(url));
+      }
     }
     _currentSource = source.toString();
     VideoCacheServer.log(_playViaLocal
         ? 'Manba: MAHALLIY server (fayl to\'liq yuklangan)'
-        : 'Manba: WORKER (Cloudflare keshidan oqim)');
+        : _playViaTelegram
+            ? 'Manba: TELEGRAM'
+            : 'Manba: WORKER (Cloudflare keshidan oqim)');
 
     // ── WORKER'DAN IJRO: AVVAL OYNA KESHGA TAYYOR BO'LSIN ─────
     //
@@ -1163,7 +1185,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     // Fayl allaqachon to'liq telefonda bo'lsa bu bosqich umuman
     // bo'lmaydi (yuqoridagi mahalliy yo'l).
     var prepared = true;
-    if (!_playViaLocal && RustCore.instance.videoWindowSeen(url, 0)) {
+    if (!_noWarm && RustCore.instance.videoWindowSeen(url, 0)) {
       // ── TEZ YO'L: BO'LAK AVVAL KESHDA KO'RILGAN ─────────────
       //
       // TUZATILGAN XATO (foydalanuvchi: "video keshda bo'lsa ham
@@ -1182,7 +1204,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       // isitib, AYNAN O'SHA joydan qayta ochadi.
       RustCore.instance.videoPrepare(url);
       VideoCacheServer.log('Tez yo\'l: bo\'lak keshda ko\'rilgan — kutilmaydi');
-    } else if (!_playViaLocal) {
+    } else if (!_noWarm) {
       prepared = await _prepareSource(url, myToken);
       if (!mounted || myToken != _playToken) return;
       // Isitish ANIQ yiqilgan bo'lsa — MAJBURAN bir marta qayta
@@ -1214,6 +1236,23 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
 
     var ctrl = await _openController(source, myToken);
 
+    // Telegram manbasi ochilmadi — worker orqali qayta urinamiz.
+    // Bog'lanish olib tashlanadi: keyingi safar bot videoni qayta
+    // yuboradi (eski xabar o'chirilgan bo'lishi mumkin).
+    if (ctrl == null && _playViaTelegram && !_offline) {
+      if (!mounted || myToken != _playToken) return;
+      VideoCacheServer.log('Telegram ishlamadi — worker orqali qayta urinilyapti...');
+      TelegramService.instance.invalidate(url);
+      _playViaTelegram = false;
+      source = Uri.parse(_workerPlayUrl(url));
+      _currentSource = source.toString();
+      if (await _prepareSource(url, myToken)) {
+        if (!mounted || myToken != _playToken) return;
+        ctrl = await _openController(source, myToken);
+      }
+      if (!mounted || myToken != _playToken) return;
+    }
+
     // Mahalliy server kutilmaganda ishlamay qolsa — internet bo'lsa
     // worker orqali qayta urinamiz (video baribir ochilsin).
     if (ctrl == null && _playViaLocal && !_offline) {
@@ -1236,13 +1275,13 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     // MAJBURAN qaytadan isitamiz va bir marta qayta urinamiz.
     // (B2'ga murojaat baribir faqat shu isitishda bo'ladi —
     // qoida buzilmaydi.)
-    if (ctrl == null && !_playViaLocal && !_offline && _openTimedOut) {
+    if (ctrl == null && !_noWarm && !_offline && _openTimedOut) {
       // Tarmoq shunchaki sekin — isitmasdan yana bir marta ochamiz.
       if (!mounted || myToken != _playToken) return;
       VideoCacheServer.log('Ochilish vaqti tugadi — qayta urinilmoqda...');
       ctrl = await _openController(source, myToken);
     }
-    if (ctrl == null && !_playViaLocal && !_offline && !_openTimedOut) {
+    if (ctrl == null && !_noWarm && !_offline && !_openTimedOut) {
       if (!mounted || myToken != _playToken) return;
       VideoCacheServer.log('Kesh oynasi topilmadi — qaytadan isitilmoqda...');
       if (await _prepareAgain(url, myToken)) {
@@ -1550,7 +1589,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   /// Fayl bitta oynaga sig'adimi (u holda tanbal keshlashning o'zi
   /// kerak emas — hamma narsa allaqachon tayyor).
   bool get _singleWindow =>
-      _playViaLocal || _totalBytes <= 0 || _totalBytes <= _windowBytes;
+      _noWarm || _totalBytes <= 0 || _totalBytes <= _windowBytes;
 
   /// Hajmni yadrodan yangilaydi (isitish javobidan meta.json'ga
   /// yozilgan bo'ladi — tarmoqqa chiqilmaydi).
@@ -1577,9 +1616,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     _windowTimer?.cancel();
     // Mahalliy (to'liq yuklab olingan) faylda oyna tushunchasining
     // o'zi yo'q — tarmoqqa umuman chiqilmaydi.
-    if (_playViaLocal) return;
+    if (_noWarm) return;
     _windowTimer = Timer.periodic(const Duration(seconds: 2), (_) {
-      if (!mounted || _playViaLocal) return;
+      if (!mounted || _noWarm) return;
       // Barmoq ekranda (oynalar surilmoqda) — UI oqimini band
       // qilmaymiz. Bir-ikki soniya kechikish sezilmaydi, kadr
       // tashlash esa darhol ko'rinadi.
@@ -1627,7 +1666,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   Future<bool> _ensureWindowFor(Duration target, Duration dur) async {
     // Hajm noma'lum bo'lsa oyna raqamini hisoblab bo'lmaydi — avval
     // uni yadrodan so'raymiz (tarmoqqa chiqilmaydi).
-    if (!_playViaLocal && _totalBytes <= 0) _refreshTotalBytes();
+    if (!_noWarm && _totalBytes <= 0) _refreshTotalBytes();
     if (_singleWindow) return true;
     final url = _currentUrl;
     if (url.isEmpty) return true;

@@ -95,6 +95,14 @@ const FAIL_COOLDOWN: Duration = Duration::from_secs(120);
 /// Bitta qismni olishga urinishlar soni.
 const PART_ATTEMPTS: usize = 3;
 
+/// Shu xatolar sessiya butunlay o'lganini bildiradi.
+const SESSION_DEAD: [&str; 4] = [
+    "AUTH_KEY_UNREGISTERED",
+    "SESSION_REVOKED",
+    "USER_DEACTIVATED",
+    "AUTH_KEY_DUPLICATED",
+];
+
 const LABEL_CONFIG: &str = "tg-config-v1";
 const LABEL_SESSION: &str = "tg-session-v1";
 const LABEL_ROUTES: &str = "tg-routes-v1";
@@ -473,7 +481,21 @@ async fn doc_for(t: &'static Tg, client: &Client, msg_id: i32, refresh: bool) ->
             return Ok(d);
         }
     }
-    let d = fetch_doc(client, msg_id).await?;
+    let d = match fetch_doc(client, msg_id).await {
+        Ok(d) => d,
+        Err(e) => {
+            // Sessiya Telegram tomonidan bekor qilingan (masalan
+            // foydalanuvchi "Qurilmalar"dan chiqarib yuborgan). Endi
+            // har bir video avval Telegram'ni sinab vaqt yo'qotmasin —
+            // qayta ulanmaguncha hammasi worker yo'lidan ketadi.
+            if SESSION_DEAD.iter().any(|k| e.contains(k)) {
+                t.authorized.store(false, Ordering::SeqCst);
+                save_config(t);
+                crate::video_cache::tg_log(format!("Telegram sessiyasi bekor qilingan: {e}"));
+            }
+            return Err(e);
+        }
+    };
     if let Ok(mut m) = t.docs.lock() {
         m.insert(msg_id, d.clone());
     }

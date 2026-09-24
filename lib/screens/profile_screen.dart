@@ -30,6 +30,7 @@ import 'sessions_screen.dart';
 import 'settings_screen.dart';
 import 'stat_detail_screen.dart';
 import 'telegram_login_screen.dart';
+import 'telegram_video_screen.dart';
 
 /// PROFIL.
 ///
@@ -498,6 +499,14 @@ class _ProfileBody extends StatelessWidget {
                   icon: Icons.settings_rounded,
                   label: 'Sozlamalar',
                   onTap: () => _open(context, const SettingsScreen()),
+                ),
+                _divider(),
+                // Videolarni Telegram serveridan olish uchun o'z
+                // Telegram hisobini ulash (`telegram_video_screen`).
+                _ProfileTile(
+                  icon: Icons.send_rounded,
+                  label: 'Telegram orqali ko\'rish',
+                  onTap: () => _open(context, const TelegramVideoScreen()),
                 ),
                 _divider(),
                 _ProfileTile(

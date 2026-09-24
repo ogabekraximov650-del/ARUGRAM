@@ -12,6 +12,7 @@ import 'app_build.dart';
 import 'account_data.dart';
 import 'rust_bridge.dart';
 import 'sync_queue.dart';
+import 'telegram_service.dart';
 
 const String kApiBase = 'https://arumediatv.uzcom.workers.dev';
 
@@ -808,6 +809,10 @@ class AuthService extends ChangeNotifier {
     clearPending();
     _session = null;
     _user = null;
+    // Ilova hisobidan chiqildi — ulangan Telegram hisobi ham uziladi,
+    // aks holda telefonga keyin kirgan odam birovning Telegram'i
+    // orqali video olardi.
+    unawaited(TelegramService.instance.logout());
     try {
       await _storage.delete(key: _sessionKey);
       await _storage.delete(key: _userKey);

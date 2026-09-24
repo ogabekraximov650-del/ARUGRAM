@@ -41,6 +41,7 @@ import 'package:flutter/foundation.dart';
 
 import 'rust_bridge.dart';
 import 'video_cache_server.dart';
+import 'telegram_service.dart';
 
 /// Bitta video (aniq bir sifat) uchun yuklab olish holati.
 @immutable
@@ -321,14 +322,23 @@ class DownloadManager extends ChangeNotifier {
   void download(String url) {
     if (url.isEmpty) return;
     _ensureConnectivityWatch();
+    // ── TELEGRAM ──────────────────────────────────────────────
+    // Telegram ulangan bo'lsa AVVAL bot videoni yuborsin va fayl
+    // Rust yadrosida Telegram'ga bog'lansin — shundan keyin yuklash
+    // Telegram'dan ketadi. Aks holda (yoki xato bo'lsa) darhol,
+    // odatdagi worker yo'lidan.
+    final tg = TelegramService.instance;
+    final viaTg = tg.active;
     // Odatiy holat: kesh-server ilova ochilishida allaqachon ishga
     // tushgan — yuklash shu zahoti boshlanadi.
-    RustCore.instance.videoDownload(url);
+    if (!viaTg) RustCore.instance.videoDownload(url);
     // Kutilmagan holatda (server hali tayyor emas) uni tayyorlab,
     // buyruqni QAYTA yuboramiz — shu sabab tugma hech qachon
     // "ishlamay qolmaydi". Buyruq takrorlansa ham yangi yuklash
     // boshlanmaydi: Rust tomonida vazifa bitta va o'zgarmaydi.
-    VideoCacheServer.instance.ensureStarted().then((_) {
+    (viaTg ? tg.prepare(url) : Future<void>.value())
+        .then((_) => VideoCacheServer.instance.ensureStarted())
+        .then((_) {
       RustCore.instance.videoDownload(url);
       _poll();
     });
