@@ -2939,3 +2939,31 @@ mahalliy ishga tushirib, natijani commit qilish kerak.
 - **Davlat IP bo'yicha.** Davlat Telegram'ning `help.getNearestDc`
   javobidan olinadi (`rust_tg_nearest_country`), masalan `+998`.
   Foydalanuvchi uni istalgan payt o'zgartira oladi.
+
+## Bot chatiga takroriy nusxalar va qayta yuklangan fayl
+
+- **Sabablar:**
+  1. Pleyer, yuklab olish va qayta urinishlar `prepare` ni bir vaqtda
+     chaqirardi.
+  2. 20 soniyalik kutish tugaganda eski chaqiruv to'xtamasdi, yangisi
+     esa yana nusxa so'rardi.
+  3. O'qish xatosidan keyin fayl 2 daqiqa chetlatilardi
+     (`FAIL_COOLDOWN`). Fayl chatda topilsa ham u "yo'q" deb
+     hisoblanardi.
+  4. Qidiruv faqat hujjatlar ichidan qidirardi, oddiy videolar esa
+     "video" turkumida.
+  5. Chatni tekshirish tarmoq xatosi bilan tugasa ham nusxa
+     so'ralardi.
+- **Tuzatildi:**
+  - Bitta nom uchun bitta tayyorlash (`_preparing`).
+  - Yaqinda (10 daqiqa) yuborilgan fayl qayta so'ralmaydi — chat bir
+    necha marta qaraladi (`_deliveredAt`).
+  - Chat tekshirilmasa nusxa so'ralmaydi.
+  - `remember` chetlatishni olib tashlaydi.
+  - Videolar video filtri bilan ham qidiriladi.
+- **Kalit:** chatda topilgan fayl kaliti sessiyada bir marta serverdan
+  yangilanadi (`keys_only`, `_keysFresh`). Fayl qayta yuklangan bo'lsa
+  telefondagi eski kalit bilan ochilmaydi.
+- **Hajm:** pleyer Telegram'dagi haqiqiy hajmni ishlatadi
+  (`cached_doc_size`). Hajm o'zgargan bo'lsa diskdagi eski bo'laklar
+  tashlanadi.

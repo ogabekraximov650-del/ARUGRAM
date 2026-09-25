@@ -720,8 +720,10 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
       hold(owner, names.first);
       // Avval bot chatidan; faqat yo'qlarini bot kanaldan yuboradi.
       final got = await _findInChat(names);
-      got.addAll(
-          await _deliver(names.where((n) => !got.contains(n)).toList()));
+      if (got == null) throw 'bot chati tekshirilmadi';
+      got.addAll(await _deliver(names
+          .where((n) => !got.contains(n) && !_recentlyDelivered(n))
+          .toList()));
       for (final n in names) {
         if (!got.contains(n)) {
           _missing.add(n);
@@ -952,13 +954,47 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
   ///
   /// HECH QACHON xato tashlamaydi.
   Future<String?> prepare(String url) async {
+    // ── BITTA FAYL — BITTA TAYYORLASH ─────────────────────────
+    //
+    // TOPILGAN XATO (foydalanuvchi: "bitta video bot chatiga 3-4
+    // marta copy qilindi"): pleyer, yuklab olish va qayta urinishlar
+    // `prepare` ni bir vaqtda (yoki 20 soniyalik kutish tugab, eski
+    // chaqiruv hali ishlayotgan paytda) chaqirardi — har biri
+    // o'zicha botdan nusxa so'rardi. Endi bir nom uchun faqat BITTA
+    // tayyorlash yuradi, qolganlar o'sha natijani kutadi (kutish
+    // tugasa ham tayyorlash to'xtamaydi — keyingi chaqiruv unga
+    // qo'shiladi).
+    final name = fileNameOf(url);
+    final running = _preparing[name];
+    final f = running ??
+        (_preparing[name] = _prepare(url).whenComplete(() {
+          _preparing.remove(name);
+        }));
     try {
-      return await _prepare(url).timeout(const Duration(seconds: 20));
+      return await f.timeout(const Duration(seconds: 20));
     } catch (e) {
       debugPrint('Telegram: tayyorlanmadi: $e');
       return null;
     }
   }
+
+  final Map<String, Future<String?>> _preparing = {};
+
+  /// Bot shu fayllarni qachon yuborgan. Yaqinda (10 daqiqa) yuborilgan
+  /// fayl chatda darhol ko'rinmasa ham QAYTA SO'RALMAYDI — chat yana
+  /// bir necha marta qaraladi.
+  final Map<String, DateTime> _deliveredAt = {};
+  static const _redeliverAfter = Duration(minutes: 10);
+
+  bool _recentlyDelivered(String name) {
+    final at = _deliveredAt[name];
+    return at != null && DateTime.now().difference(at) < _redeliverAfter;
+  }
+
+  /// Bu sessiyada kaliti serverdan yangilangan fayllar. Chatdagi
+  /// nusxa topilganda kalit bir marta serverdan olinadi — fayl qayta
+  /// yuklangan bo'lsa telefondagi eski kalit bilan ochilmasin.
+  final Set<String> _keysFresh = {};
 
   /// Rust yadrosidagi holatni o'qiydi (tarmoqsiz). Sessiyani
   /// Telegram bekor qilgan bo'lsa yadro buni o'zi belgilaydi.
@@ -974,7 +1010,10 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
   /// Bu fayllar bot chatida BORmi (`rust_tg_find`) — kanaldan qayta
   /// nusxa so'rashdan OLDIN. Chatda bor-u kaliti telefonda yo'qlari
   /// uchun kalit serverdan nusxasiz olinadi (`keys_only`).
-  Future<Set<String>> _findInChat(List<String> names) async {
+  ///
+  /// `null` — chatni tekshirib bo'lmadi (tarmoq): bunda nusxa
+  /// SO'RALMAYDI, aks holda har bir uzilish yangi nusxa bo'lardi.
+  Future<Set<String>?> _findInChat(List<String> names) async {
     if (names.isEmpty) return {};
     Map<String, dynamic> j;
     try {
@@ -990,13 +1029,18 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
         }
       });
     } catch (_) {
-      return {};
+      return null;
     }
+    if (j['error'] != null) return null;
     final found = ((j['found'] as List?) ?? const []).whereType<String>().toSet();
-    final noKey = ((j['no_key'] as List?) ?? const []).whereType<String>().toList();
+    final noKey = {
+      ...((j['no_key'] as List?) ?? const []).whereType<String>(),
+      ...found.where((n) => !_keysFresh.contains(n)),
+    }.toList();
     if (noKey.isNotEmpty) {
       final got = await _deliver(noKey, keysOnly: true);
       // Kaliti olinmagani (ruxsat yo'q) — chatdagi nusxa ishlatilmaydi.
+      _keysFresh.addAll(got);
       found.removeWhere((n) => noKey.contains(n) && !got.contains(n));
     }
     return found;
@@ -1030,6 +1074,15 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
         }
       } catch (_) {}
     }
+    if (keysOnly) {
+      _keysFresh.addAll(got);
+    } else {
+      final now = DateTime.now();
+      for (final n in got) {
+        _deliveredAt[n] = now;
+        _keysFresh.add(n);
+      }
+    }
     // Bot yangi nusxa yubordi — chat o'qilgan deb belgilanadi.
     if (!keysOnly && got.isNotEmpty) {
       _readPending = true;
@@ -1054,10 +1107,19 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
     if (ready.isNotEmpty) return ready;
 
     // 1) Avval bot chatidan — bor bo'lsa kanaldan qayta nusxa YO'Q.
-    if ((await _findInChat([name])).contains(name)) {
-      final u = _playUrl(name);
-      if (u.isNotEmpty) return u;
+    // Yaqinda yuborilgan bo'lsa chat bir necha marta qaraladi (nusxa
+    // chatda bir-ikki soniyada paydo bo'ladi).
+    for (var i = 0;; i++) {
+      final found = await _findInChat([name]);
+      // Chatni tekshirib bo'lmadi — nusxa so'ralmaydi.
+      if (found == null) return null;
+      if (found.contains(name)) return _foundUrl(name);
+      if (!_recentlyDelivered(name) || i >= 3) break;
+      await Future<void>.delayed(const Duration(milliseconds: 1500));
     }
+    // Yaqinda yuborilgan-u chatda yo'q (foydalanuvchi o'chirgan
+    // bo'lishi mumkin) — faqat 10 daqiqadan keyin qayta so'raladi.
+    if (_recentlyDelivered(name)) return null;
 
     // 2) Chatda yo'q — bot kanaldan nusxa yuboradi.
     final s = AuthService.instance.sessionToken;
@@ -1080,9 +1142,18 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
     _applyKeys(j['keys']);
     final msgId = (j['msg_id'] as num?)?.toInt() ?? 0;
     if (msgId <= 0) return null;
+    _deliveredAt[name] = DateTime.now();
+    _keysFresh.add(name);
     _readPending = true;
     unawaited(_markReadIfPending());
     _route(name, msgId);
+    final u = _playUrl(name);
+    return u.isEmpty ? null : u;
+  }
+
+  /// Chatda topilgan fayl manzili (`rust_tg_find` oldingi o'qish
+  /// xatosi chetlatishini o'zi olib tashlaydi — yangi nusxa kerak emas).
+  String? _foundUrl(String name) {
     final u = _playUrl(name);
     return u.isEmpty ? null : u;
   }

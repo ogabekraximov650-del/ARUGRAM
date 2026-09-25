@@ -816,6 +816,12 @@ fn remember(t: &Tg, messages: &[tl::enums::Message], found: &mut HashSet<String>
                     routes_changed = true;
                 }
             }
+            // Fayl chatda bor — oldingi o'qish xatosi sababli qo'yilgan
+            // chetlatish olib tashlanadi (aks holda ilova uni "yo'q"
+            // deb bilib, botdan YANA nusxa so'rardi).
+            if let Ok(mut f) = t.failed.lock() {
+                f.remove(&key);
+            }
             found.insert(key);
         }
     }
@@ -866,27 +872,43 @@ async fn find_in_chat(t: &Tg, client: &Client, names: &[String]) -> Result<HashS
     let missing: Vec<&String> = want.iter().filter(|w| !found.contains(**w)).copied().collect();
     if missing.len() <= SEARCH_MAX {
         for name in missing {
-            let res = client
-                .invoke(&tl::functions::messages::Search {
-                    peer: peer.clone(),
-                    q: name.clone(),
-                    from_id: None,
-                    saved_peer_id: None,
-                    saved_reaction: None,
-                    top_msg_id: None,
-                    filter: tl::enums::MessagesFilter::InputMessagesFilterDocument,
-                    min_date: 0,
-                    max_date: 0,
-                    offset_id: 0,
-                    add_offset: 0,
-                    limit: 5,
-                    max_id: 0,
-                    min_id: 0,
-                    hash: 0,
-                })
-                .await
-                .map_err(|e| inv_err(&e))?;
-            remember(t, &messages_of(res), &mut found);
+            // Oddiy video (`force_file: false`) Telegram'da HUJJAT emas,
+            // VIDEO turkumida — faqat hujjat filtri uni topmasdi va bot
+            // eski nusxa turgan bo'lsa ham yangisini yuborardi.
+            let filters = if mime_of_name(name).starts_with("video/") {
+                vec![
+                    tl::enums::MessagesFilter::InputMessagesFilterVideo,
+                    tl::enums::MessagesFilter::InputMessagesFilterDocument,
+                ]
+            } else {
+                vec![tl::enums::MessagesFilter::InputMessagesFilterDocument]
+            };
+            for filter in filters {
+                if found.contains(name) {
+                    break;
+                }
+                let res = client
+                    .invoke(&tl::functions::messages::Search {
+                        peer: peer.clone(),
+                        q: name.clone(),
+                        from_id: None,
+                        saved_peer_id: None,
+                        saved_reaction: None,
+                        top_msg_id: None,
+                        filter,
+                        min_date: 0,
+                        max_date: 0,
+                        offset_id: 0,
+                        add_offset: 0,
+                        limit: 5,
+                        max_id: 0,
+                        min_id: 0,
+                        hash: 0,
+                    })
+                    .await
+                    .map_err(|e| inv_err(&e))?;
+                remember(t, &messages_of(res), &mut found);
+            }
         }
     }
     Ok(found)
@@ -3087,6 +3109,15 @@ pub(crate) fn doc_size(name: &str) -> Result<(u64, String), String> {
             Err(format!("{NET_ERR}vaqt tugadi"))
         }
     }
+}
+
+/// Fayl hajmi — faqat XOTIRADAGI ma'lumotdan (tarmoqsiz). Bot
+/// chatidan topilgan fayl (`rust_tg_find`) shu yerda bo'ladi va
+/// bu — Telegram'dagi HAQIQIY hajm.
+pub(crate) fn cached_doc_size(name: &str) -> Option<(u64, String)> {
+    let t = tg()?;
+    let d = t.docs.lock().ok()?.get(name).cloned()?;
+    (d.size > 0).then(|| (d.size, d.mime))
 }
 
 /// `offset` dan `len` bayt (offset `PART` ga karrali). Qismlar

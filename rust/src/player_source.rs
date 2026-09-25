@@ -84,6 +84,22 @@ fn chunk_len(index: u64, total: u64) -> u64 {
 fn open(name: &str, size_hint: u64) -> Result<i64, String> {
     let dir = video_cache::player_dir(name).ok_or("kesh tayyor emas")?;
     let mut total = video_cache::player_total(&dir);
+    // HAQIQIY hajm ustun: bazadagi `size_*` fayl qayta yuklanganda
+    // eskirib qolishi mumkin. Noto'g'ri hajm bilan oxirgi bo'lak
+    // "qisqa javob" bo'lib yiqilardi (MP4 sarlavhasi ko'pincha oxirida
+    // — ya'ni video umuman ochilmasdi).
+    if let Some((size, mime)) = telegram::cached_doc_size(name) {
+        if size != total {
+            // Fayl almashgan (qayta yuklangan) — eski bo'laklar boshqa
+            // faylniki, ular o'qilmasin.
+            if total != 0 {
+                let _ = std::fs::remove_dir_all(&dir);
+                let _ = std::fs::create_dir_all(&dir);
+            }
+            video_cache::player_set_total(&dir, size, &mime);
+            total = size;
+        }
+    }
     if total == 0 && size_hint > 0 {
         video_cache::player_set_total(&dir, size_hint, telegram::mime_of_name(name));
         total = size_hint;
