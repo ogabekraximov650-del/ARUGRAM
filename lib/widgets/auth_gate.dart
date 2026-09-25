@@ -16,9 +16,17 @@ import '../screens/phone_login_screen.dart';
 import '../services/auth_service.dart';
 import '../services/telegram_service.dart';
 
-class AuthGate extends StatelessWidget {
+class AuthGate extends StatefulWidget {
   final Widget child;
   const AuthGate({super.key, required this.child});
+
+  @override
+  State<AuthGate> createState() => _AuthGateState();
+}
+
+class _AuthGateState extends State<AuthGate> {
+  /// Oxirgi chizishda ilova ochiq edimi.
+  bool _wasOpen = false;
 
   @override
   Widget build(BuildContext context) {
@@ -30,9 +38,21 @@ class AuthGate extends StatelessWidget {
         // Saqlangan hisob hali o'qilmagan — kirish oynasi bir zumga
         // miltillab ketmasin.
         if (!auth.restored) return const SizedBox.shrink();
-        if (auth.isLoggedIn && TelegramService.instance.authorized) {
-          return child;
+        final open = auth.isLoggedIn && TelegramService.instance.authorized;
+        if (_wasOpen && !open) {
+          // ── SESSIYA UZILDI ──────────────────────────────────
+          // Foydalanuvchi talabi: Telegram sessiyasi uzilishi bilan
+          // raqam oynasi chiqsin. Darvoza ilovaning ENG PASTKI
+          // sahifasi — ustida ochiq pleyer (yoki boshqa sahifa)
+          // bo'lsa, oyna uning ortida qolib ketardi. Shu sabab
+          // ochiq sahifalar yopiladi.
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            Navigator.of(context).popUntil((r) => r.isFirst);
+          });
         }
+        _wasOpen = open;
+        if (open) return widget.child;
         return const PhoneLoginScreen(gate: true);
       },
     );

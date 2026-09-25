@@ -210,6 +210,9 @@ struct Tg {
     inflight: Arc<Semaphore>,
     /// fayl nomi -> AES-128-CTR kaliti (`keys.bin` da shifrlangan).
     keys: Mutex<HashMap<String, [u8; 16]>>,
+    /// Sessiya Telegram tomonidan bekor qilindi (ilova bot chatini
+    /// qayta kirgach tozalashi kerak). `rust_tg_status` da `lost`.
+    lost: AtomicBool,
 }
 
 static TG: OnceLock<Tg> = OnceLock::new();
@@ -531,6 +534,7 @@ fn status_json(t: &Tg) -> String {
         "configured": t.api_id.lock().map(|v| *v > 0).unwrap_or(false),
         "authorized": t.authorized.load(Ordering::SeqCst),
         "port": t.port,
+        "lost": t.lost.load(Ordering::SeqCst),
     })
     .to_string()
 }
@@ -764,23 +768,7 @@ async fn doc_for(t: &'static Tg, client: &Client, name: &str, refresh: bool) -> 
             // foydalanuvchi "Qurilmalar"dan chiqarib yuborgan). Endi
             // har bir video avval Telegram'ni sinab vaqt yo'qotmasin —
             // qayta ulanmaguncha hammasi worker yo'lidan ketadi.
-            if SESSION_DEAD.iter().any(|k| e.contains(k)) {
-                t.authorized.store(false, Ordering::SeqCst);
-                save_config(t);
-                // O'lik kalit bilan qayta kirib bo'lmaydi (masalan
-                // AUTH_KEY_DUPLICATED) — sessiya butunlay tashlanadi,
-                // keyingi kirish toza boshlanadi.
-                if let Ok(s) = t.session.lock() {
-                    if let Some(s) = s.as_ref() {
-                        s.wipe();
-                    }
-                }
-                disconnect(t);
-                if let Ok(mut d) = t.auth_dcs.try_lock() {
-                    d.clear();
-                }
-                crate::video_cache::tg_log(format!("Telegram sessiyasi bekor qilingan: {e}"));
-            }
+            check_dead(t, &e);
             return Err(e);
         }
     };
@@ -788,6 +776,55 @@ async fn doc_for(t: &'static Tg, client: &Client, name: &str, refresh: bool) -> 
         m.insert(name.to_string(), d.clone());
     }
     Ok(d)
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  SESSIYA UZILDI (foydalanuvchi Telegram'da "Qurilmalar"dan chiqardi)
+// ═══════════════════════════════════════════════════════════════
+//
+// TOPILGAN XATO (foydalanuvchi): "Telegram orqali sessiyani uzib,
+// ilovada video bosdim — pleyer ochildi, lekin video ishlamadi; bot
+// videoni chatga yuborgan, lekin o'chirilmagan".
+//
+// Ilgari sessiya o'lganini faqat bitta joy (bot chatidan fayl
+// qidirish) sezardi. Endi Telegram "sessiya yo'q" degan HAR BIR
+// joyda (`check_dead`) va ilova ochilganda/qaytganda/video oldidan
+// (`rust_tg_check_session`) aniqlanadi. Aniqlangach sessiya
+// tashlanadi, ilova esa darhol raqam oynasini ko'rsatadi
+// (`AuthGate`). Qayta kirilgach bot chatida qolgan nusxalar
+// tozalanadi (Dart: `_afterLogin`).
+
+/// Sessiya o'lganini bildiradigan xatomi — bo'lsa sessiyani tashlaydi.
+/// Faqat kirilgan holatda (kirish jarayonidagi AUTH_KEY_UNREGISTERED
+/// normal holat).
+fn check_dead(t: &Tg, err: &str) -> bool {
+    if !t.authorized.load(Ordering::SeqCst) || !SESSION_DEAD.iter().any(|k| err.contains(k)) {
+        return false;
+    }
+    t.authorized.store(false, Ordering::SeqCst);
+    t.lost.store(true, Ordering::SeqCst);
+    save_config(t);
+    // O'lik kalit bilan qayta kirib bo'lmaydi — sessiya butunlay
+    // tashlanadi, keyingi kirish toza boshlanadi.
+    if let Ok(s) = t.session.lock() {
+        if let Some(s) = s.as_ref() {
+            s.wipe();
+        }
+    }
+    let _ = fs::remove_file(t.dir.join("session.bin"));
+    disconnect(t);
+    if let Ok(mut d) = t.auth_dcs.try_lock() {
+        d.clear();
+    }
+    if let Ok(mut d) = t.docs.lock() {
+        d.clear();
+    }
+    if let Ok(mut r) = t.routes.lock() {
+        r.clear();
+    }
+    save_routes(t);
+    crate::video_cache::tg_log(format!("Telegram sessiyasi bekor qilingan: {err}"));
+    true
 }
 
 /// Asosiy DC dan boshqa DC ga hisobni ko'chiradi (fayl boshqa DC da
@@ -865,7 +902,11 @@ async fn fetch_part(t: &'static Tg, client: Client, name: String, offset: u64) -
                     }
                     // Boshqa DC: hisobni o'sha yerga ko'chiramiz.
                     Some("AUTH_KEY_UNREGISTERED") => {
-                        copy_auth(t, &client, dc).await?;
+                        // Asosiy DC ham "kalit yo'q" desa — sessiya o'lgan.
+                        if let Err(e) = copy_auth(t, &client, dc).await {
+                            check_dead(t, &e);
+                            return Err(e);
+                        }
                     }
                     Some("FILE_MIGRATE") => {
                         if let InvocationError::Rpc(r) = &e {
@@ -874,7 +915,10 @@ async fn fetch_part(t: &'static Tg, client: Client, name: String, offset: u64) -
                             }
                         }
                     }
-                    _ => return Err(last_err),
+                    _ => {
+                        check_dead(t, &last_err);
+                        return Err(last_err);
+                    }
                 }
             }
         }
@@ -1124,6 +1168,7 @@ fn init(dir: &str, api_id: i32, api_hash: &str) -> Result<&'static Tg, String> {
             auth_dcs: tokio::sync::Mutex::new(HashSet::new()),
             inflight: Arc::new(Semaphore::new(MAX_INFLIGHT)),
             keys: Mutex::new(keys),
+            lost: AtomicBool::new(false),
         };
         if TG.set(t).is_ok() {
             let t = TG.get().unwrap();
@@ -1163,12 +1208,16 @@ where
     let Some(client) = connect(t) else { return err_json("api_id berilmagan") };
     match f(t, client) {
         Ok(s) => s.into(),
-        Err(e) => err_json(e),
+        Err(e) => {
+            check_dead(t, &e);
+            err_json(e)
+        }
     }
 }
 
 fn after_login(t: &Tg) -> String {
     t.authorized.store(true, Ordering::SeqCst);
+    t.lost.store(false, Ordering::SeqCst);
     if let Ok(mut d) = t.docs.lock() {
         d.clear();
     }
@@ -1205,6 +1254,28 @@ pub extern "C" fn rust_tg_init(dir_ptr: *const c_char, api_id: i32, api_hash_ptr
         Ok(t) => status_json(t),
         Err(e) => err_json(e),
     })
+}
+
+/// Sessiya hali tirikmi — Telegram'ga bitta arzon so'rov
+/// (`updates.getState`). O'lgan bo'lsa sessiya tashlanadi. Javob —
+/// `rust_tg_status` bilan bir xil. Tarmoq yo'q bo'lsa holat
+/// o'zgarmaydi. BLOKLAYDI (Dart uni alohida isolate'da chaqiradi).
+#[no_mangle]
+pub extern "C" fn rust_tg_check_session() -> *mut c_char {
+    let Some(t) = tg() else {
+        return string_to_cptr(json!({"configured": false, "authorized": false, "port": 0}).to_string());
+    };
+    if t.authorized.load(Ordering::SeqCst) {
+        if let Some(client) = connect(t) {
+            let r = t.rt.block_on(async {
+                tokio::time::timeout(Duration::from_secs(10), client.invoke(&tl::functions::updates::GetState {})).await
+            });
+            if let Ok(Err(e)) = r {
+                check_dead(t, &e.to_string());
+            }
+        }
+    }
+    string_to_cptr(status_json(t))
 }
 
 #[no_mangle]
@@ -2027,6 +2098,9 @@ pub extern "C" fn rust_tg_upload_start(
         save_keys(t);
         let task = t.rt.spawn(async move {
             let r = upload_to_channel(t, client, path, name, mime, channel_id, s2, total, key).await;
+            if let Err(e) = &r {
+                check_dead(t, e);
+            }
             if let Ok(mut s) = st.lock() {
                 s.done = true;
                 match r {

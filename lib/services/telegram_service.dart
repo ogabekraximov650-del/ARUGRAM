@@ -37,10 +37,11 @@ import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
 import 'dart:isolate';
+import 'dart:typed_data';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:ffi/ffi.dart';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:http/http.dart' as http;
 
 import 'auth_service.dart';
@@ -112,7 +113,7 @@ class TgLoginStep {
       );
 }
 
-class TelegramService extends ChangeNotifier {
+class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
   TelegramService._();
   static final TelegramService instance = TelegramService._();
 
@@ -157,9 +158,68 @@ class TelegramService extends ChangeNotifier {
 
   void _apply(Map<String, dynamic> j) {
     if (j['error'] != null) return;
+    final was = _authorized;
     _configured = j['configured'] == true;
     _authorized = j['authorized'] == true;
     _port = (j['port'] as num?)?.toInt() ?? _port;
+    if (was && !_authorized) _onSessionLost();
+  }
+
+  // ── SESSIYA UZILDI ──────────────────────────────────────────
+  //
+  // TALAB (foydalanuvchi): "Telegram'dan sessiya uzilishi bilan
+  // ilova yangi sessiya yaratib, raqam yozadigan oynani chiqarsin".
+  //
+  // Rust yadrosi Telegram "sessiya yo'q" deganini sezishi bilan
+  // sessiyani tashlaydi (`check_dead`). Bu yerda:
+  //   * `authorized` o'chadi — `AuthGate` darhol raqam oynasini
+  //     ko'rsatadi (ochiq sahifalarni ham yopadi);
+  //   * bot chatida qolgan nusxalar QAYTA KIRILGACH tozalanadi —
+  //     o'lgan sessiya ularni o'chira olmaydi.
+  void _onSessionLost() {
+    _holders.clear();
+    _cleanPending = true;
+    _missing.clear();
+    notifyListeners();
+  }
+
+  Timer? _statusTimer;
+
+  /// Sessiya oxirgi marta qachon tekshirilgan.
+  DateTime _checkedAt = DateTime.fromMillisecondsSinceEpoch(0);
+  Future<void>? _checking;
+
+  /// Sessiya hali tirikmi — Telegram'ga bitta arzon so'rov
+  /// (`rust_tg_check_session`). Tez-tez chaqirilsa ham [every] ichida
+  /// bir marta. Tarmoq yo'q bo'lsa holat o'zgarmaydi.
+  Future<void> checkSession(
+      {Duration every = const Duration(seconds: 30)}) {
+    if (!_started || !_authorized) return Future.value();
+    final running = _checking;
+    if (running != null) return running;
+    if (DateTime.now().difference(_checkedAt) < every) return Future.value();
+    _checkedAt = DateTime.now();
+    final f = () async {
+      try {
+        final j = await Isolate.run(() {
+          final lib = _openLib();
+          return _json(_take(
+              lib,
+              lib.lookupFunction<_NoArgC, _NoArgC>(
+                  'rust_tg_check_session')()));
+        });
+        _apply(j);
+      } catch (_) {}
+    }();
+    _checking = f.whenComplete(() => _checking = null);
+    return _checking!;
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Ilovaga qaytildi — foydalanuvchi shu orada Telegram'da
+    // "Qurilmalar"dan chiqargan bo'lishi mumkin.
+    if (state == AppLifecycleState.resumed) unawaited(checkSession());
   }
 
   /// Rust yadrosidagi mahalliy Telegram manbasi porti.
@@ -180,12 +240,18 @@ class TelegramService extends ChangeNotifier {
       return;
     }
     notifyListeners();
-    unawaited(refreshConfig().then((_) {
+    unawaited(refreshConfig().then((_) async {
+      await checkSession(every: Duration.zero);
       // Oldingi seansdan (ilova yiqilgan bo'lsa) qolgan nusxalar.
       _cleanPending = true;
       return _cleanIfPending();
     }));
     _watchConnectivity();
+    WidgetsBinding.instance.addObserver(this);
+    // Yadro sessiya o'lganini (masalan pleyer o'qiyotganda) o'zi
+    // sezadi — holat xotiradan o'qiladi, tarmoqqa chiqilmaydi.
+    _statusTimer ??=
+        Timer.periodic(const Duration(seconds: 3), (_) => _syncStatus());
   }
 
   void _init(String dir, int apiId, String apiHash) {
@@ -700,6 +766,10 @@ class TelegramService extends ChangeNotifier {
     _authorized = true;
     _missing.clear();
     notifyListeners();
+    // Oldingi (uzilgan) sessiya davrida bot chatida qolgan nusxalar
+    // endi yangi sessiya bilan o'chiriladi.
+    _cleanPending = true;
+    unawaited(_cleanIfPending());
   }
 
   Future<void> logout() async {
@@ -782,6 +852,10 @@ class TelegramService extends ChangeNotifier {
 
   Future<String?> _prepare(String url) async {
     _syncStatus();
+    // Bot nusxa yuborishidan OLDIN sessiya tirikligi tekshiriladi —
+    // aks holda o'lik sessiyaga nusxa yuborilib, u o'chirilmay
+    // qolardi (30 soniyada bir marta).
+    await checkSession();
     if (!active) return null;
     // Navbatdagi tozalash YANGI nusxa kelishidan oldin tugasin —
     // aks holda u yangi nusxani ham o'chirib yuborardi.
