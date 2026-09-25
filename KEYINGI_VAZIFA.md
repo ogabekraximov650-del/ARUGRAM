@@ -202,6 +202,16 @@ tekshirildi: `LoginActivity` bizniki bilan bir xil, farqi — rasmiy
   `updateLoginToken`, `importLoginToken`) — boshqa qurilmadagi
   Telegram: Sozlamalar → Qurilmalar → "Qurilmani ulash".
 
+**Bot chati TOZALANMAYDI (2026-09-25, foydalanuvchi talabi).**
+Fayllar shifrlangan, shu sabab nusxalar chatda qoladi. Kerakli fayl
+avval bot chatidan NOMI bo'yicha izlanadi (`rust_tg_find`: oxirgi
+200 xabar, so'ng `messages.search`); topilsa kanaldan qayta nusxa
+olinmaydi. Kaliti telefonda yo'q bo'lsa — `/api/tg/deliver
+{"keys_only": true}` (nusxasiz, bazaga yozuvsiz). Bot yangi nusxa
+yuborgach chat foydalanuvchi hisobi bilan O'QILGAN deb belgilanadi
+(`rust_tg_mark_read`, `messages.readHistory`) — Telegram'da "N ta
+o'qilmagan" chiqmaydi. Worker'da cron ham, nusxalar jadvali ham YO'Q.
+
 **Baza tozalash:** `ci/WIPE_DB_ONCE` + `ci/wipe_db.py` —
 `deploy-worker.yml` yangi worker'dan KEYIN bazani tozalaydi va
 worker'ni qayta deploy qiladi. Belgi bazaga yoziladi
