@@ -84,10 +84,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use grammers_client::client::PasswordToken;
 use grammers_client::session::types::{DcOption, PeerId, PeerInfo, UpdateState, UpdatesState};
 use grammers_client::session::{BoxFuture, Session, SessionData};
-use grammers_client::{tl, Client, InvocationError, SenderPool, SignInError};
+use grammers_client::{tl, Client, InvocationError, SenderPool};
 use serde_json::{json, Value};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -133,6 +132,7 @@ const LABEL_SESSION: &str = "tg-session-v1";
 const LABEL_ROUTES: &str = "tg-routes-v1";
 const LABEL_LOGIN: &str = "tg-login-v1";
 const LABEL_KEYS: &str = "tg-keys-v1";
+const LABEL_TOKENS: &str = "tg-auth-tokens-v1";
 
 /// TARMOQ xatosi belgisi: shunday xato bilan tugagan o'qishni
 /// internet qaytgach QAYTA urinish mumkin (pleyer uni "kutish" deb
@@ -194,7 +194,8 @@ struct Tg {
     api_id: Mutex<i32>,
     api_hash: Mutex<String>,
     authorized: AtomicBool,
-    password_token: Mutex<Option<PasswordToken>>,
+    /// 2 bosqichli parol ma'lumoti (`account.getPassword`).
+    password_token: Mutex<Option<tl::types::account::Password>>,
     /// fayl nomi -> fayl ma'lumoti (xotirada; `file_reference` eskirsa
     /// qayta olinadi).
     docs: Mutex<HashMap<String, DocInfo>>,
@@ -1338,14 +1339,53 @@ fn clear_login(t: &Tg) {
     }
 }
 
-fn code_settings() -> tl::enums::CodeSettings {
+// ═══════════════════════════════════════════════════════════════
+//  KIRISH TOKENLARI (Telegram / Cherrygram ilovasidagi kabi)
+// ═══════════════════════════════════════════════════════════════
+//
+// TALAB (foydalanuvchi): "sessiya uzilgach qayta kirishda kod
+// kelmayapti — Cherrygram'da kod yuborish qanday ishlashini ko'r".
+//
+// Cherrygram (`LoginActivity.java`) har muvaffaqiyatli kirishdan
+// keyin Telegram bergan `future_auth_token` ni saqlaydi (chiqishda
+// ham — `auth.loggedOut`), keyingi `auth.sendCode` da esa ularni
+// `CodeSettings.logout_tokens` ga qo'yadi. Tokeni tanilgan qurilmani
+// Telegram ko'pincha KODSIZ kiritadi (`auth.sentCodeSuccess`) yoki
+// darhol parolni so'raydi (SESSION_PASSWORD_NEEDED).
+//
+// Tokenlar sessiyadan ALOHIDA faylda (`tokens.bin`, shifrlangan)
+// turadi — sessiya uzilganda ham, chiqishda ham o'chmaydi. Eng
+// ko'pi 20 ta (Telegram chegarasi).
+
+fn load_tokens(t: &Tg) -> Vec<Vec<u8>> {
+    read_sealed(&t.dir.join("tokens.bin"), LABEL_TOKENS)
+        .and_then(|p| serde_json::from_slice::<Vec<String>>(&p).ok())
+        .map(|v| v.iter().filter_map(|h| hex::decode(h).ok()).collect())
+        .unwrap_or_default()
+}
+
+fn save_token(t: &Tg, token: Option<&Vec<u8>>) {
+    let Some(token) = token.filter(|t| !t.is_empty()) else { return };
+    let mut all = load_tokens(t);
+    all.retain(|x| x != token);
+    all.insert(0, token.clone());
+    all.truncate(20);
+    let hexes: Vec<String> = all.iter().map(hex::encode).collect();
+    let _ = write_sealed(
+        &t.dir.join("tokens.bin"),
+        LABEL_TOKENS,
+        &serde_json::to_vec(&hexes).unwrap_or_default(),
+    );
+}
+
+fn code_settings(tokens: Vec<Vec<u8>>) -> tl::enums::CodeSettings {
     tl::types::CodeSettings {
         allow_flashcall: false,
         current_number: false,
         allow_app_hash: false,
         allow_missed_call: false,
         allow_firebase: false,
-        logout_tokens: None,
+        logout_tokens: if tokens.is_empty() { None } else { Some(tokens) },
         token: None,
         app_sandbox: None,
         unknown_number: false,
@@ -1409,11 +1449,13 @@ fn sent_info(sc: &tl::types::auth::SentCode) -> Value {
 enum CodeSent {
     /// Kod yuborildi: (phone_code_hash, qayerga).
     Code(String, Value),
-    /// Telegram kodsiz kiritdi (kamdan-kam).
+    /// Telegram kodsiz kiritdi (kirish tokeni tanildi).
     LoggedIn,
+    /// Kodsiz, lekin 2 bosqichli parol kerak.
+    NeedPassword,
 }
 
-fn code_result(res: tl::enums::auth::SentCode) -> Result<CodeSent, String> {
+fn code_result(t: &Tg, res: tl::enums::auth::SentCode) -> Result<CodeSent, String> {
     match res {
         tl::enums::auth::SentCode::Code(c) => {
             if matches!(c.r#type, tl::enums::auth::SentCodeType::SetUpEmailRequired(_)) {
@@ -1425,7 +1467,15 @@ fn code_result(res: tl::enums::auth::SentCode) -> Result<CodeSent, String> {
             let info = sent_info(&c);
             Ok(CodeSent::Code(c.phone_code_hash, info))
         }
-        tl::enums::auth::SentCode::Success(_) => Ok(CodeSent::LoggedIn),
+        tl::enums::auth::SentCode::Success(x) => match x.authorization {
+            tl::enums::auth::Authorization::Authorization(a) => {
+                save_token(t, a.future_auth_token.as_ref());
+                Ok(CodeSent::LoggedIn)
+            }
+            tl::enums::auth::Authorization::SignUpRequired(_) => Err(
+                "Bu raqamda Telegram hisobi yo'q — avval Telegram ilovasida ro'yxatdan o'ting".to_string(),
+            ),
+        },
         tl::enums::auth::SentCode::PaymentRequired(_) => Err(
             "Telegram bu raqamga kodni faqat to'lov (Premium) evaziga yuboradi — \
              Telegram ilovasi ochiq bo'lgan boshqa qurilma orqali kiring yoki keyinroq urining"
@@ -1441,7 +1491,7 @@ async fn send_code(t: &Tg, client: &Client, phone: &str) -> Result<CodeSent, Str
         phone_number: phone.to_string(),
         api_id,
         api_hash,
-        settings: code_settings(),
+        settings: code_settings(load_tokens(t)),
     };
     let res = match client.invoke(&req).await {
         Err(InvocationError::Rpc(e)) if e.code == 303 => {
@@ -1452,18 +1502,83 @@ async fn send_code(t: &Tg, client: &Client, phone: &str) -> Result<CodeSent, Str
             client.invoke(&req).await
         }
         other => other,
+    };
+    match res {
+        Ok(r) => code_result(t, r),
+        // Kirish tokeni tanildi, lekin hisobda qo'shimcha parol bor.
+        Err(e) if e.is("SESSION_PASSWORD_NEEDED") => Ok(CodeSent::NeedPassword),
+        Err(e) => Err(friendly(&e)),
     }
-    .map_err(|e| friendly(&e))?;
-    code_result(res)
 }
 
-async fn password_token(client: &Client) -> Result<PasswordToken, String> {
-    let pw: tl::types::account::Password = client
+async fn password_token(client: &Client) -> Result<tl::types::account::Password, String> {
+    let tl::enums::account::Password::Password(pw) = client
         .invoke(&tl::functions::account::GetPassword {})
         .await
-        .map_err(|e| e.to_string())?
-        .into();
-    Ok(PasswordToken::new(pw))
+        .map_err(|e| e.to_string())?;
+    Ok(pw)
+}
+
+/// Parol bosqichiga o'tadi (ma'lumot olinadi va saqlanadi).
+fn enter_password_stage(t: &Tg, client: &Client, phone: &str, hash: &str) -> Result<String, String> {
+    let pw = t.rt.block_on(password_token(client))?;
+    let hint = pw.hint.clone().unwrap_or_default();
+    if let Ok(mut p) = t.password_token.lock() {
+        *p = Some(pw);
+    }
+    save_login(t, "password", phone, hash, &hint);
+    Ok(json!({"password": true, "hint": hint}).to_string())
+}
+
+/// Parolni SRP bilan tekshiradi (`grammers` ning `check_password`
+/// o'rniga: u kirish tokenini tashlab yuboradi va kutilmagan javobda
+/// ilovani yiqitardi — `panic`).
+enum PwResult {
+    Ok,
+    Invalid,
+}
+
+async fn check_password_srp(
+    t: &Tg,
+    client: &Client,
+    mut pw: tl::types::account::Password,
+    password: &str,
+) -> Result<PwResult, String> {
+    use grammers_crypto::two_factor_auth::{calculate_2fa, check_p_and_g};
+    use tl::enums::PasswordKdfAlgo;
+    let algo = |pw: &tl::types::account::Password| match &pw.current_algo {
+        Some(PasswordKdfAlgo::Sha256Sha256Pbkdf2Hmacsha512iter100000Sha256ModPow(a)) => Some(a.clone()),
+        _ => None,
+    };
+    let mut alg = algo(&pw).ok_or("Bu parol turini ilova qo'llamaydi — Telegram ilovasini yangilang")?;
+    if !check_p_and_g(&alg.p, &alg.g) {
+        pw = password_token(client).await?;
+        alg = algo(&pw).ok_or("Parol ma'lumoti noto'g'ri")?;
+        if !check_p_and_g(&alg.p, &alg.g) {
+            return Err("Telegram noto'g'ri parol ma'lumoti berdi — qayta urining".to_string());
+        }
+    }
+    let srp_b = pw.srp_b.clone().ok_or("Parol ma'lumoti to'liq emas")?;
+    let srp_id = pw.srp_id.ok_or("Parol ma'lumoti to'liq emas")?;
+    let (m1, g_a) = calculate_2fa(&alg.salt1, &alg.salt2, &alg.p, &alg.g, srp_b, pw.secure_random.clone(), password);
+    let req = tl::functions::auth::CheckPassword {
+        password: tl::enums::InputCheckPasswordSrp::Srp(tl::types::InputCheckPasswordSrp {
+            srp_id,
+            a: g_a.to_vec(),
+            m1: m1.to_vec(),
+        }),
+    };
+    match client.invoke(&req).await {
+        Ok(tl::enums::auth::Authorization::Authorization(a)) => {
+            save_token(t, a.future_auth_token.as_ref());
+            Ok(PwResult::Ok)
+        }
+        Ok(tl::enums::auth::Authorization::SignUpRequired(_)) => {
+            Err("Bu raqamda Telegram hisobi yo'q".to_string())
+        }
+        Err(e) if e.is("PASSWORD_HASH_INVALID") => Ok(PwResult::Invalid),
+        Err(e) => Err(friendly(&e)),
+    }
 }
 
 /// Telefon raqamiga kirish kodini yuboradi.
@@ -1483,6 +1598,7 @@ pub extern "C" fn rust_tg_request_code(phone_ptr: *const c_char) -> *mut c_char 
                 clear_login(t);
                 Ok(after_login(t))
             }
+            CodeSent::NeedPassword => enter_password_stage(t, &client, &phone, ""),
         }
     }))
 }
@@ -1509,7 +1625,7 @@ pub extern "C" fn rust_tg_resend_code() -> *mut c_char {
                 Some("PHONE_CODE_EXPIRED") => "Kod muddati tugadi — raqamni qayta kiriting".to_string(),
                 _ => friendly(&e),
             })?;
-        match code_result(res)? {
+        match code_result(t, res)? {
             CodeSent::Code(hash, sent) => {
                 save_login_info(t, "code", &phone, &hash, "", &sent);
                 Ok(json!({"ok": true, "sent": sent}).to_string())
@@ -1518,6 +1634,7 @@ pub extern "C" fn rust_tg_resend_code() -> *mut c_char {
                 clear_login(t);
                 Ok(after_login(t))
             }
+            CodeSent::NeedPassword => enter_password_stage(t, &client, &phone, ""),
         }
     }))
 }
@@ -1539,7 +1656,8 @@ pub extern "C" fn rust_tg_sign_in(code_ptr: *const c_char) -> *mut c_char {
             email_verification: None,
         }));
         match r {
-            Ok(tl::enums::auth::Authorization::Authorization(_)) => {
+            Ok(tl::enums::auth::Authorization::Authorization(a)) => {
+                save_token(t, a.future_auth_token.as_ref());
                 clear_login(t);
                 Ok(after_login(t))
             }
@@ -1547,15 +1665,7 @@ pub extern "C" fn rust_tg_sign_in(code_ptr: *const c_char) -> *mut c_char {
                 clear_login(t);
                 Err("Bu raqamda Telegram hisobi yo'q — avval Telegram ilovasida ro'yxatdan o'ting".to_string())
             }
-            Err(e) if e.is("SESSION_PASSWORD_NEEDED") => {
-                let pt = t.rt.block_on(password_token(&client))?;
-                let hint = pt.hint().unwrap_or("").to_string();
-                if let Ok(mut p) = t.password_token.lock() {
-                    *p = Some(pt);
-                }
-                save_login(t, "password", &phone, &hash, &hint);
-                Ok(json!({"password": true, "hint": hint}).to_string())
-            }
+            Err(e) if e.is("SESSION_PASSWORD_NEEDED") => enter_password_stage(t, &client, &phone, &hash),
             Err(e) if e.is("PHONE_CODE_EXPIRED") => {
                 clear_login(t);
                 Err("Kod muddati tugadi — raqamni qayta kiriting".to_string())
@@ -1573,23 +1683,20 @@ pub extern "C" fn rust_tg_check_password(pw_ptr: *const c_char) -> *mut c_char {
     string_to_cptr(with_client(|t, client| {
         // Ilova qayta ochilgan bo'lsa parol ma'lumoti xotirada yo'q —
         // Telegram'dan qayta olinadi (kod allaqachon qabul qilingan).
-        let pt = match t.password_token.lock().ok().and_then(|mut p| p.take()) {
-            Some(pt) => pt,
+        // Har urinishga YANGI ma'lumot: SRP qiymatlari bir martalik.
+        let info = match t.password_token.lock().ok().and_then(|mut p| p.take()) {
+            Some(pw) => pw,
             None => t.rt.block_on(password_token(&client))?,
         };
-        match t.rt.block_on(client.check_password(pt, pw.as_bytes())) {
-            Ok(_) => {
+        let hint = info.hint.clone().unwrap_or_default();
+        match t.rt.block_on(check_password_srp(t, &client, info, &pw))? {
+            PwResult::Ok => {
                 clear_login(t);
                 Ok(after_login(t))
             }
-            Err(SignInError::InvalidPassword(pt)) => {
-                let hint = pt.hint().unwrap_or("").to_string();
-                if let Ok(mut p) = t.password_token.lock() {
-                    *p = Some(pt);
-                }
+            PwResult::Invalid => {
                 Ok(json!({"password": true, "hint": hint, "error": "Parol noto'g'ri"}).to_string())
             }
-            Err(e) => Err(e.to_string()),
         }
     }))
 }
@@ -2274,9 +2381,14 @@ pub extern "C" fn rust_tg_logout() -> *mut c_char {
     let Some(t) = tg() else { return string_to_cptr(json!({"ok": true}).to_string()) };
     if t.authorized.load(Ordering::SeqCst) {
         if let Some(client) = connect(t) {
-            let _ = t.rt.block_on(async {
-                tokio::time::timeout(Duration::from_secs(10), client.sign_out()).await
+            // Chiqishda ham Telegram kirish tokenini beradi — keyingi
+            // kirish kodsiz bo'lishi mumkin (Cherrygram kabi).
+            let r = t.rt.block_on(async {
+                tokio::time::timeout(Duration::from_secs(10), client.invoke(&tl::functions::auth::LogOut {})).await
             });
+            if let Ok(Ok(tl::enums::auth::LoggedOut::Out(o))) = r {
+                save_token(t, o.future_auth_token.as_ref());
+            }
         }
     }
     if let Ok(s) = t.session.lock() {

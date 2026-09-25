@@ -161,6 +161,12 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
     });
     final r = await _tg.resendCode();
     if (!mounted) return;
+    if (r.needPassword) {
+      _hint = r.hint;
+      setState(() => _busy = false);
+      _go(_Step.password);
+      return;
+    }
     if (r.loggedIn) return _finish();
     if (r.error != null) return _fail(r.error);
     setState(() => _busy = false);
@@ -258,6 +264,14 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
         final r = await _tg.requestCode(_phone.text);
         if (!mounted) return;
         if (r.error != null) return _fail(r.error);
+        // Kirish tokeni tanildi (Cherrygram kabi) — kodsiz kiritildi
+        // yoki darhol parol so'raldi.
+        if (r.needPassword) {
+          _hint = r.hint;
+          setState(() => _busy = false);
+          _go(_Step.password);
+          return;
+        }
         if (r.loggedIn) return _finish();
         setState(() => _busy = false);
         _setSent(r.sent);

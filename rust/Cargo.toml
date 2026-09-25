@@ -42,6 +42,10 @@ grammers-session = { version = "=0.10.0", default-features = false, features = [
 # 2.0.0-rc1 ni tanlaydi — u API'ni buzgan, kompilyatsiya yiqiladi.
 # Cargo.lock repoda saqlanmaydi, shu sabab versiya shu yerda qotiriladi.
 glass_pumpkin = "=2.0.0-rc0"
+# 2 bosqichli parol (SRP) — `grammers` ning `check_password` kirish
+# tokenini (`future_auth_token`) tashlab yuboradi, shu sabab parol
+# `telegram.rs` da shu kutubxona bilan tekshiriladi.
+grammers-crypto = "=0.10.0"
 tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync", "time", "fs"] }
 # aes + ctr — Telegram'ga yuklanadigan fayllar AES-128-CTR bilan
 #              shifrlanadi (`telegram.rs` -> "SHIFRLAB YUKLASH"). CTR

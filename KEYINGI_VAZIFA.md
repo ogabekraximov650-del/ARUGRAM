@@ -180,6 +180,16 @@ video oldidan (30 s da bir marta) `rust_tg_check_session`
 ochiq sahifalarni yopib raqam oynasini ko'rsatadi. Qayta kirilgach bot
 chatida qolgan nusxalar tozalanadi (`_afterLogin`).
 
+**Kirish kodi (Cherrygram `LoginActivity.java` asosida, 2026-09-25).**
+Kod qayerga ketgani (`auth.sentCode.type`: ilova/SMS/qo'ng'iroq/email)
+ekranda aytiladi, `auth.resendCode` bilan qayta yuboriladi. Har
+kirishda (va chiqishda — `auth.loggedOut`) Telegram bergan
+`future_auth_token` `tokens.bin` ga saqlanadi va keyingi
+`auth.sendCode` da `logout_tokens` ga qo'yiladi — tanilgan qurilma
+kodsiz kiradi (`sentCodeSuccess`) yoki darhol parol so'raladi. Parol
+SRP'si o'zimizda (`check_password_srp`), chunki grammers'niki tokenni
+tashlab yuboradi.
+
 **Baza tozalash:** `ci/WIPE_DB_ONCE` + `ci/wipe_db.py` —
 `deploy-worker.yml` yangi worker'dan KEYIN bazani tozalaydi va
 worker'ni qayta deploy qiladi. Belgi bazaga yoziladi
