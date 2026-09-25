@@ -1238,6 +1238,7 @@ fn init(dir: &str, api_id: i32, api_hash: &str) -> Result<&'static Tg, String> {
         };
         if TG.set(t).is_ok() {
             let t = TG.get().unwrap();
+            load_wait(t);
             t.rt.spawn(serve(t, listener));
         }
     }
@@ -1276,13 +1277,20 @@ where
         Ok(s) => s.into(),
         Err(e) => {
             check_dead(t, &e);
-            err_json(e)
+            let left = wait_left();
+            if left > 0 {
+                json!({"error": e, "wait": left}).to_string()
+            } else {
+                err_json(e)
+            }
         }
     }
 }
 
 fn after_login(t: &Tg) -> String {
     t.authorized.store(true, Ordering::SeqCst);
+    WAIT_UNTIL.store(0, Ordering::SeqCst);
+    let _ = fs::remove_file(wait_path(t));
     t.lost.store(false, Ordering::SeqCst);
     if let Ok(mut d) = t.docs.lock() {
         d.clear();
@@ -1458,13 +1466,60 @@ fn code_settings(tokens: Vec<Vec<u8>>) -> tl::enums::CodeSettings {
     .into()
 }
 
+// ── QANCHA KUTISH KERAK ──────────────────────────────────────
+//
+// TALAB (foydalanuvchi): "hisobga kirish uchun qancha kutish
+// kerakligini aniq ko'rsatsin".
+//
+// Telegram vaqtni faqat `FLOOD_WAIT_<soniya>` (va
+// `FLOOD_PREMIUM_WAIT_<soniya>`) da aniq aytadi — o'sha son
+// saqlanadi (`wait.bin`, ilova yopilsa ham) va ekranda teskari
+// sanoq bo'lib turadi; tugaguncha Telegram'ga so'rov ketmaydi.
+// `PHONE_NUMBER_FLOOD` va `SEND_CODE_UNAVAILABLE` da Telegram vaqt
+// BERMAYDI — ekranda shunday deb aytiladi.
+
+static WAIT_UNTIL: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+fn wait_path(t: &Tg) -> PathBuf {
+    t.dir.join("wait.bin")
+}
+
+/// Telegram aytgan kutishning qolgan qismi (soniya).
+fn wait_left() -> i64 {
+    let until = WAIT_UNTIL.load(Ordering::SeqCst);
+    ((until - now_ms()) / 1000).max(0)
+}
+
+fn set_wait(secs: u32) {
+    let until = now_ms() + secs as i64 * 1000;
+    WAIT_UNTIL.store(until, Ordering::SeqCst);
+    if let Some(t) = tg() {
+        let _ = write_sealed(&wait_path(t), LABEL_LOGIN, json!({"until": until}).to_string().as_bytes());
+    }
+}
+
+fn load_wait(t: &Tg) {
+    if let Some(v) = read_sealed(&wait_path(t), LABEL_LOGIN).and_then(|p| serde_json::from_slice::<Value>(&p).ok()) {
+        WAIT_UNTIL.store(v["until"].as_i64().unwrap_or(0), Ordering::SeqCst);
+    }
+}
+
 fn friendly(e: &InvocationError) -> String {
+    if let InvocationError::Rpc(r) = e {
+        if r.name.starts_with("FLOOD_WAIT") || r.name.starts_with("FLOOD_PREMIUM_WAIT") {
+            if let Some(v) = r.value {
+                set_wait(v);
+                return "Telegram juda ko'p urinish sababli kirishni vaqtincha to'xtatdi".to_string();
+            }
+        }
+    }
     match rpc_name(e) {
         Some("PHONE_NUMBER_INVALID") => "Telefon raqami noto'g'ri".to_string(),
         Some("PHONE_NUMBER_BANNED") => "Bu raqam Telegram'da bloklangan".to_string(),
-        Some("PHONE_NUMBER_FLOOD") | Some("FLOOD_WAIT") => {
-            "Juda ko'p urinish — birozdan keyin qayta urining".to_string()
-        }
+        Some("PHONE_NUMBER_FLOOD") => "Bu raqamga juda ko'p kod so'raldi. Telegram kutish vaqtini \
+            aytmadi — odatda bir necha soatdan bir kungacha"
+            .to_string(),
+        Some("FLOOD_WAIT") => "Juda ko'p urinish — birozdan keyin qayta urining".to_string(),
         _ => e.to_string(),
     }
 }
@@ -1654,6 +1709,11 @@ pub extern "C" fn rust_tg_request_code(phone_ptr: *const c_char) -> *mut c_char 
         if phone.len() < 6 {
             return Err("Telefon raqamini kiriting".to_string());
         }
+        // Telegram aytgan kutish tugamagan — so'rov umuman ketmaydi
+        // (aks holda kutish yana uzayishi mumkin).
+        if wait_left() > 0 {
+            return Err("Telegram kirishni vaqtincha to'xtatgan — kuting".to_string());
+        }
         // ── BIR RAQAMGA TEZ-TEZ KOD SO'RALMASIN ───────────────
         //
         // Har yangi `auth.sendCode` oldingi kodni bekor qiladi, ko'p
@@ -1787,9 +1847,10 @@ pub extern "C" fn rust_tg_resend_code() -> *mut c_char {
                 reason: None,
             }))
             .map_err(|e| match rpc_name(&e) {
-                Some("SEND_CODE_UNAVAILABLE") => {
-                    "Boshqa usul qolmadi — biroz kutib raqamni qaytadan kiriting".to_string()
-                }
+                Some("SEND_CODE_UNAVAILABLE") => "Telegram bu raqamga kod yuborishni vaqtincha \
+                    to'xtatdi. Kutish vaqtini Telegram aytmadi — odatda bir necha soatdan bir \
+                    kungacha. Bu orada qayta so'ramang"
+                    .to_string(),
                 Some("PHONE_CODE_EXPIRED") => "Kod muddati tugadi — raqamni qayta kiriting".to_string(),
                 _ => friendly(&e),
             })?;
@@ -1885,9 +1946,10 @@ pub extern "C" fn rust_tg_login_state() -> *mut c_char {
             "phone": v["phone"].as_str().unwrap_or(""),
             "hint": v["hint"].as_str().unwrap_or(""),
             "sent": v["sent"].clone(),
+            "wait": wait_left(),
         })
         .to_string(),
-        None => json!({"stage": "phone"}).to_string(),
+        None => json!({"stage": "phone", "wait": wait_left()}).to_string(),
     })
 }
 

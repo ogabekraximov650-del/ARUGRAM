@@ -106,6 +106,9 @@ class TgLoginStep {
   /// Kod so'rovidan keyin Telegram kodsiz kiritgan (kamdan-kam).
   final bool loggedIn;
 
+  /// Telegram aytgan kutish (soniya; 0 — yo'q).
+  final int wait;
+
   const TgLoginStep({
     this.done = false,
     this.needPassword = false,
@@ -113,6 +116,7 @@ class TgLoginStep {
     this.error,
     this.sent = const {},
     this.loggedIn = false,
+    this.wait = 0,
   });
 
   factory TgLoginStep.fromJson(Map<String, dynamic> j) => TgLoginStep(
@@ -122,6 +126,7 @@ class TgLoginStep {
         error: j['error'] as String?,
         sent: (j['sent'] as Map?)?.cast<String, dynamic>() ?? const {},
         loggedIn: j['ok'] == true && j['sent'] == null,
+        wait: (j['wait'] as num?)?.toInt() ?? 0,
       );
 }
 

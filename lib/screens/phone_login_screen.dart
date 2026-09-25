@@ -90,6 +90,38 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
   // Telegram esa kodni SMS, qo'ng'iroq yoki emailga ham yuboradi.
   // Endi Telegram aytgan joy ko'rsatiladi va kutish vaqti o'tgach
   // "Kodni qayta yuborish" (keyingi usul) tugmasi chiqadi.
+  // ── TELEGRAM AYTGAN KUTISH ──────────────────────────────────
+  //
+  // TALAB (foydalanuvchi): "qancha kutish kerakligini aniq
+  // ko'rsatsin". Telegram vaqtni aytsa (FLOOD_WAIT) — teskari sanoq,
+  // tugaguncha kod so'rab bo'lmaydi. Aytmasa — xato matnida
+  // shunday deyiladi.
+  int _waitLeft = 0;
+  Timer? _waitTimer;
+
+  void _setWait(int secs) {
+    _waitTimer?.cancel();
+    _waitLeft = secs;
+    if (secs > 0) {
+      _waitTimer = Timer.periodic(const Duration(seconds: 1), (t) {
+        if (!mounted) return t.cancel();
+        setState(() => _waitLeft--);
+        if (_waitLeft <= 0) {
+          t.cancel();
+          setState(() => _error = null);
+        }
+      });
+    }
+    if (mounted) setState(() {});
+  }
+
+  /// `1:05:09` yoki `4:09`.
+  static String _clock(int s) {
+    final h = s ~/ 3600, m = (s % 3600) ~/ 60, sec = s % 60;
+    String two(int v) => v.toString().padLeft(2, '0');
+    return h > 0 ? '$h:${two(m)}:${two(sec)}' : '$m:${two(sec)}';
+  }
+
   Map<String, dynamic> _sent = const {};
   Timer? _resendTimer;
   int _resendLeft = 0;
@@ -220,7 +252,7 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
   }
 
   Future<void> _resend() async {
-    if (_busy || _resendLeft > 0) return;
+    if (_busy || _resendLeft > 0 || _waitLeft > 0) return;
     setState(() {
       _busy = true;
       _error = null;
@@ -234,7 +266,7 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
       return;
     }
     if (r.loggedIn) return _finish();
-    if (r.error != null) return _fail(r.error);
+    if (r.error != null) return _fail(r.error, wait: r.wait);
     setState(() => _busy = false);
     _code.clear();
     _setSent(r.sent);
@@ -266,6 +298,7 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
 
   void _restoreStage() {
     final st = _tg.loginState();
+    _setWait((st['wait'] as num?)?.toInt() ?? 0);
     final phone = (st['phone'] as String?) ?? '';
     if (phone.isNotEmpty) _phone.text = phone;
     switch (st['stage']) {
@@ -288,6 +321,7 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
 
   @override
   void dispose() {
+    _waitTimer?.cancel();
     _qrTimer?.cancel();
     _resendTimer?.cancel();
     _phone.dispose();
@@ -308,8 +342,9 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
     });
   }
 
-  void _fail(String? e) {
+  void _fail(String? e, {int wait = 0}) {
     if (!mounted) return;
+    if (wait > 0) _setWait(wait);
     setState(() {
       _busy = false;
       _error = e;
@@ -322,6 +357,7 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
       case _Step.qr:
         return;
       case _Step.phone:
+        if (_waitLeft > 0) return;
         if (_phone.text.length < 8) {
           _fail('Raqamni to\'liq kiriting');
           return;
@@ -332,7 +368,7 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
         });
         final r = await _tg.requestCode(_phone.text);
         if (!mounted) return;
-        if (r.error != null) return _fail(r.error);
+        if (r.error != null) return _fail(r.error, wait: r.wait);
         // Kirish tokeni tanildi (Cherrygram kabi) — kodsiz kiritildi
         // yoki darhol parol so'raldi.
         if (r.needPassword) {
@@ -360,7 +396,7 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
           _go(_Step.password);
           return;
         }
-        if (!r.done) return _fail(r.error);
+        if (!r.done) return _fail(r.error, wait: r.wait);
         _finish();
       case _Step.password:
         if (_password.text.isEmpty) return;
@@ -372,7 +408,7 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
         if (!mounted) return;
         if (!r.done) {
           _password.clear();
-          return _fail(r.error ?? 'Parol noto\'g\'ri');
+          return _fail(r.error ?? 'Parol noto\'g\'ri', wait: r.wait);
         }
         _finish();
       case _Step.finishing:
@@ -475,6 +511,17 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
                   child: _stepBody(),
                 ),
               ),
+              if (_waitLeft > 0) ...[
+                const SizedBox(height: 16),
+                Text(
+                  'Qayta urinish mumkin: ${_clock(_waitLeft)} dan keyin',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      color: Colors.orangeAccent,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700),
+                ),
+              ],
               if (_error != null) ...[
                 const SizedBox(height: 16),
                 Text(
