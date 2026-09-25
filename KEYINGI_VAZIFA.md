@@ -2792,3 +2792,14 @@ mahalliy ishga tushirib, natijani commit qilish kerak.
 - `rust/Cargo.toml` dagi `panic = "abort"` — Rust tomonida panic
   bo'lsa butun ilova o'ladi, shu sabab Rust kodi juda ehtiyotkorlik
   bilan yozilgan.
+
+## Pleyer mahalliy serversiz (Android)
+
+- `packages/video_player_android` — video_player_android 2.12.2 nusxasi
+  (`pubspec.yaml` → `dependency_overrides`). Qo'shilganlari:
+  `AruDataSource` (JNI → `rust/src/player_source.rs`), `AruVideoAsset`
+  (`aru://file/<nom>`), `AruLoadControl` (bufer: 20–40 s oldinga, 30 s orqaga).
+- Pleyer diskdagi shifrlangan 1 MiB bo'laklarni o'zi o'qiydi; yo'q bo'lak
+  Telegram'dan olinib diskka yoziladi, oldinga faqat 2 bo'lak tayyorlanadi.
+- iOS'da hozircha eski yo'l (mahalliy HTTP manba).
+- Mahalliy HTTP server hali yuklab olish, rasmlar va eskizlar uchun ishlatiladi.

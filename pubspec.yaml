@@ -92,6 +92,13 @@ dependencies:
   # dvigatel o'sha-o'sha; lekin audio uchun to'g'ri yo'l bilan.
   just_audio: ^0.10.6
 
+# ARUGRAM: video_player_android nusxasi — pleyer videoni mahalliy
+# serversiz, diskdagi shifrlangan keshdan o'qiydi (`aru://file/<nom>`,
+# packages/video_player_android/.../AruDataSource.java).
+dependency_overrides:
+  video_player_android:
+    path: packages/video_player_android
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

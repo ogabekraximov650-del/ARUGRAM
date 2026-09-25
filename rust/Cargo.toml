@@ -43,6 +43,8 @@ grammers-session = { version = "=0.10.0", default-features = false, features = [
 # Cargo.lock repoda saqlanmaydi, shu sabab versiya shu yerda qotiriladi.
 glass_pumpkin = "=2.0.0-rc0"
 tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync", "time", "fs"] }
+# jni — ExoPlayer manbasi (`player_source.rs`) Java bilan shu orqali gaplashadi.
+jni = { version = "0.21", default-features = false }
 
 [profile.release]
 opt-level = 3

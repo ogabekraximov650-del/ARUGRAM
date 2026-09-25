@@ -8884,3 +8884,67 @@ mod tests {
     }
 
 }
+
+// ═══════════════════════════════════════════════════════════════════
+//  PLEYER TO'G'RIDAN-TO'G'RI O'QISHI UCHUN (`player_source.rs`)
+// ═══════════════════════════════════════════════════════════════════
+//
+// Pleyer endi mahalliy HTTP server orqali emas, JNI orqali shu
+// bo'laklarni o'qiydi. Bo'lak formati, kalitlar va meta.json —
+// yuklab olish tizimi bilan AYNAN BIR XIL, ya'ni pleyer yozgan
+// bo'lakni yuklab olish qayta olmaydi va aksincha.
+
+pub(crate) const PLAYER_CHUNK: u64 = CHUNK_SIZE;
+
+/// Faylning kesh papkasi (yaratib qo'yiladi).
+pub(crate) fn player_dir(key: &str) -> Option<PathBuf> {
+    let key = cache_key(key);
+    let dir = SHARED.get()?.cache_root.join(&key);
+    fs::create_dir_all(&dir).ok()?;
+    Some(dir)
+}
+
+/// meta.json dagi hajm (bo'lak o'lchami mos kelmasa — 0).
+pub(crate) fn player_total(dir: &PathBuf) -> u64 {
+    meta_total_from_disk(dir)
+}
+
+/// Hajm ma'lum bo'lganda meta.json yoziladi (bor bo'lsa tegilmaydi —
+/// unda davomiylik va bo'lak jadvali ham bo'lishi mumkin).
+pub(crate) fn player_set_total(dir: &PathBuf, total: u64, content_type: &str) {
+    if meta_total_from_disk(dir) == total {
+        return;
+    }
+    let _ = write_meta(dir, &CacheMeta {
+        total_size: total,
+        content_type: content_type.to_string(),
+        chunk_size: CHUNK_SIZE,
+        duration_secs: 0.0,
+        chunk_start_ms: Vec::new(),
+    });
+}
+
+pub(crate) fn player_read_chunk(dir: &PathBuf, key: &str, index: u64, total: u64) -> Option<Vec<u8>> {
+    let plain = chunk_plain_len(index, total);
+    if plain == 0 {
+        return None;
+    }
+    let key = cache_key(key);
+    let data = read_cached_chunk(dir, &key, index, plain as usize)?;
+    stat_note_chunk(&key, index, plain);
+    Some(data)
+}
+
+pub(crate) fn player_write_chunk(dir: &PathBuf, key: &str, index: u64, total: u64, plain: &[u8]) -> bool {
+    if chunk_plain_len(index, total) != plain.len() as u64 {
+        return false;
+    }
+    let key = cache_key(key);
+    if !write_full_chunk(dir, &key, index, plain) {
+        return false;
+    }
+    NET_BYTES.fetch_add(plain.len() as u64, Ordering::Relaxed);
+    stat_note_net(&key, plain.len() as u64);
+    stat_note_chunk(&key, index, plain.len() as u64);
+    true
+}

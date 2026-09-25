@@ -279,6 +279,16 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     }
   }
 
+  /// Android'da pleyer videoni MAHALLIY SERVERSIZ o'qiydi: ExoPlayer'ga
+  /// o'z manbamiz (`AruDataSource`, packages/video_player_android)
+  /// berilgan — u diskdagi shifrlangan 1 MiB bo'laklarni Rust orqali
+  /// ochadi, yo'q bo'lagini Telegram'dan olib diskka yozadi (Telegram
+  /// ilovasi ham aynan shunday ishlaydi). iOS'da hozircha eski yo'l.
+  static bool get _aruSource => defaultTargetPlatform == TargetPlatform.android;
+
+  static Uri _aruUri(String url) =>
+      Uri.parse('aru://file/${TelegramService.fileNameOf(url)}');
+
   /// Oyna isitish (worker keshi) kerak EMASmi.
   bool get _noWarm => _playViaLocal || _playViaTelegram;
 
@@ -1141,7 +1151,12 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     final complete = _isFullyDownloaded(url);
     Uri? source;
     _playViaTelegram = false;
-    if (complete) {
+    if (complete && _aruSource) {
+      // Pleyer diskdagi shifrlangan bo'laklarni o'zi o'qiydi
+      // (mahalliy serversiz, `AruDataSource`).
+      source = _aruUri(url);
+      _playViaLocal = true;
+    } else if (complete) {
       try {
         source = await VideoCacheServer.instance.proxyUri(url);
         _playViaLocal = true;
@@ -1170,7 +1185,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       final tgUrl = await TelegramService.instance.prepare(url);
       if (!mounted || myToken != _playToken) return;
       if (tgUrl != null) {
-        source = Uri.parse(tgUrl);
+        source = _aruSource ? _aruUri(url) : Uri.parse(tgUrl);
         _playViaTelegram = true;
         _setTgHeld(url);
       } else {

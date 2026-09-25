@@ -8,7 +8,7 @@ pubspec.lock
 *.iml
 
 # ── Android (CI'da `flutter create` bilan qaytadan yaratiladi) ──
-android/
+/android/
 jniLibs-out/
 
 # ── Rust ────────────────────────────────────────────────────────

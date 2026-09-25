@@ -1902,3 +1902,65 @@ mod tests {
         }
     }
 }
+
+// ═══════════════════════════════════════════════════════════════
+//  PLEYER UCHUN TO'G'RIDAN-TO'G'RI O'QISH (`player_source.rs`)
+// ═══════════════════════════════════════════════════════════════
+//
+// Bular ExoPlayer'ning yuklash oqimidan (tokio'dan tashqarida)
+// chaqiriladi va natija kelguncha kutadi.
+
+/// Fayl hajmi va turi (bot chatidan topiladi).
+pub(crate) fn doc_size(name: &str) -> Result<(u64, String), String> {
+    let t = tg().ok_or("Telegram ishga tushmagan")?;
+    if !t.authorized.load(Ordering::SeqCst) {
+        return Err("Telegram hisobiga kirilmagan".to_string());
+    }
+    let client = connect(t).ok_or("Telegram'ga ulanib bo'lmadi")?;
+    let name = name.to_string();
+    let d = t.rt.block_on(async move { doc_for(t, &client, &name, false).await })?;
+    Ok((d.size, d.mime))
+}
+
+/// `offset` dan `len` bayt (offset `PART` ga karrali). Qismlar
+/// parallel so'raladi.
+pub(crate) fn fetch_range(name: &str, offset: u64, len: u64) -> Result<Vec<u8>, String> {
+    let t = tg().ok_or("Telegram ishga tushmagan")?;
+    let client = connect(t).ok_or("Telegram'ga ulanib bo'lmadi")?;
+    let mut jobs = Vec::new();
+    let mut off = offset;
+    while off < offset + len {
+        jobs.push(t.rt.spawn(fetch_part(t, client.clone(), name.to_string(), off)));
+        off += PART;
+    }
+    let name = name.to_string();
+    // Internet uzilsa pleyer abadiy kutib qolmasin: xato qaytadi,
+    // ExoPlayer o'zi qayta urinadi.
+    let r = t.rt.block_on(async move {
+        tokio::time::timeout(Duration::from_secs(30), async move {
+        let mut out = Vec::with_capacity(len as usize);
+        let mut jobs = jobs.into_iter();
+        while let Some(j) = jobs.next() {
+            match j.await {
+                Ok(Ok(b)) => out.extend_from_slice(&b),
+                Ok(Err(e)) => {
+                    jobs.for_each(|j| j.abort());
+                    return Err(e);
+                }
+                Err(e) => {
+                    jobs.for_each(|j| j.abort());
+                    return Err(e.to_string());
+                }
+            }
+        }
+        out.truncate(len as usize);
+        Ok(out)
+        })
+        .await
+        .unwrap_or_else(|_| Err("vaqt tugadi".to_string()))
+    });
+    if let Err(e) = &r {
+        crate::video_cache::tg_log(format!("Telegram: {name} olinmadi: {e}"));
+    }
+    r
+}
