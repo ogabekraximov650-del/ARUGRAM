@@ -312,6 +312,31 @@ class AuthService extends ChangeNotifier {
     }
   }
 
+  /// BOTSIZ KIRISH: Telegram imzolagan manzil ([signedUrl],
+  /// `TelegramService.urlAuth`) worker'da tekshiriladi va sessiya
+  /// ochiladi. Javob — `null` (kirildi) yoki xato matni.
+  Future<String?> loginWithSignature(String signedUrl) async {
+    try {
+      final r = await http
+          .post(
+            Uri.parse('$kApiBase/api/auth/telegram/widget'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({...await deviceInfo(), 'url': signedUrl}),
+          )
+          .timeout(const Duration(seconds: 20));
+      final d = jsonDecode(r.body) as Map<String, dynamic>;
+      final session = (d['session'] ?? '').toString();
+      if (r.statusCode != 200 || session.isEmpty) {
+        return (d['error'] ?? 'Kirib bo\'lmadi').toString();
+      }
+      clearPending();
+      await _save(session, AppUser.fromJson(d['user'] as Map<String, dynamic>));
+      return null;
+    } catch (_) {
+      return 'Server bilan bog\'lanib bo\'lmadi';
+    }
+  }
+
   // ── KUTILAYOTGAN KIRISH (diskda, AES-256-GCM bilan) ──────────
   //
   // MUAMMO. Kirish tokeni faqat XOTIRADA turardi. Foydalanuvchi

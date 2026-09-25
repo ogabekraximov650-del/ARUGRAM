@@ -2910,3 +2910,32 @@ mahalliy ishga tushirib, natijani commit qilish kerak.
   Telegram'dan olinib diskka yoziladi, oldinga faqat 2 bo'lak tayyorlanadi.
 - iOS'da hozircha eski yo'l (mahalliy HTTP manba).
 - Mahalliy HTTP server hali yuklab olish, rasmlar va eskizlar uchun ishlatiladi.
+
+## Botsiz kirish (Telegram Login) va Telegram ko'rinishidagi kirish oynasi
+
+- **Botsiz kirish.** Telegram hisobi ulangach ilova foydalanuvchi nomidan
+  `messages.requestUrlAuth` → `messages.acceptUrlAuth` qiladi
+  (`rust_tg_url_auth`, manzil `$kApiBase/login`). Telegram imzolagan manzil
+  `POST /api/auth/telegram/widget` ga yuboriladi. Worker
+  (`verify_tg_login`) HMAC-SHA256 ni SHA256(bot_token) kaliti bilan
+  tekshiradi, `auth_date` 5 daqiqadan eski bo'lmasin. Imzo bir martalik
+  (`login_tokens` da `w:<hash>`). Keyin `create_session` chaqiriladi
+  (4 qurilma chegarasi saqlanadi).
+  - Talab: BotFather → `/setdomain` → `arugram.uzcom.workers.dev`
+    (`https://` siz).
+  - Bu yo'l ishlamasa eski bot orqali kirishga qaytiladi.
+- **Sessiyalar bog'langan.** Telegram sessiyasi uzilsa
+  (`_onSessionLost`), ilova hisobidan ham chiqiladi. Ilovadan chiqilganda
+  Telegram sessiyasi ham uziladi (ilgaridan shunday edi).
+- **Kirish oynasi Telegram'dagidek:**
+  - to'q ko'k fon;
+  - davlat tanlash sahifasi: barcha davlatlar
+    (`lib/widgets/tg_countries.dart`), qidiruv bilan;
+  - kod va raqam alohida maydonlarda, raqam shablon bo'yicha
+    bo'laklanadi;
+  - kod uchun raqam kataklari, xatoda chayqalish;
+  - QR sahifasi 1-2-3 qadamlar bilan;
+  - bosqichlar orasida yon tomonga siljish.
+- **Davlat IP bo'yicha.** Davlat Telegram'ning `help.getNearestDc`
+  javobidan olinadi (`rust_tg_nearest_country`), masalan `+998`.
+  Foydalanuvchi uni istalgan payt o'zgartira oladi.

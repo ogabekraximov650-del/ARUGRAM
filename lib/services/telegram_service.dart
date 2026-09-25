@@ -193,11 +193,20 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
   //     ko'rsatadi (ochiq sahifalarni ham yopadi);
   //   * bot chatida qolgan nusxalar QAYTA KIRILGACH tozalanadi —
   //     o'lgan sessiya ularni o'chira olmaydi.
+  //
+  // ILOVA SESSIYASI TELEGRAM SESSIYASIGA BOG'LANGAN: Telegram
+  // sessiyasi uzilsa ilova hisobidan ham chiqiladi (ma'lumotlar
+  // navbati hisob papkasida qoladi va qayta kirilganda yuboriladi).
+  // Qayta kirishda yangi ilova sessiyasi Telegram imzosi bilan
+  // botsiz ochiladi (`urlAuth`).
   void _onSessionLost() {
     _holders.clear();
     _readPending = true;
     _missing.clear();
     notifyListeners();
+    if (AuthService.instance.isLoggedIn) {
+      unawaited(AuthService.instance.logout());
+    }
   }
 
   Timer? _statusTimer;
@@ -455,6 +464,46 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
       }
     });
     return j['ok'] == true ? null : (j['error'] as String? ?? 'Xato');
+  }
+
+  /// IP manzil bo'yicha davlat (`UZ`) — Telegram'ning o'zidan
+  /// (`help.getNearestDc`). Aniqlanmasa `null`.
+  Future<String?> nearestCountry() async {
+    if (!_started) return null;
+    try {
+      final j = await Isolate.run(() {
+        final lib = _openLib();
+        return _json(_take(
+            lib,
+            lib.lookupFunction<_NoArgC, _NoArgC>(
+                'rust_tg_nearest_country')()));
+      });
+      final c = j['country'] as String?;
+      return c == null || c.isEmpty ? null : c;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Botsiz kirish: foydalanuvchi nomidan [url] ga Telegram Login
+  /// so'raladi (`rust_tg_url_auth`). Javob — Telegram imzolagan
+  /// manzil yoki `null` ([onError] ga sababi).
+  Future<String?> urlAuth(String url, {void Function(String)? onError}) async {
+    final j = await Isolate.run(() {
+      final lib = _openLib();
+      final f = lib.lookupFunction<Pointer<Utf8> Function(Pointer<Utf8>),
+          Pointer<Utf8> Function(Pointer<Utf8>)>('rust_tg_url_auth');
+      final u = url.toNativeUtf8();
+      try {
+        return _json(_take(lib, f(u)));
+      } finally {
+        malloc.free(u);
+      }
+    });
+    final signed = j['url'] as String?;
+    if (j['ok'] == true && signed != null && signed.isNotEmpty) return signed;
+    onError?.call(j['error'] as String? ?? 'Xato');
+    return null;
   }
 
   // ── FAYL YUKLASH (hammasi ilova orqali) ─────────────────────

@@ -2216,6 +2216,86 @@ pub extern "C" fn rust_tg_start_bot(bot_ptr: *const c_char, param_ptr: *const c_
     }))
 }
 
+/// Foydalanuvchi IP manzili bo'yicha davlat (ISO kodi, `UZ`) —
+/// Telegram ilovasi raqam oynasida davlatni aynan shunday tanlaydi
+/// (`help.getNearestDc`). Javob: `{"ok":true,"country":"UZ"}`.
+#[no_mangle]
+pub extern "C" fn rust_tg_nearest_country() -> *mut c_char {
+    string_to_cptr(with_client(|t, client| {
+        let tl::enums::NearestDc::Dc(dc) = t
+            .rt
+            .block_on(client.invoke(&tl::functions::help::GetNearestDc {}))
+            .map_err(|e| friendly(&e))?;
+        Ok(json!({"ok": true, "country": dc.country}).to_string())
+    }))
+}
+
+/// ILOVAGA BOTSIZ KIRISH (Telegram Login, `messages.acceptUrlAuth`).
+///
+/// TALAB (foydalanuvchi): "har safar accountiga kirganda bot orqali
+/// tasdiqlab o'tirmasdan kirsin, foydalanuvchi IDsi Telegramning
+/// o'zidan olinsin".
+///
+/// Botning domeni BotFather'da `/setdomain` bilan qo'yilgan. Ilova
+/// shu domendagi manzilni foydalanuvchi nomidan "ochadi":
+/// `requestUrlAuth` -> `acceptUrlAuth`. Telegram javobida manzilga
+/// `id`, `first_name`, ..., `auth_date` va `hash` qo'shib beradi.
+/// `hash` — BOT TOKENI bilan qo'yilgan imzo: uni faqat Telegram
+/// yasay oladi, worker esa tekshira oladi. Ya'ni ilova hech narsani
+/// "da'vo qilmaydi" — shaxsni yana Telegramning o'zi tasdiqlaydi,
+/// faqat botga xabar yuborilmaydi.
+///
+/// Javob: `{"ok":true,"url":"<imzolangan manzil>"}` yoki
+/// `{"error":".."}`.
+#[no_mangle]
+pub extern "C" fn rust_tg_url_auth(url_ptr: *const c_char) -> *mut c_char {
+    let url = unsafe { cstr_to_str(url_ptr) }.unwrap_or("").to_string();
+    string_to_cptr(with_client(|t, client| {
+        if url.is_empty() {
+            return Err("manzil berilmagan".to_string());
+        }
+        t.rt.block_on(async {
+            let req = client
+                .invoke(&tl::functions::messages::RequestUrlAuth {
+                    peer: None,
+                    msg_id: None,
+                    button_id: None,
+                    url: Some(url.clone()),
+                    in_app_origin: None,
+                })
+                .await
+                .map_err(|e| friendly(&e))?;
+            let accepted = match req {
+                tl::enums::UrlAuthResult::Accepted(a) => a,
+                tl::enums::UrlAuthResult::Request(_) => {
+                    match client
+                        .invoke(&tl::functions::messages::AcceptUrlAuth {
+                            write_allowed: false,
+                            share_phone_number: false,
+                            peer: None,
+                            msg_id: None,
+                            button_id: None,
+                            url: Some(url.clone()),
+                            match_code: None,
+                        })
+                        .await
+                        .map_err(|e| friendly(&e))?
+                    {
+                        tl::enums::UrlAuthResult::Accepted(a) => a,
+                        _ => return Err("Telegram kirishni tasdiqlamadi".to_string()),
+                    }
+                }
+                // Domen botga bog'lanmagan (BotFather'da /setdomain yo'q).
+                tl::enums::UrlAuthResult::Default => {
+                    return Err("Bot domeni sozlanmagan".to_string())
+                }
+            };
+            let signed = accepted.url.ok_or("Telegram imzoni qaytarmadi")?;
+            Ok(json!({"ok": true, "url": signed}).to_string())
+        })
+    }))
+}
+
 // ═══════════════════════════════════════════════════════════════
 //  ADMIN: VIDEONI KANALGA YUKLASH
 // ═══════════════════════════════════════════════════════════════
