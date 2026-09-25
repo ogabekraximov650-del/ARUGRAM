@@ -82,6 +82,92 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
   String _hint = '';
   bool _available = true;
 
+  // ── KOD QAYERGA KETDI VA QAYTA YUBORISH ─────────────────────
+  //
+  // TOPILGAN XATO (foydalanuvchi: "kod yuborildi deyapti, lekin
+  // umuman kelmayapti"): oyna doim "Telegram chatida" deb yozardi,
+  // Telegram esa kodni SMS, qo'ng'iroq yoki emailga ham yuboradi.
+  // Endi Telegram aytgan joy ko'rsatiladi va kutish vaqti o'tgach
+  // "Kodni qayta yuborish" (keyingi usul) tugmasi chiqadi.
+  Map<String, dynamic> _sent = const {};
+  Timer? _resendTimer;
+  int _resendLeft = 0;
+
+  void _setSent(Object? sent) {
+    _sent = (sent is Map) ? sent.cast<String, dynamic>() : const {};
+    final timeout = (_sent['timeout'] as num?)?.toInt() ?? 0;
+    final at = (_sent['at'] as num?)?.toInt() ?? 0;
+    final passed = at > 0
+        ? (DateTime.now().millisecondsSinceEpoch - at) ~/ 1000
+        : 0;
+    // Telegram kutish vaqtini aytmagan bo'lsa ham 30 soniyadan
+    // keyin qayta so'rash mumkin bo'lsin.
+    _resendLeft = ((timeout > 0 ? timeout : 30) - passed).clamp(0, 600);
+    _resendTimer?.cancel();
+    if (_resendLeft > 0) {
+      _resendTimer = Timer.periodic(const Duration(seconds: 1), (t) {
+        if (!mounted) return t.cancel();
+        setState(() => _resendLeft--);
+        if (_resendLeft <= 0) t.cancel();
+      });
+    }
+    if (mounted) setState(() {});
+  }
+
+  int get _codeLength {
+    final n = (_sent['length'] as num?)?.toInt() ?? 0;
+    return n >= 4 && n <= 8 ? n : 5;
+  }
+
+  /// Kod qayerga yuborilgani — odam tushunadigan qilib.
+  String _whereSent() {
+    final p = _phone.text;
+    final pattern = '${_sent['pattern'] ?? ''}';
+    switch (_sent['via']) {
+      case 'sms':
+      case 'sms_word':
+      case 'sms_phrase':
+        return 'Telegram $p raqamiga SMS orqali kod yubordi.';
+      case 'call':
+        return 'Telegram $p raqamiga qo\'ng\'iroq qiladi — kodni aytib beradi.';
+      case 'flash_call':
+      case 'missed_call':
+        return 'Telegram $p raqamiga qo\'ng\'iroq qiladi. Kod — qo\'ng\'iroq '
+            'qilgan raqamning oxirgi $_codeLength ta raqami'
+            '${pattern.isEmpty ? '' : ' ($pattern...)'}.';
+      case 'email':
+        return 'Kod emailingizga yuborildi${pattern.isEmpty ? '' : ': $pattern'}.';
+      case 'fragment':
+        return 'Kod Fragment orqali yuborildi${pattern.isEmpty ? '' : ' ($pattern)'}.';
+      default:
+        return 'Telegram $p raqamiga kirish kodini yubordi.\n'
+            'Kod Telegram ilovasidagi "Telegram" chatida (boshqa '
+            'qurilmadagi Telegram\'da ham ko\'rinadi).';
+    }
+  }
+
+  String get _nextLabel => switch (_sent['next']) {
+        'sms' => 'SMS orqali yuborish',
+        'call' => 'Qo\'ng\'iroq orqali yuborish',
+        'flash_call' || 'missed_call' => 'Qo\'ng\'iroq orqali yuborish',
+        _ => 'Kodni qayta yuborish',
+      };
+
+  Future<void> _resend() async {
+    if (_busy || _resendLeft > 0) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    final r = await _tg.resendCode();
+    if (!mounted) return;
+    if (r.loggedIn) return _finish();
+    if (r.error != null) return _fail(r.error);
+    setState(() => _busy = false);
+    _code.clear();
+    _setSent(r.sent);
+  }
+
   TelegramService get _tg => TelegramService.instance;
 
   @override
@@ -112,6 +198,7 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
     if (phone.isNotEmpty) _phone.text = phone;
     switch (st['stage']) {
       case 'code':
+        _setSent(st['sent']);
         _go(_Step.code);
       case 'password':
         _hint = (st['hint'] as String?) ?? '';
@@ -129,6 +216,7 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
 
   @override
   void dispose() {
+    _resendTimer?.cancel();
     _phone.dispose();
     _code.dispose();
     _password.dispose();
@@ -170,7 +258,9 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
         final r = await _tg.requestCode(_phone.text);
         if (!mounted) return;
         if (r.error != null) return _fail(r.error);
+        if (r.loggedIn) return _finish();
         setState(() => _busy = false);
+        _setSent(r.sent);
         _go(_Step.code);
       case _Step.code:
         final code = _code.text.trim();
@@ -319,8 +409,26 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
               // "Bot orqali kirish" OLIB TASHLANDI (foydalanuvchi
               // talabi): bot orqali kirish endi faqat Telegram
               // hisobiga kirilgach, avtomatik (`_finish`).
+              if (_step == _Step.code) ...[
+                const SizedBox(height: 16),
+                Center(
+                  child: TextButton(
+                    onPressed: _busy || _resendLeft > 0 ? null : _resend,
+                    child: Text(
+                      _resendLeft > 0
+                          ? '$_nextLabel (${_resendLeft ~/ 60}:${(_resendLeft % 60).toString().padLeft(2, '0')})'
+                          : _nextLabel,
+                      style: TextStyle(
+                        color: _resendLeft > 0
+                            ? Colors.white38
+                            : AppColors.telegramLight,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
               if (_step == _Step.code || _step == _Step.password) ...[
-                const SizedBox(height: 24),
+                const SizedBox(height: 8),
                 Center(
                   child: TextButton(
                     onPressed: _busy ? null : _backToPhone,
@@ -414,10 +522,7 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
       case _Step.code:
         return Column(
           children: [
-            _title(
-                'Kodni kiriting',
-                'Telegram ${_phone.text} raqamiga kirish kodini yubordi.\n'
-                    'Kod Telegram ilovasidagi "Telegram" chatida.'),
+            _title('Kodni kiriting', _whereSent()),
             TextField(
               controller: _code,
               focusNode: _focus,
@@ -426,13 +531,14 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
               keyboardType: TextInputType.number,
               inputFormatters: [
                 FilteringTextInputFormatter.digitsOnly,
-                LengthLimitingTextInputFormatter(6),
+                LengthLimitingTextInputFormatter(8),
               ],
               textAlign: TextAlign.center,
               style: fieldStyle.copyWith(fontSize: 26, letterSpacing: 10),
-              // Telegram kodi 5 xonali — to'lishi bilan o'zi yuboriladi.
+              // Kod uzunligini Telegram aytadi (odatda 5) — to'lishi
+              // bilan o'zi yuboriladi.
               onChanged: (v) {
-                if (v.length == 5) _submit();
+                if (v.length == _codeLength) _submit();
               },
               onSubmitted: (_) => _submit(),
               decoration: _decoration('Kod'),

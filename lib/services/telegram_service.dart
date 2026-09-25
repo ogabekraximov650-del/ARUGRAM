@@ -98,11 +98,20 @@ class TgLoginStep {
   final String hint;
   final String? error;
 
+  /// Kod QAYERGA yuborilgani (`via`: app/sms/call/email/...,
+  /// `length`, `next`, `timeout`, `at`) — Rust `sent_info`.
+  final Map<String, dynamic> sent;
+
+  /// Kod so'rovidan keyin Telegram kodsiz kiritgan (kamdan-kam).
+  final bool loggedIn;
+
   const TgLoginStep({
     this.done = false,
     this.needPassword = false,
     this.hint = '',
     this.error,
+    this.sent = const {},
+    this.loggedIn = false,
   });
 
   factory TgLoginStep.fromJson(Map<String, dynamic> j) => TgLoginStep(
@@ -110,6 +119,8 @@ class TgLoginStep {
         needPassword: j['password'] == true,
         hint: (j['hint'] as String?) ?? '',
         error: j['error'] as String?,
+        sent: (j['sent'] as Map?)?.cast<String, dynamic>() ?? const {},
+        loggedIn: j['ok'] == true && j['sent'] == null,
       );
 }
 
@@ -329,7 +340,22 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
           error: 'Telegram orqali ko\'rish hozircha yoqilmagan');
     }
     final j = await _callBlocking('rust_tg_request_code', phone);
-    return TgLoginStep.fromJson(j);
+    final step = TgLoginStep.fromJson(j);
+    if (step.loggedIn) _afterLogin();
+    return step;
+  }
+
+  /// Kodni QAYTA yuborish — Telegram keyingi usulni tanlaydi
+  /// (SMS, qo'ng'iroq...).
+  Future<TgLoginStep> resendCode() async {
+    final j = await Isolate.run(() {
+      final lib = _openLib();
+      return _json(_take(
+          lib, lib.lookupFunction<_NoArgC, _NoArgC>('rust_tg_resend_code')()));
+    });
+    final step = TgLoginStep.fromJson(j);
+    if (step.loggedIn) _afterLogin();
+    return step;
   }
 
   Future<TgLoginStep> signIn(String code) async {

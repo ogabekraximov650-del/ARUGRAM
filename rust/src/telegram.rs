@@ -1322,7 +1322,12 @@ fn load_login(t: &Tg) -> Option<Value> {
 }
 
 fn save_login(t: &Tg, stage: &str, phone: &str, hash: &str, hint: &str) {
-    let body = json!({"stage": stage, "phone": phone, "hash": hash, "hint": hint, "at": now_ms()});
+    save_login_info(t, stage, phone, hash, hint, &load_login(t).map(|v| v["sent"].clone()).unwrap_or(Value::Null));
+}
+
+/// `sent` — kod QAYERGA yuborilgani (`sent_info`), ekranda aytiladi.
+fn save_login_info(t: &Tg, stage: &str, phone: &str, hash: &str, hint: &str, sent: &Value) {
+    let body = json!({"stage": stage, "phone": phone, "hash": hash, "hint": hint, "sent": sent, "at": now_ms()});
     let _ = write_sealed(&login_path(t), LABEL_LOGIN, body.to_string().as_bytes());
 }
 
@@ -1359,7 +1364,77 @@ fn friendly(e: &InvocationError) -> String {
     }
 }
 
-async fn send_code(t: &Tg, client: &Client, phone: &str) -> Result<String, String> {
+/// Kod qayerga yuborildi — ekranda AYNAN shu aytiladi.
+///
+/// TOPILGAN XATO (foydalanuvchi: "kod yuborildi deyapti, lekin kod
+/// umuman kelmayapti"): ilova Telegram javobidagi "kod QAYERGA
+/// ketdi" ma'lumotini o'qimasdi va doim "Telegram chatida" deb
+/// yozardi. Telegram esa kodni SMS, qo'ng'iroq yoki emailga ham
+/// yuboradi, ba'zan esa avval kirish emailini o'rnatishni talab
+/// qiladi. Qayta yuborish (`auth.resendCode`) ham yo'q edi.
+fn sent_info(sc: &tl::types::auth::SentCode) -> Value {
+    use tl::enums::auth::{CodeType, SentCodeType};
+    let (via, length, pattern) = match &sc.r#type {
+        SentCodeType::App(x) => ("app", x.length, String::new()),
+        SentCodeType::Sms(x) => ("sms", x.length, String::new()),
+        SentCodeType::SmsWord(_) => ("sms_word", 0, String::new()),
+        SentCodeType::SmsPhrase(_) => ("sms_phrase", 0, String::new()),
+        SentCodeType::Call(x) => ("call", x.length, String::new()),
+        SentCodeType::FlashCall(x) => ("flash_call", 0, x.pattern.clone()),
+        SentCodeType::MissedCall(x) => ("missed_call", x.length, x.prefix.clone()),
+        SentCodeType::EmailCode(x) => ("email", x.length, x.email_pattern.clone()),
+        SentCodeType::SetUpEmailRequired(_) => ("email_setup", 0, String::new()),
+        SentCodeType::FragmentSms(x) => ("fragment", x.length, x.url.clone()),
+        SentCodeType::FirebaseSms(x) => ("sms", x.length, String::new()),
+    };
+    let next = match &sc.next_type {
+        Some(CodeType::Sms) => "sms",
+        Some(CodeType::Call) => "call",
+        Some(CodeType::FlashCall) => "flash_call",
+        Some(CodeType::MissedCall) => "missed_call",
+        Some(CodeType::FragmentSms) => "fragment",
+        None => "",
+    };
+    json!({
+        "via": via,
+        "length": length,
+        "pattern": pattern,
+        "next": next,
+        "timeout": sc.timeout.unwrap_or(0),
+        "at": now_ms(),
+    })
+}
+
+/// Kod so'rovi natijasi.
+enum CodeSent {
+    /// Kod yuborildi: (phone_code_hash, qayerga).
+    Code(String, Value),
+    /// Telegram kodsiz kiritdi (kamdan-kam).
+    LoggedIn,
+}
+
+fn code_result(res: tl::enums::auth::SentCode) -> Result<CodeSent, String> {
+    match res {
+        tl::enums::auth::SentCode::Code(c) => {
+            if matches!(c.r#type, tl::enums::auth::SentCodeType::SetUpEmailRequired(_)) {
+                return Err("Telegram bu raqam uchun avval KIRISH EMAILini o'rnatishni so'rayapti: \
+                            Telegram ilovasida Sozlamalar → Maxfiylik va xavfsizlik → \
+                            Kirish emaili ni o'rnating, so'ng qayta urining"
+                    .to_string());
+            }
+            let info = sent_info(&c);
+            Ok(CodeSent::Code(c.phone_code_hash, info))
+        }
+        tl::enums::auth::SentCode::Success(_) => Ok(CodeSent::LoggedIn),
+        tl::enums::auth::SentCode::PaymentRequired(_) => Err(
+            "Telegram bu raqamga kodni faqat to'lov (Premium) evaziga yuboradi — \
+             Telegram ilovasi ochiq bo'lgan boshqa qurilma orqali kiring yoki keyinroq urining"
+                .to_string(),
+        ),
+    }
+}
+
+async fn send_code(t: &Tg, client: &Client, phone: &str) -> Result<CodeSent, String> {
     let api_id = t.api_id.lock().map(|v| *v).unwrap_or(0);
     let api_hash = t.api_hash.lock().map(|v| v.clone()).unwrap_or_default();
     let req = tl::functions::auth::SendCode {
@@ -1379,10 +1454,7 @@ async fn send_code(t: &Tg, client: &Client, phone: &str) -> Result<String, Strin
         other => other,
     }
     .map_err(|e| friendly(&e))?;
-    match res {
-        tl::enums::auth::SentCode::Code(c) => Ok(c.phone_code_hash),
-        _ => Err("Telegram kutilmagan javob berdi — qayta urining".to_string()),
-    }
+    code_result(res)
 }
 
 async fn password_token(client: &Client) -> Result<PasswordToken, String> {
@@ -1402,9 +1474,51 @@ pub extern "C" fn rust_tg_request_code(phone_ptr: *const c_char) -> *mut c_char 
         if phone.len() < 6 {
             return Err("Telefon raqamini kiriting".to_string());
         }
-        let hash = t.rt.block_on(send_code(t, &client, &phone))?;
-        save_login(t, "code", &phone, &hash, "");
-        Ok(json!({"ok": true}).to_string())
+        match t.rt.block_on(send_code(t, &client, &phone))? {
+            CodeSent::Code(hash, sent) => {
+                save_login_info(t, "code", &phone, &hash, "", &sent);
+                Ok(json!({"ok": true, "sent": sent}).to_string())
+            }
+            CodeSent::LoggedIn => {
+                clear_login(t);
+                Ok(after_login(t))
+            }
+        }
+    }))
+}
+
+/// Kodni QAYTA yuboradi (`auth.resendCode`) — odatda keyingi usulda
+/// (masalan SMS yoki qo'ng'iroq). Javob: `{"ok":true,"sent":{..}}`.
+#[no_mangle]
+pub extern "C" fn rust_tg_resend_code() -> *mut c_char {
+    string_to_cptr(with_client(|t, client| {
+        let st = load_login(t).ok_or("Kod muddati tugadi — raqamni qayta kiriting")?;
+        let phone = st["phone"].as_str().unwrap_or("").to_string();
+        let hash = st["hash"].as_str().unwrap_or("").to_string();
+        let res = t
+            .rt
+            .block_on(client.invoke(&tl::functions::auth::ResendCode {
+                phone_number: phone.clone(),
+                phone_code_hash: hash,
+                reason: None,
+            }))
+            .map_err(|e| match rpc_name(&e) {
+                Some("SEND_CODE_UNAVAILABLE") => {
+                    "Boshqa usul qolmadi — biroz kutib raqamni qaytadan kiriting".to_string()
+                }
+                Some("PHONE_CODE_EXPIRED") => "Kod muddati tugadi — raqamni qayta kiriting".to_string(),
+                _ => friendly(&e),
+            })?;
+        match code_result(res)? {
+            CodeSent::Code(hash, sent) => {
+                save_login_info(t, "code", &phone, &hash, "", &sent);
+                Ok(json!({"ok": true, "sent": sent}).to_string())
+            }
+            CodeSent::LoggedIn => {
+                clear_login(t);
+                Ok(after_login(t))
+            }
+        }
     }))
 }
 
@@ -1495,6 +1609,7 @@ pub extern "C" fn rust_tg_login_state() -> *mut c_char {
             "stage": v["stage"].as_str().unwrap_or("phone"),
             "phone": v["phone"].as_str().unwrap_or(""),
             "hint": v["hint"].as_str().unwrap_or(""),
+            "sent": v["sent"].clone(),
         })
         .to_string(),
         None => json!({"stage": "phone"}).to_string(),
