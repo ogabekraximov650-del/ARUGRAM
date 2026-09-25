@@ -2984,3 +2984,25 @@ mahalliy ishga tushirib, natijani commit qilish kerak.
   talabi): `/start <token>`. `acceptUrlAuth` yo'li
   (`rust_tg_url_auth`, `/api/auth/telegram/widget`) olib tashlandi.
   Yuqoridagi "Botsiz kirish" bo'limi endi amal qilmaydi.
+
+## Bot chati: qidiruvsiz, so'ralishi bilan nusxa, keyin tozalash
+
+Foydalanuvchi talabi: "chatdan izlash juda sekin — olib tashla; video
+so'ralishi bilan copy message ishga tushsin; pleyerdan chiqilganda yoki
+internet qaytganda ilova o'z hisobi bilan chat tarixini tozalasin".
+
+- Nusxa so'rashdan oldingi chat tekshiruvi olib tashlandi: `rust_tg_find`,
+  `messages.search`, `keys_only` va `rust_tg_mark_read` endi yo'q.
+  `/api/tg/deliver` darhol chaqiriladi.
+- Rust faylni faqat chatning oxirgi 100 ta xabari ichidan topadi
+  (`find_in_chat` — bitta `GetHistory`).
+- Chatni ilova tozalaydi (`rust_tg_clear_bot_chat`,
+  `messages.deleteHistory`). Tozalash quyidagi paytlarda ishlaydi:
+  - pleyerdan chiqilganda (`unhold`, 2 soniyadan keyin);
+  - internet qaytganda;
+  - ilova ochilganda.
+- Nusxa ishlatilayotgan yoki hozir so'ralayotgan bo'lsa (`_holders`,
+  `_delivering`), tozalash kutadi. Foydalanuvchi yuklagan fayl bot uni
+  kanalga ko'chirmaguncha chatdan o'chirilmaydi.
+- Takroriy nusxadan himoya: bitta fayl uchun bitta tayyorlash
+  (`_preparing`).

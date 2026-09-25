@@ -9714,13 +9714,6 @@ async fn tg_route(mut req: Request, env: &Env, path: &str, method: Method) -> Re
             if !admin && until <= now_ms() && pairs.iter().any(|(n, _)| n.starts_with("ep_")) {
                 return json_resp(&json!({"error": "subscription"}), 402);
             }
-            // Fayl foydalanuvchining bot chatida ALLAQACHON bor — faqat
-            // ochish kaliti kerak (ruxsat yuqorida tekshirildi). Nusxa
-            // yuborilmaydi, bazaga hech narsa yozilmaydi.
-            if body["keys_only"].as_bool().unwrap_or(false) {
-                let files: Vec<&String> = pairs.iter().map(|(n, _)| n).collect();
-                return ok_nostore(json!({"files": files, "keys": keys}));
-            }
             // `copyMessages` raqamlar O'SIB boradigan tartibda bo'lishini talab qiladi.
             pairs.sort_by_key(|(_, id)| *id);
             pairs.dedup_by_key(|(_, id)| *id);

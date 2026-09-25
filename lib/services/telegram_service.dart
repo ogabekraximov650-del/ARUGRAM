@@ -200,7 +200,7 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
   // Qayta kirishda yangi ilova sessiyasi bot orqali ochiladi.
   void _onSessionLost() {
     _holders.clear();
-    _readPending = true;
+    _clearPending = true;
     _missing.clear();
     notifyListeners();
     if (AuthService.instance.isLoggedIn) {
@@ -269,8 +269,8 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
     unawaited(refreshConfig().then((_) async {
       await checkSession(every: Duration.zero);
       // Oldingi seansdan (ilova yiqilgan bo'lsa) qolgan nusxalar.
-      _readPending = true;
-      return _markReadIfPending();
+      _clearPending = true;
+      return _clearIfPending();
     }));
     _watchConnectivity();
     WidgetsBinding.instance.addObserver(this);
@@ -614,6 +614,8 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
     // bot ko'chirib ulgurgunicha tozalanmaydi (aks holda nusxa
     // o'chib ketardi) — u keyinroq tozalanadi.
     var ready = false;
+    // Bot ko'chirib ulgurguncha chat tozalanmasin.
+    _delivering++;
     for (final wait in const [1, 1, 2, 2, 3, 4, 5, 8]) {
       await Future<void>.delayed(Duration(seconds: wait));
       try {
@@ -635,12 +637,14 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
     }
     if (ready) {
       // Bot chatidagi yuborilgan nusxa endi keraksiz.
-      _readPending = true;
-      if (_holders.isEmpty) unawaited(_markReadIfPending());
+      _delivering--;
+      _clearPending = true;
+      unawaited(_clearIfPending());
     } else {
       Timer(const Duration(minutes: 3), () {
-        _readPending = true;
-        if (_holders.isEmpty) unawaited(_markReadIfPending());
+        _delivering--;
+        _clearPending = true;
+        unawaited(_clearIfPending());
       });
     }
     return null;
@@ -691,16 +695,13 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
 
     final owner = Object();
     try {
-      await _markReadIfPending();
+      await _clearIfPending();
       final s = AuthService.instance.sessionToken;
       if (s == null) throw 'kirilmagan';
       final names = batch.keys.toList();
       hold(owner, names.first);
-      // Avval bot chatidan; faqat yo'qlarini bot kanaldan yuboradi.
-      final got = await _findInChat(names) ?? <String>{};
-      got.addAll(await _deliver(names
-          .where((n) => !got.contains(n) && !_recentlyDelivered(n))
-          .toList()));
+      // Bot hammasini BITTA so'rov bilan chatga yuboradi.
+      final got = await _deliver(names);
       for (final n in names) {
         if (!got.contains(n)) {
           _missing.add(n);
@@ -772,24 +773,21 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
   // o'chirishi bilan bot tarixni avtomatik o'chirsin" va "workerga,
   // tursoga iloji boricha kamroq so'rov".
   //
-  // ── ENDI TOZALANMAYDI — FAQAT "O'QILGAN" (2026-09-25) ────────
+  // Tozalash foydalanuvchining O'Z hisobi bilan
+  // (`rust_tg_clear_bot_chat`, `messages.deleteHistory`) — botning
+  // cheklovlari tegmaydi, worker va baza ishtirok etmaydi. U
+  // pleyerdan chiqilganda (`unhold`), internet qaytganda va ilova
+  // ochilganda ishlaydi; nusxa ishlatilayotgan yoki hozir so'ralayotgan
+  // bo'lsa (`_holders`, `_delivering`) kutadi.
   //
-  // TALAB (foydalanuvchi): "bot tarixi tozalanmasin — fayllar
-  // shifrlangan; kerakli fayl avval bot chatidan nomi bilan izlansin,
-  // bor bo'lsa kanaldan qayta copy qilinmasin; faqat nusxalar
-  // O'QILGAN deb belgilansin, Telegram'da botda 'N ta o'qilmagan'
-  // chiqmasin".
-  //
-  // Shu sabab ilgari chat tozalanadigan hamma joyda endi chat
-  // foydalanuvchining O'Z hisobi bilan o'qilgan deb belgilanadi
-  // (`rust_tg_mark_read`, `messages.readHistory`) — worker ham, baza
-  // ham ishtirok etmaydi. Nusxa chatda qoladi va keyingi safar
-  // `rust_tg_find` uni topadi (bot qayta yubormaydi).
+  // (2026-09-25 da chat tozalanmay, fayl avval chatdan izlanadigan
+  // qilingan edi — foydalanuvchi: "izlash juda sekin, olib tashla,
+  // chatni tozalasin".)
 
   final Map<Object, String> _holders = {};
-  bool _readPending = false;
-  Future<void>? _marking;
-  Timer? _readTimer;
+  bool _clearPending = false;
+  Future<void>? _clearing;
+  Timer? _clearTimer;
   StreamSubscription<List<ConnectivityResult>>? _connSub;
 
   /// [owner] shu nusxani ishlatyapti (pleyer ekrani, yuklab olish).
@@ -797,7 +795,7 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
     final name = fileNameOf(url);
     if (name.isEmpty) return;
     _holders[owner] = name;
-    _readTimer?.cancel();
+    _clearTimer?.cancel();
   }
 
   /// [owner] nusxani qo'yib yubordi.
@@ -806,11 +804,11 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
     if (_holders.isNotEmpty) return;
     // Bir zum kutamiz: boshqa qismga o'tilayotgan bo'lsa yangi
     // nusxa kelib, darhol yana band bo'ladi.
-    _readTimer?.cancel();
-    _readTimer = Timer(const Duration(seconds: 2), () {
+    _clearTimer?.cancel();
+    _clearTimer = Timer(const Duration(seconds: 2), () {
       if (_holders.isEmpty) {
-        _readPending = true;
-        unawaited(_markReadIfPending());
+        _clearPending = true;
+        unawaited(_clearIfPending());
       }
     });
   }
@@ -831,19 +829,25 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
           // pleyer ko'rayotgan nusxa ham yo'qolardi — video xatoga
           // chiqib boshidan boshlanardi. Chat pleyer yopilgach
           // tozalanadi (`unhold`).
-          _readPending = true;
+          _clearPending = true;
         } else {
-          unawaited(_markReadIfPending());
+          unawaited(_clearIfPending());
         }
       });
     } catch (_) {}
   }
 
   /// Navbatdagi tozalashni bajaradi (bir vaqtda faqat bittasi).
-  Future<void> _markReadIfPending() {
-    final running = _marking;
+  /// Nusxa ishlatilayotgan yoki hozir so'ralayotgan bo'lsa kutadi.
+  Future<void> _clearIfPending() {
+    final running = _clearing;
     if (running != null) return running;
-    if (!_readPending || !_authorized) return Future.value();
+    if (!_clearPending ||
+        !_authorized ||
+        _holders.isNotEmpty ||
+        _delivering > 0) {
+      return Future.value();
+    }
     final f = () async {
       try {
         final j = await Isolate.run(() {
@@ -851,15 +855,15 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
           return _json(_take(
               lib,
               lib.lookupFunction<_NoArgC, _NoArgC>(
-                  'rust_tg_mark_read')()));
+                  'rust_tg_clear_bot_chat')()));
         });
-        if (j['ok'] == true) _readPending = false;
+        if (j['ok'] == true) _clearPending = false;
       } catch (_) {
-        // Tarmoq yo'q — navbatda qoladi.
+        // Tarmoq yo'q — navbatda qoladi (internet qaytgach).
       }
     }();
-    _marking = f.whenComplete(() => _marking = null);
-    return _marking!;
+    _clearing = f.whenComplete(() => _clearing = null);
+    return _clearing!;
   }
 
   void _afterLogin() {
@@ -868,8 +872,8 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
     // Oldingi (uzilgan) sessiya davrida bot chatida qolgan nusxalar
     // endi yangi sessiya bilan o'chiriladi.
-    _readPending = true;
-    unawaited(_markReadIfPending());
+    _clearPending = true;
+    unawaited(_clearIfPending());
   }
 
   Future<void> logout() async {
@@ -957,21 +961,9 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
 
   final Map<String, Future<String?>> _preparing = {};
 
-  /// Bot shu fayllarni qachon yuborgan. Yaqinda (10 daqiqa) yuborilgan
-  /// fayl chatda darhol ko'rinmasa ham QAYTA SO'RALMAYDI — chat yana
-  /// bir necha marta qaraladi.
-  final Map<String, DateTime> _deliveredAt = {};
-  static const _redeliverAfter = Duration(minutes: 10);
-
-  bool _recentlyDelivered(String name) {
-    final at = _deliveredAt[name];
-    return at != null && DateTime.now().difference(at) < _redeliverAfter;
-  }
-
-  /// Bu sessiyada kaliti serverdan yangilangan fayllar. Chatdagi
-  /// nusxa topilganda kalit bir marta serverdan olinadi — fayl qayta
-  /// yuklangan bo'lsa telefondagi eski kalit bilan ochilmasin.
-  final Set<String> _keysFresh = {};
+  /// Hozir nusxa so'ralayotgan (va hali band qilinmagan) fayllar
+  /// soni — shu paytda chat tozalanmaydi.
+  int _delivering = 0;
 
   /// Rust yadrosidagi holatni o'qiydi (tarmoqsiz). Sessiyani
   /// Telegram bekor qilgan bo'lsa yadro buni o'zi belgilaydi.
@@ -984,48 +976,9 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
     if (was != _authorized) notifyListeners();
   }
 
-  /// Bu fayllar bot chatida BORmi (`rust_tg_find`) — kanaldan qayta
-  /// nusxa so'rashdan OLDIN. Chatda bor-u kaliti telefonda yo'qlari
-  /// uchun kalit serverdan nusxasiz olinadi (`keys_only`).
-  ///
-  /// `null` — chatni tekshirib bo'lmadi (tarmoq yoki Telegram cheklovi).
-  Future<Set<String>?> _findInChat(List<String> names) async {
-    if (names.isEmpty) return {};
-    Map<String, dynamic> j;
-    try {
-      final arg = jsonEncode(names);
-      j = await Isolate.run(() {
-        final lib = _openLib();
-        final f = lib.lookupFunction<_StrArgC, _StrArgC>('rust_tg_find');
-        final a = arg.toNativeUtf8();
-        try {
-          return _json(_take(lib, f(a)));
-        } finally {
-          malloc.free(a);
-        }
-      });
-    } catch (_) {
-      return null;
-    }
-    if (j['error'] != null) return null;
-    final found = ((j['found'] as List?) ?? const []).whereType<String>().toSet();
-    final noKey = {
-      ...((j['no_key'] as List?) ?? const []).whereType<String>(),
-      ...found.where((n) => !_keysFresh.contains(n)),
-    }.toList();
-    if (noKey.isNotEmpty) {
-      final got = await _deliver(noKey, keysOnly: true);
-      // Kaliti olinmagani (ruxsat yo'q) — chatdagi nusxa ishlatilmaydi.
-      _keysFresh.addAll(got);
-      found.removeWhere((n) => noKey.contains(n) && !got.contains(n));
-    }
-    return found;
-  }
-
-  /// `/api/tg/deliver` — bot fayllarni chatga yuboradi ([keysOnly] —
-  /// faqat kalitlar, nusxasiz). Qaytadi: server bergan fayllar.
-  Future<Set<String>> _deliver(List<String> names,
-      {bool keysOnly = false}) async {
+  /// `/api/tg/deliver` — bot fayllarni chatga yuboradi. Qaytadi:
+  /// server bergan fayllar.
+  Future<Set<String>> _deliver(List<String> names) async {
     final s = AuthService.instance.sessionToken;
     if (s == null || names.isEmpty) return {};
     final got = <String>{};
@@ -1039,7 +992,7 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
                 'Authorization': 'Bearer $s',
                 'Content-Type': 'application/json',
               },
-              body: jsonEncode({'files': part, 'keys_only': keysOnly}),
+              body: jsonEncode({'files': part}),
             )
             .timeout(const Duration(seconds: 25));
         if (r.statusCode == 200) {
@@ -1050,20 +1003,8 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
         }
       } catch (_) {}
     }
-    if (keysOnly) {
-      _keysFresh.addAll(got);
-    } else {
-      final now = DateTime.now();
-      for (final n in got) {
-        _deliveredAt[n] = now;
-        _keysFresh.add(n);
-      }
-    }
-    // Bot yangi nusxa yubordi — chat o'qilgan deb belgilanadi.
-    if (!keysOnly && got.isNotEmpty) {
-      _readPending = true;
-      unawaited(_markReadIfPending());
-    }
+    // Chat nusxa ishlatib bo'lingach tozalanadi (`unhold`).
+    if (got.isNotEmpty) _clearPending = true;
     return got;
   }
 
@@ -1074,7 +1015,6 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
     // qolardi (30 soniyada bir marta).
     await checkSession();
     if (!active) return null;
-    unawaited(_markReadIfPending());
     final name = fileNameOf(url);
     if (name.isEmpty || _missing.contains(name)) return null;
 
@@ -1082,57 +1022,47 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
     final ready = _playUrl(name);
     if (ready.isNotEmpty) return ready;
 
-    // 1) Avval bot chatidan — bor bo'lsa kanaldan qayta nusxa YO'Q.
-    // Yaqinda yuborilgan bo'lsa chat bir necha marta qaraladi (nusxa
-    // chatda bir-ikki soniyada paydo bo'ladi).
-    for (var i = 0;; i++) {
-      final found = await _findInChat([name]);
-      // Chatni tekshirib bo'lmadi — bot so'raladi (quyida); takroriy
-      // nusxadan `_preparing` va `_deliveredAt` saqlaydi.
-      if (found == null) break;
-      if (found.contains(name)) return _foundUrl(name);
-      if (!_recentlyDelivered(name) || i >= 3) break;
-      await Future<void>.delayed(const Duration(milliseconds: 1500));
-    }
-    // Yaqinda yuborilgan-u chatda yo'q (foydalanuvchi o'chirgan
-    // bo'lishi mumkin) — faqat 10 daqiqadan keyin qayta so'raladi.
-    if (_recentlyDelivered(name)) return null;
-
-    // 2) Chatda yo'q — bot kanaldan nusxa yuboradi.
+    // ── VIDEO SO'RALISHI BILAN NUSXA ────────────────────────────
+    //
+    // TALAB (foydalanuvchi): "bot chatidan izlash juda sekin — olib
+    // tashla; video so'ralishi bilan copy message ishga tushsin".
+    // Avval kutilayotgan tozalash tugashi kutiladi — aks holda u
+    // yangi nusxani ham o'chirib yuborardi.
+    await _clearIfPending();
     final s = AuthService.instance.sessionToken;
     if (s == null) return null;
-    final r = await http.post(
-      Uri.parse('$kApiBase/api/tg/deliver'),
-      headers: {
-        'Authorization': 'Bearer $s',
-        'Content-Type': 'application/json',
-      },
-      body: jsonEncode({'file': name}),
-    );
-    if (r.statusCode == 404) {
-      // Bu qism hali kanalga yuklanmagan — B2'dan ko'riladi.
-      _missing.add(name);
-      return null;
+    _delivering++;
+    try {
+      final r = await http.post(
+        Uri.parse('$kApiBase/api/tg/deliver'),
+        headers: {
+          'Authorization': 'Bearer $s',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({'file': name}),
+      );
+      if (r.statusCode == 404) {
+        // Bu qism hali kanalga yuklanmagan — B2'dan ko'riladi.
+        _missing.add(name);
+        return null;
+      }
+      if (r.statusCode != 200) return null;
+      final j = jsonDecode(r.body) as Map<String, dynamic>;
+      _applyKeys(j['keys']);
+      final msgId = (j['msg_id'] as num?)?.toInt() ?? 0;
+      if (msgId <= 0) return null;
+      _clearPending = true;
+      _route(name, msgId);
+      final u = _playUrl(name);
+      return u.isEmpty ? null : u;
+    } finally {
+      // Chaqiruvchi (pleyer, yuklab olish) nusxani band qilib
+      // ulgurguncha chat tozalanmasin.
+      Timer(const Duration(seconds: 10), () {
+        _delivering--;
+        unawaited(_clearIfPending());
+      });
     }
-    if (r.statusCode != 200) return null;
-    final j = jsonDecode(r.body) as Map<String, dynamic>;
-    _applyKeys(j['keys']);
-    final msgId = (j['msg_id'] as num?)?.toInt() ?? 0;
-    if (msgId <= 0) return null;
-    _deliveredAt[name] = DateTime.now();
-    _keysFresh.add(name);
-    _readPending = true;
-    unawaited(_markReadIfPending());
-    _route(name, msgId);
-    final u = _playUrl(name);
-    return u.isEmpty ? null : u;
-  }
-
-  /// Chatda topilgan fayl manzili (`rust_tg_find` oldingi o'qish
-  /// xatosi chetlatishini o'zi olib tashlaydi — yangi nusxa kerak emas).
-  String? _foundUrl(String name) {
-    final u = _playUrl(name);
-    return u.isEmpty ? null : u;
   }
 
   /// Telegram manbasi ishlamadi (masalan foydalanuvchi bot chatidagi

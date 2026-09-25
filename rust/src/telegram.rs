@@ -831,167 +831,32 @@ fn remember(t: &Tg, messages: &[tl::enums::Message], found: &mut HashSet<String>
     last_id
 }
 
-/// Bu nomlar bot chatida BORmi — kanaldan qayta nusxa olishdan OLDIN.
+/// Bu nomlar bot chatida qaysi xabarda — chatning OXIRGI 100 ta
+/// xabaridan (bot nusxani so'ralishi bilan yuboradi va chat
+/// ishlatilgach tozalanadi, ya'ni nusxa doim shu yerda).
 ///
-/// TALAB (foydalanuvchi): "fayl kerak bo'lsa avval bot chatidan nomi
-/// bilan izlab topilsin; bot chatida bor fayl kanaldan qayta copy
-/// qilinmasin; bot tarixi tozalanmasin".
-///
-/// Avval chatning oxirgi xabarlari (2 sahifa, 200 ta — yangi
-/// nusxalar shu yerda), topilmaganlari esa Telegram qidiruvi bilan
-/// fayl NOMI bo'yicha (eski nusxalar; bir nechta nom bo'lsa — eng
-/// ko'pi `SEARCH_MAX` tasi, qolganini bot qayta yuboradi).
+/// Telegram qidiruvi (`messages.search`) ATAYLAB yo'q — foydalanuvchi:
+/// "bot chatidan izlash juda sekin". U tez-tez cheklanardi ham.
 async fn find_in_chat(t: &Tg, client: &Client, names: &[String]) -> Result<HashSet<String>, String> {
-    const SEARCH_MAX: usize = 3;
-    let (id, hash) = bot_peer(t, client).await?;
-    let peer = tl::enums::InputPeer::User(tl::types::InputPeerUser { user_id: id, access_hash: hash });
-    let want: HashSet<&String> = names.iter().collect();
-    let mut found: HashSet<String> = HashSet::new();
-    let mut offset_id = 0;
-    for _ in 0..2 {
-        let res = client
-            .invoke(&tl::functions::messages::GetHistory {
-                peer: peer.clone(),
-                offset_id,
-                offset_date: 0,
-                add_offset: 0,
-                limit: 100,
-                max_id: 0,
-                min_id: 0,
-                hash: 0,
-            })
-            .await
-            .map_err(|e| inv_err(&e))?;
-        let messages = messages_of(res);
-        let n = messages.len();
-        offset_id = remember(t, &messages, &mut found);
-        if want.iter().all(|w| found.contains(*w)) || n < 100 || offset_id <= 1 {
-            break;
-        }
-    }
-    let missing: Vec<&String> = want.iter().filter(|w| !found.contains(**w)).copied().collect();
-    if missing.len() <= SEARCH_MAX {
-        for name in missing {
-            // Oddiy video (`force_file: false`) Telegram'da HUJJAT emas,
-            // VIDEO turkumida — faqat hujjat filtri uni topmasdi va bot
-            // eski nusxa turgan bo'lsa ham yangisini yuborardi.
-            let filters = if mime_of_name(name).starts_with("video/") {
-                vec![
-                    tl::enums::MessagesFilter::InputMessagesFilterVideo,
-                    tl::enums::MessagesFilter::InputMessagesFilterDocument,
-                ]
-            } else {
-                vec![tl::enums::MessagesFilter::InputMessagesFilterDocument]
-            };
-            for filter in filters {
-                if found.contains(name) {
-                    break;
-                }
-                // Qidiruv — faqat qo'shimcha imkoniyat: Telegram uni tez-tez
-                // cheklaydi (FLOOD_WAIT). Xatosi butun tekshiruvni
-                // yiqitmasin — topilmagan fayl shunchaki qayta so'raladi.
-                let res = match client
-                    .invoke(&tl::functions::messages::Search {
-                        peer: peer.clone(),
-                        q: name.clone(),
-                        from_id: None,
-                        saved_peer_id: None,
-                        saved_reaction: None,
-                        top_msg_id: None,
-                        filter,
-                        min_date: 0,
-                        max_date: 0,
-                        offset_id: 0,
-                        add_offset: 0,
-                        limit: 5,
-                        max_id: 0,
-                        min_id: 0,
-                        hash: 0,
-                    })
-                    .await
-                {
-                    Ok(r) => r,
-                    Err(e) => {
-                        crate::video_cache::tg_log(format!("Telegram: qidiruv: {}", inv_err(&e)));
-                        break;
-                    }
-                };
-                remember(t, &messages_of(res), &mut found);
-            }
-        }
-    }
-    Ok(found)
-}
-
-/// Bot chatini O'QILGAN deb belgilaydi (foydalanuvchining o'z hisobi
-/// bilan) — Telegram'da botda "N ta o'qilmagan" chiqmasin.
-async fn mark_bot_read(t: &Tg, client: &Client) -> Result<(), String> {
     let (id, hash) = bot_peer(t, client).await?;
     let peer = tl::enums::InputPeer::User(tl::types::InputPeerUser { user_id: id, access_hash: hash });
     let res = client
         .invoke(&tl::functions::messages::GetHistory {
-            peer: peer.clone(),
+            peer,
             offset_id: 0,
             offset_date: 0,
             add_offset: 0,
-            limit: 1,
+            limit: 100,
             max_id: 0,
             min_id: 0,
             hash: 0,
         })
         .await
         .map_err(|e| inv_err(&e))?;
-    let top = messages_of(res).iter().map(|m| match m {
-        tl::enums::Message::Message(m) => m.id,
-        tl::enums::Message::Service(m) => m.id,
-        tl::enums::Message::Empty(m) => m.id,
-    }).max().unwrap_or(0);
-    if top > 0 {
-        client
-            .invoke(&tl::functions::messages::ReadHistory { peer, max_id: top })
-            .await
-            .map_err(|e| inv_err(&e))?;
-    }
-    Ok(())
-}
-
-/// Nomlar ro'yxati (`["a.mp4", ...]`) — bot chatida borlari:
-/// `{"found": [...]}`. Topilganlar pleyer/yuklab olish uchun
-/// bog'lanadi (`route_url`).
-#[no_mangle]
-pub extern "C" fn rust_tg_find(json_ptr: *const c_char) -> *mut c_char {
-    let json = unsafe { cstr_to_str(json_ptr) }.unwrap_or("[]").to_string();
-    string_to_cptr(with_client(|t, client| {
-        if !t.authorized.load(Ordering::SeqCst) {
-            return Ok(json!({"found": []}).to_string());
-        }
-        let names: Vec<String> = serde_json::from_str(&json).unwrap_or_default();
-        if names.is_empty() {
-            return Ok(json!({"found": []}).to_string());
-        }
-        let found = t.rt.block_on(async {
-            tokio::time::timeout(Duration::from_secs(20), find_in_chat(t, &client, &names)).await
-        }).map_err(|_| format!("{NET_ERR}vaqt tugadi"))??;
-        let list: Vec<&String> = names.iter().filter(|n| found.contains(*n)).collect();
-        // Chatda bor, lekin ochish kaliti telefonda yo'q (masalan ilova
-        // qayta o'rnatilgan) — kalit serverdan so'raladi (nusxasiz).
-        let no_key: Vec<&&String> = list.iter().filter(|n| key_of(t, n).is_none()).collect();
-        Ok(json!({"found": list, "no_key": no_key}).to_string())
-    }))
-}
-
-/// Bot chatini o'qilgan deb belgilaydi.
-#[no_mangle]
-pub extern "C" fn rust_tg_mark_read() -> *mut c_char {
-    string_to_cptr(with_client(|t, client| {
-        if !t.authorized.load(Ordering::SeqCst) {
-            return Ok(json!({"ok": true}).to_string());
-        }
-        t.rt.block_on(async {
-            tokio::time::timeout(Duration::from_secs(20), mark_bot_read(t, &client)).await
-        }).map_err(|_| format!("{NET_ERR}vaqt tugadi"))??;
-        Ok(json!({"ok": true}).to_string())
-    }))
+    let mut found: HashSet<String> = HashSet::new();
+    remember(t, &messages_of(res), &mut found);
+    found.retain(|n| names.contains(n));
+    Ok(found)
 }
 
 async fn doc_for(t: &'static Tg, client: &Client, name: &str, refresh: bool) -> Result<DocInfo, String> {
@@ -3055,7 +2920,7 @@ pub(crate) fn doc_size(name: &str) -> Result<(u64, String), String> {
 }
 
 /// Fayl hajmi — faqat XOTIRADAGI ma'lumotdan (tarmoqsiz). Bot
-/// chatidan topilgan fayl (`rust_tg_find`) shu yerda bo'ladi va
+/// chatidagi nusxa bir marta o'qilgach (`fetch_doc`) shu yerda bo'ladi va
 /// bu — Telegram'dagi HAQIQIY hajm.
 pub(crate) fn cached_doc_size(name: &str) -> Option<(u64, String)> {
     let t = tg()?;
