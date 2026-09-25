@@ -10,11 +10,10 @@
 //
 //   1. Raqam -> Telegram kod yuboradi (Telegram ilovasiga yoki SMS).
 //   2. Kod -> (yoqilgan bo'lsa) ikki bosqichli parol.
-//   3. Telegram hisobi ulangach ilova hisobi BOTSIZ ochiladi:
-//      foydalanuvchi nomidan `messages.acceptUrlAuth` qilinadi
-//      (`rust_tg_url_auth`), Telegram imzolagan ma'lumotni worker
-//      bot tokeni bilan tekshiradi va sessiya ochadi. Bu ishlamasa
-//      (domen sozlanmagan) — eski yo'l: botga `/start <token>`.
+//   3. Telegram hisobi ulangach ilova foydalanuvchi NOMIDAN botga
+//      `/start <token>` yuboradi (`rust_tg_start_bot`) — foydalanuvchi
+//      talabi: hisob avvalgidek bot orqali tasdiqlanadi. Bot xabarni
+//      kim yuborganini Telegram'ning o'zidan biladi va sessiya ochadi.
 //
 // Natijada bitta kirish bilan ikkisi bo'ladi: ilova hisobi ochiladi
 // VA videolar uchun Telegram ulanadi (`telegram_service.dart`).
@@ -473,19 +472,6 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
       _error = null;
       _step = _Step.finishing;
     });
-    // AVVAL BOTSIZ: Telegram imzosi bilan (`urlAuth`). Bot domeni
-    // sozlanmagan yoki Telegram rad etsa — eski bot orqali yo'l.
-    final signed = await _tg.urlAuth('$kApiBase/login');
-    if (!mounted) return;
-    if (signed != null) {
-      final err = await AuthService.instance.loginWithSignature(signed);
-      if (!mounted) return;
-      if (err == null) {
-        if (!widget.gate) Navigator.of(context).pop(true);
-        return;
-      }
-      if (err.contains('blok')) return _fail(err);
-    }
     final req = await AuthService.instance.start();
     if (!mounted) return;
     if (req == null) return _fail('Server bilan bog\'lanib bo\'lmadi');

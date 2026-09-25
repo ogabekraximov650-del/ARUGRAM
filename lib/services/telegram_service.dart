@@ -197,8 +197,7 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
   // ILOVA SESSIYASI TELEGRAM SESSIYASIGA BOG'LANGAN: Telegram
   // sessiyasi uzilsa ilova hisobidan ham chiqiladi (ma'lumotlar
   // navbati hisob papkasida qoladi va qayta kirilganda yuboriladi).
-  // Qayta kirishda yangi ilova sessiyasi Telegram imzosi bilan
-  // botsiz ochiladi (`urlAuth`).
+  // Qayta kirishda yangi ilova sessiyasi bot orqali ochiladi.
   void _onSessionLost() {
     _holders.clear();
     _readPending = true;
@@ -485,27 +484,6 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
-  /// Botsiz kirish: foydalanuvchi nomidan [url] ga Telegram Login
-  /// so'raladi (`rust_tg_url_auth`). Javob — Telegram imzolagan
-  /// manzil yoki `null` ([onError] ga sababi).
-  Future<String?> urlAuth(String url, {void Function(String)? onError}) async {
-    final j = await Isolate.run(() {
-      final lib = _openLib();
-      final f = lib.lookupFunction<Pointer<Utf8> Function(Pointer<Utf8>),
-          Pointer<Utf8> Function(Pointer<Utf8>)>('rust_tg_url_auth');
-      final u = url.toNativeUtf8();
-      try {
-        return _json(_take(lib, f(u)));
-      } finally {
-        malloc.free(u);
-      }
-    });
-    final signed = j['url'] as String?;
-    if (j['ok'] == true && signed != null && signed.isNotEmpty) return signed;
-    onError?.call(j['error'] as String? ?? 'Xato');
-    return null;
-  }
-
   // ── FAYL YUKLASH (hammasi ilova orqali) ─────────────────────
   //
   // TALAB (foydalanuvchi): "worker orqali umuman fayl o'tmasin —
@@ -719,8 +697,7 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
       final names = batch.keys.toList();
       hold(owner, names.first);
       // Avval bot chatidan; faqat yo'qlarini bot kanaldan yuboradi.
-      final got = await _findInChat(names);
-      if (got == null) throw 'bot chati tekshirilmadi';
+      final got = await _findInChat(names) ?? <String>{};
       got.addAll(await _deliver(names
           .where((n) => !got.contains(n) && !_recentlyDelivered(n))
           .toList()));
@@ -1011,8 +988,7 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
   /// nusxa so'rashdan OLDIN. Chatda bor-u kaliti telefonda yo'qlari
   /// uchun kalit serverdan nusxasiz olinadi (`keys_only`).
   ///
-  /// `null` — chatni tekshirib bo'lmadi (tarmoq): bunda nusxa
-  /// SO'RALMAYDI, aks holda har bir uzilish yangi nusxa bo'lardi.
+  /// `null` — chatni tekshirib bo'lmadi (tarmoq yoki Telegram cheklovi).
   Future<Set<String>?> _findInChat(List<String> names) async {
     if (names.isEmpty) return {};
     Map<String, dynamic> j;
@@ -1111,8 +1087,9 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
     // chatda bir-ikki soniyada paydo bo'ladi).
     for (var i = 0;; i++) {
       final found = await _findInChat([name]);
-      // Chatni tekshirib bo'lmadi — nusxa so'ralmaydi.
-      if (found == null) return null;
+      // Chatni tekshirib bo'lmadi — bot so'raladi (quyida); takroriy
+      // nusxadan `_preparing` va `_deliveredAt` saqlaydi.
+      if (found == null) break;
       if (found.contains(name)) return _foundUrl(name);
       if (!_recentlyDelivered(name) || i >= 3) break;
       await Future<void>.delayed(const Duration(milliseconds: 1500));

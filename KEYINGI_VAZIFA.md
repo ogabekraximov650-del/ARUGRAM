@@ -2967,3 +2967,20 @@ mahalliy ishga tushirib, natijani commit qilish kerak.
 - **Hajm:** pleyer Telegram'dagi haqiqiy hajmni ishlatadi
   (`cached_doc_size`). Hajm o'zgargan bo'lsa diskdagi eski bo'laklar
   tashlanadi.
+
+## Tuzatish: video ochilmadi, bot nusxa yubormadi
+
+- **Sabab.** Bot chatidagi eski nusxalar `messages.search` bilan
+  qidiriladi, Telegram esa bu qidiruvni tez-tez cheklaydi. Qidiruv
+  xatosi bot chatini tekshirishni butunlay yiqitardi. Oldingi
+  tuzatishdan keyin esa tekshiruv yiqilsa nusxa umuman so'ralmasdi.
+  Natijada video ochilmadi.
+- **Tuzatish.**
+  - Qidiruv xatosi endi e'tiborsiz qoldiriladi va faqat logga
+    yoziladi.
+  - Tekshiruv baribir yiqilsa, bot so'raladi. Takroriy nusxadan
+    `_preparing` va `_deliveredAt` himoya qiladi.
+- **Kirish.** Hisob yana faqat bot orqali tasdiqlanadi (foydalanuvchi
+  talabi): `/start <token>`. `acceptUrlAuth` yo'li
+  (`rust_tg_url_auth`, `/api/auth/telegram/widget`) olib tashlandi.
+  Yuqoridagi "Botsiz kirish" bo'limi endi amal qilmaydi.

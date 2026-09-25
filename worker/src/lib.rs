@@ -3236,61 +3236,6 @@ async fn bot_username(env: &Env) -> String {
     name
 }
 
-/// Telegram Login imzosi necha soniya yaroqli (`auth_date` dan).
-const TG_LOGIN_MAX_AGE_SECS: i64 = 5 * 60;
-
-/// Telegram qaytargan imzolangan manzilni tekshiradi
-/// (https://core.telegram.org/widgets/login#checking-authorization).
-///
-/// `data_check_string` — `hash` dan boshqa barcha maydonlar,
-/// kalit bo'yicha saralangan, `k=v` ko'rinishida `\n` bilan
-/// ulangan. Kalit — SHA256(bot_token), imzo — HMAC-SHA256.
-///
-/// To'g'ri bo'lsa `upsert_user` kutadigan `{id, first_name, ...,
-/// hash}` obyektini qaytaradi.
-fn verify_tg_login(env: &Env, signed: &str) -> Option<Value> {
-    let url = Url::parse(signed).ok()?;
-    let mut hash = String::new();
-    let mut pairs: Vec<(String, String)> = Vec::new();
-    for (k, v) in url.query_pairs() {
-        if k == "hash" {
-            hash = v.to_string();
-        } else {
-            pairs.push((k.to_string(), v.to_string()));
-        }
-    }
-    if hash.len() != 64 || pairs.is_empty() {
-        return None;
-    }
-    let want: Vec<u8> = (0..32)
-        .map(|i| u8::from_str_radix(hash.get(i * 2..i * 2 + 2)?, 16).ok())
-        .collect::<Option<_>>()?;
-    pairs.sort();
-    let check = pairs.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join("\n");
-
-    let token = env.secret("TELEGRAM_BOT_TOKEN").ok()?.to_string();
-    let key: [u8; 32] = <sha2::Sha256 as sha2::Digest>::digest(token.as_bytes()).into();
-    let mut mac = <hmac::Hmac<sha2::Sha256> as hmac::Mac>::new_from_slice(&key).ok()?;
-    hmac::Mac::update(&mut mac, check.as_bytes());
-    // Doimiy vaqtli solishtirish.
-    hmac::Mac::verify_slice(mac, &want).ok()?;
-
-    let get = |k: &str| pairs.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone());
-    let auth_date = get("auth_date")?.parse::<i64>().ok()?;
-    let age = now_ms() / 1000 - auth_date;
-    if !(-60..=TG_LOGIN_MAX_AGE_SECS).contains(&age) {
-        return None;
-    }
-    let id = get("id")?.parse::<i64>().ok().filter(|i| *i > 0)?;
-    Some(json!({
-        "id": id,
-        "first_name": get("first_name").unwrap_or_default(),
-        "last_name": get("last_name").unwrap_or_default(),
-        "username": get("username").unwrap_or_default(),
-        "hash": hash.to_ascii_lowercase(),
-    }))
-}
-
 /// Login tokeni necha millisekund yashaydi (5 daqiqa).
 const LOGIN_TOKEN_TTL_MS: i64 = 5 * 60 * 1000;
 
@@ -8567,64 +8512,6 @@ async fn auth_route(req: Request, env: &Env, origin: &str, path: &str, method: M
                 "status": "ok",
                 "session": row["session_token"].as_str().unwrap_or(""),
                 "user": user_public(origin, &u),
-            }))
-        }
-
-        // ── BOTSIZ KIRISH: Telegram Login imzosi ────────────────
-        //
-        // Ilova foydalanuvchining O'Z Telegram hisobi bilan
-        // `messages.acceptUrlAuth` qiladi (`rust_tg_url_auth`) va
-        // Telegram qaytargan imzolangan manzilni shu yerga yuboradi.
-        // Imzo bot tokeni bilan qo'yilgan — uni faqat Telegram yasay
-        // oladi, ya'ni `id` soxtalashtirib bo'lmaydi.
-        (Method::Post, "/api/auth/telegram/widget") => {
-            let mut req = req;
-            let b: Value = req.json().await.unwrap_or(json!({}));
-            let signed = b["url"].as_str().unwrap_or("");
-            let Some(from) = verify_tg_login(env, signed) else {
-                return json_resp(&json!({"error": "Telegram imzosi yaroqsiz"}), 403);
-            };
-            let now = now_ms();
-            let _ = turso_exec(env, "DELETE FROM login_tokens WHERE expires_at < ?",
-                vec![TursoArg::int(now)]).await;
-            // Imzo BIR MARTALIK: `hash` login_tokens'ga kalit bo'lib
-            // yoziladi — o'sha manzil ikkinchi marta yuborilsa INSERT
-            // yiqiladi (PRIMARY KEY).
-            let token = format!("w:{}", from["hash"].as_str().unwrap_or(""));
-            let ins = turso_exec(env,
-                "INSERT INTO login_tokens (token,status,user_id,session_token,
-                 device,platform,app_version,created_at,expires_at)
-                 VALUES (?,'pending',0,'',?,?,?,?,?)",
-                vec![
-                    TursoArg::text(&token),
-                    TursoArg::text(b["device"].as_str().unwrap_or("")),
-                    TursoArg::text(b["platform"].as_str().unwrap_or("")),
-                    TursoArg::text(b["app_version"].as_str().unwrap_or("")),
-                    TursoArg::int(now),
-                    TursoArg::int(now + TG_LOGIN_MAX_AGE_SECS * 1000 * 2),
-                ]).await;
-            if ins.is_err() {
-                return json_resp(&json!({"error": "Bu imzo allaqachon ishlatilgan"}), 403);
-            }
-            let login = json!({
-                "device": b["device"], "platform": b["platform"],
-                "app_version": b["app_version"],
-            });
-            let user = upsert_user(env, &from).await?;
-            if user["is_banned"].as_i64().unwrap_or(0) == 1 {
-                if let Some((until, reason)) = ban_state(&user, now) {
-                    return json_resp(&json!({
-                        "error": ban_message(until, &reason, now),
-                        "banned": true,
-                    }), 403);
-                }
-                clear_expired_ban(env, user["id"].as_i64().unwrap_or(0)).await;
-            }
-            let session = create_session(env, &user, &login, &token).await?;
-            ok_nostore(json!({
-                "status": "ok",
-                "session": session,
-                "user": user_public(origin, &user),
             }))
         }
 
