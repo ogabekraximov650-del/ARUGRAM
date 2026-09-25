@@ -4831,6 +4831,12 @@ async fn sync_route(mut req: Request, env: &Env) -> Result<Response> {
 
     turso_batch(env, &stmts).await?;
 
+    // Bo'lim/qism raqamlari o'zgardi — chekkadagi ro'yxat keshi
+    // (30 s) eski sonni ko'rsatib turmasin.
+    for (aid, sid) in seasons.keys() {
+        purge_list_cache(&format!("/api/epizods/{aid}/{sid}")).await;
+    }
+
     ok_nostore(json!({
         "ok": true,
         "duplicate": false,

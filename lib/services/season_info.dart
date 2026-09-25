@@ -143,14 +143,14 @@ class SeasonService {
           isFav: fav,
         );
       }
+      // TOPILGAN XATO: bu yerda faqat "mening bahom" tiklanardi —
+      // reyting va baholar soni serverning ESKI qiymatida qolardi.
+      // Natijada baho qo'yilgach pleyer qayta ochilsa, reyting
+      // "o'zgarmagan" bo'lib ko'rinardi. Endi navbatdagi baho
+      // o'rtachaga ham, sanoqqa ham qo'shiladi (`_applyStars`).
       final stars = SyncQueue.instance.pendingRatings()[key];
       if (stars != null && stars != out.myStars) {
-        out = SeasonInfo(
-          season: out.season,
-          rating: out.rating,
-          myStars: stars,
-          isFav: out.isFav,
-        );
+        out = _applyStars(out, stars);
       }
     } catch (_) {
       // Navbat o'qilmasa — serverdan kelgani o'z holicha qoladi.
@@ -203,25 +203,37 @@ class SeasonService {
   /// lekin baho baribir qabul qilinishi kerak.
   static SeasonInfo rate(
       int animeId, int seasonId, int stars, SeasonInfo current) {
-    final oldStars = current.myStars;
-    final count = current.ratingCount + (oldStars > 0 ? 0 : 1);
-    // Eski yig'indi saqlanmaydi — u o'rtacha × sanoq orqali
-    // tiklanadi (yaxlitlash xatosi ko'pi bilan 0.01).
-    final oldSum = (current.rating * current.ratingCount).round();
-    final sum = oldSum + stars - oldStars;
-    final rating = count <= 0 ? 0.0 : ((sum / count) * 100).round() / 100;
-
-    final season = Map<String, dynamic>.from(current.season);
-    season['rating_count'] = count;
-    final next = SeasonInfo(
-      season: season,
-      rating: rating,
-      myStars: stars,
-      isFav: current.isFav,
-    );
+    final next = _applyStars(current, stars);
     _saveDisk(animeId, seasonId, next);
     SyncQueue.instance.putRating(animeId, seasonId, stars);
     return next;
+  }
+
+  /// [info] dagi "mening bahom" ni [stars] ga almashtiradi va
+  /// reytingni serverdagi qoida bilan (ODDIY o'rtacha) qayta
+  /// hisoblaydi: yig'indidan eski baho ayiriladi, yangisi
+  /// qo'shiladi; birinchi baho bo'lsa sanoq bittaga oshadi.
+  /// Bo'lim qatoridagi `rating_sum`/`rating_count` ham yangilanadi —
+  /// kartochkalar ham shu sondan o'rtacha chiqaradi.
+  static SeasonInfo _applyStars(SeasonInfo info, int stars) {
+    final oldStars = info.myStars;
+    final oldCount = info.ratingCount;
+    final oldSum = info.season.containsKey('rating_sum')
+        ? ((info.season['rating_sum'] as num?)?.toInt() ?? 0)
+        // Yig'indi kelmagan bo'lsa — o'rtacha × sanoqdan.
+        : (info.rating * oldCount).round();
+    final count = oldCount + (oldStars > 0 ? 0 : 1);
+    final sum = oldSum + stars - oldStars;
+    final rating = count <= 0 ? 0.0 : ((sum / count) * 100).round() / 100;
+    final season = Map<String, dynamic>.from(info.season);
+    season['rating_count'] = count;
+    season['rating_sum'] = sum;
+    return SeasonInfo(
+      season: season,
+      rating: rating,
+      myStars: stars,
+      isFav: info.isFav,
+    );
   }
 
   /// Sevimlilarga qo'shish / olib tashlash. Yangi holat DARHOL

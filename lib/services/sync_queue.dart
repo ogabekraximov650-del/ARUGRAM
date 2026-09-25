@@ -39,9 +39,19 @@
 //    yuboriladi (`WatchHistory` uni eski yozuvdan davom
 //    ettiradi), farqni server o'zi hisoblaydi.
 //
-// 3. YUBORISH SHARTLARI + QAT'IY KUNLIK CHEGARA. Quyidagilarning
-//    qaysi biri avval kelsa (`_maybeFlush`), lekin kuniga eng
-//    ko'pi `_normalPerDay` marta.
+// 3. YUBORISH SHARTLARI + QAT'IY KUNLIK CHEGARA (`maybeFlush`).
+//
+//    TOPILGAN MUAMMO (foydalanuvchi: "ilova sevimlilar, baholar,
+//    necha soat ko'rilgani va qancha odam ko'rganini to'g'ri
+//    hisoblay olmayapti"): hisob aslida TO'G'RI edi, lekin navbat
+//    serverga 6-24 soatda bir marta ketardi (20 ta yozuv yig'ilmasa).
+//    Shu vaqt ichida umumiy raqamlar "o'zgarmay" turardi.
+//
+//    Endi: yangi yozuvdan 1 daqiqa keyin (shu orada kelgan
+//    boshqalari ham shu paketga tushadi), ilova fonga ketganda esa
+//    darhol yuboriladi. Ikki paket orasida kamida 2 daqiqa va
+//    kuniga eng ko'pi `normalPerDay` ta — so'rovlar soni baribir
+//    kichik. Faqat trafik hisobi bo'lsa — 6 soatda bir marta.
 //
 // ═══════════════════════════════════════════════════════════════
 //  MA'LUMOT YO'QOLMASLIGI
@@ -134,14 +144,11 @@ class SyncQueue extends ChangeNotifier with WidgetsBindingObserver {
   // ── CHEGARALAR ──────────────────────────────────────────────
 
   /// Oddiy (shartlar bo'yicha) yuborishlar soni — kuniga.
-  static const int normalPerDay = 12;
+  static const int normalPerDay = 24;
 
   /// Umumiy qat'iy chegara — majburiy yuborishlar bilan birga.
   /// Foydalanuvchi qo'ygan shart: kuniga 50 tadan oshmasin.
   static const int hardPerDay = 50;
-
-  /// Navbat shuncha qatorga yetsa — kutilmaydi, yuboriladi.
-  static const int rowsTrigger = 20;
 
   /// Bitta paketda yuboriladigan eng ko'p qator (worker ham shu
   /// chegarani biladi). Qolgani keyingi paketga qoladi.
@@ -151,14 +158,23 @@ class SyncQueue extends ChangeNotifier with WidgetsBindingObserver {
   /// (Bunga yetish uchun bir necha hafta internetsiz yurish kerak.)
   static const int maxQueueRows = 1000;
 
-  /// Ilova fonga ketganda: oxirgi yuborishdan shuncha o'tgan bo'lsa.
-  static const Duration _bgAfter = Duration(minutes: 30);
+  /// Yangi yozuvdan keyin shuncha kutiladi (ketma-ket kelganlari
+  /// bitta paketga yig'ilsin).
+  static const Duration _writeDelay = Duration(minutes: 1);
 
-  /// Ilova ochilganda: oxirgi yuborishdan shuncha o'tgan bo'lsa.
-  static const Duration _openAfter = Duration(hours: 6);
+  /// Ikki paket orasidagi eng kam vaqt.
+  static const Duration _minGap = Duration(minutes: 2);
 
-  /// Har holda shu muddatda bir marta yuboriladi.
-  static const Duration _atLeastEvery = Duration(hours: 24);
+  /// Faqat trafik hisobi bo'lsa — shuncha vaqtda bir marta.
+  static const Duration _trafficEvery = Duration(hours: 6);
+
+  /// Kechiktirilgan yuborish.
+  Timer? _delayed;
+
+  void _later(Duration d) {
+    _delayed?.cancel();
+    _delayed = Timer(d, () => unawaited(maybeFlush('kechikkan')));
+  }
 
   // ── HOLAT ───────────────────────────────────────────────────
 
@@ -406,14 +422,24 @@ class SyncQueue extends ChangeNotifier with WidgetsBindingObserver {
 
     final now = DateTime.now().millisecondsSinceEpoch;
     final since = now - _lastSentAt;
-    final due = switch (reason) {
-      'fon' => since >= _bgAfter.inMilliseconds,
-      'ochilish' => since >= _openAfter.inMilliseconds,
-      // Oddiy yozuv: navbat to'lgan bo'lsa yoki sutka o'tgan bo'lsa.
-      _ => _rows.length >= rowsTrigger ||
-          since >= _atLeastEvery.inMilliseconds,
-    };
-    if (!due) return;
+
+    // Faqat trafik hisobi — shoshilinch emas.
+    if (_rows.isEmpty) {
+      if (since >= _trafficEvery.inMilliseconds) await flush();
+      return;
+    }
+    // Yangi yozuv — bir oz kutamiz, keyingilari ham qo'shilsin.
+    if (reason == 'yozuv') {
+      _later(_writeDelay);
+      return;
+    }
+    // Oldingi paket hozirgina ketgan — oraliq to'lgach yuboriladi.
+    final wait = _minGap.inMilliseconds - since;
+    if (wait > 0) {
+      _later(Duration(milliseconds: wait));
+      return;
+    }
+    _delayed?.cancel();
     await flush();
   }
 
