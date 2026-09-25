@@ -3033,3 +3033,17 @@ internet qaytganda ilova o'z hisobi bilan chat tarixini tozalasin".
   - yoy doim aylanib turadi va aylanish davomida uzayadi;
   - foiz o'lchangan tezlik bilan bir tekis o'sadi, haqiqiy qiymatdan
     o'zib ketmaydi.
+
+## Tuzatish: boshqa hisobda yuklash — PEER_ID_INVALID
+
+- **Sabab.** Botning `access_hash` i har bir Telegram hisobi uchun
+  boshqacha, ilova esa uni xotirada saqlab qolardi (`bot_peer`). Hisob
+  almashgach `messages.sendMedia` eski qiymat bilan ketardi.
+- **Tuzatish.**
+  - `forget_peers` bot manzilini va qo'shimcha ulanishlar uchun
+    "tayyor DC" belgilarini (`dl_dcs`) tozalaydi. U kirilganda
+    (`after_login`, `auth_dcs` bilan birga), sessiya o'lganda
+    (`check_dead`) va chiqilganda chaqiriladi.
+  - `sendMedia` baribir `PEER_ID_INVALID` bersa, bot qaytadan topiladi
+    va o'sha yuklangan fayl bir marta qayta yuboriladi. Fayl qayta
+    yuklanmaydi.

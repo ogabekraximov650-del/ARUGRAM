@@ -513,6 +513,25 @@ fn forget_account_state(t: &Tg) {
     }
     // Boshqa DC larga ko'chirilgan avtorizatsiya ESKI hisobniki.
     t.rt.block_on(async { t.auth_dcs.lock().await.clear() });
+    forget_peers(t);
+}
+
+/// Hisobga bog'liq "manzillar" (tarmoqsiz, istalgan joydan chaqirsa
+/// bo'ladi).
+///
+/// TOPILGAN XATO (foydalanuvchi: "boshqa account orqali kirib video
+/// yukladim — PEER_ID_INVALID caused by messages.sendMedia"): botning
+/// `access_hash` i HAR BIR Telegram hisobi uchun boshqacha, ilova esa
+/// uni xotirada saqlab qolardi — yangi hisob eski hisobning qiymati
+/// bilan botga yozardi. Qo'shimcha ulanishlar uchun "tayyor DC"
+/// belgilari ham eski hisobniki (yangi hisobning kaliti boshqa).
+fn forget_peers(t: &Tg) {
+    if let Ok(mut p) = t.bot_peer.lock() {
+        *p = None;
+    }
+    if let Ok(mut d) = t.dl_dcs.lock() {
+        d.clear();
+    }
 }
 
 fn disconnect(t: &Tg) {
@@ -983,6 +1002,7 @@ fn check_dead(t: &Tg, err: &str) -> bool {
     if let Ok(mut d) = t.auth_dcs.try_lock() {
         d.clear();
     }
+    forget_peers(t);
     if let Ok(mut d) = t.docs.lock() {
         d.clear();
     }
@@ -1394,6 +1414,10 @@ where
 }
 
 fn after_login(t: &Tg) -> String {
+    forget_peers(t);
+    if let Ok(mut d) = t.auth_dcs.try_lock() {
+        d.clear();
+    }
     t.authorized.store(true, Ordering::SeqCst);
     WAIT_UNTIL.store(0, Ordering::SeqCst);
     let _ = fs::remove_file(wait_path(t));
@@ -2373,7 +2397,7 @@ async fn upload_to_channel(
     // `channel_id == 0` — BOT CHATIGA (kanalga admin bo'lmagan
     // foydalanuvchi: yozishmadagi katta video). Bot uni o'zi kanalga
     // ko'chiradi (worker'dagi `tg_user_media`).
-    let peer: tl::enums::InputPeer = if channel_id != 0 {
+    let mut peer: tl::enums::InputPeer = if channel_id != 0 {
         find_channel(&client, channel_id).await?.into()
     } else {
         let (id, hash) = bot_peer(t, &client).await?;
@@ -2389,7 +2413,7 @@ async fn upload_to_channel(
     let mut rnd = [0u8; 8];
     getrandom::getrandom(&mut rnd).map_err(|e| e.to_string())?;
     let random_id = i64::from_le_bytes(rnd);
-    let req = tl::functions::messages::SendMedia {
+    let mut req = tl::functions::messages::SendMedia {
         silent: true,
         background: false,
         clear_draft: false,
@@ -2422,6 +2446,7 @@ async fn upload_to_channel(
     // topiladi — ikki marta joylanmaydi.
     let mut wait = Duration::from_secs(2);
     let mut last_err = String::new();
+    let mut retried_peer = false;
     for _ in 0..UP_ATTEMPTS {
         let Some(client) = connect(t) else { return Err("Telegram'ga ulanib bo'lmadi".to_string()) };
         match tokio::time::timeout(UP_TIMEOUT, client.invoke(&req)).await {
@@ -2431,8 +2456,21 @@ async fn upload_to_channel(
             Ok(Err(e)) if e.is("RANDOM_ID_DUPLICATE") => {
                 return find_posted(&client, &peer, &name).await;
             }
+            // Bot manzili eskirgan (masalan boshqa hisobniki) — bot
+            // qaytadan topiladi va AYNAN o'sha fayl qayta yuboriladi
+            // (fayl allaqachon Telegram serverida, qayta yuklanmaydi).
+            Ok(Err(e)) if channel_id == 0 && e.is("PEER_ID_INVALID") && !retried_peer => {
+                retried_peer = true;
+                if let Ok(mut p) = t.bot_peer.lock() {
+                    *p = None;
+                }
+                let (id, hash) = bot_peer(t, &client).await?;
+                peer = tl::enums::InputPeer::User(tl::types::InputPeerUser { user_id: id, access_hash: hash });
+                req.peer = peer.clone();
+                continue;
+            }
             Ok(Err(e)) if is_transient(&e) => last_err = e.to_string(),
-            Ok(Err(e)) => return Err(format!("kanalga yuborilmadi: {e}")),
+            Ok(Err(e)) => return Err(format!("yuborilmadi: {e}")),
             Err(_) => {
                 last_err = "vaqt tugadi".to_string();
                 drop_stale_connection(t);
@@ -2441,7 +2479,7 @@ async fn upload_to_channel(
         tokio::time::sleep(wait).await;
         wait = (wait * 2).min(Duration::from_secs(30));
     }
-    Err(format!("kanalga yuborilmadi: {last_err}"))
+    Err(format!("yuborilmadi: {last_err}"))
 }
 
 /// Bitta qism hajmi (Telegram: 1 MiB ni qoldiqsiz bo'ladi).
