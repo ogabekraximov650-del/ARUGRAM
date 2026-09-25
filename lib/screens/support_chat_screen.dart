@@ -16,9 +16,11 @@
 
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
@@ -1427,7 +1429,6 @@ class _AttachButton extends StatelessWidget {
       );
     }
     if (uploading) {
-      final pct = (progress.clamp(0.0, 1.0) * 100).round();
       return SizedBox(
         width: 42,
         height: 42,
@@ -1435,25 +1436,12 @@ class _AttachButton extends StatelessWidget {
           alignment: Alignment.center,
           children: [
             // Aylana progress — talab AYNAN shunday edi.
-            SizedBox(
-              width: 42,
-              height: 42,
-              child: CircularProgressIndicator(
-                // Hali bitta ham bayt ketmagan bo'lsa cheksiz
-                // (aylanuvchi) ko'rinish: soxta 0% turmaydi.
-                value: progress <= 0 ? null : progress.clamp(0.0, 1.0),
-                strokeWidth: 3,
-                backgroundColor: Colors.white.withValues(alpha: 0.12),
-                valueColor: AlwaysStoppedAnimation(AppColors.accent),
-              ),
-            ),
-            Text(
-              '$pct',
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 11,
-                fontWeight: FontWeight.w800,
-              ),
+            SpinRing(
+              progress: progress,
+              size: 42,
+              color: AppColors.accent,
+              track: Colors.white.withValues(alpha: 0.12),
+              fontSize: 11,
             ),
           ],
         ),
@@ -1865,37 +1853,193 @@ class _Ring extends StatelessWidget {
     return SizedBox(
       width: size,
       height: size,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          Container(
-            decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.55),
-              shape: BoxShape.circle,
-            ),
-          ),
-          SizedBox(
-            width: size,
-            height: size,
-            child: CircularProgressIndicator(
-              // Hali bitta ham bayt ketmagan bo'lsa cheksiz
-              // (aylanuvchi) ko'rinish: soxta 0% turmaydi.
-              value: progress <= 0 ? null : progress,
-              strokeWidth: 3,
-              backgroundColor: Colors.white.withValues(alpha: 0.18),
-              valueColor: const AlwaysStoppedAnimation(Colors.white),
-            ),
-          ),
-          Text(
-            '${(progress * 100).round()}',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: size > 44 ? 13 : 10,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        ],
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.55),
+          shape: BoxShape.circle,
+        ),
+        child: SpinRing(
+          progress: progress,
+          size: size,
+          color: Colors.white,
+          track: Colors.white.withValues(alpha: 0.18),
+          fontSize: size > 44 ? 13 : 10,
+        ),
       ),
     );
   }
+}
+
+/// TELEGRAM'DAGIDEK YUKLASH HALQASI.
+///
+/// TALAB (foydalanuvchi): "progress chizig'i AYLANGAN holda uzayib
+/// birlashsin — bir joyda turgan holda emas; aylana ichidagi foiz
+/// admin panelidagidek BIR XIL tezlikda o'ssin, to'xtab-to'xtab emas".
+///
+///   * Yoy doim aylanadi (bir aylanish ~1.6 s) va shu aylanish
+///     davomida uzayadi; 100% da to'liq halqa bo'lib birlashadi.
+///   * Yuklash qismlari (512 KB) bo'lak-bo'lak tugaydi, ya'ni haqiqiy
+///     qiymat sakrab o'sadi. Ko'rsatiladigan qiymat esa har kadrda
+///     o'lchangan TEZLIK bilan bir tekis oshadi va haqiqiy qiymatdan
+///     o'zib ketmaydi — foiz raqami to'xtamasdan, bir maromda o'sadi.
+class SpinRing extends StatefulWidget {
+  final double progress;
+  final double size;
+  final Color color;
+  final Color track;
+  final double stroke;
+  final double fontSize;
+
+  const SpinRing({
+    super.key,
+    required this.progress,
+    required this.size,
+    required this.color,
+    required this.track,
+    this.stroke = 3,
+    this.fontSize = 12,
+  });
+
+  @override
+  State<SpinRing> createState() => _SpinRingState();
+}
+
+class _SpinRingState extends State<SpinRing>
+    with SingleTickerProviderStateMixin {
+  late final Ticker _ticker;
+  Duration _last = Duration.zero;
+  double _angle = 0;
+  double _shown = 0;
+
+  /// Haqiqiy qiymatning o'sish tezligi (ulush/soniya), silliqlangan.
+  double _rate = 0;
+  double _prevTarget = 0;
+  DateTime _prevAt = DateTime.now();
+
+  @override
+  void initState() {
+    super.initState();
+    _prevTarget = widget.progress.clamp(0.0, 1.0);
+    _shown = _prevTarget;
+    _ticker = createTicker(_tick)..start();
+  }
+
+  @override
+  void didUpdateWidget(SpinRing old) {
+    super.didUpdateWidget(old);
+    final target = widget.progress.clamp(0.0, 1.0);
+    if (target < _prevTarget) {
+      // Yangi yuklash boshlandi.
+      _shown = target;
+      _rate = 0;
+    } else if (target > _prevTarget) {
+      final now = DateTime.now();
+      final dt = now.difference(_prevAt).inMicroseconds / 1e6;
+      if (dt > 0.05) {
+        final r = (target - _prevTarget) / dt;
+        _rate = _rate == 0 ? r : _rate * 0.7 + r * 0.3;
+        _prevAt = now;
+      }
+    }
+    _prevTarget = target;
+  }
+
+  void _tick(Duration now) {
+    final dt = _last == Duration.zero
+        ? 0.0
+        : (now - _last).inMicroseconds / 1e6;
+    _last = now;
+    final target = widget.progress.clamp(0.0, 1.0);
+    // Aylanish: ~1.6 soniyada bir marta.
+    _angle = (_angle + dt * 2 * math.pi / 1.6) % (2 * math.pi);
+    if (_shown < target) {
+      // O'lchangan tezlik bilan bir tekis; ortda qolib ketsa (tezlik
+      // hali o'lchanmagan) — farqning bir qismi bilan quvib yetadi.
+      final gap = target - _shown;
+      final step = math.max(_rate * dt, gap * dt * 1.5);
+      _shown = math.min(target, _shown + step);
+    }
+    setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _ticker.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: widget.size,
+      height: widget.size,
+      child: CustomPaint(
+        painter: _SpinRingPainter(
+          angle: _angle,
+          value: _shown,
+          color: widget.color,
+          track: widget.track,
+          stroke: widget.stroke,
+        ),
+        child: Center(
+          child: Text(
+            '${(_shown * 100).floor()}',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: widget.fontSize,
+              fontWeight: FontWeight.w800,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SpinRingPainter extends CustomPainter {
+  final double angle;
+  final double value;
+  final Color color;
+  final Color track;
+  final double stroke;
+
+  _SpinRingPainter({
+    required this.angle,
+    required this.value,
+    required this.color,
+    required this.track,
+    required this.stroke,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final r = (math.min(size.width, size.height) - stroke) / 2;
+    final c = size.center(Offset.zero);
+    final rect = Rect.fromCircle(center: c, radius: r);
+    canvas.drawCircle(
+        c,
+        r,
+        Paint()
+          ..color = track
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = stroke);
+    // Eng kichik yoy ham ko'rinsin (0% da ham aylanish sezilsin).
+    final sweep = math.max(value, 0.04) * 2 * math.pi;
+    final full = value >= 0.999;
+    canvas.drawArc(
+        rect,
+        full ? 0 : angle - math.pi / 2,
+        full ? 2 * math.pi : sweep,
+        false,
+        Paint()
+          ..color = color
+          ..style = PaintingStyle.stroke
+          ..strokeCap = StrokeCap.round
+          ..strokeWidth = stroke);
+  }
+
+  @override
+  bool shouldRepaint(_SpinRingPainter old) =>
+      old.angle != angle || old.value != value;
 }

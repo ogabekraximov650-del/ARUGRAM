@@ -111,7 +111,20 @@ const PIPELINE: usize = 4;
 /// Butun ilova bo'yicha havodagi `getFile` so'rovlari chegarasi.
 /// Yuklab olish 16 ta parallel HTTP so'rov yuboradi; chegara
 /// bo'lmasa bu 64 ta so'rov bo'lardi va Telegram FLOOD_WAIT berardi.
-const MAX_INFLIGHT: usize = 12;
+const MAX_INFLIGHT: usize = 24;
+
+/// Fayl qismlari uchun QO'SHIMCHA ulanishlar soni (asosiysidan tashqari).
+///
+/// TOPILGAN SABAB (foydalanuvchi: "videolar juda sekin yuklanyapti"):
+/// `grammers` har bir DC ga BITTA TCP ulanish ochadi — 16 ta oqim
+/// so'ragan hamma qismlar bitta ulanishdan navbat bilan o'tardi.
+/// Bitta TCP ulanishning tezligi yo'l kechikishi bilan cheklanadi,
+/// Telegram ham bitta ulanishni cheklaydi. Rasmiy ilovalar fayllar
+/// uchun alohida bir nechta ulanish ochadi — endi biz ham: qismlar
+/// asosiy + 4 ta qo'shimcha ulanishga navbat bilan taqsimlanadi.
+/// Hammasi BITTA sessiya (bitta auth kalit) bilan — Telegram buni
+/// ruxsat etadi, har bir ulanish o'z `session_id` siga ega.
+const DL_CONNS: usize = 4;
 
 /// Xatodan keyin shu fayl uchun Telegram qancha vaqt chetga suriladi.
 const FAIL_COOLDOWN: Duration = Duration::from_secs(120);
@@ -215,6 +228,13 @@ struct Tg {
     /// Qaysi DC larga hisob (auth) ko'chirilgan.
     auth_dcs: tokio::sync::Mutex<HashSet<i32>>,
     inflight: Arc<Semaphore>,
+    /// Fayl qismlari uchun qo'shimcha ulanishlar (`DL_CONNS`).
+    dl: Mutex<Vec<Client>>,
+    dl_next: std::sync::atomic::AtomicUsize,
+    /// Asosiy ulanish orqali muvaffaqiyatli ishlagan DC lar — bu DC ning
+    /// kaliti sessiyada tayyor, qo'shimcha ulanishlar shu kalit bilan
+    /// ulanadi (aks holda har biri o'z kalitini yasab, ruxsatsiz qolardi).
+    dl_dcs: Mutex<HashSet<i32>>,
     /// fayl nomi -> AES-128-CTR kaliti (`keys.bin` da shifrlangan).
     keys: Mutex<HashMap<String, [u8; 16]>>,
     /// Sessiya Telegram tomonidan bekor qilindi (ilova bot chatini
@@ -501,8 +521,51 @@ fn disconnect(t: &Tg) {
             c.disconnect();
         }
     }
+    if let Ok(mut v) = t.dl.lock() {
+        for c in v.drain(..) {
+            c.disconnect();
+        }
+    }
     if let Ok(mut s) = t.session.lock() {
         *s = None;
+    }
+}
+
+/// Qism uchun ulanish: asosiysi yoki qo'shimchalardan biri (navbat
+/// bilan). [dc] asosiy ulanish orqali hali ishlamagan bo'lsa — faqat
+/// asosiysi (kalit shu yerda yasaladi va ruxsat ko'chiriladi).
+fn part_client(t: &Tg, main: &Client, dc: i32) -> Client {
+    if !t.dl_dcs.lock().map(|s| s.contains(&dc)).unwrap_or(false) {
+        return main.clone();
+    }
+    let n = t.dl_next.fetch_add(1, Ordering::Relaxed) % (DL_CONNS + 1);
+    if n == 0 {
+        return main.clone();
+    }
+    let Some(session) = t.session.lock().ok().and_then(|s| s.clone()) else {
+        return main.clone();
+    };
+    let Ok(mut v) = t.dl.lock() else { return main.clone() };
+    while v.len() < n {
+        let api_id = t.api_id.lock().map(|v| *v).unwrap_or(0);
+        let pool = {
+            let _g = t.rt.enter();
+            SenderPool::with_configuration(Arc::clone(&session) as Arc<_>, api_id, connection_params())
+        };
+        // Yangilanishlar kerak emas — qabul qiluvchi tashlanadi
+        // (`run_sender` yuborish xatosini e'tiborsiz qoldiradi).
+        let SenderPool { runner, handle, updates } = pool;
+        drop(updates);
+        t.rt.spawn(runner.run());
+        v.push(Client::new(handle));
+    }
+    v[n - 1].clone()
+}
+
+/// [dc] asosiy ulanish orqali ishladi — qo'shimchalar ham ishlatsa bo'ladi.
+fn mark_dc_ready(t: &Tg, dc: i32) {
+    if let Ok(mut s) = t.dl_dcs.lock() {
+        s.insert(dc);
     }
 }
 
@@ -985,8 +1048,10 @@ async fn fetch_part(t: &'static Tg, client: Client, name: String, offset: u64) -
             offset: offset as i64,
             limit: PART as i32,
         };
-        match client.invoke_in_dc(dc, &req).await {
+        let c = part_client(t, &client, dc);
+        match c.invoke_in_dc(dc, &req).await {
             Ok(tl::enums::upload::File::File(f)) => {
+                mark_dc_ready(t, dc);
                 let mut bytes = f.bytes;
                 // Shifrlangan fayl — shu qismning o'zi ochiladi.
                 if let Some(key) = key_of(t, &name) {
@@ -1271,6 +1336,9 @@ fn init(dir: &str, api_id: i32, api_hash: &str) -> Result<&'static Tg, String> {
             failed: Mutex::new(HashMap::new()),
             auth_dcs: tokio::sync::Mutex::new(HashSet::new()),
             inflight: Arc::new(Semaphore::new(MAX_INFLIGHT)),
+            dl: Mutex::new(Vec::new()),
+            dl_next: std::sync::atomic::AtomicUsize::new(0),
+            dl_dcs: Mutex::new(HashSet::new()),
             keys: Mutex::new(keys),
             lost: AtomicBool::new(false),
         };
@@ -2379,7 +2447,7 @@ async fn upload_to_channel(
 /// Bitta qism hajmi (Telegram: 1 MiB ni qoldiqsiz bo'ladi).
 const UP_PART: u64 = 512 * 1024;
 /// Parallel yuboriladigan qismlar.
-const UP_WORKERS: usize = 4;
+const UP_WORKERS: usize = 8;
 /// Bitta qism (yoki post) uchun urinishlar: ~2 daqiqa kutish.
 const UP_ATTEMPTS: u32 = 8;
 /// Bitta so'rov javobini kutish chegarasi.
@@ -2464,7 +2532,16 @@ async fn save_part(t: &'static Tg, file_id: i64, part: i32, parts: i32, big: boo
     let mut wait = Duration::from_secs(1);
     let mut last_err = String::new();
     for _ in 0..UP_ATTEMPTS {
-        let Some(client) = connect(t) else { return Err("Telegram'ga ulanib bo'lmadi".to_string()) };
+        let Some(main) = connect(t) else { return Err("Telegram'ga ulanib bo'lmadi".to_string()) };
+        // Qismlar ham bir nechta ulanishga taqsimlanadi (`DL_CONNS`).
+        let home = t.session.lock().ok().and_then(|s| s.as_ref().and_then(|s| s.home_dc_id().ok()));
+        let client = match home {
+            Some(dc) => {
+                mark_dc_ready(t, dc);
+                part_client(t, &main, dc)
+            }
+            None => main,
+        };
         let r = if big {
             let req = tl::functions::upload::SaveBigFilePart {
                 file_id,

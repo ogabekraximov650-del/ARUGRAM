@@ -9554,8 +9554,7 @@ async fn tg_channel_post(env: &Env, post: &Value) {
         return;
     }
     let res = turso_batch(env, &[
-        // Ochish kaliti izohning o'zida (`key:<hex>`) — ilova
-        // `/api/tg/admin/file` ni yubora olmasa ham fayl ishlaydi.
+        // Ochish kaliti izohning o'zida (`key:<hex>`).
         ("INSERT INTO tg_files (file_name, msg_id, file_key) VALUES (?, ?, ?)
           ON CONFLICT(file_name) DO UPDATE SET msg_id=excluded.msg_id,
              file_key=CASE WHEN excluded.file_key<>'' THEN excluded.file_key ELSE file_key END",
@@ -9773,37 +9772,17 @@ async fn tg_route(mut req: Request, env: &Env, path: &str, method: Method) -> Re
             // Ochish kaliti — faqat O'Z faylingizga va faqat bir marta
             // (bo'sh bo'lsa). Admin — istalganiga.
             let own = name.starts_with(&format!("avatar_{me}_")) || name.starts_with(&format!("chat_{me}_"));
-            if valid_file_key(&key)
-                && (own || is_admin(&u))
-                && row["file_key"].as_str().unwrap_or("").is_empty()
-            {
+            let have = row["file_key"].as_str().unwrap_or("");
+            if valid_file_key(&key) && (own || is_admin(&u)) && have.is_empty() {
                 turso_exec(env, "UPDATE tg_files SET file_key=? WHERE file_name=? AND file_key=''",
                     vec![TursoArg::text(&key), TursoArg::text(&name)]).await?;
             }
-            ok_nostore(json!({"ready": true}))
-        }
-
-        // ADMIN: ilova videoni kanalga yukladi — fayl nomini postga
-        // bog'laydi (bot kanal postini ko'rib ham shuni qiladi, bu
-        // esa kafolat: webhook kechiksa ham qism darhol ishlaydi).
-        (Method::Post, "/api/tg/admin/file") => {
-            if !is_admin(&u) {
-                return json_resp(&json!({"error": "forbidden"}), 403);
-            }
-            let body: Value = req.json().await.unwrap_or(json!({}));
-            let name = body["file"].as_str().unwrap_or("").trim().to_string();
-            let msg_id = body["msg_id"].as_i64().unwrap_or(0);
-            let key = body["key"].as_str().unwrap_or("").trim().to_ascii_lowercase();
-            let key = if valid_file_key(&key) { key } else { String::new() };
-            if !tg_safe_name(&name) || msg_id <= 0 {
-                return json_resp(&json!({"error": "bad_request"}), 400);
-            }
-            turso_batch(env, &[
-                ("INSERT INTO tg_files (file_name, msg_id, file_key) VALUES (?, ?, ?)
-                  ON CONFLICT(file_name) DO UPDATE SET msg_id=excluded.msg_id, file_key=excluded.file_key",
-                 vec![TursoArg::text(&name), TursoArg::int(msg_id), TursoArg::text(&key)]),
-            ]).await?;
-            ok_nostore(json!({"ok": true}))
+            // Shu nomdagi ESKI yozuv (fayl qayta yuklanmoqda): bot yangi
+            // nusxani kanalga ko'chirgach kalit ham almashadi — ungacha
+            // "tayyor emas" (aks holda ilova bot chatini erta tozalab,
+            // yangi fayl kanalga yetib bormasdi).
+            let ready = !valid_file_key(&key) || have.is_empty() || have == key;
+            ok_nostore(json!({"ready": ready}))
         }
 
         _ => json_resp(&json!({"error": "not_found"}), 404),

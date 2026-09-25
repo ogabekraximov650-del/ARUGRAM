@@ -3006,3 +3006,30 @@ internet qaytganda ilova o'z hisobi bilan chat tarixini tozalasin".
   kanalga ko'chirmaguncha chatdan o'chirilmaydi.
 - Takroriy nusxadan himoya: bitta fayl uchun bitta tayyorlash
   (`_preparing`).
+
+## Yuklash hammasi bot orqali, bir nechta ulanish, Telegram'dagidek halqa
+
+- **Hamma fayl bot chatiga yuklanadi.** Bu admin'ga ham tegishli. Kanalga
+  faylni bot ko'chiradi (`tg_user_media`), ilova esa `/api/tg/claim`
+  bilan kutadi. Ilgari admin fayli to'g'ridan-to'g'ri kanalga ketardi va
+  admin'ning Telegram hisobi kanalda bo'lmasa "Kanal topilmadi" xatosi
+  chiqardi.
+  - `/api/tg/admin/file` olib tashlandi.
+  - `claim` shu nomdagi eski yozuvda (qayta yuklash paytida) kalit
+    mos kelmaguncha "tayyor emas" deydi. Aks holda chat erta
+    tozalanib, yangi fayl kanalga yetib bormasdi.
+- **Tezlik.** `grammers` har bir DC ga bitta TCP ulanish ochadi —
+  hamma qismlar bitta ulanishdan o'tardi. Endi fayl qismlari asosiy
+  ulanish va yana 4 ta qo'shimcha ulanishga navbat bilan
+  taqsimlanadi (`DL_CONNS`, `part_client`).
+  - Hammasi bitta sessiya (bitta auth kalit) bilan ishlaydi.
+  - Qo'shimcha ulanishlar DC ga faqat asosiy ulanish u yerda
+    muvaffaqiyatli ishlagach ulanadi (`dl_dcs`). Aks holda har biri o'z
+    kalitini yasab, ruxsatsiz qolardi.
+  - `MAX_INFLIGHT` 24 ga, yuklashdagi `UP_WORKERS` 8 ga oshirildi.
+- **Nusxa tezroq.** Video ochishdan oldin chat tozalanishi
+  boshlanmaydi — faqat hozir ketayotgan tozalash tugashi kutiladi.
+- **Halqa** (`SpinRing`):
+  - yoy doim aylanib turadi va aylanish davomida uzayadi;
+  - foiz o'lchangan tezlik bilan bir tekis o'sadi, haqiqiy qiymatdan
+    o'zib ketmaydi.

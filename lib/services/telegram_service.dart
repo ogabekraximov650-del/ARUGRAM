@@ -491,11 +491,9 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
   // ilovaning o'zidan o'tkazilsin" hamda "fayllar HUJJAT emas, ODDIY
   // ko'rinishda yuborilsin".
   //
-  //   * ADMIN — to'g'ridan-to'g'ri yopiq kanalga (u kanalda admin),
-  //     so'ng `/api/tg/admin/file` nomni postga bog'laydi;
-  //   * BOSHQALAR — o'z bot chatiga; bot uni kanalga nusxalaydi
-  //     (worker'dagi `tg_user_media`), ilova esa `/api/tg/claim` bilan
-  //     tayyor bo'lishini kutadi.
+  //   * HAMMA (admin ham) — o'z bot chatiga; bot uni kanalga
+  //     nusxalaydi (worker'dagi `tg_user_media`), ilova esa
+  //     `/api/tg/claim` bilan tayyor bo'lishini kutadi.
   //
   // Ikkala yo'lda ham fayl baytlari worker'dan o'tmaydi; hajm
   // chegarasi Telegram'niki (2 GB, Premium'da 4 GB).
@@ -533,7 +531,6 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
     if (!_authorized) return 'Telegram hisobi ulanmagan';
     if (_channel == 0) await refreshConfig(force: true);
     if (_channel == 0) return 'Kanal sozlanmagan';
-    final admin = AuthService.instance.user?.isAdmin ?? false;
     final lib = _lib;
     if (lib == null) return 'Telegram ishga tushmagan';
 
@@ -550,8 +547,12 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
     final m = mime.toNativeUtf8();
     Map<String, dynamic> started;
     try {
-      // 0 — bot chatiga (kanalga admin bo'lmagan foydalanuvchi).
-      started = _json(_take(lib, start(p, n, m, admin ? _channel : 0)));
+      // HAMMA fayl (admin'niki ham) bot chatiga yuklanadi, kanalga
+      // esa bot ko'chiradi (`tg_user_media`). Foydalanuvchi talabi:
+      // "video bot chatiga yuborilsin, bot kanalga saqlasin" —
+      // admin'ning Telegram hisobi kanalda bo'lmasa ham ishlaydi
+      // (ilgari "Kanal topilmadi" xatosi chiqardi).
+      started = _json(_take(lib, start(p, n, m, 0)));
     } finally {
       malloc.free(p);
       malloc.free(n);
@@ -561,7 +562,6 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
     if (job <= 0) return (started['error'] as String?) ?? 'Yuklash boshlanmadi';
 
     // Yuklash Rust'da fon'da ketadi — holatni so'rab turamiz.
-    var msgId = 0;
     var key = '';
     while (true) {
       await Future<void>.delayed(const Duration(milliseconds: 400));
@@ -572,7 +572,6 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
       if (st['done'] == true) {
         final err = st['error'];
         if (err is String && err.isNotEmpty) return err;
-        msgId = (st['msg_id'] as num?)?.toInt() ?? 0;
         key = (st['key'] as String?) ?? '';
         break;
       }
@@ -581,29 +580,6 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
     if (key.isNotEmpty) _uploadedKeys[fileName] = key;
     final s = AuthService.instance.sessionToken;
     if (s == null) return 'Ilova hisobiga kirilmagan';
-
-    if (admin) {
-      if (msgId <= 0) return 'Kanal xabari raqami olinmadi';
-      for (var attempt = 0; attempt < 3; attempt++) {
-        try {
-          final r = await http
-              .post(
-                Uri.parse('$kApiBase/api/tg/admin/file'),
-                headers: {
-                  'Authorization': 'Bearer $s',
-                  'Content-Type': 'application/json',
-                },
-                body:
-                    jsonEncode({'file': fileName, 'msg_id': msgId, 'key': key}),
-              )
-              .timeout(const Duration(seconds: 20));
-          if (r.statusCode == 200) return null;
-        } catch (_) {}
-        await Future<void>.delayed(const Duration(seconds: 2));
-      }
-      // Post kanalda bor — bot uni baribir ro'yxatga oladi.
-      return null;
-    }
 
     // Bot chatidan kanalga ko'chirilishini kutamiz (odatda 1-2 s).
     //
@@ -695,7 +671,8 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
 
     final owner = Object();
     try {
-      await _clearIfPending();
+      final clearing = _clearing;
+      if (clearing != null) await clearing;
       final s = AuthService.instance.sessionToken;
       if (s == null) throw 'kirilmagan';
       final names = batch.keys.toList();
@@ -1026,9 +1003,12 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
     //
     // TALAB (foydalanuvchi): "bot chatidan izlash juda sekin — olib
     // tashla; video so'ralishi bilan copy message ishga tushsin".
-    // Avval kutilayotgan tozalash tugashi kutiladi — aks holda u
-    // yangi nusxani ham o'chirib yuborardi.
-    await _clearIfPending();
+    // Tozalash shu yerda BOSHLANMAYDI (u video ochilishini
+    // sekinlashtirardi) — faqat hozir ketayotgan bo'lsa tugashi
+    // kutiladi, aks holda yangi nusxani ham o'chirib yuborardi.
+    // Navbatdagi tozalash nusxa qo'yib yuborilgach (`unhold`) bo'ladi.
+    final clearing = _clearing;
+    if (clearing != null) await clearing;
     final s = AuthService.instance.sessionToken;
     if (s == null) return null;
     _delivering++;
