@@ -426,9 +426,17 @@ class TelegramService extends ChangeNotifier {
     }
 
     // Bot chatidan kanalga ko'chirilishini kutamiz (odatda 1-2 s).
-    try {
-      for (final wait in const [1, 1, 2, 2, 3, 4, 5]) {
-        await Future<void>.delayed(Duration(seconds: wait));
+    //
+    // Fayl allaqachon Telegram'da va izohida kalit bor — qolgan ishni
+    // (kanalga ko'chirish, bazaga yozish) bot o'zi qiladi. Shu sabab
+    // kutish tugasa yoki internet sekinlashsa ham fayl QAYTA
+    // YUKLANMAYDI: yuklash muvaffaqiyatli hisoblanadi. Faqat bot chati
+    // bot ko'chirib ulgurgunicha tozalanmaydi (aks holda nusxa
+    // o'chib ketardi) — u keyinroq tozalanadi.
+    var ready = false;
+    for (final wait in const [1, 1, 2, 2, 3, 4, 5, 8]) {
+      await Future<void>.delayed(Duration(seconds: wait));
+      try {
         final r = await http.get(
           // Kalit ham shu yerda yoziladi (faqat o'z faylingizga).
           Uri.parse('$kApiBase/api/tg/claim'
@@ -438,17 +446,24 @@ class TelegramService extends ChangeNotifier {
         ).timeout(const Duration(seconds: 15));
         if (r.statusCode == 200 &&
             (jsonDecode(r.body) as Map<String, dynamic>)['ready'] == true) {
-          return null;
+          ready = true;
+          break;
         }
+      } catch (_) {
+        // Tarmoq sekin — keyingi urinish.
       }
-      return 'Fayl kanalga joylanmadi — qayta urinib ko\'ring';
-    } catch (e) {
-      return 'Tarmoq xatosi: $e';
-    } finally {
+    }
+    if (ready) {
       // Bot chatidagi yuborilgan nusxa endi keraksiz.
       _cleanPending = true;
       if (_holders.isEmpty) unawaited(_cleanIfPending());
+    } else {
+      Timer(const Duration(minutes: 3), () {
+        _cleanPending = true;
+        if (_holders.isEmpty) unawaited(_cleanIfPending());
+      });
     }
+    return null;
   }
 
   /// Eski nom (qism qo'shish ekrani shu bilan chaqiradi).

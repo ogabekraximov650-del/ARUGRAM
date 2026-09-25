@@ -9446,6 +9446,16 @@ fn tg_has_media(msg: &Value) -> bool {
         .any(|k| !msg[*k].is_null())
 }
 
+/// Post izohidagi ochish kaliti: `key:<32 hex>` qatori (ilova uni
+/// yuklashda qo'yadi — `rust/src/telegram.rs`). Yo'q bo'lsa bo'sh.
+fn caption_key(msg: &Value) -> String {
+    msg["caption"].as_str().unwrap_or("").lines()
+        .filter_map(|l| l.trim().strip_prefix("key:"))
+        .map(|k| k.trim().to_ascii_lowercase())
+        .find(|k| valid_file_key(k))
+        .unwrap_or_default()
+}
+
 async fn tg_user_media(env: &Env, msg: &Value) {
     let from = msg["from"]["id"].as_i64().unwrap_or(0);
     let chat = msg["chat"]["id"].as_i64().unwrap_or(0);
@@ -9479,13 +9489,16 @@ async fn tg_user_media(env: &Env, msg: &Value) {
         return;
     }
     let sql = if admin {
-        "INSERT INTO tg_files (file_name, msg_id) VALUES (?, ?)
-         ON CONFLICT(file_name) DO UPDATE SET msg_id=excluded.msg_id"
+        "INSERT INTO tg_files (file_name, msg_id, file_key) VALUES (?, ?, ?)
+         ON CONFLICT(file_name) DO UPDATE SET msg_id=excluded.msg_id,
+            file_key=CASE WHEN excluded.file_key<>'' THEN excluded.file_key ELSE file_key END"
     } else {
-        "INSERT INTO tg_files (file_name, msg_id) VALUES (?, ?)
+        "INSERT INTO tg_files (file_name, msg_id, file_key) VALUES (?, ?, ?)
          ON CONFLICT(file_name) DO NOTHING"
     };
-    let _ = turso_exec(env, sql, vec![TursoArg::text(&name), TursoArg::int(ch_msg)]).await;
+    let _ = turso_exec(env, sql, vec![
+        TursoArg::text(&name), TursoArg::int(ch_msg), TursoArg::text(&caption_key(msg)),
+    ]).await;
 }
 
 /// Qism (yoki uning bitta sifati) o'chirildi — kanal posti ham,
@@ -9535,9 +9548,12 @@ async fn tg_channel_post(env: &Env, post: &Value) {
         return;
     }
     let res = turso_batch(env, &[
-        ("INSERT INTO tg_files (file_name, msg_id) VALUES (?, ?)
-          ON CONFLICT(file_name) DO UPDATE SET msg_id=excluded.msg_id",
-         vec![TursoArg::text(name), TursoArg::int(msg_id)]),
+        // Ochish kaliti izohning o'zida (`key:<hex>`) — ilova
+        // `/api/tg/admin/file` ni yubora olmasa ham fayl ishlaydi.
+        ("INSERT INTO tg_files (file_name, msg_id, file_key) VALUES (?, ?, ?)
+          ON CONFLICT(file_name) DO UPDATE SET msg_id=excluded.msg_id,
+             file_key=CASE WHEN excluded.file_key<>'' THEN excluded.file_key ELSE file_key END",
+         vec![TursoArg::text(name), TursoArg::int(msg_id), TursoArg::text(&caption_key(post))]),
         // Kanal xabari almashdi — eski nusxalar endi boshqa faylni
         // ko'rsatishi mumkin, qayta yuboriladi.
     ]).await;
@@ -9700,6 +9716,10 @@ async fn tg_route(mut req: Request, env: &Env, path: &str, method: Method) -> Re
                 "chat_id": tg_user,
                 "from_chat_id": channel,
                 "message_ids": ids,
+                // Izohda ochish kaliti turadi — foydalanuvchiga nusxa
+                // IZOHSIZ boradi (ilova faylni nomi bo'yicha topadi,
+                // kalitni `keys` dan oladi).
+                "remove_caption": true,
                 "protect_content": true,
                 "disable_notification": true,
             })).await;

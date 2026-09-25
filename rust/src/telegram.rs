@@ -577,7 +577,21 @@ pub fn is_origin_url(url: &str) -> bool {
     }
 }
 
-fn note_failure(key: &str) {
+/// Mahalliy Telegram manzilidan fayl nomi (`.../tg/<belgi>/<nom>`).
+/// Yuklab olish shu nom bilan baytlarni TO'G'RIDAN-TO'G'RI oladi
+/// (`fetch_range`) — mahalliy HTTP server orqali emas.
+pub(crate) fn origin_name(url: &str) -> Option<String> {
+    let t = tg()?;
+    let rest = url.strip_prefix(&format!("http://127.0.0.1:{}/tg/", t.port))?;
+    let name = rest.split('?').next()?.rsplit('/').next()?;
+    if name.is_empty() {
+        None
+    } else {
+        Some(name.to_string())
+    }
+}
+
+pub(crate) fn note_failure(key: &str) {
     if let Some(t) = tg() {
         if let Ok(mut f) = t.failed.lock() {
             f.insert(key.to_string(), Instant::now());
@@ -1576,55 +1590,6 @@ fn uploads() -> &'static Mutex<HashMap<u64, UploadJob>> {
     UPLOADS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// O'qilgan baytlarni sanaydigan o'quvchi (yuklash foizi uchun).
-struct Counting<R> {
-    inner: R,
-    n: Arc<std::sync::atomic::AtomicU64>,
-}
-
-impl<R: tokio::io::AsyncRead + Unpin> tokio::io::AsyncRead for Counting<R> {
-    fn poll_read(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        buf: &mut tokio::io::ReadBuf<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        let before = buf.filled().len();
-        let r = std::pin::Pin::new(&mut self.inner).poll_read(cx, buf);
-        let got = buf.filled().len() - before;
-        if got > 0 {
-            self.n.fetch_add(got as u64, Ordering::Relaxed);
-        }
-        r
-    }
-}
-
-/// O'qilgan baytlarni joyida AES-128-CTR bilan shifrlaydi.
-/// Telegram faylni KETMA-KET o'qiydi (`upload_stream`), ya'ni joriy
-/// joy (`pos`) doim to'g'ri.
-struct CtrReader<R> {
-    inner: R,
-    key: [u8; 16],
-    pos: u64,
-}
-
-impl<R: tokio::io::AsyncRead + Unpin> tokio::io::AsyncRead for CtrReader<R> {
-    fn poll_read(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        buf: &mut tokio::io::ReadBuf<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        let before = buf.filled().len();
-        let r = std::pin::Pin::new(&mut self.inner).poll_read(cx, buf);
-        let got = buf.filled().len() - before;
-        if got > 0 {
-            let (key, pos) = (self.key, self.pos);
-            ctr_apply(&key, pos, &mut buf.filled_mut()[before..]);
-            self.pos += got as u64;
-        }
-        r
-    }
-}
-
 /// Kanalni adminning suhbatlari orasidan topadi (yopiq kanalga
 /// murojaat uchun `access_hash` kerak, u faqat shu yo'l bilan
 /// olinadi).
@@ -1771,45 +1736,227 @@ async fn upload_to_channel(
         let (id, hash) = bot_peer(t, &client).await?;
         tl::enums::InputPeer::User(tl::types::InputPeerUser { user_id: id, access_hash: hash })
     };
-    let file = tokio::fs::File::open(&path).await.map_err(|e| format!("fayl ochilmadi: {e}"))?;
-    let counting = Counting { inner: file, n: Arc::clone(&sent) };
-    let mut reader = CtrReader { inner: counting, key, pos: 0 };
-    let uploaded = client
-        .upload_stream(&mut reader, total as usize, name.clone())
-        .await
-        .map_err(|e| format!("yuklashda xato: {e}"))?;
+    let uploaded = upload_parts(t, &path, &name, total, key, &sent).await?;
+    // Izoh: 1-qator — fayl nomi (bot postni shu bo'yicha taniydi),
+    // 2-qator — ochish kaliti. Bot kanal postini ko'rib kalitni
+    // O'ZI yozadi (`tg_channel_post` / `tg_user_media`), ya'ni
+    // ilova keyingi so'rovni yubora olmasa ham fayl ishlaydi.
+    // Foydalanuvchilarga izohsiz nusxa boradi (`remove_caption`).
+    let caption = format!("{name}\nkey:{}", hex::encode(key));
     let mut rnd = [0u8; 8];
     getrandom::getrandom(&mut rnd).map_err(|e| e.to_string())?;
     let random_id = i64::from_le_bytes(rnd);
+    let req = tl::functions::messages::SendMedia {
+        silent: true,
+        background: false,
+        clear_draft: false,
+        noforwards: false,
+        update_stickersets_order: false,
+        invert_media: false,
+        allow_paid_floodskip: false,
+        peer: peer.clone(),
+        reply_to: None,
+        media: media_for(uploaded, &path, &name, &mime, true),
+        message: caption,
+        random_id,
+        reply_markup: None,
+        entities: None,
+        schedule_date: None,
+        schedule_repeat_period: None,
+        send_as: None,
+        quick_reply_shortcut: None,
+        effect: None,
+        allow_paid_stars: None,
+        suggested_post: None,
+    };
+    // ── POST YUBORISH: QAYTA URINISH BILAN ─────────────────────
+    //
+    // Fayl allaqachon Telegram serverida — bu bosqich yiqilsa
+    // butun faylni qaytadan yuklash kerak EMAS. Xuddi o'sha
+    // `random_id` bilan qayta yuboriladi: birinchi urinish aslida
+    // o'tib, faqat javobi yo'qolgan bo'lsa Telegram
+    // RANDOM_ID_DUPLICATE deydi va post chatdan nomi bo'yicha
+    // topiladi — ikki marta joylanmaydi.
+    let mut wait = Duration::from_secs(2);
+    let mut last_err = String::new();
+    for _ in 0..UP_ATTEMPTS {
+        let Some(client) = connect(t) else { return Err("Telegram'ga ulanib bo'lmadi".to_string()) };
+        match tokio::time::timeout(UP_TIMEOUT, client.invoke(&req)).await {
+            Ok(Ok(res)) => {
+                return msg_id_of(&res, random_id).ok_or_else(|| "xabar raqami olinmadi".to_string());
+            }
+            Ok(Err(e)) if e.is("RANDOM_ID_DUPLICATE") => {
+                return find_posted(&client, &peer, &name).await;
+            }
+            Ok(Err(e)) if is_transient(&e) => last_err = e.to_string(),
+            Ok(Err(e)) => return Err(format!("kanalga yuborilmadi: {e}")),
+            Err(_) => {
+                last_err = "vaqt tugadi".to_string();
+                drop_stale_connection(t);
+            }
+        }
+        tokio::time::sleep(wait).await;
+        wait = (wait * 2).min(Duration::from_secs(30));
+    }
+    Err(format!("kanalga yuborilmadi: {last_err}"))
+}
+
+/// Bitta qism hajmi (Telegram: 1 MiB ni qoldiqsiz bo'ladi).
+const UP_PART: u64 = 512 * 1024;
+/// Parallel yuboriladigan qismlar.
+const UP_WORKERS: usize = 4;
+/// Bitta qism (yoki post) uchun urinishlar: ~2 daqiqa kutish.
+const UP_ATTEMPTS: u32 = 8;
+/// Bitta so'rov javobini kutish chegarasi.
+const UP_TIMEOUT: Duration = Duration::from_secs(60);
+/// Telegram qoidasi: shundan katta fayl "katta fayl" usulida.
+const UP_BIG: u64 = 10 * 1024 * 1024;
+
+/// ── FAYLNI QISMLAB YUKLASH (har qism — qayta urinish bilan) ───
+///
+/// TOPILGAN MUAMMO (foydalanuvchi: "video to'liq yuklab bo'lingach
+/// internet sekinlashsa, yuklanmadi deb qayta yuklatyapti"):
+///   * foiz fayldan O'QILGAN baytlar bo'yicha sanalardi — ekranda
+///     100% turganda oxirgi qismlar hali havoda bo'lardi;
+///   * `upload_stream` bitta qism xatosida BUTUN yuklashni bekor
+///     qilardi va hammasi boshidan ketardi.
+///
+/// Endi har bir qism o'zi alohida qayta uriniladi (tarmoq xatosi,
+/// FLOOD_WAIT, javob kelmasa), foiz esa Telegram QABUL QILGAN
+/// baytlar bo'yicha sanaladi. Baytlar yo'lda AES-128-CTR bilan
+/// shifrlanadi.
+async fn upload_parts(
+    t: &'static Tg,
+    path: &str,
+    name: &str,
+    total: u64,
+    key: [u8; 16],
+    sent: &Arc<std::sync::atomic::AtomicU64>,
+) -> Result<tl::enums::InputFile, String> {
+    use std::sync::atomic::AtomicU32;
+    let parts = total.div_ceil(UP_PART) as i32;
+    let big = total > UP_BIG;
+    let mut rnd = [0u8; 8];
+    getrandom::getrandom(&mut rnd).map_err(|e| e.to_string())?;
+    let file_id = i64::from_le_bytes(rnd);
+    let next = Arc::new(AtomicU32::new(0));
+    let failed = Arc::new(AtomicBool::new(false));
+    let mut jobs = Vec::new();
+    for _ in 0..UP_WORKERS.min(parts.max(1) as usize) {
+        let (next, failed, sent) = (Arc::clone(&next), Arc::clone(&failed), Arc::clone(sent));
+        let path = path.to_string();
+        jobs.push(t.rt.spawn(async move {
+            let mut f = tokio::fs::File::open(&path).await.map_err(|e| format!("fayl ochilmadi: {e}"))?;
+            loop {
+                if failed.load(Ordering::SeqCst) {
+                    return Ok(());
+                }
+                let part = next.fetch_add(1, Ordering::SeqCst) as i32;
+                if part >= parts {
+                    return Ok(());
+                }
+                let off = part as u64 * UP_PART;
+                let len = (total - off).min(UP_PART) as usize;
+                let mut buf = vec![0u8; len];
+                use tokio::io::AsyncSeekExt;
+                f.seek(std::io::SeekFrom::Start(off)).await.map_err(|e| e.to_string())?;
+                f.read_exact(&mut buf).await.map_err(|e| format!("fayl o'qilmadi: {e}"))?;
+                ctr_apply(&key, off, &mut buf);
+                if let Err(e) = save_part(t, file_id, part, parts, big, buf).await {
+                    failed.store(true, Ordering::SeqCst);
+                    return Err(e);
+                }
+                sent.fetch_add(len as u64, Ordering::Relaxed);
+            }
+        }));
+    }
+    for j in jobs {
+        match j.await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => return Err(format!("yuklashda xato: {e}")),
+            Err(e) => return Err(format!("yuklashda xato: {e}")),
+        }
+    }
+    Ok(if big {
+        tl::types::InputFileBig { id: file_id, parts, name: name.to_string() }.into()
+    } else {
+        tl::types::InputFile { id: file_id, parts, name: name.to_string(), md5_checksum: String::new() }.into()
+    })
+}
+
+/// Bitta qismni yuboradi; vaqtinchalik xatoda kutib qayta uradi.
+async fn save_part(t: &'static Tg, file_id: i64, part: i32, parts: i32, big: bool, bytes: Vec<u8>) -> Result<(), String> {
+    let mut wait = Duration::from_secs(1);
+    let mut last_err = String::new();
+    for _ in 0..UP_ATTEMPTS {
+        let Some(client) = connect(t) else { return Err("Telegram'ga ulanib bo'lmadi".to_string()) };
+        let r = if big {
+            let req = tl::functions::upload::SaveBigFilePart {
+                file_id,
+                file_part: part,
+                file_total_parts: parts,
+                bytes: bytes.clone(),
+            };
+            tokio::time::timeout(UP_TIMEOUT, client.invoke(&req)).await
+        } else {
+            let req = tl::functions::upload::SaveFilePart { file_id, file_part: part, bytes: bytes.clone() };
+            tokio::time::timeout(UP_TIMEOUT, client.invoke(&req)).await
+        };
+        match r {
+            Ok(Ok(true)) => return Ok(()),
+            Ok(Ok(false)) => last_err = "server qismni saqlamadi".to_string(),
+            Ok(Err(e)) if is_transient(&e) => {
+                // FLOOD_WAIT_N — aynan N soniya kutiladi.
+                if let InvocationError::Rpc(r) = &e {
+                    if r.name.starts_with("FLOOD_WAIT") {
+                        if let Some(v) = r.value {
+                            wait = Duration::from_secs(v as u64 + 1);
+                        }
+                    }
+                }
+                last_err = e.to_string();
+            }
+            Ok(Err(e)) => return Err(e.to_string()),
+            Err(_) => {
+                last_err = "vaqt tugadi".to_string();
+                drop_stale_connection(t);
+            }
+        }
+        tokio::time::sleep(wait).await;
+        wait = (wait * 2).min(Duration::from_secs(30));
+    }
+    Err(format!("qism #{part}: {last_err}"))
+}
+
+/// Post allaqachon yuborilgan (RANDOM_ID_DUPLICATE) — raqamini chat
+/// tarixidan fayl nomi bo'yicha topadi.
+async fn find_posted(client: &Client, peer: &tl::enums::InputPeer, name: &str) -> Result<i32, String> {
     let res = client
-        .invoke(&tl::functions::messages::SendMedia {
-            silent: true,
-            background: false,
-            clear_draft: false,
-            noforwards: false,
-            update_stickersets_order: false,
-            invert_media: false,
-            allow_paid_floodskip: false,
-            peer,
-            reply_to: None,
-            // Oddiy video sifatida (hujjat emas — `media_for` izohi).
-            media: media_for(uploaded.raw, &path, &name, &mime, true),
-            // Izoh = fayl nomi: bot shu bo'yicha postni taniydi.
-            message: name,
-            random_id,
-            reply_markup: None,
-            entities: None,
-            schedule_date: None,
-            schedule_repeat_period: None,
-            send_as: None,
-            quick_reply_shortcut: None,
-            effect: None,
-            allow_paid_stars: None,
-            suggested_post: None,
+        .invoke(&tl::functions::messages::GetHistory {
+            peer: peer.clone(),
+            offset_id: 0,
+            offset_date: 0,
+            add_offset: 0,
+            limit: 30,
+            max_id: 0,
+            min_id: 0,
+            hash: 0,
         })
         .await
-        .map_err(|e| format!("kanalga yuborilmadi: {e}"))?;
-    msg_id_of(&res, random_id).ok_or_else(|| "xabar raqami olinmadi".to_string())
+        .map_err(|e| e.to_string())?;
+    let messages = match res {
+        tl::enums::messages::Messages::Messages(m) => m.messages,
+        tl::enums::messages::Messages::Slice(m) => m.messages,
+        tl::enums::messages::Messages::ChannelMessages(m) => m.messages,
+        tl::enums::messages::Messages::NotModified(_) => Vec::new(),
+    };
+    messages
+        .iter()
+        .find_map(|m| match m {
+            tl::enums::Message::Message(m) if doc_matches(m, name).is_some() => Some(m.id),
+            _ => None,
+        })
+        .ok_or_else(|| "post topilmadi".to_string())
 }
 
 /// `SendMedia` javobidan yangi xabarning raqamini oladi.
@@ -2099,20 +2246,6 @@ mod tests {
     }
 
     #[test]
-    fn yuklash_foizi_sanaladi() {
-        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-        rt.block_on(async {
-            let data = vec![7u8; 300_000];
-            let n = Arc::new(std::sync::atomic::AtomicU64::new(0));
-            let mut r = Counting { inner: &data[..], n: Arc::clone(&n) };
-            let mut out = Vec::new();
-            r.read_to_end(&mut out).await.unwrap();
-            assert_eq!(out.len(), 300_000);
-            assert_eq!(n.load(Ordering::Relaxed), 300_000);
-        });
-    }
-
-    #[test]
     fn ctr_istalgan_joydan_ochiladi() {
         let key = [7u8; 16];
         let plain: Vec<u8> = (0..300_000u32).map(|i| (i * 13 % 251) as u8).collect();
@@ -2132,20 +2265,6 @@ mod tests {
             ctr_apply(&key, a as u64, &mut part);
             assert_eq!(part, plain[a..b]);
         }
-    }
-
-    #[test]
-    fn ctr_oqimi_yuklashda_shifrlaydi() {
-        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-        rt.block_on(async {
-            let data: Vec<u8> = (0..70_000u32).map(|i| (i % 256) as u8).collect();
-            let key = [3u8; 16];
-            let mut r = CtrReader { inner: &data[..], key, pos: 0 };
-            let mut out = Vec::new();
-            r.read_to_end(&mut out).await.unwrap();
-            ctr_apply(&key, 0, &mut out);
-            assert_eq!(out, data);
-        });
     }
 
     #[test]

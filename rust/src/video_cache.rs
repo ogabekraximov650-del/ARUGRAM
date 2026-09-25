@@ -2696,6 +2696,16 @@ fn run_download(key: &str, url: &str) -> Result<DlOutcome, String> {
         }
     }
 
+    // Telegram'dagi fayl hajmi to'g'ridan-to'g'ri (mahalliy HTTP
+    // so'rovisiz) olinadi va meta.json ga yoziladi.
+    if via_tg && meta_total_from_disk(&dir) == 0 {
+        if let Ok((size, mime)) = crate::telegram::doc_size(key) {
+            if size > 0 {
+                player_set_total(&dir, size, &mime);
+            }
+        }
+    }
+
     // Hajmni aniqlash (meta.json bo'lsa — tarmoqqa chiqilmaydi).
     let meta = ensure_meta(shared, &dir, url)?;
     let total = meta.total_size;
@@ -4621,6 +4631,12 @@ fn fetch_span(
     }
     let last = last.min(chunk_count - 1);
 
+    if let Some(name) = crate::telegram::origin_name(url) {
+        return fetch_span_tg(
+            shared, key, dir, &name, first, last, total, stop, cur_bytes, on_start, on_chunk,
+        );
+    }
+
     // ── QOLDIQDAN DAVOM ETISH ──────────────────────────────────
     // Oldingi urinishda birinchi bo'lakning bir qismi olinib,
     // tarmoq uzilgan bo'lishi mumkin. O'sha qism diskda saqlangan:
@@ -4863,6 +4879,107 @@ fn fetch_span(
 
     if got_net == 0 {
         return Err(read_err.unwrap_or_else(|| format!("bo'lak #{first} uchun bo'sh javob")));
+    }
+    Ok(())
+}
+
+/// ── TELEGRAM'DAN TO'G'RIDAN-TO'G'RI (mahalliy HTTP'siz) ─────────
+///
+/// TOPILGAN MUAMMO (foydalanuvchi: "ilova 6-8 MB/s ko'rsatyapti,
+/// telefonning tezlik o'lchagichi esa 16 MB/s"): ilgari yuklash
+/// baytlarni ilovaning O'Z mahalliy Telegram serveridan
+/// (`127.0.0.1/tg/...`) HTTP bilan olardi. Ya'ni har bir bayt
+/// telefon ichida IKKI marta aylanardi — Telegram'dan yadroga, keyin
+/// yadrodan mahalliy ulanish orqali yana yadroga. Telefonning
+/// o'lchagichi ikkinchisini ham sanardi, ustiga uzilgan har bir
+/// HTTP oqim oldindan so'ralgan (`PIPELINE`) qismlarni behuda
+/// tashlab ketardi.
+///
+/// Endi bo'laklar `telegram::fetch_range` bilan to'g'ridan-to'g'ri
+/// olinadi (pleyer ham shunday o'qiydi) va darhol shifrlanib diskka
+/// yoziladi. Ish taqsimoti, pauza va "egizak" to'xtatish — xuddi
+/// HTTP yo'lidagidek, bo'lak chegarasida tekshiriladi.
+#[allow(clippy::too_many_arguments)]
+fn fetch_span_tg(
+    shared: &Shared,
+    key: &str,
+    dir: &PathBuf,
+    name: &str,
+    first: u64,
+    last: u64,
+    total: u64,
+    stop: &AtomicBool,
+    cur_bytes: &AtomicU64,
+    on_start: &mut dyn FnMut(),
+    on_chunk: &mut dyn FnMut(u64) -> bool,
+) -> Result<(), String> {
+    let Some(_permit) = DlPermit::acquire(key) else {
+        return Err("pauza".to_string());
+    };
+    on_start();
+    let tm = dl_timing(key);
+    let mut got_net: u64 = 0;
+    let mut err: Option<String> = None;
+    for cur in first..=last {
+        if stop.load(Ordering::SeqCst) {
+            err = Some("egizak oqim tugatdi".to_string());
+            break;
+        }
+        if !download_active(key) {
+            err = Some("pauza".to_string());
+            break;
+        }
+        cur_bytes.store(0, Ordering::Relaxed);
+        let len = chunk_plain_len(cur, total);
+        let saved = if chunk_cached(dir, cur, total) {
+            true
+        } else {
+            let t_rd = Instant::now();
+            let bytes = match crate::telegram::fetch_range(name, cur * CHUNK_SIZE, len) {
+                Ok(b) if b.len() as u64 == len => b,
+                Ok(b) => {
+                    err = Some(format!("qisqa javob: {} / {len}", b.len()));
+                    break;
+                }
+                Err(e) => {
+                    // Haqiqiy xato (fayl yo'q va h.k.) — Telegram shu
+                    // fayl uchun bir muddat chetga suriladi.
+                    if !crate::telegram::is_net_err(&e) {
+                        crate::telegram::note_failure(name);
+                    }
+                    err = Some(e);
+                    break;
+                }
+            };
+            tm.read_us
+                .fetch_add(t_rd.elapsed().as_micros() as u64, Ordering::Relaxed);
+            got_net += len;
+            tm.bytes.fetch_add(len, Ordering::Relaxed);
+            stat_note_net(key, len);
+            cur_bytes.store(len, Ordering::Relaxed);
+            let t_wr = Instant::now();
+            let ok = write_full_chunk(dir, key, cur, &bytes);
+            tm.write_us
+                .fetch_add(t_wr.elapsed().as_micros() as u64, Ordering::Relaxed);
+            ok
+        };
+        if saved && !on_chunk(cur) {
+            break;
+        }
+    }
+
+    let total_net = NET_BYTES.fetch_add(got_net, Ordering::Relaxed) + got_net;
+    if let Ok(mut m) = shared.net_by_file.lock() {
+        *m.entry(key.to_string()).or_insert(0) += got_net;
+    }
+    log(format!(
+        "TELEGRAM >>> fayl='{key}' bo'laklar {first}..={last} {got_net} bayt | jami: {:.2} MB",
+        total_net as f64 / (1024.0 * 1024.0)
+    ));
+    if got_net == 0 {
+        if let Some(e) = err {
+            return Err(e);
+        }
     }
     Ok(())
 }

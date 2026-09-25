@@ -154,6 +154,23 @@ Telegram'dan (`VoicePlayer`); `chat_` fayllari faqat suhbat
 ishtirokchilariga (`/api/tg/deliver`), xabarga faqat o'z faylini
 biriktirish mumkin (`chat_send`).
 
+**Yuklab olish Telegram'dan TO'G'RIDAN-TO'G'RI (2026-09-25).**
+`fetch_span_tg` bo'laklarni `telegram::fetch_range` bilan oladi —
+mahalliy `127.0.0.1/tg` HTTP orqali EMAS. Sabab: har bayt telefon
+ichida ikki marta aylanardi va telefon tezlik o'lchagichi ilovadagi
+raqamdan ~2 barobar ko'p ko'rsatardi; uzilgan HTTP oqimlar oldindan
+so'ralgan qismlarni ham behuda tashlardi.
+
+**Yuklash (upload) qismlab, qayta urinish bilan.** `upload_parts` —
+512 KiB lik qismlar, 4 ta parallel, har qism 8 martagacha qayta
+uriniladi (tarmoq xatosi, FLOOD_WAIT, 60 s javobsiz). Foiz Telegram
+QABUL QILGAN baytlar bo'yicha. Post (`SendMedia`) ham xuddi o'sha
+`random_id` bilan qayta yuboriladi (RANDOM_ID_DUPLICATE — post
+chatdan topiladi). Izohda `key:<hex>` qatori bor — bot postni ko'rib
+kalitni o'zi yozadi, ya'ni fayl yuklangach qolgan ishni bot va worker
+qiladi; ilova keyingi so'rovni yubora olmasa ham fayl qayta
+yuklanmaydi. Foydalanuvchilarga nusxa IZOHSIZ (`remove_caption`).
+
 **Baza tozalash:** `ci/WIPE_DB_ONCE` + `ci/wipe_db.py` —
 `deploy-worker.yml` yangi worker'dan KEYIN bazani tozalaydi va
 worker'ni qayta deploy qiladi. Belgi bazaga yoziladi
