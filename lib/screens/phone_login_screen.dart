@@ -31,6 +31,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
 import '../services/auth_service.dart';
 import '../services/telegram_service.dart';
@@ -38,7 +39,7 @@ import '../theme/app_background.dart';
 import '../widgets/glass.dart';
 import '../widgets/telegram_logo.dart';
 
-enum _Step { phone, code, password, finishing }
+enum _Step { phone, code, password, qr, finishing }
 
 class PhoneLoginScreen extends StatefulWidget {
   final bool connectOnly;
@@ -153,6 +154,71 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
         _ => 'Kodni qayta yuborish',
       };
 
+  // ── QR ORQALI KIRISH ────────────────────────────────────────
+  //
+  // Kod kelmasa ham kirish mumkin bo'lsin (Cherrygram kabi): QR
+  // boshqa qurilmadagi Telegram'da Sozlamalar → Qurilmalar →
+  // "Qurilmani ulash" bilan skanerlanadi. Tasdiqlanganini yadro
+  // sezadi (`updateLoginToken`) — shunda token qayta so'raladi va
+  // kirish yakunlanadi. Token muddati tugasa QR yangilanadi.
+  String _qrUrl = '';
+  DateTime _qrUntil = DateTime.fromMillisecondsSinceEpoch(0);
+  Timer? _qrTimer;
+  bool _qrBusy = false;
+
+  void _startQr() {
+    _go(_Step.qr);
+    _qrUrl = '';
+    unawaited(_qrRefresh());
+    _qrTimer?.cancel();
+    _qrTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted || _step != _Step.qr) return;
+      if (_tg.qrAccepted() || DateTime.now().isAfter(_qrUntil)) {
+        unawaited(_qrRefresh());
+      }
+    });
+  }
+
+  void _stopQr() {
+    _qrTimer?.cancel();
+    _qrTimer = null;
+  }
+
+  Future<void> _qrRefresh() async {
+    if (_qrBusy) return;
+    _qrBusy = true;
+    try {
+      final j = await _tg.qrToken();
+      if (!mounted || _step != _Step.qr) return;
+      if (j['ok'] == true) {
+        _stopQr();
+        await _finish();
+        return;
+      }
+      if (j['password'] == true) {
+        _stopQr();
+        _hint = '${j['hint'] ?? ''}';
+        _go(_Step.password);
+        return;
+      }
+      final err = j['error'];
+      if (err is String && err.isNotEmpty) {
+        // Bir oz kutib qayta uriniladi.
+        _qrUntil = DateTime.now().add(const Duration(seconds: 5));
+        setState(() => _error = err);
+        return;
+      }
+      final left = (j['expires'] as num?)?.toInt() ?? 30;
+      setState(() {
+        _error = null;
+        _qrUrl = '${j['url'] ?? ''}';
+        _qrUntil = DateTime.now().add(Duration(seconds: left));
+      });
+    } finally {
+      _qrBusy = false;
+    }
+  }
+
   Future<void> _resend() async {
     if (_busy || _resendLeft > 0) return;
     setState(() {
@@ -222,6 +288,7 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
 
   @override
   void dispose() {
+    _qrTimer?.cancel();
     _resendTimer?.cancel();
     _phone.dispose();
     _code.dispose();
@@ -252,6 +319,8 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
   Future<void> _submit() async {
     if (_busy) return;
     switch (_step) {
+      case _Step.qr:
+        return;
       case _Step.phone:
         if (_phone.text.length < 8) {
           _fail('Raqamni to\'liq kiriting');
@@ -363,7 +432,11 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
                   : IconButton(
                       icon: const Icon(Icons.arrow_back_rounded),
                       onPressed: () {
-                        if (_step == _Step.code || _step == _Step.password) {
+                        if (_step == _Step.qr) {
+                          _stopQr();
+                          _go(_Step.phone);
+                        } else if (_step == _Step.code ||
+                            _step == _Step.password) {
                           _backToPhone();
                         } else {
                           Navigator.of(context).maybePop();
@@ -371,7 +444,8 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
                       },
                     ),
         ),
-        floatingActionButton: _step == _Step.finishing && _error == null
+        floatingActionButton: _step == _Step.qr ||
+                (_step == _Step.finishing && _error == null)
             ? null
             : FloatingActionButton(
                 onPressed: _busy || !_available ? null : _submit,
@@ -530,6 +604,51 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
               style: fieldStyle,
               onSubmitted: (_) => _submit(),
               decoration: _decoration('Telefon raqami'),
+            ),
+            const SizedBox(height: 18),
+            TextButton.icon(
+              onPressed: _busy || !_available ? null : _startQr,
+              icon: const Icon(Icons.qr_code_2_rounded,
+                  color: AppColors.telegramLight),
+              label: const Text(
+                'QR kod orqali kirish',
+                style: TextStyle(color: AppColors.telegramLight),
+              ),
+            ),
+          ],
+        );
+      case _Step.qr:
+        return Column(
+          children: [
+            _title(
+                'QR orqali kirish',
+                'Boshqa qurilmadagi Telegram\'ni oching: Sozlamalar → '
+                    'Qurilmalar → "Qurilmani ulash" va shu QR\'ni skanerlang. '
+                    'Kod kerak emas.'),
+            const SizedBox(height: 8),
+            Center(
+              child: Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: SizedBox(
+                  width: 220,
+                  height: 220,
+                  child: _qrUrl.isEmpty
+                      ? const Center(
+                          child: CircularProgressIndicator(
+                              color: AppColors.telegram),
+                        )
+                      : QrImageView(
+                          data: _qrUrl,
+                          size: 220,
+                          backgroundColor: Colors.white,
+                          padding: EdgeInsets.zero,
+                        ),
+                ),
+              ),
             ),
           ],
         );

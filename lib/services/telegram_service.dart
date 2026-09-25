@@ -37,13 +37,14 @@ import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
 import 'dart:isolate';
-import 'dart:typed_data';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:ffi/ffi.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:http/http.dart' as http;
 
+import 'app_build.dart';
 import 'auth_service.dart';
 import 'rust_bridge.dart';
 
@@ -245,6 +246,7 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
     try {
       _lib = _openLib();
       _started = true;
+      await _setDevice();
       _init(dir, 0, '');
     } catch (e) {
       debugPrint('Telegram: yadro topilmadi: $e');
@@ -263,6 +265,36 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
     // sezadi — holat xotiradan o'qiladi, tarmoqqa chiqilmaydi.
     _statusTimer ??=
         Timer.periodic(const Duration(seconds: 3), (_) => _syncStatus());
+  }
+
+  /// Telegram'ga o'zini haqiqiy telefon sifatida tanitadi
+  /// (`rust_tg_set_device` izohi) — ulanishdan OLDIN.
+  Future<void> _setDevice() async {
+    final lib = _lib;
+    if (lib == null) return;
+    var model = '';
+    var system = '';
+    try {
+      final m = await const MethodChannel('aru/signature')
+          .invokeMapMethod<String, dynamic>('device');
+      model = '${m?['model'] ?? ''}';
+      system = '${m?['system'] ?? ''}';
+    } catch (_) {}
+    final app = kAppVersion.isEmpty ? '1.0' : kAppVersion.split('+').first;
+    final f = lib.lookupFunction<
+        Void Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>),
+        void Function(Pointer<Utf8>, Pointer<Utf8>,
+            Pointer<Utf8>)>('rust_tg_set_device');
+    final a = (model.isEmpty ? 'ARUGRAM' : model).toNativeUtf8();
+    final b = system.toNativeUtf8();
+    final c = 'ARUGRAM $app'.toNativeUtf8();
+    try {
+      f(a, b, c);
+    } finally {
+      malloc.free(a);
+      malloc.free(b);
+      malloc.free(c);
+    }
   }
 
   void _init(String dir, int apiId, String apiHash) {
@@ -343,6 +375,30 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
     final step = TgLoginStep.fromJson(j);
     if (step.loggedIn) _afterLogin();
     return step;
+  }
+
+  // ── QR ORQALI KIRISH ────────────────────────────────────────
+
+  /// QR uchun token: `{"url","expires"}`, tasdiqlangan bo'lsa
+  /// `{"ok":true}`, parol kerak bo'lsa `{"password":true,"hint"}`.
+  Future<Map<String, dynamic>> qrToken() async {
+    await refreshConfig();
+    final j = await Isolate.run(() {
+      final lib = _openLib();
+      return _json(_take(
+          lib, lib.lookupFunction<_NoArgC, _NoArgC>('rust_tg_qr_token')()));
+    });
+    if (j['ok'] == true) _afterLogin();
+    return j;
+  }
+
+  /// QR boshqa qurilmada tasdiqlandimi (tarmoqsiz).
+  bool qrAccepted() {
+    final lib = _lib;
+    if (lib == null) return false;
+    return lib.lookupFunction<Int32 Function(), int Function()>(
+            'rust_tg_qr_accepted')() ==
+        1;
   }
 
   /// Kodni QAYTA yuborish — Telegram keyingi usulni tanlaydi

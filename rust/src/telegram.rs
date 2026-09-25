@@ -163,6 +163,12 @@ fn inv_err(e: &InvocationError) -> String {
     }
 }
 
+/// Bitta raqamga shundan tez-tez yangi kod so'ralmaydi.
+const CODE_REQUEST_GAP_MS: i64 = 2 * 60 * 1000;
+
+/// QR orqali kirish tasdiqlandi (`updateLoginToken` keldi).
+static QR_ACCEPTED: AtomicBool = AtomicBool::new(false);
+
 /// Kod bosqichi shuncha vaqt saqlanadi (Telegram kodi ham shuncha
 /// yashaydi) — undan keyin ilova yana raqam so'raydi.
 const LOGIN_STATE_TTL_MS: i64 = 30 * 60 * 1000;
@@ -217,6 +223,44 @@ struct Tg {
 }
 
 static TG: OnceLock<Tg> = OnceLock::new();
+
+/// Telegram'ga o'zini qanday tanitadi (`initConnection`).
+///
+/// TOPILGAN FARQ (Cherrygram bilan solishtirganda): `grammers`
+/// standarti — "Android 32-bit", ilova versiyasi "0.10.0"
+/// (kutubxonaning o'z versiyasi), til "en". Telegram'ning
+/// firibgarlikka qarshi tizimi bunday "noma'lum" mijozga kirish
+/// kodini ehtiyotkorroq yuboradi. Endi haqiqiy telefon modeli,
+/// Android va ilova versiyasi hamda o'zbek tili beriladi
+/// (`rust_tg_set_device`, Dart ishga tushishda chaqiradi).
+static DEVICE: Mutex<Option<(String, String, String)>> = Mutex::new(None);
+
+#[no_mangle]
+pub extern "C" fn rust_tg_set_device(model_ptr: *const c_char, system_ptr: *const c_char, app_ptr: *const c_char) {
+    let s = |p| unsafe { cstr_to_str(p) }.unwrap_or("").trim().to_string();
+    let (model, system, app) = (s(model_ptr), s(system_ptr), s(app_ptr));
+    if let Ok(mut d) = DEVICE.lock() {
+        *d = Some((model, system, app));
+    }
+}
+
+fn connection_params() -> grammers_mtsender::ConnectionParams {
+    let mut p = grammers_mtsender::ConnectionParams::default();
+    if let Some((model, system, app)) = DEVICE.lock().ok().and_then(|d| d.clone()) {
+        if !model.is_empty() {
+            p.device_model = model;
+        }
+        if !system.is_empty() {
+            p.system_version = format!("Android {system}");
+        }
+        if !app.is_empty() {
+            p.app_version = app;
+        }
+    }
+    p.system_lang_code = "uz".to_string();
+    p.lang_code = "uz".to_string();
+    p
+}
 
 fn tg() -> Option<&'static Tg> {
     TG.get()
@@ -402,13 +446,34 @@ fn connect(t: &Tg) -> Option<Client> {
         // `SenderPool::new` ichida tokio kontekstida ishlaydigan
         // narsalar yaratiladi.
         let _g = t.rt.enter();
-        SenderPool::new(Arc::clone(&session), api_id)
+        SenderPool::with_configuration(Arc::clone(&session), api_id, connection_params())
     };
     let SenderPool { runner, handle, mut updates } = pool;
     let client = Client::new(handle);
     t.rt.spawn(runner.run());
     // Yangilanishlar kanali o'qilmasa xotirada cheksiz o'sadi.
-    t.rt.spawn(async move { while updates.recv().await.is_some() {} });
+    // Faqat bittasi kerak: QR orqali kirish tasdiqlandi
+    // (`updateLoginToken`).
+    t.rt.spawn(async move {
+        use grammers_session::updates::UpdatesLike;
+        while let Some(u) = updates.recv().await {
+            let accepted = match &u {
+                UpdatesLike::Updates(tl::enums::Updates::UpdateShort(s)) => {
+                    matches!(s.update, tl::enums::Update::LoginToken)
+                }
+                UpdatesLike::Updates(tl::enums::Updates::Updates(s)) => {
+                    s.updates.iter().any(|x| matches!(x, tl::enums::Update::LoginToken))
+                }
+                UpdatesLike::Updates(tl::enums::Updates::Combined(s)) => {
+                    s.updates.iter().any(|x| matches!(x, tl::enums::Update::LoginToken))
+                }
+                _ => false,
+            };
+            if accepted {
+                QR_ACCEPTED.store(true, Ordering::SeqCst);
+            }
+        }
+    });
     *slot = Some(client.clone());
     drop(slot);
     if let Ok(mut s) = t.session.lock() {
@@ -1589,6 +1654,23 @@ pub extern "C" fn rust_tg_request_code(phone_ptr: *const c_char) -> *mut c_char 
         if phone.len() < 6 {
             return Err("Telefon raqamini kiriting".to_string());
         }
+        // ── BIR RAQAMGA TEZ-TEZ KOD SO'RALMASIN ───────────────
+        //
+        // Har yangi `auth.sendCode` oldingi kodni bekor qiladi, ko'p
+        // so'rov esa Telegram'ning cheklovini yoqadi — u "yubordim"
+        // deydi-yu, kodni yubormaydi (foydalanuvchi ko'rgan holat,
+        // `auth.resendCode` -> SEND_CODE_UNAVAILABLE). Shu raqamga
+        // 2 daqiqa ichida kod so'ralgan bo'lsa — yangi so'rov
+        // yuborilmaydi, avvalgi kod kutiladi.
+        if let Some(st) = load_login(t) {
+            let at = st["sent"]["at"].as_i64().unwrap_or(0);
+            if st["stage"] == "code"
+                && st["phone"].as_str() == Some(phone.as_str())
+                && now_ms() - at < CODE_REQUEST_GAP_MS
+            {
+                return Ok(json!({"ok": true, "sent": st["sent"]}).to_string());
+            }
+        }
         match t.rt.block_on(send_code(t, &client, &phone))? {
             CodeSent::Code(hash, sent) => {
                 save_login_info(t, "code", &phone, &hash, "", &sent);
@@ -1601,6 +1683,92 @@ pub extern "C" fn rust_tg_request_code(phone_ptr: *const c_char) -> *mut c_char 
             CodeSent::NeedPassword => enter_password_stage(t, &client, &phone, ""),
         }
     }))
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  QR ORQALI KIRISH (kod kerak emas)
+// ═══════════════════════════════════════════════════════════════
+//
+// TALAB (foydalanuvchi): kirish kodi kelmasa ham kirish imkoni
+// bo'lsin. Cherrygram (`LoginActivity.java`) kabi: ilova
+// `auth.exportLoginToken` dan token oladi va QR ko'rsatadi
+// (`tg://login?token=...`). Boshqa qurilmadagi Telegram'da
+// Sozlamalar → Qurilmalar → "Qurilmani ulash" bilan skanerlanadi.
+// Telegram tasdiqlagach `updateLoginToken` keladi va token qayta
+// so'raladi — bu safar `loginTokenSuccess` (yoki boshqa DC ga
+// `loginTokenMigrateTo` -> `auth.importLoginToken`).
+
+fn b64url(bytes: &[u8]) -> String {
+    const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let mut out = String::with_capacity(bytes.len() * 4 / 3 + 4);
+    for c in bytes.chunks(3) {
+        let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
+        out.push(A[(n >> 18) as usize & 63] as char);
+        out.push(A[(n >> 12) as usize & 63] as char);
+        if c.len() > 1 {
+            out.push(A[(n >> 6) as usize & 63] as char);
+        }
+        if c.len() > 2 {
+            out.push(A[n as usize & 63] as char);
+        }
+    }
+    out
+}
+
+fn login_token_result(t: &Tg, client: &Client, r: tl::enums::auth::LoginToken) -> Result<String, String> {
+    match r {
+        tl::enums::auth::LoginToken::Token(tok) => {
+            let left = (tok.expires as i64 - now_ms() / 1000).clamp(5, 600);
+            Ok(json!({"url": format!("tg://login?token={}", b64url(&tok.token)), "expires": left}).to_string())
+        }
+        tl::enums::auth::LoginToken::Success(x) => match x.authorization {
+            tl::enums::auth::Authorization::Authorization(a) => {
+                save_token(t, a.future_auth_token.as_ref());
+                clear_login(t);
+                Ok(after_login(t))
+            }
+            tl::enums::auth::Authorization::SignUpRequired(_) => {
+                Err("Bu hisob Telegram'da ro'yxatdan o'tmagan".to_string())
+            }
+        },
+        tl::enums::auth::LoginToken::MigrateTo(m) => {
+            let session = t.session.lock().ok().and_then(|s| s.clone()).ok_or("sessiya yo'q")?;
+            t.rt.block_on(session.set_home_dc_id(m.dc_id)).map_err(|e| e.to_string())?;
+            match t.rt.block_on(client.invoke(&tl::functions::auth::ImportLoginToken { token: m.token })) {
+                Ok(r) => login_token_result(t, client, r),
+                Err(e) if e.is("SESSION_PASSWORD_NEEDED") => enter_password_stage(t, client, "", ""),
+                Err(e) => Err(friendly(&e)),
+            }
+        }
+    }
+}
+
+/// QR uchun yangi token (yoki tasdiqlangan bo'lsa — kirish).
+/// Javob: `{"url","expires"}` | `{"ok":true}` | `{"password":true,"hint"}` | `{"error"}`.
+#[no_mangle]
+pub extern "C" fn rust_tg_qr_token() -> *mut c_char {
+    string_to_cptr(with_client(|t, client| {
+        QR_ACCEPTED.store(false, Ordering::SeqCst);
+        let api_id = t.api_id.lock().map(|v| *v).unwrap_or(0);
+        let api_hash = t.api_hash.lock().map(|v| v.clone()).unwrap_or_default();
+        let r = t.rt.block_on(client.invoke(&tl::functions::auth::ExportLoginToken {
+            api_id,
+            api_hash,
+            except_ids: Vec::new(),
+        }));
+        match r {
+            Ok(r) => login_token_result(t, &client, r),
+            Err(e) if e.is("SESSION_PASSWORD_NEEDED") => enter_password_stage(t, &client, "", ""),
+            Err(e) => Err(friendly(&e)),
+        }
+    }))
+}
+
+/// QR tasdiqlandimi (tarmoqsiz). 1 — ha: `rust_tg_qr_token` ni
+/// qayta chaqirish kerak.
+#[no_mangle]
+pub extern "C" fn rust_tg_qr_accepted() -> i32 {
+    QR_ACCEPTED.load(Ordering::SeqCst) as i32
 }
 
 /// Kodni QAYTA yuboradi (`auth.resendCode`) — odatda keyingi usulda
@@ -2566,6 +2734,15 @@ mod tests {
             ctr_apply(&key, a as u64, &mut part);
             assert_eq!(part, plain[a..b]);
         }
+    }
+
+    #[test]
+    fn qr_tokeni_base64url() {
+        assert_eq!(b64url(b""), "");
+        assert_eq!(b64url(b"f"), "Zg");
+        assert_eq!(b64url(b"fo"), "Zm8");
+        assert_eq!(b64url(b"foo"), "Zm9v");
+        assert_eq!(b64url(&[0xfb, 0xff, 0xfe]), "-__-");
     }
 
     #[test]

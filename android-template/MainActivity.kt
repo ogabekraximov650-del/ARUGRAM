@@ -99,10 +99,15 @@ class MainActivity : FlutterActivity() {
         // qiladi, bu ilova esa APK bo'lib tarqatiladi.
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "aru/signature")
             .setMethodCallHandler { call, result ->
-                if (call.method != "sha256") {
-                    result.notImplemented()
-                } else {
-                    result.success(signatureSha256())
+                when (call.method) {
+                    "sha256" -> result.success(signatureSha256())
+                    // Telegram'ga o'zini tanitish uchun (`initConnection`):
+                    // "Xiaomi Redmi Note 9", "10".
+                    "device" -> result.success(mapOf(
+                        "model" to "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}".trim(),
+                        "system" to (android.os.Build.VERSION.RELEASE ?: ""),
+                    ))
+                    else -> result.notImplemented()
                 }
             }
 

@@ -190,6 +190,18 @@ kodsiz kiradi (`sentCodeSuccess`) yoki darhol parol so'raladi. Parol
 SRP'si o'zimizda (`check_password_srp`), chunki grammers'niki tokenni
 tashlab yuboradi.
 
+**Kirish kodi kelmasa (2026-09-25).** `arsLan4k1390/Cherrygram`
+tekshirildi: `LoginActivity` bizniki bilan bir xil, farqi — rasmiy
+(uzoq yillik) `api_id` va haqiqiy qurilma ma'lumoti. Endi:
+* `initConnection` — telefon modeli (`aru/signature` -> `device`),
+  Android va ilova versiyasi, til `uz` (`rust_tg_set_device`);
+  ilgari grammers standarti "Android 32-bit / 0.10.0 / en" edi;
+* bir raqamga 2 daqiqada bir martadan ko'p `auth.sendCode` YO'Q —
+  ko'p so'rov Telegram cheklovini yoqadi (SEND_CODE_UNAVAILABLE);
+* QR orqali kirish (`rust_tg_qr_token`, `auth.exportLoginToken`,
+  `updateLoginToken`, `importLoginToken`) — boshqa qurilmadagi
+  Telegram: Sozlamalar → Qurilmalar → "Qurilmani ulash".
+
 **Baza tozalash:** `ci/WIPE_DB_ONCE` + `ci/wipe_db.py` —
 `deploy-worker.yml` yangi worker'dan KEYIN bazani tozalaydi va
 worker'ni qayta deploy qiladi. Belgi bazaga yoziladi
