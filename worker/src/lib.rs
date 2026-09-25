@@ -386,23 +386,33 @@ async fn init_db(env: &Env) -> bool {
         // ya'ni bu tezlikka ta'sir qilmaydi.
         //
         // Bo'sh satr — "bu oraliq belgilanmagan".
+        // ── HAR SIFAT: MANZIL, HAJM, KALIT (2026-09) ──────────
+        //
+        // TALAB (foydalanuvchi): "epizod_db ustunlarini qayta tuz —
+        // fayl yuklash manzili, hajmi va shifrdan ochadigan kalit
+        // yozilishi kerak".
+        //
+        //   url_<q>  — fayl NOMI (Telegram kanalida shu nom bilan
+        //              turadi, `tg_files`);
+        //   size_<q> — hajm BAYTDA (son). Pleyer uni ochishda
+        //              ishlatadi — Telegram'ga hajm so'rovi ketmaydi;
+        //   key_<q>  — AES-128-CTR kaliti (32 ta hex belgi). Fayl
+        //              yuklanish paytida shu kalit bilan shifrlangan
+        //              (`rust/src/telegram.rs`). Kalit RO'YXATDA
+        //              BERILMAYDI (`hide_keys`) — faqat faylni ko'rish
+        //              ruxsati bor odamga `/api/tg/deliver` javobida.
         ("CREATE TABLE IF NOT EXISTS epizod_db (
             anime_id INTEGER, season_id INTEGER, epizod_id INTEGER,
             epizod_number INTEGER, epizod_name TEXT,
-            url_360p TEXT, size_360p TEXT,
-            url_480p TEXT, size_480p TEXT,
-            url_720p TEXT, size_720p TEXT,
-            url_1080p TEXT, size_1080p TEXT,
+            url_360p TEXT, size_360p INTEGER DEFAULT 0, key_360p TEXT DEFAULT '',
+            url_480p TEXT, size_480p INTEGER DEFAULT 0, key_480p TEXT DEFAULT '',
+            url_720p TEXT, size_720p INTEGER DEFAULT 0, key_720p TEXT DEFAULT '',
+            url_1080p TEXT, size_1080p INTEGER DEFAULT 0, key_1080p TEXT DEFAULT '',
             intro_1 TEXT, intro_2 TEXT, intro_3 TEXT, intro_4 TEXT,
             intro_5 TEXT, intro_6 TEXT, intro_7 TEXT, intro_8 TEXT,
             intro_9 TEXT, intro_10 TEXT,
             views_total INTEGER DEFAULT 0,
             watch_ms_total INTEGER DEFAULT 0,
-            -- ESKI ustun: yosh chegarasi endi QISMGA emas, butun
-            -- BO'LIMga yoziladi (`season_db.yosh`). Ustun eski
-            -- bazalarda qolgani uchun turibdi — hech qayerda
-            -- o'qilmaydi va yozilmaydi.
-            yosh INTEGER DEFAULT 0,
             created_at INTEGER,
             PRIMARY KEY (anime_id, season_id, epizod_id)
         )", vec![]),
@@ -439,93 +449,6 @@ async fn init_db(env: &Env) -> bool {
         )", vec![]),
     ]).await.is_ok();
 
-    // ── YOSH CHEGARASI USTUNI (eski bazalar uchun) ─────────────
-    //
-    // `CREATE TABLE IF NOT EXISTS` mavjud jadvalga TEGMAYDI, ya'ni
-    // baza allaqachon yaratilgan bo'lsa yuqoridagi `yosh` ustuni
-    // o'z-o'zidan paydo bo'lmaydi. Shu sabab qo'shimcha `ALTER`.
-    //
-    // HAR BIRI ALOHIDA yuboriladi va natijasi E'TIBORSIZ
-    // qoldiriladi: ustun allaqachon bo'lsa Turso xato qaytaradi,
-    // to'plamda esa birinchi xatodan keyin qolgani umuman
-    // bajarilmasdi. `ok` ga ham qo'shilmaydi — bu xato emas,
-    // kutilgan holat.
-    // ── OLIB TASHLANGAN IMKONIYATLARNI TOZALASH ──────────────
-    //
-    // TALAB (foydalanuvchi): "shaxsiy chat va GIF tizimini
-    // butunlay tozalab tashla, ilovadan ham bazadan ham — umuman
-    // keragi yo'q".
-    //
-    // Bu buyruqlar bir marta ishlaydi va keyin xato qaytaradi
-    // (jadval yoki ustun allaqachon yo'q) — bu KUTILGAN holat,
-    // pastdagi halqa natijani e'tiborsiz qoldiradi.
-    //
-    // Shaxsiy yozishmalarga kelgan shikoyatlar ham ketadi: ular
-    // endi hech qayerga olib bormaydi.
-    for sql in [
-        // ── BLOKLASH: MUDDAT VA SABAB ────────────────────
-        //
-        // TALAB (foydalanuvchi): "foydalanuvchini bloklaganda
-        // muddatsiz va muddatli bloklash tizimini qo'sh va
-        // bloklanish sababini ham yozsa bo'ladigan qil".
-        //
-        // `is_banned` eski ustun, o'z joyida qoladi — "bloklanganmi"
-        // degan savolga javob beradi.
-        //   * `ban_until` = 0  -> MUDDATSIZ;
-        //   * `ban_until` > 0  -> o'sha vaqtgacha.
-        // `ban_reason` bo'sh bo'lishi mumkin (sabab yozilmagan).
-        // ── PROFIL MAXFIYLIGI ────────────────────────────
-        //
-        // TALAB (foydalanuvchi): "foydalanuvchi boshqa profilni
-        // ko'rishi mumkin bo'lsin, faqat to'liq emas — faqatgina
-        // profil surati, nomi va usernameni ko'rishga ruxsat
-        // berilsin. ID, balans va qolgan statistikalar
-        // ko'rinmasin. Bu narsalarni boshqalar ko'rishi uchun
-        // foydalanuvchi sozlamalar panelidan ruxsat berib
-        // chiqishi kerak".
-        //
-        // Ya'ni ODATIY holat — YOPIQ. Ustun `0` bo'lsa statistika
-        // ko'rinmaydi; odam sozlamalardan yoqsa `1` bo'ladi.
-        // Odatiy qiymatni ataylab `0` qildik: maxfiylik
-        // "o'chirib qo'yiladigan" emas, "yoqiladigan" narsa
-        // bo'lishi kerak.
-        "DROP TABLE IF EXISTS dm_messages",
-        "DROP TABLE IF EXISTS dm_threads",
-        "DROP TABLE IF EXISTS dm_reactions",
-        "DELETE FROM reports_db WHERE kind='dm'",
-        "ALTER TABLE comments_db DROP COLUMN gif_url",
-        "ALTER TABLE users_db ADD COLUMN show_stats INTEGER DEFAULT 0",
-        // ── QAYSI STATISTIKA YASHIRILGAN ──────────────────────
-        //
-        // TALAB (foydalanuvchi): "sozlamalardan avvalgi yashirish
-        // tugmasini olib tashla va o'rniga HAR BITTA statistika
-        // uchun alohida yashirish tugmasi qo'yib chiq. Barcha
-        // hisobda statistika OCHIQ turadi va foydalanuvchi qo'lda
-        // yashirib chiqishi kerak; qaysi statistika yashirilgani
-        // bazada ham saqlanishi kerak".
-        //
-        // Bitta `INTEGER` bilan bo'lmaydi — endi bittasi emas,
-        // yettitasi bor. Alohida jadval ham ortiqcha: qiymat
-        // kichkina va har doim foydalanuvchi qatori bilan birga
-        // o'qiladi. Shu sabab ODDIY RO'YXAT: "episodes,comments".
-        // Bo'sh satr — hech nima yashirilmagan (odatiy holat).
-        "ALTER TABLE users_db ADD COLUMN hidden_stats TEXT DEFAULT ''",
-        "ALTER TABLE users_db ADD COLUMN ban_until INTEGER DEFAULT 0",
-        "ALTER TABLE users_db ADD COLUMN ban_reason TEXT DEFAULT ''",
-        "ALTER TABLE users_db ADD COLUMN banned_at INTEGER DEFAULT 0",
-        "ALTER TABLE season_db ADD COLUMN yosh INTEGER DEFAULT 0",
-        "ALTER TABLE epizod_db ADD COLUMN yosh INTEGER DEFAULT 0",
-        "ALTER TABLE chat_messages ADD COLUMN media_file TEXT DEFAULT ''",
-        "ALTER TABLE chat_messages ADD COLUMN media_type TEXT DEFAULT ''",
-        // Ovozli xabarning uzunligi (millisekund). Bo'lmasa ham
-        // ishlaydi, lekin u holda uzunlik faqat ijro boshlangach
-        // ma'lum bo'lardi.
-        "ALTER TABLE chat_messages ADD COLUMN media_ms INTEGER DEFAULT 0",
-        // Suhbatdosh xabarni O'QIGANMI (bitta / ikkita belgi).
-        "ALTER TABLE chat_messages ADD COLUMN seen INTEGER DEFAULT 0",
-    ] {
-        let _ = turso_exec(env, sql, vec![]).await;
-    }
 
     // ── 2. FOYDALANUVCHI ───────────────────────────────────────
     ok &= turso_batch(env, &[
@@ -539,7 +462,12 @@ async fn init_db(env: &Env) -> bool {
             profile_done INTEGER DEFAULT 1,
             traffic_bytes INTEGER DEFAULT 0,
             created_at INTEGER,
-            last_login_at INTEGER
+            last_login_at INTEGER,
+            -- Qaysi statistika yashirilgan (vergul bilan ro'yxat).
+            hidden_stats TEXT DEFAULT '',
+            -- Bloklash: 0 — muddatsiz, aks holda shu vaqtgacha.
+            ban_until INTEGER DEFAULT 0,
+            ban_reason TEXT DEFAULT ''
         )", vec![]),
         // `telegram_id UNIQUE` o'zi indeks — alohida indeks KERAK EMAS.
         // Username takrorlanmasin (bo'shlar indeksga kirmaydi).
@@ -661,7 +589,7 @@ async fn init_db(env: &Env) -> bool {
         ("CREATE TABLE IF NOT EXISTS ratings_db (
             user_id INTEGER, anime_id INTEGER, season_id INTEGER,
             stars INTEGER,
-            created_at INTEGER, updated_at INTEGER,
+            updated_at INTEGER,
             PRIMARY KEY (user_id, anime_id, season_id)
         )", vec![]),
 
@@ -721,8 +649,7 @@ async fn init_db(env: &Env) -> bool {
             status TEXT,
             pay_url TEXT,
             created_at INTEGER,
-            expires_at INTEGER,
-            paid_at INTEGER
+            expires_at INTEGER
         )", vec![]),
         ("CREATE INDEX IF NOT EXISTS idx_pay_user
             ON payments_db(user_id, created_at)", vec![]),
@@ -730,8 +657,7 @@ async fn init_db(env: &Env) -> bool {
         // Obuna — odamga BITTA qator, tugash vaqti bilan.
         ("CREATE TABLE IF NOT EXISTS subs_db (
             user_id INTEGER PRIMARY KEY,
-            expires_at INTEGER,
-            updated_at INTEGER
+            expires_at INTEGER
         )", vec![]),
 
         // Tarix oynasi: har bir to'ldirish va har bir obuna.
@@ -749,8 +675,7 @@ async fn init_db(env: &Env) -> bool {
 
         // B2'da yetim qolgan fayllar (pastdagi izohga qarang).
         ("CREATE TABLE IF NOT EXISTS orphan_files (
-            file_name TEXT PRIMARY KEY,
-            noted_at INTEGER
+            file_name TEXT PRIMARY KEY
         )", vec![]),
 
         // ══════════════════════════════════════════════════════
@@ -788,8 +713,7 @@ async fn init_db(env: &Env) -> bool {
             -- O'chirilgan izoh QATOR sifatida qoladi: javoblari
             -- yetim qolmasin va hisoblar buzilmasin.
             deleted INTEGER DEFAULT 0,
-            created_at INTEGER,
-            edited_at INTEGER DEFAULT 0
+            created_at INTEGER
         )", vec![]),
         // Ro'yxat AYNAN shu tartibda so'raladi: bitta bo'limning
         // bosh izohlari, yangisidan eskisiga.
@@ -804,7 +728,7 @@ async fn init_db(env: &Env) -> bool {
         // bazaga umuman tushmaydi. Shu sabab hisob hech qachon
         // haqiqatdan chetga chiqmaydi.
         ("CREATE TABLE IF NOT EXISTS comment_likes (
-            comment_id TEXT, user_id INTEGER, created_at INTEGER,
+            comment_id TEXT, user_id INTEGER,
             PRIMARY KEY (comment_id, user_id)
         )", vec![]),
 
@@ -906,274 +830,28 @@ async fn init_db(env: &Env) -> bool {
             -- 'image' yoki 'video'.
             media_type TEXT DEFAULT '',
             media_ms INTEGER DEFAULT 0,
-            -- ── VIDEONING KADRI (thumbnail) ─────────────────
-            --
-            -- Kichik JPEG'ning B2'dagi nomi. Uni YUBORUVCHI
-            -- yasaydi: fayl uning telefonida turgani uchun kadr
-            -- ajratish mahalliy va tezkor ish.
-            --
-            -- Qabul qiluvchi hech narsa hisoblamaydi — tayyor
-            -- rasmni oladi. Telegram ham aynan shunday qiladi.
-            media_thumb TEXT DEFAULT '',
             seen INTEGER DEFAULT 0,
             created_at INTEGER
         )", vec![]),
         // Suhbat AYNAN shu tartibda so'raladi.
         ("CREATE INDEX IF NOT EXISTS idx_chat_msgs
             ON chat_messages(user_id, created_at DESC)", vec![]),
-
-        // ── ESKI TRAFIK RAQAMI BIR MARTA TOZALANADI ───────────
-        //
-        // TALAB (foydalanuvchi): "bosh sahifadagi eski soxta
-        // trafikni tozalab tashla".
-        //
-        // Bir muddat umumiy trafik Cloudflare Analytics'dan
-        // olindi va chelaklarga yozildi. O'sha raqam telefon
-        // qabul qilganidan ~10 barobar katta edi (pleyer
-        // `Range: bytes=0-` bilan so'rab ulanishni uzadi —
-        // Cloudflare esa yo'lga chiqqan baytni sanaydi). Endi
-        // manba faqat ILOVA, shu sabab eski qatorlar o'chiriladi
-        // — aks holda yangi (to'g'ri) raqam eskisining ustiga
-        // qo'shilib, hech qachon haqiqatga kelmasdi.
-        //
-        // Belgi qo'yilgani uchun bu FAQAT BIR MARTA bajariladi.
-        ("DELETE FROM stats_hourly WHERE metric='traffic'
-            AND NOT EXISTS (SELECT 1 FROM app_config
-                             WHERE cfg_key='traffic_reset_v2')", vec![]),
-        ("DELETE FROM stats_daily WHERE metric='traffic'
-            AND NOT EXISTS (SELECT 1 FROM app_config
-                             WHERE cfg_key='traffic_reset_v2')", vec![]),
-        ("INSERT OR IGNORE INTO app_config (cfg_key,cfg_value)
-          VALUES ('traffic_reset_v2','1')", vec![]),
-
-        // ── HAMMA STATISTIKA BIR MARTA NOLLANADI ──────────────
-        //
-        // TALAB (foydalanuvchi): "Barcha statistikalarni tozalab
-        // tashla, mening profilimga tegishlilarini ham — umuman
-        // statistika qolmasin".
-        //
-        // Ilova sinovda bo'lgan davrda yig'ilgan raqamlar
-        // haqiqatni ko'rsatmaydi: trafik ikki xil manbadan
-        // sanalgan, ko'rishlar esa sinov hisoblaridan yig'ilgan.
-        // Shu sabab HAMMASI noldan boshlanadi.
-        //
-        // Nima o'chadi:
-        //   * `stats_hourly` / `stats_daily` — umumiy chelaklar;
-        //   * `season_db` dagi ko'rish va tomosha vaqti yig'indisi;
-        //   * `watch_history_db` dagi shaxsiy hisoblagichlar
-        //     (tarixning O'ZI qoladi — faqat raqamlar nollanadi);
-        //   * `users_db.traffic_bytes` — profildagi shaxsiy trafik.
-        //
-        // Baho va sevimlilar TEGILMAYDI: ular statistika emas,
-        // foydalanuvchining o'z tanlovi.
-        //
-        // Belgi qo'yilgani uchun bu FAQAT BIR MARTA bajariladi.
-        ("DELETE FROM stats_hourly
-            WHERE NOT EXISTS (SELECT 1 FROM app_config
-                               WHERE cfg_key='stats_reset_v3')", vec![]),
-        ("DELETE FROM stats_daily
-            WHERE NOT EXISTS (SELECT 1 FROM app_config
-                               WHERE cfg_key='stats_reset_v3')", vec![]),
-        ("UPDATE season_db SET views_total=0, watch_ms_total=0
-            WHERE NOT EXISTS (SELECT 1 FROM app_config
-                               WHERE cfg_key='stats_reset_v3')", vec![]),
-        ("UPDATE watch_history_db SET watched_ms=0, view_count=0
-            WHERE NOT EXISTS (SELECT 1 FROM app_config
-                               WHERE cfg_key='stats_reset_v3')", vec![]),
-        ("UPDATE users_db SET traffic_bytes=0
-            WHERE NOT EXISTS (SELECT 1 FROM app_config
-                               WHERE cfg_key='stats_reset_v3')", vec![]),
-        ("INSERT OR IGNORE INTO app_config (cfg_key,cfg_value)
-          VALUES ('stats_reset_v3','1')", vec![]),
-
-        // ══════════════════════════════════════════════════════
-        //  TO'LIQ TOZALASH — FAQAT ANIME MA'LUMOTI QOLADI
-        // ══════════════════════════════════════════════════════
-        //
-        // TALAB (foydalanuvchi): "anime rasmi va video fayllari va
-        // Turso'dagi anime ma'lumotlaridan boshqa hamma narsani
-        // tozalab tashla".
-        //
-        // QOLADI: `anime_db`, `season_db`, `epizod_db`,
-        // `season_janr` — ya'ni anime, bo'lim va qismlarning O'ZI,
-        // shu jumladan rasm va video fayllarining nomlari. B2'dagi
-        // fayllarga UMUMAN tegilmaydi.
-        //
-        // O'CHADI: hamma foydalanuvchi va ularga tegishli har
-        // narsa — hisoblar, sessiyalar, tomosha tarixi, baholar,
-        // sevimlilar, statistika, to'lovlar, obunalar va
-        // sinxronlash izlari.
-        //
-        // TEGILMAYDI: `app_config` — u foydalanuvchi ma'lumoti
-        // emas, tizim sozlamasi (Telegram webhook siri va shu
-        // yerdagi bir martalik belgilarning o'zi). Uni o'chirish
-        // webhookni buzardi va bu tozalashni HAR SAFAR qayta
-        // ishga tushirardi.
-        //
-        // ── BO'LIM VA QISM HISOBLARI HAM NOLLANADI ───────────
-        //
-        // TOPILGAN XATO (foydalanuvchi: "nimaga 3 marta ko'rilgan
-        // deyapti, mendan boshqa hech kim ko'rmadiku"): oldingi
-        // tozalashda `season_db` nollangan, `epizod_db` esa
-        // NOLLANMAGAN edi. Shu sabab bitta ekranda ikki xil raqam
-        // turardi — tepada 3, pastda 1. Endi ikkovi ham nollanadi.
-        //
-        // Belgi qo'yilgani uchun bu FAQAT BIR MARTA bajariladi.
-        ("DELETE FROM users_db WHERE NOT EXISTS
-            (SELECT 1 FROM app_config WHERE cfg_key='wipe_all_v4')", vec![]),
-        ("DELETE FROM sessions_db WHERE NOT EXISTS
-            (SELECT 1 FROM app_config WHERE cfg_key='wipe_all_v4')", vec![]),
-        ("DELETE FROM login_tokens WHERE NOT EXISTS
-            (SELECT 1 FROM app_config WHERE cfg_key='wipe_all_v4')", vec![]),
-        ("DELETE FROM watch_history_db WHERE NOT EXISTS
-            (SELECT 1 FROM app_config WHERE cfg_key='wipe_all_v4')", vec![]),
-        ("DELETE FROM ratings_db WHERE NOT EXISTS
-            (SELECT 1 FROM app_config WHERE cfg_key='wipe_all_v4')", vec![]),
-        ("DELETE FROM favorites_db WHERE NOT EXISTS
-            (SELECT 1 FROM app_config WHERE cfg_key='wipe_all_v4')", vec![]),
-        ("DELETE FROM stats_hourly WHERE NOT EXISTS
-            (SELECT 1 FROM app_config WHERE cfg_key='wipe_all_v4')", vec![]),
-        ("DELETE FROM stats_daily WHERE NOT EXISTS
-            (SELECT 1 FROM app_config WHERE cfg_key='wipe_all_v4')", vec![]),
-        ("DELETE FROM sync_batches WHERE NOT EXISTS
-            (SELECT 1 FROM app_config WHERE cfg_key='wipe_all_v4')", vec![]),
-        ("DELETE FROM payments_db WHERE NOT EXISTS
-            (SELECT 1 FROM app_config WHERE cfg_key='wipe_all_v4')", vec![]),
-        ("DELETE FROM subs_db WHERE NOT EXISTS
-            (SELECT 1 FROM app_config WHERE cfg_key='wipe_all_v4')", vec![]),
-        ("DELETE FROM billing_log WHERE NOT EXISTS
-            (SELECT 1 FROM app_config WHERE cfg_key='wipe_all_v4')", vec![]),
-        ("DELETE FROM orphan_files WHERE NOT EXISTS
-            (SELECT 1 FROM app_config WHERE cfg_key='wipe_all_v4')", vec![]),
-        ("DELETE FROM comments_db WHERE NOT EXISTS
-            (SELECT 1 FROM app_config WHERE cfg_key='wipe_all_v4')", vec![]),
-        ("DELETE FROM comment_likes WHERE NOT EXISTS
-            (SELECT 1 FROM app_config WHERE cfg_key='wipe_all_v4')", vec![]),
-        ("DELETE FROM chat_messages WHERE NOT EXISTS
-            (SELECT 1 FROM app_config WHERE cfg_key='wipe_all_v4')", vec![]),
-        ("DELETE FROM chat_threads WHERE NOT EXISTS
-            (SELECT 1 FROM app_config WHERE cfg_key='wipe_all_v4')", vec![]),
-        // Anime ma'lumoti QOLADI, faqat unga yopishgan hisoblar
-        // nollanadi.
-        ("UPDATE season_db SET views_total=0, watch_ms_total=0,
-                fav_count=0, rating_sum=0, rating_count=0
-            WHERE NOT EXISTS
-            (SELECT 1 FROM app_config WHERE cfg_key='wipe_all_v4')", vec![]),
-        ("UPDATE epizod_db SET views_total=0, watch_ms_total=0
-            WHERE NOT EXISTS
-            (SELECT 1 FROM app_config WHERE cfg_key='wipe_all_v4')", vec![]),
-        ("INSERT OR IGNORE INTO app_config (cfg_key,cfg_value)
-          VALUES ('wipe_all_v4','1')", vec![]),
-
-        // ══════════════════════════════════════════════════════
-        //  STATISTIKANI BUTUNLAY TOZALASH (v5)
-        // ══════════════════════════════════════════════════════
-        //
-        // TALAB (foydalanuvchi): "statistikani butunlay tozalab
-        // tashla — kim qaysi animeni yoki epizodni ko'rgani, baho
-        // bergani, saqlagani va hokazo barchasini".
-        //
-        // O'CHADI:
-        //   * `watch_history_db` — kim nimani ko'rgani (qatorning
-        //     O'ZI ham, nafaqat raqamlari);
-        //   * `ratings_db` — kim nimaga baho bergani;
-        //   * `favorites_db` — kim nimani saqlagani;
-        //   * `stats_hourly` / `stats_daily` — umumiy chelaklar;
-        //   * `sync_batches` — sinxronlash izlari (paket
-        //     raqamlari; ularsiz telefon o'z paketini qaytadan
-        //     yuborishi mumkin, lekin yuboradigan narsasi
-        //     qolmaydi).
-        //
-        // NOLLANADI: bo'lim va qism hisoblagichlari, shu jumladan
-        // baho yig'indisi va sevimlilar soni; profildagi shaxsiy
-        // trafik.
-        //
-        // TEGILMAYDI: hisoblarning O'ZI (`users_db`), sessiyalar,
-        // anime ma'lumoti, B2'dagi fayllar, to'lovlar va obunalar.
-        //
-        // Belgi qo'yilgani uchun bu FAQAT BIR MARTA bajariladi.
-        ("DELETE FROM watch_history_db WHERE NOT EXISTS
-            (SELECT 1 FROM app_config WHERE cfg_key='wipe_stats_v5')", vec![]),
-        ("DELETE FROM ratings_db WHERE NOT EXISTS
-            (SELECT 1 FROM app_config WHERE cfg_key='wipe_stats_v5')", vec![]),
-        ("DELETE FROM favorites_db WHERE NOT EXISTS
-            (SELECT 1 FROM app_config WHERE cfg_key='wipe_stats_v5')", vec![]),
-        ("DELETE FROM stats_hourly WHERE NOT EXISTS
-            (SELECT 1 FROM app_config WHERE cfg_key='wipe_stats_v5')", vec![]),
-        ("DELETE FROM stats_daily WHERE NOT EXISTS
-            (SELECT 1 FROM app_config WHERE cfg_key='wipe_stats_v5')", vec![]),
-        ("DELETE FROM sync_batches WHERE NOT EXISTS
-            (SELECT 1 FROM app_config WHERE cfg_key='wipe_stats_v5')", vec![]),
-        ("UPDATE season_db SET views_total=0, watch_ms_total=0,
-                fav_count=0, rating_sum=0, rating_count=0
-            WHERE NOT EXISTS
-            (SELECT 1 FROM app_config WHERE cfg_key='wipe_stats_v5')", vec![]),
-        ("UPDATE epizod_db SET views_total=0, watch_ms_total=0
-            WHERE NOT EXISTS
-            (SELECT 1 FROM app_config WHERE cfg_key='wipe_stats_v5')", vec![]),
-        ("UPDATE users_db SET traffic_bytes=0
-            WHERE NOT EXISTS
-            (SELECT 1 FROM app_config WHERE cfg_key='wipe_stats_v5')", vec![]),
-        ("INSERT OR IGNORE INTO app_config (cfg_key,cfg_value)
-          VALUES ('wipe_stats_v5','1')", vec![]),
-
-        // ── ESKI FARQ BIR MARTA TO'G'RILANADI (v7) ────────────
-        //
-        // Yuqoridagi tozalashdan keyin ikkovi ham nolda bo'ladi,
-        // lekin tozalash allaqachon o'tib ketgan bazada eski farq
-        // qolishi mumkin. Shu sabab bo'lim soni bir marta
-        // qismlardan qayta yig'iladi (`sync_route` dagi bilan
-        // AYNAN bir xil buyruq).
-        ("UPDATE season_db SET views_total = (
-            SELECT COALESCE(SUM(e.views_total), 0) FROM epizod_db e
-             WHERE e.anime_id = season_db.anime_id
-               AND e.season_id = season_db.season_id)
-          WHERE NOT EXISTS
-            (SELECT 1 FROM app_config WHERE cfg_key='views_sync_v7')", vec![]),
-        ("INSERT OR IGNORE INTO app_config (cfg_key,cfg_value)
-          VALUES ('views_sync_v7','1')", vec![]),
     ]).await.is_ok();
 
-    // ── YANGI USTUN: `chat_threads.chat_ver` ──────────────────
-    //
-    // Yuqoridagi `CREATE TABLE` faqat YANGI bazada ishlaydi —
-    // jadval allaqachon bor bo'lsa u hech narsa qilmaydi. Shu
-    // sabab mavjud baza uchun ALOHIDA `ALTER`.
-    //
-    // ── NEGA UMUMIY PAKETDA EMAS ──────────────────────────────
-    //
-    // Ustun ALLAQACHON qo'shilgan bo'lsa `ADD COLUMN` xato
-    // qaytaradi. Agar bu buyruq yuqoridagi paket ichida bo'lsa,
-    // `turso_batch` butun paketni "yiqildi" deb belgilardi,
-    // `ok` esa `false` bo'lib qolardi — va o'shanda `DB_READY`
-    // hech qachon qo'yilmay, BUTUN DDL to'plami HAR BIR so'rovda
-    // qaytadan yuborilardi (aynan yuqoridagi izoh ogohlantirgan
-    // falokat).
-    //
-    // Shu sabab u alohida yuboriladi va natijasi ATAYLAB
-    // e'tiborsiz qoldiriladi: "ustun bor" degan xato — bu normal
-    // holat, xato emas.
-    //
-    // KAMROQ SO'ROV (foydalanuvchi talabi): hamma `ALTER` BITTA
-    // so'rovda (pipeline) ketadi — ilgari har biri alohida so'rov
-    // edi. Pipeline'da buyruqlar bir-biriga bog'liq emas: biri
-    // "ustun bor" deb yiqilsa ham qolganlari bajariladi.
-    let _ = turso_many(env, &[
-        ("ALTER TABLE chat_threads ADD COLUMN chat_ver INTEGER DEFAULT 0", vec![]),
-        // Videoning kadri (yuqoridagi izohga qarang).
-        ("ALTER TABLE chat_messages ADD COLUMN media_thumb TEXT DEFAULT ''", vec![]),
-        // `tg_files.file_id` keyinroq qo'shildi.
-        ("ALTER TABLE tg_files ADD COLUMN file_id TEXT DEFAULT ''", vec![]),
-    ]).await;
 
     // ── 5. TELEGRAM ORQALI VIDEO (`tg_route` izohiga qarang) ───
     ok &= turso_batch(env, &[
         // Yopiq kanaldagi video: fayl nomi (B2 dagi bilan bir xil)
         // -> kanal xabari. Bot kanal postini ko'rganda yoziladi.
+        //
+        // `file_key` — faylning AES-128-CTR kaliti (hex). Bo'sh —
+        // fayl ochiq (masalan admin Telegram ilovasidan o'zi
+        // qo'ygan post). `/api/tg/deliver` uni ruxsati bor odamga
+        // beradi.
         ("CREATE TABLE IF NOT EXISTS tg_files (
             file_name TEXT PRIMARY KEY,
             msg_id INTEGER NOT NULL,
-            file_id TEXT DEFAULT ''
+            file_key TEXT DEFAULT ''
         )", vec![]),
     ]).await.is_ok();
 
@@ -3061,11 +2739,7 @@ async fn b2_cleanup(mut req: Request, env: &Env) -> Result<Response> {
         ("SELECT photo_url FROM season_db", vec![]),
         ("SELECT url_360p, url_480p, url_720p, url_1080p FROM epizod_db", vec![]),
         ("SELECT avatar_file FROM users_db", vec![]),
-        // Kadr (`media_thumb`) ham SHU YERDA bo'lishi SHART: aks
-        // holda tozalovchi uni "yetim" deb o'chirib yuborardi va
-        // videolar kadrsiz qolardi. Pastdagi halqa qatordagi
-        // BARCHA ustunni oladi, shu sabab ikkovi ham yetadi.
-        ("SELECT media_file, media_thumb FROM chat_messages", vec![]),
+        ("SELECT media_file FROM chat_messages", vec![]),
     ]).await?;
 
     let mut keep: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -3347,11 +3021,41 @@ fn yosh_of(v: &Value) -> i64 {
 struct EpizodFields {
     number: i64,
     name: String,
-    /// `url_360p`, `size_360p`, `url_480p`, ... — jadvaldagi tartibda.
-    media: [String; 8],
+    /// Har sifat (360p, 480p, 720p, 1080p): (fayl nomi, hajm baytda,
+    /// kalit). Kalit faqat YANGI yuklangan fayl uchun keladi — bo'sh
+    /// bo'lsa va nom o'zgarmagan bo'lsa bazadagisi saqlanadi (PUT).
+    media: [(String, i64, String); 4],
     /// `intro_1 ... intro_10` — admin yozgan MATN (`"5:14"`).
     /// Bo'sh satr = belgilanmagan.
     intros: [String; INTRO_SLOTS],
+}
+
+/// Qism sifatlari — `epizod_db` dagi tartibda.
+const QUALITIES: [&str; 4] = ["360p", "480p", "720p", "1080p"];
+
+/// Hajm: son (bayt). Eski ilova matn yuborsa ("12.34 MB") — 0.
+fn size_bytes(v: &Value) -> i64 {
+    v.as_i64()
+        .or_else(|| v.as_str().and_then(|t| t.trim().parse::<i64>().ok()))
+        .unwrap_or(0)
+        .max(0)
+}
+
+/// AES-128 kaliti: aniq 32 ta hex belgi.
+fn valid_file_key(k: &str) -> bool {
+    k.len() == 32 && k.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// Qism yozuvidan kalitlarni olib tashlaydi — ro'yxat hammaga
+/// (va chekka keshga) beriladi, kalit esa faqat `/api/tg/deliver`
+/// orqali, ruxsat tekshirilgach.
+fn hide_keys(mut obj: Value) -> Value {
+    if let Some(m) = obj.as_object_mut() {
+        for q in QUALITIES {
+            m.remove(&format!("key_{q}"));
+        }
+    }
+    obj
 }
 
 /// `epizod_db` dagi intro ustunlari soni — 5 ta juftlik.
@@ -3372,12 +3076,14 @@ fn epizod_fields(b: &Value) -> EpizodFields {
     EpizodFields {
         number: b["epizod_number"].as_i64().unwrap_or(0),
         name: s("epizod_name"),
-        media: [
-            s("url_360p"), s("size_360p"),
-            s("url_480p"), s("size_480p"),
-            s("url_720p"), s("size_720p"),
-            s("url_1080p"), s("size_1080p"),
-        ],
+        media: QUALITIES.map(|q| {
+            let key = s(&format!("key_{q}")).to_ascii_lowercase();
+            (
+                bare_name(&s(&format!("url_{q}"))),
+                size_bytes(&b[format!("size_{q}")]),
+                if valid_file_key(&key) { key } else { String::new() },
+            )
+        }),
         intros,
     }
 }
@@ -4946,7 +4652,7 @@ async fn sync_route(mut req: Request, env: &Env) -> Result<Response> {
         if old.is_none() { s.rating_count += 1; }
         rate_args.push(vec![
             TursoArg::int(me), TursoArg::int(aid), TursoArg::int(sid),
-            TursoArg::int(stars), TursoArg::int(at), TursoArg::int(at),
+            TursoArg::int(stars), TursoArg::int(at),
         ]);
     }
 
@@ -5000,8 +4706,8 @@ async fn sync_route(mut req: Request, env: &Env) -> Result<Response> {
     }
     for a in &rate_args {
         stmts.push((
-            "INSERT INTO ratings_db (user_id,anime_id,season_id,stars,created_at,updated_at)
-             VALUES (?,?,?,?,?,?)
+            "INSERT INTO ratings_db (user_id,anime_id,season_id,stars,updated_at)
+             VALUES (?,?,?,?,?)
              ON CONFLICT(user_id,anime_id,season_id) DO UPDATE SET
                 stars=excluded.stars, updated_at=excluded.updated_at",
             a.clone(),
@@ -5549,8 +5255,8 @@ async fn billing_create(mut req: Request, env: &Env) -> Result<Response> {
         vec![TursoArg::int(now)]).await;
     turso_exec(env,
         "INSERT INTO payments_db
-            (order_id,user_id,amount,status,pay_url,created_at,expires_at,paid_at)
-         VALUES (?,?,?,'pending',?,?,?,0)
+            (order_id,user_id,amount,status,pay_url,created_at,expires_at)
+         VALUES (?,?,?,'pending',?,?,?)
          ON CONFLICT(order_id) DO UPDATE SET
             user_id=excluded.user_id, amount=excluded.amount,
             pay_url=excluded.pay_url, expires_at=excluded.expires_at",
@@ -5586,9 +5292,9 @@ async fn credit_payment(env: &Env, order_id: &str, user: i64, amount: i64)
 {
     let now = now_ms();
     let upd = turso_exec(env,
-        "UPDATE payments_db SET status='paid', paid_at=?
+        "UPDATE payments_db SET status='paid'
           WHERE order_id=? AND status='pending' RETURNING order_id",
-        vec![TursoArg::int(now), TursoArg::text(order_id)]).await?;
+        vec![TursoArg::text(order_id)]).await?;
     if first_row(&upd).is_none() {
         return Ok(false);
     }
@@ -5919,10 +5625,9 @@ async fn billing_subscribe(mut req: Request, env: &Env) -> Result<Response> {
     let left = row["balance"].as_i64().unwrap_or(balance - price);
 
     turso_batch(env, &[
-        ("INSERT INTO subs_db (user_id,expires_at,updated_at) VALUES (?,?,?)
-          ON CONFLICT(user_id) DO UPDATE SET
-             expires_at=excluded.expires_at, updated_at=excluded.updated_at",
-         vec![TursoArg::int(me), TursoArg::int(until), TursoArg::int(now)]),
+        ("INSERT INTO subs_db (user_id,expires_at) VALUES (?,?)
+          ON CONFLICT(user_id) DO UPDATE SET expires_at=excluded.expires_at",
+         vec![TursoArg::int(me), TursoArg::int(until)]),
         ("INSERT INTO billing_log (id,user_id,kind,amount,days,note,created_at)
           VALUES (?,?,'subscription',?,?,?,?)",
          vec![
@@ -6005,7 +5710,6 @@ fn comment_public(origin: &str, r: &Value) -> Value {
         "liked": r["liked"].as_i64().unwrap_or(0) != 0,
         "deleted": deleted,
         "created_at": r["created_at"].as_i64().unwrap_or(0),
-        "edited_at": r["edited_at"].as_i64().unwrap_or(0),
     })
 }
 
@@ -6015,7 +5719,7 @@ fn comment_public(origin: &str, r: &Value) -> Value {
 /// javoblari. `me` — "men layk bosganmi" belgisi uchun.
 const COMMENT_SELECT: &str =
     "SELECT c.id, c.parent_id, c.user_id, c.body, c.likes,
-            c.reply_count, c.deleted, c.created_at, c.edited_at,
+            c.reply_count, c.deleted, c.created_at,
             u.first_name AS first_name, u.username AS username,
             u.avatar_file AS avatar_file,
             (SELECT COUNT(*) FROM comment_likes l
@@ -6162,8 +5866,8 @@ async fn comments_add(mut req: Request, env: &Env, origin: &str) -> Result<Respo
     turso_exec(env,
         "INSERT INTO comments_db
             (id,anime_id,season_id,user_id,parent_id,body,
-             likes,reply_count,deleted,created_at,edited_at)
-         VALUES (?,?,?,?,?,?,0,0,0,?,0)",
+             likes,reply_count,deleted,created_at)
+         VALUES (?,?,?,?,?,?,0,0,0,?)",
         vec![
             TursoArg::text(&id), TursoArg::int(aid), TursoArg::int(sid),
             TursoArg::int(me), TursoArg::text(&parent), TursoArg::text(&body),
@@ -6196,7 +5900,6 @@ async fn comments_add(mut req: Request, env: &Env, origin: &str) -> Result<Respo
         "liked": false,
         "deleted": false,
         "created_at": now,
-        "edited_at": 0,
     }))
 }
 
@@ -6229,12 +5932,11 @@ async fn comments_like(mut req: Request, env: &Env) -> Result<Response> {
     // Birlamchi kalit tufayli takroriy layk qatorga TEGMAYDI va
     // `RETURNING` hech narsa qaytarmaydi — ya'ni hisob ham
     // oshmaydi. So'rov ikki marta kelsa ham natija bir xil.
-    let now = now_ms();
     let ins = turso_exec(env,
-        "INSERT INTO comment_likes (comment_id,user_id,created_at)
-         VALUES (?,?,?) ON CONFLICT(comment_id,user_id) DO NOTHING
+        "INSERT INTO comment_likes (comment_id,user_id)
+         VALUES (?,?) ON CONFLICT(comment_id,user_id) DO NOTHING
          RETURNING comment_id",
-        vec![TursoArg::text(&id), TursoArg::int(me), TursoArg::int(now)],
+        vec![TursoArg::text(&id), TursoArg::int(me)],
     ).await?;
 
     let liked = if first_row(&ins).is_some() {
@@ -6394,12 +6096,6 @@ fn chat_msg_public(origin: &str, r: &Value) -> Value {
         },
         "media_type": r["media_type"].as_str().unwrap_or(""),
         "media_ms": r["media_ms"].as_i64().unwrap_or(0),
-        // Videoning kadri — oddiy rasm, o'sha `/api/media/` yo'li
-        // bilan beriladi. Eski xabarlarda bo'sh.
-        "media_thumb_url": match r["media_thumb"].as_str().unwrap_or("") {
-            "" => String::new(),
-            t => format!("{origin}/api/media/{t}"),
-        },
         // Suhbatdosh o'qiganmi: ilovada bitta yoki ikkita belgi.
         "seen": r["seen"].as_i64().unwrap_or(0) != 0,
         "created_at": r["created_at"].as_i64().unwrap_or(0),
@@ -6642,6 +6338,12 @@ async fn chat_send(mut req: Request, env: &Env, origin: &str) -> Result<Response
     // panelidagi video yuklash bilan bir xil yo'l), bu yerga esa
     // faqat NOMI keladi.
     let media_file = bare_name(b["media_file"].as_str().unwrap_or("")).trim().to_string();
+    // Faqat O'Z faylini biriktira oladi (admin — istalganini). Aks
+    // holda boshqa odamning `chat_` faylini o'z suhbatiga "ilib",
+    // `/api/tg/deliver` dagi suhbat tekshiruvidan o'tib olardi.
+    if !media_file.is_empty() && !is_admin(&u) && !media_file.starts_with(&format!("chat_{me}_")) {
+        return json_resp(&json!({"error": "Fayl sizniki emas"}), 403);
+    }
     let media_type = match b["media_type"].as_str().unwrap_or("") {
         "image" => "image",
         "video" => "video",
@@ -6653,9 +6355,6 @@ async fn chat_send(mut req: Request, env: &Env, origin: &str) -> Result<Response
     // Ovozli xabarning uzunligi — ilova yozib olganda o'lchaydi.
     // 0 dan kichik yoki bemaza katta qiymat qabul qilinmaydi.
     let media_ms = b["media_ms"].as_i64().unwrap_or(0).clamp(0, 3_600_000);
-    // Videoning kadri — YUBORUVCHI yasagan kichik JPEG. Faqat
-    // fayl NOMI keladi (yo'l emas), xuddi `media_file` kabi.
-    let media_thumb = bare_name(b["media_thumb"].as_str().unwrap_or("")).trim().to_string();
     // Nomi bor-u turi yo'q (yoki aksincha) — yaroqsiz juftlik.
     let has_media = !media_file.is_empty() && !media_type.is_empty();
     if body.is_empty() && !has_media {
@@ -6712,8 +6411,8 @@ async fn chat_send(mut req: Request, env: &Env, origin: &str) -> Result<Response
     turso_batch(env, &[
         ("INSERT INTO chat_messages
             (id,user_id,from_admin,body,media_file,media_type,media_ms,
-             media_thumb,created_at)
-          VALUES (?,?,?,?,?,?,?,?,?)",
+             created_at)
+          VALUES (?,?,?,?,?,?,?,?)",
          vec![
             TursoArg::text(&id), TursoArg::int(target),
             TursoArg::int(if from_admin { 1 } else { 0 }),
@@ -6721,12 +6420,6 @@ async fn chat_send(mut req: Request, env: &Env, origin: &str) -> Result<Response
             TursoArg::text(if has_media { &media_file } else { "" }),
             TursoArg::text(if has_media { media_type } else { "" }),
             TursoArg::int(if has_media { media_ms } else { 0 }),
-            // Kadr FAQAT video uchun ma'noli.
-            TursoArg::text(if has_media && media_type == "video" {
-                &media_thumb
-            } else {
-                ""
-            }),
             TursoArg::int(now),
          ]),
         ("INSERT INTO chat_threads
@@ -6758,12 +6451,6 @@ async fn chat_send(mut req: Request, env: &Env, origin: &str) -> Result<Response
         },
         "media_type": if has_media { media_type } else { "" },
         "media_ms": if has_media { media_ms } else { 0 },
-        "media_thumb_url": if has_media && media_type == "video"
-            && !media_thumb.is_empty() {
-            format!("{origin}/api/media/{media_thumb}")
-        } else {
-            String::new()
-        },
         "seen": false,
         "created_at": now,
     }))
@@ -7072,8 +6759,7 @@ async fn chat_del_message(req: &Request, env: &Env, id: &str) -> Result<Response
     // unga ishora qilgan yagona qator ham yo'q bo'lgan bo'lardi.
     // Ya'ni fayl abadiy yotib, ombor uchun pul yeb turardi.
     let row = turso_exec(env,
-        "DELETE FROM chat_messages WHERE id=? RETURNING user_id, media_file,
-                media_thumb",
+        "DELETE FROM chat_messages WHERE id=? RETURNING user_id, media_file",
         vec![TursoArg::text(id)]).await?;
     let Some(r) = first_row(&row) else {
         return json_resp(&json!({"error": "Xabar topilmadi"}), 404);
@@ -7082,12 +6768,6 @@ async fn chat_del_message(req: &Request, env: &Env, id: &str) -> Result<Response
     let file = r["media_file"].as_str().unwrap_or("");
     if !file.is_empty() {
         b2_delete(env, file).await;
-    }
-    // Videoning kadri ham yetim qolmasin: unga ishora qilgan
-    // yagona qator hozirgina o'chdi.
-    let thumb = r["media_thumb"].as_str().unwrap_or("");
-    if !thumb.is_empty() {
-        b2_delete(env, thumb).await;
     }
 
     // Suhbat qatoridagi "oxirgi xabar" endi boshqa bo'lishi
@@ -7157,10 +6837,9 @@ async fn chat_del_many(mut req: Request, env: &Env) -> Result<Response> {
 
     // B2'dagi fayllar ham o'chiriladi (yuqoridagi izohga qarang).
     let files_res = turso_exec(env,
-        &format!("SELECT media_file, media_thumb FROM chat_messages
+        &format!("SELECT media_file FROM chat_messages
                    WHERE id IN ({holes})"),
         args.clone()).await?;
-    // Qatordagi HAR IKKI ustun olinadi: faylning o'zi va kadri.
     let files: Vec<String> = files_res["rows"]
         .as_array()
         .map(|rows| {
@@ -7199,10 +6878,9 @@ async fn chat_del_thread(req: &Request, env: &Env, user: i64) -> Result<Response
     // B2'dagi fayllar ham o'chiriladi (`chat_del_message`
     // izohiga qarang).
     let files_res = turso_exec(env,
-        "SELECT media_file, media_thumb FROM chat_messages
+        "SELECT media_file FROM chat_messages
           WHERE user_id=?",
         vec![TursoArg::int(user)]).await?;
-    // Qatordagi HAR IKKI ustun olinadi: faylning o'zi va kadri.
     let files: Vec<String> = files_res["rows"]
         .as_array()
         .map(|rows| {
@@ -7961,7 +7639,7 @@ async fn user_stats_list(
         ),
         "comments" => (
             "SELECT c.id, c.parent_id, c.anime_id, c.season_id, c.body,
-                    c.likes, c.reply_count, c.created_at, c.edited_at,
+                    c.likes, c.reply_count, c.created_at,
                     s.nomi AS season_name, s.photo_url AS photo_url,
                     a.name AS anime_name
                FROM comments_db c
@@ -8231,8 +7909,7 @@ async fn admin_user_action(
         "ban" | "unban" => {
             if action == "unban" {
                 let row = turso_exec(env,
-                    "UPDATE users_db SET is_banned=0, ban_until=0, ban_reason='',
-                            banned_at=0
+                    "UPDATE users_db SET is_banned=0, ban_until=0, ban_reason=''
                       WHERE id=? RETURNING is_banned",
                     vec![TursoArg::int(id)]).await?;
                 if first_row(&row).is_none() {
@@ -8249,12 +7926,11 @@ async fn admin_user_action(
             let until = if days > 0 { now + days * 86_400_000 } else { 0 };
 
             let row = turso_exec(env,
-                "UPDATE users_db SET is_banned=1, ban_until=?, ban_reason=?,
-                        banned_at=?
+                "UPDATE users_db SET is_banned=1, ban_until=?, ban_reason=?
                   WHERE id=? RETURNING is_banned",
                 vec![
                     TursoArg::int(until), TursoArg::text(&reason),
-                    TursoArg::int(now), TursoArg::int(id),
+                    TursoArg::int(id),
                 ]).await?;
             if first_row(&row).is_none() {
                 return json_resp(&json!({"error": "Foydalanuvchi topilmadi"}), 404);
@@ -8322,10 +7998,9 @@ async fn admin_user_action(
                 format!("{} kun obuna olindi (admin)", -days)
             };
             let _ = turso_batch(env, &[
-                ("INSERT INTO subs_db (user_id,expires_at,updated_at) VALUES (?,?,?)
-                  ON CONFLICT(user_id) DO UPDATE SET
-                     expires_at=excluded.expires_at, updated_at=excluded.updated_at",
-                 vec![TursoArg::int(id), TursoArg::int(until), TursoArg::int(now)]),
+                ("INSERT INTO subs_db (user_id,expires_at) VALUES (?,?)
+                  ON CONFLICT(user_id) DO UPDATE SET expires_at=excluded.expires_at",
+                 vec![TursoArg::int(id), TursoArg::int(until)]),
                 ("INSERT INTO billing_log (id,user_id,kind,amount,days,note,created_at)
                   VALUES (?,?,'subscription',0,?,?,?)",
                  vec![
@@ -9005,12 +8680,6 @@ async fn auth_route(req: Request, env: &Env, origin: &str, path: &str, method: M
                 return err500("Saqlab bo'lmadi");
             };
 
-            // Sessiyalar jurnalidagi nusxa ham yangilansin.
-            let _ = turso_exec(env,
-                "UPDATE sessions_db SET username=?,first_name=? WHERE user_id=?",
-                vec![TursoArg::text(&username), TursoArg::text(&first_name),
-                     TursoArg::int(me)]).await;
-
             ok_nostore(json!({"user": user_public(origin, &nu)}))
         }
 
@@ -9127,9 +8796,8 @@ async fn auth_route(req: Request, env: &Env, origin: &str, path: &str, method: M
             }
             if !avatar_gone {
                 stmts.push((
-                    "INSERT OR IGNORE INTO orphan_files (file_name,noted_at)
-                     VALUES (?,?)",
-                    vec![TursoArg::text(&avatar), TursoArg::int(now_ms())],
+                    "INSERT OR IGNORE INTO orphan_files (file_name) VALUES (?)",
+                    vec![TursoArg::text(&avatar)],
                 ));
             }
             for sql in [
@@ -9949,19 +9617,70 @@ async fn tg_route(mut req: Request, env: &Env, path: &str, method: Method) -> Re
             if tg_user == 0 || channel == 0 {
                 return json_resp(&json!({"error": "disabled"}), 503);
             }
+            // ── YOZISHMA FAYLLARI FAQAT SUHBAT ISHTIROKCHILARIGA ──
+            //
+            // TOPILGAN XATO: ilgari istalgan hisob `chat_<id>_...`
+            // nomini bilsa (yoki taxmin qilsa) boshqa odamning
+            // support'ga yuborgan rasmi/videosi/ovozini olardi.
+            //
+            // Endi `chat_` fayl beriladi, agar:
+            //   * so'rovchi admin bo'lsa (u hamma suhbatni ko'radi);
+            //   * fayl so'rovchining O'ZINIKI bo'lsa (`chat_<men>_`);
+            //   * fayl so'rovchining suhbatidagi xabarda bo'lsa (admin
+            //     unga yuborgan fayl) — `chat_messages` da tekshiriladi.
+            // Oxirgisi bitta so'rov bilan va faqat shunday nomlar
+            // bo'lsa (odatda ekranda bir nechta rasm).
+            let admin = is_admin(&u);
+            let own = format!("chat_{me}_");
+            let foreign: Vec<String> = if admin {
+                Vec::new()
+            } else {
+                names.iter().filter(|n| n.starts_with("chat_") && !n.starts_with(&own)).cloned().collect()
+            };
+            let mut queries: Vec<(String, Vec<TursoArg>)> = Vec::new();
             let marks = vec!["?"; names.len()].join(",");
-            let sql = format!("SELECT file_name, msg_id FROM tg_files WHERE file_name IN ({marks})");
-            let args: Vec<TursoArg> = names.iter().map(|n| TursoArg::text(n)).collect();
-            let res = turso_many(env, &[
-                (sql.as_str(), args),
-                ("SELECT expires_at FROM subs_db WHERE user_id=?", vec![TursoArg::int(me)]),
-            ]).await?;
+            queries.push((
+                format!("SELECT file_name, msg_id, file_key FROM tg_files WHERE file_name IN ({marks})"),
+                names.iter().map(|n| TursoArg::text(n)).collect(),
+            ));
+            queries.push(("SELECT expires_at FROM subs_db WHERE user_id=?".to_string(), vec![TursoArg::int(me)]));
+            if !foreign.is_empty() {
+                let marks = vec!["?"; foreign.len()].join(",");
+                let mut args = vec![TursoArg::int(me)];
+                args.extend(foreign.iter().map(|n| TursoArg::text(n)));
+                queries.push((
+                    format!("SELECT DISTINCT media_file FROM chat_messages WHERE user_id=? AND media_file IN ({marks})"),
+                    args,
+                ));
+            }
+            let refs: Vec<(&str, Vec<TursoArg>)> = queries.iter().map(|(q, a)| (q.as_str(), a.clone())).collect();
+            let res = turso_many(env, &refs).await?;
+            let allowed: std::collections::HashSet<String> = res.get(2)
+                .map(|r| {
+                    let c = r["cols"].as_array().cloned().unwrap_or_default();
+                    r["rows"].as_array().cloned().unwrap_or_default().iter()
+                        .filter_map(|row| row_to_obj(&c, row.as_array().unwrap_or(&vec![]))["media_file"]
+                            .as_str().map(|v| v.to_string()))
+                        .collect()
+                })
+                .unwrap_or_default();
             let found = res.first().cloned().unwrap_or(json!({}));
             let cols = found["cols"].as_array().cloned().unwrap_or_default();
+            let mut keys = serde_json::Map::new();
             let mut pairs: Vec<(String, i64)> = found["rows"].as_array().cloned().unwrap_or_default()
                 .iter()
                 .map(|r| row_to_obj(&cols, r.as_array().unwrap_or(&vec![])))
-                .filter_map(|o| Some((o["file_name"].as_str()?.to_string(), o["msg_id"].as_i64()?)))
+                .filter_map(|o| {
+                    let name = o["file_name"].as_str()?.to_string();
+                    if foreign.contains(&name) && !allowed.contains(&name) {
+                        return None;
+                    }
+                    let key = o["file_key"].as_str().unwrap_or("");
+                    if !key.is_empty() {
+                        keys.insert(name.clone(), json!(key));
+                    }
+                    Some((name, o["msg_id"].as_i64()?))
+                })
                 .collect();
             if pairs.is_empty() {
                 return json_resp(&json!({"error": "not_on_telegram"}), 404);
@@ -9970,7 +9689,7 @@ async fn tg_route(mut req: Request, env: &Env, path: &str, method: Method) -> Re
             // rasmlar va yozishma fayllari obunasiz ham ko'rinadi.
             let until = res.get(1).and_then(first_row)
                 .and_then(|r| r["expires_at"].as_i64()).unwrap_or(0);
-            if !is_admin(&u) && until <= now_ms() && pairs.iter().any(|(n, _)| n.starts_with("ep_")) {
+            if !admin && until <= now_ms() && pairs.iter().any(|(n, _)| n.starts_with("ep_")) {
                 return json_resp(&json!({"error": "subscription"}), 402);
             }
             // `copyMessages` raqamlar O'SIB boradigan tartibda bo'lishini talab qiladi.
@@ -10004,6 +9723,8 @@ async fn tg_route(mut req: Request, env: &Env, path: &str, method: Method) -> Re
                 "msg_id": if sent > 0 { 1 } else { 0 },
                 "sent": sent,
                 "files": delivered,
+                // Shifrlangan fayllarning ochish kalitlari (AES-128-CTR).
+                "keys": keys,
             }))
         }
 
@@ -10016,9 +9737,24 @@ async fn tg_route(mut req: Request, env: &Env, path: &str, method: Method) -> Re
             if !tg_safe_name(&name) {
                 return json_resp(&json!({"error": "bad_file"}), 400);
             }
-            let res = turso_exec(env, "SELECT 1 AS ok FROM tg_files WHERE file_name=?",
+            let key = url.query_pairs().find(|(k, _)| k == "key")
+                .map(|(_, v)| v.to_ascii_lowercase()).unwrap_or_default();
+            let res = turso_exec(env, "SELECT file_key FROM tg_files WHERE file_name=?",
                 vec![TursoArg::text(&name)]).await?;
-            ok_nostore(json!({"ready": first_row(&res).is_some()}))
+            let Some(row) = first_row(&res) else {
+                return ok_nostore(json!({"ready": false}));
+            };
+            // Ochish kaliti — faqat O'Z faylingizga va faqat bir marta
+            // (bo'sh bo'lsa). Admin — istalganiga.
+            let own = name.starts_with(&format!("avatar_{me}_")) || name.starts_with(&format!("chat_{me}_"));
+            if valid_file_key(&key)
+                && (own || is_admin(&u))
+                && row["file_key"].as_str().unwrap_or("").is_empty()
+            {
+                turso_exec(env, "UPDATE tg_files SET file_key=? WHERE file_name=? AND file_key=''",
+                    vec![TursoArg::text(&key), TursoArg::text(&name)]).await?;
+            }
+            ok_nostore(json!({"ready": true}))
         }
 
         // ADMIN: ilova videoni kanalga yukladi — fayl nomini postga
@@ -10031,13 +9767,15 @@ async fn tg_route(mut req: Request, env: &Env, path: &str, method: Method) -> Re
             let body: Value = req.json().await.unwrap_or(json!({}));
             let name = body["file"].as_str().unwrap_or("").trim().to_string();
             let msg_id = body["msg_id"].as_i64().unwrap_or(0);
+            let key = body["key"].as_str().unwrap_or("").trim().to_ascii_lowercase();
+            let key = if valid_file_key(&key) { key } else { String::new() };
             if !tg_safe_name(&name) || msg_id <= 0 {
                 return json_resp(&json!({"error": "bad_request"}), 400);
             }
             turso_batch(env, &[
-                ("INSERT INTO tg_files (file_name, msg_id) VALUES (?, ?)
-                  ON CONFLICT(file_name) DO UPDATE SET msg_id=excluded.msg_id",
-                 vec![TursoArg::text(&name), TursoArg::int(msg_id)]),
+                ("INSERT INTO tg_files (file_name, msg_id, file_key) VALUES (?, ?, ?)
+                  ON CONFLICT(file_name) DO UPDATE SET msg_id=excluded.msg_id, file_key=excluded.file_key",
+                 vec![TursoArg::text(&name), TursoArg::int(msg_id), TursoArg::text(&key)]),
             ]).await?;
             ok_nostore(json!({"ok": true}))
         }
@@ -10567,12 +10305,19 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
                 TursoArg::text(&anime_id), TursoArg::text(&season_id), TursoArg::int(new_id),
                 TursoArg::int(ef.number), TursoArg::text(&ef.name),
             ];
-            for m in &ef.media { args.push(TursoArg::text(m)); }
+            for (url, size, key) in &ef.media {
+                args.push(TursoArg::text(url));
+                args.push(TursoArg::int(*size));
+                args.push(TursoArg::text(key));
+            }
             for v in &ef.intros { args.push(TursoArg::text(v)); }
             args.push(TursoArg::int(now_ms()));
             let res = turso_exec(&env,
-                "INSERT INTO epizod_db (anime_id,season_id,epizod_id,epizod_number,epizod_name,url_360p,size_360p,url_480p,size_480p,url_720p,size_720p,url_1080p,size_1080p,intro_1,intro_2,intro_3,intro_4,intro_5,intro_6,intro_7,intro_8,intro_9,intro_10,created_at)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING *",
+                "INSERT INTO epizod_db (anime_id,season_id,epizod_id,epizod_number,epizod_name,
+                    url_360p,size_360p,key_360p,url_480p,size_480p,key_480p,
+                    url_720p,size_720p,key_720p,url_1080p,size_1080p,key_1080p,
+                    intro_1,intro_2,intro_3,intro_4,intro_5,intro_6,intro_7,intro_8,intro_9,intro_10,created_at)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING *",
                 args,
             ).await?;
             let cols = res["cols"].as_array().cloned().unwrap_or_default();
@@ -10587,7 +10332,7 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
                     TursoArg::text(&anime_id), TursoArg::text(&season_id),
                     TursoArg::text(&anime_id), TursoArg::text(&season_id),
                 ]).await;
-            created(resolve_fields(&origin, row_to_obj(&cols, rows[0].as_array().unwrap_or(&vec![])), EPIZOD_URL_KEYS))
+            created(hide_keys(resolve_fields(&origin, row_to_obj(&cols, rows[0].as_array().unwrap_or(&vec![])), EPIZOD_URL_KEYS)))
         }
 
         _ => {
@@ -10623,7 +10368,7 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
                         vec![TursoArg::text(parts[0]), TursoArg::text(parts[1])]).await?;
                     let cols = res["cols"].as_array().cloned().unwrap_or_default();
                     let rows = res["rows"].as_array().cloned().unwrap_or_default();
-                    let items = rows.iter().map(|r| row_to_obj(&cols, r.as_array().unwrap_or(&vec![]))).collect::<Vec<_>>();
+                    let items = rows.iter().map(|r| hide_keys(row_to_obj(&cols, r.as_array().unwrap_or(&vec![])))).collect::<Vec<_>>();
                     return ok(json!(resolve_list(&origin, items, EPIZOD_URL_KEYS)));
                 }
 
@@ -10638,21 +10383,37 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
                             let mut args = vec![
                                 TursoArg::int(ef.number), TursoArg::text(&ef.name),
                             ];
-                            for m in &ef.media { args.push(TursoArg::text(m)); }
+                            // Kalit: yangi fayl bilan kelgan bo'lsa — o'sha;
+                            // aks holda fayl o'zgarmagan bo'lsa bazadagisi
+                            // qoladi (tahrirlash oynasi kalitni bilmaydi,
+                            // u ro'yxatda berilmaydi), fayl almashgan
+                            // bo'lsa — bo'sh. SQLite'da o'ng tomondagi
+                            // ustun ESKI qiymatni beradi.
+                            let mut sets = String::new();
+                            for (q, (url, size, key)) in QUALITIES.iter().zip(&ef.media) {
+                                sets.push_str(&format!(
+                                    "url_{q}=?,size_{q}=?,key_{q}=CASE WHEN ?<>'' THEN ? WHEN url_{q}=? THEN key_{q} ELSE '' END,"
+                                ));
+                                args.push(TursoArg::text(url));
+                                args.push(TursoArg::int(*size));
+                                args.push(TursoArg::text(key));
+                                args.push(TursoArg::text(key));
+                                args.push(TursoArg::text(url));
+                            }
                             for v in &ef.intros { args.push(TursoArg::text(v)); }
                             args.push(TursoArg::int(aid));
                             args.push(TursoArg::int(sid));
                             args.push(TursoArg::int(eid));
                             let res = turso_exec(&env,
-                                "UPDATE epizod_db SET epizod_number=?,epizod_name=?,url_360p=?,size_360p=?,url_480p=?,size_480p=?,url_720p=?,size_720p=?,url_1080p=?,size_1080p=?,
+                                &format!("UPDATE epizod_db SET epizod_number=?,epizod_name=?,{sets}
                                         intro_1=?,intro_2=?,intro_3=?,intro_4=?,intro_5=?,intro_6=?,intro_7=?,intro_8=?,intro_9=?,intro_10=?
-                                 WHERE anime_id=? AND season_id=? AND epizod_id=? RETURNING *",
+                                 WHERE anime_id=? AND season_id=? AND epizod_id=? RETURNING *"),
                                 args,
                             ).await?;
                             let cols = res["cols"].as_array().cloned().unwrap_or_default();
                             let rows = res["rows"].as_array().cloned().unwrap_or_default();
                             if rows.is_empty() { return err500("Yangilashda xato"); }
-                            return ok(resolve_fields(&origin, row_to_obj(&cols, rows[0].as_array().unwrap_or(&vec![])), EPIZOD_URL_KEYS));
+                            return ok(hide_keys(resolve_fields(&origin, row_to_obj(&cols, rows[0].as_array().unwrap_or(&vec![])), EPIZOD_URL_KEYS)));
                         }
 
                         if method == Method::Delete {
@@ -10681,11 +10442,11 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
                     if let (Ok(aid), Ok(sid), Ok(eid)) = (
                         parts[0].parse::<i64>(), parts[1].parse::<i64>(), parts[2].parse::<i64>()
                     ) {
-                        let (uc, sc) = match parts[3] {
-                            "360p" => ("url_360p", "size_360p"),
-                            "480p" => ("url_480p", "size_480p"),
-                            "720p" => ("url_720p", "size_720p"),
-                            "1080p" => ("url_1080p", "size_1080p"),
+                        let (uc, sc, kc) = match parts[3] {
+                            "360p" => ("url_360p", "size_360p", "key_360p"),
+                            "480p" => ("url_480p", "size_480p", "key_480p"),
+                            "720p" => ("url_720p", "size_720p", "key_720p"),
+                            "1080p" => ("url_1080p", "size_1080p", "key_1080p"),
                             _ => return err404("Noto'g'ri sifat"),
                         };
                         let old = turso_exec(&env,
@@ -10698,7 +10459,7 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
                             if !fu.is_empty() { b2_delete(&env, &fu).await; }
                         }
                         turso_exec(&env,
-                            &format!("UPDATE epizod_db SET {uc}='',{sc}='' WHERE anime_id=? AND season_id=? AND epizod_id=?"),
+                            &format!("UPDATE epizod_db SET {uc}='',{sc}=0,{kc}='' WHERE anime_id=? AND season_id=? AND epizod_id=?"),
                             vec![TursoArg::int(aid), TursoArg::int(sid), TursoArg::int(eid)]).await?;
                         return ok(json!({"success": true}));
                     }

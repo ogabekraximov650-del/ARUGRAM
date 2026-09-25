@@ -11,6 +11,7 @@ import '../theme/app_background.dart';
 import '../services/intro_times.dart';
 import '../widgets/glass.dart';
 import '../services/api_base.dart';
+import '../services/format.dart';
 import '../services/telegram_service.dart';
 
 const String _apiBase = kApiBase;
@@ -34,7 +35,17 @@ class _QualityState {
 
   // BARE B2 fayl nomi (to'liq URL emas) — server shu holda kutadi.
   String? url;
-  String? size;
+
+  /// Fayl hajmi BAYTDA (`epizod_db.size_*`).
+  int sizeBytes = 0;
+
+  /// Faylning AES-128-CTR kaliti (hex) — faqat shu ekranda YANGI
+  /// yuklangan fayl uchun ma'lum. Bo'sh bo'lsa server fayl nomi
+  /// o'zgarmagan ekan deb bazadagi kalitni saqlab qoladi.
+  String key = '';
+
+  /// Ekranda ko'rsatiladigan hajm.
+  String? get size => sizeBytes > 0 ? fileSizeLabel(sizeBytes) : null;
   bool isUploading = false;
   double progress = 0; // 0.0 – 1.0
   int uploadedBytes = 0;
@@ -136,7 +147,7 @@ class _AddEpizodScreenState extends State<AddEpizodScreen> {
         // Worker GET javobida to'liq URL keladi — bare nomga qaytaramiz,
         // saqlashda serverga aynan shu (bare) holida yuboriladi.
         q.url = _extractFileName(ep[q.urlKey] as String?);
-        q.size = ep[q.sizeKey] as String?;
+        q.sizeBytes = fileSizeBytes(ep[q.sizeKey]);
       }
     }
   }
@@ -259,12 +270,12 @@ class _AddEpizodScreenState extends State<AddEpizodScreen> {
             ? jsonDecode(response.data as String)
             : response.data;
         final b2Name = data['fileName'] as String;
-        final sizeTxt = _formatSize(fileSizeBytes);
         if (mounted) {
           setState(() {
             // Serverga BARE fayl nomi saqlanadi (to'liq URL emas).
             q.url = b2Name;
-            q.size = sizeTxt;
+            q.sizeBytes = fileSizeBytes;
+            q.key = '';
             q.isUploading = false;
             q.progress = 1.0;
           });
@@ -330,7 +341,8 @@ class _AddEpizodScreenState extends State<AddEpizodScreen> {
     }
     setState(() {
       q.url = fileName;
-      q.size = _formatSize(size);
+      q.sizeBytes = size;
+      q.key = TelegramService.instance.keyFor(fileName);
       q.isUploading = false;
       q.progress = 1.0;
     });
@@ -376,7 +388,8 @@ class _AddEpizodScreenState extends State<AddEpizodScreen> {
       // Hali saqlanmagan — faqat local tozalash
       setState(() {
         q.url = null;
-        q.size = null;
+        q.sizeBytes = 0;
+        q.key = '';
       });
       return;
     }
@@ -393,7 +406,8 @@ class _AddEpizodScreenState extends State<AddEpizodScreen> {
         if (mounted)
           setState(() {
             q.url = null;
-            q.size = null;
+            q.sizeBytes = 0;
+            q.key = '';
           });
       } else {
         throw res.body;
@@ -424,13 +438,17 @@ class _AddEpizodScreenState extends State<AddEpizodScreen> {
         'epizod_number': int.tryParse(_numberCtrl.text) ?? 0,
         'epizod_name': _nameCtrl.text,
         'url_360p': _qualities[0].url ?? '',
-        'size_360p': _qualities[0].size ?? '',
+        'size_360p': _qualities[0].sizeBytes,
+        'key_360p': _qualities[0].key,
         'url_480p': _qualities[1].url ?? '',
-        'size_480p': _qualities[1].size ?? '',
+        'size_480p': _qualities[1].sizeBytes,
+        'key_480p': _qualities[1].key,
         'url_720p': _qualities[2].url ?? '',
-        'size_720p': _qualities[2].size ?? '',
+        'size_720p': _qualities[2].sizeBytes,
+        'key_720p': _qualities[2].key,
         'url_1080p': _qualities[3].url ?? '',
-        'size_1080p': _qualities[3].size ?? '',
+        'size_1080p': _qualities[3].sizeBytes,
+        'key_1080p': _qualities[3].key,
         // Intro oraliqlari — YOZILGAN KO'RINISHIDA (`"5:14"`),
         // juftlik bo'lib. Ikki nuqtasiz yozilgan bo'lsa
         // (`514`) to'g'rilanadi.

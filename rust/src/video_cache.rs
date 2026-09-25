@@ -3281,6 +3281,54 @@ pub extern "C" fn rust_video_cache_stats(urls_json_ptr: *const c_char) -> *mut c
     string_to_cptr(serde_json::Value::Object(out).to_string())
 }
 
+/// ── DISKDA QAYSI JOYLAR BOR (progress chizig'i uchun) ───────────
+///
+/// TALAB (foydalanuvchi): "progress chiziqda qancha bayt yuklangani
+/// oq rangda, xuddi buferdek ko'rinib tursin".
+///
+/// Javob: `{"total": N, "ranges": [[0.0, 0.12], [0.5, 0.53], ...]}` —
+/// diskdagi bo'laklar faylning ULUSHI sifatida, qo'shnilari
+/// birlashtirilgan. Video bitreyti taxminan bir tekis, ya'ni ulush
+/// vaqt chizig'iga ham to'g'ri keladi.
+///
+/// UI oqimida chaqiriladi — `stats` kabi DISKKA CHIQMAYDI
+/// (`stat_snapshot_fast`), faqat xotiradagi ro'yxat o'qiladi.
+#[no_mangle]
+pub extern "C" fn rust_video_cache_ranges(url_ptr: *const c_char) -> *mut c_char {
+    let empty = || string_to_cptr("{\"total\":0,\"ranges\":[]}".to_string());
+    let Some(shared) = SHARED.get() else { return empty() };
+    let Some(url) = (unsafe { cstr_to_str(url_ptr) }) else { return empty() };
+    if url.is_empty() {
+        return empty();
+    }
+    let key = cache_key(url);
+    let dir = shared.cache_root.join(&key);
+    let (total, _) = stat_snapshot_fast(&key, &dir);
+    if total == 0 {
+        return empty();
+    }
+    let mut idx: Vec<u64> = match stats().lock() {
+        Ok(m) => m.get(&key).map(|e| e.have.iter().copied().collect()).unwrap_or_default(),
+        Err(_) => Vec::new(),
+    };
+    idx.sort_unstable();
+    let mut ranges: Vec<(u64, u64)> = Vec::new();
+    for i in idx {
+        let a = i * CHUNK_SIZE;
+        let b = (a + CHUNK_SIZE).min(total);
+        match ranges.last_mut() {
+            Some(r) if r.1 == a => r.1 = b,
+            _ => ranges.push((a, b)),
+        }
+    }
+    let t = total as f64;
+    let list: Vec<serde_json::Value> = ranges
+        .iter()
+        .map(|(a, b)| serde_json::json!([*a as f64 / t, *b as f64 / t]))
+        .collect();
+    string_to_cptr(serde_json::json!({"total": total, "ranges": list}).to_string())
+}
+
 /// ── SHU VIDEO TELEFONDA TO'LIQ BORMI ────────────────────────────
 ///
 /// Pleyer AYNAN SHU javobga qarab manba tanlaydi:

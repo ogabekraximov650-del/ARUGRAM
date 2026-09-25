@@ -117,6 +117,55 @@ Telegram yo'li o'chiq.
 rc1 grammers-crypto'ni buzadi. Cargo.lock repoda yo'q, shu sabab
 olib tashlamang.
 
+## SHIFRLAB YUKLASH (AES-128-CTR) VA BAZA TOZALASH (2026-09-25)
+
+**Shifrlash.** Ilova Telegram'ga yuklaydigan HAR BIR fayl (qism,
+poster, avatar, yozishma fayli) yuklanish paytida AES-128-CTR bilan
+shifrlanadi (`rust/src/telegram.rs` -> `CtrReader`). Har faylga
+alohida tasodifiy 16 baytlik kalit, IV nol. Telegram'da fayl HUJJAT
+(`application/octet-stream`) bo'lib turadi — Telegram uni ochib
+ko'rsata olmaydi. O'qishda `fetch_part` kerakli qismni o'z joyidan
+ochadi (`ctr_apply`), ya'ni faqat kerakli baytlar olinadi.
+- Kalit serverda: `tg_files.file_key` (hamma fayl) va qismlar uchun
+  `epizod_db.key_*`. Admin — `/api/tg/admin/file {key}`, boshqalar —
+  `/api/tg/claim?key=` (faqat o'z `avatar_<id>_`/`chat_<id>_` fayliga).
+- Kalit RO'YXATDA berilmaydi (`hide_keys`), faqat `/api/tg/deliver`
+  javobidagi `keys` da — ruxsat tekshirilgach. Telefonda `keys.bin`
+  (shifrlangan).
+- Kalitsiz fayl (admin Telegram ilovasidan o'zi qo'ygan post) —
+  ochiq, avvalgidek o'qiladi.
+
+**`epizod_db`:** `url_<q>` (fayl nomi), `size_<q>` (BAYT, son),
+`key_<q>`. Fayl nomi o'zgarmaydi (ilova yuklashda yasaydi) — bot
+chatidagi nusxa ham, kesh ham, kalit ham shu nom bo'yicha topiladi;
+Bot API `file_id` foydalanuvchi hisobida ishlamaydi.
+
+**Internet uzilsa pleyer kutadi.** `player_source.rs` tarmoq xatosida
+`RETRY` (-2) qaytaradi, `AruDataSource` 1 s kutib qayta so'raydi —
+pleyer oxirgi kadrda "buferlanmoqda" bo'lib turadi va internet
+qaytgach o'zi davom etadi. Internet uzilganda bot chati "band"lari
+bekor QILINMAYDI (`TelegramService._watchConnectivity`).
+
+**Progress chizig'i:** diskdagi bo'laklar oq rangda
+(`rust_video_cache_ranges` -> `_DiskRanges`).
+
+**Yozishma:** videolar ham `aru://` (diskka keshlanadi); ovozli xabar
+Telegram'dan (`VoicePlayer`); `chat_` fayllari faqat suhbat
+ishtirokchilariga (`/api/tg/deliver`), xabarga faqat o'z faylini
+biriktirish mumkin (`chat_send`).
+
+**Baza tozalash:** `ci/WIPE_DB_ONCE` + `ci/wipe_db.py` —
+`deploy-worker.yml` yangi worker'dan KEYIN bazani tozalaydi va
+worker'ni qayta deploy qiladi. Belgi bazaga yoziladi
+(`app_config.wipe_done`) — bir belgi bilan faqat BIR MARTA. Yana
+tozalash kerak bo'lsa — faylning ichidagi belgini o'zgartiring.
+Sxemada `ALTER` yamoqlari va eski bir martalik tozalashlar YO'Q;
+ishlatilmaydigan ustunlar olib tashlangan (`ratings_db.created_at`,
+`subs_db.updated_at`, `comment_likes.created_at`,
+`payments_db.paid_at`, `orphan_files.noted_at`,
+`comments_db.edited_at`, `chat_messages.media_thumb`,
+`tg_files.file_id`, `users_db.banned_at`, `epizod_db.yosh`).
+
 ## BAZA TOZALANDI VA SXEMA IXCHAMLASHTIRILDI (2026-09)
 
 B2 ombori va Turso bazasi **ikkinchi marta butunlay bo'shatildi**

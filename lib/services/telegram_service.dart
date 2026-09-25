@@ -19,6 +19,15 @@
 //      onlayn ko'rishda baytlar faqat XOTIRADA, yuklab olishda esa
 //      hozirgidek 1 MB lab shifrlanib saqlanadi.
 //
+// ── SHIFRLASH (AES-128-CTR) ─────────────────────────────────
+//
+// Ilova yuklaydigan har bir fayl yuklanish paytida shifrlanadi
+// (`rust/src/telegram.rs` -> "SHIFRLAB YUKLASH"). Kalit serverga
+// yoziladi va faylni ko'rish ruxsati bor odamga `/api/tg/deliver`
+// javobida (`keys`) keladi — shu yerda Rust yadrosiga beriladi
+// (`_applyKeys`), yadro esa Telegram'dan kelgan baytlarni o'zi
+// ochadi.
+//
 // Telegram ulanmagan, video kanalda yo'q yoki biror narsa ishlamasa
 // — hamma joyda odatdagi worker (B2) yo'li ishlaydi. Ya'ni bu xizmat
 // faqat QO'SHIMCHA manba: uning xatosi videoni hech qachon to'xtatmaydi.
@@ -311,8 +320,30 @@ class TelegramService extends ChangeNotifier {
   // Ikkala yo'lda ham fayl baytlari worker'dan o'tmaydi; hajm
   // chegarasi Telegram'niki (2 GB, Premium'da 4 GB).
 
-  /// Faylni Telegram'ga yuklaydi. Muvaffaqiyatda `null`, aks holda
-  /// xato matni. [onProgress] — (yuborilgan, jami) baytlar.
+  /// Oxirgi yuklangan fayllarning ochish kalitlari (hex) — qism
+  /// qo'shish ekrani kalitni `epizod_db.key_*` ga yozadi.
+  final Map<String, String> _uploadedKeys = {};
+
+  /// [fileName] yuklanganda berilgan kalit (bo'lmasa bo'sh satr).
+  String keyFor(String fileName) => _uploadedKeys[fileName] ?? '';
+
+  /// Serverdan kelgan kalitlarni Rust yadrosiga beradi.
+  void _applyKeys(Object? keys) {
+    final lib = _lib;
+    if (lib == null || keys is! Map || keys.isEmpty) return;
+    final f = lib.lookupFunction<Void Function(Pointer<Utf8>),
+        void Function(Pointer<Utf8>)>('rust_tg_set_keys');
+    final j = jsonEncode(keys).toNativeUtf8();
+    try {
+      f(j);
+    } finally {
+      malloc.free(j);
+    }
+  }
+
+  /// Faylni Telegram'ga yuklaydi (yo'lda AES-128-CTR bilan
+  /// shifrlanadi). Muvaffaqiyatda `null`, aks holda xato matni.
+  /// [onProgress] — (yuborilgan, jami) baytlar. Kalit — [keyFor].
   Future<String?> uploadFile(
     String path,
     String fileName,
@@ -351,6 +382,7 @@ class TelegramService extends ChangeNotifier {
 
     // Yuklash Rust'da fon'da ketadi — holatni so'rab turamiz.
     var msgId = 0;
+    var key = '';
     while (true) {
       await Future<void>.delayed(const Duration(milliseconds: 400));
       final st = _json(_take(lib, status(job)));
@@ -361,10 +393,12 @@ class TelegramService extends ChangeNotifier {
         final err = st['error'];
         if (err is String && err.isNotEmpty) return err;
         msgId = (st['msg_id'] as num?)?.toInt() ?? 0;
+        key = (st['key'] as String?) ?? '';
         break;
       }
     }
     _missing.remove(fileName);
+    if (key.isNotEmpty) _uploadedKeys[fileName] = key;
     final s = AuthService.instance.sessionToken;
     if (s == null) return 'Ilova hisobiga kirilmagan';
 
@@ -379,7 +413,8 @@ class TelegramService extends ChangeNotifier {
                   'Authorization': 'Bearer $s',
                   'Content-Type': 'application/json',
                 },
-                body: jsonEncode({'file': fileName, 'msg_id': msgId}),
+                body:
+                    jsonEncode({'file': fileName, 'msg_id': msgId, 'key': key}),
               )
               .timeout(const Duration(seconds: 20));
           if (r.statusCode == 200) return null;
@@ -395,8 +430,10 @@ class TelegramService extends ChangeNotifier {
       for (final wait in const [1, 1, 2, 2, 3, 4, 5]) {
         await Future<void>.delayed(Duration(seconds: wait));
         final r = await http.get(
-          Uri.parse(
-              '$kApiBase/api/tg/claim?file=${Uri.encodeQueryComponent(fileName)}'),
+          // Kalit ham shu yerda yoziladi (faqat o'z faylingizga).
+          Uri.parse('$kApiBase/api/tg/claim'
+              '?file=${Uri.encodeQueryComponent(fileName)}'
+              '&key=${Uri.encodeQueryComponent(key)}'),
           headers: {'Authorization': 'Bearer $s'},
         ).timeout(const Duration(seconds: 15));
         if (r.statusCode == 200 &&
@@ -478,7 +515,9 @@ class TelegramService extends ChangeNotifier {
             )
             .timeout(const Duration(seconds: 25));
         if (r.statusCode == 200) {
-          final files = (jsonDecode(r.body) as Map<String, dynamic>)['files'];
+          final j = jsonDecode(r.body) as Map<String, dynamic>;
+          _applyKeys(j['keys']);
+          final files = j['files'];
           if (files is List) got.addAll(files.whereType<String>());
         }
       }
@@ -600,8 +639,15 @@ class TelegramService extends ChangeNotifier {
         final online =
             r.isNotEmpty && !r.every((e) => e == ConnectivityResult.none);
         if (!online) {
-          // Internet yo'q — hamma band bekor, tozalash navbatda.
-          _holders.clear();
+          // Internet yo'q — tozalash navbatda.
+          //
+          // Band qilganlar (pleyer, yuklab olish) BEKOR QILINMAYDI:
+          // foydalanuvchi talabi — internet qaytgach video AYNI
+          // joydan davom etsin. Ilgari bu yerda hamma band o'chirilar
+          // edi va internet qaytishi bilan bot chati tozalanib,
+          // pleyer ko'rayotgan nusxa ham yo'qolardi — video xatoga
+          // chiqib boshidan boshlanardi. Chat pleyer yopilgach
+          // tozalanadi (`unhold`).
           _cleanPending = true;
         } else {
           unawaited(_cleanIfPending());
@@ -662,6 +708,13 @@ class TelegramService extends ChangeNotifier {
     final ok = RegExp(r'^[A-Za-z0-9._-]+$');
     return ok.hasMatch(last) && last != '.' && last != '..' ? last : '';
   }
+
+  /// Android pleyeri uchun manba (`AruDataSource`): pleyer diskdagi
+  /// shifrlangan bo'laklarni o'zi o'qiydi, yo'g'ini Telegram'dan
+  /// olib diskka yozadi. [size] ma'lum bo'lsa (`epizod_db.size_*`)
+  /// ochishda Telegram'ga hajm so'rovi ketmaydi.
+  static Uri aruUri(String url, {int size = 0}) => Uri.parse(
+      'aru://file/${fileNameOf(url)}${size > 0 ? '?size=$size' : ''}');
 
   String _playUrl(String name) {
     final lib = _lib;
@@ -741,10 +794,9 @@ class TelegramService extends ChangeNotifier {
       return null;
     }
     if (r.statusCode != 200) return null;
-    final msgId =
-        ((jsonDecode(r.body) as Map<String, dynamic>)['msg_id'] as num?)
-                ?.toInt() ??
-            0;
+    final j = jsonDecode(r.body) as Map<String, dynamic>;
+    _applyKeys(j['keys']);
+    final msgId = (j['msg_id'] as num?)?.toInt() ?? 0;
     if (msgId <= 0) return null;
     _route(name, msgId);
     final u = _playUrl(name);

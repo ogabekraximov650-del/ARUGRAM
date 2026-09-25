@@ -20,11 +20,13 @@
 import 'dart:async';
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 import '../services/app_http.dart';
 import '../services/image_cache.dart';
 import '../services/video_gate.dart';
+import '../services/rust_bridge.dart';
 import '../services/telegram_service.dart';
 
 class MediaViewScreen extends StatefulWidget {
@@ -126,14 +128,31 @@ class _MediaViewScreenState extends State<MediaViewScreen> {
     // ── TELEGRAM'DAN (worker orqali EMAS) ─────────────────────
     // Video bot chatiga keladi va mahalliy Telegram manbasidan
     // o'ynaydi; oyna yopilganda bot chati tozalanadi.
-    final tg = await TelegramService.instance.prepare(widget.url);
+    //
+    // ── DISKKA SAQLANADI (qismlar kabi) ──────────────────────
+    // TALAB (foydalanuvchi): "support chatdagi videoni ham xuddi
+    // shunaqa diskka saqlanadigan qilib ber". Android'da pleyer
+    // `aru://` manbasidan o'qiydi (`AruDataSource`): ko'rilgan
+    // bo'laklar shifrlangan holda diskka yoziladi, keyingi safar
+    // (internetsiz ham) diskdan ochiladi. Video to'liq diskda
+    // bo'lsa Telegram'ga umuman murojaat qilinmaydi.
+    final aru = defaultTargetPlatform == TargetPlatform.android;
+    final onDisk = aru && RustCore.instance.videoIsComplete(widget.url);
+    final tg =
+        onDisk ? null : await TelegramService.instance.prepare(widget.url);
     if (!mounted) return;
     if (tg != null) TelegramService.instance.hold(this, widget.url);
-    final c = VideoPlayerController.networkUrl(
+    final Uri source;
+    if (onDisk || (aru && tg != null)) {
+      source = TelegramService.aruUri(widget.url);
+    } else {
       // Manzilni ExoPlayer ochadi — unga sarlavha qo'shib
       // bo'lmaydi, shu sabab ruxsat manzilning o'zida keladi
       // (`nativeMediaUrl` izohiga qarang).
-      Uri.parse(tg ?? nativeMediaUrl(widget.url)),
+      source = Uri.parse(tg ?? nativeMediaUrl(widget.url));
+    }
+    final c = VideoPlayerController.networkUrl(
+      source,
       viewType: VideoViewType.platformView,
       videoPlayerOptions: VideoPlayerOptions(
         allowBackgroundPlayback: false,

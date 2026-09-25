@@ -39,6 +39,23 @@ String formatBytes(num bytes) {
   return '${text.replaceAll('.', ',')} ${units[i]}';
 }
 
+/// Qism faylining hajmi (`epizod_db.size_*`) — ekranda ko'rsatish
+/// uchun. Bazada BAYT (son) turadi; eski yozuvdagi matn (`"12.34 MB"`)
+/// o'z holicha qaytadi.
+String fileSizeLabel(Object? v) {
+  if (v is num) return v > 0 ? formatBytes(v) : '';
+  final t = (v ?? '').toString().trim();
+  final n = int.tryParse(t);
+  if (n != null) return n > 0 ? formatBytes(n) : '';
+  return t;
+}
+
+/// Qism faylining hajmi baytda (noma'lum bo'lsa 0).
+int fileSizeBytes(Object? v) {
+  if (v is num) return v.toInt();
+  return int.tryParse((v ?? '').toString().trim()) ?? 0;
+}
+
 /// Tomosha vaqti: `1:59` — FAQAT soat va daqiqa (foydalanuvchi
 /// talabi). Soat qismi uch xonadan ajratiladi: `1.284:05`.
 String formatHours(num ms) {

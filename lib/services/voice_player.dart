@@ -61,12 +61,31 @@
 // chizilganda emas. Uzoq ochiq turgan yozishmada eski token
 // muddati tugagan bo'lardi.
 
+// ═══════════════════════════════════════════════════════════════
+//  UCHINCHI TOPILGAN XATO — FAYL ENDI B2'DA EMAS, TELEGRAM'DA
+// ═══════════════════════════════════════════════════════════════
+//
+// Foydalanuvchi: "support chatdagi ovozli xabar ishlamayapti".
+//
+// SABAB. Yozishma fayllari endi worker/B2 ga emas, Telegram'ga
+// yuklanadi (`TelegramService.uploadFile`). Rasm va video buni
+// hisobga olgan edi, ovoz esa hamon worker manzilidan
+// (`/api/media/...`) o'qilardi — u yerda fayl YO'Q.
+//
+// YECHIM. Ovoz ham Telegram'dan: `TelegramService.prepare` faylni
+// bot chatiga oladi (shifrlangan bo'lsa kalit ham keladi) va
+// mahalliy manba (`127.0.0.1/tg/...`) manzilini beradi; yadro
+// baytlarni o'zi ochadi. Ijro davomida nusxa band qilinadi
+// (`hold`), to'xtaganda bo'shatiladi — bot chati shunda tozalanadi.
+// Telegram ishlatib bo'lmasa — eski worker manzili (zaxira).
+
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
 
 import 'app_http.dart';
+import 'telegram_service.dart';
 
 class VoicePlayer extends ChangeNotifier {
   VoicePlayer._() {
@@ -128,9 +147,16 @@ class VoicePlayer extends ChangeNotifier {
     notifyListeners();
     try {
       await _p.stop();
-      // Manzilni TIZIM ochadi, ilova emas — ruxsat shu sabab
-      // manzilning O'ZIDA keladi (fayl boshidagi izohga qarang).
-      await _p.setUrl(nativeMediaUrl(url));
+      final tg = await TelegramService.instance.prepare(url);
+      if (_id != id) return;
+      if (tg != null) {
+        TelegramService.instance.hold(this, url);
+      } else {
+        TelegramService.instance.unhold(this);
+      }
+      // Manzilni TIZIM ochadi, ilova emas — worker manzili uchun
+      // ruxsat shu sabab manzilning O'ZIDA keladi (yuqoridagi izoh).
+      await _p.setUrl(tg ?? nativeMediaUrl(url));
       // Ochilayotganda boshqa xabar bosilgan bo'lsa — bunisi
       // keraksiz.
       if (_id != id) return;
@@ -146,6 +172,7 @@ class VoicePlayer extends ChangeNotifier {
       if (_id == id) {
         _id = null;
         _opening = false;
+        TelegramService.instance.unhold(this);
       }
     }
     notifyListeners();
@@ -164,6 +191,7 @@ class VoicePlayer extends ChangeNotifier {
     try {
       await _p.stop();
     } catch (_) {}
+    TelegramService.instance.unhold(this);
     notifyListeners();
   }
 }

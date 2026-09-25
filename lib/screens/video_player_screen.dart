@@ -287,8 +287,22 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   /// ilovasi ham aynan shunday ishlaydi). iOS'da hozircha eski yo'l.
   static bool get _aruSource => defaultTargetPlatform == TargetPlatform.android;
 
-  static Uri _aruUri(String url) =>
-      Uri.parse('aru://file/${TelegramService.fileNameOf(url)}');
+  /// Manba manzili; hajm `epizod_db.size_*` dan (ma'lum bo'lsa
+  /// ochishda Telegram'ga hajm so'rovi ketmaydi).
+  Uri _aruUri(String url) =>
+      TelegramService.aruUri(url, size: _sizeOfUrl(url));
+
+  /// Joriy qismdagi shu manzilning hajmi baytda (noma'lum — 0).
+  int _sizeOfUrl(String url) {
+    final ep = _currentEp;
+    if (ep == null) return 0;
+    for (final q in ['360p', '480p', '720p', '1080p']) {
+      if ((ep['url_$q'] ?? '').toString() == url) {
+        return fileSizeBytes(ep['size_$q']);
+      }
+    }
+    return 0;
+  }
 
   /// Oyna isitish (worker keshi) kerak EMASmi.
   bool get _noWarm => _playViaLocal || _playViaTelegram;
@@ -1858,7 +1872,12 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     if (c == null || !mounted) return;
     if (c.value.hasError && !_recovering) {
       VideoCacheServer.log('Pleyer xatosi: ${c.value.errorDescription}');
-      _handleFatalError(c.value.position);
+      // Xatodan keyin pleyer nuqtani 0 ga tushirib yuborishi mumkin —
+      // shunda oxirgi ma'lum joydan davom etiladi (boshidan EMAS).
+      final at = c.value.position > Duration.zero
+          ? c.value.position
+          : _lastGoodPosition;
+      _handleFatalError(at);
       return;
     }
     final v = c.value;
@@ -3678,7 +3697,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
               ...ordered.map((q) {
                 final sel = _selectedQuality == q ||
                     (_selectedQuality == null && q == _qualityLabel(ep));
-                final size = (ep['size_$q'] as String?) ?? '';
+                final size = fileSizeLabel(ep['size_$q']);
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 10),
                   child: GestureDetector(
@@ -4767,7 +4786,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                                   (_selectedQuality == null &&
                                       q == _qualityLabel(_currentEp!));
                               final size =
-                                  (_currentEp!['size_$q'] as String?) ?? '';
+                                  fileSizeLabel(_currentEp!['size_$q']);
                               return GestureDetector(
                                 behavior: HitTestBehavior.opaque,
                                 onTap: () => _selectQualityFromPanel(q),
@@ -5550,6 +5569,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       position: _pendingTarget ?? value?.position ?? Duration.zero,
       duration: value?.duration ?? Duration.zero,
       buffered: bufferedRatio,
+      diskRanges: _DiskRanges.of(_currentUrl),
       fmt: _fmt,
       onSeek: (d) {
         _scheduleSeekTo(d);
@@ -5626,7 +5646,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
         .map((q) => _QualityInfo(
               label: q,
               url: (ep['url_$q'] ?? '').toString(),
-              sizeLabel: (ep['size_$q'] ?? '').toString(),
+              sizeLabel: fileSizeLabel(ep['size_$q']),
             ))
         .where((q) => q.url.isNotEmpty && _qualityVisible(q.url))
         .toList();
@@ -7221,6 +7241,9 @@ class _BottomBar extends StatefulWidget {
   final Duration duration;
   final double buffered;
 
+  /// Diskda (yuklab olingan) joylar — oq rangda (`_DiskRanges`).
+  final List<(double, double)> diskRanges;
+
   final String Function(Duration) fmt;
   final ValueChanged<Duration> onSeek;
   final VoidCallback onQualityTap;
@@ -7247,6 +7270,7 @@ class _BottomBar extends StatefulWidget {
     required this.position,
     required this.duration,
     required this.buffered,
+    this.diskRanges = const [],
     required this.fmt,
     required this.onSeek,
     required this.onQualityTap,
@@ -7433,6 +7457,7 @@ class _BottomBarState extends State<_BottomBar> {
                   child: _VideoProgressBar(
                     played: ratio,
                     buffered: widget.buffered,
+                    diskRanges: widget.diskRanges,
                     trackHeight: 5.0 * s,
                     thumbRadius: 8.0 * s,
                     onDragStart: () {
@@ -7468,6 +7493,7 @@ class _BottomBarState extends State<_BottomBar> {
             child: _VideoProgressBar(
               played: ratio,
               buffered: widget.buffered,
+              diskRanges: widget.diskRanges,
               trackHeight: trackHeight,
               thumbRadius: thumbRadius,
               onDragStart: () {
@@ -7522,6 +7548,7 @@ class _BottomBarState extends State<_BottomBar> {
 class _VideoProgressBar extends StatefulWidget {
   final double played;
   final double buffered;
+  final List<(double, double)> diskRanges;
   final double trackHeight;
   final double thumbRadius;
 
@@ -7533,6 +7560,7 @@ class _VideoProgressBar extends StatefulWidget {
   const _VideoProgressBar({
     required this.played,
     this.buffered = 0.0,
+    this.diskRanges = const [],
     required this.trackHeight,
     required this.thumbRadius,
     required this.onDragStart,
@@ -7593,6 +7621,19 @@ class _VideoProgressBarState extends State<_VideoProgressBar> {
                     borderRadius: BorderRadius.circular(track / 2),
                   ),
                 ),
+                // Diskda bor joylar (oq, bufer bilan bir xil rangda)
+                for (final r in widget.diskRanges)
+                  Positioned(
+                    left: w * r.$1.clamp(0.0, 1.0),
+                    child: Container(
+                      width: w * (r.$2 - r.$1).clamp(0.0, 1.0),
+                      height: track,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.4),
+                        borderRadius: BorderRadius.circular(track / 2),
+                      ),
+                    ),
+                  ),
                 // Buffer chiziqi (oq)
                 if (widget.buffered > 0)
                   Container(
@@ -7975,6 +8016,34 @@ class _MenuToggleRow extends StatelessWidget {
   }
 }
 
+/// ── DISKDA BOR JOYLAR (progress chizig'ida oq rangda) ─────────
+///
+/// TALAB (foydalanuvchi): "progress chiziqda qancha bayt yuklangani
+/// oq rangda, xuddi buferdek ko'rinib tursin".
+///
+/// Pleyer Telegram'dan olgan bo'laklarni diskka yozadi
+/// (`player_source.rs`), yuklab olish ham o'sha joyga yozadi — ya'ni
+/// chiziqdagi oq joylar "shu yer telefonda bor, internetsiz ham
+/// ko'rinadi" degani. Rust yadrosi diskka chiqmasdan xotiradagi
+/// ro'yxatni beradi; chiziq soniyasiga bir necha marta chizilgani
+/// uchun javob baribir 0.5 soniya eslab qolinadi.
+class _DiskRanges {
+  static String _url = '';
+  static List<(double, double)> _ranges = const [];
+  static DateTime _at = DateTime.fromMillisecondsSinceEpoch(0);
+
+  static List<(double, double)> of(String url) {
+    if (url.isEmpty) return const [];
+    final now = DateTime.now();
+    if (url != _url || now.difference(_at) > const Duration(milliseconds: 500)) {
+      _url = url;
+      _at = now;
+      _ranges = RustCore.instance.videoRanges(url);
+    }
+    return _ranges;
+  }
+}
+
 /// YouTube uslubidagi doim ko'rinadigan progress chiziqi.
 /// Kontrollar yashiringanda pastda ingichka, shaffof chiziq turadi.
 /// Kontrollar ochiq bo'lganda yashirinadi (asosiy progress bar ko'rinadi).
@@ -8032,6 +8101,15 @@ class _AlwaysVisibleProgress extends StatelessWidget {
                     height: 3,
                     color: Colors.white.withValues(alpha: 0.12),
                   ),
+                  for (final r in _DiskRanges.of(currentUrl))
+                    Positioned(
+                      left: w * r.$1.clamp(0.0, 1.0),
+                      child: Container(
+                        width: w * (r.$2 - r.$1).clamp(0.0, 1.0),
+                        height: 3,
+                        color: Colors.white.withValues(alpha: 0.3),
+                      ),
+                    ),
                   if (buffered > 0)
                     Container(
                       width: w * buffered,

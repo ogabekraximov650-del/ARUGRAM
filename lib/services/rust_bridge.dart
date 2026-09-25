@@ -152,6 +152,7 @@ class RustCore {
   late final _VideoCacheNetBytesDart _videoCacheNetBytes;
   late final _VideoCacheNetBytesDart _videoCacheServedBytes;
   late final _VideoStatsDart _videoStats;
+  _VideoStatsDart? _videoRanges;
   late final _VideoSetPosDart _videoSetPos;
   late final _VideoUrlActionDart _videoDownload;
   late final _VideoUrlActionDart _videoPause;
@@ -232,6 +233,10 @@ class RustCore {
             'rust_video_cache_served_bytes');
     _videoStats = _lib.lookupFunction<_VideoStatsC, _VideoStatsDart>(
         'rust_video_cache_stats');
+    try {
+      _videoRanges = _lib.lookupFunction<_VideoStatsC, _VideoStatsDart>(
+          'rust_video_cache_ranges');
+    } catch (_) {}
     _videoSetPos = _lib.lookupFunction<_VideoSetPosC, _VideoSetPosDart>(
         'rust_video_cache_set_position');
     _videoDownload =
@@ -854,6 +859,30 @@ class RustCore {
   // oqimidan soniyasiga bir necha marta chaqirish xavfsiz.
 
   /// Berilgan URL'lar uchun: {url: {total, downloaded, downloading}}.
+  /// Diskdagi (yuklab olingan) joylar — faylning ulushi sifatida:
+  /// `[[0.0, 0.12], [0.5, 0.53]]`. Progress chizig'ida oq rangda
+  /// ko'rsatiladi. Diskka chiqmaydi (UI oqimida chaqirsa bo'ladi).
+  List<(double, double)> videoRanges(String url) {
+    final f = _videoRanges;
+    if (!_loaded || f == null || url.isEmpty) return const [];
+    final ptr = url.toNativeUtf8();
+    try {
+      final json = _readAndFree(f(ptr));
+      if (json == null || json.isEmpty) return const [];
+      final list = (jsonDecode(json) as Map<String, dynamic>)['ranges'];
+      if (list is! List) return const [];
+      return [
+        for (final r in list)
+          if (r is List && r.length == 2)
+            ((r[0] as num).toDouble(), (r[1] as num).toDouble()),
+      ];
+    } catch (_) {
+      return const [];
+    } finally {
+      malloc.free(ptr);
+    }
+  }
+
   Map<String, Map<String, dynamic>> videoStats(List<String> urls) {
     if (!_loaded || urls.isEmpty) return const {};
     final ptr = jsonEncode(urls).toNativeUtf8();

@@ -43,6 +43,14 @@ grammers-session = { version = "=0.10.0", default-features = false, features = [
 # Cargo.lock repoda saqlanmaydi, shu sabab versiya shu yerda qotiriladi.
 glass_pumpkin = "=2.0.0-rc0"
 tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync", "time", "fs"] }
+# aes + ctr — Telegram'ga yuklanadigan fayllar AES-128-CTR bilan
+#              shifrlanadi (`telegram.rs` -> "SHIFRLAB YUKLASH"). CTR
+#              faylning ISTALGAN joyini alohida ochishga imkon beradi:
+#              pleyer faqat kerakli baytlarni oladi va ochadi.
+#              Versiyalar grammers-crypto bilan bir xil (qayta
+#              kompilyatsiya yo'q).
+aes = "0.9"
+ctr = "0.10"
 # jni — ExoPlayer manbasi (`player_source.rs`) Java bilan shu orqali gaplashadi.
 jni = { version = "0.21", default-features = false }
 

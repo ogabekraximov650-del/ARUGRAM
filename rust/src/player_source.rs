@@ -17,6 +17,20 @@
 //
 // Pleyer to'xtasa (buferi to'lsa) o'qish ham to'xtaydi, ya'ni ortiqcha
 // hech narsa yuklanmaydi — oldindan faqat `AHEAD` ta bo'lak olinadi.
+//
+// ── INTERNET UZILSA ───────────────────────────────────────────────
+//
+// TALAB (foydalanuvchi): "internet yonishini kutib, kelgan joydagi
+// kadrni ko'rsatib tursin — hozir ekran qorayib boshiga qaytib
+// qolyapti".
+//
+// Tarmoq xatosi (`telegram::is_net_err`) pleyerga XATO sifatida
+// berilmaydi: JNI `RETRY` (-2) qaytaradi va Java tomoni
+// (`AruDataSource`) biroz kutib o'sha joyni QAYTA so'raydi. Pleyer bu
+// orada buferdagini ko'rsatib bo'ladi-da, "buferlanmoqda" holatida
+// oxirgi kadrda to'xtab turadi. Internet qaytishi bilan o'qish o'zi
+// davom etadi — pleyer qaytadan ochilmaydi, ekran qoraymaydi.
+// Faqat haqiqiy xato (fayl yo'q va h.k.) pleyerga xato bo'lib boradi.
 
 use crate::{telegram, video_cache};
 use std::collections::HashMap;
@@ -65,10 +79,15 @@ fn chunk_len(index: u64, total: u64) -> u64 {
     (total - start).min(video_cache::PLAYER_CHUNK)
 }
 
-/// Faylni ochadi: hajm avval meta.json dan, bo'lmasa Telegram'dan.
-fn open(name: &str) -> Result<i64, String> {
+/// Faylni ochadi: hajm avval meta.json dan, keyin ilova bergan
+/// hajmdan (`epizod_db.size_*`), bo'lmasa Telegram'dan.
+fn open(name: &str, size_hint: u64) -> Result<i64, String> {
     let dir = video_cache::player_dir(name).ok_or("kesh tayyor emas")?;
     let mut total = video_cache::player_total(&dir);
+    if total == 0 && size_hint > 0 {
+        video_cache::player_set_total(&dir, size_hint, telegram::mime_of_name(name));
+        total = size_hint;
+    }
     if total == 0 {
         let (size, mime) = telegram::doc_size(name)?;
         if size == 0 {
@@ -210,16 +229,22 @@ use jni::objects::{JByteArray, JClass, JString};
 use jni::sys::{jint, jlong};
 use jni::JNIEnv;
 
-/// Ochadi. Xato bo'lsa 0 (Java IOException tashlaydi).
+/// Tarmoq xatosi: Java biroz kutib qayta so'raydi.
+const RETRY: i64 = -2;
+
+/// Ochadi. Qaytadi: dastak (> 0); 0 — xato (Java IOException
+/// tashlaydi); `RETRY` — internet yo'q, keyinroq qayta urinish.
 #[no_mangle]
 pub extern "system" fn Java_io_flutter_plugins_videoplayer_AruDataSource_nativeOpen<'l>(
     mut env: JNIEnv<'l>,
     _c: JClass<'l>,
     name: JString<'l>,
+    size_hint: jlong,
 ) -> jlong {
     let Ok(name) = env.get_string(&name).map(String::from) else { return 0 };
-    match open(&name) {
+    match open(&name, size_hint.max(0) as u64) {
         Ok(h) => h,
+        Err(e) if telegram::is_net_err(&e) => RETRY,
         Err(e) => {
             video_cache::tg_log(format!("Pleyer: {name} ochilmadi: {e}"));
             0
@@ -236,7 +261,8 @@ pub extern "system" fn Java_io_flutter_plugins_videoplayer_AruDataSource_nativeS
     size(h)
 }
 
-/// Qaytadi: o'qilgan bayt; 0 — fayl oxiri; -1 — xato.
+/// Qaytadi: o'qilgan bayt; 0 — fayl oxiri; -1 — xato; -2 (`RETRY`) —
+/// internet yo'q, Java kutib qayta so'raydi.
 #[no_mangle]
 pub extern "system" fn Java_io_flutter_plugins_videoplayer_AruDataSource_nativeRead<'l>(
     env: JNIEnv<'l>,
@@ -261,6 +287,7 @@ pub extern "system" fn Java_io_flutter_plugins_videoplayer_AruDataSource_nativeR
             }
             n as jint
         }
+        Err(e) if telegram::is_net_err(&e) => RETRY as jint,
         Err(e) => {
             video_cache::tg_log(format!("Pleyer: o'qib bo'lmadi: {e}"));
             -1

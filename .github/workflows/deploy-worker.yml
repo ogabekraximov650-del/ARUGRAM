@@ -8,6 +8,7 @@ on:
     branches: [main]
     paths:
       - 'worker/**'
+      - 'ci/WIPE_DB_ONCE'
       - '.github/workflows/deploy-worker.yml'
   workflow_dispatch:
 
@@ -92,6 +93,28 @@ jobs:
           put TG_CHANNEL_ID "${{ secrets.TG_CHANNEL_ID }}"
 
       - name: Deploy to Cloudflare Workers
+        working-directory: worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: wrangler deploy --env production
+
+      # ── BIR MARTALIK BAZA TOZALASH ─────────────────────────────
+      #
+      # `ci/WIPE_DB_ONCE` bo'lsa: YANGI worker deploy qilingach baza
+      # butunlay tozalanadi va worker QAYTA deploy qilinadi — yangi
+      # izolyatlar jadvallarni yangi sxemada yaratadi. Belgi bazaga
+      # yoziladi, ya'ni bir belgi bilan faqat BIR MARTA ishlaydi
+      # (`ci/wipe_db.py` izohiga qarang).
+      - name: Bazani tozalash (bir martalik)
+        if: hashFiles('ci/WIPE_DB_ONCE') != ''
+        env:
+          TURSO_URL: ${{ secrets.TURSO_URL }}
+          TURSO_TOKEN: ${{ secrets.TURSO_TOKEN }}
+        run: python3 ci/wipe_db.py
+
+      - name: Qayta deploy (tozalangan baza uchun)
+        if: hashFiles('ci/WIPE_DB_ONCE') != ''
         working-directory: worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

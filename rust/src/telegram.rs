@@ -44,6 +44,31 @@
 // `FAIL_COOLDOWN` davomida chetga suriladi va `route_url` hech
 // narsa qaytarmaydi — yuklash avtomatik B2 (worker) yo'liga qaytadi.
 //
+// ── SHIFRLAB YUKLASH (AES-128-CTR) ─────────────────────────────
+//
+// TALAB (foydalanuvchi): "fayllarni shifrlab yuklasin va shifrlangan
+// fayldan faqat kerakli baytlarni olsin".
+//
+// Ilova Telegram'ga yuklaydigan HAR BIR fayl yuklanish paytida
+// AES-128-CTR bilan shifrlanadi (`CtrReader`). Har faylga ALOHIDA
+// tasodifiy 16 baytlik kalit; IV nol — kalit takrorlanmagani uchun
+// bu xavfsiz. Kalit serverga yoziladi (`tg_files.file_key`, qismlar
+// uchun `epizod_db.key_*`) va faylni ko'rishga RUXSATI bor odamga
+// `/api/tg/deliver` javobida beriladi.
+//
+// CTR'da har 16 bayt o'z tartib raqami bilan shifrlanadi, ya'ni
+// faylning istalgan joyini alohida ochish mumkin: `fetch_part`
+// Telegram'dan kelgan qismni `offset` dan boshlab ochadi
+// (`ctr_apply`). Shifrlangan fayl hajmi aslidan bir bayt ham farq
+// qilmaydi.
+//
+// Kalit yo'q fayl (masalan admin Telegram ilovasidan o'zi qo'ygan
+// post) — ochiq deb hisoblanadi va avvalgidek o'qiladi.
+//
+// Kalitlar telefonda ham shifrlangan faylda saqlanadi (`keys.bin`):
+// ilova qayta ochilganda bot chatidagi nusxani qayta so'ramasdan
+// o'qiy oladi.
+//
 // ── SIRLAR ─────────────────────────────────────────────────────
 //
 // `api_id`/`api_hash` worker'dan keladi va sessiya bilan birga
@@ -107,6 +132,36 @@ const LABEL_CONFIG: &str = "tg-config-v1";
 const LABEL_SESSION: &str = "tg-session-v1";
 const LABEL_ROUTES: &str = "tg-routes-v1";
 const LABEL_LOGIN: &str = "tg-login-v1";
+const LABEL_KEYS: &str = "tg-keys-v1";
+
+/// TARMOQ xatosi belgisi: shunday xato bilan tugagan o'qishni
+/// internet qaytgach QAYTA urinish mumkin (pleyer uni "kutish" deb
+/// biladi, xato deb emas — `player_source.rs`).
+pub(crate) const NET_ERR: &str = "tarmoq: ";
+
+/// Xato tarmoq sababli (qayta urinsa bo'ladi)mi.
+pub(crate) fn is_net_err(e: &str) -> bool {
+    e.starts_with(NET_ERR)
+}
+
+/// Telegram xatosi vaqtinchalikmi: ulanish uzildi, server band yoki
+/// "biroz kuting" (FLOOD_WAIT). Bunday xatodan keyin qayta urinish
+/// to'g'ri; boshqalari (fayl yo'q va h.k.) — haqiqiy xato.
+fn is_transient(e: &InvocationError) -> bool {
+    match e {
+        InvocationError::Rpc(r) => r.code >= 500 || r.name.starts_with("FLOOD_WAIT"),
+        InvocationError::Io(_) | InvocationError::Dropped | InvocationError::Transport(_) => true,
+        _ => false,
+    }
+}
+
+fn inv_err(e: &InvocationError) -> String {
+    if is_transient(e) {
+        format!("{NET_ERR}{e}")
+    } else {
+        e.to_string()
+    }
+}
 
 /// Kod bosqichi shuncha vaqt saqlanadi (Telegram kodi ham shuncha
 /// yashaydi) — undan keyin ilova yana raqam so'raydi.
@@ -153,6 +208,8 @@ struct Tg {
     /// Qaysi DC larga hisob (auth) ko'chirilgan.
     auth_dcs: tokio::sync::Mutex<HashSet<i32>>,
     inflight: Arc<Semaphore>,
+    /// fayl nomi -> AES-128-CTR kaliti (`keys.bin` da shifrlangan).
+    keys: Mutex<HashMap<String, [u8; 16]>>,
 }
 
 static TG: OnceLock<Tg> = OnceLock::new();
@@ -398,6 +455,77 @@ fn save_routes(t: &Tg) {
     let _ = write_sealed(&t.dir.join("routes.bin"), LABEL_ROUTES, &body);
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  AES-128-CTR (fayl boshidagi "SHIFRLAB YUKLASH" izohiga qarang)
+// ═══════════════════════════════════════════════════════════════
+
+type Aes128Ctr = ctr::Ctr128BE<aes::Aes128>;
+
+/// 32 ta hex belgi -> 16 bayt.
+fn parse_key(hex_key: &str) -> Option<[u8; 16]> {
+    let v = hex::decode(hex_key.trim()).ok()?;
+    v.try_into().ok()
+}
+
+/// `buf` — faylning `offset` dan boshlanadigan baytlari. CTR'da
+/// shifrlash va ochish bir xil amal.
+fn ctr_apply(key: &[u8; 16], offset: u64, buf: &mut [u8]) {
+    use ctr::cipher::{KeyIvInit, StreamCipher, StreamCipherSeek};
+    let mut c = Aes128Ctr::new(key.into(), &[0u8; 16].into());
+    c.seek(offset);
+    c.apply_keystream(buf);
+}
+
+fn key_of(t: &Tg, name: &str) -> Option<[u8; 16]> {
+    t.keys.lock().ok()?.get(name).copied()
+}
+
+fn save_keys(t: &Tg) {
+    let Ok(k) = t.keys.lock() else { return };
+    let m: HashMap<&String, String> = k.iter().map(|(n, v)| (n, hex::encode(v))).collect();
+    let body = serde_json::to_vec(&m).unwrap_or_default();
+    drop(k);
+    let _ = write_sealed(&t.dir.join("keys.bin"), LABEL_KEYS, &body);
+}
+
+/// Kalitlarni qo'shadi (`{"nom": "hex", ...}`); o'zgargan bo'lsa diskka.
+fn add_keys(t: &Tg, m: &serde_json::Map<String, Value>) {
+    let mut changed = false;
+    if let Ok(mut k) = t.keys.lock() {
+        for (name, v) in m {
+            let Some(key) = v.as_str().and_then(parse_key) else { continue };
+            if k.get(name) != Some(&key) {
+                k.insert(name.clone(), key);
+                changed = true;
+            }
+        }
+    }
+    if changed {
+        // Eski (kalitsiz) ma'lumot xotirada qolmasin.
+        if let Ok(mut d) = t.docs.lock() {
+            for name in m.keys() {
+                d.remove(name);
+            }
+        }
+        save_keys(t);
+    }
+}
+
+/// Shifrlangan fayl Telegram'da `application/octet-stream` bo'lib
+/// turadi — pleyer va rasm ochuvchiga asl turi nomidan beriladi.
+pub(crate) fn mime_of_name(name: &str) -> &'static str {
+    let ext = name.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    match ext.as_str() {
+        "mp4" => "video/mp4",
+        "mkv" => "video/x-matroska",
+        "m4a" => "audio/mp4",
+        "jpg" | "jpeg" => "image/jpeg",
+        "png" => "image/png",
+        "webp" => "image/webp",
+        _ => "application/octet-stream",
+    }
+}
+
 fn status_json(t: &Tg) -> String {
     json!({
         "configured": t.api_id.lock().map(|v| *v > 0).unwrap_or(false),
@@ -473,7 +601,7 @@ async fn bot_peer(t: &Tg, client: &Client) -> Result<(i64, i64), String> {
     let tl::enums::contacts::ResolvedPeer::Peer(rp) = client
         .invoke(&tl::functions::contacts::ResolveUsername { username: bot, referer: None })
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| inv_err(&e))?;
     let p = rp
         .users
         .iter()
@@ -547,7 +675,11 @@ fn doc_matches(m: &tl::types::Message, name: &str) -> Option<DocInfo> {
         file_reference: d.file_reference.clone(),
         dc_id: d.dc_id,
         size: d.size.max(0) as u64,
-        mime: if d.mime_type.is_empty() { "video/mp4".to_string() } else { d.mime_type.clone() },
+        mime: if d.mime_type.is_empty() || d.mime_type == "application/octet-stream" {
+            mime_of_name(name).to_string()
+        } else {
+            d.mime_type.clone()
+        },
         photo_size: None,
     })
 }
@@ -575,7 +707,7 @@ async fn fetch_doc(t: &Tg, client: &Client, name: &str) -> Result<DocInfo, Strin
             hash: 0,
         })
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| inv_err(&e))?;
     let messages = match res {
         tl::enums::messages::Messages::Messages(m) => m.messages,
         tl::enums::messages::Messages::Slice(m) => m.messages,
@@ -699,12 +831,19 @@ async fn fetch_part(t: &'static Tg, client: Client, name: String, offset: u64) -
             limit: PART as i32,
         };
         match client.invoke_in_dc(dc, &req).await {
-            Ok(tl::enums::upload::File::File(f)) => return Ok(f.bytes),
+            Ok(tl::enums::upload::File::File(f)) => {
+                let mut bytes = f.bytes;
+                // Shifrlangan fayl — shu qismning o'zi ochiladi.
+                if let Some(key) = key_of(t, &name) {
+                    ctr_apply(&key, offset, &mut bytes);
+                }
+                return Ok(bytes);
+            }
             Ok(tl::enums::upload::File::CdnRedirect(_)) => {
                 return Err("CDN yo'naltirishi kutilmagan".to_string());
             }
             Err(e) => {
-                last_err = e.to_string();
+                last_err = inv_err(&e);
                 match rpc_name(&e) {
                     // Fayl havolasi eskirgan — xabarni qayta olamiz.
                     Some(n) if n.starts_with("FILE_REFERENCE_") => {
@@ -948,6 +1087,11 @@ fn init(dir: &str, api_id: i32, api_hash: &str) -> Result<&'static Tg, String> {
             .and_then(|p| serde_json::from_slice(&p).ok())
             .unwrap_or_default();
 
+        let keys: HashMap<String, [u8; 16]> = read_sealed(&dir.join("keys.bin"), LABEL_KEYS)
+            .and_then(|p| serde_json::from_slice::<HashMap<String, String>>(&p).ok())
+            .map(|m| m.into_iter().filter_map(|(k, v)| Some((k, parse_key(&v)?))).collect())
+            .unwrap_or_default();
+
         let t = Tg {
             rt,
             dir,
@@ -965,6 +1109,7 @@ fn init(dir: &str, api_id: i32, api_hash: &str) -> Result<&'static Tg, String> {
             failed: Mutex::new(HashMap::new()),
             auth_dcs: tokio::sync::Mutex::new(HashSet::new()),
             inflight: Arc::new(Semaphore::new(MAX_INFLIGHT)),
+            keys: Mutex::new(keys),
         };
         if TG.set(t).is_ok() {
             let t = TG.get().unwrap();
@@ -1420,6 +1565,8 @@ struct UploadState {
     done: bool,
     msg_id: i32,
     error: Option<String>,
+    /// Faylning AES-128-CTR kaliti (hex) — serverga yoziladi.
+    key: String,
 }
 
 static UPLOADS: OnceLock<Mutex<HashMap<u64, UploadJob>>> = OnceLock::new();
@@ -1446,6 +1593,33 @@ impl<R: tokio::io::AsyncRead + Unpin> tokio::io::AsyncRead for Counting<R> {
         let got = buf.filled().len() - before;
         if got > 0 {
             self.n.fetch_add(got as u64, Ordering::Relaxed);
+        }
+        r
+    }
+}
+
+/// O'qilgan baytlarni joyida AES-128-CTR bilan shifrlaydi.
+/// Telegram faylni KETMA-KET o'qiydi (`upload_stream`), ya'ni joriy
+/// joy (`pos`) doim to'g'ri.
+struct CtrReader<R> {
+    inner: R,
+    key: [u8; 16],
+    pos: u64,
+}
+
+impl<R: tokio::io::AsyncRead + Unpin> tokio::io::AsyncRead for CtrReader<R> {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        let before = buf.filled().len();
+        let r = std::pin::Pin::new(&mut self.inner).poll_read(cx, buf);
+        let got = buf.filled().len() - before;
+        if got > 0 {
+            let (key, pos) = (self.key, self.pos);
+            ctr_apply(&key, pos, &mut buf.filled_mut()[before..]);
+            self.pos += got as u64;
         }
         r
     }
@@ -1504,12 +1678,36 @@ fn video_meta(path: &str) -> Option<(f64, i32, i32)> {
 
 /// Yuklanadigan faylning Telegram'dagi ko'rinishi.
 ///
+/// SHIFRLANGAN fayl (hozir ilova yuklaydigan HAMMA fayl) — HUJJAT:
+/// shifrlangan baytlar surat ham, video ham emas, Telegram ularni
+/// ochib ko'rsata olmaydi. Pleyer va rasm keshi ularni o'zi ochadi.
+///
+/// Quyidagi "oddiy ko'rinish" qoidasi faqat kalitsiz yuklash uchun
+/// qoldi.
+///
 /// TALAB (foydalanuvchi): fayllar HUJJAT sifatida emas, ODDIY
 /// ko'rinishda yuborilsin — hujjatni Telegram'da yuklab olib boshqa
 /// dastur bilan ochish oson. Video — oddiy (oqimli) video. Fayl nomi
 /// (`Filename`) baribir qo'shiladi: ilova nusxani bot chatidan shu nom
 /// bo'yicha topadi (`doc_matches`).
-fn media_for(uploaded: tl::enums::InputFile, path: &str, name: &str, mime: &str) -> tl::enums::InputMedia {
+fn media_for(uploaded: tl::enums::InputFile, path: &str, name: &str, mime: &str, encrypted: bool) -> tl::enums::InputMedia {
+    if encrypted {
+        return tl::enums::InputMedia::UploadedDocument(tl::types::InputMediaUploadedDocument {
+            nosound_video: false,
+            force_file: true,
+            spoiler: false,
+            file: uploaded,
+            thumb: None,
+            mime_type: "application/octet-stream".to_string(),
+            attributes: vec![tl::enums::DocumentAttribute::Filename(
+                tl::types::DocumentAttributeFilename { file_name: name.to_string() },
+            )],
+            stickers: None,
+            video_cover: None,
+            video_timestamp: None,
+            ttl_seconds: None,
+        });
+    }
     // Rasm — oddiy SURAT (izoh = nom, `doc_matches` shu bo'yicha topadi).
     if mime.starts_with("image/") {
         return tl::enums::InputMedia::UploadedPhoto(tl::types::InputMediaUploadedPhoto {
@@ -1562,6 +1760,7 @@ async fn upload_to_channel(
     channel_id: i64,
     sent: Arc<std::sync::atomic::AtomicU64>,
     total: u64,
+    key: [u8; 16],
 ) -> Result<i32, String> {
     // `channel_id == 0` — BOT CHATIGA (kanalga admin bo'lmagan
     // foydalanuvchi: yozishmadagi katta video). Bot uni o'zi kanalga
@@ -1573,7 +1772,8 @@ async fn upload_to_channel(
         tl::enums::InputPeer::User(tl::types::InputPeerUser { user_id: id, access_hash: hash })
     };
     let file = tokio::fs::File::open(&path).await.map_err(|e| format!("fayl ochilmadi: {e}"))?;
-    let mut reader = Counting { inner: file, n: Arc::clone(&sent) };
+    let counting = Counting { inner: file, n: Arc::clone(&sent) };
+    let mut reader = CtrReader { inner: counting, key, pos: 0 };
     let uploaded = client
         .upload_stream(&mut reader, total as usize, name.clone())
         .await
@@ -1593,7 +1793,7 @@ async fn upload_to_channel(
             peer,
             reply_to: None,
             // Oddiy video sifatida (hujjat emas — `media_for` izohi).
-            media: media_for(uploaded.raw, &path, &name, &mime),
+            media: media_for(uploaded.raw, &path, &name, &mime, true),
             // Izoh = fayl nomi: bot shu bo'yicha postni taniydi.
             message: name,
             random_id,
@@ -1667,8 +1867,19 @@ pub extern "C" fn rust_tg_upload_start(
         let st = Arc::clone(&state);
         let s2 = Arc::clone(&sent);
         let mime = if mime.is_empty() { "video/mp4".to_string() } else { mime };
+        // Har faylga yangi tasodifiy kalit.
+        let mut key = [0u8; 16];
+        getrandom::getrandom(&mut key).map_err(|e| e.to_string())?;
+        if let Ok(mut s) = state.lock() {
+            s.key = hex::encode(key);
+        }
+        // Yuklovchining o'zi ham faylni darhol ocha olsin.
+        if let Ok(mut k) = t.keys.lock() {
+            k.insert(name.clone(), key);
+        }
+        save_keys(t);
         let task = t.rt.spawn(async move {
-            let r = upload_to_channel(t, client, path, name, mime, channel_id, s2, total).await;
+            let r = upload_to_channel(t, client, path, name, mime, channel_id, s2, total, key).await;
             if let Ok(mut s) = st.lock() {
                 s.done = true;
                 match r {
@@ -1701,6 +1912,7 @@ pub extern "C" fn rust_tg_upload_status(job: u64) -> *mut c_char {
         "done": st.done,
         "msg_id": st.msg_id,
         "error": st.error,
+        "key": st.key,
     });
     if st.done {
         m.remove(&job);
@@ -1778,6 +1990,17 @@ pub extern "C" fn rust_tg_route(key_ptr: *const c_char, msg_id: i32) -> i32 {
     }
     save_routes(t);
     1
+}
+
+/// Fayllarning ochish kalitlari (`/api/tg/deliver` javobidagi
+/// `keys`: `{"nom": "hex", ...}`).
+#[no_mangle]
+pub extern "C" fn rust_tg_set_keys(json_ptr: *const c_char) {
+    let Some(t) = tg() else { return };
+    let Some(json) = (unsafe { cstr_to_str(json_ptr) }) else { return };
+    if let Ok(Value::Object(m)) = serde_json::from_str::<Value>(json) {
+        add_keys(t, &m);
+    }
 }
 
 /// Pleyer uchun manzil (Telegram ishlatib bo'lmasa bo'sh satr).
@@ -1890,6 +2113,49 @@ mod tests {
     }
 
     #[test]
+    fn ctr_istalgan_joydan_ochiladi() {
+        let key = [7u8; 16];
+        let plain: Vec<u8> = (0..300_000u32).map(|i| (i * 13 % 251) as u8).collect();
+        // Yuklashdagidek: butun fayl bir oqimda, mayda bo'laklab.
+        let mut enc = plain.clone();
+        let mut pos = 0usize;
+        for step in [1usize, 15, 16, 17, 4096, 100_000] {
+            let end = (pos + step).min(enc.len());
+            ctr_apply(&key, pos as u64, &mut enc[pos..end]);
+            pos = end;
+        }
+        ctr_apply(&key, pos as u64, &mut enc[pos..]);
+        assert_ne!(enc, plain);
+        // O'qishdagidek: faqat kerakli oraliq, istalgan joydan.
+        for (a, b) in [(0usize, 10usize), (5, 37), (131_071, 131_200), (299_990, 300_000)] {
+            let mut part = enc[a..b].to_vec();
+            ctr_apply(&key, a as u64, &mut part);
+            assert_eq!(part, plain[a..b]);
+        }
+    }
+
+    #[test]
+    fn ctr_oqimi_yuklashda_shifrlaydi() {
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        rt.block_on(async {
+            let data: Vec<u8> = (0..70_000u32).map(|i| (i % 256) as u8).collect();
+            let key = [3u8; 16];
+            let mut r = CtrReader { inner: &data[..], key, pos: 0 };
+            let mut out = Vec::new();
+            r.read_to_end(&mut out).await.unwrap();
+            ctr_apply(&key, 0, &mut out);
+            assert_eq!(out, data);
+        });
+    }
+
+    #[test]
+    fn kalit_hexdan_oqiladi() {
+        assert_eq!(parse_key("00112233445566778899aabbccddeeff").unwrap()[15], 0xff);
+        assert!(parse_key("0011").is_none());
+        assert!(parse_key("zz112233445566778899aabbccddeeff").is_none());
+    }
+
+    #[test]
     fn qism_chegarasi_telegram_qoidasiga_mos() {
         // limit 4 KiB ga karrali va 1 MiB ni qoldiqsiz bo'ladi.
         assert_eq!(PART % 4096, 0);
@@ -1910,6 +2176,18 @@ mod tests {
 // Bular ExoPlayer'ning yuklash oqimidan (tokio'dan tashqarida)
 // chaqiriladi va natija kelguncha kutadi.
 
+/// Bitta o'qish uchun kutish chegarasi. Internet uzilsa pleyer
+/// abadiy kutib qolmasin: tarmoq xatosi qaytadi va pleyer (Java
+/// tomoni) internet qaytishini kutib QAYTA so'raydi.
+const READ_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// Kutish chegarasi tugadi — ulanish "yarim o'lik" bo'lishi mumkin
+/// (javob ham, xato ham kelmaydi). Keyingi so'rov YANGI ulanish
+/// ochsin.
+fn drop_stale_connection(t: &Tg) {
+    disconnect(t);
+}
+
 /// Fayl hajmi va turi (bot chatidan topiladi).
 pub(crate) fn doc_size(name: &str) -> Result<(u64, String), String> {
     let t = tg().ok_or("Telegram ishga tushmagan")?;
@@ -1918,12 +2196,21 @@ pub(crate) fn doc_size(name: &str) -> Result<(u64, String), String> {
     }
     let client = connect(t).ok_or("Telegram'ga ulanib bo'lmadi")?;
     let name = name.to_string();
-    let d = t.rt.block_on(async move { doc_for(t, &client, &name, false).await })?;
-    Ok((d.size, d.mime))
+    let r = t.rt.block_on(async move {
+        tokio::time::timeout(READ_TIMEOUT, doc_for(t, &client, &name, false)).await
+    });
+    match r {
+        Ok(d) => d.map(|d| (d.size, d.mime)),
+        Err(_) => {
+            drop_stale_connection(t);
+            Err(format!("{NET_ERR}vaqt tugadi"))
+        }
+    }
 }
 
 /// `offset` dan `len` bayt (offset `PART` ga karrali). Qismlar
-/// parallel so'raladi.
+/// parallel so'raladi. Xato tarmoq sababli bo'lsa `NET_ERR` bilan
+/// boshlanadi (`is_net_err`).
 pub(crate) fn fetch_range(name: &str, offset: u64, len: u64) -> Result<Vec<u8>, String> {
     let t = tg().ok_or("Telegram ishga tushmagan")?;
     let client = connect(t).ok_or("Telegram'ga ulanib bo'lmadi")?;
@@ -1933,32 +2220,36 @@ pub(crate) fn fetch_range(name: &str, offset: u64, len: u64) -> Result<Vec<u8>, 
         jobs.push(t.rt.spawn(fetch_part(t, client.clone(), name.to_string(), off)));
         off += PART;
     }
-    let name = name.to_string();
-    // Internet uzilsa pleyer abadiy kutib qolmasin: xato qaytadi,
-    // ExoPlayer o'zi qayta urinadi.
+    // Kutish tugasa ham havodagi so'rovlar to'xtatilsin (aks holda
+    // ular fon'da ishlab, trafik sarflardi).
+    let aborts: Vec<_> = jobs.iter().map(|j| j.abort_handle()).collect();
     let r = t.rt.block_on(async move {
-        tokio::time::timeout(Duration::from_secs(30), async move {
-        let mut out = Vec::with_capacity(len as usize);
-        let mut jobs = jobs.into_iter();
-        while let Some(j) = jobs.next() {
-            match j.await {
-                Ok(Ok(b)) => out.extend_from_slice(&b),
-                Ok(Err(e)) => {
-                    jobs.for_each(|j| j.abort());
-                    return Err(e);
-                }
-                Err(e) => {
-                    jobs.for_each(|j| j.abort());
-                    return Err(e.to_string());
+        tokio::time::timeout(READ_TIMEOUT, async move {
+            let mut out = Vec::with_capacity(len as usize);
+            for j in jobs {
+                match j.await {
+                    Ok(Ok(b)) => out.extend_from_slice(&b),
+                    Ok(Err(e)) => return Err(e),
+                    Err(e) => return Err(format!("{NET_ERR}{e}")),
                 }
             }
-        }
-        out.truncate(len as usize);
-        Ok(out)
+            out.truncate(len as usize);
+            Ok(out)
         })
         .await
-        .unwrap_or_else(|_| Err("vaqt tugadi".to_string()))
     });
+    let r = match r {
+        Ok(r) => r,
+        Err(_) => {
+            drop_stale_connection(t);
+            Err(format!("{NET_ERR}vaqt tugadi"))
+        }
+    };
+    if r.is_err() {
+        for a in aborts {
+            a.abort();
+        }
+    }
     if let Err(e) = &r {
         crate::video_cache::tg_log(format!("Telegram: {name} olinmadi: {e}"));
     }

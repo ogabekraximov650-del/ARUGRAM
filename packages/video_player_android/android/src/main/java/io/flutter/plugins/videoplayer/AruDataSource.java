@@ -3,7 +3,16 @@
 // FileStreamLoadOperation kabi). Bo'lak diskda bo'lmasa Rust uni
 // Telegram'dan oladi, shifrlab diskka yozadi va shu yerga beradi.
 //
-// Manzil: aru://file/<fayl_nomi>
+// Manzil: aru://file/<fayl_nomi>[?size=<bayt>]
+//
+// INTERNET UZILSA (foydalanuvchi talabi: "internet yonishini kutib,
+// kelgan joydagi kadrni ko'rsatib tursin"): Rust tarmoq xatosida
+// RETRY (-2) qaytaradi. Bu yerda o'qish XATO BO'LMAYDI — biroz kutib
+// o'sha joy qayta so'raladi. Pleyer shu orada buferni ko'rsatib
+// bo'ladi va oxirgi kadrda "buferlanmoqda" bo'lib turadi; internet
+// qaytishi bilan video o'zi davom etadi. Pleyer yopilsa yoki
+// boshqa joyga surilsa ExoPlayer yuklash oqimini to'xtatadi
+// (interrupt) — kutish shunda darhol tugaydi.
 
 package io.flutter.plugins.videoplayer;
 
@@ -17,6 +26,7 @@ import androidx.media3.datasource.BaseDataSource;
 import androidx.media3.datasource.DataSource;
 import androidx.media3.datasource.DataSpec;
 import java.io.IOException;
+import java.io.InterruptedIOException;
 
 @OptIn(markerClass = UnstableApi.class)
 public final class AruDataSource extends BaseDataSource {
@@ -24,7 +34,7 @@ public final class AruDataSource extends BaseDataSource {
     System.loadLibrary("rust_core");
   }
 
-  private static native long nativeOpen(String name);
+  private static native long nativeOpen(String name, long sizeHint);
 
   private static native long nativeSize(long handle);
 
@@ -39,6 +49,12 @@ public final class AruDataSource extends BaseDataSource {
       return new AruDataSource();
     }
   }
+
+  /// Rust: internet yo'q, keyinroq qayta urinish kerak.
+  private static final int RETRY = -2;
+
+  /// Qayta urinishlar orasidagi kutish.
+  private static final long RETRY_WAIT_MS = 1_000;
 
   @Nullable private Uri uri;
   private long handle;
@@ -60,8 +76,17 @@ public final class AruDataSource extends BaseDataSource {
     uri = dataSpec.uri;
     transferInitializing(dataSpec);
     String name = nameOf(dataSpec.uri);
-    long h = nativeOpen(name);
-    if (h == 0) {
+    long sizeHint = 0;
+    try {
+      String s = dataSpec.uri.getQueryParameter("size");
+      if (s != null) sizeHint = Long.parseLong(s);
+    } catch (RuntimeException ignored) {
+    }
+    long h;
+    while ((h = nativeOpen(name, sizeHint)) == RETRY) {
+      waitForNetwork();
+    }
+    if (h <= 0) {
       throw new IOException("aru: ochilmadi: " + name);
     }
     handle = h;
@@ -88,7 +113,10 @@ public final class AruDataSource extends BaseDataSource {
       return C.RESULT_END_OF_INPUT;
     }
     int want = (int) Math.min(length, remaining);
-    int n = nativeRead(handle, position, buffer, offset, want);
+    int n;
+    while ((n = nativeRead(handle, position, buffer, offset, want)) == RETRY) {
+      waitForNetwork();
+    }
     if (n < 0) {
       throw new IOException("aru: o'qib bo'lmadi");
     }
@@ -99,6 +127,17 @@ public final class AruDataSource extends BaseDataSource {
     remaining -= n;
     bytesTransferred(n);
     return n;
+  }
+
+  /// Internet qaytishini kutadi. Pleyer yuklashni bekor qilsa
+  /// (yopildi, boshqa joyga surildi) — darhol chiqadi.
+  private static void waitForNetwork() throws IOException {
+    try {
+      Thread.sleep(RETRY_WAIT_MS);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new InterruptedIOException("aru: bekor qilindi");
+    }
   }
 
   @Nullable
