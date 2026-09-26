@@ -3364,3 +3364,11 @@ zaxira yo'llar (`thumbnailData`, birinchi kadr).
   darhol chiqadi, kamida 1.6 s turadi.
 * Yozish paytida butun chat har 100 ms qayta qurilmaydi (faqat doira);
   yuklanayotgan rasm pufak o'lchamida ochiladi.
+
+## Tozalash oynalari Telegram'dagidek
+
+* Tasdiqlash — Telegram `AlertDialog` (eni ≤ 356, sarlavha 20 qalin,
+  matn 16, tugmalar bir qatorda o'ngda: "Bekor qilish" ko'k,
+  "Keshni tozalash" qizil 12% fon bilan).
+* "Kesh tozalanmoqda" pardasi to'liq ekran enida, balandligi 350
+  (`ClearingCacheView`); tugagach pastda "... kesh tozalandi" xabari.

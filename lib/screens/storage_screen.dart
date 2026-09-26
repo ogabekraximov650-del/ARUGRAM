@@ -122,24 +122,25 @@ class _StorageScreenState extends State<StorageScreen> {
     final size = _selectedOf(cache);
     if (labels.isEmpty || size <= 0) return;
     final action = _buttonText(cache);
-    final ok = await showDialog<bool>(
+    final ok = await showGeneralDialog<bool>(
       context: context,
-      builder: (c) => AlertDialog(
-        backgroundColor: AppColors.card,
-        title: Text('Keshni tozalash (${formatBytes(size)})',
-            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
-        content: const Text(_infoText,
-            style: TextStyle(color: Colors.white70, fontSize: 16)),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(c, false),
-              child: const Text('Bekor qilish')),
-          TextButton(
-              style: TextButton.styleFrom(
-                  foregroundColor: const Color(0xFFFF5A5A)),
-              onPressed: () => Navigator.pop(c, true),
-              child: Text(action)),
-        ],
+      barrierDismissible: true,
+      barrierLabel: 'close',
+      barrierColor: Colors.black.withValues(alpha: 0.6),
+      transitionDuration: const Duration(milliseconds: 180),
+      transitionBuilder: (c, a, _, child) => FadeTransition(
+        opacity: CurvedAnimation(parent: a, curve: Curves.easeOut),
+        child: ScaleTransition(
+          scale: Tween(begin: 0.94, end: 1.0).animate(
+              CurvedAnimation(parent: a, curve: Curves.easeOutCubic)),
+          child: child,
+        ),
+      ),
+      pageBuilder: (c, _, __) => _TgAlert(
+        title: 'Keshni tozalash (${formatBytes(size)})',
+        message: _infoText,
+        negative: 'Bekor qilish',
+        positive: action,
       ),
     );
     if (ok != true || !mounted) return;
@@ -162,7 +163,10 @@ class _StorageScreenState extends State<StorageScreen> {
         context: context,
         isDismissible: false,
         enableDrag: false,
+        // Telegram `BottomSheet`: ekran eni bo'yicha to'liq.
+        constraints: const BoxConstraints(maxWidth: double.infinity),
         backgroundColor: AppColors.card,
+        barrierColor: Colors.black.withValues(alpha: 0.6),
         shape: const RoundedRectangleBorder(
             borderRadius: BorderRadius.vertical(top: Radius.circular(12))),
         builder: (_) => PopScope(
@@ -187,6 +191,31 @@ class _StorageScreenState extends State<StorageScreen> {
     progress.dispose();
     if (!mounted) return;
     setState(_off.clear);
+    // Telegram: pastda "Kesh tozalandi" xabari (`CacheWasCleared`,
+    // `ic_delete`), 150 ms dan keyin.
+    await Future<void>.delayed(const Duration(milliseconds: 150));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: const Color(0xF2262626),
+        margin: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        duration: const Duration(milliseconds: 2750),
+        content: Row(
+          children: [
+            const Icon(Icons.delete_outline_rounded,
+                color: Colors.white, size: 26),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Text('${formatBytes(size)} kesh tozalandi',
+                  style: const TextStyle(color: Colors.white, fontSize: 15)),
+            ),
+          ],
+        ),
+      ));
   }
 
   @override
@@ -1131,10 +1160,12 @@ class _ClearingView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // `ClearingCacheView`: to'liq eni, balandligi 350 dp.
     return SafeArea(
       top: false,
-      child: Padding(
-        padding: const EdgeInsets.only(bottom: 28),
+      child: SizedBox(
+        width: double.infinity,
+        height: 350,
         child: ValueListenableBuilder<double>(
           valueListenable: progress,
           builder: (context, v, _) {
@@ -1155,10 +1186,15 @@ class _ClearingView extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 10),
-                Text('${(p * 100).ceil()}%',
-                    style: const TextStyle(
-                        fontSize: 24, fontWeight: FontWeight.w700)),
-                const SizedBox(height: 16),
+                SizedBox(
+                  height: 32,
+                  child: Text('${(p * 100).ceil()}%',
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 24,
+                          fontWeight: FontWeight.w700)),
+                ),
+                const SizedBox(height: 12),
                 SizedBox(
                   width: 240,
                   height: 5,
@@ -1188,20 +1224,127 @@ class _ClearingView extends StatelessWidget {
                 ),
                 const SizedBox(height: 30),
                 const Text('Kesh tozalanmoqda',
-                    style:
-                        TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700)),
                 const SizedBox(height: 10),
                 const SizedBox(
                   width: 240,
                   child: Text(
                     'Kesh tozalanayotganda bu oynani yopmang.',
                     textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 14, color: Colors.white70),
+                    style: TextStyle(fontSize: 14, color: Colors.white),
                   ),
                 ),
               ],
             );
           },
+        ),
+      ),
+    );
+  }
+}
+
+
+// ══════════════════════════════════════════════════════════════
+//  TELEGRAM `AlertDialog`
+// ══════════════════════════════════════════════════════════════
+//
+// `ActionBar/AlertDialog.java`: eni ko'pi bilan 356 dp, sarlavha 20
+// qalin (tepadan 19, yonlardan 24), matn 16, pastda 52 dp qatorda
+// o'ngga tekislangan tugmalar (40 dp, 16 qalin, 12 dp ichki chekinish);
+// "Keshni tozalash" — qizil, ostida 12% qizil fon (6 dp burchak).
+class _TgAlert extends StatelessWidget {
+  final String title;
+  final String message;
+  final String negative;
+  final String positive;
+
+  const _TgAlert({
+    required this.title,
+    required this.message,
+    required this.negative,
+    required this.positive,
+  });
+
+  static const _blue = Color(0xFF71AAEB);
+  static const _red = Color(0xFFFF5A5A);
+
+  Widget _button(BuildContext c, String text, Color color, bool value,
+      {bool tinted = false}) {
+    return Material(
+      color: tinted ? color.withValues(alpha: 0.12) : Colors.transparent,
+      borderRadius: BorderRadius.circular(tinted ? 6 : 20),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => Navigator.of(c).pop(value),
+        splashColor: color.withValues(alpha: 0.15),
+        highlightColor: color.withValues(alpha: 0.08),
+        child: Container(
+          height: 40,
+          constraints: const BoxConstraints(minWidth: 64),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Center(
+            widthFactor: 1,
+            child: Text(text,
+                maxLines: 1,
+                style: TextStyle(
+                    color: color, fontSize: 16, fontWeight: FontWeight.w700)),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final w = MediaQuery.sizeOf(context).width;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24),
+        child: Material(
+          color: const Color(0xFF212121),
+          borderRadius: BorderRadius.circular(14),
+          elevation: 8,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: math.min(356, w - 48)),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 19, 24, 10),
+                  child: Text(title,
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w700)),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
+                  child: Text(message,
+                      style: const TextStyle(
+                          color: Colors.white, fontSize: 16, height: 1.3)),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: Wrap(
+                    alignment: WrapAlignment.end,
+                    spacing: 8,
+                    runSpacing: 6,
+                    children: [
+                      _button(context, negative, _blue, false),
+                      _button(context, positive, _red, true, tinted: true),
+                    ],
+                  ),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
