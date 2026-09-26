@@ -179,7 +179,11 @@ class _CommentsTabState extends State<CommentsTab> {
       _say('Izoh yozish uchun hisobingizga kiring');
       return;
     }
-    final name = 'cmt_${me}_${DateTime.now().millisecondsSinceEpoch}.mp4';
+    // Nomda GIF'ning Telegram kaliti ham bor (`gifNameTag`) —
+    // ko'ruvchi uni to'g'ridan-to'g'ri Telegram'dan oladi.
+    final tag = await TgMedia.instance.gifNameTag(d);
+    final name =
+        'cmt_${me}_${DateTime.now().millisecondsSinceEpoch}$tag.mp4';
     setState(() => _sending = true);
     final err = await TelegramService.instance.sendGif(d.id, name);
     if (!mounted) return;

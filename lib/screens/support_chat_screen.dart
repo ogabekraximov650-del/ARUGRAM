@@ -650,7 +650,11 @@ class _SupportChatScreenState extends State<SupportChatScreen>
   Future<void> _sendGif(TgDoc d) async {
     if (_sending) return;
     final me = AuthService.instance.user?.id ?? 0;
-    final name = 'chat_${me}_${DateTime.now().millisecondsSinceEpoch}.mp4';
+    // Nomda GIF'ning Telegram kaliti ham bor (`gifNameTag`) —
+    // ko'ruvchi uni to'g'ridan-to'g'ri Telegram'dan oladi.
+    final tag = await TgMedia.instance.gifNameTag(d);
+    final name =
+        'chat_${me}_${DateTime.now().millisecondsSinceEpoch}$tag.mp4';
     setState(() => _sending = true);
     var err = await TelegramService.instance.sendGif(d.id, name);
     err ??= await _chat.send('', mediaFile: name, mediaType: 'gif');

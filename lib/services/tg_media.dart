@@ -391,6 +391,16 @@ class TgMedia {
   }
 
   // ── YAQINDA ISHLATILGANLAR (telefonda) ───────────────────────
+  /// GIF'ni yuborishda fayl nomiga qo'shiladigan qism: `_g..` (yoki
+  /// bo'sh). Qabul qiluvchi GIF'ni shu kalit bilan TO'G'RIDAN-TO'G'RI
+  /// Telegram'dan yuklaydi (`tgChatFile`) — Telegram ilovasidagidek,
+  /// bot chatisiz.
+  Future<String> gifNameTag(TgDoc d) async {
+    final j = await tgCall('rust_tg_gif_token', arg: jsonEncode({'id': d.id}));
+    final t = j['token'];
+    return t is String && t.isNotEmpty ? '_$t' : '';
+  }
+
   static const _recentMax = 40;
   List<String>? _recentEmoji;
   List<TgDoc>? _recentCustom;

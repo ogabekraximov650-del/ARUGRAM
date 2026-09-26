@@ -3387,3 +3387,22 @@ zaxira yo'llar (`thumbnailData`, birinchi kadr).
   ketma-ket keyingi kadr chiziladi (soat moslanadi); bir vaqtda 1..4
   kadr chiziladi.
 * Stikerlar panelida stikerlar animatsiyalanmaydi (faqat birinchi kadr).
+
+## Telegram'ga yaqinlashtirish: GIF to'g'ridan-to'g'ri, kadrlar diskda, kuchsiz telefon
+
+* GIF: yuborishda fayl nomiga Telegram kaliti qo'shiladi
+  (`..._g<id>_<access_hash>_<dc>_<file_reference>.mp4`, hex;
+  `rust_tg_gif_token`). Ko'ruvchi GIF'ni o'z Telegram hisobi bilan
+  to'g'ridan-to'g'ri Telegram serveridan oladi (`rust_tg_gif_direct`) —
+  bot chati va worker ishtirokisiz. Havola eskirsa (yoki eski nom
+  bo'lsa) avvalgi yo'l (bot chati) ishlaydi. Worker o'zgarmadi: nom
+  `chat_{me}_` / `cmt_{me}_` bilan boshlanadi va ≤ 200 belgi.
+* Stiker kadrlari diskda (`sticker_anim.rs`, Telegram `BitmapsCache`
+  kabi): chizilgan kadr `deflate` bilan siqilib, tutqich yopilganda
+  stiker yonidagi `<fayl>.<w>x<h>.afc` ga yoziladi; keyingi safar kadr
+  chizilmaydi — diskdan ochiladi. Papkada jami 200 MB dan oshsa eng
+  eskilari o'chadi; "Keshni tozalash" bilan birga o'chadi.
+* Telefon kuchi (`device_perf.dart`, Telegram
+  `getDevicePerformanceClass` kabi): yadrolar, eng yuqori chastota,
+  xotira. Kuchsizda: panel emojilari harakatsiz, 1 ta kadr bir vaqtda,
+  kichikroq o'lcham, 24 MB kesh, panelda 1 GIF, GIF faqat 1 marta.

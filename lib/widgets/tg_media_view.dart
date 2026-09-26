@@ -8,6 +8,7 @@
 //   * GIF — ovozsiz, takrorlanadigan mp4.
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -18,6 +19,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:video_player/video_player.dart';
 
 import '../services/api_base.dart';
+import '../services/device_perf.dart';
 import '../services/native_pool.dart';
 import '../services/telegram_service.dart';
 import '../services/tg_media.dart';
@@ -180,7 +182,14 @@ final Map<String, ui.Image> _firstFrames = {};
 const _firstFramesMax = 150;
 
 /// Hamma animatsiyalarning kadrlar keshi uchun umumiy chegara.
-const _cacheBudget = 56 * 1024 * 1024;
+/// Telefon kuchiga qarab (`DevicePerf`): 24 / 48 / 64 MB.
+final _cacheBudget = switch (DevicePerf.cls) {
+      PerfClass.low => 24,
+      PerfClass.average => 48,
+      PerfClass.high => 64,
+    } *
+    1024 *
+    1024;
 int _cacheUsed = 0;
 
 // ── UMUMIY SOAT ──────────────────────────────────────────────────
@@ -225,8 +234,11 @@ class _AnimClock {
   bool _scheduled = false;
   DateTime lastScroll = DateTime.fromMillisecondsSinceEpoch(0);
 
-  static final int _maxInflight =
-      (Platform.numberOfProcessors ~/ 2).clamp(1, 4);
+  static final int _maxInflight = switch (DevicePerf.cls) {
+    PerfClass.low => 1,
+    PerfClass.average => (Platform.numberOfProcessors ~/ 2).clamp(1, 2),
+    PerfClass.high => (Platform.numberOfProcessors ~/ 2).clamp(2, 4),
+  };
 
   bool get scrolling =>
       DateTime.now().difference(lastScroll).inMilliseconds < 180;
@@ -362,7 +374,10 @@ class _TgAnimViewState extends State<TgAnimView> {
     final dpr = MediaQuery.devicePixelRatioOf(context);
     // Panelda kichik: emoji 100 px, stiker 160 px (Telegram
     // klaviaturasi ham kichraytirib chizadi); xabarda 320 px.
-    final cap = widget.panel ? (widget.size <= 48 ? 100 : 160) : 320;
+    final low = DevicePerf.low;
+    final cap = widget.panel
+        ? (widget.size <= 48 ? (low ? 72 : 100) : (low ? 128 : 160))
+        : (low ? 256 : 320);
     _px = (widget.size * dpr).round().clamp(24, cap).toInt();
     final first = _firstFrames[_key];
     if (first != null) _img.value = first.clone();
@@ -431,7 +446,10 @@ class _TgAnimViewState extends State<TgAnimView> {
       _wantN = 0;
       _AnimClock.instance.want(this, first: _image == null);
     }
-    if (_frames > 1 && !widget.frozen && _enabled) {
+    // Kuchsiz telefonda panel (klaviatura) emojilari harakatlanmaydi —
+    // Telegram `LiteMode` (`FLAG_ANIMATED_EMOJI_KEYBOARD`) kabi.
+    final still = widget.frozen || (widget.panel && DevicePerf.low);
+    if (_frames > 1 && !still && _enabled) {
       _AnimClock.instance.add(this);
     }
   }
@@ -675,8 +693,12 @@ class TgGifThumb extends StatefulWidget {
   State<TgGifThumb> createState() => _TgGifThumbState();
 }
 
-/// Kuchsiz (kam yadroli) telefonda bir vaqtda 2 ta, aks holda 4 ta.
-final _gifSlots = Platform.numberOfProcessors >= 8 ? 4 : 2;
+/// Bir vaqtda o'ynaydigan panel GIF'lari: kuchsiz telefonda 1, o'rtachada 2, kuchlida 4.
+final _gifSlots = switch (DevicePerf.cls) {
+  PerfClass.low => 1,
+  PerfClass.average => 2,
+  PerfClass.high => 4,
+};
 int _gifBusy = 0;
 final List<VoidCallback> _gifWaiters = [];
 
@@ -845,7 +867,7 @@ class TgGifMessage extends StatefulWidget {
 final Map<String, Future<File?>> _chatFiles = {};
 
 /// Xabardagi GIF'lar: bir vaqtda tirik pleyerlar soni.
-const _msgGifMax = 6;
+final _msgGifMax = DevicePerf.low ? 3 : 6;
 int _msgGifLive = 0;
 final List<Completer<void>> _msgGifQueue = [];
 
@@ -875,7 +897,31 @@ Future<File?> tgChatFile(String name) async {
   return f;
 }
 
+/// Nomdagi GIF kaliti (`..._g<id>_<ah>_<dc>_<fr>.mp4`).
+final _gifTag = RegExp(r'_g([0-9a-f]{1,16})_([0-9a-f]{1,16})_(\d{1,3})_([0-9a-f]{2,120})\.mp4$');
+
+/// Telegram ilovasidagidek: GIF o'z Telegram hisobi bilan to'g'ridan-
+/// to'g'ri Telegram serveridan (bot chati, worker ishtirokisiz).
+Future<File?> _directGif(String name) async {
+  final m = _gifTag.firstMatch(name);
+  if (m == null || !TelegramService.instance.authorized) return null;
+  try {
+    final j = await NativePool.files.call('rust_tg_gif_direct',
+        arg: jsonEncode({
+          'id': m.group(1),
+          'ah': m.group(2),
+          'dc': m.group(3),
+          'fr': m.group(4),
+        }));
+    final p = j['path'];
+    if (p is String && File(p).existsSync()) return File(p);
+  } catch (_) {}
+  return null;
+}
+
 Future<File?> _fetchChatFile(String name) => () async {
+        final direct = await _directGif(name);
+        if (direct != null) return direct;
         try {
           final dir = await getTemporaryDirectory();
           final f = File('${dir.path}/gif_$name');
@@ -1072,6 +1118,8 @@ class _PlayEvery {
         v.position < d - const Duration(milliseconds: 120)) {
       return;
     }
+    // Kuchsiz telefonda — faqat bir marta (qayta o'ynamaydi).
+    if (DevicePerf.low) return;
     _t = Timer(const Duration(seconds: 10), () async {
       if (_dead) return;
       try {

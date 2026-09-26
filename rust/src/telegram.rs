@@ -3641,6 +3641,66 @@ pub extern "C" fn rust_tg_media_file(json_ptr: *const c_char) -> *mut c_char {
     }))
 }
 
+/// GIF'ning to'g'ridan-to'g'ri yuklash "kaliti" (fayl nomiga qo'shiladi):
+/// `g<id>_<access_hash>_<dc>_<file_reference>` (hammasi hex).
+/// Qabul qiluvchi uni o'z Telegram hisobi bilan to'g'ridan-to'g'ri
+/// Telegram serveridan yuklaydi (Telegram ilovasidagidek) — bot
+/// chati ishtirok etmaydi. `{"id":".."}` -> `{"token":".."}`.
+#[no_mangle]
+pub extern "C" fn rust_tg_gif_token(json_ptr: *const c_char) -> *mut c_char {
+    let arg: Value = serde_json::from_str(unsafe { cstr_to_str(json_ptr) }.unwrap_or("{}")).unwrap_or(json!({}));
+    let id = parse_i64(&arg["id"]);
+    let Some(md) = media_docs().lock().ok().and_then(|m| m.get(&id).cloned()) else {
+        return string_to_cptr(json!({"error": "GIF noma'lum"}).to_string());
+    };
+    let fr = hex::encode(&md.file_reference);
+    // Fayl nomi 200 belgidan oshmasin.
+    if fr.len() > 110 {
+        return string_to_cptr(json!({"error": "havola juda uzun"}).to_string());
+    }
+    let token = format!("g{:x}_{:x}_{}_{}", md.id as u64, md.access_hash as u64, md.dc_id, fr);
+    string_to_cptr(json!({"token": token}).to_string())
+}
+
+/// GIF'ni kalit bo'yicha TO'G'RIDAN-TO'G'RI Telegram'dan yuklaydi
+/// (diskda bo'lsa — darhol). `{"id","ah","dc","fr"}` -> `{"path"}`.
+/// Havola eskirgan bo'lsa xato qaytadi va ilova eski yo'lga (bot
+/// chati) o'tadi.
+#[no_mangle]
+pub extern "C" fn rust_tg_gif_direct(json_ptr: *const c_char) -> *mut c_char {
+    let arg: Value = serde_json::from_str(unsafe { cstr_to_str(json_ptr) }.unwrap_or("{}")).unwrap_or(json!({}));
+    let hex_i64 = |k: &str| u64::from_str_radix(arg[k].as_str().unwrap_or(""), 16).ok().map(|v| v as i64);
+    let (Some(id), Some(ah)) = (hex_i64("id"), hex_i64("ah")) else {
+        return string_to_cptr(json!({"error": "kalit yaroqsiz"}).to_string());
+    };
+    let dc = arg["dc"].as_str().and_then(|v| v.parse::<i32>().ok()).unwrap_or(2);
+    let Ok(fr) = hex::decode(arg["fr"].as_str().unwrap_or("")) else {
+        return string_to_cptr(json!({"error": "kalit yaroqsiz"}).to_string());
+    };
+    if let Some(t) = tg() {
+        let path = media_dir(t).join(format!("{id}"));
+        if path.exists() {
+            return string_to_cptr(json!({"path": path.to_string_lossy()}).to_string());
+        }
+    }
+    string_to_cptr(with_client(|t, client| {
+        let path = media_dir(t).join(format!("{id}"));
+        if path.exists() {
+            return Ok(json!({"path": path.to_string_lossy()}).to_string());
+        }
+        let md = MediaDoc { id, access_hash: ah, file_reference: fr, dc_id: dc, thumb: None, set: None, emoji: false };
+        let bytes = t.rt.block_on(async {
+            tokio::time::timeout(Duration::from_secs(30), download_media(t, &client, md, false))
+                .await
+                .map_err(|_| format!("{NET_ERR}vaqt tugadi"))?
+        })?;
+        let tmp = path.with_extension("part");
+        fs::write(&tmp, &bytes).map_err(|e| e.to_string())?;
+        fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
+        Ok(json!({"path": path.to_string_lossy()}).to_string())
+    }))
+}
+
 /// GIF'ni bot chatiga TAYYOR hujjat sifatida yuboradi (qayta
 /// yuklanmaydi). Izoh — fayl nomi: bot uni kanalga ko'chiradi
 /// (`tg_user_media`). `{"id":"..","name":".."}` -> `{"ok":true}`.

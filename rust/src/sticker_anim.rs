@@ -17,7 +17,8 @@
 
 use std::collections::HashMap;
 use std::ffi::{c_char, c_void};
-use std::io::Read;
+use std::io::{Read, Seek, SeekFrom, Write};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -57,10 +58,187 @@ struct Anim {
     kind: Kind,
     w: usize,
     h: usize,
+    disk: Option<DiskFrames>,
+}
+
+// ── KADRLAR DISKDA (Telegram `BitmapsCache` kabi) ──────────────────
+//
+// TALAB (foydalanuvchi): "Telegram qanday xatosiz ishlasa shunday —
+// stikerlar qotmasin, telefon qizimasin".
+//
+// Telegram stiker kadrini bir marta chizadi va siqilgan holda diskda
+// saqlaydi; keyingi aylanishlarda (va stiker qayta ochilganda) kadr
+// chizilmaydi — diskdan o'qib ochiladi. Bu yerda ham shunday:
+// chizilgan kadr `deflate` (tez daraja) bilan siqiladi va tutqich
+// yopilganda stiker yonidagi `.afc` faylga yoziladi. Keyingi safar
+// kadr diskdan o'qiladi (VP9 dekoder va Lottie chizgich ishlamaydi).
+// Papkadagi `.afc` fayllari jami [DISK_BUDGET] dan oshsa eng eskilari
+// o'chadi; ular stiker fayllari bilan birga "Keshni tozalash"da ham
+// o'chadi.
+
+const DISK_BUDGET: u64 = 200 * 1024 * 1024;
+const MAGIC: &[u8; 4] = b"AFC1";
+
+struct DiskFrames {
+    path: PathBuf,
+    /// Diskdagi kadrlar: (joyi, uzunligi); uzunlik 0 — yo'q.
+    table: Vec<(u64, u32)>,
+    file: Option<std::fs::File>,
+    /// Shu safar chizilgan (siqilgan) yangi kadrlar.
+    fresh: HashMap<usize, Vec<u8>>,
+}
+
+impl DiskFrames {
+    fn open(path: PathBuf, frames: usize, w: usize, h: usize) -> DiskFrames {
+        let mut d = DiskFrames { path, table: vec![(0, 0); frames], file: None, fresh: HashMap::new() };
+        if let Ok(mut f) = std::fs::File::open(&d.path) {
+            let mut head = [0u8; 16];
+            if f.read_exact(&mut head).is_ok()
+                && &head[0..4] == MAGIC
+                && u32::from_le_bytes(head[4..8].try_into().unwrap()) as usize == w
+                && u32::from_le_bytes(head[8..12].try_into().unwrap()) as usize == h
+                && u32::from_le_bytes(head[12..16].try_into().unwrap()) as usize == frames
+            {
+                let mut tab = vec![0u8; frames * 12];
+                if f.read_exact(&mut tab).is_ok() {
+                    for i in 0..frames {
+                        let o = u64::from_le_bytes(tab[i * 12..i * 12 + 8].try_into().unwrap());
+                        let l = u32::from_le_bytes(tab[i * 12 + 8..i * 12 + 12].try_into().unwrap());
+                        d.table[i] = (o, l);
+                    }
+                    d.file = Some(f);
+                }
+            }
+        }
+        d
+    }
+
+    /// Kadr diskda (yoki shu safar chizilgan) bo'lsa — [out] ga ochadi.
+    fn read(&mut self, f: usize, out: &mut [u8]) -> bool {
+        let data = if let Some(v) = self.fresh.get(&f) {
+            v.clone()
+        } else {
+            let (o, l) = self.table.get(f).copied().unwrap_or((0, 0));
+            let Some(file) = self.file.as_mut() else { return false };
+            if l == 0 || file.seek(SeekFrom::Start(o)).is_err() {
+                return false;
+            }
+            let mut v = vec![0u8; l as usize];
+            if file.read_exact(&mut v).is_err() {
+                return false;
+            }
+            v
+        };
+        let mut z = flate2::read::DeflateDecoder::new(&data[..]);
+        z.read_exact(out).is_ok()
+    }
+
+    fn has(&self, f: usize) -> bool {
+        self.fresh.contains_key(&f) || self.table.get(f).map(|t| t.1 > 0).unwrap_or(false)
+    }
+
+    fn put(&mut self, f: usize, px: &[u8]) {
+        if self.has(f) {
+            return;
+        }
+        let mut z = flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::fast());
+        if z.write_all(px).is_ok() {
+            if let Ok(v) = z.finish() {
+                self.fresh.insert(f, v);
+            }
+        }
+    }
+
+    /// Yangi kadrlar bo'lsa — eski va yangilarini bitta faylga yozadi.
+    fn save(&mut self, w: usize, h: usize) {
+        if self.fresh.is_empty() {
+            return;
+        }
+        let n = self.table.len();
+        let mut body: Vec<u8> = Vec::new();
+        let mut tab = vec![(0u64, 0u32); n];
+        let head_len = (16 + n * 12) as u64;
+        for i in 0..n {
+            let data = if let Some(v) = self.fresh.remove(&i) {
+                Some(v)
+            } else {
+                let (o, l) = self.table[i];
+                match (l > 0, self.file.as_mut()) {
+                    (true, Some(file)) => {
+                        let mut v = vec![0u8; l as usize];
+                        if file.seek(SeekFrom::Start(o)).is_ok() && file.read_exact(&mut v).is_ok() {
+                            Some(v)
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                }
+            };
+            if let Some(v) = data {
+                tab[i] = (head_len + body.len() as u64, v.len() as u32);
+                body.extend_from_slice(&v);
+            }
+        }
+        let mut out = Vec::with_capacity(head_len as usize + body.len());
+        out.extend_from_slice(MAGIC);
+        out.extend_from_slice(&(w as u32).to_le_bytes());
+        out.extend_from_slice(&(h as u32).to_le_bytes());
+        out.extend_from_slice(&(n as u32).to_le_bytes());
+        for (o, l) in &tab {
+            out.extend_from_slice(&o.to_le_bytes());
+            out.extend_from_slice(&l.to_le_bytes());
+        }
+        out.extend_from_slice(&body);
+        self.file = None;
+        // Bir stiker bir necha joyda ochiq bo'lishi mumkin — har yozuv
+        // o'z vaqtinchalik faylida (bir-birini buzmasin).
+        static SEQ: AtomicI64 = AtomicI64::new(0);
+        let tmp = self.path.with_extension(format!("afc.{}.part", SEQ.fetch_add(1, Ordering::SeqCst)));
+        if std::fs::write(&tmp, &out).is_err() || std::fs::rename(&tmp, &self.path).is_err() {
+            let _ = std::fs::remove_file(&tmp);
+        } else {
+            self.table = tab;
+            self.file = std::fs::File::open(&self.path).ok();
+            if let Some(dir) = self.path.parent() {
+                trim_dir(dir);
+            }
+        }
+    }
+}
+
+/// `.afc` fayllari jami [DISK_BUDGET] dan oshsa — eng eskilari o'chadi.
+fn trim_dir(dir: &Path) {
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    let mut files: Vec<(std::time::SystemTime, u64, PathBuf)> = rd
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().map(|x| x == "afc").unwrap_or(false))
+        .filter_map(|e| {
+            let m = e.metadata().ok()?;
+            Some((m.modified().ok()?, m.len(), e.path()))
+        })
+        .collect();
+    let mut total: u64 = files.iter().map(|f| f.1).sum();
+    if total <= DISK_BUDGET {
+        return;
+    }
+    files.sort_by_key(|f| f.0);
+    for (_, len, p) in files {
+        if total <= DISK_BUDGET * 3 / 4 {
+            break;
+        }
+        if std::fs::remove_file(&p).is_ok() {
+            total = total.saturating_sub(len);
+        }
+    }
 }
 
 impl Drop for Anim {
     fn drop(&mut self) {
+        let (w, h) = (self.w, self.h);
+        if let Some(d) = self.disk.as_mut() {
+            d.save(w, h);
+        }
         unsafe {
             match &self.kind {
                 Kind::Lottie { .. } => {}
@@ -238,9 +416,18 @@ fn open_anim(path_ptr: *const c_char, w: i32, h: i32) -> i64 {
     let Some(kind) = kind else { return 0 };
     let w = (w.max(1) as usize).min(MAX_SIDE);
     let h = (h.max(1) as usize).min(MAX_SIDE);
+    let frames = match &kind {
+        Kind::Lottie { frames, .. } => *frames,
+        Kind::Webm { frames, .. } => frames.len(),
+    };
+    let disk = if frames > 1 {
+        Some(DiskFrames::open(PathBuf::from(format!("{path}.{w}x{h}.afc")), frames, w, h))
+    } else {
+        None
+    };
     let id = NEXT.fetch_add(1, Ordering::SeqCst);
     if let Ok(mut m) = anims().lock() {
-        m.insert(id, Arc::new(Mutex::new(Anim { kind, w, h })));
+        m.insert(id, Arc::new(Mutex::new(Anim { kind, w, h, disk })));
     }
     id
 }
@@ -287,7 +474,26 @@ fn render_frame(id: i64, frame: i32, out: *mut u8) -> i32 {
     if out.is_null() {
         return -1;
     }
-    match &mut a.kind {
+    let a = &mut *a;
+    let buf = unsafe { std::slice::from_raw_parts_mut(out, w * h * 4) };
+    // Kadr diskda bo'lsa — chizilmaydi, ochiladi.
+    let fi = frame.max(0) as usize;
+    if let Some(d) = a.disk.as_mut() {
+        if d.read(fi, buf) {
+            return 1;
+        }
+    }
+    let r = draw(&mut a.kind, frame, out, w, h);
+    if r == 1 {
+        if let Some(d) = a.disk.as_mut() {
+            d.put(fi, buf);
+        }
+    }
+    r
+}
+
+fn draw(kind: &mut Kind, frame: i32, out: *mut u8, w: usize, h: usize) -> i32 {
+    match kind {
         Kind::Lottie { r, frames, .. } => {
             let f = (frame.max(0) as usize).min(*frames - 1);
             let px = unsafe { std::slice::from_raw_parts_mut(out as *mut u32, w * h) };
@@ -333,9 +539,10 @@ fn render_frame(id: i64, frame: i32, out: *mut u8) -> i32 {
 /// Yopadi (xotira bo'shaydi).
 #[no_mangle]
 pub extern "C" fn rust_anim_close(id: i64) {
-    if let Ok(mut m) = anims().lock() {
-        m.remove(&id);
-    }
+    // Tutqich umumiy qulfdan TASHQARIDA yopiladi: kadrlarni diskka
+    // yozish boshqa stikerlarning chizilishini to'xtatib turmasin.
+    let a = anims().lock().ok().and_then(|mut m| m.remove(&id));
+    drop(a);
 }
 
 #[cfg(test)]
@@ -369,7 +576,7 @@ mod tests {
         assert_eq!(*frames, 1);
         assert!((fps - 30.0).abs() < 0.01);
         let id = NEXT.fetch_add(1, Ordering::SeqCst);
-        anims().lock().unwrap().insert(id, Arc::new(Mutex::new(Anim { kind, w: 8, h: 8 })));
+        anims().lock().unwrap().insert(id, Arc::new(Mutex::new(Anim { kind, w: 8, h: 8, disk: None })));
         let mut buf = vec![0u8; 8 * 8 * 4];
         assert_eq!(rust_anim_render(id, 3, buf.as_mut_ptr()), 1);
         // Markazdagi nuqta — to'liq qizil (RGBA).
@@ -391,7 +598,7 @@ mod tests {
         assert!((fps - 30.0).abs() < 0.1);
         let kind = open_webm(bytes).expect("dekoder");
         let id = NEXT.fetch_add(1, Ordering::SeqCst);
-        anims().lock().unwrap().insert(id, Arc::new(Mutex::new(Anim { kind, w: 32, h: 32 })));
+        anims().lock().unwrap().insert(id, Arc::new(Mutex::new(Anim { kind, w: 32, h: 32, disk: None })));
         let mut buf = vec![0u8; 32 * 32 * 4];
         assert_eq!(rust_anim_render(id, 1, buf.as_mut_ptr()), 1);
         let px = |x: usize, y: usize| &buf[(y * 32 + x) * 4..(y * 32 + x) * 4 + 4];
@@ -403,6 +610,38 @@ mod tests {
         // Orqaga qaytish (qayta boshlash) ham ishlaydi.
         assert_eq!(rust_anim_render(id, 0, buf.as_mut_ptr()), 1);
         rust_anim_close(id);
+    }
+
+    #[test]
+    fn disk_frames_roundtrip() {
+        let dir = std::env::temp_dir().join(format!("afc_test_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("s.4x4.afc");
+        let _ = std::fs::remove_file(&path);
+        let a: Vec<u8> = (0..64).map(|i| i as u8).collect();
+        let b: Vec<u8> = (0..64).map(|i| 255 - i as u8).collect();
+        let mut d = DiskFrames::open(path.clone(), 3, 4, 4);
+        let mut out = vec![0u8; 64];
+        assert!(!d.read(0, &mut out));
+        d.put(0, &a);
+        d.put(2, &b);
+        assert!(d.read(2, &mut out) && out == b);
+        d.save(4, 4);
+        // Qayta ochilganda diskdan o'qiladi.
+        let mut d = DiskFrames::open(path.clone(), 3, 4, 4);
+        assert!(d.read(0, &mut out) && out == a);
+        assert!(d.read(2, &mut out) && out == b);
+        assert!(!d.read(1, &mut out));
+        // Yangi kadr qo'shilsa eskilari saqlanib qoladi.
+        d.put(1, &b);
+        d.save(4, 4);
+        let mut d = DiskFrames::open(path.clone(), 3, 4, 4);
+        assert!(d.read(0, &mut out) && out == a);
+        assert!(d.read(1, &mut out) && out == b);
+        // O'lchami boshqa — eski fayl ishlatilmaydi.
+        let mut d2 = DiskFrames::open(path, 3, 8, 8);
+        assert!(!d2.read(0, &mut vec![0u8; 256]));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
