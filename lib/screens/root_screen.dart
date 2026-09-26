@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -8,6 +9,7 @@ import '../services/app_build.dart';
 import '../services/auth_service.dart';
 import '../services/support_service.dart';
 import '../services/season_info.dart';
+import '../services/rust_bridge.dart';
 import '../services/ui_state.dart';
 import '../services/downloads_index.dart';
 import '../services/watch_history.dart';
@@ -70,6 +72,36 @@ class _RootScreenState extends State<RootScreen>
   /// Oldingi kadr vaqti. `null` — suzish endi boshlandi.
   Duration? _navLastTick;
 
+  /// Oldingi ochilishda ilova Rust xatosi bilan yopilgan bo'lsa —
+  /// sababi ekranda ko'rsatiladi (skrinshot qilib yuborish uchun).
+  Future<void> _showLastCrash() async {
+    final root = RustCore.instance.rootDirPath;
+    if (root == null) return;
+    final f = File('$root/last_crash.txt');
+    String text;
+    try {
+      if (!f.existsSync()) return;
+      text = f.readAsStringSync();
+      f.deleteSync();
+    } catch (_) {
+      return;
+    }
+    if (!mounted || text.trim().isEmpty) return;
+    await showDialog<void>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Ilova oldingi safar xato bilan yopilgan'),
+        content: SingleChildScrollView(
+          child: SelectableText(text, style: const TextStyle(fontSize: 12)),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c), child: const Text('Yopish')),
+        ],
+      ),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -78,6 +110,7 @@ class _RootScreenState extends State<RootScreen>
     // chiqarilgan bo'lishi mumkin).
     WidgetsBinding.instance.addObserver(this);
     _navTicker = createTicker(_onNavTick);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _showLastCrash());
 
     // ── O'QILMAGAN XABARLAR NUQTASI ──────────────────────────
     //

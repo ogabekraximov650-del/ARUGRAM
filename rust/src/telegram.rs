@@ -1305,10 +1305,27 @@ async fn serve(t: &'static Tg, listener: TcpListener) {
     }
 }
 
+/// Rust ichida `panic` bo'lsa (release'da ilova darhol yopiladi)
+/// sababi `last_crash.txt` ga yoziladi — keyingi ochilishda ilova uni
+/// ekranda ko'rsatadi (`crash_log.dart`).
+fn install_crash_log(dir: &std::path::Path) {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    let path = dir.parent().unwrap_or(dir).join("last_crash.txt");
+    ONCE.call_once(move || {
+        let prev = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            let thread = std::thread::current().name().unwrap_or("?").to_string();
+            let _ = fs::write(&path, format!("Rust panic [{thread}]: {info}"));
+            prev(info);
+        }));
+    });
+}
+
 fn init(dir: &str, api_id: i32, api_hash: &str) -> Result<&'static Tg, String> {
     if TG.get().is_none() {
         let dir = PathBuf::from(dir);
         fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        install_crash_log(&dir);
         let rt = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .thread_name("tg")
@@ -3159,17 +3176,24 @@ where
     r
 }
 
+/// Telegram so'rovi vaqt chegarasi bilan: javob kelmasa panel
+/// cheksiz "aylanib" qolmasin, xato matni ko'rinsin.
+fn run_tmo<T>(t: &Tg, secs: u64, f: impl std::future::Future<Output = Result<T, String>>) -> Result<T, String> {
+    t.rt.block_on(async {
+        tokio::time::timeout(Duration::from_secs(secs), f)
+            .await
+            .map_err(|_| format!("{NET_ERR}Telegram {secs} soniyada javob bermadi"))?
+    })
+}
+
 /// Foydalanuvchida Telegram Premium bormi (`{"premium": bool}`).
 #[no_mangle]
 pub extern "C" fn rust_tg_premium() -> *mut c_char {
     string_to_cptr(with_cache("premium", |t, client| {
         cached(t, "premium", Duration::from_secs(3600), |_| {
-            let users = t
-                .rt
-                .block_on(client.invoke(&tl::functions::users::GetUsers {
+            let users = run_tmo(t, 20, async { client.invoke(&tl::functions::users::GetUsers {
                     id: vec![tl::enums::InputUser::UserSelf],
-                }))
-                .map_err(|e| inv_err(&e))?;
+                }).await.map_err(|e| inv_err(&e)) })?;
             let premium = users.iter().any(|u| matches!(u, tl::enums::User::User(u) if u.premium));
             Ok((json!({"premium": premium}), json!({})))
         })
@@ -3183,7 +3207,7 @@ pub extern "C" fn rust_tg_sticker_sets(emoji: i32) -> *mut c_char {
     let name = if emoji != 0 { "sets_emoji" } else { "sets_stickers" };
     string_to_cptr(with_cache(name, |t, client| {
         cached(t, name, Duration::from_secs(600), |old| {
-            t.rt.block_on(async {
+            run_tmo(t, 20, async {
                 let h = hash_of(old, "all");
                 let all = if emoji != 0 {
                     client.invoke(&tl::functions::messages::GetEmojiStickers { hash: h }).await
@@ -3258,7 +3282,7 @@ pub extern "C" fn rust_tg_sticker_set(json_ptr: *const c_char) -> *mut c_char {
         // To'plam ichi deyarli o'zgarmaydi — bir kun tekshirilmaydi.
         cached(t, &name, Duration::from_secs(24 * 3600), |old| {
             let known = old.map(|v| parse_i64(&v["hash"]["h"]) as i32).unwrap_or(0);
-            match t.rt.block_on(load_set_hashed(&client, id, hash, known))? {
+            match run_tmo(t, 20, load_set_hashed(&client, id, hash, known))? {
                 Some((docs, h)) => Ok((json!({"docs": docs}), json!({"h": h.to_string()}))),
                 None => Ok((json!({"docs": old_resp(old, "docs")}), json!({"h": known.to_string()}))),
             }
@@ -3283,10 +3307,7 @@ pub extern "C" fn rust_tg_custom_emoji(json_ptr: *const c_char) -> *mut c_char {
     let missing: Vec<i64> = ids.iter().copied().filter(|id| !known.contains_key(&id.to_string())).collect();
     if !missing.is_empty() {
         let r = with_client(|t, client| {
-            let docs = t
-                .rt
-                .block_on(client.invoke(&tl::functions::messages::GetCustomEmojiDocuments { document_id: missing.clone() }))
-                .map_err(|e| inv_err(&e))?;
+            let docs = run_tmo(t, 20, async { client.invoke(&tl::functions::messages::GetCustomEmojiDocuments { document_id: missing.clone() }).await.map_err(|e| inv_err(&e)) })?;
             Ok::<_, String>(json!(docs_value(&docs, None)).to_string())
         });
         match serde_json::from_str::<Value>(&r) {
@@ -3313,10 +3334,7 @@ pub extern "C" fn rust_tg_saved_gifs() -> *mut c_char {
     string_to_cptr(with_cache("saved_gifs", |t, client| {
         cached(t, "saved_gifs", Duration::from_secs(600), |old| {
             let h = hash_of(old, "h");
-            let r = t
-                .rt
-                .block_on(client.invoke(&tl::functions::messages::GetSavedGifs { hash: h }))
-                .map_err(|e| inv_err(&e))?;
+            let r = run_tmo(t, 20, async { client.invoke(&tl::functions::messages::GetSavedGifs { hash: h }).await.map_err(|e| inv_err(&e)) })?;
             Ok(match r {
                 tl::enums::messages::SavedGifs::Gifs(g) => {
                     (json!({"docs": docs_value(&g.gifs, None)}), json!({"h": g.hash.to_string()}))
@@ -3335,7 +3353,7 @@ pub extern "C" fn rust_tg_gif_search(json_ptr: *const c_char) -> *mut c_char {
     let q = arg["q"].as_str().unwrap_or("").to_string();
     let offset = arg["offset"].as_str().unwrap_or("").to_string();
     string_to_cptr(with_client(|t, client| {
-        t.rt.block_on(async {
+        run_tmo(t, 20, async {
             static GIF_BOT: OnceLock<Mutex<Option<(i64, i64)>>> = OnceLock::new();
             let cell = GIF_BOT.get_or_init(|| Mutex::new(None));
             let cached = cell.lock().ok().and_then(|c| *c);
@@ -3380,6 +3398,60 @@ pub extern "C" fn rust_tg_gif_search(json_ptr: *const c_char) -> *mut c_char {
                 .filter_map(|d| doc_value(d, None))
                 .collect();
             Ok(json!({"docs": docs, "next": r.next_offset.unwrap_or_default()}).to_string())
+        })
+    }))
+}
+
+/// Emoji bo'yicha stikerlar (Telegram'dagi qidiruv qatoridagi ❤️ 👍 …
+/// tugmalari): `{"q":"❤"}` -> `{"docs":[..]}`.
+#[no_mangle]
+pub extern "C" fn rust_tg_stickers_by_emoji(json_ptr: *const c_char) -> *mut c_char {
+    let arg: Value = serde_json::from_str(unsafe { cstr_to_str(json_ptr) }.unwrap_or("{}")).unwrap_or(json!({}));
+    let q = arg["q"].as_str().unwrap_or("").to_string();
+    let name = format!("by_emoji_{}", hex::encode(q.as_bytes()));
+    string_to_cptr(with_cache(&name, |t, client| {
+        cached(t, &name, Duration::from_secs(3600), |old| {
+            let h = hash_of(old, "h");
+            let r = run_tmo(t, 20, async {
+                client
+                    .invoke(&tl::functions::messages::GetStickers { emoticon: q.clone(), hash: h })
+                    .await
+                    .map_err(|e| inv_err(&e))
+            })?;
+            Ok(match r {
+                tl::enums::messages::Stickers::Stickers(s) => {
+                    (json!({"docs": docs_value(&s.stickers, None)}), json!({"h": s.hash.to_string()}))
+                }
+                tl::enums::messages::Stickers::NotModified => (json!({"docs": old_resp(old, "docs")}), json!({"h": h.to_string()})),
+            })
+        })
+    }))
+}
+
+/// Telegram'ning emoji kalit so'zlari (`messages.getEmojiKeywords`) —
+/// emoji qidiruvi uchun. Bir kun keshlanadi.
+/// `{"lang":"ru"}` -> `{"k":{"so'z":["😀",..],..}}`.
+#[no_mangle]
+pub extern "C" fn rust_tg_emoji_keywords(json_ptr: *const c_char) -> *mut c_char {
+    let arg: Value = serde_json::from_str(unsafe { cstr_to_str(json_ptr) }.unwrap_or("{}")).unwrap_or(json!({}));
+    let lang = arg["lang"].as_str().unwrap_or("en").to_string();
+    let name = format!("emoji_kw_{lang}");
+    string_to_cptr(with_cache(&name, |t, client| {
+        cached(t, &name, Duration::from_secs(24 * 3600), |_| {
+            let r = run_tmo(t, 25, async {
+                client
+                    .invoke(&tl::functions::messages::GetEmojiKeywords { lang_code: lang.clone() })
+                    .await
+                    .map_err(|e| inv_err(&e))
+            })?;
+            let tl::enums::EmojiKeywordsDifference::Difference(d) = r;
+            let mut k = serde_json::Map::new();
+            for w in d.keywords {
+                if let tl::enums::EmojiKeyword::Keyword(w) = w {
+                    k.insert(w.keyword, json!(w.emoticons));
+                }
+            }
+            Ok((json!({"k": k}), json!({})))
         })
     }))
 }
@@ -3488,7 +3560,7 @@ pub extern "C" fn rust_tg_media_file(json_ptr: *const c_char) -> *mut c_char {
             return Err("kichik rasm yo'q".to_string());
         }
         let bytes = t.rt.block_on(async {
-            tokio::time::timeout(Duration::from_secs(40), download_media(t, &client, md, thumb))
+            tokio::time::timeout(Duration::from_secs(30), download_media(t, &client, md, thumb))
                 .await
                 .map_err(|_| format!("{NET_ERR}vaqt tugadi"))?
         })?;

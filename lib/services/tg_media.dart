@@ -18,8 +18,10 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'native_pool.dart';
 import 'telegram_service.dart';
 
 /// Telegram hujjati (stiker, maxsus emoji yoki GIF).
@@ -126,6 +128,15 @@ class TgMedia {
 
   bool get ready => TelegramService.instance.authorized;
 
+  /// Oxirgi xato matni — panel bo'sh qolsa ekranda shu ko'rsatiladi
+  /// (nima buzilganini skrinshotdan bilish uchun).
+  final ValueNotifier<String> lastError = ValueNotifier('');
+
+  void _fail(Map<String, dynamic> j) {
+    final e = j['error'];
+    if (e != null) lastError.value = '$e';
+  }
+
   // ── PREMIUM ──────────────────────────────────────────────────
   bool? _premium;
   Future<bool> premium() async {
@@ -146,6 +157,7 @@ class TgMedia {
     return _stickers ??= () async {
       final j = await tgCall('rust_tg_sticker_sets', intArg: 0);
       if (j['error'] != null) {
+        _fail(j);
         _stickers = null;
         return (sets: <TgSet>[], recent: <TgDoc>[], faved: <TgDoc>[]);
       }
@@ -164,6 +176,7 @@ class TgMedia {
   Future<List<TgSet>> emojiSets() => _emojiSets ??= () async {
         final j = await tgCall('rust_tg_sticker_sets', intArg: 1);
         if (j['error'] != null) {
+          _fail(j);
           _emojiSets = null;
           return <TgSet>[];
         }
@@ -181,6 +194,7 @@ class TgMedia {
         final j = await tgCall('rust_tg_sticker_set',
             arg: jsonEncode({'id': id, 'hash': hash}));
         if (j['error'] != null) {
+          _fail(j);
           _sets.remove(id);
           return <TgDoc>[];
         }
@@ -233,6 +247,7 @@ class TgMedia {
       final part = ids.sublist(i, (i + 100).clamp(0, ids.length));
       final j =
           await tgCall('rust_tg_custom_emoji', arg: jsonEncode(part));
+      _fail(j);
       final got = {for (final d in _docs(j['docs'])) d.id: d};
       for (final id in part) {
         final c = _emoji[id];
@@ -244,9 +259,58 @@ class TgMedia {
     }
   }
 
+  // ── QIDIRUV (Telegram'dagidek) ───────────────────────────────
+
+  /// Emoji bo'yicha stikerlar (`messages.getStickers`).
+  Future<List<TgDoc>> stickersByEmoji(String emoji) async {
+    final j = await tgCall('rust_tg_stickers_by_emoji',
+        arg: jsonEncode({'q': emoji}));
+    _fail(j);
+    return _docs(j['docs']);
+  }
+
+  Future<Map<String, List<String>>>? _keywords;
+
+  /// Telegram'ning emoji kalit so'zlari (o'zbek, rus, ingliz).
+  Future<Map<String, List<String>>> _loadKeywords() =>
+      _keywords ??= () async {
+        final out = <String, List<String>>{};
+        for (final lang in const ['uz', 'ru', 'en']) {
+          final j = await tgCall('rust_tg_emoji_keywords',
+              arg: jsonEncode({'lang': lang}));
+          final k = j['k'];
+          if (k is! Map) continue;
+          k.forEach((w, e) {
+            if (e is List) {
+              (out['$w'.toLowerCase()] ??= []).addAll(e.whereType<String>());
+            }
+          });
+        }
+        if (out.isEmpty) _keywords = null;
+        return out;
+      }();
+
+  /// So'z bo'yicha emoji: avval so'z BOSHLANISHI mos kelganlar.
+  Future<List<String>> searchEmoji(String q) async {
+    q = q.trim().toLowerCase();
+    if (q.isEmpty) return const [];
+    final kw = await _loadKeywords();
+    final first = <String>{};
+    final rest = <String>{};
+    kw.forEach((w, e) {
+      if (w.startsWith(q)) {
+        first.addAll(e);
+      } else if (w.contains(q)) {
+        rest.addAll(e);
+      }
+    });
+    return [...first, ...rest.difference(first)].take(120).toList();
+  }
+
   // ── GIF ──────────────────────────────────────────────────────
   Future<List<TgDoc>> savedGifs() async {
     final j = await tgCall('rust_tg_saved_gifs');
+    _fail(j);
     return _docs(j['docs']);
   }
 
@@ -254,6 +318,7 @@ class TgMedia {
       {String offset = ''}) async {
     final j = await tgCall('rust_tg_gif_search',
         arg: jsonEncode({'q': q, 'offset': offset}));
+    _fail(j);
     return (docs: _docs(j['docs']), next: '${j['next'] ?? ''}');
   }
 
@@ -285,10 +350,13 @@ class TgMedia {
       }
       _running++;
       try {
-        final j = await tgCall('rust_tg_media_file',
+        final j = await NativePool.files.call('rust_tg_media_file',
             arg: jsonEncode({'id': d.id, 'thumb': thumb}));
         final p = j['path'] as String?;
-        if (p == null) _files.remove(key);
+        if (p == null) {
+          _files.remove(key);
+          _fail(j);
+        }
         return p;
       } finally {
         _running--;

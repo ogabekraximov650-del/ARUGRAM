@@ -34,6 +34,11 @@ class NativePool {
   NativePool._(this.size, this.name);
 
   static final io = NativePool._(3, 'aru-io');
+
+  /// Stiker/emoji/GIF FAYLLARINI yuklash — alohida hovuz: sekin
+  /// yuklanish to'plamlar ro'yxati so'rovini navbatda ushlab turmasin
+  /// (panel "aylanib" qolardi).
+  static final files = NativePool._(3, 'aru-files');
   static final render = NativePool._(2, 'aru-render');
 
   final List<_Worker> _workers = [];
@@ -44,7 +49,13 @@ class NativePool {
       _workers.add(_Worker('$name-${_workers.length}'));
     }
     if (pin != null) return _workers[pin % size];
-    return _workers[_next++ % size];
+    // Eng BO'SH ishchi (navbat bo'yicha emas): band ishchiga qo'yilgan
+    // tezkor so'rov uning sekin ishi tugashini kutib qolardi.
+    var best = _workers[_next++ % size];
+    for (final w in _workers) {
+      if (w.busy < best.busy) best = w;
+    }
+    return best;
   }
 
   /// JSON qaytaradigan Rust funksiyasi: argumentsiz, satr ([arg]) yoki
@@ -94,6 +105,9 @@ class _Worker {
   final ReceivePort _rx = ReceivePort();
   final Map<int, Completer<Object?>> _pending = {};
   int _seq = 0;
+
+  /// Javobi kutilayotgan so'rovlar soni.
+  int get busy => _pending.length;
 
   _Worker(this.name) {
     _rx.listen((m) {

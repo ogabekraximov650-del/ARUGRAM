@@ -17,6 +17,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'glass.dart';
 
@@ -135,6 +136,7 @@ class _TgRecordButtonState extends State<TgRecordButton> {
       // Qisqa bosish — mikrofon <-> kamera.
       _hold!.cancel();
       _hold = null;
+      HapticFeedback.selectionClick();
       setState(() {
         _mode = _lastMode =
             _mode == TgRecMode.voice ? TgRecMode.video : TgRecMode.voice;
@@ -161,11 +163,17 @@ class _TgRecordButtonState extends State<TgRecordButton> {
 
   @override
   Widget build(BuildContext context) {
-    final icon = widget.hasText || widget.locked
-        ? Icons.send_rounded
-        : (_mode == TgRecMode.voice
-            ? Icons.mic_rounded
-            : Icons.radio_button_checked_rounded);
+    // Telegram'dagidek: matn bo'lsa ➤, aks holda 🎤 yoki dumaloq
+    // kamera belgisi. Almashganda eski belgi kichrayib, burilib
+    // yo'qoladi, yangisi kattalashib chiqadi.
+    final key = widget.hasText || widget.locked
+        ? 'send'
+        : (_mode == TgRecMode.voice ? 'mic' : 'video');
+    final Widget glyph = switch (key) {
+      'send' => const Icon(Icons.send_rounded, size: 22, color: Colors.white),
+      'mic' => const Icon(Icons.mic_rounded, size: 24, color: Colors.white),
+      _ => const _RoundVideoGlyph(),
+    };
     return Listener(
       onPointerDown: _down,
       onPointerMove: _move,
@@ -179,13 +187,16 @@ class _TgRecordButtonState extends State<TgRecordButton> {
           // Tepaga surib qulflash belgisi (yozish paytida).
           if (_holding)
             const Positioned(
-              bottom: 64,
+              bottom: 76,
               child: _LockHint(),
             ),
+          // Yozish paytida atrofda "nafas oladigan" halqa (Telegram'da
+          // ovoz balandligiga qarab kattalashadi).
+          if (_holding) const _Halo(),
           AnimatedScale(
-            scale: _holding ? 1.55 : 1,
-            duration: const Duration(milliseconds: 160),
-            curve: Curves.easeOut,
+            scale: _holding ? 1.9 : 1,
+            duration: const Duration(milliseconds: 220),
+            curve: _holding ? Curves.easeOutBack : Curves.easeOut,
             child: Container(
               width: 44,
               height: 44,
@@ -200,15 +211,82 @@ class _TgRecordButtonState extends State<TgRecordButton> {
                           strokeWidth: 2, color: Colors.white),
                     )
                   : AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 160),
-                      transitionBuilder: (c, a) =>
-                          ScaleTransition(scale: a, child: c),
-                      child: Icon(icon,
-                          key: ValueKey(icon), size: 22, color: Colors.white),
+                      duration: const Duration(milliseconds: 260),
+                      switchInCurve: Curves.easeOutBack,
+                      switchOutCurve: Curves.easeIn,
+                      transitionBuilder: (c, a) => FadeTransition(
+                        opacity: a,
+                        child: ScaleTransition(
+                          scale: Tween(begin: 0.2, end: 1.0).animate(a),
+                          child: RotationTransition(
+                            turns: Tween(begin: -0.12, end: 0.0).animate(a),
+                            child: c,
+                          ),
+                        ),
+                      ),
+                      child: KeyedSubtree(key: ValueKey(key), child: glyph),
                     ),
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Telegram'ning dumaloq video belgisi: halqa ichida kamera.
+class _RoundVideoGlyph extends StatelessWidget {
+  const _RoundVideoGlyph();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 24,
+      height: 24,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.white, width: 2),
+      ),
+      child: const Icon(Icons.videocam_rounded, size: 13, color: Colors.white),
+    );
+  }
+}
+
+/// Yozish paytidagi yumshoq, to'lqinlanadigan halqa.
+class _Halo extends StatefulWidget {
+  const _Halo();
+
+  @override
+  State<_Halo> createState() => _HaloState();
+}
+
+class _HaloState extends State<_Halo> with SingleTickerProviderStateMixin {
+  late final AnimationController _a = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 900))
+    ..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _a.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: AnimatedBuilder(
+        animation: _a,
+        builder: (_, __) => Transform.scale(
+          scale: 2.2 + 0.35 * Curves.easeInOut.transform(_a.value),
+          child: Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: AppColors.accent.withValues(alpha: 0.22),
+            ),
+          ),
+        ),
       ),
     );
   }

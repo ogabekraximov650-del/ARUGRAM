@@ -2286,6 +2286,9 @@ class _RoundBubbleState extends State<_RoundBubble> {
   bool _sound = false;
   bool _failed = false;
 
+  /// Nega ochilmadi — pufakchada ko'rinadi (bosilsa qayta uriniladi).
+  String _why = '';
+
   /// Telegram'dagidek: ekran qisqa tomonining 60% i
   /// (`roundMessageSize`).
   double get _size =>
@@ -2305,7 +2308,10 @@ class _RoundBubbleState extends State<_RoundBubble> {
     if (!mounted) return;
     if (local != null) tg.hold(this, widget.url);
     if (!onDisk && local == null) {
-      setState(() => _failed = true);
+      setState(() {
+        _failed = true;
+        _why = 'Video hali tayyor emas';
+      });
       return;
     }
     final source = onDisk || aru
@@ -2318,9 +2324,14 @@ class _RoundBubbleState extends State<_RoundBubble> {
       await c.setLooping(true);
       await c.setVolume(0);
       await c.play();
-    } catch (_) {
+    } catch (e) {
       await c.dispose();
-      if (mounted) setState(() => _failed = true);
+      if (mounted) {
+        setState(() {
+          _failed = true;
+          _why = '$e'.split('\n').first;
+        });
+      }
       return;
     }
     if (!mounted) {
@@ -2348,7 +2359,16 @@ class _RoundBubbleState extends State<_RoundBubble> {
 
   Future<void> _tap() async {
     final c = _c;
-    if (c == null) return;
+    if (c == null) {
+      if (_failed) {
+        setState(() {
+          _failed = false;
+          _why = '';
+        });
+        await _open();
+      }
+      return;
+    }
     if (!_sound) {
       await VoicePlayer.instance.stop();
       _sound = true;
@@ -2398,8 +2418,28 @@ class _RoundBubbleState extends State<_RoundBubble> {
                 child: c == null
                     ? Center(
                         child: _failed
-                            ? Icon(Icons.videocam_off_outlined,
-                                color: Colors.white.withValues(alpha: 0.3))
+                            ? Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.refresh_rounded,
+                                      size: 30,
+                                      color:
+                                          Colors.white.withValues(alpha: 0.6)),
+                                  const SizedBox(height: 6),
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 24),
+                                    child: Text(_why,
+                                        textAlign: TextAlign.center,
+                                        maxLines: 3,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                            fontSize: 11,
+                                            color: Colors.white
+                                                .withValues(alpha: 0.5))),
+                                  ),
+                                ],
+                              )
                             : const SizedBox(
                                 width: 24,
                                 height: 24,

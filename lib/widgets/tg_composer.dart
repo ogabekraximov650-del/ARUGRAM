@@ -267,6 +267,23 @@ class _TgInputAreaState extends State<TgInputArea>
 // ═══════════════════════════════════════════════════════════════
 //  PANEL: EMOJI | GIF | STIKERLAR
 // ═══════════════════════════════════════════════════════════════
+//
+// TALAB (foydalanuvchi): "emoji, gif, stiker oynasi Telegram'da
+// qanday ko'rinsa xuddi shunday — bir tomchi suvdek bo'lsin, ui
+// ko'rinishida ham ishlashida ham; tugmalarga ham Telegram'dagidek
+// animatsiya".
+//
+// Telegram Android `EmojiView` tuzilishi:
+//   * har sahifa tepasida bo'limlar qatori (emoji: 🕒 va turkumlar +
+//     maxsus to'plamlar; stiker: ☆, 🕒 va to'plamlar), tanlangan
+//     belgi ostida yumaloq "tabletka" SILJIB boradi;
+//   * uning ostida "Qidiruv" qatori; GIF va stikerda ichida ❤️ 👍 👎
+//     🎉 … turkum tugmalari (bosilsa shu emoji bo'yicha qidiradi);
+//   * pastda suzib turgan "Emoji | GIF | Stikerlar", tanlangani ostida
+//     tabletka siljiydi; emoji sahifasida o'ngda ⌫;
+//   * katak bosilganda kichrayib-kattalashadi;
+//   * GIF'lar balandligi bir xil qatorlarda, eni asl nisbatda (Telegram
+//     `ExtendedGridLayoutManager`).
 
 class TgMediaPanel extends StatefulWidget {
   final TgTextController controller;
@@ -296,9 +313,12 @@ class _TgMediaPanelState extends State<TgMediaPanel> {
   }
 
   void _go(int i) {
+    if (i == _tab) return;
+    HapticFeedback.selectionClick();
     setState(() => _tab = _lastTab = i);
     _pages.animateToPage(i,
-        duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
+        duration: const Duration(milliseconds: 280),
+        curve: Curves.easeOutCubic);
   }
 
   @override
@@ -322,68 +342,58 @@ class _TgMediaPanelState extends State<TgMediaPanel> {
                   child: _StickerPage(onSticker: widget.onSticker)),
             ],
           ),
-          // ── Pastda suzib turgan tugmalar (Telegram'dagidek) ──
+          // ── Yuklashda xato bo'lsa — sababi (bosilsa yopiladi) ──
+          Positioned(
+            left: 12,
+            right: 12,
+            bottom: 60,
+            child: ValueListenableBuilder<String>(
+              valueListenable: TgMedia.instance.lastError,
+              builder: (context, err, _) => err.isEmpty
+                  ? const SizedBox()
+                  : GestureDetector(
+                      onTap: () => TgMedia.instance.lastError.value = '',
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: const Color(0xEE3A1F22),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text('Xato: $err',
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                color: Color(0xFFFF8A8A), fontSize: 12)),
+                      ),
+                    ),
+            ),
+          ),
+          // ── Pastda suzib turgan tugmalar ──
           Positioned(
             left: 0,
             right: 0,
             bottom: 10,
-            child: Center(
-              child: Container(
-                padding: const EdgeInsets.all(4),
-                decoration: BoxDecoration(
-                  color: const Color(0xEE2A2F36),
-                  borderRadius: BorderRadius.circular(24),
-                  boxShadow: const [
-                    BoxShadow(color: Colors.black38, blurRadius: 10),
-                  ],
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    for (final (i, label) in const [
-                      (0, 'Emoji'),
-                      (1, 'GIF'),
-                      (2, 'Stikerlar'),
-                    ])
-                      GestureDetector(
-                        onTap: () => _go(i),
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 180),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: _tab == i
-                                ? Colors.white.withValues(alpha: 0.12)
-                                : Colors.transparent,
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: Text(
-                            label,
-                            style: TextStyle(
-                              color: Colors.white
-                                  .withValues(alpha: _tab == i ? 1 : 0.6),
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                      ),
-                  ],
+            child: Center(child: _TabPill(tab: _tab, onTap: _go)),
+          ),
+          // ── ⌫ (faqat Emoji sahifasida; paydo bo'lish animatsiyasi) ──
+          Positioned(
+            right: 10,
+            bottom: 12,
+            child: AnimatedScale(
+              scale: _tab == 0 ? 1 : 0.4,
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeOutBack,
+              child: AnimatedOpacity(
+                opacity: _tab == 0 ? 1 : 0,
+                duration: const Duration(milliseconds: 160),
+                child: IgnorePointer(
+                  ignoring: _tab != 0,
+                  child: _Backspace(onTap: widget.controller.backspace),
                 ),
               ),
             ),
           ),
-          // ── ⌫ (faqat Emoji sahifasida) ──
-          if (_tab == 0)
-            Positioned(
-              right: 10,
-              bottom: 12,
-              child: _RoundIcon(
-                icon: Icons.backspace_outlined,
-                onTap: widget.controller.backspace,
-                onLong: widget.controller.backspace,
-              ),
-            ),
         ],
       ),
     );
@@ -391,22 +401,132 @@ class _TgMediaPanelState extends State<TgMediaPanel> {
 }
 
 abstract final class _Pal {
-  static const bg = Color(0xFF1B1F24);
-  static const strip = Color(0xFF22272D);
-  static const hint = Color(0xFF8A939D);
+  static const bg = Color(0xFF1C1C1E);
+  static const field = Color(0x17FFFFFF);
+  static const pill = Color(0xF22C2C2E);
+  static const pillOn = Color(0x24FFFFFF);
+  static const hint = Color(0xFF8E8E93);
+  static const icon = Color(0xFF9A9AA0);
 }
 
-class _RoundIcon extends StatefulWidget {
-  final IconData icon;
-  final VoidCallback onTap;
-  final VoidCallback? onLong;
-  const _RoundIcon({required this.icon, required this.onTap, this.onLong});
+/// "Emoji | GIF | Stikerlar" — tanlangan yozuv ostida tabletka siljiydi.
+class _TabPill extends StatelessWidget {
+  final int tab;
+  final ValueChanged<int> onTap;
+  const _TabPill({required this.tab, required this.onTap});
+
+  static const _labels = ['Emoji', 'GIF', 'Stikerlar'];
+  static const _w = [72.0, 56.0, 92.0];
 
   @override
-  State<_RoundIcon> createState() => _RoundIconState();
+  Widget build(BuildContext context) {
+    var left = 0.0;
+    for (var i = 0; i < tab; i++) {
+      left += _w[i];
+    }
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: _Pal.pill,
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 12)],
+      ),
+      child: SizedBox(
+        height: 36,
+        width: _w.reduce((a, b) => a + b),
+        child: Stack(
+          children: [
+            AnimatedPositioned(
+              duration: const Duration(milliseconds: 260),
+              curve: Curves.easeOutCubic,
+              left: left,
+              top: 0,
+              bottom: 0,
+              width: _w[tab],
+              child: Container(
+                decoration: BoxDecoration(
+                  color: _Pal.pillOn,
+                  borderRadius: BorderRadius.circular(18),
+                ),
+              ),
+            ),
+            Row(
+              children: [
+                for (var i = 0; i < 3; i++)
+                  _Press(
+                    onTap: () => onTap(i),
+                    child: SizedBox(
+                      width: _w[i],
+                      height: 36,
+                      child: Center(
+                        child: AnimatedDefaultTextStyle(
+                          duration: const Duration(milliseconds: 200),
+                          style: TextStyle(
+                            color: Colors.white
+                                .withValues(alpha: tab == i ? 1 : 0.55),
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          child: Text(_labels[i]),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
-class _RoundIconState extends State<_RoundIcon> {
+/// Telegram'dagidek bosilganda kichrayadigan tugma.
+class _Press extends StatefulWidget {
+  final Widget child;
+  final VoidCallback? onTap;
+  final double scale;
+  const _Press(
+      {super.key, required this.child, this.onTap, this.scale = 0.86});
+
+  @override
+  State<_Press> createState() => _PressState();
+}
+
+class _PressState extends State<_Press> {
+  bool _down = false;
+
+  void _set(bool v) {
+    if (_down != v) setState(() => _down = v);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTapDown: (_) => _set(true),
+      onTapUp: (_) => _set(false),
+      onTapCancel: () => _set(false),
+      onTap: widget.onTap,
+      child: AnimatedScale(
+        scale: _down ? widget.scale : 1,
+        duration: Duration(milliseconds: _down ? 90 : 220),
+        curve: _down ? Curves.easeOut : Curves.easeOutBack,
+        child: widget.child,
+      ),
+    );
+  }
+}
+
+class _Backspace extends StatefulWidget {
+  final VoidCallback onTap;
+  const _Backspace({required this.onTap});
+
+  @override
+  State<_Backspace> createState() => _BackspaceState();
+}
+
+class _BackspaceState extends State<_Backspace> {
   Timer? _repeat;
 
   @override
@@ -418,21 +538,29 @@ class _RoundIconState extends State<_RoundIcon> {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: widget.onTap,
-      // Bosib turilsa — ketma-ket o'chiradi.
-      onLongPressStart: widget.onLong == null
-          ? null
-          : (_) => _repeat = Timer.periodic(
-              const Duration(milliseconds: 70), (_) => widget.onLong!()),
+      // Bosib turilsa — ketma-ket o'chiradi (Telegram'dagidek tezlashib).
+      onLongPressStart: (_) {
+        var n = 0;
+        _repeat = Timer.periodic(const Duration(milliseconds: 60), (_) {
+          n++;
+          widget.onTap();
+          if (n > 12) widget.onTap();
+        });
+      },
       onLongPressEnd: (_) => _repeat?.cancel(),
-      child: Container(
-        width: 44,
-        height: 38,
-        decoration: BoxDecoration(
-          color: const Color(0xEE2A2F36),
-          borderRadius: BorderRadius.circular(19),
+      child: _Press(
+        onTap: widget.onTap,
+        child: Container(
+          width: 44,
+          height: 44,
+          decoration: const BoxDecoration(
+            color: _Pal.pill,
+            shape: BoxShape.circle,
+            boxShadow: [BoxShadow(color: Colors.black45, blurRadius: 12)],
+          ),
+          child: const Icon(Icons.backspace_outlined,
+              color: Colors.white70, size: 20),
         ),
-        child: Icon(widget.icon, color: Colors.white70, size: 20),
       ),
     );
   }
@@ -444,14 +572,14 @@ class _Header extends StatelessWidget {
   final bool locked;
   const _Header(this.title, {this.locked = false});
 
-  static const height = 34.0;
+  static const height = 36.0;
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
       height: height,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 10, 14, 4),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
         child: Row(
           children: [
             if (locked) ...[
@@ -465,15 +593,15 @@ class _Header extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                     color: _Pal.hint,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600),
+                    fontSize: 15,
+                    fontWeight: FontWeight.w500),
               ),
             ),
             if (locked)
               const Text('Premium',
                   style: TextStyle(
                       color: Color(0xFFB57BFF),
-                      fontSize: 12,
+                      fontSize: 13,
                       fontWeight: FontWeight.w700)),
           ],
         ),
@@ -482,11 +610,12 @@ class _Header extends StatelessWidget {
   }
 }
 
-/// Tepadagi bo'limlar qatori (belgi yoki rasm).
-class _Strip extends StatelessWidget {
+/// Tepadagi bo'limlar qatori: tanlangan belgi ostida tabletka siljiydi,
+/// tanlangani ko'rinmay qolsa qator o'zi suriladi.
+class _Strip extends StatefulWidget {
   final int count;
   final int selected;
-  final Widget Function(int i) icon;
+  final Widget Function(int i, bool on) icon;
   final ValueChanged<int> onTap;
   const _Strip({
     required this.count,
@@ -495,30 +624,236 @@ class _Strip extends StatelessWidget {
     required this.onTap,
   });
 
+  static const item = 44.0;
+  static const height = 48.0;
+
+  @override
+  State<_Strip> createState() => _StripState();
+}
+
+class _StripState extends State<_Strip> {
+  final _scroll = ScrollController();
+
+  @override
+  void didUpdateWidget(_Strip old) {
+    super.didUpdateWidget(old);
+    if (old.selected != widget.selected && _scroll.hasClients) {
+      final x = 6 + widget.selected * _Strip.item;
+      final view = _scroll.position.viewportDimension;
+      final at = _scroll.offset;
+      if (x < at || x + _Strip.item > at + view) {
+        _scroll.animateTo(
+            (x - view / 2 + _Strip.item / 2)
+                .clamp(0.0, _scroll.position.maxScrollExtent),
+            duration: const Duration(milliseconds: 250),
+            curve: Curves.easeOut);
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Container(
-      height: 44,
-      color: _Pal.strip,
-      child: ListView.builder(
+    return SizedBox(
+      height: _Strip.height,
+      child: SingleChildScrollView(
+        controller: _scroll,
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 6),
-        itemCount: count,
-        itemBuilder: (_, i) => GestureDetector(
-          onTap: () => onTap(i),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            width: 40,
-            margin: const EdgeInsets.symmetric(horizontal: 2, vertical: 5),
-            decoration: BoxDecoration(
-              color: i == selected
-                  ? Colors.white.withValues(alpha: 0.12)
-                  : Colors.transparent,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            alignment: Alignment.center,
-            child: icon(i),
+        child: SizedBox(
+          width: widget.count * _Strip.item,
+          height: _Strip.height,
+          child: Stack(
+            children: [
+              AnimatedPositioned(
+                duration: const Duration(milliseconds: 250),
+                curve: Curves.easeOutCubic,
+                left: widget.selected * _Strip.item + 3,
+                top: 5,
+                width: _Strip.item - 6,
+                height: _Strip.item - 6,
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: _Pal.pillOn,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+              Row(
+                children: [
+                  for (var i = 0; i < widget.count; i++)
+                    _Press(
+                      onTap: () => widget.onTap(i),
+                      child: SizedBox(
+                        width: _Strip.item,
+                        height: _Strip.height,
+                        child: Center(
+                            child: widget.icon(i, i == widget.selected)),
+                      ),
+                    ),
+                ],
+              ),
+            ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Telegram'ning GIF va stiker qidiruvidagi turkum tugmalari.
+const _searchChips = <(IconData, String)>[
+  (Icons.favorite_border_rounded, '❤️'),
+  (Icons.thumb_up_alt_outlined, '👍'),
+  (Icons.thumb_down_alt_outlined, '👎'),
+  (Icons.celebration_outlined, '🎉'),
+  (Icons.sentiment_very_satisfied_outlined, '😂'),
+  (Icons.sentiment_dissatisfied_outlined, '😢'),
+  (Icons.sentiment_very_dissatisfied_outlined, '😡'),
+  (Icons.waving_hand_outlined, '👋'),
+  (Icons.bedtime_outlined, '😴'),
+  (Icons.local_fire_department_outlined, '🔥'),
+];
+
+/// "Qidiruv" qatori. [chips] bo'lsa — o'ng tomonda turkum tugmalari.
+class _SearchBar extends StatefulWidget {
+  final ValueChanged<String> onQuery;
+  final ValueChanged<String>? onChip;
+  final String? chip;
+  const _SearchBar({required this.onQuery, this.onChip, this.chip});
+
+  @override
+  State<_SearchBar> createState() => _SearchBarState();
+}
+
+class _SearchBarState extends State<_SearchBar> {
+  final _c = TextEditingController();
+  final _f = FocusNode();
+  Timer? _debounce;
+
+  @override
+  void initState() {
+    super.initState();
+    _f.addListener(() => setState(() {}));
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _c.dispose();
+    _f.dispose();
+    super.dispose();
+  }
+
+  void _clear() {
+    _c.clear();
+    _f.unfocus();
+    widget.onQuery('');
+    setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final typing = _f.hasFocus || _c.text.isNotEmpty;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(10, 2, 10, 6),
+      child: Container(
+        height: 38,
+        decoration: BoxDecoration(
+          color: _Pal.field,
+          borderRadius: BorderRadius.circular(19),
+        ),
+        child: Row(
+          children: [
+            const SizedBox(width: 10),
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 180),
+              child: widget.chip != null && !typing
+                  ? _Press(
+                      key: const ValueKey('back'),
+                      onTap: () => widget.onChip?.call(''),
+                      child: const Icon(Icons.arrow_back_rounded,
+                          color: _Pal.icon, size: 22),
+                    )
+                  : const Icon(Icons.search_rounded,
+                      key: ValueKey('search'), color: _Pal.icon, size: 22),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              flex: typing || widget.onChip == null ? 10 : 4,
+              child: TextField(
+                controller: _c,
+                focusNode: _f,
+                style: const TextStyle(color: Colors.white, fontSize: 16),
+                cursorColor: Colors.white70,
+                textInputAction: TextInputAction.search,
+                decoration: const InputDecoration(
+                  isDense: true,
+                  border: InputBorder.none,
+                  hintText: 'Qidiruv',
+                  hintStyle: TextStyle(color: _Pal.hint, fontSize: 16),
+                ),
+                onChanged: (v) {
+                  setState(() {});
+                  _debounce?.cancel();
+                  _debounce = Timer(const Duration(milliseconds: 350),
+                      () => widget.onQuery(v.trim()));
+                },
+              ),
+            ),
+            if (typing)
+              _Press(
+                onTap: _clear,
+                child: const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 10),
+                  child: Icon(Icons.close_rounded, color: _Pal.icon, size: 20),
+                ),
+              )
+            else if (widget.onChip != null)
+              Expanded(
+                flex: 7,
+                child: ShaderMask(
+                  shaderCallback: (r) => const LinearGradient(colors: [
+                    Colors.transparent,
+                    Colors.white,
+                    Colors.white,
+                  ], stops: [0, 0.08, 1])
+                      .createShader(r),
+                  blendMode: BlendMode.dstIn,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.only(left: 6, right: 6),
+                    children: [
+                      for (final (icon, emoji) in _searchChips)
+                        _Press(
+                          onTap: () => widget.onChip!(emoji),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 180),
+                            width: 36,
+                            margin: const EdgeInsets.symmetric(vertical: 3),
+                            decoration: BoxDecoration(
+                              color: widget.chip == emoji
+                                  ? _Pal.pillOn
+                                  : Colors.transparent,
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: Icon(icon,
+                                color: widget.chip == emoji
+                                    ? Colors.white
+                                    : _Pal.icon,
+                                size: 22),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
         ),
       ),
     );
@@ -538,8 +873,11 @@ class _Sections extends StatefulWidget {
   final List<int> counts;
   final List<Widget> headers;
 
-  /// Katak. Faqat EKRANDA ko'ringanlari quriladi (`SliverGrid`) — ilgari
-  /// to'plam butunligicha (`Wrap`) qurilardi va panel qotardi.
+  /// Qidiruv qatori — ro'yxat bilan birga suriladi (Telegram'dagidek).
+  final Widget? top;
+  final double topHeight;
+
+  /// Katak. Faqat EKRANDA ko'ringanlari quriladi (`SliverGrid`).
   final Widget Function(int section, int index, double cell) cell;
   final ValueChanged<int> onSection;
   final _SectionsJump jump;
@@ -552,6 +890,8 @@ class _Sections extends StatefulWidget {
     required this.cell,
     required this.onSection,
     required this.jump,
+    this.top,
+    this.topHeight = 0,
   });
 
   @override
@@ -568,6 +908,7 @@ class _SectionsState extends State<_Sections> {
   double _cellSize = 40;
   int _columns = 8;
   int _current = 0;
+  bool _jumping = false;
 
   @override
   void initState() {
@@ -589,27 +930,34 @@ class _SectionsState extends State<_Sections> {
   }
 
   double _sectionHeight(int i) {
-    final rows = (widget.counts[i] / _columns).ceil();
+    final n = widget.counts[i];
+    if (n == 0) return 0;
+    final rows = (n / _columns).ceil();
     return _Header.height + rows * _cellSize;
   }
 
   double _offsetOf(int section) {
-    var y = 0.0;
+    var y = widget.topHeight;
     for (var i = 0; i < section; i++) {
       y += _sectionHeight(i);
     }
     return y;
   }
 
-  void _jumpTo(int section) {
+  Future<void> _jumpTo(int section) async {
     if (!_scroll.hasClients) return;
     final y = _offsetOf(section).clamp(0.0, _scroll.position.maxScrollExtent);
-    _scroll.animateTo(y,
-        duration: const Duration(milliseconds: 280), curve: Curves.easeOut);
+    _current = section;
+    _jumping = true;
+    await _scroll.animateTo(y,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOutCubic);
+    _jumping = false;
   }
 
   void _onScroll() {
-    var y = 0.0;
+    if (_jumping) return;
+    var y = widget.topHeight;
     final at = _scroll.offset + 4;
     for (var i = 0; i < widget.counts.length; i++) {
       y += _sectionHeight(i);
@@ -633,27 +981,134 @@ class _SectionsState extends State<_Sections> {
       return CustomScrollView(
         controller: _scroll,
         slivers: [
-          for (var s = 0; s < widget.counts.length; s++) ...[
-            SliverToBoxAdapter(child: widget.headers[s]),
-            SliverPadding(
-              padding: const EdgeInsets.symmetric(horizontal: 5),
-              sliver: SliverGrid(
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: _columns),
-                delegate: SliverChildBuilderDelegate(
-                  (_, i) => widget.cell(s, i, cell),
-                  childCount: widget.counts[s],
-                  addAutomaticKeepAlives: false,
+          if (widget.top != null)
+            SliverToBoxAdapter(
+                child: SizedBox(height: widget.topHeight, child: widget.top)),
+          for (var s = 0; s < widget.counts.length; s++)
+            if (widget.counts[s] > 0) ...[
+              SliverToBoxAdapter(child: widget.headers[s]),
+              SliverPadding(
+                padding: const EdgeInsets.symmetric(horizontal: 5),
+                sliver: SliverGrid(
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: _columns),
+                  delegate: SliverChildBuilderDelegate(
+                    (_, i) => widget.cell(s, i, cell),
+                    childCount: widget.counts[s],
+                    addAutomaticKeepAlives: false,
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
           // Pastdagi suzuvchi tugmalar oxirgi qatorni yopmasin.
-          const SliverToBoxAdapter(child: SizedBox(height: 60)),
+          const SliverToBoxAdapter(child: SizedBox(height: 64)),
         ],
       );
     });
   }
+}
+
+/// Oddiy katakli ro'yxat (qidiruv natijalari).
+class _Grid extends StatelessWidget {
+  final double minCell;
+  final int minColumns;
+  final int count;
+  final Widget Function(int i, double cell) cell;
+  const _Grid({
+    required this.minCell,
+    required this.minColumns,
+    required this.count,
+    required this.cell,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(builder: (context, box) {
+      final w = box.maxWidth - 10;
+      final cols = math.max(minColumns, (w / minCell).floor());
+      final size = w / cols;
+      return GridView.builder(
+        padding: const EdgeInsets.fromLTRB(5, 0, 5, 64),
+        gridDelegate:
+            SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: cols),
+        itemCount: count,
+        itemBuilder: (_, i) => cell(i, size),
+      );
+    });
+  }
+}
+
+/// Bo'sh holat: sabab (xato bo'lsa — uning matni) va "Qayta urinish".
+class _Empty extends StatelessWidget {
+  final String text;
+  final VoidCallback? onRetry;
+  const _Empty(this.text, {this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<String>(
+      valueListenable: TgMedia.instance.lastError,
+      builder: (context, err, _) => Center(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(28, 0, 28, 60),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(text,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      color: _Pal.hint, fontSize: 15, height: 1.4)),
+              if (err.isNotEmpty && onRetry != null) ...[
+                const SizedBox(height: 8),
+                SelectableText('Xato: $err',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                        color: Color(0xFFFF6B6B), fontSize: 12)),
+              ],
+              if (onRetry != null) ...[
+                const SizedBox(height: 12),
+                _Press(
+                  onTap: () {
+                    TgMedia.instance.lastError.value = '';
+                    onRetry!();
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 18, vertical: 9),
+                    decoration: BoxDecoration(
+                      color: _Pal.pillOn,
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                    child: const Text('Qayta urinish',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600)),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _Loading extends StatelessWidget {
+  const _Loading();
+
+  @override
+  Widget build(BuildContext context) => const Center(
+        child: Padding(
+          padding: EdgeInsets.only(bottom: 50),
+          child: SizedBox(
+            width: 26,
+            height: 26,
+            child:
+                CircularProgressIndicator(strokeWidth: 2.4, color: _Pal.hint),
+          ),
+        ),
+      );
 }
 
 // ── EMOJI ────────────────────────────────────────────────────────
@@ -674,6 +1129,9 @@ class _EmojiPageState extends State<_EmojiPage>
   List<TgDoc> _recentCustom = [];
   List<TgSet> _sets = [];
   bool _premium = false;
+
+  String _query = '';
+  List<String>? _found;
 
   static const _icons = [
     Icons.emoji_emotions_outlined,
@@ -708,6 +1166,17 @@ class _EmojiPageState extends State<_EmojiPage>
       _recentCustom = premium ? rc : [];
       _sets = sets;
     });
+  }
+
+  Future<void> _search(String q) async {
+    _query = q;
+    if (q.isEmpty) {
+      setState(() => _found = null);
+      return;
+    }
+    final r = await TgMedia.instance.searchEmoji(q);
+    if (!mounted || q != _query) return;
+    setState(() => _found = r);
   }
 
   void _say(String s) {
@@ -749,6 +1218,8 @@ class _EmojiPageState extends State<_EmojiPage>
       for (final s in _sets) _Header(s.title, locked: !_premium),
     ];
     final firstSet = 1 + groups.length;
+    final search = _SearchBar(onQuery: _search);
+    final found = _found;
     return Column(
       children: [
         _Strip(
@@ -758,12 +1229,11 @@ class _EmojiPageState extends State<_EmojiPage>
             setState(() => _section = i);
             _jump.to(i);
           },
-          icon: (i) {
-            if (i == 0) {
-              return const Icon(Icons.access_time, color: _Pal.hint, size: 22);
-            }
+          icon: (i, on) {
+            final c = on ? Colors.white : _Pal.icon;
+            if (i == 0) return Icon(Icons.access_time, color: c, size: 22);
             if (i <= groups.length) {
-              return Icon(_icons[i - 1], color: _Pal.hint, size: 22);
+              return Icon(_icons[i - 1], color: c, size: 22);
             }
             final s = _sets[i - firstSet];
             return Stack(
@@ -781,40 +1251,54 @@ class _EmojiPageState extends State<_EmojiPage>
             );
           },
         ),
+        if (found != null) search,
         Expanded(
-          child: _Sections(
-            minCell: 45,
-            minColumns: 7,
-            counts: counts,
-            headers: headers,
-            jump: _jump,
-            onSection: (i) => setState(() => _section = i),
-            cell: (s, i, cell) {
-              if (s >= firstSet) {
-                return _SetCell(
-                  set: _sets[s - firstSet],
-                  index: i,
-                  size: cell * 0.62,
-                  locked: !_premium,
-                  onTap: _pickCustom,
-                );
-              }
-              if (s == 0) {
-                if (i < _recentCustom.length) {
-                  final d = _recentCustom[i];
-                  return InkWell(
-                    onTap: () => _pickCustom(d),
-                    child: Center(
-                        child: TgStickerView(doc: d, size: cell * 0.62)),
-                  );
-                }
-                final e = _recent[i - _recentCustom.length];
-                return _EmojiCell(e, cell, () => _pickEmoji(e));
-              }
-              final e = groups[s - 1].emoji[i];
-              return _EmojiCell(e, cell, () => _pickEmoji(e));
-            },
-          ),
+          child: found != null
+              ? (found.isEmpty
+                  ? const _Empty('Hech narsa topilmadi')
+                  : _Grid(
+                      minCell: 45,
+                      minColumns: 7,
+                      count: found.length,
+                      cell: (i, cell) => _EmojiCell(
+                          found[i], cell, () => _pickEmoji(found[i])),
+                    ))
+              : _Sections(
+                  minCell: 45,
+                  minColumns: 7,
+                  counts: counts,
+                  headers: headers,
+                  jump: _jump,
+                  top: search,
+                  topHeight: 46,
+                  onSection: (i) => setState(() => _section = i),
+                  cell: (s, i, cell) {
+                    if (s >= firstSet) {
+                      return _SetCell(
+                        set: _sets[s - firstSet],
+                        index: i,
+                        size: cell * 0.7,
+                        locked: !_premium,
+                        onTap: _pickCustom,
+                      );
+                    }
+                    if (s == 0) {
+                      if (i < _recentCustom.length) {
+                        final d = _recentCustom[i];
+                        return _Press(
+                          onTap: () => _pickCustom(d),
+                          child: Center(
+                              child: TgStickerView(
+                                  doc: d, size: cell * 0.7, still: true)),
+                        );
+                      }
+                      final e = _recent[i - _recentCustom.length];
+                      return _EmojiCell(e, cell, () => _pickEmoji(e));
+                    }
+                    final e = groups[s - 1].emoji[i];
+                    return _EmojiCell(e, cell, () => _pickEmoji(e));
+                  },
+                ),
         ),
       ],
     );
@@ -829,12 +1313,11 @@ class _EmojiCell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
+    return _Press(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
+      scale: 0.8,
       child: Center(
-        child: Text(e,
-            style: TextStyle(fontSize: cell * 0.56, height: 1.1)),
+        child: Text(e, style: TextStyle(fontSize: cell * 0.6, height: 1.1)),
       ),
     );
   }
@@ -888,11 +1371,10 @@ class _SetCell extends StatelessWidget {
         final docs = snap.data;
         if (docs == null || index >= docs.length) return const SizedBox();
         final d = docs[index];
-        return InkWell(
+        return _Press(
           onTap: () => onTap(d),
-          borderRadius: BorderRadius.circular(8),
           child: Opacity(
-            opacity: locked ? 0.55 : 1,
+            opacity: locked ? 0.6 : 1,
             child: Center(child: TgStickerView(doc: d, size: size, still: true)),
           ),
         );
@@ -920,6 +1402,12 @@ class _StickerPageState extends State<_StickerPage>
   List<TgDoc> _recent = [];
   List<TgDoc> _faved = [];
 
+  /// Qidiruv: turkum tugmasi yoki yozilgan so'z bo'yicha natija.
+  String? _chip;
+  String _query = '';
+  List<TgDoc>? _found;
+  bool _searching = false;
+
   @override
   bool get wantKeepAlive => true;
 
@@ -934,7 +1422,8 @@ class _StickerPageState extends State<_StickerPage>
       setState(() => _loading = false);
       return;
     }
-    final r = await TgMedia.instance.stickers();
+    setState(() => _loading = true);
+    final r = await TgMedia.instance.stickers(refresh: _sets.isEmpty);
     if (!mounted) return;
     setState(() {
       _loading = false;
@@ -944,22 +1433,95 @@ class _StickerPageState extends State<_StickerPage>
     });
   }
 
+  Future<void> _byEmoji(String emoji) async {
+    if (emoji.isEmpty) {
+      setState(() {
+        _chip = null;
+        _found = null;
+      });
+      return;
+    }
+    setState(() {
+      _chip = emoji;
+      _searching = true;
+      _found = [];
+    });
+    final r = await TgMedia.instance.stickersByEmoji(emoji);
+    if (!mounted || _chip != emoji) return;
+    setState(() {
+      _searching = false;
+      _found = r;
+    });
+  }
+
+  /// Yozilgan so'z: emoji kalit so'zlari orqali mos emoji topiladi va
+  /// shu emoji'li stikerlar ko'rsatiladi (Telegram ham shunday qiladi).
+  Future<void> _byText(String q) async {
+    _query = q;
+    if (q.isEmpty) return _byEmoji('');
+    setState(() {
+      _searching = true;
+      _found = [];
+    });
+    final emoji = await TgMedia.instance.searchEmoji(q);
+    final out = <TgDoc>[];
+    final seen = <String>{};
+    for (final e in emoji.take(3)) {
+      for (final d in await TgMedia.instance.stickersByEmoji(e)) {
+        if (seen.add(d.id)) out.add(d);
+      }
+    }
+    if (!mounted || q != _query) return;
+    setState(() {
+      _chip = null;
+      _searching = false;
+      _found = out;
+    });
+  }
+
+  Widget _cell(TgDoc d, double cell) => _Press(
+        onTap: () => widget.onSticker(d),
+        child: Center(
+            child: TgStickerView(doc: d, size: cell * 0.86, still: true)),
+      );
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    if (_loading) {
-      return const Center(
-          child: CircularProgressIndicator(strokeWidth: 2, color: _Pal.hint));
+    if (_loading) return const _Loading();
+    final search = _SearchBar(onQuery: _byText, onChip: _byEmoji, chip: _chip);
+    final found = _found;
+    if (found != null) {
+      return Column(
+        children: [
+          const SizedBox(height: 6),
+          search,
+          Expanded(
+            child: found.isEmpty
+                ? (_searching
+                    ? const _Loading()
+                    : const _Empty('Stikerlar topilmadi'))
+                : _Grid(
+                    minCell: 72,
+                    minColumns: 5,
+                    count: found.length,
+                    cell: (i, cell) => _cell(found[i], cell),
+                  ),
+          ),
+        ],
+      );
     }
     if (_sets.isEmpty && _recent.isEmpty && _faved.isEmpty) {
-      return const _Empty('Stikerlar topilmadi.\n'
-          'Telegram\'da stiker to\'plamlarini qo\'shing — ular shu yerda chiqadi.');
+      return _Empty(
+          'Stikerlar topilmadi.\n'
+          'Telegram\'da stiker to\'plamlarini qo\'shing — ular shu yerda chiqadi.',
+          onRetry: _load);
     }
-    // 0 — yaqinda, 1 — sevimlilar, keyin to'plamlar.
-    final counts = [_recent.length, _faved.length, for (final s in _sets) s.count];
+    // 0 — sevimlilar (☆), 1 — yaqinda (🕒), keyin to'plamlar.
+    final counts = [_faved.length, _recent.length, for (final s in _sets) s.count];
     final headers = <Widget>[
+      const _Header('Saralanganlar'),
       const _Header('Yaqinda ishlatilgan'),
-      const _Header('Sevimlilar'),
       for (final s in _sets) _Header(s.title),
     ];
     return Column(
@@ -971,11 +1533,13 @@ class _StickerPageState extends State<_StickerPage>
             setState(() => _section = i);
             _jump.to(i);
           },
-          icon: (i) => switch (i) {
-            0 => const Icon(Icons.access_time, color: _Pal.hint, size: 22),
-            1 => const Icon(Icons.star_border_rounded,
-                color: _Pal.hint, size: 24),
-            _ => _SetIcon(set: _sets[i - 2], size: 28),
+          icon: (i, on) {
+            final c = on ? Colors.white : _Pal.icon;
+            return switch (i) {
+              0 => Icon(Icons.star_border_rounded, color: c, size: 25),
+              1 => Icon(Icons.access_time, color: c, size: 22),
+              _ => _SetIcon(set: _sets[i - 2], size: 30),
+            };
           },
         ),
         Expanded(
@@ -985,6 +1549,8 @@ class _StickerPageState extends State<_StickerPage>
             counts: counts,
             headers: headers,
             jump: _jump,
+            top: search,
+            topHeight: 46,
             onSection: (i) => setState(() => _section = i),
             cell: (s, i, cell) {
               if (s >= 2) {
@@ -995,34 +1561,13 @@ class _StickerPageState extends State<_StickerPage>
                   onTap: widget.onSticker,
                 );
               }
-              final d = s == 0 ? _recent[i] : _faved[i];
-              return InkWell(
-                onTap: () => widget.onSticker(d),
-                borderRadius: BorderRadius.circular(8),
-                child: Center(
-                    child: TgStickerView(doc: d, size: cell * 0.86, still: true)),
-              );
+              return _cell(s == 0 ? _faved[i] : _recent[i], cell);
             },
           ),
         ),
       ],
     );
   }
-}
-
-class _Empty extends StatelessWidget {
-  final String text;
-  const _Empty(this.text);
-
-  @override
-  Widget build(BuildContext context) => Center(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(28, 0, 28, 50),
-          child: Text(text,
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: _Pal.hint, fontSize: 14, height: 1.4)),
-        ),
-      );
 }
 
 // ── GIF ──────────────────────────────────────────────────────────
@@ -1037,13 +1582,12 @@ class _GifPage extends StatefulWidget {
 
 class _GifPageState extends State<_GifPage>
     with AutomaticKeepAliveClientMixin {
-  final _q = TextEditingController();
   final _scroll = ScrollController();
-  Timer? _debounce;
   List<TgDoc> _saved = [];
   List<TgDoc> _found = [];
   String _next = '';
   String _query = '';
+  String? _chip;
   bool _loading = true;
   bool _more = false;
   int _gen = 0;
@@ -1064,8 +1608,6 @@ class _GifPageState extends State<_GifPage>
 
   @override
   void dispose() {
-    _debounce?.cancel();
-    _q.dispose();
     _scroll.dispose();
     super.dispose();
   }
@@ -1075,6 +1617,7 @@ class _GifPageState extends State<_GifPage>
       setState(() => _loading = false);
       return;
     }
+    setState(() => _loading = true);
     final saved = await TgMedia.instance.savedGifs();
     if (!mounted) return;
     _saved = saved;
@@ -1082,14 +1625,16 @@ class _GifPageState extends State<_GifPage>
   }
 
   /// Bo'sh so'rov — `@gif` mashhurlarni beradi (Telegram'dagidek).
-  Future<void> _search(String q) async {
+  Future<void> _search(String q, {String? chip}) async {
     final gen = ++_gen;
     setState(() {
       _query = q;
+      _chip = chip;
       _loading = true;
       _found = [];
       _next = '';
     });
+    if (_scroll.hasClients) _scroll.jumpTo(0);
     final r = await TgMedia.instance.searchGifs(q);
     if (!mounted || gen != _gen) return;
     setState(() {
@@ -1118,71 +1663,92 @@ class _GifPageState extends State<_GifPage>
     final items = [if (_query.isEmpty) ..._saved, ..._found];
     return Column(
       children: [
-        Container(
-          color: _Pal.strip,
-          padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
-          child: Container(
-            height: 36,
-            padding: const EdgeInsets.symmetric(horizontal: 10),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.07),
-              borderRadius: BorderRadius.circular(18),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.search, color: _Pal.hint, size: 20),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: TextField(
-                    controller: _q,
-                    style: const TextStyle(color: Colors.white, fontSize: 15),
-                    cursorColor: Colors.white70,
-                    decoration: const InputDecoration(
-                      isDense: true,
-                      border: InputBorder.none,
-                      hintText: 'GIF qidirish',
-                      hintStyle: TextStyle(color: _Pal.hint),
-                    ),
-                    onChanged: (v) {
-                      _debounce?.cancel();
-                      _debounce = Timer(const Duration(milliseconds: 400),
-                          () => _search(v.trim()));
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
+        const SizedBox(height: 6),
+        _SearchBar(
+          onQuery: (q) => _search(q),
+          onChip: (e) => _search(e, chip: e.isEmpty ? null : e),
+          chip: _chip,
         ),
         Expanded(
           child: items.isEmpty
               ? (_loading
-                  ? const Center(
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: _Pal.hint))
-                  : const _Empty('GIF topilmadi'))
-              : GridView.builder(
-                  controller: _scroll,
-                  padding: const EdgeInsets.fromLTRB(3, 3, 3, 64),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 3,
-                    mainAxisSpacing: 3,
-                    crossAxisSpacing: 3,
-                    childAspectRatio: 1.15,
-                  ),
-                  itemCount: items.length,
-                  itemBuilder: (_, i) => GestureDetector(
-                    onTap: () => widget.onGif(items[i]),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(6),
-                      child: TgGifThumb(doc: items[i]),
-                    ),
-                  ),
+                  ? const _Loading()
+                  : _Empty('GIF topilmadi', onRetry: _start))
+              : LayoutBuilder(
+                  builder: (context, box) {
+                    final rows = _justify(items, box.maxWidth, 110);
+                    return ListView.builder(
+                      controller: _scroll,
+                      padding: const EdgeInsets.only(bottom: 64),
+                      itemCount: rows.length,
+                      itemBuilder: (_, r) {
+                        final row = rows[r];
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 2),
+                          child: Row(
+                            children: [
+                              for (final (i, w) in row.items) ...[
+                                if (i != row.items.first.$1)
+                                  const SizedBox(width: 2),
+                                SizedBox(
+                                  width: w,
+                                  height: row.height,
+                                  child: _Press(
+                                    scale: 0.92,
+                                    onTap: () => widget.onGif(items[i]),
+                                    child: TgGifThumb(doc: items[i]),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        );
+                      },
+                    );
+                  },
                 ),
         ),
       ],
     );
   }
+}
+
+/// GIF qatori: indeks va eni, balandlik bir xil.
+class _GifRow {
+  final List<(int, double)> items;
+  final double height;
+  const _GifRow(this.items, this.height);
+}
+
+/// Telegram'dagidek: har qator [target] balandlikka yaqin, GIF'lar asl
+/// nisbatida va qator butun kenglikni to'ldiradi.
+List<_GifRow> _justify(List<TgDoc> docs, double width, double target) {
+  const gap = 2.0;
+  final rows = <_GifRow>[];
+  var cur = <(int, double)>[];
+  var sum = 0.0;
+  void flush({bool last = false}) {
+    if (cur.isEmpty) return;
+    final gaps = gap * (cur.length - 1);
+    var k = (width - gaps) / sum;
+    // Oxirgi to'lmagan qator haddan tashqari cho'zilmasin.
+    if (last && k * target > target * 1.3) k = 1.3;
+    final h = target * k;
+    rows.add(_GifRow([for (final (i, w) in cur) (i, w * k)], h));
+    cur = [];
+    sum = 0;
+  }
+
+  for (var i = 0; i < docs.length; i++) {
+    final d = docs[i];
+    final ratio = (d.w > 0 && d.h > 0) ? (d.w / d.h).clamp(0.5, 2.5) : 1.0;
+    final w = target * ratio;
+    cur.add((i, w));
+    sum += w;
+    if (sum + gap * (cur.length - 1) >= width) flush();
+  }
+  flush(last: true);
+  return rows;
 }
 
 /// Stiker yoki GIF xabari uchun o'lcham (Telegram'dagidek ~150).

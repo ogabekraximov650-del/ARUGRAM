@@ -3208,3 +3208,18 @@ internet qaytganda ilova o'z hisobi bilan chat tarixini tozalasin".
   toifalar (Videolar, Posterlar, Stikerlar va emojilar, GIF va chat
   fayllari, Vaqtinchalik), "Keshni tozalash <hajm>". Hisob ma'lumotlari
   tozalanmaydi.
+
+## Stiker/GIF yuklanmasligi + Telegram'dagidek panel
+
+* Sabab (topilgan): Telegram chaqiruvlari 3 ishchiga navbat bilan
+  (band-bo'shiga qaramay) bo'linardi; sekin fayl yuklash ortida
+  to'plamlar ro'yxati kutib qolardi. Endi fayllar alohida `NativePool.files`
+  da, chaqiruv eng bo'sh ishchiga tushadi; Rust so'rovlarida 20 s chegarasi.
+* Xato bo'lsa panelda matni ko'rinadi ("Xato: ..."); Rust panic sababi
+  `last_crash.txt` ga yoziladi va keyingi ochilishda ekranda chiqadi.
+* Panel Telegram `EmojiView` kabi: siljiydigan tanlov, "Qidiruv" qatori
+  (emoji — kalit so'zlar `getEmojiKeywords`; stiker/GIF — ❤️👍👎🎉… tugmalari,
+  `getStickers`/`@gif`), GIF'lar teng balandlikdagi qatorlarda, bosilganda
+  kichrayadigan tugmalar, ⌫ animatsiyasi.
+* Yozish tugmasi: 🎤 ↔ dumaloq video belgisi burilib-kattalashib almashadi,
+  yozishda katta doira va halqa. Dumaloq video ochilmasa — sababi va qayta urinish.
