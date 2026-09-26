@@ -139,3 +139,6 @@ flutter:
     - assets/aru-mark.png
     # Telegram/Cherrygram `res/raw` dagi Lottie animatsiyalari.
     - assets/tg_anim/
+    # Telegram'ning standart chat foni naqshi (`res/raw/default_pattern.svg`
+    # dan 720x1480 oq niqob qilib chizilgan) — support chat orqa foni.
+    - assets/tg_pattern.png

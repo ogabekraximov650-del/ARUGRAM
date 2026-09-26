@@ -182,6 +182,13 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
   /// Videolar Telegram'dan olinadimi.
   bool get active => _authorized && _configured && _video;
 
+  /// Telegram fayllari (stiker, emoji, GIF) diskda turadigan papka
+  /// (Rust `media_dir`). Bo'sh — hali ma'lum emas.
+  String get mediaDir {
+    final d = _dir;
+    return d.isEmpty ? '' : '$d/media';
+  }
+
   String get _dir {
     final root = RustCore.instance.rootDirPath ?? '';
     return root.isEmpty ? '' : '$root/tg';

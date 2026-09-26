@@ -227,7 +227,79 @@ class TgMedia {
       }();
 
   /// Xabardagi stiker havolasidan hujjat.
+  // ── OLDINDAN TAYYOR (diskda eslab qolingan hujjatlar) ────────
+  //
+  // TALAB (foydalanuvchi): "chatga yuborilgan GIF, stiker, emojilar
+  // oldindan tayyorlanib tursin — hozir ekranga kelganda yuklanib
+  // yotibdi, hattoki diskda tayyor bo'lsa ham".
+  //
+  // SABAB: stiker havolasi (`stk_...`) har safar to'plam ro'yxati
+  // orqali (Telegram so'rovi) topilardi, fayl yo'li esa fon isolate'i
+  // navbati orqali so'ralardi — fayl diskda bo'lsa ham. Endi havola ->
+  // hujjat va maxsus emoji -> hujjat diskda eslab qolinadi, fayl esa
+  // diskdan TO'G'RIDAN-TO'G'RI (navbatsiz) tekshiriladi.
+
+  final Map<String, TgDoc> _known = {};
+  bool _knownLoaded = false;
+  Timer? _knownSave;
+
+  Future<File> _knownFile() async {
+    final dir = await getApplicationSupportDirectory();
+    return File('${dir.path}/tg_known_docs.json');
+  }
+
+  /// Ilova ochilganda bir marta (`main`).
+  Future<void> warmup() async {
+    if (_knownLoaded) return;
+    _knownLoaded = true;
+    try {
+      final j = jsonDecode(await (await _knownFile()).readAsString());
+      if (j is Map) {
+        j.forEach((k, v) {
+          if (v is Map) {
+            _known['$k'] = TgDoc.fromJson(v.cast<String, dynamic>());
+          }
+        });
+      }
+    } catch (_) {}
+  }
+
+  void _remember(String key, TgDoc d) {
+    if (_known[key]?.id == d.id) return;
+    _known[key] = d;
+    if (_known.length > 800) _known.remove(_known.keys.first);
+    _knownSave?.cancel();
+    _knownSave = Timer(const Duration(seconds: 2), () async {
+      try {
+        await (await _knownFile()).writeAsString(jsonEncode(
+            {for (final e in _known.entries) e.key: e.value.toJson()}));
+      } catch (_) {}
+    });
+  }
+
+  /// Havola bo'yicha hujjat — xotirada bo'lsa darhol.
+  TgDoc? stickerByRefSync(String ref) => _known['ref:$ref'];
+
+  /// Maxsus emoji — xotirada bo'lsa darhol.
+  TgDoc? customEmojiSync(String id) => _known['ce:$id'];
+
+  /// Fayl diskda bo'lsa — yo'li (navbatsiz, darhol).
+  String? fileSync(TgDoc d, {bool thumb = false}) {
+    final dir = TelegramService.instance.mediaDir;
+    if (dir.isEmpty) return null;
+    final p = '$dir/${d.id}${thumb ? '.t' : ''}';
+    return File(p).existsSync() ? p : null;
+  }
+
   Future<TgDoc?> stickerByRef(String ref) async {
+    final k = _known['ref:$ref'];
+    if (k != null) return k;
+    final d = await _stickerByRef(ref);
+    if (d != null) _remember('ref:$ref', d);
+    return d;
+  }
+
+  Future<TgDoc?> _stickerByRef(String ref) async {
     final p = ref.split('_');
     if (p.length != 4 || p[0] != 'stk') return null;
     final docs = await setDocs(_dec(p[1]), _dec(p[2]));
@@ -248,6 +320,11 @@ class TgMedia {
   Future<TgDoc?> customEmoji(String id) {
     final c = _emoji[id];
     if (c != null) return c.future;
+    final k = _known['ce:$id'];
+    if (k != null) {
+      _emoji[id] = Completer<TgDoc?>()..complete(k);
+      return Future.value(k);
+    }
     final n = _emoji[id] = Completer<TgDoc?>();
     _emojiQueue.add(id);
     _emojiTimer ??= Timer(const Duration(milliseconds: 60), _flushEmoji);
@@ -256,6 +333,7 @@ class TgMedia {
 
   /// Panelda ko'rilgan maxsus emoji — qaytadan so'ralmasin.
   void rememberEmoji(TgDoc d) {
+    _remember('ce:${d.id}', d);
     final c = _emoji[d.id];
     if (c == null) {
       _emoji[d.id] = Completer<TgDoc?>()..complete(d);
@@ -279,6 +357,7 @@ class TgMedia {
         if (c == null || c.isCompleted) continue;
         final d = got[id];
         if (d == null && j['error'] != null) _emoji.remove(id);
+        if (d != null) _remember('ce:$id', d);
         c.complete(d);
       }
     }
@@ -356,6 +435,9 @@ class TgMedia {
   /// 4 ta yuklanadi — panel ochilganda 100 ta stiker birdan
   /// so'ralmasin.
   Future<String?> file(TgDoc d, {bool thumb = false}) async {
+    // Diskda bo'lsa — fon isolate'i navbatini kutmasdan.
+    final ready = fileSync(d, thumb: thumb);
+    if (ready != null) return ready;
     final key = '${d.id}${thumb ? 't' : ''}';
     final p = await _file(d, key, thumb);
     // Xotira oynasida kesh tozalangan bo'lsa — qayta yuklanadi.

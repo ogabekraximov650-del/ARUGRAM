@@ -50,18 +50,33 @@ class TgStickerView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final animated = doc.kind == 'tgs' || doc.kind == 'webm';
+    final thumb = doc.kind == 'mp4' && doc.thumb;
+    // Fayl diskda tayyor — kutish ham, kechiktirish ham yo'q: birinchi
+    // kadrdanoq chiziladi.
+    final ready = TgMedia.instance.fileSync(doc, thumb: thumb);
     return SizedBox(
       width: size,
       height: size,
-      child: _Deferred(
-        key: ValueKey('${doc.id}/${doc.kind}'),
-        builder: (context) => FutureBuilder<String?>(
-          future:
-              TgMedia.instance.file(doc, thumb: doc.kind == 'mp4' && doc.thumb),
-          builder: (context, snap) {
-            final path = snap.data;
-            if (path == null) return _Placeholder(size);
+      child: ready != null
+          ? KeyedSubtree(
+              key: ValueKey('${doc.id}/${doc.kind}'),
+              child: _content(context, ready))
+          : _Deferred(
+              key: ValueKey('${doc.id}/${doc.kind}'),
+              builder: (context) => FutureBuilder<String?>(
+                future: TgMedia.instance.file(doc, thumb: thumb),
+                builder: (context, snap) {
+                  final path = snap.data;
+                  if (path == null) return _Placeholder(size);
+                  return _content(context, path);
+                },
+              ),
+            ),
+    );
+  }
+
+  Widget _content(BuildContext context, String path) {
+            final animated = doc.kind == 'tgs' || doc.kind == 'webm';
             if (animated) {
               return TgAnimView(
                 key: ValueKey(path),
@@ -88,10 +103,6 @@ class TgStickerView extends StatelessWidget {
               ),
               errorBuilder: (_, __, ___) => _Placeholder(size),
             );
-          },
-        ),
-      ),
-    );
   }
 }
 
@@ -602,6 +613,11 @@ class TgStickerRefView extends StatelessWidget {
     // `FutureBuilder` esa yangi javob kelguncha ESKI stikerni, ichidagi
     // animatsiya esa fayl almashganini sezmay eski stikerni ko'rsatib
     // qolardi. Endi kalit havolaga bog'langan — katak butunlay yangilanadi.
+    final known = TgMedia.instance.stickerByRefSync(ref);
+    if (known != null) {
+      return KeyedSubtree(
+          key: ValueKey(ref), child: TgStickerView(doc: known, size: size));
+    }
     return FutureBuilder<TgDoc?>(
       key: ValueKey(ref),
       future: TgMedia.instance.stickerByRef(ref),
@@ -633,6 +649,11 @@ class TgCustomEmojiView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final known = TgMedia.instance.customEmojiSync(id);
+    if (known != null) {
+      return KeyedSubtree(
+          key: ValueKey(id), child: TgStickerView(doc: known, size: size));
+    }
     return FutureBuilder<TgDoc?>(
       key: ValueKey(id),
       future: TgMedia.instance.customEmoji(id),
@@ -915,7 +936,15 @@ final _gifTag = RegExp(r'_g([0-9a-f]{1,16})_([0-9a-f]{1,16})_(\d{1,3})_([0-9a-f]
 /// to'g'ri Telegram serveridan (bot chati, worker ishtirokisiz).
 Future<File?> _directGif(String name) async {
   final m = _gifTag.firstMatch(name);
-  if (m == null || !TelegramService.instance.authorized) return null;
+  if (m == null) return null;
+  // Diskda bo'lsa — navbatsiz, darhol.
+  final dir = TelegramService.instance.mediaDir;
+  if (dir.isNotEmpty) {
+    final id = BigInt.parse(m.group(1)!, radix: 16).toSigned(64);
+    final f = File('$dir/$id');
+    if (f.existsSync()) return f;
+  }
+  if (!TelegramService.instance.authorized) return null;
   try {
     final j = await NativePool.files.call('rust_tg_gif_direct',
         arg: jsonEncode({
@@ -930,16 +959,50 @@ Future<File?> _directGif(String name) async {
   return null;
 }
 
+/// Fayl haqiqiy MP4mi (`....ftyp`) — yarim/buzuq yuklangan fayl
+/// ("GIF qorayib yotibdi") keshda qolmasin.
+bool _looksLikeMp4(File f) {
+  try {
+    final r = f.openSync();
+    try {
+      final head = r.readSync(12);
+      return head.length >= 8 &&
+          head[4] == 0x66 && // f
+          head[5] == 0x74 && // t
+          head[6] == 0x79 && // y
+          head[7] == 0x70; // p
+    } finally {
+      r.closeSync();
+    }
+  } catch (_) {
+    return false;
+  }
+}
+
 Future<File?> _fetchChatFile(String name) => () async {
         final direct = await _directGif(name);
-        if (direct != null) return direct;
+        if (direct != null) {
+          if (_looksLikeMp4(direct)) return direct;
+          try {
+            direct.deleteSync();
+          } catch (_) {}
+        }
         try {
           final dir = await getTemporaryDirectory();
           final f = File('${dir.path}/gif_$name');
-          if (await f.exists() && await f.length() > 0) return f;
+          if (await f.exists() && await f.length() > 0) {
+            if (_looksLikeMp4(f)) return f;
+            await f.delete();
+          }
           final bytes = await TelegramService.instance
               .fetchBytes('$kApiBase/api/image/$name');
-          if (bytes == null || bytes.isEmpty) {
+          final mp4 = bytes != null &&
+              bytes.length > 8 &&
+              bytes[4] == 0x66 &&
+              bytes[5] == 0x74 &&
+              bytes[6] == 0x79 &&
+              bytes[7] == 0x70;
+          if (!mp4) {
             _chatFiles.remove(name);
             return null;
           }
@@ -1015,7 +1078,11 @@ class _TgGifMessageState extends State<TgGifMessage> {
         videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true));
     try {
       await c.initialize();
-      await c.setLooping(false);
+      // TALAB: "yuborilgan GIF tinmasdan animatsiyalansin" (10 soniyalik
+      // tanaffus faqat yuborilmagan — panel — holatiga tegishli edi).
+      // To'xtovsiz takrorlanganda pleyer "tugadi" holatiga ham tushmaydi
+      // (ba'zi telefonlarda o'sha holatda kadr qorayib qolardi).
+      await c.setLooping(true);
       await c.setVolume(0);
       await c.play();
     } catch (_) {
@@ -1039,10 +1106,7 @@ class _TgGifMessageState extends State<TgGifMessage> {
       }
       return;
     }
-    setState(() {
-      _ctrl = c;
-      _every = _PlayEvery(c);
-    });
+    setState(() => _ctrl = c);
   }
 
   bool _holdsSlot = false;
@@ -1145,5 +1209,45 @@ class _PlayEvery {
     _dead = true;
     _t?.cancel();
     c.removeListener(_on);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  OLDINDAN TAYYORLASH
+// ═══════════════════════════════════════════════════════════════
+
+final Set<String> _prefetched = {};
+
+/// Chat yoki izohlardagi stiker, GIF va maxsus emojilarni OLDINDAN
+/// tayyorlaydi (hujjat topiladi, fayl diskka olinadi) — ekranga
+/// chiqqanda yuklanib o'tirmaydi. Eng yangilari (ro'yxat oxiri) birinchi;
+/// ko'pi 40 xabar, GIF'lardan 12 tasi.
+void tgPrefetch(Iterable<({String type, String file, String body})> items) {
+  final list = items.toList().reversed.take(40);
+  var gifs = 0;
+  for (final m in list) {
+    if (m.type == 'sticker' && m.file.isNotEmpty) {
+      if (_prefetched.add('s:${m.file}')) {
+        unawaited(TgMedia.instance.stickerByRef(m.file).then((d) {
+          if (d != null) return TgMedia.instance.file(d);
+          return null;
+        }).catchError((_) => null));
+      }
+    } else if (m.type == 'gif' && m.file.isNotEmpty && gifs < 12) {
+      gifs++;
+      if (_prefetched.add('g:${m.file}')) {
+        unawaited(tgChatFile(m.file).catchError((_) => null));
+      }
+    }
+    if (m.body.contains('[ce:')) {
+      for (final t in customEmojiToken.allMatches(m.body)) {
+        final id = t.group(1)!;
+        if (!_prefetched.add('e:$id')) continue;
+        unawaited(TgMedia.instance.customEmoji(id).then((d) {
+          if (d != null) return TgMedia.instance.file(d);
+          return null;
+        }).catchError((_) => null));
+      }
+    }
   }
 }

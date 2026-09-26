@@ -20,6 +20,7 @@ import 'services/traffic_service.dart';
 import 'services/video_cache_server.dart';
 import 'services/watch_history.dart';
 import 'services/telegram_service.dart';
+import 'services/tg_media.dart';
 import 'widgets/auth_gate.dart';
 import 'widgets/emoji_text.dart';
 
@@ -106,6 +107,8 @@ Future<void> _main() async {
   // ishga tushmagan bo'lsa ular Telegram'ga emas, worker'ga
   // (B2) ketib qolardi. `start()` ning tarmoqsiz qismi sinxron.
   unawaited(TelegramService.instance.start());
+  // Eslab qolingan stiker/emoji hujjatlari — chat ochilganda darhol.
+  unawaited(TgMedia.instance.warmup());
 
   await VideoCacheServer.instance.ensureStarted();
 

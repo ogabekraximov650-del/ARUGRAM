@@ -3433,3 +3433,27 @@ zaxira yo'llar (`thumbnailData`, birinchi kadr).
 * Chat va izohlarga yuborilganlari avvalgidek harakatlanadi.
 * Panel emojilari — ekrandagi hammasi harakatlanadi (kuchsiz telefonda
   ham).
+
+## GIF, oldindan tayyorlash, premium emoji (admin), ovoz/dumaloq video, chat foni
+
+* Yuborilgan GIF (chat, izohlar) to'xtovsiz takrorlanadi; 10 soniyalik
+  tanaffus yo'q. Buzuq (MP4 emas) fayl keshda qolmaydi — o'chirilib
+  qayta yuklanadi ("qorayib yotibdi").
+* Oldindan tayyorlash: havola -> stiker hujjati va maxsus emoji hujjati
+  diskda eslab qolinadi (`tg_known_docs.json`, `TgMedia.warmup`), fayl
+  diskda bo'lsa navbatsiz darhol (`fileSync`) — stiker/emoji birinchi
+  kadrdanoq chiziladi. Chat va izohlar yuklanganda oxirgi 40 xabardagi
+  stiker, GIF (12 ta) va maxsus emojilar fonda tayyorlanadi
+  (`tgPrefetch`).
+* Admin (server tasdiqlagan) maxsus emojilarni Telegram Premium'siz
+  yuboradi.
+* Ovozli xabar / dumaloq video: oldingi fayl yuklanayotganda yozilgani
+  endi tashlab yuborilmaydi — navbat bilan yuboriladi; uzunlik haqiqiy
+  vaqtdan; o'zi yuborgani telefondagi asl fayldan darhol o'ynaydi
+  (`VoicePlayer.localFiles`); dumaloq video kanalga hali ko'chmagan bo'lsa
+  o'zi 6 martagacha qayta urinadi; yuklash progressi har bo'lakda butun
+  ekranni qayta qurmaydi.
+* Support chat: Telegram fon naqshi (`assets/tg_pattern.png`,
+  `default_pattern.svg` dan) + aksentga mos gradient
+  (`tg_chat_background.dart`), sarlavha va yozish paneli to'q kulrang
+  (soya bilan), pufaklar: kiruvchi `#232120`, chiquvchi `#8C3A12`.

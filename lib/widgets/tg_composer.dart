@@ -30,6 +30,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:lottie/lottie.dart';
 
+import '../services/support_service.dart';
 import '../services/tg_media.dart';
 import 'emoji_text.dart';
 import 'glass.dart';
@@ -1261,7 +1262,10 @@ class _EmojiPageState extends State<_EmojiPage>
     final m = TgMedia.instance;
     final r = await m.recentEmoji();
     final rc = await m.recentCustom();
-    final premium = m.ready && await m.premium();
+    // Admin (server tasdiqlagan) maxsus emojilarni Telegram Premium'siz
+    // ham yuboradi — ular bizning chat/izohlarimizda, Telegram'da emas.
+    final premium =
+        UnreadBadge.instance.isAdmin || (m.ready && await m.premium());
     final sets = m.ready ? await m.emojiSets() : <TgSet>[];
     if (!mounted) return;
     setState(() {

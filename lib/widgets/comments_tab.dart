@@ -123,6 +123,7 @@ class _CommentsTabState extends State<CommentsTab> {
   void initState() {
     super.initState();
     // Avval DISK (darhol), keyin tarmoq (`disk_cache.dart` izohi).
+    widget.controller.addListener(_prefetch);
     widget.controller.loadFromDisk();
     widget.controller.load();
     // Pastga yetganda keyingi sahifa o'zi so'raladi.
@@ -147,8 +148,18 @@ class _CommentsTabState extends State<CommentsTab> {
     });
   }
 
+  /// Izohlardagi stiker, GIF va maxsus emojilar oldindan tayyorlanadi.
+  void _prefetch() {
+    tgPrefetch(widget.controller.items.reversed.map((c) => (
+          type: c.deleted ? '' : c.mediaType,
+          file: c.mediaFile,
+          body: c.body,
+        )));
+  }
+
   @override
   void dispose() {
+    widget.controller.removeListener(_prefetch);
     _reportTimer?.cancel();
     _input.dispose();
     _focus.dispose();

@@ -79,6 +79,7 @@
 // (`hold`), to'xtaganda bo'shatiladi — bot chati shunda tozalanadi.
 // Telegram ishlatib bo'lmasa — eski worker manzili (zaxira).
 
+import 'dart:io';
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -105,6 +106,11 @@ class VoicePlayer extends ChangeNotifier {
   }
 
   static final VoicePlayer instance = VoicePlayer._();
+
+  /// O'zi yuborgan ovozli xabar / dumaloq video: fayl nomi -> telefondagi
+  /// asl fayl. Yuborgan odam uni darhol, tarmoqsiz eshitadi/ko'radi
+  /// (Telegram ham shunday) — bot kanalga ko'chirishini kutmaydi.
+  static final Map<String, String> localFiles = {};
 
   final AudioPlayer _p = AudioPlayer();
 
@@ -147,6 +153,15 @@ class VoicePlayer extends ChangeNotifier {
     notifyListeners();
     try {
       await _p.stop();
+      final local = localFiles[TelegramService.fileNameOf(url)];
+      if (local != null && File(local).existsSync()) {
+        await _p.setFilePath(local);
+        if (_id != id) return;
+        _opening = false;
+        notifyListeners();
+        unawaited(_p.play());
+        return;
+      }
       final tg = await TelegramService.instance.prepare(url);
       if (_id != id) return;
       if (tg != null) {

@@ -43,6 +43,7 @@ import '../widgets/tg_media_view.dart';
 import '../widgets/tg_record_button.dart';
 import '../widgets/tg_attach_sheet.dart';
 import '../widgets/tg_bubble.dart';
+import '../widgets/tg_chat_background.dart';
 import '../widgets/tg_round_recorder.dart';
 import '../widgets/tg_reply.dart';
 import '../widgets/tg_waveform.dart';
@@ -51,6 +52,11 @@ import '../widgets/emoji_text.dart';
 import 'package:video_player/video_player.dart';
 import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
 import '../services/rust_bridge.dart';
+
+/// Telegram qorong'i mavzusi ranglari (aksentga moslangan).
+const _kTgHeader = Color(0xFF1E1C1B);
+const _kTgInBubble = Color(0xFF232120);
+const _kTgOutBubble = Color(0xFF8C3A12);
 
 class SupportChatScreen extends StatefulWidget {
   /// Admin boshqa odamning suhbatini ochsa — o'sha odamning raqami.
@@ -255,6 +261,14 @@ class _SupportChatScreenState extends State<SupportChatScreen>
 
   int _seen = 0;
   void _onData() {
+    // Stiker, GIF va maxsus emojilar oldindan tayyorlanadi.
+    tgPrefetch(_chat.items.map((m) => (
+          type: m.mediaType,
+          file: m.mediaType == 'sticker' || m.mediaType == 'gif'
+              ? TelegramService.fileNameOf(m.mediaUrl)
+              : '',
+          body: m.body,
+        )));
     // Yangi xabar kelgan bo'lsa pastga tushamiz. Foydalanuvchi
     // yuqoriga surib eski xabarlarni o'qiyotgan bo'lsa —
     // TEGILMAYDI, aks holda ekran o'zidan o'zi sakrab ketardi.
@@ -339,9 +353,42 @@ class _SupportChatScreenState extends State<SupportChatScreen>
     // Xabar matni: berilmasa — yozish maydonidagisi (ovoz va dumaloq
     // videoda — matnsiz).
     String? body,
+  }) {
+    // TOPILGAN XATO: oldingi fayl hali yuklanayotganda yozilgan ovozli
+    // xabar yoki dumaloq video JIM tashlab yuborilardi ("ovozli xabar
+    // va dumaloq video yuborishda muammo"). Endi ular NAVBATGA turadi
+    // va birin-ketin yuboriladi (Telegram ham shunday).
+    final run = _upQueue.then((_) => _uploadNow(
+          file: file,
+          ext: ext,
+          type: type,
+          contentType: contentType,
+          ms: ms,
+          cleanup: cleanup,
+          body: body,
+        ));
+    _upQueue = run.catchError((_) {});
+    return run;
+  }
+
+  Future<void> _upQueue = Future.value();
+
+  Future<void> _uploadNow({
+    required File file,
+    required String ext,
+    required String type,
+    required String contentType,
+    int ms = 0,
+    Future<void> Function()? cleanup,
+    String? body,
   }) async {
-    if (_uploading) return;
+    if (!mounted) {
+      if (cleanup != null) await cleanup();
+      return;
+    }
+    var keepLocal = false;
     Future<void> dropCopy() async {
+      if (keepLocal) return;
       if (cleanup != null) await cleanup();
     }
 
@@ -385,11 +432,20 @@ class _SupportChatScreenState extends State<SupportChatScreen>
         ct,
         onProgress: (sent, total) {
           if (!mounted) return;
-          setState(() => _upProgress = total > 0 ? sent / total : 0);
+          // Har bo'lakda butun ekran qayta qurilmasin — 1% qadam bilan.
+          final p = total > 0 ? sent / total : 0.0;
+          if ((p - _upProgress).abs() < 0.01 && p < 1) return;
+          setState(() => _upProgress = p);
         },
       );
       if (upErr != null) throw upErr;
       final b2Name = name;
+      // O'zi yozgan ovoz va dumaloq video telefonda QOLADI — yuborgan
+      // odam uni darhol (tarmoqsiz) ko'radi/eshitadi.
+      if (type == 'voice' || type == 'round') {
+        VoicePlayer.localFiles[name] = file.path;
+        keepLocal = true;
+      }
 
       // Fayl joyida — endi xabarning o'zi yuboriladi.
       final err = await _chat.send(
@@ -432,7 +488,7 @@ class _SupportChatScreenState extends State<SupportChatScreen>
 
   /// Mikrofon bosildi — yozib olish boshlanadi.
   Future<void> _startRecording() async {
-    if (_recording || _uploading) return;
+    if (_recording) return;
     // Ruxsatni paketning o'zi so'raydi. Berilmasa — sababi
     // aytiladi, jim qolinmaydi.
     bool allowed = false;
@@ -499,7 +555,8 @@ class _SupportChatScreenState extends State<SupportChatScreen>
     _dragX = 0;
     _recTimer?.cancel();
     _recTimer = null;
-    final len = _recLen;
+    // Uzunlik taymer qadamidan emas, haqiqiy vaqtdan (aniq).
+    final len = DateTime.now().difference(_recStart);
     _ampSub?.cancel();
     _ampSub = null;
     _amp.value = 0;
@@ -675,7 +732,7 @@ class _SupportChatScreenState extends State<SupportChatScreen>
   /// Dumaloq video yozish (Telegram `InstantCameraView` kabi): doira
   /// barmoq bosilishi BILAN chiqadi, kamera esa uning ichida ochiladi.
   Future<bool> _startRound() async {
-    if (_roundRec || _recording || _uploading) return false;
+    if (_roundRec || _recording) return false;
     await VoicePlayer.instance.stop();
     HapticFeedback.lightImpact();
     _recLen = Duration.zero;
@@ -703,6 +760,9 @@ class _SupportChatScreenState extends State<SupportChatScreen>
       }
       setState(() => _cam = c);
       await c.startVideoRecording();
+      // Uzunlik yozish HAQIQATAN boshlangan paytdan (kamera ochilishi
+      // hisobga kirmaydi).
+      _recRoundStart = DateTime.now();
       _recTimer?.cancel();
       _recTimer = Timer.periodic(const Duration(milliseconds: 100), (_) {
         if (!mounted) return;
@@ -756,6 +816,8 @@ class _SupportChatScreenState extends State<SupportChatScreen>
     }
   }
 
+  DateTime? _recRoundStart;
+
   Future<void> _stopRound({required bool send}) async {
     if (!_roundRec) return;
     final c = _cam;
@@ -763,7 +825,10 @@ class _SupportChatScreenState extends State<SupportChatScreen>
     _dragX = 0;
     _recTimer?.cancel();
     _recTimer = null;
-    final len = _recLen;
+    final len = _recRoundStart == null
+        ? _recLen
+        : DateTime.now().difference(_recRoundStart!);
+    _recRoundStart = null;
     // Doira yopilish animatsiyasi (yuborilsa — xabar tomon "uchadi").
     setState(() {
       _roundRec = false;
@@ -1045,7 +1110,8 @@ class _SupportChatScreenState extends State<SupportChatScreen>
               Column(
                 children: [
                   Expanded(
-                    child: Stack(
+                    child: TgChatBackground(
+                      child: Stack(
                       fit: StackFit.expand,
                       children: [
                         Positioned.fill(
@@ -1112,6 +1178,7 @@ class _SupportChatScreenState extends State<SupportChatScreen>
                         ),
                       ],
                     ),
+                    ),
                   ),
                   _composer(),
                 ],
@@ -1133,8 +1200,10 @@ class _SupportChatScreenState extends State<SupportChatScreen>
     final all = _chat.items.isNotEmpty &&
         _selected.length >= _chat.items.length;
     return AppBar(
-      backgroundColor: Colors.transparent,
-      elevation: 0,
+      backgroundColor: _kTgHeader,
+      surfaceTintColor: Colors.transparent,
+      elevation: 2,
+      shadowColor: Colors.black,
       iconTheme: const IconThemeData(color: Colors.white),
       titleSpacing: 0,
       leading: IconButton(
@@ -1167,8 +1236,12 @@ class _SupportChatScreenState extends State<SupportChatScreen>
 
   PreferredSizeWidget _normalBar() {
     return AppBar(
-          backgroundColor: Colors.transparent,
-          elevation: 0,
+          // Telegram `ActionBar` (qorong'i mavzu): to'q kulrang, ostida
+          // soya — fon naqshi sarlavha ostida qoladi.
+          backgroundColor: _kTgHeader,
+          surfaceTintColor: Colors.transparent,
+          elevation: 2,
+          shadowColor: Colors.black,
           iconTheme: const IconThemeData(color: Colors.white),
           titleSpacing: 0,
           title: Row(
@@ -1425,10 +1498,8 @@ class _SupportChatScreenState extends State<SupportChatScreen>
     final active = _recording || _roundRec;
     return Container(
       decoration: BoxDecoration(
-        color: AppColors.surface,
-        border: Border(
-          top: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
-        ),
+        // Telegram `ChatActivityEnterView` foni — sarlavha bilan bir xil.
+        color: _kTgHeader,
       ),
       child: TgInputArea(
         controller: _input,
@@ -1901,7 +1972,9 @@ class _Bubble extends StatelessWidget {
       topNear: topNear,
       bottomNear: bottomNear,
     );
-    final color = mine ? AppColors.accent : const Color(0xFF222326);
+    // Telegram qorong'i mavzusi: kiruvchi — to'q kulrang (`chat_inBubble`),
+    // chiquvchi — aksentning to'qroq, bosiqroq tusi (`chat_outBubble`).
+    final color = mine ? _kTgOutBubble : _kTgInBubble;
     // Javob belgisi (`[re:..]`) matnda ko'rinmaydi — iqtibos bo'lib chiqadi.
     final body = tgSplitReply(m.body).$2;
     final hasText = body.isNotEmpty &&
@@ -2852,14 +2925,30 @@ class _RoundBubbleState extends State<_RoundBubble> {
     _open();
   }
 
+  int _waits = 0;
+
   Future<void> _open() async {
     final tg = TelegramService.instance;
+    // O'zi yuborgan dumaloq video — telefondagi asl fayldan, darhol.
+    final own = VoicePlayer.localFiles[TelegramService.fileNameOf(widget.url)];
+    if (own != null && File(own).existsSync()) {
+      return _play(VideoPlayerController.file(File(own),
+          videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true)));
+    }
     final aru = defaultTargetPlatform == TargetPlatform.android;
     final onDisk = aru && RustCore.instance.videoIsComplete(widget.url);
     final local = onDisk ? null : await tg.prepare(widget.url);
     if (!mounted) return;
     if (local != null) tg.hold(this, widget.url);
     if (!onDisk && local == null) {
+      // Yangi yuborilgan video kanalga hali ko'chmagan bo'lishi mumkin —
+      // bir necha marta o'zi qayta uriniladi (ilgari darhol "tayyor
+      // emas" deb to'xtab, faqat bosilganda ochilardi).
+      if (_waits++ < 6) {
+        await Future<void>.delayed(Duration(seconds: 2 + _waits * 2));
+        if (mounted && _c == null) return _open();
+        return;
+      }
       setState(() {
         _failed = true;
         _why = 'Video hali tayyor emas';
@@ -2869,8 +2958,11 @@ class _RoundBubbleState extends State<_RoundBubble> {
     final source = onDisk || aru
         ? TelegramService.aruUri(widget.url)
         : Uri.parse(local!);
-    final c = VideoPlayerController.networkUrl(source,
-        videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true));
+    return _play(VideoPlayerController.networkUrl(source,
+        videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true)));
+  }
+
+  Future<void> _play(VideoPlayerController c) async {
     try {
       await c.initialize();
       await c.setLooping(true);
@@ -2908,7 +3000,10 @@ class _RoundBubbleState extends State<_RoundBubble> {
     if (c == null) return;
     final v = c.value;
     // Ovozli ijro tugadi — yana ovozsiz, takrorlanib.
-    if (_sound && !v.isPlaying && v.position >= v.duration) {
+    if (_sound &&
+        !v.isPlaying &&
+        v.duration > Duration.zero &&
+        v.position >= v.duration - const Duration(milliseconds: 250)) {
       _sound = false;
       c.setVolume(0);
       c.setLooping(true);
@@ -2925,6 +3020,8 @@ class _RoundBubbleState extends State<_RoundBubble> {
         setState(() {
           _failed = false;
           _why = '';
+          _waits = 0;
+          _retried = false;
         });
         await _open();
       }
