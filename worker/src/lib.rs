@@ -6482,7 +6482,11 @@ async fn chat_send(mut req: Request, env: &Env, origin: &str) -> Result<Response
     // boshlanayotgan bo'lsa qator o'zi yaratiladi.
     let (inc_user, inc_admin) = if from_admin { (1, 0) } else { (0, 1) };
     // Ro'yxatda matnsiz rasm/video ham ko'rinib tursin.
-    let label = if !body.is_empty() {
+    // Ovozli xabarning matni — faqat to'lqin shakli (`[wf:...]`,
+    // ilova yozish paytida yig'adi, Telegram `waveform` kabi); ro'yxatda
+    // u emas, "Ovozli xabar" ko'rinsin.
+    let wave_only = media_type == "voice" && body.starts_with("[wf:") && body.ends_with(']');
+    let label = if !body.is_empty() && !wave_only {
         body.clone()
     } else if media_type == "video" {
         "Video".to_string()

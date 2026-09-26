@@ -1,4 +1,4 @@
-# lib/widgets/tg_emoji_data.dart ni yasaydi.
+# lib/widgets/tg_emoji_data.dart ni yasaydi (panel tartibi, fixEmoji, teri rangi to'plami).
 import re, sys
 from emoji_data import *
 i=java.index('char[] emojiToFE0F = {'); j=java.index('};',i)
@@ -33,5 +33,10 @@ o=["// lib/widgets/tg_emoji_data.dart — emoji paneli Telegram'dagidek.",
 for (gid,t),sec in zip(titles,colored):
     o.append(f"  TgEmojiGroup('{gid}', \"{t}\", [{','.join(dq(fix(e)) for e in sec)}]),")
 o.append("];")
+colored_list=arr1('emojiColored')
+o.append("")
+o.append("/// Teri rangini tanlasa bo'ladigan emojilar (U+FE0F siz) —")
+o.append("/// `EmojiData.emojiColored`; bosib turilsa rang tanlash oynasi.")
+o.append("const tgEmojiColored = <String>{" + ",".join(dq(x.replace('\ufe0f','')) for x in colored_list) + "};")
 open(sys.argv[1],'w',encoding='utf-8').write('\n'.join(o)+'\n')
 print(fix('☺')=='☺️', fix('❤')=='❤️', fix('😀')=='😀')

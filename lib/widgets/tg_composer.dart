@@ -665,14 +665,15 @@ class _Header extends StatelessWidget {
   final bool locked;
   const _Header(this.title, {this.locked = false});
 
-  static const height = 36.0;
+  /// `StickerSetNameCell`: balandligi 27 dp, nom 15, qalin.
+  static const height = 30.0;
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
       height: height,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+        padding: const EdgeInsets.fromLTRB(15, 9, 15, 0),
         child: Row(
           children: [
             if (locked) ...[
@@ -687,7 +688,7 @@ class _Header extends StatelessWidget {
                 style: const TextStyle(
                     color: _Pal.hint,
                     fontSize: 15,
-                    fontWeight: FontWeight.w500),
+                    fontWeight: FontWeight.w700),
               ),
             ),
             if (locked)
@@ -717,8 +718,9 @@ class _Strip extends StatefulWidget {
     required this.onTap,
   });
 
-  static const item = 44.0;
-  static const height = 48.0;
+  // `EmojiTabsStrip`: tugma 30 dp, oraliq 3 dp, tanlov burchagi 8 dp.
+  static const item = 33.0;
+  static const height = 40.0;
 
   @override
   State<_Strip> createState() => _StripState();
@@ -766,14 +768,14 @@ class _StripState extends State<_Strip> {
               AnimatedPositioned(
                 duration: const Duration(milliseconds: 250),
                 curve: Curves.easeOutCubic,
-                left: widget.selected * _Strip.item + 3,
-                top: 5,
-                width: _Strip.item - 6,
-                height: _Strip.item - 6,
+                left: widget.selected * _Strip.item + 1.5,
+                top: (_Strip.height - 30) / 2,
+                width: 30,
+                height: 30,
                 child: Container(
                   decoration: BoxDecoration(
                     color: _Pal.pillOn,
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(8),
                   ),
                 ),
               ),
@@ -1230,15 +1232,11 @@ class _EmojiPageState extends State<_EmojiPage>
   String _query = '';
   List<String>? _found;
 
+  /// Telegram `EmojiTabsStrip` belgilari — tanlanganda bir marta
+  /// "jonlanadi" (`R.raw.msg_emoji_*`).
   static const _icons = [
-    Icons.emoji_emotions_outlined,
-    Icons.pets_outlined,
-    Icons.fastfood_outlined,
-    Icons.sports_soccer_outlined,
-    Icons.directions_car_outlined,
-    Icons.lightbulb_outline,
-    Icons.emoji_symbols_outlined,
-    Icons.flag_outlined,
+    'smiles', 'cat', 'food', 'activities',
+    'travel', 'objects', 'other', 'flags',
   ];
 
   @override
@@ -1328,9 +1326,12 @@ class _EmojiPageState extends State<_EmojiPage>
           },
           icon: (i, on) {
             final c = on ? Colors.white : _Pal.icon;
-            if (i == 0) return Icon(Icons.access_time, color: c, size: 22);
+            if (i == 0) return Icon(Icons.access_time_rounded, color: c, size: 22);
             if (i <= groups.length) {
-              return Icon(_icons[i - 1], color: c, size: 22);
+              return _TabLottie(
+                  asset: 'assets/tg_anim/msg_emoji_${_icons[i - 1]}.json',
+                  selected: on,
+                  color: c);
             }
             final s = _sets[i - firstSet];
             return Stack(
@@ -1357,8 +1358,7 @@ class _EmojiPageState extends State<_EmojiPage>
                       minCell: 45,
                       minColumns: 7,
                       count: found.length,
-                      cell: (i, cell) => _EmojiCell(
-                          found[i], cell, () => _pickEmoji(found[i])),
+                      cell: (i, cell) => _EmojiCell(found[i], cell, _pickEmoji),
                     ))
               : _Sections(
                   minCell: 45,
@@ -1390,10 +1390,10 @@ class _EmojiPageState extends State<_EmojiPage>
                         );
                       }
                       final e = _recent[i - _recentCustom.length];
-                      return _EmojiCell(e, cell, () => _pickEmoji(e));
+                      return _EmojiCell(e, cell, _pickEmoji);
                     }
                     final e = groups[s - 1].emoji[i];
-                    return _EmojiCell(e, cell, () => _pickEmoji(e));
+                    return _EmojiCell(e, cell, _pickEmoji);
                   },
                 ),
         ),
@@ -1402,21 +1402,230 @@ class _EmojiPageState extends State<_EmojiPage>
   }
 }
 
+/// Emoji katagi (`ImageViewEmoji`): bosilganda 0.8 gacha kichrayadi;
+/// teri rangi bor emojini BOSIB TURISH — rang tanlash oynasi
+/// (`EmojiColorPickerWindow`: asl + 5 rang), tanlangani eslab qolinadi.
 class _EmojiCell extends StatelessWidget {
   final String e;
   final double cell;
-  final VoidCallback onTap;
-  const _EmojiCell(this.e, this.cell, this.onTap);
+  final ValueChanged<String> onPick;
+  const _EmojiCell(this.e, this.cell, this.onPick);
+
+  /// Tanlangan ranglar (asl emoji -> rangli).
+  static final Map<String, String> tones = {};
+
+  static const _colors = ['', '🏻', '🏼', '🏽', '🏾', '🏿'];
+
+  static String _base(String e) => e.replaceAll('\uFE0F', '');
+
+  /// `EmojiView.addColorToCode`: rang oxirgi ZWJ bo'lagidan OLDIN
+  /// qo'yiladi (masalan 🏃‍♂️ -> 🏃🏽‍♂).
+  static String withColor(String code, String color) {
+    if (color.isEmpty) return code;
+    var c = _base(code);
+    var end = '';
+    var invert = false;
+    if (c.endsWith('\u200D➡')) {
+      c = c.substring(0, c.length - 2);
+      invert = true;
+    }
+    final n = c.length;
+    if (n > 2 && c[n - 2] == '\u200D') {
+      end = c.substring(n - 2);
+      c = c.substring(0, n - 2);
+    } else if (n > 3 && c[n - 3] == '\u200D') {
+      end = c.substring(n - 3);
+      c = c.substring(0, n - 3);
+    }
+    return '$c$color$end${invert ? '\u200D➡' : ''}';
+  }
+
+  bool get _colorable => tgEmojiColored.contains(_base(e));
+
+  void _openTones(BuildContext context) {
+    final box = context.findRenderObject() as RenderBox?;
+    final overlay = Overlay.of(context);
+    if (box == null) return;
+    HapticFeedback.mediumImpact();
+    final at = box.localToGlobal(Offset.zero, ancestor: overlay.context.findRenderObject());
+    late OverlayEntry entry;
+    entry = OverlayEntry(
+      builder: (_) => _TonePicker(
+        emoji: e,
+        anchor: at & box.size,
+        cell: cell,
+        onPick: (v) {
+          entry.remove();
+          if (v != null) onPick(v);
+        },
+      ),
+    );
+    overlay.insert(entry);
+  }
 
   @override
   Widget build(BuildContext context) {
-    return _Press(
-      onTap: onTap,
-      scale: 0.8,
-      child: Center(
-        child: Text(e,
-            style: TextStyle(
-                fontFamily: kTgEmojiFont, fontSize: cell * 0.6, height: 1.1)),
+    final shown = tones[_base(e)] ?? e;
+    return GestureDetector(
+      onLongPress: _colorable ? () => _openTones(context) : null,
+      child: _Press(
+        onTap: () => onPick(shown),
+        scale: 0.8,
+        child: Center(
+          child: Text(shown,
+              style: TextStyle(
+                  fontFamily: kTgEmojiFont, fontSize: cell * 0.6, height: 1.1)),
+        ),
+      ),
+    );
+  }
+}
+
+/// Teri rangi tanlash oynasi (katak ustida, 6 ta variant).
+class _TonePicker extends StatefulWidget {
+  final String emoji;
+  final Rect anchor;
+  final double cell;
+  final ValueChanged<String?> onPick;
+
+  const _TonePicker({
+    required this.emoji,
+    required this.anchor,
+    required this.cell,
+    required this.onPick,
+  });
+
+  @override
+  State<_TonePicker> createState() => _TonePickerState();
+}
+
+class _TonePickerState extends State<_TonePicker>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _a = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 180))
+    ..forward();
+
+  @override
+  void dispose() {
+    _a.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    const n = 6;
+    final item = widget.cell;
+    final w = item * n + 8;
+    final left = (widget.anchor.center.dx - w / 2).clamp(6.0, size.width - w - 6);
+    final top = widget.anchor.top - item - 14;
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => widget.onPick(null),
+          ),
+        ),
+        Positioned(
+          left: left,
+          top: top,
+          child: ScaleTransition(
+            scale: CurvedAnimation(parent: _a, curve: Curves.easeOutBack),
+            alignment: Alignment.bottomCenter,
+            child: Material(
+              color: _Pal.pill,
+              elevation: 8,
+              borderRadius: BorderRadius.circular(12),
+              child: Padding(
+                padding: const EdgeInsets.all(4),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    for (final c in _EmojiCell._colors)
+                      _Press(
+                        scale: 0.8,
+                        onTap: () {
+                          final v = _EmojiCell.withColor(widget.emoji, c);
+                          final base = _EmojiCell._base(widget.emoji);
+                          if (c.isEmpty) {
+                            _EmojiCell.tones.remove(base);
+                          } else {
+                            _EmojiCell.tones[base] = v;
+                          }
+                          widget.onPick(v);
+                        },
+                        child: SizedBox(
+                          width: item,
+                          height: item,
+                          child: Center(
+                            child: Text(
+                              _EmojiCell.withColor(widget.emoji, c),
+                              style: TextStyle(
+                                  fontFamily: kTgEmojiFont,
+                                  fontSize: item * 0.6,
+                                  height: 1.1),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Bo'lim belgisi (Lottie): tanlanganda bir marta o'ynaydi.
+class _TabLottie extends StatefulWidget {
+  final String asset;
+  final bool selected;
+  final Color color;
+  const _TabLottie(
+      {required this.asset, required this.selected, required this.color});
+
+  @override
+  State<_TabLottie> createState() => _TabLottieState();
+}
+
+class _TabLottieState extends State<_TabLottie>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(vsync: this);
+
+  @override
+  void didUpdateWidget(_TabLottie old) {
+    super.didUpdateWidget(old);
+    if (widget.selected && !old.selected && _c.duration != null) {
+      _c.forward(from: 0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 24,
+      height: 24,
+      child: ColorFiltered(
+        colorFilter: ColorFilter.mode(widget.color, BlendMode.srcIn),
+        child: Lottie.asset(
+          widget.asset,
+          controller: _c,
+          onLoaded: (comp) {
+            _c.duration = comp.duration;
+            // Birinchi ko'rinishda oxirgi (tinch) kadr.
+            if (!_c.isAnimating) _c.value = 1;
+          },
+        ),
       ),
     );
   }
