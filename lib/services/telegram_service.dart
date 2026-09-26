@@ -92,6 +92,26 @@ Future<Map<String, dynamic>> _callBlocking(String fn, String arg) {
   });
 }
 
+/// Rust yadrosidagi JSON qaytaradigan funksiyani fon oqimida
+/// chaqiradi: argumentsiz, satr ([arg]) yoki son ([intArg]) bilan.
+/// Kutubxona yo'q bo'lsa (masalan testda) — `{"error": ..}`.
+Future<Map<String, dynamic>> tgCall(String fn, {String? arg, int? intArg}) async {
+  try {
+    if (arg != null) return await _callBlocking(fn, arg);
+    return await Isolate.run(() {
+      final lib = _openLib();
+      if (intArg != null) {
+        final f = lib.lookupFunction<Pointer<Utf8> Function(Int32),
+            Pointer<Utf8> Function(int)>(fn);
+        return _json(_take(lib, f(intArg)));
+      }
+      return _json(_take(lib, lib.lookupFunction<_NoArgC, _NoArgC>(fn)()));
+    });
+  } catch (e) {
+    return {'error': '$e'};
+  }
+}
+
 /// Kirish bosqichining natijasi.
 class TgLoginStep {
   final bool done;
@@ -581,17 +601,22 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
     final s = AuthService.instance.sessionToken;
     if (s == null) return 'Ilova hisobiga kirilmagan';
 
-    // Bot chatidan kanalga ko'chirilishini kutamiz (odatda 1-2 s).
-    //
-    // Fayl allaqachon Telegram'da va izohida kalit bor — qolgan ishni
-    // (kanalga ko'chirish, bazaga yozish) bot o'zi qiladi. Shu sabab
-    // kutish tugasa yoki internet sekinlashsa ham fayl QAYTA
-    // YUKLANMAYDI: yuklash muvaffaqiyatli hisoblanadi. Faqat bot chati
-    // bot ko'chirib ulgurgunicha tozalanmaydi (aks holda nusxa
-    // o'chib ketardi) — u keyinroq tozalanadi.
-    var ready = false;
     // Bot ko'chirib ulgurguncha chat tozalanmasin.
     _delivering++;
+    await _awaitClaim(fileName, key, s);
+    return null;
+  }
+
+  /// Bot chatidan kanalga ko'chirilishini kutadi (odatda 1-2 s).
+  ///
+  /// Fayl allaqachon Telegram'da — qolgan ishni (kanalga ko'chirish,
+  /// bazaga yozish) bot o'zi qiladi. Shu sabab kutish tugasa yoki
+  /// internet sekinlashsa ham fayl QAYTA YUBORILMAYDI. Faqat bot chati
+  /// bot ko'chirib ulgurgunicha tozalanmaydi (aks holda nusxa o'chib
+  /// ketardi) — u keyinroq tozalanadi. Chaqiruvchi OLDINDAN
+  /// `_delivering++` qiladi; bu yerda kamaytiriladi.
+  Future<void> _awaitClaim(String fileName, String key, String s) async {
+    var ready = false;
     for (final wait in const [1, 1, 2, 2, 3, 4, 5, 8]) {
       await Future<void>.delayed(Duration(seconds: wait));
       try {
@@ -623,6 +648,26 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
         unawaited(_clearIfPending());
       });
     }
+  }
+
+  /// GIF'ni (Telegram'dagi tayyor hujjat, [docId]) [fileName] nomi
+  /// bilan kanalga joylaydi: ilova uni bot chatiga yuboradi (qayta
+  /// yuklanmaydi, shifrlanmaydi), bot kanalga ko'chiradi. Qaytadi:
+  /// xato matni yoki `null`.
+  Future<String?> sendGif(String docId, String fileName) async {
+    if (!_authorized) return 'Telegram hisobi ulanmagan';
+    final s = AuthService.instance.sessionToken;
+    if (s == null) return 'Ilova hisobiga kirilmagan';
+    _delivering++;
+    final j = await _callBlocking(
+        'rust_tg_send_gif', jsonEncode({'id': docId, 'name': fileName}));
+    if (j['ok'] != true) {
+      _delivering--;
+      return (j['error'] as String?) ?? 'GIF yuborilmadi';
+    }
+    _missing.remove(fileName);
+    // Xabar darhol chiqsin — kanalga ko'chirilishi fon'da kutiladi.
+    unawaited(_awaitClaim(fileName, '', s));
     return null;
   }
 

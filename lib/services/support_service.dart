@@ -94,9 +94,14 @@ class ChatMessage {
   bool get isVideo => mediaType == 'video';
   bool get isVoice => mediaType == 'voice';
 
+  /// Telegram'dagidek PUFAKSIZ chiziladigan xabar: stiker, GIF yoki
+  /// dumaloq video.
+  bool get isInline =>
+      mediaType == 'sticker' || mediaType == 'gif' || mediaType == 'round';
+
   /// Rasm yoki video (ya'ni ko'ruvchida ochiladigan narsa).
   /// Ovozli xabar bunga KIRMAYDI — u xabarning o'zida ijro etiladi.
-  bool get isViewable => hasMedia && !isVoice;
+  bool get isViewable => hasMedia && !isVoice && !isInline;
 
   static ChatMessage fromJson(Map<String, dynamic> j) => ChatMessage(
         id: '${j['id'] ?? ''}',

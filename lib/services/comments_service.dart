@@ -72,6 +72,12 @@ class Comment {
   final String username;
   final String photoUrl;
   final String body;
+
+  /// Stiker (`stk_...` havolasi) yoki GIF (kanaldagi fayl nomi).
+  final String mediaFile;
+
+  /// `sticker` / `gif` yoki bo'sh (oddiy matn).
+  final String mediaType;
   final int createdAt;
   final bool deleted;
 
@@ -88,6 +94,8 @@ class Comment {
     required this.username,
     required this.photoUrl,
     required this.body,
+    this.mediaFile = '',
+    this.mediaType = '',
     required this.createdAt,
     required this.deleted,
     required this.likes,
@@ -113,6 +121,8 @@ class Comment {
         username: '${j['username'] ?? ''}',
         photoUrl: '${j['photo_url'] ?? ''}',
         body: '${j['body'] ?? ''}',
+        mediaFile: '${j['media_file'] ?? ''}',
+        mediaType: '${j['media_type'] ?? ''}',
         createdAt: ((j['created_at'] as num?) ?? 0).toInt(),
         deleted: j['deleted'] == true,
         likes: ((j['likes'] as num?) ?? 0).toInt(),
@@ -129,6 +139,8 @@ class Comment {
         'username': username,
         'photo_url': photoUrl,
         'body': body,
+        'media_file': mediaFile,
+        'media_type': mediaType,
         'created_at': createdAt,
         'deleted': deleted,
         'likes': likes,
@@ -366,9 +378,12 @@ class CommentsController extends ChangeNotifier {
 
   /// Izoh yoki javob yozadi. Xato bo'lsa matn qaytadi.
   /// Izoh yozadi.
-  Future<String?> add(String body, {String parentId = ''}) async {
+  /// Yangi izoh. [mediaType] — `sticker` / `gif` ([mediaFile] bilan,
+  /// matnsiz — Telegram'dagidek alohida xabar).
+  Future<String?> add(String body,
+      {String parentId = '', String mediaFile = '', String mediaType = ''}) async {
     final text = body.trim();
-    if (text.isEmpty) return 'Izoh bo\'sh';
+    if (text.isEmpty && mediaFile.isEmpty) return 'Izoh bo\'sh';
     try {
       final r = await http
           .post(
@@ -379,6 +394,8 @@ class CommentsController extends ChangeNotifier {
               'season_id': seasonId,
               'parent_id': parentId,
               'body': text,
+              if (mediaFile.isNotEmpty) 'media_file': mediaFile,
+              if (mediaFile.isNotEmpty) 'media_type': mediaType,
             }),
           )
           .timeout(const Duration(seconds: 20));
@@ -595,4 +612,15 @@ Future<List<Comment>?> fetchCommentReplies({
   } catch (_) {
     return null;
   }
+}
+
+/// Izohning qisqa matni (ro'yxat, shikoyat oynasi): stiker/GIF uchun
+/// nomi, maxsus emoji — oddiy emoji bo'lib.
+String commentPreview(Comment c) {
+  if (c.body.isNotEmpty) return c.body;
+  return switch (c.mediaType) {
+    'sticker' => 'Stiker',
+    'gif' => 'GIF',
+    _ => c.body,
+  };
 }

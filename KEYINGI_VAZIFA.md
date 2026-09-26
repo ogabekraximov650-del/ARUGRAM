@@ -3047,3 +3047,59 @@ internet qaytganda ilova o'z hisobi bilan chat tarixini tozalasin".
   - `sendMedia` baribir `PEER_ID_INVALID` bersa, bot qaytadan topiladi
     va o'sha yuklangan fayl bir marta qayta yuboriladi. Fayl qayta
     yuklanmaydi.
+
+## Telegram'dagidek yozish paneli: emoji, GIF, stikerlar, ovoz, dumaloq video
+
+- **Panel** (`lib/widgets/tg_composer.dart`) izohlarda va support chatda
+  ishlaydi:
+  - maydondagi 🙂 klaviatura o'rniga panel ochadi (balandligi —
+    klaviaturaniki);
+  - pastda "Emoji | GIF | Stikerlar" tugmalari, sahifalar yon tomonga
+    suriladi;
+  - Emoji sahifasi:
+    - Unicode 13.1 gacha emoji (`tg_emoji_data.dart`,
+      `emoji-test.txt` dan yasalgan);
+    - yaqinda ishlatilganlar;
+    - maxsus emoji to'plamlari — Premium bo'lmasa 🔒 bilan ko'rinadi,
+      yuborilmaydi;
+    - ⌫ tugmasi.
+  - GIF sahifasi: qidiruv (`@gif`), saqlanganlar va mashhurlar.
+  - Stikerlar sahifasi: yaqinda ishlatilganlar, sevimlilar, to'plamlar.
+- **Ma'lumot** (`lib/services/tg_media.dart`) foydalanuvchining o'z
+  Telegram hisobidan olinadi. Rust funksiyalari:
+  - `rust_tg_premium`, `rust_tg_sticker_sets`, `rust_tg_sticker_set`,
+    `rust_tg_custom_emoji`;
+  - `rust_tg_saved_gifs`, `rust_tg_gif_search`;
+  - `rust_tg_media_file` (fayllar diskda keshlanadi);
+  - `rust_tg_send_gif`.
+- **Xabar formati:**
+  - stiker: `media_type=sticker`,
+    `media_file=stk_<to'plam>_<hash>_<hujjat>` (u64 hex). Ko'ruvchi
+    stikerni `getStickerSet` bilan o'zi oladi;
+  - GIF: tayyor hujjat bot chatiga yuboriladi (qayta yuklanmaydi,
+    shifrlanmaydi), bot uni kanalga ko'chiradi. Nomi `cmt_<id>_...mp4`
+    yoki `chat_<id>_...mp4`, `media_type=gif`;
+  - maxsus emoji: matnda `[ce:<hujjat id>:<emoji>]`. Yozish maydonida u
+    rasm bo'lib ko'rinadi (`TgTextController`), `EmojiText` ham shunday
+    chizadi.
+- **Izohlar:** faqat matn, emoji, stiker va GIF — fayl va ovoz yo'q.
+  `comments_db` ga `media_file`, `media_type` ustunlari qo'shildi.
+  Eski bazaga `ALTER` bir marta ishlaydi, belgisi
+  `app_config.mig_comment_media`.
+- **Support chat** (Telegram'dagidek):
+  - qator: `[🙂 Xabar 📎] (🎤/⏺/➤)`;
+  - `tg_record_button.dart`:
+    - qisqa bosish mikrofon ↔ kamera orasida almashtiradi;
+    - bosib turish yozishni boshlaydi (150 ms), qo'yib yuborilsa
+      yuboriladi;
+    - chapga surilsa bekor qilinadi (`min(0.35·kenglik, 140) × 0.3`);
+    - tepaga 57 dp surilsa qulflanadi.
+    - Qiymatlar Telegram Android'ning `ChatActivityEnterView` idan
+      olingan.
+  - Dumaloq video (`camera` paketi, old kamera, ko'pi bilan 60 s):
+    - `media_type=round`;
+    - chatda doira bo'lib ovozsiz, takrorlanib o'ynaydi;
+    - bosilsa boshidan ovoz bilan, atrofida progress halqasi;
+    - fayl shifrlangan keshdan o'qiladi (`aru://`).
+  - Stiker, GIF va dumaloq video pufaksiz chiziladi.
+  - APK'ga `CAMERA` ruxsati qo'shildi (workflow).

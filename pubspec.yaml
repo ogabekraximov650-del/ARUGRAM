@@ -93,6 +93,13 @@ dependencies:
   # paket. Android'da u ham ExoPlayer ustida ishlaydi, ya'ni
   # dvigatel o'sha-o'sha; lekin audio uchun to'g'ri yo'l bilan.
   just_audio: ^0.10.6
+  # ── TELEGRAM STIKERLARI ─────────────────────────────────────
+  # Animatsiyali stiker va maxsus emoji (`.tgs`) — bu gzip'langan
+  # Lottie JSON. Paket uni to'g'ridan-to'g'ri chizadi.
+  lottie: ^3.3.1
+  # ── DUMALOQ VIDEO XABAR (Telegram'dagidek) ───────────────────
+  # Support chatda old kamera bilan dumaloq video yozish uchun.
+  camera: ^0.11.1
 
 # ARUGRAM: video_player_android nusxasi — pleyer videoni mahalliy
 # serversiz, diskdagi shifrlangan keshdan o'qiydi (`aru://file/<nom>`,

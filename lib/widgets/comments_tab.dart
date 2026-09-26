@@ -24,6 +24,10 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import 'emoji_text.dart';
+import 'tg_composer.dart';
+import 'tg_media_view.dart';
+import '../services/telegram_service.dart';
+import '../services/tg_media.dart';
 import '../services/image_cache.dart';
 
 import '../services/auth_service.dart';
@@ -69,7 +73,7 @@ class CommentsTab extends StatefulWidget {
 }
 
 class _CommentsTabState extends State<CommentsTab> {
-  final _input = TextEditingController();
+  final _input = TgTextController();
   final _focus = FocusNode();
   final _scroll = ScrollController();
 
@@ -163,9 +167,51 @@ class _CommentsTabState extends State<CommentsTab> {
     );
   }
 
+  /// Stiker — darhol alohida izoh bo'lib ketadi (Telegram'dagidek).
+  Future<void> _sendSticker(TgDoc d) =>
+      _sendMedia(d.ref, 'sticker');
+
+  /// GIF — Telegram'dagi tayyor fayl kanalga joylanadi (qayta
+  /// yuklanmaydi), izohga esa uning nomi yoziladi.
+  Future<void> _sendGif(TgDoc d) async {
+    final me = AuthService.instance.user?.id ?? 0;
+    if (me == 0) {
+      _say('Izoh yozish uchun hisobingizga kiring');
+      return;
+    }
+    final name = 'cmt_${me}_${DateTime.now().millisecondsSinceEpoch}.mp4';
+    setState(() => _sending = true);
+    final err = await TelegramService.instance.sendGif(d.id, name);
+    if (!mounted) return;
+    setState(() => _sending = false);
+    if (err != null) {
+      _say(err);
+      return;
+    }
+    await _sendMedia(name, 'gif');
+  }
+
+  Future<void> _sendMedia(String file, String type) async {
+    if (_sending) return;
+    if (!AuthService.instance.isLoggedIn) {
+      _say('Izoh yozish uchun hisobingizga kiring');
+      return;
+    }
+    setState(() => _sending = true);
+    final err = await widget.controller.add('',
+        parentId: _replyTo?.id ?? '', mediaFile: file, mediaType: type);
+    if (!mounted) return;
+    setState(() => _sending = false);
+    if (err != null) {
+      _say(err);
+      return;
+    }
+    setState(() => _replyTo = null);
+  }
+
   Future<void> _send() async {
     if (_sending) return;
-    final text = _input.text.trim();
+    final text = _input.encoded.trim();
     if (text.isEmpty) return;
     if (!AuthService.instance.isLoggedIn) {
       _say('Izoh yozish uchun hisobingizga kiring');
@@ -489,6 +535,15 @@ class _CommentsTabState extends State<CommentsTab> {
       // yuqoriga sakrab, ekranning tepasiga chiqib ketardi.
       //
       // Shu sabab bu yerda klaviaturaga umuman tegilmaydi.
+      // Telegram'dagidek panel (Emoji / GIF / Stikerlar). Izohga
+      // fayl, ovozli xabar va shunga o'xshashlar YUBORILMAYDI
+      // (foydalanuvchi talabi) — faqat matn, emoji, stiker va GIF.
+      child: TgInputArea(
+        controller: _input,
+        focus: _focus,
+        onSticker: _sendSticker,
+        onGif: _sendGif,
+        row: (context, emojiButton) => Padding(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -535,9 +590,13 @@ class _CommentsTabState extends State<CommentsTab> {
                     border: Border.all(
                         color: Colors.white.withValues(alpha: 0.12)),
                   ),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
-                  child: TextField(
+                  padding: const EdgeInsets.fromLTRB(2, 2, 14, 2),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      emojiButton,
+                      Expanded(
+                        child: TextField(
                     controller: _input,
                     focusNode: _focus,
                     minLines: 1,
@@ -558,6 +617,9 @@ class _CommentsTabState extends State<CommentsTab> {
                       border: InputBorder.none,
                     ),
                     onChanged: (_) => setState(() {}),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -570,6 +632,8 @@ class _CommentsTabState extends State<CommentsTab> {
             ],
           ),
         ],
+      ),
+        ),
       ),
     );
   }
@@ -818,6 +882,17 @@ class _CommentRow extends StatelessWidget {
               // `EmojiText` — oddiy `Text` ning o'rnida: matn xira
               // qoladi (alpha o'z joyida), EMOJI esa to'liq rangda
               // chiqadi. Sababi `emoji_text.dart` boshida.
+              if (!c.deleted && c.mediaType == 'sticker')
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: TgStickerRefView(ref: c.mediaFile, size: 120),
+                )
+              else if (!c.deleted && c.mediaType == 'gif')
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: TgGifMessage(fileName: c.mediaFile, maxWidth: 200),
+                )
+              else
               EmojiText(
                 c.deleted ? 'Izoh o\'chirilgan' : c.body,
                 style: TextStyle(
@@ -1081,7 +1156,7 @@ class _ReportSheetState extends State<_ReportSheet> {
                     ),
                     const SizedBox(height: 3),
                     EmojiText(
-                      widget.comment.body,
+                      commentPreview(widget.comment),
                       maxLines: 3,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(

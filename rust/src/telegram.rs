@@ -2855,6 +2855,520 @@ pub extern "C" fn rust_tg_play_url(key_ptr: *const c_char) -> *mut c_char {
     string_to_cptr(route_url(key).unwrap_or_default())
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  STIKERLAR, MAXSUS EMOJI, GIF (Telegram'dagidek yozish paneli)
+// ═══════════════════════════════════════════════════════════════
+//
+// TALAB (foydalanuvchi): "izoh va support chatga Telegram emoji, GIF
+// va stikerlarni ulab ber — Telegram'dagi pastki panel qanday
+// ishlasa xuddi shunday; premium emoji'ni faqat premium'i bor odam
+// yubora olsin".
+//
+// Hammasi foydalanuvchining O'Z Telegram hisobi bilan olinadi —
+// worker ham, baza ham fayl ko'rmaydi:
+//   * stiker xabarda `stk_<to'plam>_<hash>_<hujjat>` havolasi bo'lib
+//     turadi, ko'ruvchi uni `messages.getStickerSet` bilan oladi;
+//   * maxsus emoji matnda hujjat ID si bilan, ko'ruvchi
+//     `messages.getCustomEmojiDocuments` bilan oladi;
+//   * GIF'ni boshqalar ID bo'yicha ololmaydi — u bot chatiga TAYYOR
+//     hujjat sifatida yuboriladi (qayta yuklanmaydi) va bot uni
+//     kanalga ko'chiradi (`rust_tg_send_gif`), keyin xuddi video kabi.
+
+#[derive(Clone)]
+struct MediaDoc {
+    id: i64,
+    access_hash: i64,
+    file_reference: Vec<u8>,
+    dc_id: i32,
+    /// Eng mos kichik rasm turi (`m`) — GIF va video stikerlar uchun.
+    thumb: Option<String>,
+    /// Qayerdan olingan: fayl havolasi eskirsa qaytadan shu yerdan.
+    set: Option<(i64, i64)>,
+    emoji: bool,
+}
+
+fn media_docs() -> &'static Mutex<HashMap<i64, MediaDoc>> {
+    static M: OnceLock<Mutex<HashMap<i64, MediaDoc>>> = OnceLock::new();
+    M.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// To'plam ichidagi hujjatlar (xotirada — panel har ochilganda
+/// qaytadan so'ralmasin).
+fn set_cache() -> &'static Mutex<HashMap<i64, Vec<Value>>> {
+    static M: OnceLock<Mutex<HashMap<i64, Vec<Value>>>> = OnceLock::new();
+    M.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn media_dir(t: &Tg) -> PathBuf {
+    let d = t.dir.join("media");
+    let _ = fs::create_dir_all(&d);
+    d
+}
+
+/// Hujjatni eslab qoladi va ilovaga kerakli qisqa ko'rinishini qaytaradi.
+fn doc_value(d: &tl::enums::Document, set: Option<(i64, i64)>) -> Option<Value> {
+    let tl::enums::Document::Document(d) = d else { return None };
+    let mut alt = String::new();
+    let mut set = set;
+    let mut emoji = false;
+    let mut free = true;
+    let (mut w, mut h) = (0, 0);
+    for a in &d.attributes {
+        match a {
+            tl::enums::DocumentAttribute::Sticker(s) => {
+                alt = s.alt.clone();
+                if let tl::enums::InputStickerSet::Id(i) = &s.stickerset {
+                    set = Some((i.id, i.access_hash));
+                }
+            }
+            tl::enums::DocumentAttribute::CustomEmoji(c) => {
+                alt = c.alt.clone();
+                emoji = true;
+                free = c.free;
+                if let tl::enums::InputStickerSet::Id(i) = &c.stickerset {
+                    set = Some((i.id, i.access_hash));
+                }
+            }
+            tl::enums::DocumentAttribute::Video(v) => {
+                w = v.w;
+                h = v.h;
+            }
+            tl::enums::DocumentAttribute::ImageSize(s) => {
+                w = s.w;
+                h = s.h;
+            }
+            _ => {}
+        }
+    }
+    let kind = match d.mime_type.as_str() {
+        "application/x-tgsticker" => "tgs",
+        "image/webp" => "webp",
+        "video/webm" => "webm",
+        "video/mp4" => "mp4",
+        m if m.starts_with("image/") => "image",
+        _ => return None,
+    };
+    // Kichik rasm: `m` (320px) bo'lsa o'sha, bo'lmasa eng kattasi.
+    let thumb = d.thumbs.as_ref().and_then(|v| {
+        let sizes: Vec<(String, i32)> = v
+            .iter()
+            .filter_map(|p| match p {
+                tl::enums::PhotoSize::Size(s) => Some((s.r#type.clone(), s.w)),
+                tl::enums::PhotoSize::Progressive(s) => Some((s.r#type.clone(), s.w)),
+                _ => None,
+            })
+            .collect();
+        sizes
+            .iter()
+            .find(|(k, _)| k == "m")
+            .or_else(|| sizes.iter().max_by_key(|(_, w)| *w))
+            .map(|(k, _)| k.clone())
+    });
+    let md = MediaDoc {
+        id: d.id,
+        access_hash: d.access_hash,
+        file_reference: d.file_reference.clone(),
+        dc_id: d.dc_id,
+        thumb: thumb.clone(),
+        set,
+        emoji,
+    };
+    if let Ok(mut m) = media_docs().lock() {
+        m.insert(d.id, md);
+    }
+    let (sid, shash) = set.unwrap_or((0, 0));
+    Some(json!({
+        // 64 bitli sonlar matn ko'rinishida (Dart'da ham aniq qolsin).
+        "id": d.id.to_string(),
+        "kind": kind,
+        "emoji": alt,
+        "set_id": sid.to_string(),
+        "set_hash": shash.to_string(),
+        "w": w,
+        "h": h,
+        "thumb": thumb.is_some(),
+        "custom": emoji,
+        "free": free,
+    }))
+}
+
+fn docs_value(docs: &[tl::enums::Document], set: Option<(i64, i64)>) -> Vec<Value> {
+    docs.iter().filter_map(|d| doc_value(d, set)).collect()
+}
+
+fn sets_value(sets: &[tl::enums::StickerSet]) -> Vec<Value> {
+    sets.iter()
+        .map(|s| {
+            let tl::enums::StickerSet::Set(s) = s;
+            json!({
+                "id": s.id.to_string(),
+                "hash": s.access_hash.to_string(),
+                "title": s.title,
+                "count": s.count,
+                "thumb_doc": s.thumb_document_id.map(|v| v.to_string()),
+            })
+        })
+        .collect()
+}
+
+fn parse_i64(v: &Value) -> i64 {
+    match v {
+        Value::String(s) => s.parse().unwrap_or(0),
+        v => v.as_i64().unwrap_or(0),
+    }
+}
+
+/// Foydalanuvchida Telegram Premium bormi (`{"premium": bool}`).
+#[no_mangle]
+pub extern "C" fn rust_tg_premium() -> *mut c_char {
+    string_to_cptr(with_client(|t, client| {
+        let users = t
+            .rt
+            .block_on(client.invoke(&tl::functions::users::GetUsers {
+                id: vec![tl::enums::InputUser::UserSelf],
+            }))
+            .map_err(|e| inv_err(&e))?;
+        let premium = users.iter().any(|u| matches!(u, tl::enums::User::User(u) if u.premium));
+        Ok(json!({"premium": premium}).to_string())
+    }))
+}
+
+/// O'rnatilgan stiker to'plamlari + yaqinda ishlatilgan va sevimli
+/// stikerlar. [emoji] = 1 — maxsus emoji to'plamlari.
+#[no_mangle]
+pub extern "C" fn rust_tg_sticker_sets(emoji: i32) -> *mut c_char {
+    string_to_cptr(with_client(|t, client| {
+        t.rt.block_on(async {
+            let all = if emoji != 0 {
+                client.invoke(&tl::functions::messages::GetEmojiStickers { hash: 0 }).await
+            } else {
+                client.invoke(&tl::functions::messages::GetAllStickers { hash: 0 }).await
+            }
+            .map_err(|e| inv_err(&e))?;
+            let sets = match all {
+                tl::enums::messages::AllStickers::Stickers(a) => sets_value(&a.sets),
+                tl::enums::messages::AllStickers::NotModified => Vec::new(),
+            };
+            if emoji != 0 {
+                return Ok(json!({"sets": sets}).to_string());
+            }
+            let recent = match client
+                .invoke(&tl::functions::messages::GetRecentStickers { attached: false, hash: 0 })
+                .await
+            {
+                Ok(tl::enums::messages::RecentStickers::Stickers(r)) => docs_value(&r.stickers, None),
+                _ => Vec::new(),
+            };
+            let faved = match client.invoke(&tl::functions::messages::GetFavedStickers { hash: 0 }).await {
+                Ok(tl::enums::messages::FavedStickers::Stickers(r)) => docs_value(&r.stickers, None),
+                _ => Vec::new(),
+            };
+            Ok(json!({"sets": sets, "recent": recent, "faved": faved}).to_string())
+        })
+    }))
+}
+
+async fn load_set(client: &Client, id: i64, hash: i64) -> Result<Vec<Value>, String> {
+    let r = client
+        .invoke(&tl::functions::messages::GetStickerSet {
+            stickerset: tl::enums::InputStickerSet::Id(tl::types::InputStickerSetId { id, access_hash: hash }),
+            hash: 0,
+        })
+        .await
+        .map_err(|e| inv_err(&e))?;
+    let docs = match r {
+        tl::enums::messages::StickerSet::Set(s) => docs_value(&s.documents, Some((id, hash))),
+        tl::enums::messages::StickerSet::NotModified => Vec::new(),
+    };
+    if let Ok(mut c) = set_cache().lock() {
+        c.insert(id, docs.clone());
+    }
+    Ok(docs)
+}
+
+/// Bitta to'plamning stikerlari: `{"id":"..","hash":".."}` -> `{"docs":[..]}`.
+#[no_mangle]
+pub extern "C" fn rust_tg_sticker_set(json_ptr: *const c_char) -> *mut c_char {
+    let arg: Value = serde_json::from_str(unsafe { cstr_to_str(json_ptr) }.unwrap_or("{}")).unwrap_or(json!({}));
+    let (id, hash) = (parse_i64(&arg["id"]), parse_i64(&arg["hash"]));
+    string_to_cptr(with_client(|t, client| {
+        if let Some(d) = set_cache().lock().ok().and_then(|c| c.get(&id).cloned()) {
+            return Ok(json!({"docs": d}).to_string());
+        }
+        let docs = t.rt.block_on(load_set(&client, id, hash))?;
+        Ok(json!({"docs": docs}).to_string())
+    }))
+}
+
+/// Maxsus emoji hujjatlari ID bo'yicha: `["id", ..]` -> `{"docs":[..]}`.
+#[no_mangle]
+pub extern "C" fn rust_tg_custom_emoji(json_ptr: *const c_char) -> *mut c_char {
+    let arg: Value = serde_json::from_str(unsafe { cstr_to_str(json_ptr) }.unwrap_or("[]")).unwrap_or(json!([]));
+    let ids: Vec<i64> = arg.as_array().map(|a| a.iter().map(parse_i64).filter(|v| *v != 0).collect()).unwrap_or_default();
+    string_to_cptr(with_client(|t, client| {
+        if ids.is_empty() {
+            return Ok(json!({"docs": []}).to_string());
+        }
+        let docs = t
+            .rt
+            .block_on(client.invoke(&tl::functions::messages::GetCustomEmojiDocuments { document_id: ids.clone() }))
+            .map_err(|e| inv_err(&e))?;
+        Ok(json!({"docs": docs_value(&docs, None)}).to_string())
+    }))
+}
+
+/// Saqlangan GIF'lar.
+#[no_mangle]
+pub extern "C" fn rust_tg_saved_gifs() -> *mut c_char {
+    string_to_cptr(with_client(|t, client| {
+        let r = t
+            .rt
+            .block_on(client.invoke(&tl::functions::messages::GetSavedGifs { hash: 0 }))
+            .map_err(|e| inv_err(&e))?;
+        let docs = match r {
+            tl::enums::messages::SavedGifs::Gifs(g) => docs_value(&g.gifs, None),
+            tl::enums::messages::SavedGifs::NotModified => Vec::new(),
+        };
+        Ok(json!({"docs": docs}).to_string())
+    }))
+}
+
+/// GIF qidiruvi — Telegram'dagi kabi `@gif` bot orqali.
+/// `{"q":"..","offset":".."}` -> `{"docs":[..],"next":".."}`.
+#[no_mangle]
+pub extern "C" fn rust_tg_gif_search(json_ptr: *const c_char) -> *mut c_char {
+    let arg: Value = serde_json::from_str(unsafe { cstr_to_str(json_ptr) }.unwrap_or("{}")).unwrap_or(json!({}));
+    let q = arg["q"].as_str().unwrap_or("").to_string();
+    let offset = arg["offset"].as_str().unwrap_or("").to_string();
+    string_to_cptr(with_client(|t, client| {
+        t.rt.block_on(async {
+            static GIF_BOT: OnceLock<Mutex<Option<(i64, i64)>>> = OnceLock::new();
+            let cell = GIF_BOT.get_or_init(|| Mutex::new(None));
+            let cached = cell.lock().ok().and_then(|c| *c);
+            let (id, hash) = match cached {
+                Some(p) => p,
+                None => {
+                    let tl::enums::contacts::ResolvedPeer::Peer(rp) = client
+                        .invoke(&tl::functions::contacts::ResolveUsername { username: "gif".into(), referer: None })
+                        .await
+                        .map_err(|e| inv_err(&e))?;
+                    let p = rp
+                        .users
+                        .iter()
+                        .find_map(|u| match u {
+                            tl::enums::User::User(u) if u.bot => u.access_hash.map(|h| (u.id, h)),
+                            _ => None,
+                        })
+                        .ok_or("@gif topilmadi")?;
+                    if let Ok(mut c) = cell.lock() {
+                        *c = Some(p);
+                    }
+                    p
+                }
+            };
+            let tl::enums::messages::BotResults::Results(r) = client
+                .invoke(&tl::functions::messages::GetInlineBotResults {
+                    bot: tl::enums::InputUser::User(tl::types::InputUser { user_id: id, access_hash: hash }),
+                    peer: tl::enums::InputPeer::PeerSelf,
+                    geo_point: None,
+                    query: q.clone(),
+                    offset: offset.clone(),
+                })
+                .await
+                .map_err(|e| inv_err(&e))?;
+            let docs: Vec<Value> = r
+                .results
+                .iter()
+                .filter_map(|x| match x {
+                    tl::enums::BotInlineResult::BotInlineMediaResult(m) => m.document.as_ref(),
+                    _ => None,
+                })
+                .filter_map(|d| doc_value(d, None))
+                .collect();
+            Ok(json!({"docs": docs, "next": r.next_offset.unwrap_or_default()}).to_string())
+        })
+    }))
+}
+
+/// Fayl havolasi eskirgan — hujjat qaytadan olinadi.
+async fn refresh_media(client: &Client, md: &MediaDoc) -> Result<MediaDoc, String> {
+    if md.emoji {
+        let docs = client
+            .invoke(&tl::functions::messages::GetCustomEmojiDocuments { document_id: vec![md.id] })
+            .await
+            .map_err(|e| inv_err(&e))?;
+        docs_value(&docs, None);
+    } else if let Some((id, hash)) = md.set {
+        load_set(client, id, hash).await?;
+    } else {
+        return Err("fayl havolasi eskirgan".to_string());
+    }
+    media_docs()
+        .lock()
+        .ok()
+        .and_then(|m| m.get(&md.id).cloned())
+        .ok_or_else(|| "hujjat topilmadi".to_string())
+}
+
+/// Hujjatni (yoki uning kichik rasmini) to'liq yuklab oladi.
+async fn download_media(t: &Tg, client: &Client, mut md: MediaDoc, thumb: bool) -> Result<Vec<u8>, String> {
+    const MAX: u64 = 20 * 1024 * 1024;
+    let mut out: Vec<u8> = Vec::new();
+    let mut dc = md.dc_id;
+    let mut refreshed = false;
+    let mut offset: u64 = 0;
+    let mut tries = 0;
+    loop {
+        let req = tl::functions::upload::GetFile {
+            precise: false,
+            cdn_supported: false,
+            location: tl::enums::InputFileLocation::InputDocumentFileLocation(tl::types::InputDocumentFileLocation {
+                id: md.id,
+                access_hash: md.access_hash,
+                file_reference: md.file_reference.clone(),
+                thumb_size: if thumb { md.thumb.clone().unwrap_or_default() } else { String::new() },
+            }),
+            offset: offset as i64,
+            limit: PART as i32,
+        };
+        match client.invoke_in_dc(dc, &req).await {
+            Ok(tl::enums::upload::File::File(f)) => {
+                let n = f.bytes.len() as u64;
+                out.extend_from_slice(&f.bytes);
+                offset += n;
+                if n < PART || offset >= MAX {
+                    return Ok(out);
+                }
+            }
+            Ok(tl::enums::upload::File::CdnRedirect(_)) => return Err("CDN yo'naltirishi kutilmagan".to_string()),
+            Err(e) => {
+                tries += 1;
+                if tries > 4 {
+                    return Err(inv_err(&e));
+                }
+                match rpc_name(&e) {
+                    Some(n) if n.starts_with("FILE_REFERENCE_") && !refreshed => {
+                        refreshed = true;
+                        md = refresh_media(client, &md).await?;
+                    }
+                    Some("AUTH_KEY_UNREGISTERED") => copy_auth(t, client, dc).await?,
+                    Some("FILE_MIGRATE") => {
+                        if let InvocationError::Rpc(r) = &e {
+                            if let Some(v) = r.value {
+                                dc = v as i32;
+                            }
+                        }
+                    }
+                    _ => return Err(inv_err(&e)),
+                }
+            }
+        }
+    }
+}
+
+/// Hujjat faylining diskdagi yo'li (bir marta yuklanadi, keyin
+/// keshdan). `{"id":"..","thumb":true}` -> `{"path":".."}`.
+#[no_mangle]
+pub extern "C" fn rust_tg_media_file(json_ptr: *const c_char) -> *mut c_char {
+    let arg: Value = serde_json::from_str(unsafe { cstr_to_str(json_ptr) }.unwrap_or("{}")).unwrap_or(json!({}));
+    let id = parse_i64(&arg["id"]);
+    let thumb = arg["thumb"].as_bool().unwrap_or(false);
+    string_to_cptr(with_client(|t, client| {
+        let path = media_dir(t).join(format!("{id}{}", if thumb { ".t" } else { "" }));
+        if path.exists() {
+            return Ok(json!({"path": path.to_string_lossy()}).to_string());
+        }
+        let md = media_docs()
+            .lock()
+            .ok()
+            .and_then(|m| m.get(&id).cloned())
+            .ok_or("hujjat noma'lum")?;
+        if thumb && md.thumb.is_none() {
+            return Err("kichik rasm yo'q".to_string());
+        }
+        let bytes = t.rt.block_on(async {
+            tokio::time::timeout(Duration::from_secs(40), download_media(t, &client, md, thumb))
+                .await
+                .map_err(|_| format!("{NET_ERR}vaqt tugadi"))?
+        })?;
+        let tmp = path.with_extension("part");
+        fs::write(&tmp, &bytes).map_err(|e| e.to_string())?;
+        fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
+        Ok(json!({"path": path.to_string_lossy()}).to_string())
+    }))
+}
+
+/// GIF'ni bot chatiga TAYYOR hujjat sifatida yuboradi (qayta
+/// yuklanmaydi). Izoh — fayl nomi: bot uni kanalga ko'chiradi
+/// (`tg_user_media`). `{"id":"..","name":".."}` -> `{"ok":true}`.
+#[no_mangle]
+pub extern "C" fn rust_tg_send_gif(json_ptr: *const c_char) -> *mut c_char {
+    let arg: Value = serde_json::from_str(unsafe { cstr_to_str(json_ptr) }.unwrap_or("{}")).unwrap_or(json!({}));
+    let id = parse_i64(&arg["id"]);
+    let name = arg["name"].as_str().unwrap_or("").to_string();
+    string_to_cptr(with_client(|t, client| {
+        let md = media_docs()
+            .lock()
+            .ok()
+            .and_then(|m| m.get(&id).cloned())
+            .ok_or("GIF noma'lum")?;
+        t.rt.block_on(async {
+            let mut rnd = [0u8; 8];
+            getrandom::getrandom(&mut rnd).map_err(|e| e.to_string())?;
+            let mut retried = false;
+            loop {
+                let (uid, hash) = bot_peer(t, &client).await?;
+                let r = client
+                    .invoke(&tl::functions::messages::SendMedia {
+                        silent: true,
+                        background: false,
+                        clear_draft: false,
+                        noforwards: false,
+                        update_stickersets_order: false,
+                        invert_media: false,
+                        allow_paid_floodskip: false,
+                        peer: tl::enums::InputPeer::User(tl::types::InputPeerUser { user_id: uid, access_hash: hash }),
+                        reply_to: None,
+                        media: tl::enums::InputMedia::Document(tl::types::InputMediaDocument {
+                            spoiler: false,
+                            id: tl::enums::InputDocument::Document(tl::types::InputDocument {
+                                id: md.id,
+                                access_hash: md.access_hash,
+                                file_reference: md.file_reference.clone(),
+                            }),
+                            video_cover: None,
+                            video_timestamp: None,
+                            ttl_seconds: None,
+                            query: None,
+                        }),
+                        message: name.clone(),
+                        random_id: i64::from_le_bytes(rnd),
+                        reply_markup: None,
+                        entities: None,
+                        schedule_date: None,
+                        schedule_repeat_period: None,
+                        send_as: None,
+                        quick_reply_shortcut: None,
+                        effect: None,
+                        allow_paid_stars: None,
+                        suggested_post: None,
+                    })
+                    .await;
+                match r {
+                    Ok(_) => return Ok(json!({"ok": true}).to_string()),
+                    Err(e) if e.is("PEER_ID_INVALID") && !retried => {
+                        retried = true;
+                        if let Ok(mut p) = t.bot_peer.lock() {
+                            *p = None;
+                        }
+                    }
+                    Err(e) => return Err(inv_err(&e)),
+                }
+            }
+        })
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

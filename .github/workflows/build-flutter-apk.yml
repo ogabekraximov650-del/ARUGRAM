@@ -205,6 +205,18 @@ jobs:
             echo "✅ RECORD_AUDIO ruxsati allaqachon bor"
           fi
 
+      # Support chatdagi dumaloq video xabar uchun kamera ruxsati
+      # (`camera` paketi).
+      - name: CAMERA ruxsatini qo'shish (agar yo'q bo'lsa)
+        run: |
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          if ! grep -q "android.permission.CAMERA" "$MANIFEST"; then
+            sed -i '/<manifest /a\    <uses-permission android:name="android.permission.CAMERA" />' "$MANIFEST"
+            echo "✅ CAMERA ruxsati qo'shildi"
+          else
+            echo "✅ CAMERA ruxsati allaqachon bor"
+          fi
+
       # Video kesh-server (lib/services/video_cache_server.dart) ilova
       # ichida mahalliy http://127.0.0.1 manzilda ishlaydi. Android
       # targetSdk 28+ da standart holatda BARCHA shifrlanmagan (cleartext)

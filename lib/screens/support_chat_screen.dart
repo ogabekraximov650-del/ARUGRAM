@@ -19,7 +19,9 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
@@ -37,6 +39,14 @@ import '../widgets/glass.dart';
 import 'media_view_screen.dart';
 import 'public_profile_screen.dart';
 import '../services/telegram_service.dart';
+import '../services/tg_media.dart';
+import '../widgets/tg_composer.dart';
+import '../widgets/tg_media_view.dart';
+import '../widgets/tg_record_button.dart';
+import '../widgets/emoji_text.dart';
+import 'package:video_player/video_player.dart';
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
+import '../services/rust_bridge.dart';
 
 class SupportChatScreen extends StatefulWidget {
   /// Admin boshqa odamning suhbatini ochsa — o'sha odamning raqami.
@@ -66,7 +76,8 @@ class _SupportChatScreenState extends State<SupportChatScreen>
     // ekranni yozib olish taqiqlansin (`screen_guard.dart`).
     with ScreenGuarded<SupportChatScreen> {
   late final ChatController _chat = ChatController(userId: widget.userId);
-  final _input = TextEditingController();
+  final _input = TgTextController();
+  final _focus = FocusNode();
   final _scroll = ScrollController();
   bool _sending = false;
 
@@ -141,6 +152,17 @@ class _SupportChatScreenState extends State<SupportChatScreen>
   // ko'p uchraydigan shikoyat.
   final _rec = AudioRecorder();
   bool _recording = false;
+
+  // ── TELEGRAM'DAGIDEK YOZISH (`tg_record_button.dart`) ─────
+  /// Tepaga surib qulflangan — barmoq qo'yib yuborilsa ham yoziladi.
+  bool _locked = false;
+
+  /// Chapga surilgan masofa ("bekor qilish uchun suring").
+  double _dragX = 0;
+
+  /// Dumaloq video: old kamera.
+  CameraController? _cam;
+  bool _roundRec = false;
   Duration _recLen = Duration.zero;
   Timer? _recTimer;
   String? _recPath;
@@ -174,6 +196,8 @@ class _SupportChatScreenState extends State<SupportChatScreen>
     _chat.stopPolling();
     _chat.dispose();
     _input.dispose();
+    _focus.dispose();
+    unawaited(_cam?.dispose());
     _scroll.dispose();
     // Ekran yopildi — profil sahifasidagi nuqta yangilansin.
     UnreadBadge.instance.refresh();
@@ -348,7 +372,7 @@ class _SupportChatScreenState extends State<SupportChatScreen>
       final err = await _chat.send(
         // Ovozli xabarga matn qo'shilmaydi: yozayotgan matn
         // o'z holicha qolsin, keyin alohida yuboriladi.
-        type == 'voice' ? '' : _input.text.trim(),
+        type == 'voice' || type == 'round' ? '' : _input.encoded.trim(),
         mediaFile: b2Name,
         mediaType: type,
         mediaMs: ms,
@@ -357,7 +381,7 @@ class _SupportChatScreenState extends State<SupportChatScreen>
       if (err != null) {
         _snack(err);
       } else {
-        if (type != 'voice') _input.clear();
+        if (type != 'voice' && type != 'round') _input.clear();
         _toBottom();
       }
     } catch (e) {
@@ -432,6 +456,8 @@ class _SupportChatScreenState extends State<SupportChatScreen>
   /// faylni o'chirib tashlaydi.
   Future<void> _stopRecording({required bool send}) async {
     if (!_recording) return;
+    _locked = false;
+    _dragX = 0;
     _recTimer?.cancel();
     _recTimer = null;
     final len = _recLen;
@@ -567,9 +593,137 @@ class _SupportChatScreenState extends State<SupportChatScreen>
     return ok;
   }
 
+  // ══════════════════════════════════════════════════════════
+  //  STIKER / GIF (Telegram paneli)
+  // ══════════════════════════════════════════════════════════
+
+  Future<void> _sendSticker(TgDoc d) async {
+    final err = await _chat.send('', mediaFile: d.ref, mediaType: 'sticker');
+    if (err != null && mounted) _snack(err);
+    _toBottom();
+  }
+
+  /// GIF — Telegram'dagi tayyor fayl kanalga joylanadi (qayta
+  /// yuklanmaydi), xabarga esa uning nomi yoziladi.
+  Future<void> _sendGif(TgDoc d) async {
+    if (_sending) return;
+    final me = AuthService.instance.user?.id ?? 0;
+    final name = 'chat_${me}_${DateTime.now().millisecondsSinceEpoch}.mp4';
+    setState(() => _sending = true);
+    var err = await TelegramService.instance.sendGif(d.id, name);
+    err ??= await _chat.send('', mediaFile: name, mediaType: 'gif');
+    if (!mounted) return;
+    setState(() => _sending = false);
+    if (err != null) _snack(err);
+    _toBottom();
+  }
+
+  // ══════════════════════════════════════════════════════════
+  //  DUMALOQ VIDEO XABAR (Telegram'dagidek)
+  // ══════════════════════════════════════════════════════════
+
+  static const _roundMax = Duration(seconds: 60);
+
+  Future<bool> _startRound() async {
+    if (_roundRec || _recording || _uploading) return false;
+    await VoicePlayer.instance.stop();
+    try {
+      final cams = await availableCameras();
+      if (cams.isEmpty) throw 'kamera topilmadi';
+      final cam = cams.firstWhere(
+          (c) => c.lensDirection == CameraLensDirection.front,
+          orElse: () => cams.first);
+      final c = CameraController(cam, ResolutionPreset.medium,
+          enableAudio: true);
+      await c.initialize();
+      await c.startVideoRecording();
+      if (!mounted) {
+        await c.dispose();
+        return false;
+      }
+      HapticFeedback.lightImpact();
+      _recLen = Duration.zero;
+      setState(() {
+        _cam = c;
+        _roundRec = true;
+      });
+      _recTimer?.cancel();
+      _recTimer = Timer.periodic(const Duration(milliseconds: 100), (_) {
+        if (!mounted) return;
+        setState(() => _recLen += const Duration(milliseconds: 100));
+        if (_recLen >= _roundMax) _stopRec(true);
+      });
+      return true;
+    } catch (e) {
+      if (mounted) _snack('Kamera ochilmadi: $e');
+      return false;
+    }
+  }
+
+  Future<void> _stopRound({required bool send}) async {
+    final c = _cam;
+    if (!_roundRec || c == null) return;
+    _locked = false;
+    _dragX = 0;
+    _recTimer?.cancel();
+    _recTimer = null;
+    final len = _recLen;
+    setState(() {
+      _roundRec = false;
+      _cam = null;
+    });
+    XFile? f;
+    try {
+      f = await c.stopVideoRecording();
+    } catch (_) {}
+    await c.dispose();
+    if (f == null) return;
+    final file = File(f.path);
+    if (!send || len.inMilliseconds < 1000) {
+      try {
+        await file.delete();
+      } catch (_) {}
+      if (send && mounted) _snack('Juda qisqa');
+      return;
+    }
+    await _uploadAndSend(
+      file: file,
+      ext: 'mp4',
+      type: 'round',
+      contentType: 'video/mp4',
+      ms: len.inMilliseconds,
+      cleanup: () async {
+        try {
+          await file.delete();
+        } catch (_) {}
+      },
+    );
+  }
+
+  /// Yozish tugmasi: ovoz yoki dumaloq video boshlanadi.
+  Future<bool> _startRec(TgRecMode mode) async {
+    _focus.unfocus();
+    if (mode == TgRecMode.video) return _startRound();
+    await _startRecording();
+    if (_recording) HapticFeedback.lightImpact();
+    return _recording;
+  }
+
+  void _stopRec(bool send) {
+    setState(() {
+      _locked = false;
+      _dragX = 0;
+    });
+    if (_roundRec) {
+      unawaited(_stopRound(send: send));
+    } else {
+      unawaited(_stopRecording(send: send));
+    }
+  }
+
   Future<void> _send() async {
     if (_sending) return;
-    final text = _input.text.trim();
+    final text = _input.encoded.trim();
     if (text.isEmpty) return;
     setState(() => _sending = true);
     final err = await _chat.send(text);
@@ -599,15 +753,21 @@ class _SupportChatScreenState extends State<SupportChatScreen>
         appBar: _selecting ? _selectionBar() : _normalBar(),
         body: SafeArea(
           top: false,
-          child: Column(
+          child: Stack(
             children: [
-              Expanded(
-                child: AnimatedBuilder(
-                  animation: _chat,
-                  builder: (context, _) => _body(),
-                ),
+              Column(
+                children: [
+                  Expanded(
+                    child: AnimatedBuilder(
+                      animation: _chat,
+                      builder: (context, _) => _body(),
+                    ),
+                  ),
+                  _composer(),
+                ],
               ),
-              _composer(),
+              // Dumaloq video yozilayotganda — kamera doirasi.
+              _roundOverlay(),
             ],
           ),
         ),
@@ -831,7 +991,23 @@ class _SupportChatScreenState extends State<SupportChatScreen>
     );
   }
 
+  // ══════════════════════════════════════════════════════════
+  //  YOZISH QATORI — TELEGRAM'DAGIDEK
+  // ══════════════════════════════════════════════════════════
+  //
+  // TALAB (foydalanuvchi): "support chatga emoji, GIF, stiker, matn
+  // yozadigan, fayl yuboradigan, ovozli xabar va dumaloq xabar
+  // yuboradigan oynani qo'sh — huddi Telegram'niki bilan bir xil".
+  //
+  //   [🙂  Xabar            📎]  (🎤 / ⏺ / ➤)
+  //
+  // 🙂 — Emoji / GIF / Stikerlar paneli (`tg_composer.dart`);
+  // 📎 — rasm yoki video; o'ngdagi tugma — `tg_record_button.dart`.
+  //
+  // Klaviatura joyini `Scaffold` o'zi ochadi (bu yerda qo'shimcha
+  // bo'shliq qo'yilmaydi — ilgari qator ikki barobar sakrardi).
   Widget _composer() {
+    final active = _recording || _roundRec;
     return Container(
       decoration: BoxDecoration(
         color: AppColors.surface,
@@ -839,177 +1015,228 @@ class _SupportChatScreenState extends State<SupportChatScreen>
           top: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
         ),
       ),
-      // ── KLAVIATURA JOYINI `Scaffold` O'ZI OCHADI ──────────
-      //
-      // TOPILGAN XATO (foydalanuvchi: "yozadigan oyna judayam
-      // yuqoriga ko'tarilib ketgan").
-      //
-      // `Scaffold` standart holatda `resizeToAvoidBottomInset:
-      // true` bilan ishlaydi, ya'ni klaviatura ochilganda TANANI
-      // o'zi qisqartiradi. Bu yerda esa ustiga YANA klaviatura
-      // balandligi qo'shilardi — natijada qator ikki barobar
-      // yuqoriga sakrab, ekranning tepasiga chiqib ketardi.
-      //
-      // Shu sabab bu yerda klaviaturaga umuman tegilmaydi.
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-      // Ovoz yozilayotganda qator butunlay boshqacha: vaqt,
-      // bekor qilish va yuborish.
-      child: _recording ? _recordingRow() : _composerRow(),
+      child: TgInputArea(
+        controller: _input,
+        focus: _focus,
+        onSticker: _sendSticker,
+        onGif: _sendGif,
+        row: (context, emojiButton) => Padding(
+          padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                child: active ? _recordingInfo() : _field(emojiButton),
+              ),
+              const SizedBox(width: 8),
+              TgRecordButton(
+                hasText: !_input.isBlank && !active,
+                busy: _sending,
+                locked: _locked,
+                onSend: _send,
+                onStart: _startRec,
+                onStop: _stopRec,
+                onLock: () => setState(() => _locked = true),
+                onDrag: (dx) => setState(() => _dragX = dx),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
-  /// Ovoz yozilayotgandagi qator.
-  Widget _recordingRow() {
-    return Row(
-      children: [
-        // Qizil nuqta "yozilyapti" degani.
-        Container(
-          width: 10,
-          height: 10,
-          decoration: BoxDecoration(
-            color: Colors.red.shade400,
-            shape: BoxShape.circle,
-          ),
-        ),
-        const SizedBox(width: 10),
-        Text(
-          voiceClock(_recLen),
-          style: const TextStyle(
-              color: Colors.white,
-              fontSize: 15,
-              fontWeight: FontWeight.w700),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Text(
-            'Ovoz yozilmoqda...',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.45), fontSize: 13),
-          ),
-        ),
-        // Bekor qilish — fayl o'chib ketadi.
-        GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: () => _stopRecording(send: false),
-          child: Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: Colors.white.withValues(alpha: 0.10),
-            ),
-            child: Icon(Icons.delete_outline_rounded,
-                size: 20, color: Colors.red.shade300),
-          ),
-        ),
-        const SizedBox(width: 8),
-        GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: () => _stopRecording(send: true),
-          child: Container(
-            width: 42,
-            height: 42,
-            decoration: const BoxDecoration(
-              shape: BoxShape.circle,
-              color: AppColors.accent,
-            ),
-            child: const Icon(Icons.send_rounded, size: 19, color: Colors.white),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _composerRow() {
-    return Row(
+  /// Oddiy holat: 🙂, matn maydoni va 📎.
+  Widget _field(Widget emojiButton) {
+    return Container(
+      constraints: const BoxConstraints(minHeight: 44),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+      ),
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
+          emojiButton,
           Expanded(
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.07),
-                borderRadius: BorderRadius.circular(20),
-                border:
-                    Border.all(color: Colors.white.withValues(alpha: 0.12)),
-              ),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 11),
               child: TextField(
                 controller: _input,
+                focusNode: _focus,
                 minLines: 1,
-                maxLines: 5,
+                maxLines: 6,
                 maxLength: 2000,
                 textCapitalization: TextCapitalization.sentences,
-                style: const TextStyle(color: Colors.white, fontSize: 14),
+                style: const TextStyle(color: Colors.white, fontSize: 15),
+                cursorColor: AppColors.accent,
                 decoration: InputDecoration(
                   counterText: '',
                   isDense: true,
-                  hintText: 'Xabar yozing...',
+                  contentPadding: EdgeInsets.zero,
+                  hintText: 'Xabar',
                   hintStyle: TextStyle(
                       color: Colors.white.withValues(alpha: 0.38),
-                      fontSize: 14),
+                      fontSize: 15),
                   border: InputBorder.none,
                 ),
                 onChanged: (_) => setState(() {}),
               ),
             ),
           ),
-          // ── RASM / VIDEO BIRIKTIRISH ────────────────────────
-          //
-          // TALAB (foydalanuvchi): "fayl yuklash tugmasi yozish
-          // joyi va yuborish tugmasining ORASIDA bo'lsin".
-          //
-          // Yuklash ketayotganda tugma o'rnida AYLANA progress va
-          // uning ichida foiz turadi.
-          const SizedBox(width: 6),
+          // Telegram'dagidek: matn yozilayotganda 📎 ham turadi.
           _AttachButton(
             uploading: _uploading,
             progress: _upProgress,
-            // Progress endi CHAT PUFFAGIDA ko'rinadi; tugmada
-            // faqat "band" holati qoladi.
             showProgress: false,
+            compact: true,
             onImage: () => _pickAndSend(video: false),
             onVideo: () => _pickAndSend(video: true),
           ),
-          const SizedBox(width: 6),
-          // ── YUBORISH YOKI MIKROFON ──────────────────────────
-          //
-          // Matn yozilgan bo'lsa — yuborish, bo'sh bo'lsa —
-          // mikrofon (Telegram va WhatsApp ham shunday qiladi).
-          // Shu sabab qatorga qo'shimcha tugma qo'shilmaydi va
-          // joy tig'iz bo'lib qolmaydi.
-          Builder(builder: (context) {
-            final empty = _input.text.trim().isEmpty;
-            return GestureDetector(
-              onTap: _sending
-                  ? null
-                  : (empty ? _startRecording : _send),
-              behavior: HitTestBehavior.opaque,
-              child: Container(
-                width: 42,
-                height: 42,
-                decoration: const BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: AppColors.accent,
-                ),
-                child: _sending
-                    ? const Padding(
-                        padding: EdgeInsets.all(12),
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white),
-                      )
-                    : Icon(
-                        empty ? Icons.mic_rounded : Icons.send_rounded,
-                        size: empty ? 21 : 19,
-                        color: Colors.white,
-                      ),
-              ),
-            );
-          }),
         ],
-      );
+      ),
+    );
   }
+
+  /// Yozish paytidagi qator: ● vaqt, "◀ Bekor qilish uchun suring"
+  /// (qulflanganda — "Bekor qilish" tugmasi).
+  Widget _recordingInfo() {
+    return SizedBox(
+      height: 44,
+      child: Row(
+        children: [
+          const SizedBox(width: 10),
+          const _BlinkDot(),
+          const SizedBox(width: 8),
+          Text(
+            voiceClock(_recLen),
+            style: const TextStyle(
+                color: Colors.white,
+                fontSize: 15,
+                fontFeatures: [FontFeature.tabularFigures()]),
+          ),
+          Expanded(
+            child: _locked
+                ? Center(
+                    child: TextButton(
+                      onPressed: () => _stopRec(false),
+                      child: const Text('Bekor qilish',
+                          style: TextStyle(
+                              color: AppColors.accent,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600)),
+                    ),
+                  )
+                : Transform.translate(
+                    offset: Offset(_dragX * 0.8, 0),
+                    child: Opacity(
+                      opacity: (1 + _dragX / 60).clamp(0.2, 1.0),
+                      child: Center(
+                        child: Text(
+                          '‹  Bekor qilish uchun suring',
+                          maxLines: 1,
+                          overflow: TextOverflow.fade,
+                          softWrap: false,
+                          style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.55),
+                              fontSize: 14),
+                        ),
+                      ),
+                    ),
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Dumaloq video yozilayotganda ekran o'rtasidagi old kamera.
+  Widget _roundOverlay() {
+    final c = _cam;
+    if (!_roundRec || c == null || !c.value.isInitialized) {
+      return const SizedBox.shrink();
+    }
+    final ps = c.value.previewSize;
+    final side = MediaQuery.sizeOf(context).width * 0.72;
+    final progress =
+        _recLen.inMilliseconds / _roundMax.inMilliseconds;
+    return Positioned.fill(
+      child: IgnorePointer(
+        child: Container(
+          color: Colors.black.withValues(alpha: 0.55),
+          alignment: const Alignment(0, -0.25),
+          child: SizedBox(
+            width: side + 12,
+            height: side + 12,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                SizedBox(
+                  width: side + 12,
+                  height: side + 12,
+                  child: CircularProgressIndicator(
+                    value: progress.clamp(0.0, 1.0),
+                    strokeWidth: 4,
+                    color: Colors.white,
+                    backgroundColor: Colors.white.withValues(alpha: 0.15),
+                  ),
+                ),
+                ClipOval(
+                  child: SizedBox(
+                    width: side,
+                    height: side,
+                    child: FittedBox(
+                      fit: BoxFit.cover,
+                      child: SizedBox(
+                        // Oldindan ko'rish o'lchami yotiq (landshaft)
+                        // beriladi — telefon tik turadi.
+                        width: ps?.height ?? side,
+                        height: ps?.width ?? side,
+                        child: CameraPreview(c),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Yozish paytidagi qizil, miltillovchi nuqta.
+class _BlinkDot extends StatefulWidget {
+  const _BlinkDot();
+
+  @override
+  State<_BlinkDot> createState() => _BlinkDotState();
+}
+
+class _BlinkDotState extends State<_BlinkDot>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _a = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 700))
+    ..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _a.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => FadeTransition(
+        opacity: Tween(begin: 0.25, end: 1.0).animate(_a),
+        child: Container(
+          width: 10,
+          height: 10,
+          decoration: const BoxDecoration(
+              color: Color(0xFFE5484D), shape: BoxShape.circle),
+        ),
+      );
 }
 
 /// Sarlavhadagi kichik rasm.
@@ -1110,6 +1337,8 @@ class _Bubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final m = message;
+    // Stiker, GIF va dumaloq video — pufaksiz (Telegram'dagidek).
+    final bare = m.hasMedia && m.isInline && m.body.isEmpty;
     // ── TANLANGAN XABAR AJRALIB TURADI ────────────────────────
     //
     // Butun qator (rasm bilan birga) bo'yaladi — Telegram ham
@@ -1154,10 +1383,12 @@ class _Bubble extends StatelessWidget {
                 constraints: BoxConstraints(
                   maxWidth: MediaQuery.sizeOf(context).width * 0.76,
                 ),
-                padding: EdgeInsets.fromLTRB(
-                    m.isViewable ? 4 : 13, m.isViewable ? 4 : 9,
-                    m.isViewable ? 4 : 13, 7),
-                decoration: BoxDecoration(
+                padding: bare
+                    ? EdgeInsets.zero
+                    : EdgeInsets.fromLTRB(
+                        m.isViewable ? 4 : 13, m.isViewable ? 4 : 9,
+                        m.isViewable ? 4 : 13, 7),
+                decoration: bare ? null : BoxDecoration(
                   color: mine
                       ? AppColors.accent.withValues(alpha: 0.92)
                       : Colors.white.withValues(alpha: 0.09),
@@ -1184,7 +1415,8 @@ class _Bubble extends StatelessWidget {
                             m.isViewable ? 9 : 0, 0),
                         child: Align(
                           alignment: Alignment.centerLeft,
-                          child: Text(
+                          // Maxsus emoji (`[ce:..]`) ham chiziladi.
+                          child: EmojiText(
                             m.body,
                             style: const TextStyle(
                               color: Colors.white,
@@ -1198,9 +1430,20 @@ class _Bubble extends StatelessWidget {
                     //
                     // TALAB (foydalanuvchi): "adminga xabar
                     // yuborganda vaqti ham ko'rsatilsin".
-                    Padding(
-                      padding: EdgeInsets.only(
+                    Container(
+                      margin: EdgeInsets.only(
                           top: 3, right: m.isViewable ? 9 : 0),
+                      // Pufaksiz xabarda vaqt kichik qora "tabletka"da.
+                      padding: bare
+                          ? const EdgeInsets.symmetric(
+                              horizontal: 7, vertical: 2)
+                          : EdgeInsets.zero,
+                      decoration: bare
+                          ? BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.4),
+                              borderRadius: BorderRadius.circular(10),
+                            )
+                          : null,
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
@@ -1256,6 +1499,19 @@ class _Bubble extends StatelessWidget {
         // Tanlash rejimida bosish TANLAYDI, ijro qilmaydi.
         onSelect: selecting ? onTap : null,
       );
+    }
+    final name = TelegramService.fileNameOf(m.mediaUrl);
+    switch (m.mediaType) {
+      case 'sticker':
+        return TgStickerRefView(ref: name, size: 150);
+      case 'gif':
+        return TgGifMessage(fileName: name, maxWidth: 220);
+      case 'round':
+        return _RoundBubble(
+          url: m.mediaUrl,
+          ms: m.mediaMs,
+          onSelect: selecting ? onTap : null,
+        );
     }
     return GestureDetector(
       // Tanlash rejimida rasm/video OCHILMAYDI — bosish tanlaydi.
@@ -1410,12 +1666,16 @@ class _AttachButton extends StatelessWidget {
   final VoidCallback onImage;
   final VoidCallback onVideo;
 
+  /// Yozish maydonining ICHIDA — faqat 📎 belgisi (Telegram'dagidek).
+  final bool compact;
+
   const _AttachButton({
     required this.uploading,
     required this.progress,
     required this.onImage,
     required this.onVideo,
     this.showProgress = true,
+    this.compact = false,
   });
 
   @override
@@ -1488,16 +1748,26 @@ class _AttachButton extends StatelessWidget {
           ),
         ),
       ),
-      child: Container(
-        width: 42,
-        height: 42,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: Colors.white.withValues(alpha: 0.08),
-        ),
-        child: const Icon(Icons.attach_file_rounded,
-            size: 20, color: Colors.white70),
-      ),
+      child: compact
+          ? SizedBox(
+              width: 42,
+              height: 44,
+              child: Transform.rotate(
+                angle: 0.6,
+                child: Icon(Icons.attach_file_rounded,
+                    size: 23, color: Colors.white.withValues(alpha: 0.55)),
+              ),
+            )
+          : Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.white.withValues(alpha: 0.08),
+              ),
+              child: const Icon(Icons.attach_file_rounded,
+                  size: 20, color: Colors.white70),
+            ),
     );
   }
 }
@@ -1748,6 +2018,27 @@ class _UploadingBubble extends StatelessWidget {
     // masofa qoladi. Yuborilgan xabar puffagi ham shu qoidaga
     // amal qiladi (`isViewable`).
     final wide = image || type == 'video';
+    // Dumaloq video — pufaksiz doira, ichida halqa (Telegram'dagidek).
+    if (type == 'round') {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            Container(
+              width: 210,
+              height: 210,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.black.withValues(alpha: 0.45),
+              ),
+              alignment: Alignment.center,
+              child: _Ring(progress: p),
+            ),
+          ],
+        ),
+      );
+    }
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Row(
@@ -2042,4 +2333,205 @@ class _SpinRingPainter extends CustomPainter {
   @override
   bool shouldRepaint(_SpinRingPainter old) =>
       old.angle != angle || old.value != value;
+}
+
+
+// ══════════════════════════════════════════════════════════════
+//  DUMALOQ VIDEO XABAR (Telegram'dagidek)
+// ══════════════════════════════════════════════════════════════
+//
+// Ro'yxatda ovozsiz, takrorlanib o'ynaydi. Bosilsa — boshidan, OVOZ
+// bilan va atrofida progress halqasi; tugagach yana ovozsiz.
+// Fayl chatdagi boshqa videolar kabi shifrlangan diskka keshlanadi
+// (`aru://`, `AruDataSource`).
+
+class _RoundBubble extends StatefulWidget {
+  final String url;
+  final int ms;
+  final VoidCallback? onSelect;
+  const _RoundBubble({required this.url, required this.ms, this.onSelect});
+
+  @override
+  State<_RoundBubble> createState() => _RoundBubbleState();
+}
+
+class _RoundBubbleState extends State<_RoundBubble> {
+  VideoPlayerController? _c;
+  bool _sound = false;
+  bool _failed = false;
+
+  static const double _size = 210;
+
+  @override
+  void initState() {
+    super.initState();
+    _open();
+  }
+
+  Future<void> _open() async {
+    final tg = TelegramService.instance;
+    final aru = defaultTargetPlatform == TargetPlatform.android;
+    final onDisk = aru && RustCore.instance.videoIsComplete(widget.url);
+    final local = onDisk ? null : await tg.prepare(widget.url);
+    if (!mounted) return;
+    if (local != null) tg.hold(this, widget.url);
+    if (!onDisk && local == null) {
+      setState(() => _failed = true);
+      return;
+    }
+    final source = onDisk || aru
+        ? TelegramService.aruUri(widget.url)
+        : Uri.parse(local!);
+    final c = VideoPlayerController.networkUrl(source,
+        videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true));
+    try {
+      await c.initialize();
+      await c.setLooping(true);
+      await c.setVolume(0);
+      await c.play();
+    } catch (_) {
+      await c.dispose();
+      if (mounted) setState(() => _failed = true);
+      return;
+    }
+    if (!mounted) {
+      await c.dispose();
+      return;
+    }
+    c.addListener(_tick);
+    setState(() => _c = c);
+  }
+
+  void _tick() {
+    final c = _c;
+    if (c == null) return;
+    final v = c.value;
+    // Ovozli ijro tugadi — yana ovozsiz, takrorlanib.
+    if (_sound && !v.isPlaying && v.position >= v.duration) {
+      _sound = false;
+      c.setVolume(0);
+      c.setLooping(true);
+      c.seekTo(Duration.zero);
+      c.play();
+    }
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _tap() async {
+    final c = _c;
+    if (c == null) return;
+    if (!_sound) {
+      await VoicePlayer.instance.stop();
+      _sound = true;
+      await c.setLooping(false);
+      await c.seekTo(Duration.zero);
+      await c.setVolume(1);
+      await c.play();
+    } else if (c.value.isPlaying) {
+      await c.pause();
+    } else {
+      await c.play();
+    }
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _c?.removeListener(_tick);
+    _c?.dispose();
+    TelegramService.instance.unhold(this);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = _c;
+    final v = c?.value;
+    final total = v != null && v.duration > Duration.zero
+        ? v.duration
+        : Duration(milliseconds: widget.ms);
+    final pos = v?.position ?? Duration.zero;
+    final left = total - pos;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: widget.onSelect ?? _tap,
+      child: SizedBox(
+        width: _size,
+        height: _size,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            ClipOval(
+              child: Container(
+                width: _size - 8,
+                height: _size - 8,
+                color: Colors.white.withValues(alpha: 0.06),
+                child: c == null
+                    ? Center(
+                        child: _failed
+                            ? Icon(Icons.videocam_off_outlined,
+                                color: Colors.white.withValues(alpha: 0.3))
+                            : const SizedBox(
+                                width: 24,
+                                height: 24,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2, color: Colors.white54),
+                              ),
+                      )
+                    : FittedBox(
+                        fit: BoxFit.cover,
+                        child: SizedBox(
+                          width: v!.size.width,
+                          height: v.size.height,
+                          child: VideoPlayer(c),
+                        ),
+                      ),
+              ),
+            ),
+            // Ovoz bilan o'ynayotganda — atrofida progress.
+            if (_sound && total > Duration.zero)
+              SizedBox(
+                width: _size,
+                height: _size,
+                child: CircularProgressIndicator(
+                  value: (pos.inMilliseconds / total.inMilliseconds)
+                      .clamp(0.0, 1.0),
+                  strokeWidth: 3,
+                  color: Colors.white,
+                  backgroundColor: Colors.transparent,
+                ),
+              ),
+            // Qolgan vaqt va "ovozsiz" belgisi.
+            Positioned(
+              left: 18,
+              bottom: 14,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.45),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      voiceClock(_sound ? left : total),
+                      style: const TextStyle(
+                          color: Colors.white, fontSize: 11.5),
+                    ),
+                    if (!_sound) ...[
+                      const SizedBox(width: 4),
+                      const Icon(Icons.volume_off_rounded,
+                          size: 13, color: Colors.white),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }

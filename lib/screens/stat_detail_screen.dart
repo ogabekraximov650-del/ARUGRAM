@@ -302,7 +302,15 @@ class _CommentRowState extends State<_CommentRow> {
     final photo = '${widget.row['photo_url'] ?? ''}';
     final season = '${widget.row['season_name'] ?? ''}'.trim();
     final anime = '${widget.row['anime_name'] ?? ''}'.trim();
-    final body = '${widget.row['body'] ?? ''}';
+    final rawBody = '${widget.row['body'] ?? ''}';
+    // Stiker/GIF izohida matn yo'q — turi yoziladi.
+    final body = rawBody.isNotEmpty
+        ? rawBody
+        : switch ('${widget.row['media_type'] ?? ''}') {
+            'sticker' => 'Stiker',
+            'gif' => 'GIF',
+            _ => rawBody,
+          };
     final likes = ((widget.row['likes'] as num?) ?? 0).toInt();
     final at = ((widget.row['created_at'] as num?) ?? 0).toInt();
 

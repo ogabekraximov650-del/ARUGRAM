@@ -708,6 +708,10 @@ async fn init_db(env: &Env) -> bool {
             -- `id` si.
             parent_id TEXT DEFAULT '',
             body TEXT,
+            -- Stiker (`stk_...`) yoki GIF (`cmt_<id>_...mp4`); bo'sh — matn.
+            media_file TEXT DEFAULT '',
+            -- 'sticker' yoki 'gif'.
+            media_type TEXT DEFAULT '',
             likes INTEGER DEFAULT 0,
             reply_count INTEGER DEFAULT 0,
             -- O'chirilgan izoh QATOR sifatida qoladi: javoblari
@@ -855,8 +859,47 @@ async fn init_db(env: &Env) -> bool {
         )", vec![]),
     ]).await.is_ok();
 
+    // ── USTUN QO'SHISH (eski bazalar uchun, bir marta) ────────
+    //
+    // Izohlarda stiker va GIF (2026-09-26). `ALTER` ikkinchi marta
+    // xato beradi — shu sabab belgi `app_config` da turadi va
+    // xatolar e'tiborsiz qoldiriladi (ustun allaqachon bor).
+    if ok && config_get(env, "mig_comment_media").await.is_none() {
+        for sql in [
+            "ALTER TABLE comments_db ADD COLUMN media_file TEXT DEFAULT ''",
+            "ALTER TABLE comments_db ADD COLUMN media_type TEXT DEFAULT ''",
+        ] {
+            let _ = turso_exec(env, sql, vec![]).await;
+        }
+        config_put(env, "mig_comment_media", "1").await;
+    }
 
     ok
+}
+
+/// Stiker havolasi: `stk_<to'plam id>_<to'plam access_hash>_<hujjat id>`
+/// (uchalasi ham u64 ning hex ko'rinishi). Ko'ruvchi ilova stikerni
+/// o'z Telegram hisobi bilan shu uchlik bo'yicha oladi
+/// (`messages.getStickerSet`) — bazaga fayl yozilmaydi.
+fn sticker_ref_ok(s: &str) -> bool {
+    let parts: Vec<&str> = s.split('_').collect();
+    parts.len() == 4
+        && parts[0] == "stk"
+        && parts[1..].iter().all(|p| {
+            !p.is_empty() && p.len() <= 16 && p.chars().all(|c| c.is_ascii_hexdigit())
+        })
+}
+
+/// Izoh yoki xabardagi stiker/GIF to'g'rimi. [own] — foydalanuvchining
+/// o'z fayllari prefiksi (`cmt_<id>_` / `chat_<id>_`). Qaytadi: turi
+/// (`sticker` / `gif`) yoki xato matni.
+fn media_kind(kind: &str, file: &str, own: &str, admin: bool) -> std::result::Result<&'static str, &'static str> {
+    match kind {
+        "sticker" if sticker_ref_ok(file) => Ok("sticker"),
+        "gif" if tg_safe_name(file) && (admin || file.starts_with(own)) => Ok("gif"),
+        "sticker" | "gif" => Err("Fayl yaroqsiz"),
+        _ => Err("Noma'lum tur"),
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -5711,6 +5754,8 @@ fn comment_public(origin: &str, r: &Value) -> Value {
         "photo_url": photo,
         // O'chirilgan izohning matni UMUMAN yuborilmaydi.
         "body": if deleted { "" } else { r["body"].as_str().unwrap_or("") },
+        "media_file": if deleted { "" } else { r["media_file"].as_str().unwrap_or("") },
+        "media_type": if deleted { "" } else { r["media_type"].as_str().unwrap_or("") },
         "likes": r["likes"].as_i64().unwrap_or(0),
         "reply_count": r["reply_count"].as_i64().unwrap_or(0),
         "liked": r["liked"].as_i64().unwrap_or(0) != 0,
@@ -5724,7 +5769,7 @@ fn comment_public(origin: &str, r: &Value) -> Value {
 /// `parent` bo'sh bo'lsa — bosh izohlar, aks holda o'sha izohning
 /// javoblari. `me` — "men layk bosganmi" belgisi uchun.
 const COMMENT_SELECT: &str =
-    "SELECT c.id, c.parent_id, c.user_id, c.body, c.likes,
+    "SELECT c.id, c.parent_id, c.user_id, c.body, c.media_file, c.media_type, c.likes,
             c.reply_count, c.deleted, c.created_at,
             u.first_name AS first_name, u.username AS username,
             u.avatar_file AS avatar_file,
@@ -5833,7 +5878,22 @@ async fn comments_add(mut req: Request, env: &Env, origin: &str) -> Result<Respo
     let sid = b["season_id"].as_i64().unwrap_or(0);
     let body = b["body"].as_str().unwrap_or("").trim().to_string();
 
-    if body.is_empty() {
+    // ── STIKER / GIF (Telegram'dagidek; fayl, ovoz — YO'Q) ────
+    let media_file = b["media_file"].as_str().unwrap_or("").trim().to_string();
+    let media_type = if media_file.is_empty() {
+        ""
+    } else {
+        match media_kind(b["media_type"].as_str().unwrap_or(""), &media_file,
+                         &format!("cmt_{me}_"), is_admin(&u)) {
+            Ok(k) => k,
+            Err(e) => return json_resp(&json!({"error": e}), 400),
+        }
+    };
+    let media_file = if media_type.is_empty() { String::new() } else { media_file };
+    // Stiker/GIF — alohida xabar (matnsiz), Telegram'dagidek.
+    let body = if media_type.is_empty() { body } else { String::new() };
+
+    if body.is_empty() && media_type.is_empty() {
         return json_resp(&json!({"error": "Izoh bo'sh"}), 400);
     }
     // Uzunlik BELGI bo'yicha cheklanadi (bayt emas): o'zbekcha
@@ -5871,12 +5931,13 @@ async fn comments_add(mut req: Request, env: &Env, origin: &str) -> Result<Respo
     let now = now_ms();
     turso_exec(env,
         "INSERT INTO comments_db
-            (id,anime_id,season_id,user_id,parent_id,body,
+            (id,anime_id,season_id,user_id,parent_id,body,media_file,media_type,
              likes,reply_count,deleted,created_at)
-         VALUES (?,?,?,?,?,?,0,0,0,?)",
+         VALUES (?,?,?,?,?,?,?,?,0,0,0,?)",
         vec![
             TursoArg::text(&id), TursoArg::int(aid), TursoArg::int(sid),
             TursoArg::int(me), TursoArg::text(&parent), TursoArg::text(&body),
+            TursoArg::text(&media_file), TursoArg::text(media_type),
             TursoArg::int(now),
         ]).await?;
 
@@ -5901,6 +5962,8 @@ async fn comments_add(mut req: Request, env: &Env, origin: &str) -> Result<Respo
         "username": u["username"].as_str().unwrap_or(""),
         "photo_url": photo,
         "body": body,
+        "media_file": media_file,
+        "media_type": media_type,
         "likes": 0,
         "reply_count": 0,
         "liked": false,
@@ -6347,15 +6410,27 @@ async fn chat_send(mut req: Request, env: &Env, origin: &str) -> Result<Response
     // Faqat O'Z faylini biriktira oladi (admin — istalganini). Aks
     // holda boshqa odamning `chat_` faylini o'z suhbatiga "ilib",
     // `/api/tg/deliver` dagi suhbat tekshiruvidan o'tib olardi.
-    if !media_file.is_empty() && !is_admin(&u) && !media_file.starts_with(&format!("chat_{me}_")) {
+    let want_type = b["media_type"].as_str().unwrap_or("");
+    // Stiker — Telegram'dagi to'plamga havola, fayl emas: egalik
+    // tekshiruvi kerak emas, faqat ko'rinishi.
+    if want_type == "sticker" {
+        if !sticker_ref_ok(&media_file) {
+            return json_resp(&json!({"error": "Stiker yaroqsiz"}), 400);
+        }
+    } else if !media_file.is_empty() && !is_admin(&u) && !media_file.starts_with(&format!("chat_{me}_")) {
         return json_resp(&json!({"error": "Fayl sizniki emas"}), 403);
     }
-    let media_type = match b["media_type"].as_str().unwrap_or("") {
+    let media_type = match want_type {
         "image" => "image",
         "video" => "video",
         // TALAB (foydalanuvchi): "chatda ovozli xabar yuborish
         // tizimini ham qo'sh".
         "voice" => "voice",
+        // Telegram'dagidek stiker va GIF.
+        "sticker" => "sticker",
+        "gif" => "gif",
+        // Dumaloq video xabar (Telegram'dagidek).
+        "round" => "round",
         _ => "",
     };
     // Ovozli xabarning uzunligi — ilova yozib olganda o'lchaydi.
@@ -6411,6 +6486,12 @@ async fn chat_send(mut req: Request, env: &Env, origin: &str) -> Result<Response
         "Video".to_string()
     } else if media_type == "voice" {
         "Ovozli xabar".to_string()
+    } else if media_type == "sticker" {
+        "Stiker".to_string()
+    } else if media_type == "gif" {
+        "GIF".to_string()
+    } else if media_type == "round" {
+        "Video xabar".to_string()
     } else {
         "Rasm".to_string()
     };
@@ -7645,6 +7726,7 @@ async fn user_stats_list(
         ),
         "comments" => (
             "SELECT c.id, c.parent_id, c.anime_id, c.season_id, c.body,
+                    c.media_type,
                     c.likes, c.reply_count, c.created_at,
                     s.nomi AS season_name, s.photo_url AS photo_url,
                     a.name AS anime_name
@@ -9478,7 +9560,10 @@ async fn tg_user_media(env: &Env, msg: &Value) {
         let Some(uid) = res.ok().and_then(|r| first_row(&r)).and_then(|r| r["id"].as_i64()) else {
             return;
         };
-        let own = name.starts_with(&format!("avatar_{uid}_")) || name.starts_with(&format!("chat_{uid}_"));
+        let own = name.starts_with(&format!("avatar_{uid}_"))
+            || name.starts_with(&format!("chat_{uid}_"))
+            // Izohdagi GIF (Telegram'dagi tayyor fayl, qayta yuklanmaydi).
+            || name.starts_with(&format!("cmt_{uid}_"));
         if !own {
             return;
         }

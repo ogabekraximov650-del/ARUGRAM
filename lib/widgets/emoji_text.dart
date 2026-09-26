@@ -56,6 +56,8 @@
 import 'package:characters/characters.dart';
 import 'package:flutter/material.dart';
 
+import 'tg_media_view.dart';
+
 /// Matnni emoji bo'laklarini TO'LIQ RANGDA qoldirib chizadi.
 ///
 /// `style` — harflar uchun uslub (alpha bilan). Emoji o'sha
@@ -81,6 +83,19 @@ class EmojiText extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Telegram'ning maxsus emoji belgilari (`[ce:id:emoji]`) — rasm
+    // bo'lib chiziladi (`tg_media_view.dart`).
+    final custom = customEmojiSpans(
+        text, style, (part) => emojiSpans(part, style) ?? [TextSpan(text: part)]);
+    if (custom != null) {
+      return Text.rich(
+        TextSpan(children: custom),
+        style: style,
+        maxLines: maxLines,
+        overflow: overflow,
+        textAlign: textAlign,
+      );
+    }
     final spans = emojiSpans(text, style);
     // Emoji umuman yo'q — oddiy `Text` (eng arzon yo'l).
     if (spans == null) {
