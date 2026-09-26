@@ -3372,3 +3372,18 @@ zaxira yo'llar (`thumbnailData`, birinchi kadr).
   "Keshni tozalash" qizil 12% fon bilan).
 * "Kesh tozalanmoqda" pardasi to'liq ekran enida, balandligi 350
   (`ClearingCacheView`); tugagach pastda "... kesh tozalandi" xabari.
+
+## GIF yuklanmasligi, stiker "2x", panel stikerlari, GIF har 10 s
+
+* GIF (chat va izohlar): buzuq/yarim yuklangan fayl keshda qolib GIF
+  hech qachon ochilmasdi — endi o'chiriladi va qayta yuklanadi; yuklash
+  90 s dan osilsa qayta; 10 martagacha urinish, keyin ↻ (bosilsa qayta).
+  Bir vaqtda ko'pi 6 ta pleyer (dekoderlar cheklangan). Bot chatini
+  tozalash 40 s dan oshmaydi va fayl so'rovlari uni ko'pi 8 s kutadi
+  (ilgari osilib qolsa hamma GIF/rasm "aylanib" qolardi).
+* GIF'lar ko'ringach 1 marta o'ynaydi, keyin har 10 soniyada bir
+  (`_PlayEvery`) — panelda ham, chatda ham.
+* Stiker "qotib / 2x": kadr ulgurmaganda vaqt bo'yicha sakrash o'rniga
+  ketma-ket keyingi kadr chiziladi (soat moslanadi); bir vaqtda 1..4
+  kadr chiziladi.
+* Stikerlar panelida stikerlar animatsiyalanmaydi (faqat birinchi kadr).

@@ -1795,10 +1795,14 @@ class _StickerPageState extends State<_StickerPage>
     });
   }
 
+  // TALAB (foydalanuvchi): "stiker oynasi ochilganda stikerlar
+  // animatsiya qilinmasin" — panelda faqat birinchi kadr (animatsiya
+  // yuborilgan stikerda, chatda o'ynaydi).
   Widget _cell(TgDoc d, double cell) => _Press(
         onTap: () => widget.onSticker(d),
         child: Center(
-            child: TgStickerView(doc: d, size: cell * 0.86, still: true)),
+            child: TgStickerView(
+                doc: d, size: cell * 0.86, still: true, frozen: true)),
       );
 
   @override

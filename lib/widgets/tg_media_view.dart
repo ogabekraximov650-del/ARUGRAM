@@ -199,7 +199,7 @@ int _cacheUsed = 0;
 //   * bitta umumiy soat; hamma animatsiya 30 kadr/s dan oshmaydi
 //     (Telegram `limitFps`);
 //   * bir vaqtda chiziladigan kadrlar soni CHEKLANGAN (yadrolar
-//     soniga qarab 1..3) — navbat bilan, avval hali hech narsa
+//     soniga qarab 1..4) — navbat bilan, avval hali hech narsa
 //     ko'rsatmayotganlari;
 //   * chizilgan kadr xotirada qoladi — birinchi aylanishdan keyin
 //     animatsiya protsessorni deyarli ishlatmaydi (faqat tayyor
@@ -226,7 +226,7 @@ class _AnimClock {
   DateTime lastScroll = DateTime.fromMillisecondsSinceEpoch(0);
 
   static final int _maxInflight =
-      (Platform.numberOfProcessors ~/ 3).clamp(1, 3);
+      (Platform.numberOfProcessors ~/ 2).clamp(1, 4);
 
   bool get scrolling =>
       DateTime.now().difference(lastScroll).inMilliseconds < 180;
@@ -386,6 +386,7 @@ class _TgAnimViewState extends State<TgAnimView> {
     _AnimClock.instance.remove(this);
     _want = -1;
     _base = null;
+    _shownN = -1;
     if (_handle > 0) NativePool.render.animClose(_handle);
     _handle = 0;
     _dropCache();
@@ -427,6 +428,7 @@ class _TgAnimViewState extends State<TgAnimView> {
     }
     if (_image == null || _shown < 0) {
       _want = 0;
+      _wantN = 0;
       _AnimClock.instance.want(this, first: _image == null);
     }
     if (_frames > 1 && !widget.frozen && _enabled) {
@@ -434,28 +436,50 @@ class _TgAnimViewState extends State<TgAnimView> {
     }
   }
 
+  /// Ko'rsatilgan kadrning tartib raqami (vaqt bo'yicha).
+  int _shownN = -1;
+  int _wantN = -1;
+
+  int _frameOf(int n) => ((n * (_fps / _showFps)).floor()) % _frames;
+
   void _tick(Duration t) {
     if (_handle <= 0) return;
     final base = _base ??= t;
     final fps = _showFps;
-    final step = _fps / fps;
-    final n = ((t - base).inMicroseconds / 1e6 * fps).floor();
-    final f = ((n * step).floor()) % _frames;
+    var n = ((t - base).inMicroseconds / 1e6 * fps).floor();
+    var f = _frameOf(n);
     if (f == _shown || f == _want) return;
     final cached = _cache?[f];
     if (cached != null) {
-      _show(cached.clone(), f);
+      _show(cached.clone(), f, n);
       return;
     }
-    // Oldingi kadr hali chizilmoqda — bu kadr tashlab o'tiladi.
+    // Oldingi kadr hali chizilmoqda — kutiladi.
     if (_want >= 0) return;
+    // TOPILGAN XATO ("stiker qotib yoki 2x tezlikda o'ynayapti"): kadr
+    // chizish ulgurmaganda vaqt bo'yicha oldinga SAKRALARDI — kadrlar
+    // tashlab ketilib, stiker tez va uzuq-uzuq ko'rinardi. Endi
+    // KETMA-KET keyingi kadr chiziladi, soat esa unga moslanadi:
+    // kuchsiz telefonda sal sekinroq, lekin silliq.
+    if (_shownN >= 0 && n > _shownN + 1) {
+      n = _shownN + 1;
+      _base = t - Duration(microseconds: (n * 1e6 / fps).round());
+      f = _frameOf(n);
+      final c2 = _cache?[f];
+      if (c2 != null) {
+        _show(c2.clone(), f, n);
+        return;
+      }
+    }
     _want = f;
+    _wantN = n;
     _AnimClock.instance.want(this);
   }
 
   /// Soat navbati kelganda chaqiradi.
   Future<void> _renderWanted() async {
     final f = _want;
+    final wn = _wantN;
     final h = _handle;
     if (f < 0 || h <= 0 || _dead) {
       _want = -1;
@@ -486,11 +510,12 @@ class _TgAnimViewState extends State<TgAnimView> {
     if (cache != null && h == _handle && !cache.containsKey(f)) {
       cache[f] = img.clone();
     }
-    _show(img, f);
+    _show(img, f, wn);
   }
 
-  void _show(ui.Image img, int f) {
+  void _show(ui.Image img, int f, [int n = -1]) {
     _shown = f;
+    _shownN = n;
     final old = _img.value;
     _img.value = img;
     old?.dispose();
@@ -727,7 +752,7 @@ class _TgGifThumbState extends State<TgGifThumb> {
         videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true));
     try {
       await c.initialize();
-      await c.setLooping(true);
+      await c.setLooping(false);
       await c.setVolume(0);
       await c.play();
     } catch (_) {
@@ -739,12 +764,19 @@ class _TgGifThumbState extends State<TgGifThumb> {
       await c.dispose();
       return;
     }
-    setState(() => _c = c);
+    setState(() {
+      _c = c;
+      _every = _PlayEvery(c);
+    });
   }
+
+  _PlayEvery? _every;
 
   void _stop() {
     final c = _c;
     _c = null;
+    _every?.dispose();
+    _every = null;
     c?.dispose();
     _freeSlot();
     if (mounted) setState(() {});
@@ -754,6 +786,7 @@ class _TgGifThumbState extends State<TgGifThumb> {
   void dispose() {
     _dead = true;
     _tm?.removeListener(_onTm);
+    _every?.dispose();
     _c?.dispose();
     _c = null;
     _freeSlot();
@@ -811,6 +844,25 @@ class TgGifMessage extends StatefulWidget {
 
 final Map<String, Future<File?>> _chatFiles = {};
 
+/// Xabardagi GIF'lar: bir vaqtda tirik pleyerlar soni.
+const _msgGifMax = 6;
+int _msgGifLive = 0;
+final List<Completer<void>> _msgGifQueue = [];
+
+Future<void> _msgGifAcquire() async {
+  while (_msgGifLive >= _msgGifMax) {
+    final c = Completer<void>();
+    _msgGifQueue.add(c);
+    await c.future;
+  }
+  _msgGifLive++;
+}
+
+void _msgGifRelease() {
+  _msgGifLive--;
+  if (_msgGifQueue.isNotEmpty) _msgGifQueue.removeAt(0).complete();
+}
+
 /// Kanaldagi kichik fayl (GIF, dumaloq video) — bir marta olinadi va
 /// vaqtinchalik papkada saqlanadi.
 Future<File?> tgChatFile(String name) async {
@@ -860,51 +912,98 @@ class _TgGifMessageState extends State<TgGifMessage> {
     super.didUpdateWidget(old);
     // Ro'yxatdagi katak boshqa xabarga qayta ishlatildi.
     if (old.fileName != widget.fileName) {
-      _ctrl?.dispose();
-      _ctrl = null;
+      _dropCtrl();
       _failed = false;
       _tries = 0;
       _open();
     }
   }
 
-  Future<void> _open() async {
-    final name = widget.fileName;
-    final f = await tgChatFile(name);
-    if (!mounted || name != widget.fileName) return;
-    if (f == null) {
-      // Yangi yuborilgan GIF'ni bot kanalga hali ko'chirmagan bo'lishi
-      // mumkin — bir necha marta qayta uriniladi.
-      if (_tries++ < 6) {
-        await Future<void>.delayed(Duration(seconds: 2 + _tries * 2));
-        if (mounted && name == widget.fileName) return _open();
-        return;
-      }
-      setState(() => _failed = true);
+  _PlayEvery? _every;
+
+  Future<void> _retry(String name) async {
+    // Yangi yuborilgan GIF'ni bot kanalga hali ko'chirmagan bo'lishi
+    // yoki tarmoq uzilgan bo'lishi mumkin — qayta uriniladi.
+    if (_tries++ < 10) {
+      await Future<void>.delayed(
+          Duration(seconds: (2 + _tries * 3).clamp(2, 30)));
+      if (mounted && name == widget.fileName) return _open();
       return;
     }
+    if (mounted) setState(() => _failed = true);
+  }
+
+  Future<void> _open() async {
+    final name = widget.fileName;
+    File? f;
+    try {
+      // Osilib qolgan yuklash katakni abadiy aylantirib qo'ymasin.
+      f = await tgChatFile(name).timeout(const Duration(seconds: 90));
+    } catch (_) {
+      _chatFiles.remove(name);
+    }
+    if (!mounted || name != widget.fileName) return;
+    if (f == null) return _retry(name);
+    // Telefon video dekoderlari soni cheklangan: ro'yxatdagi ko'p GIF
+    // bir vaqtda ochilsa ba'zilari xato berib "ochilmay" qolardi.
+    // Endi bir vaqtda ko'pi bilan [_msgGifMax] tasi tirik turadi
+    // (ro'yxatdan chiqqani joyini bo'shatadi).
+    await _msgGifAcquire();
+    if (!mounted || name != widget.fileName) {
+      _msgGifRelease();
+      return;
+    }
+    _holdsSlot = true;
     final c = VideoPlayerController.file(f,
         videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true));
     try {
       await c.initialize();
-      await c.setLooping(true);
+      await c.setLooping(false);
       await c.setVolume(0);
       await c.play();
     } catch (_) {
       await c.dispose();
-      if (mounted) setState(() => _failed = true);
+      _holdsSlot = false;
+      _msgGifRelease();
+      // TOPILGAN XATO: yarim yuklangan (buzuq) fayl keshda qolib, GIF
+      // hech qachon ochilmasdi — endi o'chiriladi va qayta yuklanadi.
+      _chatFiles.remove(name);
+      try {
+        await f.delete();
+      } catch (_) {}
+      if (mounted && name == widget.fileName) return _retry(name);
       return;
     }
-    if (!mounted) {
+    if (!mounted || name != widget.fileName) {
       await c.dispose();
+      if (_holdsSlot) {
+        _holdsSlot = false;
+        _msgGifRelease();
+      }
       return;
     }
-    setState(() => _ctrl = c);
+    setState(() {
+      _ctrl = c;
+      _every = _PlayEvery(c);
+    });
+  }
+
+  bool _holdsSlot = false;
+
+  void _dropCtrl() {
+    _every?.dispose();
+    _every = null;
+    _ctrl?.dispose();
+    _ctrl = null;
+    if (_holdsSlot) {
+      _holdsSlot = false;
+      _msgGifRelease();
+    }
   }
 
   @override
   void dispose() {
-    _ctrl?.dispose();
+    _dropCtrl();
     super.dispose();
   }
 
@@ -924,8 +1023,20 @@ class _TgGifMessageState extends State<TgGifMessage> {
                 color: Colors.white.withValues(alpha: 0.06),
                 alignment: Alignment.center,
                 child: _failed
-                    ? Icon(Icons.gif_box_outlined,
-                        color: Colors.white.withValues(alpha: 0.3), size: 36)
+                    // Bosilsa qaytadan yuklanadi.
+                    ? GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () {
+                          setState(() {
+                            _failed = false;
+                            _tries = 0;
+                          });
+                          _open();
+                        },
+                        child: Icon(Icons.refresh_rounded,
+                            color: Colors.white.withValues(alpha: 0.45),
+                            size: 34),
+                      )
                     : const SizedBox(
                         width: 22,
                         height: 22,
@@ -936,5 +1047,44 @@ class _TgGifMessageState extends State<TgGifMessage> {
             : VideoPlayer(c),
       ),
     );
+  }
+}
+
+
+/// TALAB (foydalanuvchi): "GIF'lar ekranda ko'ringach 1 marta
+/// animatsiyalansin, keyin har 10 soniyada bir". Oxiriga yetgach
+/// to'xtaydi (oxirgi kadr turadi) va 10 soniyadan keyin boshidan
+/// yana bir marta o'ynaydi — dekoder doim ishlab turmaydi.
+class _PlayEvery {
+  final VideoPlayerController c;
+  Timer? _t;
+  bool _dead = false;
+
+  _PlayEvery(this.c) {
+    c.addListener(_on);
+  }
+
+  void _on() {
+    final v = c.value;
+    if (_dead || _t != null || !v.isInitialized || v.isPlaying) return;
+    final d = v.duration;
+    if (d <= Duration.zero ||
+        v.position < d - const Duration(milliseconds: 120)) {
+      return;
+    }
+    _t = Timer(const Duration(seconds: 10), () async {
+      if (_dead) return;
+      try {
+        await c.seekTo(Duration.zero);
+        await c.play();
+      } catch (_) {}
+      _t = null;
+    });
+  }
+
+  void dispose() {
+    _dead = true;
+    _t?.cancel();
+    c.removeListener(_on);
   }
 }

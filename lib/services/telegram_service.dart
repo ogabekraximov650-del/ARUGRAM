@@ -711,7 +711,9 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
     final owner = Object();
     try {
       final clearing = _clearing;
-      if (clearing != null) await clearing;
+      if (clearing != null) {
+        await clearing.timeout(const Duration(seconds: 8), onTimeout: () {});
+      }
       final s = AuthService.instance.sessionToken;
       if (s == null) throw 'kirilmagan';
       final names = batch.keys.toList();
@@ -1067,7 +1069,9 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
     // kutiladi, aks holda yangi nusxani ham o'chirib yuborardi.
     // Navbatdagi tozalash nusxa qo'yib yuborilgach (`unhold`) bo'ladi.
     final clearing = _clearing;
-    if (clearing != null) await clearing;
+    if (clearing != null) {
+      await clearing.timeout(const Duration(seconds: 8), onTimeout: () {});
+    }
     final s = AuthService.instance.sessionToken;
     if (s == null) return null;
     _delivering++;

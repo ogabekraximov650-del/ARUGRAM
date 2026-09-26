@@ -2145,7 +2145,9 @@ pub extern "C" fn rust_tg_clear_bot_chat() -> *mut c_char {
         if !t.authorized.load(Ordering::SeqCst) {
             return Ok(json!({"ok": true}).to_string());
         }
-        t.rt.block_on(async {
+        // Ulanish osilib qolsa tozalash (va uni kutayotgan fayl
+        // so'rovlari) abadiy turib qolmasin — ko'pi 40 soniya.
+        run_tmo(t, 40, async {
             let (id, hash) = bot_peer(t, &client).await?;
             // Katta tarix bir necha qadamda o'chadi (`offset > 0`).
             //
