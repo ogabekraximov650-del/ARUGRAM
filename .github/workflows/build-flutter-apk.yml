@@ -423,6 +423,51 @@ jobs:
           fi
           echo "✅ Gradle sozlamalari yangilandi"
 
+      # ── PLAGINLAR HAM compileSdk 36 BILAN ─────────────────────
+      #
+      # TOPILGAN XATO (APK yig'ilmadi): `file_picker` o'z
+      # build.gradle'ida compileSdk 34 ni qotirib qo'ygan, yangi
+      # `flutter_plugin_android_lifecycle` esa unga bog'liq
+      # kutubxonalardan kamida 36 ni talab qiladi
+      # (`:file_picker:checkReleaseAarMetadata`). Boshqa plaginlarda
+      # ham shu chiqishi mumkin, shu sabab HAMMA Android kutubxona
+      # loyihasi 36 dan past bo'lsa 36 ga ko'tariladi (targetSdk va
+      # minSdk'ga tegilmaydi). Blok fayl BOSHIGA yoziladi —
+      # `evaluationDependsOn` dan oldin, loyihalar hali baholanmagan
+      # paytda.
+      - name: Plaginlar uchun compileSdk 36
+        run: |
+          if [ -f android/build.gradle.kts ]; then
+            cat > /tmp/sdk36.kts <<'KTS'
+          subprojects {
+              afterEvaluate {
+                  if (plugins.hasPlugin("com.android.library")) {
+                      extensions.findByName("android")?.withGroovyBuilder {
+                          "compileSdkVersion"(36)
+                      }
+                  }
+              }
+          }
+
+          KTS
+            cat /tmp/sdk36.kts android/build.gradle.kts > /tmp/root.kts
+            mv /tmp/root.kts android/build.gradle.kts
+          elif [ -f android/build.gradle ]; then
+            cat > /tmp/sdk36.gradle <<'GRD'
+          subprojects {
+              afterEvaluate { p ->
+                  if (p.plugins.hasPlugin('com.android.library')) {
+                      p.android { compileSdkVersion 36 }
+                  }
+              }
+          }
+
+          GRD
+            cat /tmp/sdk36.gradle android/build.gradle > /tmp/root.gradle
+            mv /tmp/root.gradle android/build.gradle
+          fi
+          head -12 android/build.gradle* 
+
       - name: Get dependencies
         run: flutter pub get
 
