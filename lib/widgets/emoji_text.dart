@@ -125,7 +125,7 @@ List<TextSpan>? emojiSpans(String text, TextStyle style) {
 
   // Emoji uchun uslub: alpha OLIB TASHLANADI, qolgani o'sha-o'sha
   // (o'lcham, qalinlik, satr balandligi).
-  final emojiStyle = style.copyWith(
+  final emojiStyle = tgEmojiStyle(style).copyWith(
     color: (style.color ?? Colors.white).withValues(alpha: 1),
   );
 
@@ -155,6 +155,57 @@ List<TextSpan>? emojiSpans(String text, TextStyle style) {
   return sawEmoji ? out : null;
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  TELEGRAM EMOJILARI (telefonniki EMAS)
+// ═══════════════════════════════════════════════════════════════
+//
+// TALAB (foydalanuvchi): "oddiy emojilarda Telegram emojilari
+// ko'rsatilsin ... telefon emojilari ishlatilmasin".
+//
+// Telegram oddiy emojini serverdan OLMAYDI — rasmlar ilovaning
+// o'zida (rasmiy Telegram: `emoji.pack`, Cherrygram:
+// `assets/emoji/*.png`). O'sha rasmlardan `fonts/TgEmoji.ttf`
+// (rangli CBDT shrift, `tool/tg_emoji/`) yig'ilgan. Shrift:
+//   * butun ilovada zaxira shrift (`main.dart` ->
+//     `fontFamilyFallback`) — Roboto'da yo'q har bir emoji shundan;
+//   * emoji bo'laklarida ASOSIY shrift ([tgEmojiStyle]) — `♥️`, `☺️`
+//     kabi Roboto'da oddiy belgisi bor emojilar ham rasm bo'lib
+//     chiqsin (yozish maydonida ham — `TgTextController`).
+
+/// Telegram emoji shriftining nomi (`pubspec.yaml`).
+const String kTgEmojiFont = 'TgEmoji';
+
+/// Emoji bo'lagi uchun uslub: Telegram shrifti birinchi.
+TextStyle tgEmojiStyle(TextStyle style) =>
+    style.copyWith(fontFamily: kTgEmojiFont);
+
+/// Yozish maydoni uchun: emoji bo'laklari Telegram shriftida, qolgani
+/// o'zgarmaydi. Emoji bo'lmasa `null`.
+List<TextSpan>? tgEmojiInputSpans(String text, TextStyle? style) {
+  if (text.isEmpty) return null;
+  final emoji = tgEmojiStyle(style ?? const TextStyle());
+  final out = <TextSpan>[];
+  final buf = StringBuffer();
+  bool? bufIsEmoji;
+  var saw = false;
+  void flush() {
+    if (buf.isEmpty) return;
+    out.add(TextSpan(
+        text: buf.toString(), style: bufIsEmoji == true ? emoji : null));
+    buf.clear();
+  }
+
+  for (final ch in text.characters) {
+    final isEmoji = _isEmojiCluster(ch);
+    if (isEmoji) saw = true;
+    if (bufIsEmoji != null && bufIsEmoji != isEmoji) flush();
+    bufIsEmoji = isEmoji;
+    buf.write(ch);
+  }
+  flush();
+  return saw ? out : null;
+}
+
 /// Ko'rinadigan bitta belgi emojimi.
 ///
 /// ── QOIDA ATAYLAB EHTIYOTKOR ────────────────────────────────
@@ -175,6 +226,9 @@ bool _isEmojiCluster(String cluster) {
 
   // 2-qoida: emoji ko'rinishi majburlangan.
   if (runes.contains(0xFE0F)) return true;
+  // Raqamli tugma (`1⃣`, `#⃣`) — Telegram paneli ularni U+FE0F siz
+  // qo'yadi (`Emoji.fixEmoji`).
+  if (runes.contains(0x20E3)) return true;
 
   final c = runes.first;
 

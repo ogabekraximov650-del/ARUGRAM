@@ -120,6 +120,15 @@ dev_dependencies:
 flutter:
   uses-material-design: true
 
+  # Telegram emojilari (telefonniki EMAS) — rangli CBDT shrift.
+  # Rasmlar Telegram/Cherrygram ilovasidagi `assets/emoji` dan,
+  # yig'ish: `tool/tg_emoji/README.md`. Ishlatilishi:
+  # `lib/widgets/emoji_text.dart` (`kTgEmojiFont`).
+  fonts:
+    - family: TgEmoji
+      fonts:
+        - asset: fonts/TgEmoji.ttf
+
   assets:
     # ARU logotipi (oq harflar, shaffof fon) — ilova ichida
     # ishlatiladi: ochilish ekrani va bosh sahifa sarlavhasi.

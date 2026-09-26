@@ -3247,3 +3247,16 @@ internet qaytganda ilova o'z hisobi bilan chat tarixini tozalasin".
   tozalanmoqda" pardasi, bo'sh keshda yashil halqa "Xotira tozalandi".
   "Keshni avtomatik o'chirish" va "eng katta hajm" bo'limlari YO'Q —
   ularga mos ish ilovada hali yo'q.
+
+## Emojilar — Telegram'niki (telefonniki EMAS)
+
+* Oddiy emoji Telegram serverida yo'q — rasmlar ilovaning o'zida
+  (rasmiy Telegram `emoji.pack`, Cherrygram `assets/emoji`). Ular
+  `fonts/TgEmoji.ttf` (rangli CBDT, 3606 ta, ~7,4 MB) ga yig'ilgan —
+  qanday: `tool/tg_emoji/README.md`.
+* Butun ilovada zaxira shrift (`main.dart` -> `fontFamilyFallback`);
+  emoji bo'laklarida asosiy shrift (`tgEmojiStyle`, `EmojiText`,
+  `TgTextController.buildTextSpan` — yozish maydonida ham), panel
+  kataklari ham shu shriftda.
+* Panel ro'yxati Telegram tartibida (`EmojiData.dataColored`,
+  `fixEmoji` bilan) — `tg_emoji_data.dart` avtomatik yasalgan.

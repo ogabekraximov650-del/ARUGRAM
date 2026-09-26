@@ -21,6 +21,7 @@ import 'services/video_cache_server.dart';
 import 'services/watch_history.dart';
 import 'services/telegram_service.dart';
 import 'widgets/auth_gate.dart';
+import 'widgets/emoji_text.dart';
 
 // ── HAMMA SO'ROV SANALADI ───────────────────────────────────────
 //
@@ -235,6 +236,8 @@ class FulutterApp extends StatelessWidget {
       // (`lib/widgets/glass.dart`).
       theme: ThemeData(
         brightness: Brightness.dark,
+        // Emoji — telefonniki emas, Telegram'niki (`emoji_text.dart`).
+        fontFamilyFallback: const [kTgEmojiFont],
         scaffoldBackgroundColor: Colors.transparent,
         colorScheme: ColorScheme.fromSeed(
           seedColor: AppColors.accent,

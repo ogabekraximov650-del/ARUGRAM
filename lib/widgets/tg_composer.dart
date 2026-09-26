@@ -30,6 +30,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../services/tg_media.dart';
+import 'emoji_text.dart';
 import 'glass.dart';
 import 'tg_emoji_data.dart';
 import 'tg_media_view.dart';
@@ -125,15 +126,22 @@ class TgTextController extends TextEditingController {
     required bool withComposing,
   }) {
     if (!text.codeUnits.any(_isCustom)) {
-      return super.buildTextSpan(
-          context: context, style: style, withComposing: withComposing);
+      // Emoji — Telegram shriftida (`tgEmojiInputSpans`). Emoji
+      // bo'lmasa odatdagi yo'l (klaviaturaning tagiga chizig'i bilan).
+      final spans = tgEmojiInputSpans(text, style);
+      if (spans == null) {
+        return super.buildTextSpan(
+            context: context, style: style, withComposing: withComposing);
+      }
+      return TextSpan(style: style, children: spans);
     }
     final size = (style?.fontSize ?? 14) * 1.3;
     final children = <InlineSpan>[];
     final buf = StringBuffer();
     void flush() {
       if (buf.isEmpty) return;
-      children.add(TextSpan(text: buf.toString()));
+      final t = buf.toString();
+      children.addAll(tgEmojiInputSpans(t, style) ?? [TextSpan(text: t)]);
       buf.clear();
     }
 
@@ -1317,7 +1325,9 @@ class _EmojiCell extends StatelessWidget {
       onTap: onTap,
       scale: 0.8,
       child: Center(
-        child: Text(e, style: TextStyle(fontSize: cell * 0.6, height: 1.1)),
+        child: Text(e,
+            style: TextStyle(
+                fontFamily: kTgEmojiFont, fontSize: cell * 0.6, height: 1.1)),
       ),
     );
   }
