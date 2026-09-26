@@ -3195,3 +3195,16 @@ internet qaytganda ilova o'z hisobi bilan chat tarixini tozalasin".
   MIT, sof Rust) `rust/third_party/tlottie` ga nusxalandi (`SOURCE.md`).
   Har bir stiker o'z `CPURenderer` iga ega, global holat yo'q.
 * rlottie va C++ (libc++_static) bog'lanishi olib tashlandi; libvpx (webm) qoldi.
+
+## Stiker/emoji/GIF diskda keshlanadi + "Xotiradan foydalanish" oynasi
+
+* Rust (`telegram.rs`): Telegram `MediaDataController` kabi — to'plamlar
+  ro'yxati, to'plam ichi, saqlangan GIF'lar, maxsus emoji hujjatlari va
+  premium holati `tg/media/meta/*.json` da (javob + hash + fayl havolalari).
+  Yangi yozuv tarmoqsiz qaytadi, eskisi `hash` bilan tekshiriladi
+  (`NotModified` — qayta yuklanmaydi), internet bo'lmasa keshdagisi.
+  Fayllar (`tg/media/<id>`) diskda bo'lsa ulanishsiz darhol qaytadi.
+* Profil → Xotira bosilsa `StorageScreen`: halqa diagramma, belgilanadigan
+  toifalar (Videolar, Posterlar, Stikerlar va emojilar, GIF va chat
+  fayllari, Vaqtinchalik), "Keshni tozalash <hajm>". Hisob ma'lumotlari
+  tozalanmaydi.

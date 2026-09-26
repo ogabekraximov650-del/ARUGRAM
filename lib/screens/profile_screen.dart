@@ -29,6 +29,7 @@ import 'profile_edit_screen.dart';
 import 'sessions_screen.dart';
 import 'settings_screen.dart';
 import 'stat_detail_screen.dart';
+import 'storage_screen.dart';
 import 'telegram_login_screen.dart';
 import 'phone_login_screen.dart';
 import '../services/telegram_service.dart';
@@ -1207,6 +1208,11 @@ class _MyStatsGridState extends State<_MyStatsGrid> {
                 value: storage.measured
                     ? formatBytes(storage.usage.totalBytes)
                     : '—',
+                // Telegram'dagidek "Xotiradan foydalanish" oynasi.
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                      builder: (_) => const StorageScreen()),
+                ),
               ),
             ),
           ],

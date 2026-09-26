@@ -16,7 +16,7 @@
 //! (`rust_anim_render`), UI oqimi faqat tayyor rasmni chizadi.
 
 use std::collections::HashMap;
-use std::ffi::{c_char, c_void, CString};
+use std::ffi::{c_char, c_void};
 use std::io::Read;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};

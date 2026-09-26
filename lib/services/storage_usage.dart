@@ -52,8 +52,10 @@ import 'dart:io';
 import 'dart:isolate';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/painting.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'image_cache.dart';
 import 'rust_bridge.dart';
 
 /// Bitta toifa: nomi va hajmi.
@@ -134,6 +136,61 @@ class StorageUsageService extends ChangeNotifier {
     }
   }
 
+  // ── KESHNI TOZALASH (Telegram'dagidek) ─────────────────────
+  //
+  // TALAB (foydalanuvchi): "Xotira ustiga bosilganda huddi
+  // Telegram'nikidek tozalash oynasi ochilsin".
+  //
+  // Faqat qayta yuklab olinadigan KESH o'chiriladi (Telegram ham
+  // shunday: "barcha media fayllar bulutda qoladi"). Hisob
+  // ma'lumotlari — tarix, sevimlilar, sozlamalar — tegilmaydi.
+
+  /// Tozalanadigan toifalar.
+  static const Set<String> clearable = {
+    _kVideo,
+    _kPoster,
+    _kStickers,
+    _kChatMedia,
+    _kTemp,
+  };
+
+  /// Tanlangan toifalarni o'chiradi va hajmlarni qayta sanaydi.
+  Future<void> clear(Set<String> labels) async {
+    final temp = await _dir(getTemporaryDirectory);
+    final docs = RustCore.instance.rootDirPath;
+    if (labels.contains(_kVideo)) {
+      try {
+        RustCore.instance.videoCacheWipe();
+      } catch (_) {}
+    }
+    if (labels.contains(_kPoster)) {
+      try {
+        await AppImageCache.manager.emptyCache();
+      } catch (_) {}
+      PaintingBinding.instance.imageCache.clear();
+    }
+    final stickers = labels.contains(_kStickers);
+    final chat = labels.contains(_kChatMedia);
+    final other = labels.contains(_kTemp);
+    final posters = labels.contains(_kPoster);
+    await Isolate.run(() {
+      if (stickers && docs != null) {
+        // Fayllar o'chadi, to'plamlar ro'yxati (`meta`) qoladi —
+        // panel darhol ochiladi, rasmlar esa kerak bo'lganda qayta
+        // yuklanadi.
+        _deleteIn(Directory('$docs/tg/media'), (name) => name != 'meta');
+      }
+      if (temp != null) {
+        _deleteIn(Directory(temp), (name) {
+          if (name.startsWith('libCachedImageData')) return posters;
+          if (name.startsWith('gif_')) return chat;
+          return other;
+        });
+      }
+    });
+    await refresh();
+  }
+
   Future<String?> _dir(Future<Directory> Function() get) async {
     try {
       return (await get()).path;
@@ -160,6 +217,8 @@ const String _kFavorites = 'Sevimlilar';
 const String _kStats = 'Statistika';
 const String _kSettings = 'Sozlamalar';
 const String _kTemp = 'Vaqtinchalik fayllar';
+const String _kStickers = 'Stikerlar va emojilar';
+const String _kChatMedia = 'GIF va chat fayllari';
 const String _kOther = 'Boshqa';
 
 /// Ekrandagi tartib uchun barqaror ro'yxat (rang shu tartibdan
@@ -167,6 +226,8 @@ const String _kOther = 'Boshqa';
 const List<String> kStorageLabels = [
   _kVideo,
   _kPoster,
+  _kStickers,
+  _kChatMedia,
   _kFrames,
   _kAnime,
   _kEpisodes,
@@ -216,6 +277,9 @@ Map<String, int> _measure({
       if (path.contains('/libCachedImageData/') ||
           name.startsWith('libCachedImageData')) {
         add(_kPoster, size);
+      } else if (name.startsWith('gif_')) {
+        // Chatdagi GIF va dumaloq videolar (`tgChatFile`).
+        add(_kChatMedia, size);
       } else {
         // Rasm/video tanlashda qolgan nusxalar va tizim qoldiqlari.
         add(_kTemp, size);
@@ -226,6 +290,11 @@ Map<String, int> _measure({
   // ── HISOB FAYLLARI ────────────────────────────────────────
   if (docs != null) {
     _walk(Directory(docs), (path, size) {
+      // Telegram stikerlari, emojilari, GIF'lari (`tg/media`).
+      if (path.contains('/tg/media/')) {
+        add(_kStickers, size);
+        return;
+      }
       add(_labelOfDocFile(path.split('/').last), size);
     });
   }
@@ -255,6 +324,21 @@ String _labelOfDocFile(String name) {
     return _kOther;
   }
   return _kOther;
+}
+
+/// Papkaning [pick] tanlagan bevosita elementlarini o'chiradi
+/// (band fayl o'tkazib yuboriladi).
+void _deleteIn(Directory dir, bool Function(String name) pick) {
+  if (!dir.existsSync()) return;
+  try {
+    for (final e in dir.listSync(followLinks: false)) {
+      final name = e.path.split('/').last;
+      if (!pick(name)) continue;
+      try {
+        e.deleteSync(recursive: true);
+      } catch (_) {}
+    }
+  } catch (_) {}
 }
 
 /// Papkadagi HAR BIR faylni ko'rib chiqadi (`yo'l`, `hajm`).

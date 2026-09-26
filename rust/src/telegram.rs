@@ -3018,18 +3018,161 @@ fn parse_i64(v: &Value) -> i64 {
     }
 }
 
+// ── DISK KESHI (Telegram'dagidek) ────────────────────────────
+//
+// TALAB (foydalanuvchi): "emoji, stiker va giflar xotiraga yuklansin
+// va keyingi safar qayta yuklanmasin — huddi Telegram'nikidek".
+//
+// Telegram Android (`MediaDataController`) to'plamlar ro'yxatini va
+// har to'plamning hujjatlarini bazada saqlaydi, keyingi so'rovda esa
+// oxirgi `hash` ni yuboradi: o'zgarmagan bo'lsa server `NotModified`
+// qaytaradi va hech narsa qayta yuklanmaydi. Bu yerda ham xuddi shu:
+//   * javob + hash + hujjat havolalari (`MediaDoc`) —
+//     `tg/media/meta/<nom>.json`;
+//   * yangi yozuv [fresh] muddatda umuman tarmoqqa chiqmaydi;
+//   * eskirgani `hash` bilan tekshiriladi, tarmoq xato bersa —
+//     keshdagisi qaytadi (internetsiz ham panel ochiladi);
+//   * fayllarning o'zi `tg/media/<id>` da (bir marta yuklanadi).
+
+fn meta_path(t: &Tg, name: &str) -> PathBuf {
+    let d = media_dir(t).join("meta");
+    let _ = fs::create_dir_all(&d);
+    d.join(format!("{name}.json"))
+}
+
+fn md_json(m: &MediaDoc) -> Value {
+    json!({
+        "id": m.id.to_string(),
+        "ah": m.access_hash.to_string(),
+        "fr": hex::encode(&m.file_reference),
+        "dc": m.dc_id,
+        "th": m.thumb,
+        "s": m.set.map(|(a, b)| [a.to_string(), b.to_string()]),
+        "e": m.emoji,
+    })
+}
+
+fn md_parse(v: &Value) -> Option<MediaDoc> {
+    Some(MediaDoc {
+        id: parse_i64(&v["id"]),
+        access_hash: parse_i64(&v["ah"]),
+        file_reference: hex::decode(v["fr"].as_str()?).ok()?,
+        dc_id: v["dc"].as_i64()? as i32,
+        thumb: v["th"].as_str().map(str::to_string),
+        set: v["s"].as_array().map(|a| (parse_i64(&a[0]), parse_i64(&a[1]))),
+        emoji: v["e"].as_bool().unwrap_or(false),
+    })
+}
+
+/// Javob ichidagi hamma hujjat ID'lari (`{"id":..,"kind":..}`).
+fn doc_ids(v: &Value, out: &mut Vec<i64>) {
+    match v {
+        Value::Array(a) => a.iter().for_each(|x| doc_ids(x, out)),
+        Value::Object(o) => {
+            if o.contains_key("kind") {
+                out.push(parse_i64(&v["id"]));
+            } else {
+                o.values().for_each(|x| doc_ids(x, out));
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Keshdan o'qiydi va hujjat havolalarini xotiraga qaytaradi.
+/// `(yozuv, yoshi)`.
+fn meta_load(t: &Tg, name: &str) -> Option<(Value, Duration)> {
+    let p = meta_path(t, name);
+    let age = fs::metadata(&p).ok()?.modified().ok()?.elapsed().unwrap_or_default();
+    let v: Value = serde_json::from_slice(&fs::read(&p).ok()?).ok()?;
+    if let (Some(mds), Ok(mut m)) = (v["mds"].as_array(), media_docs().lock()) {
+        for md in mds.iter().filter_map(md_parse) {
+            m.entry(md.id).or_insert(md);
+        }
+    }
+    Some((v, age))
+}
+
+fn meta_save(t: &Tg, name: &str, resp: &Value, hash: &Value) {
+    let mut ids = Vec::new();
+    doc_ids(resp, &mut ids);
+    let mds: Vec<Value> = match media_docs().lock() {
+        Ok(m) => ids.iter().filter_map(|id| m.get(id)).map(md_json).collect(),
+        Err(_) => Vec::new(),
+    };
+    let p = meta_path(t, name);
+    let tmp = p.with_extension("part");
+    let body = json!({"hash": hash, "resp": resp, "mds": mds}).to_string();
+    if fs::write(&tmp, body).is_ok() {
+        let _ = fs::rename(&tmp, &p);
+    }
+}
+
+/// Keshdagi javob yangi bo'lsa — o'sha; aks holda [fetch] (u eski
+/// yozuvni oladi: `hash` va `NotModified` bo'lsa eski javob uchun).
+/// Tarmoq xato bersa — eski javob.
+fn cached<F>(t: &Tg, name: &str, fresh: Duration, fetch: F) -> Result<String, String>
+where
+    F: FnOnce(Option<&Value>) -> Result<(Value, Value), String>,
+{
+    let old = meta_load(t, name);
+    if let Some((v, age)) = &old {
+        if *age < fresh {
+            return Ok(v["resp"].to_string());
+        }
+    }
+    match fetch(old.as_ref().map(|(v, _)| v)) {
+        Ok((resp, hash)) => {
+            meta_save(t, name, &resp, &hash);
+            Ok(resp.to_string())
+        }
+        Err(e) => old.map(|(v, _)| v["resp"].to_string()).ok_or(e),
+    }
+}
+
+/// Faqat keshdan (ulanishsiz) — Telegram ishga tushmagan yoki
+/// ulanib bo'lmaganda ham panel ochilsin.
+fn cached_only(name: &str) -> Option<String> {
+    let t = tg()?;
+    meta_load(t, name).map(|(v, _)| v["resp"].to_string())
+}
+
+fn hash_of(old: Option<&Value>, key: &str) -> i64 {
+    old.map(|v| parse_i64(&v["hash"][key])).unwrap_or(0)
+}
+
+fn old_resp(old: Option<&Value>, key: &str) -> Value {
+    old.map(|v| v["resp"][key].clone()).unwrap_or(json!([]))
+}
+
+/// Keshdan yoki tarmoqdan: ulanish bo'lmasa ham kesh qaytadi.
+fn with_cache<F>(name: &str, f: F) -> String
+where
+    F: FnOnce(&'static Tg, Client) -> Result<String, String>,
+{
+    let r = with_client(f);
+    if r.contains("\"error\"") && serde_json::from_str::<Value>(&r).map(|v| v["error"].is_string()).unwrap_or(false) {
+        if let Some(c) = cached_only(name) {
+            return c;
+        }
+    }
+    r
+}
+
 /// Foydalanuvchida Telegram Premium bormi (`{"premium": bool}`).
 #[no_mangle]
 pub extern "C" fn rust_tg_premium() -> *mut c_char {
-    string_to_cptr(with_client(|t, client| {
-        let users = t
-            .rt
-            .block_on(client.invoke(&tl::functions::users::GetUsers {
-                id: vec![tl::enums::InputUser::UserSelf],
-            }))
-            .map_err(|e| inv_err(&e))?;
-        let premium = users.iter().any(|u| matches!(u, tl::enums::User::User(u) if u.premium));
-        Ok(json!({"premium": premium}).to_string())
+    string_to_cptr(with_cache("premium", |t, client| {
+        cached(t, "premium", Duration::from_secs(3600), |_| {
+            let users = t
+                .rt
+                .block_on(client.invoke(&tl::functions::users::GetUsers {
+                    id: vec![tl::enums::InputUser::UserSelf],
+                }))
+                .map_err(|e| inv_err(&e))?;
+            let premium = users.iter().any(|u| matches!(u, tl::enums::User::User(u) if u.premium));
+            Ok((json!({"premium": premium}), json!({})))
+        })
     }))
 }
 
@@ -3037,53 +3180,69 @@ pub extern "C" fn rust_tg_premium() -> *mut c_char {
 /// stikerlar. [emoji] = 1 — maxsus emoji to'plamlari.
 #[no_mangle]
 pub extern "C" fn rust_tg_sticker_sets(emoji: i32) -> *mut c_char {
-    string_to_cptr(with_client(|t, client| {
-        t.rt.block_on(async {
-            let all = if emoji != 0 {
-                client.invoke(&tl::functions::messages::GetEmojiStickers { hash: 0 }).await
-            } else {
-                client.invoke(&tl::functions::messages::GetAllStickers { hash: 0 }).await
-            }
-            .map_err(|e| inv_err(&e))?;
-            let sets = match all {
-                tl::enums::messages::AllStickers::Stickers(a) => sets_value(&a.sets),
-                tl::enums::messages::AllStickers::NotModified => Vec::new(),
-            };
-            if emoji != 0 {
-                return Ok(json!({"sets": sets}).to_string());
-            }
-            let recent = match client
-                .invoke(&tl::functions::messages::GetRecentStickers { attached: false, hash: 0 })
-                .await
-            {
-                Ok(tl::enums::messages::RecentStickers::Stickers(r)) => docs_value(&r.stickers, None),
-                _ => Vec::new(),
-            };
-            let faved = match client.invoke(&tl::functions::messages::GetFavedStickers { hash: 0 }).await {
-                Ok(tl::enums::messages::FavedStickers::Stickers(r)) => docs_value(&r.stickers, None),
-                _ => Vec::new(),
-            };
-            Ok(json!({"sets": sets, "recent": recent, "faved": faved}).to_string())
+    let name = if emoji != 0 { "sets_emoji" } else { "sets_stickers" };
+    string_to_cptr(with_cache(name, |t, client| {
+        cached(t, name, Duration::from_secs(600), |old| {
+            t.rt.block_on(async {
+                let h = hash_of(old, "all");
+                let all = if emoji != 0 {
+                    client.invoke(&tl::functions::messages::GetEmojiStickers { hash: h }).await
+                } else {
+                    client.invoke(&tl::functions::messages::GetAllStickers { hash: h }).await
+                }
+                .map_err(|e| inv_err(&e))?;
+                let (sets, all_hash) = match all {
+                    tl::enums::messages::AllStickers::Stickers(a) => (json!(sets_value(&a.sets)), a.hash),
+                    tl::enums::messages::AllStickers::NotModified => (old_resp(old, "sets"), h),
+                };
+                if emoji != 0 {
+                    return Ok((json!({"sets": sets}), json!({"all": all_hash.to_string()})));
+                }
+                let rh = hash_of(old, "recent");
+                let (recent, rh) = match client
+                    .invoke(&tl::functions::messages::GetRecentStickers { attached: false, hash: rh })
+                    .await
+                {
+                    Ok(tl::enums::messages::RecentStickers::Stickers(r)) => (json!(docs_value(&r.stickers, None)), r.hash),
+                    _ => (old_resp(old, "recent"), rh),
+                };
+                let fh = hash_of(old, "faved");
+                let (faved, fh) = match client.invoke(&tl::functions::messages::GetFavedStickers { hash: fh }).await {
+                    Ok(tl::enums::messages::FavedStickers::Stickers(r)) => (json!(docs_value(&r.stickers, None)), r.hash),
+                    _ => (old_resp(old, "faved"), fh),
+                };
+                Ok((
+                    json!({"sets": sets, "recent": recent, "faved": faved}),
+                    json!({"all": all_hash.to_string(), "recent": rh.to_string(), "faved": fh.to_string()}),
+                ))
+            })
         })
     }))
 }
 
-async fn load_set(client: &Client, id: i64, hash: i64) -> Result<Vec<Value>, String> {
+async fn load_set_hashed(client: &Client, id: i64, hash: i64, known: i32) -> Result<Option<(Vec<Value>, i32)>, String> {
     let r = client
         .invoke(&tl::functions::messages::GetStickerSet {
             stickerset: tl::enums::InputStickerSet::Id(tl::types::InputStickerSetId { id, access_hash: hash }),
-            hash: 0,
+            hash: known,
         })
         .await
         .map_err(|e| inv_err(&e))?;
-    let docs = match r {
-        tl::enums::messages::StickerSet::Set(s) => docs_value(&s.documents, Some((id, hash))),
-        tl::enums::messages::StickerSet::NotModified => Vec::new(),
-    };
-    if let Ok(mut c) = set_cache().lock() {
-        c.insert(id, docs.clone());
+    match r {
+        tl::enums::messages::StickerSet::Set(s) => {
+            let tl::enums::StickerSet::Set(info) = &s.set;
+            let docs = docs_value(&s.documents, Some((id, hash)));
+            if let Ok(mut c) = set_cache().lock() {
+                c.insert(id, docs.clone());
+            }
+            Ok(Some((docs, info.hash)))
+        }
+        tl::enums::messages::StickerSet::NotModified => Ok(None),
     }
-    Ok(docs)
+}
+
+async fn load_set(client: &Client, id: i64, hash: i64) -> Result<Vec<Value>, String> {
+    Ok(load_set_hashed(client, id, hash, 0).await?.map(|(d, _)| d).unwrap_or_default())
 }
 
 /// Bitta to'plamning stikerlari: `{"id":"..","hash":".."}` -> `{"docs":[..]}`.
@@ -3091,45 +3250,80 @@ async fn load_set(client: &Client, id: i64, hash: i64) -> Result<Vec<Value>, Str
 pub extern "C" fn rust_tg_sticker_set(json_ptr: *const c_char) -> *mut c_char {
     let arg: Value = serde_json::from_str(unsafe { cstr_to_str(json_ptr) }.unwrap_or("{}")).unwrap_or(json!({}));
     let (id, hash) = (parse_i64(&arg["id"]), parse_i64(&arg["hash"]));
-    string_to_cptr(with_client(|t, client| {
+    let name = format!("set_{id}");
+    string_to_cptr(with_cache(&name, |t, client| {
         if let Some(d) = set_cache().lock().ok().and_then(|c| c.get(&id).cloned()) {
             return Ok(json!({"docs": d}).to_string());
         }
-        let docs = t.rt.block_on(load_set(&client, id, hash))?;
-        Ok(json!({"docs": docs}).to_string())
+        // To'plam ichi deyarli o'zgarmaydi — bir kun tekshirilmaydi.
+        cached(t, &name, Duration::from_secs(24 * 3600), |old| {
+            let known = old.map(|v| parse_i64(&v["hash"]["h"]) as i32).unwrap_or(0);
+            match t.rt.block_on(load_set_hashed(&client, id, hash, known))? {
+                Some((docs, h)) => Ok((json!({"docs": docs}), json!({"h": h.to_string()}))),
+                None => Ok((json!({"docs": old_resp(old, "docs")}), json!({"h": known.to_string()}))),
+            }
+        })
     }))
 }
 
 /// Maxsus emoji hujjatlari ID bo'yicha: `["id", ..]` -> `{"docs":[..]}`.
+///
+/// Har bir emoji bir marta so'raladi va `custom_emoji` keshida qoladi.
 #[no_mangle]
 pub extern "C" fn rust_tg_custom_emoji(json_ptr: *const c_char) -> *mut c_char {
     let arg: Value = serde_json::from_str(unsafe { cstr_to_str(json_ptr) }.unwrap_or("[]")).unwrap_or(json!([]));
     let ids: Vec<i64> = arg.as_array().map(|a| a.iter().map(parse_i64).filter(|v| *v != 0).collect()).unwrap_or_default();
-    string_to_cptr(with_client(|t, client| {
-        if ids.is_empty() {
-            return Ok(json!({"docs": []}).to_string());
+    if ids.is_empty() {
+        return string_to_cptr(json!({"docs": []}).to_string());
+    }
+    let Some(t) = tg() else { return string_to_cptr(err_json("Telegram ishga tushmagan")) };
+    let mut known: serde_json::Map<String, Value> = meta_load(t, "custom_emoji")
+        .and_then(|(v, _)| v["resp"].as_object().cloned())
+        .unwrap_or_default();
+    let missing: Vec<i64> = ids.iter().copied().filter(|id| !known.contains_key(&id.to_string())).collect();
+    if !missing.is_empty() {
+        let r = with_client(|t, client| {
+            let docs = t
+                .rt
+                .block_on(client.invoke(&tl::functions::messages::GetCustomEmojiDocuments { document_id: missing.clone() }))
+                .map_err(|e| inv_err(&e))?;
+            Ok::<_, String>(json!(docs_value(&docs, None)).to_string())
+        });
+        match serde_json::from_str::<Value>(&r) {
+            Ok(Value::Array(docs)) => {
+                for d in docs {
+                    if let Some(id) = d["id"].as_str() {
+                        known.insert(id.to_string(), d);
+                    }
+                }
+                let resp = Value::Object(known.clone());
+                meta_save(t, "custom_emoji", &resp, &json!({}));
+            }
+            _ if ids.iter().all(|id| !known.contains_key(&id.to_string())) => return string_to_cptr(r),
+            _ => {}
         }
-        let docs = t
-            .rt
-            .block_on(client.invoke(&tl::functions::messages::GetCustomEmojiDocuments { document_id: ids.clone() }))
-            .map_err(|e| inv_err(&e))?;
-        Ok(json!({"docs": docs_value(&docs, None)}).to_string())
-    }))
+    }
+    let docs: Vec<Value> = ids.iter().filter_map(|id| known.get(&id.to_string()).cloned()).collect();
+    string_to_cptr(json!({"docs": docs}).to_string())
 }
 
 /// Saqlangan GIF'lar.
 #[no_mangle]
 pub extern "C" fn rust_tg_saved_gifs() -> *mut c_char {
-    string_to_cptr(with_client(|t, client| {
-        let r = t
-            .rt
-            .block_on(client.invoke(&tl::functions::messages::GetSavedGifs { hash: 0 }))
-            .map_err(|e| inv_err(&e))?;
-        let docs = match r {
-            tl::enums::messages::SavedGifs::Gifs(g) => docs_value(&g.gifs, None),
-            tl::enums::messages::SavedGifs::NotModified => Vec::new(),
-        };
-        Ok(json!({"docs": docs}).to_string())
+    string_to_cptr(with_cache("saved_gifs", |t, client| {
+        cached(t, "saved_gifs", Duration::from_secs(600), |old| {
+            let h = hash_of(old, "h");
+            let r = t
+                .rt
+                .block_on(client.invoke(&tl::functions::messages::GetSavedGifs { hash: h }))
+                .map_err(|e| inv_err(&e))?;
+            Ok(match r {
+                tl::enums::messages::SavedGifs::Gifs(g) => {
+                    (json!({"docs": docs_value(&g.gifs, None)}), json!({"h": g.hash.to_string()}))
+                }
+                tl::enums::messages::SavedGifs::NotModified => (json!({"docs": old_resp(old, "docs")}), json!({"h": h.to_string()})),
+            })
+        })
     }))
 }
 
@@ -3273,6 +3467,13 @@ pub extern "C" fn rust_tg_media_file(json_ptr: *const c_char) -> *mut c_char {
     let arg: Value = serde_json::from_str(unsafe { cstr_to_str(json_ptr) }.unwrap_or("{}")).unwrap_or(json!({}));
     let id = parse_i64(&arg["id"]);
     let thumb = arg["thumb"].as_bool().unwrap_or(false);
+    // Diskda bor bo'lsa — ulanishsiz, darhol (qayta yuklanmaydi).
+    if let Some(t) = tg() {
+        let path = media_dir(t).join(format!("{id}{}", if thumb { ".t" } else { "" }));
+        if path.exists() {
+            return string_to_cptr(json!({"path": path.to_string_lossy()}).to_string());
+        }
+    }
     string_to_cptr(with_client(|t, client| {
         let path = media_dir(t).join(format!("{id}{}", if thumb { ".t" } else { "" }));
         if path.exists() {
@@ -3603,4 +3804,36 @@ pub(crate) fn fetch_range(name: &str, offset: u64, len: u64) -> Result<Vec<u8>, 
         crate::video_cache::tg_log(format!("Telegram: {name} olinmadi: {e}"));
     }
     r
+}
+
+#[cfg(test)]
+mod media_cache_tests {
+    use super::*;
+
+    #[test]
+    fn media_doc_json_roundtrip() {
+        let m = MediaDoc {
+            id: -5_000_000_000_123,
+            access_hash: 77,
+            file_reference: vec![1, 2, 255],
+            dc_id: 4,
+            thumb: Some("m".into()),
+            set: Some((9, -9)),
+            emoji: true,
+        };
+        let b = md_parse(&md_json(&m)).unwrap();
+        assert_eq!((b.id, b.access_hash, b.file_reference, b.dc_id), (m.id, 77, vec![1, 2, 255], 4));
+        assert_eq!((b.thumb.as_deref(), b.set, b.emoji), (Some("m"), Some((9, -9)), true));
+    }
+
+    #[test]
+    fn doc_ids_found_in_nested_response() {
+        let v = json!({"sets": [{"id": "1", "title": "x"}],
+                       "recent": [{"id": "5", "kind": "tgs"}],
+                       "faved": [{"id": "-7", "kind": "webp"}]});
+        let mut ids = Vec::new();
+        doc_ids(&v, &mut ids);
+        ids.sort();
+        assert_eq!(ids, vec![-7, 5]);
+    }
 }

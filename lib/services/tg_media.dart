@@ -265,8 +265,18 @@ class TgMedia {
   /// Hujjat (yoki kichik rasmi) diskdagi yo'li. Bir vaqtda eng ko'pi
   /// 4 ta yuklanadi — panel ochilganda 100 ta stiker birdan
   /// so'ralmasin.
-  Future<String?> file(TgDoc d, {bool thumb = false}) {
+  Future<String?> file(TgDoc d, {bool thumb = false}) async {
     final key = '${d.id}${thumb ? 't' : ''}';
+    final p = await _file(d, key, thumb);
+    // Xotira oynasida kesh tozalangan bo'lsa — qayta yuklanadi.
+    if (p != null && !File(p).existsSync()) {
+      _files.remove(key);
+      return _file(d, key, thumb);
+    }
+    return p;
+  }
+
+  Future<String?> _file(TgDoc d, String key, bool thumb) {
     return _files[key] ??= () async {
       while (_running >= 4) {
         final c = Completer<void>();

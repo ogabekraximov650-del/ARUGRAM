@@ -398,7 +398,17 @@ final Map<String, Future<File?>> _chatFiles = {};
 
 /// Kanaldagi kichik fayl (GIF, dumaloq video) — bir marta olinadi va
 /// vaqtinchalik papkada saqlanadi.
-Future<File?> tgChatFile(String name) => _chatFiles[name] ??= () async {
+Future<File?> tgChatFile(String name) async {
+  final f = await (_chatFiles[name] ??= _fetchChatFile(name));
+  // Xotira oynasida kesh tozalangan bo'lsa — qayta olinadi.
+  if (f != null && !f.existsSync()) {
+    _chatFiles.remove(name);
+    return _chatFiles[name] ??= _fetchChatFile(name);
+  }
+  return f;
+}
+
+Future<File?> _fetchChatFile(String name) => () async {
         try {
           final dir = await getTemporaryDirectory();
           final f = File('${dir.path}/gif_$name');
