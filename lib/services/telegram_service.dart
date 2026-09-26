@@ -146,6 +146,13 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
   DynamicLibrary? _lib;
   bool _started = false;
 
+  /// Yadro (`librust_core.so`) ochilmagan bo'lsa — sababi (ko'rsatish
+  /// uchun). Masalan 16 KB sahifali qurilmada eski yig'ma.
+  String? startError;
+
+  /// Oxirgi sozlama so'rovi serverga yetib bormadi.
+  bool configUnreachable = false;
+
   /// Server Telegram orqali video berishga tayyormi (sirlar qo'yilgan).
   bool _serverEnabled = false;
 
@@ -284,6 +291,7 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
       _init(dir, 0, '');
     } catch (e) {
       debugPrint('Telegram: yadro topilmadi: $e');
+      startError = '$e';
       return;
     }
     notifyListeners();
@@ -384,7 +392,11 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
       final r = await http
           .get(Uri.parse('$kApiBase/api/tg/config'))
           .timeout(const Duration(seconds: 15));
-      if (r.statusCode != 200) return _configured;
+      if (r.statusCode != 200) {
+        configUnreachable = true;
+        return _configured;
+      }
+      configUnreachable = false;
       final j = jsonDecode(r.body) as Map<String, dynamic>;
       _applyConfig(j);
       RustCore.instance.saveListCache('tg_config', [
@@ -393,6 +405,7 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
       notifyListeners();
     } catch (_) {
       // Tarmoq yo'q — saqlangan sozlama bilan ishlayveradi.
+      configUnreachable = true;
     }
     return _configured;
   }

@@ -1,0 +1,19 @@
+# ── 16 KB XOTIRA SAHIFASI (Android 15+) ─────────────────────────
+#
+# TOPILGAN XATO (foydalanuvchi: "CCTAB planshetida (Android 15/16,
+# faqat 64 bit) raqam yozadigan joy va tugmalar qoramtir bo'lib qoldi,
+# klaviatura chiqmadi, hech qayeri ishlamadi").
+#
+# Yangi Android 15/16 qurilmalarining bir qismi 16 KB xotira
+# sahifasi bilan ishlaydi. Unda 4 KB ga tekislangan `.so` umuman
+# YUKLANMAYDI — `librust_core.so` ochilmagach Telegram xizmati ishga
+# tushmaydi va kirish oynasi "o'chiq" holatda qoladi. Google ham
+# Android 15+ uchun 16 KB tekislashni talab qiladi.
+[target.aarch64-linux-android]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384", "-C", "link-arg=-Wl,-z,common-page-size=16384"]
+
+[target.armv7-linux-androideabi]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384", "-C", "link-arg=-Wl,-z,common-page-size=16384"]
+
+[target.x86_64-linux-android]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384", "-C", "link-arg=-Wl,-z,common-page-size=16384"]

@@ -3499,3 +3499,16 @@ zaxira yo'llar (`thumbnailData`, birinchi kadr).
   navigatsiya ortidagi qoramtir parda o'chadi), API 30+ da
   `setDecorFitsSystemWindows(false)`; Dart'da ham
   `systemNavigationBarContrastEnforced: false`.
+
+## Android 15/16 planshet (CCTAB): ilova ishlamasligi — 16 KB sahifa
+
+* Sabab (ehtimoliy, alomatlar mos): yangi 64 bitli Android 15/16
+  qurilmalarda 16 KB xotira sahifasi; `librust_core.so` 4 KB ga
+  tekislangan edi -> yuklanmaydi -> Telegram xizmati ishga tushmaydi,
+  kirish oynasi "o'chiq" (maydon va tugmalar qoramtir).
+* Tuzatish: `rust/.cargo/config.toml` — `-z max-page-size=16384`
+  (va `common-page-size`); CI'da `llvm-readelf` bilan tekshiruv
+  (arm64); APK `zipalign -P 16` (16 KB) bilan tekislanadi.
+* Kirish oynasi: sozlama olinmasa 4 s dan keyin o'zi qayta so'raydi;
+  sababi yoziladi (yadro ochilmadi / serverga ulanib bo'lmadi —
+  internet va sana/vaqtni tekshiring / kirish yoqilmagan).

@@ -157,6 +157,26 @@ jobs:
             -o ../jniLibs-out \
             build --release
 
+      # ── 16 KB SAHIFA TEKSHIRUVI (Android 15+) ─────────────────
+      # `rust/.cargo/config.toml` dagi bog'lash bayrog'i ishlaganini
+      # tekshiradi: 64 bitli kutubxonaning har LOAD segmenti 16 KB
+      # (0x4000) yoki undan kattaga tekislangan bo'lishi shart —
+      # aks holda 16 KB sahifali qurilmalarda (masalan yangi
+      # planshetlar) ilova yadrosi umuman ochilmaydi.
+      - name: Check 16 KB page alignment (${{ matrix.abi }})
+        if: matrix.abi == 'arm64-v8a'
+        run: |
+          SO="jniLibs-out/${{ matrix.abi }}/librust_core.so"
+          READELF=$(ls "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/*/bin/llvm-readelf 2>/dev/null | head -1)
+          [ -z "$READELF" ] && READELF=$(ls "$ANDROID_NDK_LATEST_HOME"/toolchains/llvm/prebuilt/*/bin/llvm-readelf 2>/dev/null | head -1)
+          [ -z "$READELF" ] && READELF=readelf
+          "$READELF" -lW "$SO" | grep LOAD
+          if "$READELF" -lW "$SO" | awk '$1=="LOAD" {print $NF}' | grep -qvE '0x(4000|8000|10000)'; then
+            echo "❌ librust_core.so 16 KB ga tekislanmagan"
+            exit 1
+          fi
+          echo "✅ 16 KB tekislangan"
+
       # ── Flutter ─────────────────────────────────────────────────
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -601,8 +621,15 @@ jobs:
           # `zip -d` fayllar joylashuvini buzadi — .so fayllar
           # xotiraga to'g'ridan-to'g'ri joylashishi (memory-map)
           # uchun APK qaytadan tekislanishi kerak.
+          #
+          # 16 KB (Android 15+ sahifasi): `-P 16` — .so fayllar 16 KB ga
+          # tekislanadi (`-p` faqat 4 KB edi va 16 KB sahifali
+          # qurilmalarda kutubxona ochilmay qolishi mumkin edi).
+          # Eski zipalign `-P` ni bilmasa — `-p` ga qaytiladi.
           ZIPALIGN=$(ls "$ANDROID_HOME"/build-tools/*/zipalign | sort -V | tail -1)
-          "$ZIPALIGN" -f -p 4 "$APK" "$APK.aligned"
+          if ! "$ZIPALIGN" -f -P 16 4 "$APK" "$APK.aligned"; then
+            "$ZIPALIGN" -f -p 4 "$APK" "$APK.aligned"
+          fi
           mv "$APK.aligned" "$APK"
 
           echo "── O'zgartirishdan KEYIN ──"

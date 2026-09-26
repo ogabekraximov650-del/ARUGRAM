@@ -309,6 +309,16 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
       return;
     }
     setState(() => _available = ok);
+    // Yangi o'rnatilgan ilovada sozlama hali yo'q va birinchi so'rov
+    // o'tmay qolsa (internet sekin, planshetda sana noto'g'ri va h.k.)
+    // oyna "o'chiq" holatda qotib qolardi. Endi bir necha soniyadan
+    // keyin o'zi qayta so'raydi.
+    if (!ok) {
+      Future<void>.delayed(const Duration(seconds: 4), () {
+        if (mounted && !_available) _check();
+      });
+      return;
+    }
     unawaited(_detectCountry());
   }
 
@@ -591,10 +601,16 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
               ],
               if (!_available) ...[
                 const SizedBox(height: 16),
-                const Text(
-                  'Telegram orqali kirish hozircha yoqilmagan.',
+                Text(
+                  _tg.startError != null
+                      ? 'Ilova yadrosi ishga tushmadi: ${_tg.startError}'
+                      : _tg.configUnreachable
+                          ? 'Serverga ulanib bo\'lmadi — qayta urinilmoqda...\n'
+                              '(Internet va qurilmadagi sana/vaqt to\'g\'riligini '
+                              'tekshiring.)'
+                          : 'Telegram orqali kirish hozircha yoqilmagan.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: _Tg.hint, fontSize: 14),
+                  style: const TextStyle(color: _Tg.hint, fontSize: 14),
                 ),
               ],
             ],
