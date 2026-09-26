@@ -23,7 +23,6 @@ import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/scheduler.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 import '../services/chat_video_thumb.dart';
@@ -31,7 +30,6 @@ import '../services/image_cache.dart';
 
 import '../services/auth_service.dart';
 import '../services/screen_guard.dart';
-import '../services/storage_janitor.dart';
 import '../services/support_service.dart';
 import '../services/voice_player.dart';
 import '../theme/app_background.dart';
@@ -43,6 +41,8 @@ import '../services/tg_media.dart';
 import '../widgets/tg_composer.dart';
 import '../widgets/tg_media_view.dart';
 import '../widgets/tg_record_button.dart';
+import '../widgets/tg_attach_sheet.dart';
+import 'package:open_filex/open_filex.dart';
 import '../widgets/emoji_text.dart';
 import 'package:video_player/video_player.dart';
 import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
@@ -275,36 +275,6 @@ class _SupportChatScreenState extends State<SupportChatScreen>
   bool get _canDelete =>
       AuthService.instance.user?.isAdmin == true && widget.userId != null;
 
-  /// Rasm yoki video tanlab, B2'ga yuklaydi va xabar qilib
-  /// yuboradi.
-  ///
-  /// Yo'l admin panelidagi video yuklash bilan BIR XIL: worker
-  /// bir martalik B2 token beradi, fayl esa TO'G'RIDAN B2'ga
-  /// oqim bo'lib ketadi (`dio`). Ya'ni fayl worker orqali
-  /// o'tmaydi va xotiraga to'liq yuklanmaydi.
-  Future<void> _pickAndSend({required bool video}) async {
-    if (_uploading) return;
-    final picker = ImagePicker();
-    final picked = video
-        ? await picker.pickVideo(source: ImageSource.gallery)
-        : await picker.pickImage(source: ImageSource.gallery, imageQuality: 85);
-    if (picked == null) return;
-
-    final ext = picked.path.split('.').last.toLowerCase();
-    await _uploadAndSend(
-      file: File(picked.path),
-      ext: ext,
-      type: video ? 'video' : 'image',
-      contentType: video
-          ? (ext == 'mkv' ? 'video/x-matroska' : 'video/mp4')
-          : (ext == 'png' ? 'image/png' : 'image/jpeg'),
-      // `image_picker` tanlangan faylni ilovaning vaqtinchalik
-      // papkasiga NUSXALAYDI — yuklash tugashi bilan nusxa
-      // o'chiriladi (`storage_janitor.dart` izohiga qarang).
-      cleanup: () => StorageJanitor.dropPicked(picked.path),
-    );
-  }
-
   /// Faylni B2'ga yuklaydi va xabar qilib yuboradi.
   ///
   /// Rasm, video va ovozli xabar — uchovi ham SHU yo'ldan
@@ -316,6 +286,9 @@ class _SupportChatScreenState extends State<SupportChatScreen>
     required String contentType,
     int ms = 0,
     Future<void> Function()? cleanup,
+    // Xabar matni: berilmasa — yozish maydonidagisi (ovoz va dumaloq
+    // videoda — matnsiz).
+    String? body,
   }) async {
     if (_uploading) return;
     Future<void> dropCopy() async {
@@ -372,7 +345,8 @@ class _SupportChatScreenState extends State<SupportChatScreen>
       final err = await _chat.send(
         // Ovozli xabarga matn qo'shilmaydi: yozayotgan matn
         // o'z holicha qolsin, keyin alohida yuboriladi.
-        type == 'voice' || type == 'round' ? '' : _input.encoded.trim(),
+        body ??
+            (type == 'voice' || type == 'round' ? '' : _input.encoded.trim()),
         mediaFile: b2Name,
         mediaType: type,
         mediaMs: ms,
@@ -381,7 +355,9 @@ class _SupportChatScreenState extends State<SupportChatScreen>
       if (err != null) {
         _snack(err);
       } else {
-        if (type != 'voice' && type != 'round') _input.clear();
+        if (body == null && type != 'voice' && type != 'round') {
+          _input.clear();
+        }
         _toBottom();
       }
     } catch (e) {
@@ -698,6 +674,64 @@ class _SupportChatScreenState extends State<SupportChatScreen>
         } catch (_) {}
       },
     );
+  }
+
+  // ══════════════════════════════════════════════════════════
+  //  BIRIKTIRISH (Telegram'dagidek, `tg_attach_sheet.dart`)
+  // ══════════════════════════════════════════════════════════
+
+  static const _mimes = {
+    'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png',
+    'webp': 'image/webp', 'gif': 'image/gif', 'heic': 'image/heic',
+    'mp4': 'video/mp4', 'mov': 'video/quicktime', 'mkv': 'video/x-matroska',
+    'webm': 'video/webm', '3gp': 'video/3gpp',
+    'mp3': 'audio/mpeg', 'm4a': 'audio/mp4', 'ogg': 'audio/ogg',
+    'wav': 'audio/wav', 'flac': 'audio/flac',
+    'pdf': 'application/pdf', 'zip': 'application/zip',
+    'txt': 'text/plain', 'apk': 'application/vnd.android.package-archive',
+    'doc': 'application/msword', 'xls': 'application/vnd.ms-excel',
+    'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  };
+
+  Future<void> _openAttach() async {
+    _focus.unfocus();
+    final r = await showTgAttachSheet(context);
+    if (r == null || !mounted) return;
+    for (var i = 0; i < r.items.length; i++) {
+      final it = r.items[i];
+      final dot = it.name.lastIndexOf('.');
+      var ext = dot > 0 ? it.name.substring(dot + 1).toLowerCase() : '';
+      if (ext.isEmpty || ext.length > 5 ||
+          !RegExp(r'^[a-z0-9]+$').hasMatch(ext)) {
+        ext = it.type == 'video' ? 'mp4' : (it.type == 'image' ? 'jpg' : 'bin');
+      }
+      final ct = _mimes[ext] ??
+          (it.type == 'video'
+              ? 'video/mp4'
+              : it.type == 'image'
+                  ? 'image/jpeg'
+                  : 'application/octet-stream');
+      // Kamera va fayl tanlagichi faylni ilovaning keshiga nusxalaydi —
+      // yuborilgach o'chiriladi. Galereyadagi ASL faylga tegilmaydi.
+      final temp = it.file.path.contains('/cache/');
+      await _uploadAndSend(
+        file: it.file,
+        ext: ext,
+        type: it.type,
+        contentType: ct,
+        ms: it.durationMs,
+        // Fayl xabarida matn o'rnida uning nomi; izoh — birinchisiga.
+        body: it.type == 'file' ? it.name : (i == 0 ? r.caption : ''),
+        cleanup: temp
+            ? () async {
+                try {
+                  await it.file.delete();
+                } catch (_) {}
+              }
+            : null,
+      );
+    }
   }
 
   /// Yozish tugmasi: ovoz yoki dumaloq video boshlanadi.
@@ -1086,13 +1120,21 @@ class _SupportChatScreenState extends State<SupportChatScreen>
             ),
           ),
           // Telegram'dagidek: matn yozilayotganda 📎 ham turadi.
-          _AttachButton(
-            uploading: _uploading,
-            progress: _upProgress,
-            showProgress: false,
-            compact: true,
-            onImage: () => _pickAndSend(video: false),
-            onVideo: () => _pickAndSend(video: true),
+          // 📎 — Telegram'dagidek ilova ichidagi galereya / fayl oynasi.
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _uploading ? null : _openAttach,
+            child: SizedBox(
+              width: 42,
+              height: 44,
+              child: Transform.rotate(
+                angle: 0.6,
+                child: Icon(Icons.attach_file_rounded,
+                    size: 23,
+                    color: Colors.white
+                        .withValues(alpha: _uploading ? 0.25 : 0.55)),
+              ),
+            ),
           ),
         ],
       ),
@@ -1408,7 +1450,8 @@ class _Bubble extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     if (m.hasMedia) _media(context),
-                    if (m.body.isNotEmpty)
+                    // Fayl xabarida matn — faylning nomi (puffak ichida).
+                    if (m.body.isNotEmpty && m.mediaType != 'file')
                       Padding(
                         padding: EdgeInsets.fromLTRB(
                             m.isViewable ? 9 : 0, m.isViewable ? 7 : 0,
@@ -1512,6 +1555,13 @@ class _Bubble extends StatelessWidget {
           ms: m.mediaMs,
           onSelect: selecting ? onTap : null,
         );
+      case 'file':
+        return _FileBubble(
+          url: m.mediaUrl,
+          name: m.body,
+          mine: mine,
+          onSelect: selecting ? onTap : null,
+        );
     }
     return GestureDetector(
       // Tanlash rejimida rasm/video OCHILMAYDI — bosish tanlaydi.
@@ -1588,7 +1638,6 @@ class _Bubble extends StatelessWidget {
   }
 }
 
-/// Biriktirish tugmasi — yuklash ketayotganda AYLANA progress.
 /// VIDEONING BOSHIDAGI KADRI (puffak ichida).
 ///
 /// ── NEGA ALOHIDA VIDJET ─────────────────────────────────────
@@ -1653,125 +1702,6 @@ class _VideoThumbState extends State<_VideoThumb> {
     );
   }
 }
-
-class _AttachButton extends StatelessWidget {
-  final bool uploading;
-  final double progress;
-
-  /// Progress tugmada ko'rsatilsinmi.
-  ///
-  /// Endi u CHAT PUFFAGIDA ko'rinadi (foydalanuvchi talabi), shu
-  /// sabab tugmada faqat "band" holati qoladi.
-  final bool showProgress;
-  final VoidCallback onImage;
-  final VoidCallback onVideo;
-
-  /// Yozish maydonining ICHIDA — faqat 📎 belgisi (Telegram'dagidek).
-  final bool compact;
-
-  const _AttachButton({
-    required this.uploading,
-    required this.progress,
-    required this.onImage,
-    required this.onVideo,
-    this.showProgress = true,
-    this.compact = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    if (uploading && !showProgress) {
-      return SizedBox(
-        width: 42,
-        height: 42,
-        child: Icon(Icons.attach_file_rounded,
-            size: 20, color: Colors.white.withValues(alpha: 0.25)),
-      );
-    }
-    if (uploading) {
-      return SizedBox(
-        width: 42,
-        height: 42,
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            // Aylana progress — talab AYNAN shunday edi.
-            SpinRing(
-              progress: progress,
-              size: 42,
-              color: AppColors.accent,
-              track: Colors.white.withValues(alpha: 0.12),
-              fontSize: 11,
-            ),
-          ],
-        ),
-      );
-    }
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: () => showModalBottomSheet<void>(
-        context: context,
-        backgroundColor: Colors.transparent,
-        builder: (ctx) => SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
-            child: Glass(
-              borderRadius: 20,
-              blur: 18,
-              padding: const EdgeInsets.symmetric(vertical: 6),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  ListTile(
-                    leading: const Icon(Icons.image_rounded,
-                        color: Colors.white70),
-                    title: const Text('Rasm yuborish',
-                        style: TextStyle(color: Colors.white)),
-                    onTap: () {
-                      Navigator.pop(ctx);
-                      onImage();
-                    },
-                  ),
-                  ListTile(
-                    leading: const Icon(Icons.videocam_rounded,
-                        color: Colors.white70),
-                    title: const Text('Video yuborish',
-                        style: TextStyle(color: Colors.white)),
-                    onTap: () {
-                      Navigator.pop(ctx);
-                      onVideo();
-                    },
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-      child: compact
-          ? SizedBox(
-              width: 42,
-              height: 44,
-              child: Transform.rotate(
-                angle: 0.6,
-                child: Icon(Icons.attach_file_rounded,
-                    size: 23, color: Colors.white.withValues(alpha: 0.55)),
-              ),
-            )
-          : Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: Colors.white.withValues(alpha: 0.08),
-              ),
-              child: const Icon(Icons.attach_file_rounded,
-                  size: 20, color: Colors.white70),
-            ),
-    );
-  }
-}
-
 
 // ══════════════════════════════════════════════════════════════
 //  OVOZLI XABAR
@@ -2108,7 +2038,11 @@ class _UploadingBubble extends StatelessWidget {
                         const SizedBox(width: 10),
                         Expanded(
                           child: Text(
-                            voiceClock(Duration(milliseconds: ms)),
+                            type == 'file'
+                                ? path.split('/').last
+                                : voiceClock(Duration(milliseconds: ms)),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                               color: Colors.white.withValues(alpha: 0.85),
                               fontSize: 12,
@@ -2527,6 +2461,107 @@ class _RoundBubbleState extends State<_RoundBubble> {
                     ],
                   ],
                 ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+
+// ══════════════════════════════════════════════════════════════
+//  FAYL XABARI (Telegram'dagidek: belgi, nom; bosilsa ochiladi)
+// ══════════════════════════════════════════════════════════════
+
+class _FileBubble extends StatefulWidget {
+  final String url;
+  final String name;
+  final bool mine;
+  final VoidCallback? onSelect;
+  const _FileBubble(
+      {required this.url, required this.name, required this.mine, this.onSelect});
+
+  @override
+  State<_FileBubble> createState() => _FileBubbleState();
+}
+
+class _FileBubbleState extends State<_FileBubble> {
+  bool _busy = false;
+
+  Future<void> _open() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      final name = TelegramService.fileNameOf(widget.url);
+      final bytes = await TelegramService.instance.fetchBytes(widget.url);
+      if (bytes == null) throw 'yuklab bo\'lmadi';
+      final dir = await getTemporaryDirectory();
+      final safe = widget.name.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+      final f = File('${dir.path}/files/${name.hashCode}_${safe.isEmpty ? name : safe}');
+      await f.parent.create(recursive: true);
+      await f.writeAsBytes(bytes, flush: true);
+      await OpenFilex.open(f.path);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.maybeOf(context)
+            ?.showSnackBar(SnackBar(content: Text('Fayl ochilmadi: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dot = widget.name.lastIndexOf('.');
+    final ext = dot > 0 ? widget.name.substring(dot + 1).toUpperCase() : '';
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: widget.onSelect ?? _open,
+      child: SizedBox(
+        width: 230,
+        child: Row(
+          children: [
+            Container(
+              width: 46,
+              height: 46,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: widget.mine
+                    ? Colors.white.withValues(alpha: 0.22)
+                    : AppColors.accent,
+              ),
+              child: _busy
+                  ? const Padding(
+                      padding: EdgeInsets.all(13),
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Icon(Icons.insert_drive_file_rounded,
+                      color: Colors.white),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    widget.name.isEmpty ? 'Fayl' : widget.name,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600),
+                  ),
+                  if (ext.isNotEmpty)
+                    Text(ext,
+                        style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.6),
+                            fontSize: 12)),
+                ],
               ),
             ),
           ],

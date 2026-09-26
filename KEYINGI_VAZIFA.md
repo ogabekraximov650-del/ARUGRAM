@@ -3146,3 +3146,25 @@ internet qaytganda ilova o'z hisobi bilan chat tarixini tozalasin".
     ko'rinmayotgan sahifada `TickerMode` o'chiq. Ustunlar Telegram'dagidek
     `kenglik / 45 dp` (emoji) va `/ 72 dp` (stiker).
   - `lottie` paketi olib tashlandi.
+
+## Telegram'dagidek biriktirish oynasi (`tg_attach_sheet.dart`)
+
+- Cherrygram `ChatAttachAlert` kabi yasalgan:
+  - pastdan tortib kattalashtiriladigan oyna;
+  - ilova ichidagi galereya to'ri (3 ustun), birinchi katakda jonli
+    kamera — bosilsa suratga oladi;
+  - videoda uzunligi ko'rsatiladi;
+  - ko'pi bilan 10 ta narsa raqamli doira bilan tanlanadi;
+  - tepada albom tanlash;
+  - pastda "Galereya | Fayl" tugmalari; biror narsa tanlanganda ular
+    o'rnida izoh maydoni va ➤ (soni bilan).
+- "Fayl" bo'limi (`file_picker`): ichki xotira, siqilmagan rasm/video,
+  musiqa.
+- Paketlar: `photo_manager`, `file_picker`, `open_filex`. Workflow
+  `READ_MEDIA_IMAGES/VIDEO/VISUAL_USER_SELECTED` ruxsatlarini
+  qo'shadi.
+- Yangi xabar turi `file`. `media_file` — `chat_<id>_...<ext>`, matnda
+  asl nomi turadi. Puffakda belgi, nom va kengaytma ko'rinadi, bosilsa
+  fayl mos ilova bilan ochiladi. Izoh birinchi rasm/videoga qo'shiladi.
+- Kamera va fayl tanlagichi keshga nusxalagan fayllar yuborilgach
+  o'chiriladi. Galereyadagi asl faylga tegilmaydi.

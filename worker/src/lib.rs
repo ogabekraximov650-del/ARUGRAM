@@ -6431,6 +6431,8 @@ async fn chat_send(mut req: Request, env: &Env, origin: &str) -> Result<Response
         "gif" => "gif",
         // Dumaloq video xabar (Telegram'dagidek).
         "round" => "round",
+        // Istalgan fayl (hujjat) — matnda uning nomi.
+        "file" => "file",
         _ => "",
     };
     // Ovozli xabarning uzunligi — ilova yozib olganda o'lchaydi.
@@ -6492,6 +6494,8 @@ async fn chat_send(mut req: Request, env: &Env, origin: &str) -> Result<Response
         "GIF".to_string()
     } else if media_type == "round" {
         "Video xabar".to_string()
+    } else if media_type == "file" {
+        "Fayl".to_string()
     } else {
         "Rasm".to_string()
     };

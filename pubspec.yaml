@@ -96,6 +96,14 @@ dependencies:
   # ── DUMALOQ VIDEO XABAR (Telegram'dagidek) ───────────────────
   # Support chatda old kamera bilan dumaloq video yozish uchun.
   camera: ^0.11.1
+  # ── BIRIKTIRISH OYNASI (Telegram'dagidek) ────────────────────
+  # Ilova ichidagi galereya to'ri (albomlar, kichik rasmlar, video
+  # uzunligi) — tizim tanlagichi emas.
+  photo_manager: ^3.6.4
+  # "Fayl" bo'limi: istalgan turdagi faylni tanlash.
+  file_picker: ^8.1.7
+  # Chatdagi faylni ochish (mos ilova bilan).
+  open_filex: ^4.6.0
 
 # ARUGRAM: video_player_android nusxasi — pleyer videoni mahalliy
 # serversiz, diskdagi shifrlangan keshdan o'qiydi (`aru://file/<nom>`,
