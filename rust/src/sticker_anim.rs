@@ -600,6 +600,13 @@ pub extern "C" fn rust_anim_open(path_ptr: *const c_char, w: i32, h: i32) -> i64
 
 fn open_anim(path_ptr: *const c_char, w: i32, h: i32) -> i64 {
     let Some(path) = (unsafe { cstr_to_str(path_ptr) }) else { return 0 };
+    open_path(path, w, h)
+}
+
+// ── Ichki API (`anim_player.rs` — kadrlar to'g'ridan-to'g'ri ekranga) ──
+
+/// Faylni ochadi (tutqich, 0 — xato).
+pub(crate) fn open_path(path: &str, w: i32, h: i32) -> i64 {
     let Ok(bytes) = std::fs::read(path) else { return 0 };
     let kind = if bytes.starts_with(&[0x1A, 0x45, 0xDF, 0xA3]) {
         open_webm(&bytes)
@@ -925,4 +932,18 @@ mod tests {
         assert!(!d.is_null());
         unsafe { aru_vp9_close(d) };
     }
+}
+
+/// (kadrlar soni, soniyasiga kadr).
+pub(crate) fn info(id: i64) -> (usize, f64) {
+    (rust_anim_frames(id).max(0) as usize, rust_anim_fps(id))
+}
+
+/// Kadrni [out] ga (w*h*4) chizadi: 1 — tayyor.
+pub(crate) fn render_into(id: i64, frame: usize, out: &mut [u8]) -> i32 {
+    rust_anim_render(id, frame as i32, out.as_mut_ptr())
+}
+
+pub(crate) fn close(id: i64) {
+    rust_anim_close(id)
 }

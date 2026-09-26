@@ -3512,3 +3512,19 @@ zaxira yo'llar (`thumbnailData`, birinchi kadr).
 * Kirish oynasi: sozlama olinmasa 4 s dan keyin o'zi qayta so'raydi;
   sababi yoziladi (yadro ochilmadi / serverga ulanib bo'lmadi —
   internet va sana/vaqtni tekshiring / kirish yoqilmagan).
+
+## Animatsiyalar to'g'ridan-to'g'ri ekranga (Texture) — silliq
+
+* Sabab: har kadr Rust -> Dart isolate -> UI oqimi -> `ui.Image`
+  yo'lidan o'tardi; ekrandagi o'nlab emoji/stiker/GIF UI oqimini band
+  qilib, animatsiyalar sekin va uzuq-uzuq bo'lardi.
+* Endi (Android): har animatsiyaga Flutter `Texture`
+  (`SurfaceProducer`, `packages/video_player_android/.../AruAnimTextures.java`,
+  kanal `aru/anim`) va Rust o'z oqimlarida (`rust/src/anim_player.rs`:
+  1 rejalashtiruvchi + yadrolar/2 chizuvchi) kadrni `ANativeWindow` ga
+  to'g'ridan-to'g'ri chizadi. Dart faqat o'ynat/to'xtat (`AnimPlayers`,
+  `native_pool.dart`). ≤ 30 kadr/s, kechiksa sakramaydi, kadrlar
+  diskda (`.afc`). Ilova fonga o'tsa yuza ajratiladi, qaytganda qayta
+  ulanadi. Texture yo'li ishlamasa — avtomatik eski (Dart) yo'l.
+* `TgAnimView`: `_openTex` / `_texPlay` / `_closeTex`; birinchi kadr
+  yuzaga chiqqach ko'rsatiladi (qora miltillamasin).

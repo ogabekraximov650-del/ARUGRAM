@@ -227,3 +227,50 @@ void _main(SendPort out) {
     out.send([id, result]);
   });
 }
+
+// ═══════════════════════════════════════════════════════════════
+//  ANIMATSIYA O'YINCHILARI (`rust/src/anim_player.rs`)
+// ═══════════════════════════════════════════════════════════════
+//
+// Kadrni Rust o'zi Flutter `Texture` yuzasiga chizadi; bu yerdan faqat
+// "o'ynasin/to'xtasin", "kadr chiqdimi" va "yopilsin" deyiladi — arzon,
+// sinxron chaqiruvlar (UI oqimidan).
+
+typedef _SetC = Void Function(Int64, Int32);
+typedef _SetD = void Function(int, int);
+typedef _DrawnC = Int32 Function(Int64);
+typedef _DrawnD = int Function(int);
+typedef _FreeIdC = Void Function(Int64);
+typedef _FreeIdD = void Function(int);
+
+class AnimPlayers {
+  AnimPlayers._();
+
+  static DynamicLibrary? _l;
+  static _SetD? _set;
+  static _DrawnD? _drawn;
+  static _FreeIdD? _free;
+
+  static bool _load() {
+    if (_set != null) return true;
+    try {
+      final l = _l ??= _lib();
+      _set = l.lookupFunction<_SetC, _SetD>('rust_player_set');
+      _drawn = l.lookupFunction<_DrawnC, _DrawnD>('rust_player_drawn');
+      _free = l.lookupFunction<_FreeIdC, _FreeIdD>('rust_player_free');
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static void setPlaying(int id, bool on) {
+    if (_load()) _set!(id, on ? 1 : 0);
+  }
+
+  static bool drawn(int id) => _load() && _drawn!(id) == 1;
+
+  static void free(int id) {
+    if (_load()) _free!(id);
+  }
+}

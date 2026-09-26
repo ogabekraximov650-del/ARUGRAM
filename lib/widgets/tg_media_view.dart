@@ -15,6 +15,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -409,6 +410,12 @@ class _TgAnimViewState extends State<TgAnimView> {
       _px = (widget.size * dpr).round().clamp(24, cap).toInt();
       _ph = _px;
     }
+    // Android: kadrni Rust o'zi Flutter `Texture` ga chizadi (Dart
+    // kadrlar bilan shug'ullanmaydi — UI oqimi bo'sh, silliq).
+    if (_texSupported) {
+      unawaited(_openTex());
+      return;
+    }
     final first = _firstFrames[_key];
     if (first != null) _img.value = first.clone();
     if (_enabled || _image == null) _open();
@@ -418,10 +425,104 @@ class _TgAnimViewState extends State<TgAnimView> {
     final on = _tickerMode?.value.enabled ?? true;
     if (on == _enabled) return;
     _enabled = on;
+    if (_texMode) {
+      _texPlay();
+      return;
+    }
     if (on) {
       _open();
     } else {
       _release();
+    }
+  }
+
+  // ── TEXTURE REJIMI (`rust/src/anim_player.rs`) ─────────────────
+  //
+  // Birinchi xatoda (eski yig'ma, platforma qo'llamaydi) butun ilova
+  // uchun eski yo'lga (Dart orqali) qaytiladi.
+  static bool _texBroken = false;
+  static const _texCh = MethodChannel('aru/anim');
+  bool get _texSupported => Platform.isAndroid && !_texBroken;
+  bool _texMode = false;
+  int _player = 0;
+  int? _texture;
+  bool _texReady = false;
+  Timer? _texPoll;
+
+  Future<void> _openTex() async {
+    if (_player != 0 || _dead) return;
+    _texMode = true;
+    final j = await NativePool.render.call('rust_player_open',
+        arg: jsonEncode({'path': widget.path, 'w': _px, 'h': _ph}));
+    final id = (j['id'] as num?)?.toInt() ?? 0;
+    if (id <= 0) {
+      if (_dead) return;
+      setState(() => _failed = true);
+      return;
+    }
+    if (_dead) {
+      AnimPlayers.free(id);
+      return;
+    }
+    _player = id;
+    int? tex;
+    try {
+      tex = await _texCh.invokeMethod<int>(
+          'create', {'player': id, 'w': _px, 'h': _ph});
+    } catch (_) {
+      tex = null;
+    }
+    if (tex == null) {
+      // Texture yo'li ishlamadi — Dart orqali (eski yo'l).
+      _texBroken = true;
+      AnimPlayers.free(id);
+      _player = 0;
+      _texMode = false;
+      if (!_dead) _open();
+      return;
+    }
+    if (_dead) {
+      unawaited(_texCh.invokeMethod('dispose', {'texture': tex})
+          .whenComplete(() => AnimPlayers.free(id)));
+      return;
+    }
+    _texture = tex;
+    _texPlay();
+    // Birinchi kadr yuzaga chiqqach ko'rsatiladi (bo'sh/qora yuza
+    // miltillamasin).
+    var waited = 0;
+    _texPoll = Timer.periodic(const Duration(milliseconds: 16), (t) {
+      waited += 16;
+      if (_dead) {
+        t.cancel();
+        return;
+      }
+      if (AnimPlayers.drawn(id) || waited > 3000) {
+        t.cancel();
+        if (mounted) setState(() => _texReady = true);
+      }
+    });
+  }
+
+  void _texPlay() {
+    if (_player == 0) return;
+    AnimPlayers.setPlaying(_player, _enabled && !widget.frozen);
+  }
+
+  void _closeTex() {
+    _texPoll?.cancel();
+    final id = _player;
+    final tex = _texture;
+    _player = 0;
+    _texture = null;
+    if (id == 0) return;
+    AnimPlayers.setPlaying(id, false);
+    if (tex == null) {
+      AnimPlayers.free(id);
+    } else {
+      unawaited(_texCh.invokeMethod('dispose', {'texture': tex})
+          .catchError((_) => null)
+          .whenComplete(() => AnimPlayers.free(id)));
     }
   }
 
@@ -574,6 +675,7 @@ class _TgAnimViewState extends State<TgAnimView> {
   void dispose() {
     _dead = true;
     _tickerMode?.removeListener(_onTickerMode);
+    _closeTex();
     _release();
     _img.value?.dispose();
     _img.value = null;
@@ -583,6 +685,17 @@ class _TgAnimViewState extends State<TgAnimView> {
 
   @override
   Widget build(BuildContext context) {
+    if (_texMode) {
+      final tex = _texture;
+      if (_failed) return widget.fallback;
+      return SizedBox(
+        width: widget.size,
+        height: widget.height ?? widget.size,
+        child: tex != null && _texReady
+            ? Texture(textureId: tex, filterQuality: FilterQuality.medium)
+            : null,
+      );
+    }
     if (_image == null) {
       return _failed ? widget.fallback : const SizedBox.shrink();
     }

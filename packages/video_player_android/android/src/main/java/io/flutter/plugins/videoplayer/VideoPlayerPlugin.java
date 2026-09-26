@@ -26,6 +26,7 @@ public class VideoPlayerPlugin implements FlutterPlugin, AndroidVideoPlayerApi {
   private FlutterState flutterState;
   private final VideoPlayerOptions sharedOptions = new VideoPlayerOptions();
   private long nextPlayerIdentifier = 1;
+  private AruAnimTextures animTextures;
 
   /** Register this with the v2 embedding for the plugin to respond to lifecycle callbacks. */
   public VideoPlayerPlugin() {}
@@ -41,6 +42,9 @@ public class VideoPlayerPlugin implements FlutterPlugin, AndroidVideoPlayerApi {
             injector.flutterLoader()::getLookupKeyForAsset,
             binding.getTextureRegistry());
     flutterState.startListening(this, binding.getBinaryMessenger());
+    // ARUGRAM: stiker/emoji/GIF animatsiyalari uchun yuzalar.
+    animTextures =
+        new AruAnimTextures(binding.getBinaryMessenger(), binding.getTextureRegistry());
 
     binding
         .getPlatformViewRegistry()
@@ -56,6 +60,10 @@ public class VideoPlayerPlugin implements FlutterPlugin, AndroidVideoPlayerApi {
     }
     flutterState.stopListening(binding.getBinaryMessenger());
     flutterState = null;
+    if (animTextures != null) {
+      animTextures.dispose();
+      animTextures = null;
+    }
     onDestroy();
   }
 
