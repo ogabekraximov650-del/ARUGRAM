@@ -3457,3 +3457,17 @@ zaxira yo'llar (`thumbnailData`, birinchi kadr).
   `default_pattern.svg` dan) + aksentga mos gradient
   (`tg_chat_background.dart`), sarlavha va yozish paneli to'q kulrang
   (soya bilan), pufaklar: kiruvchi `#232120`, chiquvchi `#8C3A12`.
+
+## Support chat — Telegram 12 ko'rinishi
+
+* Sarlavha: fon ustida suzib turgan tabletkalar — chapda ←, o'rtada
+  rasm (44) + nom (19, qalin) + holat (bosilsa profil), o'ngda ⋮.
+  ⋮ menyusi: Qidiruv (pastda "3 / 7" va ↑↓, topilgan xabarga o'tadi),
+  Profilni ko'rish (admin), Tanlash va Tarixni tozalash (admin).
+  Tanlash rejimi ham tabletkalarda. Xabarlar sarlavha ostidan o'tadi.
+* Yozish maydoni fon ustida suzib turgan tabletka (shaffof panel).
+* Pufaklar: kiruvchi `#2A2420`, chiquvchi `#7A4A2A`; chiquvchida vaqt,
+  ✓/✓✓ va to'lqin `#E2BE9C`; ✓✓ — Telegram'dagidek ingichka chiziqli
+  (`_ChecksPainter`). Ovozli xabar tugmasi 48 dp, ochroq tusda.
+* Foydalanuvchi ko'rinishida (1:1 chat) xabarlar yonida rasm yo'q
+  (Telegram shaxsiy chati kabi); admin ko'rinishida qoladi.

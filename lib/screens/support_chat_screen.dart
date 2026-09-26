@@ -32,7 +32,6 @@ import '../services/auth_service.dart';
 import '../services/screen_guard.dart';
 import '../services/support_service.dart';
 import '../services/voice_player.dart';
-import '../theme/app_background.dart';
 import '../widgets/glass.dart';
 import 'media_view_screen.dart';
 import 'public_profile_screen.dart';
@@ -54,9 +53,14 @@ import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatf
 import '../services/rust_bridge.dart';
 
 /// Telegram qorong'i mavzusi ranglari (aksentga moslangan).
-const _kTgHeader = Color(0xFF1E1C1B);
-const _kTgInBubble = Color(0xFF232120);
-const _kTgOutBubble = Color(0xFF8C3A12);
+/// Suzib turgan tabletkalar (sarlavha, yozish maydoni) foni.
+const _kTgPill = Color(0xF0241F1C);
+const _kTgInBubble = Color(0xFF2A2420);
+const _kTgOutBubble = Color(0xFF7A4A2A);
+
+/// Chiquvchi xabardagi vaqt, belgilar va ovoz to'lqini rangi
+/// (`chat_outTimeText`, `chat_outSentCheck`).
+const _kTgOutMeta = Color(0xFFE2BE9C);
 
 class SupportChatScreen extends StatefulWidget {
   /// Admin boshqa odamning suhbatini ochsa — o'sha odamning raqami.
@@ -252,6 +256,7 @@ class _SupportChatScreenState extends State<SupportChatScreen>
     _focus.dispose();
     unawaited(_cam?.dispose());
     _scroll.dispose();
+    _searchCtl.dispose();
     // Ekran yopildi — profil sahifasidagi nuqta yangilansin.
     UnreadBadge.instance.refresh();
     // Bot chatidagi nusxalar (ovozli xabar, GIF, rasm) tozalansin.
@@ -1090,224 +1095,444 @@ class _SupportChatScreenState extends State<SupportChatScreen>
     _toBottom();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return AppBackground(
-      child: PopScope(
-        // Tanlash rejimi ochiq bo'lsa "orqaga" avval TANLOVNI
-        // bekor qiladi — ekran yopilib ketmaydi.
-        canPop: !_selecting,
-        onPopInvokedWithResult: (didPop, _) {
-          if (!didPop && _selecting) _clearSelection();
-        },
-        child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: _selecting ? _selectionBar() : _normalBar(),
-        body: SafeArea(
-          top: false,
-          child: Stack(
+  // ══════════════════════════════════════════════════════════
+  //  EKRAN — TELEGRAM (12.x) KO'RINISHI
+  // ══════════════════════════════════════════════════════════
+  //
+  // TALAB (foydalanuvchi): "Telegram'niki bilan birga-bir bo'lsin:
+  // ko'rinishi, o'qildi belgisi, yuqoridagi orqaga qaytish, profil,
+  // 3 nuqta va hokazo".
+  //
+  // Telegram'ning yangi dizayni: sarlavha — fon ustida SUZIB turgan
+  // uchta "tabletka" (chapda ←, o'rtada rasm + nom + holat, o'ngda ⋮),
+  // xabarlar ularning ostidan o'tadi; pastda yozish maydoni ham suzib
+  // turgan tabletka, yonida alohida doira tugma.
+
+  static const double _headH = 56;
+
+  /// Qidiruv (⋮ -> Qidiruv): topilgan xabarlar va joriy o'rin.
+  bool _searching = false;
+  final _searchCtl = TextEditingController();
+  List<String> _hits = const [];
+  int _hit = 0;
+
+  void _runSearch(String q) {
+    final s = q.trim().toLowerCase();
+    final out = <String>[];
+    if (s.isNotEmpty) {
+      for (final m in _chat.items.reversed) {
+        final body = plainEmojiText(tgSplitReply(m.body).$2).toLowerCase();
+        if (body.contains(s) && !tgIsWaveformBody(body)) out.add(m.id);
+      }
+    }
+    setState(() {
+      _hits = out;
+      _hit = 0;
+    });
+    if (out.isNotEmpty) _goTo(out.first);
+  }
+
+  void _stepHit(int d) {
+    if (_hits.isEmpty) return;
+    setState(() => _hit = (_hit + d).clamp(0, _hits.length - 1));
+    _goTo(_hits[_hit]);
+  }
+
+  void _closeSearch() {
+    _searchCtl.clear();
+    setState(() {
+      _searching = false;
+      _hits = const [];
+      _hit = 0;
+    });
+  }
+
+  void _openProfile() {
+    if (widget.userId == null) return;
+    Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => PublicProfileScreen(userId: widget.userId!)));
+  }
+
+  /// ⋮ menyusi (`ActionBarMenuItem`).
+  Future<void> _menuMore(Offset at) async {
+    final overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox;
+    PopupMenuItem<String> item(String v, IconData icon, String label,
+            {Color color = Colors.white}) =>
+        PopupMenuItem<String>(
+          value: v,
+          height: 50,
+          child: Row(
             children: [
-              Column(
-                children: [
-                  Expanded(
-                    child: TgChatBackground(
-                      child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        Positioned.fill(
-                          child: AnimatedBuilder(
-                            animation: _chat,
-                            builder: (context, _) => _body(),
-                          ),
-                        ),
-                        // Dumaloq video yozilayotganda — kamera doirasi
-                        // (Telegram `InstantCameraView` kabi) FAQAT xabarlar
-                        // ustida: pastdagi yozish paneli (vaqt, "bekor
-                        // qilish uchun suring", tugma) ko'rinib turadi.
-                        // Pastga tushish tugmasi (Telegram `pagedownButton`):
-                        // ro'yxat yuqoriga surilganda o'ngda pastda chiqadi.
-                        Positioned(
-                          right: 10,
-                          bottom: 10,
-                          child: AnimatedScale(
-                            scale: _showDown ? 1 : 0,
-                            duration: const Duration(milliseconds: 200),
-                            curve: Curves.easeOutBack,
-                            child: GestureDetector(
-                              onTap: () {
-                                if (!_scroll.hasClients) return;
-                                _scroll.animateTo(
-                                    _scroll.position.maxScrollExtent,
-                                    duration:
-                                        const Duration(milliseconds: 300),
-                                    curve: Curves.easeOutCubic);
-                              },
-                              child: Container(
-                                width: 42,
-                                height: 42,
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFF26272B),
-                                  shape: BoxShape.circle,
-                                  boxShadow: const [
-                                    BoxShadow(
-                                        color: Colors.black38,
-                                        blurRadius: 6,
-                                        offset: Offset(0, 2)),
-                                  ],
-                                ),
-                                child: const Icon(
-                                    Icons.keyboard_arrow_down_rounded,
-                                    color: Colors.white,
-                                    size: 28),
-                              ),
-                            ),
-                          ),
-                        ),
-                        ValueListenableBuilder<Duration>(
-                          valueListenable: _recTick,
-                          builder: (context, len, _) => TgRoundOverlay(
-                          camera: _cam,
-                          active: _roundRec,
-                          sent: _roundSent,
-                          length: len,
-                          max: _roundMax,
-                          flash: _roundFlash,
-                          onSwitchCamera: _switchCamera,
-                          onFlash: _toggleFlash,
-                        ),
-                        ),
-                      ],
-                    ),
-                    ),
-                  ),
-                  _composer(),
-                ],
-              ),
+              Icon(icon, size: 24, color: color.withValues(alpha: 0.85)),
+              const SizedBox(width: 22),
+              Text(label, style: TextStyle(color: color, fontSize: 16)),
             ],
           ),
-        ),
-      ),
-      ),
-    );
-  }
-
-  /// ── TANLASH PANELI ──────────────────────────────────────
-  ///
-  /// Chapda — tanlovni bekor qilish, o'rtada nechtasi
-  /// tanlangani, O'NG YUQORIDA esa chiqindi tugmasi
-  /// (foydalanuvchi talabi). Yonida "hammasini tanlash".
-  PreferredSizeWidget _selectionBar() {
-    final all = _chat.items.isNotEmpty &&
-        _selected.length >= _chat.items.length;
-    return AppBar(
-      backgroundColor: _kTgHeader,
-      surfaceTintColor: Colors.transparent,
-      elevation: 2,
-      shadowColor: Colors.black,
-      iconTheme: const IconThemeData(color: Colors.white),
-      titleSpacing: 0,
-      leading: IconButton(
-        icon: const Icon(Icons.close_rounded, color: Colors.white),
-        onPressed: _clearSelection,
-      ),
-      title: Text(
-        '${_selected.length} ta tanlandi',
-        style: const TextStyle(color: Colors.white, fontSize: 17),
-      ),
-      actions: [
-        IconButton(
-          tooltip: all ? 'Tanlovni olish' : 'Hammasini tanlash',
-          icon: Icon(
-            all ? Icons.deselect_rounded : Icons.select_all_rounded,
-            color: Colors.white,
-          ),
-          onPressed: all ? _clearSelection : _selectAll,
-        ),
-        IconButton(
-          tooltip: 'O\'chirish',
-          icon: const Icon(Icons.delete_outline_rounded),
-          color: Colors.red.shade400,
-          onPressed: _deleteSelected,
-        ),
-        const SizedBox(width: 4),
+        );
+    final v = await showMenu<String>(
+      context: context,
+      color: const Color(0xFF2A2420),
+      elevation: 8,
+      shape:
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      position: RelativeRect.fromRect(
+          at & const Size(1, 1), Offset.zero & overlay.size),
+      items: [
+        item('search', Icons.search_rounded, 'Qidiruv'),
+        if (widget.userId != null)
+          item('profile', Icons.person_outline_rounded, 'Profilni ko\'rish'),
+        if (_canDelete) ...[
+          item('select', Icons.check_circle_outline_rounded, 'Tanlash'),
+          item('clear', Icons.cleaning_services_outlined, 'Tarixni tozalash',
+              color: const Color(0xFFFF5A5A)),
+        ],
       ],
     );
+    if (!mounted || v == null) return;
+    switch (v) {
+      case 'search':
+        setState(() => _searching = true);
+      case 'profile':
+        _openProfile();
+      case 'select':
+        final last = _chat.items.isEmpty ? null : _chat.items.last;
+        if (last != null) _toggleSelect(last);
+      case 'clear':
+        if (_chat.items.isEmpty) return;
+        final ok = await _confirm('Butun yozishma o\'chirilsinmi?');
+        if (ok != true) return;
+        final err = await _chat
+            .removeMessages(_chat.items.map((m) => m.id).toList());
+        if (err != null) _snack(err);
+    }
   }
 
-  PreferredSizeWidget _normalBar() {
-    return AppBar(
-          // Telegram `ActionBar` (qorong'i mavzu): to'q kulrang, ostida
-          // soya — fon naqshi sarlavha ostida qoladi.
-          backgroundColor: _kTgHeader,
-          surfaceTintColor: Colors.transparent,
-          elevation: 2,
-          shadowColor: Colors.black,
-          iconTheme: const IconThemeData(color: Colors.white),
-          titleSpacing: 0,
-          title: Row(
-            children: [
-              // ── RASMGA BOSSA — PROFIL ─────────────────────────
-              //
-              // TALAB: "chatdagi profil rasmi ustiga bosganda
-              // profili ochilib profil to'liq ko'rinsin".
-              // ── `ChatAvatarContainer`: 42 dp rasm, nom (18, qalin) va
-              // ostida kulrang holat qatori (15).
-              GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: widget.userId == null
-                    ? null
-                    : () => Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) =>
-                                PublicProfileScreen(userId: widget.userId!),
-                          ),
-                        ),
-                child: widget.userId != null
-                    ? _TitleAvatar(
-                        url: widget.photoUrl, name: widget.title, size: 42)
-                    // Foydalanuvchi tomonida — yordam xizmati belgisi.
-                    : ClipOval(
-                        child: Container(
-                          width: 42,
-                          height: 42,
-                          color: Colors.black,
-                          padding: const EdgeInsets.all(7),
-                          child: Image.asset('assets/aru-mark.png'),
-                        ),
-                      ),
+  /// Suzib turgan tabletka (Telegram 12 sarlavhasi).
+  Widget _pill({required Widget child, double? width, EdgeInsets? padding}) {
+    return Container(
+      width: width,
+      height: _headH,
+      padding: padding,
+      decoration: BoxDecoration(
+        color: _kTgPill,
+        borderRadius: BorderRadius.circular(_headH / 2),
+        boxShadow: const [
+          BoxShadow(color: Color(0x40000000), blurRadius: 8, offset: Offset(0, 2)),
+        ],
+      ),
+      child: child,
+    );
+  }
+
+  Widget _roundBtn(IconData icon, VoidCallback? onTap, {Color? color}) {
+    return _pill(
+      width: _headH,
+      child: Material(
+        type: MaterialType.transparency,
+        shape: const CircleBorder(),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Icon(icon, color: color ?? Colors.white, size: 26),
+        ),
+      ),
+    );
+  }
+
+  Widget _header() {
+    final top = MediaQuery.paddingOf(context).top;
+    Widget row;
+    if (_selecting) {
+      final all = _chat.items.isNotEmpty &&
+          _selected.length >= _chat.items.length;
+      row = Row(
+        children: [
+          _roundBtn(Icons.close_rounded, _clearSelection),
+          const SizedBox(width: 8),
+          Expanded(
+            child: _pill(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text('${_selected.length} ta tanlandi',
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600)),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
+            ),
+          ),
+          const SizedBox(width: 8),
+          _pill(
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  onPressed: all ? _clearSelection : _selectAll,
+                  icon: Icon(
+                      all ? Icons.deselect_rounded : Icons.select_all_rounded,
+                      color: Colors.white),
+                ),
+                IconButton(
+                  onPressed: _deleteSelected,
+                  icon: const Icon(Icons.delete_outline_rounded,
+                      color: Color(0xFFFF5A5A)),
+                ),
+              ],
+            ),
+          ),
+        ],
+      );
+    } else if (_searching) {
+      row = Row(
+        children: [
+          _roundBtn(Icons.arrow_back_rounded, _closeSearch),
+          const SizedBox(width: 8),
+          Expanded(
+            child: _pill(
+              padding: const EdgeInsets.symmetric(horizontal: 18),
+              child: Center(
+                child: TextField(
+                  controller: _searchCtl,
+                  autofocus: true,
+                  onChanged: _runSearch,
+                  style: const TextStyle(color: Colors.white, fontSize: 17),
+                  cursorColor: AppColors.accent,
+                  decoration: InputDecoration(
+                    isDense: true,
+                    border: InputBorder.none,
+                    hintText: 'Qidiruv',
+                    hintStyle: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.4),
+                        fontSize: 17),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      );
+    } else {
+      row = Row(
+        children: [
+          _roundBtn(Icons.arrow_back_rounded,
+              () => Navigator.of(context).maybePop()),
+          const SizedBox(width: 8),
+          // `ChatAvatarContainer`: rasm (44), nom (19, qalin) va ostida
+          // kulrang holat qatori (15). Bosilsa — profil.
+          Expanded(
+            child: _pill(
+              padding: const EdgeInsets.fromLTRB(6, 6, 18, 6),
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: widget.userId == null ? null : _openProfile,
+                child: Row(
                   children: [
-                    Text(
-                      widget.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600),
-                    ),
-                    const SizedBox(height: 1),
-                    Text(
-                      widget.userId != null
-                          ? 'ID: ${widget.userId}'
-                          : 'yordam xizmati',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.55),
-                          fontSize: 14),
+                    widget.userId != null
+                        ? _TitleAvatar(
+                            url: widget.photoUrl, name: widget.title, size: 44)
+                        : ClipOval(
+                            child: Container(
+                              width: 44,
+                              height: 44,
+                              color: Colors.black,
+                              padding: const EdgeInsets.all(7),
+                              child: Image.asset('assets/aru-mark.png'),
+                            ),
+                          ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            widget.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 19,
+                                height: 1.15,
+                                fontWeight: FontWeight.w600),
+                          ),
+                          Text(
+                            widget.userId != null
+                                ? 'ID: ${widget.userId}'
+                                : 'yordam xizmati',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.5),
+                                height: 1.2,
+                                fontSize: 15),
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
               ),
-            ],
+            ),
           ),
-        );
+          const SizedBox(width: 8),
+          Builder(
+            builder: (btn) => _roundBtn(Icons.more_vert_rounded, () {
+              final box = btn.findRenderObject() as RenderBox;
+              _menuMore(box.localToGlobal(box.size.bottomRight(Offset.zero)));
+            }),
+          ),
+        ],
+      );
+    }
+    return Padding(
+      padding: EdgeInsets.fromLTRB(10, top + 6, 10, 0),
+      child: row,
+    );
+  }
+
+  /// Qidiruvda pastki qator (`SearchPanel`): "3 / 7" va ↑ ↓.
+  Widget _searchBar() {
+    final n = _hits.length;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(10, 6, 10, 8),
+      child: Container(
+        height: 48,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        decoration: BoxDecoration(
+          color: _kTgPill,
+          borderRadius: BorderRadius.circular(24),
+        ),
+        child: Row(
+          children: [
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                _searchCtl.text.trim().isEmpty
+                    ? ''
+                    : n == 0
+                        ? 'Hech narsa topilmadi'
+                        : '${_hit + 1} / $n',
+                style: const TextStyle(color: Colors.white, fontSize: 15),
+              ),
+            ),
+            IconButton(
+              onPressed: _hit < n - 1 ? () => _stepHit(1) : null,
+              icon: const Icon(Icons.keyboard_arrow_up_rounded),
+              color: Colors.white,
+              disabledColor: Colors.white24,
+            ),
+            IconButton(
+              onPressed: _hit > 0 ? () => _stepHit(-1) : null,
+              icon: const Icon(Icons.keyboard_arrow_down_rounded),
+              color: Colors.white,
+              disabledColor: Colors.white24,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      // Tanlash yoki qidiruv ochiq bo'lsa "orqaga" avval ularni yopadi.
+      canPop: !_selecting && !_searching,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        if (_selecting) {
+          _clearSelection();
+        } else if (_searching) {
+          _closeSearch();
+        }
+      },
+      child: Scaffold(
+        backgroundColor: const Color(0xFF0C0A09),
+        body: TgChatBackground(
+          child: SafeArea(
+            top: false,
+            child: Stack(
+              children: [
+                Column(
+                  children: [
+                    Expanded(
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          Positioned.fill(
+                            child: AnimatedBuilder(
+                              animation: _chat,
+                              builder: (context, _) => _body(),
+                            ),
+                          ),
+                          // Pastga tushish tugmasi (Telegram `pagedownButton`).
+                          Positioned(
+                            right: 10,
+                            bottom: 10,
+                            child: AnimatedScale(
+                              scale: _showDown ? 1 : 0,
+                              duration: const Duration(milliseconds: 200),
+                              curve: Curves.easeOutBack,
+                              child: GestureDetector(
+                                onTap: () {
+                                  if (!_scroll.hasClients) return;
+                                  _scroll.animateTo(
+                                      _scroll.position.maxScrollExtent,
+                                      duration:
+                                          const Duration(milliseconds: 300),
+                                      curve: Curves.easeOutCubic);
+                                },
+                                child: Container(
+                                  width: 44,
+                                  height: 44,
+                                  decoration: const BoxDecoration(
+                                    color: _kTgPill,
+                                    shape: BoxShape.circle,
+                                    boxShadow: [
+                                      BoxShadow(
+                                          color: Colors.black38,
+                                          blurRadius: 6,
+                                          offset: Offset(0, 2)),
+                                    ],
+                                  ),
+                                  child: const Icon(
+                                      Icons.keyboard_arrow_down_rounded,
+                                      color: Colors.white,
+                                      size: 28),
+                                ),
+                              ),
+                            ),
+                          ),
+                          // Dumaloq video yozilayotganda — kamera doirasi
+                          // FAQAT xabarlar ustida (`InstantCameraView`).
+                          ValueListenableBuilder<Duration>(
+                            valueListenable: _recTick,
+                            builder: (context, len, _) => TgRoundOverlay(
+                              camera: _cam,
+                              active: _roundRec,
+                              sent: _roundSent,
+                              length: len,
+                              max: _roundMax,
+                              flash: _roundFlash,
+                              onSwitchCamera: _switchCamera,
+                              onFlash: _toggleFlash,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (_searching) _searchBar() else _composer(),
+                  ],
+                ),
+                Positioned(top: 0, left: 0, right: 0, child: _header()),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _body() {
@@ -1364,7 +1589,9 @@ class _SupportChatScreenState extends State<SupportChatScreen>
       controller: _scroll,
       physics: const BouncingScrollPhysics(
           parent: AlwaysScrollableScrollPhysics()),
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      // Tepada suzib turgan sarlavha ostidan o'tadi.
+      padding: EdgeInsets.fromLTRB(
+          12, MediaQuery.paddingOf(context).top + _headH + 14, 12, 10),
       // Oxirida: yuklanayotgan fayl va (kerak bo'lsa) aylana.
       itemCount: items.length + (_uploading ? 1 : 0) + (_pullBusy ? 1 : 0),
       itemBuilder: (context, i) {
@@ -1426,6 +1653,7 @@ class _SupportChatScreenState extends State<SupportChatScreen>
           avatarUrl: mine ? '' : widget.photoUrl,
           avatarName: mine ? '' : widget.title,
           showAvatar: !mine && lastOfGroup,
+          avatars: widget.userId != null,
           onAvatarTap: widget.userId == null
               ? null
               : () => Navigator.of(context).push(
@@ -1498,8 +1726,9 @@ class _SupportChatScreenState extends State<SupportChatScreen>
     final active = _recording || _roundRec;
     return Container(
       decoration: BoxDecoration(
-        // Telegram `ChatActivityEnterView` foni — sarlavha bilan bir xil.
-        color: _kTgHeader,
+        // Telegram 12: yozish maydoni fon ustida suzib turadi (panel
+        // orqasi shaffof).
+        color: Colors.transparent,
       ),
       child: TgInputArea(
         controller: _input,
@@ -1516,11 +1745,18 @@ class _SupportChatScreenState extends State<SupportChatScreen>
               curve: Curves.easeOutCubic,
               child: _replyTo == null || active
                   ? const SizedBox(width: double.infinity)
-                  : TgReplyBar(
-                      name: _nameOf(_replyTo!),
-                      text: _snippet(_replyTo!),
-                      color: AppColors.accent2,
-                      onClose: () => setState(() => _replyTo = null),
+                  : Container(
+                      margin: const EdgeInsets.fromLTRB(10, 6, 10, 0),
+                      decoration: BoxDecoration(
+                        color: _kTgPill,
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      child: TgReplyBar(
+                        name: _nameOf(_replyTo!),
+                        text: _snippet(_replyTo!),
+                        color: AppColors.accent2,
+                        onClose: () => setState(() => _replyTo = null),
+                      ),
                     ),
             ),
             Padding(
@@ -1555,11 +1791,13 @@ class _SupportChatScreenState extends State<SupportChatScreen>
   /// Oddiy holat: 🙂, matn maydoni va 📎.
   Widget _field(Widget emojiButton) {
     return Container(
-      constraints: const BoxConstraints(minHeight: 44),
+      constraints: const BoxConstraints(minHeight: 48),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.07),
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+        color: _kTgPill,
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: const [
+          BoxShadow(color: Color(0x33000000), blurRadius: 6, offset: Offset(0, 2)),
+        ],
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
@@ -1618,8 +1856,12 @@ class _SupportChatScreenState extends State<SupportChatScreen>
   /// (yaltirab turadi, barmoq bilan siljiydi); qulflanganda —
   /// "BEKOR QILISH".
   Widget _recordingInfo() {
-    return SizedBox(
+    return Container(
       height: 48,
+      decoration: BoxDecoration(
+        color: _kTgPill,
+        borderRadius: BorderRadius.circular(24),
+      ),
       child: Row(
         children: [
           const SizedBox(width: 12),
@@ -1849,6 +2091,10 @@ class _Bubble extends StatelessWidget {
 
   /// Guruhdagi OXIRGI xabarmi — rasm faqat shunda chiziladi.
   final bool showAvatar;
+
+  /// Suhbatdosh rasmi uchun joy (Telegram shaxsiy chatida — yo'q;
+  /// faqat admin ko'rinishida, foydalanuvchi talabi bo'yicha).
+  final bool avatars;
   final VoidCallback? onAvatarTap;
 
   /// Admin uchun — uzoq bosilganda tanlash boshlanadi.
@@ -1886,6 +2132,7 @@ class _Bubble extends StatelessWidget {
     this.avatarUrl = '',
     this.avatarName = '',
     this.showAvatar = false,
+    this.avatars = true,
     this.onAvatarTap,
     this.onLongPressAt,
     this.quote,
@@ -1917,7 +2164,7 @@ class _Bubble extends StatelessWidget {
             mine ? MainAxisAlignment.end : MainAxisAlignment.start,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          if (!mine) ...[
+          if (!mine && avatars) ...[
             // Rasm chizilmasa ham JOYI saqlanadi — aks holda
             // guruhdagi xabarlar bir-biriga nisbatan siljib
             // ketardi.
@@ -2067,7 +2314,9 @@ class _Bubble extends StatelessWidget {
     final m = message;
     final c = onMedia
         ? Colors.white
-        : Colors.white.withValues(alpha: mine ? 0.75 : 0.5);
+        : mine
+            ? _kTgOutMeta
+            : Colors.white.withValues(alpha: 0.45);
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -2079,7 +2328,10 @@ class _Bubble extends StatelessWidget {
         // uning "o'qildi" holati ma'nosiz).
         if (mine) ...[
           const SizedBox(width: 3),
-          _SendState(pending: m.pending, seen: m.seen),
+          _SendState(
+              pending: m.pending,
+              seen: m.seen,
+              color: onMedia ? Colors.white : _kTgOutMeta),
         ],
       ],
     );
@@ -2368,8 +2620,10 @@ class _VoiceBubble extends StatelessWidget {
         final wave = tgDecodeWaveform(m.body);
         final current = vp.isCurrent(m.id) && maxMs > 0;
         final progress = maxMs <= 0 ? 0.0 : posMs / maxMs;
-        final btnBg = mine ? Colors.white : AppColors.accent;
-        final btnFg = mine ? AppColors.accent : Colors.white;
+        // Telegram: chiquvchida tugma pufakdan ochroq tusda, belgi oq;
+        // kiruvchida — aksent doira.
+        final btnBg = mine ? const Color(0xFFB07C57) : AppColors.accent2;
+        const btnFg = Colors.white;
         return SizedBox(
           width: 200,
           child: Row(
@@ -2378,8 +2632,8 @@ class _VoiceBubble extends StatelessWidget {
                 behavior: HitTestBehavior.opaque,
                 onTap: onSelect ?? () => vp.toggle(m.id, m.mediaUrl),
                 child: Container(
-                  width: 44,
-                  height: 44,
+                  width: 48,
+                  height: 48,
                   decoration:
                       BoxDecoration(shape: BoxShape.circle, color: btnBg),
                   child: opening
@@ -2414,8 +2668,10 @@ class _VoiceBubble extends StatelessWidget {
                       child: TgWaveform(
                         wave: wave,
                         progress: current ? progress : 0,
-                        played: Colors.white,
-                        rest: Colors.white.withValues(alpha: 0.4),
+                        played: mine ? const Color(0xFFF6E2CF) : Colors.white,
+                        rest: mine
+                            ? _kTgOutMeta.withValues(alpha: 0.55)
+                            : Colors.white.withValues(alpha: 0.35),
                         onSeek: onSelect != null || !current
                             ? null
                             : (f) => vp.seek(m.id,
@@ -2426,8 +2682,10 @@ class _VoiceBubble extends StatelessWidget {
                       // Yangrayotganda — hozirgi nuqta, aks holda uzunlik.
                       current ? voiceClock(pos) : voiceClock(total),
                       style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.65),
-                        fontSize: 12,
+                        color: mine
+                            ? _kTgOutMeta
+                            : Colors.white.withValues(alpha: 0.55),
+                        fontSize: 13,
                       ),
                     ),
                   ],
@@ -2454,8 +2712,10 @@ class _VoiceBubble extends StatelessWidget {
 class _SendState extends StatefulWidget {
   final bool pending;
   final bool seen;
+  final Color color;
 
-  const _SendState({required this.pending, required this.seen});
+  const _SendState(
+      {required this.pending, required this.seen, required this.color});
 
   @override
   State<_SendState> createState() => _SendStateState();
@@ -2494,32 +2754,53 @@ class _SendStateState extends State<_SendState>
 
   @override
   Widget build(BuildContext context) {
-    final color = Colors.white.withValues(alpha: widget.seen ? 0.95 : 0.6);
+    final color = widget.color;
     if (widget.pending) {
       return RotationTransition(
         turns: _spin,
         child: Icon(Icons.schedule_rounded, size: 12, color: color),
       );
     }
-    // Ikkita belgi bir-biriga QISMAN kirib turadi — Telegramda
-    // ham shunday, alohida ikkita ✓ bo'lib ko'rinmaydi.
-    if (widget.seen) {
-      return SizedBox(
-        width: 17,
-        height: 12,
-        child: Stack(
-          children: [
-            Icon(Icons.check_rounded, size: 12, color: color),
-            Positioned(
-              left: 5,
-              child: Icon(Icons.check_rounded, size: 12, color: color),
-            ),
-          ],
-        ),
-      );
-    }
-    return Icon(Icons.check_rounded, size: 12, color: color);
+    // Telegram `msg_check_s` / `msg_halfcheck`: ingichka chiziqli ✓ va
+    // o'qilganda ikkinchisi yarim ustma-ust ✓✓.
+    return CustomPaint(
+      size: const Size(17, 11),
+      painter: _ChecksPainter(color, widget.seen),
+    );
   }
+}
+
+class _ChecksPainter extends CustomPainter {
+  final Color color;
+  final bool two;
+  _ChecksPainter(this.color, this.two);
+
+  @override
+  void paint(Canvas canvas, Size s) {
+    final p = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.4
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    // Birinchi ✓.
+    final a = Path()
+      ..moveTo(0.8, 5.8)
+      ..lineTo(3.8, 8.8)
+      ..lineTo(10.4, 1.6);
+    canvas.drawPath(a, p);
+    if (two) {
+      // Ikkinchi ✓ — faqat o'ng qanoti (Telegram `halfcheck`).
+      final b = Path()
+        ..moveTo(7.6, 8.4)
+        ..lineTo(8.2, 8.8)
+        ..lineTo(14.8, 1.6);
+      canvas.drawPath(b, p);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_ChecksPainter o) => o.color != color || o.two != two;
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -2669,7 +2950,7 @@ class _UploadingBubble extends StatelessWidget {
                 // Pastda aylanuvchi soat — hali yuborilmadi.
                 const Padding(
                   padding: EdgeInsets.only(top: 4, right: 4),
-                  child: _SendState(pending: true, seen: false),
+                  child: _SendState(pending: true, seen: false, color: Colors.white70),
                 ),
               ],
             ),
