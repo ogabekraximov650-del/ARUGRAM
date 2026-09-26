@@ -310,10 +310,16 @@ class _TgMediaPanelState extends State<TgMediaPanel> {
           PageView(
             controller: _pages,
             onPageChanged: (i) => setState(() => _tab = _lastTab = i),
+            // Ko'rinmayotgan sahifadagi animatsiyalar to'xtaydi.
             children: [
-              _EmojiPage(controller: widget.controller),
-              _GifPage(onGif: widget.onGif),
-              _StickerPage(onSticker: widget.onSticker),
+              TickerMode(
+                  enabled: _tab == 0,
+                  child: _EmojiPage(controller: widget.controller)),
+              TickerMode(
+                  enabled: _tab == 1, child: _GifPage(onGif: widget.onGif)),
+              TickerMode(
+                  enabled: _tab == 2,
+                  child: _StickerPage(onSticker: widget.onSticker)),
             ],
           ),
           // ── Pastda suzib turgan tugmalar (Telegram'dagidek) ──
@@ -524,25 +530,28 @@ class _Strip extends StatelessWidget {
 /// o'sha joyga aniq sakraladi va aylantirilganda tanlangan belgi
 /// o'zi almashadi.
 class _Sections extends StatefulWidget {
-  final int columns;
+  /// Katakning eng kichik kengligi (Telegram: emoji — 45 dp, stiker —
+  /// 72 dp); ustunlar soni kenglikdan hisoblanadi, lekin
+  /// [minColumns] dan kam emas.
+  final double minCell;
+  final int minColumns;
   final List<int> counts;
   final List<Widget> headers;
-  final Widget Function(int section, int index, double cell) cell;
 
-  /// Bo'lim hali yuklanmagan bo'lsa (to'plam) — butun bo'limni o'zi
-  /// quradi.
-  final Widget? Function(int section, double cell)? lazySection;
+  /// Katak. Faqat EKRANDA ko'ringanlari quriladi (`SliverGrid`) — ilgari
+  /// to'plam butunligicha (`Wrap`) qurilardi va panel qotardi.
+  final Widget Function(int section, int index, double cell) cell;
   final ValueChanged<int> onSection;
   final _SectionsJump jump;
 
   const _Sections({
-    required this.columns,
+    required this.minCell,
+    required this.minColumns,
     required this.counts,
     required this.headers,
     required this.cell,
     required this.onSection,
     required this.jump,
-    this.lazySection,
   });
 
   @override
@@ -557,6 +566,7 @@ class _SectionsJump {
 class _SectionsState extends State<_Sections> {
   final _scroll = ScrollController();
   double _cellSize = 40;
+  int _columns = 8;
   int _current = 0;
 
   @override
@@ -579,7 +589,7 @@ class _SectionsState extends State<_Sections> {
   }
 
   double _sectionHeight(int i) {
-    final rows = (widget.counts[i] / widget.columns).ceil();
+    final rows = (widget.counts[i] / _columns).ceil();
     return _Header.height + rows * _cellSize;
   }
 
@@ -616,29 +626,27 @@ class _SectionsState extends State<_Sections> {
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(builder: (context, box) {
-      _cellSize = box.maxWidth / widget.columns;
+      final w = box.maxWidth - 10;
+      _columns = math.max(widget.minColumns, (w / widget.minCell).floor());
+      _cellSize = w / _columns;
       final cell = _cellSize;
       return CustomScrollView(
         controller: _scroll,
         slivers: [
           for (var s = 0; s < widget.counts.length; s++) ...[
             SliverToBoxAdapter(child: widget.headers[s]),
-            if (widget.lazySection?.call(s, cell) case final lazy?)
-              SliverToBoxAdapter(
-                child: SizedBox(
-                  height: (widget.counts[s] / widget.columns).ceil() * cell,
-                  child: lazy,
-                ),
-              )
-            else
-              SliverGrid(
+            SliverPadding(
+              padding: const EdgeInsets.symmetric(horizontal: 5),
+              sliver: SliverGrid(
                 gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: widget.columns),
+                    crossAxisCount: _columns),
                 delegate: SliverChildBuilderDelegate(
                   (_, i) => widget.cell(s, i, cell),
                   childCount: widget.counts[s],
+                  addAutomaticKeepAlives: false,
                 ),
               ),
+            ),
           ],
           // Pastdagi suzuvchi tugmalar oxirgi qatorni yopmasin.
           const SliverToBoxAdapter(child: SizedBox(height: 60)),
@@ -775,12 +783,22 @@ class _EmojiPageState extends State<_EmojiPage>
         ),
         Expanded(
           child: _Sections(
-            columns: 8,
+            minCell: 45,
+            minColumns: 7,
             counts: counts,
             headers: headers,
             jump: _jump,
             onSection: (i) => setState(() => _section = i),
             cell: (s, i, cell) {
+              if (s >= firstSet) {
+                return _SetCell(
+                  set: _sets[s - firstSet],
+                  index: i,
+                  size: cell * 0.62,
+                  locked: !_premium,
+                  onTap: _pickCustom,
+                );
+              }
               if (s == 0) {
                 if (i < _recentCustom.length) {
                   final d = _recentCustom[i];
@@ -795,18 +813,6 @@ class _EmojiPageState extends State<_EmojiPage>
               }
               final e = groups[s - 1].emoji[i];
               return _EmojiCell(e, cell, () => _pickEmoji(e));
-            },
-            lazySection: (s, cell) {
-              if (s < firstSet) return null;
-              final set = _sets[s - firstSet];
-              return _SetGrid(
-                set: set,
-                columns: 8,
-                cell: cell,
-                scale: 0.62,
-                locked: !_premium,
-                onTap: _pickCustom,
-              );
             },
           ),
         ),
@@ -857,20 +863,19 @@ class _SetIcon extends StatelessWidget {
   }
 }
 
-/// To'plam katakchalari (yuklanguncha bo'sh joy).
-class _SetGrid extends StatelessWidget {
+/// To'plamning bitta katagi. To'plam ro'yxati bir marta olinadi
+/// (`setDocs` keshlangan), katak esa faqat ekranga chiqqanda quriladi.
+class _SetCell extends StatelessWidget {
   final TgSet set;
-  final int columns;
-  final double cell;
-  final double scale;
+  final int index;
+  final double size;
   final bool locked;
   final ValueChanged<TgDoc> onTap;
 
-  const _SetGrid({
+  const _SetCell({
     required this.set,
-    required this.columns,
-    required this.cell,
-    required this.scale,
+    required this.index,
+    required this.size,
     required this.onTap,
     this.locked = false,
   });
@@ -880,25 +885,15 @@ class _SetGrid extends StatelessWidget {
     return FutureBuilder<List<TgDoc>>(
       future: TgMedia.instance.setDocs(set.id, set.hash),
       builder: (context, snap) {
-        final docs = snap.data ?? const <TgDoc>[];
-        return Opacity(
-          opacity: locked ? 0.55 : 1,
-          child: Wrap(
-            children: [
-              for (final d in docs)
-                SizedBox(
-                  width: cell,
-                  height: cell,
-                  child: InkWell(
-                    onTap: () => onTap(d),
-                    borderRadius: BorderRadius.circular(8),
-                    child: Center(
-                      child: TgStickerView(
-                          doc: d, size: cell * scale, still: true),
-                    ),
-                  ),
-                ),
-            ],
+        final docs = snap.data;
+        if (docs == null || index >= docs.length) return const SizedBox();
+        final d = docs[index];
+        return InkWell(
+          onTap: () => onTap(d),
+          borderRadius: BorderRadius.circular(8),
+          child: Opacity(
+            opacity: locked ? 0.55 : 1,
+            child: Center(child: TgStickerView(doc: d, size: size, still: true)),
           ),
         );
       },
@@ -985,12 +980,21 @@ class _StickerPageState extends State<_StickerPage>
         ),
         Expanded(
           child: _Sections(
-            columns: 5,
+            minCell: 72,
+            minColumns: 5,
             counts: counts,
             headers: headers,
             jump: _jump,
             onSection: (i) => setState(() => _section = i),
             cell: (s, i, cell) {
+              if (s >= 2) {
+                return _SetCell(
+                  set: _sets[s - 2],
+                  index: i,
+                  size: cell * 0.86,
+                  onTap: widget.onSticker,
+                );
+              }
               final d = s == 0 ? _recent[i] : _faved[i];
               return InkWell(
                 onTap: () => widget.onSticker(d),
@@ -999,15 +1003,6 @@ class _StickerPageState extends State<_StickerPage>
                     child: TgStickerView(doc: d, size: cell * 0.86, still: true)),
               );
             },
-            lazySection: (s, cell) => s < 2
-                ? null
-                : _SetGrid(
-                    set: _sets[s - 2],
-                    columns: 5,
-                    cell: cell,
-                    scale: 0.86,
-                    onTap: widget.onSticker,
-                  ),
           ),
         ),
       ],

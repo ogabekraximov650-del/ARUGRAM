@@ -3103,3 +3103,46 @@ internet qaytganda ilova o'z hisobi bilan chat tarixini tozalasin".
     - fayl shifrlangan keshdan o'qiladi (`aru://`).
   - Stiker, GIF va dumaloq video pufaksiz chiziladi.
   - APK'ga `CAMERA` ruxsati qo'shildi (workflow).
+
+## Stikerlar Telegram/Cherrygram kabi: rlottie + libvpx, panel qotmaydi
+
+- **Qotish sabablari:**
+  - `.tgs` Dart'dagi `lottie` paketi bilan UI oqimida o'qilib, o'nlab
+    animatsiya bir vaqtda chizilardi;
+  - har bir stiker fayli uchun `Isolate.run` bilan yangi isolate
+    ochilardi;
+  - to'plam butunligicha (`Wrap`) qurilardi.
+- **Cherrygram (Telegram fork'i) qanday qiladi:**
+  - `RLottieDrawable`: rlottie, 4 ta fon oqimi, kadrlar keshi;
+  - `AnimatedFileDrawable`: FFmpeg + libvpx, `.webm` shaffoflik bilan
+    (`gifvideo.cpp`: YUVA420P -> ARGB).
+- **Endi bizda ham shunday:**
+  - `rust/third_party/rlottie` (MIT) va `rust/third_party/libvpx` (BSD,
+    faqat VP9 dekoder, sof C; sarlavhalar
+    `configure --target=generic-gnu` bilan yasalgan) `build.rs` da `cc`
+    bilan yig'iladi. Android'da C++ statik bog'lanadi
+    (`c++_static`). armv7'da pixman assembleri NDK clang'ida
+    yig'ilmaydi, shu sabab u yerda sof C yo'li (`-U__ARM_NEON__`).
+  - `rust/src/sticker_anim.rs`: `rust_anim_open`, `_frames`, `_fps`,
+    `_render`, `_close`. `.webm` uchun kichik EBML o'quvchi bor: rang
+    `Block`/`SimpleBlock` da, shaffoflik `BlockAdditional` da.
+    `native/vp9_shim.c` ikkala VP9 oqimini ochib, premultiplied RGBA
+    beradi.
+  - Testlar: Lottie kadri; `vpxenc` bilan yasalgan shaffof `.webm`
+    (`src/testdata/alpha_sticker.webm`).
+  - arm64 `.so` 3.9 MB dan 4.8 MB ga oshdi.
+- **Dart tomoni:**
+  - `lib/services/native_pool.dart` — doimiy ishchi isolate'lar:
+    `io` (3 ta, tarmoq) va `render` (2 ta, kadrlar). `tgCall` endi
+    shu hovuz orqali ishlaydi.
+  - `TgAnimView`:
+    - kadr fon isolate'ida chiziladi, bir animatsiyaga bir so'rov,
+      ulgurmasa kadr tashlab o'tiladi;
+    - 3 MB gacha kadrlar xotirada saqlanadi;
+    - birinchi kadrlar umumiy keshda turadi;
+    - panelda o'lcham ko'pi bilan 160 px va bir vaqtda 18 ta
+      animatsiya.
+  - Panel: faqat ko'ringan kataklar quriladi (`SliverGrid` + `_SetCell`),
+    ko'rinmayotgan sahifada `TickerMode` o'chiq. Ustunlar Telegram'dagidek
+    `kenglik / 45 dp` (emoji) va `/ 72 dp` (stiker).
+  - `lottie` paketi olib tashlandi.

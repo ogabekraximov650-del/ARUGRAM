@@ -2,19 +2,22 @@
 // GIF'ni chizish (`lib/services/tg_media.dart`).
 //
 //   * `webp` / rasm — oddiy rasm;
-//   * `tgs` — Lottie animatsiya (gzip'langan JSON);
-//   * `webm` (video stiker) — kichik rasmi (Android'dagi pleyer shaffof
-//     fonli webm'ni chiza olmaydi);
+//   * `tgs` (Lottie) va `webm` (video stiker, shaffof fon bilan) —
+//     Telegram'dagidek ilova ichidagi rlottie va libvpx bilan, fon
+//     isolate'ida (`TgAnimView`);
 //   * GIF — ovozsiz, takrorlanadigan mp4.
 
+import 'dart:async';
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
-import 'package:lottie/lottie.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:video_player/video_player.dart';
 
 import '../services/api_base.dart';
+import '../services/native_pool.dart';
 import '../services/telegram_service.dart';
 import '../services/tg_media.dart';
 
@@ -23,8 +26,8 @@ class TgStickerView extends StatelessWidget {
   final TgDoc doc;
   final double size;
 
-  /// Panelda: animatsiya faqat bir marta (ko'p stiker birdan
-  /// aylanib, telefonni qizdirmasin).
+  /// Panelda (Telegram'dagidek): kichikroq o'lchamda, kadrlar
+  /// xotirada saqlanib, cheklangan sonda harakatlanadi.
   final bool still;
 
   const TgStickerView(
@@ -32,20 +35,30 @@ class TgStickerView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final thumbOnly = doc.kind == 'webm' || doc.kind == 'mp4';
+    final animated = doc.kind == 'tgs' || doc.kind == 'webm';
     return SizedBox(
       width: size,
       height: size,
       child: FutureBuilder<String?>(
-        future: TgMedia.instance.file(doc, thumb: thumbOnly && doc.thumb),
+        future: TgMedia.instance.file(doc, thumb: doc.kind == 'mp4' && doc.thumb),
         builder: (context, snap) {
           final path = snap.data;
           if (path == null) return _Fallback(doc.emoji, size);
-          if (doc.kind == 'tgs') return _Lottie(path, size, still);
+          if (animated) {
+            return TgAnimView(
+              path: path,
+              size: size,
+              panel: still,
+              fallback: _Fallback(doc.emoji, size),
+            );
+          }
+          final px = (size * MediaQuery.devicePixelRatioOf(context)).round();
           return Image.file(
             File(path),
             width: size,
             height: size,
+            // Asl 512px emas — ko'rinadigan o'lchamda ochiladi.
+            cacheWidth: px,
             fit: BoxFit.contain,
             gaplessPlayback: true,
             errorBuilder: (_, __, ___) => _Fallback(doc.emoji, size),
@@ -68,48 +81,203 @@ class _Fallback extends StatelessWidget {
       );
 }
 
-class _Lottie extends StatefulWidget {
+// ═══════════════════════════════════════════════════════════════
+//  ANIMATSIYA (rlottie / libvpx, Rust yadrosida — `sticker_anim.rs`)
+// ═══════════════════════════════════════════════════════════════
+//
+// Telegram/Cherrygram (`RLottieDrawable`) kabi:
+//   * kadr FON isolate'ida chiziladi (`NativePool.render`), UI oqimi
+//     faqat tayyor rasmni ko'rsatadi — hech narsa qotmaydi;
+//   * bitta animatsiyaga bir vaqtda faqat BITTA so'rov: kadr
+//     ulgurmasa tashlab o'tiladi (ekran to'xtab qolmaydi);
+//   * birinchi aylanishda chizilgan kadrlar xotirada qoladi (hajmi
+//     kichik bo'lsa) — keyingi aylanishlar protsessorni ishlatmaydi;
+//   * panelda o'lcham kichikroq va bir vaqtda eng ko'pi
+//     [_panelSlots] ta stiker harakatlanadi, qolganlari birinchi kadrda
+//     turadi (joy bo'shashi bilan ular ham harakatlanadi).
+
+/// Birinchi kadrlar keshi — panel qayta ochilganda darhol ko'rinsin.
+final Map<String, ui.Image> _firstFrames = {};
+const _firstFramesMax = 300;
+
+/// Panelda bir vaqtda harakatlanadigan stikerlar.
+const _panelSlots = 18;
+int _panelBusy = 0;
+final List<VoidCallback> _panelWaiters = [];
+
+class TgAnimView extends StatefulWidget {
   final String path;
   final double size;
-  final bool still;
-  const _Lottie(this.path, this.size, this.still);
+  final bool panel;
+  final Widget fallback;
+
+  const TgAnimView({
+    super.key,
+    required this.path,
+    required this.size,
+    required this.fallback,
+    this.panel = false,
+  });
 
   @override
-  State<_Lottie> createState() => _LottieState();
+  State<TgAnimView> createState() => _TgAnimViewState();
 }
 
-class _LottieState extends State<_Lottie> {
-  static final Map<String, Future<LottieComposition?>> _cache = {};
-  late Future<LottieComposition?> _comp;
+class _TgAnimViewState extends State<TgAnimView>
+    with SingleTickerProviderStateMixin {
+  Ticker? _ticker;
+  int _handle = 0;
+  int _frames = 1;
+  double _fps = 30;
+  int _px = 0;
+  ui.Image? _image;
+  bool _busy = false;
+  bool _dead = false;
+  bool _slot = false;
+  int _shown = -1;
+
+  /// Xotiradagi kadrlar (sig'sa).
+  List<ui.Image?>? _cache;
+
+  String get _key => '${widget.path}@$_px';
 
   @override
-  void initState() {
-    super.initState();
-    _comp = _cache[widget.path] ??= () async {
-      try {
-        return await LottieComposition.decodeGZip(
-            await File(widget.path).readAsBytes());
-      } catch (_) {
-        return null;
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_px != 0) return;
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    _px = (widget.size * dpr)
+        .round()
+        .clamp(24, widget.panel ? 160 : 384)
+        .toInt();
+    final first = _firstFrames[_key];
+    if (first != null) _image = first.clone();
+    _open();
+  }
+
+  Future<void> _open() async {
+    final r = await NativePool.render.animOpen(widget.path, _px, _px);
+    if (_dead) {
+      if (r != null) NativePool.render.animClose(r.$1);
+      return;
+    }
+    if (r == null) {
+      setState(() => _handle = -1);
+      return;
+    }
+    _handle = r.$1;
+    _frames = r.$2.clamp(1, 100000);
+    _fps = r.$3 > 0 ? r.$3 : 30;
+    // Hamma kadr 3 MB dan oshmasa — xotirada saqlanadi.
+    if (_px * _px * 4 * _frames <= 3 * 1024 * 1024) {
+      _cache = List<ui.Image?>.filled(_frames, null);
+    }
+    if (_image == null) await _render(0);
+    if (_dead) return;
+    if (_frames > 1) _wantPlay();
+  }
+
+  void _wantPlay() {
+    if (!widget.panel) return _play();
+    if (_panelBusy < _panelSlots) {
+      _panelBusy++;
+      _slot = true;
+      _play();
+    } else {
+      _panelWaiters.add(_onSlot);
+    }
+  }
+
+  void _onSlot() {
+    if (_dead || _slot) return;
+    _panelBusy++;
+    _slot = true;
+    _play();
+  }
+
+  void _play() {
+    _ticker ??= createTicker(_tick)..start();
+  }
+
+  void _tick(Duration t) {
+    if (_busy || _handle <= 0) return;
+    final f = ((t.inMicroseconds / 1e6) * _fps).floor() % _frames;
+    if (f == _shown) return;
+    final cached = _cache?[f];
+    if (cached != null) {
+      _show(cached.clone(), f);
+      return;
+    }
+    _render(f);
+  }
+
+  Future<void> _render(int f) async {
+    _busy = true;
+    final bytes = await NativePool.render.animFrame(_handle, f, _px, _px);
+    if (_dead || bytes == null) {
+      // Ko'rinmaydigan (yashirin) kadr — oldingisi qoladi, qayta
+      // so'ralmaydi (VP9 dekoderi boshidan boshlanib ketmasin).
+      _shown = f;
+      _busy = false;
+      return;
+    }
+    final c = Completer<ui.Image>();
+    ui.decodeImageFromPixels(
+        bytes, _px, _px, ui.PixelFormat.rgba8888, c.complete);
+    final img = await c.future;
+    _busy = false;
+    if (_dead) {
+      img.dispose();
+      return;
+    }
+    if (f == 0 && !_firstFrames.containsKey(_key)) {
+      if (_firstFrames.length >= _firstFramesMax) {
+        final k = _firstFrames.keys.first;
+        _firstFrames.remove(k)?.dispose();
       }
-    }();
+      _firstFrames[_key] = img.clone();
+    }
+    final cache = _cache;
+    if (cache != null && cache[f] == null) cache[f] = img.clone();
+    _show(img, f);
+  }
+
+  void _show(ui.Image img, int f) {
+    _shown = f;
+    final old = _image;
+    setState(() => _image = img);
+    old?.dispose();
+  }
+
+  @override
+  void dispose() {
+    _dead = true;
+    _ticker?.dispose();
+    if (_handle > 0) NativePool.render.animClose(_handle);
+    _image?.dispose();
+    for (final i in _cache ?? const <ui.Image?>[]) {
+      i?.dispose();
+    }
+    _panelWaiters.remove(_onSlot);
+    if (_slot) {
+      _panelBusy--;
+      if (_panelWaiters.isNotEmpty) _panelWaiters.removeAt(0)();
+    }
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<LottieComposition?>(
-      future: _comp,
-      builder: (context, snap) {
-        final c = snap.data;
-        if (c == null) return SizedBox(width: widget.size, height: widget.size);
-        return Lottie(
-          composition: c,
-          width: widget.size,
-          height: widget.size,
-          repeat: !widget.still,
-          fit: BoxFit.contain,
-        );
-      },
+    final img = _image;
+    if (img == null) {
+      return _handle < 0 ? widget.fallback : const SizedBox.shrink();
+    }
+    return RawImage(
+      image: img,
+      width: widget.size,
+      height: widget.size,
+      fit: BoxFit.contain,
+      filterQuality: FilterQuality.medium,
     );
   }
 }

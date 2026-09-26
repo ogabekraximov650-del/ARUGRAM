@@ -17,6 +17,7 @@ mod mp4;
 mod video_cache;
 mod telegram;
 mod player_source;
+mod sticker_anim;
 
 use ffi_utils::string_to_cptr;
 use std::os::raw::c_char;

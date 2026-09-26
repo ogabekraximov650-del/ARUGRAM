@@ -57,6 +57,12 @@ aes = "0.9"
 ctr = "0.10"
 # jni — ExoPlayer manbasi (`player_source.rs`) Java bilan shu orqali gaplashadi.
 jni = { version = "0.21", default-features = false }
+# flate2 — `.tgs` stiker gzip'langan Lottie JSON (sof Rust, miniz_oxide).
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+
+[build-dependencies]
+# rlottie (C++) va libvpx (C) ni yig'ish uchun (`build.rs`).
+cc = "1"
 
 [profile.release]
 opt-level = 3

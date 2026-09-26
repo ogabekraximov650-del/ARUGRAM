@@ -46,6 +46,7 @@ import 'package:http/http.dart' as http;
 
 import 'app_build.dart';
 import 'auth_service.dart';
+import 'native_pool.dart';
 import 'rust_bridge.dart';
 
 typedef _InitC = Pointer<Utf8> Function(Pointer<Utf8>, Int32, Pointer<Utf8>);
@@ -92,25 +93,12 @@ Future<Map<String, dynamic>> _callBlocking(String fn, String arg) {
   });
 }
 
-/// Rust yadrosidagi JSON qaytaradigan funksiyani fon oqimida
-/// chaqiradi: argumentsiz, satr ([arg]) yoki son ([intArg]) bilan.
-/// Kutubxona yo'q bo'lsa (masalan testda) — `{"error": ..}`.
-Future<Map<String, dynamic>> tgCall(String fn, {String? arg, int? intArg}) async {
-  try {
-    if (arg != null) return await _callBlocking(fn, arg);
-    return await Isolate.run(() {
-      final lib = _openLib();
-      if (intArg != null) {
-        final f = lib.lookupFunction<Pointer<Utf8> Function(Int32),
-            Pointer<Utf8> Function(int)>(fn);
-        return _json(_take(lib, f(intArg)));
-      }
-      return _json(_take(lib, lib.lookupFunction<_NoArgC, _NoArgC>(fn)()));
-    });
-  } catch (e) {
-    return {'error': '$e'};
-  }
-}
+/// Rust yadrosidagi JSON qaytaradigan funksiyani DOIMIY fon
+/// isolate'ida chaqiradi (`NativePool.io`): argumentsiz, satr ([arg])
+/// yoki son ([intArg]) bilan. Har chaqiruvda yangi isolate ochilmaydi
+/// (panel qotishining sabablaridan biri shu edi).
+Future<Map<String, dynamic>> tgCall(String fn, {String? arg, int? intArg}) =>
+    NativePool.io.call(fn, arg: arg, intArg: intArg);
 
 /// Kirish bosqichining natijasi.
 class TgLoginStep {
