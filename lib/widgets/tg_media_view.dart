@@ -8,6 +8,7 @@
 //   * GIF — ovozsiz, takrorlanadigan mp4.
 
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
@@ -16,7 +17,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:video_player/video_player.dart';
 
 import '../services/api_base.dart';
 import '../services/device_perf.dart';
@@ -327,9 +327,15 @@ class _AnimClock {
 
 class TgAnimView extends StatefulWidget {
   final String path;
+
+  /// Eni (logik). Bo'yi [height] (berilmasa — kvadrat).
   final double size;
+  final double? height;
   final bool panel;
   final bool frozen;
+
+  /// GIF (H.264 MP4): to'rtburchak, "cover" bilan kesiladi.
+  final bool gif;
   final Widget fallback;
 
   const TgAnimView({
@@ -337,8 +343,10 @@ class TgAnimView extends StatefulWidget {
     required this.path,
     required this.size,
     required this.fallback,
+    this.height,
     this.panel = false,
     this.frozen = false,
+    this.gif = false,
   });
 
   @override
@@ -352,6 +360,7 @@ class _TgAnimViewState extends State<TgAnimView> {
   int _frames = 1;
   double _fps = 30;
   int _px = 0;
+  int _ph = 0;
   final _img = ValueNotifier<ui.Image?>(null);
   ui.Image? get _image => _img.value;
   bool _dead = false;
@@ -367,7 +376,7 @@ class _TgAnimViewState extends State<TgAnimView> {
   Map<int, ui.Image>? _cache;
   int _cacheBytes = 0;
 
-  String get _key => '${widget.path}@$_px';
+  String get _key => '${widget.path}@${_px}x$_ph';
 
   /// Ko'rsatiladigan tezlik — 30 kadr/s dan oshmaydi.
   double get _showFps => _fps > 30 ? 30.0 : _fps;
@@ -389,7 +398,17 @@ class _TgAnimViewState extends State<TgAnimView> {
     final cap = widget.panel
         ? (widget.size <= 48 ? (low ? 72 : 100) : (low ? 128 : 160))
         : (low ? 256 : 320);
-    _px = (widget.size * dpr).round().clamp(24, cap).toInt();
+    if (widget.gif) {
+      // GIF: eni 240 (panel) / 360 (xabar) px gacha, bo'yi nisbatda.
+      final h = widget.height ?? widget.size;
+      final gcap = widget.panel ? (low ? 180 : 240) : (low ? 280 : 360);
+      final k = math.min(1.0, gcap / (math.max(widget.size, h) * dpr));
+      _px = (widget.size * dpr * k).round().clamp(16, 512).toInt();
+      _ph = (h * dpr * k).round().clamp(16, 512).toInt();
+    } else {
+      _px = (widget.size * dpr).round().clamp(24, cap).toInt();
+      _ph = _px;
+    }
     final first = _firstFrames[_key];
     if (first != null) _img.value = first.clone();
     if (_enabled || _image == null) _open();
@@ -430,7 +449,7 @@ class _TgAnimViewState extends State<TgAnimView> {
   Future<void> _open() async {
     if (_opening || _handle > 0 || _failed || _dead) return;
     _opening = true;
-    final r = await NativePool.render.animOpen(widget.path, _px, _px);
+    final r = await NativePool.render.animOpen(widget.path, _px, _ph);
     _opening = false;
     if (_dead || !_enabled && _image != null) {
       if (r != null) NativePool.render.animClose(r.$1);
@@ -446,7 +465,7 @@ class _TgAnimViewState extends State<TgAnimView> {
     // Faqat KO'RSATILADIGAN kadrlar saqlanadi (60 -> 30 kadr/s da
     // har ikkinchisi).
     final shown = (_frames * _showFps / _fps).ceil();
-    final need = _px * _px * 4 * shown;
+    final need = _px * _ph * 4 * shown;
     if (_cacheUsed + need <= _cacheBudget) {
       _cache = {};
       _cacheBytes = need;
@@ -513,14 +532,14 @@ class _TgAnimViewState extends State<TgAnimView> {
       _want = -1;
       return;
     }
-    final bytes = await NativePool.render.animFrame(h, f, _px, _px);
+    final bytes = await NativePool.render.animFrame(h, f, _px, _ph);
     if (_dead || bytes == null || h != _handle) {
       _want = -1;
       return;
     }
     final c = Completer<ui.Image>();
     ui.decodeImageFromPixels(
-        bytes, _px, _px, ui.PixelFormat.rgba8888, c.complete);
+        bytes, _px, _ph, ui.PixelFormat.rgba8888, c.complete);
     final img = await c.future;
     _want = -1;
     if (_dead) {
@@ -568,8 +587,8 @@ class _TgAnimViewState extends State<TgAnimView> {
       return _failed ? widget.fallback : const SizedBox.shrink();
     }
     return CustomPaint(
-      size: Size.square(widget.size),
-      painter: _FramePainter(_img),
+      size: Size(widget.size, widget.height ?? widget.size),
+      painter: _FramePainter(_img, fill: widget.gif),
     );
   }
 }
@@ -578,7 +597,10 @@ class _TgAnimViewState extends State<TgAnimView> {
 /// qurilmaydi, joylanmaydi).
 class _FramePainter extends CustomPainter {
   final ValueNotifier<ui.Image?> img;
-  _FramePainter(this.img) : super(repaint: img);
+
+  /// Butun maydonni to'ldiradi (GIF); aks holda markazdagi kvadrat.
+  final bool fill;
+  _FramePainter(this.img, {this.fill = false}) : super(repaint: img);
 
   static final _paint = Paint()..filterQuality = FilterQuality.medium;
 
@@ -587,8 +609,10 @@ class _FramePainter extends CustomPainter {
     final i = img.value;
     if (i == null) return;
     final side = size.shortestSide;
-    final dst = Rect.fromCenter(
-        center: size.center(Offset.zero), width: side, height: side);
+    final dst = fill
+        ? Offset.zero & size
+        : Rect.fromCenter(
+            center: size.center(Offset.zero), width: side, height: side);
     canvas.drawImageRect(
         i,
         Rect.fromLTWH(0, 0, i.width.toDouble(), i.height.toDouble()),
@@ -697,191 +721,73 @@ String plainEmojiText(String text) =>
 //  GIF
 // ═══════════════════════════════════════════════════════════════
 
-/// Panel katagi: GIF.
+/// Panel katagi / ko'rish oynasi: GIF.
 ///
-/// TALAB (foydalanuvchi): "GIF'lar to'liq yuklab olinmayapti". Ilgari
-/// panelda faqat kichik rasm (birinchi kadr) turardi. Endi Telegram'dagidek:
-/// avval kichik rasm, so'ng — katak EKRANDA turgan bo'lsa — GIF'ning
-/// o'zi yuklanadi va ovozsiz, takrorlanib o'ynaydi. Bir vaqtda eng
-/// ko'pi [_gifSlots] ta o'ynaydi (telefon video dekoderlari cheklangan),
-/// qolganlari kichik rasmda turadi; yashirin sahifada hammasi to'xtaydi.
-class TgGifThumb extends StatefulWidget {
+/// Telegram (`AnimatedFileDrawable`) kabi: GIF telefonning video
+/// pleyeri bilan EMAS, ilova ichidagi ffmpeg H.264 dekoderi bilan fonda
+/// ochiladi va stikerlar bilan bir xil dvigatelda (umumiy soat, kadrlar
+/// diskda) o'ynaydi — dekoderlar soni cheklovi ham, qorayib qolish ham
+/// yo'q. Fayl kelguncha — kichik rasm.
+class TgGifThumb extends StatelessWidget {
   final TgDoc doc;
 
-  /// `false` — faqat kichik rasm (panel: "GIF'lar qotib tursin, faqat
-  /// bosilganda ko'rish oynasida o'ynasin").
+  /// `false` — faqat kichik rasm.
   final bool play;
 
-  /// To'xtovsiz takrorlanadi (ko'rish oynasida).
+  /// Ko'rish oynasida (kattaroq o'lchamda chiziladi).
   final bool loop;
 
   const TgGifThumb(
       {super.key, required this.doc, this.play = true, this.loop = false});
 
   @override
-  State<TgGifThumb> createState() => _TgGifThumbState();
-}
-
-/// Bir vaqtda o'ynaydigan panel GIF'lari: kuchsiz telefonda 1, o'rtachada 2, kuchlida 4.
-final _gifSlots = switch (DevicePerf.cls) {
-  PerfClass.low => 1,
-  PerfClass.average => 2,
-  PerfClass.high => 4,
-};
-int _gifBusy = 0;
-final List<VoidCallback> _gifWaiters = [];
-
-class _TgGifThumbState extends State<TgGifThumb> {
-  VideoPlayerController? _c;
-  bool _slot = false;
-  bool _dead = false;
-  ValueListenable<TickerModeData>? _tm;
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final tm = TickerMode.getValuesNotifier(context);
-    if (!identical(tm, _tm)) {
-      _tm?.removeListener(_onTm);
-      _tm = tm..addListener(_onTm);
-    }
-    if (tm.value.enabled && !_slot && _canPlay) _want();
-  }
-
-  /// Kichik rasmi yo'q GIF panelda ham o'ynaydi (aks holda bo'sh katak).
-  bool get _canPlay => widget.play || !widget.doc.thumb;
-
-  void _onTm() {
-    if (_tm?.value.enabled ?? false) {
-      if (_canPlay) _want();
-    } else {
-      _stop();
-    }
-  }
-
-  void _want() {
-    if (_slot || _dead) return;
-    if (_gifBusy < _gifSlots) {
-      _gifBusy++;
-      _slot = true;
-      _play();
-    } else if (!_gifWaiters.contains(_onSlot)) {
-      _gifWaiters.add(_onSlot);
-    }
-  }
-
-  void _onSlot() {
-    if (_dead || _slot) return;
-    if (!(_tm?.value.enabled ?? true)) return;
-    _gifBusy++;
-    _slot = true;
-    _play();
-  }
-
-  void _freeSlot() {
-    _gifWaiters.remove(_onSlot);
-    if (!_slot) return;
-    _slot = false;
-    _gifBusy--;
-    while (_gifWaiters.isNotEmpty && _gifBusy < _gifSlots) {
-      _gifWaiters.removeAt(0)();
-    }
-  }
-
-  Future<void> _play() async {
-    // Tez surilayotgan ro'yxatda yuklanmaydi.
-    // Surish to'xtaguncha video dekoder ochilmaydi (surish silliq).
-    while (mounted &&
-        (_AnimClock.instance.scrolling ||
-            Scrollable.recommendDeferredLoadingForContext(context))) {
-      await Future<void>.delayed(const Duration(milliseconds: 150));
-    }
-    if (!mounted || !_slot) return;
-    final path = await TgMedia.instance.file(widget.doc);
-    if (!mounted || !_slot || path == null) {
-      if (mounted) _freeSlot();
-      return;
-    }
-    final c = VideoPlayerController.file(File(path),
-        videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true));
-    try {
-      await c.initialize();
-      await c.setLooping(widget.loop);
-      await c.setVolume(0);
-      await c.play();
-    } catch (_) {
-      await c.dispose();
-      if (mounted) _freeSlot();
-      return;
-    }
-    if (!mounted || !_slot) {
-      await c.dispose();
-      return;
-    }
-    setState(() {
-      _c = c;
-      _every = widget.loop ? null : _PlayEvery(c);
-    });
-  }
-
-  _PlayEvery? _every;
-
-  void _stop() {
-    final c = _c;
-    _c = null;
-    _every?.dispose();
-    _every = null;
-    c?.dispose();
-    _freeSlot();
-    if (mounted) setState(() {});
-  }
-
-  @override
-  void dispose() {
-    _dead = true;
-    _tm?.removeListener(_onTm);
-    _every?.dispose();
-    _c?.dispose();
-    _c = null;
-    _freeSlot();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final c = _c;
     final dpr = MediaQuery.devicePixelRatioOf(context);
-    return Container(
-      color: Colors.white.withValues(alpha: 0.05),
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          if (widget.doc.thumb)
-            FutureBuilder<String?>(
-              key: ValueKey(widget.doc.id),
-              future: TgMedia.instance.file(widget.doc, thumb: true),
-              builder: (context, snap) {
-                final p = snap.data;
-                if (p == null) return const SizedBox();
-                return Image.file(File(p),
-                    fit: BoxFit.cover,
-                    cacheWidth: (200 * dpr).round(),
-                    gaplessPlayback: true);
-              },
-            ),
-          if (c != null && c.value.isInitialized)
-            FittedBox(
-              fit: BoxFit.cover,
-              clipBehavior: Clip.hardEdge,
-              child: SizedBox(
-                width: c.value.size.width,
-                height: c.value.size.height,
-                child: VideoPlayer(c),
+    return LayoutBuilder(builder: (context, box) {
+      final w = box.maxWidth.isFinite ? box.maxWidth : 120.0;
+      final h = box.maxHeight.isFinite ? box.maxHeight : w;
+      return Container(
+        color: Colors.white.withValues(alpha: 0.05),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (doc.thumb)
+              FutureBuilder<String?>(
+                key: ValueKey('t${doc.id}'),
+                future: TgMedia.instance.file(doc, thumb: true),
+                builder: (context, snap) {
+                  final p = snap.data;
+                  if (p == null) return const SizedBox();
+                  return Image.file(File(p),
+                      fit: BoxFit.cover,
+                      cacheWidth: (w * dpr).round().clamp(32, 480),
+                      gaplessPlayback: true);
+                },
               ),
-            ),
-        ],
-      ),
-    );
+            if (play)
+              _Deferred(
+                key: ValueKey('g${doc.id}'),
+                builder: (context) => FutureBuilder<String?>(
+                  future: TgMedia.instance.file(doc),
+                  builder: (context, snap) {
+                    final p = snap.data;
+                    if (p == null) return const SizedBox();
+                    return TgAnimView(
+                      key: ValueKey(p),
+                      path: p,
+                      size: w,
+                      height: h,
+                      gif: true,
+                      panel: !loop,
+                      fallback: const SizedBox(),
+                    );
+                  },
+                ),
+              ),
+          ],
+        ),
+      );
+    });
   }
 }
 
@@ -897,25 +803,6 @@ class TgGifMessage extends StatefulWidget {
 }
 
 final Map<String, Future<File?>> _chatFiles = {};
-
-/// Xabardagi GIF'lar: bir vaqtda tirik pleyerlar soni.
-final _msgGifMax = DevicePerf.low ? 3 : 6;
-int _msgGifLive = 0;
-final List<Completer<void>> _msgGifQueue = [];
-
-Future<void> _msgGifAcquire() async {
-  while (_msgGifLive >= _msgGifMax) {
-    final c = Completer<void>();
-    _msgGifQueue.add(c);
-    await c.future;
-  }
-  _msgGifLive++;
-}
-
-void _msgGifRelease() {
-  _msgGifLive--;
-  if (_msgGifQueue.isNotEmpty) _msgGifQueue.removeAt(0).complete();
-}
 
 /// Kanaldagi kichik fayl (GIF, dumaloq video) — bir marta olinadi va
 /// vaqtinchalik papkada saqlanadi.
@@ -1016,8 +903,10 @@ Future<File?> _fetchChatFile(String name) => () async {
 
 
 class _TgGifMessageState extends State<TgGifMessage> {
-  VideoPlayerController? _ctrl;
+  String? _path;
+  double _ratio = 1.4;
   bool _failed = false;
+  int _tries = 0;
 
   @override
   void initState() {
@@ -1025,25 +914,21 @@ class _TgGifMessageState extends State<TgGifMessage> {
     _open();
   }
 
-  int _tries = 0;
-
   @override
   void didUpdateWidget(TgGifMessage old) {
     super.didUpdateWidget(old);
     // Ro'yxatdagi katak boshqa xabarga qayta ishlatildi.
     if (old.fileName != widget.fileName) {
-      _dropCtrl();
+      _path = null;
       _failed = false;
       _tries = 0;
       _open();
     }
   }
 
-  _PlayEvery? _every;
-
   Future<void> _retry(String name) async {
-    // Yangi yuborilgan GIF'ni bot kanalga hali ko'chirmagan bo'lishi
-    // yoki tarmoq uzilgan bo'lishi mumkin — qayta uriniladi.
+    // Yangi yuborilgan GIF hali tayyor bo'lmasligi yoki tarmoq uzilgan
+    // bo'lishi mumkin — qayta uriniladi.
     if (_tries++ < 10) {
       await Future<void>.delayed(
           Duration(seconds: (2 + _tries * 3).clamp(2, 30)));
@@ -1057,89 +942,43 @@ class _TgGifMessageState extends State<TgGifMessage> {
     final name = widget.fileName;
     File? f;
     try {
-      // Osilib qolgan yuklash katakni abadiy aylantirib qo'ymasin.
       f = await tgChatFile(name).timeout(const Duration(seconds: 90));
     } catch (_) {
       _chatFiles.remove(name);
     }
     if (!mounted || name != widget.fileName) return;
     if (f == null) return _retry(name);
-    // Telefon video dekoderlari soni cheklangan: ro'yxatdagi ko'p GIF
-    // bir vaqtda ochilsa ba'zilari xato berib "ochilmay" qolardi.
-    // Endi bir vaqtda ko'pi bilan [_msgGifMax] tasi tirik turadi
-    // (ro'yxatdan chiqqani joyini bo'shatadi).
-    await _msgGifAcquire();
-    if (!mounted || name != widget.fileName) {
-      _msgGifRelease();
-      return;
-    }
-    _holdsSlot = true;
-    final c = VideoPlayerController.file(f,
-        videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true));
-    try {
-      await c.initialize();
-      // TALAB: "yuborilgan GIF tinmasdan animatsiyalansin" (10 soniyalik
-      // tanaffus faqat yuborilmagan — panel — holatiga tegishli edi).
-      // To'xtovsiz takrorlanganda pleyer "tugadi" holatiga ham tushmaydi
-      // (ba'zi telefonlarda o'sha holatda kadr qorayib qolardi).
-      await c.setLooping(true);
-      await c.setVolume(0);
-      await c.play();
-    } catch (_) {
-      await c.dispose();
-      _holdsSlot = false;
-      _msgGifRelease();
-      // TOPILGAN XATO: yarim yuklangan (buzuq) fayl keshda qolib, GIF
-      // hech qachon ochilmasdi — endi o'chiriladi va qayta yuklanadi.
+    // Nisbat — fayl sarlavhasidan (ochmasdan), katak shunga qarab.
+    final j = await NativePool.render
+        .call('rust_anim_probe', arg: f.path);
+    if (!mounted || name != widget.fileName) return;
+    final w = (j['w'] as num?)?.toDouble() ?? 0;
+    final h = (j['h'] as num?)?.toDouble() ?? 0;
+    if (w <= 0 || h <= 0) {
+      // MP4 emas yoki buzuq — o'chiriladi va qayta yuklanadi.
       _chatFiles.remove(name);
       try {
         await f.delete();
       } catch (_) {}
-      if (mounted && name == widget.fileName) return _retry(name);
-      return;
+      return _retry(name);
     }
-    if (!mounted || name != widget.fileName) {
-      await c.dispose();
-      if (_holdsSlot) {
-        _holdsSlot = false;
-        _msgGifRelease();
-      }
-      return;
-    }
-    setState(() => _ctrl = c);
-  }
-
-  bool _holdsSlot = false;
-
-  void _dropCtrl() {
-    _every?.dispose();
-    _every = null;
-    _ctrl?.dispose();
-    _ctrl = null;
-    if (_holdsSlot) {
-      _holdsSlot = false;
-      _msgGifRelease();
-    }
-  }
-
-  @override
-  void dispose() {
-    _dropCtrl();
-    super.dispose();
+    setState(() {
+      _ratio = (w / h).clamp(0.4, 3.0);
+      _path = f!.path;
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    final c = _ctrl;
-    final ratio = c != null && c.value.isInitialized && c.value.aspectRatio > 0
-        ? c.value.aspectRatio
-        : 1.4;
+    final p = _path;
+    final w = widget.maxWidth;
+    final h = w / _ratio;
     return ClipRRect(
       borderRadius: BorderRadius.circular(14),
       child: SizedBox(
-        width: widget.maxWidth,
-        height: widget.maxWidth / ratio,
-        child: c == null
+        width: w,
+        height: h,
+        child: p == null
             ? Container(
                 color: Colors.white.withValues(alpha: 0.06),
                 alignment: Alignment.center,
@@ -1165,50 +1004,17 @@ class _TgGifMessageState extends State<TgGifMessage> {
                             strokeWidth: 2, color: Colors.white54),
                       ),
               )
-            : VideoPlayer(c),
+            // Tinmasdan takrorlanadi (Telegram), ilova ichidagi dekoder bilan.
+            : TgAnimView(
+                key: ValueKey(p),
+                path: p,
+                size: w,
+                height: h,
+                gif: true,
+                fallback: Container(color: Colors.white.withValues(alpha: 0.06)),
+              ),
       ),
     );
-  }
-}
-
-
-/// TALAB (foydalanuvchi): "GIF'lar ekranda ko'ringach 1 marta
-/// animatsiyalansin, keyin har 10 soniyada bir". Oxiriga yetgach
-/// to'xtaydi (oxirgi kadr turadi) va 10 soniyadan keyin boshidan
-/// yana bir marta o'ynaydi — dekoder doim ishlab turmaydi.
-class _PlayEvery {
-  final VideoPlayerController c;
-  Timer? _t;
-  bool _dead = false;
-
-  _PlayEvery(this.c) {
-    c.addListener(_on);
-  }
-
-  void _on() {
-    final v = c.value;
-    if (_dead || _t != null || !v.isInitialized || v.isPlaying) return;
-    final d = v.duration;
-    if (d <= Duration.zero ||
-        v.position < d - const Duration(milliseconds: 120)) {
-      return;
-    }
-    // Kuchsiz telefonda — faqat bir marta (qayta o'ynamaydi).
-    if (DevicePerf.low) return;
-    _t = Timer(const Duration(seconds: 10), () async {
-      if (_dead) return;
-      try {
-        await c.seekTo(Duration.zero);
-        await c.play();
-      } catch (_) {}
-      _t = null;
-    });
-  }
-
-  void dispose() {
-    _dead = true;
-    _t?.cancel();
-    c.removeListener(_on);
   }
 }
 

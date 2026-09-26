@@ -3471,3 +3471,23 @@ zaxira yo'llar (`thumbnailData`, birinchi kadr).
   (`_ChecksPainter`). Ovozli xabar tugmasi 48 dp, ochroq tusda.
 * Foydalanuvchi ko'rinishida (1:1 chat) xabarlar yonida rasm yo'q
   (Telegram shaxsiy chati kabi); admin ko'rinishida qoladi.
+
+## GIF — ilova ichidagi ffmpeg (Telegram `AnimatedFileDrawable` kabi)
+
+* GIF (H.264 MP4) endi telefon video pleyeri bilan EMAS, ilova ichidagi
+  ffmpeg H.264 dekoderi bilan ochiladi (`rust/third_party/ffmpeg`,
+  ffmpeg 7.1.1, LGPL 2.1+; faqat libavcodec H.264 + libavutil, sof C,
+  asm'siz; `SOURCES.txt` — yig'iladigan fayllar, `config.h` Android
+  uchun tuzatilgan). MP4 konteyneri Rust'da o'qiladi
+  (`sticker_anim.rs`: `parse_mp4`, `Kind::Mp4`), dekoder — C shim
+  (`native/h264_shim.c`: YUV -> RGBA, "cover" kesish).
+* GIF'lar stikerlar bilan bir dvigatelda: umumiy soat, ≤ 30 kadr/s,
+  kadrlar diskda (`.afc`), dekoderlar soni cheklovi va qorayish yo'q.
+  `TgGifThumb` (panel, ko'rish oynasi), `TgGifMessage` (chat, izohlar)
+  — `TgAnimView(gif: true, height: ..)`; nisbat `rust_anim_probe` dan.
+* Panelda stikerlar va GIF'lar yana harakatlanadi (Telegram kabi).
+* Premium emoji tanlanganda yuborish tugmasi yonadi (maydonga dastur
+  orqali yozilganda ham qayta chiziladi).
+* LGPL: ffmpeg manbasi va litsenziyasi `third_party/ffmpeg` da; statik
+  bog'langan — tarqatishda LGPL shartlariga e'tibor bering (o'zgartirilgan
+  ffmpeg manbasi ochiq, foydalanuvchi qayta bog'lay olishi kerak).

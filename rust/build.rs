@@ -31,6 +31,54 @@ fn main() {
     println!("cargo:rerun-if-changed=native");
 
     build_libvpx();
+    build_ffmpeg();
+}
+
+// ── GIF (H.264) — ffmpeg'ning faqat H.264 dekoderi ──────────────
+//
+// Telegram GIF'larni ilova ichidagi ffmpeg bilan protsessorda ochadi
+// (`AnimatedFileDrawable`): telefon dekoderlari soni cheklangan, ba'zi
+// telefonlarda kadr qorayib qoladi. Manba `third_party/ffmpeg` da
+// (ffmpeg 7.1.1, LGPL 2.1+): `configure --disable-everything
+// --enable-decoder=h264 --disable-asm --enable-pthreads` bilan yasalgan
+// `config.h` (arxitekturaga bog'liq emas — sof C) va shu yig'ma uchun
+// kerakli fayllar ro'yxati (`SOURCES.txt`). Android uchun `config.h`
+// da `HAVE_PTHREAD_CANCEL`, `HAVE_VALGRIND_VALGRIND_H`,
+// `HAVE_LINUX_PERF_EVENT_H` o'chirilgan.
+fn build_ffmpeg() {
+    let root = Path::new("third_party/ffmpeg");
+    let list = std::fs::read_to_string(root.join("SOURCES.txt")).unwrap_or_default();
+    // Tartib muhim: avcodec avutil'ga tayanadi — statik bog'lashda
+    // avcodec oldin turishi kerak.
+    for lib in ["libavcodec", "libavutil"] {
+        let mut b = cc::Build::new();
+        b.warnings(false)
+            .include(root)
+            .opt_level(2)
+            .flag_if_supported("-std=c17")
+            .flag_if_supported("-fno-math-errno")
+            .flag_if_supported("-fno-signed-zeros")
+            .flag_if_supported("-Wno-everything")
+            .define("HAVE_AV_CONFIG_H", None)
+            .define("_ISOC11_SOURCE", None)
+            .define("_FILE_OFFSET_BITS", "64")
+            .define("_LARGEFILE_SOURCE", None)
+            .define("_POSIX_C_SOURCE", "200112")
+            .define("_XOPEN_SOURCE", "600")
+            .define("PIC", None)
+            .define(if lib == "libavutil" { "BUILDING_avutil" } else { "BUILDING_avcodec" }, None);
+        for line in list.lines() {
+            let f = line.trim();
+            if f.starts_with(lib) && f.ends_with(".c") {
+                b.file(root.join(f));
+            }
+        }
+        if lib == "libavcodec" {
+            b.file("native/h264_shim.c");
+        }
+        b.compile(if lib == "libavutil" { "aru_avutil" } else { "aru_avcodec" });
+    }
+    println!("cargo:rustc-link-lib=m");
 }
 
 fn build_libvpx() {

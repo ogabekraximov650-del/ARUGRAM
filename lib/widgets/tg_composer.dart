@@ -1800,17 +1800,15 @@ class _StickerPageState extends State<_StickerPage>
     });
   }
 
-  // TALAB (foydalanuvchi): "stiker oynasi ochilganda stikerlar
-  // animatsiya qilinmasin" — panelda faqat birinchi kadr (animatsiya
-  // yuborilgan stikerda, chatda o'ynaydi).
   // Bosilganda — ko'rish oynasi (stiker shu yerda harakatlanadi,
   // "Stiker yuborish" bilan yuboriladi).
   Widget _cell(TgDoc d, double cell) => _Press(
         onTap: () => showTgMediaPreview(context,
             doc: d, gif: false, onSend: () => widget.onSticker(d)),
         child: Center(
-            child: TgStickerView(
-                doc: d, size: cell * 0.86, still: true, frozen: true)),
+            // Telegram'dagidek panelda ham harakatlanadi (umumiy soat,
+            // kadrlar diskda — qotmaydi).
+            child: TgStickerView(doc: d, size: cell * 0.86, still: true)),
       );
 
   @override
@@ -2024,15 +2022,14 @@ class _GifPageState extends State<_GifPage>
                                   height: row.height,
                                   child: _Press(
                                     scale: 0.92,
-                                    // Panelda qotib turadi; bosilganda —
-                                    // ko'rish oynasida o'ynaydi.
+                                    // Panelda ham o'ynaydi (ilova ichidagi
+                                    // dekoder); bosilganda — ko'rish oynasi.
                                     onTap: () => showTgMediaPreview(context,
                                         doc: items[i],
                                         gif: true,
                                         onSend: () =>
                                             widget.onGif(items[i])),
-                                    child: TgGifThumb(
-                                        doc: items[i], play: false),
+                                    child: TgGifThumb(doc: items[i]),
                                   ),
                                 ),
                               ],

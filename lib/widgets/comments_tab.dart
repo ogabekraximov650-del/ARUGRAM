@@ -74,6 +74,11 @@ class CommentsTab extends StatefulWidget {
 
 class _CommentsTabState extends State<CommentsTab> {
   final _input = TgTextController();
+  bool _inputBlank = true;
+  void _onInputChanged() {
+    final b = _input.isBlank;
+    if (b != _inputBlank && mounted) setState(() => _inputBlank = b);
+  }
   final _focus = FocusNode();
   final _scroll = ScrollController();
 
@@ -124,6 +129,12 @@ class _CommentsTabState extends State<CommentsTab> {
     super.initState();
     // Avval DISK (darhol), keyin tarmoq (`disk_cache.dart` izohi).
     widget.controller.addListener(_prefetch);
+    // TOPILGAN XATO ("premium emoji tanlanganda yuborish tugmasi
+    // yonmayapti"): paneldan qo'yilgan emoji maydonga dastur orqali
+    // yoziladi va `TextField.onChanged` chaqirilmaydi — tugma eski
+    // holatda qolardi. Endi matn bo'sh/bo'sh emasligi o'zgarsa qayta
+    // chiziladi.
+    _input.addListener(_onInputChanged);
     widget.controller.loadFromDisk();
     widget.controller.load();
     // Pastga yetganda keyingi sahifa o'zi so'raladi.

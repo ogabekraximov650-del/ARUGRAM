@@ -91,6 +91,11 @@ class _SupportChatScreenState extends State<SupportChatScreen>
     with ScreenGuarded<SupportChatScreen> {
   late final ChatController _chat = ChatController(userId: widget.userId);
   final _input = TgTextController();
+  bool _inputBlank = true;
+  void _onInputChanged() {
+    final b = _input.isBlank;
+    if (b != _inputBlank && mounted) setState(() => _inputBlank = b);
+  }
   final _focus = FocusNode();
   final _scroll = ScrollController();
   bool _sending = false;
@@ -219,6 +224,12 @@ class _SupportChatScreenState extends State<SupportChatScreen>
   void initState() {
     super.initState();
     _chat.addListener(_onData);
+    // TOPILGAN XATO ("premium emoji tanlanganda yuborish tugmasi
+    // yonmayapti"): paneldan qo'yilgan emoji maydonga dastur orqali
+    // yoziladi va `TextField.onChanged` chaqirilmaydi — tugma eski
+    // holatda qolardi. Endi matn bo'sh/bo'sh emasligi o'zgarsa qayta
+    // chiziladi.
+    _input.addListener(_onInputChanged);
     _scroll.addListener(() {
       if (!_scroll.hasClients) return;
       final p = _scroll.position;

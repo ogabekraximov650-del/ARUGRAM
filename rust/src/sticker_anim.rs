@@ -25,6 +25,10 @@ use std::sync::{Arc, Mutex, OnceLock};
 use crate::ffi_utils::cstr_to_str;
 
 extern "C" {
+    fn aru_h264_open(extra: *const u8, len: i32) -> *mut c_void;
+    fn aru_h264_close(p: *mut c_void);
+    fn aru_h264_send(p: *mut c_void, data: *const u8, len: i32) -> i32;
+    fn aru_h264_recv(p: *mut c_void, out: *mut u8, w: i32, h: i32) -> i32;
     fn aru_vp9_open() -> *mut c_void;
     fn aru_vp9_close(p: *mut c_void);
     fn aru_vp9_decode(
@@ -49,6 +53,18 @@ enum Kind {
     /// Telegram'ning o'z Lottie chizgichi (tlottie).
     Lottie { r: Box<tlottie::CPURenderer>, frames: usize, fps: f64 },
     Webm { dec: *mut c_void, frames: Vec<WebmFrame>, fps: f64, next: usize },
+    /// GIF (H.264 MP4) — ffmpeg dekoderi (`native/h264_shim.c`).
+    Mp4 {
+        dec: *mut c_void,
+        data: Vec<u8>,
+        mp4: Mp4Info,
+        fps: f64,
+        /// Dekoderga berilgan namunalar soni.
+        sent: usize,
+        /// Chiqqan (ko'rsatish tartibidagi) kadrlar soni.
+        out: usize,
+        eof: bool,
+    },
 }
 
 // Ko'rsatkichlar faqat `Mutex` ichida, bitta oqimda ishlatiladi.
@@ -247,6 +263,11 @@ impl Drop for Anim {
                         aru_vp9_close(*dec)
                     }
                 }
+                Kind::Mp4 { dec, .. } => {
+                    if !dec.is_null() {
+                        aru_h264_close(*dec)
+                    }
+                }
             }
         }
     }
@@ -399,6 +420,178 @@ fn open_webm(bytes: &[u8]) -> Option<Kind> {
     Some(Kind::Webm { dec, frames, fps, next: 0 })
 }
 
+// ── MP4 (GIF) ───────────────────────────────────────────────────
+//
+// To'liq demuxer kerak emas: Telegram GIF — bitta H.264 video yo'lak.
+// `moov` ichidan video yo'lakning namunalar jadvali (`stsz`, `stco`/
+// `co64`, `stsc`), vaqt (`mdhd`, `stts`) va dekoder sozlamasi (`avcC`)
+// o'qiladi; namunalar fayldan to'g'ridan-to'g'ri olinadi.
+
+#[derive(Default)]
+struct Mp4Info {
+    w: u32,
+    h: u32,
+    extra: Vec<u8>,
+    /// Har namuna: (fayldagi joyi, uzunligi) — dekodlash tartibida.
+    samples: Vec<(usize, usize)>,
+    timescale: u32,
+    duration: u64,
+}
+
+fn be32(b: &[u8], p: usize) -> Option<u32> {
+    Some(u32::from_be_bytes(b.get(p..p + 4)?.try_into().ok()?))
+}
+fn be64(b: &[u8], p: usize) -> Option<u64> {
+    Some(u64::from_be_bytes(b.get(p..p + 8)?.try_into().ok()?))
+}
+
+/// [b] ichidagi qutilar: (turi, mazmuni).
+fn boxes(b: &[u8]) -> Vec<([u8; 4], &[u8])> {
+    let mut out = Vec::new();
+    let mut p = 0usize;
+    while p + 8 <= b.len() {
+        let Some(sz) = be32(b, p) else { break };
+        let typ: [u8; 4] = b[p + 4..p + 8].try_into().unwrap_or([0; 4]);
+        let (head, size) = match sz {
+            1 => match be64(b, p + 8) {
+                Some(v) => (16usize, v as usize),
+                None => break,
+            },
+            0 => (8, b.len() - p),
+            v => (8, v as usize),
+        };
+        if size < head || p + size > b.len() {
+            break;
+        }
+        out.push((typ, &b[p + head..p + size]));
+        p += size;
+    }
+    out
+}
+
+fn child<'a>(b: &'a [u8], t: &[u8; 4]) -> Option<&'a [u8]> {
+    boxes(b).into_iter().find(|(k, _)| k == t).map(|(_, v)| v)
+}
+
+fn parse_mp4(b: &[u8]) -> Option<Mp4Info> {
+    let moov = child(b, b"moov")?;
+    for (k, trak) in boxes(moov) {
+        if &k != b"trak" {
+            continue;
+        }
+        let mdia = child(trak, b"mdia")?;
+        let hdlr = child(mdia, b"hdlr")?;
+        if hdlr.get(8..12)? != b"vide" {
+            continue;
+        }
+        let mut info = Mp4Info::default();
+        let mdhd = child(mdia, b"mdhd")?;
+        if mdhd.first() == Some(&1) {
+            info.timescale = be32(mdhd, 20)?;
+            info.duration = be64(mdhd, 24)?;
+        } else {
+            info.timescale = be32(mdhd, 12)?;
+            info.duration = be32(mdhd, 16)? as u64;
+        }
+        let stbl = child(child(mdia, b"minf")?, b"stbl")?;
+        // Dekoder sozlamasi va o'lcham (`avc1` -> `avcC`).
+        let stsd = child(stbl, b"stsd")?;
+        let entry = boxes(stsd.get(8..)?).into_iter().next()?;
+        if &entry.0 != b"avc1" && &entry.0 != b"avc3" {
+            return None;
+        }
+        let e = entry.1;
+        info.w = u16::from_be_bytes(e.get(24..26)?.try_into().ok()?) as u32;
+        info.h = u16::from_be_bytes(e.get(26..28)?.try_into().ok()?) as u32;
+        info.extra = child(e.get(78..)?, b"avcC")?.to_vec();
+        // Namuna o'lchamlari.
+        let stsz = child(stbl, b"stsz")?;
+        let fixed = be32(stsz, 4)? as usize;
+        let count = be32(stsz, 8)? as usize;
+        if count == 0 || count > 20_000 {
+            return None;
+        }
+        let sizes: Vec<usize> = if fixed != 0 {
+            vec![fixed; count]
+        } else {
+            (0..count).map(|i| be32(stsz, 12 + i * 4).map(|v| v as usize)).collect::<Option<_>>()?
+        };
+        // Bo'laklar joyi.
+        let chunks: Vec<usize> = if let Some(stco) = child(stbl, b"stco") {
+            let n = be32(stco, 4)? as usize;
+            (0..n).map(|i| be32(stco, 8 + i * 4).map(|v| v as usize)).collect::<Option<_>>()?
+        } else {
+            let co = child(stbl, b"co64")?;
+            let n = be32(co, 4)? as usize;
+            (0..n).map(|i| be64(co, 8 + i * 8).map(|v| v as usize)).collect::<Option<_>>()?
+        };
+        // Bo'lakdagi namunalar soni (`stsc`: birinchi bo'lak, soni).
+        let stsc = child(stbl, b"stsc")?;
+        let n = be32(stsc, 4)? as usize;
+        let runs: Vec<(usize, usize)> = (0..n)
+            .map(|i| Some((be32(stsc, 8 + i * 12)? as usize, be32(stsc, 12 + i * 12)? as usize)))
+            .collect::<Option<_>>()?;
+        let mut si = 0usize;
+        for (ci, &off) in chunks.iter().enumerate() {
+            let c = ci + 1;
+            let per = runs.iter().rev().find(|(first, _)| *first <= c).map(|r| r.1).unwrap_or(1);
+            let mut o = off;
+            for _ in 0..per {
+                if si >= count {
+                    break;
+                }
+                info.samples.push((o, sizes[si]));
+                o += sizes[si];
+                si += 1;
+            }
+        }
+        if info.samples.len() != count {
+            return None;
+        }
+        // `mdhd` davomiyligi 0 bo'lsa — `stts` dan.
+        if info.duration == 0 {
+            if let Some(stts) = child(stbl, b"stts") {
+                let n = be32(stts, 4)? as usize;
+                info.duration = (0..n)
+                    .filter_map(|i| Some(be32(stts, 8 + i * 8)? as u64 * be32(stts, 12 + i * 8)? as u64))
+                    .sum();
+            }
+        }
+        return Some(info);
+    }
+    None
+}
+
+fn open_mp4(bytes: Vec<u8>) -> Option<Kind> {
+    let mp4 = parse_mp4(&bytes)?;
+    let secs = if mp4.timescale > 0 { mp4.duration as f64 / mp4.timescale as f64 } else { 0.0 };
+    let fps = if secs > 0.0 { (mp4.samples.len() as f64 / secs).clamp(1.0, 60.0) } else { 25.0 };
+    let dec = unsafe { aru_h264_open(mp4.extra.as_ptr(), mp4.extra.len() as i32) };
+    if dec.is_null() {
+        return None;
+    }
+    Some(Kind::Mp4 { dec, data: bytes, mp4, fps, sent: 0, out: 0, eof: false })
+}
+
+/// Video (GIF) o'lchami — `{"w":..,"h":..}` (yoki xato). Dart GIF
+/// katagining nisbatini ochishdan oldin shundan biladi.
+#[no_mangle]
+pub extern "C" fn rust_anim_probe(path_ptr: *const c_char) -> *mut c_char {
+    let path = unsafe { cstr_to_str(path_ptr) }.unwrap_or("");
+    let r = std::panic::catch_unwind(|| {
+        let bytes = std::fs::read(path).ok()?;
+        let m = parse_mp4(&bytes)?;
+        Some((m.w, m.h))
+    })
+    .ok()
+    .flatten();
+    let s = match r {
+        Some((w, h)) => format!("{{\"w\":{w},\"h\":{h}}}"),
+        None => "{\"error\":\"mp4 emas\"}".to_string(),
+    };
+    crate::ffi_utils::string_to_cptr(s)
+}
+
 /// Faylni ochadi: `.tgs`/Lottie yoki `.webm`. Qaytadi: tutqich (0 — xato).
 #[no_mangle]
 pub extern "C" fn rust_anim_open(path_ptr: *const c_char, w: i32, h: i32) -> i64 {
@@ -410,6 +603,8 @@ fn open_anim(path_ptr: *const c_char, w: i32, h: i32) -> i64 {
     let Ok(bytes) = std::fs::read(path) else { return 0 };
     let kind = if bytes.starts_with(&[0x1A, 0x45, 0xDF, 0xA3]) {
         open_webm(&bytes)
+    } else if bytes.len() > 8 && &bytes[4..8] == b"ftyp" {
+        open_mp4(bytes)
     } else {
         open_lottie(&bytes)
     };
@@ -419,6 +614,7 @@ fn open_anim(path_ptr: *const c_char, w: i32, h: i32) -> i64 {
     let frames = match &kind {
         Kind::Lottie { frames, .. } => *frames,
         Kind::Webm { frames, .. } => frames.len(),
+        Kind::Mp4 { mp4, .. } => mp4.samples.len(),
     };
     let disk = if frames > 1 {
         Some(DiskFrames::open(PathBuf::from(format!("{path}.{w}x{h}.afc")), frames, w, h))
@@ -444,6 +640,7 @@ pub extern "C" fn rust_anim_frames(id: i64) -> i32 {
     match &a.kind {
         Kind::Lottie { frames, .. } => *frames as i32,
         Kind::Webm { frames, .. } => frames.len() as i32,
+        Kind::Mp4 { mp4, .. } => mp4.samples.len() as i32,
     }
 }
 
@@ -453,7 +650,7 @@ pub extern "C" fn rust_anim_fps(id: i64) -> f64 {
     let Some(a) = get(id) else { return 0.0 };
     let Ok(a) = a.lock() else { return 0.0 };
     match &a.kind {
-        Kind::Lottie { fps, .. } | Kind::Webm { fps, .. } => *fps,
+        Kind::Lottie { fps, .. } | Kind::Webm { fps, .. } | Kind::Mp4 { fps, .. } => *fps,
     }
 }
 
@@ -494,6 +691,61 @@ fn render_frame(id: i64, frame: i32, out: *mut u8) -> i32 {
 
 fn draw(kind: &mut Kind, frame: i32, out: *mut u8, w: usize, h: usize) -> i32 {
     match kind {
+        Kind::Mp4 { dec, data, mp4, sent, out: done, eof, .. } => {
+            let n = mp4.samples.len();
+            if n == 0 {
+                return -1;
+            }
+            let want = (frame.max(0) as usize).min(n - 1);
+            // Orqaga qaytilsa — dekoder boshidan (H.264 ketma-ket).
+            if want < *done || dec.is_null() {
+                unsafe {
+                    if !dec.is_null() {
+                        aru_h264_close(*dec);
+                    }
+                    *dec = aru_h264_open(mp4.extra.as_ptr(), mp4.extra.len() as i32);
+                }
+                if dec.is_null() {
+                    return -1;
+                }
+                *sent = 0;
+                *done = 0;
+                *eof = false;
+            }
+            // Cheksiz aylanib qolmasin.
+            for _ in 0..(n * 4 + 16) {
+                let target = if *done == want { out } else { std::ptr::null_mut() };
+                let r = unsafe { aru_h264_recv(*dec, target, w as i32, h as i32) };
+                match r {
+                    1 => {
+                        *done += 1;
+                        if *done == want + 1 {
+                            return 1;
+                        }
+                    }
+                    0 => {
+                        if *sent < n {
+                            let (o, l) = mp4.samples[*sent];
+                            let Some(slice) = data.get(o..o + l) else { return -1 };
+                            let s = unsafe { aru_h264_send(*dec, slice.as_ptr(), l as i32) };
+                            if s < 0 {
+                                return -1;
+                            }
+                            if s == 0 {
+                                *sent += 1;
+                            }
+                        } else if !*eof {
+                            unsafe { aru_h264_send(*dec, std::ptr::null(), 0) };
+                            *eof = true;
+                        } else {
+                            return -1;
+                        }
+                    }
+                    _ => return -1,
+                }
+            }
+            -1
+        }
         Kind::Lottie { r, frames, .. } => {
             let f = (frame.max(0) as usize).min(*frames - 1);
             let px = unsafe { std::slice::from_raw_parts_mut(out as *mut u32, w * h) };
@@ -609,6 +861,29 @@ mod tests {
         assert_eq!(px(28, 16), &[0, 0, 0, 0]);
         // Orqaga qaytish (qayta boshlash) ham ishlaydi.
         assert_eq!(rust_anim_render(id, 0, buf.as_mut_ptr()), 1);
+        rust_anim_close(id);
+    }
+
+    /// Telegram GIF kabi: H.264 High profil (B-kadrlar bilan) MP4,
+    /// 96x64, 10 kadr — ffmpeg dekoderi bilan ochiladi.
+    #[test]
+    fn mp4_gif_decodes() {
+        let bytes = include_bytes!("testdata/gif_h264.mp4").to_vec();
+        let m = parse_mp4(&bytes).expect("mp4 o'qilmadi");
+        assert_eq!((m.w, m.h), (96, 64));
+        assert_eq!(m.samples.len(), 10);
+        let kind = open_mp4(bytes).expect("dekoder ochilmadi");
+        let Kind::Mp4 { fps, .. } = &kind else { panic!() };
+        assert!((fps - 25.0).abs() < 0.5, "fps {fps}");
+        let id = NEXT.fetch_add(1, Ordering::SeqCst);
+        anims().lock().unwrap().insert(id, Arc::new(Mutex::new(Anim { kind, w: 48, h: 48, disk: None })));
+        let mut buf = vec![0u8; 48 * 48 * 4];
+        for f in [0, 3, 9, 2] {
+            assert_eq!(rust_anim_render(id, f, buf.as_mut_ptr()), 1, "kadr {f}");
+            // To'liq shaffof emas va qora emas (testsrc — rangli).
+            assert!(buf.chunks(4).all(|p| p[3] == 255));
+            assert!(buf.chunks(4).any(|p| p[0] > 40 || p[1] > 40 || p[2] > 40));
+        }
         rust_anim_close(id);
     }
 
