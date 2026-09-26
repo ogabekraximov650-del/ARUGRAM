@@ -53,6 +53,7 @@ import 'dart:isolate';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'image_cache.dart';
@@ -102,6 +103,22 @@ class StorageUsageService extends ChangeNotifier {
   /// Hech bo'lmaganda bir marta o'lchandimi.
   bool measured = false;
 
+  /// Qurilma xotirasi (bayt): jami va bo'sh. Noma'lum bo'lsa 0.
+  int deviceTotal = 0;
+  int deviceFree = 0;
+
+  static const _storage = MethodChannel('aru/storage');
+
+  Future<void> _readDevice() async {
+    try {
+      final m = await _storage.invokeMapMethod<String, dynamic>('stats');
+      deviceTotal = (m?['total'] as num?)?.toInt() ?? 0;
+      deviceFree = (m?['free'] as num?)?.toInt() ?? 0;
+    } catch (_) {
+      // Eski APK (kanal yo'q) — sarlavhada foiz chiqmaydi.
+    }
+  }
+
   /// Hajmlarni qaytadan sanaydi.
   Future<void> refresh() async {
     if (_busy) return;
@@ -117,6 +134,7 @@ class StorageUsageService extends ChangeNotifier {
       final byLabel = await Isolate.run(
         () => _measure(support: support, temp: temp, docs: docs),
       );
+      await _readDevice();
 
       final slices = <StorageSlice>[];
       byLabel.forEach((label, bytes) {
@@ -155,39 +173,66 @@ class StorageUsageService extends ChangeNotifier {
   };
 
   /// Tanlangan toifalarni o'chiradi va hajmlarni qayta sanaydi.
-  Future<void> clear(Set<String> labels) async {
+  ///
+  /// [onProgress] — 0..1 (Telegram'dagi "Kesh tozalanmoqda" oynasi
+  /// uchun): har bir toifa tugagach chaqiriladi.
+  ///
+  /// ── TOPILGAN XATO: STIKERLAR TOZALANMASDI ──────────────────
+  ///
+  /// "Stikerlar va emojilar" hajmi butun `tg/media` papkasidan
+  /// sanalardi (`meta/` — to'plamlar ro'yxati, emoji kalit so'zlari,
+  /// maxsus emoji hujjatlari ham shu ichida), o'chirishda esa `meta`
+  /// tashlab ketilardi. Hajmning asosiy qismi aynan `meta` bo'lgani
+  /// uchun "Keshni tozalash" bosilgandan keyin ham raqam deyarli
+  /// o'zgarmasdi. Endi papka BUTUNLAY tozalanadi: Rust yadrosi
+  /// `meta` yo'qligini ko'rib ro'yxatlarni Telegram'dan qaytadan
+  /// oladi (`cached` -> `hash` 0), hujjat havolalari esa xotirada
+  /// qoladi (`media_docs`), ya'ni panel ishlashda davom etadi.
+  ///
+  /// Posterlarda ham xuddi shunday: kesh ro'yxati (`v2.index`)
+  /// o'chirilmaydi va u "Posterlar 30 B" bo'lib qolardi — endi u
+  /// kesh hisobiga kirmaydi (`_measure`).
+  Future<void> clear(
+    Set<String> labels, {
+    void Function(double progress)? onProgress,
+  }) async {
     final temp = await _dir(getTemporaryDirectory);
+    final support = await _dir(getApplicationSupportDirectory);
     final docs = RustCore.instance.rootDirPath;
-    if (labels.contains(_kVideo)) {
-      try {
-        RustCore.instance.videoCacheWipe();
-      } catch (_) {}
+    final steps = labels.where(clearable.contains).toList();
+    var done = 0;
+    void step() {
+      done++;
+      onProgress?.call(steps.isEmpty ? 1 : done / steps.length);
     }
-    if (labels.contains(_kPoster)) {
-      try {
-        await AppImageCache.manager.emptyCache();
-      } catch (_) {}
-      PaintingBinding.instance.imageCache.clear();
+
+    onProgress?.call(0);
+    for (final label in steps) {
+      switch (label) {
+        case _kVideo:
+          try {
+            RustCore.instance.videoCacheWipe();
+          } catch (_) {}
+        case _kPoster:
+          try {
+            await AppImageCache.manager.emptyCache();
+          } catch (_) {}
+          PaintingBinding.instance.imageCache.clear();
+          PaintingBinding.instance.imageCache.clearLiveImages();
+          // Ro'yxatda yo'q (yetim) muhrlangan rasmlar ham ketsin.
+          if (support != null) {
+            await _wipe('$support/${AppImageCache.key}/v2', _Pick.all);
+          }
+          await _wipe(temp, _Pick.posters);
+        case _kStickers:
+          if (docs != null) await _wipe('$docs/tg/media', _Pick.all);
+        case _kChatMedia:
+          await _wipe(temp, _Pick.chat);
+        case _kTemp:
+          await _wipe(temp, _Pick.temp);
+      }
+      step();
     }
-    final stickers = labels.contains(_kStickers);
-    final chat = labels.contains(_kChatMedia);
-    final other = labels.contains(_kTemp);
-    final posters = labels.contains(_kPoster);
-    await Isolate.run(() {
-      if (stickers && docs != null) {
-        // Fayllar o'chadi, to'plamlar ro'yxati (`meta`) qoladi —
-        // panel darhol ochiladi, rasmlar esa kerak bo'lganda qayta
-        // yuklanadi.
-        _deleteIn(Directory('$docs/tg/media'), (name) => name != 'meta');
-      }
-      if (temp != null) {
-        _deleteIn(Directory(temp), (name) {
-          if (name.startsWith('libCachedImageData')) return posters;
-          if (name.startsWith('gif_')) return chat;
-          return other;
-        });
-      }
-    });
     await refresh();
   }
 
@@ -263,7 +308,9 @@ Map<String, int> _measure({
     _walk(Directory(support), (path, size) {
       if (path.contains('/video_byte_cache/')) return;
       if (path.contains('/aru_images/')) {
-        add(_kPoster, size);
+        // `v2.index` — kesh ro'yxatining o'zi (bo'sh keshda ham
+        // ~30 bayt). U tozalanmaydi, ya'ni kesh hisobiga kirmaydi.
+        add(path.contains('/aru_images/v2/') ? _kPoster : _kOther, size);
         return;
       }
       add(_kOther, size);
@@ -324,6 +371,35 @@ String _labelOfDocFile(String name) {
     return _kOther;
   }
   return _kOther;
+}
+
+/// Papkadagi qaysi elementlar o'chiriladi (`_wipe`).
+enum _Pick { all, posters, chat, temp }
+
+/// [dir] ichidagi [pick] elementlarini FON oqimida o'chiradi.
+///
+/// Alohida funksiya ATAYLAB: `Isolate.run` ga beriladigan yopilma
+/// o'zi turgan funksiyaning hamma ushlangan o'zgaruvchilarini
+/// (masalan ekrandan kelgan `onProgress`) birga olib ketishi
+/// mumkin — bu yerda esa u faqat ikkita oddiy qiymatni ushlaydi.
+Future<void> _wipe(String? dir, _Pick pick) async {
+  if (dir == null) return;
+  await Isolate.run(() {
+    _deleteIn(Directory(dir), (name) {
+      final poster = name.startsWith('libCachedImageData');
+      final gif = name.startsWith('gif_');
+      switch (pick) {
+        case _Pick.all:
+          return true;
+        case _Pick.posters:
+          return poster;
+        case _Pick.chat:
+          return gif;
+        case _Pick.temp:
+          return !poster && !gif;
+      }
+    });
+  });
 }
 
 /// Papkaning [pick] tanlagan bevosita elementlarini o'chiradi

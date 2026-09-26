@@ -111,6 +111,28 @@ class MainActivity : FlutterActivity() {
                 }
             }
 
+        // ── QURILMA XOTIRASI ("Xotiradan foydalanish" oynasi) ──
+        //
+        // Telegram'dagi `CacheControlActivity` sarlavhasi: "ilova
+        // qurilma xotirasining N% ini egallaydi" va uning ostidagi
+        // chiziq (ilova / boshqa ilovalar / bo'sh joy). Ilova
+        // ma'lumotlari turgan bo'lim o'lchanadi.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "aru/storage")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "stats" -> try {
+                        val fs = android.os.StatFs(filesDir.absolutePath)
+                        result.success(mapOf(
+                            "total" to fs.totalBytes,
+                            "free" to fs.availableBytes,
+                        ))
+                    } catch (e: Exception) {
+                        result.error("stats", e.message, null)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+
         // ── SKRINSHOT VA EKRAN YOZIB OLISHNI TAQIQLASH ─────────
         //
         // TALAB (foydalanuvchi): "ilovada video pleyerda va shaxsiy

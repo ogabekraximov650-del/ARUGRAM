@@ -3223,3 +3223,27 @@ internet qaytganda ilova o'z hisobi bilan chat tarixini tozalasin".
   kichrayadigan tugmalar, ⌫ animatsiyasi.
 * Yozish tugmasi: 🎤 ↔ dumaloq video belgisi burilib-kattalashib almashadi,
   yozishda katta doira va halqa. Dumaloq video ochilmasa — sababi va qayta urinish.
+
+## "Xotiradan foydalanish" oynasi Cherrygram'dagidek + stikerlar tozalanmasdi
+
+* **Topilgan xato:** "Stikerlar va emojilar" hajmi butun `tg/media`
+  dan sanalardi, "Keshni tozalash" esa `tg/media/meta` ni (to'plamlar
+  ro'yxati, emoji kalit so'zlari, maxsus emoji hujjatlari — hajmning
+  asosiy qismi) tashlab ketardi, shu sabab raqam kamaymasdi. Endi
+  `tg/media` butunlay o'chadi; Rust ro'yxatlarni Telegram'dan qayta
+  oladi. Ilova qayta ochilganda xotirada yo'q maxsus emoji hujjati
+  `rust_tg_media_file` da ID bo'yicha qayta so'raladi
+  (`GetCustomEmojiDocuments`). Posterlar: `aru_images/v2.index`
+  (bo'sh keshda ~30 B) endi kesh hisobiga kirmaydi, yetim muhrlangan
+  rasmlar ham o'chadi. O'chirish `_wipe` (alohida funksiya — `Isolate.run`
+  yopilmasi ekrandagi `onProgress` ni ushlab qolmasin).
+* **Oyna** (`storage_screen.dart`) — Cherrygram
+  `CacheControlActivity` + `CacheChart` o'lchamlari bilan: halqa
+  (200/172/38, 2° oraliq, zarrachalar, bosilgan bo'lak 9 ga
+  kattalashadi va qatori yoritiladi), belgisi olingan toifa halqadan
+  chiqadi, sarlavha + qurilma xotirasi chizig'i (`aru/storage` ->
+  `stats`, `MainActivity.kt`), dumaloq belgilashli qatorlar, "Keshni
+  tozalash / Tanlanganini tozalash" tugmasi, tasdiqlash, "Kesh
+  tozalanmoqda" pardasi, bo'sh keshda yashil halqa "Xotira tozalandi".
+  "Keshni avtomatik o'chirish" va "eng katta hajm" bo'limlari YO'Q —
+  ularga mos ish ilovada hali yo'q.

@@ -3551,11 +3551,30 @@ pub extern "C" fn rust_tg_media_file(json_ptr: *const c_char) -> *mut c_char {
         if path.exists() {
             return Ok(json!({"path": path.to_string_lossy()}).to_string());
         }
-        let md = media_docs()
-            .lock()
-            .ok()
-            .and_then(|m| m.get(&id).cloned())
-            .ok_or("hujjat noma'lum")?;
+        let known = media_docs().lock().ok().and_then(|m| m.get(&id).cloned());
+        let md = match known {
+            Some(md) => md,
+            // Xotira oynasida kesh (`tg/media/meta` bilan birga)
+            // tozalangach ilova qayta ochilsa, hujjat havolasi
+            // xotirada bo'lmaydi. "Yaqinda ishlatilgan" maxsus
+            // emojilar to'plam ochilmasdan so'raladi — ular ID
+            // bo'yicha qaytadan olinadi (stiker bo'lsa ro'yxat bo'sh
+            // qaytadi va xato avvalgidek).
+            None => {
+                let docs = run_tmo(t, 20, async {
+                    client
+                        .invoke(&tl::functions::messages::GetCustomEmojiDocuments { document_id: vec![id] })
+                        .await
+                        .map_err(|e| inv_err(&e))
+                })?;
+                docs_value(&docs, None);
+                media_docs()
+                    .lock()
+                    .ok()
+                    .and_then(|m| m.get(&id).cloned())
+                    .ok_or("hujjat noma'lum")?
+            }
+        };
         if thumb && md.thumb.is_none() {
             return Err("kichik rasm yo'q".to_string());
         }
