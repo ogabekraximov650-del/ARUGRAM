@@ -34,6 +34,7 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:lottie/lottie.dart';
 
 import '../services/format.dart';
 import '../services/storage_usage.dart';
@@ -143,13 +144,15 @@ class _StorageScreenState extends State<StorageScreen> {
     );
     if (ok != true || !mounted) return;
 
-    // Parda darhol emas, 150 ms dan keyin chiqadi (tez tugasa —
-    // umuman ko'rinmaydi), chiqqan bo'lsa kamida 1 soniya turadi.
+    // TALAB (foydalanuvchi): "Tozalash tugmasini bosganda Telegram'dagidek
+    // jo'ja supurgida supurayotgan animatsiyasi chiqsin". Parda DARHOL
+    // chiqadi va tozalash tez tugasa ham animatsiya ko'rinib ulgurishi
+    // uchun kamida 1.6 soniya turadi.
     final progress = ValueNotifier<double>(0);
     var done = false;
     var shownAt = -1;
     final sheetClosed = Completer<void>();
-    Timer(const Duration(milliseconds: 150), () {
+    Timer(Duration.zero, () {
       if (done || !mounted) {
         if (!sheetClosed.isCompleted) sheetClosed.complete();
         return;
@@ -175,7 +178,7 @@ class _StorageScreenState extends State<StorageScreen> {
     done = true;
     progress.value = 1;
     if (shownAt > 0 && mounted) {
-      final left = 1000 - (DateTime.now().millisecondsSinceEpoch - shownAt);
+      final left = 1600 - (DateTime.now().millisecondsSinceEpoch - shownAt);
       if (left > 0) await Future<void>.delayed(Duration(milliseconds: left));
       if (mounted) Navigator.of(context).pop();
     }
@@ -1140,12 +1143,15 @@ class _ClearingView extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 const SizedBox(height: 16),
-                const SizedBox(
+                // Telegram `utyan_cache`: supurgi bilan supurayotgan
+                // jo'ja (takrorlanib o'ynaydi).
+                SizedBox(
                   width: 150,
                   height: 150,
-                  child: Center(
-                    child: Icon(Icons.cleaning_services_rounded,
-                        size: 96, color: AppColors.accent2),
+                  child: Lottie.asset(
+                    'assets/tg_anim/utyan_cache.json',
+                    repeat: true,
+                    frameRate: FrameRate.max,
                   ),
                 ),
                 const SizedBox(height: 10),

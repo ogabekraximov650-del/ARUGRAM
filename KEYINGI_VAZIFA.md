@@ -3335,3 +3335,32 @@ zaxira yo'llar (`thumbnailData`, birinchi kadr).
   `[re:<id>]` (worker ro'yxatda olib tashlaydi). Bosib turish menyusi:
   Javob berish, Nusxa olish, (admin) Tanlash, O'chirish. Pastga tushish
   tugmasi.
+
+## 5-bosqich: chat bo'sh, qulflash, bot tarixi, qizish
+
+* Support chat bo'sh ko'rinardi: dumaloq video oynasi yopiq holatda
+  Stack'da 0 o'lchamli oddiy bola bo'lib qolar va ro'yxatni 0 kenglikka
+  siqardi. Endi doim `Positioned.fill`, Stack esa `StackFit.expand`.
+* Qulflash (`tg_record_button.dart`, Telegram `ChatActivityEnterView`):
+  qulflangan bosishda barmoq ko'tarilsa endi YUBORILMAYDI (ilgari
+  darhol ketib qolardi); bekor — `distCanMove` ning to'liq masofasi yoki
+  qo'yib yuborishda < 0.45; chapga 30% dan ko'p surilganda qulflanmaydi;
+  doira darhol ochiladi (kamera/mikrofon ochilishini kutmaydi), shu
+  paytdagi surish/qulflash ham ishlaydi. Qisqa bosishda "bosib turing"
+  maslahati; belgi animatsiyasi tizimdagi "animatsiyalarni o'chirish"ga
+  qaramaydi.
+* Bot tarixi: band yoki xato bo'lganda tozalash tashlab ketilmaydi —
+  20/30 s dan keyin qayta uriniladi; Rust'da `revoke` rad etilsa o'z
+  tomonidan o'chiriladi, uzilgan so'rov qayta yuboriladi.
+* Emoji/GIF/stiker (`tg_media_view.dart`): umumiy soat (~30 Hz),
+  hamma animatsiya ≤ 30 kadr/s, bir vaqtda 1..3 kadr chiziladi
+  (yadroga qarab), panel emojisi 100 px / stiker 160 px / xabarda
+  320 px, faqat ko'rsatiladigan kadrlar keshlanadi (56 MB), surish
+  paytida yangi kadr chizilmaydi (`tgAnimScrolled`), kadr `setState`
+  siz almashadi. GIF: kam yadroli telefonda 2 ta, surish to'xtagach
+  ochiladi. Yuklash: 5 tagacha parallel, uzilgan bo'lak qayta so'raladi
+  ("request error: dropped").
+* Tozalash oynasi: Telegram `utyan_cache.json` (supurayotgan jo'ja),
+  darhol chiqadi, kamida 1.6 s turadi.
+* Yozish paytida butun chat har 100 ms qayta qurilmaydi (faqat doira);
+  yuklanayotgan rasm pufak o'lchamida ochiladi.

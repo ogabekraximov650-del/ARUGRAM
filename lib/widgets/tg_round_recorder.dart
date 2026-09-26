@@ -101,7 +101,10 @@ class _TgRoundOverlayState extends State<TgRoundOverlay>
       animation: _a,
       builder: (context, _) {
         final t = Curves.decelerate.transform(_a.value);
-        if (t <= 0.001) return const SizedBox.shrink();
+        // Doim `Positioned.fill`: yopiq holatda ham Stack'ning
+        // o'lchamiga ta'sir qilmaydi (aks holda 0 o'lchamli bola
+        // Stack'ni — va xabarlar ro'yxatini — 0 kenglikka siqardi).
+        if (t <= 0.001) return const Positioned.fill(child: SizedBox.shrink());
         return Positioned.fill(child: LayoutBuilder(builder: (context, box) {
           final screen = MediaQuery.sizeOf(context);
           // `roundPlayingMessageSize`: ekran qisqa tomonining ~92% i.

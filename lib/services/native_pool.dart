@@ -38,7 +38,7 @@ class NativePool {
   /// Stiker/emoji/GIF FAYLLARINI yuklash — alohida hovuz: sekin
   /// yuklanish to'plamlar ro'yxati so'rovini navbatda ushlab turmasin
   /// (panel "aylanib" qolardi).
-  static final files = NativePool._(3, 'aru-files');
+  static final files = NativePool._(5, 'aru-files');
   static final render = NativePool._(3, 'aru-render');
 
   final List<_Worker> _workers = [];

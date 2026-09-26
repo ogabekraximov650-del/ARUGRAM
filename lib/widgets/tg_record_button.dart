@@ -19,9 +19,14 @@
 //     ovoz qancha baland bo'lsa shuncha tez va katta tebranadi;
 //   * doira ustida (60 dp yuqorida) qulf "tabletkasi" (36 × 50, tepaga
 //     o'q bilan, sekin tebranadi); tepaga 57 dp surilsa qulflanadi —
-//     doira ➤ ga aylanadi;
+//     doira ➤ ga aylanadi. Qulflangach barmoqni qo'yib yuborish hech
+//     narsa qilmaydi — faqat ➤ bosilganda yuboriladi;
 //   * chapga surilsa doira barmoq bilan siljiydi va 0.7 gacha
-//     kichrayadi; yetarlicha surilsa — bekor.
+//     kichrayadi; `distCanMove` ning to'liq masofasiga surilsa (yoki
+//     0.45 dan kam holatda qo'yib yuborilsa) — bekor. Chapga 30% dan
+//     ko'p surilgan bo'lsa qulflanmaydi (`slideToCancelProgress < 0.7`);
+//   * qisqa bosishda 🎤 <-> 📹 almashadi va tepada "bosib turing"
+//     maslahati 2 soniya ko'rinadi (`HoldToAudio` / `HoldToVideo`).
 
 import 'dart:async';
 import 'dart:math' as math;
@@ -88,19 +93,41 @@ class _TgRecordButtonState extends State<TgRecordButton>
 
   /// Barmoq hozir tugmada.
   bool _pressed = false;
+
+  /// Barmoq bosilgan nuqta — surish shundan o'lchanadi.
   Offset _start = Offset.zero;
+
+  /// Yozish boshlanmoqda (kamera/mikrofon ochilyapti) — doira allaqachon
+  /// ko'rinadi, barmoq bilan surish va qulflash shu paytda ham ishlaydi.
+  bool _starting = false;
+
+  /// Boshlanish paytida bekor qilindi — boshlangach darhol to'xtatiladi.
+  bool _abort = false;
   double _dx = 0;
   double _dy = 0;
+
+  /// Shu bosishda qulflandi — barmoq ko'tarilganda yuborilmaydi.
+  bool _lockedNow = false;
+
+  /// "Bosib turing" maslahati.
+  final _hint = OverlayPortalController();
+  final _link = LayerLink();
+  Timer? _hintTimer;
 
   /// 🎤 <-> 📹 belgisi (`voice_and_video.json`, 60 kadr).
   late final AnimationController _icon = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1000),
+      // Telegram (RLottie) tizimdagi "animatsiyalarni o'chirish"ga
+      // qaramaydi — belgi doim aylanib almashadi.
+      animationBehavior: AnimationBehavior.preserve,
       value: _mode == TgRecMode.voice ? 0.5 : 0);
 
   /// Doiraning ochilishi (`scale`, 0..1).
   late final AnimationController _enter = AnimationController(
-      vsync: this, duration: const Duration(milliseconds: 360));
+      vsync: this,
+      animationBehavior: AnimationBehavior.preserve,
+      duration: const Duration(milliseconds: 360));
 
   // Telegram Android (`ChatActivityEnterView`) qiymatlari:
   //   * yozish bosilgandan 150 ms keyin boshlanadi;
@@ -115,6 +142,7 @@ class _TgRecordButtonState extends State<TgRecordButton>
   @override
   void dispose() {
     _hold?.cancel();
+    _hintTimer?.cancel();
     _icon.dispose();
     _enter.dispose();
     super.dispose();
@@ -136,46 +164,79 @@ class _TgRecordButtonState extends State<TgRecordButton>
     if (widget.busy) return;
     if (widget.hasText || widget.locked) return; // bosish — `_up` da
     _start = e.position;
+    _lockedNow = false;
+    _abort = false;
     _pressed = true;
     _hold?.cancel();
     _hold = Timer(const Duration(milliseconds: 150), () async {
       _hold = null;
+      // Telegram'dagidek doira DARHOL ochiladi — kamera ochilishini
+      // kutmaydi (ilgari shu paytdagi surish/qulflash yo'qolardi).
+      _starting = true;
+      _setHolding(true);
+      HapticFeedback.lightImpact();
       final ok = await widget.onStart(_mode);
+      _starting = false;
       if (!mounted) return;
-      // Yozish boshlanguncha (kamera ochilguncha) barmoq qo'yib
-      // yuborilgan — yozuv osilib qolmasin.
-      if (ok && !_pressed && !widget.locked) {
-        widget.onStop(false);
+      if (!ok) {
+        _setHolding(false);
+        widget.onDrag(0);
+        if (widget.locked || _lockedNow) widget.onStop(false);
+        _lockedNow = false;
         return;
       }
-      if (ok) HapticFeedback.lightImpact();
-      _setHolding(ok);
+      // Boshlanguncha bekor qilingan yoki barmoq qo'yib yuborilgan
+      // (qulflanmagan) — yozuv osilib qolmasin.
+      if (_abort || (!_pressed && !widget.locked && !_lockedNow)) {
+        _abort = false;
+        _setHolding(false);
+        widget.onDrag(0);
+        widget.onStop(false);
+      }
     });
   }
 
   void _move(PointerMoveEvent e) {
     if (!_holding || widget.locked) return;
+    // Masofa barmoq BOSILGAN joydan o'lchanadi — yozish boshlanguncha
+    // qilingan harakat ham hisobga kiradi.
     final d = e.position - _start;
     final dist = _distCanMove(context);
+    final slide = (1 + d.dx / dist).clamp(0.0, 1.0);
+    // `setLockTranslation`: chapga 30% dan ko'p surilgan bo'lsa
+    // qulflanmaydi; aks holda tepaga 57 dp — qulf.
+    if (slide >= 0.7 && -d.dy >= _lockAt) {
+      HapticFeedback.mediumImpact();
+      _lockedNow = true;
+      _setHolding(false);
+      widget.onDrag(0);
+      widget.onLock();
+      return;
+    }
     setState(() {
       _dx = d.dx.clamp(-dist, 0.0);
       _dy = (-d.dy).clamp(0.0, _lockAt);
     });
     widget.onDrag(_dx);
-    if (d.dx < -dist * 0.3 && d.dx.abs() > -d.dy) {
+    // `alpha == 0` — to'liq masofaga surildi: bekor.
+    if (slide <= 0) {
       _setHolding(false);
       widget.onDrag(0);
-      widget.onStop(false);
-    } else if (-d.dy >= _lockAt) {
-      HapticFeedback.mediumImpact();
-      _setHolding(false);
-      widget.onDrag(0);
-      widget.onLock();
+      if (_starting) {
+        _abort = true;
+      } else {
+        widget.onStop(false);
+      }
     }
   }
 
   void _up(PointerUpEvent e) {
     _pressed = false;
+    if (_lockedNow) {
+      // Shu bosishda qulflandi — barmoq ko'tarilishi yubormaydi.
+      _lockedNow = false;
+      return;
+    }
     if (widget.busy) return;
     if (widget.hasText) {
       widget.onSend();
@@ -193,10 +254,19 @@ class _TgRecordButtonState extends State<TgRecordButton>
       _toggleMode();
       return;
     }
-    if (_holding) {
+    if (_starting) {
+      // Hali boshlanmagan — boshlangach darhol to'xtatiladi.
+      _abort = true;
       _setHolding(false);
       widget.onDrag(0);
-      widget.onStop(true);
+      return;
+    }
+    if (_holding) {
+      // `alpha < 0.45` holatda qo'yib yuborilsa — bekor.
+      final cancel = 1 + _dx / _distCanMove(context) < 0.45;
+      _setHolding(false);
+      widget.onDrag(0);
+      widget.onStop(!cancel);
     }
   }
 
@@ -213,12 +283,67 @@ class _TgRecordButtonState extends State<TgRecordButton>
       _icon.value = 0;
       _icon.animateTo(0.5, duration: const Duration(milliseconds: 500));
     }
+    _showHint();
+  }
+
+  void _showHint() {
+    _hintTimer?.cancel();
+    if (_hint.isShowing) {
+      // Matn yangilansin.
+      setState(() {});
+    } else {
+      _hint.show();
+    }
+    _hintTimer = Timer(const Duration(seconds: 2), () {
+      if (mounted && _hint.isShowing) _hint.hide();
+    });
+  }
+
+  Widget _hintBubble(BuildContext context) {
+    final text = _mode == TgRecMode.video
+        ? 'Video xabar yozish uchun bosib turing.\nOvozga o\'tish uchun bosing.'
+        : 'Ovozli xabar yozish uchun bosib turing.\nVideoga o\'tish uchun bosing.';
+    return CompositedTransformFollower(
+      link: _link,
+      targetAnchor: Alignment.topRight,
+      followerAnchor: Alignment.bottomRight,
+      offset: const Offset(0, -6),
+      child: Align(
+        alignment: Alignment.bottomRight,
+        child: IgnorePointer(
+          child: TweenAnimationBuilder<double>(
+            tween: Tween(begin: 0, end: 1),
+            duration: const Duration(milliseconds: 150),
+            builder: (context, v, child) => Opacity(opacity: v, child: child),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+              decoration: BoxDecoration(
+                color: const Color(0xE6202226),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(text,
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      decoration: TextDecoration.none,
+                      fontWeight: FontWeight.w400)),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   void _cancel(PointerCancelEvent e) {
     _pressed = false;
     _hold?.cancel();
     _hold = null;
+    if (_starting) {
+      _abort = true;
+      _setHolding(false);
+      widget.onDrag(0);
+      return;
+    }
     if (_holding) {
       _setHolding(false);
       widget.onDrag(0);
@@ -231,8 +356,13 @@ class _TgRecordButtonState extends State<TgRecordButton>
     final send = widget.hasText || widget.locked;
     final dist = _distCanMove(context);
     // `slideToCancelProgress`: 1 — joyida, 0 — bekor chegarasida.
-    final slide = (1 + _dx / (dist * 0.3)).clamp(0.0, 1.0);
-    return Listener(
+    final slide = (1 + _dx / dist).clamp(0.0, 1.0);
+    return OverlayPortal(
+      controller: _hint,
+      overlayChildBuilder: _hintBubble,
+      child: CompositedTransformTarget(
+      link: _link,
+      child: Listener(
       onPointerDown: _down,
       onPointerMove: _move,
       onPointerUp: _up,
@@ -317,6 +447,8 @@ class _TgRecordButtonState extends State<TgRecordButton>
           ],
         ),
       ),
+    ),
+    ),
     );
   }
 }

@@ -368,7 +368,7 @@ class TgMedia {
 
   Future<String?> _file(TgDoc d, String key, bool thumb) {
     return _files[key] ??= () async {
-      while (_running >= 4) {
+      while (_running >= 5) {
         final c = Completer<void>();
         _waiting.add(c);
         await c.future;

@@ -416,7 +416,14 @@ class _TgMediaPanelState extends State<TgMediaPanel> {
         children: [
           // Telegram hisobi almashsa sahifalar qaytadan quriladi (yangi
           // hisobning to'plamlari olinadi — `TgMedia.resetAccount`).
-          ValueListenableBuilder<int>(
+          // Surilayotganda yangi kadr chizilmaydi (`tgAnimScrolled`) —
+          // surish va sahifa almashishi silliq bo'ladi.
+          NotificationListener<ScrollUpdateNotification>(
+            onNotification: (_) {
+              tgAnimScrolled();
+              return false;
+            },
+            child: ValueListenableBuilder<int>(
             valueListenable: TgMedia.instance.accountChanged,
             builder: (context, acc, _) => PageView(
             key: ValueKey(acc),
@@ -433,6 +440,7 @@ class _TgMediaPanelState extends State<TgMediaPanel> {
                   enabled: _tab == 2,
                   child: _StickerPage(onSticker: widget.onSticker)),
             ],
+          ),
           ),
           ),
           // ── Yuklashda xato bo'lsa — sababi (bosilsa yopiladi) ──

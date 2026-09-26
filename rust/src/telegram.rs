@@ -2148,11 +2148,19 @@ pub extern "C" fn rust_tg_clear_bot_chat() -> *mut c_char {
         t.rt.block_on(async {
             let (id, hash) = bot_peer(t, &client).await?;
             // Katta tarix bir necha qadamda o'chadi (`offset > 0`).
-            for _ in 0..20 {
-                let tl::enums::messages::AffectedHistory::History(r) = client
+            //
+            // `revoke` (ikkala tomondan) bot bilan suhbatda ba'zan rad
+            // etiladi — shunda faqat o'z tomonidan o'chiriladi (Telegram
+            // ilovasi ham bot chatini shunday tozalaydi). Uzilgan so'rov
+            // ("dropped") bir necha marta qayta yuboriladi.
+            let mut revoke = true;
+            let mut tries = 0;
+            let mut steps = 0;
+            while steps < 20 {
+                let r = client
                     .invoke(&tl::functions::messages::DeleteHistory {
                         just_clear: false,
-                        revoke: true,
+                        revoke,
                         peer: tl::enums::InputPeer::User(tl::types::InputPeerUser {
                             user_id: id,
                             access_hash: hash,
@@ -2161,10 +2169,22 @@ pub extern "C" fn rust_tg_clear_bot_chat() -> *mut c_char {
                         min_date: None,
                         max_date: None,
                     })
-                    .await
-                    .map_err(|e| e.to_string())?;
-                if r.offset <= 0 {
-                    break;
+                    .await;
+                match r {
+                    Ok(tl::enums::messages::AffectedHistory::History(r)) => {
+                        steps += 1;
+                        if r.offset <= 0 {
+                            break;
+                        }
+                    }
+                    Err(e) if is_transient(&e) && tries < 3 => {
+                        tries += 1;
+                        tokio::time::sleep(Duration::from_millis(500 * tries as u64)).await;
+                    }
+                    Err(e) if revoke && matches!(&e, InvocationError::Rpc(_)) => {
+                        revoke = false;
+                    }
+                    Err(e) => return Err(inv_err(&e)),
                 }
             }
             Ok::<(), String>(())
@@ -3547,6 +3567,12 @@ async fn download_media(t: &Tg, client: &Client, mut md: MediaDoc, thumb: bool) 
                                 dc = v as i32;
                             }
                         }
+                    }
+                    // Ulanish uzilgan / so'rov tashlangan ("request error:
+                    // dropped") — bir oz kutib qaytadan (Telegram ham
+                    // fayl bo'lagini jimgina qayta so'raydi).
+                    _ if is_transient(&e) && !matches!(&e, InvocationError::Rpc(r) if r.name.starts_with("FLOOD_WAIT")) => {
+                        tokio::time::sleep(Duration::from_millis(300 * tries as u64)).await;
                     }
                     _ => return Err(inv_err(&e)),
                 }

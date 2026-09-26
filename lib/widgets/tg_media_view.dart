@@ -180,8 +180,127 @@ final Map<String, ui.Image> _firstFrames = {};
 const _firstFramesMax = 150;
 
 /// Hamma animatsiyalarning kadrlar keshi uchun umumiy chegara.
-const _cacheBudget = 48 * 1024 * 1024;
+const _cacheBudget = 56 * 1024 * 1024;
 int _cacheUsed = 0;
+
+// ── UMUMIY SOAT ──────────────────────────────────────────────────
+//
+// TALAB (foydalanuvchi): "emoji, gif va stikerlar judayam sekin
+// yuklanyapti, telefonni qotirib, qizdirib yuboryapti — kuchsiz
+// telefonlarda ham qotmasdan, kam bosim bilan ishlasin".
+//
+// TOPILGAN SABAB: har animatsiyaning O'Z soati bor edi va har biri
+// o'z kadrini fon isolate'iga so'rardi — ekrandagi 50 ta emoji
+// soniyasiga ~1500 ta kadr chizdirardi, protsessorning hamma yadrosi
+// to'xtovsiz band, telefon qiziydi, UI oqimi esa har kadrda 50 ta
+// `setState` qilardi.
+//
+// ENDI (Telegram `RLottieDrawable` / `AnimatedEmojiDrawable` kabi):
+//   * bitta umumiy soat; hamma animatsiya 30 kadr/s dan oshmaydi
+//     (Telegram `limitFps`);
+//   * bir vaqtda chiziladigan kadrlar soni CHEKLANGAN (yadrolar
+//     soniga qarab 1..3) — navbat bilan, avval hali hech narsa
+//     ko'rsatmayotganlari;
+//   * chizilgan kadr xotirada qoladi — birinchi aylanishdan keyin
+//     animatsiya protsessorni deyarli ishlatmaydi (faqat tayyor
+//     rasmni almashtiradi);
+//   * ro'yxat SURILAYOTGANDA yangi kadr chizilmaydi (tayyorlari
+//     o'ynayveradi) — surish silliq bo'ladi;
+//   * kadr `setState` bilan emas, faqat qayta chizish bilan
+//     almashadi (widget qayta qurilmaydi).
+
+/// Ro'yxat surilayotganini bildiradi (panel `NotificationListener`
+/// orqali chaqiradi).
+void tgAnimScrolled() => _AnimClock.instance.lastScroll = DateTime.now();
+
+class _AnimClock {
+  _AnimClock._();
+  static final instance = _AnimClock._();
+
+  final Set<_TgAnimViewState> _subs = {};
+
+  /// Kadr kutayotganlar (qo'shilish tartibida).
+  final Set<_TgAnimViewState> _queue = {};
+  int _inflight = 0;
+  bool _scheduled = false;
+  DateTime lastScroll = DateTime.fromMillisecondsSinceEpoch(0);
+
+  static final int _maxInflight =
+      (Platform.numberOfProcessors ~/ 3).clamp(1, 3);
+
+  bool get scrolling =>
+      DateTime.now().difference(lastScroll).inMilliseconds < 180;
+
+  void add(_TgAnimViewState s) {
+    _subs.add(s);
+    _schedule();
+  }
+
+  void remove(_TgAnimViewState s) {
+    _subs.remove(s);
+    _queue.remove(s);
+  }
+
+  /// Soat soniyasiga ~30 marta uradi (90/120 Hz ekranda ham har
+  /// vsync'da emas) — kadr vsync'ga tekislanadi, lekin ortiqcha
+  /// kadr qurilmaydi.
+  void _schedule() {
+    if (_scheduled || _subs.isEmpty) return;
+    _scheduled = true;
+    Timer(const Duration(milliseconds: 30), () {
+      if (_subs.isEmpty) {
+        _scheduled = false;
+        return;
+      }
+      SchedulerBinding.instance.scheduleFrameCallback(_frame);
+    });
+  }
+
+  void _frame(Duration t) {
+    _scheduled = false;
+    for (final s in _subs.toList()) {
+      s._tick(t);
+    }
+    _pump();
+    _schedule();
+  }
+
+  /// Kadr kerak ([first] — hali hech narsa ko'rsatilmagan).
+  void want(_TgAnimViewState s, {bool first = false}) {
+    if (first) {
+      // Bo'sh turganlar navbat boshiga.
+      final rest = _queue.toList();
+      _queue
+        ..clear()
+        ..add(s)
+        ..addAll(rest);
+    } else {
+      _queue.add(s);
+    }
+    _pump();
+  }
+
+  void _pump() {
+    final busy = scrolling;
+    while (_inflight < (busy ? 1 : _maxInflight) && _queue.isNotEmpty) {
+      _TgAnimViewState? pick;
+      for (final s in _queue) {
+        // Surilayotganda faqat birinchi kadrlar chiziladi.
+        if (!busy || s._image == null) {
+          pick = s;
+          break;
+        }
+      }
+      if (pick == null) return;
+      _queue.remove(pick);
+      _inflight++;
+      pick._renderWanted().whenComplete(() {
+        _inflight--;
+        _pump();
+      });
+    }
+  }
+}
 
 class TgAnimView extends StatefulWidget {
   final String path;
@@ -203,28 +322,32 @@ class TgAnimView extends StatefulWidget {
   State<TgAnimView> createState() => _TgAnimViewState();
 }
 
-class _TgAnimViewState extends State<TgAnimView>
-    with SingleTickerProviderStateMixin {
-  Ticker? _ticker;
+class _TgAnimViewState extends State<TgAnimView> {
   int _handle = 0;
   bool _opening = false;
   bool _failed = false;
   int _frames = 1;
   double _fps = 30;
   int _px = 0;
-  ui.Image? _image;
-  bool _busy = false;
+  final _img = ValueNotifier<ui.Image?>(null);
+  ui.Image? get _image => _img.value;
   bool _dead = false;
   int _shown = -1;
-  Duration _base = Duration.zero;
+
+  /// Chizilishi kerak bo'lgan kadr (-1 — hech narsa).
+  int _want = -1;
+  Duration? _base;
   ValueListenable<TickerModeData>? _tickerMode;
   bool _enabled = true;
 
   /// Xotiradagi kadrlar (umumiy chegaraga sig'sa).
-  List<ui.Image?>? _cache;
+  Map<int, ui.Image>? _cache;
   int _cacheBytes = 0;
 
   String get _key => '${widget.path}@$_px';
+
+  /// Ko'rsatiladigan tezlik — 30 kadr/s dan oshmaydi.
+  double get _showFps => _fps > 30 ? 30.0 : _fps;
 
   @override
   void didChangeDependencies() {
@@ -237,12 +360,12 @@ class _TgAnimViewState extends State<TgAnimView>
     }
     if (_px != 0) return;
     final dpr = MediaQuery.devicePixelRatioOf(context);
-    _px = (widget.size * dpr)
-        .round()
-        .clamp(24, widget.panel ? 160 : 384)
-        .toInt();
+    // Panelda kichik: emoji 100 px, stiker 160 px (Telegram
+    // klaviaturasi ham kichraytirib chizadi); xabarda 320 px.
+    final cap = widget.panel ? (widget.size <= 48 ? 100 : 160) : 320;
+    _px = (widget.size * dpr).round().clamp(24, cap).toInt();
     final first = _firstFrames[_key];
-    if (first != null) _image = first.clone();
+    if (first != null) _img.value = first.clone();
     if (_enabled || _image == null) _open();
   }
 
@@ -260,16 +383,17 @@ class _TgAnimViewState extends State<TgAnimView>
   /// Yashirin: Rust tutqichi va kadrlar keshi bo'shaydi, oxirgi kadr
   /// ekranda qoladi.
   void _release() {
-    _ticker?.dispose();
-    _ticker = null;
+    _AnimClock.instance.remove(this);
+    _want = -1;
+    _base = null;
     if (_handle > 0) NativePool.render.animClose(_handle);
     _handle = 0;
     _dropCache();
   }
 
   void _dropCache() {
-    for (final i in _cache ?? const <ui.Image?>[]) {
-      i?.dispose();
+    for (final i in _cache?.values ?? const <ui.Image>[]) {
+      i.dispose();
     }
     _cache = null;
     _cacheUsed -= _cacheBytes;
@@ -292,52 +416,61 @@ class _TgAnimViewState extends State<TgAnimView>
     _handle = r.$1;
     _frames = r.$2.clamp(1, 100000);
     _fps = r.$3 > 0 ? r.$3 : 30;
-    final need = _px * _px * 4 * _frames;
+    // Faqat KO'RSATILADIGAN kadrlar saqlanadi (60 -> 30 kadr/s da
+    // har ikkinchisi).
+    final shown = (_frames * _showFps / _fps).ceil();
+    final need = _px * _px * 4 * shown;
     if (_cacheUsed + need <= _cacheBudget) {
-      _cache = List<ui.Image?>.filled(_frames, null);
+      _cache = {};
       _cacheBytes = need;
       _cacheUsed += need;
     }
-    if (_image == null || _shown < 0) await _render(0);
-    if (_dead || _handle <= 0) return;
+    if (_image == null || _shown < 0) {
+      _want = 0;
+      _AnimClock.instance.want(this, first: _image == null);
+    }
     if (_frames > 1 && !widget.frozen && _enabled) {
-      _ticker ??= createTicker(_tick)..start();
-      _base = Duration.zero;
+      _AnimClock.instance.add(this);
     }
   }
 
   void _tick(Duration t) {
-    if (_busy || _handle <= 0) return;
-    // Panelda 30 kadr/s (Telegram'dagi kichik stikerlar kabi).
-    final fps = widget.panel ? (_fps > 30 ? 30.0 : _fps) : _fps;
+    if (_handle <= 0) return;
+    final base = _base ??= t;
+    final fps = _showFps;
     final step = _fps / fps;
-    final n = ((t - _base).inMicroseconds / 1e6 * fps).floor();
+    final n = ((t - base).inMicroseconds / 1e6 * fps).floor();
     final f = ((n * step).floor()) % _frames;
-    if (f == _shown) return;
+    if (f == _shown || f == _want) return;
     final cached = _cache?[f];
     if (cached != null) {
       _show(cached.clone(), f);
       return;
     }
-    _render(f);
+    // Oldingi kadr hali chizilmoqda — bu kadr tashlab o'tiladi.
+    if (_want >= 0) return;
+    _want = f;
+    _AnimClock.instance.want(this);
   }
 
-  Future<void> _render(int f) async {
+  /// Soat navbati kelganda chaqiradi.
+  Future<void> _renderWanted() async {
+    final f = _want;
     final h = _handle;
-    if (h <= 0) return;
-    _busy = true;
+    if (f < 0 || h <= 0 || _dead) {
+      _want = -1;
+      return;
+    }
     final bytes = await NativePool.render.animFrame(h, f, _px, _px);
     if (_dead || bytes == null || h != _handle) {
-      // Ko'rinmaydigan (yashirin) kadr — oldingisi qoladi.
-      _shown = f;
-      _busy = false;
+      _want = -1;
       return;
     }
     final c = Completer<ui.Image>();
     ui.decodeImageFromPixels(
         bytes, _px, _px, ui.PixelFormat.rgba8888, c.complete);
     final img = await c.future;
-    _busy = false;
+    _want = -1;
     if (_dead) {
       img.dispose();
       return;
@@ -350,7 +483,7 @@ class _TgAnimViewState extends State<TgAnimView>
       _firstFrames[_key] = img.clone();
     }
     final cache = _cache;
-    if (cache != null && h == _handle && cache[f] == null) {
+    if (cache != null && h == _handle && !cache.containsKey(f)) {
       cache[f] = img.clone();
     }
     _show(img, f);
@@ -358,9 +491,11 @@ class _TgAnimViewState extends State<TgAnimView>
 
   void _show(ui.Image img, int f) {
     _shown = f;
-    final old = _image;
-    setState(() => _image = img);
+    final old = _img.value;
+    _img.value = img;
     old?.dispose();
+    // Birinchi kadr — `fallback`/bo'sh joy o'rniga rasm chiqsin.
+    if (old == null && mounted) setState(() {});
   }
 
   @override
@@ -368,24 +503,48 @@ class _TgAnimViewState extends State<TgAnimView>
     _dead = true;
     _tickerMode?.removeListener(_onTickerMode);
     _release();
-    _image?.dispose();
+    _img.value?.dispose();
+    _img.value = null;
+    _img.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final img = _image;
-    if (img == null) {
+    if (_image == null) {
       return _failed ? widget.fallback : const SizedBox.shrink();
     }
-    return RawImage(
-      image: img,
-      width: widget.size,
-      height: widget.size,
-      fit: BoxFit.contain,
-      filterQuality: FilterQuality.medium,
+    return CustomPaint(
+      size: Size.square(widget.size),
+      painter: _FramePainter(_img),
     );
   }
+}
+
+/// Kadrni chizadi; kadr almashganda faqat QAYTA CHIZILADI (qayta
+/// qurilmaydi, joylanmaydi).
+class _FramePainter extends CustomPainter {
+  final ValueNotifier<ui.Image?> img;
+  _FramePainter(this.img) : super(repaint: img);
+
+  static final _paint = Paint()..filterQuality = FilterQuality.medium;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final i = img.value;
+    if (i == null) return;
+    final side = size.shortestSide;
+    final dst = Rect.fromCenter(
+        center: size.center(Offset.zero), width: side, height: side);
+    canvas.drawImageRect(
+        i,
+        Rect.fromLTWH(0, 0, i.width.toDouble(), i.height.toDouble()),
+        dst,
+        _paint);
+  }
+
+  @override
+  bool shouldRepaint(_FramePainter old) => !identical(old.img, img);
 }
 
 /// Xabardagi stiker (`stk_...` havolasi bo'yicha).
@@ -491,7 +650,8 @@ class TgGifThumb extends StatefulWidget {
   State<TgGifThumb> createState() => _TgGifThumbState();
 }
 
-const _gifSlots = 4;
+/// Kuchsiz (kam yadroli) telefonda bir vaqtda 2 ta, aks holda 4 ta.
+final _gifSlots = Platform.numberOfProcessors >= 8 ? 4 : 2;
 int _gifBusy = 0;
 final List<VoidCallback> _gifWaiters = [];
 
@@ -551,7 +711,10 @@ class _TgGifThumbState extends State<TgGifThumb> {
 
   Future<void> _play() async {
     // Tez surilayotgan ro'yxatda yuklanmaydi.
-    while (mounted && Scrollable.recommendDeferredLoadingForContext(context)) {
+    // Surish to'xtaguncha video dekoder ochilmaydi (surish silliq).
+    while (mounted &&
+        (_AnimClock.instance.scrolling ||
+            Scrollable.recommendDeferredLoadingForContext(context))) {
       await Future<void>.delayed(const Duration(milliseconds: 150));
     }
     if (!mounted || !_slot) return;

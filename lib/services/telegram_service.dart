@@ -858,10 +858,14 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> _clearIfPending() {
     final running = _clearing;
     if (running != null) return running;
-    if (!_clearPending ||
-        !_authorized ||
-        _holders.isNotEmpty ||
-        _delivering > 0) {
+    if (!_clearPending || !_authorized) return Future.value();
+    if (_holders.isNotEmpty || _delivering > 0) {
+      // TOPILGAN XATO ("bot tarixi tozalanmayapti"): nusxa band
+      // bo'lgan paytda tozalash shunchaki TASHLAB KETILARDI va
+      // keyingi turtki (pleyerdan chiqish, internet qaytishi)
+      // bo'lmaguncha chat to'lib turardi. Endi navbat saqlanadi va
+      // bir ozdan keyin yana tekshiriladi (tarmoqqa chiqilmaydi).
+      _retryClear(const Duration(seconds: 20));
       return Future.value();
     }
     final f = () async {
@@ -873,13 +877,27 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
               lib.lookupFunction<_NoArgC, _NoArgC>(
                   'rust_tg_clear_bot_chat')()));
         });
-        if (j['ok'] == true) _clearPending = false;
+        if (j['ok'] == true) {
+          _clearPending = false;
+        } else {
+          // Xato (uzilgan ulanish va h.k.) — jim qolmaydi, qayta.
+          _retryClear(const Duration(seconds: 30));
+        }
       } catch (_) {
-        // Tarmoq yo'q — navbatda qoladi (internet qaytgach).
+        _retryClear(const Duration(seconds: 30));
       }
     }();
     _clearing = f.whenComplete(() => _clearing = null);
     return _clearing!;
+  }
+
+  Timer? _clearRetry;
+  void _retryClear(Duration after) {
+    if (_clearRetry?.isActive ?? false) return;
+    _clearRetry = Timer(after, () {
+      _clearRetry = null;
+      unawaited(_clearIfPending());
+    });
   }
 
   void _afterLogin() {

@@ -172,6 +172,11 @@ class _SupportChatScreenState extends State<SupportChatScreen>
   bool _roundSent = false;
   Duration _recLen = Duration.zero;
 
+  /// Yozuv uzunligi — faqat dumaloq video doirasi qayta chiziladi.
+  /// (Ilgari har 100 ms da butun ekran — xabarlar ro'yxati bilan —
+  /// `setState` qilinardi va yozish paytida chat qotardi.)
+  final _recTick = ValueNotifier<Duration>(Duration.zero);
+
   /// Yozish boshlangan payt — taymer soniyaning yuzdan biri bilan
   /// ko'rsatiladi (`TimerView`: "0:03,45").
   DateTime _recStart = DateTime.now();
@@ -232,6 +237,7 @@ class _SupportChatScreenState extends State<SupportChatScreen>
     _recTimer?.cancel();
     _ampSub?.cancel();
     _amp.dispose();
+    _recTick.dispose();
     unawaited(_rec.dispose());
     _chat.removeListener(_onData);
     _chat.stopPolling();
@@ -259,6 +265,7 @@ class _SupportChatScreenState extends State<SupportChatScreen>
 
   /// Ro'yxat pastdan tortildimi — shunda yangilanadi.
   bool _onScroll(ScrollNotification n) {
+    if (n is ScrollUpdateNotification) tgAnimScrolled();
     if (_pullBusy) return false;
     if (n is OverscrollNotification) {
       // Musbat `overscroll` — OXIRIDAN tashqariga chiqish.
@@ -455,6 +462,7 @@ class _SupportChatScreenState extends State<SupportChatScreen>
       );
       _recPath = path;
       _recLen = Duration.zero;
+      _recTick.value = Duration.zero;
       _recStart = DateTime.now();
       _levels.clear();
       // dBFS -> 16 bitli RMS (`* 32767`) -> Telegram shkalasi (1800).
@@ -470,7 +478,8 @@ class _SupportChatScreenState extends State<SupportChatScreen>
       _recTimer?.cancel();
       _recTimer = Timer.periodic(const Duration(milliseconds: 200), (_) {
         if (!mounted) return;
-        setState(() => _recLen += const Duration(milliseconds: 200));
+        _recLen += const Duration(milliseconds: 200);
+        _recTick.value = _recLen;
         // Juda uzun yozuvni o'zi to'xtatadi: 5 daqiqadan uzun
         // ovozli xabar yozishmaga to'g'ri kelmaydi.
         if (_recLen.inMinutes >= 5) _stopRecording(send: true);
@@ -664,6 +673,7 @@ class _SupportChatScreenState extends State<SupportChatScreen>
     await VoicePlayer.instance.stop();
     HapticFeedback.lightImpact();
     _recLen = Duration.zero;
+    _recTick.value = Duration.zero;
     _recStart = DateTime.now();
     setState(() {
       _roundRec = true;
@@ -690,7 +700,8 @@ class _SupportChatScreenState extends State<SupportChatScreen>
       _recTimer?.cancel();
       _recTimer = Timer.periodic(const Duration(milliseconds: 100), (_) {
         if (!mounted) return;
-        setState(() => _recLen += const Duration(milliseconds: 100));
+        _recLen += const Duration(milliseconds: 100);
+        _recTick.value = _recLen;
         if (_recLen >= _roundMax) _stopRec(true);
       });
       return true;
@@ -1029,6 +1040,7 @@ class _SupportChatScreenState extends State<SupportChatScreen>
                 children: [
                   Expanded(
                     child: Stack(
+                      fit: StackFit.expand,
                       children: [
                         Positioned.fill(
                           child: AnimatedBuilder(
@@ -1079,15 +1091,18 @@ class _SupportChatScreenState extends State<SupportChatScreen>
                             ),
                           ),
                         ),
-                        TgRoundOverlay(
+                        ValueListenableBuilder<Duration>(
+                          valueListenable: _recTick,
+                          builder: (context, len, _) => TgRoundOverlay(
                           camera: _cam,
                           active: _roundRec,
                           sent: _roundSent,
-                          length: _recLen,
+                          length: len,
                           max: _roundMax,
                           flash: _roundFlash,
                           onSwitchCamera: _switchCamera,
                           onFlash: _toggleFlash,
+                        ),
                         ),
                       ],
                     ),
@@ -1553,7 +1568,7 @@ class _SupportChatScreenState extends State<SupportChatScreen>
                       key: const ValueKey('slide'),
                       offset: Offset(_dragX, 0),
                       child: Opacity(
-                        opacity: (1 + _dragX / 60).clamp(0.0, 1.0),
+                        opacity: (1 + _dragX / 120).clamp(0.0, 1.0),
                         child: const Center(child: _SlideToCancel()),
                       ),
                     ),
@@ -2519,7 +2534,10 @@ class _UploadingBubble extends StatelessWidget {
                         ConstrainedBox(
                           constraints: const BoxConstraints(
                               maxHeight: 240, minWidth: 150),
-                          child: Image.file(File(path), fit: BoxFit.cover),
+                          // Kamera rasmi 12 MP bo'lishi mumkin — pufak
+                          // o'lchamida ochiladi (xotira va qotish).
+                          child: Image.file(File(path),
+                              fit: BoxFit.cover, cacheWidth: 700),
                         ),
                         Container(color: Colors.black38),
                         _Ring(progress: p),
