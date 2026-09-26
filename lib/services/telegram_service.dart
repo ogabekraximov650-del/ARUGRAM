@@ -609,7 +609,8 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
   /// bot ko'chirib ulgurgunicha tozalanmaydi (aks holda nusxa o'chib
   /// ketardi) — u keyinroq tozalanadi. Chaqiruvchi OLDINDAN
   /// `_delivering++` qiladi; bu yerda kamaytiriladi.
-  Future<void> _awaitClaim(String fileName, String key, String s) async {
+  Future<void> _awaitClaim(String fileName, String key, String s,
+      {Duration fallback = const Duration(minutes: 3)}) async {
     var ready = false;
     for (final wait in const [1, 1, 2, 2, 3, 4, 5, 8]) {
       await Future<void>.delayed(Duration(seconds: wait));
@@ -636,7 +637,7 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
       _clearPending = true;
       unawaited(_clearIfPending());
     } else {
-      Timer(const Duration(minutes: 3), () {
+      Timer(fallback, () {
         _delivering--;
         _clearPending = true;
         unawaited(_clearIfPending());
@@ -661,7 +662,15 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
     }
     _missing.remove(fileName);
     // Xabar darhol chiqsin — kanalga ko'chirilishi fon'da kutiladi.
-    unawaited(_awaitClaim(fileName, '', s));
+    // GIF — Telegram'dagi tayyor hujjat: bot uni bir zumda ko'chiradi,
+    // ko'ruvchilar esa uni to'g'ridan-to'g'ri Telegram'dan oladi.
+    // WORKER'GA KAMROQ SO'ROV: `/api/tg/claim` 8 marta so'ralmaydi —
+    // bot chati shunchaki 20 soniya band turadi, keyin tozalanadi.
+    Timer(const Duration(seconds: 20), () {
+      _delivering--;
+      _clearPending = true;
+      unawaited(_clearIfPending());
+    });
     return null;
   }
 
@@ -807,6 +816,21 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
   Future<void>? _clearing;
   Timer? _clearTimer;
   StreamSubscription<List<ConnectivityResult>>? _connSub;
+
+  /// Ekran (pleyer, support chat) yopildi — bot chati tozalansin.
+  ///
+  /// TALAB (foydalanuvchi): "bot chat tarixi pleyer yoki support chat
+  /// sahifasidan chiqqandan keyin tozalansin". Nusxa hali ishlatilayotgan
+  /// bo'lsa (yuklab olish va h.k.) tozalash navbatda qoladi va bo'shashi
+  /// bilan bajariladi (`_clearIfPending`).
+  void screenClosed() {
+    if (!_authorized) return;
+    _clearPending = true;
+    _clearTimer?.cancel();
+    _clearTimer = Timer(const Duration(seconds: 2), () {
+      unawaited(_clearIfPending());
+    });
+  }
 
   /// [owner] shu nusxani ishlatyapti (pleyer ekrani, yuklab olish).
   void hold(Object owner, String url) {

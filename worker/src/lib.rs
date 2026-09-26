@@ -6037,7 +6037,7 @@ async fn comments_like(mut req: Request, env: &Env) -> Result<Response> {
 }
 
 /// DELETE /api/comments/:id — FAQAT o'z izohini.
-async fn comments_delete(req: &Request, env: &Env, id: &str) -> Result<Response> {
+async fn comments_delete(req: &Request, env: &Env, ctx: &Context, id: &str) -> Result<Response> {
     let Some(u) = session_user(env, &bearer(req)).await? else {
         return json_resp(&json!({"error": "unauthorized"}), 401);
     };
@@ -6089,7 +6089,7 @@ async fn comments_delete(req: &Request, env: &Env, id: &str) -> Result<Response>
     // javoblarning O'ZIDAN oldin o'chiriladi — ular javoblarni
     // `parent_id` bo'yicha qidiradi, javoblar ketgandan keyin esa
     // topadigan narsasi qolmasdi.
-    let mut cleanup: Vec<(&str, Vec<TursoArg>)> = vec![
+    let mut cleanup: Vec<(&'static str, Vec<TursoArg>)> = vec![
         // Javoblarning layklari.
         ("DELETE FROM comment_likes
            WHERE comment_id IN (SELECT id FROM comments_db WHERE parent_id=?)",
@@ -6115,7 +6115,13 @@ async fn comments_delete(req: &Request, env: &Env, id: &str) -> Result<Response>
             vec![TursoArg::text(&parent)],
         ));
     }
-    let _ = turso_batch(env, &cleanup).await;
+    // Izohning o'zi o'chdi — javob DARHOL qaytadi, qolgan tozalash
+    // (javoblar, layklar, shikoyatlar, hisob) FON'da ("o'chirish
+    // judayam sekin").
+    let env2 = env.clone();
+    ctx.wait_until(async move {
+        let _ = turso_batch(&env2, &cleanup).await;
+    });
 
     ok_nostore(json!({"ok": true, "parent_id": parent}))
 }
@@ -6844,7 +6850,7 @@ async fn chat_one(
 // butunlay yo'q qilishni so'ragan.
 
 /// DELETE /api/chat/message/:id — bitta xabar.
-async fn chat_del_message(req: &Request, env: &Env, id: &str) -> Result<Response> {
+async fn chat_del_message(req: &Request, env: &Env, ctx: &Context, id: &str) -> Result<Response> {
     let Some(u) = session_user(env, &bearer(req)).await? else {
         return json_resp(&json!({"error": "unauthorized"}), 401);
     };
@@ -6867,15 +6873,21 @@ async fn chat_del_message(req: &Request, env: &Env, id: &str) -> Result<Response
         return json_resp(&json!({"error": "Xabar topilmadi"}), 404);
     };
     let owner = r["user_id"].as_i64().unwrap_or(0);
-    let file = r["media_file"].as_str().unwrap_or("");
-    if !file.is_empty() {
-        b2_delete(env, file).await;
-    }
-
-    // Suhbat qatoridagi "oxirgi xabar" endi boshqa bo'lishi
-    // mumkin — u qayta hisoblanadi. Hech narsa qolmasa suhbatning
-    // o'zi ham olib tashlanadi.
-    refresh_thread(env, owner).await;
+    let file = r["media_file"].as_str().unwrap_or("").to_string();
+    // TOPILGAN XATO ("xabarni o'chirish judayam sekin"): javob B2 va
+    // Telegram'dagi faylni o'chirish (har biri bir necha so'rov) va
+    // suhbat qatorini qayta hisoblash tugaguncha kutardi. Endi xabar
+    // bazadan o'chishi bilan javob qaytadi, qolgani FON'da.
+    let env2 = env.clone();
+    ctx.wait_until(async move {
+        if !file.is_empty() {
+            b2_delete(&env2, &file).await;
+        }
+        // Suhbat qatoridagi "oxirgi xabar" endi boshqa bo'lishi
+        // mumkin — u qayta hisoblanadi. Hech narsa qolmasa suhbatning
+        // o'zi ham olib tashlanadi.
+        refresh_thread(&env2, owner).await;
+    });
     ok_nostore(json!({"ok": true}))
 }
 
@@ -6894,7 +6906,7 @@ async fn chat_del_message(req: &Request, env: &Env, id: &str) -> Result<Response
 ///
 /// FAQAT ADMIN — foydalanuvchi o'z xabarini ham o'chira olmaydi
 /// (foydalanuvchi talabi).
-async fn chat_del_many(mut req: Request, env: &Env) -> Result<Response> {
+async fn chat_del_many(mut req: Request, env: &Env, ctx: &Context) -> Result<Response> {
     let Some(u) = session_user(env, &bearer(&req)).await? else {
         return json_resp(&json!({"error": "unauthorized"}), 401);
     };
@@ -6921,51 +6933,39 @@ async fn chat_del_many(mut req: Request, env: &Env) -> Result<Response> {
     let holes = vec!["?"; ids.len()].join(",");
     let args: Vec<TursoArg> = ids.iter().map(|i| TursoArg::text(i)).collect();
 
-    // Qaysi suhbatlarga tegdi — o'chirishdan OLDIN bilib olamiz,
-    // keyin ularning oxirgi xabari qayta hisoblanadi.
-    let owners_res = turso_exec(env,
-        &format!("SELECT DISTINCT user_id FROM chat_messages WHERE id IN ({holes})"),
-        args.clone()).await?;
-    let owners: Vec<i64> = owners_res["rows"]
-        .as_array()
-        .map(|rows| {
-            rows.iter()
-                .filter_map(|r| r.as_array())
-                .filter_map(|r| r.first())
-                .filter_map(|c| c["value"].as_str().and_then(|v| v.parse::<i64>().ok()))
-                .collect()
-        })
-        .unwrap_or_default();
-
-    // B2'dagi fayllar ham o'chiriladi (yuqoridagi izohga qarang).
-    let files_res = turso_exec(env,
-        &format!("SELECT media_file FROM chat_messages
-                   WHERE id IN ({holes})"),
-        args.clone()).await?;
-    let files: Vec<String> = files_res["rows"]
-        .as_array()
-        .map(|rows| {
-            rows.iter()
-                .filter_map(|r| r.as_array())
-                .flat_map(|r| r.iter())
-                .filter_map(|c| c["value"].as_str())
-                .filter(|v| !v.is_empty())
-                .map(|v| v.to_string())
-                .collect()
-        })
-        .unwrap_or_default();
-
-    turso_exec(env,
-        &format!("DELETE FROM chat_messages WHERE id IN ({holes})"),
+    // BITTA so'rov: o'chiradi va qaysi suhbat/fayllarga tegganini
+    // qaytaradi (ilgari uchta alohida so'rov edi).
+    let res = turso_exec(env,
+        &format!("DELETE FROM chat_messages WHERE id IN ({holes})
+                  RETURNING user_id, media_file"),
         args).await?;
-
-    for f in files {
-        b2_delete(env, &f).await;
+    let mut owners: Vec<i64> = Vec::new();
+    let mut files: Vec<String> = Vec::new();
+    for r in res["rows"].as_array().cloned().unwrap_or_default() {
+        let Some(r) = r.as_array() else { continue };
+        let val = |i: usize| r.get(i).and_then(|c| c["value"].as_str()).unwrap_or("").to_string();
+        if let Ok(o) = val(0).parse::<i64>() {
+            if !owners.contains(&o) {
+                owners.push(o);
+            }
+        }
+        let f = val(1);
+        if !f.is_empty() {
+            files.push(f);
+        }
     }
 
-    for o in owners {
-        refresh_thread(env, o).await;
-    }
+    // B2/Telegram fayllari va suhbat qatorlari — FON'da (javob
+    // kutmaydi; `chat_del_message` izohiga qarang).
+    let env2 = env.clone();
+    ctx.wait_until(async move {
+        for f in files {
+            b2_delete(&env2, &f).await;
+        }
+        for o in owners {
+            refresh_thread(&env2, o).await;
+        }
+    });
     ok_nostore(json!({"ok": true, "count": ids.len()}))
 }
 
@@ -10142,7 +10142,7 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
         return chat_threads(&req, &env, &origin).await;
     }
     if path == "/api/chat/messages/delete" && method == Method::Post {
-        return chat_del_many(req, &env).await;
+        return chat_del_many(req, &env, &ctx).await;
     }
     if let Some(idv) = path.strip_prefix("/api/chat/thread/") {
         if let Ok(uid) = idv.parse::<i64>() {
@@ -10156,7 +10156,7 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
     }
     if method == Method::Delete {
         if let Some(mid) = path.strip_prefix("/api/chat/message/") {
-            return chat_del_message(&req, &env, mid).await;
+            return chat_del_message(&req, &env, &ctx, mid).await;
         }
     }
 
@@ -10243,7 +10243,7 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
         }
         // /api/comments/:id — o'z izohini o'chirish
         if parts.len() == 1 && method == Method::Delete {
-            return comments_delete(&req, &env, parts[0]).await;
+            return comments_delete(&req, &env, &ctx, parts[0]).await;
         }
     }
 

@@ -3406,3 +3406,18 @@ zaxira yo'llar (`thumbnailData`, birinchi kadr).
   `getDevicePerformanceClass` kabi): yadrolar, eng yuqori chastota,
   xotira. Kuchsizda: panel emojilari harakatsiz, 1 ta kadr bir vaqtda,
   kichikroq o'lcham, 24 MB kesh, panelda 1 GIF, GIF faqat 1 marta.
+
+## O'chirish tezligi, bot chati ekrandan chiqqach, worker so'rovlari
+
+* O'chirish (izoh va support chat): Telegram'dagidek darhol ekrandan
+  yo'qoladi, server javobi fonda; xato bo'lsa joyiga qaytadi.
+  Worker: `chat_del_many` — bitta `DELETE ... RETURNING` (ilgari 3
+  so'rov); B2/Telegram fayllari, suhbat qatori va izoh javoblari/
+  layklari `ctx.wait_until` bilan FON'da — javob darhol qaytadi.
+* Bot chati: pleyer va support chat yopilganda `screenClosed()` —
+  2 soniyadan keyin tozalanadi (band bo'lsa bo'shashi bilan). GIF
+  yuborilgach bot chati ko'pi 20 soniya band (ilgari 3 daqiqagacha).
+* Worker'ga kamroq so'rov: "o'qilmagan" nuqtasi 12 → 45 s, ilova fonda
+  yoki suhbat ochiq bo'lsa yuborilmaydi; ilovaga qaytishda `/auth/me`
+  ko'pi 5 daqiqada, nuqta 20 soniyada bir; suhbatning uzoq kutishi
+  ilova fonda to'xtaydi; GIF uchun `/api/tg/claim` so'ralmaydi.

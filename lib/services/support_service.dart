@@ -27,6 +27,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:http/http.dart' as http;
 
 import 'auth_service.dart';
@@ -377,13 +378,20 @@ class ChatController extends ChangeNotifier {
     return oldest;
   }
 
+  /// Hozir ochiq (kuzatilayotgan) suhbatlar soni — shu paytda
+  /// ilovaning umumiy "o'qilmagan" so'rovi yuborilmaydi (suhbatning
+  /// o'zi uzoq kutish bilan baribir kuzatib turibdi).
+  static int watchingCount = 0;
+
   void startPolling() {
     if (_watching) return;
     _watching = true;
+    watchingCount++;
     unawaited(_watchLoop());
   }
 
   void stopPolling() {
+    if (_watching) watchingCount--;
     _watching = false;
     _poll?.cancel();
     _poll = null;
@@ -393,6 +401,13 @@ class ChatController extends ChangeNotifier {
     while (_watching) {
       if (AuthService.instance.sessionToken == null) {
         await Future<void>.delayed(const Duration(seconds: 5));
+        continue;
+      }
+      // Ilova fonda (ekran o'chiq, boshqa ilova ochiq) — worker'ga
+      // so'rov YUBORILMAYDI; qaytilganda kutish davom etadi.
+      final st = WidgetsBinding.instance.lifecycleState;
+      if (st != null && st != AppLifecycleState.resumed) {
+        await Future<void>.delayed(const Duration(seconds: 2));
         continue;
       }
       try {
@@ -438,6 +453,7 @@ class ChatController extends ChangeNotifier {
 
   @override
   void dispose() {
+    if (_watching) watchingCount--;
     _watching = false;
     _poll?.cancel();
     super.dispose();
@@ -582,13 +598,28 @@ class ChatController extends ChangeNotifier {
   /// so'rov yuborish sekin bo'lardi va yarmida uzilib qolsa
   /// yozishma yarim o'chgan holatda qolardi.
   Future<String?> removeMessages(Iterable<String> ids) async {
-    final list = ids.toList();
-    if (list.isEmpty) return null;
-    final err = await deleteChatMessages(list);
-    if (err != null) return err;
-    final gone = list.toSet();
+    final gone = ids.toSet();
+    if (gone.isEmpty) return null;
+    // TALAB (foydalanuvchi): "xabarni o'chirish ishlamayapti yoki
+    // judayam sekin". Telegram'dagidek: xabar ekrandan DARHOL
+    // yo'qoladi, server javobi fonda kutiladi; xato bo'lsa xabarlar
+    // joyiga qaytadi.
+    final before = List<ChatMessage>.of(_items);
     _items.removeWhere((m) => gone.contains(m.id));
     notifyListeners();
+    // Hali yuborilmagan (vaqtinchalik) nusxalar serverda yo'q.
+    final server = gone.where((id) => !id.startsWith('tmp')).toList();
+    final err = server.isEmpty ? null : await deleteChatMessages(server);
+    if (err != null) {
+      final now = {for (final m in _items) m.id};
+      for (final m in before) {
+        if (gone.contains(m.id) && !now.contains(m.id)) _items.add(m);
+      }
+      _items.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      notifyListeners();
+      return err;
+    }
+    _saveDisk();
     return null;
   }
 
@@ -789,6 +820,13 @@ class ChatThreadsController extends ChangeNotifier {
     while (_watching) {
       if (AuthService.instance.sessionToken == null) {
         await Future<void>.delayed(const Duration(seconds: 5));
+        continue;
+      }
+      // Ilova fonda (ekran o'chiq, boshqa ilova ochiq) — worker'ga
+      // so'rov YUBORILMAYDI; qaytilganda kutish davom etadi.
+      final st = WidgetsBinding.instance.lifecycleState;
+      if (st != null && st != AppLifecycleState.resumed) {
+        await Future<void>.delayed(const Duration(seconds: 2));
         continue;
       }
       try {

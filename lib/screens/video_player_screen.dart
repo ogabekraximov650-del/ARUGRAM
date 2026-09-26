@@ -574,6 +574,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     VideoGate.leave();
     // Pleyerdan chiqildi — bot chatidagi nusxa o'chiriladi.
     _setTgHeld(null);
+    TelegramService.instance.screenClosed();
     BillingService.instance.removeListener(_onBillingChanged);
     // `late final` — Izohlar oynasi umuman ochilmagan bo'lsa
     // nazoratchi yaratilmagan ham bo'ladi.

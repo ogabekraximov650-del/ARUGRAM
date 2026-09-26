@@ -126,10 +126,16 @@ class _RootScreenState extends State<RootScreen>
     // xabar tez kelmayapti"). Suhbatning O'ZI ochiq turganda
     // esa umuman kutilmaydi — u yerda uzoq kutish ishlaydi
     // (`ChatController._watchLoop`).
+    // WORKER'GA KAMROQ SO'ROV (foydalanuvchi talabi): 12 -> 45 soniya;
+    // ilova fonda bo'lsa yoki suhbat ochiq bo'lsa (u o'zi uzoq kutish
+    // bilan kuzatadi) umuman yuborilmaydi.
     unawaited(UnreadBadge.instance.refresh());
     _unreadTimer = Timer.periodic(
-      const Duration(seconds: 12),
+      const Duration(seconds: 45),
       (_) {
+        final st = WidgetsBinding.instance.lifecycleState;
+        if (st != null && st != AppLifecycleState.resumed) return;
+        if (ChatController.watchingCount > 0) return;
         UnreadBadge.instance.refresh();
         _refreshAdminBadges();
       },
@@ -169,6 +175,9 @@ class _RootScreenState extends State<RootScreen>
   /// ma'nosi yo'q. Adminlikni ilova o'zi taxmin qilmaydi —
   /// `UnreadBadge` serverdan kelgan belgini eslab qoladi
   /// (`support_service.dart` izohiga qarang).
+  DateTime _lastMe = DateTime.now();
+  DateTime _lastUnread = DateTime.now();
+
   void _refreshAdminBadges() {
     // Admin paneli yo'q build'da bu so'rov umuman kerak emas.
     if (!kAdminBuild || !UnreadBadge.instance.isAdmin) return;
@@ -178,12 +187,22 @@ class _RootScreenState extends State<RootScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) return;
-    // Javob kutilmaydi — sessiya bekor qilingan bo'lsa
-    // AuthService o'zi xabar beradi va profil yangilanadi.
-    AuthService.instance.refresh();
-    // Fon'dan qaytdi — admin javob yozgan bo'lsa nuqta yonsin.
-    unawaited(UnreadBadge.instance.refresh());
-    _refreshAdminBadges();
+    // WORKER'GA KAMROQ SO'ROV: ilovaga har qaytishda emas — profil
+    // ko'pi bilan 5 daqiqada, nuqta 20 soniyada bir marta so'raladi
+    // (galereya, Telegram va h.k.dan tez-tez qaytiladi).
+    final now = DateTime.now();
+    if (now.difference(_lastMe) > const Duration(minutes: 5)) {
+      _lastMe = now;
+      // Javob kutilmaydi — sessiya bekor qilingan bo'lsa
+      // AuthService o'zi xabar beradi va profil yangilanadi.
+      AuthService.instance.refresh();
+    }
+    if (now.difference(_lastUnread) > const Duration(seconds: 20)) {
+      _lastUnread = now;
+      // Fon'dan qaytdi — admin javob yozgan bo'lsa nuqta yonsin.
+      unawaited(UnreadBadge.instance.refresh());
+      _refreshAdminBadges();
+    }
     // Telegramdan qaytdi. Foydalanuvchi u yerda START bosgan
     // bo'lsa, sessiya serverda allaqachon ochilgan — saqlangan
     // token bilan bir marta so'rasak, hisob o'zi ochiladi.

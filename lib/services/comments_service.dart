@@ -423,12 +423,35 @@ class CommentsController extends ChangeNotifier {
 
   /// O'z izohini o'chiradi.
   Future<String?> remove(String id) async {
+    // TALAB (foydalanuvchi): "izohni o'chirish ishlamayapti yoki
+    // judayam sekin". Telegram'dagidek: izoh ekrandan DARHOL yo'qoladi,
+    // server javobi fonda kutiladi; xato bo'lsa hammasi joyiga qaytadi.
+    final snapItems = List.of(_items);
+    final snapReplies = {
+      for (final e in _replies.entries) e.key: List.of(e.value),
+    };
+    _items.removeWhere((c) => c.id == id);
+    for (final list in _replies.values) {
+      list.removeWhere((c) => c.id == id);
+    }
+    notifyListeners();
+    void restore() {
+      _items
+        ..clear()
+        ..addAll(snapItems);
+      _replies
+        ..clear()
+        ..addAll(snapReplies);
+      notifyListeners();
+    }
+
     try {
       final r = await http
           .delete(Uri.parse('$_base/$id'), headers: _headers())
           .timeout(const Duration(seconds: 20));
       final j = jsonDecode(r.body) as Map<String, dynamic>;
       if (r.statusCode != 200) {
+        restore();
         return '${j['error'] ?? 'O\'chirilmadi'}';
       }
       // ── JAVOB O'CHDI — BOSH IZOHNING HISOBI KAMAYADI ────────
@@ -470,6 +493,7 @@ class CommentsController extends ChangeNotifier {
       notifyListeners();
       return null;
     } catch (_) {
+      restore();
       return 'Internet yo\'q';
     }
   }

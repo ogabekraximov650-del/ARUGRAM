@@ -248,6 +248,8 @@ class _SupportChatScreenState extends State<SupportChatScreen>
     _scroll.dispose();
     // Ekran yopildi — profil sahifasidagi nuqta yangilansin.
     UnreadBadge.instance.refresh();
+    // Bot chatidagi nusxalar (ovozli xabar, GIF, rasm) tozalansin.
+    TelegramService.instance.screenClosed();
     super.dispose();
   }
 
