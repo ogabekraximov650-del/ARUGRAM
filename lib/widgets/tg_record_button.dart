@@ -1,23 +1,36 @@
 // lib/widgets/tg_record_button.dart — TELEGRAM'DAGIDEK YUBORISH /
 // OVOZ / DUMALOQ VIDEO TUGMASI.
 //
-// TALAB (foydalanuvchi): "support chatga ovozli xabar va dumaloq
-// xabar yuboradigan oynani qo'sh — huddi Telegram'niki bilan bir
-// xil bo'lsin".
+// TALAB (foydalanuvchi): "Dumaloq video olish va ovozli xabar
+// tugmalarining ikonkasi va ustiga bosgandagi animatsiyasini xuddi
+// Telegram'nikidek qil".
 //
-// Telegram Android'dagi xatti-harakat:
-//   * matn yozilgan bo'lsa — ➤ (yuborish);
-//   * bo'sh bo'lsa — 🎤 yoki 📷; QISQA bosish ular orasida almashtiradi;
-//   * BOSIB TURISH — yozish boshlanadi (tugma kattalashadi);
-//     qo'yib yuborilsa — yuboriladi;
-//   * chapga surilsa — bekor qilinadi;
-//   * tepaga surilsa — QULFLANADI: barmoqni qo'yib yuborsa ham yozish
-//     davom etadi, keyin ➤ bilan yuboriladi.
+// Manba: Cherrygram `ChatActivityEnterView` (`RecordCircle`,
+// `ControlsView`), `BlobDrawable`, `WaveDrawable`,
+// `ChatActivityEnterViewAnimatedIconView` (`voice_and_video.json`):
+//
+//   * bo'sh holatda 🎤 yoki 📹 — Lottie: 🎤 = 30-kadr, 📹 = 0/60-kadr;
+//     QISQA bosish ular orasida aylanib almashtiradi;
+//   * matn yozilgan bo'lsa — ➤;
+//   * BOSIB TURISH (150 ms) — yozish: tugma o'rnida radiusi
+//     41 + 30 × ovoz balandligi bo'lgan doira ochiladi (0 → 1.1 → 0.9
+//     → 1 "sakrash"), atrofida ikki qatlam "pufak" to'lqin
+//     (katta: 50..57 dp, 30% shaffof; kichik: 47..56 dp, 15%) —
+//     ovoz qancha baland bo'lsa shuncha tez va katta tebranadi;
+//   * doira ustida (60 dp yuqorida) qulf "tabletkasi" (36 × 50, tepaga
+//     o'q bilan, sekin tebranadi); tepaga 57 dp surilsa qulflanadi —
+//     doira ➤ ga aylanadi;
+//   * chapga surilsa doira barmoq bilan siljiydi va 0.7 gacha
+//     kichrayadi; yetarlicha surilsa — bekor.
 
 import 'dart:async';
+import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
+import 'package:lottie/lottie.dart';
 
 import 'glass.dart';
 
@@ -42,6 +55,9 @@ class TgRecordButton extends StatefulWidget {
   /// yozuvi shunga qarab siljiydi.
   final ValueChanged<double> onDrag;
 
+  /// Ovoz balandligi 0..1 (Telegram'dagi `amplitude / 1800`).
+  final ValueListenable<double>? amplitude;
+
   const TgRecordButton({
     super.key,
     required this.hasText,
@@ -52,15 +68,19 @@ class TgRecordButton extends StatefulWidget {
     required this.onStop,
     required this.onLock,
     required this.onDrag,
+    this.amplitude,
   });
 
   @override
   State<TgRecordButton> createState() => _TgRecordButtonState();
 }
 
-class _TgRecordButtonState extends State<TgRecordButton> {
+class _TgRecordButtonState extends State<TgRecordButton>
+    with TickerProviderStateMixin {
   /// Oxirgi tanlangan rejim (ekranlar orasida saqlanadi).
   static TgRecMode _lastMode = TgRecMode.voice;
+
+  static const double _size = 48;
 
   TgRecMode _mode = _lastMode;
   Timer? _hold;
@@ -69,6 +89,18 @@ class _TgRecordButtonState extends State<TgRecordButton> {
   /// Barmoq hozir tugmada.
   bool _pressed = false;
   Offset _start = Offset.zero;
+  double _dx = 0;
+  double _dy = 0;
+
+  /// 🎤 <-> 📹 belgisi (`voice_and_video.json`, 60 kadr).
+  late final AnimationController _icon = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1000),
+      value: _mode == TgRecMode.voice ? 0.5 : 0);
+
+  /// Doiraning ochilishi (`scale`, 0..1).
+  late final AnimationController _enter = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 360));
 
   // Telegram Android (`ChatActivityEnterView`) qiymatlari:
   //   * yozish bosilgandan 150 ms keyin boshlanadi;
@@ -76,14 +108,28 @@ class _TgRecordButtonState extends State<TgRecordButton> {
   //     surish "0.7 dan kam" bo'lganda bekor qilinadi, ya'ni
   //     `distCanMove * 0.3` chapga surilganda;
   //   * tepaga 57 dp surilsa — qulflanadi.
-  static const _lockAt = -57.0;
-  double _cancelAt(BuildContext c) =>
-      -(MediaQuery.sizeOf(c).width * 0.35).clamp(0.0, 140.0) * 0.3;
+  static const _lockAt = 57.0;
+  double _distCanMove(BuildContext c) =>
+      (MediaQuery.sizeOf(c).width * 0.35).clamp(0.0, 140.0);
 
   @override
   void dispose() {
     _hold?.cancel();
+    _icon.dispose();
+    _enter.dispose();
     super.dispose();
+  }
+
+  void _setHolding(bool v) {
+    if (v == _holding) return;
+    setState(() => _holding = v);
+    if (v) {
+      _enter.forward(from: 0);
+    } else {
+      _enter.value = 0;
+      _dx = 0;
+      _dy = 0;
+    }
   }
 
   void _down(PointerDownEvent e) {
@@ -102,20 +148,27 @@ class _TgRecordButtonState extends State<TgRecordButton> {
         widget.onStop(false);
         return;
       }
-      setState(() => _holding = ok);
+      if (ok) HapticFeedback.lightImpact();
+      _setHolding(ok);
     });
   }
 
   void _move(PointerMoveEvent e) {
     if (!_holding || widget.locked) return;
     final d = e.position - _start;
-    widget.onDrag(d.dx.clamp(-200.0, 0.0));
-    if (d.dx < _cancelAt(context)) {
-      setState(() => _holding = false);
+    final dist = _distCanMove(context);
+    setState(() {
+      _dx = d.dx.clamp(-dist, 0.0);
+      _dy = (-d.dy).clamp(0.0, _lockAt);
+    });
+    widget.onDrag(_dx);
+    if (d.dx < -dist * 0.3 && d.dx.abs() > -d.dy) {
+      _setHolding(false);
       widget.onDrag(0);
       widget.onStop(false);
-    } else if (d.dy < _lockAt) {
-      setState(() => _holding = false);
+    } else if (-d.dy >= _lockAt) {
+      HapticFeedback.mediumImpact();
+      _setHolding(false);
       widget.onDrag(0);
       widget.onLock();
     }
@@ -133,20 +186,32 @@ class _TgRecordButtonState extends State<TgRecordButton> {
       return;
     }
     if (_hold != null) {
-      // Qisqa bosish — mikrofon <-> kamera.
+      // Qisqa bosish — 🎤 <-> 📹 (belgi aylanib almashadi).
       _hold!.cancel();
       _hold = null;
       HapticFeedback.selectionClick();
-      setState(() {
-        _mode = _lastMode =
-            _mode == TgRecMode.voice ? TgRecMode.video : TgRecMode.voice;
-      });
+      _toggleMode();
       return;
     }
     if (_holding) {
-      setState(() => _holding = false);
+      _setHolding(false);
       widget.onDrag(0);
       widget.onStop(true);
+    }
+  }
+
+  void _toggleMode() {
+    setState(() {
+      _mode = _lastMode =
+          _mode == TgRecMode.voice ? TgRecMode.video : TgRecMode.voice;
+    });
+    // `setState(VIDEO)`: 30 -> 60 kadr; `setState(VOICE)`: 0 -> 30.
+    if (_mode == TgRecMode.video) {
+      _icon.value = 0.5;
+      _icon.animateTo(1, duration: const Duration(milliseconds: 500));
+    } else {
+      _icon.value = 0;
+      _icon.animateTo(0.5, duration: const Duration(milliseconds: 500));
     }
   }
 
@@ -155,7 +220,7 @@ class _TgRecordButtonState extends State<TgRecordButton> {
     _hold?.cancel();
     _hold = null;
     if (_holding) {
-      setState(() => _holding = false);
+      _setHolding(false);
       widget.onDrag(0);
       widget.onStop(false);
     }
@@ -163,156 +228,448 @@ class _TgRecordButtonState extends State<TgRecordButton> {
 
   @override
   Widget build(BuildContext context) {
-    // Telegram'dagidek: matn bo'lsa ➤, aks holda 🎤 yoki dumaloq
-    // kamera belgisi. Almashganda eski belgi kichrayib, burilib
-    // yo'qoladi, yangisi kattalashib chiqadi.
-    final key = widget.hasText || widget.locked
-        ? 'send'
-        : (_mode == TgRecMode.voice ? 'mic' : 'video');
-    final Widget glyph = switch (key) {
-      'send' => const Icon(Icons.send_rounded, size: 22, color: Colors.white),
-      'mic' => const Icon(Icons.mic_rounded, size: 24, color: Colors.white),
-      _ => const _RoundVideoGlyph(),
-    };
+    final send = widget.hasText || widget.locked;
+    final dist = _distCanMove(context);
+    // `slideToCancelProgress`: 1 — joyida, 0 — bekor chegarasida.
+    final slide = (1 + _dx / (dist * 0.3)).clamp(0.0, 1.0);
     return Listener(
       onPointerDown: _down,
       onPointerMove: _move,
       onPointerUp: _up,
       onPointerCancel: _cancel,
       behavior: HitTestBehavior.opaque,
-      child: Stack(
-        clipBehavior: Clip.none,
-        alignment: Alignment.center,
-        children: [
-          // Tepaga surib qulflash belgisi (yozish paytida).
-          if (_holding)
-            const Positioned(
-              bottom: 76,
-              child: _LockHint(),
-            ),
-          // Yozish paytida atrofda "nafas oladigan" halqa (Telegram'da
-          // ovoz balandligiga qarab kattalashadi).
-          if (_holding) const _Halo(),
-          AnimatedScale(
-            scale: _holding ? 1.9 : 1,
-            duration: const Duration(milliseconds: 220),
-            curve: _holding ? Curves.easeOutBack : Curves.easeOut,
-            child: Container(
-              width: 44,
-              height: 44,
-              decoration: const BoxDecoration(
-                shape: BoxShape.circle,
-                color: AppColors.accent,
-              ),
-              child: widget.busy
-                  ? const Padding(
-                      padding: EdgeInsets.all(12),
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white),
-                    )
-                  : AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 260),
-                      switchInCurve: Curves.easeOutBack,
-                      switchOutCurve: Curves.easeIn,
-                      transitionBuilder: (c, a) => FadeTransition(
-                        opacity: a,
-                        child: ScaleTransition(
-                          scale: Tween(begin: 0.2, end: 1.0).animate(a),
-                          child: RotationTransition(
-                            turns: Tween(begin: -0.12, end: 0.0).animate(a),
+      child: SizedBox(
+        width: _size,
+        height: _size,
+        child: Stack(
+          clipBehavior: Clip.none,
+          alignment: Alignment.center,
+          children: [
+            // Oddiy tugma (yozish paytida doira ostida yashiringan).
+            AnimatedOpacity(
+              duration: const Duration(milliseconds: 150),
+              opacity: _holding ? 0 : 1,
+              child: Container(
+                width: _size,
+                height: _size,
+                decoration: const BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: AppColors.accent,
+                ),
+                child: widget.busy
+                    ? const Padding(
+                        padding: EdgeInsets.all(13),
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white),
+                      )
+                    : AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 200),
+                        switchInCurve: Curves.easeOutBack,
+                        switchOutCurve: Curves.easeIn,
+                        transitionBuilder: (c, a) => FadeTransition(
+                          opacity: a,
+                          child: ScaleTransition(
+                            scale: Tween(begin: 0.1, end: 1.0).animate(a),
                             child: c,
                           ),
                         ),
+                        child: send
+                            ? const Padding(
+                                key: ValueKey('send'),
+                                padding: EdgeInsets.only(left: 3),
+                                child: Icon(Icons.send_rounded,
+                                    size: 24, color: Colors.white),
+                              )
+                            : SizedBox(
+                                key: const ValueKey('rec'),
+                                width: 26,
+                                height: 26,
+                                child: ColorFiltered(
+                                  colorFilter: const ColorFilter.mode(
+                                      Colors.white, BlendMode.srcIn),
+                                  child: Lottie.asset(
+                                    'assets/tg_anim/voice_and_video.json',
+                                    controller: _icon,
+                                  ),
+                                ),
+                              ),
                       ),
-                      child: KeyedSubtree(key: ValueKey(key), child: glyph),
-                    ),
+              ),
             ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Telegram'ning dumaloq video belgisi: halqa ichida kamera.
-class _RoundVideoGlyph extends StatelessWidget {
-  const _RoundVideoGlyph();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 24,
-      height: 24,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        border: Border.all(color: Colors.white, width: 2),
-      ),
-      child: const Icon(Icons.videocam_rounded, size: 13, color: Colors.white),
-    );
-  }
-}
-
-/// Yozish paytidagi yumshoq, to'lqinlanadigan halqa.
-class _Halo extends StatefulWidget {
-  const _Halo();
-
-  @override
-  State<_Halo> createState() => _HaloState();
-}
-
-class _HaloState extends State<_Halo> with SingleTickerProviderStateMixin {
-  late final AnimationController _a = AnimationController(
-      vsync: this, duration: const Duration(milliseconds: 900))
-    ..repeat(reverse: true);
-
-  @override
-  void dispose() {
-    _a.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return IgnorePointer(
-      child: AnimatedBuilder(
-        animation: _a,
-        builder: (_, __) => Transform.scale(
-          scale: 2.2 + 0.35 * Curves.easeInOut.transform(_a.value),
-          child: Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: AppColors.accent.withValues(alpha: 0.22),
-            ),
-          ),
+            if (_holding)
+              Positioned(
+                // Doira va qulf tugmadan tashqariga chiqadi.
+                left: _size / 2 - 150,
+                top: _size / 2 - 230,
+                width: 300,
+                height: 300,
+                child: IgnorePointer(
+                  child: _RecordCircle(
+                    enter: _enter,
+                    amplitude: widget.amplitude,
+                    video: _mode == TgRecMode.video,
+                    slideDx: _dx,
+                    slide: slide,
+                    lockMove: _dy / _lockAt,
+                  ),
+                ),
+              ),
+          ],
         ),
       ),
     );
   }
 }
 
-class _LockHint extends StatelessWidget {
-  const _LockHint();
+// ══════════════════════════════════════════════════════════════
+//  YOZISH DOIRASI (`RecordCircle`)
+// ══════════════════════════════════════════════════════════════
+
+class _RecordCircle extends StatefulWidget {
+  final Animation<double> enter;
+  final ValueListenable<double>? amplitude;
+  final bool video;
+  final double slideDx;
+
+  /// `slideToCancelProgress` (1 — joyida).
+  final double slide;
+
+  /// Qulf tomon surilgan ulush (0..1).
+  final double lockMove;
+
+  const _RecordCircle({
+    required this.enter,
+    required this.amplitude,
+    required this.video,
+    required this.slideDx,
+    required this.slide,
+    required this.lockMove,
+  });
+
+  @override
+  State<_RecordCircle> createState() => _RecordCircleState();
+}
+
+class _RecordCircleState extends State<_RecordCircle>
+    with SingleTickerProviderStateMixin {
+  late final Ticker _ticker;
+  final _big = _Blob(12);
+  final _tiny = _Blob(11);
+  final _repaint = ValueNotifier<int>(0);
+  Duration _last = Duration.zero;
+
+  /// Doira radiusidagi ovoz ulushi (`RecordCircle.amplitude`).
+  double _amp = 0;
+  double _ampTo = 0;
+  double _ampStep = 0;
+
+  /// Qulfning "nafas olishi" (`idleProgress`, 0..1..0).
+  double _idle = 0;
+  bool _idleUp = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _big
+      ..minRadius = 50
+      ..maxRadius = 50 + 12 * _Blob.formBigMax;
+    _tiny
+      ..minRadius = 47
+      ..maxRadius = 47 + 15 * _Blob.formSmallMax;
+    _big.generate();
+    _tiny.generate();
+    widget.amplitude?.addListener(_onAmp);
+    _ticker = createTicker(_tick)..start();
+  }
+
+  @override
+  void didUpdateWidget(_RecordCircle old) {
+    super.didUpdateWidget(old);
+    if (old.amplitude != widget.amplitude) {
+      old.amplitude?.removeListener(_onAmp);
+      widget.amplitude?.addListener(_onAmp);
+    }
+  }
+
+  void _onAmp() {
+    final v = (widget.amplitude?.value ?? 0).clamp(0.0, 1.0);
+    _big.setValue(v, true);
+    _tiny.setValue(v, false);
+    _ampTo = v;
+    // `animateAmplitudeDiff` (`WaveDrawable.animationSpeedCircle` = 0.55).
+    _ampStep = (_ampTo - _amp) / (100 + 500 * 0.55);
+  }
+
+  void _tick(Duration now) {
+    final dt = (now - _last).inMilliseconds.clamp(0, 50).toDouble();
+    _last = now;
+    if (_amp != _ampTo) {
+      _amp += _ampStep * dt;
+      if ((_ampStep > 0 && _amp > _ampTo) ||
+          (_ampStep < 0 && _amp < _ampTo)) {
+        _amp = _ampTo;
+      }
+    }
+    _big.updateAmplitude(dt);
+    _big.update(_big.amplitude, 1.01);
+    _tiny.updateAmplitude(dt);
+    _tiny.update(_tiny.amplitude, 1.02);
+    if (_idleUp) {
+      _idle += 0.01;
+      if (_idle > 1) {
+        _idle = 1;
+        _idleUp = false;
+      }
+    } else {
+      _idle -= 0.01;
+      if (_idle < 0) {
+        _idle = 0;
+        _idleUp = true;
+      }
+    }
+    _repaint.value++;
+  }
+
+  @override
+  void dispose() {
+    widget.amplitude?.removeListener(_onAmp);
+    _ticker.dispose();
+    _repaint.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 36,
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      decoration: BoxDecoration(
-        color: const Color(0xEE2A2F36),
-        borderRadius: BorderRadius.circular(18),
+    return CustomPaint(
+      painter: _RecordPainter(
+        repaint: Listenable.merge([_repaint, widget.enter]),
+        state: this,
       ),
-      child: const Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.lock_open_rounded, size: 18, color: Colors.white70),
-          SizedBox(height: 2),
-          Icon(Icons.keyboard_arrow_up_rounded,
-              size: 18, color: Colors.white54),
-        ],
-      ),
+      child: const SizedBox.expand(),
     );
+  }
+}
+
+class _RecordPainter extends CustomPainter {
+  final _RecordCircleState state;
+
+  _RecordPainter({required Listenable repaint, required this.state})
+      : super(repaint: repaint);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = state.widget;
+    // Tugma markazi: 150 x 230 (`Positioned` ga qarang).
+    final cx = 150.0;
+    final cy = 230.0;
+    final scale = Curves.linear.transform(w.enter.value);
+    // `sc`: 0 -> 1 (0.5 gacha), 1 -> 0.9, 0.9 -> 1.
+    final double sc;
+    if (scale <= 0.5) {
+      sc = scale / 0.5;
+    } else if (scale <= 0.75) {
+      sc = 1 - (scale - 0.5) / 0.25 * 0.1;
+    } else {
+      sc = 0.9 + (scale - 0.75) / 0.25 * 0.1;
+    }
+    final slideScale = 0.7 + w.slide * 0.3;
+    final radius = (41 + 30 * state._amp) * sc * slideScale;
+    final x = cx + w.slideDx;
+    const color = AppColors.accent;
+
+    // ── Pufak to'lqinlar ─────────────────────────────────────
+    final slide1 = w.slide > 0.7 ? 1.0 : w.slide / 0.7;
+    final enter = Curves.easeOut.transform(sc.clamp(0.0, 1.0));
+    if (slide1 > 0) {
+      var s = sc * slide1 * enter * (_Blob.scaleBigMin + 1.4 * state._big.amplitude);
+      canvas.save();
+      canvas.translate(x, cy);
+      canvas.scale(s, s);
+      state._big.draw(canvas, Paint()..color = color.withValues(alpha: 0.30));
+      canvas.restore();
+      s = sc * slide1 * enter * (_Blob.scaleSmallMin + 1.4 * state._tiny.amplitude);
+      canvas.save();
+      canvas.translate(x, cy);
+      canvas.scale(s, s);
+      state._tiny.draw(canvas, Paint()..color = color.withValues(alpha: 0.15));
+      canvas.restore();
+    }
+
+    // ── Doira va belgi ───────────────────────────────────────
+    canvas.drawCircle(Offset(x, cy), radius, Paint()..color = color);
+    final icon = w.video ? Icons.videocam_rounded : Icons.mic_rounded;
+    final tp = TextPainter(
+      text: TextSpan(
+        text: String.fromCharCode(icon.codePoint),
+        style: TextStyle(
+          fontFamily: icon.fontFamily,
+          package: icon.fontPackage,
+          fontSize: 26 * sc.clamp(0.0, 1.0),
+          color: Colors.white,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    tp.paint(canvas, Offset(x - tp.width / 2, cy - tp.height / 2));
+
+    // ── Qulf (`ControlsView`) ────────────────────────────────
+    final move = 1 - w.lockMove.clamp(0.0, 1.0); // `moveProgress`
+    final yAdd = w.lockMove.clamp(0.0, 1.0) * 57;
+    final lockH = 36 + 14 * move;
+    final lockTop =
+        cy - 170 + 60 + 30 * (1 - sc) - yAdd + move * state._idle * -8;
+    final alpha = (w.slide.clamp(0.0, 1.0) * sc.clamp(0.0, 1.0));
+    if (alpha > 0.01) {
+      final r = RRect.fromRectAndRadius(
+          Rect.fromLTWH(cx - 18, lockTop, 36, lockH), const Radius.circular(18));
+      canvas.drawRRect(
+          r, Paint()..color = const Color(0xFF26292E).withValues(alpha: alpha));
+      canvas.drawRRect(
+          r,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1
+            ..color = Colors.white.withValues(alpha: 0.10 * alpha));
+      final ic = Paint()
+        ..color = Colors.white.withValues(alpha: 0.85 * alpha)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.7
+        ..strokeCap = StrokeCap.round;
+      // Qulf tanasi va halqasi (`lockMiddleY`, `lockTopY`).
+      final mid = lockTop + lockH / 2 - 8 + 2 + 2 * move;
+      final body = RRect.fromRectAndRadius(
+          Rect.fromCenter(center: Offset(cx, mid + 3), width: 13, height: 10),
+          const Radius.circular(2.5));
+      canvas.drawRRect(body, Paint()..color = Colors.white.withValues(alpha: 0.85 * alpha));
+      final top = mid - 2;
+      final shackle = Path()
+        ..moveTo(cx - 4, top)
+        ..lineTo(cx - 4, top - 3)
+        ..arcToPoint(Offset(cx + 4, top - 3),
+            radius: const Radius.circular(4))
+        // Surilgan sari halqa yopiladi (`lockRotation`).
+        ..lineTo(cx + 4, top - 3 + 3 * (1 - move));
+      canvas.save();
+      canvas.translate(cx, top);
+      canvas.rotate(9 * move * math.pi / 180);
+      canvas.translate(-cx, -top);
+      canvas.drawPath(shackle, ic);
+      canvas.restore();
+      // Tepaga o'q.
+      if (move > 0.05) {
+        final ay = lockTop + lockH - 10;
+        final arrow = Path()
+          ..moveTo(cx - 4, ay + 2)
+          ..lineTo(cx, ay - 2)
+          ..lineTo(cx + 4, ay + 2);
+        canvas.drawPath(
+            arrow,
+            ic
+              ..color = Colors.white.withValues(alpha: 0.6 * alpha * move));
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_RecordPainter old) => true;
+}
+
+/// `BlobDrawable` — tasodifiy nuqtali, silliq egri "pufak".
+class _Blob {
+  static const maxSpeed = 8.2;
+  static const minSpeed = 0.8;
+  static const scaleBigMin = 0.878;
+  static const scaleSmallMin = 0.926;
+  static const formBigMax = 0.6;
+  static const formSmallMax = 0.6;
+
+  final int n;
+  final double _l;
+  final _rnd = math.Random();
+  late final List<double> _r = List.filled(n, 0);
+  late final List<double> _a = List.filled(n, 0);
+  late final List<double> _rNext = List.filled(n, 0);
+  late final List<double> _aNext = List.filled(n, 0);
+  late final List<double> _p = List.filled(n, 0);
+  late final List<double> _speed = List.filled(n, 0);
+  double minRadius = 0;
+  double maxRadius = 0;
+  double amplitude = 0;
+  double _to = 0;
+  double _diff = 0;
+
+  _Blob(this.n) : _l = (4.0 / 3.0) * math.tan(math.pi / (2 * n));
+
+  double _r100() => (_rnd.nextInt(200) - 100) / 100;
+
+  void _gen(List<double> r, List<double> a, int i) {
+    final angleDif = 360 / n * 0.05;
+    final radDif = maxRadius - minRadius;
+    r[i] = minRadius + _r100().abs() * radDif;
+    a[i] = 360 / n * i + _r100() * angleDif;
+    _speed[i] = 0.017 + 0.003 * _r100().abs();
+  }
+
+  void generate() {
+    for (var i = 0; i < n; i++) {
+      _gen(_r, _a, i);
+      _gen(_rNext, _aNext, i);
+      _p[i] = 0;
+    }
+  }
+
+  void update(double amp, double speedScale) {
+    for (var i = 0; i < n; i++) {
+      _p[i] += _speed[i] * minSpeed + amp * _speed[i] * maxSpeed * speedScale;
+      if (_p[i] >= 1) {
+        _p[i] = 0;
+        _r[i] = _rNext[i];
+        _a[i] = _aNext[i];
+        _gen(_rNext, _aNext, i);
+      }
+    }
+  }
+
+  void setValue(double v, bool big) {
+    _to = v;
+    // `ANIMATION_SPEED_WAVE_HUGE` 0.65, `_SMALL` 0.45.
+    final speed = big ? 1 - 0.65 : 1 - 0.45;
+    if (_to > amplitude) {
+      _diff = (_to - amplitude) / (100 + (big ? 300 : 400) * speed);
+    } else {
+      _diff = (_to - amplitude) / (100 + 500 * speed);
+    }
+  }
+
+  void updateAmplitude(double dt) {
+    if (_to == amplitude) return;
+    amplitude += _diff * dt;
+    if ((_diff > 0 && amplitude > _to) || (_diff < 0 && amplitude < _to)) {
+      amplitude = _to;
+    }
+  }
+
+  /// Markaz (0, 0) atrofida chizadi.
+  void draw(Canvas canvas, Paint paint) {
+    final path = Path();
+    for (var i = 0; i < n; i++) {
+      final p = _p[i];
+      final j = i + 1 < n ? i + 1 : 0;
+      final pn = _p[j];
+      final r1 = _r[i] * (1 - p) + _rNext[i] * p;
+      final r2 = _r[j] * (1 - pn) + _rNext[j] * pn;
+      final a1 = (_a[i] * (1 - p) + _aNext[i] * p) * math.pi / 180;
+      final a2 = (_a[j] * (1 - pn) + _aNext[j] * pn) * math.pi / 180;
+      final l = _l * (math.min(r1, r2) + (math.max(r1, r2) - math.min(r1, r2)) / 2);
+      Offset rot(double x, double y, double a) => Offset(
+          x * math.cos(a) - y * math.sin(a), x * math.sin(a) + y * math.cos(a));
+      final s0 = rot(0, -r1, a1);
+      final s1 = rot(l, -r1, a1);
+      final e0 = rot(0, -r2, a2);
+      final e1 = rot(-l, -r2, a2);
+      if (i == 0) path.moveTo(s0.dx, s0.dy);
+      path.cubicTo(s1.dx, s1.dy, e1.dx, e1.dy, e0.dx, e0.dy);
+    }
+    canvas.drawPath(path, paint);
   }
 }

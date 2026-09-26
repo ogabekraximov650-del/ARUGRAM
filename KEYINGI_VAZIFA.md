@@ -3260,3 +3260,18 @@ internet qaytganda ilova o'z hisobi bilan chat tarixini tozalasin".
   kataklari ham shu shriftda.
 * Panel ro'yxati Telegram tartibida (`EmojiData.dataColored`,
   `fixEmoji` bilan) — `tg_emoji_data.dart` avtomatik yasalgan.
+
+## Chat Telegram'dagidek (2-bosqich)
+
+* Dumaloq video: ExoPlayer'da `setEnableDecoderFallback(true)`
+  (apparat dekoder ochilmasa dasturiysi), pufakcha xatoda bir marta
+  o'zi qayta urinadi.
+* Biriktirish oynasi (`tg_attach_sheet.dart`) — `ChatAttachAlert`:
+  shisha tab (Lottie `assets/tg_anim/tab_*.json`), Galereya/Fayl/Musiqa,
+  tanlashda 0.787 kichrayish, raqamli doira, izoh + ➤ nishoncha.
+* Yozish tugmasi (`tg_record_button.dart`) — `RecordCircle`,
+  `BlobDrawable`: 🎤↔📹 Lottie (`voice_and_video.json`), ovoz
+  balandligiga qarab to'lqin (record `onAmplitudeChanged`), qulf,
+  "0:03,45" taymer, yaltiroq "Bekor qilish uchun suring".
+* Pufakchalar (`tg_bubble.dart`) — `MessageDrawable` dumi, guruhlash,
+  vaqt matn oxirida, kun ajratgichi.

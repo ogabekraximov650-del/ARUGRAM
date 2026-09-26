@@ -42,6 +42,7 @@ import '../widgets/tg_composer.dart';
 import '../widgets/tg_media_view.dart';
 import '../widgets/tg_record_button.dart';
 import '../widgets/tg_attach_sheet.dart';
+import '../widgets/tg_bubble.dart';
 import '../widgets/tg_round_recorder.dart';
 import 'package:open_filex/open_filex.dart';
 import '../widgets/emoji_text.dart';
@@ -168,8 +169,17 @@ class _SupportChatScreenState extends State<SupportChatScreen>
   /// Oxirgi dumaloq video yuborildimi (yopilish animatsiyasi uchun).
   bool _roundSent = false;
   Duration _recLen = Duration.zero;
+
+  /// Yozish boshlangan payt — taymer soniyaning yuzdan biri bilan
+  /// ko'rsatiladi (`TimerView`: "0:03,45").
+  DateTime _recStart = DateTime.now();
   Timer? _recTimer;
   String? _recPath;
+
+  /// Ovoz balandligi 0..1 — yozish doirasi shunga qarab to'lqinlanadi
+  /// (Telegram: `amplitude / 1800`, 16 bitli namunalar RMS'i).
+  final ValueNotifier<double> _amp = ValueNotifier(0);
+  StreamSubscription<Amplitude>? _ampSub;
 
   @override
   void initState() {
@@ -195,6 +205,8 @@ class _SupportChatScreenState extends State<SupportChatScreen>
     // yangrab qolardi.
     unawaited(VoicePlayer.instance.stop());
     _recTimer?.cancel();
+    _ampSub?.cancel();
+    _amp.dispose();
     unawaited(_rec.dispose());
     _chat.removeListener(_onData);
     _chat.stopPolling();
@@ -418,6 +430,15 @@ class _SupportChatScreenState extends State<SupportChatScreen>
       );
       _recPath = path;
       _recLen = Duration.zero;
+      _recStart = DateTime.now();
+      // dBFS -> 16 bitli RMS (`* 32767`) -> Telegram shkalasi (1800).
+      _ampSub?.cancel();
+      _ampSub = _rec
+          .onAmplitudeChanged(const Duration(milliseconds: 100))
+          .listen((a) {
+        final lin = math.pow(10, a.current / 20).toDouble();
+        _amp.value = (lin * 32767 / 1800).clamp(0.0, 1.0);
+      });
       setState(() => _recording = true);
       _recTimer?.cancel();
       _recTimer = Timer.periodic(const Duration(milliseconds: 200), (_) {
@@ -441,6 +462,9 @@ class _SupportChatScreenState extends State<SupportChatScreen>
     _recTimer?.cancel();
     _recTimer = null;
     final len = _recLen;
+    _ampSub?.cancel();
+    _ampSub = null;
+    _amp.value = 0;
     setState(() => _recording = false);
 
     String? path;
@@ -611,6 +635,7 @@ class _SupportChatScreenState extends State<SupportChatScreen>
     await VoicePlayer.instance.stop();
     HapticFeedback.lightImpact();
     _recLen = Duration.zero;
+    _recStart = DateTime.now();
     setState(() {
       _roundRec = true;
       _roundSent = false;
@@ -1034,9 +1059,17 @@ class _SupportChatScreenState extends State<SupportChatScreen>
         // chiziladi: aks holda bir xil rasm ustma-ust takrorlanib,
         // ro'yxat g'ijimlanib ketardi.
         final next = i + 1 < items.length ? items[i + 1] : null;
-        final lastOfGroup =
-            next == null || next.fromAdmin != m.fromAdmin;
-        return _Bubble(
+        final prev = i > 0 ? items[i - 1] : null;
+        final lastOfGroup = next == null ||
+            next.fromAdmin != m.fromAdmin ||
+            !tgSameDay(next.createdAt, m.createdAt);
+        // Kun almashganda — sana ajratgichi (`ChatActionCell`).
+        final newDay =
+            prev == null || !tgSameDay(prev.createdAt, m.createdAt);
+        final topNear = !newDay && prev.fromAdmin == m.fromAdmin;
+        final bubble = _Bubble(
+          topNear: topNear,
+          bottomNear: !lastOfGroup,
           thumbs: _thumbs,
           message: m,
           mine: mine,
@@ -1065,6 +1098,11 @@ class _SupportChatScreenState extends State<SupportChatScreen>
               ),
             ),
           ),
+        );
+        if (!newDay) return bubble;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [TgDateChip(tgDayLabel(m.createdAt)), bubble],
         );
       },
       ),
@@ -1118,6 +1156,7 @@ class _SupportChatScreenState extends State<SupportChatScreen>
                 onStop: _stopRec,
                 onLock: () => setState(() => _locked = true),
                 onDrag: (dx) => setState(() => _dragX = dx),
+                amplitude: _amp,
               ),
             ],
           ),
@@ -1187,52 +1226,43 @@ class _SupportChatScreenState extends State<SupportChatScreen>
     );
   }
 
-  /// Yozish paytidagi qator: ● vaqt, "◀ Bekor qilish uchun suring"
-  /// (qulflanganda — "Bekor qilish" tugmasi).
+  /// Yozish paytidagi qator (`RecordDot`, `TimerView`,
+  /// `SlideTextView`): ● 0:03,45 va "‹ Bekor qilish uchun suring"
+  /// (yaltirab turadi, barmoq bilan siljiydi); qulflanganda —
+  /// "BEKOR QILISH".
   Widget _recordingInfo() {
     return SizedBox(
-      height: 44,
+      height: 48,
       child: Row(
         children: [
-          const SizedBox(width: 10),
+          const SizedBox(width: 12),
           const _BlinkDot(),
-          const SizedBox(width: 8),
-          Text(
-            voiceClock(_recLen),
-            style: const TextStyle(
-                color: Colors.white,
-                fontSize: 15,
-                fontFeatures: [FontFeature.tabularFigures()]),
-          ),
+          const SizedBox(width: 10),
+          _RecTimer(start: _recStart),
           Expanded(
-            child: _locked
-                ? Center(
-                    child: TextButton(
-                      onPressed: () => _stopRec(false),
-                      child: const Text('Bekor qilish',
-                          style: TextStyle(
-                              color: AppColors.accent,
-                              fontSize: 15,
-                              fontWeight: FontWeight.w600)),
-                    ),
-                  )
-                : Transform.translate(
-                    offset: Offset(_dragX * 0.8, 0),
-                    child: Opacity(
-                      opacity: (1 + _dragX / 60).clamp(0.2, 1.0),
-                      child: Center(
-                        child: Text(
-                          '‹  Bekor qilish uchun suring',
-                          maxLines: 1,
-                          overflow: TextOverflow.fade,
-                          softWrap: false,
-                          style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.55),
-                              fontSize: 14),
-                        ),
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 200),
+              child: _locked
+                  ? Center(
+                      key: const ValueKey('cancel'),
+                      child: TextButton(
+                        onPressed: () => _stopRec(false),
+                        child: const Text('BEKOR QILISH',
+                            style: TextStyle(
+                                color: AppColors.accent2,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700)),
+                      ),
+                    )
+                  : Transform.translate(
+                      key: const ValueKey('slide'),
+                      offset: Offset(_dragX, 0),
+                      child: Opacity(
+                        opacity: (1 + _dragX / 60).clamp(0.0, 1.0),
+                        child: const Center(child: _SlideToCancel()),
                       ),
                     ),
-                  ),
+            ),
           ),
         ],
       ),
@@ -1241,7 +1271,8 @@ class _SupportChatScreenState extends State<SupportChatScreen>
 
 }
 
-/// Yozish paytidagi qizil, miltillovchi nuqta.
+/// Yozish paytidagi qizil nuqta (`RecordDot`): 600 ms da so'nadi va
+/// yana yonadi.
 class _BlinkDot extends StatefulWidget {
   const _BlinkDot();
 
@@ -1252,7 +1283,7 @@ class _BlinkDot extends StatefulWidget {
 class _BlinkDotState extends State<_BlinkDot>
     with SingleTickerProviderStateMixin {
   late final AnimationController _a = AnimationController(
-      vsync: this, duration: const Duration(milliseconds: 700))
+      vsync: this, duration: const Duration(milliseconds: 600))
     ..repeat(reverse: true);
 
   @override
@@ -1263,7 +1294,7 @@ class _BlinkDotState extends State<_BlinkDot>
 
   @override
   Widget build(BuildContext context) => FadeTransition(
-        opacity: Tween(begin: 0.25, end: 1.0).animate(_a),
+        opacity: Tween(begin: 1.0, end: 0.0).animate(_a),
         child: Container(
           width: 10,
           height: 10,
@@ -1271,6 +1302,103 @@ class _BlinkDotState extends State<_BlinkDot>
               color: Color(0xFFE5484D), shape: BoxShape.circle),
         ),
       );
+}
+
+/// `TimerView`: "0:03,45" (15, soniyaning yuzdan biri bilan).
+class _RecTimer extends StatefulWidget {
+  final DateTime start;
+  const _RecTimer({required this.start});
+
+  @override
+  State<_RecTimer> createState() => _RecTimerState();
+}
+
+class _RecTimerState extends State<_RecTimer>
+    with SingleTickerProviderStateMixin {
+  late final Ticker _t = createTicker((_) => setState(() {}))..start();
+
+  @override
+  void dispose() {
+    _t.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final d = DateTime.now().difference(widget.start);
+    final ms = d.inMilliseconds;
+    final m = ms ~/ 60000;
+    final sec = (ms ~/ 1000) % 60;
+    final cs = (ms % 1000) ~/ 10;
+    return Text(
+      '$m:${sec.toString().padLeft(2, '0')},${cs.toString().padLeft(2, '0')}',
+      style: const TextStyle(
+          color: Colors.white,
+          fontSize: 15,
+          fontFeatures: [FontFeature.tabularFigures()]),
+    );
+  }
+}
+
+/// `SlideTextView`: "‹ Bekor qilish uchun suring" — kulrang, ustidan
+/// yorug' chiziq yurib turadi.
+class _SlideToCancel extends StatefulWidget {
+  const _SlideToCancel();
+
+  @override
+  State<_SlideToCancel> createState() => _SlideToCancelState();
+}
+
+class _SlideToCancelState extends State<_SlideToCancel>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _a = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 1500))
+    ..repeat();
+
+  @override
+  void dispose() {
+    _a.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const gray = Color(0xFF8A939D);
+    return AnimatedBuilder(
+      animation: _a,
+      builder: (context, child) => ShaderMask(
+        blendMode: BlendMode.srcIn,
+        shaderCallback: (r) {
+          // Yorug'lik o'ngdan chapga yuradi (strelka yo'nalishida).
+          final x = 1.4 - 1.8 * _a.value;
+          return LinearGradient(
+            colors: const [gray, Colors.white, gray],
+            stops: [
+              (x - 0.2).clamp(0.0, 1.0),
+              x.clamp(0.0, 1.0),
+              (x + 0.2).clamp(0.0, 1.0),
+            ],
+          ).createShader(r);
+        },
+        child: child,
+      ),
+      child: const Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.chevron_left_rounded, size: 20, color: gray),
+          Flexible(
+            child: Text(
+              'Bekor qilish uchun suring',
+              maxLines: 1,
+              overflow: TextOverflow.fade,
+              softWrap: false,
+              style: TextStyle(color: gray, fontSize: 15),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 /// Sarlavhadagi kichik rasm.
@@ -1353,6 +1481,12 @@ class _Bubble extends StatelessWidget {
   /// Umuman tanlash rejimi ochiqmi (bitta bo'lsa ham).
   final bool selecting;
 
+  /// Tepada/pastda shu yuboruvchining (o'sha kuni) boshqa xabari bor —
+  /// Telegram'dagidek o'sha tomondagi burchak kichik, dum faqat
+  /// guruhning OXIRGI xabarida.
+  final bool topNear;
+  final bool bottomNear;
+
   const _Bubble({
     required this.message,
     required this.mine,
@@ -1366,6 +1500,8 @@ class _Bubble extends StatelessWidget {
     this.onTap,
     this.selected = false,
     this.selecting = false,
+    this.topNear = false,
+    this.bottomNear = false,
   });
 
   @override
@@ -1382,7 +1518,8 @@ class _Bubble extends StatelessWidget {
       color: selected
           ? AppColors.accent.withValues(alpha: 0.16)
           : Colors.transparent,
-      padding: const EdgeInsets.only(bottom: 8),
+      // Guruh ichida 2 dp, guruhlar orasida 8 dp (Telegram).
+      padding: EdgeInsets.only(bottom: bottomNear ? 2 : 8),
       child: Row(
         mainAxisAlignment:
             mine ? MainAxisAlignment.end : MainAxisAlignment.start,
@@ -1413,107 +1550,155 @@ class _Bubble extends StatelessWidget {
               onLongPress: onLongPress,
               onTap: onTap,
               behavior: HitTestBehavior.opaque,
-              child: Container(
+              child: ConstrainedBox(
                 constraints: BoxConstraints(
-                  maxWidth: MediaQuery.sizeOf(context).width * 0.76,
+                  maxWidth: MediaQuery.sizeOf(context).width * 0.8,
                 ),
-                padding: bare
-                    ? EdgeInsets.zero
-                    : EdgeInsets.fromLTRB(
-                        m.isViewable ? 4 : 13, m.isViewable ? 4 : 9,
-                        m.isViewable ? 4 : 13, 7),
-                decoration: bare ? null : BoxDecoration(
-                  color: mine
-                      ? AppColors.accent.withValues(alpha: 0.92)
-                      : Colors.white.withValues(alpha: 0.09),
-                  borderRadius: BorderRadius.only(
-                    topLeft: const Radius.circular(16),
-                    topRight: const Radius.circular(16),
-                    bottomLeft: Radius.circular(mine ? 16 : 4),
-                    bottomRight: Radius.circular(mine ? 4 : 16),
-                  ),
-                  border: mine
-                      ? null
-                      : Border.all(
-                          color: Colors.white.withValues(alpha: 0.10)),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (m.hasMedia) _media(context),
-                    // Fayl xabarida matn — faylning nomi (puffak ichida).
-                    if (m.body.isNotEmpty && m.mediaType != 'file')
-                      Padding(
-                        padding: EdgeInsets.fromLTRB(
-                            m.isViewable ? 9 : 0, m.isViewable ? 7 : 0,
-                            m.isViewable ? 9 : 0, 0),
-                        child: Align(
-                          alignment: Alignment.centerLeft,
-                          // Maxsus emoji (`[ce:..]`) ham chiziladi.
-                          child: EmojiText(
-                            m.body,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 14,
-                              height: 1.38,
-                            ),
-                          ),
-                        ),
-                      ),
-                    // ── VAQT ────────────────────────────────────
-                    //
-                    // TALAB (foydalanuvchi): "adminga xabar
-                    // yuborganda vaqti ham ko'rsatilsin".
-                    Container(
-                      margin: EdgeInsets.only(
-                          top: 3, right: m.isViewable ? 9 : 0),
-                      // Pufaksiz xabarda vaqt kichik qora "tabletka"da.
-                      padding: bare
-                          ? const EdgeInsets.symmetric(
-                              horizontal: 7, vertical: 2)
-                          : EdgeInsets.zero,
-                      decoration: bare
-                          ? BoxDecoration(
-                              color: Colors.black.withValues(alpha: 0.4),
-                              borderRadius: BorderRadius.circular(10),
-                            )
-                          : null,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            chatTime(m.createdAt),
-                            style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.6),
-                              fontSize: 10.5,
-                            ),
-                          ),
-                          // ── YUBORILISH BELGISI ────────────────
-                          //
-                          // TALAB (foydalanuvchi): "pastida vaqt
-                          // ikoni aylanib tursin va yuborilgach
-                          // Telegramdagidek bitta ✓ tursin, admin
-                          // o'qiganidan keyingina ✓✓ ikkita
-                          // bo'lsin".
-                          //
-                          // Belgi FAQAT o'z xabaringizda turadi:
-                          // suhbatdoshning xabari yonida uning
-                          // "o'qildi" holati ma'nosiz.
-                          if (mine) ...[
-                            const SizedBox(width: 4),
-                            _SendState(pending: m.pending, seen: m.seen),
-                          ],
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
+                child: _content(context, bare),
               ),
             ),
           ),
         ],
       ),
+    );
+  }
+
+  // ── PUFAKCHA (`ChatMessageCell` + `MessageDrawable`) ──────────
+  //
+  //   * matn 16, vaqt 12 — matnning oxirgi qatoriga sig'sa o'sha
+  //     qatorda o'ngda, sig'masa yangi qatorda;
+  //   * rasm/video izohsiz bo'lsa — pufak yo'q, rasmning o'zi
+  //     yumaloqlanadi, vaqt rasm ustida qoramtir "tabletka"da;
+  //   * stiker, GIF, dumaloq video — pufaksiz, vaqt tabletkada.
+  Widget _content(BuildContext context, bool bare) {
+    final m = message;
+    final shape = TgBubbleShape(
+      out: mine,
+      tail: !bottomNear,
+      topNear: topNear,
+      bottomNear: bottomNear,
+    );
+    final color = mine ? AppColors.accent : const Color(0xFF222326);
+    final hasText = m.body.isNotEmpty && m.mediaType != 'file';
+
+    if (bare) {
+      return Column(
+        crossAxisAlignment:
+            mine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _media(context),
+          const SizedBox(height: 4),
+          _timePill(),
+        ],
+      );
+    }
+
+    // Izohsiz rasm/video: pufak o'rnida rasmning o'zi (`TYPE_MEDIA`).
+    if (m.isViewable && !hasText) {
+      final media = TgBubbleShape(
+        out: mine,
+        topNear: topNear,
+        bottomNear: bottomNear,
+        media: true,
+      );
+      return Padding(
+        padding: EdgeInsets.only(
+            left: mine ? 0 : TgBubbleShape.tailInset,
+            right: mine ? TgBubbleShape.tailInset : 0),
+        child: Stack(
+          children: [
+            ClipPath(clipper: TgBubbleClip(media), child: _media(context)),
+            Positioned(right: 6, bottom: 6, child: _timePill()),
+          ],
+        ),
+      );
+    }
+
+    final time = _timeRow(onMedia: false);
+    return TgBubble(
+      shape: shape,
+      color: color,
+      padding: m.isViewable
+          ? const EdgeInsets.fromLTRB(3, 3, 3, 6)
+          : const EdgeInsets.fromLTRB(11, 6, 10, 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (m.hasMedia)
+            m.isViewable
+                ? ClipRRect(
+                    borderRadius: BorderRadius.circular(14),
+                    child: _media(context))
+                : _media(context),
+          if (hasText)
+            Padding(
+              padding: EdgeInsets.fromLTRB(m.isViewable ? 8 : 0,
+                  m.isViewable || m.hasMedia ? 6 : 0, m.isViewable ? 7 : 0, 0),
+              child: _TextWithTime(
+                text: m.body,
+                time: time,
+                timeWidth: _timeWidth(),
+              ),
+            )
+          else
+            Align(
+              alignment: Alignment.centerRight,
+              child: Padding(
+                padding: EdgeInsets.only(
+                    top: 3, right: m.isViewable ? 7 : 0),
+                child: time,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// Vaqt va (o'z xabarida) ✓ / ✓✓.
+  Widget _timeRow({required bool onMedia}) {
+    final m = message;
+    final c = onMedia
+        ? Colors.white
+        : Colors.white.withValues(alpha: mine ? 0.75 : 0.5);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          tgTime(m.createdAt),
+          style: TextStyle(color: c, fontSize: 12, height: 1.1),
+        ),
+        // Belgi FAQAT o'z xabaringizda (suhbatdosh xabari yonida
+        // uning "o'qildi" holati ma'nosiz).
+        if (mine) ...[
+          const SizedBox(width: 3),
+          _SendState(pending: m.pending, seen: m.seen),
+        ],
+      ],
+    );
+  }
+
+  /// Vaqt egallaydigan kenglik (matn oxirida shuncha joy qoldiriladi).
+  double _timeWidth() {
+    final tp = TextPainter(
+      text: TextSpan(
+          text: tgTime(message.createdAt),
+          style: const TextStyle(fontSize: 12, height: 1.1)),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    return tp.width + (mine ? 20 : 0) + 8;
+  }
+
+  /// Media ustidagi vaqt (`chat_mediaTimeBackground`).
+  Widget _timePill() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: const Color(0x66000000),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: _timeRow(onMedia: true),
     );
   }
 
@@ -1626,6 +1811,42 @@ class _Bubble extends StatelessWidget {
                 ),
         ),
       ),
+    );
+  }
+}
+
+/// Matn va vaqt (`ChatMessageCell`): vaqt oxirgi qatorga sig'sa o'sha
+/// qatorda o'ngda turadi — matn oxiriga vaqt kengligicha ko'rinmas
+/// joy qo'yiladi; sig'masa o'zi yangi qatorga tushadi.
+class _TextWithTime extends StatelessWidget {
+  final String text;
+  final Widget time;
+  final double timeWidth;
+
+  const _TextWithTime({
+    required this.text,
+    required this.time,
+    required this.timeWidth,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    const style = TextStyle(color: Colors.white, fontSize: 16, height: 1.3);
+    return Stack(
+      children: [
+        Text.rich(
+          TextSpan(children: [
+            // Maxsus emoji (`[ce:..]`) va Telegram emojilari bilan.
+            ...(customEmojiSpans(text, style,
+                    (p) => emojiSpans(p, style) ?? [TextSpan(text: p)]) ??
+                emojiSpans(text, style) ??
+                [TextSpan(text: text)]),
+            WidgetSpan(child: SizedBox(width: timeWidth, height: 14)),
+          ]),
+          style: style,
+        ),
+        Positioned(right: 0, bottom: 1, child: time),
+      ],
     );
   }
 }
@@ -2289,6 +2510,9 @@ class _RoundBubbleState extends State<_RoundBubble> {
   /// Nega ochilmadi — pufakchada ko'rinadi (bosilsa qayta uriniladi).
   String _why = '';
 
+  /// Xatodan keyin o'zi bir marta qayta urindimi.
+  bool _retried = false;
+
   /// Telegram'dagidek: ekran qisqa tomonining 60% i
   /// (`roundMessageSize`).
   double get _size =>
@@ -2326,6 +2550,15 @@ class _RoundBubbleState extends State<_RoundBubble> {
       await c.play();
     } catch (e) {
       await c.dispose();
+      // Dekoder bir zum band bo'lishi mumkin (ro'yxatdagi boshqa
+      // video/GIF uni hali bo'shatmagan) — bir marta o'zi qayta
+      // uriniladi, keyingisi — bosilganda.
+      if (!_retried && mounted) {
+        _retried = true;
+        await Future<void>.delayed(const Duration(milliseconds: 700));
+        if (mounted) return _open();
+        return;
+      }
       if (mounted) {
         setState(() {
           _failed = true;

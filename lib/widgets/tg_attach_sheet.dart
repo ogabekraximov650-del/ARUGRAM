@@ -1,26 +1,37 @@
 // lib/widgets/tg_attach_sheet.dart — TELEGRAM'DAGIDEK BIRIKTIRISH OYNASI.
 //
-// TALAB (foydalanuvchi): "fayl yuborish tugmasini bosganda huddi
-// Telegram'dagidek ilovaning o'zidan galereya va fayl yuboradigan
-// oynalar ochilsin".
+// TALAB (foydalanuvchi): "Fayl yuborish va galereya oynasini
+// Telegram'nikidek qilib qayta qur".
 //
-// Telegram/Cherrygram `ChatAttachAlert` kabi:
+// Manba: Cherrygram `ChatAttachAlert.java`, `ChatAttachAlertPhotoLayout`,
+// `PhotoAttachPhotoCell`, `CheckBoxBase`, `glass/GlassTabView`:
+//
 //   * pastdan chiqadigan, tortib kattalashtiriladigan oyna;
-//   * ilova ICHIDAGI galereya to'ri (3 ustun), birinchi katakda
-//     jonli kamera; videoda uzunligi; o'ng yuqorida tanlash doirasi
-//     (tanlash tartibi raqam bilan);
-//   * tepada albom tanlash ("Galereya ▾");
-//   * pastda "Galereya | Fayl" tugmalari; biror narsa tanlanganda
-//     ularning o'rnida izoh maydoni va ➤ (nechta tanlangani bilan).
+//   * galereya to'ri: 3 ustun, chet va oraliq 2 dp; birinchi katakda
+//     jonli kamera; videoda chap pastda (4 dp) 17 dp lik qoramtir
+//     yorliq — ▶ va uzunligi (12, qalin);
+//   * o'ng yuqorida (5 dp) 24 dp lik tanlash doirasi: bo'sh — oq
+//     halqa, tanlangan — urg'u rangida, oq hoshiyali, ichida TARTIB
+//     RAQAMI; tanlangan rasm 0.787 gacha kichrayadi;
+//   * tepada: ✕ va albom tanlash ("Galereya ▾"), tanlanganda
+//     "N ta tanlandi";
+//   * pastda SHISHA "tabletka" (balandligi 56, radiusi 28) — Galereya,
+//     Fayl, Musiqa: har biri Lottie belgi (24) + nom (11, qalin),
+//     tanlangani yumshoq fon bilan (`tab_*.json` / `tab_*_reverse.json`);
+//     orqasida 72 dp lik xiralashuvchi pastki qatlam;
+//   * biror narsa tanlanganda tablar o'rnida izoh maydoni va ➤ (nechta
+//     tanlangani nishonchada).
 
 import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:camera/camera.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:lottie/lottie.dart';
 import 'package:photo_manager/photo_manager.dart';
 
 import 'glass.dart';
@@ -54,11 +65,16 @@ Future<TgAttachResult?> showTgAttachSheet(BuildContext context) {
 }
 
 abstract final class _C {
-  static const bg = Color(0xFF1C1F24);
-  static const bar = Color(0xFF23272D);
+  static const bg = AppColors.card;
   static const hint = Color(0xFF8A939D);
-  static const blue = Color(0xFF3D9AEA);
+
+  /// `glass_tabUnselected`.
+  static const tab = Color(0xFFAAB0B7);
+  static const accent = AppColors.accent2;
 }
+
+/// Bo'limlar (Telegram'dagi tartibda).
+enum _Tab { gallery, file, music }
 
 class _AttachSheet extends StatefulWidget {
   const _AttachSheet();
@@ -68,8 +84,10 @@ class _AttachSheet extends StatefulWidget {
 }
 
 class _AttachSheetState extends State<_AttachSheet> {
+  static const _max = 10;
+
   final _caption = TextEditingController();
-  int _tab = 0;
+  _Tab _tab = _Tab.gallery;
   PermissionState? _perm;
   List<AssetPathEntity> _albums = [];
   AssetPathEntity? _album;
@@ -80,6 +98,10 @@ class _AttachSheetState extends State<_AttachSheet> {
   final List<AssetEntity> _selected = [];
   CameraController? _cam;
   bool _sending = false;
+
+  /// Musiqa bo'limi (qurilmadagi audio fayllar).
+  List<AssetEntity>? _songs;
+  final List<AssetEntity> _pickedSongs = [];
 
   @override
   void initState() {
@@ -112,7 +134,7 @@ class _AttachSheetState extends State<_AttachSheet> {
     _more();
   }
 
-  /// Birinchi katakdagi jonli kamera (Telegram'dagidek).
+  /// Birinchi katakdagi jonli kamera (`PhotoAttachCameraCell`).
   Future<void> _startCamera() async {
     try {
       final cams = await availableCameras();
@@ -147,6 +169,25 @@ class _AttachSheetState extends State<_AttachSheet> {
     });
   }
 
+  Future<void> _loadSongs() async {
+    if (_songs != null) return;
+    try {
+      final p = _perm ?? await PhotoManager.requestPermissionExtend();
+      if (!p.hasAccess) {
+        if (mounted) setState(() => _songs = const []);
+        return;
+      }
+      final paths = await PhotoManager.getAssetPathList(
+          type: RequestType.audio, hasAll: true, onlyAll: true);
+      final list = paths.isEmpty
+          ? <AssetEntity>[]
+          : await paths.first.getAssetListRange(start: 0, end: 500);
+      if (mounted) setState(() => _songs = list);
+    } catch (_) {
+      if (mounted) setState(() => _songs = const []);
+    }
+  }
+
   void _pickAlbum(AssetPathEntity a) {
     setState(() {
       _album = a;
@@ -160,9 +201,23 @@ class _AttachSheetState extends State<_AttachSheet> {
   void _toggle(AssetEntity e) {
     setState(() {
       if (!_selected.remove(e)) {
-        if (_selected.length < 10) _selected.add(e);
+        if (_selected.length < _max) _selected.add(e);
       }
     });
+  }
+
+  void _toggleSong(AssetEntity e) {
+    setState(() {
+      if (!_pickedSongs.remove(e)) {
+        if (_pickedSongs.length < _max) _pickedSongs.add(e);
+      }
+    });
+  }
+
+  void _setTab(_Tab t) {
+    if (t == _tab) return;
+    setState(() => _tab = t);
+    if (t == _Tab.music) _loadSongs();
   }
 
   Future<void> _shoot() async {
@@ -180,14 +235,18 @@ class _AttachSheetState extends State<_AttachSheet> {
   }
 
   Future<void> _send() async {
-    if (_sending || _selected.isEmpty) return;
+    final music = _tab == _Tab.music;
+    final list = music ? _pickedSongs : _selected;
+    if (_sending || list.isEmpty) return;
     setState(() => _sending = true);
     final out = <TgAttachItem>[];
-    for (final e in _selected) {
+    for (final e in list) {
       final f = await e.originFile ?? await e.file;
       if (f == null) continue;
       final video = e.type == AssetType.video;
-      out.add(TgAttachItem(f, video ? 'video' : 'image',
+      out.add(TgAttachItem(
+          f,
+          music ? 'file' : (video ? 'video' : 'image'),
           e.title ?? f.path.split('/').last,
           durationMs: video ? e.duration * 1000 : 0));
     }
@@ -211,28 +270,91 @@ class _AttachSheetState extends State<_AttachSheet> {
     Navigator.of(context).pop(TgAttachResult(items, ''));
   }
 
+  int get _count =>
+      _tab == _Tab.music ? _pickedSongs.length : _selected.length;
+
   @override
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+    final safe = MediaQuery.paddingOf(context).bottom;
+    final showCaption = _count > 0 && _tab != _Tab.file;
     return Padding(
       padding: EdgeInsets.only(bottom: bottomInset),
       child: DraggableScrollableSheet(
-        initialChildSize: 0.6,
+        initialChildSize: 0.62,
         minChildSize: 0.35,
         maxChildSize: 1,
         expand: false,
         snap: true,
         builder: (context, scroll) => ClipRRect(
           borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
-          child: Container(
+          child: ColoredBox(
             color: _C.bg,
-            child: Column(
+            child: Stack(
               children: [
-                _header(),
-                Expanded(
-                  child: _tab == 0 ? _gallery(scroll) : _files(scroll),
+                Column(
+                  children: [
+                    _header(),
+                    Expanded(
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 200),
+                        child: KeyedSubtree(
+                          key: ValueKey(_tab),
+                          child: switch (_tab) {
+                            _Tab.gallery => _gallery(scroll, safe),
+                            _Tab.file => _files(scroll, safe),
+                            _Tab.music => _music(scroll, safe),
+                          },
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-                _selected.isNotEmpty && _tab == 0 ? _captionBar() : _tabs(),
+                // Pastki xiralashuvchi qatlam (`bottomFadeDrawable`,
+                // 72 dp) — tablar ostida kontent sekin so'nadi.
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  height: 72 + safe + 20,
+                  child: IgnorePointer(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            _C.bg.withValues(alpha: 0),
+                            _C.bg.withValues(alpha: 0.92),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 220),
+                    transitionBuilder: (c, a) => FadeTransition(
+                      opacity: a,
+                      child: SlideTransition(
+                        position: Tween(
+                                begin: const Offset(0, 0.3), end: Offset.zero)
+                            .animate(a),
+                        child: c,
+                      ),
+                    ),
+                    child: showCaption
+                        ? KeyedSubtree(
+                            key: const ValueKey('caption'),
+                            child: _captionBar(safe))
+                        : KeyedSubtree(
+                            key: const ValueKey('tabs'), child: _tabs(safe)),
+                  ),
+                ),
               ],
             ),
           ),
@@ -241,9 +363,22 @@ class _AttachSheetState extends State<_AttachSheet> {
     );
   }
 
+  // ── TEPA QISM ─────────────────────────────────────────────────
   Widget _header() {
+    final title = switch (_tab) {
+      _Tab.gallery => _selected.isNotEmpty
+          ? '${_selected.length} ta tanlandi'
+          : (_album == null || _album!.isAll ? 'Galereya' : _album!.name),
+      _Tab.file => 'Fayl tanlash',
+      _Tab.music => _pickedSongs.isNotEmpty
+          ? '${_pickedSongs.length} ta tanlandi'
+          : 'Musiqa',
+    };
+    final titleText = Text(title,
+        style: const TextStyle(
+            color: Colors.white, fontSize: 20, fontWeight: FontWeight.w600));
     return SizedBox(
-      height: 52,
+      height: 56,
       child: Stack(
         children: [
           Align(
@@ -259,17 +394,23 @@ class _AttachSheetState extends State<_AttachSheet> {
             ),
           ),
           Positioned.fill(
-            top: 10,
+            top: 8,
             child: Row(
               children: [
+                const SizedBox(width: 4),
                 IconButton(
-                  icon: const Icon(Icons.close, color: Colors.white),
+                  icon: const Icon(Icons.close_rounded, color: Colors.white),
                   onPressed: () => Navigator.of(context).pop(),
                 ),
-                if (_tab == 0 && _albums.isNotEmpty)
+                const SizedBox(width: 4),
+                if (_tab == _Tab.gallery &&
+                    _albums.length > 1 &&
+                    _selected.isEmpty)
                   PopupMenuButton<AssetPathEntity>(
-                    color: _C.bar,
+                    color: AppColors.cardAlt,
                     onSelected: _pickAlbum,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
                     itemBuilder: (_) => [
                       for (final a in _albums)
                         PopupMenuItem(
@@ -280,27 +421,17 @@ class _AttachSheetState extends State<_AttachSheet> {
                     ],
                     child: Row(
                       children: [
-                        Text(
-                          _selected.isNotEmpty
-                              ? '${_selected.length} ta tanlandi'
-                              : (_album == null || _album!.isAll
-                                  ? 'Galereya'
-                                  : _album!.name),
-                          style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 18,
-                              fontWeight: FontWeight.w600),
-                        ),
-                        const Icon(Icons.arrow_drop_down, color: Colors.white),
+                        titleText,
+                        const Icon(Icons.arrow_drop_down_rounded,
+                            color: Colors.white),
                       ],
                     ),
                   )
                 else
-                  Text(_tab == 0 ? 'Galereya' : 'Fayl',
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600)),
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 180),
+                    child: KeyedSubtree(key: ValueKey(title), child: titleText),
+                  ),
               ],
             ),
           ),
@@ -309,32 +440,11 @@ class _AttachSheetState extends State<_AttachSheet> {
     );
   }
 
-  Widget _gallery(ScrollController scroll) {
+  // ── GALEREYA (`ChatAttachAlertPhotoLayout`) ───────────────────
+  Widget _gallery(ScrollController scroll, double safe) {
     final p = _perm;
     if (p != null && !p.hasAccess) {
-      return ListView(
-        controller: scroll,
-        padding: const EdgeInsets.all(28),
-        children: [
-          const Icon(Icons.photo_library_outlined, color: _C.hint, size: 56),
-          const SizedBox(height: 14),
-          const Text(
-            'Rasm va videolarni yuborish uchun galereyaga ruxsat bering',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.white, fontSize: 15, height: 1.4),
-          ),
-          const SizedBox(height: 14),
-          Center(
-            child: FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: _C.blue),
-              onPressed: () async {
-                await PhotoManager.openSetting();
-              },
-              child: const Text('Sozlamalarni ochish'),
-            ),
-          ),
-        ],
-      );
+      return _NoAccess(scroll: scroll);
     }
     return NotificationListener<ScrollNotification>(
       onNotification: (n) {
@@ -343,7 +453,7 @@ class _AttachSheetState extends State<_AttachSheet> {
       },
       child: GridView.builder(
         controller: scroll,
-        padding: const EdgeInsets.all(2),
+        padding: EdgeInsets.fromLTRB(2, 0, 2, 96 + safe),
         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: 3,
           mainAxisSpacing: 2,
@@ -385,8 +495,8 @@ class _AttachSheetState extends State<_AttachSheet> {
                 ),
               ),
             const Center(
-              child: Icon(Icons.photo_camera_outlined,
-                  color: Colors.white, size: 30),
+              child: Icon(Icons.photo_camera_rounded,
+                  color: Colors.white, size: 28),
             ),
           ],
         ),
@@ -394,145 +504,156 @@ class _AttachSheetState extends State<_AttachSheet> {
     );
   }
 
-  Widget _files(ScrollController scroll) {
-    Widget row(IconData icon, Color color, String title, String sub,
-        VoidCallback onTap) {
-      return ListTile(
-        onTap: onTap,
-        leading: CircleAvatar(
-          backgroundColor: color,
-          child: Icon(icon, color: Colors.white),
-        ),
-        title: Text(title, style: const TextStyle(color: Colors.white)),
-        subtitle: Text(sub, style: const TextStyle(color: _C.hint)),
-      );
-    }
-
+  // ── FAYL (`ChatAttachAlertDocumentLayout`) ────────────────────
+  Widget _files(ScrollController scroll, double safe) {
     return ListView(
       controller: scroll,
+      padding: EdgeInsets.only(bottom: 96 + safe),
       children: [
-        row(Icons.folder_rounded, _C.blue, 'Ichki xotira',
-            'Istalgan faylni tanlash', () => _pickFiles(FileType.any)),
-        row(Icons.image_rounded, const Color(0xFF4CAF50), 'Galereya',
-            'Rasm va videoni SIQILMAGAN fayl sifatida',
-            () => _pickFiles(FileType.media)),
-        row(Icons.music_note_rounded, const Color(0xFFFF7043), 'Musiqa',
-            'Audio fayllar', () => _pickFiles(FileType.audio)),
+        _DocRow(
+          icon: Icons.folder_rounded,
+          color: const Color(0xFF3D9AEA),
+          title: 'Ichki xotira',
+          subtitle: 'Fayl tizimidan istalgan fayl',
+          onTap: () => _pickFiles(FileType.any),
+        ),
+        _DocRow(
+          icon: Icons.image_rounded,
+          color: const Color(0xFF4FC76A),
+          title: 'Galereya',
+          subtitle: 'Rasm va videoni siqilmagan holda yuborish',
+          onTap: () => _pickFiles(FileType.media),
+        ),
+        _DocRow(
+          icon: Icons.music_note_rounded,
+          color: const Color(0xFFF07F3A),
+          title: 'Musiqa',
+          subtitle: 'Audio fayllar',
+          onTap: () => _pickFiles(FileType.audio),
+          divider: false,
+        ),
+        const _SectionShadow(),
+        const Padding(
+          padding: EdgeInsets.fromLTRB(21, 14, 21, 8),
+          child: Text(
+            'Yuborilgan fayllar serverda shifrlangan holda saqlanadi.',
+            style: TextStyle(color: _C.hint, fontSize: 13.5, height: 1.35),
+          ),
+        ),
       ],
     );
   }
 
-  Widget _tabs() {
-    Widget tab(int i, IconData icon, Color color, String label) {
-      final on = _tab == i;
-      return Expanded(
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: () => setState(() => _tab = i),
-          child: Column(
+  // ── MUSIQA (`ChatAttachAlertAudioLayout`) ─────────────────────
+  Widget _music(ScrollController scroll, double safe) {
+    final songs = _songs;
+    if (songs == null) {
+      return const Center(
+          child: CircularProgressIndicator(strokeWidth: 2, color: _C.accent));
+    }
+    if (songs.isEmpty) {
+      return ListView(
+        controller: scroll,
+        padding: const EdgeInsets.all(32),
+        children: [
+          const Icon(Icons.music_off_rounded, color: _C.hint, size: 56),
+          const SizedBox(height: 12),
+          const Text('Qurilmada musiqa topilmadi',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.white, fontSize: 15)),
+          const SizedBox(height: 12),
+          Center(
+            child: TextButton(
+              onPressed: () => _pickFiles(FileType.audio),
+              child: const Text('Fayldan tanlash',
+                  style: TextStyle(color: _C.accent)),
+            ),
+          ),
+        ],
+      );
+    }
+    return ListView.builder(
+      controller: scroll,
+      padding: EdgeInsets.only(bottom: 96 + safe),
+      itemCount: songs.length,
+      itemBuilder: (_, i) {
+        final s = songs[i];
+        final n = _pickedSongs.indexOf(s);
+        return _SongRow(
+          song: s,
+          number: n < 0 ? null : n + 1,
+          onTap: () => _toggleSong(s),
+        );
+      },
+    );
+  }
+
+  // ── PASTDAGI SHISHA TABLAR (`GlassTabView`) ───────────────────
+  Widget _tabs(double safe) {
+    return Padding(
+      padding: EdgeInsets.only(bottom: 8 + safe),
+      child: Center(
+        child: _GlassPill(
+          child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 160),
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  color: on ? color : color.withValues(alpha: 0.18),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(icon, color: on ? Colors.white : color, size: 24),
+              _AttachTab(
+                label: 'Galereya',
+                anim: 'tab_gallery',
+                selected: _tab == _Tab.gallery,
+                onTap: () => _setTab(_Tab.gallery),
               ),
-              const SizedBox(height: 4),
-              Text(label,
-                  style: TextStyle(
-                      color: on ? Colors.white : _C.hint, fontSize: 12.5)),
+              _AttachTab(
+                label: 'Fayl',
+                anim: 'tab_files',
+                selected: _tab == _Tab.file,
+                onTap: () => _setTab(_Tab.file),
+              ),
+              _AttachTab(
+                label: 'Musiqa',
+                anim: 'tab_music',
+                selected: _tab == _Tab.music,
+                onTap: () => _setTab(_Tab.music),
+              ),
             ],
           ),
         ),
-      );
-    }
-
-    return Container(
-      color: _C.bar,
-      padding: EdgeInsets.fromLTRB(
-          40, 10, 40, 10 + MediaQuery.paddingOf(context).bottom),
-      child: Row(
-        children: [
-          tab(0, Icons.image_rounded, _C.blue, 'Galereya'),
-          tab(1, Icons.insert_drive_file_rounded, const Color(0xFF4CAF50),
-              'Fayl'),
-        ],
       ),
     );
   }
 
-  Widget _captionBar() {
-    return Container(
-      color: _C.bar,
-      padding: EdgeInsets.fromLTRB(
-          12, 8, 12, 8 + MediaQuery.paddingOf(context).bottom),
+  // ── IZOH VA ➤ (`commentTextView` + `writeButton`) ─────────────
+  Widget _captionBar(double safe) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(8, 0, 8, 8 + safe),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           Expanded(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.07),
-                borderRadius: BorderRadius.circular(22),
-              ),
+            child: _GlassPill(
+              radius: 24,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
               child: TextField(
                 controller: _caption,
                 minLines: 1,
                 maxLines: 4,
-                style: const TextStyle(color: Colors.white, fontSize: 15),
+                style: const TextStyle(color: Colors.white, fontSize: 16),
+                cursorColor: _C.accent,
                 decoration: const InputDecoration(
                   border: InputBorder.none,
+                  isDense: true,
+                  contentPadding: EdgeInsets.symmetric(vertical: 14),
                   hintText: 'Izoh qo\'shish...',
                   hintStyle: TextStyle(color: _C.hint),
                 ),
               ),
             ),
           ),
-          const SizedBox(width: 10),
-          GestureDetector(
+          const SizedBox(width: 8),
+          _SendButton(
+            count: _count,
+            busy: _sending,
             onTap: _send,
-            child: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                Container(
-                  width: 48,
-                  height: 48,
-                  decoration: const BoxDecoration(
-                      color: AppColors.accent, shape: BoxShape.circle),
-                  child: _sending
-                      ? const Padding(
-                          padding: EdgeInsets.all(14),
-                          child: CircularProgressIndicator(
-                              strokeWidth: 2, color: Colors.white),
-                        )
-                      : const Icon(Icons.send_rounded, color: Colors.white),
-                ),
-                Positioned(
-                  right: -2,
-                  top: -4,
-                  child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: _C.bar, width: 2),
-                    ),
-                    child: Text('${_selected.length}',
-                        style: const TextStyle(
-                            color: AppColors.accent,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700)),
-                  ),
-                ),
-              ],
-            ),
           ),
         ],
       ),
@@ -540,8 +661,462 @@ class _AttachSheetState extends State<_AttachSheet> {
   }
 }
 
-/// Galereyadagi bitta katak: kichik rasm, videoda uzunlik, tanlash
-/// doirasi (tanlash tartibi raqami bilan).
+/// Shisha "tabletka" (`BlurredBackgroundDrawable`, radiusi 28).
+class _GlassPill extends StatelessWidget {
+  final Widget child;
+  final double radius;
+  final EdgeInsets padding;
+
+  const _GlassPill({
+    required this.child,
+    this.radius = 28,
+    this.padding = const EdgeInsets.all(4),
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(radius),
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+        child: Container(
+          padding: padding,
+          decoration: BoxDecoration(
+            color: const Color(0xCC26292E),
+            borderRadius: BorderRadius.circular(radius),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+          ),
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
+/// Bitta tab: Lottie belgi (24) + nom (11, qalin). Tanlanganda belgi
+/// "to'ladi" (`tab_*.json`), tanlov olinsa qaytadi (`*_reverse.json`),
+/// orqasida urg'u rangidagi yumshoq tabletka 0.6 dan 1 gacha o'sadi.
+class _AttachTab extends StatefulWidget {
+  final String label;
+  final String anim;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _AttachTab({
+    required this.label,
+    required this.anim,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  State<_AttachTab> createState() => _AttachTabState();
+}
+
+class _AttachTabState extends State<_AttachTab> with TickerProviderStateMixin {
+  late final AnimationController _sel = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 320),
+      value: widget.selected ? 1 : 0);
+  late final AnimationController _icon = AnimationController(vsync: this);
+  late bool _reverse = !widget.selected;
+
+  @override
+  void initState() {
+    super.initState();
+    // Birinchi ko'rinishda — oxirgi kadr (animatsiyasiz).
+    _icon.value = 1;
+  }
+
+  @override
+  void didUpdateWidget(_AttachTab old) {
+    super.didUpdateWidget(old);
+    if (old.selected != widget.selected) {
+      if (widget.selected) {
+        _sel.forward();
+      } else {
+        _sel.reverse();
+      }
+      setState(() => _reverse = !widget.selected);
+      // Yangi fayl yuklangach (`onLoaded`) o'ynaydi; oldin yuklangan
+      // bo'lsa — darhol.
+      _icon.value = 0;
+      if (_icon.duration != null) _icon.forward();
+    }
+  }
+
+  @override
+  void dispose() {
+    _sel.dispose();
+    _icon.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final w = _tabWidth(widget.label);
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: widget.onTap,
+      child: AnimatedBuilder(
+        animation: _sel,
+        builder: (context, _) {
+          final t = Curves.decelerate.transform(_sel.value);
+          final color = Color.lerp(_C.tab, _C.accent, t)!;
+          return SizedBox(
+            width: w,
+            height: 48,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                if (t > 0)
+                  Transform.scale(
+                    scale: ui.lerpDouble(0.6, 1, t),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: _C.accent.withValues(alpha: 0.12 * t),
+                        borderRadius: BorderRadius.circular(24),
+                      ),
+                    ),
+                  ),
+                Positioned(
+                  top: 4,
+                  child: ColorFiltered(
+                    colorFilter: ColorFilter.mode(color, BlendMode.srcIn),
+                    child: Lottie.asset(
+                      'assets/tg_anim/${widget.anim}${_reverse ? '_reverse' : ''}.json',
+                      key: ValueKey(_reverse),
+                      controller: _icon,
+                      width: 24,
+                      height: 24,
+                      onLoaded: (c) {
+                        _icon.duration = c.duration;
+                        if (_icon.value < 1 && !_icon.isAnimating) {
+                          _icon.forward();
+                        }
+                      },
+                    ),
+                  ),
+                ),
+                Positioned(
+                  top: 29,
+                  left: 0,
+                  right: 0,
+                  child: Text(
+                    widget.label,
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: color,
+                      fontSize: 11,
+                      fontWeight:
+                          widget.selected ? FontWeight.w800 : FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  /// `measureAttachTabWidth`: matn + 16..8 dp chet, eng ko'pi 84.
+  static double _tabWidth(String s) {
+    final tp = TextPainter(
+      text: TextSpan(
+          text: s,
+          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    final pad = ui.lerpDouble(16, 8, ((tp.width - 40) / 16).clamp(0.0, 1.0))!;
+    return (tp.width + pad * 2).clamp(0.0, 84.0) + 8;
+  }
+}
+
+/// ➤ tugmasi va nechta tanlangani (`writeButton` + `selectedCountView`).
+class _SendButton extends StatelessWidget {
+  final int count;
+  final bool busy;
+  final VoidCallback onTap;
+
+  const _SendButton(
+      {required this.count, required this.busy, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: SizedBox(
+        width: 52,
+        height: 52,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Container(
+              width: 52,
+              height: 52,
+              decoration: const BoxDecoration(
+                  color: _C.accent, shape: BoxShape.circle),
+              child: busy
+                  ? const Padding(
+                      padding: EdgeInsets.all(15),
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Padding(
+                      padding: EdgeInsets.only(left: 3),
+                      child: Icon(Icons.send_rounded,
+                          color: Colors.white, size: 24),
+                    ),
+            ),
+            Positioned(
+              right: -4,
+              top: -4,
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 180),
+                transitionBuilder: (c, a) =>
+                    ScaleTransition(scale: a, child: c),
+                child: Container(
+                  key: ValueKey(count),
+                  constraints:
+                      const BoxConstraints(minWidth: 22, minHeight: 22),
+                  padding: const EdgeInsets.symmetric(horizontal: 5),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(11),
+                    border: Border.all(color: _C.bg, width: 2),
+                  ),
+                  child: Text('$count',
+                      style: const TextStyle(
+                          color: _C.accent,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700)),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Galereyaga ruxsat yo'q.
+class _NoAccess extends StatelessWidget {
+  final ScrollController scroll;
+  const _NoAccess({required this.scroll});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      controller: scroll,
+      padding: const EdgeInsets.all(28),
+      children: [
+        const Icon(Icons.photo_library_outlined, color: _C.hint, size: 56),
+        const SizedBox(height: 14),
+        const Text(
+          'Rasm va videolarni yuborish uchun galereyaga ruxsat bering',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: Colors.white, fontSize: 15, height: 1.4),
+        ),
+        const SizedBox(height: 14),
+        Center(
+          child: FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: _C.accent),
+            onPressed: PhotoManager.openSetting,
+            child: const Text('Sozlamalarni ochish'),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Fayl bo'limidagi qator (`SharedDocumentCell`): 42 dp lik rangli
+/// belgi, nomi (16) va izohi (13.5).
+class _DocRow extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+  final bool divider;
+
+  const _DocRow({
+    required this.icon,
+    required this.color,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+    this.divider = true,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: SizedBox(
+        height: 64,
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: Row(
+                children: [
+                  const SizedBox(width: 16),
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: color,
+                      borderRadius: BorderRadius.circular(21),
+                    ),
+                    child: Icon(icon, color: Colors.white, size: 22),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(title,
+                            style: const TextStyle(
+                                color: Colors.white, fontSize: 16)),
+                        const SizedBox(height: 3),
+                        Text(subtitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                color: _C.hint, fontSize: 13.5)),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                ],
+              ),
+            ),
+            if (divider)
+              const Positioned(
+                left: 72,
+                right: 0,
+                bottom: 0,
+                child: SizedBox(
+                    height: 0.6,
+                    child: ColoredBox(color: Color(0x14FFFFFF))),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SectionShadow extends StatelessWidget {
+  const _SectionShadow();
+
+  @override
+  Widget build(BuildContext context) =>
+      Container(height: 10, color: Colors.black.withValues(alpha: 0.25));
+}
+
+/// Musiqa qatori (`SharedAudioCell`): dumaloq belgi, nomi, uzunligi,
+/// o'ngda tanlash doirasi.
+class _SongRow extends StatelessWidget {
+  final AssetEntity song;
+  final int? number;
+  final VoidCallback onTap;
+
+  const _SongRow(
+      {required this.song, required this.number, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final s = song.duration;
+    final dur = '${s ~/ 60}:${(s % 60).toString().padLeft(2, '0')}';
+    return InkWell(
+      onTap: onTap,
+      child: SizedBox(
+        height: 64,
+        child: Row(
+          children: [
+            const SizedBox(width: 16),
+            Container(
+              width: 44,
+              height: 44,
+              decoration: const BoxDecoration(
+                  color: _C.accent, shape: BoxShape.circle),
+              child: const Icon(Icons.play_arrow_rounded,
+                  color: Colors.white, size: 28),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(song.title ?? 'Nomsiz',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style:
+                          const TextStyle(color: Colors.white, fontSize: 16)),
+                  const SizedBox(height: 3),
+                  Text(dur,
+                      style: const TextStyle(color: _C.hint, fontSize: 13.5)),
+                ],
+              ),
+            ),
+            _CheckCircle(number: number, onDark: false),
+            const SizedBox(width: 18),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// `CheckBox2` (24 dp): bo'sh — oq halqa, tanlangan — urg'u rangida,
+/// oq hoshiyali, ichida tartib raqami.
+class _CheckCircle extends StatelessWidget {
+  final int? number;
+
+  /// Rasm ustida (bo'sh holatda ichi xira qora).
+  final bool onDark;
+
+  const _CheckCircle({required this.number, this.onDark = true});
+
+  @override
+  Widget build(BuildContext context) {
+    final n = number;
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      width: 24,
+      height: 24,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: n != null
+            ? _C.accent
+            : (onDark ? const Color(0x28000000) : Colors.transparent),
+        border: Border.all(
+            color: n != null || onDark ? Colors.white : _C.hint, width: 1.5),
+      ),
+      child: AnimatedScale(
+        duration: const Duration(milliseconds: 180),
+        scale: n == null ? 0 : 1,
+        child: Text(n == null ? '' : '$n',
+            style: const TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.w700)),
+      ),
+    );
+  }
+}
+
+/// Galereyadagi bitta katak (`PhotoAttachPhotoCell`).
 class _AssetTile extends StatefulWidget {
   final AssetEntity asset;
   final int? number;
@@ -561,7 +1136,7 @@ class _AssetTileState extends State<_AssetTile> {
   void initState() {
     super.initState();
     _thumb = _thumbs[widget.asset.id] ??= widget.asset
-        .thumbnailDataWithSize(const ThumbnailSize.square(240), quality: 80);
+        .thumbnailDataWithSize(const ThumbnailSize.square(300), quality: 85);
   }
 
   String _dur(int s) =>
@@ -573,66 +1148,62 @@ class _AssetTileState extends State<_AssetTile> {
     final n = widget.number;
     return GestureDetector(
       onTap: widget.onTap,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          FutureBuilder<Uint8List?>(
-            future: _thumb,
-            builder: (_, s) => s.data == null
-                ? Container(color: Colors.white.withValues(alpha: 0.05))
-                : AnimatedScale(
-                    scale: n != null ? 0.86 : 1,
-                    duration: const Duration(milliseconds: 150),
-                    child: Image.memory(s.data!,
-                        fit: BoxFit.cover, gaplessPlayback: true),
+      child: ColoredBox(
+        color: const Color(0xFF0E0F11),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            AnimatedScale(
+              scale: n != null ? 0.787 : 1,
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeOut,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  FutureBuilder<Uint8List?>(
+                    future: _thumb,
+                    builder: (_, s) => s.data == null
+                        ? Container(color: Colors.white.withValues(alpha: 0.05))
+                        : Image.memory(s.data!,
+                            fit: BoxFit.cover, gaplessPlayback: true),
                   ),
-          ),
-          if (e.type == AssetType.video)
+                  if (e.type == AssetType.video)
+                    Positioned(
+                      left: 4,
+                      bottom: 4,
+                      height: 17,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 5),
+                        decoration: BoxDecoration(
+                          color: const Color(0x66000000),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.play_arrow_rounded,
+                                size: 12, color: Colors.white),
+                            const SizedBox(width: 1),
+                            Text(_dur(e.duration),
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 12,
+                                    height: 1.1,
+                                    fontWeight: FontWeight.w600)),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
             Positioned(
-              left: 5,
-              bottom: 5,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                decoration: BoxDecoration(
-                  color: Colors.black54,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.videocam_rounded,
-                        size: 12, color: Colors.white),
-                    const SizedBox(width: 2),
-                    Text(_dur(e.duration),
-                        style: const TextStyle(
-                            color: Colors.white, fontSize: 11)),
-                  ],
-                ),
-              ),
+              right: 5,
+              top: 5,
+              child: _CheckCircle(number: n),
             ),
-          Positioned(
-            right: 5,
-            top: 5,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              width: 24,
-              height: 24,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: n != null ? _C.blue : Colors.black26,
-                border: Border.all(color: Colors.white, width: 1.6),
-              ),
-              child: n == null
-                  ? null
-                  : Text('$n',
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700)),
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

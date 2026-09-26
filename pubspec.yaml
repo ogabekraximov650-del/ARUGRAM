@@ -96,6 +96,9 @@ dependencies:
   # ── DUMALOQ VIDEO XABAR (Telegram'dagidek) ───────────────────
   # Support chatda old kamera bilan dumaloq video yozish uchun.
   camera: ^0.11.1
+  # Telegram'ning Lottie belgilari (biriktirish oynasi tablari,
+  # 🎤 <-> dumaloq video tugmasi) — `assets/tg_anim/`.
+  lottie: ^3.3.1
   # ── BIRIKTIRISH OYNASI (Telegram'dagidek) ────────────────────
   # Ilova ichidagi galereya to'ri (albomlar, kichik rasmlar, video
   # uzunligi) — tizim tanlagichi emas.
@@ -134,3 +137,5 @@ flutter:
     # ishlatiladi: ochilish ekrani va bosh sahifa sarlavhasi.
     # Manba: branding/aru-mark.png
     - assets/aru-mark.png
+    # Telegram/Cherrygram `res/raw` dagi Lottie animatsiyalari.
+    - assets/tg_anim/
