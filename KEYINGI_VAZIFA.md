@@ -3314,3 +3314,24 @@ idan ASCII va boshqa oddiy belgilar olib tashlandi
 (`tool/tg_emoji/README.md`), `fontFamilyFallback` =
 `['sans-serif', 'TgEmoji']`. Galereyada video kichik rasmi chiqmasa
 zaxira yo'llar (`thumbnailData`, birinchi kadr).
+
+## Telegram bilan taqqoslash (4-bosqich)
+
+* Emoji paneli (`EmojiView`, `EmojiTabsStrip`): bo'lim belgilari —
+  Telegram Lottie (`msg_emoji_*.json`, tanlanganda o'ynaydi), tugma
+  30 dp / oraliq 3 dp / burchak 8; sarlavhalar 15 qalin; teri rangi —
+  bosib turilsa 6 variantli oyna (`tgEmojiColored`, `addColorToCode`).
+* Dumaloq video (`InstantCameraView`): 180 ms decelerate, yarim
+  balandlikdan ko'tariladi; tugmalar pastki chapda shisha panelda
+  (kamera almashtirish aylanadi, chiroq: orqa — fonar, old — ekran oq);
+  oyna faqat xabarlar ustida, yozish paneli ko'rinadi.
+* Ovozli xabar (`SeekBarWaveform`): 44 dp tugma, to'lqin (3 dp qadam,
+  2 dp chiziq, ±7 dp), yozishda yig'iladi va matnga `[wf:...]` bo'lib
+  qo'shiladi (`tg_waveform.dart`); worker ro'yxatda "Ovozli xabar".
+* Dumaloq video pufagi ovoz bilan o'ynaganda kattalashadi.
+* Sarlavha (`ChatAvatarContainer`): 42 dp rasm, nom 18, holat qatori.
+* Javob (`tg_reply.dart`): chapga surish yoki menyu → javob qatori;
+  xabarda iqtibos (bosilsa asl xabarga o'tadi va yoritiladi); matnda
+  `[re:<id>]` (worker ro'yxatda olib tashlaydi). Bosib turish menyusi:
+  Javob berish, Nusxa olish, (admin) Tanlash, O'chirish. Pastga tushish
+  tugmasi.

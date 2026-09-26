@@ -44,6 +44,7 @@ import '../widgets/tg_record_button.dart';
 import '../widgets/tg_attach_sheet.dart';
 import '../widgets/tg_bubble.dart';
 import '../widgets/tg_round_recorder.dart';
+import '../widgets/tg_reply.dart';
 import '../widgets/tg_waveform.dart';
 import 'package:open_filex/open_filex.dart';
 import '../widgets/emoji_text.dart';
@@ -186,10 +187,29 @@ class _SupportChatScreenState extends State<SupportChatScreen>
   /// shakli shulardan yasaladi (`tg_waveform.dart`).
   final List<double> _levels = [];
 
+  // ── TELEGRAM'DAGIDEK: JAVOB, MENYU, PASTGA TUSHISH ──────────
+  /// Javob berilayotgan xabar (yozish paneli tepasida qator).
+  ChatMessage? _replyTo;
+
+  /// Xabarlarning kalitlari — iqtibos bosilsa asl xabarga o'tish uchun.
+  final Map<String, GlobalKey> _keys = {};
+
+  /// Bir zum yoritiladigan xabar (iqtibosdan o'tilganda).
+  String? _flash;
+
+  /// Pastga tushish tugmasi ko'rinadimi (ro'yxat yuqoriga surilgan).
+  bool _showDown = false;
+
   @override
   void initState() {
     super.initState();
     _chat.addListener(_onData);
+    _scroll.addListener(() {
+      if (!_scroll.hasClients) return;
+      final p = _scroll.position;
+      final down = p.pixels < p.maxScrollExtent - 400;
+      if (down != _showDown) setState(() => _showDown = down);
+    });
     // Avval DISK (darhol), keyin tarmoq.
     _chat.loadFromDisk();
     _chat.load().then((_) => _toBottom(jump: true));
@@ -844,12 +864,139 @@ class _SupportChatScreenState extends State<SupportChatScreen>
     }
   }
 
+  /// Xabarning qisqa matni (iqtibos va javob qatori uchun).
+  String _snippet(ChatMessage m) {
+    final body = tgSplitReply(m.body).$2;
+    if (m.hasMedia) {
+      final label = switch (m.mediaType) {
+        'voice' => 'Ovozli xabar',
+        'round' => 'Video xabar',
+        'sticker' => 'Stiker',
+        'gif' => 'GIF',
+        'file' => m.body.isEmpty ? 'Fayl' : m.body,
+        'video' => 'Video',
+        _ => 'Rasm',
+      };
+      if (m.mediaType == 'file' || m.isVoice || body.isEmpty) return label;
+      return '$label, ${plainEmojiText(body)}';
+    }
+    return plainEmojiText(body).replaceAll('\n', ' ');
+  }
+
+  List<ChatMessage>? _byIdSrc;
+  Map<String, ChatMessage> _byIdMap = const {};
+  Map<String, ChatMessage> _byId(List<ChatMessage> items) {
+    if (!identical(items, _byIdSrc) || _byIdMap.length != items.length) {
+      _byIdSrc = items;
+      _byIdMap = {for (final x in items) x.id: x};
+    }
+    return _byIdMap;
+  }
+
+  bool _isMine(ChatMessage m) =>
+      _chat.isAdminView ? m.fromAdmin : !m.fromAdmin;
+
+  String _nameOf(ChatMessage m) =>
+      _isMine(m) ? 'Siz' : (widget.title.isEmpty ? 'Admin' : widget.title);
+
+  void _startReply(ChatMessage m) {
+    if (m.pending) return;
+    HapticFeedback.selectionClick();
+    setState(() => _replyTo = m);
+    _focus.requestFocus();
+  }
+
+  /// Iqtibos bosildi — asl xabarga o'tiladi va u bir zum yoritiladi.
+  Future<void> _goTo(String id) async {
+    final items = _chat.items;
+    final i = items.indexWhere((x) => x.id == id);
+    if (i < 0) {
+      _snack('Asl xabar topilmadi');
+      return;
+    }
+    var ctx = _keys[id]?.currentContext;
+    if (ctx == null && _scroll.hasClients) {
+      // Hali qurilmagan — taxminiy joyga sakrab, so'ng aniq joylanadi.
+      final p = _scroll.position;
+      _scroll.jumpTo((p.maxScrollExtent * i / items.length)
+          .clamp(0.0, p.maxScrollExtent));
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+      ctx = _keys[id]?.currentContext;
+    }
+    if (ctx != null && ctx.mounted) {
+      await Scrollable.ensureVisible(ctx,
+          alignment: 0.35,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOutCubic);
+    }
+    if (!mounted) return;
+    setState(() => _flash = id);
+    await Future<void>.delayed(const Duration(milliseconds: 1200));
+    if (mounted && _flash == id) setState(() => _flash = null);
+  }
+
+  /// Xabarni bosib turish menyusi (Telegram `ActionBarPopupWindow`).
+  Future<void> _menu(ChatMessage m, Offset at) async {
+    if (_selecting) return;
+    HapticFeedback.mediumImpact();
+    final text = tgSplitReply(m.body).$2;
+    final canCopy = !m.hasMedia && text.isNotEmpty;
+    final overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox;
+    PopupMenuItem<String> item(String v, IconData icon, String label,
+            {Color color = Colors.white}) =>
+        PopupMenuItem<String>(
+          value: v,
+          height: 48,
+          child: Row(
+            children: [
+              Icon(icon, size: 22, color: color.withValues(alpha: 0.8)),
+              const SizedBox(width: 18),
+              Text(label, style: TextStyle(color: color, fontSize: 16)),
+            ],
+          ),
+        );
+    final v = await showMenu<String>(
+      context: context,
+      color: const Color(0xFF26272B),
+      shape:
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      position: RelativeRect.fromRect(
+          at & const Size(1, 1), Offset.zero & overlay.size),
+      items: [
+        if (!m.pending) item('reply', Icons.reply_rounded, 'Javob berish'),
+        if (canCopy) item('copy', Icons.copy_rounded, 'Nusxa olish'),
+        if (_canDelete) ...[
+          item('select', Icons.check_circle_outline_rounded, 'Tanlash'),
+          item('delete', Icons.delete_outline_rounded, 'O\'chirish',
+              color: const Color(0xFFFF5A5A)),
+        ],
+      ],
+    );
+    if (!mounted || v == null) return;
+    switch (v) {
+      case 'reply':
+        _startReply(m);
+      case 'copy':
+        await Clipboard.setData(ClipboardData(text: plainEmojiText(text)));
+        _snack('Nusxa olindi');
+      case 'select':
+        _toggleSelect(m);
+      case 'delete':
+        _toggleSelect(m);
+        await _deleteSelected();
+    }
+  }
+
   Future<void> _send() async {
     if (_sending) return;
     final text = _input.encoded.trim();
     if (text.isEmpty) return;
     setState(() => _sending = true);
-    final err = await _chat.send(text);
+    final reply = _replyTo;
+    final err = await _chat.send(tgWithReply(reply?.id, text));
+    if (!mounted) return;
+    if (err == null) _replyTo = null;
     if (!mounted) return;
     setState(() => _sending = false);
     if (err != null) {
@@ -893,6 +1040,45 @@ class _SupportChatScreenState extends State<SupportChatScreen>
                         // (Telegram `InstantCameraView` kabi) FAQAT xabarlar
                         // ustida: pastdagi yozish paneli (vaqt, "bekor
                         // qilish uchun suring", tugma) ko'rinib turadi.
+                        // Pastga tushish tugmasi (Telegram `pagedownButton`):
+                        // ro'yxat yuqoriga surilganda o'ngda pastda chiqadi.
+                        Positioned(
+                          right: 10,
+                          bottom: 10,
+                          child: AnimatedScale(
+                            scale: _showDown ? 1 : 0,
+                            duration: const Duration(milliseconds: 200),
+                            curve: Curves.easeOutBack,
+                            child: GestureDetector(
+                              onTap: () {
+                                if (!_scroll.hasClients) return;
+                                _scroll.animateTo(
+                                    _scroll.position.maxScrollExtent,
+                                    duration:
+                                        const Duration(milliseconds: 300),
+                                    curve: Curves.easeOutCubic);
+                              },
+                              child: Container(
+                                width: 42,
+                                height: 42,
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF26272B),
+                                  shape: BoxShape.circle,
+                                  boxShadow: const [
+                                    BoxShadow(
+                                        color: Colors.black38,
+                                        blurRadius: 6,
+                                        offset: Offset(0, 2)),
+                                  ],
+                                ),
+                                child: const Icon(
+                                    Icons.keyboard_arrow_down_rounded,
+                                    color: Colors.white,
+                                    size: 28),
+                              ),
+                            ),
+                          ),
+                        ),
                         TgRoundOverlay(
                           camera: _cam,
                           active: _roundRec,
@@ -1110,6 +1296,7 @@ class _SupportChatScreenState extends State<SupportChatScreen>
           );
         }
         final m = items[i];
+        final byId = _byId(items);
         // O'z xabarim o'ngda. Admin ekranida "o'ziniki" — admin
         // yozganlari; foydalanuvchi ekranida esa aksincha.
         final mine = _chat.isAdminView ? m.fromAdmin : !m.fromAdmin;
@@ -1155,9 +1342,22 @@ class _SupportChatScreenState extends State<SupportChatScreen>
                   ),
           // Admin uzoq bosib TANLAYDI, keyin qolganlarini oddiy
           // bosib qo'shadi. Foydalanuvchida ikkovi ham ishlamaydi.
-          onLongPress: _canDelete ? () => _toggleSelect(m) : null,
+          onLongPressAt: (at) => _menu(m, at),
           onTap: _selecting ? () => _toggleSelect(m) : null,
-          selected: _selected.contains(m.id),
+          selected: _selected.contains(m.id) || _flash == m.id,
+          quote: () {
+            final rid = tgSplitReply(m.body).$1;
+            if (rid == null) return null;
+            final orig = byId[rid];
+            final mineColor = Colors.white;
+            return TgReplyQuote(
+              name: orig == null ? 'Xabar' : _nameOf(orig),
+              text: orig == null ? 'o\'chirilgan' : _snippet(orig),
+              color: mine ? mineColor : AppColors.accent2,
+              background: Colors.white.withValues(alpha: 0.08),
+              onTap: () => _goTo(rid),
+            );
+          }(),
           selecting: _selecting,
           onOpenMedia: () => Navigator.of(context).push(
             MaterialPageRoute<void>(
@@ -1168,10 +1368,17 @@ class _SupportChatScreenState extends State<SupportChatScreen>
             ),
           ),
         );
-        if (!newDay) return bubble;
+        final row = KeyedSubtree(
+          key: _keys[m.id] ??= GlobalKey(),
+          child: TgSwipeReply(
+            onReply: _selecting || m.pending ? null : () => _startReply(m),
+            child: bubble,
+          ),
+        );
+        if (!newDay) return row;
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [TgDateChip(tgDayLabel(m.createdAt)), bubble],
+          children: [TgDateChip(tgDayLabel(m.createdAt)), row],
         );
       },
       ),
@@ -1207,7 +1414,24 @@ class _SupportChatScreenState extends State<SupportChatScreen>
         focus: _focus,
         onSticker: _sendSticker,
         onGif: _sendGif,
-        row: (context, emojiButton) => Padding(
+        row: (context, emojiButton) => Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Javob qatori (Telegram `replyLine`): yozish maydonining
+            // tepasida, ✕ bilan bekor qilinadi.
+            AnimatedSize(
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOutCubic,
+              child: _replyTo == null || active
+                  ? const SizedBox(width: double.infinity)
+                  : TgReplyBar(
+                      name: _nameOf(_replyTo!),
+                      text: _snippet(_replyTo!),
+                      color: AppColors.accent2,
+                      onClose: () => setState(() => _replyTo = null),
+                    ),
+            ),
+            Padding(
           padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.end,
@@ -1229,6 +1453,8 @@ class _SupportChatScreenState extends State<SupportChatScreen>
               ),
             ],
           ),
+        ),
+          ],
         ),
       ),
     );
@@ -1534,7 +1760,11 @@ class _Bubble extends StatelessWidget {
   final VoidCallback? onAvatarTap;
 
   /// Admin uchun — uzoq bosilganda tanlash boshlanadi.
-  final VoidCallback? onLongPress;
+  /// Bosib turildi (menyu shu nuqtada ochiladi).
+  final ValueChanged<Offset>? onLongPressAt;
+
+  /// Javob iqtibosi (bo'lsa).
+  final Widget? quote;
 
   /// Tanlash rejimida bosish tanlaydi, oddiy holatda esa
   /// rasm/video ochiladi.
@@ -1565,7 +1795,8 @@ class _Bubble extends StatelessWidget {
     this.avatarName = '',
     this.showAvatar = false,
     this.onAvatarTap,
-    this.onLongPress,
+    this.onLongPressAt,
+    this.quote,
     this.onTap,
     this.selected = false,
     this.selecting = false,
@@ -1577,7 +1808,7 @@ class _Bubble extends StatelessWidget {
   Widget build(BuildContext context) {
     final m = message;
     // Stiker, GIF va dumaloq video — pufaksiz (Telegram'dagidek).
-    final bare = m.hasMedia && m.isInline && m.body.isEmpty;
+    final bare = m.hasMedia && m.isInline && m.body.isEmpty && quote == null;
     // ── TANLANGAN XABAR AJRALIB TURADI ────────────────────────
     //
     // Butun qator (rasm bilan birga) bo'yaladi — Telegram ham
@@ -1616,7 +1847,9 @@ class _Bubble extends StatelessWidget {
           ],
           Flexible(
             child: GestureDetector(
-              onLongPress: onLongPress,
+              onLongPressStart: onLongPressAt == null
+                  ? null
+                  : (d) => onLongPressAt!(d.globalPosition),
               onTap: onTap,
               behavior: HitTestBehavior.opaque,
               child: ConstrainedBox(
@@ -1648,9 +1881,11 @@ class _Bubble extends StatelessWidget {
       bottomNear: bottomNear,
     );
     final color = mine ? AppColors.accent : const Color(0xFF222326);
-    final hasText = m.body.isNotEmpty &&
+    // Javob belgisi (`[re:..]`) matnda ko'rinmaydi — iqtibos bo'lib chiqadi.
+    final body = tgSplitReply(m.body).$2;
+    final hasText = body.isNotEmpty &&
         m.mediaType != 'file' &&
-        !(m.isVoice && tgIsWaveformBody(m.body));
+        !(m.isVoice && tgIsWaveformBody(body));
 
     if (bare) {
       return Column(
@@ -1666,7 +1901,7 @@ class _Bubble extends StatelessWidget {
     }
 
     // Izohsiz rasm/video: pufak o'rnida rasmning o'zi (`TYPE_MEDIA`).
-    if (m.isViewable && !hasText) {
+    if (m.isViewable && !hasText && quote == null) {
       final media = TgBubbleShape(
         out: mine,
         topNear: topNear,
@@ -1697,6 +1932,12 @@ class _Bubble extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
+          if (quote != null)
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                  m.isViewable ? 5 : 0, m.isViewable ? 3 : 0, 0, 2),
+              child: quote!,
+            ),
           if (m.hasMedia)
             m.isViewable
                 ? ClipRRect(
@@ -1708,7 +1949,7 @@ class _Bubble extends StatelessWidget {
               padding: EdgeInsets.fromLTRB(m.isViewable ? 8 : 0,
                   m.isViewable || m.hasMedia ? 6 : 0, m.isViewable ? 7 : 0, 0),
               child: _TextWithTime(
-                text: m.body,
+                text: body,
                 time: time,
                 timeWidth: _timeWidth(),
               ),

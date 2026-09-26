@@ -6486,8 +6486,15 @@ async fn chat_send(mut req: Request, env: &Env, origin: &str) -> Result<Response
     // ilova yozish paytida yig'adi, Telegram `waveform` kabi); ro'yxatda
     // u emas, "Ovozli xabar" ko'rinsin.
     let wave_only = media_type == "voice" && body.starts_with("[wf:") && body.ends_with(']');
-    let label = if !body.is_empty() && !wave_only {
-        body.clone()
+    // Javob belgisi (`[re:<id>]`, ilova — `tg_reply.dart`) ro'yxatda
+    // ko'rinmaydi.
+    let shown: &str = if body.starts_with("[re:") {
+        body.find(']').map(|i| &body[i + 1..]).unwrap_or(body.as_str())
+    } else {
+        body.as_str()
+    };
+    let label = if !shown.is_empty() && !wave_only {
+        shown.to_string()
     } else if media_type == "video" {
         "Video".to_string()
     } else if media_type == "voice" {
