@@ -3184,3 +3184,14 @@ internet qaytganda ilova o'z hisobi bilan chat tarixini tozalasin".
   (`TgRecordButton._pressed`).
 - Chatdagi dumaloq video ekran qisqa tomonining 60% i
   (`roundMessageSize`).
+
+## Stiker/GIF oynasida ilova yopilishi — rlottie o'rniga tlottie
+
+* Sabab: rlottie (LOTTIE_THREAD_SUPPORT'siz) bitta global rasterizatordan
+  foydalanadi; ikki render izolyati bir vaqtda chizganda xotira buzilib,
+  ilova native darajada yopilardi. Premium emoji ham shu sababli chizilmay,
+  oddiy emoji ko'rinardi.
+* Yechim: Telegram'ning o'z Lottie renderi — tlottie (github.com/dkaraush/tlottie,
+  MIT, sof Rust) `rust/third_party/tlottie` ga nusxalandi (`SOURCE.md`).
+  Har bir stiker o'z `CPURenderer` iga ega, global holat yo'q.
+* rlottie va C++ (libc++_static) bog'lanishi olib tashlandi; libvpx (webm) qoldi.

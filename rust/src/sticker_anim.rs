@@ -7,7 +7,8 @@
 //! Telegram/Cherrygram (`RLottieDrawable`, `AnimatedFileDrawable`)
 //! stikerlarni tizim pleyeri bilan EMAS, ilova ichidagi kutubxonalar
 //! bilan, FON OQIMIDA chizadi:
-//!   * `.tgs` — rlottie (gzip'langan Lottie JSON);
+//!   * `.tgs` — tlottie (Telegram Android / Cherrygram'ning o'z Lottie
+//!     chizgichi, sof Rust; gzip'langan Lottie JSON);
 //!   * `.webm` — libvpx: rang va shaffoflik ikki alohida VP9 oqimi
 //!     (`native/vp9_shim.c`).
 //!
@@ -23,12 +24,6 @@ use std::sync::{Arc, Mutex, OnceLock};
 use crate::ffi_utils::cstr_to_str;
 
 extern "C" {
-    fn lottie_animation_from_data(data: *const c_char, key: *const c_char, resource: *const c_char) -> *mut c_void;
-    fn lottie_animation_destroy(a: *mut c_void);
-    fn lottie_animation_get_totalframe(a: *const c_void) -> usize;
-    fn lottie_animation_get_framerate(a: *const c_void) -> f64;
-    fn lottie_animation_render(a: *mut c_void, frame: usize, buf: *mut u32, w: usize, h: usize, bpl: usize);
-
     fn aru_vp9_open() -> *mut c_void;
     fn aru_vp9_close(p: *mut c_void);
     fn aru_vp9_decode(
@@ -50,7 +45,8 @@ struct WebmFrame {
 }
 
 enum Kind {
-    Lottie { ptr: *mut c_void, frames: usize, fps: f64 },
+    /// Telegram'ning o'z Lottie chizgichi (tlottie).
+    Lottie { r: Box<tlottie::CPURenderer>, frames: usize, fps: f64 },
     Webm { dec: *mut c_void, frames: Vec<WebmFrame>, fps: f64, next: usize },
 }
 
@@ -67,7 +63,7 @@ impl Drop for Anim {
     fn drop(&mut self) {
         unsafe {
             match &self.kind {
-                Kind::Lottie { ptr, .. } => lottie_animation_destroy(*ptr),
+                Kind::Lottie { .. } => {}
                 Kind::Webm { dec, .. } => {
                     if !dec.is_null() {
                         aru_vp9_close(*dec)
@@ -97,17 +93,13 @@ fn open_lottie(bytes: &[u8]) -> Option<Kind> {
     } else {
         bytes.to_vec()
     };
-    let data = CString::new(json).ok()?;
-    let empty = CString::new("").ok()?;
-    // Kalit bo'sh — rlottie modelni o'z keshida saqlamaydi (xotira
-    // cheksiz o'smasin; har bir stiker o'zi ochiladi va yopiladi).
-    let ptr = unsafe { lottie_animation_from_data(data.as_ptr(), empty.as_ptr(), empty.as_ptr()) };
-    if ptr.is_null() {
-        return None;
-    }
-    let frames = unsafe { lottie_animation_get_totalframe(ptr) }.max(1);
-    let fps = unsafe { lottie_animation_get_framerate(ptr) };
-    Some(Kind::Lottie { ptr, frames, fps: if fps > 0.0 { fps } else { 30.0 } })
+    // Telegram Android (`jni/lottie.cpp`) kabi: tlottie, standart
+    // cheklovlar, RGBA tartibi (Flutter premultiplied RGBA kutadi).
+    let comp = tlottie::Composition::parse(&json, &tlottie::Limits::default()).ok()?;
+    let frames = comp.frame_count().max(1) as usize;
+    let fps = comp.frame_rate as f64;
+    let r = Box::new(tlottie::CPURenderer::new(comp));
+    Some(Kind::Lottie { r, frames, fps: if fps > 0.0 { fps } else { 30.0 } })
 }
 
 // ── WEBM (EBML) ─────────────────────────────────────────────────
@@ -286,17 +278,14 @@ pub extern "C" fn rust_anim_render(id: i64, frame: i32, out: *mut u8) -> i32 {
         return -1;
     }
     match &mut a.kind {
-        Kind::Lottie { ptr, frames, .. } => {
+        Kind::Lottie { r, frames, .. } => {
             let f = (frame.max(0) as usize).min(*frames - 1);
-            unsafe {
-                lottie_animation_render(*ptr, f, out as *mut u32, w, h, w * 4);
-                // rlottie: BGRA (premultiplied) -> RGBA.
-                let px = std::slice::from_raw_parts_mut(out, w * h * 4);
-                for c in px.chunks_exact_mut(4) {
-                    c.swap(0, 2);
-                }
+            let px = unsafe { std::slice::from_raw_parts_mut(out as *mut u32, w * h) };
+            // Premultiplied RGBA ([R,G,B,A] baytlar), avval tozalanadi.
+            match r.render(f as f32, px, w as u32, h as u32, tlottie::RenderOptions::default()) {
+                Ok(()) => 1,
+                Err(_) => -1,
             }
-            1
         }
         Kind::Webm { dec, frames, next, .. } => {
             let want = (frame.max(0) as usize).min(frames.len() - 1);
@@ -363,19 +352,14 @@ mod tests {
           {"ty":1,"sc":"#ff0000","sw":20,"sh":20,"ip":0,"op":10,"st":0,
            "ks":{"o":{"a":0,"k":100},"r":{"a":0,"k":0},"p":{"a":0,"k":[10,10,0]},
                  "a":{"a":0,"k":[10,10,0]},"s":{"a":0,"k":[100,100,100]}}}]}"##;
-        let Some(Kind::Lottie { ptr, frames, fps }) = open_lottie(json.as_bytes()) else {
-            panic!("ochilmadi")
-        };
-        // rlottie oxirgi kadrni ham sanaydi: op - ip + 1.
-        assert_eq!(frames, 11);
+        let kind = open_lottie(json.as_bytes()).expect("ochilmadi");
+        let Kind::Lottie { frames, fps, .. } = &kind else { panic!("lottie emas") };
+        // Harakatsiz kompozitsiyani tlottie bitta kadr deb sanaydi
+        // (animatsiyalida — op - ip).
+        assert_eq!(*frames, 1);
         assert!((fps - 30.0).abs() < 0.01);
-        let mut a = Anim { kind: Kind::Lottie { ptr, frames, fps }, w: 8, h: 8 };
         let id = NEXT.fetch_add(1, Ordering::SeqCst);
-        let (w, h) = (a.w, a.h);
-        anims().lock().unwrap().insert(id, Arc::new(Mutex::new(std::mem::replace(
-            &mut a,
-            Anim { kind: Kind::Webm { dec: std::ptr::null_mut(), frames: Vec::new(), fps: 1.0, next: 0 }, w, h },
-        ))));
+        anims().lock().unwrap().insert(id, Arc::new(Mutex::new(Anim { kind, w: 8, h: 8 })));
         let mut buf = vec![0u8; 8 * 8 * 4];
         assert_eq!(rust_anim_render(id, 3, buf.as_mut_ptr()), 1);
         // Markazdagi nuqta — to'liq qizil (RGBA).
