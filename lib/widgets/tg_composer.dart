@@ -28,6 +28,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:lottie/lottie.dart';
 
 import '../services/tg_media.dart';
 import 'emoji_text.dart';
@@ -189,11 +190,23 @@ class TgInputArea extends StatefulWidget {
 }
 
 class _TgInputAreaState extends State<TgInputArea>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, TickerProviderStateMixin {
   bool _open = false;
+
+  /// Panel bir marta quriladi va keyin yopiq holda ham saqlanadi —
+  /// qayta ochilishi darhol.
+  bool _built = false;
 
   /// Oxirgi ko'rilgan klaviatura balandligi — panel xuddi shunday.
   static double _kb = 300;
+
+  /// Panelning chiqishi (Telegram: 250 ms, `CubicBezierInterpolator.DEFAULT`).
+  late final AnimationController _show = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 250));
+
+  /// 🙂 <-> ⌨ belgisi (`smile_to_keyboard.json` / `keyboard_to_smile.json`).
+  late final AnimationController _icon =
+      AnimationController(vsync: this, value: 1);
 
   @override
   void initState() {
@@ -206,6 +219,8 @@ class _TgInputAreaState extends State<TgInputArea>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     widget.focus.removeListener(_onFocus);
+    _show.dispose();
+    _icon.dispose();
     super.dispose();
   }
 
@@ -216,56 +231,120 @@ class _TgInputAreaState extends State<TgInputArea>
     if (h > 150) _kb = h;
   }
 
+  bool get _keyboardUp {
+    final view = View.of(context);
+    return view.viewInsets.bottom / view.devicePixelRatio > 100;
+  }
+
+  void _setOpen(bool v, {bool instant = false}) {
+    if (v == _open) return;
+    setState(() {
+      _open = v;
+      if (v) _built = true;
+    });
+    _icon.value = 0;
+    if (_icon.duration != null) _icon.forward();
+    if (instant) {
+      _show.value = v ? 1 : 0;
+    } else if (v) {
+      _show.forward();
+    } else {
+      _show.reverse();
+    }
+  }
+
   void _onFocus() {
-    // Maydonga bosildi — klaviatura chiqadi, panel yopiladi.
-    if (widget.focus.hasFocus && _open) setState(() => _open = false);
+    // Maydonga bosildi — klaviatura chiqadi va panel O'RNIDA turadi
+    // (bir zumda almashadi, pastga tushib-chiqmaydi).
+    if (widget.focus.hasFocus && _open) _setOpen(false, instant: true);
   }
 
   void _toggle() {
     if (_open) {
-      setState(() => _open = false);
       widget.focus.requestFocus();
+      _setOpen(false, instant: true);
     } else {
+      // Klaviatura ochiq bo'lsa — panel uning o'rnini darhol egallaydi;
+      // yopiq bo'lsa — pastdan chiqadi.
+      final instant = _keyboardUp;
       widget.focus.unfocus();
       SystemChannels.textInput.invokeMethod('TextInput.hide');
-      setState(() => _open = true);
+      _setOpen(true, instant: instant);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final button = IconButton(
-      onPressed: _toggle,
-      visualDensity: VisualDensity.compact,
-      icon: Icon(
-        _open ? Icons.keyboard_outlined : Icons.emoji_emotions_outlined,
-        color: Colors.white.withValues(alpha: 0.55),
-        size: 24,
+    final button = GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: _toggle,
+      child: SizedBox(
+        width: 44,
+        height: 44,
+        child: Center(
+          child: SizedBox(
+            width: 26,
+            height: 26,
+            child: ColorFiltered(
+              colorFilter: ColorFilter.mode(
+                  Colors.white.withValues(alpha: 0.55), BlendMode.srcIn),
+              child: Lottie.asset(
+                _open
+                    ? 'assets/tg_anim/smile_to_keyboard.json'
+                    : 'assets/tg_anim/keyboard_to_smile.json',
+                key: ValueKey(_open),
+                controller: _icon,
+                onLoaded: (c) {
+                  _icon.duration = c.duration;
+                  if (_icon.value < 1 && !_icon.isAnimating) _icon.forward();
+                },
+              ),
+            ),
+          ),
+        ),
       ),
     );
+    final h = _kb.clamp(240.0, 420.0);
     return PopScope(
       canPop: !_open,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop && _open) setState(() => _open = false);
+        if (!didPop && _open) _setOpen(false);
       },
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           widget.row(context, button),
-          AnimatedSize(
-            duration: const Duration(milliseconds: 180),
-            curve: Curves.easeOut,
-            child: _open
-                ? SizedBox(
-                    height: _kb.clamp(240.0, 420.0),
-                    child: TgMediaPanel(
-                      controller: widget.controller,
-                      onSticker: widget.onSticker,
-                      onGif: widget.onGif,
-                    ),
-                  )
-                : const SizedBox(width: double.infinity),
-          ),
+          if (_built)
+            // Panel o'lchami O'ZGARMAYDI (qayta joylanmaydi) — faqat
+            // ko'rinadigan qismi ochiladi: har kadrda yuzlab katakni
+            // qayta joylash panelni qotirardi.
+            AnimatedBuilder(
+              animation: _show,
+              builder: (context, child) {
+                final t = Curves.easeOutCubic.transform(_show.value);
+                // Yopiq panel daraxtdan CHIQMAYDI (holati saqlanadi,
+                // qayta ochilishi darhol) — faqat ko'rinmaydi.
+                if (t <= 0) return Offstage(child: child);
+                return ClipRect(
+                  child: Align(
+                    alignment: Alignment.topCenter,
+                    heightFactor: t,
+                    child: child,
+                  ),
+                );
+              },
+              child: TickerMode(
+                enabled: _open,
+                child: SizedBox(
+                  height: h,
+                  child: TgMediaPanel(
+                    controller: widget.controller,
+                    onSticker: widget.onSticker,
+                    onGif: widget.onGif,
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -335,7 +414,12 @@ class _TgMediaPanelState extends State<TgMediaPanel> {
       color: _Pal.bg,
       child: Stack(
         children: [
-          PageView(
+          // Telegram hisobi almashsa sahifalar qaytadan quriladi (yangi
+          // hisobning to'plamlari olinadi — `TgMedia.resetAccount`).
+          ValueListenableBuilder<int>(
+            valueListenable: TgMedia.instance.accountChanged,
+            builder: (context, acc, _) => PageView(
+            key: ValueKey(acc),
             controller: _pages,
             onPageChanged: (i) => setState(() => _tab = _lastTab = i),
             // Ko'rinmayotgan sahifadagi animatsiyalar to'xtaydi.
@@ -349,6 +433,7 @@ class _TgMediaPanelState extends State<TgMediaPanel> {
                   enabled: _tab == 2,
                   child: _StickerPage(onSticker: widget.onSticker)),
             ],
+          ),
           ),
           // ── Yuklashda xato bo'lsa — sababi (bosilsa yopiladi) ──
           Positioned(
@@ -988,6 +1073,9 @@ class _SectionsState extends State<_Sections> {
       final cell = _cellSize;
       return CustomScrollView(
         controller: _scroll,
+        // Faqat ekrandagi (va uning chetidagi bir qator) kataklar
+        // quriladi va yuklanadi — ko'rinmagani yuklanmaydi.
+        cacheExtent: cell,
         slivers: [
           if (widget.top != null)
             SliverToBoxAdapter(
@@ -1036,6 +1124,7 @@ class _Grid extends StatelessWidget {
       final cols = math.max(minColumns, (w / minCell).floor());
       final size = w / cols;
       return GridView.builder(
+        cacheExtent: size,
         padding: const EdgeInsets.fromLTRB(5, 0, 5, 64),
         gridDelegate:
             SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: cols),
@@ -1350,7 +1439,7 @@ class _SetIcon extends StatelessWidget {
             ? docs.first
             : docs.firstWhere((x) => x.id == set.thumbDoc,
                 orElse: () => docs.first);
-        return TgStickerView(doc: d, size: size, still: true);
+        return TgStickerView(doc: d, size: size, still: true, frozen: true);
       },
     );
   }
@@ -1689,6 +1778,7 @@ class _GifPageState extends State<_GifPage>
                     final rows = _justify(items, box.maxWidth, 110);
                     return ListView.builder(
                       controller: _scroll,
+                      cacheExtent: 110,
                       padding: const EdgeInsets.only(bottom: 64),
                       itemCount: rows.length,
                       itemBuilder: (_, r) {

@@ -48,6 +48,7 @@ import 'app_build.dart';
 import 'auth_service.dart';
 import 'native_pool.dart';
 import 'rust_bridge.dart';
+import 'tg_media.dart';
 
 typedef _InitC = Pointer<Utf8> Function(Pointer<Utf8>, Int32, Pointer<Utf8>);
 typedef _InitDart = Pointer<Utf8> Function(Pointer<Utf8>, int, Pointer<Utf8>);
@@ -164,9 +165,14 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
   bool _configured = false;
   bool _authorized = false;
 
-  /// Shu seansda Telegram'da YO'Q deb bilingan fayllar (qayta-qayta
-  /// so'ralmasin).
-  final Set<String> _missing = {};
+  /// Telegram'da YO'Q deb bilingan fayllar (qayta-qayta so'ralmasin).
+  ///
+  /// TOPILGAN XATO: GIF/fayl yuborilgach xabar DARHOL chiqadi, bot esa
+  /// uni kanalga bir-ikki soniyadan keyin ko'chiradi. Shu orada kelgan
+  /// birinchi so'rov "yo'q" javobini olib, fayl seans oxirigacha
+  /// "yo'q" bo'lib qolardi (izohdagi GIF umuman ochilmasdi). Endi
+  /// belgi 20 soniyadan keyin o'zi o'chadi.
+  final _missing = _ExpiringSet(const Duration(seconds: 20));
 
   bool get serverEnabled => _serverEnabled;
 
@@ -879,6 +885,7 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
   void _afterLogin() {
     _authorized = true;
     _missing.clear();
+    unawaited(TgMedia.instance.resetAccount());
     notifyListeners();
     // Oldingi (uzilgan) sessiya davrida bot chatida qolgan nusxalar
     // endi yangi sessiya bilan o'chiriladi.
@@ -894,6 +901,7 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
     });
     _authorized = false;
     _missing.clear();
+    unawaited(TgMedia.instance.resetAccount());
     notifyListeners();
   }
 
@@ -1086,4 +1094,27 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
     if (name.isEmpty) return;
     _route(name, 0);
   }
+}
+
+
+/// Belgilari [ttl] dan keyin o'zi o'chadigan to'plam.
+class _ExpiringSet {
+  final Duration ttl;
+  final Map<String, DateTime> _at = {};
+  _ExpiringSet(this.ttl);
+
+  void add(String k) => _at[k] = DateTime.now();
+
+  bool contains(String k) {
+    final t = _at[k];
+    if (t == null) return false;
+    if (DateTime.now().difference(t) > ttl) {
+      _at.remove(k);
+      return false;
+    }
+    return true;
+  }
+
+  void remove(String k) => _at.remove(k);
+  void clear() => _at.clear();
 }

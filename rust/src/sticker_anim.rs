@@ -224,6 +224,10 @@ fn open_webm(bytes: &[u8]) -> Option<Kind> {
 /// Faylni ochadi: `.tgs`/Lottie yoki `.webm`. Qaytadi: tutqich (0 — xato).
 #[no_mangle]
 pub extern "C" fn rust_anim_open(path_ptr: *const c_char, w: i32, h: i32) -> i64 {
+    std::panic::catch_unwind(|| open_anim(path_ptr, w, h)).unwrap_or(0)
+}
+
+fn open_anim(path_ptr: *const c_char, w: i32, h: i32) -> i64 {
     let Some(path) = (unsafe { cstr_to_str(path_ptr) }) else { return 0 };
     let Ok(bytes) = std::fs::read(path) else { return 0 };
     let kind = if bytes.starts_with(&[0x1A, 0x45, 0xDF, 0xA3]) {
@@ -249,7 +253,7 @@ fn get(id: i64) -> Option<Arc<Mutex<Anim>>> {
 #[no_mangle]
 pub extern "C" fn rust_anim_frames(id: i64) -> i32 {
     let Some(a) = get(id) else { return 0 };
-    let a = a.lock().unwrap();
+    let Ok(a) = a.lock() else { return 0 };
     match &a.kind {
         Kind::Lottie { frames, .. } => *frames as i32,
         Kind::Webm { frames, .. } => frames.len() as i32,
@@ -260,7 +264,7 @@ pub extern "C" fn rust_anim_frames(id: i64) -> i32 {
 #[no_mangle]
 pub extern "C" fn rust_anim_fps(id: i64) -> f64 {
     let Some(a) = get(id) else { return 0.0 };
-    let a = a.lock().unwrap();
+    let Ok(a) = a.lock() else { return 0.0 };
     match &a.kind {
         Kind::Lottie { fps, .. } | Kind::Webm { fps, .. } => *fps,
     }
@@ -271,8 +275,14 @@ pub extern "C" fn rust_anim_fps(id: i64) -> f64 {
 /// -1 — xato.
 #[no_mangle]
 pub extern "C" fn rust_anim_render(id: i64, frame: i32, out: *mut u8) -> i32 {
+    // Buzuq stiker faylida chizgich `panic` qilsa — ilova yopilmaydi,
+    // shu stiker birinchi kadrida qoladi.
+    std::panic::catch_unwind(|| render_frame(id, frame, out)).unwrap_or(-1)
+}
+
+fn render_frame(id: i64, frame: i32, out: *mut u8) -> i32 {
     let Some(a) = get(id) else { return -1 };
-    let mut a = a.lock().unwrap();
+    let Ok(mut a) = a.lock() else { return -1 };
     let (w, h) = (a.w, a.h);
     if out.is_null() {
         return -1;

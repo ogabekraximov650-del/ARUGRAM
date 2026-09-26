@@ -39,7 +39,7 @@ class NativePool {
   /// yuklanish to'plamlar ro'yxati so'rovini navbatda ushlab turmasin
   /// (panel "aylanib" qolardi).
   static final files = NativePool._(3, 'aru-files');
-  static final render = NativePool._(2, 'aru-render');
+  static final render = NativePool._(3, 'aru-render');
 
   final List<_Worker> _workers = [];
   int _next = 0;

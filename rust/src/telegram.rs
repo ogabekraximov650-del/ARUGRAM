@@ -505,6 +505,7 @@ fn connect(t: &Tg) -> Option<Client> {
 /// Hisobga bog'liq xotiradagi narsalarni tozalaydi (boshqa hisob
 /// bilan kirilganda eskisi ishlatilib qolmasin).
 fn forget_account_state(t: &Tg) {
+    forget_media_lists(t);
     if let Ok(mut d) = t.docs.lock() {
         d.clear();
     }
@@ -514,6 +515,14 @@ fn forget_account_state(t: &Tg) {
     // Boshqa DC larga ko'chirilgan avtorizatsiya ESKI hisobniki.
     t.rt.block_on(async { t.auth_dcs.lock().await.clear() });
     forget_peers(t);
+}
+
+/// Stiker/emoji to'plamlari ro'yxati, saqlangan GIF'lar, premium
+/// holati — HISOBGA tegishli (`tg/media/meta`). Hisob almashsa
+/// o'chiriladi, aks holda yangi hisobga eskisining to'plamlari
+/// ko'rinardi. Fayllarning o'zi (hujjat ID bo'yicha) qoladi.
+fn forget_media_lists(t: &Tg) {
+    let _ = fs::remove_dir_all(t.dir.join("media").join("meta"));
 }
 
 /// Hisobga bog'liq "manzillar" (tarmoqsiz, istalgan joydan chaqirsa
@@ -1416,7 +1425,20 @@ where
 {
     let Some(t) = tg() else { return err_json("Telegram ishga tushmagan") };
     let Some(client) = connect(t) else { return err_json("api_id berilmagan") };
-    match f(t, client) {
+    // Ichkaridagi kutilmagan `panic` ilovani yopmasin — xato bo'lib
+    // qaytadi (sababi `last_crash.txt` ga ham yoziladi).
+    let r = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(t, client))) {
+        Ok(r) => r,
+        Err(p) => {
+            let why = p
+                .downcast_ref::<&str>()
+                .map(|s| s.to_string())
+                .or_else(|| p.downcast_ref::<String>().cloned())
+                .unwrap_or_default();
+            Err(format!("ichki xato: {why}"))
+        }
+    };
+    match r {
         Ok(s) => s.into(),
         Err(e) => {
             check_dead(t, &e);
@@ -1432,6 +1454,7 @@ where
 
 fn after_login(t: &Tg) -> String {
     forget_peers(t);
+    forget_media_lists(t);
     if let Ok(mut d) = t.auth_dcs.try_lock() {
         d.clear();
     }

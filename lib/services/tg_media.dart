@@ -137,6 +137,31 @@ class TgMedia {
     if (e != null) lastError.value = '$e';
   }
 
+  /// Telegram hisobi almashdi (chiqish / boshqa hisob bilan kirish).
+  ///
+  /// TOPILGAN XATO: to'plamlar ro'yxati, premium holati va "yaqinda
+  /// ishlatilgan"lar xotirada (va Rust'da `tg/media/meta` da) HISOBGA
+  /// bog'lanmagan holda turardi — yangi hisobga eski hisobning
+  /// to'plamlari ko'rinardi. Fayllarning o'zi (stiker rasmlari) hujjat
+  /// ID bo'yicha — ular hisobga bog'liq emas, qoladi.
+  Future<void> resetAccount() async {
+    _premium = null;
+    _stickers = null;
+    _emojiSets = null;
+    _sets.clear();
+    _emoji.clear();
+    _recentEmoji = null;
+    _recentCustom = null;
+    try {
+      final f = await _recentFile();
+      if (await f.exists()) await f.delete();
+    } catch (_) {}
+    accountChanged.value++;
+  }
+
+  /// Hisob almashganda oshadi — ochiq panel ro'yxatlarni qayta oladi.
+  final ValueNotifier<int> accountChanged = ValueNotifier(0);
+
   // ── PREMIUM ──────────────────────────────────────────────────
   bool? _premium;
   Future<bool> premium() async {

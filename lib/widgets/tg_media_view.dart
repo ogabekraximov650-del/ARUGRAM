@@ -11,6 +11,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:path_provider/path_provider.dart';
@@ -22,16 +23,28 @@ import '../services/telegram_service.dart';
 import '../services/tg_media.dart';
 
 /// Stiker yoki maxsus emoji.
+///
+/// TALAB (foydalanuvchi): "premium emojining o'rniga oddiy emoji
+/// ko'rsatilmasin — faqat premium emojining o'zi yuklab olingach
+/// ko'rsatilsin; GIF va stiker ham shunday". Ya'ni yuklanguncha joy
+/// BO'SH (xira doira) turadi, zaxira emoji chizilmaydi.
 class TgStickerView extends StatelessWidget {
   final TgDoc doc;
   final double size;
 
-  /// Panelda (Telegram'dagidek): kichikroq o'lchamda, kadrlar
-  /// xotirada saqlanib, cheklangan sonda harakatlanadi.
+  /// Panelda (Telegram'dagidek): kichikroq o'lchamda, 30 kadr/s.
   final bool still;
 
-  const TgStickerView(
-      {super.key, required this.doc, required this.size, this.still = false});
+  /// Faqat birinchi kadr (panel tepasidagi to'plam belgilari).
+  final bool frozen;
+
+  const TgStickerView({
+    super.key,
+    required this.doc,
+    required this.size,
+    this.still = false,
+    this.frozen = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -39,46 +52,106 @@ class TgStickerView extends StatelessWidget {
     return SizedBox(
       width: size,
       height: size,
-      child: FutureBuilder<String?>(
-        future: TgMedia.instance.file(doc, thumb: doc.kind == 'mp4' && doc.thumb),
-        builder: (context, snap) {
-          final path = snap.data;
-          if (path == null) return _Fallback(doc.emoji, size);
-          if (animated) {
-            return TgAnimView(
-              path: path,
-              size: size,
-              panel: still,
-              fallback: _Fallback(doc.emoji, size),
+      child: _Deferred(
+        key: ValueKey('${doc.id}/${doc.kind}'),
+        builder: (context) => FutureBuilder<String?>(
+          future:
+              TgMedia.instance.file(doc, thumb: doc.kind == 'mp4' && doc.thumb),
+          builder: (context, snap) {
+            final path = snap.data;
+            if (path == null) return _Placeholder(size);
+            if (animated) {
+              return TgAnimView(
+                key: ValueKey(path),
+                path: path,
+                size: size,
+                panel: still,
+                frozen: frozen,
+                fallback: _Placeholder(size),
+              );
+            }
+            final px = (size * MediaQuery.devicePixelRatioOf(context)).round();
+            return Image.file(
+              File(path),
+              width: size,
+              height: size,
+              // Asl 512px emas — ko'rinadigan o'lchamda ochiladi.
+              cacheWidth: px,
+              fit: BoxFit.contain,
+              gaplessPlayback: true,
+              frameBuilder: (context, child, frame, sync) => AnimatedOpacity(
+                opacity: frame == null ? 0 : 1,
+                duration: const Duration(milliseconds: 150),
+                child: child,
+              ),
+              errorBuilder: (_, __, ___) => _Placeholder(size),
             );
-          }
-          final px = (size * MediaQuery.devicePixelRatioOf(context)).round();
-          return Image.file(
-            File(path),
-            width: size,
-            height: size,
-            // Asl 512px emas — ko'rinadigan o'lchamda ochiladi.
-            cacheWidth: px,
-            fit: BoxFit.contain,
-            gaplessPlayback: true,
-            errorBuilder: (_, __, ___) => _Fallback(doc.emoji, size),
-          );
-        },
+          },
+        ),
       ),
     );
   }
 }
 
-class _Fallback extends StatelessWidget {
-  final String emoji;
+/// Yuklanguncha: zaxira emoji EMAS, xira bo'sh joy.
+class _Placeholder extends StatelessWidget {
   final double size;
-  const _Fallback(this.emoji, this.size);
+  const _Placeholder(this.size);
 
   @override
   Widget build(BuildContext context) => Center(
-        child: Text(emoji,
-            style: TextStyle(fontSize: size * 0.6, height: 1)),
+        child: Container(
+          width: size * 0.62,
+          height: size * 0.62,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.05),
+            shape: BoxShape.circle,
+          ),
+        ),
       );
+}
+
+/// Ro'yxat TEZ surilayotganda yuklashni kechiktiradi
+/// (`Scrollable.recommendDeferredLoadingForContext`) — barmoq bilan
+/// "uchirilgan" ro'yxatdagi yuzlab stiker yuklanib o'tirmaydi, faqat
+/// to'xtagan joydagilari yuklanadi.
+class _Deferred extends StatefulWidget {
+  final WidgetBuilder builder;
+  const _Deferred({super.key, required this.builder});
+
+  @override
+  State<_Deferred> createState() => _DeferredState();
+}
+
+class _DeferredState extends State<_Deferred> {
+  bool _go = false;
+  Timer? _t;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_go) _check();
+  }
+
+  void _check() {
+    if (!mounted || _go) return;
+    if (Scrollable.recommendDeferredLoadingForContext(context)) {
+      _t?.cancel();
+      _t = Timer(const Duration(milliseconds: 120), _check);
+      return;
+    }
+    setState(() => _go = true);
+  }
+
+  @override
+  void dispose() {
+    _t?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      _go ? widget.builder(context) : const SizedBox.expand();
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -87,28 +160,34 @@ class _Fallback extends StatelessWidget {
 //
 // Telegram/Cherrygram (`RLottieDrawable`) kabi:
 //   * kadr FON isolate'ida chiziladi (`NativePool.render`), UI oqimi
-//     faqat tayyor rasmni ko'rsatadi — hech narsa qotmaydi;
+//     faqat tayyor rasmni ko'rsatadi;
 //   * bitta animatsiyaga bir vaqtda faqat BITTA so'rov: kadr
-//     ulgurmasa tashlab o'tiladi (ekran to'xtab qolmaydi);
-//   * birinchi aylanishda chizilgan kadrlar xotirada qoladi (hajmi
-//     kichik bo'lsa) — keyingi aylanishlar protsessorni ishlatmaydi;
-//   * panelda o'lcham kichikroq va bir vaqtda eng ko'pi
-//     [_panelSlots] ta stiker harakatlanadi, qolganlari birinchi kadrda
-//     turadi (joy bo'shashi bilan ular ham harakatlanadi).
+//     ulgurmasa tashlab o'tiladi;
+//   * panelda 30 kadr/s va kichikroq o'lcham;
+//   * FAQAT ko'rinadigan (TickerMode yoqilgan) animatsiya harakatlanadi;
+//     yashirin sahifadagisi Rust tutqichini ham, kadrlar keshini ham
+//     bo'shatadi (oxirgi kadr qoladi) — xotira to'lib ilova yopilmasin;
+//   * kadrlar keshi UMUMIY chegara bilan ([_cacheBudget]).
+//
+// TOPILGAN XATO: ilgari panelda "18 ta harakatlanish o'rni" bor edi va
+// ular yashirin sahifadagi (Emoji) to'plam kataklari va tepadagi
+// belgilar bilan band bo'lib qolardi — Stikerlar sahifasi umuman
+// harakatlanmasdi. Har animatsiya 3 MB gacha kadr saqlardi — ko'p
+// stiker ochilganda xotira tugardi.
 
 /// Birinchi kadrlar keshi — panel qayta ochilganda darhol ko'rinsin.
 final Map<String, ui.Image> _firstFrames = {};
-const _firstFramesMax = 300;
+const _firstFramesMax = 150;
 
-/// Panelda bir vaqtda harakatlanadigan stikerlar.
-const _panelSlots = 18;
-int _panelBusy = 0;
-final List<VoidCallback> _panelWaiters = [];
+/// Hamma animatsiyalarning kadrlar keshi uchun umumiy chegara.
+const _cacheBudget = 48 * 1024 * 1024;
+int _cacheUsed = 0;
 
 class TgAnimView extends StatefulWidget {
   final String path;
   final double size;
   final bool panel;
+  final bool frozen;
   final Widget fallback;
 
   const TgAnimView({
@@ -117,6 +196,7 @@ class TgAnimView extends StatefulWidget {
     required this.size,
     required this.fallback,
     this.panel = false,
+    this.frozen = false,
   });
 
   @override
@@ -127,23 +207,34 @@ class _TgAnimViewState extends State<TgAnimView>
     with SingleTickerProviderStateMixin {
   Ticker? _ticker;
   int _handle = 0;
+  bool _opening = false;
+  bool _failed = false;
   int _frames = 1;
   double _fps = 30;
   int _px = 0;
   ui.Image? _image;
   bool _busy = false;
   bool _dead = false;
-  bool _slot = false;
   int _shown = -1;
+  Duration _base = Duration.zero;
+  ValueListenable<TickerModeData>? _tickerMode;
+  bool _enabled = true;
 
-  /// Xotiradagi kadrlar (sig'sa).
+  /// Xotiradagi kadrlar (umumiy chegaraga sig'sa).
   List<ui.Image?>? _cache;
+  int _cacheBytes = 0;
 
   String get _key => '${widget.path}@$_px';
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    final tm = TickerMode.getValuesNotifier(context);
+    if (!identical(tm, _tickerMode)) {
+      _tickerMode?.removeListener(_onTickerMode);
+      _tickerMode = tm..addListener(_onTickerMode);
+      _enabled = tm.value.enabled;
+    }
     if (_px != 0) return;
     final dpr = MediaQuery.devicePixelRatioOf(context);
     _px = (widget.size * dpr)
@@ -152,56 +243,76 @@ class _TgAnimViewState extends State<TgAnimView>
         .toInt();
     final first = _firstFrames[_key];
     if (first != null) _image = first.clone();
-    _open();
+    if (_enabled || _image == null) _open();
+  }
+
+  void _onTickerMode() {
+    final on = _tickerMode?.value.enabled ?? true;
+    if (on == _enabled) return;
+    _enabled = on;
+    if (on) {
+      _open();
+    } else {
+      _release();
+    }
+  }
+
+  /// Yashirin: Rust tutqichi va kadrlar keshi bo'shaydi, oxirgi kadr
+  /// ekranda qoladi.
+  void _release() {
+    _ticker?.dispose();
+    _ticker = null;
+    if (_handle > 0) NativePool.render.animClose(_handle);
+    _handle = 0;
+    _dropCache();
+  }
+
+  void _dropCache() {
+    for (final i in _cache ?? const <ui.Image?>[]) {
+      i?.dispose();
+    }
+    _cache = null;
+    _cacheUsed -= _cacheBytes;
+    _cacheBytes = 0;
   }
 
   Future<void> _open() async {
+    if (_opening || _handle > 0 || _failed || _dead) return;
+    _opening = true;
     final r = await NativePool.render.animOpen(widget.path, _px, _px);
-    if (_dead) {
+    _opening = false;
+    if (_dead || !_enabled && _image != null) {
       if (r != null) NativePool.render.animClose(r.$1);
       return;
     }
     if (r == null) {
-      setState(() => _handle = -1);
+      setState(() => _failed = true);
       return;
     }
     _handle = r.$1;
     _frames = r.$2.clamp(1, 100000);
     _fps = r.$3 > 0 ? r.$3 : 30;
-    // Hamma kadr 3 MB dan oshmasa — xotirada saqlanadi.
-    if (_px * _px * 4 * _frames <= 3 * 1024 * 1024) {
+    final need = _px * _px * 4 * _frames;
+    if (_cacheUsed + need <= _cacheBudget) {
       _cache = List<ui.Image?>.filled(_frames, null);
+      _cacheBytes = need;
+      _cacheUsed += need;
     }
-    if (_image == null) await _render(0);
-    if (_dead) return;
-    if (_frames > 1) _wantPlay();
-  }
-
-  void _wantPlay() {
-    if (!widget.panel) return _play();
-    if (_panelBusy < _panelSlots) {
-      _panelBusy++;
-      _slot = true;
-      _play();
-    } else {
-      _panelWaiters.add(_onSlot);
+    if (_image == null || _shown < 0) await _render(0);
+    if (_dead || _handle <= 0) return;
+    if (_frames > 1 && !widget.frozen && _enabled) {
+      _ticker ??= createTicker(_tick)..start();
+      _base = Duration.zero;
     }
-  }
-
-  void _onSlot() {
-    if (_dead || _slot) return;
-    _panelBusy++;
-    _slot = true;
-    _play();
-  }
-
-  void _play() {
-    _ticker ??= createTicker(_tick)..start();
   }
 
   void _tick(Duration t) {
     if (_busy || _handle <= 0) return;
-    final f = ((t.inMicroseconds / 1e6) * _fps).floor() % _frames;
+    // Panelda 30 kadr/s (Telegram'dagi kichik stikerlar kabi).
+    final fps = widget.panel ? (_fps > 30 ? 30.0 : _fps) : _fps;
+    final step = _fps / fps;
+    final n = ((t - _base).inMicroseconds / 1e6 * fps).floor();
+    final f = ((n * step).floor()) % _frames;
     if (f == _shown) return;
     final cached = _cache?[f];
     if (cached != null) {
@@ -212,11 +323,12 @@ class _TgAnimViewState extends State<TgAnimView>
   }
 
   Future<void> _render(int f) async {
+    final h = _handle;
+    if (h <= 0) return;
     _busy = true;
-    final bytes = await NativePool.render.animFrame(_handle, f, _px, _px);
-    if (_dead || bytes == null) {
-      // Ko'rinmaydigan (yashirin) kadr — oldingisi qoladi, qayta
-      // so'ralmaydi (VP9 dekoderi boshidan boshlanib ketmasin).
+    final bytes = await NativePool.render.animFrame(h, f, _px, _px);
+    if (_dead || bytes == null || h != _handle) {
+      // Ko'rinmaydigan (yashirin) kadr — oldingisi qoladi.
       _shown = f;
       _busy = false;
       return;
@@ -238,7 +350,9 @@ class _TgAnimViewState extends State<TgAnimView>
       _firstFrames[_key] = img.clone();
     }
     final cache = _cache;
-    if (cache != null && cache[f] == null) cache[f] = img.clone();
+    if (cache != null && h == _handle && cache[f] == null) {
+      cache[f] = img.clone();
+    }
     _show(img, f);
   }
 
@@ -252,17 +366,9 @@ class _TgAnimViewState extends State<TgAnimView>
   @override
   void dispose() {
     _dead = true;
-    _ticker?.dispose();
-    if (_handle > 0) NativePool.render.animClose(_handle);
+    _tickerMode?.removeListener(_onTickerMode);
+    _release();
     _image?.dispose();
-    for (final i in _cache ?? const <ui.Image?>[]) {
-      i?.dispose();
-    }
-    _panelWaiters.remove(_onSlot);
-    if (_slot) {
-      _panelBusy--;
-      if (_panelWaiters.isNotEmpty) _panelWaiters.removeAt(0)();
-    }
     super.dispose();
   }
 
@@ -270,7 +376,7 @@ class _TgAnimViewState extends State<TgAnimView>
   Widget build(BuildContext context) {
     final img = _image;
     if (img == null) {
-      return _handle < 0 ? widget.fallback : const SizedBox.shrink();
+      return _failed ? widget.fallback : const SizedBox.shrink();
     }
     return RawImage(
       image: img,
@@ -290,7 +396,13 @@ class TgStickerRefView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // TOPILGAN XATO ("izohga boshqa stiker ketyapti"): ro'yxatga yangi
+    // izoh qo'shilganda eski katak boshqa izohga qayta ishlatilardi,
+    // `FutureBuilder` esa yangi javob kelguncha ESKI stikerni, ichidagi
+    // animatsiya esa fayl almashganini sezmay eski stikerni ko'rsatib
+    // qolardi. Endi kalit havolaga bog'langan — katak butunlay yangilanadi.
     return FutureBuilder<TgDoc?>(
+      key: ValueKey(ref),
       future: TgMedia.instance.stickerByRef(ref),
       builder: (context, snap) {
         final d = snap.data;
@@ -310,7 +422,7 @@ class TgStickerRefView extends StatelessWidget {
   }
 }
 
-/// Matn ichidagi maxsus emoji (topilmaguncha oddiy emoji).
+/// Matn ichidagi maxsus emoji (topilguncha bo'sh joy).
 class TgCustomEmojiView extends StatelessWidget {
   final String id;
   final String alt;
@@ -321,10 +433,12 @@ class TgCustomEmojiView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<TgDoc?>(
+      key: ValueKey(id),
       future: TgMedia.instance.customEmoji(id),
       builder: (context, snap) {
         final d = snap.data;
-        if (d == null) return _Fallback(alt, size * 1.2);
+        // Yuklanguncha zaxira emoji EMAS — bo'sh joy (foydalanuvchi talabi).
+        if (d == null) return SizedBox(width: size, height: size);
         return TgStickerView(doc: d, size: size);
       },
     );
@@ -361,24 +475,162 @@ String plainEmojiText(String text) =>
 //  GIF
 // ═══════════════════════════════════════════════════════════════
 
-/// Panel katagi: GIF'ning kichik rasmi.
-class TgGifThumb extends StatelessWidget {
+/// Panel katagi: GIF.
+///
+/// TALAB (foydalanuvchi): "GIF'lar to'liq yuklab olinmayapti". Ilgari
+/// panelda faqat kichik rasm (birinchi kadr) turardi. Endi Telegram'dagidek:
+/// avval kichik rasm, so'ng — katak EKRANDA turgan bo'lsa — GIF'ning
+/// o'zi yuklanadi va ovozsiz, takrorlanib o'ynaydi. Bir vaqtda eng
+/// ko'pi [_gifSlots] ta o'ynaydi (telefon video dekoderlari cheklangan),
+/// qolganlari kichik rasmda turadi; yashirin sahifada hammasi to'xtaydi.
+class TgGifThumb extends StatefulWidget {
   final TgDoc doc;
   const TgGifThumb({super.key, required this.doc});
 
   @override
+  State<TgGifThumb> createState() => _TgGifThumbState();
+}
+
+const _gifSlots = 4;
+int _gifBusy = 0;
+final List<VoidCallback> _gifWaiters = [];
+
+class _TgGifThumbState extends State<TgGifThumb> {
+  VideoPlayerController? _c;
+  bool _slot = false;
+  bool _dead = false;
+  ValueListenable<TickerModeData>? _tm;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final tm = TickerMode.getValuesNotifier(context);
+    if (!identical(tm, _tm)) {
+      _tm?.removeListener(_onTm);
+      _tm = tm..addListener(_onTm);
+    }
+    if (tm.value.enabled && !_slot) _want();
+  }
+
+  void _onTm() {
+    if (_tm?.value.enabled ?? false) {
+      _want();
+    } else {
+      _stop();
+    }
+  }
+
+  void _want() {
+    if (_slot || _dead) return;
+    if (_gifBusy < _gifSlots) {
+      _gifBusy++;
+      _slot = true;
+      _play();
+    } else if (!_gifWaiters.contains(_onSlot)) {
+      _gifWaiters.add(_onSlot);
+    }
+  }
+
+  void _onSlot() {
+    if (_dead || _slot) return;
+    if (!(_tm?.value.enabled ?? true)) return;
+    _gifBusy++;
+    _slot = true;
+    _play();
+  }
+
+  void _freeSlot() {
+    _gifWaiters.remove(_onSlot);
+    if (!_slot) return;
+    _slot = false;
+    _gifBusy--;
+    while (_gifWaiters.isNotEmpty && _gifBusy < _gifSlots) {
+      _gifWaiters.removeAt(0)();
+    }
+  }
+
+  Future<void> _play() async {
+    // Tez surilayotgan ro'yxatda yuklanmaydi.
+    while (mounted && Scrollable.recommendDeferredLoadingForContext(context)) {
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+    }
+    if (!mounted || !_slot) return;
+    final path = await TgMedia.instance.file(widget.doc);
+    if (!mounted || !_slot || path == null) {
+      if (mounted) _freeSlot();
+      return;
+    }
+    final c = VideoPlayerController.file(File(path),
+        videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true));
+    try {
+      await c.initialize();
+      await c.setLooping(true);
+      await c.setVolume(0);
+      await c.play();
+    } catch (_) {
+      await c.dispose();
+      if (mounted) _freeSlot();
+      return;
+    }
+    if (!mounted || !_slot) {
+      await c.dispose();
+      return;
+    }
+    setState(() => _c = c);
+  }
+
+  void _stop() {
+    final c = _c;
+    _c = null;
+    c?.dispose();
+    _freeSlot();
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _dead = true;
+    _tm?.removeListener(_onTm);
+    _c?.dispose();
+    _c = null;
+    _freeSlot();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return FutureBuilder<String?>(
-      future: doc.thumb ? TgMedia.instance.file(doc, thumb: true) : null,
-      builder: (context, snap) {
-        final p = snap.data;
-        return Container(
-          color: Colors.white.withValues(alpha: 0.05),
-          child: p == null
-              ? null
-              : Image.file(File(p), fit: BoxFit.cover, gaplessPlayback: true),
-        );
-      },
+    final c = _c;
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    return Container(
+      color: Colors.white.withValues(alpha: 0.05),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (widget.doc.thumb)
+            FutureBuilder<String?>(
+              key: ValueKey(widget.doc.id),
+              future: TgMedia.instance.file(widget.doc, thumb: true),
+              builder: (context, snap) {
+                final p = snap.data;
+                if (p == null) return const SizedBox();
+                return Image.file(File(p),
+                    fit: BoxFit.cover,
+                    cacheWidth: (200 * dpr).round(),
+                    gaplessPlayback: true);
+              },
+            ),
+          if (c != null && c.value.isInitialized)
+            FittedBox(
+              fit: BoxFit.cover,
+              clipBehavior: Clip.hardEdge,
+              child: SizedBox(
+                width: c.value.size.width,
+                height: c.value.size.height,
+                child: VideoPlayer(c),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
@@ -438,10 +690,33 @@ class _TgGifMessageState extends State<TgGifMessage> {
     _open();
   }
 
+  int _tries = 0;
+
+  @override
+  void didUpdateWidget(TgGifMessage old) {
+    super.didUpdateWidget(old);
+    // Ro'yxatdagi katak boshqa xabarga qayta ishlatildi.
+    if (old.fileName != widget.fileName) {
+      _ctrl?.dispose();
+      _ctrl = null;
+      _failed = false;
+      _tries = 0;
+      _open();
+    }
+  }
+
   Future<void> _open() async {
-    final f = await tgChatFile(widget.fileName);
-    if (!mounted) return;
+    final name = widget.fileName;
+    final f = await tgChatFile(name);
+    if (!mounted || name != widget.fileName) return;
     if (f == null) {
+      // Yangi yuborilgan GIF'ni bot kanalga hali ko'chirmagan bo'lishi
+      // mumkin — bir necha marta qayta uriniladi.
+      if (_tries++ < 6) {
+        await Future<void>.delayed(Duration(seconds: 2 + _tries * 2));
+        if (mounted && name == widget.fileName) return _open();
+        return;
+      }
       setState(() => _failed = true);
       return;
     }

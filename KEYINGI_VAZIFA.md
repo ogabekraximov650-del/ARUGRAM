@@ -3275,3 +3275,32 @@ internet qaytganda ilova o'z hisobi bilan chat tarixini tozalasin".
   "0:03,45" taymer, yaltiroq "Bekor qilish uchun suring".
 * Pufakchalar (`tg_bubble.dart`) — `MessageDrawable` dumi, guruhlash,
   vaqt matn oxirida, kun ajratgichi.
+
+## Emoji/GIF/stiker paneli: silliqlik, xotira, xatolar (3-bosqich)
+
+* Stikerlar harakatlanmasdi: panelning 18 ta "o'rni" yashirin sahifa
+  (emoji to'plamlari, tepadagi belgilar) bilan band bo'lib qolardi.
+  Endi `TgAnimView` TickerMode'ga qaraydi: yashirin — Rust tutqichi va
+  kadrlar keshi bo'shaydi, ko'rinsa qayta ochiladi; kadrlar keshi
+  umumiy 48 MB chegara bilan; panelda 30 kadr/s; tepadagi to'plam
+  belgilari `frozen` (bitta kadr). `NativePool.render` — 3 ishchi.
+* Faqat ekrandagilar: `cacheExtent` bir katak, tez surilganda yuklash
+  kechiktiriladi (`_Deferred`, `recommendDeferredLoadingForContext`).
+* Premium emoji/stiker/GIF yuklanguncha zaxira emoji EMAS — bo'sh joy.
+* GIF paneli: kichik rasm, so'ng ko'rinayotgan GIF'ning o'zi o'ynaydi
+  (bir vaqtda 4 ta, `_gifSlots`).
+* Crash: Rust `panic = "unwind"` + `with_client`/`rust_anim_*` da
+  `catch_unwind` — ichki xato ilovani yopmaydi, xato bo'lib qaytadi.
+* "Boshqa stiker ketyapti": qayta ishlatilgan katak eski stikerni
+  ko'rsatardi — `TgStickerRefView`/`TgStickerView`/`TgAnimView` endi
+  kalit (key) bilan; `TgGifMessage` fayl almashganini sezadi.
+* Izohdagi GIF ochilmasdi: bot kanalga ko'chirguncha kelgan so'rov
+  faylni seans oxirigacha "yo'q" deb belgilardi — endi 20 s
+  (`_ExpiringSet`), `TgGifMessage` 6 marta qayta urinadi.
+* Hisob almashganda: `TgMedia.resetAccount` (xotiradagi ro'yxatlar,
+  "yaqinda"lar fayli) + Rust `forget_media_lists` (`tg/media/meta`);
+  panel sahifalari `accountChanged` bilan qayta quriladi.
+* Panel ochilishi: `AnimatedSize` o'rniga o'lchami o'zgarmaydigan
+  panel + `ClipRect/Align` (250 ms); klaviatura ochiq bo'lsa darhol
+  almashadi; yopilganda `Offstage` (holati saqlanadi); 🙂↔⌨ —
+  Telegram Lottie (`smile_to_keyboard.json`).
