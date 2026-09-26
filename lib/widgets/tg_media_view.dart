@@ -446,10 +446,9 @@ class _TgAnimViewState extends State<TgAnimView> {
       _wantN = 0;
       _AnimClock.instance.want(this, first: _image == null);
     }
-    // Kuchsiz telefonda panel (klaviatura) emojilari harakatlanmaydi —
-    // Telegram `LiteMode` (`FLAG_ANIMATED_EMOJI_KEYBOARD`) kabi.
-    final still = widget.frozen || (widget.panel && DevicePerf.low);
-    if (_frames > 1 && !still && _enabled) {
+    // TALAB (foydalanuvchi): "emojilar — ekranda ko'rinib turgan
+    // barchasi animatsiyalansin" (kuchsiz telefonda ham).
+    if (_frames > 1 && !widget.frozen && _enabled) {
       _AnimClock.instance.add(this);
     }
   }
@@ -687,7 +686,16 @@ String plainEmojiText(String text) =>
 /// qolganlari kichik rasmda turadi; yashirin sahifada hammasi to'xtaydi.
 class TgGifThumb extends StatefulWidget {
   final TgDoc doc;
-  const TgGifThumb({super.key, required this.doc});
+
+  /// `false` — faqat kichik rasm (panel: "GIF'lar qotib tursin, faqat
+  /// bosilganda ko'rish oynasida o'ynasin").
+  final bool play;
+
+  /// To'xtovsiz takrorlanadi (ko'rish oynasida).
+  final bool loop;
+
+  const TgGifThumb(
+      {super.key, required this.doc, this.play = true, this.loop = false});
 
   @override
   State<TgGifThumb> createState() => _TgGifThumbState();
@@ -716,12 +724,15 @@ class _TgGifThumbState extends State<TgGifThumb> {
       _tm?.removeListener(_onTm);
       _tm = tm..addListener(_onTm);
     }
-    if (tm.value.enabled && !_slot) _want();
+    if (tm.value.enabled && !_slot && _canPlay) _want();
   }
+
+  /// Kichik rasmi yo'q GIF panelda ham o'ynaydi (aks holda bo'sh katak).
+  bool get _canPlay => widget.play || !widget.doc.thumb;
 
   void _onTm() {
     if (_tm?.value.enabled ?? false) {
-      _want();
+      if (_canPlay) _want();
     } else {
       _stop();
     }
@@ -774,7 +785,7 @@ class _TgGifThumbState extends State<TgGifThumb> {
         videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true));
     try {
       await c.initialize();
-      await c.setLooping(false);
+      await c.setLooping(widget.loop);
       await c.setVolume(0);
       await c.play();
     } catch (_) {
@@ -788,7 +799,7 @@ class _TgGifThumbState extends State<TgGifThumb> {
     }
     setState(() {
       _c = c;
-      _every = _PlayEvery(c);
+      _every = widget.loop ? null : _PlayEvery(c);
     });
   }
 

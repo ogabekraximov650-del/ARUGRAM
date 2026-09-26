@@ -3421,3 +3421,15 @@ zaxira yo'llar (`thumbnailData`, birinchi kadr).
   yoki suhbat ochiq bo'lsa yuborilmaydi; ilovaga qaytishda `/auth/me`
   ko'pi 5 daqiqada, nuqta 20 soniyada bir; suhbatning uzoq kutishi
   ilova fonda to'xtaydi; GIF uchun `/api/tg/claim` so'ralmaydi.
+
+## Stiker/GIF ko'rish oynasi (Telegram `ContentPreviewViewer`)
+
+* Panelda stikerlar va GIF'lar harakatsiz (GIF — faqat kichik rasm,
+  `TgGifThumb(play: false)`).
+* Bir marta bosilganda — ko'rish oynasi (`tg_media_preview.dart`): fon
+  xiralashadi, markazda katta stiker (tepasida emojisi) yoki GIF — shu
+  yerda harakatlanadi (GIF to'xtovsiz); ostida "Stiker yuborish" /
+  "GIF yuborish"; bo'sh joyga bosilsa yopiladi.
+* Chat va izohlarga yuborilganlari avvalgidek harakatlanadi.
+* Panel emojilari — ekrandagi hammasi harakatlanadi (kuchsiz telefonda
+  ham).
