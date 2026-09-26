@@ -237,7 +237,14 @@ class FulutterApp extends StatelessWidget {
       theme: ThemeData(
         brightness: Brightness.dark,
         // Emoji — telefonniki emas, Telegram'niki (`emoji_text.dart`).
-        fontFamilyFallback: const [kTgEmojiFont],
+        //
+        // TOPILGAN XATO: ro'yxatda faqat `TgEmoji` bo'lganda, telefonda
+        // "Roboto" nomli shrift topilmasa (Xiaomi va b.) Flutter HAMMA
+        // matnni birinchi topgan shrift — `TgEmoji` bilan chizardi:
+        // raqamlar yo'qolib ("ID:", "15:39" -> ":"), bo'shliqlar keng
+        // bo'lib qolgan edi. Endi avval telefonning o'z shrifti
+        // (`sans-serif`), emoji esa (unda yo'q) — Telegram shriftidan.
+        fontFamilyFallback: const ['sans-serif', kTgEmojiFont],
         scaffoldBackgroundColor: Colors.transparent,
         colorScheme: ColorScheme.fromSeed(
           seedColor: AppColors.accent,

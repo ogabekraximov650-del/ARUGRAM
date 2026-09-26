@@ -3304,3 +3304,13 @@ internet qaytganda ilova o'z hisobi bilan chat tarixini tozalasin".
   panel + `ClipRect/Align` (250 ms); klaviatura ochiq bo'lsa darhol
   almashadi; yopilganda `Offstage` (holati saqlanadi); 🙂↔⌨ —
   Telegram Lottie (`smile_to_keyboard.json`).
+
+## Tuzatish: matnlar g'alati (raqamlar yo'q, bo'shliqlar keng)
+
+Sabab — `TgEmoji` shrifti: telefonda "Roboto" topilmagach Flutter
+hamma matnni ro'yxatdagi birinchi shrift (`TgEmoji`) bilan chizdi, unda
+esa raqam va bo'shliq glifi bo'sh/keng edi. Tuzatish: shrift `cmap`
+idan ASCII va boshqa oddiy belgilar olib tashlandi
+(`tool/tg_emoji/README.md`), `fontFamilyFallback` =
+`['sans-serif', 'TgEmoji']`. Galereyada video kichik rasmi chiqmasa
+zaxira yo'llar (`thumbnailData`, birinchi kadr).

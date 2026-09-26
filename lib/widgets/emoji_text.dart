@@ -176,8 +176,11 @@ List<TextSpan>? emojiSpans(String text, TextStyle style) {
 const String kTgEmojiFont = 'TgEmoji';
 
 /// Emoji bo'lagi uchun uslub: Telegram shrifti birinchi.
-TextStyle tgEmojiStyle(TextStyle style) =>
-    style.copyWith(fontFamily: kTgEmojiFont);
+TextStyle tgEmojiStyle(TextStyle style) => style.copyWith(
+      fontFamily: kTgEmojiFont,
+      // Shriftda yo'q belgi (masalan `1⃣` dagi raqam) — telefonniki.
+      fontFamilyFallback: const ['sans-serif'],
+    );
 
 /// Yozish maydoni uchun: emoji bo'laklari Telegram shriftida, qolgani
 /// o'zgarmaydi. Emoji bo'lmasa `null`.

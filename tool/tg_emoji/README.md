@@ -20,3 +20,9 @@ python3 ne/third_party/color_emoji/emoji_builder.py -S -V t.ttf out.ttf pngs/emo
 add_vs_cmap.py -vs 2640 2642 2695 --dstdir . -o fonts/TgEmoji.ttf out.ttf
 ```
 So'ng `name` jadvalidagi oila nomi `TgEmoji` qilib qo'yilgan (fontTools).
+
+**Muhim:** so'ng shrift `cmap` idan emoji bo'lmagan belgilar olib
+tashlanadi — `U+0000`, `U+000D`, bo'shliq, `#`, `*`, `0-9`, `©`, `®`,
+`U+20E3`. Aks holda telefonda asosiy shrift topilmaganda Flutter HAMMA
+matnni shu shrift bilan chizadi: raqamlar yo'qoladi, bo'shliqlar keng
+bo'ladi (2026-09 da aynan shunday bo'lgan).

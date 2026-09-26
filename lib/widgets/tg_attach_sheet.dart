@@ -1135,8 +1135,30 @@ class _AssetTileState extends State<_AssetTile> {
   @override
   void initState() {
     super.initState();
-    _thumb = _thumbs[widget.asset.id] ??= widget.asset
-        .thumbnailDataWithSize(const ThumbnailSize.square(300), quality: 85);
+    _thumb = _thumbs[widget.asset.id] ??= _load(widget.asset);
+  }
+
+  /// Ba'zi videolarda (skrinshotdagi qora kataklar) o'lchamli kichik
+  /// rasm chiqmaydi — shunda standart kichik rasm, u ham bo'lmasa
+  /// videoning birinchi kadri so'raladi.
+  static Future<Uint8List?> _load(AssetEntity e) async {
+    try {
+      final a = await e.thumbnailDataWithSize(const ThumbnailSize.square(300),
+          quality: 85);
+      if (a != null && a.isNotEmpty) return a;
+    } catch (_) {}
+    try {
+      final b = await e.thumbnailData;
+      if (b != null && b.isNotEmpty) return b;
+    } catch (_) {}
+    try {
+      return await e.thumbnailDataWithOption(ThumbnailOption(
+          size: const ThumbnailSize.square(300),
+          format: ThumbnailFormat.png,
+          frame: 1));
+    } catch (_) {
+      return null;
+    }
   }
 
   String _dur(int s) =>
