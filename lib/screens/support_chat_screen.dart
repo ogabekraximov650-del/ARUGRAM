@@ -42,6 +42,7 @@ import '../widgets/tg_composer.dart';
 import '../widgets/tg_media_view.dart';
 import '../widgets/tg_record_button.dart';
 import '../widgets/tg_attach_sheet.dart';
+import '../widgets/tg_round_recorder.dart';
 import 'package:open_filex/open_filex.dart';
 import '../widgets/emoji_text.dart';
 import 'package:video_player/video_player.dart';
@@ -163,6 +164,9 @@ class _SupportChatScreenState extends State<SupportChatScreen>
   /// Dumaloq video: old kamera.
   CameraController? _cam;
   bool _roundRec = false;
+
+  /// Oxirgi dumaloq video yuborildimi (yopilish animatsiyasi uchun).
+  bool _roundSent = false;
   Duration _recLen = Duration.zero;
   Timer? _recTimer;
   String? _recPath;
@@ -600,9 +604,18 @@ class _SupportChatScreenState extends State<SupportChatScreen>
 
   static const _roundMax = Duration(seconds: 60);
 
+  /// Dumaloq video yozish (Telegram `InstantCameraView` kabi): doira
+  /// barmoq bosilishi BILAN chiqadi, kamera esa uning ichida ochiladi.
   Future<bool> _startRound() async {
     if (_roundRec || _recording || _uploading) return false;
     await VoicePlayer.instance.stop();
+    HapticFeedback.lightImpact();
+    _recLen = Duration.zero;
+    setState(() {
+      _roundRec = true;
+      _roundSent = false;
+      _cam = null;
+    });
     try {
       final cams = await availableCameras();
       if (cams.isEmpty) throw 'kamera topilmadi';
@@ -612,17 +625,14 @@ class _SupportChatScreenState extends State<SupportChatScreen>
       final c = CameraController(cam, ResolutionPreset.medium,
           enableAudio: true);
       await c.initialize();
-      await c.startVideoRecording();
-      if (!mounted) {
+      // Kamera ochilguncha barmoq qo'yib yuborilgan (yoki bekor
+      // qilingan) — yozish boshlanmaydi.
+      if (!mounted || !_roundRec) {
         await c.dispose();
         return false;
       }
-      HapticFeedback.lightImpact();
-      _recLen = Duration.zero;
-      setState(() {
-        _cam = c;
-        _roundRec = true;
-      });
+      setState(() => _cam = c);
+      await c.startVideoRecording();
       _recTimer?.cancel();
       _recTimer = Timer.periodic(const Duration(milliseconds: 100), (_) {
         if (!mounted) return;
@@ -631,27 +641,55 @@ class _SupportChatScreenState extends State<SupportChatScreen>
       });
       return true;
     } catch (e) {
-      if (mounted) _snack('Kamera ochilmadi: $e');
+      if (mounted) {
+        setState(() {
+          _roundRec = false;
+          _cam = null;
+        });
+        _snack('Kamera ochilmadi: $e');
+      }
       return false;
     }
   }
 
-  Future<void> _stopRound({required bool send}) async {
+  /// Old va orqa kamera orasida almashtirish (yozish to'xtamaydi).
+  Future<void> _switchCamera() async {
     final c = _cam;
-    if (!_roundRec || c == null) return;
+    if (c == null) return;
+    try {
+      final cams = await availableCameras();
+      final now = c.description.lensDirection;
+      final other = cams.firstWhere((x) => x.lensDirection != now,
+          orElse: () => c.description);
+      if (other == c.description) return;
+      await c.setDescription(other);
+      if (mounted) setState(() {});
+    } catch (_) {
+      // Qurilma yozish paytida almashtirishni qo'llamaydi.
+    }
+  }
+
+  Future<void> _stopRound({required bool send}) async {
+    if (!_roundRec) return;
+    final c = _cam;
     _locked = false;
     _dragX = 0;
     _recTimer?.cancel();
     _recTimer = null;
     final len = _recLen;
+    // Doira yopilish animatsiyasi (yuborilsa — xabar tomon "uchadi").
     setState(() {
       _roundRec = false;
-      _cam = null;
+      _roundSent = send && len.inMilliseconds >= 1000;
     });
+    if (c == null) return;
     XFile? f;
     try {
-      f = await c.stopVideoRecording();
+      if (c.value.isRecordingVideo) f = await c.stopVideoRecording();
     } catch (_) {}
+    // Animatsiya tugaguncha kamera ko'rinib tursin.
+    await Future<void>.delayed(const Duration(milliseconds: 240));
+    if (mounted && identical(_cam, c)) setState(() => _cam = null);
     await c.dispose();
     if (f == null) return;
     final file = File(f.path);
@@ -800,8 +838,16 @@ class _SupportChatScreenState extends State<SupportChatScreen>
                   _composer(),
                 ],
               ),
-              // Dumaloq video yozilayotganda — kamera doirasi.
-              _roundOverlay(),
+              // Dumaloq video yozilayotganda — kamera doirasi
+              // (Telegram `InstantCameraView` kabi).
+              TgRoundOverlay(
+                camera: _cam,
+                active: _roundRec,
+                sent: _roundSent,
+                length: _recLen,
+                max: _roundMax,
+                onSwitchCamera: _switchCamera,
+              ),
             ],
           ),
         ),
@@ -1193,60 +1239,6 @@ class _SupportChatScreenState extends State<SupportChatScreen>
     );
   }
 
-  /// Dumaloq video yozilayotganda ekran o'rtasidagi old kamera.
-  Widget _roundOverlay() {
-    final c = _cam;
-    if (!_roundRec || c == null || !c.value.isInitialized) {
-      return const SizedBox.shrink();
-    }
-    final ps = c.value.previewSize;
-    final side = MediaQuery.sizeOf(context).width * 0.72;
-    final progress =
-        _recLen.inMilliseconds / _roundMax.inMilliseconds;
-    return Positioned.fill(
-      child: IgnorePointer(
-        child: Container(
-          color: Colors.black.withValues(alpha: 0.55),
-          alignment: const Alignment(0, -0.25),
-          child: SizedBox(
-            width: side + 12,
-            height: side + 12,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                SizedBox(
-                  width: side + 12,
-                  height: side + 12,
-                  child: CircularProgressIndicator(
-                    value: progress.clamp(0.0, 1.0),
-                    strokeWidth: 4,
-                    color: Colors.white,
-                    backgroundColor: Colors.white.withValues(alpha: 0.15),
-                  ),
-                ),
-                ClipOval(
-                  child: SizedBox(
-                    width: side,
-                    height: side,
-                    child: FittedBox(
-                      fit: BoxFit.cover,
-                      child: SizedBox(
-                        // Oldindan ko'rish o'lchami yotiq (landshaft)
-                        // beriladi — telefon tik turadi.
-                        width: ps?.height ?? side,
-                        height: ps?.width ?? side,
-                        child: CameraPreview(c),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
 }
 
 /// Yozish paytidagi qizil, miltillovchi nuqta.
@@ -2294,7 +2286,10 @@ class _RoundBubbleState extends State<_RoundBubble> {
   bool _sound = false;
   bool _failed = false;
 
-  static const double _size = 210;
+  /// Telegram'dagidek: ekran qisqa tomonining 60% i
+  /// (`roundMessageSize`).
+  double get _size =>
+      (MediaQuery.sizeOf(context).shortestSide * 0.6).clamp(160.0, 320.0);
 
   @override
   void initState() {

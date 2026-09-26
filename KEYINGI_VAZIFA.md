@@ -3168,3 +3168,19 @@ internet qaytganda ilova o'z hisobi bilan chat tarixini tozalasin".
   fayl mos ilova bilan ochiladi. Izoh birinchi rasm/videoga qo'shiladi.
 - Kamera va fayl tanlagichi keshga nusxalagan fayllar yuborilgach
   o'chiriladi. Galereyadagi asl faylga tegilmaydi.
+
+## Dumaloq video Telegram'dagidek (`tg_round_recorder.dart`)
+
+- Cherrygram'ning `InstantCameraView` qiymatlari asosida:
+  - chat ustida xiralashgan va qoraygan fon;
+  - doira ekran qisqa tomonining ~92% i;
+  - ochilishda doira 0.1 → 1 kattalashib, pastdan ko'tariladi;
+  - atrofida oq, 3 dp qalinlikdagi progress yoyi (60 s);
+  - doira ostida kamerani almashtirish tugmasi (`setDescription`,
+    yozish to'xtamaydi);
+  - yuborilganda doira kichrayib, chap pastga "uchadi".
+- Doira barmoq bosilishi bilan chiqadi, kamera uning ichida ochiladi.
+  Kamera ochilguncha barmoq qo'yib yuborilsa, yozuv osilib qolmaydi
+  (`TgRecordButton._pressed`).
+- Chatdagi dumaloq video ekran qisqa tomonining 60% i
+  (`roundMessageSize`).

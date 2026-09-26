@@ -64,6 +64,9 @@ class _TgRecordButtonState extends State<TgRecordButton> {
   TgRecMode _mode = _lastMode;
   Timer? _hold;
   bool _holding = false;
+
+  /// Barmoq hozir tugmada.
+  bool _pressed = false;
   Offset _start = Offset.zero;
 
   // Telegram Android (`ChatActivityEnterView`) qiymatlari:
@@ -86,11 +89,18 @@ class _TgRecordButtonState extends State<TgRecordButton> {
     if (widget.busy) return;
     if (widget.hasText || widget.locked) return; // bosish — `_up` da
     _start = e.position;
+    _pressed = true;
     _hold?.cancel();
     _hold = Timer(const Duration(milliseconds: 150), () async {
       _hold = null;
       final ok = await widget.onStart(_mode);
       if (!mounted) return;
+      // Yozish boshlanguncha (kamera ochilguncha) barmoq qo'yib
+      // yuborilgan — yozuv osilib qolmasin.
+      if (ok && !_pressed && !widget.locked) {
+        widget.onStop(false);
+        return;
+      }
       setState(() => _holding = ok);
     });
   }
@@ -111,6 +121,7 @@ class _TgRecordButtonState extends State<TgRecordButton> {
   }
 
   void _up(PointerUpEvent e) {
+    _pressed = false;
     if (widget.busy) return;
     if (widget.hasText) {
       widget.onSend();
@@ -138,6 +149,7 @@ class _TgRecordButtonState extends State<TgRecordButton> {
   }
 
   void _cancel(PointerCancelEvent e) {
+    _pressed = false;
     _hold?.cancel();
     _hold = null;
     if (_holding) {
