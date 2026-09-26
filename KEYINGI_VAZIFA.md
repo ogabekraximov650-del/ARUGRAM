@@ -3491,3 +3491,11 @@ zaxira yo'llar (`thumbnailData`, birinchi kadr).
 * LGPL: ffmpeg manbasi va litsenziyasi `third_party/ffmpeg` da; statik
   bog'langan — tarqatishda LGPL shartlariga e'tibor bering (o'zgartirilgan
   ffmpeg manbasi ochiq, foydalanuvchi qayta bog'lay olishi kerak).
+
+## Tizim tugmalari ortida qora panel yo'q
+
+* `MainActivity.onCreate`: navigatsiya/holat paneli shaffof,
+  `isNavigationBarContrastEnforced = false` (Android 10+ 3 tugmali
+  navigatsiya ortidagi qoramtir parda o'chadi), API 30+ da
+  `setDecorFitsSystemWindows(false)`; Dart'da ham
+  `systemNavigationBarContrastEnforced: false`.

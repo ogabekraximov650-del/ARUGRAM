@@ -45,6 +45,28 @@ import io.flutter.plugin.common.MethodChannel
 import java.io.ByteArrayOutputStream
 
 class MainActivity : FlutterActivity() {
+    // ── TIZIM TUGMALARI ORQASIDA QORA PANEL BO'LMASIN ─────────────
+    //
+    // TALAB (foydalanuvchi): "ilovaning pastida telefon tugmalari
+    // orqasida qora oyna bo'lmasin". Ilova tizim panellari ostigacha
+    // chiziladi (edge-to-edge) va Android 10+ ning 3 tugmali navigatsiya
+    // ortiga qo'yadigan qoramtir "kontrast" pardasi o'chiriladi — ortida
+    // ilovaning o'zi ko'rinadi.
+    override fun onCreate(savedInstanceState: android.os.Bundle?) {
+        super.onCreate(savedInstanceState)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            window.setDecorFitsSystemWindows(false)
+        }
+        @Suppress("DEPRECATION")
+        window.navigationBarColor = android.graphics.Color.TRANSPARENT
+        @Suppress("DEPRECATION")
+        window.statusBarColor = android.graphics.Color.TRANSPARENT
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.isNavigationBarContrastEnforced = false
+            window.isStatusBarContrastEnforced = false
+        }
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "aru/thumb")

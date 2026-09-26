@@ -78,6 +78,10 @@ Future<void> _main() async {
     systemNavigationBarDividerColor: Colors.transparent,
     systemNavigationBarIconBrightness: Brightness.light,
     statusBarIconBrightness: Brightness.light,
+    // 3 tugmali navigatsiya ortidagi qoramtir pardani o'chiradi — ortida
+    // ilovaning o'zi ko'rinadi (foydalanuvchi talabi).
+    systemNavigationBarContrastEnforced: false,
+    systemStatusBarContrastEnforced: false,
   ));
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
 
