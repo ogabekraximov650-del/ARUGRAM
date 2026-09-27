@@ -187,7 +187,7 @@ jobs:
       - name: Generate android folder (agar yo'q bo'lsa)
         run: |
           if [ ! -f "android/app/build.gradle" ]; then
-            flutter create --platforms=android --org uz.arugram .
+            flutter create --platforms=android --org uz.arumediatv .
           fi
 
       # Kompilyatsiya qilingan .so fayllarni Android loyihasiga joylash —
@@ -411,8 +411,9 @@ jobs:
           set -e
           MANIFEST="android/app/src/main/AndroidManifest.xml"
 
-          sed -i 's/android:label="[^"]*"/android:label="ARUGRAM"/' "$MANIFEST"
-          grep -q 'android:label="ARUGRAM"' "$MANIFEST" \
+          # TALAB (foydalanuvchi): ilova nomi — ARUmediaTV.
+          sed -i 's/android:label="[^"]*"/android:label="ARUmediaTV"/' "$MANIFEST"
+          grep -q 'android:label="ARUmediaTV"' "$MANIFEST" \
             || { echo "❌ Ilova nomi o'zgarmadi"; exit 1; }
 
           if ! grep -q 'android:roundIcon' "$MANIFEST"; then
@@ -421,7 +422,7 @@ jobs:
           grep -q 'android:roundIcon="@mipmap/ic_launcher_round"' "$MANIFEST" \
             || { echo "❌ roundIcon qo'shilmadi"; exit 1; }
 
-          echo "✅ Ilova nomi: ARUGRAM, yumaloq belgi ulandi"
+          echo "✅ Ilova nomi: ARUmediaTV, yumaloq belgi ulandi"
 
       # ── TOMOSHA TARIXI UCHUN KADR AJRATUVCHI ──────────────────
       #
@@ -430,23 +431,41 @@ jobs:
       # `MainActivity.kt` shablon sifatida repoda turadi
       # (`android-template/`) va shu yerda o'rniga ko'chiriladi.
       #
-      # Paket nomi yaratilgan fayldan O'QIB OLINADI — qo'lda
-      # yozilsa, `--org` o'zgargan kuni jimgina buzilardi.
+      # ── PAKET NOMI: uz.arumediatv.com ─────────────────────────
+      #
+      # TALAB (foydalanuvchi): "papka manzilini uz.arumediatv.com ga
+      # o'zgartir". `flutter create` paketni `--org` + loyiha nomidan
+      # (`soft`) yasaydi, shu sabab bu yerda aniq qo'yiladi:
+      # `applicationId`, `namespace` va `MainActivity` paketi (manifestdagi
+      # `.MainActivity` namespace'ga nisbatan topiladi — uchalasi bir xil
+      # bo'lishi shart).
+      #
+      # DIQQAT: paket nomi almashgani uchun Android buni YANGI ilova deb
+      # biladi — eski ARUGRAM ustiga yangilanmaydi, yonida alohida
+      # o'rnatiladi (eskisini o'chirish kerak).
       - name: Kadr ajratuvchini (MediaMetadataRetriever) joylashtirish
         run: |
-          MA=$(find android/app/src/main -name "MainActivity.kt" | head -1)
-          if [ -z "$MA" ]; then
+          set -e
+          PKG="uz.arumediatv.com"
+          OLD=$(find android/app/src/main -name "MainActivity.kt" | head -1)
+          if [ -z "$OLD" ]; then
             echo "❌ MainActivity.kt topilmadi"
             exit 1
           fi
-          PKG=$(grep -m1 '^package ' "$MA" | sed 's/^package //' | tr -d '\r;')
-          if [ -z "$PKG" ]; then
-            echo "❌ paket nomi aniqlanmadi"
-            exit 1
-          fi
-          sed "s/__PKG__/$PKG/" android-template/MainActivity.kt > "$MA"
-          echo "✅ Kadr ajratuvchi joylashtirildi (paket: $PKG)"
-          grep -n "aru/thumb" "$MA"
+          DIR="android/app/src/main/kotlin/$(echo "$PKG" | tr . /)"
+          mkdir -p "$DIR"
+          sed "s/__PKG__/$PKG/" android-template/MainActivity.kt > "$DIR/MainActivity.kt"
+          if [ "$OLD" != "$DIR/MainActivity.kt" ]; then rm -f "$OLD"; fi
+          for G in android/app/build.gradle android/app/build.gradle.kts; do
+            [ -f "$G" ] || continue
+            sed -i -E "s/(namespace[[:space:]]*=?[[:space:]]*)\"[^\"]*\"/\1\"$PKG\"/; s/(applicationId[[:space:]]*=?[[:space:]]*)\"[^\"]*\"/\1\"$PKG\"/" "$G"
+            grep -q "applicationId.*\"$PKG\"" "$G" || { echo "❌ applicationId o'zgarmadi ($G)"; exit 1; }
+            grep -q "namespace.*\"$PKG\"" "$G" || { echo "❌ namespace o'zgarmadi ($G)"; exit 1; }
+          done
+          [ "$(find android/app/src/main -name MainActivity.kt | wc -l)" = "1" ] \
+            || { echo "❌ MainActivity.kt bir nechta"; exit 1; }
+          echo "✅ Paket: $PKG, kadr ajratuvchi joylashtirildi"
+          grep -n "aru/thumb" "$DIR/MainActivity.kt"
 
       - name: Kotlin va compileSdk versiyalarini eng yangisiga moslash
         run: |
@@ -846,8 +865,8 @@ jobs:
           # 1) Ilova nomi
           LABEL=$("$AAPT" dump badging "$APK" | grep -m1 "^application-label:" || true)
           echo "$LABEL"
-          echo "$LABEL" | grep -q "'ARUGRAM'" \
-            || { echo "❌ XATO: ilova nomi ARUGRAM emas"; exit 1; }
+          echo "$LABEL" | grep -q "'ARUmediaTV'" \
+            || { echo "❌ XATO: ilova nomi ARUmediaTV emas"; exit 1; }
 
           # 2) Barcha PNG resurslar ochiladi
           TMP=$(mktemp -d)
@@ -1060,7 +1079,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
-          name: ARUGRAM (build ${{ github.run_number }})
+          name: ARUmediaTV (build ${{ github.run_number }})
           body: |
             Telefonga to'g'ridan-to'g'ri o'rnatish uchun `.apk`
             faylini yuklab oling (ZIP emas).

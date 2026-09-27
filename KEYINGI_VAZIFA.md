@@ -3691,3 +3691,17 @@ ketyapti". "Actions'ni qo'lda ishga tushiraman, avto ishga tushmasin".
   (alohida sahifa, istalgan joyga yoki "orqaga" bosilsa yopiladi).
 - `encode.yml`: faqat `workflow_dispatch`; worker workflow'ni
   chaqirmaydi (`GH_TOKEN`/`ENCODE_GH_TOKEN` kerak emas).
+
+## Ilova nomi ARUmediaTV, paket uz.arumediatv.com (2026-09)
+
+TALAB: "Ilova nomini ARUmediaTV ga o'zgartir, papka manzilini
+uz.arumediatv.com ga o'zgartir".
+
+- `build-flutter-apk.yml`: manifest `android:label="ARUmediaTV"` (va
+  tekshiruvi), Release nomi; `flutter create --org uz.arumediatv`,
+  so'ng `applicationId` va `namespace` aniq `uz.arumediatv.com`,
+  `MainActivity.kt` shu paketga (`kotlin/uz/arumediatv/com/`) ko'chiriladi.
+- `main.dart`: `MaterialApp.title` — ARUmediaTV.
+- DIQQAT: paket nomi almashdi — Android buni yangi ilova deb biladi,
+  eski ARUGRAM ustiga yangilanmaydi (eskisini o'chirib o'rnatish kerak).
+  APK fayl nomlari (`arugram-...-build-N.apk`) o'zgarmadi.
