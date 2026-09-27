@@ -86,40 +86,52 @@ jobs:
         if: steps.peek.outputs.pending != '0'
         run: pip install --no-cache-dir -r tool/encode/requirements.txt
 
-      # TOPILGAN XATO: "base64: invalid input" — secret'ga nusxalanganda
-      # qiymat ichiga bo'sh joy / qator oralig'i tushib qolgan. Endi
-      # base64 bo'lmagan belgilar olib tashlanadi va natija haqiqiy
-      # SQLite (Pyrogram sessiyasi) ekani tekshiriladi.
+      # ── SESSIYA ──────────────────────────────────────────────
+      #
+      # Asosiy yo'l: repo'dagi `tool/encode/session.enc` — sessiya
+      # `ENCODE_TOKEN` bilan shifrlangan (AES-256-CBC, PBKDF2 200 000
+      # takror). Kalitsiz ochib bo'lmaydi. Secret'larga uzun base64'ni
+      # nusxalashda ortiqcha matn tushib qolardi ("base64: invalid
+      # input"), shu sabab shu yo'l qilindi (foydalanuvchi talabi).
+      #
+      # Zaxira: `PYRO_SESSION_B64_1/2/3` secret'lari (fayl yo'q yoki
+      # ochilmasa). Natija haqiqiy SQLite ekani har doim tekshiriladi.
       - name: Telegram sessiyasi
         if: steps.peek.outputs.pending != '0'
         env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
           S1: ${{ secrets.PYRO_SESSION_B64_1 }}
           S2: ${{ secrets.PYRO_SESSION_B64_2 }}
           S3: ${{ secrets.PYRO_SESSION_B64_3 }}
         run: |
+          OUT=tool/encode/pyro_session.session
+          ok() { head -c 16 "$OUT" 2>/dev/null | grep -q "SQLite format 3"; }
+          K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          if [ -f tool/encode/session.enc ] && [ -n "$K" ]; then
+            if K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K \
+                 -in tool/encode/session.enc -out "$OUT" 2>/dev/null && ok; then
+              echo "✅ Sessiya shifrlangan fayldan tiklandi ($(stat -c%s "$OUT") bayt)"
+              exit 0
+            fi
+            echo "⚠️ session.enc ochilmadi (ENCODE_TOKEN boshqa?) — secret'lar sinab ko'riladi"
+          fi
           if [ -z "$S1" ]; then
-            echo "::error::PYRO_SESSION_B64_1/2/3 secret'lari yo'q"
+            echo "::error::Sessiya yo'q: session.enc ochilmadi va PYRO_SESSION_B64_1/2/3 qo'yilmagan"
             exit 1
           fi
-          # Har bo'lak alohida — qaysi secret'ga ortiqcha matn (nom,
-          # "Name:" va h.k.) tushib qolgani ko'rinsin. Yaroqli sessiyada
-          # har biri 2276 belgi (oxirgisi `=` bilan tugaydi).
+          # Har bo'lak alohida — qaysi secret'ga ortiqcha matn tushib
+          # qolgani ko'rinsin.
           for n in 1 2 3; do
             k="S$n"
             v=$(printf '%s' "${!k}" | tr -cd 'A-Za-z0-9+/=')
             echo "PYRO_SESSION_B64_$n: ${#v} belgi, boshi: ${v:0:6}…, oxiri: …${v: -4}"
           done
           B64=$(printf '%s%s%s' "$S1" "$S2" "$S3" | tr -cd 'A-Za-z0-9+/=')
-          echo "Base64 uzunligi: ${#B64} belgi (kutilgan: 6828)"
-          if ! printf '%s' "$B64" | base64 -d > tool/encode/pyro_session.session 2>/dev/null; then
-            echo "::error::Sessiya ochilmadi — PYRO_SESSION_B64_1/2/3 qiymatlarini to'liq, bo'lib-bo'lib emas, qaytadan qo'ying"
+          if ! printf '%s' "$B64" | base64 -d > "$OUT" 2>/dev/null || ! ok; then
+            echo "::error::Sessiya ochilmadi — PYRO_SESSION_B64_1/2/3 qiymatlarini tekshiring"
             exit 1
           fi
-          if ! head -c 16 tool/encode/pyro_session.session | grep -q "SQLite format 3"; then
-            echo "::error::Sessiya fayli buzuq (SQLite emas) — secret'larni tekshiring"
-            exit 1
-          fi
-          echo "✅ Sessiya tiklandi ($(stat -c%s tool/encode/pyro_session.session) bayt)"
+          echo "✅ Sessiya secret'lardan tiklandi ($(stat -c%s "$OUT") bayt)"
 
       - name: Kodlash
         if: steps.peek.outputs.pending != '0'

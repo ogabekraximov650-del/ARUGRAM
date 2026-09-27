@@ -3789,3 +3789,10 @@ tayyor bo'lguncha esa hech narsa chizilmasdi (qora/bo'sh).
   oxiri chiqadi (yaroqli qiymatda har biri 2276 belgi) — ortiqcha matn
   qaysi secret'ga tushgani ko'rinadi. Birinchi urinishda jami 6974 belgi
   chiqdi (kutilgan 6828) — secret'larga 146 ta ortiqcha belgi tushgan.
+- (2026-09, davomi) Sessiya secret'lariga nusxalashda ortiqcha matn
+  tushib qolaverdi (jami 6974 belgi, kerak 6828). Foydalanuvchi talabi
+  bilan sessiya `ENCODE_TOKEN` bilan shifrlanib repo'ga qo'yildi:
+  `tool/encode/session.enc` (openssl AES-256-CBC, PBKDF2 200 000).
+  `encode.yml` avval shu faylni ochadi, bo'lmasa `PYRO_SESSION_B64_*`.
+  ENCODE_TOKEN almashtirilsa — faylni yangi kalit bilan qayta shifrlash
+  kerak.
