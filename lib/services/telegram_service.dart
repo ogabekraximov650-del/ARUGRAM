@@ -670,34 +670,6 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
-  /// GIF'ni (Telegram'dagi tayyor hujjat, [docId]) [fileName] nomi
-  /// bilan kanalga joylaydi: ilova uni bot chatiga yuboradi (qayta
-  /// yuklanmaydi, shifrlanmaydi), bot kanalga ko'chiradi. Qaytadi:
-  /// xato matni yoki `null`.
-  Future<String?> sendGif(String docId, String fileName) async {
-    if (!_authorized) return 'Telegram hisobi ulanmagan';
-    final s = AuthService.instance.sessionToken;
-    if (s == null) return 'Ilova hisobiga kirilmagan';
-    _delivering++;
-    final j = await _callBlocking(
-        'rust_tg_send_gif', jsonEncode({'id': docId, 'name': fileName}));
-    if (j['ok'] != true) {
-      _delivering--;
-      return (j['error'] as String?) ?? 'GIF yuborilmadi';
-    }
-    _missing.remove(fileName);
-    // Xabar darhol chiqsin — kanalga ko'chirilishi fon'da kutiladi.
-    // GIF — Telegram'dagi tayyor hujjat: bot uni bir zumda ko'chiradi,
-    // ko'ruvchilar esa uni to'g'ridan-to'g'ri Telegram'dan oladi.
-    // WORKER'GA KAMROQ SO'ROV: `/api/tg/claim` 8 marta so'ralmaydi —
-    // bot chati shunchaki 20 soniya band turadi, keyin tozalanadi.
-    Timer(const Duration(seconds: 20), () {
-      _delivering--;
-      _clearPending = true;
-      unawaited(_clearIfPending());
-    });
-    return null;
-  }
 
   /// Eski nom (qism qo'shish ekrani shu bilan chaqiradi).
   Future<String?> uploadToChannel(

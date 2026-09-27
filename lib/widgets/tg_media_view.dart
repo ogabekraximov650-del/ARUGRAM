@@ -17,9 +17,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/scheduler.dart';
-import 'package:path_provider/path_provider.dart';
 
-import '../services/api_base.dart';
 import '../services/device_perf.dart';
 import '../services/native_pool.dart';
 import '../services/telegram_service.dart';
@@ -1087,40 +1085,21 @@ bool _looksLikeMp4(File f) {
   }
 }
 
-Future<File?> _fetchChatFile(String name) => () async {
-        final direct = await _directGif(name);
-        if (direct != null) {
-          if (_looksLikeMp4(direct)) return direct;
-          try {
-            direct.deleteSync();
-          } catch (_) {}
-        }
-        try {
-          final dir = await getTemporaryDirectory();
-          final f = File('${dir.path}/gif_$name');
-          if (await f.exists() && await f.length() > 0) {
-            if (_looksLikeMp4(f)) return f;
-            await f.delete();
-          }
-          final bytes = await TelegramService.instance
-              .fetchBytes('$kApiBase/api/image/$name');
-          final mp4 = bytes != null &&
-              bytes.length > 8 &&
-              bytes[4] == 0x66 &&
-              bytes[5] == 0x74 &&
-              bytes[6] == 0x79 &&
-              bytes[7] == 0x70;
-          if (!mp4) {
-            _chatFiles.remove(name);
-            return null;
-          }
-          await f.writeAsBytes(bytes, flush: true);
-          return f;
-        } catch (_) {
-          _chatFiles.remove(name);
-          return null;
-        }
-      }();
+/// GIF faqat Telegram serveridan, ko'ruvchining o'z hisobi bilan
+/// (`_directGif`). TALAB (foydalanuvchi): "maxfiy kanal va B2'siz" —
+/// bot chati orqali olish (`fetchBytes`) olib tashlandi: u bot chatini
+/// band qilib, tozalashda videolar nusxasini ham o'chirib yuborardi.
+Future<File?> _fetchChatFile(String name) async {
+  final f = await _directGif(name);
+  if (f != null && _looksLikeMp4(f)) return f;
+  if (f != null) {
+    try {
+      f.deleteSync();
+    } catch (_) {}
+  }
+  _chatFiles.remove(name);
+  return null;
+}
 
 
 class _TgGifMessageState extends State<TgGifMessage> {

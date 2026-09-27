@@ -26,7 +26,6 @@ import 'package:flutter/material.dart';
 import 'emoji_text.dart';
 import 'tg_composer.dart';
 import 'tg_media_view.dart';
-import '../services/telegram_service.dart';
 import '../services/tg_media.dart';
 import '../services/image_cache.dart';
 
@@ -193,27 +192,23 @@ class _CommentsTabState extends State<CommentsTab> {
   Future<void> _sendSticker(TgDoc d) =>
       _sendMedia(d.ref, 'sticker');
 
-  /// GIF — Telegram'dagi tayyor fayl kanalga joylanadi (qayta
-  /// yuklanmaydi), izohga esa uning nomi yoziladi.
+  /// GIF — izohga faqat uning nomi (ichida Telegram kaliti) yoziladi;
+  /// maxfiy kanalga yuborilmaydi. Ko'ruvchi uni o'z Telegram hisobi
+  /// bilan to'g'ridan-to'g'ri Telegram serveridan oladi (`tgChatFile`).
   Future<void> _sendGif(TgDoc d) async {
     final me = AuthService.instance.user?.id ?? 0;
     if (me == 0) {
       _say('Izoh yozish uchun hisobingizga kiring');
       return;
     }
-    // Nomda GIF'ning Telegram kaliti ham bor (`gifNameTag`) —
-    // ko'ruvchi uni to'g'ridan-to'g'ri Telegram'dan oladi.
     final tag = await TgMedia.instance.gifNameTag(d);
-    final name =
-        'cmt_${me}_${DateTime.now().millisecondsSinceEpoch}$tag.mp4';
-    setState(() => _sending = true);
-    final err = await TelegramService.instance.sendGif(d.id, name);
     if (!mounted) return;
-    setState(() => _sending = false);
-    if (err != null) {
-      _say(err);
+    if (tag.isEmpty) {
+      _say('GIF yuborilmadi — Telegram hisobini tekshiring');
       return;
     }
+    final name =
+        'cmt_${me}_${DateTime.now().millisecondsSinceEpoch}$tag.mp4';
     await _sendMedia(name, 'gif');
   }
 

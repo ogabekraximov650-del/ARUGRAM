@@ -3720,3 +3720,24 @@ jimgina tashlanardi.
   (`TelegramService.initError`).
 - Worker (`tg_api_creds`): secret'ga ortiqcha matn bilan yozilgan
   qiymat ham o'qiladi (raqamlar va 32 belgili hex).
+
+## GIF: maxfiy kanalsiz va B2'siz — faqat Telegram serveridan (2026-09)
+
+TALAB (foydalanuvchi): "maxfiy kanalga GIF yuborish va undan yuklab
+olish deb videolar ochilmayapti. GIF kanalga yuborilmasin, Telegram
+serveridan olinsin — hech qanday B2 va maxfiy kanallarsiz".
+
+- Yuborish (`support_chat_screen.dart`, `comments_tab.dart`): bot
+  chatiga/kanalga hech narsa yuborilmaydi — xabarga faqat nom yoziladi,
+  nomda GIF'ning Telegram kaliti (`gifNameTag`: id, access_hash, dc,
+  file_reference). `TelegramService.sendGif` olib tashlandi.
+- Olish (`_fetchChatFile`): faqat `_directGif` — ko'ruvchining o'z
+  Telegram hisobi bilan to'g'ridan-to'g'ri. Bot chati orqali olish
+  (`fetchBytes`) olib tashlandi: u bot chatini band qilib, tozalashda
+  video nusxalariga xalaqit berardi.
+- Cheklov: Telegram `file_reference` ni vaqt o'tib eskirtirishi mumkin —
+  juda eski GIF xabarlari ochilmasligi mumkin (qayta urinish tugmasi
+  bor). Kalitsiz eski GIF'lar (kanal orqali yuborilganlar) endi
+  ochilmaydi.
+- `TG_API_ID`/`TG_API_HASH` eskirgan edi — foydalanuvchi GitHub
+  secret'larini yangilaydi, worker keyingi deploy'da oladi.

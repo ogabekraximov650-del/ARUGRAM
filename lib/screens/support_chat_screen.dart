@@ -720,19 +720,24 @@ class _SupportChatScreenState extends State<SupportChatScreen>
     _toBottom();
   }
 
-  /// GIF — Telegram'dagi tayyor fayl kanalga joylanadi (qayta
-  /// yuklanmaydi), xabarga esa uning nomi yoziladi.
+  /// GIF — xabarga faqat uning nomi (ichida Telegram kaliti) yoziladi.
+  /// TALAB (foydalanuvchi): "GIF maxfiy kanalga yuborilmasin, B2 ham
+  /// kerak emas — Telegram serveridan olinsin". Ko'ruvchi GIF'ni o'z
+  /// Telegram hisobi bilan to'g'ridan-to'g'ri Telegram serveridan oladi
+  /// (`tgChatFile`); bot chati ishlatilmaydi — videolarga xalaqit
+  /// bermaydi.
   Future<void> _sendGif(TgDoc d) async {
     if (_sending) return;
     final me = AuthService.instance.user?.id ?? 0;
-    // Nomda GIF'ning Telegram kaliti ham bor (`gifNameTag`) —
-    // ko'ruvchi uni to'g'ridan-to'g'ri Telegram'dan oladi.
     final tag = await TgMedia.instance.gifNameTag(d);
+    if (tag.isEmpty) {
+      _snack('GIF yuborilmadi — Telegram hisobini tekshiring');
+      return;
+    }
     final name =
         'chat_${me}_${DateTime.now().millisecondsSinceEpoch}$tag.mp4';
     setState(() => _sending = true);
-    var err = await TelegramService.instance.sendGif(d.id, name);
-    err ??= await _chat.send('', mediaFile: name, mediaType: 'gif');
+    final err = await _chat.send('', mediaFile: name, mediaType: 'gif');
     if (!mounted) return;
     setState(() => _sending = false);
     if (err != null) _snack(err);
