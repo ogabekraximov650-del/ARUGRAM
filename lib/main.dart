@@ -118,6 +118,14 @@ Future<void> _main() async {
   // Kuchsiz telefonda animatsiyalar soniyasiga 20 kadr (Telegram
   // `LiteMode` kabi) — protsessor va batareya yuki kamroq.
   if (DevicePerf.low) AnimPlayers.fpsCap(20);
+  // XOTIRA: Flutter rasm keshi odatda 100 MB / 1000 ta rasm —
+  // 2 GB telefonda bu juda ko'p (ochilgan posterlar, avatarlar,
+  // kadrlar dekodlangan holda turadi). Kuchsizda 40 MB, qolganida
+  // 80 MB; rasmlar baribir diskda (`AppImageCache`) — qayta
+  // dekodlash tez.
+  PaintingBinding.instance.imageCache
+    ..maximumSize = DevicePerf.low ? 200 : 500
+    ..maximumSizeBytes = (DevicePerf.low ? 40 : 80) << 20;
 
   await VideoCacheServer.instance.ensureStarted();
 

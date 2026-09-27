@@ -191,12 +191,13 @@ class _DeferredState extends State<_Deferred> {
 
 /// Birinchi kadrlar keshi — panel qayta ochilganda darhol ko'rinsin.
 final Map<String, ui.Image> _firstFrames = {};
-const _firstFramesMax = 150;
+/// Kuchsiz telefonda kamroq (har biri ~100-250 KB piksel).
+final _firstFramesMax = DevicePerf.low ? 60 : 150;
 
 /// Hamma animatsiyalarning kadrlar keshi uchun umumiy chegara.
-/// Telefon kuchiga qarab (`DevicePerf`): 24 / 48 / 64 MB.
+/// Telefon kuchiga qarab (`DevicePerf`): 16 / 48 / 64 MB.
 final _cacheBudget = switch (DevicePerf.cls) {
-      PerfClass.low => 24,
+      PerfClass.low => 16,
       PerfClass.average => 48,
       PerfClass.high => 64,
     } *

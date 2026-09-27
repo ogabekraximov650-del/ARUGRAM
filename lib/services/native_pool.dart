@@ -24,6 +24,8 @@ import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 
+import 'device_perf.dart';
+
 DynamicLibrary _lib() => Platform.isAndroid
     ? DynamicLibrary.open('librust_core.so')
     : DynamicLibrary.process();
@@ -33,13 +35,15 @@ class NativePool {
   final String name;
   NativePool._(this.size, this.name);
 
-  static final io = NativePool._(3, 'aru-io');
+  // XOTIRA: har isolate o'z uyumi bilan bir necha MB egallaydi —
+  // kuchsiz (2 GB) telefonda ishchilar kamroq (11 o'rniga 6).
+  static final io = NativePool._(DevicePerf.low ? 2 : 3, 'aru-io');
 
   /// Stiker/emoji/GIF FAYLLARINI yuklash — alohida hovuz: sekin
   /// yuklanish to'plamlar ro'yxati so'rovini navbatda ushlab turmasin
   /// (panel "aylanib" qolardi).
-  static final files = NativePool._(5, 'aru-files');
-  static final render = NativePool._(3, 'aru-render');
+  static final files = NativePool._(DevicePerf.low ? 2 : 5, 'aru-files');
+  static final render = NativePool._(DevicePerf.low ? 2 : 3, 'aru-render');
 
   final List<_Worker> _workers = [];
   int _next = 0;

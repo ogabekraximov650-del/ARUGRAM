@@ -3544,3 +3544,35 @@ zaxira yo'llar (`thumbnailData`, birinchi kadr).
    Faqat o'zgargan kadr qayta chiziladi.
 3. Kuchsiz telefon (`DevicePerf.low`): 20 kadr/s
    (`rust_player_fps_cap`), guruh yuzasi 1.5x o'lchamda (aks holda 2x).
+
+## Operativ xotira (RAM) tejash — 2 GB telefonlar uchun (2026-09)
+
+TALAB: "Ilova kodini scannerlab chiq va RAM'ni yeydigan narsalarni
+kamaytir yoki tuzat — pleyer bufer, rasmlar va boshqalar".
+
+Topilgan va tuzatilganlar:
+
+1. **Video pleyer buferi** (`AruLoadControl.java`): bayt chegarasi
+   yo'q edi — yuqori bitreytli videoda 40 s oldinga + 30 s orqaga
+   yuzlab MB bo'lardi. Endi oldinga 15..30 s, orqaga 10 s va
+   **24 MB umumiy chegara** (`setTargetBufferBytes`,
+   `prioritizeTimeOverSizeThresholds = false`).
+2. **GIF/stiker kadrlari keshi** (`sticker_anim.rs`, `DiskFrames`):
+   yangi chizilgan kadrlar tutqich yopilguncha XOTIRADA turardi (uzun
+   GIF — o'nlab MB), yopishda `.afc` fayl yana ikki marta xotirada
+   yig'ilardi. Endi kadr darhol vaqtinchalik `.spill` faylga yoziladi
+   (xotirada faqat joyi), `.afc` esa oqim bilan yoziladi. Qolib ketgan
+   `.spill`/`.part` fayllar (1 soatdan eski) tozalanadi.
+3. **Flutter rasm keshi** (`main.dart`): odatiy 100 MB / 1000 rasm
+   o'rniga kuchsizda 40 MB / 200, qolganida 80 MB / 500.
+4. **To'liq ekran rasm** (`media_view_screen.dart`): rasm asl
+   o'lchamida dekodlanardi (12 MP ≈ 48 MB). Endi ekran eni x2 gacha
+   (720..2160 px).
+5. **Fon isolate'lari** (`native_pool.dart`): kuchsiz telefonda
+   11 o'rniga 6 ta (io 2, files 2, render 2).
+6. **Animatsiya keshlari** (`tg_media_view.dart`): kuchsizda kadrlar
+   keshi 24 → 16 MB, birinchi kadrlar 150 → 60 ta.
+
+Tekshirildi (o'zgartirish kerak emas): video kesh yuklovchisi
+(16 x 1 MB bufer), video/tarix eskizlari xotira keshi (chegaralangan),
+chat va ro'yxat rasmlari (`memCacheWidth` bor).

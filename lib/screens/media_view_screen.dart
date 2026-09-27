@@ -215,6 +215,13 @@ class _MediaViewScreenState extends State<MediaViewScreen> {
         cacheManager: AppImageCache.manager,
         imageUrl: widget.url,
         fit: BoxFit.contain,
+        // XOTIRA: 12 MP rasm to'liq dekodlansa ~48 MB bo'ladi. Ekran
+        // eniga (x2 — kattalashtirish uchun) qadar dekodlanadi.
+        memCacheWidth: (MediaQuery.sizeOf(context).width *
+                MediaQuery.devicePixelRatioOf(context) *
+                2)
+            .round()
+            .clamp(720, 2160),
         placeholder: (_, __) => const SizedBox(
           width: 34,
           height: 34,

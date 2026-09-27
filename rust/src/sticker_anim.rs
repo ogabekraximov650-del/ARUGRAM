@@ -95,18 +95,36 @@ struct Anim {
 const DISK_BUDGET: u64 = 200 * 1024 * 1024;
 const MAGIC: &[u8; 4] = b"AFC1";
 
+// XOTIRA (foydalanuvchi: "2 GB telefonda ham silliq ishlasin"):
+// ilgari shu safar chizilgan kadrlar tutqich yopilguncha XOTIRADA
+// turardi — uzun GIF (300 kadr, 512 px) o'nlab MB egallardi, yopishda
+// esa butun fayl yana ikki marta xotirada yig'ilardi. Endi yangi kadr
+// darhol vaqtinchalik `.spill` faylga yoziladi (xotirada faqat joyi),
+// yopishda esa `.afc` bo'lakma-bo'lak, oqim bilan yoziladi.
+
 struct DiskFrames {
     path: PathBuf,
     /// Diskdagi kadrlar: (joyi, uzunligi); uzunlik 0 — yo'q.
     table: Vec<(u64, u32)>,
     file: Option<std::fs::File>,
-    /// Shu safar chizilgan (siqilgan) yangi kadrlar.
-    fresh: HashMap<usize, Vec<u8>>,
+    /// Shu safar chizilgan (siqilgan) yangi kadrlar: `.spill` dagi joyi.
+    fresh: HashMap<usize, (u64, u32)>,
+    spill: Option<(PathBuf, std::fs::File, u64)>,
+}
+
+fn read_at(file: &mut std::fs::File, o: u64, l: u32) -> Option<Vec<u8>> {
+    if l == 0 || file.seek(SeekFrom::Start(o)).is_err() {
+        return None;
+    }
+    let mut v = vec![0u8; l as usize];
+    file.read_exact(&mut v).ok()?;
+    Some(v)
 }
 
 impl DiskFrames {
     fn open(path: PathBuf, frames: usize, w: usize, h: usize) -> DiskFrames {
-        let mut d = DiskFrames { path, table: vec![(0, 0); frames], file: None, fresh: HashMap::new() };
+        let mut d =
+            DiskFrames { path, table: vec![(0, 0); frames], file: None, fresh: HashMap::new(), spill: None };
         if let Ok(mut f) = std::fs::File::open(&d.path) {
             let mut head = [0u8; 16];
             if f.read_exact(&mut head).is_ok()
@@ -129,22 +147,19 @@ impl DiskFrames {
         d
     }
 
+    /// Siqilgan kadr (yangi yoki diskdagi).
+    fn raw(&mut self, f: usize) -> Option<Vec<u8>> {
+        if let Some(&(o, l)) = self.fresh.get(&f) {
+            let (_, file, _) = self.spill.as_mut()?;
+            return read_at(file, o, l);
+        }
+        let (o, l) = self.table.get(f).copied().unwrap_or((0, 0));
+        read_at(self.file.as_mut()?, o, l)
+    }
+
     /// Kadr diskda (yoki shu safar chizilgan) bo'lsa — [out] ga ochadi.
     fn read(&mut self, f: usize, out: &mut [u8]) -> bool {
-        let data = if let Some(v) = self.fresh.get(&f) {
-            v.clone()
-        } else {
-            let (o, l) = self.table.get(f).copied().unwrap_or((0, 0));
-            let Some(file) = self.file.as_mut() else { return false };
-            if l == 0 || file.seek(SeekFrom::Start(o)).is_err() {
-                return false;
-            }
-            let mut v = vec![0u8; l as usize];
-            if file.read_exact(&mut v).is_err() {
-                return false;
-            }
-            v
-        };
+        let Some(data) = self.raw(f) else { return false };
         let mut z = flate2::read::DeflateDecoder::new(&data[..]);
         z.read_exact(out).is_ok()
     }
@@ -158,61 +173,87 @@ impl DiskFrames {
             return;
         }
         let mut z = flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::fast());
-        if z.write_all(px).is_ok() {
-            if let Ok(v) = z.finish() {
-                self.fresh.insert(f, v);
-            }
+        if z.write_all(px).is_err() {
+            return;
+        }
+        let Ok(v) = z.finish() else { return };
+        if self.spill.is_none() {
+            // Bir stiker bir necha joyda ochiq bo'lishi mumkin — har
+            // tutqich o'z vaqtinchalik faylida.
+            let sp = self.path.with_extension(format!("afc.{}.spill", SEQ.fetch_add(1, Ordering::SeqCst)));
+            let Ok(file) =
+                std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(true).open(&sp)
+            else {
+                return;
+            };
+            self.spill = Some((sp, file, 0));
+        }
+        let Some((_, file, end)) = self.spill.as_mut() else { return };
+        if file.seek(SeekFrom::Start(*end)).is_ok() && file.write_all(&v).is_ok() {
+            self.fresh.insert(f, (*end, v.len() as u32));
+            *end += v.len() as u64;
         }
     }
 
-    /// Yangi kadrlar bo'lsa — eski va yangilarini bitta faylga yozadi.
+    /// Yangi kadrlar bo'lsa — eski va yangilarini bitta faylga yozadi
+    /// (oqim bilan: xotirada bir vaqtda bitta kadr).
     fn save(&mut self, w: usize, h: usize) {
-        if self.fresh.is_empty() {
-            return;
+        if !self.fresh.is_empty() {
+            self.write_all(w, h);
         }
+        self.fresh.clear();
+        if let Some((sp, _, _)) = self.spill.take() {
+            let _ = std::fs::remove_file(sp);
+        }
+    }
+
+    fn write_all(&mut self, w: usize, h: usize) {
         let n = self.table.len();
-        let mut body: Vec<u8> = Vec::new();
-        let mut tab = vec![(0u64, 0u32); n];
         let head_len = (16 + n * 12) as u64;
-        for i in 0..n {
-            let data = if let Some(v) = self.fresh.remove(&i) {
-                Some(v)
-            } else {
-                let (o, l) = self.table[i];
-                match (l > 0, self.file.as_mut()) {
-                    (true, Some(file)) => {
-                        let mut v = vec![0u8; l as usize];
-                        if file.seek(SeekFrom::Start(o)).is_ok() && file.read_exact(&mut v).is_ok() {
-                            Some(v)
-                        } else {
-                            None
-                        }
-                    }
-                    _ => None,
-                }
+        let mut tab = vec![(0u64, 0u32); n];
+        let mut off = head_len;
+        for (i, t) in tab.iter_mut().enumerate() {
+            let l = match self.fresh.get(&i) {
+                Some(&(_, l)) => l,
+                None if self.file.is_some() => self.table[i].1,
+                None => 0,
             };
-            if let Some(v) = data {
-                tab[i] = (head_len + body.len() as u64, v.len() as u32);
-                body.extend_from_slice(&v);
+            if l > 0 {
+                *t = (off, l);
+                off += l as u64;
             }
         }
-        let mut out = Vec::with_capacity(head_len as usize + body.len());
-        out.extend_from_slice(MAGIC);
-        out.extend_from_slice(&(w as u32).to_le_bytes());
-        out.extend_from_slice(&(h as u32).to_le_bytes());
-        out.extend_from_slice(&(n as u32).to_le_bytes());
-        for (o, l) in &tab {
-            out.extend_from_slice(&o.to_le_bytes());
-            out.extend_from_slice(&l.to_le_bytes());
-        }
-        out.extend_from_slice(&body);
-        self.file = None;
-        // Bir stiker bir necha joyda ochiq bo'lishi mumkin — har yozuv
-        // o'z vaqtinchalik faylida (bir-birini buzmasin).
-        static SEQ: AtomicI64 = AtomicI64::new(0);
         let tmp = self.path.with_extension(format!("afc.{}.part", SEQ.fetch_add(1, Ordering::SeqCst)));
-        if std::fs::write(&tmp, &out).is_err() || std::fs::rename(&tmp, &self.path).is_err() {
+        let ok = (|| -> Option<()> {
+            let mut out = std::io::BufWriter::new(std::fs::File::create(&tmp).ok()?);
+            let mut head = Vec::with_capacity(head_len as usize);
+            head.extend_from_slice(MAGIC);
+            head.extend_from_slice(&(w as u32).to_le_bytes());
+            head.extend_from_slice(&(h as u32).to_le_bytes());
+            head.extend_from_slice(&(n as u32).to_le_bytes());
+            for (o, l) in &tab {
+                head.extend_from_slice(&o.to_le_bytes());
+                head.extend_from_slice(&l.to_le_bytes());
+            }
+            out.write_all(&head).ok()?;
+            for (i, t) in tab.iter().enumerate() {
+                if t.1 == 0 {
+                    continue;
+                }
+                let v = self.raw(i)?;
+                if v.len() != t.1 as usize {
+                    return None;
+                }
+                out.write_all(&v).ok()?;
+            }
+            out.flush().ok()
+        })()
+        .is_some();
+        self.file = None;
+        if !ok || std::fs::rename(&tmp, &self.path).is_err() {
             let _ = std::fs::remove_file(&tmp);
+            // Eski fayl (bo'lsa) buzilmagan — qayta ochiladi.
+            self.file = std::fs::File::open(&self.path).ok();
         } else {
             self.table = tab;
             self.file = std::fs::File::open(&self.path).ok();
@@ -223,11 +264,38 @@ impl DiskFrames {
     }
 }
 
+impl Drop for DiskFrames {
+    fn drop(&mut self) {
+        if let Some((sp, _, _)) = self.spill.take() {
+            let _ = std::fs::remove_file(sp);
+        }
+    }
+}
+
+static SEQ: AtomicI64 = AtomicI64::new(0);
+
 /// `.afc` fayllari jami [DISK_BUDGET] dan oshsa — eng eskilari o'chadi.
 fn trim_dir(dir: &Path) {
     let Ok(rd) = std::fs::read_dir(dir) else { return };
-    let mut files: Vec<(std::time::SystemTime, u64, PathBuf)> = rd
-        .filter_map(|e| e.ok())
+    let entries: Vec<std::fs::DirEntry> = rd.filter_map(|e| e.ok()).collect();
+    // Ilova yopilib qolganda qolgan vaqtinchalik fayllar (1 soatdan eski).
+    let hour = std::time::Duration::from_secs(3600);
+    for e in &entries {
+        let p = e.path();
+        let tmp = p.extension().map(|x| x == "spill" || x == "part").unwrap_or(false);
+        let old = e
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+            .map(|d| d > hour)
+            .unwrap_or(false);
+        if tmp && old {
+            let _ = std::fs::remove_file(p);
+        }
+    }
+    let mut files: Vec<(std::time::SystemTime, u64, PathBuf)> = entries
+        .into_iter()
         .filter(|e| e.path().extension().map(|x| x == "afc").unwrap_or(false))
         .filter_map(|e| {
             let m = e.metadata().ok()?;
