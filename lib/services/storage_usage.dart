@@ -225,7 +225,10 @@ class StorageUsageService extends ChangeNotifier {
           }
           await _wipe(temp, _Pick.posters);
         case _kStickers:
-          if (docs != null) await _wipe('$docs/tg/media', _Pick.all);
+          // Faqat FAYLLAR: `meta` (to'plamlar ro'yxati, hujjatlar —
+          // Telegram'dan kelgan MA'LUMOT) doimiy saqlanadi
+          // (foydalanuvchi talabi: "ma'lumotlar tozalanmasin").
+          if (docs != null) await _wipe('$docs/tg/media', _Pick.files);
         case _kChatMedia:
           await _wipe(temp, _Pick.chat);
         case _kTemp:
@@ -374,7 +377,7 @@ String _labelOfDocFile(String name) {
 }
 
 /// Papkadagi qaysi elementlar o'chiriladi (`_wipe`).
-enum _Pick { all, posters, chat, temp }
+enum _Pick { all, files, posters, chat, temp }
 
 /// [dir] ichidagi [pick] elementlarini FON oqimida o'chiradi.
 ///
@@ -391,6 +394,8 @@ Future<void> _wipe(String? dir, _Pick pick) async {
       switch (pick) {
         case _Pick.all:
           return true;
+        case _Pick.files:
+          return name != 'meta';
         case _Pick.posters:
           return poster;
         case _Pick.chat:

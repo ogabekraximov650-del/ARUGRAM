@@ -3812,3 +3812,15 @@ tayyor bo'lguncha esa hech narsa chizilmasdi (qora/bo'sh).
   katak qayta qurilganda yangi so'rov ketardi); fayl navbati endi
   oxirgi so'ralgandan (ekrandagidan) boshlaydi; kichik rasm olinmasa —
   to'liq faylning birinchi kadri.
+
+## Kalit kanal postida yo'q; Turso o'qishlari kamaytirildi; ma'lumot doimiy (2026-09)
+
+- XAVFSIZLIK: ilova (`upload_to_channel`) va Actions (`run.py`) kanal
+  postiga endi faqat fayl nomini yozadi — ochish kaliti YO'Q. Kalit:
+  ilova -> `/api/tg/claim`, Actions -> `/api/encode/quality` (`msg_id`
+  bilan `tg_files` ga yoziladi).
+- Turso (5 kunda 500 000 o'qish): sessiya izolyat xotirasida 60 s
+  (`SESSION_MEMO`, chiqishda o'chadi); chat kutishi 16 x 1.2 s o'rniga
+  4 x 5 s — o'qishlar ~4 barobar kam.
+- "Keshni tozalash"da `tg/media/meta` (Telegram'dan kelgan ma'lumot)
+  o'chmaydi — faqat fayllar.

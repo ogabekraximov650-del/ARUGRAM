@@ -2466,12 +2466,13 @@ async fn upload_to_channel(
         tl::enums::InputPeer::User(tl::types::InputPeerUser { user_id: id, access_hash: hash })
     };
     let uploaded = upload_parts(t, &path, &name, total, key, &sent).await?;
-    // Izoh: 1-qator — fayl nomi (bot postni shu bo'yicha taniydi),
-    // 2-qator — ochish kaliti. Bot kanal postini ko'rib kalitni
-    // O'ZI yozadi (`tg_channel_post` / `tg_user_media`), ya'ni
-    // ilova keyingi so'rovni yubora olmasa ham fayl ishlaydi.
+    // Izoh — faqat fayl nomi (bot postni shu bo'yicha taniydi).
     // Foydalanuvchilarga izohsiz nusxa boradi (`remove_caption`).
-    let caption = format!("{name}\nkey:{}", hex::encode(key));
+    // XAVFSIZLIK (foydalanuvchi talabi): ochish kaliti kanal postiga
+    // YOZILMAYDI — faqat fayl nomi. Kalit bazaga ilova orqali
+    // (`/api/tg/claim`) yoziladi.
+    let _ = &key;
+    let caption = name.clone();
     let mut rnd = [0u8; 8];
     getrandom::getrandom(&mut rnd).map_err(|e| e.to_string())?;
     let random_id = i64::from_le_bytes(rnd);

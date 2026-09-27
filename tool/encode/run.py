@@ -248,11 +248,13 @@ async def process(app: Client, channel: int, job: dict):
             size = out.stat().st_size
             out.unlink()
             log(f"  {label}: {size / 1048576:.1f} MB, {time.time() - t:.0f} s — yuklanmoqda...")
-            await app.send_document(
+            # Kalit kanal postiga YOZILMAYDI (xavfsizlik) — faqat worker'ga.
+            sent = await app.send_document(
                 channel, str(sealed), file_name=name, force_document=True,
-                caption=f"{name}\nkey:{k.hex()}", disable_notification=True)
+                caption=name, disable_notification=True)
             sealed.unlink()
-            api("quality", {**ident, "quality": label, "file": name, "size": size, "key": k.hex()})
+            api("quality", {**ident, "quality": label, "file": name, "size": size,
+                            "key": k.hex(), "msg_id": sent.id})
             done.add(label)
             log(f"  {label}: jurnalga yozildi")
 

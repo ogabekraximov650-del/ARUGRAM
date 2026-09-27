@@ -3911,9 +3911,40 @@ fn token_hash(token: &str) -> String {
 /// yozilmaydi.
 const SEEN_EVERY_MS: i64 = 12 * 3_600_000;
 
+// ── SESSIYA XOTIRADA (Turso o'qishlarini kamaytirish) ─────────
+//
+// TALAB (foydalanuvchi): "Turso'da 5 kunda 500 000 o'qish — juda ko'p".
+// Har himoyalangan so'rov sessiyani bazadan (JOIN + UPDATE — 2-3 qator)
+// o'qirdi. Endi tasdiqlangan sessiya shu izolyat xotirasida 60 soniya
+// turadi — shu vaqt ichidagi keyingi so'rovlar bazaga bormaydi.
+const SESSION_MEMO_MS: i64 = 60_000;
+thread_local! {
+    static SESSION_MEMO: std::cell::RefCell<std::collections::HashMap<String, (Value, i64)>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
 async fn session_user(env: &Env, token: &str) -> Result<Option<Value>> {
     if token.is_empty() { return Ok(None); }
     let now = now_ms();
+    if let Some(u) = SESSION_MEMO.with(|m| {
+        m.borrow().get(token).filter(|(_, at)| now - *at < SESSION_MEMO_MS).map(|(u, _)| u.clone())
+    }) {
+        return Ok(Some(u));
+    }
+    let r = session_user_db(env, token, now).await?;
+    if let Some(u) = &r {
+        SESSION_MEMO.with(|m| {
+            let mut m = m.borrow_mut();
+            if m.len() > 2000 {
+                m.retain(|_, (_, at)| now - *at < SESSION_MEMO_MS);
+            }
+            m.insert(token.to_string(), (u.clone(), now));
+        });
+    }
+    Ok(r)
+}
+
+async fn session_user_db(env: &Env, token: &str, now: i64) -> Result<Option<Value>> {
 
     // ── IKKI BUYRUQ — BITTA SO'ROV ────────────────────────────
     //
@@ -6649,8 +6680,11 @@ async fn chat_send(mut req: Request, env: &Env, origin: &str) -> Result<Response
 /// Worker'da bitta so'rovdan chiqadigan ichki so'rovlar soni
 /// chegaralangan, shu sabab tekshiruvlar soni ham chegarali:
 /// 16 ta tekshiruv x 1.2 soniya = ~19 soniya.
-const CHAT_WAIT_TICKS: u32 = 16;
-const CHAT_WAIT_STEP_MS: u64 = 1200;
+// Turso o'qishlarini kamaytirish: ~19 s kutishda 16 emas, 4 marta
+// tekshiriladi (har 5 s) — o'qishlar 4 barobar kam, yangi xabar eng
+// ko'pi 5 s kechikadi.
+const CHAT_WAIT_TICKS: u32 = 4;
+const CHAT_WAIT_STEP_MS: u64 = 5000;
 
 /// GET /api/chat/wait?since=<ms>[&user_id=N][&all=1]
 async fn chat_wait(req: &Request, env: &Env) -> Result<Response> {
@@ -9027,6 +9061,7 @@ async fn auth_route(req: Request, env: &Env, origin: &str, path: &str, method: M
 
         (Method::Post, "/api/auth/logout") => {
             let t = bearer(&req);
+            SESSION_MEMO.with(|m| { m.borrow_mut().remove(&t); });
             if !t.is_empty() {
                 // Xesh VA eski ochiq ko'rinish — ikkovi ham o'chiriladi:
                 // hali xeshga o'tmagan qator ham chiqib ketsin.
@@ -10110,6 +10145,14 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
         }
         let mut jargs = vec![TursoArg::text(&format!(",{},", done.join(","))), TursoArg::int(now + ENCODE_LEASE_MS)];
         jargs.extend(pk());
+        // Kalit kanal postida YO'Q (xavfsizlik) — shu yerda yoziladi.
+        let msg_id = jint(&b, "msg_id");
+        if msg_id > 0 {
+            let _ = turso_exec(env,
+                "INSERT INTO tg_files (file_name, msg_id, file_key) VALUES (?, ?, ?)
+                 ON CONFLICT(file_name) DO UPDATE SET msg_id=excluded.msg_id, file_key=excluded.file_key",
+                vec![TursoArg::text(file), TursoArg::int(msg_id), TursoArg::text(&key)]).await;
+        }
         turso_batch(env, &[
             (&format!("UPDATE epizod_db SET url_{q}=?, size_{q}=?, key_{q}=?
                         WHERE anime_id=? AND season_id=? AND epizod_id=?"),
