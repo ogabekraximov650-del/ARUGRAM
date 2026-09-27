@@ -898,6 +898,17 @@ async fn init_db(env: &Env) -> bool {
             "ALTER TABLE epizod_db ADD COLUMN origin_video TEXT DEFAULT ''", vec![]).await;
         config_put(env, "mig_origin_video", "1").await;
     }
+    // Asl videoning ochish kaliti — Actions `tg_files` da topa olmasa
+    // ham shu yerdan oladi (foydalanuvchi talabi).
+    if ok && config_get(env, "mig_origin_key").await.is_none() {
+        for sql in [
+            "ALTER TABLE epizod_db ADD COLUMN origin_key TEXT DEFAULT ''",
+            "ALTER TABLE encode_jobs ADD COLUMN origin_key TEXT DEFAULT ''",
+        ] {
+            let _ = turso_exec(env, sql, vec![]).await;
+        }
+        config_put(env, "mig_origin_key", "1").await;
+    }
 
     ok
 }
@@ -3122,6 +3133,8 @@ fn hide_keys(mut obj: Value) -> Value {
         for q in QUALITIES {
             m.remove(&format!("key_{q}"));
         }
+        // Asl videoning kaliti ham hammaga berilmaydi.
+        m.remove("origin_key");
     }
     obj
 }
@@ -9829,6 +9842,8 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
         if !tg_safe_name(&origin) || !origin.starts_with("orig_") {
             return json_resp(&json!({"error": "Asl video nomi noto'g'ri"}), 400);
         }
+        let okey = b["key"].as_str().unwrap_or("").trim().to_ascii_lowercase();
+        let okey = if valid_file_key(&okey) { okey } else { String::new() };
         let ep = turso_exec(env,
             "SELECT epizod_id FROM epizod_db WHERE anime_id=? AND season_id=? AND epizod_id=?",
             vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]).await?;
@@ -9865,9 +9880,15 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
             vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e), TursoArg::text(&origin), TursoArg::int(now)]
         };
         turso_batch(env, &[
-            ("UPDATE epizod_db SET origin_video=? WHERE anime_id=? AND season_id=? AND epizod_id=?",
-             vec![TursoArg::text(&origin), TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]),
+            ("UPDATE epizod_db SET origin_video=?, origin_key=CASE WHEN ?<>'' THEN ? ELSE origin_key END
+               WHERE anime_id=? AND season_id=? AND epizod_id=?",
+             vec![TursoArg::text(&origin), TursoArg::text(&okey), TursoArg::text(&okey),
+                  TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]),
             (job_sql, job_args),
+            ("UPDATE encode_jobs SET origin_key=CASE WHEN ?<>'' THEN ? ELSE origin_key END
+               WHERE anime_id=? AND season_id=? AND epizod_id=? AND origin=?",
+             vec![TursoArg::text(&okey), TursoArg::text(&okey),
+                  TursoArg::int(a), TursoArg::int(s), TursoArg::int(e), TursoArg::text(&origin)]),
         ]).await?;
         let n = turso_exec(env,
             "SELECT COUNT(*) AS n FROM encode_jobs WHERE state IN ('queued','running')", vec![]).await?;
@@ -9893,7 +9914,7 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
             return json_resp(&json!({"error": "Asl video nomi noto'g'ri"}), 400);
         }
         turso_batch(env, &[
-            ("UPDATE epizod_db SET origin_video='' WHERE anime_id=? AND season_id=? AND epizod_id=? AND origin_video=?",
+            ("UPDATE epizod_db SET origin_video='', origin_key='' WHERE anime_id=? AND season_id=? AND epizod_id=? AND origin_video=?",
              vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e), TursoArg::text(&origin)]),
             ("DELETE FROM encode_jobs WHERE anime_id=? AND season_id=? AND epizod_id=? AND origin=?",
              vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e), TursoArg::text(&origin)]),
@@ -10039,7 +10060,11 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
                     "done": done,
                     "uploaded": uploaded,
                     "origin_msg": src["msg_id"],
-                    "origin_key": src["file_key"],
+                    // Kanal postidagi kalit; bo'lmasa bazadagisi.
+                    "origin_key": match src["file_key"].as_str().unwrap_or("") {
+                        k if valid_file_key(k) => k.to_string(),
+                        _ => job["origin_key"].as_str().unwrap_or("").to_string(),
+                    },
                 },
                 "channel": tg_channel_id(env),
             }));
@@ -10112,6 +10137,16 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
             turso_exec(env,
                 "UPDATE encode_jobs SET state='done', runner='', lease_until=0, error=''
                   WHERE anime_id=? AND season_id=? AND epizod_id=? AND queued_at=?", pk()).await?;
+            // Hamma sifat tayyor — asl video kanaldan va bazadan o'chadi
+            // (foydalanuvchi talabi).
+            let origin = job["origin"].as_str().unwrap_or("").to_string();
+            if origin.starts_with("orig_") {
+                let _ = turso_exec(env,
+                    "UPDATE epizod_db SET origin_video='', origin_key=''
+                      WHERE anime_id=? AND season_id=? AND epizod_id=? AND origin_video=?",
+                    vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e), TursoArg::text(&origin)]).await;
+                tg_forget_file(env, &origin).await;
+            }
             encode_notify(env, &format!(
                 "\u{2705} Kodlandi: anime #{a}, bo'lim #{s}, {num}-qism — {}", done.join(", "))).await;
             return ok(json!({"ok": true}));

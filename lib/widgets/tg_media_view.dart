@@ -77,16 +77,22 @@ class TgStickerView extends StatelessWidget {
       child: ready != null
           ? KeyedSubtree(
               key: ValueKey('${doc.id}/${doc.kind}'),
-              child: _content(context, ready, thumb))
+              child: _content(context, ready, ready.endsWith('.t')))
           : _Deferred(
               key: ValueKey('${doc.id}/${doc.kind}'),
               builder: (context) => FutureBuilder<String?>(
-                future: TgMedia.instance.file(doc, thumb: thumb),
+                // Kichik rasm olinmasa — to'liq fayl (birinchi kadr).
+                future: thumb
+                    ? TgMedia.instance
+                        .file(doc, thumb: true)
+                        .then<String?>((p) async =>
+                            p ?? await TgMedia.instance.file(doc))
+                    : TgMedia.instance.file(doc),
                 builder: (context, snap) {
                   final path = snap.data;
                   // Yuklanguncha — kichik rasm (bo'lsa), bo'sh doira emas.
                   if (path == null) return _loading();
-                  return _content(context, path, thumb);
+                  return _content(context, path, path.endsWith('.t'));
                 },
               ),
             ),

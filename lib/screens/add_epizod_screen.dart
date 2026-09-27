@@ -336,6 +336,8 @@ class _AddEpizodScreenState extends State<AddEpizodScreen> {
             'season_id': widget.seasonId,
             'epizod_id': epizodId,
             'origin': o,
+            // Ochish kaliti ham bazaga yoziladi (Actions topa olsin).
+            'key': TelegramService.instance.keyFor(o),
           }));
       if (r.statusCode == 200) return null;
       String msg = '${r.statusCode}';

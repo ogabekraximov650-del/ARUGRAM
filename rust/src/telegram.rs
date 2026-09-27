@@ -3289,14 +3289,44 @@ pub extern "C" fn rust_tg_sticker_sets(emoji: i32) -> *mut c_char {
     }))
 }
 
+/// To'plamning HOZIRGI `access_hash` i (o'rnatilgan stiker va emoji
+/// to'plamlari ro'yxatidan). Saqlangan eski qiymat bilan Telegram
+/// `STICKERSET_INVALID` qaytarsa ishlatiladi.
+async fn fresh_set_hash(client: &Client, id: i64) -> Option<i64> {
+    let lists = [
+        client.invoke(&tl::functions::messages::GetAllStickers { hash: 0 }).await,
+        client.invoke(&tl::functions::messages::GetEmojiStickers { hash: 0 }).await,
+    ];
+    for l in lists.into_iter().flatten() {
+        if let tl::enums::messages::AllStickers::Stickers(a) = l {
+            for set in &a.sets {
+                let tl::enums::StickerSet::Set(info) = set;
+                if info.id == id {
+                    return Some(info.access_hash);
+                }
+            }
+        }
+    }
+    None
+}
+
 async fn load_set_hashed(client: &Client, id: i64, hash: i64, known: i32) -> Result<Option<(Vec<Value>, i32)>, String> {
-    let r = client
-        .invoke(&tl::functions::messages::GetStickerSet {
-            stickerset: tl::enums::InputStickerSet::Id(tl::types::InputStickerSetId { id, access_hash: hash }),
-            hash: known,
-        })
-        .await
-        .map_err(|e| inv_err(&e))?;
+    let req = |h: i64| tl::functions::messages::GetStickerSet {
+        stickerset: tl::enums::InputStickerSet::Id(tl::types::InputStickerSetId { id, access_hash: h }),
+        hash: known,
+    };
+    // TOPILGAN XATO ("STICKERSET_INVALID ... getStickerSet", panel va
+    // chatdagi stikerlar ochilmadi): saqlangan `access_hash` eskirgan
+    // (hisob/ilova kaliti almashgan). Yangisi ro'yxatdan olinib, bir marta
+    // qayta so'raladi.
+    let (r, hash) = match client.invoke(&req(hash)).await {
+        Ok(r) => (r, hash),
+        Err(e) if e.to_string().contains("STICKERSET_INVALID") => match fresh_set_hash(client, id).await {
+            Some(h) if h != hash => (client.invoke(&req(h)).await.map_err(|e| inv_err(&e))?, h),
+            _ => return Err(inv_err(&e)),
+        },
+        Err(e) => return Err(inv_err(&e)),
+    };
     match r {
         tl::enums::messages::StickerSet::Set(s) => {
             let tl::enums::StickerSet::Set(info) = &s.set;

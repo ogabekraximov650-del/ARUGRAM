@@ -3796,3 +3796,19 @@ tayyor bo'lguncha esa hech narsa chizilmasdi (qora/bo'sh).
   `encode.yml` avval shu faylni ochadi, bo'lmasa `PYRO_SESSION_B64_*`.
   ENCODE_TOKEN almashtirilsa — faylni yangi kalit bilan qayta shifrlash
   kerak.
+
+## Asl video kaliti bazada, kodlashdan keyin o'chirish, stiker xatolari (2026-09)
+
+- `epizod_db.origin_key`, `encode_jobs.origin_key` (`mig_origin_key`):
+  ilova navbatga qo'yishda asl videoning ochish kalitini ham yuboradi;
+  `claim` avval kanal postidagi kalitni, bo'lmasa bazadagisini beradi.
+  `origin_key` ro'yxat javoblarida yashiriladi (`hide_keys`).
+- `finish` (hamma sifat tayyor): asl video kanaldan (`tg_forget_file`)
+  va bazadan (`origin_video`, `origin_key`) o'chiriladi.
+- `STICKERSET_INVALID` (panel va chatdagi stikerlar ochilmadi): eskirgan
+  `access_hash` — Rust `load_set_hashed` o'rnatilgan to'plamlar
+  ro'yxatidan yangisini olib bir marta qayta so'raydi (`fresh_set_hash`).
+- Qotish: xato bo'lgan to'plam/fayl 30 s qayta so'ralmaydi (ilgari har
+  katak qayta qurilganda yangi so'rov ketardi); fayl navbati endi
+  oxirgi so'ralgandan (ekrandagidan) boshlaydi; kichik rasm olinmasa —
+  to'liq faylning birinchi kadri.

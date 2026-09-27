@@ -220,7 +220,9 @@ class TgMedia {
             arg: jsonEncode({'id': id, 'hash': hash}));
         if (j['error'] != null) {
           _fail(j);
-          _sets.remove(id);
+          // DARHOL qayta so'ralmaydi: har katak qayta qurilganda yangi
+          // so'rov ketib, panel qotib qolardi ("ekran qotib yotibdi").
+          Timer(const Duration(seconds: 30), () => _sets.remove(id));
           return <TgDoc>[];
         }
         return _docs(j['docs']);
@@ -448,7 +450,16 @@ class TgMedia {
     return p;
   }
 
+  /// Yaqinda olinmagan fayllar — 30 soniya qayta so'ralmaydi (xato
+  /// bo'lganda har qayta qurishda yangi so'rov ketib, navbat to'lib,
+  /// ekran qotardi).
+  final Map<String, DateTime> _failedAt = {};
+
   Future<String?> _file(TgDoc d, String key, bool thumb) {
+    final f = _failedAt[key];
+    if (f != null && DateTime.now().difference(f).inSeconds < 30) {
+      return Future.value(null);
+    }
     return _files[key] ??= () async {
       while (_running >= 5) {
         final c = Completer<void>();
@@ -462,12 +473,15 @@ class TgMedia {
         final p = j['path'] as String?;
         if (p == null) {
           _files.remove(key);
+          _failedAt[key] = DateTime.now();
           _fail(j);
         }
         return p;
       } finally {
         _running--;
-        if (_waiting.isNotEmpty) _waiting.removeAt(0).complete();
+        // OXIRGI so'ralgan birinchi: ekranda HOZIR ko'rinayotgan katak
+        // (surib o'tib ketilganlar navbat boshida kutib turmasin).
+        if (_waiting.isNotEmpty) _waiting.removeLast().complete();
       }
     }();
   }
