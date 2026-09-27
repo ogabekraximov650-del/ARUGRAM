@@ -597,7 +597,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     _sleepTickTimer?.cancel();
     _leftSeekHideTimer?.cancel();
     _rightSeekHideTimer?.cancel();
-    _seekIdleTimer?.cancel();
     _pendingSingleTapTimer?.cancel();
     _healthTimer?.cancel();
     _windowTimer?.cancel();
@@ -1107,7 +1106,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
 
     // Sek navbatini tozalaymiz — eski epizodga tegishli so'rovlar
     // yangisiga tushib qolmasligi kerak.
-    _seekIdleTimer?.cancel();
     _pendingTarget = null;
     _queuedSeek = null;
     _seekBusy = false;
@@ -2351,8 +2349,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     // Kutilayotgan sek bo'lsa — foydalanuvchi "endi ket" demoqda:
     // Kutish vaqtini sarflamasdan darhol bajaramiz.
     if (_pendingTarget != null) {
-      _seekIdleTimer?.cancel();
-      _seekIdleTimer = null;
       setState(() => _intendedPlaying = true);
       _resumeAfterSeek = true;
       _commitPendingSeek();
@@ -2404,7 +2400,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   //   2) keyingi barcha sek buyruqlari faqat MAQSAD NUQTASINI
   //      o'zgartiradi — progress chizig'i va vaqt darhol yangilanadi,
   //      lekin tarmoqqa ham, dekoderga ham hech narsa bormaydi;
-  //   3) foydalanuvchi _seekIdle davomida boshqa sek qilmasa —
+  //   3) (endi kutilmaydi — darhol) —
   //      AYNAN BITTA sek yuboriladi va video o'sha joydan davom
   //      etadi.
   //
@@ -2421,24 +2417,18 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   // MUHIM: shu 500 ms ichida pleyerga (demak worker'ga ham) BITTA
   // ham so'rov yuborilmaydi — video pauzada, `seekTo` esa faqat
   // tinchlik davri tugagach, AYNAN BIR MARTA yuboriladi.
-  // ── SEK KUTISHI: 200 ms (foydalanuvchi talabi) ─────────────
+  // ── SEK KUTISHI OLIB TASHLANDI (foydalanuvchi talabi) ──────
   //
-  // Bu tanaffusning yagona vazifasi — ketma-ket buyruqlarni bitta
-  // sek qilib yig'ish. Progress chizig'ini surganda yig'iladigan
-  // narsa yo'q, shu sabab u AYNAN 200 ms bilan ishlaydi: barmoq
-  // uzilishi bilan video deyarli darhol sakraydi.
-  static const Duration _seekIdle = Duration(milliseconds: 200);
+  // "Sek qilgandagi kutish vaqtini olib tashla — endi video
+  // xotiradan ko'rsatiladi, bu kerak emas". Ilgari buyruqlar 200 ms
+  // (ikki marta bosishda 320 ms) tinchlikdan keyin bitta sek bo'lib
+  // yuborilardi. Endi har buyruq DARHOL bajariladi; ketma-ket
+  // buyruqlarni `_runSeek` o'zi yig'adi (bir vaqtda bitta `seekTo`,
+  // qolgani — faqat eng oxirgisi), ya'ni dekoder ortiqcha
+  // yuklanmaydi.
 
-  // ── IKKI MARTA BOSISH UCHUN BIROZ UZUNROQ ─────────────────
-  //
-  // Ketma-ket tap deb hisoblanadigan oraliq 300 ms
-  // (`_handleVideoTap`). Agar sek shu oraliqdan TEZROQ yuborilsa,
-  // u ikki tap ORASIDA ketib qolardi: "+10" o'rniga ikkita alohida
-  // "+5" bo'lar va ekrandagi son haqiqiy sakrashga mos kelmasdi.
-  //
-  // Shu sabab FAQAT tap yo'li uchun tanaffus 320 ms. Progress
-  // chizig'i esa yuqoridagi 200 ms bilan ishlaydi.
-  static const Duration _seekIdleTap = Duration(milliseconds: 320);
+  /// Ikki marta bosish ko'rsatkichi (+5s) ekranda turadigan vaqt.
+  static const Duration _seekBadgeHold = Duration(milliseconds: 700);
 
   // ── Ichki holat ──────────────────────────────────────────────
   // Bir vaqtda faqat BITTA `seekTo` uchib turadi; undan keyingilari
@@ -2477,7 +2467,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   // Kutilayotgan sek nuqtasi. Null bo'lmasa — UI shu qiymatni
   // ko'rsatadi (pleyerning haqiqiy pozitsiyasini emas).
   Duration? _pendingTarget;
-  Timer? _seekIdleTimer;
   // Sek boshlanganda ijro ketayotganmidi — tugagach shunga qaytamiz.
   bool _resumeAfterSeek = false;
 
@@ -2493,8 +2482,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   /// Nisbiy sek (ekranga ikki marta bosish) — jamlash uchun
   /// biroz uzunroq tanaffus.
   void _scheduleSeek(int deltaSeconds) {
-    _requestSeek(_seekBase + Duration(seconds: deltaSeconds),
-        idle: _seekIdleTap);
+    _requestSeek(_seekBase + Duration(seconds: deltaSeconds));
   }
 
   /// Mutlaq sek (progress chizig'i) — eng qisqa tanaffus.
@@ -2522,7 +2510,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     return false;
   }
 
-  void _requestSeek(Duration target, {Duration? idle}) {
+  void _requestSeek(Duration target) {
     final ctrl = _controller;
     if (ctrl == null || !ctrl.value.isInitialized) return;
 
@@ -2553,17 +2541,12 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     setState(() => _pendingTarget = t);
     _scheduleHide();
 
-    // Har bir yangi sek kutish taymerini QAYTADAN boshlaydi.
-    _seekIdleTimer?.cancel();
-    // Bufer ichidagi nuqtaga sek — yig'iladigan narsa yo'q, tanaffus
-    // ham kerak emas (yuqoridagi `_targetInBuffer` izohiga qarang).
-    final wait = _targetInBuffer(ctrl, t) ? Duration.zero : (idle ?? _seekIdle);
-    _seekIdleTimer = Timer(wait, _commitPendingSeek);
+    // Kutishsiz — darhol.
+    unawaited(_commitPendingSeek());
   }
 
   /// Qisqa tinchlikdan keyin: BITTA sek va ijroni davom ettirish.
   Future<void> _commitPendingSeek() async {
-    _seekIdleTimer = null;
     final target = _pendingTarget;
     final c = _controller;
     if (target == null || c == null || !mounted) {
@@ -2724,7 +2707,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       // ham shu vaqtgacha turadi (avval 2 soniyada yo'qolib, hali
       // sek bo'lmagan holda foydalanuvchini chalg'itardi).
       _leftSeekHideTimer =
-          Timer(_seekIdleTap + const Duration(milliseconds: 400), () {
+          Timer(_seekBadgeHold, () {
         if (mounted) {
           setState(() {
             _showLeftSeek = false;
@@ -2735,7 +2718,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     } else {
       _rightSeekHideTimer?.cancel();
       _rightSeekHideTimer =
-          Timer(_seekIdleTap + const Duration(milliseconds: 400), () {
+          Timer(_seekBadgeHold, () {
         if (mounted) {
           setState(() {
             _showRightSeek = false;

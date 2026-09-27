@@ -3613,3 +3613,17 @@ Qilinganlar:
   ro'yxatida `items` nusxasi har qator uchun olinmaydi; chat foni
   `isComplex` (rasterlab keshlanadi).
 - CI: APK nomi `arugram-<admin-32|user-64>-build-<raqam>.apk`.
+
+## Sek kutishi olib tashlandi (2026-09)
+
+TALAB: "Sek qilgandagi kutish vaqtini olib tashla — endi video
+xotiradan ko'rsatiladi, bu kerak emas".
+
+`video_player_screen.dart`: sek buyrug'i 200 ms (ikki marta bosishda
+320 ms) tinchlikni kutardi (`_seekIdle`, `_seekIdleTap`,
+`_seekIdleTimer`). Endi olib tashlandi — `_requestSeek` darhol
+`_commitPendingSeek` ni chaqiradi. Ketma-ket buyruqlarni `_runSeek`
+yig'adi (bir vaqtda bitta `seekTo`, navbatda faqat eng oxirgisi).
++5/-5 ko'rsatkichi 700 ms turadi (`_seekBadgeHold`). Keshda yo'q
+joyga sek qilinganda bo'lakni yuklab olishni kutish
+(`_ensureWindowFor`) o'z joyida qoldi — bu tarmoqdan olish uchun.
