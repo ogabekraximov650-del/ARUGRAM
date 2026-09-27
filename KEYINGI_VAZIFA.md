@@ -3824,3 +3824,5 @@ tayyor bo'lguncha esa hech narsa chizilmasdi (qora/bo'sh).
   4 x 5 s — o'qishlar ~4 barobar kam.
 - "Keshni tozalash"da `tg/media/meta` (Telegram'dan kelgan ma'lumot)
   o'chmaydi — faqat fayllar.
+
+- (2026-09) Katalog ro'yxatlari chekka keshda 1 soat (`EDGE_CACHE_SECONDS`), yozishdan keyin darhol tozalanadi va yangisi qayta keshlanadi; ilovaga 30 s. Bot tezligi — o'zgartirilmadi.

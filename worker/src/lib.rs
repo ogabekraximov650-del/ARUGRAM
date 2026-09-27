@@ -3197,6 +3197,17 @@ fn epizod_fields(b: &Value) -> EpizodFields {
 // oladi — ya'ni "saqladim, lekin ko'rinmayapti" holati yo'q.
 const LIST_CACHE_SECONDS: u64 = 30;
 
+/// Chekka keshda (Cloudflare Cache API) saqlash muddati.
+///
+/// TALAB (foydalanuvchi): "Turso'dan keladigan ma'lumot keshda
+/// saqlansin, keyingi safar keshdan o'qilsin; tahrirlansa — keshga
+/// qaytadan yozilsin". Katalog ro'yxatlari yozishdan keyin darhol
+/// o'chiriladi (`purge_list_cache`) va keyingi so'rovda bazadan
+/// yangisi olinib qayta keshlanadi — shu sabab chekkada uzoq (1 soat)
+/// turishi xavfsiz. Ilovaga esa qisqa muddat (`LIST_CACHE_SECONDS`)
+/// beriladi: telefon eskirgan ro'yxatni ushlab qolmaydi.
+const EDGE_CACHE_SECONDS: u64 = 3600;
+
 /// Ro'yxat keshining kaliti. So'rov satri (query) ham kalitga
 /// kiradi — ya'ni turli filtrlar aralashib ketmaydi.
 fn list_cache_url(path: &str, query: Option<&str>) -> String {
@@ -10519,7 +10530,7 @@ async fn main(req: Request, env: Env, ctx: Context) -> Result<Response> {
                 let _ = h.set("Content-Type", "application/json");
                 let _ = h.set(
                     "Cache-Control",
-                    &format!("public, max-age={}", cache_seconds(&path)),
+                    &format!("public, max-age={}", cache_seconds(&path).max(EDGE_CACHE_SECONDS)),
                 );
                 let _ = Cache::default().put(&k, to_cache).await;
             }
