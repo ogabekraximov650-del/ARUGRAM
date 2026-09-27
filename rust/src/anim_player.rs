@@ -54,23 +54,45 @@ extern "C" {
 const RGBA_8888: i32 = 1;
 
 // ── O'YNATUVCHI ────────────────────────────────────────────────────
+//
+// Bitta yuzaga BIR NECHTA animatsiya (Telegram `DrawingInBackground
+// ThreadDrawable` kabi): masalan emoji panelining butun qatori bitta
+// rasmga chiziladi va ekranga bitta `Texture` bo'lib chiqadi — 8 ta
+// alohida yuza o'rniga bitta (grafik protsessor yuki ancha kam).
 
-struct Player {
+struct Item {
     anim: i64,
-    win: *mut c_void,
+    x: usize,
+    y: usize,
     w: usize,
     h: usize,
     frames: usize,
     /// Manba kadrlaridan qanchasi o'tkazib yuboriladi (60 -> 30 kadr/s).
     step: f64,
-    interval: Duration,
     /// Ko'rsatilgan kadrlar hisobi (vaqt bo'yicha emas — ketma-ket).
     n: u64,
+    /// Oxirgi chizilgan kadr (o'zgarmasa qayta chizilmaydi).
+    last: usize,
+    buf: Vec<u8>,
+}
+
+struct Player {
+    items: Vec<Item>,
+    win: *mut c_void,
+    w: usize,
+    h: usize,
+    interval: Duration,
     playing: bool,
     /// Yuza yangi ulandi / hali birorta kadr chizilmagan.
     need_draw: bool,
     next: Instant,
     buf: Vec<u8>,
+}
+
+impl Player {
+    fn animated(&self) -> bool {
+        self.items.iter().any(|i| i.frames > 1)
+    }
 }
 
 // Ko'rsatkich faqat `Mutex` ichida, bir vaqtda bitta oqimda ishlatiladi.
@@ -160,22 +182,46 @@ fn scheduler(tx: mpsc::SyncSender<i64>) {
 
 /// Navbatdagi kadrni chizib, yuzaga qo'yadi.
 fn draw(s: &Shared) {
-    let Ok(mut p) = s.p.lock() else { return };
+    let Ok(mut guard) = s.p.lock() else { return };
+    let p = &mut *guard;
     if p.win.is_null() {
         return;
     }
-    let frame = if p.frames == 0 { 0 } else { ((p.n as f64 * p.step) as usize) % p.frames };
-    let anim = p.anim;
-    let mut buf = std::mem::take(&mut p.buf);
-    let ok = sticker_anim::render_into(anim, frame, &mut buf) == 1;
-    p.buf = buf;
-    if ok && blit(&p) {
-        s.drawn.store(true, Ordering::SeqCst);
+    let mut changed = p.need_draw;
+    let playing = p.playing;
+    for it in p.items.iter_mut() {
+        let f = if it.frames == 0 { 0 } else { ((it.n as f64 * it.step) as usize) % it.frames };
+        if f != it.last && sticker_anim::render_into(it.anim, f, &mut it.buf) == 1 {
+            it.last = f;
+            changed = true;
+        }
+        if playing && it.frames > 1 {
+            it.n = it.n.wrapping_add(1);
+        }
+    }
+    if changed {
+        // Umumiy rasm: shaffof fon + har animatsiya o'z joyida.
+        p.buf.iter_mut().for_each(|b| *b = 0);
+        for it in &p.items {
+            if it.last == usize::MAX {
+                continue;
+            }
+            let n = it.w.min(p.w.saturating_sub(it.x));
+            for row in 0..it.h {
+                let y = it.y + row;
+                if y >= p.h {
+                    break;
+                }
+                let d = (y * p.w + it.x) * 4;
+                let src = row * it.w * 4;
+                p.buf[d..d + n * 4].copy_from_slice(&it.buf[src..src + n * 4]);
+            }
+        }
+        if blit(p) {
+            s.drawn.store(true, Ordering::SeqCst);
+        }
     }
     p.need_draw = false;
-    if p.playing && p.frames > 1 {
-        p.n = p.n.wrapping_add(1);
-    }
     // Kechiksa — sakramaydi, keyingi kadr interval o'tib (silliq).
     let now = Instant::now();
     let due = p.next + p.interval;
@@ -208,31 +254,35 @@ fn blit(_p: &Player) -> bool {
 
 // ── C API (Dart) ───────────────────────────────────────────────────
 
-/// Ochadi: `{"path","w","h"}` -> `{"id","frames"}` (yoki `{"error"}`).
-/// O'yinchi yuzasiz va to'xtagan holda yaratiladi.
-#[no_mangle]
-pub extern "C" fn rust_player_open(json_ptr: *const std::ffi::c_char) -> *mut std::ffi::c_char {
-    let arg: Value = serde_json::from_str(unsafe { cstr_to_str(json_ptr) }.unwrap_or("{}")).unwrap_or(json!({}));
-    let path = arg["path"].as_str().unwrap_or("");
-    let w = arg["w"].as_i64().unwrap_or(0).clamp(1, 512) as usize;
-    let h = arg["h"].as_i64().unwrap_or(0).clamp(1, 512) as usize;
+fn open_item(path: &str, x: usize, y: usize, w: usize, h: usize) -> Option<Item> {
     let anim = sticker_anim::open_path(path, w as i32, h as i32);
     if anim <= 0 {
-        return string_to_cptr(json!({"error": "ochilmadi"}).to_string());
+        return None;
     }
     let (frames, fps) = sticker_anim::info(anim);
-    // Telegram `limitFps`: 30 kadr/s dan oshmaydi.
-    let show = if fps > 30.0 { 30.0 } else if fps > 0.0 { fps } else { 30.0 };
+    // Telegram `limitFps` (kuchsiz telefonda kamroq — Dart beradi).
+    let cap = FPS_CAP.load(Ordering::SeqCst) as f64;
+    let show = if fps > cap { cap } else if fps > 0.0 { fps } else { cap };
     let src = if fps > 0.0 { fps } else { show };
+    Some(Item { anim, x, y, w, h, frames: frames.max(1), step: src / show, n: 0, last: usize::MAX, buf: vec![0u8; w * h * 4] })
+}
+
+/// Kadr/s chegarasi (odatda 30; kuchsiz telefonda Dart 20 qiladi).
+static FPS_CAP: AtomicI64 = AtomicI64::new(30);
+
+#[no_mangle]
+pub extern "C" fn rust_player_fps_cap(fps: i32) {
+    FPS_CAP.store(fps.clamp(10, 60) as i64, Ordering::SeqCst);
+}
+
+fn add_player(items: Vec<Item>, w: usize, h: usize) -> i64 {
+    let cap = FPS_CAP.load(Ordering::SeqCst) as f64;
     let p = Player {
-        anim,
+        items,
         win: std::ptr::null_mut(),
         w,
         h,
-        frames: frames.max(1),
-        step: src / show,
-        interval: Duration::from_secs_f64(1.0 / show),
-        n: 0,
+        interval: Duration::from_secs_f64(1.0 / cap),
         playing: false,
         need_draw: true,
         next: Instant::now(),
@@ -243,7 +293,53 @@ pub extern "C" fn rust_player_open(json_ptr: *const std::ffi::c_char) -> *mut st
         m.insert(id, Arc::new(Shared { p: Mutex::new(p), busy: AtomicBool::new(false), drawn: AtomicBool::new(false) }));
     }
     let _ = queue();
+    id
+}
+
+/// Ochadi: `{"path","w","h"}` -> `{"id","frames"}` (yoki `{"error"}`).
+/// O'yinchi yuzasiz va to'xtagan holda yaratiladi.
+#[no_mangle]
+pub extern "C" fn rust_player_open(json_ptr: *const std::ffi::c_char) -> *mut std::ffi::c_char {
+    let arg: Value = serde_json::from_str(unsafe { cstr_to_str(json_ptr) }.unwrap_or("{}")).unwrap_or(json!({}));
+    let path = arg["path"].as_str().unwrap_or("");
+    let w = arg["w"].as_i64().unwrap_or(0).clamp(1, 512) as usize;
+    let h = arg["h"].as_i64().unwrap_or(0).clamp(1, 512) as usize;
+    let Some(it) = open_item(path, 0, 0, w, h) else {
+        return string_to_cptr(json!({"error": "ochilmadi"}).to_string());
+    };
+    let frames = it.frames;
+    let id = add_player(vec![it], w, h);
     string_to_cptr(json!({"id": id, "frames": frames}).to_string())
+}
+
+/// Bir nechta animatsiyani BITTA yuzaga: `{"w","h","items":[{"path",
+/// "x","y","w","h"}]}` -> `{"id","n"}` (n — ochilganlari soni).
+#[no_mangle]
+pub extern "C" fn rust_player_open_multi(json_ptr: *const std::ffi::c_char) -> *mut std::ffi::c_char {
+    let arg: Value = serde_json::from_str(unsafe { cstr_to_str(json_ptr) }.unwrap_or("{}")).unwrap_or(json!({}));
+    let w = arg["w"].as_i64().unwrap_or(0).clamp(1, 4096) as usize;
+    let h = arg["h"].as_i64().unwrap_or(0).clamp(1, 2048) as usize;
+    if w * h > 4096 * 1024 {
+        return string_to_cptr(json!({"error": "juda katta"}).to_string());
+    }
+    let mut items = Vec::new();
+    for v in arg["items"].as_array().cloned().unwrap_or_default() {
+        let x = v["x"].as_i64().unwrap_or(0).max(0) as usize;
+        let y = v["y"].as_i64().unwrap_or(0).max(0) as usize;
+        let iw = v["w"].as_i64().unwrap_or(0).clamp(1, 512) as usize;
+        let ih = v["h"].as_i64().unwrap_or(0).clamp(1, 512) as usize;
+        if x >= w || y >= h {
+            continue;
+        }
+        let iw = iw.min(w - x);
+        let ih = ih.min(h - y);
+        if let Some(it) = open_item(v["path"].as_str().unwrap_or(""), x, y, iw, ih) {
+            items.push(it);
+        }
+    }
+    let n = items.len();
+    let id = add_player(items, w, h);
+    string_to_cptr(json!({"id": id, "n": n}).to_string())
 }
 
 /// O'ynasin (1) yoki to'xtasin (0).
@@ -251,7 +347,7 @@ pub extern "C" fn rust_player_open(json_ptr: *const std::ffi::c_char) -> *mut st
 pub extern "C" fn rust_player_set(id: i64, playing: i32) {
     if let Some(s) = get(id) {
         if let Ok(mut p) = s.p.lock() {
-            let on = playing != 0 && p.frames > 1;
+            let on = playing != 0 && p.animated();
             if on && !p.playing {
                 p.next = Instant::now();
             }
@@ -273,8 +369,9 @@ pub extern "C" fn rust_player_free(id: i64) {
     if let Some(s) = s {
         if let Ok(mut p) = s.p.lock() {
             detach_locked(&mut p);
-            sticker_anim::close(p.anim);
-            p.anim = 0;
+            for it in p.items.drain(..) {
+                sticker_anim::close(it.anim);
+            }
         }
     }
 }
@@ -358,6 +455,22 @@ mod tests {
         assert_eq!(rust_player_drawn(id), 0);
         rust_player_free(id);
         assert!(get(id).is_none());
+
+        // Bir nechta animatsiya bitta yuzada.
+        let arg = CString::new(
+            json!({"w": 64, "h": 24, "items": [
+                {"path": f.to_string_lossy(), "x": 0, "y": 0, "w": 32, "h": 24},
+                {"path": f.to_string_lossy(), "x": 32, "y": 0, "w": 32, "h": 24},
+                {"path": "/yoq/fayl", "x": 0, "y": 0, "w": 8, "h": 8}
+            ]})
+            .to_string(),
+        )
+        .unwrap();
+        let r = unsafe { CString::from_raw(rust_player_open_multi(arg.as_ptr())) };
+        let v: Value = serde_json::from_str(r.to_str().unwrap()).unwrap();
+        assert_eq!(v["n"].as_i64(), Some(2));
+        let id = v["id"].as_i64().unwrap();
+        rust_player_free(id);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

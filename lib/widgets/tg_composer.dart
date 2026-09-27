@@ -1095,14 +1095,16 @@ class _SectionsState extends State<_Sections> {
           for (var s = 0; s < widget.counts.length; s++)
             if (widget.counts[s] > 0) ...[
               SliverToBoxAdapter(child: widget.headers[s]),
+              // Qatorlar: har qatordagi animatsiyalar BITTA yuzaga
+              // chiziladi (`TgAnimBatch`, Telegram kabi).
               SliverPadding(
                 padding: const EdgeInsets.symmetric(horizontal: 5),
-                sliver: SliverGrid(
-                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: _columns),
+                sliver: SliverFixedExtentList(
+                  itemExtent: cell,
                   delegate: SliverChildBuilderDelegate(
-                    (_, i) => widget.cell(s, i, cell),
-                    childCount: widget.counts[s],
+                    (_, r) => _gridRow(r, _columns, widget.counts[s], cell,
+                        (i) => widget.cell(s, i, cell)),
+                    childCount: (widget.counts[s] / _columns).ceil(),
                     addAutomaticKeepAlives: false,
                   ),
                 ),
@@ -1114,6 +1116,23 @@ class _SectionsState extends State<_Sections> {
       );
     });
   }
+}
+
+/// Bitta qator: [cols] ta katak; ulardagi animatsiyalar bitta yuzada.
+Widget _gridRow(int r, int cols, int count, double cell,
+    Widget Function(int i) build) {
+  return TgAnimBatch(
+    child: Row(
+      children: [
+        for (var j = 0; j < cols; j++)
+          SizedBox(
+            width: cell,
+            height: cell,
+            child: r * cols + j < count ? build(r * cols + j) : null,
+          ),
+      ],
+    ),
+  );
 }
 
 /// Oddiy katakli ro'yxat (qidiruv natijalari).
@@ -1135,13 +1154,12 @@ class _Grid extends StatelessWidget {
       final w = box.maxWidth - 10;
       final cols = math.max(minColumns, (w / minCell).floor());
       final size = w / cols;
-      return GridView.builder(
+      return ListView.builder(
         cacheExtent: size,
         padding: const EdgeInsets.fromLTRB(5, 0, 5, 64),
-        gridDelegate:
-            SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: cols),
-        itemCount: count,
-        itemBuilder: (_, i) => cell(i, size),
+        itemExtent: size,
+        itemCount: (count / cols).ceil(),
+        itemBuilder: (_, r) => _gridRow(r, cols, count, size, (i) => cell(i, size)),
       );
     });
   }
@@ -2012,7 +2030,9 @@ class _GifPageState extends State<_GifPage>
                         final row = rows[r];
                         return Padding(
                           padding: const EdgeInsets.only(bottom: 2),
-                          child: Row(
+                          // Qatordagi GIF'lar bitta yuzada (Telegram kabi).
+                          child: TgAnimBatch(
+                            child: Row(
                             children: [
                               for (final (i, w) in row.items) ...[
                                 if (i != row.items.first.$1)
@@ -2034,6 +2054,7 @@ class _GifPageState extends State<_GifPage>
                                 ),
                               ],
                             ],
+                          ),
                           ),
                         );
                       },

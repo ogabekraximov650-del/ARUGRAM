@@ -242,6 +242,8 @@ typedef _DrawnC = Int32 Function(Int64);
 typedef _DrawnD = int Function(int);
 typedef _FreeIdC = Void Function(Int64);
 typedef _FreeIdD = void Function(int);
+typedef _CapC = Void Function(Int32);
+typedef _CapD = void Function(int);
 
 class AnimPlayers {
   AnimPlayers._();
@@ -272,5 +274,13 @@ class AnimPlayers {
 
   static void free(int id) {
     if (_load()) _free!(id);
+  }
+
+  /// Kadr/s chegarasi (kuchsiz telefonda 20).
+  static void fpsCap(int fps) {
+    try {
+      final l = _l ??= _lib();
+      l.lookupFunction<_CapC, _CapD>('rust_player_fps_cap')(fps);
+    } catch (_) {}
   }
 }

@@ -410,6 +410,16 @@ class _TgAnimViewState extends State<TgAnimView> {
       _px = (widget.size * dpr).round().clamp(24, cap).toInt();
       _ph = _px;
     }
+    // Guruh ichida (emoji qatori va h.k.) — o'z yuzasi YO'Q: o'rnini
+    // guruhga aytadi, guruh hammasini bitta yuzaga chizdiradi.
+    final batch = _texSupported && !widget.frozen ? TgAnimBatch._of(context) : null;
+    if (batch != null) {
+      _batch = batch;
+      _texMode = true;
+      _batched = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _report());
+      return;
+    }
     // Android: kadrni Rust o'zi Flutter `Texture` ga chizadi (Dart
     // kadrlar bilan shug'ullanmaydi — UI oqimi bo'sh, silliq).
     if (_texSupported) {
@@ -425,6 +435,7 @@ class _TgAnimViewState extends State<TgAnimView> {
     final on = _tickerMode?.value.enabled ?? true;
     if (on == _enabled) return;
     _enabled = on;
+    if (_batched) return;
     if (_texMode) {
       _texPlay();
       return;
@@ -444,6 +455,32 @@ class _TgAnimViewState extends State<TgAnimView> {
   static const _texCh = MethodChannel('aru/anim');
   bool get _texSupported => Platform.isAndroid && !_texBroken;
   bool _texMode = false;
+  _TgAnimBatchState? _batch;
+  bool _batched = false;
+
+  /// O'rnini (guruhga nisbatan) guruhga aytadi.
+  void _report() {
+    final b = _batch;
+    if (_dead || b == null || !mounted) return;
+    final me = context.findRenderObject() as RenderBox?;
+    final root = b.context.findRenderObject() as RenderBox?;
+    if (me == null || root == null || !me.hasSize || !me.attached) return;
+    final o = me.localToGlobal(Offset.zero, ancestor: root);
+    b.put(this, widget.path, o & me.size);
+  }
+
+  /// Guruh yuzasi ishlamadi — o'zi chizadi (eski yo'l).
+  void _batchFailed() {
+    _batch = null;
+    _batched = false;
+    _texMode = false;
+    if (_dead) return;
+    final first = _firstFrames[_key];
+    if (first != null) _img.value = first.clone();
+    _open();
+    if (mounted) setState(() {});
+  }
+
   int _player = 0;
   int? _texture;
   bool _texReady = false;
@@ -675,6 +712,8 @@ class _TgAnimViewState extends State<TgAnimView> {
   void dispose() {
     _dead = true;
     _tickerMode?.removeListener(_onTickerMode);
+    _batch?.remove(this);
+    _batch = null;
     _closeTex();
     _release();
     _img.value?.dispose();
@@ -685,6 +724,11 @@ class _TgAnimViewState extends State<TgAnimView> {
 
   @override
   Widget build(BuildContext context) {
+    if (_batched) {
+      // Guruh chizadi — bu yerda faqat joy (o'lcham o'zgarsa qayta aytiladi).
+      WidgetsBinding.instance.addPostFrameCallback((_) => _report());
+      return SizedBox(width: widget.size, height: widget.height ?? widget.size);
+    }
     if (_texMode) {
       final tex = _texture;
       if (_failed) return widget.fallback;
@@ -1168,5 +1212,216 @@ void tgPrefetch(Iterable<({String type, String file, String body})> items) {
         }).catchError((_) => null));
       }
     }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  GURUH: BIR NECHTA ANIMATSIYA — BITTA YUZA (Telegram kabi)
+// ═══════════════════════════════════════════════════════════════
+//
+// Telegram (`DrawingInBackgroundThreadDrawable`) ekrandagi emojilarni
+// bittalab chizmaydi: bir qatordagi hammasi fon oqimida BITTA rasmga
+// chiziladi va ekranga bitta rasm chiqadi. Bu yerda ham: [TgAnimBatch]
+// ichidagi har bir [TgAnimView] o'z yuzasini ochmaydi — o'rnini
+// (to'rtburchagini) guruhga aytadi, guruh esa hammasini Rust'da bitta
+// yuzaga chizdiradi (`rust_player_open_multi`). 8 ta yuza o'rniga bitta
+// — grafik protsessor yuki ancha kam, kuchsiz telefonda ham silliq.
+
+class TgAnimBatch extends StatefulWidget {
+  final Widget child;
+  const TgAnimBatch({super.key, required this.child});
+
+  static _TgAnimBatchState? _of(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<_BatchScope>()?.state;
+
+  @override
+  State<TgAnimBatch> createState() => _TgAnimBatchState();
+}
+
+class _BatchScope extends InheritedWidget {
+  final _TgAnimBatchState state;
+  const _BatchScope({required this.state, required super.child});
+
+  @override
+  bool updateShouldNotify(_BatchScope old) => !identical(old.state, state);
+}
+
+class _BatchItem {
+  final String path;
+  final Rect rect;
+  _BatchItem(this.path, this.rect);
+}
+
+class _TgAnimBatchState extends State<TgAnimBatch> {
+  static const _ch = MethodChannel('aru/anim');
+  final Map<_TgAnimViewState, _BatchItem> _items = {};
+  Timer? _debounce;
+  bool _dead = false;
+  int _player = 0;
+  int? _texture;
+  int _gen = 0;
+  ValueListenable<TickerModeData>? _tm;
+  bool _enabled = true;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final tm = TickerMode.getValuesNotifier(context);
+    if (!identical(tm, _tm)) {
+      _tm?.removeListener(_onTm);
+      _tm = tm..addListener(_onTm);
+      _enabled = tm.value.enabled;
+    }
+  }
+
+  void _onTm() {
+    _enabled = _tm?.value.enabled ?? true;
+    if (_player != 0) AnimPlayers.setPlaying(_player, _enabled);
+  }
+
+  void put(_TgAnimViewState who, String path, Rect rect) {
+    final old = _items[who];
+    if (old != null && old.path == path && old.rect == rect) return;
+    _items[who] = _BatchItem(path, rect);
+    _schedule();
+  }
+
+  void remove(_TgAnimViewState who) {
+    if (_items.remove(who) != null && !_dead) _schedule();
+  }
+
+  void _schedule() {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 60), _rebuild);
+  }
+
+  Future<void> _rebuild() async {
+    if (_dead || !mounted) return;
+    final gen = ++_gen;
+    final box = context.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize || _items.isEmpty) {
+      _swap(0, null);
+      return;
+    }
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    // Yuza o'lchami: kuchsiz telefonda 1.5x, aks holda 2x gacha.
+    final scale = math.min(dpr, DevicePerf.low ? 1.5 : 2.0);
+    final w = (box.size.width * scale).round();
+    final h = (box.size.height * scale).round();
+    if (w <= 0 || h <= 0) return;
+    final items = [
+      for (final it in _items.values)
+        {
+          'path': it.path,
+          'x': (it.rect.left * scale).round(),
+          'y': (it.rect.top * scale).round(),
+          'w': (it.rect.width * scale).round(),
+          'h': (it.rect.height * scale).round(),
+        }
+    ];
+    final j = await NativePool.render.call('rust_player_open_multi',
+        arg: jsonEncode({'w': w, 'h': h, 'items': items}));
+    final id = (j['id'] as num?)?.toInt() ?? 0;
+    if (id <= 0) return;
+    if (_dead || gen != _gen) {
+      AnimPlayers.free(id);
+      return;
+    }
+    int? tex;
+    try {
+      tex = await _ch.invokeMethod<int>('create', {'player': id, 'w': w, 'h': h});
+    } catch (_) {
+      tex = null;
+    }
+    if (tex == null) {
+      AnimPlayers.free(id);
+      _failAll();
+      return;
+    }
+    if (_dead || gen != _gen) {
+      unawaited(_ch
+          .invokeMethod('dispose', {'texture': tex})
+          .catchError((_) => null)
+          .whenComplete(() => AnimPlayers.free(id)));
+      return;
+    }
+    AnimPlayers.setPlaying(id, _enabled);
+    // Yangi rasm birinchi kadri chiqqach almashtiriladi (miltillamasin).
+    var waited = 0;
+    Timer.periodic(const Duration(milliseconds: 16), (t) {
+      waited += 16;
+      if (_dead || gen != _gen) {
+        t.cancel();
+        if (_texture != tex) {
+          unawaited(_ch
+              .invokeMethod('dispose', {'texture': tex})
+              .catchError((_) => null)
+              .whenComplete(() => AnimPlayers.free(id)));
+        }
+        return;
+      }
+      if (AnimPlayers.drawn(id) || waited > 3000) {
+        t.cancel();
+        _swap(id, tex);
+      }
+    });
+  }
+
+  /// Texture yo'li umuman ishlamadi — hamma animatsiya o'zi chizadi.
+  void _failAll() {
+    _TgAnimViewState._texBroken = true;
+    final list = _items.keys.toList();
+    _items.clear();
+    for (final v in list) {
+      v._batchFailed();
+    }
+  }
+
+  void _swap(int id, int? tex) {
+    final oldId = _player;
+    final oldTex = _texture;
+    _player = id;
+    _texture = tex;
+    if (mounted && !_dead) setState(() {});
+    if (oldId != 0) {
+      AnimPlayers.setPlaying(oldId, false);
+      if (oldTex == null) {
+        AnimPlayers.free(oldId);
+      } else {
+        unawaited(_ch
+            .invokeMethod('dispose', {'texture': oldTex})
+            .catchError((_) => null)
+            .whenComplete(() => AnimPlayers.free(oldId)));
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _dead = true;
+    _debounce?.cancel();
+    _tm?.removeListener(_onTm);
+    _swap(0, null);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tex = _texture;
+    return _BatchScope(
+      state: this,
+      child: Stack(
+        children: [
+          widget.child,
+          if (tex != null)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: Texture(
+                    textureId: tex, filterQuality: FilterQuality.medium),
+              ),
+            ),
+        ],
+      ),
+    );
   }
 }

@@ -2206,7 +2206,9 @@ class _Bubble extends StatelessWidget {
                 constraints: BoxConstraints(
                   maxWidth: MediaQuery.sizeOf(context).width * 0.8,
                 ),
-                child: _content(context, bare),
+                // Xabardagi hamma animatsiya (maxsus emojilar, stiker,
+                // GIF) bitta yuzada (`TgAnimBatch`).
+                child: TgAnimBatch(child: _content(context, bare)),
               ),
             ),
           ),

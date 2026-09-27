@@ -284,6 +284,22 @@ jobs:
             echo "✅ networkSecurityConfig allaqachon bor"
           fi
 
+      # ── ESKI GRAFIK DVIGATEL (Skia) — KUCHSIZ TELEFONLARDA SILLIQ ──
+      #
+      # TALAB (foydalanuvchi): "2 GB RAM'li telefonda ham qotmasdan
+      # ishlasin". Flutter'ning yangi dvigateli (Impeller) Android'da
+      # ko'p rasm/animatsiyali ekranlarda o'rta va arzon telefonlarda
+      # kadr tashlab ketishi rasman qayd etilgan (flutter/flutter
+      # #148472, #153186, #183510). Skia'ga qaytilganda ular ancha
+      # silliq ishlaydi.
+      - name: Impeller'ni o'chirish (Skia)
+        run: |
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          if ! grep -q "EnableImpeller" "$MANIFEST"; then
+            sed -i '0,/<\/application>/s//        <meta-data android:name="io.flutter.embedding.android.EnableImpeller" android:value="false" \/>\n    <\/application>/' "$MANIFEST"
+          fi
+          grep -n "EnableImpeller" "$MANIFEST" || { echo "❌ EnableImpeller qo'shilmadi"; exit 1; }
+
       # ── TELEGRAM HAVOLASINI OCHISH UCHUN (Android 11+) ────────
       #
       # Android 11 dan boshlab ilova boshqa ilovalarni "ko'ra"

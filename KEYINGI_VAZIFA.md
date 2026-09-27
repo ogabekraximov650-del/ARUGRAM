@@ -3528,3 +3528,19 @@ zaxira yo'llar (`thumbnailData`, birinchi kadr).
   ulanadi. Texture yo'li ishlamasa — avtomatik eski (Dart) yo'l.
 * `TgAnimView`: `_openTex` / `_texPlay` / `_closeTex`; birinchi kadr
   yuzaga chiqqach ko'rsatiladi (qora miltillamasin).
+
+## Kuchsiz (2 GB) telefon uchun 3 bosqich
+
+1. Impeller o'chirildi (Skia) — CI manifestga
+   `io.flutter.embedding.android.EnableImpeller=false` qo'shadi
+   (flutter/flutter #148472, #153186, #183510: Android'da ko'p
+   rasm/animatsiyada o'rta va arzon telefonlarda kadr tashlaydi).
+2. Telegram `DrawingInBackgroundThreadDrawable` usuli: `TgAnimBatch`
+   (tg_media_view.dart) — ichidagi animatsiyalar o'z yuzasini ochmaydi,
+   o'rnini aytadi; guruh hammasini Rust'da bitta yuzaga chizdiradi
+   (`rust_player_open_multi`, anim_player.rs `Item`). Emoji/stiker
+   paneli qatorlari (`_gridRow`), GIF qatorlari, chat xabari va izoh
+   matni — har biri bitta Texture (ilgari har animatsiya alohida).
+   Faqat o'zgargan kadr qayta chiziladi.
+3. Kuchsiz telefon (`DevicePerf.low`): 20 kadr/s
+   (`rust_player_fps_cap`), guruh yuzasi 1.5x o'lchamda (aks holda 2x).

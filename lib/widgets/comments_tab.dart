@@ -919,7 +919,9 @@ class _CommentRow extends StatelessWidget {
                   child: TgGifMessage(fileName: c.mediaFile, maxWidth: 200),
                 )
               else
-              EmojiText(
+              // Matndagi maxsus emojilar bitta yuzada (`TgAnimBatch`).
+              TgAnimBatch(
+                child: EmojiText(
                 c.deleted ? 'Izoh o\'chirilgan' : c.body,
                 style: TextStyle(
                   color: c.deleted
@@ -929,6 +931,7 @@ class _CommentRow extends StatelessWidget {
                   height: 1.38,
                   fontStyle: c.deleted ? FontStyle.italic : null,
                 ),
+              ),
               ),
               // ── LAYK · JAVOB · O'CHIRISH ────────────────────────
               //
