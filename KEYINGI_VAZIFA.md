@@ -3752,3 +3752,7 @@ odam yubora olsin — Telegram Premium bo'lishi shart emas".
   tekshirilmaydi. Qulf/xabar matni yangilandi.
 - GIF va stikerlar oldindan hech qanday premium tekshiruvisiz ishlaydi
   (yuborish Telegram'ga emas, bizning chat/izohlarga).
+- (2026-09, davomi) GIF va stikerlar ham faqat ilova obunasi (yoki
+  admin) bilan yuboriladi: `_TgMediaPanelState._allowed` — panelni hamma
+  ko'radi, yuborishda obuna tekshiriladi (obuna yo'q bo'lsa "Profil →
+  Obuna" xabari). Yuborishning boshqa yo'li yo'q (faqat panel).

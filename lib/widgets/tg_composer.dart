@@ -402,6 +402,34 @@ class _TgMediaPanelState extends State<TgMediaPanel> {
     super.dispose();
   }
 
+  // TALAB (foydalanuvchi): "GIF va stikerlarni ham ilovamizdan obuna
+  // sotib olgan odam yubora oladi". Panelni hamma ochib ko'ra oladi,
+  // yuborish esa — faqat obuna (yoki admin) bilan.
+  Future<bool> _allowed(String what) async {
+    if (UnreadBadge.instance.isAdmin) return true;
+    final b = BillingService.instance;
+    if (!b.active) await b.load();
+    if (b.active) return true;
+    if (mounted) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: AppColors.card,
+        content: Text(
+            '$what faqat ARUmediaTV obunasi bilan yuboriladi (Profil → Obuna)',
+            style: const TextStyle(color: Colors.white)),
+      ));
+    }
+    return false;
+  }
+
+  Future<void> _sendGif(TgDoc d) async {
+    if (await _allowed('GIF')) widget.onGif(d);
+  }
+
+  Future<void> _sendSticker(TgDoc d) async {
+    if (await _allowed('Stikerlar')) widget.onSticker(d);
+  }
+
   void _go(int i) {
     if (i == _tab) return;
     HapticFeedback.selectionClick();
@@ -438,10 +466,10 @@ class _TgMediaPanelState extends State<TgMediaPanel> {
                   enabled: _tab == 0,
                   child: _EmojiPage(controller: widget.controller)),
               TickerMode(
-                  enabled: _tab == 1, child: _GifPage(onGif: widget.onGif)),
+                  enabled: _tab == 1, child: _GifPage(onGif: _sendGif)),
               TickerMode(
                   enabled: _tab == 2,
-                  child: _StickerPage(onSticker: widget.onSticker)),
+                  child: _StickerPage(onSticker: _sendSticker)),
             ],
           ),
           ),
