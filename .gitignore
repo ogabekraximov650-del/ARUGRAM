@@ -31,5 +31,5 @@ rust/Cargo.lock
 __pycache__/
 *.pyc
 tool/encode/*.session*
-tool/encode/*.txt
+tool/encode/PYRO_SESSION_B64_*.txt
 arugram_encode.session*
