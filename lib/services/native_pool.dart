@@ -280,6 +280,17 @@ class AnimPlayers {
     if (_load()) _free!(id);
   }
 
+  static _FreeIdD? _replay;
+
+  /// Bir martalik (chatdagi stiker/GIF) animatsiyalarni boshidan
+  /// o'ynatadi — ekranda to'liq ko'ringanda.
+  static void replay(int id) {
+    if (!_load()) return;
+    try {
+      (_replay ??= _l!.lookupFunction<_FreeIdC, _FreeIdD>('rust_player_replay'))(id);
+    } catch (_) {}
+  }
+
   /// Kadr/s chegarasi (kuchsiz telefonda 20).
   static void fpsCap(int fps) {
     try {

@@ -500,6 +500,9 @@ class _CommentsTabState extends State<CommentsTab> {
       );
     }
 
+    // `c.items` har chaqirilganda butun ro'yxatdan nusxa oladi —
+    // surishda har qator uchun ikki marta nusxa olinardi. Bir marta.
+    final items = c.items;
     return RefreshIndicator(
       onRefresh: () => c.load(force: true),
       color: AppColors.accent,
@@ -510,9 +513,9 @@ class _CommentsTabState extends State<CommentsTab> {
             parent: AlwaysScrollableScrollPhysics()),
         padding: const EdgeInsets.fromLTRB(12, 6, 12, 12),
         // Oxirgi element — "yana yuklanmoqda" aylanasi.
-        itemCount: c.items.length + (c.hasMore ? 1 : 0),
+        itemCount: items.length + (c.hasMore ? 1 : 0),
         itemBuilder: (context, i) {
-          if (i >= c.items.length) {
+          if (i >= items.length) {
             return const Padding(
               padding: EdgeInsets.symmetric(vertical: 18),
               child: Center(
@@ -525,7 +528,7 @@ class _CommentsTabState extends State<CommentsTab> {
               ),
             );
           }
-          final item = c.items[i];
+          final item = items[i];
           return _CommentBlock(
             comment: item,
             controller: c,

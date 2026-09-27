@@ -41,12 +41,16 @@ class TgStickerView extends StatelessWidget {
   /// Faqat birinchi kadr (panel tepasidagi to'plam belgilari).
   final bool frozen;
 
+  /// Bir marta o'ynaydi (chatdagi xabar) — [TgAnimView.once].
+  final bool once;
+
   const TgStickerView({
     super.key,
     required this.doc,
     required this.size,
     this.still = false,
     this.frozen = false,
+    this.once = false,
   });
 
   @override
@@ -85,6 +89,7 @@ class TgStickerView extends StatelessWidget {
                 size: size,
                 panel: still,
                 frozen: frozen,
+                once: once,
                 fallback: _Placeholder(size),
               );
             }
@@ -338,6 +343,11 @@ class TgAnimView extends StatefulWidget {
 
   /// GIF (H.264 MP4): to'rtburchak, "cover" bilan kesiladi.
   final bool gif;
+
+  /// Bir marta o'ynaydi (chatdagi stiker/GIF, Telegram kabi): ekranda
+  /// to'liq ko'ringanda boshlanadi, oxirgi kadrda to'xtaydi; ekrandan
+  /// chiqib qaytsa (yoki bosilsa) yana bir marta.
+  final bool once;
   final Widget fallback;
 
   const TgAnimView({
@@ -349,6 +359,7 @@ class TgAnimView extends StatefulWidget {
     this.panel = false,
     this.frozen = false,
     this.gif = false,
+    this.once = false,
   });
 
   @override
@@ -394,16 +405,19 @@ class _TgAnimViewState extends State<TgAnimView> {
     }
     if (_px != 0) return;
     final dpr = MediaQuery.devicePixelRatioOf(context);
-    // Panelda kichik: emoji 100 px, stiker 160 px (Telegram
-    // klaviaturasi ham kichraytirib chizadi); xabarda 320 px.
+    // SIFAT (foydalanuvchi: "GIF va stikerlar sifati pasayib
+    // ketibdi"): ilgari xabardagi stiker 320 px, GIF 360 px bilan
+    // cheklangan edi — 3x ekranda (180 dp = 540 px) xira ko'rinardi.
+    // Endi Telegram kabi ekran o'lchamida (512 px gacha); kadrlar
+    // diskda saqlangani uchun qayta chizish qimmat emas.
     final low = DevicePerf.low;
     final cap = widget.panel
-        ? (widget.size <= 48 ? (low ? 72 : 100) : (low ? 128 : 160))
-        : (low ? 256 : 320);
+        ? (widget.size <= 48 ? (low ? 96 : 128) : (low ? 192 : 256))
+        : (low ? 384 : 512);
     if (widget.gif) {
-      // GIF: eni 240 (panel) / 360 (xabar) px gacha, bo'yi nisbatda.
+      // GIF: eni 320 (panel) / 512 (xabar) px gacha, bo'yi nisbatda.
       final h = widget.height ?? widget.size;
-      final gcap = widget.panel ? (low ? 180 : 240) : (low ? 280 : 360);
+      final gcap = widget.panel ? (low ? 240 : 320) : (low ? 400 : 512);
       final k = math.min(1.0, gcap / (math.max(widget.size, h) * dpr));
       _px = (widget.size * dpr * k).round().clamp(16, 512).toInt();
       _ph = (h * dpr * k).round().clamp(16, 512).toInt();
@@ -491,7 +505,8 @@ class _TgAnimViewState extends State<TgAnimView> {
     if (_player != 0 || _dead) return;
     _texMode = true;
     final j = await NativePool.render.call('rust_player_open',
-        arg: jsonEncode({'path': widget.path, 'w': _px, 'h': _ph}));
+        arg: jsonEncode(
+            {'path': widget.path, 'w': _px, 'h': _ph, 'once': widget.once}));
     final id = (j['id'] as num?)?.toInt() ?? 0;
     if (id <= 0) {
       if (_dead) return;
@@ -526,6 +541,10 @@ class _TgAnimViewState extends State<TgAnimView> {
     }
     _texture = tex;
     _texPlay();
+    if (widget.once) {
+      (_watch ??= _OnceWatch(context, () => AnimPlayers.replay(_player)))
+          .attach(fresh: true);
+    }
     // Birinchi kadr yuzaga chiqqach ko'rsatiladi (bo'sh/qora yuza
     // miltillamasin).
     var waited = 0;
@@ -547,7 +566,16 @@ class _TgAnimViewState extends State<TgAnimView> {
     AnimPlayers.setPlaying(_player, _enabled && !widget.frozen);
   }
 
+  _OnceWatch? _watch;
+
+  /// Bosilganda — bir martalik animatsiya qayta o'ynaydi.
+  void replay() {
+    if (_player != 0) AnimPlayers.replay(_player);
+    _batch?.replay();
+  }
+
   void _closeTex() {
+    _watch?.detach();
     _texPoll?.cancel();
     final id = _player;
     final tex = _texture;
@@ -587,6 +615,8 @@ class _TgAnimViewState extends State<TgAnimView> {
 
   Future<void> _open() async {
     if (_opening || _handle > 0 || _failed || _dead) return;
+    // Birinchi kadr allaqachon bor — qayta ochish shart emas.
+    if (widget.frozen && _image != null) return;
     _opening = true;
     final r = await NativePool.render.animOpen(widget.path, _px, _ph);
     _opening = false;
@@ -697,6 +727,10 @@ class _TgAnimViewState extends State<TgAnimView> {
       cache[f] = img.clone();
     }
     _show(img, f, wn);
+    // Faqat birinchi kadr kerak (panel stikerlari) — Rust tutqichi
+    // darhol yopiladi (xotira: har stiker o'z chizgichini ushlab
+    // turmasin).
+    if (widget.frozen) _release();
   }
 
   void _show(ui.Image img, int f, [int n = -1]) {
@@ -728,18 +762,21 @@ class _TgAnimViewState extends State<TgAnimView> {
     if (_batched) {
       // Guruh chizadi — bu yerda faqat joy (o'lcham o'zgarsa qayta aytiladi).
       WidgetsBinding.instance.addPostFrameCallback((_) => _report());
-      return SizedBox(width: widget.size, height: widget.height ?? widget.size);
+      final box =
+          SizedBox(width: widget.size, height: widget.height ?? widget.size);
+      return widget.once ? _TapReplay(onTap: replay, child: box) : box;
     }
     if (_texMode) {
       final tex = _texture;
       if (_failed) return widget.fallback;
-      return SizedBox(
+      final box = SizedBox(
         width: widget.size,
         height: widget.height ?? widget.size,
         child: tex != null && _texReady
             ? Texture(textureId: tex, filterQuality: FilterQuality.medium)
             : null,
       );
+      return widget.once ? _TapReplay(onTap: replay, child: box) : box;
     }
     if (_image == null) {
       return _failed ? widget.fallback : const SizedBox.shrink();
@@ -798,7 +835,7 @@ class TgStickerRefView extends StatelessWidget {
     final known = TgMedia.instance.stickerByRefSync(ref);
     if (known != null) {
       return KeyedSubtree(
-          key: ValueKey(ref), child: TgStickerView(doc: known, size: size));
+          key: ValueKey(ref), child: TgStickerView(doc: known, size: size, once: true));
     }
     return FutureBuilder<TgDoc?>(
       key: ValueKey(ref),
@@ -815,7 +852,7 @@ class TgStickerRefView extends StatelessWidget {
                 : null,
           );
         }
-        return TgStickerView(doc: d, size: size);
+        return TgStickerView(doc: d, size: size, once: true);
       },
     );
   }
@@ -1162,13 +1199,15 @@ class _TgGifMessageState extends State<TgGifMessage> {
                             strokeWidth: 2, color: Colors.white54),
                       ),
               )
-            // Tinmasdan takrorlanadi (Telegram), ilova ichidagi dekoder bilan.
+            // Telegram kabi: ekranda to'liq ko'ringanda bir marta o'ynaydi
+            // (bosilsa — yana), ilova ichidagi dekoder bilan.
             : TgAnimView(
                 key: ValueKey(p),
                 path: p,
                 size: w,
                 height: h,
                 gif: true,
+                once: true,
                 fallback: Container(color: Colors.white.withValues(alpha: 0.06)),
               ),
       ),
@@ -1250,7 +1289,8 @@ class _BatchScope extends InheritedWidget {
 class _BatchItem {
   final String path;
   final Rect rect;
-  _BatchItem(this.path, this.rect);
+  final bool once;
+  _BatchItem(this.path, this.rect, this.once);
 }
 
 class _TgAnimBatchState extends State<TgAnimBatch> {
@@ -1283,7 +1323,7 @@ class _TgAnimBatchState extends State<TgAnimBatch> {
   void put(_TgAnimViewState who, String path, Rect rect) {
     final old = _items[who];
     if (old != null && old.path == path && old.rect == rect) return;
-    _items[who] = _BatchItem(path, rect);
+    _items[who] = _BatchItem(path, rect, who.widget.once);
     _schedule();
   }
 
@@ -1291,13 +1331,25 @@ class _TgAnimBatchState extends State<TgAnimBatch> {
     if (_items.remove(who) != null && !_dead) _schedule();
   }
 
-  void _schedule() {
+  void _schedule([int ms = 60]) {
     _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 60), _rebuild);
+    _debounce = Timer(Duration(milliseconds: ms), _rebuild);
   }
+
+  /// Yuza joyi (guruh ichida) — faqat animatsiyalar egallagan qism.
+  Rect _texRect = Rect.zero;
+  Rect _nextRect = Rect.zero;
 
   Future<void> _rebuild() async {
     if (_dead || !mounted) return;
+    // SURISHDA QOTISH (foydalanuvchi: "izoh va support chatni surganda
+    // qotyapti"): ro'yxat tez surilayotganda har yangi xabar uchun yuza
+    // ochilardi (platforma oqimida `SurfaceProducer`, Rust'da kadrlar).
+    // Flutter tavsiyasi bo'yicha — surish sekinlashguncha kutiladi.
+    if (Scrollable.recommendDeferredLoadingForContext(context)) {
+      _schedule(150);
+      return;
+    }
     final gen = ++_gen;
     final box = context.findRenderObject() as RenderBox?;
     if (box == null || !box.hasSize || _items.isEmpty) {
@@ -1305,21 +1357,34 @@ class _TgAnimBatchState extends State<TgAnimBatch> {
       return;
     }
     final dpr = MediaQuery.devicePixelRatioOf(context);
-    // Yuza o'lchami: kuchsiz telefonda 1.5x, aks holda 2x gacha.
-    final scale = math.min(dpr, DevicePerf.low ? 1.5 : 2.0);
-    final w = (box.size.width * scale).round();
-    final h = (box.size.height * scale).round();
+    // Ekran zichligida (3x gacha) — kichikroq chizilib cho'zilsa
+    // emoji/stiker xira ko'rinardi.
+    final scale = math.min(dpr, DevicePerf.low ? 2.0 : 3.0);
+    // Yuza butun pufakcha emas — faqat animatsiyalarni o'rab turgan
+    // to'rtburchak. Ilgari bitta emojili matn xabari uchun ham butun
+    // pufakcha kattaligida (masalan 900x600 px) yuza ochilib, har kadrda
+    // to'liq ko'chirilardi — grafik protsessor yuki surishni qotirardi.
+    var u = _items.values.first.rect;
+    for (final it in _items.values) {
+      u = u.expandToInclude(it.rect);
+    }
+    u = u.intersect(Offset.zero & box.size);
+    final w = (u.width * scale).round();
+    final h = (u.height * scale).round();
     if (w <= 0 || h <= 0) return;
     final items = [
       for (final it in _items.values)
         {
           'path': it.path,
-          'x': (it.rect.left * scale).round(),
-          'y': (it.rect.top * scale).round(),
+          'x': ((it.rect.left - u.left) * scale).round(),
+          'y': ((it.rect.top - u.top) * scale).round(),
           'w': (it.rect.width * scale).round(),
           'h': (it.rect.height * scale).round(),
+          'once': it.once,
         }
     ];
+    _nextRect = u;
+    final hasOnce = _items.values.any((it) => it.once);
     final j = await NativePool.render.call('rust_player_open_multi',
         arg: jsonEncode({'w': w, 'h': h, 'items': items}));
     final id = (j['id'] as num?)?.toInt() ?? 0;
@@ -1363,7 +1428,12 @@ class _TgAnimBatchState extends State<TgAnimBatch> {
       }
       if (AnimPlayers.drawn(id) || waited > 3000) {
         t.cancel();
+        _texRect = _nextRect;
         _swap(id, tex);
+        // Bir martalik stiker/GIF — ekranda to'liq ko'ringanda.
+        if (hasOnce) {
+          (_watch ??= _OnceWatch(context, replay)).attach(fresh: true);
+        }
       }
     });
   }
@@ -1376,6 +1446,12 @@ class _TgAnimBatchState extends State<TgAnimBatch> {
     for (final v in list) {
       v._batchFailed();
     }
+  }
+
+  _OnceWatch? _watch;
+
+  void replay() {
+    if (_player != 0) AnimPlayers.replay(_player);
   }
 
   void _swap(int id, int? tex) {
@@ -1400,6 +1476,7 @@ class _TgAnimBatchState extends State<TgAnimBatch> {
   @override
   void dispose() {
     _dead = true;
+    _watch?.detach();
     _debounce?.cancel();
     _tm?.removeListener(_onTm);
     _swap(0, null);
@@ -1415,7 +1492,8 @@ class _TgAnimBatchState extends State<TgAnimBatch> {
         children: [
           widget.child,
           if (tex != null)
-            Positioned.fill(
+            Positioned.fromRect(
+              rect: _texRect,
               child: IgnorePointer(
                 child: Texture(
                     textureId: tex, filterQuality: FilterQuality.medium),
@@ -1423,6 +1501,103 @@ class _TgAnimBatchState extends State<TgAnimBatch> {
             ),
         ],
       ),
+    );
+  }
+}
+
+/// "Ekranda TO'LIQ ko'rindi" kuzatuvchisi (bir martalik animatsiyalar).
+///
+/// TALAB (foydalanuvchi): "yuborilgan GIF va stikerlar ekranda
+/// ko'ringanda bir marta animatsiya bo'lsin; ekranni surganda yo'qolib,
+/// qayta chiqsa yana bir marta".
+///
+/// Ro'yxat surilganda joy tekshiriladi: to'liq ko'ringan paytda
+/// [onShow] bir marta chaqiriladi; element ko'rinish maydonidan butunlay
+/// chiqqach yana "o'qlanadi".
+class _OnceWatch {
+  final BuildContext context;
+  final VoidCallback onShow;
+  _OnceWatch(this.context, this.onShow);
+
+  ScrollableState? _scroll;
+  ScrollPosition? _pos;
+  bool _armed = true;
+
+  /// [fresh] — yangi o'yinchi: ko'rinib turgan bo'lsa darhol o'ynaydi.
+  void attach({bool fresh = false}) {
+    if (!context.mounted) return;
+    if (fresh) _armed = true;
+    if (_pos == null) {
+      _scroll = Scrollable.maybeOf(context);
+      _pos = _scroll?.position;
+      _pos?.addListener(check);
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) => check());
+  }
+
+  void detach() {
+    _pos?.removeListener(check);
+    _pos = null;
+    _scroll = null;
+  }
+
+  void check() {
+    if (!context.mounted) return;
+    final me = context.findRenderObject() as RenderBox?;
+    if (me == null || !me.attached || !me.hasSize) return;
+    final vb = _scroll?.context.findRenderObject() as RenderBox?;
+    final view = vb != null && vb.attached && vb.hasSize
+        ? vb.localToGlobal(Offset.zero) & vb.size
+        : Offset.zero & MediaQuery.sizeOf(context);
+    final r = me.localToGlobal(Offset.zero) & me.size;
+    final seen = r.intersect(view);
+    final full = seen.width > 0 &&
+        seen.height >= math.min(r.height, view.height) - 1;
+    if (full) {
+      if (_armed) {
+        _armed = false;
+        onShow();
+      }
+    } else if (!r.overlaps(view)) {
+      _armed = true;
+    }
+  }
+}
+
+/// Bosilganini sezadi, lekin ota-onaning bosishini (tanlash, menyu)
+/// "o'g'irlamaydi" — `Listener` bosish musobaqasida qatnashmaydi.
+class _TapReplay extends StatefulWidget {
+  final VoidCallback onTap;
+  final Widget child;
+  const _TapReplay({required this.onTap, required this.child});
+
+  @override
+  State<_TapReplay> createState() => _TapReplayState();
+}
+
+class _TapReplayState extends State<_TapReplay> {
+  Offset? _down;
+  DateTime _at = DateTime.now();
+
+  @override
+  Widget build(BuildContext context) {
+    return Listener(
+      behavior: HitTestBehavior.opaque,
+      onPointerDown: (e) {
+        _down = e.position;
+        _at = DateTime.now();
+      },
+      onPointerUp: (e) {
+        final d = _down;
+        _down = null;
+        if (d != null &&
+            (e.position - d).distance < 12 &&
+            DateTime.now().difference(_at).inMilliseconds < 400) {
+          widget.onTap();
+        }
+      },
+      onPointerCancel: (_) => _down = null,
+      child: widget.child,
     );
   }
 }

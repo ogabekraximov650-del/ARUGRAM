@@ -1048,7 +1048,10 @@ jobs:
         id: rename
         run: |
           SRC="build/app/outputs/flutter-apk/app-release.apk"
-          OUT="build/app/outputs/flutter-apk/arumedia-${{ matrix.name }}.apk"
+          # TALAB (foydalanuvchi): "APK nomiga build raqami ham yozilsin
+          # — qaysi build'ni o'rnatganimni aniq bilish uchun".
+          # Masalan: `arugram-admin-32-build-412.apk`.
+          OUT="build/app/outputs/flutter-apk/arugram-${{ matrix.name }}-build-${{ github.run_number }}.apk"
           cp "$SRC" "$OUT"
           echo "out=$OUT" >> "$GITHUB_OUTPUT"
           ls -lh "$OUT"
@@ -1066,8 +1069,8 @@ jobs:
             hajmi kichik. Telefoningiz 64-bitli bo'lsa `-64`,
             eskiroq bo'lsa `-32` ni oling.
 
-            * `arumedia-admin-32.apk` — admin paneli bilan, 32-bit (armeabi-v7a)
-            * `arumedia-user-64.apk`  — foydalanuvchi, 64-bit (arm64-v8a)
+            * `arugram-admin-32-build-${{ github.run_number }}.apk` — admin paneli bilan, 32-bit (armeabi-v7a)
+            * `arugram-user-64-build-${{ github.run_number }}.apk`  — foydalanuvchi, 64-bit (arm64-v8a)
 
             Foydalanuvchi APK'sida admin paneli kodi umuman yo'q.
 
@@ -1081,7 +1084,7 @@ jobs:
             1. Telefondagi eski ARUGRAM ni butunlay o'chiring
                (MIUI'da "Ikkinchi makon"/"Ikki ilova" ichidagisini
                ham) va qaytadan urinib ko'ring.
-            2. Baribir chiqsa — `arumedia-user-64.apk` ni
+            2. Baribir chiqsa — `arugram-user-64-build-${{ github.run_number }}.apk` ni
                o'rnatib ko'ring. AGAR U O'RNATILSA, telefoningiz
                32-bit ilovalarni qo'llab-quvvatlamaydi va
                `-32` APK shu sabab rad etilyapti.
@@ -1106,11 +1109,11 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          name: arumedia-${{ matrix.name }}
+          name: arugram-${{ matrix.name }}-build-${{ github.run_number }}
           path: ${{ steps.rename.outputs.out }}
           retention-days: 30
 
       - name: Done
         run: |
-          echo "✅ APK tayyor: arumedia-${{ matrix.name }}.apk"
+          echo "✅ APK tayyor: ${{ steps.rename.outputs.out }}"
           echo "   Faqat ${{ matrix.abi }}, imzolar: v1+v2+v3(+v4)."

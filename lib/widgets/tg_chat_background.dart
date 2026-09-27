@@ -57,8 +57,14 @@ class _TgChatBackgroundState extends State<TgChatBackground> {
     return Stack(
       fit: StackFit.expand,
       children: [
+        // `isComplex` — Flutter fonni bir marta rasterlab keshda saqlaydi:
+        // surish paytida ustidagi ro'yxat har kadr qayta chizilganda
+        // ham fon (gradient + naqsh + qatlamlar) qayta hisoblanmaydi.
         RepaintBoundary(
-          child: CustomPaint(painter: _BgPainter(_pattern)),
+          child: CustomPaint(
+              painter: _BgPainter(_pattern),
+              isComplex: true,
+              willChange: false),
         ),
         widget.child,
       ],

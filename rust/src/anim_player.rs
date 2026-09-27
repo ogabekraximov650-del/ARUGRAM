@@ -74,6 +74,11 @@ struct Item {
     /// Oxirgi chizilgan kadr (o'zgarmasa qayta chizilmaydi).
     last: usize,
     buf: Vec<u8>,
+    /// Bir marta o'ynaydi (chatdagi stiker/GIF — Telegram kabi):
+    /// oxirgi kadrda to'xtaydi, [rust_player_replay] qayta boshlaydi.
+    once: bool,
+    /// `once` animatsiya tugadi (yoki hali boshlanmagan) — turadi.
+    done: bool,
 }
 
 struct Player {
@@ -190,12 +195,22 @@ fn draw(s: &Shared) {
     let mut changed = p.need_draw;
     let playing = p.playing;
     for it in p.items.iter_mut() {
-        let f = if it.frames == 0 { 0 } else { ((it.n as f64 * it.step) as usize) % it.frames };
+        let raw = (it.n as f64 * it.step) as usize;
+        let f = if it.frames == 0 {
+            0
+        } else if it.once {
+            raw.min(it.frames - 1)
+        } else {
+            raw % it.frames
+        };
         if f != it.last && sticker_anim::render_into(it.anim, f, &mut it.buf) == 1 {
             it.last = f;
             changed = true;
         }
-        if playing && it.frames > 1 {
+        if it.once && raw + 1 >= it.frames {
+            it.done = true;
+        }
+        if playing && it.frames > 1 && !(it.once && it.done) {
             it.n = it.n.wrapping_add(1);
         }
     }
@@ -254,7 +269,7 @@ fn blit(_p: &Player) -> bool {
 
 // ── C API (Dart) ───────────────────────────────────────────────────
 
-fn open_item(path: &str, x: usize, y: usize, w: usize, h: usize) -> Option<Item> {
+fn open_item(path: &str, x: usize, y: usize, w: usize, h: usize, once: bool) -> Option<Item> {
     let anim = sticker_anim::open_path(path, w as i32, h as i32);
     if anim <= 0 {
         return None;
@@ -264,7 +279,21 @@ fn open_item(path: &str, x: usize, y: usize, w: usize, h: usize) -> Option<Item>
     let cap = FPS_CAP.load(Ordering::SeqCst) as f64;
     let show = if fps > cap { cap } else if fps > 0.0 { fps } else { cap };
     let src = if fps > 0.0 { fps } else { show };
-    Some(Item { anim, x, y, w, h, frames: frames.max(1), step: src / show, n: 0, last: usize::MAX, buf: vec![0u8; w * h * 4] })
+    Some(Item {
+        anim,
+        x,
+        y,
+        w,
+        h,
+        frames: frames.max(1),
+        step: src / show,
+        n: 0,
+        last: usize::MAX,
+        buf: vec![0u8; w * h * 4],
+        once,
+        // Bir martalik — ko'ringanda (`rust_player_replay`) boshlanadi.
+        done: once,
+    })
 }
 
 /// Kadr/s chegarasi (odatda 30; kuchsiz telefonda Dart 20 qiladi).
@@ -304,7 +333,8 @@ pub extern "C" fn rust_player_open(json_ptr: *const std::ffi::c_char) -> *mut st
     let path = arg["path"].as_str().unwrap_or("");
     let w = arg["w"].as_i64().unwrap_or(0).clamp(1, 512) as usize;
     let h = arg["h"].as_i64().unwrap_or(0).clamp(1, 512) as usize;
-    let Some(it) = open_item(path, 0, 0, w, h) else {
+    let once = arg["once"].as_bool().unwrap_or(false);
+    let Some(it) = open_item(path, 0, 0, w, h, once) else {
         return string_to_cptr(json!({"error": "ochilmadi"}).to_string());
     };
     let frames = it.frames;
@@ -333,7 +363,8 @@ pub extern "C" fn rust_player_open_multi(json_ptr: *const std::ffi::c_char) -> *
         }
         let iw = iw.min(w - x);
         let ih = ih.min(h - y);
-        if let Some(it) = open_item(v["path"].as_str().unwrap_or(""), x, y, iw, ih) {
+        let once = v["once"].as_bool().unwrap_or(false);
+        if let Some(it) = open_item(v["path"].as_str().unwrap_or(""), x, y, iw, ih, once) {
             items.push(it);
         }
     }
@@ -352,6 +383,25 @@ pub extern "C" fn rust_player_set(id: i64, playing: i32) {
                 p.next = Instant::now();
             }
             p.playing = on;
+        }
+    }
+}
+
+/// Bir martalik animatsiyalarni boshidan qayta o'ynatadi (ekranda
+/// to'liq ko'ringanda).
+#[no_mangle]
+pub extern "C" fn rust_player_replay(id: i64) {
+    if let Some(s) = get(id) {
+        if let Ok(mut p) = s.p.lock() {
+            let mut any = false;
+            for it in p.items.iter_mut().filter(|i| i.once && i.frames > 1) {
+                it.n = 0;
+                it.done = false;
+                any = true;
+            }
+            if any {
+                p.next = Instant::now();
+            }
         }
     }
 }
@@ -470,6 +520,27 @@ mod tests {
         let v: Value = serde_json::from_str(r.to_str().unwrap()).unwrap();
         assert_eq!(v["n"].as_i64(), Some(2));
         let id = v["id"].as_i64().unwrap();
+        rust_player_free(id);
+
+        // Bir martalik: kutib turadi, `replay` dan keyin oxirgi kadrda
+        // to'xtaydi.
+        let arg = CString::new(json!({"path": f.to_string_lossy(), "w": 32, "h": 24, "once": true}).to_string()).unwrap();
+        let r = unsafe { CString::from_raw(rust_player_open(arg.as_ptr())) };
+        let v: Value = serde_json::from_str(r.to_str().unwrap()).unwrap();
+        let id = v["id"].as_i64().unwrap();
+        let s = get(id).unwrap();
+        {
+            let p = s.p.lock().unwrap();
+            assert!(p.items[0].once && p.items[0].done);
+        }
+        rust_player_replay(id);
+        {
+            let mut p = s.p.lock().unwrap();
+            assert!(!p.items[0].done);
+            // Yuzasiz `draw` chiqib ketadi — hisobni qo'lda yuritamiz.
+            p.playing = true;
+            p.items[0].n = 50;
+        }
         rust_player_free(id);
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -3576,3 +3576,40 @@ Topilgan va tuzatilganlar:
 Tekshirildi (o'zgartirish kerak emas): video kesh yuklovchisi
 (16 x 1 MB bufer), video/tarix eskizlari xotira keshi (chegaralangan),
 chat va ro'yxat rasmlari (`memCacheWidth` bor).
+
+## Stiker/GIF: Telegram kabi bosib turish, bir marta o'ynash, sifat, surish, APK nomi (2026-09)
+
+TALABLAR (foydalanuvchi):
+1. Panelda (to'plamlar) faqat GIF va emojilar harakatlansin; emoji,
+   GIF va stiker ustiga BOSIB TURILGANDA ekran tepasida katta bo'lib
+   chiqib animatsiyalansin.
+2. Yuborilgan stiker va GIF ekranda to'liq ko'ringanda bir marta
+   o'ynasin; ekrandan chiqib qayta ko'rinsa — yana bir marta.
+   (Matndagi maxsus emojilar aylanib turaveradi.)
+3. GIF va stikerlar sifati pasayib ketgan.
+4. Izoh va support chatni surganda qotyapti.
+5. APK nomida build raqami bo'lsin.
+
+Qilinganlar:
+- `tg_media_preview.dart` qayta yozildi: `TgHoldTarget` (bir bosish —
+  darhol yuboradi, bosib turish — `TgHoldPreview`) va ekran tepasidagi
+  katta ko'rinish; barmoq boshqa katakka surilsa almashadi, qo'yib
+  yuborilsa yopiladi. Orqa fon blur'siz (kuchsiz telefon uchun).
+- Stikerlar panelida stikerlar `frozen` (faqat birinchi kadr, Rust
+  tutqichi darhol yopiladi). GIF va emojilar harakatlanadi.
+- Rust `anim_player.rs`: `once` rejimi (oxirgi kadrda to'xtaydi) va
+  `rust_player_replay`. Dart'da `_OnceWatch` — to'liq ko'ringanda
+  qayta o'ynatadi; ustiga bosilsa ham (`_TapReplay`, ota-ona bosishini
+  o'g'irlamaydi). `TgStickerRefView` va `TgGifMessage` — `once: true`.
+- Sifat: xabardagi stiker 512 px gacha (ilgari 320), GIF 512 px
+  (ilgari 360), panel kataklari kattaroq; guruh yuzasi 3x zichlikda
+  (ilgari 2x). `h264_shim.c` — eng yaqin nuqta o'rniga bilinear,
+  kuchli kichraytirishda 2x2 o'rtacha.
+- Surish: guruh yuzasi endi butun pufakcha emas, faqat animatsiyalar
+  egallagan to'rtburchak; tez surishda yuza ochish kechiktiriladi
+  (`Scrollable.recommendDeferredLoadingForContext`); support chat
+  so'rovi o'zgarish bo'lmasa `notifyListeners` chaqirmaydi (ilgari
+  har bir necha soniyada butun chat qayta qurilardi); izohlar
+  ro'yxatida `items` nusxasi har qator uchun olinmaydi; chat foni
+  `isComplex` (rasterlab keshlanadi).
+- CI: APK nomi `arugram-<admin-32|user-64>-build-<raqam>.apk`.

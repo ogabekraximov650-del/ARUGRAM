@@ -1413,7 +1413,9 @@ class _EmojiPageState extends State<_EmojiPage>
                     if (s == 0) {
                       if (i < _recentCustom.length) {
                         final d = _recentCustom[i];
-                        return _Press(
+                        return TgHoldTarget(
+                          doc: d,
+                          gif: false,
                           onTap: () => _pickCustom(d),
                           child: Center(
                               child: TgStickerView(
@@ -1694,12 +1696,17 @@ class _SetCell extends StatelessWidget {
   final bool locked;
   final ValueChanged<TgDoc> onTap;
 
+  /// Faqat birinchi kadr (stikerlar paneli — Telegram kabi, panelda
+  /// faqat GIF va emojilar harakatlanadi).
+  final bool frozen;
+
   const _SetCell({
     required this.set,
     required this.index,
     required this.size,
     required this.onTap,
     this.locked = false,
+    this.frozen = false,
   });
 
   @override
@@ -1710,11 +1717,17 @@ class _SetCell extends StatelessWidget {
         final docs = snap.data;
         if (docs == null || index >= docs.length) return const SizedBox();
         final d = docs[index];
-        return _Press(
+        // Bir marta bosish — yuboradi; bosib turish — tepada katta
+        // ko'rinish (`TgHoldPreview`).
+        return TgHoldTarget(
+          doc: d,
+          gif: false,
           onTap: () => onTap(d),
           child: Opacity(
             opacity: locked ? 0.6 : 1,
-            child: Center(child: TgStickerView(doc: d, size: size, still: true)),
+            child: Center(
+                child: TgStickerView(
+                    doc: d, size: size, still: true, frozen: frozen)),
           ),
         );
       },
@@ -1818,15 +1831,16 @@ class _StickerPageState extends State<_StickerPage>
     });
   }
 
-  // Bosilganda — ko'rish oynasi (stiker shu yerda harakatlanadi,
-  // "Stiker yuborish" bilan yuboriladi).
-  Widget _cell(TgDoc d, double cell) => _Press(
-        onTap: () => showTgMediaPreview(context,
-            doc: d, gif: false, onSend: () => widget.onSticker(d)),
+  // TALAB (foydalanuvchi): Telegram kabi — bir marta bosilsa darhol
+  // yuboriladi; bosib turilsa ekran tepasida katta bo'lib harakatlanadi.
+  // Panelda stikerlar TURADI (faqat birinchi kadr) — protsessor bo'sh.
+  Widget _cell(TgDoc d, double cell) => TgHoldTarget(
+        doc: d,
+        gif: false,
+        onTap: () => widget.onSticker(d),
         child: Center(
-            // Telegram'dagidek panelda ham harakatlanadi (umumiy soat,
-            // kadrlar diskda — qotmaydi).
-            child: TgStickerView(doc: d, size: cell * 0.86, still: true)),
+            child: TgStickerView(
+                doc: d, size: cell * 0.86, still: true, frozen: true)),
       );
 
   @override
@@ -1902,6 +1916,7 @@ class _StickerPageState extends State<_StickerPage>
                   set: _sets[s - 2],
                   index: i,
                   size: cell * 0.86,
+                  frozen: true,
                   onTap: widget.onSticker,
                 );
               }
@@ -2040,15 +2055,14 @@ class _GifPageState extends State<_GifPage>
                                 SizedBox(
                                   width: w,
                                   height: row.height,
-                                  child: _Press(
+                                  child: TgHoldTarget(
                                     scale: 0.92,
-                                    // Panelda ham o'ynaydi (ilova ichidagi
-                                    // dekoder); bosilganda — ko'rish oynasi.
-                                    onTap: () => showTgMediaPreview(context,
-                                        doc: items[i],
-                                        gif: true,
-                                        onSend: () =>
-                                            widget.onGif(items[i])),
+                                    doc: items[i],
+                                    gif: true,
+                                    // Panelda o'ynaydi (ilova ichidagi
+                                    // dekoder); bosilsa — yuboriladi,
+                                    // bosib turilsa — tepada katta.
+                                    onTap: () => widget.onGif(items[i]),
                                     child: TgGifThumb(doc: items[i]),
                                   ),
                                 ),

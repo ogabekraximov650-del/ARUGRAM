@@ -476,6 +476,14 @@ class ChatController extends ChangeNotifier {
     // necha o'nlab bayt. Ilgari har safar 200 ta xabar qaytadan
     // tashilardi.
     final since = _loaded ? _lastAt : 0;
+    // SURISHDA QOTISH (foydalanuvchi: "support chatni surganda
+    // qotyapti"): har so'rovdan keyin (bir necha soniyada bir)
+    // `notifyListeners` chaqirilib, javob BO'SH bo'lsa ham butun
+    // chat qayta qurilardi — surish shu paytda sakrardi. Endi faqat
+    // haqiqatan o'zgarish bo'lsa.
+    final wasLoaded = _loaded;
+    final oldError = _error;
+    var changed = false;
     try {
       final uri = Uri.parse(since > 0 ? '$_url?since=$since' : _url);
       final r = await http
@@ -499,6 +507,7 @@ class ChatController extends ChangeNotifier {
             final m = _items[i];
             if (!m.seen && seenIds.contains(m.id)) {
               _items[i] = m.markSeen();
+              changed = true;
             }
           }
         }
@@ -525,6 +534,7 @@ class ChatController extends ChangeNotifier {
           final before = _items.length;
           _items.removeWhere((m) => !m.pending && !live.contains(m.id));
           removed = _items.length != before;
+          if (removed) changed = true;
         }
 
         if (since > 0) {
@@ -538,6 +548,7 @@ class ChatController extends ChangeNotifier {
             // bo'lsa — u serverdan kelgani bilan almashadi.
             _items.removeWhere((m) => m.pending);
             _items.addAll(fresh);
+            changed = true;
           }
           // Diskdagi nusxa yangi xabar kelganda HAM, xabar
           // o'chirilganda HAM qayta yoziladi — aks holda ilova
@@ -554,6 +565,7 @@ class ChatController extends ChangeNotifier {
           _items
             ..clear()
             ..addAll(rows);
+          changed = true;
           DiskCache.write(_diskKey, raw);
         }
         _loaded = true;
@@ -567,7 +579,7 @@ class ChatController extends ChangeNotifier {
       if (!_loaded) _error = 'Internet yo\'q';
     }
     _loading = false;
-    notifyListeners();
+    if (changed || !wasLoaded || _error != oldError) notifyListeners();
   }
 
   /// Ro'yxatni diskka yozadi (vaqtinchalik nusxalarsiz).
