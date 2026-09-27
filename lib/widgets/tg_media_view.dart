@@ -24,6 +24,7 @@ import '../services/device_perf.dart';
 import '../services/native_pool.dart';
 import '../services/telegram_service.dart';
 import '../services/tg_media.dart';
+import 'tg_media_preview.dart';
 
 /// Stiker yoki maxsus emoji.
 ///
@@ -44,6 +45,9 @@ class TgStickerView extends StatelessWidget {
   /// Bir marta o'ynaydi (chatdagi xabar) — [TgAnimView.once].
   final bool once;
 
+  /// Harakatlanadi — faqat katta ko'rinishda ([TgAnimView.live]).
+  final bool live;
+
   const TgStickerView({
     super.key,
     required this.doc,
@@ -51,6 +55,7 @@ class TgStickerView extends StatelessWidget {
     this.still = false,
     this.frozen = false,
     this.once = false,
+    this.live = false,
   });
 
   @override
@@ -90,6 +95,7 @@ class TgStickerView extends StatelessWidget {
                 panel: still,
                 frozen: frozen,
                 once: once,
+                live: live,
                 fallback: _Placeholder(size),
               );
             }
@@ -348,6 +354,13 @@ class TgAnimView extends StatefulWidget {
   /// to'liq ko'ringanda boshlanadi, oxirgi kadrda to'xtaydi; ekrandan
   /// chiqib qaytsa (yoki bosilsa) yana bir marta.
   final bool once;
+
+  /// Harakatlanadi. TALAB (foydalanuvchi): "emoji, GIF va stikerlar
+  /// oddiy holatda umuman animatsiyalanmasin — faqat ustiga bosib
+  /// turganda (yoki chatda bir bosilganda) tepada ko'rsatilganda".
+  /// Qolgan hamma joyda — faqat birinchi kadr (Rust tutqichi darhol
+  /// yopiladi, yuza ham, soat ham ishlamaydi).
+  final bool live;
   final Widget fallback;
 
   const TgAnimView({
@@ -360,6 +373,7 @@ class TgAnimView extends StatefulWidget {
     this.frozen = false,
     this.gif = false,
     this.once = false,
+    this.live = false,
   });
 
   @override
@@ -390,6 +404,9 @@ class _TgAnimViewState extends State<TgAnimView> {
   int _cacheBytes = 0;
 
   String get _key => '${widget.path}@${_px}x$_ph';
+
+  /// Faqat birinchi kadr ([TgAnimView.live] emas).
+  bool get _still => widget.frozen || !widget.live;
 
   /// Ko'rsatiladigan tezlik — 30 kadr/s dan oshmaydi.
   double get _showFps => _fps > 30 ? 30.0 : _fps;
@@ -427,7 +444,7 @@ class _TgAnimViewState extends State<TgAnimView> {
     }
     // Guruh ichida (emoji qatori va h.k.) — o'z yuzasi YO'Q: o'rnini
     // guruhga aytadi, guruh hammasini bitta yuzaga chizdiradi.
-    final batch = _texSupported && !widget.frozen ? TgAnimBatch._of(context) : null;
+    final batch = _texSupported && !_still ? TgAnimBatch._of(context) : null;
     if (batch != null) {
       _batch = batch;
       _texMode = true;
@@ -437,7 +454,7 @@ class _TgAnimViewState extends State<TgAnimView> {
     }
     // Android: kadrni Rust o'zi Flutter `Texture` ga chizadi (Dart
     // kadrlar bilan shug'ullanmaydi — UI oqimi bo'sh, silliq).
-    if (_texSupported) {
+    if (_texSupported && !_still) {
       unawaited(_openTex());
       return;
     }
@@ -563,7 +580,7 @@ class _TgAnimViewState extends State<TgAnimView> {
 
   void _texPlay() {
     if (_player == 0) return;
-    AnimPlayers.setPlaying(_player, _enabled && !widget.frozen);
+    AnimPlayers.setPlaying(_player, _enabled && !_still);
   }
 
   _OnceWatch? _watch;
@@ -616,7 +633,7 @@ class _TgAnimViewState extends State<TgAnimView> {
   Future<void> _open() async {
     if (_opening || _handle > 0 || _failed || _dead) return;
     // Birinchi kadr allaqachon bor — qayta ochish shart emas.
-    if (widget.frozen && _image != null) return;
+    if (_still && _image != null) return;
     _opening = true;
     final r = await NativePool.render.animOpen(widget.path, _px, _ph);
     _opening = false;
@@ -635,7 +652,7 @@ class _TgAnimViewState extends State<TgAnimView> {
     // har ikkinchisi).
     final shown = (_frames * _showFps / _fps).ceil();
     final need = _px * _ph * 4 * shown;
-    if (_cacheUsed + need <= _cacheBudget) {
+    if (!_still && _cacheUsed + need <= _cacheBudget) {
       _cache = {};
       _cacheBytes = need;
       _cacheUsed += need;
@@ -647,7 +664,7 @@ class _TgAnimViewState extends State<TgAnimView> {
     }
     // TALAB (foydalanuvchi): "emojilar — ekranda ko'rinib turgan
     // barchasi animatsiyalansin" (kuchsiz telefonda ham).
-    if (_frames > 1 && !widget.frozen && _enabled) {
+    if (_frames > 1 && !_still && _enabled) {
       _AnimClock.instance.add(this);
     }
   }
@@ -730,7 +747,7 @@ class _TgAnimViewState extends State<TgAnimView> {
     // Faqat birinchi kadr kerak (panel stikerlari) — Rust tutqichi
     // darhol yopiladi (xotira: har stiker o'z chizgichini ushlab
     // turmasin).
-    if (widget.frozen) _release();
+    if (_still) _release();
   }
 
   void _show(ui.Image img, int f, [int n = -1]) {
@@ -834,8 +851,7 @@ class TgStickerRefView extends StatelessWidget {
     // qolardi. Endi kalit havolaga bog'langan — katak butunlay yangilanadi.
     final known = TgMedia.instance.stickerByRefSync(ref);
     if (known != null) {
-      return KeyedSubtree(
-          key: ValueKey(ref), child: TgStickerView(doc: known, size: size, once: true));
+      return KeyedSubtree(key: ValueKey(ref), child: _tapPreview(context, known));
     }
     return FutureBuilder<TgDoc?>(
       key: ValueKey(ref),
@@ -852,10 +868,17 @@ class TgStickerRefView extends StatelessWidget {
                 : null,
           );
         }
-        return TgStickerView(doc: d, size: size, once: true);
+        return _tapPreview(context, d);
       },
     );
   }
+
+  /// Turadi (birinchi kadr); bosilsa — tepada katta bo'lib harakatlanadi.
+  Widget _tapPreview(BuildContext context, TgDoc d) => GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => TgHoldPreview.showTap(context, doc: d),
+        child: TgStickerView(doc: d, size: size),
+      );
 }
 
 /// Matn ichidagi maxsus emoji (topilguncha bo'sh joy).
@@ -959,7 +982,9 @@ class TgGifThumb extends StatelessWidget {
                       gaplessPlayback: true);
                 },
               ),
-            if (play)
+            // Panelda — faqat kichik rasm (to'liq GIF yuklanmaydi ham);
+            // katta ko'rinishda ([loop]) — harakatlanadi.
+            if (play && (loop || !doc.thumb))
               _Deferred(
                 key: ValueKey('g${doc.id}'),
                 builder: (context) => FutureBuilder<String?>(
@@ -974,6 +999,7 @@ class TgGifThumb extends StatelessWidget {
                       height: h,
                       gif: true,
                       panel: !loop,
+                      live: loop,
                       fallback: const SizedBox(),
                     );
                   },
@@ -1199,16 +1225,21 @@ class _TgGifMessageState extends State<TgGifMessage> {
                             strokeWidth: 2, color: Colors.white54),
                       ),
               )
-            // Telegram kabi: ekranda to'liq ko'ringanda bir marta o'ynaydi
-            // (bosilsa — yana), ilova ichidagi dekoder bilan.
-            : TgAnimView(
-                key: ValueKey(p),
-                path: p,
-                size: w,
-                height: h,
-                gif: true,
-                once: true,
-                fallback: Container(color: Colors.white.withValues(alpha: 0.06)),
+            // Turadi (birinchi kadr); bosilsa — tepada katta bo'lib
+            // harakatlanadi (ilova ichidagi dekoder bilan).
+            : GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () =>
+                    TgHoldPreview.showTap(context, path: p, ratio: _ratio),
+                child: TgAnimView(
+                  key: ValueKey(p),
+                  path: p,
+                  size: w,
+                  height: h,
+                  gif: true,
+                  fallback:
+                      Container(color: Colors.white.withValues(alpha: 0.06)),
+                ),
               ),
       ),
     );

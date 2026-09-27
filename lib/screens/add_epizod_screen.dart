@@ -604,8 +604,8 @@ class _AddEpizodScreenState extends State<AddEpizodScreen> {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                 content: Text(err == null
-                    ? 'Kodlash navbatiga qo\'yildi — sifatlar tayyor bo\'lgach '
-                        'o\'zi yoziladi'
+                    ? 'Kodlash navbatiga qo\'yildi — GitHub Actions\'da '
+                        '"Avto-kodlash" ni ishga tushiring'
                     : 'Qism saqlandi, lekin kodlash navbatiga qo\'yilmadi: $err')));
           }
         }

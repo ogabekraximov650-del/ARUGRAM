@@ -9722,8 +9722,8 @@ async fn tg_channel_post(env: &Env, post: &Value) {
 //      uni yopiq kanalga ko'chiradi va `tg_files` ga yozadi
 //      (`tg_user_media`). Keyin `POST /api/encode/queue` — qism
 //      yozuviga `origin_video`, navbatga (`encode_jobs`) yozuv.
-//   2. Worker Actions'ni ishga tushiradi (`encode_dispatch`, bo'lmasa
-//      workflow soatlik jadval bilan o'zi tekshiradi).
+//   2. Admin Actions'da `encode.yml` ni QO'LDA ishga tushiradi
+//      (foydalanuvchi talabi: avtomatik ishga tushmasin).
 //   3. Actions (`tool/encode/run.py`) `claim` bilan navbatdagi ENG
 //      ESKI ishni oladi, har sifatni kodlab kanalga yuklaydi va
 //      `quality` bilan jurnalga yozadi, oxirida `finish`.
@@ -9774,30 +9774,6 @@ fn done_list(done: &str) -> Vec<String> {
 /// Kodlangan sifat fayli nomi — ish va sifatga bog'liq, o'zgarmas.
 fn encode_file_name(a: i64, s: i64, e: i64, q: &str, queued_at: i64) -> String {
     format!("ep_{a}_{s}_{e}_{q}_{queued_at}.mp4")
-}
-
-/// GitHub Actions'dagi `encode.yml` ni ishga tushiradi (xato — jim).
-async fn encode_dispatch(env: &Env) {
-    let token = tg_secret(env, "GH_TOKEN");
-    if token.is_empty() {
-        return;
-    }
-    let repo = match tg_secret(env, "GH_REPO") {
-        r if r.is_empty() => "ogabekraximov650-del/ARUGRAM".to_string(),
-        r => r,
-    };
-    let h = Headers::new();
-    let _ = h.set("Authorization", &format!("Bearer {token}"));
-    let _ = h.set("Accept", "application/vnd.github+json");
-    let _ = h.set("User-Agent", "arugram-worker");
-    let _ = h.set("Content-Type", "application/json");
-    if let Ok(r) = Request::new_with_init(
-        &format!("https://api.github.com/repos/{repo}/actions/workflows/encode.yml/dispatches"),
-        RequestInit::new().with_method(Method::Post).with_headers(h)
-            .with_body(Some(json!({"ref": "main"}).to_string().into())),
-    ) {
-        let _ = Fetch::Request(r).send().await;
-    }
 }
 
 async fn encode_notify(env: &Env, text: &str) {
@@ -9879,7 +9855,6 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
              vec![TursoArg::text(&origin), TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]),
             (job_sql, job_args),
         ]).await?;
-        encode_dispatch(env).await;
         let n = turso_exec(env,
             "SELECT COUNT(*) AS n FROM encode_jobs WHERE state IN ('queued','running')", vec![]).await?;
         let n = first_row(&n).and_then(|r| r["n"].as_i64()).unwrap_or(1);

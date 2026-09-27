@@ -3672,3 +3672,22 @@ KERAKLI SECRETS (GitHub → ARUGRAM → Settings → Secrets):
   (fine-grained token: faqat ARUGRAM, "Actions: Read and write"),
   ixtiyoriy API_BASE. Keyin worker'ni qayta deploy qilish kerak
   (`deploy-worker.yml` ENCODE_TOKEN va GH_TOKEN ni qo'yadi).
+
+## Animatsiya faqat katta ko'rinishda; Actions faqat qo'lda (2026-09)
+
+TALAB (foydalanuvchi): "emoji, GIF va stikerlar oddiy holatda umuman
+animatsiyalanmasin — faqat ustiga bosib turganda va chatda bir bosganda
+tepada ko'rsatilganda. Chat va izohlarda ham ko'ringanda
+animatsiyalanmasin. Hozir panelni ochishim bilan qotib, ilova yopilib
+ketyapti". "Actions'ni qo'lda ishga tushiraman, avto ishga tushmasin".
+
+- `TgAnimView.live` (odatda `false`): hamma joyda faqat birinchi kadr —
+  Rust tutqichi darhol yopiladi, `Texture`/guruh yuzasi, soat, kadrlar
+  keshi umuman ishlatilmaydi (panel ochilganda o'nlab yuza ochilib,
+  xotira to'lib ilova yopilardi). Harakat faqat `TgHoldPreview` da
+  (`live: true`).
+- Panelda GIF — faqat kichik rasm (to'liq fayl yuklanmaydi).
+- Chat/izohlardagi stiker va GIF: bir bosilsa `TgHoldPreview.showTap`
+  (alohida sahifa, istalgan joyga yoki "orqaga" bosilsa yopiladi).
+- `encode.yml`: faqat `workflow_dispatch`; worker workflow'ni
+  chaqirmaydi (`GH_TOKEN`/`ENCODE_GH_TOKEN` kerak emas).

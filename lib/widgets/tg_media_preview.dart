@@ -13,6 +13,11 @@
 //     o'sha katakka almashadi;
 //   * barmoq qo'yib yuborilsa — yopiladi (hech narsa yuborilmaydi).
 //
+// Chat va izohlardagi stiker/GIF (u yerda ular TURADI — faqat birinchi
+// kadr): bir marta bosilsa xuddi shu ko'rinish ochiladi
+// ([TgHoldPreview.showTap]) va ekranning istalgan joyiga bosilsa
+// yopiladi. Animatsiya faqat shu ko'rinishda bo'ladi.
+//
 // Orqa fon ATAYLAB xiralashtirilmaydi (blur): kuchsiz telefonda har
 // kadrda butun ekranni xiralashtirish surishni qotirardi.
 
@@ -24,8 +29,9 @@ import 'package:flutter/services.dart';
 import '../services/tg_media.dart';
 import 'tg_media_view.dart';
 
-/// Ko'rsatilayotgan narsa.
-typedef _Shown = ({TgDoc doc, bool gif});
+/// Ko'rsatilayotgan narsa: hujjat (panel, chatdagi stiker) yoki
+/// diskdagi GIF fayli (chatdagi GIF, [ratio] — eni/bo'yi).
+typedef _Shown = ({TgDoc? doc, String? path, bool gif, double ratio});
 
 /// Bosib turilganda ko'rinadigan katta ko'rinish (bitta, butun ilova
 /// uchun).
@@ -36,13 +42,47 @@ abstract final class TgHoldPreview {
 
   static bool get open => _entry != null;
 
+  static _Shown _of(TgDoc d, bool gif) => (
+        doc: d,
+        path: null,
+        gif: gif,
+        ratio: d.w > 0 && d.h > 0 ? d.w / d.h : 1.4,
+      );
+
   static void show(BuildContext context, TgDoc doc, {required bool gif}) {
     HapticFeedback.selectionClick();
-    _shown.value = (doc: doc, gif: gif);
+    _shown.value = _of(doc, gif);
+    _insert(context, tapToClose: false);
+  }
+
+  /// Bir bosishda ochiladi, ekranning istalgan joyiga (yoki "orqaga")
+  /// bosilsa yopiladi (chat va izohlardagi stiker [doc] yoki GIF fayli
+  /// [path]). Alohida sahifa (route) — boshqa oynaga o'tilganda qolib
+  /// ketmaydi.
+  static void showTap(BuildContext context,
+      {TgDoc? doc, String? path, double ratio = 1.4}) {
+    if (doc == null && path == null) return;
+    HapticFeedback.selectionClick();
+    final shown = ValueNotifier<_Shown?>(doc != null
+        ? _of(doc, doc.kind == 'mp4')
+        : (doc: null, path: path, gif: true, ratio: ratio));
+    Navigator.of(context, rootNavigator: true)
+        .push(PageRouteBuilder<void>(
+          opaque: false,
+          transitionDuration: Duration.zero,
+          reverseTransitionDuration: Duration.zero,
+          pageBuilder: (_, __, ___) =>
+              _PreviewLayer(shown: shown, tapToClose: true),
+        ))
+        .whenComplete(shown.dispose);
+  }
+
+  static void _insert(BuildContext context, {required bool tapToClose}) {
     if (_entry != null) return;
     final overlay = Overlay.maybeOf(context, rootOverlay: true);
     if (overlay == null) return;
-    final e = OverlayEntry(builder: (_) => _PreviewLayer(shown: _shown));
+    final e = OverlayEntry(
+        builder: (_) => _PreviewLayer(shown: _shown, tapToClose: tapToClose));
     _entry = e;
     overlay.insert(e);
   }
@@ -53,9 +93,9 @@ abstract final class TgHoldPreview {
     final t = TgHoldTarget._at(global);
     if (t == null) return;
     final cur = _shown.value;
-    if (cur != null && cur.doc.id == t.doc.id && cur.gif == t.gif) return;
+    if (cur != null && cur.doc?.id == t.doc.id && cur.gif == t.gif) return;
     HapticFeedback.selectionClick();
-    _shown.value = (doc: t.doc, gif: t.gif);
+    _shown.value = _of(t.doc, t.gif);
   }
 
   static void hide() {
@@ -152,7 +192,11 @@ class _TgHoldTargetState extends State<TgHoldTarget> {
 
 class _PreviewLayer extends StatefulWidget {
   final ValueNotifier<_Shown?> shown;
-  const _PreviewLayer({required this.shown});
+
+  /// Bir bosishda ochilgan — istalgan joyga bosilsa yopiladi (aks holda
+  /// barmoq qo'yib yuborilganda yopiladi va bosishlarni o'tkazib yuboradi).
+  final bool tapToClose;
+  const _PreviewLayer({required this.shown, required this.tapToClose});
 
   @override
   State<_PreviewLayer> createState() => _PreviewLayerState();
@@ -172,26 +216,28 @@ class _PreviewLayerState extends State<_PreviewLayer>
 
   Widget _media(_Shown s, Size screen) {
     final side = math.min(screen.width, screen.height);
-    if (!s.gif) {
+    final doc = s.doc;
+    if (!s.gif && doc != null) {
       final size = math.min(side * 0.62, 300.0);
       return Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (s.doc.emoji.isNotEmpty)
+          if (doc.emoji.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(bottom: 6),
-              child: Text(s.doc.emoji,
+              child: Text(doc.emoji,
                   style: const TextStyle(
                       fontSize: 30,
                       height: 1.2,
                       decoration: TextDecoration.none)),
             ),
+          // Faqat shu yerda harakatlanadi.
           TgStickerView(
-              key: ValueKey('p/${s.doc.id}'), doc: s.doc, size: size),
+              key: ValueKey('p/${doc.id}'), doc: doc, size: size, live: true),
         ],
       );
     }
-    final ratio = s.doc.w > 0 && s.doc.h > 0 ? s.doc.w / s.doc.h : 1.4;
+    final ratio = s.ratio;
     var w = screen.width - 48;
     var h = w / ratio;
     final maxH = screen.height * 0.4;
@@ -204,8 +250,16 @@ class _PreviewLayerState extends State<_PreviewLayer>
       child: SizedBox(
         width: w,
         height: h,
-        child: TgGifThumb(
-            key: ValueKey('p/${s.doc.id}'), doc: s.doc, loop: true),
+        child: doc != null
+            ? TgGifThumb(key: ValueKey('p/${doc.id}'), doc: doc, loop: true)
+            : TgAnimView(
+                key: ValueKey('p/${s.path}'),
+                path: s.path!,
+                size: w,
+                height: h,
+                gif: true,
+                live: true,
+                fallback: const SizedBox()),
       ),
     );
   }
@@ -215,38 +269,42 @@ class _PreviewLayerState extends State<_PreviewLayer>
     final screen = MediaQuery.sizeOf(context);
     final top = MediaQuery.paddingOf(context).top;
     final t = CurvedAnimation(parent: _a, curve: Curves.easeOutCubic);
-    return IgnorePointer(
-      child: AnimatedBuilder(
-        animation: t,
-        builder: (context, child) => Stack(
-          children: [
-            Positioned.fill(
-              child: ColoredBox(
-                  color: Colors.black.withValues(alpha: 0.6 * t.value)),
-            ),
-            Positioned(
-              left: 0,
-              right: 0,
-              top: top + 36,
-              child: Center(
-                child: Opacity(
-                  opacity: t.value,
-                  child: Transform.scale(
-                    scale: 0.8 + 0.2 * t.value,
-                    alignment: Alignment.topCenter,
-                    child: child,
-                  ),
+    final layer = AnimatedBuilder(
+      animation: t,
+      builder: (context, child) => Stack(
+        children: [
+          Positioned.fill(
+            child: ColoredBox(
+                color: Colors.black.withValues(alpha: 0.6 * t.value)),
+          ),
+          Positioned(
+            left: 0,
+            right: 0,
+            top: top + 36,
+            child: Center(
+              child: Opacity(
+                opacity: t.value,
+                child: Transform.scale(
+                  scale: 0.8 + 0.2 * t.value,
+                  alignment: Alignment.topCenter,
+                  child: child,
                 ),
               ),
             ),
-          ],
-        ),
-        child: ValueListenableBuilder<_Shown?>(
-          valueListenable: widget.shown,
-          builder: (context, s, _) =>
-              s == null ? const SizedBox.shrink() : _media(s, screen),
-        ),
+          ),
+        ],
       ),
+      child: ValueListenableBuilder<_Shown?>(
+        valueListenable: widget.shown,
+        builder: (context, s, _) =>
+            s == null ? const SizedBox.shrink() : _media(s, screen),
+      ),
+    );
+    if (!widget.tapToClose) return IgnorePointer(child: layer);
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => Navigator.of(context).maybePop(),
+      child: layer,
     );
   }
 }
