@@ -55,6 +55,16 @@ START_BUDGET = int(os.environ.get("START_BUDGET_MIN", "240")) * 60
 SESSION = str(Path(__file__).with_name("pyro_session"))
 WORK = Path(os.environ.get("RUNNER_TEMP", "/tmp")) / "arugram_encode"
 
+
+def session_api_id() -> int:
+    """Sessiya faylidagi api_id (o'qib bo'lmasa 0)."""
+    try:
+        import sqlite3
+        c = sqlite3.connect(f"file:{SESSION}.session?mode=ro", uri=True)
+        return int(c.execute("SELECT api_id FROM sessions").fetchone()[0] or 0)
+    except Exception:
+        return 0
+
 # (sifat, balandlik, CRF farqi) — kattadan kichikka.
 LADDER = [("1080p", 1080, 0), ("720p", 720, 1), ("480p", 480, 2), ("360p", 360, 3)]
 CHUNK = 4 * 1024 * 1024
@@ -268,7 +278,11 @@ async def process(app: Client, channel: int, job: dict):
 
 
 async def main():
-    app = Client(SESSION, api_id=int(os.environ["TG_API_ID"]),
+    # Sessiya qaysi ilova (api_id) bilan yaratilgan bo'lsa — o'sha bilan
+    # ulanadi: ARUGRAM'ning `TG_API_ID` si boshqa bo'lishi mumkin
+    # (masalan sessiya `anime` repodan olingan).
+    api_id = session_api_id() or int(os.environ["TG_API_ID"])
+    app = Client(SESSION, api_id=api_id,
                  api_hash=os.environ["TG_API_HASH"], no_updates=True)
     async with app:
         # Kanal ma'lum bo'lsin (Pyrogram peer keshida).
