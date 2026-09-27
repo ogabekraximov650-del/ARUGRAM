@@ -156,6 +156,9 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
   /// Server Telegram orqali video berishga tayyormi (sirlar qo'yilgan).
   bool _serverEnabled = false;
 
+  /// Yadroni sozlashdagi oxirgi xato (kirish oynasida ko'rsatiladi).
+  String? initError;
+
   /// Kirish boti (`/start <token>` shunga yuboriladi).
   String _bot = '';
 
@@ -346,7 +349,9 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
     final d = dir.toNativeUtf8();
     final h = apiHash.toNativeUtf8();
     try {
-      _apply(_json(_take(lib, f(d, apiId, h))));
+      final r = _json(_take(lib, f(d, apiId, h)));
+      initError = r['error']?.toString();
+      _apply(r);
     } finally {
       malloc.free(d);
       malloc.free(h);

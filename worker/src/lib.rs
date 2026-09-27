@@ -9523,6 +9523,20 @@ fn tg_secret(env: &Env, name: &str) -> String {
         .unwrap_or_default()
 }
 
+/// `TG_API_ID` / `TG_API_HASH` — secret'ga ortiqcha matn bilan
+/// qo'yilgan bo'lsa ham (masalan `TG_API_ID 34000035` yoki qator
+/// oralig'i bilan) to'g'ri o'qiladi: raqamlar va 32 belgili hex.
+fn tg_api_creds(env: &Env) -> (i64, String) {
+    let id: String = tg_secret(env, "TG_API_ID").chars().filter(|c| c.is_ascii_digit()).collect();
+    let raw = tg_secret(env, "TG_API_HASH");
+    let hash = raw
+        .split(|c: char| !c.is_ascii_hexdigit())
+        .find(|p| p.len() == 32)
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    (id.parse().unwrap_or(0), hash)
+}
+
 fn tg_channel_id(env: &Env) -> i64 {
     normalize_channel_id(&tg_secret(env, "TG_CHANNEL_ID"))
 }
@@ -10102,8 +10116,7 @@ async fn tg_route(mut req: Request, env: &Env, path: &str, method: Method) -> Re
     // beriladi, ya'ni ular parol emas (`telegram.rs` ularni
     // telefonda shifrlab saqlaydi).
     if method == Method::Get && path == "/api/tg/config" {
-        let api_id: i64 = tg_secret(env, "TG_API_ID").parse().unwrap_or(0);
-        let api_hash = tg_secret(env, "TG_API_HASH");
+        let (api_id, api_hash) = tg_api_creds(env);
         if api_id <= 0 || api_hash.is_empty() {
             return ok_nostore(json!({"enabled": false}));
         }

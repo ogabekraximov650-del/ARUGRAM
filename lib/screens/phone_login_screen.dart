@@ -608,7 +608,12 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
                           ? 'Serverga ulanib bo\'lmadi — qayta urinilmoqda...\n'
                               '(Internet va qurilmadagi sana/vaqt to\'g\'riligini '
                               'tekshiring.)'
-                          : 'Telegram orqali kirish hozircha yoqilmagan.',
+                          : !_tg.serverEnabled
+                              ? 'Telegram orqali kirish hozircha yoqilmagan '
+                                  '(serverda TG_API_ID / TG_API_HASH sozlanmagan '
+                                  'yoki noto\'g\'ri).'
+                              : 'Telegram yadrosi sozlanmadi: '
+                                  '${_tg.initError ?? 'noma\'lum sabab'}',
                   textAlign: TextAlign.center,
                   style: const TextStyle(color: _Tg.hint, fontSize: 14),
                 ),
@@ -765,7 +770,9 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
               width: 74,
               child: TextField(
                 controller: _cc,
-                enabled: !_busy && _available,
+                // Raqam har doim yoziladi (sozlama kelmasa ham) — faqat
+                // "davom" tugmasi kutadi.
+                enabled: !_busy,
                 keyboardType: TextInputType.phone,
                 inputFormatters: [
                   FilteringTextInputFormatter.digitsOnly,
@@ -786,7 +793,9 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
                 controller: _num,
                 focusNode: _focus,
                 autofocus: true,
-                enabled: !_busy && _available,
+                // Raqam har doim yoziladi (sozlama kelmasa ham) — faqat
+                // "davom" tugmasi kutadi.
+                enabled: !_busy,
                 keyboardType: TextInputType.phone,
                 inputFormatters: [_NumberFormatter(() => _country)],
                 style: big.copyWith(letterSpacing: 0.6),

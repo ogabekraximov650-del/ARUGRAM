@@ -3705,3 +3705,18 @@ uz.arumediatv.com ga o'zgartir".
 - DIQQAT: paket nomi almashdi — Android buni yangi ilova deb biladi,
   eski ARUGRAM ustiga yangilanmaydi (eskisini o'chirib o'rnatish kerak).
   APK fayl nomlari (`arugram-...-build-N.apk`) o'zgarmadi.
+
+## Kirish oynasi: raqam yozib bo'lmasdi (telefon va planshet) (2026-09)
+
+Belgi: "Telegram orqali kirish hozircha yoqilmagan" + maydonlar xira,
+raqam yozilmaydi. Bu matn — server `/api/tg/config` javobida
+`enabled: false` (worker'da `TG_API_ID`/`TG_API_HASH` yo'q yoki raqam
+emas) yoki yadro sozlanmagani. Ilgari sababi farqlanmasdi, xato esa
+jimgina tashlanardi.
+
+- Raqam va davlat kodi maydonlari endi har doim yoziladi (faqat
+  "davom" tugmasi sozlamani kutadi).
+- Sabab aniq ko'rsatiladi: server sozlanmagan / yadro xatosi
+  (`TelegramService.initError`).
+- Worker (`tg_api_creds`): secret'ga ortiqcha matn bilan yozilgan
+  qiymat ham o'qiladi (raqamlar va 32 belgili hex).
