@@ -86,15 +86,32 @@ jobs:
         if: steps.peek.outputs.pending != '0'
         run: pip install --no-cache-dir -r tool/encode/requirements.txt
 
+      # TOPILGAN XATO: "base64: invalid input" — secret'ga nusxalanganda
+      # qiymat ichiga bo'sh joy / qator oralig'i tushib qolgan. Endi
+      # base64 bo'lmagan belgilar olib tashlanadi va natija haqiqiy
+      # SQLite (Pyrogram sessiyasi) ekani tekshiriladi.
       - name: Telegram sessiyasi
         if: steps.peek.outputs.pending != '0'
+        env:
+          S1: ${{ secrets.PYRO_SESSION_B64_1 }}
+          S2: ${{ secrets.PYRO_SESSION_B64_2 }}
+          S3: ${{ secrets.PYRO_SESSION_B64_3 }}
         run: |
-          if [ -z "${{ secrets.PYRO_SESSION_B64_1 }}" ]; then
+          if [ -z "$S1" ]; then
             echo "::error::PYRO_SESSION_B64_1/2/3 secret'lari yo'q"
             exit 1
           fi
-          printf '%s%s%s' "${{ secrets.PYRO_SESSION_B64_1 }}" "${{ secrets.PYRO_SESSION_B64_2 }}" \
-            "${{ secrets.PYRO_SESSION_B64_3 }}" | base64 -d > tool/encode/pyro_session.session
+          B64=$(printf '%s%s%s' "$S1" "$S2" "$S3" | tr -cd 'A-Za-z0-9+/=')
+          echo "Base64 uzunligi: ${#B64} belgi (kutilgan: 6828)"
+          if ! printf '%s' "$B64" | base64 -d > tool/encode/pyro_session.session 2>/dev/null; then
+            echo "::error::Sessiya ochilmadi — PYRO_SESSION_B64_1/2/3 qiymatlarini to'liq, bo'lib-bo'lib emas, qaytadan qo'ying"
+            exit 1
+          fi
+          if ! head -c 16 tool/encode/pyro_session.session | grep -q "SQLite format 3"; then
+            echo "::error::Sessiya fayli buzuq (SQLite emas) — secret'larni tekshiring"
+            exit 1
+          fi
+          echo "✅ Sessiya tiklandi ($(stat -c%s tool/encode/pyro_session.session) bayt)"
 
       - name: Kodlash
         if: steps.peek.outputs.pending != '0'
