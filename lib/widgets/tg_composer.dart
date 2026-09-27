@@ -157,7 +157,7 @@ class TgTextController extends TextEditingController {
         flush();
         children.add(WidgetSpan(
           alignment: PlaceholderAlignment.middle,
-          child: TgStickerView(doc: d, size: size),
+          child: TgStickerView(doc: d, size: size, still: true),
         ));
       }
     }

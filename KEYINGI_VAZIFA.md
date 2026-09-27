@@ -3756,3 +3756,24 @@ odam yubora olsin — Telegram Premium bo'lishi shart emas".
   admin) bilan yuboriladi: `_TgMediaPanelState._allowed` — panelni hamma
   ko'radi, yuborishda obuna tekshiriladi (obuna yo'q bo'lsa "Profil →
   Obuna" xabari). Yuborishning boshqa yo'li yo'q (faqat panel).
+
+## Emoji/stiker sekinligi, ekran qotishi, chatda "qora" (2026-09)
+
+TALAB: "animatsiya o'chirilgan bo'lsa ham bosib turganda sekin, chatga
+yuborilgani ishlamayapti, ekran qotib yotibdi, emoji va stikerlar juda
+sekin yuklanyapti, chatdagilar qop-qora — Telegram'da hammasi ishlaydi".
+
+TOPILGAN SABAB: harakatsiz holatda ham HAR bir emoji/stiker uchun to'liq
+fayl yuklanib, birinchi kadr Rust'da (tlottie/VP9) chizilardi. Navbat
+(`_AnimClock`) kuchsiz telefonda bir vaqtda BITTA kadr chizadi va yangi
+kelgan katakni navbat boshiga qo'yadi — panel ochilganda yuzlab emoji
+navbatga tushib, chatdagi stikerlar oxirida qolardi; birinchi kadr
+tayyor bo'lguncha esa hech narsa chizilmasdi (qora/bo'sh).
+
+- Panel, matndagi emojilar va yozish maydonidagi emojilar (`still`):
+  Telegram'ning tayyor kichik rasmi (thumbnail, bir necha KB) —
+  Rust'da chizish yo'q, to'liq fayl yuklanmaydi.
+- Chatdagi stiker va katta ko'rinish: birinchi kadr / animatsiya
+  tayyor bo'lguncha kichik rasm ko'rinib turadi (`_ThumbImage`,
+  `TgAnimView` endi yuklanayotganda ham `fallback` ni ko'rsatadi).
+- Chatdagi GIF olinmasa — sababi ekranda (`_gifErrors`).

@@ -58,7 +58,16 @@ class TgStickerView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final thumb = doc.kind == 'mp4' && doc.thumb;
+    final animated = doc.kind == 'tgs' || doc.kind == 'webm';
+    // TEZLIK (foydalanuvchi: "emoji va stikerlar juda sekin yuklanyapti,
+    // ekran qotib qolyapti"): panelda va matndagi kichik emojilarda
+    // harakat yo'q — Telegram'ning TAYYOR kichik rasmi (thumbnail, bir
+    // necha KB) ko'rsatiladi. Ilgari har biri uchun to'liq fayl yuklanib,
+    // birinchi kadr Rust'da bittalab chizilardi (kuchsiz telefonda bir
+    // vaqtda bittadan) — yuzlab emoji navbatda turib, ekran qotardi.
+    final thumb = doc.thumb &&
+        !live &&
+        (doc.kind == 'mp4' || (animated && still));
     // Fayl diskda tayyor — kutish ham, kechiktirish ham yo'q: birinchi
     // kadrdanoq chiziladi.
     final ready = TgMedia.instance.fileSync(doc, thumb: thumb);
@@ -68,24 +77,30 @@ class TgStickerView extends StatelessWidget {
       child: ready != null
           ? KeyedSubtree(
               key: ValueKey('${doc.id}/${doc.kind}'),
-              child: _content(context, ready))
+              child: _content(context, ready, thumb))
           : _Deferred(
               key: ValueKey('${doc.id}/${doc.kind}'),
               builder: (context) => FutureBuilder<String?>(
                 future: TgMedia.instance.file(doc, thumb: thumb),
                 builder: (context, snap) {
                   final path = snap.data;
-                  if (path == null) return _Placeholder(size);
-                  return _content(context, path);
+                  // Yuklanguncha — kichik rasm (bo'lsa), bo'sh doira emas.
+                  if (path == null) return _loading();
+                  return _content(context, path, thumb);
                 },
               ),
             ),
     );
   }
 
-  Widget _content(BuildContext context, String path) {
+  /// To'liq fayl / birinchi kadr tayyor bo'lguncha ko'rinadigan narsa.
+  Widget _loading() => doc.thumb && (doc.kind == 'tgs' || doc.kind == 'webm')
+      ? _ThumbImage(doc: doc, size: size)
+      : _Placeholder(size);
+
+  Widget _content(BuildContext context, String path, bool thumb) {
             final animated = doc.kind == 'tgs' || doc.kind == 'webm';
-            if (animated) {
+            if (animated && !thumb) {
               return TgAnimView(
                 key: ValueKey(path),
                 path: path,
@@ -94,7 +109,7 @@ class TgStickerView extends StatelessWidget {
                 frozen: frozen,
                 once: once,
                 live: live,
-                fallback: _Placeholder(size),
+                fallback: _loading(),
               );
             }
             final px = (size * MediaQuery.devicePixelRatioOf(context)).round();
@@ -113,6 +128,31 @@ class TgStickerView extends StatelessWidget {
               ),
               errorBuilder: (_, __, ___) => _Placeholder(size),
             );
+  }
+}
+
+/// Telegram'ning tayyor kichik rasmi (thumbnail) — birinchi kadr yoki
+/// animatsiya tayyor bo'lguncha (chatdagi stiker, katta ko'rinish).
+class _ThumbImage extends StatelessWidget {
+  final TgDoc doc;
+  final double size;
+  const _ThumbImage({required this.doc, required this.size});
+
+  @override
+  Widget build(BuildContext context) {
+    final ready = TgMedia.instance.fileSync(doc, thumb: true);
+    Widget img(String p) => Image.file(File(p),
+        width: size,
+        height: size,
+        fit: BoxFit.contain,
+        gaplessPlayback: true,
+        errorBuilder: (_, __, ___) => _Placeholder(size));
+    if (ready != null) return img(ready);
+    return FutureBuilder<String?>(
+      future: TgMedia.instance.file(doc, thumb: true),
+      builder: (context, snap) =>
+          snap.data == null ? _Placeholder(size) : img(snap.data!),
+    );
   }
 }
 
@@ -789,13 +829,13 @@ class _TgAnimViewState extends State<TgAnimView> {
         height: widget.height ?? widget.size,
         child: tex != null && _texReady
             ? Texture(textureId: tex, filterQuality: FilterQuality.medium)
-            : null,
+            : widget.fallback,
       );
       return widget.once ? _TapReplay(onTap: replay, child: box) : box;
     }
-    if (_image == null) {
-      return _failed ? widget.fallback : const SizedBox.shrink();
-    }
+    // Birinchi kadr tayyor bo'lguncha ham — zaxira (kichik rasm yoki
+    // bo'sh joy); ilgari hech narsa ko'rinmay, "qora" turardi.
+    if (_image == null) return widget.fallback;
     return CustomPaint(
       size: Size(widget.size, widget.height ?? widget.size),
       painter: _FramePainter(_img, fill: widget.gif),
@@ -892,7 +932,8 @@ class TgCustomEmojiView extends StatelessWidget {
     final known = TgMedia.instance.customEmojiSync(id);
     if (known != null) {
       return KeyedSubtree(
-          key: ValueKey(id), child: TgStickerView(doc: known, size: size));
+          key: ValueKey(id),
+          child: TgStickerView(doc: known, size: size, still: true));
     }
     return FutureBuilder<TgDoc?>(
       key: ValueKey(id),
@@ -901,7 +942,7 @@ class TgCustomEmojiView extends StatelessWidget {
         final d = snap.data;
         // Yuklanguncha zaxira emoji EMAS — bo'sh joy (foydalanuvchi talabi).
         if (d == null) return SizedBox(width: size, height: size);
-        return TgStickerView(doc: d, size: size);
+        return TgStickerView(doc: d, size: size, still: true);
       },
     );
   }
@@ -1038,11 +1079,17 @@ Future<File?> tgChatFile(String name) async {
 /// Nomdagi GIF kaliti (`..._g<id>_<ah>_<dc>_<fr>.mp4`).
 final _gifTag = RegExp(r'_g([0-9a-f]{1,16})_([0-9a-f]{1,16})_(\d{1,3})_([0-9a-f]{2,120})\.mp4$');
 
+/// GIF nima uchun olinmadi (ekranda ko'rsatiladi — sababini bilish uchun).
+final Map<String, String> _gifErrors = {};
+
 /// Telegram ilovasidagidek: GIF o'z Telegram hisobi bilan to'g'ridan-
 /// to'g'ri Telegram serveridan (bot chati, worker ishtirokisiz).
 Future<File?> _directGif(String name) async {
   final m = _gifTag.firstMatch(name);
-  if (m == null) return null;
+  if (m == null) {
+    _gifErrors[name] = 'eski GIF (Telegram kaliti yo\'q)';
+    return null;
+  }
   // Diskda bo'lsa — navbatsiz, darhol.
   final dir = TelegramService.instance.mediaDir;
   if (dir.isNotEmpty) {
@@ -1050,7 +1097,10 @@ Future<File?> _directGif(String name) async {
     final f = File('$dir/$id');
     if (f.existsSync()) return f;
   }
-  if (!TelegramService.instance.authorized) return null;
+  if (!TelegramService.instance.authorized) {
+    _gifErrors[name] = 'Telegram hisobi ulanmagan';
+    return null;
+  }
   try {
     final j = await NativePool.files.call('rust_tg_gif_direct',
         arg: jsonEncode({
@@ -1061,7 +1111,10 @@ Future<File?> _directGif(String name) async {
         }));
     final p = j['path'];
     if (p is String && File(p).existsSync()) return File(p);
-  } catch (_) {}
+    _gifErrors[name] = '${j['error'] ?? 'noma\'lum xato'}';
+  } catch (e) {
+    _gifErrors[name] = '$e';
+  }
   return null;
 }
 
@@ -1193,9 +1246,27 @@ class _TgGifMessageState extends State<TgGifMessage> {
                           });
                           _open();
                         },
-                        child: Icon(Icons.refresh_rounded,
-                            color: Colors.white.withValues(alpha: 0.45),
-                            size: 34),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.refresh_rounded,
+                                color: Colors.white.withValues(alpha: 0.45),
+                                size: 34),
+                            // Sababi — tuzatish uchun ko'rinib tursin.
+                            if (_gifErrors[widget.fileName] != null)
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(8, 6, 8, 0),
+                                child: Text(_gifErrors[widget.fileName]!,
+                                    textAlign: TextAlign.center,
+                                    maxLines: 3,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                        fontSize: 11,
+                                        color: Colors.white
+                                            .withValues(alpha: 0.5))),
+                              ),
+                          ],
+                        ),
                       )
                     : const SizedBox(
                         width: 22,
