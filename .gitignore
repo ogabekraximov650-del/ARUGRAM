@@ -30,3 +30,4 @@ rust/Cargo.lock
 # ── Python ─────────────────────────────────────────────────────
 __pycache__/
 *.pyc
+anime/musiqa.wav
