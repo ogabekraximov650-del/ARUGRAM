@@ -101,6 +101,14 @@ jobs:
             echo "::error::PYRO_SESSION_B64_1/2/3 secret'lari yo'q"
             exit 1
           fi
+          # Har bo'lak alohida — qaysi secret'ga ortiqcha matn (nom,
+          # "Name:" va h.k.) tushib qolgani ko'rinsin. Yaroqli sessiyada
+          # har biri 2276 belgi (oxirgisi `=` bilan tugaydi).
+          for n in 1 2 3; do
+            k="S$n"
+            v=$(printf '%s' "${!k}" | tr -cd 'A-Za-z0-9+/=')
+            echo "PYRO_SESSION_B64_$n: ${#v} belgi, boshi: ${v:0:6}…, oxiri: …${v: -4}"
+          done
           B64=$(printf '%s%s%s' "$S1" "$S2" "$S3" | tr -cd 'A-Za-z0-9+/=')
           echo "Base64 uzunligi: ${#B64} belgi (kutilgan: 6828)"
           if ! printf '%s' "$B64" | base64 -d > tool/encode/pyro_session.session 2>/dev/null; then

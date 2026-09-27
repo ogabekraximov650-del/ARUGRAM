@@ -9875,6 +9875,33 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
         return ok(json!({"ok": true, "state": "queued", "in_queue": n}));
     }
 
+    // Asl videoni o'chirish (ilovadagi "o'chirish" tugmasi): qism
+    // yozuvidan, navbatdan va kanaldan. Ishlayotgan run'ning keyingi
+    // yozuvlari 409 bilan rad etiladi (ish yo'qoldi) — u to'xtaydi.
+    // Tayyor bo'lgan sifatlarga tegilmaydi.
+    if path == "/api/encode/delete" && method == Method::Post {
+        let Some(u) = session_user(env, &bearer(&req)).await? else {
+            return json_resp(&json!({"error": "unauthorized"}), 401);
+        };
+        if !is_admin(&u) {
+            return json_resp(&json!({"error": "forbidden"}), 403);
+        }
+        let b: Value = req.json().await.unwrap_or(json!({}));
+        let (a, s, e) = encode_pk(&b);
+        let origin = b["origin"].as_str().unwrap_or("").trim().to_string();
+        if !tg_safe_name(&origin) || !origin.starts_with("orig_") {
+            return json_resp(&json!({"error": "Asl video nomi noto'g'ri"}), 400);
+        }
+        turso_batch(env, &[
+            ("UPDATE epizod_db SET origin_video='' WHERE anime_id=? AND season_id=? AND epizod_id=? AND origin_video=?",
+             vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e), TursoArg::text(&origin)]),
+            ("DELETE FROM encode_jobs WHERE anime_id=? AND season_id=? AND epizod_id=? AND origin=?",
+             vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e), TursoArg::text(&origin)]),
+        ]).await?;
+        tg_forget_file(env, &origin).await;
+        return ok(json!({"ok": true}));
+    }
+
     if path == "/api/encode/status" && method == Method::Get {
         let Some(u) = session_user(env, &bearer(&req)).await? else {
             return json_resp(&json!({"error": "unauthorized"}), 401);

@@ -3777,3 +3777,15 @@ tayyor bo'lguncha esa hech narsa chizilmasdi (qora/bo'sh).
   tayyor bo'lguncha kichik rasm ko'rinib turadi (`_ThumbImage`,
   `TgAnimView` endi yuklanayotganda ham `fallback` ni ko'rsatadi).
 - Chatdagi GIF olinmasa — sababi ekranda (`_gifErrors`).
+
+## Asl videoni o'chirish tugmasi; sessiya secret'i tekshiruvi (2026-09)
+
+- Ilova: "Asl video (avto-kodlash)" kartasida qolgan sifatlardagi kabi
+  o'chirish tugmasi (tasdiqlash bilan). Worker `POST /api/encode/delete`
+  (admin): `epizod_db.origin_video` tozalanadi, navbatdan olinadi
+  (ishlayotgan run 409 olib to'xtaydi), kanal posti o'chadi
+  (`tg_forget_file`). Tayyor sifatlar qoladi.
+- `encode.yml`: log'da har bir `PYRO_SESSION_B64_n` uzunligi, boshi va
+  oxiri chiqadi (yaroqli qiymatda har biri 2276 belgi) — ortiqcha matn
+  qaysi secret'ga tushgani ko'rinadi. Birinchi urinishda jami 6974 belgi
+  chiqdi (kutilgan 6828) — secret'larga 146 ta ortiqcha belgi tushgan.

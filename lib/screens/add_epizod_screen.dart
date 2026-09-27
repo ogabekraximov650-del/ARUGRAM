@@ -257,6 +257,73 @@ class _AddEpizodScreenState extends State<AddEpizodScreen> {
             : 'Asl video yuklanmadi — $err')));
   }
 
+  /// Asl videoni o'chiradi (qolgan sifatlardagi kabi): kanaldan,
+  /// qism yozuvidan va kodlash navbatidan. Tayyor sifatlar qoladi.
+  Future<void> _deleteOrigin() async {
+    final o = _origin;
+    if (o == null) return;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.cardAlt,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Asl videoni o\'chirish?',
+            style: TextStyle(color: Colors.white)),
+        content: Text(
+          'Asl video Telegram\'dan ham, bazadan ham o\'chiriladi va '
+          'kodlash navbatdan olinadi. Tayyor bo\'lgan sifatlar qoladi. '
+          'Davom etasizmi?',
+          style: TextStyle(color: Colors.white.withValues(alpha: 0.7)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Yo\'q',
+                style: TextStyle(color: Colors.white.withValues(alpha: 0.5))),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Ha, o\'chirish'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
+    String? err;
+    try {
+      final r = await http.post(Uri.parse('$_apiBase/api/encode/delete'),
+          headers: _authHeaders,
+          body: jsonEncode({
+            'anime_id': widget.animeId,
+            'season_id': widget.seasonId,
+            'epizod_id': widget.initialEpizod?['epizod_id'] ?? 0,
+            'origin': o,
+          }));
+      if (r.statusCode != 200) {
+        err = '${r.statusCode}';
+        try {
+          err = (jsonDecode(r.body)['error'] ?? err).toString();
+        } catch (_) {}
+      }
+    } catch (e) {
+      err = '$e';
+    }
+    if (!mounted) return;
+    if (err == null) {
+      setState(() {
+        _origin = null;
+        _originNew = false;
+        _encodeJob = null;
+        _originQ.sizeBytes = 0;
+      });
+    }
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(err == null
+            ? 'Asl video o\'chirildi'
+            : 'Asl video o\'chirilmadi: $err')));
+  }
+
   /// Qismni kodlash navbatiga qo'yadi. Xato bo'lsa — matni.
   Future<String?> _queueEncode(Object epizodId) async {
     final o = _origin;
@@ -859,6 +926,17 @@ class _AddEpizodScreenState extends State<AddEpizodScreen> {
                         style: TextStyle(
                             fontSize: 13,
                             color: Colors.white.withValues(alpha: 0.8))),
+                  ),
+                  // Qolgan sifatlardagi kabi o'chirish tugmasi.
+                  GlassTappable(
+                    onTap: _deleteOrigin,
+                    child: Glass(
+                      borderRadius: 10,
+                      blur: 10,
+                      padding: const EdgeInsets.all(8),
+                      child: const Icon(Icons.delete_outline_rounded,
+                          color: Colors.redAccent, size: 20),
+                    ),
                   ),
                 ],
               ),
