@@ -3741,3 +3741,14 @@ serveridan olinsin — hech qanday B2 va maxfiy kanallarsiz".
   ochilmaydi.
 - `TG_API_ID`/`TG_API_HASH` eskirgan edi — foydalanuvchi GitHub
   secret'larini yangilaydi, worker keyingi deploy'da oladi.
+
+## Premium emoji — ilova obunasi bilan (2026-09)
+
+TALAB: "premium emoji, GIF va stikerlarni ilovamizdan obuna sotib olgan
+odam yubora olsin — Telegram Premium bo'lishi shart emas".
+
+- `tg_composer.dart` (`_EmojiPage._load`): ruxsat endi
+  `BillingService.active` (ilova obunasi) yoki admin; Telegram Premium
+  tekshirilmaydi. Qulf/xabar matni yangilandi.
+- GIF va stikerlar oldindan hech qanday premium tekshiruvisiz ishlaydi
+  (yuborish Telegram'ga emas, bizning chat/izohlarga).

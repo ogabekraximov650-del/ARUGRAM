@@ -2,8 +2,8 @@
 //
 // TALAB (foydalanuvchi): "Telegram'ning pastki yozish va uchchala
 // to'plamni ochadigan oynasi qanday ishlasa, xuddi shunday qilib
-// yasab ber" (Emoji / GIF / Stikerlar); "premium emoji'ni faqat
-// premium'i bor odam yubora olsin".
+// yasab ber" (Emoji / GIF / Stikerlar); "premium emoji'ni
+// ilovamiz obunasi bor odam yubora olsin (Telegram Premium shart emas)".
 //
 // ── QANDAY ISHLAYDI (Telegram Android bilan bir xil) ────────────
 //
@@ -30,6 +30,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:lottie/lottie.dart';
 
+import '../services/billing_service.dart';
 import '../services/support_service.dart';
 import '../services/tg_media.dart';
 import 'emoji_text.dart';
@@ -1280,10 +1281,14 @@ class _EmojiPageState extends State<_EmojiPage>
     final m = TgMedia.instance;
     final r = await m.recentEmoji();
     final rc = await m.recentCustom();
-    // Admin (server tasdiqlagan) maxsus emojilarni Telegram Premium'siz
-    // ham yuboradi — ular bizning chat/izohlarimizda, Telegram'da emas.
-    final premium =
-        UnreadBadge.instance.isAdmin || (m.ready && await m.premium());
+    // TALAB (foydalanuvchi): "premium emoji'ni ILOVAMIZDAN obuna sotib
+    // olgan odam yubora olsin — Telegram Premium shart emas". Emojilar
+    // bizning chat/izohlarimizda ko'rsatiladi (Telegram'ga
+    // yuborilmaydi), shu sabab ruxsat ilova obunasiga bog'langan.
+    // Admin — har doim.
+    final billing = BillingService.instance;
+    if (!billing.active) await billing.load();
+    final premium = UnreadBadge.instance.isAdmin || billing.active;
     final sets = m.ready ? await m.emojiSets() : <TgSet>[];
     if (!mounted) return;
     setState(() {
@@ -1320,7 +1325,8 @@ class _EmojiPageState extends State<_EmojiPage>
 
   void _pickCustom(TgDoc d) {
     if (!_premium) {
-      _say('Maxsus emoji faqat Telegram Premium bilan yuboriladi');
+      _say('Premium emoji faqat ARUmediaTV obunasi bilan yuboriladi '
+          '(Profil → Obuna)');
       return;
     }
     TgMedia.instance.rememberEmoji(d);
