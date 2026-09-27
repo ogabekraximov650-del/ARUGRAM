@@ -857,6 +857,25 @@ async fn init_db(env: &Env) -> bool {
             msg_id INTEGER NOT NULL,
             file_key TEXT DEFAULT ''
         )", vec![]),
+        // ── AVTO-KODLASH NAVBATI (`encode_route`) ─────────────
+        //
+        // Har qismga bitta yozuv: original fayl (`tg_files` dagi nom),
+        // navbatga qo'yilgan vaqt (tartib shu bo'yicha), holat va
+        // tayyor bo'lgan sifatlar (`,720p,480p,`) — qayta ishga
+        // tushirilganda tayyor sifat QAYTA kodlanmaydi.
+        ("CREATE TABLE IF NOT EXISTS encode_jobs (
+            anime_id INTEGER, season_id INTEGER, epizod_id INTEGER,
+            origin TEXT NOT NULL,
+            queued_at INTEGER NOT NULL,
+            state TEXT DEFAULT 'queued',
+            done TEXT DEFAULT '',
+            runner TEXT DEFAULT '',
+            lease_until INTEGER DEFAULT 0,
+            attempts INTEGER DEFAULT 0,
+            error TEXT DEFAULT '',
+            PRIMARY KEY (anime_id, season_id, epizod_id)
+        )", vec![]),
+        ("CREATE INDEX IF NOT EXISTS idx_encode_q ON encode_jobs(state, queued_at)", vec![]),
     ]).await.is_ok();
 
     // ── USTUN QO'SHISH (eski bazalar uchun, bir marta) ────────
@@ -872,6 +891,12 @@ async fn init_db(env: &Env) -> bool {
             let _ = turso_exec(env, sql, vec![]).await;
         }
         config_put(env, "mig_comment_media", "1").await;
+    }
+    // Avto-kodlash: qismning asl (original) videosi (2026-09).
+    if ok && config_get(env, "mig_origin_video").await.is_none() {
+        let _ = turso_exec(env,
+            "ALTER TABLE epizod_db ADD COLUMN origin_video TEXT DEFAULT ''", vec![]).await;
+        config_put(env, "mig_origin_video", "1").await;
     }
 
     ok
@@ -9125,6 +9150,17 @@ fn needs_app_check(path: &str) -> bool {
     if path == "/api/billing/webhook" {
         return false;
     }
+    // ── AVTO-KODLASH (GitHub Actions) ────────────────────────
+    //
+    // Ularni ilova emas, GitHub Actions chaqiradi — APK imzosi yo'q.
+    // O'z maxfiy kaliti (`ENCODE_TOKEN`, `encode_token_ok`) bilan
+    // himoyalangan. Ilova chaqiradiganlari (`queue`, `status`) esa
+    // tekshiruvdan o'tadi.
+    if matches!(path, "/api/encode/peek" | "/api/encode/claim" | "/api/encode/heartbeat"
+        | "/api/encode/quality" | "/api/encode/finish")
+    {
+        return false;
+    }
     // ── VIDEO VA RASM YO'LLARI ENDI OCHIQ EMAS ───────────────
     //
     // TALAB (foydalanuvchi): "worker faqat yangi xavfsiz ilovaga
@@ -9578,7 +9614,10 @@ async fn tg_user_media(env: &Env, msg: &Value) {
         let own = name.starts_with(&format!("avatar_{uid}_"))
             || name.starts_with(&format!("chat_{uid}_"))
             // Izohdagi GIF (Telegram'dagi tayyor fayl, qayta yuklanmaydi).
-            || name.starts_with(&format!("cmt_{uid}_"));
+            || name.starts_with(&format!("cmt_{uid}_"))
+            // Avto-kodlash uchun asl video (kelajakda boshqalar ham
+            // yuklaydi) — faqat O'Z nomi bilan.
+            || name.starts_with(&format!("orig_{uid}_"));
         if !own {
             return;
         }
@@ -9668,6 +9707,414 @@ async fn tg_channel_post(env: &Env, post: &Value) {
         format!("\u{274C} <code>{}</code> saqlanmadi (baza xatosi)", html_escape(name))
     };
     tg_send(env, ADMIN_TELEGRAM_ID, &text).await;
+}
+
+// ══════════════════════════════════════════════════════════════
+//  AVTO-KODLASH (GitHub Actions, H.265)
+// ══════════════════════════════════════════════════════════════
+//
+// TALAB (foydalanuvchi): "epizod yuklash oynasiga 'Original video
+// yuklash' tugmasi; video yuklangach GitHub Actions uni sifatlarga
+// bo'lib (H.265) kodlasin, Telegram'ga yuklasin va jurnalga yozsin".
+//
+// OQIM:
+//   1. Ilova asl videoni BOT CHATIGA yuklaydi (`orig_<id>_...`), bot
+//      uni yopiq kanalga ko'chiradi va `tg_files` ga yozadi
+//      (`tg_user_media`). Keyin `POST /api/encode/queue` — qism
+//      yozuviga `origin_video`, navbatga (`encode_jobs`) yozuv.
+//   2. Worker Actions'ni ishga tushiradi (`encode_dispatch`, bo'lmasa
+//      workflow soatlik jadval bilan o'zi tekshiradi).
+//   3. Actions (`tool/encode/run.py`) `claim` bilan navbatdagi ENG
+//      ESKI ishni oladi, har sifatni kodlab kanalga yuklaydi va
+//      `quality` bilan jurnalga yozadi, oxirida `finish`.
+//
+// XAVFSIZLIK (foydalanuvchi talabi):
+//   * KETMA-KET: navbat `queued_at` bo'yicha; bir vaqtda faqat BITTA
+//     ish "running" (boshqa run `busy` oladi). Workflow'da ham
+//     `concurrency` guruhi bor.
+//   * TAYYOR SIFAT QAYTA KODLANMAYDI: `done` ro'yxati; yuklangan-u,
+//     jurnalga yozilmay qolgan sifat (`tg_files` da bor) ham `claim`
+//     javobida qaytadi va faqat jurnalga yoziladi.
+//   * IJARA (lease): run o'lib qolsa, ish 30 daqiqada bo'shaydi va
+//     keyingi run QOLGAN sifatlardan davom etadi. `heartbeat` ijarani
+//     uzaytiradi. Ish boshqaga o'tgan bo'lsa eski run'ning yozuvlari
+//     rad etiladi (`runner` + `queued_at` tekshiruvi).
+//   * 3 marta yiqilgan ish "error" bo'ladi va navbatni to'sib
+//     qo'ymaydi; adminga xabar boradi.
+//   * Actions faqat maxfiy kalit (`ENCODE_TOKEN`) bilan kiradi.
+
+const ENCODE_LEASE_MS: i64 = 30 * 60 * 1000;
+const ENCODE_MAX_ATTEMPTS: i64 = 3;
+/// Bot asl videoni kanalga ko'chirib ulgurmagan bo'lsa shuncha kutiladi.
+const ENCODE_ORIGIN_WAIT_MS: i64 = 2 * 60 * 60 * 1000;
+
+fn ct_eq(a: &str, b: &str) -> bool {
+    a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+fn encode_token_ok(req: &Request, env: &Env) -> bool {
+    let want = tg_secret(env, "ENCODE_TOKEN");
+    if want.len() < 16 {
+        return false;
+    }
+    let got = req.headers().get("X-Encode-Token").ok().flatten().unwrap_or_default();
+    ct_eq(got.trim(), &want)
+}
+
+fn jint(b: &Value, k: &str) -> i64 {
+    b[k].as_i64()
+        .or_else(|| b[k].as_str().and_then(|s| s.trim().parse().ok()))
+        .unwrap_or(0)
+}
+
+fn done_list(done: &str) -> Vec<String> {
+    done.split(',').filter(|q| QUALITIES.contains(q)).map(String::from).collect()
+}
+
+/// Kodlangan sifat fayli nomi — ish va sifatga bog'liq, o'zgarmas.
+fn encode_file_name(a: i64, s: i64, e: i64, q: &str, queued_at: i64) -> String {
+    format!("ep_{a}_{s}_{e}_{q}_{queued_at}.mp4")
+}
+
+/// GitHub Actions'dagi `encode.yml` ni ishga tushiradi (xato — jim).
+async fn encode_dispatch(env: &Env) {
+    let token = tg_secret(env, "GH_TOKEN");
+    if token.is_empty() {
+        return;
+    }
+    let repo = match tg_secret(env, "GH_REPO") {
+        r if r.is_empty() => "ogabekraximov650-del/ARUGRAM".to_string(),
+        r => r,
+    };
+    let h = Headers::new();
+    let _ = h.set("Authorization", &format!("Bearer {token}"));
+    let _ = h.set("Accept", "application/vnd.github+json");
+    let _ = h.set("User-Agent", "arugram-worker");
+    let _ = h.set("Content-Type", "application/json");
+    if let Ok(r) = Request::new_with_init(
+        &format!("https://api.github.com/repos/{repo}/actions/workflows/encode.yml/dispatches"),
+        RequestInit::new().with_method(Method::Post).with_headers(h)
+            .with_body(Some(json!({"ref": "main"}).to_string().into())),
+    ) {
+        let _ = Fetch::Request(r).send().await;
+    }
+}
+
+async fn encode_notify(env: &Env, text: &str) {
+    tg_send(env, ADMIN_TELEGRAM_ID, text).await;
+}
+
+fn encode_pk(b: &Value) -> (i64, i64, i64) {
+    (jint(b, "anime_id"), jint(b, "season_id"), jint(b, "epizod_id"))
+}
+
+/// Ish shu run'niki va hali "running" — aks holda `None`.
+async fn encode_own_job(env: &Env, b: &Value) -> Option<Value> {
+    let (a, s, e) = encode_pk(b);
+    let runner = b["runner"].as_str().unwrap_or("");
+    if runner.is_empty() {
+        return None;
+    }
+    let res = turso_exec(env,
+        "SELECT * FROM encode_jobs WHERE anime_id=? AND season_id=? AND epizod_id=?
+           AND queued_at=? AND runner=? AND state='running'",
+        vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e),
+             TursoArg::int(jint(b, "queued_at")), TursoArg::text(runner)]).await.ok()?;
+    first_row(&res)
+}
+
+async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -> Result<Response> {
+    // ── ILOVA (admin) ────────────────────────────────────────
+    if path == "/api/encode/queue" && method == Method::Post {
+        let Some(u) = session_user(env, &bearer(&req)).await? else {
+            return json_resp(&json!({"error": "unauthorized"}), 401);
+        };
+        // Hozircha faqat admin; keyin qism egasi ham (`orig_<id>_`).
+        if !is_admin(&u) {
+            return json_resp(&json!({"error": "forbidden"}), 403);
+        }
+        let b: Value = req.json().await.unwrap_or(json!({}));
+        let (a, s, e) = encode_pk(&b);
+        let origin = b["origin"].as_str().unwrap_or("").trim().to_string();
+        if !tg_safe_name(&origin) || !origin.starts_with("orig_") {
+            return json_resp(&json!({"error": "Asl video nomi noto'g'ri"}), 400);
+        }
+        let ep = turso_exec(env,
+            "SELECT epizod_id FROM epizod_db WHERE anime_id=? AND season_id=? AND epizod_id=?",
+            vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]).await?;
+        if first_row(&ep).is_none() {
+            return err404("Qism topilmadi");
+        }
+        let old = turso_exec(env,
+            "SELECT origin, state FROM encode_jobs WHERE anime_id=? AND season_id=? AND epizod_id=?",
+            vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]).await?;
+        let old = first_row(&old);
+        let same = old.as_ref().map(|o| o["origin"].as_str() == Some(origin.as_str())).unwrap_or(false);
+        let state = old.as_ref().and_then(|o| o["state"].as_str().map(String::from)).unwrap_or_default();
+        if same && state != "error" {
+            // Xuddi shu video allaqachon navbatda/tayyor — qayta
+            // boshlanmaydi (ikki marta "Saqlash" bosilsa ham).
+            return ok(json!({"ok": true, "state": state}));
+        }
+        let now = now_ms();
+        let job_sql = if same {
+            // Xato bilan to'xtagan — tayyor sifatlari saqlanib, qayta
+            // navbatga (o'sha tartib raqami bilan).
+            "UPDATE encode_jobs SET state='queued', runner='', lease_until=0, attempts=0, error=''
+              WHERE anime_id=? AND season_id=? AND epizod_id=? AND origin=?"
+        } else {
+            "INSERT INTO encode_jobs (anime_id,season_id,epizod_id,origin,queued_at,state,done,runner,lease_until,attempts,error)
+             VALUES (?,?,?,?,?,'queued','','',0,0,'')
+             ON CONFLICT(anime_id,season_id,epizod_id) DO UPDATE SET origin=excluded.origin,
+                queued_at=excluded.queued_at, state='queued', done='', runner='', lease_until=0,
+                attempts=0, error=''"
+        };
+        let job_args = if same {
+            vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e), TursoArg::text(&origin)]
+        } else {
+            vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e), TursoArg::text(&origin), TursoArg::int(now)]
+        };
+        turso_batch(env, &[
+            ("UPDATE epizod_db SET origin_video=? WHERE anime_id=? AND season_id=? AND epizod_id=?",
+             vec![TursoArg::text(&origin), TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]),
+            (job_sql, job_args),
+        ]).await?;
+        encode_dispatch(env).await;
+        let n = turso_exec(env,
+            "SELECT COUNT(*) AS n FROM encode_jobs WHERE state IN ('queued','running')", vec![]).await?;
+        let n = first_row(&n).and_then(|r| r["n"].as_i64()).unwrap_or(1);
+        return ok(json!({"ok": true, "state": "queued", "in_queue": n}));
+    }
+
+    if path == "/api/encode/status" && method == Method::Get {
+        let Some(u) = session_user(env, &bearer(&req)).await? else {
+            return json_resp(&json!({"error": "unauthorized"}), 401);
+        };
+        if !is_admin(&u) {
+            return json_resp(&json!({"error": "forbidden"}), 403);
+        }
+        let url = req.url()?;
+        let q = |k: &str| url.query_pairs().find(|(n, _)| n == k)
+            .and_then(|(_, v)| v.parse::<i64>().ok()).unwrap_or(0);
+        let res = turso_exec(env,
+            "SELECT epizod_id, state, done, error, queued_at FROM encode_jobs
+              WHERE anime_id=? AND season_id=?",
+            vec![TursoArg::int(q("anime_id")), TursoArg::int(q("season_id"))]).await?;
+        let cols = res["cols"].as_array().cloned().unwrap_or_default();
+        let rows = res["rows"].as_array().cloned().unwrap_or_default();
+        let items: Vec<Value> = rows.iter()
+            .map(|r| row_to_obj(&cols, r.as_array().unwrap_or(&vec![]))).collect();
+        return ok(json!({"items": items}));
+    }
+
+    // ── ACTIONS (maxfiy kalit bilan) ─────────────────────────
+    if !encode_token_ok(&req, env) {
+        return json_resp(&json!({"error": "unauthorized"}), 401);
+    }
+    let now = now_ms();
+
+    if path == "/api/encode/peek" && method == Method::Get {
+        let res = turso_exec(env,
+            "SELECT COUNT(*) AS n FROM encode_jobs
+              WHERE state='queued' OR (state='running' AND lease_until<=?)",
+            vec![TursoArg::int(now)]).await?;
+        let n = first_row(&res).and_then(|r| r["n"].as_i64()).unwrap_or(0);
+        return ok(json!({"pending": n}));
+    }
+
+    if method != Method::Post {
+        return err404("topilmadi");
+    }
+    let b: Value = req.json().await.unwrap_or(json!({}));
+
+    if path == "/api/encode/claim" {
+        let runner = b["runner"].as_str().unwrap_or("").trim().to_string();
+        if runner.is_empty() || runner.len() > 64 {
+            return json_resp(&json!({"error": "runner"}), 400);
+        }
+        // Boshqa run ishlayapti — KETMA-KET: kutiladi.
+        let busy = turso_exec(env,
+            "SELECT runner FROM encode_jobs WHERE state='running' AND lease_until>? AND runner<>? LIMIT 1",
+            vec![TursoArg::int(now), TursoArg::text(&runner)]).await?;
+        if first_row(&busy).is_some() {
+            return ok(json!({"busy": true}));
+        }
+        for _ in 0..8 {
+            let res = turso_exec(env,
+                "SELECT * FROM encode_jobs WHERE state='queued' OR (state='running' AND lease_until<=?)
+                  ORDER BY queued_at ASC LIMIT 1",
+                vec![TursoArg::int(now)]).await?;
+            let Some(job) = first_row(&res) else {
+                return ok(json!({"none": true}));
+            };
+            let (a, s, e) = encode_pk(&job);
+            let queued_at = jint(&job, "queued_at");
+            let origin = job["origin"].as_str().unwrap_or("").to_string();
+            let pk = vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e), TursoArg::int(queued_at)];
+            let fail = |why: String| {
+                let mut args = vec![TursoArg::text(&why)];
+                args.extend(pk.clone());
+                (why, args)
+            };
+            let fail_sql = "UPDATE encode_jobs SET state='error', runner='', lease_until=0, error=?
+                             WHERE anime_id=? AND season_id=? AND epizod_id=? AND queued_at=?";
+            if jint(&job, "attempts") >= ENCODE_MAX_ATTEMPTS {
+                let (why, args) = fail(format!("{ENCODE_MAX_ATTEMPTS} marta urinildi"));
+                let _ = turso_exec(env, fail_sql, args).await;
+                encode_notify(env, &format!("\u{274C} Kodlash to'xtadi: {a}/{s}/{e} — {}", html_escape(&why))).await;
+                continue;
+            }
+            let ep = turso_exec(env,
+                "SELECT epizod_number FROM epizod_db WHERE anime_id=? AND season_id=? AND epizod_id=?",
+                vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]).await?;
+            let Some(ep) = first_row(&ep) else {
+                let (_, args) = fail("Qism o'chirilgan".to_string());
+                let _ = turso_exec(env, fail_sql, args).await;
+                continue;
+            };
+            let src = turso_exec(env, "SELECT msg_id, file_key FROM tg_files WHERE file_name=?",
+                vec![TursoArg::text(&origin)]).await?;
+            let Some(src) = first_row(&src) else {
+                if now - queued_at > ENCODE_ORIGIN_WAIT_MS {
+                    let (why, args) = fail("Asl video Telegram'da topilmadi".to_string());
+                    let _ = turso_exec(env, fail_sql, args).await;
+                    encode_notify(env, &format!("\u{274C} Kodlash: {a}/{s}/{e} — {why}")).await;
+                    continue;
+                }
+                // Bot hali ko'chirmagan — tartib buzilmasin, kutiladi.
+                return ok(json!({"wait": true}));
+            };
+            // Egallash: faqat hali hech kim olmagan bo'lsa.
+            let mut args = vec![TursoArg::text(&runner), TursoArg::int(now + ENCODE_LEASE_MS)];
+            args.extend(pk.clone());
+            args.push(TursoArg::int(now));
+            let got = turso_exec(env,
+                "UPDATE encode_jobs SET state='running', runner=?, lease_until=?, attempts=attempts+1
+                  WHERE anime_id=? AND season_id=? AND epizod_id=? AND queued_at=?
+                    AND (state='queued' OR (state='running' AND lease_until<=?))
+                  RETURNING done, attempts",
+                args).await?;
+            let Some(got) = first_row(&got) else {
+                return ok(json!({"busy": true}));
+            };
+            let done = done_list(got["done"].as_str().unwrap_or(""));
+            // Oldingi run yuklagan-u, jurnalga yozib ulgurmagan sifatlar.
+            let mut uploaded = Vec::new();
+            for q in QUALITIES {
+                if done.iter().any(|d| d == q) {
+                    continue;
+                }
+                let name = encode_file_name(a, s, e, q, queued_at);
+                let r = turso_exec(env, "SELECT msg_id, file_key FROM tg_files WHERE file_name=?",
+                    vec![TursoArg::text(&name)]).await?;
+                if let Some(r) = first_row(&r) {
+                    let key = r["file_key"].as_str().unwrap_or("").to_string();
+                    if valid_file_key(&key) {
+                        uploaded.push(json!({"quality": q, "file": name, "msg_id": r["msg_id"], "key": key}));
+                    }
+                }
+            }
+            return ok(json!({
+                "job": {
+                    "anime_id": a, "season_id": s, "epizod_id": e,
+                    "queued_at": queued_at, "origin": origin,
+                    "epizod_number": ep["epizod_number"],
+                    "attempt": got["attempts"],
+                    "done": done,
+                    "uploaded": uploaded,
+                    "origin_msg": src["msg_id"],
+                    "origin_key": src["file_key"],
+                },
+                "channel": tg_channel_id(env),
+            }));
+        }
+        return ok(json!({"none": true}));
+    }
+
+    let Some(job) = encode_own_job(env, &b).await else {
+        // Ish boshqa run'ga o'tgan yoki qayta navbatga qo'yilgan.
+        return json_resp(&json!({"error": "job_lost"}), 409);
+    };
+    let (a, s, e) = encode_pk(&job);
+    let queued_at = jint(&job, "queued_at");
+    let pk = || vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e), TursoArg::int(queued_at)];
+
+    if path == "/api/encode/heartbeat" {
+        let mut args = vec![TursoArg::int(now + ENCODE_LEASE_MS)];
+        args.extend(pk());
+        turso_exec(env,
+            "UPDATE encode_jobs SET lease_until=? WHERE anime_id=? AND season_id=? AND epizod_id=? AND queued_at=?",
+            args).await?;
+        return ok(json!({"ok": true}));
+    }
+
+    if path == "/api/encode/quality" {
+        let q = b["quality"].as_str().unwrap_or("");
+        if !QUALITIES.contains(&q) {
+            return json_resp(&json!({"error": "sifat"}), 400);
+        }
+        let file = b["file"].as_str().unwrap_or("");
+        let key = b["key"].as_str().unwrap_or("").to_ascii_lowercase();
+        let size = jint(&b, "size");
+        if file != encode_file_name(a, s, e, q, queued_at) || !valid_file_key(&key) || size <= 0 {
+            return json_resp(&json!({"error": "fayl"}), 400);
+        }
+        let old = turso_exec(env,
+            &format!("SELECT url_{q} AS u FROM epizod_db WHERE anime_id=? AND season_id=? AND epizod_id=?"),
+            vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]).await?;
+        let old = first_row(&old).and_then(|r| r["u"].as_str().map(String::from)).unwrap_or_default();
+        let mut done = done_list(job["done"].as_str().unwrap_or(""));
+        if !done.iter().any(|d| d == q) {
+            done.push(q.to_string());
+        }
+        let mut jargs = vec![TursoArg::text(&format!(",{},", done.join(","))), TursoArg::int(now + ENCODE_LEASE_MS)];
+        jargs.extend(pk());
+        turso_batch(env, &[
+            (&format!("UPDATE epizod_db SET url_{q}=?, size_{q}=?, key_{q}=?
+                        WHERE anime_id=? AND season_id=? AND epizod_id=?"),
+             vec![TursoArg::text(file), TursoArg::int(size), TursoArg::text(&key),
+                  TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]),
+            ("UPDATE encode_jobs SET done=?, lease_until=?
+               WHERE anime_id=? AND season_id=? AND epizod_id=? AND queued_at=?", jargs),
+        ]).await?;
+        // Eski (almashtirilgan) Telegram fayli kanaldan o'chadi.
+        let old = bare_name(&old);
+        if !old.is_empty() && old != file {
+            tg_forget_file(env, &old).await;
+        }
+        purge_list_cache(&format!("/api/epizods/{a}/{s}/{e}")).await;
+        return ok(json!({"ok": true, "done": done}));
+    }
+
+    if path == "/api/encode/finish" {
+        let done = done_list(job["done"].as_str().unwrap_or(""));
+        let num = turso_exec(env,
+            "SELECT epizod_number FROM epizod_db WHERE anime_id=? AND season_id=? AND epizod_id=?",
+            vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]).await.ok()
+            .and_then(|r| first_row(&r)).and_then(|r| r["epizod_number"].as_i64()).unwrap_or(0);
+        if b["ok"].as_bool() == Some(true) && !done.is_empty() {
+            turso_exec(env,
+                "UPDATE encode_jobs SET state='done', runner='', lease_until=0, error=''
+                  WHERE anime_id=? AND season_id=? AND epizod_id=? AND queued_at=?", pk()).await?;
+            encode_notify(env, &format!(
+                "\u{2705} Kodlandi: anime #{a}, bo'lim #{s}, {num}-qism — {}", done.join(", "))).await;
+            return ok(json!({"ok": true}));
+        }
+        let why: String = b["error"].as_str().unwrap_or("noma'lum xato").chars().take(300).collect();
+        let give_up = b["fatal"].as_bool() == Some(true) || jint(&job, "attempts") >= ENCODE_MAX_ATTEMPTS;
+        let mut args = vec![TursoArg::text(if give_up { "error" } else { "queued" }), TursoArg::text(&why)];
+        args.extend(pk());
+        turso_exec(env,
+            "UPDATE encode_jobs SET state=?, runner='', lease_until=0, error=?
+              WHERE anime_id=? AND season_id=? AND epizod_id=? AND queued_at=?", args).await?;
+        if give_up {
+            encode_notify(env, &format!(
+                "\u{274C} Kodlash to'xtadi: anime #{a}, bo'lim #{s}, {num}-qism — {}", html_escape(&why))).await;
+        }
+        return ok(json!({"ok": true, "retry": !give_up}));
+    }
+
+    err404("topilmadi")
 }
 
 async fn tg_route(mut req: Request, env: &Env, path: &str, method: Method) -> Result<Response> {
@@ -9957,7 +10404,10 @@ async fn main(req: Request, env: Env, ctx: Context) -> Result<Response> {
         // Shikoyat yuborish ham katalogga tegmaydi.
         || path.starts_with("/api/reports")
         // Telegram orqali video — shaxsiy, katalogga tegmaydi.
-        || path.starts_with("/api/tg/");
+        || path.starts_with("/api/tg/")
+        // Avto-kodlash navbati: qism yozuvini o'zi yangilaganda kerakli
+        // ro'yxat keshini o'zi tozalaydi (`encode_quality`).
+        || path.starts_with("/api/encode/");
     let write = matches!(method, Method::Post | Method::Put | Method::Delete) && !auth_path;
     let mut resp = route(req, env, ctx).await?;
 
@@ -10061,6 +10511,10 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
 
     if path.starts_with("/api/tg/") {
         return tg_route(req, &env, path, method.clone()).await;
+    }
+
+    if path.starts_with("/api/encode/") {
+        return encode_route(req, &env, path, method.clone()).await;
     }
 
     // ── SHAFFOF STATISTIKA ────────────────────────────────────

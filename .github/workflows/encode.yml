@@ -1,0 +1,119 @@
+name: Avto-kodlash (H.265)
+
+# ── AVTO-KODLASH ────────────────────────────────────────────────
+#
+# Ilovada "Original video yuklash" bilan yuklangan asl videolarni
+# sifatlarga bo'lib (upscale YO'Q) H.265 bilan kodlaydi, yopiq
+# Telegram kanaliga shifrlab yuklaydi va qism jurnaliga yozadi.
+# Navbat va holat worker'da (`worker/src/lib.rs` -> `encode_route`),
+# ish — `tool/encode/run.py` (`anime` repodagi `encode_h265.sh`
+# sozlamalari bilan).
+#
+# ISHGA TUSHISHI:
+#   * worker asl video navbatga qo'yilganda o'zi chaqiradi
+#     (`workflow_dispatch`, `ENCODE_GH_TOKEN` kerak);
+#   * zaxira: har soatda navbat tekshiriladi (bo'sh bo'lsa ~10 soniyada
+#     tugaydi, ffmpeg ham o'rnatilmaydi).
+#
+# KETMA-KET: `concurrency` — bir vaqtda faqat bitta run; navbatning
+# o'zi ham bir vaqtda bitta ishni beradi (yuklangan vaqti bo'yicha).
+#
+# KERAKLI SECRETS:
+#   PYRO_SESSION_B64_1/2/3 — kanal egasining Pyrogram sessiyasi
+#                            (`anime` repodagi bilan bir xil);
+#   TG_API_ID, TG_API_HASH — my.telegram.org;
+#   ENCODE_TOKEN           — worker bilan umumiy maxfiy kalit (32+ belgi);
+#   API_BASE (ixtiyoriy)   — worker manzili; bo'lmasa Cloudflare
+#                            hisobidan aniqlanadi (APK build'dagidek).
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: '23 * * * *'
+
+concurrency:
+  group: arugram-encode
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  encode:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - name: Worker manzili va navbat
+        id: peek
+        env:
+          API_BASE: ${{ secrets.API_BASE }}
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+        run: |
+          if [ -z "$ENCODE_TOKEN" ]; then
+            echo "::error::ENCODE_TOKEN secret'i yo'q"
+            exit 1
+          fi
+          if [ -z "$API_BASE" ] && [ -n "$CF_TOKEN" ] && [ -n "$CF_ACCOUNT" ]; then
+            SUB=$(curl -fsS -H "Authorization: Bearer $CF_TOKEN" \
+              "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/workers/subdomain" \
+              | jq -r '.result.subdomain // empty' || true)
+            [ -n "$SUB" ] && API_BASE="https://arugram.$SUB.workers.dev"
+          fi
+          if [ -z "$API_BASE" ]; then
+            echo "::error::Worker manzili aniqlanmadi (API_BASE secret'ini qo'ying)"
+            exit 1
+          fi
+          echo "api=$API_BASE" >> "$GITHUB_OUTPUT"
+          N=$(curl -fsS -H "X-Encode-Token: $ENCODE_TOKEN" -H "User-Agent: arugram-encoder" \
+            "$API_BASE/api/encode/peek" | jq -r '.pending // 0')
+          echo "Navbatda: $N"
+          echo "pending=$N" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        if: steps.peek.outputs.pending != '0'
+        uses: actions/checkout@v4
+
+      - name: ffmpeg
+        if: steps.peek.outputs.pending != '0'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+
+      - name: Python
+        if: steps.peek.outputs.pending != '0'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Python paketlari
+        if: steps.peek.outputs.pending != '0'
+        run: pip install --no-cache-dir -r tool/encode/requirements.txt
+
+      - name: Telegram sessiyasi
+        if: steps.peek.outputs.pending != '0'
+        run: |
+          if [ -z "${{ secrets.PYRO_SESSION_B64_1 }}" ]; then
+            echo "::error::PYRO_SESSION_B64_1/2/3 secret'lari yo'q"
+            exit 1
+          fi
+          printf '%s%s%s' "${{ secrets.PYRO_SESSION_B64_1 }}" "${{ secrets.PYRO_SESSION_B64_2 }}" \
+            "${{ secrets.PYRO_SESSION_B64_3 }}" | base64 -d > tool/encode/pyro_session.session
+
+      - name: Kodlash
+        if: steps.peek.outputs.pending != '0'
+        env:
+          API_BASE: ${{ steps.peek.outputs.api }}
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+          # `anime` repodagi kabi: CRF BASE (1080p), pastlari BASE-1..3.
+          H265_CRF: '30'
+          H265_PRESET: medium
+          # Shundan keyin yangi ish olinmaydi (6 soatlik limitga sig'sin).
+          START_BUDGET_MIN: '240'
+          PYTHONUNBUFFERED: '1'
+        run: python3 tool/encode/run.py
+
+      - name: Sessiyani o'chirish
+        if: always()
+        run: rm -f tool/encode/pyro_session.session

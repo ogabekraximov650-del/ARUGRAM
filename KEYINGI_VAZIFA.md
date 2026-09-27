@@ -3627,3 +3627,48 @@ yig'adi (bir vaqtda bitta `seekTo`, navbatda faqat eng oxirgisi).
 +5/-5 ko'rsatkichi 700 ms turadi (`_seekBadgeHold`). Keshda yo'q
 joyga sek qilinganda bo'lakni yuklab olishni kutish
 (`_ensureWindowFor`) o'z joyida qoldi — bu tarmoqdan olish uchun.
+
+## Avto-kodlash: asl video → H.265 sifatlar → Telegram → jurnal (2026-09)
+
+TALAB (foydalanuvchi): epizod yuklash oynasiga "Original video yuklash"
+tugmasi; video yuklangach GitHub Actions uni sifatlarga bo'lib
+kodlasin (`anime` repodagi H.265 workflow), Telegram'ga yuklasin va
+`epizod_db` ga yozsin. Asl video KANALGA emas, BOTGA yuklansin
+(kelajakda boshqalar ham yuklaydi). Xavfsizlik: yuklangan vaqti
+bo'yicha KETMA-KET, bittasi tugamaguncha keyingisi boshlanmasin, bir
+sifat qayta-qayta kodlanmasin.
+
+Qilinganlar:
+- Ilova (`add_epizod_screen.dart`): "Asl video (avto-kodlash)" kartasi.
+  Video bot chatiga yuklanadi (`orig_<foydalanuvchi id>_<anime>_<bo'lim>_<vaqt>.mp4`),
+  "Saqlash"dan keyin `POST /api/encode/queue`. Tahrirlashda holat
+  ko'rinadi (navbatda / kodlanmoqda, tayyor: ... / tayyor / xato +
+  "Qayta urinish").
+- Worker:
+  * `epizod_db.origin_video` ustuni (`mig_origin_video`), `encode_jobs`
+    jadvali (navbat: `queued_at`, `state`, `done`, `runner`,
+    `lease_until`, `attempts`, `error`);
+  * bot `orig_<uid>_` nomli faylni oddiy foydalanuvchidan ham kanalga
+    ko'chiradi (`tg_user_media`);
+  * `/api/encode/queue`, `/api/encode/status` (admin, ilova imzosi bilan);
+    `/api/encode/peek|claim|heartbeat|quality|finish` (Actions,
+    `X-Encode-Token` = `ENCODE_TOKEN`, ilova imzosi talab qilinmaydi);
+  * navbatga qo'yilganda workflow'ni ishga tushiradi (`GH_TOKEN`).
+- Xavfsizlik: bir vaqtda bitta "running" ish (boshqasi `busy`);
+  tartib `queued_at`; tayyor sifat (`done`) qayta kodlanmaydi, yuklanib
+  jurnalga yozilmay qolgani (`tg_files` dagi `ep_<a>_<s>_<e>_<q>_<queued_at>.mp4`)
+  faqat jurnalga yoziladi; 30 daqiqalik ijara + heartbeat (run o'lsa
+  keyingisi qolganidan davom etadi); eski run yozuvlari 409 bilan rad
+  etiladi; 3 urinishdan keyin "error" (navbatni to'smaydi), adminga
+  Telegram xabari; bir xil asl video qayta navbatga qo'yilmaydi.
+- `.github/workflows/encode.yml` + `tool/encode/run.py`: navbat bo'sh
+  bo'lsa ~10 s da tugaydi; ffmpeg libx265 (CRF 30/29/28/27, medium,
+  hvc1, +faststart, AAC), upscale yo'q, davomiylik tekshiruvi,
+  AES-128-CTR (ilova bilan bir xil) shifrlab kanalga yuklash.
+
+KERAKLI SECRETS (GitHub → ARUGRAM → Settings → Secrets):
+  PYRO_SESSION_B64_1/2/3 (anime repodagi — kanal egasi), TG_API_ID,
+  TG_API_HASH, ENCODE_TOKEN (32+ tasodifiy belgi), ENCODE_GH_TOKEN
+  (fine-grained token: faqat ARUGRAM, "Actions: Read and write"),
+  ixtiyoriy API_BASE. Keyin worker'ni qayta deploy qilish kerak
+  (`deploy-worker.yml` ENCODE_TOKEN va GH_TOKEN ni qo'yadi).

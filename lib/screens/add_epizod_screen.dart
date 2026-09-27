@@ -10,9 +10,9 @@ import '../services/ui_state.dart';
 import '../theme/app_background.dart';
 import '../services/intro_times.dart';
 import '../widgets/glass.dart';
-import '../services/api_base.dart';
 import '../services/format.dart';
 import '../services/telegram_service.dart';
+import '../services/auth_service.dart';
 
 const String _apiBase = kApiBase;
 
@@ -121,6 +121,25 @@ class _AddEpizodScreenState extends State<AddEpizodScreen> {
 
   late final List<_QualityState> _qualities;
 
+  // ── ASL (ORIGINAL) VIDEO — AVTO-KODLASH ─────────────────────────
+  //
+  // TALAB (foydalanuvchi): "epizod yuklash oynasiga 'Original video
+  // yuklash' tugmasi; GitHub Actions uni sifatlarga bo'lib kodlasin,
+  // Telegram'ga yuklasin va jurnalga yozsin".
+  //
+  // Asl video BOT CHATIGA yuklanadi (bot kanalga o'zi ko'chiradi —
+  // kelajakda boshqalar ham yuklay olsin). "Saqlash"dan keyin qism
+  // navbatga qo'yiladi (`/api/encode/queue`); tayyor sifatlar jurnalga
+  // o'zi yoziladi (`.github/workflows/encode.yml`).
+  String? _origin;
+
+  /// Asl video SHU oynada yuklandi — saqlashda navbatga qo'yiladi.
+  bool _originNew = false;
+  final _originQ = _QualityState(label: 'Asl video', urlKey: '', sizeKey: '');
+
+  /// Serverdagi kodlash holati (tahrirlashda).
+  Map<String, dynamic>? _encodeJob;
+
   @override
   void initState() {
     super.initState();
@@ -149,6 +168,116 @@ class _AddEpizodScreenState extends State<AddEpizodScreen> {
         q.url = _extractFileName(ep[q.urlKey] as String?);
         q.sizeBytes = fileSizeBytes(ep[q.sizeKey]);
       }
+      final o = (ep['origin_video'] ?? '').toString();
+      if (o.isNotEmpty) _origin = o;
+      _loadEncodeStatus();
+    }
+  }
+
+  Map<String, String> get _authHeaders => {
+        'Authorization': 'Bearer ${AuthService.instance.sessionToken ?? ''}',
+        'Content-Type': 'application/json',
+      };
+
+  /// Shu qismning kodlash holati (navbatda / kodlanmoqda / tayyor / xato).
+  Future<void> _loadEncodeStatus() async {
+    final id = widget.initialEpizod?['epizod_id'];
+    if (id == null) return;
+    try {
+      final r = await http.get(
+          Uri.parse('$_apiBase/api/encode/status'
+              '?anime_id=${widget.animeId}&season_id=${widget.seasonId}'),
+          headers: _authHeaders);
+      if (r.statusCode != 200) return;
+      final items = (jsonDecode(r.body)['items'] as List?) ?? const [];
+      for (final it in items) {
+        if (it is Map && '${it['epizod_id']}' == '$id') {
+          if (mounted) {
+            setState(() => _encodeJob = Map<String, dynamic>.from(it));
+          }
+          return;
+        }
+      }
+    } catch (_) {}
+  }
+
+  /// Asl videoni tanlab, bot chati orqali Telegram'ga yuklaydi.
+  Future<void> _pickOrigin() async {
+    if (!TelegramService.instance.authorized) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Asl video Telegram orqali yuklanadi: '
+              'Profil → "Telegram\'ni ulash"')));
+      return;
+    }
+    UiState.setAdminPicking(true);
+    final picked = await ImagePicker().pickVideo(source: ImageSource.gallery);
+    UiState.setAdminPicking(false);
+    if (picked == null || !mounted) return;
+    final size = await File(picked.path).length();
+    final ext = picked.path.split('.').last.toLowerCase();
+    final mime = ext == 'mkv' ? 'video/x-matroska' : 'video/mp4';
+    final uid = AuthService.instance.user?.id ?? 0;
+    // Bot boshqalarga faqat O'Z nomini (`orig_<id>_`) yozdiradi.
+    final name = 'orig_${uid}_${widget.animeId}_${widget.seasonId}_'
+        '${DateTime.now().millisecondsSinceEpoch}.$ext';
+    final q = _originQ;
+    setState(() {
+      q.isUploading = true;
+      q.progress = 0;
+      q.uploadedBytes = 0;
+      q.totalBytes = size;
+    });
+    final err = await TelegramService.instance.uploadFile(
+      picked.path,
+      name,
+      mime,
+      onProgress: (sent, total) {
+        if (!mounted) return;
+        setState(() {
+          q.uploadedBytes = sent;
+          q.totalBytes = total;
+          q.progress = total > 0 ? sent / total : 0;
+        });
+      },
+    );
+    await StorageJanitor.dropPicked(picked.path);
+    if (!mounted) return;
+    setState(() {
+      q.isUploading = false;
+      if (err == null) {
+        _origin = name;
+        _originNew = true;
+        q.sizeBytes = size;
+        _encodeJob = null;
+      }
+    });
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(err == null
+            ? 'Asl video yuklandi — "Saqlash"dan keyin kodlash navbatiga qo\'yiladi'
+            : 'Asl video yuklanmadi — $err')));
+  }
+
+  /// Qismni kodlash navbatiga qo'yadi. Xato bo'lsa — matni.
+  Future<String?> _queueEncode(Object epizodId) async {
+    final o = _origin;
+    if (o == null) return null;
+    try {
+      final r = await http.post(Uri.parse('$_apiBase/api/encode/queue'),
+          headers: _authHeaders,
+          body: jsonEncode({
+            'anime_id': widget.animeId,
+            'season_id': widget.seasonId,
+            'epizod_id': epizodId,
+            'origin': o,
+          }));
+      if (r.statusCode == 200) return null;
+      String msg = '${r.statusCode}';
+      try {
+        msg = (jsonDecode(r.body)['error'] ?? msg).toString();
+      } catch (_) {}
+      return msg;
+    } catch (e) {
+      return '$e';
     }
   }
 
@@ -465,6 +594,21 @@ class _AddEpizodScreenState extends State<AddEpizodScreen> {
               headers: {'Content-Type': 'application/json'}, body: body);
 
       if (res.statusCode == 200 || res.statusCode == 201) {
+        // Asl video yangi yuklangan bo'lsa — kodlash navbatiga.
+        if (_originNew && _origin != null) {
+          Object? id = widget.initialEpizod?['epizod_id'];
+          try {
+            id ??= jsonDecode(res.body)['epizod_id'];
+          } catch (_) {}
+          final err = id == null ? 'qism raqami olinmadi' : await _queueEncode(id);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text(err == null
+                    ? 'Kodlash navbatiga qo\'yildi — sifatlar tayyor bo\'lgach '
+                        'o\'zi yoziladi'
+                    : 'Qism saqlandi, lekin kodlash navbatiga qo\'yilmadi: $err')));
+          }
+        }
         if (mounted) Navigator.of(context).pop(true);
       } else {
         throw 'Saqlashda xato (${res.statusCode}): ${res.body}';
@@ -564,6 +708,9 @@ class _AddEpizodScreenState extends State<AddEpizodScreen> {
                           Icons.title_rounded),
                       const SizedBox(height: 20),
 
+                      _buildOriginCard(),
+                      const SizedBox(height: 12),
+
                       // ── 4 ta sifat yuklash oynasi ──
                       for (final q in _qualities) ...[
                         _QualityCard(
@@ -630,6 +777,145 @@ class _AddEpizodScreenState extends State<AddEpizodScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  /// Kodlash holati — bir qator matn.
+  String? _encodeStatusText() {
+    final j = _encodeJob;
+    if (j == null) {
+      if (_originNew) return 'Saqlangach kodlash navbatiga qo\'yiladi';
+      return null;
+    }
+    final done = (j['done'] ?? '')
+        .toString()
+        .split(',')
+        .where((e) => e.isNotEmpty)
+        .join(', ');
+    return switch (j['state']) {
+      'queued' => done.isEmpty ? 'Navbatda' : 'Navbatda (tayyor: $done)',
+      'running' => done.isEmpty
+          ? 'Kodlanmoqda...'
+          : 'Kodlanmoqda... tayyor: $done',
+      'done' => 'Tayyor: $done',
+      'error' => 'Xato: ${j['error'] ?? ''}',
+      _ => null,
+    };
+  }
+
+  Widget _buildOriginCard() {
+    final q = _originQ;
+    final status = _encodeStatusText();
+    final failed = _encodeJob?['state'] == 'error';
+    return Glass(
+      borderRadius: 16,
+      blur: 14,
+      tint: 0.08,
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Asl video (avto-kodlash)',
+              style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 14)),
+          const SizedBox(height: 4),
+          Text(
+            'Bitta asl video yuklang — 1080p/720p/480p/360p (manbadan '
+            'baland emas) H.265 bilan o\'zi tayyorlanadi va yoziladi.',
+            style: TextStyle(
+                fontSize: 12, color: Colors.white.withValues(alpha: 0.55)),
+          ),
+          const SizedBox(height: 10),
+          if (q.isUploading) ...[
+            ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: LinearProgressIndicator(
+                value: q.progress,
+                backgroundColor: Colors.white.withValues(alpha: 0.1),
+                valueColor: AlwaysStoppedAnimation(AppColors.accent),
+                minHeight: 6,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(_progressText(q),
+                style: TextStyle(
+                    fontSize: 12, color: Colors.white.withValues(alpha: 0.7))),
+          ] else ...[
+            if (_origin != null) ...[
+              Row(
+                children: [
+                  Icon(
+                      failed
+                          ? Icons.error_outline_rounded
+                          : Icons.check_circle_rounded,
+                      color: failed ? Colors.redAccent : Colors.greenAccent,
+                      size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(status ?? 'Asl video yuklangan',
+                        style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.white.withValues(alpha: 0.8))),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+            ],
+            SizedBox(
+              width: double.infinity,
+              child: GlassTappable(
+                onTap: _pickOrigin,
+                child: Glass(
+                  borderRadius: 12,
+                  blur: 10,
+                  tint: 0.05,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.movie_filter_rounded,
+                          color: AppColors.accent, size: 20),
+                      const SizedBox(width: 8),
+                      Text(
+                        _origin == null
+                            ? 'Original video yuklash'
+                            : 'Boshqa asl video yuklash',
+                        style: TextStyle(
+                            color: AppColors.accent,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            if (failed && !_originNew) ...[
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: TextButton.icon(
+                  onPressed: () async {
+                    final id = widget.initialEpizod?['epizod_id'];
+                    if (id == null) return;
+                    final err = await _queueEncode(id);
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        content: Text(err == null
+                            ? 'Qayta navbatga qo\'yildi'
+                            : 'Xato: $err')));
+                    _loadEncodeStatus();
+                  },
+                  icon: const Icon(Icons.refresh_rounded, size: 18),
+                  label: const Text('Qayta urinish'),
+                ),
+              ),
+            ],
+          ],
+        ],
       ),
     );
   }

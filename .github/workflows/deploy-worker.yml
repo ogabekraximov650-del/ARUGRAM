@@ -91,6 +91,11 @@ jobs:
           put TG_API_ID "${{ secrets.TG_API_ID }}"
           put TG_API_HASH "${{ secrets.TG_API_HASH }}"
           put TG_CHANNEL_ID "${{ secrets.TG_CHANNEL_ID }}"
+          # Avto-kodlash (`encode.yml`): Actions shu kalit bilan kiradi;
+          # GH_TOKEN — worker workflow'ni ishga tushirishi uchun
+          # (faqat shu repo, "Actions: Read and write").
+          put ENCODE_TOKEN "${{ secrets.ENCODE_TOKEN }}"
+          put GH_TOKEN "${{ secrets.ENCODE_GH_TOKEN }}"
 
       - name: Deploy to Cloudflare Workers
         working-directory: worker
