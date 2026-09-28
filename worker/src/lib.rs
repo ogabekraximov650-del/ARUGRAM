@@ -10237,8 +10237,11 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
                 tg_forget_file(env, &origin).await;
             }
             encbot_purge(a, s, e).await;
+            let (an, sn) = encbot_titles(env, a, s).await
+                .unwrap_or_else(|| (format!("anime #{a}"), format!("bo'lim #{s}")));
             encode_notify(env, &format!(
-                "\u{2705} Kodlandi: anime #{a}, bo'lim #{s}, {num}-qism — {}", done.join(", "))).await;
+                "\u{2705} Kodlash tugadi: <b>{}</b>, {}, {num}-qism.\nTayyor sifatlar: {}\nAsl video o'chirildi.",
+                html_escape(&an), html_escape(&sn), done.join(", "))).await;
             return ok(json!({"ok": true}));
         }
         let why: String = b["error"].as_str().unwrap_or("noma'lum xato").chars().take(300).collect();
@@ -10383,7 +10386,9 @@ fn encbot_keyboard(rows: Vec<Vec<String>>) -> Value {
     let kb: Vec<Value> = rows.into_iter()
         .map(|r| json!(r.into_iter().map(|t| json!({"text": t})).collect::<Vec<_>>()))
         .collect();
-    json!({"keyboard": kb, "resize_keyboard": true, "is_persistent": true})
+    // `is_persistent` YO'Q: aks holda Telegram yozish joyidagi tugmalarni
+    // yashirish/ko'rsatish belgisini chiqarmaydi (foydalanuvchi talabi).
+    json!({"keyboard": kb, "resize_keyboard": true})
 }
 
 const ENCBOT_BTN_ANIMES: &str = "\u{2B05}\u{FE0F} Animelar";
@@ -10399,26 +10404,36 @@ async fn encbot_anime_page(env: &Env, page: i64) -> (String, Value) {
         vec![TursoArg::int(ENCBOT_PAGE + 1), TursoArg::int(page * ENCBOT_PAGE)]).await;
     let rows = res.map(|r| rows_of(&r)).unwrap_or_default();
     if rows.is_empty() && page == 0 {
-        return ("Bo'limi qo'shilgan anime yo'q. Avval ilovada anime va bo'lim qo'shing.".into(),
+        return ("Hali birorta animega bo'lim qo'shilmagan.\nAvval ilovada anime va uning bo'limini qo'shing, \
+                 keyin shu yerga qayting.".into(),
             encbot_keyboard(vec![vec![ENCBOT_BTN_STATUS.to_string()]]));
     }
-    let mut kb: Vec<Vec<String>> = rows.iter().take(ENCBOT_PAGE as usize).map(|r| {
+    let shown: Vec<&Value> = rows.iter().take(ENCBOT_PAGE as usize).collect();
+    let mut kb: Vec<Vec<String>> = shown.iter().map(|r| {
         let id = jint(r, "id");
         let name = r["name"].as_str().unwrap_or("").trim().to_string();
-        vec![format!("\u{1F3AC} {name} #{id}")]
+        // Nom takrorlansa (yoki bo'sh bo'lsa) — ajratish uchun raqami ham.
+        let twin = shown.iter().filter(|x| x["name"].as_str().unwrap_or("").trim() == name).count() > 1;
+        if name.is_empty() || twin {
+            vec![format!("\u{1F3AC} {name} (#{id})")]
+        } else {
+            vec![format!("\u{1F3AC} {name}")]
+        }
     }).collect();
     let mut nav = Vec::new();
     if page > 0 {
-        nav.push(format!("\u{25C0}\u{FE0F} {}-sahifa", page));
+        nav.push(format!("\u{25C0}\u{FE0F} Oldingi: {}-sahifa", page));
     }
     if rows.len() as i64 > ENCBOT_PAGE {
-        nav.push(format!("\u{25B6}\u{FE0F} {}-sahifa", page + 2));
+        nav.push(format!("Keyingi: {}-sahifa \u{25B6}\u{FE0F}", page + 2));
     }
     if !nav.is_empty() {
         kb.push(nav);
     }
     kb.push(vec![ENCBOT_BTN_STATUS.to_string()]);
-    ("\u{1F3AC} Qaysi animega qism qo'shiladi? Pastdagi tugmalardan tanlang.".into(), encbot_keyboard(kb))
+    ("\u{1F3AC} Qaysi animega yangi qism qo'shmoqchisiz?\n\n\
+      Pastdagi tugmalardan birini bosing. Tugmalar ko'rinmasa — yozish joyining \
+      o'ng tomonidagi to'rt kvadratli belgini bosing.".into(), encbot_keyboard(kb))
 }
 
 /// 2-qadam: animening bo'limlari.
@@ -10430,22 +10445,21 @@ async fn encbot_seasons(env: &Env, a: i64) -> (String, Value) {
     ]).await;
     let back = vec![ENCBOT_BTN_ANIMES.to_string()];
     let Ok(res) = res else {
-        return ("\u{274C} Baza xatosi, qayta urinib ko'ring.".into(), encbot_keyboard(vec![back]));
+        return ("\u{274C} Ma'lumotni olib bo'lmadi. Birozdan keyin qayta urinib ko'ring.".into(), encbot_keyboard(vec![back]));
     };
     let name = res.first().and_then(first_row)
         .and_then(|r| r["name"].as_str().map(String::from)).unwrap_or_default();
     let seasons = res.get(1).map(rows_of).unwrap_or_default();
     if seasons.is_empty() {
-        return ("Bu animeda bo'lim yo'q.".into(), encbot_keyboard(vec![back]));
+        return ("Bu animeda hali bo'lim yo'q. Avval ilovada bo'lim qo'shing.".into(), encbot_keyboard(vec![back]));
     }
     let mut kb: Vec<Vec<String>> = seasons.iter().map(|r| {
-        let sid = jint(r, "season_id");
         let nomi = r["nomi"].as_str().unwrap_or("").trim().to_string();
-        vec![format!("\u{1F4C2} {}-bo'lim{} ({} qism) #{a}/{sid}", jint(r, "bolim_id"),
+        vec![format!("\u{1F4C2} {}-bo'lim{} \u{2014} {} ta qism", jint(r, "bolim_id"),
             if nomi.is_empty() { String::new() } else { format!(": {nomi}") }, jint(r, "epizod_count"))]
     }).collect();
     kb.push(back);
-    (format!("<b>{}</b>\nQaysi bo'lim?", html_escape(&name)), encbot_keyboard(kb))
+    (format!("\u{1F3AC} <b>{}</b>\n\nQaysi bo'limga qism qo'shamiz?", html_escape(&name)), encbot_keyboard(kb))
 }
 
 /// Bo'limdagi qism raqamlari (o'sish tartibida).
@@ -10469,9 +10483,11 @@ async fn encbot_select(env: &Env, chat: i64, a: i64, s: i64) {
     let next = nums.iter().max().copied().unwrap_or(0) + 1;
     let kb = encbot_keyboard(vec![vec![ENCBOT_BTN_ANIMES.to_string(), ENCBOT_BTN_STATUS.to_string()]]);
     encbot_send(env, chat, &format!(
-        "\u{2705} Tanlandi: <b>{}</b>\n{}\nMavjud qismlar: {}\n\nEndi videolarni yuboring yoki FORWARD qiling — \
-         har biri navbatdagi qism bo'lib qo'shiladi ({next}, {}, ...).\n\
-         Qism raqamini kerak bo'lsa ilovadan o'zgartirasiz. Boshqa bo'lim: \u{201C}Animelar\u{201D} tugmasi.",
+        "\u{2705} Tanlandi: <b>{}</b>, {}\n\u{1F4DA} Hozir bor qismlar: {}\n\n\
+         \u{1F4E4} Endi videolarni shu yerga yuboring yoki boshqa kanaldan uzating (forward). \
+         Har bir video navbatdagi qism bo'lib qo'shiladi: {next}-qism, {}-qism va hokazo.\n\n\
+         \u{270F}\u{FE0F} Qism raqamini keyin ilovadan o'zgartirish mumkin.\n\
+         \u{21A9}\u{FE0F} Boshqa anime tanlash uchun \u{00AB}Animelar\u{00BB} tugmasini bosing.",
         html_escape(&an), html_escape(&sn), number_ranges(&nums), next + 1), Some(kb)).await;
 }
 
@@ -10489,7 +10505,7 @@ async fn encbot_video(env: &Env, msg: &Value, a: i64, s: i64, n: i64) {
     let ext = fname.rsplit_once('.').map(|(_, e)| e.to_string()).unwrap_or_default();
     let video_ext = ["mp4", "mkv", "mov", "avi", "webm", "m4v", "ts"];
     if !is_video && !mime.starts_with("video/") && !video_ext.contains(&ext.as_str()) {
-        encbot_send(env, chat, "\u{274C} Bu video emas. Video faylni yuboring.", None).await;
+        encbot_send(env, chat, "\u{274C} Bu video emas. Iltimos, video faylni yuboring yoki uzating.", None).await;
         return;
     }
     let ext = if video_ext.contains(&ext.as_str()) { ext } else { "mp4".to_string() };
@@ -10515,7 +10531,7 @@ async fn encbot_video(env: &Env, msg: &Value, a: i64, s: i64, n: i64) {
         Ok(c) => c["message_id"].as_i64().unwrap_or(0),
         Err(e) => {
             encbot_send(env, chat, &format!(
-                "\u{274C} Kanalga ko'chirib bo'lmadi: <code>{}</code>\nBot yopiq kanalda ADMIN ekanini tekshiring.",
+                "\u{274C} Videoni yopiq kanalga ko'chirib bo'lmadi.\nBot kanalda admin ekanini tekshiring.\n\nXato: <code>{}</code>",
                 html_escape(&e.to_string())), None).await;
             return;
         }
@@ -10606,8 +10622,9 @@ async fn encbot_video(env: &Env, msg: &Value, a: i64, s: i64, n: i64) {
         .ok().and_then(|r| first_row(&r)).map(|r| jint(&r, "n")).unwrap_or(1);
     let kick = encode_kick(env).await;
     encbot_send(env, chat, &format!(
-        "\u{2705} {n}-qism {} va kodlash navbatiga qo'yildi (navbatda {inq} ta).\n\
-         Sifatlar tayyor bo'lguncha ilovada asl video ko'rsatiladi.\n{kick}",
+        "\u{2705} {n}-qism {} va kodlashga navbatga qo'yildi.\n\
+         \u{1F4CB} Navbatda jami: {inq} ta video.\n\
+         \u{1F4FA} Sifatlar tayyor bo'lguncha ilovada asl video ko'rsatiladi.\n\n{kick}",
         if replaced { "almashtirildi" } else { "qo'shildi" }), None).await;
 }
 
@@ -10665,7 +10682,7 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
                 let n = encbot_numbers(env, *a, *s).await.iter().max().copied().unwrap_or(0) + 1;
                 encbot_video(env, msg, *a, *s, n).await;
             }
-            _ => encbot_send(env, chat, "Avval /start bilan anime va bo'limni tanlang.", None).await,
+            _ => encbot_send(env, chat, "Avval qaysi anime va bo'limga qo'shishni tanlang: /start", None).await,
         }
         return ok(json!({"ok": true}));
     }
@@ -10673,31 +10690,63 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
         let res = turso_exec(env,
             "SELECT state, COUNT(*) AS n FROM encode_jobs GROUP BY state", vec![]).await;
         let lines: Vec<String> = res.map(|r| rows_of(&r)).unwrap_or_default().iter()
-            .map(|r| format!("{}: {}", r["state"].as_str().unwrap_or("?"), jint(r, "n"))).collect();
+            .map(|r| {
+                let label = match r["state"].as_str().unwrap_or("") {
+                    "queued" => "\u{23F3} Navbatda kutmoqda",
+                    "running" => "\u{2699}\u{FE0F} Hozir kodlanmoqda",
+                    "error" => "\u{274C} Xato bilan to'xtagan",
+                    "done" => "\u{2705} Tayyor",
+                    _ => "\u{2753} Boshqa",
+                };
+                format!("{label}: {} ta", jint(r, "n"))
+            }).collect();
         let kick = encode_kick(env).await;
-        encbot_send(env, chat, &format!("\u{1F4CB} Navbat:\n{}\n{kick}",
-            if lines.is_empty() { "bo'sh".to_string() } else { lines.join("\n") }), None).await;
+        encbot_send(env, chat, &format!("\u{1F4CB} <b>Kodlash navbati</b>\n\n{}\n\n{kick}",
+            if lines.is_empty() { "Navbatda hech narsa yo'q.".to_string() } else { lines.join("\n") }), None).await;
         return ok(json!({"ok": true}));
     }
-    // Pastdagi tugma: oxiridagi `#a` (anime) yoki `#a/s` (bo'lim).
-    if let Some((_, tag)) = text.rsplit_once('#') {
-        let ids: Vec<i64> = tag.trim().split('/').filter_map(|p| p.trim().parse().ok()).collect();
-        match ids.as_slice() {
-            [a] => {
-                let (t, kb) = encbot_seasons(env, *a).await;
-                encbot_send(env, chat, &t, Some(kb)).await;
-                return ok(json!({"ok": true}));
+    // Bo'lim tugmasi: "📂 2-bo'lim: nomi — 6 ta qism" (anime — oxirgi tanlangan).
+    if let Some(rest) = text.strip_prefix("\u{1F4C2}") {
+        let bolim: i64 = rest.trim().split("-bo'lim").next().unwrap_or("").trim().parse().unwrap_or(-1);
+        let a: i64 = config_get(env, "encbot_anime").await.and_then(|v| v.parse().ok()).unwrap_or(0);
+        let sid = turso_exec(env,
+            "SELECT season_id FROM season_db WHERE anime_id=? AND bolim_id=? ORDER BY season_id ASC LIMIT 1",
+            vec![TursoArg::int(a), TursoArg::int(bolim)]).await
+            .ok().and_then(|r| first_row(&r)).map(|r| jint(&r, "season_id"));
+        match sid {
+            Some(s) => encbot_select(env, chat, a, s).await,
+            None => {
+                let (t, kb) = encbot_anime_page(env, 0).await;
+                encbot_send(env, chat, &format!("Bo'lim topilmadi, qaytadan tanlang.\n\n{t}"), Some(kb)).await;
             }
-            [a, s] => {
-                encbot_select(env, chat, *a, *s).await;
-                return ok(json!({"ok": true}));
-            }
-            _ => {}
+        }
+        return ok(json!({"ok": true}));
+    }
+    // Anime tugmasi: "🎬 nomi" yoki "🎬 nomi (#12)".
+    if let Some(rest) = text.strip_prefix("\u{1F3AC}") {
+        let rest = rest.trim();
+        let by_id = rest.rsplit_once("(#")
+            .and_then(|(_, t)| t.strip_suffix(')'))
+            .and_then(|t| t.trim().parse::<i64>().ok());
+        let a = match by_id {
+            Some(id) => Some(id),
+            None => turso_exec(env,
+                "SELECT a.id FROM anime_db a WHERE TRIM(a.name)=?
+                   AND EXISTS (SELECT 1 FROM season_db s WHERE s.anime_id=a.id)
+                 ORDER BY a.id DESC LIMIT 1",
+                vec![TursoArg::text(rest)]).await
+                .ok().and_then(|r| first_row(&r)).map(|r| jint(&r, "id")),
+        };
+        if let Some(a) = a {
+            config_put(env, "encbot_anime", &a.to_string()).await;
+            let (t, kb) = encbot_seasons(env, a).await;
+            encbot_send(env, chat, &t, Some(kb)).await;
+            return ok(json!({"ok": true}));
         }
     }
-    // Sahifa tugmalari: "▶️ 2-sahifa".
-    let page = text.split_whitespace().nth(1)
-        .and_then(|w| w.strip_suffix("-sahifa"))
+    // Sahifa tugmalari: "◀️ Oldingi: 1-sahifa" / "Keyingi: 3-sahifa ▶️".
+    let page = text.split_whitespace()
+        .find_map(|w| w.strip_suffix("-sahifa"))
         .and_then(|n| n.parse::<i64>().ok())
         .map(|n| n - 1)
         .unwrap_or(0);
@@ -10803,10 +10852,10 @@ async fn encode_kick(env: &Env) -> String {
     };
     let (pending, active) = (jint(&r, "pending"), jint(&r, "active"));
     if active > 0 {
-        return "\u{2699}\u{FE0F} Kodlash hozir ishlayapti.".into();
+        return "\u{2699}\u{FE0F} Kodlash hozir ishlayapti — navbatdagilar ketma-ket kodlanadi.".into();
     }
     if pending == 0 {
-        return "Navbat bo'sh.".into();
+        return "\u{2705} Kodlanadigan video qolmadi.".into();
     }
     let repo = match tg_secret(env, "GH_REPO") {
         r if r.contains('/') => r,
@@ -10818,7 +10867,7 @@ async fn encode_kick(env: &Env) -> String {
             &format!("/repos/{repo}/actions/workflows/{GH_WORKFLOW}/runs?status={st}&per_page=1"), None).await {
             Ok((200, v)) => {
                 if v["total_count"].as_i64().unwrap_or(0) > 0 {
-                    return "\u{23F3} Actions run allaqachon navbatda/ishlayapti.".into();
+                    return "\u{23F3} Kodlash dasturi (GitHub Actions) ishga tushmoqda — biroz kuting.".into();
                 }
             }
             Ok((code, v)) => {
@@ -10831,7 +10880,7 @@ async fn encode_kick(env: &Env) -> String {
     match gh_api(env, Method::Post,
         &format!("/repos/{repo}/actions/workflows/{GH_WORKFLOW}/dispatches"),
         Some(json!({"ref": "main"}))).await {
-        Ok((204, _)) => "\u{25B6}\u{FE0F} Avto-kodlash (Actions) ishga tushirildi.".into(),
+        Ok((204, _)) => "\u{25B6}\u{FE0F} Kodlash boshlandi (GitHub Actions ishga tushirildi).".into(),
         Ok((code, v)) => format!("\u{26A0}\u{FE0F} Actions ishga tushmadi (GitHub {code}): {}",
             html_escape(v["message"].as_str().unwrap_or(""))),
         Err(e) => format!("\u{26A0}\u{FE0F} Actions ishga tushmadi: {}", html_escape(&e.to_string())),
