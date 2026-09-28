@@ -3937,7 +3937,7 @@ qayta ochilmasin. Cloudflare kesh kerak emas.
   faqat `pos + 60 s` (o'rtacha bitreyt bo'yicha) gacha olinadi; undan
   uzoqdagisi `WAIT` → JNI `RETRY` → `AruDataSource` 1 s kutib qayta so'raydi.
   Istisno: fayl boshi (4 MiB) va oxiri (8 MiB, `moov`), joy noma'lum yoki
-  10 s dan eski. Test: `oldinga_bir_daqiqadan_ortiq_olinmaydi`.
+  2 daqiqadan eski. Test: `oldinga_bir_daqiqadan_ortiq_olinmaydi`.
 - `video_player_screen.dart` → `_checkSourceSwitch`: manba `aru://` bo'lsa
   fayl to'liq yuklanganda pleyer QAYTA OCHILMAYDI (faqat `_playViaLocal`).
 - Worker: ro'yxatlarning Cloudflare chekka keshi butunlay olib tashlandi

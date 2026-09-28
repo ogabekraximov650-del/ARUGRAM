@@ -55,7 +55,8 @@ const AHEAD: u64 = 2;
 //
 // Istisnolar (ular bo'lmasa video ochilmay qolishi mumkin): fayl boshi
 // va oxiri (MP4 sarlavhasi `moov` ko'pincha oxirida), hamda ijro joyi
-// noma'lum yoki eskirgan (10 s dan ko'p xabar kelmagan) holat.
+// noma'lum yoki eskirgan (2 daqiqadan ko'p xabar kelmagan) holat. Surish
+// (barmoq ekranda) paytida xabar to'xtaydi — shu sabab muddat uzun.
 const AHEAD_MS: u64 = 60_000;
 /// Chegaradan tashqari so'rov — JNI buni `RETRY` qiladi.
 const WAIT: &str = "oldinga chegara";
@@ -80,7 +81,7 @@ fn net_allowed(name: &str, total: u64, index: u64) -> bool {
     }
     let Ok(m) = positions().lock() else { return true };
     let Some(p) = m.get(name) else { return true };
-    if p.dur_ms == 0 || p.at.elapsed() > std::time::Duration::from_secs(10) {
+    if p.dur_ms == 0 || p.at.elapsed() > std::time::Duration::from_secs(120) {
         return true;
     }
     let limit = ((p.pos_ms + AHEAD_MS) as u128 * total as u128 / p.dur_ms as u128) as u64
