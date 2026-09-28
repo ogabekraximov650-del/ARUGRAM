@@ -829,10 +829,18 @@ fn doc_matches(m: &tl::types::Message, name: &str) -> Option<DocInfo> {
     }
     let Some(tl::enums::MessageMedia::Document(md)) = &m.media else { return None };
     let Some(tl::enums::Document::Document(d)) = &md.document else { return None };
-    let by_attr = d.attributes.iter().any(|a| {
-        matches!(a, tl::enums::DocumentAttribute::Filename(f) if f.file_name == name)
-    });
-    if !by_attr && m.message.lines().next().unwrap_or("").trim() != name {
+    // ASL videolar (`orig_`) — faqat POST IZOHI bo'yicha: kodlash boti
+    // orqali kelganlarida fayl nomi Telegram'niki (`video.mp4`), worker
+    // ularni izohi bilan yuboradi. Qolganlari (kodlangan sifatlar va
+    // h.k.) — faqat FAYL NOMI bo'yicha (foydalanuvchi talabi).
+    let found = if name.starts_with("orig_") {
+        m.message.lines().next().unwrap_or("").trim() == name
+    } else {
+        d.attributes.iter().any(|a| {
+            matches!(a, tl::enums::DocumentAttribute::Filename(f) if f.file_name == name)
+        })
+    };
+    if !found {
         return None;
     }
     Some(DocInfo {

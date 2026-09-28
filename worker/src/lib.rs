@@ -10471,24 +10471,70 @@ async fn encbot_numbers(env: &Env, a: i64, s: i64) -> Vec<i64> {
         .unwrap_or_default()
 }
 
-/// 3-qadam: bo'lim tanlandi — u eslab qolinadi (`app_config.encbot_target`)
-/// va keyin kelgan HAR BIR video (forward ham) keyingi qism bo'ladi.
+const ENCBOT_BTN_ADD: &str = "\u{2795} Yangi qism qo'shish";
+
+/// 3-qadam: bo'lim tanlandi — pastda: tepada "Yangi qism qo'shish", ostida
+/// qismlar (eng yangisi tepada, 1-qism eng pastda). Qism tugmasi — o'sha
+/// qismni yangi video bilan ALMASHTIRISH. Bo'lim `app_config.encbot_season`
+/// da, rejim `encbot_target` da (`a/s` — qo'shish, `a/s/n` — almashtirish,
+/// bo'sh — hali tanlanmagan).
 async fn encbot_select(env: &Env, chat: i64, a: i64, s: i64) {
     let Some((an, sn)) = encbot_titles(env, a, s).await else {
         encbot_send(env, chat, "\u{274C} Anime yoki bo'lim topilmadi.", None).await;
         return;
     };
-    config_put(env, "encbot_target", &format!("{a}/{s}")).await;
+    config_put(env, "encbot_season", &format!("{a}/{s}")).await;
+    config_put(env, "encbot_target", "").await;
     let nums = encbot_numbers(env, a, s).await;
-    let next = nums.iter().max().copied().unwrap_or(0) + 1;
-    let kb = encbot_keyboard(vec![vec![ENCBOT_BTN_ANIMES.to_string(), ENCBOT_BTN_STATUS.to_string()]]);
+    let mut kb: Vec<Vec<String>> = vec![vec![ENCBOT_BTN_ADD.to_string()]];
+    let mut desc: Vec<i64> = nums.clone();
+    desc.sort_unstable_by(|x, y| y.cmp(x));
+    desc.dedup();
+    for chunk in desc.chunks(3) {
+        kb.push(chunk.iter().map(|n| format!("\u{1F39E} {n}-qism")).collect());
+    }
+    kb.push(vec![ENCBOT_BTN_ANIMES.to_string(), ENCBOT_BTN_STATUS.to_string()]);
     encbot_send(env, chat, &format!(
-        "\u{2705} Tanlandi: <b>{}</b>, {}\n\u{1F4DA} Hozir bor qismlar: {}\n\n\
-         \u{1F4E4} Endi videolarni shu yerga yuboring yoki boshqa kanaldan uzating (forward). \
+        "\u{1F4C2} <b>{}</b>, {}\n\u{1F4DA} Hozir bor qismlar: {}\n\n\
+         \u{2795} Yangi qism qo'shish uchun pastdagi \u{00AB}Yangi qism qo'shish\u{00BB} tugmasini bosing.\n\
+         \u{1F501} Qismning videosini almashtirish uchun pastdan o'sha qism tugmasini bosing.",
+        html_escape(&an), html_escape(&sn), number_ranges(&nums)), Some(encbot_keyboard(kb))).await;
+}
+
+/// Tanlangan bo'lim (`encbot_season`).
+async fn encbot_season(env: &Env) -> Option<(i64, i64)> {
+    let v: Vec<i64> = config_get(env, "encbot_season").await.unwrap_or_default()
+        .split('/').filter_map(|p| p.parse().ok()).collect();
+    match v.as_slice() {
+        [a, s] => Some((*a, *s)),
+        _ => None,
+    }
+}
+
+/// "Yangi qism qo'shish" bosildi.
+async fn encbot_mode_add(env: &Env, chat: i64) {
+    let Some((a, s)) = encbot_season(env).await else {
+        encbot_send(env, chat, "Avval anime va bo'limni tanlang: /start", None).await;
+        return;
+    };
+    config_put(env, "encbot_target", &format!("{a}/{s}")).await;
+    let next = encbot_numbers(env, a, s).await.iter().max().copied().unwrap_or(0) + 1;
+    encbot_send(env, chat, &format!(
+        "\u{1F4E4} Endi videolarni shu yerga yuboring yoki boshqa kanaldan uzating (forward).\n\
          Har bir video navbatdagi qism bo'lib qo'shiladi: {next}-qism, {}-qism va hokazo.\n\n\
-         \u{270F}\u{FE0F} Qism raqamini keyin ilovadan o'zgartirish mumkin.\n\
-         \u{21A9}\u{FE0F} Boshqa anime tanlash uchun \u{00AB}Animelar\u{00BB} tugmasini bosing.",
-        html_escape(&an), html_escape(&sn), number_ranges(&nums), next + 1), Some(kb)).await;
+         \u{270F}\u{FE0F} Qism raqamini keyin ilovadan o'zgartirish mumkin.", next + 1), None).await;
+}
+
+/// Qism tugmasi bosildi — keyingi video shu qismni almashtiradi.
+async fn encbot_mode_replace(env: &Env, chat: i64, n: i64) {
+    let Some((a, s)) = encbot_season(env).await else {
+        encbot_send(env, chat, "Avval anime va bo'limni tanlang: /start", None).await;
+        return;
+    };
+    config_put(env, "encbot_target", &format!("{a}/{s}/{n}")).await;
+    encbot_send(env, chat, &format!(
+        "\u{1F501} <b>{n}-qism</b> uchun yangi videoni yuboring yoki uzating.\n\
+         Eski video va uning sifatlari o'chiriladi, yangisi qayta kodlanadi."), None).await;
 }
 
 /// 5-qadam: video keldi — kanalga, qism yozuviga va navbatga.
@@ -10675,6 +10721,12 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
         let target: Vec<i64> = config_get(env, "encbot_target").await.unwrap_or_default()
             .split('/').filter_map(|p| p.parse().ok()).collect();
         match target.as_slice() {
+            // Almashtirish — faqat BITTA video; keyin rejim o'chadi.
+            [a, s, n] => {
+                config_put(env, "encbot_target", "").await;
+                encbot_video(env, msg, *a, *s, *n).await;
+                encbot_select(env, chat, *a, *s).await;
+            }
             [a, s] => {
                 // Keyingi raqam — bo'limdagi eng kattasidan keyin. Webhook'lar
                 // ketma-ket keladi (`max_connections: 1`), ya'ni bir nechta
@@ -10682,7 +10734,9 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
                 let n = encbot_numbers(env, *a, *s).await.iter().max().copied().unwrap_or(0) + 1;
                 encbot_video(env, msg, *a, *s, n).await;
             }
-            _ => encbot_send(env, chat, "Avval qaysi anime va bo'limga qo'shishni tanlang: /start", None).await,
+            _ => encbot_send(env, chat,
+                "Avval anime va bo'limni tanlang, keyin \u{00AB}Yangi qism qo'shish\u{00BB} yoki qism tugmasini bosing: /start",
+                None).await,
         }
         return ok(json!({"ok": true}));
     }
@@ -10704,6 +10758,17 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
         encbot_send(env, chat, &format!("\u{1F4CB} <b>Kodlash navbati</b>\n\n{}\n\n{kick}",
             if lines.is_empty() { "Navbatda hech narsa yo'q.".to_string() } else { lines.join("\n") }), None).await;
         return ok(json!({"ok": true}));
+    }
+    if text == ENCBOT_BTN_ADD {
+        encbot_mode_add(env, chat).await;
+        return ok(json!({"ok": true}));
+    }
+    // Qism tugmasi: "🎞 5-qism".
+    if let Some(rest) = text.strip_prefix("\u{1F39E}") {
+        if let Ok(n) = rest.trim().trim_end_matches("-qism").trim().parse::<i64>() {
+            encbot_mode_replace(env, chat, n).await;
+            return ok(json!({"ok": true}));
+        }
     }
     // Bo'lim tugmasi: "📂 2-bo'lim: nomi — 6 ta qism" (anime — oxirgi tanlangan).
     if let Some(rest) = text.strip_prefix("\u{1F4C2}") {
@@ -11055,13 +11120,14 @@ async fn tg_route(mut req: Request, env: &Env, path: &str, method: Method) -> Re
             // `copyMessages` raqamlar O'SIB boradigan tartibda bo'lishini talab qiladi.
             pairs.sort_by_key(|(_, id)| *id);
             pairs.dedup_by_key(|(_, id)| *id);
-            // Kodlash boti qo'ygan asl videolarda (`orig_bot_`) fayl nomi
-            // Telegram'niki (masalan `video.mp4`) — ilova ularni faqat IZOH
-            // (= bizdagi nom, kalit yo'q) bo'yicha topa oladi. Shu sabab
-            // ular izoh bilan, qolganlari izohsiz nusxalanadi.
+            // ASL videolar (`orig_`) ilovada POST IZOHI bo'yicha topiladi
+            // (kodlash boti qo'yganlarida fayl nomi Telegram'niki, masalan
+            // `video.mp4`); kodlangan va boshqa fayllar — FAYL NOMI bo'yicha
+            // (foydalanuvchi talabi). Shu sabab asl videolar izohi bilan,
+            // qolganlari izohsiz nusxalanadi.
             let (with_cap, no_cap): (Vec<i64>, Vec<i64>) = {
                 let (a, b): (Vec<&(String, i64)>, Vec<&(String, i64)>) =
-                    pairs.iter().partition(|(n, _)| n.starts_with("orig_bot_"));
+                    pairs.iter().partition(|(n, _)| n.starts_with("orig_"));
                 (a.iter().map(|(_, id)| *id).collect(), b.iter().map(|(_, id)| *id).collect())
             };
             let mut copied: Result<Value> = Ok(json!([]));

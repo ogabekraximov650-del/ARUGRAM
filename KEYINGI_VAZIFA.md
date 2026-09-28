@@ -3894,3 +3894,17 @@ izohsiz (`remove_caption`) yuborardi, bot orqali kelgan videoning fayl nomi
 esa Telegram'niki (`video.mp4`) — ilova (`doc_matches`) uni nom bo'yicha
 topolmasdi. Endi `orig_bot_` fayllar alohida `copyMessages` bilan IZOHI
 bilan yuboriladi (izohda faqat nom, kalit yo'q).
+
+**Botda qismlar ro'yxati va almashtirish.** Bo'lim tanlanganda pastda:
+tepada "➕ Yangi qism qo'shish", ostida qismlar (eng yangisi tepada, 3
+tadan). Qism tugmasi — keyingi BITTA video o'sha qismni almashtiradi.
+Holat: `encbot_season` (`a/s`), `encbot_target` (`a/s` qo'shish, `a/s/n`
+almashtirish, bo'sh — tanlanmagan).
+
+**Asl video izoh bo'yicha, qolganlari fayl nomi bo'yicha.** Worker hamma
+`orig_` fayllarni bot chatiga izohi bilan yuboradi; ilova (`doc_matches`)
+`orig_` ni faqat izoh, boshqa hujjatlarni faqat fayl nomi bo'yicha topadi.
+
+**Ilovada "Original".** `video_player_screen.dart` → `_isOriginQuality`:
+`url_<q>` `origin_video` ga teng bo'lsa sifat nomi o'rniga "Original"
+ko'rinadi (eski ilovada hanuz sifat nomi).

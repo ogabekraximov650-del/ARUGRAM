@@ -1006,6 +1006,20 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     _selectedQuality = saved;
   }
 
+  /// Qism kodlanayotgan paytda worker ASL videoni bo'sh sifat o'rnida
+  /// beradi (`with_origin`, `origin_video`). Ilovada u sifat nomi bilan
+  /// emas, alohida "Original" deb ko'rsatiladi (foydalanuvchi talabi).
+  static bool _isOriginQuality(Map<String, dynamic> ep, String q) {
+    final o = (ep['origin_video'] ?? '').toString();
+    if (o.isEmpty) return false;
+    final u = (ep['url_$q'] ?? '').toString();
+    return u == o || u.endsWith('/$o');
+  }
+
+  /// Ekranda ko'rinadigan sifat nomi.
+  static String _qualityTitle(Map<String, dynamic> ep, String q) =>
+      _isOriginQuality(ep, q) ? 'Original' : q;
+
   String _qualityLabel(Map<String, dynamic> ep) {
     if (_selectedQuality != null) return _selectedQuality!;
     for (final k in ['1080p', '720p', '480p', '360p']) {
@@ -3718,7 +3732,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(q.toUpperCase(),
+                                Text(_qualityTitle(ep, q).toUpperCase(),
                                     style: TextStyle(
                                         color:
                                             sel ? Colors.black : Colors.white,
@@ -4789,7 +4803,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                                   ),
                                   child: Row(
                                     children: [
-                                      Text(q.toUpperCase(),
+                                      Text(_qualityTitle(_currentEp!, q).toUpperCase(),
                                           style: TextStyle(
                                               color: sel
                                                   ? AppColors.accent
@@ -5628,7 +5642,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   List<_QualityInfo> _qualityInfos(Map<String, dynamic> ep) {
     return _availableQualities(ep)
         .map((q) => _QualityInfo(
-              label: q,
+              label: _qualityTitle(ep, q),
               url: (ep['url_$q'] ?? '').toString(),
               sizeLabel: fileSizeLabel(ep['size_$q']),
             ))
