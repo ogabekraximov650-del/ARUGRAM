@@ -48,7 +48,6 @@ import 'app_build.dart';
 import 'auth_service.dart';
 import 'native_pool.dart';
 import 'rust_bridge.dart';
-import 'tg_media.dart';
 
 typedef _InitC = Pointer<Utf8> Function(Pointer<Utf8>, Int32, Pointer<Utf8>);
 typedef _InitDart = Pointer<Utf8> Function(Pointer<Utf8>, int, Pointer<Utf8>);
@@ -191,13 +190,6 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
 
   /// Videolar Telegram'dan olinadimi.
   bool get active => _authorized && _configured && _video;
-
-  /// Telegram fayllari (stiker, emoji, GIF) diskda turadigan papka
-  /// (Rust `media_dir`). Bo'sh — hali ma'lum emas.
-  String get mediaDir {
-    final d = _dir;
-    return d.isEmpty ? '' : '$d/media';
-  }
 
   String get _dir {
     final root = RustCore.instance.rootDirPath ?? '';
@@ -926,7 +918,6 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
   void _afterLogin() {
     _authorized = true;
     _missing.clear();
-    unawaited(TgMedia.instance.resetAccount());
     notifyListeners();
     // Oldingi (uzilgan) sessiya davrida bot chatida qolgan nusxalar
     // endi yangi sessiya bilan o'chiriladi.
@@ -942,7 +933,6 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
     });
     _authorized = false;
     _missing.clear();
-    unawaited(TgMedia.instance.resetAccount());
     notifyListeners();
   }
 

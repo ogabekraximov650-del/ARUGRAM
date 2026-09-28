@@ -913,31 +913,6 @@ async fn init_db(env: &Env) -> bool {
     ok
 }
 
-/// Stiker havolasi: `stk_<to'plam id>_<to'plam access_hash>_<hujjat id>`
-/// (uchalasi ham u64 ning hex ko'rinishi). Ko'ruvchi ilova stikerni
-/// o'z Telegram hisobi bilan shu uchlik bo'yicha oladi
-/// (`messages.getStickerSet`) — bazaga fayl yozilmaydi.
-fn sticker_ref_ok(s: &str) -> bool {
-    let parts: Vec<&str> = s.split('_').collect();
-    parts.len() == 4
-        && parts[0] == "stk"
-        && parts[1..].iter().all(|p| {
-            !p.is_empty() && p.len() <= 16 && p.chars().all(|c| c.is_ascii_hexdigit())
-        })
-}
-
-/// Izoh yoki xabardagi stiker/GIF to'g'rimi. [own] — foydalanuvchining
-/// o'z fayllari prefiksi (`cmt_<id>_` / `chat_<id>_`). Qaytadi: turi
-/// (`sticker` / `gif`) yoki xato matni.
-fn media_kind(kind: &str, file: &str, own: &str, admin: bool) -> std::result::Result<&'static str, &'static str> {
-    match kind {
-        "sticker" if sticker_ref_ok(file) => Ok("sticker"),
-        "gif" if tg_safe_name(file) && (admin || file.starts_with(own)) => Ok("gif"),
-        "sticker" | "gif" => Err("Fayl yaroqsiz"),
-        _ => Err("Noma'lum tur"),
-    }
-}
-
 // ═══════════════════════════════════════════════════════════════
 //  VAQT — TOSHKENT (UTC+5)
 // ═══════════════════════════════════════════════════════════════
@@ -5958,22 +5933,16 @@ async fn comments_add(mut req: Request, env: &Env, origin: &str) -> Result<Respo
     let sid = b["season_id"].as_i64().unwrap_or(0);
     let body = b["body"].as_str().unwrap_or("").trim().to_string();
 
-    // ── STIKER / GIF (Telegram'dagidek; fayl, ovoz — YO'Q) ────
-    let media_file = b["media_file"].as_str().unwrap_or("").trim().to_string();
-    let media_type = if media_file.is_empty() {
-        ""
-    } else {
-        match media_kind(b["media_type"].as_str().unwrap_or(""), &media_file,
-                         &format!("cmt_{me}_"), is_admin(&u)) {
-            Ok(k) => k,
-            Err(e) => return json_resp(&json!({"error": e}), 400),
-        }
-    };
-    let media_file = if media_type.is_empty() { String::new() } else { media_file };
-    // Stiker/GIF — alohida xabar (matnsiz), Telegram'dagidek.
-    let body = if media_type.is_empty() { body } else { String::new() };
+    // ── FAQAT MATN ────────────────────────────────────────────
+    // Telegram stiker/GIF olib tashlandi (ilova o'z tizimini
+    // yasaydi) — izohga fayl biriktirilmaydi.
+    if !b["media_file"].as_str().unwrap_or("").trim().is_empty() {
+        return json_resp(&json!({"error": "Stiker va GIF hozircha yo'q"}), 400);
+    }
+    let media_file = String::new();
+    let media_type = "";
 
-    if body.is_empty() && media_type.is_empty() {
+    if body.is_empty() {
         return json_resp(&json!({"error": "Izoh bo'sh"}), 400);
     }
     // Uzunlik BELGI bo'yicha cheklanadi (bayt emas): o'zbekcha
@@ -6497,13 +6466,11 @@ async fn chat_send(mut req: Request, env: &Env, origin: &str) -> Result<Response
     // holda boshqa odamning `chat_` faylini o'z suhbatiga "ilib",
     // `/api/tg/deliver` dagi suhbat tekshiruvidan o'tib olardi.
     let want_type = b["media_type"].as_str().unwrap_or("");
-    // Stiker — Telegram'dagi to'plamga havola, fayl emas: egalik
-    // tekshiruvi kerak emas, faqat ko'rinishi.
-    if want_type == "sticker" {
-        if !sticker_ref_ok(&media_file) {
-            return json_resp(&json!({"error": "Stiker yaroqsiz"}), 400);
-        }
-    } else if !media_file.is_empty() && !is_admin(&u) && !media_file.starts_with(&format!("chat_{me}_")) {
+    // Telegram stiker/GIF olib tashlandi (ilova o'z tizimini yasaydi).
+    if want_type == "sticker" || want_type == "gif" {
+        return json_resp(&json!({"error": "Stiker va GIF hozircha yo'q"}), 400);
+    }
+    if !media_file.is_empty() && !is_admin(&u) && !media_file.starts_with(&format!("chat_{me}_")) {
         return json_resp(&json!({"error": "Fayl sizniki emas"}), 403);
     }
     let media_type = match want_type {
@@ -6512,9 +6479,6 @@ async fn chat_send(mut req: Request, env: &Env, origin: &str) -> Result<Response
         // TALAB (foydalanuvchi): "chatda ovozli xabar yuborish
         // tizimini ham qo'sh".
         "voice" => "voice",
-        // Telegram'dagidek stiker va GIF.
-        "sticker" => "sticker",
-        "gif" => "gif",
         // Dumaloq video xabar (Telegram'dagidek).
         "round" => "round",
         // Istalgan fayl (hujjat) — matnda uning nomi.
@@ -9686,8 +9650,6 @@ async fn tg_user_media(env: &Env, msg: &Value) {
         };
         let own = name.starts_with(&format!("avatar_{uid}_"))
             || name.starts_with(&format!("chat_{uid}_"))
-            // Izohdagi GIF (Telegram'dagi tayyor fayl, qayta yuklanmaydi).
-            || name.starts_with(&format!("cmt_{uid}_"))
             // Avto-kodlash uchun asl video (kelajakda boshqalar ham
             // yuklaydi) — faqat O'Z nomi bilan.
             || name.starts_with(&format!("orig_{uid}_"));

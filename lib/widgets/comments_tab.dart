@@ -25,8 +25,7 @@ import 'package:flutter/material.dart';
 
 import 'emoji_text.dart';
 import 'tg_composer.dart';
-import 'tg_media_view.dart';
-import '../services/tg_media.dart';
+import 'media_placeholder.dart';
 import '../services/image_cache.dart';
 
 import '../services/auth_service.dart';
@@ -126,8 +125,6 @@ class _CommentsTabState extends State<CommentsTab> {
   @override
   void initState() {
     super.initState();
-    // Avval DISK (darhol), keyin tarmoq (`disk_cache.dart` izohi).
-    widget.controller.addListener(_prefetch);
     // TOPILGAN XATO ("premium emoji tanlanganda yuborish tugmasi
     // yonmayapti"): paneldan qo'yilgan emoji maydonga dastur orqali
     // yoziladi va `TextField.onChanged` chaqirilmaydi — tugma eski
@@ -158,18 +155,8 @@ class _CommentsTabState extends State<CommentsTab> {
     });
   }
 
-  /// Izohlardagi stiker, GIF va maxsus emojilar oldindan tayyorlanadi.
-  void _prefetch() {
-    tgPrefetch(widget.controller.items.reversed.map((c) => (
-          type: c.deleted ? '' : c.mediaType,
-          file: c.mediaFile,
-          body: c.body,
-        )));
-  }
-
   @override
   void dispose() {
-    widget.controller.removeListener(_prefetch);
     _reportTimer?.cancel();
     _input.dispose();
     _focus.dispose();
@@ -186,48 +173,6 @@ class _CommentsTabState extends State<CommentsTab> {
         content: Text(text, style: const TextStyle(color: Colors.white)),
       ),
     );
-  }
-
-  /// Stiker — darhol alohida izoh bo'lib ketadi (Telegram'dagidek).
-  Future<void> _sendSticker(TgDoc d) =>
-      _sendMedia(d.ref, 'sticker');
-
-  /// GIF — izohga faqat uning nomi (ichida Telegram kaliti) yoziladi;
-  /// maxfiy kanalga yuborilmaydi. Ko'ruvchi uni o'z Telegram hisobi
-  /// bilan to'g'ridan-to'g'ri Telegram serveridan oladi (`tgChatFile`).
-  Future<void> _sendGif(TgDoc d) async {
-    final me = AuthService.instance.user?.id ?? 0;
-    if (me == 0) {
-      _say('Izoh yozish uchun hisobingizga kiring');
-      return;
-    }
-    final tag = await TgMedia.instance.gifNameTag(d);
-    if (!mounted) return;
-    if (tag.isEmpty) {
-      _say('GIF yuborilmadi — Telegram hisobini tekshiring');
-      return;
-    }
-    final name =
-        'cmt_${me}_${DateTime.now().millisecondsSinceEpoch}$tag.mp4';
-    await _sendMedia(name, 'gif');
-  }
-
-  Future<void> _sendMedia(String file, String type) async {
-    if (_sending) return;
-    if (!AuthService.instance.isLoggedIn) {
-      _say('Izoh yozish uchun hisobingizga kiring');
-      return;
-    }
-    setState(() => _sending = true);
-    final err = await widget.controller.add('',
-        parentId: _replyTo?.id ?? '', mediaFile: file, mediaType: type);
-    if (!mounted) return;
-    setState(() => _sending = false);
-    if (err != null) {
-      _say(err);
-      return;
-    }
-    setState(() => _replyTo = null);
   }
 
   Future<void> _send() async {
@@ -565,8 +510,6 @@ class _CommentsTabState extends State<CommentsTab> {
       child: TgInputArea(
         controller: _input,
         focus: _focus,
-        onSticker: _sendSticker,
-        onGif: _sendGif,
         row: (context, emojiButton) => Padding(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
       child: Column(
@@ -906,20 +849,14 @@ class _CommentRow extends StatelessWidget {
               // `EmojiText` — oddiy `Text` ning o'rnida: matn xira
               // qoladi (alpha o'z joyida), EMOJI esa to'liq rangda
               // chiqadi. Sababi `emoji_text.dart` boshida.
-              if (!c.deleted && c.mediaType == 'sticker')
+              if (!c.deleted &&
+                  (c.mediaType == 'sticker' || c.mediaType == 'gif'))
                 Padding(
                   padding: const EdgeInsets.only(top: 2),
-                  child: TgStickerRefView(ref: c.mediaFile, size: 120),
-                )
-              else if (!c.deleted && c.mediaType == 'gif')
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: TgGifMessage(fileName: c.mediaFile, maxWidth: 200),
+                  child: MediaPlaceholder(type: c.mediaType),
                 )
               else
-              // Matndagi maxsus emojilar bitta yuzada (`TgAnimBatch`).
-              TgAnimBatch(
-                child: EmojiText(
+              EmojiText(
                 c.deleted ? 'Izoh o\'chirilgan' : c.body,
                 style: TextStyle(
                   color: c.deleted
@@ -929,7 +866,6 @@ class _CommentRow extends StatelessWidget {
                   height: 1.38,
                   fontStyle: c.deleted ? FontStyle.italic : null,
                 ),
-              ),
               ),
               // ── LAYK · JAVOB · O'CHIRISH ────────────────────────
               //

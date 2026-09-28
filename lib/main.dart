@@ -20,8 +20,6 @@ import 'services/traffic_service.dart';
 import 'services/video_cache_server.dart';
 import 'services/watch_history.dart';
 import 'services/telegram_service.dart';
-import 'services/tg_media.dart';
-import 'services/native_pool.dart';
 import 'services/device_perf.dart';
 import 'widgets/auth_gate.dart';
 import 'widgets/emoji_text.dart';
@@ -113,11 +111,6 @@ Future<void> _main() async {
   // ishga tushmagan bo'lsa ular Telegram'ga emas, worker'ga
   // (B2) ketib qolardi. `start()` ning tarmoqsiz qismi sinxron.
   unawaited(TelegramService.instance.start());
-  // Eslab qolingan stiker/emoji hujjatlari — chat ochilganda darhol.
-  unawaited(TgMedia.instance.warmup());
-  // Kuchsiz telefonda animatsiyalar soniyasiga 20 kadr (Telegram
-  // `LiteMode` kabi) — protsessor va batareya yuki kamroq.
-  if (DevicePerf.low) AnimPlayers.fpsCap(20);
   // XOTIRA: Flutter rasm keshi odatda 100 MB / 1000 ta rasm —
   // 2 GB telefonda bu juda ko'p (ochilgan posterlar, avatarlar,
   // kadrlar dekodlangan holda turadi). Kuchsizda 40 MB, qolganida

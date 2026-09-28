@@ -36,9 +36,8 @@ import '../widgets/glass.dart';
 import 'media_view_screen.dart';
 import 'public_profile_screen.dart';
 import '../services/telegram_service.dart';
-import '../services/tg_media.dart';
 import '../widgets/tg_composer.dart';
-import '../widgets/tg_media_view.dart';
+import '../widgets/media_placeholder.dart';
 import '../widgets/tg_record_button.dart';
 import '../widgets/tg_attach_sheet.dart';
 import '../widgets/tg_bubble.dart';
@@ -277,14 +276,6 @@ class _SupportChatScreenState extends State<SupportChatScreen>
 
   int _seen = 0;
   void _onData() {
-    // Stiker, GIF va maxsus emojilar oldindan tayyorlanadi.
-    tgPrefetch(_chat.items.map((m) => (
-          type: m.mediaType,
-          file: m.mediaType == 'sticker' || m.mediaType == 'gif'
-              ? TelegramService.fileNameOf(m.mediaUrl)
-              : '',
-          body: m.body,
-        )));
     // Yangi xabar kelgan bo'lsa pastga tushamiz. Foydalanuvchi
     // yuqoriga surib eski xabarlarni o'qiyotgan bo'lsa —
     // TEGILMAYDI, aks holda ekran o'zidan o'zi sakrab ketardi.
@@ -297,7 +288,6 @@ class _SupportChatScreenState extends State<SupportChatScreen>
 
   /// Ro'yxat pastdan tortildimi — shunda yangilanadi.
   bool _onScroll(ScrollNotification n) {
-    if (n is ScrollUpdateNotification) tgAnimScrolled();
     if (_pullBusy) return false;
     if (n is OverscrollNotification) {
       // Musbat `overscroll` — OXIRIDAN tashqariga chiqish.
@@ -708,40 +698,6 @@ class _SupportChatScreenState extends State<SupportChatScreen>
       ),
     );
     return ok;
-  }
-
-  // ══════════════════════════════════════════════════════════
-  //  STIKER / GIF (Telegram paneli)
-  // ══════════════════════════════════════════════════════════
-
-  Future<void> _sendSticker(TgDoc d) async {
-    final err = await _chat.send('', mediaFile: d.ref, mediaType: 'sticker');
-    if (err != null && mounted) _snack(err);
-    _toBottom();
-  }
-
-  /// GIF — xabarga faqat uning nomi (ichida Telegram kaliti) yoziladi.
-  /// TALAB (foydalanuvchi): "GIF maxfiy kanalga yuborilmasin, B2 ham
-  /// kerak emas — Telegram serveridan olinsin". Ko'ruvchi GIF'ni o'z
-  /// Telegram hisobi bilan to'g'ridan-to'g'ri Telegram serveridan oladi
-  /// (`tgChatFile`); bot chati ishlatilmaydi — videolarga xalaqit
-  /// bermaydi.
-  Future<void> _sendGif(TgDoc d) async {
-    if (_sending) return;
-    final me = AuthService.instance.user?.id ?? 0;
-    final tag = await TgMedia.instance.gifNameTag(d);
-    if (tag.isEmpty) {
-      _snack('GIF yuborilmadi — Telegram hisobini tekshiring');
-      return;
-    }
-    final name =
-        'chat_${me}_${DateTime.now().millisecondsSinceEpoch}$tag.mp4';
-    setState(() => _sending = true);
-    final err = await _chat.send('', mediaFile: name, mediaType: 'gif');
-    if (!mounted) return;
-    setState(() => _sending = false);
-    if (err != null) _snack(err);
-    _toBottom();
   }
 
   // ══════════════════════════════════════════════════════════
@@ -1749,8 +1705,6 @@ class _SupportChatScreenState extends State<SupportChatScreen>
       child: TgInputArea(
         controller: _input,
         focus: _focus,
-        onSticker: _sendSticker,
-        onGif: _sendGif,
         row: (context, emojiButton) => Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -2211,9 +2165,7 @@ class _Bubble extends StatelessWidget {
                 constraints: BoxConstraints(
                   maxWidth: MediaQuery.sizeOf(context).width * 0.8,
                 ),
-                // Xabardagi hamma animatsiya (maxsus emojilar, stiker,
-                // GIF) bitta yuzada (`TgAnimBatch`).
-                child: TgAnimBatch(child: _content(context, bare)),
+                child: _content(context, bare),
               ),
             ),
           ),
@@ -2396,12 +2348,10 @@ class _Bubble extends StatelessWidget {
         onSelect: selecting ? onTap : null,
       );
     }
-    final name = TelegramService.fileNameOf(m.mediaUrl);
     switch (m.mediaType) {
       case 'sticker':
-        return TgStickerRefView(ref: name, size: 150);
       case 'gif':
-        return TgGifMessage(fileName: name, maxWidth: 220);
+        return MediaPlaceholder(type: m.mediaType);
       case 'round':
         return _RoundBubble(
           url: m.mediaUrl,
@@ -2512,11 +2462,10 @@ class _TextWithTime extends StatelessWidget {
       children: [
         Text.rich(
           TextSpan(children: [
-            // Maxsus emoji (`[ce:..]`) va Telegram emojilari bilan.
-            ...(customEmojiSpans(text, style,
-                    (p) => emojiSpans(p, style) ?? [TextSpan(text: p)]) ??
-                emojiSpans(text, style) ??
-                [TextSpan(text: text)]),
+            // Telegram emojilari bilan (eski maxsus emoji `[ce:..]`
+            // belgilari oddiy emoji bo'lib chiqadi).
+            ...(emojiSpans(plainEmojiText(text), style) ??
+                [TextSpan(text: plainEmojiText(text))]),
             WidgetSpan(child: SizedBox(width: timeWidth, height: 14)),
           ]),
           style: style,

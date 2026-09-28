@@ -13,49 +13,33 @@
 //   * Panelning pastida suzib turgan "Emoji | GIF | Stikerlar"
 //     tugmalari, sahifalar yon tomonga suriladi.
 //   * Emoji: tepada bo'limlar qatori (yaqinda, kulgichlar, hayvonlar
-//     ... bayroqlar, keyin maxsus emoji to'plamlari), bitta uzun
-//     ro'yxat; o'ng pastda ⌫ tugmasi. Maxsus emoji to'plamlari
-//     Premium'siz odamga 🔒 bilan ko'rinadi, lekin yuborilmaydi.
-//   * GIF: qidiruv (`@gif`), saqlanganlar va mashhurlar.
-//   * Stikerlar: yaqinda, sevimlilar va o'rnatilgan to'plamlar.
-//
-// Maxsus emoji yozish maydonining O'ZIDA rasm bo'lib ko'rinadi
-// (`TgTextController`); yuborilganda matnga `[ce:<id>:<emoji>]`
-// belgisi bo'lib kiradi.
+//     ... bayroqlar), bitta uzun ro'yxat; o'ng pastda ⌫ tugmasi.
+//   * GIF va Stikerlar: hozircha bo'sh oynalar. Telegram'ning premium
+//     emoji, GIF va stikerlari olib tashlandi (foydalanuvchi talabi:
+//     "o'zimiz ilova uchun premium emoji, gif va stiker tizimni
+//     yasaymiz").
 
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:lottie/lottie.dart';
 
-import '../services/billing_service.dart';
-import '../services/support_service.dart';
-import '../services/tg_media.dart';
+import 'package:path_provider/path_provider.dart';
+
 import 'emoji_text.dart';
-import 'glass.dart';
 import 'tg_emoji_data.dart';
-import 'tg_media_preview.dart';
-import 'tg_media_view.dart';
 
 // ═══════════════════════════════════════════════════════════════
 //  YOZISH MAYDONI BOSHQARUVCHISI
 // ═══════════════════════════════════════════════════════════════
 
-/// Maxsus emoji'ni maydonning O'ZIDA rasm qilib ko'rsatadi.
-///
-/// Har bir maxsus emoji matnda BITTA "shaxsiy" belgi (U+E000..U+F8FF)
-/// bo'lib turadi — kursor, o'chirish va belgilash oddiy harfdagidek
-/// ishlaydi. Yuborishda [encoded] ularni `[ce:<id>:<emoji>]` ga
-/// almashtiradi.
+/// Yozish maydoni: emoji Telegram shriftida ko'rinadi.
 class TgTextController extends TextEditingController {
   TgTextController({super.text});
-
-  final Map<int, TgDoc> _custom = {};
-  int _next = 0xE000;
-
-  bool _isCustom(int unit) => _custom.containsKey(unit);
 
   /// Kursor turgan joyga matn qo'yadi (belgilangan qism almashadi).
   void insertText(String s) {
@@ -67,13 +51,6 @@ class TgTextController extends TextEditingController {
       text: t.replaceRange(start, end, s),
       selection: TextSelection.collapsed(offset: start + s.length),
     );
-  }
-
-  void insertCustom(TgDoc d) {
-    if (_next > 0xF8FF) _next = 0xE000;
-    final unit = _next++;
-    _custom[unit] = d;
-    insertText(String.fromCharCode(unit));
   }
 
   /// ⌫ — kursordan oldingi BITTA ko'rinadigan belgi (emoji o'rtasidan
@@ -101,27 +78,9 @@ class TgTextController extends TextEditingController {
   }
 
   /// Serverga yuboriladigan matn.
-  String get encoded {
-    final b = StringBuffer();
-    for (final unit in text.codeUnits) {
-      final d = _custom[unit];
-      if (d == null) {
-        b.writeCharCode(unit);
-      } else {
-        final alt = d.emoji.replaceAll(']', '').trim();
-        b.write('[ce:${d.id}:${alt.isEmpty ? '⭐' : alt}]');
-      }
-    }
-    return b.toString();
-  }
+  String get encoded => text;
 
   bool get isBlank => text.trim().isEmpty;
-
-  @override
-  void clear() {
-    super.clear();
-    _custom.clear();
-  }
 
   @override
   TextSpan buildTextSpan({
@@ -129,40 +88,14 @@ class TgTextController extends TextEditingController {
     TextStyle? style,
     required bool withComposing,
   }) {
-    if (!text.codeUnits.any(_isCustom)) {
-      // Emoji — Telegram shriftida (`tgEmojiInputSpans`). Emoji
-      // bo'lmasa odatdagi yo'l (klaviaturaning tagiga chizig'i bilan).
-      final spans = tgEmojiInputSpans(text, style);
-      if (spans == null) {
-        return super.buildTextSpan(
-            context: context, style: style, withComposing: withComposing);
-      }
-      return TextSpan(style: style, children: spans);
+    // Emoji — Telegram shriftida (`tgEmojiInputSpans`). Emoji
+    // bo'lmasa odatdagi yo'l (klaviaturaning tagiga chizig'i bilan).
+    final spans = tgEmojiInputSpans(text, style);
+    if (spans == null) {
+      return super.buildTextSpan(
+          context: context, style: style, withComposing: withComposing);
     }
-    final size = (style?.fontSize ?? 14) * 1.3;
-    final children = <InlineSpan>[];
-    final buf = StringBuffer();
-    void flush() {
-      if (buf.isEmpty) return;
-      final t = buf.toString();
-      children.addAll(tgEmojiInputSpans(t, style) ?? [TextSpan(text: t)]);
-      buf.clear();
-    }
-
-    for (final unit in text.codeUnits) {
-      final d = _custom[unit];
-      if (d == null) {
-        buf.writeCharCode(unit);
-      } else {
-        flush();
-        children.add(WidgetSpan(
-          alignment: PlaceholderAlignment.middle,
-          child: TgStickerView(doc: d, size: size, still: true),
-        ));
-      }
-    }
-    flush();
-    return TextSpan(style: style, children: children);
+    return TextSpan(style: style, children: spans);
   }
 }
 
@@ -176,16 +109,12 @@ class TgInputArea extends StatefulWidget {
   final TgTextController controller;
   final FocusNode focus;
   final Widget Function(BuildContext context, Widget emojiButton) row;
-  final ValueChanged<TgDoc> onSticker;
-  final ValueChanged<TgDoc> onGif;
 
   const TgInputArea({
     super.key,
     required this.controller,
     required this.focus,
     required this.row,
-    required this.onSticker,
-    required this.onGif,
   });
 
   @override
@@ -340,11 +269,7 @@ class _TgInputAreaState extends State<TgInputArea>
                 enabled: _open,
                 child: SizedBox(
                   height: h,
-                  child: TgMediaPanel(
-                    controller: widget.controller,
-                    onSticker: widget.onSticker,
-                    onGif: widget.onGif,
-                  ),
+                  child: TgMediaPanel(controller: widget.controller),
                 ),
               ),
             ),
@@ -364,28 +289,19 @@ class _TgInputAreaState extends State<TgInputArea>
 // animatsiya".
 //
 // Telegram Android `EmojiView` tuzilishi:
-//   * har sahifa tepasida bo'limlar qatori (emoji: 🕒 va turkumlar +
-//     maxsus to'plamlar; stiker: ☆, 🕒 va to'plamlar), tanlangan
-//     belgi ostida yumaloq "tabletka" SILJIB boradi;
-//   * uning ostida "Qidiruv" qatori; GIF va stikerda ichida ❤️ 👍 👎
-//     🎉 … turkum tugmalari (bosilsa shu emoji bo'yicha qidiradi);
+//   * emoji sahifasi tepasida bo'limlar qatori (🕒 va turkumlar),
+//     tanlangan belgi ostida yumaloq "tabletka" SILJIB boradi;
 //   * pastda suzib turgan "Emoji | GIF | Stikerlar", tanlangani ostida
 //     tabletka siljiydi; emoji sahifasida o'ngda ⌫;
-//   * katak bosilganda kichrayib-kattalashadi;
-//   * GIF'lar balandligi bir xil qatorlarda, eni asl nisbatda (Telegram
-//     `ExtendedGridLayoutManager`).
+//   * katak bosilganda kichrayib-kattalashadi.
+//
+// GIF va Stikerlar oynalari hozircha bo'sh (ilovaning o'z tizimi
+// yasalguncha).
 
 class TgMediaPanel extends StatefulWidget {
   final TgTextController controller;
-  final ValueChanged<TgDoc> onSticker;
-  final ValueChanged<TgDoc> onGif;
 
-  const TgMediaPanel({
-    super.key,
-    required this.controller,
-    required this.onSticker,
-    required this.onGif,
-  });
+  const TgMediaPanel({super.key, required this.controller});
 
   @override
   State<TgMediaPanel> createState() => _TgMediaPanelState();
@@ -400,34 +316,6 @@ class _TgMediaPanelState extends State<TgMediaPanel> {
   void dispose() {
     _pages.dispose();
     super.dispose();
-  }
-
-  // TALAB (foydalanuvchi): "GIF va stikerlarni ham ilovamizdan obuna
-  // sotib olgan odam yubora oladi". Panelni hamma ochib ko'ra oladi,
-  // yuborish esa — faqat obuna (yoki admin) bilan.
-  Future<bool> _allowed(String what) async {
-    if (UnreadBadge.instance.isAdmin) return true;
-    final b = BillingService.instance;
-    if (!b.active) await b.load();
-    if (b.active) return true;
-    if (mounted) {
-      ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(
-        behavior: SnackBarBehavior.floating,
-        backgroundColor: AppColors.card,
-        content: Text(
-            '$what faqat ARUmediaTV obunasi bilan yuboriladi (Profil → Obuna)',
-            style: const TextStyle(color: Colors.white)),
-      ));
-    }
-    return false;
-  }
-
-  Future<void> _sendGif(TgDoc d) async {
-    if (await _allowed('GIF')) widget.onGif(d);
-  }
-
-  Future<void> _sendSticker(TgDoc d) async {
-    if (await _allowed('Stikerlar')) widget.onSticker(d);
   }
 
   void _go(int i) {
@@ -445,19 +333,7 @@ class _TgMediaPanelState extends State<TgMediaPanel> {
       color: _Pal.bg,
       child: Stack(
         children: [
-          // Telegram hisobi almashsa sahifalar qaytadan quriladi (yangi
-          // hisobning to'plamlari olinadi — `TgMedia.resetAccount`).
-          // Surilayotganda yangi kadr chizilmaydi (`tgAnimScrolled`) —
-          // surish va sahifa almashishi silliq bo'ladi.
-          NotificationListener<ScrollUpdateNotification>(
-            onNotification: (_) {
-              tgAnimScrolled();
-              return false;
-            },
-            child: ValueListenableBuilder<int>(
-            valueListenable: TgMedia.instance.accountChanged,
-            builder: (context, acc, _) => PageView(
-            key: ValueKey(acc),
+          PageView(
             controller: _pages,
             onPageChanged: (i) => setState(() => _tab = _lastTab = i),
             // Ko'rinmayotgan sahifadagi animatsiyalar to'xtaydi.
@@ -465,41 +341,10 @@ class _TgMediaPanelState extends State<TgMediaPanel> {
               TickerMode(
                   enabled: _tab == 0,
                   child: _EmojiPage(controller: widget.controller)),
-              TickerMode(
-                  enabled: _tab == 1, child: _GifPage(onGif: _sendGif)),
-              TickerMode(
-                  enabled: _tab == 2,
-                  child: _StickerPage(onSticker: _sendSticker)),
+              const _Soon(icon: Icons.gif_box_outlined, title: 'GIF'),
+              const _Soon(
+                  icon: Icons.emoji_emotions_outlined, title: 'Stikerlar'),
             ],
-          ),
-          ),
-          ),
-          // ── Yuklashda xato bo'lsa — sababi (bosilsa yopiladi) ──
-          Positioned(
-            left: 12,
-            right: 12,
-            bottom: 60,
-            child: ValueListenableBuilder<String>(
-              valueListenable: TgMedia.instance.lastError,
-              builder: (context, err, _) => err.isEmpty
-                  ? const SizedBox()
-                  : GestureDetector(
-                      onTap: () => TgMedia.instance.lastError.value = '',
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: const Color(0xEE3A1F22),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text('Xato: $err',
-                            maxLines: 3,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                                color: Color(0xFFFF8A8A), fontSize: 12)),
-                      ),
-                    ),
-            ),
           ),
           // ── Pastda suzib turgan tugmalar ──
           Positioned(
@@ -534,7 +379,6 @@ class _TgMediaPanelState extends State<TgMediaPanel> {
 
 abstract final class _Pal {
   static const bg = Color(0xFF1C1C1E);
-  static const field = Color(0x17FFFFFF);
   static const pill = Color(0xF22C2C2E);
   static const pillOn = Color(0x24FFFFFF);
   static const hint = Color(0xFF8E8E93);
@@ -618,8 +462,7 @@ class _Press extends StatefulWidget {
   final Widget child;
   final VoidCallback? onTap;
   final double scale;
-  const _Press(
-      {super.key, required this.child, this.onTap, this.scale = 0.86});
+  const _Press({required this.child, this.onTap, this.scale = 0.86});
 
   @override
   State<_Press> createState() => _PressState();
@@ -701,8 +544,7 @@ class _BackspaceState extends State<_Backspace> {
 /// Bo'lim sarlavhasi.
 class _Header extends StatelessWidget {
   final String title;
-  final bool locked;
-  const _Header(this.title, {this.locked = false});
+  const _Header(this.title);
 
   /// `StickerSetNameCell`: balandligi 27 dp, nom 15, qalin.
   static const height = 30.0;
@@ -715,10 +557,6 @@ class _Header extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(15, 9, 15, 0),
         child: Row(
           children: [
-            if (locked) ...[
-              const Icon(Icons.lock_rounded, size: 14, color: _Pal.hint),
-              const SizedBox(width: 4),
-            ],
             Expanded(
               child: Text(
                 title,
@@ -730,12 +568,6 @@ class _Header extends StatelessWidget {
                     fontWeight: FontWeight.w700),
               ),
             ),
-            if (locked)
-              const Text('Premium',
-                  style: TextStyle(
-                      color: Color(0xFFB57BFF),
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700)),
           ],
         ),
       ),
@@ -840,160 +672,6 @@ class _StripState extends State<_Strip> {
   }
 }
 
-/// Telegram'ning GIF va stiker qidiruvidagi turkum tugmalari.
-const _searchChips = <(IconData, String)>[
-  (Icons.favorite_border_rounded, '❤️'),
-  (Icons.thumb_up_alt_outlined, '👍'),
-  (Icons.thumb_down_alt_outlined, '👎'),
-  (Icons.celebration_outlined, '🎉'),
-  (Icons.sentiment_very_satisfied_outlined, '😂'),
-  (Icons.sentiment_dissatisfied_outlined, '😢'),
-  (Icons.sentiment_very_dissatisfied_outlined, '😡'),
-  (Icons.waving_hand_outlined, '👋'),
-  (Icons.bedtime_outlined, '😴'),
-  (Icons.local_fire_department_outlined, '🔥'),
-];
-
-/// "Qidiruv" qatori. [chips] bo'lsa — o'ng tomonda turkum tugmalari.
-class _SearchBar extends StatefulWidget {
-  final ValueChanged<String> onQuery;
-  final ValueChanged<String>? onChip;
-  final String? chip;
-  const _SearchBar({required this.onQuery, this.onChip, this.chip});
-
-  @override
-  State<_SearchBar> createState() => _SearchBarState();
-}
-
-class _SearchBarState extends State<_SearchBar> {
-  final _c = TextEditingController();
-  final _f = FocusNode();
-  Timer? _debounce;
-
-  @override
-  void initState() {
-    super.initState();
-    _f.addListener(() => setState(() {}));
-  }
-
-  @override
-  void dispose() {
-    _debounce?.cancel();
-    _c.dispose();
-    _f.dispose();
-    super.dispose();
-  }
-
-  void _clear() {
-    _c.clear();
-    _f.unfocus();
-    widget.onQuery('');
-    setState(() {});
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final typing = _f.hasFocus || _c.text.isNotEmpty;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(10, 2, 10, 6),
-      child: Container(
-        height: 38,
-        decoration: BoxDecoration(
-          color: _Pal.field,
-          borderRadius: BorderRadius.circular(19),
-        ),
-        child: Row(
-          children: [
-            const SizedBox(width: 10),
-            AnimatedSwitcher(
-              duration: const Duration(milliseconds: 180),
-              child: widget.chip != null && !typing
-                  ? _Press(
-                      key: const ValueKey('back'),
-                      onTap: () => widget.onChip?.call(''),
-                      child: const Icon(Icons.arrow_back_rounded,
-                          color: _Pal.icon, size: 22),
-                    )
-                  : const Icon(Icons.search_rounded,
-                      key: ValueKey('search'), color: _Pal.icon, size: 22),
-            ),
-            const SizedBox(width: 6),
-            Expanded(
-              flex: typing || widget.onChip == null ? 10 : 4,
-              child: TextField(
-                controller: _c,
-                focusNode: _f,
-                style: const TextStyle(color: Colors.white, fontSize: 16),
-                cursorColor: Colors.white70,
-                textInputAction: TextInputAction.search,
-                decoration: const InputDecoration(
-                  isDense: true,
-                  border: InputBorder.none,
-                  hintText: 'Qidiruv',
-                  hintStyle: TextStyle(color: _Pal.hint, fontSize: 16),
-                ),
-                onChanged: (v) {
-                  setState(() {});
-                  _debounce?.cancel();
-                  _debounce = Timer(const Duration(milliseconds: 350),
-                      () => widget.onQuery(v.trim()));
-                },
-              ),
-            ),
-            if (typing)
-              _Press(
-                onTap: _clear,
-                child: const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 10),
-                  child: Icon(Icons.close_rounded, color: _Pal.icon, size: 20),
-                ),
-              )
-            else if (widget.onChip != null)
-              Expanded(
-                flex: 7,
-                child: ShaderMask(
-                  shaderCallback: (r) => const LinearGradient(colors: [
-                    Colors.transparent,
-                    Colors.white,
-                    Colors.white,
-                  ], stops: [0, 0.08, 1])
-                      .createShader(r),
-                  blendMode: BlendMode.dstIn,
-                  child: ListView(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.only(left: 6, right: 6),
-                    children: [
-                      for (final (icon, emoji) in _searchChips)
-                        _Press(
-                          onTap: () => widget.onChip!(emoji),
-                          child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 180),
-                            width: 36,
-                            margin: const EdgeInsets.symmetric(vertical: 3),
-                            decoration: BoxDecoration(
-                              color: widget.chip == emoji
-                                  ? _Pal.pillOn
-                                  : Colors.transparent,
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                            child: Icon(icon,
-                                color: widget.chip == emoji
-                                    ? Colors.white
-                                    : _Pal.icon,
-                                size: 22),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 /// Bo'limli uzun ro'yxat: har bir bo'limning balandligi OLDINDAN
 /// ma'lum (sarlavha + qatorlar), shu sabab tepadagi qatordan bosilganda
 /// o'sha joyga aniq sakraladi va aylantirilganda tanlangan belgi
@@ -1006,10 +684,6 @@ class _Sections extends StatefulWidget {
   final int minColumns;
   final List<int> counts;
   final List<Widget> headers;
-
-  /// Qidiruv qatori — ro'yxat bilan birga suriladi (Telegram'dagidek).
-  final Widget? top;
-  final double topHeight;
 
   /// Katak. Faqat EKRANDA ko'ringanlari quriladi (`SliverGrid`).
   final Widget Function(int section, int index, double cell) cell;
@@ -1024,8 +698,6 @@ class _Sections extends StatefulWidget {
     required this.cell,
     required this.onSection,
     required this.jump,
-    this.top,
-    this.topHeight = 0,
   });
 
   @override
@@ -1071,7 +743,7 @@ class _SectionsState extends State<_Sections> {
   }
 
   double _offsetOf(int section) {
-    var y = widget.topHeight;
+    var y = 0.0;
     for (var i = 0; i < section; i++) {
       y += _sectionHeight(i);
     }
@@ -1091,7 +763,7 @@ class _SectionsState extends State<_Sections> {
 
   void _onScroll() {
     if (_jumping) return;
-    var y = widget.topHeight;
+    var y = 0.0;
     final at = _scroll.offset + 4;
     for (var i = 0; i < widget.counts.length; i++) {
       y += _sectionHeight(i);
@@ -1118,14 +790,9 @@ class _SectionsState extends State<_Sections> {
         // quriladi va yuklanadi — ko'rinmagani yuklanmaydi.
         cacheExtent: cell,
         slivers: [
-          if (widget.top != null)
-            SliverToBoxAdapter(
-                child: SizedBox(height: widget.topHeight, child: widget.top)),
           for (var s = 0; s < widget.counts.length; s++)
             if (widget.counts[s] > 0) ...[
               SliverToBoxAdapter(child: widget.headers[s]),
-              // Qatorlar: har qatordagi animatsiyalar BITTA yuzaga
-              // chiziladi (`TgAnimBatch`, Telegram kabi).
               SliverPadding(
                 padding: const EdgeInsets.symmetric(horizontal: 5),
                 sliver: SliverFixedExtentList(
@@ -1147,127 +814,90 @@ class _SectionsState extends State<_Sections> {
   }
 }
 
-/// Bitta qator: [cols] ta katak; ulardagi animatsiyalar bitta yuzada.
+/// Bitta qator: [cols] ta katak.
 Widget _gridRow(int r, int cols, int count, double cell,
     Widget Function(int i) build) {
-  return TgAnimBatch(
-    child: Row(
-      children: [
-        for (var j = 0; j < cols; j++)
-          SizedBox(
-            width: cell,
-            height: cell,
-            child: r * cols + j < count ? build(r * cols + j) : null,
-          ),
-      ],
-    ),
+  return Row(
+    children: [
+      for (var j = 0; j < cols; j++)
+        SizedBox(
+          width: cell,
+          height: cell,
+          child: r * cols + j < count ? build(r * cols + j) : null,
+        ),
+    ],
   );
 }
 
-/// Oddiy katakli ro'yxat (qidiruv natijalari).
-class _Grid extends StatelessWidget {
-  final double minCell;
-  final int minColumns;
-  final int count;
-  final Widget Function(int i, double cell) cell;
-  const _Grid({
-    required this.minCell,
-    required this.minColumns,
-    required this.count,
-    required this.cell,
-  });
+/// GIF / Stikerlar oynasi — ilovaning o'z tizimi yasalguncha bo'sh.
+class _Soon extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  const _Soon({required this.icon, required this.title});
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(builder: (context, box) {
-      final w = box.maxWidth - 10;
-      final cols = math.max(minColumns, (w / minCell).floor());
-      final size = w / cols;
-      return ListView.builder(
-        cacheExtent: size,
-        padding: const EdgeInsets.fromLTRB(5, 0, 5, 64),
-        itemExtent: size,
-        itemCount: (count / cols).ceil(),
-        itemBuilder: (_, r) => _gridRow(r, cols, count, size, (i) => cell(i, size)),
-      );
-    });
-  }
-}
-
-/// Bo'sh holat: sabab (xato bo'lsa — uning matni) va "Qayta urinish".
-class _Empty extends StatelessWidget {
-  final String text;
-  final VoidCallback? onRetry;
-  const _Empty(this.text, {this.onRetry});
-
-  @override
-  Widget build(BuildContext context) {
-    return ValueListenableBuilder<String>(
-      valueListenable: TgMedia.instance.lastError,
-      builder: (context, err, _) => Center(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(28, 0, 28, 60),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(text,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                      color: _Pal.hint, fontSize: 15, height: 1.4)),
-              if (err.isNotEmpty && onRetry != null) ...[
-                const SizedBox(height: 8),
-                SelectableText('Xato: $err',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                        color: Color(0xFFFF6B6B), fontSize: 12)),
-              ],
-              if (onRetry != null) ...[
-                const SizedBox(height: 12),
-                _Press(
-                  onTap: () {
-                    TgMedia.instance.lastError.value = '';
-                    onRetry!();
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 18, vertical: 9),
-                    decoration: BoxDecoration(
-                      color: _Pal.pillOn,
-                      borderRadius: BorderRadius.circular(18),
-                    ),
-                    child: const Text('Qayta urinish',
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w600)),
-                  ),
-                ),
-              ],
-            ],
-          ),
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(28, 0, 28, 60),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 44, color: _Pal.hint),
+            const SizedBox(height: 10),
+            Text(title,
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600)),
+            const SizedBox(height: 4),
+            const Text('Tez orada',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: _Pal.hint, fontSize: 14)),
+          ],
         ),
       ),
     );
   }
 }
 
-class _Loading extends StatelessWidget {
-  const _Loading();
-
-  @override
-  Widget build(BuildContext context) => const Center(
-        child: Padding(
-          padding: EdgeInsets.only(bottom: 50),
-          child: SizedBox(
-            width: 26,
-            height: 26,
-            child:
-                CircularProgressIndicator(strokeWidth: 2.4, color: _Pal.hint),
-          ),
-        ),
-      );
-}
-
 // ── EMOJI ────────────────────────────────────────────────────────
+
+/// Yaqinda ishlatilgan oddiy emojilar (telefonda, ilova papkasida).
+abstract final class _RecentEmoji {
+  static const _max = 35;
+  static List<String>? _list;
+
+  static Future<File> _file() async {
+    final dir = await getApplicationSupportDirectory();
+    return File('${dir.path}/tg_recent_emoji.json');
+  }
+
+  static Future<List<String>> load() async {
+    final cached = _list;
+    if (cached != null) return List.of(cached);
+    var out = <String>[];
+    try {
+      final j = jsonDecode(await (await _file()).readAsString());
+      if (j is Map) {
+        out = ((j['emoji'] as List?) ?? const []).whereType<String>().toList();
+      }
+    } catch (_) {}
+    _list = out;
+    return List.of(out);
+  }
+
+  static Future<void> note(String e) async {
+    final l = _list ??= await load();
+    l
+      ..remove(e)
+      ..insert(0, e);
+    if (l.length > _max) l.removeLast();
+    try {
+      await (await _file()).writeAsString(jsonEncode({'emoji': l}));
+    } catch (_) {}
+  }
+}
 
 class _EmojiPage extends StatefulWidget {
   final TgTextController controller;
@@ -1282,12 +912,6 @@ class _EmojiPageState extends State<_EmojiPage>
   final _jump = _SectionsJump();
   int _section = 0;
   List<String> _recent = [];
-  List<TgDoc> _recentCustom = [];
-  List<TgSet> _sets = [];
-  bool _premium = false;
-
-  String _query = '';
-  List<String>? _found;
 
   /// Telegram `EmojiTabsStrip` belgilari — tanlanganda bir marta
   /// "jonlanadi" (`R.raw.msg_emoji_*`).
@@ -1306,84 +930,33 @@ class _EmojiPageState extends State<_EmojiPage>
   }
 
   Future<void> _load() async {
-    final m = TgMedia.instance;
-    final r = await m.recentEmoji();
-    final rc = await m.recentCustom();
-    // TALAB (foydalanuvchi): "premium emoji'ni ILOVAMIZDAN obuna sotib
-    // olgan odam yubora olsin — Telegram Premium shart emas". Emojilar
-    // bizning chat/izohlarimizda ko'rsatiladi (Telegram'ga
-    // yuborilmaydi), shu sabab ruxsat ilova obunasiga bog'langan.
-    // Admin — har doim.
-    final billing = BillingService.instance;
-    if (!billing.active) await billing.load();
-    final premium = UnreadBadge.instance.isAdmin || billing.active;
-    final sets = m.ready ? await m.emojiSets() : <TgSet>[];
+    final r = await _RecentEmoji.load();
     if (!mounted) return;
-    setState(() {
-      _recent = r;
-      _premium = premium;
-      _recentCustom = premium ? rc : [];
-      _sets = sets;
-    });
-  }
-
-  Future<void> _search(String q) async {
-    _query = q;
-    if (q.isEmpty) {
-      setState(() => _found = null);
-      return;
-    }
-    final r = await TgMedia.instance.searchEmoji(q);
-    if (!mounted || q != _query) return;
-    setState(() => _found = r);
-  }
-
-  void _say(String s) {
-    ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(
-      behavior: SnackBarBehavior.floating,
-      backgroundColor: AppColors.card,
-      content: Text(s, style: const TextStyle(color: Colors.white)),
-    ));
+    setState(() => _recent = r);
   }
 
   void _pickEmoji(String e) {
     widget.controller.insertText(e);
-    unawaited(TgMedia.instance.noteEmoji(e));
-  }
-
-  void _pickCustom(TgDoc d) {
-    if (!_premium) {
-      _say('Premium emoji faqat ARUmediaTV obunasi bilan yuboriladi '
-          '(Profil → Obuna)');
-      return;
-    }
-    TgMedia.instance.rememberEmoji(d);
-    widget.controller.insertCustom(d);
-    unawaited(TgMedia.instance.noteCustom(d));
+    unawaited(_RecentEmoji.note(e));
   }
 
   @override
   Widget build(BuildContext context) {
     super.build(context);
     final groups = tgEmojiGroups;
-    // 0 — yaqinda, 1..8 — Unicode bo'limlari, keyin maxsus to'plamlar.
+    // 0 — yaqinda, 1..8 — Unicode bo'limlari.
     final counts = <int>[
-      _recent.length + _recentCustom.length,
+      _recent.length,
       for (final g in groups) g.emoji.length,
-      for (final s in _sets) s.count,
     ];
     final headers = <Widget>[
       const _Header('Yaqinda ishlatilgan'),
       for (final g in groups) _Header(g.title),
-      for (final s in _sets) _Header(s.title, locked: !_premium),
     ];
-    final firstSet = 1 + groups.length;
-    final search = _SearchBar(onQuery: _search);
-    final found = _found;
     return Column(
       children: [
         _Strip(
-          count: 1 + groups.length + _sets.length,
+          count: 1 + groups.length,
           selected: _section,
           onTap: (i) {
             setState(() => _section = i);
@@ -1392,77 +965,23 @@ class _EmojiPageState extends State<_EmojiPage>
           icon: (i, on) {
             final c = on ? Colors.white : _Pal.icon;
             if (i == 0) return Icon(Icons.access_time_rounded, color: c, size: 22);
-            if (i <= groups.length) {
-              return _TabLottie(
-                  asset: 'assets/tg_anim/msg_emoji_${_icons[i - 1]}.json',
-                  selected: on,
-                  color: c);
-            }
-            final s = _sets[i - firstSet];
-            return Stack(
-              alignment: Alignment.center,
-              children: [
-                _SetIcon(set: s, size: 26),
-                if (!_premium)
-                  const Positioned(
-                    right: 0,
-                    bottom: 0,
-                    child: Icon(Icons.lock_rounded,
-                        size: 11, color: Colors.white70),
-                  ),
-              ],
-            );
+            return _TabLottie(
+                asset: 'assets/tg_anim/msg_emoji_${_icons[i - 1]}.json',
+                selected: on,
+                color: c);
           },
         ),
-        if (found != null) search,
         Expanded(
-          child: found != null
-              ? (found.isEmpty
-                  ? const _Empty('Hech narsa topilmadi')
-                  : _Grid(
-                      minCell: 45,
-                      minColumns: 7,
-                      count: found.length,
-                      cell: (i, cell) => _EmojiCell(found[i], cell, _pickEmoji),
-                    ))
-              : _Sections(
-                  minCell: 45,
-                  minColumns: 7,
-                  counts: counts,
-                  headers: headers,
-                  jump: _jump,
-                  top: search,
-                  topHeight: 46,
-                  onSection: (i) => setState(() => _section = i),
-                  cell: (s, i, cell) {
-                    if (s >= firstSet) {
-                      return _SetCell(
-                        set: _sets[s - firstSet],
-                        index: i,
-                        size: cell * 0.7,
-                        locked: !_premium,
-                        onTap: _pickCustom,
-                      );
-                    }
-                    if (s == 0) {
-                      if (i < _recentCustom.length) {
-                        final d = _recentCustom[i];
-                        return TgHoldTarget(
-                          doc: d,
-                          gif: false,
-                          onTap: () => _pickCustom(d),
-                          child: Center(
-                              child: TgStickerView(
-                                  doc: d, size: cell * 0.7, still: true)),
-                        );
-                      }
-                      final e = _recent[i - _recentCustom.length];
-                      return _EmojiCell(e, cell, _pickEmoji);
-                    }
-                    final e = groups[s - 1].emoji[i];
-                    return _EmojiCell(e, cell, _pickEmoji);
-                  },
-                ),
+          child: _Sections(
+            minCell: 45,
+            minColumns: 7,
+            counts: counts,
+            headers: headers,
+            jump: _jump,
+            onSection: (i) => setState(() => _section = i),
+            cell: (s, i, cell) => _EmojiCell(
+                s == 0 ? _recent[i] : groups[s - 1].emoji[i], cell, _pickEmoji),
+          ),
         ),
       ],
     );
@@ -1697,462 +1216,3 @@ class _TabLottieState extends State<_TabLottie>
     );
   }
 }
-
-/// To'plamning birinchi stikeri — tepadagi qator uchun belgi.
-class _SetIcon extends StatelessWidget {
-  final TgSet set;
-  final double size;
-  const _SetIcon({required this.set, required this.size});
-
-  @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<List<TgDoc>>(
-      future: TgMedia.instance.setDocs(set.id, set.hash),
-      builder: (context, snap) {
-        final docs = snap.data ?? const <TgDoc>[];
-        if (docs.isEmpty) return SizedBox(width: size, height: size);
-        final d = set.thumbDoc == null
-            ? docs.first
-            : docs.firstWhere((x) => x.id == set.thumbDoc,
-                orElse: () => docs.first);
-        return TgStickerView(doc: d, size: size, still: true, frozen: true);
-      },
-    );
-  }
-}
-
-/// To'plamning bitta katagi. To'plam ro'yxati bir marta olinadi
-/// (`setDocs` keshlangan), katak esa faqat ekranga chiqqanda quriladi.
-class _SetCell extends StatelessWidget {
-  final TgSet set;
-  final int index;
-  final double size;
-  final bool locked;
-  final ValueChanged<TgDoc> onTap;
-
-  /// Faqat birinchi kadr (stikerlar paneli — Telegram kabi, panelda
-  /// faqat GIF va emojilar harakatlanadi).
-  final bool frozen;
-
-  const _SetCell({
-    required this.set,
-    required this.index,
-    required this.size,
-    required this.onTap,
-    this.locked = false,
-    this.frozen = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<List<TgDoc>>(
-      future: TgMedia.instance.setDocs(set.id, set.hash),
-      builder: (context, snap) {
-        final docs = snap.data;
-        if (docs == null || index >= docs.length) return const SizedBox();
-        final d = docs[index];
-        // Bir marta bosish — yuboradi; bosib turish — tepada katta
-        // ko'rinish (`TgHoldPreview`).
-        return TgHoldTarget(
-          doc: d,
-          gif: false,
-          onTap: () => onTap(d),
-          child: Opacity(
-            opacity: locked ? 0.6 : 1,
-            child: Center(
-                child: TgStickerView(
-                    doc: d, size: size, still: true, frozen: frozen)),
-          ),
-        );
-      },
-    );
-  }
-}
-
-// ── STIKERLAR ────────────────────────────────────────────────────
-
-class _StickerPage extends StatefulWidget {
-  final ValueChanged<TgDoc> onSticker;
-  const _StickerPage({required this.onSticker});
-
-  @override
-  State<_StickerPage> createState() => _StickerPageState();
-}
-
-class _StickerPageState extends State<_StickerPage>
-    with AutomaticKeepAliveClientMixin {
-  final _jump = _SectionsJump();
-  int _section = 0;
-  bool _loading = true;
-  List<TgSet> _sets = [];
-  List<TgDoc> _recent = [];
-  List<TgDoc> _faved = [];
-
-  /// Qidiruv: turkum tugmasi yoki yozilgan so'z bo'yicha natija.
-  String? _chip;
-  String _query = '';
-  List<TgDoc>? _found;
-  bool _searching = false;
-
-  @override
-  bool get wantKeepAlive => true;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    if (!TgMedia.instance.ready) {
-      setState(() => _loading = false);
-      return;
-    }
-    setState(() => _loading = true);
-    final r = await TgMedia.instance.stickers(refresh: _sets.isEmpty);
-    if (!mounted) return;
-    setState(() {
-      _loading = false;
-      _sets = r.sets;
-      _recent = r.recent.take(20).toList();
-      _faved = r.faved;
-    });
-  }
-
-  Future<void> _byEmoji(String emoji) async {
-    if (emoji.isEmpty) {
-      setState(() {
-        _chip = null;
-        _found = null;
-      });
-      return;
-    }
-    setState(() {
-      _chip = emoji;
-      _searching = true;
-      _found = [];
-    });
-    final r = await TgMedia.instance.stickersByEmoji(emoji);
-    if (!mounted || _chip != emoji) return;
-    setState(() {
-      _searching = false;
-      _found = r;
-    });
-  }
-
-  /// Yozilgan so'z: emoji kalit so'zlari orqali mos emoji topiladi va
-  /// shu emoji'li stikerlar ko'rsatiladi (Telegram ham shunday qiladi).
-  Future<void> _byText(String q) async {
-    _query = q;
-    if (q.isEmpty) return _byEmoji('');
-    setState(() {
-      _searching = true;
-      _found = [];
-    });
-    final emoji = await TgMedia.instance.searchEmoji(q);
-    final out = <TgDoc>[];
-    final seen = <String>{};
-    for (final e in emoji.take(3)) {
-      for (final d in await TgMedia.instance.stickersByEmoji(e)) {
-        if (seen.add(d.id)) out.add(d);
-      }
-    }
-    if (!mounted || q != _query) return;
-    setState(() {
-      _chip = null;
-      _searching = false;
-      _found = out;
-    });
-  }
-
-  // TALAB (foydalanuvchi): Telegram kabi — bir marta bosilsa darhol
-  // yuboriladi; bosib turilsa ekran tepasida katta bo'lib harakatlanadi.
-  // Panelda stikerlar TURADI (faqat birinchi kadr) — protsessor bo'sh.
-  Widget _cell(TgDoc d, double cell) => TgHoldTarget(
-        doc: d,
-        gif: false,
-        onTap: () => widget.onSticker(d),
-        child: Center(
-            child: TgStickerView(
-                doc: d, size: cell * 0.86, still: true, frozen: true)),
-      );
-
-  @override
-  Widget build(BuildContext context) {
-    super.build(context);
-    if (_loading) return const _Loading();
-    final search = _SearchBar(onQuery: _byText, onChip: _byEmoji, chip: _chip);
-    final found = _found;
-    if (found != null) {
-      return Column(
-        children: [
-          const SizedBox(height: 6),
-          search,
-          Expanded(
-            child: found.isEmpty
-                ? (_searching
-                    ? const _Loading()
-                    : const _Empty('Stikerlar topilmadi'))
-                : _Grid(
-                    minCell: 72,
-                    minColumns: 5,
-                    count: found.length,
-                    cell: (i, cell) => _cell(found[i], cell),
-                  ),
-          ),
-        ],
-      );
-    }
-    if (_sets.isEmpty && _recent.isEmpty && _faved.isEmpty) {
-      return _Empty(
-          'Stikerlar topilmadi.\n'
-          'Telegram\'da stiker to\'plamlarini qo\'shing — ular shu yerda chiqadi.',
-          onRetry: _load);
-    }
-    // 0 — sevimlilar (☆), 1 — yaqinda (🕒), keyin to'plamlar.
-    final counts = [_faved.length, _recent.length, for (final s in _sets) s.count];
-    final headers = <Widget>[
-      const _Header('Saralanganlar'),
-      const _Header('Yaqinda ishlatilgan'),
-      for (final s in _sets) _Header(s.title),
-    ];
-    return Column(
-      children: [
-        _Strip(
-          count: 2 + _sets.length,
-          selected: _section,
-          onTap: (i) {
-            setState(() => _section = i);
-            _jump.to(i);
-          },
-          icon: (i, on) {
-            final c = on ? Colors.white : _Pal.icon;
-            return switch (i) {
-              0 => Icon(Icons.star_border_rounded, color: c, size: 25),
-              1 => Icon(Icons.access_time, color: c, size: 22),
-              _ => _SetIcon(set: _sets[i - 2], size: 30),
-            };
-          },
-        ),
-        Expanded(
-          child: _Sections(
-            minCell: 72,
-            minColumns: 5,
-            counts: counts,
-            headers: headers,
-            jump: _jump,
-            top: search,
-            topHeight: 46,
-            onSection: (i) => setState(() => _section = i),
-            cell: (s, i, cell) {
-              if (s >= 2) {
-                return _SetCell(
-                  set: _sets[s - 2],
-                  index: i,
-                  size: cell * 0.86,
-                  frozen: true,
-                  onTap: widget.onSticker,
-                );
-              }
-              return _cell(s == 0 ? _faved[i] : _recent[i], cell);
-            },
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-// ── GIF ──────────────────────────────────────────────────────────
-
-class _GifPage extends StatefulWidget {
-  final ValueChanged<TgDoc> onGif;
-  const _GifPage({required this.onGif});
-
-  @override
-  State<_GifPage> createState() => _GifPageState();
-}
-
-class _GifPageState extends State<_GifPage>
-    with AutomaticKeepAliveClientMixin {
-  final _scroll = ScrollController();
-  List<TgDoc> _saved = [];
-  List<TgDoc> _found = [];
-  String _next = '';
-  String _query = '';
-  String? _chip;
-  bool _loading = true;
-  bool _more = false;
-  int _gen = 0;
-
-  @override
-  bool get wantKeepAlive => true;
-
-  @override
-  void initState() {
-    super.initState();
-    _scroll.addListener(() {
-      if (_scroll.position.pixels > _scroll.position.maxScrollExtent - 300) {
-        _loadMore();
-      }
-    });
-    _start();
-  }
-
-  @override
-  void dispose() {
-    _scroll.dispose();
-    super.dispose();
-  }
-
-  Future<void> _start() async {
-    if (!TgMedia.instance.ready) {
-      setState(() => _loading = false);
-      return;
-    }
-    setState(() => _loading = true);
-    final saved = await TgMedia.instance.savedGifs();
-    if (!mounted) return;
-    _saved = saved;
-    await _search('');
-  }
-
-  /// Bo'sh so'rov — `@gif` mashhurlarni beradi (Telegram'dagidek).
-  Future<void> _search(String q, {String? chip}) async {
-    final gen = ++_gen;
-    setState(() {
-      _query = q;
-      _chip = chip;
-      _loading = true;
-      _found = [];
-      _next = '';
-    });
-    if (_scroll.hasClients) _scroll.jumpTo(0);
-    final r = await TgMedia.instance.searchGifs(q);
-    if (!mounted || gen != _gen) return;
-    setState(() {
-      _loading = false;
-      _found = r.docs;
-      _next = r.next;
-    });
-  }
-
-  Future<void> _loadMore() async {
-    if (_more || _loading || _next.isEmpty) return;
-    _more = true;
-    final gen = _gen;
-    final r = await TgMedia.instance.searchGifs(_query, offset: _next);
-    _more = false;
-    if (!mounted || gen != _gen) return;
-    setState(() {
-      _found.addAll(r.docs);
-      _next = r.next;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    super.build(context);
-    final items = [if (_query.isEmpty) ..._saved, ..._found];
-    return Column(
-      children: [
-        const SizedBox(height: 6),
-        _SearchBar(
-          onQuery: (q) => _search(q),
-          onChip: (e) => _search(e, chip: e.isEmpty ? null : e),
-          chip: _chip,
-        ),
-        Expanded(
-          child: items.isEmpty
-              ? (_loading
-                  ? const _Loading()
-                  : _Empty('GIF topilmadi', onRetry: _start))
-              : LayoutBuilder(
-                  builder: (context, box) {
-                    final rows = _justify(items, box.maxWidth, 110);
-                    return ListView.builder(
-                      controller: _scroll,
-                      cacheExtent: 110,
-                      padding: const EdgeInsets.only(bottom: 64),
-                      itemCount: rows.length,
-                      itemBuilder: (_, r) {
-                        final row = rows[r];
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 2),
-                          // Qatordagi GIF'lar bitta yuzada (Telegram kabi).
-                          child: TgAnimBatch(
-                            child: Row(
-                            children: [
-                              for (final (i, w) in row.items) ...[
-                                if (i != row.items.first.$1)
-                                  const SizedBox(width: 2),
-                                SizedBox(
-                                  width: w,
-                                  height: row.height,
-                                  child: TgHoldTarget(
-                                    scale: 0.92,
-                                    doc: items[i],
-                                    gif: true,
-                                    // Panelda o'ynaydi (ilova ichidagi
-                                    // dekoder); bosilsa — yuboriladi,
-                                    // bosib turilsa — tepada katta.
-                                    onTap: () => widget.onGif(items[i]),
-                                    child: TgGifThumb(doc: items[i]),
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
-                          ),
-                        );
-                      },
-                    );
-                  },
-                ),
-        ),
-      ],
-    );
-  }
-}
-
-/// GIF qatori: indeks va eni, balandlik bir xil.
-class _GifRow {
-  final List<(int, double)> items;
-  final double height;
-  const _GifRow(this.items, this.height);
-}
-
-/// Telegram'dagidek: har qator [target] balandlikka yaqin, GIF'lar asl
-/// nisbatida va qator butun kenglikni to'ldiradi.
-List<_GifRow> _justify(List<TgDoc> docs, double width, double target) {
-  const gap = 2.0;
-  final rows = <_GifRow>[];
-  var cur = <(int, double)>[];
-  var sum = 0.0;
-  void flush({bool last = false}) {
-    if (cur.isEmpty) return;
-    final gaps = gap * (cur.length - 1);
-    var k = (width - gaps) / sum;
-    // Oxirgi to'lmagan qator haddan tashqari cho'zilmasin.
-    if (last && k * target > target * 1.3) k = 1.3;
-    final h = target * k;
-    rows.add(_GifRow([for (final (i, w) in cur) (i, w * k)], h));
-    cur = [];
-    sum = 0;
-  }
-
-  for (var i = 0; i < docs.length; i++) {
-    final d = docs[i];
-    final ratio = (d.w > 0 && d.h > 0) ? (d.w / d.h).clamp(0.5, 2.5) : 1.0;
-    final w = target * ratio;
-    cur.add((i, w));
-    sum += w;
-    if (sum + gap * (cur.length - 1) >= width) flush();
-  }
-  flush(last: true);
-  return rows;
-}
-
-/// Stiker yoki GIF xabari uchun o'lcham (Telegram'dagidek ~150).
-double tgStickerSize(BuildContext context) =>
-    math.min(150, MediaQuery.sizeOf(context).width * 0.4);

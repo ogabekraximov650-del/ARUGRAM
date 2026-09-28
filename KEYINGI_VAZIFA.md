@@ -3826,3 +3826,18 @@ tayyor bo'lguncha esa hech narsa chizilmasdi (qora/bo'sh).
   o'chmaydi — faqat fayllar.
 
 - (2026-09) Katalog ro'yxatlari chekka keshda 1 soat (`EDGE_CACHE_SECONDS`), yozishdan keyin darhol tozalanadi va yangisi qayta keshlanadi; ilovaga 30 s. Bot tezligi — o'zgartirilmadi.
+
+## Telegram premium emoji, GIF va stikerlar olib tashlandi (2026-09)
+
+- Foydalanuvchi talabi: ilova o'zining premium emoji, GIF va stiker
+  tizimini yasaydi. Faqat oddiy (Unicode) emojilar qoldi.
+- Ilova: `tg_media.dart`, `tg_media_view.dart`, `tg_media_preview.dart`
+  o'chirildi; panelda Emoji (oddiy + yaqinda ishlatilganlar) va bo'sh
+  "GIF" / "Stikerlar" oynalari ("Tez orada") qoldi.
+- Eski stiker/GIF xabarlari `MediaPlaceholder` bilan, eski `[ce:..]`
+  belgilari oddiy emoji bo'lib ko'rinadi (`plainEmojiText`).
+- Rust: `sticker_anim.rs`, `anim_player.rs`, Telegram stiker/GIF
+  funksiyalari, libvpx, ffmpeg, tlottie o'chirildi; Java `AruAnimTextures`
+  o'chirildi.
+- Worker: izohga va chatga yangi stiker/GIF qabul qilinmaydi.
+- Eski `tg/media` fayllari "Vaqtinchalik fayllar" bilan tozalanadi.

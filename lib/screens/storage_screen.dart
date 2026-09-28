@@ -44,8 +44,6 @@ import '../widgets/glass.dart';
 const Map<String, Color> _colors = {
   'Videolar': Color(0xFF3E8CF0),
   'Posterlar': Color(0xFF56B6F5),
-  'Stikerlar va emojilar': Color(0xFFF09B3A),
-  'GIF va chat fayllari': Color(0xFF4FC76A),
   'Vaqtinchalik fayllar': Color(0xFF9A6FE2),
 };
 

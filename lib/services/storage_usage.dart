@@ -167,8 +167,6 @@ class StorageUsageService extends ChangeNotifier {
   static const Set<String> clearable = {
     _kVideo,
     _kPoster,
-    _kStickers,
-    _kChatMedia,
     _kTemp,
   };
 
@@ -176,18 +174,6 @@ class StorageUsageService extends ChangeNotifier {
   ///
   /// [onProgress] — 0..1 (Telegram'dagi "Kesh tozalanmoqda" oynasi
   /// uchun): har bir toifa tugagach chaqiriladi.
-  ///
-  /// ── TOPILGAN XATO: STIKERLAR TOZALANMASDI ──────────────────
-  ///
-  /// "Stikerlar va emojilar" hajmi butun `tg/media` papkasidan
-  /// sanalardi (`meta/` — to'plamlar ro'yxati, emoji kalit so'zlari,
-  /// maxsus emoji hujjatlari ham shu ichida), o'chirishda esa `meta`
-  /// tashlab ketilardi. Hajmning asosiy qismi aynan `meta` bo'lgani
-  /// uchun "Keshni tozalash" bosilgandan keyin ham raqam deyarli
-  /// o'zgarmasdi. Endi papka BUTUNLAY tozalanadi: Rust yadrosi
-  /// `meta` yo'qligini ko'rib ro'yxatlarni Telegram'dan qaytadan
-  /// oladi (`cached` -> `hash` 0), hujjat havolalari esa xotirada
-  /// qoladi (`media_docs`), ya'ni panel ishlashda davom etadi.
   ///
   /// Posterlarda ham xuddi shunday: kesh ro'yxati (`v2.index`)
   /// o'chirilmaydi va u "Posterlar 30 B" bo'lib qolardi — endi u
@@ -224,15 +210,11 @@ class StorageUsageService extends ChangeNotifier {
             await _wipe('$support/${AppImageCache.key}/v2', _Pick.all);
           }
           await _wipe(temp, _Pick.posters);
-        case _kStickers:
-          // Faqat FAYLLAR: `meta` (to'plamlar ro'yxati, hujjatlar —
-          // Telegram'dan kelgan MA'LUMOT) doimiy saqlanadi
-          // (foydalanuvchi talabi: "ma'lumotlar tozalanmasin").
-          if (docs != null) await _wipe('$docs/tg/media', _Pick.files);
-        case _kChatMedia:
-          await _wipe(temp, _Pick.chat);
         case _kTemp:
           await _wipe(temp, _Pick.temp);
+          // Olib tashlangan Telegram stiker/emoji/GIF tizimidan
+          // eski o'rnatishlarda qolgan fayllar.
+          if (docs != null) await _wipe('$docs/tg/media', _Pick.all);
       }
       step();
     }
@@ -265,8 +247,6 @@ const String _kFavorites = 'Sevimlilar';
 const String _kStats = 'Statistika';
 const String _kSettings = 'Sozlamalar';
 const String _kTemp = 'Vaqtinchalik fayllar';
-const String _kStickers = 'Stikerlar va emojilar';
-const String _kChatMedia = 'GIF va chat fayllari';
 const String _kOther = 'Boshqa';
 
 /// Ekrandagi tartib uchun barqaror ro'yxat (rang shu tartibdan
@@ -274,8 +254,6 @@ const String _kOther = 'Boshqa';
 const List<String> kStorageLabels = [
   _kVideo,
   _kPoster,
-  _kStickers,
-  _kChatMedia,
   _kFrames,
   _kAnime,
   _kEpisodes,
@@ -327,9 +305,6 @@ Map<String, int> _measure({
       if (path.contains('/libCachedImageData/') ||
           name.startsWith('libCachedImageData')) {
         add(_kPoster, size);
-      } else if (name.startsWith('gif_')) {
-        // Chatdagi GIF va dumaloq videolar (`tgChatFile`).
-        add(_kChatMedia, size);
       } else {
         // Rasm/video tanlashda qolgan nusxalar va tizim qoldiqlari.
         add(_kTemp, size);
@@ -340,9 +315,10 @@ Map<String, int> _measure({
   // ── HISOB FAYLLARI ────────────────────────────────────────
   if (docs != null) {
     _walk(Directory(docs), (path, size) {
-      // Telegram stikerlari, emojilari, GIF'lari (`tg/media`).
+      // Olib tashlangan Telegram stiker/emoji/GIF tizimidan qolgan
+      // fayllar (`tg/media`) — "Vaqtinchalik" bilan tozalanadi.
       if (path.contains('/tg/media/')) {
-        add(_kStickers, size);
+        add(_kTemp, size);
         return;
       }
       add(_labelOfDocFile(path.split('/').last), size);
@@ -377,7 +353,7 @@ String _labelOfDocFile(String name) {
 }
 
 /// Papkadagi qaysi elementlar o'chiriladi (`_wipe`).
-enum _Pick { all, files, posters, chat, temp }
+enum _Pick { all, posters, temp }
 
 /// [dir] ichidagi [pick] elementlarini FON oqimida o'chiradi.
 ///
@@ -390,18 +366,13 @@ Future<void> _wipe(String? dir, _Pick pick) async {
   await Isolate.run(() {
     _deleteIn(Directory(dir), (name) {
       final poster = name.startsWith('libCachedImageData');
-      final gif = name.startsWith('gif_');
       switch (pick) {
         case _Pick.all:
           return true;
-        case _Pick.files:
-          return name != 'meta';
         case _Pick.posters:
           return poster;
-        case _Pick.chat:
-          return gif;
         case _Pick.temp:
-          return !poster && !gif;
+          return !poster;
       }
     });
   });

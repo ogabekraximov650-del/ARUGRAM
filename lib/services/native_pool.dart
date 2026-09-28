@@ -1,26 +1,18 @@
 // lib/services/native_pool.dart — Rust yadrosi uchun DOIMIY ishchi
 // isolate'lar.
 //
-// TOPILGAN SABAB (foydalanuvchi: "to'plamlarni ochishim bilan ilova
-// qotib qolyapti"): panel har bir stiker fayli va har bir to'plam
-// uchun `Isolate.run` chaqirardi — ya'ni HAR SAFAR yangi isolate
-// ochilib yopilardi. Panel ochilganda bu yuzlab isolate degani.
-// Telegram/Cherrygram esa bir necha doimiy fon oqimida ishlaydi
-// (`RLottieDrawable`: 4 ta oqim, `DispatchQueue`).
+// Har chaqiruvda `Isolate.run` yangi isolate ochib yopardi; bu yerda
+// bir necha doimiy ishchi bor. `NativePool.io` — tarmoqqa chiqadigan
+// Telegram chaqiruvlari.
 //
-// Endi ikki hovuz bor:
-//   * `NativePool.io`     — tarmoqqa chiqadigan chaqiruvlar (stiker
-//                           to'plami, fayl yuklash) — 3 ta ishchi;
-//   * `NativePool.render` — stiker kadrlari (rlottie / libvpx) — 2 ta
-//                           ishchi; tarmoq kutayotgan chaqiruv
-//                           animatsiyani to'xtatib qo'ymasin.
+// Telegram stiker/emoji/GIF chizish (rlottie/libvpx) hovuzlari olib
+// tashlandi (ilova o'z tizimini yasaydi).
 
 import 'dart:async';
 import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
 import 'dart:isolate';
-import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 
@@ -36,23 +28,16 @@ class NativePool {
   NativePool._(this.size, this.name);
 
   // XOTIRA: har isolate o'z uyumi bilan bir necha MB egallaydi —
-  // kuchsiz (2 GB) telefonda ishchilar kamroq (11 o'rniga 6).
+  // kuchsiz (2 GB) telefonda ishchilar kamroq.
   static final io = NativePool._(DevicePerf.low ? 2 : 3, 'aru-io');
-
-  /// Stiker/emoji/GIF FAYLLARINI yuklash — alohida hovuz: sekin
-  /// yuklanish to'plamlar ro'yxati so'rovini navbatda ushlab turmasin
-  /// (panel "aylanib" qolardi).
-  static final files = NativePool._(DevicePerf.low ? 2 : 5, 'aru-files');
-  static final render = NativePool._(DevicePerf.low ? 2 : 3, 'aru-render');
 
   final List<_Worker> _workers = [];
   int _next = 0;
 
-  _Worker _pick([int? pin]) {
+  _Worker _pick() {
     while (_workers.length < size) {
       _workers.add(_Worker('$name-${_workers.length}'));
     }
-    if (pin != null) return _workers[pin % size];
     // Eng BO'SH ishchi (navbat bo'yicha emas): band ishchiga qo'yilgan
     // tezkor so'rov uning sekin ishi tugashini kutib qolardi.
     var best = _workers[_next++ % size];
@@ -76,29 +61,6 @@ class NativePool {
       return {'error': r.isEmpty ? 'Javob yo\'q' : r};
     }
     return {'error': '$r'};
-  }
-
-  /// Animatsiyani ochadi: `(tutqich, kadrlar, fps)` yoki `null`.
-  Future<(int, int, double)?> animOpen(String path, int w, int h) async {
-    final r =
-        await _pick().request({'op': 'open', 'path': path, 'w': w, 'h': h});
-    if (r is List && r.length == 3 && (r[0] as int) > 0) {
-      return (r[0] as int, r[1] as int, (r[2] as num).toDouble());
-    }
-    return null;
-  }
-
-  /// Kadr (premultiplied RGBA, w*h*4) yoki `null`. Bir animatsiyaning
-  /// hamma kadri BITTA ishchida chiziladi (VP9 ketma-ket ochiladi).
-  Future<Uint8List?> animFrame(int handle, int frame, int w, int h) async {
-    final r = await _pick(handle).request(
-        {'op': 'frame', 'h': handle, 'f': frame, 'w': w, 'hh': h});
-    if (r is TransferableTypedData) return r.materialize().asUint8List();
-    return null;
-  }
-
-  void animClose(int handle) {
-    _pick(handle).request({'op': 'close', 'h': handle});
   }
 }
 
@@ -145,30 +107,12 @@ typedef _IntC = Pointer<Utf8> Function(Int32);
 typedef _IntD = Pointer<Utf8> Function(int);
 typedef _FreeC = Void Function(Pointer<Utf8>);
 typedef _FreeD = void Function(Pointer<Utf8>);
-typedef _OpenC = Int64 Function(Pointer<Utf8>, Int32, Int32);
-typedef _OpenD = int Function(Pointer<Utf8>, int, int);
-typedef _I64IntC = Int32 Function(Int64);
-typedef _I64IntD = int Function(int);
-typedef _FpsC = Double Function(Int64);
-typedef _FpsD = double Function(int);
-typedef _RenderC = Int32 Function(Int64, Int32, Pointer<Uint8>);
-typedef _RenderD = int Function(int, int, Pointer<Uint8>);
-typedef _CloseC = Void Function(Int64);
-typedef _CloseD = void Function(int);
 
 void _main(SendPort out) {
   final rx = ReceivePort();
   out.send(rx.sendPort);
   final lib = _lib();
   final free = lib.lookupFunction<_FreeC, _FreeD>('rust_free_string');
-  final open = lib.lookupFunction<_OpenC, _OpenD>('rust_anim_open');
-  final frames = lib.lookupFunction<_I64IntC, _I64IntD>('rust_anim_frames');
-  final fps = lib.lookupFunction<_FpsC, _FpsD>('rust_anim_fps');
-  final render = lib.lookupFunction<_RenderC, _RenderD>('rust_anim_render');
-  final close = lib.lookupFunction<_CloseC, _CloseD>('rust_anim_close');
-  // Har bir animatsiya uchun bitta bufer (qayta ishlatiladi).
-  final bufs = <int, (Pointer<Uint8>, int)>{};
-
   String take(Pointer<Utf8> p) {
     if (p == nullptr) return '';
     final s = p.toDartString();
@@ -199,103 +143,10 @@ void _main(SendPort out) {
           } else {
             result = take(lib.lookupFunction<_NoArgC, _NoArgC>(fn)());
           }
-        case 'open':
-          final p = (msg['path'] as String).toNativeUtf8();
-          try {
-            final h = open(p, msg['w'] as int, msg['h'] as int);
-            result = h > 0 ? [h, frames(h), fps(h)] : [0, 0, 0.0];
-          } finally {
-            malloc.free(p);
-          }
-        case 'frame':
-          final h = msg['h'] as int;
-          final len = (msg['w'] as int) * (msg['hh'] as int) * 4;
-          var b = bufs[h];
-          if (b == null || b.$2 != len) {
-            if (b != null) malloc.free(b.$1);
-            b = bufs[h] = (malloc<Uint8>(len), len);
-          }
-          final r = render(h, msg['f'] as int, b.$1);
-          result = r == 1
-              ? TransferableTypedData.fromList([b.$1.asTypedList(len)])
-              : null;
-        case 'close':
-          final h = msg['h'] as int;
-          close(h);
-          final b = bufs.remove(h);
-          if (b != null) malloc.free(b.$1);
       }
     } catch (e) {
       result = msg['op'] == 'call' ? '{"error":"$e"}' : null;
     }
     out.send([id, result]);
   });
-}
-
-// ═══════════════════════════════════════════════════════════════
-//  ANIMATSIYA O'YINCHILARI (`rust/src/anim_player.rs`)
-// ═══════════════════════════════════════════════════════════════
-//
-// Kadrni Rust o'zi Flutter `Texture` yuzasiga chizadi; bu yerdan faqat
-// "o'ynasin/to'xtasin", "kadr chiqdimi" va "yopilsin" deyiladi — arzon,
-// sinxron chaqiruvlar (UI oqimidan).
-
-typedef _SetC = Void Function(Int64, Int32);
-typedef _SetD = void Function(int, int);
-typedef _DrawnC = Int32 Function(Int64);
-typedef _DrawnD = int Function(int);
-typedef _FreeIdC = Void Function(Int64);
-typedef _FreeIdD = void Function(int);
-typedef _CapC = Void Function(Int32);
-typedef _CapD = void Function(int);
-
-class AnimPlayers {
-  AnimPlayers._();
-
-  static DynamicLibrary? _l;
-  static _SetD? _set;
-  static _DrawnD? _drawn;
-  static _FreeIdD? _free;
-
-  static bool _load() {
-    if (_set != null) return true;
-    try {
-      final l = _l ??= _lib();
-      _set = l.lookupFunction<_SetC, _SetD>('rust_player_set');
-      _drawn = l.lookupFunction<_DrawnC, _DrawnD>('rust_player_drawn');
-      _free = l.lookupFunction<_FreeIdC, _FreeIdD>('rust_player_free');
-      return true;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  static void setPlaying(int id, bool on) {
-    if (_load()) _set!(id, on ? 1 : 0);
-  }
-
-  static bool drawn(int id) => _load() && _drawn!(id) == 1;
-
-  static void free(int id) {
-    if (_load()) _free!(id);
-  }
-
-  static _FreeIdD? _replay;
-
-  /// Bir martalik (chatdagi stiker/GIF) animatsiyalarni boshidan
-  /// o'ynatadi — ekranda to'liq ko'ringanda.
-  static void replay(int id) {
-    if (!_load()) return;
-    try {
-      (_replay ??= _l!.lookupFunction<_FreeIdC, _FreeIdD>('rust_player_replay'))(id);
-    } catch (_) {}
-  }
-
-  /// Kadr/s chegarasi (kuchsiz telefonda 20).
-  static void fpsCap(int fps) {
-    try {
-      final l = _l ??= _lib();
-      l.lookupFunction<_CapC, _CapD>('rust_player_fps_cap')(fps);
-    } catch (_) {}
-  }
 }

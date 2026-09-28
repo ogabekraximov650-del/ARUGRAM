@@ -57,24 +57,14 @@ aes = "0.9"
 ctr = "0.10"
 # jni — ExoPlayer manbasi (`player_source.rs`) Java bilan shu orqali gaplashadi.
 jni = { version = "0.21", default-features = false }
-# tlottie — Telegram Android / Cherrygram ishlatadigan Lottie chizgich
-# (sof Rust, MIT). `third_party/tlottie/SOURCE.md` ga qarang.
-tlottie = { path = "third_party/tlottie", default-features = false, features = ["cpu", "std"] }
-# flate2 — `.tgs` stiker gzip'langan Lottie JSON (sof Rust, miniz_oxide).
-flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
-
-[build-dependencies]
-# rlottie (C++) va libvpx (C) ni yig'ish uchun (`build.rs`).
-cc = "1"
 
 [profile.release]
 opt-level = 3
 lto = true
 codegen-units = 1
-# `unwind`: Telegram chaqiruvlari (`with_client`) va stiker chizish
-# ichidagi kutilmagan `panic` ilovani YOPMAYDI — xato bo'lib qaytadi
-# (`catch_unwind`). `abort` bilan har qanday panic butun ilovani
-# yopardi (masalan GIF oynasi).
+# `unwind`: Telegram chaqiruvlari (`with_client`) ichidagi kutilmagan
+# `panic` ilovani YOPMAYDI — xato bo'lib qaytadi (`catch_unwind`).
+# `abort` bilan har qanday panic butun ilovani yopardi.
 panic = "unwind"
 strip = true
 
