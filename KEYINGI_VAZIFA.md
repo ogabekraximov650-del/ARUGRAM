@@ -3908,3 +3908,11 @@ almashtirish, bo'sh — tanlanmagan).
 **Ilovada "Original".** `video_player_screen.dart` → `_isOriginQuality`:
 `url_<q>` `origin_video` ga teng bo'lsa sifat nomi o'rniga "Original"
 ko'rinadi (eski ilovada hanuz sifat nomi).
+
+**Kunlik chegara — 10 ta qism (qat'iy, tugmasiz; foydalanuvchi talabi,
+GitHub Actions'dan me'yorida foydalanish uchun).** `ENCODE_DAILY_LIMIT`.
+Hisob `app_config.encode_day` = `<Toshkent kuni>:<soni>`, `claim` da
+birinchi urinish (`attempts == 1`) bo'lsa +1. Chegara to'lganda `claim` va
+`peek` faqat yarim qolgan (ijarasi o'tgan `running`) ishni beradi,
+`encode_kick` Actions'ni ishga tushirmaydi — qolganlar ertaga 00:00 dan
+keyin cron bilan o'zi boshlanadi. Botdagi "Holat": "Bugun: N/10".
