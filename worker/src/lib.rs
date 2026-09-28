@@ -10409,7 +10409,9 @@ async fn encbot_anime_page(env: &Env, page: i64) -> (String, Value) {
             encbot_keyboard(vec![vec![ENCBOT_BTN_STATUS.to_string()]]));
     }
     let shown: Vec<&Value> = rows.iter().take(ENCBOT_PAGE as usize).collect();
-    let mut kb: Vec<Vec<String>> = shown.iter().map(|r| {
+    // "Holat" — eng tepada (foydalanuvchi talabi).
+    let mut kb: Vec<Vec<String>> = vec![vec![ENCBOT_BTN_STATUS.to_string()]];
+    kb.extend(shown.iter().map(|r| {
         let id = jint(r, "id");
         let name = r["name"].as_str().unwrap_or("").trim().to_string();
         // Nom takrorlansa (yoki bo'sh bo'lsa) — ajratish uchun raqami ham.
@@ -10419,7 +10421,7 @@ async fn encbot_anime_page(env: &Env, page: i64) -> (String, Value) {
         } else {
             vec![format!("\u{1F3AC} {name}")]
         }
-    }).collect();
+    }));
     let mut nav = Vec::new();
     if page > 0 {
         nav.push(format!("\u{25C0}\u{FE0F} Oldingi: {}-sahifa", page));
@@ -10430,7 +10432,6 @@ async fn encbot_anime_page(env: &Env, page: i64) -> (String, Value) {
     if !nav.is_empty() {
         kb.push(nav);
     }
-    kb.push(vec![ENCBOT_BTN_STATUS.to_string()]);
     ("\u{1F3AC} Qaysi animega yangi qism qo'shmoqchisiz?\n\n\
       Pastdagi tugmalardan birini bosing. Tugmalar ko'rinmasa — yozish joyining \
       o'ng tomonidagi to'rt kvadratli belgini bosing.".into(), encbot_keyboard(kb))
@@ -10493,11 +10494,11 @@ async fn encbot_select(env: &Env, chat: i64, a: i64, s: i64) {
     for chunk in desc.chunks(3) {
         kb.push(chunk.iter().map(|n| format!("\u{1F39E} {n}-qism")).collect());
     }
-    kb.push(vec![ENCBOT_BTN_ANIMES.to_string(), ENCBOT_BTN_STATUS.to_string()]);
     encbot_send(env, chat, &format!(
         "\u{1F4C2} <b>{}</b>, {}\n\u{1F4DA} Hozir bor qismlar: {}\n\n\
          \u{2795} Yangi qism qo'shish uchun pastdagi \u{00AB}Yangi qism qo'shish\u{00BB} tugmasini bosing.\n\
-         \u{1F501} Qismning videosini almashtirish uchun pastdan o'sha qism tugmasini bosing.",
+         \u{1F501} Qismning videosini almashtirish uchun pastdan o'sha qism tugmasini bosing.\n\
+         \u{21A9}\u{FE0F} Boshqa anime tanlash: /start",
         html_escape(&an), html_escape(&sn), number_ranges(&nums)), Some(encbot_keyboard(kb))).await;
 }
 
