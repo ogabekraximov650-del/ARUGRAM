@@ -11,6 +11,7 @@ import 'services/app_keys.dart';
 import 'services/auth_service.dart';
 import 'services/image_cache.dart';
 import 'services/billing_service.dart';
+import 'services/nav_inset.dart';
 import 'services/net_meter.dart';
 import 'services/offline_library.dart';
 import 'services/rust_bridge.dart';
@@ -84,6 +85,8 @@ Future<void> _main() async {
     systemStatusBarContrastEnforced: false,
   ));
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+  // Tizim tugmalari balandligi (zaxira) — `nav_inset.dart`.
+  unawaited(NavInset.refresh());
 
   // Rust yadrosi (kesh, qidiruv, shifrlash) shu yerda yuklanadi.
   await RustCore.instance.init();
@@ -286,6 +289,34 @@ class FulutterApp extends StatelessWidget {
         // narxi esa bir necha barobar past.
         splashFactory: InkRipple.splashFactory,
         useMaterial3: true,
+      ),
+      // Pastki chekinish KAMIDA tizim tugmalari balandligicha
+      // (`nav_inset.dart` izohiga qarang).
+      builder: (context, child) => AnimatedBuilder(
+        animation: Listenable.merge([NavInset.px, NavInset.immersive]),
+        builder: (context, _) {
+          final mq = MediaQuery.of(context);
+          final dpr = mq.devicePixelRatio <= 0 ? 1.0 : mq.devicePixelRatio;
+          final floor = NavInset.px.value / dpr;
+          if (floor <= 0 ||
+              NavInset.immersive.value ||
+              mq.orientation == Orientation.landscape) {
+            return child!;
+          }
+          final vp = mq.viewPadding.bottom > floor ? mq.viewPadding.bottom : floor;
+          // Klaviatura ochiq — pastki chekinishni u egallaydi.
+          final keyboard = mq.viewInsets.bottom > 0;
+          final p = keyboard || mq.padding.bottom > floor
+              ? mq.padding.bottom
+              : floor;
+          return MediaQuery(
+            data: mq.copyWith(
+              viewPadding: mq.viewPadding.copyWith(bottom: vp),
+              padding: mq.padding.copyWith(bottom: p),
+            ),
+            child: child!,
+          );
+        },
       ),
       home: const AuthGate(child: RootScreen()),
     );

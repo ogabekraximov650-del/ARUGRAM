@@ -3958,3 +3958,13 @@ va eski MIUI'da ilova tugmalar ustida tugab, pastda tizim qora foni qolardi.
 `SYSTEM_UI_FLAG_LAYOUT_*`, `FLAG_TRANSLUCENT_NAVIGATION` olib tashlanadi,
 `FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS`; `onCreate`, `onResume` va fokus
 qaytganda qayta qo'llanadi (MIUI tiklab yuboradi).
+
+**Oynalar tizim tugmalari ortida qolmasin (zaxira chekinish).** MIUI'da
+(ayniqsa to'liq ekrandan keyin) Flutter'ga pastki chekinish 0 kelardi —
+baholash, yuklab olish va boshqa pastki oynalarning tugmalari telefon
+tugmalari ortida qolardi. `lib/services/nav_inset.dart` + Kotlin
+`aru/insets` → `navBottom` (barqaror balandlik, yashirilganda ham
+o'zgarmaydi). `main.dart` → `MaterialApp.builder`: `MediaQuery` ning
+`padding`/`viewPadding` pastki qiymati KAMIDA shuncha (klaviatura ochiq,
+landshaft va pleyer to'liq ekranda — `NavInset.immersive` — qo'llanmaydi).
+Qayta o'qish: birinchi kadr, ilovaga qaytish, to'liq ekrandan chiqish.

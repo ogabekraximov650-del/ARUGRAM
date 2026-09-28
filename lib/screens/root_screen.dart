@@ -18,6 +18,7 @@ import '../widgets/glass.dart';
 import 'admin_screen.dart';
 import 'home_screen.dart';
 import 'search_screen.dart';
+import '../services/nav_inset.dart';
 import 'catalog_screen.dart';
 import 'library_screen.dart';
 import 'profile_screen.dart';
@@ -109,6 +110,9 @@ class _RootScreenState extends State<RootScreen>
     // (masalan 5-qurilma kirgan bo'lsa, bu qurilma chegaradan
     // chiqarilgan bo'lishi mumkin).
     WidgetsBinding.instance.addObserver(this);
+    // Tizim tugmalari balandligi (zaxira) — oyna chizilgach o'qiladi
+    // (undan oldin Android uni bermaydi). `nav_inset.dart`.
+    WidgetsBinding.instance.addPostFrameCallback((_) => NavInset.refresh());
     _navTicker = createTicker(_onNavTick);
     WidgetsBinding.instance.addPostFrameCallback((_) => _showLastCrash());
 
@@ -187,6 +191,7 @@ class _RootScreenState extends State<RootScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) return;
+    unawaited(NavInset.refresh());
     // WORKER'GA KAMROQ SO'ROV: ilovaga har qaytishda emas — profil
     // ko'pi bilan 5 daqiqada, nuqta 20 soniyada bir marta so'raladi
     // (galereya, Telegram va h.k.dan tez-tez qaytiladi).

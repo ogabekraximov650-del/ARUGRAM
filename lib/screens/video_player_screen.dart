@@ -120,6 +120,7 @@ import '../services/image_cache.dart';
 
 import '../services/app_settings.dart';
 import '../services/billing_service.dart';
+import '../services/nav_inset.dart';
 import '../services/telegram_service.dart';
 import '../services/comments_service.dart';
 import '../services/download_manager.dart';
@@ -3691,6 +3692,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
         DeviceOrientation.landscapeLeft,
         DeviceOrientation.landscapeRight,
       ]);
+      NavInset.immersive.value = true;
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     } else {
       _restoreSystemUI();
@@ -3701,6 +3703,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   void _restoreSystemUI() {
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    NavInset.immersive.value = false;
+    // Tizim tugmalari qaytgach balandlik qayta o'qiladi.
+    Future.delayed(const Duration(milliseconds: 400), NavInset.refresh);
   }
 
   void _showQualityDialog() {

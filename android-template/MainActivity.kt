@@ -176,6 +176,19 @@ class MainActivity : FlutterActivity() {
                 }
             }
 
+        // ── TIZIM TUGMALARI BALANDLIGI (`lib/services/nav_inset.dart`) ──
+        //
+        // "Barqaror" qiymat: tugmalar vaqtincha yashirilgan (pleyer to'liq
+        // ekran) paytda ham o'zgarmaydi. MIUI ba'zan Flutter'ga 0 beradi —
+        // ilova buni zaxira sifatida ishlatadi. Fizik pikselda.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "aru/insets")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "navBottom" -> result.success(navBottomPx())
+                    else -> result.notImplemented()
+                }
+            }
+
         // ── QURILMA XOTIRASI ("Xotiradan foydalanish" oynasi) ──
         //
         // Telegram'dagi `CacheControlActivity` sarlavhasi: "ilova
@@ -256,6 +269,23 @@ class MainActivity : FlutterActivity() {
         // `aru/storage` kanali ham bor edi; profil sahifasidan
         // "telefon xotirasi N% band" qatori olib tashlangach
         // (foydalanuvchi talabi) u ham keraksiz bo'lib qoldi.
+    }
+
+    private fun navBottomPx(): Int {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return 0
+        return try {
+            val insets = window.decorView.rootWindowInsets ?: return 0
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                insets.getInsetsIgnoringVisibility(
+                    android.view.WindowInsets.Type.navigationBars()
+                ).bottom
+            } else {
+                @Suppress("DEPRECATION")
+                insets.stableInsetBottom
+            }
+        } catch (e: Throwable) {
+            0
+        }
     }
 
     /// APK imzo sertifikatining SHA-256 hash'i (base64).
