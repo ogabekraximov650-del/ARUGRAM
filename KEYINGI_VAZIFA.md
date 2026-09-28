@@ -3916,3 +3916,11 @@ birinchi urinish (`attempts == 1`) bo'lsa +1. Chegara to'lganda `claim` va
 `peek` faqat yarim qolgan (ijarasi o'tgan `running`) ishni beradi,
 `encode_kick` Actions'ni ishga tushirmaydi — qolganlar ertaga 00:00 dan
 keyin cron bilan o'zi boshlanadi. Botdagi "Holat": "Bugun: N/10".
+
+**Tuzatish: kodlangan sifat/yangi qism ilovada ko'rinmasdi, asl video
+yo'qolmasdi.** Chekka kesh faqat YOZUV bo'lgan data-markazda tozalanadi;
+sifatni GitHub Actions (AQSh), yangi qismni kodlash boti (Telegram serveri)
+yozadi — foydalanuvchi yaqinidagi kesh 1 soat eski turardi. Endi
+`/api/epizods/` ro'yxati chekkada 5 daqiqa, kodlanayotgan qism bo'lsa
+(`"origin_video":"orig_` javobda) — 1 daqiqa. Kesh kaliti `-v2` (eski
+yozuvlar bekor).

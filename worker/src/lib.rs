@@ -3236,12 +3236,15 @@ const EDGE_CACHE_SECONDS: u64 = 3600;
 
 /// Ro'yxat keshining kaliti. So'rov satri (query) ham kalitga
 /// kiradi — ya'ni turli filtrlar aralashib ketmaydi.
+///
+/// `-v2`: qismlar ro'yxati qisqa keshlanadigan bo'lgach (2026-09-28)
+/// 1 soatlik eski yozuvlar bir martada bekor qilindi.
 fn list_cache_url(path: &str, query: Option<&str>) -> String {
     match query {
         Some(q) if !q.is_empty() => {
-            format!("https://fulutter-list-cache.internal{path}?{q}")
+            format!("https://fulutter-list-cache-v2.internal{path}?{q}")
         }
-        _ => format!("https://fulutter-list-cache.internal{path}"),
+        _ => format!("https://fulutter-list-cache-v2.internal{path}"),
     }
 }
 
@@ -11343,6 +11346,25 @@ async fn main(req: Request, env: Env, ctx: Context) -> Result<Response> {
     // 3) Yangi ro'yxat javobi keshga yoziladi.
     if cacheable && resp.status_code() == 200 {
         let bytes = resp.bytes().await?;
+        // ── QISMLAR RO'YXATI QISQAROQ KESHLANADI ──────────────
+        //
+        // TOPILGAN XATO (foydalanuvchi: "4-qism 720p tayyor bo'ldi,
+        // lekin ilovada hech narsa yo'q"): kesh FAQAT o'sha data-markazda
+        // tozalanadi. Kodlangan sifatni GitHub Actions (AQSh), yangi
+        // qismni kodlash boti (Telegram serveri) yozadi — ya'ni
+        // foydalanuvchi yaqinidagi keshga tegilmaydi va eski ro'yxat
+        // 1 soatgacha turib qolardi.
+        //
+        // Endi qismlar ro'yxati chekkada 5 daqiqa, kodlanayotgan qismi
+        // bo'lsa (`origin_video` bor) — 1 daqiqa turadi. Anime/bo'lim
+        // ro'yxatlari avvalgidek 1 soat.
+        let edge_ttl = if path.starts_with("/api/epizods/") {
+            let pat: &[u8] = b"\"origin_video\":\"orig_";
+            let encoding = bytes.windows(pat.len()).any(|w| w == pat);
+            if encoding { 60 } else { 300 }
+        } else {
+            cache_seconds(&path).max(EDGE_CACHE_SECONDS)
+        };
         if let Ok(k) = Request::new(&key_url, Method::Get) {
             if let Ok(mut to_cache) = Response::from_bytes(bytes.clone()) {
                 set_cors(&mut to_cache);
@@ -11350,7 +11372,7 @@ async fn main(req: Request, env: Env, ctx: Context) -> Result<Response> {
                 let _ = h.set("Content-Type", "application/json");
                 let _ = h.set(
                     "Cache-Control",
-                    &format!("public, max-age={}", cache_seconds(&path).max(EDGE_CACHE_SECONDS)),
+                    &format!("public, max-age={edge_ttl}"),
                 );
                 let _ = Cache::default().put(&k, to_cache).await;
             }
