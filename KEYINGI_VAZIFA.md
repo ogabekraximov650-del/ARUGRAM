@@ -3882,3 +3882,9 @@ bo'lmasa va GitHub'da `encode.yml` run'i kutmayotgan/ishlamayotgan
 bo'lsa — `workflow_dispatch` (`GH_ACTIONS_TOKEN`, repo `GH_REPO` yoki
 `ogabekraximov650-del/ARUGRAM`). Ishga tushirilganda adminga xabar,
 xato bo'lsa soatiga bir marta. Navbatga qo'yilganda ham darhol chaqiriladi.
+
+**Kodlash tugagach tozalash** (`/api/encode/finish`, foydalanuvchi talabi):
+asl video ustunlari (`origin_video/key/size/height`) tozalanadi, `encode_jobs`
+qatori O'CHIRILADI (ilovadagi "Tayyor" belgisi endi chiqmaydi), `tg_files`
+qatori va kanal posti o'chadi (`tg_forget_file`; asosiy bot o'chira olmasa —
+kodlash boti).

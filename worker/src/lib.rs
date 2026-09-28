@@ -9756,7 +9756,12 @@ async fn tg_forget_file(env: &Env, value: &str) {
     };
     let channel = tg_channel_id(env);
     if channel != 0 {
-        let _ = tg_api(env, "deleteMessage", json!({"chat_id": channel, "message_id": msg_id})).await;
+        let body = json!({"chat_id": channel, "message_id": msg_id});
+        // Post kodlash botiniki bo'lsa-yu, asosiy botda o'chirish huquqi
+        // bo'lmasa — kodlash botining o'zi o'chiradi.
+        if tg_api(env, "deleteMessage", body.clone()).await.is_err() && !encbot_token(env).is_empty() {
+            let _ = encbot_api(env, "deleteMessage", body).await;
+        }
     }
     let _ = turso_batch(env, &[
         ("DELETE FROM tg_files WHERE file_name=?", vec![TursoArg::text(name)]),
@@ -10217,17 +10222,18 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
             vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]).await.ok()
             .and_then(|r| first_row(&r)).and_then(|r| r["epizod_number"].as_i64()).unwrap_or(0);
         if b["ok"].as_bool() == Some(true) && !done.is_empty() {
-            turso_exec(env,
-                "UPDATE encode_jobs SET state='done', runner='', lease_until=0, error=''
-                  WHERE anime_id=? AND season_id=? AND epizod_id=? AND queued_at=?", pk()).await?;
-            // Hamma sifat tayyor — asl video kanaldan va bazadan o'chadi
-            // (foydalanuvchi talabi).
+            // Hamma sifat tayyor — asl video va unga tegishli HAMMA narsa
+            // o'chadi (foydalanuvchi talabi): qism yozuvidagi asl video
+            // ustunlari, navbatdagi ish yozuvi, `tg_files` qatori va
+            // yopiq kanaldagi post.
             let origin = job["origin"].as_str().unwrap_or("").to_string();
+            turso_batch(env, &[
+                ("UPDATE epizod_db SET origin_video='', origin_key='', origin_size=0, origin_height=0
+                   WHERE anime_id=? AND season_id=? AND epizod_id=? AND origin_video=?",
+                 vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e), TursoArg::text(&origin)]),
+                ("DELETE FROM encode_jobs WHERE anime_id=? AND season_id=? AND epizod_id=? AND queued_at=?", pk()),
+            ]).await?;
             if origin.starts_with("orig_") {
-                let _ = turso_exec(env,
-                    "UPDATE epizod_db SET origin_video='', origin_key=''
-                      WHERE anime_id=? AND season_id=? AND epizod_id=? AND origin_video=?",
-                    vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e), TursoArg::text(&origin)]).await;
                 tg_forget_file(env, &origin).await;
             }
             encbot_purge(a, s, e).await;
