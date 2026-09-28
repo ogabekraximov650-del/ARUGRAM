@@ -909,6 +909,17 @@ async fn init_db(env: &Env) -> bool {
         }
         config_put(env, "mig_origin_key", "1").await;
     }
+    // Asl videoning hajmi va balandligi — sifatlar tayyor bo'lguncha
+    // ilovada asl video ko'rsatiladi (`with_origin`).
+    if ok && config_get(env, "mig_origin_meta").await.is_none() {
+        for sql in [
+            "ALTER TABLE epizod_db ADD COLUMN origin_size INTEGER DEFAULT 0",
+            "ALTER TABLE epizod_db ADD COLUMN origin_height INTEGER DEFAULT 0",
+        ] {
+            let _ = turso_exec(env, sql, vec![]).await;
+        }
+        config_put(env, "mig_origin_meta", "1").await;
+    }
 
     ok
 }
@@ -3114,6 +3125,46 @@ fn hide_keys(mut obj: Value) -> Value {
     obj
 }
 
+/// Asl video qaysi sifat o'rnida ko'rsatiladi — balandligi bo'yicha
+/// (noma'lum bo'lsa 720p).
+fn origin_slot(height: i64) -> &'static str {
+    match height {
+        h if h >= 900 => "1080p",
+        h if h >= 600 => "720p",
+        h if h >= 420 => "480p",
+        h if h > 0 => "360p",
+        _ => "720p",
+    }
+}
+
+/// SIFATLAR TAYYOR BO'LGUNCHA ASL VIDEO (foydalanuvchi talabi).
+///
+/// Qism avto-kodlashda turgan paytda (`origin_video` bor) asl video
+/// o'z balandligiga mos BO'SH sifat o'rnida beriladi — ilova uni
+/// oddiy sifat kabi ochadi (pleyer, yuklab olish), ilovaga o'zgartirish
+/// kerak emas. Kodlangan sifat yozilgach (`/api/encode/quality`) o'sha
+/// o'rin haqiqiy faylga o'tadi, hammasi tayyor bo'lgach (`finish`)
+/// `origin_video` tozalanadi va asl video ro'yxatdan yo'qoladi.
+///
+/// Bazaga hech narsa yozilmaydi — faqat javobda. Tahrirlash oynasi
+/// shu qiymatni qaytarib yuborsa, PUT uni e'tiborsiz qoldiradi.
+fn with_origin(mut obj: Value) -> Value {
+    let origin = obj["origin_video"].as_str().unwrap_or("").trim().to_string();
+    if origin.is_empty() {
+        return obj;
+    }
+    let q = origin_slot(jint(&obj, "origin_height"));
+    let size = jint(&obj, "origin_size");
+    if let Some(m) = obj.as_object_mut() {
+        let empty = m.get(&format!("url_{q}")).and_then(|v| v.as_str()).map(|v| v.is_empty()).unwrap_or(true);
+        if empty {
+            m.insert(format!("url_{q}"), json!(origin));
+            m.insert(format!("size_{q}"), json!(size));
+        }
+    }
+    obj
+}
+
 /// `epizod_db` dagi intro ustunlari soni — 5 ta juftlik.
 const INTRO_SLOTS: usize = 10;
 
@@ -3374,6 +3425,12 @@ async fn config_put(env: &Env, key: &str, value: &str) {
 
 async fn tg_api(env: &Env, method: &str, body: Value) -> Result<Value> {
     let token = env.secret("TELEGRAM_BOT_TOKEN")?.to_string();
+    tg_api_tok(&token, method, body).await
+}
+
+/// Bot API chaqiruvi — istalgan bot tokeni bilan (asosiy bot yoki
+/// kodlash boti, `encbot_*`).
+async fn tg_api_tok(token: &str, method: &str, body: Value) -> Result<Value> {
     let h = Headers::new();
     h.set("Content-Type", "application/json")?;
     let req = Request::new_with_init(
@@ -9736,6 +9793,11 @@ async fn tg_channel_post(env: &Env, post: &Value) {
         // Kanal xabari almashdi — eski nusxalar endi boshqa faylni
         // ko'rsatishi mumkin, qayta yuboriladi.
     ]).await;
+    // Asl videolarni kodlash boti o'zi kanalga qo'yadi va o'zi xabar
+    // beradi (`encbot_video`) — ikkinchi xabar ortiqcha.
+    if res.is_ok() && name.starts_with("orig_") {
+        return;
+    }
     let text = if res.is_ok() {
         format!("\u{2705} <code>{}</code> \u{2192} kanal posti #{msg_id}", html_escape(name))
     } else {
@@ -9888,9 +9950,11 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
             vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e), TursoArg::text(&origin), TursoArg::int(now)]
         };
         turso_batch(env, &[
-            ("UPDATE epizod_db SET origin_video=?, origin_key=CASE WHEN ?<>'' THEN ? ELSE origin_key END
+            ("UPDATE epizod_db SET origin_video=?, origin_key=CASE WHEN ?<>'' THEN ? ELSE origin_key END,
+                  origin_size=?, origin_height=?
                WHERE anime_id=? AND season_id=? AND epizod_id=?",
              vec![TursoArg::text(&origin), TursoArg::text(&okey), TursoArg::text(&okey),
+                  TursoArg::int(jint(&b, "size").max(0)), TursoArg::int(jint(&b, "height").max(0)),
                   TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]),
             (job_sql, job_args),
             ("UPDATE encode_jobs SET origin_key=CASE WHEN ?<>'' THEN ? ELSE origin_key END
@@ -9898,9 +9962,12 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
              vec![TursoArg::text(&okey), TursoArg::text(&okey),
                   TursoArg::int(a), TursoArg::int(s), TursoArg::int(e), TursoArg::text(&origin)]),
         ]).await?;
+        encbot_purge(a, s, e).await;
         let n = turso_exec(env,
             "SELECT COUNT(*) AS n FROM encode_jobs WHERE state IN ('queued','running')", vec![]).await?;
         let n = first_row(&n).and_then(|r| r["n"].as_i64()).unwrap_or(1);
+        // Actions'ni kutmasdan ishga tushirish (cron ham har 10 daqiqada).
+        encode_kick(env).await;
         return ok(json!({"ok": true, "state": "queued", "in_queue": n}));
     }
 
@@ -10139,7 +10206,7 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
         if !old.is_empty() && old != file {
             tg_forget_file(env, &old).await;
         }
-        purge_list_cache(&format!("/api/epizods/{a}/{s}/{e}")).await;
+        encbot_purge(a, s, e).await;
         return ok(json!({"ok": true, "done": done}));
     }
 
@@ -10163,6 +10230,7 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
                     vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e), TursoArg::text(&origin)]).await;
                 tg_forget_file(env, &origin).await;
             }
+            encbot_purge(a, s, e).await;
             encode_notify(env, &format!(
                 "\u{2705} Kodlandi: anime #{a}, bo'lim #{s}, {num}-qism — {}", done.join(", "))).await;
             return ok(json!({"ok": true}));
@@ -10182,6 +10250,611 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
     }
 
     err404("topilmadi")
+}
+
+// ══════════════════════════════════════════════════════════════
+//  KODLASH BOTI (ikkinchi Telegram bot) VA AVTO-ISHGA TUSHIRISH
+// ══════════════════════════════════════════════════════════════
+//
+// TALAB (foydalanuvchi): "workerga yana bitta telegram bot ulash
+// kerak — bu botda faqat anime va bo'limi qo'shilgan animelarga
+// avto-kodlash uchun qism qo'shsa bo'ladigan qil"; "qism raqamini
+// so'rasin"; "qism bor bo'lsa qayta kodlansin, qismlarni almashtirsa
+// bo'ladigan qil"; "sifatlar tayyor bo'lmaguncha original fayldan
+// ko'rsatilib tursin"; "cron har 10 daqiqada navbatni va Actions
+// ishlayotganini tekshirsin".
+//
+// BOT (`ENCODE_BOT_TOKEN`, webhook `/api/telegram/encode-bot`):
+//   * faqat admin (`ADMIN_TELEGRAM_ID`) — boshqalarga javob yo'q;
+//   * yangi anime yoki bo'lim YARATMAYDI: ro'yxatda faqat kamida
+//     bitta bo'limi bor animelar;
+//   * /start -> anime -> bo'lim -> qism raqami -> video. Holat bazaga
+//     YOZILMAYDI: har qadam bot xabaridagi `ID: a/s[/n]` qatorida
+//     turadi va keyingi qadam o'sha xabarga JAVOB (reply) bo'ladi;
+//   * video kanalga `copyMessage` bilan ko'chadi (fayl worker'dan
+//     o'tmaydi, hajm chegarasi yo'q). Bot kanalda ADMIN bo'lishi shart;
+//   * qism bor bo'lsa — ALMASHTIRILADI: eski sifatlar o'chadi, yangi
+//     asl video navbatga qo'yiladi. Kodlanguncha ilovada asl video
+//     ko'rsatiladi (`with_origin`).
+//
+// Asl video botga oddiy Telegram fayli bo'lib keladi — ilova
+// yuklaydiganidek shifrlanmaydi (bot faylni o'qimaydi, faqat
+// ko'chiradi). U faqat kodlanguncha turadi va `finish` da o'chadi.
+//
+// CRON (har 10 daqiqa, `encode_kick`): navbatda ish bor-u, hech bir
+// run uni ushlab turmagan bo'lsa (ijara yo'q yoki eskirgan) va
+// GitHub'da `encode.yml` ishlamayotgan/kutmayotgan bo'lsa — uni
+// `workflow_dispatch` bilan ishga tushiradi. Kerak: `GH_ACTIONS_TOKEN`
+// (fine-grained, shu repo, "Actions: Read and write").
+
+const ENCBOT_PATH: &str = "/api/telegram/encode-bot";
+/// Anime ro'yxatining bir sahifasi.
+const ENCBOT_PAGE: i64 = 10;
+/// Asosiy repo — `GH_REPO` secret'i bilan almashtirsa bo'ladi.
+const GH_REPO_DEFAULT: &str = "ogabekraximov650-del/ARUGRAM";
+const GH_WORKFLOW: &str = "encode.yml";
+
+fn encbot_token(env: &Env) -> String {
+    tg_secret(env, "ENCODE_BOT_TOKEN")
+}
+
+async fn encbot_api(env: &Env, method: &str, body: Value) -> Result<Value> {
+    let token = encbot_token(env);
+    if token.is_empty() {
+        return Err(Error::RustError("ENCODE_BOT_TOKEN yo'q".into()));
+    }
+    tg_api_tok(&token, method, body).await
+}
+
+async fn encbot_send(env: &Env, chat: i64, text: &str, markup: Option<Value>) {
+    let mut body = json!({
+        "chat_id": chat, "text": text, "parse_mode": "HTML",
+        "disable_web_page_preview": true,
+    });
+    if let Some(m) = markup {
+        body["reply_markup"] = m;
+    }
+    let _ = encbot_api(env, "sendMessage", body).await;
+}
+
+/// Tugma bosilganda xabarni o'rnida almashtiradi (chat to'lib ketmasin).
+async fn encbot_edit(env: &Env, chat: i64, msg_id: i64, text: &str, markup: Option<Value>) {
+    let mut body = json!({
+        "chat_id": chat, "message_id": msg_id, "text": text,
+        "parse_mode": "HTML", "disable_web_page_preview": true,
+    });
+    if let Some(m) = markup {
+        body["reply_markup"] = m;
+    }
+    let _ = encbot_api(env, "editMessageText", body).await;
+}
+
+/// Javob so'raladigan xabar (Telegram javob maydonini o'zi ochadi).
+fn encbot_force_reply(hint: &str) -> Value {
+    json!({"force_reply": true, "input_field_placeholder": hint})
+}
+
+/// Qism o'zgargach eskirgan ro'yxat keshlari.
+async fn encbot_purge(a: i64, s: i64, e: i64) {
+    purge_list_cache(&format!("/api/epizods/{a}/{s}/{e}")).await;
+    purge_list_cache(&format!("/api/seasons/{a}/{s}")).await;
+    if let Ok(k) = Request::new(&list_cache_url(&format!("/api/epizods/{a}/{s}/{e}"), None), Method::Get) {
+        let _ = Cache::default().delete(&k, false).await;
+    }
+}
+
+fn rows_of(res: &Value) -> Vec<Value> {
+    let cols = res["cols"].as_array().cloned().unwrap_or_default();
+    res["rows"].as_array().cloned().unwrap_or_default().iter()
+        .map(|r| row_to_obj(&cols, r.as_array().unwrap_or(&vec![])))
+        .collect()
+}
+
+/// Bot xabaridagi `ID: 3/2` yoki `ID: 3/2/5` qatori.
+fn encbot_marker(text: &str) -> Vec<i64> {
+    text.lines()
+        .filter_map(|l| l.trim().strip_prefix("ID:"))
+        .map(|r| r.trim().split('/').filter_map(|p| p.trim().parse::<i64>().ok()).collect::<Vec<_>>())
+        .find(|v| v.len() == 2 || v.len() == 3)
+        .unwrap_or_default()
+}
+
+/// Qism raqamlari qisqa ko'rinishda: `1–12, 14, 20–21`.
+fn number_ranges(nums: &[i64]) -> String {
+    let mut out: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < nums.len() {
+        let start = nums[i];
+        let mut end = start;
+        while i + 1 < nums.len() && nums[i + 1] == end + 1 {
+            i += 1;
+            end = nums[i];
+        }
+        out.push(if start == end { start.to_string() } else { format!("{start}\u{2013}{end}") });
+        i += 1;
+    }
+    if out.is_empty() { "yo'q".to_string() } else { out.join(", ") }
+}
+
+async fn encbot_titles(env: &Env, a: i64, s: i64) -> Option<(String, String)> {
+    let res = turso_many(env, &[
+        ("SELECT name FROM anime_db WHERE id=?", vec![TursoArg::int(a)]),
+        ("SELECT nomi, bolim_id FROM season_db WHERE anime_id=? AND season_id=?",
+         vec![TursoArg::int(a), TursoArg::int(s)]),
+    ]).await.ok()?;
+    let anime = first_row(res.first()?)?;
+    let season = first_row(res.get(1)?)?;
+    let an = anime["name"].as_str().unwrap_or("").trim().to_string();
+    let sn = season["nomi"].as_str().unwrap_or("").trim().to_string();
+    let bid = jint(&season, "bolim_id");
+    let sn = if sn.is_empty() { format!("{bid}-bo'lim") } else { format!("{bid}-bo'lim: {sn}") };
+    Some((if an.is_empty() { format!("#{a}") } else { an }, sn))
+}
+
+/// 1-qadam: bo'limi bor animelar ro'yxati.
+async fn encbot_anime_page(env: &Env, page: i64) -> (String, Value) {
+    let page = page.max(0);
+    let res = turso_exec(env,
+        "SELECT a.id, a.name FROM anime_db a
+          WHERE EXISTS (SELECT 1 FROM season_db s WHERE s.anime_id=a.id)
+          ORDER BY a.id DESC LIMIT ? OFFSET ?",
+        vec![TursoArg::int(ENCBOT_PAGE + 1), TursoArg::int(page * ENCBOT_PAGE)]).await;
+    let rows = res.map(|r| rows_of(&r)).unwrap_or_default();
+    if rows.is_empty() && page == 0 {
+        return ("Bo'limi qo'shilgan anime yo'q. Avval ilovada anime va bo'lim qo'shing.".into(), json!({"inline_keyboard": []}));
+    }
+    let mut kb: Vec<Value> = rows.iter().take(ENCBOT_PAGE as usize).map(|r| {
+        let id = jint(r, "id");
+        let name: String = r["name"].as_str().unwrap_or("").chars().take(60).collect();
+        json!([{"text": if name.is_empty() { format!("#{id}") } else { name }, "callback_data": format!("a:{id}")}])
+    }).collect();
+    let mut nav = Vec::new();
+    if page > 0 {
+        nav.push(json!({"text": "\u{2B05}\u{FE0F} Oldingi", "callback_data": format!("p:{}", page - 1)}));
+    }
+    if rows.len() as i64 > ENCBOT_PAGE {
+        nav.push(json!({"text": "Keyingi \u{27A1}\u{FE0F}", "callback_data": format!("p:{}", page + 1)}));
+    }
+    if !nav.is_empty() {
+        kb.push(json!(nav));
+    }
+    ("\u{1F3AC} Qaysi animega qism qo'shiladi?".into(), json!({"inline_keyboard": kb}))
+}
+
+/// 2-qadam: animening bo'limlari.
+async fn encbot_seasons(env: &Env, a: i64) -> (String, Value) {
+    let res = turso_many(env, &[
+        ("SELECT name FROM anime_db WHERE id=?", vec![TursoArg::int(a)]),
+        ("SELECT season_id, bolim_id, nomi, epizod_count FROM season_db WHERE anime_id=? ORDER BY season_id ASC",
+         vec![TursoArg::int(a)]),
+    ]).await;
+    let Ok(res) = res else {
+        return ("\u{274C} Baza xatosi, qayta urinib ko'ring.".into(), json!({"inline_keyboard": []}));
+    };
+    let name = res.first().and_then(first_row)
+        .and_then(|r| r["name"].as_str().map(String::from)).unwrap_or_default();
+    let seasons = res.get(1).map(rows_of).unwrap_or_default();
+    let back = json!([{"text": "\u{2B05}\u{FE0F} Animelar", "callback_data": "p:0"}]);
+    if seasons.is_empty() {
+        return ("Bu animeda bo'lim yo'q.".into(), json!({"inline_keyboard": [back]}));
+    }
+    let mut kb: Vec<Value> = seasons.iter().map(|r| {
+        let sid = jint(r, "season_id");
+        let nomi: String = r["nomi"].as_str().unwrap_or("").chars().take(50).collect();
+        let label = format!("{}-bo'lim{} ({} qism)", jint(r, "bolim_id"),
+            if nomi.is_empty() { String::new() } else { format!(": {nomi}") }, jint(r, "epizod_count"));
+        json!([{"text": label, "callback_data": format!("s:{a}:{sid}")}])
+    }).collect();
+    kb.push(back);
+    (format!("<b>{}</b>\nQaysi bo'lim?", html_escape(&name)), json!({"inline_keyboard": kb}))
+}
+
+/// 3-qadam: qism raqamini so'rash.
+async fn encbot_ask_number(env: &Env, chat: i64, a: i64, s: i64) {
+    let Some((an, sn)) = encbot_titles(env, a, s).await else {
+        encbot_send(env, chat, "\u{274C} Anime yoki bo'lim topilmadi.", None).await;
+        return;
+    };
+    let nums: Vec<i64> = turso_exec(env,
+        "SELECT epizod_number FROM epizod_db WHERE anime_id=? AND season_id=? ORDER BY epizod_number ASC",
+        vec![TursoArg::int(a), TursoArg::int(s)]).await
+        .map(|r| rows_of(&r).iter().map(|x| jint(x, "epizod_number")).collect())
+        .unwrap_or_default();
+    let next = nums.iter().max().copied().unwrap_or(0) + 1;
+    encbot_send(env, chat, &format!(
+        "<b>{}</b>\n{}\nMavjud qismlar: {}\n\nQism raqamini shu xabarga JAVOB qilib yozing \
+         (masalan <code>{next}</code>). Bor raqam yozilsa — qism almashtiriladi.\n\nID: {a}/{s}",
+        html_escape(&an), html_escape(&sn), number_ranges(&nums)),
+        Some(encbot_force_reply(&format!("Qism raqami, masalan {next}")))).await;
+}
+
+/// 4-qadam: raqam keldi — video so'raladi.
+async fn encbot_ask_video(env: &Env, chat: i64, a: i64, s: i64, n: i64) {
+    let Some((an, sn)) = encbot_titles(env, a, s).await else {
+        encbot_send(env, chat, "\u{274C} Anime yoki bo'lim topilmadi.", None).await;
+        return;
+    };
+    let exists = turso_exec(env,
+        "SELECT epizod_id FROM epizod_db WHERE anime_id=? AND season_id=? AND epizod_number=? LIMIT 1",
+        vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(n)]).await
+        .ok().and_then(|r| first_row(&r)).is_some();
+    let what = if exists {
+        "\u{26A0}\u{FE0F} Bu qism BOR — yangi video bilan ALMASHTIRILADI (eski sifatlar o'chadi)."
+    } else {
+        "Yangi qism qo'shiladi."
+    };
+    encbot_send(env, chat, &format!(
+        "<b>{}</b>\n{}\n<b>{n}-qism.</b> {what}\n\nAsl videoni shu xabarga JAVOB qilib yuboring \
+         (video yoki fayl).\n\nID: {a}/{s}/{n}",
+        html_escape(&an), html_escape(&sn)),
+        Some(encbot_force_reply("Videoni yuboring"))).await;
+}
+
+/// 5-qadam: video keldi — kanalga, qism yozuviga va navbatga.
+async fn encbot_video(env: &Env, msg: &Value, a: i64, s: i64, n: i64) {
+    let chat = msg["chat"]["id"].as_i64().unwrap_or(0);
+    let msg_id = msg["message_id"].as_i64().unwrap_or(0);
+    let (media, is_video) = if msg["video"].is_object() {
+        (&msg["video"], true)
+    } else {
+        (&msg["document"], false)
+    };
+    let mime = media["mime_type"].as_str().unwrap_or("").to_ascii_lowercase();
+    let fname = media["file_name"].as_str().unwrap_or("").to_ascii_lowercase();
+    let ext = fname.rsplit_once('.').map(|(_, e)| e.to_string()).unwrap_or_default();
+    let video_ext = ["mp4", "mkv", "mov", "avi", "webm", "m4v", "ts"];
+    if !is_video && !mime.starts_with("video/") && !video_ext.contains(&ext.as_str()) {
+        encbot_send(env, chat, "\u{274C} Bu video emas. Video faylni yuboring.", None).await;
+        return;
+    }
+    let ext = if video_ext.contains(&ext.as_str()) { ext } else { "mp4".to_string() };
+    let size = media["file_size"].as_i64().unwrap_or(0).max(0);
+    let height = media["height"].as_i64().unwrap_or(0).max(0);
+    let channel = tg_channel_id(env);
+    if channel == 0 {
+        encbot_send(env, chat, "\u{274C} TG_CHANNEL_ID sozlanmagan.", None).await;
+        return;
+    }
+    if encbot_titles(env, a, s).await.is_none() {
+        encbot_send(env, chat, "\u{274C} Anime yoki bo'lim topilmadi (o'chirilgan bo'lishi mumkin).", None).await;
+        return;
+    }
+    let now = now_ms();
+    let origin = format!("orig_bot_{a}_{s}_{n}_{now}.{ext}");
+    // Kanalga NUSXA (fayl qayta yuklanmaydi). Izoh = fayl nomi.
+    let copied = encbot_api(env, "copyMessage", json!({
+        "chat_id": channel, "from_chat_id": chat, "message_id": msg_id,
+        "caption": origin, "disable_notification": true,
+    })).await;
+    let ch_msg = match copied {
+        Ok(c) => c["message_id"].as_i64().unwrap_or(0),
+        Err(e) => {
+            encbot_send(env, chat, &format!(
+                "\u{274C} Kanalga ko'chirib bo'lmadi: <code>{}</code>\nBot yopiq kanalda ADMIN ekanini tekshiring.",
+                html_escape(&e.to_string())), None).await;
+            return;
+        }
+    };
+    if ch_msg <= 0 {
+        encbot_send(env, chat, "\u{274C} Kanalga ko'chirib bo'lmadi.", None).await;
+        return;
+    }
+    let _ = turso_exec(env,
+        "INSERT INTO tg_files (file_name, msg_id, file_key) VALUES (?, ?, '')
+         ON CONFLICT(file_name) DO UPDATE SET msg_id=excluded.msg_id",
+        vec![TursoArg::text(&origin), TursoArg::int(ch_msg)]).await;
+
+    // Qism bormi (raqami bo'yicha).
+    let old = turso_exec(env,
+        "SELECT * FROM epizod_db WHERE anime_id=? AND season_id=? AND epizod_number=? LIMIT 1",
+        vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(n)]).await
+        .ok().and_then(|r| first_row(&r));
+    let replaced = old.is_some();
+    let e = match &old {
+        Some(ep) => {
+            let e = jint(ep, "epizod_id");
+            let r = turso_exec(env,
+                "UPDATE epizod_db SET url_360p='',size_360p=0,key_360p='',url_480p='',size_480p=0,key_480p='',
+                    url_720p='',size_720p=0,key_720p='',url_1080p='',size_1080p=0,key_1080p='',
+                    origin_video=?, origin_key='', origin_size=?, origin_height=?
+                  WHERE anime_id=? AND season_id=? AND epizod_id=?",
+                vec![TursoArg::text(&origin), TursoArg::int(size), TursoArg::int(height),
+                     TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]).await;
+            if r.is_err() {
+                encbot_send(env, chat, "\u{274C} Qismni yangilab bo'lmadi (baza xatosi).", None).await;
+                return;
+            }
+            // Almashtirilgan sifatlar va eski asl video kanaldan o'chadi.
+            for q in QUALITIES {
+                let u = ep[format!("url_{q}").as_str()].as_str().unwrap_or("");
+                if !u.is_empty() {
+                    b2_delete(env, u).await;
+                }
+            }
+            let ov = ep["origin_video"].as_str().unwrap_or("");
+            if ov.starts_with("orig_") && ov != origin {
+                tg_forget_file(env, ov).await;
+            }
+            e
+        }
+        None => {
+            let Ok(e) = next_epizod_id(env).await else {
+                encbot_send(env, chat, "\u{274C} Baza xatosi.", None).await;
+                return;
+            };
+            let r = turso_batch(env, &[
+                ("INSERT INTO epizod_db (anime_id,season_id,epizod_id,epizod_number,epizod_name,
+                    url_360p,size_360p,key_360p,url_480p,size_480p,key_480p,
+                    url_720p,size_720p,key_720p,url_1080p,size_1080p,key_1080p,
+                    intro_1,intro_2,intro_3,intro_4,intro_5,intro_6,intro_7,intro_8,intro_9,intro_10,
+                    created_at,origin_video,origin_key,origin_size,origin_height)
+                  VALUES (?,?,?,?,'','',0,'','',0,'','',0,'','',0,'','','','','','','','','','','',?,?,'',?,?)",
+                 vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e), TursoArg::int(n),
+                      TursoArg::int(now), TursoArg::text(&origin), TursoArg::int(size), TursoArg::int(height)]),
+                ("UPDATE season_db SET epizod_count=(SELECT COUNT(*) FROM epizod_db WHERE anime_id=? AND season_id=?)
+                   WHERE anime_id=? AND season_id=?",
+                 vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(a), TursoArg::int(s)]),
+            ]).await;
+            if r.is_err() {
+                encbot_send(env, chat, "\u{274C} Qism qo'shib bo'lmadi (baza xatosi).", None).await;
+                return;
+            }
+            e
+        }
+    };
+    // Navbat: bor ish (ishlayotgan bo'lsa ham) yangisiga almashadi —
+    // eski run'ning keyingi yozuvlari 409 bilan rad etiladi.
+    let q = turso_exec(env,
+        "INSERT INTO encode_jobs (anime_id,season_id,epizod_id,origin,queued_at,state,done,runner,lease_until,attempts,error,origin_key)
+         VALUES (?,?,?,?,?,'queued','','',0,0,'','')
+         ON CONFLICT(anime_id,season_id,epizod_id) DO UPDATE SET origin=excluded.origin,
+            queued_at=excluded.queued_at, state='queued', done='', runner='', lease_until=0,
+            attempts=0, error='', origin_key=''",
+        vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e), TursoArg::text(&origin), TursoArg::int(now)]).await;
+    encbot_purge(a, s, e).await;
+    if q.is_err() {
+        encbot_send(env, chat, "\u{274C} Navbatga qo'yib bo'lmadi (baza xatosi). Videoni qayta yuboring.", None).await;
+        return;
+    }
+    let inq = turso_exec(env,
+        "SELECT COUNT(*) AS n FROM encode_jobs WHERE state IN ('queued','running')", vec![]).await
+        .ok().and_then(|r| first_row(&r)).map(|r| jint(&r, "n")).unwrap_or(1);
+    let kick = encode_kick(env).await;
+    encbot_send(env, chat, &format!(
+        "\u{2705} {n}-qism {} va kodlash navbatiga qo'yildi (navbatda {inq} ta).\n\
+         Sifatlar tayyor bo'lguncha ilovada asl video ko'rsatiladi.\n{kick}",
+        if replaced { "almashtirildi" } else { "qo'shildi" }), None).await;
+}
+
+async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
+    let got = req.headers().get("X-Telegram-Bot-Api-Secret-Token").ok().flatten().unwrap_or_default();
+    let want = config_get(env, "encbot_secret").await.unwrap_or_default();
+    if want.is_empty() || !ct_eq(&got, &want) {
+        return json_resp(&json!({"error": "forbidden"}), 403);
+    }
+    let update: Value = req.json().await.unwrap_or(json!({}));
+
+    // Tugma bosildi.
+    let cb = &update["callback_query"];
+    if cb.is_object() {
+        let _ = encbot_api(env, "answerCallbackQuery", json!({"callback_query_id": cb["id"]})).await;
+        if cb["from"]["id"].as_i64() != Some(ADMIN_TELEGRAM_ID) {
+            return ok(json!({"ok": true}));
+        }
+        let chat = cb["message"]["chat"]["id"].as_i64().unwrap_or(0);
+        let mid = cb["message"]["message_id"].as_i64().unwrap_or(0);
+        let data = cb["data"].as_str().unwrap_or("");
+        let parts: Vec<i64> = data.split(':').skip(1).filter_map(|p| p.parse().ok()).collect();
+        match (data.split(':').next().unwrap_or(""), parts.as_slice()) {
+            ("p", [page]) => {
+                let (t, kb) = encbot_anime_page(env, *page).await;
+                encbot_edit(env, chat, mid, &t, Some(kb)).await;
+            }
+            ("a", [a]) => {
+                let (t, kb) = encbot_seasons(env, *a).await;
+                encbot_edit(env, chat, mid, &t, Some(kb)).await;
+            }
+            ("s", [a, s]) => encbot_ask_number(env, chat, *a, *s).await,
+            _ => {}
+        }
+        return ok(json!({"ok": true}));
+    }
+
+    let msg = &update["message"];
+    let chat = msg["chat"]["id"].as_i64().unwrap_or(0);
+    // Faqat admin va faqat shaxsiy chat — boshqalarga javob yo'q.
+    if chat == 0 || msg["from"]["id"].as_i64() != Some(ADMIN_TELEGRAM_ID) || chat != ADMIN_TELEGRAM_ID {
+        return ok(json!({"ok": true}));
+    }
+    let reply = &msg["reply_to_message"];
+    let marker = if reply["from"]["is_bot"].as_bool() == Some(true) {
+        encbot_marker(reply["text"].as_str().unwrap_or(""))
+    } else {
+        Vec::new()
+    };
+    let has_video = msg["video"].is_object() || msg["document"].is_object();
+    let text = msg["text"].as_str().unwrap_or("").trim().to_string();
+
+    if has_video {
+        match marker.as_slice() {
+            [a, s, n] => encbot_video(env, msg, *a, *s, *n).await,
+            _ => encbot_send(env, chat,
+                "Videoni \u{201C}videoni yuboring\u{201D} xabariga JAVOB qilib yuboring. Boshlash: /start", None).await,
+        }
+        return ok(json!({"ok": true}));
+    }
+    if let [a, s] = marker.as_slice() {
+        match text.parse::<i64>() {
+            Ok(n) if (1..=100_000).contains(&n) => encbot_ask_video(env, chat, *a, *s, n).await,
+            _ => encbot_send(env, chat, "Qism raqamini son bilan yozing (masalan 5).",
+                Some(encbot_force_reply("Qism raqami"))).await,
+        }
+        return ok(json!({"ok": true}));
+    }
+    if text.starts_with("/holat") {
+        let res = turso_exec(env,
+            "SELECT state, COUNT(*) AS n FROM encode_jobs GROUP BY state", vec![]).await;
+        let lines: Vec<String> = res.map(|r| rows_of(&r)).unwrap_or_default().iter()
+            .map(|r| format!("{}: {}", r["state"].as_str().unwrap_or("?"), jint(r, "n"))).collect();
+        let kick = encode_kick(env).await;
+        encbot_send(env, chat, &format!("\u{1F4CB} Navbat:\n{}\n{kick}",
+            if lines.is_empty() { "bo'sh".to_string() } else { lines.join("\n") }), None).await;
+        return ok(json!({"ok": true}));
+    }
+    // /start va boshqa har qanday matn — anime ro'yxati.
+    let (t, kb) = encbot_anime_page(env, 0).await;
+    encbot_send(env, chat, &t, Some(kb)).await;
+    ok(json!({"ok": true}))
+}
+
+static ENCBOT_READY: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// Kodlash botining webhook'ini BIR MARTA o'rnatadi (asosiy botdagidek:
+/// belgi = bot ID + manzil; bot almashsa qayta o'rnatiladi).
+async fn ensure_encbot_webhook(env: &Env, origin: &str) {
+    use core::sync::atomic::Ordering;
+    if ENCBOT_READY.load(Ordering::Relaxed) || origin.is_empty() {
+        return;
+    }
+    let token = encbot_token(env);
+    let bot_id = token.split(':').next().unwrap_or("").to_string();
+    if bot_id.is_empty() {
+        return;
+    }
+    let url = format!("{origin}{ENCBOT_PATH}");
+    let want = format!("{bot_id}|{url}|v1");
+    if config_get(env, "encbot_webhook_for").await.as_deref() == Some(want.as_str()) {
+        ENCBOT_READY.store(true, Ordering::Relaxed);
+        return;
+    }
+    let secret = match config_get(env, "encbot_secret").await {
+        Some(s) if !s.is_empty() => s,
+        _ => {
+            let fresh = random_hex(48);
+            let _ = turso_exec(env,
+                "INSERT OR IGNORE INTO app_config (cfg_key,cfg_value) VALUES (?,?)",
+                vec![TursoArg::text("encbot_secret"), TursoArg::text(&fresh)]).await;
+            config_get(env, "encbot_secret").await.unwrap_or(fresh)
+        }
+    };
+    let res = tg_api_tok(&token, "setWebhook", json!({
+        "url": url,
+        "secret_token": secret,
+        "allowed_updates": ["message", "callback_query"],
+        "drop_pending_updates": true,
+    })).await;
+    if res.is_ok() {
+        let _ = tg_api_tok(&token, "setMyCommands", json!({"commands": [
+            {"command": "start", "description": "Qism qo'shish (anime tanlash)"},
+            {"command": "holat", "description": "Kodlash navbati holati"},
+        ]})).await;
+        config_put(env, "encbot_webhook_for", &want).await;
+        ENCBOT_READY.store(true, Ordering::Relaxed);
+    }
+}
+
+/// Worker manzili cron uchun (unda so'rov yo'q): asosiy bot webhook'i
+/// o'rnatilganda saqlangan manzildan.
+async fn worker_origin(env: &Env) -> String {
+    config_get(env, "tg_webhook_url").await
+        .and_then(|u| u.strip_suffix("/api/telegram/webhook").map(String::from))
+        .unwrap_or_default()
+}
+
+async fn gh_api(env: &Env, method: Method, path: &str, body: Option<Value>) -> Result<(u16, Value)> {
+    let token = tg_secret(env, "GH_ACTIONS_TOKEN");
+    if token.is_empty() {
+        return Err(Error::RustError("GH_ACTIONS_TOKEN yo'q".into()));
+    }
+    let h = Headers::new();
+    h.set("Authorization", &format!("Bearer {token}"))?;
+    h.set("Accept", "application/vnd.github+json")?;
+    h.set("X-GitHub-Api-Version", "2022-11-28")?;
+    h.set("User-Agent", "arugram-worker")?;
+    let mut init = RequestInit::new();
+    init.with_method(method).with_headers(h);
+    if let Some(b) = body {
+        init.with_body(Some(b.to_string().into()));
+    }
+    let req = Request::new_with_init(&format!("https://api.github.com{path}"), &init)?;
+    let mut r = Fetch::Request(req).send().await?;
+    let status = r.status_code();
+    let v: Value = r.json().await.unwrap_or(json!({}));
+    Ok((status, v))
+}
+
+/// Navbatda ish bo'lsa-yu, uni hech kim bajarmayotgan bo'lsa —
+/// `encode.yml` ni ishga tushiradi. Natija matni (bot xabari uchun).
+///
+/// Bazaga faqat O'QISH (bitta so'rov); Actions ishlayotgan bo'lsa
+/// GitHub'ga umuman borilmaydi.
+async fn encode_kick(env: &Env) -> String {
+    let now = now_ms();
+    let res = turso_exec(env,
+        "SELECT
+           (SELECT COUNT(*) FROM encode_jobs WHERE state='queued' OR (state='running' AND lease_until<=?)) AS pending,
+           (SELECT COUNT(*) FROM encode_jobs WHERE state='running' AND lease_until>?) AS active",
+        vec![TursoArg::int(now), TursoArg::int(now)]).await;
+    let Some(r) = res.ok().and_then(|r| first_row(&r)) else {
+        return "\u{26A0}\u{FE0F} Navbatni o'qib bo'lmadi.".into();
+    };
+    let (pending, active) = (jint(&r, "pending"), jint(&r, "active"));
+    if active > 0 {
+        return "\u{2699}\u{FE0F} Kodlash hozir ishlayapti.".into();
+    }
+    if pending == 0 {
+        return "Navbat bo'sh.".into();
+    }
+    let repo = match tg_secret(env, "GH_REPO") {
+        r if r.contains('/') => r,
+        _ => GH_REPO_DEFAULT.to_string(),
+    };
+    // Run allaqachon kutayotgan yoki ishga tushayotgan bo'lsa — ikkinchisi kerak emas.
+    for st in ["queued", "in_progress", "waiting", "requested", "pending"] {
+        match gh_api(env, Method::Get,
+            &format!("/repos/{repo}/actions/workflows/{GH_WORKFLOW}/runs?status={st}&per_page=1"), None).await {
+            Ok((200, v)) => {
+                if v["total_count"].as_i64().unwrap_or(0) > 0 {
+                    return "\u{23F3} Actions run allaqachon navbatda/ishlayapti.".into();
+                }
+            }
+            Ok((code, v)) => {
+                return format!("\u{26A0}\u{FE0F} GitHub javobi {code}: {}",
+                    html_escape(v["message"].as_str().unwrap_or("")));
+            }
+            Err(e) => return format!("\u{26A0}\u{FE0F} Actions avtomatik ishga tushmadi: {}", html_escape(&e.to_string())),
+        }
+    }
+    match gh_api(env, Method::Post,
+        &format!("/repos/{repo}/actions/workflows/{GH_WORKFLOW}/dispatches"),
+        Some(json!({"ref": "main"}))).await {
+        Ok((204, _)) => "\u{25B6}\u{FE0F} Avto-kodlash (Actions) ishga tushirildi.".into(),
+        Ok((code, v)) => format!("\u{26A0}\u{FE0F} Actions ishga tushmadi (GitHub {code}): {}",
+            html_escape(v["message"].as_str().unwrap_or(""))),
+        Err(e) => format!("\u{26A0}\u{FE0F} Actions ishga tushmadi: {}", html_escape(&e.to_string())),
+    }
+}
+
+/// CRON (har 10 daqiqa, `wrangler.toml`): navbat va Actions tekshiruvi.
+#[event(scheduled)]
+async fn scheduled(_ev: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
+    if !encbot_token(&env).is_empty() {
+        let origin = worker_origin(&env).await;
+        ensure_encbot_webhook(&env, &origin).await;
+    }
+    let msg = encode_kick(&env).await;
+    // Faqat ishga tushirilganda yoki xato bo'lsa adminga xabar. Xato
+    // (masalan token yo'q) har 10 daqiqada takrorlanmasin — soatiga bir.
+    let hourly = (now_ms() / 600_000) % 6 == 0;
+    if msg.starts_with('\u{25B6}') || (hourly && msg.starts_with('\u{26A0}')) {
+        let token = encbot_token(&env);
+        let body = json!({"chat_id": ADMIN_TELEGRAM_ID, "text": format!("Cron: {msg}"), "parse_mode": "HTML"});
+        if token.is_empty() {
+            let _ = tg_api(&env, "sendMessage", body).await;
+        } else {
+            let _ = tg_api_tok(&token, "sendMessage", body).await;
+        }
+    }
 }
 
 async fn tg_route(mut req: Request, env: &Env, path: &str, method: Method) -> Result<Response> {
@@ -10319,11 +10992,12 @@ async fn tg_route(mut req: Request, env: &Env, path: &str, method: Method) -> Re
             if pairs.is_empty() {
                 return json_resp(&json!({"error": "not_on_telegram"}), 404);
             }
-            // Obuna faqat QISMLAR (ep_) uchun, SERVERDA tekshiriladi —
+            // Obuna faqat QISMLAR (ep_ va kodlanguncha ko'rsatiladigan
+            // asl video orig_) uchun, SERVERDA tekshiriladi —
             // rasmlar va yozishma fayllari obunasiz ham ko'rinadi.
             let until = res.get(1).and_then(first_row)
                 .and_then(|r| r["expires_at"].as_i64()).unwrap_or(0);
-            if !admin && until <= now_ms() && pairs.iter().any(|(n, _)| n.starts_with("ep_")) {
+            if !admin && until <= now_ms() && pairs.iter().any(|(n, _)| n.starts_with("ep_") || n.starts_with("orig_")) {
                 return json_resp(&json!({"error": "subscription"}), 402);
             }
             // `copyMessages` raqamlar O'SIB boradigan tartibda bo'lishini talab qiladi.
@@ -10571,7 +11245,15 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
         return history_route(req, &env, path, method.clone()).await;
     }
 
+    // Kodlash boti (ikkinchi bot) — o'z siri bilan (`encbot_webhook`).
+    if path == ENCBOT_PATH && method == Method::Post {
+        return encbot_webhook(&env, req).await;
+    }
     if path.starts_with("/api/auth/") || path.starts_with("/api/telegram/") {
+        // Kodlash botining webhook'i ham birinchi kirish so'rovida o'rnatiladi.
+        if !encbot_token(&env).is_empty() {
+            ensure_encbot_webhook(&env, &origin).await;
+        }
         return auth_route(req, &env, &origin, path, method.clone()).await;
     }
 
@@ -10993,7 +11675,7 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
                         vec![TursoArg::text(parts[0]), TursoArg::text(parts[1])]).await?;
                     let cols = res["cols"].as_array().cloned().unwrap_or_default();
                     let rows = res["rows"].as_array().cloned().unwrap_or_default();
-                    let items = rows.iter().map(|r| hide_keys(row_to_obj(&cols, r.as_array().unwrap_or(&vec![])))).collect::<Vec<_>>();
+                    let items = rows.iter().map(|r| with_origin(hide_keys(row_to_obj(&cols, r.as_array().unwrap_or(&vec![]))))).collect::<Vec<_>>();
                     return ok(json!(resolve_list(&origin, items, EPIZOD_URL_KEYS)));
                 }
 
@@ -11016,11 +11698,24 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
                             // ustun ESKI qiymatni beradi.
                             let mut sets = String::new();
                             for (q, (url, size, key)) in QUALITIES.iter().zip(&ef.media) {
+                                // Ro'yxatda asl video sifat o'rnida berilgan
+                                // bo'lsa (`with_origin`), tahrirlash oynasi
+                                // uni qaytarib yuboradi — u sifat EMAS, shu
+                                // sabab o'rin o'zgarmay qoladi.
+                                let keep = "?<>'' AND ?=COALESCE(origin_video,'')";
                                 sets.push_str(&format!(
-                                    "url_{q}=?,size_{q}=?,key_{q}=CASE WHEN ?<>'' THEN ? WHEN url_{q}=? THEN key_{q} ELSE '' END,"
+                                    "url_{q}=CASE WHEN {keep} THEN url_{q} ELSE ? END,\
+                                     size_{q}=CASE WHEN {keep} THEN size_{q} ELSE ? END,\
+                                     key_{q}=CASE WHEN {keep} THEN key_{q} WHEN ?<>'' THEN ? WHEN url_{q}=? THEN key_{q} ELSE '' END,"
                                 ));
                                 args.push(TursoArg::text(url));
+                                args.push(TursoArg::text(url));
+                                args.push(TursoArg::text(url));
+                                args.push(TursoArg::text(url));
+                                args.push(TursoArg::text(url));
                                 args.push(TursoArg::int(*size));
+                                args.push(TursoArg::text(url));
+                                args.push(TursoArg::text(url));
                                 args.push(TursoArg::text(key));
                                 args.push(TursoArg::text(key));
                                 args.push(TursoArg::text(url));
@@ -11038,20 +11733,28 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
                             let cols = res["cols"].as_array().cloned().unwrap_or_default();
                             let rows = res["rows"].as_array().cloned().unwrap_or_default();
                             if rows.is_empty() { return err500("Yangilashda xato"); }
-                            return ok(hide_keys(resolve_fields(&origin, row_to_obj(&cols, rows[0].as_array().unwrap_or(&vec![])), EPIZOD_URL_KEYS)));
+                            return ok(resolve_fields(&origin, with_origin(hide_keys(row_to_obj(&cols, rows[0].as_array().unwrap_or(&vec![])))), EPIZOD_URL_KEYS));
                         }
 
                         if method == Method::Delete {
                             let old = turso_exec(&env,
-                                "SELECT url_360p,url_480p,url_720p,url_1080p FROM epizod_db WHERE anime_id=? AND season_id=? AND epizod_id=?",
+                                "SELECT url_360p,url_480p,url_720p,url_1080p,origin_video FROM epizod_db WHERE anime_id=? AND season_id=? AND epizod_id=?",
                                 vec![TursoArg::int(aid), TursoArg::int(sid), TursoArg::int(eid)]).await?;
                             let ec = old["cols"].as_array().cloned().unwrap_or_default();
                             let er = old["rows"].as_array().cloned().unwrap_or_default();
                             if !er.is_empty() {
-                                b2_delete_epizod_files(&env, &row_to_obj(&ec, er[0].as_array().unwrap_or(&vec![]))).await;
+                                let row = row_to_obj(&ec, er[0].as_array().unwrap_or(&vec![]));
+                                b2_delete_epizod_files(&env, &row).await;
+                                // Kodlanishi kutilayotgan asl video ham kanaldan o'chadi.
+                                let ov = row["origin_video"].as_str().unwrap_or("");
+                                if ov.starts_with("orig_") {
+                                    tg_forget_file(&env, ov).await;
+                                }
                             }
                             let _ = turso_batch(&env, &[
                                 ("DELETE FROM epizod_db WHERE anime_id=? AND season_id=? AND epizod_id=?",
+                                 vec![TursoArg::int(aid), TursoArg::int(sid), TursoArg::int(eid)]),
+                                ("DELETE FROM encode_jobs WHERE anime_id=? AND season_id=? AND epizod_id=?",
                                  vec![TursoArg::int(aid), TursoArg::int(sid), TursoArg::int(eid)]),
                                 ("UPDATE season_db SET epizod_count=(SELECT COUNT(*) FROM epizod_db WHERE anime_id=? AND season_id=?)
                                   WHERE anime_id=? AND season_id=?",

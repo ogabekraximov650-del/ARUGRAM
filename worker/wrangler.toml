@@ -46,6 +46,8 @@ workers_dev = true
 # wrangler secret put TEZCHECK_TOKEN --env production
 # wrangler secret put TEZCHECK_DESK --env production
 # wrangler secret put TEZCHECK_WEBHOOK_SECRET --env production
+# wrangler secret put ENCODE_BOT_TOKEN --env production   (kodlash boti)
+# wrangler secret put GH_ACTIONS_TOKEN --env production   (encode.yml ni ishga tushirish)
 #
 # TEZCHECK_TOKEN  — hisob tokeni (`aps_...`). MAXFIY: tezcheck.uz
 #                   faqat uning SHA-256 xeshini saqlaydi, ya'ni
@@ -60,7 +62,10 @@ workers_dev = true
 # Uchalasi ham FAQAT worker ichida ishlatiladi va ilovaga hech
 # qachon chiqmaydi.
 
-# Cron YO'Q (kamroq so'rov): bot nusxalarini ilova o'zi tozalaydi.
-# Bo'sh ro'yxat — avval qo'yilgan daqiqalik cron'ni ham o'chiradi.
+# Cron — har 10 daqiqada avto-kodlash navbati tekshiriladi
+# (`worker/src/lib.rs` -> `scheduled`, `encode_kick`): navbatda ish
+# bo'lsa-yu, Actions ishlamayotgan bo'lsa `encode.yml` ishga
+# tushiriladi. Navbat bo'sh bo'lsa bazaga bitta o'qish, GitHub'ga
+# so'rov yo'q. Bot nusxalarini esa hanuz ilova o'zi tozalaydi.
 [env.production.triggers]
-crons = []
+crons = ["*/10 * * * *"]

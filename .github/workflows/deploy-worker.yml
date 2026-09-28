@@ -93,6 +93,12 @@ jobs:
           put TG_CHANNEL_ID "${{ secrets.TG_CHANNEL_ID }}"
           # Avto-kodlash (`encode.yml`): Actions shu kalit bilan kiradi.
           put ENCODE_TOKEN "${{ secrets.ENCODE_TOKEN }}"
+          # Kodlash boti (qism qo'shish, faqat admin) — @BotFather tokeni.
+          # Bot yopiq kanalda ADMIN bo'lishi shart.
+          put ENCODE_BOT_TOKEN "${{ secrets.ENCODE_BOT_TOKEN }}"
+          # Cron `encode.yml` ni o'zi ishga tushirishi uchun: fine-grained
+          # token, faqat shu repo, "Actions: Read and write".
+          put GH_ACTIONS_TOKEN "${{ secrets.GH_ACTIONS_TOKEN }}"
 
       - name: Deploy to Cloudflare Workers
         working-directory: worker

@@ -9,7 +9,10 @@ name: Avto-kodlash (H.265)
 # ish — `tool/encode/run.py` (`anime` repodagi `encode_h265.sh`
 # sozlamalari bilan).
 #
-# ISHGA TUSHISHI: FAQAT QO'LDA (foydalanuvchi talabi — xavfsizroq):
+# ISHGA TUSHISHI: worker o'zi (`workflow_dispatch` API orqali) —
+# qism navbatga qo'yilganda va cron'da har 10 daqiqada, agar navbatda
+# ish bo'lsa-yu, hech bir run ishlamayotgan bo'lsa (`encode_kick`,
+# `GH_ACTIONS_TOKEN`). Qo'lda ham bo'ladi:
 # Actions -> "Avto-kodlash (H.265)" -> Run workflow. Bitta run navbatdagi
 # hamma qismni (yuklangan vaqti bo'yicha) ketma-ket kodlaydi; navbat bo'sh
 # bo'lsa ~10 soniyada tugaydi.

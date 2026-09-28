@@ -32,7 +32,8 @@ qarorning sababi: `KEYINGI_VAZIFA.md` (katta fayl, kerakli bo'limni
     `pubspec.yaml` o'zgarsa — APK build (`build-flutter-apk.yml`);
   - `worker/**` o'zgarsa — worker deploy (`deploy-worker.yml`).
   Workflow'larni qo'lda `workflow_dispatch` qilmang.
-  `encode.yml` — faqat foydalanuvchi o'zi qo'lda ishga tushiradi.
+  `encode.yml` ni worker o'zi ishga tushiradi (cron har 10 daqiqa,
+  `encode_kick`) — siz ishga tushirmang.
 
 ## Loyiha tuzilishi
 
@@ -49,6 +50,7 @@ kanali orqali uzatiladi (xarajatni kamaytirish uchun).
 | `rust/src/` | Rust yadrosi: `telegram.rs` (grammers/MTProto), `video_cache.rs` (shifrlangan bo'lak-kesh), `player_source.rs` (pleyer uchun JNI manba), `crypto.rs` |
 | `packages/video_player_android` | `video_player_android` nusxasi: `AruDataSource` pleyerni mahalliy serversiz, diskdagi shifrlangan keshdan o'qitadi |
 | `worker/src/lib.rs` | Cloudflare Worker (Rust → WASM), worker nomi `arugram`. Baza — Turso |
+| Kodlash boti | `worker/src/lib.rs` → `encbot_*`: ikkinchi bot (`ENCODE_BOT_TOKEN`), faqat admin; bor anime/bo'limga qism qo'shadi yoki almashtiradi va avto-kodlash navbatiga qo'yadi |
 | `tool/encode/` | H.265 avto-kodlash (Python, `encode.yml`) |
 | `ci/` | Imzo kaliti (`release.keystore`), baza tozalash skripti |
 | `android-template/` | CI `flutter create` dan keyin qo'yadigan `MainActivity.kt` (`/android/` repoda yo'q) |

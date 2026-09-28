@@ -3841,3 +3841,40 @@ tayyor bo'lguncha esa hech narsa chizilmasdi (qora/bo'sh).
   o'chirildi.
 - Worker: izohga va chatga yangi stiker/GIF qabul qilinmaydi.
 - Eski `tg/media` fayllari "Vaqtinchalik fayllar" bilan tozalanadi.
+
+## KODLASH BOTI, ASL VIDEO KO'RSATISH VA CRON (2026-09-28)
+
+**Talab:** ikkinchi Telegram bot — faqat admin, faqat bo'limi bor
+animelarga avto-kodlash uchun qism qo'shadi; qism raqamini so'raydi;
+bor qism almashtiriladi (qayta kodlanadi); sifatlar tayyor bo'lguncha
+asl video ko'rsatiladi; cron har 10 daqiqada navbat va Actions'ni
+tekshiradi.
+
+**Bot** (`worker/src/lib.rs` → `encbot_*`, webhook
+`/api/telegram/encode-bot`, secret `ENCODE_BOT_TOKEN`):
+- Webhook o'zi o'rnatiladi (cron'da yoki birinchi `/api/auth|telegram`
+  so'rovida), sir `app_config.encbot_secret`.
+- Faqat `ADMIN_TELEGRAM_ID`, faqat shaxsiy chat.
+- `/start` → anime (bo'limi borlar, 10 tadan sahifa) → bo'lim → qism
+  raqami → video. Holat bazaga yozilmaydi: bot xabaridagi
+  `ID: a/s[/n]` qatori + javob (reply). `/holat` — navbat.
+- Video kanalga `copyMessage` (izoh = `orig_bot_<a>_<s>_<n>_<ms>.<ext>`),
+  `tg_files` ga kalitsiz yoziladi. Bot kanalda ADMIN bo'lishi shart.
+  Asosiy bot `orig_` postlari haqida adminga xabar yubormaydi.
+- Qism bor bo'lsa: sifatlari tozalanib fayllari o'chadi, eski asl video
+  o'chadi, navbat yangilanadi (eski run 409 bilan to'xtaydi).
+
+**Asl video ko'rsatish** (`with_origin`): `epizod_db.origin_size`,
+`origin_height` (migratsiya `mig_origin_meta`). Qism ro'yxatida asl video
+balandligiga mos BO'SH sifat o'rnida (`origin_slot`, noma'lum — 720p)
+beriladi; ilova o'zgarmagan. PUT bu qiymatni saqlamaydi (`origin_video`
+bilan solishtiriladi). `orig_` fayllar ham obuna talab qiladi
+(`/api/tg/deliver`). `finish` da `origin_video` tozalanadi va kesh
+yangilanadi (`encbot_purge`). Qism o'chirilsa asl video va navbat ham.
+
+**Cron** (`wrangler.toml` `*/10 * * * *`, `scheduled` → `encode_kick`):
+navbatda ish (queued yoki ijarasi o'tgan running) bo'lsa, faol ijara
+bo'lmasa va GitHub'da `encode.yml` run'i kutmayotgan/ishlamayotgan
+bo'lsa — `workflow_dispatch` (`GH_ACTIONS_TOKEN`, repo `GH_REPO` yoki
+`ogabekraximov650-del/ARUGRAM`). Ishga tushirilganda adminga xabar,
+xato bo'lsa soatiga bir marta. Navbatga qo'yilganda ham darhol chaqiriladi.
