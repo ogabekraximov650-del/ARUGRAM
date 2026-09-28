@@ -86,6 +86,11 @@ typedef _VideoWipeDart = int Function();
 typedef _VideoWindowC = Int32 Function(Pointer<Utf8>, Uint64);
 typedef _VideoWindowDart = int Function(Pointer<Utf8>, int);
 
+// Pleyerning ijro joyi (`rust/src/player_source.rs` → onlayn ko'rishda
+// ko'pi bilan 1 daqiqa oldinga yuklanadi).
+typedef _PlayerPosC = Void Function(Pointer<Utf8>, Int64, Int64);
+typedef _PlayerPosDart = void Function(Pointer<Utf8>, int, int);
+
 typedef _VideoTotalC = Uint64 Function(Pointer<Utf8>);
 typedef _VideoTotalDart = int Function(Pointer<Utf8>);
 
@@ -1024,6 +1029,31 @@ class RustCore {
 
   /// Berilgan oynani keshga olishni boshlaydi (fon'da). Bir necha
   /// marta chaqirilsa ham manbaga BITTA so'rov ketadi.
+  _PlayerPosDart? _playerPos;
+  bool _playerPosMissing = false;
+
+  /// Pleyer ijro joyini yadroga bildiradi. `name` — fayl nomi
+  /// (`aru://file/<nom>`), `durMs` 0 — pleyer yopildi. Yadro diskda
+  /// yo'q bo'lakni faqat shu joydan ko'pi bilan 1 daqiqa oldinda
+  /// bo'lsa Telegram'dan oladi.
+  void playerPosition(String name, int posMs, int durMs) {
+    if (!_loaded || name.isEmpty || _playerPosMissing) return;
+    try {
+      _playerPos ??= _lib.lookupFunction<_PlayerPosC, _PlayerPosDart>(
+          'rust_player_position');
+    } catch (_) {
+      _playerPosMissing = true;
+      return;
+    }
+    final ptr = name.toNativeUtf8();
+    try {
+      _playerPos!(ptr, posMs, durMs);
+    } catch (_) {
+    } finally {
+      malloc.free(ptr);
+    }
+  }
+
   void videoWarmWindow(String url, int windowIndex) {
     if (!_loaded || url.isEmpty || windowIndex < 0) return;
     final ptr = url.toNativeUtf8();

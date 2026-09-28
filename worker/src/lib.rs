@@ -3196,107 +3196,14 @@ fn epizod_fields(b: &Value) -> EpizodFields {
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  RO'YXAT SO'ROVLARI UCHUN CHEKKA (EDGE) KESHI
+//  RO'YXATLAR CHEKKADA (CLOUDFLARE) KESHLANMAYDI (2026-09-29)
 // ═══════════════════════════════════════════════════════════════
 //
-// MUAMMO (miqyos): anime/bo'lim/qism ro'yxatlari HAR BIR ilova
-// ochilishida so'raladi va har bir so'rov Turso'ga boradi. Bir
-// vaqtda 100 ming (yoki 1 million) foydalanuvchi bo'lganda baza
-// birinchi bo'lib "yiqiladigan" joy aynan shu — chunki bazaning
-// bir soniyadagi so'rov chegarasi bor, Cloudflare chekkasiniki
-// esa amalda yo'q.
-//
-// YECHIM: ro'yxat javoblari Cloudflare chekkasida qisqa muddat
-// saqlanadi. Bir data-markazdagi MINGLAB foydalanuvchi bitta
-// baza so'rovi bilan xizmat qilinadi.
-//
-// ── NEGA 30 SONIYA ────────────────────────────────────────────
-// Kontent kuniga bir necha marta o'zgaradi, ya'ni 30 soniyalik
-// "eskirish" foydalanuvchi uchun umuman sezilmaydi. Boshqa
-// tomondan, 30 soniya bir data-markazdagi barcha so'rovlarni
-// BITTAGA jamlash uchun yetarlicha uzun.
-//
-// ── ADMIN DARHOL KO'RADI ──────────────────────────────────────
-// Har qanday yozish (POST/PUT/DELETE) so'rovidan keyin tegishli
-// kesh yozuvlari O'CHIRILADI. Admin ekranidagi keyingi so'rov
-// (odatda AYNAN O'SHA data-markazga tushadi) yangi ma'lumotni
-// oladi — ya'ni "saqladim, lekin ko'rinmayapti" holati yo'q.
-const LIST_CACHE_SECONDS: u64 = 30;
+// Foydalanuvchi talabi: "Cloudflare keshni o'chirib tashla, keragi
+// yo'q". Kesh faqat yozuv bo'lgan data-markazda tozalanardi —
+// GitHub Actions / kodlash boti yozgan o'zgarish foydalanuvchiga
+// kechikib yetardi. Endi har ro'yxat so'rovi bazadan olinadi.
 
-/// Chekka keshda (Cloudflare Cache API) saqlash muddati.
-///
-/// TALAB (foydalanuvchi): "Turso'dan keladigan ma'lumot keshda
-/// saqlansin, keyingi safar keshdan o'qilsin; tahrirlansa — keshga
-/// qaytadan yozilsin". Katalog ro'yxatlari yozishdan keyin darhol
-/// o'chiriladi (`purge_list_cache`) va keyingi so'rovda bazadan
-/// yangisi olinib qayta keshlanadi — shu sabab chekkada uzoq (1 soat)
-/// turishi xavfsiz. Ilovaga esa qisqa muddat (`LIST_CACHE_SECONDS`)
-/// beriladi: telefon eskirgan ro'yxatni ushlab qolmaydi.
-const EDGE_CACHE_SECONDS: u64 = 3600;
-
-/// Ro'yxat keshining kaliti. So'rov satri (query) ham kalitga
-/// kiradi — ya'ni turli filtrlar aralashib ketmaydi.
-///
-/// `-v2`: qismlar ro'yxati qisqa keshlanadigan bo'lgach (2026-09-28)
-/// 1 soatlik eski yozuvlar bir martada bekor qilindi.
-fn list_cache_url(path: &str, query: Option<&str>) -> String {
-    match query {
-        Some(q) if !q.is_empty() => {
-            format!("https://fulutter-list-cache-v2.internal{path}?{q}")
-        }
-        _ => format!("https://fulutter-list-cache-v2.internal{path}"),
-    }
-}
-
-/// Shu manzil keshlanadigan (faqat o'qiydigan) ro'yxatmi.
-/// Shu yo'l javobi chekkada necha soniya turadi.
-///
-/// Statistika og'ir so'rov (bir necha yuz qator o'qiydi) va uning
-/// raqamlari bir necha daqiqada o'zgarmaydi — shu sabab u
-/// ro'yxatlardan uzoqroq keshlanadi.
-fn cache_seconds(path: &str) -> u64 {
-    if path == "/api/stats" { 300 } else { LIST_CACHE_SECONDS }
-}
-
-fn is_list_path(path: &str) -> bool {
-    path == "/api/stats"
-        || path == "/api/anime"
-        || path == "/api/seasons"
-        || path.starts_with("/api/anime/janr/")
-        || path.starts_with("/api/seasons/anime/")
-        || path.starts_with("/api/epizods/")
-}
-
-/// Yozishdan keyin qaysi kesh yozuvlari eskiradi.
-fn invalidated_list_paths(path: &str) -> Vec<String> {
-    let mut out = vec!["/api/anime".to_string(), "/api/seasons".to_string()];
-    // /api/epizods/<anime>/<season>[/<epizod>] -> ro'yxat kaliti
-    if let Some(rest) = path.strip_prefix("/api/epizods/") {
-        let parts: Vec<&str> = rest.split('/').collect();
-        if parts.len() >= 2 {
-            out.push(format!("/api/epizods/{}/{}", parts[0], parts[1]));
-        }
-    }
-    // /api/seasons/<anime>/<season> -> o'sha anime bo'limlari
-    if let Some(rest) = path.strip_prefix("/api/seasons/") {
-        let first = rest.split('/').next().unwrap_or("");
-        if !first.is_empty() && first != "anime" {
-            out.push(format!("/api/seasons/anime/{first}"));
-        }
-    }
-    out
-}
-
-/// Kesh yozuvlarini o'chiradi (xatolar e'tiborsiz qoldiriladi —
-/// kesh eskirsa ham eng ko'pi 30 soniyadan keyin o'zi yangilanadi).
-async fn purge_list_cache(path: &str) {
-    let cache = Cache::default();
-    for p in invalidated_list_paths(path) {
-        if let Ok(k) = Request::new(&list_cache_url(&p, None), Method::Get) {
-            let _ = cache.delete(&k, false).await;
-        }
-    }
-}
 
 // ══════════════════════════════════════════════════════════════
 //  TELEGRAM ORQALI KIRISH
@@ -4989,11 +4896,6 @@ async fn sync_route(mut req: Request, env: &Env) -> Result<Response> {
 
     turso_batch(env, &stmts).await?;
 
-    // Bo'lim/qism raqamlari o'zgardi — chekkadagi ro'yxat keshi
-    // (30 s) eski sonni ko'rsatib turmasin.
-    for (aid, sid) in seasons.keys() {
-        purge_list_cache(&format!("/api/epizods/{aid}/{sid}")).await;
-    }
 
     ok_nostore(json!({
         "ok": true,
@@ -9993,7 +9895,6 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
              vec![TursoArg::text(&okey), TursoArg::text(&okey),
                   TursoArg::int(a), TursoArg::int(s), TursoArg::int(e), TursoArg::text(&origin)]),
         ]).await?;
-        encbot_purge(a, s, e).await;
         let n = turso_exec(env,
             "SELECT COUNT(*) AS n FROM encode_jobs WHERE state IN ('queued','running')", vec![]).await?;
         let n = first_row(&n).and_then(|r| r["n"].as_i64()).unwrap_or(1);
@@ -10254,7 +10155,6 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
         if !old.is_empty() && old != file {
             tg_forget_file(env, &old).await;
         }
-        encbot_purge(a, s, e).await;
         return ok(json!({"ok": true, "done": done}));
     }
 
@@ -10279,7 +10179,6 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
             if origin.starts_with("orig_") {
                 tg_forget_file(env, &origin).await;
             }
-            encbot_purge(a, s, e).await;
             let (an, sn) = encbot_titles(env, a, s).await
                 .unwrap_or_else(|| (format!("anime #{a}"), format!("bo'lim #{s}")));
             encode_notify(env, &format!(
@@ -10374,14 +10273,6 @@ async fn encbot_send(env: &Env, chat: i64, text: &str, markup: Option<Value>) {
     let _ = encbot_api(env, "sendMessage", body).await;
 }
 
-/// Qism o'zgargach eskirgan ro'yxat keshlari.
-async fn encbot_purge(a: i64, s: i64, e: i64) {
-    purge_list_cache(&format!("/api/epizods/{a}/{s}/{e}")).await;
-    purge_list_cache(&format!("/api/seasons/{a}/{s}")).await;
-    if let Ok(k) = Request::new(&list_cache_url(&format!("/api/epizods/{a}/{s}/{e}"), None), Method::Get) {
-        let _ = Cache::default().delete(&k, false).await;
-    }
-}
 
 fn rows_of(res: &Value) -> Vec<Value> {
     let cols = res["cols"].as_array().cloned().unwrap_or_default();
@@ -10702,7 +10593,6 @@ async fn encbot_video(env: &Env, msg: &Value, a: i64, s: i64, n: i64) {
             queued_at=excluded.queued_at, state='queued', done='', runner='', lease_until=0,
             attempts=0, error='', origin_key=''",
         vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e), TursoArg::text(&origin), TursoArg::int(now)]).await;
-    encbot_purge(a, s, e).await;
     if q.is_err() {
         encbot_send(env, chat, "\u{274C} Navbatga qo'yib bo'lmadi (baza xatosi). Videoni qayta yuboring.", None).await;
         return;
@@ -11269,7 +11159,6 @@ async fn tg_route(mut req: Request, env: &Env, path: &str, method: Method) -> Re
 async fn main(req: Request, env: Env, ctx: Context) -> Result<Response> {
     let url = req.url()?;
     let path = url.path().to_string();
-    let query = url.query().map(|q| q.to_string());
     let method = req.method();
 
     // ── FAQAT ILOVADAN (foydalanuvchi talabi) ────────────────
@@ -11288,109 +11177,9 @@ async fn main(req: Request, env: Env, ctx: Context) -> Result<Response> {
         }
     }
 
-    let cacheable = method == Method::Get && is_list_path(&path);
-    let key_url = list_cache_url(&path, query.as_deref());
-
-    // 1) Chekkadagi kesh — bazaga umuman borilmaydi.
-    if cacheable {
-        if let Ok(k) = Request::new(&key_url, Method::Get) {
-            if let Ok(Some(hit)) = Cache::default().get(&k, false).await {
-                return Ok(hit);
-            }
-        }
-    }
-
-    // Kirish (auth) so'rovlari ro'yxat keshiga umuman aloqador
-    // emas — ular ham keshni tozalayversa, HAR BIR kirish
-    // anime/bo'limlar keshini behuda kuydirib yuborardi.
-    // `/api/history` ham shu ro'yxatga kiradi: u foydalanuvchining
-    // SHAXSIY yozuvi, anime/bo'limlar ro'yxatiga umuman aloqasi
-    // yo'q. Aks holda har bir ko'rilgan qism butun katalog keshini
-    // behuda kuydirib yuborardi.
-    // `/api/rating` va `/api/favorite` ham shu ro'yxatda: ular
-    // foydalanuvchining SHAXSIY yozuvi va katalog ro'yxatiga
-    // aloqasi yo'q. Aks holda har bir baho/sevimli butun katalog
-    // keshini behuda kuydirib yuborardi.
-    let auth_path = path.starts_with("/api/auth/")
-        || path.starts_with("/api/telegram/")
-        || path.starts_with("/api/history")
-        || path == "/api/favorites"
-        || path.starts_with("/api/me/")
-        || path == "/api/sync"
-        || path.starts_with("/api/billing")
-        // Izohlarda "men layk bosganmi" belgisi bor — ya'ni javob
-        // HAR BIR ODAM uchun boshqacha. Uni chekkada keshlash
-        // boshqa odamning belgisini ko'rsatib qo'yardi.
-        || path.starts_with("/api/comments")
-        // Yozishma HAR BIR ODAM uchun boshqacha va u katalogga
-        // umuman aloqasi yo'q — keshni kuydirmaydi.
-        || path.starts_with("/api/chat")
-        // Admin amallari katalogga aloqasi yo'q — keshni
-        // kuydirmaydi.
-        || path.starts_with("/api/admin/")
-        // Shikoyat yuborish ham katalogga tegmaydi.
-        || path.starts_with("/api/reports")
-        // Telegram orqali video — shaxsiy, katalogga tegmaydi.
-        || path.starts_with("/api/tg/")
-        // Avto-kodlash navbati: qism yozuvini o'zi yangilaganda kerakli
-        // ro'yxat keshini o'zi tozalaydi (`encode_quality`).
-        || path.starts_with("/api/encode/");
-    let write = matches!(method, Method::Post | Method::Put | Method::Delete) && !auth_path;
-    let mut resp = route(req, env, ctx).await?;
-
-    // 2) Yozishdan keyin eskirgan yozuvlar o'chiriladi.
-    if write && resp.status_code() < 400 {
-        purge_list_cache(&path).await;
-    }
-
-    // 3) Yangi ro'yxat javobi keshga yoziladi.
-    if cacheable && resp.status_code() == 200 {
-        let bytes = resp.bytes().await?;
-        // ── QISMLAR RO'YXATI QISQAROQ KESHLANADI ──────────────
-        //
-        // TOPILGAN XATO (foydalanuvchi: "4-qism 720p tayyor bo'ldi,
-        // lekin ilovada hech narsa yo'q"): kesh FAQAT o'sha data-markazda
-        // tozalanadi. Kodlangan sifatni GitHub Actions (AQSh), yangi
-        // qismni kodlash boti (Telegram serveri) yozadi — ya'ni
-        // foydalanuvchi yaqinidagi keshga tegilmaydi va eski ro'yxat
-        // 1 soatgacha turib qolardi.
-        //
-        // Endi qismlar ro'yxati chekkada 5 daqiqa, kodlanayotgan qismi
-        // bo'lsa (`origin_video` bor) — 1 daqiqa turadi. Anime/bo'lim
-        // ro'yxatlari avvalgidek 1 soat.
-        let edge_ttl = if path.starts_with("/api/epizods/") {
-            let pat: &[u8] = b"\"origin_video\":\"orig_";
-            let encoding = bytes.windows(pat.len()).any(|w| w == pat);
-            if encoding { 60 } else { 300 }
-        } else {
-            cache_seconds(&path).max(EDGE_CACHE_SECONDS)
-        };
-        if let Ok(k) = Request::new(&key_url, Method::Get) {
-            if let Ok(mut to_cache) = Response::from_bytes(bytes.clone()) {
-                set_cors(&mut to_cache);
-                let h = to_cache.headers_mut();
-                let _ = h.set("Content-Type", "application/json");
-                let _ = h.set(
-                    "Cache-Control",
-                    &format!("public, max-age={edge_ttl}"),
-                );
-                let _ = Cache::default().put(&k, to_cache).await;
-            }
-        }
-        let mut out = Response::from_bytes(bytes)?;
-        set_cors(&mut out);
-        {
-            let h = out.headers_mut();
-            h.set("Content-Type", "application/json")?;
-            h.set(
-                "Cache-Control",
-                &format!("public, max-age={}", cache_seconds(&path)),
-            )?;
-        }
-        return Ok(out);
-    }
-
-    Ok(resp)
+    // Ro'yxatlar Cloudflare chekkasida keshlanmaydi (foydalanuvchi
+    // talabi) — har so'rov to'g'ridan-to'g'ri `route` ga.
+    route(req, env, ctx).await
 }
 
 async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {

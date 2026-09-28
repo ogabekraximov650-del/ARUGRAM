@@ -41,6 +41,53 @@ use std::sync::{Arc, Condvar, Mutex, OnceLock};
 /// Pleyer o'qiyotgan joydan oldinga shuncha bo'lak tayyorlab qo'yiladi.
 const AHEAD: u64 = 2;
 
+// ── ONLAYN KO'RISHDA KO'PI BILAN 1 DAQIQA OLDINGA ─────────────────
+//
+// TALAB (foydalanuvchi): "onlayn ko'rishda ko'rayotgan daqiqadan
+// 1 daqiqagacha yuklab olishga ruxsat bo'lsin, undan ko'p emas".
+//
+// Ilova har soniyada ijro joyini beradi (`rust_player_position`).
+// Diskda YO'Q bo'lak Telegram'dan faqat u ijro joyidan ko'pi bilan
+// `AHEAD_MS` oldinda bo'lsa olinadi (bayt/vaqt — faylning o'rtacha
+// bitreyti bo'yicha). Undan uzoqdagisi so'ralsa `WAIT` qaytadi — Java
+// (`AruDataSource`) biroz kutib qayta so'raydi, ijro esa buferdan davom
+// etadi va joy surilgan sari chegara ham suriladi.
+//
+// Istisnolar (ular bo'lmasa video ochilmay qolishi mumkin): fayl boshi
+// va oxiri (MP4 sarlavhasi `moov` ko'pincha oxirida), hamda ijro joyi
+// noma'lum yoki eskirgan (10 s dan ko'p xabar kelmagan) holat.
+const AHEAD_MS: u64 = 60_000;
+/// Chegaradan tashqari so'rov — JNI buni `RETRY` qiladi.
+const WAIT: &str = "oldinga chegara";
+
+struct PlayPos {
+    pos_ms: u64,
+    dur_ms: u64,
+    at: std::time::Instant,
+}
+
+fn positions() -> &'static Mutex<HashMap<String, PlayPos>> {
+    static P: OnceLock<Mutex<HashMap<String, PlayPos>>> = OnceLock::new();
+    P.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Shu bo'lakni hozir tarmoqdan olsa bo'ladimi.
+fn net_allowed(name: &str, total: u64, index: u64) -> bool {
+    let start = index * video_cache::PLAYER_CHUNK;
+    let edge = 4 * video_cache::PLAYER_CHUNK;
+    if start < edge || start + 2 * edge >= total {
+        return true;
+    }
+    let Ok(m) = positions().lock() else { return true };
+    let Some(p) = m.get(name) else { return true };
+    if p.dur_ms == 0 || p.at.elapsed() > std::time::Duration::from_secs(10) {
+        return true;
+    }
+    let limit = ((p.pos_ms + AHEAD_MS) as u128 * total as u128 / p.dur_ms as u128) as u64
+        + video_cache::PLAYER_CHUNK;
+    start <= limit
+}
+
 type ChunkResult = Result<Arc<Vec<u8>>, String>;
 
 struct Reader {
@@ -191,6 +238,9 @@ fn prefetch(r: &Arc<Reader>, index: u64) {
         if r.closed.load(Ordering::SeqCst) {
             return;
         }
+        if !net_allowed(&r.name, r.total, i) {
+            return;
+        }
         if flights().lock().map(|m| m.contains_key(&(r.name.clone(), i))).unwrap_or(true) {
             continue;
         }
@@ -219,7 +269,14 @@ fn read(h: i64, pos: u64, out: &mut [u8]) -> Result<usize, String> {
     let chunk = match cached {
         Some(b) => b,
         None => {
-            let b = load_chunk(&r.name, &r.dir, r.total, index)?;
+            let b = if net_allowed(&r.name, r.total, index) {
+                load_chunk(&r.name, &r.dir, r.total, index)?
+            } else {
+                match video_cache::player_read_chunk(&r.dir, &r.name, index, r.total) {
+                    Some(b) => Arc::new(b),
+                    None => return Err(WAIT.to_string()),
+                }
+            };
             if let Ok(mut l) = r.last.lock() {
                 *l = Some((index, Arc::clone(&b)));
             }
@@ -235,6 +292,27 @@ fn read(h: i64, pos: u64, out: &mut [u8]) -> Result<usize, String> {
 
 fn size(h: i64) -> i64 {
     reader(h).map(|r| r.total as i64).unwrap_or(-1)
+}
+
+/// Ilova ijro joyini beradi (har soniyada va sek qilinganda).
+/// `name` — fayl nomi (`aru://file/<nom>` dagi), `dur_ms` 0 bo'lsa
+/// yozuv o'chiriladi (pleyer yopildi).
+#[no_mangle]
+pub extern "C" fn rust_player_position(name: *const std::os::raw::c_char, pos_ms: i64, dur_ms: i64) {
+    if name.is_null() {
+        return;
+    }
+    let Ok(name) = unsafe { std::ffi::CStr::from_ptr(name) }.to_str() else { return };
+    let Ok(mut m) = positions().lock() else { return };
+    if dur_ms <= 0 {
+        m.remove(name);
+        return;
+    }
+    m.insert(name.to_string(), PlayPos {
+        pos_ms: pos_ms.max(0) as u64,
+        dur_ms: dur_ms as u64,
+        at: std::time::Instant::now(),
+    });
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -303,7 +381,7 @@ pub extern "system" fn Java_io_flutter_plugins_videoplayer_AruDataSource_nativeR
             }
             n as jint
         }
-        Err(e) if telegram::is_net_err(&e) => RETRY as jint,
+        Err(e) if e == WAIT || telegram::is_net_err(&e) => RETRY as jint,
         Err(e) => {
             video_cache::tg_log(format!("Pleyer: o'qib bo'lmadi: {e}"));
             -1
@@ -323,6 +401,23 @@ pub extern "system" fn Java_io_flutter_plugins_videoplayer_AruDataSource_nativeC
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn oldinga_bir_daqiqadan_ortiq_olinmaydi() {
+        let c = video_cache::PLAYER_CHUNK;
+        let total = 600 * c; // 600 MiB, 600 s — 1 MiB/s
+        let name = "test_oldinga.mp4";
+        // Joy noma'lum — cheklov yo'q.
+        assert!(net_allowed(name, total, 300));
+        let cname = std::ffi::CString::new(name).unwrap();
+        rust_player_position(cname.as_ptr(), 100_000, 600_000);
+        assert!(net_allowed(name, total, 150)); // 150 s — 50 s oldinda
+        assert!(!net_allowed(name, total, 170)); // 170 s — 70 s oldinda
+        assert!(net_allowed(name, total, 598)); // fayl oxiri (moov)
+        assert!(net_allowed(name, total, 1)); // fayl boshi
+        rust_player_position(cname.as_ptr(), 0, 0);
+        assert!(net_allowed(name, total, 300));
+    }
 
     #[test]
     fn chunk_len_edges() {

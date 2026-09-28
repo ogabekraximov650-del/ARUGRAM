@@ -3924,3 +3924,22 @@ yozadi — foydalanuvchi yaqinidagi kesh 1 soat eski turardi. Endi
 `/api/epizods/` ro'yxati chekkada 5 daqiqa, kodlanayotgan qism bo'lsa
 (`"origin_video":"orig_` javobda) — 1 daqiqa. Kesh kaliti `-v2` (eski
 yozuvlar bekor).
+
+## ONLAYN KO'RISH: KO'PI BILAN 1 DAQIQA OLDINGA, QAYTA OCHILISHSIZ (2026-09-29)
+
+**Talab:** onlayn ko'rishda ijro joyidan ko'pi bilan 1 daqiqa oldinga
+yuklansin; video diskdan ko'rsatilsin; to'liq yuklab olinganda pleyer
+qayta ochilmasin. Cloudflare kesh kerak emas.
+
+- `rust/src/player_source.rs`: `rust_player_position(name, pos_ms, dur_ms)`
+  — ilova ijro joyini beradi (sog'liq taymeri har 0.8 s + har `seekTo`
+  oldidan; `dispose` da 0). `net_allowed`: diskda yo'q bo'lak Telegram'dan
+  faqat `pos + 60 s` (o'rtacha bitreyt bo'yicha) gacha olinadi; undan
+  uzoqdagisi `WAIT` → JNI `RETRY` → `AruDataSource` 1 s kutib qayta so'raydi.
+  Istisno: fayl boshi (4 MiB) va oxiri (8 MiB, `moov`), joy noma'lum yoki
+  10 s dan eski. Test: `oldinga_bir_daqiqadan_ortiq_olinmaydi`.
+- `video_player_screen.dart` → `_checkSourceSwitch`: manba `aru://` bo'lsa
+  fayl to'liq yuklanganda pleyer QAYTA OCHILMAYDI (faqat `_playViaLocal`).
+- Worker: ro'yxatlarning Cloudflare chekka keshi butunlay olib tashlandi
+  (`list_cache_url`, `purge_list_cache`, `encbot_purge` yo'q) — har so'rov
+  bazadan.

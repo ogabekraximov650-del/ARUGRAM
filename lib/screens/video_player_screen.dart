@@ -572,6 +572,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   @override
   void dispose() {
     VideoGate.leave();
+    // Pleyer yopildi — oldinga yuklash chegarasi olib tashlanadi.
+    if (_currentUrl.isNotEmpty) {
+      RustCore.instance
+          .playerPosition(TelegramService.fileNameOf(_currentUrl), 0, 0);
+    }
     // Pleyerdan chiqildi — bot chatidagi nusxa o'chiriladi.
     _setTgHeld(null);
     TelegramService.instance.screenClosed();
@@ -872,6 +877,18 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   /// Oxirgi ko'rilgan "to'liq yuklangan" ishorasi.
   bool? _lastCompleteHint;
 
+  /// Ijro joyini Rust yadrosiga bildiradi — diskda yo'q bo'lak faqat
+  /// shu joydan ko'pi bilan 1 daqiqa oldinda bo'lsa yuklanadi
+  /// (`rust/src/player_source.rs`, foydalanuvchi talabi). Faqat
+  /// `aru://` manbasida (Android, diskdan o'qish) ma'noli.
+  void _reportPosition(Duration at, {Duration? duration}) {
+    if (!_currentSource.startsWith('aru://') || _currentUrl.isEmpty) return;
+    final dur = duration ?? _controller?.value.duration ?? Duration.zero;
+    if (dur <= Duration.zero) return;
+    RustCore.instance.playerPosition(TelegramService.fileNameOf(_currentUrl),
+        at.inMilliseconds, dur.inMilliseconds);
+  }
+
   void _checkSourceSwitch() {
     final ep = _currentEp;
     final c = _controller;
@@ -896,6 +913,15 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     // sabab faqat shu yerda chaqiriladi).
     final real = _isFullyDownloaded(url);
     if (real == _playViaLocal) return;
+
+    // Pleyer allaqachon DISKDAN o'qiyapti (`aru://`, Android) — onlayn
+    // ham, yuklab olingan ham bitta manba. Fayl to'liq yuklansa (yoki
+    // o'chirilsa) pleyerni QAYTA OCHISH kerak emas (foydalanuvchi
+    // talabi: "yuklab olindi deb pleyer o'chib yonmasin").
+    if (_currentSource.startsWith('aru://')) {
+      _playViaLocal = real;
+      return;
+    }
 
     _switchingSource = true;
     final at = c.value.position;
@@ -1411,6 +1437,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
         } catch (_) {}
         return;
       }
+      _reportPosition(startAt, duration: ctrl.value.duration);
       try {
         await ctrl.seekTo(startAt);
       } catch (_) {}
@@ -2024,6 +2051,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       if (!v.isInitialized || v.duration <= Duration.zero) return;
 
       // ── MANBA O'ZGARDIMI (yuklab olindi / o'chirildi) ──────
+      _reportPosition(v.position, duration: v.duration);
       if (DateTime.now().difference(_lastSourceCheck).inMilliseconds >= 2000) {
         _lastSourceCheck = DateTime.now();
         _checkSourceSwitch();
@@ -2289,6 +2317,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     _lastNudge = DateTime.now();
     VideoCacheServer.log('Yengil turtki: ${at.inSeconds}s');
     try {
+      _reportPosition(at);
       await c.seekTo(at).timeout(const Duration(seconds: 2));
     } catch (_) {}
     if (!mounted || _controller != c) return;
@@ -2658,6 +2687,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
           // fayl tayyor bo'lgunicha o'zi kutadi (bufer aylanasi
           // ko'rinib turadi) — ya'ni "faqat yuklab olinishini kutish"
           // qoladi, bizning navbatimiz emas.
+          _reportPosition(target);
           await c.seekTo(target).timeout(const Duration(seconds: 1));
         } catch (e) {
           VideoCacheServer.log('seekTo kechikdi/xato: $e');
