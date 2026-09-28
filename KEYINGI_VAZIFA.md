@@ -3950,3 +3950,11 @@ tashqarida bo'lsa pleyer abadiy kutardi. Endi ilova `buffering` ni ham
 beradi (`v.isBuffering`; sek oldidan — true) va BUFERLANAYOTGANDA cheklov
 yo'q. Admin ekranlarida asl video sifat nomi bilan emas: ro'yxatda
 "Original — tayyorlanmoqda", tahrirlashda faqat "Asl video" bo'limida.
+
+**Tizim tugmalari ortidagi qora panel (2026-09-29).** Oyna panellar ostiga
+faqat Android 11+ da (`setDecorFitsSystemWindows`) cho'zilardi; Android 10
+va eski MIUI'da ilova tugmalar ustida tugab, pastda tizim qora foni qolardi.
+`android-template/MainActivity.kt` → `applyEdgeToEdge()`: eski Android'da
+`SYSTEM_UI_FLAG_LAYOUT_*`, `FLAG_TRANSLUCENT_NAVIGATION` olib tashlanadi,
+`FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS`; `onCreate`, `onResume` va fokus
+qaytganda qayta qo'llanadi (MIUI tiklab yuboradi).

@@ -52,15 +52,58 @@ class MainActivity : FlutterActivity() {
     // chiziladi (edge-to-edge) va Android 10+ ning 3 tugmali navigatsiya
     // ortiga qo'yadigan qoramtir "kontrast" pardasi o'chiriladi — ortida
     // ilovaning o'zi ko'rinadi.
+    //
+    // TOPILGAN XATO (foydalanuvchi: "telefon tugmasi orqasidagi qora
+    // oyna hali ham bor"): oyna tizim panellari ostiga faqat Android 11+
+    // da (`setDecorFitsSystemWindows`) cho'zilardi. Android 10 va undan
+    // eski (MIUI 12 li Redmi'lar) da ilova tugmalar ustida TUGAR, pastda
+    // esa tizimning qora foni qolardi. Bundan tashqari MIUI oyna fokusni
+    // qaytarib olganda (pleyer, boshqa ilovadan qaytish) bayroqlarni
+    // tiklab yuboradi. Endi:
+    //   * eski Android'da ham `LAYOUT_HIDE_NAVIGATION`/`LAYOUT_FULLSCREEN`;
+    //   * `FLAG_TRANSLUCENT_NAVIGATION` olib tashlanadi,
+    //     `FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS` qo'yiladi (rang ishlashi uchun);
+    //   * hammasi `onResume` va fokus qaytganda QAYTA qo'llanadi.
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
         super.onCreate(savedInstanceState)
+        applyEdgeToEdge()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        applyEdgeToEdge()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) applyEdgeToEdge()
+    }
+
+    private fun applyEdgeToEdge() {
+        window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION)
+        window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS)
+        window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             window.setDecorFitsSystemWindows(false)
+        } else {
+            @Suppress("DEPRECATION")
+            val flags = android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+                android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+                android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+            @Suppress("DEPRECATION")
+            val cur = window.decorView.systemUiVisibility
+            // Pleyerning to'liq ekran (yashirish) bayroqlariga tegilmaydi.
+            @Suppress("DEPRECATION")
+            window.decorView.systemUiVisibility = cur or flags
         }
         @Suppress("DEPRECATION")
         window.navigationBarColor = android.graphics.Color.TRANSPARENT
         @Suppress("DEPRECATION")
         window.statusBarColor = android.graphics.Color.TRANSPARENT
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            @Suppress("DEPRECATION")
+            window.navigationBarDividerColor = android.graphics.Color.TRANSPARENT
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             window.isNavigationBarContrastEnforced = false
             window.isStatusBarContrastEnforced = false
