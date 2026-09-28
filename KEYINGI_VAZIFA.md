@@ -3855,7 +3855,7 @@ tekshiradi.
 - Webhook o'zi o'rnatiladi (cron'da yoki birinchi `/api/auth|telegram`
   so'rovida), sir `app_config.encbot_secret`.
 - Faqat `ADMIN_TELEGRAM_ID`, faqat shaxsiy chat.
-- `/start` → anime (bo'limi borlar, 10 tadan sahifa) → bo'lim. Bo'lim
+- `/start` → anime (bo'limi borlar, 10 tadan sahifa) → bo'lim — tugmalar PASTDAN (reply keyboard, matn oxirida `#a` / `#a/s`). Bo'lim
   `app_config.encbot_target` ga yoziladi; keyin yuborilgan yoki FORWARD
   qilingan har bir video navbatdagi qism (MAX+1) bo'ladi — raqam
   so'ralmaydi, reply shart emas (foydalanuvchi talabi; raqamni ilovadan

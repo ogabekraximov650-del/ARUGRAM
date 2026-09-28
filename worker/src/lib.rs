@@ -10322,18 +10322,6 @@ async fn encbot_send(env: &Env, chat: i64, text: &str, markup: Option<Value>) {
     let _ = encbot_api(env, "sendMessage", body).await;
 }
 
-/// Tugma bosilganda xabarni o'rnida almashtiradi (chat to'lib ketmasin).
-async fn encbot_edit(env: &Env, chat: i64, msg_id: i64, text: &str, markup: Option<Value>) {
-    let mut body = json!({
-        "chat_id": chat, "message_id": msg_id, "text": text,
-        "parse_mode": "HTML", "disable_web_page_preview": true,
-    });
-    if let Some(m) = markup {
-        body["reply_markup"] = m;
-    }
-    let _ = encbot_api(env, "editMessageText", body).await;
-}
-
 /// Qism o'zgargach eskirgan ro'yxat keshlari.
 async fn encbot_purge(a: i64, s: i64, e: i64) {
     purge_list_cache(&format!("/api/epizods/{a}/{s}/{e}")).await;
@@ -10382,6 +10370,19 @@ async fn encbot_titles(env: &Env, a: i64, s: i64) -> Option<(String, String)> {
     Some((if an.is_empty() { format!("#{a}") } else { an }, sn))
 }
 
+/// Pastdan chiqadigan tugmalar (reply keyboard) — inline tugmalarda
+/// uzun nomlar kesilib qolardi (foydalanuvchi talabi). Tugma bosilganda
+/// uning MATNI keladi; kerakli raqam matn oxiridagi `#...` da turadi.
+fn encbot_keyboard(rows: Vec<Vec<String>>) -> Value {
+    let kb: Vec<Value> = rows.into_iter()
+        .map(|r| json!(r.into_iter().map(|t| json!({"text": t})).collect::<Vec<_>>()))
+        .collect();
+    json!({"keyboard": kb, "resize_keyboard": true, "is_persistent": true})
+}
+
+const ENCBOT_BTN_ANIMES: &str = "\u{2B05}\u{FE0F} Animelar";
+const ENCBOT_BTN_STATUS: &str = "\u{1F4CB} Holat";
+
 /// 1-qadam: bo'limi bor animelar ro'yxati.
 async fn encbot_anime_page(env: &Env, page: i64) -> (String, Value) {
     let page = page.max(0);
@@ -10392,24 +10393,26 @@ async fn encbot_anime_page(env: &Env, page: i64) -> (String, Value) {
         vec![TursoArg::int(ENCBOT_PAGE + 1), TursoArg::int(page * ENCBOT_PAGE)]).await;
     let rows = res.map(|r| rows_of(&r)).unwrap_or_default();
     if rows.is_empty() && page == 0 {
-        return ("Bo'limi qo'shilgan anime yo'q. Avval ilovada anime va bo'lim qo'shing.".into(), json!({"inline_keyboard": []}));
+        return ("Bo'limi qo'shilgan anime yo'q. Avval ilovada anime va bo'lim qo'shing.".into(),
+            encbot_keyboard(vec![vec![ENCBOT_BTN_STATUS.to_string()]]));
     }
-    let mut kb: Vec<Value> = rows.iter().take(ENCBOT_PAGE as usize).map(|r| {
+    let mut kb: Vec<Vec<String>> = rows.iter().take(ENCBOT_PAGE as usize).map(|r| {
         let id = jint(r, "id");
-        let name: String = r["name"].as_str().unwrap_or("").chars().take(60).collect();
-        json!([{"text": if name.is_empty() { format!("#{id}") } else { name }, "callback_data": format!("a:{id}")}])
+        let name = r["name"].as_str().unwrap_or("").trim().to_string();
+        vec![format!("\u{1F3AC} {name} #{id}")]
     }).collect();
     let mut nav = Vec::new();
     if page > 0 {
-        nav.push(json!({"text": "\u{2B05}\u{FE0F} Oldingi", "callback_data": format!("p:{}", page - 1)}));
+        nav.push(format!("\u{25C0}\u{FE0F} {}-sahifa", page));
     }
     if rows.len() as i64 > ENCBOT_PAGE {
-        nav.push(json!({"text": "Keyingi \u{27A1}\u{FE0F}", "callback_data": format!("p:{}", page + 1)}));
+        nav.push(format!("\u{25B6}\u{FE0F} {}-sahifa", page + 2));
     }
     if !nav.is_empty() {
-        kb.push(json!(nav));
+        kb.push(nav);
     }
-    ("\u{1F3AC} Qaysi animega qism qo'shiladi?".into(), json!({"inline_keyboard": kb}))
+    kb.push(vec![ENCBOT_BTN_STATUS.to_string()]);
+    ("\u{1F3AC} Qaysi animega qism qo'shiladi? Pastdagi tugmalardan tanlang.".into(), encbot_keyboard(kb))
 }
 
 /// 2-qadam: animening bo'limlari.
@@ -10419,25 +10422,24 @@ async fn encbot_seasons(env: &Env, a: i64) -> (String, Value) {
         ("SELECT season_id, bolim_id, nomi, epizod_count FROM season_db WHERE anime_id=? ORDER BY season_id ASC",
          vec![TursoArg::int(a)]),
     ]).await;
+    let back = vec![ENCBOT_BTN_ANIMES.to_string()];
     let Ok(res) = res else {
-        return ("\u{274C} Baza xatosi, qayta urinib ko'ring.".into(), json!({"inline_keyboard": []}));
+        return ("\u{274C} Baza xatosi, qayta urinib ko'ring.".into(), encbot_keyboard(vec![back]));
     };
     let name = res.first().and_then(first_row)
         .and_then(|r| r["name"].as_str().map(String::from)).unwrap_or_default();
     let seasons = res.get(1).map(rows_of).unwrap_or_default();
-    let back = json!([{"text": "\u{2B05}\u{FE0F} Animelar", "callback_data": "p:0"}]);
     if seasons.is_empty() {
-        return ("Bu animeda bo'lim yo'q.".into(), json!({"inline_keyboard": [back]}));
+        return ("Bu animeda bo'lim yo'q.".into(), encbot_keyboard(vec![back]));
     }
-    let mut kb: Vec<Value> = seasons.iter().map(|r| {
+    let mut kb: Vec<Vec<String>> = seasons.iter().map(|r| {
         let sid = jint(r, "season_id");
-        let nomi: String = r["nomi"].as_str().unwrap_or("").chars().take(50).collect();
-        let label = format!("{}-bo'lim{} ({} qism)", jint(r, "bolim_id"),
-            if nomi.is_empty() { String::new() } else { format!(": {nomi}") }, jint(r, "epizod_count"));
-        json!([{"text": label, "callback_data": format!("s:{a}:{sid}")}])
+        let nomi = r["nomi"].as_str().unwrap_or("").trim().to_string();
+        vec![format!("\u{1F4C2} {}-bo'lim{} ({} qism) #{a}/{sid}", jint(r, "bolim_id"),
+            if nomi.is_empty() { String::new() } else { format!(": {nomi}") }, jint(r, "epizod_count"))]
     }).collect();
     kb.push(back);
-    (format!("<b>{}</b>\nQaysi bo'lim?", html_escape(&name)), json!({"inline_keyboard": kb}))
+    (format!("<b>{}</b>\nQaysi bo'lim?", html_escape(&name)), encbot_keyboard(kb))
 }
 
 /// Bo'limdagi qism raqamlari (o'sish tartibida).
@@ -10451,19 +10453,20 @@ async fn encbot_numbers(env: &Env, a: i64, s: i64) -> Vec<i64> {
 
 /// 3-qadam: bo'lim tanlandi — u eslab qolinadi (`app_config.encbot_target`)
 /// va keyin kelgan HAR BIR video (forward ham) keyingi qism bo'ladi.
-async fn encbot_select(env: &Env, chat: i64, mid: i64, a: i64, s: i64) {
+async fn encbot_select(env: &Env, chat: i64, a: i64, s: i64) {
     let Some((an, sn)) = encbot_titles(env, a, s).await else {
-        encbot_edit(env, chat, mid, "\u{274C} Anime yoki bo'lim topilmadi.", None).await;
+        encbot_send(env, chat, "\u{274C} Anime yoki bo'lim topilmadi.", None).await;
         return;
     };
     config_put(env, "encbot_target", &format!("{a}/{s}")).await;
     let nums = encbot_numbers(env, a, s).await;
     let next = nums.iter().max().copied().unwrap_or(0) + 1;
-    encbot_edit(env, chat, mid, &format!(
+    let kb = encbot_keyboard(vec![vec![ENCBOT_BTN_ANIMES.to_string(), ENCBOT_BTN_STATUS.to_string()]]);
+    encbot_send(env, chat, &format!(
         "\u{2705} Tanlandi: <b>{}</b>\n{}\nMavjud qismlar: {}\n\nEndi videolarni yuboring yoki FORWARD qiling — \
          har biri navbatdagi qism bo'lib qo'shiladi ({next}, {}, ...).\n\
-         Qism raqamini kerak bo'lsa ilovadan o'zgartirasiz. Boshqa bo'lim: /start",
-        html_escape(&an), html_escape(&sn), number_ranges(&nums), next + 1), None).await;
+         Qism raqamini kerak bo'lsa ilovadan o'zgartirasiz. Boshqa bo'lim: \u{201C}Animelar\u{201D} tugmasi.",
+        html_escape(&an), html_escape(&sn), number_ranges(&nums), next + 1), Some(kb)).await;
 }
 
 /// 5-qadam: video keldi — kanalga, qism yozuviga va navbatga.
@@ -10618,19 +10621,19 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
             return ok(json!({"ok": true}));
         }
         let chat = cb["message"]["chat"]["id"].as_i64().unwrap_or(0);
-        let mid = cb["message"]["message_id"].as_i64().unwrap_or(0);
         let data = cb["data"].as_str().unwrap_or("");
         let parts: Vec<i64> = data.split(':').skip(1).filter_map(|p| p.parse().ok()).collect();
         match (data.split(':').next().unwrap_or(""), parts.as_slice()) {
+            // Eski inline tugmalar (avvalgi xabarlarda) ham ishlaydi.
             ("p", [page]) => {
                 let (t, kb) = encbot_anime_page(env, *page).await;
-                encbot_edit(env, chat, mid, &t, Some(kb)).await;
+                encbot_send(env, chat, &t, Some(kb)).await;
             }
             ("a", [a]) => {
                 let (t, kb) = encbot_seasons(env, *a).await;
-                encbot_edit(env, chat, mid, &t, Some(kb)).await;
+                encbot_send(env, chat, &t, Some(kb)).await;
             }
-            ("s", [a, s]) => encbot_select(env, chat, mid, *a, *s).await,
+            ("s", [a, s]) => encbot_select(env, chat, *a, *s).await,
             _ => {}
         }
         return ok(json!({"ok": true}));
@@ -10660,7 +10663,7 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
         }
         return ok(json!({"ok": true}));
     }
-    if text.starts_with("/holat") {
+    if text.starts_with("/holat") || text == ENCBOT_BTN_STATUS {
         let res = turso_exec(env,
             "SELECT state, COUNT(*) AS n FROM encode_jobs GROUP BY state", vec![]).await;
         let lines: Vec<String> = res.map(|r| rows_of(&r)).unwrap_or_default().iter()
@@ -10670,8 +10673,30 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
             if lines.is_empty() { "bo'sh".to_string() } else { lines.join("\n") }), None).await;
         return ok(json!({"ok": true}));
     }
-    // /start va boshqa har qanday matn — anime ro'yxati.
-    let (t, kb) = encbot_anime_page(env, 0).await;
+    // Pastdagi tugma: oxiridagi `#a` (anime) yoki `#a/s` (bo'lim).
+    if let Some((_, tag)) = text.rsplit_once('#') {
+        let ids: Vec<i64> = tag.trim().split('/').filter_map(|p| p.trim().parse().ok()).collect();
+        match ids.as_slice() {
+            [a] => {
+                let (t, kb) = encbot_seasons(env, *a).await;
+                encbot_send(env, chat, &t, Some(kb)).await;
+                return ok(json!({"ok": true}));
+            }
+            [a, s] => {
+                encbot_select(env, chat, *a, *s).await;
+                return ok(json!({"ok": true}));
+            }
+            _ => {}
+        }
+    }
+    // Sahifa tugmalari: "▶️ 2-sahifa".
+    let page = text.split_whitespace().nth(1)
+        .and_then(|w| w.strip_suffix("-sahifa"))
+        .and_then(|n| n.parse::<i64>().ok())
+        .map(|n| n - 1)
+        .unwrap_or(0);
+    // /start, "Animelar" va boshqa har qanday matn — anime ro'yxati.
+    let (t, kb) = encbot_anime_page(env, page).await;
     encbot_send(env, chat, &t, Some(kb)).await;
     ok(json!({"ok": true}))
 }
