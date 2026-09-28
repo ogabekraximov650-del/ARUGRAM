@@ -3855,9 +3855,13 @@ tekshiradi.
 - Webhook o'zi o'rnatiladi (cron'da yoki birinchi `/api/auth|telegram`
   so'rovida), sir `app_config.encbot_secret`.
 - Faqat `ADMIN_TELEGRAM_ID`, faqat shaxsiy chat.
-- `/start` → anime (bo'limi borlar, 10 tadan sahifa) → bo'lim → qism
-  raqami → video. Holat bazaga yozilmaydi: bot xabaridagi
-  `ID: a/s[/n]` qatori + javob (reply). `/holat` — navbat.
+- `/start` → anime (bo'limi borlar, 10 tadan sahifa) → bo'lim. Bo'lim
+  `app_config.encbot_target` ga yoziladi; keyin yuborilgan yoki FORWARD
+  qilingan har bir video navbatdagi qism (MAX+1) bo'ladi — raqam
+  so'ralmaydi, reply shart emas (foydalanuvchi talabi; raqamni ilovadan
+  o'zgartiradi). Webhook `max_connections: 1` — ketma-ket, raqamlar
+  to'qnashmaydi. `/holat` — navbat. `GET /api/telegram/encode-bot` —
+  token/webhook tekshiruvi.
 - Video kanalga `copyMessage` (izoh = `orig_bot_<a>_<s>_<n>_<ms>.<ext>`),
   `tg_files` ga kalitsiz yoziladi. Bot kanalda ADMIN bo'lishi shart.
   Asosiy bot `orig_` postlari haqida adminga xabar yubormaydi.

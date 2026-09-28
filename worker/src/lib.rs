@@ -10268,14 +10268,19 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
 //   * faqat admin (`ADMIN_TELEGRAM_ID`) — boshqalarga javob yo'q;
 //   * yangi anime yoki bo'lim YARATMAYDI: ro'yxatda faqat kamida
 //     bitta bo'limi bor animelar;
-//   * /start -> anime -> bo'lim -> qism raqami -> video. Holat bazaga
-//     YOZILMAYDI: har qadam bot xabaridagi `ID: a/s[/n]` qatorida
-//     turadi va keyingi qadam o'sha xabarga JAVOB (reply) bo'ladi;
+//   * /start -> anime -> bo'lim. Tanlangan bo'lim `app_config.encbot_target`
+//     da turadi; keyin yuborilgan/forward qilingan HAR BIR video
+//     navbatdagi qism bo'ladi (raqam avtomatik, reply shart emas);
 //   * video kanalga `copyMessage` bilan ko'chadi (fayl worker'dan
 //     o'tmaydi, hajm chegarasi yo'q). Bot kanalda ADMIN bo'lishi shart;
 //   * qism bor bo'lsa — ALMASHTIRILADI: eski sifatlar o'chadi, yangi
 //     asl video navbatga qo'yiladi. Kodlanguncha ilovada asl video
 //     ko'rsatiladi (`with_origin`).
+//
+// YANGILANISH (foydalanuvchi talabi): qism raqami SO'RALMAYDI va
+// javob (reply) shart emas — bo'lim tanlangach har bir yuborilgan yoki
+// forward qilingan video navbatdagi qism bo'ladi; raqamni kerak bo'lsa
+// ilovadan o'zgartiradi.
 //
 // Asl video botga oddiy Telegram fayli bo'lib keladi — ilova
 // yuklaydiganidek shifrlanmaydi (bot faylni o'qimaydi, faqat
@@ -10329,11 +10334,6 @@ async fn encbot_edit(env: &Env, chat: i64, msg_id: i64, text: &str, markup: Opti
     let _ = encbot_api(env, "editMessageText", body).await;
 }
 
-/// Javob so'raladigan xabar (Telegram javob maydonini o'zi ochadi).
-fn encbot_force_reply(hint: &str) -> Value {
-    json!({"force_reply": true, "input_field_placeholder": hint})
-}
-
 /// Qism o'zgargach eskirgan ro'yxat keshlari.
 async fn encbot_purge(a: i64, s: i64, e: i64) {
     purge_list_cache(&format!("/api/epizods/{a}/{s}/{e}")).await;
@@ -10348,15 +10348,6 @@ fn rows_of(res: &Value) -> Vec<Value> {
     res["rows"].as_array().cloned().unwrap_or_default().iter()
         .map(|r| row_to_obj(&cols, r.as_array().unwrap_or(&vec![])))
         .collect()
-}
-
-/// Bot xabaridagi `ID: 3/2` yoki `ID: 3/2/5` qatori.
-fn encbot_marker(text: &str) -> Vec<i64> {
-    text.lines()
-        .filter_map(|l| l.trim().strip_prefix("ID:"))
-        .map(|r| r.trim().split('/').filter_map(|p| p.trim().parse::<i64>().ok()).collect::<Vec<_>>())
-        .find(|v| v.len() == 2 || v.len() == 3)
-        .unwrap_or_default()
 }
 
 /// Qism raqamlari qisqa ko'rinishda: `1–12, 14, 20–21`.
@@ -10449,45 +10440,30 @@ async fn encbot_seasons(env: &Env, a: i64) -> (String, Value) {
     (format!("<b>{}</b>\nQaysi bo'lim?", html_escape(&name)), json!({"inline_keyboard": kb}))
 }
 
-/// 3-qadam: qism raqamini so'rash.
-async fn encbot_ask_number(env: &Env, chat: i64, a: i64, s: i64) {
-    let Some((an, sn)) = encbot_titles(env, a, s).await else {
-        encbot_send(env, chat, "\u{274C} Anime yoki bo'lim topilmadi.", None).await;
-        return;
-    };
-    let nums: Vec<i64> = turso_exec(env,
+/// Bo'limdagi qism raqamlari (o'sish tartibida).
+async fn encbot_numbers(env: &Env, a: i64, s: i64) -> Vec<i64> {
+    turso_exec(env,
         "SELECT epizod_number FROM epizod_db WHERE anime_id=? AND season_id=? ORDER BY epizod_number ASC",
         vec![TursoArg::int(a), TursoArg::int(s)]).await
         .map(|r| rows_of(&r).iter().map(|x| jint(x, "epizod_number")).collect())
-        .unwrap_or_default();
-    let next = nums.iter().max().copied().unwrap_or(0) + 1;
-    encbot_send(env, chat, &format!(
-        "<b>{}</b>\n{}\nMavjud qismlar: {}\n\nQism raqamini shu xabarga JAVOB qilib yozing \
-         (masalan <code>{next}</code>). Bor raqam yozilsa — qism almashtiriladi.\n\nID: {a}/{s}",
-        html_escape(&an), html_escape(&sn), number_ranges(&nums)),
-        Some(encbot_force_reply(&format!("Qism raqami, masalan {next}")))).await;
+        .unwrap_or_default()
 }
 
-/// 4-qadam: raqam keldi — video so'raladi.
-async fn encbot_ask_video(env: &Env, chat: i64, a: i64, s: i64, n: i64) {
+/// 3-qadam: bo'lim tanlandi — u eslab qolinadi (`app_config.encbot_target`)
+/// va keyin kelgan HAR BIR video (forward ham) keyingi qism bo'ladi.
+async fn encbot_select(env: &Env, chat: i64, mid: i64, a: i64, s: i64) {
     let Some((an, sn)) = encbot_titles(env, a, s).await else {
-        encbot_send(env, chat, "\u{274C} Anime yoki bo'lim topilmadi.", None).await;
+        encbot_edit(env, chat, mid, "\u{274C} Anime yoki bo'lim topilmadi.", None).await;
         return;
     };
-    let exists = turso_exec(env,
-        "SELECT epizod_id FROM epizod_db WHERE anime_id=? AND season_id=? AND epizod_number=? LIMIT 1",
-        vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(n)]).await
-        .ok().and_then(|r| first_row(&r)).is_some();
-    let what = if exists {
-        "\u{26A0}\u{FE0F} Bu qism BOR — yangi video bilan ALMASHTIRILADI (eski sifatlar o'chadi)."
-    } else {
-        "Yangi qism qo'shiladi."
-    };
-    encbot_send(env, chat, &format!(
-        "<b>{}</b>\n{}\n<b>{n}-qism.</b> {what}\n\nAsl videoni shu xabarga JAVOB qilib yuboring \
-         (video yoki fayl).\n\nID: {a}/{s}/{n}",
-        html_escape(&an), html_escape(&sn)),
-        Some(encbot_force_reply("Videoni yuboring"))).await;
+    config_put(env, "encbot_target", &format!("{a}/{s}")).await;
+    let nums = encbot_numbers(env, a, s).await;
+    let next = nums.iter().max().copied().unwrap_or(0) + 1;
+    encbot_edit(env, chat, mid, &format!(
+        "\u{2705} Tanlandi: <b>{}</b>\n{}\nMavjud qismlar: {}\n\nEndi videolarni yuboring yoki FORWARD qiling — \
+         har biri navbatdagi qism bo'lib qo'shiladi ({next}, {}, ...).\n\
+         Qism raqamini kerak bo'lsa ilovadan o'zgartirasiz. Boshqa bo'lim: /start",
+        html_escape(&an), html_escape(&sn), number_ranges(&nums), next + 1), None).await;
 }
 
 /// 5-qadam: video keldi — kanalga, qism yozuviga va navbatga.
@@ -10654,7 +10630,7 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
                 let (t, kb) = encbot_seasons(env, *a).await;
                 encbot_edit(env, chat, mid, &t, Some(kb)).await;
             }
-            ("s", [a, s]) => encbot_ask_number(env, chat, *a, *s).await,
+            ("s", [a, s]) => encbot_select(env, chat, mid, *a, *s).await,
             _ => {}
         }
         return ok(json!({"ok": true}));
@@ -10666,28 +10642,21 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
     if chat == 0 || msg["from"]["id"].as_i64() != Some(ADMIN_TELEGRAM_ID) || chat != ADMIN_TELEGRAM_ID {
         return ok(json!({"ok": true}));
     }
-    let reply = &msg["reply_to_message"];
-    let marker = if reply["from"]["is_bot"].as_bool() == Some(true) {
-        encbot_marker(reply["text"].as_str().unwrap_or(""))
-    } else {
-        Vec::new()
-    };
     let has_video = msg["video"].is_object() || msg["document"].is_object();
     let text = msg["text"].as_str().unwrap_or("").trim().to_string();
 
     if has_video {
-        match marker.as_slice() {
-            [a, s, n] => encbot_video(env, msg, *a, *s, *n).await,
-            _ => encbot_send(env, chat,
-                "Videoni \u{201C}videoni yuboring\u{201D} xabariga JAVOB qilib yuboring. Boshlash: /start", None).await,
-        }
-        return ok(json!({"ok": true}));
-    }
-    if let [a, s] = marker.as_slice() {
-        match text.parse::<i64>() {
-            Ok(n) if (1..=100_000).contains(&n) => encbot_ask_video(env, chat, *a, *s, n).await,
-            _ => encbot_send(env, chat, "Qism raqamini son bilan yozing (masalan 5).",
-                Some(encbot_force_reply("Qism raqami"))).await,
+        let target: Vec<i64> = config_get(env, "encbot_target").await.unwrap_or_default()
+            .split('/').filter_map(|p| p.parse().ok()).collect();
+        match target.as_slice() {
+            [a, s] => {
+                // Keyingi raqam — bo'limdagi eng kattasidan keyin. Webhook'lar
+                // ketma-ket keladi (`max_connections: 1`), ya'ni bir nechta
+                // forward qilingan video raqamlari to'qnashmaydi.
+                let n = encbot_numbers(env, *a, *s).await.iter().max().copied().unwrap_or(0) + 1;
+                encbot_video(env, msg, *a, *s, n).await;
+            }
+            _ => encbot_send(env, chat, "Avval /start bilan anime va bo'limni tanlang.", None).await,
         }
         return ok(json!({"ok": true}));
     }
@@ -10722,7 +10691,7 @@ async fn ensure_encbot_webhook(env: &Env, origin: &str) {
         return;
     }
     let url = format!("{origin}{ENCBOT_PATH}");
-    let want = format!("{bot_id}|{url}|v1");
+    let want = format!("{bot_id}|{url}|v2");
     if config_get(env, "encbot_webhook_for").await.as_deref() == Some(want.as_str()) {
         ENCBOT_READY.store(true, Ordering::Relaxed);
         return;
@@ -10741,6 +10710,9 @@ async fn ensure_encbot_webhook(env: &Env, origin: &str) {
         "url": url,
         "secret_token": secret,
         "allowed_updates": ["message", "callback_query"],
+        // Yangilanishlar KETMA-KET: bir nechta forward qilingan video
+        // bir vaqtda kelsa qism raqamlari to'qnashmasin.
+        "max_connections": 1,
         "drop_pending_updates": true,
     })).await;
     if res.is_ok() {
