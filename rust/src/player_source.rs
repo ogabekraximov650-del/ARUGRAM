@@ -43,15 +43,24 @@ const AHEAD: u64 = 2;
 
 // ── ONLAYN KO'RISHDA KO'PI BILAN 1 DAQIQA OLDINGA ─────────────────
 //
+// YANGILANISH (foydalanuvchi: "tez-tez pauza bo'lib, o'rtasida
+// aylanma chiqyapti"): pleyerning O'Z so'rovlarini to'xtatib turish
+// ijroni buzdi — anime'da bitreyt sahnaga qarab bir necha barobar
+// o'zgaradi va "o'rtacha 1 daqiqa" ba'zi joyda 15 soniyaga ham
+// yetmaydi. Endi pleyer so'ragan bo'lak DOIM beriladi (pleyerning
+// o'zi `AruLoadControl` bilan ko'pi bilan 30 s oldinga o'qiydi), bu
+// chegara esa faqat BIZNING oldindan olishimizga (`prefetch`)
+// qo'llanadi. Ya'ni oldinda turadigan hamma narsa: pleyer buferi
+// (≤30 s) + ko'pi bilan `AHEAD` bo'lak.
+//
 // TALAB (foydalanuvchi): "onlayn ko'rishda ko'rayotgan daqiqadan
 // 1 daqiqagacha yuklab olishga ruxsat bo'lsin, undan ko'p emas".
 //
 // Ilova har soniyada ijro joyini beradi (`rust_player_position`).
 // Diskda YO'Q bo'lak Telegram'dan faqat u ijro joyidan ko'pi bilan
 // `AHEAD_MS` oldinda bo'lsa olinadi (bayt/vaqt — faylning o'rtacha
-// bitreyti bo'yicha). Undan uzoqdagisi so'ralsa `WAIT` qaytadi — Java
-// (`AruDataSource`) biroz kutib qayta so'raydi, ijro esa buferdan davom
-// etadi va joy surilgan sari chegara ham suriladi.
+// bitreyti bo'yicha). Hozir bu faqat oldindan olishga (`prefetch`)
+// qo'llanadi — quyidagi "YANGILANISH" ga qarang.
 //
 // TOPILGAN XATO (foydalanuvchi: "video birdan to'xtab qoldi, qayta
 // kirsam ham ochilmayapti"): pleyer buferi TUGAGAN ("buferlanmoqda")
@@ -68,8 +77,6 @@ const AHEAD: u64 = 2;
 // noma'lum yoki eskirgan (2 daqiqadan ko'p xabar kelmagan) holat. Surish
 // (barmoq ekranda) paytida xabar to'xtaydi — shu sabab muddat uzun.
 const AHEAD_MS: u64 = 60_000;
-/// Chegaradan tashqari so'rov — JNI buni `RETRY` qiladi.
-const WAIT: &str = "oldinga chegara";
 
 struct PlayPos {
     pos_ms: u64,
@@ -281,14 +288,9 @@ fn read(h: i64, pos: u64, out: &mut [u8]) -> Result<usize, String> {
     let chunk = match cached {
         Some(b) => b,
         None => {
-            let b = if net_allowed(&r.name, r.total, index) {
-                load_chunk(&r.name, &r.dir, r.total, index)?
-            } else {
-                match video_cache::player_read_chunk(&r.dir, &r.name, index, r.total) {
-                    Some(b) => Arc::new(b),
-                    None => return Err(WAIT.to_string()),
-                }
-            };
+            // Pleyer SO'RAGAN bo'lak HAR DOIM beriladi — uni to'xtatib
+            // turish video qotib qolishiga olib keldi (quyidagi izoh).
+            let b = load_chunk(&r.name, &r.dir, r.total, index)?;
             if let Ok(mut l) = r.last.lock() {
                 *l = Some((index, Arc::clone(&b)));
             }
@@ -399,7 +401,7 @@ pub extern "system" fn Java_io_flutter_plugins_videoplayer_AruDataSource_nativeR
             }
             n as jint
         }
-        Err(e) if e == WAIT || telegram::is_net_err(&e) => RETRY as jint,
+        Err(e) if telegram::is_net_err(&e) => RETRY as jint,
         Err(e) => {
             video_cache::tg_log(format!("Pleyer: o'qib bo'lmadi: {e}"));
             -1

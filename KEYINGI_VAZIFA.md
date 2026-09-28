@@ -3968,3 +3968,11 @@ o'zgarmaydi). `main.dart` → `MaterialApp.builder`: `MediaQuery` ning
 `padding`/`viewPadding` pastki qiymati KAMIDA shuncha (klaviatura ochiq,
 landshaft va pleyer to'liq ekranda — `NavInset.immersive` — qo'llanmaydi).
 Qayta o'qish: birinchi kadr, ilovaga qaytish, to'liq ekrandan chiqish.
+
+**YANGILANISH: pleyer so'rovlari to'xtatilmaydi.** Pleyerning o'z
+o'qishlarini `WAIT` bilan to'xtatish tez-tez pauza va aylanma berdi
+(anime bitreyti sahnaga qarab bir necha barobar o'zgaradi). Endi pleyer
+so'ragan bo'lak doim beriladi; `net_allowed` faqat `prefetch` ga.
+Oldinda turadigan jami: pleyer buferi (`AruLoadControl`, ≤30 s) + ≤2 MiB.
+Diskdagi foiz esa BUTUN ko'rilgan joylarni (oldingi seanslar, sekdan
+oldingi joy) ham o'z ichiga oladi — u "oldinga yuklangan" degani emas.
