@@ -88,8 +88,8 @@ typedef _VideoWindowDart = int Function(Pointer<Utf8>, int);
 
 // Pleyerning ijro joyi (`rust/src/player_source.rs` → onlayn ko'rishda
 // ko'pi bilan 1 daqiqa oldinga yuklanadi).
-typedef _PlayerPosC = Void Function(Pointer<Utf8>, Int64, Int64);
-typedef _PlayerPosDart = void Function(Pointer<Utf8>, int, int);
+typedef _PlayerPosC = Void Function(Pointer<Utf8>, Int64, Int64, Int32);
+typedef _PlayerPosDart = void Function(Pointer<Utf8>, int, int, int);
 
 typedef _VideoTotalC = Uint64 Function(Pointer<Utf8>);
 typedef _VideoTotalDart = int Function(Pointer<Utf8>);
@@ -1036,7 +1036,11 @@ class RustCore {
   /// (`aru://file/<nom>`), `durMs` 0 — pleyer yopildi. Yadro diskda
   /// yo'q bo'lakni faqat shu joydan ko'pi bilan 1 daqiqa oldinda
   /// bo'lsa Telegram'dan oladi.
-  void playerPosition(String name, int posMs, int durMs) {
+  ///
+  /// `buffering` — pleyer ma'lumot kutib to'xtab turibdi: bu paytda
+  /// cheklov yo'q (aks holda u abadiy kutib qolishi mumkin).
+  void playerPosition(String name, int posMs, int durMs,
+      {bool buffering = false}) {
     if (!_loaded || name.isEmpty || _playerPosMissing) return;
     try {
       _playerPos ??= _lib.lookupFunction<_PlayerPosC, _PlayerPosDart>(
@@ -1047,7 +1051,7 @@ class RustCore {
     }
     final ptr = name.toNativeUtf8();
     try {
-      _playerPos!(ptr, posMs, durMs);
+      _playerPos!(ptr, posMs, durMs, buffering ? 1 : 0);
     } catch (_) {
     } finally {
       malloc.free(ptr);

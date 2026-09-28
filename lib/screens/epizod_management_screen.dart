@@ -319,11 +319,16 @@ class _AdminEpizodCard extends StatelessWidget {
       {required this.epizod, required this.onTap, required this.onDelete});
 
   String get _qualities {
+    // Kodlanguncha worker ASL videoni bo'sh sifat o'rnida beradi — u
+    // sifat nomi bilan emas, "Original — tayyorlanmoqda" deb ko'rinadi.
+    final o = (epizod['origin_video'] ?? '').toString();
+    bool isOrigin(String u) => o.isNotEmpty && (u == o || u.endsWith('/$o'));
     final q = <String>[];
-    if ((epizod['url_360p'] ?? '').isNotEmpty) q.add('360p');
-    if ((epizod['url_480p'] ?? '').isNotEmpty) q.add('480p');
-    if ((epizod['url_720p'] ?? '').isNotEmpty) q.add('720p');
-    if ((epizod['url_1080p'] ?? '').isNotEmpty) q.add('1080p');
+    for (final k in ['360p', '480p', '720p', '1080p']) {
+      final u = (epizod['url_$k'] ?? '').toString();
+      if (u.isNotEmpty && !isOrigin(u)) q.add(k);
+    }
+    if (o.isNotEmpty) q.add('Original \u2014 tayyorlanmoqda');
     return q.isEmpty ? 'Fayl yo\'q' : q.join(' • ');
   }
 

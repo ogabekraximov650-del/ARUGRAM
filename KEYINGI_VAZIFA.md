@@ -3943,3 +3943,10 @@ qayta ochilmasin. Cloudflare kesh kerak emas.
 - Worker: ro'yxatlarning Cloudflare chekka keshi butunlay olib tashlandi
   (`list_cache_url`, `purge_list_cache`, `encbot_purge` yo'q) — har so'rov
   bazadan.
+
+**Tuzatish: 1 daqiqa chegarasi pleyerni qotirib qo'ydi.** Pleyer buferi
+tugaganda ijro joyi surilmaydi, chegara ham — kerakli bo'lak chegaradan
+tashqarida bo'lsa pleyer abadiy kutardi. Endi ilova `buffering` ni ham
+beradi (`v.isBuffering`; sek oldidan — true) va BUFERLANAYOTGANDA cheklov
+yo'q. Admin ekranlarida asl video sifat nomi bilan emas: ro'yxatda
+"Original — tayyorlanmoqda", tahrirlashda faqat "Asl video" bo'limida.

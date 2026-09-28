@@ -162,13 +162,17 @@ class _AddEpizodScreenState extends State<AddEpizodScreen> {
       }
       _numberCtrl.text = (ep['epizod_number'] ?? '').toString();
       _nameCtrl.text = ep['epizod_name'] ?? '';
+      final o = (ep['origin_video'] ?? '').toString();
       for (final q in _qualities) {
         // Worker GET javobida to'liq URL keladi — bare nomga qaytaramiz,
         // saqlashda serverga aynan shu (bare) holida yuboriladi.
-        q.url = _extractFileName(ep[q.urlKey] as String?);
+        final u = _extractFileName(ep[q.urlKey] as String?);
+        // Kodlanguncha worker ASL videoni bo'sh sifat o'rnida beradi —
+        // u sifat emas (u yuqoridagi "Asl video" bo'limida ko'rinadi).
+        if (o.isNotEmpty && u == o) continue;
+        q.url = u;
         q.sizeBytes = fileSizeBytes(ep[q.sizeKey]);
       }
-      final o = (ep['origin_video'] ?? '').toString();
       if (o.isNotEmpty) _origin = o;
       _loadEncodeStatus();
     }

@@ -881,12 +881,17 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   /// shu joydan ko'pi bilan 1 daqiqa oldinda bo'lsa yuklanadi
   /// (`rust/src/player_source.rs`, foydalanuvchi talabi). Faqat
   /// `aru://` manbasida (Android, diskdan o'qish) ma'noli.
-  void _reportPosition(Duration at, {Duration? duration}) {
+  ///
+  /// `buffering` — pleyer ma'lumot kutib turibdi (yoki hozirgina sek
+  /// qilindi): bu paytda yadro cheklov qo'ymaydi, aks holda pleyer
+  /// kerakli bo'lakni abadiy kutib qolishi mumkin edi.
+  void _reportPosition(Duration at, {Duration? duration, bool? buffering}) {
     if (!_currentSource.startsWith('aru://') || _currentUrl.isEmpty) return;
     final dur = duration ?? _controller?.value.duration ?? Duration.zero;
     if (dur <= Duration.zero) return;
     RustCore.instance.playerPosition(TelegramService.fileNameOf(_currentUrl),
-        at.inMilliseconds, dur.inMilliseconds);
+        at.inMilliseconds, dur.inMilliseconds,
+        buffering: buffering ?? true);
   }
 
   void _checkSourceSwitch() {
@@ -2051,7 +2056,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       if (!v.isInitialized || v.duration <= Duration.zero) return;
 
       // ── MANBA O'ZGARDIMI (yuklab olindi / o'chirildi) ──────
-      _reportPosition(v.position, duration: v.duration);
+      _reportPosition(v.position,
+          duration: v.duration, buffering: v.isBuffering);
       if (DateTime.now().difference(_lastSourceCheck).inMilliseconds >= 2000) {
         _lastSourceCheck = DateTime.now();
         _checkSourceSwitch();

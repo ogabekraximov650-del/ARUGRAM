@@ -53,6 +53,16 @@ const AHEAD: u64 = 2;
 // (`AruDataSource`) biroz kutib qayta so'raydi, ijro esa buferdan davom
 // etadi va joy surilgan sari chegara ham suriladi.
 //
+// TOPILGAN XATO (foydalanuvchi: "video birdan to'xtab qoldi, qayta
+// kirsam ham ochilmayapti"): pleyer buferi TUGAGAN ("buferlanmoqda")
+// paytda ijro joyi surilmaydi, ya'ni chegara ham surilmaydi — kerakli
+// bo'lak chegaradan tashqarida bo'lsa pleyer abadiy kutib qolardi
+// (masalan audio va video fayl ichida uzoq joylashgan yoki bitreyt
+// o'rtachadan ancha baland joyda). Endi pleyer BUFERLANAYOTGANDA
+// (ilova `buffering` deb bildiradi) cheklov yo'q — unga aynan hozir
+// kerak bo'lgan narsa beriladi; chegara faqat bufer to'la, ijro
+// ketayotgan yoki pauza paytida ishlaydi.
+//
 // Istisnolar (ular bo'lmasa video ochilmay qolishi mumkin): fayl boshi
 // va oxiri (MP4 sarlavhasi `moov` ko'pincha oxirida), hamda ijro joyi
 // noma'lum yoki eskirgan (2 daqiqadan ko'p xabar kelmagan) holat. Surish
@@ -64,6 +74,7 @@ const WAIT: &str = "oldinga chegara";
 struct PlayPos {
     pos_ms: u64,
     dur_ms: u64,
+    buffering: bool,
     at: std::time::Instant,
 }
 
@@ -81,7 +92,7 @@ fn net_allowed(name: &str, total: u64, index: u64) -> bool {
     }
     let Ok(m) = positions().lock() else { return true };
     let Some(p) = m.get(name) else { return true };
-    if p.dur_ms == 0 || p.at.elapsed() > std::time::Duration::from_secs(120) {
+    if p.buffering || p.dur_ms == 0 || p.at.elapsed() > std::time::Duration::from_secs(120) {
         return true;
     }
     let limit = ((p.pos_ms + AHEAD_MS) as u128 * total as u128 / p.dur_ms as u128) as u64
@@ -299,7 +310,12 @@ fn size(h: i64) -> i64 {
 /// `name` — fayl nomi (`aru://file/<nom>` dagi), `dur_ms` 0 bo'lsa
 /// yozuv o'chiriladi (pleyer yopildi).
 #[no_mangle]
-pub extern "C" fn rust_player_position(name: *const std::os::raw::c_char, pos_ms: i64, dur_ms: i64) {
+pub extern "C" fn rust_player_position(
+    name: *const std::os::raw::c_char,
+    pos_ms: i64,
+    dur_ms: i64,
+    buffering: i32,
+) {
     if name.is_null() {
         return;
     }
@@ -312,6 +328,7 @@ pub extern "C" fn rust_player_position(name: *const std::os::raw::c_char, pos_ms
     m.insert(name.to_string(), PlayPos {
         pos_ms: pos_ms.max(0) as u64,
         dur_ms: dur_ms as u64,
+        buffering: buffering != 0,
         at: std::time::Instant::now(),
     });
 }
@@ -411,12 +428,15 @@ mod tests {
         // Joy noma'lum — cheklov yo'q.
         assert!(net_allowed(name, total, 300));
         let cname = std::ffi::CString::new(name).unwrap();
-        rust_player_position(cname.as_ptr(), 100_000, 600_000);
+        rust_player_position(cname.as_ptr(), 100_000, 600_000, 0);
         assert!(net_allowed(name, total, 150)); // 150 s — 50 s oldinda
         assert!(!net_allowed(name, total, 170)); // 170 s — 70 s oldinda
         assert!(net_allowed(name, total, 598)); // fayl oxiri (moov)
         assert!(net_allowed(name, total, 1)); // fayl boshi
-        rust_player_position(cname.as_ptr(), 0, 0);
+        // Pleyer buferlanmoqda (to'xtab qolgan) — kerakli bo'lak beriladi.
+        rust_player_position(cname.as_ptr(), 100_000, 600_000, 1);
+        assert!(net_allowed(name, total, 300));
+        rust_player_position(cname.as_ptr(), 0, 0, 0);
         assert!(net_allowed(name, total, 300));
     }
 
