@@ -11249,6 +11249,24 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
     if path == ENCBOT_PATH && method == Method::Post {
         return encbot_webhook(&env, req).await;
     }
+    // Tekshiruv: bot tokeni ishlaydimi va webhook qo'yilganmi (sirsiz).
+    if path == ENCBOT_PATH && method == Method::Get {
+        ENCBOT_READY.store(false, core::sync::atomic::Ordering::Relaxed);
+        let _ = config_put(&env, "encbot_webhook_for", "").await;
+        ensure_encbot_webhook(&env, &origin).await;
+        let me = encbot_api(&env, "getMe", json!({})).await;
+        let hook = encbot_api(&env, "getWebhookInfo", json!({})).await.unwrap_or(json!({}));
+        return ok_nostore(json!({
+            "token_set": !encbot_token(&env).is_empty(),
+            "bot": me.as_ref().ok().and_then(|m| m["username"].as_str().map(String::from)),
+            "bot_error": me.err().map(|e| e.to_string()),
+            "webhook_url": hook["url"],
+            "webhook_expected": format!("{origin}{ENCBOT_PATH}"),
+            "last_error": hook["last_error_message"],
+            "pending": hook["pending_update_count"],
+            "gh_token_set": !tg_secret(&env, "GH_ACTIONS_TOKEN").is_empty(),
+        }));
+    }
     if path.starts_with("/api/auth/") || path.starts_with("/api/telegram/") {
         // Kodlash botining webhook'i ham birinchi kirish so'rovida o'rnatiladi.
         if !encbot_token(&env).is_empty() {
