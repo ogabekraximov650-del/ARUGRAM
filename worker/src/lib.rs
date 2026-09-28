@@ -11055,20 +11055,38 @@ async fn tg_route(mut req: Request, env: &Env, path: &str, method: Method) -> Re
             // `copyMessages` raqamlar O'SIB boradigan tartibda bo'lishini talab qiladi.
             pairs.sort_by_key(|(_, id)| *id);
             pairs.dedup_by_key(|(_, id)| *id);
-            let ids: Vec<i64> = pairs.iter().map(|(_, id)| *id).collect();
-            let copied = tg_api(env, "copyMessages", json!({
-                "chat_id": tg_user,
-                "from_chat_id": channel,
-                "message_ids": ids,
-                // Izohda ochish kaliti turadi — foydalanuvchiga nusxa
-                // IZOHSIZ boradi (ilova faylni nomi bo'yicha topadi,
-                // kalitni `keys` dan oladi).
-                "remove_caption": true,
-                "protect_content": true,
-                "disable_notification": true,
-            })).await;
+            // Kodlash boti qo'ygan asl videolarda (`orig_bot_`) fayl nomi
+            // Telegram'niki (masalan `video.mp4`) — ilova ularni faqat IZOH
+            // (= bizdagi nom, kalit yo'q) bo'yicha topa oladi. Shu sabab
+            // ular izoh bilan, qolganlari izohsiz nusxalanadi.
+            let (with_cap, no_cap): (Vec<i64>, Vec<i64>) = {
+                let (a, b): (Vec<&(String, i64)>, Vec<&(String, i64)>) =
+                    pairs.iter().partition(|(n, _)| n.starts_with("orig_bot_"));
+                (a.iter().map(|(_, id)| *id).collect(), b.iter().map(|(_, id)| *id).collect())
+            };
+            let mut copied: Result<Value> = Ok(json!([]));
+            let mut sent = 0usize;
+            for (ids, remove) in [(no_cap, true), (with_cap, false)] {
+                if ids.is_empty() || copied.is_err() {
+                    continue;
+                }
+                copied = tg_api(env, "copyMessages", json!({
+                    "chat_id": tg_user,
+                    "from_chat_id": channel,
+                    "message_ids": ids,
+                    // Izohda ochish kaliti turadi — foydalanuvchiga nusxa
+                    // IZOHSIZ boradi (ilova faylni nomi bo'yicha topadi,
+                    // kalitni `keys` dan oladi).
+                    "remove_caption": remove,
+                    "protect_content": true,
+                    "disable_notification": true,
+                })).await;
+                if let Ok(v) = &copied {
+                    sent += v.as_array().map(|a| a.len()).unwrap_or(0);
+                }
+            }
             let sent = match copied {
-                Ok(v) => v.as_array().map(|a| a.len()).unwrap_or(0),
+                Ok(_) => sent,
                 Err(e) => {
                     let e = e.to_string();
                     // Foydalanuvchi botni to'xtatgan (blocked) — qayta

@@ -3888,3 +3888,9 @@ asl video ustunlari (`origin_video/key/size/height`) tozalanadi, `encode_jobs`
 qatori O'CHIRILADI (ilovadagi "Tayyor" belgisi endi chiqmaydi), `tg_files`
 qatori va kanal posti o'chadi (`tg_forget_file`; asosiy bot o'chira olmasa —
 kodlash boti).
+
+**Tuzatish: bot yuklagan asl video ochilmasdi.** `/api/tg/deliver` nusxalarni
+izohsiz (`remove_caption`) yuborardi, bot orqali kelgan videoning fayl nomi
+esa Telegram'niki (`video.mp4`) — ilova (`doc_matches`) uni nom bo'yicha
+topolmasdi. Endi `orig_bot_` fayllar alohida `copyMessages` bilan IZOHI
+bilan yuboriladi (izohda faqat nom, kalit yo'q).
