@@ -7,9 +7,9 @@
 //   2. Yuklanmalar — `DownloadsList`;
 //   3. Sevimlilar  — `FavoritesTab`.
 //
-// Oynalar `IndexedStack` bilan almashadi: bosilgan zahoti o'tadi va
-// ochilgan oyna holati (masalan tarix ro'yxatining o'rni) saqlanib
-// qoladi.
+// Oynalar `PageView` da: tugma bosilsa ham, barmoq bilan o'ngga-chapga
+// surilsa ham almashadi; ochilgan oyna holati (masalan tarix
+// ro'yxatining o'rni) saqlanib qoladi.
 
 import 'package:flutter/material.dart';
 
@@ -26,6 +26,29 @@ class LibraryScreen extends StatefulWidget {
 
 class _LibraryScreenState extends State<LibraryScreen> {
   int _tab = 0;
+
+  // ── BARMOQ BILAN SURIB O'TISH (foydalanuvchi talabi, 2026-09-29) ──
+  //
+  // "Ekranni qo'lda o'ngga yoki chapga surib Tarix, Yuklanmalar va
+  // Sevimlilar oynalariga o'tsa bo'ladigan qil". `IndexedStack` o'rniga
+  // `PageView`: tugma ham, surish ham bitta sahifani suzdiradi. Har
+  // oyna tirik saqlanadi (`_KeepAlive`) — ro'yxat o'rni yo'qolmaydi.
+  final PageController _pages = PageController();
+
+  @override
+  void dispose() {
+    _pages.dispose();
+    super.dispose();
+  }
+
+  void _goTo(int i) {
+    if (i == _tab) return;
+    _pages.animateToPage(
+      i,
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOutCubic,
+    );
+  }
 
   static const _titles = ['Tarix', 'Yuklanmalar', 'Sevimlilar'];
 
@@ -55,7 +78,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   child: _TabButton(
                     label: _titles[i],
                     active: _tab == i,
-                    onTap: () => setState(() => _tab = i),
+                    onTap: () => _goTo(i),
                   ),
                 ),
               );
@@ -63,18 +86,42 @@ class _LibraryScreenState extends State<LibraryScreen> {
           ),
         ),
         Expanded(
-          child: IndexedStack(
-            index: _tab,
-            sizing: StackFit.expand,
+          child: PageView(
+            controller: _pages,
+            physics: const BouncingScrollPhysics(),
+            // Qo'shni oyna oldindan quriladi — surishda qotish yo'q.
+            allowImplicitScrolling: true,
+            onPageChanged: (i) => setState(() => _tab = i),
             children: const [
-              HistoryTab(),
-              DownloadsList(),
-              FavoritesTab(),
+              _KeepAlive(child: HistoryTab()),
+              _KeepAlive(child: DownloadsList()),
+              _KeepAlive(child: FavoritesTab()),
             ],
           ),
         ),
       ],
     );
+  }
+}
+
+/// Sahifani `PageView` da tirik saqlaydi (ro'yxat o'rni yo'qolmasin).
+class _KeepAlive extends StatefulWidget {
+  final Widget child;
+  const _KeepAlive({required this.child});
+
+  @override
+  State<_KeepAlive> createState() => _KeepAliveState();
+}
+
+class _KeepAliveState extends State<_KeepAlive>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return widget.child;
   }
 }
 

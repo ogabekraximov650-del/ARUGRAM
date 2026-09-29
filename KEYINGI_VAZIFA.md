@@ -4011,3 +4011,11 @@ video berilmaydi va `/api/tg/deliver` uni faqat adminga beradi. Ro'yxat
 qism raqami bo'yicha BIRINCHI TAYYOR BO'LMAGAN qismda to'xtaydi
 (`episode_ready`). Admin ekrani (`epizod_management_screen`) `?all=1` +
 sessiya bilan hammasini oladi.
+
+**Kutubxona: surib o'tish, yuklanmalarda faqat bayti bor sifatlar, navbatdagi
+sifatda suzuvchi apelsin (2026-09-29).** `library_screen.dart`: `IndexedStack`
+o'rniga `PageView` (tugma ham, o'ngga-chapga surish ham; `_KeepAlive`).
+`history_screen.dart`: qism kartasida faqat `downloaded > 0`, yuklanayotgan
+yoki navbatdagi sifatlar; navbatdagi (yoki hajmi noma'lum yuklanayotgan)
+`_QualityBox` ustida `LinearProgressIndicator` (sifatlar oynasidagi
+cheksiz chiziq bilan bir xil).

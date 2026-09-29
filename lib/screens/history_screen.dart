@@ -565,8 +565,14 @@ class _DownloadRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final h = _watched;
-    final urls = [...item.allUrls]..sort((a, b) =>
-        _qualityRank(qualityOf(a)).compareTo(_qualityRank(qualityOf(b))));
+    // Faqat KAMIDA BIR BAYT yuklangan yoki hozir yuklanayotgan/navbatdagi
+    // sifatlar (foydalanuvchi talabi: "0 bayt sifatlar ko'rinmasin").
+    final urls = item.allUrls.where((u) {
+      final st = DownloadManager.instance.statOf(u);
+      return st.downloaded > 0 || st.downloading || st.queued;
+    }).toList()
+      ..sort((a, b) =>
+          _qualityRank(qualityOf(a)).compareTo(_qualityRank(qualityOf(b))));
     return Glass(
       borderRadius: 16,
       padding: const EdgeInsets.all(10),
@@ -696,16 +702,18 @@ class _DownloadRow extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 10),
-          // ── SIFAT OYNACHALARI ───────────────────────────────
-          Row(
-            children: [
-              for (var i = 0; i < urls.length; i++) ...[
-                if (i > 0) const SizedBox(width: 6),
-                Expanded(child: _QualityBox(url: urls[i])),
+          if (urls.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            // ── SIFAT OYNACHALARI ─────────────────────────────
+            Row(
+              children: [
+                for (var i = 0; i < urls.length; i++) ...[
+                  if (i > 0) const SizedBox(width: 6),
+                  Expanded(child: _QualityBox(url: urls[i])),
+                ],
               ],
-            ],
-          ),
+            ),
+          ],
         ],
       ),
     );
@@ -769,6 +777,10 @@ class _QualityBox extends StatelessWidget {
         total > 0 ? (st.downloaded / total).clamp(0.0, 1.0).toDouble() : 0.0;
     final done = total > 0 && st.downloaded >= total;
     final q = qualityOf(url);
+    // NAVBATDA (yoki hajmi hali noma'lum bo'lib yuklanayotgan) sifat:
+    // apelsin rang oynacha ustidan SUZIB O'TIB TURADI — sifatlar
+    // oynasidagi (`_ProgressBar` cheksiz holati) bilan bir xil.
+    final waiting = !done && (st.queued || (st.downloading && total <= 0));
     return GestureDetector(
       onTap: done ? null : () => DownloadManager.instance.download(url),
       behavior: HitTestBehavior.opaque,
@@ -783,6 +795,14 @@ class _QualityBox extends StatelessWidget {
         ),
         child: Stack(
           children: [
+            if (waiting)
+              Positioned.fill(
+                child: LinearProgressIndicator(
+                  backgroundColor: Colors.transparent,
+                  color: AppColors.accent.withValues(alpha: 0.55),
+                  minHeight: 48,
+                ),
+              ),
             FractionallySizedBox(
               widthFactor: ratio,
               heightFactor: 1,
