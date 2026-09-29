@@ -400,20 +400,33 @@ class _DownloadsListState extends State<DownloadsList>
           onRefresh: () => idx
               .refresh()
               .timeout(const Duration(seconds: 25), onTimeout: () {}),
+          // ── ANIME BO'YICHA (foydalanuvchi talabi, 2026-09-29) ──
+          //
+          // "Yuklanmalar oynasida ham qism bo'yicha emas, tomosha
+          // tarixidagidek anime bo'yicha ko'rsatilsin". Guruhlar
+          // tartibi — eng oxirgi yuklangan qism bo'yicha (`rows`
+          // shu tartibda keladi).
           child: rows.isEmpty
               ? _EmptyDownloads(loading: !idx.ready)
-              : ListView.builder(
-                  physics: const AlwaysScrollableScrollPhysics(
-                      parent: ClampingScrollPhysics()),
-                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 120),
-                  itemCount: rows.length,
-                  itemBuilder: (context, i) => RepaintBoundary(
-                    child: Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: _DownloadRow(item: rows[i]),
+              : Builder(builder: (context) {
+                  final groups = <int, List<DownloadItem>>{};
+                  for (final r in rows) {
+                    (groups[r.animeId] ??= []).add(r);
+                  }
+                  final list = groups.values.toList();
+                  return ListView.builder(
+                    physics: const AlwaysScrollableScrollPhysics(
+                        parent: ClampingScrollPhysics()),
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 120),
+                    itemCount: list.length,
+                    itemBuilder: (context, i) => RepaintBoundary(
+                      child: Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: _DownloadAnimeCard(items: list[i]),
+                      ),
                     ),
-                  ),
-                ),
+                  );
+                }),
         );
       },
     );
@@ -540,240 +553,158 @@ class _DownloadRow extends StatelessWidget {
     );
   }
 
+  // ── QISM KARTASI (foydalanuvchi talabi, 2026-09-29) ───────
+  //
+  //   [ kadr ]  Bo'lim nomi
+  //             N-bo'lim N-qism
+  //             [yuklab olish] [o'chirish]
+  //   [ 360p 12% ][ 720p 100% ][ 1080p 0% ]   <- har sifat oynachasi
+  //
+  // Oynachalar sifatlar soniga qarab eniga teng bo'linadi va
+  // yuklangan hajmga qarab chapdan o'ngga apelsin rangga to'ladi.
   @override
   Widget build(BuildContext context) {
     final h = _watched;
-    return GestureDetector(
-      onTap: () => _open(context),
-      behavior: HitTestBehavior.opaque,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    final urls = [...item.allUrls]..sort((a, b) =>
+        _qualityRank(qualityOf(a)).compareTo(_qualityRank(qualityOf(b))));
+    return Glass(
+      borderRadius: 16,
+      padding: const EdgeInsets.all(10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          // ── CHAP: KADR (tarix oynasidagidek) ────────────────
-          Expanded(
-            flex: 5,
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(14),
-              child: AspectRatio(
-                aspectRatio: 16 / 9,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    if (h != null)
-                      _Frame(item: h)
-                    else if (item.poster.isNotEmpty)
-                      CachedNetworkImage(
-                        cacheManager: AppImageCache.manager,
-                        imageUrl: item.poster,
-                        fit: BoxFit.cover,
-                        // Qator 16:9 va ekran kengligining yarmi —
-                        // 540 px yetib ortadi.
-                        memCacheWidth: 540,
-                        placeholder: (_, __) =>
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // ── CHAP: KADR ──────────────────────────────────
+              Expanded(
+                flex: 5,
+                child: GestureDetector(
+                  onTap: () => _open(context),
+                  behavior: HitTestBehavior.opaque,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: AspectRatio(
+                      aspectRatio: 16 / 9,
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          if (h != null)
+                            _Frame(item: h)
+                          else if (item.poster.isNotEmpty)
+                            CachedNetworkImage(
+                              cacheManager: AppImageCache.manager,
+                              imageUrl: item.poster,
+                              fit: BoxFit.cover,
+                              memCacheWidth: 540,
+                              placeholder: (_, __) =>
+                                  Container(color: AppColors.cardAlt),
+                              errorWidget: (_, __, ___) =>
+                                  Container(color: AppColors.cardAlt),
+                            )
+                          else
                             Container(color: AppColors.cardAlt),
-                        errorWidget: (_, __, ___) =>
-                            Container(color: AppColors.cardAlt),
-                      )
-                    else
-                      Container(color: AppColors.cardAlt),
-
-                    // To'xtagan joyning vaqti — kadr ustida.
-                    if (h != null)
-                      Positioned(
-                        left: 6,
-                        right: 6,
-                        bottom: 7,
-                        child: _ShadowText(
-                          '${_clock(h.positionMs)}/${_clock(h.durationMs)}',
-                          size: 10,
-                          weight: FontWeight.w600,
-                          align: TextAlign.right,
-                        ),
-                      ),
-
-                    // Tomosha progressi (tarixdagi bilan bir xil).
-                    Positioned(
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      child: SizedBox(
-                        height: 3.5,
-                        child: Stack(
-                          children: [
-                            Container(color: Colors.white24),
-                            FractionallySizedBox(
-                              widthFactor: h?.progress ?? 0,
-                              alignment: Alignment.centerLeft,
-                              child: Container(
-                                decoration: const BoxDecoration(
-                                  gradient: LinearGradient(
-                                    colors: [
-                                      AppColors.accent,
-                                      AppColors.accent2
-                                    ],
-                                  ),
-                                ),
+                          if (h != null)
+                            Positioned(
+                              left: 6,
+                              right: 6,
+                              bottom: 7,
+                              child: _ShadowText(
+                                '${_clock(h.positionMs)}/${_clock(h.durationMs)}',
+                                size: 10,
+                                weight: FontWeight.w600,
+                                align: TextAlign.right,
                               ),
                             ),
-                          ],
-                        ),
+                          // Tomosha progressi.
+                          Positioned(
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            child: SizedBox(
+                              height: 3.5,
+                              child: Stack(
+                                children: [
+                                  Container(color: Colors.white24),
+                                  FractionallySizedBox(
+                                    widthFactor: h?.progress ?? 0,
+                                    alignment: Alignment.centerLeft,
+                                    child: Container(
+                                      decoration: const BoxDecoration(
+                                        gradient: LinearGradient(colors: [
+                                          AppColors.accent,
+                                          AppColors.accent2
+                                        ]),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              // ── O'NG: BO'LIM NOMI, QISM, TUGMALAR ──────────
+              Expanded(
+                flex: 4,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      item.title.isEmpty ? 'Anime' : item.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        height: 1.25,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      '${item.bolimNumber}-bo\'lim ${item.epizodNumber}-qism',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.65),
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        _RowIconButton(
+                          icon: Icons.download_rounded,
+                          onTap: () => _openQualities(context),
+                        ),
+                        _RowIconButton(
+                          icon: Icons.delete_outline_rounded,
+                          onTap: () => _confirmDelete(context),
+                        ),
+                      ],
                     ),
                   ],
                 ),
               ),
-            ),
+            ],
           ),
-          const SizedBox(width: 10),
-
-          // ── O'NG: NOM, QISM, SIFAT, HAJM, FOIZ ──────────────
-          Expanded(
-            flex: 4,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Text(
-                        item.title.isEmpty ? 'Anime' : item.title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w700,
-                          height: 1.25,
-                        ),
-                      ),
-                    ),
-                    // ── IKKI TUGMA: YUKLAB OLISH VA TOZALASH ──
-                    //
-                    // TALAB (foydalanuvchi): "tozalash tugmasini
-                    // biroz kattalashtir va bosganda aniq
-                    // ishlaydigan qil" hamda "kadr yoniga yuklab
-                    // olish ikonini qo'y — bosganda mavjud
-                    // sifatlar, hajmlari va har birining
-                    // to'g'risida yuklab olish tugmasi chiqsin".
-                    //
-                    // Ikkovi ham 40x40 nuqta bosish maydoniga ega
-                    // (Android tavsiyasi 48, ro'yxat zich bo'lgani
-                    // uchun 40) — ilgari ikonka 17 nuqta edi va
-                    // barmoq ko'pincha tegmasdan qolardi.
-                    _RowIconButton(
-                      icon: Icons.download_rounded,
-                      onTap: () => _openQualities(context),
-                    ),
-                    _RowIconButton(
-                      icon: Icons.cleaning_services_rounded,
-                      onTap: () => _confirmDelete(context),
-                    ),
-                  ],
-                ),
-                Text(
-                  '${item.bolimNumber}-bo\'lim ${item.epizodNumber}-qism',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.6),
-                    fontSize: 11.5,
-                  ),
-                ),
-                const SizedBox(height: 5),
-                // Sifat va hajm — foydalanuvchi talabi: "qanaqa
-                // sifatda, qancha MB va qancha foiz yuklab
-                // olgani yozilib turilsin".
-                Row(
-                  children: [
-                    if (item.quality.isNotEmpty) ...[
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.10),
-                          borderRadius: BorderRadius.circular(5),
-                          border: Border.all(color: Colors.white24),
-                        ),
-                        child: Text(
-                          item.quality,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 10.5,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                    ],
-                    Flexible(
-                      child: Text(
-                        item.total > 0
-                            ? '${formatBytes(item.downloaded)} / '
-                                '${formatBytes(item.total)}'
-                            : formatBytes(item.downloaded),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.6),
-                          fontSize: 11,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                // ── PROGRESS CHIZIG'I ─────────────────────────
-                //
-                // TALAB (foydalanuvchi): "foizni admin panelidagi
-                // video yuklashdagidek real vaqt rejimida aniq va
-                // progress chizig'i bilan ko'rsatsin".
-                //
-                // Tugagan qismda chiziq ko'rsatilmaydi — u yerda
-                // yashil foiz o'zi yetarli.
-                if (!item.complete) ...[
-                  _ProgressBar(
-                    value: item.total > 0 ? item.ratio : null,
-                    color: AppColors.accent,
-                  ),
-                  const SizedBox(height: 5),
-                ],
-                Row(
-                  children: [
-                    Text(
-                      _percent(item.ratio * 100),
-                      style: TextStyle(
-                        color: item.complete
-                            ? AppColors.success
-                            : AppColors.accent,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const Spacer(),
-                    if (!item.complete) ...[
-                      Builder(builder: (context) {
-                        final st = DownloadManager.instance.statOf(item.url);
-                        final label = st.queued
-                            ? 'navbatda'
-                            : st.retrying
-                                ? 'qayta ulanmoqda...'
-                                : st.speedLabel;
-                        if (label.isEmpty) return const SizedBox.shrink();
-                        return Text(
-                          label,
-                          style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.5),
-                            fontSize: 10.5,
-                          ),
-                        );
-                      }),
-                    ],
-                  ],
-                ),
+          const SizedBox(height: 10),
+          // ── SIFAT OYNACHALARI ───────────────────────────────
+          Row(
+            children: [
+              for (var i = 0; i < urls.length; i++) ...[
+                if (i > 0) const SizedBox(width: 6),
+                Expanded(child: _QualityBox(url: urls[i])),
               ],
-            ),
+            ],
           ),
         ],
       ),
@@ -814,6 +745,292 @@ class _RowIconButton extends StatelessWidget {
         width: 40,
         height: 40,
         child: Icon(icon, size: 20, color: Colors.white70),
+      ),
+    );
+  }
+}
+
+/// Sifat tartibi uchun raqam (`720p` -> 720, noma'lum — oxirida).
+int _qualityRank(String q) =>
+    int.tryParse(q.replaceAll(RegExp(r'[^0-9]'), '')) ?? 1 << 30;
+
+/// Bitta sifat oynachasi: "360p  12%" va "9.0 MB / 70 MB"; foni
+/// yuklangan ulushga qarab chapdan o'ngga apelsin rangga to'ladi.
+/// Bosilsa — to'liq bo'lmagan sifat yuklab olishga qo'yiladi.
+class _QualityBox extends StatelessWidget {
+  final String url;
+  const _QualityBox({required this.url});
+
+  @override
+  Widget build(BuildContext context) {
+    final st = DownloadManager.instance.statOf(url);
+    final total = st.total;
+    final double ratio =
+        total > 0 ? (st.downloaded / total).clamp(0.0, 1.0).toDouble() : 0.0;
+    final done = total > 0 && st.downloaded >= total;
+    final q = qualityOf(url);
+    return GestureDetector(
+      onTap: done ? null : () => DownloadManager.instance.download(url),
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        height: 48,
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          color: AppColors.cardAlt,
+          border: Border.all(
+              color: done ? AppColors.accent : AppColors.border, width: 1),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Stack(
+          children: [
+            FractionallySizedBox(
+              widthFactor: ratio,
+              heightFactor: 1,
+              alignment: Alignment.centerLeft,
+              child: Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(colors: [
+                    AppColors.accent.withValues(alpha: 0.85),
+                    AppColors.accent2.withValues(alpha: 0.85),
+                  ]),
+                ),
+              ),
+            ),
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        '${q.isEmpty ? '?' : q}  ${_percent(ratio * 100)}',
+                        maxLines: 1,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        total > 0
+                            ? '${formatBytes(st.downloaded)} / ${formatBytes(total)}'
+                            : formatBytes(st.downloaded),
+                        maxLines: 1,
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.8),
+                          fontSize: 10.5,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Yuklanmalar ro'yxatidagi ANIME kartasi (tarixdagi `AnimeRow` kabi).
+class _DownloadAnimeCard extends StatelessWidget {
+  final List<DownloadItem> items;
+  const _DownloadAnimeCard({required this.items});
+
+  @override
+  Widget build(BuildContext context) {
+    final first = items.first;
+    final h = WatchHistory.instance
+        .findEpisode(first.animeId, first.seasonId, first.epizodId);
+    var got = 0;
+    var total = 0;
+    for (final it in items) {
+      got += it.downloaded;
+      total += it.total;
+    }
+    return GestureDetector(
+      onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) =>
+            DownloadsAnimeScreen(animeId: first.animeId, title: first.title),
+      )),
+      behavior: HitTestBehavior.opaque,
+      child: Glass(
+        borderRadius: 18,
+        padding: const EdgeInsets.all(10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: AspectRatio(
+                aspectRatio: 16 / 9,
+                child: h != null
+                    ? _Frame(item: h)
+                    : first.poster.isNotEmpty
+                        ? CachedNetworkImage(
+                            cacheManager: AppImageCache.manager,
+                            imageUrl: first.poster,
+                            fit: BoxFit.cover,
+                            memCacheWidth: 720,
+                            placeholder: (_, __) =>
+                                Container(color: AppColors.cardAlt),
+                            errorWidget: (_, __, ___) =>
+                                Container(color: AppColors.cardAlt),
+                          )
+                        : Container(color: AppColors.cardAlt),
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              first.title.isEmpty ? 'Anime' : first.title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 15.5,
+                fontWeight: FontWeight.w700,
+                height: 1.25,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '${items.length} ta qism yuklangan',
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.68),
+                fontSize: 12.5,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              total > 0
+                  ? 'Hajmi: ${formatBytes(got)} / ${formatBytes(total)}'
+                  : 'Hajmi: ${formatBytes(got)}',
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.52),
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Bitta animening yuklangan qismlari — qism raqami bo'yicha tartibda.
+class DownloadsAnimeScreen extends StatefulWidget {
+  final int animeId;
+  final String title;
+  const DownloadsAnimeScreen(
+      {super.key, required this.animeId, required this.title});
+
+  @override
+  State<DownloadsAnimeScreen> createState() => _DownloadsAnimeScreenState();
+}
+
+class _DownloadsAnimeScreenState extends State<DownloadsAnimeScreen> {
+  Timer? _tick;
+
+  @override
+  void initState() {
+    super.initState();
+    // Foizlar real vaqtda (ro'yxatdagidek).
+    _tick = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) DownloadsIndex.instance.refreshStats();
+    });
+  }
+
+  @override
+  void dispose() {
+    _tick?.cancel();
+    DownloadManager.instance.unwatch(this);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AppBackground(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        body: SafeArea(
+          child: AnimatedBuilder(
+            animation: Listenable.merge([
+              DownloadsIndex.instance,
+              WatchHistory.instance,
+              DownloadManager.instance,
+            ]),
+            builder: (context, _) {
+              final rows = DownloadsIndex.instance.items
+                  .where((e) => e.animeId == widget.animeId)
+                  .toList()
+                ..sort((a, b) {
+                  final c = a.bolimNumber.compareTo(b.bolimNumber);
+                  return c != 0 ? c : a.epizodNumber.compareTo(b.epizodNumber);
+                });
+              DownloadManager.instance.watch(this, {
+                for (final r in rows) ...r.allUrls,
+              });
+              return Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+                    child: Row(
+                      children: [
+                        GestureDetector(
+                          onTap: () => Navigator.of(context).pop(),
+                          behavior: HitTestBehavior.opaque,
+                          child: const Glass(
+                            borderRadius: 14,
+                            padding: EdgeInsets.all(8),
+                            child: Icon(Icons.arrow_back_rounded,
+                                color: Colors.white),
+                          ),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Text(
+                            widget.title.isEmpty ? 'Yuklanmalar' : widget.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: rows.isEmpty
+                        ? const _EmptyDownloads(loading: false)
+                        : ListView.builder(
+                            physics: const BouncingScrollPhysics(
+                                parent: AlwaysScrollableScrollPhysics()),
+                            padding: const EdgeInsets.fromLTRB(16, 4, 16, 40),
+                            itemCount: rows.length,
+                            itemBuilder: (context, i) => RepaintBoundary(
+                              child: Padding(
+                                padding: const EdgeInsets.only(bottom: 12),
+                                child: _DownloadRow(item: rows[i]),
+                              ),
+                            ),
+                          ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
       ),
     );
   }

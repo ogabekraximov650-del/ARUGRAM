@@ -42,7 +42,6 @@ import 'rust_bridge.dart';
 import 'sync_queue.dart';
 import 'video_cache_server.dart';
 import 'video_gate.dart';
-import 'watch_progress.dart';
 
 /// Tarixdagi bitta qism.
 class HistoryItem {
@@ -359,7 +358,10 @@ class WatchHistory extends ChangeNotifier {
   DateTime _lastPrewarm = DateTime.fromMillisecondsSinceEpoch(0);
 
   /// Ko'rish davomida kadr shuncha vaqtda bir marta tayyorlanadi.
-  static const Duration _prewarmGap = Duration(seconds: 45);
+  ///
+  /// 45 s edi; foydalanuvchi talabi — "kadr tez yangilansin". Kalit kadr
+  /// diskdagi keshdan olinadi (tarmoq emas), ya'ni 10 s arzon.
+  static const Duration _prewarmGap = Duration(seconds: 10);
 
   /// KADRNI KO'RISH DAVOMIDA TAYYORLAB QO'YADI.
   ///
@@ -460,9 +462,12 @@ class WatchHistory extends ChangeNotifier {
     // Endi chegara qism uzunligiga bog'langan (`WatchProgress`
     // bilan bitta qoida): uzunlikning 10% i, lekin ko'pi bilan
     // 15 soniya.
-    final minMs = WatchProgress.minPositionFor(
-      Duration(milliseconds: duration),
-    ).inMilliseconds;
+    //
+    // YANGILANISH (foydalanuvchi talabi, 2026-09-29): "kadrlar qancha
+    // ko'rsa ham ko'rinsin — faqat 1-soniyasini ko'rsa ham aynan o'sha
+    // kadr". Endi chegara 1 soniya: tarixga ham, kadr ham shundan.
+    // (Qayerdan davom ettirish — `WatchProgress` — o'z qoidasida.)
+    const minMs = 1000;
     // Hali chegaraga yetmagan — yozuv KUTIB TURADI (yo'q
     // qilinmaydi: ko'rish davom etsa chegaradan o'tadi).
     if (duration <= 0 || position < minMs) return;

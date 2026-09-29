@@ -3989,3 +3989,16 @@ talabi: "1:00 da 2:00 gacha, 1:01 da 2:01 gacha").** `player_source.rs` →
 yo'q bo'laklar ketma-ket olinadi (bir fayl — bitta oqim, `filling`).
 Chegaradan keyingisi olinmaydi. Qadam — 1 MiB bo'lak (bitreytga qarab bir
 necha soniya). Test: `oyna_joy_bilan_birga_suriladi`.
+
+## YUKLANMALAR ANIME BO'YICHA, ASL VIDEO YASHIRILDI (2026-09-29)
+
+- Kutubxona: Tarix · Yuklanmalar · Sevimlilar. Tarix faqat anime bo'yicha.
+  Yuklanmalar ham anime bo'yicha (`_DownloadAnimeCard` → `DownloadsAnimeScreen`,
+  qismlar raqam bo'yicha); qism kartasida har sifat uchun `_QualityBox`
+  (eni sifatlar soniga qarab, yuklangan ulushga qarab apelsin to'ladi).
+- Tarixga tushish chegarasi 1 s (kadr ham), ko'rishda kadr har 10 s.
+- Asl video ilovada KO'RSATILMAYDI (`with_origin` olib tashlandi): u
+  shifrlanmagan va foydalanuvchi bot chatida Telegram'da ochiq ko'rinardi.
+  `/api/tg/deliver` `orig_` ni faqat adminga beradi.
+- Sifat hajmi yorlig'i avval diskdan (`rust_video_cache_total`), bo'lmasa
+  `size_*` (ustunlar zaxira sifatida qoladi — foydalanuvchi tanlovi).

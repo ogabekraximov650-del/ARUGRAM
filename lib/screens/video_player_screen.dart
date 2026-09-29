@@ -1048,6 +1048,15 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     return u == o || u.endsWith('/$o');
   }
 
+  /// Sifat hajmi yorlig'i: avval DISKDAN (fayl ochilgan/yuklangan bo'lsa
+  /// Telegram'dan olingan aniq hajm `meta.json` da turadi), bo'lmasa
+  /// bazadagi `size_*` (zaxira). Foydalanuvchi talabi, 2026-09-29.
+  static String _sizeLabel(Map<String, dynamic> ep, String q) {
+    final url = (ep['url_$q'] ?? '').toString();
+    final disk = url.isEmpty ? 0 : RustCore.instance.videoTotalBytes(url);
+    return fileSizeLabel(disk > 0 ? disk : ep['size_$q']);
+  }
+
   /// Ekranda ko'rinadigan sifat nomi.
   static String _qualityTitle(Map<String, dynamic> ep, String q) =>
       _isOriginQuality(ep, q) ? 'Original' : q;
@@ -3736,7 +3745,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
               ...ordered.map((q) {
                 final sel = _selectedQuality == q ||
                     (_selectedQuality == null && q == _qualityLabel(ep));
-                final size = fileSizeLabel(ep['size_$q']);
+                final size = _sizeLabel(ep, q);
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 10),
                   child: GestureDetector(
@@ -4825,7 +4834,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                                   (_selectedQuality == null &&
                                       q == _qualityLabel(_currentEp!));
                               final size =
-                                  fileSizeLabel(_currentEp!['size_$q']);
+                                  _sizeLabel(_currentEp!, q);
                               return GestureDetector(
                                 behavior: HitTestBehavior.opaque,
                                 onTap: () => _selectQualityFromPanel(q),
@@ -5685,7 +5694,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
         .map((q) => _QualityInfo(
               label: _qualityTitle(ep, q),
               url: (ep['url_$q'] ?? '').toString(),
-              sizeLabel: fileSizeLabel(ep['size_$q']),
+              sizeLabel: _sizeLabel(ep, q),
             ))
         .where((q) => q.url.isNotEmpty && _qualityVisible(q.url))
         .toList();

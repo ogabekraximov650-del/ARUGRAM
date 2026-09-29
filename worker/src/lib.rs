@@ -3125,45 +3125,14 @@ fn hide_keys(mut obj: Value) -> Value {
     obj
 }
 
-/// Asl video qaysi sifat o'rnida ko'rsatiladi — balandligi bo'yicha
-/// (noma'lum bo'lsa 720p).
-fn origin_slot(height: i64) -> &'static str {
-    match height {
-        h if h >= 900 => "1080p",
-        h if h >= 600 => "720p",
-        h if h >= 420 => "480p",
-        h if h > 0 => "360p",
-        _ => "720p",
-    }
-}
-
-/// SIFATLAR TAYYOR BO'LGUNCHA ASL VIDEO (foydalanuvchi talabi).
-///
-/// Qism avto-kodlashda turgan paytda (`origin_video` bor) asl video
-/// o'z balandligiga mos BO'SH sifat o'rnida beriladi — ilova uni
-/// oddiy sifat kabi ochadi (pleyer, yuklab olish), ilovaga o'zgartirish
-/// kerak emas. Kodlangan sifat yozilgach (`/api/encode/quality`) o'sha
-/// o'rin haqiqiy faylga o'tadi, hammasi tayyor bo'lgach (`finish`)
-/// `origin_video` tozalanadi va asl video ro'yxatdan yo'qoladi.
-///
-/// Bazaga hech narsa yozilmaydi — faqat javobda. Tahrirlash oynasi
-/// shu qiymatni qaytarib yuborsa, PUT uni e'tiborsiz qoldiradi.
-fn with_origin(mut obj: Value) -> Value {
-    let origin = obj["origin_video"].as_str().unwrap_or("").trim().to_string();
-    if origin.is_empty() {
-        return obj;
-    }
-    let q = origin_slot(jint(&obj, "origin_height"));
-    let size = jint(&obj, "origin_size");
-    if let Some(m) = obj.as_object_mut() {
-        let empty = m.get(&format!("url_{q}")).and_then(|v| v.as_str()).map(|v| v.is_empty()).unwrap_or(true);
-        if empty {
-            m.insert(format!("url_{q}"), json!(origin));
-            m.insert(format!("size_{q}"), json!(size));
-        }
-    }
-    obj
-}
+// ── ASL VIDEO ILOVADA KO'RSATILMAYDI (2026-09-29) ─────────────
+//
+// Ilgari kodlanguncha asl video bo'sh sifat o'rnida berilardi
+// (`with_origin`). Foydalanuvchi talabi bilan olib tashlandi: asl
+// video SHIFRLANMAGAN (kodlash botidan kelgan) va u foydalanuvchining
+// bot chatiga nusxalanganda Telegram'da ochiq ko'rinardi. Endi qism
+// faqat kodlangan sifatlari bilan ko'rinadi; `orig_` fayllar
+// `/api/tg/deliver` da faqat adminga beriladi.
 
 /// `epizod_db` dagi intro ustunlari soni — 5 ta juftlik.
 const INTRO_SLOTS: usize = 10;
@@ -10604,7 +10573,7 @@ async fn encbot_video(env: &Env, msg: &Value, a: i64, s: i64, n: i64) {
     encbot_send(env, chat, &format!(
         "\u{2705} {n}-qism {} va kodlashga navbatga qo'yildi.\n\
          \u{1F4CB} Navbatda jami: {inq} ta video.\n\
-         \u{1F4FA} Sifatlar tayyor bo'lguncha ilovada asl video ko'rsatiladi.\n\n{kick}",
+         \u{1F4FA} Qism ilovada birinchi sifat kodlangach ko'rinadi.\n\n{kick}",
         if replaced { "almashtirildi" } else { "qo'shildi" }), None).await;
 }
 
@@ -10996,6 +10965,15 @@ async fn tg_route(mut req: Request, env: &Env, path: &str, method: Method) -> Re
             // Oxirgisi bitta so'rov bilan va faqat shunday nomlar
             // bo'lsa (odatda ekranda bir nechta rasm).
             let admin = is_admin(&u);
+            // Kodlanmagan ASL video (`orig_`) shifrlanmagan — u
+            // foydalanuvchi bot chatida Telegram'ning o'zida ochiq
+            // ko'rinardi. Endi faqat adminga (foydalanuvchi talabi).
+            if !admin {
+                names.retain(|n| !n.starts_with("orig_"));
+                if names.is_empty() {
+                    return json_resp(&json!({"error": "not_on_telegram"}), 404);
+                }
+            }
             let own = format!("chat_{me}_");
             let foreign: Vec<String> = if admin {
                 Vec::new()
@@ -11688,7 +11666,7 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
                         vec![TursoArg::text(parts[0]), TursoArg::text(parts[1])]).await?;
                     let cols = res["cols"].as_array().cloned().unwrap_or_default();
                     let rows = res["rows"].as_array().cloned().unwrap_or_default();
-                    let items = rows.iter().map(|r| with_origin(hide_keys(row_to_obj(&cols, r.as_array().unwrap_or(&vec![]))))).collect::<Vec<_>>();
+                    let items = rows.iter().map(|r| hide_keys(row_to_obj(&cols, r.as_array().unwrap_or(&vec![])))).collect::<Vec<_>>();
                     return ok(json!(resolve_list(&origin, items, EPIZOD_URL_KEYS)));
                 }
 
@@ -11746,7 +11724,7 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
                             let cols = res["cols"].as_array().cloned().unwrap_or_default();
                             let rows = res["rows"].as_array().cloned().unwrap_or_default();
                             if rows.is_empty() { return err500("Yangilashda xato"); }
-                            return ok(resolve_fields(&origin, with_origin(hide_keys(row_to_obj(&cols, rows[0].as_array().unwrap_or(&vec![])))), EPIZOD_URL_KEYS));
+                            return ok(resolve_fields(&origin, hide_keys(row_to_obj(&cols, rows[0].as_array().unwrap_or(&vec![]))), EPIZOD_URL_KEYS));
                         }
 
                         if method == Method::Delete {
