@@ -153,7 +153,13 @@ type SpanReader<'a> = &'a dyn Fn(u64, u64) -> Option<Vec<u8>>;
 /// `moov` ni topib `VideoTrack` ga o'giradi. Yuqori darajadagi atomlar
 /// kezib chiqiladi (`mdat` ni sakrab o'tadi), shu sabab `moov` oxirida
 /// bo'lsa ham kam o'qiladi.
-fn track_from(total: u64, read: SpanReader) -> Option<crate::mp4::VideoTrack> {
+/// Video va (bo'lsa) ovoz yo'lakchalarining namuna jadvallari.
+pub(crate) struct Tracks {
+    pub video: crate::mp4::VideoTrack,
+    pub audio: Option<crate::mp4::VideoTrack>,
+}
+
+fn track_from(total: u64, read: SpanReader) -> Option<Tracks> {
     /// Himoya: buzilgan faylda cheksiz aylanib qolmaslik uchun.
     const MAX_BOXES: usize = 64;
     /// `moov` odatda 1 MB atrofida; 32 MB dan kattasi shubhali.
@@ -176,7 +182,9 @@ fn track_from(total: u64, read: SpanReader) -> Option<crate::mp4::VideoTrack> {
                 return None;
             }
             let moov = read(body_start, body_len)?;
-            return crate::mp4::parse_moov(&moov);
+            let video = crate::mp4::parse_moov(&moov)?;
+            let audio = crate::mp4::parse_moov_audio(&moov);
+            return Some(Tracks { video, audio });
         }
         let next = body_start.checked_add(body_len)?;
         if next <= at {
@@ -219,7 +227,7 @@ fn read_span(r: &Reader, off: u64, len: u64) -> Option<Vec<u8>> {
 
 /// Namuna jadvali: o'qilgan bo'lsa shu; `parse` bo'lsa va hali o'qilmagan
 /// bo'lsa — o'qiydi (tarmoq bo'lishi mumkin: FAQAT fon oqimidan).
-fn track_of(r: &Reader, parse: bool) -> Option<Arc<crate::mp4::VideoTrack>> {
+fn track_of(r: &Reader, parse: bool) -> Option<Arc<Tracks>> {
     {
         let g = r.track.lock().ok()?;
         if let Some(t) = &g.0 {
@@ -236,8 +244,8 @@ fn track_of(r: &Reader, parse: bool) -> Option<Arc<crate::mp4::VideoTrack>> {
             g.0 = Some(Arc::clone(&t));
             // Pleyer chizig'i uchun aniq "bayt → soniya" jadvali.
             let tm = TimeMap {
-                chunk_ms: t.chunk_start_ms(video_cache::PLAYER_CHUNK, r.total),
-                dur_ms: (t.duration_secs() * 1000.0) as u64,
+                chunk_ms: t.video.chunk_start_ms(video_cache::PLAYER_CHUNK, r.total),
+                dur_ms: (t.video.duration_secs() * 1000.0) as u64,
             };
             if let Ok(mut m) = time_maps().lock() {
                 m.insert(video_cache::player_key(&r.name), Arc::new(tm));
@@ -251,8 +259,17 @@ fn track_of(r: &Reader, parse: bool) -> Option<Arc<crate::mp4::VideoTrack>> {
     }
 }
 
-/// `[joy bo'lagi, chegara bo'lagi]` — ijro joyi ma'lum bo'lsa.
-fn window_of(r: &Reader, parse: bool) -> Option<(u64, u64)> {
+/// Oyna: bo'laklar oraliqlari (video va ovoz alohida — ular faylda
+/// uzoq-uzoqda turishi mumkin) — `[joy bo'lagi, chegara bo'lagi]`.
+///
+/// OVOZ HAM HISOBGA OLINADI (foydalanuvchi: "video qotib qoldi"):
+/// ovoz va video kalta ketma-ketlikda joylashmagan (qo'pol interleave)
+/// fayllarda ExoPlayer ovoz baytlari uchun faylning BOSHQA joyiga
+/// sakraydi. Oyna faqat video bo'yicha bo'lsa, o'sha bo'lak "oynadan
+/// tashqari" deb kutdirilib, pleyer qotib qolardi. Endi ikkala
+/// yo'lakcha uchun `pos .. pos + 1 daqiqa` baytlari oynaga kiradi —
+/// bu 1 daqiqalik ijro uchun eng kam kerakli baytlar.
+fn windows_of(r: &Reader, parse: bool) -> Option<Vec<(u64, u64)>> {
     let (pos, dur) = {
         let m = positions().lock().ok()?;
         let p = m.get(&r.name)?;
@@ -261,14 +278,23 @@ fn window_of(r: &Reader, parse: bool) -> Option<(u64, u64)> {
     if dur == 0 || r.total == 0 {
         return None;
     }
+    let last = r.total.saturating_sub(1) / video_cache::PLAYER_CHUNK;
+    let mut out = Vec::new();
     if let Some(t) = track_of(r, parse) {
-        let last = r.total.saturating_sub(1) / video_cache::PLAYER_CHUNK;
-        let off = |ms: u64| t.locate(t.sample_at_ms(ms)).map(|x| x.offset);
-        if let (Some(a), Some(b)) = (off(pos), off(pos + AHEAD_MS)) {
-            return Some(((a / video_cache::PLAYER_CHUNK).min(last), (b / video_cache::PLAYER_CHUNK).min(last)));
+        for tr in std::iter::once(&t.video).chain(t.audio.iter()) {
+            let off = |ms: u64| tr.locate(tr.sample_at_ms(ms)).map(|x| x.offset);
+            if let (Some(a), Some(b)) = (off(pos), off(pos + AHEAD_MS)) {
+                out.push((
+                    (a / video_cache::PLAYER_CHUNK).min(last),
+                    (b / video_cache::PLAYER_CHUNK).min(last),
+                ));
+            }
         }
     }
-    Some(avg_window(pos, dur, r.total))
+    if out.is_empty() {
+        out.push(avg_window(pos, dur, r.total));
+    }
+    Some(out)
 }
 
 fn fill_window(name: &str) {
@@ -290,8 +316,8 @@ fn fill_window(name: &str) {
             if r.closed.load(Ordering::SeqCst) {
                 break;
             }
-            let Some((from, to)) = window_of(&r, true) else { break };
-            let next = (from..=to).find(|&i| {
+            let Some(wins) = windows_of(&r, true) else { break };
+            let next = wins.iter().flat_map(|&(a, b)| a..=b).find(|&i| {
                 !video_cache::player_has_chunk(&r.dir, i, r.total)
                     && !flights().lock().map(|m| m.contains_key(&(r.name.clone(), i))).unwrap_or(true)
             });
@@ -320,8 +346,8 @@ fn net_allowed(r: &Reader, index: u64) -> bool {
             return true;
         }
     }
-    match window_of(r, false) {
-        Some((_, to)) => index <= to + 1,
+    match windows_of(r, false) {
+        Some(wins) => wins.iter().any(|&(a, b)| index + 1 >= a && index <= b + 1),
         None => true,
     }
 }
@@ -337,7 +363,10 @@ struct Reader {
     /// har safar diskdan ochib o'tirmaslik uchun).
     last: Mutex<Option<(u64, Arc<Vec<u8>>)>>,
     /// Namuna jadvali (`moov`) va o'qib bo'lmagan urinishlar soni.
-    track: Mutex<(Option<Arc<crate::mp4::VideoTrack>>, u8)>,
+    track: Mutex<(Option<Arc<Tracks>>, u8)>,
+    /// Pleyer so'ragan bo'lak oynadan tashqarida bo'lib, kutilayotgan
+    /// bo'lsa: (bo'lak, qachondan). Uzoq kutilsa — majburan beriladi.
+    waiting: Mutex<Option<(u64, std::time::Instant)>>,
 }
 
 /// Bir bo'lakni ikki marta yuklamaslik uchun: (fayl, indeks) -> kutish.
@@ -407,6 +436,7 @@ fn open(name: &str, size_hint: u64) -> Result<i64, String> {
         closed: Arc::new(AtomicBool::new(false)),
         last: Mutex::new(None),
         track: Mutex::new((None, 0)),
+        waiting: Mutex::new(None),
     });
     readers().lock().map_err(|e| e.to_string())?.insert(h, r);
     Ok(h)
@@ -525,7 +555,22 @@ fn read(h: i64, pos: u64, out: &mut [u8]) -> Result<usize, String> {
             // diskda bo'lmasa kutadi (`WAIT`). Ketma-ket o'qish uchun
             // alohida ruxsat YO'Q: pleyerning o'z zaxirasi (≤30 s) oynaga
             // sig'adi, ruxsat esa oynani sekin "sudrab" ketardi.
-            let b = if net_allowed(&r, index) {
+            let allowed = net_allowed(&r, index) || {
+                // Pleyer bir bo'lakni 3 soniyadan ortiq kutsa — majburan
+                // beriladi: qotib qolgandan ko'ra bitta ortiqcha bo'lak.
+                let mut w = r.waiting.lock().map_err(|e| e.to_string())?;
+                match *w {
+                    Some((i, since)) if i == index => since.elapsed() >= std::time::Duration::from_secs(3),
+                    _ => {
+                        *w = Some((index, std::time::Instant::now()));
+                        false
+                    }
+                }
+            };
+            let b = if allowed {
+                if let Ok(mut w) = r.waiting.lock() {
+                    *w = None;
+                }
                 load_chunk(&r.name, &r.dir, r.total, index, "pleyer")?
             } else {
                 match video_cache::player_read_chunk(&r.dir, &r.name, index, r.total) {
@@ -674,6 +719,7 @@ mod tests {
             closed: Arc::new(AtomicBool::new(false)),
             last: Mutex::new(None),
             track: Mutex::new((None, 0)),
+            waiting: Mutex::new(None),
         }
     }
 
@@ -705,13 +751,13 @@ mod tests {
         let r = test_reader(name, total);
         let cname = std::ffi::CString::new(name).unwrap();
         rust_player_position(cname.as_ptr(), 60_000, 600_000, 0);
-        assert_eq!(window_of(&r, false), Some((60, 120)));
+        assert_eq!(windows_of(&r, false), Some(vec![(60, 120)]));
         rust_player_position(cname.as_ptr(), 61_000, 600_000, 0);
-        assert_eq!(window_of(&r, false), Some((61, 121)));
+        assert_eq!(windows_of(&r, false), Some(vec![(61, 121)]));
         rust_player_position(cname.as_ptr(), 590_000, 600_000, 0);
-        assert_eq!(window_of(&r, false), Some((590, 599)));
+        assert_eq!(windows_of(&r, false), Some(vec![(590, 599)]));
         rust_player_position(cname.as_ptr(), 0, 0, 0);
-        assert_eq!(window_of(&r, false), None);
+        assert_eq!(windows_of(&r, false), None);
     }
 
     /// Haqiqiy MP4 (`gif_h264.mp4`): namuna jadvali `moov` dan o'qiladi va
@@ -724,7 +770,8 @@ mod tests {
             let end = off.checked_add(len)?.min(total);
             file.get(off as usize..end as usize).map(|s| s.to_vec())
         };
-        let t = track_from(total, &read).expect("moov o'qilishi kerak");
+        let tracks = track_from(total, &read).expect("moov o'qilishi kerak");
+        let t = &tracks.video;
         let mut prev = 0u64;
         for ms in (0..2000u64).step_by(100) {
             let s = t.sample_at_ms(ms);

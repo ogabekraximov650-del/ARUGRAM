@@ -4041,3 +4041,11 @@ o'chirish qizil, hamma sifat yig'indi tezligi.
 karta: bo'lim nomi, "N-bo'lim", biror sifati TO'LIQ yuklangan qismlar soni,
 "Hajmi" — faqat DISKDA mavjud bayt (jami hajm emas). Karta ichi
 (`DownloadsAnimeScreen`) shu bo'limning qismlari, raqam bo'yicha.
+
+**Tuzatish: pleyer qotib qolardi (ovoz uzoqda).** Oyna faqat VIDEO yo'lakcha
+bo'yicha edi; ovoz va video qo'pol interleave qilingan fayllarda ExoPlayer
+ovoz baytlari uchun faylning boshqa joyiga sakraydi va o'sha bo'lak
+"oynadan tashqari" deb kutdirilardi. Endi oyna VIDEO + OVOZ (`mp4::
+parse_moov_audio`) yo'lakchalari uchun `pos .. pos + 1 daqiqa` baytlari
+(`windows_of`), fon to'ldirish ham ikkalasini oladi. Zaxira: pleyer bir
+bo'lakni 3 s dan ko'p kutsa, majburan beriladi (`Reader::waiting`).

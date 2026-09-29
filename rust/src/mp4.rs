@@ -216,6 +216,17 @@ impl VideoTrack {
 }
 
 pub fn parse_moov(moov: &[u8]) -> Option<VideoTrack> {
+    parse_moov_kind(moov, b"vide")
+}
+
+/// Ovoz yo'lakchasi (`soun`) — faqat namuna jadvallari kerak
+/// (`locate`, `sample_at_ms`): pleyer oynasi ovoz baytlarini ham
+/// hisoblashi uchun (`player_source`).
+pub fn parse_moov_audio(moov: &[u8]) -> Option<VideoTrack> {
+    parse_moov_kind(moov, b"soun")
+}
+
+fn parse_moov_kind(moov: &[u8], want: &[u8; 4]) -> Option<VideoTrack> {
     for trak in traks(moov) {
         let mdia = match child(trak, b"mdia") {
             Some(v) => v,
@@ -227,7 +238,7 @@ pub fn parse_moov(moov: &[u8]) -> Option<VideoTrack> {
             None => continue,
         };
         // hdlr: [4 version+flags][4 predefined][4 handler_type]
-        if hdlr.len() < 12 || &hdlr[8..12] != b"vide" {
+        if hdlr.len() < 12 || &hdlr[8..12] != want {
             continue;
         }
 
