@@ -88,6 +88,11 @@ def main():
                    "description": "Avto-kodlash (H.265)"}, ok=(201, 422))
     print("Repo yaratildi" if code == 201 else "Repo bor — o'shanga yuklanadi")
     repo = f"/repos/{login}/{NAME}"
+    # Mavjud reponing ko'rinishi so'ralganiga moslanadi (public/private).
+    _, info = api("GET", repo)
+    if bool(info.get("private")) != PRIVATE:
+        api("PATCH", repo, {"private": PRIVATE})
+        print("Repo endi " + ("private" if PRIVATE else "PUBLIC"))
 
     files = {
         ".github/workflows/encode.yml": HERE / "avtoencode.workflow.yml",
