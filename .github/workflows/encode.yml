@@ -9,12 +9,10 @@ name: Avto-kodlash (H.265)
 # ish — `tool/encode/run.py` (`anime` repodagi `encode_h265.sh`
 # sozlamalari bilan).
 #
-# ISHGA TUSHISHI: worker o'zi (`workflow_dispatch` API orqali) —
-# qism navbatga qo'yilganda va cron'da har 10 daqiqada, agar navbatda
-# ish bo'lsa-yu, hech bir run ishlamayotgan bo'lsa (`encode_kick`,
-# `GH_ACTIONS_TOKEN`). Qo'lda ham bo'ladi:
-# Actions -> "Avto-kodlash (H.265)" -> Run workflow. Bitta run navbatdagi
-# hamma qismni (yuklangan vaqti bo'yicha) ketma-ket kodlaydi; navbat bo'sh
+# ISHGA TUSHISHI: bu repoda FAQAT QO'LDA (Actions -> "Avto-kodlash
+# (H.265)" -> Run workflow). Avtomatik ishga tushirish YANGI akkauntdagi
+# `avtoencode` repoda (worker `GH_REPO` secret'i shu repoga qaraydi).
+# Bitta run navbatdagi hamma qismni ketma-ket kodlaydi; navbat bo'sh
 # bo'lsa ~10 soniyada tugaydi.
 #
 # KETMA-KET: `concurrency` — bir vaqtda faqat bitta run; navbatning
@@ -41,7 +39,7 @@ permissions:
 jobs:
   encode:
     runs-on: ubuntu-latest
-    timeout-minutes: 350
+    timeout-minutes: 300
     steps:
       - name: Worker manzili va navbat
         id: peek

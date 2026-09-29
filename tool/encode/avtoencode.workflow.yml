@@ -2,7 +2,10 @@ name: Avto-kodlash (H.265)
 
 on:
   # Faqat worker (Cloudflare cron, har 10 daqiqada navbatni tekshiradi)
-  # navbat bo'sh bo'lmaganda ishga tushiradi; qo'lda ham bo'ladi.
+  # navbat bo'sh bo'lmaganda va run ishlamayotganda ishga tushiradi.
+  # Run 4 soatdan keyin yangi ish olmaydi, 5 soatda majburan to'xtaydi;
+  # keyingi cron (yoki oxirgi qadam) uni yangidan boshlaydi.
+  # Qo'lda ham bo'ladi.
   workflow_dispatch: {}
 
 concurrency:
@@ -16,7 +19,7 @@ permissions:
 jobs:
   encode:
     runs-on: ubuntu-latest
-    timeout-minutes: 350
+    timeout-minutes: 300
     env:
       API_BASE: ${{ secrets.API_BASE || 'https://arugram.uzcom.workers.dev' }}
     steps:

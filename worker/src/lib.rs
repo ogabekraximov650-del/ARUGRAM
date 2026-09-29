@@ -10252,13 +10252,14 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
 // run uni ushlab turmagan bo'lsa (ijara yo'q yoki eskirgan) va
 // GitHub'da `encode.yml` ishlamayotgan/kutmayotgan bo'lsa — uni
 // `workflow_dispatch` bilan ishga tushiradi. Kerak: `GH_ACTIONS_TOKEN`
-// (fine-grained, shu repo, "Actions: Read and write").
+// (token, "Actions: Read and write") va `GH_REPO` (`owner/repo`).
+// Run 4 soatdan keyin yangi ish olmaydi (START_BUDGET_MIN), 5 soatda
+// majburan to'xtaydi (timeout-minutes) — keyingi cron uni yangidan
+// ishga tushiradi.
 
 const ENCBOT_PATH: &str = "/api/telegram/encode-bot";
 /// Anime ro'yxatining bir sahifasi.
 const ENCBOT_PAGE: i64 = 10;
-/// Asosiy repo — `GH_REPO` secret'i bilan almashtirsa bo'ladi.
-const GH_REPO_DEFAULT: &str = "ogabekraximov650-del/ARUGRAM";
 const GH_WORKFLOW: &str = "encode.yml";
 
 fn encbot_token(env: &Env) -> String {
@@ -10874,10 +10875,12 @@ async fn encode_kick(env: &Env) -> String {
         return format!("\u{1F6D1} Bugungi chegara ({ENCODE_DAILY_LIMIT} ta qism) to'ldi. \
             Navbatdagi {pending} ta video ertaga (Toshkent vaqti bilan 00:00 dan keyin) o'zi kodlanadi.");
     }
-    let repo = match tg_secret(env, "GH_REPO") {
-        r if r.contains('/') => r,
-        _ => GH_REPO_DEFAULT.to_string(),
-    };
+    // Kodlash repo'si (`owner/repo`) — faqat `GH_REPO` secret'idan; yo'q
+    // bo'lsa Actions ishga tushirilmaydi (eski repoga adashib ketmasin).
+    let repo = tg_secret(env, "GH_REPO");
+    if !repo.contains('/') {
+        return "\u{26A0}\u{FE0F} GH_REPO o'rnatilmagan — Actions ishga tushirilmadi.".into();
+    }
     // Run allaqachon kutayotgan yoki ishga tushayotgan bo'lsa — ikkinchisi kerak emas.
     for st in ["queued", "in_progress", "waiting", "requested", "pending"] {
         match gh_api(env, Method::Get,
