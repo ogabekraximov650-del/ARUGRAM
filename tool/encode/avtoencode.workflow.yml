@@ -1,9 +1,9 @@
 name: Avto-kodlash (H.265)
 
 on:
+  # Faqat worker (Cloudflare cron, har 10 daqiqada navbatni tekshiradi)
+  # navbat bo'sh bo'lmaganda ishga tushiradi; qo'lda ham bo'ladi.
   workflow_dispatch: {}
-  schedule:
-    - cron: '*/30 * * * *'
 
 concurrency:
   group: arugram-encode

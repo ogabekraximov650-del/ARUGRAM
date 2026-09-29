@@ -99,6 +99,22 @@ jobs:
           # Cron `encode.yml` ni o'zi ishga tushirishi uchun: fine-grained
           # token, faqat shu repo, "Actions: Read and write".
           put GH_ACTIONS_TOKEN "${{ secrets.GH_ACTIONS_TOKEN }}"
+          # Kodlash boshqa akkauntdagi repoda bo'lsa: shu repodagi
+          # `tool/encode/gh_token.enc` (ENCODE_TOKEN bilan shifrlangan
+          # token) ochiladi va yuqoridagini ALMASHTIRADI; repo nomi
+          # `tool/encode/gh_repo.txt` dan (`owner/repo`).
+          if [ -f ../tool/encode/gh_token.enc ] && [ -f ../tool/encode/gh_repo.txt ]; then
+            K=$(printf '%s' "${{ secrets.ENCODE_TOKEN }}" | tr -d '[:space:]')
+            GHT=$(K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K \
+              -in ../tool/encode/gh_token.enc 2>/dev/null | tr -d '[:space:]')
+            if [ -n "$GHT" ]; then
+              put GH_ACTIONS_TOKEN "$GHT"
+              put GH_REPO "$(tr -d '[:space:]' < ../tool/encode/gh_repo.txt)"
+              echo "✅ GH_ACTIONS_TOKEN va GH_REPO shifrlangan fayldan o'rnatildi"
+            else
+              echo "⚠️  gh_token.enc ochilmadi — eski GH_ACTIONS_TOKEN saqlanadi"
+            fi
+          fi
 
       - name: Deploy to Cloudflare Workers
         working-directory: worker
