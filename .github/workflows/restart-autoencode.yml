@@ -1,0 +1,25 @@
+name: Avto-kodlashni qayta boshlash (yangi akkaunt repo'si)
+
+# Qo'lda. `avtoencode` repodagi ishlayotgan run'ni bekor qiladi, worker'dagi
+# "ishlayapti" ishlarni navbatga qaytaradi va yangi run ishga tushiradi.
+# Kerak: worker deploy qilingan (`/api/encode/release`); token
+# `tool/encode/gh_token.enc` da (yoki NEW_GH_TOKEN secret'i).
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  restart:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Qayta boshlash
+        env:
+          NEW_GH_TOKEN: ${{ secrets.NEW_GH_TOKEN }}
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+          API_BASE: ${{ secrets.API_BASE }}
+        run: python3 tool/encode/restart_run.py

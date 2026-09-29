@@ -9158,7 +9158,7 @@ fn needs_app_check(path: &str) -> bool {
     // O'z maxfiy kaliti (`ENCODE_TOKEN`, `encode_token_ok`) bilan
     // himoyalangan. Ilova chaqiradiganlari (`queue`, `status`) esa
     // tekshiruvdan o'tadi.
-    if matches!(path, "/api/encode/peek" | "/api/encode/claim" | "/api/encode/heartbeat"
+    if matches!(path, "/api/encode/peek" | "/api/encode/claim" | "/api/encode/heartbeat" | "/api/encode/release"
         | "/api/encode/quality" | "/api/encode/finish")
     {
         return false;
@@ -9767,10 +9767,11 @@ async fn tg_channel_post(env: &Env, post: &Value) {
 //     qo'ymaydi; adminga xabar boradi.
 //   * Actions faqat maxfiy kalit (`ENCODE_TOKEN`) bilan kiradi.
 
-/// Ijara: heartbeat har 2 daqiqada yangilaydi. Run qo'lda bekor qilinsa yoki
-/// o'lsa, ish shuncha vaqtdan keyin boshqa run'ga bo'sh (avval 30 daqiqa —
-/// yangi run'lar "boshqa run ishlayapti" deb bekor to'xtardi).
-const ENCODE_LEASE_MS: i64 = 6 * 60 * 1000;
+/// Ijara: heartbeat har 10 daqiqada yangilaydi (foydalanuvchi talabi:
+/// worker'ga 10 daqiqada bir). Bekor qilingan run ishni o'zi qaytaradi
+/// (`cancelled`), qo'lda qayta boshlash esa `/api/encode/release` bilan —
+/// ijaraning uzunligi faqat kutilmagan o'lim uchun.
+const ENCODE_LEASE_MS: i64 = 25 * 60 * 1000;
 const ENCODE_MAX_ATTEMPTS: i64 = 3;
 /// Bot asl videoni kanalga ko'chirib ulgurmagan bo'lsa shuncha kutiladi.
 const ENCODE_ORIGIN_WAIT_MS: i64 = 2 * 60 * 60 * 1000;
@@ -9995,6 +9996,16 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
         return err404("topilmadi");
     }
     let b: Value = req.json().await.unwrap_or(json!({}));
+
+    // Qo'lda qayta boshlash: ishlayotgan hamma ish ijarasiz navbatga qaytadi
+    // (`restart-autoencode.yml` run'larni bekor qilgach chaqiradi).
+    if path == "/api/encode/release" {
+        turso_exec(env,
+            "UPDATE encode_jobs SET state='queued', runner='', lease_until=0, progress='',
+                    attempts=MAX(attempts-1,0)
+              WHERE state='running'", vec![]).await?;
+        return ok(json!({"ok": true}));
+    }
 
     if path == "/api/encode/claim" {
         let runner = b["runner"].as_str().unwrap_or("").trim().to_string();

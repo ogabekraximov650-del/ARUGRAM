@@ -25,6 +25,8 @@ XAVFSIZLIK:
 """
 
 import asyncio
+import collections
+import html
 import json
 import signal
 import os
@@ -40,7 +42,7 @@ from pathlib import Path
 
 import pyrogram.utils
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from pyrogram import Client
+from pyrogram import Client, enums
 
 # Pyrogram 2.0.106: yangi kanallarning raqami eski chegaradan kichik —
 # aks holda "Peer id invalid" (ma'lum xato, shu yamoq bilan tuzaladi).
@@ -53,6 +55,9 @@ CRF_BASE = int(os.environ.get("H265_CRF", "30"))
 PRESET = os.environ.get("H265_PRESET", "medium")
 # Shu vaqtdan keyin YANGI ish olinmaydi (Actions limiti 6 soat).
 START_BUDGET = int(os.environ.get("START_BUDGET_MIN", "240")) * 60
+# Actions log'i shu YOPIQ kanalga yoziladi (bitta xabar, har ~3 soniyada
+# tahrirlanadi). 0 yoki bo'sh — o'chiq.
+LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL_ID", "0") or 0)
 SESSION = str(Path(__file__).with_name("pyro_session"))
 WORK = Path(os.environ.get("RUNNER_TEMP", "/tmp")) / "arugram_encode"
 
@@ -101,8 +106,89 @@ class Fatal(Exception):
     """Qayta urinishning foydasi yo'q (buzuq manba va h.k.)."""
 
 
+class ChannelLog:
+    """Actions log'ini yopiq kanaldagi BITTA xabarga yozadi.
+
+    Har qism uchun yangi xabar; ichida oxirgi voqealar (yuklash, sifat
+    tayyor...) va oxirgi soniyalik statistika qatorlari. Xabar har ~3
+    soniyada tahrirlanadi: Telegram bir xabarni har soniyada tahrirlashga
+    FloodWait beradi, shu sabab 3 soniya. Xato bo'lsa kodlashga TEGMAYDI —
+    5 marta ketma-ket xatodan keyin kanalga yozish o'chadi.
+    """
+    LIMIT = 3600  # xabar 4096 belgidan oshmasin
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.events = collections.deque(maxlen=14)
+        self.prog = collections.deque(maxlen=10)
+        self.title = ""
+        self.msg_id = None
+        self.dirty = False
+        self.fails = 0
+        self.off = LOG_CHANNEL == 0
+
+    def start(self, title):
+        with self.lock:
+            self.events.clear()
+            self.prog.clear()
+            self.title, self.msg_id, self.dirty = title, None, True
+
+    def stop(self):
+        with self.lock:
+            self.title = ""
+
+    def add(self, text, progress=False):
+        with self.lock:
+            if not self.title:
+                return
+            (self.prog if progress else self.events).append(text)
+            self.dirty = True
+
+    def render(self):
+        with self.lock:
+            lines = list(self.events) + ([""] if self.prog else []) + list(self.prog)
+            title = self.title
+        body = "\n".join(lines)
+        while len(body) > self.LIMIT and lines:
+            lines.pop(0)
+            body = "\n".join(lines)
+        return f"<b>{html.escape(title)}</b>\n<pre>{html.escape(body)}</pre>"
+
+    async def flush(self, app):
+        if self.off or not self.dirty or not self.title:
+            return
+        with self.lock:
+            self.dirty = False
+        text = self.render()
+        try:
+            if self.msg_id is None:
+                m = await app.send_message(LOG_CHANNEL, text, parse_mode=enums.ParseMode.HTML,
+                                           disable_notification=True)
+                self.msg_id = m.id
+            else:
+                await app.edit_message_text(LOG_CHANNEL, self.msg_id, text,
+                                            parse_mode=enums.ParseMode.HTML)
+            self.fails = 0
+        except Exception as e:
+            self.fails += 1
+            self.dirty = True
+            print(f"Kanalga log yozilmadi ({self.fails}/5): {e}", flush=True)
+            if self.fails >= 5:
+                self.off = True
+                print("Kanalga log yozish o'chirildi.", flush=True)
+
+    async def loop(self, app):
+        while True:
+            await asyncio.sleep(3)
+            await self.flush(app)
+
+
+CHLOG = ChannelLog()
+
+
 def log(*a):
     print(time.strftime("%H:%M:%S"), *a, flush=True)
+    CHLOG.add(time.strftime("%H:%M:%S ") + " ".join(str(x) for x in a))
 
 
 def api(path, body=None, method="POST"):
@@ -259,6 +345,7 @@ def encode(src: Path, dst: Path, src_h: int, target: int, dcrf: int,
         if time.time() - last_log >= 1.0:
             last_log = time.time()
             print(time.strftime("%H:%M:%S"), text, flush=True)
+            CHLOG.add(time.strftime("%H:%M:%S ") + text.strip(), progress=True)
     if p.wait() != 0:
         raise subprocess.CalledProcessError(p.returncode, "ffmpeg")
 
@@ -287,8 +374,9 @@ class Heartbeat:
             return True
 
     def run(self):
-        # 30 soniya: bot "Holat" xabari eng yangi statistikani ko'rsatadi.
-        while not self.stop.wait(30):
+        # 10 daqiqa (worker'ga yozuv kam): jonli log kanalda, bot "Holat"
+        # xabari esa shu oxirgi holatni ko'rsatadi. Ijara 25 daqiqa.
+        while not self.stop.wait(600):
             if not self.ping():
                 return
 
@@ -307,6 +395,7 @@ async def process(app: Client, channel: int, job: dict):
     ident = {"runner": RUNNER, "anime_id": a, "season_id": s, "epizod_id": e, "queued_at": qa}
     global CURRENT
     CURRENT = ident
+    CHLOG.start(f"Qism {a}/{s}/{e} (#{job.get('epizod_number')}) — run {RUNNER}")
     hb = Heartbeat(ident)
     shutil.rmtree(WORK, ignore_errors=True)
     WORK.mkdir(parents=True)
@@ -405,6 +494,8 @@ async def process(app: Client, channel: int, job: dict):
             pass
     finally:
         CURRENT = None
+        await CHLOG.flush(app)
+        CHLOG.stop()
         hb.stop.set()
         shutil.rmtree(WORK, ignore_errors=True)
 
@@ -420,6 +511,7 @@ async def main():
         # Kanal ma'lum bo'lsin (Pyrogram peer keshida).
         async for _ in app.get_dialogs():
             pass
+        flusher = asyncio.create_task(CHLOG.loop(app))
         worked = False
         while True:
             if time.time() - T0 > START_BUDGET:
@@ -438,6 +530,7 @@ async def main():
                 break
             await process(app, int(r["channel"]), job)
             worked = True
+        flusher.cancel()
         # Workflow'ning "Davom ettirish" qadami FAQAT ish bajarilgan bo'lsa
         # yangi run ochadi (aks holda "boshqa run ishlayapti" bilan tinmay
         # qisqa run'lar ochilaverardi).
