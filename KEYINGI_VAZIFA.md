@@ -3976,3 +3976,9 @@ so'ragan bo'lak doim beriladi; `net_allowed` faqat `prefetch` ga.
 Oldinda turadigan jami: pleyer buferi (`AruLoadControl`, ≤30 s) + ≤2 MiB.
 Diskdagi foiz esa BUTUN ko'rilgan joylarni (oldingi seanslar, sekdan
 oldingi joy) ham o'z ichiga oladi — u "oldinga yuklangan" degani emas.
+
+**Sakrab uzoqqa o'qish cheklandi.** Pleyer chizig'ida ijro joyidan ~3 daqiqa
+oldinda yakka bo'lak paydo bo'lardi. Endi `read`: oxirgi o'qilgan bo'lakdan
+ketma-ket (≤ `AHEAD`+1) o'qish — doim; sakrab, `pos + 60 s` dan uzoqdagi va
+diskda yo'q bo'lak — `WAIT` (Java 1 s kutadi). Pleyer buferlanayotganda
+(`buffering`) va sek oldidan (ilova joyni bildiradi) cheklov yo'q.

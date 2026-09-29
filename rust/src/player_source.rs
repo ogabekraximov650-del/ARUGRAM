@@ -53,6 +53,14 @@ const AHEAD: u64 = 2;
 // qo'llanadi. Ya'ni oldinda turadigan hamma narsa: pleyer buferi
 // (≤30 s) + ko'pi bilan `AHEAD` bo'lak.
 //
+// YANA YANGILANISH (foydalanuvchi: "pleyer chizig'ida 1 daqiqalik
+// bo'sh joydan keyingi joy yuklanyapti"): ketma-ket o'qish (pleyer
+// buferini to'ldirishi) cheklanmaydi, lekin oxirgi o'qilgan joydan
+// SAKRAB chegaradan uzoqqa so'ralgan bo'lak (diskda yo'q bo'lsa)
+// berilmaydi — `WAIT`, Java 1 s kutib qayta so'raydi. Sek oldidan
+// ilova yangi joyni bildiradi, ya'ni sek bunga tushmaydi; pleyer
+// buferlanayotgan (to'xtab qolgan) bo'lsa ham cheklov yo'q.
+//
 // TALAB (foydalanuvchi): "onlayn ko'rishda ko'rayotgan daqiqadan
 // 1 daqiqagacha yuklab olishga ruxsat bo'lsin, undan ko'p emas".
 //
@@ -77,6 +85,8 @@ const AHEAD: u64 = 2;
 // noma'lum yoki eskirgan (2 daqiqadan ko'p xabar kelmagan) holat. Surish
 // (barmoq ekranda) paytida xabar to'xtaydi — shu sabab muddat uzun.
 const AHEAD_MS: u64 = 60_000;
+/// Sakrab, chegaradan tashqaridan so'ralgan bo'lak — JNI `RETRY` qiladi.
+const WAIT: &str = "oldinga chegara";
 
 struct PlayPos {
     pos_ms: u64,
@@ -117,6 +127,9 @@ struct Reader {
     /// Oxirgi o'qilgan bo'lak (pleyer uni mayda bo'laklab o'qiydi —
     /// har safar diskdan ochib o'tirmaslik uchun).
     last: Mutex<Option<(u64, Arc<Vec<u8>>)>>,
+    /// Shu manba oxirgi o'qigan bo'lak raqami (`u64::MAX` — hali yo'q):
+    /// ketma-ket o'qish va sakrashni ajratish uchun.
+    last_index: std::sync::atomic::AtomicU64,
 }
 
 /// Bir bo'lakni ikki marta yuklamaslik uchun: (fayl, indeks) -> kutish.
@@ -185,6 +198,7 @@ fn open(name: &str, size_hint: u64) -> Result<i64, String> {
         total,
         closed: Arc::new(AtomicBool::new(false)),
         last: Mutex::new(None),
+        last_index: std::sync::atomic::AtomicU64::new(u64::MAX),
     });
     readers().lock().map_err(|e| e.to_string())?.insert(h, r);
     Ok(h)
@@ -288,9 +302,19 @@ fn read(h: i64, pos: u64, out: &mut [u8]) -> Result<usize, String> {
     let chunk = match cached {
         Some(b) => b,
         None => {
-            // Pleyer SO'RAGAN bo'lak HAR DOIM beriladi — uni to'xtatib
-            // turish video qotib qolishiga olib keldi (quyidagi izoh).
-            let b = load_chunk(&r.name, &r.dir, r.total, index)?;
+            // Ketma-ket o'qish (pleyer buferi) — doim. Sakrab, chegaradan
+            // uzoqdagi va diskda yo'q bo'lak — kutadi (yuqoridagi izoh).
+            let prev = r.last_index.load(Ordering::SeqCst);
+            let sequential = prev != u64::MAX && index >= prev && index <= prev + AHEAD + 1;
+            let b = if sequential || net_allowed(&r.name, r.total, index) {
+                load_chunk(&r.name, &r.dir, r.total, index)?
+            } else {
+                match video_cache::player_read_chunk(&r.dir, &r.name, index, r.total) {
+                    Some(b) => Arc::new(b),
+                    None => return Err(WAIT.to_string()),
+                }
+            };
+            r.last_index.store(index, Ordering::SeqCst);
             if let Ok(mut l) = r.last.lock() {
                 *l = Some((index, Arc::clone(&b)));
             }
@@ -401,7 +425,7 @@ pub extern "system" fn Java_io_flutter_plugins_videoplayer_AruDataSource_nativeR
             }
             n as jint
         }
-        Err(e) if telegram::is_net_err(&e) => RETRY as jint,
+        Err(e) if e == WAIT || telegram::is_net_err(&e) => RETRY as jint,
         Err(e) => {
             video_cache::tg_log(format!("Pleyer: o'qib bo'lmadi: {e}"));
             -1
