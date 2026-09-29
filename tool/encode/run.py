@@ -210,7 +210,22 @@ def progress_line(label: str, f: dict, dur: float, started: float):
     line = (f"    {label} {pct:3d}% | video {hms(t)}/{hms(dur)} | "
             f"tezlik {speed or '-'} | {f.get('fps', '-')} kadr/s | "
             f"bitreyt {brt} | {mb} | o'tdi {hms(time.time() - started)} | qoldi ~{eta}")
-    return pct, line
+    # Botning "Holat" xabari uchun ixcham ko'rinish (`|` bilan, bo'shliqsiz):
+    # tezlik|kadr/s|bitreyt|hajm MB|taxminiy MB|o'tdi s|qoldi s
+    def num(x, fmt="{:.1f}"):
+        try:
+            return fmt.format(float(x))
+        except ValueError:
+            return "-"
+    est = f"{int(size) / 1048576 * dur / t:.0f}" if size.isdigit() and int(size) > 0 and t > 5 else "-"
+    tail = "|".join([
+        (speed or "-").replace(" ", ""), num(f.get("fps", ""), "{:.1f}"),
+        num(br.replace("kbits/s", ""), "{:.0f}"),
+        f"{int(size) / 1048576:.1f}" if size.isdigit() else "-", est,
+        str(int(time.time() - started)),
+        str(int((dur - t) / sp)) if sp > 0 else "-",
+    ])
+    return pct, line, tail
 
 
 def encode(src: Path, dst: Path, src_h: int, target: int, dcrf: int,
@@ -238,10 +253,9 @@ def encode(src: Path, dst: Path, src_h: int, target: int, dcrf: int,
         fields = {}
         if not r:
             continue
-        pct, text = r
-        if pct != last and on_progress:
-            last = pct
-            on_progress(pct)
+        pct, text, tail = r
+        if on_progress:
+            on_progress(pct, tail)
         if time.time() - last_log >= 1.0:
             last_log = time.time()
             print(time.strftime("%H:%M:%S"), text, flush=True)
@@ -273,7 +287,8 @@ class Heartbeat:
             return True
 
     def run(self):
-        while not self.stop.wait(120):
+        # 30 soniya: bot "Holat" xabari eng yangi statistikani ko'rsatadi.
+        while not self.stop.wait(30):
             if not self.ping():
                 return
 
@@ -347,7 +362,7 @@ async def process(app: Client, channel: int, job: dict):
             await asyncio.to_thread(hb.set, f"enc|{label}|0|{idx}|{len(steps)}", True)
             await asyncio.to_thread(
                 encode, src, out, src_h, target, dcrf, src_d,
-                lambda pct, l=label, i=idx, n=len(steps): hb.set(f"enc|{l}|{pct}|{i}|{n}"),
+                lambda pct, tail, l=label, i=idx, n=len(steps): hb.set(f"enc|{l}|{pct}|{i}|{n}|{tail}"),
                 label)
             _, d = await asyncio.to_thread(probe, out)
             if abs(d - src_d) > 2.0:

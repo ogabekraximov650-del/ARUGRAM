@@ -9782,6 +9782,22 @@ fn encode_progress_text(p: &str) -> String {
     match v.as_slice() {
         ["download"] => "\u{2B07}\u{FE0F} asl video yuklab olinmoqda".into(),
         ["enc", q, pct, i, n] => format!("\u{2699}\u{FE0F} {q} ({i}/{n}): {pct}% kodlandi"),
+        // To'liq statistika (Actions log'idagi eng yangi qator bilan bir xil).
+        ["enc", q, pct, i, n, speed, fps, br, mb, est, el, eta] => {
+            let hms = |s: &str| -> String {
+                match s.parse::<i64>() {
+                    Ok(v) if v >= 0 => {
+                        let (h, m, sec) = (v / 3600, v % 3600 / 60, v % 60);
+                        if h > 0 { format!("{h}:{m:02}:{sec:02}") } else { format!("{m:02}:{sec:02}") }
+                    }
+                    _ => "--:--".to_string(),
+                }
+            };
+            let est = if *est == "-" { String::new() } else { format!(" (~{est} MB bo'ladi)") };
+            format!("\u{2699}\u{FE0F} {q} ({i}/{n}): <b>{pct}%</b> kodlandi\n    \
+                tezlik {speed} \u{00B7} {fps} kadr/s \u{00B7} bitreyt {br} kb/s\n    \
+                hajm {mb} MB{est}\n    o'tdi {} \u{00B7} qoldi ~{}", hms(el), hms(eta))
+        }
         ["upload", q, i, n] => format!("\u{2B06}\u{FE0F} {q} ({i}/{n}) Telegram'ga yuklanmoqda"),
         _ => "\u{2699}\u{FE0F} boshlanmoqda".into(),
     }
@@ -10101,7 +10117,7 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
         // faqat xavfsiz belgilar, qisqa.
         let prog: String = b["progress"].as_str().unwrap_or("").chars()
             .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '|' | '_' | '-' | '.'))
-            .take(40).collect();
+            .take(120).collect();
         let mut args = vec![TursoArg::int(now + ENCODE_LEASE_MS), TursoArg::text(&prog)];
         args.extend(pk());
         turso_exec(env,
@@ -10698,7 +10714,7 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
         let kick = encode_kick(env).await;
         // Hozir ishlayotgan qism: qaysi anime/qism, qaysi sifat, necha foiz.
         let run = turso_exec(env,
-            "SELECT j.progress AS progress, j.season_id AS s, a.name AS name, e.epizod_number AS num
+            "SELECT j.progress AS progress, j.lease_until AS lease, j.season_id AS s, a.name AS name, e.epizod_number AS num
                FROM encode_jobs j
                LEFT JOIN anime_db a ON a.id=j.anime_id
                LEFT JOIN epizod_db e ON e.anime_id=j.anime_id AND e.season_id=j.season_id AND e.epizod_id=j.epizod_id
@@ -10707,7 +10723,9 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
         let running: Vec<String> = run.map(|r| rows_of(&r)).unwrap_or_default().iter()
             .map(|r| format!("\u{1F3AC} <b>{}</b> \u{2014} {}-bo'lim, {}-qism\n    {}",
                 html_escape(r["name"].as_str().unwrap_or("?")), jint(r, "s"), jint(r, "num"),
-                encode_progress_text(r["progress"].as_str().unwrap_or(""))))
+                format!("{}\n    \u{1F552} {} soniya oldin yangilangan",
+                    encode_progress_text(r["progress"].as_str().unwrap_or("")),
+                    ((now_ms() - (jint(r, "lease") - ENCODE_LEASE_MS)) / 1000).max(0))))
             .collect();
         let running = if running.is_empty() { String::new() } else { format!("{}\n\n", running.join("\n")) };
         encbot_send(env, chat, &format!("\u{1F4CB} <b>Kodlash navbati</b>\n\n{running}{}\n\n{kick}",

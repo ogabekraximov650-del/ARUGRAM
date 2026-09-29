@@ -4122,3 +4122,8 @@ bo'lakni 3 s dan ko'p kutsa, majburan beriladi (`Reader::waiting`).
 - Log qatoriga bitreyt qo'shildi. Preset `medium` o'zgarmadi.
 - Log: har soniyalik qatorda bitreyt va hozirgi/taxminiy yakuniy hajm; manba
   qatorida hajm va bitreyt; sifat tugaganda o'rtacha bitreyt va hajm.
+- Botdagi "Holat": hozir ishlayotgan qism uchun Actions log'idagi eng yangi
+  statistika (foiz, tezlik, kadr/s, bitreyt, hajm va taxminiy yakuniy hajm,
+  o'tgan/qolgan vaqt) va "N soniya oldin yangilangan". `run.py` har 30
+  soniyada heartbeat bilan `enc|sifat|foiz|i|n|tezlik|fps|bitreyt|MB|taxmin|o'tdi|qoldi`
+  yuboradi (Turso: soatiga ~120 yozuv).
