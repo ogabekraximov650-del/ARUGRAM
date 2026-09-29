@@ -22,14 +22,32 @@ from pathlib import Path
 
 from nacl import encoding, public
 
-TOKEN = os.environ["NEW_GH_TOKEN"].strip()
+
+
+def _token():
+    """NEW_GH_TOKEN secret'i yoki `gh_token.enc` (ENCODE_TOKEN bilan shifrlangan)."""
+    t = os.environ.get("NEW_GH_TOKEN", "").strip()
+    enc = HERE / "gh_token.enc"
+    if not t and enc.exists():
+        import subprocess
+        k = "".join(os.environ.get("ENCODE_TOKEN", "").split())
+        r = subprocess.run(
+            ["openssl", "enc", "-d", "-aes-256-cbc", "-pbkdf2", "-iter", "200000",
+             "-pass", "env:K", "-in", str(enc)],
+            env={**os.environ, "K": k}, capture_output=True)
+        t = r.stdout.decode().strip()
+        print("Token shifrlangan fayldan olindi" if t else "gh_token.enc ochilmadi")
+    if not t:
+        sys.exit("::error::Token yo'q (NEW_GH_TOKEN secret'i yoki gh_token.enc)")
+    return t
+
+
+HERE = Path(__file__).parent
+TOKEN = _token()
 NAME = os.environ.get("REPO_NAME", "avtoencode").strip() or "avtoencode"
 PRIVATE = os.environ.get("REPO_PRIVATE", "true") == "true"
 ALLOW_SAME = os.environ.get("ALLOW_SAME_ACCOUNT", "false") == "true"
 OLD_OWNER = os.environ.get("GITHUB_REPOSITORY_OWNER", "")
-HERE = Path(__file__).parent
-
-
 def api(method, path, body=None, ok=(200, 201, 204)):
     req = urllib.request.Request(
         "https://api.github.com" + path,
