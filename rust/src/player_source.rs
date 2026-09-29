@@ -115,18 +115,135 @@ fn filling() -> &'static Mutex<std::collections::HashSet<String>> {
     F.get_or_init(|| Mutex::new(std::collections::HashSet::new()))
 }
 
+// ── ANIQ "SONIYA → BAYT" (VBR): 1 DAQIQA = 1 DAQIQA ────────────────
+//
+// TOPILGAN XATO (foydalanuvchi: "1 daqiqa deb edim, 5 daqiqagacha
+// oldindan yuklanyapti"): oyna baytlari O'RTACHA bitreyt bilan
+// hisoblangan edi (`bayt = vaqt / davomiylik × hajm`). Anime'da
+// bitreyt sahnaga qarab keskin o'zgaradi: suhbat/tinch sahna bir
+// necha barobar ARZON, ya'ni o'rtacha bo'yicha "1 daqiqalik" bayt
+// tinch sahnada 4-5 daqiqani qamrab olardi.
+//
+// Endi faylning O'ZIDAGI namuna jadvallaridan (`moov`: stts/stsz/stsc/
+// stco — `mp4::VideoTrack`) haqiqiy joy olinadi: `sample_at_ms(vaqt)` →
+// `locate(namuna).offset`. `moov` fonda BIR marta o'qiladi (u odatda
+// faylning boshida yoki oxirida — pleyer uni baribir o'qiydi). Jadval
+// hali yo'q (yoki o'qilmadi) bo'lsa — o'rtacha bitreyt zaxira.
+
+/// Fayldan `[off, off+len)` ni beradi (fayl boshi/oxirida `None`).
+type SpanReader<'a> = &'a dyn Fn(u64, u64) -> Option<Vec<u8>>;
+
+/// `moov` ni topib `VideoTrack` ga o'giradi. Yuqori darajadagi atomlar
+/// kezib chiqiladi (`mdat` ni sakrab o'tadi), shu sabab `moov` oxirida
+/// bo'lsa ham kam o'qiladi.
+fn track_from(total: u64, read: SpanReader) -> Option<crate::mp4::VideoTrack> {
+    /// Himoya: buzilgan faylda cheksiz aylanib qolmaslik uchun.
+    const MAX_BOXES: usize = 64;
+    /// `moov` odatda 1 MB atrofida; 32 MB dan kattasi shubhali.
+    const MAX_MOOV: u64 = 32 * 1024 * 1024;
+
+    let mut at: u64 = 0;
+    for _ in 0..MAX_BOXES {
+        if at + 8 > total {
+            return None;
+        }
+        let head = read(at, 16.min(total - at))?;
+        let (body_in_head, raw_len, kind) = crate::mp4::box_header(&head, 0)?;
+        let body_start = at + body_in_head as u64;
+        if body_start > total {
+            return None;
+        }
+        let body_len = if raw_len == u64::MAX { total - body_start } else { raw_len };
+        if &kind == b"moov" {
+            if body_len == 0 || body_len > MAX_MOOV {
+                return None;
+            }
+            let moov = read(body_start, body_len)?;
+            return crate::mp4::parse_moov(&moov);
+        }
+        let next = body_start.checked_add(body_len)?;
+        if next <= at {
+            return None;
+        }
+        at = next;
+    }
+    None
+}
+
+/// Ijro joyi va oyna uzunligi bo'yicha `[boshlanish bo'lagi, chegara
+/// bo'lagi]` — O'RTACHA bitreyt bo'yicha (zaxira).
+fn avg_window(pos_ms: u64, dur_ms: u64, total: u64) -> (u64, u64) {
+    let at = |ms: u64| (ms as u128 * total as u128 / dur_ms.max(1) as u128) as u64;
+    let last = total.saturating_sub(1) / video_cache::PLAYER_CHUNK;
+    let from = (at(pos_ms) / video_cache::PLAYER_CHUNK).min(last);
+    let to = (at(pos_ms + AHEAD_MS) / video_cache::PLAYER_CHUNK).min(last);
+    (from, to)
+}
+
+/// Fayldan bo'laklar orqali `[off, off+len)` ni yig'adi (diskdan yoki
+/// Telegram'dan).
+fn read_span(r: &Reader, off: u64, len: u64) -> Option<Vec<u8>> {
+    let end = off.checked_add(len)?.min(r.total);
+    let mut out = Vec::with_capacity(len.min(1 << 26) as usize);
+    let mut pos = off;
+    while pos < end {
+        let idx = pos / video_cache::PLAYER_CHUNK;
+        let c = load_chunk(&r.name, &r.dir, r.total, idx).ok()?;
+        let o = (pos - idx * video_cache::PLAYER_CHUNK) as usize;
+        let n = ((end - pos) as usize).min(c.len().checked_sub(o)?);
+        if n == 0 {
+            return None;
+        }
+        out.extend_from_slice(&c[o..o + n]);
+        pos += n as u64;
+    }
+    Some(out)
+}
+
+/// Namuna jadvali: o'qilgan bo'lsa shu; `parse` bo'lsa va hali o'qilmagan
+/// bo'lsa — o'qiydi (tarmoq bo'lishi mumkin: FAQAT fon oqimidan).
+fn track_of(r: &Reader, parse: bool) -> Option<Arc<crate::mp4::VideoTrack>> {
+    {
+        let g = r.track.lock().ok()?;
+        if let Some(t) = &g.0 {
+            return Some(Arc::clone(t));
+        }
+        if !parse || g.1 >= 3 {
+            return None;
+        }
+    }
+    let t = track_from(r.total, &|off, len| read_span(r, off, len)).map(Arc::new);
+    let mut g = r.track.lock().ok()?;
+    match t {
+        Some(t) => {
+            g.0 = Some(Arc::clone(&t));
+            Some(t)
+        }
+        None => {
+            g.1 += 1; // 3 marta o'qilmasa — o'rtacha bitreyt bilan davom
+            None
+        }
+    }
+}
+
 /// `[joy bo'lagi, chegara bo'lagi]` — ijro joyi ma'lum bo'lsa.
-fn window_of(name: &str, total: u64) -> Option<(u64, u64)> {
-    let m = positions().lock().ok()?;
-    let p = m.get(name)?;
-    if p.dur_ms == 0 || total == 0 {
+fn window_of(r: &Reader, parse: bool) -> Option<(u64, u64)> {
+    let (pos, dur) = {
+        let m = positions().lock().ok()?;
+        let p = m.get(&r.name)?;
+        (p.pos_ms, p.dur_ms)
+    };
+    if dur == 0 || r.total == 0 {
         return None;
     }
-    let at = |ms: u64| (ms as u128 * total as u128 / p.dur_ms as u128) as u64;
-    let last = total.saturating_sub(1) / video_cache::PLAYER_CHUNK;
-    let from = (at(p.pos_ms) / video_cache::PLAYER_CHUNK).min(last);
-    let to = (at(p.pos_ms + AHEAD_MS) / video_cache::PLAYER_CHUNK).min(last);
-    Some((from, to))
+    if let Some(t) = track_of(r, parse) {
+        let last = r.total.saturating_sub(1) / video_cache::PLAYER_CHUNK;
+        let off = |ms: u64| t.locate(t.sample_at_ms(ms)).map(|x| x.offset);
+        if let (Some(a), Some(b)) = (off(pos), off(pos + AHEAD_MS)) {
+            return Some(((a / video_cache::PLAYER_CHUNK).min(last), (b / video_cache::PLAYER_CHUNK).min(last)));
+        }
+    }
+    Some(avg_window(pos, dur, r.total))
 }
 
 fn fill_window(name: &str) {
@@ -148,7 +265,7 @@ fn fill_window(name: &str) {
             if r.closed.load(Ordering::SeqCst) {
                 break;
             }
-            let Some((from, to)) = window_of(&r.name, r.total) else { break };
+            let Some((from, to)) = window_of(&r, true) else { break };
             let next = (from..=to).find(|&i| {
                 !video_cache::player_has_chunk(&r.dir, i, r.total)
                     && !flights().lock().map(|m| m.contains_key(&(r.name.clone(), i))).unwrap_or(true)
@@ -165,20 +282,23 @@ fn fill_window(name: &str) {
 }
 
 /// Shu bo'lakni hozir tarmoqdan olsa bo'ladimi.
-fn net_allowed(name: &str, total: u64, index: u64) -> bool {
+fn net_allowed(r: &Reader, index: u64) -> bool {
     let start = index * video_cache::PLAYER_CHUNK;
     let edge = 4 * video_cache::PLAYER_CHUNK;
-    if start < edge || start + 2 * edge >= total {
+    if start < edge || start + 2 * edge >= r.total {
         return true;
     }
-    let Ok(m) = positions().lock() else { return true };
-    let Some(p) = m.get(name) else { return true };
-    if p.buffering || p.dur_ms == 0 || p.at.elapsed() > std::time::Duration::from_secs(120) {
-        return true;
+    {
+        let Ok(m) = positions().lock() else { return true };
+        let Some(p) = m.get(&r.name) else { return true };
+        if p.buffering || p.dur_ms == 0 || p.at.elapsed() > std::time::Duration::from_secs(120) {
+            return true;
+        }
     }
-    let limit = ((p.pos_ms + AHEAD_MS) as u128 * total as u128 / p.dur_ms as u128) as u64
-        + video_cache::PLAYER_CHUNK;
-    start <= limit
+    match window_of(r, false) {
+        Some((_, to)) => index <= to + 1,
+        None => true,
+    }
 }
 
 type ChunkResult = Result<Arc<Vec<u8>>, String>;
@@ -194,6 +314,8 @@ struct Reader {
     /// Shu manba oxirgi o'qigan bo'lak raqami (`u64::MAX` — hali yo'q):
     /// ketma-ket o'qish va sakrashni ajratish uchun.
     last_index: std::sync::atomic::AtomicU64,
+    /// Namuna jadvali (`moov`) va o'qib bo'lmagan urinishlar soni.
+    track: Mutex<(Option<Arc<crate::mp4::VideoTrack>>, u8)>,
 }
 
 /// Bir bo'lakni ikki marta yuklamaslik uchun: (fayl, indeks) -> kutish.
@@ -263,6 +385,7 @@ fn open(name: &str, size_hint: u64) -> Result<i64, String> {
         closed: Arc::new(AtomicBool::new(false)),
         last: Mutex::new(None),
         last_index: std::sync::atomic::AtomicU64::new(u64::MAX),
+        track: Mutex::new((None, 0)),
     });
     readers().lock().map_err(|e| e.to_string())?.insert(h, r);
     Ok(h)
@@ -335,7 +458,7 @@ fn prefetch(r: &Arc<Reader>, index: u64) {
         if r.closed.load(Ordering::SeqCst) {
             return;
         }
-        if !net_allowed(&r.name, r.total, i) {
+        if !net_allowed(r, i) {
             return;
         }
         if flights().lock().map(|m| m.contains_key(&(r.name.clone(), i))).unwrap_or(true) {
@@ -370,7 +493,7 @@ fn read(h: i64, pos: u64, out: &mut [u8]) -> Result<usize, String> {
             // uzoqdagi va diskda yo'q bo'lak — kutadi (yuqoridagi izoh).
             let prev = r.last_index.load(Ordering::SeqCst);
             let sequential = prev != u64::MAX && index >= prev && index <= prev + AHEAD + 1;
-            let b = if sequential || net_allowed(&r.name, r.total, index) {
+            let b = if sequential || net_allowed(&r, index) {
                 load_chunk(&r.name, &r.dir, r.total, index)?
             } else {
                 match video_cache::player_read_chunk(&r.dir, &r.name, index, r.total) {
@@ -512,24 +635,36 @@ pub extern "system" fn Java_io_flutter_plugins_videoplayer_AruDataSource_nativeC
 mod tests {
     use super::*;
 
+    fn test_reader(name: &str, total: u64) -> Reader {
+        Reader {
+            name: name.to_string(),
+            dir: PathBuf::from("/nonexistent"),
+            total,
+            closed: Arc::new(AtomicBool::new(false)),
+            last: Mutex::new(None),
+            last_index: std::sync::atomic::AtomicU64::new(u64::MAX),
+            track: Mutex::new((None, 0)),
+        }
+    }
+
     #[test]
     fn oldinga_bir_daqiqadan_ortiq_olinmaydi() {
         let c = video_cache::PLAYER_CHUNK;
         let total = 600 * c; // 600 MiB, 600 s — 1 MiB/s
         let name = "test_oldinga.mp4";
+        let r = test_reader(name, total);
         // Joy noma'lum — cheklov yo'q.
-        assert!(net_allowed(name, total, 300));
+        assert!(net_allowed(&r, 300));
         let cname = std::ffi::CString::new(name).unwrap();
         rust_player_position(cname.as_ptr(), 100_000, 600_000, 0);
-        assert!(net_allowed(name, total, 150)); // 150 s — 50 s oldinda
-        assert!(!net_allowed(name, total, 170)); // 170 s — 70 s oldinda
-        assert!(net_allowed(name, total, 598)); // fayl oxiri (moov)
-        assert!(net_allowed(name, total, 1)); // fayl boshi
+        assert!(net_allowed(&r, 150)); // 150 s — 50 s oldinda
+        assert!(!net_allowed(&r, 170)); // 170 s — 70 s oldinda
+        assert!(net_allowed(&r, 598)); // fayl oxiri (moov)
+        assert!(net_allowed(&r, 1)); // fayl boshi
         // Pleyer buferlanmoqda (to'xtab qolgan) — kerakli bo'lak beriladi.
         rust_player_position(cname.as_ptr(), 100_000, 600_000, 1);
-        assert!(net_allowed(name, total, 300));
+        assert!(net_allowed(&r, 300));
         rust_player_position(cname.as_ptr(), 0, 0, 0);
-        assert!(net_allowed(name, total, 300));
     }
 
     #[test]
@@ -537,15 +672,37 @@ mod tests {
         let c = video_cache::PLAYER_CHUNK;
         let total = 600 * c; // 600 s — 1 MiB/s
         let name = "test_oyna.mp4";
+        let r = test_reader(name, total);
         let cname = std::ffi::CString::new(name).unwrap();
         rust_player_position(cname.as_ptr(), 60_000, 600_000, 0);
-        assert_eq!(window_of(name, total), Some((60, 120)));
+        assert_eq!(window_of(&r, false), Some((60, 120)));
         rust_player_position(cname.as_ptr(), 61_000, 600_000, 0);
-        assert_eq!(window_of(name, total), Some((61, 121)));
+        assert_eq!(window_of(&r, false), Some((61, 121)));
         rust_player_position(cname.as_ptr(), 590_000, 600_000, 0);
-        assert_eq!(window_of(name, total), Some((590, 599)));
+        assert_eq!(window_of(&r, false), Some((590, 599)));
         rust_player_position(cname.as_ptr(), 0, 0, 0);
-        assert_eq!(window_of(name, total), None);
+        assert_eq!(window_of(&r, false), None);
+    }
+
+    /// Haqiqiy MP4 (`gif_h264.mp4`): namuna jadvali `moov` dan o'qiladi va
+    /// vaqt → bayt monoton o'sadi (VBR uchun aniq oyna asosi).
+    #[test]
+    fn moov_dan_soniya_bayt_jadvali() {
+        let file = include_bytes!("testdata/gif_h264.mp4");
+        let total = file.len() as u64;
+        let read = |off: u64, len: u64| -> Option<Vec<u8>> {
+            let end = off.checked_add(len)?.min(total);
+            file.get(off as usize..end as usize).map(|s| s.to_vec())
+        };
+        let t = track_from(total, &read).expect("moov o'qilishi kerak");
+        let mut prev = 0u64;
+        for ms in (0..2000u64).step_by(100) {
+            let s = t.sample_at_ms(ms);
+            let off = t.locate(s).expect("namuna joyi").offset;
+            assert!(off >= prev, "vaqt o'sdi, bayt kamaydi: {ms} ms");
+            assert!(off < total);
+            prev = off;
+        }
     }
 
     #[test]

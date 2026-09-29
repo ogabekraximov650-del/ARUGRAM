@@ -4019,3 +4019,11 @@ o'rniga `PageView` (tugma ham, o'ngga-chapga surish ham; `_KeepAlive`).
 yoki navbatdagi sifatlar; navbatdagi (yoki hajmi noma'lum yuklanayotgan)
 `_QualityBox` ustida `LinearProgressIndicator` (sifatlar oynasidagi
 cheksiz chiziq bilan bir xil).
+
+**Tuzatish: "1 daqiqa" 5 daqiqagacha cho'zilardi (VBR).** Oyna baytlari
+o'rtacha bitreyt bilan hisoblanardi; tinch (arzon) sahnada 1 daqiqalik
+o'rtacha bayt 4-5 daqiqani qamrardi. Endi `player_source.rs` `moov` dan
+namuna jadvalini o'qiydi (`track_from`, fon oqimida bir marta) va oynani
+AYNAN `sample_at_ms → locate().offset` bilan hisoblaydi (`window_of`);
+jadval yo'q bo'lsa o'rtacha bitreyt zaxira (`avg_window`). Testlar:
+`moov_dan_soniya_bayt_jadvali` (haqiqiy MP4), `oyna_joy_bilan_birga_suriladi`.
