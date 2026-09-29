@@ -78,6 +78,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 }
 
+/// Tugma — ilgari Tarix ichidagi "Anime bo'yicha / Qism bo'yicha"
+/// tugmalari bilan AYNAN bir xil ko'rinish (foydalanuvchi talabi):
+/// faol — apelsin gradient, qolganlari — karta rangida.
 class _TabButton extends StatelessWidget {
   final String label;
   final bool active;
@@ -92,14 +95,19 @@ class _TabButton extends StatelessWidget {
       behavior: HitTestBehavior.opaque,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
-        padding: const EdgeInsets.symmetric(vertical: 10),
+        padding: const EdgeInsets.symmetric(vertical: 11),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(14),
-          color: active ? AppColors.accent.withValues(alpha: 0.16) : AppColors.card,
+          gradient: active
+              ? const LinearGradient(
+                  colors: [AppColors.accent, AppColors.accent2],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                )
+              : null,
+          color: active ? null : AppColors.card,
           border: Border.all(
-            color: active ? AppColors.accent : AppColors.border,
-            width: 1,
-          ),
+              color: active ? Colors.transparent : AppColors.border, width: 1),
         ),
         child: Center(
           child: Text(
@@ -108,7 +116,7 @@ class _TabButton extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
               color: active ? Colors.white : Colors.white60,
-              fontSize: 13,
+              fontSize: 12,
               fontWeight: FontWeight.w600,
             ),
           ),
