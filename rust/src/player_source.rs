@@ -100,6 +100,70 @@ fn positions() -> &'static Mutex<HashMap<String, PlayPos>> {
     P.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+// ── SIRPANUVCHI OYNA: DISKDA DOIM `pos .. pos + 1 daqiqa` ──────────
+//
+// TALAB (foydalanuvchi): "pleyer 1:00 da bo'lsa 2:00 gacha, 1:01 da
+// bo'lsa 2:01 gacha yuklab olinsin — har soniya surilganda keyingi
+// soniya". Pleyerning o'z buferi (≤30 s) bunga yetmaydi, shu sabab
+// ilova har joy xabarida (`rust_player_position`, ~0.8 s) fonda
+// `pos .. pos + AHEAD_MS` oralig'idagi diskda YO'Q bo'laklar ketma-ket
+// olinadi (bir fayl uchun bitta oqim). Chegaradan keyingisi olinmaydi —
+// oyna ijro bilan birga suriladi. Bo'lak 1 MiB, ya'ni qadam bir necha
+// soniya (bitreytga qarab).
+fn filling() -> &'static Mutex<std::collections::HashSet<String>> {
+    static F: OnceLock<Mutex<std::collections::HashSet<String>>> = OnceLock::new();
+    F.get_or_init(|| Mutex::new(std::collections::HashSet::new()))
+}
+
+/// `[joy bo'lagi, chegara bo'lagi]` — ijro joyi ma'lum bo'lsa.
+fn window_of(name: &str, total: u64) -> Option<(u64, u64)> {
+    let m = positions().lock().ok()?;
+    let p = m.get(name)?;
+    if p.dur_ms == 0 || total == 0 {
+        return None;
+    }
+    let at = |ms: u64| (ms as u128 * total as u128 / p.dur_ms as u128) as u64;
+    let last = total.saturating_sub(1) / video_cache::PLAYER_CHUNK;
+    let from = (at(p.pos_ms) / video_cache::PLAYER_CHUNK).min(last);
+    let to = (at(p.pos_ms + AHEAD_MS) / video_cache::PLAYER_CHUNK).min(last);
+    Some((from, to))
+}
+
+fn fill_window(name: &str) {
+    let Some(r) = readers().lock().ok().and_then(|m| {
+        m.values().find(|r| r.name == name && !r.closed.load(Ordering::SeqCst)).cloned()
+    }) else {
+        return;
+    };
+    match filling().lock() {
+        Ok(mut f) => {
+            if !f.insert(name.to_string()) {
+                return; // allaqachon to'ldirilyapti
+            }
+        }
+        Err(_) => return,
+    }
+    std::thread::spawn(move || {
+        loop {
+            if r.closed.load(Ordering::SeqCst) {
+                break;
+            }
+            let Some((from, to)) = window_of(&r.name, r.total) else { break };
+            let next = (from..=to).find(|&i| {
+                !video_cache::player_has_chunk(&r.dir, i, r.total)
+                    && !flights().lock().map(|m| m.contains_key(&(r.name.clone(), i))).unwrap_or(true)
+            });
+            let Some(i) = next else { break }; // oyna to'la
+            if load_chunk(&r.name, &r.dir, r.total, i).is_err() {
+                break; // tarmoq xatosi — keyingi joy xabarida qayta
+            }
+        }
+        if let Ok(mut f) = filling().lock() {
+            f.remove(&r.name);
+        }
+    });
+}
+
 /// Shu bo'lakni hozir tarmoqdan olsa bo'ladimi.
 fn net_allowed(name: &str, total: u64, index: u64) -> bool {
     let start = index * video_cache::PLAYER_CHUNK;
@@ -357,6 +421,8 @@ pub extern "C" fn rust_player_position(
         buffering: buffering != 0,
         at: std::time::Instant::now(),
     });
+    drop(m);
+    fill_window(name);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -464,6 +530,22 @@ mod tests {
         assert!(net_allowed(name, total, 300));
         rust_player_position(cname.as_ptr(), 0, 0, 0);
         assert!(net_allowed(name, total, 300));
+    }
+
+    #[test]
+    fn oyna_joy_bilan_birga_suriladi() {
+        let c = video_cache::PLAYER_CHUNK;
+        let total = 600 * c; // 600 s — 1 MiB/s
+        let name = "test_oyna.mp4";
+        let cname = std::ffi::CString::new(name).unwrap();
+        rust_player_position(cname.as_ptr(), 60_000, 600_000, 0);
+        assert_eq!(window_of(name, total), Some((60, 120)));
+        rust_player_position(cname.as_ptr(), 61_000, 600_000, 0);
+        assert_eq!(window_of(name, total), Some((61, 121)));
+        rust_player_position(cname.as_ptr(), 590_000, 600_000, 0);
+        assert_eq!(window_of(name, total), Some((590, 599)));
+        rust_player_position(cname.as_ptr(), 0, 0, 0);
+        assert_eq!(window_of(name, total), None);
     }
 
     #[test]

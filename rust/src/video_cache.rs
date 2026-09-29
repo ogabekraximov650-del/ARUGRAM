@@ -9089,6 +9089,11 @@ pub(crate) fn player_set_total(dir: &PathBuf, total: u64, content_type: &str) {
     });
 }
 
+/// Bo'lak diskda bormi (ochmasdan, faqat tekshiradi).
+pub(crate) fn player_has_chunk(dir: &PathBuf, index: u64, total: u64) -> bool {
+    chunk_cached(dir, index, total)
+}
+
 pub(crate) fn player_read_chunk(dir: &PathBuf, key: &str, index: u64, total: u64) -> Option<Vec<u8>> {
     let plain = chunk_plain_len(index, total);
     if plain == 0 {

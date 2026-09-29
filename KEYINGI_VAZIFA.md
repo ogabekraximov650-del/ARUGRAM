@@ -3982,3 +3982,10 @@ oldinda yakka bo'lak paydo bo'lardi. Endi `read`: oxirgi o'qilgan bo'lakdan
 ketma-ket (≤ `AHEAD`+1) o'qish — doim; sakrab, `pos + 60 s` dan uzoqdagi va
 diskda yo'q bo'lak — `WAIT` (Java 1 s kutadi). Pleyer buferlanayotganda
 (`buffering`) va sek oldidan (ilova joyni bildiradi) cheklov yo'q.
+
+**Sirpanuvchi oyna: diskda doim `pos .. pos + 1 daqiqa` (foydalanuvchi
+talabi: "1:00 da 2:00 gacha, 1:01 da 2:01 gacha").** `player_source.rs` →
+`fill_window`: har `rust_player_position` da (~0.8 s) fonda oynadagi diskda
+yo'q bo'laklar ketma-ket olinadi (bir fayl — bitta oqim, `filling`).
+Chegaradan keyingisi olinmaydi. Qadam — 1 MiB bo'lak (bitreytga qarab bir
+necha soniya). Test: `oyna_joy_bilan_birga_suriladi`.
