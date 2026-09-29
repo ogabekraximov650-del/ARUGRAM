@@ -4049,3 +4049,21 @@ ovoz baytlari uchun faylning boshqa joyiga sakraydi va o'sha bo'lak
 parse_moov_audio`) yo'lakchalari uchun `pos .. pos + 1 daqiqa` baytlari
 (`windows_of`), fon to'ldirish ham ikkalasini oladi. Zaxira: pleyer bir
 bo'lakni 3 s dan ko'p kutsa, majburan beriladi (`Reader::waiting`).
+
+## Avto-kodlash yangi akkauntda (2026-09)
+
+- Kodlash `ogabek008/avtoencode` repoda (private, Actions daqiqalari
+  cheklangan). Repo `.github/workflows/setup-autoencode.yml` bilan
+  yaratiladi (`tool/encode/setup_repo.py`): fayllar yuklanadi,
+  `TG_API_ID`, `TG_API_HASH`, `ENCODE_TOKEN` shifrlab o'rnatiladi.
+- Ishga tushirish: worker cron (har 10 daqiqa, `encode_kick`) `GH_REPO`
+  (`tool/encode/gh_repo.txt`) va `GH_ACTIONS_TOKEN` bilan. Token
+  `tool/encode/gh_token.enc` da (ENCODE_TOKEN bilan shifrlangan);
+  `deploy-worker.yml` uni ochib worker secret'lariga qo'yadi. Token
+  almashsa faqat shu fayl yangilanadi (bir haftalik token tugaydi).
+- Run 4 soatdan keyin yangi ish olmaydi (`START_BUDGET_MIN`), 5 soatda
+  majburan to'xtaydi (`timeout-minutes: 300`); worker yangisini boshlaydi.
+- Eski repodagi `encode.yml` faqat qo'lda; worker `GH_REPO`siz Actions'ni
+  ishga tushirmaydi.
+- Public qilinganda GitHub reponi bloklagan edi (`Repository has been
+  locked`) — hozircha private.

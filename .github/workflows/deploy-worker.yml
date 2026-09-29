@@ -103,6 +103,7 @@ jobs:
           # `tool/encode/gh_token.enc` (ENCODE_TOKEN bilan shifrlangan
           # token) ochiladi va yuqoridagini ALMASHTIRADI; repo nomi
           # `tool/encode/gh_repo.txt` dan (`owner/repo`).
+          # Token almashsa `gh_token.enc` yangilanadi va shu fayl o'zgarib deploy ishga tushadi.
           if [ -f ../tool/encode/gh_token.enc ] && [ -f ../tool/encode/gh_repo.txt ]; then
             K=$(printf '%s' "${{ secrets.ENCODE_TOKEN }}" | tr -d '[:space:]')
             GHT=$(K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K \
