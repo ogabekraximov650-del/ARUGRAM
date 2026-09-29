@@ -3332,9 +3332,30 @@ pub extern "C" fn rust_video_cache_ranges(url_ptr: *const c_char) -> *mut c_char
         }
     }
     let t = total as f64;
+    // ── PLEYER CHIZIG'I VAQT BO'YICHA (foydalanuvchi: "5 daqiqagacha
+    // yuklanyapti") ────────────────────────────────────────────────
+    //
+    // Chiziq VAQT o'qi, ranges esa BAYT. Oddiy `bayt / hajm` bitreyt
+    // o'zgarsa yolg'on: jangovar sahnada 1 daqiqa = ko'p bayt, ya'ni
+    // chiziqda 4-5 daqiqa bo'lib ko'rinardi. Pleyer `moov` ni o'qigan
+    // bo'lsa (`player_source::time_map`) aniq soniyalar beriladi.
+    let tm = crate::player_source::time_map(&key);
     let list: Vec<serde_json::Value> = ranges
         .iter()
-        .map(|(a, b)| serde_json::json!([*a as f64 / t, *b as f64 / t]))
+        .map(|(a, b)| match &tm {
+            Some(tm) if tm.dur_ms > 0 && !tm.chunk_ms.is_empty() => {
+                let ia = (*a / CHUNK_SIZE) as usize;
+                let ib = b.div_ceil(CHUNK_SIZE) as usize;
+                let dur = tm.dur_ms as f64;
+                let t0 = tm.chunk_ms.get(ia).copied().unwrap_or(0) as f64;
+                let t1 = match tm.chunk_ms.get(ib) {
+                    Some(v) => *v as f64,
+                    None => dur,
+                };
+                serde_json::json!([(t0 / dur).min(1.0), (t1 / dur).min(1.0)])
+            }
+            _ => serde_json::json!([*a as f64 / t, *b as f64 / t]),
+        })
         .collect();
     string_to_cptr(serde_json::json!({"total": total, "ranges": list}).to_string())
 }
@@ -9060,6 +9081,12 @@ mod tests {
 // bo'lakni yuklab olish qayta olmaydi va aksincha.
 
 pub(crate) const PLAYER_CHUNK: u64 = CHUNK_SIZE;
+
+/// Fayl kesh kaliti (`player_source` shu bilan "bayt → soniya" jadvalini
+/// `rust_video_cache_ranges` ga ulaydi).
+pub(crate) fn player_key(name: &str) -> String {
+    cache_key(name)
+}
 
 /// Faylning kesh papkasi (yaratib qo'yiladi).
 pub(crate) fn player_dir(key: &str) -> Option<PathBuf> {

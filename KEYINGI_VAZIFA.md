@@ -4027,3 +4027,12 @@ namuna jadvalini o'qiydi (`track_from`, fon oqimida bir marta) va oynani
 AYNAN `sample_at_ms → locate().offset` bilan hisoblaydi (`window_of`);
 jadval yo'q bo'lsa o'rtacha bitreyt zaxira (`avg_window`). Testlar:
 `moov_dan_soniya_bayt_jadvali` (haqiqiy MP4), `oyna_joy_bilan_birga_suriladi`.
+
+**Pleyer chizig'i VAQT bo'yicha (2026-09-29).** `rust_video_cache_ranges`
+baytni `bayt/hajm` deb qaytarardi — bitreyt o'zgarganda 1 daqiqa chiziqda
+4-5 daqiqa bo'lib ko'rinardi. Endi `moov` o'qilgach (`player_source::time_map`,
+`mp4::VideoTrack::chunk_start_ms`) aniq soniyalar. Oyna: ketma-ket o'qish
+uchun alohida ruxsat olib tashlandi, har tarmoq bo'lagi jurnalga yoziladi
+(`Pleyer: <nom> #<bo'lak> tarmoqdan (<sabab>), joy <s>`; sabab: pleyer/oyna/
+oldindan/moov). Yuklanmalar kartasi: sifatlar 2 tadan, tugmalar kattaroq,
+o'chirish qizil, hamma sifat yig'indi tezligi.

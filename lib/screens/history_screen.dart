@@ -684,19 +684,58 @@ class _DownloadRow extends StatelessWidget {
                         fontSize: 12,
                       ),
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 6),
+                    // Tugmalar kattaroq, orasi ochiqroq; o'chirish — qizil
+                    // (foydalanuvchi talabi).
                     Row(
                       children: [
                         _RowIconButton(
                           icon: Icons.download_rounded,
                           onTap: () => _openQualities(context),
                         ),
+                        const SizedBox(width: 16),
                         _RowIconButton(
                           icon: Icons.delete_outline_rounded,
+                          color: AppColors.danger,
                           onTap: () => _confirmDelete(context),
                         ),
                       ],
                     ),
+                    // Shu qismning HAMMA sifatlari yig'indi tezligi.
+                    const SizedBox(height: 4),
+                    Builder(builder: (context) {
+                      var speed = 0;
+                      var active = false;
+                      for (final u in item.allUrls) {
+                        final st = DownloadManager.instance.statOf(u);
+                        speed += st.speed;
+                        if (st.downloading || st.queued) active = true;
+                      }
+                      final label = speed > 0
+                          ? VideoCacheStat(speed: speed).speedLabel
+                          : (active ? 'kutilmoqda...' : '');
+                      if (label.isEmpty) return const SizedBox.shrink();
+                      return Row(
+                        children: [
+                          Icon(Icons.speed_rounded,
+                              size: 14,
+                              color: AppColors.accent.withValues(alpha: 0.9)),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              label,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.75),
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      );
+                    }),
                   ],
                 ),
               ),
@@ -704,15 +743,22 @@ class _DownloadRow extends StatelessWidget {
           ),
           if (urls.isNotEmpty) ...[
             const SizedBox(height: 10),
-            // ── SIFAT OYNACHALARI ─────────────────────────────
-            Row(
-              children: [
-                for (var i = 0; i < urls.length; i++) ...[
-                  if (i > 0) const SizedBox(width: 6),
+            // ── SIFAT OYNACHALARI: ENIGA 2 TADAN ───────────────
+            //
+            // Foydalanuvchi talabi: "sifatlar eniga 2 qatordan". Har
+            // qatorda ikkitadan; oxirgi yolg'iz oynacha butun eni.
+            for (var i = 0; i < urls.length; i += 2) ...[
+              if (i > 0) const SizedBox(height: 6),
+              Row(
+                children: [
                   Expanded(child: _QualityBox(url: urls[i])),
+                  if (i + 1 < urls.length) ...[
+                    const SizedBox(width: 6),
+                    Expanded(child: _QualityBox(url: urls[i + 1])),
+                  ],
                 ],
-              ],
-            ),
+              ),
+            ],
           ],
         ],
       ),
@@ -740,8 +786,10 @@ class _DownloadRow extends StatelessWidget {
 class _RowIconButton extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
+  final Color color;
 
-  const _RowIconButton({required this.icon, required this.onTap});
+  const _RowIconButton(
+      {required this.icon, required this.onTap, this.color = Colors.white70});
 
   @override
   Widget build(BuildContext context) {
@@ -750,9 +798,9 @@ class _RowIconButton extends StatelessWidget {
       // `opaque` — ikonka atrofidagi bo'sh joy ham tapni oladi.
       behavior: HitTestBehavior.opaque,
       child: SizedBox(
-        width: 40,
-        height: 40,
-        child: Icon(icon, size: 20, color: Colors.white70),
+        width: 44,
+        height: 44,
+        child: Icon(icon, size: 26, color: color),
       ),
     );
   }

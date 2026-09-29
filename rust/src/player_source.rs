@@ -95,6 +95,23 @@ struct PlayPos {
     at: std::time::Instant,
 }
 
+/// "Bayt → soniya" jadvali (pleyer chizig'i uchun): har bir 1 MiB
+/// bo'lakda boshlanadigan birinchi kadrning vaqti.
+pub(crate) struct TimeMap {
+    pub chunk_ms: Vec<u32>,
+    pub dur_ms: u64,
+}
+
+fn time_maps() -> &'static Mutex<HashMap<String, Arc<TimeMap>>> {
+    static T: OnceLock<Mutex<HashMap<String, Arc<TimeMap>>>> = OnceLock::new();
+    T.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// `key` — `video_cache::player_key(nom)`.
+pub(crate) fn time_map(key: &str) -> Option<Arc<TimeMap>> {
+    time_maps().lock().ok()?.get(key).cloned()
+}
+
 fn positions() -> &'static Mutex<HashMap<String, PlayPos>> {
     static P: OnceLock<Mutex<HashMap<String, PlayPos>>> = OnceLock::new();
     P.get_or_init(|| Mutex::new(HashMap::new()))
@@ -188,7 +205,7 @@ fn read_span(r: &Reader, off: u64, len: u64) -> Option<Vec<u8>> {
     let mut pos = off;
     while pos < end {
         let idx = pos / video_cache::PLAYER_CHUNK;
-        let c = load_chunk(&r.name, &r.dir, r.total, idx).ok()?;
+        let c = load_chunk(&r.name, &r.dir, r.total, idx, "moov").ok()?;
         let o = (pos - idx * video_cache::PLAYER_CHUNK) as usize;
         let n = ((end - pos) as usize).min(c.len().checked_sub(o)?);
         if n == 0 {
@@ -217,6 +234,14 @@ fn track_of(r: &Reader, parse: bool) -> Option<Arc<crate::mp4::VideoTrack>> {
     match t {
         Some(t) => {
             g.0 = Some(Arc::clone(&t));
+            // Pleyer chizig'i uchun aniq "bayt → soniya" jadvali.
+            let tm = TimeMap {
+                chunk_ms: t.chunk_start_ms(video_cache::PLAYER_CHUNK, r.total),
+                dur_ms: (t.duration_secs() * 1000.0) as u64,
+            };
+            if let Ok(mut m) = time_maps().lock() {
+                m.insert(video_cache::player_key(&r.name), Arc::new(tm));
+            }
             Some(t)
         }
         None => {
@@ -271,7 +296,7 @@ fn fill_window(name: &str) {
                     && !flights().lock().map(|m| m.contains_key(&(r.name.clone(), i))).unwrap_or(true)
             });
             let Some(i) = next else { break }; // oyna to'la
-            if load_chunk(&r.name, &r.dir, r.total, i).is_err() {
+            if load_chunk(&r.name, &r.dir, r.total, i, "oyna").is_err() {
                 break; // tarmoq xatosi — keyingi joy xabarida qayta
             }
         }
@@ -311,9 +336,6 @@ struct Reader {
     /// Oxirgi o'qilgan bo'lak (pleyer uni mayda bo'laklab o'qiydi —
     /// har safar diskdan ochib o'tirmaslik uchun).
     last: Mutex<Option<(u64, Arc<Vec<u8>>)>>,
-    /// Shu manba oxirgi o'qigan bo'lak raqami (`u64::MAX` — hali yo'q):
-    /// ketma-ket o'qish va sakrashni ajratish uchun.
-    last_index: std::sync::atomic::AtomicU64,
     /// Namuna jadvali (`moov`) va o'qib bo'lmagan urinishlar soni.
     track: Mutex<(Option<Arc<crate::mp4::VideoTrack>>, u8)>,
 }
@@ -384,7 +406,6 @@ fn open(name: &str, size_hint: u64) -> Result<i64, String> {
         total,
         closed: Arc::new(AtomicBool::new(false)),
         last: Mutex::new(None),
-        last_index: std::sync::atomic::AtomicU64::new(u64::MAX),
         track: Mutex::new((None, 0)),
     });
     readers().lock().map_err(|e| e.to_string())?.insert(h, r);
@@ -403,7 +424,7 @@ fn close(h: i64) {
 
 /// Bo'lakni diskdan yoki Telegram'dan oladi. Bir xil bo'lakni boshqa
 /// oqim olayotgan bo'lsa — o'shani kutadi.
-fn load_chunk(name: &str, dir: &PathBuf, total: u64, index: u64) -> ChunkResult {
+fn load_chunk(name: &str, dir: &PathBuf, total: u64, index: u64, why: &str) -> ChunkResult {
     if let Some(b) = video_cache::player_read_chunk(dir, name, index, total) {
         return Ok(Arc::new(b));
     }
@@ -431,6 +452,16 @@ fn load_chunk(name: &str, dir: &PathBuf, total: u64, index: u64) -> ChunkResult 
         Some(b) => Ok(Arc::new(b)),
         None => {
             let len = chunk_len(index, total);
+            // Diagnostika: tarmoqdan olingan har bir bo'lak — sababi bilan
+            // (`pleyer` / `oyna` / `oldindan` / `moov`) va ijro joyi bilan.
+            video_cache::tg_log(format!(
+                "Pleyer: {name} #{index} tarmoqdan ({why}), joy {}",
+                positions()
+                    .lock()
+                    .ok()
+                    .and_then(|m| m.get(name).map(|p| format!("{} s", p.pos_ms / 1000)))
+                    .unwrap_or_else(|| "?".into())
+            ));
             telegram::fetch_range(name, index * video_cache::PLAYER_CHUNK, len).and_then(|b| {
                 if b.len() as u64 != len {
                     return Err(format!("qisqa javob: {} / {len}", b.len()));
@@ -467,7 +498,7 @@ fn prefetch(r: &Arc<Reader>, index: u64) {
         let r = Arc::clone(r);
         std::thread::spawn(move || {
             if !r.closed.load(Ordering::SeqCst) {
-                let _ = load_chunk(&r.name, &r.dir, r.total, i);
+                let _ = load_chunk(&r.name, &r.dir, r.total, i, "oldindan");
             }
         });
     }
@@ -489,19 +520,19 @@ fn read(h: i64, pos: u64, out: &mut [u8]) -> Result<usize, String> {
     let chunk = match cached {
         Some(b) => b,
         None => {
-            // Ketma-ket o'qish (pleyer buferi) — doim. Sakrab, chegaradan
-            // uzoqdagi va diskda yo'q bo'lak — kutadi (yuqoridagi izoh).
-            let prev = r.last_index.load(Ordering::SeqCst);
-            let sequential = prev != u64::MAX && index >= prev && index <= prev + AHEAD + 1;
-            let b = if sequential || net_allowed(&r, index) {
-                load_chunk(&r.name, &r.dir, r.total, index)?
+            // Oyna (`pos .. pos + 1 daqiqa`, `moov` bo'yicha aniq) ichida,
+            // yoki pleyer ma'lumot kutayotgan bo'lsa — olinadi. Aks holda
+            // diskda bo'lmasa kutadi (`WAIT`). Ketma-ket o'qish uchun
+            // alohida ruxsat YO'Q: pleyerning o'z zaxirasi (≤30 s) oynaga
+            // sig'adi, ruxsat esa oynani sekin "sudrab" ketardi.
+            let b = if net_allowed(&r, index) {
+                load_chunk(&r.name, &r.dir, r.total, index, "pleyer")?
             } else {
                 match video_cache::player_read_chunk(&r.dir, &r.name, index, r.total) {
                     Some(b) => Arc::new(b),
                     None => return Err(WAIT.to_string()),
                 }
             };
-            r.last_index.store(index, Ordering::SeqCst);
             if let Ok(mut l) = r.last.lock() {
                 *l = Some((index, Arc::clone(&b)));
             }
@@ -642,7 +673,6 @@ mod tests {
             total,
             closed: Arc::new(AtomicBool::new(false)),
             last: Mutex::new(None),
-            last_index: std::sync::atomic::AtomicU64::new(u64::MAX),
             track: Mutex::new((None, 0)),
         }
     }
@@ -703,6 +733,12 @@ mod tests {
             assert!(off < total);
             prev = off;
         }
+        // "Bayt → soniya" jadvali (pleyer chizig'i): monoton va davomiylikdan oshmaydi.
+        let table = t.chunk_start_ms(video_cache::PLAYER_CHUNK, total);
+        assert_eq!(table.len() as u64, total.div_ceil(video_cache::PLAYER_CHUNK));
+        let dur_ms = (t.duration_secs() * 1000.0) as u32;
+        assert!(table.windows(2).all(|w| w[0] <= w[1]));
+        assert!(table.iter().all(|&v| v <= dur_ms));
     }
 
     #[test]

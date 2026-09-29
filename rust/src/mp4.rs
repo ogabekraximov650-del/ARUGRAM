@@ -456,6 +456,41 @@ impl VideoTrack {
         None
     }
 
+    /// "BAYT → SONIYA" jadvali: faylni `chunk` baytlik bo'laklarga
+    /// bo'lganda har bir bo'lakda BOSHLANADIGAN birinchi video kadrning
+    /// vaqti (millisekund). Kadr boshlanmagan bo'laklar (faqat ovoz)
+    /// oldingisining vaqtini oladi — jadval monoton.
+    pub fn chunk_start_ms(&self, chunk: u64, total: u64) -> Vec<u32> {
+        if chunk == 0 || total == 0 || self.timescale == 0 {
+            return Vec::new();
+        }
+        let n = total.div_ceil(chunk) as usize;
+        let mut out = vec![u32::MAX; n];
+        let mut ticks: u64 = 0;
+        let mut sample: u32 = 1;
+        for (count, delta) in &self.stts {
+            for _ in 0..*count {
+                if let Some(r) = self.locate(sample) {
+                    let ci = (r.offset / chunk) as usize;
+                    if ci < n && out[ci] == u32::MAX {
+                        out[ci] = (ticks * 1000 / self.timescale as u64).min(u32::MAX as u64 - 1) as u32;
+                    }
+                }
+                ticks += *delta as u64;
+                sample += 1;
+            }
+        }
+        let mut last = 0u32;
+        for v in out.iter_mut() {
+            if *v == u32::MAX {
+                *v = last;
+            } else {
+                last = *v;
+            }
+        }
+        out
+    }
+
     /// Namunaning davomiyligi (vaqt birligida).
     fn delta_of(&self, sample: u32) -> u32 {
         let mut seen: u64 = 0;
