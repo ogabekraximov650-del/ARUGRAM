@@ -4067,3 +4067,14 @@ bo'lakni 3 s dan ko'p kutsa, majburan beriladi (`Reader::waiting`).
   ishga tushirmaydi.
 - Public qilinganda GitHub reponi bloklagan edi (`Repository has been
   locked`) — hozircha private.
+
+## Kodlashning kunlik chegarasi olib tashlandi (2026-09)
+
+- Foydalanuvchi talabi: "Chegarini olib tashla, endi keragi yo'q".
+  `ENCODE_DAILY_LIMIT` (10 ta qism/kun), `encode_today`, `tashkent_day`
+  va `app_config.encode_day` hisoblagichi o'chirildi.
+- `/api/encode/peek`, `/api/encode/claim`, `encode_kick` endi navbatdagi
+  hamma ishni chegarasiz beradi; bot "Holat" xabarida "Bugun ... N/10"
+  qatori va "Bugungi chegara to'ldi" xabari yo'q.
+- Bazadagi eski `encode_day` yozuvi zararsiz (endi o'qilmaydi).
+- Eslatma: yuqoridagi "Kunlik chegara — 10 ta qism" bo'limi eskirgan.

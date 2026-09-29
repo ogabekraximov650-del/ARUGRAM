@@ -9766,29 +9766,6 @@ const ENCODE_MAX_ATTEMPTS: i64 = 3;
 /// Bot asl videoni kanalga ko'chirib ulgurmagan bo'lsa shuncha kutiladi.
 const ENCODE_ORIGIN_WAIT_MS: i64 = 2 * 60 * 60 * 1000;
 
-/// KUNLIK CHEGARA (foydalanuvchi talabi, tugmasiz, qat'iy): bir kunda
-/// (Toshkent vaqti, 00:00 dan) ko'pi bilan shuncha YANGI qism kodlashga
-/// olinadi. Qolganlari navbatda turadi va ertasi kuni o'zi boshlanadi.
-/// Yarim qolgan ish (ijarasi o'tgan `running`) chegaraga qaramay davom etadi.
-const ENCODE_DAILY_LIMIT: i64 = 10;
-
-/// Toshkent (UTC+5) bo'yicha kun raqami.
-fn tashkent_day(now: i64) -> i64 {
-    (now + 5 * 3600 * 1000) / 86_400_000
-}
-
-/// Bugun kodlashga olingan yangi qismlar soni (`app_config.encode_day`
-/// = `<kun>:<soni>`).
-async fn encode_today(env: &Env) -> i64 {
-    let day = tashkent_day(now_ms());
-    config_get(env, "encode_day").await
-        .and_then(|v| {
-            let (d, n) = v.split_once(':')?;
-            (d.parse::<i64>().ok()? == day).then(|| n.parse::<i64>().ok()).flatten()
-        })
-        .unwrap_or(0)
-}
-
 fn ct_eq(a: &str, b: &str) -> bool {
     a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
@@ -9969,14 +9946,10 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
     let now = now_ms();
 
     if path == "/api/encode/peek" && method == Method::Get {
-        // Kunlik chegara to'lgan bo'lsa — faqat yarim qolgan ishlar.
-        let sql = if encode_today(env).await >= ENCODE_DAILY_LIMIT {
-            "SELECT COUNT(*) AS n FROM encode_jobs WHERE state='running' AND lease_until<=?"
-        } else {
+        let res = turso_exec(env,
             "SELECT COUNT(*) AS n FROM encode_jobs
-              WHERE state='queued' OR (state='running' AND lease_until<=?)"
-        };
-        let res = turso_exec(env, sql, vec![TursoArg::int(now)]).await?;
+              WHERE state='queued' OR (state='running' AND lease_until<=?)",
+            vec![TursoArg::int(now)]).await?;
         let n = first_row(&res).and_then(|r| r["n"].as_i64()).unwrap_or(0);
         return ok(json!({"pending": n}));
     }
@@ -9998,18 +9971,10 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
         if first_row(&busy).is_some() {
             return ok(json!({"busy": true}));
         }
-        let today = encode_today(env).await;
-        let limit_hit = today >= ENCODE_DAILY_LIMIT;
         for _ in 0..8 {
             let res = turso_exec(env,
-                if limit_hit {
-                    // Chegara to'ldi — faqat yarim qolgan ishni davom ettirish.
-                    "SELECT * FROM encode_jobs WHERE state='running' AND lease_until<=?
-                      ORDER BY queued_at ASC LIMIT 1"
-                } else {
-                    "SELECT * FROM encode_jobs WHERE state='queued' OR (state='running' AND lease_until<=?)
-                      ORDER BY queued_at ASC LIMIT 1"
-                },
+                "SELECT * FROM encode_jobs WHERE state='queued' OR (state='running' AND lease_until<=?)
+                  ORDER BY queued_at ASC LIMIT 1",
                 vec![TursoArg::int(now)]).await?;
             let Some(job) = first_row(&res) else {
                 return ok(json!({"none": true}));
@@ -10064,11 +10029,6 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
             let Some(got) = first_row(&got) else {
                 return ok(json!({"busy": true}));
             };
-            // Yangi qism (birinchi urinish) — bugungi hisobga qo'shiladi.
-            if jint(&got, "attempts") == 1 {
-                config_put(env, "encode_day",
-                    &format!("{}:{}", tashkent_day(now), today + 1)).await;
-            }
             let done = done_list(got["done"].as_str().unwrap_or(""));
             // Oldingi run yuklagan-u, jurnalga yozib ulgurmagan sifatlar.
             let mut uploaded = Vec::new();
@@ -10701,9 +10661,7 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
                 format!("{label}: {} ta", jint(r, "n"))
             }).collect();
         let kick = encode_kick(env).await;
-        let today = encode_today(env).await;
-        encbot_send(env, chat, &format!("\u{1F4CB} <b>Kodlash navbati</b>\n\
-            \u{1F4C5} Bugun kodlashga olingan: {today}/{ENCODE_DAILY_LIMIT}\n\n{}\n\n{kick}",
+        encbot_send(env, chat, &format!("\u{1F4CB} <b>Kodlash navbati</b>\n\n{}\n\n{kick}",
             if lines.is_empty() { "Navbatda hech narsa yo'q.".to_string() } else { lines.join("\n") }), None).await;
         return ok(json!({"ok": true}));
     }
@@ -10870,10 +10828,6 @@ async fn encode_kick(env: &Env) -> String {
     }
     if pending == 0 {
         return "\u{2705} Kodlanadigan video qolmadi.".into();
-    }
-    if jint(&r, "stale") == 0 && encode_today(env).await >= ENCODE_DAILY_LIMIT {
-        return format!("\u{1F6D1} Bugungi chegara ({ENCODE_DAILY_LIMIT} ta qism) to'ldi. \
-            Navbatdagi {pending} ta video ertaga (Toshkent vaqti bilan 00:00 dan keyin) o'zi kodlanadi.");
     }
     // Kodlash repo'si (`owner/repo`) — faqat `GH_REPO` secret'idan; yo'q
     // bo'lsa Actions ishga tushirilmaydi (eski repoga adashib ketmasin).
