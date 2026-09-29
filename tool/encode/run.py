@@ -133,6 +133,12 @@ class ChannelLog:
             self.active = True
             self.pending.append(("title", title))
 
+    def heading(self, title):
+        """Yangi qism sarlavhasi (xabar oqimi to'xtamaydi)."""
+        with self.lock:
+            if self.active:
+                self.pending.append(("title", title))
+
     def stop(self):
         with self.lock:
             self.active = False
@@ -187,6 +193,21 @@ class ChannelLog:
 
 
 CHLOG = ChannelLog()
+
+
+def transfer_progress(kind: str):
+    """Telegram yuklab olish/yuklash jarayoni: har soniyada bitta qator."""
+    t0, last = time.time(), [0.0]
+
+    def cb(cur, total):
+        now = time.time()
+        if now - last[0] < 1.0 and cur < total:
+            return
+        last[0] = now
+        pct = cur * 100 / total if total else 0
+        sp = cur / max(now - t0, 0.1) / 1048576
+        log(f"    {kind} {pct:5.1f}% | {cur / 1048576:.1f}/{total / 1048576:.1f} MB | {sp:.2f} MB/s")
+    return cb
 
 
 def log(*a):
@@ -398,7 +419,7 @@ async def process(app: Client, channel: int, job: dict):
     ident = {"runner": RUNNER, "anime_id": a, "season_id": s, "epizod_id": e, "queued_at": qa}
     global CURRENT
     CURRENT = ident
-    CHLOG.start(f"Qism {a}/{s}/{e} (#{job.get('epizod_number')}) — run {RUNNER}")
+    CHLOG.heading(f"\U0001F3AC Qism {a}/{s}/{e} (#{job.get('epizod_number')}) — run {RUNNER}")
     hb = Heartbeat(ident)
     shutil.rmtree(WORK, ignore_errors=True)
     WORK.mkdir(parents=True)
@@ -423,7 +444,8 @@ async def process(app: Client, channel: int, job: dict):
             raise Fatal("asl video kanalda topilmadi")
         log("  asl video yuklab olinmoqda...")
         await asyncio.to_thread(hb.set, "download", True)
-        got = await app.download_media(m, file_name=str(enc))
+        got = await app.download_media(m, file_name=str(enc),
+                                       progress=transfer_progress("yuklab olinmoqda"))
         if not got or Path(got).stat().st_size == 0:
             raise RuntimeError("asl video yuklab olinmadi")
         key = (job.get("origin_key") or "").strip()
@@ -472,7 +494,8 @@ async def process(app: Client, channel: int, job: dict):
             # Kalit kanal postiga YOZILMAYDI (xavfsizlik) — faqat worker'ga.
             sent = await app.send_document(
                 channel, str(sealed), file_name=name, force_document=True,
-                caption=name, disable_notification=True)
+                caption=name, disable_notification=True,
+                progress=transfer_progress(f"{label} Telegram'ga yuklanmoqda"))
             sealed.unlink()
             api("quality", {**ident, "quality": label, "file": name, "size": size,
                             "key": k.hex(), "msg_id": sent.id})
@@ -499,7 +522,6 @@ async def process(app: Client, channel: int, job: dict):
         CURRENT = None
         for _ in range(6):  # qolgan qatorlar to'liq ketsin
             await CHLOG.flush(app)
-        CHLOG.stop()
         hb.stop.set()
         shutil.rmtree(WORK, ignore_errors=True)
 
@@ -515,6 +537,9 @@ async def main():
         # Kanal ma'lum bo'lsin (Pyrogram peer keshida).
         async for _ in app.get_dialogs():
             pass
+        # Kanalga log RUN BOSHLANISHI BILAN yoqiladi (qism kutilmaydi).
+        CHLOG.start(f"\u25B6\uFE0F Run {RUNNER} boshlandi")
+        log(f"kompyuter: {os.cpu_count()} yadro, preset {PRESET}, CRF {CRF_BASE}")
         flusher = asyncio.create_task(CHLOG.loop(app))
         worked = False
         while True:
@@ -534,6 +559,10 @@ async def main():
                 break
             await process(app, int(r["channel"]), job)
             worked = True
+        log("Run tugadi.")
+        for _ in range(6):
+            await CHLOG.flush(app)
+        CHLOG.stop()
         flusher.cancel()
         # Workflow'ning "Davom ettirish" qadami FAQAT ish bajarilgan bo'lsa
         # yangi run ochadi (aks holda "boshqa run ishlayapti" bilan tinmay

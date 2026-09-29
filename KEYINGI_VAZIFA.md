@@ -4142,3 +4142,7 @@ bo'lakni 3 s dan ko'p kutsa, majburan beriladi (`Reader::waiting`).
 - Qo'lda qayta boshlash: `restart-autoencode.yml` (`restart_run.py`) —
   avtoencode'dagi run'larni bekor qiladi, `/api/encode/release` bilan
   ishlarni navbatga qaytaradi va yangisini ishga tushiradi.
+- Kanalga log run'ning o'zi boshlanishi bilan yoqiladi (`Run ... boshlandi`),
+  qism kutilmaydi; yuklab olish/yuklash ham har soniyada qator beradi
+  (`transfer_progress`). ffmpeg/pip o'rnatilishi (Python'gacha ~1.5 daqiqa)
+  kanalga tushmaydi — ular `run.py` ishga tushmasdan oldin.
