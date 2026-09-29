@@ -3125,14 +3125,56 @@ fn hide_keys(mut obj: Value) -> Value {
     obj
 }
 
-// ── ASL VIDEO ILOVADA KO'RSATILMAYDI (2026-09-29) ─────────────
+// ── ASL VIDEO: FAQAT SHIFRLANGANI KO'RSATILADI (2026-09-29) ───────
 //
-// Ilgari kodlanguncha asl video bo'sh sifat o'rnida berilardi
-// (`with_origin`). Foydalanuvchi talabi bilan olib tashlandi: asl
-// video SHIFRLANMAGAN (kodlash botidan kelgan) va u foydalanuvchining
-// bot chatiga nusxalanganda Telegram'da ochiq ko'rinardi. Endi qism
-// faqat kodlangan sifatlari bilan ko'rinadi; `orig_` fayllar
-// `/api/tg/deliver` da faqat adminga beriladi.
+// Foydalanuvchi talabi: kodlash botidan kelgan asl video SHIFRLANMAGAN
+// — u foydalanuvchining bot chatiga nusxalanganda Telegram'da ochiq
+// ko'rinardi, shu sabab u ilovada ko'rsatilmaydi (faqat adminga).
+// Ilova orqali yuklangan asl video esa shifrlangan (`origin_key` bor) —
+// u kodlanguncha bo'sh sifat o'rnida ("Original") beriladi.
+//
+// KETMA-KETLIK: bo'limdagi qismlar raqam bo'yicha, birinchi TAYYOR
+// BO'LMAGAN qismgacha ko'rsatiladi. Ya'ni 1-qism kodlangan, 2-qism
+// kodlanmagan (shifrsiz asl), 3-qism shifrlangan asl bo'lsa — faqat
+// 1-qism; 2-qism tayyor bo'lgach 3-qism ham ko'rinadi. Admin
+// (`?all=1`) hammasini ko'radi.
+
+/// Asl video qaysi sifat o'rnida — balandligi bo'yicha (noma'lum — 720p).
+fn origin_slot(height: i64) -> &'static str {
+    match height {
+        h if h >= 900 => "1080p",
+        h if h >= 600 => "720p",
+        h if h >= 420 => "480p",
+        h if h > 0 => "360p",
+        _ => "720p",
+    }
+}
+
+/// Shifrlangan asl videoni bo'sh sifat o'rniga qo'yadi. `hide_keys` dan
+/// OLDIN chaqiriladi (unga `origin_key` kerak).
+fn with_encrypted_origin(mut obj: Value) -> Value {
+    let origin = obj["origin_video"].as_str().unwrap_or("").trim().to_string();
+    let key = obj["origin_key"].as_str().unwrap_or("").trim().to_string();
+    if origin.is_empty() || !valid_file_key(&key) {
+        return obj;
+    }
+    let q = origin_slot(jint(&obj, "origin_height"));
+    let size = jint(&obj, "origin_size");
+    if let Some(m) = obj.as_object_mut() {
+        let empty = m.get(&format!("url_{q}")).and_then(|v| v.as_str()).map(|v| v.is_empty()).unwrap_or(true);
+        if empty {
+            m.insert(format!("url_{q}"), json!(origin));
+            m.insert(format!("size_{q}"), json!(size));
+        }
+    }
+    obj
+}
+
+/// Qismda ko'rsatsa bo'ladigan video bormi (kodlangan sifat yoki
+/// `with_encrypted_origin` qo'ygan shifrlangan asl video).
+fn episode_ready(obj: &Value) -> bool {
+    QUALITIES.iter().any(|q| !obj[format!("url_{q}").as_str()].as_str().unwrap_or("").is_empty())
+}
 
 /// `epizod_db` dagi intro ustunlari soni — 5 ta juftlik.
 const INTRO_SLOTS: usize = 10;
@@ -10965,15 +11007,6 @@ async fn tg_route(mut req: Request, env: &Env, path: &str, method: Method) -> Re
             // Oxirgisi bitta so'rov bilan va faqat shunday nomlar
             // bo'lsa (odatda ekranda bir nechta rasm).
             let admin = is_admin(&u);
-            // Kodlanmagan ASL video (`orig_`) shifrlanmagan — u
-            // foydalanuvchi bot chatida Telegram'ning o'zida ochiq
-            // ko'rinardi. Endi faqat adminga (foydalanuvchi talabi).
-            if !admin {
-                names.retain(|n| !n.starts_with("orig_"));
-                if names.is_empty() {
-                    return json_resp(&json!({"error": "not_on_telegram"}), 404);
-                }
-            }
             let own = format!("chat_{me}_");
             let foreign: Vec<String> = if admin {
                 Vec::new()
@@ -11019,6 +11052,11 @@ async fn tg_route(mut req: Request, env: &Env, path: &str, method: Method) -> Re
                         return None;
                     }
                     let key = o["file_key"].as_str().unwrap_or("");
+                    // Shifrlanmagan ASL video (kodlash botidan) — faqat
+                    // adminga: u bot chatida Telegram'da ochiq ko'rinardi.
+                    if !admin && name.starts_with("orig_") && key.is_empty() {
+                        return None;
+                    }
                     if !key.is_empty() {
                         keys.insert(name.clone(), json!(key));
                     }
@@ -11666,7 +11704,24 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
                         vec![TursoArg::text(parts[0]), TursoArg::text(parts[1])]).await?;
                     let cols = res["cols"].as_array().cloned().unwrap_or_default();
                     let rows = res["rows"].as_array().cloned().unwrap_or_default();
-                    let items = rows.iter().map(|r| hide_keys(row_to_obj(&cols, r.as_array().unwrap_or(&vec![])))).collect::<Vec<_>>();
+                    // Admin (tahrirlash ekranlari) — hamma qism, o'z holicha.
+                    let want_all = url.query_pairs().any(|(k, v)| k == "all" && v == "1");
+                    let admin = want_all
+                        && session_user(&env, &bearer(&req)).await?.map(|u| is_admin(&u)).unwrap_or(false);
+                    let mut items = Vec::new();
+                    for r in &rows {
+                        let obj = row_to_obj(&cols, r.as_array().unwrap_or(&vec![]));
+                        if admin {
+                            items.push(hide_keys(obj));
+                            continue;
+                        }
+                        let obj = hide_keys(with_encrypted_origin(obj));
+                        // Birinchi tayyor bo'lmagan qismda to'xtaladi.
+                        if !episode_ready(&obj) {
+                            break;
+                        }
+                        items.push(obj);
+                    }
                     return ok(json!(resolve_list(&origin, items, EPIZOD_URL_KEYS)));
                 }
 

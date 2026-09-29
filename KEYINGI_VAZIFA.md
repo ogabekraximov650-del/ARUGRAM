@@ -4002,3 +4002,12 @@ necha soniya). Test: `oyna_joy_bilan_birga_suriladi`.
   `/api/tg/deliver` `orig_` ni faqat adminga beradi.
 - Sifat hajmi yorlig'i avval diskdan (`rust_video_cache_total`), bo'lmasa
   `size_*` (ustunlar zaxira sifatida qoladi — foydalanuvchi tanlovi).
+
+**YANGILANISH (2026-09-29): shifrlangan asl video ko'rsatiladi, ketma-ketlik
+buzilmaydi.** `GET /api/epizods/a/s`: ilova orqali yuklangan (shifrlangan,
+`origin_key` bor) asl video kodlanguncha bo'sh sifat o'rnida beriladi
+(`with_encrypted_origin`, "Original"); kodlash botidan kelgan shifrsiz asl
+video berilmaydi va `/api/tg/deliver` uni faqat adminga beradi. Ro'yxat
+qism raqami bo'yicha BIRINCHI TAYYOR BO'LMAGAN qismda to'xtaydi
+(`episode_ready`). Admin ekrani (`epizod_management_screen`) `?all=1` +
+sessiya bilan hammasini oladi.

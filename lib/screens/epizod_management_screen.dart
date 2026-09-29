@@ -8,6 +8,7 @@ import '../theme/app_background.dart';
 import '../widgets/glass.dart';
 import 'add_epizod_screen.dart';
 import '../services/api_base.dart';
+import '../services/auth_service.dart';
 
 const String _apiBase = kApiBase;
 
@@ -58,8 +59,15 @@ class _EpizodManagementScreenState extends State<EpizodManagementScreen> {
       _errorMsg = null;
     });
     try {
-      final res = await http
-          .get(Uri.parse('$_apiBase/api/epizods/$_animeId/$_seasonId'));
+      // `?all=1` + sessiya — admin HAMMA qismni ko'radi (oddiy ro'yxat
+      // birinchi tayyor bo'lmagan qismda to'xtaydi — worker izohiga
+      // qarang).
+      final res = await http.get(
+        Uri.parse('$_apiBase/api/epizods/$_animeId/$_seasonId?all=1'),
+        headers: {
+          'Authorization': 'Bearer ${AuthService.instance.sessionToken ?? ''}',
+        },
+      );
       // Ekran yopilib ketgan bo'lsa `setState` chaqirish
       // istisno tashlaydi ("setState() called after dispose()") —
       // shu sabab har bir kutishdan keyin tekshiriladi.
