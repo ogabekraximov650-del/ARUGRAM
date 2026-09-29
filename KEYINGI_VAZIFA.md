@@ -4036,3 +4036,8 @@ uchun alohida ruxsat olib tashlandi, har tarmoq bo'lagi jurnalga yoziladi
 (`Pleyer: <nom> #<bo'lak> tarmoqdan (<sabab>), joy <s>`; sabab: pleyer/oyna/
 oldindan/moov). Yuklanmalar kartasi: sifatlar 2 tadan, tugmalar kattaroq,
 o'chirish qizil, hamma sifat yig'indi tezligi.
+
+**Yuklanmalar kartasi = BO'LIM (2026-09-29).** Guruh kaliti `animeId/seasonId`;
+karta: bo'lim nomi, "N-bo'lim", biror sifati TO'LIQ yuklangan qismlar soni,
+"Hajmi" — faqat DISKDA mavjud bayt (jami hajm emas). Karta ichi
+(`DownloadsAnimeScreen`) shu bo'limning qismlari, raqam bo'yicha.

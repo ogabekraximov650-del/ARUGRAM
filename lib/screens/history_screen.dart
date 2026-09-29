@@ -409,9 +409,12 @@ class _DownloadsListState extends State<DownloadsList>
           child: rows.isEmpty
               ? _EmptyDownloads(loading: !idx.ready)
               : Builder(builder: (context) {
-                  final groups = <int, List<DownloadItem>>{};
+                  // Har BO'LIM alohida karta (foydalanuvchi talabi:
+                  // "bo'lim nomi, N-bo'lim, to'liq yuklangan qismlar,
+                  // diskdagi hajm").
+                  final groups = <String, List<DownloadItem>>{};
                   for (final r in rows) {
-                    (groups[r.animeId] ??= []).add(r);
+                    (groups['${r.animeId}/${r.seasonId}'] ??= []).add(r);
                   }
                   final list = groups.values.toList();
                   return ListView.builder(
@@ -907,7 +910,9 @@ class _QualityBox extends StatelessWidget {
   }
 }
 
-/// Yuklanmalar ro'yxatidagi ANIME kartasi (tarixdagi `AnimeRow` kabi).
+/// Yuklanmalar ro'yxatidagi BO'LIM kartasi (tarixdagi `AnimeRow` kabi):
+/// bo'lim nomi, "N-bo'lim", biror sifati TO'LIQ yuklangan qismlar soni
+/// va DISKDA mavjud hajm (faqat yuklangani, jami hajm emas).
 class _DownloadAnimeCard extends StatelessWidget {
   final List<DownloadItem> items;
   const _DownloadAnimeCard({required this.items});
@@ -917,16 +922,29 @@ class _DownloadAnimeCard extends StatelessWidget {
     final first = items.first;
     final h = WatchHistory.instance
         .findEpisode(first.animeId, first.seasonId, first.epizodId);
-    var got = 0;
-    var total = 0;
+    var onDisk = 0;
+    var fullEpisodes = 0;
     for (final it in items) {
-      got += it.downloaded;
-      total += it.total;
+      var itemBytes = 0;
+      var anyFull = false;
+      for (final u in it.allUrls) {
+        final st = DownloadManager.instance.statOf(u);
+        itemBytes += st.downloaded;
+        if (st.total > 0 && st.downloaded >= st.total) anyFull = true;
+      }
+      // Kuzatuv hali boshlanmagan bo'lsa — indeksdagi qiymat.
+      if (itemBytes == 0) itemBytes = it.downloaded;
+      if (!anyFull) anyFull = it.complete;
+      onDisk += itemBytes;
+      if (anyFull) fullEpisodes++;
     }
     return GestureDetector(
       onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
-        builder: (_) =>
-            DownloadsAnimeScreen(animeId: first.animeId, title: first.title),
+        builder: (_) => DownloadsAnimeScreen(
+          animeId: first.animeId,
+          seasonId: first.seasonId,
+          title: first.title,
+        ),
       )),
       behavior: HitTestBehavior.opaque,
       child: Glass(
@@ -968,9 +986,17 @@ class _DownloadAnimeCard extends StatelessWidget {
                 height: 1.25,
               ),
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 4),
             Text(
-              '${items.length} ta qism yuklangan',
+              '${first.bolimNumber}-bo\'lim',
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.7),
+                fontSize: 13,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              '$fullEpisodes ta qism to\'liq yuklangan',
               style: TextStyle(
                 color: Colors.white.withValues(alpha: 0.68),
                 fontSize: 12.5,
@@ -978,9 +1004,7 @@ class _DownloadAnimeCard extends StatelessWidget {
             ),
             const SizedBox(height: 2),
             Text(
-              total > 0
-                  ? 'Hajmi: ${formatBytes(got)} / ${formatBytes(total)}'
-                  : 'Hajmi: ${formatBytes(got)}',
+              'Hajmi: ${formatBytes(onDisk)}',
               style: TextStyle(
                 color: Colors.white.withValues(alpha: 0.52),
                 fontSize: 12,
@@ -996,9 +1020,15 @@ class _DownloadAnimeCard extends StatelessWidget {
 /// Bitta animening yuklangan qismlari — qism raqami bo'yicha tartibda.
 class DownloadsAnimeScreen extends StatefulWidget {
   final int animeId;
+
+  /// Bo'lim (0 — animening hamma bo'limlari).
+  final int seasonId;
   final String title;
   const DownloadsAnimeScreen(
-      {super.key, required this.animeId, required this.title});
+      {super.key,
+      required this.animeId,
+      this.seasonId = 0,
+      required this.title});
 
   @override
   State<DownloadsAnimeScreen> createState() => _DownloadsAnimeScreenState();
@@ -1037,7 +1067,9 @@ class _DownloadsAnimeScreenState extends State<DownloadsAnimeScreen> {
             ]),
             builder: (context, _) {
               final rows = DownloadsIndex.instance.items
-                  .where((e) => e.animeId == widget.animeId)
+                  .where((e) =>
+                      e.animeId == widget.animeId &&
+                      (widget.seasonId == 0 || e.seasonId == widget.seasonId))
                   .toList()
                 ..sort((a, b) {
                   final c = a.bolimNumber.compareTo(b.bolimNumber);
