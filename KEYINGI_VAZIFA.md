@@ -4120,3 +4120,5 @@ bo'lakni 3 s dan ko'p kutsa, majburan beriladi (`Reader::waiting`).
   qaytaradi (urinish sanalmaydi); (3) "Davom ettirish" faqat `run.py` haqiqatan
   ish bajarganda (`worked=1` output) yangi run ochadi.
 - Log qatoriga bitreyt qo'shildi. Preset `medium` o'zgarmadi.
+- Log: har soniyalik qatorda bitreyt va hozirgi/taxminiy yakuniy hajm; manba
+  qatorida hajm va bitreyt; sifat tugaganda o'rtacha bitreyt va hajm.

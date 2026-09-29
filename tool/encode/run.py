@@ -200,7 +200,13 @@ def progress_line(label: str, f: dict, dur: float, started: float):
     except ValueError:
         brt = "-"
     size = f.get("total_size", "")
-    mb = f"{int(size) / 1048576:.1f} MB" if size.isdigit() else "-"
+    if size.isdigit() and int(size) > 0:
+        # Hozirgi hajm va shu sur'atda yakuniy taxminiy hajm.
+        mb = f"{int(size) / 1048576:.1f} MB"
+        if t > 5:
+            mb += f" (~{int(size) / 1048576 * dur / t:.0f} MB bo'ladi)"
+    else:
+        mb = "-"
     line = (f"    {label} {pct:3d}% | video {hms(t)}/{hms(dur)} | "
             f"tezlik {speed or '-'} | {f.get('fps', '-')} kadr/s | "
             f"bitreyt {brt} | {mb} | o'tdi {hms(time.time() - started)} | qoldi ~{eta}")
@@ -322,7 +328,10 @@ async def process(app: Client, channel: int, job: dict):
         hb.check()
         src_h, src_d = await asyncio.to_thread(probe, src)
         steps = plan(src_h)
-        log(f"  manba {src_h}p, {src_d:.0f} s -> {', '.join(x[0] for x in steps)}")
+        src_mb = src.stat().st_size / 1048576
+        log(f"  manba {src_h}p, {src_d:.0f} s, {src_mb:.1f} MB, "
+            f"bitreyt ~{src.stat().st_size * 8 / src_d / 1000:.0f} kb/s -> "
+            f"{', '.join(x[0] for x in steps)}")
         log(f"  kompyuter: {os.cpu_count()} yadro, preset {PRESET}, CRF {CRF_BASE}")
 
         for idx, (label, target, dcrf) in enumerate(steps, 1):
@@ -349,7 +358,9 @@ async def process(app: Client, channel: int, job: dict):
             await asyncio.to_thread(ctr_file, out, sealed, k)
             size = out.stat().st_size
             out.unlink()
-            log(f"  {label}: {size / 1048576:.1f} MB, {time.time() - t:.0f} s — yuklanmoqda...")
+            log(f"  {label}: tayyor — {size / 1048576:.1f} MB, o'rtacha bitreyt "
+                f"{size * 8 / src_d / 1000:.0f} kb/s, kodlash {hms(time.time() - t)} "
+                f"— yuklanmoqda...")
             await asyncio.to_thread(hb.set, f"upload|{label}|{idx}|{len(steps)}", True)
             # Kalit kanal postiga YOZILMAYDI (xavfsizlik) — faqat worker'ga.
             sent = await app.send_document(
