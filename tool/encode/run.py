@@ -152,8 +152,36 @@ def plan(height):
     return out
 
 
+def hms(sec: float) -> str:
+    sec = max(0, int(sec))
+    h, r = divmod(sec, 3600)
+    m, s_ = divmod(r, 60)
+    return f"{h}:{m:02d}:{s_:02d}" if h else f"{m:02d}:{s_:02d}"
+
+
+def progress_line(label: str, f: dict, dur: float, started: float):
+    """ffmpeg `-progress` bloki -> (foiz, log qatori) yoki None."""
+    us = f.get("out_time_us") or f.get("out_time_ms") or ""
+    if not us.isdigit() or dur <= 0:
+        return None
+    t = int(us) / 1e6
+    pct = min(99, int(t / dur * 100))
+    speed = f.get("speed", "").strip()
+    try:
+        sp = float(speed.rstrip("x"))
+    except ValueError:
+        sp = 0.0
+    eta = hms((dur - t) / sp) if sp > 0 else "--:--"
+    size = f.get("total_size", "")
+    mb = f"{int(size) / 1048576:.1f} MB" if size.isdigit() else "-"
+    line = (f"    {label} {pct:3d}% | video {hms(t)}/{hms(dur)} | "
+            f"tezlik {speed or '-'} | {f.get('fps', '-')} kadr/s | "
+            f"{mb} | o'tdi {hms(time.time() - started)} | qoldi ~{eta}")
+    return pct, line
+
+
 def encode(src: Path, dst: Path, src_h: int, target: int, dcrf: int,
-           dur: float = 0.0, on_progress=None):
+           dur: float = 0.0, on_progress=None, label: str = ""):
     vf = [] if target >= src_h else ["-vf", f"scale=-2:{target}:flags=lanczos"]
     abr = "128k" if target >= 720 else "96k"
     cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostats",
@@ -165,15 +193,25 @@ def encode(src: Path, dst: Path, src_h: int, target: int, dcrf: int,
            "-movflags", "+faststart", str(dst)]
     # `-progress pipe:1` — ffmpeg har soniyada `out_time_us=...` yozadi;
     # foiz = shu vaqt / manba davomiyligi (bot "Holat" xabari uchun).
+    # Har soniyada bitta to'liq qator log'ga chiqadi (foiz, tezlik, ETA).
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True)
-    last = -1
+    fields, last, last_log, started = {}, -1, 0.0, time.time()
     for line in p.stdout:
         k, _, v = line.strip().partition("=")
-        if k in ("out_time_us", "out_time_ms") and v.isdigit() and dur > 0 and on_progress:
-            pct = int(min(99, int(v) / 1e6 / dur * 100))
-            if pct != last:
-                last = pct
-                on_progress(pct)
+        if k != "progress":
+            fields[k] = v
+            continue
+        r = progress_line(label, fields, dur, started)
+        fields = {}
+        if not r:
+            continue
+        pct, text = r
+        if pct != last and on_progress:
+            last = pct
+            on_progress(pct)
+        if time.time() - last_log >= 1.0:
+            last_log = time.time()
+            print(time.strftime("%H:%M:%S"), text, flush=True)
     if p.wait() != 0:
         raise subprocess.CalledProcessError(p.returncode, "ffmpeg")
 
@@ -256,6 +294,7 @@ async def process(app: Client, channel: int, job: dict):
         src_h, src_d = await asyncio.to_thread(probe, src)
         steps = plan(src_h)
         log(f"  manba {src_h}p, {src_d:.0f} s -> {', '.join(x[0] for x in steps)}")
+        log(f"  kompyuter: {os.cpu_count()} yadro, preset {PRESET}, CRF {CRF_BASE}")
 
         for idx, (label, target, dcrf) in enumerate(steps, 1):
             hb.check()
@@ -270,7 +309,8 @@ async def process(app: Client, channel: int, job: dict):
             await asyncio.to_thread(hb.set, f"enc|{label}|0|{idx}|{len(steps)}", True)
             await asyncio.to_thread(
                 encode, src, out, src_h, target, dcrf, src_d,
-                lambda pct, l=label, i=idx, n=len(steps): hb.set(f"enc|{l}|{pct}|{i}|{n}"))
+                lambda pct, l=label, i=idx, n=len(steps): hb.set(f"enc|{l}|{pct}|{i}|{n}"),
+                label)
             _, d = await asyncio.to_thread(probe, out)
             if abs(d - src_d) > 2.0:
                 raise RuntimeError(f"{label}: davomiylik mos emas ({d:.1f} / {src_d:.1f} s)")

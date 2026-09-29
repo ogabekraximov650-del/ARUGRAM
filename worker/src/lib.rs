@@ -10888,6 +10888,21 @@ async fn encode_kick(env: &Env) -> String {
             Err(e) => return format!("\u{26A0}\u{FE0F} Actions avtomatik ishga tushmadi: {}", html_escape(&e.to_string())),
         }
     }
+    // PANDANI YO'Q QILISH: bir vaqtda ikki joydan (cron, bot tugmasi, qism
+    // qo'shish) kelgan ikkita so'rov GitHub ro'yxatida hali ko'rinmagan
+    // run'ni ko'rmay, ikkovi ham yangi run ochib yuborardi. Shu sabab
+    // ishga tushirish huquqi bazada ATOMIK olinadi: oxirgi ishga tushirishdan
+    // 6 daqiqa o'tmagan bo'lsa (yoki boshqa so'rov hozirgina olgan bo'lsa) —
+    // ikkinchisi tegmaydi.
+    let claim = turso_exec(env,
+        "INSERT INTO app_config (cfg_key,cfg_value) VALUES ('encode_kicked_at', ?)
+         ON CONFLICT(cfg_key) DO UPDATE SET cfg_value=excluded.cfg_value
+           WHERE CAST(app_config.cfg_value AS INTEGER) < ?
+         RETURNING cfg_key",
+        vec![TursoArg::text(&now.to_string()), TursoArg::int(now - 6 * 60 * 1000)]).await;
+    if !claim.ok().and_then(|r| first_row(&r)).is_some() {
+        return "\u{23F3} Kodlash dasturi hozirgina ishga tushirilgan — biroz kuting.".into();
+    }
     match gh_api(env, Method::Post,
         &format!("/repos/{repo}/actions/workflows/{GH_WORKFLOW}/dispatches"),
         Some(json!({"ref": "main"}))).await {

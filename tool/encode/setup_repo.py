@@ -8,7 +8,7 @@
   3. run.py, requirements.txt, session.enc va workflow'ni yuklaydi;
   4. secret'larni (TG_API_ID, TG_API_HASH, ENCODE_TOKEN, API_BASE) shifrlab
      o'rnatadi — qiymatlar logda ko'rinmaydi;
-  5. workflow'ni bir marta ishga tushiradi.
+  5. kodlashni ishga tushirmaydi (buni worker qiladi).
 """
 
 import base64
@@ -122,15 +122,9 @@ def main():
             {"encrypted_value": enc, "key_id": pk["key_id"]})
         print(f"Secret o'rnatildi: {name}")
 
-    for i in range(6):
-        code, _ = api("POST", f"{repo}/actions/workflows/encode.yml/dispatches",
-                      {"ref": "main"}, ok=(204, 404, 422))
-        if code == 204:
-            print("Workflow ishga tushirildi")
-            break
-        time.sleep(5)
-    else:
-        print("Workflow'ni Actions bo'limidan qo'lda ishga tushiring")
+    # Kodlashni bu skript ISHGA TUSHIRMAYDI: uni Cloudflare worker o'zi
+    # navbatga qarab ishga tushiradi (aks holda ishlab turgan run bilan
+    # ikkinchisi to'qnashardi).
     print(f"Tayyor: https://github.com/{login}/{NAME}")
 
 

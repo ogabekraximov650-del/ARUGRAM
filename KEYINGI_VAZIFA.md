@@ -4090,3 +4090,21 @@ bo'lakni 3 s dan ko'p kutsa, majburan beriladi (`Reader::waiting`).
   anime nomi, bo'lim/qism raqami, sifat (i/n) va foiz.
 - Actions log'idagi vaqt (`16:41:23`) — UTC; Toshkent = +5 soat.
 - Yangi repoga (`avtoencode`) `run.py` ni `setup-autoencode.yml` yetkazadi.
+
+## Kodlash: ikki marta ishga tushish tuzatildi, log har soniyada (2026-09)
+
+- SABAB (foydalanuvchi: "ishlab turgan bo'lsa ham worker yangisini
+  uyg'otibdi"): (1) cron, bot tugmasi va qism qo'shish bir vaqtda
+  `encode_kick` ni chaqirsa, GitHub ro'yxatida hali ko'rinmagan run'ni
+  ko'rmay ikkovi ham yangi run ochardi; (2) `setup_repo.py` oxirida
+  `encode.yml` ni o'zi ishga tushirardi. `concurrency` sababli ortiqcha run
+  navbatda turib, keyingisi kelganda bekor bo'lardi.
+- TUZATISH: ishga tushirish huquqi bazada atomik olinadi
+  (`app_config.encode_kicked_at`, `INSERT .. ON CONFLICT .. WHERE .. RETURNING`,
+  6 daqiqa); `setup_repo.py` endi ishga tushirmaydi.
+- `run.py` kodlash paytida har soniyada bitta to'liq qator yozadi: foiz,
+  video vaqti, tezlik (x), kadr/s, hajm, o'tgan vaqt, qolgan vaqt; boshida
+  yadrolar soni.
+- SEKINLIK SABABI: private repoda runner 2 yadroli (public'da 4). 24 daqiqalik
+  1080p ~46 daqiqa (0.5x). Bepul private limit oyiga 2000 daqiqa (~20 ta
+  qism); public repo cheksiz, lekin GitHub avval reponi bloklagan edi.
