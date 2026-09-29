@@ -53,12 +53,15 @@ TOKEN = os.environ["ENCODE_TOKEN"]
 RUNNER = f"{os.environ.get('GITHUB_RUN_ID', 'local')}-{os.environ.get('GITHUB_RUN_ATTEMPT', '1')}"
 CRF_BASE = int(os.environ.get("H265_CRF", "30"))
 PRESET = os.environ.get("H265_PRESET", "medium")
+# Qo'shimcha x265 sozlamalari (ixtiyoriy, `:` bilan, masalan `frame-threads=2`).
+# Preset o'zgarmaydi.
+X265_EXTRA = os.environ.get("H265_X265_EXTRA", "").strip(":")
 # Shu vaqtdan keyin YANGI ish olinmaydi (Actions limiti 6 soat).
 START_BUDGET = int(os.environ.get("START_BUDGET_MIN", "240")) * 60
-# Actions log'i shu YOPIQ kanalga yoziladi (yangi xabarlar, har soniyada).
+# Actions log'i shu YOPIQ kanalga yoziladi (bitta xabar, tahrirlanadi).
 # 0 yoki bo'sh — o'chiq.
 LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL_ID", "0") or 0)
-LOG_INTERVAL = max(1.0, float(os.environ.get("LOG_INTERVAL_SEC", "1") or 1))
+LOG_INTERVAL = max(1.0, float(os.environ.get("LOG_INTERVAL_SEC", "3") or 3))
 SESSION = str(Path(__file__).with_name("pyro_session"))
 WORK = Path(os.environ.get("RUNNER_TEMP", "/tmp")) / "arugram_encode"
 
@@ -108,79 +111,77 @@ class Fatal(Exception):
 
 
 class ChannelLog:
-    """Actions log'ini yopiq kanalga YANGI xabarlar bilan yuboradi.
+    """Actions log'ini yopiq kanaldagi BITTA xabarga yozadi.
 
-    Xabar TAHRIRLANMAYDI (foydalanuvchi talabi): har `LOG_INTERVAL` soniyada
-    (odatda 1) shu orada to'plangan qatorlar bitta yangi xabar bo'lib
-    ketadi. Har qism o'z sarlavhasi bilan boshlanadi. Telegram FloodWait
-    bersa — qatorlar to'planib turadi va ruxsat berilgach bitta xabar bo'lib
-    ketadi (log yo'qolmaydi). Xato bo'lsa kodlashga TEGMAYDI — 5 marta
+    Run boshlanishi bilan bitta xabar, har qism uchun yangisi; ichida oxirgi
+    voqealar (yuklash, sifat tayyor...) va oxirgi soniyalik statistika
+    qatorlari. Xabar TAHRIRLANADI (foydalanuvchi talabi), har `LOG_INTERVAL`
+    soniyada (odatda 3: Telegram bir xabarni tezroq tahrirlashga FloodWait
+    beradi — bo'lsa kutiladi). Xato bo'lsa kodlashga TEGMAYDI — 5 marta
     ketma-ket xatodan keyin kanalga yozish o'chadi.
     """
-    LIMIT = 3600  # bitta xabar 4096 belgidan oshmasin
+    LIMIT = 3600  # xabar 4096 belgidan oshmasin
 
     def __init__(self):
         self.lock = threading.Lock()
-        self.pending = collections.deque()
-        self.active = False
+        self.events = collections.deque(maxlen=14)
+        self.prog = collections.deque(maxlen=10)
+        self.title = ""
+        self.msg_id = None
+        self.dirty = False
         self.fails = 0
         self.hold_until = 0.0
         self.off = LOG_CHANNEL == 0
 
     def start(self, title):
         with self.lock:
-            self.pending.clear()
-            self.active = True
-            self.pending.append(("title", title))
-
-    def heading(self, title):
-        """Yangi qism sarlavhasi (xabar oqimi to'xtamaydi)."""
-        with self.lock:
-            if self.active:
-                self.pending.append(("title", title))
+            self.events.clear()
+            self.prog.clear()
+            self.title, self.msg_id, self.dirty = title, None, True
 
     def stop(self):
         with self.lock:
-            self.active = False
+            self.title = ""
 
     def add(self, text, progress=False):
         with self.lock:
-            if self.active:
-                self.pending.append(("line", text))
+            if not self.title:
+                return
+            (self.prog if progress else self.events).append(text)
+            self.dirty = True
 
-    def _take(self):
-        """Yuboriladigan qatorlarni oladi (navbatdan hali OLMAYDI)."""
+    def render(self):
         with self.lock:
-            items = list(self.pending)
-        out, size, n = [], 0, 0
-        for kind, text in items:
-            piece = f"<b>{html.escape(text)}</b>" if kind == "title" else html.escape(text)
-            if out and size + len(piece) + 1 > self.LIMIT:
-                break
-            out.append(piece)
-            size += len(piece) + 1
-            n += 1
-        return n, "\n".join(out)
+            lines = list(self.events) + ([""] if self.prog else []) + list(self.prog)
+            title = self.title
+        body = "\n".join(lines)
+        while len(body) > self.LIMIT and lines:
+            lines.pop(0)
+            body = "\n".join(lines)
+        return f"<b>{html.escape(title)}</b>\n<pre>{html.escape(body)}</pre>"
 
     async def flush(self, app):
-        if self.off or time.time() < self.hold_until:
+        if self.off or not self.dirty or not self.title or time.time() < self.hold_until:
             return
-        n, text = self._take()
-        if not n:
-            return
+        with self.lock:
+            self.dirty = False
+        text = self.render()
         try:
-            await app.send_message(LOG_CHANNEL, text, parse_mode=enums.ParseMode.HTML,
-                                   disable_notification=True)
-            with self.lock:
-                for _ in range(n):
-                    self.pending.popleft()
+            if self.msg_id is None:
+                m = await app.send_message(LOG_CHANNEL, text, parse_mode=enums.ParseMode.HTML,
+                                           disable_notification=True)
+                self.msg_id = m.id
+            else:
+                await app.edit_message_text(LOG_CHANNEL, self.msg_id, text,
+                                            parse_mode=enums.ParseMode.HTML)
             self.fails = 0
         except Exception as e:
             if type(e).__name__ == "FloodWait":
-                # Qatorlar to'planib turadi, ruxsat berilgach bittada ketadi.
+                self.dirty = True
                 self.hold_until = time.time() + int(getattr(e, "value", 10) or 10)
                 return
             self.fails += 1
+            self.dirty = True
             print(f"Kanalga log yozilmadi ({self.fails}/5): {e}", flush=True)
             if self.fails >= 5:
                 self.off = True
@@ -284,6 +285,16 @@ def plan(height):
     return out
 
 
+def cpu_model() -> str:
+    try:
+        for line in open("/proc/cpuinfo"):
+            if line.startswith("model name"):
+                return line.split(":", 1)[1].strip()
+    except Exception:
+        pass
+    return "CPU noma'lum"
+
+
 def hms(sec: float) -> str:
     sec = max(0, int(sec))
     h, r = divmod(sec, 3600)
@@ -346,7 +357,7 @@ def encode(src: Path, dst: Path, src_h: int, target: int, dcrf: int,
            "-progress", "pipe:1", "-y", "-i", str(src),
            "-map", "0:v:0", "-map", "0:a:0?", "-map_metadata", "-1", "-sn", *vf,
            "-c:v", "libx265", "-preset", PRESET, "-crf", str(CRF_BASE - dcrf),
-           "-x265-params", "log-level=error", "-pix_fmt", "yuv420p", "-tag:v", "hvc1",
+           "-x265-params", "log-level=error" + (":" + X265_EXTRA if X265_EXTRA else ""), "-pix_fmt", "yuv420p", "-tag:v", "hvc1",
            "-c:a", "aac", "-ac", "2", "-b:a", abr, "-ar", "44100",
            "-movflags", "+faststart", str(dst)]
     # `-progress pipe:1` — ffmpeg har soniyada `out_time_us=...` yozadi;
@@ -419,7 +430,7 @@ async def process(app: Client, channel: int, job: dict):
     ident = {"runner": RUNNER, "anime_id": a, "season_id": s, "epizod_id": e, "queued_at": qa}
     global CURRENT
     CURRENT = ident
-    CHLOG.heading(f"\U0001F3AC Qism {a}/{s}/{e} (#{job.get('epizod_number')}) — run {RUNNER}")
+    CHLOG.start(f"\U0001F3AC Qism {a}/{s}/{e} (#{job.get('epizod_number')}) — run {RUNNER}")
     hb = Heartbeat(ident)
     shutil.rmtree(WORK, ignore_errors=True)
     WORK.mkdir(parents=True)
@@ -520,8 +531,8 @@ async def process(app: Client, channel: int, job: dict):
             pass
     finally:
         CURRENT = None
-        for _ in range(6):  # qolgan qatorlar to'liq ketsin
-            await CHLOG.flush(app)
+        await CHLOG.flush(app)
+        CHLOG.start(f"\u25B6\uFE0F Run {RUNNER} davom etmoqda")
         hb.stop.set()
         shutil.rmtree(WORK, ignore_errors=True)
 
@@ -539,7 +550,7 @@ async def main():
             pass
         # Kanalga log RUN BOSHLANISHI BILAN yoqiladi (qism kutilmaydi).
         CHLOG.start(f"\u25B6\uFE0F Run {RUNNER} boshlandi")
-        log(f"kompyuter: {os.cpu_count()} yadro, preset {PRESET}, CRF {CRF_BASE}")
+        log(f"kompyuter: {cpu_model()}, {os.cpu_count()} yadro, preset {PRESET}, CRF {CRF_BASE}")
         flusher = asyncio.create_task(CHLOG.loop(app))
         worked = False
         while True:

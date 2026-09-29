@@ -10895,12 +10895,39 @@ async fn encode_kick(env: &Env) -> String {
         "SELECT
            (SELECT COUNT(*) FROM encode_jobs WHERE state='queued' OR (state='running' AND lease_until<=?)) AS pending,
            (SELECT COUNT(*) FROM encode_jobs WHERE state='running' AND lease_until<=?) AS stale,
-           (SELECT COUNT(*) FROM encode_jobs WHERE state='running' AND lease_until>?) AS active",
+           (SELECT COUNT(*) FROM encode_jobs WHERE state='running' AND lease_until>?) AS active,
+           (SELECT COALESCE(MAX(lease_until),0) FROM encode_jobs WHERE state='running') AS lease_max",
         vec![TursoArg::int(now), TursoArg::int(now), TursoArg::int(now)]).await;
     let Some(r) = res.ok().and_then(|r| first_row(&r)) else {
         return "\u{26A0}\u{FE0F} Navbatni o'qib bo'lmadi.".into();
     };
-    let (pending, active) = (jint(&r, "pending"), jint(&r, "active"));
+    let (mut pending, mut active) = (jint(&r, "pending"), jint(&r, "active"));
+    // ESKIRGAN "ISHLAYAPTI": run qo'lda bekor qilingan/o'lgan bo'lsa ish bazada
+    // ijarasi bilan "ishlayapti" bo'lib turaveradi. Oxirgi heartbeat 4 daqiqadan
+    // oldin bo'lsa-yu, GitHub'da na ishlayotgan, na kutayotgan run bo'lmasa —
+    // ish darhol bo'shatiladi va yangi run ishga tushiriladi.
+    if active > 0 && now - (jint(&r, "lease_max") - ENCODE_LEASE_MS) > 4 * 60 * 1000 {
+        let repo = tg_secret(env, "GH_REPO");
+        if repo.contains('/') {
+            let mut any = false;
+            let mut known = true;
+            for st in ["in_progress", "queued"] {
+                match gh_api(env, Method::Get,
+                    &format!("/repos/{repo}/actions/workflows/{GH_WORKFLOW}/runs?status={st}&per_page=1"), None).await {
+                    Ok((200, v)) => any |= v["total_count"].as_i64().unwrap_or(0) > 0,
+                    _ => known = false,
+                }
+            }
+            if known && !any {
+                let _ = turso_exec(env,
+                    "UPDATE encode_jobs SET state='queued', runner='', lease_until=0, progress='',
+                            attempts=MAX(attempts-1,0)
+                      WHERE state='running'", vec![]).await;
+                pending += active;
+                active = 0;
+            }
+        }
+    }
     if active > 0 {
         return "\u{2699}\u{FE0F} Kodlash hozir ishlayapti — navbatdagilar ketma-ket kodlanadi.".into();
     }

@@ -4131,12 +4131,12 @@ bo'lakni 3 s dan ko'p kutsa, majburan beriladi (`Reader::waiting`).
 ## Actions log'i yopiq kanalga; worker'ga 10 daqiqada; qayta boshlash (2026-09)
 
 - `run.py` (`ChannelLog`) log'ni kanalga (`LOG_CHANNEL_ID`, avtoencode
-  workflow'ida `-1004360822958`) YANGI xabarlar bilan yuboradi — xabar
-  TAHRIRLANMAYDI (foydalanuvchi talabi). Har `LOG_INTERVAL_SEC` (1) soniyada
-  to'plangan qatorlar bitta xabar; har qism sarlavha bilan boshlanadi.
-  FloodWait bo'lsa qatorlar to'planib, ruxsat berilgach bittada ketadi.
-  Xato bo'lsa kodlash to'xtamaydi, 5 xatodan keyin kanalga yozish o'chadi.
-  Sessiya hisobi kanalga a'zo bo'lishi kerak. Soatiga ~3600 xabar bo'ladi.
+  workflow'ida `-1004360822958`) BITTA xabarga yozadi va uni har
+  `LOG_INTERVAL_SEC` (3) soniyada TAHRIRLAYDI (foydalanuvchi qarori: yangi
+  xabarlar emas, tahrir). Kanalga log run boshlanishi bilan yoqiladi, har
+  qism o'z xabari bilan; yuklab olish/yuklash ham har soniyada qator beradi.
+  FloodWait bo'lsa kutiladi. Xato bo'lsa kodlash to'xtamaydi, 5 xatodan keyin
+  kanalga yozish o'chadi. Sessiya hisobi kanalga a'zo bo'lishi kerak.
 - Worker'ga heartbeat 10 daqiqada (ijara 25 daqiqa); bot "Holat" shu oxirgi
   holatni ko'rsatadi, jonli log — kanalda.
 - Qo'lda qayta boshlash: `restart-autoencode.yml` (`restart_run.py`) —
@@ -4146,3 +4146,13 @@ bo'lakni 3 s dan ko'p kutsa, majburan beriladi (`Reader::waiting`).
   qism kutilmaydi; yuklab olish/yuklash ham har soniyada qator beradi
   (`transfer_progress`). ffmpeg/pip o'rnatilishi (Python'gacha ~1.5 daqiqa)
   kanalga tushmaydi — ular `run.py` ishga tushmasdan oldin.
+
+## Eskirgan "ishlayapti" avtomatik bo'shatiladi; tezlik (2026-09)
+
+- Run qo'lda bekor qilinganda ish bazada "ishlayapti" bo'lib qolar va bot
+  "ishlayapti" der, yangi run esa ochilmasdi. `encode_kick`: oxirgi
+  heartbeat 4 daqiqadan eski va GitHub'da ishlayotgan/kutayotgan run yo'q
+  bo'lsa — ish bo'shatiladi va yangi run ishga tushadi.
+- Tezlik: private repoda runner 2 yadroli, public'da 4 (`ubuntu-latest`).
+  Log boshida CPU modeli chiqadi; ixtiyoriy `H265_X265_EXTRA` (preset
+  o'zgarmaydi).
