@@ -1,13 +1,11 @@
 // lib/screens/library_screen.dart — KUTUBXONA.
 //
-// Uchta oyna:
+// Uchta oyna (foydalanuvchi talabi, 2026-09-29: "Tarix va Sevimlilar
+// o'rtasiga Yuklanmalar tugmasini qo'sh"):
 //
-//   1. Tomoshalar tarixi — ishlaydi (`HistoryTab`);
-//   2. Sevimlilar       — ishlaydi (`FavoritesTab`): pleyerda
-//      yurakcha bosilgan bo'limlar shu yerda turadi;
-//
-// "Yuklanmalar" ILGARI shu yerda uchinchi oyna edi; endi u tomosha
-// tarixining uchinchi sahifasi (foydalanuvchi talabi).
+//   1. Tarix       — faqat anime bo'yicha (`HistoryTab`);
+//   2. Yuklanmalar — `DownloadsList`;
+//   3. Sevimlilar  — `FavoritesTab`.
 //
 // Oynalar `IndexedStack` bilan almashadi: bosilgan zahoti o'tadi va
 // ochilgan oyna holati (masalan tarix ro'yxatining o'rni) saqlanib
@@ -29,15 +27,7 @@ class LibraryScreen extends StatefulWidget {
 class _LibraryScreenState extends State<LibraryScreen> {
   int _tab = 0;
 
-  // ── "YUKLANMALAR" BU YERDA EMAS ────────────────────────────
-  //
-  // TALAB (foydalanuvchi): "Kutubxona sahifasidagi yuklanmalar
-  // oynasini olib tashlab, tarix oynasiga qism bo'yicha oynasining
-  // o'ng tarafiga qo'sh".
-  //
-  // Endi u `HistoryTab` ning uchinchi sahifasi (`DownloadsList`) —
-  // ya'ni barmoq bilan surib o'tiladi.
-  static const _titles = ['Tarix', 'Sevimlilar'];
+  static const _titles = ['Tarix', 'Yuklanmalar', 'Sevimlilar'];
 
   @override
   Widget build(BuildContext context) {
@@ -78,6 +68,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
             sizing: StackFit.expand,
             children: const [
               HistoryTab(),
+              DownloadsList(),
               FavoritesTab(),
             ],
           ),

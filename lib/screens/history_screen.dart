@@ -179,84 +179,19 @@ Future<void> _confirmRemove(BuildContext context, HistoryItem item) async {
 //  TARIX OYNASI
 // ══════════════════════════════════════════════════════════════
 
-class HistoryTab extends StatefulWidget {
+// ── FAQAT "ANIME BO'YICHA" (2026-09-29) ────────────────────────
+//
+// TALAB (foydalanuvchi): "Tarix oynasidan uchta tugmani olib tashla va
+// faqat anime bo'yicha ko'rsatadigan qil". "Yuklanmalar" endi Kutubxona
+// sahifasining o'z tugmasi (`library_screen.dart`, `DownloadsList`).
+//
+// Yuklash `RootScreen` da — aynan Kutubxona tugmasi bosilganda —
+// boshlanadi (bu yerda `initState` da so'rov yo'q).
+class HistoryTab extends StatelessWidget {
   const HistoryTab({super.key});
 
   @override
-  State<HistoryTab> createState() => _HistoryTabState();
-}
-
-class _HistoryTabState extends State<HistoryTab> {
-  // ── BU YERDA `initState` DA YUKLASH YO'Q ──────────────────
-  //
-  // Kutubxona sahifasi ilova ochilganda BIRGA quriladi
-  // (`RootScreen` dagi `IndexedStack`), ya'ni bu yerda yuklasak
-  // foydalanuvchi kutubxonani ochmasa ham serverga so'rov ketardi.
-  //
-  // Shu sabab yuklash `RootScreen` da — aynan Kutubxona tugmasi
-  // bosilganda — boshlanadi. Ro'yxat 60 soniya "yangi" hisoblanadi,
-  // ya'ni oynalar orasida yurganda qayta so'ralmaydi.
-
-  final PageController _pages = PageController();
-
-  /// 0 — anime bo'yicha, 1 — qism bo'yicha.
-  int _page = 0;
-
-  @override
-  void dispose() {
-    _pages.dispose();
-    super.dispose();
-  }
-
-  void _goTo(int i) {
-    if (i == _page) return;
-    // Sahifa SUZIB keladi — tugma bosilganda ham, barmoq bilan
-    // surilganda ham bir xil harakat.
-    _pages.animateToPage(
-      i,
-      duration: const Duration(milliseconds: 280),
-      curve: Curves.easeOutCubic,
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        _Switcher(page: _page, onChanged: _goTo),
-        Expanded(
-          // ── SURISH SILLIQ, KADRLAR ESA DARHOL ───────────────
-          //
-          // Bu yerda ilgari "surish paytida kadr yuklanmasin"
-          // degan qulf bor edi. U qotishni oldini oldi, lekin
-          // rasmlar kechikib chiqadigan bo'ldi (foydalanuvchi:
-          // "juda sekin yangilanyapti").
-          //
-          // Endi qulf YO'Q: kadrlar ro'yxat o'qilishi bilan
-          // fon'da xotiraga ko'chiriladi
-          // (`WatchHistory._warmThumbs`), ya'ni surish paytida
-          // bajariladigan ish umuman qolmaydi — ham silliq, ham
-          // darhol.
-          child: PageView(
-            controller: _pages,
-            physics: const BouncingScrollPhysics(),
-            // Qo'shni oyna OLDINDAN quriladi — surish paytida
-            // qurish ishi qolmaydi.
-            allowImplicitScrolling: true,
-            onPageChanged: (i) => setState(() => _page = i),
-            children: const [
-              _HistoryList(byAnime: true),
-              _HistoryList(byAnime: false),
-              // TALAB (foydalanuvchi): "Kutubxona sahifasidagi
-              // yuklanmalar oynasini olib tashlab, tarix oynasiga
-              // qism bo'yicha oynasining o'ng tarafiga qo'sh".
-              DownloadsList(),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
+  Widget build(BuildContext context) => const _HistoryList(byAnime: true);
 }
 
 /// Bitta ro'yxat (anime bo'yicha yoki qism bo'yicha).
@@ -1593,94 +1528,6 @@ class _EmptyDownloads extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-// ── Anime bo'yicha / Qism bo'yicha ────────────────────────────
-
-class _Switcher extends StatelessWidget {
-  final int page;
-  final ValueChanged<int> onChanged;
-  const _Switcher({required this.page, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-      child: Row(
-        children: [
-          Expanded(
-            child: _SwitchButton(
-              label: 'Anime bo\'yicha',
-              active: page == 0,
-              onTap: () => onChanged(0),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: _SwitchButton(
-              label: 'Qism bo\'yicha',
-              active: page == 1,
-              onTap: () => onChanged(1),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: _SwitchButton(
-              label: 'Yuklanmalar',
-              active: page == 2,
-              onTap: () => onChanged(2),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SwitchButton extends StatelessWidget {
-  final String label;
-  final bool active;
-  final VoidCallback onTap;
-  const _SwitchButton(
-      {required this.label, required this.active, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        padding: const EdgeInsets.symmetric(vertical: 11),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(14),
-          gradient: active
-              ? const LinearGradient(
-                  colors: [AppColors.accent, AppColors.accent2],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                )
-              : null,
-          color: active ? null : AppColors.card,
-          border: Border.all(
-              color: active ? Colors.transparent : AppColors.border, width: 1),
-        ),
-        child: Center(
-          child: Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            // Uchta tugma tor ekranga ham sig'ishi kerak.
-            style: TextStyle(
-              color: active ? Colors.white : Colors.white60,
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ),
-      ),
     );
   }
 }
