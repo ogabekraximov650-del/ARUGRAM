@@ -909,6 +909,12 @@ async fn init_db(env: &Env) -> bool {
         }
         config_put(env, "mig_origin_key", "1").await;
     }
+    // Kodlash jarayoni (qaysi sifat, necha foiz) — botning "Holat" xabari uchun.
+    if ok && config_get(env, "mig_encode_progress").await.is_none() {
+        let _ = turso_exec(env,
+            "ALTER TABLE encode_jobs ADD COLUMN progress TEXT DEFAULT ''", vec![]).await;
+        config_put(env, "mig_encode_progress", "1").await;
+    }
     // Asl videoning hajmi va balandligi — sifatlar tayyor bo'lguncha
     // ilovada asl video ko'rsatiladi (`with_origin`).
     if ok && config_get(env, "mig_origin_meta").await.is_none() {
@@ -9766,6 +9772,18 @@ const ENCODE_MAX_ATTEMPTS: i64 = 3;
 /// Bot asl videoni kanalga ko'chirib ulgurmagan bo'lsa shuncha kutiladi.
 const ENCODE_ORIGIN_WAIT_MS: i64 = 2 * 60 * 60 * 1000;
 
+/// Actions yuborgan jarayon matnini odam o'qiydigan ko'rinishga aylantiradi:
+/// `enc|1080p|37|1|4` -> "1080p (1/4): 37%".
+fn encode_progress_text(p: &str) -> String {
+    let v: Vec<&str> = p.split('|').collect();
+    match v.as_slice() {
+        ["download"] => "\u{2B07}\u{FE0F} asl video yuklab olinmoqda".into(),
+        ["enc", q, pct, i, n] => format!("\u{2699}\u{FE0F} {q} ({i}/{n}): {pct}% kodlandi"),
+        ["upload", q, i, n] => format!("\u{2B06}\u{FE0F} {q} ({i}/{n}) Telegram'ga yuklanmoqda"),
+        _ => "\u{2699}\u{FE0F} boshlanmoqda".into(),
+    }
+}
+
 fn ct_eq(a: &str, b: &str) -> bool {
     a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
@@ -10076,10 +10094,15 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
     let pk = || vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e), TursoArg::int(queued_at)];
 
     if path == "/api/encode/heartbeat" {
-        let mut args = vec![TursoArg::int(now + ENCODE_LEASE_MS)];
+        // Jarayon matni (`enc|1080p|37|1|4`, `download`, `upload|720p|2|4`) —
+        // faqat xavfsiz belgilar, qisqa.
+        let prog: String = b["progress"].as_str().unwrap_or("").chars()
+            .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '|' | '_' | '-' | '.'))
+            .take(40).collect();
+        let mut args = vec![TursoArg::int(now + ENCODE_LEASE_MS), TursoArg::text(&prog)];
         args.extend(pk());
         turso_exec(env,
-            "UPDATE encode_jobs SET lease_until=? WHERE anime_id=? AND season_id=? AND epizod_id=? AND queued_at=?",
+            "UPDATE encode_jobs SET lease_until=?, progress=? WHERE anime_id=? AND season_id=? AND epizod_id=? AND queued_at=?",
             args).await?;
         return ok(json!({"ok": true}));
     }
@@ -10661,7 +10684,21 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
                 format!("{label}: {} ta", jint(r, "n"))
             }).collect();
         let kick = encode_kick(env).await;
-        encbot_send(env, chat, &format!("\u{1F4CB} <b>Kodlash navbati</b>\n\n{}\n\n{kick}",
+        // Hozir ishlayotgan qism: qaysi anime/qism, qaysi sifat, necha foiz.
+        let run = turso_exec(env,
+            "SELECT j.progress AS progress, j.season_id AS s, a.name AS name, e.epizod_number AS num
+               FROM encode_jobs j
+               LEFT JOIN anime_db a ON a.id=j.anime_id
+               LEFT JOIN epizod_db e ON e.anime_id=j.anime_id AND e.season_id=j.season_id AND e.epizod_id=j.epizod_id
+              WHERE j.state='running' AND j.lease_until>? LIMIT 3",
+            vec![TursoArg::int(now_ms())]).await;
+        let running: Vec<String> = run.map(|r| rows_of(&r)).unwrap_or_default().iter()
+            .map(|r| format!("\u{1F3AC} <b>{}</b> \u{2014} {}-bo'lim, {}-qism\n    {}",
+                html_escape(r["name"].as_str().unwrap_or("?")), jint(r, "s"), jint(r, "num"),
+                encode_progress_text(r["progress"].as_str().unwrap_or(""))))
+            .collect();
+        let running = if running.is_empty() { String::new() } else { format!("{}\n\n", running.join("\n")) };
+        encbot_send(env, chat, &format!("\u{1F4CB} <b>Kodlash navbati</b>\n\n{running}{}\n\n{kick}",
             if lines.is_empty() { "Navbatda hech narsa yo'q.".to_string() } else { lines.join("\n") }), None).await;
         return ok(json!({"ok": true}));
     }

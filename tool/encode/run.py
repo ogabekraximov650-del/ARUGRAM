@@ -152,16 +152,30 @@ def plan(height):
     return out
 
 
-def encode(src: Path, dst: Path, src_h: int, target: int, dcrf: int):
+def encode(src: Path, dst: Path, src_h: int, target: int, dcrf: int,
+           dur: float = 0.0, on_progress=None):
     vf = [] if target >= src_h else ["-vf", f"scale=-2:{target}:flags=lanczos"]
     abr = "128k" if target >= 720 else "96k"
-    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(src),
+    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostats",
+           "-progress", "pipe:1", "-y", "-i", str(src),
            "-map", "0:v:0", "-map", "0:a:0?", "-map_metadata", "-1", "-sn", *vf,
            "-c:v", "libx265", "-preset", PRESET, "-crf", str(CRF_BASE - dcrf),
            "-x265-params", "log-level=error", "-pix_fmt", "yuv420p", "-tag:v", "hvc1",
            "-c:a", "aac", "-ac", "2", "-b:a", abr, "-ar", "44100",
            "-movflags", "+faststart", str(dst)]
-    subprocess.run(cmd, check=True)
+    # `-progress pipe:1` — ffmpeg har soniyada `out_time_us=...` yozadi;
+    # foiz = shu vaqt / manba davomiyligi (bot "Holat" xabari uchun).
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True)
+    last = -1
+    for line in p.stdout:
+        k, _, v = line.strip().partition("=")
+        if k in ("out_time_us", "out_time_ms") and v.isdigit() and dur > 0 and on_progress:
+            pct = int(min(99, int(v) / 1e6 / dur * 100))
+            if pct != last:
+                last = pct
+                on_progress(pct)
+    if p.wait() != 0:
+        raise subprocess.CalledProcessError(p.returncode, "ffmpeg")
 
 
 class Heartbeat:
@@ -169,18 +183,33 @@ class Heartbeat:
         self.ident = ident
         self.stop = threading.Event()
         self.lost = False
+        # Botning "Holat" xabari uchun: `download`, `enc|1080p|37|1|4`,
+        # `upload|720p|2|4`.
+        self.progress = ""
         self.t = threading.Thread(target=self.run, daemon=True)
         self.t.start()
 
+    def ping(self):
+        """Ijarani uzaytiradi va jarayonni yuboradi. False — ish boshqaga o'tgan."""
+        try:
+            api("heartbeat", {**self.ident, "progress": self.progress})
+            return True
+        except JobLost:
+            self.lost = True
+            return False
+        except Exception as e:
+            log("heartbeat xato:", e)
+            return True
+
     def run(self):
-        while not self.stop.wait(240):
-            try:
-                api("heartbeat", self.ident)
-            except JobLost:
-                self.lost = True
+        while not self.stop.wait(120):
+            if not self.ping():
                 return
-            except Exception as e:
-                log("heartbeat xato:", e)
+
+    def set(self, progress, now=False):
+        self.progress = progress
+        if now:
+            self.ping()
 
     def check(self):
         if self.lost:
@@ -213,6 +242,7 @@ async def process(app: Client, channel: int, job: dict):
         if not m or m.empty or not (m.document or m.video):
             raise Fatal("asl video kanalda topilmadi")
         log("  asl video yuklab olinmoqda...")
+        await asyncio.to_thread(hb.set, "download", True)
         got = await app.download_media(m, file_name=str(enc))
         if not got or Path(got).stat().st_size == 0:
             raise RuntimeError("asl video yuklab olinmadi")
@@ -227,7 +257,7 @@ async def process(app: Client, channel: int, job: dict):
         steps = plan(src_h)
         log(f"  manba {src_h}p, {src_d:.0f} s -> {', '.join(x[0] for x in steps)}")
 
-        for label, target, dcrf in steps:
+        for idx, (label, target, dcrf) in enumerate(steps, 1):
             hb.check()
             if label in done:
                 log(f"  {label}: tayyor — o'tkazib yuborildi")
@@ -237,7 +267,10 @@ async def process(app: Client, channel: int, job: dict):
             log(f"  {label}: kodlanmoqda...")
             t = time.time()
             # Alohida oqimda — Telegram ulanishi (ping) uzilib qolmasin.
-            await asyncio.to_thread(encode, src, out, src_h, target, dcrf)
+            await asyncio.to_thread(hb.set, f"enc|{label}|0|{idx}|{len(steps)}", True)
+            await asyncio.to_thread(
+                encode, src, out, src_h, target, dcrf, src_d,
+                lambda pct, l=label, i=idx, n=len(steps): hb.set(f"enc|{l}|{pct}|{i}|{n}"))
             _, d = await asyncio.to_thread(probe, out)
             if abs(d - src_d) > 2.0:
                 raise RuntimeError(f"{label}: davomiylik mos emas ({d:.1f} / {src_d:.1f} s)")
@@ -248,6 +281,7 @@ async def process(app: Client, channel: int, job: dict):
             size = out.stat().st_size
             out.unlink()
             log(f"  {label}: {size / 1048576:.1f} MB, {time.time() - t:.0f} s — yuklanmoqda...")
+            await asyncio.to_thread(hb.set, f"upload|{label}|{idx}|{len(steps)}", True)
             # Kalit kanal postiga YOZILMAYDI (xavfsizlik) — faqat worker'ga.
             sent = await app.send_document(
                 channel, str(sealed), file_name=name, force_document=True,

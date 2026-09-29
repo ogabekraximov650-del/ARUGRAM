@@ -4078,3 +4078,15 @@ bo'lakni 3 s dan ko'p kutsa, majburan beriladi (`Reader::waiting`).
   qatori va "Bugungi chegara to'ldi" xabari yo'q.
 - Bazadagi eski `encode_day` yozuvi zararsiz (endi o'qilmaydi).
 - Eslatma: yuqoridagi "Kunlik chegara — 10 ta qism" bo'limi eskirgan.
+
+## Botda kodlash jarayoni: qism, sifat, foiz (2026-09)
+
+- `run.py` ffmpeg'ni `-progress pipe:1` bilan ishga tushiradi va foizni
+  (`out_time / davomiylik`) `heartbeat` orqali yuboradi (har 2 daqiqada,
+  bosqich almashganda darhol): `download`, `enc|1080p|37|1|4`,
+  `upload|720p|2|4`.
+- Worker `encode_jobs.progress` ustunida saqlaydi (`mig_encode_progress`),
+  botdagi "Holat" xabari hozir ishlayotgan qismni ko'rsatadi:
+  anime nomi, bo'lim/qism raqami, sifat (i/n) va foiz.
+- Actions log'idagi vaqt (`16:41:23`) — UTC; Toshkent = +5 soat.
+- Yangi repoga (`avtoencode`) `run.py` ni `setup-autoencode.yml` yetkazadi.
