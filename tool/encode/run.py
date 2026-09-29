@@ -26,6 +26,7 @@ XAVFSIZLIK:
 
 import asyncio
 import json
+import signal
 import os
 import secrets
 import shutil
@@ -69,6 +70,27 @@ def session_api_id() -> int:
 LADDER = [("1080p", 1080, 0), ("720p", 720, 1), ("480p", 480, 2), ("360p", 360, 3)]
 CHUNK = 4 * 1024 * 1024
 T0 = time.time()
+
+
+CURRENT = None  # hozir ishlanayotgan ish (bekor qilinganda qaytarish uchun)
+
+
+def on_cancel(signum, frame):
+    """Run bekor qilindi (GitHub SIGINT/SIGTERM yuboradi): ishni darhol
+    navbatga qaytaramiz — keyingi run 6 daqiqa kutib o'tirmasin."""
+    if CURRENT:
+        try:
+            req = urllib.request.Request(
+                f"{API}/api/encode/finish",
+                data=json.dumps({**CURRENT, "ok": False, "cancelled": True}).encode(),
+                method="POST",
+                headers={"X-Encode-Token": TOKEN, "Content-Type": "application/json",
+                         "User-Agent": "arugram-encoder"})
+            urllib.request.urlopen(req, timeout=10).read()
+            print("Run bekor qilindi — ish navbatga qaytarildi", flush=True)
+        except Exception as e:
+            print("Bekor qilishda qaytarib bo'lmadi:", e, flush=True)
+    os._exit(0)
 
 
 class JobLost(Exception):
@@ -172,11 +194,16 @@ def progress_line(label: str, f: dict, dur: float, started: float):
     except ValueError:
         sp = 0.0
     eta = hms((dur - t) / sp) if sp > 0 else "--:--"
+    br = f.get("bitrate", "").strip()
+    try:
+        brt = f"{float(br.replace('kbits/s', '')):.0f} kb/s"
+    except ValueError:
+        brt = "-"
     size = f.get("total_size", "")
     mb = f"{int(size) / 1048576:.1f} MB" if size.isdigit() else "-"
     line = (f"    {label} {pct:3d}% | video {hms(t)}/{hms(dur)} | "
             f"tezlik {speed or '-'} | {f.get('fps', '-')} kadr/s | "
-            f"{mb} | o'tdi {hms(time.time() - started)} | qoldi ~{eta}")
+            f"bitreyt {brt} | {mb} | o'tdi {hms(time.time() - started)} | qoldi ~{eta}")
     return pct, line
 
 
@@ -257,6 +284,8 @@ class Heartbeat:
 async def process(app: Client, channel: int, job: dict):
     a, s, e, qa = job["anime_id"], job["season_id"], job["epizod_id"], job["queued_at"]
     ident = {"runner": RUNNER, "anime_id": a, "season_id": s, "epizod_id": e, "queued_at": qa}
+    global CURRENT
+    CURRENT = ident
     hb = Heartbeat(ident)
     shutil.rmtree(WORK, ignore_errors=True)
     WORK.mkdir(parents=True)
@@ -349,6 +378,7 @@ async def process(app: Client, channel: int, job: dict):
         except Exception:
             pass
     finally:
+        CURRENT = None
         hb.stop.set()
         shutil.rmtree(WORK, ignore_errors=True)
 
@@ -364,6 +394,7 @@ async def main():
         # Kanal ma'lum bo'lsin (Pyrogram peer keshida).
         async for _ in app.get_dialogs():
             pass
+        worked = False
         while True:
             if time.time() - T0 > START_BUDGET:
                 log("Vaqt limiti yaqin — qolgan ishlar keyingi run'da.")
@@ -380,8 +411,18 @@ async def main():
                 log("Navbat bo'sh.")
                 break
             await process(app, int(r["channel"]), job)
+            worked = True
+        # Workflow'ning "Davom ettirish" qadami FAQAT ish bajarilgan bo'lsa
+        # yangi run ochadi (aks holda "boshqa run ishlayapti" bilan tinmay
+        # qisqa run'lar ochilaverardi).
+        out = os.environ.get("GITHUB_OUTPUT")
+        if out:
+            with open(out, "a") as fh:
+                fh.write(f"worked={'1' if worked else '0'}\n")
 
 
 if __name__ == "__main__":
+    signal.signal(signal.SIGINT, on_cancel)
+    signal.signal(signal.SIGTERM, on_cancel)
     asyncio.run(main())
     sys.exit(0)

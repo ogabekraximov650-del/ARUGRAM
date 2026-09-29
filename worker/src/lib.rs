@@ -9767,7 +9767,10 @@ async fn tg_channel_post(env: &Env, post: &Value) {
 //     qo'ymaydi; adminga xabar boradi.
 //   * Actions faqat maxfiy kalit (`ENCODE_TOKEN`) bilan kiradi.
 
-const ENCODE_LEASE_MS: i64 = 30 * 60 * 1000;
+/// Ijara: heartbeat har 2 daqiqada yangilaydi. Run qo'lda bekor qilinsa yoki
+/// o'lsa, ish shuncha vaqtdan keyin boshqa run'ga bo'sh (avval 30 daqiqa —
+/// yangi run'lar "boshqa run ishlayapti" deb bekor to'xtardi).
+const ENCODE_LEASE_MS: i64 = 6 * 60 * 1000;
 const ENCODE_MAX_ATTEMPTS: i64 = 3;
 /// Bot asl videoni kanalga ko'chirib ulgurmagan bo'lsa shuncha kutiladi.
 const ENCODE_ORIGIN_WAIT_MS: i64 = 2 * 60 * 60 * 1000;
@@ -10179,6 +10182,15 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
                 "\u{2705} Kodlash tugadi: <b>{}</b>, {}, {num}-qism.\nTayyor sifatlar: {}\nAsl video o'chirildi.",
                 html_escape(&an), html_escape(&sn), done.join(", "))).await;
             return ok(json!({"ok": true}));
+        }
+        // Run BEKOR QILINDI (qo'lda yoki tizim): ish urinish sanalmasdan,
+        // xatosiz navbatga qaytadi va keyingi run darhol olishi mumkin.
+        if b["cancelled"].as_bool() == Some(true) {
+            turso_exec(env,
+                "UPDATE encode_jobs SET state='queued', runner='', lease_until=0, progress='',
+                        attempts=MAX(attempts-1,0)
+                  WHERE anime_id=? AND season_id=? AND epizod_id=? AND queued_at=?", pk()).await?;
+            return ok(json!({"ok": true, "retry": true}));
         }
         let why: String = b["error"].as_str().unwrap_or("noma'lum xato").chars().take(300).collect();
         let give_up = b["fatal"].as_bool() == Some(true) || jint(&job, "attempts") >= ENCODE_MAX_ATTEMPTS;

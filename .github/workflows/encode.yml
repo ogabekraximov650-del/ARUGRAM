@@ -135,6 +135,7 @@ jobs:
           echo "✅ Sessiya secret'lardan tiklandi ($(stat -c%s "$OUT") bayt)"
 
       - name: Kodlash
+        id: enc
         if: steps.peek.outputs.pending != '0'
         env:
           API_BASE: ${{ steps.peek.outputs.api }}

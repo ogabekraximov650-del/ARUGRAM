@@ -4108,3 +4108,15 @@ bo'lakni 3 s dan ko'p kutsa, majburan beriladi (`Reader::waiting`).
 - SEKINLIK SABABI: private repoda runner 2 yadroli (public'da 4). 24 daqiqalik
   1080p ~46 daqiqa (0.5x). Bepul private limit oyiga 2000 daqiqa (~20 ta
   qism); public repo cheksiz, lekin GitHub avval reponi bloklagan edi.
+
+## Kodlash: bekor qilingan run'dan keyin tinmay run ochilishi tuzatildi (2026-09)
+
+- SABAB: run qo'lda bekor qilinsa, ish bazada `running` va ijarasi 30 daqiqa
+  qolardi. Yangi run "boshqa run ishlayapti" deb muvaffaqiyatli tugardi,
+  "Davom ettirish" qadami esa navbat bo'sh emasligi uchun yana yangisini
+  ochardi — tinmay qisqa run'lar.
+- TUZATISH: (1) ijara 6 daqiqa (heartbeat 2 daqiqada); (2) `run.py`
+  SIGINT/SIGTERM'da ishni `finish {cancelled:true}` bilan darhol navbatga
+  qaytaradi (urinish sanalmaydi); (3) "Davom ettirish" faqat `run.py` haqiqatan
+  ish bajarganda (`worked=1` output) yangi run ochadi.
+- Log qatoriga bitreyt qo'shildi. Preset `medium` o'zgarmadi.

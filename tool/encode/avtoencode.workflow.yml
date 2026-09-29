@@ -66,6 +66,7 @@ jobs:
           echo "Sessiya tiklandi"
 
       - name: Kodlash
+        id: enc
         if: steps.peek.outputs.pending != '0'
         env:
           ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
@@ -83,7 +84,7 @@ jobs:
 
       # Navbat qolgan bo'lsa — keyingi 30 daqiqani kutmasdan qayta ishga tushadi.
       - name: Davom ettirish
-        if: success() && steps.peek.outputs.pending != '0'
+        if: success() && steps.enc.outputs.worked == '1'
         env:
           GH_TOKEN: ${{ github.token }}
           ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
