@@ -4130,12 +4130,13 @@ bo'lakni 3 s dan ko'p kutsa, majburan beriladi (`Reader::waiting`).
 
 ## Actions log'i yopiq kanalga; worker'ga 10 daqiqada; qayta boshlash (2026-09)
 
-- `run.py` (`ChannelLog`) har qism uchun kanalda (`LOG_CHANNEL_ID`,
-  avtoencode workflow'ida `-1004360822958`) BITTA xabar yuboradi va uni har
-  ~3 soniyada tahrirlaydi: oxirgi voqealar + oxirgi 10 ta soniyalik
-  statistika qatori. Har soniya emas: Telegram bir xabarni shunchalik tez
-  tahrirlashga FloodWait beradi. Xato bo'lsa kodlash to'xtamaydi, 5 xatodan
-  keyin kanalga yozish o'chadi. Sessiya hisobi kanalga a'zo bo'lishi kerak.
+- `run.py` (`ChannelLog`) log'ni kanalga (`LOG_CHANNEL_ID`, avtoencode
+  workflow'ida `-1004360822958`) YANGI xabarlar bilan yuboradi — xabar
+  TAHRIRLANMAYDI (foydalanuvchi talabi). Har `LOG_INTERVAL_SEC` (1) soniyada
+  to'plangan qatorlar bitta xabar; har qism sarlavha bilan boshlanadi.
+  FloodWait bo'lsa qatorlar to'planib, ruxsat berilgach bittada ketadi.
+  Xato bo'lsa kodlash to'xtamaydi, 5 xatodan keyin kanalga yozish o'chadi.
+  Sessiya hisobi kanalga a'zo bo'lishi kerak. Soatiga ~3600 xabar bo'ladi.
 - Worker'ga heartbeat 10 daqiqada (ijara 25 daqiqa); bot "Holat" shu oxirgi
   holatni ko'rsatadi, jonli log — kanalda.
 - Qo'lda qayta boshlash: `restart-autoencode.yml` (`restart_run.py`) —

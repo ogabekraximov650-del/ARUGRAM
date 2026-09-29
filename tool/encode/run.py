@@ -55,9 +55,10 @@ CRF_BASE = int(os.environ.get("H265_CRF", "30"))
 PRESET = os.environ.get("H265_PRESET", "medium")
 # Shu vaqtdan keyin YANGI ish olinmaydi (Actions limiti 6 soat).
 START_BUDGET = int(os.environ.get("START_BUDGET_MIN", "240")) * 60
-# Actions log'i shu YOPIQ kanalga yoziladi (bitta xabar, har ~3 soniyada
-# tahrirlanadi). 0 yoki bo'sh — o'chiq.
+# Actions log'i shu YOPIQ kanalga yoziladi (yangi xabarlar, har soniyada).
+# 0 yoki bo'sh — o'chiq.
 LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL_ID", "0") or 0)
+LOG_INTERVAL = max(1.0, float(os.environ.get("LOG_INTERVAL_SEC", "1") or 1))
 SESSION = str(Path(__file__).with_name("pyro_session"))
 WORK = Path(os.environ.get("RUNNER_TEMP", "/tmp")) / "arugram_encode"
 
@@ -107,71 +108,73 @@ class Fatal(Exception):
 
 
 class ChannelLog:
-    """Actions log'ini yopiq kanaldagi BITTA xabarga yozadi.
+    """Actions log'ini yopiq kanalga YANGI xabarlar bilan yuboradi.
 
-    Har qism uchun yangi xabar; ichida oxirgi voqealar (yuklash, sifat
-    tayyor...) va oxirgi soniyalik statistika qatorlari. Xabar har ~3
-    soniyada tahrirlanadi: Telegram bir xabarni har soniyada tahrirlashga
-    FloodWait beradi, shu sabab 3 soniya. Xato bo'lsa kodlashga TEGMAYDI —
-    5 marta ketma-ket xatodan keyin kanalga yozish o'chadi.
+    Xabar TAHRIRLANMAYDI (foydalanuvchi talabi): har `LOG_INTERVAL` soniyada
+    (odatda 1) shu orada to'plangan qatorlar bitta yangi xabar bo'lib
+    ketadi. Har qism o'z sarlavhasi bilan boshlanadi. Telegram FloodWait
+    bersa — qatorlar to'planib turadi va ruxsat berilgach bitta xabar bo'lib
+    ketadi (log yo'qolmaydi). Xato bo'lsa kodlashga TEGMAYDI — 5 marta
+    ketma-ket xatodan keyin kanalga yozish o'chadi.
     """
-    LIMIT = 3600  # xabar 4096 belgidan oshmasin
+    LIMIT = 3600  # bitta xabar 4096 belgidan oshmasin
 
     def __init__(self):
         self.lock = threading.Lock()
-        self.events = collections.deque(maxlen=14)
-        self.prog = collections.deque(maxlen=10)
-        self.title = ""
-        self.msg_id = None
-        self.dirty = False
+        self.pending = collections.deque()
+        self.active = False
         self.fails = 0
+        self.hold_until = 0.0
         self.off = LOG_CHANNEL == 0
 
     def start(self, title):
         with self.lock:
-            self.events.clear()
-            self.prog.clear()
-            self.title, self.msg_id, self.dirty = title, None, True
+            self.pending.clear()
+            self.active = True
+            self.pending.append(("title", title))
 
     def stop(self):
         with self.lock:
-            self.title = ""
+            self.active = False
 
     def add(self, text, progress=False):
         with self.lock:
-            if not self.title:
-                return
-            (self.prog if progress else self.events).append(text)
-            self.dirty = True
+            if self.active:
+                self.pending.append(("line", text))
 
-    def render(self):
+    def _take(self):
+        """Yuboriladigan qatorlarni oladi (navbatdan hali OLMAYDI)."""
         with self.lock:
-            lines = list(self.events) + ([""] if self.prog else []) + list(self.prog)
-            title = self.title
-        body = "\n".join(lines)
-        while len(body) > self.LIMIT and lines:
-            lines.pop(0)
-            body = "\n".join(lines)
-        return f"<b>{html.escape(title)}</b>\n<pre>{html.escape(body)}</pre>"
+            items = list(self.pending)
+        out, size, n = [], 0, 0
+        for kind, text in items:
+            piece = f"<b>{html.escape(text)}</b>" if kind == "title" else html.escape(text)
+            if out and size + len(piece) + 1 > self.LIMIT:
+                break
+            out.append(piece)
+            size += len(piece) + 1
+            n += 1
+        return n, "\n".join(out)
 
     async def flush(self, app):
-        if self.off or not self.dirty or not self.title:
+        if self.off or time.time() < self.hold_until:
             return
-        with self.lock:
-            self.dirty = False
-        text = self.render()
+        n, text = self._take()
+        if not n:
+            return
         try:
-            if self.msg_id is None:
-                m = await app.send_message(LOG_CHANNEL, text, parse_mode=enums.ParseMode.HTML,
-                                           disable_notification=True)
-                self.msg_id = m.id
-            else:
-                await app.edit_message_text(LOG_CHANNEL, self.msg_id, text,
-                                            parse_mode=enums.ParseMode.HTML)
+            await app.send_message(LOG_CHANNEL, text, parse_mode=enums.ParseMode.HTML,
+                                   disable_notification=True)
+            with self.lock:
+                for _ in range(n):
+                    self.pending.popleft()
             self.fails = 0
         except Exception as e:
+            if type(e).__name__ == "FloodWait":
+                # Qatorlar to'planib turadi, ruxsat berilgach bittada ketadi.
+                self.hold_until = time.time() + int(getattr(e, "value", 10) or 10)
+                return
             self.fails += 1
-            self.dirty = True
             print(f"Kanalga log yozilmadi ({self.fails}/5): {e}", flush=True)
             if self.fails >= 5:
                 self.off = True
@@ -179,7 +182,7 @@ class ChannelLog:
 
     async def loop(self, app):
         while True:
-            await asyncio.sleep(3)
+            await asyncio.sleep(LOG_INTERVAL)
             await self.flush(app)
 
 
@@ -494,7 +497,8 @@ async def process(app: Client, channel: int, job: dict):
             pass
     finally:
         CURRENT = None
-        await CHLOG.flush(app)
+        for _ in range(6):  # qolgan qatorlar to'liq ketsin
+            await CHLOG.flush(app)
         CHLOG.stop()
         hb.stop.set()
         shutil.rmtree(WORK, ignore_errors=True)
