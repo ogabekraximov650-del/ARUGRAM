@@ -4156,3 +4156,9 @@ bo'lakni 3 s dan ko'p kutsa, majburan beriladi (`Reader::waiting`).
 - Tezlik: private repoda runner 2 yadroli, public'da 4 (`ubuntu-latest`).
   Log boshida CPU modeli chiqadi; ixtiyoriy `H265_X265_EXTRA` (preset
   o'zgarmaydi).
+- Yangi va eski (`anime` repo, `scripts/encode_h265.sh`) kodlash buyruqlari
+  qatorma-qator solishtirildi: libx265, preset medium, CRF 30/-1/-2/-3,
+  `-x265-params log-level=error`, lanczos, yuv420p/hvc1, AAC — BIR XIL.
+  Tezlik farqi skriptdan emas, runner uskunasidan (private: 2 mantiqiy
+  yadro ≈ 1 jismoniy, public: 4). Log boshida endi mantiqiy/jismoniy
+  yadrolar soni chiqadi.

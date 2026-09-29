@@ -286,13 +286,18 @@ def plan(height):
 
 
 def cpu_model() -> str:
+    """CPU modeli va yadrolar (mantiqiy / jismoniy) — tezlik farqini tushunish uchun."""
+    model, phys = "CPU noma'lum", ""
     try:
         for line in open("/proc/cpuinfo"):
-            if line.startswith("model name"):
-                return line.split(":", 1)[1].strip()
+            if line.startswith("model name") and model == "CPU noma'lum":
+                model = line.split(":", 1)[1].strip()
+            elif line.startswith("cpu cores") and not phys:
+                phys = line.split(":", 1)[1].strip()
     except Exception:
         pass
-    return "CPU noma'lum"
+    logical = os.cpu_count()
+    return f"{model}, {logical} mantiqiy" + (f" / {phys} jismoniy yadro" if phys else " yadro")
 
 
 def hms(sec: float) -> str:
@@ -472,7 +477,6 @@ async def process(app: Client, channel: int, job: dict):
         log(f"  manba {src_h}p, {src_d:.0f} s, {src_mb:.1f} MB, "
             f"bitreyt ~{src.stat().st_size * 8 / src_d / 1000:.0f} kb/s -> "
             f"{', '.join(x[0] for x in steps)}")
-        log(f"  kompyuter: {os.cpu_count()} yadro, preset {PRESET}, CRF {CRF_BASE}")
 
         for idx, (label, target, dcrf) in enumerate(steps, 1):
             hb.check()
@@ -550,7 +554,7 @@ async def main():
             pass
         # Kanalga log RUN BOSHLANISHI BILAN yoqiladi (qism kutilmaydi).
         CHLOG.start(f"\u25B6\uFE0F Run {RUNNER} boshlandi")
-        log(f"kompyuter: {cpu_model()}, {os.cpu_count()} yadro, preset {PRESET}, CRF {CRF_BASE}")
+        log(f"kompyuter: {cpu_model()}, preset {PRESET}, CRF {CRF_BASE}")
         flusher = asyncio.create_task(CHLOG.loop(app))
         worked = False
         while True:
