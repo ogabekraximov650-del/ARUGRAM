@@ -1,0 +1,46 @@
+name: Avto-kodlash repo'sini yaratish (yangi akkaunt)
+
+# Bir martalik. Kerakli secret: NEW_GH_TOKEN — YANGI akkauntning tokeni
+# (classic, `repo` + `workflow`). TG_API_ID, TG_API_HASH, ENCODE_TOKEN
+# (va ixtiyoriy API_BASE) shu repodagilardan ko'chiriladi.
+# Ish tugagach NEW_GH_TOKEN'ni o'chirib, tokenni GitHub'da bekor qiling.
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo_name:
+        description: Yangi repo nomi
+        default: avtoencode
+      private:
+        description: Private repo
+        type: boolean
+        default: true
+      allow_same_account:
+        description: Token eski akkauntniki bo'lsa ham davom etish
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install --no-cache-dir pynacl
+      - name: Repo yaratish va sozlash
+        env:
+          NEW_GH_TOKEN: ${{ secrets.NEW_GH_TOKEN }}
+          REPO_NAME: ${{ inputs.repo_name }}
+          REPO_PRIVATE: ${{ inputs.private }}
+          ALLOW_SAME_ACCOUNT: ${{ inputs.allow_same_account }}
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+          API_BASE: ${{ secrets.API_BASE }}
+        run: python3 tool/encode/setup_repo.py
