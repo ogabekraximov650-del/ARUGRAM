@@ -4344,3 +4344,16 @@ qolgandek ko'rardi. Endi to'plam qo'shishda kutilmaydi (`waitForClaim: false`:
 fayl allaqachon Telegram'da, bot va worker o'zi tugatadi), bosqich matni
 ko'rsatiladi ("Telegram qabul qilmoqda...") va Telegram 120 s javob bermasa
 yuklash bekor qilinib xato matni chiqadi.
+
+## Video tahrirlash oynasi (to'plamga video qo'shishda)
+
+Nima: video tanlanganda CapCut uslubidagi oyna avtomatik ochiladi — kadrlardan
+iborat vaqt chizig'i, chetlarini/oynani sudrab bo'lak tanlash, tanlangan bo'lak
+aylanib ko'rinadi. Eng uzun bo'lak to'plam turiga qarab: emoji 5 s, stiker 8 s,
+GIF 15 s (`packMaxSeconds`, `tool/packs/arunorm.py` bilan bir xil). Kesishni
+baribir Actions bajaradi (fayl nomida `_t<start>-<end>`).
+Kadrlar: `android-template/MainActivity.kt` → `aru/thumb` kanalining `frames`
+usuli (MediaMetadataRetriever, oqimda, xato bo'lsa null). Kanal bo'lmasa
+vaqt chizig'i kulrang bo'ladi, kesish baribir ishlaydi.
+Fayllar: `lib/screens/pack_video_trim_screen.dart`, `pack_add_screen.dart`,
+`test/pack_trim_test.dart`.

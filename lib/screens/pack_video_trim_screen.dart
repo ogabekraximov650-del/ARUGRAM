@@ -12,6 +12,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
 import '../services/pack_service.dart';
@@ -32,6 +33,29 @@ String fmtMs(int ms) {
   return '$m:$r';
 }
 
+/// Videodan tekis oraliqda kadrlar (JPEG) oladi — vaqt chizig'i uchun.
+/// Android'da `aru/thumb` kanalining `frames` usuli (MediaMetadataRetriever).
+/// Kanal yo'q bo'lsa (test, boshqa platforma) — bo'sh ro'yxat.
+Future<List<Uint8List?>> grabVideoFrames(String path,
+    {int count = 8, int maxWidth = 160}) async {
+  try {
+    final r = await const MethodChannel('aru/thumb').invokeMethod<List<dynamic>>(
+        'frames', {
+      'path': path,
+      'count': count,
+      'maxWidth': maxWidth,
+      'quality': 60,
+    });
+    if (r == null) return const [];
+    return [for (final e in r) e is Uint8List ? e : null];
+  } catch (_) {
+    return const [];
+  }
+}
+
+/// CapCut uslubidagi kesish oynasi: tepada aylanib turuvchi ko'rinish,
+/// pastda kadrlardan iborat vaqt chizig'i. Chetlarini yoki oynaning o'zini
+/// sudrab bo'lak tanlanadi. Eng uzun bo'lak tur bo'yicha cheklangan.
 class PackVideoTrimScreen extends StatefulWidget {
   final String path;
   final String kind;
@@ -49,14 +73,25 @@ class PackVideoTrimScreen extends StatefulWidget {
   State<PackVideoTrimScreen> createState() => _PackVideoTrimScreenState();
 }
 
+enum _Drag { none, left, right, body }
+
 class _PackVideoTrimScreenState extends State<PackVideoTrimScreen> {
+  static const double _minMs = 500;
+  static const double _handleW = 16;
+  static const int _frameCount = 8;
+
   VideoPlayerController? _c;
   double _dur = 0;
   double _a = 0;
   double _b = 0;
+  double _pos = 0;
   String? _error;
+  List<Uint8List?> _frames = const [];
+  _Drag _drag = _Drag.none;
 
   int get _maxMs => packMaxSeconds(widget.kind) * 1000;
+  double get _maxSel => _dur < _maxMs ? _dur : _maxMs.toDouble();
+  double get _minSel => _dur < _minMs ? _dur : _minMs;
 
   @override
   void initState() {
@@ -79,56 +114,209 @@ class _PackVideoTrimScreenState extends State<PackVideoTrimScreen> {
     }
     c.setVolume(0);
     _dur = c.value.duration.inMilliseconds.toDouble();
+    if (_dur <= 0) {
+      await c.dispose();
+      setState(() => _error = 'Video davomiyligi noma\'lum');
+      return;
+    }
     _a = widget.end > widget.start ? widget.start.toDouble() : 0;
-    _b = widget.end > widget.start
-        ? widget.end.toDouble()
-        : (_dur < _maxMs ? _dur : _maxMs.toDouble());
+    _b = widget.end > widget.start ? widget.end.toDouble() : _maxSel;
+    _a = _a.clamp(0.0, _dur).toDouble();
+    _b = _b.clamp(_a, _dur).toDouble();
+    if (_b - _a > _maxSel) _b = _a + _maxSel;
     _c = c;
-    c.addListener(_loop);
+    c.addListener(_tick);
     unawaited(c.seekTo(Duration(milliseconds: _a.round())));
     unawaited(c.play());
     setState(() {});
+    final f = await grabVideoFrames(widget.path, count: _frameCount);
+    if (mounted) setState(() => _frames = f);
   }
 
   /// Bo'lak oxiriga yetsa — boshiga qaytadi (aylanib turadi).
-  void _loop() {
+  void _tick() {
     final c = _c;
-    if (c == null || !c.value.isInitialized) return;
-    if (c.value.position.inMilliseconds >= _b - 30) {
+    if (c == null || !c.value.isInitialized || !mounted) return;
+    final p = c.value.position.inMilliseconds.toDouble();
+    if (_drag == _Drag.none && c.value.isPlaying && p >= _b - 30) {
       unawaited(c.seekTo(Duration(milliseconds: _a.round())));
     }
+    if ((p - _pos).abs() > 16) setState(() => _pos = p);
   }
 
   @override
   void dispose() {
-    _c?.removeListener(_loop);
+    _c?.removeListener(_tick);
     _c?.dispose();
     super.dispose();
   }
 
-  void _onRange(RangeValues v) {
-    var a = v.start, b = v.end;
-    // Tur bo'yicha eng uzun bo'lakdan oshmasin: siljitilgan chetdan
-    // qarama-qarshi chet suriladi.
-    if (b - a > _maxMs) {
-      if (a != _a) {
-        b = a + _maxMs;
-      } else {
-        a = b - _maxMs;
-      }
+  void _seek(double ms) {
+    final c = _c;
+    if (c == null) return;
+    _pos = ms;
+    unawaited(c.seekTo(Duration(milliseconds: ms.round())));
+  }
+
+  _Drag _hit(double x, double w) {
+    final ax = _a / _dur * w;
+    final bx = _b / _dur * w;
+    if ((x - ax).abs() <= 26 && (x - ax).abs() <= (x - bx).abs()) {
+      return _Drag.left;
     }
-    final moveStart = a != _a;
+    if ((x - bx).abs() <= 26) return _Drag.right;
+    if (x > ax && x < bx) return _Drag.body;
+    return _Drag.none;
+  }
+
+  void _onStart(DragStartDetails d, double w) {
+    _drag = _hit(d.localPosition.dx, w);
+    if (_drag != _Drag.none) unawaited(_c?.pause());
+  }
+
+  void _onUpdate(DragUpdateDetails d, double w) {
+    if (_drag == _Drag.none) return;
+    final dm = d.delta.dx / w * _dur;
+    var a = _a, b = _b;
+    switch (_drag) {
+      case _Drag.left:
+        a = (a + dm).clamp(0.0, b - _minSel).toDouble();
+        if (b - a > _maxSel) a = b - _maxSel;
+      case _Drag.right:
+        b = (b + dm).clamp(a + _minSel, _dur).toDouble();
+        if (b - a > _maxSel) b = a + _maxSel;
+      case _Drag.body:
+        final len = b - a;
+        a = (a + dm).clamp(0.0, _dur - len).toDouble();
+        b = a + len;
+      case _Drag.none:
+        break;
+    }
     setState(() {
       _a = a;
       _b = b;
     });
-    unawaited(_c?.seekTo(Duration(milliseconds: (moveStart ? a : (b - 800 < a ? a : b - 800)).round())));
+    _seek(_drag == _Drag.right ? (b - 400 < a ? a : b - 400) : a);
+  }
+
+  void _onEnd() {
+    if (_drag == _Drag.none) return;
+    _drag = _Drag.none;
+    _seek(_a);
+    unawaited(_c?.play());
+  }
+
+  Widget _timeline(double w) {
+    final ax = _a / _dur * w;
+    final bx = _b / _dur * w;
+    final px = (_pos.clamp(_a, _b) / _dur * w).clamp(ax, bx).toDouble();
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onHorizontalDragStart: (d) => _onStart(d, w),
+      onHorizontalDragUpdate: (d) => _onUpdate(d, w),
+      onHorizontalDragEnd: (_) => _onEnd(),
+      onHorizontalDragCancel: _onEnd,
+      child: SizedBox(
+        height: 64,
+        width: w,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            // kadrlar
+            Positioned.fill(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: Row(
+                  children: [
+                    for (var i = 0; i < _frameCount; i++)
+                      Expanded(
+                        child: i < _frames.length && _frames[i] != null
+                            ? Image.memory(_frames[i]!,
+                                fit: BoxFit.cover,
+                                height: 64,
+                                gaplessPlayback: true)
+                            : Container(color: Colors.white12),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            // tanlanmagan joylar — xira
+            Positioned(
+                left: 0,
+                width: ax,
+                top: 0,
+                bottom: 0,
+                child: Container(color: Colors.black.withValues(alpha: 0.65))),
+            Positioned(
+                left: bx,
+                right: 0,
+                top: 0,
+                bottom: 0,
+                child: Container(color: Colors.black.withValues(alpha: 0.65))),
+            // tanlangan oyna: ramka va dastalar
+            Positioned(
+              left: ax - _handleW / 2,
+              width: bx - ax + _handleW,
+              top: -3,
+              bottom: -3,
+              child: Container(
+                decoration: BoxDecoration(
+                  border: Border.symmetric(
+                      horizontal:
+                          BorderSide(color: AppColors.accent, width: 3)),
+                ),
+              ),
+            ),
+            for (final x in [ax, bx])
+              Positioned(
+                left: x - _handleW / 2,
+                width: _handleW,
+                top: -3,
+                bottom: -3,
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: AppColors.accent,
+                    borderRadius: BorderRadius.circular(5),
+                  ),
+                  child: const Center(
+                    child: SizedBox(
+                      width: 3,
+                      height: 22,
+                      child: DecoratedBox(
+                          decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius:
+                                  BorderRadius.all(Radius.circular(2)))),
+                    ),
+                  ),
+                ),
+              ),
+            // o'ynash chizig'i
+            Positioned(
+              left: px - 1.5,
+              width: 3,
+              top: -6,
+              bottom: -6,
+              child: const DecoratedBox(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.all(Radius.circular(2)),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final c = _c;
     final len = (_b - _a).round();
+    final maxS = packMaxSeconds(widget.kind);
+    final atMax = _b - _a >= _maxSel - 1;
     return AppBackground(
       child: Scaffold(
         backgroundColor: Colors.transparent,
@@ -136,7 +324,7 @@ class _PackVideoTrimScreenState extends State<PackVideoTrimScreen> {
           backgroundColor: Colors.transparent,
           elevation: 0,
           iconTheme: const IconThemeData(color: Colors.white),
-          title: const Text('Videoni kesish',
+          title: const Text('Videoni tahrirlash',
               style: TextStyle(color: Colors.white, fontSize: 18)),
           actions: [
             TextButton(
@@ -160,7 +348,8 @@ class _PackVideoTrimScreenState extends State<PackVideoTrimScreen> {
                       Expanded(
                         child: Center(
                           child: GestureDetector(
-                            onTap: () => c.value.isPlaying ? c.pause() : c.play(),
+                            onTap: () =>
+                                c.value.isPlaying ? c.pause() : c.play(),
                             child: AspectRatio(
                               aspectRatio: c.value.aspectRatio,
                               child: VideoPlayer(c),
@@ -169,26 +358,49 @@ class _PackVideoTrimScreenState extends State<PackVideoTrimScreen> {
                         ),
                       ),
                       Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                        padding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
                         child: Column(
                           children: [
-                            RangeSlider(
-                              min: 0,
-                              max: _dur,
-                              values: RangeValues(_a, _b),
-                              activeColor: AppColors.accent,
-                              onChanged: _onRange,
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text(
+                                  '${(len / 1000).toStringAsFixed(1)} s',
+                                  style: TextStyle(
+                                      color: atMax
+                                          ? AppColors.accent
+                                          : Colors.white,
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.w700),
+                                ),
+                                const SizedBox(width: 8),
+                                Text('· eng ko\'pi $maxS s',
+                                    style: const TextStyle(
+                                        color: Colors.white54,
+                                        fontSize: 14)),
+                              ],
                             ),
-                            Text(
-                              '${fmtMs(_a.round())} – ${fmtMs(_b.round())}   ·   '
-                              '${(len / 1000).toStringAsFixed(1)} s '
-                              '(ko\'pi bilan ${packMaxSeconds(widget.kind)} s)',
-                              style: const TextStyle(
-                                  color: Colors.white70, fontSize: 13.5),
+                            const SizedBox(height: 14),
+                            LayoutBuilder(
+                              builder: (_, cs) => _timeline(cs.maxWidth),
                             ),
-                            const SizedBox(height: 6),
+                            const SizedBox(height: 8),
+                            Row(
+                              mainAxisAlignment:
+                                  MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(fmtMs(_a.round()),
+                                    style: const TextStyle(
+                                        color: Colors.white54, fontSize: 12)),
+                                Text(fmtMs(_dur.round()),
+                                    style: const TextStyle(
+                                        color: Colors.white54, fontSize: 12)),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
                             const Text(
-                              'Faqat tanlangan bo\'lak qoladi, ovoz olib tashlanadi.',
+                              'Chetlarini yoki oynani sudrang. Faqat tanlangan '
+                              'bo\'lak qoladi, ovoz olib tashlanadi.',
                               textAlign: TextAlign.center,
                               style: TextStyle(
                                   color: Colors.white38, fontSize: 12),

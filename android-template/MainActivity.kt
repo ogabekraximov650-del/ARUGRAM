@@ -114,7 +114,19 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "aru/thumb")
             .setMethodCallHandler { call, result ->
-                if (call.method != "grab") {
+                if (call.method == "frames") {
+                    // Video tahrirlash oynasi (to'plamga qo'shish): telefondagi
+                    // fayldan teng oraliqdagi kichik kadrlar tasmasi. UI oqimida
+                    // emas — dekodlash sekin.
+                    val path = call.argument<String>("path") ?: ""
+                    val count = call.argument<Int>("count") ?: 8
+                    val maxWidth = call.argument<Int>("maxWidth") ?: 160
+                    val quality = call.argument<Int>("quality") ?: 60
+                    Thread {
+                        val frames = grabFrames(path, count, maxWidth, quality)
+                        runOnUiThread { result.success(frames) }
+                    }.start()
+                } else if (call.method != "grab") {
                     result.notImplemented()
                 } else {
                     val url = call.argument<String>("url") ?: ""
@@ -349,6 +361,57 @@ class MainActivity : FlutterActivity() {
         r.getFrameAtTime(timeUs, option)
     } catch (e: Throwable) {
         null
+    }
+
+    /**
+     * Mahalliy videodan [count] ta teng oraliqdagi kadr (JPEG). Olib bo'lmagani
+     * `null`. Hech qachon xato tashlamaydi.
+     */
+    private fun grabFrames(path: String, count: Int, maxWidth: Int, quality: Int): List<ByteArray?> {
+        val out = ArrayList<ByteArray?>()
+        if (path.isEmpty() || count <= 0) return out
+        val retriever = MediaMetadataRetriever()
+        try {
+            retriever.setDataSource(path)
+            val durationMs = retriever
+                .extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                ?.toLongOrNull() ?: 0L
+            val lastUs = if (durationMs > 1) (durationMs - 1) * 1000L else 0L
+            for (i in 0 until count) {
+                val timeUs = if (count <= 1) 0L else lastUs * i / (count - 1)
+                var frame: Bitmap? = try {
+                    retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                } catch (e: Throwable) {
+                    null
+                }
+                if (frame == null) {
+                    out.add(null)
+                    continue
+                }
+                if (frame.width > maxWidth && frame.width > 0) {
+                    val h = (frame.height.toLong() * maxWidth / frame.width)
+                        .toInt().coerceAtLeast(1)
+                    val scaled = Bitmap.createScaledBitmap(frame, maxWidth, h, true)
+                    if (scaled !== frame) {
+                        frame.recycle()
+                        frame = scaled
+                    }
+                }
+                val bytes = ByteArrayOutputStream()
+                frame.compress(Bitmap.CompressFormat.JPEG, quality, bytes)
+                frame.recycle()
+                out.add(bytes.toByteArray())
+            }
+        } catch (e: Throwable) {
+            // Qolgan kadrlar `null` bo'lib qoladi.
+            while (out.size < count) out.add(null)
+        } finally {
+            try {
+                retriever.release()
+            } catch (e: Throwable) {
+            }
+        }
+        return out
     }
 
     private fun grabFrame(url: String, maxWidth: Int, quality: Int): ByteArray? {

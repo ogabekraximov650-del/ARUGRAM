@@ -108,6 +108,11 @@ class _PackAddScreenState extends State<PackAddScreen> {
       }
       _drafts.add(d);
       if (mounted) setState(() {});
+      // Video tanlansa — darhol tahrirlash (kesish) oynasi ochiladi.
+      if (mounted && d.problem == null && d.isVideo && d.durationMs > 0) {
+        _ready = true;
+        await _trim(d);
+      }
     }
     if (mounted) setState(() => _ready = true);
   }
