@@ -4506,3 +4506,10 @@ bulutdan (kanaldan) qayta yuklanadi.
   va panelda to'liq element (GIF animatsiyasi) yuklanmay, faqat statik rasm qolardi.
 * `PackImage`: aylanmaydigan tarkibda (ko'rish oynasi) "to'liq ko'rinish" tekshiruvi o'tkazib yuboriladi.
 * Admin: video ochilmasa sabab va "Tashqi ilovada ochish" tugmasi ko'rinadi.
+
+## Ekrandagi elementlar tez va to'liq yuklanadi
+
+`PackService._data`: yonma-yon turgan kichik elementlar (<= 200 KB, jami <= 768 KB) BITTA
+so'rovda olinadi va hammasi xotira/diskka tushadi (`_dataGroup`) — ekrandagi katakchalar
+ketma-ket bo'lgani uchun Telegram'ga so'rov soni keskin kamayadi. So'rovlar kanali 4 dan
+6 ga, aylantirish to'xtagach animatsiyani boshlash 80 ms (avval 140).

@@ -1180,7 +1180,7 @@ class PackService extends ChangeNotifier {
   // ═════════════════════════════════════════════════════════════
 
   final _Lru _mem = _Lru(24 * 1024 * 1024);
-  final _Gate _gate = _Gate(4);
+  final _Gate _gate = _Gate(6);
   final Map<String, Future<Uint8List?>> _flight = {};
   final Map<String, DateTime> _failed = {};
   static const Duration _cool = Duration(seconds: 5);
@@ -1242,6 +1242,29 @@ class PackService extends ChangeNotifier {
     return mine;
   }
 
+  /// [it] va undan keyin yonma-yon turgan, xotirada yo'q kichik elementlar
+  /// (jami <= 768 KB). Katta element (>200 KB) — faqat o'zi.
+  List<PackItem> _dataGroup(PackInfo info, PackHeader h, PackItem it) {
+    const maxItem = 200 * 1024;
+    const maxTotal = 768 * 1024;
+    if (it.len > maxItem) return [it];
+    final sorted = [...h.items]..sort((a, b) => a.off.compareTo(b.off));
+    final i = sorted.indexWhere((e) => e.id == it.id);
+    if (i < 0) return [it];
+    final out = <PackItem>[it];
+    var total = it.len;
+    var prevEnd = it.off + it.len;
+    for (var j = i + 1; j < sorted.length; j++) {
+      final n = sorted[j];
+      if (n.off != prevEnd || n.len > maxItem || total + n.len > maxTotal) break;
+      if (_mem.get('d${info.id}_${n.id}') != null) break;
+      out.add(n);
+      total += n.len;
+      prevEnd = n.off + n.len;
+    }
+    return out;
+  }
+
   Future<Uint8List?> _data(PackInfo info, PackHeader h, PackItem it) async {
     final key = 'd${info.id}_${it.id}';
     final m = _mem.get(key);
@@ -1254,13 +1277,29 @@ class PackService extends ChangeNotifier {
           _mem.put(key, d);
           return d;
         }
-        final b = await _range(info.file, h.base + it.off, it.len);
-        if (b == null || b.length != it.len) {
+        // Yonma-yon turgan kichik elementlar BITTA so'rovda olinadi (ekrandagi
+        // katakchalar odatda ketma-ket): har biri uchun alohida Telegram
+        // so'rovi kerak emas — animatsiya tezroq boshlanadi.
+        final group = _dataGroup(info, h, it);
+        final start = group.first.off;
+        final end = group.last.off + group.last.len;
+        final b0 = await _range(info.file, h.base + start, end - start);
+        if (b0 == null || b0.length != end - start) {
           _failed[key] = DateTime.now();
           return null;
         }
-        _mem.put(key, b);
-        unawaited(_diskPut(info.id, key, b));
+        Uint8List? b;
+        for (final g in group) {
+          final piece = Uint8List.sublistView(b0, g.off - start, g.off - start + g.len);
+          final k = 'd${info.id}_${g.id}';
+          _mem.put(k, piece);
+          unawaited(_diskPut(info.id, k, piece));
+          if (g.id == it.id) b = piece;
+        }
+        if (b == null) {
+          _failed[key] = DateTime.now();
+          return null;
+        }
         return b;
       } finally {
         _flight.remove(key);

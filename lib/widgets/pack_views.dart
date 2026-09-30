@@ -241,7 +241,7 @@ class _PackImageState extends State<PackImage> {
       });
     }
     _visTimer?.cancel();
-    _visTimer = Timer(const Duration(milliseconds: 140), _recheck);
+    _visTimer = Timer(const Duration(milliseconds: 80), _recheck);
   }
 
   /// Aylantirish to'xtagach: to'liq ko'ringanlar animatsiyani boshlaydi,
