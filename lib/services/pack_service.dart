@@ -364,7 +364,9 @@ class _Gate {
       return await f();
     } finally {
       _n--;
-      if (_q.isNotEmpty) _q.removeAt(0).complete();
+      // Eng YANGI so'rov birinchi: foydalanuvchi hozir ko'rayotgani (yangi
+      // chiqqan katakchalar) eski, allaqachon ekrandan ketganlardan oldin olinadi.
+      if (_q.isNotEmpty) _q.removeLast().complete();
     }
   }
 }

@@ -157,7 +157,44 @@ class _PackImageState extends State<PackImage> {
   @override
   void initState() {
     super.initState();
-    unawaited(_load());
+    _startSoon();
+  }
+
+  bool _pendingLoad = false;
+  Timer? _nearTimer;
+
+  /// Joylashgach: element ekran va undan 2 qator pastda/tepada bo'lsa
+  /// yuklanadi, aks holda aylantirilganda (tez) yuklanadi.
+  void _startSoon() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (_withinWindow()) {
+        _pendingLoad = false;
+        unawaited(_load());
+      } else {
+        _pendingLoad = true;
+      }
+    });
+  }
+
+  /// Element aylanuvchi ro'yxatning ko'rinadigan qismidan har tomonga 2 qator
+  /// (elementning o'z balandligi x 2) ichidami. Ro'yxatdan tashqarida — doim.
+  bool _withinWindow() {
+    final ro = context.findRenderObject();
+    final pos = _scrollPos;
+    if (ro is! RenderBox || !ro.attached || !ro.hasSize) return true;
+    final vp = RenderAbstractViewport.maybeOf(ro);
+    if (vp == null || pos == null || !pos.hasPixels) return true;
+    try {
+      final start = vp.getOffsetToReveal(ro, 0.0).offset;
+      final extent = pos.axis == Axis.vertical ? ro.size.height : ro.size.width;
+      final end = start + extent;
+      final margin = 2 * extent;
+      return end >= pos.pixels - margin &&
+          start <= pos.pixels + pos.viewportDimension + margin;
+    } catch (_) {
+      return true;
+    }
   }
 
   @override
@@ -190,6 +227,16 @@ class _PackImageState extends State<PackImage> {
   }
 
   void _onScroll() {
+    // Yuklanmagan element oynaga kirsa — aylantirish DAVOMIDA (tez) yuklanadi.
+    if (_pendingLoad && _nearTimer == null) {
+      _nearTimer = Timer(const Duration(milliseconds: 60), () {
+        _nearTimer = null;
+        if (mounted && _pendingLoad && _withinWindow()) {
+          _pendingLoad = false;
+          unawaited(_load());
+        }
+      });
+    }
     _visTimer?.cancel();
     _visTimer = Timer(const Duration(milliseconds: 140), _recheck);
   }
@@ -220,7 +267,7 @@ class _PackImageState extends State<PackImage> {
         old.item != widget.item ||
         old.animate != widget.animate) {
       _reset();
-      unawaited(_load());
+      _startSoon();
     }
   }
 
@@ -229,6 +276,7 @@ class _PackImageState extends State<PackImage> {
     _gen++;
     _retry?.cancel();
     _visTimer?.cancel();
+    _nearTimer?.cancel();
     _scrollPos?.removeListener(_onScroll);
     _reset(keepBytes: true);
     super.dispose();

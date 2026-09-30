@@ -4467,3 +4467,11 @@ MediaStore so'rovlari (`Images` / `Video`), ruxsat `READ_MEDIA_*` (13+) yoki
 (`isExternalStorageManager`) yo'q bo'lsa tizim fayl tanlagichiga o'tadi. Bizda ham:
 galereya birlashtirilgan so'rovda bo'sh chiqsa rasm/video alohida so'raladi; "Ichki
 xotira" ruxsatsiz tizim tanlagichini ochadi.
+
+## Kechiktirilgan yuklash (ekran + 2 qator)
+
+`PackImage` element ekran va undan tepa/pastga 2 qator (element balandligi x 2) ichida
+bo'lgandagina yuklanadi (`_withinWindow`); undan uzoqdagilar kutadi va aylantirish
+davomida oynaga kirishi bilan (60 ms) tez yuklanadi. Server so'rovlari navbati
+(`_Gate`) endi yangisi-birinchi: hozir ko'rinayotgan katakcha eski, ekrandan ketganlardan
+oldin olinadi.
