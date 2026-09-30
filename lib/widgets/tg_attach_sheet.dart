@@ -35,6 +35,7 @@ import 'package:lottie/lottie.dart';
 import 'package:photo_manager/photo_manager.dart';
 
 import 'glass.dart';
+import 'tg_file_browser.dart';
 
 /// Tanlangan bitta narsa.
 class TgAttachItem {
@@ -86,7 +87,8 @@ class _AttachSheet extends StatefulWidget {
   State<_AttachSheet> createState() => _AttachSheetState();
 }
 
-class _AttachSheetState extends State<_AttachSheet> {
+class _AttachSheetState extends State<_AttachSheet>
+    with WidgetsBindingObserver {
   int get _max => widget.packMode ? 20 : 10;
 
   final _caption = TextEditingController();
@@ -106,15 +108,67 @@ class _AttachSheetState extends State<_AttachSheet> {
   List<AssetEntity>? _songs;
   final List<AssetEntity> _pickedSongs = [];
 
+  /// "Fayl" bo'limi: oxirgi fayllar va tanlanganlar.
+  List<TgFileEntry>? _recent;
+  bool _fileAccess = true;
+  final List<File> _pickedFiles = [];
+
+  Set<String>? get _exts => widget.packMode ? kMediaExts : null;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState s) {
+    if (s == AppLifecycleState.resumed && _tab == _Tab.file && !_fileAccess) {
+      _recent = null;
+      unawaited(_loadRecent());
+    }
+  }
+
+  Future<void> _loadRecent() async {
+    if (_recent != null) return;
+    final ok = await TgFiles.hasAccess();
+    final list = ok ? await TgFiles.recent(_exts) : <TgFileEntry>[];
+    if (!mounted) return;
+    setState(() {
+      _fileAccess = ok;
+      _recent = list;
+    });
+  }
+
+  String _kindOf(String path) {
+    if (!widget.packMode) return 'file';
+    return kVideoExts.contains(TgFiles.ext(path)) ? 'video' : 'image';
+  }
+
+  void _toggleFile(File f) {
+    setState(() {
+      if (!_pickedFiles.any((x) => x.path == f.path)) {
+        if (_pickedFiles.length < _max) _pickedFiles.add(f);
+      } else {
+        _pickedFiles.removeWhere((x) => x.path == f.path);
+      }
+    });
+  }
+
+  Future<void> _openBrowser() async {
+    final r = await Navigator.of(context).push<List<File>>(MaterialPageRoute(
+        builder: (_) => TgFileBrowserScreen(exts: _exts, maxPick: _max)));
+    if (r == null || r.isEmpty || !mounted) return;
+    Navigator.of(context).pop(TgAttachResult([
+      for (final f in r) TgAttachItem(f, _kindOf(f.path), TgFiles.baseName(f.path))
+    ], ''));
+  }
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _init();
     _startCamera();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _caption.dispose();
     _cam?.dispose();
     super.dispose();
@@ -221,6 +275,7 @@ class _AttachSheetState extends State<_AttachSheet> {
     if (t == _tab) return;
     setState(() => _tab = t);
     if (t == _Tab.music) _loadSongs();
+    if (t == _Tab.file) unawaited(_loadRecent());
   }
 
   Future<void> _shoot() async {
@@ -238,6 +293,14 @@ class _AttachSheetState extends State<_AttachSheet> {
   }
 
   Future<void> _send() async {
+    if (_tab == _Tab.file) {
+      if (_pickedFiles.isEmpty) return;
+      Navigator.of(context).pop(TgAttachResult([
+        for (final f in _pickedFiles)
+          TgAttachItem(f, _kindOf(f.path), TgFiles.baseName(f.path))
+      ], _caption.text.trim()));
+      return;
+    }
     final music = _tab == _Tab.music;
     final list = music ? _pickedSongs : _selected;
     if (_sending || list.isEmpty) return;
@@ -277,13 +340,17 @@ class _AttachSheetState extends State<_AttachSheet> {
     Navigator.of(context).pop(TgAttachResult(items, ''));
   }
 
-  int get _count => _tab == _Tab.music ? _pickedSongs.length : _selected.length;
+  int get _count => switch (_tab) {
+        _Tab.music => _pickedSongs.length,
+        _Tab.file => _pickedFiles.length,
+        _Tab.gallery => _selected.length,
+      };
 
   @override
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
     final safe = MediaQuery.paddingOf(context).bottom;
-    final showCaption = _count > 0 && (_tab != _Tab.file || widget.packMode);
+    final showCaption = _count > 0;
     return Padding(
       padding: EdgeInsets.only(bottom: bottomInset),
       child: DraggableScrollableSheet(
@@ -375,7 +442,9 @@ class _AttachSheetState extends State<_AttachSheet> {
       _Tab.gallery => _selected.isNotEmpty
           ? '${_selected.length} ta tanlandi'
           : (_album == null || _album!.isAll ? 'Galereya' : _album!.name),
-      _Tab.file => 'Fayl tanlash',
+      _Tab.file => _pickedFiles.isNotEmpty
+          ? '${_pickedFiles.length} ta tanlandi'
+          : 'Fayl tanlash',
       _Tab.music => _pickedSongs.isNotEmpty
           ? '${_pickedSongs.length} ta tanlandi'
           : 'Musiqa',
@@ -512,36 +581,125 @@ class _AttachSheetState extends State<_AttachSheet> {
 
   // ── FAYL (`ChatAttachAlertDocumentLayout`) ────────────────────
   Widget _files(ScrollController scroll, double safe) {
+    final recent = _recent;
     return ListView(
       controller: scroll,
       padding: EdgeInsets.only(bottom: 96 + safe),
       children: [
-        _DocRow(
-          icon: Icons.folder_rounded,
-          color: const Color(0xFF3D9AEA),
-          title: 'Ichki xotira',
-          subtitle: 'Fayl tizimidan istalgan fayl',
-          onTap: () =>
-              _pickFiles(widget.packMode ? FileType.media : FileType.any),
-          divider: !widget.packMode,
+        Container(
+          margin: const EdgeInsets.fromLTRB(12, 4, 12, 6),
+          decoration: BoxDecoration(
+            color: const Color(0xFF17171A),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            children: [
+              _DocRow(
+                icon: Icons.storage_rounded,
+                color: const Color(0xFF4FA35A),
+                title: 'Ichki xotira',
+                subtitle: 'Fayl tizimingiz ichidan qidirish',
+                onTap: _openBrowser,
+              ),
+              _DocRow(
+                icon: Icons.image_rounded,
+                color: const Color(0xFFD9A93B),
+                title: 'Galereya',
+                subtitle: widget.packMode
+                    ? 'Rasm va videolar'
+                    : 'Rasmlarni ixchamlashtirmasdan yuborish',
+                onTap: () => _setTab(_Tab.gallery),
+              ),
+              if (!widget.packMode)
+                _DocRow(
+                  icon: Icons.music_note_rounded,
+                  color: const Color(0xFFF07F3A),
+                  title: 'Musiqa',
+                  subtitle: 'Audio fayllar',
+                  onTap: () => _pickFiles(FileType.audio),
+                ),
+              _DocRow(
+                icon: Icons.open_in_new_rounded,
+                color: const Color(0xFF6F7780),
+                title: 'Boshqa ilovalardan',
+                subtitle: 'Tizimning fayl tanlagichi',
+                onTap: () =>
+                    _pickFiles(widget.packMode ? FileType.media : FileType.any),
+                divider: false,
+              ),
+            ],
+          ),
         ),
-        if (!widget.packMode)
-          _DocRow(
-            icon: Icons.image_rounded,
-            color: const Color(0xFF4FC76A),
-            title: 'Galereya',
-            subtitle: 'Rasm va videoni siqilmagan holda yuborish',
-            onTap: () => _pickFiles(FileType.media),
+        if (!_fileAccess)
+          Container(
+            margin: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFF17171A),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                    'Oxirgi fayllarni va jildlarni ko\'rsatish uchun '
+                    '"barcha fayllarga ruxsat" bering.',
+                    style: TextStyle(color: Colors.white70, fontSize: 14.5)),
+                const SizedBox(height: 10),
+                TextButton(
+                  onPressed: TgFiles.requestAccess,
+                  child: const Text('Ruxsat berish'),
+                ),
+              ],
+            ),
+          )
+        else if (recent == null)
+          const Padding(
+            padding: EdgeInsets.all(28),
+            child: Center(
+              child: SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2.2, color: Colors.white54),
+              ),
+            ),
+          )
+        else if (recent.isNotEmpty) ...[
+          const Padding(
+            padding: EdgeInsets.fromLTRB(24, 14, 16, 6),
+            child: Text('Oxirgi fayllar',
+                style: TextStyle(
+                    color: Color(0xFFE2620F),
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700)),
           ),
-        if (!widget.packMode)
-          _DocRow(
-            icon: Icons.music_note_rounded,
-            color: const Color(0xFFF07F3A),
-            title: 'Musiqa',
-            subtitle: 'Audio fayllar',
-            onTap: () => _pickFiles(FileType.audio),
-            divider: false,
+          Container(
+            margin: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+            decoration: BoxDecoration(
+              color: const Color(0xFF17171A),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              children: [
+                for (var i = 0; i < recent.length; i++)
+                  TgFileRow(
+                    leading: TgFileIcon(recent[i].name, file: recent[i].file),
+                    title: recent[i].name,
+                    subtitle: '${TgFiles.size(recent[i].size)}, '
+                        '${TgFiles.date(recent[i].modified)}',
+                    showCheck: true,
+                    selected:
+                        _pickedFiles.any((x) => x.path == recent[i].file.path),
+                    onTap: () => _toggleFile(recent[i].file),
+                    divider: i < recent.length - 1,
+                  ),
+              ],
+            ),
           ),
+        ],
         const _SectionShadow(),
         const Padding(
           padding: EdgeInsets.fromLTRB(21, 14, 21, 8),

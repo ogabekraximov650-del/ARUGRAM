@@ -4357,3 +4357,16 @@ usuli (MediaMetadataRetriever, oqimda, xato bo'lsa null). Kanal bo'lmasa
 vaqt chizig'i kulrang bo'ladi, kesish baribir ishlaydi.
 Fayllar: `lib/screens/pack_video_trim_screen.dart`, `pack_add_screen.dart`,
 `test/pack_trim_test.dart`.
+
+## Telegram uslubidagi fayl tanlash
+
+Nima: attach oynasining "Fayl" bo'limi Telegram'dagidek — "Ichki xotira"
+(jildlar bo'ylab yurish, `..`, qidiruv, saralash, ko'p tanlash), "Galereya",
+"Oxirgi fayllar" (Download va boshqa odatiy jildlar), tizim tanlagichi
+"Boshqa ilovalardan" zaxira sifatida. To'plamga qo'shishda (`packMode`) faqat
+rasm/video ko'rinadi. Barcha jildlar uchun `MANAGE_EXTERNAL_STORAGE` (workflow
+manifestga qo'shadi) va `aru/files` kanali (`hasAll`, `requestAll`,
+MainActivity). Ruxsat berilmasa — tugma va zaxira tanlagich.
+Fayllar: `lib/widgets/tg_file_browser.dart`, `tg_attach_sheet.dart`,
+`android-template/MainActivity.kt`, `.github/workflows/build-flutter-apk.yml`,
+`test/tg_file_browser_test.dart`.

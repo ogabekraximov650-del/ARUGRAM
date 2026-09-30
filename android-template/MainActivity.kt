@@ -223,6 +223,47 @@ class MainActivity : FlutterActivity() {
                 }
             }
 
+        // ── FAYL TANLASH: "BARCHA FAYLLARGA RUXSAT" ────────────
+        //
+        // Telegram uslubidagi fayl tanlagich (lib/widgets/tg_file_browser.dart)
+        // jildlarni o'zi ko'rsatadi. Android 11+ da APK, ZIP kabi
+        // media bo'lmagan fayllarni ko'rish uchun shu ruxsat kerak.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "aru/files")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "hasAll" -> try {
+                        val ok = if (Build.VERSION.SDK_INT >= 30) {
+                            android.os.Environment.isExternalStorageManager()
+                        } else {
+                            checkSelfPermission(
+                                android.Manifest.permission.READ_EXTERNAL_STORAGE
+                            ) == PackageManager.PERMISSION_GRANTED
+                        }
+                        result.success(ok)
+                    } catch (e: Throwable) {
+                        result.success(true)
+                    }
+                    "requestAll" -> try {
+                        if (Build.VERSION.SDK_INT >= 30) {
+                            val i = android.content.Intent(
+                                android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                                android.net.Uri.parse("package:" + packageName)
+                            )
+                            startActivity(i)
+                        } else {
+                            requestPermissions(
+                                arrayOf(android.Manifest.permission.READ_EXTERNAL_STORAGE),
+                                9101
+                            )
+                        }
+                        result.success(null)
+                    } catch (e: Throwable) {
+                        result.error("request", e.message, null)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+
         // ── SKRINSHOT VA EKRAN YOZIB OLISHNI TAQIQLASH ─────────
         //
         // TALAB (foydalanuvchi): "ilovada video pleyerda va shaxsiy

@@ -244,7 +244,9 @@ jobs:
       - name: Galereya ruxsatlarini qo'shish (agar yo'q bo'lsa)
         run: |
           MANIFEST="android/app/src/main/AndroidManifest.xml"
-          for P in READ_MEDIA_IMAGES READ_MEDIA_VIDEO READ_MEDIA_VISUAL_USER_SELECTED; do
+          # MANAGE_EXTERNAL_STORAGE — Telegram uslubidagi fayl tanlagich jildlarni
+          # ko'rishi uchun; READ_EXTERNAL_STORAGE — Android 10 va pastroq.
+          for P in READ_MEDIA_IMAGES READ_MEDIA_VIDEO READ_MEDIA_VISUAL_USER_SELECTED MANAGE_EXTERNAL_STORAGE READ_EXTERNAL_STORAGE; do
             if ! grep -q "android.permission.$P" "$MANIFEST"; then
               sed -i "/<manifest /a\    <uses-permission android:name=\"android.permission.$P\" />" "$MANIFEST"
               echo "✅ $P qo'shildi"
