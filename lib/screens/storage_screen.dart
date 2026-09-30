@@ -444,9 +444,10 @@ class _CacheChartState extends State<_CacheChart>
     with TickerProviderStateMixin {
   static const double _separator = 2;
 
-  /// Bo'laklar siljishi (650 ms, `EASE_OUT_QUINT`).
+  /// Bo'laklar siljishi va kichrayib yo'qolishi: sekin va yumshoq (avval 650 ms
+  /// tez `EASE_OUT_QUINT` edi — belgisi olingan bo'lak birdan yo'qolib qolardi).
   late final AnimationController _move = AnimationController(
-      vsync: this, duration: const Duration(milliseconds: 650))
+      vsync: this, duration: const Duration(milliseconds: 1200))
     ..value = 1;
 
   /// Bosilgan bo'lak 9 px ga kattalashadi (200 ms).
@@ -504,7 +505,7 @@ class _CacheChartState extends State<_CacheChart>
 
   /// Hozirgi (oraliq) holat — yangi siljish shu joydan boshlanadi.
   Map<String, _Sector> _current() {
-    final t = Curves.easeOutQuint.transform(_move.value);
+    final t = Curves.easeInOutCubic.transform(_move.value);
     final out = <String, _Sector>{};
     for (final k in {..._from.keys, ..._to.keys}) {
       final a = _from[k];
