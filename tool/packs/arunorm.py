@@ -41,8 +41,8 @@ LIMITS = {
 MAX_FPS = 20
 # Kichik rasm (thumb) o'lchami: GIF devorida katta ko'rinadi, shu sabab kattaroq.
 THUMB_SIDE = {"sticker": 192, "emoji": 72, "gif": 256}
-QUALITIES = (80, 65, 50, 40, 30)
-SCALES = (1.0, 0.8, 0.65, 0.5)
+QUALITIES = (80, 65, 50, 40, 30, 20)
+SCALES = (1.0, 0.8, 0.65, 0.5, 0.35, 0.25)
 
 
 class Rejected(Exception):
@@ -81,7 +81,7 @@ def _fit(w: int, h: int, side: int):
     return max(1, round(w * k)), max(1, round(h * k))
 
 
-def _frames(im: Image.Image, size):
+def _frames(im: Image.Image, size, square=False):
     """(RGBA kadr, davomiyligi ms) ro'yxati. Xotira to'lmasligi uchun har kadr
     o'qilishi bilan `size` (w, h) gacha kichraytiriladi."""
     frames = []
@@ -92,6 +92,10 @@ def _frames(im: Image.Image, size):
         if d < 20:
             d = 100.0
         rgba = fr.convert("RGBA")
+        if square:
+            m = min(rgba.size)
+            l, t = (rgba.width - m) // 2, (rgba.height - m) // 2
+            rgba = rgba.crop((l, t, l + m, t + m))
         if rgba.size != size:
             rgba = rgba.resize(size, Image.LANCZOS)
         frames.append((rgba, d))
@@ -207,7 +211,7 @@ def _video_keep_audio(raw: bytes, lim: dict, trim):
             if len(data) <= arupack.MAX_ITEM:
                 break
         if best is None or len(best) > arupack.MAX_ITEM:
-            raise Rejected("ovozli video yengillashtirilgandan keyin ham 5 MB dan katta")
+            return None  # sig'madi — ovozsiz WebP yo'li o'zi moslashtiradi
         # kichik rasm (thumb) va o'lcham — birinchi kadrdan
         png = Path(d) / "t.png"
         try:
@@ -249,7 +253,20 @@ def _encode(frames, scale, quality, side_w, side_h):
     return buf.getvalue(), w, h
 
 
-def normalize(raw: bytes, kind: str, emoji: str = "", trim=None) -> Result:
+def _probe_video(raw: bytes) -> bool:
+    """Noma'lum formatdagi fayl ffmpeg o'qiy oladigan video-mi."""
+    with tempfile.TemporaryDirectory() as d:
+        src = Path(d) / "in.bin"
+        src.write_bytes(raw)
+        try:
+            out = _run(["ffprobe", "-v", "error", "-select_streams", "v:0",
+                        "-show_entries", "stream=codec_type", "-of", "csv=p=0", str(src)], 60)
+            return b"video" in out.stdout
+        except Exception:
+            return False
+
+
+def normalize(raw: bytes, kind: str, emoji: str = "", trim=None, mute=False) -> Result:
     """Foydalanuvchi faylini to'plam elementiga aylantiradi (yoki `Rejected`).
     `trim` — video uchun (boshi_ms, oxiri_ms)."""
     if kind not in LIMITS:
@@ -257,12 +274,20 @@ def normalize(raw: bytes, kind: str, emoji: str = "", trim=None) -> Result:
     lim = LIMITS[kind]
     fmt = sniff(raw)
     if not fmt:
-        raise Rejected("fayl turi qo'llanmaydi (PNG, JPG, GIF yoki WebP kerak)")
+        # Mos kelmagan format: rasm bo'lsa Pillow, video bo'lsa ffmpeg moslashtiradi.
+        try:
+            with Image.open(io.BytesIO(raw)) as probe:
+                probe.verify()
+            fmt = "image"
+        except Exception:
+            fmt = "mp4" if _probe_video(raw) else ""
+    if not fmt:
+        raise Rejected("fayl o'qilmadi: rasm yoki video emas")
     if len(raw) > arupack.MAX_ITEM:
         raise Rejected("fayl 5 MB dan katta")
     try:
         if fmt in ("mp4", "webm"):
-            if kind == "gif":
+            if kind == "gif" and not mute:
                 keep = _video_keep_audio(raw, lim, trim)
                 if keep is not None:
                     return keep
@@ -272,7 +297,9 @@ def normalize(raw: bytes, kind: str, emoji: str = "", trim=None) -> Result:
             w0, h0 = im.size
             if w0 <= 0 or h0 <= 0:
                 raise Rejected("rasm o'lchami noto'g'ri")
-            frames = _frames(im, _fit(w0, h0, lim["side"]))
+            if kind == "emoji":
+                w0 = h0 = min(w0, h0)
+            frames = _frames(im, _fit(w0, h0, lim["side"]), square=(kind == "emoji"))
     except Rejected:
         raise
     except (UnidentifiedImageError, OSError, ValueError, SyntaxError, EOFError,
@@ -288,20 +315,28 @@ def normalize(raw: bytes, kind: str, emoji: str = "", trim=None) -> Result:
     fw, fh = _fit(w0, h0, lim["side"])
 
     best = None
-    for scale in SCALES:
-        for q in QUALITIES:
-            data, w, h = _encode(frames, scale, q, fw, fh)
-            if best is None or len(data) < len(best[0]):
-                best = (data, w, h)
-            if len(data) <= lim["soft"]:
-                best = (data, w, h)
-                break
-        else:
-            continue
-        break
+    # Sig'masa moslashtiriladi: avval sifat/o'lcham pasayadi, keyin kadrlar
+    # siyraklashtiriladi (vaqt saqlanadi) — rad etilmaydi.
+    for _thin in range(5):
+        for scale in SCALES:
+            for q in QUALITIES:
+                data, w, h = _encode(frames, scale, q, fw, fh)
+                if best is None or len(data) < len(best[0]):
+                    best = (data, w, h)
+                if len(data) <= lim["soft"]:
+                    best = (data, w, h)
+                    break
+            else:
+                continue
+            break
+        if len(best[0]) <= arupack.MAX_ITEM or len(frames) < 4 or _thin == 4:
+            break
+        frames = [[frames[i][0], frames[i][1] + (frames[i + 1][1] if i + 1 < len(frames) else 0)]
+                  for i in range(0, len(frames), 2)]
+        best = None
     data, w, h = best
     if len(data) > arupack.MAX_ITEM:
-        raise Rejected("yengillashtirilgandan keyin ham 5 MB dan katta")
+        raise Rejected("eng past sifatga tushirilgandan keyin ham 5 MB dan katta")
 
     tw, th = _fit(w0, h0, THUMB_SIDE[kind])
     tb = io.BytesIO()

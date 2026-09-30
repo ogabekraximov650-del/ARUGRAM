@@ -172,6 +172,32 @@ class VideoTests(unittest.TestCase):
         # ovozsiz video GIFda ham WebP
         self.assertFalse(arunorm.normalize(make_video(), "gif").video)
 
+    def test_mute_belgisi_ovozni_olib_tashlaydi(self):
+        import run
+        self.assertTrue(run.mute_of("pki_1_2_3_t0-5000_m.bin"))
+        self.assertTrue(run.mute_of("pki_1_2_3_m.bin"))
+        self.assertFalse(run.mute_of("pki_1_2_3_t0-5000.bin"))
+        self.assertEqual(run.trim_of("pki_1_2_3_t100-5000_m.bin"), (100, 5000))
+
+    def test_moslashmagan_fayl_moslashtiriladi(self):
+        import random
+        # BMP (sniff bilmaydi) -> Pillow moslashtiradi
+        b = io.BytesIO()
+        Image.new("RGB", (300, 200), (10, 200, 30)).save(b, "BMP")
+        r = arunorm.normalize(b.getvalue(), "sticker")
+        self.assertLessEqual(max(r.w, r.h), 384)
+        # emoji: rasm ham kvadratga kesiladi
+        r = arunorm.normalize(png(400, 100), "emoji")
+        self.assertEqual(r.w, r.h)
+        # juda og'ir shovqinli animatsiya rad etilmaydi, 5 MB ga sig'diriladi
+        rnd = random.Random(1)
+        imgs = [Image.frombytes("RGB", (400, 400), bytes(rnd.getrandbits(8) for _ in range(400 * 400 * 3)))
+                for _ in range(6)]
+        bb = io.BytesIO()
+        imgs[0].save(bb, "GIF", save_all=True, append_images=imgs[1:], duration=100, loop=0)
+        r = arunorm.normalize(bb.getvalue(), "gif")
+        self.assertLessEqual(len(r.data), arupack.MAX_ITEM)
+
     def test_olchamlar_emoji_stiker_gif(self):
         raw = make_video(seconds=1, w=1280, h=720)
         if raw is None:

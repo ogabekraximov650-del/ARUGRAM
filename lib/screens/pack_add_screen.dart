@@ -28,6 +28,7 @@ class _Draft {
   int size = 0;
   int durationMs = 0;
   int trimA = 0;
+  bool sound = true;
   int trimB = 0;
   String emoji = '';
   String? problem;
@@ -151,13 +152,14 @@ class _PackAddScreenState extends State<PackAddScreen> {
   }
 
   Future<void> _trim(_Draft d) async {
-    final r = await Navigator.of(context).push<(int, int)>(
+    final r = await Navigator.of(context).push<(int, int, bool)>(
       MaterialPageRoute(
         builder: (_) => PackVideoTrimScreen(
           path: d.path,
           kind: widget.pack.kind,
           start: d.trimA,
           end: d.trimB,
+          sound: d.sound,
         ),
       ),
     );
@@ -165,6 +167,7 @@ class _PackAddScreenState extends State<PackAddScreen> {
     setState(() {
       d.trimA = r.$1;
       d.trimB = r.$2;
+      d.sound = r.$3;
     });
   }
 
@@ -192,6 +195,7 @@ class _PackAddScreenState extends State<PackAddScreen> {
         emoji: d.emoji,
         trimStartMs: d.isVideo ? d.trimA : 0,
         trimEndMs: d.isVideo ? d.trimB : 0,
+        sound: d.sound,
         onProgress: (sent, total) {
           if (!mounted || total <= 0) return;
           setState(() => d.status = 'Yuklanmoqda ${(sent * 100 / total).floor()}%');

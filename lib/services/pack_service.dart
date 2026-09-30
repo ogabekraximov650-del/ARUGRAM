@@ -723,6 +723,7 @@ class PackService extends ChangeNotifier {
     String emoji = '',
     int trimStartMs = 0,
     int trimEndMs = 0,
+    bool sound = true,
     void Function(int sent, int total)? onProgress,
     void Function(String phase)? onPhase,
   }) async {
@@ -755,8 +756,10 @@ class PackService extends ChangeNotifier {
     if (!TelegramService.instance.authorized) {
       return 'Fayl Telegram orqali yuklanadi — avval Telegram hisobini ulang';
     }
+    // `_m` — ovozsiz (Actions ovozni olib tashlaydi); belgisiz — GIFda ovoz saqlanadi.
+    final mute = isPackVideo(kindOfFile) && !sound ? '_m' : '';
     final name = 'pki_${uid}_${DateTime.now().millisecondsSinceEpoch}'
-        '_${_rnd.nextInt(0xffff).toRadixString(16)}$trim.bin';
+        '_${_rnd.nextInt(0xffff).toRadixString(16)}$trim$mute.bin';
     final err = await TelegramService.instance.uploadFile(
       path,
       name,

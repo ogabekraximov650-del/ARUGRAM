@@ -60,12 +60,16 @@ class PackVideoTrimScreen extends StatefulWidget {
   final String kind;
   final int start;
   final int end;
+
+  /// Ovoz saqlansinmi (faqat GIF to'plamida ma'noli).
+  final bool sound;
   const PackVideoTrimScreen({
     super.key,
     required this.path,
     required this.kind,
     this.start = 0,
     this.end = 0,
+    this.sound = true,
   });
 
   @override
@@ -87,6 +91,9 @@ class _PackVideoTrimScreenState extends State<PackVideoTrimScreen> {
   String? _error;
   List<Uint8List?> _frames = const [];
   _Drag _drag = _Drag.none;
+  late bool _sound = widget.sound;
+
+  bool get _canSound => widget.kind == PackKind.gif;
 
   int get _maxMs => packMaxSeconds(widget.kind) * 1000;
   double get _maxSel => _dur < _maxMs ? _dur : _maxMs.toDouble();
@@ -111,7 +118,7 @@ class _PackVideoTrimScreenState extends State<PackVideoTrimScreen> {
       await c.dispose();
       return;
     }
-    c.setVolume(0);
+    c.setVolume(_canSound && _sound ? 1 : 0);
     _dur = c.value.duration.inMilliseconds.toDouble();
     if (_dur <= 0) {
       await c.dispose();
@@ -479,14 +486,33 @@ class _PackVideoTrimScreenState extends State<PackVideoTrimScreen> {
                         padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
                         child: Row(
                           children: [
-                            Container(
-                              width: 44,
-                              height: 44,
-                              decoration: const BoxDecoration(
-                                  color: Color(0xFF1C1C1E),
-                                  shape: BoxShape.circle),
-                              child: const Icon(Icons.volume_off_rounded,
-                                  color: Colors.white54, size: 22),
+                            GestureDetector(
+                              onTap: !_canSound
+                                  ? () => ScaffoldMessenger.of(context)
+                                      .showSnackBar(const SnackBar(
+                                          content: Text(
+                                              'Ovoz faqat GIF to\'plamida saqlanadi')))
+                                  : () {
+                                      setState(() => _sound = !_sound);
+                                      unawaited(_c?.setVolume(_sound ? 1 : 0));
+                                    },
+                              child: Container(
+                                width: 44,
+                                height: 44,
+                                decoration: BoxDecoration(
+                                    color: _canSound && _sound
+                                        ? AppColors.accent
+                                        : const Color(0xFF1C1C1E),
+                                    shape: BoxShape.circle),
+                                child: Icon(
+                                    _canSound && _sound
+                                        ? Icons.volume_up_rounded
+                                        : Icons.volume_off_rounded,
+                                    color: _canSound
+                                        ? Colors.white
+                                        : Colors.white54,
+                                    size: 22),
+                              ),
                             ),
                             const Spacer(),
                             _pill(
@@ -544,8 +570,8 @@ class _PackVideoTrimScreenState extends State<PackVideoTrimScreen> {
                             _step('Oxiri', false),
                             const Spacer(),
                             GestureDetector(
-                              onTap: () => Navigator.of(context)
-                                  .pop((_a.round(), _b.round())),
+                              onTap: () => Navigator.of(context).pop(
+                                  (_a.round(), _b.round(), _canSound && _sound)),
                               child: Container(
                                 width: 56,
                                 height: 56,

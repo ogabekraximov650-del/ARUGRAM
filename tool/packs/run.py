@@ -89,7 +89,8 @@ def apply_ops(pack: arupack.Pack, ops: list, fetch) -> list:
         try:
             raw = fetch(op)
             res = arunorm.normalize(raw, pack.kind, op.get("emoji", ""),
-                                    trim_of(op.get("file", "")))
+                                    trim_of(op.get("file", "")),
+                                    mute=mute_of(op.get("file", "")))
             need = res_size(res) + 256
             if pack.data_size() + need + 256 * len(pack.items) > arupack.MAX_PACK:
                 raise arunorm.Rejected("to'plam to'ldi (1 GB)")
@@ -107,8 +108,14 @@ def apply_ops(pack: arupack.Pack, ops: list, fetch) -> list:
 
 def trim_of(name: str):
     """Video bo'lagi fayl nomidan: `pki_..._t<boshi_ms>-<oxiri_ms>.bin`."""
-    m = re.search(r"_t(\d{1,9})-(\d{1,9})\.bin$", name or "")
+    m = re.search(r"_t(\d{1,9})-(\d{1,9})(?:_m)?\.bin$", name or "")
     return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+def mute_of(name: str) -> bool:
+    """Ovozsiz qilish belgisi: `..._m.bin` (GIF to'plamida ovoz saqlanadi, shu
+    belgi bo'lmasa)."""
+    return bool(re.search(r"_m\.bin$", name or ""))
 
 
 def res_size(res) -> int:

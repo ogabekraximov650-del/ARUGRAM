@@ -4400,3 +4400,14 @@ ovozli), o'yin joylari `AnimSlots` bilan cheklangan. Ro'yxat/devorda faqat
 kichik statik rasm.
 Fayllar: `arupack.py`, `arunorm.py`, `run.py`, `test_arupack.py`,
 `lib/services/pack_service.dart`, `lib/widgets/pack_views.dart`, `pack_preview.dart`.
+
+## Ovozni tanlash va moslashtirish
+
+Video tahrirlash oynasidagi karnay tugmasi GIF uchun ovozni yoqadi/o'chiradi
+(natija `(boshi, oxiri, ovoz)`); ovozsiz bo'lsa fayl nomi `..._m.bin` bilan
+tugaydi (`run.py: mute_of`). Emoji/stikerda ovoz doim olib tashlanadi.
+Actions mos kelmagan faylni RAD ETMAY moslashtiradi (`arunorm.normalize`):
+noma'lum rasm formati (BMP, TIFF...) — Pillow, noma'lum video — ffmpeg;
+emoji rasmi ham markazdan kvadratga kesiladi; 5 MB ga sig'masa sifat va o'lcham
+pasayadi, keyin kadrlar siyraklashtiriladi; ovozli MP4 sig'masa ovozsiz WebP.
+Rad etish faqat fayl umuman o'qilmasa yoki eng past sifatda ham 5 MB dan katta bo'lsa.
