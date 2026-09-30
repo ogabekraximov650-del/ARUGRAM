@@ -13,6 +13,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:open_filex/open_filex.dart';
 import 'package:video_player/video_player.dart';
 
 import '../services/pack_service.dart';
@@ -613,6 +614,7 @@ class PackVideoPreview extends StatefulWidget {
 
 class _PackVideoPreviewState extends State<PackVideoPreview> {
   VideoPlayerController? _c;
+  String? _err;
   late bool _on = widget.sound;
 
   @override
@@ -627,8 +629,12 @@ class _PackVideoPreviewState extends State<PackVideoPreview> {
       await c.initialize();
       await c.setVolume(widget.sound ? 1 : 0);
       await c.setLooping(true);
-    } catch (_) {
+    } catch (e) {
       await c.dispose();
+      if (mounted) {
+        final t = '$e'.replaceAll(RegExp(r'\s+'), ' ');
+        setState(() => _err = t.length > 90 ? t.substring(0, 90) : t);
+      }
       return;
     }
     if (!mounted) {
@@ -655,8 +661,32 @@ class _PackVideoPreviewState extends State<PackVideoPreview> {
         width: widget.size,
         height: widget.size,
         child: c == null
-            ? const Center(
-                child: Icon(Icons.movie_outlined, color: Colors.white38))
+            ? Center(
+                child: _err == null
+                    ? const Icon(Icons.movie_outlined, color: Colors.white38)
+                    : Padding(
+                        padding: const EdgeInsets.all(10),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.error_outline_rounded,
+                                color: AppColors.danger, size: 26),
+                            const SizedBox(height: 6),
+                            Text('Video ochilmadi: $_err',
+                                textAlign: TextAlign.center,
+                                maxLines: 4,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                    color: Colors.white54, fontSize: 11)),
+                            TextButton(
+                              onPressed: () =>
+                                  OpenFilex.open(widget.path),
+                              child: const Text('Tashqi ilovada ochish'),
+                            ),
+                          ],
+                        ),
+                      ),
+              )
             : Stack(
                 alignment: Alignment.center,
                 children: [

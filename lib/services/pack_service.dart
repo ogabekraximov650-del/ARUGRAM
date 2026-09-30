@@ -36,6 +36,7 @@ import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data' show BytesBuilder;
 
 import 'package:characters/characters.dart';
 import 'package:flutter/foundation.dart';
@@ -1182,7 +1183,7 @@ class PackService extends ChangeNotifier {
   final _Gate _gate = _Gate(4);
   final Map<String, Future<Uint8List?>> _flight = {};
   final Map<String, DateTime> _failed = {};
-  static const Duration _cool = Duration(seconds: 20);
+  static const Duration _cool = Duration(seconds: 5);
 
   bool _coolingDown(String k) {
     final t = _failed[k];
@@ -1292,10 +1293,40 @@ class PackService extends ChangeNotifier {
   @visibleForTesting
   Future<Uint8List?> Function(String file, int offset, int len)? rangeOverride;
 
-  Future<Uint8List?> _range(String file, int offset, int len) {
-    if (len <= 0) return Future.value(Uint8List(0));
+  /// Katta o'qish bo'laklarga bo'linadi (mahalliy Telegram serveri uzun
+  /// o'qishni o'rtasida uzib qo'yishi mumkin) va vaqtinchalik xatoda
+  /// qayta uriniladi.
+  static const int _rangePart = 1024 * 1024;
+
+  Future<Uint8List?> _range(String file, int offset, int len) async {
+    if (len <= 0) return Uint8List(0);
     final o = rangeOverride;
     if (o != null) return o(file, offset, len);
+    if (len <= _rangePart) return _rangeRetry(file, offset, len);
+    final out = BytesBuilder(copy: false);
+    var pos = 0;
+    while (pos < len) {
+      final n = len - pos < _rangePart ? len - pos : _rangePart;
+      final b = await _rangeRetry(file, offset + pos, n);
+      if (b == null || b.length != n) return null;
+      out.add(b);
+      pos += n;
+    }
+    return out.takeBytes();
+  }
+
+  Future<Uint8List?> _rangeRetry(String file, int offset, int len) async {
+    for (var attempt = 0; attempt < 3; attempt++) {
+      final b = await _rangeOnce(file, offset, len);
+      if (b != null) return b;
+      if (attempt < 2) {
+        await Future<void>.delayed(Duration(milliseconds: 500 * (attempt + 1)));
+      }
+    }
+    return null;
+  }
+
+  Future<Uint8List?> _rangeOnce(String file, int offset, int len) {
     return _gate.run(() async {
       final tg = TelegramService.instance;
       try {
@@ -1311,7 +1342,7 @@ class PackService extends ChangeNotifier {
             .timeout(const Duration(seconds: 45));
         if (r.statusCode == 206 ||
             (r.statusCode == 200 && r.bodyBytes.length == len)) {
-          return r.bodyBytes;
+          if (r.bodyBytes.length == len) return r.bodyBytes;
         }
         lastError = 'Telegram javobi ${r.statusCode} ($file, $offset+$len)';
         tg.invalidate(file);

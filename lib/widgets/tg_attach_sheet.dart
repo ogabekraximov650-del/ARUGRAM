@@ -67,6 +67,12 @@ Future<TgAttachResult?> showTgAttachSheet(BuildContext context,
   );
 }
 
+/// Tartib ANIQ berilishi shart: ba'zi telefonlarda (MIUI) tartibsiz so'rov
+/// `near "LIMIT": syntax error` bilan yiqiladi.
+FilterOptionGroup _galleryFilter() => FilterOptionGroup(
+      orders: [const OrderOption(type: OrderOptionType.createDate, asc: false)],
+    );
+
 abstract final class _C {
   static const bg = AppColors.card;
   static const hint = Color(0xFF8A939D);
@@ -197,13 +203,16 @@ class _AttachSheetState extends State<_AttachSheet>
       final albums = await PhotoManager.getAssetPathList(
         type: RequestType.common,
         hasAll: true,
+        filterOption: _galleryFilter(),
       );
       if (!mounted) return;
       setState(() {
         _albums = albums;
         _album = albums.isEmpty ? null : albums.first;
       });
-      await _more();
+      try {
+        await _more();
+      } catch (_) {}
       if (_items.isEmpty) await _separateFallback();
     } catch (e) {
       if (mounted) setState(() => _galleryError = '$e');
@@ -219,7 +228,10 @@ class _AttachSheetState extends State<_AttachSheet>
     for (final t in [RequestType.image, RequestType.video]) {
       try {
         final paths = await PhotoManager.getAssetPathList(
-            type: t, hasAll: true, onlyAll: true);
+            type: t,
+            hasAll: true,
+            onlyAll: true,
+            filterOption: _galleryFilter());
         if (paths.isEmpty) continue;
         all.addAll(await paths.first.getAssetListRange(start: 0, end: 300));
       } catch (_) {}
@@ -308,7 +320,19 @@ class _AttachSheetState extends State<_AttachSheet>
     final a = _album;
     if (a == null || _loading || _end) return;
     _loading = true;
-    final list = await a.getAssetListPaged(page: _page, size: 60);
+    List<AssetEntity> list;
+    try {
+      list = await a.getAssetListPaged(page: _page, size: 60);
+    } catch (_) {
+      try {
+        // Sahifalash yiqilsa — oraliq bilan (boshqa native yo'l).
+        list = await a.getAssetListRange(
+            start: _items.length, end: _items.length + 60);
+      } catch (_) {
+        _loading = false;
+        rethrow;
+      }
+    }
     _loading = false;
     if (!mounted) return;
     setState(() {

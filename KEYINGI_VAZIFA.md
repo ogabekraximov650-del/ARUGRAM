@@ -4494,3 +4494,15 @@ toifaga tushadi: "Emoji, GIF va stikerlar" (ochiladigan), ichida Emoji / GIF / S
 (to'plam turi `PackService.packKinds()` dan). Har bir bo'lim alohida belgilanadi va
 tozalanadi (`PackService.clearKinds`), butun toifa — `clearCache`. Tozalangan rasmlar
 bulutdan (kanaldan) qayta yuklanadi.
+
+## Tuzatishlar: galereya, to'plam o'qish, admin video
+
+* Galereya: MIUI'da `getAssetListPaged` "near LIMIT: syntax error" bilan yiqilardi —
+  endi tartib aniq beriladi (`FilterOptionGroup(orders)`), sahifalash yiqilsa `getAssetListRange`,
+  u ham yiqilsa rasm/video alohida so'raladi.
+* To'plam o'qish (`PackService._range`): mahalliy Telegram serveri uzun o'qishni o'rtasida
+  uzardi ("Connection closed while receiving data") — o'qish 1 MB bo'laklarga bo'linadi,
+  har bo'lak 3 marta uriniladi, xatodan keyingi kutish 20 s emas 5 s. Shu sabab uzoq bosishda
+  va panelda to'liq element (GIF animatsiyasi) yuklanmay, faqat statik rasm qolardi.
+* `PackImage`: aylanmaydigan tarkibda (ko'rish oynasi) "to'liq ko'rinish" tekshiruvi o'tkazib yuboriladi.
+* Admin: video ochilmasa sabab va "Tashqi ilovada ochish" tugmasi ko'rinadi.

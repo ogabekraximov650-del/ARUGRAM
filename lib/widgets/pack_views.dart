@@ -185,6 +185,7 @@ class _PackImageState extends State<PackImage> {
     if (ro is! RenderBox || !ro.attached || !ro.hasSize) return true;
     final vp = RenderAbstractViewport.maybeOf(ro);
     if (vp == null || pos == null || !pos.hasPixels) return true;
+    if (pos.maxScrollExtent <= 0 && pos.minScrollExtent >= 0) return true;
     try {
       final start = vp.getOffsetToReveal(ro, 0.0).offset;
       final extent = pos.axis == Axis.vertical ? ro.size.height : ro.size.width;
@@ -216,6 +217,8 @@ class _PackImageState extends State<PackImage> {
     final vp = RenderAbstractViewport.maybeOf(ro);
     final pos = _scrollPos;
     if (vp == null || pos == null || !pos.hasPixels) return true;
+    // Aylanmaydigan (sig'gan) tarkib — hammasi ko'rinib turibdi (masalan, ko'rish oynasi).
+    if (pos.maxScrollExtent <= 0 && pos.minScrollExtent >= 0) return true;
     try {
       final lead = vp.getOffsetToReveal(ro, 0.0).offset;
       final trail = vp.getOffsetToReveal(ro, 1.0).offset;
