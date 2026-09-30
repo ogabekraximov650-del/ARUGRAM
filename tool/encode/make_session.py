@@ -26,7 +26,12 @@ from pathlib import Path
 
 from pyrogram import Client
 
-NAME = "arugram_encode"
+# To'plamlar (emoji/GIF/stiker) workflow'i uchun ALOHIDA sessiya:
+#   SESSION_NAME=arugram_packs SECRET_PREFIX=PACKS_SESSION_B64 python3 make_session.py
+# (o'sha hisobga qayta kiriladi — Telegram'da yangi, mustaqil sessiya
+# ochiladi, shu sabab ikkala workflow bir vaqtda ishlay oladi).
+NAME = os.environ.get("SESSION_NAME", "arugram_encode")
+PREFIX = os.environ.get("SECRET_PREFIX", "PYRO_SESSION_B64")
 
 
 def main():
@@ -45,10 +50,10 @@ def main():
     parts = [b64[i * n:(i + 1) * n] for i in range(3)]
     files = []
     for i, p in enumerate(parts, 1):
-        f = Path(f"PYRO_SESSION_B64_{i}.txt")
+        f = Path(f"{PREFIX}_{i}.txt")
         f.write_text(p)
         files.append(f)
-        print(f"\nPYRO_SESSION_B64_{i} ({len(p)} belgi) -> {f}")
+        print(f"\n{PREFIX}_{i} ({len(p)} belgi) -> {f}")
 
     if send:
         with Client(NAME, api_id=api_id, api_hash=api_hash) as app:
@@ -57,7 +62,7 @@ def main():
         print("\nSaqlangan xabarlarga yuborildi. GitHub'ga qo'ygach ularni o'chiring.")
 
     print("\nGitHub -> ARUGRAM -> Settings -> Secrets and variables -> Actions:")
-    print("  PYRO_SESSION_B64_1/2/3 = fayllardagi qiymatlar.")
+    print(f"  {PREFIX}_1/2/3 = fayllardagi qiymatlar.")
     print(f"Ish tugagach {NAME}.session va .txt fayllarni o'chiring.")
 
 

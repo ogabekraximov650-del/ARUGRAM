@@ -4202,10 +4202,15 @@ ular yengil WebP ga aylantiriladi va ilova ularni Telegram'siz o'zi ko'rsatadi.
    `encode.yml` ga TEGILMAYDI). Worker uni faqat `approved` amal bo'lganda
    ishga tushiradi (`packs::kick`, cron har 10 daqiqa + admin tasdiqlaganda).
    `pending` (admin ko'rmagan) va `rejected` amallar navbatda TURADI,
-   lekin Actions ularni ishlamaydi. Bitta Pyrogram sessiyasi ikki joyda
-   bir vaqtda ishlatilsa Telegram uni o'chiradi, shu sabab `packs.yml`
-   kodlash bilan BIR `concurrency` guruhida (`arugram-encode`): ikkisi
-   ketma-ket ishlaydi. Run: eski faylni yuklab ochadi, elementlarni
+   lekin Actions ularni ishlamaydi. **Kodlash va to'plamlar BIR VAQTDA
+   ishlaydi** (3000+ qism kodlanayotganda to'plamlar kutib qolmasin —
+   foydalanuvchi talabi): ALOHIDA `concurrency` guruhi (`arugram-packs`) va
+   MUSTAQIL Telegram sessiyasi (`PACKS_SESSION_B64_1/2/3`; bitta sessiya ikki
+   joyda ishlasa Telegram uni o'chiradi). Sessiya: `SESSION_NAME=arugram_packs
+   SECRET_PREFIX=PACKS_SESSION_B64 python3 tool/encode/make_session.py`
+   (o'sha hisobga qayta kiriladi — yangi mustaqil sessiya), qiymatlar yangi
+   repo secret'lariga. Secret yo'q bo'lsa ZAXIRA: kodlash sessiyasi, lekin
+   kodlash tugaguncha kutiladi. Run: eski faylni yuklab ochadi, elementlarni
    `arunorm.py` bilan yengil WebP ga aylantiradi (stiker 512 px, emoji
    128 px, GIF 480 px; <= 20 kadr/s; uzun/og'ir animatsiya RAD etiladi;
    har elementga 96 px statik thumb), yangi kalit bilan yuklaydi va

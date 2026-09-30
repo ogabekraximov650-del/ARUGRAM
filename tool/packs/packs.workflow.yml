@@ -7,14 +7,20 @@ name: To'plamlar (emoji, GIF, stiker)
 on:
   workflow_dispatch: {}
 
-# Kodlash bilan BIR guruh: bitta Telegram sessiyasi ikki joyda bir vaqtda
-# ishlatilmasin (aks holda Telegram sessiyani o'chiradi).
+# ALOHIDA guruh: kodlash va to'plamlar BIR VAQTDA ishlaydi, biri
+# ikkinchisini kutmaydi (kodlash soatlab ketishi mumkin). Buning uchun ularning
+# Telegram sessiyalari MUSTAQIL bo'lishi shart (bitta sessiyani ikki joyda
+# ishlatsa Telegram uni o'chiradi): to'plamlar `PACKS_SESSION_B64_1/2/3`
+# secret'laridan olinadi (`tool/encode/make_session.py`, izohiga qarang).
+# Bu secret'lar yo'q bo'lsa — zaxira: kodlash sessiyasi, lekin kodlash
+# ishlayotgan bo'lsa u tugaguncha kutiladi (xavfsizlik uchun).
 concurrency:
-  group: arugram-encode
+  group: arugram-packs
   cancel-in-progress: false
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   packs:
@@ -50,16 +56,48 @@ jobs:
         run: pip install --no-cache-dir -r tool/packs/requirements.txt
 
       - name: Telegram sessiyasi
+        id: session
         if: steps.peek.outputs.pending != '0'
         env:
           ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+          S1: ${{ secrets.PACKS_SESSION_B64_1 }}
+          S2: ${{ secrets.PACKS_SESSION_B64_2 }}
+          S3: ${{ secrets.PACKS_SESSION_B64_3 }}
         run: |
           OUT=tool/packs/pyro_session.session
+          ok() { head -c 16 "$OUT" 2>/dev/null | grep -q "SQLite format 3"; }
+          if [ -n "$S1" ]; then
+            B64=$(printf '%s%s%s' "$S1" "$S2" "$S3" | tr -cd 'A-Za-z0-9+/=')
+            if printf '%s' "$B64" | base64 -d > "$OUT" 2>/dev/null && ok; then
+              echo "Alohida sessiya tiklandi ($(stat -c%s "$OUT") bayt)"
+              echo "shared=0" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "::error::PACKS_SESSION_B64_1/2/3 ochilmadi — qiymatlarni tekshiring"
+            exit 1
+          fi
+          echo "::warning::PACKS_SESSION_B64_* yo'q — kodlash sessiyasi ishlatiladi (zaxira)"
           K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
           K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K \
             -in tool/encode/session.enc -out "$OUT"
-          head -c 16 "$OUT" | grep -q "SQLite format 3" || { echo "::error::Sessiya ochilmadi (ENCODE_TOKEN noto'g'ri?)"; exit 1; }
-          echo "Sessiya tiklandi"
+          ok || { echo "::error::Sessiya ochilmadi (ENCODE_TOKEN noto'g'ri?)"; exit 1; }
+          echo "shared=1" >> "$GITHUB_OUTPUT"
+
+      # Zaxira sessiya kodlash bilan BIR: kodlash ishlayotgan bo'lsa tugashini
+      # kutamiz (bir vaqtda ikki joyda ishlasa Telegram sessiyani o'chiradi).
+      - name: Kodlash tugashini kutish (faqat zaxira sessiya bilan)
+        if: steps.peek.outputs.pending != '0' && steps.session.outputs.shared == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in $(seq 1 300); do
+            N=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/encode.yml/runs?status=in_progress&per_page=1" --jq '.total_count' || echo 0)
+            [ "$N" = "0" ] && exit 0
+            echo "Kodlash ishlayapti — kutilmoqda ($i)"
+            sleep 60
+          done
+          echo "::error::Kodlash juda uzoq davom etdi"
+          exit 1
 
       - name: To'plamlarni yig'ish
         if: steps.peek.outputs.pending != '0'
