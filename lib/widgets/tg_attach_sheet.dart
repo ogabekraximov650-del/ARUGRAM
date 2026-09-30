@@ -176,21 +176,82 @@ class _AttachSheetState extends State<_AttachSheet>
     super.dispose();
   }
 
+  /// Galereya yuklanib bo'ldimi va xato bo'lsa nima.
+  bool _galleryLoaded = false;
+  String? _galleryError;
+
   Future<void> _init() async {
-    final p = await PhotoManager.requestPermissionExtend();
-    if (!mounted) return;
-    setState(() => _perm = p);
-    if (!p.hasAccess) return;
-    final albums = await PhotoManager.getAssetPathList(
-      type: RequestType.common,
-      hasAll: true,
+    try {
+      final p = await PhotoManager.requestPermissionExtend();
+      if (!mounted) return;
+      setState(() => _perm = p);
+      if (!p.hasAccess) return;
+      final albums = await PhotoManager.getAssetPathList(
+        type: RequestType.common,
+        hasAll: true,
+      );
+      if (!mounted) return;
+      setState(() {
+        _albums = albums;
+        _album = albums.isEmpty ? null : albums.first;
+      });
+      await _more();
+    } catch (e) {
+      if (mounted) setState(() => _galleryError = '$e');
+    } finally {
+      if (mounted) setState(() => _galleryLoaded = true);
+    }
+  }
+
+  /// Galereya bo'sh chiqqanda: sabab ko'rsatiladi va yo'llar beriladi.
+  Widget _galleryEmpty() {
+    final p = _perm;
+    final limited = p == PermissionState.limited;
+    final why = _galleryError != null
+        ? 'Galereyani o\'qib bo\'lmadi: ${_galleryError!.length > 100 ? _galleryError!.substring(0, 100) : _galleryError}'
+        : limited
+            ? 'Faqat tanlangan rasm/videolarga ruxsat berilgan (hozircha hech biri tanlanmagan).'
+            : 'Galereyada rasm yoki video topilmadi '
+                '(ruxsat: ${p?.name ?? '?'}, albomlar: ${_albums.length}).';
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+      child: Column(
+        children: [
+          Text(why,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white70, fontSize: 14.5)),
+          const SizedBox(height: 14),
+          Wrap(
+            alignment: WrapAlignment.center,
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              if (limited)
+                FilledButton(
+                  style: FilledButton.styleFrom(backgroundColor: _C.accent),
+                  onPressed: () async {
+                    await PhotoManager.presentLimited();
+                    _items.clear();
+                    _page = 0;
+                    _end = false;
+                    unawaited(_init());
+                  },
+                  child: const Text('Rasmlarni tanlash'),
+                ),
+              OutlinedButton(
+                onPressed: PhotoManager.openSetting,
+                child: const Text('Ruxsat sozlamalari'),
+              ),
+              OutlinedButton(
+                onPressed: () =>
+                    _pickFiles(widget.packMode ? FileType.media : FileType.any),
+                child: const Text('Tizim galereyasi'),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
-    if (!mounted) return;
-    setState(() {
-      _albums = albums;
-      _album = albums.isEmpty ? null : albums.first;
-    });
-    _more();
   }
 
   /// Birinchi katakdagi jonli kamera (`PhotoAttachCameraCell`).
@@ -528,25 +589,36 @@ class _AttachSheetState extends State<_AttachSheet>
         if (n.metrics.pixels > n.metrics.maxScrollExtent - 600) _more();
         return false;
       },
-      child: GridView.builder(
+      child: CustomScrollView(
         controller: scroll,
-        padding: EdgeInsets.fromLTRB(2, 0, 2, 96 + safe),
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 3,
-          mainAxisSpacing: 2,
-          crossAxisSpacing: 2,
-        ),
-        itemCount: _items.length + 1,
-        itemBuilder: (_, i) {
-          if (i == 0) return _cameraTile();
-          final e = _items[i - 1];
-          final n = _selected.indexOf(e);
-          return _AssetTile(
-            asset: e,
-            number: n < 0 ? null : n + 1,
-            onTap: () => _toggle(e),
-          );
-        },
+        slivers: [
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(2, 0, 2, 0),
+            sliver: SliverGrid(
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 3,
+                mainAxisSpacing: 2,
+                crossAxisSpacing: 2,
+              ),
+              delegate: SliverChildBuilderDelegate(
+                (_, i) {
+                  if (i == 0) return _cameraTile();
+                  final e = _items[i - 1];
+                  final n = _selected.indexOf(e);
+                  return _AssetTile(
+                    asset: e,
+                    number: n < 0 ? null : n + 1,
+                    onTap: () => _toggle(e),
+                  );
+                },
+                childCount: _items.length + 1,
+              ),
+            ),
+          ),
+          if (_galleryLoaded && _items.isEmpty)
+            SliverToBoxAdapter(child: _galleryEmpty()),
+          SliverToBoxAdapter(child: SizedBox(height: 96 + safe)),
+        ],
       ),
     );
   }

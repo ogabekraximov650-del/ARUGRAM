@@ -1,0 +1,33 @@
+name: To'plam kodini avtoencode repo'siga sinxronlash
+
+# `tool/packs/**` o'zgarganda avtomatik: to'plam Actions'i (`packs.yml`) boshqa
+# akkauntdagi repoda ishlaydi va uning kodi shu yerdan o'sha yerga ko'chiriladi
+# (aks holda o'zgarishlar u yerga yetib bormaydi). Token: `tool/encode/gh_token.enc`.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tool/packs/**'
+      - '.github/workflows/sync-packs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-packs
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: secret
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fayllarni yuklash
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+          NEW_GH_TOKEN: ${{ secrets.NEW_GH_TOKEN }}
+        run: python3 tool/packs/sync_repo.py

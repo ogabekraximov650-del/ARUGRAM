@@ -364,10 +364,21 @@ class _TgFileBrowserScreenState extends State<TgFileBrowserScreen>
         files.add(TgFileEntry(
             e.key, TgFiles.baseName(e.key.path), st.size, st.modified));
       }
-    } catch (_) {
-      err = 'Bu jildni ochib bo\'lmadi';
+    } catch (e) {
+      final t = '$e'.replaceAll(RegExp(r'\s+'), ' ');
+      err = 'Bu jildni ochib bo\'lmadi: ${t.length > 110 ? t.substring(0, 110) : t}';
     }
     if (!mounted) return;
+    // Bosh jildni ham o'qib bo'lmasa — ruxsat yo'q: tugma ko'rsatiladi.
+    if (err != null && d.path == TgFiles.root) {
+      setState(() {
+        _dir = d;
+        _access = false;
+        _error = err;
+        _loading = false;
+      });
+      return;
+    }
     setState(() {
       _dir = d;
       _dirs = dirs;
@@ -523,6 +534,13 @@ class _TgFileBrowserScreenState extends State<TgFileBrowserScreen>
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.white70, fontSize: 15.5),
             ),
+            if (_error != null) ...[
+              const SizedBox(height: 8),
+              Text(_error!,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      color: Color(0xFF8A939D), fontSize: 12.5)),
+            ],
             const SizedBox(height: 18),
             FilledButton(
               style: FilledButton.styleFrom(backgroundColor: AppColors.accent),

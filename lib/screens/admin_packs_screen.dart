@@ -19,7 +19,9 @@ import 'package:path_provider/path_provider.dart';
 import '../services/pack_service.dart';
 import '../theme/app_background.dart';
 import '../widgets/glass.dart';
+import 'pack_detail_screen.dart';
 import 'pack_video_trim_screen.dart';
+import 'public_profile_screen.dart';
 
 class AdminPacksScreen extends StatefulWidget {
   const AdminPacksScreen({super.key});
@@ -310,7 +312,35 @@ class _AdminPacksScreenState extends State<AdminPacksScreen> {
               style: TextStyle(
                   color: Colors.white.withValues(alpha: 0.55), fontSize: 12.5),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              children: [
+                ActionChip(
+                  avatar: const Icon(Icons.collections_rounded, size: 16),
+                  label: const Text('Butun to\'plam',
+                      style: TextStyle(fontSize: 12.5)),
+                  onPressed: () {
+                    final pk = (o['pack'] as num?)?.toInt() ?? 0;
+                    if (pk <= 0) return;
+                    Navigator.of(context).push(MaterialPageRoute<void>(
+                        builder: (_) => PackDetailScreen(packId: pk)));
+                  },
+                ),
+                ActionChip(
+                  avatar: const Icon(Icons.person_rounded, size: 16),
+                  label: const Text('Egasining profili',
+                      style: TextStyle(fontSize: 12.5)),
+                  onPressed: () {
+                    final uid = (o['owner_id'] as num?)?.toInt() ?? 0;
+                    if (uid <= 0) return;
+                    Navigator.of(context).push(MaterialPageRoute<void>(
+                        builder: (_) => PublicProfileScreen(userId: uid)));
+                  },
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
             Row(
               children: [
                 Expanded(
@@ -389,7 +419,7 @@ class _AdminVideoState extends State<_AdminVideo> {
 
   @override
   Widget build(BuildContext context) {
-    final m = RegExp(r'_t(\d{1,9})-(\d{1,9})\.bin$').firstMatch(widget.file);
+    final m = RegExp(r'_t(\d{1,9})-(\d{1,9})(?:_m)?\.bin$').firstMatch(widget.file);
     final p = _path;
     return Column(
       children: [
@@ -402,7 +432,7 @@ class _AdminVideoState extends State<_AdminVideo> {
                       strokeWidth: 2, color: Colors.white54))
               : ClipRRect(
                   borderRadius: BorderRadius.circular(14),
-                  child: PackVideoPreview(path: p, size: 240),
+                  child: PackVideoPreview(path: p, size: 240, sound: true),
                 ),
         ),
         Padding(

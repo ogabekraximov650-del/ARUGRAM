@@ -601,7 +601,11 @@ class _PackVideoTrimScreenState extends State<PackVideoTrimScreen> {
 class PackVideoPreview extends StatefulWidget {
   final String path;
   final double size;
-  const PackVideoPreview({super.key, required this.path, this.size = 96});
+
+  /// Ovoz bilan ko'rsatish (admin tekshiruvi): karnay tugmasi chiqadi.
+  final bool sound;
+  const PackVideoPreview(
+      {super.key, required this.path, this.size = 96, this.sound = false});
 
   @override
   State<PackVideoPreview> createState() => _PackVideoPreviewState();
@@ -609,6 +613,7 @@ class PackVideoPreview extends StatefulWidget {
 
 class _PackVideoPreviewState extends State<PackVideoPreview> {
   VideoPlayerController? _c;
+  late bool _on = widget.sound;
 
   @override
   void initState() {
@@ -620,7 +625,7 @@ class _PackVideoPreviewState extends State<PackVideoPreview> {
     final c = VideoPlayerController.file(File(widget.path));
     try {
       await c.initialize();
-      await c.setVolume(0);
+      await c.setVolume(widget.sound ? 1 : 0);
       await c.setLooping(true);
     } catch (_) {
       await c.dispose();
@@ -667,6 +672,28 @@ class _PackVideoPreviewState extends State<PackVideoPreview> {
                   if (!c.value.isPlaying)
                     const Icon(Icons.play_circle_fill_rounded,
                         color: Colors.white70, size: 30),
+                  if (widget.sound)
+                    Positioned(
+                      right: 8,
+                      bottom: 8,
+                      child: GestureDetector(
+                        onTap: () {
+                          setState(() => _on = !_on);
+                          unawaited(c.setVolume(_on ? 1 : 0));
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.all(7),
+                          decoration: const BoxDecoration(
+                              color: Colors.black54, shape: BoxShape.circle),
+                          child: Icon(
+                              _on
+                                  ? Icons.volume_up_rounded
+                                  : Icons.volume_off_rounded,
+                              color: Colors.white,
+                              size: 20),
+                        ),
+                      ),
+                    ),
                 ],
               ),
       ),

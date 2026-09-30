@@ -4418,3 +4418,18 @@ Rad etish faqat fayl umuman o'qilmasa yoki eng past sifatda ham 5 MB dan katta b
 bir xil sifatda H.264 dan ~40% kichik, ya'ni 5 MB ga sifat pasaytirmasdan
 sig'adi. x265 yiqilsa — H.264 zaxirasi. Pleyer (ExoPlayer) HEVC ni qurilma
 dekoderi bilan o'ynatadi (kodlash workflow'idagi H.265 videolar kabi).
+
+## Muhim: to'plam kodi ikkinchi repoda (sinxronlash)
+
+Kadrlar chegarasi olib tashlanganiga qaramay "kadrlar juda ko'p (200 ta)" bilan
+rad etilishi sababi: `packs.yml` BOSHQA akkauntdagi `avtoencode` repoda
+ishlaydi va uning kodi (`run.py`, `arunorm.py`, `arupack.py`) o'sha yerga NUSXA
+edi — bu repodagi o'zgarish yetib bormagan. Endi `.github/workflows/sync-packs.yml`
+`tool/packs/**` o'zgarganda `tool/packs/sync_repo.py` bilan o'zgargan fayllarni
+`gh_token.enc` tokeni orqali o'sha repoga yuklaydi (qo'lda ishga tushirish shart emas).
+
+Admin tekshiruvi: video OVOZ bilan (karnay tugmasi), "Butun to'plam" va
+"Egasining profili" tugmalari. Galereya bo'sh chiqsa — sabab va yo'llar
+(ruxsat sozlamalari, cheklangan ruxsatni kengaytirish, tizim galereyasi);
+fayl brauzeri xatosi ekranda ko'rsatiladi, Android 10 uchun
+`requestLegacyExternalStorage`. Ovozli MP4 o'lchamlari 16 ga karrali.

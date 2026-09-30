@@ -253,6 +253,16 @@ jobs:
             fi
           done
 
+      # Android 10 da fayl tanlagich jildlarni ko'rishi uchun (scoped storage'ni
+      # chetlab o'tadi); 11+ da `MANAGE_EXTERNAL_STORAGE` ishlaydi.
+      - name: requestLegacyExternalStorage (agar yo'q bo'lsa)
+        run: |
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          if ! grep -q "requestLegacyExternalStorage" "$MANIFEST"; then
+            sed -i '0,/<application/s//<application android:requestLegacyExternalStorage="true"/' "$MANIFEST"
+            echo "✅ requestLegacyExternalStorage qo'shildi"
+          fi
+
       # Video kesh-server (lib/services/video_cache_server.dart) ilova
       # ichida mahalliy http://127.0.0.1 manzilda ishlaydi. Android
       # targetSdk 28+ da standart holatda BARCHA shifrlanmagan (cleartext)

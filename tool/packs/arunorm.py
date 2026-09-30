@@ -198,7 +198,7 @@ def _video_keep_audio(raw: bytes, lim: dict, trim):
                               (int(lim["side"] * 0.35), 38, "32k")):
             dst = Path(d) / "out.mp4"
             vf = (f"fps=24,scale='min({side},iw)':'min({side},ih)':"
-                  f"force_original_aspect_ratio=decrease:force_divisible_by=2")
+                  f"force_original_aspect_ratio=decrease:force_divisible_by=16")
             base = ["ffmpeg", "-v", "error", "-y", "-ss", f"{start:.3f}", "-t", f"{length:.3f}",
                     "-i", str(src), "-vf", vf]
             tail = ["-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", ab, "-ac", "1",
