@@ -53,6 +53,9 @@ class PackImage extends StatefulWidget {
   final int pack;
   final int item;
   final double size;
+
+  /// Balandlik (berilmasa [size] — kvadrat). GIF devorida turli nisbat.
+  final double? height;
   final bool animate;
   final BoxFit fit;
 
@@ -64,6 +67,7 @@ class PackImage extends StatefulWidget {
     required this.pack,
     required this.item,
     required this.size,
+    this.height,
     this.animate = false,
     this.fit = BoxFit.contain,
     this.fallback,
@@ -159,16 +163,17 @@ class _PackImageState extends State<PackImage> {
   Widget build(BuildContext context) {
     final b = _bytes;
     if (b == null) {
+      final h = widget.height ?? widget.size;
       if (_failed) {
-        return widget.fallback ?? SizedBox(width: widget.size, height: widget.size);
+        return widget.fallback ?? SizedBox(width: widget.size, height: h);
       }
-      return SizedBox(width: widget.size, height: widget.size);
+      return SizedBox(width: widget.size, height: h);
     }
     final dpr = MediaQuery.devicePixelRatioOf(context);
     return Image.memory(
       b,
       width: widget.size,
-      height: widget.size,
+      height: widget.height ?? widget.size,
       fit: widget.fit,
       gaplessPlayback: true,
       filterQuality: FilterQuality.low,

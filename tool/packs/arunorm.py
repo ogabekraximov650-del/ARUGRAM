@@ -38,7 +38,8 @@ LIMITS = {
     "gif":     dict(side=480, frames=200, seconds=15.0, soft=3 * 1024 * 1024),
 }
 MAX_FPS = 20
-THUMB_SIDE = 96
+# Kichik rasm (thumb) o'lchami: GIF devorida katta ko'rinadi, shu sabab kattaroq.
+THUMB_SIDE = {"sticker": 192, "emoji": 72, "gif": 256}
 QUALITIES = (80, 65, 50, 40, 30)
 SCALES = (1.0, 0.8, 0.65, 0.5)
 
@@ -232,7 +233,7 @@ def normalize(raw: bytes, kind: str, emoji: str = "", trim=None) -> Result:
     if len(data) > arupack.MAX_ITEM:
         raise Rejected("yengillashtirilgandan keyin ham 5 MB dan katta")
 
-    tw, th = _fit(w0, h0, THUMB_SIDE)
+    tw, th = _fit(w0, h0, THUMB_SIDE[kind])
     tb = io.BytesIO()
     frames[0][0].resize((tw, th), Image.LANCZOS).save(tb, "WEBP", quality=60, method=4)
     return Result(data=data, thumb=tb.getvalue(), animated=animated, w=w, h=h)

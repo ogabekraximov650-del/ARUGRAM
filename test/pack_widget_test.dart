@@ -99,4 +99,25 @@ void main() {
     await t.pumpAndSettle();
     expect(picked, '😀');
   });
+
+  testWidgets('yozish paneli: Telegramdagidek qidiruv qatori va sahifalar',
+      (t) async {
+    final c = TgTextController();
+    await t.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: SizedBox(height: 420, child: TgMediaPanel(controller: c)),
+      ),
+    ));
+    await t.pump(const Duration(milliseconds: 300));
+    expect(t.takeException(), isNull);
+    // Emoji sahifasi: qidiruv qatori va tezkor emoji.
+    expect(find.text('Qidiruv'), findsOneWidget);
+    expect(find.text('👍'), findsWidgets);
+    // GIF va Stikerlar sahifalariga o'tish xato bermaydi.
+    await t.tap(find.text('GIF'));
+    await t.pump(const Duration(milliseconds: 400));
+    await t.tap(find.text('Stikerlar'));
+    await t.pump(const Duration(milliseconds: 400));
+    expect(t.takeException(), isNull);
+  });
 }

@@ -413,7 +413,10 @@ class _TgMediaPanelState extends State<TgMediaPanel> {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return ClipRRect(
+      // Telegram'dagidek: panelning yuqori burchaklari yumaloq.
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+      child: Container(
       color: _Pal.bg,
       child: Stack(
         children: [
@@ -462,7 +465,7 @@ class _TgMediaPanelState extends State<TgMediaPanel> {
           ),
         ],
       ),
-    );
+    ));
   }
 }
 
@@ -918,12 +921,146 @@ Widget _gridRow(int r, int cols, int count, double cell,
   );
 }
 
+// ── QIDIRUV (Telegram'dagidek) ────────────────────────────────
+
+String _baseEmoji(String e) => e.replaceAll('️', '');
+
+/// Element qidiruvga mos keladimi: tezkor emoji (`chip`) elementning mos
+/// emojisi bo'yicha, matn (`query`) — to'plam nomi yoki emoji bo'yicha.
+bool _matches(PackInfo p, String emoji, String query, String chip) {
+  if (chip.isNotEmpty && !_baseEmoji(emoji).contains(_baseEmoji(chip))) {
+    return false;
+  }
+  if (query.isNotEmpty) {
+    final q = query.toLowerCase();
+    if (!p.title.toLowerCase().contains(q) && !emoji.contains(query)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/// "Qidiruv" + tezkor emoji tugmalari (❤ 👍 👎 ...).
+class _PackSearch extends StatelessWidget {
+  final String query;
+  final String chip;
+  final ValueChanged<String> onQuery;
+  final ValueChanged<String> onChip;
+  const _PackSearch({
+    required this.query,
+    required this.chip,
+    required this.onQuery,
+    required this.onChip,
+  });
+
+  static const chips = ['❤️', '👍', '👎', '🎉', '😊', '😢', '😂', '🔥', '🙏', '😡'];
+
+  Future<void> _ask(BuildContext context) async {
+    final ctl = TextEditingController(text: query);
+    final r = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF2C2C2E),
+        title: const Text('Qidiruv',
+            style: TextStyle(color: Colors.white, fontSize: 17)),
+        content: TextField(
+          controller: ctl,
+          autofocus: true,
+          style: const TextStyle(color: Colors.white),
+          decoration: const InputDecoration(
+            hintText: 'To\'plam nomi yoki emoji',
+            hintStyle: TextStyle(color: Colors.white38),
+          ),
+          onSubmitted: (v) => Navigator.of(ctx).pop(v),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(''),
+              child: const Text('Tozalash')),
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(ctl.text),
+              child: const Text('Qidirish')),
+        ],
+      ),
+    );
+    if (r != null) onQuery(r.trim());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 44,
+      margin: const EdgeInsets.fromLTRB(10, 2, 10, 6),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(22),
+      ),
+      child: Row(
+        children: [
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => _ask(context),
+            child: Padding(
+              padding: const EdgeInsets.only(left: 14, right: 12),
+              child: Row(
+                children: [
+                  const Icon(Icons.search_rounded, color: _Pal.hint, size: 22),
+                  const SizedBox(width: 8),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 90),
+                    child: Text(
+                      query.isEmpty ? 'Qidiruv' : query,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          color: query.isEmpty ? _Pal.hint : Colors.white,
+                          fontSize: 16),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Expanded(
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.only(right: 8),
+              children: [
+                for (final c in chips)
+                  _Press(
+                    onTap: () => onChip(chip == c ? '' : c),
+                    child: Container(
+                      width: 40,
+                      margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 1),
+                      decoration: BoxDecoration(
+                        color: chip == c ? _Pal.pillOn : Colors.transparent,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Center(
+                        child: Text(c,
+                            style: const TextStyle(
+                                fontFamily: kTgEmojiFont,
+                                fontSize: 21,
+                                height: 1.1)),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// GIF va Stikerlar oynasi: yaqinda ishlatilganlar + har bir to'plam
 /// bo'limi (ilovaning O'Z to'plamlari — `pack_service.dart`).
 ///
-/// Katakda faqat kichik STATIK rasm (~5 KB): o'nlab animatsiya bir vaqtda
+/// Katakda faqat kichik STATIK rasm: o'nlab animatsiya bir vaqtda
 /// ishlab kuchsiz telefonni qiynamasligi uchun. Tanlangan element xabarda
-/// esa o'z animatsiyasi bilan chiqadi.
+/// esa o'z animatsiyasi bilan chiqadi. Stikerlar — 4 ustunli katakcha,
+/// GIF — Telegram'dagidek zich "devor" (har birining o'z nisbati).
 class _PackPage extends StatefulWidget {
   final String kind;
   final ValueChanged<PackPick>? onPick;
@@ -936,9 +1073,16 @@ class _PackPage extends StatefulWidget {
 class _PackPageState extends State<_PackPage>
     with AutomaticKeepAliveClientMixin {
   final _jump = _SectionsJump();
+  final _wall = ScrollController();
   int _section = 0;
   final Map<int, PackHeader> _hdr = {};
   bool _first = true;
+  String _query = '';
+  String _chip = '';
+  List<double> _offsets = const [];
+
+  bool get _gif => widget.kind == PackKind.gif;
+  bool get _filtering => _query.isNotEmpty || _chip.isNotEmpty;
 
   @override
   bool get wantKeepAlive => true;
@@ -953,6 +1097,7 @@ class _PackPageState extends State<_PackPage>
   @override
   void dispose() {
     PackService.instance.removeListener(_onSvc);
+    _wall.dispose();
     super.dispose();
   }
 
@@ -985,7 +1130,7 @@ class _PackPageState extends State<_PackPage>
     final gone = PackService.instance.removedItems(p.id);
     return [
       for (final it in h.items)
-        if (!gone.contains(it.id)) it,
+        if (!gone.contains(it.id) && _matches(p, it.emoji, _query, _chip)) it,
     ];
   }
 
@@ -1000,81 +1145,242 @@ class _PackPageState extends State<_PackPage>
     widget.onPick?.call(p);
   }
 
+  /// Muqova: to'plamning birinchi elementi, yumaloq burchakli.
+  Widget _cover(PackInfo p, List<PackItem> l, bool on) {
+    if (l.isEmpty) {
+      return Icon(Icons.circle_outlined,
+          color: on ? Colors.white : _Pal.icon, size: 18);
+    }
+    return Opacity(
+      opacity: on ? 1 : 0.8,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: PackImage(
+            pack: p.id, item: l.first.id, size: 26, fit: BoxFit.cover),
+      ),
+    );
+  }
+
+  Widget _search() => _PackSearch(
+        query: _query,
+        chip: _chip,
+        onQuery: (v) => setState(() => _query = v),
+        onChip: (v) => setState(() => _chip = v),
+      );
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
     final svc = PackService.instance;
     final packs = svc.usable(widget.kind);
-    final recent = svc.recent(widget.kind);
+    final recentAll = svc.recent(widget.kind);
+    final recent = _query.isNotEmpty
+        ? const <PackPick>[]
+        : [
+            for (final r in recentAll)
+              if (_chip.isEmpty ||
+                  _baseEmoji(r.emoji).contains(_baseEmoji(_chip)))
+                r,
+          ];
     final lists = [for (final p in packs) _items(p)];
-    if (packs.isEmpty && recent.isEmpty) {
+    if (packs.isEmpty && recentAll.isEmpty) {
       return _PackEmpty(
           kind: widget.kind, loading: _first || svc.loading, onOpen: _openHub);
     }
     final counts = <int>[recent.length, for (final l in lists) l.length];
-    final headers = <Widget>[
-      const _Header('Yaqinda ishlatilgan'),
-      for (final p in packs) _Header(p.title),
-    ];
+    final sel = _section.clamp(0, counts.length - 1);
+    final strip = _Strip(
+      count: counts.length + 1,
+      selected: sel,
+      onTap: (i) {
+        if (i >= counts.length) {
+          _openHub();
+          return;
+        }
+        setState(() => _section = i);
+        if (_gif) {
+          if (_wall.hasClients && i < _offsets.length) {
+            _wall.animateTo(
+                _offsets[i].clamp(0.0, _wall.position.maxScrollExtent),
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeOutCubic);
+          }
+        } else {
+          _jump.to(i);
+        }
+      },
+      icon: (i, on) {
+        final c = on ? Colors.white : _Pal.icon;
+        if (i == 0) return Icon(Icons.access_time_rounded, color: c, size: 22);
+        if (i >= counts.length) {
+          return Icon(Icons.add_circle_outline_rounded, color: c, size: 22);
+        }
+        return _cover(packs[i - 1], lists[i - 1], on);
+      },
+    );
+    final empty = counts.every((c) => c == 0);
     return Column(
       children: [
-        _Strip(
-          count: counts.length + 1,
-          selected: _section.clamp(0, counts.length - 1),
-          onTap: (i) {
-            if (i >= counts.length) {
-              _openHub();
-              return;
-            }
-            setState(() => _section = i);
-            _jump.to(i);
-          },
-          icon: (i, on) {
-            final c = on ? Colors.white : _Pal.icon;
-            if (i == 0) {
-              return Icon(Icons.access_time_rounded, color: c, size: 22);
-            }
-            if (i >= counts.length) {
-              return Icon(Icons.add_circle_outline_rounded, color: c, size: 22);
-            }
-            final l = lists[i - 1];
-            if (l.isEmpty) return Icon(Icons.circle_outlined, color: c, size: 18);
-            return Opacity(
-              opacity: on ? 1 : 0.75,
-              child: PackImage(pack: packs[i - 1].id, item: l.first.id, size: 24),
-            );
-          },
-        ),
+        strip,
+        _search(),
         Expanded(
-          child: _Sections(
-            minCell: widget.kind == PackKind.gif ? 100 : 72,
-            minColumns: widget.kind == PackKind.gif ? 3 : 4,
-            counts: counts,
-            headers: headers,
-            jump: _jump,
-            onSection: (i) => setState(() => _section = i),
-            cell: (s, i, cell) {
-              final PackPick pick;
-              if (s == 0) {
-                pick = recent[i];
-              } else {
-                final it = lists[s - 1][i];
-                pick = PackPick(widget.kind, packs[s - 1].id, it.id, it.emoji);
-              }
-              return _Press(
-                onTap: () => _pick(pick),
-                scale: 0.85,
-                child: Padding(
-                  padding: const EdgeInsets.all(4),
-                  child: PackImage(pack: pick.pack, item: pick.item, size: cell - 8),
-                ),
-              );
-            },
-          ),
+          child: empty && _filtering
+              ? const Center(
+                  child: Text('Hech narsa topilmadi',
+                      style: TextStyle(color: _Pal.hint, fontSize: 15)))
+              : _gif
+                  ? _gifWall(recent, packs, lists)
+                  : _stickerGrid(recent, packs, lists, counts),
         ),
       ],
     );
   }
+
+  Widget _stickerGrid(List<PackPick> recent, List<PackInfo> packs,
+      List<List<PackItem>> lists, List<int> counts) {
+    return _Sections(
+      minCell: 72,
+      minColumns: 4,
+      counts: counts,
+      headers: [
+        const _Header('Yaqinda ishlatilgan'),
+        for (final p in packs) _Header(p.title),
+      ],
+      jump: _jump,
+      onSection: (i) => setState(() => _section = i),
+      cell: (s, i, cell) {
+        final PackPick pick;
+        if (s == 0) {
+          pick = recent[i];
+        } else {
+          final it = lists[s - 1][i];
+          pick = PackPick(widget.kind, packs[s - 1].id, it.id, it.emoji);
+        }
+        return _Press(
+          onTap: () => _pick(pick),
+          scale: 0.85,
+          child: Padding(
+            padding: const EdgeInsets.all(3),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: PackImage(pack: pick.pack, item: pick.item, size: cell - 6),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// GIF "devori": har qator kenglikka to'liq sig'adi, elementlar o'z nisbatida.
+  Widget _gifWall(List<PackPick> recent, List<PackInfo> packs,
+      List<List<PackItem>> lists) {
+    return LayoutBuilder(builder: (context, box) {
+      const gap = 2.0;
+      const target = 118.0;
+      final w = box.maxWidth;
+      final entries = <Object>[]; // String — sarlavha; List<_GifCell> — qator
+      final offsets = <double>[];
+      var y = 0.0;
+
+      void addSection(String title, List<_GifCell> cells) {
+        offsets.add(y);
+        if (cells.isEmpty) return;
+        entries.add(title);
+        y += _Header.height;
+        var row = <_GifCell>[];
+        var sum = 0.0;
+        void flush(bool full) {
+          if (row.isEmpty) return;
+          final gaps = gap * (row.length - 1);
+          final h = full ? (w - gaps) / sum : target;
+          entries.add(_GifRow(row, h.clamp(60.0, 260.0)));
+          y += h.clamp(60.0, 260.0) + gap;
+          row = <_GifCell>[];
+          sum = 0;
+        }
+
+        for (final c in cells) {
+          row.add(c);
+          sum += c.aspect;
+          if (sum * target + gap * (row.length - 1) >= w) flush(true);
+        }
+        flush(false);
+      }
+
+      addSection('Yaqinda ishlatilgan', [
+        for (final r in recent) _GifCell(r, 1.0, r.pack),
+      ]);
+      for (var i = 0; i < packs.length; i++) {
+        addSection(packs[i].title, [
+          for (final it in lists[i])
+            _GifCell(
+              PackPick(widget.kind, packs[i].id, it.id, it.emoji),
+              (it.w > 0 && it.h > 0) ? (it.w / it.h).clamp(0.5, 3.0) : 1.0,
+              packs[i].id,
+            ),
+        ]);
+      }
+      _offsets = offsets;
+      return ListView.builder(
+        controller: _wall,
+        padding: const EdgeInsets.only(bottom: 70),
+        itemCount: entries.length,
+        itemBuilder: (_, i) {
+          final e = entries[i];
+          if (e is String) return _Header(e);
+          final r = e as _GifRow;
+          final gaps = gap * (r.cells.length - 1);
+          final sum = r.cells.fold<double>(0, (a, c) => a + c.aspect);
+          final full = sum * target + gaps >= w;
+          return Padding(
+            padding: const EdgeInsets.only(bottom: gap),
+            child: SizedBox(
+              height: r.height,
+              child: Row(
+                children: [
+                  for (var j = 0; j < r.cells.length; j++) ...[
+                    if (j > 0) const SizedBox(width: gap),
+                    SizedBox(
+                      width: full
+                          ? (w - gaps) * r.cells[j].aspect / sum
+                          : r.height * r.cells[j].aspect,
+                      height: r.height,
+                      child: _Press(
+                        onTap: () => _pick(r.cells[j].pick),
+                        scale: 0.96,
+                        child: PackImage(
+                          pack: r.cells[j].pick.pack,
+                          item: r.cells[j].pick.item,
+                          size: full
+                              ? (w - gaps) * r.cells[j].aspect / sum
+                              : r.height * r.cells[j].aspect,
+                          height: r.height,
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          );
+        },
+      );
+    });
+  }
+}
+
+class _GifCell {
+  final PackPick pick;
+  final double aspect;
+  final int pack;
+  const _GifCell(this.pick, this.aspect, this.pack);
+}
+
+class _GifRow {
+  final List<_GifCell> cells;
+  final double height;
+  const _GifRow(this.cells, this.height);
 }
 
 /// To'plam yo'q bo'lgandagi oyna.
@@ -1177,6 +1483,8 @@ class _EmojiPageState extends State<_EmojiPage>
   int _section = 0;
   List<String> _recent = [];
   final Map<int, PackHeader> _hdr = {};
+  String _query = '';
+  String _chip = '';
 
   /// Telegram `EmojiTabsStrip` belgilari — tanlanganda bir marta
   /// "jonlanadi" (`R.raw.msg_emoji_*`).
@@ -1225,7 +1533,7 @@ class _EmojiPageState extends State<_EmojiPage>
     final gone = PackService.instance.removedItems(p.id);
     return [
       for (final it in h.items)
-        if (!gone.contains(it.id)) it,
+        if (!gone.contains(it.id) && _matches(p, it.emoji, _query, _chip)) it,
     ];
   }
 
@@ -1301,6 +1609,12 @@ class _EmojiPageState extends State<_EmojiPage>
                 selected: on,
                 color: c);
           },
+        ),
+        _PackSearch(
+          query: _query,
+          chip: _chip,
+          onQuery: (v) => setState(() => _query = v),
+          onChip: (v) => setState(() => _chip = v),
         ),
         Expanded(
           child: _Sections(

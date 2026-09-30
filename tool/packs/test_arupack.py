@@ -93,7 +93,7 @@ class NormalizeTests(unittest.TestCase):
         self.assertLessEqual(max(r.w, r.h), 512)
         self.assertEqual(arunorm.sniff(r.data), "webp")
         self.assertEqual(arunorm.sniff(r.thumb), "webp")
-        self.assertLess(len(r.thumb), 20000)
+        self.assertLess(len(r.thumb), 40000)
 
     def test_animatsiya_saqlanadi(self):
         r = arunorm.normalize(gif(8), "gif")
