@@ -33,9 +33,10 @@ Image.MAX_IMAGE_PIXELS = 40_000_000
 LIMITS = {
     #           eng katta tomon, kadrlar, soniya, yumshoq hajm chegarasi
     # Kadrlar soni va uzunlik CHEKLANMAYDI (foydalanuvchi talabi); faqat 5 MB.
-    "sticker": dict(side=512, soft=512 * 1024),
+    # Emoji eng kichik, stiker o'rtacha, GIF eng katta (va xilma-xil nisbatda).
+    "sticker": dict(side=384, soft=512 * 1024),
     "emoji":   dict(side=128, soft=256 * 1024),
-    "gif":     dict(side=480, soft=3 * 1024 * 1024),
+    "gif":     dict(side=640, soft=3 * 1024 * 1024),
 }
 MAX_FPS = 20
 # Kichik rasm (thumb) o'lchami: GIF devorida katta ko'rinadi, shu sabab kattaroq.
@@ -55,6 +56,8 @@ class Result:
     animated: bool
     w: int
     h: int
+    # Ovozli MP4 (faqat GIF to'plami): data — mp4 baytlari.
+    video: bool = False
 
 
 def sniff(b: bytes) -> str:
@@ -149,6 +152,77 @@ def _video_frames(raw: bytes, kind: str, lim: dict, trim):
         return frames, w1, h1
 
 
+def _has_audio(src: Path) -> bool:
+    try:
+        out = _run(["ffprobe", "-v", "error", "-select_streams", "a:0",
+                    "-show_entries", "stream=codec_type", "-of", "csv=p=0", str(src)], 60)
+        return b"audio" in out.stdout
+    except Exception:
+        return False
+
+
+def _video_keep_audio(raw: bytes, lim: dict, trim):
+    """GIF to'plami uchun: videoda OVOZ bo'lsa, u saqlanadi — H.264 + AAC MP4
+    (<= 5 MB). Ovoz bo'lmasa `None` (oddiy yengil WebP yo'li ishlaydi)."""
+    with tempfile.TemporaryDirectory() as d:
+        src = Path(d) / "in.bin"
+        src.write_bytes(raw)
+        if not _has_audio(src):
+            return None
+        try:
+            out = _run(["ffprobe", "-v", "error", "-select_streams", "v:0",
+                        "-show_entries", "stream=width,height:format=duration",
+                        "-of", "csv=p=0", str(src)], 60).stdout.decode().split()
+            wh = out[0].split(",")
+            w0, h0 = int(wh[0]), int(wh[1])
+            dur = float(out[1].split(",")[-1]) if len(out) > 1 else float(wh[2])
+        except Exception:
+            raise Rejected("video o'qilmadi")
+        if w0 <= 0 or h0 <= 0 or dur <= 0:
+            raise Rejected("video o'lchami yoki davomiyligi noto'g'ri")
+        start, end = 0.0, dur
+        if trim:
+            start = max(0.0, min(dur, trim[0] / 1000.0))
+            end = max(start, min(dur, trim[1] / 1000.0))
+        length = end - start
+        if length < 0.2:
+            raise Rejected("tanlangan bo'lak juda qisqa")
+        best = None
+        for side, crf, ab in ((lim["side"], 28, "64k"), (lim["side"], 32, "48k"),
+                              (int(lim["side"] * 0.75), 34, "48k"),
+                              (int(lim["side"] * 0.5), 36, "32k"),
+                              (int(lim["side"] * 0.35), 38, "32k")):
+            dst = Path(d) / "out.mp4"
+            vf = (f"fps=24,scale='min({side},iw)':'min({side},ih)':"
+                  f"force_original_aspect_ratio=decrease:force_divisible_by=2")
+            try:
+                _run(["ffmpeg", "-v", "error", "-y", "-ss", f"{start:.3f}", "-t", f"{length:.3f}",
+                      "-i", str(src), "-vf", vf, "-c:v", "libx264", "-preset", "veryfast",
+                      "-crf", str(crf), "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", ab,
+                      "-ac", "1", "-movflags", "+faststart", str(dst)], 600)
+            except Exception:
+                raise Rejected("videoni qayta ishlab bo'lmadi")
+            data = dst.read_bytes()
+            best = data
+            if len(data) <= arupack.MAX_ITEM:
+                break
+        if best is None or len(best) > arupack.MAX_ITEM:
+            raise Rejected("ovozli video yengillashtirilgandan keyin ham 5 MB dan katta")
+        # kichik rasm (thumb) va o'lcham — birinchi kadrdan
+        png = Path(d) / "t.png"
+        try:
+            _run(["ffmpeg", "-v", "error", "-y", "-i", str(dst), "-frames:v", "1", str(png)], 60)
+            with Image.open(png) as im:
+                w1, h1 = im.size
+                tw, th = _fit(w1, h1, THUMB_SIDE["gif"])
+                tb = io.BytesIO()
+                im.convert("RGBA").resize((tw, th), Image.LANCZOS).save(
+                    tb, "WEBP", quality=60, method=4)
+        except Exception:
+            raise Rejected("videodan kadr olinmadi")
+        return Result(data=best, thumb=tb.getvalue(), animated=True, w=w1, h=h1, video=True)
+
+
 def _drop_fast(frames):
     """Sekundiga MAX_FPS dan ortiq kadrlarni tashlaydi (vaqt saqlanadi)."""
     step = 1000.0 / MAX_FPS
@@ -188,6 +262,10 @@ def normalize(raw: bytes, kind: str, emoji: str = "", trim=None) -> Result:
         raise Rejected("fayl 5 MB dan katta")
     try:
         if fmt in ("mp4", "webm"):
+            if kind == "gif":
+                keep = _video_keep_audio(raw, lim, trim)
+                if keep is not None:
+                    return keep
             frames, w0, h0 = _video_frames(raw, kind, lim, trim)
         else:
             im = Image.open(io.BytesIO(raw))

@@ -12,10 +12,12 @@
 //     24 dp lik joyda katta xotira olmaydi.
 
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:video_player/video_player.dart';
 
 import '../services/device_perf.dart';
 import '../screens/pack_detail_screen.dart';
@@ -61,6 +63,9 @@ class PackImage extends StatefulWidget {
   /// Balandlik (berilmasa [size] — kvadrat). GIF devorida turli nisbat.
   final double? height;
   final bool animate;
+
+  /// Ovozli video elementlarda ovoz yoqilsinmi (chatda — o'chiq, ko'rishda — yoqiq).
+  final bool sound;
   final BoxFit fit;
 
   /// Yuklanmasa (yoki to'plam topilmasa) ko'rsatiladigan narsa.
@@ -73,6 +78,7 @@ class PackImage extends StatefulWidget {
     required this.size,
     this.height,
     this.animate = false,
+    this.sound = false,
     this.fit = BoxFit.contain,
     this.fallback,
   });
@@ -90,6 +96,8 @@ class _PackImageState extends State<PackImage> {
   int _retries = 0;
   Timer? _retry;
   PackRef? _ref;
+  VideoPlayerController? _vc;
+  File? _vfile;
 
   /// Elementning o'zi shu hajmdan katta bo'lsa, kichik rasm o'rniga
   /// yuklanmaydi (devorda bir vaqtda ko'p og'ir fayl olinmasin).
@@ -104,6 +112,8 @@ class _PackImageState extends State<PackImage> {
   @override
   void didUpdateWidget(PackImage old) {
     super.didUpdateWidget(old);
+    if (old.sound != widget.sound)
+      unawaited(_vc?.setVolume(widget.sound ? 1 : 0));
     if (old.pack != widget.pack ||
         old.item != widget.item ||
         old.animate != widget.animate) {
@@ -120,7 +130,21 @@ class _PackImageState extends State<PackImage> {
     super.dispose();
   }
 
+  void _dropVideo() {
+    final c = _vc;
+    final f = _vfile;
+    _vc = null;
+    _vfile = null;
+    if (c != null) unawaited(c.dispose());
+    if (f != null) {
+      try {
+        f.deleteSync();
+      } catch (_) {}
+    }
+  }
+
   void _reset({bool keepBytes = false}) {
+    _dropVideo();
     _retry?.cancel();
     _stopWaiting();
     _release();
@@ -216,6 +240,10 @@ class _PackImageState extends State<PackImage> {
     }
     final d = await svc.data(r);
     if (!mounted || gen != _gen) return;
+    if (d != null && r.item.video) {
+      await _startVideo(r, d, gen);
+      return;
+    }
     if (d != null) {
       setState(() {
         _bytes = d;
@@ -227,6 +255,33 @@ class _PackImageState extends State<PackImage> {
         setState(() => _failed = true);
         _scheduleRetry();
       }
+    }
+  }
+
+  /// Ovozli MP4: vaqtinchalik faylga yoziladi va takrorlanib o'ynaydi.
+  Future<void> _startVideo(PackRef r, Uint8List d, int gen) async {
+    try {
+      final f = File(
+          '${Directory.systemTemp.path}/aru_pv_${r.info.id}_${r.item.id}.mp4');
+      await f.writeAsBytes(d, flush: true);
+      final c = VideoPlayerController.file(f);
+      await c.initialize();
+      if (!mounted || gen != _gen) {
+        await c.dispose();
+        try {
+          f.deleteSync();
+        } catch (_) {}
+        return;
+      }
+      await c.setLooping(true);
+      await c.setVolume(widget.sound ? 1 : 0);
+      await c.play();
+      setState(() {
+        _vc = c;
+        _vfile = f;
+      });
+    } catch (_) {
+      _release();
     }
   }
 
@@ -243,6 +298,22 @@ class _PackImageState extends State<PackImage> {
   @override
   Widget build(BuildContext context) {
     final b = _bytes;
+    final vc = _vc;
+    if (vc != null && vc.value.isInitialized) {
+      return SizedBox(
+        width: widget.size,
+        height: widget.height ?? widget.size,
+        child: FittedBox(
+          fit: widget.fit == BoxFit.cover ? BoxFit.cover : BoxFit.contain,
+          clipBehavior: Clip.hardEdge,
+          child: SizedBox(
+            width: vc.value.size.width,
+            height: vc.value.size.height,
+            child: VideoPlayer(vc),
+          ),
+        ),
+      );
+    }
     if (b == null) {
       final h = widget.height ?? widget.size;
       if (_failed) {
@@ -271,27 +342,58 @@ class _PackImageState extends State<PackImage> {
 }
 
 /// Xabar yoki izohdagi stiker / GIF (`pk_<to'plam>_<element>`).
-class PackMediaView extends StatelessWidget {
+/// Ovozli GIF: bosilsa ovoz yoqiladi/o'chadi; oddiy stiker/GIF: to'plam ochiladi.
+class PackMediaView extends StatefulWidget {
   final String file;
   final String type;
   const PackMediaView({super.key, required this.file, required this.type});
 
   @override
+  State<PackMediaView> createState() => _PackMediaViewState();
+}
+
+class _PackMediaViewState extends State<PackMediaView> {
+  bool _sound = false;
+
+  @override
   Widget build(BuildContext context) {
-    final ref = parsePackRef(file);
-    if (ref == null) return MediaPlaceholder(type: type);
-    final size = type == 'gif' ? 200.0 : 150.0;
-    // Telegram'dagidek: xabardagi stikerga bosilsa to'plami ochiladi va
-    // uni o'ziga qo'shish mumkin.
+    final ref = parsePackRef(widget.file);
+    if (ref == null) return MediaPlaceholder(type: widget.type);
+    final size = widget.type == 'gif' ? 200.0 : 150.0;
+    final hdr = PackService.instance.cachedItem(ref.$1, ref.$2);
+    final video = hdr?.video ?? false;
     return GestureDetector(
-      onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
-          builder: (_) => PackDetailScreen(packId: ref.$1))),
-      child: PackImage(
-        pack: ref.$1,
-        item: ref.$2,
-        size: size,
-        animate: true,
-        fallback: MediaPlaceholder(type: type),
+      onTap: () {
+        if (video) {
+          setState(() => _sound = !_sound);
+          return;
+        }
+        Navigator.of(context).push(MaterialPageRoute<void>(
+            builder: (_) => PackDetailScreen(packId: ref.$1)));
+      },
+      child: Stack(
+        alignment: Alignment.bottomRight,
+        children: [
+          PackImage(
+            pack: ref.$1,
+            item: ref.$2,
+            size: size,
+            animate: true,
+            sound: _sound,
+            fallback: MediaPlaceholder(type: widget.type),
+          ),
+          if (video)
+            Container(
+              margin: const EdgeInsets.all(6),
+              padding: const EdgeInsets.all(4),
+              decoration: const BoxDecoration(
+                  color: Colors.black54, shape: BoxShape.circle),
+              child: Icon(
+                  _sound ? Icons.volume_up_rounded : Icons.volume_off_rounded,
+                  color: Colors.white,
+                  size: 16),
+            ),
+        ],
       ),
     );
   }

@@ -149,7 +149,38 @@ class VideoTests(unittest.TestCase):
         r = arunorm.normalize(raw, "gif")
         self.assertTrue(r.animated)
         self.assertLessEqual(len(r.data), arupack.MAX_ITEM)
-        self.assertLessEqual(max(r.w, r.h), 480)
+        self.assertLessEqual(max(r.w, r.h), 640)
+
+    def test_ovozli_video_gifda_mp4_qoladi(self):
+        import shutil
+        import subprocess
+        if not shutil.which("ffmpeg"):
+            self.skipTest("ffmpeg yo'q")
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d) / "a.mp4"
+            subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i",
+                            "testsrc=duration=2:size=320x180:rate=25", "-f", "lavfi", "-i",
+                            "sine=frequency=440:duration=2", "-shortest", str(out)], check=True)
+            raw = out.read_bytes()
+        r = arunorm.normalize(raw, "gif")
+        self.assertTrue(r.video)
+        self.assertEqual(arunorm.sniff(r.data), "mp4")
+        self.assertLessEqual(len(r.data), arupack.MAX_ITEM)
+        # emoji va stikerda ovoz olib tashlanadi (WebP)
+        r2 = arunorm.normalize(raw, "sticker")
+        self.assertFalse(r2.video)
+        # ovozsiz video GIFda ham WebP
+        self.assertFalse(arunorm.normalize(make_video(), "gif").video)
+
+    def test_olchamlar_emoji_stiker_gif(self):
+        raw = make_video(seconds=1, w=1280, h=720)
+        if raw is None:
+            self.skipTest("ffmpeg yo'q")
+        e = arunorm.normalize(raw, "emoji")
+        s = arunorm.normalize(raw, "sticker")
+        g = arunorm.normalize(raw, "gif")
+        self.assertLess(max(e.w, e.h), max(s.w, s.h))
+        self.assertLess(max(s.w, s.h), max(g.w, g.h))
 
     def test_kesib_olish_va_emoji_kvadrat(self):
         raw = make_video(seconds=6)

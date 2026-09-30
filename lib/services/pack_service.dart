@@ -208,6 +208,9 @@ class PackItem {
   /// Ma'lumot boshiga nisbatan joylashuv.
   final int off, len, thumbOff, thumbLen;
   final bool animated;
+
+  /// Ovozli MP4 (faqat GIF to'plami): `a` = 2. Rasm sifatida dekodlanmaydi.
+  final bool video;
   final int w, h;
   final String emoji;
 
@@ -218,6 +221,7 @@ class PackItem {
     required this.thumbOff,
     required this.thumbLen,
     required this.animated,
+    this.video = false,
     required this.w,
     required this.h,
     required this.emoji,
@@ -229,7 +233,8 @@ class PackItem {
         len: _i(j['l']),
         thumbOff: _i(j['to']),
         thumbLen: _i(j['tl']),
-        animated: _i(j['a']) == 1,
+        animated: _i(j['a']) >= 1,
+        video: _i(j['a']) == 2,
         w: _i(j['w']),
         h: _i(j['h']),
         emoji: '${j['e'] ?? ''}',
@@ -241,7 +246,7 @@ class PackItem {
         'l': len,
         'to': thumbOff,
         'tl': thumbLen,
-        'a': animated ? 1 : 0,
+        'a': video ? 2 : (animated ? 1 : 0),
         'w': w,
         'h': h,
         'e': emoji,
@@ -1028,6 +1033,10 @@ class PackService extends ChangeNotifier {
 
   /// To'plam + sarlavha + element. Element sarlavhada yo'q bo'lsa
   /// (to'plam yangilangan) — ma'lumot bir marta yangilanadi.
+  /// Sarlavha xotirada bo'lsa — element (kutmasdan), aks holda null.
+  PackItem? cachedItem(int packId, int itemId) =>
+      _headers[packId]?.find(itemId);
+
   Future<PackRef?> resolve(int packId, int itemId) async {
     var info = await infoFor(packId);
     if (info == null) return null;

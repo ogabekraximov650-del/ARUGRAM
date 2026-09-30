@@ -93,7 +93,7 @@ def apply_ops(pack: arupack.Pack, ops: list, fetch) -> list:
             need = res_size(res) + 256
             if pack.data_size() + need + 256 * len(pack.items) > arupack.MAX_PACK:
                 raise arunorm.Rejected("to'plam to'ldi (1 GB)")
-            item_id = pack.add(res.data, res.thumb, res.animated, res.w, res.h,
+            item_id = pack.add(res.data, res.thumb, 2 if res.video else res.animated, res.w, res.h,
                                (op.get("emoji") or "")[:16])
             results.append({"id": oid, "ok": True, "item": item_id})
         except arunorm.Rejected as e:

@@ -120,7 +120,8 @@ class Source:
 class Item:
     def __init__(self, item_id, data: Source, thumb: Source, animated, w, h, emoji):
         self.id, self.data, self.thumb = item_id, data, thumb
-        self.animated, self.w, self.h, self.emoji = bool(animated), w, h, emoji
+        # 0 — statik, 1 — animatsiyali WebP, 2 — ovozli MP4 (faqat GIF to'plami)
+        self.animated, self.w, self.h, self.emoji = int(animated), w, h, emoji
 
 
 class Pack:
@@ -159,7 +160,7 @@ def header_json(pack: Pack) -> bytes:
         items.append({
             "i": it.id, "o": doff, "l": it.data.length,
             "to": toff, "tl": it.thumb.length,
-            "a": 1 if it.animated else 0, "w": it.w, "h": it.h, "e": it.emoji,
+            "a": int(it.animated), "w": it.w, "h": it.h, "e": it.emoji,
         })
         toff += it.thumb.length
         doff += it.data.length

@@ -4387,3 +4387,16 @@ Qoldi: 5 MB hajm, chiqish o'lchami (stiker 512 / emoji 128 / GIF 480 px), sekund
 20 kadr. Kadrlar o'qilishi bilan kichraytiriladi (xotira to'lmaydi). GIF
 to'plamida rasm ham, animatsiya ham mumkin. Ilovadagi tahrirlash oynasining
 tur bo'yicha eng uzun bo'lagi (5/8/15 s) saqlandi.
+
+## O'lchamlar (emoji < stiker < GIF) va GIFda OVOZ
+
+`tool/packs/arunorm.py`: emoji 128 px (eng kichik), stiker 384 px, GIF 640 px
+(asl nisbatda, xilma-xil). GIF to'plamiga ovozli video yuklansa, ovoz
+saqlanadi: H.264+AAC MP4 (<= 5 MB, sifat pog'onalari bilan), sarlavhada `a=2`
+(`PackItem.video`). Ovozsiz video, emoji va stikerda oldingidek yengil WebP.
+Ilova: `PackImage` video elementni vaqtinchalik fayldan takrorlab o'ynatadi
+(chatda ovozsiz, bosilsa ovoz yoqiladi; uzoq bosib ko'rish va element oynasida
+ovozli), o'yin joylari `AnimSlots` bilan cheklangan. Ro'yxat/devorda faqat
+kichik statik rasm.
+Fayllar: `arupack.py`, `arunorm.py`, `run.py`, `test_arupack.py`,
+`lib/services/pack_service.dart`, `lib/widgets/pack_views.dart`, `pack_preview.dart`.

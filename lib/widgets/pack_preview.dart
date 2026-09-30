@@ -110,6 +110,7 @@ class _PreviewBody extends StatelessWidget {
                           size: w,
                           height: h,
                           animate: true,
+                          sound: true,
                           fit: BoxFit.contain,
                         ),
                       ),
