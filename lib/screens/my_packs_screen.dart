@@ -28,6 +28,8 @@ class MyPacksScreen extends StatefulWidget {
 
 class _MyPacksScreenState extends State<MyPacksScreen> {
   late String _kind = widget.initialKind;
+  late final PageController _pages = PageController(
+      initialPage: PackKind.all.indexOf(widget.initialKind).clamp(0, 2));
   final _svc = PackService.instance;
 
   @override
@@ -40,6 +42,7 @@ class _MyPacksScreenState extends State<MyPacksScreen> {
   @override
   void dispose() {
     _svc.removeListener(_onSvc);
+    _pages.dispose();
     super.dispose();
   }
 
@@ -99,10 +102,70 @@ class _MyPacksScreenState extends State<MyPacksScreen> {
         ),
       );
 
+  Widget _page(String kind) {
+    final mine = _svc.myPacks.where((p) => p.kind == kind).toList();
+    final subs = _svc.subPacks.where((p) => p.kind == kind).toList();
+    return RefreshIndicator(
+      onRefresh: () => _svc.load(force: true),
+      child: ListView(
+        physics: const BouncingScrollPhysics(
+            parent: AlwaysScrollableScrollPhysics()),
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 110),
+        children: [
+          if (!AuthService.instance.isLoggedIn)
+            _hint('To\'plam yaratish uchun hisobingizga kiring.')
+          else ...[
+            _section('Mening to\'plamlarim'),
+            if (mine.isEmpty)
+              _hint(_svc.loading && !_svc.loaded
+                  ? 'Yuklanmoqda...'
+                  : 'Hali to\'plam yo\'q. "Yangi to\'plam" tugmasi bilan '
+                      'o\'zingiznikini yarating: rasmlar admin ko\'rib '
+                      'chiqqach to\'plamga qo\'shiladi.'),
+            for (final p in mine) _tile(p, mine: true),
+            const SizedBox(height: 14),
+            _section('Qo\'shilgan to\'plamlar'),
+            if (subs.isEmpty)
+              _hint('Boshqalarning to\'plamlarini pastdagi tugma orqali '
+                  'qo\'shing.'),
+            for (final p in subs) _tile(p, mine: false),
+            const SizedBox(height: 12),
+            GlassTappable(
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                    builder: (_) => PackBrowseScreen(kind: kind)),
+              ),
+              child: Glass(
+                borderRadius: 18,
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    const Icon(Icons.explore_rounded,
+                        color: AppColors.accent, size: 24),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Text(
+                        'Ommaviy ${PackKind.plural(kind).toLowerCase()}ni ko\'rish',
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                    const Icon(Icons.chevron_right_rounded,
+                        color: Colors.white38),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final mine = _svc.myPacks.where((p) => p.kind == _kind).toList();
-    final subs = _svc.subPacks.where((p) => p.kind == _kind).toList();
     return AppBackground(
       child: Scaffold(
         backgroundColor: Colors.transparent,
@@ -122,64 +185,20 @@ class _MyPacksScreenState extends State<MyPacksScreen> {
                 label: const Text('Yangi to\'plam'),
               )
             : null,
-        body: RefreshIndicator(
-          onRefresh: () => _svc.load(force: true),
-          child: ListView(
-            physics: const BouncingScrollPhysics(
-                parent: AlwaysScrollableScrollPhysics()),
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 110),
-            children: [
-              _kinds(),
-              const SizedBox(height: 14),
-              if (!AuthService.instance.isLoggedIn)
-                _hint('To\'plam yaratish uchun hisobingizga kiring.')
-              else ...[
-                _section('Mening to\'plamlarim'),
-                if (mine.isEmpty)
-                  _hint(_svc.loading && !_svc.loaded
-                      ? 'Yuklanmoqda...'
-                      : 'Hali to\'plam yo\'q. "Yangi to\'plam" tugmasi bilan '
-                          'o\'zingiznikini yarating: rasmlar admin ko\'rib '
-                          'chiqqach to\'plamga qo\'shiladi.'),
-                for (final p in mine) _tile(p, mine: true),
-                const SizedBox(height: 14),
-                _section('Qo\'shilgan to\'plamlar'),
-                if (subs.isEmpty)
-                  _hint('Boshqalarning to\'plamlarini pastdagi tugma orqali '
-                      'qo\'shing.'),
-                for (final p in subs) _tile(p, mine: false),
-                const SizedBox(height: 12),
-                GlassTappable(
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                        builder: (_) => PackBrowseScreen(kind: _kind)),
-                  ),
-                  child: Glass(
-                    borderRadius: 18,
-                    padding: const EdgeInsets.all(16),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.explore_rounded,
-                            color: AppColors.accent, size: 24),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: Text(
-                            'Ommaviy ${PackKind.plural(_kind).toLowerCase()}ni ko\'rish',
-                            style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 15,
-                                fontWeight: FontWeight.w600),
-                          ),
-                        ),
-                        const Icon(Icons.chevron_right_rounded,
-                            color: Colors.white38),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ],
-          ),
+        body: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+              child: _kinds(),
+            ),
+            Expanded(
+              child: PageView(
+                controller: _pages,
+                onPageChanged: (i) => setState(() => _kind = PackKind.all[i]),
+                children: [for (final k in PackKind.all) _page(k)],
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -191,7 +210,9 @@ class _MyPacksScreenState extends State<MyPacksScreen> {
         for (final k in PackKind.all) ...[
           Expanded(
             child: GestureDetector(
-              onTap: () => setState(() => _kind = k),
+              onTap: () => _pages.animateToPage(PackKind.all.indexOf(k),
+                  duration: const Duration(milliseconds: 260),
+                  curve: Curves.easeOutCubic),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 180),
                 padding: const EdgeInsets.symmetric(vertical: 11),
@@ -205,8 +226,8 @@ class _MyPacksScreenState extends State<MyPacksScreen> {
                   child: Text(
                     PackKind.plural(k),
                     style: TextStyle(
-                      color: Colors.white
-                          .withValues(alpha: _kind == k ? 1 : 0.7),
+                      color:
+                          Colors.white.withValues(alpha: _kind == k ? 1 : 0.7),
                       fontWeight: FontWeight.w600,
                       fontSize: 14,
                     ),
@@ -319,7 +340,8 @@ class _PackCoverState extends State<_PackCover> {
   @override
   void didUpdateWidget(_PackCover old) {
     super.didUpdateWidget(old);
-    if (old.pack.version != widget.pack.version || old.pack.id != widget.pack.id) {
+    if (old.pack.version != widget.pack.version ||
+        old.pack.id != widget.pack.id) {
       unawaited(_load());
     }
   }
@@ -349,9 +371,7 @@ class _PackCoverState extends State<_PackCover> {
           : Padding(
               padding: const EdgeInsets.all(6),
               child: PackImage(
-                  pack: widget.pack.id,
-                  item: _first,
-                  size: widget.size - 12),
+                  pack: widget.pack.id, item: _first, size: widget.size - 12),
             ),
     );
   }
@@ -505,8 +525,8 @@ class _PackBrowseScreenState extends State<PackBrowseScreen> {
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: TextStyle(
-                                        color: Colors.white
-                                            .withValues(alpha: 0.5),
+                                        color:
+                                            Colors.white.withValues(alpha: 0.5),
                                         fontSize: 12.5),
                                   ),
                                 ],

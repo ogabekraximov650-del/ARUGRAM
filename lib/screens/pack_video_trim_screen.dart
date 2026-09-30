@@ -77,7 +77,7 @@ enum _Drag { none, left, right, body }
 
 class _PackVideoTrimScreenState extends State<PackVideoTrimScreen> {
   static const double _minMs = 500;
-  static const double _handleW = 16;
+  static const double _handleW = 22;
   static const int _frameCount = 8;
 
   VideoPlayerController? _c;
@@ -161,10 +161,10 @@ class _PackVideoTrimScreenState extends State<PackVideoTrimScreen> {
   _Drag _hit(double x, double w) {
     final ax = _a / _dur * w;
     final bx = _b / _dur * w;
-    if ((x - ax).abs() <= 26 && (x - ax).abs() <= (x - bx).abs()) {
+    if ((x - ax).abs() <= 36 && (x - ax).abs() <= (x - bx).abs()) {
       return _Drag.left;
     }
-    if ((x - bx).abs() <= 26) return _Drag.right;
+    if ((x - bx).abs() <= 36) return _Drag.right;
     if (x > ax && x < bx) return _Drag.body;
     return _Drag.none;
   }
@@ -206,12 +206,93 @@ class _PackVideoTrimScreenState extends State<PackVideoTrimScreen> {
     unawaited(_c?.play());
   }
 
+  void _nudge({required bool start, required double dm}) {
+    var a = _a, b = _b;
+    if (start) {
+      a = (a + dm).clamp(0.0, b - _minSel).toDouble();
+      if (b - a > _maxSel) a = b - _maxSel;
+    } else {
+      b = (b + dm).clamp(a + _minSel, _dur).toDouble();
+      if (b - a > _maxSel) b = a + _maxSel;
+    }
+    setState(() {
+      _a = a;
+      _b = b;
+    });
+    final c = _c;
+    if (c == null) return;
+    unawaited(c.pause());
+    _seek(start ? a : (b - 400 < a ? a : b - 400));
+  }
+
+  /// Bo'lakni imkon qadar uzun qiladi (chegaragacha), boshini saqlab.
+  void _fill() {
+    var a = _a;
+    var b = a + _maxSel;
+    if (b > _dur) {
+      b = _dur;
+      a = (b - _maxSel).clamp(0.0, b).toDouble();
+    }
+    setState(() {
+      _a = a;
+      _b = b;
+    });
+    _seek(a);
+    unawaited(_c?.play());
+  }
+
+  void _togglePlay() {
+    final c = _c;
+    if (c == null) return;
+    if (c.value.isPlaying) {
+      unawaited(c.pause());
+    } else {
+      if (c.value.position.inMilliseconds >= _b - 30 ||
+          c.value.position.inMilliseconds < _a) {
+        _seek(_a);
+      }
+      unawaited(c.play());
+    }
+    setState(() {});
+  }
+
+  Widget _step(String label, bool start) {
+    Widget b(IconData i, double dm) => InkResponse(
+          onTap: () => _nudge(start: start, dm: dm),
+          radius: 22,
+          child: Padding(
+            padding: const EdgeInsets.all(8),
+            child: Icon(i, color: Colors.white, size: 22),
+          ),
+        );
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          b(Icons.chevron_left_rounded, -100),
+          Text(label,
+              style: const TextStyle(color: Colors.white70, fontSize: 12.5)),
+          b(Icons.chevron_right_rounded, 100),
+        ],
+      ),
+    );
+  }
+
   Widget _timeline(double w) {
     final ax = _a / _dur * w;
     final bx = _b / _dur * w;
     final px = (_pos.clamp(_a, _b) / _dur * w).clamp(ax, bx).toDouble();
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
+      onTapUp: (d) {
+        final ms = (d.localPosition.dx / w * _dur).clamp(_a, _b).toDouble();
+        _seek(ms);
+      },
       onHorizontalDragStart: (d) => _onStart(d, w),
       onHorizontalDragUpdate: (d) => _onUpdate(d, w),
       onHorizontalDragEnd: (_) => _onEnd(),
@@ -282,7 +363,7 @@ class _PackVideoTrimScreenState extends State<PackVideoTrimScreen> {
                   child: const Center(
                     child: SizedBox(
                       width: 3,
-                      height: 22,
+                      height: 26,
                       child: DecoratedBox(
                           decoration: BoxDecoration(
                               color: Colors.white,
@@ -397,7 +478,40 @@ class _PackVideoTrimScreenState extends State<PackVideoTrimScreen> {
                                         color: Colors.white54, fontSize: 12)),
                               ],
                             ),
-                            const SizedBox(height: 10),
+                            const SizedBox(height: 12),
+                            Row(
+                              mainAxisAlignment:
+                                  MainAxisAlignment.spaceBetween,
+                              children: [
+                                _step('Boshi', true),
+                                InkResponse(
+                                  onTap: _togglePlay,
+                                  radius: 34,
+                                  child: Container(
+                                    width: 52,
+                                    height: 52,
+                                    decoration: const BoxDecoration(
+                                        color: AppColors.accent,
+                                        shape: BoxShape.circle),
+                                    child: Icon(
+                                        c.value.isPlaying
+                                            ? Icons.pause_rounded
+                                            : Icons.play_arrow_rounded,
+                                        color: Colors.white,
+                                        size: 32),
+                                  ),
+                                ),
+                                _step('Oxiri', false),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            TextButton.icon(
+                              onPressed: atMax ? null : _fill,
+                              icon: const Icon(Icons.open_in_full_rounded,
+                                  size: 18),
+                              label: Text('Eng uzun bo\'lak ($maxS s)'),
+                            ),
+                            const SizedBox(height: 4),
                             const Text(
                               'Chetlarini yoki oynani sudrang. Faqat tanlangan '
                               'bo\'lak qoladi, ovoz olib tashlanadi.',

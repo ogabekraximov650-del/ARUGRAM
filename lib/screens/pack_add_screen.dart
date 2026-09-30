@@ -38,6 +38,33 @@ class _Draft {
   bool get isVideo => isPackVideo(sniffed);
 }
 
+/// Galereyadan rasm/video tanlaydi. Bir usul xato bersa, keyingisi
+/// sinaladi (ba'zi telefonlarda ko'p tanlash ishlamaydi). Natija:
+/// (fayllar, xato matni — hech qaysi usul ishlamasa).
+Future<(List<XFile>, String?)> pickPackMedia() async {
+  final picker = ImagePicker();
+  Object? last;
+  try {
+    return (await picker.pickMultipleMedia(limit: 20), null);
+  } catch (e) {
+    last = e;
+  }
+  try {
+    final one = await picker.pickMedia();
+    return (one == null ? <XFile>[] : [one], null);
+  } catch (e) {
+    last = e;
+  }
+  try {
+    final one = await picker.pickVideo(source: ImageSource.gallery);
+    return (one == null ? <XFile>[] : [one], null);
+  } catch (e) {
+    last = e;
+  }
+  final t = '$last'.replaceAll(RegExp(r'\s+'), ' ');
+  return (<XFile>[], t.length > 120 ? t.substring(0, 120) : t);
+}
+
 class PackAddScreen extends StatefulWidget {
   final PackInfo pack;
   final List<XFile> files;
@@ -120,11 +147,10 @@ class _PackAddScreenState extends State<PackAddScreen> {
   static String _mb(int b) => '${(b / 1048576).toStringAsFixed(1)} MB';
 
   Future<void> _more() async {
-    List<XFile> more;
-    try {
-      more = await ImagePicker().pickMultipleMedia(limit: 20);
-    } catch (_) {
-      return;
+    final (more, err) = await pickPackMedia();
+    if (err != null && mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Fayl tanlab bo\'lmadi: $err')));
     }
     if (more.isEmpty || !mounted) return;
     await _load(more.map((f) => f.path).toList());

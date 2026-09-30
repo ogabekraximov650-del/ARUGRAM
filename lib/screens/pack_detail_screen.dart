@@ -11,7 +11,6 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 
 import '../services/auth_service.dart';
 import '../services/pack_service.dart';
@@ -117,12 +116,10 @@ class _PackDetailScreenState extends State<PackDetailScreen> {
   Future<void> _add() async {
     final p = _current();
     if (p == null) return;
-    List<XFile> picked;
-    try {
-      // Rasm ham, video ham (Telegram'dagidek).
-      picked = await ImagePicker().pickMultipleMedia(limit: 20);
-    } catch (_) {
-      _say('Fayl tanlab bo\'lmadi');
+    // Rasm ham, video ham (Telegram'dagidek).
+    final (picked, err) = await pickPackMedia();
+    if (err != null) {
+      _say('Fayl tanlab bo\'lmadi: $err');
       return;
     }
     if (picked.isEmpty || !mounted) return;
