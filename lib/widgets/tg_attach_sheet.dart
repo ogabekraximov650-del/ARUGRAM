@@ -152,6 +152,14 @@ class _AttachSheetState extends State<_AttachSheet>
   }
 
   Future<void> _openBrowser() async {
+    // Telegram'dagidek: "barcha fayllar" ruxsati yo'q bo'lsa — tizimning o'z
+    // fayl tanlagichi (jildlarni ko'rsatishga urinib, qotib qolinmaydi).
+    if (!await TgFiles.hasAccess()) {
+      if (!mounted) return;
+      await _pickFiles(widget.packMode ? FileType.media : FileType.any);
+      return;
+    }
+    if (!mounted) return;
     final r = await Navigator.of(context).push<List<File>>(MaterialPageRoute(
         builder: (_) => TgFileBrowserScreen(exts: _exts, maxPick: _max)));
     if (r == null || r.isEmpty || !mounted) return;
@@ -196,11 +204,32 @@ class _AttachSheetState extends State<_AttachSheet>
         _album = albums.isEmpty ? null : albums.first;
       });
       await _more();
+      if (_items.isEmpty) await _separateFallback();
     } catch (e) {
       if (mounted) setState(() => _galleryError = '$e');
     } finally {
       if (mounted) setState(() => _galleryLoaded = true);
     }
+  }
+
+  /// Telegram'dagidek rasm va videolar ALOHIDA so'raladi (ba'zi telefonlarda
+  /// birlashtirilgan so'rov bo'sh qaytadi) va sana bo'yicha qo'shiladi.
+  Future<void> _separateFallback() async {
+    final all = <AssetEntity>[];
+    for (final t in [RequestType.image, RequestType.video]) {
+      try {
+        final paths = await PhotoManager.getAssetPathList(
+            type: t, hasAll: true, onlyAll: true);
+        if (paths.isEmpty) continue;
+        all.addAll(await paths.first.getAssetListRange(start: 0, end: 300));
+      } catch (_) {}
+    }
+    if (all.isEmpty || !mounted) return;
+    all.sort((a, b) => b.createDateTime.compareTo(a.createDateTime));
+    setState(() {
+      _items.addAll(all);
+      _end = true;
+    });
   }
 
   /// Galereya bo'sh chiqqanda: sabab ko'rsatiladi va yo'llar beriladi.

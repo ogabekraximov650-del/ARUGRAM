@@ -17,6 +17,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderAbstractViewport;
 import 'package:video_player/video_player.dart';
 
 import '../services/device_perf.dart';
@@ -39,14 +40,14 @@ class AnimSlots extends ChangeNotifier {
 
   int _cap(AnimPool p) => switch (p) {
         AnimPool.small => switch (DevicePerf.cls) {
-            PerfClass.low => 6,
-            PerfClass.average => 14,
-            PerfClass.high => 24,
+            PerfClass.low => 12,
+            PerfClass.average => 30,
+            PerfClass.high => 60,
           },
         AnimPool.big => switch (DevicePerf.cls) {
-            PerfClass.low => 2,
-            PerfClass.average => 5,
-            PerfClass.high => 9,
+            PerfClass.low => 4,
+            PerfClass.average => 8,
+            PerfClass.high => 14,
           },
         AnimPool.video => DevicePerf.cls == PerfClass.low ? 1 : 2,
       };
@@ -145,6 +146,9 @@ class _PackImageState extends State<PackImage> {
   VideoPlayerController? _vc;
   File? _vfile;
   AnimPool _pool = AnimPool.big;
+  Uint8List? _thumbBytes;
+  ScrollPosition? _scrollPos;
+  Timer? _visTimer;
 
   /// Elementning o'zi shu hajmdan katta bo'lsa, kichik rasm o'rniga
   /// yuklanmaydi (devorda bir vaqtda ko'p og'ir fayl olinmasin).
@@ -154,6 +158,57 @@ class _PackImageState extends State<PackImage> {
   void initState() {
     super.initState();
     unawaited(_load());
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final pos = Scrollable.maybeOf(context)?.position;
+    if (!identical(pos, _scrollPos)) {
+      _scrollPos?.removeListener(_onScroll);
+      _scrollPos = pos;
+      pos?.addListener(_onScroll);
+    }
+  }
+
+  /// Element ekranda TO'LIQ ko'rinyaptimi (aylanuvchi ro'yxatda). Ro'yxatdan
+  /// tashqarida (xabar, matn ichida) — doim ko'rinadi deb olinadi.
+  bool _fullyVisible() {
+    final ro = context.findRenderObject();
+    if (ro is! RenderBox || !ro.attached) return false;
+    final vp = RenderAbstractViewport.maybeOf(ro);
+    final pos = _scrollPos;
+    if (vp == null || pos == null || !pos.hasPixels) return true;
+    try {
+      final lead = vp.getOffsetToReveal(ro, 0.0).offset;
+      final trail = vp.getOffsetToReveal(ro, 1.0).offset;
+      const eps = 1.0;
+      return pos.pixels <= lead + eps && pos.pixels >= trail - eps;
+    } catch (_) {
+      return true; // hali joylashmagan — keyingi tekshiruvda aniqlanadi
+    }
+  }
+
+  void _onScroll() {
+    _visTimer?.cancel();
+    _visTimer = Timer(const Duration(milliseconds: 140), _recheck);
+  }
+
+  /// Aylantirish to'xtagach: to'liq ko'ringanlar animatsiyani boshlaydi,
+  /// ko'rinmay qolganlar joyini bo'shatib statik rasmga qaytadi.
+  void _recheck() {
+    if (!mounted || !widget.animate) return;
+    final r = _ref;
+    if (r == null || !r.item.animated) return;
+    if (_fullyVisible()) {
+      if (!_slot && !_waitingSlot) unawaited(_loadFull(r, _gen));
+    } else if (_slot || _waitingSlot) {
+      _stopWaiting();
+      _release();
+      _dropVideo();
+      final t = _thumbBytes;
+      if (t != null) setState(() => _bytes = t);
+    }
   }
 
   @override
@@ -173,6 +228,8 @@ class _PackImageState extends State<PackImage> {
   void dispose() {
     _gen++;
     _retry?.cancel();
+    _visTimer?.cancel();
+    _scrollPos?.removeListener(_onScroll);
     _reset(keepBytes: true);
     super.dispose();
   }
@@ -248,6 +305,7 @@ class _PackImageState extends State<PackImage> {
     final t = await svc.thumb(r);
     if (!mounted || gen != _gen) return;
     if (t != null) {
+      _thumbBytes = t;
       setState(() {
         _bytes = t;
         _failed = false;
@@ -280,6 +338,9 @@ class _PackImageState extends State<PackImage> {
   /// bo'lmasa kichik statik rasm turadi va joy bo'shashini kutadi.
   Future<void> _loadFull(PackRef r, int gen) async {
     final svc = PackService.instance;
+    // Animatsiya faqat to'liq ko'ringan elementda; aks holda aylantirish
+    // to'xtaganda `_recheck` boshlaydi.
+    if (r.item.animated && !_slot && !_fullyVisible()) return;
     if (r.item.animated && !_slot) {
       final pool = r.item.video
           ? AnimPool.video

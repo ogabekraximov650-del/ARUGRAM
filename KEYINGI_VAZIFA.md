@@ -4454,3 +4454,16 @@ katakchalar (lazy ro'yxat) va faqat joy bor bo'lganicha animatsiya qiladi, qolga
 kichik statik rasm; joy bo'shasa boshlanadi. To'liq element olinmasa qayta uriniladi.
 `PackSoundHub`: izohda GIF ovozi yoqilsa asosiy pleyer pauza bo'ladi; pleyerda play
 bosilsa GIF ovozi o'chadi, animatsiya davom etadi (`video_player_screen.dart`).
+
+## Faqat to'liq ko'ringan elementlar animatsiya qiladi; Telegram kodidan xulosalar
+
+`PackImage`: aylanuvchi ro'yxatda element ekranda TO'LIQ ko'ringandagina animatsiya
+boshlanadi (`_fullyVisible`, aylantirish to'xtagach 140 ms dan keyin `_recheck`);
+ko'rinmay qolsa joyini bo'shatib statik rasmga qaytadi. Shu sababli hovuz kattaroq:
+kichik 12/30/60, katta 4/8/14.
+Telegram (DrKLO) `MediaController.loadGalleryPhotosAlbums`: rasm va video ALOHIDA
+MediaStore so'rovlari (`Images` / `Video`), ruxsat `READ_MEDIA_*` (13+) yoki
+`READ_EXTERNAL_STORAGE`. `ChatAttachAlertDocumentLayout`: "barcha fayllar" ruxsati
+(`isExternalStorageManager`) yo'q bo'lsa tizim fayl tanlagichiga o'tadi. Bizda ham:
+galereya birlashtirilgan so'rovda bo'sh chiqsa rasm/video alohida so'raladi; "Ichki
+xotira" ruxsatsiz tizim tanlagichini ochadi.
