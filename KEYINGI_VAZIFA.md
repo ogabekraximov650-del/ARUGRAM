@@ -4475,3 +4475,14 @@ bo'lgandagina yuklanadi (`_withinWindow`); undan uzoqdagilar kutadi va aylantiri
 davomida oynaga kirishi bilan (60 ms) tez yuklanadi. Server so'rovlari navbati
 (`_Gate`) endi yangisi-birinchi: hozir ko'rinayotgan katakcha eski, ekrandan ketganlardan
 oldin olinadi.
+
+## Doimiy diskda saqlash va tez ochilish
+
+Emoji/GIF/stiker kichik rasmlari va elementlari diskda (`aru_packs/`, shifrlangan)
+DOIMIY saqlanadi: hech qanday hajm chegarasi yo'q, "Keshni tozalash" (video kesh,
+`video_byte_cache/`) ularga tegmaydi, faqat `PackService.clearCache` o'chiradi (hech
+qayerdan chaqirilmaydi). Endi to'plam ma'lumoti (fayl nomi, versiya) ham diskda
+(`pack_known_v1`, 300 tagacha): ilova qayta ochilganda boshqalarning to'plamlari
+ham tarmoqsiz diskdan darhol chiqadi; ma'lumot 6 soatdan eski bo'lsa orqa fonda
+yangilanadi. GIF devorida nisbat 0.4..3.5 oralig'ida (uzun/keng elementlar o'z
+nisbatida, kichraytirilgan holda).

@@ -515,6 +515,7 @@ class PackService extends ChangeNotifier {
         for (final p in [..._mine, ..._subs]) {
           _known[p.id] = _Known(p, DateTime.now());
         }
+        _saveKnownSoon();
         _localSubs.removeWhere((id, _) => _subs.any((p) => p.id == id));
       } else {
         error = 'Yuklab bo\'lmadi (${r.statusCode})';
@@ -573,6 +574,7 @@ class PackService extends ChangeNotifier {
     _loaded = false;
     _localSubs.clear();
     _known.clear();
+    _knownLoaded = false;
     _headers.clear();
     _mem.clear();
     notifyListeners();
@@ -986,9 +988,51 @@ class PackService extends ChangeNotifier {
 
   /// To'plam ma'lumoti. Xabarda uchragan begona to'plam ham (server
   /// `/api/packs/info` dan, bir necha so'rov bitta bo'lib).
+  /// Boshqalarning to'plamlari haqidagi ma'lumot (fayl nomi, versiya) diskda
+  /// ham saqlanadi: ilova qayta ochilganda tarmoq kutilmaydi — rasmlar diskdan
+  /// darhol chiqadi, ma'lumot esa orqa fonda yangilanadi.
+  static const String _knownKey = 'pack_known_v1';
+  bool _knownLoaded = false;
+  final Set<int> _refreshedOnce = {};
+  Timer? _knownSaveTimer;
+
+  void _loadKnown() {
+    if (_knownLoaded) return;
+    _knownLoaded = true;
+    final c = DiskCache.readOne(_knownKey);
+    for (final e in (c?['list'] as List? ?? const [])) {
+      if (e is! Map) continue;
+      final p = PackInfo.fromJson(Map<String, dynamic>.from(e));
+      final at = DateTime.fromMillisecondsSinceEpoch(_i(e['_at']));
+      _known.putIfAbsent(p.id, () => _Known(p, at));
+    }
+  }
+
+  void _saveKnownSoon() {
+    _knownSaveTimer?.cancel();
+    _knownSaveTimer = Timer(const Duration(seconds: 2), () {
+      final list = _known.values.toList()
+        ..sort((a, b) => b.at.compareTo(a.at));
+      DiskCache.writeOne(_knownKey, {
+        'list': [
+          for (final k in list.take(300))
+            {...k.info.toJson(), '_at': k.at.millisecondsSinceEpoch},
+        ],
+      });
+    });
+  }
+
   Future<PackInfo?> infoFor(int packId, {bool refresh = false}) {
+    _loadKnown();
     final k = _known[packId];
-    if (!refresh && k != null) return Future.value(k.info);
+    if (!refresh && k != null) {
+      // Eskirgan bo'lsa — javob darhol (diskdagi), yangilanish orqa fonda.
+      if (DateTime.now().difference(k.at) > const Duration(hours: 6) &&
+          _refreshedOnce.add(packId)) {
+        unawaited(infoFor(packId, refresh: true));
+      }
+      return Future.value(k.info);
+    }
     for (final p in [..._mine, ..._subs]) {
       if (p.id == packId && !refresh) return Future.value(p);
     }
@@ -1019,6 +1063,7 @@ class PackService extends ChangeNotifier {
             _known[p.id] = _Known(p, DateTime.now());
           }
         }
+        _saveKnownSoon();
       }
     } catch (_) {}
     for (final e in waiters.entries) {

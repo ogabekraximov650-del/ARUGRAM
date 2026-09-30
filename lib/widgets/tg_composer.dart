@@ -1474,7 +1474,7 @@ class _PackPageState extends State<_PackPage>
           if (h.id != r.pack) continue;
           final it = h.find(r.item);
           if (it != null && it.w > 0 && it.h > 0) {
-            return (it.w / it.h).clamp(0.5, 3.0);
+            return (it.w / it.h).clamp(0.4, 3.5);
           }
         }
         return 1.0;
@@ -1489,7 +1489,7 @@ class _PackPageState extends State<_PackPage>
           for (final it in lists[i])
             _GifCell(
               PackPick(widget.kind, packs[i].id, it.id, it.emoji),
-              (it.w > 0 && it.h > 0) ? (it.w / it.h).clamp(0.5, 3.0) : 1.0,
+              (it.w > 0 && it.h > 0) ? (it.w / it.h).clamp(0.4, 3.5) : 1.0,
               packs[i].id,
             ),
         ], pack: packs[i]);
