@@ -150,7 +150,7 @@ class _StorageScreenState extends State<StorageScreen> {
 
   bool _allSelected(List<StorageSlice> cache) => cache.every(_fullyOn);
 
-  bool _packsOpen = true;
+  bool _packsOpen = false;
 
   String _buttonText(List<StorageSlice> cache) =>
       _allSelected(cache) ? 'Keshni tozalash' : 'Tanlanganini tozalash';
@@ -335,7 +335,12 @@ class _StorageScreenState extends State<StorageScreen> {
                           expanded: _packsOpen,
                           onExpand: () =>
                               setState(() => _packsOpen = !_packsOpen),
-                          onTap: () => _toggleSlice(cache[i]),
+                          // Ichki bo'limli toifada qatorga bosish — ochadi/yopadi,
+                          // belgi (doira) esa hammasini tanlaydi (Telegram'dagidek).
+                          onTap: cache[i].children.isNotEmpty
+                              ? () => setState(() => _packsOpen = !_packsOpen)
+                              : () => _toggleSlice(cache[i]),
+                          onCheck: () => _toggleSlice(cache[i]),
                         ),
                         if (cache[i].children.isNotEmpty && _packsOpen)
                           for (var k = 0; k < cache[i].children.length; k++)
@@ -1017,6 +1022,9 @@ class _SectionRow extends StatelessWidget {
   final bool expanded;
   final VoidCallback? onExpand;
 
+  /// Doira (belgi)ga bosish; berilmasa qatorning o'zi ishlaydi.
+  final VoidCallback? onCheck;
+
   /// Ichki bo'lim: chapdan qo'shimcha bo'sh joy.
   final double indent;
 
@@ -1030,6 +1038,7 @@ class _SectionRow extends StatelessWidget {
     this.expandable = false,
     this.expanded = false,
     this.onExpand,
+    this.onCheck,
     this.indent = 0,
   });
 
@@ -1047,9 +1056,16 @@ class _SectionRow extends StatelessWidget {
               Positioned.fill(
                 child: Row(
                   children: [
-                    SizedBox(width: 21 + indent),
-                    _RoundCheck(checked: checked, color: c),
-                    const SizedBox(width: 18),
+                    SizedBox(width: 15 + indent),
+                    GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: onCheck ?? onTap,
+                      child: Padding(
+                        padding: const EdgeInsets.all(6),
+                        child: _RoundCheck(checked: checked, color: c),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
                     Expanded(
                       child: Text.rich(
                         TextSpan(children: [
