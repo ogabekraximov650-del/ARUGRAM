@@ -4486,3 +4486,11 @@ qayerdan chaqirilmaydi). Endi to'plam ma'lumoti (fayl nomi, versiya) ham diskda
 ham tarmoqsiz diskdan darhol chiqadi; ma'lumot 6 soatdan eski bo'lsa orqa fonda
 yangilanadi. GIF devorida nisbat 0.4..3.5 oralig'ida (uzun/keng elementlar o'z
 nisbatida, kichraytirilgan holda).
+
+## Xotira oynasida "Emoji, GIF va stikerlar"
+
+`storage_usage.dart`/`storage_screen.dart`: `aru_packs/` keshi endi "Boshqa"ga emas, alohida
+toifaga tushadi: "Emoji, GIF va stikerlar" (ochiladigan), ichida Emoji / GIF / Stiker
+(to'plam turi `PackService.packKinds()` dan). Har bir bo'lim alohida belgilanadi va
+tozalanadi (`PackService.clearKinds`), butun toifa — `clearCache`. Tozalangan rasmlar
+bulutdan (kanaldan) qayta yuklanadi.

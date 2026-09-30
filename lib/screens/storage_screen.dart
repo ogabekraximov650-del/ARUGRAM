@@ -45,6 +45,10 @@ const Map<String, Color> _colors = {
   'Videolar': Color(0xFF3E8CF0),
   'Posterlar': Color(0xFF56B6F5),
   'Vaqtinchalik fayllar': Color(0xFF9A6FE2),
+  'Emoji, GIF va stikerlar': Color(0xFFE08A3C),
+  'Emoji': Color(0xFFF0B04A),
+  'GIF': Color(0xFFE0703C),
+  'Stiker': Color(0xFFC95A8A),
 };
 
 Color _colorOf(String label) => _colors[label] ?? const Color(0xFFE8B730);
@@ -99,24 +103,62 @@ class _StorageScreenState extends State<StorageScreen> {
       .where((s) => StorageUsageService.clearable.contains(s.label))
       .toList();
 
-  int _selectedOf(List<StorageSlice> cache) => cache
-      .where((s) => !_off.contains(s.label))
-      .fold(0, (a, s) => a + s.bytes);
+  /// Ichki bo'limi bor toifa: kamida bittasi belgilanganmi.
+  bool _isOn(StorageSlice s) => s.children.isEmpty
+      ? !_off.contains(s.label)
+      : s.children.any((c) => !_off.contains(c.label));
 
-  bool _allSelected(List<StorageSlice> cache) =>
-      cache.every((s) => !_off.contains(s.label));
+  bool _fullyOn(StorageSlice s) => s.children.isEmpty
+      ? !_off.contains(s.label)
+      : s.children.every((c) => !_off.contains(c.label));
 
-  String _buttonText(List<StorageSlice> cache) => _allSelected(cache)
-      ? 'Keshni tozalash'
-      : 'Tanlanganini tozalash';
+  /// Tanlangan hajm (bo'limlar bo'yicha; ro'yxatga kirmagan qoldiq faqat
+  /// hamma bo'lim tanlanganda hisoblanadi).
+  int _bytesOf(StorageSlice s) {
+    if (s.children.isEmpty) return _off.contains(s.label) ? 0 : s.bytes;
+    final on = s.children.where((c) => !_off.contains(c.label));
+    final sum = on.fold<int>(0, (a, c) => a + c.bytes);
+    final rest = s.bytes - s.children.fold<int>(0, (a, c) => a + c.bytes);
+    return sum + (on.length == s.children.length ? rest : 0);
+  }
+
+  Set<String> _labelsOf(StorageSlice s) {
+    if (s.children.isEmpty) return _off.contains(s.label) ? {} : {s.label};
+    final on = s.children.where((c) => !_off.contains(c.label)).toList();
+    if (on.length == s.children.length) {
+      return {s.label, ...s.children.map((c) => c.label)};
+    }
+    return {for (final c in on) c.label};
+  }
+
+  /// Toifa qatoriga bosilganda: hammasi yoqiq bo'lsa o'chadi, aks holda yonadi.
+  void _toggleSlice(StorageSlice s) {
+    setState(() {
+      final all = s.children.isEmpty
+          ? [s.label]
+          : [for (final c in s.children) c.label];
+      if (_fullyOn(s)) {
+        _off.addAll(all);
+      } else {
+        _off.removeAll(all);
+      }
+    });
+  }
+
+  int _selectedOf(List<StorageSlice> cache) =>
+      cache.fold(0, (a, s) => a + _bytesOf(s));
+
+  bool _allSelected(List<StorageSlice> cache) => cache.every(_fullyOn);
+
+  bool _packsOpen = true;
+
+  String _buttonText(List<StorageSlice> cache) =>
+      _allSelected(cache) ? 'Keshni tozalash' : 'Tanlanganini tozalash';
 
   // ── TOZALASH (`ClearCacheButtonInternal`) ─────────────────────
   Future<void> _clear() async {
     final cache = _cache;
-    final labels = cache
-        .where((s) => !_off.contains(s.label))
-        .map((s) => s.label)
-        .toSet();
+    final labels = <String>{for (final s in cache) ..._labelsOf(s)};
     final size = _selectedOf(cache);
     if (labels.isEmpty || size <= 0) return;
     final action = _buttonText(cache);
@@ -129,8 +171,8 @@ class _StorageScreenState extends State<StorageScreen> {
       transitionBuilder: (c, a, _, child) => FadeTransition(
         opacity: CurvedAnimation(parent: a, curve: Curves.easeOut),
         child: ScaleTransition(
-          scale: Tween(begin: 0.94, end: 1.0).animate(
-              CurvedAnimation(parent: a, curve: Curves.easeOutCubic)),
+          scale: Tween(begin: 0.94, end: 1.0)
+              .animate(CurvedAnimation(parent: a, curve: Curves.easeOutCubic)),
           child: child,
         ),
       ),
@@ -184,8 +226,8 @@ class _StorageScreenState extends State<StorageScreen> {
       if (left > 0) await Future<void>.delayed(Duration(milliseconds: left));
       if (mounted) Navigator.of(context).pop();
     }
-    await sheetClosed.future.timeout(const Duration(seconds: 2),
-        onTimeout: () {});
+    await sheetClosed.future
+        .timeout(const Duration(seconds: 2), onTimeout: () {});
     progress.dispose();
     if (!mounted) return;
     setState(_off.clear);
@@ -199,8 +241,7 @@ class _StorageScreenState extends State<StorageScreen> {
         behavior: SnackBarBehavior.floating,
         backgroundColor: const Color(0xF2262626),
         margin: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         duration: const Duration(milliseconds: 2750),
         content: Row(
           children: [
@@ -266,7 +307,8 @@ class _StorageScreenState extends State<StorageScreen> {
                       complete: !calculating && total <= 0,
                       slices: [
                         for (final s in cache)
-                          if (!_off.contains(s.label)) s,
+                          if (_bytesOf(s) > 0)
+                            StorageSlice(s.label, _bytesOf(s)),
                       ],
                       selectedBytes: selected,
                       onPress: (l) => setState(() => _highlight = l),
@@ -281,18 +323,40 @@ class _StorageScreenState extends State<StorageScreen> {
                     if (calculating)
                       for (var i = 0; i < 5; i++) const _LoadingRow()
                     else
-                      for (var i = 0; i < cache.length; i++)
+                      for (var i = 0; i < cache.length; i++) ...[
                         _SectionRow(
                           slice: cache[i],
                           percent: percents[i],
-                          checked: !_off.contains(cache[i].label),
-                          divider: i < cache.length - 1,
+                          checked: _isOn(cache[i]),
+                          divider: i < cache.length - 1 ||
+                              (cache[i].children.isNotEmpty && _packsOpen),
                           highlighted: _highlight == cache[i].label,
-                          onTap: () => setState(() {
-                            final l = cache[i].label;
-                            if (!_off.remove(l)) _off.add(l);
-                          }),
+                          expandable: cache[i].children.isNotEmpty,
+                          expanded: _packsOpen,
+                          onExpand: () =>
+                              setState(() => _packsOpen = !_packsOpen),
+                          onTap: () => _toggleSlice(cache[i]),
                         ),
+                        if (cache[i].children.isNotEmpty && _packsOpen)
+                          for (var k = 0; k < cache[i].children.length; k++)
+                            _SectionRow(
+                              slice: cache[i].children[k],
+                              percent: total > 0
+                                  ? (cache[i].children[k].bytes * 100 / total)
+                                      .round()
+                                  : 0,
+                              checked:
+                                  !_off.contains(cache[i].children[k].label),
+                              divider: k < cache[i].children.length - 1 ||
+                                  i < cache.length - 1,
+                              highlighted: false,
+                              indent: 42,
+                              onTap: () => setState(() {
+                                final l = cache[i].children[k].label;
+                                if (!_off.remove(l)) _off.add(l);
+                              }),
+                            ),
+                      ],
                     if (hasCache)
                       _ClearButton(
                         text: _buttonText(cache),
@@ -499,9 +563,8 @@ class _CacheChartState extends State<_CacheChart>
       }
       final from = prev * total + k * _separator;
       final to = from + p * total;
-      out[s.label] = _Sector(
-          (from + to) / 2, (to - from).abs() / 2, '${pct[s.label]}%',
-          textAlpha, textScale);
+      out[s.label] = _Sector((from + to) / 2, (to - from).abs() / 2,
+          '${pct[s.label]}%', textAlpha, textScale);
       prev += p;
       k++;
     }
@@ -653,8 +716,8 @@ class _ChartPainter extends CustomPainter {
       final sweep = s.half * 2 * math.pi / 180;
       path
         ..arcTo(Rect.fromCircle(center: c, radius: outer), from, sweep, true)
-        ..arcTo(Rect.fromCircle(center: c, radius: inner), from + sweep,
-            -sweep, false)
+        ..arcTo(Rect.fromCircle(center: c, radius: inner), from + sweep, -sweep,
+            false)
         ..close();
     }
     // Rang markazdan chetga to'yinadi (`RadialGradient`, 0.3..1).
@@ -663,8 +726,8 @@ class _ChartPainter extends CustomPainter {
     canvas.drawPath(
         path,
         Paint()
-          ..shader = ui.Gradient.radial(
-              c, radius, [light, dark], const [.3, 1]));
+          ..shader =
+              ui.Gradient.radial(c, radius, [light, dark], const [.3, 1]));
 
     // Zarrachalar — bo'lak ichida ichkaridan tashqariga oqadi.
     canvas.save();
@@ -709,8 +772,8 @@ class _ChartPainter extends CustomPainter {
       final wave = .25 * (math.sin(t * math.pi) - 1) + 1;
       final nearText =
           s.textAlpha > 0 ? math.min((p - textPos).distance / 64, 1.0) : 1.0;
-      final alpha =
-          (.65 * (-1.75 * (t - .5).abs() + 1) * wave * nearText).clamp(0.0, 1.0);
+      final alpha = (.65 * (-1.75 * (t - .5).abs() + 1) * wave * nearText)
+          .clamp(0.0, 1.0);
       if (alpha <= 0) continue;
       final scale = .75 * wave * (.8 + (math.sin(angle) + 1) * .25);
       paint.color = Colors.white.withValues(alpha: alpha);
@@ -949,6 +1012,14 @@ class _SectionRow extends StatelessWidget {
   final bool highlighted;
   final VoidCallback onTap;
 
+  /// Ichki bo'limlari bor toifa: o'ngda ochish/yopish belgisi.
+  final bool expandable;
+  final bool expanded;
+  final VoidCallback? onExpand;
+
+  /// Ichki bo'lim: chapdan qo'shimcha bo'sh joy.
+  final double indent;
+
   const _SectionRow({
     required this.slice,
     required this.percent,
@@ -956,6 +1027,10 @@ class _SectionRow extends StatelessWidget {
     required this.divider,
     required this.highlighted,
     required this.onTap,
+    this.expandable = false,
+    this.expanded = false,
+    this.onExpand,
+    this.indent = 0,
   });
 
   @override
@@ -972,7 +1047,7 @@ class _SectionRow extends StatelessWidget {
               Positioned.fill(
                 child: Row(
                   children: [
-                    const SizedBox(width: 21),
+                    SizedBox(width: 21 + indent),
                     _RoundCheck(checked: checked, color: c),
                     const SizedBox(width: 18),
                     Expanded(
@@ -990,6 +1065,20 @@ class _SectionRow extends StatelessWidget {
                         style: const TextStyle(fontSize: 16),
                       ),
                     ),
+                    if (expandable)
+                      GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: onExpand,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 6),
+                          child: Icon(
+                              expanded
+                                  ? Icons.keyboard_arrow_up_rounded
+                                  : Icons.keyboard_arrow_down_rounded,
+                              color: _grayText,
+                              size: 22),
+                        ),
+                      ),
                     const SizedBox(width: 8),
                     Text(formatBytes(slice.bytes),
                         style: const TextStyle(
@@ -1212,8 +1301,7 @@ class _ClearingView extends StatelessWidget {
                             widthFactor: t,
                             heightFactor: 1,
                             alignment: Alignment.centerLeft,
-                            child:
-                                const ColoredBox(color: AppColors.accent2),
+                            child: const ColoredBox(color: AppColors.accent2),
                           ),
                         ),
                       ],
@@ -1243,7 +1331,6 @@ class _ClearingView extends StatelessWidget {
     );
   }
 }
-
 
 // ══════════════════════════════════════════════════════════════
 //  TELEGRAM `AlertDialog`
@@ -1330,14 +1417,14 @@ class _TgAlert extends StatelessWidget {
                   child: Align(
                     alignment: Alignment.centerRight,
                     child: Wrap(
-                    alignment: WrapAlignment.end,
-                    spacing: 8,
-                    runSpacing: 6,
-                    children: [
-                      _button(context, negative, _blue, false),
-                      _button(context, positive, _red, true, tinted: true),
-                    ],
-                  ),
+                      alignment: WrapAlignment.end,
+                      spacing: 8,
+                      runSpacing: 6,
+                      children: [
+                        _button(context, negative, _blue, false),
+                        _button(context, positive, _red, true, tinted: true),
+                      ],
+                    ),
                   ),
                 ),
               ],

@@ -1371,6 +1371,28 @@ class PackService extends ChangeNotifier {
     } catch (_) {}
   }
 
+  /// Ma'lum to'plamlar: id -> tur (xotira ekrani uchun).
+  Map<int, String> packKinds() => {
+        for (final k in _known.values) k.info.id: k.info.kind,
+        for (final p in [..._mine, ..._subs]) p.id: p.kind,
+      };
+
+  /// Faqat berilgan turdagi to'plamlarning diskdagi keshini o'chiradi
+  /// (`kinds == null` — hammasini). Bulutdagi fayl qoladi: qayta yuklanadi.
+  Future<void> clearKinds(Set<String>? kinds) async {
+    if (kinds == null) return clearCache();
+    _mem.clear();
+    try {
+      final r = _root();
+      if (r == null) return;
+      for (final e in packKinds().entries) {
+        if (!kinds.contains(e.value)) continue;
+        final d = Directory('$r/${e.key}');
+        if (await d.exists()) await d.delete(recursive: true);
+      }
+    } catch (_) {}
+  }
+
   /// Diskdagi kesh hajmi (bayt).
   Future<int> cacheBytes() async {
     var total = 0;

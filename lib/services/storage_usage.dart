@@ -57,6 +57,7 @@ import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'image_cache.dart';
+import 'pack_service.dart';
 import 'rust_bridge.dart';
 
 /// Bitta toifa: nomi va hajmi.
@@ -65,7 +66,10 @@ class StorageSlice {
   final String label;
   final int bytes;
 
-  const StorageSlice(this.label, this.bytes);
+  /// Ichki bo'limlar (masalan "Emoji, GIF va stikerlar" ichida Emoji/GIF/Stiker).
+  final List<StorageSlice> children;
+
+  const StorageSlice(this.label, this.bytes, {this.children = const []});
 }
 
 /// Bitta o'lchov natijasi — toifalar, kattasidan kichigiga.
@@ -131,14 +135,25 @@ class StorageUsageService extends ChangeNotifier {
       // hisoblarning fayllari (`accountid_*`) shu ichida.
       final docs = RustCore.instance.rootDirPath;
 
+      final kinds = PackService.instance.packKinds();
       final byLabel = await Isolate.run(
-        () => _measure(support: support, temp: temp, docs: docs),
+        () => _measure(support: support, temp: temp, docs: docs, kinds: kinds),
       );
       await _readDevice();
 
       final slices = <StorageSlice>[];
       byLabel.forEach((label, bytes) {
-        if (bytes > 0) slices.add(StorageSlice(label, bytes));
+        if (bytes <= 0 || label.startsWith('$_kPacks/')) return;
+        if (label == _kPacks) {
+          final kids = <StorageSlice>[
+            for (final k in const [_kPackEmoji, _kPackGif, _kPackSticker])
+              if ((byLabel['$_kPacks/$k'] ?? 0) > 0)
+                StorageSlice(k, byLabel['$_kPacks/$k']!),
+          ];
+          slices.add(StorageSlice(label, bytes, children: kids));
+        } else {
+          slices.add(StorageSlice(label, bytes));
+        }
       });
       // Kattasi tepada — foydalanuvchi eng ko'p joy olganini
       // birinchi ko'rishi kerak.
@@ -168,6 +183,10 @@ class StorageUsageService extends ChangeNotifier {
     _kVideo,
     _kPoster,
     _kTemp,
+    _kPacks,
+    _kPackEmoji,
+    _kPackGif,
+    _kPackSticker,
   };
 
   /// Tanlangan toifalarni o'chiradi va hajmlarni qayta sanaydi.
@@ -210,6 +229,15 @@ class StorageUsageService extends ChangeNotifier {
             await _wipe('$support/${AppImageCache.key}/v2', _Pick.all);
           }
           await _wipe(temp, _Pick.posters);
+        case _kPacks:
+          // Hammasi (emoji, GIF, stiker va yuborilganlar nusxasi).
+          await PackService.instance.clearCache();
+        case _kPackEmoji:
+          await PackService.instance.clearKinds({PackKind.emoji});
+        case _kPackGif:
+          await PackService.instance.clearKinds({PackKind.gif});
+        case _kPackSticker:
+          await PackService.instance.clearKinds({PackKind.sticker});
         case _kTemp:
           await _wipe(temp, _Pick.temp);
           // Olib tashlangan Telegram stiker/emoji/GIF tizimidan
@@ -248,6 +276,10 @@ const String _kStats = 'Statistika';
 const String _kSettings = 'Sozlamalar';
 const String _kTemp = 'Vaqtinchalik fayllar';
 const String _kOther = 'Boshqa';
+const String _kPacks = 'Emoji, GIF va stikerlar';
+const String _kPackEmoji = 'Emoji';
+const String _kPackGif = 'GIF';
+const String _kPackSticker = 'Stiker';
 
 /// Ekrandagi tartib uchun barqaror ro'yxat (rang shu tartibdan
 /// olinadi — `profile_screen.dart`).
@@ -262,6 +294,7 @@ const List<String> kStorageLabels = [
   _kStats,
   _kSettings,
   _kTemp,
+  _kPacks,
   _kOther,
 ];
 
@@ -269,6 +302,7 @@ Map<String, int> _measure({
   required String? support,
   required String? temp,
   required String? docs,
+  required Map<int, String> kinds,
 }) {
   final out = <String, int>{};
   void add(String label, int bytes) {
@@ -319,6 +353,22 @@ Map<String, int> _measure({
       // fayllar (`tg/media`) — "Vaqtinchalik" bilan tozalanadi.
       if (path.contains('/tg/media/')) {
         add(_kTemp, size);
+        return;
+      }
+      // Emoji/GIF/stiker keshi: `aru_packs/<to'plam>/t..|d..` (+ `sent/`).
+      final pi = path.indexOf('/aru_packs/');
+      if (pi >= 0) {
+        add(_kPacks, size);
+        final rest = path.substring(pi + '/aru_packs/'.length).split('/');
+        final id = rest.length > 1 ? int.tryParse(rest.first) : null;
+        final kind = id == null ? null : kinds[id];
+        final child = switch (kind) {
+          'emoji' => _kPackEmoji,
+          'gif' => _kPackGif,
+          'sticker' => _kPackSticker,
+          _ => null,
+        };
+        if (child != null) add('$_kPacks/$child', size);
         return;
       }
       add(_labelOfDocFile(path.split('/').last), size);
