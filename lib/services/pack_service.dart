@@ -39,6 +39,7 @@ import 'dart:math';
 
 import 'package:characters/characters.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 
 import 'auth_service.dart';
@@ -761,6 +762,7 @@ class PackService extends ChangeNotifier {
       waitForClaim: false,
     );
     if (err != null) return err;
+    await _keepSentPreview(path, name, isPackVideo(kindOfFile));
     final e = emoji.replaceAll(RegExp(r'[\[\]]'), '').characters.take(3).toString();
     SyncQueue.instance.putPack('p:add:$name', {
       'op': 'add',
@@ -772,6 +774,35 @@ class PackService extends ChangeNotifier {
     notifyListeners();
     _flushSoon();
     return null;
+  }
+
+  /// Yuborilgan faylning kichik nusxasi (ro'yxatda ko'rsatish uchun).
+  /// Tanlagich vaqtinchalik fayli o'chirilgani uchun alohida saqlanadi.
+  String? sentPreviewPath(String file) {
+    final r = _root();
+    return r == null ? null : '$r/sent/$file';
+  }
+
+  Future<void> _keepSentPreview(String path, String name, bool video) async {
+    try {
+      final dst = sentPreviewPath(name);
+      if (dst == null) return;
+      final out = File(dst);
+      await out.parent.create(recursive: true);
+      if (!video) {
+        await File(path).copy(dst);
+        return;
+      }
+      final r = await const MethodChannel('aru/thumb')
+          .invokeMethod<List<dynamic>>('frames', {
+        'path': path,
+        'count': 1,
+        'maxWidth': 200,
+        'quality': 70,
+      });
+      final b = r == null || r.isEmpty ? null : r.first;
+      if (b is Uint8List) await out.writeAsBytes(b);
+    } catch (_) {}
   }
 
   // ── OMMAVIY TO'PLAMLAR ───────────────────────────────────────

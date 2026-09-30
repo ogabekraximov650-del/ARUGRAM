@@ -8,6 +8,7 @@
 // tushmasin); bosilganda element o'z animatsiyasi bilan ochiladi.
 
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -360,6 +361,24 @@ class _PackDetailScreenState extends State<PackDetailScreen> {
     );
   }
 
+  /// Yuborilgan narsaning kichik ko'rinishi (bo'lmasa — bo'sh joy).
+  Widget _sentThumb(PackOp o) {
+    final path = _svc.sentPreviewPath(o.file);
+    if (path == null || !File(path).existsSync()) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(right: 10),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Image.file(File(path),
+            width: 44,
+            height: 44,
+            fit: BoxFit.cover,
+            cacheWidth: 132,
+            errorBuilder: (_, __, ___) => const SizedBox(width: 44, height: 44)),
+      ),
+    );
+  }
+
   Widget _opsCard(List<PackOp> ops) {
     String label(PackOp o) => switch (o.state) {
           'queued' => 'Yuborilmoqda...',
@@ -396,6 +415,7 @@ class _PackDetailScreenState extends State<PackDetailScreen> {
                       decoration:
                           BoxDecoration(color: color(o), shape: BoxShape.circle)),
                   const SizedBox(width: 10),
+                  _sentThumb(o),
                   if (o.emoji.isNotEmpty) ...[
                     Text(o.emoji, style: const TextStyle(fontSize: 16)),
                     const SizedBox(width: 6),
