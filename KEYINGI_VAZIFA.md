@@ -4564,3 +4564,10 @@ o'tkazib yuborsa) amal ertasi kungacha "Yuborilmoqda..." bo'lib turardi.
   yangisi eskisining o'rnini oladi; fayl tanlagichda `allowMultiple: false`),
   `pack_add_screen.dart` (faqat birinchi fayl; "Boshqa fayl tanlash" almashtiradi).
 Bekor qilingan faylning Telegram'ga yuklangan nusxasi kanalda qoladi (bazaga yozilmagan).
+
+## Xotira halqasi: foizlar tashqarida, bo'laklar sekinroq
+
+`storage_screen.dart`: foiz yozuvlari halqaning TASHQARISIDA (bo'lak markazi yo'nalishida,
+bo'lak rangida, yozuv o'lchamiga qarab halqadan uzoqlashadi), 1% dan boshlab ko'rinadi;
+chizish maydoni 200 -> 270. Tanlash o'zgarganda bo'laklarning kattalashib-kichrayishi
+1200 ms -> 2200 ms (`_move`, `easeInOutCubic`).

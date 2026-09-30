@@ -9,8 +9,8 @@
 // o'shandan olingan:
 //
 //   * oq (bu yerda — karta rangi) blok: yuqori panel, halqa diagramma
-//     (balandligi 200, diametri 172, qalinligi 38, bo'laklar orasi 2°,
-//     bo'lak ichida foiz — 5% dan katta bo'lsa), o'rtada TANLANGAN
+//     (balandligi 270, diametri 172, qalinligi 38, bo'laklar orasi 2°,
+//     foiz — halqa TASHQARISIDA, bo'lak rangida), o'rtada TANLANGAN
 //     hajm (raqam 32, birligi 12);
 //   * sarlavha "Xotiradan foydalanish", izoh "ARUGRAM qurilma
 //     xotirasining N% qismini egallagan" va uning ostidagi chiziq
@@ -454,10 +454,11 @@ class _CacheChartState extends State<_CacheChart>
     with TickerProviderStateMixin {
   static const double _separator = 2;
 
-  /// Bo'laklar siljishi va kichrayib yo'qolishi: sekin va yumshoq (avval 650 ms
-  /// tez `EASE_OUT_QUINT` edi — belgisi olingan bo'lak birdan yo'qolib qolardi).
+  /// Bo'laklar siljishi, kattalashishi va kichrayib yo'qolishi: sekin va
+  /// yumshoq (650 ms -> 1200 ms ham tez ko'rindi; foydalanuvchi talabi bilan
+  /// 2200 ms).
   late final AnimationController _move = AnimationController(
-      vsync: this, duration: const Duration(milliseconds: 1200))
+      vsync: this, duration: const Duration(milliseconds: 2200))
     ..value = 1;
 
   /// Bosilgan bo'lak 9 px ga kattalashadi (200 ms).
@@ -570,7 +571,9 @@ class _CacheChartState extends State<_CacheChart>
     var k = 0;
     for (final s in list) {
       var p = s.bytes / sum;
-      final textAlpha = p > .05 && p < 1 ? 1.0 : 0.0;
+      // Foiz halqaning TASHQARISIDA yoziladi, ya'ni kichik bo'lakda ham
+      // sig'adi (faqat butun halqa — 100% — bo'lsa yozilmaydi).
+      final textAlpha = p >= .01 && p < 1 ? 1.0 : 0.0;
       final textScale = p < .08 || pct[s.label]! >= 100 ? .85 : 1.0;
       if (p < .02) {
         p = .02;
@@ -626,10 +629,11 @@ class _CacheChartState extends State<_CacheChart>
   @override
   Widget build(BuildContext context) {
     final text = formatBytes(widget.selectedBytes).split(' ');
+    // Foizlar halqa tashqarisida — joy kattaroq.
     return SizedBox(
-      height: 200,
+      height: _ChartPainter.box,
       child: LayoutBuilder(builder: (context, box) {
-        final size = Size(box.maxWidth, 200);
+        final size = Size(box.maxWidth, _ChartPainter.box);
         final interactive = !widget.loading && !widget.complete;
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
@@ -670,6 +674,9 @@ class _ChartPainter extends CustomPainter {
   /// Diametri 172 -> radiusi 86; qalinligi 38.
   static const double radius = 86;
   static const double thickness = 38;
+
+  /// Chizish maydoni balandligi: halqa + tashqaridagi foiz yozuvlari.
+  static const double box = 270;
 
   final Map<String, _Sector> Function() sectors;
   final String? pressed;
@@ -748,31 +755,36 @@ class _ChartPainter extends CustomPainter {
     // Zarrachalar — bo'lak ichida ichkaridan tashqariga oqadi.
     canvas.save();
     canvas.clipPath(path);
-    final textPos = c +
-        Offset(math.cos(s.center * math.pi / 180),
-                math.sin(s.center * math.pi / 180)) *
-            ((outer + inner) / 2);
-    _paintParticles(canvas, c, s, inner, outer, time, textPos);
+    _paintParticles(canvas, c, s, inner, outer, time);
     canvas.restore();
 
+    // Foiz — halqaning TASHQARISIDA, bo'lak markazi yo'nalishida, bo'lak
+    // rangida (aniq ko'rinsin; ichida zarrachalar va gradient xalaqit berardi).
     if (s.textAlpha > 0.01 && s.text.isNotEmpty) {
       final tp = TextPainter(
         text: TextSpan(
           text: s.text,
           style: TextStyle(
-            color: Colors.white.withValues(alpha: s.textAlpha),
-            fontSize: 15 * s.textScale,
+            color: Color.alphaBlend(const Color(0x33FFFFFF), color)
+                .withValues(alpha: s.textAlpha),
+            fontSize: 14.5 * s.textScale,
             fontWeight: FontWeight.w700,
           ),
         ),
         textDirection: TextDirection.ltr,
       )..layout();
-      tp.paint(canvas, textPos - Offset(tp.width / 2, tp.height / 2));
+      final dir = Offset(math.cos(s.center * math.pi / 180),
+          math.sin(s.center * math.pi / 180));
+      // Yozuv markazi halqadan uning o'lchamiga qarab uzoqlashadi — chetiga
+      // tegmaydi (yon tomonda eni, tepa/pastda bo'yi hisobga olinadi).
+      final gap = 10 + dir.dx.abs() * tp.width / 2 + dir.dy.abs() * tp.height / 2;
+      final pos = c + dir * (radius + 9 + gap);
+      tp.paint(canvas, pos - Offset(tp.width / 2, tp.height / 2));
     }
   }
 
   void _paintParticles(Canvas canvas, Offset c, _Sector s, double inner,
-      double outer, double time, Offset textPos) {
+      double outer, double time) {
     const step = 7.0;
     const sz = 5.0;
     final sqrt2 = math.sqrt2;
@@ -786,9 +798,7 @@ class _ChartPainter extends CustomPainter {
       final rad = angle * math.pi / 180;
       final p = c + Offset(math.cos(rad), math.sin(rad)) * r;
       final wave = .25 * (math.sin(t * math.pi) - 1) + 1;
-      final nearText =
-          s.textAlpha > 0 ? math.min((p - textPos).distance / 64, 1.0) : 1.0;
-      final alpha = (.65 * (-1.75 * (t - .5).abs() + 1) * wave * nearText)
+      final alpha = (.65 * (-1.75 * (t - .5).abs() + 1) * wave)
           .clamp(0.0, 1.0);
       if (alpha <= 0) continue;
       final scale = .75 * wave * (.8 + (math.sin(angle) + 1) * .25);
