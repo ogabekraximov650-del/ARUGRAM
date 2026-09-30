@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:soft/services/pack_service.dart';
 import 'package:soft/widgets/emoji_text.dart';
 import 'package:soft/widgets/pack_emoji_picker.dart';
+import 'package:soft/widgets/pack_preview.dart';
 import 'package:soft/widgets/pack_views.dart';
 import 'package:soft/widgets/tg_composer.dart';
 
@@ -119,5 +120,39 @@ void main() {
     await t.tap(find.text('Stikerlar'));
     await t.pump(const Duration(milliseconds: 400));
     expect(t.takeException(), isNull);
+  });
+
+  testWidgets('bosib turish: katta ko\'rinish va menyu amali bajariladi',
+      (t) async {
+    var sent = 0;
+    await t.pumpWidget(MaterialApp(
+      home: Builder(
+        builder: (ctx) => Scaffold(
+          body: TextButton(
+            onPressed: () => showPackPreview(
+              ctx,
+              pack: 5,
+              item: 9,
+              emoji: '🍑',
+              actions: [
+                PackPreviewAction(Icons.send_rounded, 'Stiker yuborish', () => sent++),
+                PackPreviewAction(Icons.delete_outline_rounded, 'O\'chirish', () {},
+                    danger: true),
+              ],
+            ),
+            child: const Text('och'),
+          ),
+        ),
+      ),
+    ));
+    await t.tap(find.text('och'));
+    await t.pump(const Duration(milliseconds: 500));
+    expect(t.takeException(), isNull);
+    expect(find.text('🍑'), findsOneWidget);
+    expect(find.text('Stiker yuborish'), findsOneWidget);
+    await t.tap(find.text('Stiker yuborish'));
+    await t.pump(const Duration(milliseconds: 500));
+    expect(sent, 1);
+    expect(find.text('Stiker yuborish'), findsNothing);
   });
 }

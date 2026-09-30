@@ -31,7 +31,9 @@ import 'package:lottie/lottie.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../screens/my_packs_screen.dart';
+import '../services/auth_service.dart';
 import '../services/pack_service.dart';
+import 'pack_preview.dart';
 import 'pack_views.dart';
 
 import 'emoji_text.dart';
@@ -553,8 +555,12 @@ class _TabPill extends StatelessWidget {
 class _Press extends StatefulWidget {
   final Widget child;
   final VoidCallback? onTap;
+
+  /// Bosib turish (katta ko'rinish va menyu — `pack_preview.dart`).
+  final VoidCallback? onLongPress;
   final double scale;
-  const _Press({required this.child, this.onTap, this.scale = 0.86});
+  const _Press(
+      {required this.child, this.onTap, this.onLongPress, this.scale = 0.86});
 
   @override
   State<_Press> createState() => _PressState();
@@ -575,6 +581,7 @@ class _PressState extends State<_Press> {
       onTapUp: (_) => _set(false),
       onTapCancel: () => _set(false),
       onTap: widget.onTap,
+      onLongPress: widget.onLongPress,
       child: AnimatedScale(
         scale: _down ? widget.scale : 1,
         duration: Duration(milliseconds: _down ? 90 : 220),
@@ -1168,26 +1175,65 @@ class _PackPageState extends State<_PackPage>
         onChip: (v) => setState(() => _chip = v),
       );
 
+  PackInfo? _infoOf(int packId) {
+    for (final p in PackService.instance.usable(widget.kind)) {
+      if (p.id == packId) return p;
+    }
+    return null;
+  }
+
+  /// Bosib turish: katta ko'rinish + menyu (Telegram'dagidek).
+  void _preview(PackPick pick, {double aspect = 1}) {
+    final svc = PackService.instance;
+    final info = _infoOf(pick.pack);
+    final me = AuthService.instance.user?.id ?? 0;
+    final fav = svc.isFavorite(pick);
+    final what = _gif ? 'GIF' : 'Stiker';
+    showPackPreview(
+      context,
+      pack: pick.pack,
+      item: pick.item,
+      emoji: pick.emoji,
+      aspect: aspect,
+      actions: [
+        PackPreviewAction(Icons.send_rounded, '$what yuborish', () => _pick(pick)),
+        PackPreviewAction(
+          fav ? Icons.star_border_rounded : Icons.star_rounded,
+          fav ? 'Saralanganlardan o\'chirish' : 'Saralanganlarga qo\'shish',
+          () => svc.toggleFavorite(pick),
+        ),
+        if (info != null && me > 0 && info.ownerId == me)
+          PackPreviewAction(
+            Icons.delete_outline_rounded,
+            'To\'plamdan o\'chirish',
+            () => svc.removeItem(pick.pack, pick.item),
+            danger: true,
+          ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
     final svc = PackService.instance;
     final packs = svc.usable(widget.kind);
+    bool keep(PackPick r) =>
+        _chip.isEmpty || _baseEmoji(r.emoji).contains(_baseEmoji(_chip));
     final recentAll = svc.recent(widget.kind);
-    final recent = _query.isNotEmpty
-        ? const <PackPick>[]
-        : [
-            for (final r in recentAll)
-              if (_chip.isEmpty ||
-                  _baseEmoji(r.emoji).contains(_baseEmoji(_chip)))
-                r,
-          ];
+    final favAll = svc.favorites(widget.kind);
+    // Qidiruv matni bor bo'lsa yaqinda/saralangan bo'limlari yashiriladi
+    // (ularda to'plam nomi yo'q).
+    final favs = _query.isNotEmpty ? const <PackPick>[] : favAll.where(keep).toList();
+    final recent =
+        _query.isNotEmpty ? const <PackPick>[] : recentAll.where(keep).toList();
     final lists = [for (final p in packs) _items(p)];
-    if (packs.isEmpty && recentAll.isEmpty) {
+    if (packs.isEmpty && recentAll.isEmpty && favAll.isEmpty) {
       return _PackEmpty(
           kind: widget.kind, loading: _first || svc.loading, onOpen: _openHub);
     }
-    final counts = <int>[recent.length, for (final l in lists) l.length];
+    // 0 — saralanganlar (⭐), 1 — yaqinda (🕒), 2.. — to'plamlar.
+    final counts = <int>[favs.length, recent.length, for (final l in lists) l.length];
     final sel = _section.clamp(0, counts.length - 1);
     final strip = _Strip(
       count: counts.length + 1,
@@ -1211,11 +1257,12 @@ class _PackPageState extends State<_PackPage>
       },
       icon: (i, on) {
         final c = on ? Colors.white : _Pal.icon;
-        if (i == 0) return Icon(Icons.access_time_rounded, color: c, size: 22);
+        if (i == 0) return Icon(Icons.star_border_rounded, color: c, size: 24);
+        if (i == 1) return Icon(Icons.access_time_rounded, color: c, size: 22);
         if (i >= counts.length) {
           return Icon(Icons.add_circle_outline_rounded, color: c, size: 22);
         }
-        return _cover(packs[i - 1], lists[i - 1], on);
+        return _cover(packs[i - 2], lists[i - 2], on);
       },
     );
     final empty = counts.every((c) => c == 0);
@@ -1229,20 +1276,21 @@ class _PackPageState extends State<_PackPage>
                   child: Text('Hech narsa topilmadi',
                       style: TextStyle(color: _Pal.hint, fontSize: 15)))
               : _gif
-                  ? _gifWall(recent, packs, lists)
-                  : _stickerGrid(recent, packs, lists, counts),
+                  ? _gifWall(favs, recent, packs, lists)
+                  : _stickerGrid(favs, recent, packs, lists, counts),
         ),
       ],
     );
   }
 
-  Widget _stickerGrid(List<PackPick> recent, List<PackInfo> packs,
-      List<List<PackItem>> lists, List<int> counts) {
+  Widget _stickerGrid(List<PackPick> favs, List<PackPick> recent,
+      List<PackInfo> packs, List<List<PackItem>> lists, List<int> counts) {
     return _Sections(
       minCell: 72,
       minColumns: 4,
       counts: counts,
       headers: [
+        const _Header('Saralanganlar'),
         const _Header('Yaqinda ishlatilgan'),
         for (final p in packs) _Header(p.title),
       ],
@@ -1251,13 +1299,16 @@ class _PackPageState extends State<_PackPage>
       cell: (s, i, cell) {
         final PackPick pick;
         if (s == 0) {
+          pick = favs[i];
+        } else if (s == 1) {
           pick = recent[i];
         } else {
-          final it = lists[s - 1][i];
-          pick = PackPick(widget.kind, packs[s - 1].id, it.id, it.emoji);
+          final it = lists[s - 2][i];
+          pick = PackPick(widget.kind, packs[s - 2].id, it.id, it.emoji);
         }
         return _Press(
           onTap: () => _pick(pick),
+          onLongPress: () => _preview(pick),
           scale: 0.85,
           child: Padding(
             padding: const EdgeInsets.all(3),
@@ -1272,13 +1323,13 @@ class _PackPageState extends State<_PackPage>
   }
 
   /// GIF "devori": har qator kenglikka to'liq sig'adi, elementlar o'z nisbatida.
-  Widget _gifWall(List<PackPick> recent, List<PackInfo> packs,
-      List<List<PackItem>> lists) {
+  Widget _gifWall(List<PackPick> favs, List<PackPick> recent,
+      List<PackInfo> packs, List<List<PackItem>> lists) {
     return LayoutBuilder(builder: (context, box) {
       const gap = 2.0;
       const target = 118.0;
       final w = box.maxWidth;
-      final entries = <Object>[]; // String — sarlavha; List<_GifCell> — qator
+      final entries = <Object>[]; // String — sarlavha; _GifRow — qator
       final offsets = <double>[];
       var y = 0.0;
 
@@ -1292,9 +1343,9 @@ class _PackPageState extends State<_PackPage>
         void flush(bool full) {
           if (row.isEmpty) return;
           final gaps = gap * (row.length - 1);
-          final h = full ? (w - gaps) / sum : target;
-          entries.add(_GifRow(row, h.clamp(60.0, 260.0)));
-          y += h.clamp(60.0, 260.0) + gap;
+          final h = (full ? (w - gaps) / sum : target).clamp(60.0, 260.0);
+          entries.add(_GifRow(row, h));
+          y += h + gap;
           row = <_GifCell>[];
           sum = 0;
         }
@@ -1307,9 +1358,21 @@ class _PackPageState extends State<_PackPage>
         flush(false);
       }
 
-      addSection('Yaqinda ishlatilgan', [
-        for (final r in recent) _GifCell(r, 1.0, r.pack),
-      ]);
+      double aspectOf(PackPick r) {
+        for (final h in _hdr.values) {
+          if (h.id != r.pack) continue;
+          final it = h.find(r.item);
+          if (it != null && it.w > 0 && it.h > 0) {
+            return (it.w / it.h).clamp(0.5, 3.0);
+          }
+        }
+        return 1.0;
+      }
+
+      addSection('Saralanganlar',
+          [for (final r in favs) _GifCell(r, aspectOf(r), r.pack)]);
+      addSection('Yaqinda ishlatilgan',
+          [for (final r in recent) _GifCell(r, aspectOf(r), r.pack)]);
       for (var i = 0; i < packs.length; i++) {
         addSection(packs[i].title, [
           for (final it in lists[i])
@@ -1347,6 +1410,8 @@ class _PackPageState extends State<_PackPage>
                       height: r.height,
                       child: _Press(
                         onTap: () => _pick(r.cells[j].pick),
+                        onLongPress: () =>
+                            _preview(r.cells[j].pick, aspect: r.cells[j].aspect),
                         scale: 0.96,
                         child: PackImage(
                           pack: r.cells[j].pick.pack,
@@ -1554,6 +1619,24 @@ class _EmojiPageState extends State<_EmojiPage>
         PackKind.emoji, p.id, it.id, it.emoji.isEmpty ? '🙂' : it.emoji));
   }
 
+  /// Bosib turish: katta ko'rinish; "Emoji yuborish" va oddiy emojidan nusxa
+  /// olish (Telegram'dagidek).
+  void _previewPack(PackInfo p, PackItem it) {
+    final plain = it.emoji.isEmpty ? '🙂' : it.emoji;
+    showPackPreview(
+      context,
+      pack: p.id,
+      item: it.id,
+      emoji: plain,
+      actions: [
+        PackPreviewAction(Icons.send_rounded, 'Emoji yuborish', () => _pickPack(p, it)),
+        PackPreviewAction(Icons.copy_rounded, 'Emojidan nusxa olish', () {
+          Clipboard.setData(ClipboardData(text: plain));
+        }),
+      ],
+    );
+  }
+
   void _openHub() {
     Navigator.of(context).push(MaterialPageRoute<void>(
         builder: (_) => const MyPacksScreen(initialKind: PackKind.emoji)));
@@ -1630,6 +1713,7 @@ class _EmojiPageState extends State<_EmojiPage>
                 final it = lists[s - 1][i];
                 return _Press(
                   onTap: () => _pickPack(packs[s - 1], it),
+                  onLongPress: () => _previewPack(packs[s - 1], it),
                   scale: 0.8,
                   child: Padding(
                     padding: EdgeInsets.all(cell * 0.14),

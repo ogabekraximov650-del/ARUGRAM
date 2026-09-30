@@ -4272,3 +4272,16 @@ sync_queue}.dart`, `lib/widgets/{pack_views,tg_composer,emoji_text}.dart`,
   rasm/elementlar darhol keshga tushadi; kichik rasm olinmasa elementning
   o'zi sinaladi; oxirgi xato to'plam oynasida yozib qo'yiladi
   (`PackService.lastError`).
+
+### Bosib turganda katta ko'rinish va menyu; saralanganlar (2026-09)
+
+Telegram Android (`ContentPreviewViewer.java`, GitHub'dan o'qildi) dagidek:
+- Katakni bosib turilsa (`pack_preview.dart`): orqa fon 0x71000000 (~120 ms)
+  + yengil xiralik, element markazda KATTA (eng kichik tomon - 40 dp),
+  tepasida unga mos emoji, pastida yumaloq menyu (320 ms, easeOutQuint,
+  tepadan 12 dp siljib chiqadi). Animatsiyali element shu yerda o'ynaydi.
+- Stiker/GIF menyusi: yuborish, saralanganlarga qo'shish/o'chirish, (egasi
+  uchun) to'plamdan o'chirish. Emoji: "Emoji yuborish", "Emojidan nusxa olish".
+- ⭐ Saralanganlar (`PackService.favorites`, telefonda `pack_fav_<tur>`) —
+  panelning birinchi bo'limi. "Tovushsiz yuborish" va "Rejalashtirish"
+  qilinmadi: bizda bunday xabar turlari yo'q.

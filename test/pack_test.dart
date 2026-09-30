@@ -136,6 +136,19 @@ void main() {
     });
   });
 
+  group('saralanganlar', () {
+    test('qo\'shiladi va olib tashlanadi', () {
+      final svc = PackService.instance;
+      const p = PackPick(PackKind.gif, 7, 3, '😂');
+      expect(svc.isFavorite(p), isFalse);
+      expect(svc.toggleFavorite(p), isTrue);
+      expect(svc.isFavorite(p), isTrue);
+      expect(svc.favorites(PackKind.gif).first.item, 3);
+      expect(svc.toggleFavorite(p), isFalse);
+      expect(svc.isFavorite(p), isFalse);
+    });
+  });
+
   group('navbat', () {
     final q = SyncQueue.instance;
     setUp(() => q.wipe());

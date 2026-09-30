@@ -1215,6 +1215,42 @@ class PackService extends ChangeNotifier {
       for (final e in l) {'p': e.pack, 'i': e.item, 'e': e.emoji},
     ]);
   }
+
+  // ── SARALANGANLAR (Telegram'dagi ⭐) ─────────────────────────
+
+  final Map<String, List<PackPick>> _favs = {};
+
+  List<PackPick> favorites(String kind) {
+    final have = _favs[kind];
+    if (have != null) return List.of(have);
+    final rows = DiskCache.read('pack_fav_$kind') ?? const [];
+    final out = [
+      for (final m in rows)
+        PackPick(kind, _i(m['p']), _i(m['i']), '${m['e'] ?? ''}'),
+    ];
+    _favs[kind] = out;
+    return List.of(out);
+  }
+
+  bool isFavorite(PackPick p) =>
+      favorites(p.kind).any((e) => e.pack == p.pack && e.item == p.item);
+
+  /// Saralanganlarga qo'shadi yoki olib tashlaydi. Qaytadi: endi saralanganmi.
+  bool toggleFavorite(PackPick p) {
+    final l = _favs[p.kind] ??= favorites(p.kind);
+    final was = l.indexWhere((e) => e.pack == p.pack && e.item == p.item);
+    if (was >= 0) {
+      l.removeAt(was);
+    } else {
+      l.insert(0, p);
+      if (l.length > 200) l.removeLast();
+    }
+    DiskCache.write('pack_fav_${p.kind}', [
+      for (final e in l) {'p': e.pack, 'i': e.item, 'e': e.emoji},
+    ]);
+    notifyListeners();
+    return was < 0;
+  }
 }
 
 class _Known {
