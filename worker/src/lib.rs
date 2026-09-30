@@ -8974,9 +8974,9 @@ async fn auth_route(req: Request, env: &Env, origin: &str, path: &str, method: M
             ] {
                 stmts.push((sql, vec![TursoArg::int(me)]));
             }
-            // Foydalanuvchining emoji/GIF/stiker to'plamlari va ularning
-            // kanaldagi fayllari ham o'chadi (xohishga ko'ra: xatosi yutiladi).
-            packs::delete_user_packs(env, me).await;
+            // Emoji/GIF/stiker to'plamlari hisob o'chirilganda QOLADI
+            // (foydalanuvchi talabi): boshqalar ularni ishlatib turadi.
+            // Faqat shu odamning obunalari o'chadi (yuqorida).
             // ── IKKI BOSQICH: BIRINCHISI YIQILSA HAM HISOB O'CHADI ──
             //
             // Turso quvurida bitta buyruq yiqilsa BUTUN quvur

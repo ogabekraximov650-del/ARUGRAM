@@ -4226,6 +4226,9 @@ emoji: `[pe:<to'plam>:<element>:<emoji>]` (eski Telegram `[ce:...]` bilan
 adashmasin). Yozish maydonida u BITTA belgi (U+E000...) va rasm bo'lib
 chiziladi (`TgTextController`), yuborishda belgiga aylanadi.
 
+**Hisob o'chirilsa** to'plamlar QOLADI (foydalanuvchi talabi) — faqat
+o'sha odamning obunalari (`pack_subs`) o'chadi.
+
 **Actions.** `/api/encode/peek` va `encode_kick` endi to'plam navbatini ham
 hisoblaydi (`packs::PENDING_SQL`); `setup_repo.py` yangi fayllarni
 (`packs_run.py`, `arupack.py`, `arunorm.py`) yangi repoga yuklaydi,

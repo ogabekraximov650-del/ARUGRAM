@@ -284,27 +284,6 @@ pub(crate) async fn valid_ref(env: &Env, media_file: &str, media_type: &str) -> 
         .unwrap_or(false)
 }
 
-/// Hisob o'chirilganda: uning hamma to'plami o'chadi.
-pub(crate) async fn delete_user_packs(env: &Env, user_id: i64) {
-    let ids: Vec<i64> = match turso_exec(env,
-        "SELECT id FROM pack_db WHERE owner_id=? AND state='active'", vec![arg_i(user_id)]).await
-    {
-        Ok(r) => rows_of(&r).iter().map(|o| jint(o, "id")).collect(),
-        Err(_) => return,
-    };
-    if ids.is_empty() {
-        return;
-    }
-    let _ = turso_batch(env, &[
-        ("UPDATE pack_ops SET state='rejected', reason=? WHERE owner_id=? AND state IN ('pending','approved')",
-         vec![arg_s(REASON_DELETED), arg_i(user_id)]),
-        ("UPDATE pack_db SET state='deleted' WHERE owner_id=? AND state='active'", vec![arg_i(user_id)]),
-    ]).await;
-    for id in ids.iter().take(30) {
-        forget_pack_files(env, *id, None).await;
-    }
-}
-
 // ── ROUTER ──────────────────────────────────────────────────────
 
 fn pack_json(o: &Value) -> Value {
