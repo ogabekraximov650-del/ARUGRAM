@@ -58,7 +58,7 @@ PRESET = os.environ.get("H265_PRESET", "medium")
 X265_EXTRA = os.environ.get("H265_X265_EXTRA", "").strip(":")
 # Shu vaqtdan keyin YANGI ish olinmaydi (Actions limiti 6 soat).
 START_BUDGET = int(os.environ.get("START_BUDGET_MIN", "240")) * 60
-# Actions log'i shu YOPIQ kanalga yoziladi (bitta xabar, tahrirlanadi).
+# Actions log'i shu YOPIQ kanalga yoziladi (yangi xabarlar, har 3 soniyada).
 # 0 yoki bo'sh — o'chiq.
 LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL_ID", "0") or 0)
 LOG_INTERVAL = max(1.0, float(os.environ.get("LOG_INTERVAL_SEC", "3") or 3))
@@ -111,77 +111,79 @@ class Fatal(Exception):
 
 
 class ChannelLog:
-    """Actions log'ini yopiq kanaldagi BITTA xabarga yozadi.
+    """Actions log'ini yopiq kanalga YANGI xabarlar bilan yuboradi.
 
-    Run boshlanishi bilan bitta xabar, har qism uchun yangisi; ichida oxirgi
-    voqealar (yuklash, sifat tayyor...) va oxirgi soniyalik statistika
-    qatorlari. Xabar TAHRIRLANADI (foydalanuvchi talabi), har `LOG_INTERVAL`
-    soniyada (odatda 3: Telegram bir xabarni tezroq tahrirlashga FloodWait
-    beradi — bo'lsa kutiladi). Xato bo'lsa kodlashga TEGMAYDI — 5 marta
+    Xabar TAHRIRLANMAYDI (foydalanuvchi talabi): har `LOG_INTERVAL` soniyada
+    (odatda 3) shu orada to'plangan qatorlar bitta yangi xabar bo'lib
+    ketadi. Har qism o'z sarlavhasi bilan boshlanadi. Telegram FloodWait
+    bersa — qatorlar to'planib turadi va ruxsat berilgach bitta xabar bo'lib
+    ketadi (log yo'qolmaydi). Xato bo'lsa kodlashga TEGMAYDI — 5 marta
     ketma-ket xatodan keyin kanalga yozish o'chadi.
     """
-    LIMIT = 3600  # xabar 4096 belgidan oshmasin
+    LIMIT = 3600  # bitta xabar 4096 belgidan oshmasin
 
     def __init__(self):
         self.lock = threading.Lock()
-        self.events = collections.deque(maxlen=14)
-        self.prog = collections.deque(maxlen=10)
-        self.title = ""
-        self.msg_id = None
-        self.dirty = False
+        self.pending = collections.deque()
+        self.active = False
         self.fails = 0
         self.hold_until = 0.0
         self.off = LOG_CHANNEL == 0
 
     def start(self, title):
         with self.lock:
-            self.events.clear()
-            self.prog.clear()
-            self.title, self.msg_id, self.dirty = title, None, True
+            self.pending.clear()
+            self.active = True
+            self.pending.append(("title", title))
+
+    def heading(self, title):
+        """Yangi qism sarlavhasi (xabar oqimi to'xtamaydi)."""
+        with self.lock:
+            if self.active:
+                self.pending.append(("title", title))
 
     def stop(self):
         with self.lock:
-            self.title = ""
+            self.active = False
 
     def add(self, text, progress=False):
         with self.lock:
-            if not self.title:
-                return
-            (self.prog if progress else self.events).append(text)
-            self.dirty = True
+            if self.active:
+                self.pending.append(("line", text))
 
-    def render(self):
+    def _take(self):
+        """Yuboriladigan qatorlarni oladi (navbatdan hali OLMAYDI)."""
         with self.lock:
-            lines = list(self.events) + ([""] if self.prog else []) + list(self.prog)
-            title = self.title
-        body = "\n".join(lines)
-        while len(body) > self.LIMIT and lines:
-            lines.pop(0)
-            body = "\n".join(lines)
-        return f"<b>{html.escape(title)}</b>\n<pre>{html.escape(body)}</pre>"
+            items = list(self.pending)
+        out, size, n = [], 0, 0
+        for kind, text in items:
+            piece = f"<b>{html.escape(text)}</b>" if kind == "title" else html.escape(text)
+            if out and size + len(piece) + 1 > self.LIMIT:
+                break
+            out.append(piece)
+            size += len(piece) + 1
+            n += 1
+        return n, "\n".join(out)
 
     async def flush(self, app):
-        if self.off or not self.dirty or not self.title or time.time() < self.hold_until:
+        if self.off or time.time() < self.hold_until:
             return
-        with self.lock:
-            self.dirty = False
-        text = self.render()
+        n, text = self._take()
+        if not n:
+            return
         try:
-            if self.msg_id is None:
-                m = await app.send_message(LOG_CHANNEL, text, parse_mode=enums.ParseMode.HTML,
-                                           disable_notification=True)
-                self.msg_id = m.id
-            else:
-                await app.edit_message_text(LOG_CHANNEL, self.msg_id, text,
-                                            parse_mode=enums.ParseMode.HTML)
+            await app.send_message(LOG_CHANNEL, text, parse_mode=enums.ParseMode.HTML,
+                                   disable_notification=True)
+            with self.lock:
+                for _ in range(n):
+                    self.pending.popleft()
             self.fails = 0
         except Exception as e:
             if type(e).__name__ == "FloodWait":
-                self.dirty = True
+                # Qatorlar to'planib turadi, ruxsat berilgach bittada ketadi.
                 self.hold_until = time.time() + int(getattr(e, "value", 10) or 10)
                 return
             self.fails += 1
-            self.dirty = True
             print(f"Kanalga log yozilmadi ({self.fails}/5): {e}", flush=True)
             if self.fails >= 5:
                 self.off = True
@@ -435,7 +437,7 @@ async def process(app: Client, channel: int, job: dict):
     ident = {"runner": RUNNER, "anime_id": a, "season_id": s, "epizod_id": e, "queued_at": qa}
     global CURRENT
     CURRENT = ident
-    CHLOG.start(f"\U0001F3AC Qism {a}/{s}/{e} (#{job.get('epizod_number')}) — run {RUNNER}")
+    CHLOG.heading(f"\U0001F3AC Qism {a}/{s}/{e} (#{job.get('epizod_number')}) — run {RUNNER}")
     hb = Heartbeat(ident)
     shutil.rmtree(WORK, ignore_errors=True)
     WORK.mkdir(parents=True)
@@ -535,8 +537,8 @@ async def process(app: Client, channel: int, job: dict):
             pass
     finally:
         CURRENT = None
-        await CHLOG.flush(app)
-        CHLOG.start(f"\u25B6\uFE0F Run {RUNNER} davom etmoqda")
+        for _ in range(6):  # qolgan qatorlar to'liq ketsin
+            await CHLOG.flush(app)
         hb.stop.set()
         shutil.rmtree(WORK, ignore_errors=True)
 

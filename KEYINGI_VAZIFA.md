@@ -4131,12 +4131,13 @@ bo'lakni 3 s dan ko'p kutsa, majburan beriladi (`Reader::waiting`).
 ## Actions log'i yopiq kanalga; worker'ga 10 daqiqada; qayta boshlash (2026-09)
 
 - `run.py` (`ChannelLog`) log'ni kanalga (`LOG_CHANNEL_ID`, avtoencode
-  workflow'ida `-1004360822958`) BITTA xabarga yozadi va uni har
-  `LOG_INTERVAL_SEC` (3) soniyada TAHRIRLAYDI (foydalanuvchi qarori: yangi
-  xabarlar emas, tahrir). Kanalga log run boshlanishi bilan yoqiladi, har
-  qism o'z xabari bilan; yuklab olish/yuklash ham har soniyada qator beradi.
-  FloodWait bo'lsa kutiladi. Xato bo'lsa kodlash to'xtamaydi, 5 xatodan keyin
-  kanalga yozish o'chadi. Sessiya hisobi kanalga a'zo bo'lishi kerak.
+  workflow'ida `-1004360822958`) har `LOG_INTERVAL_SEC` (3) soniyada YANGI
+  xabar bilan yuboradi: shu orada to'plangan qatorlar bitta xabar. Tahrir
+  yaxshi ishlamadi (foydalanuvchi qarori). Kanalga log run boshlanishi bilan
+  yoqiladi, har qism o'z sarlavhasi bilan; yuklab olish/yuklash ham har
+  soniyada qator beradi. FloodWait bo'lsa qatorlar to'planib, keyin bittada
+  ketadi. Xato bo'lsa kodlash to'xtamaydi, 5 xatodan keyin kanalga yozish
+  o'chadi. Sessiya hisobi kanalga a'zo bo'lishi kerak (soatiga ~1200 xabar).
 - Worker'ga heartbeat 10 daqiqada (ijara 25 daqiqa); bot "Holat" shu oxirgi
   holatni ko'rsatadi, jonli log — kanalda.
 - Qo'lda qayta boshlash: `restart-autoencode.yml` (`restart_run.py`) —
