@@ -4579,3 +4579,16 @@ jo'ja, Lottie) o'rniga kod bilan chizilgan sahna — jo'ja chap tomondagi eshikn
 qo'lidagi axlat qopini qutiga tashlaydi (qopqoq ochiladi, qop yoy bo'ylab uchadi, qopqoq
 yopilib chang ko'tariladi), xursand sakraydi va ortiga qaytib kiradi; 4.2 s da takrorlanadi.
 `storage_screen.dart` `_ClearingView` shuni ishlatadi (260 x 170). Tashqi fayl yo'q.
+
+## Kesh tozalash animatsiyasi v2: asl `utyan` jo'jasi, haqiqiy burilish
+
+Oldingi (qo'lda chizilgan) jo'ja o'rniga — Telegram `utyan_cache.json` dagi ASL jo'ja.
+`lib/widgets/utyan_parts.dart` — Lottie'dan (lottie-web orqali, kadr 106 va 200) olingan
+vektor shakllar (tana, bosh, tumshuq, og'iz, ko'zlar, qo'llar, yaltirashlar; asl rang va
+qalinlik), avtomatik yasalgan. `trash_chick.dart`:
+* Burilish — ikki holat nuqtama-nuqta aralashtiriladi (Lottie'ning o'zidagi bosh burilishi):
+  yuz bosh sirti bo'ylab suriladi, uzoq ko'z chetga kirib torayadi, tana yassilanmaydi.
+  Chapga — ko'zgudagi nishonga siljish (ko'zlar o'rin almashadi), qo'llar tana ichida kesiladi.
+* Lapanglab sakrab yurish, otishdan oldin cho'kish, otishda cho'zilish, "^^" xursandlik
+  sakrashi; eshik 3D perspektivada ochiladi (ichkaridan yorug'lik), qopqoq sakrab yopiladi,
+  chang (bitta qatlamda) va uchqunlar. 5.4 s, takrorlanadi.

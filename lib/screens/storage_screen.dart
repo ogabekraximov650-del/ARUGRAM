@@ -1299,7 +1299,7 @@ class _ClearingView extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 // Jo'ja eshikni ochib chiqadi va axlat qopini qutiga
-                // tashlaydi (takrorlanib o'ynaydi; `trash_chick.dart`).
+                // tashlaydi (asl Telegram jo'jasi `utyan`; `trash_chick.dart`).
                 const TrashChickAnimation(width: 260, height: 170),
                 const SizedBox(height: 10),
                 SizedBox(
