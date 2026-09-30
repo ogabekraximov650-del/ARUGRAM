@@ -11,6 +11,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart' show XFile;
 
 import '../services/auth_service.dart';
 import '../services/pack_service.dart';
@@ -266,7 +267,7 @@ class _PackDetailScreenState extends State<PackDetailScreen> {
             ],
             const SizedBox(height: 14),
             if (ops.isNotEmpty) ...[
-              _opsCard(ops),
+              _opsCard(ops, p),
               const SizedBox(height: 14),
             ],
             if (!p.usable && ops.isEmpty)
@@ -361,7 +362,7 @@ class _PackDetailScreenState extends State<PackDetailScreen> {
 
   /// Yuborilgan narsaning kichik ko'rinishi (bo'lmasa — bo'sh joy).
   Widget _sentThumb(PackOp o) {
-    final path = _svc.sentPreviewPath(o.file);
+    final path = _svc.sentThumbPath(o.file);
     if (path == null || !File(path).existsSync()) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.only(right: 10),
@@ -377,7 +378,15 @@ class _PackDetailScreenState extends State<PackDetailScreen> {
     );
   }
 
-  Widget _opsCard(List<PackOp> ops) {
+  Future<void> _resend(PackOp o, PackInfo p) async {
+    final src = _svc.sentSourcePath(o.file);
+    if (src == null) return;
+    final n = await Navigator.of(context).push<int>(MaterialPageRoute(
+        builder: (_) => PackAddScreen(pack: p, files: [XFile(src)])));
+    if (n != null && n > 0 && mounted) _svc.clearOp(o);
+  }
+
+  Widget _opsCard(List<PackOp> ops, PackInfo p) {
     String label(PackOp o) => switch (o.state) {
           'queued' => 'Yuborilmoqda...',
           'pending' => 'Admin ko\'rib chiqmoqda',
@@ -396,35 +405,80 @@ class _PackDetailScreenState extends State<PackDetailScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Yuborilgan rasmlar',
-              style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.7),
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700)),
+          Row(
+            children: [
+              Expanded(
+                child: Text('Yuborilgan rasmlar',
+                    style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.7),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700)),
+              ),
+              if (ops.any((o) => o.state == 'rejected'))
+                GestureDetector(
+                  onTap: () => _svc.clearRejected(p.id),
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 4),
+                    child: Text('Rad etilganlarni tozalash',
+                        style: TextStyle(
+                            color: AppColors.danger,
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w600)),
+                  ),
+                ),
+            ],
+          ),
           const SizedBox(height: 8),
           for (final o in ops)
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
-              child: Row(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Container(
-                      width: 8,
-                      height: 8,
-                      decoration:
-                          BoxDecoration(color: color(o), shape: BoxShape.circle)),
-                  const SizedBox(width: 10),
-                  _sentThumb(o),
-                  if (o.emoji.isNotEmpty) ...[
-                    Text(o.emoji, style: const TextStyle(fontSize: 16)),
-                    const SizedBox(width: 6),
-                  ],
-                  Expanded(
-                    child: Text(label(o),
-                        style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.8),
-                            fontSize: 13,
-                            height: 1.35)),
+                  Row(
+                    children: [
+                      Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                              color: color(o), shape: BoxShape.circle)),
+                      const SizedBox(width: 10),
+                      _sentThumb(o),
+                      if (o.emoji.isNotEmpty) ...[
+                        Text(o.emoji, style: const TextStyle(fontSize: 16)),
+                        const SizedBox(width: 6),
+                      ],
+                      Expanded(
+                        child: Text(label(o),
+                            style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.8),
+                                fontSize: 13,
+                                height: 1.35)),
+                      ),
+                    ],
                   ),
+                  if (o.state == 'rejected')
+                    Padding(
+                      padding: const EdgeInsets.only(left: 18, top: 2),
+                      child: Wrap(
+                        spacing: 6,
+                        children: [
+                          if (_svc.sentSourcePath(o.file) != null)
+                            TextButton.icon(
+                              onPressed: () => _resend(o, p),
+                              icon: const Icon(Icons.refresh_rounded, size: 18),
+                              label: const Text('Qayta yuborish'),
+                            ),
+                          TextButton.icon(
+                            onPressed: () => _svc.clearOp(o),
+                            icon: const Icon(Icons.delete_outline_rounded,
+                                size: 18, color: AppColors.danger),
+                            label: const Text('O\'chirish',
+                                style: TextStyle(color: AppColors.danger)),
+                          ),
+                        ],
+                      ),
+                    ),
                 ],
               ),
             ),

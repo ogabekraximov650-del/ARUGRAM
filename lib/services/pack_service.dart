@@ -464,6 +464,9 @@ class PackService extends ChangeNotifier {
   List<PackInfo> _mine = [];
   List<PackInfo> _subs = [];
   List<PackOp> _ops = [];
+
+  /// Egasi tozalagan (serverga yuborilgan) amallar — ro'yxatdan yashiriladi.
+  final Set<int> _dismissed = {};
   bool _loaded = false;
   bool _loading = false;
   String? error;
@@ -529,6 +532,30 @@ class PackService extends ChangeNotifier {
     _mine = list('mine', PackInfo.fromJson);
     _subs = list('subs', PackInfo.fromJson);
     _ops = list('ops', PackOp.fromJson);
+    _dismissed.removeWhere((id) => !_ops.any((o) => o.id == id));
+    unawaited(_sweepSent());
+  }
+
+  /// Serverda endi yo'q (tozalangan / 30 kundan eski) yuborishlarning
+  /// mahalliy nusxalari o'chadi.
+  Future<void> _sweepSent() async {
+    try {
+      final r = _root();
+      if (r == null) return;
+      final dir = Directory('$r/sent');
+      if (!await dir.exists()) return;
+      final keep = {
+        for (final o in _ops) o.file,
+        for (final m in SyncQueue.instance.pendingPacks()) '${m['file'] ?? ''}',
+      };
+      final cut = DateTime.now().subtract(const Duration(days: 1));
+      await for (final e in dir.list()) {
+        if (e is! File) continue;
+        final name = e.path.split('/').last.replaceAll(RegExp(r'\.jpg$'), '');
+        if (keep.contains(name)) continue;
+        if ((await e.stat()).modified.isBefore(cut)) await e.delete();
+      }
+    } catch (_) {}
   }
 
   Map<String, String> _auth({bool json = false}) => {
@@ -602,7 +629,8 @@ class PackService extends ChangeNotifier {
 
   /// To'plamning amallari: serverdagi + hali yuborilmagan (`queued`).
   List<PackOp> opsOf(int packId) {
-    final out = _ops.where((o) => o.pack == packId).toList();
+    final out =
+        _ops.where((o) => o.pack == packId && !_dismissed.contains(o.id)).toList();
     for (final m in SyncQueue.instance.pendingPacks()) {
       if (_i(m['pack']) != packId) continue;
       if (m['op'] == 'add') {
@@ -801,6 +829,8 @@ class PackService extends ChangeNotifier {
         await File(path).copy(dst);
         return;
       }
+      // Video: asl nusxa (qayta yuborish uchun) va kichik kadr (ro'yxat uchun).
+      await File(path).copy(dst);
       final r = await const MethodChannel('aru/thumb')
           .invokeMethod<List<dynamic>>('frames', {
         'path': path,
@@ -809,8 +839,48 @@ class PackService extends ChangeNotifier {
         'quality': 70,
       });
       final b = r == null || r.isEmpty ? null : r.first;
-      if (b is Uint8List) await out.writeAsBytes(b);
+      if (b is Uint8List) await File('$dst.jpg').writeAsBytes(b);
     } catch (_) {}
+  }
+
+  /// Ro'yxatdagi kichik ko'rinish: video bo'lsa kadr (`.jpg`), aks holda rasmning o'zi.
+  String? sentThumbPath(String file) {
+    final base = sentPreviewPath(file);
+    if (base == null) return null;
+    return File('$base.jpg').existsSync() ? '$base.jpg' : base;
+  }
+
+  /// Qayta yuborish uchun asl fayl (bor bo'lsa).
+  String? sentSourcePath(String file) {
+    final base = sentPreviewPath(file);
+    return base != null && File(base).existsSync() ? base : null;
+  }
+
+  void _dropSent(String file) {
+    final base = sentPreviewPath(file);
+    if (base == null) return;
+    for (final f in [base, '$base.jpg']) {
+      try {
+        File(f).deleteSync();
+      } catch (_) {}
+    }
+  }
+
+  /// Rad etilgan yuborishni ro'yxatdan tozalaydi (server ham o'chiradi).
+  void clearOp(PackOp o) {
+    if (o.id <= 0) return;
+    _dismissed.add(o.id);
+    _dropSent(o.file);
+    SyncQueue.instance.putPack('p:clear:${o.id}', {'op': 'clear', 'pack': o.pack, 'id': o.id});
+    notifyListeners();
+    _flushSoon();
+  }
+
+  /// To'plamdagi hamma rad etilganlarni tozalaydi.
+  void clearRejected(int packId) {
+    for (final o in opsOf(packId).where((o) => o.state == 'rejected')) {
+      clearOp(o);
+    }
   }
 
   // ── OMMAVIY TO'PLAMLAR ───────────────────────────────────────

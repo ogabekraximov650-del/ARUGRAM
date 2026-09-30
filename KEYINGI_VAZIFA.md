@@ -4433,3 +4433,14 @@ Admin tekshiruvi: video OVOZ bilan (karnay tugmasi), "Butun to'plam" va
 (ruxsat sozlamalari, cheklangan ruxsatni kengaytirish, tizim galereyasi);
 fayl brauzeri xatosi ekranda ko'rsatiladi, Android 10 uchun
 `requestLegacyExternalStorage`. Ovozli MP4 o'lchamlari 16 ga karrali.
+
+## Rad etilganlarni qayta yuborish va tozalash
+
+To'plam oynasidagi "Yuborilgan rasmlar"da rad etilgan qatorda "Qayta yuborish"
+(asl fayl telefonda saqlangan bo'lsa; muvaffaqiyatli yuborilsa eskisi tozalanadi)
+va "O'chirish" tugmalari, sarlavhada "Rad etilganlarni tozalash". Server:
+`packs.rs` sync amali `clear` (faqat egasining `rejected` yozuvlari). Rad etilganlar
+30 kun ko'rinadi (`REJECTED_SHOW_MS`), tozalanmasa 30 kundan keyin avtomatik
+o'chadi: `packs::cleanup_rejected` (cron'dan, kuniga bir marta 03:00 UTC) va har
+job tugaganda. Telefondagi nusxalar (`aru_packs/sent/`) server yozuvi yo'qolgach
+o'chadi. Eski (yangilanishdan oldingi) rad etilganlarda asl fayl yo'q — faqat "O'chirish".

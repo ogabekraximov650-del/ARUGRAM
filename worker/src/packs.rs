@@ -47,7 +47,7 @@ const JOB_MAX_OPS: i64 = 40;
 /// Bot kanalga ko'chirib ulgurmagan fayl shuncha kutiladi.
 const STAGING_WAIT_MS: i64 = 2 * 60 * 60 * 1000;
 /// Rad etilgan amallar egasiga shuncha vaqt ko'rsatiladi.
-const REJECTED_SHOW_MS: i64 = 14 * 24 * 60 * 60 * 1000;
+const REJECTED_SHOW_MS: i64 = 30 * 24 * 60 * 60 * 1000;
 /// `pack_ops.reason` — to'plam o'chirilgani uchun bekor bo'lgan amallar
 /// (egasiga ko'rsatilmaydi).
 const REASON_DELETED: &str = "pack_deleted";
@@ -204,6 +204,17 @@ pub(crate) fn sync_stmts(
                     vec![arg_i(pack), arg_i(me)],
                 ));
             }
+            // Rad etilgan yuborishni egasi qo'lda tozalaydi (bitta `id` yoki
+            // to'plamdagi hammasi). Faqat o'zining `rejected` yozuvlari.
+            "clear" => {
+                let id = jint(p, "id");
+                if id <= 0 && pack <= 0 { continue; }
+                out.push((
+                    "DELETE FROM pack_ops WHERE owner_id=? AND state='rejected' AND op='add'
+                        AND ((?>0 AND id=?) OR (?<=0 AND pack_id=?))",
+                    vec![arg_i(me), arg_i(id), arg_i(id), arg_i(id), arg_i(pack)],
+                ));
+            }
             "sub" => {
                 if pack <= 0 { continue; }
                 if p["on"].as_bool().unwrap_or(true) {
@@ -225,6 +236,19 @@ pub(crate) fn sync_stmts(
         }
     }
     (out, deleted, removes)
+}
+
+/// 30 kundan oshgan rad etilgan yozuvlarni o'chiradi. Cron har 10 daqiqada
+/// chaqiradi, lekin ish kuniga BIR marta (03:00-03:10 UTC) bajariladi —
+/// Turso o'qishlari tejalsin.
+pub(crate) async fn cleanup_rejected(env: &Env) {
+    let now = now_ms();
+    let in_day = (now / 60_000) % (24 * 60);
+    if !(180..190).contains(&in_day) { return; }
+    let _ = turso_batch(env, &[(
+        "DELETE FROM pack_ops WHERE state='rejected' AND created_at<?",
+        vec![arg_i(now - REJECTED_SHOW_MS)],
+    )]).await;
 }
 
 // ── SYNC'DAN KEYIN ──────────────────────────────────────────────
@@ -793,7 +817,7 @@ async fn job_finish(env: &Env, b: &Value) -> Result<Response> {
     // Eski rad etilgan yozuvlar (30 kundan keyin) tozalanadi — jadval o'smasin.
     stmts.push((
         "DELETE FROM pack_ops WHERE state='rejected' AND created_at<?",
-        vec![arg_i(now_ms() - 30 * 24 * 60 * 60 * 1000)],
+        vec![arg_i(now_ms() - REJECTED_SHOW_MS)],
     ));
     turso_batch(env, &stmts).await?;
 
@@ -865,5 +889,9 @@ mod tests {
         assert_eq!((s.len(), d), (2, vec![5]));
         let (s, _, _) = sync_stmts(1, &op(json!({"op": "sub", "pack": 5, "on": false})), 10);
         assert_eq!(s.len(), 1);
+        let (s, _, _) = sync_stmts(1, &op(json!({"op": "clear", "pack": 5, "id": 9})), 10);
+        assert_eq!(s.len(), 1);
+        let (s, _, _) = sync_stmts(1, &op(json!({"op": "clear"})), 10);
+        assert!(s.is_empty());
     }
 }

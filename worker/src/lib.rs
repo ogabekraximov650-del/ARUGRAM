@@ -11035,6 +11035,7 @@ async fn scheduled(_ev: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
     }
     // To'plamlar (emoji/GIF/stiker) — ALOHIDA workflow (`packs::kick`); kodlashga tegmaydi.
     let _ = packs::kick(&env).await;
+    packs::cleanup_rejected(&env).await;
     let msg = encode_kick(&env).await;
     // Faqat ishga tushirilganda yoki xato bo'lsa adminga xabar. Xato
     // (masalan token yo'q) har 10 daqiqada takrorlanmasin — soatiga bir.
