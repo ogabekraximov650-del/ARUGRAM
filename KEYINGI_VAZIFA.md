@@ -4571,3 +4571,11 @@ Bekor qilingan faylning Telegram'ga yuklangan nusxasi kanalda qoladi (bazaga yoz
 bo'lak rangida, yozuv o'lchamiga qarab halqadan uzoqlashadi), 1% dan boshlab ko'rinadi;
 chizish maydoni 200 -> 270. Tanlash o'zgarganda bo'laklarning kattalashib-kichrayishi
 1200 ms -> 2200 ms (`_move`, `easeInOutCubic`).
+
+## Kesh tozalash animatsiyasi: jo'ja axlatni qutiga tashlaydi
+
+`lib/widgets/trash_chick.dart` (`TrashChickAnimation`): Telegram `utyan_cache` (supurayotgan
+jo'ja, Lottie) o'rniga kod bilan chizilgan sahna — jo'ja chap tomondagi eshikni ochib chiqadi,
+qo'lidagi axlat qopini qutiga tashlaydi (qopqoq ochiladi, qop yoy bo'ylab uchadi, qopqoq
+yopilib chang ko'tariladi), xursand sakraydi va ortiga qaytib kiradi; 4.2 s da takrorlanadi.
+`storage_screen.dart` `_ClearingView` shuni ishlatadi (260 x 170). Tashqi fayl yo'q.

@@ -34,11 +34,11 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
-import 'package:lottie/lottie.dart';
 
 import '../services/format.dart';
 import '../services/storage_usage.dart';
 import '../widgets/glass.dart';
+import '../widgets/trash_chick.dart';
 
 /// Toifa ranglari (Telegram'dagi `statisticChartLine_*`).
 const Map<String, Color> _colors = {
@@ -1298,17 +1298,9 @@ class _ClearingView extends StatelessWidget {
             return Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // Telegram `utyan_cache`: supurgi bilan supurayotgan
-                // jo'ja (takrorlanib o'ynaydi).
-                SizedBox(
-                  width: 170,
-                  height: 170,
-                  child: Lottie.asset(
-                    'assets/tg_anim/utyan_cache.json',
-                    repeat: true,
-                    frameRate: FrameRate.max,
-                  ),
-                ),
+                // Jo'ja eshikni ochib chiqadi va axlat qopini qutiga
+                // tashlaydi (takrorlanib o'ynaydi; `trash_chick.dart`).
+                const TrashChickAnimation(width: 260, height: 170),
                 const SizedBox(height: 10),
                 SizedBox(
                   height: 32,
