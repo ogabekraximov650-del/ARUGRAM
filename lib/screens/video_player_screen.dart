@@ -137,6 +137,7 @@ import '../theme/app_background.dart';
 import 'billing_screen.dart';
 import '../widgets/glass.dart';
 import '../widgets/comments_tab.dart';
+import '../widgets/pack_views.dart' show PackSoundHub;
 import '../services/api_base.dart';
 
 const String _apiBase = kApiBase;
@@ -437,6 +438,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     // Kadr yasovchilar SHU PAYTDA tarmoqqa chiqmasin: ijro
     // birinchi o'rinda (`video_gate.dart` izohiga qarang).
     VideoGate.enter();
+    PackSoundHub.instance.addListener(_onGifSound);
     // Pleyer sozlamalari (intro avtomatik o'tkazilsinmi) —
     // diskdan, tarmoqsiz.
     AppSettings.instance.load();
@@ -572,6 +574,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
 
   @override
   void dispose() {
+    PackSoundHub.instance.removeListener(_onGifSound);
     VideoGate.leave();
     // Pleyer yopildi — oldinga yuklash chegarasi olib tashlanadi.
     if (_currentUrl.isNotEmpty) {
@@ -1922,6 +1925,17 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   /// 800 ms) urinishni takrorlaydi.
   Duration? _pendingEofAt;
 
+  bool _wasPlaying = false;
+
+  /// Izohdagi GIF ovozi yoqilsa — asosiy pleyer pauza bo'ladi.
+  void _onGifSound() {
+    if (!PackSoundHub.instance.active) return;
+    final c = _controller;
+    if (c != null && c.value.isInitialized && c.value.isPlaying) {
+      unawaited(c.pause());
+    }
+  }
+
   void _onControllerUpdate() {
     final c = _controller;
     if (c == null || !mounted) return;
@@ -1936,6 +1950,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       return;
     }
     final v = c.value;
+    // Pleyerda play bosilsa — izohdagi GIF ovozi o'chadi (animatsiya davom etadi).
+    if (v.isPlaying && !_wasPlaying) PackSoundHub.instance.muteAll();
+    _wasPlaying = v.isPlaying;
     if (v.isCompleted) {
       _onCompleted(c);
     } else if (v.isInitialized) {

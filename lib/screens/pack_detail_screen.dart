@@ -324,7 +324,10 @@ class _PackDetailScreenState extends State<PackDetailScreen> {
                       padding: const EdgeInsets.all(6),
                       child: LayoutBuilder(
                         builder: (_, box) => PackImage(
-                            pack: p.id, item: it.id, size: box.maxWidth),
+                            pack: p.id,
+                            item: it.id,
+                            size: box.maxWidth,
+                            animate: true),
                       ),
                     ),
                   );

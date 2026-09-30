@@ -24,29 +24,75 @@ import '../screens/pack_detail_screen.dart';
 import '../services/pack_service.dart';
 import 'media_placeholder.dart';
 
-/// Bir vaqtda nechta animatsiya ishlashi mumkin.
+/// Bir vaqtda nechta animatsiya ishlashi mumkin (telefonga bosim tushmasin).
+///
+/// Uch hovuz: KICHIK (emoji va boshqa <= 200 KB — arzon, ko'pi mumkin),
+/// KATTA (stiker/GIF) va VIDEO (ovozli MP4 — qurilma dekoderi kam, 1-2 ta).
+/// Joy bo'lmasa kichik statik rasm turadi, joy bo'shaganda animatsiya boshlanadi.
+enum AnimPool { small, big, video }
+
 class AnimSlots extends ChangeNotifier {
   AnimSlots._();
   static final AnimSlots instance = AnimSlots._();
 
-  final Set<Object> _used = {};
+  final Map<Object, AnimPool> _used = {};
 
-  int get max => switch (DevicePerf.cls) {
-        PerfClass.low => 2,
-        PerfClass.average => 5,
-        PerfClass.high => 9,
+  int _cap(AnimPool p) => switch (p) {
+        AnimPool.small => switch (DevicePerf.cls) {
+            PerfClass.low => 6,
+            PerfClass.average => 14,
+            PerfClass.high => 24,
+          },
+        AnimPool.big => switch (DevicePerf.cls) {
+            PerfClass.low => 2,
+            PerfClass.average => 5,
+            PerfClass.high => 9,
+          },
+        AnimPool.video => DevicePerf.cls == PerfClass.low ? 1 : 2,
       };
 
-  bool tryAcquire(Object owner) {
-    if (_used.contains(owner)) return true;
-    if (_used.length >= max) return false;
-    _used.add(owner);
+  bool tryAcquire(Object owner, [AnimPool pool = AnimPool.big]) {
+    if (_used.containsKey(owner)) return true;
+    final n = _used.values.where((v) => v == pool).length;
+    if (n >= _cap(pool)) return false;
+    _used[owner] = pool;
     return true;
   }
 
   /// Joy bo'shadi — kutayotganlar qayta urinadi (animatsiya keyin boshlanadi).
   void release(Object owner) {
-    if (_used.remove(owner)) notifyListeners();
+    if (_used.remove(owner) != null) notifyListeners();
+  }
+}
+
+/// Ovozli GIF: bir vaqtda faqat bittasida ovoz yoqiq. Ovoz yoqilsa asosiy
+/// pleyer pauza bo'ladi, pleyerda play bosilsa ovoz o'chadi (animatsiya
+/// to'xtamaydi).
+class PackSoundHub extends ChangeNotifier {
+  PackSoundHub._();
+  static final PackSoundHub instance = PackSoundHub._();
+
+  Object? _owner;
+  bool get active => _owner != null;
+  bool isOn(Object o) => identical(_owner, o);
+
+  void on(Object owner) {
+    if (identical(_owner, owner)) return;
+    _owner = owner;
+    notifyListeners();
+  }
+
+  void off(Object owner) {
+    if (!identical(_owner, owner)) return;
+    _owner = null;
+    notifyListeners();
+  }
+
+  /// Pleyerda play bosildi — GIF ovozi o'chadi.
+  void muteAll() {
+    if (_owner == null) return;
+    _owner = null;
+    notifyListeners();
   }
 }
 
@@ -98,6 +144,7 @@ class _PackImageState extends State<PackImage> {
   PackRef? _ref;
   VideoPlayerController? _vc;
   File? _vfile;
+  AnimPool _pool = AnimPool.big;
 
   /// Elementning o'zi shu hajmdan katta bo'lsa, kichik rasm o'rniga
   /// yuklanmaydi (devorda bir vaqtda ko'p og'ir fayl olinmasin).
@@ -177,7 +224,12 @@ class _PackImageState extends State<PackImage> {
     _retries++;
     _retry?.cancel();
     _retry = Timer(Duration(seconds: 6 * _retries), () {
-      if (mounted && _bytes == null) unawaited(_load());
+      if (!mounted) return;
+      if (_bytes == null) {
+        unawaited(_load());
+      } else if (widget.animate && _ref != null && !_slot && !_waitingSlot) {
+        unawaited(_loadFull(_ref!, _gen));
+      }
     });
   }
 
@@ -229,7 +281,11 @@ class _PackImageState extends State<PackImage> {
   Future<void> _loadFull(PackRef r, int gen) async {
     final svc = PackService.instance;
     if (r.item.animated && !_slot) {
-      if (!AnimSlots.instance.tryAcquire(this)) {
+      final pool = r.item.video
+          ? AnimPool.video
+          : (r.item.len <= 200 * 1024 ? AnimPool.small : AnimPool.big);
+      _pool = pool;
+      if (!AnimSlots.instance.tryAcquire(this, pool)) {
         if (!_waitingSlot) {
           _waitingSlot = true;
           AnimSlots.instance.addListener(_onSlotFree);
@@ -253,8 +309,9 @@ class _PackImageState extends State<PackImage> {
       _release();
       if (_bytes == null) {
         setState(() => _failed = true);
-        _scheduleRetry();
       }
+      // Kichik rasm turgan bo'lsa ham to'liq elementni qayta urinib ko'radi.
+      _scheduleRetry();
     }
   }
 
@@ -288,7 +345,7 @@ class _PackImageState extends State<PackImage> {
   void _onSlotFree() {
     final r = _ref;
     if (!mounted || r == null || !_waitingSlot) return;
-    if (AnimSlots.instance.tryAcquire(this)) {
+    if (AnimSlots.instance.tryAcquire(this, _pool)) {
       _stopWaiting();
       _slot = true;
       unawaited(_loadFull(r, _gen));
@@ -353,7 +410,31 @@ class PackMediaView extends StatefulWidget {
 }
 
 class _PackMediaViewState extends State<PackMediaView> {
-  bool _sound = false;
+  bool get _sound => PackSoundHub.instance.isOn(this);
+
+  @override
+  void initState() {
+    super.initState();
+    PackSoundHub.instance.addListener(_onHub);
+    // Sarlavha hali xotirada bo'lmasa — video ekani keyin ma'lum bo'ladi.
+    final ref = parsePackRef(widget.file);
+    if (ref != null && PackService.instance.cachedItem(ref.$1, ref.$2) == null) {
+      unawaited(PackService.instance.resolve(ref.$1, ref.$2).then((_) {
+        if (mounted) setState(() {});
+      }));
+    }
+  }
+
+  void _onHub() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    PackSoundHub.instance.removeListener(_onHub);
+    PackSoundHub.instance.off(this);
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -365,7 +446,11 @@ class _PackMediaViewState extends State<PackMediaView> {
     return GestureDetector(
       onTap: () {
         if (video) {
-          setState(() => _sound = !_sound);
+          if (_sound) {
+            PackSoundHub.instance.off(this);
+          } else {
+            PackSoundHub.instance.on(this);
+          }
           return;
         }
         Navigator.of(context).push(MaterialPageRoute<void>(

@@ -1428,7 +1428,8 @@ class _PackPageState extends State<_PackPage>
             padding: const EdgeInsets.all(3),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(12),
-              child: PackImage(pack: pick.pack, item: pick.item, size: cell - 6),
+              child: PackImage(
+                  pack: pick.pack, item: pick.item, size: cell - 6, animate: true),
             ),
           ),
         );
@@ -1535,6 +1536,7 @@ class _PackPageState extends State<_PackPage>
                               ? (w - gaps) * r.cells[j].aspect / sum
                               : r.height * r.cells[j].aspect,
                           height: r.height,
+                          animate: true,
                           fit: BoxFit.cover,
                         ),
                       ),
@@ -1848,7 +1850,8 @@ class _EmojiPageState extends State<_EmojiPage>
           scale: 0.8,
           child: Padding(
             padding: EdgeInsets.all(cell * 0.14),
-            child: PackImage(pack: packs[k].id, item: it.id, size: cell * 0.72),
+            child: PackImage(
+                pack: packs[k].id, item: it.id, size: cell * 0.72, animate: true),
           ),
         );
       },

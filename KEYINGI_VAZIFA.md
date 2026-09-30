@@ -4444,3 +4444,13 @@ va "O'chirish" tugmalari, sarlavhada "Rad etilganlarni tozalash". Server:
 o'chadi: `packs::cleanup_rejected` (cron'dan, kuniga bir marta 03:00 UTC) va har
 job tugaganda. Telefondagi nusxalar (`aru_packs/sent/`) server yozuvi yo'qolgach
 o'chadi. Eski (yangilanishdan oldingi) rad etilganlarda asl fayl yo'q — faqat "O'chirish".
+
+## Animatsiya hamma joyda (kam bosim bilan) va GIF ovozi
+
+`pack_views.dart`: `AnimSlots` uch hovuzli — KICHIK (<= 200 KB, emoji: past/o'rta/kuchli
+telefonda 6/14/24), KATTA (stiker/GIF: 2/5/9), VIDEO (ovozli MP4: 1/2). Panelda
+(stiker, emoji, GIF devori) va to'plam oynasida ham `animate: true`: faqat ekrandagi
+katakchalar (lazy ro'yxat) va faqat joy bor bo'lganicha animatsiya qiladi, qolgani
+kichik statik rasm; joy bo'shasa boshlanadi. To'liq element olinmasa qayta uriniladi.
+`PackSoundHub`: izohda GIF ovozi yoqilsa asosiy pleyer pauza bo'ladi; pleyerda play
+bosilsa GIF ovozi o'chadi, animatsiya davom etadi (`video_player_screen.dart`).
