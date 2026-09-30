@@ -9,7 +9,6 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:video_player/video_player.dart';
 
@@ -18,6 +17,7 @@ import '../services/storage_janitor.dart';
 import '../theme/app_background.dart';
 import '../widgets/glass.dart';
 import '../widgets/pack_emoji_picker.dart';
+import '../widgets/tg_attach_sheet.dart';
 import 'pack_video_trim_screen.dart';
 
 enum _Stage { ready, uploading, done, failed }
@@ -39,32 +39,17 @@ class _Draft {
   bool get isVideo => isPackVideo(sniffed);
 }
 
-/// Galereyadan rasm/video tanlaydi. Bir usul xato bersa, keyingisi
-/// sinaladi (ba'zi telefonlarda ko'p tanlash ishlamaydi). Natija:
-/// (fayllar, xato matni — hech qaysi usul ishlamasa).
-Future<(List<XFile>, String?)> pickPackMedia() async {
-  final picker = ImagePicker();
-  Object? last;
+/// Rasm/video tanlaydi: chatdagi kabi Telegram uslubidagi oyna
+/// (galereya to'ri, ko'p tanlash, "Fayl" bo'limi). Natija: (fayllar, xato).
+Future<(List<XFile>, String?)> pickPackMedia(BuildContext context) async {
   try {
-    return (await picker.pickMultipleMedia(limit: 20), null);
-  } catch (e) {
-    last = e;
-  }
-  // Ba'zi telefonlarning galereyasi videoni tanlagichga bera olmaydi
-  // (`no_valid_video_uri`). Shunda tizim fayl tanlagichi ishlatiladi.
-  try {
-    final r = await FilePicker.platform
-        .pickFiles(type: FileType.media, allowMultiple: true);
+    final r = await showTgAttachSheet(context, packMode: true);
     if (r == null) return (<XFile>[], null);
-    return ([
-      for (final f in r.files)
-        if (f.path != null) XFile(f.path!)
-    ], null);
+    return ([for (final i in r.items) XFile(i.file.path)], null);
   } catch (e) {
-    last = e;
+    final t = '$e'.replaceAll(RegExp(r'\s+'), ' ');
+    return (<XFile>[], t.length > 120 ? t.substring(0, 120) : t);
   }
-  final t = '$last'.replaceAll(RegExp(r'\s+'), ' ');
-  return (<XFile>[], t.length > 120 ? t.substring(0, 120) : t);
 }
 
 class PackAddScreen extends StatefulWidget {
@@ -149,7 +134,7 @@ class _PackAddScreenState extends State<PackAddScreen> {
   static String _mb(int b) => '${(b / 1048576).toStringAsFixed(1)} MB';
 
   Future<void> _more() async {
-    final (more, err) = await pickPackMedia();
+    final (more, err) = await pickPackMedia(context);
     if (err != null && mounted) {
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('Fayl tanlab bo\'lmadi: $err')));

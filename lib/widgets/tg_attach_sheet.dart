@@ -53,14 +53,16 @@ class TgAttachResult {
   const TgAttachResult(this.items, this.caption);
 }
 
-Future<TgAttachResult?> showTgAttachSheet(BuildContext context) {
+/// [packMode] — to'plamga rasm/video tanlash: musiqa va izoh yo'q, 20 tagacha.
+Future<TgAttachResult?> showTgAttachSheet(BuildContext context,
+    {bool packMode = false}) {
   return showModalBottomSheet<TgAttachResult>(
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
     backgroundColor: Colors.transparent,
     barrierColor: Colors.black54,
-    builder: (_) => const _AttachSheet(),
+    builder: (_) => _AttachSheet(packMode: packMode),
   );
 }
 
@@ -77,14 +79,15 @@ abstract final class _C {
 enum _Tab { gallery, file, music }
 
 class _AttachSheet extends StatefulWidget {
-  const _AttachSheet();
+  final bool packMode;
+  const _AttachSheet({this.packMode = false});
 
   @override
   State<_AttachSheet> createState() => _AttachSheetState();
 }
 
 class _AttachSheetState extends State<_AttachSheet> {
-  static const _max = 10;
+  int get _max => widget.packMode ? 20 : 10;
 
   final _caption = TextEditingController();
   _Tab _tab = _Tab.gallery;
@@ -142,8 +145,8 @@ class _AttachSheetState extends State<_AttachSheet> {
       final back = cams.firstWhere(
           (c) => c.lensDirection == CameraLensDirection.back,
           orElse: () => cams.first);
-      final c = CameraController(back, ResolutionPreset.low,
-          enableAudio: false);
+      final c =
+          CameraController(back, ResolutionPreset.low, enableAudio: false);
       await c.initialize();
       if (!mounted) {
         await c.dispose();
@@ -244,9 +247,7 @@ class _AttachSheetState extends State<_AttachSheet> {
       final f = await e.originFile ?? await e.file;
       if (f == null) continue;
       final video = e.type == AssetType.video;
-      out.add(TgAttachItem(
-          f,
-          music ? 'file' : (video ? 'video' : 'image'),
+      out.add(TgAttachItem(f, music ? 'file' : (video ? 'video' : 'image'),
           e.title ?? f.path.split('/').last,
           durationMs: video ? e.duration * 1000 : 0));
     }
@@ -264,20 +265,25 @@ class _AttachSheetState extends State<_AttachSheet> {
     for (final f in r.files) {
       final p = f.path;
       if (p == null) continue;
-      items.add(TgAttachItem(File(p), 'file', f.name));
+      final ext = p.split('.').last.toLowerCase();
+      final kind = !widget.packMode
+          ? 'file'
+          : ['mp4', 'webm', 'mov', 'mkv', '3gp'].contains(ext)
+              ? 'video'
+              : 'image';
+      items.add(TgAttachItem(File(p), kind, f.name));
     }
     if (items.isEmpty) return;
     Navigator.of(context).pop(TgAttachResult(items, ''));
   }
 
-  int get _count =>
-      _tab == _Tab.music ? _pickedSongs.length : _selected.length;
+  int get _count => _tab == _Tab.music ? _pickedSongs.length : _selected.length;
 
   @override
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
     final safe = MediaQuery.paddingOf(context).bottom;
-    final showCaption = _count > 0 && _tab != _Tab.file;
+    final showCaption = _count > 0 && (_tab != _Tab.file || widget.packMode);
     return Padding(
       padding: EdgeInsets.only(bottom: bottomInset),
       child: DraggableScrollableSheet(
@@ -341,9 +347,9 @@ class _AttachSheetState extends State<_AttachSheet> {
                     transitionBuilder: (c, a) => FadeTransition(
                       opacity: a,
                       child: SlideTransition(
-                        position: Tween(
-                                begin: const Offset(0, 0.3), end: Offset.zero)
-                            .animate(a),
+                        position:
+                            Tween(begin: const Offset(0, 0.3), end: Offset.zero)
+                                .animate(a),
                         child: c,
                       ),
                     ),
@@ -515,23 +521,27 @@ class _AttachSheetState extends State<_AttachSheet> {
           color: const Color(0xFF3D9AEA),
           title: 'Ichki xotira',
           subtitle: 'Fayl tizimidan istalgan fayl',
-          onTap: () => _pickFiles(FileType.any),
+          onTap: () =>
+              _pickFiles(widget.packMode ? FileType.media : FileType.any),
+          divider: !widget.packMode,
         ),
-        _DocRow(
-          icon: Icons.image_rounded,
-          color: const Color(0xFF4FC76A),
-          title: 'Galereya',
-          subtitle: 'Rasm va videoni siqilmagan holda yuborish',
-          onTap: () => _pickFiles(FileType.media),
-        ),
-        _DocRow(
-          icon: Icons.music_note_rounded,
-          color: const Color(0xFFF07F3A),
-          title: 'Musiqa',
-          subtitle: 'Audio fayllar',
-          onTap: () => _pickFiles(FileType.audio),
-          divider: false,
-        ),
+        if (!widget.packMode)
+          _DocRow(
+            icon: Icons.image_rounded,
+            color: const Color(0xFF4FC76A),
+            title: 'Galereya',
+            subtitle: 'Rasm va videoni siqilmagan holda yuborish',
+            onTap: () => _pickFiles(FileType.media),
+          ),
+        if (!widget.packMode)
+          _DocRow(
+            icon: Icons.music_note_rounded,
+            color: const Color(0xFFF07F3A),
+            title: 'Musiqa',
+            subtitle: 'Audio fayllar',
+            onTap: () => _pickFiles(FileType.audio),
+            divider: false,
+          ),
         const _SectionShadow(),
         const Padding(
           padding: EdgeInsets.fromLTRB(21, 14, 21, 8),
@@ -609,12 +619,13 @@ class _AttachSheetState extends State<_AttachSheet> {
                 selected: _tab == _Tab.file,
                 onTap: () => _setTab(_Tab.file),
               ),
-              _AttachTab(
-                label: 'Musiqa',
-                anim: 'tab_music',
-                selected: _tab == _Tab.music,
-                onTap: () => _setTab(_Tab.music),
-              ),
+              if (!widget.packMode)
+                _AttachTab(
+                  label: 'Musiqa',
+                  anim: 'tab_music',
+                  selected: _tab == _Tab.music,
+                  onTap: () => _setTab(_Tab.music),
+                ),
             ],
           ),
         ),
@@ -629,26 +640,37 @@ class _AttachSheetState extends State<_AttachSheet> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          Expanded(
-            child: _GlassPill(
-              radius: 24,
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: TextField(
-                controller: _caption,
-                minLines: 1,
-                maxLines: 4,
-                style: const TextStyle(color: Colors.white, fontSize: 16),
-                cursorColor: _C.accent,
-                decoration: const InputDecoration(
-                  border: InputBorder.none,
-                  isDense: true,
-                  contentPadding: EdgeInsets.symmetric(vertical: 14),
-                  hintText: 'Izoh qo\'shish...',
-                  hintStyle: TextStyle(color: _C.hint),
+          if (widget.packMode)
+            Expanded(
+              child: _GlassPill(
+                radius: 24,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                child: Text('$_count ta tanlandi',
+                    style: const TextStyle(color: Colors.white, fontSize: 16)),
+              ),
+            )
+          else
+            Expanded(
+              child: _GlassPill(
+                radius: 24,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: TextField(
+                  controller: _caption,
+                  minLines: 1,
+                  maxLines: 4,
+                  style: const TextStyle(color: Colors.white, fontSize: 16),
+                  cursorColor: _C.accent,
+                  decoration: const InputDecoration(
+                    border: InputBorder.none,
+                    isDense: true,
+                    contentPadding: EdgeInsets.symmetric(vertical: 14),
+                    hintText: 'Izoh qo\'shish...',
+                    hintStyle: TextStyle(color: _C.hint),
+                  ),
                 ),
               ),
             ),
-          ),
           const SizedBox(width: 8),
           _SendButton(
             count: _count,
@@ -858,8 +880,8 @@ class _SendButton extends StatelessWidget {
             Container(
               width: 52,
               height: 52,
-              decoration: const BoxDecoration(
-                  color: _C.accent, shape: BoxShape.circle),
+              decoration:
+                  const BoxDecoration(color: _C.accent, shape: BoxShape.circle),
               child: busy
                   ? const Padding(
                       padding: EdgeInsets.all(15),
@@ -1004,8 +1026,7 @@ class _DocRow extends StatelessWidget {
                 right: 0,
                 bottom: 0,
                 child: SizedBox(
-                    height: 0.6,
-                    child: ColoredBox(color: Color(0x14FFFFFF))),
+                    height: 0.6, child: ColoredBox(color: Color(0x14FFFFFF))),
               ),
           ],
         ),
@@ -1046,8 +1067,8 @@ class _SongRow extends StatelessWidget {
             Container(
               width: 44,
               height: 44,
-              decoration: const BoxDecoration(
-                  color: _C.accent, shape: BoxShape.circle),
+              decoration:
+                  const BoxDecoration(color: _C.accent, shape: BoxShape.circle),
               child: const Icon(Icons.play_arrow_rounded,
                   color: Colors.white, size: 28),
             ),
@@ -1161,8 +1182,7 @@ class _AssetTileState extends State<_AssetTile> {
     }
   }
 
-  String _dur(int s) =>
-      '${s ~/ 60}:${(s % 60).toString().padLeft(2, '0')}';
+  String _dur(int s) => '${s ~/ 60}:${(s % 60).toString().padLeft(2, '0')}';
 
   @override
   Widget build(BuildContext context) {
