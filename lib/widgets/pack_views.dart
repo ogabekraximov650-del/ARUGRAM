@@ -18,6 +18,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 import '../services/device_perf.dart';
+import '../screens/pack_detail_screen.dart';
 import '../services/pack_service.dart';
 import 'media_placeholder.dart';
 
@@ -280,12 +281,18 @@ class PackMediaView extends StatelessWidget {
     final ref = parsePackRef(file);
     if (ref == null) return MediaPlaceholder(type: type);
     final size = type == 'gif' ? 200.0 : 150.0;
-    return PackImage(
-      pack: ref.$1,
-      item: ref.$2,
-      size: size,
-      animate: true,
-      fallback: MediaPlaceholder(type: type),
+    // Telegram'dagidek: xabardagi stikerga bosilsa to'plami ochiladi va
+    // uni o'ziga qo'shish mumkin.
+    return GestureDetector(
+      onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+          builder: (_) => PackDetailScreen(packId: ref.$1))),
+      child: PackImage(
+        pack: ref.$1,
+        item: ref.$2,
+        size: size,
+        animate: true,
+        fallback: MediaPlaceholder(type: type),
+      ),
     );
   }
 }

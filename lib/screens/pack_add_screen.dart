@@ -84,18 +84,24 @@ class _PackAddScreenState extends State<PackAddScreen> {
           d.problem =
               '${_mb(d.size)} — 5 MB dan katta, yuklab bo\'lmaydi';
         } else if (d.isVideo) {
+          // Davomiylikni o'qib bo'lmasa ham yuborish mumkin: kesish oynasi
+          // yopiq, video butunligicha ketadi va serverda tekshiriladi.
           final c = VideoPlayerController.file(f);
           try {
-            await c.initialize();
+            await c.initialize().timeout(const Duration(seconds: 12));
             d.durationMs = c.value.duration.inMilliseconds;
           } catch (_) {
-            d.problem = 'Videoni ochib bo\'lmadi';
+            d.durationMs = 0;
           } finally {
-            await c.dispose();
+            try {
+              await c.dispose();
+            } catch (_) {}
           }
           final max = packMaxSeconds(widget.pack.kind) * 1000;
           d.trimA = 0;
-          d.trimB = d.durationMs < max ? d.durationMs : max;
+          d.trimB = d.durationMs <= 0
+              ? 0
+              : (d.durationMs < max ? d.durationMs : max);
         }
       } catch (_) {
         d.problem = 'Faylni o\'qib bo\'lmadi';
@@ -332,7 +338,7 @@ class _PackAddScreenState extends State<PackAddScreen> {
                         style: const TextStyle(
                             color: AppColors.danger, fontSize: 12.5)),
                   ] else ...[
-                    if (d.isVideo)
+                    if (d.isVideo && d.durationMs > 0)
                       Padding(
                         padding: const EdgeInsets.only(top: 3),
                         child: Text(
@@ -358,7 +364,7 @@ class _PackAddScreenState extends State<PackAddScreen> {
                               ? Icons.emoji_emotions_outlined
                               : null,
                         ),
-                        if (d.isVideo)
+                        if (d.isVideo && d.durationMs > 0)
                           _chip(
                             onTap: locked ? null : () => _trim(d),
                             icon: Icons.content_cut_rounded,

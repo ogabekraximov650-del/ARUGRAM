@@ -31,6 +31,7 @@ import 'package:lottie/lottie.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../screens/my_packs_screen.dart';
+import '../screens/pack_detail_screen.dart';
 import '../services/auth_service.dart';
 import '../services/pack_service.dart';
 import 'pack_preview.dart';
@@ -456,6 +457,45 @@ class _TgMediaPanelState extends State<TgMediaPanel> {
             bottom: 10,
             child: Center(child: _TabPill(tab: _tab, onTap: _go)),
           ),
+          // ── ⚙ (GIF va Stikerlar sahifasida): to'plamlarni boshqarish ──
+          Positioned(
+            right: 10,
+            bottom: 12,
+            child: AnimatedScale(
+              scale: _tab != 0 ? 1 : 0.4,
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeOutBack,
+              child: AnimatedOpacity(
+                opacity: _tab != 0 ? 1 : 0,
+                duration: const Duration(milliseconds: 160),
+                child: IgnorePointer(
+                  ignoring: _tab == 0,
+                  child: _Press(
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => MyPacksScreen(
+                            initialKind:
+                                _tab == 1 ? PackKind.gif : PackKind.sticker),
+                      ),
+                    ),
+                    child: Container(
+                      width: 44,
+                      height: 44,
+                      decoration: const BoxDecoration(
+                        color: _Pal.pill,
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(color: Colors.black45, blurRadius: 12)
+                        ],
+                      ),
+                      child: const Icon(Icons.settings_outlined,
+                          color: Colors.white70, size: 22),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
           // ── ⌫ (faqat Emoji sahifasida; paydo bo'lish animatsiyasi) ──
           Positioned(
             right: 10,
@@ -652,31 +692,41 @@ class _BackspaceState extends State<_Backspace> {
 /// Bo'lim sarlavhasi.
 class _Header extends StatelessWidget {
   final String title;
-  const _Header(this.title);
+
+  /// Bosilsa — to'plam ochiladi (Telegram: to'plam nomiga bosish).
+  final VoidCallback? onTap;
+  const _Header(this.title, {this.onTap});
 
   /// `StickerSetNameCell`: balandligi 27 dp, nom 15, qalin.
   static const height = 30.0;
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: height,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(15, 9, 15, 0),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                    color: _Pal.hint,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700),
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: SizedBox(
+        height: height,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(15, 9, 15, 0),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      color: _Pal.hint,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700),
+                ),
               ),
-            ),
-          ],
+              if (onTap != null)
+                const Icon(Icons.chevron_right_rounded,
+                    color: _Pal.hint, size: 20),
+            ],
+          ),
         ),
       ),
     );
@@ -1155,6 +1205,11 @@ class _PackPageState extends State<_PackPage>
         builder: (_) => MyPacksScreen(initialKind: widget.kind)));
   }
 
+  void _openPack(PackInfo p) {
+    Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => PackDetailScreen(packId: p.id, initial: p)));
+  }
+
   void _pick(PackPick p) {
     HapticFeedback.selectionClick();
     PackService.instance.noteRecent(p);
@@ -1303,7 +1358,7 @@ class _PackPageState extends State<_PackPage>
       headers: [
         const _Header('Saralanganlar'),
         const _Header('Yaqinda ishlatilgan'),
-        for (final p in packs) _Header(p.title),
+        for (final p in packs) _Header(p.title, onTap: () => _openPack(p)),
       ],
       jump: _jump,
       onSection: (i) => setState(() => _section = i),
@@ -1340,14 +1395,14 @@ class _PackPageState extends State<_PackPage>
       const gap = 2.0;
       const target = 118.0;
       final w = box.maxWidth;
-      final entries = <Object>[]; // String — sarlavha; _GifRow — qator
+      final entries = <Object>[]; // _GifHead — sarlavha; _GifRow — qator
       final offsets = <double>[];
       var y = 0.0;
 
-      void addSection(String title, List<_GifCell> cells) {
+      void addSection(String title, List<_GifCell> cells, {PackInfo? pack}) {
         offsets.add(y);
         if (cells.isEmpty) return;
-        entries.add(title);
+        entries.add(_GifHead(title, pack));
         y += _Header.height;
         var row = <_GifCell>[];
         var sum = 0.0;
@@ -1392,7 +1447,7 @@ class _PackPageState extends State<_PackPage>
               (it.w > 0 && it.h > 0) ? (it.w / it.h).clamp(0.5, 3.0) : 1.0,
               packs[i].id,
             ),
-        ]);
+        ], pack: packs[i]);
       }
       _offsets = offsets;
       return ListView.builder(
@@ -1401,7 +1456,10 @@ class _PackPageState extends State<_PackPage>
         itemCount: entries.length,
         itemBuilder: (_, i) {
           final e = entries[i];
-          if (e is String) return _Header(e);
+          if (e is _GifHead) {
+            final pk = e.pack;
+            return _Header(e.title, onTap: pk == null ? null : () => _openPack(pk));
+          }
           final r = e as _GifRow;
           final gaps = gap * (r.cells.length - 1);
           final sum = r.cells.fold<double>(0, (a, c) => a + c.aspect);
@@ -1444,6 +1502,12 @@ class _PackPageState extends State<_PackPage>
       );
     });
   }
+}
+
+class _GifHead {
+  final String title;
+  final PackInfo? pack;
+  const _GifHead(this.title, this.pack);
 }
 
 class _GifCell {
@@ -1668,7 +1732,10 @@ class _EmojiPageState extends State<_EmojiPage>
     ];
     final headers = <Widget>[
       const _Header('Yaqinda ishlatilgan'),
-      for (final p in packs) _Header(p.title),
+      for (final p in packs)
+        _Header(p.title,
+            onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                builder: (_) => PackDetailScreen(packId: p.id, initial: p)))),
       for (final g in groups) _Header(g.title),
     ];
     return Column(

@@ -4301,3 +4301,20 @@ Telegram Android (`ContentPreviewViewer.java`, GitHub'dan o'qildi) dagidek:
   faqat kichik (<= 300 KB) element o'rniga yuklanadi; tanlangan stiker/GIF
   xabar chiqmasdan oldin oldindan yuklanadi; eski rad etilgan yozuvlar
   (30 kun) bazadan tozalanadi.
+
+### "Hech narsa ko'rinmayapti" sababi topildi (2026-09)
+
+`PackService.header()` va `_thumb()` da `future.whenComplete(() => map.remove(k))`
+yozilgan edi. `Map.remove` o'sha Future'ning O'ZINI qaytaradi, `whenComplete`
+esa qaytarilgan Future'ni kutadi — ya'ni o'zini o'zi abadiy kutib qotardi:
+sarlavha va kichik rasmlar HECH QACHON tugamasdi (panel va to'plam oynasida
+bo'sh kataklar). Endi `whenComplete(() { map.remove(k); })` (figurali qavs bilan).
+Qayta yuz bermasligi uchun `test/pack_pipeline_test.dart`: Python yasagan
+HAQIQIY to'plam fayli (`test/fixtures/sample_pack.arp`) Telegram'siz o'qiladi
+(`PackService.rangeOverride`). Qoida: `whenComplete` ichida `=>` bilan
+Future qaytaradigan narsa yozmang.
+
+Qulaylik (Telegram `EmojiView.java` asosida): ⚙ tugma (GIF/Stikerlar
+sahifasida to'plamlarni boshqarish), to'plam nomiga bosilsa to'plam ochiladi,
+xabardagi stikerga bosilsa to'plami ochiladi va uni qo'shish mumkin; video
+davomiyligi o'qilmasa ham yuborish mumkin (server tekshiradi).

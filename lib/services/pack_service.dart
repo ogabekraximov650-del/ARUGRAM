@@ -929,7 +929,11 @@ class PackService extends ChangeNotifier {
     final mem = _headers[info.id];
     if (mem != null && mem.ver >= info.version) return Future.value(mem);
     return _headerFlight[info.id] ??=
-        _loadHeader(info).whenComplete(() => _headerFlight.remove(info.id));
+        _loadHeader(info).whenComplete(() {
+          // DIQQAT: `=> remove(...)` yozilmasin — u o'sha Future'ning o'zini
+          // qaytaradi va `whenComplete` uni kutib, abadiy qotib qoladi.
+          _headerFlight.remove(info.id);
+        });
   }
 
   Future<PackHeader?> _loadHeader(PackInfo info) async {
@@ -1050,7 +1054,9 @@ class PackService extends ChangeNotifier {
     if (we > h.thumbEnd) we = h.thumbEnd;
     final wk = 'w${info.id}_${info.version}_$ws';
     final blob = await (_flight[wk] ??= _range(info.file, h.base + ws, we - ws)
-        .whenComplete(() => _flight.remove(wk)));
+        .whenComplete(() {
+      _flight.remove(wk); // `=>` EMAS (yuqoridagi izohga qarang)
+    }));
     if (blob == null || blob.length < we - ws) {
       if (blob != null) {
         lastError = 'Kichik rasm bloki to\'liq kelmadi (${blob.length}/${we - ws})';
@@ -1118,8 +1124,14 @@ class PackService extends ChangeNotifier {
 
   /// Fayldan [len] bayt (`offset` dan) — mahalliy Telegram manbasidan,
   /// allaqachon ochilgan holda. Bo'lmasa `null`.
+  /// Testlar uchun: Telegram o'rniga shu funksiya baytlarni beradi.
+  @visibleForTesting
+  Future<Uint8List?> Function(String file, int offset, int len)? rangeOverride;
+
   Future<Uint8List?> _range(String file, int offset, int len) {
     if (len <= 0) return Future.value(Uint8List(0));
+    final o = rangeOverride;
+    if (o != null) return o(file, offset, len);
     return _gate.run(() async {
       final tg = TelegramService.instance;
       try {
