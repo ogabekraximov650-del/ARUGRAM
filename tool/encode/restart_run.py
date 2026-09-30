@@ -98,6 +98,9 @@ def main():
     except urllib.error.HTTPError as e:
         print(f"::warning::Worker release -> {e.code} {e.read()[:150]!r}")
 
+    if os.environ.get("NO_DISPATCH") == "1":
+        print("Yangi run ISHGA TUSHIRILMADI (dispatch=false) — faqat to'xtatildi va bo'shatildi.")
+        return
     code, _ = gh("POST", f"/repos/{REPO}/actions/workflows/encode.yml/dispatches",
                  {"ref": "main"}, ok=(204,))
     print("Yangi run ishga tushirildi" if code == 204 else f"dispatch -> {code}")

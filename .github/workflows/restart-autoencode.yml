@@ -6,7 +6,12 @@ name: Avto-kodlashni qayta boshlash (yangi akkaunt repo'si)
 # `tool/encode/gh_token.enc` da (yoki NEW_GH_TOKEN secret'i).
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      dispatch:
+        description: Bekor qilgach yangi run ishga tushirilsinmi
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -22,4 +27,5 @@ jobs:
           NEW_GH_TOKEN: ${{ secrets.NEW_GH_TOKEN }}
           ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
           API_BASE: ${{ secrets.API_BASE }}
+          NO_DISPATCH: ${{ inputs.dispatch == false && '1' || '0' }}
         run: python3 tool/encode/restart_run.py
