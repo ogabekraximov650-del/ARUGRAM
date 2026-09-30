@@ -188,7 +188,7 @@ class _StorageScreenState extends State<StorageScreen> {
     // TALAB (foydalanuvchi): "Tozalash tugmasini bosganda Telegram'dagidek
     // jo'ja supurgida supurayotgan animatsiyasi chiqsin". Parda DARHOL
     // chiqadi va tozalash tez tugasa ham animatsiya ko'rinib ulgurishi
-    // uchun kamida 1.6 soniya turadi.
+    // uchun kamida 3.5 soniya turadi (foiz shu vaqtda tekis o'sadi).
     final progress = ValueNotifier<double>(0);
     var done = false;
     var shownAt = -1;
@@ -218,14 +218,24 @@ class _StorageScreenState extends State<StorageScreen> {
       });
     });
 
-    await _svc.clear(labels, onProgress: (v) => progress.value = v);
+    // Foiz haqiqiy ishga emas, vaqtga bog'langan (tekis o'sadi): tozalash tez
+    // tugasa ham animatsiya va foiz sekin, ko'rinib ulgurib ketadi. Ish
+    // tugamagan bo'lsa 95% da kutadi.
+    const minMs = 3500;
+    final sw = Stopwatch()..start();
+    final tick = Timer.periodic(const Duration(milliseconds: 50), (_) {
+      final r = sw.elapsedMilliseconds / minMs;
+      progress.value = done ? r.clamp(0.0, 1.0) : r.clamp(0.0, 0.95);
+    });
+    await _svc.clear(labels);
     done = true;
-    progress.value = 1;
-    if (shownAt > 0 && mounted) {
-      final left = 1600 - (DateTime.now().millisecondsSinceEpoch - shownAt);
-      if (left > 0) await Future<void>.delayed(Duration(milliseconds: left));
-      if (mounted) Navigator.of(context).pop();
+    while (sw.elapsedMilliseconds < minMs) {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
     }
+    tick.cancel();
+    progress.value = 1;
+    await Future<void>.delayed(const Duration(milliseconds: 350));
+    if (shownAt > 0 && mounted) Navigator.of(context).pop();
     await sheetClosed.future
         .timeout(const Duration(seconds: 2), onTimeout: () {});
     progress.dispose();
@@ -1269,20 +1279,20 @@ class _ClearingView extends StatelessWidget {
       top: false,
       child: SizedBox(
         width: double.infinity,
-        height: 350,
+        // Ekran eniga to'liq, bo'yiga yarmi.
+        height: MediaQuery.sizeOf(context).height * 0.5,
         child: ValueListenableBuilder<double>(
           valueListenable: progress,
           builder: (context, v, _) {
             final p = v.clamp(0.0, 1.0);
             return Column(
-              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const SizedBox(height: 16),
                 // Telegram `utyan_cache`: supurgi bilan supurayotgan
                 // jo'ja (takrorlanib o'ynaydi).
                 SizedBox(
-                  width: 150,
-                  height: 150,
+                  width: 170,
+                  height: 170,
                   child: Lottie.asset(
                     'assets/tg_anim/utyan_cache.json',
                     repeat: true,
