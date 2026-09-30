@@ -4208,7 +4208,7 @@ ular yengil WebP ga aylantiriladi va ilova ularni Telegram'siz o'zi ko'rsatadi.
 4. Ko'rish: to'plam oynasida faqat statik thumb; xabarda animatsiya faqat
    `AnimSlots` bo'sh joyi bo'lsa (kuchsiz telefonda 2, o'rtachada 5,
    kuchlida 9), qolganlari statik. Hamma narsa `aru_packs/` da shifrlab
-   keshlanadi (250 MB dan oshsa eng eskilari o'chadi).
+   keshlanadi; disk hajmi CHEKLANMAGAN (foydalanuvchi talabi).
 
 **Turso (kam yozuv).** Elementlar bazada EMAS, faylning sarlavhasida.
 Jadvallar: `pack_db` (to'plam + Actions ijarasi), `pack_ops` (kutayotgan/

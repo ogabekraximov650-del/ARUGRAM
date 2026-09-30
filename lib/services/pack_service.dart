@@ -21,7 +21,8 @@
 //       - to'plam oynasida faqat kichik STATIK rasmlar (~5 KB);
 //       - animatsiya faqat kerak bo'lganda va bir vaqtda cheklangan
 //         sondagina (`AnimSlots`, telefon kuchiga qarab);
-//       - hamma narsa diskda shifrlab keshlanadi, bir marta olinadi;
+//       - hamma narsa diskda shifrlab keshlanadi (hajm CHEKLANMAGAN —
+//         foydalanuvchi talabi), bir marta olinadi;
 //       - bo'laklar bir vaqtda 4 tadan ortiq olinmaydi.
 //   * YOZUV: hamma yozuv `SyncQueue` orqali (Turso pul turadi).
 //     Element qo'shish: fayl shifrlab bot chatiga yuklanadi (`pki_...`),
@@ -1068,7 +1069,6 @@ class PackService extends ChangeNotifier {
   // ── DISK (shifrlangan) ───────────────────────────────────────
 
   static const String _label = 'pack_item';
-  static const int _diskMax = 250 * 1024 * 1024;
 
   String? _root() {
     final r = RustCore.instance.rootDirPath;
@@ -1098,34 +1098,6 @@ class PackService extends ChangeNotifier {
       if (sealed == null) return; // shifrlash yo'q — ochiq yozilmaydi
       await f.parent.create(recursive: true);
       await f.writeAsBytes(sealed);
-    } catch (_) {}
-  }
-
-  /// Disk keshi [_diskMax] dan oshsa eng eskilari o'chadi.
-  Future<void> trimDisk() async {
-    try {
-      final r = _root();
-      if (r == null) return;
-      final dir = Directory(r);
-      if (!await dir.exists()) return;
-      final files = <(File, int, DateTime)>[];
-      var total = 0;
-      await for (final e in dir.list(recursive: true, followLinks: false)) {
-        if (e is File) {
-          final st = await e.stat();
-          files.add((e, st.size, st.modified));
-          total += st.size;
-        }
-      }
-      if (total <= _diskMax) return;
-      files.sort((a, b) => a.$3.compareTo(b.$3));
-      for (final f in files) {
-        if (total <= _diskMax * 0.8) break;
-        try {
-          await f.$1.delete();
-          total -= f.$2;
-        } catch (_) {}
-      }
     } catch (_) {}
   }
 

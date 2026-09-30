@@ -15,7 +15,6 @@ import 'services/nav_inset.dart';
 import 'services/net_meter.dart';
 import 'services/offline_library.dart';
 import 'services/rust_bridge.dart';
-import 'services/pack_service.dart';
 import 'services/storage_janitor.dart';
 import 'services/sync_queue.dart';
 import 'services/traffic_service.dart';
@@ -229,11 +228,6 @@ Future<void> _main() async {
   // bo'lsa, nusxa qolib ketadi va ilova hajmi o'sib boradi —
   // shu sabab eski qoldiqlar ochilishda tozalanadi.
   unawaited(StorageJanitor.sweep());
-
-  // Emoji/GIF/stiker keshi 250 MB dan oshib ketmasin (ochilishni
-  // sekinlashtirmaslik uchun biroz kutiladi).
-  unawaited(Future<void>.delayed(
-      const Duration(seconds: 45), PackService.instance.trimDisk));
 
   runApp(const FulutterApp());
 }
