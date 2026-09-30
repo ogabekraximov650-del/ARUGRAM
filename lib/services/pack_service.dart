@@ -629,12 +629,32 @@ class PackService extends ChangeNotifier {
 
   int _newPackId() => (_rnd.nextInt(0x7fffffff) + 1) * 2097152 + _rnd.nextInt(2097152);
 
+  Timer? _flushTimer;
+
+  /// Amaldan keyin (bir necha amal bitta bo'lib) serverga yuboradi.
+  ///
+  /// Kunlik yuborish chegarasi (`SyncQueue.hardPerDay`) tarix va baholarga
+  /// ham kerak — to'plam amallari uni yeb qo'ymasin: 3 soniya kutiladi
+  /// (ketma-ket amallar bitta so'rovga tushadi) va kun chegarasiga
+  /// yaqinlashilsa majburan yuborilmaydi (odatdagi navbat o'zi yuboradi).
   void _flushSoon() {
-    unawaited(() async {
+    _flushTimer?.cancel();
+    _flushTimer = Timer(const Duration(seconds: 3), () async {
       try {
-        await SyncQueue.instance.flush(force: true);
+        final q = SyncQueue.instance;
+        if (q.sentToday < SyncQueue.hardPerDay - 10) {
+          await q.flush(force: true);
+        }
       } catch (_) {}
       await load(force: true);
+    });
+  }
+
+  /// Tanlangan element xabarda darhol chiqishi uchun oldindan yuklab qo'yadi.
+  void prefetch(int packId, int itemId) {
+    unawaited(() async {
+      final r = await resolve(packId, itemId);
+      if (r != null) await data(r);
     }());
   }
 

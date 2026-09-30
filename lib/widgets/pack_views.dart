@@ -22,7 +22,7 @@ import '../services/pack_service.dart';
 import 'media_placeholder.dart';
 
 /// Bir vaqtda nechta animatsiya ishlashi mumkin.
-class AnimSlots {
+class AnimSlots extends ChangeNotifier {
   AnimSlots._();
   static final AnimSlots instance = AnimSlots._();
 
@@ -41,7 +41,10 @@ class AnimSlots {
     return true;
   }
 
-  void release(Object owner) => _used.remove(owner);
+  /// Joy bo'shadi — kutayotganlar qayta urinadi (animatsiya keyin boshlanadi).
+  void release(Object owner) {
+    if (_used.remove(owner)) notifyListeners();
+  }
 }
 
 /// Bitta element rasmi.
@@ -81,7 +84,15 @@ class _PackImageState extends State<PackImage> {
   Uint8List? _bytes;
   bool _failed = false;
   bool _slot = false;
+  bool _waitingSlot = false;
   int _gen = 0;
+  int _retries = 0;
+  Timer? _retry;
+  PackRef? _ref;
+
+  /// Elementning o'zi shu hajmdan katta bo'lsa, kichik rasm o'rniga
+  /// yuklanmaydi (devorda bir vaqtda ko'p og'ir fayl olinmasin).
+  static const int _fallbackMax = 300 * 1024;
 
   @override
   void initState() {
@@ -95,9 +106,7 @@ class _PackImageState extends State<PackImage> {
     if (old.pack != widget.pack ||
         old.item != widget.item ||
         old.animate != widget.animate) {
-      _release();
-      _bytes = null;
-      _failed = false;
+      _reset();
       unawaited(_load());
     }
   }
@@ -105,8 +114,21 @@ class _PackImageState extends State<PackImage> {
   @override
   void dispose() {
     _gen++;
-    _release();
+    _retry?.cancel();
+    _reset(keepBytes: true);
     super.dispose();
+  }
+
+  void _reset({bool keepBytes = false}) {
+    _retry?.cancel();
+    _stopWaiting();
+    _release();
+    _ref = null;
+    _retries = 0;
+    if (!keepBytes) {
+      _bytes = null;
+      _failed = false;
+    }
   }
 
   void _release() {
@@ -116,6 +138,24 @@ class _PackImageState extends State<PackImage> {
     }
   }
 
+  void _stopWaiting() {
+    if (_waitingSlot) {
+      AnimSlots.instance.removeListener(_onSlotFree);
+      _waitingSlot = false;
+    }
+  }
+
+  /// Internet yo'q yoki to'plam hali ochilmadi — bir necha marta qayta uriniladi
+  /// (xabar abadiy bo'sh qolib ketmasin).
+  void _scheduleRetry() {
+    if (!mounted || _retries >= 3) return;
+    _retries++;
+    _retry?.cancel();
+    _retry = Timer(Duration(seconds: 6 * _retries), () {
+      if (mounted && _bytes == null) unawaited(_load());
+    });
+  }
+
   Future<void> _load() async {
     final gen = ++_gen;
     final svc = PackService.instance;
@@ -123,39 +163,79 @@ class _PackImageState extends State<PackImage> {
     if (!mounted || gen != _gen) return;
     if (r == null) {
       setState(() => _failed = true);
+      _scheduleRetry();
       return;
     }
+    _ref = r;
     // 1) tez: kichik statik rasm.
     final t = await svc.thumb(r);
     if (!mounted || gen != _gen) return;
-    if (t != null) setState(() => _bytes = t);
+    if (t != null) {
+      setState(() {
+        _bytes = t;
+        _failed = false;
+      });
+    }
     if (!widget.animate) {
       if (t == null) {
-        // Kichik rasm olinmadi — elementning o'zini sinab ko'ramiz
-        // (rasm ko'rinmay qolmasin).
-        final d = await svc.data(r);
-        if (!mounted || gen != _gen) return;
-        if (d != null && !r.item.animated) {
-          setState(() => _bytes = d);
-          return;
+        // Kichik rasm olinmadi — elementning o'zini sinab ko'ramiz (kichik
+        // bo'lsa), rasm ko'rinmay qolmasin.
+        if (!r.item.animated && r.item.len <= _fallbackMax) {
+          final d = await svc.data(r);
+          if (!mounted || gen != _gen) return;
+          if (d != null) {
+            setState(() {
+              _bytes = d;
+              _failed = false;
+            });
+            return;
+          }
         }
         setState(() => _failed = true);
+        _scheduleRetry();
       }
       return;
     }
-    // 2) elementning o'zi: animatsiya bo'lsa faqat bo'sh joy bo'lganda,
-    // statik bo'lsa doim (sifatliroq).
-    if (r.item.animated) {
-      if (!AnimSlots.instance.tryAcquire(this)) return;
+    await _loadFull(r, gen);
+  }
+
+  /// Elementning o'zi. Animatsiya bo'lsa faqat bo'sh joy ([AnimSlots]) bo'lganda;
+  /// bo'lmasa kichik statik rasm turadi va joy bo'shashini kutadi.
+  Future<void> _loadFull(PackRef r, int gen) async {
+    final svc = PackService.instance;
+    if (r.item.animated && !_slot) {
+      if (!AnimSlots.instance.tryAcquire(this)) {
+        if (!_waitingSlot) {
+          _waitingSlot = true;
+          AnimSlots.instance.addListener(_onSlotFree);
+        }
+        return;
+      }
       _slot = true;
     }
     final d = await svc.data(r);
     if (!mounted || gen != _gen) return;
     if (d != null) {
-      setState(() => _bytes = d);
+      setState(() {
+        _bytes = d;
+        _failed = false;
+      });
     } else {
       _release();
-      if (_bytes == null) setState(() => _failed = true);
+      if (_bytes == null) {
+        setState(() => _failed = true);
+        _scheduleRetry();
+      }
+    }
+  }
+
+  void _onSlotFree() {
+    final r = _ref;
+    if (!mounted || r == null || !_waitingSlot) return;
+    if (AnimSlots.instance.tryAcquire(this)) {
+      _stopWaiting();
+      _slot = true;
+      unawaited(_loadFull(r, _gen));
     }
   }
 

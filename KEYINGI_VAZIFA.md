@@ -4285,3 +4285,19 @@ Telegram Android (`ContentPreviewViewer.java`, GitHub'dan o'qildi) dagidek:
 - ⭐ Saralanganlar (`PackService.favorites`, telefonda `pack_fav_<tur>`) —
   panelning birinchi bo'limi. "Tovushsiz yuborish" va "Rejalashtirish"
   qilinmadi: bizda bunday xabar turlari yo'q.
+
+### Animatsiya qanday ishlaydi va tekshiruv tuzatishlari (2026-09)
+
+- Animatsiya — yengil animatsion WebP (<= 15-20 kadr/s, kichik o'lcham).
+  Panelda hech qachon animatsiya YO'Q (faqat statik thumb). Xabarda va katta
+  ko'rinishda o'ynaydi, lekin bir vaqtda ko'pi bilan `AnimSlots.max` ta
+  (kuchsiz 2, o'rtacha 5, kuchli 9); joy bo'lmasa statik thumb turadi va joy
+  bo'shashi bilan o'zi boshlanadi. Ekrandan chiqqan vidjet joyini qaytaradi.
+- Tuzatildi: xabar internet yo'qligidan bo'sh qolib ketmasin (3 marta qayta
+  uriniladi); to'plam amallari kunlik yuborish chegarasini yemasin (3 s
+  yig'iladi, kun chegarasiga 10 qolganda majburlanmaydi); bitta xabarga <= 20
+  maxsus emoji (server uzunlik chegarasi belgini kesib qo'ymasin); yuklash
+  paytida orqaga chiqib fayllarni o'chirib bo'lmaydi; kichik rasm olinmasa
+  faqat kichik (<= 300 KB) element o'rniga yuklanadi; tanlangan stiker/GIF
+  xabar chiqmasdan oldin oldindan yuklanadi; eski rad etilgan yozuvlar
+  (30 kun) bazadan tozalanadi.

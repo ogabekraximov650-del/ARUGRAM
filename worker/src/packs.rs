@@ -790,6 +790,11 @@ async fn job_finish(env: &Env, b: &Value) -> Result<Response> {
             ));
         }
     }
+    // Eski rad etilgan yozuvlar (30 kundan keyin) tozalanadi — jadval o'smasin.
+    stmts.push((
+        "DELETE FROM pack_ops WHERE state='rejected' AND created_at<?",
+        vec![arg_i(now_ms() - 30 * 24 * 60 * 60 * 1000)],
+    ));
     turso_batch(env, &stmts).await?;
 
     if changed && !old_file.is_empty() && old_file != new_file {

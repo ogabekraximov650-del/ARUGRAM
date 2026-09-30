@@ -57,7 +57,16 @@ class TgTextController extends TextEditingController {
   static const int _puaLimit = 900;
   final Map<int, PackPick> _packs = {};
 
+  /// Bitta xabarda ko'pi bilan shuncha maxsus emoji (har biri yuborilganda
+  /// ~25 belgi; server xabar uzunligini cheklaydi va belgi o'rtasidan
+  /// kesilib qolmasligi kerak).
+  static const int maxPerMessage = 20;
+
+  bool get canAddPackEmoji =>
+      text.runes.where(_packs.containsKey).length < maxPerMessage;
+
   void insertPackEmoji(PackPick p) {
+    if (!canAddPackEmoji) return;
     int? code;
     _packs.forEach((c, v) {
       if (v.pack == p.pack && v.item == p.item) code = c;
@@ -1149,6 +1158,8 @@ class _PackPageState extends State<_PackPage>
   void _pick(PackPick p) {
     HapticFeedback.selectionClick();
     PackService.instance.noteRecent(p);
+    // Xabar chiqqanda o'zi darhol ko'rinsin.
+    PackService.instance.prefetch(p.pack, p.item);
     widget.onPick?.call(p);
   }
 

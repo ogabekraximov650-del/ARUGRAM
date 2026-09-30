@@ -197,7 +197,16 @@ class _PackAddScreenState extends State<PackAddScreen> {
   Widget build(BuildContext context) {
     final p = widget.pack;
     final n = _sendable;
-    return AppBackground(
+    return PopScope(
+      // Yuklash paytida chiqib bo'lmaydi: fayllar hali o'qilyapti.
+      canPop: !_busy,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && _busy) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('Yuklash tugashini kuting')));
+        }
+      },
+      child: AppBackground(
       child: Scaffold(
         backgroundColor: Colors.transparent,
         appBar: AppBar(
@@ -250,7 +259,7 @@ class _PackAddScreenState extends State<PackAddScreen> {
                 },
               ),
       ),
-    );
+    ));
   }
 
   Widget _limits(PackInfo p) {
