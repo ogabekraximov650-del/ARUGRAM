@@ -9,6 +9,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:video_player/video_player.dart';
 
@@ -49,15 +50,16 @@ Future<(List<XFile>, String?)> pickPackMedia() async {
   } catch (e) {
     last = e;
   }
+  // Ba'zi telefonlarning galereyasi videoni tanlagichga bera olmaydi
+  // (`no_valid_video_uri`). Shunda tizim fayl tanlagichi ishlatiladi.
   try {
-    final one = await picker.pickMedia();
-    return (one == null ? <XFile>[] : [one], null);
-  } catch (e) {
-    last = e;
-  }
-  try {
-    final one = await picker.pickVideo(source: ImageSource.gallery);
-    return (one == null ? <XFile>[] : [one], null);
+    final r = await FilePicker.platform
+        .pickFiles(type: FileType.media, allowMultiple: true);
+    if (r == null) return (<XFile>[], null);
+    return ([
+      for (final f in r.files)
+        if (f.path != null) XFile(f.path!)
+    ], null);
   } catch (e) {
     last = e;
   }
