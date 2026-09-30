@@ -47,6 +47,11 @@ void main() {
       expect(
           sniffImage([...'RIFF'.codeUnits, 0, 0, 0, 0, ...'WEBP'.codeUnits]),
           'webp');
+      expect(sniffImage([0, 0, 0, 24, ...'ftypmp42'.codeUnits]), 'mp4');
+      expect(sniffImage([0x1A, 0x45, 0xDF, 0xA3, 0, 0, 0, 0]), 'webm');
+      expect(isPackVideo('mp4'), isTrue);
+      expect(isPackVideo('webm'), isTrue);
+      expect(isPackVideo('png'), isFalse);
       expect(sniffImage('MZ....'.codeUnits), '');
       expect(sniffImage(const []), '');
     });

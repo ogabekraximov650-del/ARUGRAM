@@ -31,6 +31,7 @@ XAVFSIZLIK:
 import asyncio
 import json
 import os
+import re
 import shutil
 import threading
 import time
@@ -87,7 +88,8 @@ def apply_ops(pack: arupack.Pack, ops: list, fetch) -> list:
             continue
         try:
             raw = fetch(op)
-            res = arunorm.normalize(raw, pack.kind, op.get("emoji", ""))
+            res = arunorm.normalize(raw, pack.kind, op.get("emoji", ""),
+                                    trim_of(op.get("file", "")))
             need = res_size(res) + 256
             if pack.data_size() + need + 256 * len(pack.items) > arupack.MAX_PACK:
                 raise arunorm.Rejected("to'plam to'ldi (1 GB)")
@@ -101,6 +103,12 @@ def apply_ops(pack: arupack.Pack, ops: list, fetch) -> list:
         except LookupError as e:
             results.append({"id": oid, "ok": False, "reason": str(e)[:200] or "fayl topilmadi"})
     return results
+
+
+def trim_of(name: str):
+    """Video bo'lagi fayl nomidan: `pki_..._t<boshi_ms>-<oxiri_ms>.bin`."""
+    m = re.search(r"_t(\d{1,9})-(\d{1,9})\.bin$", name or "")
+    return (int(m.group(1)), int(m.group(2))) if m else None
 
 
 def res_size(res) -> int:

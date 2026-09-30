@@ -4254,3 +4254,21 @@ arunorm,run,test_arupack}.py`, `tool/packs/packs.workflow.yml`, `lib/services/{p
 sync_queue}.dart`, `lib/widgets/{pack_views,tg_composer,emoji_text}.dart`,
 `lib/screens/{my_packs,pack_detail,admin_packs}_screen.dart`, testlar:
 `test/pack_test.dart`, `test/pack_widget_test.dart`.
+
+### To'plam qo'shish oynasi, ilova emojisi va video (2026-09)
+
+- **Qo'shish oynasi** (`pack_add_screen.dart`): tanlangan rasm/video KO'RINIB
+  turadi; har biri uchun mos emoji, videoni kesish, olib tashlash; hajm
+  (<= 5 MB) va uzunlik yuklashdan OLDIN tekshiriladi, sabab kartada chiqadi.
+- **Mos emoji** telefonning klaviaturasidan emas, ilovaning o'z Telegram
+  emoji oynasidan (`pack_emoji_picker.dart`, `TgEmoji` shrifti).
+- **Video** (MP4/WebM, faylning o'zi <= 5 MB): kesish oynasi
+  (`pack_video_trim_screen.dart`) — bo'lak fayl nomiga yoziladi
+  (`pki_..._t<boshi_ms>-<oxiri_ms>.bin`), kesish va yengil WebP ga aylantirish
+  Actions'da (`arunorm.py`, `ffmpeg`; 15 kadr/s, ovoz tashlanadi, emoji uchun
+  markazdan kvadrat). Uzunlik: emoji 5 s, stiker 8 s, GIF 15 s. Admin videoni
+  o'ynatib ko'radi (`admin_packs_screen.dart`). `packs.yml` ffmpeg o'rnatadi.
+- **Rasm ko'rinmasligi:** birinchi o'qishda 256 KB olinadi va undagi kichik
+  rasm/elementlar darhol keshga tushadi; kichik rasm olinmasa elementning
+  o'zi sinaladi; oxirgi xato to'plam oynasida yozib qo'yiladi
+  (`PackService.lastError`).

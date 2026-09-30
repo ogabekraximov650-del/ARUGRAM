@@ -10,13 +10,16 @@
 // admin uni o'z Telegram hisobi orqali ochadi (`TelegramService`).
 
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../services/pack_service.dart';
 import '../theme/app_background.dart';
 import '../widgets/glass.dart';
+import 'pack_video_trim_screen.dart';
 
 class AdminPacksScreen extends StatefulWidget {
   const AdminPacksScreen({super.key});
@@ -269,6 +272,9 @@ class _AdminPacksScreenState extends State<AdminPacksScreen> {
                         ),
                       );
                     }
+                    if (isPackVideo(sniffImage(b))) {
+                      return _AdminVideo(bytes: b, file: file);
+                    }
                     return ClipRRect(
                       borderRadius: BorderRadius.circular(14),
                       child: Image.memory(
@@ -336,6 +342,79 @@ class _AdminPacksScreenState extends State<AdminPacksScreen> {
           ],
         ),
       ),
+    );
+  }
+}
+
+
+/// Foydalanuvchi yuborgan VIDEO: vaqtinchalik faylga yoziladi va o'ynaydi
+/// (bosilsa to'xtaydi). Tanlangan bo'lak (fayl nomida) yozib qo'yiladi.
+class _AdminVideo extends StatefulWidget {
+  final Uint8List bytes;
+  final String file;
+  const _AdminVideo({required this.bytes, required this.file});
+
+  @override
+  State<_AdminVideo> createState() => _AdminVideoState();
+}
+
+class _AdminVideoState extends State<_AdminVideo> {
+  String? _path;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_write());
+  }
+
+  Future<void> _write() async {
+    try {
+      final dir = await getTemporaryDirectory();
+      final f = File('${dir.path}/admin_pack_${widget.file}.mp4');
+      await f.writeAsBytes(widget.bytes, flush: true);
+      if (mounted) setState(() => _path = f.path);
+    } catch (_) {}
+  }
+
+  @override
+  void dispose() {
+    final p = _path;
+    if (p != null) {
+      try {
+        File(p).deleteSync();
+      } catch (_) {}
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final m = RegExp(r'_t(\d{1,9})-(\d{1,9})\.bin$').firstMatch(widget.file);
+    final p = _path;
+    return Column(
+      children: [
+        SizedBox(
+          height: 240,
+          width: double.infinity,
+          child: p == null
+              ? const Center(
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Colors.white54))
+              : ClipRRect(
+                  borderRadius: BorderRadius.circular(14),
+                  child: PackVideoPreview(path: p, size: 240),
+                ),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Text(
+            m == null
+                ? 'Video (butunligicha)'
+                : 'Video · tanlangan bo\'lak ${fmtMs(int.parse(m.group(1)!))} – ${fmtMs(int.parse(m.group(2)!))}',
+            style: const TextStyle(color: Colors.white60, fontSize: 12.5),
+          ),
+        ),
+      ],
     );
   }
 }

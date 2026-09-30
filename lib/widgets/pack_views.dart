@@ -126,7 +126,17 @@ class _PackImageState extends State<PackImage> {
     if (!mounted || gen != _gen) return;
     if (t != null) setState(() => _bytes = t);
     if (!widget.animate) {
-      if (t == null) setState(() => _failed = true);
+      if (t == null) {
+        // Kichik rasm olinmadi — elementning o'zini sinab ko'ramiz
+        // (rasm ko'rinmay qolmasin).
+        final d = await svc.data(r);
+        if (!mounted || gen != _gen) return;
+        if (d != null && !r.item.animated) {
+          setState(() => _bytes = d);
+          return;
+        }
+        setState(() => _failed = true);
+      }
       return;
     }
     // 2) elementning o'zi: animatsiya bo'lsa faqat bo'sh joy bo'lganda,
@@ -164,8 +174,12 @@ class _PackImageState extends State<PackImage> {
       filterQuality: FilterQuality.low,
       // O'z o'lchamida dekodlanadi — xotira tejaladi.
       cacheWidth: math.max(16, (widget.size * dpr).round()),
-      errorBuilder: (_, __, ___) =>
-          widget.fallback ?? SizedBox(width: widget.size, height: widget.size),
+      errorBuilder: (_, __, ___) {
+        PackService.instance.lastError =
+            'Rasm dekodlanmadi (${b.length} bayt, pack ${widget.pack}/${widget.item})';
+        return widget.fallback ??
+            SizedBox(width: widget.size, height: widget.size);
+      },
     );
   }
 }

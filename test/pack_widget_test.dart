@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:soft/services/pack_service.dart';
 import 'package:soft/widgets/emoji_text.dart';
+import 'package:soft/widgets/pack_emoji_picker.dart';
 import 'package:soft/widgets/pack_views.dart';
 import 'package:soft/widgets/tg_composer.dart';
 
@@ -75,5 +76,27 @@ void main() {
     ));
     expect(t.takeException(), isNull);
     expect(find.text('GIF'), findsOneWidget);
+  });
+
+  testWidgets('emoji tanlash oynasi ilovaning o\'z emojilarini ko\'rsatadi',
+      (t) async {
+    String? picked;
+    await t.pumpWidget(MaterialApp(
+      home: Builder(
+        builder: (ctx) => Scaffold(
+          body: TextButton(
+            onPressed: () async => picked = await showPackEmojiPicker(ctx),
+            child: const Text('och'),
+          ),
+        ),
+      ),
+    ));
+    await t.tap(find.text('och'));
+    await t.pumpAndSettle();
+    expect(find.text('Mos emoji'), findsOneWidget);
+    expect(find.text('😀'), findsWidgets);
+    await t.tap(find.text('😀').first);
+    await t.pumpAndSettle();
+    expect(picked, '😀');
   });
 }

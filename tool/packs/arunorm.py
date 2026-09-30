@@ -9,12 +9,19 @@ Maqsad — kuchsiz telefonlar ko'tara olsin:
   * har elementga kichik statik rasm (thumb) yasaladi: to'plam oynasida
     faqat shu ko'rinadi, animatsiya esa faqat kerak bo'lganda ochiladi.
 
-Kiruvchi turlar: PNG, JPEG, GIF, WebP (animatsiyali ham). Fayl turi kengaytmadan
-emas, BAYTLARIDAN aniqlanadi. Chiqish hajmi <= 5 MB (`arupack.MAX_ITEM`).
+Kiruvchi turlar: PNG, JPEG, GIF, WebP (animatsiyali ham) va VIDEO (MP4/MOV,
+WebM). Fayl turi kengaytmadan emas, BAYTLARIDAN aniqlanadi. Video `ffmpeg`
+bilan kadrlarga ajratiladi (foydalanuvchi ilovada tanlagan bo'lak — `trim`
+— kesib olinadi, ovoz tashlanadi, emoji uchun markazdan kvadrat kesiladi),
+so'ng rasm animatsiyasi bilan bir xil yo'l. Chiqish hajmi <= 5 MB
+(`arupack.MAX_ITEM`).
 """
 
 import io
+import subprocess
+import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 
 from PIL import Image, ImageSequence, UnidentifiedImageError
 
@@ -58,6 +65,10 @@ def sniff(b: bytes) -> str:
         return "gif"
     if b[:4] == b"RIFF" and b[8:12] == b"WEBP":
         return "webp"
+    if b[4:8] == b"ftyp":
+        return "mp4"
+    if b[:4] == b"\x1a\x45\xdf\xa3":
+        return "webm"
     return ""
 
 
@@ -82,6 +93,64 @@ def _frames(im: Image.Image, lim: dict):
         if total / 1000.0 > lim["seconds"]:
             raise Rejected(f"animatsiya juda uzun (ko'pi bilan {lim['seconds']:.0f} soniya)")
     return frames
+
+
+VIDEO_FPS = 15
+
+
+def _run(cmd, timeout=180):
+    return subprocess.run(cmd, capture_output=True, timeout=timeout, check=True)
+
+
+def _video_frames(raw: bytes, kind: str, lim: dict, trim):
+    """Video -> (RGBA kadr, ms) ro'yxati va manba o'lchami. `trim` — (boshi_ms,
+    oxiri_ms) yoki None."""
+    with tempfile.TemporaryDirectory() as d:
+        src = Path(d) / "in.bin"
+        src.write_bytes(raw)
+        try:
+            out = _run(["ffprobe", "-v", "error", "-select_streams", "v:0",
+                        "-show_entries", "stream=width,height:format=duration",
+                        "-of", "csv=p=0", str(src)], 60).stdout.decode().split()
+            wh, dur = out[0].split(","), None
+            w0, h0 = int(wh[0]), int(wh[1])
+            dur = float(out[1].split(",")[-1]) if len(out) > 1 else float(wh[2])
+        except Exception:
+            raise Rejected("video o'qilmadi")
+        if w0 <= 0 or h0 <= 0 or max(w0, h0) > MAX_SOURCE_SIDE or dur <= 0:
+            raise Rejected("video o'lchami yoki davomiyligi noto'g'ri")
+        start, end = 0.0, dur
+        if trim:
+            start = max(0.0, min(dur, trim[0] / 1000.0))
+            end = max(start, min(dur, trim[1] / 1000.0))
+        length = end - start
+        if length < 0.2:
+            raise Rejected("tanlangan bo'lak juda qisqa")
+        if length > lim["seconds"] + 0.05:
+            raise Rejected(f"video juda uzun (ko'pi bilan {lim['seconds']:.0f} soniya)")
+        side = lim["side"]
+        vf = []
+        if kind == "emoji":
+            vf.append("crop='min(iw,ih)':'min(iw,ih)'")
+        vf.append(f"fps={VIDEO_FPS}")
+        vf.append(f"scale='min({side},iw)':'min({side},ih)':force_original_aspect_ratio=decrease")
+        try:
+            _run(["ffmpeg", "-v", "error", "-y", "-ss", f"{start:.3f}", "-t", f"{length:.3f}",
+                  "-i", str(src), "-an", "-vf", ",".join(vf),
+                  "-frames:v", str(lim["frames"] + 1), str(Path(d) / "f%04d.png")], 180)
+        except Exception:
+            raise Rejected("videoni qayta ishlab bo'lmadi")
+        files = sorted(Path(d).glob("f*.png"))
+        if not files:
+            raise Rejected("videodan kadr olinmadi")
+        if len(files) > lim["frames"]:
+            raise Rejected(f"kadrlar juda ko'p (ko'pi bilan {lim['frames']} ta)")
+        frames = []
+        for f in files:
+            with Image.open(f) as im:
+                frames.append((im.convert("RGBA"), 1000.0 / VIDEO_FPS))
+        w1, h1 = frames[0][0].size
+        return frames, w1, h1
 
 
 def _drop_fast(frames):
@@ -110,8 +179,9 @@ def _encode(frames, scale, quality, side_w, side_h):
     return buf.getvalue(), w, h
 
 
-def normalize(raw: bytes, kind: str, emoji: str = "") -> Result:
-    """Foydalanuvchi faylini to'plam elementiga aylantiradi (yoki `Rejected`)."""
+def normalize(raw: bytes, kind: str, emoji: str = "", trim=None) -> Result:
+    """Foydalanuvchi faylini to'plam elementiga aylantiradi (yoki `Rejected`).
+    `trim` — video uchun (boshi_ms, oxiri_ms)."""
     if kind not in LIMITS:
         raise Rejected("noto'g'ri tur")
     lim = LIMITS[kind]
@@ -121,11 +191,14 @@ def normalize(raw: bytes, kind: str, emoji: str = "") -> Result:
     if len(raw) > arupack.MAX_ITEM:
         raise Rejected("fayl 5 MB dan katta")
     try:
-        im = Image.open(io.BytesIO(raw))
-        w0, h0 = im.size
-        if w0 <= 0 or h0 <= 0 or max(w0, h0) > MAX_SOURCE_SIDE:
-            raise Rejected(f"rasm o'lchami juda katta (ko'pi bilan {MAX_SOURCE_SIDE} px)")
-        frames = _frames(im, lim)
+        if fmt in ("mp4", "webm"):
+            frames, w0, h0 = _video_frames(raw, kind, lim, trim)
+        else:
+            im = Image.open(io.BytesIO(raw))
+            w0, h0 = im.size
+            if w0 <= 0 or h0 <= 0 or max(w0, h0) > MAX_SOURCE_SIDE:
+                raise Rejected(f"rasm o'lchami juda katta (ko'pi bilan {MAX_SOURCE_SIDE} px)")
+            frames = _frames(im, lim)
     except Rejected:
         raise
     except (UnidentifiedImageError, OSError, ValueError, SyntaxError, EOFError,

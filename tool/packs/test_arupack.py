@@ -126,6 +126,59 @@ class NormalizeTests(unittest.TestCase):
             arunorm.normalize(png()[:40], "sticker")
 
 
+def make_video(seconds=3, w=320, h=180, fmt="mp4"):
+    import shutil
+    import subprocess
+    if not shutil.which("ffmpeg"):
+        return None
+    with tempfile.TemporaryDirectory() as d:
+        out = Path(d) / f"v.{fmt}"
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i",
+                        f"testsrc=duration={seconds}:size={w}x{h}:rate=25", str(out)],
+                       check=True)
+        return out.read_bytes()
+
+
+class VideoTests(unittest.TestCase):
+    def test_video_animatsiyaga_aylanadi(self):
+        raw = make_video()
+        if raw is None:
+            self.skipTest("ffmpeg yo'q")
+        self.assertEqual(arunorm.sniff(raw), "mp4")
+        r = arunorm.normalize(raw, "gif")
+        self.assertTrue(r.animated)
+        self.assertLessEqual(len(r.data), arupack.MAX_ITEM)
+        self.assertLessEqual(max(r.w, r.h), 480)
+
+    def test_kesib_olish_va_emoji_kvadrat(self):
+        raw = make_video(seconds=6)
+        if raw is None:
+            self.skipTest("ffmpeg yo'q")
+        r = arunorm.normalize(raw, "emoji", trim=(1000, 3000))
+        self.assertEqual(r.w, r.h)
+        self.assertLessEqual(r.w, 128)
+        im = Image.open(io.BytesIO(r.data))
+        # 2 soniya * 15 kadr/s ~ 30 kadr
+        self.assertTrue(20 <= im.n_frames <= 32, im.n_frames)
+
+    def test_juda_uzun_video_rad_etiladi(self):
+        raw = make_video(seconds=6)
+        if raw is None:
+            self.skipTest("ffmpeg yo'q")
+        with self.assertRaises(arunorm.Rejected):
+            arunorm.normalize(raw, "emoji")  # 6 s > 5 s
+        with self.assertRaises(arunorm.Rejected):
+            arunorm.normalize(raw, "emoji", trim=(0, 100))  # juda qisqa
+
+    def test_buzuq_video(self):
+        with self.assertRaises(arunorm.Rejected):
+            arunorm.normalize(b"\x00\x00\x00\x18ftypmp42" + b"junk" * 50, "gif")
+
+    def test_kesim_nomdan_olinadi(self):
+        self.assertEqual(packs_run.trim_of("pki_1_2_ab_t1500-4200.bin"), (1500, 4200))
+        self.assertIsNone(packs_run.trim_of("pki_1_2_ab.bin"))
+
+
 class ApplyOpsTests(unittest.TestCase):
     def test_bir_element_xatosi_qolganlarga_tegmaydi(self):
         pack = arupack.Pack(9, "sticker", "T")

@@ -46,6 +46,10 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: ffmpeg (video uchun)
+        if: steps.peek.outputs.pending != '0'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+
       - name: Python paketlari
         if: steps.peek.outputs.pending != '0'
         run: pip install --no-cache-dir -r tool/packs/requirements.txt

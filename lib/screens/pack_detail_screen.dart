@@ -14,10 +14,10 @@ import 'package:image_picker/image_picker.dart';
 
 import '../services/auth_service.dart';
 import '../services/pack_service.dart';
-import '../services/storage_janitor.dart';
 import '../theme/app_background.dart';
 import '../widgets/glass.dart';
 import '../widgets/pack_views.dart';
+import 'pack_add_screen.dart';
 
 class PackDetailScreen extends StatefulWidget {
   final int packId;
@@ -32,8 +32,6 @@ class _PackDetailScreenState extends State<PackDetailScreen> {
   final _svc = PackService.instance;
   PackHeader? _header;
   PackInfo? _fetched;
-  bool _uploading = false;
-  String _progress = '';
 
   @override
   void initState() {
@@ -117,86 +115,22 @@ class _PackDetailScreenState extends State<PackDetailScreen> {
 
   Future<void> _add() async {
     final p = _current();
-    if (p == null || _uploading) return;
+    if (p == null) return;
     List<XFile> picked;
     try {
-      picked = await ImagePicker().pickMultiImage(limit: 20);
+      // Rasm ham, video ham (Telegram'dagidek).
+      picked = await ImagePicker().pickMultipleMedia(limit: 20);
     } catch (_) {
-      _say('Rasm tanlab bo\'lmadi');
+      _say('Fayl tanlab bo\'lmadi');
       return;
     }
     if (picked.isEmpty || !mounted) return;
-
-    // Bitta rasm bo'lsa — unga mos emoji so'raladi (ixtiyoriy).
-    var emoji = '';
-    if (picked.length == 1 && p.kind != PackKind.gif) {
-      final ctl = TextEditingController();
-      final r = await showDialog<String>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          backgroundColor: AppColors.card,
-          title: const Text('Mos emoji (ixtiyoriy)',
-              style: TextStyle(color: Colors.white, fontSize: 16)),
-          content: TextField(
-            controller: ctl,
-            autofocus: true,
-            style: const TextStyle(color: Colors.white, fontSize: 22),
-            decoration: const InputDecoration(
-              hintText: '😀',
-              hintStyle: TextStyle(color: Colors.white24),
-            ),
-          ),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.of(ctx).pop(''),
-                child: const Text('O\'tkazish')),
-            TextButton(
-                onPressed: () => Navigator.of(ctx).pop(ctl.text),
-                child: const Text('Yuklash')),
-          ],
-        ),
-      );
-      if (r == null || !mounted) {
-        unawaited(StorageJanitor.dropPicked(picked.first.path));
-        return;
-      }
-      emoji = r;
-    }
-
-    setState(() => _uploading = true);
-    var ok = 0;
-    String? firstError;
-    for (var i = 0; i < picked.length; i++) {
-      if (!mounted) return;
-      setState(() => _progress = '${i + 1} / ${picked.length}');
-      final err = await _svc.addItem(
-        p,
-        picked[i].path,
-        emoji: emoji,
-        onProgress: (sent, total) {
-          if (!mounted || total <= 0) return;
-          setState(() => _progress =
-              '${i + 1} / ${picked.length} · ${(sent * 100 / total).floor()}%');
-        },
-      );
-      unawaited(StorageJanitor.dropPicked(picked[i].path));
-      if (err == null) {
-        ok++;
-      } else {
-        firstError ??= err;
-      }
-    }
-    if (!mounted) return;
-    setState(() {
-      _uploading = false;
-      _progress = '';
-    });
-    if (ok > 0) {
-      _say(ok == picked.length
-          ? '$ok ta yuborildi — admin ko\'rib chiqadi'
-          : '$ok ta yuborildi. Qolganlari: ${firstError ?? 'xato'}');
-    } else {
-      _say(firstError ?? 'Yuborilmadi');
+    // Qo'shish oynasi: nima yuborilayotgani ko'rinadi, emoji tanlanadi,
+    // video kesiladi.
+    final n = await Navigator.of(context).push<int>(MaterialPageRoute(
+        builder: (_) => PackAddScreen(pack: p, files: picked)));
+    if (n != null && n > 0 && mounted) {
+      _say('$n ta yuborildi — admin ko\'rib chiqadi');
     }
   }
 
@@ -313,15 +247,9 @@ class _PackDetailScreenState extends State<PackDetailScreen> {
             ? FloatingActionButton.extended(
                 backgroundColor: AppColors.accent,
                 foregroundColor: Colors.white,
-                onPressed: _uploading ? null : _add,
-                icon: _uploading
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white))
-                    : const Icon(Icons.add_photo_alternate_rounded),
-                label: Text(_uploading ? _progress : 'Rasm qo\'shish'),
+                onPressed: _add,
+                icon: const Icon(Icons.add_photo_alternate_rounded),
+                label: const Text('Qo\'shish'),
               )
             : null,
         body: ListView(
@@ -348,8 +276,8 @@ class _PackDetailScreenState extends State<PackDetailScreen> {
                 child: Center(
                   child: Text(
                     mine
-                        ? 'To\'plam bo\'sh. "Rasm qo\'shish" tugmasi bilan '
-                            'rasm yuboring — admin tasdiqlagach shu yerda '
+                        ? 'To\'plam bo\'sh. "Qo\'shish" tugmasi bilan '
+                            'rasm yoki video yuboring — admin tasdiqlagach shu yerda '
                             'ko\'rinadi.'
                         : 'To\'plam hali bo\'sh.',
                     textAlign: TextAlign.center,
@@ -366,7 +294,15 @@ class _PackDetailScreenState extends State<PackDetailScreen> {
                     child: CircularProgressIndicator(
                         strokeWidth: 2.4, color: Colors.white54)),
               )
-            else
+            else ...[
+              if (_svc.lastError.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Text('Oxirgi xato: ${_svc.lastError}',
+                      style: TextStyle(
+                          color: AppColors.danger.withValues(alpha: 0.9),
+                          fontSize: 11.5)),
+                ),
               GridView.builder(
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
@@ -394,6 +330,7 @@ class _PackDetailScreenState extends State<PackDetailScreen> {
                   );
                 },
               ),
+            ],
           ],
         ),
       ),

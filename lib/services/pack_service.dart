@@ -393,7 +393,11 @@ class _Lru {
   }
 }
 
-/// Fayl turini BAYTLARIDAN aniqlaydi (kengaytmaga ishonilmaydi).
+/// Fayl turini BAYTLARIDAN aniqlaydi (kengaytmaga ishonilmaydi):
+/// png, jpeg, gif, webp, mp4, webm; tanib bo'lmasa bo'sh satr.
+bool isPackVideo(String sniffed) => sniffed == 'mp4' || sniffed == 'webm';
+
+
 String sniffImage(List<int> b) {
   if (b.length >= 8 &&
       b[0] == 0x89 &&
@@ -407,6 +411,22 @@ String sniffImage(List<int> b) {
   }
   if (b.length >= 6 && b[0] == 0x47 && b[1] == 0x49 && b[2] == 0x46) {
     return 'gif';
+  }
+  // MP4 / MOV: 4-8 baytlarda "ftyp".
+  if (b.length >= 12 &&
+      b[4] == 0x66 &&
+      b[5] == 0x74 &&
+      b[6] == 0x79 &&
+      b[7] == 0x70) {
+    return 'mp4';
+  }
+  // WebM / MKV (EBML).
+  if (b.length >= 4 &&
+      b[0] == 0x1A &&
+      b[1] == 0x45 &&
+      b[2] == 0xDF &&
+      b[3] == 0xA3) {
+    return 'webm';
   }
   if (b.length >= 12 &&
       b[0] == 0x52 &&
@@ -441,6 +461,9 @@ class PackService extends ChangeNotifier {
   bool _loaded = false;
   bool _loading = false;
   String? error;
+
+  /// Oxirgi rasm/fayl o'qish xatosi (diagnostika: ekranda ko'rsatiladi).
+  String lastError = '';
 
   /// Obuna bo'lingan, lekin server hali bilmagan to'plamlar (darhol
   /// ko'rinsin).
@@ -664,10 +687,16 @@ class PackService extends ChangeNotifier {
 
   /// Elementni yuklaydi (admin ko'rib chiqishi uchun). Muvaffaqiyatda `null`,
   /// aks holda xato matni.
+  ///
+  /// Rasm (PNG, JPG, GIF, WebP) yoki video (MP4, WebM). Video uchun
+  /// [trimStartMs]..[trimEndMs] — ilovada tanlangan bo'lak: u fayl nomiga
+  /// yoziladi (`_t<boshi>-<oxiri>`), kesishni Actions bajaradi. Hajm <= 5 MB.
   Future<String?> addItem(
     PackInfo pack,
     String path, {
     String emoji = '',
+    int trimStartMs = 0,
+    int trimEndMs = 0,
     void Function(int sent, int total)? onProgress,
   }) async {
     final uid = AuthService.instance.user?.id ?? 0;
@@ -688,15 +717,19 @@ class PackService extends ChangeNotifier {
     if (size > kPackItemMaxBytes) {
       return 'Fayl 5 MB dan katta (${(size / 1048576).toStringAsFixed(1)} MB)';
     }
-    final head = await f.openRead(0, 16).fold<List<int>>([], (a, b) => a..addAll(b));
-    if (sniffImage(head).isEmpty) {
-      return 'Faqat PNG, JPG, GIF yoki WebP rasm yuklash mumkin';
+    final head = await f.openRead(0, 32).fold<List<int>>([], (a, b) => a..addAll(b));
+    final kindOfFile = sniffImage(head);
+    if (kindOfFile.isEmpty) {
+      return 'Faqat rasm (PNG, JPG, GIF, WebP) yoki video (MP4, WebM) yuklash mumkin';
     }
+    final trim = isPackVideo(kindOfFile) && trimEndMs > trimStartMs
+        ? '_t$trimStartMs-$trimEndMs'
+        : '';
     if (!TelegramService.instance.authorized) {
       return 'Fayl Telegram orqali yuklanadi — avval Telegram hisobini ulang';
     }
     final name = 'pki_${uid}_${DateTime.now().millisecondsSinceEpoch}'
-        '_${_rnd.nextInt(0xffff).toRadixString(16)}.bin';
+        '_${_rnd.nextInt(0xffff).toRadixString(16)}$trim.bin';
     final err = await TelegramService.instance.uploadFile(
       path,
       name,
@@ -885,8 +918,9 @@ class PackService extends ChangeNotifier {
       _headers[info.id] = disk;
       return disk;
     }
-    // Fayl boshidan 64 KB: preamble (16 bayt) + sarlavha odatda sig'adi.
-    final first = await _range(info.file, 0, 65536);
+    // Fayl boshidan 256 KB: preamble (16 bayt) + sarlavha + ko'p kichik rasm
+    // odatda sig'adi (kichik to'plam butunlay).
+    final first = await _range(info.file, 0, 262144);
     if (first == null || first.length < 16) return disk;
     final bd = ByteData.sublistView(first);
     if (first[0] != 0x41 || first[1] != 0x52 || first[2] != 0x55 || first[3] != 0x50) {
@@ -907,9 +941,29 @@ class PackService extends ChangeNotifier {
       if (h.id != info.id) return disk;
       _headers[info.id] = h;
       DiskCache.writeOne('pack_hdr_${info.id}', h.toCache());
+      _seed(info, h, bytes);
       return h;
     } catch (_) {
       return disk;
+    }
+  }
+
+  /// Birinchi o'qishda kelgan baytlar ichida to'liq turgan kichik rasm va
+  /// elementlar darhol keshga tushadi (kichik to'plam uchun qo'shimcha
+  /// so'rov kerak bo'lmaydi).
+  void _seed(PackInfo info, PackHeader h, Uint8List bytes) {
+    for (final it in h.items) {
+      void take(String prefix, int off, int len) {
+        if (len <= 0 || h.base + off + len > bytes.length) return;
+        final piece =
+            Uint8List.sublistView(bytes, h.base + off, h.base + off + len);
+        final k = '${prefix}${info.id}_${it.id}';
+        _mem.put(k, piece);
+        unawaited(_diskPut(info.id, k, piece));
+      }
+
+      take('t', it.thumbOff, it.thumbLen);
+      take('d', it.off, it.len);
     }
   }
 
@@ -978,6 +1032,9 @@ class PackService extends ChangeNotifier {
     final blob = await (_flight[wk] ??= _range(info.file, h.base + ws, we - ws)
         .whenComplete(() => _flight.remove(wk)));
     if (blob == null || blob.length < we - ws) {
+      if (blob != null) {
+        lastError = 'Kichik rasm bloki to\'liq kelmadi (${blob.length}/${we - ws})';
+      }
       _failed[key] = DateTime.now();
       return null;
     }
@@ -1048,7 +1105,10 @@ class PackService extends ChangeNotifier {
       try {
         _touch(file);
         final url = await tg.prepare(file);
-        if (url == null) return null;
+        if (url == null) {
+          lastError = 'Telegram fayli ochilmadi ($file)';
+          return null;
+        }
         final r = await http
             .get(Uri.parse(url),
                 headers: {'Range': 'bytes=$offset-${offset + len - 1}'})
@@ -1057,9 +1117,11 @@ class PackService extends ChangeNotifier {
             (r.statusCode == 200 && r.bodyBytes.length == len)) {
           return r.bodyBytes;
         }
+        lastError = 'Telegram javobi ${r.statusCode} ($file, $offset+$len)';
         tg.invalidate(file);
         return null;
-      } catch (_) {
+      } catch (e) {
+        lastError = 'O\'qib bo\'lmadi: $e';
         tg.invalidate(file);
         return null;
       }
