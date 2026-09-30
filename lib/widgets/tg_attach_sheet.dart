@@ -56,14 +56,14 @@ class TgAttachResult {
 
 /// [packMode] — to'plamga rasm/video tanlash: musiqa va izoh yo'q, 20 tagacha.
 Future<TgAttachResult?> showTgAttachSheet(BuildContext context,
-    {bool packMode = false}) {
+    {bool packMode = false, Set<String>? exts}) {
   return showModalBottomSheet<TgAttachResult>(
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
     backgroundColor: Colors.transparent,
     barrierColor: Colors.black54,
-    builder: (_) => _AttachSheet(packMode: packMode),
+    builder: (_) => _AttachSheet(packMode: packMode, exts: exts),
   );
 }
 
@@ -81,7 +81,8 @@ enum _Tab { gallery, file, music }
 
 class _AttachSheet extends StatefulWidget {
   final bool packMode;
-  const _AttachSheet({this.packMode = false});
+  final Set<String>? exts;
+  const _AttachSheet({this.packMode = false, this.exts});
 
   @override
   State<_AttachSheet> createState() => _AttachSheetState();
@@ -113,7 +114,8 @@ class _AttachSheetState extends State<_AttachSheet>
   bool _fileAccess = true;
   final List<File> _pickedFiles = [];
 
-  Set<String>? get _exts => widget.packMode ? kMediaExts : null;
+  Set<String>? get _exts =>
+      widget.packMode ? (widget.exts ?? kMediaExts) : null;
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState s) {

@@ -41,7 +41,8 @@ class _Draft {
 
 /// Rasm/video tanlaydi: chatdagi kabi Telegram uslubidagi oyna
 /// (galereya to'ri, ko'p tanlash, "Fayl" bo'limi). Natija: (fayllar, xato).
-Future<(List<XFile>, String?)> pickPackMedia(BuildContext context) async {
+Future<(List<XFile>, String?)> pickPackMedia(BuildContext context,
+    {String kind = ''}) async {
   try {
     final r = await showTgAttachSheet(context, packMode: true);
     if (r == null) return (<XFile>[], null);
@@ -134,7 +135,7 @@ class _PackAddScreenState extends State<PackAddScreen> {
   static String _mb(int b) => '${(b / 1048576).toStringAsFixed(1)} MB';
 
   Future<void> _more() async {
-    final (more, err) = await pickPackMedia(context);
+    final (more, err) = await pickPackMedia(context, kind: widget.pack.kind);
     if (err != null && mounted) {
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('Fayl tanlab bo\'lmadi: $err')));

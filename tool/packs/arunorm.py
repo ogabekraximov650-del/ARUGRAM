@@ -4,8 +4,8 @@ Maqsad — kuchsiz telefonlar ko'tara olsin:
   * o'lcham cheklanadi (stiker 512, emoji 128, GIF 480 px);
   * animatsiya sekundiga ko'pi bilan 20 kadr (ortiqcha kadrlar tashlanadi,
     vaqti oldingi kadrga qo'shiladi — tezlik o'zgarmaydi);
-  * uzunlik va kadrlar soni cheklanadi (juda og'ir animatsiya RAD etiladi,
-    kesib tashlanmaydi — egasiga sababi aytiladi);
+  * kadrlar soni va uzunlik CHEKLANMAYDI (faqat 5 MB); rasm ham,
+    animatsiya ham qabul qilinadi;
   * har elementga kichik statik rasm (thumb) yasaladi: to'plam oynasida
     faqat shu ko'rinadi, animatsiya esa faqat kerak bo'lganda ochiladi.
 
@@ -29,13 +29,13 @@ import arupack
 
 # Ochiq holatda shuncha piksel/kadr o'qiladi — "dekompressiya bombasi"dan himoya.
 Image.MAX_IMAGE_PIXELS = 40_000_000
-MAX_SOURCE_SIDE = 4096
 
 LIMITS = {
     #           eng katta tomon, kadrlar, soniya, yumshoq hajm chegarasi
-    "sticker": dict(side=512, frames=150, seconds=8.0, soft=512 * 1024),
-    "emoji":   dict(side=128, frames=90,  seconds=5.0, soft=256 * 1024),
-    "gif":     dict(side=480, frames=200, seconds=15.0, soft=3 * 1024 * 1024),
+    # Kadrlar soni va uzunlik CHEKLANMAYDI (foydalanuvchi talabi); faqat 5 MB.
+    "sticker": dict(side=512, soft=512 * 1024),
+    "emoji":   dict(side=128, soft=256 * 1024),
+    "gif":     dict(side=480, soft=3 * 1024 * 1024),
 }
 MAX_FPS = 20
 # Kichik rasm (thumb) o'lchami: GIF devorida katta ko'rinadi, shu sabab kattaroq.
@@ -78,21 +78,20 @@ def _fit(w: int, h: int, side: int):
     return max(1, round(w * k)), max(1, round(h * k))
 
 
-def _frames(im: Image.Image, lim: dict):
-    """(RGBA kadr, davomiyligi ms) ro'yxati — kadrlar/uzunlik chegarasi bilan."""
-    frames, total = [], 0.0
+def _frames(im: Image.Image, size):
+    """(RGBA kadr, davomiyligi ms) ro'yxati. Xotira to'lmasligi uchun har kadr
+    o'qilishi bilan `size` (w, h) gacha kichraytiriladi."""
+    frames = []
     for fr in ImageSequence.Iterator(im):
         d = fr.info.get("duration", im.info.get("duration", 100))
         d = float(d) if d and d > 0 else 100.0
         # 10 ms dan qisqa kadrlar brauzerlarda 100 ms ga aylanadi — biz ham.
         if d < 20:
             d = 100.0
-        frames.append((fr.convert("RGBA"), d))
-        total += d
-        if len(frames) > lim["frames"]:
-            raise Rejected(f"kadrlar juda ko'p (ko'pi bilan {lim['frames']} ta)")
-        if total / 1000.0 > lim["seconds"]:
-            raise Rejected(f"animatsiya juda uzun (ko'pi bilan {lim['seconds']:.0f} soniya)")
+        rgba = fr.convert("RGBA")
+        if rgba.size != size:
+            rgba = rgba.resize(size, Image.LANCZOS)
+        frames.append((rgba, d))
     return frames
 
 
@@ -118,7 +117,7 @@ def _video_frames(raw: bytes, kind: str, lim: dict, trim):
             dur = float(out[1].split(",")[-1]) if len(out) > 1 else float(wh[2])
         except Exception:
             raise Rejected("video o'qilmadi")
-        if w0 <= 0 or h0 <= 0 or max(w0, h0) > MAX_SOURCE_SIDE or dur <= 0:
+        if w0 <= 0 or h0 <= 0 or dur <= 0:
             raise Rejected("video o'lchami yoki davomiyligi noto'g'ri")
         start, end = 0.0, dur
         if trim:
@@ -127,8 +126,6 @@ def _video_frames(raw: bytes, kind: str, lim: dict, trim):
         length = end - start
         if length < 0.2:
             raise Rejected("tanlangan bo'lak juda qisqa")
-        if length > lim["seconds"] + 0.05:
-            raise Rejected(f"video juda uzun (ko'pi bilan {lim['seconds']:.0f} soniya)")
         side = lim["side"]
         vf = []
         if kind == "emoji":
@@ -138,14 +135,12 @@ def _video_frames(raw: bytes, kind: str, lim: dict, trim):
         try:
             _run(["ffmpeg", "-v", "error", "-y", "-ss", f"{start:.3f}", "-t", f"{length:.3f}",
                   "-i", str(src), "-an", "-vf", ",".join(vf),
-                  "-frames:v", str(lim["frames"] + 1), str(Path(d) / "f%04d.png")], 180)
+                  str(Path(d) / "f%05d.png")], 600)
         except Exception:
             raise Rejected("videoni qayta ishlab bo'lmadi")
         files = sorted(Path(d).glob("f*.png"))
         if not files:
             raise Rejected("videodan kadr olinmadi")
-        if len(files) > lim["frames"]:
-            raise Rejected(f"kadrlar juda ko'p (ko'pi bilan {lim['frames']} ta)")
         frames = []
         for f in files:
             with Image.open(f) as im:
@@ -197,9 +192,9 @@ def normalize(raw: bytes, kind: str, emoji: str = "", trim=None) -> Result:
         else:
             im = Image.open(io.BytesIO(raw))
             w0, h0 = im.size
-            if w0 <= 0 or h0 <= 0 or max(w0, h0) > MAX_SOURCE_SIDE:
-                raise Rejected(f"rasm o'lchami juda katta (ko'pi bilan {MAX_SOURCE_SIDE} px)")
-            frames = _frames(im, lim)
+            if w0 <= 0 or h0 <= 0:
+                raise Rejected("rasm o'lchami noto'g'ri")
+            frames = _frames(im, _fit(w0, h0, lim["side"]))
     except Rejected:
         raise
     except (UnidentifiedImageError, OSError, ValueError, SyntaxError, EOFError,
@@ -213,9 +208,6 @@ def normalize(raw: bytes, kind: str, emoji: str = "", trim=None) -> Result:
         frames = _drop_fast(frames)
         animated = len(frames) > 1
     fw, fh = _fit(w0, h0, lim["side"])
-    if kind == "emoji" and abs(fw - fh) > max(fw, fh) * 0.15:
-        # Emoji matn ichida kvadrat katakda turadi — cho'zilgan rasm rad etiladi.
-        raise Rejected("emoji kvadrat bo'lishi kerak")
 
     best = None
     for scale in SCALES:

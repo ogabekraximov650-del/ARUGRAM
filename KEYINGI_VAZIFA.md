@@ -4378,3 +4378,12 @@ hisobining "Saqlangan xabarlar"iga (`me`) yuboriladi: `tool/notify/send_apk.py`.
 Sessiya `tool/encode/session.enc` dan (`ENCODE_TOKEN` bilan) nusxaga tiklanadi,
 `TG_API_ID`/`TG_API_HASH` secret'lari ishlatiladi. Qadam `continue-on-error`:
 xato bo'lsa build buzilmaydi. 4 ta APK — 4 ta xabar.
+
+## To'plam cheklovlari yengillashtirildi
+
+`tool/packs/arunorm.py`: kadrlar soni, animatsiya/video uzunligi, manba o'lchami
+va emoji kvadrat sharti bo'yicha rad etish OLIB TASHLANDI (foydalanuvchi talabi).
+Qoldi: 5 MB hajm, chiqish o'lchami (stiker 512 / emoji 128 / GIF 480 px), sekundiga
+20 kadr. Kadrlar o'qilishi bilan kichraytiriladi (xotira to'lmaydi). GIF
+to'plamida rasm ham, animatsiya ham mumkin. Ilovadagi tahrirlash oynasining
+tur bo'yicha eng uzun bo'lagi (5/8/15 s) saqlandi.

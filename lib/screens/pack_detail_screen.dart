@@ -117,7 +117,7 @@ class _PackDetailScreenState extends State<PackDetailScreen> {
     final p = _current();
     if (p == null) return;
     // Rasm ham, video ham (Telegram'dagidek).
-    final (picked, err) = await pickPackMedia(context);
+    final (picked, err) = await pickPackMedia(context, kind: p.kind);
     if (err != null) {
       _say('Fayl tanlab bo\'lmadi: $err');
       return;

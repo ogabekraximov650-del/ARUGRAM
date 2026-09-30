@@ -107,9 +107,10 @@ class NormalizeTests(unittest.TestCase):
         im = Image.open(io.BytesIO(r.data))
         self.assertLessEqual(im.n_frames, 12)
 
-    def test_emoji_kvadrat_bolishi_kerak(self):
-        with self.assertRaises(arunorm.Rejected):
-            arunorm.normalize(png(400, 100), "emoji")
+    def test_emoji_cheklanmagan_nisbat_va_gifda_rasm(self):
+        r0 = arunorm.normalize(png(400, 100), "emoji")  # endi rad etilmaydi
+        self.assertLessEqual(max(r0.w, r0.h), 128)
+        self.assertFalse(arunorm.normalize(png(200, 200), "gif").animated)  # rasm ham mumkin
         r = arunorm.normalize(png(300, 300), "emoji")
         self.assertLessEqual(max(r.w, r.h), 128)
 
@@ -118,8 +119,8 @@ class NormalizeTests(unittest.TestCase):
             arunorm.normalize(b"not an image at all", "sticker")
         with self.assertRaises(arunorm.Rejected):
             arunorm.normalize(png() + b"\0" * (6 * 1024 * 1024), "sticker")
-        with self.assertRaises(arunorm.Rejected):
-            arunorm.normalize(gif(200, ms=100), "emoji")  # 20 soniya > 5 s
+        # Kadrlar soni/uzunlik endi cheklanmaydi.
+        self.assertTrue(arunorm.normalize(gif(200, ms=100), "emoji").animated)
 
     def test_buzuq_png(self):
         with self.assertRaises(arunorm.Rejected):
@@ -161,12 +162,11 @@ class VideoTests(unittest.TestCase):
         # 2 soniya * 15 kadr/s ~ 30 kadr
         self.assertTrue(20 <= im.n_frames <= 32, im.n_frames)
 
-    def test_juda_uzun_video_rad_etiladi(self):
+    def test_uzun_video_qabul_qilinadi_qisqa_rad(self):
         raw = make_video(seconds=6)
         if raw is None:
             self.skipTest("ffmpeg yo'q")
-        with self.assertRaises(arunorm.Rejected):
-            arunorm.normalize(raw, "emoji")  # 6 s > 5 s
+        self.assertTrue(arunorm.normalize(raw, "emoji").animated)  # uzunlik cheklanmaydi
         with self.assertRaises(arunorm.Rejected):
             arunorm.normalize(raw, "emoji", trim=(0, 100))  # juda qisqa
 
