@@ -4411,3 +4411,10 @@ noma'lum rasm formati (BMP, TIFF...) — Pillow, noma'lum video — ffmpeg;
 emoji rasmi ham markazdan kvadratga kesiladi; 5 MB ga sig'masa sifat va o'lcham
 pasayadi, keyin kadrlar siyraklashtiriladi; ovozli MP4 sig'masa ovozsiz WebP.
 Rad etish faqat fayl umuman o'qilmasa yoki eng past sifatda ham 5 MB dan katta bo'lsa.
+
+## Ovozli GIF — H.265 (HEVC)
+
+`arunorm._video_keep_audio` endi H.265 (libx265, `hvc1`) + AAC bilan kodlaydi:
+bir xil sifatda H.264 dan ~40% kichik, ya'ni 5 MB ga sifat pasaytirmasdan
+sig'adi. x265 yiqilsa — H.264 zaxirasi. Pleyer (ExoPlayer) HEVC ni qurilma
+dekoderi bilan o'ynatadi (kodlash workflow'idagi H.265 videolar kabi).

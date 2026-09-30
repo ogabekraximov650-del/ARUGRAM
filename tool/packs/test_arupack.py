@@ -165,6 +165,13 @@ class VideoTests(unittest.TestCase):
         r = arunorm.normalize(raw, "gif")
         self.assertTrue(r.video)
         self.assertEqual(arunorm.sniff(r.data), "mp4")
+        with tempfile.TemporaryDirectory() as d2:
+            q = Path(d2) / "o.mp4"
+            q.write_bytes(r.data)
+            codec = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0",
+                                    "-show_entries", "stream=codec_name", "-of", "csv=p=0", str(q)],
+                                   capture_output=True).stdout.decode().strip()
+            self.assertIn(codec, ("hevc", "h264"))
         self.assertLessEqual(len(r.data), arupack.MAX_ITEM)
         # emoji va stikerda ovoz olib tashlanadi (WebP)
         r2 = arunorm.normalize(raw, "sticker")

@@ -166,7 +166,7 @@ def _has_audio(src: Path) -> bool:
 
 
 def _video_keep_audio(raw: bytes, lim: dict, trim):
-    """GIF to'plami uchun: videoda OVOZ bo'lsa, u saqlanadi — H.264 + AAC MP4
+    """GIF to'plami uchun: videoda OVOZ bo'lsa, u saqlanadi — H.265 (HEVC) + AAC MP4
     (<= 5 MB). Ovoz bo'lmasa `None` (oddiy yengil WebP yo'li ishlaydi)."""
     with tempfile.TemporaryDirectory() as d:
         src = Path(d) / "in.bin"
@@ -199,13 +199,19 @@ def _video_keep_audio(raw: bytes, lim: dict, trim):
             dst = Path(d) / "out.mp4"
             vf = (f"fps=24,scale='min({side},iw)':'min({side},ih)':"
                   f"force_original_aspect_ratio=decrease:force_divisible_by=2")
+            base = ["ffmpeg", "-v", "error", "-y", "-ss", f"{start:.3f}", "-t", f"{length:.3f}",
+                    "-i", str(src), "-vf", vf]
+            tail = ["-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", ab, "-ac", "1",
+                    "-movflags", "+faststart", str(dst)]
             try:
-                _run(["ffmpeg", "-v", "error", "-y", "-ss", f"{start:.3f}", "-t", f"{length:.3f}",
-                      "-i", str(src), "-vf", vf, "-c:v", "libx264", "-preset", "veryfast",
-                      "-crf", str(crf), "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", ab,
-                      "-ac", "1", "-movflags", "+faststart", str(dst)], 600)
+                # H.265 (HEVC): xuddi shu sifatda H.264 dan ~40% kichik.
+                _run(base + ["-c:v", "libx265", "-preset", "fast", "-crf", str(crf + 4),
+                             "-tag:v", "hvc1", "-x265-params", "log-level=error"] + tail, 900)
             except Exception:
-                raise Rejected("videoni qayta ishlab bo'lmadi")
+                try:  # x265 yo'q/yiqilsa — H.264
+                    _run(base + ["-c:v", "libx264", "-preset", "veryfast", "-crf", str(crf)] + tail, 600)
+                except Exception:
+                    raise Rejected("videoni qayta ishlab bo'lmadi")
             data = dst.read_bytes()
             best = data
             if len(data) <= arupack.MAX_ITEM:
