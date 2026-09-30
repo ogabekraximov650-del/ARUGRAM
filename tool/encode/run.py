@@ -58,10 +58,10 @@ PRESET = os.environ.get("H265_PRESET", "medium")
 X265_EXTRA = os.environ.get("H265_X265_EXTRA", "").strip(":")
 # Shu vaqtdan keyin YANGI ish olinmaydi (Actions limiti 6 soat).
 START_BUDGET = int(os.environ.get("START_BUDGET_MIN", "240")) * 60
-# Actions log'i shu YOPIQ kanalga yoziladi (yangi xabarlar, har 3 soniyada).
+# Actions log'i shu YOPIQ kanalga yoziladi (yangi xabarlar, har 5 soniyada).
 # 0 yoki bo'sh — o'chiq.
 LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL_ID", "0") or 0)
-LOG_INTERVAL = max(1.0, float(os.environ.get("LOG_INTERVAL_SEC", "3") or 3))
+LOG_INTERVAL = max(1.0, float(os.environ.get("LOG_INTERVAL_SEC", "5") or 5))
 SESSION = str(Path(__file__).with_name("pyro_session"))
 WORK = Path(os.environ.get("RUNNER_TEMP", "/tmp")) / "arugram_encode"
 
@@ -114,7 +114,7 @@ class ChannelLog:
     """Actions log'ini yopiq kanalga YANGI xabarlar bilan yuboradi.
 
     Xabar TAHRIRLANMAYDI (foydalanuvchi talabi): har `LOG_INTERVAL` soniyada
-    (odatda 3) shu orada to'plangan qatorlar bitta yangi xabar bo'lib
+    (odatda 5) shu orada to'plangan qatorlar bitta yangi xabar bo'lib
     ketadi. Har qism o'z sarlavhasi bilan boshlanadi. Telegram FloodWait
     bersa — qatorlar to'planib turadi va ruxsat berilgach bitta xabar bo'lib
     ketadi (log yo'qolmaydi). Xato bo'lsa kodlashga TEGMAYDI — 5 marta
