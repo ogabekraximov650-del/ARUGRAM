@@ -1,4 +1,8 @@
-"""To'plam (emoji, GIF, stiker) fayllarini yig'ish — `run.py` ichidan chaqiriladi.
+"""To'plam (emoji, GIF, stiker) fayllarini yig'ish (GitHub Actions, `packs.yml`).
+
+ALOHIDA workflow: kodlash (`tool/encode/run.py`, `encode.yml`) ga TEGILMAYDI.
+Yangi akkauntdagi repoda (`GH_REPO`) ishlaydi; worker uni faqat admin
+tasdiqlagan rasm bo'lganda ishga tushiradi (`worker/src/packs.rs` -> `kick`).
 
 Navbat worker'da (`worker/src/packs.rs`). Bu modul:
 
@@ -12,9 +16,10 @@ Navbat worker'da (`worker/src/packs.rs`). Bu modul:
      (`pk_<to'plam>_<versiya>.arp`);
   6. `finish` — natija (har amal uchun: bo'ldi yoki sababi bilan rad).
 
-Telegram sessiyasi `run.py` bilan BIR XIL (bitta sessiya ikki joyda bir
-vaqtda ishlatilsa Telegram uni o'chirib yuboradi — shu sabab bu modul
-alohida workflow emas, kodlash run'ining ichida ishlaydi).
+Telegram sessiyasi kodlash bilan BIR XIL (`session.enc`). Bitta sessiya ikki
+joyda bir vaqtda ishlatilsa Telegram uni o'chirib yuboradi — shu sabab
+`packs.yml` kodlash bilan BIR `concurrency` guruhida: ikkisi hech qachon
+bir vaqtda ishlamaydi (kodlash hozir ishlayotgan bo'lsa to'plamlar kutadi).
 
 XAVFSIZLIK:
   * bitta element xatosi (buzuq rasm, katta fayl) butun to'plamni to'xtatmaydi
@@ -229,3 +234,46 @@ async def drain(app, log, allowed=lambda: True) -> int:
         await process(app, int(r["channel"]), job, log)
         done += 1
     return done
+
+
+# ── ISHGA TUSHIRISH ─────────────────────────────────────────────
+
+T0 = time.time()
+# Shu vaqtdan keyin yangi to'plam olinmaydi (Actions limiti 6 soat).
+START_BUDGET = int(os.environ.get("START_BUDGET_MIN", "240")) * 60
+SESSION = str(Path(__file__).with_name("pyro_session"))
+
+
+def _log(*a):
+    print(time.strftime("%H:%M:%S"), *a, flush=True)
+
+
+def _session_api_id() -> int:
+    """Sessiya faylidagi api_id (o'qib bo'lmasa 0)."""
+    try:
+        import sqlite3
+        c = sqlite3.connect(f"file:{SESSION}.session?mode=ro", uri=True)
+        return int(c.execute("SELECT api_id FROM sessions").fetchone()[0] or 0)
+    except Exception:
+        return 0
+
+
+async def main():
+    import pyrogram.utils
+    from pyrogram import Client
+
+    # Pyrogram 2.0.106: yangi kanallar uchun ma'lum xato (kodlashdagi yamoq).
+    pyrogram.utils.MIN_CHANNEL_ID = -1009999999999
+    api_id = _session_api_id() or int(os.environ["TG_API_ID"])
+    app = Client(SESSION, api_id=api_id, api_hash=os.environ["TG_API_HASH"],
+                 no_updates=True)
+    async with app:
+        # Kanal Pyrogram peer keshida bo'lsin.
+        async for _ in app.get_dialogs():
+            pass
+        n = await drain(app, _log, lambda: time.time() - T0 <= START_BUDGET)
+        _log(f"Tugadi: {n} ta to'plam ishlandi")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

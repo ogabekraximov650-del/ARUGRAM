@@ -4197,14 +4197,20 @@ ular yengil WebP ga aylantiriladi va ilova ularni Telegram'siz o'zi ko'rsatadi.
 2. Worker `pack_ops` ga `pending` yozadi. ADMIN (`admin_packs_screen.dart`,
    `/api/packs/admin/review`) ko'rib chiqadi: tasdiqlansa `approved`,
    rad etilsa `rejected` + sabab (egasiga ko'rinadi, fayl kanaldan o'chadi).
-3. Tasdiqlangan amali bor to'plamni Actions oladi (`packs_run.py`, KODLASH
-   RUN'I ICHIDA — bitta Pyrogram sessiyasi ikki joyda bir vaqtda ishlasa
-   Telegram uni o'chiradi, shu sabab alohida workflow YO'Q): eski faylni
-   yuklab ochadi, elementlarni `arunorm.py` bilan yengil WebP ga aylantiradi
-   (stiker 512 px, emoji 128 px, GIF 480 px; <= 20 kadr/s; uzun/og'ir
-   animatsiya RAD etiladi; har elementga 96 px statik thumb), yangi kalit
-   bilan yuklaydi va `finish` yuboradi. Bitta element xatosi qolganlariga
-   tegmaydi. To'plam 1 GB dan oshsa qolganlari "to'plam to'ldi" bilan rad.
+3. Tasdiqlangan amali bor to'plamni Actions oladi (`tool/packs/run.py`,
+   ALOHIDA `packs.yml` workflow'i, yangi akkauntdagi repoda; kodlash
+   `encode.yml` ga TEGILMAYDI). Worker uni faqat `approved` amal bo'lganda
+   ishga tushiradi (`packs::kick`, cron har 10 daqiqa + admin tasdiqlaganda).
+   `pending` (admin ko'rmagan) va `rejected` amallar navbatda TURADI,
+   lekin Actions ularni ishlamaydi. Bitta Pyrogram sessiyasi ikki joyda
+   bir vaqtda ishlatilsa Telegram uni o'chiradi, shu sabab `packs.yml`
+   kodlash bilan BIR `concurrency` guruhida (`arugram-encode`): ikkisi
+   ketma-ket ishlaydi. Run: eski faylni yuklab ochadi, elementlarni
+   `arunorm.py` bilan yengil WebP ga aylantiradi (stiker 512 px, emoji
+   128 px, GIF 480 px; <= 20 kadr/s; uzun/og'ir animatsiya RAD etiladi;
+   har elementga 96 px statik thumb), yangi kalit bilan yuklaydi va
+   `finish` yuboradi. Bitta element xatosi qolganlariga tegmaydi. To'plam
+   1 GB dan oshsa qolganlari "to'plam to'ldi" bilan rad.
 4. Ko'rish: to'plam oynasida faqat statik thumb; xabarda animatsiya faqat
    `AnimSlots` bo'sh joyi bo'lsa (kuchsiz telefonda 2, o'rtachada 5,
    kuchlida 9), qolganlari statik. Hamma narsa `aru_packs/` da shifrlab
@@ -4229,11 +4235,10 @@ chiziladi (`TgTextController`), yuborishda belgiga aylanadi.
 **Hisob o'chirilsa** to'plamlar QOLADI (foydalanuvchi talabi) — faqat
 o'sha odamning obunalari (`pack_subs`) o'chadi.
 
-**Actions.** `/api/encode/peek` va `encode_kick` endi to'plam navbatini ham
-hisoblaydi (`packs::PENDING_SQL`); `setup_repo.py` yangi fayllarni
-(`packs_run.py`, `arupack.py`, `arunorm.py`) yangi repoga yuklaydi,
-`requirements.txt` ga `pillow` qo'shilgan. Kodlash boshqa videoni
-ishlayotganda to'plam navbati videolar ORASIDA ishlanadi.
+**Actions.** `tool/encode/setup_repo.py` (workflow: "Avto-kodlash repo'sini
+yaratish") yangi repoga `packs.yml`, `tool/packs/*` fayllarini yuklaydi —
+YANGI FAYLLAR YETIB BORISHI UCHUN uni bir marta qo'lda ishga tushiring.
+Navbat: `/api/packs/job/peek|claim|heartbeat|finish` (`ENCODE_TOKEN`).
 
 **Ma'lum cheklovlar.**
 - Ko'rish uchun Telegram hisobi ulangan bo'lishi kerak (butun ilova shunday).
@@ -4243,8 +4248,8 @@ ishlayotganda to'plam navbati videolar ORASIDA ishlanadi.
 - Animatsiyali WebP kirishda ham qabul qilinadi, lekin GIF eng ishonchli.
 
 **Fayllar.** `worker/src/packs.rs`, `worker/src/lib.rs` (sync, deliver,
-claim, chat/izoh, peek/kick, hisob o'chirish), `tool/encode/{arupack,
-arunorm,packs_run,test_arupack}.py`, `lib/services/{pack_service,
+claim, chat/izoh, peek/kick, hisob o'chirish), `tool/packs/{arupack,
+arunorm,run,test_arupack}.py`, `tool/packs/packs.workflow.yml`, `lib/services/{pack_service,
 sync_queue}.dart`, `lib/widgets/{pack_views,tg_composer,emoji_text}.dart`,
 `lib/screens/{my_packs,pack_detail,admin_packs}_screen.dart`, testlar:
 `test/pack_test.dart`, `test/pack_widget_test.dart`.

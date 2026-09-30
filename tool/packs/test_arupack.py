@@ -1,6 +1,6 @@
 """To'plam fayli va rasm yengillashtirish testlari.
 
-Ishga tushirish:  cd tool/encode && python3 -m unittest -v test_arupack
+Ishga tushirish:  cd tool/packs && python3 -m unittest -v test_arupack
 """
 
 import io
@@ -13,7 +13,7 @@ from PIL import Image
 
 import arunorm
 import arupack
-import packs_run
+import run as packs_run
 
 
 def png(w=64, h=64, color=(255, 0, 0, 255)) -> bytes:

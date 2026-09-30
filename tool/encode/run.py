@@ -44,14 +44,6 @@ import pyrogram.utils
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from pyrogram import Client, enums
 
-# To'plamlar (emoji, GIF, stiker) — Pillow kerak; yo'q bo'lsa kodlash
-# baribir ishlayveradi.
-try:
-    import packs_run
-except Exception as _e:  # pragma: no cover
-    packs_run = None
-    print("packs_run yuklanmadi:", _e, flush=True)
-
 # Pyrogram 2.0.106: yangi kanallarning raqami eski chegaradan kichik —
 # aks holda "Peer id invalid" (ma'lum xato, shu yamoq bilan tuzaladi).
 pyrogram.utils.MIN_CHANNEL_ID = -1009999999999
@@ -571,14 +563,6 @@ async def main():
             if time.time() - T0 > START_BUDGET:
                 log("Vaqt limiti yaqin — qolgan ishlar keyingi run'da.")
                 break
-            # To'plamlar (emoji, GIF, stiker) — tez ish, har videodan OLDIN
-            # tekshiriladi. Xato kodlashga tegmaydi (`packs_run`).
-            if packs_run is not None:
-                try:
-                    if await packs_run.drain(app, log, lambda: time.time() - T0 <= START_BUDGET):
-                        worked = True
-                except Exception as e:
-                    log("To'plamlar ishida xato (kodlash davom etadi):", e)
             r = api("claim", {"runner": RUNNER})
             if r.get("busy"):
                 log("Boshqa run ishlayapti — kutiladi.")

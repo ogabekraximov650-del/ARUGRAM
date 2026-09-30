@@ -236,7 +236,7 @@ pub(crate) async fn after_sync(env: &Env, me: i64, deleted: &[i64], removes: boo
         forget_pack_files(env, *id, Some(me)).await;
     }
     if removes {
-        let _ = encode_kick(env).await;
+        let _ = kick(env).await;
     }
 }
 
@@ -264,11 +264,63 @@ async fn forget_pack_files(env: &Env, id: i64, owner: Option<i64>) {
     ]).await;
 }
 
-/// Actions navbati: tasdiqlangan amali bor to'plamlar soni (`encode_kick`
-/// va `/api/encode/peek` shuni ham hisobga oladi).
-pub(crate) const PENDING_SQL: &str =
-    "(SELECT COUNT(DISTINCT o.pack_id) FROM pack_ops o JOIN pack_db p ON p.id=o.pack_id
-       WHERE o.state='approved' AND p.state='active')";
+/// Tasdiqlangan amali bor to'plamlar soni (Actions navbati).
+///
+/// FAQAT `approved`: admin ko'rib chiqmagan (`pending`) va rad etilgan
+/// rasmlar navbatda TURADI, lekin Actions ularni ishlamaydi.
+const PENDING_SQL: &str =
+    "SELECT COUNT(DISTINCT o.pack_id) AS n FROM pack_ops o JOIN pack_db p ON p.id=o.pack_id
+      WHERE o.state='approved' AND p.state='active'";
+
+/// To'plamlar workflow'i (yangi akkauntdagi repoda; kodlash `encode.yml`
+/// dan ALOHIDA).
+const GH_PACKS_WORKFLOW: &str = "packs.yml";
+
+/// Ishlanadigan to'plam bo'lsa va workflow ishlamayotgan bo'lsa — `packs.yml`
+/// ni ishga tushiradi. Kerak: `GH_ACTIONS_TOKEN`, `GH_REPO`. Natija matni.
+pub(crate) async fn kick(env: &Env) -> String {
+    let n = match turso_exec(env, PENDING_SQL, vec![]).await {
+        Ok(r) => first_row(&r).map(|r| jint(&r, "n")).unwrap_or(0),
+        Err(_) => return "Navbatni o'qib bo'lmadi".into(),
+    };
+    if n == 0 {
+        return "To'plam navbati bo'sh".into();
+    }
+    let repo = tg_secret(env, "GH_REPO");
+    if !repo.contains('/') {
+        return "GH_REPO o'rnatilmagan".into();
+    }
+    for st in ["queued", "in_progress", "waiting", "requested", "pending"] {
+        match gh_api(env, Method::Get,
+            &format!("/repos/{repo}/actions/workflows/{GH_PACKS_WORKFLOW}/runs?status={st}&per_page=1"), None).await {
+            Ok((200, v)) if v["total_count"].as_i64().unwrap_or(0) > 0 => {
+                return "To'plamlar workflow'i ishlayapti yoki kutmoqda".into();
+            }
+            Ok((200, _)) => {}
+            Ok((code, _)) => return format!("GitHub javobi {code}"),
+            Err(e) => return format!("Actions ishga tushmadi: {e}"),
+        }
+    }
+    // Ikki so'rov bir vaqtda ikkita run ochmasin: ishga tushirish huquqi
+    // bazada ATOMIK olinadi (oxirgisidan 3 daqiqa o'tmagan bo'lsa — tegmaydi).
+    let now = now_ms();
+    let claim = turso_exec(env,
+        "INSERT INTO app_config (cfg_key,cfg_value) VALUES ('packs_kicked_at', ?)
+         ON CONFLICT(cfg_key) DO UPDATE SET cfg_value=excluded.cfg_value
+           WHERE CAST(app_config.cfg_value AS INTEGER) < ?
+         RETURNING cfg_key",
+        vec![arg_s(&now.to_string()), arg_i(now - 3 * 60 * 1000)]).await;
+    if !claim.ok().and_then(|r| first_row(&r)).is_some() {
+        return "To'plamlar workflow'i hozirgina ishga tushirilgan".into();
+    }
+    match gh_api(env, Method::Post,
+        &format!("/repos/{repo}/actions/workflows/{GH_PACKS_WORKFLOW}/dispatches"),
+        Some(json!({"ref": "main"}))).await {
+        Ok((204, _)) => "To'plamlar workflow'i ishga tushirildi".into(),
+        Ok((code, _)) => format!("Actions ishga tushmadi (GitHub {code})"),
+        Err(e) => format!("Actions ishga tushmadi: {e}"),
+    }
+}
 
 // ── XABARDA ISHLATISH ───────────────────────────────────────────
 
@@ -316,6 +368,11 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
         }
         let b: Value = req.json().await.unwrap_or(json!({}));
         return match path {
+            "/api/packs/job/peek" => {
+                let n = turso_exec(env, PENDING_SQL, vec![]).await.ok()
+                    .and_then(|r| first_row(&r)).map(|r| jint(&r, "n")).unwrap_or(0);
+                ok(json!({"pending": n}))
+            }
             "/api/packs/job/claim" => job_claim(env, &b).await,
             "/api/packs/job/heartbeat" => job_heartbeat(env, &b).await,
             "/api/packs/job/finish" => job_finish(env, &b).await,
@@ -460,7 +517,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
                       WHERE id IN ({marks}) AND state='pending' AND op='add'
                         AND pack_id IN (SELECT id FROM pack_db WHERE state='active')");
                 turso_exec(env, &sql, id_args()).await?;
-                let _ = encode_kick(env).await;
+                let _ = kick(env).await;
                 return ok_nostore(json!({"ok": true, "approved": ids.len()}));
             }
             let sql = format!("SELECT id,file FROM pack_ops WHERE id IN ({marks}) AND state='pending' AND op='add'");

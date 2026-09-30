@@ -10029,11 +10029,9 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
     let now = now_ms();
 
     if path == "/api/encode/peek" && method == Method::Get {
-        // Emoji/GIF/stiker to'plamlari ham shu run'da ishlanadi (`packs_run`).
         let res = turso_exec(env,
-            &format!("SELECT (SELECT COUNT(*) FROM encode_jobs
-                               WHERE state='queued' OR (state='running' AND lease_until<=?))
-                            + {} AS n", packs::PENDING_SQL),
+            "SELECT COUNT(*) AS n FROM encode_jobs
+              WHERE state='queued' OR (state='running' AND lease_until<=?)",
             vec![TursoArg::int(now)]).await?;
         let n = first_row(&res).and_then(|r| r["n"].as_i64()).unwrap_or(0);
         return ok(json!({"pending": n}));
@@ -10938,15 +10936,12 @@ async fn gh_api(env: &Env, method: Method, path: &str, body: Option<Value>) -> R
 /// GitHub'ga umuman borilmaydi.
 async fn encode_kick(env: &Env) -> String {
     let now = now_ms();
-    // `pending` ga emoji/GIF/stiker to'plamlari ham kiradi (`packs_run`).
     let res = turso_exec(env,
-        &format!("SELECT
-           (SELECT COUNT(*) FROM encode_jobs WHERE state='queued' OR (state='running' AND lease_until<=?))
-             + {} AS pending,
+        "SELECT
+           (SELECT COUNT(*) FROM encode_jobs WHERE state='queued' OR (state='running' AND lease_until<=?)) AS pending,
            (SELECT COUNT(*) FROM encode_jobs WHERE state='running' AND lease_until<=?) AS stale,
            (SELECT COUNT(*) FROM encode_jobs WHERE state='running' AND lease_until>?) AS active,
            (SELECT COALESCE(MAX(lease_until),0) FROM encode_jobs WHERE state='running') AS lease_max",
-           packs::PENDING_SQL),
         vec![TursoArg::int(now), TursoArg::int(now), TursoArg::int(now)]).await;
     let Some(r) = res.ok().and_then(|r| first_row(&r)) else {
         return "\u{26A0}\u{FE0F} Navbatni o'qib bo'lmadi.".into();
@@ -11038,6 +11033,8 @@ async fn scheduled(_ev: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
         let origin = worker_origin(&env).await;
         ensure_encbot_webhook(&env, &origin).await;
     }
+    // To'plamlar (emoji/GIF/stiker) — ALOHIDA workflow (`packs::kick`); kodlashga tegmaydi.
+    let _ = packs::kick(&env).await;
     let msg = encode_kick(&env).await;
     // Faqat ishga tushirilganda yoki xato bo'lsa adminga xabar. Xato
     // (masalan token yo'q) har 10 daqiqada takrorlanmasin — soatiga bir.

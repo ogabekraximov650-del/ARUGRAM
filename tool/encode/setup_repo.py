@@ -43,6 +43,7 @@ def _token():
 
 
 HERE = Path(__file__).parent
+PACKS = HERE.parent / "packs"
 TOKEN = _token()
 NAME = os.environ.get("REPO_NAME", "avtoencode").strip() or "avtoencode"
 PRIVATE = os.environ.get("REPO_PRIVATE", "true") == "true"
@@ -97,9 +98,12 @@ def main():
     files = {
         ".github/workflows/encode.yml": HERE / "avtoencode.workflow.yml",
         "tool/encode/run.py": HERE / "run.py",
-        "tool/encode/packs_run.py": HERE / "packs_run.py",
-        "tool/encode/arupack.py": HERE / "arupack.py",
-        "tool/encode/arunorm.py": HERE / "arunorm.py",
+        # To'plamlar (emoji/GIF/stiker) — ALOHIDA workflow (`packs.yml`).
+        ".github/workflows/packs.yml": PACKS / "packs.workflow.yml",
+        "tool/packs/run.py": PACKS / "run.py",
+        "tool/packs/arupack.py": PACKS / "arupack.py",
+        "tool/packs/arunorm.py": PACKS / "arunorm.py",
+        "tool/packs/requirements.txt": PACKS / "requirements.txt",
         "tool/encode/requirements.txt": HERE / "requirements.txt",
         "tool/encode/session.enc": HERE / "session.enc",
     }
