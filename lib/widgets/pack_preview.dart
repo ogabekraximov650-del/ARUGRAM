@@ -5,7 +5,8 @@
 // KATTA ko'rinadi (o'lcham = ekranning kichik tomoni - 40 dp, burchak
 // yumaloq), tepasida unga mos emoji (24 dp), pastida yumaloq (12) menyu
 // (320 ms, easeOutQuint: tepadan 12 dp pastga siljib chiqadi).
-// Animatsiyali element shu yerda o'ynaydi (bitta, ya'ni telefonga bosim yo'q).
+// Animatsiyali element shu yerda o'ynaydi (`priority`: joy bo'lmasa ham —
+// orqadagi elementlardan birining joyini vaqtincha oladi).
 
 import 'dart:ui' as ui;
 
@@ -111,6 +112,7 @@ class _PreviewBody extends StatelessWidget {
                           height: h,
                           animate: true,
                           sound: true,
+                          priority: true,
                           fit: BoxFit.contain,
                         ),
                       ),

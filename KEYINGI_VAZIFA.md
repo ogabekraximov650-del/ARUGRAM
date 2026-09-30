@@ -4513,3 +4513,23 @@ bulutdan (kanaldan) qayta yuklanadi.
 so'rovda olinadi va hammasi xotira/diskka tushadi (`_dataGroup`) — ekrandagi katakchalar
 ketma-ket bo'lgani uchun Telegram'ga so'rov soni keskin kamayadi. So'rovlar kanali 4 dan
 6 ga, aylantirish to'xtagach animatsiyani boshlash 80 ms (avval 140).
+
+## Ko'ringan hamma emoji/GIF/stiker animatsiya qiladi (hamma joyda)
+
+`pack_views.dart`:
+* `_fullyVisible` endi geometrik: element ekran ichida va o'rab turgan HAMMA aylanuvchi
+  ro'yxatlar (ichma-ich, gorizontal ham) ichida to'liq bo'lsa. Yopiq/orqadagi sahifa
+  (`TickerMode`: panelning boshqa varag'i, ustiga ochilgan oyna) va ilova fonda — yo'q.
+* `_VisWatch`: bitta umumiy taymer (300 ms) hamma `PackImage`ni qayta tekshiradi — panel
+  ochilishi/yopilishi, klaviatura, varaq almashishi kabi aylantirishsiz o'zgarishlar ham sezilsin.
+* `AnimSlots` chegarasi bir ekranga sig'adigandan ko'p (kichik 48/72/120, katta 16/24/36,
+  video 4/6/8): ko'ringan hammasi o'ynaydi, chegara faqat favqulodda himoya. Kuchsiz
+  telefonda bosim ko'rinmaydiganlar darhol to'xtashi va `cacheWidth` bilan kamayadi.
+* Bosib turilgandagi katta ko'rinish va to'plam elementi oynasi `priority: true`: joy
+  bo'lmasa eng eski oddiy egasining joyini oladi (`slotEvicted`), yopilgach u qaytadi.
+* Ovozli GIF pleyerlari `mixWithOthers: true` — ovoz fokusini so'ramaydi, shuning uchun
+  bir nechtasi bir-birini (va asosiy pleyer ularni) pauza qilmaydi; chatdagi hamma GIF
+  ovozsiz o'ynaydi, bosilgani ovozli (`PackSoundHub`), ekrandan chiqsa ovozi o'chadi
+  (`onStopped`). Vaqtinchalik fayl nomi vidjetga xos (bir xil GIF ikki marta bo'lsa
+  biri ikkinchisining faylini o'chirmaydi).
+* Panel belgilari (to'plam ikonkalari) va "Mening to'plamlarim" ro'yxatida ham `animate: true`.

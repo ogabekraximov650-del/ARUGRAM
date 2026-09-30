@@ -1282,7 +1282,11 @@ class _PackPageState extends State<_PackPage>
       child: ClipRRect(
         borderRadius: BorderRadius.circular(8),
         child: PackImage(
-            pack: p.id, item: l.first.id, size: 26, fit: BoxFit.cover),
+            pack: p.id,
+            item: l.first.id,
+            size: 26,
+            animate: true,
+            fit: BoxFit.cover),
       ),
     );
   }
@@ -1820,6 +1824,7 @@ class _EmojiPageState extends State<_EmojiPage>
                 pack: packs[i - 1 - ng].id,
                 item: l.first.id,
                 size: 24,
+                animate: true,
                 fit: BoxFit.cover),
           ),
         );

@@ -146,7 +146,12 @@ class _PackDetailScreenState extends State<PackDetailScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             PackImage(
-                pack: p.id, item: it.id, size: 240, animate: true, sound: true),
+                pack: p.id,
+                item: it.id,
+                size: 240,
+                animate: true,
+                sound: true,
+                priority: true),
             const SizedBox(height: 10),
             if (it.emoji.isNotEmpty)
               Text(it.emoji, style: const TextStyle(fontSize: 26)),

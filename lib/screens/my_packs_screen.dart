@@ -371,7 +371,10 @@ class _PackCoverState extends State<_PackCover> {
           : Padding(
               padding: const EdgeInsets.all(6),
               child: PackImage(
-                  pack: widget.pack.id, item: _first, size: widget.size - 12),
+                  pack: widget.pack.id,
+                  item: _first,
+                  size: widget.size - 12,
+                  animate: true),
             ),
     );
   }

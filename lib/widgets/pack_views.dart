@@ -2,12 +2,17 @@
 //
 // Telefonga bosim tushmasligi uchun (`pack_service.dart` boshidagi izoh):
 //
-//   * ro'yxat va to'plam oynasida faqat kichik STATIK rasm (`PackImage`,
-//     `animate: false`);
-//   * xabarda va matn ichida animatsiya faqat bir vaqtda cheklangan sondagi
-//     joyda (`AnimSlots`) — qolgani statik turadi. Telefon kuchsizroq
-//     bo'lsa chegara kichikroq (`DevicePerf`);
-//   * ekrandan chiqqan vidjet o'z o'rnini qaytaradi;
+//   * animatsiya FAQAT ekranda to'liq ko'ringan elementda ishlaydi (hamma
+//     joyda: panel, chat, izoh, bosib turilgandagi ko'rinish). Qisman
+//     ko'rinsa, orqadagi/yopiq sahifada (`TickerMode`) yoki ilova fonda
+//     bo'lsa — kichik statik rasm, joyi (`AnimSlots`) bo'shatiladi;
+//   * ko'rinish 300 ms da bir tekshiriladi (`_VisWatch`) va aylantirish
+//     to'xtaganda darhol — panel ochilib-yopilganda ham kechikmaydi;
+//   * `AnimSlots` chegarasi ekranga sig'adigan elementlardan ko'p, ya'ni
+//     ko'ringan hammasi o'ynaydi; faqat favqulodda (juda ko'p) holatda
+//     telefonni qotirmaslik uchun cheklaydi (`DevicePerf`);
+//   * bosib turilgandagi katta ko'rinish (`priority`) joy bo'lmasa
+//     boshqasining joyini vaqtincha oladi;
 //   * rasm o'z o'lchamida dekodlanadi (`cacheWidth`) — 512 px lik rasm
 //     24 dp lik joyda katta xotira olmaydi.
 
@@ -37,32 +42,87 @@ class AnimSlots extends ChangeNotifier {
   static final AnimSlots instance = AnimSlots._();
 
   final Map<Object, AnimPool> _used = {};
+  final Set<Object> _prio = {};
 
+  // Faqat to'liq ko'ringanlar joy oladi, shuning uchun chegara bir ekranga
+  // sig'adigan elementlardan (emoji paneli ~50, stiker ~15, GIF ~10) ko'p.
   int _cap(AnimPool p) => switch (p) {
         AnimPool.small => switch (DevicePerf.cls) {
-            PerfClass.low => 12,
-            PerfClass.average => 30,
-            PerfClass.high => 60,
+            PerfClass.low => 48,
+            PerfClass.average => 72,
+            PerfClass.high => 120,
           },
         AnimPool.big => switch (DevicePerf.cls) {
-            PerfClass.low => 4,
-            PerfClass.average => 8,
-            PerfClass.high => 14,
+            PerfClass.low => 16,
+            PerfClass.average => 24,
+            PerfClass.high => 36,
           },
-        AnimPool.video => DevicePerf.cls == PerfClass.low ? 1 : 2,
+        AnimPool.video => switch (DevicePerf.cls) {
+            PerfClass.low => 4,
+            PerfClass.average => 6,
+            PerfClass.high => 8,
+          },
       };
 
-  bool tryAcquire(Object owner, [AnimPool pool = AnimPool.big]) {
+  /// [priority] (bosib turilgandagi katta ko'rinish): joy bo'lmasa shu
+  /// hovuzdagi eng eski oddiy egasining joyi olinadi — u statik rasmga
+  /// qaytib, joy bo'shashini kutadi.
+  bool tryAcquire(Object owner,
+      [AnimPool pool = AnimPool.big, bool priority = false]) {
     if (_used.containsKey(owner)) return true;
     final n = _used.values.where((v) => v == pool).length;
-    if (n >= _cap(pool)) return false;
+    if (n >= _cap(pool)) {
+      if (!priority) return false;
+      Object? victim;
+      for (final e in _used.entries) {
+        if (e.value == pool && !_prio.contains(e.key) && e.key is AnimSlotOwner) {
+          victim = e.key;
+          break;
+        }
+      }
+      if (victim == null) return false;
+      _used.remove(victim);
+      (victim as AnimSlotOwner).slotEvicted();
+    }
     _used[owner] = pool;
+    if (priority) _prio.add(owner);
     return true;
   }
 
   /// Joy bo'shadi — kutayotganlar qayta urinadi (animatsiya keyin boshlanadi).
   void release(Object owner) {
+    _prio.remove(owner);
     if (_used.remove(owner) != null) notifyListeners();
+  }
+}
+
+/// [AnimSlots] joyini ushlab turuvchi: joyi ustuvor elementga berilsa xabar oladi.
+abstract class AnimSlotOwner {
+  void slotEvicted();
+}
+
+/// Hamma [PackImage] ko'rinishini davriy tekshiradi: aylantirishsiz o'zgarishlar
+/// (panel ochilishi/yopilishi, sahifa almashishi, klaviatura) ham sezilsin.
+/// Bitta umumiy taymer — har bir element uchun alohida emas.
+class _VisWatch {
+  static final Set<_PackImageState> _items = {};
+  static Timer? _timer;
+
+  static void add(_PackImageState s) {
+    _items.add(s);
+    _timer ??= Timer.periodic(const Duration(milliseconds: 300), (_) {
+      for (final s in _items.toList()) {
+        s._recheck();
+      }
+    });
+  }
+
+  static void remove(_PackImageState s) {
+    _items.remove(s);
+    if (_items.isEmpty) {
+      _timer?.cancel();
+      _timer = null;
+    }
   }
 }
 
@@ -118,6 +178,13 @@ class PackImage extends StatefulWidget {
   /// Yuklanmasa (yoki to'plam topilmasa) ko'rsatiladigan narsa.
   final Widget? fallback;
 
+  /// Bosib turilgandagi katta ko'rinish: joy bo'lmasa boshqasinikini oladi.
+  final bool priority;
+
+  /// Animatsiya to'xtab statik rasmga qaytdi (ekrandan chiqdi yoki joyi
+  /// olindi) — masalan, GIF ovozini o'chirish uchun.
+  final VoidCallback? onStopped;
+
   const PackImage({
     super.key,
     required this.pack,
@@ -128,13 +195,15 @@ class PackImage extends StatefulWidget {
     this.sound = false,
     this.fit = BoxFit.contain,
     this.fallback,
+    this.priority = false,
+    this.onStopped,
   });
 
   @override
   State<PackImage> createState() => _PackImageState();
 }
 
-class _PackImageState extends State<PackImage> {
+class _PackImageState extends State<PackImage> implements AnimSlotOwner {
   Uint8List? _bytes;
   bool _failed = false;
   bool _slot = false;
@@ -150,6 +219,17 @@ class _PackImageState extends State<PackImage> {
   ScrollPosition? _scrollPos;
   Timer? _visTimer;
 
+  /// To'liq element hozir olinyapti / o'ynatish boshlanyapti.
+  bool _fullBusy = false;
+
+  /// To'liq element olinmadi — qayta urinishni taymer ([_scheduleRetry])
+  /// yoki element ekrandan chiqib qaytishi boshlaydi (har tekshiruvda emas).
+  bool _fullFailed = false;
+
+  /// Sahifa ko'rinyaptimi (`TickerMode`: yopiq panel, orqadagi oyna — yo'q).
+  bool _tickerOn = true;
+  Size _screen = Size.zero;
+
   /// Elementning o'zi shu hajmdan katta bo'lsa, kichik rasm o'rniga
   /// yuklanmaydi (devorda bir vaqtda ko'p og'ir fayl olinmasin).
   static const int _fallbackMax = 300 * 1024;
@@ -157,6 +237,7 @@ class _PackImageState extends State<PackImage> {
   @override
   void initState() {
     super.initState();
+    _VisWatch.add(this);
     _startSoon();
   }
 
@@ -201,6 +282,12 @@ class _PackImageState extends State<PackImage> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _screen = MediaQuery.sizeOf(context);
+    final on = TickerMode.of(context);
+    if (on != _tickerOn) {
+      _tickerOn = on;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _recheck());
+    }
     final pos = Scrollable.maybeOf(context)?.position;
     if (!identical(pos, _scrollPos)) {
       _scrollPos?.removeListener(_onScroll);
@@ -209,23 +296,39 @@ class _PackImageState extends State<PackImage> {
     }
   }
 
-  /// Element ekranda TO'LIQ ko'rinyaptimi (aylanuvchi ro'yxatda). Ro'yxatdan
-  /// tashqarida (xabar, matn ichida) — doim ko'rinadi deb olinadi.
+  /// Element ekranda TO'LIQ ko'rinyaptimi: ekran ichida va o'zini o'rab
+  /// turgan HAMMA aylanuvchi ro'yxatlar (ichma-ich ham) ichida to'liq.
+  /// Sahifa yopiq/orqada (`TickerMode`) yoki ilova fonda bo'lsa — yo'q.
   bool _fullyVisible() {
+    if (!_tickerOn) return false;
+    final ls = WidgetsBinding.instance.lifecycleState;
+    if (ls != null && ls != AppLifecycleState.resumed) return false;
     final ro = context.findRenderObject();
-    if (ro is! RenderBox || !ro.attached) return false;
-    final vp = RenderAbstractViewport.maybeOf(ro);
-    final pos = _scrollPos;
-    if (vp == null || pos == null || !pos.hasPixels) return true;
-    // Aylanmaydigan (sig'gan) tarkib — hammasi ko'rinib turibdi (masalan, ko'rish oynasi).
-    if (pos.maxScrollExtent <= 0 && pos.minScrollExtent >= 0) return true;
+    if (ro is! RenderBox || !ro.attached || !ro.hasSize || ro.size.isEmpty) {
+      return false;
+    }
     try {
-      final lead = vp.getOffsetToReveal(ro, 0.0).offset;
-      final trail = vp.getOffsetToReveal(ro, 1.0).offset;
-      const eps = 1.0;
-      return pos.pixels <= lead + eps && pos.pixels >= trail - eps;
+      final r = MatrixUtils.transformRect(
+          ro.getTransformTo(null), Offset.zero & ro.size);
+      const eps = 1.5;
+      bool inside(Rect o) =>
+          r.left >= o.left - eps &&
+          r.top >= o.top - eps &&
+          r.right <= o.right + eps &&
+          r.bottom <= o.bottom + eps;
+      if (_screen != Size.zero && !inside(Offset.zero & _screen)) return false;
+      RenderObject? p = ro.parent;
+      while (p != null) {
+        if (p is RenderBox && p is RenderAbstractViewport && p.hasSize) {
+          final vr = MatrixUtils.transformRect(
+              p.getTransformTo(null), Offset.zero & p.size);
+          if (!inside(vr)) return false;
+        }
+        p = p.parent;
+      }
+      return true;
     } catch (_) {
-      return true; // hali joylashmagan — keyingi tekshiruvda aniqlanadi
+      return false; // hali joylashmagan — keyingi tekshiruvda aniqlanadi
     }
   }
 
@@ -247,18 +350,54 @@ class _PackImageState extends State<PackImage> {
   /// Aylantirish to'xtagach: to'liq ko'ringanlar animatsiyani boshlaydi,
   /// ko'rinmay qolganlar joyini bo'shatib statik rasmga qaytadi.
   void _recheck() {
-    if (!mounted || !widget.animate) return;
+    if (!mounted) return;
+    if (_pendingLoad && _withinWindow()) {
+      _pendingLoad = false;
+      unawaited(_load());
+      return;
+    }
+    if (!widget.animate) return;
     final r = _ref;
     if (r == null || !r.item.animated) return;
     if (_fullyVisible()) {
-      if (!_slot && !_waitingSlot) unawaited(_loadFull(r, _gen));
-    } else if (_slot || _waitingSlot) {
-      _stopWaiting();
-      _release();
-      _dropVideo();
-      final t = _thumbBytes;
-      if (t != null) setState(() => _bytes = t);
+      if (!_slot && !_waitingSlot && !_fullBusy && !_fullFailed) {
+        unawaited(_loadFull(r, _gen));
+      }
+    } else {
+      // Ekrandan chiqdi — qaytganda muvaffaqiyatsiz element yana sinaladi.
+      _fullFailed = false;
+      if (_slot || _waitingSlot || _vc != null) _toStatic();
     }
+  }
+
+  /// Animatsiya to'xtaydi: joy bo'shaydi, video yopiladi, kichik rasm qoladi.
+  void _toStatic() {
+    _stopWaiting();
+    _release();
+    _dropVideo();
+    final t = _thumbBytes;
+    setState(() {
+      if (t != null) _bytes = t;
+    });
+    widget.onStopped?.call();
+  }
+
+  /// Joyimiz ustuvor elementga (bosib turilgan ko'rinish) berildi: statik
+  /// rasmga qaytamiz va joy bo'shashini kutamiz.
+  @override
+  void slotEvicted() {
+    _slot = false;
+    if (!mounted) return;
+    _dropVideo();
+    final t = _thumbBytes;
+    setState(() {
+      if (t != null) _bytes = t;
+    });
+    if (!_waitingSlot) {
+      _waitingSlot = true;
+      AnimSlots.instance.addListener(_onSlotFree);
+    }
+    widget.onStopped?.call();
   }
 
   @override
@@ -277,6 +416,7 @@ class _PackImageState extends State<PackImage> {
   @override
   void dispose() {
     _gen++;
+    _VisWatch.remove(this);
     _retry?.cancel();
     _visTimer?.cancel();
     _nearTimer?.cancel();
@@ -305,6 +445,7 @@ class _PackImageState extends State<PackImage> {
     _release();
     _ref = null;
     _retries = 0;
+    _fullFailed = false;
     if (!keepBytes) {
       _bytes = null;
       _failed = false;
@@ -333,6 +474,7 @@ class _PackImageState extends State<PackImage> {
     _retry?.cancel();
     _retry = Timer(Duration(seconds: 6 * _retries), () {
       if (!mounted) return;
+      _fullFailed = false;
       if (_bytes == null) {
         unawaited(_load());
       } else if (widget.animate && _ref != null && !_slot && !_waitingSlot) {
@@ -385,19 +527,19 @@ class _PackImageState extends State<PackImage> {
     await _loadFull(r, gen);
   }
 
-  /// Elementning o'zi. Animatsiya bo'lsa faqat bo'sh joy ([AnimSlots]) bo'lganda;
-  /// bo'lmasa kichik statik rasm turadi va joy bo'shashini kutadi.
+  /// Elementning o'zi. Animatsiya bo'lsa faqat to'liq ko'ringanda va bo'sh
+  /// joy ([AnimSlots]) bo'lganda; bo'lmasa kichik statik rasm turadi.
   Future<void> _loadFull(PackRef r, int gen) async {
+    if (_fullBusy) return;
     final svc = PackService.instance;
-    // Animatsiya faqat to'liq ko'ringan elementda; aks holda aylantirish
-    // to'xtaganda `_recheck` boshlaydi.
-    if (r.item.animated && !_slot && !_fullyVisible()) return;
     if (r.item.animated && !_slot) {
+      // To'liq ko'rinmasa — `_recheck` ko'ringanda boshlaydi.
+      if (!_fullyVisible()) return;
       final pool = r.item.video
           ? AnimPool.video
           : (r.item.len <= 200 * 1024 ? AnimPool.small : AnimPool.big);
       _pool = pool;
-      if (!AnimSlots.instance.tryAcquire(this, pool)) {
+      if (!AnimSlots.instance.tryAcquire(this, pool, widget.priority)) {
         if (!_waitingSlot) {
           _waitingSlot = true;
           AnimSlots.instance.addListener(_onSlotFree);
@@ -406,24 +548,32 @@ class _PackImageState extends State<PackImage> {
       }
       _slot = true;
     }
-    final d = await svc.data(r);
-    if (!mounted || gen != _gen) return;
-    if (d != null && r.item.video) {
-      await _startVideo(r, d, gen);
-      return;
-    }
-    if (d != null) {
-      setState(() {
-        _bytes = d;
-        _failed = false;
-      });
-    } else {
-      _release();
-      if (_bytes == null) {
-        setState(() => _failed = true);
+    _fullBusy = true;
+    try {
+      final d = await svc.data(r);
+      if (!mounted || gen != _gen) return;
+      // Kutish davomida ekrandan chiqdi yoki joyi olindi.
+      if (r.item.animated && !_slot) return;
+      if (d != null && r.item.video) {
+        await _startVideo(r, d, gen);
+        return;
       }
-      // Kichik rasm turgan bo'lsa ham to'liq elementni qayta urinib ko'radi.
-      _scheduleRetry();
+      if (d != null) {
+        setState(() {
+          _bytes = d;
+          _failed = false;
+        });
+      } else {
+        _release();
+        _fullFailed = true;
+        if (_bytes == null) {
+          setState(() => _failed = true);
+        }
+        // Kichik rasm turgan bo'lsa ham to'liq elementni qayta urinib ko'radi.
+        _scheduleRetry();
+      }
+    } finally {
+      _fullBusy = false;
     }
   }
 
@@ -431,11 +581,12 @@ class _PackImageState extends State<PackImage> {
   Future<void> _startVideo(PackRef r, Uint8List d, int gen) async {
     try {
       final f = File(
-          '${Directory.systemTemp.path}/aru_pv_${r.info.id}_${r.item.id}.mp4');
+          '${Directory.systemTemp.path}/aru_pv_${r.info.id}_${r.item.id}_${identityHashCode(this)}.mp4');
       await f.writeAsBytes(d, flush: true);
-      final c = VideoPlayerController.file(f);
+      final c = VideoPlayerController.file(f,
+          videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true));
       await c.initialize();
-      if (!mounted || gen != _gen) {
+      if (!mounted || gen != _gen || !_slot) {
         await c.dispose();
         try {
           f.deleteSync();
@@ -450,14 +601,22 @@ class _PackImageState extends State<PackImage> {
         _vfile = f;
       });
     } catch (_) {
+      // Dekoder band (juda ko'p video) — statik rasm, keyinroq qayta uriniladi.
       _release();
+      _fullFailed = true;
+      _scheduleRetry();
     }
   }
 
   void _onSlotFree() {
     final r = _ref;
     if (!mounted || r == null || !_waitingSlot) return;
-    if (AnimSlots.instance.tryAcquire(this, _pool)) {
+    if (!_fullyVisible()) {
+      // Ko'rinmay qoldi — ko'ringanda `_recheck` qayta boshlaydi.
+      _stopWaiting();
+      return;
+    }
+    if (AnimSlots.instance.tryAcquire(this, _pool, widget.priority)) {
       _stopWaiting();
       _slot = true;
       unawaited(_loadFull(r, _gen));
@@ -577,6 +736,8 @@ class _PackMediaViewState extends State<PackMediaView> {
             size: size,
             animate: true,
             sound: _sound,
+            // Ekrandan chiqsa ovoz ham o'chadi.
+            onStopped: () => PackSoundHub.instance.off(this),
             fallback: MediaPlaceholder(type: widget.type),
           ),
           if (video)
