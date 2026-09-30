@@ -97,6 +97,9 @@ def main():
     files = {
         ".github/workflows/encode.yml": HERE / "avtoencode.workflow.yml",
         "tool/encode/run.py": HERE / "run.py",
+        "tool/encode/packs_run.py": HERE / "packs_run.py",
+        "tool/encode/arupack.py": HERE / "arupack.py",
+        "tool/encode/arunorm.py": HERE / "arunorm.py",
         "tool/encode/requirements.txt": HERE / "requirements.txt",
         "tool/encode/session.enc": HERE / "session.enc",
     }

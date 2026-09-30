@@ -14,10 +14,10 @@
 //     tugmalari, sahifalar yon tomonga suriladi.
 //   * Emoji: tepada bo'limlar qatori (yaqinda, kulgichlar, hayvonlar
 //     ... bayroqlar), bitta uzun ro'yxat; o'ng pastda ⌫ tugmasi.
-//   * GIF va Stikerlar: hozircha bo'sh oynalar. Telegram'ning premium
-//     emoji, GIF va stikerlari olib tashlandi (foydalanuvchi talabi:
-//     "o'zimiz ilova uchun premium emoji, gif va stiker tizimni
-//     yasaymiz").
+//   * GIF va Stikerlar, hamda emoji sahifasidagi maxsus emojilar —
+//     ilovaning O'Z to'plamlaridan (`pack_service.dart`). Telegram'ning
+//     premium emoji, GIF va stikerlari olib tashlangan (foydalanuvchi
+//     talabi: kuchsiz telefonlar ko'tara olmadi).
 
 import 'dart:async';
 import 'dart:convert';
@@ -30,6 +30,10 @@ import 'package:lottie/lottie.dart';
 
 import 'package:path_provider/path_provider.dart';
 
+import '../screens/my_packs_screen.dart';
+import '../services/pack_service.dart';
+import 'pack_views.dart';
+
 import 'emoji_text.dart';
 import 'tg_emoji_data.dart';
 
@@ -40,6 +44,39 @@ import 'tg_emoji_data.dart';
 /// Yozish maydoni: emoji Telegram shriftida ko'rinadi.
 class TgTextController extends TextEditingController {
   TgTextController({super.text});
+
+  // ── ILOVANING O'Z TO'PLAMIDAGI EMOJI ────────────────────────
+  //
+  // Matnda BITTA belgi bo'lib turadi (shaxsiy foydalanish oralig'i,
+  // U+E000...): kursor, belgilash va ⌫ oddiy belgidek ishlaydi. Yozish
+  // maydonida rasm bo'lib chiziladi (`buildTextSpan`), yuborishda esa
+  // `[pe:<to'plam>:<element>:<emoji>]` belgisiga aylanadi (`encoded`).
+  static const int _puaBase = 0xE000;
+  static const int _puaLimit = 900;
+  final Map<int, PackPick> _packs = {};
+
+  void insertPackEmoji(PackPick p) {
+    int? code;
+    _packs.forEach((c, v) {
+      if (v.pack == p.pack && v.item == p.item) code = c;
+    });
+    if (code == null) {
+      if (_packs.length >= _puaLimit) {
+        // To'lgan: maydonda maxsus emoji qolmagan bo'lsa tozalanadi.
+        if (text.runes.any(_packs.containsKey)) return;
+        _packs.clear();
+      }
+      code = _puaBase + _packs.length;
+      _packs[code!] = p;
+    }
+    insertText(String.fromCharCode(code!));
+  }
+
+  @override
+  void clear() {
+    _packs.clear();
+    super.clear();
+  }
 
   /// Kursor turgan joyga matn qo'yadi (belgilangan qism almashadi).
   void insertText(String s) {
@@ -78,7 +115,17 @@ class TgTextController extends TextEditingController {
   }
 
   /// Serverga yuboriladigan matn.
-  String get encoded => text;
+  String get encoded {
+    if (_packs.isEmpty) return text;
+    final b = StringBuffer();
+    for (final r in text.runes) {
+      final p = _packs[r];
+      b.write(p == null
+          ? String.fromCharCode(r)
+          : packEmojiToken(p.pack, p.item, p.emoji));
+    }
+    return b.toString();
+  }
 
   bool get isBlank => text.trim().isEmpty;
 
@@ -88,6 +135,34 @@ class TgTextController extends TextEditingController {
     TextStyle? style,
     required bool withComposing,
   }) {
+    // Maxsus emoji (ilovaning o'z to'plamidan) — rasm bo'lib.
+    if (_packs.isNotEmpty && text.runes.any(_packs.containsKey)) {
+      final size = (style?.fontSize ?? 16) * 1.35;
+      final out = <InlineSpan>[];
+      final buf = StringBuffer();
+      void flush() {
+        if (buf.isEmpty) return;
+        final t = buf.toString();
+        out.add(TextSpan(children: tgEmojiInputSpans(t, style) ?? [TextSpan(text: t)]));
+        buf.clear();
+      }
+
+      for (final r in text.runes) {
+        final p = _packs[r];
+        if (p == null) {
+          buf.writeCharCode(r);
+          continue;
+        }
+        flush();
+        out.add(WidgetSpan(
+          alignment: PlaceholderAlignment.middle,
+          child: PackEmojiInline(
+              pack: p.pack, item: p.item, emoji: p.emoji, size: size),
+        ));
+      }
+      flush();
+      return TextSpan(style: style, children: out);
+    }
     // Emoji — Telegram shriftida (`tgEmojiInputSpans`). Emoji
     // bo'lmasa odatdagi yo'l (klaviaturaning tagiga chizig'i bilan).
     final spans = tgEmojiInputSpans(text, style);
@@ -110,11 +185,16 @@ class TgInputArea extends StatefulWidget {
   final FocusNode focus;
   final Widget Function(BuildContext context, Widget emojiButton) row;
 
+  /// Stiker yoki GIF tanlandi (xabar sifatida yuboriladi). Bo'lmasa —
+  /// ular panelda ko'rinmaydi.
+  final ValueChanged<PackPick>? onPickMedia;
+
   const TgInputArea({
     super.key,
     required this.controller,
     required this.focus,
     required this.row,
+    this.onPickMedia,
   });
 
   @override
@@ -269,7 +349,10 @@ class _TgInputAreaState extends State<TgInputArea>
                 enabled: _open,
                 child: SizedBox(
                   height: h,
-                  child: TgMediaPanel(controller: widget.controller),
+                  child: TgMediaPanel(
+                    controller: widget.controller,
+                    onPickMedia: widget.onPickMedia,
+                  ),
                 ),
               ),
             ),
@@ -300,8 +383,9 @@ class _TgInputAreaState extends State<TgInputArea>
 
 class TgMediaPanel extends StatefulWidget {
   final TgTextController controller;
+  final ValueChanged<PackPick>? onPickMedia;
 
-  const TgMediaPanel({super.key, required this.controller});
+  const TgMediaPanel({super.key, required this.controller, this.onPickMedia});
 
   @override
   State<TgMediaPanel> createState() => _TgMediaPanelState();
@@ -341,9 +425,14 @@ class _TgMediaPanelState extends State<TgMediaPanel> {
               TickerMode(
                   enabled: _tab == 0,
                   child: _EmojiPage(controller: widget.controller)),
-              const _Soon(icon: Icons.gif_box_outlined, title: 'GIF'),
-              const _Soon(
-                  icon: Icons.emoji_emotions_outlined, title: 'Stikerlar'),
+              TickerMode(
+                  enabled: _tab == 1,
+                  child: _PackPage(
+                      kind: PackKind.gif, onPick: widget.onPickMedia)),
+              TickerMode(
+                  enabled: _tab == 2,
+                  child: _PackPage(
+                      kind: PackKind.sticker, onPick: widget.onPickMedia)),
             ],
           ),
           // ── Pastda suzib turgan tugmalar ──
@@ -829,31 +918,206 @@ Widget _gridRow(int r, int cols, int count, double cell,
   );
 }
 
-/// GIF / Stikerlar oynasi — ilovaning o'z tizimi yasalguncha bo'sh.
-class _Soon extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  const _Soon({required this.icon, required this.title});
+/// GIF va Stikerlar oynasi: yaqinda ishlatilganlar + har bir to'plam
+/// bo'limi (ilovaning O'Z to'plamlari — `pack_service.dart`).
+///
+/// Katakda faqat kichik STATIK rasm (~5 KB): o'nlab animatsiya bir vaqtda
+/// ishlab kuchsiz telefonni qiynamasligi uchun. Tanlangan element xabarda
+/// esa o'z animatsiyasi bilan chiqadi.
+class _PackPage extends StatefulWidget {
+  final String kind;
+  final ValueChanged<PackPick>? onPick;
+  const _PackPage({required this.kind, this.onPick});
+
+  @override
+  State<_PackPage> createState() => _PackPageState();
+}
+
+class _PackPageState extends State<_PackPage>
+    with AutomaticKeepAliveClientMixin {
+  final _jump = _SectionsJump();
+  int _section = 0;
+  final Map<int, PackHeader> _hdr = {};
+  bool _first = true;
+
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  void initState() {
+    super.initState();
+    PackService.instance.addListener(_onSvc);
+    unawaited(_init());
+  }
+
+  @override
+  void dispose() {
+    PackService.instance.removeListener(_onSvc);
+    super.dispose();
+  }
+
+  Future<void> _init() async {
+    await PackService.instance.load();
+    await _loadHeaders();
+    if (mounted) setState(() => _first = false);
+  }
+
+  void _onSvc() {
+    if (!mounted) return;
+    setState(() {});
+    unawaited(_loadHeaders());
+  }
+
+  Future<void> _loadHeaders() async {
+    final svc = PackService.instance;
+    for (final p in svc.usable(widget.kind)) {
+      final have = _hdr[p.id];
+      if (have != null && have.ver >= p.version) continue;
+      final h = await svc.header(p);
+      if (!mounted) return;
+      if (h != null) setState(() => _hdr[p.id] = h);
+    }
+  }
+
+  List<PackItem> _items(PackInfo p) {
+    final h = _hdr[p.id];
+    if (h == null) return const [];
+    final gone = PackService.instance.removedItems(p.id);
+    return [
+      for (final it in h.items)
+        if (!gone.contains(it.id)) it,
+    ];
+  }
+
+  void _openHub() {
+    Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => MyPacksScreen(initialKind: widget.kind)));
+  }
+
+  void _pick(PackPick p) {
+    HapticFeedback.selectionClick();
+    PackService.instance.noteRecent(p);
+    widget.onPick?.call(p);
+  }
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
+    final svc = PackService.instance;
+    final packs = svc.usable(widget.kind);
+    final recent = svc.recent(widget.kind);
+    final lists = [for (final p in packs) _items(p)];
+    if (packs.isEmpty && recent.isEmpty) {
+      return _PackEmpty(
+          kind: widget.kind, loading: _first || svc.loading, onOpen: _openHub);
+    }
+    final counts = <int>[recent.length, for (final l in lists) l.length];
+    final headers = <Widget>[
+      const _Header('Yaqinda ishlatilgan'),
+      for (final p in packs) _Header(p.title),
+    ];
+    return Column(
+      children: [
+        _Strip(
+          count: counts.length + 1,
+          selected: _section.clamp(0, counts.length - 1),
+          onTap: (i) {
+            if (i >= counts.length) {
+              _openHub();
+              return;
+            }
+            setState(() => _section = i);
+            _jump.to(i);
+          },
+          icon: (i, on) {
+            final c = on ? Colors.white : _Pal.icon;
+            if (i == 0) {
+              return Icon(Icons.access_time_rounded, color: c, size: 22);
+            }
+            if (i >= counts.length) {
+              return Icon(Icons.add_circle_outline_rounded, color: c, size: 22);
+            }
+            final l = lists[i - 1];
+            if (l.isEmpty) return Icon(Icons.circle_outlined, color: c, size: 18);
+            return Opacity(
+              opacity: on ? 1 : 0.75,
+              child: PackImage(pack: packs[i - 1].id, item: l.first.id, size: 24),
+            );
+          },
+        ),
+        Expanded(
+          child: _Sections(
+            minCell: widget.kind == PackKind.gif ? 100 : 72,
+            minColumns: widget.kind == PackKind.gif ? 3 : 4,
+            counts: counts,
+            headers: headers,
+            jump: _jump,
+            onSection: (i) => setState(() => _section = i),
+            cell: (s, i, cell) {
+              final PackPick pick;
+              if (s == 0) {
+                pick = recent[i];
+              } else {
+                final it = lists[s - 1][i];
+                pick = PackPick(widget.kind, packs[s - 1].id, it.id, it.emoji);
+              }
+              return _Press(
+                onTap: () => _pick(pick),
+                scale: 0.85,
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: PackImage(pack: pick.pack, item: pick.item, size: cell - 8),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// To'plam yo'q bo'lgandagi oyna.
+class _PackEmpty extends StatelessWidget {
+  final String kind;
+  final bool loading;
+  final VoidCallback onOpen;
+  const _PackEmpty(
+      {required this.kind, required this.loading, required this.onOpen});
+
+  @override
+  Widget build(BuildContext context) {
+    final gif = kind == PackKind.gif;
     return Center(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(28, 0, 28, 60),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 44, color: _Pal.hint),
+            Icon(gif ? Icons.gif_box_outlined : Icons.emoji_emotions_outlined,
+                size: 44, color: _Pal.hint),
             const SizedBox(height: 10),
-            Text(title,
+            Text(PackKind.plural(kind),
                 style: const TextStyle(
                     color: Colors.white,
                     fontSize: 16,
                     fontWeight: FontWeight.w600)),
             const SizedBox(height: 4),
-            const Text('Tez orada',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: _Pal.hint, fontSize: 14)),
+            Text(
+              loading
+                  ? 'Yuklanmoqda...'
+                  : "Hali to'plam yo'q. Ommaviy to'plamlardan qo'shing yoki "
+                      "o'zingiz yarating.",
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: _Pal.hint, fontSize: 14),
+            ),
+            if (!loading) ...[
+              const SizedBox(height: 14),
+              TextButton(
+                onPressed: onOpen,
+                child: const Text("To'plamlarni ochish"),
+              ),
+            ],
           ],
         ),
       ),
@@ -912,6 +1176,7 @@ class _EmojiPageState extends State<_EmojiPage>
   final _jump = _SectionsJump();
   int _section = 0;
   List<String> _recent = [];
+  final Map<int, PackHeader> _hdr = {};
 
   /// Telegram `EmojiTabsStrip` belgilari — tanlanganda bir marta
   /// "jonlanadi" (`R.raw.msg_emoji_*`).
@@ -926,7 +1191,42 @@ class _EmojiPageState extends State<_EmojiPage>
   @override
   void initState() {
     super.initState();
+    PackService.instance.addListener(_onSvc);
     _load();
+    unawaited(PackService.instance.load().then((_) => _loadHeaders()));
+  }
+
+  @override
+  void dispose() {
+    PackService.instance.removeListener(_onSvc);
+    super.dispose();
+  }
+
+  void _onSvc() {
+    if (!mounted) return;
+    setState(() {});
+    unawaited(_loadHeaders());
+  }
+
+  Future<void> _loadHeaders() async {
+    final svc = PackService.instance;
+    for (final p in svc.usable(PackKind.emoji)) {
+      final have = _hdr[p.id];
+      if (have != null && have.ver >= p.version) continue;
+      final h = await svc.header(p);
+      if (!mounted) return;
+      if (h != null) setState(() => _hdr[p.id] = h);
+    }
+  }
+
+  List<PackItem> _items(PackInfo p) {
+    final h = _hdr[p.id];
+    if (h == null) return const [];
+    final gone = PackService.instance.removedItems(p.id);
+    return [
+      for (final it in h.items)
+        if (!gone.contains(it.id)) it,
+    ];
   }
 
   Future<void> _load() async {
@@ -940,33 +1240,64 @@ class _EmojiPageState extends State<_EmojiPage>
     unawaited(_RecentEmoji.note(e));
   }
 
+  void _pickPack(PackInfo p, PackItem it) {
+    HapticFeedback.selectionClick();
+    widget.controller.insertPackEmoji(PackPick(
+        PackKind.emoji, p.id, it.id, it.emoji.isEmpty ? '🙂' : it.emoji));
+  }
+
+  void _openHub() {
+    Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => const MyPacksScreen(initialKind: PackKind.emoji)));
+  }
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
     final groups = tgEmojiGroups;
-    // 0 — yaqinda, 1..8 — Unicode bo'limlari.
+    final packs = PackService.instance.usable(PackKind.emoji);
+    final lists = [for (final p in packs) _items(p)];
+    final np = packs.length;
+    // 0 — yaqinda, 1..np — maxsus emoji to'plamlari, keyin Unicode bo'limlari.
     final counts = <int>[
       _recent.length,
+      for (final l in lists) l.length,
       for (final g in groups) g.emoji.length,
     ];
     final headers = <Widget>[
       const _Header('Yaqinda ishlatilgan'),
+      for (final p in packs) _Header(p.title),
       for (final g in groups) _Header(g.title),
     ];
     return Column(
       children: [
         _Strip(
-          count: 1 + groups.length,
-          selected: _section,
+          count: counts.length + 1,
+          selected: _section.clamp(0, counts.length - 1),
           onTap: (i) {
+            if (i >= counts.length) {
+              _openHub();
+              return;
+            }
             setState(() => _section = i);
             _jump.to(i);
           },
           icon: (i, on) {
             final c = on ? Colors.white : _Pal.icon;
             if (i == 0) return Icon(Icons.access_time_rounded, color: c, size: 22);
+            if (i >= counts.length) {
+              return Icon(Icons.add_circle_outline_rounded, color: c, size: 22);
+            }
+            if (i <= np) {
+              final l = lists[i - 1];
+              if (l.isEmpty) return Icon(Icons.circle_outlined, color: c, size: 18);
+              return Opacity(
+                opacity: on ? 1 : 0.75,
+                child: PackImage(pack: packs[i - 1].id, item: l.first.id, size: 24),
+              );
+            }
             return _TabLottie(
-                asset: 'assets/tg_anim/msg_emoji_${_icons[i - 1]}.json',
+                asset: 'assets/tg_anim/msg_emoji_${_icons[i - 1 - np]}.json',
                 selected: on,
                 color: c);
           },
@@ -979,8 +1310,22 @@ class _EmojiPageState extends State<_EmojiPage>
             headers: headers,
             jump: _jump,
             onSection: (i) => setState(() => _section = i),
-            cell: (s, i, cell) => _EmojiCell(
-                s == 0 ? _recent[i] : groups[s - 1].emoji[i], cell, _pickEmoji),
+            cell: (s, i, cell) {
+              if (s == 0) return _EmojiCell(_recent[i], cell, _pickEmoji);
+              if (s <= np) {
+                final it = lists[s - 1][i];
+                return _Press(
+                  onTap: () => _pickPack(packs[s - 1], it),
+                  scale: 0.8,
+                  child: Padding(
+                    padding: EdgeInsets.all(cell * 0.14),
+                    child: PackImage(
+                        pack: packs[s - 1].id, item: it.id, size: cell * 0.72),
+                  ),
+                );
+              }
+              return _EmojiCell(groups[s - 1 - np].emoji[i], cell, _pickEmoji);
+            },
           ),
         ),
       ],

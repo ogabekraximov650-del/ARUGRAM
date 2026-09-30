@@ -37,7 +37,8 @@ import 'media_view_screen.dart';
 import 'public_profile_screen.dart';
 import '../services/telegram_service.dart';
 import '../widgets/tg_composer.dart';
-import '../widgets/media_placeholder.dart';
+import '../widgets/pack_views.dart';
+import '../services/pack_service.dart';
 import '../widgets/tg_record_button.dart';
 import '../widgets/tg_attach_sheet.dart';
 import '../widgets/tg_bubble.dart';
@@ -1067,6 +1068,24 @@ class _SupportChatScreenState extends State<SupportChatScreen>
     _toBottom();
   }
 
+  /// Stiker yoki GIF — ilovaning o'z to'plamidan (matnsiz xabar).
+  Future<void> _sendPack(PackPick p) async {
+    if (_sending) return;
+    setState(() => _sending = true);
+    final reply = _replyTo;
+    final err = await _chat.send(tgWithReply(reply?.id, ''),
+        mediaFile: p.ref, mediaType: p.kind);
+    if (!mounted) return;
+    if (err == null) _replyTo = null;
+    if (!mounted) return;
+    setState(() => _sending = false);
+    if (err != null) {
+      _snack(err);
+      return;
+    }
+    _toBottom();
+  }
+
   // ══════════════════════════════════════════════════════════
   //  EKRAN — TELEGRAM (12.x) KO'RINISHI
   // ══════════════════════════════════════════════════════════
@@ -1705,6 +1724,7 @@ class _SupportChatScreenState extends State<SupportChatScreen>
       child: TgInputArea(
         controller: _input,
         focus: _focus,
+        onPickMedia: _sendPack,
         row: (context, emojiButton) => Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -2351,7 +2371,10 @@ class _Bubble extends StatelessWidget {
     switch (m.mediaType) {
       case 'sticker':
       case 'gif':
-        return MediaPlaceholder(type: m.mediaType);
+        return PackMediaView(
+          file: TelegramService.fileNameOf(m.mediaUrl),
+          type: m.mediaType,
+        );
       case 'round':
         return _RoundBubble(
           url: m.mediaUrl,
@@ -2464,8 +2487,7 @@ class _TextWithTime extends StatelessWidget {
           TextSpan(children: [
             // Telegram emojilari bilan (eski maxsus emoji `[ce:..]`
             // belgilari oddiy emoji bo'lib chiqadi).
-            ...(emojiSpans(plainEmojiText(text), style) ??
-                [TextSpan(text: plainEmojiText(text))]),
+            ...richEmojiSpans(text, style),
             WidgetSpan(child: SizedBox(width: timeWidth, height: 14)),
           ]),
           style: style,

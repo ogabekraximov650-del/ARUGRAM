@@ -4163,3 +4163,85 @@ bo'lakni 3 s dan ko'p kutsa, majburan beriladi (`Reader::waiting`).
   Tezlik farqi skriptdan emas, runner uskunasidan (private: 2 mantiqiy
   yadro ≈ 1 jismoniy, public: 4). Log boshida endi mantiqiy/jismoniy
   yadrolar soni chiqadi.
+
+## EMOJI, GIF VA STIKER TO'PLAMLARI — ILOVANING O'Z TIZIMI (2026-09)
+
+> Eslatma: yuqoridagi "Telegramdagi emoji/GIF/stikerlar" (rlottie, libvpx,
+> tlottie, `tg_media.dart`) bo'limlari ESKIRGAN — o'sha kod repodan olib
+> tashlangan (kuchsiz telefonlar ko'tara olmadi). Quyidagisi uning o'rnida.
+
+**Nega.** Telegram'ning `.tgs` (Lottie) va `.webm` stikerlari har kadrda
+CPU'da chizilardi. Endi foydalanuvchilar o'zi yasagan rasmlarni yuklaydi,
+ular yengil WebP ga aylantiriladi va ilova ularni Telegram'siz o'zi ko'rsatadi.
+
+**Tuzilma.** Bitta TO'PLAM = kanaldagi bitta shifrlangan fayl
+(`pk_<id>_<versiya>.arp`). Emoji, GIF va stiker uchun ALOHIDA to'plamlar
+(tur to'plam yaratilganda tanlanadi). Fayl <= 1 GB, element <= 5 MB.
+- Format (`tool/encode/arupack.py`): `[16 bayt: "ARUP", versiya, sarlavha
+  uzunligi][sarlavha JSON][hamma kichik rasm (thumb)][elementlar]` — MP4
+  dagi `moov`/faststart kabi: ilova avval faqat sarlavhani, keyin kerakli
+  bo'lakni (`Range`) o'qiydi. Kichik rasmlar ketma-ket va boshida — to'plam
+  oynasi bitta oraliq so'rovi bilan to'ladi.
+- Shifrlash: butun fayl AES-128-CTR (IV nol, `rust/src/telegram.rs` bilan
+  bir xil). **Har yangi versiyaga YANGI kalit** — bir xil kalit+IV bilan
+  o'zgargan faylni qayta shifrlash CTR'ni buzadi. Element raqamlari
+  (`next`) qayta ishlatilmaydi.
+- Kalit va xabar raqami `tg_files` da (boshqa fayllardagidek); ko'rish —
+  `/api/tg/deliver` (`pk_...` hammaga ochiq), keyin mahalliy
+  `127.0.0.1/tg/...` dan `Range` bilan (`PackService._range`).
+
+**Oqim.**
+1. Ilova rasmni (PNG/JPG/GIF/WebP, <= 5 MB, tur BAYTLARDAN aniqlanadi)
+   shifrlab bot chatiga yuklaydi: `pki_<hisob>_...` (`tg_user_media`,
+   `/api/tg/claim` shu prefiksni taniydi), keyin `SyncQueue` orqali `add`.
+2. Worker `pack_ops` ga `pending` yozadi. ADMIN (`admin_packs_screen.dart`,
+   `/api/packs/admin/review`) ko'rib chiqadi: tasdiqlansa `approved`,
+   rad etilsa `rejected` + sabab (egasiga ko'rinadi, fayl kanaldan o'chadi).
+3. Tasdiqlangan amali bor to'plamni Actions oladi (`packs_run.py`, KODLASH
+   RUN'I ICHIDA — bitta Pyrogram sessiyasi ikki joyda bir vaqtda ishlasa
+   Telegram uni o'chiradi, shu sabab alohida workflow YO'Q): eski faylni
+   yuklab ochadi, elementlarni `arunorm.py` bilan yengil WebP ga aylantiradi
+   (stiker 512 px, emoji 128 px, GIF 480 px; <= 20 kadr/s; uzun/og'ir
+   animatsiya RAD etiladi; har elementga 96 px statik thumb), yangi kalit
+   bilan yuklaydi va `finish` yuboradi. Bitta element xatosi qolganlariga
+   tegmaydi. To'plam 1 GB dan oshsa qolganlari "to'plam to'ldi" bilan rad.
+4. Ko'rish: to'plam oynasida faqat statik thumb; xabarda animatsiya faqat
+   `AnimSlots` bo'sh joyi bo'lsa (kuchsiz telefonda 2, o'rtachada 5,
+   kuchlida 9), qolganlari statik. Hamma narsa `aru_packs/` da shifrlab
+   keshlanadi (250 MB dan oshsa eng eskilari o'chadi).
+
+**Turso (kam yozuv).** Elementlar bazada EMAS, faylning sarlavhasida.
+Jadvallar: `pack_db` (to'plam + Actions ijarasi), `pack_ops` (kutayotgan/
+tasdiqlangan/rad etilgan amallar; bajarilgani O'CHADI), `pack_subs`.
+Hamma foydalanuvchi yozuvi `POST /api/sync` dagi `packs` massivi orqali
+(`packs::sync_stmts`: har amal o'zini tekshiradi, yaroqsizi tashlanadi;
+chegaralar: 30 to'plam, 100 kutayotgan rasm, 200 obuna, bir paketda 50 amal).
+O'qish: `/api/packs/library` (mening + obunalar + amallar, BITTA so'rov),
+`/public`, `/info`.
+
+**Xabarlarda.** Stiker/GIF: `media_type=sticker|gif`, `media_file=
+pk_<to'plam>_<element>` (worker to'plam borligini va turi mosligini
+tekshiradi — `packs::valid_ref`; support chat va izohlarda). Matn ichidagi
+emoji: `[pe:<to'plam>:<element>:<emoji>]` (eski Telegram `[ce:...]` bilan
+adashmasin). Yozish maydonida u BITTA belgi (U+E000...) va rasm bo'lib
+chiziladi (`TgTextController`), yuborishda belgiga aylanadi.
+
+**Actions.** `/api/encode/peek` va `encode_kick` endi to'plam navbatini ham
+hisoblaydi (`packs::PENDING_SQL`); `setup_repo.py` yangi fayllarni
+(`packs_run.py`, `arupack.py`, `arunorm.py`) yangi repoga yuklaydi,
+`requirements.txt` ga `pillow` qo'shilgan. Kodlash boshqa videoni
+ishlayotganda to'plam navbati videolar ORASIDA ishlanadi.
+
+**Ma'lum cheklovlar.**
+- Ko'rish uchun Telegram hisobi ulangan bo'lishi kerak (butun ilova shunday).
+- Actions `finish` yubormay o'lsa, kanalda bitta ortiqcha (bazada yo'q) post
+  qoladi — zararsiz.
+- `.tgs` va video (MP4/WebM) qabul qilinmaydi: faqat PNG/JPG/GIF/WebP.
+- Animatsiyali WebP kirishda ham qabul qilinadi, lekin GIF eng ishonchli.
+
+**Fayllar.** `worker/src/packs.rs`, `worker/src/lib.rs` (sync, deliver,
+claim, chat/izoh, peek/kick, hisob o'chirish), `tool/encode/{arupack,
+arunorm,packs_run,test_arupack}.py`, `lib/services/{pack_service,
+sync_queue}.dart`, `lib/widgets/{pack_views,tg_composer,emoji_text}.dart`,
+`lib/screens/{my_packs,pack_detail,admin_packs}_screen.dart`, testlar:
+`test/pack_test.dart`, `test/pack_widget_test.dart`.

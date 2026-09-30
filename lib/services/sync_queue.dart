@@ -90,6 +90,9 @@ class SyncKind {
   static const String history = 'history';
   static const String rating = 'rating';
   static const String favorite = 'favorite';
+
+  /// Emoji, GIF va stiker to'plamlari (`pack_service.dart`).
+  static const String pack = 'pack';
 }
 
 /// Sinxronlash natijasi — chiqish oynasidagi xabar shunga qarab
@@ -153,6 +156,9 @@ class SyncQueue extends ChangeNotifier with WidgetsBindingObserver {
   /// Bitta paketda yuboriladigan eng ko'p qator (worker ham shu
   /// chegarani biladi). Qolgani keyingi paketga qoladi.
   static const int maxRowsPerBatch = 150;
+
+  /// Bitta paketdagi eng ko'p to'plam amali (worker: `MAX_SYNC_SMALL`).
+  static const int maxPackRowsPerBatch = 50;
 
   /// Navbat bundan uzun bo'lib ketmaydi — eng eskisi tashlanadi.
   /// (Bunga yetish uchun bir necha hafta internetsiz yurish kerak.)
@@ -350,6 +356,28 @@ class SyncQueue extends ChangeNotifier with WidgetsBindingObserver {
     });
   }
 
+  /// Emoji/GIF/stiker to'plami amali (`pack_service.dart`): to'plam
+  /// yaratish, element qo'shish/olib tashlash, o'chirish, obuna.
+  ///
+  /// [key] amal turi va nishonini bildiradi (`p:new:<id>`,
+  /// `p:add:<fayl>`, `p:rm:<to'plam>:<element>`, `p:del:<id>`,
+  /// `p:sub:<id>`) — bir xil kalit navbatda BITTA qoladi (obuna yoqilib
+  /// o'chirilsa faqat oxirgisi ketadi).
+  void putPack(String key, Map<String, dynamic> data) {
+    _put(SyncKind.pack, key, data);
+  }
+
+  /// Yuborilmagan to'plam amallari (ekranda server javobining ustiga
+  /// qo'yiladi — foydalanuvchi hozirgina qilgan ish yo'qolib qolmasin).
+  List<Map<String, dynamic>> pendingPacks() {
+    load();
+    return [
+      for (final e in _rows)
+        if (e['kind'] == SyncKind.pack && e['data'] is Map)
+          Map<String, dynamic>.from(e['data'] as Map),
+    ];
+  }
+
   // ── YUBORILMAGAN YOZUVLARNI KO'RSATISH ──────────────────────
   //
   // NEGA KERAK (yo'l qo'yilishi mumkin bo'lgan xato): tarix va
@@ -512,12 +540,24 @@ class SyncQueue extends ChangeNotifier with WidgetsBindingObserver {
 
   /// Bitta paketni yuboradi. `true` — muvaffaqiyat.
   Future<bool> _sendOnce(String token) async {
-    final batch = _rows.take(maxRowsPerBatch).toList();
+    // Worker bir paketda ko'pi bilan 50 ta to'plam amalini qabul qiladi
+    // (ortig'i butun paketni rad etardi) — qolgani keyingi paketga.
+    final batch = <Map<String, dynamic>>[];
+    var packRows = 0;
+    for (final e in _rows) {
+      if (batch.length >= maxRowsPerBatch) break;
+      if (e['kind'] == SyncKind.pack) {
+        if (packRows >= maxPackRowsPerBatch) continue;
+        packRows++;
+      }
+      batch.add(e);
+    }
     final trafficBytes = TrafficService.instance.pendingBytes;
 
     final history = <Map<String, dynamic>>[];
     final ratings = <Map<String, dynamic>>[];
     final favorites = <Map<String, dynamic>>[];
+    final packs = <Map<String, dynamic>>[];
     for (final e in batch) {
       final data = Map<String, dynamic>.from(e['data'] as Map);
       switch (e['kind']) {
@@ -527,6 +567,8 @@ class SyncQueue extends ChangeNotifier with WidgetsBindingObserver {
           ratings.add(data);
         case SyncKind.favorite:
           favorites.add(data);
+        case SyncKind.pack:
+          packs.add(data);
       }
     }
 
@@ -544,6 +586,7 @@ class SyncQueue extends ChangeNotifier with WidgetsBindingObserver {
               'history': history,
               'ratings': ratings,
               'favorites': favorites,
+              'packs': packs,
               'traffic_bytes': trafficBytes,
             }),
           )

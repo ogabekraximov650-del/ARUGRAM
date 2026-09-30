@@ -25,7 +25,8 @@ import 'package:flutter/material.dart';
 
 import 'emoji_text.dart';
 import 'tg_composer.dart';
-import 'media_placeholder.dart';
+import 'pack_views.dart';
+import '../services/pack_service.dart';
 import '../services/image_cache.dart';
 
 import '../services/auth_service.dart';
@@ -193,6 +194,26 @@ class _CommentsTabState extends State<CommentsTab> {
       return;
     }
     _input.clear();
+    setState(() => _replyTo = null);
+    _focus.unfocus();
+  }
+
+  /// Stiker yoki GIF — matnsiz, alohida izoh (ilovaning o'z to'plamidan).
+  Future<void> _sendPack(PackPick p) async {
+    if (_sending) return;
+    if (!AuthService.instance.isLoggedIn) {
+      _say('Izoh yozish uchun hisobingizga kiring');
+      return;
+    }
+    setState(() => _sending = true);
+    final err = await widget.controller.add('',
+        parentId: _replyTo?.id ?? '', mediaFile: p.ref, mediaType: p.kind);
+    if (!mounted) return;
+    setState(() => _sending = false);
+    if (err != null) {
+      _say(err);
+      return;
+    }
     setState(() => _replyTo = null);
     _focus.unfocus();
   }
@@ -510,6 +531,7 @@ class _CommentsTabState extends State<CommentsTab> {
       child: TgInputArea(
         controller: _input,
         focus: _focus,
+        onPickMedia: _sendPack,
         row: (context, emojiButton) => Padding(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
       child: Column(
@@ -853,7 +875,7 @@ class _CommentRow extends StatelessWidget {
                   (c.mediaType == 'sticker' || c.mediaType == 'gif'))
                 Padding(
                   padding: const EdgeInsets.only(top: 2),
-                  child: MediaPlaceholder(type: c.mediaType),
+                  child: PackMediaView(file: c.mediaFile, type: c.mediaType),
                 )
               else
               EmojiText(

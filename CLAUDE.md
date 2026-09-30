@@ -51,7 +51,8 @@ kanali orqali uzatiladi (xarajatni kamaytirish uchun).
 | `packages/video_player_android` | `video_player_android` nusxasi: `AruDataSource` pleyerni mahalliy serversiz, diskdagi shifrlangan keshdan o'qitadi |
 | `worker/src/lib.rs` | Cloudflare Worker (Rust → WASM), worker nomi `arugram`. Baza — Turso |
 | Kodlash boti | `worker/src/lib.rs` → `encbot_*`: ikkinchi bot (`ENCODE_BOT_TOKEN`), faqat admin; bor anime/bo'limga qism qo'shadi yoki almashtiradi va avto-kodlash navbatiga qo'yadi |
-| `tool/encode/` | H.265 avto-kodlash (Python, `encode.yml`) |
+| `tool/encode/` | H.265 avto-kodlash (Python, `encode.yml`) + emoji/GIF/stiker to'plamlarini yig'ish (`packs_run.py`, `arupack.py`, `arunorm.py`) |
+| `worker/src/packs.rs` | Emoji/GIF/stiker to'plamlari (o'z tizimimiz; Telegram'niki olib tashlangan) — `KEYINGI_VAZIFA.md` oxirgi bo'lim |
 | `ci/` | Imzo kaliti (`release.keystore`), baza tozalash skripti |
 | `android-template/` | CI `flutter create` dan keyin qo'yadigan `MainActivity.kt` (`/android/` repoda yo'q) |
 

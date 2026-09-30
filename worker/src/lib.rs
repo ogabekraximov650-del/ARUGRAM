@@ -32,6 +32,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use worker::*;
 
+// Emoji, GIF va stiker to'plamlari (`packs.rs` boshidagi izohga qarang).
+mod packs;
+
 // ── CORS + JSON yordamchi ──────────────────────────────────────
 
 fn set_cors(resp: &mut Response) {
@@ -876,6 +879,13 @@ async fn init_db(env: &Env) -> bool {
             PRIMARY KEY (anime_id, season_id, epizod_id)
         )", vec![]),
         ("CREATE INDEX IF NOT EXISTS idx_encode_q ON encode_jobs(state, queued_at)", vec![]),
+        // ── EMOJI, GIF VA STIKER TO'PLAMLARI (`packs.rs`) ─────
+        (packs::DDL[0], vec![]),
+        (packs::DDL[1], vec![]),
+        (packs::DDL[2], vec![]),
+        (packs::DDL[3], vec![]),
+        (packs::DDL[4], vec![]),
+        (packs::DDL[5], vec![]),
     ]).await.is_ok();
 
     // ── USTUN QO'SHISH (eski bazalar uchun, bir marta) ────────
@@ -4540,9 +4550,11 @@ async fn sync_route(mut req: Request, env: &Env) -> Result<Response> {
     let history = b["history"].as_array().unwrap_or(&none);
     let ratings = b["ratings"].as_array().unwrap_or(&none);
     let favorites = b["favorites"].as_array().unwrap_or(&none);
+    let pack_ops = b["packs"].as_array().unwrap_or(&none);
     if history.len() > MAX_SYNC_HISTORY
         || ratings.len() > MAX_SYNC_SMALL
         || favorites.len() > MAX_SYNC_SMALL
+        || pack_ops.len() > MAX_SYNC_SMALL
     {
         return json_resp(&json!({"error": "paket juda katta"}), 413);
     }
@@ -4897,6 +4909,12 @@ async fn sync_route(mut req: Request, env: &Env) -> Result<Response> {
         ));
     }
 
+    // Emoji, GIF va stiker to'plamlari (`packs::sync_stmts`): har amal o'zini
+    // tekshiradi, yaroqsizi jimgina tashlanadi.
+    let (pack_stmts, pack_deleted, pack_removes) = packs::sync_stmts(me, pack_ops, now);
+    let pack_count = pack_stmts.len();
+    stmts.extend(pack_stmts);
+
     // Paket belgisi — takrorni tanib olish uchun.
     stmts.push((
         "INSERT INTO sync_batches (user_id,batch_id,at) VALUES (?,?,?)
@@ -4913,10 +4931,14 @@ async fn sync_route(mut req: Request, env: &Env) -> Result<Response> {
 
     turso_batch(env, &stmts).await?;
 
+    if !pack_ops.is_empty() {
+        packs::after_sync(env, me, &pack_deleted, pack_removes).await;
+    }
 
     ok_nostore(json!({
         "ok": true,
         "duplicate": false,
+        "packs": pack_count,
         // Ilova navbatdan AYNAN shularni o'chiradi.
         "history": hist_args.len() + hide_args.len(),
         "ratings": rate_args.len(),
@@ -5912,16 +5934,22 @@ async fn comments_add(mut req: Request, env: &Env, origin: &str) -> Result<Respo
     let sid = b["season_id"].as_i64().unwrap_or(0);
     let body = b["body"].as_str().unwrap_or("").trim().to_string();
 
-    // ── FAQAT MATN ────────────────────────────────────────────
-    // Telegram stiker/GIF olib tashlandi (ilova o'z tizimini
-    // yasaydi) — izohga fayl biriktirilmaydi.
-    if !b["media_file"].as_str().unwrap_or("").trim().is_empty() {
-        return json_resp(&json!({"error": "Stiker va GIF hozircha yo'q"}), 400);
-    }
-    let media_file = String::new();
-    let media_type = "";
+    // ── MATN, STIKER YOKI GIF ─────────────────────────────────
+    // Izohga fayl biriktirilmaydi; faqat ilovaning O'Z to'plamlaridagi
+    // stiker yoki GIF havolasi (`pk_<to'plam>_<element>`, `packs.rs`).
+    let want_media = bare_name(b["media_file"].as_str().unwrap_or("")).trim().to_string();
+    let want_type = b["media_type"].as_str().unwrap_or("");
+    let (media_file, media_type): (String, &str) = if want_media.is_empty() {
+        (String::new(), "")
+    } else if (want_type == "sticker" || want_type == "gif")
+        && packs::valid_ref(env, &want_media, want_type).await
+    {
+        (want_media, if want_type == "gif" { "gif" } else { "sticker" })
+    } else {
+        return json_resp(&json!({"error": "To'plam elementi topilmadi"}), 400);
+    };
 
-    if body.is_empty() {
+    if body.is_empty() && media_file.is_empty() {
         return json_resp(&json!({"error": "Izoh bo'sh"}), 400);
     }
     // Uzunlik BELGI bo'yicha cheklanadi (bayt emas): o'zbekcha
@@ -6445,14 +6473,19 @@ async fn chat_send(mut req: Request, env: &Env, origin: &str) -> Result<Response
     // holda boshqa odamning `chat_` faylini o'z suhbatiga "ilib",
     // `/api/tg/deliver` dagi suhbat tekshiruvidan o'tib olardi.
     let want_type = b["media_type"].as_str().unwrap_or("");
-    // Telegram stiker/GIF olib tashlandi (ilova o'z tizimini yasaydi).
-    if want_type == "sticker" || want_type == "gif" {
-        return json_resp(&json!({"error": "Stiker va GIF hozircha yo'q"}), 400);
-    }
-    if !media_file.is_empty() && !is_admin(&u) && !media_file.starts_with(&format!("chat_{me}_")) {
+    // Stiker va GIF — ilovaning O'Z to'plamlaridan (`pk_<to'plam>_<element>`,
+    // `packs.rs`): fayl yuklanmaydi, faqat mavjud to'plamga havola.
+    let is_pack_media = want_type == "sticker" || want_type == "gif";
+    if is_pack_media {
+        if !packs::valid_ref(env, &media_file, want_type).await {
+            return json_resp(&json!({"error": "To'plam elementi topilmadi"}), 400);
+        }
+    } else if !media_file.is_empty() && !is_admin(&u) && !media_file.starts_with(&format!("chat_{me}_")) {
         return json_resp(&json!({"error": "Fayl sizniki emas"}), 403);
     }
     let media_type = match want_type {
+        "sticker" => "sticker",
+        "gif" => "gif",
         "image" => "image",
         "video" => "video",
         // TALAB (foydalanuvchi): "chatda ovozli xabar yuborish
@@ -8937,9 +8970,13 @@ async fn auth_route(req: Request, env: &Env, origin: &str, path: &str, method: M
                 "DELETE FROM payments_db WHERE user_id=?",
                 "DELETE FROM subs_db WHERE user_id=?",
                 "DELETE FROM billing_log WHERE user_id=?",
+                "DELETE FROM pack_subs WHERE user_id=?",
             ] {
                 stmts.push((sql, vec![TursoArg::int(me)]));
             }
+            // Foydalanuvchining emoji/GIF/stiker to'plamlari va ularning
+            // kanaldagi fayllari ham o'chadi (xohishga ko'ra: xatosi yutiladi).
+            packs::delete_user_packs(env, me).await;
             // ── IKKI BOSQICH: BIRINCHISI YIQILSA HAM HISOB O'CHADI ──
             //
             // Turso quvurida bitta buyruq yiqilsa BUTUN quvur
@@ -9161,6 +9198,11 @@ fn needs_app_check(path: &str) -> bool {
     if matches!(path, "/api/encode/peek" | "/api/encode/claim" | "/api/encode/heartbeat" | "/api/encode/release"
         | "/api/encode/quality" | "/api/encode/finish")
     {
+        return false;
+    }
+    // To'plamlar navbati ham xuddi shu Actions run'ida ishlaydi va shu kalit
+    // bilan himoyalangan (`packs::route`, `encode_token_ok`).
+    if path.starts_with("/api/packs/job/") {
         return false;
     }
     // ── VIDEO VA RASM YO'LLARI ENDI OCHIQ EMAS ───────────────
@@ -9631,7 +9673,10 @@ async fn tg_user_media(env: &Env, msg: &Value) {
             || name.starts_with(&format!("chat_{uid}_"))
             // Avto-kodlash uchun asl video (kelajakda boshqalar ham
             // yuklaydi) — faqat O'Z nomi bilan.
-            || name.starts_with(&format!("orig_{uid}_"));
+            || name.starts_with(&format!("orig_{uid}_"))
+            // To'plamga qo'shiladigan element (admin ko'rib chiqquncha
+            // kanalda vaqtincha turadi) — `packs.rs`.
+            || name.starts_with(&format!("pki_{uid}_"));
         if !own {
             return;
         }
@@ -9984,9 +10029,11 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
     let now = now_ms();
 
     if path == "/api/encode/peek" && method == Method::Get {
+        // Emoji/GIF/stiker to'plamlari ham shu run'da ishlanadi (`packs_run`).
         let res = turso_exec(env,
-            "SELECT COUNT(*) AS n FROM encode_jobs
-              WHERE state='queued' OR (state='running' AND lease_until<=?)",
+            &format!("SELECT (SELECT COUNT(*) FROM encode_jobs
+                               WHERE state='queued' OR (state='running' AND lease_until<=?))
+                            + {} AS n", packs::PENDING_SQL),
             vec![TursoArg::int(now)]).await?;
         let n = first_row(&res).and_then(|r| r["n"].as_i64()).unwrap_or(0);
         return ok(json!({"pending": n}));
@@ -10891,12 +10938,15 @@ async fn gh_api(env: &Env, method: Method, path: &str, body: Option<Value>) -> R
 /// GitHub'ga umuman borilmaydi.
 async fn encode_kick(env: &Env) -> String {
     let now = now_ms();
+    // `pending` ga emoji/GIF/stiker to'plamlari ham kiradi (`packs_run`).
     let res = turso_exec(env,
-        "SELECT
-           (SELECT COUNT(*) FROM encode_jobs WHERE state='queued' OR (state='running' AND lease_until<=?)) AS pending,
+        &format!("SELECT
+           (SELECT COUNT(*) FROM encode_jobs WHERE state='queued' OR (state='running' AND lease_until<=?))
+             + {} AS pending,
            (SELECT COUNT(*) FROM encode_jobs WHERE state='running' AND lease_until<=?) AS stale,
            (SELECT COUNT(*) FROM encode_jobs WHERE state='running' AND lease_until>?) AS active,
            (SELECT COALESCE(MAX(lease_until),0) FROM encode_jobs WHERE state='running') AS lease_max",
+           packs::PENDING_SQL),
         vec![TursoArg::int(now), TursoArg::int(now), TursoArg::int(now)]).await;
     let Some(r) = res.ok().and_then(|r| first_row(&r)) else {
         return "\u{26A0}\u{FE0F} Navbatni o'qib bo'lmadi.".into();
@@ -11085,6 +11135,14 @@ async fn tg_route(mut req: Request, env: &Env, path: &str, method: Method) -> Re
             // bo'lsa (odatda ekranda bir nechta rasm).
             let admin = is_admin(&u);
             let own = format!("chat_{me}_");
+            // To'plamga qo'shilishi kutilayotgan element (`pki_`) — faqat
+            // egasiga va adminga (ko'rib chiqish uchun); to'plam fayllari
+            // (`pk_`) esa hammaga ochiladi.
+            let own_pki = format!("pki_{me}_");
+            names.retain(|n| admin || !n.starts_with("pki_") || n.starts_with(&own_pki));
+            if names.is_empty() {
+                return json_resp(&json!({"error": "bad_file"}), 400);
+            }
             let foreign: Vec<String> = if admin {
                 Vec::new()
             } else {
@@ -11228,7 +11286,9 @@ async fn tg_route(mut req: Request, env: &Env, path: &str, method: Method) -> Re
             };
             // Ochish kaliti — faqat O'Z faylingizga va faqat bir marta
             // (bo'sh bo'lsa). Admin — istalganiga.
-            let own = name.starts_with(&format!("avatar_{me}_")) || name.starts_with(&format!("chat_{me}_"));
+            let own = name.starts_with(&format!("avatar_{me}_"))
+                || name.starts_with(&format!("chat_{me}_"))
+                || name.starts_with(&format!("pki_{me}_"));
             let have = row["file_key"].as_str().unwrap_or("");
             if valid_file_key(&key) && (own || is_admin(&u)) && have.is_empty() {
                 turso_exec(env, "UPDATE tg_files SET file_key=? WHERE file_name=? AND file_key=''",
@@ -11369,6 +11429,10 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
 
     if path.starts_with("/api/encode/") {
         return encode_route(req, &env, path, method.clone()).await;
+    }
+
+    if path.starts_with("/api/packs/") {
+        return packs::route(req, &env, &path, method.clone()).await;
     }
 
     // ── SHAFFOF STATISTIKA ────────────────────────────────────

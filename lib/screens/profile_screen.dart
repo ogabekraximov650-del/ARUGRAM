@@ -27,6 +27,7 @@ import 'admin_screen.dart';
 import 'support_chat_screen.dart';
 import 'profile_edit_screen.dart';
 import 'sessions_screen.dart';
+import 'my_packs_screen.dart';
 import 'settings_screen.dart';
 import 'stat_detail_screen.dart';
 import 'storage_screen.dart';
@@ -544,6 +545,16 @@ class _ProfileBody extends StatelessWidget {
                   icon: Icons.devices_rounded,
                   label: 'Qurilmalar',
                   onTap: () => _open(context, const SessionsScreen()),
+                ),
+                _divider(),
+                // ── EMOJI, GIF VA STIKERLAR ───────────────────
+                //
+                // O'z to'plamlarini yasash va boshqalarnikini qo'shish
+                // (`my_packs_screen.dart`).
+                _ProfileTile(
+                  icon: Icons.emoji_emotions_rounded,
+                  label: 'Emoji, GIF va stikerlar',
+                  onTap: () => _open(context, const MyPacksScreen()),
                 ),
                 _divider(),
                 // ── ADMIN BILAN BOG'LANISH ────────────────────

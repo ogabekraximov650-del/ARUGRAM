@@ -56,14 +56,37 @@
 import 'package:characters/characters.dart';
 import 'package:flutter/material.dart';
 
+import '../services/pack_service.dart';
+import 'pack_views.dart';
+
 /// Eski (olib tashlangan) Telegram maxsus emoji belgisi
 /// `[ce:<hujjat>:<emoji>]` — endi faqat oddiy emoji ko'rsatiladi.
 final _customEmojiToken = RegExp(r'\[ce:(-?\d{1,20}):([^\]]{1,16})\]');
 
 /// Eski maxsus emoji belgilarini oddiy emoji bilan almashtiradi.
-String plainEmojiText(String text) => text.contains('[ce:')
+String _legacyPlain(String text) => text.contains('[ce:')
     ? text.replaceAllMapped(_customEmojiToken, (m) => m.group(2)!)
     : text;
+
+/// Ro'yxat ko'rinishi, nusxa olish va qidiruv uchun: eski maxsus emoji
+/// ham, ilovaning o'z to'plamidagi emoji (`[pe:...]`) ham oddiy emoji
+/// bo'lib chiqadi.
+String plainEmojiText(String text) {
+  var t = _legacyPlain(text);
+  if (t.contains('[pe:')) {
+    t = t.replaceAllMapped(kPackEmojiToken, (m) => m.group(3) ?? '');
+  }
+  return t;
+}
+
+/// Xabar matni bo'laklari: oddiy emoji Telegram shriftida to'liq rangda,
+/// ilovaning o'z to'plamidagi emoji (`[pe:...]`) esa rasm bo'lib.
+List<InlineSpan> richEmojiSpans(String text, TextStyle style) {
+  final t = _legacyPlain(text);
+  TextSpan plain(String s) =>
+      TextSpan(children: emojiSpans(s, style) ?? [TextSpan(text: s)]);
+  return packEmojiSpans(t, style.fontSize ?? 14, plain) ?? [plain(t)];
+}
 
 /// Matnni emoji bo'laklarini TO'LIQ RANGDA qoldirib chizadi.
 ///
@@ -91,7 +114,22 @@ class EmojiText extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // Eski maxsus emoji belgilari (`[ce:id:emoji]`) — oddiy emoji.
-    final text = plainEmojiText(this.text);
+    final text = _legacyPlain(this.text);
+    // Ilovaning o'z to'plamidagi emoji (`[pe:...]`) — rasm bo'lib.
+    final packed = packEmojiSpans(
+      text,
+      style.fontSize ?? 14,
+      (plain) => TextSpan(children: emojiSpans(plain, style) ?? [TextSpan(text: plain)]),
+    );
+    if (packed != null) {
+      return Text.rich(
+        TextSpan(children: packed),
+        style: style,
+        maxLines: maxLines,
+        overflow: overflow,
+        textAlign: textAlign,
+      );
+    }
     final spans = emojiSpans(text, style);
     // Emoji umuman yo'q — oddiy `Text` (eng arzon yo'l).
     if (spans == null) {

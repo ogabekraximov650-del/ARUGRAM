@@ -5,6 +5,7 @@ import '../services/admin_badges.dart';
 import '../services/admin_users_service.dart';
 import 'admin_app_screen.dart';
 import 'admin_reports_screen.dart';
+import 'admin_packs_screen.dart';
 import 'admin_users_screen.dart';
 import 'anime_management_screen.dart';
 
@@ -162,6 +163,21 @@ class AdminScreen extends StatelessWidget {
                           },
                         );
                       },
+                    ),
+                    const SizedBox(height: 12),
+                    // ── EMOJI, GIF VA STIKERLAR ───────────────
+                    //
+                    // Foydalanuvchilar yuklagan har bir rasm avval shu
+                    // yerda tekshiriladi (`admin_packs_screen.dart`).
+                    _AdminButton(
+                      icon: Icons.emoji_emotions_rounded,
+                      label: 'Emoji, GIF va stikerlar',
+                      subtitle: 'Yuklangan rasmlarni ko\'rib chiqish',
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => const AdminPacksScreen(),
+                        ),
+                      ),
                     ),
                     const SizedBox(height: 12),
                     // ── ILOVA VA XAVFSIZLIK ───────────────────

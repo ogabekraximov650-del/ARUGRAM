@@ -48,6 +48,7 @@ import 'rust_bridge.dart';
 import 'season_info.dart';
 import 'stats_service.dart';
 import 'image_cache.dart';
+import 'pack_service.dart';
 import 'sync_queue.dart';
 import 'traffic_service.dart';
 import 'watch_history.dart';
@@ -101,6 +102,11 @@ class AccountData {
     // Admin panelidagi yangilik nuqtalari ham.
     try {
       AdminBadges.instance.clear();
+    } catch (_) {}
+    // Emoji/GIF/stiker to'plamlari (mening to'plamlarim, obunalarim)
+    // hisobga tegishli; elementlarning o'zi (diskdagi kesh) esa umumiy.
+    try {
+      PackService.instance.reset();
     } catch (_) {}
     try {
       WatchProgress.instance.reload();
