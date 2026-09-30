@@ -155,4 +155,33 @@ void main() {
     expect(sent, 1);
     expect(find.text('Stiker yuborish'), findsNothing);
   });
+
+  testWidgets('emoji ro\'yxati aylanadi: qidiruv ketadi, tepadagi qator yashirinadi',
+      (t) async {
+    final c = TgTextController();
+    await t.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: SizedBox(height: 420, child: TgMediaPanel(controller: c)),
+      ),
+    ));
+    await t.pump(const Duration(milliseconds: 300));
+    // Panel oxirgi ochilgan sahifada ochiladi — Emoji sahifasiga o'tamiz.
+    await t.tap(find.text('Emoji'));
+    for (var i = 0; i < 6; i++) {
+      await t.pump(const Duration(milliseconds: 120));
+    }
+    final y0 = t.getTopLeft(find.text('Qidiruv')).dy;
+    // Pastga aylantirish: qidiruv qatori ro'yxat bilan birga yuqoriga ketadi.
+    await t.drag(find.byType(CustomScrollView).first, const Offset(0, -400));
+    await t.pump(const Duration(milliseconds: 400));
+    expect(t.takeException(), isNull);
+    final finder = find.text('Qidiruv');
+    if (finder.evaluate().isNotEmpty) {
+      expect(t.getTopLeft(finder).dy, lessThan(y0));
+    }
+    // Tepaga qaytish — hammasi joyida.
+    await t.drag(find.byType(CustomScrollView).first, const Offset(0, 800));
+    await t.pump(const Duration(milliseconds: 400));
+    expect(t.takeException(), isNull);
+  });
 }

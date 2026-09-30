@@ -4318,3 +4318,20 @@ Qulaylik (Telegram `EmojiView.java` asosida): ⚙ tugma (GIF/Stikerlar
 sahifasida to'plamlarni boshqarish), to'plam nomiga bosilsa to'plam ochiladi,
 xabardagi stikerga bosilsa to'plami ochiladi va uni qo'shish mumkin; video
 davomiyligi o'qilmasa ham yuborish mumkin (server tekshiradi).
+
+### Panel tuzilishi Telegram (`EmojiView.java`) bilan bir xil (2026-09)
+
+Telegram kodidan o'qib olingan (DrKLO/Telegram, `EmojiView.java`):
+- Tepadagi bo'limlar qatori (`EmojiTabsStrip`, 36 dp) ro'yxat USTIDA suzadi:
+  pastga aylantirilsa tepaga chiqib yashirinadi, tepaga aylantirilsa qaytadi
+  (`checkTabsY`). Ro'yxatning yuqori bo'sh joyi 36 dp, pastki 44 dp.
+- Qidiruv qatori (50 dp) — ro'yxatning BIRINCHI elementi: u ham ro'yxat bilan
+  aylanib ketadi (qotib turmaydi).
+- Emoji katagi kenglik/45 dp, stiker kenglik/72 dp, GIF qatori ~100 dp
+  (bizda ~118 dp, har biri o'z nisbatida, qator kenglikka to'liq sig'adi).
+- Emoji sahifasi tartibi: yaqinda, Unicode bo'limlari, KEYIN maxsus emoji
+  to'plamlari. GIF sahifasida tepadagi qator YO'Q (faqat qidiruv + devor).
+- Stikerlar sahifasida ⚙ (sozlamalar) tugmasi, to'plam nomiga bosilsa
+  to'plam ochiladi, bosib turilsa katta ko'rinish va menyu.
+Bizda: `_Sections` (`leading` — qidiruv, `tabs` — suzuvchi qator, `ValueNotifier`
+bilan faqat qator qayta chiziladi). Panel foni issiq to'q rang (skrinshotdagi).

@@ -521,8 +521,8 @@ class _TgMediaPanelState extends State<TgMediaPanel> {
 }
 
 abstract final class _Pal {
-  static const bg = Color(0xFF1C1C1E);
-  static const pill = Color(0xF22C2C2E);
+  static const bg = Color(0xFF201B18);
+  static const pill = Color(0xF2352C27);
   static const pillOn = Color(0x24FFFFFF);
   static const hint = Color(0xFF8E8E93);
   static const icon = Color(0xFF9A9AA0);
@@ -848,6 +848,15 @@ class _Sections extends StatefulWidget {
   final ValueChanged<int> onSection;
   final _SectionsJump jump;
 
+  /// Tepadagi bo'limlar qatori (`EmojiTabsStrip`, 36-40 dp): pastga
+  /// aylantirilganda tepaga chiqib yashirinadi, tepaga aylantirilganda
+  /// qaytadi (Telegram: `checkTabsY`).
+  final Widget? tabs;
+
+  /// Ro'yxatning BIRINCHI elementi bo'lgan qidiruv qatori (50 dp,
+  /// Telegram: `searchFieldHeight`) — u ham ro'yxat bilan aylanib ketadi.
+  final Widget? leading;
+
   const _Sections({
     required this.minCell,
     required this.minColumns,
@@ -856,7 +865,11 @@ class _Sections extends StatefulWidget {
     required this.cell,
     required this.onSection,
     required this.jump,
+    this.tabs,
+    this.leading,
   });
+
+  static const double searchHeight = 50;
 
   @override
   State<_Sections> createState() => _SectionsState();
@@ -869,10 +882,14 @@ class _SectionsJump {
 
 class _SectionsState extends State<_Sections> {
   final _scroll = ScrollController();
+  final _tabsDy = ValueNotifier<double>(0);
   double _cellSize = 40;
   int _columns = 8;
   int _current = 0;
   bool _jumping = false;
+  double _lastOffset = 0;
+
+  double get _lead => widget.leading != null ? _Sections.searchHeight : 0;
 
   @override
   void initState() {
@@ -890,6 +907,7 @@ class _SectionsState extends State<_Sections> {
   @override
   void dispose() {
     _scroll.dispose();
+    _tabsDy.dispose();
     super.dispose();
   }
 
@@ -901,7 +919,7 @@ class _SectionsState extends State<_Sections> {
   }
 
   double _offsetOf(int section) {
-    var y = 0.0;
+    var y = _lead;
     for (var i = 0; i < section; i++) {
       y += _sectionHeight(i);
     }
@@ -913,16 +931,27 @@ class _SectionsState extends State<_Sections> {
     final y = _offsetOf(section).clamp(0.0, _scroll.position.maxScrollExtent);
     _current = section;
     _jumping = true;
+    _tabsDy.value = 0;
     await _scroll.animateTo(y,
         duration: const Duration(milliseconds: 300),
         curve: Curves.easeOutCubic);
     _jumping = false;
+    _lastOffset = _scroll.offset;
   }
 
   void _onScroll() {
+    final off = _scroll.offset;
+    // Tepadagi qator: pastga aylantirilsa yashirinadi, tepaga — qaytadi.
+    if (widget.tabs != null && !_jumping) {
+      final d = off - _lastOffset;
+      _tabsDy.value = off <= 0
+          ? 0
+          : (_tabsDy.value - d).clamp(-_Strip.height, 0.0);
+    }
+    _lastOffset = off;
     if (_jumping) return;
-    var y = 0.0;
-    final at = _scroll.offset + 4;
+    var y = _lead;
+    final at = off + 4;
     for (var i = 0; i < widget.counts.length; i++) {
       y += _sectionHeight(i);
       if (at < y) {
@@ -942,30 +971,55 @@ class _SectionsState extends State<_Sections> {
       _columns = math.max(widget.minColumns, (w / widget.minCell).floor());
       _cellSize = w / _columns;
       final cell = _cellSize;
-      return CustomScrollView(
-        controller: _scroll,
-        // Faqat ekrandagi (va uning chetidagi bir qator) kataklar
-        // quriladi va yuklanadi — ko'rinmagani yuklanmaydi.
-        cacheExtent: cell,
-        slivers: [
-          for (var s = 0; s < widget.counts.length; s++)
-            if (widget.counts[s] > 0) ...[
-              SliverToBoxAdapter(child: widget.headers[s]),
-              SliverPadding(
-                padding: const EdgeInsets.symmetric(horizontal: 5),
-                sliver: SliverFixedExtentList(
-                  itemExtent: cell,
-                  delegate: SliverChildBuilderDelegate(
-                    (_, r) => _gridRow(r, _columns, widget.counts[s], cell,
-                        (i) => widget.cell(s, i, cell)),
-                    childCount: (widget.counts[s] / _columns).ceil(),
-                    addAutomaticKeepAlives: false,
-                  ),
+      return Stack(
+        children: [
+          CustomScrollView(
+            controller: _scroll,
+            // Faqat ekrandagi (va uning chetidagi bir qator) kataklar
+            // quriladi va yuklanadi — ko'rinmagani yuklanmaydi.
+            cacheExtent: cell,
+            slivers: [
+              // Tepadagi qator egallagan joy.
+              if (widget.tabs != null)
+                const SliverToBoxAdapter(child: SizedBox(height: _Strip.height)),
+              if (widget.leading != null)
+                SliverToBoxAdapter(
+                  child: SizedBox(
+                      height: _Sections.searchHeight, child: widget.leading),
                 ),
-              ),
+              for (var s = 0; s < widget.counts.length; s++)
+                if (widget.counts[s] > 0) ...[
+                  SliverToBoxAdapter(child: widget.headers[s]),
+                  SliverPadding(
+                    padding: const EdgeInsets.symmetric(horizontal: 5),
+                    sliver: SliverFixedExtentList(
+                      itemExtent: cell,
+                      delegate: SliverChildBuilderDelegate(
+                        (_, r) => _gridRow(r, _columns, widget.counts[s], cell,
+                            (i) => widget.cell(s, i, cell)),
+                        childCount: (widget.counts[s] / _columns).ceil(),
+                        addAutomaticKeepAlives: false,
+                      ),
+                    ),
+                  ),
+                ],
+              // Pastdagi suzuvchi tugmalar oxirgi qatorni yopmasin
+              // (Telegram: pastdan 44 dp).
+              const SliverToBoxAdapter(child: SizedBox(height: 64)),
             ],
-          // Pastdagi suzuvchi tugmalar oxirgi qatorni yopmasin.
-          const SliverToBoxAdapter(child: SizedBox(height: 64)),
+          ),
+          if (widget.tabs != null)
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: ValueListenableBuilder<double>(
+                valueListenable: _tabsDy,
+                builder: (_, dy, child) =>
+                    Transform.translate(offset: Offset(0, dy), child: child),
+                child: ColoredBox(color: _Pal.bg, child: widget.tabs),
+              ),
+            ),
         ],
       );
     });
@@ -1055,8 +1109,8 @@ class _PackSearch extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 44,
-      margin: const EdgeInsets.fromLTRB(10, 2, 10, 6),
+      height: 42,
+      margin: const EdgeInsets.fromLTRB(10, 4, 10, 4),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.07),
         borderRadius: BorderRadius.circular(22),
@@ -1145,7 +1199,6 @@ class _PackPageState extends State<_PackPage>
   bool _first = true;
   String _query = '';
   String _chip = '';
-  List<double> _offsets = const [];
 
   bool get _gif => widget.kind == PackKind.gif;
   bool get _filtering => _query.isNotEmpty || _chip.isNotEmpty;
@@ -1300,6 +1353,12 @@ class _PackPageState extends State<_PackPage>
     }
     // 0 — saralanganlar (⭐), 1 — yaqinda (🕒), 2.. — to'plamlar.
     final counts = <int>[favs.length, recent.length, for (final l in lists) l.length];
+    final empty = counts.every((c) => c == 0);
+    if (_gif) {
+      // GIF sahifasida tepadagi qator YO'Q (Telegram'dagidek): qidiruv va
+      // zich "devor".
+      return _gifWall(favs, recent, packs, lists, empty);
+    }
     final sel = _section.clamp(0, counts.length - 1);
     final strip = _Strip(
       count: counts.length + 1,
@@ -1310,16 +1369,7 @@ class _PackPageState extends State<_PackPage>
           return;
         }
         setState(() => _section = i);
-        if (_gif) {
-          if (_wall.hasClients && i < _offsets.length) {
-            _wall.animateTo(
-                _offsets[i].clamp(0.0, _wall.position.maxScrollExtent),
-                duration: const Duration(milliseconds: 300),
-                curve: Curves.easeOutCubic);
-          }
-        } else {
-          _jump.to(i);
-        }
+        _jump.to(i);
       },
       icon: (i, on) {
         final c = on ? Colors.white : _Pal.icon;
@@ -1331,30 +1381,28 @@ class _PackPageState extends State<_PackPage>
         return _cover(packs[i - 2], lists[i - 2], on);
       },
     );
-    final empty = counts.every((c) => c == 0);
-    return Column(
-      children: [
+    if (empty && _filtering) {
+      return Column(children: [
         strip,
         _search(),
-        Expanded(
-          child: empty && _filtering
-              ? const Center(
-                  child: Text('Hech narsa topilmadi',
-                      style: TextStyle(color: _Pal.hint, fontSize: 15)))
-              : _gif
-                  ? _gifWall(favs, recent, packs, lists)
-                  : _stickerGrid(favs, recent, packs, lists, counts),
+        const Expanded(
+          child: Center(
+              child: Text('Hech narsa topilmadi',
+                  style: TextStyle(color: _Pal.hint, fontSize: 15))),
         ),
-      ],
-    );
+      ]);
+    }
+    return _stickerGrid(strip, favs, recent, packs, lists, counts);
   }
 
-  Widget _stickerGrid(List<PackPick> favs, List<PackPick> recent,
+  Widget _stickerGrid(Widget strip, List<PackPick> favs, List<PackPick> recent,
       List<PackInfo> packs, List<List<PackItem>> lists, List<int> counts) {
     return _Sections(
       minCell: 72,
       minColumns: 4,
       counts: counts,
+      tabs: strip,
+      leading: _search(),
       headers: [
         const _Header('Saralanganlar'),
         const _Header('Yaqinda ishlatilgan'),
@@ -1389,21 +1437,18 @@ class _PackPageState extends State<_PackPage>
   }
 
   /// GIF "devori": har qator kenglikka to'liq sig'adi, elementlar o'z nisbatida.
+  /// Birinchi element — qidiruv qatori (u ham aylanib ketadi).
   Widget _gifWall(List<PackPick> favs, List<PackPick> recent,
-      List<PackInfo> packs, List<List<PackItem>> lists) {
+      List<PackInfo> packs, List<List<PackItem>> lists, bool empty) {
     return LayoutBuilder(builder: (context, box) {
       const gap = 2.0;
       const target = 118.0;
       final w = box.maxWidth;
       final entries = <Object>[]; // _GifHead — sarlavha; _GifRow — qator
-      final offsets = <double>[];
-      var y = 0.0;
 
       void addSection(String title, List<_GifCell> cells, {PackInfo? pack}) {
-        offsets.add(y);
         if (cells.isEmpty) return;
         entries.add(_GifHead(title, pack));
-        y += _Header.height;
         var row = <_GifCell>[];
         var sum = 0.0;
         void flush(bool full) {
@@ -1411,7 +1456,6 @@ class _PackPageState extends State<_PackPage>
           final gaps = gap * (row.length - 1);
           final h = (full ? (w - gaps) / sum : target).clamp(60.0, 260.0);
           entries.add(_GifRow(row, h));
-          y += h + gap;
           row = <_GifCell>[];
           sum = 0;
         }
@@ -1449,13 +1493,15 @@ class _PackPageState extends State<_PackPage>
             ),
         ], pack: packs[i]);
       }
-      _offsets = offsets;
       return ListView.builder(
         controller: _wall,
         padding: const EdgeInsets.only(bottom: 70),
-        itemCount: entries.length,
+        itemCount: entries.length + 1,
         itemBuilder: (_, i) {
-          final e = entries[i];
+          if (i == 0) {
+            return SizedBox(height: _Sections.searchHeight, child: _search());
+          }
+          final e = entries[i - 1];
           if (e is _GifHead) {
             final pk = e.pack;
             return _Header(e.title, onTap: pk == null ? null : () => _openPack(pk));
@@ -1723,88 +1769,89 @@ class _EmojiPageState extends State<_EmojiPage>
     final groups = tgEmojiGroups;
     final packs = PackService.instance.usable(PackKind.emoji);
     final lists = [for (final p in packs) _items(p)];
-    final np = packs.length;
-    // 0 — yaqinda, 1..np — maxsus emoji to'plamlari, keyin Unicode bo'limlari.
+    final ng = groups.length;
+    // Telegram'dagidek tartib: 0 — yaqinda, 1..ng — Unicode bo'limlari,
+    // keyin maxsus emoji to'plamlari.
     final counts = <int>[
       _recent.length,
-      for (final l in lists) l.length,
       for (final g in groups) g.emoji.length,
+      for (final l in lists) l.length,
     ];
     final headers = <Widget>[
       const _Header('Yaqinda ishlatilgan'),
+      for (final g in groups) _Header(g.title),
       for (final p in packs)
         _Header(p.title,
             onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
                 builder: (_) => PackDetailScreen(packId: p.id, initial: p)))),
-      for (final g in groups) _Header(g.title),
     ];
-    return Column(
-      children: [
-        _Strip(
-          count: counts.length + 1,
-          selected: _section.clamp(0, counts.length - 1),
-          onTap: (i) {
-            if (i >= counts.length) {
-              _openHub();
-              return;
-            }
-            setState(() => _section = i);
-            _jump.to(i);
-          },
-          icon: (i, on) {
-            final c = on ? Colors.white : _Pal.icon;
-            if (i == 0) return Icon(Icons.access_time_rounded, color: c, size: 22);
-            if (i >= counts.length) {
-              return Icon(Icons.add_circle_outline_rounded, color: c, size: 22);
-            }
-            if (i <= np) {
-              final l = lists[i - 1];
-              if (l.isEmpty) return Icon(Icons.circle_outlined, color: c, size: 18);
-              return Opacity(
-                opacity: on ? 1 : 0.75,
-                child: PackImage(pack: packs[i - 1].id, item: l.first.id, size: 24),
-              );
-            }
-            return _TabLottie(
-                asset: 'assets/tg_anim/msg_emoji_${_icons[i - 1 - np]}.json',
-                selected: on,
-                color: c);
-          },
-        ),
-        _PackSearch(
-          query: _query,
-          chip: _chip,
-          onQuery: (v) => setState(() => _query = v),
-          onChip: (v) => setState(() => _chip = v),
-        ),
-        Expanded(
-          child: _Sections(
-            minCell: 45,
-            minColumns: 7,
-            counts: counts,
-            headers: headers,
-            jump: _jump,
-            onSection: (i) => setState(() => _section = i),
-            cell: (s, i, cell) {
-              if (s == 0) return _EmojiCell(_recent[i], cell, _pickEmoji);
-              if (s <= np) {
-                final it = lists[s - 1][i];
-                return _Press(
-                  onTap: () => _pickPack(packs[s - 1], it),
-                  onLongPress: () => _previewPack(packs[s - 1], it),
-                  scale: 0.8,
-                  child: Padding(
-                    padding: EdgeInsets.all(cell * 0.14),
-                    child: PackImage(
-                        pack: packs[s - 1].id, item: it.id, size: cell * 0.72),
-                  ),
-                );
-              }
-              return _EmojiCell(groups[s - 1 - np].emoji[i], cell, _pickEmoji);
-            },
+    final strip = _Strip(
+      count: counts.length + 1,
+      selected: _section.clamp(0, counts.length - 1),
+      onTap: (i) {
+        if (i >= counts.length) {
+          _openHub();
+          return;
+        }
+        setState(() => _section = i);
+        _jump.to(i);
+      },
+      icon: (i, on) {
+        final c = on ? Colors.white : _Pal.icon;
+        if (i == 0) return Icon(Icons.access_time_rounded, color: c, size: 22);
+        if (i >= counts.length) {
+          return Icon(Icons.add_circle_outline_rounded, color: c, size: 22);
+        }
+        if (i <= ng) {
+          return _TabLottie(
+              asset: 'assets/tg_anim/msg_emoji_${_icons[i - 1]}.json',
+              selected: on,
+              color: c);
+        }
+        final l = lists[i - 1 - ng];
+        if (l.isEmpty) return Icon(Icons.circle_outlined, color: c, size: 18);
+        return Opacity(
+          opacity: on ? 1 : 0.75,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: PackImage(
+                pack: packs[i - 1 - ng].id,
+                item: l.first.id,
+                size: 24,
+                fit: BoxFit.cover),
           ),
-        ),
-      ],
+        );
+      },
+    );
+    return _Sections(
+      minCell: 45,
+      minColumns: 7,
+      counts: counts,
+      headers: headers,
+      tabs: strip,
+      leading: _PackSearch(
+        query: _query,
+        chip: _chip,
+        onQuery: (v) => setState(() => _query = v),
+        onChip: (v) => setState(() => _chip = v),
+      ),
+      jump: _jump,
+      onSection: (i) => setState(() => _section = i),
+      cell: (s, i, cell) {
+        if (s == 0) return _EmojiCell(_recent[i], cell, _pickEmoji);
+        if (s <= ng) return _EmojiCell(groups[s - 1].emoji[i], cell, _pickEmoji);
+        final k = s - 1 - ng;
+        final it = lists[k][i];
+        return _Press(
+          onTap: () => _pickPack(packs[k], it),
+          onLongPress: () => _previewPack(packs[k], it),
+          scale: 0.8,
+          child: Padding(
+            padding: EdgeInsets.all(cell * 0.14),
+            child: PackImage(pack: packs[k].id, item: it.id, size: cell * 0.72),
+          ),
+        );
+      },
     );
   }
 }
