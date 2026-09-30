@@ -1112,6 +1112,31 @@ jobs:
           prerelease: true
           files: ${{ steps.rename.outputs.out }}
 
+      # ── TELEGRAM: "SAQLANGAN XABARLAR"GA YUBORISH ────────────
+      #
+      # TALAB (foydalanuvchi): "tayyor bo'lgan apklar telegram
+      # accountni xabarlariga yuborilsin, ya'ni accountni o'ziga".
+      # Sessiya kodlash workflow'idagi kabi `session.enc` dan
+      # (`ENCODE_TOKEN` bilan) tiklanadi; nusxada ishlanadi. Xato
+      # bo'lsa build buzilmaydi.
+      - name: APK'ni Telegram "Saqlangan xabarlar"ga yuborish
+        continue-on-error: true
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+        run: |
+          APK="${{ steps.rename.outputs.out }}"
+          S="$RUNNER_TEMP/notify_session"
+          K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K \
+            -in tool/encode/session.enc -out "$S.session"
+          head -c 16 "$S.session" | grep -q "SQLite format 3"
+          pip install --no-cache-dir -q pyrogram==2.0.106 tgcrypto==1.2.5
+          python tool/notify/send_apk.py "$S" "$APK" \
+            "ARUGRAM build ${{ github.run_number }} (${{ matrix.name }}) — ${{ env.APP_VERSION }}"
+          rm -f "$S.session"
+
       # ── ARTIFACT YUKLASH — MAJBURIY EMAS ──────────────────────
       #
       # TUZATILGAN XATO: bu qadam ilgari Release'dan OLDIN turardi

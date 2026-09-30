@@ -4370,3 +4370,11 @@ MainActivity). Ruxsat berilmasa — tugma va zaxira tanlagich.
 Fayllar: `lib/widgets/tg_file_browser.dart`, `tg_attach_sheet.dart`,
 `android-template/MainActivity.kt`, `.github/workflows/build-flutter-apk.yml`,
 `test/tg_file_browser_test.dart`.
+
+## APK'ni Telegram "Saqlangan xabarlar"ga yuborish
+
+`build-flutter-apk.yml` oxirida (Release'dan keyin) har bir tayyor APK Telegram
+hisobining "Saqlangan xabarlar"iga (`me`) yuboriladi: `tool/notify/send_apk.py`.
+Sessiya `tool/encode/session.enc` dan (`ENCODE_TOKEN` bilan) nusxaga tiklanadi,
+`TG_API_ID`/`TG_API_HASH` secret'lari ishlatiladi. Qadam `continue-on-error`:
+xato bo'lsa build buzilmaydi. 4 ta APK — 4 ta xabar.
