@@ -553,11 +553,18 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
   /// Faylni Telegram'ga yuklaydi (yo'lda AES-128-CTR bilan
   /// shifrlanadi). Muvaffaqiyatda `null`, aks holda xato matni.
   /// [onProgress] — (yuborilgan, jami) baytlar. Kalit — [keyFor].
+  ///
+  /// [waitForClaim] `false` bo'lsa botning kanalga ko'chirishi KUTILMAYDI
+  /// (fon'da tugaydi): fayl allaqachon Telegram'da, qolgan ishni bot va
+  /// worker qiladi — to'plam qo'shish shuni ishlatadi, foydalanuvchi
+  /// yuklash 100% bo'lgach kutib qolmasin. [onPhase] — bosqich matni.
   Future<String?> uploadFile(
     String path,
     String fileName,
     String mime, {
     void Function(int sent, int total)? onProgress,
+    bool waitForClaim = true,
+    void Function(String phase)? onPhase,
   }) async {
     if (!_authorized) return 'Telegram hisobi ulanmagan';
     if (_channel == 0) await refreshConfig(force: true);
@@ -594,12 +601,24 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
 
     // Yuklash Rust'da fon'da ketadi — holatni so'rab turamiz.
     var key = '';
+    DateTime? allSentAt;
     while (true) {
       await Future<void>.delayed(const Duration(milliseconds: 400));
       final st = _json(_take(lib, status(job)));
       final sent = (st['sent'] as num?)?.toInt() ?? 0;
       final total = (st['total'] as num?)?.toInt() ?? 0;
       if (total > 0) onProgress?.call(sent, total);
+      // Hamma bayt ketdi, lekin Telegram post qilmadi — abadiy kutmaymiz.
+      if (total > 0 && sent >= total && st['done'] != true) {
+        allSentAt ??= DateTime.now();
+        onPhase?.call('Telegram qabul qilmoqda...');
+        if (DateTime.now().difference(allSentAt) > const Duration(seconds: 120)) {
+          final cancel = lib.lookupFunction<Void Function(Uint64),
+              void Function(int)>('rust_tg_upload_cancel');
+          cancel(job);
+          return 'Telegram javob bermadi — internetni tekshirib, qayta urinib ko\'ring';
+        }
+      }
       if (st['done'] == true) {
         final err = st['error'];
         if (err is String && err.isNotEmpty) return err;
@@ -614,7 +633,12 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
 
     // Bot ko'chirib ulgurguncha chat tozalanmasin.
     _delivering++;
-    await _awaitClaim(fileName, key, s);
+    if (waitForClaim) {
+      onPhase?.call('Kanalga ko\'chirilmoqda...');
+      await _awaitClaim(fileName, key, s);
+    } else {
+      unawaited(_awaitClaim(fileName, key, s));
+    }
     return null;
   }
 

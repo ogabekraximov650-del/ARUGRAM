@@ -175,7 +175,10 @@ class _PackAddScreenState extends State<PackAddScreen> {
         trimEndMs: d.isVideo ? d.trimB : 0,
         onProgress: (sent, total) {
           if (!mounted || total <= 0) return;
-          setState(() => d.status = '${(sent * 100 / total).floor()}%');
+          setState(() => d.status = 'Yuklanmoqda ${(sent * 100 / total).floor()}%');
+        },
+        onPhase: (t) {
+          if (mounted) setState(() => d.status = t);
         },
       );
       if (!mounted) return;

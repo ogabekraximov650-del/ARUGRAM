@@ -4335,3 +4335,12 @@ Telegram kodidan o'qib olingan (DrKLO/Telegram, `EmojiView.java`):
   to'plam ochiladi, bosib turilsa katta ko'rinish va menyu.
 Bizda: `_Sections` (`leading` — qidiruv, `tabs` — suzuvchi qator, `ValueNotifier`
 bilan faqat qator qayta chiziladi). Panel foni issiq to'q rang (skrinshotdagi).
+
+### To'plamga yuklash 100% da qotib qolmasin (2026-09)
+
+`TelegramService.uploadFile` yuklash tugagach botning kanalga ko'chirishini
+(`_awaitClaim`, ~26 s va undan ko'p) KUTARDI — foydalanuvchi 100% da qotib
+qolgandek ko'rardi. Endi to'plam qo'shishda kutilmaydi (`waitForClaim: false`:
+fayl allaqachon Telegram'da, bot va worker o'zi tugatadi), bosqich matni
+ko'rsatiladi ("Telegram qabul qilmoqda...") va Telegram 120 s javob bermasa
+yuklash bekor qilinib xato matni chiqadi.

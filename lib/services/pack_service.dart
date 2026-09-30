@@ -718,6 +718,7 @@ class PackService extends ChangeNotifier {
     int trimStartMs = 0,
     int trimEndMs = 0,
     void Function(int sent, int total)? onProgress,
+    void Function(String phase)? onPhase,
   }) async {
     final uid = AuthService.instance.user?.id ?? 0;
     if (uid <= 0) return 'Avval hisobga kiring';
@@ -755,6 +756,9 @@ class PackService extends ChangeNotifier {
       name,
       'application/octet-stream',
       onProgress: onProgress,
+      onPhase: onPhase,
+      // Botning kanalga ko'chirishi fon'da: yuklash 100% bo'lgach kutilmaydi.
+      waitForClaim: false,
     );
     if (err != null) return err;
     final e = emoji.replaceAll(RegExp(r'[\[\]]'), '').characters.take(3).toString();
