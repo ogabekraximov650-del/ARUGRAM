@@ -16,7 +16,6 @@ import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
 import '../services/pack_service.dart';
-import '../theme/app_background.dart';
 import '../widgets/glass.dart';
 
 /// Tur bo'yicha eng uzun bo'lak (soniya) — `tool/packs/arunorm.py` bilan bir xil.
@@ -77,7 +76,7 @@ enum _Drag { none, left, right, body }
 
 class _PackVideoTrimScreenState extends State<PackVideoTrimScreen> {
   static const double _minMs = 500;
-  static const double _handleW = 22;
+  static const double _handleW = 20;
   static const int _frameCount = 8;
 
   VideoPlayerController? _c;
@@ -283,10 +282,14 @@ class _PackVideoTrimScreenState extends State<PackVideoTrimScreen> {
     );
   }
 
+  /// Telegram uslubidagi kadrlar tasmasi: och kulrang ramka, ikki chetda
+  /// tutqichlar, tanlanmagan joy xira, ingichka o'ynash chizig'i.
   Widget _timeline(double w) {
+    const h = 56.0;
     final ax = _a / _dur * w;
     final bx = _b / _dur * w;
     final px = (_pos.clamp(_a, _b) / _dur * w).clamp(ax, bx).toDouble();
+    const light = Color(0xFFBDBDBD);
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTapUp: (d) {
@@ -298,15 +301,18 @@ class _PackVideoTrimScreenState extends State<PackVideoTrimScreen> {
       onHorizontalDragEnd: (_) => _onEnd(),
       onHorizontalDragCancel: _onEnd,
       child: SizedBox(
-        height: 64,
+        height: h + 20,
         width: w,
         child: Stack(
           clipBehavior: Clip.none,
           children: [
-            // kadrlar
-            Positioned.fill(
+            Positioned(
+              left: 0,
+              right: 0,
+              top: 10,
+              height: h,
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(6),
+                borderRadius: BorderRadius.circular(8),
                 child: Row(
                   children: [
                     for (var i = 0; i < _frameCount; i++)
@@ -314,59 +320,63 @@ class _PackVideoTrimScreenState extends State<PackVideoTrimScreen> {
                         child: i < _frames.length && _frames[i] != null
                             ? Image.memory(_frames[i]!,
                                 fit: BoxFit.cover,
-                                height: 64,
+                                height: h,
                                 gaplessPlayback: true)
-                            : Container(color: Colors.white12),
+                            : Container(
+                                height: h, color: const Color(0xFF151515)),
                       ),
                   ],
                 ),
               ),
             ),
-            // tanlanmagan joylar — xira
             Positioned(
                 left: 0,
                 width: ax,
-                top: 0,
-                bottom: 0,
-                child: Container(color: Colors.black.withValues(alpha: 0.65))),
+                top: 10,
+                height: h,
+                child: Container(color: Colors.black.withValues(alpha: 0.7))),
             Positioned(
                 left: bx,
                 right: 0,
-                top: 0,
-                bottom: 0,
-                child: Container(color: Colors.black.withValues(alpha: 0.65))),
-            // tanlangan oyna: ramka va dastalar
+                top: 10,
+                height: h,
+                child: Container(color: Colors.black.withValues(alpha: 0.7))),
+            // tanlangan bo'lak ramkasi
             Positioned(
-              left: ax - _handleW / 2,
-              width: bx - ax + _handleW,
-              top: -3,
-              bottom: -3,
-              child: Container(
+              left: ax,
+              width: bx - ax,
+              top: 10,
+              height: h,
+              child: const DecoratedBox(
                 decoration: BoxDecoration(
                   border: Border.symmetric(
-                      horizontal:
-                          BorderSide(color: AppColors.accent, width: 3)),
+                      horizontal: BorderSide(color: light, width: 3)),
                 ),
               ),
             ),
-            for (final x in [ax, bx])
+            // tutqichlar
+            for (final e in [(ax - _handleW, true), (bx, false)])
               Positioned(
-                left: x - _handleW / 2,
+                left: e.$1,
                 width: _handleW,
-                top: -3,
-                bottom: -3,
+                top: 10,
+                height: h,
                 child: Container(
                   decoration: BoxDecoration(
-                    color: AppColors.accent,
-                    borderRadius: BorderRadius.circular(5),
+                    color: light,
+                    borderRadius: e.$2
+                        ? const BorderRadius.horizontal(
+                            left: Radius.circular(8))
+                        : const BorderRadius.horizontal(
+                            right: Radius.circular(8)),
                   ),
                   child: const Center(
                     child: SizedBox(
                       width: 3,
-                      height: 26,
+                      height: 22,
                       child: DecoratedBox(
                           decoration: BoxDecoration(
-                              color: Colors.white,
+                              color: Color(0xFF3A3A3A),
                               borderRadius:
                                   BorderRadius.all(Radius.circular(2)))),
                     ),
@@ -377,12 +387,13 @@ class _PackVideoTrimScreenState extends State<PackVideoTrimScreen> {
             Positioned(
               left: px - 1.5,
               width: 3,
-              top: -6,
-              bottom: -6,
+              top: 4,
+              height: h + 12,
               child: const DecoratedBox(
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.all(Radius.circular(2)),
+                  boxShadow: [BoxShadow(color: Colors.black54, blurRadius: 3)],
                 ),
               ),
             ),
@@ -392,140 +403,170 @@ class _PackVideoTrimScreenState extends State<PackVideoTrimScreen> {
     );
   }
 
+  Widget _pill(Widget child, {VoidCallback? onTap}) => GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1C1C1E),
+            borderRadius: BorderRadius.circular(18),
+          ),
+          child: child,
+        ),
+      );
+
   @override
   Widget build(BuildContext context) {
     final c = _c;
     final len = (_b - _a).round();
     final maxS = packMaxSeconds(widget.kind);
     final atMax = _b - _a >= _maxSel - 1;
-    return AppBackground(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          iconTheme: const IconThemeData(color: Colors.white),
-          title: const Text('Videoni tahrirlash',
-              style: TextStyle(color: Colors.white, fontSize: 18)),
-          actions: [
-            TextButton(
-              onPressed: c == null
-                  ? null
-                  : () => Navigator.of(context).pop((_a.round(), _b.round())),
-              child: const Text('Tayyor'),
-            ),
-          ],
-        ),
-        body: _error != null
-            ? Center(
-                child: Text(_error!,
-                    style: const TextStyle(color: AppColors.danger)))
-            : c == null
-                ? const Center(
-                    child: CircularProgressIndicator(
-                        strokeWidth: 2.4, color: Colors.white54))
-                : Column(
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: Colors.white),
+        title: Text(
+            widget.kind == PackKind.gif
+                ? 'GIF'
+                : widget.kind == PackKind.emoji
+                    ? 'Emoji'
+                    : 'Stiker',
+            style: const TextStyle(color: Colors.white, fontSize: 19)),
+      ),
+      body: _error != null
+          ? Center(
+              child: Text(_error!,
+                  style: const TextStyle(color: AppColors.danger)))
+          : c == null
+              ? const Center(
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2.4, color: Colors.white54))
+              : SafeArea(
+                  child: Column(
                     children: [
                       Expanded(
-                        child: Center(
-                          child: GestureDetector(
-                            onTap: () =>
-                                c.value.isPlaying ? c.pause() : c.play(),
-                            child: AspectRatio(
-                              aspectRatio: c.value.aspectRatio,
-                              child: VideoPlayer(c),
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: _togglePlay,
+                          child: Center(
+                            child: Stack(
+                              alignment: Alignment.center,
+                              children: [
+                                AspectRatio(
+                                  aspectRatio: c.value.aspectRatio,
+                                  child: VideoPlayer(c),
+                                ),
+                                if (!c.value.isPlaying)
+                                  Container(
+                                    width: 64,
+                                    height: 64,
+                                    decoration: const BoxDecoration(
+                                        color: Colors.black54,
+                                        shape: BoxShape.circle),
+                                    child: const Icon(
+                                        Icons.play_arrow_rounded,
+                                        color: Colors.white,
+                                        size: 44),
+                                  ),
+                              ],
                             ),
                           ),
                         ),
                       ),
                       Padding(
-                        padding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
-                        child: Column(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+                        child: Row(
                           children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Text(
-                                  '${(len / 1000).toStringAsFixed(1)} s',
-                                  style: TextStyle(
-                                      color: atMax
-                                          ? AppColors.accent
-                                          : Colors.white,
-                                      fontSize: 20,
-                                      fontWeight: FontWeight.w700),
+                            Container(
+                              width: 44,
+                              height: 44,
+                              decoration: const BoxDecoration(
+                                  color: Color(0xFF1C1C1E),
+                                  shape: BoxShape.circle),
+                              child: const Icon(Icons.volume_off_rounded,
+                                  color: Colors.white54, size: 22),
+                            ),
+                            const Spacer(),
+                            _pill(
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text('${(len / 1000).toStringAsFixed(1)} s',
+                                      style: TextStyle(
+                                          color: atMax
+                                              ? AppColors.accent
+                                              : Colors.white,
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w700)),
+                                  Text('  ·  eng ko\'pi $maxS s',
+                                      style: const TextStyle(
+                                          color: Colors.white54,
+                                          fontSize: 14)),
+                                ],
+                              ),
+                              onTap: atMax ? null : _fill,
+                            ),
+                            const Spacer(),
+                            const SizedBox(width: 44),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 26),
+                        child: LayoutBuilder(
+                          builder: (_, cs) => _timeline(cs.maxWidth),
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(26, 0, 26, 0),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(fmtMs(_a.round()),
+                                style: const TextStyle(
+                                    color: Colors.white54, fontSize: 12)),
+                            Text(fmtMs(_b.round()),
+                                style: const TextStyle(
+                                    color: Colors.white54, fontSize: 12)),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                        child: Row(
+                          children: [
+                            _step('Boshi', true),
+                            const SizedBox(width: 8),
+                            _step('Oxiri', false),
+                            const Spacer(),
+                            GestureDetector(
+                              onTap: () => Navigator.of(context)
+                                  .pop((_a.round(), _b.round())),
+                              child: Container(
+                                width: 56,
+                                height: 56,
+                                decoration: const BoxDecoration(
+                                  color: AppColors.accent,
+                                  shape: BoxShape.circle,
+                                  boxShadow: [
+                                    BoxShadow(
+                                        color: Colors.black54, blurRadius: 10)
+                                  ],
                                 ),
-                                const SizedBox(width: 8),
-                                Text('· eng ko\'pi $maxS s',
-                                    style: const TextStyle(
-                                        color: Colors.white54,
-                                        fontSize: 14)),
-                              ],
+                                child: const Icon(Icons.check_rounded,
+                                    color: Colors.white, size: 30),
+                              ),
                             ),
-                            const SizedBox(height: 14),
-                            LayoutBuilder(
-                              builder: (_, cs) => _timeline(cs.maxWidth),
-                            ),
-                            const SizedBox(height: 8),
-                            Row(
-                              mainAxisAlignment:
-                                  MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text(fmtMs(_a.round()),
-                                    style: const TextStyle(
-                                        color: Colors.white54, fontSize: 12)),
-                                Text(fmtMs(_dur.round()),
-                                    style: const TextStyle(
-                                        color: Colors.white54, fontSize: 12)),
-                              ],
-                            ),
-                            const SizedBox(height: 12),
-                            Row(
-                              mainAxisAlignment:
-                                  MainAxisAlignment.spaceBetween,
-                              children: [
-                                _step('Boshi', true),
-                                InkResponse(
-                                  onTap: _togglePlay,
-                                  radius: 34,
-                                  child: Container(
-                                    width: 52,
-                                    height: 52,
-                                    decoration: const BoxDecoration(
-                                        color: AppColors.accent,
-                                        shape: BoxShape.circle),
-                                    child: Icon(
-                                        c.value.isPlaying
-                                            ? Icons.pause_rounded
-                                            : Icons.play_arrow_rounded,
-                                        color: Colors.white,
-                                        size: 32),
-                                  ),
-                                ),
-                                _step('Oxiri', false),
-                              ],
-                            ),
-                            const SizedBox(height: 8),
-                            TextButton.icon(
-                              onPressed: atMax ? null : _fill,
-                              icon: const Icon(Icons.open_in_full_rounded,
-                                  size: 18),
-                              label: Text('Eng uzun bo\'lak ($maxS s)'),
-                            ),
-                            const SizedBox(height: 4),
-                            const Text(
-                              'Chetlarini yoki oynani sudrang. Faqat tanlangan '
-                              'bo\'lak qoladi, ovoz olib tashlanadi.',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                  color: Colors.white38, fontSize: 12),
-                            ),
-                            const SizedBox(height: 18),
                           ],
                         ),
                       ),
                     ],
                   ),
-      ),
+                ),
     );
   }
 }
