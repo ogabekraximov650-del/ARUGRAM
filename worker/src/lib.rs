@@ -4385,6 +4385,11 @@ async fn history_route(
         // bazada qoladi: qism qayta ko'rilsa o'sha qator tiriladi
         // va statistika ham buzilmaydi.
         (Method::Get, "/api/history") => {
+            // Ilovadan o'chirilgan qism (anime/bo'lim) tarixda
+            // CHIQMAYDI (`e.epizod_id IS NOT NULL`): qatorning o'zi
+            // o'chirishda yoki kunlik cron'da (`cleanup_orphan_history`)
+            // bazadan ham ketadi.
+            //
             // `epizod_number` FAQAT `epizod_db` DAN olinadi —
             // tarix jadvalida bunday ustun yo'q. Admin qism
             // raqamini o'zgartirsa ro'yxatda darhol yangisi
@@ -4406,6 +4411,7 @@ async fn history_route(
                           ON e.anime_id = h.anime_id AND e.season_id = h.season_id
                          AND e.epizod_id = h.epizod_id
                   WHERE h.user_id = ? AND h.deleted_at = 0
+                    AND e.epizod_id IS NOT NULL
                   ORDER BY h.updated_at DESC
                   LIMIT 300",
                 vec![TursoArg::int(me)]).await?;
@@ -4681,6 +4687,9 @@ async fn sync_route(mut req: Request, env: &Env) -> Result<Response> {
 
     for ((aid, sid, eid), h) in &hist_in {
         let (aid, sid, eid) = (*aid, *sid, *eid);
+        // Ilovadan o'chirilgan anime/bo'lim — eski navbatdan kelgan yozuv
+        // tarixni qayta tiriltirmasin.
+        if !real_season.contains(&(aid, sid)) { continue; }
         // Telefon soatiga ishonilmaydi.
         let at = h["updated_at"].as_i64().unwrap_or(now).clamp(0, now);
 
@@ -7758,7 +7767,7 @@ async fn user_stats_list(
                LEFT JOIN epizod_db e
                       ON e.anime_id = h.anime_id AND e.season_id = h.season_id
                      AND e.epizod_id = h.epizod_id
-              WHERE h.user_id = ?
+              WHERE h.user_id = ? AND e.epizod_id IS NOT NULL
               ORDER BY h.updated_at DESC
               LIMIT ? OFFSET ?",
             vec![TursoArg::int(id), TursoArg::int(STATS_PAGE), TursoArg::int(off)],
@@ -11027,6 +11036,26 @@ async fn encode_kick(env: &Env) -> String {
 }
 
 /// CRON (har 10 daqiqa, `wrangler.toml`): navbat va Actions tekshiruvi.
+/// Ilovadan o'chirilgan qismlarning tomosha tarixi (hamma foydalanuvchida).
+///
+/// O'chirish endi tarixni ham darhol tozalaydi; bu esa ESKI (o'zgarishdan
+/// oldin o'chirilgan) va eski navbatdan qayta kelgan qatorlar uchun.
+/// Kuniga bir marta, 03:20 UTC (08:20 Toshkent) — cron har 10 daqiqada,
+/// ya'ni 10 daqiqalik oynaga bir marta tushadi. `NOT IN (SELECT ...)`
+/// ichki so'rovni bir marta yig'adi: o'qish = tarix + qismlar soni (har
+/// qator uchun qayta skan emas). `epizod_db` bo'sh bo'lsa hech narsa
+/// o'chirilmaydi (ehtiyot).
+async fn cleanup_orphan_history(env: &Env) {
+    let in_day = (now_ms() / 60_000) % (24 * 60);
+    if !(200..210).contains(&in_day) { return; }
+    let _ = turso_exec(env,
+        "DELETE FROM watch_history_db
+          WHERE (anime_id, season_id, epizod_id) NOT IN
+                (SELECT anime_id, season_id, epizod_id FROM epizod_db)
+            AND EXISTS (SELECT 1 FROM epizod_db)",
+        vec![]).await;
+}
+
 #[event(scheduled)]
 async fn scheduled(_ev: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
     if !encbot_token(&env).is_empty() {
@@ -11036,6 +11065,7 @@ async fn scheduled(_ev: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
     // To'plamlar (emoji/GIF/stiker) — ALOHIDA workflow (`packs::kick`); kodlashga tegmaydi.
     let _ = packs::kick(&env).await;
     packs::cleanup_rejected(&env).await;
+    cleanup_orphan_history(&env).await;
     let msg = encode_kick(&env).await;
     // Faqat ishga tushirilganda yoki xato bo'lsa adminga xabar. Xato
     // (masalan token yo'q) har 10 daqiqada takrorlanmasin — soatiga bir.
@@ -11941,6 +11971,9 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
                                  vec![TursoArg::int(aid), TursoArg::int(sid), TursoArg::int(eid)]),
                                 ("DELETE FROM encode_jobs WHERE anime_id=? AND season_id=? AND epizod_id=?",
                                  vec![TursoArg::int(aid), TursoArg::int(sid), TursoArg::int(eid)]),
+                                // Hamma foydalanuvchining tomosha tarixidan ham.
+                                ("DELETE FROM watch_history_db WHERE anime_id=? AND season_id=? AND epizod_id=?",
+                                 vec![TursoArg::int(aid), TursoArg::int(sid), TursoArg::int(eid)]),
                                 ("UPDATE season_db SET epizod_count=(SELECT COUNT(*) FROM epizod_db WHERE anime_id=? AND season_id=?)
                                   WHERE anime_id=? AND season_id=?",
                                  vec![TursoArg::int(aid), TursoArg::int(sid), TursoArg::int(aid), TursoArg::int(sid)]),
@@ -12045,6 +12078,9 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
                                  vec![TursoArg::int(aid), TursoArg::int(sid)]),
                                 ("DELETE FROM favorites_db WHERE anime_id=? AND season_id=?",
                                  vec![TursoArg::int(aid), TursoArg::int(sid)]),
+                                // Hamma foydalanuvchining tomosha tarixidan ham.
+                                ("DELETE FROM watch_history_db WHERE anime_id=? AND season_id=?",
+                                 vec![TursoArg::int(aid), TursoArg::int(sid)]),
                                 ("DELETE FROM season_db WHERE anime_id=? AND season_id=?",
                                  vec![TursoArg::int(aid), TursoArg::int(sid)]),
                             ]).await;
@@ -12121,6 +12157,9 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
                         let op = row_to_obj(&oc, or_[0].as_array().unwrap_or(&vec![]))["photo_url"].as_str().unwrap_or("").to_string();
                         if !op.is_empty() { b2_delete(&env, &op).await; }
                         turso_exec(&env, "DELETE FROM anime_db WHERE id=?", vec![TursoArg::int(id)]).await?;
+                        // 4. Hamma foydalanuvchining tomosha tarixidan ham.
+                        let _ = turso_exec(&env, "DELETE FROM watch_history_db WHERE anime_id=?",
+                            vec![TursoArg::int(id)]).await;
                         return ok(json!({"success": true}));
                     }
                 }

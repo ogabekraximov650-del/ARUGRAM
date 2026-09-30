@@ -4533,3 +4533,17 @@ ketma-ket bo'lgani uchun Telegram'ga so'rov soni keskin kamayadi. So'rovlar kana
   (`onStopped`). Vaqtinchalik fayl nomi vidjetga xos (bir xil GIF ikki marta bo'lsa
   biri ikkinchisining faylini o'chirmaydi).
 * Panel belgilari (to'plam ikonkalari) va "Mening to'plamlarim" ro'yxatida ham `animate: true`.
+
+## O'chirilgan anime/bo'lim/qism hamma foydalanuvchining tomosha tarixidan ketadi
+
+`worker/src/lib.rs`:
+* Admin anime, bo'lim yoki qismni o'chirsa — `watch_history_db` dagi mos qatorlar ham
+  (hamma foydalanuvchida) o'sha zahoti o'chadi.
+* `/api/history` va statistika "Qismlar" ro'yxati (`episodes`) faqat MAVJUD qismni
+  ko'rsatadi (`e.epizod_id IS NOT NULL`) — eski qoldiqlar darhol ko'rinmaydi.
+* `cleanup_orphan_history` (cron, kuniga bir marta 03:20 UTC): `epizod_db` da yo'q
+  qismlarning tarixini o'chiradi (o'zgarishdan oldin o'chirilganlar uchun).
+  `NOT IN (SELECT ...)` — o'qish = tarix + qismlar soni; `epizod_db` bo'sh bo'lsa tegmaydi.
+* `/api/sync`: mavjud bo'lmagan bo'lim uchun tarix yozuvi qabul qilinmaydi (telefondagi
+  eski navbat o'chirilgan animeni tarixga qaytarmasin; qo'shimcha o'qish yo'q —
+  `real_season` allaqachon olinadi).
