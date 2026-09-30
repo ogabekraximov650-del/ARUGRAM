@@ -676,18 +676,41 @@ class PackService extends ChangeNotifier {
   /// ham kerak — to'plam amallari uni yeb qo'ymasin: 3 soniya kutiladi
   /// (ketma-ket amallar bitta so'rovga tushadi) va kun chegarasiga
   /// yaqinlashilsa majburan yuborilmaydi (odatdagi navbat o'zi yuboradi).
-  void _flushSoon() {
+  void _flushSoon([int tries = 0]) {
     _flushTimer?.cancel();
     _flushTimer = Timer(const Duration(seconds: 3), () async {
+      final q = SyncQueue.instance;
+      // Boshqa paket ketayotgan bo'lsa — u tugagach yana urinamiz (amal
+      // o'sha paketga tushmagan bo'lishi mumkin, navbatda qotib qolmasin).
+      if (q.isSending && tries < 10) {
+        _flushSoon(tries + 1);
+        return;
+      }
       try {
-        final q = SyncQueue.instance;
-        if (q.sentToday < SyncQueue.hardPerDay - 10) {
+        if (q.sentToday < SyncQueue.hardPerDay - 5) {
           await q.flush(force: true);
         }
       } catch (_) {}
       await load(force: true);
     });
   }
+
+  /// Hali serverga yetmagan (telefonda turgan) to'plam amalini yuborishni
+  /// hozir qayta urinadi.
+  void retryQueued() => _flushSoon();
+
+  /// Yuborilmay qolgan (`queued`) qo'shishni bekor qiladi: navbatdan olib
+  /// tashlanadi va telefondagi nusxasi o'chadi.
+  void cancelQueued(PackOp o) {
+    if (o.state != 'queued' || o.file.isEmpty) return;
+    SyncQueue.instance.removeKey('p:add:${o.file}');
+    _dropSent(o.file);
+    notifyListeners();
+  }
+
+  /// Shu to'plamda hali serverga yetmagan qo'shish bormi.
+  bool hasQueuedAdd(int packId) =>
+      opsOf(packId).any((o) => o.isAdd && o.state == 'queued');
 
   /// Tanlangan element xabarda darhol chiqishi uchun oldindan yuklab qo'yadi.
   void prefetch(int packId, int itemId) {

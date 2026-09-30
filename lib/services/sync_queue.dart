@@ -369,6 +369,20 @@ class SyncQueue extends ChangeNotifier with WidgetsBindingObserver {
 
   /// Yuborilmagan to'plam amallari (ekranda server javobining ustiga
   /// qo'yiladi — foydalanuvchi hozirgina qilgan ish yo'qolib qolmasin).
+  /// Navbatdan bitta yozuvni (kalit bo'yicha) olib tashlaydi — masalan,
+  /// foydalanuvchi yuborilmay qolgan to'plam amalini bekor qilsa.
+  void removeKey(String key) {
+    load();
+    final n = _rows.length;
+    _rows.removeWhere((e) => e['key'] == key);
+    if (_rows.length == n) return;
+    _saveQueue();
+    notifyListeners();
+  }
+
+  /// Navbatda to'plam amali bormi (foydalanuvchi kutib turgan ish).
+  bool get _hasPackRows => _rows.any((e) => e['kind'] == SyncKind.pack);
+
   List<Map<String, dynamic>> pendingPacks() {
     load();
     return [
@@ -446,7 +460,11 @@ class SyncQueue extends ChangeNotifier with WidgetsBindingObserver {
     _rollDay();
     if (_sending) return;
     if (!_hasWork) return;
-    if (_sentToday >= normalPerDay) return;
+    // To'plam amali (rasm yuborish va h.k.) — foydalanuvchi ekranda kutib
+    // turibdi: oddiy kunlik chegara (24) to'lgan bo'lsa ham qat'iy chegaragacha
+    // yuboriladi. Aks holda "Yuborilmoqda..." ertasi kungacha qotib qolardi.
+    final packs = _hasPackRows;
+    if (_sentToday >= (packs ? hardPerDay : normalPerDay)) return;
 
     final now = DateTime.now().millisecondsSinceEpoch;
     final since = now - _lastSentAt;
@@ -468,7 +486,7 @@ class SyncQueue extends ChangeNotifier with WidgetsBindingObserver {
       return;
     }
     _delayed?.cancel();
-    await flush();
+    await flush(force: packs);
   }
 
   /// Yuboradigan narsa bormi (trafik hisoboti ham hisobga kiradi).

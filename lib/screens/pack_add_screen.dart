@@ -41,13 +41,15 @@ class _Draft {
 }
 
 /// Rasm/video tanlaydi: chatdagi kabi Telegram uslubidagi oyna
-/// (galereya to'ri, ko'p tanlash, "Fayl" bo'limi). Natija: (fayllar, xato).
+/// (galereya to'ri, "Fayl" bo'limi). Bittada faqat BITTA fayl
+/// (foydalanuvchi talabi: bir necha fayl birdan yuborilganda navbatda
+/// qotib qolardi). Natija: (fayllar, xato).
 Future<(List<XFile>, String?)> pickPackMedia(BuildContext context,
     {String kind = ''}) async {
   try {
     final r = await showTgAttachSheet(context, packMode: true);
     if (r == null) return (<XFile>[], null);
-    return ([for (final i in r.items) XFile(i.file.path)], null);
+    return ([for (final i in r.items.take(1)) XFile(i.file.path)], null);
   } catch (e) {
     final t = '$e'.replaceAll(RegExp(r'\s+'), ' ');
     return (<XFile>[], t.length > 120 ? t.substring(0, 120) : t);
@@ -71,7 +73,8 @@ class _PackAddScreenState extends State<PackAddScreen> {
   @override
   void initState() {
     super.initState();
-    unawaited(_load(widget.files.map((f) => f.path).toList()));
+    // Bittada faqat bitta fayl.
+    unawaited(_load(widget.files.take(1).map((f) => f.path).toList()));
   }
 
   @override
@@ -142,7 +145,12 @@ class _PackAddScreenState extends State<PackAddScreen> {
           .showSnackBar(SnackBar(content: Text('Fayl tanlab bo\'lmadi: $err')));
     }
     if (more.isEmpty || !mounted) return;
-    await _load(more.map((f) => f.path).toList());
+    // Bittada bitta fayl: yangisi eskisining o'rnini oladi.
+    for (final d in _drafts) {
+      unawaited(StorageJanitor.dropPicked(d.path));
+    }
+    setState(_drafts.clear);
+    await _load(more.take(1).map((f) => f.path).toList());
   }
 
   Future<void> _pickEmoji(_Draft d) async {
@@ -248,10 +256,11 @@ class _PackAddScreenState extends State<PackAddScreen> {
           title: Text('${PackKind.single(p.kind)} qo\'shish',
               style: const TextStyle(color: Colors.white, fontSize: 18)),
           actions: [
+            // Bittada bitta fayl: boshqasini tanlasa — eskisining o'rniga.
             IconButton(
-              tooltip: 'Yana tanlash',
+              tooltip: 'Boshqa fayl tanlash',
               onPressed: _busy ? null : _more,
-              icon: const Icon(Icons.add_photo_alternate_rounded),
+              icon: const Icon(Icons.swap_horiz_rounded),
             ),
           ],
         ),

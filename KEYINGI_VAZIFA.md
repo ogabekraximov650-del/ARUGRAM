@@ -4547,3 +4547,20 @@ ketma-ket bo'lgani uchun Telegram'ga so'rov soni keskin kamayadi. So'rovlar kana
 * `/api/sync`: mavjud bo'lmagan bo'lim uchun tarix yozuvi qabul qilinmaydi (telefondagi
   eski navbat o'chirilgan animeni tarixga qaytarmasin; qo'shimcha o'qish yo'q —
   `real_season` allaqachon olinadi).
+
+## To'plamga yuborish: "Yuborilmoqda..." qotib qolmaydi, bittada bitta fayl
+
+Sabab: fayl Telegram'ga yuklangach, qo'shish amali telefondagi `SyncQueue`da serverga
+yuborilishini kutadi. Navbat oddiy yuborishni kuniga 24 ta bilan cheklaydi — faol kunda
+chegara to'lsa (yoki amal boshqa paket ketayotganda qo'shilib, `flush` `_sending` sabab
+o'tkazib yuborsa) amal ertasi kungacha "Yuborilmoqda..." bo'lib turardi.
+* `sync_queue.dart`: navbatda to'plam amali bo'lsa qat'iy chegaragacha (50) majburiy
+  yuboriladi; `removeKey` — bitta yozuvni olib tashlash.
+* `pack_service.dart`: `_flushSoon` boshqa paket ketayotgan bo'lsa kutib qayta uriniladi;
+  `retryQueued`, `cancelQueued`, `hasQueuedAdd`.
+* `pack_detail_screen.dart`: "Yuborilmoqda..." qatorida "Qayta urinish" va "Bekor qilish";
+  oldingi fayl serverga yetmaguncha yangisini qo'shib bo'lmaydi.
+* Bittada BITTA fayl: `tg_attach_sheet.dart` (`packMode` — galereyada bitta tanlash,
+  yangisi eskisining o'rnini oladi; fayl tanlagichda `allowMultiple: false`),
+  `pack_add_screen.dart` (faqat birinchi fayl; "Boshqa fayl tanlash" almashtiradi).
+Bekor qilingan faylning Telegram'ga yuklangan nusxasi kanalda qoladi (bazaga yozilmagan).

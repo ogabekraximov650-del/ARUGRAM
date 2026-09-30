@@ -54,7 +54,7 @@ class TgAttachResult {
   const TgAttachResult(this.items, this.caption);
 }
 
-/// [packMode] — to'plamga rasm/video tanlash: musiqa va izoh yo'q, 20 tagacha.
+/// [packMode] — to'plamga rasm/video tanlash: musiqa va izoh yo'q, faqat BITTA fayl.
 Future<TgAttachResult?> showTgAttachSheet(BuildContext context,
     {bool packMode = false, Set<String>? exts}) {
   return showModalBottomSheet<TgAttachResult>(
@@ -96,7 +96,8 @@ class _AttachSheet extends StatefulWidget {
 
 class _AttachSheetState extends State<_AttachSheet>
     with WidgetsBindingObserver {
-  int get _max => widget.packMode ? 20 : 10;
+  // To'plamga bittada faqat BITTA fayl (foydalanuvchi talabi).
+  int get _max => widget.packMode ? 1 : 10;
 
   final _caption = TextEditingController();
   _Tab _tab = _Tab.gallery;
@@ -374,6 +375,8 @@ class _AttachSheetState extends State<_AttachSheet>
   void _toggle(AssetEntity e) {
     setState(() {
       if (!_selected.remove(e)) {
+        // Bitta tanlash rejimida yangisi eskisining o'rnini oladi.
+        if (_max == 1) _selected.clear();
         if (_selected.length < _max) _selected.add(e);
       }
     });
@@ -437,7 +440,7 @@ class _AttachSheetState extends State<_AttachSheet>
   Future<void> _pickFiles(FileType type) async {
     final r = await FilePicker.platform.pickFiles(
       type: type,
-      allowMultiple: true,
+      allowMultiple: !widget.packMode,
     );
     if (!mounted || r == null) return;
     final items = <TgAttachItem>[];

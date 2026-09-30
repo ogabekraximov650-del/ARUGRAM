@@ -117,6 +117,13 @@ class _PackDetailScreenState extends State<PackDetailScreen> {
   Future<void> _add() async {
     final p = _current();
     if (p == null) return;
+    // Bittada bitta fayl: oldingisi hali serverga yetmagan bo'lsa yangisi
+    // qo'shilmaydi (birdan bir nechtasi navbatda qotib qolmasin).
+    if (_svc.hasQueuedAdd(p.id)) {
+      _svc.retryQueued();
+      _say('Oldingi fayl hali yuborilmoqda — tugashini kuting yoki uni bekor qiling');
+      return;
+    }
     // Rasm ham, video ham (Telegram'dagidek).
     final (picked, err) = await pickPackMedia(context, kind: p.kind);
     if (err != null) {
@@ -465,6 +472,29 @@ class _PackDetailScreenState extends State<PackDetailScreen> {
                       ),
                     ],
                   ),
+                  // Telefonda qotib qolgan (serverga yetmagan) yuborish:
+                  // qayta urinish yoki bekor qilish.
+                  if (o.state == 'queued')
+                    Padding(
+                      padding: const EdgeInsets.only(left: 18, top: 2),
+                      child: Wrap(
+                        spacing: 6,
+                        children: [
+                          TextButton.icon(
+                            onPressed: _svc.retryQueued,
+                            icon: const Icon(Icons.refresh_rounded, size: 18),
+                            label: const Text('Qayta urinish'),
+                          ),
+                          TextButton.icon(
+                            onPressed: () => _svc.cancelQueued(o),
+                            icon: const Icon(Icons.close_rounded,
+                                size: 18, color: AppColors.danger),
+                            label: const Text('Bekor qilish',
+                                style: TextStyle(color: AppColors.danger)),
+                          ),
+                        ],
+                      ),
+                    ),
                   if (o.state == 'rejected')
                     Padding(
                       padding: const EdgeInsets.only(left: 18, top: 2),
