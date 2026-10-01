@@ -6,9 +6,9 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   test('eng uzun bo\'lak tur bo\'yicha belgilanadi', () {
-    expect(packMaxSeconds(PackKind.emoji), 5);
-    expect(packMaxSeconds(PackKind.sticker), 8);
-    expect(packMaxSeconds(PackKind.gif), 15);
+    expect(packMaxSeconds(PackKind.emoji), 8);
+    expect(packMaxSeconds(PackKind.sticker), 12);
+    expect(packMaxSeconds(PackKind.gif), 0); // cheklanmaydi, faqat 5 MB
   });
 
   test('kadr kanali yo\'q bo\'lsa bo\'sh ro\'yxat (yiqilmaydi)', () async {

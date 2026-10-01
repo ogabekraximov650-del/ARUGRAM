@@ -120,7 +120,7 @@ class _PackAddScreenState extends State<PackAddScreen> {
           d.trimA = 0;
           d.trimB = d.durationMs <= 0
               ? 0
-              : (d.durationMs < max ? d.durationMs : max);
+              : (max <= 0 || d.durationMs < max ? d.durationMs : max);
         }
       } catch (_) {
         d.problem = 'Faylni o\'qib bo\'lmadi';
@@ -308,9 +308,13 @@ class _PackAddScreenState extends State<PackAddScreen> {
     return Padding(
       padding: const EdgeInsets.fromLTRB(4, 0, 4, 12),
       child: Text(
-        'Rasm yoki video (har biri 5 MB gacha). Video ko\'pi bilan $sec soniya: '
-        'kerakli bo\'lagini "Kesish" bilan tanlang. Admin tasdiqlagach '
-        '"${p.title}" to\'plamida ko\'rinadi.',
+        sec > 0
+            ? 'Rasm yoki video (har biri 5 MB gacha). Video ko\'pi bilan $sec soniya: '
+                'kerakli bo\'lagini "Kesish" bilan tanlang. Admin tasdiqlagach '
+                '"${p.title}" to\'plamida ko\'rinadi.'
+            : 'Rasm yoki video (har biri 5 MB gacha, uzunligi cheklanmaydi). '
+                'Kerak bo\'lsa bo\'lagini "Kesish" bilan tanlang. Admin tasdiqlagach '
+                '"${p.title}" to\'plamida ko\'rinadi.',
         style: TextStyle(
             color: Colors.white.withValues(alpha: 0.55),
             fontSize: 12.5,

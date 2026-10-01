@@ -19,11 +19,13 @@ import 'package:video_player/video_player.dart';
 import '../services/pack_service.dart';
 import '../widgets/glass.dart';
 
-/// Tur bo'yicha eng uzun bo'lak (soniya) — `tool/packs/arunorm.py` bilan bir xil.
+/// Tur bo'yicha eng uzun bo'lak (soniya); 0 — uzunlik cheklanmaydi (GIF:
+/// faqat hajm 5 MB dan oshmasin). Serverda (`tool/packs/arunorm.py`) uzunlik
+/// tekshirilmaydi, faqat 5 MB.
 int packMaxSeconds(String kind) => switch (kind) {
-      PackKind.emoji => 5,
-      PackKind.gif => 15,
-      _ => 8,
+      PackKind.emoji => 8,
+      PackKind.gif => 0,
+      _ => 12,
     };
 
 String fmtMs(int ms) {
@@ -97,7 +99,8 @@ class _PackVideoTrimScreenState extends State<PackVideoTrimScreen> {
   bool get _canSound => widget.kind == PackKind.gif;
 
   int get _maxMs => packMaxSeconds(widget.kind) * 1000;
-  double get _maxSel => _dur < _maxMs ? _dur : _maxMs.toDouble();
+  double get _maxSel =>
+      _maxMs <= 0 || _dur < _maxMs ? _dur : _maxMs.toDouble();
   double get _minSel => _dur < _minMs ? _dur : _minMs;
 
   @override
@@ -527,10 +530,11 @@ class _PackVideoTrimScreenState extends State<PackVideoTrimScreen> {
                                               : Colors.white,
                                           fontSize: 16,
                                           fontWeight: FontWeight.w700)),
-                                  Text('  ·  eng ko\'pi $maxS s',
-                                      style: const TextStyle(
-                                          color: Colors.white54,
-                                          fontSize: 14)),
+                                  if (maxS > 0)
+                                    Text('  ·  eng ko\'pi $maxS s',
+                                        style: const TextStyle(
+                                            color: Colors.white54,
+                                            fontSize: 14)),
                                 ],
                               ),
                               onTap: atMax ? null : _fill,

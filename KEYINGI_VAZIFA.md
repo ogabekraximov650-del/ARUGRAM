@@ -4663,3 +4663,10 @@ rejimlari) bo'lsa Flutter `disableAnimations = true` qiladi:
 Yechim: `main.dart` `builder` da `MediaQuery.disableAnimations` har doim `false`;
 `trash_chick.dart` va `storage_screen.dart` (`_move`) kontrollerlari
 `AnimationBehavior.preserve`.
+
+## To'plamga video yuklash: uzunlik chegaralari
+
+`packMaxSeconds` (`pack_video_trim_screen.dart`): GIF — 0 (uzunlik cheklanmaydi, faqat
+fayl 5 MB dan oshmasin), stiker — 12 s, emoji — 8 s. 0 bo'lsa kesish oynasi butun
+videoni tanlashga ruxsat beradi va "eng ko'pi" yozuvi chiqmaydi. Serverda
+(`tool/packs/arunorm.py`) uzunlik tekshirilmaydi — faqat 5 MB.
