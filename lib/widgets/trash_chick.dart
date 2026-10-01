@@ -170,7 +170,7 @@ class _S {
 
   void _tier1(double t) {
     door = _eio(_seg(t, 0, .7)) - _eio(_seg(t, 6.1, 6.9));
-    x = _dc + 4;
+    x = _dc + 18; // o'ng (o'ziga chap) ustunga yaqin turadi
     throwArm = 'a'; // o'ng qo'li (chap qo'li ramkada)
     var y = _lerp(0, 1, _eio(_seg(t, .85, 1.15)));
     y = _lerp(y, -1, _eio(_seg(t, 1.95, 2.35)));
@@ -532,7 +532,7 @@ class _ScenePainter extends CustomPainter {
       release = _handWorld(_S(bytes, s.flyT0 - 0.0001));
     }
     // uy ichidami (devor orqasida chiziladi)
-    final chickIn = s.x <= _dc + 2 && s.door < .9;
+    final chickIn = s.x <= _dc + 20 && s.door < .9;
     // qop eshikdan o'tayotgan bo'lsa: ichkaridagi qismi devor orqasida
     final bagSplit =
         s.bag == _BagMode.drag && !s.bagPx.isNaN && s.bagPx < _dr + 40;
@@ -546,17 +546,19 @@ class _ScenePainter extends CustomPainter {
     if (chickIn) _chick(canvas, s);
     _doorPanel(canvas, s);
     _houseFront(canvas);
-    // eshik ramkasini ushlagan (chap) qo'l ramka ustida ko'rinadi
-    if (chickIn && s.grip > .5) {
+    _dragBag(canvas, s, bagSplit ? _Pass.outside : _Pass.all);
+    if (!chickIn && !overBin) _chick(canvas, s);
+    // eshik ramkasini ORQASIDAN ushlagan (chap) qo'l: tananing oldida,
+    // qanot uchi esa ustun orqasiga kirib turadi
+    if (s.grip > .5) {
       final m = _matrix(s);
       final ar = _arms(s, m);
       canvas.save();
+      canvas.clipRect(const Rect.fromLTRB(0, 0, _dr, _h));
       canvas.transform(m.storage);
       _arm(canvas, ar.shB, ar.b);
       canvas.restore();
     }
-    _dragBag(canvas, s, bagSplit ? _Pass.outside : _Pass.all);
-    if (!chickIn && !overBin) _chick(canvas, s);
     if (release != null) _flying(canvas, s, release);
     _binFront(canvas, s);
     if (overBin) _chick(canvas, s);
@@ -697,8 +699,8 @@ class _ScenePainter extends CustomPainter {
     // eshik ramkasini o'zining CHAP qo'li (b) bilan, o'ziga nisbatan chap
     // tomonidan (bizga o'ng ustun) ushlaydi (500 MB gacha)
     if (s.grip > 0) {
-      final p = m.unmap(const Offset(_dr - 2, _floor - 62));
-      b = _lerp2(b, _capTo(shB, p, _armL * 1.6), s.grip);
+      final p = m.unmap(const Offset(_dr + 8, _floor - 62));
+      b = _lerp2(b, _capTo(shB, p, _armL * 2.2), s.grip);
     }
     if (s.happy) {
       final w = math.sin(s.sec * 22) * 14;
@@ -836,9 +838,10 @@ class _ScenePainter extends CustomPainter {
     final near = ar.face > 0 ? 'b' : 'a';
     final carry = _carry(s, ar);
     // uzoqdagi qo'l — tana orqasida (qop ko'targan qo'l doim oldinda)
+    final gripB = s.grip > .5; // ramkani ushlagan qo'l alohida chiziladi
     if (y.abs() > .35) {
       if (near == 'b' && carry != 'a') _arm(canvas, ar.shA, ar.a);
-      if (near == 'a' && carry != 'b') _arm(canvas, ar.shB, ar.b);
+      if (near == 'a' && carry != 'b' && !gripB) _arm(canvas, ar.shB, ar.b);
     }
     for (final n in const [
       'body', 'head_bl3', 'head', 'head_bl1', 'head_bl2', 'beak', 'beak_bl',
@@ -921,7 +924,9 @@ class _ScenePainter extends CustomPainter {
       _bag(canvas, _bagAt(s, tip), s.bw / _k, s.bh / _k, 1, 0, local: true);
     }
     if (y.abs() <= .35 || near == 'a' || carry == 'a') _arm(canvas, ar.shA, ar.a);
-    if (y.abs() <= .35 || near == 'b' || carry == 'b') _arm(canvas, ar.shB, ar.b);
+    if ((y.abs() <= .35 || near == 'b' || carry == 'b') && !gripB) {
+      _arm(canvas, ar.shB, ar.b);
+    }
     canvas.restore();
   }
 
@@ -1021,7 +1026,9 @@ class _ScenePainter extends CustomPainter {
     // og'izga kirgach old gardish orqasida yo'qoladi
     if (u > .7) canvas.clipRect(const Rect.fromLTWH(0, 0, _w, _bt + 2));
     final st = 1 + .12 * math.sin(u * math.pi);
-    _bag(canvas, Offset(x, y), s.bw / st, s.bh * st, 1, u * math.pi * 2.2);
+    // ozgina aylanib uchadi
+    _bag(canvas, Offset(x, y), s.bw / st, s.bh * st, 1,
+        u * .9 + math.sin(u * math.pi) * .35);
     canvas.restore();
   }
 
