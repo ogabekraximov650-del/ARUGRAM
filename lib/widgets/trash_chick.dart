@@ -131,7 +131,12 @@ enum _Eyes { calm, happy, strain, cry }
 
 enum _BagMode { hand, fly, bin, drag }
 
-enum _Pass { inside, outside, all }
+/// Old tomoni ko'rinadigan qop (eshik o'yig'ida; bo'g'zi jo'janing qo'lida).
+class _End {
+  final double cx, cy, d, sc, ry, tip;
+  final bool inside;
+  const _End(this.cx, this.cy, this.d, this.sc, this.ry, this.tip, this.inside);
+}
 
 // ── VAQT JADVALI ─────────────────────────────────────────────────
 class _S {
@@ -142,14 +147,24 @@ class _S {
   double wind = 0, fling = 0, grip = 0, hop = 0, flail = 0, wipeBrow = 0;
   double puff = -1, spark = -1, binWob = 0, flyT0 = 0, flyT1 = 0, flyPeak = 0;
   bool pivotR = false, happy = false, dragging = false, stuck = false;
-  bool holding = false, sob = false, rubEye = false, rubBoth = false;
-  double flyBack = 0, walkOut = 0, jerk = 0, dragU = 0, dropAt = 99;
+  bool holding = false, sob = false, rubEye = false, rubAlt = false;
+  double flyBack = 0, jerk = 0, dragU = 0, dropAt = 99;
+
+  /// Chuqurlik: 0 — devor tekisligi va tashqari, < 0 — uy ichida (uzoqroq).
+  double depth = 0;
   String? throwArm; // 'a' / 'b' — otadigan qo'l (berilmasa — yaqini)
   _Eyes eyes = _Eyes.calm;
   _BagMode bag = _BagMode.hand;
-  // sudralayotgan qop: tubi (px) yerda, burchagi (ang), siqilishi (sq)
-  double bagPx = double.nan, bagAng = 0, bagSq = 1;
-  Offset? knot; // qop uchidagi tugun (sahnada) — ikki qo'l shu yerni ushlaydi
+
+  // eshik o'yig'idagi (old tomoni ko'rinadigan) qop
+  bool hasEnd = false, endStuck = false;
+  double endFrom = 0, endAt = 0, endOut = 0, endPop = 0;
+  _End? endS;
+
+  // yonboshlab yotgan, sudralayotgan qop: tubi (px) yerda, tuguni qo'lda
+  double bagPx = double.nan, bagAng = math.pi / 2, bagSq = 1;
+  bool side = false;
+  Offset? knot; // ikki qo'l ushlab turgan nuqta (sahnada)
 
   _S(int bytes, this.sec)
       : tier = _tierOf(bytes),
@@ -169,15 +184,17 @@ class _S {
   }
 
   void _tier1(double t) {
+    // Eshikdan chiqmaydi: o'zining chap qo'li bilan ramkani orqasidan ushlab,
+    // o'ngga-chapga mo'ralaydi va o'ng qo'li bilan qopni shu yerdan otadi.
     door = _eio(_seg(t, 0, .7)) - _eio(_seg(t, 6.1, 6.9));
-    x = _dc + 18; // o'ng (o'ziga chap) ustunga yaqin turadi
-    throwArm = 'a'; // o'ng qo'li (chap qo'li ramkada)
+    x = _dc + 18;
+    throwArm = 'a';
+    depth = -.3 - .4 * _eio(_seg(t, 5.8, 6.2)); // eshik o'yig'ida turadi
     var y = _lerp(0, 1, _eio(_seg(t, .85, 1.15)));
     y = _lerp(y, -1, _eio(_seg(t, 1.95, 2.35)));
     y = _lerp(y, 1, _eio(_seg(t, 2.85, 3.15)));
     y = _lerp(y, 0, _eio(_seg(t, 5.55, 5.85)));
     yaw = y;
-    // eshikdan tashqariga engashib mo'ralaydi
     lean = .13 * math.sin(math.pi * _seg(t, 1.1, 1.95)) -
         .05 * math.sin(math.pi * _seg(t, 2.3, 2.85));
     grip = _eio(_seg(t, .75, 1.05)) - _eio(_seg(t, 4.75, 5.0));
@@ -198,15 +215,18 @@ class _S {
   }
 
   void _tier2(double t) {
-    door = _eio(_seg(t, 0, .7)) - _eio(_seg(t, 12.6, 13.4));
-    var y = _lerp(0, 1, _eio(_seg(t, .55, .85)));
+    door = _eio(_seg(t, 0, .7)) - _eio(_seg(t, 12.7, 13.4));
+    var y = _lerp(0, 1, _eio(_seg(t, .75, .95)));
     y = _lerp(y, 0, _eio(_seg(t, 7.0, 7.25)));
     y = _lerp(y, -1, _eio(_seg(t, 7.9, 8.2)));
-    y = _lerp(y, 0, _eio(_seg(t, 12.35, 12.55)));
+    y = _lerp(y, -2, _eio(_seg(t, 12.35, 12.6))); // orqasini o'girib kiradi
     yaw = y;
-    var w = _walk(t, .75, 5.6, _dc, _stopX - 60, 58);
+    // ostonadan bizga tomon chiqadi, oxirida ichkariga kiradi
+    depth = -.6 * (1 - _eio(_seg(t, .35, .85))) - .6 * _eio(_seg(t, 12.5, 12.95));
+    if (t > .35 && t < .85) ph = _seg(t, .35, .85) * 2;
+    var w = _walk(t, .85, 5.6, _dc, _stopX - 60, 58);
     x = w.x;
-    ph = w.ph;
+    if (t > .85) ph = w.ph;
     wind = _sio(_seg(t, 5.75, 6.15)) * (1 - _seg(t, 6.15, 6.22));
     fling = _eout(_seg(t, 6.15, 6.27)) * (1 - _sio(_seg(t, 6.6, 7.0)));
     flyT0 = 6.22;
@@ -229,24 +249,42 @@ class _S {
   }
 
   void _tier3(double t) {
-    door = _eio(_seg(t, 0, .7)) - _eio(_seg(t, 15.6, 16.4));
-    // orqasi bilan (uyga qarab) qopni tugunidan sudraydi
-    var y = -1.0;
+    // Orqasi bilan (bizga orqasini o'girib) ostonadan chiqadi; qop old tomoni
+    // bilan eshik o'yig'ida ko'rinadi; jo'ja yon tomonga o'tib tortadi, qop
+    // ag'darilib yonboshlaydi va yo'lak bo'ylab sudraladi.
+    door = _eio(_seg(t, 0, .7)) - _eio(_seg(t, 15.8, 16.4));
+    const xSide = _dr + 80;
+    var y = -2.0;
+    y = _lerp(y, -1, _eio(_seg(t, 1.3, 1.7)));
     y = _lerp(y, 0, _eio(_seg(t, 9.0, 9.35)));
     y = _lerp(y, -1, _eio(_seg(t, 10.6, 10.9)));
-    y = _lerp(y, 0, _eio(_seg(t, 15.3, 15.5)));
+    y = _lerp(y, -2, _eio(_seg(t, 15.2, 15.45)));
     yaw = y;
-    var w = _walk(t, .7, 8.6, _dc, _dragX, 34);
-    x = w.x;
-    ph = w.ph;
-    stride = .6;
-    dragging = t < 8.6;
+    depth = -.7 * (1 - _eio(_seg(t, .5, 1.3))) - .7 * _eio(_seg(t, 15.35, 15.8));
+    x = _dc;
+    if (t > .5 && t < 1.3) ph = _seg(t, .5, 1.3) * 2;
+    if (t >= 1.3) {
+      final w = _walk(t, 1.3, 1.9, _dc, xSide, 40);
+      x = w.x;
+      ph = w.ph;
+    }
+    bag = _BagMode.drag;
+    hasEnd = true;
+    endFrom = .5;
+    endAt = 1.9;
+    endOut = 2.3;
+    dragging = t >= 1.6 && t < 8.6;
+    holding = t >= .5 && t < 8.6;
+    if (t >= 2.3) {
+      final w = _walk(t, 2.3, 8.6, xSide, _dragX, 34);
+      x = w.x;
+      ph = w.ph;
+      stride = .6;
+    }
     lean = dragging ? .16 + .03 * math.sin(t * 9) : 0.0;
     eyes = dragging ? _Eyes.strain : _Eyes.calm;
     sweat = dragging ? 1.0 : math.max(0.0, 1 - (t - 8.7) * 1.5);
-    bag = _BagMode.drag;
-    dropAt = 8.6; // qo'yib yuborilgach yonboshlab yotadi
-    // yengil nafas va peshanadagi terni artish
+    dropAt = 8.6;
     if (t > 8.7 && t < 10.4) {
       final u = _seg(t, 8.7, 10.4);
       sy = 1 - .06 * math.sin(u * math.pi);
@@ -254,7 +292,7 @@ class _S {
       wipeBrow = math.sin(u * math.pi);
     }
     if (t > 10.9) {
-      w = _walk(t, 10.9, 15.3, _dragX, _dc, 58);
+      final w = _walk(t, 10.9, 15.2, _dragX, _dc, 58);
       x = w.x;
       ph = w.ph;
       stride = 1;
@@ -262,56 +300,78 @@ class _S {
   }
 
   void _tier4(double t) {
-    // 5 GB+: qop eshikka tiqiladi, jo'ja chiranib tortadi, qop otilib chiqadi,
-    // jo'ja orqaga uchib o'tirib qoladi va yig'laydi, yig'lab sudrab boradi.
-    // Jo'ja va qopning aniq o'rni — `_ScenePainter._resolve` da.
-    door = _eio(_seg(t, 0, .8)) - _eio(_seg(t, 21.6, 22.4));
+    // 5 GB+: orqasi bilan ostonadan chiqadi, qop eshikka tiqiladi; jo'ja yon
+    // tomonga o'tib, tovonlariga tayanib chiranib tortadi. Qop birdan bo'shaydi:
+    // muvozanat yo'qoladi va jo'ja tovoni atrofida orqasiga ag'dariladi
+    // (og'irlik kuchi bilan tezlashib), dumaloq orqasida bir-ikki chayqalib
+    // yotib qoladi, yig'lab o'tiradi, keyin turib qopni sudrab boradi.
+    door = _eio(_seg(t, 0, .8)) - _eio(_seg(t, 21.7, 22.4));
     bag = _BagMode.drag;
-    var y = -1.0;
-    y = _lerp(y, 0, _eio(_seg(t, 4.6, 5.0))); // yiqilganda yuzi oldinga
+    pivotR = true; // og'ish doim orqa tovon atrofida (sakrashsiz)
+    const xSide = _dr + 90;
+    var y = -2.0;
+    y = _lerp(y, -1, _eio(_seg(t, 1.5, 1.9)));
+    y = _lerp(y, 0, _eio(_seg(t, 6.5, 6.9))); // o'tirgach yuzini bizga buradi
     y = _lerp(y, -1, _eio(_seg(t, 8.0, 8.3))); // qopga qaraydi
     y = _lerp(y, 0, _eio(_seg(t, 16.2, 16.5)));
     y = _lerp(y, -1, _eio(_seg(t, 17.4, 17.7)));
-    y = _lerp(y, 0, _eio(_seg(t, 21.3, 21.5)));
+    y = _lerp(y, -2, _eio(_seg(t, 21.0, 21.3)));
     yaw = y;
+    depth = -.7 * (1 - _eio(_seg(t, .6, 1.5))) - .7 * _eio(_seg(t, 21.2, 21.7));
+    x = _dc;
+    if (t > .6 && t < 1.5) ph = _seg(t, .6, 1.5) * 2;
+    hasEnd = true;
+    endStuck = true;
+    endFrom = .6;
+    endPop = 4.45;
     if (t < 4.45) {
-      // eshikda tiqilgan; jo'ja silkinib tortadi
-      jerk = math.max(0.0, math.sin(_seg(t, 1.8, 4.45) * math.pi * 6)) *
-          _seg(t, 1.8, 4.45);
-      walkOut = _seg(t, .8, 1.8);
-      ph = _walk(t, .8, 1.8, _dc, _dc + 200, 30).ph;
-      stride = .6;
-      lean = t < 1.8 ? .12 : .3 + .08 * jerk;
-      shake = t > 1.8 ? 1.0 : 0.0;
-      eyes = t > 1.8 ? _Eyes.strain : _Eyes.calm;
-      sweat = t > 2.0 ? 1.0 : 0.0;
-      stuck = true;
-      dragging = true;
-      bagSq = .84;
+      if (t >= 1.5) {
+        final w = _walk(t, 1.5, 2.1, _dc, xSide, 40);
+        x = w.x;
+        ph = w.ph;
+      }
+      jerk = math.max(0.0, math.sin(_seg(t, 2.1, 4.45) * math.pi * 6)) *
+          _seg(t, 2.1, 4.45);
+      if (t >= 2.1) x = xSide + jerk * 10;
+      lean = _lerp(.08, .3, _eio(_seg(t, 2.1, 2.5))) + .08 * jerk;
+      shake = t > 2.1 ? 1.0 : 0.0;
+      eyes = t > 2.1 ? _Eyes.strain : _Eyes.calm;
+      sweat = t > 2.3 ? 1.0 : 0.0;
+      stuck = t >= 2.1;
+      holding = true;
+      dragging = t >= 1.5;
       return;
     }
-    // jo'ja orqaga uchadi va o'tirib qoladi
-    final f = _seg(t, 4.45, 5.0), land = _seg(t, 5.0, 5.45);
-    flyBack = _eout(f);
-    lift = math.sin(f * math.pi) * 40;
-    pivotR = true;
-    var r = .42 * _eout(f);
-    r = _lerp(r, .24, _eout(land));
+    // ag'darilish: teskari mayatnik — burchak tezlanib o'sadi (u²), dumaloq
+    // orqasi ustida dumalagani uchun tayanch nuqtasi orqaga siljiydi
+    const tFall = 4.45, tHit = 4.8, lie = 1.32;
+    double r;
+    if (t < tHit) {
+      final u = _seg(t, tFall, tHit);
+      r = .3 + (lie - .3) * u * u;
+      flyBack = u * u;
+    } else {
+      // yerga urilish: so'nuvchi chayqalish (har zarba kichikroq)
+      final u = t - tHit;
+      r = lie - .3 * math.exp(-u * 5) * math.sin(u * 11).abs();
+      flyBack = 1;
+    }
+    r = _lerp(r, .28, _eio(_seg(t, 6.0, 6.6))); // zo'rg'a o'tirib oladi
     r = _lerp(r, 0, _eio(_seg(t, 7.4, 7.9))); // turadi
     rot = r;
-    if (t > 5.0 && t < 5.5) {
-      final kq = math.sin(land * math.pi);
-      sy *= 1 - .16 * kq;
-      sx *= 1 + .12 * kq;
+    if (t > tHit && t < tHit + .22) {
+      final kq = math.sin(_seg(t, tHit, tHit + .22) * math.pi);
+      sy *= 1 - .14 * kq;
+      sx *= 1 + .1 * kq;
     }
-    eyes = t < 5.05 ? _Eyes.strain : _Eyes.cry;
-    sweat = t < 5.05 ? 1.0 : 0.0;
-    sob = t > 5.3 && t < 7.4;
-    flail = t < 5.1 ? math.sin(_seg(t, 4.45, 5.1) * math.pi) : 0.0;
-    rubEye = (t > 5.4 && t < 7.5) || (t > 16.0 && t < 21.3);
-    rubBoth = t < 7.5;
-    tears = t > 5.2 ? 1.0 : 0.0;
-    // tugunga yetib boradi va yig'lab, chiranib sudraydi
+    // qo'llar beixtiyor silkinadi, ko'zlar avval ochiq (qo'rqib), keyin yig'i
+    eyes = t < tHit + .1 ? _Eyes.calm : _Eyes.cry;
+    sob = t > 5.1 && t < 7.4;
+    flail = t < 5.0 ? math.sin(_seg(t, tFall, 5.0) * math.pi) : 0.0;
+    rubEye = (t > 6.9 && t < 7.5) || (t > 16.0 && t < 21.0);
+    rubAlt = t < 7.5; // navbatma-navbat ikki qo'li bilan
+    tears = t > 5.0 ? 1.0 : 0.0;
+    x = xSide;
     if (t >= 8.4) {
       dragU = _seg(t, 8.4, 16.0);
       ph = _walk(t, 8.4, 16.0, 0, 700, 28).ph;
@@ -329,13 +389,14 @@ class _S {
     }
     dropAt = 16.0;
     if (t > 17.7) {
-      final w3 = _walk(t, 17.7, 21.3, _dragX, _dc, 40);
+      final w3 = _walk(t, 17.7, 21.0, _dragX, _dc, 40);
       x = w3.x;
       ph = w3.ph;
       stride = .75;
     }
   }
 }
+
 
 // ── 2D AFFIN ─────────────────────────────────────────────────────
 class _Aff {
@@ -473,6 +534,12 @@ const Map<String, String> _faceSwap = {
 
 List<double> _pose(String name, double yaw) {
   final part = _parts[name]!;
+  // orqa ko'rinish: yuz qismlari bosh sirti bo'ylab chetga o'tadi
+  if (yaw < -1) {
+    final base = _pose(name, -1);
+    if (!_faceSwap.containsKey(name)) return base;
+    return _xform(base, 0, 1, -(-1 - yaw) * 170, 0);
+  }
   if (yaw >= 0) return _mix(part.a, part.b, yaw);
   final u = -yaw;
   final ra = _bbox(part.a);
@@ -526,28 +593,33 @@ class _ScenePainter extends CustomPainter {
     canvas.translate((size.width - _w * k) / 2, (size.height - _h * k) / 2);
     canvas.scale(k);
     canvas.clipRect(const Rect.fromLTWH(0, 0, _w, _h));
-    final s = _resolve(bytes, _S(bytes, anim.value * _dur));
+    final s = _resolve(_S(bytes, anim.value * _dur));
     Offset? release;
     if (s.bag == _BagMode.fly || s.bag == _BagMode.bin) {
       release = _handWorld(_S(bytes, s.flyT0 - 0.0001));
     }
-    // uy ichidami (devor orqasida chiziladi)
-    final chickIn = s.x <= _dc + 20 && s.door < .9;
-    // qop eshikdan o'tayotgan bo'lsa: ichkaridagi qismi devor orqasida
-    final bagSplit =
-        s.bag == _BagMode.drag && !s.bagPx.isNaN && s.bagPx < _dr + 40;
+    // uy ichida (devor orqasida) chiziladiganlar
+    final chickIn = s.depth < -.02;
+    final e = s.endS;
     final overBin = s.x > _bl - _hw;
 
     _ground(canvas);
     _fence(canvas);
     _houseBack(canvas, s);
     _binBack(canvas, s);
-    if (bagSplit) _dragBag(canvas, s, _Pass.inside);
-    if (chickIn) _chick(canvas, s);
-    _doorPanel(canvas, s);
+    if (e != null && e.inside) _bagEnd(canvas, s, e);
+    if (chickIn) {
+      _neck(canvas, s);
+      _chick(canvas, s);
+    }
     _houseFront(canvas);
-    _dragBag(canvas, s, bagSplit ? _Pass.outside : _Pass.all);
+    _doorPanel(canvas, s);
+    // tashqarida
+    if (e != null && !e.inside) _bagEnd(canvas, s, e);
+    _dragBag(canvas, s);
+    if (!chickIn) _neck(canvas, s);
     if (!chickIn && !overBin) _chick(canvas, s);
+    _tearDrops(canvas, s);
     // eshik ramkasini ORQASIDAN ushlagan (chap) qo'l: tananing oldida,
     // qanot uchi esa ustun orqasiga kirib turadi
     if (s.grip > .5) {
@@ -567,16 +639,19 @@ class _ScenePainter extends CustomPainter {
     canvas.restore();
   }
 
-  // ── SUDRALAYOTGAN QOP ───────────────────────────────────────────
+  // ── QOP HOLATI ─────────────────────────────────────────────────
   //
-  // Katta qop TO'LIQ YOTGAN holda sudraladi: tubi orqada, uchidagi tuguni
-  // jo'janing IKKI qo'lida. Qo'llar tanadan `_hOff` oldinda.
+  // Katta qop eshikdan old tomoni bilan (bizga qarab) chiqadi: avval eshik
+  // o'yig'ida yumaloq old tomoni ko'rinadi, bo'g'zi jo'janing qo'lida. Tashqariga
+  // chiqqach ag'darilib yonboshlaydi va yo'lak bo'ylab TO'LIQ YOTGAN holda
+  // sudraladi: tubi orqada, uchidagi tuguni jo'janing ikki qo'lida.
   static const double _hOff = _hw * .55;
 
-  /// Qop tubidan tugunigacha masofa.
   static double _bagLen(_S s) => .9 * s.bh * (1 + (1 - s.bagSq) * .35);
 
-  static double _knotY(_S s) => _floor - s.bw * s.bagSq / 2 * .85 + 2;
+  static double _bagWW(_S s) => s.bw * s.bagSq;
+
+  static double _knotY(_S s) => _floor - _bagWW(s) / 2 * .85 + 2;
 
   static void _setKnot(_S s, double knotX) {
     s.bagAng = math.pi / 2;
@@ -584,33 +659,62 @@ class _ScenePainter extends CustomPainter {
     s.knot = Offset(knotX, _knotY(s));
   }
 
-  static _S _resolve(int bytes, _S s) {
+  static _End? _endState(_S s) {
+    if (!s.hasEnd) return null;
+    final t = s.sec, d = s.bw;
+    double sc;
+    var inside = true;
+    if (s.endStuck) {
+      if (t < s.endFrom) return null;
+      sc = _lerp(.78, 1, _eio(_seg(t, s.endFrom, 2.1))) + .03 * s.jerk;
+      if (t >= s.endPop) {
+        inside = false;
+        sc = _lerp(1, 1.05, _eout(_seg(t, s.endPop, s.endPop + .1)));
+      }
+    } else {
+      if (t < s.endFrom || t >= s.endOut) return null;
+      sc = _lerp(.75, 1, _eio(_seg(t, s.endFrom, s.endAt)));
+      if (t >= s.endAt) {
+        inside = false;
+        sc = 1;
+      }
+    }
+    // ag'darilish: old ko'rinishdan yonbosh ko'rinishga (0..1)
+    final tip = s.endStuck
+        ? _seg(t, s.endPop, s.endPop + .35)
+        : (t >= s.endAt ? _seg(t, s.endAt, s.endOut) : 0.0);
+    if (tip >= 1) return null;
+    final ry = d / 2 * .92 * sc;
+    return _End(_dc, _floor - ry + 2 - (inside ? (1 - sc) * 40 : 0), d, sc, ry,
+        tip, inside);
+  }
+
+  static _S _resolve(_S s) {
     if (s.bag != _BagMode.drag) return s;
     final t = s.sec;
-    if (s.tier == 3) {
-      _setKnot(s, (t < s.dropAt ? s.x : _dragX) - _hOff);
-      if (t >= s.dropAt) s.knot = null;
-      return s;
-    }
-    // 5 GB+
-    const stuckPx = _dl + 10;
-    if (t < 4.45) {
-      final xStuck = stuckPx + _bagLen(s) + _hOff;
-      s.x = _lerp(_dc, xStuck, _eio(s.walkOut)) + s.jerk * 10;
-      _setKnot(s, s.x - _hOff);
-      s.bagPx = math.min(s.bagPx, stuckPx) + s.jerk * 6;
-      s.knot = Offset(s.bagPx + _bagLen(s), _knotY(s));
-      return s;
-    }
-    final p = _resolve(bytes, _S(bytes, 4.45 - 1e-4));
-    final pu = _seg(t, 4.45, 4.8);
-    s.bagSq = _lerp(.84, 1, _backOut(math.min(1.0, pu * 1.4), 2.5));
-    final restPx = p.bagPx + 170;
-    s.bagAng = math.pi / 2;
-    s.bagPx = _lerp(p.bagPx, restPx, _eout(pu));
+    final e = s.endS = _endState(s);
+    s.side = false;
     s.knot = null;
-    final xLand = p.x + 140;
-    s.x = _lerp(p.x, xLand, s.flyBack);
+    if (e != null && (s.holding || s.stuck)) s.knot = Offset(e.cx + 18, e.cy);
+    if (s.tier == 3) {
+      if (t >= s.endAt) {
+        s.side = t >= s.endOut;
+        _setKnot(s, (t < s.dropAt ? s.x : _dragX) - _hOff);
+        if (t >= s.dropAt) s.knot = null;
+      }
+      return s;
+    }
+    final pop = s.endPop;
+    if (t < pop) return s;
+    s.side = t >= pop + .35;
+    // qop tortilgan tomonga (o'ngga) otilib chiqadi va ishqalanish bilan
+    // sekinlashib to'xtaydi; ag'darilib yonboshlaydi
+    const restPx = 65.0;
+    s.bagSq = _lerp(.86, 1, _backOut(_seg(t, pop, pop + .4), 2.5));
+    s.bagAng = math.pi / 2;
+    s.bagPx = _lerp(restPx - 70, restPx, _eout(_seg(t, pop, pop + .7)));
+    const xSide = _dr + 90, xLand = xSide + 80;
+    s.x = _lerp(xSide, xLand, s.flyBack);
     if (t >= 8.0) {
       final xGrab = restPx + _bagLen(s) + _hOff;
       if (t < 8.4) {
@@ -622,9 +726,10 @@ class _ScenePainter extends CustomPainter {
         if (t >= s.dropAt) s.knot = null;
       }
     }
-    if (t > 17.7) s.x = _walk(t, 17.7, 21.3, _dragX, _dc, 40).x;
+    if (t > 17.7) s.x = _walk(t, 17.7, 21.0, _dragX, _dc, 40).x;
     return s;
   }
+
 
   // ── JO'JA ──────────────────────────────────────────────────────
 
@@ -652,7 +757,18 @@ class _ScenePainter extends CustomPainter {
     }
     rot += s.lean; // qopni tortganda orqaga og'adi
     if (s.shake > 0) rot += math.sin(s.sec * 55) * .025 * s.shake;
-    if (s.sob) sy *= 1 - .025 * math.sin(s.sec * 14).abs();
+    if (s.sob) {
+      // ho'ngrash: keskin nafas olish, sekin chiqarish
+      final c = (s.sec * 1.7) % 1;
+      final v = c < .18 ? c / .18 : math.pow(1 - (c - .18) / .82, 2).toDouble();
+      sy *= 1 + .06 * v;
+      sx *= 1 - .03 * v;
+      if (s.pivotR) rot += .03 * v;
+    }
+    // chuqurlik: ichkarida (depth < 0) — kichikroq va tepada (uzoqroq)
+    sx *= 1 + .1 * s.depth;
+    sy *= 1 + .1 * s.depth;
+    lift -= 14 * s.depth;
     final m = _Aff();
     if (s.pivotR) {
       m.translate(s.x + _hw, _floor - lift).rotate(rot).translate(-_hw, 0);
@@ -663,10 +779,12 @@ class _ScenePainter extends CustomPainter {
     return m;
   }
 
+
+
   /// Qo'l nuqtalari (jo'janing 512 fazosida).
   static _Arms _arms(_S s, _Aff m) {
-    final y = s.yaw;
-    final kk = 1 - .5 * y.abs(), off = 34 * y;
+    final y = s.yaw, ys = math.max(-1.0, y);
+    final kk = 1 - .5 * ys.abs(), off = 34 * ys;
     final shA = Offset(_cx - _shDx * kk + off, _shY);
     final shB = Offset(_cx + _shDx * kk + off, _shY);
     final face = y < -.05 ? -1.0 : 1.0;
@@ -707,30 +825,33 @@ class _ScenePainter extends CustomPainter {
       a = _polar(shA, -125 + w, _armL);
       b = _polar(shB, -55 - w, _armL);
     }
-    // sudrash / tortish: ikkala qo'l qop tomonga, titraydi
-    // sudrash / tortish: ikkala qo'l bilan qop uchidagi tugunni ushlaydi
+    // sudrash / tortish: ikkala qo'l bilan qop bo'g'zini yoki tugunini ushlaydi
     final knot = s.knot;
     if ((s.dragging || s.stuck || s.holding) && knot != null) {
       final tr = s.shake * math.sin(s.sec * 50) * 5;
       final k = m.unmap(knot);
-      a = _capTo(shA, Offset(k.dx + 8, k.dy + 12 + tr), _armL * 1.9);
-      b = _capTo(shB, Offset(k.dx - 8, k.dy - 12 - tr), _armL * 1.9);
+      final cap = s.endS != null ? _armL * 1.35 : _armL * 1.9;
+      a = _capTo(shA, Offset(k.dx + 8, k.dy + 12 + tr), cap);
+      b = _capTo(shB, Offset(k.dx - 8, k.dy - 12 - tr), cap);
     }
     if (s.flail > 0) {
       final w = math.sin(s.sec * 30) * 30;
       a = _lerp2(a, _polar(shA, -140 + w, _armL), s.flail);
       b = _lerp2(b, _polar(shB, -40 - w, _armL), s.flail);
     }
-    // ko'zini artib yig'laydi
+    // ko'zini artib yig'laydi (o'tirganda — navbatma-navbat ikki qo'li bilan)
     if (s.rubEye && !s.dragging) {
       final r = math.sin(s.sec * 16) * 10;
       final e1 = _bbox(_pose('eye', y)).center;
       final e2 = _bbox(_pose('eye_2', y)).center;
       final ha = _capTo(shA, Offset(e1.dx + r, e1.dy + 20), _armL * 1.7);
       final hb = _capTo(shB, Offset(e2.dx - r, e2.dy + 20), _armL * 1.7);
-      if (s.rubBoth) {
-        a = ha;
-        b = hb;
+      if (s.rubAlt) {
+        if ((s.sec / .7).floor().isOdd) {
+          a = ha;
+        } else {
+          b = hb;
+        }
       } else if (nearIsB) {
         b = hb;
       } else {
@@ -766,6 +887,13 @@ class _ScenePainter extends CustomPainter {
     final k = _carry(s, ar) ?? (ar.face > 0 ? 'b' : 'a');
     final tip = k == 'b' ? _tip(ar.shB, ar.b) : _tip(ar.shA, ar.a);
     return m.map(_bagAt(s, tip));
+  }
+
+  /// Ikki qo'l o'rtasi (sahnada) — qop bo'g'zi shu yerda.
+  static Offset _pullWorld(_S s) {
+    final m = _matrix(s);
+    final ar = _arms(s, m);
+    return m.map(_lerp2(ar.a, ar.b, .5));
   }
 
   /// Qanotsimon keng qo'l (asl jo'janing qo'llari kabi): ildizi yelkada,
@@ -826,7 +954,7 @@ class _ScenePainter extends CustomPainter {
     final lie = s.pivotR ? math.sin(s.rot) : 0.0;
     canvas.drawOval(
         Rect.fromCenter(
-            center: Offset(s.x + lie * _hw, _floor + 3),
+            center: Offset(s.x + lie * _hw, _floor + 3 + 14 * s.depth),
             width: 2 * (_hw * 1.05 * (1 - lift / 250) + lie * _hw * .6),
             height: 18),
         Paint()..color = Color.fromRGBO(0, 0, 0, _clamp(.3 - lift / 300, 0, 1)));
@@ -837,16 +965,33 @@ class _ScenePainter extends CustomPainter {
     final ar = _arms(s, m);
     final near = ar.face > 0 ? 'b' : 'a';
     final carry = _carry(s, ar);
-    // uzoqdagi qo'l — tana orqasida (qop ko'targan qo'l doim oldinda)
     final gripB = s.grip > .5; // ramkani ushlagan qo'l alohida chiziladi
-    if (y.abs() > .35) {
-      if (near == 'b' && carry != 'a') _arm(canvas, ar.shA, ar.a);
-      if (near == 'a' && carry != 'b' && !gripB) _arm(canvas, ar.shB, ar.b);
+    // orqa ko'rinish: ikkala qo'l ham tana orqasida
+    final backV = y < -1.3;
+    if (backV) {
+      _arm(canvas, ar.shA, ar.a);
+      _arm(canvas, ar.shB, ar.b);
+    } else if (y.abs() > .35) {
+      // uzoqdagi qo'l — tana orqasida (qop ko'targan qo'l doim oldinda)
+      final far = near == 'b' ? 'a' : 'b';
+      if (!(far == 'b' && gripB) && far != carry) {
+        if (far == 'a') {
+          _arm(canvas, ar.shA, ar.a);
+        } else {
+          _arm(canvas, ar.shB, ar.b);
+        }
+      }
     }
-    for (final n in const [
-      'body', 'head_bl3', 'head', 'head_bl1', 'head_bl2', 'beak', 'beak_bl',
-      'mouth'
-    ]) {
+    for (final n in const ['body', 'head_bl3', 'head', 'head_bl1', 'head_bl2']) {
+      _part(canvas, n, _pose(n, y));
+    }
+    // yuz: orqaga o'girilganda bosh sirti bo'ylab chetga o'tib yashirinadi
+    canvas.save();
+    if (y < -1) {
+      canvas.clipPath(_path(_pose('body', y))
+        ..addPath(_path(_pose('head', y)), Offset.zero));
+    }
+    for (final n in const ['beak', 'beak_bl', 'mouth']) {
       _part(canvas, n, _pose(n, y));
     }
     // ko'zlar
@@ -884,22 +1029,15 @@ class _ScenePainter extends CustomPainter {
             Offset(c.dx + 18 * d, c.dy - 38 - 6 * kq), ink(10));
       }
     }
-    // ko'z yoshlari
+    // ko'z yoshlari: yuzdan oqadigan oqim (tomchilar keyin sahnada tushadi)
     if (s.tears > 0) {
-      final ph = (s.sec * 2.2) % 1;
       for (final (c, d) in [(c1, -1.0), (c2, 1.0)]) {
         canvas.drawPath(
             Path()
-              ..moveTo(c.dx + 18 * d, c.dy + 8)
+              ..moveTo(c.dx + 16 * d, c.dy + 8)
               ..quadraticBezierTo(
-                  c.dx + 30 * d, c.dy + 50, c.dx + 24 * d, c.dy + 90),
-            ink(12, const Color(0xF278C8FF)));
-        canvas.drawOval(
-            Rect.fromCenter(
-                center: Offset(c.dx + 24 * d, c.dy + 90 + ph * 40),
-                width: 18,
-                height: 24),
-            Paint()..color = const Color(0xF296D7FF));
+                  c.dx + 28 * d, c.dy + 40, c.dx + 24 * d, c.dy + 70),
+            ink(11, const Color(0xE678C8FF)));
       }
     }
     // ter tomchisi
@@ -917,14 +1055,30 @@ class _ScenePainter extends CustomPainter {
       canvas.drawPath(drop,
           ink(6, const Color(0xFF3D8FC4).withValues(alpha: alpha)));
     }
-    // yaqin qo'l (va qop) — tana oldida
-    // qop qanot uchida osilib turadi
+    canvas.restore();
+    if (backV) {
+      canvas.restore();
+      return;
+    }
+    // qop qanot uchida osilib turadi (mayatnik: qadam bilan tebranadi,
+    // otishga tayyorlanishda orqaga og'adi)
     if (s.bag == _BagMode.hand && carry != null) {
       final tip = carry == 'b' ? _tip(ar.shB, ar.b) : _tip(ar.shA, ar.a);
-      _bag(canvas, _bagAt(s, tip), s.bw / _k, s.bh / _k, 1, 0, local: true);
+      final sw = (s.ph >= 0
+              ? .16 * math.sin(s.ph * math.pi)
+              : .05 * math.sin(s.sec * 3)) +
+          s.wind * .5 * ar.face;
+      canvas.save();
+      canvas.translate(tip.dx, tip.dy);
+      canvas.rotate(sw);
+      _bag(canvas, Offset(0, .4 * s.bh / _k), s.bw / _k, s.bh / _k, 1, 0,
+          local: true);
+      canvas.restore();
     }
-    if (y.abs() <= .35 || near == 'a' || carry == 'a') _arm(canvas, ar.shA, ar.a);
-    if ((y.abs() <= .35 || near == 'b' || carry == 'b') && !gripB) {
+    // yaqin qo'l (va qop ko'targan qo'l) — tana oldida
+    final side = y.abs() > .35;
+    if (!side || near == 'a' || carry == 'a') _arm(canvas, ar.shA, ar.a);
+    if ((!side || near == 'b' || carry == 'b') && !gripB) {
       _arm(canvas, ar.shB, ar.b);
     }
     canvas.restore();
@@ -999,29 +1153,230 @@ class _ScenePainter extends CustomPainter {
     canvas.restore();
   }
 
-  /// Sudralayotgan qop: tubi `bagPx` da yerda, `bagAng` burchakda egilgan.
-  /// [pass] — eshikdan o'tayotganda ichki (devor orqasi) va tashqi qismi alohida.
-  void _dragBag(Canvas canvas, _S s, _Pass pass) {
-    if (s.bag != _BagMode.drag || s.bagPx.isNaN) return;
+  /// Yonboshlab yotgan, sudralayotgan qop: tubi `bagPx` da yerda.
+  void _dragBag(Canvas canvas, _S s) {
+    if (s.bag != _BagMode.drag || s.bagPx.isNaN || !s.side) return;
     final sq = s.bagSq, hh = s.bh * (1 + (1 - sq) * .35), ww = s.bw * sq;
     final py = _floor - (ww / 2) * math.sin(s.bagAng).abs() * .85 + 2;
     canvas.save();
-    if (pass == _Pass.inside) {
-      canvas.clipRect(const Rect.fromLTRB(0, 0, _dr + 1, _h));
-    } else if (pass == _Pass.outside) {
-      canvas.clipRect(const Rect.fromLTRB(_dr, 0, _w, _h));
-    }
     canvas.translate(s.bagPx, py);
     canvas.rotate(s.bagAng);
     _bag(canvas, Offset(0, -hh / 2), s.bw, s.bh, sq, 0);
     canvas.restore();
   }
 
+  /// Eshik o'yig'idagi qop: old (yig'ilgan og'zi) tomoni bizga qarab turadi.
+  /// `tip` > 0 — tortilgan tomonga (o'ngga) burilib yonboshlaydi: tik o'q
+  /// atrofida aylanish proyeksiyasi — yon tanasi `sin` bilan uzayadi, og'iz
+  /// tomoni `cos` bilan torayib o'ng uchiga o'tadi.
+  void _bagEnd(Canvas canvas, _S s, _End e) {
+    var rx = e.d / 2 * e.sc, ry = e.ry, cx = e.cx, cy = e.cy;
+    if (e.tip > 0 && !s.bagPx.isNaN) {
+      final sq = s.bagSq, hh = s.bh * (1 + (1 - sq) * .35), ww = s.bw * sq;
+      final u = _eout(e.tip), th = u * math.pi / 2;
+      final sn = math.sin(th), cs = math.cos(th);
+      final py = _floor - ww / 2 * .85 + 2;
+      final c = _lerp(e.cx, s.bagPx + hh / 2, u);
+      cy = _lerp(cy, py, u);
+      ry = _lerp(ry, ww / 2 * .9, u);
+      canvas.drawOval(
+          Rect.fromCenter(
+              center: Offset(c, _floor + 2),
+              width: 2 * (hh / 2 * sn + rx * cs) * .95,
+              height: 20),
+          Paint()..color = const Color(0x4D000000));
+      if (sn > .02) {
+        canvas.save();
+        canvas.translate(c, py);
+        canvas.scale(sn, 1);
+        canvas.translate(-hh / 2, 0);
+        canvas.rotate(math.pi / 2);
+        _bag(canvas, Offset(0, -hh / 2), s.bw, s.bh, sq, 0);
+        canvas.restore();
+      }
+      rx *= cs;
+      cx = c + hh / 2 * sn;
+      if (rx < 2) return;
+    } else {
+      if (rx <= 0 || ry <= 0) return;
+      canvas.drawOval(
+          Rect.fromCenter(
+              center: Offset(cx, _floor + 2), width: 2 * rx * .95, height: 20),
+          Paint()..color = const Color(0x4D000000));
+    }
+    canvas.save();
+    canvas.translate(cx, cy);
+    final oval = Rect.fromCenter(center: Offset.zero, width: 2 * rx, height: 2 * ry);
+    canvas.drawOval(
+        oval,
+        Paint()
+          ..shader = ui.Gradient.radial(
+              Offset.zero,
+              rx,
+              const [Color(0xFF555A64), Color(0xFF25282D)],
+              null,
+              TileMode.clamp,
+              null,
+              Offset(-rx * .3, -ry * .35),
+              rx * .1));
+    canvas.drawOval(
+        oval,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 6
+          ..color = const Color(0xFF121317));
+    final wr = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 4
+      ..strokeCap = StrokeCap.round
+      ..color = const Color(0xBF121317);
+    // og'iz tomon yig'ilgan burmalar (notekis, har biri boshqa uzunlikda)
+    const folds = [
+      [.3, .88, .3],
+      [1.05, .62, -.25],
+      [1.7, .8, .4],
+      [2.55, .7, -.3],
+      [3.3, .9, .2],
+      [4.0, .55, -.35],
+      [4.75, .78, .3],
+      [5.5, .66, -.2],
+    ];
+    for (final f in folds) {
+      final a = f[0], l = f[1], bend = f[2];
+      canvas.drawPath(
+          Path()
+            ..moveTo(math.cos(a) * rx * l, math.sin(a) * ry * l)
+            ..quadraticBezierTo(math.cos(a + bend) * rx * l * .55,
+                math.sin(a + bend) * ry * l * .55, math.cos(a) * rx * .12,
+                math.sin(a) * ry * .12),
+          wr);
+    }
+    canvas.drawArc(
+        Rect.fromCenter(center: Offset.zero, width: 2 * rx * .78, height: 2 * ry * .78),
+        math.pi * 1.08,
+        math.pi * .3,
+        false,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 6
+          ..color = const Color(0x59FFFFFF));
+    canvas.drawCircle(Offset.zero, ry * .13, Paint()..color = const Color(0xFF121317));
+    canvas.restore();
+  }
+
+  /// Qop bo'g'zi: eshikdagi qopning yig'ilgan og'zi jo'janing qo'llarigacha
+  /// cho'zilgan — qop yonida keng, tugun tomon toraygan, burmalari bilan.
+  void _neck(Canvas canvas, _S s) {
+    final e = s.endS;
+    if (e == null || !(s.holding || s.stuck)) return;
+    final h = _pullWorld(s);
+    final a = Offset(e.cx, e.cy);
+    // tortilganda bo'g'iz tarang, aks holda biroz osiladi
+    final c = Offset((a.dx + h.dx) / 2, (a.dy + h.dy) / 2 + (s.stuck ? 4 : 14));
+    Offset at(double u) => a * ((1 - u) * (1 - u)) + c * (2 * u * (1 - u)) + h * (u * u);
+    final w0 = math.min(54.0, e.ry * .42), w1 = 14.0;
+    final left = <Offset>[], right = <Offset>[];
+    const n = 14;
+    for (var i = 0; i <= n; i++) {
+      final u = i / n;
+      final p = at(u);
+      final dv = at(math.min(1, u + .01)) - at(math.max(0, u - .01));
+      final d = dv.distance == 0 ? 1.0 : dv.distance;
+      final nv = Offset(-dv.dy / d, dv.dx / d);
+      // yig'ilgan og'iz: qopdan chiqishda keng, so'ng tez torayadi
+      final w = w1 + (w0 - w1) * math.pow(1 - u, 2.2).toDouble();
+      left.add(p + nv * (w / 2));
+      right.add(p - nv * (w / 2));
+    }
+    final body = Path()..moveTo(left.first.dx, left.first.dy);
+    for (final p in left.skip(1)) {
+      body.lineTo(p.dx, p.dy);
+    }
+    for (final p in right.reversed) {
+      body.lineTo(p.dx, p.dy);
+    }
+    body.close();
+    canvas.drawPath(body, Paint()..color = const Color(0xFF34383F));
+    canvas.drawPath(
+        body,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 5
+          ..strokeJoin = StrokeJoin.round
+          ..color = const Color(0xFF121317));
+    // bo'ylama burmalar
+    final fold = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3
+      ..strokeCap = StrokeCap.round
+      ..color = const Color(0xB3121317);
+    for (final k in const [.3, .7]) {
+      final f = Path();
+      for (var i = 0; i <= 10; i++) {
+        final q = Offset.lerp(left[i], right[i], k)!;
+        if (i == 0) {
+          f.moveTo(q.dx, q.dy);
+        } else {
+          f.lineTo(q.dx, q.dy);
+        }
+      }
+      canvas.drawPath(f, fold);
+    }
+    // tugun — qo'llar orasida
+    canvas.drawCircle(h, 11, Paint()..color = const Color(0xFF3D4149));
+    canvas.drawCircle(
+        h,
+        11,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 4
+          ..color = const Color(0xFF121317));
+  }
+
+  /// Ko'z yoshi tomchilari: erkin tushadi (g), yerga tegsa sachraydi.
+  void _tearDrops(Canvas canvas, _S s) {
+    if (s.tears <= 0) return;
+    final m = _matrix(s);
+    const g = 2400.0;
+    for (final (n, d, off) in const [('eye', -1.0, 0.0), ('eye_2', 1.0, .31)]) {
+      final c = _bbox(_pose(n, s.yaw)).center;
+      final p = m.map(Offset(c.dx + 24 * d, c.dy + 72));
+      for (var i = 0; i < 3; i++) {
+        final age = (s.sec + off + i * .23) % .69;
+        final yy = p.dy + .5 * g * age * age, xx = p.dx + d * 30 * age;
+        if (yy < _floor) {
+          canvas.drawOval(
+              Rect.fromCenter(center: Offset(xx, yy), width: 7, height: 10),
+              Paint()..color = const Color(0xF296D7FF));
+        } else {
+          final tg = math.sqrt(math.max(0.0, 2 * (_floor - p.dy) / g));
+          final a = age - tg;
+          if (a < .15) {
+            final k = a / .15;
+            canvas.drawArc(
+                Rect.fromCenter(
+                    center: Offset(p.dx + d * 30 * tg, _floor),
+                    width: 2 * (4 + 10 * k),
+                    height: 2 * (2 + 2 * k)),
+                math.pi,
+                math.pi,
+                false,
+                Paint()
+                  ..style = PaintingStyle.stroke
+                  ..strokeWidth = 2.5
+                  ..color = Color.fromRGBO(150, 215, 255, _clamp(1 - k, 0, 1)));
+          }
+        }
+      }
+    }
+  }
+
   void _flying(Canvas canvas, _S s, Offset a) {
     if (s.bag != _BagMode.fly) return;
     final u = _seg(s.sec, s.flyT0, s.flyT1);
+    // parabola: gorizontal tezlik doimiy
     final x = _lerp(a.dx, _bc, u);
-    final y = _lerp(a.dy, _bt + 6, u) - math.sin(u * math.pi) * s.flyPeak;
+    final y = _lerp(a.dy, _bt + 6, u) - 4 * s.flyPeak * u * (1 - u);
     canvas.save();
     // og'izga kirgach old gardish orqasida yo'qoladi
     if (u > .7) canvas.clipRect(const Rect.fromLTWH(0, 0, _w, _bt + 2));
@@ -1096,6 +1451,17 @@ class _ScenePainter extends CustomPainter {
           ..shader = ui.Gradient.linear(const Offset(0, _dt), const Offset(0, _floor),
               const [Color(0xFF1D140E), Color(0xFF3A271B)]));
     canvas.drawRect(r, Paint()..color = Color.fromRGBO(255, 200, 120, .25 * s.door));
+    // ostona: yer bilan tekis beton plita (ustidan yuriladi)
+    const sill = Rect.fromLTWH(_dl - 14, _floor - 3, _dr - _dl + 28, 10);
+    canvas.drawRect(sill, Paint()..color = const Color(0xFF9A9792));
+    canvas.drawRect(const Rect.fromLTWH(_dl - 14, _floor - 3, _dr - _dl + 28, 3),
+        Paint()..color = const Color(0xFFB5B2AC));
+    canvas.drawRect(
+        sill,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 3
+          ..color = const Color(0xFF5A5855));
   }
 
   void _houseFront(Canvas canvas) {
@@ -1128,15 +1494,19 @@ class _ScenePainter extends CustomPainter {
         Paint()
           ..strokeWidth = 8
           ..color = const Color(0xFF7A4A26));
-    // poydevor
-    const base = Rect.fromLTWH(-10, _floor - 22, _wallR + 10, 22);
-    canvas.drawRect(base, Paint()..color = const Color(0xFF8C8A86));
-    canvas.drawRect(
-        base,
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 5
-          ..color = const Color(0xFF5A5855));
+    // beton poydevor — faqat devor ostida (eshik o'yig'ida yo'q)
+    for (final base in const [
+      Rect.fromLTRB(-10, _floor - 22, _dl - 14, _floor),
+      Rect.fromLTRB(_dr + 14, _floor - 22, _wallR, _floor),
+    ]) {
+      canvas.drawRect(base, Paint()..color = const Color(0xFF8C8A86));
+      canvas.drawRect(
+          base,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 5
+            ..color = const Color(0xFF5A5855));
+    }
     // eshik ramkasi
     final frameFill = Paint()..color = const Color(0xFFAA5A1F);
     final frameInk = Paint()
@@ -1184,62 +1554,65 @@ class _ScenePainter extends CustomPainter {
     canvas.drawLine(const Offset(-20, 30), const Offset(_wallR + 46, 262), roofInk);
   }
 
-  /// Tabaqa chap ilmoqda ichkariga aylanadi (perspektiva).
+  /// Eshik TASHQARIGA (bizga tomon) ochiladi: ilmog'i chap ustunda. Uzoq cheti
+  /// bizga yaqinlashgani uchun perspektivada kattalashadi; 90° dan keyin devor
+  /// ustiga yotadi va ichki (orqa) yuzi ko'rinadi.
   void _doorPanel(Canvas canvas, _S s) {
-    final phi = s.door * 1.45;
+    final phi = s.door * 1.95;
     const x0 = _dl, y0 = _dt, y1 = _floor, pw = _dr - _dl;
-    final depth = math.sin(phi) * .2;
     final xf = x0 + pw * math.cos(phi);
     const yc = (y0 + y1) / 2;
-    final hh = (y1 - y0) / 2 * (1 - depth);
-    if ((xf - x0).abs() < 2) return;
-    canvas.save();
-    canvas.clipRect(const Rect.fromLTWH(_dl, 0, _w, _h));
+    final hh = (y1 - y0) / 2 * (1 + math.sin(phi) * .12);
     final q = Path()
       ..moveTo(x0, y0)
       ..lineTo(xf, yc - hh)
       ..lineTo(xf, yc + hh)
       ..lineTo(x0, y1)
       ..close();
-    final sh = math.min(1.0, s.door * 1.2);
+    final back = math.cos(phi) < 0;
+    final lit = math.cos(phi).abs();
+    final c0 = back
+        ? Color.lerp(const Color(0xFF7A3F14), const Color(0xFFA8612B), lit)!
+        : Color.lerp(const Color(0xFFA8612B), const Color(0xFFD98A45), lit)!;
+    final c1 = back
+        ? Color.lerp(const Color(0xFF6A3510), const Color(0xFF93531F), lit)!
+        : Color.lerp(const Color(0xFF93531F), const Color(0xFFC7773A), lit)!;
     canvas.drawPath(
         q,
         Paint()
-          ..shader = ui.Gradient.linear(const Offset(x0, 0), Offset(xf, 0), [
-            Color.lerp(const Color(0xFFD98A45), const Color(0xFF8F4A18), sh)!,
-            Color.lerp(const Color(0xFFC7773A), const Color(0xFF6F3810), sh)!,
-          ]));
+          ..shader = ui.Gradient.linear(
+              const Offset(x0, 0), Offset(xf == x0 ? x0 + 1 : xf, 0), [c0, c1]));
     Offset at(double u, double v) => Offset(_lerp(x0, xf, u),
         _lerp(_lerp(y0, yc - hh, u), _lerp(y1, yc + hh, u), v));
-    final panelInk = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 5
-      ..strokeJoin = StrokeJoin.round
-      ..color = const Color(0xE66D3605);
-    for (final v in const [
-      [.08, .42],
-      [.52, .92]
-    ]) {
-      final p = Path()
-        ..moveTo(at(.16, v[0]).dx, at(.16, v[0]).dy)
-        ..lineTo(at(.84, v[0]).dx, at(.84, v[0]).dy)
-        ..lineTo(at(.84, v[1]).dx, at(.84, v[1]).dy)
-        ..lineTo(at(.16, v[1]).dx, at(.16, v[1]).dy)
-        ..close();
-      canvas.drawPath(p, Paint()..color = const Color(0x1A000000));
-      canvas.drawPath(p, panelInk);
+    if ((xf - x0).abs() > 10) {
+      final panelInk = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 5
+        ..strokeJoin = StrokeJoin.round
+        ..color = const Color(0xE66D3605);
+      for (final v in const [
+        [.08, .42],
+        [.52, .92]
+      ]) {
+        final p = Path()
+          ..moveTo(at(.16, v[0]).dx, at(.16, v[0]).dy)
+          ..lineTo(at(.84, v[0]).dx, at(.84, v[0]).dy)
+          ..lineTo(at(.84, v[1]).dx, at(.84, v[1]).dy)
+          ..lineTo(at(.16, v[1]).dx, at(.16, v[1]).dy)
+          ..close();
+        canvas.drawPath(p, Paint()..color = const Color(0x1A000000));
+        canvas.drawPath(p, panelInk);
+      }
+      final kr = Rect.fromCenter(
+          center: at(.86, .55), width: 2 * (8 * lit + 2), height: 16);
+      canvas.drawOval(kr, Paint()..color = const Color(0xFFFFD527));
+      canvas.drawOval(
+          kr,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 4
+            ..color = const Color(0xFF6D3605));
     }
-    final kr = Rect.fromCenter(
-        center: at(.86, .55),
-        width: 2 * (8 * math.cos(phi).abs() + 2),
-        height: 16);
-    canvas.drawOval(kr, Paint()..color = const Color(0xFFFFD527));
-    canvas.drawOval(
-        kr,
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 4
-          ..color = const Color(0xFF6D3605));
     canvas.drawPath(
         q,
         Paint()
@@ -1247,7 +1620,6 @@ class _ScenePainter extends CustomPainter {
           ..strokeWidth = 7
           ..strokeJoin = StrokeJoin.round
           ..color = const Color(0xFF6D3605));
-    canvas.restore();
   }
 
   static final Rect _mouth = Rect.fromCenter(

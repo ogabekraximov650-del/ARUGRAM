@@ -4626,3 +4626,27 @@ eshik), o'ng chetgacha yog'och panjara, og'zi doim ochiq quti; hammasi kichik, y
   qoladi, ikki qo'li bilan ko'zini ishqalab yig'laydi, yig'lab sudrab boradi va qaytadi.
 Qo'llar — har biri alohida, kalta, qanotsimon (asl jo'ja qo'llari kabi). Qop o'lchami
 hajmga qarab silliq o'sadi (`_bagSize`). Prototip brauzerda yasalib, Dart'ga ko'chirilgan.
+
+## Kesh tozalash animatsiyasi v4: real fizika (eshik, qopning chiqishi, yiqilish)
+
+`lib/widgets/trash_chick.dart`. Foydalanuvchi izohlari bo'yicha:
+* Eshik TASHQARIGA ochiladi (devor ustiga yotadi, orqa yuzi ko'rinadi); jo'ja eshik
+  o'yig'idan chuqurlik bilan chiqadi (`_S.depth < 0` — uy ichida: kichikroq, tepada,
+  devor orqasida chiziladi), ya'ni eshik orqasidan emas, eshikdan chiqadi.
+* Beton poydevor faqat devor ostida; eshik o'yig'ida yer bilan tekis ostona plitasi.
+* Katta qop (2 GB+) eshikdan old tomoni (yig'ilgan og'zi) bilan chiqadi (`_End`,
+  `_bagEnd`); bo'g'zi (`_neck`) qopdan qo'llargacha toraygan, burmali. Tortilgan tomonga
+  burilganda tik o'q atrofida aylanish proyeksiyasi: yon tanasi `sin`, og'iz tomoni `cos`
+  bilan — so'ng yonboshlab yotib sudraladi.
+* 5 GB+: jo'ja tovonlariga tayanib (`pivotR`) chiranadi; qop bo'shaganda havoga uchmaydi —
+  tovoni atrofida orqasiga ag'dariladi (teskari mayatnik, burchak ~u²), dumaloq orqasida
+  so'nuvchi chayqalib yotadi, ho'ngrab yig'laydi (keskin nafas, sekin chiqarish), zo'rg'a
+  o'tirib, yuzini bizga buradi, navbatma-navbat ko'zini ishqalaydi. Qop tortilgan tomonga
+  otilib chiqib, ishqalanish bilan to'xtaydi. Ko'z yoshi tomchilari erkin tushadi va
+  yerga tegib sachraydi (`_tearDrops`).
+* Orqa ko'rinish (`yaw < -1`): yuz qismlari bosh sirti bo'ylab chetga o'tib, tana
+  siluetiga qirqiladi; ikkala qo'l tana orqasida.
+* Otilgan qop — haqiqiy parabola, ozgina aylanadi; qo'ldagi qop qanot uchida mayatnikdek
+  tebranadi.
+Namuna videolar Dart kodining o'zidan (`flutter test` ichida `RepaintBoundary.toImage`)
+yozib olingan.
