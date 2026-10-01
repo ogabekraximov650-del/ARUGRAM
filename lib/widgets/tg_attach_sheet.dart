@@ -30,6 +30,7 @@ import 'dart:ui' as ui;
 import 'package:camera/camera.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:lottie/lottie.dart';
 import 'package:photo_manager/photo_manager.dart';
@@ -73,6 +74,59 @@ FilterOptionGroup _galleryFilter() => FilterOptionGroup(
       orders: [const OrderOption(type: OrderOptionType.createDate, asc: false)],
     );
 
+/// Galereyaning ZAXIRA yo'li (`MainActivity.kt` -> "aru/gallery").
+///
+/// TOPILGAN XATO (foydalanuvchi skrinshoti: "Galereyada rasm yoki video
+/// topilmadi (ruxsat: authorized, albomlar: 10)"): albomlar bor, lekin
+/// `photo_manager` elementlarni o'qiy olmaydi — u har qatorni
+/// `File(path).exists()` bilan tekshiradi va hamma ustunlarni majburiy
+/// o'qiydi; ba'zi telefonlarda (MIUI, scoped storage) shu yerda HAMMA qator
+/// tushib qoladi va ro'yxat jimgina bo'sh qaytadi. Zaxira yo'l MediaStore'ni
+/// o'zi, faqat kerakli ustunlar bilan o'qiydi; kichik rasm va faylning o'zi
+/// `content://` orqali olinadi (yo'l tekshirilmaydi).
+abstract final class _NativeGallery {
+  static const MethodChannel _ch = MethodChannel('aru/gallery');
+
+  /// Shu yo'l bilan olingan elementlar (kichik rasm va fayl ham shu yo'ldan).
+  static final Set<String> ids = {};
+
+  static Future<List<AssetEntity>> list(
+      int offset, int limit, String? bucket) async {
+    final r = await _ch.invokeListMethod<Map<dynamic, dynamic>>('list',
+            {'offset': offset, 'limit': limit, 'bucket': bucket}) ??
+        const [];
+    final out = <AssetEntity>[];
+    for (final m in r) {
+      final id = '${m['id']}';
+      final video = m['video'] == true;
+      out.add(AssetEntity(
+        id: id,
+        typeInt: video ? 2 : 1,
+        width: (m['w'] as num?)?.toInt() ?? 0,
+        height: (m['h'] as num?)?.toInt() ?? 0,
+        duration: ((m['dur'] as num?)?.toInt() ?? 0) ~/ 1000,
+        title: m['name'] as String?,
+        mimeType: m['mime'] as String?,
+        createDateSecond: (m['date'] as num?)?.toInt(),
+      ));
+      ids.add(id);
+    }
+    return out;
+  }
+
+  static Future<Uint8List?> thumb(AssetEntity e) => _ch.invokeMethod<Uint8List>(
+      'thumb', {'id': e.id, 'video': e.type == AssetType.video, 'size': 300});
+
+  static Future<File?> copy(AssetEntity e) async {
+    final p = await _ch.invokeMethod<String>('copy', {
+      'id': e.id,
+      'video': e.type == AssetType.video,
+      'name': e.title ?? e.id,
+    });
+    return p == null ? null : File(p);
+  }
+}
+
 abstract final class _C {
   static const bg = AppColors.card;
   static const hint = Color(0xFF8A939D);
@@ -105,6 +159,9 @@ class _AttachSheetState extends State<_AttachSheet>
   List<AssetPathEntity> _albums = [];
   AssetPathEntity? _album;
   final List<AssetEntity> _items = [];
+
+  /// `photo_manager` bo'sh qaytardi — zaxira yo'l (`_NativeGallery`) ishlatiladi.
+  bool _native = false;
   int _page = 0;
   bool _loading = false;
   bool _end = false;
@@ -319,22 +376,35 @@ class _AttachSheetState extends State<_AttachSheet>
 
   Future<void> _more() async {
     final a = _album;
-    if (a == null || _loading || _end) return;
+    if (_loading || _end) return;
     _loading = true;
-    List<AssetEntity> list;
+    var list = <AssetEntity>[];
     try {
-      list = await a.getAssetListPaged(page: _page, size: 60);
-    } catch (_) {
-      try {
-        // Sahifalash yiqilsa — oraliq bilan (boshqa native yo'l).
-        list = await a.getAssetListRange(
-            start: _items.length, end: _items.length + 60);
-      } catch (_) {
-        _loading = false;
-        rethrow;
+      if (!_native && a != null) {
+        try {
+          list = await a.getAssetListPaged(page: _page, size: 60);
+        } catch (_) {
+          try {
+            // Sahifalash yiqilsa — oraliq bilan (boshqa native yo'l).
+            list = await a.getAssetListRange(
+                start: _items.length, end: _items.length + 60);
+          } catch (_) {
+            list = [];
+          }
+        }
       }
+      // `photo_manager` birinchi sahifadayoq hech narsa bermadi (yoki albom
+      // ro'yxati umuman yo'q) — MediaStore'ni o'zimiz o'qiymiz.
+      if (!_native && list.isEmpty && _items.isEmpty) _native = true;
+      if (_native) {
+        list = await _NativeGallery.list(
+            _items.length, 60, a == null || a.isAll ? null : a.id);
+      }
+    } catch (e) {
+      _galleryError = '$e';
+    } finally {
+      _loading = false;
     }
-    _loading = false;
     if (!mounted) return;
     setState(() {
       _items.addAll(list);
@@ -426,7 +496,18 @@ class _AttachSheetState extends State<_AttachSheet>
     setState(() => _sending = true);
     final out = <TgAttachItem>[];
     for (final e in list) {
-      final f = await e.originFile ?? await e.file;
+      File? f;
+      try {
+        f = _NativeGallery.ids.contains(e.id)
+            ? await _NativeGallery.copy(e)
+            : (await e.originFile ?? await e.file);
+      } catch (_) {}
+      // `photo_manager` faylni topa olmasa — `content://` orqali nusxa.
+      if (f == null && !music) {
+        try {
+          f = await _NativeGallery.copy(e);
+        } catch (_) {}
+      }
       if (f == null) continue;
       final video = e.type == AssetType.video;
       out.add(TgAttachItem(f, music ? 'file' : (video ? 'video' : 'image'),
@@ -1451,6 +1532,13 @@ class _AssetTileState extends State<_AssetTile> {
   /// rasm chiqmaydi — shunda standart kichik rasm, u ham bo'lmasa
   /// videoning birinchi kadri so'raladi.
   static Future<Uint8List?> _load(AssetEntity e) async {
+    if (_NativeGallery.ids.contains(e.id)) {
+      try {
+        return await _NativeGallery.thumb(e);
+      } catch (_) {
+        return null;
+      }
+    }
     try {
       final a = await e.thumbnailDataWithSize(const ThumbnailSize.square(300),
           quality: 85);

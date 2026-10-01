@@ -4592,3 +4592,21 @@ qalinlik), avtomatik yasalgan. `trash_chick.dart`:
 * Lapanglab sakrab yurish, otishdan oldin cho'kish, otishda cho'zilish, "^^" xursandlik
   sakrashi; eshik 3D perspektivada ochiladi (ichkaridan yorug'lik), qopqoq sakrab yopiladi,
   chang (bitta qatlamda) va uchqunlar. 5.4 s, takrorlanadi.
+
+## Galereya bo'sh chiqishi va videoning o'ng chetidagi yashil chiziq
+
+* Galereya ("rasm yoki video topilmadi (ruxsat: authorized, albomlar: 10)"): albomlar
+  topiladi, lekin `photo_manager` elementlarni o'qiy olmaydi — u har qatorni
+  `File(path).exists()` bilan tekshiradi va hamma ustunlarni majburiy o'qiydi; ba'zi
+  telefonlarda hammasi jimgina tushib qoladi. Endi `photo_manager` birinchi sahifada bo'sh
+  qaytarsa `tg_attach_sheet.dart` zaxira yo'lga (`_NativeGallery`) o'tadi:
+  `MainActivity.kt` "aru/gallery" — `list` (MediaStore.Files, faqat kerakli ustunlar,
+  LIMIT'siz, kursor surib; albom = `bucket_id`), `thumb` (`loadThumbnail` / eski
+  `Thumbnails`), `copy` (`content://` dan `cacheDir/aru_picked/` ga nusxa;
+  `StorageJanitor.dropPicked` o'chiradi). `photo_manager` fayl bermasa ham nusxa shu yo'ldan.
+* Yashil chiziq: Android 10+ da Flutter video yuzasi `ImageReader` (`handlesCropAndRotation()
+  == false`) — dekoder kadr enini 32/64 ga yaxlitlaganda (360 -> 384) kesish e'tiborsiz
+  qoladi, o'ngda yashil bo'shliq, kadr siqiladi. `MainActivity.onCreate` da
+  `FlutterRenderer.debugForceSurfaceProducerGlTextures = true` — `SurfaceTexture` yo'li
+  kesish/burishni matritsa bilan qo'llaydi. Ilova Skia'da (Impeller o'chiq), shuning uchun
+  xavfsiz. Barcha videolarga (pleyer, chat, GIF, kesish oynasi) taalluqli.

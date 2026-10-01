@@ -65,6 +65,21 @@ class MainActivity : FlutterActivity() {
     //     `FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS` qo'yiladi (rang ishlashi uchun);
     //   * hammasi `onResume` va fokus qaytganda QAYTA qo'llanadi.
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
+        // ── VIDEONING CHETIDAGI YASHIL CHIZIQ ──────────────────────
+        //
+        // Foydalanuvchi: "bo'yiga cho'zilgan GIFda o'ng tomonda yashil
+        // chiziq paydo bo'lyapti". Sabab: Android 10+ da Flutter video
+        // yuzasini `ImageReader` orqali beradi va u dekoderning KESISH
+        // (crop) ma'lumotini e'tiborsiz qoldiradi
+        // (`handlesCropAndRotation() == false`). Apparat dekoder kadr enini
+        // 32/64 ga yaxlitlab chiqaradi (masalan 360 -> 384) — ortiqcha
+        // bo'sh joy yashil bo'lib, kadr esa siqilib ko'rinadi.
+        // `SurfaceTexture` yo'li kesish va burishni o'zgartirish matritsasi
+        // bilan to'g'ri qo'llaydi. Ilova Skia (OpenGL) da ishlaydi
+        // (Impeller o'chirilgan, build-flutter-apk.yml), ya'ni bu yo'l
+        // xavfsiz. Birinchi video yuzasi yaratilishidan OLDIN qo'yiladi.
+        io.flutter.embedding.engine.renderer.FlutterRenderer
+            .debugForceSurfaceProducerGlTextures = true
         super.onCreate(savedInstanceState)
         applyEdgeToEdge()
     }
@@ -285,6 +300,59 @@ class MainActivity : FlutterActivity() {
         // `flutter_windowmanager` esa uzoq vaqtdan beri
         // yangilanmagan va Gradle yangilanishlarida yiqiladi
         // (yuqoridagi `video_thumbnail` bilan bir xil dard).
+        // ── GALEREYA: ZAXIRA YO'L (MediaStore'dan to'g'ridan-to'g'ri) ──
+        //
+        // Foydalanuvchi: biriktirish oynasida "Galereyada rasm yoki video
+        // topilmadi (ruxsat: authorized, albomlar: 10)". Albomlar topiladi,
+        // lekin `photo_manager` elementlarni o'qiy olmaydi: u har qatorni
+        // `File(path).exists()` bilan tekshiradi va barcha ustunlarni
+        // (`orientation`, `datetaken`, ...) majburiy o'qiydi — ba'zi
+        // telefonlarda (MIUI, scoped storage) shu yerda hammasi tushib qoladi.
+        // Bu kanal faqat kerakli ustunlarni, `LIMIT`siz (kursorni o'zimiz
+        // suramiz) o'qiydi; kichik rasm va fayl nusxasi `content://` orqali.
+        // Ilova faqat `photo_manager` bo'sh qaytarganda shu yerga o'tadi.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "aru/gallery")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "list" -> {
+                        val offset = call.argument<Int>("offset") ?: 0
+                        val limit = call.argument<Int>("limit") ?: 60
+                        val bucket = call.argument<String>("bucket")
+                        Thread {
+                            try {
+                                val list = galleryList(offset, limit, bucket)
+                                runOnUiThread { result.success(list) }
+                            } catch (e: Throwable) {
+                                runOnUiThread { result.error("list", e.toString(), null) }
+                            }
+                        }.start()
+                    }
+                    "thumb" -> {
+                        val id = (call.argument<Any>("id") ?: "0").toString().toLongOrNull() ?: 0L
+                        val video = call.argument<Boolean>("video") ?: false
+                        val size = call.argument<Int>("size") ?: 300
+                        Thread {
+                            val bytes = try { galleryThumb(id, video, size) } catch (e: Throwable) { null }
+                            runOnUiThread { result.success(bytes) }
+                        }.start()
+                    }
+                    "copy" -> {
+                        val id = (call.argument<Any>("id") ?: "0").toString().toLongOrNull() ?: 0L
+                        val video = call.argument<Boolean>("video") ?: false
+                        val name = call.argument<String>("name") ?: "file"
+                        Thread {
+                            try {
+                                val path = galleryCopy(id, video, name)
+                                runOnUiThread { result.success(path) }
+                            } catch (e: Throwable) {
+                                runOnUiThread { result.error("copy", e.toString(), null) }
+                            }
+                        }.start()
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "aru/secure")
             .setMethodCallHandler { call, result ->
                 when (call.method) {
@@ -322,6 +390,97 @@ class MainActivity : FlutterActivity() {
         // `aru/storage` kanali ham bor edi; profil sahifasidan
         // "telefon xotirasi N% band" qatori olib tashlangach
         // (foydalanuvchi talabi) u ham keraksiz bo'lib qoldi.
+    }
+
+    // ── GALEREYA YORDAMCHILARI ("aru/gallery") ──────────────────
+
+    private fun mediaUri(id: Long, video: Boolean): android.net.Uri =
+        android.content.ContentUris.withAppendedId(
+            if (video) android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+            else android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            id
+        )
+
+    /// Rasm va videolar, yangisi birinchi. Ustun bo'lmasa (eski/o'zgartirilgan
+    /// MediaStore) — shu maydon shunchaki 0 bo'ladi, qator tashlanmaydi.
+    private fun galleryList(offset: Int, limit: Int, bucket: String?): List<Map<String, Any?>> {
+        val uri = android.provider.MediaStore.Files.getContentUri("external")
+        val type = android.provider.MediaStore.Files.FileColumns.MEDIA_TYPE
+        val image = android.provider.MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE
+        val video = android.provider.MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO
+        var sel = "($type=$image OR $type=$video)"
+        val args = ArrayList<String>()
+        if (!bucket.isNullOrEmpty()) {
+            sel += " AND bucket_id=?"
+            args.add(bucket)
+        }
+        val full = arrayOf("_id", type, "mime_type", "date_added", "width", "height",
+            "duration", "_display_name")
+        val cursor = try {
+            contentResolver.query(uri, full, sel, args.toTypedArray(), "date_added DESC")
+        } catch (e: Throwable) {
+            // `duration` ustuni yo'q MediaStore — usiz.
+            contentResolver.query(uri, full.filter { it != "duration" }.toTypedArray(),
+                sel, args.toTypedArray(), "date_added DESC")
+        }
+        val out = ArrayList<Map<String, Any?>>()
+        cursor?.use { c ->
+            fun col(n: String) = c.getColumnIndex(n)
+            val iId = col("_id"); val iType = col(type); val iMime = col("mime_type")
+            val iDate = col("date_added"); val iW = col("width"); val iH = col("height")
+            val iDur = col("duration"); val iName = col("_display_name")
+            if (offset > 0 && !c.moveToPosition(offset - 1)) return out
+            while (out.size < limit && c.moveToNext()) {
+                try {
+                    val isVideo = iType >= 0 && c.getInt(iType) == video
+                    out.add(mapOf(
+                        "id" to c.getLong(iId).toString(),
+                        "video" to isVideo,
+                        "mime" to (if (iMime >= 0) c.getString(iMime) else null),
+                        "date" to (if (iDate >= 0) c.getLong(iDate) else 0L),
+                        "w" to (if (iW >= 0) c.getInt(iW) else 0),
+                        "h" to (if (iH >= 0) c.getInt(iH) else 0),
+                        "dur" to (if (iDur >= 0 && isVideo) c.getLong(iDur) else 0L),
+                        "name" to (if (iName >= 0) c.getString(iName) else null),
+                    ))
+                } catch (e: Throwable) {
+                    // buzuq qator — o'tkazib yuboriladi, qolganlari chiqadi
+                }
+            }
+        }
+        return out
+    }
+
+    private fun galleryThumb(id: Long, video: Boolean, size: Int): ByteArray? {
+        val bmp: Bitmap? = if (Build.VERSION.SDK_INT >= 29) {
+            contentResolver.loadThumbnail(mediaUri(id, video), android.util.Size(size, size), null)
+        } else if (video) {
+            @Suppress("DEPRECATION")
+            android.provider.MediaStore.Video.Thumbnails.getThumbnail(
+                contentResolver, id, android.provider.MediaStore.Video.Thumbnails.MINI_KIND, null)
+        } else {
+            @Suppress("DEPRECATION")
+            android.provider.MediaStore.Images.Thumbnails.getThumbnail(
+                contentResolver, id, android.provider.MediaStore.Images.Thumbnails.MINI_KIND, null)
+        }
+        if (bmp == null) return null
+        val out = ByteArrayOutputStream()
+        bmp.compress(Bitmap.CompressFormat.JPEG, 85, out)
+        return out.toByteArray()
+    }
+
+    /// Tanlangan faylning nusxasi (ilova keshida; yuklash tugagach
+    /// `StorageJanitor.dropPicked` o'chiradi).
+    private fun galleryCopy(id: Long, video: Boolean, name: String): String {
+        val safe = name.replace(Regex("[^A-Za-z0-9._-]"), "_").takeLast(80)
+        val dir = java.io.File(cacheDir, "aru_picked")
+        dir.mkdirs()
+        val dst = java.io.File(dir, "${id}_$safe")
+        contentResolver.openInputStream(mediaUri(id, video)).use { input ->
+            if (input == null) throw IllegalStateException("fayl ochilmadi")
+            java.io.FileOutputStream(dst).use { input.copyTo(it) }
+        }
+        return dst.absolutePath
     }
 
     private fun navBottomPx(): Int {
