@@ -457,8 +457,11 @@ class _CacheChartState extends State<_CacheChart>
   /// Bo'laklar siljishi, kattalashishi va kichrayib yo'qolishi: sekin va
   /// yumshoq (650 ms -> 1200 ms ham tez ko'rindi; foydalanuvchi talabi bilan
   /// 2200 ms).
+  /// `preserve` — tizim animatsiyalari o'chiq telefonda ham sekin qoladi.
   late final AnimationController _move = AnimationController(
-      vsync: this, duration: const Duration(milliseconds: 3200))
+      vsync: this,
+      duration: const Duration(milliseconds: 3200),
+      animationBehavior: AnimationBehavior.preserve)
     ..value = 1;
 
   /// Bosilgan bo'lak 9 px ga kattalashadi (200 ms).

@@ -4650,3 +4650,16 @@ hajmga qarab silliq o'sadi (`_bagSize`). Prototip brauzerda yasalib, Dart'ga ko'
   tebranadi.
 Namuna videolar Dart kodining o'zidan (`flutter test` ichida `RepaintBoundary.toImage`)
 yozib olingan.
+
+## Tizim animatsiyalari o'chiq telefonda: emoji/stiker to'xtab qolishi va jo'ja tez o'tishi
+
+Telefonda "Animatsiya ko'lami: o'chiq" (dasturchi sozlamasi, ba'zi quvvat tejash
+rejimlari) bo'lsa Flutter `disableAnimations = true` qiladi:
+* `Image` animatsiyali WebP/GIF ni birinchi kadrda to'xtatadi (`widgets/image.dart`,
+  `MediaQuery.maybeDisableAnimationsOf`) — emoji va stikerlar qimirlamaydi. To'plam
+  GIF'lari ovozli MP4 (`VideoPlayer`) bo'lgani uchun ishlayveradi.
+* `AnimationController` (`AnimationBehavior.normal`) davomiylikni 0.05 ga ko'paytiradi —
+  13.5 s lik jo'ja ~0.7 s da o'tib ketadi, halqa ham.
+Yechim: `main.dart` `builder` da `MediaQuery.disableAnimations` har doim `false`;
+`trash_chick.dart` va `storage_screen.dart` (`_move`) kontrollerlari
+`AnimationBehavior.preserve`.

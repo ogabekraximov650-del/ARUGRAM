@@ -52,8 +52,12 @@ class TrashChickAnimation extends StatefulWidget {
 
 class _TrashChickAnimationState extends State<TrashChickAnimation>
     with SingleTickerProviderStateMixin {
+  // `preserve`: telefonda tizim animatsiyalari o'chiq bo'lsa ham Flutter
+  // davomiylikni 20 barobar qisqartirmasin (jo'ja ko'z ilg'amas tez o'tardi).
   late final AnimationController _c = AnimationController(
-      vsync: this, duration: TrashChickAnimation.durationFor(widget.bytes))
+      vsync: this,
+      duration: TrashChickAnimation.durationFor(widget.bytes),
+      animationBehavior: AnimationBehavior.preserve)
     ..forward();
 
   @override

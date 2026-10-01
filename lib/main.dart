@@ -295,13 +295,23 @@ class FulutterApp extends StatelessWidget {
       builder: (context, child) => AnimatedBuilder(
         animation: Listenable.merge([NavInset.px, NavInset.immersive]),
         builder: (context, _) {
-          final mq = MediaQuery.of(context);
+          // Telefonda tizim animatsiyalari o'chirilgan bo'lsa (dasturchi
+          // sozlamasi "Animatsiya ko'lami: o'chiq" yoki quvvat tejash),
+          // Flutter `disableAnimations` ni yoqadi va `Image` animatsiyali
+          // WebP (emoji, stiker) ni birinchi kadrda to'xtatib qo'yadi.
+          // Ilova — media ilova: emoji/stiker doim harakatlansin.
+          final sys = MediaQuery.of(context);
+          final mq = sys.disableAnimations
+              ? sys.copyWith(disableAnimations: false)
+              : sys;
           final dpr = mq.devicePixelRatio <= 0 ? 1.0 : mq.devicePixelRatio;
           final floor = NavInset.px.value / dpr;
           if (floor <= 0 ||
               NavInset.immersive.value ||
               mq.orientation == Orientation.landscape) {
-            return child!;
+            return identical(mq, sys)
+                ? child!
+                : MediaQuery(data: mq, child: child!);
           }
           final vp = mq.viewPadding.bottom > floor ? mq.viewPadding.bottom : floor;
           // Klaviatura ochiq — pastki chekinishni u egallaydi.
