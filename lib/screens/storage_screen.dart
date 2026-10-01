@@ -185,10 +185,10 @@ class _StorageScreenState extends State<StorageScreen> {
     );
     if (ok != true || !mounted) return;
 
-    // TALAB (foydalanuvchi): "Tozalash tugmasini bosganda Telegram'dagidek
-    // jo'ja supurgida supurayotgan animatsiyasi chiqsin". Parda DARHOL
-    // chiqadi va tozalash tez tugasa ham animatsiya ko'rinib ulgurishi
-    // uchun kamida 3.5 soniya turadi (foiz shu vaqtda tekis o'sadi).
+    // TALAB (foydalanuvchi): tozalashda jo'ja chiqindini qutiga tashlaydi —
+    // sahna chiqindi HAJMIGA qarab (`TrashChickAnimation`). Parda DARHOL
+    // chiqadi va animatsiya oxirigacha ko'rinadi: foiz chizig'i va halqa
+    // jo'ja bilan bir xil sur'atda, sekin o'sadi.
     final progress = ValueNotifier<double>(0);
     var done = false;
     var shownAt = -1;
@@ -211,7 +211,7 @@ class _StorageScreenState extends State<StorageScreen> {
             borderRadius: BorderRadius.vertical(top: Radius.circular(12))),
         builder: (_) => PopScope(
           canPop: false,
-          child: _ClearingView(progress: progress),
+          child: _ClearingView(progress: progress, bytes: size),
         ),
       ).whenComplete(() {
         if (!sheetClosed.isCompleted) sheetClosed.complete();
@@ -221,7 +221,7 @@ class _StorageScreenState extends State<StorageScreen> {
     // Foiz haqiqiy ishga emas, vaqtga bog'langan (tekis o'sadi): tozalash tez
     // tugasa ham animatsiya va foiz sekin, ko'rinib ulgurib ketadi. Ish
     // tugamagan bo'lsa 95% da kutadi.
-    const minMs = 3500;
+    final minMs = TrashChickAnimation.durationFor(size).inMilliseconds;
     final sw = Stopwatch()..start();
     final tick = Timer.periodic(const Duration(milliseconds: 50), (_) {
       final r = sw.elapsedMilliseconds / minMs;
@@ -458,7 +458,7 @@ class _CacheChartState extends State<_CacheChart>
   /// yumshoq (650 ms -> 1200 ms ham tez ko'rindi; foydalanuvchi talabi bilan
   /// 2200 ms).
   late final AnimationController _move = AnimationController(
-      vsync: this, duration: const Duration(milliseconds: 2200))
+      vsync: this, duration: const Duration(milliseconds: 3200))
     ..value = 1;
 
   /// Bosilgan bo'lak 9 px ga kattalashadi (200 ms).
@@ -1280,7 +1280,10 @@ class _InfoCell extends StatelessWidget {
 class _ClearingView extends StatelessWidget {
   final ValueNotifier<double> progress;
 
-  const _ClearingView({required this.progress});
+  /// Tozalanayotgan hajm — jo'ja sahnasi shunga qarab.
+  final int bytes;
+
+  const _ClearingView({required this.progress, required this.bytes});
 
   @override
   Widget build(BuildContext context) {
@@ -1298,9 +1301,13 @@ class _ClearingView extends StatelessWidget {
             return Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // Jo'ja eshikni ochib chiqadi va axlat qopini qutiga
-                // tashlaydi (asl Telegram jo'jasi `utyan`; `trash_chick.dart`).
-                const TrashChickAnimation(width: 260, height: 170),
+                // Jo'ja eshikdan chiqib chiqindini qutiga tashlaydi — hajmga
+                // qarab (asl Telegram jo'jasi `utyan`; `trash_chick.dart`).
+                TrashChickAnimation(
+                  bytes: bytes,
+                  width: math.min(MediaQuery.sizeOf(context).width - 24, 440),
+                  height: math.min(MediaQuery.sizeOf(context).width - 24, 440) / 2,
+                ),
                 const SizedBox(height: 10),
                 SizedBox(
                   height: 32,

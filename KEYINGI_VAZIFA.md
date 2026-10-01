@@ -4610,3 +4610,19 @@ qalinlik), avtomatik yasalgan. `trash_chick.dart`:
   `FlutterRenderer.debugForceSurfaceProducerGlTextures = true` — `SurfaceTexture` yo'li
   kesish/burishni matritsa bilan qo'llaydi. Ilova Skia'da (Impeller o'chiq), shuning uchun
   xavfsiz. Barcha videolarga (pleyer, chat, GIF, kesish oynasi) taalluqli.
+
+## Kesh tozalash animatsiyasi v3: hajmga qarab 4 sahna, uy, panjara, qanotsimon qo'llar
+
+`lib/widgets/trash_chick.dart` (`TrashChickAnimation(bytes: ...)`), bir marta o'ynaydi;
+uzunligi `TrashChickAnimation.durationFor(bytes)` — `storage_screen.dart` foiz chizig'i shu
+vaqtga bog'langan (halqa ham sekinroq: 3200 ms). Sahna: chapda uy burchagi (tom, devor,
+eshik), o'ng chetgacha yog'och panjara, og'zi doim ochiq quti; hammasi kichik, yo'l uzun.
+* < 500 MB — eshikdan chiqmaydi: o'zining chap qo'li bilan ramkaning o'ziga nisbatan chap
+  tomonini (bizga o'ng ustun) ushlab, o'ng-chapga mo'ralaydi, o'ng qo'li bilan otadi.
+* 500 MB – 2 GB — qanot uchida osilgan qopni qutigacha olib borib tashlaydi.
+* 2 – 5 GB — qop qutidan katta: to'liq yotgan holda, uchidagi tugunidan ikki qo'llab,
+  orqasi bilan yurib qiynalib sudraydi, qutining yoniga qo'yadi, terini artadi.
+* 5 GB+ — qop eshikka tiqiladi, chiranadi, otilib chiqadi, jo'ja orqaga uchib o'tirib
+  qoladi, ikki qo'li bilan ko'zini ishqalab yig'laydi, yig'lab sudrab boradi va qaytadi.
+Qo'llar — har biri alohida, kalta, qanotsimon (asl jo'ja qo'llari kabi). Qop o'lchami
+hajmga qarab silliq o'sadi (`_bagSize`). Prototip brauzerda yasalib, Dart'ga ko'chirilgan.
