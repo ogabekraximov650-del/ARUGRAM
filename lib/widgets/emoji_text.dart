@@ -53,7 +53,6 @@
 // (grapheme cluster) bo'yicha ajratadi — ya'ni emoji hech qachon
 // o'rtasidan kesilmaydi. Paket allaqachon bog'liqliklar ichida.
 
-import 'package:characters/characters.dart';
 import 'package:flutter/material.dart';
 
 import '../services/pack_service.dart';

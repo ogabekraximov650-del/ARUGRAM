@@ -6916,12 +6916,10 @@ class _QualityRow extends StatelessWidget {
 class _MiniIconButton extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
-  final bool highlighted;
 
   const _MiniIconButton({
     required this.icon,
     required this.onTap,
-    this.highlighted = false,
   });
 
   @override
@@ -6935,13 +6933,10 @@ class _MiniIconButton extends StatelessWidget {
         width: 44,
         height: 44,
         decoration: BoxDecoration(
-          color: highlighted
-              ? AppColors.accent.withValues(alpha: 0.22)
-              : Colors.white.withValues(alpha: 0.08),
+          color: Colors.white.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(12),
         ),
-        child: Icon(icon,
-            size: 23, color: highlighted ? AppColors.accent : Colors.white70),
+        child: Icon(icon, size: 23, color: Colors.white70),
       ),
     );
   }

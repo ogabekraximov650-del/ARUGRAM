@@ -1,0 +1,7 @@
+# `packages/video_player_android/pigeons/` — faqat kod generatori manbasi
+# (`pigeon` paketi kerak, ilova yig'ilishida ishtirok etmaydi): tahlil
+# uni o'qisa xato chiqaradi.
+analyzer:
+  exclude:
+    - packages/video_player_android/pigeons/**
+    - build/**

@@ -283,7 +283,7 @@ class _PackImageState extends State<PackImage> implements AnimSlotOwner {
   void didChangeDependencies() {
     super.didChangeDependencies();
     _screen = MediaQuery.sizeOf(context);
-    final on = TickerMode.of(context);
+    final on = TickerMode.valuesOf(context).enabled;
     if (on != _tickerOn) {
       _tickerOn = on;
       WidgetsBinding.instance.addPostFrameCallback((_) => _recheck());

@@ -25,6 +25,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/services.dart';
 import 'package:lottie/lottie.dart';
 
@@ -977,7 +978,7 @@ class _SectionsState extends State<_Sections> {
             controller: _scroll,
             // Faqat ekrandagi (va uning chetidagi bir qator) kataklar
             // quriladi va yuklanadi — ko'rinmagani yuklanmaydi.
-            cacheExtent: cell,
+            scrollCacheExtent: ScrollCacheExtent.pixels(cell),
             slivers: [
               // Tepadagi qator egallagan joy.
               if (widget.tabs != null)

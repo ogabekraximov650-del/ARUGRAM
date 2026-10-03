@@ -7,7 +7,6 @@ import 'dart:convert';
 import '../theme/app_background.dart';
 import '../widgets/glass.dart';
 import 'add_epizod_screen.dart';
-import '../services/api_base.dart';
 import '../services/auth_service.dart';
 
 const String _apiBase = kApiBase;
