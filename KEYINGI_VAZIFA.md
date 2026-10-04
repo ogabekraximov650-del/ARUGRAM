@@ -4833,3 +4833,20 @@ ham ko'rsatilsin".
   ("Worker orqali", sariq). GitHub qadamlari 30 s da, navbat — qism
   almashganda. Worker `/api/encode/live` endi `log_chat` va `data` ham
   beradi.
+
+## Pullik belgisi hamma kartochkada; bepul/pullik — faqat ko'rinadigan qismlar bo'yicha (2026-10)
+
+- `lib/widgets/paid_badge.dart`: `PaidBadge` (oltin toj + "Pullik", `compact` —
+  faqat toj) va `PaidMark` (bo'lim pullik bo'lsa belgi). Ishlatiladi:
+  `SeasonCard` (bosh sahifa, katalog, sevimlilar, statistika — belgilar
+  o'chiq kartochkada ham), qidiruv, pleyerdagi bo'limlar ro'yxati, tarix
+  (`AnimeRow`, `EpisodeRow`), yuklanmalar (bo'lim kartasi va qism qatori),
+  izohlar statistikasidagi poster. `seasonIsPaid` ma'lumot yo'q bo'lsa
+  `false` (ilova bilgan bo'limlar: `/api/seasons` dagi 200 ta + `free`
+  maydoni kelgan obyektlar).
+- `free_seasons` (worker): faqat ILOVADA KO'RINADIGAN qismlar sanaladi —
+  kodlangan sifati (`url_*`) bor yoki kalitli asl video (`origin_key` 32
+  belgi). Kalitsiz, hali kodlanmagan asl video (kodlash boti) bo'limni pullik
+  qilmaydi. Qism ko'rinadigan bo'lganda (`/api/epizods` qo'shish/tahrir,
+  `encode/quality`, kalitli `encode/queue`) `free_seasons_forget` keshni
+  tozalaydi (izolyat + shu data markaz; boshqalarida 10 daqiqagacha).

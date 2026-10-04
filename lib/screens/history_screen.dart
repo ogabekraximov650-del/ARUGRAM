@@ -45,6 +45,7 @@ import '../services/offline_library.dart';
 import '../services/watch_history.dart';
 import '../theme/app_background.dart';
 import '../widgets/glass.dart';
+import '../widgets/paid_badge.dart';
 import 'video_player_screen.dart';
 
 // ── UMUMIY YORDAMCHILAR ───────────────────────────────────────
@@ -614,6 +615,12 @@ class _DownloadRow extends StatelessWidget {
                             )
                           else
                             Container(color: AppColors.cardAlt),
+                          Positioned(
+                            top: 5,
+                            right: 5,
+                            child: PaidMark.ids(item.animeId, item.seasonId,
+                                compact: true),
+                          ),
                           if (h != null)
                             Positioned(
                               left: 6,
@@ -958,20 +965,31 @@ class _DownloadAnimeCard extends StatelessWidget {
               borderRadius: BorderRadius.circular(12),
               child: AspectRatio(
                 aspectRatio: 16 / 9,
-                child: h != null
-                    ? _Frame(item: h)
-                    : first.poster.isNotEmpty
-                        ? CachedNetworkImage(
-                            cacheManager: AppImageCache.manager,
-                            imageUrl: first.poster,
-                            fit: BoxFit.cover,
-                            memCacheWidth: 720,
-                            placeholder: (_, __) =>
-                                Container(color: AppColors.cardAlt),
-                            errorWidget: (_, __, ___) =>
-                                Container(color: AppColors.cardAlt),
-                          )
-                        : Container(color: AppColors.cardAlt),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    if (h != null)
+                      _Frame(item: h)
+                    else if (first.poster.isNotEmpty)
+                      CachedNetworkImage(
+                        cacheManager: AppImageCache.manager,
+                        imageUrl: first.poster,
+                        fit: BoxFit.cover,
+                        memCacheWidth: 720,
+                        placeholder: (_, __) =>
+                            Container(color: AppColors.cardAlt),
+                        errorWidget: (_, __, ___) =>
+                            Container(color: AppColors.cardAlt),
+                      )
+                    else
+                      Container(color: AppColors.cardAlt),
+                    Positioned(
+                      top: 8,
+                      right: 8,
+                      child: PaidMark.ids(first.animeId, first.seasonId),
+                    ),
+                  ],
+                ),
               ),
             ),
             const SizedBox(height: 10),
@@ -1878,7 +1896,17 @@ class AnimeRow extends StatelessWidget {
               borderRadius: BorderRadius.circular(12),
               child: AspectRatio(
                 aspectRatio: 16 / 9,
-                child: _Frame(item: item),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    _Frame(item: item),
+                    Positioned(
+                      top: 8,
+                      right: 8,
+                      child: PaidMark.ids(item.animeId, item.seasonId),
+                    ),
+                  ],
+                ),
               ),
             ),
             const SizedBox(height: 10),
@@ -1970,6 +1998,11 @@ class EpisodeRow extends StatelessWidget {
             fit: StackFit.expand,
             children: [
               if (readOnly) _Poster(url: item.poster) else _Frame(item: item),
+              Positioned(
+                top: 8,
+                right: 8,
+                child: PaidMark.ids(item.animeId, item.seasonId),
+              ),
 
               // ── YOZUVLAR ────────────────────────────────────
               //

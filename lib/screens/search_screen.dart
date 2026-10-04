@@ -3,6 +3,7 @@ import '../services/image_cache.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../widgets/glass.dart';
+import '../widgets/paid_badge.dart';
 import '../services/rust_bridge.dart';
 import 'anime_detail_screen.dart';
 import '../services/api_base.dart';
@@ -230,12 +231,19 @@ class _SeasonSearchCard extends StatelessWidget {
                   ),
                   color: Colors.white.withValues(alpha: 0.10),
                 ),
-                child: (season['photo_url'] == null ||
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    if (season['photo_url'] == null ||
                         (season['photo_url'] as String).isEmpty)
-                    ? const Center(
-                        child: Icon(Icons.movie_creation_outlined,
-                            size: 40, color: Colors.white70))
-                    : null,
+                      const Center(
+                          child: Icon(Icons.movie_creation_outlined,
+                              size: 40, color: Colors.white70)),
+                    // "Pullik" belgisi (`paid_badge.dart`).
+                    Positioned(
+                        top: 8, right: 8, child: PaidMark(season: season)),
+                  ],
+                ),
               ),
             ),
             Padding(

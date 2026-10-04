@@ -139,6 +139,7 @@ import '../theme/app_background.dart';
 import 'billing_screen.dart';
 import '../widgets/glass.dart';
 import '../widgets/comments_tab.dart';
+import '../widgets/paid_badge.dart';
 import '../widgets/pack_views.dart' show PackSoundHub;
 import '../services/api_base.dart';
 
@@ -6311,8 +6312,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                     ],
                   ),
                 ),
-                if (isCur)
+                PaidMark(season: s),
+                if (isCur) ...[
+                  const SizedBox(width: 6),
                   Icon(Icons.play_arrow_rounded, color: AppColors.accent),
+                ],
               ],
             ),
           ),

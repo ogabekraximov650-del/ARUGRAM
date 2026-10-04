@@ -5442,8 +5442,17 @@ async fn free_seasons(env: &Env) -> std::collections::HashSet<(i64, i64)> {
         FREE_SEASONS_CACHE.with(|c| *c.borrow_mut() = Some((now, v.clone())));
         return v;
     }
+    // FAQAT ILOVADA KO'RINADIGAN qismlar sanaladi (foydalanuvchi talabi:
+    // "bo'limga shifrlangan, ya'ni ilovada ko'rinadigan qism joylanishi
+    // bilan pullik bo'ladi"): kodlangan sifati bor yoki kalitli (shifrlangan)
+    // asl video. Hali kodlanmagan, kalitsiz asl video (kodlash botidan
+    // kelgan, navbatda turgan) bo'limni pullik qilmaydi — u ilovada
+    // ko'rinmaydi (`episode_ready`, `with_encrypted_origin`).
     let res = turso_exec(env,
         "SELECT anime_id, season_id FROM epizod_db
+          WHERE COALESCE(url_360p,'')<>'' OR COALESCE(url_480p,'')<>''
+             OR COALESCE(url_720p,'')<>'' OR COALESCE(url_1080p,'')<>''
+             OR (COALESCE(origin_video,'')<>'' AND LENGTH(COALESCE(origin_key,''))=32)
           GROUP BY anime_id, season_id
           ORDER BY MAX(COALESCE(created_at,0)) ASC, anime_id ASC, season_id ASC",
         vec![]).await;
@@ -5460,6 +5469,16 @@ async fn free_seasons(env: &Env) -> std::collections::HashSet<(i64, i64)> {
     FREE_SEASONS_CACHE.with(|c| *c.borrow_mut() = Some((now, free.clone())));
     free_seasons_edge_put(&free).await;
     free
+}
+
+/// Qism ko'rinadigan bo'ldi (yangi qism, kodlangan sifat, shifrlangan asl
+/// video) — bepul/pullik ro'yxati DARHOL qayta hisoblansin: izolyat
+/// xotirasi va shu data markazdagi Cloudflare keshi tozalanadi. (Boshqa
+/// data markazlarda kesh muddati — 10 daqiqagacha — tugaguncha eski
+/// ro'yxat turishi mumkin.)
+async fn free_seasons_forget() {
+    FREE_SEASONS_CACHE.with(|c| *c.borrow_mut() = None);
+    let _ = Cache::default().delete(FREE_SEASONS_EDGE_URL, false).await;
 }
 
 /// Bo'lim obyektlariga `free` (bepulmi) maydonini qo'shadi.
@@ -10215,6 +10234,10 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
              vec![TursoArg::text(&okey), TursoArg::text(&okey),
                   TursoArg::int(a), TursoArg::int(s), TursoArg::int(e), TursoArg::text(&origin)]),
         ]).await?;
+        // Kalitli asl video — qism ilovada darhol ko'rinadi.
+        if !okey.is_empty() {
+            free_seasons_forget().await;
+        }
         let n = turso_exec(env,
             "SELECT COUNT(*) AS n FROM encode_jobs WHERE state IN ('queued','running')", vec![]).await?;
         let n = first_row(&n).and_then(|r| r["n"].as_i64()).unwrap_or(1);
@@ -10538,6 +10561,8 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
             ("UPDATE encode_jobs SET done=?, lease_until=MAX(lease_until, ?)
                WHERE anime_id=? AND season_id=? AND epizod_id=? AND queued_at=?", jargs),
         ]).await?;
+        // Birinchi kodlangan sifat — qism endi ilovada ko'rinadi.
+        free_seasons_forget().await;
         // Eski (almashtirilgan) Telegram fayli kanaldan o'chadi.
         let old = bare_name(&old);
         if !old.is_empty() && old != file {
@@ -12311,6 +12336,7 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
                  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING *",
                 args,
             ).await?;
+            free_seasons_forget().await;
             let cols = res["cols"].as_array().cloned().unwrap_or_default();
             let rows = res["rows"].as_array().cloned().unwrap_or_default();
             if rows.is_empty() { return err500("Epizod qo'shib bo'lmadi"); }
@@ -12432,6 +12458,7 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
                                  WHERE anime_id=? AND season_id=? AND epizod_id=? RETURNING *"),
                                 args,
                             ).await?;
+                            free_seasons_forget().await;
                             let cols = res["cols"].as_array().cloned().unwrap_or_default();
                             let rows = res["rows"].as_array().cloned().unwrap_or_default();
                             if rows.is_empty() { return err500("Yangilashda xato"); }

@@ -40,6 +40,7 @@ import '../services/watch_history.dart';
 import '../theme/app_background.dart';
 import '../widgets/glass.dart';
 import '../widgets/poster_image.dart';
+import '../widgets/paid_badge.dart';
 import 'history_screen.dart';
 import 'home_screen.dart';
 
@@ -339,7 +340,18 @@ class _CommentRowState extends State<_CommentRow> {
                   child: SizedBox(
                     width: 62,
                     height: 88,
-                    child: PosterImage(url: photo),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        PosterImage(url: photo),
+                        Positioned(
+                          top: 4,
+                          right: 4,
+                          child: PaidMark.ids(_animeId, _seasonId,
+                              compact: true),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
