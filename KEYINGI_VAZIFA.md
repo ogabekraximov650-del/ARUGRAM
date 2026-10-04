@@ -4769,9 +4769,9 @@ yuklanyapti".
 - `free_seasons` (worker) butun `epizod_db` ni GROUP BY bilan o'qiydi va
   natija faqat bitta izolyatda 60 s turardi — bo'limlar ro'yxati, bo'lim
   oynasi va obunasiz odamning HAR BIR `/api/tg/deliver` so'rovi ko'pincha
-  shu og'ir so'rovni kutardi. Endi Cloudflare Cache API'da 5 daqiqa
+  shu og'ir so'rovni kutardi. Endi Cloudflare Cache API'da 10 daqiqa
   (`FREE_SEASONS_EDGE_URL`) + izolyatda 2 daqiqa. Yangi qism qo'shilganda
-  bepul ro'yxat 5 daqiqagacha kechikib yangilanadi.
+  bepul ro'yxat 10 daqiqagacha kechikib yangilanadi.
 - `seasonIsFree` (ilova) obunasiz odamda pleyerning har chizishida butun
   bo'limlar ro'yxatini aylanardi — endi indeks (`_freeIndex`).
 - `ChannelGate`: ruxsat berilgan zahoti (pleyer endi ochilayotganda)

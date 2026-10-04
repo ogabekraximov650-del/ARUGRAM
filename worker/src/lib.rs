@@ -5395,10 +5395,10 @@ async fn desk_diagnosis(env: &Env) -> Option<String> {
 // HAR BIR video nusxasi (`/api/tg/deliver`, obunasiz odamda) ko'pincha
 // shu og'ir so'rovni kutardi (va har safar hamma qatorni o'qib, pul
 // sarflardi). Endi natija Cloudflare keshida (Cache API, butun data
-// markaz uchun bitta) 5 daqiqa, izolyat xotirasida esa 2 daqiqa turadi.
+// markaz uchun bitta) 10 daqiqa, izolyat xotirasida esa 2 daqiqa turadi.
 
 const FREE_SEASONS_TTL_MS: i64 = 120_000;
-const FREE_SEASONS_EDGE_SECS: u32 = 300;
+const FREE_SEASONS_EDGE_SECS: u32 = 600;
 const FREE_SEASONS_EDGE_URL: &str = "https://arugram-free-seasons.internal/v1";
 
 thread_local! {
