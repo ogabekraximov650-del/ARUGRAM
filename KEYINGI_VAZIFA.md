@@ -4777,3 +4777,33 @@ yuklanyapti".
 - `ChannelGate`: ruxsat berilgan zahoti (pleyer endi ochilayotganda)
   kanallarga qo'shilish boshlanib, video bilan Telegram ulanishini
   talashardi — birinchi aylanish 45 s keyin (`_firstDelay`).
+
+## Admin: kodlash navbati va jonli log — bazaga yozuvsiz (2026-10)
+
+Foydalanuvchi: admin panelida hozir kodlanayotgan qism (bo'lim nomi, bo'lim,
+qism, encode log statistikasi) va pastida navbat (surat, nom, bo'lim, qism);
+"yangilash tugmasini bosganda worker oxirgi logni so'rab olsin, panel bot ham
+shunday — faqat so'ralganda; shunda har 10 daqiqada bazaga log yozish shart
+bo'lmasdi".
+
+- **Runner (`tool/encode/run.py`)**: davriy `heartbeat` olib tashlandi.
+  `claim` da `no_heartbeat: true` -> ijara butun run'ga
+  (`ENCODE_RUN_LEASE_MS`, 5 soat 20 daqiqa). Jonli holat log kanalidagi
+  bitta QADALGAN xabarda (`#arustatus`, `StatusPin`): ~15 s da tahrirlanadi,
+  birinchi qatorlar `kalit: qiymat` (run, job `a/s/e`, num, progress,
+  updated), `---` dan keyin oxirgi 14 log qatori (ffmpeg qatori
+  almashtiriladi). Runner `claim` javobidagi `status_bots` ni (kodlash va
+  asosiy bot) log kanaliga o'zi admin qiladi va `log_chat` ni worker'ga
+  aytadi (`app_config.encode_log_chat`, faqat o'zgarganda yoziladi).
+- **Worker**: `GET /api/encode/admin` (navbat: running/queue/errors, bitta
+  JOIN so'rov), `GET /api/encode/live` (`encode_live`: `getChat` ->
+  `pinned_message` + GitHub run va qadamlari). Ikkalasi faqat admin.
+  Kodlash botining "Holat" xabari ham jonli holatni so'raganda o'qiydi
+  (`encode_live_text`). Uzun ijarali run o'lgan-o'lmaganini `encode_kick`
+  har safar GitHub'dan tekshiradi; `quality` ijarani qisqartirmaydi
+  (`MAX(lease_until, ?)`). Eski runner'lar uchun `heartbeat` yo'li qoldi.
+  Log kanali sirdan ham berilishi mumkin: `ENCODE_LOG_CHANNEL`.
+- **Ilova**: `lib/screens/admin_encode_screen.dart` (admin paneli ->
+  "Kodlash navbati"), yuqorida "Yangilash" tugmasi.
+- `run.py` avtoencode repo'ga `sync-packs.yml` orqali avtomatik ko'chadi
+  (`tool/packs/sync_repo.py` -> `FILES`).

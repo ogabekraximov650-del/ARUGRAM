@@ -9,6 +9,7 @@ on:
     branches: [main]
     paths:
       - 'tool/packs/**'
+      - 'tool/encode/run.py'
       - '.github/workflows/sync-packs.yml'
   workflow_dispatch:
 

@@ -19,8 +19,12 @@ XAVFSIZLIK:
   * tayyor sifat (`done`) QAYTA kodlanmaydi; yuklangan-u jurnalga yozilmay
     qolgani (`uploaded`) faqat jurnalga yoziladi;
   * kodlangan faylning davomiyligi manbaga mos kelmasa — yuklanmaydi;
-  * har 4 daqiqada `heartbeat`; ish boshqa run'ga o'tgan bo'lsa (409) —
-    darhol to'xtaydi, hech narsa yozmaydi;
+  * `heartbeat` YO'Q (2026-10): ish olinganda ijara butun run'ga beriladi
+    (`no_heartbeat`), o'lgan run'ni worker GitHub'dan tekshirib bo'shatadi.
+    Ish boshqa run'ga o'tgan bo'lsa (`quality`/`finish` 409) — to'xtaydi;
+  * jonli holat bazaga YOZILMAYDI: log kanalidagi bitta QADALGAN xabar
+    (`#arustatus`) har ~15 soniyada tahrirlanadi, worker uni faqat admin
+    so'raganda o'qiydi (`StatusPin`);
   * vaqt limiti yaqin bo'lsa yangi ish olinmaydi (qolgani keyingi run'da).
 """
 
@@ -62,6 +66,8 @@ START_BUDGET = int(os.environ.get("START_BUDGET_MIN", "240")) * 60
 # 0 yoki bo'sh — o'chiq.
 LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL_ID", "0") or 0)
 LOG_INTERVAL = max(1.0, float(os.environ.get("LOG_INTERVAL_SEC", "10") or 10))
+# Qadalgan holat xabari shu oraliqda tahrirlanadi (`StatusPin`).
+STATUS_INTERVAL = max(5.0, float(os.environ.get("STATUS_INTERVAL_SEC", "15") or 15))
 SESSION = str(Path(__file__).with_name("pyro_session"))
 WORK = Path(os.environ.get("RUNNER_TEMP", "/tmp")) / "arugram_encode"
 
@@ -215,7 +221,9 @@ def transfer_progress(kind: str):
 
 def log(*a):
     print(time.strftime("%H:%M:%S"), *a, flush=True)
-    CHLOG.add(time.strftime("%H:%M:%S ") + " ".join(str(x) for x in a))
+    line = time.strftime("%H:%M:%S ") + " ".join(str(x) for x in a)
+    CHLOG.add(line)
+    STATUS.line(line)
 
 
 def api(path, body=None, method="POST"):
@@ -388,8 +396,113 @@ def encode(src: Path, dst: Path, src_h: int, target: int, dcrf: int,
             last_log = time.time()
             print(time.strftime("%H:%M:%S"), text, flush=True)
             CHLOG.add(time.strftime("%H:%M:%S ") + text.strip(), progress=True)
+            STATUS.line(time.strftime("%H:%M:%S ") + text.strip(), progress=True)
     if p.wait() != 0:
         raise subprocess.CalledProcessError(p.returncode, "ffmpeg")
+
+
+class StatusPin:
+    """Log kanalidagi QADALGAN holat xabari (`#arustatus`).
+
+    TALAB (foydalanuvchi): "yangilash tugmasini bosganda worker oxirgi logni
+    so'rab olsin ... shunda har 10 daqiqada bazaga log yozish shart
+    bo'lmasdi". Runner'ga tashqaridan murojaat qilib bo'lmaydi, shu sabab
+    holat bitta xabarda turadi va ~15 soniyada tahrirlanadi (bepul, bazaga
+    hech narsa yozilmaydi). Worker'ning boti (kanal admini) uni faqat admin
+    so'raganda `getChat` -> `pinned_message` bilan o'qiydi.
+
+    Birinchi qatorlar — mashina o'qiydigan `kalit: qiymat`, `---` dan keyin
+    oxirgi log qatorlari. Xato bo'lsa kodlashga TEGMAYDI.
+    """
+    TAG = "#arustatus"
+    LINES = 14
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.lines = collections.deque(maxlen=self.LINES)
+        self.job = ""
+        self.num = ""
+        self.progress = "idle"
+        self.msg_id = 0
+        self.sent = ""
+        self.off = LOG_CHANNEL == 0
+        self.bots = []
+
+    def line(self, text, progress=False):
+        with self.lock:
+            # ffmpeg har soniyada qator beradi — oxirgisi almashtiriladi.
+            if progress and self.lines and self.lines[-1][0]:
+                self.lines[-1] = (True, text)
+            else:
+                self.lines.append((progress, text))
+
+    def set_job(self, job: str, num: str):
+        with self.lock:
+            self.job, self.num = job, num
+
+    def set_progress(self, progress: str):
+        with self.lock:
+            self.progress = progress or "idle"
+
+    def text(self) -> str:
+        with self.lock:
+            head = [self.TAG, f"run: {RUNNER}", f"job: {self.job}", f"num: {self.num}",
+                    f"progress: {self.progress}", f"updated: {int(time.time())}", "---"]
+            body = [t for _, t in self.lines]
+        out = "\n".join(head + body)
+        return out[:4000]
+
+    async def _promote(self, app):
+        # Worker'ning botlari kanalda ADMIN bo'lmasa qadalgan xabarni o'qiy
+        # olmaydi — kanal egasi (shu sessiya) ularni o'zi qo'shadi.
+        from pyrogram.types import ChatPrivileges
+        for b in self.bots:
+            try:
+                await app.promote_chat_member(
+                    LOG_CHANNEL, b, ChatPrivileges(can_manage_chat=True, can_post_messages=True))
+            except Exception as e:
+                print(f"@{b} log kanaliga admin qilinmadi: {e}", flush=True)
+
+    async def start(self, app):
+        if self.off:
+            return
+        try:
+            await self._promote(app)
+            chat = await app.get_chat(LOG_CHANNEL)
+            pm = getattr(chat, "pinned_message", None)
+            if pm and (pm.text or "").startswith(self.TAG):
+                self.msg_id = pm.id
+            else:
+                m = await app.send_message(LOG_CHANNEL, self.text(), disable_notification=True)
+                self.msg_id = m.id
+                await app.pin_chat_message(LOG_CHANNEL, m.id, disable_notification=True)
+        except Exception as e:
+            print(f"Holat xabari ochilmadi: {e}", flush=True)
+            self.off = True
+
+    async def push(self, app):
+        if self.off or not self.msg_id:
+            return
+        t = self.text()
+        if t == self.sent:
+            return
+        try:
+            await app.edit_message_text(LOG_CHANNEL, self.msg_id, t,
+                                        disable_web_page_preview=True)
+            self.sent = t
+        except Exception as e:
+            if type(e).__name__ == "FloodWait":
+                await asyncio.sleep(int(getattr(e, "value", 10) or 10))
+            elif type(e).__name__ != "MessageNotModified":
+                print(f"Holat xabari yangilanmadi: {e}", flush=True)
+
+    async def loop(self, app):
+        while True:
+            await asyncio.sleep(STATUS_INTERVAL)
+            await self.push(app)
+
+
+STATUS = StatusPin()
 
 
 class Heartbeat:
@@ -400,8 +513,8 @@ class Heartbeat:
         # Botning "Holat" xabari uchun: `download`, `enc|1080p|37|1|4`,
         # `upload|720p|2|4`.
         self.progress = ""
-        self.t = threading.Thread(target=self.run, daemon=True)
-        self.t.start()
+        # Davriy ping YO'Q (bazaga yozuv kamaysin): ijara run uchun
+        # beriladi (`no_heartbeat`), holat esa `STATUS` da.
 
     def ping(self):
         """Ijarani uzaytiradi va jarayonni yuboradi. False — ish boshqaga o'tgan."""
@@ -415,17 +528,9 @@ class Heartbeat:
             log("heartbeat xato:", e)
             return True
 
-    def run(self):
-        # 10 daqiqa (worker'ga yozuv kam): jonli log kanalda, bot "Holat"
-        # xabari esa shu oxirgi holatni ko'rsatadi. Ijara 25 daqiqa.
-        while not self.stop.wait(600):
-            if not self.ping():
-                return
-
     def set(self, progress, now=False):
         self.progress = progress
-        if now:
-            self.ping()
+        STATUS.set_progress(progress)
 
     def check(self):
         if self.lost:
@@ -439,6 +544,9 @@ async def process(app: Client, channel: int, job: dict):
     CURRENT = ident
     CHLOG.heading(f"\U0001F3AC Qism {a}/{s}/{e} (#{job.get('epizod_number')}) — run {RUNNER}")
     hb = Heartbeat(ident)
+    STATUS.set_job(f"{a}/{s}/{e}", str(job.get("epizod_number") or ""))
+    STATUS.set_progress("start")
+    await STATUS.push(app)
     shutil.rmtree(WORK, ignore_errors=True)
     WORK.mkdir(parents=True)
     try:
@@ -540,6 +648,9 @@ async def process(app: Client, channel: int, job: dict):
         for _ in range(6):  # qolgan qatorlar to'liq ketsin
             await CHLOG.flush(app)
         hb.stop.set()
+        STATUS.set_job("", "")
+        STATUS.set_progress("idle")
+        await STATUS.push(app)
         shutil.rmtree(WORK, ignore_errors=True)
 
 
@@ -558,12 +669,20 @@ async def main():
         CHLOG.start(f"\u25B6\uFE0F Run {RUNNER} boshlandi")
         log(f"kompyuter: {cpu_model()}, preset {PRESET}, CRF {CRF_BASE}")
         flusher = asyncio.create_task(CHLOG.loop(app))
+        status_started = False
+        status_task = None
         worked = False
         while True:
             if time.time() - T0 > START_BUDGET:
                 log("Vaqt limiti yaqin — qolgan ishlar keyingi run'da.")
                 break
-            r = api("claim", {"runner": RUNNER})
+            r = api("claim", {"runner": RUNNER, "no_heartbeat": True,
+                              "log_chat": LOG_CHANNEL})
+            if not status_started:
+                status_started = True
+                STATUS.bots = [b for b in (r.get("status_bots") or []) if isinstance(b, str) and b]
+                await STATUS.start(app)
+                status_task = asyncio.create_task(STATUS.loop(app))
             if r.get("busy"):
                 log("Boshqa run ishlayapti — kutiladi.")
                 break
@@ -577,6 +696,11 @@ async def main():
             await process(app, int(r["channel"]), job)
             worked = True
         log("Run tugadi.")
+        STATUS.set_job("", "")
+        STATUS.set_progress("idle")
+        await STATUS.push(app)
+        if status_task:
+            status_task.cancel()
         for _ in range(6):
             await CHLOG.flush(app)
         CHLOG.stop()

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""`tool/packs/` fayllarini avtoencode reposiga (boshqa akkaunt) yangilaydi.
+"""`tool/packs/` fayllarini (va `tool/encode/run.py` ni) avtoencode reposiga (boshqa akkaunt) yangilaydi.
 
 MUHIM: to'plam Actions'i (`packs.yml`) BOSHQA akkauntdagi repoda ishlaydi va
 uning kodi o'sha yerga NUSXA qilib qo'yilgan. Bu repodagi o'zgarish o'z-o'zidan
@@ -27,6 +27,10 @@ FILES = {
     "tool/packs/arupack.py": HERE / "arupack.py",
     "tool/packs/arunorm.py": HERE / "arunorm.py",
     "tool/packs/requirements.txt": HERE / "requirements.txt",
+    # Kodlash skripti ham o'sha repoda ishlaydi (`encode.yml`) — aks holda
+    # bu yerdagi o'zgarishlar (masalan qadalgan holat xabari) u yerga
+    # yetib bormasdi.
+    "tool/encode/run.py": ENC / "run.py",
 }
 
 

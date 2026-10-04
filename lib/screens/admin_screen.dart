@@ -5,6 +5,7 @@ import '../services/admin_badges.dart';
 import '../services/admin_users_service.dart';
 import 'admin_app_screen.dart';
 import 'admin_channels_screen.dart';
+import 'admin_encode_screen.dart';
 import 'admin_reports_screen.dart';
 import 'admin_packs_screen.dart';
 import 'admin_users_screen.dart';
@@ -190,6 +191,21 @@ class AdminScreen extends StatelessWidget {
                       onTap: () => Navigator.of(context).push(
                         MaterialPageRoute<void>(
                           builder: (_) => const AdminChannelsScreen(),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    // ── KODLASH NAVBATI ───────────────────────
+                    //
+                    // Hozir kodlanayotgan va navbatdagi qismlar,
+                    // jonli log (`admin_encode_screen.dart`).
+                    _AdminButton(
+                      icon: Icons.movie_filter_rounded,
+                      label: 'Kodlash navbati',
+                      subtitle: 'Kodlanayotgan va navbatdagi qismlar, log',
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => const AdminEncodeScreen(),
                         ),
                       ),
                     ),

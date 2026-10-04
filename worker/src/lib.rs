@@ -10062,6 +10062,10 @@ async fn tg_channel_post(env: &Env, post: &Value) {
 /// (`cancelled`), qo'lda qayta boshlash esa `/api/encode/release` bilan —
 /// ijaraning uzunligi faqat kutilmagan o'lim uchun.
 const ENCODE_LEASE_MS: i64 = 25 * 60 * 1000;
+/// Yangi runner (`no_heartbeat`) heartbeat yubormaydi — ijara butun run'ga
+/// (Actions 5 soatda to'xtaydi). O'lgan run'ni `encode_kick` GitHub'dan
+/// tekshirib bo'shatadi, ya'ni bazaga davriy yozuv kerak emas.
+const ENCODE_RUN_LEASE_MS: i64 = 320 * 60 * 1000;
 const ENCODE_MAX_ATTEMPTS: i64 = 3;
 /// Bot asl videoni kanalga ko'chirib ulgurmagan bo'lsa shuncha kutiladi.
 const ENCODE_ORIGIN_WAIT_MS: i64 = 2 * 60 * 60 * 1000;
@@ -10267,6 +10271,62 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
         return ok(json!({"items": items}));
     }
 
+    // ── ADMIN PANELI: NAVBAT VA JONLI HOLAT ──────────────────
+    //
+    // TALAB (foydalanuvchi): admin panelida kodlanayotgan va navbatdagi
+    // qismlar; "yangilash tugmasini bosganda worker oxirgi logni so'rab
+    // olsin". Ikkalasi ham faqat O'QIYDI: navbat — bazadan (bitta so'rov),
+    // jonli holat — Telegram'dagi qadalgan xabar va GitHub'dan.
+    if (path == "/api/encode/admin" || path == "/api/encode/live") && method == Method::Get {
+        let Some(u) = session_user(env, &bearer(&req)).await? else {
+            return json_resp(&json!({"error": "unauthorized"}), 401);
+        };
+        if !is_admin(&u) {
+            return json_resp(&json!({"error": "forbidden"}), 403);
+        }
+        if path == "/api/encode/live" {
+            return ok_nostore(encode_live(env).await);
+        }
+        let origin = origin_of(&req);
+        let res = turso_exec(env,
+            "SELECT j.anime_id AS anime_id, j.season_id AS season_id, j.epizod_id AS epizod_id,
+                    j.state AS state, j.queued_at AS queued_at, j.error AS error,
+                    j.attempts AS attempts, j.done AS done, j.lease_until AS lease_until,
+                    a.name AS anime_name, s.nomi AS nomi, s.bolim_id AS bolim_id,
+                    s.photo_url AS photo_url, e.epizod_number AS epizod_number
+               FROM encode_jobs j
+               LEFT JOIN anime_db a ON a.id=j.anime_id
+               LEFT JOIN season_db s ON s.anime_id=j.anime_id AND s.season_id=j.season_id
+               LEFT JOIN epizod_db e ON e.anime_id=j.anime_id AND e.season_id=j.season_id
+                                    AND e.epizod_id=j.epizod_id
+              ORDER BY j.queued_at ASC LIMIT 300",
+            vec![]).await?;
+        let now = now_ms();
+        let (mut running, mut queue, mut errors) = (Vec::new(), Vec::new(), Vec::new());
+        for r in rows_of(&res) {
+            let item = resolve_fields(&origin, json!({
+                "anime_id": jint(&r, "anime_id"),
+                "season_id": jint(&r, "season_id"),
+                "epizod_id": jint(&r, "epizod_id"),
+                "anime_name": r["anime_name"].as_str().unwrap_or(""),
+                "nomi": r["nomi"].as_str().unwrap_or(""),
+                "bolim_id": jint(&r, "bolim_id"),
+                "epizod_number": jint(&r, "epizod_number"),
+                "photo_url": r["photo_url"].as_str().unwrap_or(""),
+                "queued_at": jint(&r, "queued_at"),
+                "attempts": jint(&r, "attempts"),
+                "done": done_list(r["done"].as_str().unwrap_or("")),
+                "error": r["error"].as_str().unwrap_or(""),
+            }), SEASON_URL_KEYS);
+            match r["state"].as_str().unwrap_or("") {
+                "running" if jint(&r, "lease_until") > now => running.push(item),
+                "error" => errors.push(item),
+                _ => queue.push(item),
+            }
+        }
+        return ok_nostore(json!({"running": running, "queue": queue, "errors": errors}));
+    }
+
     // ── ACTIONS (maxfiy kalit bilan) ─────────────────────────
     if !encode_token_ok(&req, env) {
         return json_resp(&json!({"error": "unauthorized"}), 401);
@@ -10301,6 +10361,12 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
         let runner = b["runner"].as_str().unwrap_or("").trim().to_string();
         if runner.is_empty() || runner.len() > 64 {
             return json_resp(&json!({"error": "runner"}), 400);
+        }
+        // Jonli holat qaysi kanalda (`StatusPin`) — o'zgargandagina yoziladi.
+        if let Some(lc) = b["log_chat"].as_i64().filter(|v| *v < 0) {
+            if config_get(env, "encode_log_chat").await.as_deref() != Some(lc.to_string().as_str()) {
+                config_put(env, "encode_log_chat", &lc.to_string()).await;
+            }
         }
         // Boshqa run ishlayapti — KETMA-KET: kutiladi.
         let busy = turso_exec(env,
@@ -10355,7 +10421,12 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
                 return ok(json!({"wait": true}));
             };
             // Egallash: faqat hali hech kim olmagan bo'lsa.
-            let mut args = vec![TursoArg::text(&runner), TursoArg::int(now + ENCODE_LEASE_MS)];
+            let lease = if b["no_heartbeat"].as_bool() == Some(true) {
+                ENCODE_RUN_LEASE_MS
+            } else {
+                ENCODE_LEASE_MS
+            };
+            let mut args = vec![TursoArg::text(&runner), TursoArg::int(now + lease)];
             args.extend(pk.clone());
             args.push(TursoArg::int(now));
             let got = turso_exec(env,
@@ -10400,6 +10471,9 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
                     },
                 },
                 "channel": tg_channel_id(env),
+                // Log kanalida admin bo'lishi kerak bo'lgan botlar
+                // (qadalgan holat xabarini o'qish uchun).
+                "status_bots": encode_status_bots(env).await,
             }));
         }
         return ok(json!({"none": true}));
@@ -10461,7 +10535,7 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
                         WHERE anime_id=? AND season_id=? AND epizod_id=?"),
              vec![TursoArg::text(file), TursoArg::int(size), TursoArg::text(&key),
                   TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]),
-            ("UPDATE encode_jobs SET done=?, lease_until=?
+            ("UPDATE encode_jobs SET done=?, lease_until=MAX(lease_until, ?)
                WHERE anime_id=? AND season_id=? AND epizod_id=? AND queued_at=?", jargs),
         ]).await?;
         // Eski (almashtirilgan) Telegram fayli kanaldan o'chadi.
@@ -11013,21 +11087,10 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
                 format!("{label}: {} ta", jint(r, "n"))
             }).collect();
         let kick = encode_kick(env).await;
-        // Hozir ishlayotgan qism: qaysi anime/qism, qaysi sifat, necha foiz.
-        let run = turso_exec(env,
-            "SELECT j.progress AS progress, j.lease_until AS lease, j.season_id AS s, a.name AS name, e.epizod_number AS num
-               FROM encode_jobs j
-               LEFT JOIN anime_db a ON a.id=j.anime_id
-               LEFT JOIN epizod_db e ON e.anime_id=j.anime_id AND e.season_id=j.season_id AND e.epizod_id=j.epizod_id
-              WHERE j.state='running' AND j.lease_until>? LIMIT 3",
-            vec![TursoArg::int(now_ms())]).await;
-        let running: Vec<String> = run.map(|r| rows_of(&r)).unwrap_or_default().iter()
-            .map(|r| format!("\u{1F3AC} <b>{}</b> \u{2014} {}-bo'lim, {}-qism\n    {}",
-                html_escape(r["name"].as_str().unwrap_or("?")), jint(r, "s"), jint(r, "num"),
-                format!("{}\n    \u{1F552} {} soniya oldin yangilangan",
-                    encode_progress_text(r["progress"].as_str().unwrap_or("")),
-                    ((now_ms() - (jint(r, "lease") - ENCODE_LEASE_MS)) / 1000).max(0))))
-            .collect();
+        // Hozir ishlayotgan qism — JONLI holat, faqat shu so'rovda o'qiladi
+        // (qadalgan xabar va GitHub; bazaga yozuv yo'q).
+        let live = encode_live_text(env).await;
+        let running: Vec<String> = if live.is_empty() { Vec::new() } else { vec![live] };
         let running = if running.is_empty() { String::new() } else { format!("{}\n\n", running.join("\n")) };
         encbot_send(env, chat, &format!("\u{1F4CB} <b>Kodlash navbati</b>\n\n{running}{}\n\n{kick}",
             if lines.is_empty() { "Navbatda hech narsa yo'q.".to_string() } else { lines.join("\n") }), None).await;
@@ -11174,6 +11237,167 @@ async fn gh_api(env: &Env, method: Method, path: &str, body: Option<Value>) -> R
     Ok((status, v))
 }
 
+// ── JONLI HOLAT — FAQAT SO'RALGANDA ───────────────────────────
+//
+// TALAB (foydalanuvchi): "yangilash tugmasini bosganda worker o'zi token
+// yordamida oxirgi logni so'rab olsin ... panel botni ham shunaqa qil,
+// ya'ni faqat so'ragan vaqtda logni beradi ... shunda har 10 daqiqada
+// bazaga log ma'lumotini yozish shart bo'lmasdi".
+//
+// Runner'ga (GitHub Actions) tashqaridan murojaat qilib bo'lmaydi. Shu
+// sabab runner holatni log kanalidagi bitta QADALGAN xabarda (`#arustatus`,
+// `tool/encode/run.py` -> `StatusPin`) ~15 soniyada yangilab turadi —
+// bepul, bazaga yozuvsiz. Worker uni FAQAT so'ralganda o'qiydi:
+//   * Telegram: `getChat(log kanali)` -> `pinned_message` (kodlash boti,
+//     bo'lmasa asosiy bot; runner ularni kanalga o'zi admin qiladi);
+//   * GitHub: ishlayotgan run va uning qadamlari (`GH_ACTIONS_TOKEN`).
+
+/// Log kanalida admin qilinadigan botlar (kodlash va asosiy).
+async fn encode_status_bots(env: &Env) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Ok(me) = encbot_api(env, "getMe", json!({})).await {
+        if let Some(n) = me["username"].as_str().filter(|n| !n.is_empty()) {
+            out.push(n.to_string());
+        }
+    }
+    let main = bot_username(env).await;
+    if !main.is_empty() && !out.contains(&main) {
+        out.push(main);
+    }
+    out
+}
+
+/// Qadalgan `#arustatus` xabaridan: `kalit: qiymat` sarlavha va log qatorlari.
+fn parse_status_pin(text: &str) -> Option<Value> {
+    let mut it = text.lines();
+    if it.next()?.trim() != "#arustatus" {
+        return None;
+    }
+    let mut head = serde_json::Map::new();
+    let mut lines = Vec::new();
+    let mut body = false;
+    for l in it {
+        if body {
+            lines.push(json!(l));
+        } else if l.trim() == "---" {
+            body = true;
+        } else if let Some((k, v)) = l.split_once(':') {
+            head.insert(k.trim().to_string(), json!(v.trim()));
+        }
+    }
+    let job = head.get("job").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let p: Vec<i64> = job.split('/').filter_map(|x| x.parse().ok()).collect();
+    let progress = head.get("progress").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    Some(json!({
+        "run": head.get("run").cloned().unwrap_or(json!("")),
+        "anime_id": p.first().copied().unwrap_or(0),
+        "season_id": p.get(1).copied().unwrap_or(0),
+        "epizod_id": p.get(2).copied().unwrap_or(0),
+        "epizod_number": head.get("num").and_then(|v| v.as_str())
+            .and_then(|v| v.parse::<i64>().ok()).unwrap_or(0),
+        "progress": progress,
+        "progress_text": encode_progress_text(&progress),
+        "updated_at": head.get("updated").and_then(|v| v.as_str())
+            .and_then(|v| v.parse::<i64>().ok()).unwrap_or(0) * 1000,
+        "lines": lines,
+    }))
+}
+
+/// Jonli holat: qadalgan xabar + GitHub run. Bazaga hech narsa yozmaydi.
+async fn encode_live(env: &Env) -> Value {
+    let mut out = json!({"status": null, "github": null});
+    // ── TELEGRAM ──
+    let chat = match tg_secret(env, "ENCODE_LOG_CHANNEL") {
+        c if !c.is_empty() => c,
+        _ => config_get(env, "encode_log_chat").await.unwrap_or_default(),
+    };
+    if chat.is_empty() {
+        out["status_error"] = json!("Log kanali hali ma'lum emas (kodlash bir marta ishga tushishi kerak)");
+    } else {
+        let body = json!({"chat_id": chat});
+        let mut got = encbot_api(env, "getChat", body.clone()).await.ok();
+        if got.as_ref().map(|c| c["pinned_message"].is_null()).unwrap_or(true) {
+            if let Ok(c) = tg_api(env, "getChat", body).await {
+                got = Some(c);
+            }
+        }
+        match got.as_ref().and_then(|c| c["pinned_message"]["text"].as_str()).and_then(parse_status_pin) {
+            Some(st) => out["status"] = st,
+            None => out["status_error"] = json!(
+                "Holat xabari o'qilmadi: bot log kanalida admin emas yoki runner hali yozmagan"),
+        }
+    }
+    // ── GITHUB ──
+    let repo = tg_secret(env, "GH_REPO");
+    if repo.contains('/') {
+        for st in ["in_progress", "queued"] {
+            let Ok((200, v)) = gh_api(env, Method::Get,
+                &format!("/repos/{repo}/actions/workflows/{GH_WORKFLOW}/runs?status={st}&per_page=1"), None).await
+            else { continue };
+            let Some(run) = v["workflow_runs"].as_array().and_then(|a| a.first()).cloned() else { continue };
+            let id = run["id"].as_i64().unwrap_or(0);
+            let mut steps = Vec::new();
+            if let Ok((200, j)) = gh_api(env, Method::Get,
+                &format!("/repos/{repo}/actions/runs/{id}/jobs?per_page=1"), None).await
+            {
+                if let Some(job) = j["jobs"].as_array().and_then(|a| a.first()) {
+                    for s in job["steps"].as_array().cloned().unwrap_or_default() {
+                        steps.push(json!({
+                            "name": s["name"], "status": s["status"],
+                            "conclusion": s["conclusion"],
+                            "started_at": s["started_at"], "completed_at": s["completed_at"],
+                        }));
+                    }
+                }
+            }
+            out["github"] = json!({
+                "id": id, "status": run["status"], "url": run["html_url"],
+                "started_at": run["run_started_at"], "steps": steps,
+            });
+            break;
+        }
+    }
+    out
+}
+
+/// Bot "Holat" xabari uchun jonli holat matni (bo'sh — ma'lumot yo'q).
+async fn encode_live_text(env: &Env) -> String {
+    let live = encode_live(env).await;
+    let mut parts = Vec::new();
+    if let Some(st) = live["status"].as_object() {
+        let (a, s) = (jint(&live["status"], "anime_id"), jint(&live["status"], "season_id"));
+        if a > 0 {
+            let (an, sn) = encbot_titles(env, a, s).await
+                .unwrap_or_else(|| (format!("anime #{a}"), format!("bo'lim #{s}")));
+            parts.push(format!("\u{1F3AC} <b>{}</b> \u{2014} {}, {}-qism\n    {}",
+                html_escape(&an), html_escape(&sn), jint(&live["status"], "epizod_number"),
+                st.get("progress_text").and_then(|v| v.as_str()).unwrap_or("")));
+        } else {
+            parts.push("\u{1F4A4} Runner hozir qism kodlamayapti.".to_string());
+        }
+        let upd = jint(&live["status"], "updated_at");
+        if upd > 0 {
+            parts.push(format!("\u{1F552} {} soniya oldin yangilangan", ((now_ms() - upd) / 1000).max(0)));
+        }
+        let lines: Vec<String> = live["status"]["lines"].as_array().cloned().unwrap_or_default().iter()
+            .rev().take(6).rev().filter_map(|l| l.as_str().map(html_escape)).collect();
+        if !lines.is_empty() {
+            parts.push(format!("<pre>{}</pre>", lines.join("\n")));
+        }
+    } else if let Some(e) = live["status_error"].as_str() {
+        parts.push(format!("\u{26A0}\u{FE0F} {}", html_escape(e)));
+    }
+    if let Some(g) = live["github"].as_object() {
+        let cur = g.get("steps").and_then(|v| v.as_array()).and_then(|a| a.iter()
+            .find(|s| s["status"].as_str() == Some("in_progress")).cloned());
+        parts.push(format!("\u{1F419} GitHub: {}{}",
+            html_escape(g.get("status").and_then(|v| v.as_str()).unwrap_or("")),
+            cur.and_then(|s| s["name"].as_str().map(|n| format!(" \u{2014} {}", html_escape(n))))
+                .unwrap_or_default()));
+    }
+    parts.join("\n")
+}
+
 /// Navbatda ish bo'lsa-yu, uni hech kim bajarmayotgan bo'lsa —
 /// `encode.yml` ni ishga tushiradi. Natija matni (bot xabari uchun).
 ///
@@ -11196,7 +11420,10 @@ async fn encode_kick(env: &Env) -> String {
     // ijarasi bilan "ishlayapti" bo'lib turaveradi. Oxirgi heartbeat 4 daqiqadan
     // oldin bo'lsa-yu, GitHub'da na ishlayotgan, na kutayotgan run bo'lmasa —
     // ish darhol bo'shatiladi va yangi run ishga tushiriladi.
-    if active > 0 && now - (jint(&r, "lease_max") - ENCODE_LEASE_MS) > 4 * 60 * 1000 {
+    // Yangi runner heartbeat yubormaydi (ijarasi uzun) — u ham har safar
+    // GitHub'dan tekshiriladi (GitHub so'rovi bepul, bazaga yozuv yo'q).
+    let long_lease = jint(&r, "lease_max") - now > ENCODE_LEASE_MS;
+    if active > 0 && (long_lease || now - (jint(&r, "lease_max") - ENCODE_LEASE_MS) > 4 * 60 * 1000) {
         let repo = tg_secret(env, "GH_REPO");
         if repo.contains('/') {
             let mut any = false;
