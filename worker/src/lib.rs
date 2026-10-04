@@ -3467,10 +3467,10 @@ async fn ensure_webhook(env: &Env, origin: &str) {
     // `|v2`: kanal postlari (`channel_post`) ham kerak bo'ldi —
     // eski ro'yxatdan o'tish ularni olmasdi, shu sabab kalit
     // almashtirildi va webhook bir marta qayta o'rnatiladi.
-    // `|v3`: majburiy obuna kanallari — `chat_member` (ochiq kanalga
-    // qo'shildi) va `chat_join_request` (yopiq kanalga so'rov) ham
-    // kerak (`channels.rs`).
-    let want = format!("{bot_id}|{url}|v3");
+    // `|v4`: majburiy obuna kanallari — `chat_member` (ochiq kanalga
+    // qo'shildi), `chat_join_request` (yopiq kanalga so'rov) va adminning
+    // kanal menyusidagi tugmalari (`callback_query`) ham kerak (`channels.rs`).
+    let want = format!("{bot_id}|{url}|v4");
     if config_get(env, "tg_webhook_for").await.as_deref() == Some(want.as_str()) {
         WEBHOOK_READY.store(true, Ordering::Relaxed);
         return;
@@ -3480,7 +3480,8 @@ async fn ensure_webhook(env: &Env, origin: &str) {
         "url": url,
         "secret_token": secret,
         "allowed_updates": ["message", "channel_post", "edited_channel_post",
-                            "chat_member", "chat_join_request", "my_chat_member"],
+                            "chat_member", "chat_join_request", "my_chat_member",
+                            "callback_query"],
         "drop_pending_updates": true,
     })).await;
 
@@ -4237,6 +4238,18 @@ async fn handle_tg_webhook(env: &Env, mut req: Request) -> Result<Response> {
     if channels::on_update(env, &update).await {
         return ok(json!({"ok": true}));
     }
+    // Admin: kanal menyusidagi tugmalar (`channels.rs`).
+    let cb = &update["callback_query"];
+    if cb.is_object() {
+        let _ = tg_api(env, "answerCallbackQuery", json!({"callback_query_id": cb["id"]})).await;
+        if cb["from"]["id"].as_i64() == Some(ADMIN_TELEGRAM_ID) {
+            channels::on_callback(env,
+                cb["message"]["chat"]["id"].as_i64().unwrap_or(0),
+                cb["message"]["message_id"].as_i64().unwrap_or(0),
+                cb["data"].as_str().unwrap_or("")).await;
+        }
+        return ok(json!({"ok": true}));
+    }
     // Yopiq video kanalidagi yangi post (`tg_channel_post`).
     for k in ["channel_post", "edited_channel_post"] {
         if update[k].is_object() {
@@ -4245,6 +4258,16 @@ async fn handle_tg_webhook(env: &Env, mut req: Request) -> Result<Response> {
         }
     }
     let msg = update["message"].clone();
+    // Admin shaxsiy chatda: "🔐 Majburiy obunalar" menyusi, kanal tanlash
+    // tugmalari va kanaldan forward qilingan post (`channels.rs`).
+    // `/start <token>` (kirish) bu yerda ushlanmaydi.
+    if msg["from"]["id"].as_i64() == Some(ADMIN_TELEGRAM_ID)
+        && msg["chat"]["id"].as_i64() == Some(ADMIN_TELEGRAM_ID)
+        && (!tg_has_media(&msg) || msg["forward_origin"]["type"] == "channel")
+        && channels::on_message(env, &msg).await
+    {
+        return ok(json!({"ok": true}));
+    }
     // Foydalanuvchi ilovadan bot chatiga yuborgan fayl (surat, video,
     // ovozli xabar) — bot uni kanalga ko'chiradi (`tg_user_media`).
     if tg_has_media(&msg) {
@@ -10514,11 +10537,11 @@ async fn encbot_anime_page(env: &Env, page: i64) -> (String, Value) {
     if rows.is_empty() && page == 0 {
         return ("Hali birorta animega bo'lim qo'shilmagan.\nAvval ilovada anime va uning bo'limini qo'shing, \
                  keyin shu yerga qayting.".into(),
-            encbot_keyboard(vec![vec![ENCBOT_BTN_STATUS.to_string(), channels::BTN_CHANNELS.to_string()]]));
+            encbot_keyboard(vec![vec![ENCBOT_BTN_STATUS.to_string()]]));
     }
     let shown: Vec<&Value> = rows.iter().take(ENCBOT_PAGE as usize).collect();
-    // "Holat" — eng tepada (foydalanuvchi talabi), yonida majburiy obunalar.
-    let mut kb: Vec<Vec<String>> = vec![vec![ENCBOT_BTN_STATUS.to_string(), channels::BTN_CHANNELS.to_string()]];
+    // "Holat" — eng tepada (foydalanuvchi talabi).
+    let mut kb: Vec<Vec<String>> = vec![vec![ENCBOT_BTN_STATUS.to_string()]];
     kb.extend(shown.iter().map(|r| {
         let id = jint(r, "id");
         let name = r["name"].as_str().unwrap_or("").trim().to_string();
@@ -10799,10 +10822,6 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
         }
         let chat = cb["message"]["chat"]["id"].as_i64().unwrap_or(0);
         let data = cb["data"].as_str().unwrap_or("");
-        // Majburiy obunalar menyusi (`channels.rs`).
-        if channels::on_callback(env, chat, cb["message"]["message_id"].as_i64().unwrap_or(0), data).await {
-            return ok(json!({"ok": true}));
-        }
         let parts: Vec<i64> = data.split(':').skip(1).filter_map(|p| p.parse().ok()).collect();
         match (data.split(':').next().unwrap_or(""), parts.as_slice()) {
             // Eski inline tugmalar (avvalgi xabarlarda) ham ishlaydi.
@@ -10828,18 +10847,6 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
     }
     let has_video = msg["video"].is_object() || msg["document"].is_object();
     let text = msg["text"].as_str().unwrap_or("").trim().to_string();
-
-    // ── MAJBURIY OBUNALAR (`channels.rs`) ─────────────────────
-    if text == channels::BTN_CHANNELS || text.starts_with("/kanallar") {
-        channels::menu(env, chat).await;
-        return ok(json!({"ok": true}));
-    }
-    // Kanal qo'shish jarayonida kutilgan matn yoki forward qilingan post.
-    if !has_video || msg["forward_origin"]["type"] == "channel" {
-        if channels::on_text(env, chat, msg, &text).await {
-            return ok(json!({"ok": true}));
-        }
-    }
 
     if has_video {
         let target: Vec<i64> = config_get(env, "encbot_target").await.unwrap_or_default()
@@ -10976,7 +10983,7 @@ async fn ensure_encbot_webhook(env: &Env, origin: &str) {
         return;
     }
     let url = format!("{origin}{ENCBOT_PATH}");
-    let want = format!("{bot_id}|{url}|v3");
+    let want = format!("{bot_id}|{url}|v4");
     if config_get(env, "encbot_webhook_for").await.as_deref() == Some(want.as_str()) {
         ENCBOT_READY.store(true, Ordering::Relaxed);
         return;
@@ -11004,7 +11011,6 @@ async fn ensure_encbot_webhook(env: &Env, origin: &str) {
         let _ = tg_api_tok(&token, "setMyCommands", json!({"commands": [
             {"command": "start", "description": "Qism qo'shish (anime tanlash)"},
             {"command": "holat", "description": "Kodlash navbati holati"},
-            {"command": "kanallar", "description": "Majburiy obuna kanallari"},
         ]})).await;
         config_put(env, "encbot_webhook_for", &want).await;
         ENCBOT_READY.store(true, Ordering::Relaxed);

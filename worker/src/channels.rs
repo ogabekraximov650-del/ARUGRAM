@@ -348,15 +348,29 @@ pub(crate) async fn route(req: Request, env: &Env, path: &str, method: Method) -
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  KODLASH BOTI (admin paneli boti): "🔐 Majburiy obunalar"
+//  ASOSIY BOT: "🔐 Majburiy obunalar" (faqat admin, shaxsiy chatda)
 // ═══════════════════════════════════════════════════════════════
 //
 // `aniraxuzbot15` dagi menyu: yangi kanal qo'shish (turini tanlash),
 // ro'yxat, kanal ichida limitni oshirish/kamaytirish va o'chirish.
-// Matn kutilayotgan holat `app_config.encbot_chwait` da turadi.
+// Kanal qo'shishda pastda ikkita tugma (`request_chat`, `chat_picker.ts`
+// dagidek): "🤖 Botni kanalga admin qilish" — Telegram kanalni tanlatib
+// botni o'zi admin qiladi; "🆔 Kanal IDsi botga yuborish" — tanlangan
+// kanal IDsi botga keladi va kanal qo'shiladi. Postni forward qilish
+// yoki @username / -100... yozish ham ishlaydi.
+// Matn kutilayotgan holat `app_config.chan_wait` da turadi.
 
 pub(crate) const BTN_CHANNELS: &str = "\u{1F510} Majburiy obunalar";
-const WAIT_KEY: &str = "encbot_chwait";
+const BTN_PICK_ADMIN: &str = "\u{1F916} Botni kanalga admin qilish";
+const BTN_PICK_ID: &str = "\u{1F194} Kanal IDsi botga yuborish";
+const BTN_PICK_BACK: &str = "\u{27E8} Orqaga";
+const WAIT_KEY: &str = "chan_wait";
+
+/// `request_chat` tugmalari raqami: ochiq kanal 100/101, yopiq 110/111.
+const REQ_PUB_ADMIN: i64 = 100;
+const REQ_PUB_ID: i64 = 101;
+const REQ_PRIV_ADMIN: i64 = 110;
+const REQ_PRIV_ID: i64 = 111;
 
 fn ikb(rows: Vec<Vec<(String, String)>>) -> Value {
     json!({"inline_keyboard": rows.into_iter()
@@ -372,10 +386,58 @@ fn back(to: &str) -> Value {
     ikb(vec![vec![b("\u{27E8} Orqaga", to)]])
 }
 
+/// Adminning doimiy pastki tugmasi.
+fn admin_kb() -> Value {
+    json!({"keyboard": [[{"text": BTN_CHANNELS}]], "resize_keyboard": true})
+}
+
+/// Bot API `ChatAdministratorRights` (aniraxuzbot15 `chat_picker.ts`).
+fn rights(invite: bool, promote: bool) -> Value {
+    json!({
+        "is_anonymous": false, "can_manage_chat": true, "can_change_info": false,
+        "can_post_messages": true, "can_edit_messages": true, "can_delete_messages": true,
+        "can_invite_users": invite, "can_restrict_members": false, "can_promote_members": promote,
+        "can_manage_video_chats": false, "can_post_stories": false, "can_edit_stories": false,
+        "can_delete_stories": false,
+    })
+}
+
+/// Kanal tanlash tugmalari (pastda).
+fn picker_kb(public: bool) -> Value {
+    let (adm, id) = if public { (REQ_PUB_ADMIN, REQ_PUB_ID) } else { (REQ_PRIV_ADMIN, REQ_PRIV_ID) };
+    json!({
+        "keyboard": [
+            [{"text": BTN_PICK_ADMIN, "request_chat": {
+                "request_id": adm, "chat_is_channel": true, "bot_is_member": false,
+                "user_administrator_rights": rights(true, true),
+                "bot_administrator_rights": rights(true, false),
+            }}],
+            [{"text": BTN_PICK_ID, "request_chat": {
+                "request_id": id, "chat_is_channel": true,
+                "user_administrator_rights": rights(false, false),
+            }}],
+            [{"text": BTN_PICK_BACK}],
+        ],
+        "resize_keyboard": true,
+        "is_persistent": true,
+    })
+}
+
+async fn send(env: &Env, chat: i64, text: &str, markup: Option<Value>) {
+    let mut body = json!({
+        "chat_id": chat, "text": text, "parse_mode": "HTML",
+        "disable_web_page_preview": true,
+    });
+    if let Some(m) = markup {
+        body["reply_markup"] = m;
+    }
+    let _ = tg_api(env, "sendMessage", body).await;
+}
+
 /// Xabarni tahrirlaydi (tugma bosilgan bo'lsa), bo'lmasa yangisini yuboradi.
 async fn show(env: &Env, chat: i64, msg_id: i64, text: &str, kb: Value) {
     if msg_id > 0 {
-        let r = encbot_api(env, "editMessageText", json!({
+        let r = tg_api(env, "editMessageText", json!({
             "chat_id": chat, "message_id": msg_id, "text": text,
             "parse_mode": "HTML", "disable_web_page_preview": true, "reply_markup": kb,
         })).await;
@@ -383,7 +445,7 @@ async fn show(env: &Env, chat: i64, msg_id: i64, text: &str, kb: Value) {
             return;
         }
     }
-    encbot_send(env, chat, text, Some(kb)).await;
+    send(env, chat, text, Some(kb)).await;
 }
 
 fn menu_kb() -> Value {
@@ -397,9 +459,11 @@ const MENU_TEXT: &str = "\u{1F510} <b>Majburiy obunalar</b>\n\n\
     Bepul bo'limni ko'rishdan oldin ilova foydalanuvchidan ruxsat so'raydi va uning \
     Telegram hisobi bilan shu kanallarga o'zi qo'shiladi (yopiq kanalga so'rov yuboradi).";
 
-pub(crate) async fn menu(env: &Env, chat: i64) {
+async fn menu(env: &Env, chat: i64) {
     config_put(env, WAIT_KEY, "").await;
-    encbot_send(env, chat, MENU_TEXT, Some(menu_kb())).await;
+    // Pastki tugma (kanal tanlash tugmalari o'rniga) va menyu.
+    send(env, chat, "\u{1F447}", Some(admin_kb())).await;
+    send(env, chat, MENU_TEXT, Some(menu_kb())).await;
 }
 
 fn list_text(items: &[Value]) -> String {
@@ -462,10 +526,14 @@ async fn show_one(env: &Env, chat: i64, msg_id: i64, id: i64) {
     show(env, chat, msg_id, &detail_lines(&c), ikb(rows)).await;
 }
 
-const HOW_TO_ADD: &str = "1. Asosiy botni kanalga ADMIN qiling (\"Foydalanuvchi qo'shish\" va \
-    \"Havola orqali taklif qilish\" huquqlari bilan).\n\
-    2. Kanaldan istalgan postni shu yerga FORWARD qiling yoki kanal @username'ini / \
-    <code>-100...</code> IDsini yuboring.";
+const HOW_TO_ADD: &str = "1. Botni kanalingizga admin qiling (\"Foydalanuvchi qo'shish\" / \
+    \"Havola orqali taklif qilish\" huquqi bilan).\n\
+    2. Kanaldagi istalgan postni shu yerga FORWARD qiling yoki @username / \
+    <code>-100...</code> IDsini yuboring.\n\n\
+    Yoki pastdagi tugmalardan:\n\n\
+    \u{1F916} <b>Botni kanalga admin qilish</b> — kanalni tanlang va botni admin qiling.\n\n\
+    \u{1F194} <b>Kanal IDsi botga yuborish</b> — kanalni tanlang, bot IDsini o'zi oladi va \
+    kanalni qo'shadi.";
 
 /// Inline tugma (`ch:...`). `true` — shu yerda bajarildi.
 pub(crate) async fn on_callback(env: &Env, chat: i64, msg_id: i64, data: &str) -> bool {
@@ -495,6 +563,9 @@ pub(crate) async fn on_callback(env: &Env, chat: i64, msg_id: i64, data: &str) -
             let text = format!("<b>Turi:</b> {}\n\n{HOW_TO_ADD}", kind_label(kind));
             config_put(env, WAIT_KEY, wait).await;
             show(env, chat, msg_id, &text, back("ch:add")).await;
+            // Pastdagi tugmalar: botni kanalga admin qilish va kanal IDsini
+            // yuborish (aniraxuzbot15 `chat_picker.ts`).
+            send(env, chat, "\u{1F447} Pastdagi tugmalardan foydalaning:", Some(picker_kb(kind == "public"))).await;
         }
         "list" => {
             config_put(env, WAIT_KEY, "").await;
@@ -530,61 +601,92 @@ fn forwarded_chat(msg: &Value) -> Option<String> {
     msg["forward_from_chat"]["id"].as_i64().map(|i| i.to_string())
 }
 
-/// Kutilayotgan matn (kanal, limit, havola). `true` — shu yerda
-/// qabul qilindi. Pastki tugmalar (boshqa bo'lim) holatni bekor qiladi.
-pub(crate) async fn on_text(env: &Env, chat: i64, msg: &Value, text: &str) -> bool {
+/// Kanalni qo'shadi va limit so'raydi.
+async fn add_and_ask_limit(env: &Env, chat: i64, kind: &str, input: &str) {
+    match add(env, kind, input, 0).await {
+        Ok(c) => {
+            let id = jint(&c, "id");
+            config_put(env, WAIT_KEY, &format!("limit:{id}")).await;
+            // Pastdagi kanal tanlash tugmalari olib tashlanadi.
+            send(env, chat, &format!(
+                "\u{2705} Qo'shildi: <b>{}</b>\n<code>{}</code>\n\nEndi kanalga qo'shilishi kerak bo'lgan \
+                 odamlar sonini RAQAM bilan yuboring (masalan: 1000).\n<code>0</code> — cheklovsiz.",
+                html_escape(c["title"].as_str().unwrap_or("")), jint(&c, "chat_id")), Some(admin_kb())).await;
+        }
+        Err(e) => send(env, chat, &format!("\u{274C} {}", html_escape(&e)), None).await,
+    }
+}
+
+/// Admin shaxsiy chatda yozgan xabar. `true` — shu yerda bajarildi
+/// (aks holda odatdagi kirish oqimi davom etadi: `/start <token>` va h.k.).
+pub(crate) async fn on_message(env: &Env, msg: &Value) -> bool {
+    let chat = msg["chat"]["id"].as_i64().unwrap_or(0);
+    if chat == 0 {
+        return false;
+    }
+    let text = msg["text"].as_str().unwrap_or("").trim().to_string();
+    if text == BTN_CHANNELS || text == "/kanallar" || text == "/start" {
+        menu(env, chat).await;
+        return true;
+    }
+    if text == BTN_PICK_BACK {
+        menu(env, chat).await;
+        return true;
+    }
+    // Pastdagi tugma orqali kanal tanlandi.
+    let cs = &msg["chat_shared"];
+    if cs.is_object() {
+        let rid = jint(cs, "request_id");
+        let chat_id = cs["chat_id"].as_i64().unwrap_or(0);
+        match rid {
+            REQ_PUB_ADMIN | REQ_PRIV_ADMIN => send(env, chat,
+                "\u{2705} Bot kanalga admin qilindi.\n\nEndi \u{1F194} <b>Kanal IDsi botga yuborish</b> \
+                 tugmasini bosib, o'sha kanalni tanlang.", None).await,
+            REQ_PUB_ID | REQ_PRIV_ID => {
+                let kind = if rid == REQ_PUB_ID { "public" } else { "private" };
+                add_and_ask_limit(env, chat, kind, &chat_id.to_string()).await;
+            }
+            _ => return false,
+        }
+        return true;
+    }
     let wait = config_get(env, WAIT_KEY).await.unwrap_or_default();
-    if wait.is_empty() {
+    if wait.is_empty() || text.starts_with('/') {
         return false;
     }
-    let nav = text.starts_with('/')
-        || ["\u{1F3AC}", "\u{1F4C2}", "\u{1F39E}", "\u{2795}", "\u{1F4CB}", "\u{2B05}", "\u{25C0}", "Keyingi", "\u{1F510}"]
-            .iter().any(|p| text.starts_with(p));
-    if nav && forwarded_chat(msg).is_none() {
-        config_put(env, WAIT_KEY, "").await;
-        return false;
-    }
-    let num = text.trim().parse::<i64>().ok().filter(|n| *n >= 1);
+    let num = text.parse::<i64>().ok().filter(|n| *n >= 1);
     let (head, arg) = wait.split_once(':').unwrap_or((wait.as_str(), ""));
     match head {
         "pub" | "priv" => {
-            let input = forwarded_chat(msg).unwrap_or_else(|| text.trim().to_string());
-            let kind = if head == "pub" { "public" } else { "private" };
-            match add(env, kind, &input, 0).await {
-                Ok(c) => {
-                    let id = jint(&c, "id");
-                    config_put(env, WAIT_KEY, &format!("limit:{id}")).await;
-                    encbot_send(env, chat, &format!(
-                        "\u{2705} Qo'shildi: <b>{}</b>\n\nEndi kanalga qo'shilishi kerak bo'lgan odamlar \
-                         sonini RAQAM bilan yuboring (masalan: 1000).\n<code>0</code> — cheklovsiz.",
-                        html_escape(c["title"].as_str().unwrap_or(""))), None).await;
-                }
-                Err(e) => encbot_send(env, chat, &format!("\u{274C} {}", html_escape(&e)), Some(back("ch:add"))).await,
+            let input = forwarded_chat(msg).unwrap_or_else(|| text.clone());
+            if input.is_empty() {
+                return false;
             }
+            add_and_ask_limit(env, chat, if head == "pub" { "public" } else { "private" }, &input).await;
         }
         "limit" => {
-            let Ok(n) = text.trim().parse::<i64>() else {
-                encbot_send(env, chat, "\u{274C} Faqat raqam yuboring (0 — cheklovsiz).", None).await;
+            let Ok(n) = text.parse::<i64>() else {
+                send(env, chat, "\u{274C} Faqat raqam yuboring (0 — cheklovsiz).", None).await;
                 return true;
             };
             let id = arg.parse().unwrap_or(0);
             let _ = turso_exec(env, "UPDATE channels_db SET need=? WHERE id=?",
                 vec![TursoArg::int(n.max(0)), TursoArg::int(id)]).await;
             config_put(env, WAIT_KEY, "").await;
-            encbot_send(env, chat, &format!("\u{2705} Saqlandi. Limit: {}",
+            send(env, chat, &format!("\u{2705} Saqlandi. Limit: {}",
                 if n > 0 { n.to_string() } else { "cheklovsiz".into() }), Some(menu_kb())).await;
         }
         "inc" | "dec" => {
             let Some(n) = num else {
-                encbot_send(env, chat, "\u{274C} Faqat musbat raqam yuboring.", None).await;
+                send(env, chat, "\u{274C} Faqat musbat raqam yuboring.", None).await;
                 return true;
             };
             let id = arg.parse().unwrap_or(0);
             config_put(env, WAIT_KEY, "").await;
             match change_limit(env, id, if head == "inc" { n } else { -n }).await {
-                Some(c) => encbot_send(env, chat, &format!("\u{2705} Yangi limit: <b>{}</b>", jint(&c, "need")),
+                Some(c) => send(env, chat, &format!("\u{2705} Yangi limit: <b>{}</b>", jint(&c, "need")),
                     Some(back(&format!("ch:view:{id}")))).await,
-                None => encbot_send(env, chat, "\u{274C} Topilmadi.", Some(back("ch:list"))).await,
+                None => send(env, chat, "\u{274C} Topilmadi.", Some(back("ch:list"))).await,
             }
         }
         _ => {

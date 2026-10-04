@@ -2323,6 +2323,80 @@ pub extern "C" fn rust_tg_join_channel(arg_ptr: *const c_char) -> *mut c_char {
     }))
 }
 
+/// Admin paneli: ASOSIY botni kanalga ADMIN qiladi — adminning O'Z
+/// Telegram hisobi bilan (`channels.editAdmin`), Telegram botiga
+/// kirmasdan (foydalanuvchi talabi: "kanal IDsi yoki useri berilganda
+/// kanalni o'zi topib admin qilsin, Telegram botsiz ham ishlasin").
+///
+/// Argument: `@nom`, `https://t.me/nom` yoki `-100...`. Ochiq kanal nomi
+/// bo'yicha topiladi, ID bo'yicha esa adminning suhbatlari orasidan
+/// (kanal egasi/admini bo'lgani uchun u yerda bor). Huquqlar —
+/// aniraxuzbot15 dagidek: post yozish/tahrirlash/o'chirish, havola
+/// orqali taklif qilish (yopiq kanal so'rovlari uchun shart), boshqarish.
+///
+/// Javob: `{"ok":true,"chat_id":-100...}` (Bot API ko'rinishidagi ID).
+#[no_mangle]
+pub extern "C" fn rust_tg_make_bot_admin(arg_ptr: *const c_char) -> *mut c_char {
+    let target = unsafe { cstr_to_str(arg_ptr) }.unwrap_or("").trim().to_string();
+    string_to_cptr(with_client(|t, client| {
+        if !t.authorized.load(Ordering::SeqCst) {
+            return Err("Telegram ulanmagan".to_string());
+        }
+        let chat_id = run_tmo(t, 60, async {
+            let (channel_id, access_hash) = if let Some(name) = public_name(&target) {
+                let tl::enums::contacts::ResolvedPeer::Peer(rp) = client
+                    .invoke(&tl::functions::contacts::ResolveUsername { username: name, referer: None })
+                    .await
+                    .map_err(|e| inv_err(&e))?;
+                rp.chats
+                    .iter()
+                    .find_map(|c| match c {
+                        tl::enums::Chat::Channel(c) => c.access_hash.map(|h| (c.id, h)),
+                        _ => None,
+                    })
+                    .ok_or("kanal topilmadi")?
+            } else {
+                let raw: i64 = target.parse().map_err(|_| "kanal @username yoki -100... ID bo'lsin".to_string())?;
+                let id = if raw < 0 { raw } else { -1_000_000_000_000 - raw };
+                match find_channel(&client, id).await?.into() {
+                    tl::enums::InputPeer::Channel(p) => (p.channel_id, p.access_hash),
+                    _ => return Err("bu kanal emas".to_string()),
+                }
+            };
+            let (bot_id, bot_hash) = bot_peer(t, &client).await?;
+            client
+                .invoke(&tl::functions::channels::EditAdmin {
+                    channel: tl::enums::InputChannel::Channel(tl::types::InputChannel { channel_id, access_hash }),
+                    user_id: tl::enums::InputUser::User(tl::types::InputUser { user_id: bot_id, access_hash: bot_hash }),
+                    admin_rights: tl::enums::ChatAdminRights::Rights(tl::types::ChatAdminRights {
+                        change_info: false,
+                        post_messages: true,
+                        edit_messages: true,
+                        delete_messages: true,
+                        ban_users: false,
+                        invite_users: true,
+                        pin_messages: false,
+                        add_admins: false,
+                        anonymous: false,
+                        manage_call: false,
+                        other: true,
+                        manage_topics: false,
+                        post_stories: false,
+                        edit_stories: false,
+                        delete_stories: false,
+                        manage_direct_messages: false,
+                        manage_ranks: false,
+                    }),
+                    rank: None,
+                })
+                .await
+                .map_err(|e| inv_err(&e))?;
+            Ok::<i64, String>(-1_000_000_000_000 - channel_id)
+        })?;
+        Ok(json!({"ok": true, "chat_id": chat_id}).to_string())
+    }))
+}
+
 /// Kirish boti username'i (videolar shu bot chatidan olinadi).
 #[no_mangle]
 pub extern "C" fn rust_tg_set_bot(bot_ptr: *const c_char) {

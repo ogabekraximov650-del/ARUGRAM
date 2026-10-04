@@ -2,13 +2,14 @@
 //
 // TALAB (foydalanuvchi): admin panelida to'liq tizim — kanal qo'shish
 // (ochiq / yopiq), limit, statistika va o'chirish.
-// Xuddi shu amallar kodlash botida ham bor ("🔐 Majburiy obunalar").
+// Xuddi shu amallar ASOSIY botda ham bor ("🔐 Majburiy obunalar").
 // Ikkalasi ham bitta server kodini ishlatadi (`worker/src/channels.rs`).
 //
-// Kanal qo'shishdan oldin ASOSIY botni kanalga admin qilish kerak
-// ("Foydalanuvchi qo'shish" va "Havola orqali taklif qilish"
-// huquqlari bilan): yopiq kanal havolasini bot o'zi yaratadi, kim
-// qo'shilgani/so'rov yuborganini ham bot sanaydi.
+// Asosiy bot kanalda ADMIN bo'lishi shart (yopiq kanal havolasini bot
+// yaratadi, kim qo'shilgani/so'rov yuborganini bot sanaydi). Bu ekranda
+// admin faqat @username yoki ID yozadi — ilova adminning O'Z Telegram
+// hisobi bilan kanalni topib, botni o'zi admin qiladi
+// (`rust_tg_make_bot_admin`), ya'ni Telegram botiga kirish shart emas.
 
 import 'dart:convert';
 
@@ -17,6 +18,7 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 
 import '../services/auth_service.dart';
+import '../services/telegram_service.dart';
 import '../theme/app_background.dart';
 import '../widgets/glass.dart';
 
@@ -121,14 +123,16 @@ class _AdminChannelsScreenState extends State<AdminChannelsScreen> {
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           ListTile(
             leading: const Icon(Icons.campaign_rounded, color: Colors.white),
-            title: const Text('Ochiq [public] kanal', style: TextStyle(color: Colors.white)),
+            title: const Text('Ochiq [public] kanal',
+                style: TextStyle(color: Colors.white)),
             subtitle: const Text('Ilova foydalanuvchini o\'zi qo\'shadi',
                 style: TextStyle(color: Colors.white54)),
             onTap: () => Navigator.pop(c, 'public'),
           ),
           ListTile(
             leading: const Icon(Icons.lock_rounded, color: Colors.white),
-            title: const Text('Yopiq [private] kanal', style: TextStyle(color: Colors.white)),
+            title: const Text('Yopiq [private] kanal',
+                style: TextStyle(color: Colors.white)),
             subtitle: const Text('Ilova qo\'shilish so\'rovini yuboradi',
                 style: TextStyle(color: Colors.white54)),
             onTap: () => Navigator.pop(c, 'private'),
@@ -149,10 +153,11 @@ class _AdminChannelsScreenState extends State<AdminChannelsScreen> {
         content: SingleChildScrollView(
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             const Text(
-                'Avval asosiy botni kanalga ADMIN qiling ("Foydalanuvchi qo\'shish" '
-                'va "Havola orqali taklif qilish" huquqlari bilan).',
-                style: TextStyle(color: Colors.white60, fontSize: 12.5),
-              ),
+              'Kanal @username yoki IDsini yozing — ilova Telegram hisobingiz '
+              'bilan kanalni topib, asosiy botni o\'zi admin qiladi. Siz shu '
+              'kanalning egasi (yoki admin qo\'sha oladigan admini) bo\'lishingiz kerak.',
+              style: TextStyle(color: Colors.white60, fontSize: 12.5),
+            ),
             TextField(
               controller: input,
               style: const TextStyle(color: Colors.white),
@@ -163,29 +168,54 @@ class _AdminChannelsScreenState extends State<AdminChannelsScreen> {
               ),
             ),
             TextField(
-                controller: need,
-                keyboardType: TextInputType.number,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                style: const TextStyle(color: Colors.white),
-                decoration: const InputDecoration(
-                    labelText: 'Limit — nechta odam (0 — cheklovsiz)'),
-              ),
+              controller: need,
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              style: const TextStyle(color: Colors.white),
+              decoration: const InputDecoration(
+                  labelText: 'Limit — nechta odam (0 — cheklovsiz)'),
+            ),
           ]),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Bekor')),
-          FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Qo\'shish')),
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Bekor')),
+          FilledButton(
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('Qo\'shish')),
         ],
       ),
     );
     if (ok != true) return;
+    var target = input.text.trim();
+    if (target.isEmpty) return;
+    // Botni kanalga admin qilish — adminning Telegram hisobi bilan.
+    // Bo'lmasa ham (Telegram ulanmagan, bot allaqachon admin) server
+    // o'zi tekshiradi va sababini aytadi.
+    String? adminErr;
+    if (TelegramService.instance.authorized) {
+      setState(() => _busy = true);
+      final j = await tgCall('rust_tg_make_bot_admin', arg: target);
+      if (!mounted) return;
+      final id = (j['chat_id'] as num?)?.toInt();
+      if (j['ok'] == true && id != null) {
+        target = '$id';
+      } else {
+        adminErr = '${j['error'] ?? ''}';
+      }
+    }
     final err = await _post({
       'op': 'add',
       'kind': kind,
-      'input': input.text.trim(),
+      'input': target,
       'need': int.tryParse(need.text) ?? 0,
     });
-    _say(err ?? 'Qo\'shildi');
+    _say(err == null
+        ? 'Qo\'shildi'
+        : adminErr != null && adminErr.isNotEmpty
+            ? '$err\n(Botni admin qilib bo\'lmadi: $adminErr)'
+            : err);
   }
 
   // ── LIMIT VA O'CHIRISH ───────────────────────────────────
@@ -207,7 +237,8 @@ class _AdminChannelsScreenState extends State<AdminChannelsScreen> {
           decoration: InputDecoration(labelText: 'Hozirgi limit: ${c['need']}'),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(d), child: const Text('Bekor')),
+          TextButton(
+              onPressed: () => Navigator.pop(d), child: const Text('Bekor')),
           FilledButton(
               onPressed: () => Navigator.pop(d, int.tryParse(ctl.text) ?? 0),
               child: const Text('Saqlash')),
@@ -215,7 +246,8 @@ class _AdminChannelsScreenState extends State<AdminChannelsScreen> {
       ),
     );
     if (n == null || n <= 0) return;
-    final err = await _post({'op': 'limit', 'id': c['id'], 'delta': inc ? n : -n});
+    final err =
+        await _post({'op': 'limit', 'id': c['id'], 'delta': inc ? n : -n});
     _say(err ?? 'Saqlandi');
   }
 
@@ -224,10 +256,14 @@ class _AdminChannelsScreenState extends State<AdminChannelsScreen> {
       context: context,
       builder: (d) => AlertDialog(
         backgroundColor: AppColors.card,
-        title: const Text('O\'chirilsinmi?', style: TextStyle(color: Colors.white)),
-        content: Text('${c['title']}', style: const TextStyle(color: Colors.white70)),
+        title: const Text('O\'chirilsinmi?',
+            style: TextStyle(color: Colors.white)),
+        content: Text('${c['title']}',
+            style: const TextStyle(color: Colors.white70)),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Bekor')),
+          TextButton(
+              onPressed: () => Navigator.pop(d, false),
+              child: const Text('Bekor')),
           FilledButton(
               style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
               onPressed: () => Navigator.pop(d, true),
@@ -255,17 +291,15 @@ class _AdminChannelsScreenState extends State<AdminChannelsScreen> {
         padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
-            Icon(
-                kind == 'public'
-                    ? Icons.campaign_rounded
-                    : Icons.lock_rounded,
-                color: Colors.white70,
-                size: 20),
+            Icon(kind == 'public' ? Icons.campaign_rounded : Icons.lock_rounded,
+                color: Colors.white70, size: 20),
             const SizedBox(width: 8),
             Expanded(
               child: Text('${c['title']}',
                   style: const TextStyle(
-                      color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700)),
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700)),
             ),
             if (c['active'] == false)
               const Text('limit to\'ldi',
@@ -284,18 +318,21 @@ class _AdminChannelsScreenState extends State<AdminChannelsScreen> {
               IconButton(
                 tooltip: 'Limitni oshirish',
                 onPressed: _busy ? null : () => _limit(c, true),
-                icon: const Icon(Icons.trending_up_rounded, color: Colors.white70),
+                icon: const Icon(Icons.trending_up_rounded,
+                    color: Colors.white70),
               ),
               IconButton(
                 tooltip: 'Limitni kamaytirish',
                 onPressed: _busy ? null : () => _limit(c, false),
-                icon: const Icon(Icons.trending_down_rounded, color: Colors.white70),
+                icon: const Icon(Icons.trending_down_rounded,
+                    color: Colors.white70),
               ),
             ],
             IconButton(
               tooltip: 'O\'chirish',
               onPressed: _busy ? null : () => _delete(c),
-              icon: const Icon(Icons.delete_outline_rounded, color: AppColors.danger),
+              icon: const Icon(Icons.delete_outline_rounded,
+                  color: AppColors.danger),
             ),
           ]),
         ]),
@@ -312,7 +349,8 @@ class _AdminChannelsScreenState extends State<AdminChannelsScreen> {
           backgroundColor: Colors.transparent,
           elevation: 0,
           iconTheme: const IconThemeData(color: Colors.white),
-          title: const Text('Majburiy obunalar', style: TextStyle(color: Colors.white)),
+          title: const Text('Majburiy obunalar',
+              style: TextStyle(color: Colors.white)),
         ),
         floatingActionButton: FloatingActionButton.extended(
           backgroundColor: AppColors.accent,
@@ -337,7 +375,10 @@ class _AdminChannelsScreenState extends State<AdminChannelsScreen> {
                           'ruxsat so\'raydi va foydalanuvchining Telegram hisobi bilan shu '
                           'kanallarga o\'zi qo\'shiladi (yopiq kanalga so\'rov yuboradi). '
                           'Limit to\'lgan kanal endi talab qilinmaydi.',
-                          style: const TextStyle(color: Colors.white60, fontSize: 12.5, height: 1.45),
+                          style: const TextStyle(
+                              color: Colors.white60,
+                              fontSize: 12.5,
+                              height: 1.45),
                         ),
                         const SizedBox(height: 12),
                         if (_items.isEmpty)

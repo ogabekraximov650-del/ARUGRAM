@@ -4719,8 +4719,16 @@ o'chirish mumkin. Asos — `aniraxuzbot15` (`bot/src/handlers/channels.ts`).
   Ilova bazaga hech narsa YOZMAYDI. Kanallar soni cheklanmagan, tashqi
   havolalar yo'q (foydalanuvchi talabi bilan olib tashlandi).
 - Admin: ilovadagi "Majburiy obunalar" (`admin_channels_screen.dart`) va
-  kodlash boti -> "🔐 Majburiy obunalar" / `/kanallar` (holat
-  `app_config.encbot_chwait`).
+  ASOSIY bot (admin shaxsiy chatida `/start`, `/kanallar` yoki
+  "🔐 Majburiy obunalar"; holat `app_config.chan_wait`). Kodlash botidan
+  olib tashlandi. Botda kanal qo'shishda pastda aniraxuzbot15 dagi
+  `request_chat` tugmalari: "🤖 Botni kanalga admin qilish" va
+  "🆔 Kanal IDsi botga yuborish" (`chat_shared`), forward yoki @username/ID ham
+  ishlaydi. Webhook `|v4` (+`callback_query`).
+- Ilovadagi admin ekrani Telegram botsiz ishlaydi: @username yoki ID
+  berilsa ilova adminning O'Z Telegram hisobi bilan kanalni topib botni
+  admin qiladi (`rust_tg_make_bot_admin`, `channels.editAdmin`), keyin
+  serverga qo'shadi.
 - Ilova: `lib/services/channel_gate.dart` (ruxsat `chan_consent`, bajarilgan
   `chan_done`, ro'yxat 15 daqiqa kesh), Rust `rust_tg_join_channel`
   (`channels.joinChannel` / `messages.importChatInvite`, INVITE_REQUEST_SENT
