@@ -1081,8 +1081,9 @@ jobs:
           SRC="build/app/outputs/flutter-apk/app-release.apk"
           # TALAB (foydalanuvchi): "APK nomiga build raqami ham yozilsin
           # — qaysi build'ni o'rnatganimni aniq bilish uchun".
-          # Masalan: `arugram-admin-32-build-412.apk`.
-          OUT="build/app/outputs/flutter-apk/arugram-${{ matrix.name }}-build-${{ github.run_number }}.apk"
+          # Masalan: `arumediatv-admin-32-build-412.apk`.
+          # GitHub'dagi nom — `arumediatv` (foydalanuvchi talabi, 2026-10).
+          OUT="build/app/outputs/flutter-apk/arumediatv-${{ matrix.name }}-build-${{ github.run_number }}.apk"
           cp "$SRC" "$OUT"
           echo "out=$OUT" >> "$GITHUB_OUTPUT"
           ls -lh "$OUT"
@@ -1100,8 +1101,8 @@ jobs:
             hajmi kichik. Telefoningiz 64-bitli bo'lsa `-64`,
             eskiroq bo'lsa `-32` ni oling.
 
-            * `arugram-admin-32-build-${{ github.run_number }}.apk` — admin paneli bilan, 32-bit (armeabi-v7a)
-            * `arugram-user-64-build-${{ github.run_number }}.apk`  — foydalanuvchi, 64-bit (arm64-v8a)
+            * `arumediatv-admin-32-build-${{ github.run_number }}.apk` — admin paneli bilan, 32-bit (armeabi-v7a)
+            * `arumediatv-user-64-build-${{ github.run_number }}.apk`  — foydalanuvchi, 64-bit (arm64-v8a)
 
             Foydalanuvchi APK'sida admin paneli kodi umuman yo'q.
 
@@ -1112,10 +1113,10 @@ jobs:
 
             **"Ilova o'rnatilmadi" chiqsa:**
 
-            1. Telefondagi eski ARUGRAM ni butunlay o'chiring
+            1. Telefondagi eski ARUmediaTV ni butunlay o'chiring
                (MIUI'da "Ikkinchi makon"/"Ikki ilova" ichidagisini
                ham) va qaytadan urinib ko'ring.
-            2. Baribir chiqsa — `arugram-user-64-build-${{ github.run_number }}.apk` ni
+            2. Baribir chiqsa — `arumediatv-user-64-build-${{ github.run_number }}.apk` ni
                o'rnatib ko'ring. AGAR U O'RNATILSA, telefoningiz
                32-bit ilovalarni qo'llab-quvvatlamaydi va
                `-32` APK shu sabab rad etilyapti.
@@ -1144,7 +1145,7 @@ jobs:
           head -c 16 "$S.session" | grep -q "SQLite format 3"
           pip install --no-cache-dir -q pyrogram==2.0.106 tgcrypto==1.2.5
           python tool/notify/send_apk.py "$S" "$APK" \
-            "ARUGRAM build ${{ github.run_number }} (${{ matrix.name }}) — ${{ env.APP_VERSION }}"
+            "ARUmediaTV build ${{ github.run_number }} (${{ matrix.name }}) — ${{ env.APP_VERSION }}"
           rm -f "$S.session"
 
       # ── ARTIFACT YUKLASH — MAJBURIY EMAS ──────────────────────
@@ -1165,7 +1166,7 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          name: arugram-${{ matrix.name }}-build-${{ github.run_number }}
+          name: arumediatv-${{ matrix.name }}-build-${{ github.run_number }}
           path: ${{ steps.rename.outputs.out }}
           retention-days: 30
 
