@@ -2323,6 +2323,192 @@ pub extern "C" fn rust_tg_join_channel(arg_ptr: *const c_char) -> *mut c_char {
     }))
 }
 
+/// Admin paneli — MAJBURIY KANAL QO'SHISHDAN OLDIN TEKSHIRISH.
+///
+/// TALAB (foydalanuvchi): "kanal ID yoki useri yozilsa avval ilova kanal
+/// bor-yo'qligini tekshirsin; mavjud bo'lsa surati, nomi, username,
+/// obunachilar va hokazo chiqsin". Adminning O'Z Telegram hisobi bilan:
+///   * `@nom` / `t.me/nom` — `contacts.resolveUsername`;
+///   * `-100...` — adminning suhbatlari orasidan (`find_channel`);
+///   * `t.me/+xesh` (yopiq havola) — `messages.checkChatInvite` (a'zo
+///     bo'lmasa ham nomi, surati, obunachilar soni keladi).
+/// Ochiq/yopiq kanal uchun obunachilar va tavsif `channels.getFullChannel`
+/// dan. Surat — kichik (160 px) JPEG, base64 bilan (diskka YOZILMAYDI).
+///
+/// Javob: `{"ok":true,"id":-100..,"title","username","about","members",
+/// "verified","broadcast","public","member","photo":"<base64>"}` yoki
+/// `{"error":...}`.
+#[no_mangle]
+pub extern "C" fn rust_tg_channel_info(arg_ptr: *const c_char) -> *mut c_char {
+    let input = unsafe { cstr_to_str(arg_ptr) }.unwrap_or("").trim().to_string();
+    string_to_cptr(with_client(|t, client| {
+        if !t.authorized.load(Ordering::SeqCst) {
+            return Err("Telegram ulanmagan".to_string());
+        }
+        let v = run_tmo(t, 30, channel_info(&client, &input))?;
+        Ok(v.to_string())
+    }))
+}
+
+fn b64(data: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for c in data.chunks(3) {
+        let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
+        out.push(T[(n >> 18) as usize & 63] as char);
+        out.push(T[(n >> 12) as usize & 63] as char);
+        out.push(if c.len() > 1 { T[(n >> 6) as usize & 63] as char } else { '=' });
+        out.push(if c.len() > 2 { T[n as usize & 63] as char } else { '=' });
+    }
+    out
+}
+
+/// Faylni xotiraga yuklab oladi (kichik rasm uchun; 1 MB dan oshsa to'xtaydi).
+async fn download_small(client: &Client, loc: tl::enums::InputFileLocation) -> Option<Vec<u8>> {
+    let photo = grammers_client::media::ChatPhoto { raw: loc };
+    let mut it = client.iter_download(&photo);
+    let mut buf = Vec::new();
+    while let Some(chunk) = it.next().await.ok()? {
+        buf.extend(chunk);
+        if buf.len() > 1024 * 1024 {
+            return None;
+        }
+    }
+    (!buf.is_empty()).then_some(buf)
+}
+
+fn channel_json(c: &tl::types::Channel) -> Value {
+    json!({
+        "id": -1_000_000_000_000 - c.id,
+        "title": c.title,
+        "username": c.username.clone().or_else(|| c.usernames.as_ref().and_then(|u| u.iter().find_map(|x| match x {
+            tl::enums::Username::Username(x) if x.active => Some(x.username.clone()),
+            _ => None,
+        }))).unwrap_or_default(),
+        "verified": c.verified,
+        "broadcast": c.broadcast,
+        "megagroup": c.megagroup,
+        "members": c.participants_count.unwrap_or(0),
+        "member": !c.left,
+        "join_request": c.join_request,
+    })
+}
+
+async fn channel_info(client: &Client, input: &str) -> Result<Value, String> {
+    // ── YOPIQ HAVOLA ──
+    if let Some(hash) = invite_hash(input) {
+        let inv = client
+            .invoke(&tl::functions::messages::CheckChatInvite { hash })
+            .await
+            .map_err(|e| match rpc_name(&e) {
+                Some("INVITE_HASH_EXPIRED") | Some("INVITE_HASH_INVALID") => "Havola yaroqsiz yoki muddati o'tgan".to_string(),
+                _ => inv_err(&e),
+            })?;
+        let chat = match inv {
+            tl::enums::ChatInvite::Already(a) => a.chat,
+            tl::enums::ChatInvite::Peek(p) => p.chat,
+            tl::enums::ChatInvite::Invite(i) => {
+                // A'zo emas — kanal IDsi noma'lum, ma'lumot havoladan.
+                let mut v = json!({
+                    "ok": true, "id": 0, "title": i.title, "username": "",
+                    "about": i.about.unwrap_or_default(), "members": i.participants_count,
+                    "verified": i.verified, "broadcast": i.broadcast, "megagroup": i.megagroup,
+                    "public": i.public, "member": false, "join_request": i.request_needed,
+                });
+                if let tl::enums::Photo::Photo(p) = i.photo {
+                    let thumb = p.sizes.iter().find_map(|s| match s {
+                        tl::enums::PhotoSize::Size(x) if x.r#type == "a" => Some(x.r#type.clone()),
+                        _ => None,
+                    }).or_else(|| p.sizes.iter().find_map(|s| match s {
+                        tl::enums::PhotoSize::Size(x) => Some(x.r#type.clone()),
+                        tl::enums::PhotoSize::Progressive(x) => Some(x.r#type.clone()),
+                        _ => None,
+                    }));
+                    if let Some(thumb_size) = thumb {
+                        let loc = tl::enums::InputFileLocation::InputPhotoFileLocation(tl::types::InputPhotoFileLocation {
+                            id: p.id, access_hash: p.access_hash, file_reference: p.file_reference, thumb_size,
+                        });
+                        if let Some(b) = download_small(client, loc).await {
+                            v["photo"] = json!(b64(&b));
+                        }
+                    }
+                }
+                return Ok(v);
+            }
+        };
+        return full_info(client, chat).await;
+    }
+    // ── OCHIQ NOM ──
+    if let Some(name) = public_name(input) {
+        let tl::enums::contacts::ResolvedPeer::Peer(rp) = client
+            .invoke(&tl::functions::contacts::ResolveUsername { username: name, referer: None })
+            .await
+            .map_err(|e| match rpc_name(&e) {
+                Some("USERNAME_NOT_OCCUPIED") | Some("USERNAME_INVALID") => "Bunday kanal topilmadi".to_string(),
+                _ => inv_err(&e),
+            })?;
+        let chat = rp.chats.into_iter()
+            .find(|c| matches!(c, tl::enums::Chat::Channel(_)))
+            .ok_or("Bu nom kanalga tegishli emas (foydalanuvchi yoki bot)")?;
+        return full_info(client, chat).await;
+    }
+    // ── ID ──
+    let raw: i64 = input.parse().map_err(|_| "Kanalni @username, -100... ID yoki havola bilan yozing".to_string())?;
+    let id = if raw < 0 { raw } else { -1_000_000_000_000 - raw };
+    let (cid, hash) = match find_channel(client, id).await?.into() {
+        tl::enums::InputPeer::Channel(p) => (p.channel_id, p.access_hash),
+        _ => return Err("bu kanal emas".to_string()),
+    };
+    let res = client
+        .invoke(&tl::functions::channels::GetChannels {
+            id: vec![tl::enums::InputChannel::Channel(tl::types::InputChannel { channel_id: cid, access_hash: hash })],
+        })
+        .await
+        .map_err(|e| inv_err(&e))?;
+    let chats = match res {
+        tl::enums::messages::Chats::Chats(c) => c.chats,
+        tl::enums::messages::Chats::Slice(c) => c.chats,
+    };
+    let chat = chats.into_iter().next().ok_or("Kanal topilmadi")?;
+    full_info(client, chat).await
+}
+
+/// Kanal obyektidan to'liq ma'lumot (obunachilar, tavsif, surat).
+async fn full_info(client: &Client, chat: tl::enums::Chat) -> Result<Value, String> {
+    let tl::enums::Chat::Channel(c) = chat else {
+        return Err("Bu kanal emas (oddiy guruh)".to_string());
+    };
+    let mut v = channel_json(&c);
+    v["ok"] = json!(true);
+    v["public"] = json!(!v["username"].as_str().unwrap_or("").is_empty());
+    let Some(hash) = c.access_hash else {
+        return Ok(v);
+    };
+    let input = tl::enums::InputChannel::Channel(tl::types::InputChannel { channel_id: c.id, access_hash: hash });
+    if let Ok(tl::enums::messages::ChatFull::Full(f)) = client
+        .invoke(&tl::functions::channels::GetFullChannel { channel: input })
+        .await
+    {
+        if let tl::enums::ChatFull::ChannelFull(cf) = f.full_chat {
+            v["about"] = json!(cf.about);
+            if let Some(n) = cf.participants_count {
+                v["members"] = json!(n);
+            }
+        }
+    }
+    if let tl::enums::ChatPhoto::Photo(p) = &c.photo {
+        let loc = tl::enums::InputFileLocation::InputPeerPhotoFileLocation(tl::types::InputPeerPhotoFileLocation {
+            big: false,
+            peer: tl::enums::InputPeer::Channel(tl::types::InputPeerChannel { channel_id: c.id, access_hash: hash }),
+            photo_id: p.photo_id,
+        });
+        if let Some(b) = download_small(client, loc).await {
+            v["photo"] = json!(b64(&b));
+        }
+    }
+    Ok(v)
+}
+
 /// Admin paneli — kodlash holati JONLI: log kanalidagi qadalgan
 /// `#arustatus` xabarini adminning O'Z Telegram hisobi bilan o'qiydi
 /// (`channels.getMessages`). Worker ham, baza ham ishtirok etmaydi —

@@ -132,13 +132,31 @@ async fn record_request(env: &Env, chat_id: i64, tg_id: i64) {
         return;
     };
     let id = jint(&ch, "id");
+    let now = now_ms();
     // `changes()` — oldingi INSERT haqiqatda qator qo'shganmi (takror
-    // bo'lsa 0): hisoblagich faqat yangi odamda oshadi.
+    // bo'lsa 0): hisoblagich faqat yangi odamda oshadi. Grafik
+    // chelaklari ham faqat YANGI so'rovda oshadi (qator vaqti `at` = shu
+    // so'rov vaqti bo'lsa — demak hozirgina qo'shilgan).
+    let metric = format!("chan:{id}");
+    let new_row = "(SELECT COUNT(*) FROM chan_requests WHERE channel_id=? AND tg_id=? AND at=?)";
+    let hour_sql = format!("INSERT INTO stats_hourly (hour,metric,value) SELECT ?, ?, {new_row}
+         WHERE {new_row} > 0
+         ON CONFLICT(hour,metric) DO UPDATE SET value=value+excluded.value");
+    let day_sql = format!("INSERT INTO stats_daily (day,metric,value) SELECT ?, ?, {new_row}
+         WHERE {new_row} > 0
+         ON CONFLICT(day,metric) DO UPDATE SET value=value+excluded.value");
+    let pick = |bucket: String| vec![
+        TursoArg::text(&bucket), TursoArg::text(&metric),
+        TursoArg::int(id), TursoArg::int(tg_id), TursoArg::int(now),
+        TursoArg::int(id), TursoArg::int(tg_id), TursoArg::int(now),
+    ];
     let _ = turso_batch(env, &[
         ("INSERT OR IGNORE INTO chan_requests (channel_id,tg_id,at) VALUES (?,?,?)",
-         vec![TursoArg::int(id), TursoArg::int(tg_id), TursoArg::int(now_ms())]),
+         vec![TursoArg::int(id), TursoArg::int(tg_id), TursoArg::int(now)]),
         ("UPDATE channels_db SET joined = joined + changes() WHERE id=?",
          vec![TursoArg::int(id)]),
+        (hour_sql.as_str(), pick(hour_key(now))),
+        (day_sql.as_str(), pick(day_key(now))),
     ]).await;
 }
 
@@ -147,9 +165,21 @@ async fn count_join(env: &Env, chat_id: i64) {
     if chat_id == 0 {
         return;
     }
-    let _ = turso_exec(env,
-        "UPDATE channels_db SET joined = joined + 1 WHERE chat_id=? AND kind='public'",
-        vec![TursoArg::int(chat_id)]).await;
+    let Ok(res) = turso_exec(env,
+        "UPDATE channels_db SET joined = joined + 1 WHERE chat_id=? AND kind='public' RETURNING id",
+        vec![TursoArg::int(chat_id)]).await
+    else {
+        return;
+    };
+    // Grafik uchun chelaklar (`/api/stats/series`, `chan:<id>`).
+    let now = now_ms();
+    for r in rows_of(&res) {
+        let metric = format!("chan:{}", jint(&r, "id"));
+        let _ = turso_batch(env, &[
+            (STAT_HOUR_SQL, stat_args(&hour_key(now), &metric, 1)),
+            (STAT_DAY_SQL, stat_args(&day_key(now), &metric, 1)),
+        ]).await;
+    }
 }
 
 fn is_member_status(m: &Value) -> bool {
@@ -261,6 +291,15 @@ pub(crate) async fn change_limit(env: &Env, id: i64, delta: i64) -> Option<Value
     first_row(&res)
 }
 
+/// Limitni ANIQ belgilaydi (foydalanuvchi talabi: "1000 desam 1000,
+/// 10 000 desam 10 000"). `need = 0` — cheklovsiz.
+pub(crate) async fn set_limit(env: &Env, id: i64, need: i64) -> Option<Value> {
+    let res = turso_exec(env,
+        "UPDATE channels_db SET need = ? WHERE id=? AND kind IN ('public','private') RETURNING *",
+        vec![TursoArg::int(need.max(0)), TursoArg::int(id)]).await.ok()?;
+    first_row(&res)
+}
+
 /// O'chiradi — yopiq kanal bo'lsa unga so'rov yuborganlar ham o'chadi.
 pub(crate) async fn delete(env: &Env, id: i64) -> bool {
     turso_batch(env, &[
@@ -337,6 +376,10 @@ pub(crate) async fn route(req: Request, env: &Env, path: &str, method: Method) -
         {
             Ok(c) => ok_nostore(json!({"ok": true, "item": admin_view(&c)})),
             Err(e) => json_resp(&json!({"error": e}), 400),
+        },
+        "set" => match set_limit(env, id, jint(&b, "need")).await {
+            Some(c) => ok_nostore(json!({"ok": true, "item": admin_view(&c)})),
+            None => err404("Topilmadi"),
         },
         "limit" => match change_limit(env, id, jint(&b, "delta")).await {
             Some(c) => ok_nostore(json!({"ok": true, "item": admin_view(&c)})),
@@ -517,9 +560,11 @@ async fn show_one(env: &Env, chat: i64, msg_id: i64, id: i64) {
         show(env, chat, msg_id, "\u{274C} Topilmadi.", back("ch:list")).await;
         return;
     };
+    // Limit ANIQ son bilan belgilanadi (oshirish/kamaytirish o'rniga —
+    // cheksiz kanalda ular ishlamasdi).
     let mut rows = vec![
-        vec![b("\u{1F4C8} Limitni oshirish", &format!("ch:inc:{id}"))],
-        vec![b("\u{1F4C9} Limitni kamaytirish", &format!("ch:dec:{id}"))],
+        vec![b("\u{270F}\u{FE0F} Limitni belgilash", &format!("ch:setlim:{id}"))],
+        vec![b("\u{267E} Cheksiz qilish", &format!("ch:unl:{id}"))],
     ];
     rows.push(vec![b("\u{1F5D1} O'chirish", &format!("ch:del:{id}"))]);
     rows.push(vec![b("\u{27E8} Orqaga", "ch:list")]);
@@ -572,6 +617,16 @@ pub(crate) async fn on_callback(env: &Env, chat: i64, msg_id: i64, data: &str) -
             show_list(env, chat, msg_id).await;
         }
         "view" => show_one(env, chat, msg_id, id).await,
+        "setlim" => {
+            config_put(env, WAIT_KEY, &format!("limit:{id}")).await;
+            show(env, chat, msg_id,
+                "Yangi limitni RAQAM bilan yuboring (masalan: 1000 yoki 10000).\n<code>0</code> — cheklovsiz.",
+                back(&format!("ch:view:{id}"))).await;
+        }
+        "unl" => {
+            set_limit(env, id, 0).await;
+            show_one(env, chat, msg_id, id).await;
+        }
         "inc" | "dec" => {
             config_put(env, WAIT_KEY, &format!("{}:{id}", parts[0])).await;
             let verb = if parts[0] == "inc" { "oshirmoqchisiz" } else { "kamaytirmoqchisiz" };

@@ -59,13 +59,21 @@ class StatBlock {
 
 class AppStats {
   final StatBlock users;
+
+  /// Qism ko'rishlar (odam boshiga qism uchun bitta).
   final StatBlock views;
+
+  /// Anime va bo'lim ko'rishlar (odam boshiga anime/bo'lim uchun bitta).
+  final StatBlock animeViews;
+  final StatBlock seasonViews;
   final StatBlock traffic;
   final StatBlock watch;
 
   const AppStats({
     required this.users,
     required this.views,
+    required this.animeViews,
+    required this.seasonViews,
     required this.traffic,
     required this.watch,
   });
@@ -73,6 +81,8 @@ class AppStats {
   static const empty = AppStats(
     users: StatBlock(),
     views: StatBlock(),
+    animeViews: StatBlock(),
+    seasonViews: StatBlock(),
     traffic: StatBlock(),
     watch: StatBlock(),
   );
@@ -80,6 +90,10 @@ class AppStats {
   factory AppStats.fromJson(Map<String, dynamic> j) => AppStats(
         users: StatBlock.fromJson(j['users'] as Map<String, dynamic>?),
         views: StatBlock.fromJson(j['views'] as Map<String, dynamic>?),
+        animeViews:
+            StatBlock.fromJson(j['anime_views'] as Map<String, dynamic>?),
+        seasonViews:
+            StatBlock.fromJson(j['season_views'] as Map<String, dynamic>?),
         traffic: StatBlock.fromJson(j['traffic'] as Map<String, dynamic>?),
         watch: StatBlock.fromJson(j['watch'] as Map<String, dynamic>?),
       );
@@ -87,6 +101,8 @@ class AppStats {
   Map<String, dynamic> toJson() => {
         'users': users.toJson(),
         'views': views.toJson(),
+        'anime_views': animeViews.toJson(),
+        'season_views': seasonViews.toJson(),
         'traffic': traffic.toJson(),
         'watch': watch.toJson(),
       };

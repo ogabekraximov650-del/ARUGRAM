@@ -4850,3 +4850,38 @@ ham ko'rsatilsin".
   qilmaydi. Qism ko'rinadigan bo'lganda (`/api/epizods` qo'shish/tahrir,
   `encode/quality`, kalitli `encode/queue`) `free_seasons_forget` keshni
   tozalaydi (izolyat + shu data markaz; boshqalarida 10 daqiqagacha).
+
+## Kanal qo'shish oynasi, aniq limit, grafiklar, statistika bloklari, kodlash holati tuzatildi (2026-10)
+
+- **Kodlash holati ko'rinmasdi**: Pyrogram matnni Markdown deb o'qib, `---`
+  ajratgich va `--:--` ni "tagiga chizish" qilib yo'qotardi. Endi qadalgan
+  xabar `ParseMode.DISABLED` bilan yuboriladi/tahrirlanadi; o'quvchilar
+  (worker `parse_status_pin`, ilova `parseStatusPin`) faqat tanish
+  kalitlarni sarlavha deb oladi, qolgani log.
+- **Worker keshi**: `/api/encode/live` natijasi Cloudflare keshida 30 s
+  (`ENCODE_LIVE_CACHE_URL`), log kanali izolyatda eslab qolinadi — Turso
+  o'qilmaydi. Ilovaning asosiy yo'li baribir worker'siz (qadalgan xabar).
+- **GitHub o'qish tokeni**: `GH_READ_TOKEN` (fine-grained, faqat kodlash
+  repo'si, "Actions: Read-only"; GitHub secret -> `deploy-worker.yml`).
+  Bo'lsa `/api/encode/live` uni faqat adminga `gh` bilan beradi va worker
+  GitHub'ga o'zi bormaydi; ilova run qadamlarini GitHub'dan 30 s da so'raydi.
+  Yozish huquqli `GH_ACTIONS_TOKEN` ilovaga hech qachon chiqmaydi.
+- **Kanal qo'shish** (`admin_channel_add_screen.dart`): qidiruv maydoni ->
+  `rust_tg_channel_info` (admin hisobi: `resolveUsername` / suhbatlardan ID /
+  `checkChatInvite`; `getFullChannel` — obunachilar, tavsif; kichik surat
+  base64, diskka yozilmaydi) -> ma'lumot kartasi -> tur, limit (aniq son yoki
+  cheksiz) -> qo'shish (bot admin qilinadi, server tekshiradi).
+- **Limit aniq**: `op: set` (`channels::set_limit`), ilovada son + "Cheksiz";
+  botda "Limitni belgilash" / "Cheksiz qilish" (oshirish/kamaytirish olib
+  tashlandi, eski tugmalar ishlab turadi).
+- **Grafiklar** (`lib/widgets/trend_chart.dart`, `GET /api/stats/series`,
+  5 daqiqa kesh): 24 soat / 7 / 30 kun / hammasi, bosib-surib aniq qiymat,
+  o'zgarish foizi. Ko'rsatkichlar: `users` (yangi hisoblar), `anime_views`,
+  `season_views`, `views`, `watch_ms`, `traffic`, `chan` / `chan:<id>`
+  (faqat admin). Kanal chelaklari `channels.rs` hodisalarida yoziladi
+  (yangi qo'shilish/so'rovga +2 qator).
+- **Statistika bloklari**: foydalanuvchilar, anime / bo'lim / qism
+  ko'rishlar, ko'rish vaqti, trafik — kunlik/haftalik/oylik/umumiy + grafik.
+  `anime_views` / `season_views` `sync_route` da odam boshiga bitta
+  sanaladi; o'tmishi bir marta tomosha tarixidan `0000-00-00` chelagiga
+  yoziladi (`mig_view_seed`, faqat "umumiy" ga kiradi).

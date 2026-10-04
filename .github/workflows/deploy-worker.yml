@@ -99,6 +99,10 @@ jobs:
           # Cron `encode.yml` ni o'zi ishga tushirishi uchun: fine-grained
           # token, faqat shu repo, "Actions: Read and write".
           put GH_ACTIONS_TOKEN "${{ secrets.GH_ACTIONS_TOKEN }}"
+          # Admin paneli GitHub run qadamlarini O'ZI so'rashi uchun: fine-grained
+          # token, faqat kodlash repo'si, "Actions: Read-only" (yozish YO'Q).
+          # Faqat admin so'rovida ilovaga beriladi (`/api/encode/live`).
+          put GH_READ_TOKEN "${{ secrets.GH_READ_TOKEN }}"
           # Kodlash boshqa akkauntdagi repoda bo'lsa: shu repodagi
           # `tool/encode/gh_token.enc` (ENCODE_TOKEN bilan shifrlangan
           # token) ochiladi va yuqoridagini ALMASHTIRADI; repo nomi

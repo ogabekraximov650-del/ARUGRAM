@@ -1,9 +1,11 @@
 // lib/screens/stats_screen.dart — UMUMIY STATISTIKA.
 //
-// Bitta sahifa, to'rtta blok (ekranni yuqoriga surib ko'riladi):
+// Bitta sahifa, oltita blok (ekranni yuqoriga surib ko'riladi):
 //
-//   Foydalanuvchilar → Tomosha qilingan qismlar → Trafik sarfi →
-//   Tomosha vaqti
+//   Foydalanuvchilar → Anime ko'rishlar → Bo'lim ko'rishlar →
+//   Qism ko'rishlar → Ko'rish vaqti → Trafik sarfi
+//
+// Har blok ostida treyding chizig'idek grafik (`trend_chart.dart`).
 //
 // Har birida bir xil tartib: Kunlik / Haftalik / Oylik / Umumiy.
 // Raqamlar uch xonadan ajratiladi (`1.000`). Yillik ko'rsatkich
@@ -18,6 +20,7 @@ import '../services/format.dart';
 import '../services/stats_service.dart';
 import '../theme/app_background.dart';
 import '../widgets/glass.dart';
+import '../widgets/trend_chart.dart';
 
 class StatsScreen extends StatefulWidget {
   const StatsScreen({super.key});
@@ -92,20 +95,56 @@ class _StatsScreenState extends State<StatsScreen> {
                             parent: AlwaysScrollableScrollPhysics()),
                         padding: const EdgeInsets.fromLTRB(16, 4, 16, 120),
                         children: [
+                          // TALAB (foydalanuvchi): kunlik, haftalik, oylik
+                          // va umumiy — foydalanuvchilar, anime / bo'lim /
+                          // qism ko'rishlar, ko'rish soati, trafik; har
+                          // biri treyding chizig'idek grafik bilan.
                           _StatCard(
                             title: 'Foydalanuvchilar',
                             icon: Icons.people_alt_rounded,
                             block: s.stats.users,
                             format: (v) => '${formatCount(v)} ta',
-                            note: 'Kunlik — oxirgi 24 soatda kirganlar',
+                            note: 'Kunlik — oxirgi 24 soatda kirganlar. '
+                                'Grafik — yangi ochilgan hisoblar',
+                            metric: 'users',
                           ),
                           const SizedBox(height: 12),
                           _StatCard(
-                            title: 'Tomosha qilingan qismlar',
+                            title: 'Anime ko\'rishlar',
+                            icon: Icons.movie_filter_rounded,
+                            block: s.stats.animeViews,
+                            format: (v) => '${formatCount(v)} ta',
+                            note: 'Bitta odam bitta animeni ko\'rgani bir marta '
+                                'sanaladi',
+                            metric: 'anime_views',
+                          ),
+                          const SizedBox(height: 12),
+                          _StatCard(
+                            title: 'Bo\'lim ko\'rishlar',
+                            icon: Icons.video_library_rounded,
+                            block: s.stats.seasonViews,
+                            format: (v) => '${formatCount(v)} ta',
+                            note: 'Bitta odam bitta bo\'limni ko\'rgani bir marta '
+                                'sanaladi',
+                            metric: 'season_views',
+                          ),
+                          const SizedBox(height: 12),
+                          _StatCard(
+                            title: 'Qism ko\'rishlar',
                             icon: Icons.play_circle_fill_rounded,
                             block: s.stats.views,
                             format: (v) => '${formatCount(v)} ta',
                             note: 'Qism ochilib ko\'rilgani hisoblanadi',
+                            metric: 'views',
+                          ),
+                          const SizedBox(height: 12),
+                          _StatCard(
+                            title: 'Ko\'rish vaqti',
+                            icon: Icons.schedule_rounded,
+                            block: s.stats.watch,
+                            format: (v) => '${formatHours(v)} soat',
+                            note: '1x tezlikdagi haqiqiy vaqt',
+                            metric: 'watch_ms',
                           ),
                           const SizedBox(height: 12),
                           _StatCard(
@@ -113,15 +152,8 @@ class _StatsScreenState extends State<StatsScreen> {
                             icon: Icons.cloud_download_rounded,
                             block: s.stats.traffic,
                             format: formatBytes,
-                            note: 'Foydalanuvchilar qabul qilgan hajm',
-                          ),
-                          const SizedBox(height: 12),
-                          _StatCard(
-                            title: 'Tomosha vaqti',
-                            icon: Icons.schedule_rounded,
-                            block: s.stats.watch,
-                            format: (v) => '${formatHours(v)} soat',
-                            note: '1x tezlikdagi haqiqiy vaqt',
+                            note: 'Barcha foydalanuvchilar qabul qilgan hajm',
+                            metric: 'traffic',
                           ),
                           const SizedBox(height: 16),
                           Center(
@@ -154,12 +186,16 @@ class _StatCard extends StatelessWidget {
   final String Function(int) format;
   final String note;
 
+  /// Grafik ko'rsatkichi (`/api/stats/series`).
+  final String metric;
+
   const _StatCard({
     required this.title,
     required this.icon,
     required this.block,
     required this.format,
     required this.note,
+    required this.metric,
   });
 
   @override
@@ -191,6 +227,8 @@ class _StatCard extends StatelessWidget {
           _row('Haftalik', block.weekly),
           _row('Oylik', block.monthly),
           _row('Umumiy', block.total, strong: true),
+          const SizedBox(height: 14),
+          TrendChart(metric: metric, format: format),
           const SizedBox(height: 8),
           Text(
             note,

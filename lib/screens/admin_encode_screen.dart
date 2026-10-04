@@ -120,6 +120,7 @@ class _AdminEncodeScreenState extends State<AdminEncodeScreen> {
       });
       _lastJob = _jobKey(_status);
       unawaited(_readDirect());
+      unawaited(_readGithub());
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -129,10 +130,19 @@ class _AdminEncodeScreenState extends State<AdminEncodeScreen> {
     }
   }
 
+  /// Faqat o'qish huquqli GitHub tokeni (`gh`: token, repo, workflow) —
+  /// bo'lsa run qadamlari GitHub'dan TO'G'RIDAN-TO'G'RI so'raladi.
+  Map<String, dynamic>? _gh;
+
   void _applyWorkerLive(Map<String, dynamic> live) {
-    _github = live['github'] is Map<String, dynamic>
-        ? live['github'] as Map<String, dynamic>
-        : null;
+    if (live['gh'] is Map<String, dynamic>) {
+      _gh = live['gh'] as Map<String, dynamic>;
+    }
+    if (_gh == null || live['github'] != null) {
+      _github = live['github'] is Map<String, dynamic>
+          ? live['github'] as Map<String, dynamic>
+          : null;
+    }
     _logChat = '${live['log_chat'] ?? ''}';
     // To'g'ridan-to'g'ri o'qilayotgan bo'lsa worker nusxasi (eskiroq)
     // ustidan yozilmaydi.
@@ -164,6 +174,59 @@ class _AdminEncodeScreenState extends State<AdminEncodeScreen> {
     return true;
   }
 
+  /// GitHub run va qadamlari — adminning o'qish tokeni bilan, worker'siz.
+  Future<void> _readGithub() async {
+    final gh = _gh;
+    if (gh == null) return;
+    final h = {
+      'Authorization': 'Bearer ${gh['token']}',
+      'Accept': 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+    };
+    final base = 'https://api.github.com/repos/${gh['repo']}/actions';
+    try {
+      Map<String, dynamic>? run;
+      for (final st in const ['in_progress', 'queued']) {
+        final r = await http
+            .get(
+                Uri.parse('$base/workflows/${gh['workflow']}/runs'
+                    '?status=$st&per_page=1'),
+                headers: h)
+            .timeout(const Duration(seconds: 15));
+        if (r.statusCode != 200) return;
+        final runs = (jsonDecode(r.body) as Map<String, dynamic>)['workflow_runs'];
+        if (runs is List && runs.isNotEmpty && runs.first is Map<String, dynamic>) {
+          run = runs.first as Map<String, dynamic>;
+          break;
+        }
+      }
+      if (run == null) {
+        if (mounted) setState(() => _github = null);
+        return;
+      }
+      final cur = run;
+      final r = await http
+          .get(Uri.parse('$base/runs/${cur['id']}/jobs?per_page=1'), headers: h)
+          .timeout(const Duration(seconds: 15));
+      final jobs = r.statusCode == 200
+          ? (jsonDecode(r.body) as Map<String, dynamic>)['jobs']
+          : null;
+      final steps = jobs is List && jobs.isNotEmpty && jobs.first is Map
+          ? ((jobs.first as Map)['steps'] as List? ?? const [])
+          : const [];
+      if (!mounted) return;
+      setState(() => _github = {
+            'id': cur['id'],
+            'status': cur['status'],
+            'url': cur['html_url'],
+            'started_at': cur['run_started_at'],
+            'steps': steps,
+          });
+    } catch (_) {
+      // Tarmoq yo'q — keyingi aylanishda.
+    }
+  }
+
   Future<void> _onTick() async {
     if (_polling || !mounted || _at == null) return;
     _polling = true;
@@ -174,7 +237,8 @@ class _AdminEncodeScreenState extends State<AdminEncodeScreen> {
       if (!mounted) return;
       // Telegram'dan o'qib bo'lmasa — worker orqali (10 soniyada), GitHub
       // qadamlari esa har holda 30 soniyada.
-      if ((!ok && _ticks % 5 == 0) || _ticks % 15 == 0) {
+      if (_gh != null && _ticks % 15 == 0) unawaited(_readGithub());
+      if ((!ok && _ticks % 5 == 0) || (_gh == null && _ticks % 15 == 0)) {
         final live = await _get('/api/encode/live');
         if (!mounted) return;
         setState(() => _applyWorkerLive(live ?? const {}));
@@ -350,6 +414,9 @@ Map<String, dynamic>? parseStatusPin(String text) {
   final head = <String, String>{};
   final log = <String>[];
   var body = false;
+  // Faqat TANISH kalitlar sarlavha; qolgani log (ajratgich buzilgan eski
+  // xabarda ham log yo'qolmasin).
+  const keys = {'run', 'job', 'num', 'progress', 'updated', 'data'};
   for (final l in lines.skip(1)) {
     if (body) {
       log.add(l);
@@ -357,7 +424,12 @@ Map<String, dynamic>? parseStatusPin(String text) {
       body = true;
     } else {
       final i = l.indexOf(':');
-      if (i > 0) head[l.substring(0, i).trim()] = l.substring(i + 1).trim();
+      final k = i > 0 ? l.substring(0, i).trim() : '';
+      if (keys.contains(k)) {
+        head[k] = l.substring(i + 1).trim();
+      } else if (l.trim().isNotEmpty) {
+        log.add(l);
+      }
     }
   }
   final job = (head['job'] ?? '').split('/').map(int.tryParse).toList();

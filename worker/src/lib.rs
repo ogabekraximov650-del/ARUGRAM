@@ -4751,6 +4751,16 @@ async fn sync_route(mut req: Request, env: &Env) -> Result<Response> {
     let mut watch_left = MAX_SYNC_WATCH_MS;
     let mut views_left = MAX_SYNC_VIEWS;
     let mut total_views = 0i64;
+    // ANIME va BO'LIM ko'rishlari (foydalanuvchi talabi: statistikada
+    // "anime ko'rishlar", "bo'lim ko'rishlar", "qism ko'rishlar" alohida).
+    // Odam boshiga BITTA: shu odam shu anime/bo'limdan BIRINCHI marta qism
+    // ko'rganda oshadi (`old_hist` — shu animelarning eski yozuvlari).
+    let mut anime_views = 0i64;
+    let mut season_views = 0i64;
+    let mut seen_anime: Vec<i64> = old_hist.iter()
+        .filter(|(_, (_, v))| *v > 0).map(|((a, _, _), _)| *a).collect();
+    let mut seen_season: Vec<(i64, i64)> = old_hist.iter()
+        .filter(|(_, (_, v))| *v > 0).map(|((a, s, _), _)| (*a, *s)).collect();
     let mut total_watch = 0i64;
 
     let mut stmts: Vec<(&str, Vec<TursoArg>)> = Vec::new();
@@ -4806,6 +4816,16 @@ async fn sync_route(mut req: Request, env: &Env) -> Result<Response> {
             TursoArg::int(at),
         ]);
 
+        if view_inc > 0 {
+            if !seen_anime.contains(&aid) {
+                seen_anime.push(aid);
+                anime_views += 1;
+            }
+            if !seen_season.contains(&(aid, sid)) {
+                seen_season.push((aid, sid));
+                season_views += 1;
+            }
+        }
         if view_inc > 0 || delta > 0 {
             total_views += view_inc;
             total_watch += delta;
@@ -4976,6 +4996,14 @@ async fn sync_route(mut req: Request, env: &Env) -> Result<Response> {
     // ── STATISTIKA CHELAKLARI — PAKETGA BIR MARTA ─────────────
     let hour = hour_key(now);
     let day = day_key(now);
+    if anime_views > 0 {
+        stmts.push((STAT_HOUR_SQL, stat_args(&hour, "anime_views", anime_views)));
+        stmts.push((STAT_DAY_SQL, stat_args(&day, "anime_views", anime_views)));
+    }
+    if season_views > 0 {
+        stmts.push((STAT_HOUR_SQL, stat_args(&hour, "season_views", season_views)));
+        stmts.push((STAT_DAY_SQL, stat_args(&day, "season_views", season_views)));
+    }
     if total_views > 0 {
         stmts.push((STAT_HOUR_SQL, stat_args(&hour, "views", total_views)));
         stmts.push((STAT_DAY_SQL, stat_args(&day, "views", total_views)));
@@ -8600,6 +8628,26 @@ async fn stats_route(env: &Env) -> Result<Response> {
     let d7 = day_key(now - 6 * day_ms);
     let d30 = day_key(now - 29 * day_ms);
 
+    // ── ANIME / BO'LIM KO'RISHLARI: O'TMISH BIR MARTA ─────────
+    // Bu ikki ko'rsatkich 2026-10 da qo'shildi (`sync_route`). Ungacha
+    // ko'rilganlar tomosha tarixidan BIR MARTA sanaladi va "0000-00-00"
+    // kunli chelak bo'lib yoziladi: "umumiy" ga kiradi, kunlik/haftalik/
+    // oylikka va grafikka kirmaydi.
+    if config_get(env, "mig_view_seed").await.is_none() {
+        let seed = turso_many(env, &[
+            ("SELECT COUNT(*) FROM (SELECT DISTINCT user_id, anime_id FROM watch_history_db WHERE view_count > 0)", vec![]),
+            ("SELECT COUNT(*) FROM (SELECT DISTINCT user_id, anime_id, season_id FROM watch_history_db WHERE view_count > 0)", vec![]),
+        ]).await;
+        if let Ok(seed) = seed {
+            let (a, b) = (scalar(&seed[0]), scalar(&seed[1]));
+            let _ = turso_batch(env, &[
+                (STAT_DAY_SQL, stat_args("0000-00-00", "anime_views", a)),
+                (STAT_DAY_SQL, stat_args("0000-00-00", "season_views", b)),
+            ]).await;
+            config_put(env, "mig_view_seed", "1").await;
+        }
+    }
+
     let res = turso_many(env, &[
         // Foydalanuvchilar: jami + davr bo'yicha yangi hisoblar.
         //
@@ -8660,7 +8708,9 @@ async fn stats_route(env: &Env) -> Result<Response> {
             periods.insert(m, (cell(r, 1), cell(r, 2), cell(r, 3)));
         }
     }
-    for (metric, key) in [("views", "views"), ("traffic", "traffic"), ("watch_ms", "watch")] {
+    for (metric, key) in [("views", "views"), ("anime_views", "anime_views"),
+                          ("season_views", "season_views"), ("traffic", "traffic"),
+                          ("watch_ms", "watch")] {
         let (w, m, t) = periods.get(metric).copied().unwrap_or((0, 0, 0));
         out.insert(key.into(), json!({
             "daily": daily.get(metric).copied().unwrap_or(0),
@@ -8669,6 +8719,126 @@ async fn stats_route(env: &Env) -> Result<Response> {
     }
     out.insert("tz".into(), json!("UTC+5"));
     ok(Value::Object(out))
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  GRAFIK: VAQT QATORI (treyding chizig'idek)
+// ═══════════════════════════════════════════════════════════════
+//
+// TALAB (foydalanuvchi): "statistika tizimini qo'sh, huddi treyding
+// chizig'idek" — ilova ham, majburiy kanallar ham.
+//
+// `GET /api/stats/series?metric=<m>&range=24h|7d|30d|all`
+//   * `views`, `traffic`, `watch_ms` — mavjud chelaklar (`stats_hourly`
+//     24 soat uchun, `stats_daily` qolgani uchun). Bazaga YANGI yozuv yo'q;
+//   * `users` — yangi hisoblar, `users_db.created_at` dan;
+//   * `chan` (hamma kanal) yoki `chan:<id>` — majburiy kanalga qo'shilgan /
+//     so'rov yuborganlar (`channels.rs` hodisalarida yoziladi). FAQAT admin.
+//
+// Javob: `{"points":[{"t":"2026-10-04T13","v":12},...],"total":N,"bucket":"hour|day"}`.
+// Bo'sh oraliqlar 0 bilan to'ldiriladi (chiziq uzilmasin). Natija
+// Cloudflare keshida 5 daqiqa (bazaga o'qish kamaysin).
+async fn stats_series(req: &Request, env: &Env) -> Result<Response> {
+    let url = req.url()?;
+    let q = |k: &str| url.query_pairs().find(|(n, _)| n == k).map(|(_, v)| v.to_string()).unwrap_or_default();
+    let metric = q("metric");
+    let range = q("range");
+    let chan = metric == "chan" || metric.starts_with("chan:");
+    if !matches!(metric.as_str(), "views" | "anime_views" | "season_views" | "traffic" | "watch_ms" | "users") && !chan {
+        return json_resp(&json!({"error": "metric"}), 400);
+    }
+    if chan {
+        let Some(u) = session_user(env, &bearer(req)).await? else {
+            return json_resp(&json!({"error": "unauthorized"}), 401);
+        };
+        if !is_admin(&u) {
+            return json_resp(&json!({"error": "forbidden"}), 403);
+        }
+    }
+    // Kesh (kanal grafigi ham — so'rov admin tekshiruvidan KEYIN).
+    let key = format!("https://arugram-series.internal/v1?m={metric}&r={range}");
+    if let Ok(k) = Request::new(&key, Method::Get) {
+        if let Ok(Some(mut hit)) = Cache::default().get(&k, false).await {
+            if let Ok(v) = hit.json::<Value>().await {
+                return ok_nostore(v);
+            }
+        }
+    }
+    let now = now_ms();
+    const HOUR: i64 = 3_600_000;
+    const DAY: i64 = 86_400_000;
+    let hourly = range == "24h";
+    let days: i64 = match range.as_str() { "7d" => 7, "30d" => 30, _ => 0 };
+
+    // (chelak kaliti -> qiymat)
+    let mut vals: std::collections::BTreeMap<String, i64> = std::collections::BTreeMap::new();
+    let since_hour = hour_key(now - 23 * HOUR);
+    let since_day = if days > 0 { day_key(now - (days - 1) * DAY) } else { String::new() };
+    let rows = if metric == "users" {
+        let fmt = if hourly { "%Y-%m-%dT%H" } else { "%Y-%m-%d" };
+        let since = if hourly { now - 24 * HOUR } else if days > 0 { now - days * DAY } else { 0 };
+        turso_exec(env, &format!(
+            "SELECT strftime('{fmt}', (created_at + {UTC5_OFFSET_MS}) / 1000, 'unixepoch') AS b,
+                    COUNT(*) AS v
+               FROM users_db WHERE created_at >= ? GROUP BY b"),
+            vec![TursoArg::int(since)]).await?
+    } else {
+        let (table, col) = if hourly { ("stats_hourly", "hour") } else { ("stats_daily", "day") };
+        let since = if hourly { since_hour.clone() } else { since_day.clone() };
+        let (cond, arg) = if metric == "chan" {
+            ("metric LIKE 'chan:%'".to_string(), None)
+        } else {
+            ("metric = ?".to_string(), Some(metric.clone()))
+        };
+        let mut args = vec![TursoArg::text(&since)];
+        if let Some(a) = arg { args.push(TursoArg::text(&a)); }
+        turso_exec(env, &format!(
+            "SELECT {col} AS b, SUM(value) AS v FROM {table}
+              WHERE {col} >= ? AND {cond} GROUP BY {col}"), args).await?
+    };
+    for r in rows_of(&rows) {
+        let b = r["b"].as_str().unwrap_or("").to_string();
+        // "0000-00-00" — o'tmish yig'indisi (`stats_route`), grafikka kirmaydi.
+        if !b.is_empty() && !b.starts_with("0000") {
+            *vals.entry(b).or_insert(0) += jint(&r, "v");
+        }
+    }
+    // Chelaklar ketma-ketligi (bo'shlari 0).
+    let mut keys: Vec<String> = Vec::new();
+    if hourly {
+        for i in (0..24).rev() {
+            keys.push(hour_key(now - i * HOUR));
+        }
+    } else {
+        let n = if days > 0 {
+            days
+        } else {
+            // "Hammasi": birinchi ma'lum kundan bugungacha (ko'pi 3 yil).
+            let first = vals.keys().next().cloned().unwrap_or_else(|| day_key(now));
+            let mut n = 1;
+            while n < 1100 && day_key(now - n * DAY) >= first {
+                n += 1;
+            }
+            n
+        };
+        for i in (0..n).rev() {
+            keys.push(day_key(now - i * DAY));
+        }
+    }
+    let mut total = 0i64;
+    let points: Vec<Value> = keys.iter().map(|k| {
+        let v = vals.get(k).copied().unwrap_or(0);
+        total += v;
+        json!({"t": k, "v": v})
+    }).collect();
+    let out = json!({"points": points, "total": total, "bucket": if hourly { "hour" } else { "day" }});
+    if let Ok(mut resp) = Response::from_json(&out) {
+        let _ = resp.headers_mut().set("Cache-Control", "public, max-age=300");
+        if let Ok(k) = Request::new(&key, Method::Get) {
+            let _ = Cache::default().put(&k, resp).await;
+        }
+    }
+    ok_nostore(out)
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -10308,7 +10478,19 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
             return json_resp(&json!({"error": "forbidden"}), 403);
         }
         if path == "/api/encode/live" {
-            return ok_nostore(encode_live(env).await);
+            let mut v = encode_live(env).await;
+            // TALAB (foydalanuvchi): "ilova GitHub tokenni olib to'g'ridan-
+            // to'g'ri GitHub'dan statistikani olsin" — XAVFSIZ YO'L: alohida,
+            // FAQAT O'QISH huquqli token (`GH_READ_TOKEN`, fine-grained,
+            // "Actions: Read-only", faqat kodlash repo'si). U faqat adminga
+            // beriladi va keshga tushmaydi. Asosiy (yozish huquqli)
+            // `GH_ACTIONS_TOKEN` hech qachon ilovaga chiqmaydi.
+            let read = tg_secret(env, "GH_READ_TOKEN");
+            let repo = tg_secret(env, "GH_REPO");
+            if !read.is_empty() && repo.contains('/') {
+                v["gh"] = json!({"token": read, "repo": repo, "workflow": GH_WORKFLOW});
+            }
+            return ok_nostore(v);
         }
         let origin = origin_of(&req);
         let res = turso_exec(env,
@@ -11301,13 +11483,18 @@ fn parse_status_pin(text: &str) -> Option<Value> {
     let mut head = serde_json::Map::new();
     let mut lines = Vec::new();
     let mut body = false;
+    // Faqat TANISH kalitlar sarlavha; qolgani log qatori (ajratgich `---`
+    // buzilgan eski xabarda ham log yo'qolmasin).
+    const KEYS: [&str; 6] = ["run", "job", "num", "progress", "updated", "data"];
     for l in it {
         if body {
             lines.push(json!(l));
         } else if l.trim() == "---" {
             body = true;
-        } else if let Some((k, v)) = l.split_once(':') {
+        } else if let Some((k, v)) = l.split_once(':').filter(|(k, _)| KEYS.contains(&k.trim())) {
             head.insert(k.trim().to_string(), json!(v.trim()));
+        } else if !l.trim().is_empty() {
+            lines.push(json!(l));
         }
     }
     let job = head.get("job").and_then(|v| v.as_str()).unwrap_or("").to_string();
@@ -11333,13 +11520,59 @@ fn parse_status_pin(text: &str) -> Option<Value> {
 }
 
 /// Jonli holat: qadalgan xabar + GitHub run. Bazaga hech narsa yozmaydi.
+/// Log kanali: sir yoki `app_config` (izolyatda eslab qolinadi — har
+/// so'rovda Turso o'qilmasin).
+async fn encode_log_chat(env: &Env) -> String {
+    thread_local! {
+        static CHAT: core::cell::RefCell<String> = const { core::cell::RefCell::new(String::new()) };
+    }
+    let s = tg_secret(env, "ENCODE_LOG_CHANNEL");
+    if !s.is_empty() {
+        return s;
+    }
+    let cached = CHAT.with(|c| c.borrow().clone());
+    if !cached.is_empty() {
+        return cached;
+    }
+    let v = config_get(env, "encode_log_chat").await.unwrap_or_default();
+    if !v.is_empty() {
+        CHAT.with(|c| *c.borrow_mut() = v.clone());
+    }
+    v
+}
+
+// ── JONLI HOLAT KESHI ─────────────────────────────────────────
+//
+// TALAB (foydalanuvchi): "worker statistikani keshga saqlasin va ilovaga
+// kesh orqali bersin — Turso xarajati kamaysin". Natija Cloudflare
+// keshida 30 soniya turadi: shu orada kelgan so'rovlar (bir nechta admin,
+// bot "Holat" tugmasi, ilovaning zaxira yo'li) Telegram'ga ham, GitHub'ga
+// ham, bazaga ham bormaydi.
+const ENCODE_LIVE_CACHE_URL: &str = "https://arugram-encode-live.internal/v1";
+const ENCODE_LIVE_CACHE_SECS: u32 = 30;
+
 async fn encode_live(env: &Env) -> Value {
+    if let Ok(req) = Request::new(ENCODE_LIVE_CACHE_URL, Method::Get) {
+        if let Ok(Some(mut hit)) = Cache::default().get(&req, false).await {
+            if let Ok(v) = hit.json::<Value>().await {
+                return v;
+            }
+        }
+    }
+    let v = encode_live_fresh(env).await;
+    if let Ok(mut resp) = Response::from_json(&v) {
+        let _ = resp.headers_mut().set("Cache-Control", &format!("public, max-age={ENCODE_LIVE_CACHE_SECS}"));
+        if let Ok(req) = Request::new(ENCODE_LIVE_CACHE_URL, Method::Get) {
+            let _ = Cache::default().put(&req, resp).await;
+        }
+    }
+    v
+}
+
+async fn encode_live_fresh(env: &Env) -> Value {
     let mut out = json!({"status": null, "github": null});
     // ── TELEGRAM ──
-    let chat = match tg_secret(env, "ENCODE_LOG_CHANNEL") {
-        c if !c.is_empty() => c,
-        _ => config_get(env, "encode_log_chat").await.unwrap_or_default(),
-    };
+    let chat = encode_log_chat(env).await;
     // Ilova shu kanalni adminning O'Z Telegram hisobi bilan to'g'ridan-to'g'ri
     // o'qiydi (`rust_tg_read_pinned`, ~2 soniyada) — worker'siz.
     out["log_chat"] = json!(chat);
@@ -11360,8 +11593,11 @@ async fn encode_live(env: &Env) -> Value {
         }
     }
     // ── GITHUB ──
+    // Faqat o'qish huquqli token (`GH_READ_TOKEN`) bo'lsa — ilova GitHub'dan
+    // O'ZI so'raydi (worker so'rovi kamayadi); bu yerda so'ralmaydi. Token
+    // faqat admin so'rovida beriladi (`/api/encode/live`, `gh`).
     let repo = tg_secret(env, "GH_REPO");
-    if repo.contains('/') {
+    if repo.contains('/') && tg_secret(env, "GH_READ_TOKEN").is_empty() {
         for st in ["in_progress", "queued"] {
             let Ok((200, v)) = gh_api(env, Method::Get,
                 &format!("/repos/{repo}/actions/workflows/{GH_WORKFLOW}/runs?status={st}&per_page=1"), None).await
@@ -11976,6 +12212,10 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
     // ── SHAFFOF STATISTIKA ────────────────────────────────────
     if path == "/api/stats" && method == Method::Get {
         return stats_route(&env).await;
+    }
+    // Treyding chizig'idek grafik uchun vaqt qatori (`stats_series`).
+    if path == "/api/stats/series" && method == Method::Get {
+        return stats_series(&req, &env).await;
     }
 
     // ── YAGONA YOZUV YO'LI ────────────────────────────────────

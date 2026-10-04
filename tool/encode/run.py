@@ -586,7 +586,8 @@ class StatusPin:
             if pm and (pm.text or "").startswith(self.TAG):
                 self.msg_id = pm.id
             else:
-                m = await app.send_message(LOG_CHANNEL, self.text(), disable_notification=True)
+                m = await app.send_message(LOG_CHANNEL, self.text(), disable_notification=True,
+                                           parse_mode=enums.ParseMode.DISABLED)
                 self.msg_id = m.id
                 await app.pin_chat_message(LOG_CHANNEL, m.id, disable_notification=True)
         except Exception as e:
@@ -600,8 +601,13 @@ class StatusPin:
         if t == self.sent:
             return
         try:
+            # TOPILGAN XATO: Pyrogram matnni sukut bo'yicha Markdown deb
+            # o'qiydi — `---` ajratgich va log'dagi `--:--` "tagiga chizish"
+            # belgisi bo'lib yo'qolardi, ilova esa log va statistikani
+            # topa olmasdi ("Log hali bo'sh"). Endi matn O'Z HOLICHA ketadi.
             await app.edit_message_text(LOG_CHANNEL, self.msg_id, t,
-                                        disable_web_page_preview=True)
+                                        disable_web_page_preview=True,
+                                        parse_mode=enums.ParseMode.DISABLED)
             self.sent = t
         except Exception as e:
             if type(e).__name__ == "FloodWait":

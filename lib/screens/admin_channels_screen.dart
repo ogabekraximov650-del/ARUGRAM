@@ -18,9 +18,11 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 
 import '../services/auth_service.dart';
-import '../services/telegram_service.dart';
 import '../theme/app_background.dart';
 import '../widgets/glass.dart';
+import '../widgets/trend_chart.dart';
+import '../services/format.dart';
+import 'admin_channel_add_screen.dart';
 
 class AdminChannelsScreen extends StatefulWidget {
   const AdminChannelsScreen({super.key});
@@ -115,140 +117,105 @@ class _AdminChannelsScreenState extends State<AdminChannelsScreen> {
 
   // ── QO'SHISH ─────────────────────────────────────────────
 
+  /// Yangi oyna: avval kanal tekshiriladi (surati, nomi, obunachilar),
+  /// keyin limit va qo'shish (`admin_channel_add_screen.dart`).
   Future<void> _add() async {
-    final kind = await showModalBottomSheet<String>(
-      context: context,
-      backgroundColor: AppColors.card,
-      builder: (c) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          ListTile(
-            leading: const Icon(Icons.campaign_rounded, color: Colors.white),
-            title: const Text('Ochiq [public] kanal',
-                style: TextStyle(color: Colors.white)),
-            subtitle: const Text('Ilova foydalanuvchini o\'zi qo\'shadi',
-                style: TextStyle(color: Colors.white54)),
-            onTap: () => Navigator.pop(c, 'public'),
-          ),
-          ListTile(
-            leading: const Icon(Icons.lock_rounded, color: Colors.white),
-            title: const Text('Yopiq [private] kanal',
-                style: TextStyle(color: Colors.white)),
-            subtitle: const Text('Ilova qo\'shilish so\'rovini yuboradi',
-                style: TextStyle(color: Colors.white54)),
-            onTap: () => Navigator.pop(c, 'private'),
-          ),
-        ]),
-      ),
+    final added = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => const AdminChannelAddScreen()),
     );
-    if (kind == null || !mounted) return;
-
-    final input = TextEditingController();
-    final need = TextEditingController(text: '0');
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (c) => AlertDialog(
-        backgroundColor: AppColors.card,
-        title: Text(kind == 'public' ? 'Ochiq kanal' : 'Yopiq kanal',
-            style: const TextStyle(color: Colors.white)),
-        content: SingleChildScrollView(
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            const Text(
-              'Kanal @username yoki IDsini yozing — ilova Telegram hisobingiz '
-              'bilan kanalni topib, asosiy botni o\'zi admin qiladi. Siz shu '
-              'kanalning egasi (yoki admin qo\'sha oladigan admini) bo\'lishingiz kerak.',
-              style: TextStyle(color: Colors.white60, fontSize: 12.5),
-            ),
-            TextField(
-              controller: input,
-              style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(
-                labelText: kind == 'public'
-                    ? '@username yoki -100... ID'
-                    : 'Kanal IDsi (-100...)',
-              ),
-            ),
-            TextField(
-              controller: need,
-              keyboardType: TextInputType.number,
-              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              style: const TextStyle(color: Colors.white),
-              decoration: const InputDecoration(
-                  labelText: 'Limit — nechta odam (0 — cheklovsiz)'),
-            ),
-          ]),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(c, false),
-              child: const Text('Bekor')),
-          FilledButton(
-              onPressed: () => Navigator.pop(c, true),
-              child: const Text('Qo\'shish')),
-        ],
-      ),
-    );
-    if (ok != true) return;
-    var target = input.text.trim();
-    if (target.isEmpty) return;
-    // Botni kanalga admin qilish — adminning Telegram hisobi bilan.
-    // Bo'lmasa ham (Telegram ulanmagan, bot allaqachon admin) server
-    // o'zi tekshiradi va sababini aytadi.
-    String? adminErr;
-    if (TelegramService.instance.authorized) {
-      setState(() => _busy = true);
-      final j = await tgCall('rust_tg_make_bot_admin', arg: target);
-      if (!mounted) return;
-      final id = (j['chat_id'] as num?)?.toInt();
-      if (j['ok'] == true && id != null) {
-        target = '$id';
-      } else {
-        adminErr = '${j['error'] ?? ''}';
-      }
+    if (added == true && mounted) {
+      _say('Qo\'shildi');
+      await _load();
     }
-    final err = await _post({
-      'op': 'add',
-      'kind': kind,
-      'input': target,
-      'need': int.tryParse(need.text) ?? 0,
-    });
-    _say(err == null
-        ? 'Qo\'shildi'
-        : adminErr != null && adminErr.isNotEmpty
-            ? '$err\n(Botni admin qilib bo\'lmadi: $adminErr)'
-            : err);
   }
 
   // ── LIMIT VA O'CHIRISH ───────────────────────────────────
 
-  Future<void> _limit(Map<String, dynamic> c, bool inc) async {
-    final ctl = TextEditingController();
+  /// Limit ANIQ son bilan (foydalanuvchi talabi: "1000 desam 1000,
+  /// 10 000 desam 10 000"). "Cheksiz" — 0.
+  Future<void> _limit(Map<String, dynamic> c) async {
+    final cur = (c['need'] as num?)?.toInt() ?? 0;
+    final ctl = TextEditingController(text: cur > 0 ? '$cur' : '');
     final n = await showDialog<int>(
       context: context,
       builder: (d) => AlertDialog(
         backgroundColor: AppColors.card,
-        title: Text(inc ? 'Limitni oshirish' : 'Limitni kamaytirish',
-            style: const TextStyle(color: Colors.white)),
-        content: TextField(
-          controller: ctl,
-          autofocus: true,
-          keyboardType: TextInputType.number,
-          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-          style: const TextStyle(color: Colors.white),
-          decoration: InputDecoration(labelText: 'Hozirgi limit: ${c['need']}'),
+        title: const Text('Limitni belgilash',
+            style: TextStyle(color: Colors.white)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Hozir: ${cur > 0 ? formatCount(cur) : 'cheksiz'}',
+                style: const TextStyle(color: Colors.white60, fontSize: 13)),
+            TextField(
+              controller: ctl,
+              autofocus: true,
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              style: const TextStyle(color: Colors.white, fontSize: 18),
+              decoration: const InputDecoration(
+                  labelText: 'Nechta odam (masalan 1000)'),
+            ),
+          ],
         ),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(d), child: const Text('Bekor')),
+          TextButton(
+              onPressed: () => Navigator.pop(d, 0),
+              child: const Text('Cheksiz')),
           FilledButton(
-              onPressed: () => Navigator.pop(d, int.tryParse(ctl.text) ?? 0),
+              onPressed: () {
+                final v = int.tryParse(ctl.text) ?? 0;
+                if (v > 0) Navigator.pop(d, v);
+              },
               child: const Text('Saqlash')),
         ],
       ),
     );
-    if (n == null || n <= 0) return;
-    final err =
-        await _post({'op': 'limit', 'id': c['id'], 'delta': inc ? n : -n});
+    if (n == null || n < 0) return;
+    final err = await _post({'op': 'set', 'id': c['id'], 'need': n});
     _say(err ?? 'Saqlandi');
+  }
+
+  /// Kanal grafigi (qo'shilganlar / so'rov yuborganlar, kunlar bo'yicha).
+  void _chart(Map<String, dynamic> c) {
+    final kind = '${c['kind']}';
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.card,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('${c['title']}',
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700)),
+              Text(
+                  kind == 'public'
+                      ? 'Kanalga qo\'shilganlar'
+                      : 'Qo\'shilish so\'rovini yuborganlar',
+                  style: const TextStyle(color: Colors.white54, fontSize: 12.5)),
+              const SizedBox(height: 14),
+              TrendChart(
+                metric: 'chan:${c['id']}',
+                format: (v) => '${formatCount(v)} ta',
+                height: 170,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _delete(Map<String, dynamic> c) async {
@@ -314,20 +281,17 @@ class _AdminChannelsScreenState extends State<AdminChannelsScreen> {
                 style: const TextStyle(color: Colors.white70, fontSize: 13)),
           ],
           Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-            ...[
-              IconButton(
-                tooltip: 'Limitni oshirish',
-                onPressed: _busy ? null : () => _limit(c, true),
-                icon: const Icon(Icons.trending_up_rounded,
-                    color: Colors.white70),
-              ),
-              IconButton(
-                tooltip: 'Limitni kamaytirish',
-                onPressed: _busy ? null : () => _limit(c, false),
-                icon: const Icon(Icons.trending_down_rounded,
-                    color: Colors.white70),
-              ),
-            ],
+            IconButton(
+              tooltip: 'Statistika',
+              onPressed: () => _chart(c),
+              icon: const Icon(Icons.show_chart_rounded,
+                  color: Colors.white70),
+            ),
+            IconButton(
+              tooltip: 'Limitni belgilash',
+              onPressed: _busy ? null : () => _limit(c),
+              icon: const Icon(Icons.edit_rounded, color: Colors.white70),
+            ),
             IconButton(
               tooltip: 'O\'chirish',
               onPressed: _busy ? null : () => _delete(c),
@@ -381,6 +345,33 @@ class _AdminChannelsScreenState extends State<AdminChannelsScreen> {
                               height: 1.45),
                         ),
                         const SizedBox(height: 12),
+                        // Hamma kanal bo'yicha — treyding chizig'idek.
+                        if (_items.isNotEmpty) ...[
+                          Glass(
+                            borderRadius: 18,
+                            padding: const EdgeInsets.all(14),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('Barcha kanallar',
+                                    style: TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 15)),
+                                const Text(
+                                    'Qo\'shilganlar va so\'rov yuborganlar',
+                                    style: TextStyle(
+                                        color: Colors.white54, fontSize: 12)),
+                                const SizedBox(height: 12),
+                                TrendChart(
+                                  metric: 'chan',
+                                  format: (v) => '${formatCount(v)} ta',
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                        ],
                         if (_items.isEmpty)
                           const Padding(
                             padding: EdgeInsets.only(top: 40),
