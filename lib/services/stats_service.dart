@@ -57,7 +57,47 @@ class StatBlock {
       };
 }
 
+/// Ilovadagi kontent: jami anime, bo'lim, qism (+ qo'shilgan qismlar).
+class ContentStats {
+  final int anime;
+  final int seasons;
+  final int episodes;
+  final StatBlock newEpisodes;
+
+  const ContentStats({
+    this.anime = 0,
+    this.seasons = 0,
+    this.episodes = 0,
+    this.newEpisodes = const StatBlock(),
+  });
+
+  factory ContentStats.fromJson(Map<String, dynamic>? j) {
+    int v(String k) => ((j ?? const {})[k] as num?)?.toInt() ?? 0;
+    return ContentStats(
+      anime: v('anime'),
+      seasons: v('seasons'),
+      episodes: v('episodes'),
+      newEpisodes: StatBlock(
+        daily: v('episodes_daily'),
+        weekly: v('episodes_weekly'),
+        monthly: v('episodes_monthly'),
+        total: v('episodes'),
+      ),
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'anime': anime,
+        'seasons': seasons,
+        'episodes': episodes,
+        'episodes_daily': newEpisodes.daily,
+        'episodes_weekly': newEpisodes.weekly,
+        'episodes_monthly': newEpisodes.monthly,
+      };
+}
+
 class AppStats {
+  final ContentStats content;
   final StatBlock users;
 
   /// Qism ko'rishlar (odam boshiga qism uchun bitta).
@@ -70,6 +110,7 @@ class AppStats {
   final StatBlock watch;
 
   const AppStats({
+    this.content = const ContentStats(),
     required this.users,
     required this.views,
     required this.animeViews,
@@ -88,6 +129,7 @@ class AppStats {
   );
 
   factory AppStats.fromJson(Map<String, dynamic> j) => AppStats(
+        content: ContentStats.fromJson(j['content'] as Map<String, dynamic>?),
         users: StatBlock.fromJson(j['users'] as Map<String, dynamic>?),
         views: StatBlock.fromJson(j['views'] as Map<String, dynamic>?),
         animeViews:
@@ -99,6 +141,7 @@ class AppStats {
       );
 
   Map<String, dynamic> toJson() => {
+        'content': content.toJson(),
         'users': users.toJson(),
         'views': views.toJson(),
         'anime_views': animeViews.toJson(),

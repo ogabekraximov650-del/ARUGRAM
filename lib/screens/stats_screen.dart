@@ -99,6 +99,8 @@ class _StatsScreenState extends State<StatsScreen> {
                           // va umumiy — foydalanuvchilar, anime / bo'lim /
                           // qism ko'rishlar, ko'rish soati, trafik; har
                           // biri treyding chizig'idek grafik bilan.
+                          _ContentCard(content: s.stats.content),
+                          const SizedBox(height: 12),
                           _StatCard(
                             title: 'Foydalanuvchilar',
                             icon: Icons.people_alt_rounded,
@@ -266,6 +268,79 @@ class _StatCard extends StatelessWidget {
               fontSize: strong ? 16 : 14.5,
               fontWeight: strong ? FontWeight.w800 : FontWeight.w600,
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Ilovadagi kontent: jami anime, bo'lim, qism va yangi qo'shilgan qismlar.
+class _ContentCard extends StatelessWidget {
+  final ContentStats content;
+  const _ContentCard({required this.content});
+
+  @override
+  Widget build(BuildContext context) {
+    Widget big(String label, int v, IconData icon) => Expanded(
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.05),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Column(
+              children: [
+                Icon(icon, color: AppColors.accent, size: 20),
+                const SizedBox(height: 6),
+                Text(formatCount(v),
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800)),
+                Text(label,
+                    style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.55),
+                        fontSize: 12)),
+              ],
+            ),
+          ),
+        );
+    final n = content.newEpisodes;
+    return Glass(
+      borderRadius: 20,
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.video_collection_rounded,
+                  size: 20, color: AppColors.accent),
+              SizedBox(width: 10),
+              Text('Ilovadagi kontent',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 16.5,
+                      fontWeight: FontWeight.w700)),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              big('Anime', content.anime, Icons.movie_filter_rounded),
+              const SizedBox(width: 8),
+              big('Bo\'lim', content.seasons, Icons.video_library_rounded),
+              const SizedBox(width: 8),
+              big('Qism', content.episodes, Icons.play_circle_rounded),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'Yangi qo\'shilgan qismlar — kunlik: ${formatCount(n.daily)}, '
+            'haftalik: ${formatCount(n.weekly)}, oylik: ${formatCount(n.monthly)}',
+            style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.6), fontSize: 12.5),
           ),
         ],
       ),

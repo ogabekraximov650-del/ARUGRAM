@@ -6,6 +6,7 @@ import '../services/admin_users_service.dart';
 import 'admin_app_screen.dart';
 import 'admin_channels_screen.dart';
 import 'admin_encode_screen.dart';
+import 'stats_screen.dart';
 import 'admin_reports_screen.dart';
 import 'admin_packs_screen.dart';
 import 'admin_users_screen.dart';
@@ -191,6 +192,22 @@ class AdminScreen extends StatelessWidget {
                       onTap: () => Navigator.of(context).push(
                         MaterialPageRoute<void>(
                           builder: (_) => const AdminChannelsScreen(),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    // ── UMUMIY STATISTIKA ─────────────────────
+                    //
+                    // Bosh sahifadagi banner build'da o'chiq
+                    // (`kHomeStats`), shu sabab statistika sahifasiga
+                    // admin panelidan kiriladi.
+                    _AdminButton(
+                      icon: Icons.insights_rounded,
+                      label: 'Umumiy statistika',
+                      subtitle: 'Kontent, foydalanuvchilar, ko\'rishlar, trafik',
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => const StatsScreen(),
                         ),
                       ),
                     ),

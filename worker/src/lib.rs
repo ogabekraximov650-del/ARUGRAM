@@ -8677,6 +8677,21 @@ async fn stats_route(env: &Env) -> Result<Response> {
         // Eski soatlik chelaklar kerak emas (3 kundan oshgani).
         ("DELETE FROM stats_hourly WHERE hour < ?",
          vec![TursoArg::text(&day_key(now - 3 * day_ms))]),
+        // KONTENT (foydalanuvchi talabi: "ilovaga qo'shilgan jami anime,
+        // bo'lim va qismlarni ham ko'rsat"): jami anime, bo'lim va qism;
+        // qismlar davrlar bo'yicha (`epizod_db.created_at`).
+        ("SELECT (SELECT COUNT(*) FROM anime_db),
+                 (SELECT COUNT(*) FROM season_db),
+                 COUNT(*),
+                 SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END),
+                 SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END),
+                 SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END)
+            FROM epizod_db",
+         vec![
+            TursoArg::int(now - day_ms),
+            TursoArg::int(now - 7 * day_ms),
+            TursoArg::int(now - 30 * day_ms),
+         ]),
     ]).await?;
 
     let urow = &res[0]["rows"][0];
@@ -8717,6 +8732,15 @@ async fn stats_route(env: &Env) -> Result<Response> {
             "weekly": w, "monthly": m, "total": t,
         }));
     }
+    let crow = &res[5]["rows"][0];
+    out.insert("content".into(), json!({
+        "anime": cell(crow, 0),
+        "seasons": cell(crow, 1),
+        "episodes": cell(crow, 2),
+        "episodes_daily": cell(crow, 3),
+        "episodes_weekly": cell(crow, 4),
+        "episodes_monthly": cell(crow, 5),
+    }));
     out.insert("tz".into(), json!("UTC+5"));
     ok(Value::Object(out))
 }
