@@ -4341,6 +4341,14 @@ async fn handle_tg_webhook(env: &Env, mut req: Request) -> Result<Response> {
     if user["is_banned"].as_i64().unwrap_or(0) == 1 {
         let uid = user["id"].as_i64().unwrap_or(0);
         if let Some((until, reason)) = ban_state(&user, now) {
+            // Ilova ham bilsin: aks holda u "Hisobingiz
+            // tasdiqlanmoqda..." da sababsiz qotib qolardi
+            // (`/api/auth/telegram/status` -> `banned`). Sabab va
+            // muddat bu yerda saqlanmaydi — status so'ralganda
+            // `users_db` dan yangisi o'qiladi.
+            let _ = turso_exec(env,
+                "UPDATE login_tokens SET status='banned', user_id=? WHERE token=?",
+                vec![TursoArg::int(uid), TursoArg::text(&arg)]).await;
             tg_send(env, chat_id, &format!(
                 "{}
 
@@ -8772,6 +8780,26 @@ async fn auth_route(req: Request, env: &Env, origin: &str, path: &str, method: M
                 let _ = turso_exec(env, "DELETE FROM login_tokens WHERE token=?",
                     vec![TursoArg::text(&token)]).await;
                 return ok_nostore(json!({"status": "expired"}));
+            }
+            // ── BLOKLANGAN HISOB ──────────────────────────────
+            // Bot kirishni rad etgan (`handle_tg_webhook`). Ilova
+            // sababni ko'rsatib, raqam oynasiga qaytadi. Token bir
+            // martalik — o'chiriladi.
+            if row["status"].as_str().unwrap_or("") == "banned" {
+                let _ = turso_exec(env, "DELETE FROM login_tokens WHERE token=?",
+                    vec![TursoArg::text(&token)]).await;
+                let ures = turso_exec(env, "SELECT * FROM users_db WHERE id=?",
+                    vec![TursoArg::int(row["user_id"].as_i64().unwrap_or(0))]).await?;
+                let now = now_ms();
+                let msg = first_row(&ures)
+                    .and_then(|u| ban_state(&u, now))
+                    .map(|(until, reason)| ban_message(until, &reason, now));
+                return ok_nostore(match msg {
+                    Some(m) => json!({"status": "banned", "message": m}),
+                    // Shu orada blok olingan/muddati tugagan —
+                    // qayta urinish kifoya.
+                    None => json!({"status": "expired"}),
+                });
             }
             if row["status"].as_str().unwrap_or("") != "approved" {
                 return ok_nostore(json!({"status": "pending"}));

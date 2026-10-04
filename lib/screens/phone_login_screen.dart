@@ -499,8 +499,42 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
         return;
       }
       if (st == LoginStatus.expired) break;
+      if (st == LoginStatus.banned) {
+        final msg = AuthService.instance.banMessage;
+        return _restart(msg.isNotEmpty ? msg : 'Hisobingiz bloklangan.');
+      }
     }
     _fail('Kirish tasdiqlanmadi — qayta urinib ko\'ring');
+  }
+
+  // ── BLOKLANGAN HISOB / KIRISH YAKUNLANMADI ─────────────────
+  //
+  // TOPILGAN XATO (foydalanuvchi): "bloklangan accountga kirmoqchi
+  // bo'lganda ilova 'tasdiqlanmoqda' deb qolib ketyapti, sababini
+  // aytmayapti va raqam yozish oynasiga qaytarmayapti". Bot kirishni
+  // rad etardi, server esa ilovaga faqat "pending" qaytarardi.
+  //
+  // Endi server `banned` (sabab va muddat bilan) qaytaradi. Telegram
+  // sessiyasi shu qurilmadan chiqariladi (aks holda oyna qayta
+  // ochilganda `_check` yana shu yerga tushib qolardi) va raqam
+  // oynasi sabab matni bilan ochiladi.
+  Future<void> _restart(String? message) async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await _tg.logout();
+    } catch (_) {}
+    if (!mounted) return;
+    _tg.resetLogin();
+    _code.clear();
+    _password.clear();
+    _go(_Step.phone);
+    setState(() {
+      _busy = false;
+      _error = message;
+    });
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -518,8 +552,9 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
   Widget build(BuildContext context) {
     final showFab = _step != _Step.qr &&
         !(_step == _Step.finishing && _error == null);
+    // "Kirilmoqda" bosqichida xato chiqsa — orqaga = raqam oynasi.
     final canBack = !((widget.gate && _step == _Step.phone) ||
-        _step == _Step.finishing);
+        (_step == _Step.finishing && _error == null));
     return Scaffold(
       backgroundColor: _Tg.bg,
       appBar: AppBar(
@@ -631,6 +666,8 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
       _go(_Step.phone);
     } else if (_step == _Step.code || _step == _Step.password) {
       _backToPhone();
+    } else if (_step == _Step.finishing) {
+      unawaited(_restart(null));
     } else {
       Navigator.of(context).maybePop();
     }

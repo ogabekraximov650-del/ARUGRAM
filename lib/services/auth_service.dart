@@ -150,7 +150,7 @@ class TelegramLoginRequest {
 
 /// Kirish holati — `LoginWaitScreen` shu qiymatlarga qarab
 /// ekranda nima ko'rsatishini hal qiladi.
-enum LoginStatus { pending, ok, expired, error }
+enum LoginStatus { pending, ok, expired, error, banned }
 
 /// ═══════════════════════════════════════════════════════════════
 ///  TELEGRAM ORQALI KIRISH
@@ -385,6 +385,10 @@ class AuthService extends ChangeNotifier {
     if (path != null) RustCore.instance.secureClear(path);
   }
 
+  /// Oxirgi [check] `banned` qaytarganda — server matni (sabab va
+  /// muddat bilan).
+  String banMessage = '';
+
   /// 2-qadam: foydalanuvchi Telegramda START bosdimi?
   Future<LoginStatus> check(String token) async {
     try {
@@ -424,6 +428,12 @@ class AuthService extends ChangeNotifier {
         case 'expired':
           clearPending();
           return LoginStatus.expired;
+        // Hisob bloklangan: bot kirishni rad etdi. Sabab va muddat
+        // [banMessage] da (ekran shuni ko'rsatadi).
+        case 'banned':
+          clearPending();
+          banMessage = (d['message'] ?? '').toString();
+          return LoginStatus.banned;
         default:
           return LoginStatus.pending;
       }

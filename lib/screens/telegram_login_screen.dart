@@ -249,6 +249,7 @@ class _TelegramLoginScreenState extends State<TelegramLoginScreen>
         if (mounted) Navigator.of(context).pop(true);
         break;
       case LoginStatus.expired:
+      case LoginStatus.banned:
         _poll?.cancel();
         _tick?.cancel();
         setState(() => _stage = _Stage.expired);
