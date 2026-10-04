@@ -423,6 +423,7 @@ class SeasonCard extends StatelessWidget {
     final rating = rCount > 0 ? rSum / rCount : 0.0;
     final views = int.tryParse('${season['views_total'] ?? 0}') ?? 0;
     final yosh = int.tryParse('${season['yosh'] ?? 0}') ?? 0;
+    final paid = seasonIsPaid(season);
 
     return GlassTappable(
       onTap: onTap,
@@ -514,9 +515,19 @@ class SeasonCard extends StatelessWidget {
                       ],
                     ),
                     // Yosh chegarasi — talab bo'yicha PASTROQDA.
-                    if (yosh > 0) ...[
+                    // PULLIK belgisi shu qatorning o'ng tomonida
+                    // (foydalanuvchi talabi: "pullik animelar
+                    // kartochkasi ustiga pullik ekanini bildiradigan
+                    // belgi"). Bepul bo'limlarda chiqmaydi.
+                    if (yosh > 0 || paid) ...[
                       const SizedBox(height: 6),
-                      _AgeBadge(yosh: yosh),
+                      Row(
+                        children: [
+                          if (yosh > 0) _AgeBadge(yosh: yosh),
+                          const Spacer(),
+                          if (paid) const _PaidBadge(),
+                        ],
+                      ),
                     ],
                   ],
                 ),
@@ -634,6 +645,42 @@ class _CardBadge extends StatelessWidget {
               color: Colors.white,
               fontSize: 10.5,
               fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Pullik bo'lim belgisi ───────────────────────────────────────
+//
+// Oltin toj + "Pullik": obunasiz ko'rib bo'lmaydigan bo'lim. Bepul
+// bo'limlar (`seasonIsFree`) belgisiz qoladi.
+class _PaidBadge extends StatelessWidget {
+  const _PaidBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.62),
+        borderRadius: BorderRadius.circular(7),
+        border: Border.all(color: AppColors.gold.withValues(alpha: 0.7)),
+      ),
+      child: const Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.workspace_premium_rounded,
+              size: 12, color: AppColors.gold),
+          SizedBox(width: 3),
+          Text(
+            'Pullik',
+            style: TextStyle(
+              color: AppColors.gold,
+              fontSize: 10.5,
+              fontWeight: FontWeight.w800,
             ),
           ),
         ],

@@ -155,6 +155,32 @@ bool seasonIsFree(Map<String, dynamic> s) {
       .contains('${seasonInt(s, 'anime_id')}:${seasonInt(s, 'season_id')}');
 }
 
+/// Bo'lim aniq PULLIKmi (kartochkadagi belgi uchun). Ma'lumot yo'q
+/// bo'lsa (eski nusxa, ro'yxatda topilmadi) — `false`: noto'g'ri
+/// "pullik" belgisi chiqmasin.
+bool seasonIsPaid(Map<String, dynamic> s) {
+  if (s['free'] is bool) return !(s['free'] as bool);
+  final key = '${seasonInt(s, 'anime_id')}:${seasonInt(s, 'season_id')}';
+  if (_freeIndex().contains(key)) return false;
+  return _knownIndex().contains(key);
+}
+
+Set<String> _knownSet = const {};
+List<Map<String, dynamic>>? _knownOf;
+
+Set<String> _knownIndex() {
+  final items = SeasonsRepo.instance.items;
+  if (!identical(items, _knownOf)) {
+    _knownOf = items;
+    _knownSet = {
+      for (final o in items)
+        if (o['free'] is bool)
+          '${seasonInt(o, 'anime_id')}:${seasonInt(o, 'season_id')}',
+    };
+  }
+  return _knownSet;
+}
+
 // Pleyer bu savolni HAR chizishda beradi (obunasiz odamda — sekundiga
 // bir necha marta). Ilgari har safar butun ro'yxat aylanib chiqilardi;
 // endi ro'yxat almashganda bir marta indeks quriladi.
