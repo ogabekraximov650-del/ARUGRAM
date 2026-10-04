@@ -10,10 +10,10 @@
 // "Majburiy obunalar" asosida:
 //
 //   * kanal turlari: 📢 ochiq (public), 🔐 yopiq (private, qo'shilish
-//     so'rovi bilan), 🔗 tashqi havola (Instagram, YouTube...);
+//     so'rovi bilan). Tashqi havolalar va kanallar soni cheklovi YO'Q
+//     (foydalanuvchi talabi);
 //   * har kanalga LIMIT (`need`) — shuncha odam qo'shilgach kanal
 //     endi talab qilinmaydi; `need = 0` — cheklovsiz;
-//   * ko'pi bilan 8 ta kanal (tashqi havolalar bunga kirmaydi);
 //   * HISOBLAGICH (`joined`) bot orqali, Telegram'ning o'z hodisalari
 //     bilan oshadi (ilovaga ishonilmaydi):
 //       - yopiq kanal: `chat_join_request` — so'rov yuborilgani.
@@ -37,10 +37,9 @@
 use super::*;
 
 pub(crate) const DDL: [&str; 2] = [
-    // kind: public | private | external.
+    // kind: public | private.
     //   public  — chat_id, username (@nom), title;
-    //   private — chat_id, link (bot yaratgan, so'rov bilan), title;
-    //   external — title (havola nomi), link (URL).
+    //   private — chat_id, link (bot yaratgan, so'rov bilan), title.
     "CREATE TABLE IF NOT EXISTS channels_db (
         id INTEGER PRIMARY KEY,
         kind TEXT NOT NULL,
@@ -62,9 +61,6 @@ pub(crate) const DDL: [&str; 2] = [
         PRIMARY KEY (channel_id, tg_id)
     ) WITHOUT ROWID",
 ];
-
-/// Ko'pi bilan shuncha kanal (tashqi havolalar hisobga kirmaydi).
-const MAX_CHANNELS: i64 = 8;
 
 /// Ochiq kanal nomi: `@nom`, `nom`, `https://t.me/nom` -> `nom`.
 fn public_name(raw: &str) -> Option<String> {
@@ -90,11 +86,6 @@ fn chat_ref(raw: &str) -> Option<Value> {
     public_name(t).map(|n| json!(format!("@{n}")))
 }
 
-fn valid_url(u: &str) -> bool {
-    let l = u.to_ascii_lowercase();
-    (l.starts_with("https://") || l.starts_with("http://")) && u.len() > 10 && u.len() <= 300 && !u.contains(char::is_whitespace)
-}
-
 /// Kanal hali talab qilinadimi (limit to'lmagan).
 fn active(c: &Value) -> bool {
     let need = jint(c, "need");
@@ -102,11 +93,7 @@ fn active(c: &Value) -> bool {
 }
 
 fn kind_label(kind: &str) -> &'static str {
-    match kind {
-        "public" => "\u{1F4E2} ochiq",
-        "private" => "\u{1F510} yopiq",
-        _ => "\u{1F517} tashqi havola",
-    }
+    if kind == "public" { "\u{1F4E2} ochiq" } else { "\u{1F510} yopiq" }
 }
 
 /// Foydalanuvchi qo'shiladigan manzil.
@@ -206,32 +193,11 @@ fn bot_id(env: &Env) -> i64 {
         .unwrap_or(0)
 }
 
-/// Kanal qo'shadi. `input` — public/private uchun `@nom` yoki `-100...`,
-/// external uchun URL; `name` — tashqi havola nomi. Javob — yangi qator.
-pub(crate) async fn add(env: &Env, kind: &str, input: &str, name: &str, need: i64) -> std::result::Result<Value, String> {
+/// Kanal qo'shadi. `input` — `@nom` yoki `-100...`. Javob — yangi qator.
+pub(crate) async fn add(env: &Env, kind: &str, input: &str, need: i64) -> std::result::Result<Value, String> {
     let now = now_ms();
-    if kind == "external" {
-        let name = name.trim();
-        let url = input.trim();
-        if name.is_empty() || name.chars().count() > 40 {
-            return Err("Havola nomi 1-40 belgi bo'lsin".into());
-        }
-        if !valid_url(url) {
-            return Err("http:// yoki https:// bilan boshlanadigan to'liq URL yuboring".into());
-        }
-        let res = turso_exec(env,
-            "INSERT INTO channels_db (kind,title,link,created_at) VALUES ('external',?,?,?) RETURNING *",
-            vec![TursoArg::text(name), TursoArg::text(url), TursoArg::int(now)]).await
-            .map_err(|e| e.to_string())?;
-        return first_row(&res).ok_or_else(|| "saqlanmadi".to_string());
-    }
     if kind != "public" && kind != "private" {
         return Err("kanal turi noto'g'ri".into());
-    }
-    let cnt = turso_exec(env, "SELECT COUNT(*) FROM channels_db WHERE kind<>'external'", vec![]).await
-        .map(|r| scalar(&r)).unwrap_or(0);
-    if cnt >= MAX_CHANNELS {
-        return Err(format!("Ko'pi bilan {MAX_CHANNELS} ta kanal. Hozir {cnt} ta qo'shilgan."));
     }
     let Some(chat) = chat_ref(input) else {
         return Err("Kanalni @username yoki -100... ID ko'rinishida yuboring (yoki kanaldan post forward qiling)".into());
@@ -290,7 +256,7 @@ pub(crate) async fn add(env: &Env, kind: &str, input: &str, name: &str, need: i6
 /// 0 dan pastga tushmaydi).
 pub(crate) async fn change_limit(env: &Env, id: i64, delta: i64) -> Option<Value> {
     let res = turso_exec(env,
-        "UPDATE channels_db SET need = MAX(0, need + ?) WHERE id=? AND kind<>'external' RETURNING *",
+        "UPDATE channels_db SET need = MAX(0, need + ?) WHERE id=? AND kind IN ('public','private') RETURNING *",
         vec![TursoArg::int(delta), TursoArg::int(id)]).await.ok()?;
     first_row(&res)
 }
@@ -336,7 +302,7 @@ pub(crate) async fn route(req: Request, env: &Env, path: &str, method: Method) -
         // Limiti to'lgan kanal endi talab qilinmaydi va ko'rsatilmaydi.
         // Hisoblagichlar va kanal IDsi ilovaga berilmaydi.
         let items: Vec<Value> = all_channels(env).await.iter()
-            .filter(|c| c["kind"] == "external" || active(c))
+            .filter(|c| active(c))
             .map(|c| json!({
                 "id": jint(c, "id"),
                 "kind": c["kind"],
@@ -355,7 +321,7 @@ pub(crate) async fn route(req: Request, env: &Env, path: &str, method: Method) -
     }
     if method == Method::Get {
         let items: Vec<Value> = all_channels(env).await.iter().map(admin_view).collect();
-        return ok_nostore(json!({"items": items, "max": MAX_CHANNELS}));
+        return ok_nostore(json!({"items": items}));
     }
     if method != Method::Post {
         return err404("not_found");
@@ -367,7 +333,6 @@ pub(crate) async fn route(req: Request, env: &Env, path: &str, method: Method) -
         "add" => match add(env,
             b["kind"].as_str().unwrap_or(""),
             b["input"].as_str().unwrap_or(""),
-            b["name"].as_str().unwrap_or(""),
             jint(&b, "need")).await
         {
             Ok(c) => ok_nostore(json!({"ok": true, "item": admin_view(&c)})),
@@ -452,10 +417,6 @@ fn detail_lines(c: &Value) -> String {
     let kind = c["kind"].as_str().unwrap_or("");
     let title = html_escape(c["title"].as_str().unwrap_or(""));
     let mut t = format!("<b>Turi:</b> {}\n", kind_label(kind));
-    if kind == "external" {
-        t.push_str(&format!("   <b>Nomi:</b> {title}\n   <b>Havola:</b> {}\n", html_escape(&join_url(c))));
-        return t;
-    }
     t.push_str(&format!("   <b>Nomi:</b> {title}\n   <b>ID:</b> <code>{}</code>\n", jint(c, "chat_id")));
     if kind == "public" {
         t.push_str(&format!("   <b>Useri:</b> {}\n", html_escape(c["username"].as_str().unwrap_or(""))));
@@ -492,11 +453,10 @@ async fn show_one(env: &Env, chat: i64, msg_id: i64, id: i64) {
         show(env, chat, msg_id, "\u{274C} Topilmadi.", back("ch:list")).await;
         return;
     };
-    let mut rows = Vec::new();
-    if c["kind"] != "external" {
-        rows.push(vec![b("\u{1F4C8} Limitni oshirish", &format!("ch:inc:{id}"))]);
-        rows.push(vec![b("\u{1F4C9} Limitni kamaytirish", &format!("ch:dec:{id}"))]);
-    }
+    let mut rows = vec![
+        vec![b("\u{1F4C8} Limitni oshirish", &format!("ch:inc:{id}"))],
+        vec![b("\u{1F4C9} Limitni kamaytirish", &format!("ch:dec:{id}"))],
+    ];
     rows.push(vec![b("\u{1F5D1} O'chirish", &format!("ch:del:{id}"))]);
     rows.push(vec![b("\u{27E8} Orqaga", "ch:list")]);
     show(env, chat, msg_id, &detail_lines(&c), ikb(rows)).await;
@@ -522,23 +482,17 @@ pub(crate) async fn on_callback(env: &Env, chat: i64, msg_id: i64, data: &str) -
             show(env, chat, msg_id,
                 "Turini tanlang:\n\n\
                  \u{1F4E2} <b>Ochiq kanal</b> — ilova foydalanuvchini kanalga o'zi qo'shadi.\n\n\
-                 \u{1F510} <b>Yopiq kanal</b> — ilova qo'shilish so'rovini yuboradi.\n\n\
-                 \u{1F517} <b>Tashqi havola</b> — Instagram, YouTube kabi havolalar (faqat ko'rsatiladi).",
+                 \u{1F510} <b>Yopiq kanal</b> — ilova qo'shilish so'rovini yuboradi.",
                 ikb(vec![
                     vec![b("\u{1F4E2} Ochiq [ public ] kanal", "ch:new:public")],
                     vec![b("\u{1F510} Yopiq [ private ] kanal", "ch:new:private")],
-                    vec![b("\u{1F517} Tashqi havola [ URL ]", "ch:new:external")],
                     vec![b("\u{27E8} Orqaga", "ch:menu")],
                 ])).await;
         }
         "new" => {
             let kind = parts.get(1).copied().unwrap_or("");
-            let (wait, text) = match kind {
-                "public" => ("pub", format!("<b>Turi:</b> {}\n\n{HOW_TO_ADD}", kind_label("public"))),
-                "private" => ("priv", format!("<b>Turi:</b> {}\n\n{HOW_TO_ADD}", kind_label("private"))),
-                _ => ("ext_name", format!("<b>Turi:</b> {}\n\nHavola uchun NOM yuboring \
-                    (masalan: <code>Instagram</code>):", kind_label("external"))),
-            };
+            let wait = if kind == "public" { "pub" } else { "priv" };
+            let text = format!("<b>Turi:</b> {}\n\n{HOW_TO_ADD}", kind_label(kind));
             config_put(env, WAIT_KEY, wait).await;
             show(env, chat, msg_id, &text, back("ch:add")).await;
         }
@@ -596,7 +550,7 @@ pub(crate) async fn on_text(env: &Env, chat: i64, msg: &Value, text: &str) -> bo
         "pub" | "priv" => {
             let input = forwarded_chat(msg).unwrap_or_else(|| text.trim().to_string());
             let kind = if head == "pub" { "public" } else { "private" };
-            match add(env, kind, &input, "", 0).await {
+            match add(env, kind, &input, 0).await {
                 Ok(c) => {
                     let id = jint(&c, "id");
                     config_put(env, WAIT_KEY, &format!("limit:{id}")).await;
@@ -633,24 +587,6 @@ pub(crate) async fn on_text(env: &Env, chat: i64, msg: &Value, text: &str) -> bo
                 None => encbot_send(env, chat, "\u{274C} Topilmadi.", Some(back("ch:list"))).await,
             }
         }
-        "ext_name" => {
-            let name = text.trim();
-            if name.is_empty() || name.chars().count() > 40 {
-                encbot_send(env, chat, "\u{274C} Nom 1-40 belgi bo'lsin.", None).await;
-                return true;
-            }
-            config_put(env, WAIT_KEY, &format!("ext_url:{name}")).await;
-            encbot_send(env, chat, &format!("\u{2705} \"{}\" qabul qilindi.\n\nEndi havolani (URL) yuboring:",
-                html_escape(name)), None).await;
-        }
-        "ext_url" => match add(env, "external", text, arg, 0).await {
-            Ok(_) => {
-                config_put(env, WAIT_KEY, "").await;
-                encbot_send(env, chat, &format!("\u{2705} \"{}\" havolasi saqlandi.", html_escape(arg)),
-                    Some(menu_kb())).await;
-            }
-            Err(e) => encbot_send(env, chat, &format!("\u{274C} {}", html_escape(&e)), None).await,
-        },
         _ => {
             config_put(env, WAIT_KEY, "").await;
             return false;
@@ -669,8 +605,6 @@ mod tests {
         assert_eq!(chat_ref("https://t.me/arugram_news"), Some(json!("@arugram_news")));
         assert_eq!(chat_ref("-1001234567890"), Some(json!(-1001234567890i64)));
         assert_eq!(chat_ref("abc"), None);
-        assert!(valid_url("https://instagram.com/aru"));
-        assert!(!valid_url("instagram.com"));
         assert!(active(&json!({"need": 0, "joined": 9})));
         assert!(active(&json!({"need": 10, "joined": 9})));
         assert!(!active(&json!({"need": 10, "joined": 10})));

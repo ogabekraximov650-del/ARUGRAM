@@ -1,7 +1,7 @@
 // lib/screens/admin_channels_screen.dart — MAJBURIY OBUNA KANALLARI.
 //
 // TALAB (foydalanuvchi): admin panelida to'liq tizim — kanal qo'shish
-// (ochiq / yopiq / tashqi havola), limit, statistika va o'chirish.
+// (ochiq / yopiq), limit, statistika va o'chirish.
 // Xuddi shu amallar kodlash botida ham bor ("🔐 Majburiy obunalar").
 // Ikkalasi ham bitta server kodini ishlatadi (`worker/src/channels.rs`).
 //
@@ -29,7 +29,6 @@ class AdminChannelsScreen extends StatefulWidget {
 
 class _AdminChannelsScreenState extends State<AdminChannelsScreen> {
   List<Map<String, dynamic>> _items = const [];
-  int _max = 8;
   bool _loading = true;
   bool _busy = false;
   String? _error;
@@ -70,7 +69,6 @@ class _AdminChannelsScreenState extends State<AdminChannelsScreen> {
           _items = (j['items'] as List? ?? const [])
               .whereType<Map<String, dynamic>>()
               .toList();
-          _max = (j['max'] as num?)?.toInt() ?? 8;
           _loading = false;
         });
       } else {
@@ -135,60 +133,36 @@ class _AdminChannelsScreenState extends State<AdminChannelsScreen> {
                 style: TextStyle(color: Colors.white54)),
             onTap: () => Navigator.pop(c, 'private'),
           ),
-          ListTile(
-            leading: const Icon(Icons.link_rounded, color: Colors.white),
-            title: const Text('Tashqi havola [URL]', style: TextStyle(color: Colors.white)),
-            subtitle: const Text('Instagram, YouTube — faqat ko\'rsatiladi',
-                style: TextStyle(color: Colors.white54)),
-            onTap: () => Navigator.pop(c, 'external'),
-          ),
         ]),
       ),
     );
     if (kind == null || !mounted) return;
 
     final input = TextEditingController();
-    final name = TextEditingController();
     final need = TextEditingController(text: '0');
-    final ext = kind == 'external';
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
         backgroundColor: AppColors.card,
-        title: Text(
-            kind == 'public'
-                ? 'Ochiq kanal'
-                : kind == 'private'
-                    ? 'Yopiq kanal'
-                    : 'Tashqi havola',
+        title: Text(kind == 'public' ? 'Ochiq kanal' : 'Yopiq kanal',
             style: const TextStyle(color: Colors.white)),
         content: SingleChildScrollView(
           child: Column(mainAxisSize: MainAxisSize.min, children: [
-            if (!ext)
-              const Text(
+            const Text(
                 'Avval asosiy botni kanalga ADMIN qiling ("Foydalanuvchi qo\'shish" '
                 'va "Havola orqali taklif qilish" huquqlari bilan).',
                 style: TextStyle(color: Colors.white60, fontSize: 12.5),
-              ),
-            if (ext)
-              TextField(
-                controller: name,
-                style: const TextStyle(color: Colors.white),
-                decoration: const InputDecoration(labelText: 'Nomi (masalan: Instagram)'),
               ),
             TextField(
               controller: input,
               style: const TextStyle(color: Colors.white),
               decoration: InputDecoration(
-                labelText: ext
-                    ? 'Havola (https://...)'
-                    : kind == 'public'
-                        ? '@username yoki -100... ID'
-                        : 'Kanal IDsi (-100...)',
+                labelText: kind == 'public'
+                    ? '@username yoki -100... ID'
+                    : 'Kanal IDsi (-100...)',
               ),
             ),
-            if (!ext)
-              TextField(
+            TextField(
                 controller: need,
                 keyboardType: TextInputType.number,
                 inputFormatters: [FilteringTextInputFormatter.digitsOnly],
@@ -209,7 +183,6 @@ class _AdminChannelsScreenState extends State<AdminChannelsScreen> {
       'op': 'add',
       'kind': kind,
       'input': input.text.trim(),
-      'name': name.text.trim(),
       'need': int.tryParse(need.text) ?? 0,
     });
     _say(err ?? 'Qo\'shildi');
@@ -271,7 +244,6 @@ class _AdminChannelsScreenState extends State<AdminChannelsScreen> {
 
   Widget _card(Map<String, dynamic> c) {
     final kind = '${c['kind']}';
-    final ext = kind == 'external';
     final need = (c['need'] as num?)?.toInt() ?? 0;
     final joined = (c['joined'] as num?)?.toInt() ?? 0;
     final verb = kind == 'public' ? 'qo\'shilgan' : 'so\'rov yuborgan';
@@ -286,9 +258,7 @@ class _AdminChannelsScreenState extends State<AdminChannelsScreen> {
             Icon(
                 kind == 'public'
                     ? Icons.campaign_rounded
-                    : kind == 'private'
-                        ? Icons.lock_rounded
-                        : Icons.link_rounded,
+                    : Icons.lock_rounded,
                 color: Colors.white70,
                 size: 20),
             const SizedBox(width: 8),
@@ -297,20 +267,20 @@ class _AdminChannelsScreenState extends State<AdminChannelsScreen> {
                   style: const TextStyle(
                       color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700)),
             ),
-            if (c['active'] == false && !ext)
+            if (c['active'] == false)
               const Text('limit to\'ldi',
                   style: TextStyle(color: AppColors.accent, fontSize: 12)),
           ]),
           const SizedBox(height: 4),
           SelectableText('${c['url']}',
               style: const TextStyle(color: Colors.white54, fontSize: 12.5)),
-          if (!ext) ...[
+          ...[
             const SizedBox(height: 4),
             Text('$joined / ${need > 0 ? need : '∞'} tasi $verb',
                 style: const TextStyle(color: Colors.white70, fontSize: 13)),
           ],
           Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-            if (!ext) ...[
+            ...[
               IconButton(
                 tooltip: 'Limitni oshirish',
                 onPressed: _busy ? null : () => _limit(c, true),
@@ -335,7 +305,6 @@ class _AdminChannelsScreenState extends State<AdminChannelsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final chans = _items.where((c) => c['kind'] != 'external').length;
     return AppBackground(
       child: Scaffold(
         backgroundColor: Colors.transparent,
@@ -364,7 +333,7 @@ class _AdminChannelsScreenState extends State<AdminChannelsScreen> {
                       padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
                       children: [
                         Text(
-                          'Kanallar: $chans / $_max. Bepul bo\'limni ochishdan oldin ilova '
+                          'Kanallar: ${_items.length}. Bepul bo\'limni ochishdan oldin ilova '
                           'ruxsat so\'raydi va foydalanuvchining Telegram hisobi bilan shu '
                           'kanallarga o\'zi qo\'shiladi (yopiq kanalga so\'rov yuboradi). '
                           'Limit to\'lgan kanal endi talab qilinmaydi.',

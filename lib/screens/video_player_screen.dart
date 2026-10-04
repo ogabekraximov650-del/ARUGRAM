@@ -135,7 +135,6 @@ import '../services/seasons_repo.dart';
 import '../services/channel_gate.dart';
 import '../services/watch_history.dart';
 import '../services/watch_progress.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../theme/app_background.dart';
 import 'billing_screen.dart';
 import '../widgets/glass.dart';
@@ -8386,8 +8385,7 @@ class _ChannelConsentScreenState extends State<_ChannelConsentScreen> {
   @override
   Widget build(BuildContext context) {
     final list = ChannelGate.instance.channels;
-    final chans = (list ?? const <GateChannel>[]).where((c) => !c.isExternal).toList();
-    final links = (list ?? const <GateChannel>[]).where((c) => c.isExternal).toList();
+    final chans = list ?? const <GateChannel>[];
     final muted = Colors.white.withValues(alpha: 0.62);
     return AppBackground(
       child: Scaffold(
@@ -8441,12 +8439,6 @@ class _ChannelConsentScreenState extends State<_ChannelConsentScreen> {
                           ),
                         ],
                       ),
-                    ),
-                  for (final l in links)
-                    TextButton.icon(
-                      onPressed: () => launchUrl(Uri.parse(l.url), mode: LaunchMode.externalApplication),
-                      icon: const Icon(Icons.open_in_new_rounded, size: 16),
-                      label: Text(l.title),
                     ),
                   const SizedBox(height: 20),
                   SizedBox(

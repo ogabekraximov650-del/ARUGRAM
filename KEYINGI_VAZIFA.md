@@ -4706,17 +4706,18 @@ foydalanuvchining O'Z Telegram hisobi bilan kanallarga qo'shiladi / yopiq
 kanalga so'rov yuboradi. Ruxsatni Sozlamalar -> "Bepul ko'rish" dan
 o'chirish mumkin. Asos — `aniraxuzbot15` (`bot/src/handlers/channels.ts`).
 
-- Server: `worker/src/channels.rs`. Jadvallar `channels_db` (public/private/
-  external, `need` limit, `joined` hisob) va `chan_requests` — FAQAT yopiq
+- Server: `worker/src/channels.rs`. Jadvallar `channels_db` (public/private,
+  `need` limit, `joined` hisob) va `chan_requests` — FAQAT yopiq
   kanalga so'rov yuborganlar (bir marta sanaladi; kanal o'chsa ular ham
   o'chadi). Ochiq kanalga qo'shilganlar jurnalga yozilmaydi — faqat `joined`+1.
 - Hisob Telegram hodisalari bilan (ilovaga ishonilmaydi): `chat_join_request`
   (so'rov — `getChatMember` uni ko'rmaydi), `chat_member` (ochiq kanalga
   qo'shildi). Asosiy bot kanalda ADMIN bo'lishi shart ("Foydalanuvchi
   qo'shish", yopiq uchun "Havola orqali taklif qilish"). Webhook `|v3`.
-- Yo'llar: `GET /api/channels` (ilova; limiti to'lmaganlar + tashqi
-  havolalar), `GET/POST /api/admin/channels` (admin: add/limit/del).
-  Ilova bazaga hech narsa YOZMAYDI. Ko'pi bilan 8 kanal.
+- Yo'llar: `GET /api/channels` (ilova; limiti to'lmaganlar),
+  `GET/POST /api/admin/channels` (admin: add/limit/del).
+  Ilova bazaga hech narsa YOZMAYDI. Kanallar soni cheklanmagan, tashqi
+  havolalar yo'q (foydalanuvchi talabi bilan olib tashlandi).
 - Admin: ilovadagi "Majburiy obunalar" (`admin_channels_screen.dart`) va
   kodlash boti -> "🔐 Majburiy obunalar" / `/kanallar` (holat
   `app_config.encbot_chwait`).

@@ -27,7 +27,6 @@
 //
 // Serverga hech narsa YOZILMAYDI: kim qo'shilgani/so'rov yuborgani
 // bot orqali, Telegram hodisalari bilan sanaladi (`worker/src/channels.rs`).
-// Tashqi havolalar (Instagram va h.k.) faqat ruxsat oynasida ko'rsatiladi.
 
 import 'dart:async';
 import 'dart:convert';
@@ -43,14 +42,12 @@ import 'telegram_service.dart';
 class GateChannel {
   final int id;
 
-  /// `public` | `private` | `external`.
+  /// `public` | `private`.
   final String kind;
   final String title;
   final String url;
 
   const GateChannel(this.id, this.kind, this.title, this.url);
-
-  bool get isExternal => kind == 'external';
 
   /// Bajarilganini eslab qolish kaliti: manzil o'zgarsa (admin kanalni
   /// o'chirib qayta qo'shsa) qayta uriniladi.
@@ -117,7 +114,7 @@ class ChannelGate extends ChangeNotifier {
     return _consent;
   }
 
-  /// Hozir talab qilinayotgan kanallar va havolalar (`null` — hali noma'lum).
+  /// Hozir talab qilinayotgan kanallar (`null` — hali noma'lum).
   List<GateChannel>? get channels {
     _sync();
     return _list;
@@ -129,7 +126,7 @@ class ChannelGate extends ChangeNotifier {
     _sync();
     if (_consent) return false;
     final l = _list;
-    return l == null || l.any((c) => !c.isExternal);
+    return l == null || l.isNotEmpty;
   }
 
   /// Hisob almashdi (`account_data.dart`) — keyingi murojaatda yangi
@@ -218,7 +215,7 @@ class ChannelGate extends ChangeNotifier {
     try {
       await refresh();
       final todo = (_list ?? const <GateChannel>[])
-          .where((c) => !c.isExternal && c.url.isNotEmpty && !_done.contains(c.doneKey))
+          .where((c) => c.url.isNotEmpty && !_done.contains(c.doneKey))
           .toList();
       for (final c in todo) {
         if (!consented) break;
