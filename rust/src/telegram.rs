@@ -2201,6 +2201,128 @@ pub extern "C" fn rust_tg_clear_bot_chat() -> *mut c_char {
     }))
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  MAJBURIY KANALLARGA QO'SHILISH (foydalanuvchi ruxsati bilan)
+// ═══════════════════════════════════════════════════════════════
+//
+// TALAB (foydalanuvchi): bepul bo'limni ko'rish uchun ilova
+// foydalanuvchidan RUXSAT so'raydi va ruxsat berilsa, uning
+// Telegram hisobi bilan admin belgilagan kanallarga o'zi qo'shiladi
+// (ochiq kanal) yoki qo'shilish so'rovini yuboradi (yopiq kanal).
+//
+// Bu funksiya FAQAT Dart tomoni foydalanuvchi "Ruxsat berish"ni
+// bosgandan keyin chaqiriladi (`channel_gate.dart`) — hech qachon
+// o'zi, jimgina emas. Kanaldan CHIQISH yo'q: foydalanuvchi o'zi
+// istasa chiqadi.
+//
+// Natija (`state`): `joined` — a'zo bo'ldi (yoki allaqachon a'zo),
+// `requested` — yopiq kanalga qo'shilish so'rovi yuborildi (admin
+// tasdiqlaguncha a'zo emas, lekin server buni "bajarildi" deb
+// hisoblaydi — majburiy obuna shunday ishlaydi).
+
+/// Ochiq kanal nomi: `@nom`, `nom` yoki `https://t.me/nom` -> `nom`.
+/// Telegram qoidasi: 5-32 belgi, lotin harf, raqam va `_`.
+fn public_name(raw: &str) -> Option<String> {
+    let t = raw.trim();
+    let t = t
+        .strip_prefix("https://t.me/")
+        .or_else(|| t.strip_prefix("http://t.me/"))
+        .or_else(|| t.strip_prefix("t.me/"))
+        .unwrap_or(t);
+    let t = t.trim_start_matches('@').trim_end_matches('/');
+    let ok = (5..=32).contains(&t.len())
+        && t.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+    ok.then(|| t.to_string())
+}
+
+/// Yopiq kanal havolasidan xesh: `https://t.me/+AbC`, `t.me/joinchat/AbC`.
+fn invite_hash(raw: &str) -> Option<String> {
+    let t = raw.trim().trim_end_matches('/');
+    let last = t.rsplit('/').next()?;
+    let h = last.trim_start_matches('+');
+    let ok = h.len() >= 8
+        && h.len() <= 64
+        && h.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+    ok.then(|| h.to_string())
+}
+
+async fn join_one(client: &Client, kind: &str, target: &str) -> Result<&'static str, String> {
+    match kind {
+        "public" => {
+            let name = public_name(target).ok_or("kanal nomi noto'g'ri")?;
+            let tl::enums::contacts::ResolvedPeer::Peer(rp) = client
+                .invoke(&tl::functions::contacts::ResolveUsername { username: name, referer: None })
+                .await
+                .map_err(|e| inv_err(&e))?;
+            let (id, hash) = rp
+                .chats
+                .iter()
+                .find_map(|c| match c {
+                    tl::enums::Chat::Channel(c) => c.access_hash.map(|h| (c.id, h)),
+                    _ => None,
+                })
+                .ok_or("kanal topilmadi")?;
+            let r = client
+                .invoke(&tl::functions::channels::JoinChannel {
+                    channel: tl::enums::InputChannel::Channel(tl::types::InputChannel {
+                        channel_id: id,
+                        access_hash: hash,
+                    }),
+                })
+                .await;
+            match r {
+                Ok(_) => Ok("joined"),
+                Err(InvocationError::Rpc(r)) if r.name == "USER_ALREADY_PARTICIPANT" => Ok("joined"),
+                Err(InvocationError::Rpc(r)) if r.name == "INVITE_REQUEST_SENT" => Ok("requested"),
+                Err(e) => Err(inv_err(&e)),
+            }
+        }
+        "private" => {
+            let hash = invite_hash(target).ok_or("havola noto'g'ri")?;
+            // Allaqachon a'zo bo'lsa qayta so'rov yuborilmaydi.
+            match client
+                .invoke(&tl::functions::messages::CheckChatInvite { hash: hash.clone() })
+                .await
+            {
+                Ok(tl::enums::ChatInvite::Already(_)) => return Ok("joined"),
+                Ok(_) => {}
+                Err(e) => return Err(inv_err(&e)),
+            }
+            match client
+                .invoke(&tl::functions::messages::ImportChatInvite { hash })
+                .await
+            {
+                Ok(_) => Ok("joined"),
+                Err(InvocationError::Rpc(r)) if r.name == "USER_ALREADY_PARTICIPANT" => Ok("joined"),
+                // Qo'shilish so'rovi yuborildi — majburiy obuna uchun yetarli.
+                Err(InvocationError::Rpc(r)) if r.name == "INVITE_REQUEST_SENT" => Ok("requested"),
+                Err(e) => Err(inv_err(&e)),
+            }
+        }
+        _ => Err("kanal turi noto'g'ri".to_string()),
+    }
+}
+
+/// Foydalanuvchining Telegram hisobi bilan BITTA kanalga qo'shiladi.
+///
+/// Argument: `<tur>:<manzil>` — `public:https://t.me/nom` yoki
+/// `private:https://t.me/+xesh`. Javob: `{"ok":true,"state":"joined|requested"}`
+/// yoki `{"error":...}`. Tarmoqqa chiqadi (BLOKLAYDI) — Dart uni
+/// fon isolate'ida chaqiradi (`tgCall`).
+#[no_mangle]
+pub extern "C" fn rust_tg_join_channel(arg_ptr: *const c_char) -> *mut c_char {
+    let arg = unsafe { cstr_to_str(arg_ptr) }.unwrap_or("");
+    let (kind, target) = arg.split_once(':').unwrap_or(("", ""));
+    let (kind, target) = (kind.to_string(), target.to_string());
+    string_to_cptr(with_client(|t, client| {
+        if !t.authorized.load(Ordering::SeqCst) {
+            return Err("Telegram ulanmagan".to_string());
+        }
+        let state = run_tmo(t, 30, join_one(&client, &kind, &target))?;
+        Ok(json!({"ok": true, "state": state}).to_string())
+    }))
+}
+
 /// Kirish boti username'i (videolar shu bot chatidan olinadi).
 #[no_mangle]
 pub extern "C" fn rust_tg_set_bot(bot_ptr: *const c_char) {
@@ -2928,6 +3050,19 @@ pub extern "C" fn rust_tg_play_url(key_ptr: *const c_char) -> *mut c_char {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn kanal_nomi_va_havola_xeshi() {
+        assert_eq!(public_name("@arugram_news").as_deref(), Some("arugram_news"));
+        assert_eq!(public_name("https://t.me/arugram_news/").as_deref(), Some("arugram_news"));
+        assert_eq!(public_name("t.me/arugram_news").as_deref(), Some("arugram_news"));
+        assert!(public_name("abc").is_none());
+        assert!(public_name("a b c d e f").is_none());
+        assert_eq!(invite_hash("https://t.me/+AbCdEf123456").as_deref(), Some("AbCdEf123456"));
+        assert_eq!(invite_hash("t.me/joinchat/AbCdEf123456").as_deref(), Some("AbCdEf123456"));
+        assert!(invite_hash("https://t.me/+ab").is_none());
+        assert!(invite_hash("https://t.me/+ab cd!ef12345").is_none());
+    }
     use super::*;
 
     #[test]

@@ -132,8 +132,10 @@ import '../services/format.dart';
 import '../services/intro_times.dart';
 import '../services/season_info.dart';
 import '../services/seasons_repo.dart';
+import '../services/channel_gate.dart';
 import '../services/watch_history.dart';
 import '../services/watch_progress.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../theme/app_background.dart';
 import 'billing_screen.dart';
 import '../widgets/glass.dart';
@@ -459,12 +461,22 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       // tugmasi). O'sha payt yuklashni boshlash kerak — aks holda
       // pleyer ochiladi-yu, qismlar ro'yxati bo'sh qolardi.
       BillingService.instance.addListener(_onBillingChanged);
+      // Bepul bo'lim: ruxsat SHU EKRANDA beriladi (`_ChannelConsentScreen`).
+      ChannelGate.instance.addListener(_onBillingChanged);
     }
   }
 
-  /// Obuna bor yoki bo'lim BEPUL (qismi oldinroq joylangan yarmi).
+  /// Obuna bor yoki bo'lim BEPUL (qismi oldinroq joylangan yarmi) va
+  /// majburiy kanallarga ruxsat berilgan (`channel_gate.dart`).
   bool get _canWatch =>
-      BillingService.instance.active || seasonIsFree(widget.season);
+      BillingService.instance.active ||
+      (seasonIsFree(widget.season) && !ChannelGate.instance.needsConsent);
+
+  /// Bepul bo'lim, lekin kanallarga ruxsat hali berilmagan.
+  bool get _needsChannelConsent =>
+      !BillingService.instance.active &&
+      seasonIsFree(widget.season) &&
+      ChannelGate.instance.needsConsent;
 
   /// Qismlar, bo'limlar va bo'lim ma'lumoti — BIR MARTA.
   bool _loadingStarted = false;
@@ -481,6 +493,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   void _onBillingChanged() {
     if (!mounted || !_canWatch) return;
     BillingService.instance.removeListener(_onBillingChanged);
+    ChannelGate.instance.removeListener(_onBillingChanged);
     // Xabar KADR CHIZILAYOTGAN paytda kelishi mumkin. Yuklash esa
     // `setState` chaqiradi — shu sabab kadr tugagach boshlanadi.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -590,6 +603,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     _setTgHeld(null);
     TelegramService.instance.screenClosed();
     BillingService.instance.removeListener(_onBillingChanged);
+    ChannelGate.instance.removeListener(_onBillingChanged);
     // `late final` — Izohlar oynasi umuman ochilmagan bo'lsa
     // nazoratchi yaratilmagan ham bo'ladi.
     if (_commentsMade) _comments.dispose();
@@ -3871,8 +3885,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     // uzilgan, PUL TO'LAGAN odam yuklab olgan animesini bemalol
     // ko'ra oladi (`billing_service.dart` -> `restore` izohi).
     return AnimatedBuilder(
-      animation: BillingService.instance,
+      animation: Listenable.merge([BillingService.instance, ChannelGate.instance]),
       builder: (context, _) {
+        if (_needsChannelConsent) {
+          return const _ChannelConsentScreen();
+        }
         if (!_canWatch) {
           return const _SubRequiredScreen();
         }
@@ -8334,6 +8351,123 @@ class _SubRequiredScreen extends StatelessWidget {
                         fontSize: 13,
                       ),
                     ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── BEPUL BO'LIM: MAJBURIY KANALLARGA RUXSAT ───────────────────
+//
+// TALAB (foydalanuvchi): bepul animeni ko'rish uchun ilova
+// kanallarga obuna bo'lish uchun ruxsat so'raydi; ruxsat berilsa
+// pleyer darhol ochiladi, qo'shilish esa orqa fonda bo'ladi
+// (`channel_gate.dart`).
+class _ChannelConsentScreen extends StatefulWidget {
+  const _ChannelConsentScreen();
+
+  @override
+  State<_ChannelConsentScreen> createState() => _ChannelConsentScreenState();
+}
+
+class _ChannelConsentScreenState extends State<_ChannelConsentScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // Ro'yxat bo'sh bo'lsa (admin kanal qo'shmagan) oyna o'zi yopiladi.
+    ChannelGate.instance.refresh();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final list = ChannelGate.instance.channels;
+    final chans = (list ?? const <GateChannel>[]).where((c) => !c.isExternal).toList();
+    final links = (list ?? const <GateChannel>[]).where((c) => c.isExternal).toList();
+    final muted = Colors.white.withValues(alpha: 0.62);
+    return AppBackground(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          iconTheme: const IconThemeData(color: Colors.white),
+        ),
+        body: SafeArea(
+          top: false,
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(24, 0, 24, 40),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.campaign_rounded, size: 64, color: AppColors.accent),
+                  const SizedBox(height: 18),
+                  const Text(
+                    'Bepul ko\'rish',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w800),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    'Bu bo\'limni bepul ko\'rish uchun quyidagi kanallarga obuna '
+                    'bo\'lishingiz kerak. Ruxsat bersangiz, ilova Telegram hisobingiz '
+                    'bilan ularga o\'zi qo\'shiladi (yopiq kanalga so\'rov yuboradi). '
+                    'Kanaldan istalgan vaqtda Telegram\'da chiqib ketishingiz mumkin.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: muted, fontSize: 13.5, height: 1.55),
+                  ),
+                  const SizedBox(height: 16),
+                  if (list == null)
+                    const Padding(
+                      padding: EdgeInsets.all(12),
+                      child: CircularProgressIndicator(),
+                    ),
+                  for (final c in chans)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Row(
+                        children: [
+                          Icon(c.kind == 'public' ? Icons.campaign_outlined : Icons.lock_outline_rounded,
+                              size: 18, color: muted),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(c.title.isEmpty ? c.url : c.title,
+                                style: const TextStyle(color: Colors.white, fontSize: 14)),
+                          ),
+                        ],
+                      ),
+                    ),
+                  for (final l in links)
+                    TextButton.icon(
+                      onPressed: () => launchUrl(Uri.parse(l.url), mode: LaunchMode.externalApplication),
+                      icon: const Icon(Icons.open_in_new_rounded, size: 16),
+                      label: Text(l.title),
+                    ),
+                  const SizedBox(height: 20),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppColors.accent,
+                        minimumSize: const Size(0, 48),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      ),
+                      onPressed: () => ChannelGate.instance.grant(),
+                      child: const Text('Ruxsat berish va ko\'rish',
+                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextButton(
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(builder: (_) => const BillingScreen(startPage: 1)),
+                    ),
+                    child: Text('Kanalsiz — obuna olish', style: TextStyle(color: muted, fontSize: 13)),
                   ),
                 ],
               ),

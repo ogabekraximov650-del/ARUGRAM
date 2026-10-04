@@ -4,6 +4,7 @@ import '../widgets/glass.dart';
 import '../services/admin_badges.dart';
 import '../services/admin_users_service.dart';
 import 'admin_app_screen.dart';
+import 'admin_channels_screen.dart';
 import 'admin_reports_screen.dart';
 import 'admin_packs_screen.dart';
 import 'admin_users_screen.dart';
@@ -176,6 +177,19 @@ class AdminScreen extends StatelessWidget {
                       onTap: () => Navigator.of(context).push(
                         MaterialPageRoute<void>(
                           builder: (_) => const AdminPacksScreen(),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    // Bepul bo'lim uchun majburiy kanallar
+                    // (`admin_channels_screen.dart`).
+                    _AdminButton(
+                      icon: Icons.campaign_rounded,
+                      label: 'Majburiy obunalar',
+                      subtitle: 'Kanallar, limit va statistika',
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => const AdminChannelsScreen(),
                         ),
                       ),
                     ),

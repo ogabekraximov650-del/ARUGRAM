@@ -11,6 +11,7 @@ import 'services/app_keys.dart';
 import 'services/auth_service.dart';
 import 'services/image_cache.dart';
 import 'services/billing_service.dart';
+import 'services/channel_gate.dart';
 import 'services/nav_inset.dart';
 import 'services/net_meter.dart';
 import 'services/offline_library.dart';
@@ -199,6 +200,10 @@ Future<void> _main() async {
   // nusxadan). Bosh sahifadan anime bosilganda "oxirgi ko'rilgan
   // qism" darhol ma'lum bo'lishi kerak, shu sabab bu yerda.
   WatchHistory.instance.loadFromDisk();
+
+  // Majburiy obuna kanallari: ruxsat avval berilgan bo'lsa orqa fonda
+  // (har 5 daqiqada) qo'shilish davom etadi (`channel_gate.dart`).
+  ChannelGate.instance.start();
 
   // ── TRAFIK HISOBI ───────────────────────────────────────────
   // Faqat TARMOQDAN kelgan baytlar sanaladi (Rust yadrosining

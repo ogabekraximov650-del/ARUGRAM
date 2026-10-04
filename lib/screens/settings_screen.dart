@@ -35,6 +35,7 @@ import '../services/auth_service.dart';
 import '../services/user_stats.dart';
 import '../theme/app_background.dart';
 import '../widgets/glass.dart';
+import '../services/channel_gate.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -188,6 +189,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         fontSize: 12,
                         height: 1.5,
                       ),
+                    ),
+                  ),
+                  const SizedBox(height: 22),
+                  // ── MAJBURIY KANALLAR (`channel_gate.dart`) ──────
+                  //
+                  // TALAB (foydalanuvchi): ruxsat berilgandan keyin uni
+                  // sozlamalardan o'chirib qo'ysa bo'lsin. O'chirilsa
+                  // orqa fondagi qo'shilish to'xtaydi va bepul bo'lim
+                  // ochilganda ruxsat yana so'raladi.
+                  _SectionLabel('BEPUL KO\'RISH'),
+                  const SizedBox(height: 10),
+                  AnimatedBuilder(
+                    animation: ChannelGate.instance,
+                    builder: (context, _) => _PrivacyRow(
+                      icon: Icons.campaign_rounded,
+                      title: 'Kanallarga avtomatik obuna',
+                      hint: 'Bepul bo\'limlar uchun ilova Telegram hisobingiz '
+                          'bilan majburiy kanallarga qo\'shiladi (yopiq kanalga '
+                          'so\'rov yuboradi). O\'chirsangiz, bepul bo\'lim '
+                          'ochilganda ruxsat yana so\'raladi.',
+                      value: ChannelGate.instance.consented,
+                      busy: false,
+                      onChanged: (on) {
+                        if (on) {
+                          ChannelGate.instance.grant();
+                        } else {
+                          ChannelGate.instance.revoke();
+                        }
+                        _say(on ? 'Ruxsat berildi' : 'Ruxsat o\'chirildi');
+                      },
                     ),
                   ),
                 ],

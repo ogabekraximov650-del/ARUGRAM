@@ -4696,3 +4696,33 @@ pullik. Bepul bo'limning HAMMA qismi bepul.
   (`seasons_repo.dart` -> `seasonIsFree`).
 - Eslatma: eski B2 yo'li (`/api/play`) hech qachon obunani tekshirmagan —
   o'zgarmadi.
+
+## MAJBURIY OBUNA KANALLARI (2026-10)
+
+TALAB (foydalanuvchi): bepul bo'limni ochganda ilova (pullikdagi
+"obuna oling" oynasi kabi) kanallarga obuna bo'lish uchun RUXSAT so'raydi.
+Ruxsat berilishi bilan pleyer ochiladi, ilova orqa fonda (har 5 daqiqada)
+foydalanuvchining O'Z Telegram hisobi bilan kanallarga qo'shiladi / yopiq
+kanalga so'rov yuboradi. Ruxsatni Sozlamalar -> "Bepul ko'rish" dan
+o'chirish mumkin. Asos — `aniraxuzbot15` (`bot/src/handlers/channels.ts`).
+
+- Server: `worker/src/channels.rs`. Jadvallar `channels_db` (public/private/
+  external, `need` limit, `joined` hisob) va `chan_requests` — FAQAT yopiq
+  kanalga so'rov yuborganlar (bir marta sanaladi; kanal o'chsa ular ham
+  o'chadi). Ochiq kanalga qo'shilganlar jurnalga yozilmaydi — faqat `joined`+1.
+- Hisob Telegram hodisalari bilan (ilovaga ishonilmaydi): `chat_join_request`
+  (so'rov — `getChatMember` uni ko'rmaydi), `chat_member` (ochiq kanalga
+  qo'shildi). Asosiy bot kanalda ADMIN bo'lishi shart ("Foydalanuvchi
+  qo'shish", yopiq uchun "Havola orqali taklif qilish"). Webhook `|v3`.
+- Yo'llar: `GET /api/channels` (ilova; limiti to'lmaganlar + tashqi
+  havolalar), `GET/POST /api/admin/channels` (admin: add/limit/del).
+  Ilova bazaga hech narsa YOZMAYDI. Ko'pi bilan 8 kanal.
+- Admin: ilovadagi "Majburiy obunalar" (`admin_channels_screen.dart`) va
+  kodlash boti -> "🔐 Majburiy obunalar" / `/kanallar` (holat
+  `app_config.encbot_chwait`).
+- Ilova: `lib/services/channel_gate.dart` (ruxsat `chan_consent`, bajarilgan
+  `chan_done`, ro'yxat 15 daqiqa kesh), Rust `rust_tg_join_channel`
+  (`channels.joinChannel` / `messages.importChatInvite`, INVITE_REQUEST_SENT
+  = so'rov yuborildi). Pleyer: `_ChannelConsentScreen`.
+- Server bepul bo'limni kanalga qo'shilganlik bo'yicha TO'SMAYDI (pleyer
+  ruxsatdan keyin darhol ochilishi kerak edi) — to'siq ilovada.

@@ -42,6 +42,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'app_settings.dart';
 import 'billing_service.dart';
+import 'channel_gate.dart';
 import 'admin_badges.dart';
 import 'support_service.dart';
 import 'rust_bridge.dart';
@@ -136,6 +137,10 @@ class AccountData {
     } catch (_) {}
     try {
       SyncQueue.instance.attach();
+    } catch (_) {}
+    // Kanallarga ruxsat ham hisobga tegishli — yangi papkadan o'qiladi.
+    try {
+      ChannelGate.instance.reset();
     } catch (_) {}
   }
 
