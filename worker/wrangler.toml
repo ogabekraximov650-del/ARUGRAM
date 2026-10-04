@@ -33,9 +33,29 @@ new_sqlite_classes = ["PresenceHub"]
 tag = "v2"
 deleted_classes = ["PresenceHub"]
 
+# ══════════════════════════════════════════════════════════════
+#  KODLASH HOLATI — `EncodeLive` (Durable Object)
+# ══════════════════════════════════════════════════════════════
+#
+# Runner har daqiqada to'liq log va statistikani yuboradi, admin paneli
+# o'qiydi (`worker/src/lib.rs` -> `EncodeLive`). Butun dunyo uchun bitta
+# nusxa (oddiy Cloudflare keshi har data markazda alohida bo'lgani uchun
+# u yaramaydi). Turso ishlatilmaydi. SQLite asosidagi sinf — bepul
+# rejada ham ishlaydi (avvalgi `PresenceHub` kabi).
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["EncodeLive"]
+
+[durable_objects]
+bindings = [{ name = "ENCODE_LIVE", class_name = "EncodeLive" }]
+
 [env.production]
 name = "arugram"
 workers_dev = true
+
+# Durable Object bog'lanishi muhitga MEROS bo'lmaydi — shu yerda qayta.
+[env.production.durable_objects]
+bindings = [{ name = "ENCODE_LIVE", class_name = "EncodeLive" }]
 
 # Secrets (GitHub Actions orqali o'rnatiladi):
 # wrangler secret put TURSO_URL --env production

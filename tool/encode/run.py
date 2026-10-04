@@ -70,6 +70,8 @@ LOG_INTERVAL = max(1.0, float(os.environ.get("LOG_INTERVAL_SEC", "10") or 10))
 # 3 soniya — admin paneli uni ~2 soniyada o'qiydi (deyarli real vaqt);
 # Telegram bundan tez tahrirlashga ruxsat bermaydi (FloodWait).
 STATUS_INTERVAL = max(2.0, float(os.environ.get("STATUS_INTERVAL_SEC", "3") or 3))
+# To'liq holat worker'ga (`EncodeLive`) shu oraliqda yuboriladi.
+WORKER_PUSH_SEC = max(20.0, float(os.environ.get("WORKER_PUSH_SEC", "60") or 60))
 SESSION = str(Path(__file__).with_name("pyro_session"))
 WORK = Path(os.environ.get("RUNNER_TEMP", "/tmp")) / "arugram_encode"
 
@@ -617,10 +619,30 @@ class StatusPin:
             elif type(e).__name__ != "MessageNotModified":
                 print(f"Holat xabari yangilanmadi: {e}", flush=True)
 
+    def send_worker(self):
+        """To'liq holat va log'ni worker'ga (`/api/encode/push` -> `EncodeLive`).
+
+        TALAB (foydalanuvchi): "har daqiqada oxirgi to'liq log keshga
+        yozilsin va to'g'ridan-to'g'ri kesh orqali ko'rsatilsin". Bazaga
+        (Turso) yozilmaydi. Xato bo'lsa kodlashga tegmaydi.
+        """
+        try:
+            req = urllib.request.Request(
+                f"{API}/api/encode/push", data=self.text().encode(), method="POST",
+                headers={"X-Encode-Token": TOKEN, "Content-Type": "text/plain; charset=utf-8",
+                         "User-Agent": "arugram-encoder"})
+            urllib.request.urlopen(req, timeout=20).read()
+        except Exception as e:
+            print(f"Holat worker'ga yuborilmadi: {e}", flush=True)
+
     async def loop(self, app):
+        last_push = 0.0
         while True:
             await asyncio.sleep(self.interval)
             await self.push(app)
+            if time.time() - last_push >= WORKER_PUSH_SEC:
+                last_push = time.time()
+                await asyncio.to_thread(self.send_worker)
 
 
 STATUS = StatusPin()
@@ -669,6 +691,7 @@ async def process(app: Client, channel: int, job: dict):
     STATUS.set_progress("start")
     STATUS.update(job_started=int(time.time()), attempt=job.get("attempt"),
                   src=None, ladder=None, cur=None, xfer=None)
+    await asyncio.to_thread(STATUS.send_worker)
     await STATUS.push(app)
     shutil.rmtree(WORK, ignore_errors=True)
     WORK.mkdir(parents=True)
@@ -791,6 +814,7 @@ async def process(app: Client, channel: int, job: dict):
         STATUS.update(job_started=None, attempt=None, src=None, ladder=None,
                       cur=None, xfer=None)
         await STATUS.push(app)
+        await asyncio.to_thread(STATUS.send_worker)
         shutil.rmtree(WORK, ignore_errors=True)
 
 

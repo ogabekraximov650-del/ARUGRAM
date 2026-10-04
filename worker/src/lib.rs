@@ -9654,7 +9654,7 @@ fn needs_app_check(path: &str) -> bool {
     // himoyalangan. Ilova chaqiradiganlari (`queue`, `status`) esa
     // tekshiruvdan o'tadi.
     if matches!(path, "/api/encode/peek" | "/api/encode/claim" | "/api/encode/heartbeat" | "/api/encode/release"
-        | "/api/encode/quality" | "/api/encode/finish")
+        | "/api/encode/quality" | "/api/encode/finish" | "/api/encode/push")
     {
         return false;
     }
@@ -10561,6 +10561,17 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
         return json_resp(&json!({"error": "unauthorized"}), 401);
     }
     let now = now_ms();
+
+    // Runner har daqiqada to'liq holat va log'ni yuboradi (`StatusPin`
+    // matni) — `EncodeLive` xotirasiga yoziladi, Turso'ga EMAS.
+    if path == "/api/encode/push" && method == Method::Post {
+        let text = req.text().await.unwrap_or_default();
+        if !text.starts_with("#arustatus") || text.len() > 16_000 {
+            return json_resp(&json!({"error": "matn"}), 400);
+        }
+        let ok_put = encode_live_store(env, Some(text)).await.is_some();
+        return ok_nostore(json!({"ok": ok_put}));
+    }
 
     if path == "/api/encode/peek" && method == Method::Get {
         let res = turso_exec(env,
@@ -11593,13 +11604,92 @@ async fn encode_live(env: &Env) -> Value {
     v
 }
 
+// ── JONLI HOLAT XOTIRASI (Durable Object) ─────────────────────
+//
+// TALAB (foydalanuvchi): "har daqiqada Cloudflare keshga oxirgi to'liq log
+// yozilsin va to'g'ridan-to'g'ri kesh orqali ko'rsatilsin".
+//
+// NEGA ODDIY KESH EMAS: Cloudflare keshi (Cache API) har data markazda
+// ALOHIDA. Runner (GitHub, AQSh) yozgan nusxani O'zbekistondagi admin
+// so'rovi boshqa data markazga tushib, ko'rmasdi. `EncodeLive` — butun
+// dunyo uchun BITTA nusxa: oxirgi holat xotirada (va o'z kichik omborida,
+// qayta ishga tushsa yo'qolmasin) turadi. Turso ishlatilmaydi.
+//
+// `GET` — oxirgi matn (yo'q bo'lsa 404), `POST` — yangi matn.
+
+#[durable_object(fetch)]
+pub struct EncodeLive {
+    state: State,
+    last: std::cell::RefCell<Option<String>>,
+}
+
+impl DurableObject for EncodeLive {
+    fn new(state: State, _env: Env) -> Self {
+        Self { state, last: std::cell::RefCell::new(None) }
+    }
+
+    async fn fetch(&self, mut req: Request) -> Result<Response> {
+        if req.method() == Method::Post {
+            let text = req.text().await?;
+            *self.last.borrow_mut() = Some(text.clone());
+            self.state.storage().put("s", text).await?;
+            return Response::ok("ok");
+        }
+        let mem = self.last.borrow().clone();
+        let text = match mem {
+            Some(t) => Some(t),
+            None => self.state.storage().get::<String>("s").await.ok().flatten(),
+        };
+        match text {
+            Some(t) => {
+                *self.last.borrow_mut() = Some(t.clone());
+                Response::ok(t)
+            }
+            None => Response::error("bo'sh", 404),
+        }
+    }
+}
+
+/// `Some(text)` — yozadi, `None` — o'qiydi. Natija: o'qilgan/yozilgan matn.
+async fn encode_live_store(env: &Env, text: Option<String>) -> Option<String> {
+    let ns = env.durable_object("ENCODE_LIVE").ok()?;
+    let stub = ns.get_by_name("encode").ok()?;
+    let mut init = RequestInit::new();
+    match &text {
+        Some(t) => {
+            init.with_method(Method::Post).with_body(Some(t.clone().into()));
+        }
+        None => {
+            init.with_method(Method::Get);
+        }
+    }
+    let req = Request::new_with_init("https://encode-live.internal/", &init).ok()?;
+    let mut resp = stub.fetch_with_request(req).await.ok()?;
+    if resp.status_code() != 200 {
+        return None;
+    }
+    match text {
+        Some(t) => Some(t),
+        None => resp.text().await.ok(),
+    }
+}
+
 async fn encode_live_fresh(env: &Env) -> Value {
     let mut out = json!({"status": null, "github": null});
-    // ── TELEGRAM ──
+    // ── RUNNER YUBORGAN (har daqiqada) ──
+    // 5 daqiqadan eski bo'lsa (run tugagan / to'xtagan) — Telegram'dagi
+    // qadalgan xabar (zaxira).
+    let pushed = encode_live_store(env, None).await
+        .and_then(|t| parse_status_pin(&t))
+        .filter(|st| now_ms() - jint(st, "updated_at") < 5 * 60 * 1000);
     let chat = encode_log_chat(env).await;
-    // Ilova shu kanalni adminning O'Z Telegram hisobi bilan to'g'ridan-to'g'ri
-    // o'qiydi (`rust_tg_read_pinned`, ~2 soniyada) — worker'siz.
     out["log_chat"] = json!(chat);
+    if let Some(st) = pushed {
+        out["status"] = st;
+        out["source"] = json!("cache");
+        return encode_live_github(env, out).await;
+    }
+    // ── TELEGRAM ──
     if chat.is_empty() {
         out["status_error"] = json!("Log kanali hali ma'lum emas (kodlash bir marta ishga tushishi kerak)");
     } else {
@@ -11616,6 +11706,10 @@ async fn encode_live_fresh(env: &Env) -> Value {
                 "Holat xabari o'qilmadi: bot log kanalida admin emas yoki runner hali yozmagan"),
         }
     }
+    encode_live_github(env, out).await
+}
+
+async fn encode_live_github(env: &Env, mut out: Value) -> Value {
     // ── GITHUB ──
     // Faqat o'qish huquqli token (`GH_READ_TOKEN`) bo'lsa — ilova GitHub'dan
     // O'ZI so'raydi (worker so'rovi kamayadi); bu yerda so'ralmaydi. Token

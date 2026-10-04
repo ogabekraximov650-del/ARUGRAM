@@ -11,17 +11,19 @@
 //
 // ── MA'LUMOT QAYERDAN ───────────────────────────────────────
 //
-//   * JONLI holat (~2 soniyada): runner (`tool/encode/run.py` ->
-//     `StatusPin`) log kanalidagi QADALGAN `#arustatus` xabarini ~3
-//     soniyada tahrirlaydi. Ilova uni adminning O'Z Telegram hisobi bilan
-//     to'g'ridan-to'g'ri o'qiydi (`rust_tg_read_pinned`) — worker ham,
-//     baza ham ishtirok etmaydi, ya'ni bepul.
-//   * Admin hisobi kanalda bo'lmasa (yoki Telegram ulanmagan bo'lsa) —
-//     worker orqali (`GET /api/encode/live`), 10 soniyada bir.
+//   * ASOSIY YO'L (foydalanuvchi talabi: "har daqiqada oxirgi to'liq log
+//     keshga yozilsin va kesh orqali ko'rsatilsin"): runner har daqiqada
+//     to'liq holat va log'ni worker'ga yuboradi (`/api/encode/push`), worker
+//     uni `EncodeLive` xotirasida saqlaydi (butun dunyo uchun bitta nusxa,
+//     Turso'siz). Ilova `GET /api/encode/live` ni ~16 soniyada so'raydi.
+//   * ZAXIRA (worker'da yangi holat yo'q — masalan eski skriptli run):
+//     log kanalidagi QADALGAN `#arustatus` xabari, adminning O'Z Telegram
+//     hisobi bilan (`rust_tg_read_pinned`), ~2 soniyada.
+//   * GitHub run qadamlari — `GH_READ_TOKEN` bo'lsa ilovaning o'zi
+//     GitHub'dan so'raydi (30 soniyada), bo'lmasa worker orqali.
 //   * Navbat — `GET /api/encode/admin` (bazadan bitta O'QISH): ekran
 //     ochilganda, "Yangilash" bosilganda va kodlanayotgan qism
 //     almashganda.
-//   * GitHub run qadamlari — worker orqali, 30 soniyada bir.
 //
 // Ekran yopilishi bilan hamma so'rovlar to'xtaydi.
 
@@ -119,7 +121,7 @@ class _AdminEncodeScreenState extends State<AdminEncodeScreen> {
         _at = DateTime.now();
       });
       _lastJob = _jobKey(_status);
-      unawaited(_readDirect());
+      if (!_cache) unawaited(_readDirect());
       unawaited(_readGithub());
     } catch (e) {
       if (!mounted) return;
@@ -144,15 +146,22 @@ class _AdminEncodeScreenState extends State<AdminEncodeScreen> {
           : null;
     }
     _logChat = '${live['log_chat'] ?? ''}';
-    // To'g'ridan-to'g'ri o'qilayotgan bo'lsa worker nusxasi (eskiroq)
-    // ustidan yozilmaydi.
-    if (!_direct) {
-      _status = live['status'] is Map<String, dynamic>
-          ? live['status'] as Map<String, dynamic>
-          : null;
-      _statusError = '${live['status_error'] ?? ''}';
+    _cache = live['source'] == 'cache';
+    final st = live['status'] is Map<String, dynamic>
+        ? live['status'] as Map<String, dynamic>
+        : null;
+    // Yangirog'i qoladi (Telegram'dan o'qilgan nusxa yangiroq bo'lishi mumkin).
+    if (st != null &&
+        (_status == null ||
+            _int(st['updated_at']) >= _int(_status!['updated_at']))) {
+      _status = st;
+      _direct = false;
     }
+    if (_status == null) _statusError = '${live['status_error'] ?? ''}';
   }
+
+  /// Holat worker xotirasidan (`EncodeLive`, runner har daqiqada yozadi).
+  bool _cache = false;
 
   /// Qadalgan xabarni adminning o'z Telegram hisobi bilan o'qiydi.
   Future<bool> _readDirect() async {
@@ -232,13 +241,14 @@ class _AdminEncodeScreenState extends State<AdminEncodeScreen> {
     _polling = true;
     _ticks++;
     try {
-      var ok = false;
-      if (_logChat.isNotEmpty) ok = await _readDirect();
+      // ASOSIY YO'L (foydalanuvchi talabi): runner har daqiqada to'liq log
+      // va statistikani worker xotirasiga yozadi — ilova uni ~16 soniyada
+      // so'raydi. Worker'da yangi holat bo'lmasa (eski skriptli run) —
+      // zaxira: Telegram'dagi qadalgan xabar, adminning o'z hisobi bilan.
+      if (!_cache && _logChat.isNotEmpty) await _readDirect();
       if (!mounted) return;
-      // Telegram'dan o'qib bo'lmasa — worker orqali (10 soniyada), GitHub
-      // qadamlari esa har holda 30 soniyada.
       if (_gh != null && _ticks % 15 == 0) unawaited(_readGithub());
-      if ((!ok && _ticks % 5 == 0) || (_gh == null && _ticks % 15 == 0)) {
+      if (_ticks % 8 == 0) {
         final live = await _get('/api/encode/live');
         if (!mounted) return;
         setState(() => _applyWorkerLive(live ?? const {}));
@@ -349,7 +359,8 @@ class _AdminEncodeScreenState extends State<AdminEncodeScreen> {
         children: [
           const _Label('HOZIR KODLANMOQDA'),
           const Spacer(),
-          _LiveDot(direct: _direct, updatedMs: _int(st?['updated_at'])),
+          _LiveDot(
+              direct: _direct || _cache, updatedMs: _int(st?['updated_at'])),
         ],
       ),
       const SizedBox(height: 8),
@@ -554,7 +565,8 @@ class _LiveDot extends StatelessWidget {
     final age = updatedMs > 0
         ? (DateTime.now().millisecondsSinceEpoch - updatedMs) ~/ 1000
         : -1;
-    final fresh = age >= 0 && age < 20;
+    // Runner har daqiqada yozadi — 2 daqiqagacha "yangi".
+    final fresh = age >= 0 && age < 120;
     final color = direct && fresh ? AppColors.success : AppColors.gold;
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -567,7 +579,7 @@ class _LiveDot extends StatelessWidget {
         const SizedBox(width: 6),
         Text(
           [
-            direct ? 'Jonli' : 'Worker orqali',
+            direct ? 'Jonli' : 'Eski holat',
             if (age >= 0) '${age}s',
           ].join(' · '),
           style: TextStyle(color: color, fontSize: 11.5),

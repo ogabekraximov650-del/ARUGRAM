@@ -4885,3 +4885,22 @@ ham ko'rsatilsin".
   `anime_views` / `season_views` `sync_route` da odam boshiga bitta
   sanaladi; o'tmishi bir marta tomosha tarixidan `0000-00-00` chelagiga
   yoziladi (`mig_view_seed`, faqat "umumiy" ga kiradi).
+
+## Kodlash holati — har daqiqada worker xotirasiga (`EncodeLive`, Durable Object) (2026-10)
+
+Foydalanuvchi: "har daqiqada Cloudflare keshga oxirgi to'liq log yozilsin va
+to'g'ridan-to'g'ri kesh orqali ko'rsatilsin" (Turso'siz).
+
+- Oddiy Cloudflare keshi (Cache API) har data markazda alohida: runner (AQSh)
+  yozgani O'zbekistondagi admin so'roviga ko'rinmasdi. Shu sabab
+  `EncodeLive` Durable Object (SQLite sinf, bepul rejada ishlaydi, migratsiya
+  `v3`, bog'lanish `ENCODE_LIVE` — `wrangler.toml` da ham asosiy, ham
+  `env.production` da). Bitta nusxa (`get_by_name("encode")`): oxirgi matn
+  xotirada + o'z omborida (`s` kaliti).
+- Runner (`run.py` -> `StatusPin.send_worker`): `#arustatus` matnini
+  `POST /api/encode/push` (ENCODE_TOKEN, imzo tekshiruvidan ozod) ga har
+  `WORKER_PUSH_SEC` (60) soniyada, qism boshida va oxirida yuboradi.
+- `encode_live_fresh`: avval `EncodeLive` (5 daqiqadan yangi bo'lsa,
+  `source: "cache"`), bo'lmasa Telegram qadalgan xabari (zaxira).
+- Ilova: `/api/encode/live` ni ~16 s da so'raydi; `source != cache` bo'lsa
+  zaxira — qadalgan xabarni o'zi o'qiydi.
