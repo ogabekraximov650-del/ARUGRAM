@@ -5385,13 +5385,48 @@ async fn desk_diagnosis(env: &Env) -> Option<String> {
 //
 // Tartib: `MAX(epizod_db.created_at)` o'sish bo'yicha, teng bo'lsa
 // (anime_id, season_id). Natija bazadan o'qiladi, yozuv YO'Q;
-// o'qishni kamaytirish uchun izolyatda 60 soniya keshlanadi.
+// keshlanadi (pastdagi "TEZLIK" izohi).
 
-const FREE_SEASONS_TTL_MS: i64 = 60_000;
+// ── TEZLIK (foydalanuvchi: "bepul ko'rishda ilova juda sekin") ──
+//
+// Hisob butun `epizod_db` ni GROUP BY bilan o'qiydi. Ilgari natija
+// faqat SHU izolyatda 60 soniya turardi — Cloudflare esa so'rovlarni
+// ko'p izolyatga tarqatadi, ya'ni bo'limlar ro'yxati, bo'lim oynasi va
+// HAR BIR video nusxasi (`/api/tg/deliver`, obunasiz odamda) ko'pincha
+// shu og'ir so'rovni kutardi (va har safar hamma qatorni o'qib, pul
+// sarflardi). Endi natija Cloudflare keshida (Cache API, butun data
+// markaz uchun bitta) 5 daqiqa, izolyat xotirasida esa 2 daqiqa turadi.
+
+const FREE_SEASONS_TTL_MS: i64 = 120_000;
+const FREE_SEASONS_EDGE_SECS: u32 = 300;
+const FREE_SEASONS_EDGE_URL: &str = "https://arugram-free-seasons.internal/v1";
 
 thread_local! {
     static FREE_SEASONS_CACHE: std::cell::RefCell<Option<(i64, std::collections::HashSet<(i64, i64)>)>> =
         const { std::cell::RefCell::new(None) };
+}
+
+fn free_pairs(v: &Value) -> std::collections::HashSet<(i64, i64)> {
+    v.as_array().map(|a| a.iter()
+        .filter_map(|p| Some((p.get(0)?.as_i64()?, p.get(1)?.as_i64()?)))
+        .collect())
+        .unwrap_or_default()
+}
+
+async fn free_seasons_edge_get() -> Option<std::collections::HashSet<(i64, i64)>> {
+    let req = Request::new(FREE_SEASONS_EDGE_URL, Method::Get).ok()?;
+    let mut hit = Cache::default().get(&req, false).await.ok()??;
+    let v: Value = hit.json().await.ok()?;
+    Some(free_pairs(&v))
+}
+
+async fn free_seasons_edge_put(free: &std::collections::HashSet<(i64, i64)>) {
+    let list: Vec<Value> = free.iter().map(|(a, s)| json!([a, s])).collect();
+    let Ok(mut resp) = Response::from_json(&json!(list)) else { return };
+    let _ = resp.headers_mut().set("Cache-Control", &format!("public, max-age={FREE_SEASONS_EDGE_SECS}"));
+    if let Ok(req) = Request::new(FREE_SEASONS_EDGE_URL, Method::Get) {
+        let _ = Cache::default().put(&req, resp).await;
+    }
 }
 
 /// Bepul bo'limlar to'plami: `(anime_id, season_id)`.
@@ -5401,6 +5436,10 @@ async fn free_seasons(env: &Env) -> std::collections::HashSet<(i64, i64)> {
         c.borrow().as_ref().filter(|(at, _)| now - *at < FREE_SEASONS_TTL_MS).map(|(_, v)| v.clone())
     });
     if let Some(v) = hit {
+        return v;
+    }
+    if let Some(v) = free_seasons_edge_get().await {
+        FREE_SEASONS_CACHE.with(|c| *c.borrow_mut() = Some((now, v.clone())));
         return v;
     }
     let res = turso_exec(env,
@@ -5419,6 +5458,7 @@ async fn free_seasons(env: &Env) -> std::collections::HashSet<(i64, i64)> {
         .collect();
     let free: std::collections::HashSet<(i64, i64)> = ids.iter().take(ids.len() / 2).cloned().collect();
     FREE_SEASONS_CACHE.with(|c| *c.borrow_mut() = Some((now, free.clone())));
+    free_seasons_edge_put(&free).await;
     free
 }
 

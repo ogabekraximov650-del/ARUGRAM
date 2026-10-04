@@ -4760,3 +4760,20 @@ hisobga yozadi va `SyncQueue.putSettings` ga bitta qator qo'yadi
 Fayllar: `lib/screens/settings_screen.dart`, `lib/services/auth_service.dart`,
 `lib/services/sync_queue.dart`, `lib/services/channel_gate.dart`,
 `worker/src/lib.rs`.
+
+## Bepul ko'rish sekinligi (2026-10)
+
+Foydalanuvchi: "bepul ko'rishda ilova juda sekin, pleyer va qismlar sekin
+yuklanyapti".
+
+- `free_seasons` (worker) butun `epizod_db` ni GROUP BY bilan o'qiydi va
+  natija faqat bitta izolyatda 60 s turardi — bo'limlar ro'yxati, bo'lim
+  oynasi va obunasiz odamning HAR BIR `/api/tg/deliver` so'rovi ko'pincha
+  shu og'ir so'rovni kutardi. Endi Cloudflare Cache API'da 5 daqiqa
+  (`FREE_SEASONS_EDGE_URL`) + izolyatda 2 daqiqa. Yangi qism qo'shilganda
+  bepul ro'yxat 5 daqiqagacha kechikib yangilanadi.
+- `seasonIsFree` (ilova) obunasiz odamda pleyerning har chizishida butun
+  bo'limlar ro'yxatini aylanardi — endi indeks (`_freeIndex`).
+- `ChannelGate`: ruxsat berilgan zahoti (pleyer endi ochilayotganda)
+  kanallarga qo'shilish boshlanib, video bilan Telegram ulanishini
+  talashardi — birinchi aylanish 45 s keyin (`_firstDelay`).

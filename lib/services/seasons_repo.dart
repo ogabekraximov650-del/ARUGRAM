@@ -151,14 +151,27 @@ class SeasonsRepo extends ChangeNotifier {
 /// bo'lmasa (eski nusxa) umumiy ro'yxatdagi nusxadan olinadi.
 bool seasonIsFree(Map<String, dynamic> s) {
   if (s['free'] is bool) return s['free'] as bool;
-  final a = seasonInt(s, 'anime_id');
-  final id = seasonInt(s, 'season_id');
-  for (final o in SeasonsRepo.instance.items) {
-    if (seasonInt(o, 'anime_id') == a && seasonInt(o, 'season_id') == id) {
-      return o['free'] == true;
-    }
+  return _freeIndex()
+      .contains('${seasonInt(s, 'anime_id')}:${seasonInt(s, 'season_id')}');
+}
+
+// Pleyer bu savolni HAR chizishda beradi (obunasiz odamda — sekundiga
+// bir necha marta). Ilgari har safar butun ro'yxat aylanib chiqilardi;
+// endi ro'yxat almashganda bir marta indeks quriladi.
+List<Map<String, dynamic>>? _freeOf;
+Set<String> _freeSet = const {};
+
+Set<String> _freeIndex() {
+  final items = SeasonsRepo.instance.items;
+  if (!identical(items, _freeOf)) {
+    _freeOf = items;
+    _freeSet = {
+      for (final o in items)
+        if (o['free'] == true)
+          '${seasonInt(o, 'anime_id')}:${seasonInt(o, 'season_id')}',
+    };
   }
-  return false;
+  return _freeSet;
 }
 
 int seasonInt(Map<String, dynamic> s, String key) =>

@@ -199,6 +199,8 @@ class ChannelGate extends ChangeNotifier {
     _consent = false;
     _timer?.cancel();
     _timer = null;
+    _first?.cancel();
+    _first = null;
     _saveConsent(false);
     notifyListeners();
   }
@@ -216,9 +218,22 @@ class ChannelGate extends ChangeNotifier {
     } catch (_) {}
   }
 
+  /// Birinchi qo'shilishgacha kutish.
+  ///
+  /// TOPILGAN MUAMMO (foydalanuvchi: "bepul ko'rishda ilova juda sekin,
+  /// qismlar sekin yuklanyapti"): ruxsat berilishi bilan (ya'ni AYNAN
+  /// pleyer ochilib, video yuklana boshlagan paytda) ilova har bir
+  /// kanalga ketma-ket qo'shila boshlardi — Telegram ulanishi videoning
+  /// birinchi bo'laklari bilan talashardi. Endi video boshlanib olgach.
+  static const Duration _firstDelay = Duration(seconds: 45);
+  Timer? _first;
+
   void _arm() {
     _timer ??= Timer.periodic(_every, (_) => unawaited(_tick()));
-    unawaited(_tick());
+    _first ??= Timer(_firstDelay, () {
+      _first = null;
+      unawaited(_tick());
+    });
   }
 
   /// Ro'yxatni serverdan oladi (ruxsat oynasi ham chaqiradi).
