@@ -4807,3 +4807,29 @@ bo'lmasdi".
   "Kodlash navbati"), yuqorida "Yangilash" tugmasi.
 - `run.py` avtoencode repo'ga `sync-packs.yml` orqali avtomatik ko'chadi
   (`tool/packs/sync_repo.py` -> `FILES`).
+
+## Kodlash statistikasi — real vaqtda va batafsil (2026-10)
+
+Foydalanuvchi: "encode statistikani to'liq mayda detallarigacha aniq va real
+timeda ko'rsat; videoni qancha daqiqa kodlangani va jami qancha daqiqaligi
+ham ko'rsatilsin".
+
+- **Runner**: qadalgan `#arustatus` xabari endi ~3 s da tahrirlanadi
+  (`STATUS_INTERVAL_SEC`, FloodWait bo'lsa oraliq o'zi 1 s ga uzayadi,
+  15 s gacha). Sarlavhaga `data: {JSON}` qatori qo'shildi: `cur` (ffmpeg:
+  foiz, `out_s`/`dur_s` — kodlangan va jami soniya, kadr, kadr/s, tezlik,
+  bitreyt, hajm, taxminiy hajm, o'tdi/qoldi, drop/dup, q), `ladder`
+  (har sifat: kutmoqda/kodlanmoqda/yuklanmoqda/tayyor, CRF, hajm, kb/s,
+  kodlash vaqti), `src` (o'lcham, davomiylik, hajm, bitreyt, kadr/s, jami
+  kadr, kodek), `xfer` (yuklab olish/Telegram'ga yuklash: foiz, MB, MB/s,
+  qoldi), `sys` (CPU %, yadro, yuklama, RAM, bo'sh disk), `run_s`,
+  `job_started`, `attempt`. 4000 belgidan oshsa eski log qatorlari tashlanadi.
+- **Rust**: `rust_tg_read_pinned(kanal_id)` — adminning o'z hisobi bilan
+  qadalgan xabarni o'qiydi (`channels.getMessages`; kanal va xabar raqami
+  eslab qolinadi, raqam 30 s da `getFullChannel` bilan yangilanadi).
+- **Ilova** (`admin_encode_screen.dart`): ekran ochiq turganda har 2 s da
+  to'g'ridan-to'g'ri Telegram'dan o'qiydi ("Jonli" yashil nuqta). Bo'lmasa
+  (admin kanalda emas / Telegram ulanmagan) — worker orqali 10 s da
+  ("Worker orqali", sariq). GitHub qadamlari 30 s da, navbat — qism
+  almashganda. Worker `/api/encode/live` endi `log_chat` va `data` ham
+  beradi.

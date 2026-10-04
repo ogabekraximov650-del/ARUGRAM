@@ -2323,6 +2323,92 @@ pub extern "C" fn rust_tg_join_channel(arg_ptr: *const c_char) -> *mut c_char {
     }))
 }
 
+/// Admin paneli — kodlash holati JONLI: log kanalidagi qadalgan
+/// `#arustatus` xabarini adminning O'Z Telegram hisobi bilan o'qiydi
+/// (`channels.getMessages`). Worker ham, baza ham ishtirok etmaydi —
+/// panel ochiq turganda ~2 soniyada bir chaqiriladi.
+///
+/// Kanal (`channel_id`, `access_hash`) va qadalgan xabar raqami eslab
+/// qolinadi: har chaqiruv odatda BITTA so'rov. Xabar raqami 30 soniyada
+/// bir marta (yoki xabar topilmasa) `channels.getFullChannel` bilan
+/// yangilanadi — runner yangi xabar qadagan bo'lishi mumkin.
+///
+/// Argument: Bot API ko'rinishidagi kanal ID (`-100...`).
+/// Javob: `{"ok":true,"text":"...","edit_date":unix}` yoki `{"error":...}`.
+#[no_mangle]
+pub extern "C" fn rust_tg_read_pinned(arg_ptr: *const c_char) -> *mut c_char {
+    let chat: i64 = unsafe { cstr_to_str(arg_ptr) }.unwrap_or("").trim().parse().unwrap_or(0);
+    string_to_cptr(with_client(|t, client| {
+        if !t.authorized.load(Ordering::SeqCst) {
+            return Err("Telegram ulanmagan".to_string());
+        }
+        if chat >= 0 {
+            return Err("kanal ID noto'g'ri".to_string());
+        }
+        let (text, edit) = run_tmo(t, 20, read_pinned(&client, chat))?;
+        Ok(json!({"ok": true, "text": text, "edit_date": edit}).to_string())
+    }))
+}
+
+/// (kanal ID, channel_id, access_hash, qadalgan xabar, raqam olingan payt).
+static PINNED: Mutex<Option<(i64, i64, i64, i32, Instant)>> = Mutex::new(None);
+
+async fn read_pinned(client: &Client, chat: i64) -> Result<(String, i64), String> {
+    let cached = PINNED.lock().ok().and_then(|g| *g).filter(|c| c.0 == chat);
+    let (cid, hash) = match cached {
+        Some(c) => (c.1, c.2),
+        None => match find_channel(client, chat).await?.into() {
+            tl::enums::InputPeer::Channel(p) => (p.channel_id, p.access_hash),
+            _ => return Err("bu kanal emas".to_string()),
+        },
+    };
+    let channel = || tl::enums::InputChannel::Channel(tl::types::InputChannel { channel_id: cid, access_hash: hash });
+    let mut msg_id = cached
+        .filter(|c| c.3 > 0 && c.4.elapsed() < Duration::from_secs(30))
+        .map(|c| c.3)
+        .unwrap_or(0);
+    if msg_id == 0 {
+        let full = client
+            .invoke(&tl::functions::channels::GetFullChannel { channel: channel() })
+            .await
+            .map_err(|e| inv_err(&e))?;
+        let tl::enums::messages::ChatFull::Full(f) = full;
+        msg_id = match f.full_chat {
+            tl::enums::ChatFull::ChannelFull(cf) => cf.pinned_msg_id.unwrap_or(0),
+            _ => 0,
+        };
+        if let Ok(mut g) = PINNED.lock() {
+            *g = Some((chat, cid, hash, msg_id, Instant::now()));
+        }
+    }
+    if msg_id <= 0 {
+        return Err("kanalda qadalgan holat xabari yo'q".to_string());
+    }
+    let res = client
+        .invoke(&tl::functions::channels::GetMessages {
+            channel: channel(),
+            id: vec![tl::enums::InputMessage::Id(tl::types::InputMessageId { id: msg_id })],
+        })
+        .await
+        .map_err(|e| inv_err(&e))?;
+    let msgs = match res {
+        tl::enums::messages::Messages::Messages(m) => m.messages,
+        tl::enums::messages::Messages::Slice(m) => m.messages,
+        tl::enums::messages::Messages::ChannelMessages(m) => m.messages,
+        tl::enums::messages::Messages::NotModified(_) => Vec::new(),
+    };
+    for m in msgs {
+        if let tl::enums::Message::Message(m) = m {
+            return Ok((m.message, m.edit_date.unwrap_or(m.date) as i64));
+        }
+    }
+    // Xabar o'chirilgan — keyingi safar raqam qaytadan olinadi.
+    if let Ok(mut g) = PINNED.lock() {
+        *g = Some((chat, cid, hash, 0, Instant::now()));
+    }
+    Err("qadalgan xabar topilmadi".to_string())
+}
+
 /// Admin paneli: ASOSIY botni kanalga ADMIN qiladi — adminning O'Z
 /// Telegram hisobi bilan (`channels.editAdmin`), Telegram botiga
 /// kirmasdan (foydalanuvchi talabi: "kanal IDsi yoki useri berilganda

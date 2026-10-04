@@ -11300,6 +11300,10 @@ fn parse_status_pin(text: &str) -> Option<Value> {
         "updated_at": head.get("updated").and_then(|v| v.as_str())
             .and_then(|v| v.parse::<i64>().ok()).unwrap_or(0) * 1000,
         "lines": lines,
+        // Batafsil statistika (runner `StatusPin.data`): joriy ffmpeg
+        // holati, sifatlar zinasi, manba, yuklash/yuklab olish, CPU/RAM.
+        "data": head.get("data").and_then(|v| v.as_str())
+            .and_then(|v| serde_json::from_str::<Value>(v).ok()).unwrap_or(json!({})),
     }))
 }
 
@@ -11311,6 +11315,9 @@ async fn encode_live(env: &Env) -> Value {
         c if !c.is_empty() => c,
         _ => config_get(env, "encode_log_chat").await.unwrap_or_default(),
     };
+    // Ilova shu kanalni adminning O'Z Telegram hisobi bilan to'g'ridan-to'g'ri
+    // o'qiydi (`rust_tg_read_pinned`, ~2 soniyada) — worker'siz.
+    out["log_chat"] = json!(chat);
     if chat.is_empty() {
         out["status_error"] = json!("Log kanali hali ma'lum emas (kodlash bir marta ishga tushishi kerak)");
     } else {

@@ -67,7 +67,9 @@ START_BUDGET = int(os.environ.get("START_BUDGET_MIN", "240")) * 60
 LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL_ID", "0") or 0)
 LOG_INTERVAL = max(1.0, float(os.environ.get("LOG_INTERVAL_SEC", "10") or 10))
 # Qadalgan holat xabari shu oraliqda tahrirlanadi (`StatusPin`).
-STATUS_INTERVAL = max(5.0, float(os.environ.get("STATUS_INTERVAL_SEC", "15") or 15))
+# 3 soniya — admin paneli uni ~2 soniyada o'qiydi (deyarli real vaqt);
+# Telegram bundan tez tahrirlashga ruxsat bermaydi (FloodWait).
+STATUS_INTERVAL = max(2.0, float(os.environ.get("STATUS_INTERVAL_SEC", "3") or 3))
 SESSION = str(Path(__file__).with_name("pyro_session"))
 WORK = Path(os.environ.get("RUNNER_TEMP", "/tmp")) / "arugram_encode"
 
@@ -216,6 +218,12 @@ def transfer_progress(kind: str):
         pct = cur * 100 / total if total else 0
         sp = cur / max(now - t0, 0.1) / 1048576
         log(f"    {kind} {pct:5.1f}% | {cur / 1048576:.1f}/{total / 1048576:.1f} MB | {sp:.2f} MB/s")
+        STATUS.update(xfer={
+            "kind": kind, "pct": round(pct, 1), "cur_mb": round(cur / 1048576, 1),
+            "total_mb": round(total / 1048576, 1), "mbps": round(sp, 2),
+            "elapsed": int(now - t0),
+            "eta": int((total - cur) / 1048576 / sp) if sp > 0 and total else -1,
+        })
     return cb
 
 
@@ -278,6 +286,23 @@ def probe(path: Path):
         return h, d
     except Exception as e:
         raise Fatal(f"video o'qilmadi: {e}")
+
+
+def src_info(path: Path) -> dict:
+    """Manba haqida qo'shimcha (kadr tezligi, kodek, eni) — panel uchun."""
+    try:
+        out = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=codec_name,width,avg_frame_rate,nb_frames",
+             "-of", "json", str(path)],
+            capture_output=True, text=True, timeout=60, check=True).stdout
+        st = json.loads(out)["streams"][0]
+        num, _, den = str(st.get("avg_frame_rate", "0/1")).partition("/")
+        fps = float(num) / float(den or 1) if float(den or 1) else 0.0
+        return {"codec": st.get("codec_name", ""), "w": int(st.get("width") or 0),
+                "fps": round(fps, 3)}
+    except Exception:
+        return {}
 
 
 def plan(height):
@@ -354,6 +379,30 @@ def progress_line(label: str, f: dict, dur: float, started: float):
         except ValueError:
             return "-"
     est = f"{int(size) / 1048576 * dur / t:.0f}" if size.isdigit() and int(size) > 0 and t > 5 else "-"
+    # Admin paneli uchun TO'LIQ ma'lumot (`StatusPin`, `cur`).
+    def fnum(x):
+        try:
+            return float(str(x).replace("kbits/s", "").rstrip("x").strip())
+        except ValueError:
+            return None
+    frame = int(f["frame"]) if f.get("frame", "").isdigit() else None
+    detail = {
+        "q": label,
+        "pct": round(min(t / dur * 100, 100.0), 2),
+        "out_s": round(t, 1),
+        "dur_s": round(dur, 1),
+        "frame": frame,
+        "fps": fnum(f.get("fps", "")),
+        "speed": fnum(speed) if speed else None,
+        "bitrate_kbps": fnum(br),
+        "size_mb": round(int(size) / 1048576, 2) if size.isdigit() else None,
+        "est_mb": round(int(size) / 1048576 * dur / t, 1) if size.isdigit() and int(size) > 0 and t > 5 else None,
+        "elapsed": int(time.time() - started),
+        "eta": int((dur - t) / sp) if sp > 0 else -1,
+        "drop": int(f["drop_frames"]) if f.get("drop_frames", "").isdigit() else None,
+        "dup": int(f["dup_frames"]) if f.get("dup_frames", "").isdigit() else None,
+        "qp": fnum(f.get("stream_0_0_q", "")),
+    }
     tail = "|".join([
         (speed or "-").replace(" ", ""), num(f.get("fps", ""), "{:.1f}"),
         num(br.replace("kbits/s", ""), "{:.0f}"),
@@ -361,7 +410,7 @@ def progress_line(label: str, f: dict, dur: float, started: float):
         str(int(time.time() - started)),
         str(int((dur - t) / sp)) if sp > 0 else "-",
     ])
-    return pct, line, tail
+    return pct, line, tail, detail
 
 
 def encode(src: Path, dst: Path, src_h: int, target: int, dcrf: int,
@@ -389,9 +438,10 @@ def encode(src: Path, dst: Path, src_h: int, target: int, dcrf: int,
         fields = {}
         if not r:
             continue
-        pct, text, tail = r
+        pct, text, tail, detail = r
         if on_progress:
             on_progress(pct, tail)
+        STATUS.update(cur=detail)
         if time.time() - last_log >= 1.0:
             last_log = time.time()
             print(time.strftime("%H:%M:%S"), text, flush=True)
@@ -427,6 +477,61 @@ class StatusPin:
         self.sent = ""
         self.off = LOG_CHANNEL == 0
         self.bots = []
+        # Batafsil statistika (admin paneli uchun, `data:` qatorida JSON).
+        self.data = {}
+        self._cpu = None
+        self.interval = STATUS_INTERVAL
+
+    def update(self, **kv):
+        with self.lock:
+            for k, v in kv.items():
+                if v is None:
+                    self.data.pop(k, None)
+                else:
+                    self.data[k] = v
+
+    def quality(self, q, **kv):
+        """Sifatlar zinasidagi bitta sifat holatini yangilaydi."""
+        with self.lock:
+            for row in self.data.get("ladder", []):
+                if row.get("q") == q:
+                    row.update(kv)
+
+    def _sys(self):
+        """CPU, RAM, disk — Linux runner'da /proc dan (xato bo'lsa bo'sh)."""
+        out = {}
+        try:
+            with open("/proc/stat") as f:
+                v = [int(x) for x in f.readline().split()[1:]]
+            idle, total = v[3] + (v[4] if len(v) > 4 else 0), sum(v)
+            if self._cpu:
+                di, dt = idle - self._cpu[0], total - self._cpu[1]
+                if dt > 0:
+                    out["cpu"] = round(100 * (1 - di / dt), 1)
+            self._cpu = (idle, total)
+        except Exception:
+            pass
+        try:
+            mem = {}
+            with open("/proc/meminfo") as f:
+                for ln in f:
+                    k, _, v = ln.partition(":")
+                    mem[k] = int(v.split()[0])
+            out["ram_total_mb"] = mem["MemTotal"] // 1024
+            out["ram_used_mb"] = (mem["MemTotal"] - mem.get("MemAvailable", 0)) // 1024
+        except Exception:
+            pass
+        try:
+            du = shutil.disk_usage(WORK.parent)
+            out["disk_free_gb"] = round(du.free / 1e9, 1)
+        except Exception:
+            pass
+        try:
+            out["load"] = round(os.getloadavg()[0], 2)
+        except Exception:
+            pass
+        out["cores"] = os.cpu_count() or 0
+        return out
 
     def line(self, text, progress=False):
         with self.lock:
@@ -445,12 +550,20 @@ class StatusPin:
             self.progress = progress or "idle"
 
     def text(self) -> str:
+        sysinfo = self._sys()
         with self.lock:
+            data = dict(self.data)
+            data["sys"] = sysinfo
+            data["run_s"] = int(time.time() - T0)
             head = [self.TAG, f"run: {RUNNER}", f"job: {self.job}", f"num: {self.num}",
-                    f"progress: {self.progress}", f"updated: {int(time.time())}", "---"]
+                    f"progress: {self.progress}", f"updated: {int(time.time())}",
+                    "data: " + json.dumps(data, separators=(",", ":"), ensure_ascii=False),
+                    "---"]
             body = [t for _, t in self.lines]
-        out = "\n".join(head + body)
-        return out[:4000]
+        # Telegram xabari 4096 belgidan oshmasin — eski qatorlar tashlanadi.
+        while body and len("\n".join(head + body)) > 4000:
+            body.pop(0)
+        return "\n".join(head + body)[:4000]
 
     async def _promote(self, app):
         # Worker'ning botlari kanalda ADMIN bo'lmasa qadalgan xabarni o'qiy
@@ -492,13 +605,15 @@ class StatusPin:
             self.sent = t
         except Exception as e:
             if type(e).__name__ == "FloodWait":
+                # Telegram sekinlashtirishni so'radi — oraliq uzayadi.
+                self.interval = min(self.interval + 1.0, 15.0)
                 await asyncio.sleep(int(getattr(e, "value", 10) or 10))
             elif type(e).__name__ != "MessageNotModified":
                 print(f"Holat xabari yangilanmadi: {e}", flush=True)
 
     async def loop(self, app):
         while True:
-            await asyncio.sleep(STATUS_INTERVAL)
+            await asyncio.sleep(self.interval)
             await self.push(app)
 
 
@@ -546,6 +661,8 @@ async def process(app: Client, channel: int, job: dict):
     hb = Heartbeat(ident)
     STATUS.set_job(f"{a}/{s}/{e}", str(job.get("epizod_number") or ""))
     STATUS.set_progress("start")
+    STATUS.update(job_started=int(time.time()), attempt=job.get("attempt"),
+                  src=None, ladder=None, cur=None, xfer=None)
     await STATUS.push(app)
     shutil.rmtree(WORK, ignore_errors=True)
     WORK.mkdir(parents=True)
@@ -584,6 +701,13 @@ async def process(app: Client, channel: int, job: dict):
         src_h, src_d = await asyncio.to_thread(probe, src)
         steps = plan(src_h)
         src_mb = src.stat().st_size / 1048576
+        extra = await asyncio.to_thread(src_info, src)
+        STATUS.update(xfer=None, src={
+            "h": src_h, "dur_s": round(src_d, 1), "mb": round(src_mb, 1),
+            "kbps": round(src.stat().st_size * 8 / src_d / 1000), **extra,
+            "frames": round(src_d * extra["fps"]) if extra.get("fps") else None,
+        }, ladder=[{"q": l, "h": tgt, "crf": CRF_BASE - dc,
+                    "state": "done" if l in done else "wait"} for l, tgt, dc in steps])
         log(f"  manba {src_h}p, {src_d:.0f} s, {src_mb:.1f} MB, "
             f"bitreyt ~{src.stat().st_size * 8 / src_d / 1000:.0f} kb/s -> "
             f"{', '.join(x[0] for x in steps)}")
@@ -597,6 +721,8 @@ async def process(app: Client, channel: int, job: dict):
             out = WORK / f"{label}.mp4"
             log(f"  {label}: kodlanmoqda...")
             t = time.time()
+            STATUS.quality(label, state="enc", started=int(t))
+            STATUS.update(cur=None, xfer=None)
             # Alohida oqimda — Telegram ulanishi (ping) uzilib qolmasin.
             await asyncio.to_thread(hb.set, f"enc|{label}|0|{idx}|{len(steps)}", True)
             await asyncio.to_thread(
@@ -612,6 +738,10 @@ async def process(app: Client, channel: int, job: dict):
             await asyncio.to_thread(ctr_file, out, sealed, k)
             size = out.stat().st_size
             out.unlink()
+            STATUS.quality(label, state="upload", size_mb=round(size / 1048576, 1),
+                           enc_s=int(time.time() - t),
+                           kbps=round(size * 8 / src_d / 1000))
+            STATUS.update(cur=None)
             log(f"  {label}: tayyor — {size / 1048576:.1f} MB, o'rtacha bitreyt "
                 f"{size * 8 / src_d / 1000:.0f} kb/s, kodlash {hms(time.time() - t)} "
                 f"— yuklanmoqda...")
@@ -625,6 +755,8 @@ async def process(app: Client, channel: int, job: dict):
             api("quality", {**ident, "quality": label, "file": name, "size": size,
                             "key": k.hex(), "msg_id": sent.id})
             done.add(label)
+            STATUS.quality(label, state="done")
+            STATUS.update(xfer=None)
             log(f"  {label}: jurnalga yozildi")
 
         api("finish", {**ident, "ok": True})
@@ -650,6 +782,8 @@ async def process(app: Client, channel: int, job: dict):
         hb.stop.set()
         STATUS.set_job("", "")
         STATUS.set_progress("idle")
+        STATUS.update(job_started=None, attempt=None, src=None, ladder=None,
+                      cur=None, xfer=None)
         await STATUS.push(app)
         shutil.rmtree(WORK, ignore_errors=True)
 
