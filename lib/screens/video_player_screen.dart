@@ -7296,18 +7296,18 @@ class _FsChip extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (icon != null) ...[
+            if (icon != null)
               Icon(icon, color: Colors.white, size: 16 * scale),
-              SizedBox(width: 4 * scale),
-            ],
-            Text(
-              label,
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 12 * scale,
-                fontWeight: FontWeight.w700,
+            if (icon != null && label.isNotEmpty) SizedBox(width: 4 * scale),
+            if (label.isNotEmpty)
+              Text(
+                label,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 12 * scale,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
-            ),
           ],
         ),
       ),
@@ -7452,6 +7452,19 @@ class _BottomBarState extends State<_BottomBar> {
             Row(
               children: [
                 const Spacer(),
+                // QISMLAR RO'YXATI — tezlik tugmasining CHAP yonida
+                // (foydalanuvchi talabi: "shunda qulay bo'ladi").
+                // Ilgari pastdagi qism boshqaruvi qatorining chap
+                // chetida edi.
+                if (widget.onEpisodeList != null) ...[
+                  _FsChip(
+                    icon: Icons.playlist_play_rounded,
+                    label: '',
+                    onTap: widget.onEpisodeList!,
+                    scale: s,
+                  ),
+                  SizedBox(width: 8 * s),
+                ],
                 if (widget.onSpeedTap != null) ...[
                   // TEZLIK — IKONKA (yozuv emas, foydalanuvchi
                   // talabi). Yonidagi kichik raqam hozirgi tezlikni
@@ -7478,8 +7491,8 @@ class _BottomBarState extends State<_BottomBar> {
             // tugmasi va chap tarafida oldingi qismga o'tkazadigan
             // tugma va chap tarafida qismlar ro'yxati".
             //
-            // Ya'ni o'ngdan chapga: keyingi | play | oldingi |
-            // ro'yxat. Chapdan o'ngga yozilganda tartib teskari
+            // Ya'ni o'ngdan chapga: keyingi | play | oldingi.
+            // (Ro'yxat tugmasi endi yuqorida, tezlik yonida.) Chapdan o'ngga yozilganda tartib teskari
             // bo'ladi va qator O'NGGA yopishtiriladi.
             //
             // TOPILGAN XATO: qatorda hizalash umuman yo'q edi, shu
@@ -7487,14 +7500,6 @@ class _BottomBarState extends State<_BottomBar> {
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                if (widget.onEpisodeList != null) ...[
-                  _FsButton(
-                    icon: Icons.playlist_play_rounded,
-                    onTap: widget.onEpisodeList,
-                    scale: s,
-                  ),
-                  SizedBox(width: 10 * s),
-                ],
                 _FsButton(
                   icon: Icons.skip_previous_rounded,
                   onTap: widget.hasPrev ? widget.onPrev : null,

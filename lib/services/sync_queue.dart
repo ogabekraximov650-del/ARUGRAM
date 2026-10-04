@@ -93,6 +93,9 @@ class SyncKind {
 
   /// Emoji, GIF va stiker to'plamlari (`pack_service.dart`).
   static const String pack = 'pack';
+
+  /// Sozlamalar (yashirilgan statistika, kanallarga obuna ruxsati).
+  static const String settings = 'settings';
 }
 
 /// Sinxronlash natijasi — chiqish oynasidagi xabar shunga qarab
@@ -367,6 +370,21 @@ class SyncQueue extends ChangeNotifier with WidgetsBindingObserver {
     _put(SyncKind.pack, key, data);
   }
 
+  /// Sozlamalarning TO'LIQ holati. Kalit bitta (`settings`) — tugma
+  /// necha marta bosilmasin, navbatda oxirgi holat qoladi.
+  void putSettings(List<String> hiddenStats, bool chanConsent) {
+    _put(SyncKind.settings, 'settings', {
+      'hidden_stats': hiddenStats,
+      'chan_consent': chanConsent,
+    });
+  }
+
+  /// Sozlamalar hali serverga ketmaganmi.
+  bool get hasPendingSettings {
+    load();
+    return _rows.any((e) => e['kind'] == SyncKind.settings);
+  }
+
   /// Yuborilmagan to'plam amallari (ekranda server javobining ustiga
   /// qo'yiladi — foydalanuvchi hozirgina qilgan ish yo'qolib qolmasin).
   /// Navbatdan bitta yozuvni (kalit bo'yicha) olib tashlaydi — masalan,
@@ -576,6 +594,7 @@ class SyncQueue extends ChangeNotifier with WidgetsBindingObserver {
     final ratings = <Map<String, dynamic>>[];
     final favorites = <Map<String, dynamic>>[];
     final packs = <Map<String, dynamic>>[];
+    Map<String, dynamic>? settings;
     for (final e in batch) {
       final data = Map<String, dynamic>.from(e['data'] as Map);
       switch (e['kind']) {
@@ -587,6 +606,8 @@ class SyncQueue extends ChangeNotifier with WidgetsBindingObserver {
           favorites.add(data);
         case SyncKind.pack:
           packs.add(data);
+        case SyncKind.settings:
+          settings = data;
       }
     }
 
@@ -605,6 +626,7 @@ class SyncQueue extends ChangeNotifier with WidgetsBindingObserver {
               'ratings': ratings,
               'favorites': favorites,
               'packs': packs,
+              if (settings != null) 'settings': settings,
               'traffic_bytes': trafficBytes,
             }),
           )

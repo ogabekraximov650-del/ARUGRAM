@@ -75,6 +75,10 @@ class AppUser {
   /// `StatKind.key` bilan bir xil ("episodes", "comments" ...).
   final List<String> hiddenStats;
 
+  /// Kanallarga avtomatik obunaga ruxsat (`channel_gate.dart`).
+  /// Bazada (`users_db.chan_consent`) saqlanadi; yangi hisobda yo'q.
+  final bool chanConsent;
+
   const AppUser({
     required this.id,
     required this.telegramId,
@@ -86,7 +90,24 @@ class AppUser {
     this.profileDone = true,
     this.isAdmin = false,
     this.hiddenStats = const [],
+    this.chanConsent = false,
   });
+
+  /// Shu hisob, faqat sozlamalari boshqa.
+  AppUser withSettings({List<String>? hiddenStats, bool? chanConsent}) =>
+      AppUser(
+        id: id,
+        telegramId: telegramId,
+        username: username,
+        firstName: firstName,
+        lastName: lastName,
+        photoUrl: photoUrl,
+        balance: balance,
+        profileDone: profileDone,
+        isAdmin: isAdmin,
+        hiddenStats: hiddenStats ?? this.hiddenStats,
+        chanConsent: chanConsent ?? this.chanConsent,
+      );
 
   /// Shu statistika yashirilganmi.
   bool isHidden(String key) => hiddenStats.contains(key);
@@ -124,6 +145,7 @@ class AppUser {
         hiddenStats: ((j['hidden_stats'] as List?) ?? const [])
             .map((e) => '$e')
             .toList(),
+        chanConsent: j['chan_consent'] as bool? ?? false,
       );
 
   Map<String, dynamic> toJson() => {
@@ -137,6 +159,7 @@ class AppUser {
         'profile_done': profileDone,
         'is_admin': isAdmin,
         'hidden_stats': hiddenStats,
+        'chan_consent': chanConsent,
       };
 }
 
@@ -268,7 +291,7 @@ class AuthService extends ChangeNotifier {
         final u = AppUser.fromJson(
             (jsonDecode(r.body) as Map<String, dynamic>)['user']
                 as Map<String, dynamic>);
-        await _save(s, u);
+        await _save(s, _keepLocalSettings(u));
       } else if (r.statusCode == 401) {
         // Sessiya bekor qilingan — masalan 5-qurilma kirgani uchun
         // bu qurilma chegaradan chiqarilgan.
@@ -849,56 +872,57 @@ class AuthService extends ChangeNotifier {
       'app_version': kAppVersion,
     };
   }
-}
 
-// ══════════════════════════════════════════════════════════════
-//  MAXFIYLIK SOZLAMASI
-// ══════════════════════════════════════════════════════════════
-//
-// TALAB (foydalanuvchi): "foydalanuvchi boshqa profilni ko'rishi
-// mumkin bo'lsin, faqat to'liq emas — faqatgina profil surati,
-// nomi va usernameni ko'rishga ruxsat berilsin. ID, balans va
-// qolgan statistikalar ko'rinmasin. Bu narsalarni boshqalar
-// ko'rishi uchun foydalanuvchi sozlamalar panelidan ruxsat berib
-// chiqishi kerak".
-//
-// Haqiqiy to'siq SERVERDA: ruxsat berilmagan bo'lsa statistika
-// javobga UMUMAN qo'shilmaydi (`public_profile` izohiga qarang).
-// Bu yerdagi kod shunchaki sozlamani yuboradi.
+  // ── SOZLAMALAR: AVVAL TELEFONDA, KEYIN BITTA PAKETDA ─────────
+  //
+  // TOPILGAN XATO (foydalanuvchi: "sozlamalardagi tugmalarni yoqib
+  // o'chirib bo'lmayapti" va "bitta tugmani bosganda bazada
+  // yangilanmaguncha qolganlari ishlamayapti"):
+  //   * har bosishda `POST /api/me/privacy`, keyin `/api/auth/me`
+  //     so'ralardi va tugmalar javob kelguncha qulflanardi;
+  //   * worker foydalanuvchi qatorini 60 soniya eslab qoladi
+  //     (`SESSION_MEMO`), ya'ni `/api/auth/me` ESKI ro'yxatni
+  //     qaytarardi va tugma o'z-o'zidan eski holatiga qaytardi.
+  //
+  // Endi o'zgarish DARHOL telefondagi hisobga yoziladi (tugma shu
+  // zahoti suriladi, boshqalari kutmaydi) va `SyncQueue` ga bitta
+  // qator bo'lib tushadi — necha marta bosilmasin bazaga bitta
+  // yozuv ketadi (CLAUDE.md: yagona yozuv yo'li).
 
-extension AuthPrivacy on AuthService {
-  /// Qaysi statistikalar yashirilishini saqlaydi.
-  ///
-  /// Ro'yxat TO'LIQ yuboriladi va eskisining o'rnini bosadi —
-  /// "qaysi biri o'zgardi" deb yuborish ikki qurilmada bir vaqtda
-  /// o'zgartirilganda chalkashardi.
-  ///
-  /// Xato bo'lsa matn qaytadi va ekrandagi tugma eski holatiga
-  /// qaytariladi (chaqiruvchi shunga qarab ish tutadi).
-  Future<String?> setHiddenStats(List<String> keys) async {
-    final t = sessionToken;
-    if (t == null) return 'Avval hisobingizga kiring';
-    try {
-      final r = await http
-          .post(
-            Uri.parse('$kApiBase/api/me/privacy'),
-            headers: {
-              'Authorization': 'Bearer $t',
-              'Content-Type': 'application/json',
-            },
-            body: jsonEncode({'hidden_stats': keys}),
-          )
-          .timeout(const Duration(seconds: 20));
-      if (r.statusCode != 200) {
-        final j = jsonDecode(r.body) as Map<String, dynamic>;
-        return '${j['error'] ?? 'Saqlanmadi'}';
-      }
-      // Saqlangan nusxa ham yangilanadi — ilova qayta ochilganda
-      // tugmalar to'g'ri holatda turadi.
-      await refresh();
-      return null;
-    } catch (_) {
-      return 'Internet yo\'q';
-    }
+  /// Oxirgi mahalliy o'zgarish vaqti — server shu orada eski
+  /// nusxani qaytarsa (boshqa izolyatning xotirasi), u tugmalarni
+  /// orqaga qaytarib yubormasin.
+  int _settingsAt = 0;
+  static const int _settingsTrustMs = 5 * 60 * 1000;
+
+  /// Statistikani yashirish va kanallarga obuna ruxsati.
+  void updateSettings({List<String>? hiddenStats, bool? chanConsent}) {
+    final s = _session;
+    final u = _user;
+    if (s == null || u == null) return;
+    final nu =
+        u.withSettings(hiddenStats: hiddenStats, chanConsent: chanConsent);
+    _user = nu;
+    _settingsAt = DateTime.now().millisecondsSinceEpoch;
+    notifyListeners();
+    SyncQueue.instance
+        .putSettings(nu.hiddenStats, nu.chanConsent);
+    unawaited(() async {
+      try {
+        await _storage.write(key: _userKey, value: jsonEncode(nu.toJson()));
+      } catch (_) {}
+    }());
+  }
+
+  /// Serverdan kelgan hisobga hali yuborilmagan (yoki hozirgina
+  /// yuborilgan) mahalliy sozlamalar qo'yiladi.
+  AppUser _keepLocalSettings(AppUser fromServer) {
+    final local = _user;
+    if (local == null || local.id != fromServer.id) return fromServer;
+    final fresh = DateTime.now().millisecondsSinceEpoch - _settingsAt <
+        _settingsTrustMs;
+    if (!fresh && !SyncQueue.instance.hasPendingSettings) return fromServer;
+    return fromServer.withSettings(
+        hiddenStats: local.hiddenStats, chanConsent: local.chanConsent);
   }
 }

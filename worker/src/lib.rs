@@ -469,6 +469,8 @@ async fn init_db(env: &Env) -> bool {
             last_login_at INTEGER,
             -- Qaysi statistika yashirilgan (vergul bilan ro'yxat).
             hidden_stats TEXT DEFAULT '',
+            -- Kanallarga avtomatik obunaga ruxsat (1 — berilgan).
+            chan_consent INTEGER DEFAULT 0,
             -- Bloklash: 0 — muddatsiz, aks holda shu vaqtgacha.
             ban_until INTEGER DEFAULT 0,
             ban_reason TEXT DEFAULT ''
@@ -939,6 +941,12 @@ async fn init_db(env: &Env) -> bool {
             let _ = turso_exec(env, sql, vec![]).await;
         }
         config_put(env, "mig_origin_meta", "1").await;
+    }
+    // Kanallarga obuna ruxsati endi telefonda emas, bazada (2026-10).
+    if ok && config_get(env, "mig_chan_consent").await.is_none() {
+        let _ = turso_exec(env,
+            "ALTER TABLE users_db ADD COLUMN chan_consent INTEGER DEFAULT 0", vec![]).await;
+        config_put(env, "mig_chan_consent", "1").await;
     }
 
     ok
@@ -3661,6 +3669,9 @@ fn user_public(origin: &str, u: &Value) -> Value {
         // ochiq (odatiy holat, foydalanuvchi talabi). Sozlamalar
         // oynasi shu ro'yxat bo'yicha tugmalarni chizadi.
         "hidden_stats": hidden_stats_of(u),
+        // Kanallarga avtomatik obunaga ruxsat (`channel_gate.dart`).
+        // Yangi hisobda — yo'q.
+        "chan_consent": u["chan_consent"].as_i64().unwrap_or(0) == 1,
         "created_at": u["created_at"].clone(),
         "last_login_at": u["last_login_at"].clone(),
     })
@@ -3931,6 +3942,15 @@ async fn session_user(env: &Env, token: &str) -> Result<Option<Value>> {
         });
     }
     Ok(r)
+}
+
+/// Foydalanuvchi qatori o'zgardi (sozlamalar) — shu izolyatdagi
+/// eslab qolingan nusxa tashlanadi. Aks holda `/api/auth/me` 60
+/// soniyagacha ESKI qiymatni qaytarardi va ilovadagi tugma
+/// "o'z-o'zidan" eski holatiga qaytib qolardi.
+fn forget_session_memo(token: &str) {
+    if token.is_empty() { return; }
+    SESSION_MEMO.with(|m| { m.borrow_mut().remove(token); });
 }
 
 async fn session_user_db(env: &Env, token: &str, now: i64) -> Result<Option<Value>> {
@@ -4609,6 +4629,18 @@ async fn sync_route(mut req: Request, env: &Env) -> Result<Response> {
     }
     let traffic = b["traffic_bytes"].as_i64().unwrap_or(0).clamp(0, MAX_SYNC_TRAFFIC);
 
+    // ── SOZLAMALAR (Sozlamalar oynasi) ────────────────────────
+    //
+    // `{"hidden_stats": [...], "chan_consent": true}` — TO'LIQ holat,
+    // eskisining o'rnini bosadi. Ilova navbatda bitta qator saqlaydi
+    // (`SyncQueue.putSettings`), ya'ni tugmalar necha marta bosilmasin
+    // bazaga bitta yozuv ketadi.
+    let settings = &b["settings"];
+    let hidden_value: Option<String> = settings["hidden_stats"].as_array()
+        .map(|l| clean_hidden_stats(l).join(","));
+    let consent_value: Option<i64> = settings["chan_consent"].as_bool()
+        .map(|v| if v { 1 } else { 0 });
+
     let now = now_ms();
 
     // ── TAKROR YOZUVLAR TASHLANADI ────────────────────────────
@@ -4961,6 +4993,22 @@ async fn sync_route(mut req: Request, env: &Env) -> Result<Response> {
         ));
     }
 
+    match (&hidden_value, consent_value) {
+        (Some(h), Some(c)) => stmts.push((
+            "UPDATE users_db SET hidden_stats=?, chan_consent=? WHERE id=?",
+            vec![TursoArg::text(h), TursoArg::int(c), TursoArg::int(me)],
+        )),
+        (Some(h), None) => stmts.push((
+            "UPDATE users_db SET hidden_stats=? WHERE id=?",
+            vec![TursoArg::text(h), TursoArg::int(me)],
+        )),
+        (None, Some(c)) => stmts.push((
+            "UPDATE users_db SET chan_consent=? WHERE id=?",
+            vec![TursoArg::int(c), TursoArg::int(me)],
+        )),
+        (None, None) => {}
+    }
+
     // Emoji, GIF va stiker to'plamlari (`packs::sync_stmts`): har amal o'zini
     // tekshiradi, yaroqsizi jimgina tashlanadi.
     let (pack_stmts, pack_deleted, pack_removes) = packs::sync_stmts(me, pack_ops, now);
@@ -4982,6 +5030,9 @@ async fn sync_route(mut req: Request, env: &Env) -> Result<Response> {
     }
 
     turso_batch(env, &stmts).await?;
+    if hidden_value.is_some() || consent_value.is_some() {
+        forget_session_memo(&token);
+    }
 
     if !pack_ops.is_empty() {
         packs::after_sync(env, me, &pack_deleted, pack_removes).await;
@@ -7676,18 +7727,26 @@ async fn me_privacy(mut req: Request, env: &Env) -> Result<Response> {
     let Some(list) = b["hidden_stats"].as_array() else {
         return json_resp(&json!({"error": "hidden_stats kelmadi"}), 400);
     };
-    // Faqat TANISH nomlar saqlanadi (`STAT_KEYS`) va har biri bir
-    // marta — aks holda ustunga cheksiz axlat yozish mumkin edi.
-    let mut keep: Vec<&str> = Vec::new();
-    for v in list {
-        if let Some(k) = v.as_str() {
-            if STAT_KEYS.contains(&k) && !keep.contains(&k) { keep.push(k); }
-        }
-    }
+    let keep = clean_hidden_stats(list);
     let value = keep.join(",");
     turso_exec(env, "UPDATE users_db SET hidden_stats=? WHERE id=?",
         vec![TursoArg::text(&value), TursoArg::int(me)]).await?;
+    forget_session_memo(&bearer(&req));
     ok_nostore(json!({"ok": true, "hidden_stats": keep}))
+}
+
+/// Faqat TANISH nomlar saqlanadi (`STAT_KEYS`) va har biri bir
+/// marta — aks holda ustunga cheksiz axlat yozish mumkin edi.
+fn clean_hidden_stats(list: &[Value]) -> Vec<&'static str> {
+    let mut keep: Vec<&'static str> = Vec::new();
+    for v in list {
+        if let Some(k) = v.as_str() {
+            if let Some(known) = STAT_KEYS.iter().find(|s| **s == k) {
+                if !keep.contains(known) { keep.push(known); }
+            }
+        }
+    }
+    keep
 }
 
 /// GET /api/user/:id — OMMAVIY profil.

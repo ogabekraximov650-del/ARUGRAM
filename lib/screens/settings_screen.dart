@@ -28,6 +28,21 @@
 //
 // BALANS ESA HECH QACHON KO'RINMAYDI: u faqat egasiga va
 // adminga. Hech qanday sozlama uni ochmaydi.
+//
+// ── TUGMA = "YASHIRISH" (2026-10, foydalanuvchi talabi) ─────
+//
+// "Yangi accountga kirganda barchasi chapga surilgan, o'chiq
+// bo'lsin; bosib o'ngga sursa yonsin — yoqqanda statistika
+// ko'rinmasligi kerak." Ya'ni tugma YOQILGAN = statistika
+// YASHIRILGAN. Odatiy holat o'zgarmadi: yangi hisobda hamma
+// tugma o'chiq va hamma statistika ochiq.
+//
+// ── TEZLIK ──────────────────────────────────────────────────
+//
+// Tugma bosilishi bilan holat telefondagi hisobga yoziladi va
+// `SyncQueue` orqali bitta paketda serverga ketadi
+// (`AuthService.updateSettings`). Hech bir tugma boshqasini
+// kutmaydi.
 
 import 'package:flutter/material.dart';
 
@@ -85,9 +100,6 @@ const List<({StatKind kind, IconData icon, String hint})> _rows = [
 ];
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  /// Hozir so'rov ketayotgan statistika (bo'sh — hech biri).
-  String _busy = '';
-
   void _say(String text) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -99,28 +111,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  /// `visible` — endi KO'RINSINMI. Ya'ni tugma yoqilgan holat
-  /// "ko'rinadi", o'chirilgani "yashirilgan".
-  Future<void> _toggle(StatKind kind, bool visible) async {
-    if (_busy.isNotEmpty) return;
+  /// `hide` — endi YASHIRILSINMI (tugma yoqildi).
+  void _toggle(StatKind kind, bool hide) {
     final now = List<String>.from(
         AuthService.instance.user?.hiddenStats ?? const <String>[]);
-    if (visible) {
+    if (!hide) {
       now.remove(kind.key);
     } else if (!now.contains(kind.key)) {
       now.add(kind.key);
     }
-    setState(() => _busy = kind.key);
-    final err = await AuthService.instance.setHiddenStats(now);
-    if (!mounted) return;
-    setState(() => _busy = '');
-    if (err != null) {
-      _say(err);
-      return;
-    }
-    _say(visible
-        ? '${kind.label} endi boshqalarga ko\'rinadi'
-        : '${kind.label} yashirildi');
+    AuthService.instance.updateSettings(hiddenStats: now);
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    _say(hide
+        ? '${kind.label} yashirildi'
+        : '${kind.label} endi boshqalarga ko\'rinadi');
   }
 
   @override
@@ -151,8 +155,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 4),
                     child: Text(
-                      'Statistikangiz odatda OCHIQ turadi. Keraksizini '
-                      'shu yerdan yashirib qo\'ying — yashirilgani '
+                      'Statistikangiz odatda OCHIQ turadi. Yashirmoqchi '
+                      'bo\'lganingizning tugmasini yoqing — yoqilgani '
                       'boshqalarga umuman ko\'rinmaydi.',
                       style: TextStyle(
                         color: Colors.white.withValues(alpha: 0.42),
@@ -167,12 +171,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       icon: r.icon,
                       title: r.kind.label,
                       hint: r.hint,
-                      // Tugma "ko'rinsinmi" degan savolga javob
-                      // beradi, shu sabab ro'yxatdagi holat
-                      // TESKARISIGA o'giriladi.
-                      value: !(u?.isHidden(r.kind.key) ?? false),
-                      busy: _busy == r.kind.key,
-                      onChanged: (on) => _toggle(r.kind, on),
+                      // Tugma "yashirilsinmi" degan savolga javob
+                      // beradi: yoqilgan = yashirilgan.
+                      value: u?.isHidden(r.kind.key) ?? false,
+                      onChanged: u == null ? null : (on) => _toggle(r.kind, on),
                     ),
                     const SizedBox(height: 10),
                   ],
@@ -210,13 +212,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           'so\'rov yuboradi). O\'chirsangiz, bepul bo\'lim '
                           'ochilganda ruxsat yana so\'raladi.',
                       value: ChannelGate.instance.consented,
-                      busy: false,
                       onChanged: (on) {
                         if (on) {
                           ChannelGate.instance.grant();
                         } else {
                           ChannelGate.instance.revoke();
                         }
+                        ScaffoldMessenger.of(context).hideCurrentSnackBar();
                         _say(on ? 'Ruxsat berildi' : 'Ruxsat o\'chirildi');
                       },
                     ),
@@ -237,15 +239,13 @@ class _PrivacyRow extends StatelessWidget {
   final String title;
   final String hint;
   final bool value;
-  final bool busy;
-  final ValueChanged<bool> onChanged;
+  final ValueChanged<bool>? onChanged;
 
   const _PrivacyRow({
     required this.icon,
     required this.title,
     required this.hint,
     required this.value,
-    required this.busy,
     required this.onChanged,
   });
 
@@ -294,20 +294,12 @@ class _PrivacyRow extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 6),
-          if (busy)
-            const SizedBox(
-              width: 22,
-              height: 22,
-              child: CircularProgressIndicator(
-                  strokeWidth: 2, color: Colors.white54),
-            )
-          else
-            Switch(
-              value: value,
-              activeThumbColor: Colors.white,
-              activeTrackColor: AppColors.accent,
-              onChanged: onChanged,
-            ),
+          Switch(
+            value: value,
+            activeThumbColor: Colors.white,
+            activeTrackColor: AppColors.accent,
+            onChanged: onChanged,
+          ),
         ],
       ),
     );

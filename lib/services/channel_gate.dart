@@ -14,8 +14,9 @@
 //   1. Obunasi yo'q odam BEPUL bo'limni ochadi -> pleyer o'rnida
 //      ruxsat oynasi (`video_player_screen.dart` -> `_ChannelConsentScreen`).
 //      Admin birorta ham kanal qo'shmagan bo'lsa oyna chiqmaydi.
-//   2. "Ruxsat berish" -> ruxsat shu hisobning papkasiga yoziladi
-//      (`chan_consent`), pleyer DARHOL ochiladi.
+//   2. "Ruxsat berish" -> ruxsat hisobga yoziladi va bazada saqlanadi
+//      (`users_db.chan_consent`, `SyncQueue` orqali — boshqa
+//      sozlamalar kabi), pleyer DARHOL ochiladi.
 //   3. Orqa fonda (ilova ochiq turganda, har 5 daqiqada) ro'yxat
 //      (`GET /api/channels`, 15 daqiqada bir marta) olinadi va hali
 //      qo'shilinmagan har bir kanalga foydalanuvchining O'Z Telegram
@@ -25,7 +26,7 @@
 //      kanalga qayta-qayta urinilmaydi. Telegram FLOOD_WAIT bersa,
 //      shu aylanish to'xtaydi va keyingisida davom etadi.
 //
-// Serverga hech narsa YOZILMAYDI: kim qo'shilgani/so'rov yuborgani
+// Serverga faqat ruxsatning o'zi yoziladi (sozlama). Kim qo'shilgani/so'rov yuborgani
 // bot orqali, Telegram hodisalari bilan sanaladi (`worker/src/channels.rs`).
 
 import 'dart:async';
@@ -86,6 +87,9 @@ class ChannelGate extends ChangeNotifier {
   Timer? _timer;
   bool _running = false;
 
+  /// Eski (telefondagi) ruxsat bazaga ko'chirilmoqda (`_sync`).
+  bool _migrating = false;
+
   /// Hisob almashsa (papka boshqa) — qaytadan o'qiladi.
   void _sync() {
     final uid = AuthService.instance.user?.id ?? 0;
@@ -96,8 +100,32 @@ class ChannelGate extends ChangeNotifier {
     _list = null;
     _listAt = 0;
     try {
+      final u = AuthService.instance.user;
       final c = RustCore.instance.getCachedList(_consentKey);
-      _consent = c != null && c.isNotEmpty;
+      final local = c != null && c.isNotEmpty;
+      if (u == null) {
+        // Hisobsiz (mehmon) — ruxsat faqat telefonda.
+        _consent = local;
+      } else {
+        _consent = u.chanConsent;
+        // ── ESKI ILOVADAN QOLGAN RUXSAT ─────────────────────
+        // Ilgari ruxsat faqat telefonda (`chan_consent`) turardi.
+        // Bir marta bazaga ko'chiriladi va telefondagisi o'chiriladi.
+        // `_sync` ekran chizilayotganda ham chaqiriladi — hisob
+        // o'zgarishi keyingi lahzaga qoldiriladi.
+        if (local) {
+          RustCore.instance
+              .saveListCache(_consentKey, const <Map<String, dynamic>>[]);
+          if (!_consent) {
+            _consent = true;
+            _migrating = true;
+            scheduleMicrotask(() {
+              _migrating = false;
+              AuthService.instance.updateSettings(chanConsent: true);
+            });
+          }
+        }
+      }
       for (final e in RustCore.instance.getCachedList(_doneKey) ?? const []) {
         final k = e['k'];
         if (k is String) _done.add(k);
@@ -111,6 +139,19 @@ class ChannelGate extends ChangeNotifier {
 
   bool get consented {
     _sync();
+    // Ruxsat boshqa qurilmada (yoki serverdan yangilanib) o'zgargan
+    // bo'lishi mumkin — haqiqiy manba hisobning o'zi.
+    final u = AuthService.instance.user;
+    if (u != null &&
+        !_migrating &&
+        u.chanConsent != _consent &&
+        u.id == _uid) {
+      _consent = u.chanConsent;
+      if (!_consent) {
+        _timer?.cancel();
+        _timer = null;
+      }
+    }
     return _consent;
   }
 
@@ -123,8 +164,7 @@ class ChannelGate extends ChangeNotifier {
   /// Ruxsat so'rash kerakmi: ruxsat yo'q va ro'yxatda (yoki hali
   /// noma'lum) birorta kanal bor.
   bool get needsConsent {
-    _sync();
-    if (_consent) return false;
+    if (consented) return false;
     final l = _list;
     return l == null || l.isNotEmpty;
   }
@@ -146,11 +186,7 @@ class ChannelGate extends ChangeNotifier {
   Future<void> grant() async {
     _sync();
     _consent = true;
-    try {
-      RustCore.instance.saveListCache(_consentKey, [
-        {'at': DateTime.now().millisecondsSinceEpoch}
-      ]);
-    } catch (_) {}
+    _saveConsent(true);
     notifyListeners();
     _arm();
   }
@@ -163,10 +199,21 @@ class ChannelGate extends ChangeNotifier {
     _consent = false;
     _timer?.cancel();
     _timer = null;
-    try {
-      RustCore.instance.saveListCache(_consentKey, const <Map<String, dynamic>>[]);
-    } catch (_) {}
+    _saveConsent(false);
     notifyListeners();
+  }
+
+  /// Hisob bo'lsa — bazaga (`SyncQueue`), bo'lmasa telefonga.
+  void _saveConsent(bool on) {
+    if (AuthService.instance.user != null) {
+      AuthService.instance.updateSettings(chanConsent: on);
+      return;
+    }
+    try {
+      RustCore.instance.saveListCache(_consentKey, [
+        if (on) {'at': DateTime.now().millisecondsSinceEpoch}
+      ]);
+    } catch (_) {}
   }
 
   void _arm() {

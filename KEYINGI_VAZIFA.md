@@ -4735,3 +4735,28 @@ o'chirish mumkin. Asos — `aniraxuzbot15` (`bot/src/handlers/channels.ts`).
   = so'rov yuborildi). Pleyer: `_ChannelConsentScreen`.
 - Server bepul bo'limni kanalga qo'shilganlik bo'yicha TO'SMAYDI (pleyer
   ruxsatdan keyin darhol ochilishi kerak edi) — to'siq ilovada.
+
+## Sozlamalar: tugma = "yashirish", SyncQueue orqali, kanal ruxsati bazada (2026-10)
+
+**Nima:** Sozlamalardagi statistika tugmalari endi "yashirish" ma'nosida
+(yangi hisobda hammasi o'chiq = hammasi ochiq; yoqilgani boshqalarga
+ko'rinmaydi). Kanallarga avtomatik obuna ruxsati telefondan bazaga
+ko'chdi (`users_db.chan_consent`, `mig_chan_consent`).
+
+**Nega:** tugmalar ishlamasdi — har bosishda `POST /api/me/privacy` +
+`/api/auth/me` ketardi, tugmalar javobgacha qulflanardi, worker esa
+foydalanuvchi qatorini 60 soniya eslab qolgani (`SESSION_MEMO`) uchun
+eski ro'yxatni qaytarib, tugmani orqaga surib qo'yardi.
+
+**Qanday:** `AuthService.updateSettings` holatni darhol telefondagi
+hisobga yozadi va `SyncQueue.putSettings` ga bitta qator qo'yadi
+(kalit `settings`, oxirgisi qoladi). `/api/sync` paketidagi `settings`
+`{hidden_stats, chan_consent}` bitta `UPDATE users_db` bo'ladi va
+`SESSION_MEMO` tozalanadi. Serverdan kelgan hisobga yuborilmagan /
+5 daqiqa ichidagi mahalliy sozlama ustun (`_keepLocalSettings`).
+`/api/me/privacy` eski ilovalar uchun qoldi. Eski telefondagi
+`chan_consent` bir marta bazaga ko'chiriladi (`ChannelGate._sync`).
+
+Fayllar: `lib/screens/settings_screen.dart`, `lib/services/auth_service.dart`,
+`lib/services/sync_queue.dart`, `lib/services/channel_gate.dart`,
+`worker/src/lib.rs`.
