@@ -143,6 +143,24 @@ class SeasonsRepo extends ChangeNotifier {
 // (Turso ustunlari matn bo'lib qaytishi mumkin). Shu sabab
 // o'qish hamma joyda AYNAN shu funksiyalar orqali.
 
+/// Bo'lim BEPULmi (obunasiz ko'riladimi).
+///
+/// Qismi bor bo'limlarning yarmi — qismi oldinroq joylanganlari —
+/// bepul; qaysilari ekanini SERVER hal qiladi (`free` maydoni,
+/// `worker/src/lib.rs` -> `free_seasons`). Bo'lim obyektida maydon
+/// bo'lmasa (eski nusxa) umumiy ro'yxatdagi nusxadan olinadi.
+bool seasonIsFree(Map<String, dynamic> s) {
+  if (s['free'] is bool) return s['free'] as bool;
+  final a = seasonInt(s, 'anime_id');
+  final id = seasonInt(s, 'season_id');
+  for (final o in SeasonsRepo.instance.items) {
+    if (seasonInt(o, 'anime_id') == a && seasonInt(o, 'season_id') == id) {
+      return o['free'] == true;
+    }
+  }
+  return false;
+}
+
 int seasonInt(Map<String, dynamic> s, String key) =>
     int.tryParse('${s[key] ?? 0}') ?? 0;
 

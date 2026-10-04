@@ -131,6 +131,7 @@ import '../services/video_cache_server.dart';
 import '../services/format.dart';
 import '../services/intro_times.dart';
 import '../services/season_info.dart';
+import '../services/seasons_repo.dart';
 import '../services/watch_history.dart';
 import '../services/watch_progress.dart';
 import '../theme/app_background.dart';
@@ -451,7 +452,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     // Holat serverdan bir marta yangilanadi: odam boshqa
     // qurilmada obuna olgan bo'lsa shu yerda darhol bilinadi.
     unawaited(BillingService.instance.load(force: true));
-    if (BillingService.instance.active) {
+    if (_canWatch) {
       _startLoading();
     } else {
       // Obuna SHU EKRANDA turib olinishi mumkin ("Obuna olish"
@@ -460,6 +461,10 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       BillingService.instance.addListener(_onBillingChanged);
     }
   }
+
+  /// Obuna bor yoki bo'lim BEPUL (qismi oldinroq joylangan yarmi).
+  bool get _canWatch =>
+      BillingService.instance.active || seasonIsFree(widget.season);
 
   /// Qismlar, bo'limlar va bo'lim ma'lumoti — BIR MARTA.
   bool _loadingStarted = false;
@@ -474,7 +479,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   }
 
   void _onBillingChanged() {
-    if (!mounted || !BillingService.instance.active) return;
+    if (!mounted || !_canWatch) return;
     BillingService.instance.removeListener(_onBillingChanged);
     // Xabar KADR CHIZILAYOTGAN paytda kelishi mumkin. Yuklash esa
     // `setState` chaqiradi — shu sabab kadr tugagach boshlanadi.
@@ -3868,7 +3873,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     return AnimatedBuilder(
       animation: BillingService.instance,
       builder: (context, _) {
-        if (!BillingService.instance.active) {
+        if (!_canWatch) {
           return const _SubRequiredScreen();
         }
 

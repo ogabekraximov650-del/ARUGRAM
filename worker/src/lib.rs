@@ -5276,6 +5276,78 @@ async fn desk_diagnosis(env: &Env) -> Option<String> {
     ))
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  BEPUL BO'LIMLAR — YARMI
+// ═══════════════════════════════════════════════════════════════
+//
+// TALAB (foydalanuvchi): qismi bor bo'limlarning YARMI bepul.
+// Bo'limlar oxirgi qism qachon joylangani bo'yicha tartiblanadi:
+// qismi OLDINROQ joylangan (eskirgan) bo'limlar bepul, eng yangi
+// qism joylanganlari pullik. Bepul bo'limdagi HAMMA qism bepul.
+//
+//   * juft son — teng yarmi bepul (10 ta -> 5 ta);
+//   * toq son — yarmidan kichigi (3 ta -> 1 ta, 11 ta -> 5 ta);
+//   * qismi yo'q bo'limlar sanalmaydi.
+//
+// Tartib: `MAX(epizod_db.created_at)` o'sish bo'yicha, teng bo'lsa
+// (anime_id, season_id). Natija bazadan o'qiladi, yozuv YO'Q;
+// o'qishni kamaytirish uchun izolyatda 60 soniya keshlanadi.
+
+const FREE_SEASONS_TTL_MS: i64 = 60_000;
+
+thread_local! {
+    static FREE_SEASONS_CACHE: std::cell::RefCell<Option<(i64, std::collections::HashSet<(i64, i64)>)>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Bepul bo'limlar to'plami: `(anime_id, season_id)`.
+async fn free_seasons(env: &Env) -> std::collections::HashSet<(i64, i64)> {
+    let now = now_ms();
+    let hit = FREE_SEASONS_CACHE.with(|c| {
+        c.borrow().as_ref().filter(|(at, _)| now - *at < FREE_SEASONS_TTL_MS).map(|(_, v)| v.clone())
+    });
+    if let Some(v) = hit {
+        return v;
+    }
+    let res = turso_exec(env,
+        "SELECT anime_id, season_id FROM epizod_db
+          GROUP BY anime_id, season_id
+          ORDER BY MAX(COALESCE(created_at,0)) ASC, anime_id ASC, season_id ASC",
+        vec![]).await;
+    let Ok(res) = res else {
+        // Baza javob bermadi — keshdagi (eskirgan) nusxa, u ham yo'q bo'lsa hech narsa bepul emas.
+        return FREE_SEASONS_CACHE.with(|c| c.borrow().as_ref().map(|(_, v)| v.clone()).unwrap_or_default());
+    };
+    let cols = res["cols"].as_array().cloned().unwrap_or_default();
+    let ids: Vec<(i64, i64)> = res["rows"].as_array().cloned().unwrap_or_default().iter()
+        .map(|r| row_to_obj(&cols, r.as_array().unwrap_or(&vec![])))
+        .map(|o| (jint(&o, "anime_id"), jint(&o, "season_id")))
+        .collect();
+    let free: std::collections::HashSet<(i64, i64)> = ids.iter().take(ids.len() / 2).cloned().collect();
+    FREE_SEASONS_CACHE.with(|c| *c.borrow_mut() = Some((now, free.clone())));
+    free
+}
+
+/// Bo'lim obyektlariga `free` (bepulmi) maydonini qo'shadi.
+fn mark_free(items: &mut [Value], free: &std::collections::HashSet<(i64, i64)>) {
+    for o in items.iter_mut() {
+        let key = (jint(o, "anime_id"), jint(o, "season_id"));
+        o["free"] = json!(free.contains(&key));
+    }
+}
+
+/// Qism fayli nomidan `(anime_id, season_id)`:
+/// `ep_<a>_<s>_...` yoki `orig_<kim>_<a>_<s>_...`.
+fn season_of_file(name: &str) -> Option<(i64, i64)> {
+    let p: Vec<&str> = name.split('_').collect();
+    let (a, s) = match p.first().copied()? {
+        "ep" => (p.get(1)?, p.get(2)?),
+        "orig" => (p.get(2)?, p.get(3)?),
+        _ => return None,
+    };
+    Some((a.parse().ok()?, s.parse().ok()?))
+}
+
 /// Obuna tugash vaqti (ms). Obunasi yo'q bo'lsa 0.
 async fn sub_until(env: &Env, user: i64) -> i64 {
     let res = turso_exec(env, "SELECT expires_at FROM subs_db WHERE user_id=?",
@@ -8477,6 +8549,8 @@ async fn season_detail(env: &Env, origin: &str, req: &Request, aid: i64, sid: i6
         row["rating_count"].as_i64().unwrap_or(0),
     );
 
+    let mut row = row;
+    row["free"] = json!(free_seasons(env).await.contains(&(aid, sid)));
     ok_nostore(json!({
         "season": resolve_fields(origin, row, SEASON_URL_KEYS),
         "rating": rating,
@@ -11234,8 +11308,18 @@ async fn tg_route(mut req: Request, env: &Env, path: &str, method: Method) -> Re
             // rasmlar va yozishma fayllari obunasiz ham ko'rinadi.
             let until = res.get(1).and_then(first_row)
                 .and_then(|r| r["expires_at"].as_i64()).unwrap_or(0);
-            if !admin && until <= now_ms() && pairs.iter().any(|(n, _)| n.starts_with("ep_") || n.starts_with("orig_")) {
-                return json_resp(&json!({"error": "subscription"}), 402);
+            if !admin && until <= now_ms() {
+                let paid_names: Vec<&String> = pairs.iter().map(|(n, _)| n)
+                    .filter(|n| n.starts_with("ep_") || n.starts_with("orig_")).collect();
+                if !paid_names.is_empty() {
+                    // Bepul bo'limning qismlari obunasiz ham beriladi.
+                    let free = free_seasons(env).await;
+                    let all_free = paid_names.iter()
+                        .all(|n| season_of_file(n).map(|k| free.contains(&k)).unwrap_or(false));
+                    if !all_free {
+                        return json_resp(&json!({"error": "subscription"}), 402);
+                    }
+                }
             }
             // `copyMessages` raqamlar O'SIB boradigan tartibda bo'lishini talab qiladi.
             pairs.sort_by_key(|(_, id)| *id);
@@ -11737,7 +11821,8 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
             let res = turso_exec(&env, "SELECT * FROM season_db ORDER BY anime_id DESC, season_id ASC LIMIT 200", vec![]).await?;
             let cols = res["cols"].as_array().cloned().unwrap_or_default();
             let rows = res["rows"].as_array().cloned().unwrap_or_default();
-            let items = rows.iter().map(|r| row_to_obj(&cols, r.as_array().unwrap_or(&vec![]))).collect::<Vec<_>>();
+            let mut items = rows.iter().map(|r| row_to_obj(&cols, r.as_array().unwrap_or(&vec![]))).collect::<Vec<_>>();
+            mark_free(&mut items, &free_seasons(&env).await);
             ok(json!(resolve_list(&origin, items, SEASON_URL_KEYS)))
         }
 
@@ -11858,7 +11943,8 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
                         vec![TursoArg::text(aid)]).await?;
                     let cols = res["cols"].as_array().cloned().unwrap_or_default();
                     let rows = res["rows"].as_array().cloned().unwrap_or_default();
-                    let items = rows.iter().map(|r| row_to_obj(&cols, r.as_array().unwrap_or(&vec![]))).collect::<Vec<_>>();
+                    let mut items = rows.iter().map(|r| row_to_obj(&cols, r.as_array().unwrap_or(&vec![]))).collect::<Vec<_>>();
+                    mark_free(&mut items, &free_seasons(&env).await);
                     return ok(json!(resolve_list(&origin, items, SEASON_URL_KEYS)));
                 }
             }

@@ -4670,3 +4670,29 @@ Yechim: `main.dart` `builder` da `MediaQuery.disableAnimations` har doim `false`
 fayl 5 MB dan oshmasin), stiker — 12 s, emoji — 8 s. 0 bo'lsa kesish oynasi butun
 videoni tanlashga ruxsat beradi va "eng ko'pi" yozuvi chiqmaydi. Serverda
 (`tool/packs/arunorm.py`) uzunlik tekshirilmaydi — faqat 5 MB.
+
+## BEPUL BO'LIMLAR — YARMI (2026-10)
+
+TALAB (foydalanuvchi): qismi bor bo'limlarning yarmi obunasiz ko'rilsin.
+Qismi OLDINROQ joylangan bo'limlar bepul, eng yangi qism joylanganlari
+pullik. Bepul bo'limning HAMMA qismi bepul.
+
+- Hisob (`worker/src/lib.rs` -> `free_seasons`): hamma bo'lim
+  `MAX(epizod_db.created_at)` o'sish bo'yicha (teng bo'lsa `anime_id`,
+  `season_id`) tartiblanadi, birinchi `n / 2` tasi (butun bo'lib
+  pastga: 10 -> 5, 3 -> 1, 11 -> 5) bepul. Qismi yo'q bo'lim sanalmaydi.
+  Anime chegarasi yo'q — tartib butun ilova bo'yicha.
+- Nega `MAX` (oxirgi qism): hozir efirda bo'lgan, yangi qism chiqayotgan
+  bo'lim pullik bo'lib qoladi; eski, tugagan bo'limlar bepul.
+  (Agar "birinchi qism" bo'yicha kerak bo'lsa — `MAX` ni `MIN` ga almashtiring.)
+- Baza yozuvi YO'Q, ustun qo'shilmadi: natija har so'rovda hisoblanadi va
+  izolyatda 60 soniya keshlanadi (o'qishni kamaytirish uchun).
+- Server to'sig'i: `/api/tg/deliver` — `ep_`/`orig_` fayli bepul bo'limniki
+  bo'lsa obunasiz ham beriladi (fayl nomidan bo'lim `season_of_file` bilan
+  olinadi), aks holda 402.
+- Ilova: `/api/seasons`, `/api/seasons/anime/:id`, `/api/season/:a/:s`
+  javobida bo'limda `free` (bool) bor. Pleyer (`video_player_screen.dart`)
+  `_canWatch = obuna || seasonIsFree(season)` bo'yicha ochiladi
+  (`seasons_repo.dart` -> `seasonIsFree`).
+- Eslatma: eski B2 yo'li (`/api/play`) hech qachon obunani tekshirmagan —
+  o'zgarmadi.
