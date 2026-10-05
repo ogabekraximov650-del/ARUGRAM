@@ -780,6 +780,17 @@ class _CacheChartState extends State<_CacheChart>
   }
 }
 
+/// Halqa tashqarisidagi bitta foiz yozuvi: o'z bo'lagining burchagi
+/// ([home]) va surilgandan keyingi burchagi ([angle]).
+class _Label {
+  final double home;
+  double angle;
+  final TextPainter tp;
+  final Color color;
+
+  _Label(this.home, this.tp, this.color) : angle = home;
+}
+
 class _ChartPainter extends CustomPainter {
   /// Diametri 172 -> radiusi 86; qalinligi 38.
   static const double radius = 86;
@@ -831,7 +842,104 @@ class _ChartPainter extends CustomPainter {
       final grow = label == pressed ? 9 * pressT() : 0.0;
       _paintSector(canvas, c, s, _colorOf(label), radius + grow, time);
     }
+    _paintLabels(canvas, c, all);
     _paintCenter(canvas, c);
+  }
+
+  /// Foizlar — halqaning TASHQARISIDA, bo'lak markazi yo'nalishida, bo'lak
+  /// rangida (aniq ko'rinsin; ichida zarrachalar va gradient xalaqit berardi).
+  ///
+  /// ── USTMA-UST TUSHMAYDI ─────────────────────────────────────
+  ///
+  /// TALAB (foydalanuvchi): "halqadagi foiz yozuvlari ustma-ust tushmasin,
+  /// surib joylashtir". Kichik bo'laklar yonma-yon tursa, ularning
+  /// yozuvlari bitta joyga tushardi. Endi yozuvlar halqa atrofida
+  /// bir-biridan itariladi (burchak bo'yicha, ko'pi bilan 70°), joyidan
+  /// surilgan yozuv esa o'z bo'lagiga ingichka chiziq bilan ulanadi.
+  /// Hisob har kadrda bajariladi — bo'lak o'zgarsa yozuv ham silliq
+  /// suriladi.
+  void _paintLabels(Canvas canvas, Offset c, Map<String, _Sector> all) {
+    final items = <_Label>[];
+    for (final e in all.entries) {
+      final s = e.value;
+      if (s.half <= 0 || s.textAlpha <= 0.01 || s.pct <= 0) continue;
+      final color = Color.alphaBlend(const Color(0x33FFFFFF), _colorOf(e.key))
+          .withValues(alpha: s.textAlpha);
+      final tp = TextPainter(
+        text: TextSpan(
+          text: _pctText(s.pct),
+          style: TextStyle(
+            color: color,
+            fontSize: 14.5 * s.textScale,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      items.add(_Label(s.center % 360, tp, color));
+    }
+    if (items.isEmpty) return;
+    items.sort((a, b) => a.home.compareTo(b.home));
+
+    Rect rectAt(_Label l, double angle) {
+      final pos = _labelPos(c, angle, l.tp);
+      return Rect.fromCenter(
+              center: pos, width: l.tp.width, height: l.tp.height)
+          .inflate(3);
+    }
+
+    // Qo'shni yozuvlar ustma-ust tushsa — ikkalasi qarama-qarshi
+    // tomonga ozgina suriladi; to'qnashuv qolmaguncha (yoki chegaragacha).
+    const step = 1.5;
+    const maxShift = 70.0;
+    final n = items.length;
+    for (var iter = 0; iter < 120 && n > 1; iter++) {
+      var moved = false;
+      for (var i = 0; i < n; i++) {
+        final j = (i + 1) % n;
+        if (n == 2 && i == 1) break;
+        final a = items[i];
+        final b = items[j];
+        if (!rectAt(a, a.angle).overlaps(rectAt(b, b.angle))) continue;
+        if ((a.angle - step - a.home).abs() <= maxShift) a.angle -= step;
+        if ((b.angle + step - b.home).abs() <= maxShift) b.angle += step;
+        moved = true;
+      }
+      if (!moved) break;
+    }
+
+    for (final l in items) {
+      final pos = _labelPos(c, l.angle, l.tp);
+      if ((l.angle - l.home).abs() > 4) {
+        // O'z bo'lagiga ulovchi chiziq: halqa chetidan yozuv tomonga.
+        final home = l.home * math.pi / 180;
+        final from = c + Offset(math.cos(home), math.sin(home)) * (radius + 3);
+        final toward = pos - c;
+        final to = c +
+            toward / toward.distance *
+                (toward.distance -
+                    (l.tp.width / 2 * (toward.dx / toward.distance).abs() +
+                        l.tp.height / 2 * (toward.dy / toward.distance).abs()) -
+                    3);
+        canvas.drawLine(
+            from,
+            to,
+            Paint()
+              ..color = l.color.withValues(alpha: l.color.a * .55)
+              ..strokeWidth = 1.2
+              ..strokeCap = StrokeCap.round);
+      }
+      l.tp.paint(canvas, pos - Offset(l.tp.width / 2, l.tp.height / 2));
+    }
+  }
+
+  /// Yozuv markazi halqadan uning o'lchamiga qarab uzoqlashadi — chetiga
+  /// tegmaydi (yon tomonda eni, tepa/pastda bo'yi hisobga olinadi).
+  static Offset _labelPos(Offset c, double angle, TextPainter tp) {
+    final dir = Offset(
+        math.cos(angle * math.pi / 180), math.sin(angle * math.pi / 180));
+    final gap = 10 + dir.dx.abs() * tp.width / 2 + dir.dy.abs() * tp.height / 2;
+    return c + dir * (radius + 9 + gap);
   }
 
   void _paintSector(Canvas canvas, Offset c, _Sector s, Color color,
@@ -869,30 +977,6 @@ class _ChartPainter extends CustomPainter {
     canvas.clipPath(path);
     _paintParticles(canvas, c, s, inner, outer, time);
     canvas.restore();
-
-    // Foiz — halqaning TASHQARISIDA, bo'lak markazi yo'nalishida, bo'lak
-    // rangida (aniq ko'rinsin; ichida zarrachalar va gradient xalaqit berardi).
-    if (s.textAlpha > 0.01 && s.pct > 0) {
-      final tp = TextPainter(
-        text: TextSpan(
-          text: _pctText(s.pct),
-          style: TextStyle(
-            color: Color.alphaBlend(const Color(0x33FFFFFF), color)
-                .withValues(alpha: s.textAlpha),
-            fontSize: 14.5 * s.textScale,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        textDirection: TextDirection.ltr,
-      )..layout();
-      final dir = Offset(math.cos(s.center * math.pi / 180),
-          math.sin(s.center * math.pi / 180));
-      // Yozuv markazi halqadan uning o'lchamiga qarab uzoqlashadi — chetiga
-      // tegmaydi (yon tomonda eni, tepa/pastda bo'yi hisobga olinadi).
-      final gap = 10 + dir.dx.abs() * tp.width / 2 + dir.dy.abs() * tp.height / 2;
-      final pos = c + dir * (radius + 9 + gap);
-      tp.paint(canvas, pos - Offset(tp.width / 2, tp.height / 2));
-    }
   }
 
   void _paintParticles(Canvas canvas, Offset c, _Sector s, double inner,
