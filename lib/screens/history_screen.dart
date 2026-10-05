@@ -2141,8 +2141,23 @@ class _FrameState extends State<_Frame> {
   void didUpdateWidget(covariant _Frame old) {
     super.didUpdateWidget(old);
     if (old.item.thumbKey != widget.item.thumbKey) {
-      // Eski kadr ekranda qolaveradi (bo'sh joy ko'rinmasin) —
-      // yangisi tayyor bo'lishi bilan almashadi.
+      // ── BOSHQA QISM — ESKI KADR QOLMAYDI ──────────────────
+      //
+      // TOPILGAN XATO (foydalanuvchi: "Titanlar hujumi bilan
+      // Zanjirlangan askarga bir xil kadr qo'yildi, ilova
+      // adashtirib yubordi"). Ro'yxat qayta tartiblanganda (yangi
+      // yuklash, 10 soniyalik yangilanish) Flutter karta joyidagi
+      // shu oynani BOSHQA animega qayta ishlatadi. Ilgari eski kadr
+      // "bo'sh joy ko'rinmasin" deb qoldirilardi — yangi qismning
+      // kadri tayyor bo'lmasa (yoki yasalmasa) boshqa animening
+      // rasmi o'sha joyda qotib qolardi. Endi eski kadr faqat O'SHA
+      // videoning o'zi bo'lsa (to'xtagan joy o'zgargan) qoladi;
+      // boshqa qism bo'lsa — darhol poster, keyin o'zining kadri.
+      if (old.item.videoKey != widget.item.videoKey ||
+          old.item.animeId != widget.item.animeId ||
+          old.item.epizodId != widget.item.epizodId) {
+        setState(() => _bytes = null);
+      }
       _load();
     }
   }
