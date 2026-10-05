@@ -4968,10 +4968,11 @@ to'g'ridan-to'g'ri kesh orqali ko'rsatilsin" (Turso'siz).
   "Tejamkor tizim" jadvaliga jamlaydi va `tool/stats/baseline.json`
   (tejashdan OLDINGI o'lchov) bilan daqiqasiga solishtiradi. `sxema`
   uchun 7 — taxminiy (1 paket + 6 migratsiya belgisi).
-- **Yuklab olish qotib qolishi (tuzatildi).** `ThumbDirGuard` kadr uchun
-  ochilgan papkani o'chirardi — shu payt o'sha fayl yuklab olina
-  boshlagan bo'lsa (faqat `meta.json` bor edi) yuklash yo'q papkaga yoza
-  olmay qotardi. Endi fayl yuklash navbatida yoki pleyerda ochiq bo'lsa
-  papkaga tegilmaydi; `write_full_chunk` papkani kerak bo'lsa qayta yaratadi.
+- **Kadr ishi diskka hech narsa yozmaydi.** Baytlar xotirada edi, lekin
+  kesh papkasi va `meta.json` (hajm) yozilib, keyin o'chirilardi
+  (`ThumbDirGuard`) — bir paytda boshlangan yuklab olish yo'q papkaga
+  yoza olmay qotardi. Endi `serve_thumb` papka ochmaydi va `meta.json`
+  yozmaydi (hajm xotirada), diskdan faqat o'qiydi; `ThumbDirGuard` olib
+  tashlandi. `write_full_chunk` papka yo'q bo'lsa qayta yaratadi.
 - **Pleyer `AHEAD` yana 2** (4 bo'lganda parallel bo'laklar orasida
   teshik qolardi). `DL_CONNS`/`MAX_INFLIGHT` oshirilgani yuklab olish uchun qoladi.

@@ -381,18 +381,6 @@ struct Flight {
     cv: Condvar,
 }
 
-/// Shu kalitdagi fayl pleyerda ochiqmi (`video_cache::ThumbDirGuard`).
-pub(crate) fn is_open(key: &str) -> bool {
-    readers()
-        .lock()
-        .map(|m| {
-            m.values().any(|r| {
-                !r.closed.load(Ordering::SeqCst) && video_cache::player_key(&r.name) == key
-            })
-        })
-        .unwrap_or(true)
-}
-
 fn readers() -> &'static Mutex<HashMap<i64, Arc<Reader>>> {
     static R: OnceLock<Mutex<HashMap<i64, Arc<Reader>>>> = OnceLock::new();
     R.get_or_init(|| Mutex::new(HashMap::new()))

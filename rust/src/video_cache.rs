@@ -5406,48 +5406,6 @@ fn probe_head(shared: &Shared, url: &str, want: u64) -> Option<(u64, String, Vec
     Some((total, ct, buf))
 }
 
-/// TOPILGAN MUAMMO (foydalanuvchi: "kadr olingach video fayl
-/// o'chirilsin — yuklanmalarda bir necha MB yuklab olingan deb
-/// ko'rsatyapti"). Kadr uchun o'qilgan baytlar diskka YOZILMAYDI
-/// (xotirada turadi), lekin papka va `meta.json` qolib, video
-/// "qisman yuklangan" bo'lib ko'rinardi. Kadr uchun ochilgan papka
-/// (oldin bo'lmagan) ish tugagach — ichida faqat `meta.json` bo'lsa —
-/// o'chiriladi. Pleyer yoki yuklab olish yozgan bo'laklarga tegilmaydi.
-///
-/// TOPILGAN XATO (foydalanuvchi: "yuklab olish ishlamaydi"): kadr
-/// yasalayotgan paytda xuddi shu fayl YUKLAB OLINA boshlasa, papka
-/// hali faqat `meta.json` dan iborat bo'lardi va bu yerda o'chirib
-/// yuborilardi — yuklash esa yo'q papkaga bo'lak yoza olmay qotib
-/// qolardi ("hajmi aniqlanmoqda"). Endi fayl yuklab olish navbatida
-/// bo'lsa yoki pleyer ochgan bo'lsa papkaga tegilmaydi.
-struct ThumbDirGuard {
-    dir: PathBuf,
-    key: String,
-    active: bool,
-}
-
-impl Drop for ThumbDirGuard {
-    fn drop(&mut self) {
-        if !self.active {
-            return;
-        }
-        let downloading = downloads()
-            .lock()
-            .map(|m| m.contains_key(&self.key))
-            .unwrap_or(true);
-        if downloading || crate::player_source::is_open(&self.key) {
-            return;
-        }
-        let Ok(list) = fs::read_dir(&self.dir) else { return };
-        let only_meta = list
-            .filter_map(|e| e.ok())
-            .all(|e| e.file_name().to_str() == Some("meta.json"));
-        if only_meta {
-            let _ = fs::remove_dir_all(&self.dir);
-        }
-    }
-}
-
 fn find_moov(reader: &ThumbReader) -> Option<Vec<u8>> {
     /// Himoya: buzilgan faylda cheksiz aylanib qolmaslik uchun.
     const MAX_BOXES: usize = 64;
@@ -5752,14 +5710,19 @@ fn serve_thumb(
     let body = match thumb_from_memo(&tag) {
         Some(cached) => cached,
         None => {
+            // ── KADR ISHI DISKKA HECH NARSA YOZMAYDI ──────────────
+            //
+            // Foydalanuvchi: "kadr uchun yuklab olinganlari RAM'da
+            // turadi degan eding-ku". Ilgari baytlar xotirada tursa ham
+            // kesh papkasi ochilib, unga hajm yozilgan `meta.json`
+            // qo'yilardi, keyin o'chirilardi — va shu o'chirish
+            // bir paytda boshlangan YUKLAB OLISHNI buzdi. Endi papka
+            // ochilmaydi, hajm faqat xotirada; diskdan faqat O'QILADI
+            // (qism ko'rilgan/yuklangan bo'lsa bo'laklari tayyor).
             let dir = shared.cache_root.join(&key);
-            let _ = fs::create_dir_all(&dir);
 
             // Hajm: avval diskdan, bo'lmasa bitta kichik so'rov bilan.
             let mut total = meta_total_from_disk(&dir);
-            // Papka shu kadr uchun ochildi (video ko'rilmagan/yuklanmagan)
-            // — ish tugagach izsiz o'chiriladi (`ThumbDirGuard`).
-            let _guard = ThumbDirGuard { dir: dir.clone(), key: key.clone(), active: total == 0 };
             // ── HAJM BIRINCHI O'QISHNING O'ZIDAN ─────────────────
             //
             // TOPILGAN XATO (foydalanuvchi: "support chatdagi
@@ -5775,26 +5738,11 @@ fn serve_thumb(
             // kadr ham shu yerda).
             let mut head: Option<Vec<u8>> = None;
             if total == 0 {
-                if let Some((t, ct, bytes)) = probe_head(shared, url, ThumbReader::READAHEAD) {
+                if let Some((t, _ct, bytes)) = probe_head(shared, url, ThumbReader::READAHEAD) {
                     note_net_bytes(&key, bytes.len() as u64);
-                    write_meta(
-                        &dir,
-                        &CacheMeta {
-                            total_size: t,
-                            content_type: ct,
-                            chunk_size: CHUNK_SIZE,
-                            duration_secs: 0.0,
-                            chunk_start_ms: Vec::new(),
-                        },
-                    );
                     total = t;
                     head = Some(bytes);
                 }
-            }
-            if total == 0 {
-                total = ensure_meta(shared, &dir, url)
-                    .map(|m| m.total_size)
-                    .unwrap_or(0);
             }
             if total == 0 {
                 log("Kadr: hajm aniqlanmadi".to_string());
