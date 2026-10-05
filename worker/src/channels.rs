@@ -144,8 +144,12 @@ async fn record_request(env: &Env, chat_id: i64, tg_id: i64) {
         return;
     };
     let Some(row) = first_row(&res) else {
+        // Takroriy so'rov: eski usulda yana 4 ta buyruq ketardi.
+        saved("kanal", 4);
         return;
     };
+    // Yangi so'rov: kanal qidiruvi INSERT ichida (eski: alohida SELECT).
+    saved("kanal", 1);
     let id = jint(&row, "channel_id");
     let metric = format!("chan:{id}");
     let _ = turso_batch(env, &[

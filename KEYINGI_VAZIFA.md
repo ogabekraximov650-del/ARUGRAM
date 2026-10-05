@@ -4963,3 +4963,8 @@ to'g'ridan-to'g'ri kesh orqali ko'rsatilsin" (Turso'siz).
   diskdagi ro'yxat qoladi). Oyna ochiq turganda `GET /api/comments/wait?mk=`
   (~20 s, Turso'siz) — yangi izoh/layk bo'lsa ro'yxat yangilanadi.
   Belgi umumiy (hamma bo'limlar uchun bitta).
+- **Tejash hisobi.** Turso'ga borilmagan har holatda worker `aru_sv <tur> <n>`
+  jurnal qatorini yozadi (`saved()`); `tool/stats/tail_report.py` ularni
+  "Tejamkor tizim" jadvaliga jamlaydi va `tool/stats/baseline.json`
+  (tejashdan OLDINGI o'lchov) bilan daqiqasiga solishtiradi. `sxema`
+  uchun 7 — taxminiy (1 paket + 6 migratsiya belgisi).

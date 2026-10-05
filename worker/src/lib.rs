@@ -207,6 +207,15 @@ fn sql_head(sql: &str) -> String {
     flat.chars().take(90).collect()
 }
 
+/// Tejash hisobi: Turso'ga BORILMAGAN har bir holat jurnalga yoziladi —
+/// `aru_sv <tur> <tejalgan buyruqlar>`. `worker-stats` hisoboti ularni
+/// jamlab "qancha tejaldi" jadvalini chiqaradi (`tool/stats`).
+fn saved(kind: &str, n: i64) {
+    if n > 0 {
+        console_log!("aru_sv {} {}", kind, n);
+    }
+}
+
 fn sql_is_write(sql: &str) -> bool {
     let head: String = sql.trim_start().chars().take(6).collect::<String>().to_ascii_uppercase();
     head.starts_with("INSERT") || head.starts_with("UPDATE") || head.starts_with("DELETE")
@@ -437,6 +446,8 @@ async fn ensure_db(env: &Env) {
     if let Ok(req) = Request::new(&mark, Method::Get) {
         if let Ok(Some(_)) = Cache::default().get(&req, false).await {
             DB_READY.store(true, Ordering::Relaxed);
+            // Sxema paketi (1 so'rov, ~30 buyruq) + 6 ta migratsiya belgisi.
+            saved("sxema", 7);
             return;
         }
     }
@@ -3546,6 +3557,7 @@ async fn config_get(env: &Env, key: &str) -> Option<String> {
         if let Some(v) = CONFIG_MEMO.with(|m| {
             m.borrow().get(key).filter(|(_, at)| now - *at < CONFIG_MEMO_MS).map(|(v, _)| v.clone())
         }) {
+            saved("sozlama", 1);
             return Some(v);
         }
     }
@@ -6384,6 +6396,7 @@ async fn comments_list(
     if page == 0 && mk_before >= 0 && mk == mk_before && at_before > 0
         && at_before <= now && now - at_before < COMMENTS_FALLBACK_MS
     {
+        saved("izohlar", 1);
         return ok_nostore(json!({"same": true, "mk": mk, "at": at_before}));
     }
 
@@ -6926,6 +6939,7 @@ async fn chat_unread(req: &Request, env: &Env) -> Result<Response> {
     if u_before >= 0 && mk == mk_before && at_before > 0 && at_before <= now
         && now - at_before < UNREAD_FALLBACK_MS
     {
+        saved("nuqta", 1);
         return ok_nostore(json!({
             "unread": u_before, "admin": admin, "mk": mk, "at": at_before,
         }));
@@ -7324,6 +7338,13 @@ async fn chat_wait(req: &Request, env: &Env) -> Result<Response> {
         let mut need = mk != mk_before || now_ms() - at_before >= CHAT_FALLBACK_MS
             || at_before > now_ms();
         let steps = (CHAT_WAIT_TICKS as u64 * CHAT_WAIT_STEP_MS) / CHAT_MARK_STEP_MS;
+        // Tejash hisobi: eski usul shu vaqt ichida har 5 s da o'qirdi.
+        let started = now_ms();
+        let mut reads: i64 = 0;
+        let note = |reads: i64| {
+            let old = (now_ms() - started) / CHAT_WAIT_STEP_MS as i64 + 1;
+            saved("chat", old.min(CHAT_WAIT_TICKS as i64) - reads);
+        };
         for i in 0..=steps {
             if i > 0 {
                 Delay::from(core::time::Duration::from_millis(CHAT_MARK_STEP_MS)).await;
@@ -7335,14 +7356,17 @@ async fn chat_wait(req: &Request, env: &Env) -> Result<Response> {
             }
             if need {
                 need = false;
+                reads += 1;
                 let res = turso_exec(env, vsql, vargs.clone()).await?;
                 at = now_ms();
                 ver = scalar(&res);
                 if ver != ver_before {
+                    note(reads);
                     return ok_nostore(json!({"new": true, "ver": ver, "mk": mk, "at": at}));
                 }
             }
         }
+        note(reads);
         return ok_nostore(json!({"new": false, "ver": ver, "mk": mk, "at": at}));
     }
 
