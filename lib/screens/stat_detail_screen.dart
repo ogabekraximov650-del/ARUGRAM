@@ -40,6 +40,7 @@ import '../services/watch_history.dart';
 import '../theme/app_background.dart';
 import '../widgets/glass.dart';
 import '../widgets/poster_image.dart';
+import '../widgets/pack_views.dart';
 import '../widgets/paid_badge.dart';
 import 'history_screen.dart';
 import 'home_screen.dart';
@@ -303,15 +304,30 @@ class _CommentRowState extends State<_CommentRow> {
     final photo = '${widget.row['photo_url'] ?? ''}';
     final season = '${widget.row['season_name'] ?? ''}'.trim();
     final anime = '${widget.row['anime_name'] ?? ''}'.trim();
-    final rawBody = '${widget.row['body'] ?? ''}';
-    // Stiker/GIF izohida matn yo'q — turi yoziladi.
-    final body = rawBody.isNotEmpty
-        ? rawBody
-        : switch ('${widget.row['media_type'] ?? ''}') {
-            'sticker' => 'Stiker',
-            'gif' => 'GIF',
-            _ => rawBody,
-          };
+    // ── AYNAN NIMA YUBORILGANI / YOZILGANI ─────────────────
+    //
+    // TALAB (foydalanuvchi): "izohlar statistikasida foydalanuvchi
+    // aynan nima yuborgani va nima yozgani aniq ko'rsatilsin". Ilgari
+    // GIF/stiker izohida faqat "GIF" so'zi turardi — endi o'sha GIF
+    // yoki stikerning o'zi (izohlar oynasidagidek, `PackMediaView`),
+    // matn bo'lsa matn ham, ustida esa nima ekani (izoh / javob,
+    // GIF / stiker) yoziladi.
+    final body = '${widget.row['body'] ?? ''}';
+    final mediaType = '${widget.row['media_type'] ?? ''}';
+    final mediaFile = '${widget.row['media_file'] ?? ''}';
+    final hasMedia =
+        mediaFile.isNotEmpty && (mediaType == 'sticker' || mediaType == 'gif');
+    final isReply = '${widget.row['parent_id'] ?? ''}'.isNotEmpty;
+    final what = switch (mediaType) {
+      'sticker' => 'stiker',
+      'gif' => 'GIF',
+      _ => '',
+    };
+    final caption = [
+      isReply ? 'Javob' : 'Izoh',
+      if (what.isNotEmpty) '$what yubordi',
+      if (body.trim().isNotEmpty) 'yozdi',
+    ].join(' · ');
     final likes = ((widget.row['likes'] as num?) ?? 0).toInt();
     final at = ((widget.row['created_at'] as num?) ?? 0).toInt();
 
@@ -372,19 +388,37 @@ class _CommentRowState extends State<_CommentRow> {
                         fontWeight: FontWeight.w700,
                       ),
                     ),
-                    const SizedBox(height: 5),
-                    // Emoji alpha tufayli qoramtir bo'lmasin
-                    // (`emoji_text.dart` izohiga qarang).
-                    EmojiText(
-                      body,
-                      maxLines: 4,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.82),
-                        fontSize: 13,
-                        height: 1.35,
-                      ),
+                    const SizedBox(height: 3),
+                    Text(
+                      caption,
+                      style: const TextStyle(
+                          color: Colors.white54, fontSize: 11.5),
                     ),
+                    if (hasMedia) ...[
+                      const SizedBox(height: 6),
+                      PackMediaView(file: mediaFile, type: mediaType),
+                    ],
+                    if (body.trim().isNotEmpty) ...[
+                      const SizedBox(height: 5),
+                      // Emoji alpha tufayli qoramtir bo'lmasin
+                      // (`emoji_text.dart` izohiga qarang).
+                      EmojiText(
+                        body,
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.9),
+                          fontSize: 13,
+                          height: 1.35,
+                        ),
+                      ),
+                    ] else if (!hasMedia && what.isNotEmpty) ...[
+                      // Eski server javobi (`media_file` yo'q) — hech
+                      // bo'lmasa turi.
+                      const SizedBox(height: 5),
+                      Text(what,
+                          style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.9),
+                              fontSize: 13)),
+                    ],
                     const SizedBox(height: 8),
                     Row(
                       children: [
@@ -503,6 +537,15 @@ class _ReplyRow extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 2),
+                if (!reply.deleted &&
+                    (reply.mediaType == 'sticker' || reply.mediaType == 'gif') &&
+                    reply.mediaFile.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2, bottom: 2),
+                    child: PackMediaView(
+                        file: reply.mediaFile, type: reply.mediaType),
+                  ),
+                if (reply.body.trim().isNotEmpty)
                 EmojiText(
                   reply.body,
                   style: TextStyle(

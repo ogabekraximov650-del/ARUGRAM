@@ -5219,6 +5219,9 @@ struct ThumbReader<'a> {
     /// turadi; bitta zaxira bo'lsa oxirini o'qish boshini o'chirib
     /// yuborardi va kalit kadr uchun yana bitta so'rov ketardi.
     buf: RefCell<Vec<(u64, Vec<u8>)>>,
+    /// Fayl Telegram'da bormi (bir marta aniqlanadi; `None` — hali
+    /// so'ralmagan). Har 16 baytlik o'qishda qayta so'ralmasin.
+    tg: std::cell::Cell<Option<bool>>,
 }
 
 impl ThumbReader<'_> {
@@ -5264,6 +5267,11 @@ impl ThumbReader<'_> {
             return Some(v);
         }
         if let Some(v) = self.read_from_disk(start, len) {
+            return Some(v);
+        }
+        // Videolar endi Telegram'da — avval o'sha yerdan (pleyer bilan
+        // bir xil bo'laklar, diskka ham yoziladi).
+        if let Some(v) = self.read_from_tg(start, len) {
             return Some(v);
         }
         // Tarmoqqa chiqyapmiz — bir yo'la ko'proq olamiz.
@@ -5314,6 +5322,50 @@ impl ThumbReader<'_> {
         } else {
             None
         }
+    }
+
+    /// ═══════════════════════════════════════════════════════════
+    ///  TELEGRAM'DAN (TOPILGAN XATO: TARIXDA KADR O'RNIGA POSTER)
+    /// ═══════════════════════════════════════════════════════════
+    ///
+    /// Foydalanuvchi: "tomosha tarixida to'xtagan joydagi kadr
+    /// o'rniga poster ko'rinyapti".
+    ///
+    /// SABAB: videolar endi Telegram kanali orqali keladi, worker esa
+    /// fayl baytlarini bermaydi. Kadr yasovchi esa diskda yo'q
+    /// baytlarni FAQAT worker manzilidan (HTTP) so'rardi — javob
+    /// kelmasdi va kadr yasalmasdi (masalan `moov` yoki kalit kadr
+    /// bo'lagi diskda bo'lmasa, boshqa qurilmada ko'rilgan qism).
+    ///
+    /// Endi yetishmayotgan baytlar pleyer kabi Telegram'dan, butun
+    /// 1 MiB bo'laklar bilan olinadi (`player_source::load_chunk`) va
+    /// shifrlanib diskka yoziladi — keyingi kadr va pleyer ularni
+    /// qayta yuklamaydi. Fayl bot chatida bo'lishi kerak: Dart tomoni
+    /// buni kerak bo'lganda so'raydi (`watch_history.dart`).
+    fn read_from_tg(&self, start: u64, len: u64) -> Option<Vec<u8>> {
+        if self.tg.get().is_none() {
+            let ok = crate::telegram::cached_doc_size(&self.key).is_some()
+                || crate::telegram::doc_size(&self.key).is_ok();
+            self.tg.set(Some(ok));
+        }
+        if self.tg.get() != Some(true) {
+            return None;
+        }
+        let first = start / CHUNK_SIZE;
+        let last = (start + len - 1) / CHUNK_SIZE;
+        let mut out = Vec::with_capacity(len as usize);
+        for i in first..=last {
+            let chunk =
+                crate::player_source::load_chunk(&self.key, &self.dir, self.total, i, "kadr").ok()?;
+            let chunk_start = i * CHUNK_SIZE;
+            let from = (start.max(chunk_start) - chunk_start) as usize;
+            let to = ((start + len).min(chunk_start + chunk.len() as u64) - chunk_start) as usize;
+            if from >= to || to > chunk.len() {
+                return None;
+            }
+            out.extend_from_slice(&chunk[from..to]);
+        }
+        (out.len() as u64 == len).then_some(out)
     }
 
     /// `want` bayt so'raydi, lekin KAMIDA `need` bayt kelsa
@@ -5726,6 +5778,18 @@ fn serve_thumb(
             // bo'lak bo'lib qoladi (ftyp, ko'pincha moov va kalit
             // kadr ham shu yerda).
             let mut head: Option<Vec<u8>> = None;
+            // Telegram'dagi fayl: hajm Telegram ma'lumotidan (xotiradan,
+            // bo'lmasa bitta so'rov) — worker baytlarni bermaydi.
+            if total == 0 {
+                let tg = crate::telegram::cached_doc_size(&key)
+                    .or_else(|| crate::telegram::doc_size(&key).ok());
+                if let Some((size, mime)) = tg {
+                    if size > 0 {
+                        player_set_total(&dir, size, &mime);
+                        total = size;
+                    }
+                }
+            }
             if total == 0 {
                 if let Some((t, ct, bytes)) = probe_head(shared, url, ThumbReader::READAHEAD) {
                     note_net_bytes(&key, bytes.len() as u64);
@@ -5760,6 +5824,7 @@ fn serve_thumb(
                 url: url.to_string(),
                 total,
                 buf: RefCell::new(Vec::new()),
+                tg: std::cell::Cell::new(None),
             };
             if let Some(bytes) = head {
                 if !bytes.is_empty() && bytes.len() as u64 <= ThumbReader::BUF_MAX {
@@ -7577,6 +7642,7 @@ mod tests {
             url,
             total,
             buf: RefCell::new(Vec::new()),
+            tg: std::cell::Cell::new(Some(false)),
         };
         reader.keep(0, head);
         let out = (|| {
@@ -7780,6 +7846,7 @@ mod tests {
             url: url.clone(),
             total,
             buf: RefCell::new(Vec::new()),
+            tg: std::cell::Cell::new(Some(false)),
         };
 
         // `find_moov` aynan shunday yuradi: `ftyp` sarlavhasi,

@@ -111,7 +111,10 @@ const PIPELINE: usize = 4;
 /// Butun ilova bo'yicha havodagi `getFile` so'rovlari chegarasi.
 /// Yuklab olish 16 ta parallel HTTP so'rov yuboradi; chegara
 /// bo'lmasa bu 64 ta so'rov bo'lardi va Telegram FLOOD_WAIT berardi.
-const MAX_INFLIGHT: usize = 24;
+///
+/// 24 edi — pleyerning oldindan olishi (`AHEAD`) oshirilgach, yuklab
+/// olish bilan birga so'rovlar navbatda kutib qolmasin deb 32.
+const MAX_INFLIGHT: usize = 32;
 
 /// Fayl qismlari uchun QO'SHIMCHA ulanishlar soni (asosiysidan tashqari).
 ///
@@ -124,7 +127,11 @@ const MAX_INFLIGHT: usize = 24;
 /// asosiy + 4 ta qo'shimcha ulanishga navbat bilan taqsimlanadi.
 /// Hammasi BITTA sessiya (bitta auth kalit) bilan — Telegram buni
 /// ruxsat etadi, har bir ulanish o'z `session_id` siga ega.
-const DL_CONNS: usize = 4;
+///
+/// 4 edi; foydalanuvchi: "fayllar juda sekin yuklanyapti" — 6 ta
+/// qo'shimcha ulanish (jami 7): havodagi so'rovlar ko'proq ulanishga
+/// yoyiladi, har biri o'z TCP oynasi bilan.
+const DL_CONNS: usize = 6;
 
 /// Xatodan keyin shu fayl uchun Telegram qancha vaqt chetga suriladi.
 const FAIL_COOLDOWN: Duration = Duration::from_secs(120);

@@ -8070,7 +8070,7 @@ async fn user_stats_list(
         ),
         "comments" => (
             "SELECT c.id, c.parent_id, c.anime_id, c.season_id, c.body,
-                    c.media_type,
+                    c.media_type, c.media_file,
                     c.likes, c.reply_count, c.created_at,
                     s.nomi AS season_name, s.photo_url AS photo_url,
                     a.name AS anime_name

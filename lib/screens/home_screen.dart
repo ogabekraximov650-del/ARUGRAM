@@ -403,6 +403,7 @@ class SeasonCard extends StatelessWidget {
     final photoUrl = season['photo_url'] as String?;
     final name = (season['nomi'] ?? '').toString();
     final bolim = int.tryParse(season['bolim_id']?.toString() ?? '') ?? 0;
+    final eps = int.tryParse(season['epizod_count']?.toString() ?? '') ?? 0;
 
     // ── KARTOCHKA BELGILARI ───────────────────────────────────
     //
@@ -579,15 +580,22 @@ class SeasonCard extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          if (bolim > 0)
+                          // TALAB (foydalanuvchi): bo'lim yonida undagi
+                          // qismlar soni ("2-bo'lim · 12 ta qism") va
+                          // OQ rangda — qizil yozuv qorong'i posterda
+                          // ko'rinmasdi.
+                          if (bolim > 0 || eps > 0)
                             Text(
-                              '$bolim-bo\'lim',
+                              [
+                                if (bolim > 0) '$bolim-bo\'lim',
+                                if (eps > 0) '${formatCount(eps)} ta qism',
+                              ].join(' · '),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
                                 fontWeight: FontWeight.w600,
                                 fontSize: tagSize,
-                                color: AppColors.accent,
+                                color: Colors.white,
                                 height: 1.3,
                               ),
                             ),

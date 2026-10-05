@@ -40,6 +40,7 @@ import 'package:http/http.dart' as http;
 import 'auth_service.dart';
 import 'rust_bridge.dart';
 import 'sync_queue.dart';
+import 'telegram_service.dart';
 import 'video_cache_server.dart';
 import 'video_gate.dart';
 
@@ -1140,7 +1141,10 @@ class WatchHistory extends ChangeNotifier {
       // paytida ishlaydi va takror urinish kanalni band qiladi.
       final tries = exact ? _thumbTries : 1;
       for (var attempt = 1; attempt <= tries; attempt++) {
-        final data = await _grabThumb(item, exact);
+        // 1-urinish — faqat diskdagi bo'laklardan (tarmoqsiz, odatda
+        // yetadi). Bo'lmasa fayl bot chatiga so'raladi va yetishmagan
+        // baytlar Telegram'dan olinadi (`_grabThumb`).
+        final data = await _grabThumb(item, exact, viaTg: attempt > 1);
         if (data != null) {
           _rememberThumb(key, data);
           if (exact) {
@@ -1173,7 +1177,16 @@ class WatchHistory extends ChangeNotifier {
   /// yasalmasin. Urinishlar orasidagi tanaffusda navbat BAND
   /// QILINMAYDI — aks holda bitta muvaffaqiyatsiz kadr qolgan
   /// qatorlarni ushlab turardi.
-  Future<Uint8List?> _grabThumb(HistoryItem item, bool exact) async {
+  ///
+  /// [viaTg] — TOPILGAN XATO (foydalanuvchi: "tarixda to'xtagan joydagi
+  /// kadr o'rniga poster ko'rinyapti"): videolar endi Telegram'da, worker
+  /// esa fayl baytlarini bermaydi. Diskda yetmagan bayt (masalan `moov`
+  /// yoki kalit kadr bo'lagi) uchun Rust yadrosi Telegram'ga murojaat
+  /// qiladi — buning uchun fayl bot chatida bo'lishi kerak. Shu sabab
+  /// qayta urinishda nusxa so'raladi (pleyerdagidek) va ish tugagach
+  /// qo'yib yuboriladi (chat tozalanadi).
+  Future<Uint8List?> _grabThumb(HistoryItem item, bool exact,
+      {bool viaTg = false}) async {
     // ── VIDEO OCHIQ TURGANDA ANIQ KADR YASALMAYDI ───────────
     //
     // TOPILGAN XATO (foydalanuvchi: "pleyer va yozishmadagi video
@@ -1198,20 +1211,27 @@ class WatchHistory extends ChangeNotifier {
       await Future<void>.delayed(const Duration(milliseconds: 120));
     }
     _thumbRunning++;
+    final owner = Object();
     try {
+      if (viaTg) {
+        final tg = TelegramService.instance;
+        tg.hold(owner, item.videoUrl);
+        await tg.prepare(item.videoUrl);
+      }
       final uri = await VideoCacheServer.instance
           .thumbUri(item.videoUrl, item.positionMs, exact: exact);
       final data = await _thumbChannel.invokeMethod<Uint8List>('grab', {
         'url': uri.toString(),
         'maxWidth': 640,
         'quality': 72,
-      }).timeout(const Duration(seconds: 25));
+      }).timeout(Duration(seconds: viaTg ? 60 : 25));
       if (data == null || data.isEmpty) return null;
       return data;
     } catch (_) {
       // Urinish uzildi — yuqorida yana bir marta sinaladi.
       return null;
     } finally {
+      if (viaTg) TelegramService.instance.unhold(owner);
       _thumbRunning--;
     }
   }

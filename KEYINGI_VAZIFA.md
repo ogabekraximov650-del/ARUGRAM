@@ -4904,3 +4904,27 @@ to'g'ridan-to'g'ri kesh orqali ko'rsatilsin" (Turso'siz).
   `source: "cache"`), bo'lmasa Telegram qadalgan xabari (zaxira).
 - Ilova: `/api/encode/live` ni ~16 s da so'raydi; `source != cache` bo'lsa
   zaxira — qadalgan xabarni o'zi o'qiydi.
+
+## Tarix kadrlari Telegram'dan, yuklash tezligi, izohlar statistikasi (2026-10)
+
+- **Tarixda kadr o'rniga poster.** Videolar endi Telegram'da, worker
+  fayl baytlarini bermaydi, kadr yasovchi esa diskda yo'q baytlarni
+  faqat worker'dan (HTTP) so'rardi. Endi `ThumbReader::read_from_tg`
+  yetishmagan baytlarni pleyer kabi Telegram'dan 1 MiB bo'laklar bilan
+  oladi (`player_source::load_chunk`, diskka ham yoziladi); hajm ham
+  Telegram'dan (`doc_size`). Dart: 1-urinish faqat diskdan, keyingilari
+  faylni bot chatiga so'raydi (`prepare` + `hold/unhold`) —
+  `watch_history.dart` `_grabThumb(viaTg)`.
+- **Tezlik.** Pleyerning oldindan olishi `AHEAD` 2 -> 4 bo'lak (1 daqiqa
+  qoidasi o'z kuchida), `DL_CONNS` 4 -> 6, `MAX_INFLIGHT` 24 -> 32.
+  FLOOD_WAIT ko'paysa birinchi navbatda shularni qaytaring.
+- **Majburiy kanallar** (`channel_gate.dart`): bittadan, 5-10 s oraliq,
+  pleyer ochiq (`VideoGate.busy`) paytda to'xtaydi, Telegram limitida
+  30 daqiqa kutish (`chan_pause`).
+- **Izohlar statistikasi**: worker `media_file` ham beradi, ekranda
+  GIF/stikerning o'zi (`PackMediaView`) va "Izoh/Javob · GIF yubordi ·
+  yozdi" yozuvi.
+- **Bosh sahifa kartasi**: "N-bo'lim · M ta qism" (`epizod_count`), oq rangda.
+- **Xotira halqasi**: bo'laklar orasida bo'shliq yo'q, ulushlar
+  siljiydi va burchaklar har kadrda ketma-ket yig'iladi; tozalashda
+  halqa parda foizi bilan bir sur'atda bo'shaydi; foizlar `000.00`.

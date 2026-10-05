@@ -39,7 +39,13 @@ use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 
 /// Pleyer o'qiyotgan joydan oldinga shuncha bo'lak tayyorlab qo'yiladi.
-const AHEAD: u64 = 2;
+///
+/// 2 edi; foydalanuvchi: "Telegram'dan fayllar juda sekin yuklanyapti".
+/// 2 ta bo'lak (= 4 ta `getFile` so'rovi) havoda bo'lsa, tezlik bitta
+/// so'rovning borib-kelish vaqtiga bog'lanib qolardi. 4 ta bo'lak
+/// (8 so'rov) bir nechta ulanishni to'liq band qiladi. "1 daqiqadan
+/// ortiq oldinga yuklama" qoidasi o'z kuchida (`net_allowed`).
+const AHEAD: u64 = 4;
 
 // ── ONLAYN KO'RISHDA KO'PI BILAN 1 DAQIQA OLDINGA ─────────────────
 //
@@ -352,7 +358,7 @@ fn net_allowed(r: &Reader, index: u64) -> bool {
     }
 }
 
-type ChunkResult = Result<Arc<Vec<u8>>, String>;
+pub(crate) type ChunkResult = Result<Arc<Vec<u8>>, String>;
 
 struct Reader {
     name: String,
@@ -454,7 +460,7 @@ fn close(h: i64) {
 
 /// Bo'lakni diskdan yoki Telegram'dan oladi. Bir xil bo'lakni boshqa
 /// oqim olayotgan bo'lsa — o'shani kutadi.
-fn load_chunk(name: &str, dir: &PathBuf, total: u64, index: u64, why: &str) -> ChunkResult {
+pub(crate) fn load_chunk(name: &str, dir: &PathBuf, total: u64, index: u64, why: &str) -> ChunkResult {
     if let Some(b) = video_cache::player_read_chunk(dir, name, index, total) {
         return Ok(Arc::new(b));
     }
