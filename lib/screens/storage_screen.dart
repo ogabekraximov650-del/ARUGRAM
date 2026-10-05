@@ -9,7 +9,8 @@
 // o'shandan olingan:
 //
 //   * oq (bu yerda — karta rangi) blok: yuqori panel, halqa diagramma
-//     (balandligi 270, diametri 172, qalinligi 38, bo'laklar orasi 2°,
+//     (balandligi 270, diametri 172, qalinligi 38, bo'laklar orasi 0° —
+//     bir-biriga tegib turadi,
 //     foiz — halqa TASHQARISIDA, bo'lak rangida), o'rtada TANLANGAN
 //     hajm (raqam 32, birligi 12);
 //   * sarlavha "Xotiradan foydalanish", izoh "ARUGRAM qurilma
@@ -82,6 +83,10 @@ class _StorageScreenState extends State<StorageScreen> {
 
   /// Sarlavha yuqori panelda (halqa va sarlavha ekrandan chiqqach).
   bool _pinned = false;
+
+  /// Tozalanayotganda — parda foizi (0..1). Halqa shu bilan BIR XIL
+  /// sur'atda bo'shaydi (`_CacheChart.drain`).
+  ValueNotifier<double>? _drain;
 
   @override
   void initState() {
@@ -190,6 +195,7 @@ class _StorageScreenState extends State<StorageScreen> {
     // chiqadi va animatsiya oxirigacha ko'rinadi: foiz chizig'i va halqa
     // jo'ja bilan bir xil sur'atda, sekin o'sadi.
     final progress = ValueNotifier<double>(0);
+    setState(() => _drain = progress);
     var done = false;
     var shownAt = -1;
     final sheetClosed = Completer<void>();
@@ -223,7 +229,8 @@ class _StorageScreenState extends State<StorageScreen> {
     // tugamagan bo'lsa 95% da kutadi.
     final minMs = TrashChickAnimation.durationFor(size).inMilliseconds;
     final sw = Stopwatch()..start();
-    final tick = Timer.periodic(const Duration(milliseconds: 50), (_) {
+    // ~60 kadr/s: halqa va foiz silliq kamaysin.
+    final tick = Timer.periodic(const Duration(milliseconds: 16), (_) {
       final r = sw.elapsedMilliseconds / minMs;
       progress.value = done ? r.clamp(0.0, 1.0) : r.clamp(0.0, 0.95);
     });
@@ -238,9 +245,16 @@ class _StorageScreenState extends State<StorageScreen> {
     if (shownAt > 0 && mounted) Navigator.of(context).pop();
     await sheetClosed.future
         .timeout(const Duration(seconds: 2), onTimeout: () {});
-    progress.dispose();
-    if (!mounted) return;
-    setState(_off.clear);
+    if (!mounted) {
+      progress.dispose();
+      return;
+    }
+    setState(() {
+      _drain = null;
+      _off.clear();
+    });
+    // Halqa chizuvchisi hali shu kadrgacha unga ulangan.
+    WidgetsBinding.instance.addPostFrameCallback((_) => progress.dispose());
     // Telegram: pastda "Kesh tozalandi" xabari (`CacheWasCleared`,
     // `ic_delete`), 150 ms dan keyin.
     await Future<void>.delayed(const Duration(milliseconds: 150));
@@ -313,8 +327,9 @@ class _StorageScreenState extends State<StorageScreen> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     _CacheChart(
-                      loading: calculating,
-                      complete: !calculating && total <= 0,
+                      loading: _drain == null && calculating,
+                      complete: _drain == null && !calculating && total <= 0,
+                      drain: _drain,
                       slices: [
                         for (final s in cache)
                           if (_bytesOf(s) > 0)
@@ -357,8 +372,9 @@ class _StorageScreenState extends State<StorageScreen> {
                             _SectionRow(
                               slice: cache[i].children[k],
                               percent: total > 0
-                                  ? (cache[i].children[k].bytes * 100 / total)
-                                      .round()
+                                  ? (cache[i].children[k].bytes * 10000 / total)
+                                          .round() /
+                                      100
                                   : 0,
                               checked:
                                   !_off.contains(cache[i].children[k].label),
@@ -395,10 +411,15 @@ const String _infoText =
     'Barcha videolar, rasmlar, stikerlar va emojilar serverda qoladi — '
     'kerak bo\'lsa ularni qayta yuklab olishingiz mumkin.';
 
-/// Foizlarni jami 100 bo'ladigan qilib yaxlitlaydi
-/// (`AndroidUtilities.roundPercents` — eng katta qoldiq usuli).
-List<int> _roundPercents(List<double> shares) {
-  final raw = [for (final s in shares) s * 100];
+/// Foiz matni: `000.00` ko'rinishida (foydalanuvchi talabi), masalan
+/// `100.00%`, `38.25%`, `0.42%`.
+String _pctText(double p) =>
+    p > 0 && p < .005 ? '<0.01%' : '${p.toStringAsFixed(2)}%';
+
+/// Foizlarni (yuzdan bir aniqlikda) jami 100 bo'ladigan qilib
+/// yaxlitlaydi (`AndroidUtilities.roundPercents` — eng katta qoldiq usuli).
+List<double> _roundPercents(List<double> shares) {
+  final raw = [for (final s in shares) s * 10000];
   final out = [for (final r in raw) r.floor()];
   final sum = raw.fold<double>(0, (a, b) => a + b);
   var left = sum.round() - out.fold<int>(0, (a, b) => a + b);
@@ -409,7 +430,7 @@ List<int> _roundPercents(List<double> shares) {
     out[i]++;
     left--;
   }
-  return out;
+  return [for (final o in out) o / 100];
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -425,9 +446,15 @@ class _CacheChart extends StatefulWidget {
   final int selectedBytes;
   final ValueChanged<String?> onPress;
 
+  /// Tozalash foizi (0..1): berilgan bo'lsa halqa shu paytdagi holatida
+  /// qotadi va foiz o'sgani sari bo'laklar, ulardagi foizlar va
+  /// o'rtadagi hajm birga kamayadi (pardadagi jo'ja bilan bir sur'atda).
+  final ValueNotifier<double>? drain;
+
   const _CacheChart({
     required this.loading,
     required this.complete,
+    this.drain,
     required this.slices,
     required this.selectedBytes,
     required this.onPress,
@@ -442,17 +469,24 @@ class _CacheChart extends StatefulWidget {
 class _Sector {
   final double center;
   final double half;
-  final String text;
+
+  /// Foiz (0..100) — son bo'lib turadi: o'zgarganda matn ham bo'lak
+  /// bilan bir sur'atda silliq kamayadi/ko'payadi.
+  final double pct;
   final double textAlpha;
   final double textScale;
 
   const _Sector(this.center, this.half,
-      [this.text = '', this.textAlpha = 0, this.textScale = 1]);
+      [this.pct = 0, this.textAlpha = 0, this.textScale = 1]);
+
+  _Sector scaled(double f) => _Sector(center, half * f, pct * f, textAlpha, textScale);
 }
 
 class _CacheChartState extends State<_CacheChart>
     with TickerProviderStateMixin {
-  static const double _separator = 2;
+  /// Bo'laklar orasidagi ochiq joy (gradus). Foydalanuvchi talabi:
+  /// bo'laklar bir-biriga tegib tursin, faqat ranglari alohida.
+  static const double _separator = 0;
 
   /// Bo'laklar siljishi, kattalashishi va kichrayib yo'qolishi: sekin va
   /// yumshoq (650 ms -> 1200 ms ham tez ko'rindi; foydalanuvchi talabi bilan
@@ -477,23 +511,86 @@ class _CacheChartState extends State<_CacheChart>
   Map<String, _Sector> _to = {};
   String? _pressed;
 
+  /// O'rtadagi hajm ham bo'laklar bilan BIR XIL sur'atda o'zgaradi
+  /// (ilgari darhol sakrardi).
+  double _fromBytes = 0;
+  double _toBytes = 0;
+
   @override
   void initState() {
     super.initState();
     _to = _layout(widget.slices);
     _from = _to;
+    _fromBytes = _toBytes = widget.selectedBytes.toDouble();
   }
 
   @override
   void didUpdateWidget(_CacheChart old) {
     super.didUpdateWidget(old);
+    if (widget.drain != null) {
+      if (old.drain == null) {
+        // Tozalash boshlandi — halqa shu holatida qotadi, keyin
+        // `drain` bo'yicha bo'shaydi. Shu orada kelgan yangi hajmlar
+        // (xizmat qayta sanadi) e'tiborsiz.
+        final now = _current();
+        final bytes = _bytesNow();
+        _move.value = 1;
+        _from = _to = now;
+        _fromBytes = _toBytes = bytes;
+      }
+      return;
+    }
     final next = _layout(widget.slices);
-    if (!_sameLayout(next, _to)) {
+    final bytes = widget.selectedBytes.toDouble();
+    if (old.drain != null) {
+      // Tozalash tugadi: halqa bo'sh — qolgan bo'laklar noldan o'sadi.
+      _from = {};
+      _fromBytes = 0;
+      _to = next;
+      _toBytes = bytes;
+      _move.forward(from: 0);
+      return;
+    }
+    if (!_sameLayout(next, _to) || bytes != _toBytes) {
+      _fromBytes = _bytesNow();
+      _toBytes = bytes;
       _from = _current();
       _to = next;
       _move.forward(from: 0);
     }
   }
+
+  double _bytesNow() => ui.lerpDouble(
+      _fromBytes, _toBytes, Curves.easeInOutCubic.transform(_move.value))!;
+
+  /// Tozalashda qolgan ulush (1 -> 0).
+  double get _left => 1 - (widget.drain?.value ?? 0).clamp(0.0, 1.0);
+
+  /// Chizish uchun bo'laklar (tozalanayotgan bo'lsa — kichraygan).
+  ///
+  /// Tozalashda bo'laklar bir-biriga tegib turgan holda kichrayadi:
+  /// halqa butunligicha, birinchi bo'lak boshidan boshlab qisqaradi.
+  Map<String, _Sector> _visible() {
+    final now = _current();
+    if (widget.drain == null) return now;
+    final f = _left;
+    final order = now.keys.toList()
+      ..sort((a, b) => ((now[a]!.center - now[a]!.half) % 360)
+          .compareTo((now[b]!.center - now[b]!.half) % 360));
+    if (order.isEmpty) return now;
+    final first = now[order.first]!;
+    var at = first.center - first.half;
+    final out = <String, _Sector>{};
+    for (final k in order) {
+      final s = now[k]!.scaled(f);
+      out[k] = _Sector(at + s.half, s.half, s.pct, s.textAlpha, s.textScale);
+      at += s.half * 2;
+    }
+    return out;
+  }
+
+  double _visibleBytes() =>
+      widget.drain == null ? _bytesNow() : _bytesNow() * _left;
 
   @override
   void dispose() {
@@ -510,7 +607,7 @@ class _CacheChartState extends State<_CacheChart>
       if (o == null ||
           (o.center - e.value.center).abs() > 0.01 ||
           (o.half - e.value.half).abs() > 0.01 ||
-          o.text != e.value.text) {
+          (o.pct - e.value.pct).abs() > 0.001) {
         return false;
       }
     }
@@ -533,12 +630,12 @@ class _CacheChartState extends State<_CacheChart>
   static _Sector _lerp(_Sector? a, _Sector? b, double t) {
     // Yangi bo'lak o'z joyida noldan o'sadi, ketayotgani o'z joyida
     // yo'qoladi.
-    a ??= _Sector(b!.center, 0, b.text, 0, b.textScale);
-    b ??= _Sector(a.center, 0, a.text, 0, a.textScale);
+    a ??= _Sector(b!.center, 0, 0, 0, b.textScale);
+    b ??= _Sector(a.center, 0, 0, 0, a.textScale);
     return _Sector(
       _lerpAngle(a.center, b.center, t),
       ui.lerpDouble(a.half, b.half, t)!,
-      t < 0.5 ? a.text : b.text,
+      ui.lerpDouble(a.pct, b.pct, t)!,
       ui.lerpDouble(a.textAlpha, b.textAlpha, t)!,
       ui.lerpDouble(a.textScale, b.textScale, t)!,
     );
@@ -574,9 +671,11 @@ class _CacheChartState extends State<_CacheChart>
     var k = 0;
     for (final s in list) {
       var p = s.bytes / sum;
-      // Foiz halqaning TASHQARISIDA yoziladi, ya'ni kichik bo'lakda ham
-      // sig'adi (faqat butun halqa — 100% — bo'lsa yozilmaydi).
-      final textAlpha = p >= .01 && p < 1 ? 1.0 : 0.0;
+      // Foiz halqaning TASHQARISIDA yoziladi, ya'ni ENG KICHIK bo'lakda
+      // ham ko'rinadi (foydalanuvchi talabi; ilgari 1% dan kichigi
+      // yozilmasdi). Butun halqa (100%) ham yoziladi — tozalashda u
+      // 100.00 dan 0 gacha kamayib boradi.
+      final textAlpha = p > 0 ? 1.0 : 0.0;
       final textScale = p < .08 || pct[s.label]! >= 100 ? .85 : 1.0;
       if (p < .02) {
         p = .02;
@@ -586,7 +685,7 @@ class _CacheChartState extends State<_CacheChart>
       final from = prev * total + k * _separator;
       final to = from + p * total;
       out[s.label] = _Sector((from + to) / 2, (to - from).abs() / 2,
-          '${pct[s.label]}%', textAlpha, textScale);
+          pct[s.label]!, textAlpha, textScale);
       prev += p;
       k++;
     }
@@ -631,13 +730,13 @@ class _CacheChartState extends State<_CacheChart>
 
   @override
   Widget build(BuildContext context) {
-    final text = formatBytes(widget.selectedBytes).split(' ');
     // Foizlar halqa tashqarisida — joy kattaroq.
     return SizedBox(
       height: _ChartPainter.box,
       child: LayoutBuilder(builder: (context, box) {
         final size = Size(box.maxWidth, _ChartPainter.box);
-        final interactive = !widget.loading && !widget.complete;
+        final interactive =
+            !widget.loading && !widget.complete && widget.drain == null;
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
           onPanDown: interactive
@@ -652,18 +751,16 @@ class _CacheChartState extends State<_CacheChart>
             child: CustomPaint(
               size: size,
               painter: _ChartPainter(
-                repaint: Listenable.merge([_move, _press, _clock]),
-                sectors: () => _current(),
+                repaint: Listenable.merge(
+                    [_move, _press, _clock, if (widget.drain != null) widget.drain]),
+                sectors: _visible,
+                bytes: _visibleBytes,
                 pressed: _pressed,
                 pressT: () => _press.value,
                 clock: () =>
                     (_clock.lastElapsedDuration?.inMicroseconds ?? 0) / 1e7,
                 loading: widget.loading,
                 complete: widget.complete,
-                top: widget.loading ? '' : text.first,
-                bottom: widget.loading || text.length < 2
-                    ? ''
-                    : text.sublist(1).join(' '),
               ),
             ),
           ),
@@ -682,24 +779,24 @@ class _ChartPainter extends CustomPainter {
   static const double box = 270;
 
   final Map<String, _Sector> Function() sectors;
+
+  /// O'rtadagi hajm (bayt) — har kadrda, animatsiya bilan birga.
+  final double Function() bytes;
   final String? pressed;
   final double Function() pressT;
   final double Function() clock;
   final bool loading;
   final bool complete;
-  final String top;
-  final String bottom;
 
   _ChartPainter({
     required Listenable repaint,
     required this.sectors,
+    required this.bytes,
     required this.pressed,
     required this.pressT,
     required this.clock,
     required this.loading,
     required this.complete,
-    required this.top,
-    required this.bottom,
   }) : super(repaint: repaint);
 
   @override
@@ -739,7 +836,9 @@ class _ChartPainter extends CustomPainter {
         ..addOval(Rect.fromCircle(center: c, radius: inner));
     } else {
       final from = (s.center - s.half) * math.pi / 180;
-      final sweep = s.half * 2 * math.pi / 180;
+      // Yarim gradus ustma-ust: qo'shni bo'laklar chegarasida silliqlash
+      // (anti-alias) qoldiradigan ingichka qora chiziq ko'rinmasin.
+      final sweep = (s.half * 2 + .5) * math.pi / 180;
       path
         ..arcTo(Rect.fromCircle(center: c, radius: outer), from, sweep, true)
         ..arcTo(Rect.fromCircle(center: c, radius: inner), from + sweep, -sweep,
@@ -763,10 +862,10 @@ class _ChartPainter extends CustomPainter {
 
     // Foiz — halqaning TASHQARISIDA, bo'lak markazi yo'nalishida, bo'lak
     // rangida (aniq ko'rinsin; ichida zarrachalar va gradient xalaqit berardi).
-    if (s.textAlpha > 0.01 && s.text.isNotEmpty) {
+    if (s.textAlpha > 0.01 && s.pct > 0) {
       final tp = TextPainter(
         text: TextSpan(
-          text: s.text,
+          text: _pctText(s.pct),
           style: TextStyle(
             color: Color.alphaBlend(const Color(0x33FFFFFF), color)
                 .withValues(alpha: s.textAlpha),
@@ -811,6 +910,9 @@ class _ChartPainter extends CustomPainter {
   }
 
   void _paintCenter(Canvas canvas, Offset c) {
+    final text = formatBytes(bytes().round()).split(' ');
+    final top = text.first;
+    final bottom = text.length < 2 ? '' : text.sublist(1).join(' ');
     final tp = TextPainter(
       text: TextSpan(
           text: top,
@@ -880,9 +982,8 @@ class _ChartPainter extends CustomPainter {
       old.pressed != pressed ||
       old.loading != loading ||
       old.complete != complete ||
-      old.top != top ||
-      old.bottom != bottom ||
-      old.sectors != sectors;
+      old.sectors != sectors ||
+      old.bytes != bytes;
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1035,7 +1136,7 @@ class _UsageBarPainter extends CustomPainter {
 
 class _SectionRow extends StatelessWidget {
   final StorageSlice slice;
-  final int percent;
+  final double percent;
   final bool checked;
   final bool divider;
   final bool highlighted;
@@ -1095,7 +1196,7 @@ class _SectionRow extends StatelessWidget {
                         TextSpan(children: [
                           TextSpan(text: slice.label),
                           TextSpan(
-                            text: '  ${percent <= 0 ? '<1' : percent}%',
+                            text: '  ${percent <= 0 ? '<0.01%' : _pctText(percent)}',
                             style: const TextStyle(
                                 fontSize: 13.3, fontWeight: FontWeight.w700),
                           ),
@@ -1314,7 +1415,7 @@ class _ClearingView extends StatelessWidget {
                 const SizedBox(height: 10),
                 SizedBox(
                   height: 32,
-                  child: Text('${(p * 100).ceil()}%',
+                  child: Text(_pctText(p * 100).replaceFirst('<0.01%', '0.00%'),
                       style: const TextStyle(
                           color: Colors.white,
                           fontSize: 24,
