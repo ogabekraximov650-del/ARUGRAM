@@ -4907,14 +4907,16 @@ to'g'ridan-to'g'ri kesh orqali ko'rsatilsin" (Turso'siz).
 
 ## Tarix kadrlari Telegram'dan, yuklash tezligi, izohlar statistikasi (2026-10)
 
-- **Tarixda kadr o'rniga poster.** Videolar endi Telegram'da, worker
-  fayl baytlarini bermaydi, kadr yasovchi esa diskda yo'q baytlarni
-  faqat worker'dan (HTTP) so'rardi. Endi `ThumbReader::read_from_tg`
-  yetishmagan baytlarni pleyer kabi Telegram'dan 1 MiB bo'laklar bilan
-  oladi (`player_source::load_chunk`, diskka ham yoziladi); hajm ham
-  Telegram'dan (`doc_size`). Dart: 1-urinish faqat diskdan, keyingilari
-  faylni bot chatiga so'raydi (`prepare` + `hold/unhold`) —
-  `watch_history.dart` `_grabThumb(viaTg)`.
+- **Tarixda kadr o'rniga poster / sekin kadrlar.** Videolar endi
+  Telegram'da, worker fayl baytlarini bermaydi. Tarix kadrlari endi
+  yozishmadagidek mahalliy Telegram manzili (`/tg/0/<nom>`) orqali
+  olinadi: `WatchHistory` da BITTA navbat (`_runQueue`), tarixdagi
+  tartib bo'yicha yuqoridan pastga, bittadan; navbatdagi 4 ta qism bitta
+  `/api/tg/deliver` bilan (`TelegramService.deliverMany`). Baytlar
+  xotiraga o'qiladi, diskka yozilmaydi; kadr uchun ochilgan papka
+  (`meta.json`) ish tugagach o'chiriladi (`ThumbDirGuard`) — yuklanmalarda
+  "qisman yuklangan" ko'rinmaydi. Kadr eng baland sifatli fayldan
+  (`HistoryItem.thumbUrl`, faqat telefonda), 1280 px, JPEG 90.
 - **Tezlik.** Pleyerning oldindan olishi `AHEAD` 2 -> 4 bo'lak (1 daqiqa
   qoidasi o'z kuchida), `DL_CONNS` 4 -> 6, `MAX_INFLIGHT` 24 -> 32.
   FLOOD_WAIT ko'paysa birinchi navbatda shularni qaytaring.

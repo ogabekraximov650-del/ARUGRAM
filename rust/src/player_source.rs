@@ -358,7 +358,7 @@ fn net_allowed(r: &Reader, index: u64) -> bool {
     }
 }
 
-pub(crate) type ChunkResult = Result<Arc<Vec<u8>>, String>;
+type ChunkResult = Result<Arc<Vec<u8>>, String>;
 
 struct Reader {
     name: String,
@@ -460,7 +460,7 @@ fn close(h: i64) {
 
 /// Bo'lakni diskdan yoki Telegram'dan oladi. Bir xil bo'lakni boshqa
 /// oqim olayotgan bo'lsa — o'shani kutadi.
-pub(crate) fn load_chunk(name: &str, dir: &PathBuf, total: u64, index: u64, why: &str) -> ChunkResult {
+fn load_chunk(name: &str, dir: &PathBuf, total: u64, index: u64, why: &str) -> ChunkResult {
     if let Some(b) = video_cache::player_read_chunk(dir, name, index, total) {
         return Ok(Arc::new(b));
     }

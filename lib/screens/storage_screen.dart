@@ -212,7 +212,9 @@ class _StorageScreenState extends State<StorageScreen> {
         // Telegram `BottomSheet`: ekran eni bo'yicha to'liq.
         constraints: const BoxConstraints(maxWidth: double.infinity),
         backgroundColor: AppColors.card,
-        barrierColor: Colors.black.withValues(alpha: 0.6),
+        // Parda orqasidagi halqa TINIQ ko'rinib tursin (foydalanuvchi
+        // talabi) — u jo'ja bilan birga bo'shaydi, xiralashtirilmaydi.
+        barrierColor: Colors.transparent,
         shape: const RoundedRectangleBorder(
             borderRadius: BorderRadius.vertical(top: Radius.circular(12))),
         builder: (_) => PopScope(

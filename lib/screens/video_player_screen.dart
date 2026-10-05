@@ -1157,6 +1157,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       animeName: (widget.season['anime_name'] ?? '').toString(),
       seasonPhoto: (widget.season['photo_url'] ?? '').toString(),
       videoUrl: url,
+      // Tarix kadri ENG BALAND sifatli fayldan (foydalanuvchi talabi).
+      thumbUrl: [
+        for (final k in const ['url_1080p', 'url_720p', 'url_480p', 'url_360p'])
+          (ep[k] ?? '').toString(),
+      ].firstWhere((u) => u.isNotEmpty, orElse: () => url),
     );
 
     // Yangi qism — intro oraliqlari qaytadan o'qiladi.

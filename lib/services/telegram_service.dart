@@ -1049,6 +1049,53 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
     if (was != _authorized) notifyListeners();
   }
 
+  /// Fayl bot chatida allaqachon turgan bo'lsa (pleyer olgan) — uning
+  /// mahalliy manzili, tarmoqsiz. Bo'lmasa `null`.
+  String? readyUrl(String url) {
+    if (!active) return null;
+    final name = fileNameOf(url);
+    if (name.isEmpty) return null;
+    final u = _playUrl(name);
+    return u.isEmpty ? null : u;
+  }
+
+  /// Bir nechta faylni BITTA so'rov bilan bot chatiga oldiradi va
+  /// har biri uchun mahalliy Telegram manzilini qaytaradi (nom ->
+  /// manzil). Tomosha tarixi kadrlari shu bilan navbatdagi bir nechta
+  /// qism uchun bitta so'rov yuboradi (har biriga alohida emas).
+  /// Chaqiruvchi ishni tugatguncha [hold] qilib turishi kerak.
+  Future<Map<String, String>> deliverMany(List<String> urls) async {
+    final out = <String, String>{};
+    if (!active || _port == 0) return out;
+    final names = <String>{
+      for (final u in urls)
+        if (fileNameOf(u).isNotEmpty && !_missing.contains(fileNameOf(u)))
+          fileNameOf(u)
+    }.toList();
+    if (names.isEmpty) return out;
+    final clearing = _clearing;
+    if (clearing != null) {
+      await clearing.timeout(const Duration(seconds: 8), onTimeout: () {});
+    }
+    _delivering++;
+    try {
+      final got = await _deliver(names);
+      for (final n in names) {
+        if (got.contains(n)) {
+          out[n] = 'http://127.0.0.1:$_port/tg/0/$n';
+        } else {
+          _missing.add(n);
+        }
+      }
+    } finally {
+      Timer(const Duration(seconds: 10), () {
+        _delivering--;
+        unawaited(_clearIfPending());
+      });
+    }
+    return out;
+  }
+
   /// `/api/tg/deliver` — bot fayllarni chatga yuboradi. Qaytadi:
   /// server bergan fayllar.
   Future<Set<String>> _deliver(List<String> names) async {

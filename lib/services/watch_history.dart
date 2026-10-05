@@ -84,6 +84,11 @@ class HistoryItem {
   final String seasonPhoto;
   final String videoUrl;
 
+  /// Kadr shu fayldan olinadi: qismning ENG BALAND sifatli fayli
+  /// (foydalanuvchi talabi). Faqat telefonda saqlanadi (serverga
+  /// bormaydi); bo'sh bo'lsa — [videoUrl].
+  final String thumbUrl;
+
   /// Foydalanuvchi shu qismni OXIRGI marta qaysi sifatda ko'rgani
   /// ("720p"). Keyingi safar internet yoqilganda video aynan shu
   /// sifatdan davom etadi (foydalanuvchi talabi).
@@ -115,6 +120,7 @@ class HistoryItem {
     required this.positionMs,
     required this.durationMs,
     this.lastQuality = '',
+    this.thumbUrl = '',
     this.watchedMs = 0,
     this.viewCount = 0,
     required this.updatedAt,
@@ -181,6 +187,7 @@ class HistoryItem {
         'anime_photo': animePhoto,
         'season_photo': seasonPhoto,
         'video_url': videoUrl,
+        'thumb_url': thumbUrl,
         'last_quality': lastQuality,
         'position_ms': positionMs,
         'duration_ms': durationMs,
@@ -206,6 +213,7 @@ class HistoryItem {
       animePhoto: strOf('anime_photo'),
       seasonPhoto: strOf('season_photo'),
       videoUrl: strOf('video_url'),
+      thumbUrl: strOf('thumb_url'),
       lastQuality: strOf('last_quality'),
       positionMs: intOf('position_ms'),
       durationMs: intOf('duration_ms'),
@@ -232,10 +240,6 @@ class WatchHistory extends ChangeNotifier {
 
   /// Ro'yxat shu muddat ichida qayta so'ralmaydi.
   static const Duration _freshFor = Duration(seconds: 60);
-
-  /// Bir vaqtda shuncha kadr yasaladi — ro'yxat sirg'alayotganda
-  /// tarmoq ham, protsessor ham bo'g'ilib qolmasin.
-  static const int _maxParallelThumbs = 2;
 
   List<HistoryItem> _items = [];
   DateTime? _loadedAt;
@@ -281,6 +285,7 @@ class WatchHistory extends ChangeNotifier {
     required int epizodId,
     required int epizodNumber,
     required String videoUrl,
+    String thumbUrl = '',
     String quality = '',
     int bolimId = 0,
     String animeName = '',
@@ -342,6 +347,7 @@ class WatchHistory extends ChangeNotifier {
       'anime_photo': animePhoto,
       'season_photo': seasonPhoto,
       'video_url': videoUrl,
+      'thumb_url': thumbUrl,
       'position_ms': 0,
       'duration_ms': 0,
     };
@@ -534,6 +540,7 @@ class WatchHistory extends ChangeNotifier {
       animePhoto: pick(strOf('anime_photo'), old?.animePhoto),
       seasonPhoto: pick(strOf('season_photo'), old?.seasonPhoto),
       videoUrl: pick(strOf('video_url'), old?.videoUrl),
+      thumbUrl: pick(strOf('thumb_url'), old?.thumbUrl),
       lastQuality: pick(strOf('last_quality'), old?.lastQuality),
       positionMs: intOf('position_ms'),
       durationMs: intOf('duration_ms'),
@@ -658,6 +665,22 @@ class WatchHistory extends ChangeNotifier {
     }
 
     if (fresh != null) {
+      // Kadr manbasi (eng baland sifat) faqat telefonda turadi —
+      // serverdan kelgan yozuvlarga eskisidan ko'chiriladi.
+      final thumbSrc = {
+        for (final o in _items)
+          if (o.thumbUrl.isNotEmpty)
+            '${o.animeId}:${o.seasonId}:${o.epizodId}': o.thumbUrl,
+      };
+      fresh = [
+        for (final f in fresh)
+          f.thumbUrl.isEmpty &&
+                  thumbSrc['${f.animeId}:${f.seasonId}:${f.epizodId}'] != null
+              ? HistoryItem.fromJson(f.toJson()
+                ..['thumb_url'] =
+                    thumbSrc['${f.animeId}:${f.seasonId}:${f.epizodId}'])
+              : f,
+      ];
       fresh = _mergeLocal(fresh);
       fresh.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
       _items = fresh;
@@ -1120,118 +1143,158 @@ class WatchHistory extends ChangeNotifier {
     return _buildThumb(item, key, exact);
   }
 
-  /// Bitta kadr uchun eng ko'pi shuncha marta urinib ko'riladi.
-  ///
-  /// TOPILGAN XATO (foydalanuvchi: "kadr ba'zida yangilanmay
-  /// qolyabdi"): urinish BITTA edi. Kadr yasash mahalliy serverni
-  /// ishga tushirishni va faylning bir necha yuz kilobaytini
-  /// o'qishni talab qiladi — pleyerdan chiqqan lahzada (tarmoq
-  /// almashayotgan, server hali ko'tarilayotgan payt) bu urinish
-  /// oson uzilardi va rasm o'sha holicha eski qolib ketardi.
-  static const int _thumbTries = 3;
+  // ══════════════════════════════════════════════════════════
+  //  KADRLAR NAVBATI — YUQORIDAN PASTGA, BITTADAN
+  // ══════════════════════════════════════════════════════════
+  //
+  // TALAB (foydalanuvchi): "kadrlar toshbaqadan ham sekin yuklanyapti",
+  // "diskda yo'q kadrlar birin-ketin yuklansin, har joydan emas —
+  // statistikaga kirishi bilan tartib bo'yicha yuqoridan boshlab",
+  // "iloji boricha eng baland sifatdan kadr olinsin".
+  //
+  // ILGARI: har bir qator o'zicha kadr so'rardi (ikkitadan parallel,
+  // tartibsiz), birinchi urinish faqat diskdan bo'lib ko'pincha
+  // yiqilardi, keyin har qism uchun ALOHIDA worker so'rovi va bot
+  // nusxasi, urinishlar orasida tanaffus.
+  //
+  // ENDI: aniq kadrlar BITTA navbatda. Navbat har safar ro'yxatdagi
+  // tartib (tarixdagi joyi) bo'yicha saralanadi — eng yuqoridagi qator
+  // birinchi. Navbatdagi bir nechta qism BITTA `/api/tg/deliver`
+  // so'rovi bilan bot chatiga olinadi va kadrlar bittadan, yuqoridan
+  // pastga yasaladi. Kerakli baytlar Telegram'dan xotiraga o'qiladi —
+  // diskka yozilmaydi (yuklanmalar ro'yxatida "yuklangan" bo'lib
+  // ko'rinmaydi, Rust: `ThumbDirGuard`).
+  //
+  // SIFAT: kadr qismning ENG BALAND sifatli faylidan olinadi
+  // (`HistoryItem.thumbUrl`, pleyer beradi) va 1280 px gacha, JPEG 90.
 
-  /// Kadrni HAQIQATAN yasaydi (tarmoq yoki diskdagi bo'laklardan).
+  final List<_ThumbJob> _queue = [];
+  bool _queueRunning = false;
+  int _queueSeq = 0;
+
+  /// Bir yo'la bot chatiga olinadigan qismlar soni.
+  static const int _queueBatch = 4;
+
+  /// Kadrni HAQIQATAN yasaydi.
   Future<Uint8List?> _buildThumb(
       HistoryItem item, String key, bool exact) async {
-    final path = _thumbPath(key);
-    if (path == null) return null;
+    if (exact) return _enqueue(item, key);
+    // Taxminiy (kalit) kadr — faqat ko'rish davomida; fayl pleyer
+    // uchun bot chatida allaqachon turibdi (worker'ga so'rov yo'q).
     if (!_thumbBuilding.add(key)) return null;
     try {
-      // Taxminiy kadr bitta urinish bilan cheklanadi — u ijro
-      // paytida ishlaydi va takror urinish kanalni band qiladi.
-      final tries = exact ? _thumbTries : 1;
-      for (var attempt = 1; attempt <= tries; attempt++) {
-        // 1-urinish — faqat diskdagi bo'laklardan (tarmoqsiz, odatda
-        // yetadi). Bo'lmasa fayl bot chatiga so'raladi va yetishmagan
-        // baytlar Telegram'dan olinadi (`_grabThumb`).
-        final data = await _grabThumb(item, exact, viaTg: attempt > 1);
-        if (data != null) {
-          _rememberThumb(key, data);
-          if (exact) {
-            _roughKeys.remove(key);
-          } else {
-            _roughKeys.add(key);
-          }
-          // Ro'yxat DARHOL yangi kadrga o'tsin (kutib turmasin).
-          notifyListeners();
-          // Shifrlab saqlaymiz va shu videoning eski kadrlarini
-          // o'chiramiz (foydalanuvchi oldinga surgan bo'lsa,
-          // eskisi endi noto'g'ri).
-          RustCore.instance.secureSave(path, 'thumb:$key', base64Encode(data));
-          _removeStaleThumbs(item.videoKey, key);
-          return data;
-        }
-        if (attempt < tries) {
-          await Future<void>.delayed(Duration(milliseconds: 600 * attempt));
-        }
-      }
-      return null;
+      final local = TelegramService.instance.readyUrl(item.videoUrl);
+      final data = await _grabOnce(local ?? item.videoUrl, item.positionMs,
+          exact: false);
+      if (data != null) _storeThumb(item, key, data, exact: false);
+      return data;
     } finally {
       _thumbBuilding.remove(key);
     }
   }
 
-  /// BITTA urinish: mahalliy serverdan kadr olib, JPEG qaytaradi.
-  ///
-  /// Navbat AYNAN shu yerda: bir vaqtda ikkitadan ko'p kadr
-  /// yasalmasin. Urinishlar orasidagi tanaffusda navbat BAND
-  /// QILINMAYDI — aks holda bitta muvaffaqiyatsiz kadr qolgan
-  /// qatorlarni ushlab turardi.
-  ///
-  /// [viaTg] — TOPILGAN XATO (foydalanuvchi: "tarixda to'xtagan joydagi
-  /// kadr o'rniga poster ko'rinyapti"): videolar endi Telegram'da, worker
-  /// esa fayl baytlarini bermaydi. Diskda yetmagan bayt (masalan `moov`
-  /// yoki kalit kadr bo'lagi) uchun Rust yadrosi Telegram'ga murojaat
-  /// qiladi — buning uchun fayl bot chatida bo'lishi kerak. Shu sabab
-  /// qayta urinishda nusxa so'raladi (pleyerdagidek) va ish tugagach
-  /// qo'yib yuboriladi (chat tozalanadi).
-  Future<Uint8List?> _grabThumb(HistoryItem item, bool exact,
-      {bool viaTg = false}) async {
-    // ── VIDEO OCHIQ TURGANDA ANIQ KADR YASALMAYDI ───────────
-    //
-    // TOPILGAN XATO (foydalanuvchi: "pleyer va yozishmadagi video
-    // judayam sekin ochilyapti, ba'zida ochilmay qolyapti").
-    //
-    // Aniq kadr uchun faylning bir necha megabayti olinadi.
-    // Qism almashganda, ilova fonga chiqqanda yoki tarixdan
-    // qism ochilganda bu ish AYNAN pleyer ochilayotgan lahzada
-    // boshlanardi va ExoPlayer bilan bitta tor kanalni bo'lishardi.
-    // Yozishmadagi kadrlar allaqachon shu qoidaga bo'ysunadi
-    // (`VideoGate`) — endi tarix kadrlari ham kutadi. Pleyer
-    // yopilishi bilan kadr darhol yasaladi.
-    //
-    // Taxminiy (kalit) kadr kutmaydi: u bitta kichik o'qish va
-    // aynan ko'rish davomida olinishi kerak.
-    if (exact) {
-      while (VideoGate.busy) {
-        await Future<void>.delayed(const Duration(milliseconds: 400));
-      }
+  Future<Uint8List?> _enqueue(HistoryItem item, String key) {
+    for (final j in _queue) {
+      if (j.key == key) return j.done.future;
     }
-    while (_thumbRunning >= _maxParallelThumbs) {
-      await Future<void>.delayed(const Duration(milliseconds: 120));
-    }
-    _thumbRunning++;
-    final owner = Object();
+    final job = _ThumbJob(item, key, _queueSeq++);
+    _queue.add(job);
+    unawaited(_runQueue());
+    return job.done.future;
+  }
+
+  /// Navbatdagi o'rni: tarix ro'yxatidagi joyi (yuqoridagisi oldin),
+  /// ro'yxatda bo'lmasa (masalan boshqa odam statistikasi) — kelish
+  /// tartibida, oxirida.
+  int _rank(_ThumbJob j) {
+    final i = _items.indexWhere((e) => e.thumbKey == j.key);
+    return i >= 0 ? i : 1000000 + j.seq;
+  }
+
+  Future<void> _runQueue() async {
+    if (_queueRunning) return;
+    _queueRunning = true;
     try {
-      if (viaTg) {
+      while (_queue.isNotEmpty) {
+        // Video ochiq — tarmoq faqat videoniki (`VideoGate`).
+        while (VideoGate.busy) {
+          await Future<void>.delayed(const Duration(milliseconds: 400));
+        }
+        _queue.sort((a, b) => _rank(a).compareTo(_rank(b)));
+        final batch = _queue.take(_queueBatch).toList();
         final tg = TelegramService.instance;
-        tg.hold(owner, item.videoUrl);
-        await tg.prepare(item.videoUrl);
+        final owner = Object();
+        tg.hold(owner, batch.first.src);
+        try {
+          final local = await tg.deliverMany([for (final j in batch) j.src]);
+          for (final j in batch) {
+            if (VideoGate.busy) break;
+            // Shu orada yuqoriroqdagi qator navbatga qo'shilgan bo'lsa —
+            // u oldin (to'plam qaytadan tuziladi).
+            if (_queue.any((o) => !batch.contains(o) && _rank(o) < _rank(j))) {
+              break;
+            }
+            _queue.remove(j);
+            Uint8List? data;
+            if (_thumbBuilding.add(j.key)) {
+              try {
+                final name = TelegramService.fileNameOf(j.src);
+                data = await _grabOnce(local[name] ?? j.src, j.item.positionMs,
+                    exact: true);
+                if (data != null) {
+                  _storeThumb(j.item, j.key, data, exact: true);
+                }
+              } finally {
+                _thumbBuilding.remove(j.key);
+              }
+            }
+            if (!j.done.isCompleted) j.done.complete(data);
+          }
+        } finally {
+          tg.unhold(owner);
+        }
       }
+    } finally {
+      _queueRunning = false;
+    }
+  }
+
+  void _storeThumb(HistoryItem item, String key, Uint8List data,
+      {required bool exact}) {
+    final path = _thumbPath(key);
+    _rememberThumb(key, data);
+    if (exact) {
+      _roughKeys.remove(key);
+    } else {
+      _roughKeys.add(key);
+    }
+    // Ro'yxat DARHOL yangi kadrga o'tsin.
+    notifyListeners();
+    if (path == null) return;
+    // Shifrlab saqlaymiz va shu videoning eski kadrlarini o'chiramiz
+    // (foydalanuvchi oldinga surgan bo'lsa, eskisi endi noto'g'ri).
+    RustCore.instance.secureSave(path, 'thumb:$key', base64Encode(data));
+    _removeStaleThumbs(item.videoKey, key);
+  }
+
+  /// BITTA urinish: mahalliy serverdan kadr olib, JPEG qaytaradi.
+  Future<Uint8List?> _grabOnce(String src, int positionMs,
+      {required bool exact}) async {
+    _thumbRunning++;
+    try {
       final uri = await VideoCacheServer.instance
-          .thumbUri(item.videoUrl, item.positionMs, exact: exact);
+          .thumbUri(src, positionMs, exact: exact);
       final data = await _thumbChannel.invokeMethod<Uint8List>('grab', {
         'url': uri.toString(),
-        'maxWidth': 640,
-        'quality': 72,
-      }).timeout(Duration(seconds: viaTg ? 60 : 25));
+        // Eng baland sifat (foydalanuvchi talabi): 1280 px, JPEG 90.
+        'maxWidth': 1280,
+        'quality': 90,
+      }).timeout(const Duration(seconds: 60));
       if (data == null || data.isEmpty) return null;
       return data;
     } catch (_) {
-      // Urinish uzildi — yuqorida yana bir marta sinaladi.
       return null;
     } finally {
-      if (viaTg) TelegramService.instance.unhold(owner);
       _thumbRunning--;
     }
   }
@@ -1326,4 +1389,17 @@ class WatchHistory extends ChangeNotifier {
       // joyida qoladi.
     }
   }
+}
+
+/// Navbatdagi bitta aniq kadr ishi.
+class _ThumbJob {
+  final HistoryItem item;
+  final String key;
+  final int seq;
+  final Completer<Uint8List?> done = Completer<Uint8List?>();
+
+  _ThumbJob(this.item, this.key, this.seq);
+
+  /// Kadr olinadigan fayl: eng baland sifat (bo'lsa), aks holda ko'rilgani.
+  String get src => item.thumbUrl.isNotEmpty ? item.thumbUrl : item.videoUrl;
 }
