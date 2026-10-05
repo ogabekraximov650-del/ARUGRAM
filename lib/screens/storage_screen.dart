@@ -478,16 +478,21 @@ class _Sector {
 
   const _Sector(this.center, this.half,
       [this.pct = 0, this.textAlpha = 0, this.textScale = 1]);
+}
 
-  _Sector scaled(double f) => _Sector(center, half * f, pct * f, textAlpha, textScale);
+/// Bo'lakning maqsad holati: halqaning qancha qismi (0..1), foizi va
+/// yozuv o'lchami. Burchaklar har kadrda shu ulushlardan YONMA-YON
+/// qilib qayta yig'iladi.
+class _Share {
+  final double frac;
+  final double pct;
+  final double textScale;
+
+  const _Share(this.frac, this.pct, this.textScale);
 }
 
 class _CacheChartState extends State<_CacheChart>
     with TickerProviderStateMixin {
-  /// Bo'laklar orasidagi ochiq joy (gradus). Foydalanuvchi talabi:
-  /// bo'laklar bir-biriga tegib tursin, faqat ranglari alohida.
-  static const double _separator = 0;
-
   /// Bo'laklar siljishi, kattalashishi va kichrayib yo'qolishi: sekin va
   /// yumshoq (650 ms -> 1200 ms ham tez ko'rindi; foydalanuvchi talabi bilan
   /// 2200 ms).
@@ -507,8 +512,21 @@ class _CacheChartState extends State<_CacheChart>
       AnimationController(vsync: this, duration: const Duration(seconds: 10))
         ..repeat();
 
-  Map<String, _Sector> _from = {};
-  Map<String, _Sector> _to = {};
+  // ── BO'LAKLAR BIR-BIRIGA ULANGAN HOLDA O'ZGARADI ─────────────
+  //
+  // TOPILGAN MUAMMO (foydalanuvchi: "tanlaganda ranglar bir-birining
+  // ichiga o'tib ketmasin, ulangan holda kattalashsin/kichraysin"):
+  // ilgari har bo'lakning markazi va kengligi alohida-alohida
+  // siljirdi, tartib esa hajm bo'yicha qayta saralanardi — oraliq
+  // kadrlarda bo'laklar ustma-ust tushardi yoki orasida teshik
+  // ochilardi. Endi faqat ULUSHLAR siljiydi, tartib o'zgarmaydi
+  // (`_order`) va burchaklar har kadrda 0° dan boshlab ketma-ket
+  // qo'yiladi: biri kattalashsa, qo'shnisi shuncha suriladi.
+
+  /// Bo'laklar tartibi (o'zgarmaydi; yangisi oxiriga qo'shiladi).
+  List<String> _order = [];
+  Map<String, _Share> _from = {};
+  Map<String, _Share> _to = {};
   String? _pressed;
 
   /// O'rtadagi hajm ham bo'laklar bilan BIR XIL sur'atda o'zgaradi
@@ -519,8 +537,9 @@ class _CacheChartState extends State<_CacheChart>
   @override
   void initState() {
     super.initState();
-    _to = _layout(widget.slices);
+    _to = _shares(widget.slices);
     _from = _to;
+    _mergeOrder();
     _fromBytes = _toBytes = widget.selectedBytes.toDouble();
   }
 
@@ -532,7 +551,7 @@ class _CacheChartState extends State<_CacheChart>
         // Tozalash boshlandi — halqa shu holatida qotadi, keyin
         // `drain` bo'yicha bo'shaydi. Shu orada kelgan yangi hajmlar
         // (xizmat qayta sanadi) e'tiborsiz.
-        final now = _current();
+        final now = _currentShares();
         final bytes = _bytesNow();
         _move.value = 1;
         _from = _to = now;
@@ -540,7 +559,7 @@ class _CacheChartState extends State<_CacheChart>
       }
       return;
     }
-    final next = _layout(widget.slices);
+    final next = _shares(widget.slices);
     final bytes = widget.selectedBytes.toDouble();
     if (old.drain != null) {
       // Tozalash tugadi: halqa bo'sh — qolgan bo'laklar noldan o'sadi.
@@ -548,43 +567,80 @@ class _CacheChartState extends State<_CacheChart>
       _fromBytes = 0;
       _to = next;
       _toBytes = bytes;
+      _mergeOrder();
       _move.forward(from: 0);
       return;
     }
-    if (!_sameLayout(next, _to) || bytes != _toBytes) {
+    if (!_sameShares(next, _to) || bytes != _toBytes) {
       _fromBytes = _bytesNow();
       _toBytes = bytes;
-      _from = _current();
+      _from = _currentShares();
       _to = next;
+      _mergeOrder();
       _move.forward(from: 0);
     }
   }
 
-  double _bytesNow() => ui.lerpDouble(
-      _fromBytes, _toBytes, Curves.easeInOutCubic.transform(_move.value))!;
+  /// Tartib: borlari o'z joyida qoladi, yangilari kichigidan kattasiga
+  /// (Telegram'dagidek) oxiriga qo'shiladi.
+  void _mergeOrder() {
+    final keep = {..._from.keys, ..._to.keys};
+    final order = [for (final k in _order) if (keep.contains(k)) k];
+    final fresh = [
+      for (final s in widget.slices)
+        if (keep.contains(s.label) && !order.contains(s.label)) s
+    ]..sort((a, b) => a.bytes.compareTo(b.bytes));
+    order.addAll(fresh.map((s) => s.label));
+    for (final k in keep) {
+      if (!order.contains(k)) order.add(k);
+    }
+    _order = order;
+  }
+
+  double get _t => Curves.easeInOutCubic.transform(_move.value);
+
+  double _bytesNow() => ui.lerpDouble(_fromBytes, _toBytes, _t)!;
 
   /// Tozalashda qolgan ulush (1 -> 0).
   double get _left => 1 - (widget.drain?.value ?? 0).clamp(0.0, 1.0);
 
-  /// Chizish uchun bo'laklar (tozalanayotgan bo'lsa — kichraygan).
-  ///
-  /// Tozalashda bo'laklar bir-biriga tegib turgan holda kichrayadi:
-  /// halqa butunligicha, birinchi bo'lak boshidan boshlab qisqaradi.
+  /// Hozirgi (oraliq) ulushlar — yangi siljish shu joydan boshlanadi.
+  Map<String, _Share> _currentShares() {
+    final t = _t;
+    final out = <String, _Share>{};
+    for (final k in _order) {
+      final a = _from[k];
+      final b = _to[k];
+      if (a == null && b == null) continue;
+      final s = _Share(
+        ui.lerpDouble(a?.frac ?? 0, b?.frac ?? 0, t)!,
+        ui.lerpDouble(a?.pct ?? 0, b?.pct ?? 0, t)!,
+        ui.lerpDouble(
+            a?.textScale ?? b!.textScale, b?.textScale ?? a!.textScale, t)!,
+      );
+      if (s.frac > 0.00001) out[k] = s;
+    }
+    return out;
+  }
+
+  /// Chizish uchun bo'laklar: 0° dan boshlab YONMA-YON (orasida teshik
+  /// ham, ustma-ust tushish ham yo'q). Tozalanayotgan bo'lsa ulushlar
+  /// va foizlar birga kichrayadi — halqa birinchi bo'lak boshidan
+  /// boshlab butunligicha qisqaradi.
   Map<String, _Sector> _visible() {
-    final now = _current();
-    if (widget.drain == null) return now;
-    final f = _left;
-    final order = now.keys.toList()
-      ..sort((a, b) => ((now[a]!.center - now[a]!.half) % 360)
-          .compareTo((now[b]!.center - now[b]!.half) % 360));
-    if (order.isEmpty) return now;
-    final first = now[order.first]!;
-    var at = first.center - first.half;
+    final f = widget.drain == null ? 1.0 : _left;
+    final shares = _currentShares();
     final out = <String, _Sector>{};
-    for (final k in order) {
-      final s = now[k]!.scaled(f);
-      out[k] = _Sector(at + s.half, s.half, s.pct, s.textAlpha, s.textScale);
-      at += s.half * 2;
+    var at = 0.0;
+    for (final k in _order) {
+      final s = shares[k];
+      if (s == null) continue;
+      final half = s.frac * f * 180;
+      // Paydo bo'layotgan/ketayotgan bo'lak yozuvi xiralashib chiqadi
+      // (tozalashda esa oxirigacha ko'rinadi — ulush `f` siz olinadi).
+      final alpha = (s.frac / .02).clamp(0.0, 1.0);
+      out[k] = _Sector(at + half, half, s.pct * f, alpha, s.textScale);
+      at += half * 2;
     }
     return out;
   }
@@ -600,13 +656,12 @@ class _CacheChartState extends State<_CacheChart>
     super.dispose();
   }
 
-  bool _sameLayout(Map<String, _Sector> a, Map<String, _Sector> b) {
+  static bool _sameShares(Map<String, _Share> a, Map<String, _Share> b) {
     if (a.length != b.length) return false;
     for (final e in a.entries) {
       final o = b[e.key];
       if (o == null ||
-          (o.center - e.value.center).abs() > 0.01 ||
-          (o.half - e.value.half).abs() > 0.01 ||
+          (o.frac - e.value.frac).abs() > 0.00001 ||
           (o.pct - e.value.pct).abs() > 0.001) {
         return false;
       }
@@ -614,38 +669,12 @@ class _CacheChartState extends State<_CacheChart>
     return true;
   }
 
-  /// Hozirgi (oraliq) holat — yangi siljish shu joydan boshlanadi.
-  Map<String, _Sector> _current() {
-    final t = Curves.easeInOutCubic.transform(_move.value);
-    final out = <String, _Sector>{};
-    for (final k in {..._from.keys, ..._to.keys}) {
-      final a = _from[k];
-      final b = _to[k];
-      final s = _lerp(a, b, t);
-      if (s.half > 0.001) out[k] = s;
-    }
-    return out;
-  }
-
-  static _Sector _lerp(_Sector? a, _Sector? b, double t) {
-    // Yangi bo'lak o'z joyida noldan o'sadi, ketayotgani o'z joyida
-    // yo'qoladi.
-    a ??= _Sector(b!.center, 0, 0, 0, b.textScale);
-    b ??= _Sector(a.center, 0, 0, 0, a.textScale);
-    return _Sector(
-      _lerpAngle(a.center, b.center, t),
-      ui.lerpDouble(a.half, b.half, t)!,
-      ui.lerpDouble(a.pct, b.pct, t)!,
-      ui.lerpDouble(a.textAlpha, b.textAlpha, t)!,
-      ui.lerpDouble(a.textScale, b.textScale, t)!,
-    );
-  }
-
-  static double _lerpAngle(double a, double b, double f) =>
-      (a + (((b - a + 360 + 180) % 360) - 180) * f + 360) % 360;
-
-  /// `CacheChart.setSegments` — burchaklar hisobi.
-  static Map<String, _Sector> _layout(List<StorageSlice> slices) {
+  /// `CacheChart.setSegments` — har bo'lakning halqadagi ulushi.
+  ///
+  /// Foiz halqaning TASHQARISIDA yoziladi, ya'ni ENG KICHIK bo'lakda
+  /// ham ko'rinadi (foydalanuvchi talabi). Juda kichik bo'lak halqada
+  /// kamida 2% joy oladi (ko'rinsin), qolganlari shunga qisqaradi.
+  static Map<String, _Share> _shares(List<StorageSlice> slices) {
     final list = slices.where((s) => s.bytes > 0).toList();
     final sum = list.fold<int>(0, (a, s) => a + s.bytes);
     if (sum <= 0) return {};
@@ -659,35 +688,16 @@ class _CacheChartState extends State<_CacheChart>
       }
     }
     final percents = _roundPercents([for (final s in list) s.bytes / sum]);
-    final pct = {
-      for (var i = 0; i < list.length; i++) list[i].label: percents[i]
-    };
-    // Kichigidan kattasiga (Telegram'dagidek).
-    list.sort((a, b) => a.bytes.compareTo(b.bytes));
-    final count = list.length;
-    final total = 360 - _separator * (count < 2 ? 0 : count);
-    final out = <String, _Sector>{};
-    var prev = 0.0;
-    var k = 0;
-    for (final s in list) {
-      var p = s.bytes / sum;
-      // Foiz halqaning TASHQARISIDA yoziladi, ya'ni ENG KICHIK bo'lakda
-      // ham ko'rinadi (foydalanuvchi talabi; ilgari 1% dan kichigi
-      // yozilmasdi). Butun halqa (100%) ham yoziladi — tozalashda u
-      // 100.00 dan 0 gacha kamayib boradi.
-      final textAlpha = p > 0 ? 1.0 : 0.0;
-      final textScale = p < .08 || pct[s.label]! >= 100 ? .85 : 1.0;
+    final out = <String, _Share>{};
+    for (var i = 0; i < list.length; i++) {
+      var p = list[i].bytes / sum;
+      final textScale = p < .08 || percents[i] >= 100 ? .85 : 1.0;
       if (p < .02) {
         p = .02;
       } else {
         p *= 1 - (.02 * under - minus);
       }
-      final from = prev * total + k * _separator;
-      final to = from + p * total;
-      out[s.label] = _Sector((from + to) / 2, (to - from).abs() / 2,
-          pct[s.label]!, textAlpha, textScale);
-      prev += p;
-      k++;
+      out[list[i].label] = _Share(p, percents[i], textScale);
     }
     return out;
   }
@@ -703,7 +713,7 @@ class _CacheChartState extends State<_CacheChart>
     }
     var a = math.atan2(d.dy, d.dx) * 180 / math.pi;
     if (a < 0) a += 360;
-    for (final e in _to.entries) {
+    for (final e in _visible().entries) {
       if (a >= e.value.center - e.value.half &&
           a <= e.value.center + e.value.half) {
         return e.key;
