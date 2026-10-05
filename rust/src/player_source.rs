@@ -40,12 +40,12 @@ use std::sync::{Arc, Condvar, Mutex, OnceLock};
 
 /// Pleyer o'qiyotgan joydan oldinga shuncha bo'lak tayyorlab qo'yiladi.
 ///
-/// 2 edi; foydalanuvchi: "Telegram'dan fayllar juda sekin yuklanyapti".
-/// 2 ta bo'lak (= 4 ta `getFile` so'rovi) havoda bo'lsa, tezlik bitta
-/// so'rovning borib-kelish vaqtiga bog'lanib qolardi. 4 ta bo'lak
-/// (8 so'rov) bir nechta ulanishni to'liq band qiladi. "1 daqiqadan
-/// ortiq oldinga yuklama" qoidasi o'z kuchida (`net_allowed`).
-const AHEAD: u64 = 4;
+/// Bir muddat 4 qilingan edi — foydalanuvchi: "onlayn ko'rishda pleyer
+/// 1 MB bo'lak atrofida joy tashlab, keyingi joyni yuklab olyapti".
+/// Bir vaqtda 4 ta bo'lak parallel olinganda kech kelgani orasida
+/// teshik qolardi. Avvalgi holatiga (2) qaytarildi; tezlik oshirish
+/// (`DL_CONNS`, `MAX_INFLIGHT`) yuklab olish va boshqa ishlar uchun qoladi.
+const AHEAD: u64 = 2;
 
 // ── ONLAYN KO'RISHDA KO'PI BILAN 1 DAQIQA OLDINGA ─────────────────
 //
@@ -379,6 +379,18 @@ struct Reader {
 struct Flight {
     done: Mutex<Option<ChunkResult>>,
     cv: Condvar,
+}
+
+/// Shu kalitdagi fayl pleyerda ochiqmi (`video_cache::ThumbDirGuard`).
+pub(crate) fn is_open(key: &str) -> bool {
+    readers()
+        .lock()
+        .map(|m| {
+            m.values().any(|r| {
+                !r.closed.load(Ordering::SeqCst) && video_cache::player_key(&r.name) == key
+            })
+        })
+        .unwrap_or(true)
 }
 
 fn readers() -> &'static Mutex<HashMap<i64, Arc<Reader>>> {

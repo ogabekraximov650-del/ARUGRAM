@@ -4601,6 +4601,9 @@ fn write_full_chunk(dir: &PathBuf, key: &str, index: u64, plain: &[u8]) -> bool 
     if on_disk.is_empty() && !plain.is_empty() {
         return false;
     }
+    // Papka (masalan tozalash yoki kadr ishi tufayli) yo'q bo'lib qolgan
+    // bo'lsa — qayta yaratiladi, aks holda yuklash abadiy yiqilardi.
+    let _ = fs::create_dir_all(dir);
     let tmp = dir.join(format!("{}.{}.tmp", chunk_name(index), micros_now()));
     if fs::write(&tmp, &on_disk).is_err() {
         let _ = fs::remove_file(&tmp);
@@ -5410,14 +5413,29 @@ fn probe_head(shared: &Shared, url: &str, want: u64) -> Option<(u64, String, Vec
 /// "qisman yuklangan" bo'lib ko'rinardi. Kadr uchun ochilgan papka
 /// (oldin bo'lmagan) ish tugagach — ichida faqat `meta.json` bo'lsa —
 /// o'chiriladi. Pleyer yoki yuklab olish yozgan bo'laklarga tegilmaydi.
+///
+/// TOPILGAN XATO (foydalanuvchi: "yuklab olish ishlamaydi"): kadr
+/// yasalayotgan paytda xuddi shu fayl YUKLAB OLINA boshlasa, papka
+/// hali faqat `meta.json` dan iborat bo'lardi va bu yerda o'chirib
+/// yuborilardi — yuklash esa yo'q papkaga bo'lak yoza olmay qotib
+/// qolardi ("hajmi aniqlanmoqda"). Endi fayl yuklab olish navbatida
+/// bo'lsa yoki pleyer ochgan bo'lsa papkaga tegilmaydi.
 struct ThumbDirGuard {
     dir: PathBuf,
+    key: String,
     active: bool,
 }
 
 impl Drop for ThumbDirGuard {
     fn drop(&mut self) {
         if !self.active {
+            return;
+        }
+        let downloading = downloads()
+            .lock()
+            .map(|m| m.contains_key(&self.key))
+            .unwrap_or(true);
+        if downloading || crate::player_source::is_open(&self.key) {
             return;
         }
         let Ok(list) = fs::read_dir(&self.dir) else { return };
@@ -5741,7 +5759,7 @@ fn serve_thumb(
             let mut total = meta_total_from_disk(&dir);
             // Papka shu kadr uchun ochildi (video ko'rilmagan/yuklanmagan)
             // — ish tugagach izsiz o'chiriladi (`ThumbDirGuard`).
-            let _guard = ThumbDirGuard { dir: dir.clone(), active: total == 0 };
+            let _guard = ThumbDirGuard { dir: dir.clone(), key: key.clone(), active: total == 0 };
             // ── HAJM BIRINCHI O'QISHNING O'ZIDAN ─────────────────
             //
             // TOPILGAN XATO (foydalanuvchi: "support chatdagi
