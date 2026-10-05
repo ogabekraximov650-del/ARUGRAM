@@ -133,7 +133,11 @@ class _CommentsTabState extends State<CommentsTab> {
     // chiziladi.
     _input.addListener(_onInputChanged);
     widget.controller.loadFromDisk();
-    widget.controller.load();
+    // Diskdagi ro'yxat darhol ko'rinadi; server esa faqat "o'zgardimi"
+    // deb so'raladi — o'zgarmagan bo'lsa Turso'ga bormaydi (kesh belgisi).
+    widget.controller.load(force: true);
+    // Oyna ochiq turganda yangi izohlar o'zi chiqadi (Turso'siz kutish).
+    widget.controller.startWatching();
     // Pastga yetganda keyingi sahifa o'zi so'raladi.
     _scroll.addListener(() {
       if (!_scroll.hasClients) return;
@@ -158,6 +162,7 @@ class _CommentsTabState extends State<CommentsTab> {
 
   @override
   void dispose() {
+    widget.controller.stopWatching();
     _reportTimer?.cancel();
     _input.dispose();
     _focus.dispose();

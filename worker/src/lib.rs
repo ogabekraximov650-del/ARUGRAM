@@ -182,15 +182,24 @@ fn row_to_obj(cols: &[Value], row: &[Value]) -> Value {
 // eng yomon holatda eski xatti-harakat (xabar yo'qolmaydi).
 
 const CHAT_MARK_URL: &str = "https://arugram-chat-mark.internal/v1";
+/// Izohlar (`comments_db`, `comment_likes`) belgisi — xuddi shunday.
+const COMMENTS_MARK_URL: &str = "https://arugram-comments-mark.internal/v1";
 /// Belgi o'zgarmasa ham Turso shuncha vaqtda bir marta tekshiriladi.
-const CHAT_FALLBACK_MS: i64 = 45_000;
+///
+/// 45 s edi; foydalanuvchi talabi — 10 daqiqa. Bir ma'lumot markazi
+/// ichida o'zgarish baribir 2 soniyada seziladi; faqat BOSHQA markazdan
+/// yozilgan xabar 10 daqiqagacha kechikishi mumkin.
+const CHAT_FALLBACK_MS: i64 = 10 * 60 * 1000;
 /// Nuqta (`chat_unread`) uchun zaxira tekshiruv oralig'i.
-const UNREAD_FALLBACK_MS: i64 = 180_000;
+const UNREAD_FALLBACK_MS: i64 = 10 * 60 * 1000;
+/// Izohlar ro'yxati uchun zaxira tekshiruv oralig'i.
+const COMMENTS_FALLBACK_MS: i64 = 10 * 60 * 1000;
 
 thread_local! {
-    /// Shu izolyatda oxirgi marta suhbat o'zgargan vaqt (kesh
-    /// kechiksa ham shu izolyat darhol biladi).
-    static CHAT_MARK_LOCAL: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
+    /// Shu izolyatda oxirgi o'zgarish vaqtlari (belgi manzili -> ms):
+    /// kesh kechiksa ham shu izolyat darhol biladi.
+    static MARK_LOCAL: std::cell::RefCell<std::collections::HashMap<&'static str, i64>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
 }
 
 fn sql_head(sql: &str) -> String {
@@ -198,48 +207,56 @@ fn sql_head(sql: &str) -> String {
     flat.chars().take(90).collect()
 }
 
-fn sql_touches_chat(sql: &str) -> bool {
-    let t = sql.trim_start();
-    let head: String = t.chars().take(6).collect::<String>().to_ascii_uppercase();
-    (head.starts_with("INSERT") || head.starts_with("UPDATE") || head.starts_with("DELETE")
-        || head.starts_with("REPLAC"))
-        && (sql.contains("chat_messages") || sql.contains("chat_threads"))
+fn sql_is_write(sql: &str) -> bool {
+    let head: String = sql.trim_start().chars().take(6).collect::<String>().to_ascii_uppercase();
+    head.starts_with("INSERT") || head.starts_with("UPDATE") || head.starts_with("DELETE")
+        || head.starts_with("REPLAC")
 }
 
-/// Har bir buyruq natijasini jurnalga yozadi; suhbat o'zgargan
-/// bo'lsa belgini yangilaydi.
+fn sql_touches_chat(sql: &str) -> bool {
+    sql_is_write(sql) && (sql.contains("chat_messages") || sql.contains("chat_threads"))
+}
+
+fn sql_touches_comments(sql: &str) -> bool {
+    sql_is_write(sql) && (sql.contains("comments_db") || sql.contains("comment_likes"))
+}
+
+/// Har bir buyruq natijasini jurnalga yozadi; suhbat yoki izohlar
+/// o'zgargan bo'lsa belgini yangilaydi.
 async fn turso_after(sqls: &[&str], results: &[Value]) {
-    let mut chat = false;
+    let (mut chat, mut comments) = (false, false);
     for (i, sql) in sqls.iter().enumerate() {
         let r = results.get(i);
         let read = r.and_then(|v| v["rows_read"].as_i64()).unwrap_or(-1);
         let wrote = r.and_then(|v| v["rows_written"].as_i64()).unwrap_or(-1);
         console_log!("aru_tq r={} w={} {}", read, wrote, sql_head(sql));
-        if sql_touches_chat(sql) {
-            chat = true;
-        }
+        chat |= sql_touches_chat(sql);
+        comments |= sql_touches_comments(sql);
     }
     if chat {
-        chat_mark_touch().await;
+        mark_touch(CHAT_MARK_URL).await;
+    }
+    if comments {
+        mark_touch(COMMENTS_MARK_URL).await;
     }
 }
 
-async fn chat_mark_touch() {
+async fn mark_touch(url: &'static str) {
     let now = now_ms();
-    CHAT_MARK_LOCAL.with(|c| c.set(now));
+    MARK_LOCAL.with(|m| m.borrow_mut().insert(url, now));
     let Ok(mut resp) = Response::ok(now.to_string()) else { return };
     let _ = resp.headers_mut().set("Cache-Control", "public, max-age=86400");
-    if let Ok(req) = Request::new(CHAT_MARK_URL, Method::Get) {
+    if let Ok(req) = Request::new(url, Method::Get) {
         let _ = Cache::default().put(&req, resp).await;
     }
 }
 
-/// Suhbat belgisi: oxirgi o'zgarish vaqti. Keshda yo'q bo'lsa
-/// "hozir" qo'yiladi (ehtiyot: o'zgarish bo'lgan deb hisoblanadi).
-async fn chat_mark() -> i64 {
-    let local = CHAT_MARK_LOCAL.with(|c| c.get());
+/// Belgi: oxirgi o'zgarish vaqti. Keshda yo'q bo'lsa "hozir" qo'yiladi
+/// (ehtiyot: o'zgarish bo'lgan deb hisoblanadi).
+async fn mark_get(url: &'static str) -> i64 {
+    let local = MARK_LOCAL.with(|m| m.borrow().get(url).copied().unwrap_or(0));
     let cached = async {
-        let req = Request::new(CHAT_MARK_URL, Method::Get).ok()?;
+        let req = Request::new(url, Method::Get).ok()?;
         let mut hit = Cache::default().get(&req, false).await.ok()??;
         hit.text().await.ok()?.trim().parse::<i64>().ok()
     }
@@ -247,10 +264,14 @@ async fn chat_mark() -> i64 {
     match cached {
         Some(v) => v.max(local),
         None => {
-            chat_mark_touch().await;
-            CHAT_MARK_LOCAL.with(|c| c.get())
+            mark_touch(url).await;
+            MARK_LOCAL.with(|m| m.borrow().get(url).copied().unwrap_or(0))
         }
     }
+}
+
+async fn chat_mark() -> i64 {
+    mark_get(CHAT_MARK_URL).await
 }
 
 async fn turso_exec(env: &Env, sql: &str, args: Vec<TursoArg>) -> Result<Value> {
@@ -6345,6 +6366,27 @@ async fn comments_list(
         String::new()
     };
 
+    // ── O'ZGARMAGAN BO'LSA TURSO'GA BORILMAYDI ─────────────────
+    //
+    // (`COMMENTS_MARK_URL`.) Ilova oxirgi ro'yxat bilan kelgan belgini
+    // (`mk`) va tekshirish vaqtini (`at`) qaytaradi. Hech bir izoh/layk
+    // o'zgarmagan va zaxira muddati o'tmagan bo'lsa — "o'sha-o'sha"
+    // deyiladi, ilova diskdagi ro'yxatni ko'rsatadi.
+    let qi = |k: &str| -> i64 {
+        url.query_pairs()
+            .find(|(n, _)| n == k)
+            .and_then(|(_, v)| v.parse::<i64>().ok())
+            .unwrap_or(-1)
+    };
+    let (mk_before, at_before) = (qi("mk"), qi("at"));
+    let mk = mark_get(COMMENTS_MARK_URL).await;
+    let now = now_ms();
+    if page == 0 && mk_before >= 0 && mk == mk_before && at_before > 0
+        && at_before <= now && now - at_before < COMMENTS_FALLBACK_MS
+    {
+        return ok_nostore(json!({"same": true, "mk": mk, "at": at_before}));
+    }
+
     let res = turso_exec(env, &comment_query(&sort), vec![
         TursoArg::int(me), TursoArg::int(aid), TursoArg::int(sid),
         TursoArg::text(parent),
@@ -6362,7 +6404,32 @@ async fn comments_list(
         "page": page,
         // Ro'yxat to'liq kelgan bo'lsa — yana bor bo'lishi mumkin.
         "has_more": items.len() as i64 >= COMMENT_PAGE,
+        "mk": mk,
+        "at": now,
     }))
+}
+
+/// GET /api/comments/wait?mk=.. — izohlar oynasi ochiq turganda yangi
+/// izoh/layk paydo bo'lishini kutadi (~20 s). TURSO'GA UMUMAN BORMAYDI:
+/// faqat Cloudflare keshidagi belgi (`COMMENTS_MARK_URL`) tekshiriladi.
+async fn comments_wait(req: &Request) -> Result<Response> {
+    let url = req.url()?;
+    let mk_before: i64 = url.query_pairs()
+        .find(|(k, _)| k == "mk")
+        .and_then(|(_, v)| v.parse().ok())
+        .unwrap_or(-1);
+    let steps = (CHAT_WAIT_TICKS as u64 * CHAT_WAIT_STEP_MS) / CHAT_MARK_STEP_MS;
+    let mut mk = mark_get(COMMENTS_MARK_URL).await;
+    for i in 0..=steps {
+        if i > 0 {
+            Delay::from(core::time::Duration::from_millis(CHAT_MARK_STEP_MS)).await;
+            mk = mark_get(COMMENTS_MARK_URL).await;
+        }
+        if mk != mk_before {
+            return ok_nostore(json!({"new": true, "mk": mk}));
+        }
+    }
+    ok_nostore(json!({"new": false, "mk": mk}))
 }
 
 /// POST /api/comments — yangi izoh yoki javob.
@@ -12736,6 +12803,9 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
     }
     if path == "/api/comments/like" && method == Method::Post {
         return comments_like(req, &env).await;
+    }
+    if path == "/api/comments/wait" && method == Method::Get {
+        return comments_wait(&req).await;
     }
     if let Some(rest) = path.strip_prefix("/api/comments/") {
         let parts: Vec<&str> = rest.split('/').collect();

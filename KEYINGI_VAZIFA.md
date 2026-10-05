@@ -4953,3 +4953,13 @@ to'g'ridan-to'g'ri kesh orqali ko'rsatilsin" (Turso'siz).
   admin suhbat holatlari ATAYLAB yo'q); yopiq kanal so'rovi bitta
   `INSERT ... SELECT ... RETURNING`, yangi bo'lsa "+1" bilan
   (`channels.rs` -> `record_request`, `COUNT(*)` sanashlar olib tashlandi).
+- **Zaxira tekshiruv 10 daqiqa** (foydalanuvchi talabi): `CHAT_FALLBACK_MS`,
+  `UNREAD_FALLBACK_MS`, `COMMENTS_FALLBACK_MS` = 10 daqiqa. Bir ma'lumot
+  markazida o'zgarish 2 s da seziladi; boshqa markazdan yozilgani 10
+  daqiqagacha kechikishi mumkin.
+- **Izohlar ham kesh belgisida** (`COMMENTS_MARK_URL`, `comments_db` /
+  `comment_likes` ga yozuv avtomatik seziladi). `GET /api/comments/:a/:s`
+  ilova `mk`/`at` yuborsa va o'zgarish bo'lmasa `{"same":true}` (Turso'siz,
+  diskdagi ro'yxat qoladi). Oyna ochiq turganda `GET /api/comments/wait?mk=`
+  (~20 s, Turso'siz) — yangi izoh/layk bo'lsa ro'yxat yangilanadi.
+  Belgi umumiy (hamma bo'limlar uchun bitta).

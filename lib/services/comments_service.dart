@@ -40,7 +40,7 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:http/http.dart' as http;
 
 import 'auth_service.dart';
@@ -181,6 +181,25 @@ class CommentsController extends ChangeNotifier {
   String? _error;
   bool _loaded = false;
 
+  // ── KESH BELGISI (Turso'ga kamroq so'rov) ──────────────────
+  //
+  // Worker izohlar o'zgarganini Cloudflare keshidagi belgi bilan biladi
+  // (`COMMENTS_MARK_URL`). Ilova oxirgi ro'yxat bilan kelgan belgini
+  // ([_mk]) va Turso tekshirilgan vaqtni ([_at]) qaytarib yuboradi:
+  // hech narsa o'zgarmagan bo'lsa server bazaga bormaydi va diskdagi
+  // ro'yxat qoladi. Izohlar oynasi ochiq turganda esa yangi izoh/layk
+  // `/api/comments/wait` orqali kutiladi (Turso'siz).
+  int _mk = -1;
+  int _at = 0;
+
+  String get _mkKey => '${_diskKey}_mk';
+
+  void _saveMk() {
+    DiskCache.write(_mkKey, [
+      {'mk': _mk, 'at': _at, 'u': AuthService.instance.user?.id ?? 0}
+    ]);
+  }
+
   /// Hozirgi tartib. Oyna ochilganda har doim "Yangilar".
   CommentSort _sort = CommentSort.yangi;
   CommentSort get sort => _sort;
@@ -252,6 +271,12 @@ class CommentsController extends ChangeNotifier {
       ..clear()
       ..addAll(rows.where(_alive).map(Comment.fromJson));
     _loaded = true;
+    // Belgi faqat SHU hisobniki bo'lsa (layk belgilari hisobga bog'liq).
+    final m = DiskCache.readOne(_mkKey);
+    if (m != null && m['u'] == (AuthService.instance.user?.id ?? 0)) {
+      _mk = (m['mk'] as num?)?.toInt() ?? -1;
+      _at = (m['at'] as num?)?.toInt() ?? 0;
+    }
     notifyListeners();
   }
 
@@ -285,13 +310,24 @@ class CommentsController extends ChangeNotifier {
     _error = null;
     notifyListeners();
     try {
+      final canSame =
+          _sort == CommentSort.yangi && _items.isNotEmpty && _mk >= 0;
       final r = await http
           .get(Uri.parse(
-              '$_base/$animeId/$seasonId?page=0&sort=${_sort.code}'),
+              '$_base/$animeId/$seasonId?page=0&sort=${_sort.code}'
+              '${canSame ? '&mk=$_mk&at=$_at' : ''}'),
               headers: _headers())
           .timeout(const Duration(seconds: 20));
-      if (r.statusCode == 200) {
+      if (r.statusCode == 200 &&
+          canSame &&
+          (jsonDecode(r.body) as Map<String, dynamic>)['same'] == true) {
+        // O'zgarmagan — ekrandagi (diskdagi) ro'yxat to'g'ri.
+        _loaded = true;
+      } else if (r.statusCode == 200) {
         final j = jsonDecode(r.body) as Map<String, dynamic>;
+        _mk = (j['mk'] as num?)?.toInt() ?? -1;
+        _at = (j['at'] as num?)?.toInt() ?? 0;
+        if (_sort == CommentSort.yangi) _saveMk();
         final rows = ((j['items'] as List?) ?? [])
             .cast<Map<String, dynamic>>();
         _items
@@ -312,6 +348,60 @@ class CommentsController extends ChangeNotifier {
     }
     _loading = false;
     notifyListeners();
+  }
+
+  // ── JONLI YANGILANISH ─────────────────────────────────────
+  bool _watching = false;
+
+  /// Izohlar oynasi ochiq: yangi izoh/layk paydo bo'lishi kutiladi.
+  void startWatching() {
+    if (_watching) return;
+    _watching = true;
+    unawaited(_watchLoop());
+  }
+
+  void stopWatching() => _watching = false;
+
+  Future<void> _watchLoop() async {
+    while (_watching) {
+      // Ilova fonda — so'rov yuborilmaydi.
+      final st = WidgetsBinding.instance.lifecycleState;
+      if (st != null && st != AppLifecycleState.resumed) {
+        await Future<void>.delayed(const Duration(seconds: 2));
+        continue;
+      }
+      if (_mk < 0 || _loading) {
+        // Hali birinchi ro'yxat kelmagan — o'sha kelgach kutiladi.
+        await Future<void>.delayed(const Duration(seconds: 2));
+        continue;
+      }
+      try {
+        final r = await http
+            .get(Uri.parse('$_base/wait?mk=$_mk'))
+            .timeout(const Duration(seconds: 35));
+        if (!_watching) return;
+        if (r.statusCode == 200) {
+          final j = jsonDecode(r.body) as Map<String, dynamic>;
+          if (j['new'] == true) {
+            await load(force: true);
+            // Ro'yxat kelmasa ham belgi yangilansin (aylanib qolmasin).
+            final mk = (j['mk'] as num?)?.toInt();
+            if (mk != null && mk > _mk) _mk = mk;
+          }
+          continue;
+        }
+        await Future<void>.delayed(const Duration(seconds: 5));
+      } catch (_) {
+        if (!_watching) return;
+        await Future<void>.delayed(const Duration(seconds: 3));
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _watching = false;
+    super.dispose();
   }
 
   Future<void> loadMore() async {
