@@ -4946,3 +4946,10 @@ to'g'ridan-to'g'ri kesh orqali ko'rsatilsin" (Turso'siz).
   `.github/workflows/worker-stats.yml` (+ `tool/stats/tail_report.py`)
   N daqiqa tinglab, yo'l va SQL bo'yicha o'qilgan/yozilgan qatorlar
   jadvalini "Summary" ga chiqaradi. Keyingi tejash shu jadvalga qarab.
+- **Webhook tejashlari** (worker hisobotidan keyin): sxema belgisi
+  Cloudflare keshida (`schema_mark_url` — worker kodining xeshi; kod
+  o'zgarsa jadvallar bir marta qayta tekshiriladi); deyarli o'zgarmaydigan
+  `app_config` kalitlari izolyat xotirasida 10 daqiqa (`CONFIG_MEMO_KEYS`,
+  admin suhbat holatlari ATAYLAB yo'q); yopiq kanal so'rovi bitta
+  `INSERT ... SELECT ... RETURNING`, yangi bo'lsa "+1" bilan
+  (`channels.rs` -> `record_request`, `COUNT(*)` sanashlar olib tashlandi).

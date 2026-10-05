@@ -125,38 +125,33 @@ async fn record_request(env: &Env, chat_id: i64, tg_id: i64) {
     if chat_id == 0 || tg_id == 0 {
         return;
     }
-    let Some(ch) = turso_exec(env,
-        "SELECT id FROM channels_db WHERE chat_id=? AND kind='private' LIMIT 1",
-        vec![TursoArg::int(chat_id)]).await.ok().and_then(|r| first_row(&r))
+    // ── KAMROQ BUYRUQ (worker hisoboti) ────────────────────────
+    //
+    // Ilgari: kanalni qidirish + INSERT + UPDATE + soatlik va kunlik
+    // statistika, ikkalasi ham "yangi qator qo'shildimi" deb
+    // `chan_requests` ni qayta sanardi (`COUNT(*)`, 4 marta). Endi
+    // kanal qidiruvi INSERT ning ichida, natija `RETURNING` bilan
+    // keladi; takroriy so'rov (qator qo'shilmadi) bo'lsa — boshqa
+    // hech narsa yuborilmaydi; yangi bo'lsa — hisoblagich va
+    // statistikaga oddiy "+1" (sanash yo'q).
+    let now = now_ms();
+    let Ok(res) = turso_exec(env,
+        "INSERT OR IGNORE INTO chan_requests (channel_id,tg_id,at)
+           SELECT id, ?, ? FROM channels_db WHERE chat_id=? AND kind='private' LIMIT 1
+         RETURNING channel_id",
+        vec![TursoArg::int(tg_id), TursoArg::int(now), TursoArg::int(chat_id)]).await
     else {
         return;
     };
-    let id = jint(&ch, "id");
-    let now = now_ms();
-    // `changes()` — oldingi INSERT haqiqatda qator qo'shganmi (takror
-    // bo'lsa 0): hisoblagich faqat yangi odamda oshadi. Grafik
-    // chelaklari ham faqat YANGI so'rovda oshadi (qator vaqti `at` = shu
-    // so'rov vaqti bo'lsa — demak hozirgina qo'shilgan).
+    let Some(row) = first_row(&res) else {
+        return;
+    };
+    let id = jint(&row, "channel_id");
     let metric = format!("chan:{id}");
-    let new_row = "(SELECT COUNT(*) FROM chan_requests WHERE channel_id=? AND tg_id=? AND at=?)";
-    let hour_sql = format!("INSERT INTO stats_hourly (hour,metric,value) SELECT ?, ?, {new_row}
-         WHERE {new_row} > 0
-         ON CONFLICT(hour,metric) DO UPDATE SET value=value+excluded.value");
-    let day_sql = format!("INSERT INTO stats_daily (day,metric,value) SELECT ?, ?, {new_row}
-         WHERE {new_row} > 0
-         ON CONFLICT(day,metric) DO UPDATE SET value=value+excluded.value");
-    let pick = |bucket: String| vec![
-        TursoArg::text(&bucket), TursoArg::text(&metric),
-        TursoArg::int(id), TursoArg::int(tg_id), TursoArg::int(now),
-        TursoArg::int(id), TursoArg::int(tg_id), TursoArg::int(now),
-    ];
     let _ = turso_batch(env, &[
-        ("INSERT OR IGNORE INTO chan_requests (channel_id,tg_id,at) VALUES (?,?,?)",
-         vec![TursoArg::int(id), TursoArg::int(tg_id), TursoArg::int(now)]),
-        ("UPDATE channels_db SET joined = joined + changes() WHERE id=?",
-         vec![TursoArg::int(id)]),
-        (hour_sql.as_str(), pick(hour_key(now))),
-        (day_sql.as_str(), pick(day_key(now))),
+        ("UPDATE channels_db SET joined = joined + 1 WHERE id=?", vec![TursoArg::int(id)]),
+        (STAT_HOUR_SQL, stat_args(&hour_key(now), &metric, 1)),
+        (STAT_DAY_SQL, stat_args(&day_key(now), &metric, 1)),
     ]).await;
 }
 

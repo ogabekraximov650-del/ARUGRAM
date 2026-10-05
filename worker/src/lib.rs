@@ -404,6 +404,21 @@ async fn ensure_db(env: &Env) {
     if DB_READY.load(Ordering::Relaxed) {
         return;
     }
+    // ── SXEMA BELGISI KESHDA (Turso'ga ortiqcha 30+ buyruq yo'q) ──
+    //
+    // Worker hisoboti (`worker-stats`) ko'rsatdi: har YANGI izolyat
+    // (30 daqiqada 8 marta) ~30 ta "CREATE ... IF NOT EXISTS" va 6 ta
+    // `app_config` o'qishini yuborardi. Endi muvaffaqiyatli `init_db`
+    // dan keyin Cloudflare keshiga (bepul) belgi qo'yiladi. Kalit — shu
+    // worker kodining xeshi: kod (va sxema) o'zgarsa kalit ham
+    // o'zgaradi va jadvallar bir marta qayta tekshiriladi.
+    let mark = schema_mark_url();
+    if let Ok(req) = Request::new(&mark, Method::Get) {
+        if let Ok(Some(_)) = Cache::default().get(&req, false).await {
+            DB_READY.store(true, Ordering::Relaxed);
+            return;
+        }
+    }
     // ── BELGI FAQAT MUVAFFAQIYATDA QO'YILADI ──────────────────
     //
     // Ilgari `init_db` yiqilsa ham belgi qo'yilardi va izolyat
@@ -412,7 +427,23 @@ async fn ensure_db(env: &Env) {
     // sababi hech qayerda ko'rinmasdi.
     if init_db(env).await {
         DB_READY.store(true, Ordering::Relaxed);
+        if let (Ok(req), Ok(mut resp)) = (Request::new(&mark, Method::Get), Response::ok("1")) {
+            let _ = resp.headers_mut().set("Cache-Control", "public, max-age=604800");
+            let _ = Cache::default().put(&req, resp).await;
+        }
     }
+}
+
+/// Sxema belgisi manzili: worker manba kodining FNV xeshi bilan.
+fn schema_mark_url() -> String {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for part in [include_str!("lib.rs"), include_str!("channels.rs"), include_str!("packs.rs")] {
+        for b in part.as_bytes() {
+            h ^= *b as u64;
+            h = h.wrapping_mul(0x100000001b3);
+        }
+    }
+    format!("https://arugram-schema.internal/{h:016x}")
 }
 
 async fn init_db(env: &Env) -> bool {
@@ -3466,7 +3497,45 @@ fn random_hex(len: usize) -> String {
 
 // ── app_config: kichik kalit/qiymat ombori ─────────────────────
 
+/// Deyarli o'zgarmaydigan sozlamalar — izolyat xotirasida saqlanadi.
+///
+/// Worker hisoboti: `tg_webhook_secret` HAR BIR Telegram webhook'ida
+/// bazadan o'qilardi (30 daqiqada 107 ta `app_config` o'qishi). Faqat
+/// shu ro'yxatdagi kalitlar va faqat topilgan qiymat saqlanadi.
+/// Admin suhbat holatlari (`chan_wait`, `encbot_target` va h.k.)
+/// ATAYLAB saqlanmaydi: ular boshqa izolyatda o'zgaradi va eski qiymat
+/// noto'g'ri amalga olib kelardi.
+const CONFIG_MEMO_KEYS: &[&str] = &[
+    "tg_webhook_secret", "tg_webhook_for", "tg_webhook_url",
+    "encbot_secret", "encbot_webhook_for", "encode_log_chat",
+    "mig_comment_media", "mig_origin_video", "mig_origin_key",
+    "mig_encode_progress", "mig_origin_meta", "mig_chan_consent",
+];
+const CONFIG_MEMO_MS: i64 = 10 * 60 * 1000;
+
+thread_local! {
+    static CONFIG_MEMO: std::cell::RefCell<std::collections::HashMap<String, (String, i64)>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
 async fn config_get(env: &Env, key: &str) -> Option<String> {
+    let memo = CONFIG_MEMO_KEYS.contains(&key);
+    if memo {
+        let now = now_ms();
+        if let Some(v) = CONFIG_MEMO.with(|m| {
+            m.borrow().get(key).filter(|(_, at)| now - *at < CONFIG_MEMO_MS).map(|(v, _)| v.clone())
+        }) {
+            return Some(v);
+        }
+    }
+    let v = config_get_db(env, key).await?;
+    if memo {
+        CONFIG_MEMO.with(|m| m.borrow_mut().insert(key.to_string(), (v.clone(), now_ms())));
+    }
+    Some(v)
+}
+
+async fn config_get_db(env: &Env, key: &str) -> Option<String> {
     let res = turso_exec(env, "SELECT cfg_value FROM app_config WHERE cfg_key=?",
         vec![TursoArg::text(key)]).await.ok()?;
     let cols = res["cols"].as_array().cloned().unwrap_or_default();
@@ -3478,6 +3547,7 @@ async fn config_get(env: &Env, key: &str) -> Option<String> {
 }
 
 async fn config_put(env: &Env, key: &str, value: &str) {
+    CONFIG_MEMO.with(|m| m.borrow_mut().remove(key));
     let _ = turso_exec(env,
         "INSERT INTO app_config (cfg_key,cfg_value) VALUES (?,?)
          ON CONFLICT(cfg_key) DO UPDATE SET cfg_value=excluded.cfg_value",
