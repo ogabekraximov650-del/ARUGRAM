@@ -4928,3 +4928,19 @@ to'g'ridan-to'g'ri kesh orqali ko'rsatilsin" (Turso'siz).
 - **Xotira halqasi**: bo'laklar orasida bo'shliq yo'q, ulushlar
   siljiydi va burchaklar har kadrda ketma-ket yig'iladi; tozalashda
   halqa parda foizi bilan bir sur'atda bo'shaydi; foizlar `000.00`.
+
+## Chat so'rovlari kesh belgisi bilan, Turso o'lchovi (2026-10)
+
+- **Chat belgisi.** `chat_messages`/`chat_threads` ga har qanday yozuv
+  `turso_after` da avtomatik seziladi va Cloudflare keshiga "o'zgarish
+  vaqti" (`CHAT_MARK_URL`) qo'yiladi. `chat_wait` endi har 2 s da shu
+  belgini tekshiradi, Turso'ni faqat belgi o'zgarganda yoki 45 s da bir
+  marta (`CHAT_FALLBACK_MS`) o'qiydi; ilova `mk`/`at` ni qaytarib yuboradi.
+  `chat_unread` belgi o'zgarmagan bo'lsa 3 daqiqagacha (`UNREAD_FALLBACK_MS`)
+  bazaga bormaydi. Kesh har ma'lumot markazida alohida — zaxira
+  tekshiruvlar shu uchun; belgi yo'qolsa "o'zgardi" deb hisoblanadi.
+- **O'lchov.** Har Turso buyrug'idan keyin `aru_tq r=.. w=.. <SQL>` jurnal
+  qatori (faqat `wrangler tail` ko'radi, saqlanmaydi).
+  `.github/workflows/worker-stats.yml` (+ `tool/stats/tail_report.py`)
+  N daqiqa tinglab, yo'l va SQL bo'yicha o'qilgan/yozilgan qatorlar
+  jadvalini "Summary" ga chiqaradi. Keyingi tejash shu jadvalga qarab.

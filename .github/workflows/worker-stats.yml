@@ -1,0 +1,67 @@
+name: Worker va Turso so'rovlari hisoboti
+
+# Worker'ning jonli jurnalini (`wrangler tail`) bir necha daqiqa tinglab,
+# qaysi yo'l va qaysi SQL eng ko'p Turso qatorini o'qiyotgani/yozayotganini
+# jadval qilib chiqaradi (Actions sahifasidagi "Summary" va artifact).
+# Worker har Turso buyrug'idan keyin `aru_tq ...` qatorini yozadi —
+# `worker/src/lib.rs` -> `turso_after`. Jurnal hech qayerda saqlanmaydi.
+#
+# Bu fayl yoki skript o'zgarsa bir marta o'zi ishga tushadi; keyin
+# kerak bo'lganda "Run workflow" bilan.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/worker-stats.yml'
+      - 'tool/stats/**'
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "Necha daqiqa tinglash"
+        default: "30"
+
+jobs:
+  tail:
+    runs-on: ubuntu-latest
+    environment: secret
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install wrangler
+        run: npm install -g wrangler
+
+      # Push bilan ishga tushganda yangi worker deploy bo'lib olishini
+      # kutamiz (`aru_tq` qatorlari yangi kodda).
+      - name: Deploy tugashini kutish
+        if: github.event_name == 'push'
+        run: sleep 300
+
+      - name: Jurnalni tinglash
+        working-directory: worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          MINUTES: ${{ github.event.inputs.minutes || '30' }}
+        run: |
+          echo "$MINUTES" > ../minutes.txt
+          timeout "$(( MINUTES * 60 ))s" wrangler tail --env production --format json > ../tail.jsonl 2> ../tail.err || true
+          echo "Hodisalar fayli: $(wc -c < ../tail.jsonl) bayt"
+          tail -n 20 ../tail.err || true
+
+      - name: Hisobot
+        run: |
+          python3 tool/stats/tail_report.py tail.jsonl "$(cat minutes.txt)" > report.md
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
+          cat report.md
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: worker-stats
+          path: |
+            report.md
+          retention-days: 14

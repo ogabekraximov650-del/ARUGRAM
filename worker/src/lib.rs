@@ -147,6 +147,112 @@ fn row_to_obj(cols: &[Value], row: &[Value]) -> Value {
     Value::Object(map)
 }
 
+
+// ══════════════════════════════════════════════════════════════
+//  TURSO SO'ROVLARINI O'LCHASH VA CHAT BELGISI
+// ══════════════════════════════════════════════════════════════
+//
+// TALAB (foydalanuvchi): "worker va Turso so'rovlarini kamaytirish";
+// "worker orqali kuzatilgan so'rovlarni Actions orqali aniqlab ol".
+//
+// ── O'LCHASH ──────────────────────────────────────────────────
+//
+// Har bir Turso buyrug'idan keyin bitta qisqa jurnal qatori
+// yoziladi: `aru_tq r=<o'qilgan qator> w=<yozilgan qator> <SQL boshi>`.
+// Jurnal hech qayerda saqlanmaydi va pul turmaydi — uni faqat
+// `wrangler tail` ko'radi. `.github/workflows/worker-stats.yml` bir
+// necha daqiqa tinglab, qaysi yo'l (`/api/...`) va qaysi SQL eng ko'p
+// qator o'qiyotganini jadval qilib chiqaradi. Jurnal qatori aynan o'sha
+// so'rovning hodisasiga tushadi, ya'ni yo'lga to'g'ri bog'lanadi.
+//
+// ── CHAT BELGISI ──────────────────────────────────────────────
+//
+// Support chat ochiq turganda uzoq kutish (`chat_wait`) ilgari har 5
+// soniyada Turso'dan o'qirdi, o'qilmaganlar nuqtasi (`chat_unread`)
+// esa har 45 soniyada. Endi suhbat jadvallariga (`chat_messages`,
+// `chat_threads`) har qanday yozuv shu yerda avtomatik seziladi va
+// Cloudflare keshiga (bepul) "o'zgarish vaqti" belgisi qo'yiladi.
+// Kutish Turso o'rniga shu belgini tekshiradi; Turso faqat belgi
+// o'zgarganda (yoki zaxira uchun vaqti-vaqti bilan) o'qiladi.
+//
+// Kesh har ma'lumot markazida alohida — boshqa markazdagi yozuv bu
+// yerda ko'rinmasligi mumkin. Shu sabab belgi o'zgarmasa ham Turso
+// baribir `CHAT_FALLBACK_MS` da bir marta tekshiriladi. Belgi
+// yo'qolsa (kesh tozalandi) — "hozir o'zgardi" deb hisoblanadi, ya'ni
+// eng yomon holatda eski xatti-harakat (xabar yo'qolmaydi).
+
+const CHAT_MARK_URL: &str = "https://arugram-chat-mark.internal/v1";
+/// Belgi o'zgarmasa ham Turso shuncha vaqtda bir marta tekshiriladi.
+const CHAT_FALLBACK_MS: i64 = 45_000;
+/// Nuqta (`chat_unread`) uchun zaxira tekshiruv oralig'i.
+const UNREAD_FALLBACK_MS: i64 = 180_000;
+
+thread_local! {
+    /// Shu izolyatda oxirgi marta suhbat o'zgargan vaqt (kesh
+    /// kechiksa ham shu izolyat darhol biladi).
+    static CHAT_MARK_LOCAL: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
+}
+
+fn sql_head(sql: &str) -> String {
+    let flat: String = sql.split_whitespace().collect::<Vec<_>>().join(" ");
+    flat.chars().take(90).collect()
+}
+
+fn sql_touches_chat(sql: &str) -> bool {
+    let t = sql.trim_start();
+    let head: String = t.chars().take(6).collect::<String>().to_ascii_uppercase();
+    (head.starts_with("INSERT") || head.starts_with("UPDATE") || head.starts_with("DELETE")
+        || head.starts_with("REPLAC"))
+        && (sql.contains("chat_messages") || sql.contains("chat_threads"))
+}
+
+/// Har bir buyruq natijasini jurnalga yozadi; suhbat o'zgargan
+/// bo'lsa belgini yangilaydi.
+async fn turso_after(sqls: &[&str], results: &[Value]) {
+    let mut chat = false;
+    for (i, sql) in sqls.iter().enumerate() {
+        let r = results.get(i);
+        let read = r.and_then(|v| v["rows_read"].as_i64()).unwrap_or(-1);
+        let wrote = r.and_then(|v| v["rows_written"].as_i64()).unwrap_or(-1);
+        console_log!("aru_tq r={} w={} {}", read, wrote, sql_head(sql));
+        if sql_touches_chat(sql) {
+            chat = true;
+        }
+    }
+    if chat {
+        chat_mark_touch().await;
+    }
+}
+
+async fn chat_mark_touch() {
+    let now = now_ms();
+    CHAT_MARK_LOCAL.with(|c| c.set(now));
+    let Ok(mut resp) = Response::ok(now.to_string()) else { return };
+    let _ = resp.headers_mut().set("Cache-Control", "public, max-age=86400");
+    if let Ok(req) = Request::new(CHAT_MARK_URL, Method::Get) {
+        let _ = Cache::default().put(&req, resp).await;
+    }
+}
+
+/// Suhbat belgisi: oxirgi o'zgarish vaqti. Keshda yo'q bo'lsa
+/// "hozir" qo'yiladi (ehtiyot: o'zgarish bo'lgan deb hisoblanadi).
+async fn chat_mark() -> i64 {
+    let local = CHAT_MARK_LOCAL.with(|c| c.get());
+    let cached = async {
+        let req = Request::new(CHAT_MARK_URL, Method::Get).ok()?;
+        let mut hit = Cache::default().get(&req, false).await.ok()??;
+        hit.text().await.ok()?.trim().parse::<i64>().ok()
+    }
+    .await;
+    match cached {
+        Some(v) => v.max(local),
+        None => {
+            chat_mark_touch().await;
+            CHAT_MARK_LOCAL.with(|c| c.get())
+        }
+    }
+}
+
 async fn turso_exec(env: &Env, sql: &str, args: Vec<TursoArg>) -> Result<Value> {
     let url = env.secret("TURSO_URL")?.to_string();
     let token = env.secret("TURSO_TOKEN")?.to_string();
@@ -172,7 +278,9 @@ async fn turso_exec(env: &Env, sql: &str, args: Vec<TursoArg>) -> Result<Value> 
             r["error"]["message"].as_str().unwrap_or("Turso xato").to_string()
         ));
     }
-    Ok(r["response"]["result"].clone())
+    let out = r["response"]["result"].clone();
+    turso_after(&[sql], std::slice::from_ref(&out)).await;
+    Ok(out)
 }
 
 async fn turso_batch(env: &Env, stmts: &[(&str, Vec<TursoArg>)]) -> Result<()> {
@@ -209,6 +317,10 @@ async fn turso_batch(env: &Env, stmts: &[(&str, Vec<TursoArg>)]) -> Result<()> {
                 return Err(Error::RustError(format!("baza xatosi: {why}")));
             }
         }
+        let results: Vec<Value> =
+            list.iter().map(|i| i["response"]["result"].clone()).collect();
+        let sqls: Vec<&str> = stmts.iter().map(|(s, _)| *s).collect();
+        turso_after(&sqls, &results).await;
     }
     Ok(())
 }
@@ -248,6 +360,8 @@ async fn turso_many(env: &Env, stmts: &[(&str, Vec<TursoArg>)]) -> Result<Vec<Va
             out.push(item["response"]["result"].clone());
         }
     }
+    let sqls: Vec<&str> = stmts.iter().map(|(s, _)| *s).collect();
+    turso_after(&sqls, &out).await;
     Ok(out)
 }
 
@@ -6654,19 +6768,43 @@ async fn chat_unread(req: &Request, env: &Env) -> Result<Response> {
         return json_resp(&json!({"error": "unauthorized"}), 401);
     };
     let me = u["id"].as_i64().unwrap_or(0);
+    let admin = is_admin(&u);
 
-    if is_admin(&u) {
-        // Admin uchun — hamma suhbatlardagi o'qilmaganlar yig'indisi.
-        let res = turso_exec(env,
-            "SELECT COALESCE(SUM(unread_admin),0) FROM chat_threads",
-            vec![]).await?;
-        return ok_nostore(json!({"unread": scalar(&res), "admin": true}));
+    // ── SUHBAT O'ZGARMAGAN BO'LSA TURSO'GA BORILMAYDI ──────────
+    //
+    // (`CHAT_MARK_URL` izohiga qarang.) Ilova oxirgi javobdagi
+    // sonni (`u`), belgini (`mk`) va tekshirish vaqtini (`at`)
+    // qaytarib yuboradi. Belgi o'sha-o'sha va zaxira muddati
+    // o'tmagan bo'lsa — o'sha son qaytadi, bazaga so'rov yo'q.
+    let url = req.url()?;
+    let q = |k: &str| -> i64 {
+        url.query_pairs()
+            .find(|(n, _)| n == k)
+            .and_then(|(_, v)| v.parse::<i64>().ok())
+            .unwrap_or(-1)
+    };
+    let (u_before, mk_before, at_before) = (q("u"), q("mk"), q("at"));
+    let mk = chat_mark().await;
+    let now = now_ms();
+    if u_before >= 0 && mk == mk_before && at_before > 0 && at_before <= now
+        && now - at_before < UNREAD_FALLBACK_MS
+    {
+        return ok_nostore(json!({
+            "unread": u_before, "admin": admin, "mk": mk, "at": at_before,
+        }));
     }
 
-    let res = turso_exec(env,
-        "SELECT COALESCE(unread_user,0) FROM chat_threads WHERE user_id=?",
-        vec![TursoArg::int(me)]).await?;
-    ok_nostore(json!({"unread": scalar(&res), "admin": false}))
+    let res = if admin {
+        // Admin uchun — hamma suhbatlardagi o'qilmaganlar yig'indisi.
+        turso_exec(env,
+            "SELECT COALESCE(SUM(unread_admin),0) FROM chat_threads",
+            vec![]).await?
+    } else {
+        turso_exec(env,
+            "SELECT COALESCE(unread_user,0) FROM chat_threads WHERE user_id=?",
+            vec![TursoArg::int(me)]).await?
+    };
+    ok_nostore(json!({"unread": scalar(&res), "admin": admin, "mk": mk, "at": now}))
 }
 
 /// TIZIM nomidan foydalanuvchining yozishmasiga xabar qo'yadi.
@@ -6934,6 +7072,8 @@ async fn chat_send(mut req: Request, env: &Env, origin: &str) -> Result<Response
 // ko'pi 5 s kechikadi.
 const CHAT_WAIT_TICKS: u32 = 4;
 const CHAT_WAIT_STEP_MS: u64 = 5000;
+/// Kesh belgisi shunchalik tez-tez tekshiriladi (bepul).
+const CHAT_MARK_STEP_MS: u64 = 2000;
 
 /// GET /api/chat/wait?since=<ms>[&user_id=N][&all=1]
 async fn chat_wait(req: &Request, env: &Env) -> Result<Response> {
@@ -7027,17 +7167,46 @@ async fn chat_wait(req: &Request, env: &Env) -> Result<Response> {
                                 WHERE user_id=?),0)",
              vec![TursoArg::int(target)])
         };
-        for i in 0..CHAT_WAIT_TICKS {
+        // ── TURSO FAQAT BELGI O'ZGARGANDA ─────────────────────
+        //
+        // (`CHAT_MARK_URL` izohiga qarang.) Ilgari har 5 soniyada
+        // Turso o'qilardi — chat ochiq turgan bitta odam daqiqasiga
+        // 12 ta o'qish. Endi har 2 soniyada BEPUL kesh belgisi
+        // tekshiriladi (xabar hatto tezroq keladi), Turso esa faqat
+        // belgi o'zgarganda yoki `CHAT_FALLBACK_MS` da bir marta.
+        //
+        // Ilova oxirgi ko'rgan belgini (`mk`) va Turso oxirgi
+        // tekshirilgan vaqtni (`at`) qaytarib yuboradi — hech narsa
+        // o'zgarmagan bo'lsa yangi kutish Turso'ga umuman bormaydi.
+        // Eski ilova (`mk` yo'q) har kutishda bir marta o'qiydi.
+        let mk_before: i64 = q("mk").parse().unwrap_or(-1);
+        let at_before: i64 = q("at").parse().unwrap_or(0);
+        let mut mk = chat_mark().await;
+        let mut at = at_before;
+        let mut ver = ver_before;
+        let mut need = mk != mk_before || now_ms() - at_before >= CHAT_FALLBACK_MS
+            || at_before > now_ms();
+        let steps = (CHAT_WAIT_TICKS as u64 * CHAT_WAIT_STEP_MS) / CHAT_MARK_STEP_MS;
+        for i in 0..=steps {
             if i > 0 {
-                Delay::from(core::time::Duration::from_millis(CHAT_WAIT_STEP_MS)).await;
+                Delay::from(core::time::Duration::from_millis(CHAT_MARK_STEP_MS)).await;
+                let m = chat_mark().await;
+                if m != mk || now_ms() - at >= CHAT_FALLBACK_MS {
+                    need = true;
+                }
+                mk = m;
             }
-            let res = turso_exec(env, vsql, vargs.clone()).await?;
-            let ver = scalar(&res);
-            if ver != ver_before {
-                return ok_nostore(json!({"new": true, "ver": ver}));
+            if need {
+                need = false;
+                let res = turso_exec(env, vsql, vargs.clone()).await?;
+                at = now_ms();
+                ver = scalar(&res);
+                if ver != ver_before {
+                    return ok_nostore(json!({"new": true, "ver": ver, "mk": mk, "at": at}));
+                }
             }
         }
-        return ok_nostore(json!({"new": false, "ver": ver_before}));
+        return ok_nostore(json!({"new": false, "ver": ver, "mk": mk, "at": at}));
     }
 
     let (sql, args): (&str, Vec<TursoArg>) = if watch_all {

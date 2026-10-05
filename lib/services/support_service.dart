@@ -223,6 +223,10 @@ class UnreadBadge extends ChangeNotifier {
 
   /// Hisob almashganda.
   void clear() {
+    // Hisob almashdi / chiqildi — serverdagi belgi ham qaytadan.
+    _srvCount = -1;
+    _mk = -1;
+    _at = 0;
     if (_count == 0) return;
     _count = 0;
     notifyListeners();
@@ -235,6 +239,16 @@ class UnreadBadge extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ── TURSO'GA KAMROQ SO'ROV ─────────────────────────────────
+  //
+  // Server oxirgi javobdagi son ([_srvCount]), suhbat belgisi ([_mk])
+  // va Turso tekshirilgan vaqtni ([_at]) qaytaradi. Shularni qaytarib
+  // yuborsak — suhbatlarda hech narsa o'zgarmagan bo'lsa server bazaga
+  // bormaydi (`chat_unread` izohiga qarang).
+  int _srvCount = -1;
+  int _mk = -1;
+  int _at = 0;
+
   Future<void> refresh() async {
     if (_busy) return;
     if (AuthService.instance.sessionToken == null) {
@@ -244,11 +258,15 @@ class UnreadBadge extends ChangeNotifier {
     _busy = true;
     try {
       final r = await http
-          .get(Uri.parse('$_base/unread'), headers: _headers())
+          .get(Uri.parse('$_base/unread?u=$_srvCount&mk=$_mk&at=$_at'),
+              headers: _headers())
           .timeout(const Duration(seconds: 15));
       if (r.statusCode == 200) {
         final j = jsonDecode(r.body) as Map<String, dynamic>;
         final n = ((j['unread'] as num?) ?? 0).toInt();
+        _srvCount = n;
+        _mk = (j['mk'] as num?)?.toInt() ?? -1;
+        _at = (j['at'] as num?)?.toInt() ?? 0;
         // Server har javobda "bu admin sanog'imi" deb aytadi
         // (`chat_unread`). Ilova buni O'ZI taxmin qilmaydi.
         final adm = j['admin'] == true;
@@ -311,6 +329,12 @@ class ChatController extends ChangeNotifier {
   // bo'lsa BIRINCHI kutish ham darhol qaytmaydi — bekorga so'rov
   // ketmaydi.
   int _ver = 0;
+
+  /// Server bergan suhbat belgisi va Turso tekshirilgan vaqt —
+  /// keyingi kutishda qaytariladi: hech narsa o'zgarmagan bo'lsa
+  /// server Turso'ga umuman bormaydi (`chat_wait` izohiga qarang).
+  int _mk = -1;
+  int _at = 0;
 
   /// Diskdagi nusxani DARHOL ko'rsatadi (tarmoq kutilmaydi).
   ///
@@ -413,7 +437,7 @@ class ChatController extends ChangeNotifier {
         // `ver` — ASOSIY belgi (server bitta qator o'qiydi).
         // Qolgan sonlar ESKI serverlar uchun qoldirilgan: yangi
         // worker `ver` ni ko'rsa ularga qaramaydi.
-        final uri = Uri.parse('$_base/wait?ver=$_ver'
+        final uri = Uri.parse('$_base/wait?ver=$_ver&mk=$_mk&at=$_at'
             '&since=$_lastAt&seen=$_seenCount'
             '&count=$_liveCount&oldest=$_oldestAt'
             '${userId != null ? '&user_id=$userId' : ''}');
@@ -428,6 +452,8 @@ class ChatController extends ChangeNotifier {
           // yuklash davomida yana o'zgarish bo'lsa, keyingi kutish
           // uni darhol sezadi (o'zgarish yo'qolib qolmaydi).
           final ver = (j['ver'] as num?)?.toInt();
+          _mk = (j['mk'] as num?)?.toInt() ?? -1;
+          _at = (j['at'] as num?)?.toInt() ?? 0;
           if (j['new'] == true) {
             await load(force: true);
           }
@@ -807,6 +833,12 @@ class ChatThreadsController extends ChangeNotifier {
   /// qarang). Diskda ham saqlanadi.
   int _ver = 0;
 
+  /// Server bergan suhbat belgisi va Turso tekshirilgan vaqt —
+  /// keyingi kutishda qaytariladi: hech narsa o'zgarmagan bo'lsa
+  /// server Turso'ga umuman bormaydi (`chat_wait` izohiga qarang).
+  int _mk = -1;
+  int _at = 0;
+
   // ── UZOQ KUTISH ───────────────────────────────────────────
   //
   // Admin suhbatlar ro'yxatini ochib turganda yangi xabar
@@ -846,13 +878,17 @@ class ChatThreadsController extends ChangeNotifier {
         // faqat `since` yuborilardi va server har tekshiruvda
         // butun ro'yxatni sanardi.
         final r = await http
-            .get(Uri.parse('$_base/wait?all=1&ver=$_ver&since=$_lastAt'),
+            .get(
+                Uri.parse('$_base/wait?all=1&ver=$_ver&mk=$_mk&at=$_at'
+                    '&since=$_lastAt'),
                 headers: _headers())
             .timeout(const Duration(seconds: 35));
         if (!_watching) return;
         if (r.statusCode == 200) {
           final j = jsonDecode(r.body) as Map<String, dynamic>;
           final ver = (j['ver'] as num?)?.toInt();
+          _mk = (j['mk'] as num?)?.toInt() ?? -1;
+          _at = (j['at'] as num?)?.toInt() ?? 0;
           if (j['new'] == true) {
             await load(force: true);
             await UnreadBadge.instance.refresh();
