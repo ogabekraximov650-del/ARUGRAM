@@ -32,9 +32,10 @@ FILES = {
     # yetib bormasdi.
     "tool/encode/run.py": ENC / "run.py",
 }
-# "Post kodlash" (kodlash botining ikkinchi bo'limi) — `tool/encode/run.py` ishlatadi.
+# "Post kodlash" (kodlash botining ikkinchi bo'limi) — ALOHIDA workflow `post.yml`.
+FILES[".github/workflows/post.yml"] = HERE.parent / "post" / "post.workflow.yml"
 for _src in sorted((HERE.parent / "post").iterdir()):
-    if _src.is_file() and not _src.name.startswith(".") and _src.suffix != ".pyc":
+    if _src.is_file() and _src.suffix in (".py", ".sh", ".png"):
         FILES[f"tool/post/{_src.name}"] = _src
 
 

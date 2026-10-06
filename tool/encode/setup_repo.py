@@ -6,7 +6,7 @@
      to'xtaydi: adashib eski akkauntda repo ochilmasin);
   2. bo'sh repo yaratadi (bor bo'lsa — o'shani ishlatadi);
   3. run.py, requirements.txt, session.enc, workflow'ni va "Post kodlash"
-     fayllarini (`tool/post/`: post.py, encode.sh, <ID>_logo.png) yuklaydi;
+     fayllarini (`post.yml`, `tool/post/`: post.py, encode.sh, <ID>_logo.png) yuklaydi;
   4. secret'larni (TG_API_ID, TG_API_HASH, ENCODE_TOKEN, API_BASE) shifrlab
      o'rnatadi — qiymatlar logda ko'rinmaydi;
   5. kodlashni ishga tushirmaydi (buni worker qiladi).
@@ -112,9 +112,10 @@ def main():
         "tool/encode/requirements.txt": HERE / "requirements.txt",
         "tool/encode/session.enc": HERE / "session.enc",
     }
-    # "Post kodlash" (kodlash botining ikkinchi bo'limi) — `tool/encode/run.py` ishlatadi.
+    # "Post kodlash" (kodlash botining ikkinchi bo'limi) — ALOHIDA workflow `post.yml`.
+    files[".github/workflows/post.yml"] = POST / "post.workflow.yml"
     for src in sorted(POST.iterdir()):
-        if src.is_file() and not src.name.startswith(".") and src.suffix != ".pyc":
+        if src.is_file() and src.suffix in (".py", ".sh", ".png"):
             files[f"tool/post/{src.name}"] = src
     for dest, src in files.items():
         body = {"message": f"Avto-kodlash: {dest}",

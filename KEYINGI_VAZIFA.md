@@ -5045,31 +5045,39 @@ Rasm va video yuboriladi, izohida post nomi; Actions videoni H.264 bilan
 kodlab (boshida 3 soniya rasm, burchakda logotip), logotip fayli nomidagi
 ID'ga Telegram'da ochiladigan VIDEO qilib, tagida aynan shu nom bilan
 yuboradi. Navbatdagi postlar tugma; bosilganda rasm + video, tagida inline
-tahrirlash/o'chirish. Kodlash yangi akkauntdagi `avtoencode` repoda
-(hozirgi avto-kodlash bilan bitta joyda). Hajm chegarasi qo'yilmaydi.
+tahrirlash/o'chirish. Jarayon botda ilovadagi kodlash holati kabi jonli
+ko'rinadi. Kodlash yangi akkauntdagi `avtoencode` repoda, avto-kodlashdan
+ALOHIDA workflow'da ("ikkalasi alohida narsalar"). Hajm chegarasi yo'q.
 
 Qanday ishlaydi:
-- `worker/src/postbot.rs` — bot qismi va `/api/post/{claim,check,finish}`.
-  `/start` endi bosh menyu. Post rejimi `app_config.encbot_mode='post'`,
-  yig'ilayotgan post `post_draft`, tahrirlash `post_edit` (`<id>:n|p|v`).
+- `worker/src/postbot.rs` — bot qismi, `kick` va
+  `/api/post/{claim,check,progress,finish}`. `/start` — bosh menyu. Post
+  rejimi `app_config.encbot_mode='post'`, yig'ilayotgan post `post_draft`,
+  tahrirlash `post_edit` (`<id>:n|p|v`), takror himoyasi `post_last_src`
+  (Telegram webhook'ni qayta yuborsa bitta post ikki marta tushmasin).
   Rasm va video admin chatidan yopiq kanalga `copyMessage` (fayl worker'dan
-  o'tmaydi). Navbat — yangi jadval `post_jobs`.
-- Navbat soni (`/api/encode/peek`, `encode_kick`) postlarni ham hisoblaydi —
-  `avtoencode` repodagi `encode.yml` o'zgarishsiz ishga tushadi.
-- `tool/encode/run.py` har qismdan OLDIN `tool/post/post.py` orqali post
-  so'raydi va uni SHU run'da, SHU Telegram sessiyasi bilan ishlaydi. Sabab:
-  bitta sessiyani ikki run bir vaqtda ishlatsa Telegram uni bekor qiladi
-  (AUTH_KEY_DUPLICATED) — avto-kodlash ham to'xtab qolardi. Natija: kodlash
-  ketayotgan bo'lsa post joriy qism tugagach olinadi.
+  o'tmaydi). Navbat — jadval `post_jobs`.
+- `kick` (post qo'shilganda, "qayta urinish"da va cron'da) — `GH_REPO`
+  dagi `post.yml` ni ishga tushiradi. Avto-kodlash navbatiga (`encode_kick`,
+  `peek`) postlar QO'SHILMAYDI.
+- `tool/post/post.py` — run navbat bo'shaguncha postlarni ketma-ket ishlaydi.
+  Claim'da worker botga holat xabarini yuboradi va raqamini beradi; runner
+  uni har ~10 s `/api/post/progress` bilan tahrirlaydi (bosqich, foiz-chiziq,
+  tezlik, kadr/s, bitreyt, hajm, o'tgan/qolgan vaqt) — bazaga yozuvsiz.
+  Tugaganda (yoki xato/bekor bo'lsa) shu xabar yakuniy holatga o'tadi.
 - `tool/post/encode.sh` — `anime/scripts/encode.sh` (H.264) bilan bir xil
   ffmpeg buyrug'i, faqat kirish fayl yo'llari bilan; audiosiz videoga
   jimlik qo'yiladi. `tool/post/6076003760_logo.png` — `anime/anipng` dan;
   fayl nomidagi ID = video yuboriladigan odam.
-- `tool/post/**` `avtoencode` repoga `sync-packs.yml` (`tool/packs/sync_repo.py`)
-  bilan avtomatik ko'chadi — `tool/encode/run.py` kabi. `setup_repo.py` ham
-  ularni yuklaydi (o'zgarmagan faylni qayta yuklamaydi; `REPO_PRIVATE` bo'sh
-  bo'lsa repo ko'rinishiga tegmaydi).
-- Post 3 marta xato bersa `error` bo'ladi — bot navbatida ❌ bilan, "Qayta
-  urinish"/"O'chirish" tugmalari. Kodlanayotgan postni faqat o'chirish
-  mumkin: `post.py` yuborishdan oldin `/api/post/check` qiladi (409 —
-  yuborilmaydi).
+- `tool/post/post.workflow.yml` -> `avtoencode/.github/workflows/post.yml`,
+  `tool/post/*.py|*.sh|*.png` bilan birga `sync-packs.yml`
+  (`tool/packs/sync_repo.py`) orqali avtomatik ko'chadi; `setup_repo.py`
+  ham yuklaydi.
+- SESSIYA: `post.yml` ham `tool/encode/session.enc` ni ishlatadi
+  (foydalanuvchi: hamma sessiya bitta akkauntniki). Post va avto-kodlash bir
+  vaqtda Telegram'ga ulanadi — foydalanuvchi 6 oy davomida muammo
+  kuzatmagan. Sessiya bekor qilinsa (AUTH_KEY_DUPLICATED) — post uchun
+  alohida sessiya yaratib, `post.yml` ga berish kerak bo'ladi.
+- Post 3 marta xato bersa `error` — bot navbatida ❌, "Qayta urinish" /
+  "O'chirish". Kodlanayotgan postni faqat o'chirish mumkin: `post.py`
+  yuborishdan oldin `/api/post/check` qiladi (409 — yuborilmaydi).

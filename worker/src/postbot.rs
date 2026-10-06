@@ -14,11 +14,13 @@
 // OQIM:
 //   * rasm va video admin chatidan yopiq kanalga `copyMessage` bilan
 //     ko'chadi (fayl worker'dan o'tmaydi, hajm chegarasi yo'q);
-//   * `post_jobs` ga bitta yozuv; `encode_kick` avto-kodlash run'ini
-//     ishga tushiradi (navbat soni postlarni ham hisoblaydi);
-//   * `tool/encode/run.py` har qismdan OLDIN `/api/post/claim` so'raydi —
-//     post o'sha run'da, o'sha Telegram sessiyasi bilan ishlanadi (ikki run
-//     bitta sessiyani bir vaqtda ishlatsa Telegram uni bekor qiladi);
+//   * `post_jobs` ga bitta yozuv; `kick` ALOHIDA workflow'ni (`post.yml`,
+//     `avtoencode` repoda, shablon `tool/post/post.workflow.yml`) ishga
+//     tushiradi — avto-kodlash (H.265) bilan bog'liq emas (foydalanuvchi
+//     talabi: "ikkalasi alohida narsalar"). Cron ham har 10 daqiqada;
+//   * `tool/post/post.py` navbat bo'shaguncha `/api/post/claim` qiladi;
+//     jarayonni botdagi bitta xabarda jonli ko'rsatadi (`/api/post/progress`
+//     — bazaga yozmaydi, faqat xabarni tahrirlaydi);
 //   * `/api/post/finish` — tayyor bo'lsa yozuv va kanal postlari o'chadi.
 //
 // Suhbat holati `app_config` da: `encbot_mode` (`post` yoki bo'sh),
@@ -54,9 +56,54 @@ pub(crate) const BTN_POST: &str = "\u{1F3AC} Post kodlash";
 pub(crate) const BTN_HOME: &str = "\u{1F3E0} Bosh menyu";
 const BTN_QUEUE: &str = "\u{1F4CB} Navbatdagi postlar";
 
-/// Navbatga hali olinmagan (yoki ijarasi tugagan) postlar soni.
-pub(crate) const PENDING_SQL: &str =
-    "(SELECT COUNT(*) FROM post_jobs WHERE state='queued' OR (state='running' AND lease_until<=?))";
+const POST_WORKFLOW: &str = "post.yml";
+
+/// Navbatda post bo'lsa-yu, uni hech kim ishlamayotgan bo'lsa — `post.yml`
+/// ni ishga tushiradi. Natija matni (bot xabari uchun).
+pub(crate) async fn kick(env: &Env) -> String {
+    let now = now_ms();
+    let res = turso_exec(env,
+        "SELECT
+           (SELECT COUNT(*) FROM post_jobs WHERE state='queued' OR (state='running' AND lease_until<=?)) AS pending,
+           (SELECT COUNT(*) FROM post_jobs WHERE state='running' AND lease_until>?) AS active",
+        vec![TursoArg::int(now), TursoArg::int(now)]).await;
+    let Some(r) = res.ok().and_then(|r| first_row(&r)) else {
+        return "\u{26A0}\u{FE0F} Post navbatini o'qib bo'lmadi.".into();
+    };
+    if jint(&r, "active") > 0 {
+        return "\u{2699}\u{FE0F} Post kodlash ishlayapti \u{2014} navbatdagilar ketma-ket kodlanadi.".into();
+    }
+    if jint(&r, "pending") == 0 {
+        return String::new();
+    }
+    let repo = tg_secret(env, "GH_REPO");
+    if !repo.contains('/') {
+        return "\u{26A0}\u{FE0F} GH_REPO o'rnatilmagan \u{2014} Actions ishga tushirilmadi.".into();
+    }
+    match gh_workflow_busy(env, &repo, POST_WORKFLOW).await {
+        Ok(true) => return "\u{23F3} Post kodlash (GitHub Actions) ishga tushmoqda \u{2014} biroz kuting.".into(),
+        Ok(false) => {}
+        Err(e) => return e,
+    }
+    // Ikki joydan bir vaqtda (cron + bot) ikkita run ochilmasin — atomik belgi.
+    let claim = turso_exec(env,
+        "INSERT INTO app_config (cfg_key,cfg_value) VALUES ('post_kicked_at', ?)
+         ON CONFLICT(cfg_key) DO UPDATE SET cfg_value=excluded.cfg_value
+           WHERE CAST(app_config.cfg_value AS INTEGER) < ?
+         RETURNING cfg_key",
+        vec![TursoArg::text(&now.to_string()), TursoArg::int(now - 3 * 60 * 1000)]).await;
+    if !claim.ok().and_then(|r| first_row(&r)).is_some() {
+        return "\u{23F3} Post kodlash hozirgina ishga tushirilgan \u{2014} biroz kuting.".into();
+    }
+    match gh_api(env, Method::Post,
+        &format!("/repos/{repo}/actions/workflows/{POST_WORKFLOW}/dispatches"),
+        Some(json!({"ref": "main"}))).await {
+        Ok((204, _)) => "\u{25B6}\u{FE0F} Post kodlash boshlandi (GitHub Actions ishga tushirildi).".into(),
+        Ok((code, v)) => format!("\u{26A0}\u{FE0F} Post kodlash ishga tushmadi (GitHub {code}): {}",
+            html_escape(v["message"].as_str().unwrap_or(""))),
+        Err(e) => format!("\u{26A0}\u{FE0F} Post kodlash ishga tushmadi: {}", html_escape(&e.to_string())),
+    }
+}
 
 // ── Bot: menyular ────────────────────────────────────────────
 
@@ -280,6 +327,15 @@ pub(crate) async fn on_message(env: &Env, msg: &Value, chat: i64) -> bool {
     }
 
     // Hammasi bor — kanalga va navbatga.
+    // TAKROR HIMOYASI: Telegram javobni kutib ulgurmasa xabarni QAYTA yuboradi
+    // (navbatda bitta post bir necha marta paydo bo'lardi). Oxirgi navbatga
+    // qo'yilgan video xabari eslab qolinadi — o'sha xabar qayta kelsa e'tiborsiz.
+    let src_key = format!("{}:{}", d.photo, d.video);
+    if config_get(env, "post_last_src").await.as_deref() == Some(src_key.as_str()) {
+        draft_put(env, &Draft::default()).await;
+        return true;
+    }
+    config_put(env, "post_last_src", &src_key).await;
     let now = now_ms();
     let photo_ch = match to_channel(env, chat, d.photo, &format!("post_photo_{now}")).await {
         Ok(m) => m,
@@ -315,7 +371,7 @@ pub(crate) async fn on_message(env: &Env, msg: &Value, chat: i64) -> bool {
     draft_put(env, &Draft::default()).await;
     let n = turso_exec(env, "SELECT COUNT(*) AS n FROM post_jobs WHERE state IN ('queued','running')", vec![]).await
         .ok().and_then(|r| first_row(&r)).map(|r| jint(&r, "n")).unwrap_or(1);
-    let kick = encode_kick(env).await;
+    let kick = kick(env).await;
     encbot_send(env, chat, &format!(
         "\u{2705} Navbatga qo'yildi: <b>#{id} {}</b>\n\u{1F4E6} Video: {:.1} MB\n\u{1F4CB} Navbatdagi postlar: {n} ta\n\n{kick}",
         html_escape(&short(&d.name)), d.size as f64 / 1048576.0), Some(post_keyboard())).await;
@@ -325,6 +381,12 @@ pub(crate) async fn on_message(env: &Env, msg: &Value, chat: i64) -> bool {
 async fn job_get(env: &Env, id: i64) -> Option<Value> {
     turso_exec(env, "SELECT * FROM post_jobs WHERE id=?", vec![TursoArg::int(id)]).await
         .ok().and_then(|r| first_row(&r))
+}
+
+/// Jonli holat xabarining sarlavhasi.
+fn status_head(id: i64, name: &str, attempt: i64) -> String {
+    format!("\u{1F3AC} <b>Post #{id}: {}</b>{}", html_escape(&short(name)),
+        if attempt > 1 { format!(" (urinish {attempt})") } else { String::new() })
 }
 
 fn state_icon(job: &Value) -> &'static str {
@@ -455,7 +517,7 @@ pub(crate) async fn on_callback(env: &Env, chat: i64, data: &str) -> bool {
             let _ = turso_exec(env,
                 "UPDATE post_jobs SET state='queued', attempts=0, error='', runner='', lease_until=0 WHERE id=? AND state='error'",
                 vec![TursoArg::int(id)]).await;
-            let kick = encode_kick(env).await;
+            let kick = kick(env).await;
             encbot_send(env, chat, &format!("\u{1F501} #{id} yana navbatga qo'yildi.\n\n{kick}"), None).await;
         }
         _ => return false,
@@ -463,7 +525,7 @@ pub(crate) async fn on_callback(env: &Env, chat: i64, data: &str) -> bool {
     true
 }
 
-// ── Actions (`tool/encode/run.py` -> `tool/post/post.py`) ────
+// ── Actions (`post.yml` -> `tool/post/post.py`) ──────────────
 
 async fn own(env: &Env, b: &Value) -> Option<Value> {
     let runner = b["runner"].as_str().unwrap_or("");
@@ -518,16 +580,34 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
             let Some(got) = first_row(&got) else {
                 continue;
             };
-            encbot_send(env, ADMIN_TELEGRAM_ID, &format!(
-                "\u{2699}\u{FE0F} Post kodlash boshlandi: <b>#{id} {}</b>{}", html_escape(&short(&name)),
-                if jint(&got, "attempts") > 1 { format!(" (urinish {})", jint(&got, "attempts")) } else { String::new() }),
-                None).await;
-            return ok(json!({"channel": channel, "job": {
+            // JONLI HOLAT XABARI: Actions uni `/api/post/progress` bilan tahrirlab
+            // turadi (ilovadagi kodlash holati kabi). Raqami faqat runner'da —
+            // bazaga yozilmaydi.
+            let head = status_head(id, &name, jint(&got, "attempts"));
+            let status_msg = encbot_api(env, "sendMessage", json!({
+                "chat_id": ADMIN_TELEGRAM_ID, "parse_mode": "HTML",
+                "text": format!("{head}\n\n\u{23F3} boshlanmoqda..."),
+            })).await.ok().and_then(|v| v["message_id"].as_i64()).unwrap_or(0);
+            return ok(json!({"channel": channel, "status_msg": status_msg, "job": {
                 "id": id, "name": name, "photo_msg": jint(&job, "photo_msg"),
                 "video_msg": jint(&job, "video_msg"), "attempt": jint(&got, "attempts"),
             }}));
         }
         return ok(json!({"none": true}));
+    }
+
+    // Jonli holat: holat xabarini tahrirlaydi. Bazaga tegmaydi (har ~10 s keladi).
+    if path == "/api/post/progress" {
+        let msg = jint(&b, "status_msg");
+        let text: String = b["text"].as_str().unwrap_or("").chars().take(3000).collect();
+        if msg > 0 && !text.is_empty() {
+            let head = status_head(jint(&b, "id"), b["name"].as_str().unwrap_or(""), jint(&b, "attempt"));
+            let _ = encbot_api(env, "editMessageText", json!({
+                "chat_id": ADMIN_TELEGRAM_ID, "message_id": msg, "parse_mode": "HTML",
+                "text": format!("{head}\n\n{}", html_escape(&text)),
+            })).await;
+        }
+        return ok_nostore(json!({"ok": true}));
     }
 
     // Yuborishdan oldin: post hali shu run'nikimi (admin o'chirmaganmi).
@@ -544,7 +624,18 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
         };
         let id = jint(&job, "id");
         let name = job["name"].as_str().unwrap_or("").to_string();
+        let status_msg = jint(&b, "status_msg");
+        let final_status = |line: String| {
+            let head = status_head(id, &name, jint(&job, "attempts"));
+            json!({"chat_id": ADMIN_TELEGRAM_ID, "message_id": status_msg, "parse_mode": "HTML",
+                   "text": format!("{head}\n\n{line}")})
+        };
         if b["ok"].as_bool() == Some(true) {
+            if status_msg > 0 {
+                let _ = encbot_api(env, "editMessageText", final_status(format!(
+                    "\u{2705} Tayyor va {} ga yuborildi ({:.1} MB)",
+                    html_escape(b["to"].as_str().unwrap_or("")), jint(&b, "size") as f64 / 1048576.0))).await;
+            }
             turso_exec(env, "DELETE FROM post_jobs WHERE id=?", vec![TursoArg::int(id)]).await?;
             channel_delete(env, jint(&job, "photo_msg")).await;
             channel_delete(env, jint(&job, "video_msg")).await;
@@ -557,12 +648,20 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
         }
         let err = b["error"].as_str().unwrap_or("").chars().take(300).collect::<String>();
         if b["cancelled"].as_bool() == Some(true) {
+            if status_msg > 0 {
+                let _ = encbot_api(env, "editMessageText",
+                    final_status("\u{23F8} Run to'xtatildi \u{2014} post navbatga qaytdi".to_string())).await;
+            }
             turso_exec(env,
                 "UPDATE post_jobs SET state='queued', runner='', lease_until=0, attempts=MAX(attempts-1,0) WHERE id=?",
                 vec![TursoArg::int(id)]).await?;
             return ok(json!({"ok": true}));
         }
         let fatal = b["fatal"].as_bool() == Some(true) || jint(&job, "attempts") >= POST_MAX_ATTEMPTS;
+        if status_msg > 0 {
+            let _ = encbot_api(env, "editMessageText", final_status(format!(
+                "{} xato: {}", if fatal { "\u{274C}" } else { "\u{26A0}\u{FE0F}" }, html_escape(&err)))).await;
+        }
         turso_exec(env,
             "UPDATE post_jobs SET state=?, runner='', lease_until=0, error=? WHERE id=?",
             vec![TursoArg::text(if fatal { "error" } else { "queued" }), TursoArg::text(&err), TursoArg::int(id)]).await?;

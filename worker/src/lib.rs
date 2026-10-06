@@ -10383,7 +10383,7 @@ fn needs_app_check(path: &str) -> bool {
     // tekshiruvdan o'tadi.
     if matches!(path, "/api/encode/peek" | "/api/encode/claim" | "/api/encode/heartbeat" | "/api/encode/release"
         | "/api/encode/quality" | "/api/encode/finish" | "/api/encode/push"
-        | "/api/post/claim" | "/api/post/check" | "/api/post/finish")
+        | "/api/post/claim" | "/api/post/check" | "/api/post/finish" | "/api/post/progress")
     {
         return false;
     }
@@ -11304,12 +11304,10 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
 
     if path == "/api/encode/peek" && method == Method::Get {
         let res = turso_exec(env,
-            &format!("SELECT (SELECT COUNT(*) FROM encode_jobs
-              WHERE state='queued' OR (state='running' AND lease_until<=?)) + {} AS n",
-              postbot::PENDING_SQL),
-            vec![TursoArg::int(now), TursoArg::int(now)]).await?;
-        // Postlar (`postbot.rs`) ham shu run'da ishlanadi — ular ham hisobda.
-        let n = first_row(&res).map(|r| jint(&r, "n")).unwrap_or(0);
+            "SELECT COUNT(*) AS n FROM encode_jobs
+              WHERE state='queued' OR (state='running' AND lease_until<=?)",
+            vec![TursoArg::int(now)]).await?;
+        let n = first_row(&res).and_then(|r| r["n"].as_i64()).unwrap_or(0);
         return ok(json!({"pending": n}));
     }
 
@@ -12555,8 +12553,13 @@ async fn encode_live_text(env: &Env) -> String {
 /// mumkin, `encode_kick` dagi izohga qarang) — oxirgi run'lar ro'yxati
 /// olinib, holati shu yerda tekshiriladi. Xato bo'lsa — bot uchun matn.
 async fn encode_gh_busy(env: &Env, repo: &str) -> std::result::Result<bool, String> {
+    gh_workflow_busy(env, repo, GH_WORKFLOW).await
+}
+
+/// Workflow'ning tugamagan run'i bormi (`encode_gh_busy` izohiga qarang).
+async fn gh_workflow_busy(env: &Env, repo: &str, workflow: &str) -> std::result::Result<bool, String> {
     match gh_api(env, Method::Get,
-        &format!("/repos/{repo}/actions/workflows/{GH_WORKFLOW}/runs?per_page=10"), None).await {
+        &format!("/repos/{repo}/actions/workflows/{workflow}/runs?per_page=10"), None).await {
         Ok((200, v)) => Ok(v["workflow_runs"].as_array().map(|a| a.iter()
             .any(|r| r["status"].as_str().map(|s| s != "completed").unwrap_or(false)))
             .unwrap_or(false)),
@@ -12591,19 +12594,16 @@ async fn encode_run_alive(env: &Env, repo: &str, runner: &str) -> Option<bool> {
 async fn encode_kick(env: &Env) -> String {
     let now = now_ms();
     let res = turso_exec(env,
-        &format!("SELECT
+        "SELECT
            (SELECT COUNT(*) FROM encode_jobs WHERE state='queued' OR (state='running' AND lease_until<=?)) AS pending,
-           {} AS posts,
            (SELECT COUNT(*) FROM encode_jobs WHERE state='running' AND lease_until<=?) AS stale,
            (SELECT COUNT(*) FROM encode_jobs WHERE state='running' AND lease_until>?) AS active,
            (SELECT COALESCE(MAX(lease_until),0) FROM encode_jobs WHERE state='running') AS lease_max",
-           postbot::PENDING_SQL),
-        vec![TursoArg::int(now), TursoArg::int(now), TursoArg::int(now), TursoArg::int(now)]).await;
+        vec![TursoArg::int(now), TursoArg::int(now), TursoArg::int(now)]).await;
     let Some(r) = res.ok().and_then(|r| first_row(&r)) else {
         return "\u{26A0}\u{FE0F} Navbatni o'qib bo'lmadi.".into();
     };
-    // Postlar (`postbot.rs`) ham shu run'da, qismlardan OLDIN ishlanadi.
-    let (mut pending, mut active) = (jint(&r, "pending") + jint(&r, "posts"), jint(&r, "active"));
+    let (mut pending, mut active) = (jint(&r, "pending"), jint(&r, "active"));
     // ESKIRGAN "ISHLAYAPTI": run qo'lda bekor qilingan/o'lgan bo'lsa ish bazada
     // ijarasi bilan "ishlayapti" bo'lib turaveradi. Oxirgi heartbeat 4 daqiqadan
     // oldin bo'lsa (yangi runner heartbeat yubormaydi — har safar) ishni olgan
@@ -12719,6 +12719,8 @@ async fn scheduled(_ev: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
     let _ = packs::kick(&env).await;
     packs::cleanup_rejected(&env).await;
     cleanup_orphan_history(&env).await;
+    // "Post kodlash" — ALOHIDA workflow (`postbot::kick`).
+    let _ = postbot::kick(&env).await;
     let msg = encode_kick(&env).await;
     // Faqat ishga tushirilganda yoki xato bo'lsa adminga xabar. Xato
     // (masalan token yo'q) har 10 daqiqada takrorlanmasin — soatiga bir.
