@@ -10,6 +10,7 @@ on:
     paths:
       - 'tool/packs/**'
       - 'tool/encode/run.py'
+      - 'tool/post/**'
       - '.github/workflows/sync-packs.yml'
   workflow_dispatch:
 

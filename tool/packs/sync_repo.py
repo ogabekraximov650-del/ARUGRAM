@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""`tool/packs/` fayllarini (va `tool/encode/run.py` ni) avtoencode reposiga (boshqa akkaunt) yangilaydi.
+"""`tool/packs/` fayllarini (va `tool/encode/run.py`, `tool/post/` ni) avtoencode reposiga (boshqa akkaunt) yangilaydi.
 
 MUHIM: to'plam Actions'i (`packs.yml`) BOSHQA akkauntdagi repoda ishlaydi va
 uning kodi o'sha yerga NUSXA qilib qo'yilgan. Bu repodagi o'zgarish o'z-o'zidan
@@ -32,6 +32,10 @@ FILES = {
     # yetib bormasdi.
     "tool/encode/run.py": ENC / "run.py",
 }
+# "Post kodlash" (kodlash botining ikkinchi bo'limi) — `tool/encode/run.py` ishlatadi.
+for _src in sorted((HERE.parent / "post").iterdir()):
+    if _src.is_file() and not _src.name.startswith(".") and _src.suffix != ".pyc":
+        FILES[f"tool/post/{_src.name}"] = _src
 
 
 def token() -> str:

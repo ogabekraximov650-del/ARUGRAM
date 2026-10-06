@@ -5,19 +5,7 @@ name: Avto-kodlash repo'sini yaratish (yangi akkaunt)
 # (va ixtiyoriy API_BASE) shu repodagilardan ko'chiriladi.
 # Ish tugagach NEW_GH_TOKEN'ni o'chirib, tokenni GitHub'da bekor qiling.
 
-# AVTOMATIK SINXRONLASH: `main`ga kodlash/post fayllari o'zgarib push
-# qilinsa — yangi akkauntdagi `avtoencode` repoga o'zi yuklanadi (token
-# `tool/encode/gh_token.enc` da). Bunda repo ko'rinishi (public/private)
-# O'ZGARTIRILMAYDI, o'zgarmagan fayllar qayta yuklanmaydi.
-
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'tool/encode/run.py'
-      - 'tool/encode/requirements.txt'
-      - 'tool/encode/avtoencode.workflow.yml'
-      - 'tool/post/**'
   workflow_dispatch:
     inputs:
       repo_name:
@@ -48,9 +36,9 @@ jobs:
       - name: Repo yaratish va sozlash
         env:
           NEW_GH_TOKEN: ${{ secrets.NEW_GH_TOKEN }}
-          REPO_NAME: ${{ inputs.repo_name || 'avtoencode' }}
-          REPO_PRIVATE: ${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.private) || '' }}
-          ALLOW_SAME_ACCOUNT: ${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.allow_same_account) || 'true' }}
+          REPO_NAME: ${{ inputs.repo_name }}
+          REPO_PRIVATE: ${{ inputs.private }}
+          ALLOW_SAME_ACCOUNT: ${{ inputs.allow_same_account }}
           TG_API_ID: ${{ secrets.TG_API_ID }}
           TG_API_HASH: ${{ secrets.TG_API_HASH }}
           ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}

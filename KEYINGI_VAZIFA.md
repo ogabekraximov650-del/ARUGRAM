@@ -5065,10 +5065,10 @@ Qanday ishlaydi:
   ffmpeg buyrug'i, faqat kirish fayl yo'llari bilan; audiosiz videoga
   jimlik qo'yiladi. `tool/post/6076003760_logo.png` — `anime/anipng` dan;
   fayl nomidagi ID = video yuboriladigan odam.
-- `setup-autoencode.yml` endi `tool/encode/run.py`, `tool/post/**` va h.k.
-  `main`ga push qilinganda o'zi ishga tushib, fayllarni `avtoencode` repoga
-  yuklaydi (`setup_repo.py`: push'da repo ko'rinishiga tegmaydi, o'zgarmagan
-  faylni qayta yuklamaydi).
+- `tool/post/**` `avtoencode` repoga `sync-packs.yml` (`tool/packs/sync_repo.py`)
+  bilan avtomatik ko'chadi — `tool/encode/run.py` kabi. `setup_repo.py` ham
+  ularni yuklaydi (o'zgarmagan faylni qayta yuklamaydi; `REPO_PRIVATE` bo'sh
+  bo'lsa repo ko'rinishiga tegmaydi).
 - Post 3 marta xato bersa `error` bo'ladi — bot navbatida ❌ bilan, "Qayta
   urinish"/"O'chirish" tugmalari. Kodlanayotgan postni faqat o'chirish
   mumkin: `post.py` yuborishdan oldin `/api/post/check` qiladi (409 —
