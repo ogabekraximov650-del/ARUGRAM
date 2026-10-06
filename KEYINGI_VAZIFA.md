@@ -4976,3 +4976,14 @@ to'g'ridan-to'g'ri kesh orqali ko'rsatilsin" (Turso'siz).
   tashlandi. `write_full_chunk` papka yo'q bo'lsa qayta yaratadi.
 - **Pleyer `AHEAD` yana 2** (4 bo'lganda parallel bo'laklar orasida
   teshik qolardi). `DL_CONNS`/`MAX_INFLIGHT` oshirilgani yuklab olish uchun qoladi.
+- **Yuklab olish (2026-10-06).** Asl sabab: kadr navbati `/tg/0/<nom>`
+  orqali o'qiganda fayl hali bot chatida ko'rinmasa `note_failure` uni 2
+  daqiqaga Telegram'dan chetlatardi (`route_url` -> `None`) va shu payt
+  boshlangan yuklash worker yo'liga o'tib qotardi (hisobotda
+  `GET/HEAD /api/image/ep_..mp4`). Endi kadr `/tg/t/<nom>` bilan o'qiydi
+  (`soft` — xatosi chetlatmaydi), worker'ga umuman bormaydi;
+  `deliverMany` `_missing` ga yozmaydi. `download_manager.dart` va
+  `DL_CONNS=4`/`MAX_INFLIGHT=24` avvalgi (b786d4b) holatiga qaytarildi.
+- **Kartadagi "N ta qism"** — faqat ko'rinadigan qismlar
+  (`visible_episode_counts`, `/api/seasons` da `epizod_count` almashtiriladi;
+  isolyat + Cloudflare keshi 10 daqiqa, `free_seasons_forget` tozalaydi).

@@ -5724,6 +5724,76 @@ async fn free_seasons(env: &Env) -> std::collections::HashSet<(i64, i64)> {
 async fn free_seasons_forget() {
     FREE_SEASONS_CACHE.with(|c| *c.borrow_mut() = None);
     let _ = Cache::default().delete(FREE_SEASONS_EDGE_URL, false).await;
+    VISIBLE_EPS_CACHE.with(|c| *c.borrow_mut() = None);
+    let _ = Cache::default().delete(VISIBLE_EPS_EDGE_URL, false).await;
+}
+
+// ── BO'LIMDA ILOVADA KO'RINADIGAN QISMLAR SONI ─────────────────
+//
+// TOPILGAN XATO (foydalanuvchi: "kartochkada ilovada mavjud bo'lmagan
+// qismlar ham ko'rsatilyapti"): `season_db.epizod_count` bazadagi HAMMA
+// qismni sanaydi — hali kodlanmagan / video joylanmaganlarini ham.
+// Kartadagi "N ta qism" endi faqat KO'RINADIGAN qismlardan (`free_seasons`
+// dagi shart bilan bir xil). Hisob isolyat xotirasida va Cloudflare
+// keshida 10 daqiqa turadi — har so'rovda Turso'ga borilmaydi.
+const VISIBLE_EPS_EDGE_URL: &str = "https://arugram-visible-eps.internal/v1";
+
+thread_local! {
+    static VISIBLE_EPS_CACHE: std::cell::RefCell<Option<(i64, std::collections::HashMap<(i64, i64), i64>)>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+async fn visible_episode_counts(env: &Env) -> Option<std::collections::HashMap<(i64, i64), i64>> {
+    let now = now_ms();
+    if let Some(v) = VISIBLE_EPS_CACHE.with(|c| {
+        c.borrow().as_ref().filter(|(at, _)| now - *at < FREE_SEASONS_TTL_MS).map(|(_, v)| v.clone())
+    }) {
+        return Some(v);
+    }
+    let parse = |v: &Value| -> std::collections::HashMap<(i64, i64), i64> {
+        v.as_array().map(|a| a.iter()
+            .filter_map(|p| Some(((p.get(0)?.as_i64()?, p.get(1)?.as_i64()?), p.get(2)?.as_i64()?)))
+            .collect())
+            .unwrap_or_default()
+    };
+    if let Ok(req) = Request::new(VISIBLE_EPS_EDGE_URL, Method::Get) {
+        if let Ok(Some(mut hit)) = Cache::default().get(&req, false).await {
+            if let Ok(v) = hit.json::<Value>().await {
+                let m = parse(&v);
+                VISIBLE_EPS_CACHE.with(|c| *c.borrow_mut() = Some((now, m.clone())));
+                return Some(m);
+            }
+        }
+    }
+    let res = turso_exec(env,
+        "SELECT anime_id, season_id, COUNT(*) AS n FROM epizod_db
+          WHERE COALESCE(url_360p,'')<>'' OR COALESCE(url_480p,'')<>''
+             OR COALESCE(url_720p,'')<>'' OR COALESCE(url_1080p,'')<>''
+             OR (COALESCE(origin_video,'')<>'' AND LENGTH(COALESCE(origin_key,''))=32)
+          GROUP BY anime_id, season_id",
+        vec![]).await.ok()?;
+    let cols = res["cols"].as_array().cloned().unwrap_or_default();
+    let list: Vec<Value> = res["rows"].as_array().cloned().unwrap_or_default().iter()
+        .map(|r| row_to_obj(&cols, r.as_array().unwrap_or(&vec![])))
+        .map(|o| json!([jint(&o, "anime_id"), jint(&o, "season_id"), jint(&o, "n")]))
+        .collect();
+    let m = parse(&json!(list));
+    VISIBLE_EPS_CACHE.with(|c| *c.borrow_mut() = Some((now, m.clone())));
+    if let Ok(mut resp) = Response::from_json(&json!(list)) {
+        let _ = resp.headers_mut().set("Cache-Control", &format!("public, max-age={FREE_SEASONS_EDGE_SECS}"));
+        if let Ok(req) = Request::new(VISIBLE_EPS_EDGE_URL, Method::Get) {
+            let _ = Cache::default().put(&req, resp).await;
+        }
+    }
+    Some(m)
+}
+
+/// Bo'lim obyektlaridagi `epizod_count` ni ko'rinadigan qismlar soniga almashtiradi.
+fn mark_visible_counts(items: &mut [Value], counts: &std::collections::HashMap<(i64, i64), i64>) {
+    for o in items.iter_mut() {
+        let key = (jint(o, "anime_id"), jint(o, "season_id"));
+        o["epizod_count"] = json!(counts.get(&key).copied().unwrap_or(0));
+    }
 }
 
 /// Bo'lim obyektlariga `free` (bepulmi) maydonini qo'shadi.
@@ -12940,6 +13010,9 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
             let rows = res["rows"].as_array().cloned().unwrap_or_default();
             let mut items = rows.iter().map(|r| row_to_obj(&cols, r.as_array().unwrap_or(&vec![]))).collect::<Vec<_>>();
             mark_free(&mut items, &free_seasons(&env).await);
+            if let Some(counts) = visible_episode_counts(&env).await {
+                mark_visible_counts(&mut items, &counts);
+            }
             ok(json!(resolve_list(&origin, items, SEASON_URL_KEYS)))
         }
 

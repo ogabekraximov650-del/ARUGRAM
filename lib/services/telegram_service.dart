@@ -1081,11 +1081,12 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
     try {
       final got = await _deliver(names);
       for (final n in names) {
-        if (got.contains(n)) {
-          out[n] = 'http://127.0.0.1:$_port/tg/0/$n';
-        } else {
-          _missing.add(n);
-        }
+        // Berilmaganini `_missing` ga qo'shmaymiz: u pleyer va YUKLAB
+        // OLISH uchun ham "Telegram'da yo'q" degani bo'lib, 20 soniya
+        // ular worker yo'liga o'tib ketardi.
+        // `/tg/t/` — kadr uchun o'qish: xatosi faylni Telegram'dan
+        // chetlatmaydi (Rust: `soft`), aks holda yuklab olish buzilardi.
+        if (got.contains(n)) out[n] = 'http://127.0.0.1:$_port/tg/t/$n';
       }
     } finally {
       Timer(const Duration(seconds: 10), () {

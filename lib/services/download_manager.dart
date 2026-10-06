@@ -331,9 +331,6 @@ class DownloadManager extends ChangeNotifier {
     _rearm();
   }
 
-  /// Yuklab olishga berish zanjiri (`download` izohiga qarang).
-  Future<void> _chain = Future<void>.value();
-
   /// Yuklab olishni boshlaydi. Videoning bir qismi allaqachon keshda
   /// bo'lsa (masalan ko'rilgani sabab), FAQAT yetishmayotgan bo'laklar
   /// olinadi.
@@ -354,26 +351,12 @@ class DownloadManager extends ChangeNotifier {
     // buyruqni QAYTA yuboramiz — shu sabab tugma hech qachon
     // "ishlamay qolmaydi". Buyruq takrorlansa ham yangi yuklash
     // boshlanmaydi: Rust tomonida vazifa bitta va o'zgarmaydi.
-    //
-    // ── NAVBAT TARTIBI = BOSILGAN TARTIB ─────────────────────
-    //
-    // TOPILGAN XATO (foydalanuvchi: "4 ta qismning hamma sifatini
-    // ketma-ket bosaman, lekin 1-qismning bir sifati qolib ketib,
-    // 2-qismga o'tib ketyapti"). Rust navbati vazifalarni yadroga
-    // KELGAN tartibda oladi (`choose_task` -> `seq`). Telegram nusxasi
-    // esa har sifat uchun alohida so'raladi va javoblar har xil
-    // tezlikda keladi — kech kelgan sifat navbat oxiriga tushardi.
-    // Endi tayyorlash va yadroga berish bitta zanjirda, bosilgan
-    // tartibda bajariladi.
-    _chain = _chain.then((_) async {
-      // Shu orada pauza yoki o'chirish bosilgan bo'lsa — boshlanmaydi.
-      if (!_active.contains(url)) return;
-      if (viaTg) await _prepareTg(url);
-      await VideoCacheServer.instance.ensureStarted();
-      if (!_active.contains(url)) return;
+    (viaTg ? _prepareTg(url) : Future<void>.value())
+        .then((_) => VideoCacheServer.instance.ensureStarted())
+        .then((_) {
       RustCore.instance.videoDownload(url);
       _poll();
-    }).catchError((Object _) {});
+    });
     _active.add(url);
     // Tugmaning ko'rinishi darhol o'zgarishi uchun holatni "yuklanyapti"
     // deb belgilab qo'yamiz — keyingi so'rovda Rust'dan kelgan haqiqiy

@@ -111,10 +111,7 @@ const PIPELINE: usize = 4;
 /// Butun ilova bo'yicha havodagi `getFile` so'rovlari chegarasi.
 /// Yuklab olish 16 ta parallel HTTP so'rov yuboradi; chegara
 /// bo'lmasa bu 64 ta so'rov bo'lardi va Telegram FLOOD_WAIT berardi.
-///
-/// 24 edi — pleyerning oldindan olishi (`AHEAD`) oshirilgach, yuklab
-/// olish bilan birga so'rovlar navbatda kutib qolmasin deb 32.
-const MAX_INFLIGHT: usize = 32;
+const MAX_INFLIGHT: usize = 24;
 
 /// Fayl qismlari uchun QO'SHIMCHA ulanishlar soni (asosiysidan tashqari).
 ///
@@ -127,11 +124,7 @@ const MAX_INFLIGHT: usize = 32;
 /// asosiy + 4 ta qo'shimcha ulanishga navbat bilan taqsimlanadi.
 /// Hammasi BITTA sessiya (bitta auth kalit) bilan — Telegram buni
 /// ruxsat etadi, har bir ulanish o'z `session_id` siga ega.
-///
-/// 4 edi; foydalanuvchi: "fayllar juda sekin yuklanyapti" — 6 ta
-/// qo'shimcha ulanish (jami 7): havodagi so'rovlar ko'proq ulanishga
-/// yoyiladi, har biri o'z TCP oynasi bilan.
-const DL_CONNS: usize = 6;
+const DL_CONNS: usize = 4;
 
 /// Xatodan keyin shu fayl uchun Telegram qancha vaqt chetga suriladi.
 const FAIL_COOLDOWN: Duration = Duration::from_secs(120);
@@ -1210,10 +1203,20 @@ async fn handle(t: &'static Tg, mut stream: TcpStream) {
     // yangilash uchun.
     let path = path.split('?').next().unwrap_or("");
     let mut seg = path.trim_start_matches('/').split('/');
-    let (Some("tg"), Some(_), Some(key)) = (seg.next(), seg.next(), seg.next()) else {
+    let (Some("tg"), Some(mark), Some(key)) = (seg.next(), seg.next(), seg.next()) else {
         respond(&mut stream, "404 Not Found", "").await;
         return;
     };
+    // `t` — tomosha tarixi KADRI uchun o'qish. Uning xatosi faylni
+    // "Telegram'da ishlamaydi" deb belgilamasligi kerak.
+    //
+    // TOPILGAN XATO (foydalanuvchi: "yuklab olish ishlamaydi"): kadr
+    // navbati fayl hali bot chatida ko'rinmay turib o'qishga urinsa,
+    // `note_failure` faylni 2 daqiqaga Telegram'dan chetlatardi —
+    // shu payt boshlangan YUKLAB OLISH worker yo'liga o'tib (u video
+    // bermaydi) qotib qolardi. Worker hisobotida aynan shu fayllarga
+    // `GET/HEAD /api/image/ep_..._1080p...mp4` so'rovlari ko'rindi.
+    let soft = mark == "t";
     let key = key.to_string();
     let Some(client) = connect(t) else {
         respond(&mut stream, "503 Service Unavailable", "").await;
@@ -1223,7 +1226,9 @@ async fn handle(t: &'static Tg, mut stream: TcpStream) {
         Ok(d) => d,
         Err(e) => {
             crate::video_cache::tg_log(format!("Telegram: {key} ochilmadi: {e}"));
-            note_failure(&key);
+            if !soft {
+                note_failure(&key);
+            }
             respond(&mut stream, "502 Bad Gateway", "").await;
             return;
         }
@@ -1258,7 +1263,9 @@ async fn handle(t: &'static Tg, mut stream: TcpStream) {
     if let Err(e) = pump(&mut stream, start, end, spawn).await {
         if let PumpError::Source(e) = e {
             crate::video_cache::tg_log(format!("Telegram: {key} olinmadi: {e}"));
-            note_failure(&key);
+            if !soft {
+                note_failure(&key);
+            }
         }
     }
 }

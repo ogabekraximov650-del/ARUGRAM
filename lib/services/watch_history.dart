@@ -1183,9 +1183,11 @@ class WatchHistory extends ChangeNotifier {
     // uchun bot chatida allaqachon turibdi (worker'ga so'rov yo'q).
     if (!_thumbBuilding.add(key)) return null;
     try {
+      // Faqat Telegram manbasi bilan — worker video baytlarini bermaydi
+      // (worker hisobotida keraksiz GET/HEAD so'rovlari ko'rindi).
       final local = TelegramService.instance.readyUrl(item.videoUrl);
-      final data = await _grabOnce(local ?? item.videoUrl, item.positionMs,
-          exact: false);
+      if (local == null) return null;
+      final data = await _grabOnce(local, item.positionMs, exact: false);
       if (data != null) _storeThumb(item, key, data, exact: false);
       return data;
     } finally {
@@ -1239,8 +1241,12 @@ class WatchHistory extends ChangeNotifier {
             if (_thumbBuilding.add(j.key)) {
               try {
                 final name = TelegramService.fileNameOf(j.src);
-                data = await _grabOnce(local[name] ?? j.src, j.item.positionMs,
-                    exact: true);
+                // Telegram manbasi yo'q bo'lsa worker'ga BORILMAYDI (u video
+                // baytlarini bermaydi) — keyingi safar qayta uriniladi.
+                final src = local[name];
+                if (src != null) {
+                  data = await _grabOnce(src, j.item.positionMs, exact: true);
+                }
                 if (data != null) {
                   _storeThumb(j.item, j.key, data, exact: true);
                 }
