@@ -35,6 +35,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
 
 import 'auth_service.dart';
 import 'rust_bridge.dart';
@@ -42,7 +43,6 @@ import 'sync_queue.dart';
 import 'telegram_service.dart';
 import 'video_cache_server.dart';
 import 'video_gate.dart';
-import 'etag_http.dart';
 
 /// Tarixdagi bitta qism.
 class HistoryItem {
@@ -233,6 +233,10 @@ class WatchHistory extends ChangeNotifier {
   /// NEGA: bitta telefondan ikki kishi kirishi mumkin. Kalit umumiy
   /// bo'lsa, ikkinchi odam bir zumga BIRINCHISINING tarixini ko'rib
   /// qolardi (server javobi kelguncha).
+  /// Oxirgi javobdagi server vaqti (`t`) va oxirgi TO'LIQ ro'yxat vaqti
+  /// (`f`) — delta uchun (`load`).
+  String get _nowKey => '${_listKey}_now';
+
   String get _listKey {
     final id = AuthService.instance.user?.id ?? 0;
     return 'watch_history_$id';
@@ -640,16 +644,71 @@ class WatchHistory extends ChangeNotifier {
     List<HistoryItem>? fresh;
     if (token != null) {
       try {
-        final r = await EtagHttp.get(
-          Uri.parse('$kApiBase/api/history'),
+        // ── FAQAT O'ZGARGAN QATORLAR (delta) ──────────────────────
+        //
+        // TALAB (foydalanuvchi): "Turso'dan iloji boricha bitta qator
+        // o'qilsin, xarajat kam bo'lsin". Diskda ro'yxat va oldingi
+        // javobdagi server vaqti bo'lsa — faqat shundan keyin
+        // o'zgarganlari so'raladi (server `MarkHub` bo'yicha o'zgarish
+        // bo'lmasa Turso'ga umuman bormaydi) va diskdagi ro'yxatga
+        // qo'shiladi. 30 s ustma-ust (bir vaqtdagi yozuv yo'qolmasin) va
+        // sutkada bir marta to'liq ro'yxat — ehtiyot uchun.
+        final base = RustCore.instance.getCachedList(_listKey);
+        final mark = RustCore.instance.getCachedList(_nowKey);
+        final srvNow = (mark != null && mark.isNotEmpty)
+            ? ((mark.first['t'] as num?)?.toInt() ?? 0)
+            : 0;
+        final fullAt = (mark != null && mark.isNotEmpty)
+            ? ((mark.first['f'] as num?)?.toInt() ?? 0)
+            : 0;
+        final nowMs = DateTime.now().millisecondsSinceEpoch;
+        final canDelta = base != null &&
+            srvNow > 0 &&
+            nowMs - fullAt < const Duration(hours: 24).inMilliseconds;
+        final since = srvNow - 30000;
+        final r = await http.get(
+          Uri.parse('$kApiBase/api/history${canDelta ? '?since=$since' : ''}'),
           headers: {'Authorization': 'Bearer $token'},
         ).timeout(const Duration(seconds: 20));
         if (r.statusCode == 200) {
           final data = jsonDecode(r.body) as Map<String, dynamic>;
-          final rows = (data['items'] as List?) ?? [];
-          fresh = rows
-              .map((e) => HistoryItem.fromJson(e as Map<String, dynamic>))
+          final rows = ((data['items'] as List?) ?? [])
+              .whereType<Map<String, dynamic>>()
               .toList();
+          final isDelta = data['delta'] == true && canDelta;
+          if (isDelta) {
+            // Diskdagi ro'yxatga qo'shiladi: yangilangani almashadi,
+            // yashirilgani / o'chirilgan qismniki olib tashlanadi.
+            final byKey = <String, Map<String, dynamic>>{
+              for (final m in base)
+                '${m['anime_id']}:${m['season_id']}:${m['epizod_id']}': m,
+            };
+            for (final m in rows) {
+              final k = '${m['anime_id']}:${m['season_id']}:${m['epizod_id']}';
+              final hidden = ((m['deleted_at'] as num?)?.toInt() ?? 0) != 0 ||
+                  m['gone'] == 1;
+              if (hidden) {
+                byKey.remove(k);
+              } else {
+                final old = byKey[k];
+                // Faqat telefondagi maydonlar (kadr manbasi) saqlanadi.
+                byKey[k] = {
+                  ...m,
+                  if (old != null && old['thumb_url'] != null)
+                    'thumb_url': old['thumb_url'],
+                };
+              }
+            }
+            fresh = _fromRows(byKey.values.toList());
+          } else {
+            fresh = rows.map(HistoryItem.fromJson).toList();
+          }
+          final t = (data['now'] as num?)?.toInt() ?? 0;
+          if (t > 0) {
+            RustCore.instance.saveListCache(_nowKey, [
+              {'t': t, 'f': isDelta ? fullAt : nowMs}
+            ]);
+          }
           _loadedAt = DateTime.now();
         }
       } catch (_) {

@@ -396,24 +396,26 @@ async fn marks_bump(env: &Env, tables: &[String]) {
 /// (`true` — DO dan, hamma data markaz uchun bir xil; `false` — faqat shu
 /// data markaz keshi, zaxira tekshiruv kerak).
 async fn marks_get(env: &Env, tables: &[&str]) -> (i64, bool) {
+    let (each, reliable) = marks_each(env, tables).await;
+    (each.into_iter().max().unwrap_or(0), reliable)
+}
+
+/// Har bir jadval belgisi alohida — BITTA DO murojaati bilan.
+async fn marks_each(env: &Env, tables: &[&str]) -> (Vec<i64>, bool) {
     let keys: Vec<String> = tables.iter().map(|t| mark_key(t)).collect();
     if let Some(v) = mark_do_call(env, &[], 0, &keys).await {
-        let mut max = 0;
-        for k in &keys {
-            max = max.max(v.get(k).copied().unwrap_or(0));
-        }
         // Kesh/xotira ham hisobga olinadi (shu izolyatdagi yangi yozuv).
-        let local = keys.iter()
-            .map(|k| MARK_LOCAL.with(|m| m.borrow().get(k).copied().unwrap_or(0)))
-            .max()
-            .unwrap_or(0);
-        return (max.max(local), true);
+        let out = keys.iter().map(|k| {
+            let local = MARK_LOCAL.with(|m| m.borrow().get(k).copied().unwrap_or(0));
+            v.get(k).copied().unwrap_or(0).max(local)
+        }).collect();
+        return (out, true);
     }
-    let mut max = 0;
+    let mut out = Vec::with_capacity(keys.len());
     for k in &keys {
-        max = max.max(mark_cache_get(k).await);
+        out.push(mark_cache_get(k).await);
     }
-    (max, false)
+    (out, false)
 }
 
 /// Faqat kesh (bepul) — uzoq kutish ichidagi tez-tez tekshiruv uchun.
@@ -448,6 +450,15 @@ async fn turso_after(env: &Env, sqls: &[&str], results: &[Value]) {
             continue;
         }
         if let Some(t) = sql_write_table(sql) {
+            // Qator O'CHIRILSA alohida belgi ham (`del_<jadval>`): "faqat
+            // o'zgargan qatorlar" (delta) o'chirilganini sezolmaydi —
+            // shunda ilova ro'yxatni to'liq qayta oladi.
+            if sql.trim_start().get(..6).map(|w| w.eq_ignore_ascii_case("delete")).unwrap_or(false) {
+                let d = format!("del_{t}");
+                if !tables.contains(&d) {
+                    tables.push(d);
+                }
+            }
             if !tables.contains(&t) {
                 tables.push(t);
             }
@@ -1349,6 +1360,21 @@ async fn init_db(env: &Env) -> bool {
         let _ = turso_exec(env,
             "ALTER TABLE users_db ADD COLUMN chan_consent INTEGER DEFAULT 0", vec![]).await;
         config_put(env, "mig_chan_consent", "1").await;
+    }
+    // Tomosha tarixi: SERVER vaqti (`srv_at`) — "faqat o'zgargan qatorlar"
+    // (delta) uchun. `updated_at` ilova soatidan keladi, unga tayanib
+    // bo'lmaydi. Indekslar: delta (`user_id, srv_at`) va statistikadagi
+    // qismlar sahifasi (`user_id, updated_at`) — ikkinchisisiz har sahifa
+    // foydalanuvchining BUTUN tarixini saralab o'qirdi (hisobot: 2 so'rovda
+    // 630 qator).
+    if ok && config_get(env, "mig_hist_srv_at").await.is_none() {
+        let _ = turso_exec(env,
+            "ALTER TABLE watch_history_db ADD COLUMN srv_at INTEGER DEFAULT 0", vec![]).await;
+        let _ = turso_exec(env,
+            "CREATE INDEX IF NOT EXISTS idx_history_srv ON watch_history_db(user_id, srv_at)", vec![]).await;
+        let _ = turso_exec(env,
+            "CREATE INDEX IF NOT EXISTS idx_history_upd ON watch_history_db(user_id, updated_at DESC)", vec![]).await;
+        config_put(env, "mig_hist_srv_at", "1").await;
     }
 
     ok
@@ -3766,7 +3792,7 @@ const CONFIG_MEMO_KEYS: &[&str] = &[
     "tg_webhook_secret", "tg_webhook_for", "tg_webhook_url",
     "encbot_secret", "encbot_webhook_for", "encode_log_chat",
     "mig_comment_media", "mig_origin_video", "mig_origin_key",
-    "mig_encode_progress", "mig_origin_meta", "mig_chan_consent",
+    "mig_encode_progress", "mig_origin_meta", "mig_chan_consent", "mig_hist_srv_at",
 ];
 const CONFIG_MEMO_MS: i64 = 10 * 60 * 1000;
 
@@ -4899,6 +4925,63 @@ async fn history_route(
             // tarix jadvalida bunday ustun yo'q. Admin qism
             // raqamini o'zgartirsa ro'yxatda darhol yangisi
             // ko'rinadi.
+            // ── FAQAT O'ZGARGAN QATORLAR (delta) ──────────────────────
+            //
+            // TALAB (foydalanuvchi): "iloji boricha bitta qator o'qilsin,
+            // xarajat kam bo'lsin". Ilova oldingi javobdagi server vaqtini
+            // (`since`) yuboradi. O'zgarish belgilari (`MarkHub`) bo'yicha:
+            //   * tarix jadvali o'zgarmagan — Turso'ga UMUMAN borilmaydi;
+            //   * faqat tarix o'zgargan — shu odamning `srv_at > since`
+            //     qatorlari (indeks bo'yicha, odatda 0-2 qator);
+            //   * nomlar/qismlar o'zgargan, qator o'chirilgan yoki DO
+            //     ishlamayapti — to'liq ro'yxat (avvalgidek).
+            let now = now_ms();
+            let since: i64 = req.url().ok()
+                .and_then(|u| u.query_pairs().find(|(k, _)| k == "since").and_then(|(_, v)| v.parse().ok()))
+                .unwrap_or(0);
+            if since > 0 && since < now {
+                let (m, reliable) = marks_each(env, &["watch_history_db",
+                    "anime_db", "season_db", "epizod_db", "del_watch_history_db"]).await;
+                let hist = m[0];
+                let other = m[1..].iter().copied().max().unwrap_or(0);
+                if reliable && other <= since {
+                    if hist <= since {
+                        saved("tarix", 1);
+                        return ok_nostore(json!({"items": [], "delta": true, "now": now}));
+                    }
+                    let res = turso_exec(env,
+                        "SELECT h.anime_id, h.season_id, h.epizod_id,
+                                e.epizod_number AS epizod_number,
+                                h.video_url, h.last_quality,
+                                h.position_ms, h.duration_ms, h.watched_ms, h.view_count,
+                                h.updated_at, h.deleted_at,
+                                CASE WHEN e.epizod_id IS NULL THEN 1 ELSE 0 END AS gone,
+                                a.name AS anime_name, a.photo_url AS anime_photo,
+                                s.bolim_id AS bolim_id, s.nomi AS season_name,
+                                s.photo_url AS season_photo
+                           FROM watch_history_db h
+                           LEFT JOIN anime_db a ON a.id = h.anime_id
+                           LEFT JOIN season_db s
+                                  ON s.anime_id = h.anime_id AND s.season_id = h.season_id
+                           LEFT JOIN epizod_db e
+                                  ON e.anime_id = h.anime_id AND e.season_id = h.season_id
+                                 AND e.epizod_id = h.epizod_id
+                          WHERE h.user_id = ? AND h.srv_at > ?",
+                        vec![TursoArg::int(me), TursoArg::int(since)]).await?;
+                    let cols = res["cols"].as_array().cloned().unwrap_or_default();
+                    let items: Vec<Value> = res["rows"].as_array().cloned().unwrap_or_default()
+                        .iter()
+                        .map(|r| row_to_obj(&cols, r.as_array().unwrap_or(&vec![])))
+                        .collect();
+                    let items = resolve_list(
+                        &origin_of(&req),
+                        items,
+                        &["anime_photo", "season_photo", "video_url"],
+                    );
+                    saved("tarix", 1);
+                    return ok_nostore(json!({"items": items, "delta": true, "now": now}));
+                }
+            }
             let res = turso_exec(env,
                 "SELECT h.anime_id, h.season_id, h.epizod_id,
                         e.epizod_number AS epizod_number,
@@ -4933,7 +5016,7 @@ async fn history_route(
                 items,
                 &["anime_photo", "season_photo", "video_url"],
             );
-            ok_nostore(json!({"items": items}))
+            ok_nostore(json!({"items": items, "delta": false, "now": now}))
         }
 
         // ── YOZUV ENDI BU YERDA EMAS ──────────────────────────
@@ -5316,13 +5399,17 @@ async fn sync_route(mut req: Request, env: &Env) -> Result<Response> {
     }
 
     // ── 2-QUVUR: HAMMA YOZUV BIRDAN ───────────────────────────
+    // `srv_at` — server vaqti (delta uchun, `/api/history?since=`).
+    let srv_now = now_ms();
     for a in &hist_args {
+        let mut a = a.clone();
+        a.push(TursoArg::int(srv_now));
         stmts.push((
             "INSERT INTO watch_history_db
                 (user_id,anime_id,season_id,epizod_id,video_url,
                  last_quality,position_ms,duration_ms,watched_ms,view_count,
-                 deleted_at,updated_at)
-             VALUES (?,?,?,?,?,?,?,?,?,?,0,?)
+                 deleted_at,updated_at,srv_at)
+             VALUES (?,?,?,?,?,?,?,?,?,?,0,?,?)
              ON CONFLICT(user_id,anime_id,season_id,epizod_id) DO UPDATE SET
                 video_url=excluded.video_url,
                 last_quality=excluded.last_quality,
@@ -5331,17 +5418,20 @@ async fn sync_route(mut req: Request, env: &Env) -> Result<Response> {
                 watched_ms=excluded.watched_ms,
                 view_count=excluded.view_count,
                 deleted_at=0,
-                updated_at=excluded.updated_at",
-            a.clone(),
+                updated_at=excluded.updated_at,
+                srv_at=excluded.srv_at",
+            a,
         ));
     }
     // Tarixdan yashirish — yozuv O'CHIRILMAYDI (foydalanuvchi
     // talabi), faqat `deleted_at` belgilanadi.
     for a in &hide_args {
+        let mut a = a.clone();
+        a.push(TursoArg::int(srv_now));
         stmts.push((
-            "UPDATE watch_history_db SET deleted_at=?
-              WHERE user_id=? AND anime_id=? AND season_id=? AND epizod_id=?",
-            a.clone(),
+            "UPDATE watch_history_db SET deleted_at=?1, srv_at=?6
+              WHERE user_id=?2 AND anime_id=?3 AND season_id=?4 AND epizod_id=?5",
+            a,
         ));
     }
     for a in &rate_args {
@@ -12898,7 +12988,6 @@ async fn main(req: Request, env: Env, ctx: Context) -> Result<Response> {
 fn etag_tables(path: &str) -> Option<&'static [&'static str]> {
     const SEASONS: &[&str] = &["season_db", "epizod_db"];
     const SEASON_ONE: &[&str] = &["season_db", "epizod_db", "ratings_db", "favorites_db"];
-    const HISTORY: &[&str] = &["watch_history_db", "anime_db", "season_db", "epizod_db"];
     const FAVS: &[&str] = &["favorites_db", "season_db"];
     const ME_STATS: &[&str] = &["watch_history_db", "favorites_db", "ratings_db", "comments_db"];
     const USER_STATS: &[&str] = &[
@@ -12907,7 +12996,6 @@ fn etag_tables(path: &str) -> Option<&'static [&'static str]> {
     ];
     match path {
         "/api/seasons" => return Some(SEASONS),
-        "/api/history" => return Some(HISTORY),
         "/api/favorites" => return Some(FAVS),
         "/api/me/stats" => return Some(ME_STATS),
         _ => {}

@@ -5004,3 +5004,13 @@ to'g'ridan-to'g'ri kesh orqali ko'rsatilsin" (Turso'siz).
   YANGI GET yo'l qo'shilsa, uning jadvallarini `etag_tables` ga yozing.
 - **Chat/izohlar/nuqta** endi `marks_get` (DO) dan: DO ishlasa 10 daqiqalik
   zaxira Turso tekshiruvi yo'q; kutish ichidagi 2 s lik tekshiruv — kesh.
+- **Faqat o'zgargan qatorlar (delta), tomosha tarixi.** `watch_history_db.srv_at`
+  (SERVER vaqti, `mig_hist_srv_at`; `updated_at` ilova soatidan, ishonchsiz).
+  `GET /api/history?since=` — `MarkHub` bo'yicha: tarix o'zgarmagan bo'lsa
+  Turso'siz bo'sh delta; faqat tarix o'zgargan bo'lsa `srv_at > since`
+  (indeks `idx_history_srv`); nomlar/qismlar o'zgargan, qator o'chirilgan
+  (`del_<jadval>` belgisi — har `DELETE` da) yoki DO ishlamasa — to'liq.
+  Ilova: diskdagi ro'yxatga qo'shadi, 30 s ustma-ust, sutkada bir to'liq.
+- **Indeks `idx_history_upd (user_id, updated_at DESC)`** — statistikadagi
+  qismlar sahifasi endi faqat o'z 40 qatorini o'qiydi (ilgari butun tarixni
+  saralardi: hisobotda 2 so'rov = 630 qator).
