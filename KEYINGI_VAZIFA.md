@@ -5036,3 +5036,40 @@ Tuzatish:
 - Cron bo'shatganda urinish QAYTARILMAYDI: run haqiqatan o'lsa (xotira va
   h.k.) qism 3 martadan keyin "xato" bo'lib, navbatni to'smaydi. Qo'lda
   `release` va bekor qilish (`cancelled`) avvalgidek urinish sanamaydi.
+
+## Kodlash botida "Post kodlash" bo'limi (2026-10)
+
+TALAB (foydalanuvchi): `anime` repodagi Encode tizimini kodlash botiga
+ulash. Botda ikki bo'lim: "📱 Ilova uchun" (eski oqim) va "🎬 Post kodlash".
+Rasm va video yuboriladi, izohida post nomi; Actions videoni H.264 bilan
+kodlab (boshida 3 soniya rasm, burchakda logotip), logotip fayli nomidagi
+ID'ga Telegram'da ochiladigan VIDEO qilib, tagida aynan shu nom bilan
+yuboradi. Navbatdagi postlar tugma; bosilganda rasm + video, tagida inline
+tahrirlash/o'chirish. Kodlash yangi akkauntdagi `avtoencode` repoda
+(hozirgi avto-kodlash bilan bitta joyda). Hajm chegarasi qo'yilmaydi.
+
+Qanday ishlaydi:
+- `worker/src/postbot.rs` — bot qismi va `/api/post/{claim,check,finish}`.
+  `/start` endi bosh menyu. Post rejimi `app_config.encbot_mode='post'`,
+  yig'ilayotgan post `post_draft`, tahrirlash `post_edit` (`<id>:n|p|v`).
+  Rasm va video admin chatidan yopiq kanalga `copyMessage` (fayl worker'dan
+  o'tmaydi). Navbat — yangi jadval `post_jobs`.
+- Navbat soni (`/api/encode/peek`, `encode_kick`) postlarni ham hisoblaydi —
+  `avtoencode` repodagi `encode.yml` o'zgarishsiz ishga tushadi.
+- `tool/encode/run.py` har qismdan OLDIN `tool/post/post.py` orqali post
+  so'raydi va uni SHU run'da, SHU Telegram sessiyasi bilan ishlaydi. Sabab:
+  bitta sessiyani ikki run bir vaqtda ishlatsa Telegram uni bekor qiladi
+  (AUTH_KEY_DUPLICATED) — avto-kodlash ham to'xtab qolardi. Natija: kodlash
+  ketayotgan bo'lsa post joriy qism tugagach olinadi.
+- `tool/post/encode.sh` — `anime/scripts/encode.sh` (H.264) bilan bir xil
+  ffmpeg buyrug'i, faqat kirish fayl yo'llari bilan; audiosiz videoga
+  jimlik qo'yiladi. `tool/post/6076003760_logo.png` — `anime/anipng` dan;
+  fayl nomidagi ID = video yuboriladigan odam.
+- `setup-autoencode.yml` endi `tool/encode/run.py`, `tool/post/**` va h.k.
+  `main`ga push qilinganda o'zi ishga tushib, fayllarni `avtoencode` repoga
+  yuklaydi (`setup_repo.py`: push'da repo ko'rinishiga tegmaydi, o'zgarmagan
+  faylni qayta yuklamaydi).
+- Post 3 marta xato bersa `error` bo'ladi — bot navbatida ❌ bilan, "Qayta
+  urinish"/"O'chirish" tugmalari. Kodlanayotgan postni faqat o'chirish
+  mumkin: `post.py` yuborishdan oldin `/api/post/check` qiladi (409 —
+  yuborilmaydi).

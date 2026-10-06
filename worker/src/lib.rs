@@ -35,6 +35,7 @@ use worker::*;
 // Emoji, GIF va stiker to'plamlari (`packs.rs` boshidagi izohga qarang).
 mod packs;
 mod channels;
+mod postbot;
 
 // ── CORS + JSON yordamchi ──────────────────────────────────────
 
@@ -705,7 +706,7 @@ async fn ensure_db(env: &Env) {
 /// Sxema belgisi manzili: worker manba kodining FNV xeshi bilan.
 fn schema_mark_url() -> String {
     let mut h: u64 = 0xcbf29ce484222325;
-    for part in [include_str!("lib.rs"), include_str!("channels.rs"), include_str!("packs.rs")] {
+    for part in [include_str!("lib.rs"), include_str!("channels.rs"), include_str!("packs.rs"), include_str!("postbot.rs")] {
         for b in part.as_bytes() {
             h ^= *b as u64;
             h = h.wrapping_mul(0x100000001b3);
@@ -1305,6 +1306,9 @@ async fn init_db(env: &Env) -> bool {
         // ── MAJBURIY OBUNA KANALLARI (`channels.rs`) ──────────
         (channels::DDL[0], vec![]),
         (channels::DDL[1], vec![]),
+        // ── POST KODLASH (kodlash botining ikkinchi bo'limi, `postbot.rs`) ──
+        (postbot::DDL[0], vec![]),
+        (postbot::DDL[1], vec![]),
     ]).await.is_ok();
 
     // ── USTUN QO'SHISH (eski bazalar uchun, bir marta) ────────
@@ -10378,7 +10382,8 @@ fn needs_app_check(path: &str) -> bool {
     // himoyalangan. Ilova chaqiradiganlari (`queue`, `status`) esa
     // tekshiruvdan o'tadi.
     if matches!(path, "/api/encode/peek" | "/api/encode/claim" | "/api/encode/heartbeat" | "/api/encode/release"
-        | "/api/encode/quality" | "/api/encode/finish" | "/api/encode/push")
+        | "/api/encode/quality" | "/api/encode/finish" | "/api/encode/push"
+        | "/api/post/claim" | "/api/post/check" | "/api/post/finish")
     {
         return false;
     }
@@ -11299,10 +11304,12 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
 
     if path == "/api/encode/peek" && method == Method::Get {
         let res = turso_exec(env,
-            "SELECT COUNT(*) AS n FROM encode_jobs
-              WHERE state='queued' OR (state='running' AND lease_until<=?)",
-            vec![TursoArg::int(now)]).await?;
-        let n = first_row(&res).and_then(|r| r["n"].as_i64()).unwrap_or(0);
+            &format!("SELECT (SELECT COUNT(*) FROM encode_jobs
+              WHERE state='queued' OR (state='running' AND lease_until<=?)) + {} AS n",
+              postbot::PENDING_SQL),
+            vec![TursoArg::int(now), TursoArg::int(now)]).await?;
+        // Postlar (`postbot.rs`) ham shu run'da ishlanadi — ular ham hisobda.
+        let n = first_row(&res).map(|r| jint(&r, "n")).unwrap_or(0);
         return ok(json!({"pending": n}));
     }
 
@@ -11704,11 +11711,11 @@ async fn encbot_anime_page(env: &Env, page: i64) -> (String, Value) {
     if rows.is_empty() && page == 0 {
         return ("Hali birorta animega bo'lim qo'shilmagan.\nAvval ilovada anime va uning bo'limini qo'shing, \
                  keyin shu yerga qayting.".into(),
-            encbot_keyboard(vec![vec![ENCBOT_BTN_STATUS.to_string()]]));
+            encbot_keyboard(vec![vec![ENCBOT_BTN_STATUS.to_string(), postbot::BTN_HOME.to_string()]]));
     }
     let shown: Vec<&Value> = rows.iter().take(ENCBOT_PAGE as usize).collect();
     // "Holat" — eng tepada (foydalanuvchi talabi).
-    let mut kb: Vec<Vec<String>> = vec![vec![ENCBOT_BTN_STATUS.to_string()]];
+    let mut kb: Vec<Vec<String>> = vec![vec![ENCBOT_BTN_STATUS.to_string(), postbot::BTN_HOME.to_string()]];
     kb.extend(shown.iter().map(|r| {
         let id = jint(r, "id");
         let name = r["name"].as_str().unwrap_or("").trim().to_string();
@@ -11989,6 +11996,10 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
         }
         let chat = cb["message"]["chat"]["id"].as_i64().unwrap_or(0);
         let data = cb["data"].as_str().unwrap_or("");
+        // "Post kodlash" postining tahrirlash/o'chirish tugmalari (`postbot.rs`).
+        if postbot::on_callback(env, chat, data).await {
+            return ok(json!({"ok": true}));
+        }
         let parts: Vec<i64> = data.split(':').skip(1).filter_map(|p| p.parse().ok()).collect();
         match (data.split(':').next().unwrap_or(""), parts.as_slice()) {
             // Eski inline tugmalar (avvalgi xabarlarda) ham ishlaydi.
@@ -12014,6 +12025,34 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
     }
     let has_video = msg["video"].is_object() || msg["document"].is_object();
     let text = msg["text"].as_str().unwrap_or("").trim().to_string();
+
+    // ── Bosh menyu: "Ilova uchun" va "Post kodlash" (`postbot.rs`) ──
+    if text.starts_with("/start") || text == postbot::BTN_HOME {
+        config_put(env, "encbot_mode", "").await;
+        postbot::main_menu(env, chat).await;
+        return ok(json!({"ok": true}));
+    }
+    if text == postbot::BTN_APP {
+        config_put(env, "encbot_mode", "").await;
+        config_put(env, "post_edit", "").await;
+        let (t, kb) = encbot_anime_page(env, 0).await;
+        encbot_send(env, chat, &t, Some(kb)).await;
+        return ok(json!({"ok": true}));
+    }
+    if text == postbot::BTN_POST {
+        postbot::post_menu(env, chat).await;
+        return ok(json!({"ok": true}));
+    }
+    if let Some(id) = postbot::button_id(&text) {
+        config_put(env, "encbot_mode", "post").await;
+        postbot::show(env, chat, id).await;
+        return ok(json!({"ok": true}));
+    }
+    let is_status = text.starts_with("/holat") || text == ENCBOT_BTN_STATUS;
+    if !is_status && config_get(env, "encbot_mode").await.as_deref() == Some("post") {
+        postbot::on_message(env, msg, chat).await;
+        return ok(json!({"ok": true}));
+    }
 
     if has_video {
         let target: Vec<i64> = config_get(env, "encbot_target").await.unwrap_or_default()
@@ -12058,7 +12097,10 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
         let live = encode_live_text(env).await;
         let running: Vec<String> = if live.is_empty() { Vec::new() } else { vec![live] };
         let running = if running.is_empty() { String::new() } else { format!("{}\n\n", running.join("\n")) };
-        encbot_send(env, chat, &format!("\u{1F4CB} <b>Kodlash navbati</b>\n\n{running}{}\n\n{kick}",
+        let posts = turso_exec(env,
+            "SELECT COUNT(*) AS n FROM post_jobs WHERE state IN ('queued','running')", vec![]).await
+            .ok().and_then(|r| first_row(&r)).map(|r| jint(&r, "n")).unwrap_or(0);
+        encbot_send(env, chat, &format!("\u{1F4CB} <b>Kodlash navbati</b>\n\n{running}{}\n\u{1F3AC} Postlar navbatda: {posts} ta\n\n{kick}",
             if lines.is_empty() { "Navbatda hech narsa yo'q.".to_string() } else { lines.join("\n") }), None).await;
         return ok(json!({"ok": true}));
     }
@@ -12139,7 +12181,7 @@ async fn ensure_encbot_webhook(env: &Env, origin: &str) {
         return;
     }
     let url = format!("{origin}{ENCBOT_PATH}");
-    let want = format!("{bot_id}|{url}|v4");
+    let want = format!("{bot_id}|{url}|v5");
     if config_get(env, "encbot_webhook_for").await.as_deref() == Some(want.as_str()) {
         ENCBOT_READY.store(true, Ordering::Relaxed);
         return;
@@ -12165,7 +12207,7 @@ async fn ensure_encbot_webhook(env: &Env, origin: &str) {
     })).await;
     if res.is_ok() {
         let _ = tg_api_tok(&token, "setMyCommands", json!({"commands": [
-            {"command": "start", "description": "Qism qo'shish (anime tanlash)"},
+            {"command": "start", "description": "Bosh menyu (Ilova uchun / Post kodlash)"},
             {"command": "holat", "description": "Kodlash navbati holati"},
         ]})).await;
         config_put(env, "encbot_webhook_for", &want).await;
@@ -12549,16 +12591,19 @@ async fn encode_run_alive(env: &Env, repo: &str, runner: &str) -> Option<bool> {
 async fn encode_kick(env: &Env) -> String {
     let now = now_ms();
     let res = turso_exec(env,
-        "SELECT
+        &format!("SELECT
            (SELECT COUNT(*) FROM encode_jobs WHERE state='queued' OR (state='running' AND lease_until<=?)) AS pending,
+           {} AS posts,
            (SELECT COUNT(*) FROM encode_jobs WHERE state='running' AND lease_until<=?) AS stale,
            (SELECT COUNT(*) FROM encode_jobs WHERE state='running' AND lease_until>?) AS active,
            (SELECT COALESCE(MAX(lease_until),0) FROM encode_jobs WHERE state='running') AS lease_max",
-        vec![TursoArg::int(now), TursoArg::int(now), TursoArg::int(now)]).await;
+           postbot::PENDING_SQL),
+        vec![TursoArg::int(now), TursoArg::int(now), TursoArg::int(now), TursoArg::int(now)]).await;
     let Some(r) = res.ok().and_then(|r| first_row(&r)) else {
         return "\u{26A0}\u{FE0F} Navbatni o'qib bo'lmadi.".into();
     };
-    let (mut pending, mut active) = (jint(&r, "pending"), jint(&r, "active"));
+    // Postlar (`postbot.rs`) ham shu run'da, qismlardan OLDIN ishlanadi.
+    let (mut pending, mut active) = (jint(&r, "pending") + jint(&r, "posts"), jint(&r, "active"));
     // ESKIRGAN "ISHLAYAPTI": run qo'lda bekor qilingan/o'lgan bo'lsa ish bazada
     // ijarasi bilan "ishlayapti" bo'lib turaveradi. Oxirgi heartbeat 4 daqiqadan
     // oldin bo'lsa (yangi runner heartbeat yubormaydi — har safar) ishni olgan
@@ -13149,6 +13194,10 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
 
     if path.starts_with("/api/encode/") {
         return encode_route(req, &env, path, method.clone()).await;
+    }
+
+    if path.starts_with("/api/post/") {
+        return postbot::route(req, &env, path, method.clone()).await;
     }
 
     if path.starts_with("/api/packs/") {

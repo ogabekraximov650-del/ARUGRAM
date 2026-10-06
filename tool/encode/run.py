@@ -15,6 +15,9 @@ Navbat worker'da (`worker/src/lib.rs` -> `encode_route`). Bu skript:
      va `quality` bilan jurnalga (`epizod_db`) yozadi;
   5. `finish`.
 
+Har qismdan OLDIN "Post kodlash" navbati (`tool/post/post.py`) so'raladi:
+post bo'lsa shu run'da, shu sessiya bilan ishlanadi.
+
 XAVFSIZLIK:
   * tayyor sifat (`done`) QAYTA kodlanmaydi; yuklangan-u jurnalga yozilmay
     qolgani (`uploaded`) faqat jurnalga yoziladi;
@@ -47,6 +50,15 @@ from pathlib import Path
 import pyrogram.utils
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from pyrogram import Client, enums
+
+# "Post kodlash" (kodlash botining ikkinchi bo'limi). Papka yo'q bo'lsa
+# (eski nusxa) — postlar shunchaki ishlanmaydi.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "post"))
+try:
+    import post as postjob
+except Exception as _e:  # noqa: BLE001
+    postjob = None
+    print("tool/post yo'q — postlar ishlanmaydi:", _e, flush=True)
 
 # Pyrogram 2.0.106: yangi kanallarning raqami eski chegaradan kichik —
 # aks holda "Peer id invalid" (ma'lum xato, shu yamoq bilan tuzaladi).
@@ -92,11 +104,15 @@ T0 = time.time()
 
 
 CURRENT = None  # hozir ishlanayotgan ish (bekor qilinganda qaytarish uchun)
+CURRENT_POST = None  # hozir ishlanayotgan post raqami
 
 
 def on_cancel(signum, frame):
     """Run bekor qilindi (GitHub SIGINT/SIGTERM yuboradi): ishni darhol
     navbatga qaytaramiz — keyingi run 6 daqiqa kutib o'tirmasin."""
+    if CURRENT_POST and postjob:
+        postjob.cancel(RUNNER, CURRENT_POST)
+        print("Run bekor qilindi — post navbatga qaytarildi", flush=True)
     if CURRENT:
         try:
             req = urllib.request.Request(
@@ -840,6 +856,19 @@ async def main():
             if time.time() - T0 > START_BUDGET:
                 log("Vaqt limiti yaqin — qolgan ishlar keyingi run'da.")
                 break
+            # Postlar — qismlardan oldin (qisqa, admin kutib turadi).
+            pr = postjob.claim(RUNNER) if postjob else None
+            if pr:
+                global CURRENT_POST
+                CURRENT_POST = int(pr["job"]["id"])
+                try:
+                    await postjob.process(app, pr, RUNNER, log, transfer_progress)
+                finally:
+                    CURRENT_POST = None
+                    for _ in range(6):
+                        await CHLOG.flush(app)
+                worked = True
+                continue
             r = api("claim", {"runner": RUNNER, "no_heartbeat": True,
                               "log_chat": LOG_CHANNEL})
             if not status_started:

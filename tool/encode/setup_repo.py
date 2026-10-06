@@ -5,13 +5,15 @@
   1. NEW_GH_TOKEN qaysi akkauntniki ekanini aniqlaydi (eski akkaunt bo'lsa —
      to'xtaydi: adashib eski akkauntda repo ochilmasin);
   2. bo'sh repo yaratadi (bor bo'lsa — o'shani ishlatadi);
-  3. run.py, requirements.txt, session.enc va workflow'ni yuklaydi;
+  3. run.py, requirements.txt, session.enc, workflow'ni va "Post kodlash"
+     fayllarini (`tool/post/`: post.py, encode.sh, <ID>_logo.png) yuklaydi;
   4. secret'larni (TG_API_ID, TG_API_HASH, ENCODE_TOKEN, API_BASE) shifrlab
      o'rnatadi — qiymatlar logda ko'rinmaydi;
   5. kodlashni ishga tushirmaydi (buni worker qiladi).
 """
 
 import base64
+import hashlib
 import json
 import os
 import sys
@@ -44,9 +46,12 @@ def _token():
 
 HERE = Path(__file__).parent
 PACKS = HERE.parent / "packs"
+POST = HERE.parent / "post"
 TOKEN = _token()
 NAME = os.environ.get("REPO_NAME", "avtoencode").strip() or "avtoencode"
-PRIVATE = os.environ.get("REPO_PRIVATE", "true") == "true"
+# Bo'sh (masalan `push` bilan avtomatik sinxronlash) — ko'rinish O'ZGARTIRILMAYDI.
+PRIVATE_RAW = os.environ.get("REPO_PRIVATE", "").strip()
+PRIVATE = PRIVATE_RAW != "false"
 ALLOW_SAME = os.environ.get("ALLOW_SAME_ACCOUNT", "false") == "true"
 OLD_OWNER = os.environ.get("GITHUB_REPOSITORY_OWNER", "")
 def api(method, path, body=None, ok=(200, 201, 204)):
@@ -91,7 +96,7 @@ def main():
     repo = f"/repos/{login}/{NAME}"
     # Mavjud reponing ko'rinishi so'ralganiga moslanadi (public/private).
     _, info = api("GET", repo)
-    if bool(info.get("private")) != PRIVATE:
+    if PRIVATE_RAW and bool(info.get("private")) != PRIVATE:
         api("PATCH", repo, {"private": PRIVATE})
         print("Repo endi " + ("private" if PRIVATE else "PUBLIC"))
 
@@ -107,12 +112,20 @@ def main():
         "tool/encode/requirements.txt": HERE / "requirements.txt",
         "tool/encode/session.enc": HERE / "session.enc",
     }
+    # "Post kodlash" (kodlash botining ikkinchi bo'limi) — `tool/encode/run.py` ishlatadi.
+    for src in sorted(POST.iterdir()):
+        if src.is_file() and not src.name.startswith(".") and src.suffix != ".pyc":
+            files[f"tool/post/{src.name}"] = src
     for dest, src in files.items():
         body = {"message": f"Avto-kodlash: {dest}",
                 "content": base64.b64encode(src.read_bytes()).decode(),
                 "branch": "main"}
         code, cur = api("GET", f"{repo}/contents/{dest}?ref=main", ok=(200, 404))
         if code == 200:
+            raw = src.read_bytes()
+            if cur.get("sha") == hashlib.sha1(b"blob %d\0" % len(raw) + raw).hexdigest():
+                print(f"O'zgarmagan: {dest}")
+                continue
             body["sha"] = cur["sha"]
         api("PUT", f"{repo}/contents/{dest}", body)
         print(f"Yuklandi: {dest}")
