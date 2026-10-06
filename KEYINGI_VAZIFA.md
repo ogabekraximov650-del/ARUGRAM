@@ -4987,3 +4987,20 @@ to'g'ridan-to'g'ri kesh orqali ko'rsatilsin" (Turso'siz).
 - **Kartadagi "N ta qism"** — faqat ko'rinadigan qismlar
   (`visible_episode_counts`, `/api/seasons` da `epizod_count` almashtiriladi;
   isolyat + Cloudflare keshi 10 daqiqa, `free_seasons_forget` tozalaydi).
+
+## "O'zgarish bormi?" tizimi — Durable Object `MarkHub` (2026-10-06)
+
+- **Belgilar.** Turso'ga har bir yozuv (`turso_after`, `w>0`) o'zgargan
+  jadval belgisini (`t:<jadval>` -> ms) yangilaydi: `MarkHub` (butun dunyo
+  uchun bitta DO, `wrangler.toml` migratsiya `v4`, binding `MARK_HUB`) +
+  zaxira Cloudflare keshi (`MARK_CACHE_BASE`). Oylik chegara YO'Q
+  (foydalanuvchi talabi). DO javob bermasa — 5 daqiqa zaxira rejimi;
+  yetib bormagan belgilar `MARK_PENDING` da turib keyingi murojaatda ketadi.
+- **ETag.** `main()` da `etag_tables(path)` dagi GET yo'llari (bo'limlar,
+  bo'lim, tarix, sevimlilar, `me/stats`, `user/:id/stats/:kind`): versiya =
+  jadvallar belgisi + token xeshi (DO'siz rejimda + 10 daqiqalik bo'lak).
+  `If-None-Match` mos kelsa 304 — Turso'ga borilmaydi. Ilova:
+  `lib/services/etag_http.dart` (javob + versiya diskda, 304 da diskdagisi).
+  YANGI GET yo'l qo'shilsa, uning jadvallarini `etag_tables` ga yozing.
+- **Chat/izohlar/nuqta** endi `marks_get` (DO) dan: DO ishlasa 10 daqiqalik
+  zaxira Turso tekshiruvi yo'q; kutish ichidagi 2 s lik tekshiruv — kesh.

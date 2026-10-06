@@ -25,9 +25,9 @@
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
-import 'package:http/http.dart' as http;
 
 import 'auth_service.dart';
+import 'etag_http.dart';
 
 /// Profildagi har bir statistika katagi.
 ///
@@ -98,7 +98,7 @@ class UserStatsList extends ChangeNotifier {
     notifyListeners();
     try {
       final token = AuthService.instance.sessionToken;
-      final r = await http.get(
+      final r = await EtagHttp.get(
         Uri.parse('$kApiBase/api/user/$userId/stats/${kind.key}?page=$_page'),
         headers: {
           if (token != null) 'Authorization': 'Bearer $token',

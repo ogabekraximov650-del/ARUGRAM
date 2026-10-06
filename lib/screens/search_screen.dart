@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import '../services/image_cache.dart';
-import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../widgets/glass.dart';
 import '../widgets/paid_badge.dart';
 import '../services/rust_bridge.dart';
 import 'anime_detail_screen.dart';
 import '../services/api_base.dart';
+import '../services/etag_http.dart';
 
 const String API_BASE = kApiBase;
 
@@ -43,7 +43,7 @@ class _SearchScreenState extends State<SearchScreen> {
 
     try {
       if (_allSeasons.isEmpty) {
-        final res = await http.get(Uri.parse('$API_BASE/api/seasons'));
+        final res = await EtagHttp.get(Uri.parse('$API_BASE/api/seasons'));
         if (res.statusCode == 200) {
           final data = jsonDecode(res.body) as List;
           _allSeasons = data.cast<Map<String, dynamic>>();

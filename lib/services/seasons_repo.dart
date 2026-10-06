@@ -25,11 +25,11 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
-import 'package:http/http.dart' as http;
 
 import 'offline_library.dart';
 import 'rust_bridge.dart';
 import 'api_base.dart';
+import 'etag_http.dart';
 
 const String _apiBase = kApiBase;
 
@@ -74,7 +74,7 @@ class SeasonsRepo extends ChangeNotifier {
       notifyListeners();
     }
     try {
-      final r = await http
+      final r = await EtagHttp
           .get(Uri.parse('$_apiBase/api/seasons'))
           .timeout(const Duration(seconds: 10));
       if (r.statusCode == 200) {

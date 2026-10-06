@@ -46,8 +46,22 @@ deleted_classes = ["PresenceHub"]
 tag = "v3"
 new_sqlite_classes = ["EncodeLive"]
 
+# ══════════════════════════════════════════════════════════════
+#  O'ZGARISH BELGILARI — `MarkHub` (Durable Object)
+# ══════════════════════════════════════════════════════════════
+#
+# Turso'ga yozuv bo'lganda jadval belgisi shu yerda yangilanadi; o'qishda
+# "o'zgarish bormi" shu yerdan so'raladi — butun dunyo uchun BITTA nusxa
+# (`worker/src/lib.rs` -> `MarkHub`).
+[[migrations]]
+tag = "v4"
+new_sqlite_classes = ["MarkHub"]
+
 [durable_objects]
-bindings = [{ name = "ENCODE_LIVE", class_name = "EncodeLive" }]
+bindings = [
+  { name = "ENCODE_LIVE", class_name = "EncodeLive" },
+  { name = "MARK_HUB", class_name = "MarkHub" },
+]
 
 [env.production]
 name = "arugram"
@@ -55,7 +69,10 @@ workers_dev = true
 
 # Durable Object bog'lanishi muhitga MEROS bo'lmaydi — shu yerda qayta.
 [env.production.durable_objects]
-bindings = [{ name = "ENCODE_LIVE", class_name = "EncodeLive" }]
+bindings = [
+  { name = "ENCODE_LIVE", class_name = "EncodeLive" },
+  { name = "MARK_HUB", class_name = "MarkHub" },
+]
 
 # Secrets (GitHub Actions orqali o'rnatiladi):
 # wrangler secret put TURSO_URL --env production

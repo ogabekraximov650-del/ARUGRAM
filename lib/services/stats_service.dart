@@ -22,6 +22,7 @@ import 'package:http/http.dart' as http;
 
 import 'auth_service.dart';
 import 'rust_bridge.dart';
+import 'etag_http.dart';
 
 /// Bitta ko'rsatkichning davrlar bo'yicha qiymati.
 /// YILLIK ko'rsatkich ATAYLAB YO'Q (foydalanuvchi talabi):
@@ -309,7 +310,7 @@ class MyStatsService extends ChangeNotifier {
     _loading = true;
     notifyListeners();
     try {
-      final r = await http.get(
+      final r = await EtagHttp.get(
         Uri.parse('$kApiBase/api/me/stats'),
         headers: {'Authorization': 'Bearer $token'},
       ).timeout(const Duration(seconds: 15));

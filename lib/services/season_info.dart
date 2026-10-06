@@ -11,11 +11,11 @@
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
-import 'package:http/http.dart' as http;
 
 import 'auth_service.dart';
 import 'rust_bridge.dart';
 import 'sync_queue.dart';
+import 'etag_http.dart';
 
 class SeasonInfo {
   final Map<String, dynamic> season;
@@ -162,7 +162,7 @@ class SeasonService {
   /// `null` — ekran baribir ochilaveradi.
   static Future<SeasonInfo?> load(int animeId, int seasonId) async {
     try {
-      final r = await http
+      final r = await EtagHttp
           .get(
             Uri.parse('$kApiBase/api/season/$animeId/$seasonId'),
             headers: _headers(),
@@ -323,7 +323,7 @@ class FavoritesService extends ChangeNotifier {
     _loading = true;
     notifyListeners();
     try {
-      final r = await http.get(
+      final r = await EtagHttp.get(
         Uri.parse('$kApiBase/api/favorites'),
         headers: {'Authorization': 'Bearer $token'},
       ).timeout(const Duration(seconds: 15));

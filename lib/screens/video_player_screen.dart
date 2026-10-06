@@ -142,6 +142,7 @@ import '../widgets/comments_tab.dart';
 import '../widgets/paid_badge.dart';
 import '../widgets/pack_views.dart' show PackSoundHub;
 import '../services/api_base.dart';
+import '../services/etag_http.dart';
 
 const String _apiBase = kApiBase;
 
@@ -795,7 +796,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     }
 
     try {
-      final res = await http
+      final res = await EtagHttp
           .get(Uri.parse('$_apiBase/api/seasons/anime/$animeId'))
           .timeout(const Duration(seconds: 10));
       if (res.statusCode == 200) {

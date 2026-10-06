@@ -181,30 +181,248 @@ fn row_to_obj(cols: &[Value], row: &[Value]) -> Value {
 // yo'qolsa (kesh tozalandi) — "hozir o'zgardi" deb hisoblanadi, ya'ni
 // eng yomon holatda eski xatti-harakat (xabar yo'qolmaydi).
 
-const CHAT_MARK_URL: &str = "https://arugram-chat-mark.internal/v1";
-/// Izohlar (`comments_db`, `comment_likes`) belgisi — xuddi shunday.
-const COMMENTS_MARK_URL: &str = "https://arugram-comments-mark.internal/v1";
-/// Belgi o'zgarmasa ham Turso shuncha vaqtda bir marta tekshiriladi.
-///
-/// 45 s edi; foydalanuvchi talabi — 10 daqiqa. Bir ma'lumot markazi
-/// ichida o'zgarish baribir 2 soniyada seziladi; faqat BOSHQA markazdan
-/// yozilgan xabar 10 daqiqagacha kechikishi mumkin.
+// ── O'ZGARISH BELGILARI: DURABLE OBJECT (`MarkHub`) + KESH ZAXIRASI ──
+//
+// TALAB (foydalanuvchi): "kesh faqat o'zgarish bor-yo'qligini aytsin —
+// bor bo'lsagina worker Turso'ga so'rov yuborsin"; "har 10 daqiqada
+// Turso'ga so'rov yubormasdan"; "DO javob bermasagina 10 daqiqalik
+// tekshiruvga o'tilsin" (oylik DO chegarasi keyin olib tashlandi).
+//
+// Turso'ga har bir YOZUV (`turso_after`) o'zgargan jadvallarning
+// belgisini (`t:<jadval>` -> vaqt, ms) yangilaydi:
+//   1. `MarkHub` — butun dunyo uchun BITTA Durable Object. Hamma data
+//      markazlar bir joyga qaraydi, ya'ni belgi darhol hamma joyda
+//      to'g'ri — zaxira tekshiruv KERAK EMAS.
+//   2. Cloudflare keshi (har data markazda alohida) + izolyat xotirasi —
+//      DO javob bermasa (chegara, xato) ishlatiladi; shu holatdagina
+//      10 daqiqalik zaxira Turso tekshiruvi ishlaydi.
+//
+// O'qishda (`marks_get`) avval DO, bo'lmasa kesh. Belgi bilan ilova
+// oxirgi ko'rgan versiyasini solishtiradi (ETag / `mk`): o'zgarish yo'q
+// bo'lsa Turso'ga borilmaydi.
+//
+// DO CHEGARASI YO'Q (foydalanuvchi talabi: "1 mln limitni olib tashla").
+// Faqat DO javob bermasa (xato, Cloudflare chegarasi) — 5 daqiqa DO'siz,
+// shu paytda kesh belgisi + 10 daqiqalik zaxira Turso tekshiruvi.
+
+/// Belgilar keshi (zaxira): `<MARK_CACHE_BASE><kalit>`.
+const MARK_CACHE_BASE: &str = "https://arugram-mark.internal/";
+/// Belgi o'zgarmasa ham Turso shuncha vaqtda bir marta tekshiriladi —
+/// FAQAT DO ishlamayotganda (kesh har data markazda alohida).
 const CHAT_FALLBACK_MS: i64 = 10 * 60 * 1000;
-/// Nuqta (`chat_unread`) uchun zaxira tekshiruv oralig'i.
+/// Nuqta (`chat_unread`) uchun zaxira tekshiruv oralig'i (DO'siz).
 const UNREAD_FALLBACK_MS: i64 = 10 * 60 * 1000;
-/// Izohlar ro'yxati uchun zaxira tekshiruv oralig'i.
+/// Izohlar ro'yxati uchun zaxira tekshiruv oralig'i (DO'siz).
 const COMMENTS_FALLBACK_MS: i64 = 10 * 60 * 1000;
 
+const CHAT_TABLES: &[&str] = &["chat_messages", "chat_threads"];
+const COMMENT_TABLES: &[&str] = &["comments_db", "comment_likes"];
+
 thread_local! {
-    /// Shu izolyatda oxirgi o'zgarish vaqtlari (belgi manzili -> ms):
-    /// kesh kechiksa ham shu izolyat darhol biladi.
-    static MARK_LOCAL: std::cell::RefCell<std::collections::HashMap<&'static str, i64>> =
+    /// Shu izolyatda oxirgi o'zgarish vaqtlari (kalit -> ms).
+    static MARK_LOCAL: std::cell::RefCell<std::collections::HashMap<String, i64>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+    /// Shu vaqtgacha (ms) DO'ga murojaat qilinmaydi.
+    static MARK_DO_OFF: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
+    /// DO'ga yetib bormagan belgilar (kalit -> vaqt): DO qaytgach birinchi
+    /// murojaat bilan yuboriladi — aks holda DO'dagi belgi eskirib, ilova
+    /// "o'zgarish yo'q" deb eski ma'lumotni ko'rib qolardi.
+    static MARK_PENDING: std::cell::RefCell<std::collections::HashMap<String, i64>> =
         std::cell::RefCell::new(std::collections::HashMap::new());
 }
 
 fn sql_head(sql: &str) -> String {
     let flat: String = sql.split_whitespace().collect::<Vec<_>>().join(" ");
     flat.chars().take(90).collect()
+}
+
+/// Yozuv buyrug'i qaysi jadvalga tegadi (`INSERT [OR ..] INTO t`,
+/// `REPLACE INTO t`, `UPDATE t`, `DELETE FROM t`). O'qish bo'lsa `None`.
+fn sql_write_table(sql: &str) -> Option<String> {
+    let words: Vec<String> = sql
+        .split(|c: char| c.is_whitespace() || c == '(')
+        .filter(|w| !w.is_empty())
+        .take(8)
+        .map(|w| w.to_ascii_lowercase())
+        .collect();
+    let first = words.first()?.as_str();
+    let after = |kw: &str| -> Option<String> {
+        let i = words.iter().position(|w| w == kw)?;
+        words.get(i + 1).map(|t| t.trim_matches(|c| c == '"' || c == '`').to_string())
+    };
+    match first {
+        "insert" | "replace" => after("into"),
+        "update" => {
+            // UPDATE OR IGNORE t ...
+            if words.get(1).map(|w| w == "or").unwrap_or(false) {
+                words.get(3).cloned()
+            } else {
+                words.get(1).cloned()
+            }
+        }
+        "delete" => after("from"),
+        _ => None,
+    }
+}
+
+fn mark_key(table: &str) -> String {
+    format!("t:{table}")
+}
+
+fn mark_do_enabled() -> bool {
+    MARK_DO_OFF.with(|c| c.get()) <= now_ms()
+}
+
+fn mark_do_disable(until: i64) {
+    MARK_DO_OFF.with(|c| c.set(until));
+}
+
+/// `MarkHub` ga BITTA murojaat: `bump` kalitlarini `at` vaqtiga
+/// yangilaydi va `get` kalitlarining qiymatlarini qaytaradi.
+async fn mark_do_call(env: &Env, bump: &[String], at: i64, get: &[String])
+    -> Option<std::collections::HashMap<String, i64>> {
+    let remember = || {
+        MARK_PENDING.with(|p| {
+            let mut p = p.borrow_mut();
+            for k in bump {
+                let e = p.entry(k.clone()).or_insert(0);
+                if at > *e {
+                    *e = at;
+                }
+            }
+        });
+    };
+    if !mark_do_enabled() {
+        remember();
+        return None;
+    }
+    let Some(stub) = env.durable_object("MARK_HUB").ok().and_then(|ns| ns.get_by_name("marks").ok()) else {
+        remember();
+        return None;
+    };
+    // Avval yetib bormagan belgilar ham shu murojaat bilan ketadi.
+    let pending: Vec<(String, i64)> = MARK_PENDING.with(|p| p.borrow_mut().drain().collect());
+    let mut bump_all: Vec<String> = bump.to_vec();
+    let mut at_all = at;
+    for (k, t) in &pending {
+        if !bump_all.contains(k) {
+            bump_all.push(k.clone());
+        }
+        at_all = at_all.max(*t);
+    }
+    let restore = || {
+        MARK_PENDING.with(|p| {
+            let mut p = p.borrow_mut();
+            for (k, t) in &pending {
+                let e = p.entry(k.clone()).or_insert(0);
+                if *t > *e {
+                    *e = *t;
+                }
+            }
+        });
+        remember();
+    };
+    let body = json!({"bump": bump_all, "at": at_all.max(1), "get": get}).to_string();
+    let mut init = RequestInit::new();
+    init.with_method(Method::Post).with_body(Some(body.into()));
+    let req = Request::new_with_init("https://mark-hub.internal/", &init).ok()?;
+    let ok = match stub.fetch_with_request(req).await {
+        Ok(r) if r.status_code() == 200 => Some(r),
+        _ => None,
+    };
+    let Some(mut resp) = ok else {
+        // DO javob bermadi — 5 daqiqa zaxira tizimida (kesh + 10 daqiqa).
+        restore();
+        mark_do_disable(now_ms() + 5 * 60 * 1000);
+        return None;
+    };
+    let v: Value = resp.json().await.ok()?;
+    Some(
+        v["v"].as_object()
+            .map(|m| m.iter().filter_map(|(k, x)| Some((k.clone(), x.as_i64()?))).collect())
+            .unwrap_or_default(),
+    )
+}
+
+async fn mark_cache_put(key: &str, at: i64) {
+    MARK_LOCAL.with(|m| {
+        let mut m = m.borrow_mut();
+        let e = m.entry(key.to_string()).or_insert(0);
+        if at > *e {
+            *e = at;
+        }
+    });
+    let Ok(mut resp) = Response::ok(at.to_string()) else { return };
+    let _ = resp.headers_mut().set("Cache-Control", "public, max-age=86400");
+    if let Ok(req) = Request::new(&format!("{MARK_CACHE_BASE}{key}"), Method::Get) {
+        let _ = Cache::default().put(&req, resp).await;
+    }
+}
+
+/// Faqat shu data markaz (kesh) + izolyat: belgi yo'q bo'lsa "hozir"
+/// qo'yiladi (ehtiyot: o'zgarish bo'lgan deb hisoblanadi).
+async fn mark_cache_get(key: &str) -> i64 {
+    let local = MARK_LOCAL.with(|m| m.borrow().get(key).copied().unwrap_or(0));
+    let cached = async {
+        let req = Request::new(&format!("{MARK_CACHE_BASE}{key}"), Method::Get).ok()?;
+        let mut hit = Cache::default().get(&req, false).await.ok()??;
+        hit.text().await.ok()?.trim().parse::<i64>().ok()
+    }
+    .await;
+    match cached {
+        Some(v) => v.max(local),
+        None => {
+            let now = now_ms();
+            mark_cache_put(key, now).await;
+            now.max(local)
+        }
+    }
+}
+
+/// Jadvallar o'zgardi: DO (bitta murojaat) + kesh zaxirasi.
+async fn marks_bump(env: &Env, tables: &[String]) {
+    if tables.is_empty() {
+        return;
+    }
+    let at = now_ms();
+    let keys: Vec<String> = tables.iter().map(|t| mark_key(t)).collect();
+    let _ = mark_do_call(env, &keys, at, &[]).await;
+    for k in &keys {
+        mark_cache_put(k, at).await;
+    }
+}
+
+/// Jadvallar belgisi (eng so'nggi o'zgarish vaqti) va u ISHONCHLImi
+/// (`true` — DO dan, hamma data markaz uchun bir xil; `false` — faqat shu
+/// data markaz keshi, zaxira tekshiruv kerak).
+async fn marks_get(env: &Env, tables: &[&str]) -> (i64, bool) {
+    let keys: Vec<String> = tables.iter().map(|t| mark_key(t)).collect();
+    if let Some(v) = mark_do_call(env, &[], 0, &keys).await {
+        let mut max = 0;
+        for k in &keys {
+            max = max.max(v.get(k).copied().unwrap_or(0));
+        }
+        // Kesh/xotira ham hisobga olinadi (shu izolyatdagi yangi yozuv).
+        let local = keys.iter()
+            .map(|k| MARK_LOCAL.with(|m| m.borrow().get(k).copied().unwrap_or(0)))
+            .max()
+            .unwrap_or(0);
+        return (max.max(local), true);
+    }
+    let mut max = 0;
+    for k in &keys {
+        max = max.max(mark_cache_get(k).await);
+    }
+    (max, false)
+}
+
+/// Faqat kesh (bepul) — uzoq kutish ichidagi tez-tez tekshiruv uchun.
+async fn marks_local(tables: &[&str]) -> i64 {
+    let mut max = 0;
+    for t in tables {
+        max = max.max(mark_cache_get(&mark_key(t)).await);
+    }
+    max
 }
 
 /// Tejash hisobi: Turso'ga BORILMAGAN har bir holat jurnalga yoziladi —
@@ -216,71 +434,78 @@ fn saved(kind: &str, n: i64) {
     }
 }
 
-fn sql_is_write(sql: &str) -> bool {
-    let head: String = sql.trim_start().chars().take(6).collect::<String>().to_ascii_uppercase();
-    head.starts_with("INSERT") || head.starts_with("UPDATE") || head.starts_with("DELETE")
-        || head.starts_with("REPLAC")
-}
-
-fn sql_touches_chat(sql: &str) -> bool {
-    sql_is_write(sql) && (sql.contains("chat_messages") || sql.contains("chat_threads"))
-}
-
-fn sql_touches_comments(sql: &str) -> bool {
-    sql_is_write(sql) && (sql.contains("comments_db") || sql.contains("comment_likes"))
-}
-
-/// Har bir buyruq natijasini jurnalga yozadi; suhbat yoki izohlar
-/// o'zgargan bo'lsa belgini yangilaydi.
-async fn turso_after(sqls: &[&str], results: &[Value]) {
-    let (mut chat, mut comments) = (false, false);
+/// Har bir buyruq natijasini jurnalga yozadi; yozuv bo'lgan jadvallar
+/// belgisini yangilaydi (`marks_bump`).
+async fn turso_after(env: &Env, sqls: &[&str], results: &[Value]) {
+    let mut tables: Vec<String> = Vec::new();
     for (i, sql) in sqls.iter().enumerate() {
         let r = results.get(i);
         let read = r.and_then(|v| v["rows_read"].as_i64()).unwrap_or(-1);
         let wrote = r.and_then(|v| v["rows_written"].as_i64()).unwrap_or(-1);
         console_log!("aru_tq r={} w={} {}", read, wrote, sql_head(sql));
-        chat |= sql_touches_chat(sql);
-        comments |= sql_touches_comments(sql);
-    }
-    if chat {
-        mark_touch(CHAT_MARK_URL).await;
-    }
-    if comments {
-        mark_touch(COMMENTS_MARK_URL).await;
-    }
-}
-
-async fn mark_touch(url: &'static str) {
-    let now = now_ms();
-    MARK_LOCAL.with(|m| m.borrow_mut().insert(url, now));
-    let Ok(mut resp) = Response::ok(now.to_string()) else { return };
-    let _ = resp.headers_mut().set("Cache-Control", "public, max-age=86400");
-    if let Ok(req) = Request::new(url, Method::Get) {
-        let _ = Cache::default().put(&req, resp).await;
-    }
-}
-
-/// Belgi: oxirgi o'zgarish vaqti. Keshda yo'q bo'lsa "hozir" qo'yiladi
-/// (ehtiyot: o'zgarish bo'lgan deb hisoblanadi).
-async fn mark_get(url: &'static str) -> i64 {
-    let local = MARK_LOCAL.with(|m| m.borrow().get(url).copied().unwrap_or(0));
-    let cached = async {
-        let req = Request::new(url, Method::Get).ok()?;
-        let mut hit = Cache::default().get(&req, false).await.ok()??;
-        hit.text().await.ok()?.trim().parse::<i64>().ok()
-    }
-    .await;
-    match cached {
-        Some(v) => v.max(local),
-        None => {
-            mark_touch(url).await;
-            MARK_LOCAL.with(|m| m.borrow().get(url).copied().unwrap_or(0))
+        // Haqiqatan qator o'zgarmagan bo'lsa (`w=0`) belgi tegilmaydi.
+        if wrote == 0 {
+            continue;
+        }
+        if let Some(t) = sql_write_table(sql) {
+            if !tables.contains(&t) {
+                tables.push(t);
+            }
         }
     }
+    marks_bump(env, &tables).await;
 }
 
-async fn chat_mark() -> i64 {
-    mark_get(CHAT_MARK_URL).await
+/// Durable Object: o'zgarish belgilari (butun dunyo uchun bitta).
+#[durable_object(fetch)]
+pub struct MarkHub {
+    state: State,
+    marks: std::cell::RefCell<Option<std::collections::HashMap<String, i64>>>,
+}
+
+impl DurableObject for MarkHub {
+    fn new(state: State, _env: Env) -> Self {
+        Self { state, marks: std::cell::RefCell::new(None) }
+    }
+
+    async fn fetch(&self, mut req: Request) -> Result<Response> {
+        let storage = self.state.storage();
+        // ── BELGILAR ──
+        if self.marks.borrow().is_none() {
+            let saved: Option<std::collections::HashMap<String, i64>> =
+                storage.get("m").await.ok().flatten();
+            *self.marks.borrow_mut() = Some(saved.unwrap_or_default());
+        }
+        let body: Value = req.json().await.unwrap_or(json!({}));
+        let at = body["at"].as_i64().unwrap_or(0);
+        let mut changed = false;
+        if let Some(list) = body["bump"].as_array() {
+            let mut m = self.marks.borrow_mut();
+            let m = m.get_or_insert_with(Default::default);
+            for k in list.iter().filter_map(|k| k.as_str()) {
+                let e = m.entry(k.to_string()).or_insert(0);
+                // Monoton: soat orqaga ketsa ham belgi kamaymaydi.
+                let next = at.max(*e + 1);
+                if next != *e {
+                    *e = next;
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            let snapshot = self.marks.borrow().clone().unwrap_or_default();
+            let _ = storage.put("m", snapshot).await;
+        }
+        let mut out = serde_json::Map::new();
+        if let Some(list) = body["get"].as_array() {
+            let m = self.marks.borrow();
+            for k in list.iter().filter_map(|k| k.as_str()) {
+                let v = m.as_ref().and_then(|m| m.get(k).copied()).unwrap_or(0);
+                out.insert(k.to_string(), json!(v));
+            }
+        }
+        Response::from_json(&json!({"v": out}))
+    }
 }
 
 async fn turso_exec(env: &Env, sql: &str, args: Vec<TursoArg>) -> Result<Value> {
@@ -309,7 +534,7 @@ async fn turso_exec(env: &Env, sql: &str, args: Vec<TursoArg>) -> Result<Value> 
         ));
     }
     let out = r["response"]["result"].clone();
-    turso_after(&[sql], std::slice::from_ref(&out)).await;
+    turso_after(env, &[sql], std::slice::from_ref(&out)).await;
     Ok(out)
 }
 
@@ -350,7 +575,7 @@ async fn turso_batch(env: &Env, stmts: &[(&str, Vec<TursoArg>)]) -> Result<()> {
         let results: Vec<Value> =
             list.iter().map(|i| i["response"]["result"].clone()).collect();
         let sqls: Vec<&str> = stmts.iter().map(|(s, _)| *s).collect();
-        turso_after(&sqls, &results).await;
+        turso_after(env, &sqls, &results).await;
     }
     Ok(())
 }
@@ -391,7 +616,7 @@ async fn turso_many(env: &Env, stmts: &[(&str, Vec<TursoArg>)]) -> Result<Vec<Va
         }
     }
     let sqls: Vec<&str> = stmts.iter().map(|(s, _)| *s).collect();
-    turso_after(&sqls, &out).await;
+    turso_after(env, &sqls, &out).await;
     Ok(out)
 }
 
@@ -6450,7 +6675,7 @@ async fn comments_list(
 
     // ── O'ZGARMAGAN BO'LSA TURSO'GA BORILMAYDI ─────────────────
     //
-    // (`COMMENTS_MARK_URL`.) Ilova oxirgi ro'yxat bilan kelgan belgini
+    // (`MarkHub` belgilari, `COMMENT_TABLES`.) Ilova oxirgi ro'yxat bilan kelgan belgini
     // (`mk`) va tekshirish vaqtini (`at`) qaytaradi. Hech bir izoh/layk
     // o'zgarmagan va zaxira muddati o'tmagan bo'lsa — "o'sha-o'sha"
     // deyiladi, ilova diskdagi ro'yxatni ko'rsatadi.
@@ -6461,10 +6686,12 @@ async fn comments_list(
             .unwrap_or(-1)
     };
     let (mk_before, at_before) = (qi("mk"), qi("at"));
-    let mk = mark_get(COMMENTS_MARK_URL).await;
+    let (mk, reliable) = marks_get(env, COMMENT_TABLES).await;
     let now = now_ms();
+    // DO ishlasa (belgi hamma joyda bir xil) — zaxira muddati shart emas.
     if page == 0 && mk_before >= 0 && mk == mk_before && at_before > 0
-        && at_before <= now && now - at_before < COMMENTS_FALLBACK_MS
+        && at_before <= now
+        && (reliable || now - at_before < COMMENTS_FALLBACK_MS)
     {
         saved("izohlar", 1);
         return ok_nostore(json!({"same": true, "mk": mk, "at": at_before}));
@@ -6494,19 +6721,22 @@ async fn comments_list(
 
 /// GET /api/comments/wait?mk=.. — izohlar oynasi ochiq turganda yangi
 /// izoh/layk paydo bo'lishini kutadi (~20 s). TURSO'GA UMUMAN BORMAYDI:
-/// faqat Cloudflare keshidagi belgi (`COMMENTS_MARK_URL`) tekshiriladi.
-async fn comments_wait(req: &Request) -> Result<Response> {
+/// faqat o'zgarish belgisi (`MarkHub` / kesh, `COMMENT_TABLES`) tekshiriladi.
+async fn comments_wait(req: &Request, env: &Env) -> Result<Response> {
     let url = req.url()?;
     let mk_before: i64 = url.query_pairs()
         .find(|(k, _)| k == "mk")
         .and_then(|(_, v)| v.parse().ok())
         .unwrap_or(-1);
     let steps = (CHAT_WAIT_TICKS as u64 * CHAT_WAIT_STEP_MS) / CHAT_MARK_STEP_MS;
-    let mut mk = mark_get(COMMENTS_MARK_URL).await;
+    // Boshida BIR marta DO (boshqa data markazdagi yozuv ham ko'rinadi),
+    // keyin har 2 s da faqat kesh (bepul).
+    let (first, _) = marks_get(env, COMMENT_TABLES).await;
+    let mut mk = first;
     for i in 0..=steps {
         if i > 0 {
             Delay::from(core::time::Duration::from_millis(CHAT_MARK_STEP_MS)).await;
-            mk = mark_get(COMMENTS_MARK_URL).await;
+            mk = first.max(marks_local(COMMENT_TABLES).await);
         }
         if mk != mk_before {
             return ok_nostore(json!({"new": true, "mk": mk}));
@@ -7004,10 +7234,10 @@ async fn chat_unread(req: &Request, env: &Env) -> Result<Response> {
             .unwrap_or(-1)
     };
     let (u_before, mk_before, at_before) = (q("u"), q("mk"), q("at"));
-    let mk = chat_mark().await;
+    let (mk, reliable) = marks_get(env, CHAT_TABLES).await;
     let now = now_ms();
     if u_before >= 0 && mk == mk_before && at_before > 0 && at_before <= now
-        && now - at_before < UNREAD_FALLBACK_MS
+        && (reliable || now - at_before < UNREAD_FALLBACK_MS)
     {
         saved("nuqta", 1);
         return ok_nostore(json!({
@@ -7402,11 +7632,15 @@ async fn chat_wait(req: &Request, env: &Env) -> Result<Response> {
         // Eski ilova (`mk` yo'q) har kutishda bir marta o'qiydi.
         let mk_before: i64 = q("mk").parse().unwrap_or(-1);
         let at_before: i64 = q("at").parse().unwrap_or(0);
-        let mut mk = chat_mark().await;
+        // Boshida BIR marta DO (hamma data markaz uchun to'g'ri belgi);
+        // kutish ichida har 2 s da faqat kesh (bepul). DO ishlasa zaxira
+        // 10 daqiqalik Turso tekshiruvi kerak emas.
+        let (first, reliable) = marks_get(env, CHAT_TABLES).await;
+        let mut mk = first;
         let mut at = at_before;
         let mut ver = ver_before;
-        let mut need = mk != mk_before || now_ms() - at_before >= CHAT_FALLBACK_MS
-            || at_before > now_ms();
+        let stale = |at: i64| !reliable && now_ms() - at >= CHAT_FALLBACK_MS;
+        let mut need = mk != mk_before || stale(at_before) || at_before > now_ms();
         let steps = (CHAT_WAIT_TICKS as u64 * CHAT_WAIT_STEP_MS) / CHAT_MARK_STEP_MS;
         // Tejash hisobi: eski usul shu vaqt ichida har 5 s da o'qirdi.
         let started = now_ms();
@@ -7418,8 +7652,8 @@ async fn chat_wait(req: &Request, env: &Env) -> Result<Response> {
         for i in 0..=steps {
             if i > 0 {
                 Delay::from(core::time::Duration::from_millis(CHAT_MARK_STEP_MS)).await;
-                let m = chat_mark().await;
-                if m != mk || now_ms() - at >= CHAT_FALLBACK_MS {
+                let m = first.max(marks_local(CHAT_TABLES).await);
+                if m != mk || stale(at) {
                     need = true;
                 }
                 mk = m;
@@ -12617,9 +12851,85 @@ async fn main(req: Request, env: Env, ctx: Context) -> Result<Response> {
         }
     }
 
-    // Ro'yxatlar Cloudflare chekkasida keshlanmaydi (foydalanuvchi
-    // talabi) — har so'rov to'g'ridan-to'g'ri `route` ga.
+    // ── "O'ZGARISH BORMI?" (ETag) ──────────────────────────────
+    //
+    // TALAB (foydalanuvchi): "kesh faqat o'zgarish bor-yo'qligini aytsin;
+    // bor bo'lsagina worker Turso'ga so'rov yuborsin". Ro'yxatdagi GET
+    // so'rovlarida javob versiyasi = o'qiladigan jadvallar belgisi
+    // (`MarkHub`) + so'rovchi (token xeshi). Ilova oldingi versiyani
+    // `If-None-Match` da yuborsa va u o'zgarmagan bo'lsa — 304, bo'sh
+    // javob, Turso'ga BORILMAYDI; ilova diskdagi nusxani ko'rsatadi.
+    // DO ishlamasa (zaxira) versiyaga 10 daqiqalik bo'lak qo'shiladi —
+    // ya'ni eng kamida 10 daqiqada bir yangilanadi.
+    if method == Method::Get {
+        if let Some(tables) = etag_tables(&path) {
+            let (mark, reliable) = marks_get(&env, tables).await;
+            let who = token_hash(&bearer(&req));
+            let who: String = who.chars().take(12).collect();
+            // FAQAT DO javob bermasa 10 daqiqalik bo'lak qo'shiladi
+            // (foydalanuvchi talabi). DO'ga yetib bormagan belgilar keyingi
+            // murojaatda qayta yuboriladi (`MARK_PENDING`).
+            let bucket = if reliable { String::new() } else { format!("-b{}", now_ms() / 600_000) };
+            let etag = format!("W/\"{mark}-{who}{bucket}\"");
+            let sent = req.headers().get("If-None-Match").ok().flatten().unwrap_or_default();
+            if !sent.is_empty() && sent.split(',').any(|t| t.trim() == etag) {
+                saved("etag", 1);
+                let mut r = Response::empty()?.with_status(304);
+                let _ = r.headers_mut().set("ETag", &etag);
+                let _ = r.headers_mut().set("Cache-Control", "no-cache");
+                set_cors(&mut r);
+                return Ok(r);
+            }
+            let mut resp = route(req, env, ctx).await?;
+            if resp.status_code() == 200 {
+                let _ = resp.headers_mut().set("ETag", &etag);
+            }
+            return Ok(resp);
+        }
+    }
+
     route(req, env, ctx).await
+}
+
+/// "O'zgarish bormi?" tizimidagi GET yo'llari va ular o'qiydigan
+/// jadvallar. Ro'yxat HANDLER'dagi SQL bilan mos bo'lishi SHART: bu yerda
+/// yo'q jadval o'zgarsa, ilova eski javobni ko'rib qoladi. Pul va kirish
+/// (balans, obuna, sessiya) ATAYLAB yo'q.
+fn etag_tables(path: &str) -> Option<&'static [&'static str]> {
+    const SEASONS: &[&str] = &["season_db", "epizod_db"];
+    const SEASON_ONE: &[&str] = &["season_db", "epizod_db", "ratings_db", "favorites_db"];
+    const HISTORY: &[&str] = &["watch_history_db", "anime_db", "season_db", "epizod_db"];
+    const FAVS: &[&str] = &["favorites_db", "season_db"];
+    const ME_STATS: &[&str] = &["watch_history_db", "favorites_db", "ratings_db", "comments_db"];
+    const USER_STATS: &[&str] = &[
+        "watch_history_db", "favorites_db", "ratings_db", "comments_db",
+        "users_db", "anime_db", "season_db", "epizod_db",
+    ];
+    match path {
+        "/api/seasons" => return Some(SEASONS),
+        "/api/history" => return Some(HISTORY),
+        "/api/favorites" => return Some(FAVS),
+        "/api/me/stats" => return Some(ME_STATS),
+        _ => {}
+    }
+    if let Some(rest) = path.strip_prefix("/api/seasons/anime/") {
+        if rest.parse::<i64>().is_ok() {
+            return Some(SEASONS);
+        }
+    }
+    if let Some(rest) = path.strip_prefix("/api/season/") {
+        let p: Vec<&str> = rest.split('/').collect();
+        if p.len() == 2 && p.iter().all(|x| x.parse::<i64>().is_ok()) {
+            return Some(SEASON_ONE);
+        }
+    }
+    if let Some(rest) = path.strip_prefix("/api/user/") {
+        let p: Vec<&str> = rest.split('/').collect();
+        if p.len() == 3 && p[1] == "stats" && p[0].parse::<i64>().is_ok() {
+            return Some(USER_STATS);
+        }
+    }
+    None
 }
 
 async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
@@ -12899,7 +13209,7 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
         return comments_like(req, &env).await;
     }
     if path == "/api/comments/wait" && method == Method::Get {
-        return comments_wait(&req).await;
+        return comments_wait(&req, &env).await;
     }
     if let Some(rest) = path.strip_prefix("/api/comments/") {
         let parts: Vec<&str> = rest.split('/').collect();
@@ -13136,6 +13446,9 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
                     let rows = res["rows"].as_array().cloned().unwrap_or_default();
                     let mut items = rows.iter().map(|r| row_to_obj(&cols, r.as_array().unwrap_or(&vec![]))).collect::<Vec<_>>();
                     mark_free(&mut items, &free_seasons(&env).await);
+                    if let Some(counts) = visible_episode_counts(&env).await {
+                        mark_visible_counts(&mut items, &counts);
+                    }
                     return ok(json!(resolve_list(&origin, items, SEASON_URL_KEYS)));
                 }
             }

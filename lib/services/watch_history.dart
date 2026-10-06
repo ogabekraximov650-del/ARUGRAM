@@ -35,7 +35,6 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:http/http.dart' as http;
 
 import 'auth_service.dart';
 import 'rust_bridge.dart';
@@ -43,6 +42,7 @@ import 'sync_queue.dart';
 import 'telegram_service.dart';
 import 'video_cache_server.dart';
 import 'video_gate.dart';
+import 'etag_http.dart';
 
 /// Tarixdagi bitta qism.
 class HistoryItem {
@@ -640,7 +640,7 @@ class WatchHistory extends ChangeNotifier {
     List<HistoryItem>? fresh;
     if (token != null) {
       try {
-        final r = await http.get(
+        final r = await EtagHttp.get(
           Uri.parse('$kApiBase/api/history'),
           headers: {'Authorization': 'Bearer $token'},
         ).timeout(const Duration(seconds: 20));
