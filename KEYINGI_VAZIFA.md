@@ -5014,3 +5014,25 @@ to'g'ridan-to'g'ri kesh orqali ko'rsatilsin" (Turso'siz).
 - **Indeks `idx_history_upd (user_id, updated_at DESC)`** — statistikadagi
   qismlar sahifasi endi faqat o'z 40 qatorini o'qiydi (ilgari butun tarixni
   saralardi: hisobotda 2 so'rov = 630 qator).
+
+## Avto-kodlash: ishlayotgan run "o'lgan" deb hisoblanardi (2026-10)
+
+Belgi: botga har 10 daqiqada "Cron: Kodlash boshlandi (GitHub Actions ishga
+tushirildi)" kelardi, navbat 3 soatda 31 dan 30 ga zo'rg'a tushdi.
+
+Sabab (`worker/src/lib.rs` -> `encode_kick`): ishlayotgan ish (ijarasi uzun,
+`no_heartbeat`) har cron'da GitHub'dagi `runs?status=in_progress` ro'yxati
+bilan tekshirilardi. GitHub bu filtrni qidiruv indeksidan beradi va
+ishlayotgan run unda ko'rinmay qolardi -> worker ishni navbatga qaytarar
+(`attempts-1` bilan — hech qachon "xato" bo'lmasdi), yangi run ochardi; eski
+run esa sifatni yozolmay (409 `job_lost`) qismni boshidan kodlardi.
+
+Tuzatish:
+- `encode_run_alive`: ishni olgan run (`runner` = `<run_id>-<attempt>`)
+  to'g'ridan-to'g'ri `GET /actions/runs/<id>` bilan tekshiriladi; faqat
+  `completed` yoki 404 bo'lsa ish bo'shatiladi (aniqlab bo'lmasa tegilmaydi).
+- `encode_gh_busy`: ishga tushirishdan oldingi tekshiruv ham `?status=`
+  filtrisiz — oxirgi 10 run olinib, `status != completed` qidiriladi.
+- Cron bo'shatganda urinish QAYTARILMAYDI: run haqiqatan o'lsa (xotira va
+  h.k.) qism 3 martadan keyin "xato" bo'lib, navbatni to'smaydi. Qo'lda
+  `release` va bekor qilish (`cancelled`) avvalgidek urinish sanamaydi.

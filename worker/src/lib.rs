@@ -12508,6 +12508,39 @@ async fn encode_live_text(env: &Env) -> String {
     parts.join("\n")
 }
 
+/// `encode.yml` ning tugamagan (kutayotgan yoki ishlayotgan) run'i bormi.
+/// `?status=` filtri ISHLATILMAYDI (u ishlayotgan run'ni ko'rsatmay qolishi
+/// mumkin, `encode_kick` dagi izohga qarang) — oxirgi run'lar ro'yxati
+/// olinib, holati shu yerda tekshiriladi. Xato bo'lsa — bot uchun matn.
+async fn encode_gh_busy(env: &Env, repo: &str) -> std::result::Result<bool, String> {
+    match gh_api(env, Method::Get,
+        &format!("/repos/{repo}/actions/workflows/{GH_WORKFLOW}/runs?per_page=10"), None).await {
+        Ok((200, v)) => Ok(v["workflow_runs"].as_array().map(|a| a.iter()
+            .any(|r| r["status"].as_str().map(|s| s != "completed").unwrap_or(false)))
+            .unwrap_or(false)),
+        Ok((code, v)) => Err(format!("\u{26A0}\u{FE0F} GitHub javobi {code}: {}",
+            html_escape(v["message"].as_str().unwrap_or("")))),
+        Err(e) => Err(format!("\u{26A0}\u{FE0F} Actions avtomatik ishga tushmadi: {}",
+            html_escape(&e.to_string()))),
+    }
+}
+
+/// Ishni olgan run hali ishlayaptimi: `runner` = `<run_id>-<attempt>`
+/// (`run.py`). `Some(false)` — run tugagan yoki yo'q (ish bo'shatiladi),
+/// `Some(true)` — ishlayapti, `None` — aniqlab bo'lmadi (tegilmaydi).
+async fn encode_run_alive(env: &Env, repo: &str, runner: &str) -> Option<bool> {
+    let id = runner.split('-').next().and_then(|x| x.parse::<i64>().ok()).filter(|x| *x > 0);
+    let Some(id) = id else {
+        // Run raqamisiz (qo'lda, `local`) — workflow'ning biror run'i ishlayaptimi.
+        return encode_gh_busy(env, repo).await.ok();
+    };
+    match gh_api(env, Method::Get, &format!("/repos/{repo}/actions/runs/{id}"), None).await {
+        Ok((200, v)) => Some(v["status"].as_str().map(|s| s != "completed").unwrap_or(true)),
+        Ok((404, _)) => Some(false),
+        _ => None,
+    }
+}
+
 /// Navbatda ish bo'lsa-yu, uni hech kim bajarmayotgan bo'lsa —
 /// `encode.yml` ni ishga tushiradi. Natija matni (bot xabari uchun).
 ///
@@ -12528,30 +12561,42 @@ async fn encode_kick(env: &Env) -> String {
     let (mut pending, mut active) = (jint(&r, "pending"), jint(&r, "active"));
     // ESKIRGAN "ISHLAYAPTI": run qo'lda bekor qilingan/o'lgan bo'lsa ish bazada
     // ijarasi bilan "ishlayapti" bo'lib turaveradi. Oxirgi heartbeat 4 daqiqadan
-    // oldin bo'lsa-yu, GitHub'da na ishlayotgan, na kutayotgan run bo'lmasa —
-    // ish darhol bo'shatiladi va yangi run ishga tushiriladi.
-    // Yangi runner heartbeat yubormaydi (ijarasi uzun) — u ham har safar
-    // GitHub'dan tekshiriladi (GitHub so'rovi bepul, bazaga yozuv yo'q).
+    // oldin bo'lsa (yangi runner heartbeat yubormaydi — har safar) ishni olgan
+    // run GitHub'dan tekshiriladi va u TUGAGAN bo'lsagina ish bo'shatiladi.
+    //
+    // TOPILGAN XATO (2026-10): avval `runs?status=in_progress` ro'yxati
+    // so'ralardi. GitHub bu filtrni qidiruv indeksidan beradi va ishlayotgan
+    // run unda ko'pincha ko'rinmaydi — worker har 10 daqiqada ishlayotgan
+    // ishni "o'lgan" deb navbatga qaytarar, yangi run ochar (botga "Actions
+    // ishga tushirildi"), eski run esa natijani yozolmay (409) qismni boshidan
+    // kodlardi: navbat soatlab qimirlamasdi. Endi ishni olgan run (`runner` =
+    // `<run_id>-<attempt>`) TO'G'RIDAN-TO'G'RI `/actions/runs/<id>` bilan
+    // tekshiriladi. Bo'shatishda urinish qaytarilmaydi: run haqiqatan o'lgan
+    // bo'lsa (masalan xotira yetmay), shu qism 3 martadan keyin "xato" bo'ladi
+    // va navbatni cheksiz to'sib turmaydi.
     let long_lease = jint(&r, "lease_max") - now > ENCODE_LEASE_MS;
     if active > 0 && (long_lease || now - (jint(&r, "lease_max") - ENCODE_LEASE_MS) > 4 * 60 * 1000) {
         let repo = tg_secret(env, "GH_REPO");
-        if repo.contains('/') {
-            let mut any = false;
-            let mut known = true;
-            for st in ["in_progress", "queued"] {
-                match gh_api(env, Method::Get,
-                    &format!("/repos/{repo}/actions/workflows/{GH_WORKFLOW}/runs?status={st}&per_page=1"), None).await {
-                    Ok((200, v)) => any |= v["total_count"].as_i64().unwrap_or(0) > 0,
-                    _ => known = false,
+        let runners = turso_exec(env,
+            "SELECT DISTINCT runner FROM encode_jobs WHERE state='running' AND lease_until>?",
+            vec![TursoArg::int(now)]).await;
+        if let (true, Ok(runners)) = (repo.contains('/'), runners) {
+            let mut dead = Vec::new();
+            for row in rows_of(&runners) {
+                let runner = row["runner"].as_str().unwrap_or("").to_string();
+                match encode_run_alive(env, &repo, &runner).await {
+                    Some(false) => dead.push(runner),
+                    _ => {}
                 }
             }
-            if known && !any {
-                let _ = turso_exec(env,
-                    "UPDATE encode_jobs SET state='queued', runner='', lease_until=0, progress='',
-                            attempts=MAX(attempts-1,0)
-                      WHERE state='running'", vec![]).await;
-                pending += active;
-                active = 0;
+            for runner in &dead {
+                let n = turso_exec(env,
+                    "UPDATE encode_jobs SET state='queued', runner='', lease_until=0, progress=''
+                      WHERE state='running' AND runner=? RETURNING epizod_id",
+                    vec![TursoArg::text(runner)]).await
+                    .map(|v| rows_of(&v).len() as i64).unwrap_or(0);
+                pending += n;
+                active -= n;
             }
         }
     }
@@ -12568,20 +12613,10 @@ async fn encode_kick(env: &Env) -> String {
         return "\u{26A0}\u{FE0F} GH_REPO o'rnatilmagan — Actions ishga tushirilmadi.".into();
     }
     // Run allaqachon kutayotgan yoki ishga tushayotgan bo'lsa — ikkinchisi kerak emas.
-    for st in ["queued", "in_progress", "waiting", "requested", "pending"] {
-        match gh_api(env, Method::Get,
-            &format!("/repos/{repo}/actions/workflows/{GH_WORKFLOW}/runs?status={st}&per_page=1"), None).await {
-            Ok((200, v)) => {
-                if v["total_count"].as_i64().unwrap_or(0) > 0 {
-                    return "\u{23F3} Kodlash dasturi (GitHub Actions) ishga tushmoqda — biroz kuting.".into();
-                }
-            }
-            Ok((code, v)) => {
-                return format!("\u{26A0}\u{FE0F} GitHub javobi {code}: {}",
-                    html_escape(v["message"].as_str().unwrap_or("")));
-            }
-            Err(e) => return format!("\u{26A0}\u{FE0F} Actions avtomatik ishga tushmadi: {}", html_escape(&e.to_string())),
-        }
+    match encode_gh_busy(env, &repo).await {
+        Ok(true) => return "\u{23F3} Kodlash dasturi (GitHub Actions) ishga tushmoqda — biroz kuting.".into(),
+        Ok(false) => {}
+        Err(e) => return e,
     }
     // PANDANI YO'Q QILISH: bir vaqtda ikki joydan (cron, bot tugmasi, qism
     // qo'shish) kelgan ikkita so'rov GitHub ro'yxatida hali ko'rinmagan
