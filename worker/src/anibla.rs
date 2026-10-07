@@ -911,6 +911,24 @@ fn job_head(caption: &str) -> String {
     format!("\u{2B07}\u{FE0F} <b>{}</b>", c.replacen('\n', "</b>\n", 1))
 }
 
+/// Jonli holat xabari — "Post kodlash" holati bilan bir xil ko'rinish:
+/// qalin sarlavha ("⬇️ Yuklash #4: Nomi"), ostida qism/sifat, keyin runner
+/// yuborgan bosqichlar matni (oddiy matn, HTML'dan tozalanadi).
+fn live_text(job: &Value, body: &str) -> String {
+    let cap = job["caption"].as_str().unwrap_or("");
+    let mut lines = cap.lines();
+    let title = lines.next().unwrap_or("");
+    let rest: Vec<&str> = lines.collect();
+    let mut t = format!("\u{2B07}\u{FE0F} <b>Yuklash #{}: {}</b>", jint(job, "id"), html_escape(title));
+    if !rest.is_empty() {
+        t.push_str(&format!("\n{}", html_escape(&rest.join(" \u{00B7} "))));
+    }
+    if !body.is_empty() {
+        t.push_str(&format!("\n\n{}", html_escape(body)));
+    }
+    t.chars().take(4000).collect()
+}
+
 /// Sifat tanlandi: variant manzilini aniqlaydi va navbatga qo'yadi.
 async fn start(env: &Env, chat: i64, it: &Item, ep: Option<(&str, &Episode, String)>, height: i64) {
     let mut caption = it.t.clone();
@@ -1012,8 +1030,7 @@ async fn queue_list(env: &Env, chat: i64) {
         let id = jint(&j, "id");
         let fresh = encbot_api(env, "sendMessage", json!({
             "chat_id": chat, "parse_mode": "HTML",
-            "text": format!("{}\n\n\u{2699}\u{FE0F} yuklanmoqda \u{2014} holat bir necha soniyada shu yerda yangilanadi...",
-                job_head(j["caption"].as_str().unwrap_or(""))),
+            "text": live_text(&j, "\u{2699}\u{FE0F} yuklanmoqda \u{2014} holat bir necha soniyada shu yerda yangilanadi..."),
         })).await.ok().and_then(|v| v["message_id"].as_i64()).unwrap_or(0);
         if fresh > 0 {
             let old = turso_exec(env, "UPDATE anibla_jobs SET status_msg=? WHERE id=? RETURNING chat",
@@ -1137,7 +1154,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
             let mut status = jint(&job, "status_msg");
             let fresh = encbot_api(env, "sendMessage", json!({
                 "chat_id": chat, "parse_mode": "HTML",
-                "text": format!("{}\n\n\u{2699}\u{FE0F} Yuklash boshlandi...", job_head(job["caption"].as_str().unwrap_or(""))),
+                "text": live_text(&job, "\u{23F3} boshlanmoqda..."),
             })).await.ok().and_then(|v| v["message_id"].as_i64()).unwrap_or(0);
             if fresh > 0 {
                 let _ = turso_exec(env, "UPDATE anibla_jobs SET status_msg=? WHERE id=?",
@@ -1174,7 +1191,8 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
         // retry after N") — N runner'ga qaytadi va u shuncha kutadi.
         if msg > 0 && !text.is_empty() {
             if let Err(e) = encbot_api(env, "editMessageText", json!({
-                "chat_id": jint(&row, "chat"), "message_id": msg, "text": text,
+                "chat_id": jint(&row, "chat"), "message_id": msg, "parse_mode": "HTML",
+                "text": live_text(&row, &text),
             })).await {
                 let e = e.to_string();
                 if let Some(rest) = e.split("retry after").nth(1) {
@@ -1195,7 +1213,8 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
         let chat = jint(&job, "chat");
         let text: String = b["text"].as_str().unwrap_or("").chars().take(3500).collect();
         let status = |line: String| json!({"chat_id": chat, "message_id": jint(&job, "status_msg"),
-            "text": if text.is_empty() { line.clone() } else { format!("{text}\n{line}") }});
+            "parse_mode": "HTML",
+            "text": live_text(&job, &if text.is_empty() { line.clone() } else { format!("{text}\n{line}") })});
         if b["ok"].as_bool() == Some(true) {
             // Tayyor video kanaldan BOT CHATIGA ko'chiriladi, kanal posti o'chadi.
             let channel = tg_channel_id(env);

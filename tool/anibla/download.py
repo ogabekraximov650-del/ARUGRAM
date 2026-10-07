@@ -46,7 +46,7 @@ CURRENT = None
 # "har 5 soniyada"). Telegram cheklasa — worker aytgan vaqtcha kutiladi.
 LIVE_SEC = float(os.environ.get("LIVE_SEC", "5"))
 # Holat xabarida ko'rinadigan oxirgi log qatorlari.
-LOG_LINES = int(os.environ.get("LOG_LINES", "8"))
+LOG_LINES = int(os.environ.get("LOG_LINES", "4"))
 LIVE = None
 # Saytdan bir vaqtda yuklanadigan HLS bo'laklari soni (foydalanuvchi: sayt
 # 10+ MB/s bera oladi, bitta oqim ~2 MB/s).
@@ -128,7 +128,7 @@ class Live:
     def __init__(self, job):
         global LIVE
         self.job = job
-        self.head = "\u2B07\uFE0F " + job.caption + (f"\n(urinish {job.attempt})" if job.attempt > 1 else "")
+        self.head2 = f"(urinish {job.attempt})" if job.attempt > 1 else ""
         self.steps = []
         self.logs = deque(maxlen=LOG_LINES)
         self.line = "\u23F3 boshlanmoqda..."
@@ -143,7 +143,9 @@ class Live:
 
     def text(self, line=None):
         with self.lock:
-            parts = [self.head, ""] + self.steps + [self.line if line is None else line]
+            # Sarlavhani ("⬇️ Yuklash #4: Nomi") worker qo'yadi — "Post kodlash"
+            # holati bilan bir xil ko'rinish.
+            parts = ([self.head2] if self.head2 else []) + self.steps + [self.line if line is None else line]
             if self.logs:
                 parts += ["", "\U0001F4DC Log:"] + list(self.logs)
         parts += ["", f"\u23F1 jami: {hms(time.time() - self.t0)}"]
@@ -201,8 +203,9 @@ class Live:
             sp = cur / max(now - t0, 0.1) / 1048576
             eta = (total - cur) / 1048576 / sp if sp > 0 and total else 0
             self.send(f"{kind}\n{bar(pct)} {pct:.1f}%\n"
-                      f"{cur / 1048576:.1f} / {total / 1048576:.1f} MB \u00B7 {sp:.2f} MB/s \u00B7 "
-                      f"qoldi ~{hms(eta)}")
+                      f"tezlik {sp:.2f} MB/s\n"
+                      f"hajm {cur / 1048576:.1f} / {total / 1048576:.1f} MB\n"
+                      f"o'tdi {hms(now - t0)} \u00B7 qoldi ~{hms(eta)}")
             if now - state["log"] >= 10 or cur >= total:
                 state["log"] = now
                 log(f"Telegram'ga {pct:.1f}% \u00B7 {cur / 1048576:.1f}/{total / 1048576:.1f} MB \u00B7 {sp:.2f} MB/s")
@@ -319,9 +322,10 @@ def download(url, out, live):
             sp = b / max(el, 0.1) / 1048576
             eta = el * (100 - pct) / pct if pct > 0.5 else 0
             est = f" (~{b / 1048576 * 100 / pct:.0f} MB bo'ladi)" if pct > 3 else ""
-            live.send(f"\u2B07\uFE0F Saytdan yuklab olinmoqda ({PARALLEL} oqim)\n{bar(pct)} {pct:.1f}%\n"
-                      f"{b / 1048576:.1f} MB{est} \u00B7 {sp:.2f} MB/s\n"
-                      f"bo'lak {c}/{n} \u00B7 o'tdi {hms(el)} \u00B7 qoldi ~{hms(eta)}")
+            live.send(f"\u2B07\uFE0F Saytdan yuklanmoqda ({PARALLEL} oqim)\n{bar(pct)} {pct:.1f}%\n"
+                      f"tezlik {sp:.2f} MB/s \u00B7 bo'lak {c}/{n}\n"
+                      f"hajm {b / 1048576:.1f} MB{est}\n"
+                      f"o'tdi {hms(el)} \u00B7 qoldi ~{hms(eta)}")
             if time.time() - st["log"] >= 10:
                 st["log"] = time.time()
                 log(f"saytdan {pct:.1f}% \u00B7 {b / 1048576:.1f} MB \u00B7 {sp:.2f} MB/s \u00B7 bo'lak {c}/{n}")
@@ -449,7 +453,8 @@ async def process(app, job):
         live.send("⏳ boshlanmoqda...", force=True)
         el = await asyncio.to_thread(download, job.url, out, live)
         size = out.stat().st_size
-        live.done(f"Yuklab olindi: {size / 1048576:.1f} MB · {hms(el)}")
+        w, h, dur = ffprobe(out, "width", "v:0"), ffprobe(out, "height", "v:0"), ffprobe(out, "duration")
+        live.done(f"Yuklab olindi: {size / 1048576:.1f} MB · {w or '?'}x{h or '?'} · {hms(dur or 0)} · {hms(el)} da")
         log(f"  yuklab olindi: {size / 1048576:.1f} MB")
         if size > MAX_BYTES:
             raise Fatal(f"fayl {size / 1048576:.0f} MB — Telegram chegarasi 2 GB. Pastroq sifatni tanlang.")

@@ -5168,3 +5168,8 @@ Qanday ishlaydi:
   Sinov (720p, 278 bo'lak, 278 MB): ~11.8 MB/s (avval bitta oqim ~2 MB/s).
   Playlist shifrlangan / fMP4 / bayt oralig'i bo'lsa — eski ffmpeg usuli
   (`download_ffmpeg`). Telegram'ga yuklash hali bitta ulanishda.
+- HOLAT KO'RINISHI (foydalanuvchi: "Post kodlashdagidek chiqsin"): worker
+  `live_text` — qalin sarlavha "⬇️ Yuklash #4: Nomi", ostida fasl/qism/sifat;
+  runner faqat tanani yuboradi: tugagan bosqichlar ("✅ Yuklab olindi: MB ·
+  WxH · davomiylik"), joriy bosqich (foiz-chiziq, tezlik, bo'lak, hajm va
+  taxminiy yakuniy hajm, o'tdi/qoldi), oxirgi 4 log qatori, "⏱ jami".
