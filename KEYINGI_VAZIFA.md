@@ -5209,3 +5209,10 @@ Qanday ishlaydi:
   Izlash, Yuklash navbati / Bo'limlar) va "◀️ Oldingi / Keyingi ▶️" panelning
   TEPASIDA. Qismlar bitta sahifada (`EP_PAGE`=300, faqat juda uzun seriallar
   bo'linadi) va TESKARI tartibda (eng yangisi birinchi).
+- BARCHA ANIMELAR BITTA SAHIFADA (foydalanuvchi talabi): ro'yxat `limit=500`
+  bilan (sayt 500 da kesadi) bitta so'rovda olinadi (364 ta anime ~1 MB javob,
+  ~2 s). Tavsif ro'yxatda SAQLANMAYDI (`anibla_nav` shishib ketmasin), anime
+  tanlanganda `series/<slug>` / `movies/<slug>` dan olinadi (`describe`).
+  Telegram panelga tugmalar sonini cheklaydi (aniq chegarasi noma'lum) —
+  `send_list` rad etilsa 300 → 150 → 60 tugmaga tushib qayta urinadi va
+  "qolganini nom yozib qidiring" deydi. Qismlar ham shu orqali yuboriladi.

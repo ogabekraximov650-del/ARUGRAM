@@ -47,7 +47,9 @@ const BTN_CATS: &str = "\u{1F4C2} Bo'limlar";
 const WORKFLOW: &str = "anibla.yml";
 const DEFAULT_SITE: &str = "https://anibla.uz";
 /// Qidiruv natijalari bir sahifada.
-const SEARCH_PAGE: i64 = 8;
+/// Ro'yxat BITTA sahifada (foydalanuvchi talabi). Sayt `limit` ni 500 da
+/// kesadi — 364 ta anime bitta so'rovga sig'adi.
+const SEARCH_PAGE: i64 = 500;
 /// Qismlar BITTA sahifada (foydalanuvchi talabi). Juda uzun seriallar (Naruto
 /// 500 qism) uchun Telegram panelini haddan oshirmaslik maqsadida — 300 tadan.
 const EP_PAGE: usize = 300;
@@ -462,7 +464,9 @@ async fn listing(env: &Env, chat: i64, q: &str, cat: &str, label: &str, page: i6
         m: x["mediaType"].as_str().unwrap_or("").to_string(),
         y: jint(x, "published_year"),
         e: jint(x, "available_episodes"),
-        d: x["uz"]["description"].as_str().unwrap_or("").chars().take(350).collect(),
+        // Tavsif ro'yxatda SAQLANMAYDI (500 ta anime bazadagi yozuvni shishirardi):
+        // anime tanlanganda alohida olinadi (`describe`).
+        d: String::new(),
         img: x["thumbnail"].as_str().unwrap_or("").trim_start_matches('/').to_string(),
     }).filter(|i| !i.s.is_empty()).collect();
     if items.is_empty() {
@@ -488,21 +492,22 @@ async fn listing(env: &Env, chat: i64, q: &str, cat: &str, label: &str, page: i6
 /// Saqlangan ro'yxatni (qayta so'ramasdan) pastki panelga chiqaradi.
 async fn list_view(env: &Env, chat: i64, mut nav: Nav) {
     nav.v = "list".into();
-    let mut rows: Vec<Vec<String>> = Vec::new();
+    let mut top: Vec<Vec<String>> = Vec::new();
     let mut nr = Vec::new();
     if nav.p > 1 { nr.push(BTN_PREV.to_string()); }
     if nav.p < nav.pages { nr.push(BTN_NEXT.to_string()); }
-    if !nr.is_empty() { rows.push(nr); }
-    rows.extend(nav.items.iter().map(|it| vec![it.label()]));
+    if !nr.is_empty() { top.push(nr); }
+    let items: Vec<Vec<String>> = nav.items.iter().map(|it| vec![it.label()]).collect();
     let head = if nav.q.is_empty() {
         format!("\u{1F4C2} <b>{}</b> \u{2014} {} ta", html_escape(&nav.lt), nav.total)
     } else {
         format!("\u{1F50D} <b>\u{00AB}{}\u{00BB}</b> \u{2014} {} ta natija", html_escape(&nav.q), nav.total)
     };
-    let text = format!("{head} \u{00B7} {}/{}-sahifa\n\u{1F4FA} serial \u{00B7} \u{1F3AC} film\n\n\
-                        \u{2B07}\u{FE0F} Pastdan tanlang:", nav.p, nav.pages);
+    let page = if nav.pages > 1 { format!(" \u{00B7} {}/{}-sahifa", nav.p, nav.pages) } else { String::new() };
+    let text = format!("{head}{page}\n\u{1F4FA} serial \u{00B7} \u{1F3AC} film\n\n\
+                        \u{2B07}\u{FE0F} Pastdan tanlang:");
     nav_put(env, &nav).await;
-    encbot_send(env, chat, &text, Some(panel(rows, false))).await;
+    send_list(env, chat, &text, top, items, false, None).await;
 }
 
 // ── Bot: serial / film ───────────────────────────────────────
@@ -556,7 +561,22 @@ fn item_head(it: &Item, desc: bool) -> String {
 
 /// Tanlangan anime/film: muqova va keyingi qadam (film — sifatlar, serial —
 /// fasllar yoki bitta fasl bo'lsa darhol qismlar).
+/// Tanlangan anime/film tavsifi (ro'yxatda saqlanmagan).
+async fn describe(env: &Env, it: &Item) -> String {
+    let path = format!("{}/{}", if it.movie() { "movies" } else { "series" }, enc(&it.s));
+    let Ok(v) = get(env, &path, false).await else { return String::new() };
+    let d = if v["data"].is_array() { &v["data"][0] } else { &v["data"] };
+    d["uz"]["description"].as_str().or_else(|| d["ru"]["description"].as_str())
+        .unwrap_or("").chars().take(350).collect()
+}
+
 async fn show_item(env: &Env, chat: i64, mut nav: Nav) {
+    if let Some(i) = usize::try_from(nav.i).ok().filter(|i| *i < nav.items.len()) {
+        if nav.items[i].d.is_empty() {
+            let d = describe(env, &nav.items[i]).await;
+            nav.items[i].d = d;
+        }
+    }
     let Some(it) = cur_item(&nav) else { return };
     if it.movie() {
         nav.j = -1;
@@ -620,21 +640,17 @@ async fn show_eps(env: &Env, chat: i64, mut nav: Nav, card: bool) {
     nav_put(env, &nav).await;
     let start = nav.ep as usize * EP_PAGE;
     let part = &eps[start..(start + EP_PAGE).min(eps.len())];
-    let mut rows: Vec<Vec<String>> = Vec::new();
+    let mut top: Vec<Vec<String>> = Vec::new();
     let mut nr = Vec::new();
     if nav.ep > 0 { nr.push(BTN_PREV.to_string()); }
     if nav.ep + 1 < pages { nr.push(BTN_NEXT.to_string()); }
-    if !nr.is_empty() { rows.push(nr); }
-    rows.extend(part.chunks(3)
-        .map(|ch| ch.iter().map(|e| format!("\u{25B6}\u{FE0F} {}-qism", e.num)).collect::<Vec<_>>()));
+    if !nr.is_empty() { top.push(nr); }
+    let rows: Vec<Vec<String>> = part.chunks(3)
+        .map(|ch| ch.iter().map(|e| format!("\u{25B6}\u{FE0F} {}-qism", e.num)).collect::<Vec<_>>()).collect();
     let text = format!("{}\n{} \u{00B7} {} ta qism{}\n\n\u{2B07}\u{FE0F} Qismni pastdagi paneldan tanlang (eng yangisi birinchi):",
         item_head(&it, card), html_escape(&season_label(season)), eps.len(),
         if pages > 1 { format!(" \u{00B7} {}\u{2013}{}-qismlar", part[0].num, part[part.len() - 1].num) } else { String::new() });
-    if card {
-        send_card(env, chat, &it, &text, panel(rows, true)).await;
-    } else {
-        encbot_send(env, chat, &text, Some(panel(rows, true))).await;
-    }
+    send_list(env, chat, &text, top, rows, true, if card { Some(&it) } else { None }).await;
 }
 
 /// Qism tanlandi: sifatlar (qatorga bitta).
@@ -715,6 +731,50 @@ async fn pick_quality(env: &Env, chat: i64, nav: &Nav, height: i64) {
     let label = format!("{} \u{00B7} {}-qism{}", season_label(season), e.num,
         if e.title.is_empty() || e.title == e.num.to_string() { String::new() } else { format!(": {}", e.title) });
     start(env, chat, status, &it, Some((&season.slug, e, label)), height).await;
+}
+
+/// Xabar (muqova bilan yoki oddiy) yuboradi; muvaffaqiyatini qaytaradi.
+async fn try_send(env: &Env, chat: i64, text: &str, markup: &Value, card: Option<&Item>) -> bool {
+    if let Some(it) = card {
+        if !it.img.is_empty() && text.chars().count() <= 1000 {
+            let r = encbot_api(env, "sendPhoto", json!({
+                "chat_id": chat, "photo": format!("{}/{}", site(env), it.img),
+                "caption": text, "parse_mode": "HTML", "reply_markup": markup,
+            })).await;
+            if r.is_ok() {
+                return true;
+            }
+        }
+    }
+    encbot_api(env, "sendMessage", json!({
+        "chat_id": chat, "text": text, "parse_mode": "HTML",
+        "disable_web_page_preview": true, "reply_markup": markup,
+    })).await.is_ok()
+}
+
+/// Uzun ro'yxatni pastki panelga chiqaradi. Telegram panelga tugmalar sonini
+/// cheklaydi (aniq chegarasi hujjatlashtirilmagan) — rad etsa, avtomatik
+/// kamroq tugma bilan qayta urinadi va qolganini nom yozib qidirishni aytadi.
+async fn send_list(env: &Env, chat: i64, text: &str, top: Vec<Vec<String>>, items: Vec<Vec<String>>,
+                   back: bool, card: Option<&Item>) {
+    let total: usize = items.iter().map(|r| r.len()).sum();
+    for cap in [usize::MAX, 300, 150, 60] {
+        let mut rows = top.clone();
+        let mut shown = 0usize;
+        for r in &items {
+            if shown + r.len() > cap { break; }
+            shown += r.len();
+            rows.push(r.clone());
+        }
+        let t = if shown < total {
+            format!("{text}\n\n\u{26A0}\u{FE0F} Telegram paneli cheklovi: {total} tadan faqat birinchi {shown} tasi \
+                     ko'rsatildi. Qolganini nom yozib qidiring.")
+        } else { text.to_string() };
+        if try_send(env, chat, &t, &panel(rows, back), card).await {
+            return;
+        }
+    }
+    encbot_send(env, chat, "\u{274C} Ro'yxatni yuborib bo'lmadi. Nom yozib qidiring.", None).await;
 }
 
 /// Muqova rasmi bilan (bo'lmasa oddiy matn).
