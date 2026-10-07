@@ -26,7 +26,9 @@ import threading
 import time
 from collections import deque
 import urllib.error
+import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -46,6 +48,9 @@ LIVE_SEC = float(os.environ.get("LIVE_SEC", "5"))
 # Holat xabarida ko'rinadigan oxirgi log qatorlari.
 LOG_LINES = int(os.environ.get("LOG_LINES", "8"))
 LIVE = None
+# Saytdan bir vaqtda yuklanadigan HLS bo'laklari soni (foydalanuvchi: sayt
+# 10+ MB/s bera oladi, bitta oqim ~2 MB/s).
+PARALLEL = int(os.environ.get("PARALLEL", "12"))
 
 
 class Lost(Exception):
@@ -231,7 +236,122 @@ def ffprobe(path, entry, stream=None):
         return None
 
 
+def fetch(url, timeout=60):
+    req = urllib.request.Request(url, headers={"User-Agent": UA})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return r.read()
+
+
+def segments(url):
+    """Variant playlist'idagi bo'laklar: [(to'liq manzil, uzunlik)].
+    Shifrlangan (EXT-X-KEY), fMP4 (EXT-X-MAP) yoki bayt oralig'i bo'lsa — None
+    (unda ffmpeg o'zi yuklaydi)."""
+    text = fetch(url).decode(errors="replace")
+    if any(t in text for t in ("#EXT-X-KEY", "#EXT-X-MAP", "#EXT-X-BYTERANGE", "#EXT-X-STREAM-INF")):
+        return None
+    segs, dur = [], 0.0
+    for ln in text.splitlines():
+        ln = ln.strip()
+        if ln.startswith("#EXTINF:"):
+            try:
+                dur = float(ln[8:].split(",")[0])
+            except ValueError:
+                dur = 0.0
+        elif ln and not ln.startswith("#"):
+            segs.append((urllib.parse.urljoin(url, ln), dur))
+            dur = 0.0
+    return segs or None
+
+
 def download(url, out, live):
+    """HLS -> mp4. Bo'laklar `PARALLEL` tadan bir vaqtda yuklanadi, ketma-ket
+    bitta .ts ga qo'shiladi va ffmpeg qayta kodlamasdan mp4 ga o'tkazadi.
+    Playlist g'ayrioddiy bo'lsa — eski usul (ffmpeg o'zi, bitta oqim)."""
+    try:
+        segs = segments(url)
+    except Exception as e:  # noqa: BLE001
+        log("playlist:", e)
+        segs = None
+    if not segs:
+        log("parallel yuklab bo'lmaydi — ffmpeg o'zi yuklaydi")
+        return download_ffmpeg(url, out, live)
+    total = sum(d for _, d in segs)
+    n = len(segs)
+    log(f"  yuklanmoqda: {n} bo'lak, {hms(total)}, {PARALLEL} tadan parallel")
+    parts = WORK / "parts"
+    parts.mkdir(parents=True, exist_ok=True)
+    t0 = time.time()
+    lock = threading.Lock()
+    st = {"bytes": 0, "done": 0, "dur": 0.0, "log": 0.0}
+
+    def one(idx):
+        seg_url, d = segs[idx]
+        dest = parts / f"{idx:06d}.ts"
+        err = None
+        for attempt in range(6):
+            try:
+                data = fetch(seg_url, timeout=90)
+                if not data:
+                    raise RuntimeError("bo'sh javob")
+                dest.write_bytes(data)
+                with lock:
+                    st["bytes"] += len(data)
+                    st["done"] += 1
+                    st["dur"] += d
+                return
+            except Exception as e:  # noqa: BLE001
+                err = e
+                time.sleep(min(2 * (attempt + 1), 10))
+        raise RuntimeError(f"{idx + 1}-bo'lak yuklanmadi: {err}")
+
+    with ThreadPoolExecutor(max_workers=PARALLEL) as ex:
+        futs = [ex.submit(one, k) for k in range(n)]
+        pending = set(futs)
+        while pending:
+            done_now = {f for f in pending if f.done()}
+            for f in done_now:
+                f.result()  # xato bo'lsa — shu yerda chiqadi
+            pending -= done_now
+            with lock:
+                b, c, dsec = st["bytes"], st["done"], st["dur"]
+            el = time.time() - t0
+            pct = dsec * 100 / total if total else c * 100 / n
+            sp = b / max(el, 0.1) / 1048576
+            eta = el * (100 - pct) / pct if pct > 0.5 else 0
+            est = f" (~{b / 1048576 * 100 / pct:.0f} MB bo'ladi)" if pct > 3 else ""
+            live.send(f"\u2B07\uFE0F Saytdan yuklab olinmoqda ({PARALLEL} oqim)\n{bar(pct)} {pct:.1f}%\n"
+                      f"{b / 1048576:.1f} MB{est} \u00B7 {sp:.2f} MB/s\n"
+                      f"bo'lak {c}/{n} \u00B7 o'tdi {hms(el)} \u00B7 qoldi ~{hms(eta)}")
+            if time.time() - st["log"] >= 10:
+                st["log"] = time.time()
+                log(f"saytdan {pct:.1f}% \u00B7 {b / 1048576:.1f} MB \u00B7 {sp:.2f} MB/s \u00B7 bo'lak {c}/{n}")
+            if pending:
+                time.sleep(0.5)
+    el = time.time() - t0
+    log(f"  bo'laklar tayyor: {st['bytes'] / 1048576:.1f} MB, {hms(el)}, "
+        f"o'rtacha {st['bytes'] / max(el, 0.1) / 1048576:.2f} MB/s")
+
+    # Bo'laklar ketma-ket bitta .ts ga (MPEG-TS bo'laklarini shunday qo'shish to'g'ri).
+    joined = WORK / "joined.ts"
+    with open(joined, "wb") as w:
+        for k in range(n):
+            f = parts / f"{k:06d}.ts"
+            with open(f, "rb") as r:
+                shutil.copyfileobj(r, w, 4 * 1048576)
+            f.unlink()
+    live.send("\U0001F9E9 Bo'laklar mp4 ga yig'ilmoqda...")
+    log("  mp4 ga yig'ilmoqda (qayta kodlamasdan)...")
+    r = subprocess.run(["ffmpeg", "-nostdin", "-y", "-hide_banner", "-loglevel", "error",
+                        "-i", str(joined), "-map", "0:v:0?", "-map", "0:a?", "-c", "copy",
+                        "-bsf:a", "aac_adtstoasc", "-movflags", "+faststart", str(out)],
+                       capture_output=True, text=True)
+    joined.unlink(missing_ok=True)
+    if r.returncode != 0 or not out.exists() or out.stat().st_size == 0:
+        raise RuntimeError("mp4 ga yig'ib bo'lmadi: " + ((r.stderr or "").strip().splitlines() or ["?"])[-1][:200])
+    return time.time() - t0
+
+
+def download_ffmpeg(url, out, live):
     """HLS -> mp4 (qayta kodlamasdan). ffmpeg `-progress` dan foiz."""
     total = playlist_duration(url)
     log(f"  yuklanmoqda: {url} ({hms(total)})")

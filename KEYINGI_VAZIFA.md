@@ -5162,3 +5162,9 @@ Qanday ishlaydi:
   ostiga ko'chiradi. `/api/anibla/progress` joriy `status_msg` ni bazadan
   O'QIYDI (runner o'zgarmadi). Navbat ro'yxatida izoh qatori ("❌ xato")
   olib tashlandi — har qatorda holat so'z bilan (navbatda/yuklanmoqda/xato).
+- TEZ YUKLASH (foydalanuvchi: "sayt 10+ MB/s bera oladi"): `download.py`
+  variant playlist bo'laklarini `PARALLEL` (12) tadan bir vaqtda yuklaydi,
+  tartib bilan bitta .ts ga qo'shadi, ffmpeg `-c copy` bilan mp4 qiladi.
+  Sinov (720p, 278 bo'lak, 278 MB): ~11.8 MB/s (avval bitta oqim ~2 MB/s).
+  Playlist shifrlangan / fMP4 / bayt oralig'i bo'lsa — eski ffmpeg usuli
+  (`download_ffmpeg`). Telegram'ga yuklash hali bitta ulanishda.
