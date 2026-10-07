@@ -948,10 +948,19 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
     if path == "/api/anibla/progress" {
         let text: String = b["text"].as_str().unwrap_or("").chars().take(3500).collect();
         let msg = jint(&b, "status_msg");
+        // Runner har soniyada yuboradi. Telegram cheklasa ("Too Many Requests:
+        // retry after N") — N runner'ga qaytadi va u shuncha kutadi.
         if msg > 0 && !text.is_empty() {
-            let _ = encbot_api(env, "editMessageText", json!({
+            if let Err(e) = encbot_api(env, "editMessageText", json!({
                 "chat_id": jint(&b, "chat"), "message_id": msg, "text": text,
-            })).await;
+            })).await {
+                let e = e.to_string();
+                if let Some(rest) = e.split("retry after").nth(1) {
+                    let secs: i64 = rest.trim().chars().take_while(|c| c.is_ascii_digit()).collect::<String>()
+                        .parse().unwrap_or(5);
+                    return ok_nostore(json!({"ok": false, "retry_after": secs.max(1)}));
+                }
+            }
         }
         return ok_nostore(json!({"ok": true}));
     }

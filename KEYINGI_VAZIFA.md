@@ -5132,3 +5132,8 @@ Qanday ishlaydi:
   bilan"; alohida `ANIBLA_KEY` secret qo'yilsa, o'sha ustun). `deploy-worker.yml` uni
   ochib worker secret `ANIBLA_CREDS` qiladi (`creds.enc` o'zgarsa deploy
   avtomatik). Yangilash: `ANIBLA_KEY=<ENCODE_TOKEN> bash tool/anibla/set_creds.sh`.
+- JONLI HOLAT (foydalanuvchi talabi): holat xabari har 5 soniyada tahrirlanadi
+  (`LIVE_SEC`, alohida oqimda — yuklash to'xtamaydi) va ichida Actions
+  log'ining oxirgi 8 qatori ("📜 Log", `LOG_LINES`): bosqichlar, har 10 s
+  foiz/tezlik, ffmpeg ogohlantirishlari. Telegram "retry after N" bersa,
+  `/api/anibla/progress` N ni qaytaradi va runner shuncha kutadi.

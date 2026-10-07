@@ -22,7 +22,9 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
+from collections import deque
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -38,6 +40,12 @@ RUNNER = f"{os.environ.get('GITHUB_RUN_ID', 'local')}-{os.environ.get('GITHUB_RU
 START_BUDGET = int(os.environ.get("START_BUDGET_MIN", "280")) * 60
 T0 = time.time()
 CURRENT = None
+# Botdagi holat xabari shuncha soniyada bir tahrirlanadi (foydalanuvchi talabi:
+# "har 5 soniyada"). Telegram cheklasa — worker aytgan vaqtcha kutiladi.
+LIVE_SEC = float(os.environ.get("LIVE_SEC", "5"))
+# Holat xabarida ko'rinadigan oxirgi log qatorlari.
+LOG_LINES = int(os.environ.get("LOG_LINES", "8"))
+LIVE = None
 
 
 class Lost(Exception):
@@ -66,7 +74,10 @@ class Job:
 
 
 def log(*a):
-    print(time.strftime("%H:%M:%S"), *a, flush=True)
+    line = " ".join(str(x) for x in a)
+    print(time.strftime("%H:%M:%S"), line, flush=True)
+    if LIVE:
+        LIVE.add_log(line)
 
 
 def api(path, body):
@@ -105,34 +116,79 @@ def bar(pct, width=12):
 
 
 class Live:
-    """Botdagi holat xabari: bosqich, foiz, tezlik, hajm, qolgan vaqt.
-    Har 10 soniyada bittadan ko'p yuborilmaydi; xatosi ishga tegmaydi."""
+    """Botdagi holat xabari: bosqich, foiz, tezlik, hajm, qolgan vaqt va
+    oxirgi log qatorlari. Alohida oqim har `LIVE_SEC` soniyada yuboradi —
+    yuklash va Telegram'ga yuklash to'xtab qolmaydi. Xatosi ishga tegmaydi."""
 
     def __init__(self, job):
+        global LIVE
         self.job = job
-        self.head = "⬇️ " + job.caption + (f"\n(urinish {job.attempt})" if job.attempt > 1 else "")
+        self.head = "\u2B07\uFE0F " + job.caption + (f"\n(urinish {job.attempt})" if job.attempt > 1 else "")
         self.steps = []
-        self.last = 0.0
+        self.logs = deque(maxlen=LOG_LINES)
+        self.line = "\u23F3 boshlanmoqda..."
         self.t0 = time.time()
+        self.sent = ""
+        self.pause_until = 0.0
+        self.lock = threading.Lock()
+        self.stop = threading.Event()
+        LIVE = self
+        if job.status:
+            threading.Thread(target=self._loop, daemon=True).start()
 
-    def text(self, line):
-        return "\n".join([self.head, ""] + self.steps + [line, "", f"⏱ jami: {hms(time.time() - self.t0)}"])
+    def text(self, line=None):
+        with self.lock:
+            parts = [self.head, ""] + self.steps + [self.line if line is None else line]
+            if self.logs:
+                parts += ["", "\U0001F4DC Log:"] + list(self.logs)
+        parts += ["", f"\u23F1 jami: {hms(time.time() - self.t0)}"]
+        return "\n".join(parts)[-3500:]
+
+    def add_log(self, line):
+        line = line.strip()
+        if line:
+            with self.lock:
+                self.logs.append(f"{time.strftime('%H:%M:%S')} {line[:160]}")
 
     def done(self, line):
-        self.steps.append("✅ " + line)
+        with self.lock:
+            self.steps.append("\u2705 " + line)
 
     def send(self, line, force=False):
-        now = time.time()
-        if not self.job.status or (not force and now - self.last < 10):
+        with self.lock:
+            self.line = line
+        if force:
+            self._push()
+
+    def _push(self):
+        if not self.job.status or time.time() < self.pause_until:
             return
-        self.last = now
+        text = self.text()
+        if text == self.sent:
+            return
         try:
-            api("progress", {**self.job.ident(), "text": self.text(line)})
+            r = api("progress", {**self.job.ident(), "text": text})
+            wait = int(r.get("retry_after") or 0)
+            if wait:
+                self.pause_until = time.time() + wait
+            else:
+                self.sent = text
         except Exception as e:  # noqa: BLE001
-            log("progress:", e)
+            print("progress:", e, flush=True)
+
+    def _loop(self):
+        while not self.stop.wait(LIVE_SEC):
+            self._push()
+
+    def close(self):
+        global LIVE
+        self.stop.set()
+        if LIVE is self:
+            LIVE = None
 
     def transfer(self, kind):
         t0 = time.time()
+        state = {"log": 0.0}
 
         def cb(cur, total):
             now = time.time()
@@ -140,8 +196,11 @@ class Live:
             sp = cur / max(now - t0, 0.1) / 1048576
             eta = (total - cur) / 1048576 / sp if sp > 0 and total else 0
             self.send(f"{kind}\n{bar(pct)} {pct:.1f}%\n"
-                      f"{cur / 1048576:.1f} / {total / 1048576:.1f} MB · {sp:.2f} MB/s · "
-                      f"qoldi ~{hms(eta)}", force=cur >= total)
+                      f"{cur / 1048576:.1f} / {total / 1048576:.1f} MB \u00B7 {sp:.2f} MB/s \u00B7 "
+                      f"qoldi ~{hms(eta)}")
+            if now - state["log"] >= 10 or cur >= total:
+                state["log"] = now
+                log(f"Telegram'ga {pct:.1f}% \u00B7 {cur / 1048576:.1f}/{total / 1048576:.1f} MB \u00B7 {sp:.2f} MB/s")
         return cb
 
 
@@ -176,12 +235,23 @@ def download(url, out, live):
     """HLS -> mp4 (qayta kodlamasdan). ffmpeg `-progress` dan foiz."""
     total = playlist_duration(url)
     log(f"  yuklanmoqda: {url} ({hms(total)})")
-    cmd = ["ffmpeg", "-nostdin", "-y", "-loglevel", "error", "-progress", "pipe:1",
+    cmd = ["ffmpeg", "-nostdin", "-y", "-hide_banner", "-loglevel", "warning", "-progress", "pipe:1",
            "-user_agent", UA, "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "10",
            "-i", url, "-map", "0:v:0?", "-map", "0:a?", "-c", "copy",
            "-bsf:a", "aac_adtstoasc", "-movflags", "+faststart", str(out)]
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
+    errs = deque(maxlen=20)
+
+    def read_err():
+        for ln in p.stderr:
+            ln = ln.strip()
+            if ln:
+                errs.append(ln)
+                log("ffmpeg:", ln)
+    reader = threading.Thread(target=read_err, daemon=True)
+    reader.start()
     t0 = time.time()
+    last_log = 0.0
     cur_t = size = 0
     for line in p.stdout:
         k, _, v = line.strip().partition("=")
@@ -198,10 +268,13 @@ def download(url, out, live):
             live.send(f"⬇️ Saytdan yuklab olinmoqda\n{bar(pct)} {pct:.1f}%\n"
                       f"{size / 1048576:.1f} MB{est} · {sp:.2f} MB/s\n"
                       f"o'tdi {hms(el)} · qoldi ~{hms(eta)}")
-    err = p.stderr.read()
+            if time.time() - last_log >= 10:
+                last_log = time.time()
+                log(f"saytdan {pct:.1f}% · {size / 1048576:.1f} MB · {sp:.2f} MB/s · {hms(cur_t)}/{hms(total)}")
     code = p.wait()
+    reader.join(timeout=5)
     if code != 0 or not out.exists() or out.stat().st_size == 0:
-        raise RuntimeError("ffmpeg xatosi: " + (err.strip().splitlines() or ["?"])[-1][:200])
+        raise RuntimeError("ffmpeg xatosi: " + (list(errs) or ["?"])[-1][:200])
     return time.time() - t0
 
 
@@ -247,7 +320,7 @@ async def process(app, job):
     WORK.mkdir(parents=True)
     out = WORK / "video.mp4"
     thumb = WORK / "thumb.jpg"
-    log(f"#{job.id}: {job.caption.replace(chr(10), ' | ')} (urinish {job.attempt})")
+    log(f"#{job.id}: {job.caption.replace(chr(10), ' | ')} (urinish {job.attempt}, run {RUNNER})")
     try:
         if not job.channel:
             raise Fatal("yopiq kanal (TG_CHANNEL_ID) worker'da sozlanmagan")
@@ -262,9 +335,13 @@ async def process(app, job):
             raise Fatal(f"fayl {size / 1048576:.0f} MB — Telegram chegarasi 2 GB. Pastroq sifatni tanlang.")
         subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-ss", "10", "-i", str(out), "-frames:v", "1",
                         "-vf", "scale='min(320,iw)':-2", "-q:v", "5", str(thumb)])
+        log("Telegram'ga yuklanmoqda (yopiq kanal orqali)...")
         live.send("⬆️ Telegram'ga yuklanmoqda...", force=True)
+        t_up = time.time()
         msg = await upload(app, job, out, thumb, live)
+        live.done(f"Telegram'ga yuklandi · {hms(time.time() - t_up)}")
         log(f"  kanalga yuklandi: xabar {msg}")
+        live.close()
         try:
             api("done", {**job.ident(), "ok": True, "channel_msg": msg,
                          "text": live.text(f"✅ Tayyor ({size / 1048576:.1f} MB)")})
@@ -277,12 +354,14 @@ async def process(app, job):
         log(f"  #{job.id} navbatdan olib tashlandi yoki boshqa run'ga o'tdi")
     except Exception as ex:  # noqa: BLE001
         log(f"  #{job.id} XATO: {ex}")
+        live.close()
         try:
             api("done", {**job.ident(), "ok": False, "fatal": isinstance(ex, Fatal),
                          "error": str(ex)[:300], "text": live.text("")})
         except Exception:
             pass
     finally:
+        live.close()
         shutil.rmtree(WORK, ignore_errors=True)
 
 
