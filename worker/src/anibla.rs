@@ -696,6 +696,40 @@ struct Variant {
     height: i64,
     bandwidth: i64,
     url: String,
+    /// Alohida ovoz yo'li (`#EXT-X-MEDIA:TYPE=AUDIO`) — bo'lsa, video
+    /// bo'laklaridagi ichki ovoz EMAS, shu ishlatiladi.
+    audio: Option<String>,
+    /// Ovoz nomi ("Ўзбек").
+    audio_name: String,
+}
+
+impl Variant {
+    /// Navbatga yoziladigan manzil: `video` yoki `video\naudio`.
+    fn job_url(&self) -> String {
+        match &self.audio {
+            Some(a) => format!("{}\n{a}", self.url),
+            None => self.url.clone(),
+        }
+    }
+}
+
+/// `#EXT-X-MEDIA` qatoridagi atribut (qo'shtirnoq ichidagi vergul bilan ham).
+fn m3u_attr(attrs: &str, name: &str) -> String {
+    let key = format!("{name}=");
+    let mut rest = attrs;
+    while let Some(pos) = rest.find(&key) {
+        let ok = pos == 0 || rest[..pos].ends_with(',');
+        let after = &rest[pos + key.len()..];
+        if ok {
+            return if let Some(q) = after.strip_prefix('"') {
+                q.split('"').next().unwrap_or("").to_string()
+            } else {
+                after.split(',').next().unwrap_or("").trim().to_string()
+            };
+        }
+        rest = after;
+    }
+    String::new()
 }
 
 /// Nisbiy manzilni to'liqqa aylantiradi (m3u8 ichidagi `./720/index.m3u8`).
@@ -729,18 +763,40 @@ async fn variants(video: &str) -> std::result::Result<Vec<Variant>, String> {
         return Err(format!("playlist ochilmadi (HTTP {code})"));
     }
     let lines: Vec<&str> = m3u.lines().map(|l| l.trim()).collect();
+    // OVOZ YO'LLARI (foydalanuvchi: "ovozi o'zbekcha emas, ruscha bo'lib
+    // qolyapti"): ba'zi qismlarda (`external-hls`) o'zbekcha ovoz ALOHIDA
+    // playlist (`#EXT-X-MEDIA:TYPE=AUDIO,LANGUAGE="uz"`), video bo'laklari
+    // ichidagisi esa boshqa (ruscha) ovoz. Guruh bo'yicha: avval `uz`, keyin
+    // DEFAULT=YES, keyin birinchisi.
+    let mut groups: Vec<(String, String, String, i32)> = Vec::new(); // (guruh, uri, nom, ustunlik)
+    for l in &lines {
+        let Some(a) = l.strip_prefix("#EXT-X-MEDIA:") else { continue };
+        if m3u_attr(a, "TYPE") != "AUDIO" { continue; }
+        let uri = m3u_attr(a, "URI");
+        if uri.is_empty() { continue; }
+        let lang = m3u_attr(a, "LANGUAGE").to_ascii_lowercase();
+        let rank = if lang.starts_with("uz") { 3 } else if m3u_attr(a, "DEFAULT") == "YES" { 2 } else { 1 };
+        groups.push((m3u_attr(a, "GROUP-ID"), join_url(&master, &uri), m3u_attr(a, "NAME"), rank));
+    }
+    let pick_audio = |gid: &str| -> Option<(String, String)> {
+        groups.iter().filter(|g| g.0 == gid).max_by_key(|g| g.3).map(|g| (g.1.clone(), g.2.clone()))
+    };
     let mut out = Vec::new();
     for (k, l) in lines.iter().enumerate() {
         let Some(attrs) = l.strip_prefix("#EXT-X-STREAM-INF:") else { continue };
         let Some(uri) = lines[k + 1..].iter().find(|x| !x.is_empty() && !x.starts_with('#')) else { continue };
-        let attr = |name: &str| attrs.split(',').find_map(|p| p.trim().strip_prefix(name)).unwrap_or("");
-        let height = attr("RESOLUTION=").split('x').nth(1).and_then(|h| h.parse().ok()).unwrap_or(0);
-        let bandwidth = attr("BANDWIDTH=").parse().unwrap_or(0);
-        out.push(Variant { height, bandwidth, url: join_url(&master, uri) });
+        let height = m3u_attr(attrs, "RESOLUTION").split('x').nth(1).and_then(|h| h.parse().ok()).unwrap_or(0);
+        let bandwidth = m3u_attr(attrs, "BANDWIDTH").parse().unwrap_or(0);
+        let gid = m3u_attr(attrs, "AUDIO");
+        let (audio, audio_name) = match (!gid.is_empty()).then(|| pick_audio(&gid)).flatten() {
+            Some((u, n)) => (Some(u), n),
+            None => (None, String::new()),
+        };
+        out.push(Variant { height, bandwidth, url: join_url(&master, uri), audio, audio_name });
     }
     if out.is_empty() {
         // Sifatlarsiz oddiy playlist — bitta "asl" sifat.
-        out.push(Variant { height: 0, bandwidth: 0, url: master });
+        out.push(Variant { height: 0, bandwidth: 0, url: master, audio: None, audio_name: String::new() });
     }
     out.sort_by(|a, b| b.height.cmp(&a.height).then(b.bandwidth.cmp(&a.bandwidth)));
     out.dedup_by_key(|v| v.height);
@@ -793,7 +849,9 @@ async fn qualities_text(env: &Env, it: &Item, ep: Option<(&str, &Episode)>)
         (label, v.height)
     }).collect();
     let len = if secs > 0.0 { format!("\u{23F1} {} \u{00B7} ", hms(secs as i64)) } else { String::new() };
-    Ok((format!("{len}Sifatni tanlang:"), rows))
+    let voice = if vs[0].audio_name.is_empty() { String::new() }
+                else { format!("\u{1F50A} Ovoz: {}\n", html_escape(&vs[0].audio_name)) };
+    Ok((format!("{voice}{len}Sifatni tanlang:"), rows))
 }
 
 fn hms(s: i64) -> String {
@@ -959,7 +1017,7 @@ async fn start(env: &Env, chat: i64, it: &Item, ep: Option<(&str, &Episode, Stri
     // Bir xil video ikki marta navbatga tushmasin (tugma ikki bosilsa yoki
     // Telegram webhook'ni qayta yuborsa).
     let dup = turso_exec(env, "SELECT id FROM anibla_jobs WHERE url=? AND state IN ('queued','running') LIMIT 1",
-        vec![TursoArg::text(&v.url)]).await.ok().and_then(|r| first_row(&r));
+        vec![TursoArg::text(&v.job_url())]).await.ok().and_then(|r| first_row(&r));
     if let Some(d) = dup {
         let _ = encbot_api(env, "editMessageText", edit(format!(
             "\u{2139}\u{FE0F} Bu video allaqachon navbatda (#{}).", jint(&d, "id")))).await;
@@ -967,7 +1025,7 @@ async fn start(env: &Env, chat: i64, it: &Item, ep: Option<(&str, &Episode, Stri
     }
     let ins = turso_exec(env,
         "INSERT INTO anibla_jobs (url, caption, file_name, chat, status_msg, queued_at) VALUES (?,?,?,?,?,?) RETURNING id",
-        vec![TursoArg::text(&v.url), TursoArg::text(&caption), TursoArg::text(&fname),
+        vec![TursoArg::text(&v.job_url()), TursoArg::text(&caption), TursoArg::text(&fname),
              TursoArg::int(chat), TursoArg::int(status), TursoArg::int(now_ms())]).await;
     let Some(id) = ins.ok().and_then(|r| first_row(&r)).map(|r| jint(&r, "id")) else {
         let _ = encbot_api(env, "editMessageText", edit("\u{274C} Navbatga qo'yib bo'lmadi (baza xatosi).".into())).await;

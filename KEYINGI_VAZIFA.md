@@ -5173,3 +5173,13 @@ Qanday ishlaydi:
   runner faqat tanani yuboradi: tugagan bosqichlar ("✅ Yuklab olindi: MB ·
   WxH · davomiylik"), joriy bosqich (foiz-chiziq, tezlik, bo'lak, hajm va
   taxminiy yakuniy hajm, o'tdi/qoldi), oxirgi 4 log qatori, "⏱ jami".
+- OVOZ YO'LI (foydalanuvchi: "ovozi o'zbekcha emas, ruscha"): ba'zi qismlar
+  (`/external-hls/...`, masalan Muzli devor 14, Moviy quticha 2) master
+  playlistida o'zbekcha ovoz ALOHIDA: `#EXT-X-MEDIA:TYPE=AUDIO,LANGUAGE="uz"`,
+  video bo'laklari ichida esa boshqa (ruscha) ovoz bor. Eski kod faqat video
+  variantini olardi. Endi worker `variants` ovoz guruhidan `uz` (keyin
+  DEFAULT=YES) ni tanlaydi, navbatga `video\naudio` yoziladi; runner ikkalasini
+  parallel yuklab `-map 0:v:0 -map 1:a:0` bilan qo'shadi (ichki ovoz
+  tashlanadi). Sinov: natijadagi ovoz o'zbekcha playlist bilan bayt-bayt bir
+  xil (MD5). Sifat tanlashda "🔊 Ovoz: Ўзбек" ko'rinadi. Oddiy (`/content/...`)
+  qismlarda bitta ovoz — o'zgarishsiz.

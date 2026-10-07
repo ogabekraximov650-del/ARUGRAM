@@ -269,27 +269,38 @@ def segments(url):
 def download(url, out, live):
     """HLS -> mp4. Bo'laklar `PARALLEL` tadan bir vaqtda yuklanadi, ketma-ket
     bitta .ts ga qo'shiladi va ffmpeg qayta kodlamasdan mp4 ga o'tkazadi.
+
+    `url` — `video` yoki `video\naudio`: ba'zi qismlarda o'zbekcha ovoz ALOHIDA
+    playlist (worker `#EXT-X-MEDIA` dan tanlaydi), video bo'laklari ichidagi
+    ovoz esa boshqa til (ruscha). Shunda video faqat videosi bilan, ovoz esa
+    alohida playlistdan olinadi.
     Playlist g'ayrioddiy bo'lsa — eski usul (ffmpeg o'zi, bitta oqim)."""
+    vurl, _, aurl = url.partition("\n")
+    vurl, aurl = vurl.strip(), aurl.strip()
     try:
-        segs = segments(url)
+        vsegs = segments(vurl)
+        asegs = segments(aurl) if aurl else []
     except Exception as e:  # noqa: BLE001
         log("playlist:", e)
-        segs = None
-    if not segs:
+        vsegs = asegs = None
+    if not vsegs or asegs is None:
         log("parallel yuklab bo'lmaydi — ffmpeg o'zi yuklaydi")
-        return download_ffmpeg(url, out, live)
-    total = sum(d for _, d in segs)
-    n = len(segs)
-    log(f"  yuklanmoqda: {n} bo'lak, {hms(total)}, {PARALLEL} tadan parallel")
+        return download_ffmpeg(vurl, out, live, aurl)
+    if aurl:
+        log(f"  alohida ovoz yo'li: {len(asegs)} bo'lak (video ichidagi ovoz tashlanadi)")
+    jobs = [("v", k, u, d) for k, (u, d) in enumerate(vsegs)] + [("a", k, u, d) for k, (u, d) in enumerate(asegs)]
+    total = sum(d for _, _, _, d in jobs)
+    n = len(jobs)
+    log(f"  yuklanmoqda: {n} bo'lak, {hms(sum(d for _, d in vsegs))}, {PARALLEL} tadan parallel")
     parts = WORK / "parts"
     parts.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
     lock = threading.Lock()
     st = {"bytes": 0, "done": 0, "dur": 0.0, "log": 0.0}
 
-    def one(idx):
-        seg_url, d = segs[idx]
-        dest = parts / f"{idx:06d}.ts"
+    def one(job):
+        kind, idx, seg_url, d = job
+        dest = parts / f"{kind}{idx:06d}.ts"
         err = None
         for attempt in range(6):
             try:
@@ -305,11 +316,10 @@ def download(url, out, live):
             except Exception as e:  # noqa: BLE001
                 err = e
                 time.sleep(min(2 * (attempt + 1), 10))
-        raise RuntimeError(f"{idx + 1}-bo'lak yuklanmadi: {err}")
+        raise RuntimeError(f"{'ovoz' if kind == 'a' else 'video'} {idx + 1}-bo'lagi yuklanmadi: {err}")
 
     with ThreadPoolExecutor(max_workers=PARALLEL) as ex:
-        futs = [ex.submit(one, k) for k in range(n)]
-        pending = set(futs)
+        pending = {ex.submit(one, jb) for jb in jobs}
         while pending:
             done_now = {f for f in pending if f.done()}
             for f in done_now:
@@ -336,32 +346,43 @@ def download(url, out, live):
         f"o'rtacha {st['bytes'] / max(el, 0.1) / 1048576:.2f} MB/s")
 
     # Bo'laklar ketma-ket bitta .ts ga (MPEG-TS bo'laklarini shunday qo'shish to'g'ri).
-    joined = WORK / "joined.ts"
-    with open(joined, "wb") as w:
-        for k in range(n):
-            f = parts / f"{k:06d}.ts"
-            with open(f, "rb") as r:
-                shutil.copyfileobj(r, w, 4 * 1048576)
-            f.unlink()
+    def join(kind, count):
+        dst = WORK / f"{kind}.ts"
+        with open(dst, "wb") as w:
+            for k in range(count):
+                f = parts / f"{kind}{k:06d}.ts"
+                with open(f, "rb") as r:
+                    shutil.copyfileobj(r, w, 4 * 1048576)
+                f.unlink()
+        return dst
+    vts = join("v", len(vsegs))
+    ats = join("a", len(asegs)) if asegs else None
     live.send("\U0001F9E9 Bo'laklar mp4 ga yig'ilmoqda...")
-    log("  mp4 ga yig'ilmoqda (qayta kodlamasdan)...")
-    r = subprocess.run(["ffmpeg", "-nostdin", "-y", "-hide_banner", "-loglevel", "error",
-                        "-i", str(joined), "-map", "0:v:0?", "-map", "0:a?", "-c", "copy",
-                        "-bsf:a", "aac_adtstoasc", "-movflags", "+faststart", str(out)],
-                       capture_output=True, text=True)
-    joined.unlink(missing_ok=True)
+    log("  mp4 ga yig'ilmoqda (qayta kodlamasdan)" + (", o'zbekcha ovoz bilan" if ats else "") + "...")
+    cmd = ["ffmpeg", "-nostdin", "-y", "-hide_banner", "-loglevel", "error", "-i", str(vts)]
+    if ats:
+        cmd += ["-i", str(ats), "-map", "0:v:0", "-map", "1:a:0"]
+    else:
+        cmd += ["-map", "0:v:0?", "-map", "0:a?"]
+    cmd += ["-c", "copy", "-bsf:a", "aac_adtstoasc", "-movflags", "+faststart", str(out)]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    vts.unlink(missing_ok=True)
+    if ats:
+        ats.unlink(missing_ok=True)
     if r.returncode != 0 or not out.exists() or out.stat().st_size == 0:
         raise RuntimeError("mp4 ga yig'ib bo'lmadi: " + ((r.stderr or "").strip().splitlines() or ["?"])[-1][:200])
     return time.time() - t0
 
 
-def download_ffmpeg(url, out, live):
-    """HLS -> mp4 (qayta kodlamasdan). ffmpeg `-progress` dan foiz."""
+def download_ffmpeg(url, out, live, audio=""):
+    """HLS -> mp4 (qayta kodlamasdan). ffmpeg `-progress` dan foiz.
+    `audio` — alohida ovoz playlisti (bo'lsa, videoning ichki ovozi o'rniga)."""
     total = playlist_duration(url)
     log(f"  yuklanmoqda: {url} ({hms(total)})")
     cmd = ["ffmpeg", "-nostdin", "-y", "-hide_banner", "-loglevel", "warning", "-progress", "pipe:1",
            "-user_agent", UA, "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "10",
-           "-i", url, "-map", "0:v:0?", "-map", "0:a?", "-c", "copy",
+           "-i", url] + (["-user_agent", UA, "-i", audio, "-map", "0:v:0", "-map", "1:a:0"] if audio
+                         else ["-map", "0:v:0?", "-map", "0:a?"]) + ["-c", "copy",
            "-bsf:a", "aac_adtstoasc", "-movflags", "+faststart", str(out)]
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
     errs = deque(maxlen=20)
