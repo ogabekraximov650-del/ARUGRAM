@@ -5127,7 +5127,8 @@ Qanday ishlaydi:
 - `tool/anibla/anibla.workflow.yml` va `download.py` -> avtoencode repo
   (`sync-packs.yml`, `tool/packs/sync_repo.py`). `creds.enc` KO'CHIRILMAYDI.
 - LOGIN/PAROL: `tool/anibla/creds.enc` — JSON `{site, login, password}`,
-  AES-256-CBC + PBKDF2 (200 000), `gh_token.enc` bilan bir xil format. Kalit —
-  GitHub secret `ANIBLA_KEY` (environment `secret`). `deploy-worker.yml` uni
+  AES-256-CBC + PBKDF2 (200 000), `gh_token.enc` bilan bir xil format va
+  KALIT ham bir xil — `ENCODE_TOKEN` (foydalanuvchi: "qolgan fayllar shu kalit
+  bilan"; alohida `ANIBLA_KEY` secret qo'yilsa, o'sha ustun). `deploy-worker.yml` uni
   ochib worker secret `ANIBLA_CREDS` qiladi (`creds.enc` o'zgarsa deploy
-  avtomatik). Yangilash: `ANIBLA_KEY=... bash tool/anibla/set_creds.sh`.
+  avtomatik). Yangilash: `ANIBLA_KEY=<ENCODE_TOKEN> bash tool/anibla/set_creds.sh`.

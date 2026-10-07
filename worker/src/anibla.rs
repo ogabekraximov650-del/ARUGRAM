@@ -7,7 +7,7 @@
 // mavjud sifatlari (1080p, 720p, ...) tugma bo'lib chiqadi; tugma
 // bosilganda video GitHub Actions orqali (IKKINCHI akkauntdagi `GH_REPO`)
 // yuklab olinib, botga yuboriladi. Login/parol AES bilan shifrlangan
-// faylda (`tool/anibla/creds.enc`).
+// faylda (`tool/anibla/creds.enc`, kalit — `ENCODE_TOKEN`).
 //
 // SAYT (2026-10 holatiga, sayt JS kodidan va so'rovlardan aniqlangan):
 //   * API: `<sayt>/api/backend/api/v1/...` (Next.js proksi);
@@ -251,8 +251,8 @@ fn menu_keyboard() -> Value {
 pub(crate) async fn menu(env: &Env, chat: i64) {
     config_put(env, "encbot_mode", "anibla").await;
     let warn = if creds(env).is_none() {
-        "\n\n\u{26A0}\u{FE0F} Login/parol hali sozlanmagan: GitHub'da <code>ANIBLA_KEY</code> \
-         secret'ini qo'yib, worker'ni qayta deploy qiling."
+        "\n\n\u{26A0}\u{FE0F} Login/parol hali sozlanmagan: <code>tool/anibla/creds.enc</code> \
+         <code>ENCODE_TOKEN</code> bilan ochilmadi (deploy log'iga qarang)."
     } else { "" };
     encbot_send(env, chat, &format!(
         "\u{1F39E} <b>Anibla.uz yuklash</b>\n\n\

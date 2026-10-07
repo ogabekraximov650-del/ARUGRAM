@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # anibla.uz login/parolini yangilash: `tool/anibla/creds.enc` ni qayta shifrlaydi.
 #
-#   ANIBLA_KEY=<GitHub'dagi ANIBLA_KEY qiymati> bash tool/anibla/set_creds.sh
+#   ANIBLA_KEY=<ENCODE_TOKEN qiymati> bash tool/anibla/set_creds.sh
 #
 # Login (telefon) va parol so'raladi, ekranda ko'rinmaydi. Keyin faylni
 # commit/push qiling — worker deploy'i (`deploy-worker.yml`) yangisini o'rnatadi.

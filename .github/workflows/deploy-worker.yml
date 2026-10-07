@@ -110,11 +110,11 @@ jobs:
           # `tool/encode/gh_repo.txt` dan (`owner/repo`).
           # Token almashsa `gh_token.enc` yangilanadi va shu fayl o'zgarib deploy ishga tushadi.
           # anibla.uz login/paroli (`worker/src/anibla.rs`): `tool/anibla/creds.enc`
-          # (AES-256-CBC, PBKDF2) GitHub secret `ANIBLA_KEY` bilan ochiladi va
-          # worker'ga `ANIBLA_CREDS` (JSON) bo'lib qo'yiladi. Kalit yo'q yoki
-          # noto'g'ri bo'lsa — eski qiymat saqlanadi.
+          # (AES-256-CBC, PBKDF2) `ENCODE_TOKEN` bilan ochiladi (`gh_token.enc`,
+          # `session.enc` kabi; alohida `ANIBLA_KEY` qo'yilsa — o'sha) va worker'ga
+          # `ANIBLA_CREDS` (JSON) bo'lib qo'yiladi. Ochilmasa — eski qiymat saqlanadi.
           if [ -f ../tool/anibla/creds.enc ]; then
-            AK=$(printf '%s' "${{ secrets.ANIBLA_KEY }}" | tr -d '[:space:]')
+            AK=$(printf '%s' "${{ secrets.ANIBLA_KEY || secrets.ENCODE_TOKEN }}" | tr -d '[:space:]')
             AC=""
             if [ -n "$AK" ]; then
               AC=$(K="$AK" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K \
@@ -124,7 +124,7 @@ jobs:
               put ANIBLA_CREDS "$AC"
               echo "✅ ANIBLA_CREDS shifrlangan fayldan o'rnatildi"
             else
-              echo "⚠️  creds.enc ochilmadi (ANIBLA_KEY yo'q yoki noto'g'ri) — eski ANIBLA_CREDS saqlanadi"
+              echo "⚠️  creds.enc ochilmadi (kalit noto'g'ri) — eski ANIBLA_CREDS saqlanadi"
             fi
           fi
           if [ -f ../tool/encode/gh_token.enc ] && [ -f ../tool/encode/gh_repo.txt ]; then
