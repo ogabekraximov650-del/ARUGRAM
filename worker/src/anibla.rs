@@ -47,12 +47,12 @@ const BTN_CATS: &str = "\u{1F4C2} Bo'limlar";
 const WORKFLOW: &str = "anibla.yml";
 const DEFAULT_SITE: &str = "https://anibla.uz";
 /// Qidiruv natijalari bir sahifada.
-/// Ro'yxat BITTA sahifada (foydalanuvchi talabi). Sayt `limit` ni 500 da
-/// kesadi — 364 ta anime bitta so'rovga sig'adi.
-const SEARCH_PAGE: i64 = 500;
-/// Qismlar BITTA sahifada (foydalanuvchi talabi). Juda uzun seriallar (Naruto
-/// 500 qism) uchun Telegram panelini haddan oshirmaslik maqsadida — 300 tadan.
-const EP_PAGE: usize = 300;
+/// Ro'yxat sahifasi — 100 tadan (foydalanuvchi talabi). Telegram pastki panelga
+/// 150 tagacha tugmani qabul qildi, 300 ni rad etdi (sinab ko'rilgan).
+const SEARCH_PAGE: i64 = 100;
+/// Qismlar sahifasi: 3 tadan qatorda 150 tagacha (Telegram chegarasidan ichkarida;
+/// 150 tugma sinab ko'rilgan). Qisqa seriallar bitta sahifaga sig'adi.
+const EP_PAGE: usize = 150;
 const UA: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
 
 thread_local! {
@@ -758,7 +758,7 @@ async fn try_send(env: &Env, chat: i64, text: &str, markup: &Value, card: Option
 async fn send_list(env: &Env, chat: i64, text: &str, top: Vec<Vec<String>>, items: Vec<Vec<String>>,
                    back: bool, card: Option<&Item>) {
     let total: usize = items.iter().map(|r| r.len()).sum();
-    for cap in [usize::MAX, 300, 150, 60] {
+    for cap in [usize::MAX, 150, 100, 60] {
         let mut rows = top.clone();
         let mut shown = 0usize;
         for r in &items {

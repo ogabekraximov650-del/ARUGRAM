@@ -5216,3 +5216,7 @@ Qanday ishlaydi:
   Telegram panelga tugmalar sonini cheklaydi (aniq chegarasi noma'lum) —
   `send_list` rad etilsa 300 → 150 → 60 tugmaga tushib qayta urinadi va
   "qolganini nom yozib qidiring" deydi. Qismlar ham shu orqali yuboriladi.
+- SAHIFA O'LCHAMI (sinov natijasi): Telegram pastki panelda 300 tugmani RAD
+  ETDI, 150 tasini qabul qildi. Shu sabab anime ro'yxati 100 tadan (foydalanuvchi
+  talabi, `SEARCH_PAGE`=100, "Oldingi/Keyingi" tepada), qismlar 150 tagacha
+  (`EP_PAGE`=150). `send_list` zaxira zinasi: hammasi → 150 → 100 → 60.
