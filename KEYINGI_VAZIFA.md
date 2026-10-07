@@ -5039,6 +5039,12 @@ Tuzatish:
 
 ## Kodlash botida "Post kodlash" bo'limi (2026-10)
 
+YANGILANISH (foydalanuvchi talabi): post endi H.265 bilan kodlanadi —
+`anime` repodagi "Encode (H265)" sozlamalari: libx265, sof CRF — har qanday
+sifatda 30 (foydalanuvchi talabi; `H265_CRF`, `H265_PRESET` — `post.workflow.yml`),
+`hvc1` tegi (Telegram/iOS'da ochilishi uchun), audio AAC 128k. Pastdagi
+"H.264" so'zlari shu yangilanishgacha bo'lgan holat.
+
 TALAB (foydalanuvchi): `anime` repodagi Encode tizimini kodlash botiga
 ulash. Botda ikki bo'lim: "📱 Ilova uchun" (eski oqim) va "🎬 Post kodlash".
 Rasm va video yuboriladi, izohida post nomi; Actions videoni H.264 bilan

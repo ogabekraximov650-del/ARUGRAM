@@ -1,9 +1,9 @@
-name: Post kodlash (H.264)
+name: Post kodlash (H.265)
 
 # Kodlash botining "Post kodlash" bo'limi (`worker/src/postbot.rs`).
 # Botga rasm + video + nom yuborilsa worker shu workflow'ni o'zi ishga
 # tushiradi (cron ham har 10 daqiqada tekshiradi). Navbatdagi postlar
-# ketma-ket: H.264, boshida rasm, burchakda logotip -> `<ID>_logo.png`
+# ketma-ket: H.265, boshida rasm, burchakda logotip -> `<ID>_logo.png`
 # dagi ID'ga video bo'lib, tagida post nomi bilan.
 # Avto-kodlash (H.265, `encode.yml`) bilan bog'liq emas.
 #
@@ -56,6 +56,9 @@ jobs:
           TG_API_ID: ${{ secrets.TG_API_ID }}
           TG_API_HASH: ${{ secrets.TG_API_HASH }}
           START_BUDGET_MIN: '300'
+          # CRF — har qanday sifatda shu qiymat. Katta qiymat = kichik fayl.
+          H265_CRF: '30'
+          H265_PRESET: medium
           PYTHONUNBUFFERED: '1'
         run: python3 tool/post/post.py
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Post kodlash (kodlash botining "Post kodlash" bo'limi, `post.py` chaqiradi).
 #
-# `anime` repodagi `scripts/encode.sh` (oddiy "Encode", H.264) bilan AYNAN
-# BIR XIL natija: boshida 3 soniyalik cover-rasm, keyin asosiy video, intro
+# `anime` repodagi `scripts/encode.sh` ("Encode (H265)", VIDEO_CODEC=h265)
+# bilan AYNAN BIR XIL natija: boshida 3 soniyalik cover-rasm, keyin asosiy video, intro
 # tugagach o'ng yuqori burchakda logotip. Audio — AAC, stereo, 44.1 kHz, 128k.
 # Farqi faqat kirish: papka o'rniga fayl yo'llari beriladi.
 #
@@ -31,7 +31,7 @@ if [ -z "$w" ] || [ -z "$h" ]; then
     echo "::error::video o'lchamini aniqlab bo'lmadi"
     exit 1
 fi
-# libx264 / yuv420p juft o'lcham talab qiladi.
+# libx265 / yuv420p juft o'lcham talab qiladi.
 w=$(( w / 2 * 2 )); h=$(( h / 2 * 2 ))
 
 fps_val=$(ffprobe -v error -select_streams v:0 -show_entries stream=r_frame_rate -of default=noprint_wrappers=1:nokey=1 "$SRC_MAIN" | head -n 1 | tr -d '\r')
@@ -55,7 +55,10 @@ fi
 
 echo "=== $LABEL ==="
 echo "    Manba : $(basename "$SRC_MAIN") | ${w}x${h} | ${fps_val} fps | ${total_sec}s"
-echo "    Kodek : H.264 (libx264)"
+# H.265: sof CRF (bitrate chegarasi yo'q). Foydalanuvchi talabi: CRF har
+# qanday sifatda 30 (`H265_CRF`). Katta qiymat = kichik fayl.
+crf="${H265_CRF:-30}"
+echo "    Kodek : H.265 (libx265, ${h}p, CRF $crf, preset ${H265_PRESET:-medium}, audio 128k)"
 
 FILTER="[1:v]scale=$w:$h:force_original_aspect_ratio=increase,crop=$w:$h,setsar=1,fps=$fps_val[c_v];\
 [0:v]scale=$w:$h,setsar=1,fps=$fps_val[main_v];\
@@ -98,9 +101,8 @@ stdbuf -oL ffmpeg -i "$SRC_MAIN" \
     "${AEXTRA[@]}" \
     -filter_complex "$FILTER" \
     -map "[out_v]" -map "[full_a]" \
-    -c:v libx264 -preset medium -crf 18 \
-    -g 48 -keyint_min 48 -sc_threshold 0 \
-    -b:v 1750k -minrate 1200k -maxrate 2000k -bufsize 3000k \
+    -c:v libx265 -preset "${H265_PRESET:-medium}" -crf "$crf" \
+    -x265-params log-level=error -tag:v hvc1 \
     -pix_fmt yuv420p -c:a aac -ac 2 -b:a 128k -ar 44100 \
     -movflags +faststart \
     -progress pipe:1 -nostats -y -loglevel error "$OUTPUT" | run_progress "$(( total_sec + 3 ))"

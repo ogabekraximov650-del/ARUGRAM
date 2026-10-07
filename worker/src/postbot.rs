@@ -5,7 +5,7 @@
 // TALAB (foydalanuvchi): kodlash botida ikki bo'lim — "Ilova uchun"
 // (eski oqim, `encbot_*`) va "Post kodlash" (`anime` repodagi Encode
 // tizimi). Botga rasm va video yuboriladi, izohida (caption) post nomi;
-// Actions videoni H.264 bilan kodlaydi (boshida 3 soniya rasm, burchakda
+// Actions videoni H.265 bilan kodlaydi (boshida 3 soniya rasm, burchakda
 // logotip) va logotip fayli nomidagi ID'ga (`tool/post/<ID>_logo.png`)
 // Telegram'da ochiladigan VIDEO qilib, tagida aynan shu nom bilan yuboradi.
 // Navbatdagi postlar tugma bo'lib ko'rinadi; bosilganda rasm va video,
@@ -132,7 +132,7 @@ pub(crate) async fn post_menu(env: &Env, chat: i64) {
         "\u{1F3AC} <b>Post kodlash</b>\n\n\
          Rasm va videoni yuboring, izohiga (caption) post nomini yozing.\n\
          Bittasiga yozsangiz ham bo'ladi, albom qilib yuborsangiz ham bo'ladi.\n\n\
-         Video H.264 bilan kodlanadi (boshida rasm, burchakda logotip) va \
+         Video H.265 bilan kodlanadi (boshida rasm, burchakda logotip) va \
          tagida shu nom bilan yuboriladi.\n\n\u{1F4CB} Navbatda: {n} ta post."),
         Some(post_keyboard())).await;
 }

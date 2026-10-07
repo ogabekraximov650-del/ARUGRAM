@@ -7,7 +7,7 @@ tushiradi. Avto-kodlash (H.265, ilova qismlari) bilan bog'liq emas.
 
 Run navbat bo'shaguncha postlarni KETMA-KET ishlaydi. Bitta post:
   1. rasm va video yopiq kanaldan yuklab olinadi (bot ko'chirgan postlar);
-  2. `encode.sh` — `anime` repodagi oddiy "Encode" bilan bir xil (H.264,
+  2. `encode.sh` — `anime` repodagi "Encode (H265)" bilan bir xil (H.265,
      boshida 3 soniya rasm, burchakda logotip);
   3. tayyor video `<ID>_logo.png` fayl nomidagi ID'ga Telegram'da
      ochiladigan VIDEO bo'lib (fayl emas), tagida post nomi bilan yuboriladi;
@@ -174,7 +174,7 @@ def run_encode(args, log, live=None):
             el = now - t0
             eta = el * (100 - pct) / pct if pct > 0.5 else 0
             est = f" (~{mb * 100 / pct:.0f} MB bo'ladi)" if pct > 3 else ""
-            live.send(f"\u2699\uFE0F Kodlanmoqda (H.264)\n{bar(pct)} {pct:.1f}%\n"
+            live.send(f"\u2699\uFE0F Kodlanmoqda (H.265)\n{bar(pct)} {pct:.1f}%\n"
                       f"tezlik {speed:.2f}x \u00B7 {fps} kadr/s \u00B7 bitreyt {kbps} kb/s\n"
                       f"hajm {mb:.1f} MB{est}\no'tdi {hms(el)} \u00B7 qoldi ~{hms(eta)}")
         if line.startswith("\U0001F3AC") and now - last < 30:
@@ -229,9 +229,9 @@ async def process(app, r, runner, log):
                         "scale='min(320,iw)':-2", "-q:v", "5", str(thumb)])
 
         out = WORK / f"post_{pid}.mp4"
-        log(f"  kodlanmoqda (H.264), manba {src_mb:.1f} MB...")
+        log(f"  kodlanmoqda (H.265), manba {src_mb:.1f} MB...")
         t = time.time()
-        live.send("\u2699\uFE0F Kodlash boshlanmoqda (H.264)...", force=True)
+        live.send("\u2699\uFE0F Kodlash boshlanmoqda (H.265)...", force=True)
         code = await asyncio.to_thread(run_encode, [src, cover, logo, out], log, live)
         if code != 0 or not out.exists():
             raise RuntimeError("kodlashda xatolik (Actions log'iga qarang)")
