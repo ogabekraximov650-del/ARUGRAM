@@ -36,6 +36,8 @@ use worker::*;
 mod packs;
 mod channels;
 mod postbot;
+// anibla.uz dan qidirib yuklash (kodlash botining uchinchi bo'limi).
+mod anibla;
 
 // ── CORS + JSON yordamchi ──────────────────────────────────────
 
@@ -706,7 +708,7 @@ async fn ensure_db(env: &Env) {
 /// Sxema belgisi manzili: worker manba kodining FNV xeshi bilan.
 fn schema_mark_url() -> String {
     let mut h: u64 = 0xcbf29ce484222325;
-    for part in [include_str!("lib.rs"), include_str!("channels.rs"), include_str!("packs.rs"), include_str!("postbot.rs")] {
+    for part in [include_str!("lib.rs"), include_str!("channels.rs"), include_str!("packs.rs"), include_str!("postbot.rs"), include_str!("anibla.rs")] {
         for b in part.as_bytes() {
             h ^= *b as u64;
             h = h.wrapping_mul(0x100000001b3);
@@ -1309,6 +1311,9 @@ async fn init_db(env: &Env) -> bool {
         // ── POST KODLASH (kodlash botining ikkinchi bo'limi, `postbot.rs`) ──
         (postbot::DDL[0], vec![]),
         (postbot::DDL[1], vec![]),
+        // ── ANIBLA YUKLASH NAVBATI (kodlash botining uchinchi bo'limi, `anibla.rs`) ──
+        (anibla::DDL[0], vec![]),
+        (anibla::DDL[1], vec![]),
     ]).await.is_ok();
 
     // ── USTUN QO'SHISH (eski bazalar uchun, bir marta) ────────
@@ -10383,7 +10388,8 @@ fn needs_app_check(path: &str) -> bool {
     // tekshiruvdan o'tadi.
     if matches!(path, "/api/encode/peek" | "/api/encode/claim" | "/api/encode/heartbeat" | "/api/encode/release"
         | "/api/encode/quality" | "/api/encode/finish" | "/api/encode/push"
-        | "/api/post/claim" | "/api/post/check" | "/api/post/finish" | "/api/post/progress")
+        | "/api/post/claim" | "/api/post/check" | "/api/post/finish" | "/api/post/progress"
+        | "/api/anibla/claim" | "/api/anibla/progress" | "/api/anibla/done")
     {
         return false;
     }
@@ -11994,6 +12000,10 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
         }
         let chat = cb["message"]["chat"]["id"].as_i64().unwrap_or(0);
         let data = cb["data"].as_str().unwrap_or("");
+        // anibla.uz qidiruvi, qism va sifat tugmalari (`anibla.rs`).
+        if anibla::on_callback(env, chat, cb["message"]["message_id"].as_i64().unwrap_or(0), data).await {
+            return ok(json!({"ok": true}));
+        }
         // "Post kodlash" postining tahrirlash/o'chirish tugmalari (`postbot.rs`).
         if postbot::on_callback(env, chat, data).await {
             return ok(json!({"ok": true}));
@@ -12041,12 +12051,20 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
         postbot::post_menu(env, chat).await;
         return ok(json!({"ok": true}));
     }
+    if text == anibla::BTN {
+        anibla::menu(env, chat).await;
+        return ok(json!({"ok": true}));
+    }
     if let Some(id) = postbot::button_id(&text) {
         config_put(env, "encbot_mode", "post").await;
         postbot::show(env, chat, id).await;
         return ok(json!({"ok": true}));
     }
     let is_status = text.starts_with("/holat") || text == ENCBOT_BTN_STATUS;
+    if !is_status && config_get(env, "encbot_mode").await.as_deref() == Some("anibla") {
+        anibla::on_message(env, msg, chat).await;
+        return ok(json!({"ok": true}));
+    }
     if !is_status && config_get(env, "encbot_mode").await.as_deref() == Some("post") {
         postbot::on_message(env, msg, chat).await;
         return ok(json!({"ok": true}));
@@ -12721,6 +12739,8 @@ async fn scheduled(_ev: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
     cleanup_orphan_history(&env).await;
     // "Post kodlash" — ALOHIDA workflow (`postbot::kick`).
     let _ = postbot::kick(&env).await;
+    // "Anibla yuklash" navbati — ALOHIDA workflow (`anibla::kick`).
+    let _ = anibla::kick(&env).await;
     let msg = encode_kick(&env).await;
     // Faqat ishga tushirilganda yoki xato bo'lsa adminga xabar. Xato
     // (masalan token yo'q) har 10 daqiqada takrorlanmasin — soatiga bir.
@@ -13200,6 +13220,10 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
 
     if path.starts_with("/api/post/") {
         return postbot::route(req, &env, path, method.clone()).await;
+    }
+
+    if path.starts_with("/api/anibla/") {
+        return anibla::route(req, &env, path, method.clone()).await;
     }
 
     if path.starts_with("/api/packs/") {

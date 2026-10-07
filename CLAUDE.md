@@ -53,6 +53,7 @@ kanali orqali uzatiladi (xarajatni kamaytirish uchun).
 | Kodlash boti | `worker/src/lib.rs` → `encbot_*`: ikkinchi bot (`ENCODE_BOT_TOKEN`), faqat admin; bor anime/bo'limga qism qo'shadi yoki almashtiradi va avto-kodlash navbatiga qo'yadi |
 | `tool/encode/` | H.265 avto-kodlash (Python, `encode.yml`) |
 | `tool/post/`, `worker/src/postbot.rs` | Kodlash botining "Post kodlash" bo'limi: rasm+video+nom -> H.265 (logotip, cover) -> `<ID>_logo.png` dagi ID'ga. ALOHIDA workflow `post.yml` (avtoencode repoda, shablon `tool/post/post.workflow.yml`), worker `postbot::kick` ishga tushiradi |
+| `worker/src/anibla.rs`, `tool/anibla/` | Kodlash botining "Anibla yuklash" bo'limi: anibla.uz dan qidirish -> qism -> sifat -> ALOHIDA workflow `anibla.yml` (avtoencode repoda) yuklab, bot chatiga yuboradi. Login/parol `tool/anibla/creds.enc` (kalit — secret `ANIBLA_KEY`) |
 | `tool/packs/` | Emoji/GIF/stiker to'plamlarini yig'ish (ALOHIDA workflow `packs.yml`, yangi akkauntdagi repoda) |
 | `worker/src/packs.rs` | Emoji/GIF/stiker to'plamlari (o'z tizimimiz; Telegram'niki olib tashlangan) — `KEYINGI_VAZIFA.md` oxirgi bo'lim |
 | `ci/` | Imzo kaliti (`release.keystore`), baza tozalash skripti |

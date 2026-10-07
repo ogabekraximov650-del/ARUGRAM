@@ -5087,3 +5087,47 @@ Qanday ishlaydi:
 - Post 3 marta xato bersa `error` — bot navbatida ❌, "Qayta urinish" /
   "O'chirish". Kodlanayotgan postni faqat o'chirish mumkin: `post.py`
   yuborishdan oldin `/api/post/check` qiladi (409 — yuborilmaydi).
+
+## Kodlash botida "Anibla yuklash" bo'limi (2026-10)
+
+TALAB (foydalanuvchi): bot anibla.uz ga login/parol bilan kiradi, "Izlash"
+tugmasi; nom yozilganda topilgan videoning mavjud sifatlari tugma bo'lib
+chiqadi; bosilganda video GitHub Actions (IKKINCHI akkaunt, `GH_REPO`) orqali
+yuklab olinib, BOT CHATIGA yuboriladi. Login/parol AES bilan shifrlangan faylda.
+
+Qanday ishlaydi:
+- `worker/src/anibla.rs` — kodlash botining uchinchi bo'limi
+  ("🎞 Anibla yuklash", bosh menyuda). Rejim `encbot_mode='anibla'`: yozilgan
+  matn — qidiruv. Natijalar inline tugma (📺 serial / 🎬 film) -> muqova va
+  tavsif -> fasl -> qismlar (30 tadan sahifa) -> sifatlar (1080p/720p/...,
+  taxminiy hajmi bilan). Tugmalarda faqat raqamlar (`z?:<nav>:...`,
+  `callback_data` 64 bayt); oxirgi qidiruv `app_config.anibla_nav` da (har
+  qidiruvda bitta yozuv), eski qidiruv tugmasi bosilsa "qaytadan izlang".
+- Sayt API (sayt JS kodidan aniqlangan, `anibla.rs` boshidagi izoh):
+  `api/backend/api/v1` — qidiruv, fasl, qism ro'yxati loginsiz; qism/film
+  videosi (`episodes/<slug>/<fasl>/<qism>`, `movies/<slug>`) LOGIN bilan
+  (cookie `access_token`). Token 14 kun, `app_config.anibla_token` + izolyat
+  xotirasi; 401 bo'lsa qayta kiradi. `video` -> `?format=api` -> HLS master
+  m3u8 -> sifatlar. Playlist va bo'laklar loginsiz ochiladi.
+- NAVBAT (foydalanuvchi talabi: "alohida workflow'da; videolar ko'p bo'lsa
+  bazada navbatda tursin va ketma-ket yuklansin"): sifat bosilganda jadval
+  `anibla_jobs` ga bitta yozuv (variant m3u8, izoh, fayl nomi, chat, holat
+  xabari), takror bosish himoyasi (shu url navbatda bo'lsa qo'shilmaydi).
+  `anibla::kick` (qo'shilganda, "qayta"da va cron'da) — `GH_REPO` dagi
+  ALOHIDA `anibla.yml` ni ishga tushiradi (`anibla_kicked_at` atomik belgi,
+  concurrency `arugram-anibla`). Run navbat bo'shaguncha `/api/anibla/claim`
+  bilan videolarni KETMA-KET oladi (ijara 130 daq, 3 urinish, keyin `error`).
+  "📋 Yuklash navbati" — ro'yxat, olib tashlash (`zx`), qayta urinish (`zr`).
+  Video baytlari worker'dan O'TMAYDI.
+- `tool/anibla/download.py`: ffmpeg `-c copy` (qayta kodlamasdan) mp4 ga
+  yig'adi, `tool/encode/session.enc` sessiyasi bilan yopiq kanalga yuklaydi,
+  `/api/anibla/done` — kodlash boti uni bot chatiga `copyMessage` qiladi,
+  kanal postini va navbat yozuvini o'chiradi. Jonli holat — `/api/anibla/progress` (bazaga
+  yozuvsiz). 2 GB dan katta fayl — xato ("pastroq sifatni tanlang").
+- `tool/anibla/anibla.workflow.yml` va `download.py` -> avtoencode repo
+  (`sync-packs.yml`, `tool/packs/sync_repo.py`). `creds.enc` KO'CHIRILMAYDI.
+- LOGIN/PAROL: `tool/anibla/creds.enc` — JSON `{site, login, password}`,
+  AES-256-CBC + PBKDF2 (200 000), `gh_token.enc` bilan bir xil format. Kalit —
+  GitHub secret `ANIBLA_KEY` (environment `secret`). `deploy-worker.yml` uni
+  ochib worker secret `ANIBLA_CREDS` qiladi (`creds.enc` o'zgarsa deploy
+  avtomatik). Yangilash: `ANIBLA_KEY=... bash tool/anibla/set_creds.sh`.

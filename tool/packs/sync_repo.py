@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""`tool/packs/` fayllarini (va `tool/encode/run.py`, `tool/post/` ni) avtoencode reposiga (boshqa akkaunt) yangilaydi.
+"""`tool/packs/` fayllarini (va `tool/encode/run.py`, `tool/post/`, `tool/anibla/` ni) avtoencode reposiga (boshqa akkaunt) yangilaydi.
 
 MUHIM: to'plam Actions'i (`packs.yml`) BOSHQA akkauntdagi repoda ishlaydi va
 uning kodi o'sha yerga NUSXA qilib qo'yilgan. Bu repodagi o'zgarish o'z-o'zidan
@@ -37,6 +37,10 @@ FILES[".github/workflows/post.yml"] = HERE.parent / "post" / "post.workflow.yml"
 for _src in sorted((HERE.parent / "post").iterdir()):
     if _src.is_file() and _src.suffix in (".py", ".sh", ".png"):
         FILES[f"tool/post/{_src.name}"] = _src
+# "Anibla yuklash" (kodlash botining uchinchi bo'limi) — ALOHIDA workflow `anibla.yml`.
+# `creds.enc` KO'CHIRILMAYDI: login/parol faqat worker'da (ANIBLA_CREDS).
+FILES[".github/workflows/anibla.yml"] = HERE.parent / "anibla" / "anibla.workflow.yml"
+FILES["tool/anibla/download.py"] = HERE.parent / "anibla" / "download.py"
 
 
 def token() -> str:

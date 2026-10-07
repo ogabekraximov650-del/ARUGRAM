@@ -11,6 +11,8 @@ on:
       - 'tool/packs/**'
       - 'tool/encode/run.py'
       - 'tool/post/**'
+      - 'tool/anibla/download.py'
+      - 'tool/anibla/anibla.workflow.yml'
       - '.github/workflows/sync-packs.yml'
   workflow_dispatch:
 

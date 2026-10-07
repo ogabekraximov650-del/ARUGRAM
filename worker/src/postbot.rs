@@ -112,9 +112,11 @@ pub(crate) async fn main_menu(env: &Env, chat: i64) {
     encbot_send(env, chat,
         "\u{1F3E0} <b>Bosh menyu</b>\n\n\
          \u{1F4F1} <b>Ilova uchun</b> \u{2014} ilovadagi anime bo'limiga qism qo'shish.\n\
-         \u{1F3AC} <b>Post kodlash</b> \u{2014} rasm + video + nom: kodlab, tayyor videoni yuboradi.",
+         \u{1F3AC} <b>Post kodlash</b> \u{2014} rasm + video + nom: kodlab, tayyor videoni yuboradi.\n\
+         \u{1F39E} <b>Anibla yuklash</b> \u{2014} anibla.uz dan qidirib, tanlangan sifatda yuklab beradi.",
         Some(encbot_keyboard(vec![
             vec![BTN_APP.to_string(), BTN_POST.to_string()],
+            vec![super::anibla::BTN.to_string()],
             vec![ENCBOT_BTN_STATUS.to_string()],
         ]))).await;
 }
