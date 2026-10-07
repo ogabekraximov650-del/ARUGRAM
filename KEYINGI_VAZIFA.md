@@ -5146,3 +5146,19 @@ Qanday ishlaydi:
   (`listing`, `anibla_nav.c/lt`).
 - Navbat: har bir kutayotgan videoni (`zx`) yoki hammasini birdan (`zxa`)
   o'chirish; yuklanayotganiga tegilmaydi.
+- PASTKI PANEL (foydalanuvchi talabi: "ro'yxatlar inline emas, pastki
+  paneldan; anime nomlari qatorga 1 ta, qismlar 3 ta, sifat 1 ta"): bo'limlar,
+  anime/film ro'yxati, fasllar, qismlar (30 tadan sahifa, "◀️ Oldingi" /
+  "Keyingi ▶️"), sifatlar — hammasi reply keyboard. Tugma MATNI keladi:
+  anime — `Item::label()` bilan, fasl — "🗂 ", qism — "▶️ N-qism", sifat —
+  "⬇️ 720p ..." prefiksi; qaysi ro'yxat ochiqligi `anibla_nav.v`
+  (list|seasons|eps|q) va `i/j/ep/k` da (har qadamda bitta yozuv).
+  "⬅️ Orqaga" — bir qadam orqaga. Inline faqat navbat tugmalarida qoldi;
+  eski inline ro'yxat tugmalari "pastki panelda" deb javob beradi.
+- JONLI HOLAT KO'RINMASDI (foydalanuvchi: "5 soniyalik log ko'rsatilmayapti"):
+  holat xabari "navbatga qo'shildi" xabari bo'lib yuqorida qolib ketardi.
+  Endi `claim` chat OXIRIGA yangi holat xabarini yuboradi (`status_msg`
+  yangilanadi), "📋 Yuklash navbati" ham yuklanayotgan video holatini ro'yxat
+  ostiga ko'chiradi. `/api/anibla/progress` joriy `status_msg` ni bazadan
+  O'QIYDI (runner o'zgarmadi). Navbat ro'yxatida izoh qatori ("❌ xato")
+  olib tashlandi — har qatorda holat so'z bilan (navbatda/yuklanmoqda/xato).

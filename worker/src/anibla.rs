@@ -196,6 +196,11 @@ fn title_of(v: &Value) -> String {
 }
 
 // ── Navigatsiya holati ───────────────────────────────────────
+//
+// TALAB (foydalanuvchi): ro'yxatlar PASTKI PANELDAN (reply keyboard), inline
+// emas: anime nomlari — qatorga bitta, qismlar — qatorga uchta, sifatlar —
+// qatorga bitta. Tugma bosilganda uning MATNI keladi; qaysi ro'yxat ochiqligi
+// `anibla_nav` da (`v`: list | seasons | eps | q, tanlangan `i`/`j`/`k`).
 
 #[derive(Default, Serialize, Deserialize, Clone)]
 struct Item {
@@ -217,6 +222,14 @@ impl Item {
     fn movie(&self) -> bool {
         !self.m.to_ascii_lowercase().contains("serie")
     }
+
+    /// Ro'yxatdagi tugma matni (shu matn qaytib kelganda aynan shu element).
+    fn label(&self) -> String {
+        let mut l = format!("{} {}", if self.movie() { "\u{1F3AC}" } else { "\u{1F4FA}" }, self.t);
+        if self.y > 0 { l.push_str(&format!(" \u{00B7} {}", self.y)); }
+        if !self.movie() && self.e > 0 { l.push_str(&format!(" \u{00B7} {} qism", self.e)); }
+        l
+    }
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -233,12 +246,28 @@ struct Nav {
     pages: i64,
     total: i64,
     items: Vec<Item>,
+    /// Ochiq ro'yxat: `list`, `seasons`, `eps`, `q`.
+    #[serde(default)]
+    v: String,
+    /// Tanlangan anime (items ichida), fasl, qismlar sahifasi, qism.
+    #[serde(default)]
+    i: i64,
+    #[serde(default)]
+    j: i64,
+    #[serde(default)]
+    ep: i64,
+    #[serde(default)]
+    k: i64,
 }
 
 async fn nav_get(env: &Env) -> Nav {
     config_get(env, "anibla_nav").await
         .and_then(|v| serde_json::from_str(&v).ok())
         .unwrap_or_default()
+}
+
+async fn nav_put(env: &Env, nav: &Nav) {
+    config_put(env, "anibla_nav", &serde_json::to_string(nav).unwrap_or_default()).await;
 }
 
 fn kb(rows: Vec<Vec<Value>>) -> Value {
@@ -249,14 +278,38 @@ fn btn(text: &str, data: String) -> Value {
     json!({"text": text, "callback_data": data})
 }
 
-fn menu_keyboard() -> Value {
-    encbot_keyboard(vec![
-        vec![BTN_CATS.to_string(), BTN_SEARCH.to_string()],
-        vec![BTN_QUEUE.to_string(), postbot::BTN_HOME.to_string()],
-    ])
+const BTN_NEW: &str = "\u{1F195} Oxirgi yuklanganlar";
+const BTN_PREV: &str = "\u{25C0}\u{FE0F} Oldingi";
+const BTN_NEXT: &str = "Keyingi \u{25B6}\u{FE0F}";
+const BTN_BACK: &str = "\u{2B05}\u{FE0F} Orqaga";
+
+/// Pastki panel: berilgan qatorlar + doimiy pastki qatorlar.
+fn panel(mut rows: Vec<Vec<String>>, back: bool) -> Value {
+    if back {
+        rows.push(vec![BTN_BACK.to_string(), postbot::BTN_HOME.to_string()]);
+        rows.push(vec![BTN_SEARCH.to_string(), BTN_QUEUE.to_string()]);
+    } else {
+        rows.push(vec![BTN_CATS.to_string(), BTN_SEARCH.to_string()]);
+        rows.push(vec![BTN_QUEUE.to_string(), postbot::BTN_HOME.to_string()]);
+    }
+    encbot_keyboard(rows)
 }
 
-// ── Bot: menyu va qidiruv ────────────────────────────────────
+fn menu_keyboard() -> Value {
+    panel(vec![], false)
+}
+
+// ── Bot: menyu, bo'limlar va qidiruv ─────────────────────────
+
+/// Bosh panel: "Oxirgi yuklanganlar" va saytdagi bo'limlar (2 tadan).
+async fn home_panel(env: &Env) -> Value {
+    let mut rows = vec![vec![BTN_NEW.to_string()]];
+    let cats = categories(env).await;
+    for ch in cats.chunks(2) {
+        rows.push(ch.iter().map(|(_, name)| format!("\u{1F4C2} {name}")).collect());
+    }
+    panel(rows, false)
+}
 
 pub(crate) async fn menu(env: &Env, chat: i64) {
     config_put(env, "encbot_mode", "anibla").await;
@@ -264,18 +317,17 @@ pub(crate) async fn menu(env: &Env, chat: i64) {
         "\n\n\u{26A0}\u{FE0F} Login/parol hali sozlanmagan: <code>tool/anibla/creds.enc</code> \
          <code>ENCODE_TOKEN</code> bilan ochilmadi (deploy log'iga qarang)."
     } else { "" };
+    let panel = home_panel(env).await;
     encbot_send(env, chat, &format!(
         "\u{1F39E} <b>Anibla.uz yuklash</b>\n\n\
-         \u{1F4C2} Saytdagi bo'limlardan tanlang yoki \u{1F50D} anime/film nomini yozing (kamida 3 harf).\n\
-         Natijadan tanlang \u{2192} fasl va qism \u{2192} sifat.\n\
-         Video navbatga tushadi va GitHub Actions orqali ketma-ket yuklanib, shu chatga yuboriladi.{warn}"),
-        Some(menu_keyboard())).await;
-    categories_menu(env, chat).await;
+         \u{1F4C2} Pastdagi bo'limlardan tanlang yoki anime/film nomini yozing (kamida 3 harf).\n\
+         Anime \u{2192} fasl va qism \u{2192} sifat. Video navbatga tushadi, GitHub Actions orqali \
+         ketma-ket yuklanib, shu chatga yuboriladi.{warn}"),
+        Some(panel)).await;
 }
 
 /// Saytdagi bo'limlar: `GET categories` (Ongoing, Hamma animelar, Anime
-/// filmlar, ...) — ro'yxat saytdan olinadi, kodga yozilmagan. Birinchisi —
-/// "Oxirgi yuklanganlar" (filtrsiz ro'yxat, sayt yangilarini boshida beradi).
+/// filmlar, ...) — ro'yxat saytdan olinadi, kodga yozilmagan.
 async fn categories(env: &Env) -> Vec<(String, String)> {
     let v = get(env, "categories?sortBy=name.uz&sortDirection=-1", false).await.unwrap_or(json!({}));
     let list = v["data"]["categories"].as_array().or_else(|| v["data"].as_array()).cloned().unwrap_or_default();
@@ -286,16 +338,7 @@ async fn categories(env: &Env) -> Vec<(String, String)> {
     }).collect()
 }
 
-async fn categories_menu(env: &Env, chat: i64) {
-    let mut rows = vec![vec![btn("\u{1F195} Oxirgi yuklanganlar", "zc:new".into())]];
-    let cats = categories(env).await;
-    for ch in cats.chunks(2) {
-        rows.push(ch.iter().map(|(id, name)| btn(&format!("\u{1F4C2} {name}"), format!("zc:{id}"))).collect());
-    }
-    encbot_send(env, chat, "\u{1F4C2} <b>Bo'limlar</b> (saytdagidek):", Some(kb(rows))).await;
-}
-
-/// Anibla rejimidagi matn — qidiruv.
+/// Pastki paneldagi tugma (yoki yozilgan matn). Anibla rejimida hamma matn shu yerga.
 pub(crate) async fn on_message(env: &Env, msg: &Value, chat: i64) {
     let text = msg["text"].as_str().unwrap_or("").trim().to_string();
     if text == BTN_QUEUE {
@@ -303,25 +346,96 @@ pub(crate) async fn on_message(env: &Env, msg: &Value, chat: i64) {
         return;
     }
     if text == BTN_CATS {
-        categories_menu(env, chat).await;
+        let panel = home_panel(env).await;
+        encbot_send(env, chat, "\u{1F4C2} <b>Bo'limlar</b> (saytdagidek) \u{2014} pastdan tanlang:", Some(panel)).await;
         return;
     }
     if text.is_empty() || text == BTN_SEARCH {
-        encbot_send(env, chat, "\u{270D}\u{FE0F} Anime yoki film nomini yozing:", Some(menu_keyboard())).await;
+        encbot_send(env, chat, "\u{270D}\u{FE0F} Anime yoki film nomini yozing:", None).await;
+        return;
+    }
+    if text == BTN_NEW {
+        listing(env, chat, "", "new", "Oxirgi yuklanganlar", 1).await;
+        return;
+    }
+    if let Some(name) = text.strip_prefix("\u{1F4C2} ") {
+        if let Some((id, n)) = categories(env).await.into_iter().find(|(_, n)| n == name.trim()) {
+            listing(env, chat, "", &id, &n, 1).await;
+            return;
+        }
+    }
+
+    let mut nav = nav_get(env).await;
+    if text == BTN_PREV || text == BTN_NEXT {
+        let d = if text == BTN_NEXT { 1 } else { -1 };
+        if nav.v == "eps" {
+            nav.ep = (nav.ep + d).max(0);
+            show_eps(env, chat, nav, false).await;
+        } else if !nav.n.is_empty() {
+            let page = (nav.p + d).clamp(1, nav.pages.max(1));
+            listing(env, chat, &nav.q, &nav.c, &nav.lt, page).await;
+        }
+        return;
+    }
+    if text == BTN_BACK {
+        let movie = usize::try_from(nav.i).ok().and_then(|i| nav.items.get(i)).map(|it| it.movie()).unwrap_or(true);
+        match nav.v.as_str() {
+            "q" if !movie => show_eps(env, chat, nav, false).await,
+            "eps" => {
+                let it = usize::try_from(nav.i).ok().and_then(|i| nav.items.get(i)).cloned();
+                let many = match &it { Some(it) => seasons(env, &it.s).await.map(|s| s.len() > 1).unwrap_or(false), None => false };
+                if many { show_seasons(env, chat, nav).await } else { list_view(env, chat, nav).await }
+            }
+            "seasons" | "q" => list_view(env, chat, nav).await,
+            _ => {
+                let panel = home_panel(env).await;
+                encbot_send(env, chat, "\u{1F4C2} Bo'limlar:", Some(panel)).await;
+            }
+        }
+        return;
+    }
+    // Ro'yxatdagi anime/film.
+    if let Some(i) = nav.items.iter().position(|it| it.label() == text) {
+        nav.i = i as i64;
+        show_item(env, chat, nav).await;
+        return;
+    }
+    // Fasl: "🗂 2-fasl".
+    if let Some(name) = text.strip_prefix("\u{1F5C2} ") {
+        if let Some(it) = usize::try_from(nav.i).ok().and_then(|i| nav.items.get(i)).cloned() {
+            if let Ok(ss) = seasons(env, &it.s).await {
+                if let Some(j) = ss.iter().position(|s| season_label(s) == name.trim()) {
+                    nav.j = j as i64;
+                    nav.ep = 0;
+                    show_eps(env, chat, nav, true).await;
+                    return;
+                }
+            }
+        }
+    }
+    // Qism: "▶️ 12-qism".
+    if let Some(rest) = text.strip_prefix("\u{25B6}\u{FE0F} ") {
+        if let Some(num) = rest.strip_suffix("-qism").and_then(|n| n.trim().parse::<i64>().ok()) {
+            show_qualities(env, chat, nav, num).await;
+            return;
+        }
+    }
+    // Sifat: "⬇️ 720p · ~250 MB" (`asl sifat` — 0).
+    if let Some(rest) = text.strip_prefix("\u{2B07}\u{FE0F} ") {
+        let h: i64 = rest.chars().take_while(|c| c.is_ascii_digit()).collect::<String>().parse().unwrap_or(0);
+        pick_quality(env, chat, &nav, h).await;
         return;
     }
     if text.chars().count() < 3 {
-        encbot_send(env, chat, "Kamida 3 ta harf yozing.", Some(menu_keyboard())).await;
+        encbot_send(env, chat, "Kamida 3 ta harf yozing.", None).await;
         return;
     }
     let q: String = text.chars().take(80).collect();
-    listing(env, chat, 0, &q, "", "", 1).await;
+    listing(env, chat, &q, "", "", 1).await;
 }
 
-/// Qidiruv sahifasi. `edit` > 0 — shu xabarni tahrirlaydi (sahifa almashganda).
 /// Ro'yxat sahifasi: qidiruv (`q`) yoki bo'lim (`cat`: ID yoki `new`).
-/// `edit` > 0 — shu xabarni tahrirlaydi (sahifa almashganda).
-async fn listing(env: &Env, chat: i64, edit: i64, q: &str, cat: &str, label: &str, page: i64) {
+async fn listing(env: &Env, chat: i64, q: &str, cat: &str, label: &str, page: i64) {
     let mut path = format!("media/mobile?limit={SEARCH_PAGE}&page={page}");
     if !q.is_empty() {
         path.push_str(&format!("&search={}", enc(q)));
@@ -331,7 +445,7 @@ async fn listing(env: &Env, chat: i64, edit: i64, q: &str, cat: &str, label: &st
     let v = match get(env, &path, false).await {
         Ok(v) => v,
         Err(e) => {
-            encbot_send(env, chat, &format!("\u{274C} Qidirib bo'lmadi: {}", html_escape(&e)), None).await;
+            encbot_send(env, chat, &format!("\u{274C} Ro'yxatni olib bo'lmadi: {}", html_escape(&e)), None).await;
             return;
         }
     };
@@ -351,7 +465,7 @@ async fn listing(env: &Env, chat: i64, edit: i64, q: &str, cat: &str, label: &st
             format!("\u{1F937} <b>\u{00AB}{}\u{00BB}</b> bo'yicha hech narsa topilmadi.\n\
                      Boshqacha yozib ko'ring (masalan, o'zbekcha nomining bir qismi).", html_escape(q))
         };
-        encbot_send(env, chat, &t, Some(menu_keyboard())).await;
+        encbot_send(env, chat, &t, None).await;
         return;
     }
     let pages = jint(&v["pagination"], "pages").max(1);
@@ -359,37 +473,28 @@ async fn listing(env: &Env, chat: i64, edit: i64, q: &str, cat: &str, label: &st
     let nav = Nav {
         n: (now_ms() % 1_000_000).to_string(),
         q: q.to_string(), c: cat.to_string(), lt: label.to_string(), p: page, pages, total, items,
+        ..Default::default()
     };
-    config_put(env, "anibla_nav", &serde_json::to_string(&nav).unwrap_or_default()).await;
+    list_view(env, chat, nav).await;
+}
 
-    let mut rows: Vec<Vec<Value>> = nav.items.iter().enumerate().map(|(i, it)| {
-        let mut label = format!("{} {}", if it.movie() { "\u{1F3AC}" } else { "\u{1F4FA}" }, it.t);
-        if it.y > 0 { label.push_str(&format!(" \u{00B7} {}", it.y)); }
-        if !it.movie() && it.e > 0 { label.push_str(&format!(" \u{00B7} {} qism", it.e)); }
-        vec![btn(&label, format!("zi:{}:{i}", nav.n))]
-    }).collect();
-    if pages > 1 {
-        let mut r = Vec::new();
-        if page > 1 { r.push(btn("\u{25C0}\u{FE0F}", format!("zg:{}:{}", nav.n, page - 1))); }
-        r.push(btn(&format!("{page}/{pages}"), format!("zg:{}:{page}", nav.n)));
-        if page < pages { r.push(btn("\u{25B6}\u{FE0F}", format!("zg:{}:{}", nav.n, page + 1))); }
-        rows.push(r);
-    }
-    let head = if q.is_empty() {
-        format!("\u{1F4C2} <b>{}</b> \u{2014} {total} ta", html_escape(label))
+/// Saqlangan ro'yxatni (qayta so'ramasdan) pastki panelga chiqaradi.
+async fn list_view(env: &Env, chat: i64, mut nav: Nav) {
+    nav.v = "list".into();
+    let mut rows: Vec<Vec<String>> = nav.items.iter().map(|it| vec![it.label()]).collect();
+    let mut nr = Vec::new();
+    if nav.p > 1 { nr.push(BTN_PREV.to_string()); }
+    if nav.p < nav.pages { nr.push(BTN_NEXT.to_string()); }
+    if !nr.is_empty() { rows.push(nr); }
+    let head = if nav.q.is_empty() {
+        format!("\u{1F4C2} <b>{}</b> \u{2014} {} ta", html_escape(&nav.lt), nav.total)
     } else {
-        format!("\u{1F50D} <b>\u{00AB}{}\u{00BB}</b> \u{2014} {total} ta natija", html_escape(q))
+        format!("\u{1F50D} <b>\u{00AB}{}\u{00BB}</b> \u{2014} {} ta natija", html_escape(&nav.q), nav.total)
     };
-    let text = format!("{head} \u{00B7} {page}/{pages}-sahifa\n\
-                        \u{1F4FA} serial \u{00B7} \u{1F3AC} film\n\nKeraklisini tanlang:");
-    if edit > 0 {
-        let _ = encbot_api(env, "editMessageText", json!({
-            "chat_id": chat, "message_id": edit, "text": text, "parse_mode": "HTML",
-            "reply_markup": kb(rows),
-        })).await;
-    } else {
-        encbot_send(env, chat, &text, Some(kb(rows))).await;
-    }
+    let text = format!("{head} \u{00B7} {}/{}-sahifa\n\u{1F4FA} serial \u{00B7} \u{1F3AC} film\n\n\
+                        \u{2B07}\u{FE0F} Pastdan tanlang:", nav.p, nav.pages);
+    nav_put(env, &nav).await;
+    encbot_send(env, chat, &text, Some(panel(rows, false))).await;
 }
 
 // ── Bot: serial / film ───────────────────────────────────────
@@ -428,89 +533,161 @@ fn season_label(s: &Season) -> String {
     if s.title.chars().all(|c| c.is_ascii_digit()) { format!("{}-fasl", s.title) } else { s.title.clone() }
 }
 
-/// Tanlangan anime/film: rasm, qisqa ma'lumot va keyingi qadam tugmalari.
-async fn show_item(env: &Env, chat: i64, nav: &Nav, i: usize) {
-    let Some(it) = nav.items.get(i) else { return };
+fn cur_item(nav: &Nav) -> Option<Item> {
+    usize::try_from(nav.i).ok().and_then(|i| nav.items.get(i)).cloned()
+}
+
+fn item_head(it: &Item, desc: bool) -> String {
     let mut head = format!("{} <b>{}</b>", if it.movie() { "\u{1F3AC}" } else { "\u{1F4FA}" }, html_escape(&it.t));
     if it.y > 0 { head.push_str(&format!(" ({})", it.y)); }
-    if !it.d.is_empty() {
+    if desc && !it.d.is_empty() {
         head.push_str(&format!("\n\n{}\u{2026}", html_escape(&it.d)));
     }
-    let markup = if it.movie() {
-        match qualities_text(env, it, None).await {
+    head
+}
+
+/// Tanlangan anime/film: muqova va keyingi qadam (film — sifatlar, serial —
+/// fasllar yoki bitta fasl bo'lsa darhol qismlar).
+async fn show_item(env: &Env, chat: i64, mut nav: Nav) {
+    let Some(it) = cur_item(&nav) else { return };
+    if it.movie() {
+        nav.j = -1;
+        nav.k = -1;
+        let head = item_head(&it, true);
+        match qualities_text(env, &it, None).await {
             Ok((t, rows)) => {
-                head.push_str(&format!("\n\n{t}"));
-                kb(rows.into_iter().map(|(label, h)| vec![btn(&label, format!("zq:{}:{i}:-:-:{h}", nav.n))]).collect())
+                nav.v = "q".into();
+                nav_put(env, &nav).await;
+                let rows = rows.into_iter().map(|(l, _)| vec![l]).collect();
+                send_card(env, chat, &it, &format!("{head}\n\n{t}"), panel(rows, true)).await;
             }
-            Err(e) => {
-                head.push_str(&format!("\n\n\u{274C} {}", html_escape(&e)));
-                kb(vec![])
-            }
+            Err(e) => encbot_send(env, chat, &format!("{head}\n\n\u{274C} {}", html_escape(&e)), None).await,
         }
-    } else {
-        match seasons(env, &it.s).await {
-            Ok(ss) if ss.len() > 1 => {
-                head.push_str("\n\nFaslni tanlang:");
-                let rows: Vec<Vec<Value>> = ss.chunks(3).enumerate().map(|(r, ch)| ch.iter().enumerate()
-                    .map(|(c, s)| btn(&season_label(s), format!("zs:{}:{i}:{}", nav.n, r * 3 + c))).collect()).collect();
-                kb(rows)
-            }
-            Ok(ss) if ss.len() == 1 => match episodes(env, &it.s, &ss[0].slug).await.ok() {
-                Some(eps) if !eps.is_empty() => {
-                    head.push_str(&format!("\n\n{} \u{00B7} {} ta qism. Qismni tanlang:", season_label(&ss[0]), eps.len()));
-                    episode_kb(&nav.n, i, 0, &eps, 0)
-                }
-                _ => {
-                    head.push_str("\n\n\u{1F937} Qismlar topilmadi.");
-                    kb(vec![])
-                }
-            },
-            Ok(_) => {
-                head.push_str("\n\n\u{1F937} Fasllar topilmadi.");
-                kb(vec![])
-            }
-            Err(e) => {
-                head.push_str(&format!("\n\n\u{274C} {}", html_escape(&e)));
-                kb(vec![])
-            }
+        return;
+    }
+    match seasons(env, &it.s).await {
+        Ok(ss) if ss.len() > 1 => {
+            send_card(env, chat, &it, &item_head(&it, true), json!({"remove_keyboard": false})).await;
+            show_seasons(env, chat, nav).await;
         }
+        Ok(ss) if ss.len() == 1 => {
+            nav.j = 0;
+            nav.ep = 0;
+            show_eps(env, chat, nav, true).await;
+        }
+        Ok(_) => encbot_send(env, chat, &format!("{}\n\n\u{1F937} Fasllar topilmadi.", item_head(&it, false)), None).await,
+        Err(e) => encbot_send(env, chat, &format!("{}\n\n\u{274C} {}", item_head(&it, false), html_escape(&e)), None).await,
+    }
+}
+
+async fn show_seasons(env: &Env, chat: i64, mut nav: Nav) {
+    let Some(it) = cur_item(&nav) else { return };
+    let ss = seasons(env, &it.s).await.unwrap_or_default();
+    nav.v = "seasons".into();
+    nav_put(env, &nav).await;
+    let rows: Vec<Vec<String>> = ss.chunks(2)
+        .map(|ch| ch.iter().map(|s| format!("\u{1F5C2} {}", season_label(s))).collect()).collect();
+    encbot_send(env, chat, &format!("{}\n\n{} ta fasl \u{2014} pastdan tanlang:", item_head(&it, false), ss.len()),
+        Some(panel(rows, true))).await;
+}
+
+/// Qismlar: qatorga 3 tadan, `EP_PAGE` tadan sahifa. `card` — muqova bilan.
+async fn show_eps(env: &Env, chat: i64, mut nav: Nav, card: bool) {
+    let Some(it) = cur_item(&nav) else { return };
+    let ss = match seasons(env, &it.s).await {
+        Ok(ss) => ss,
+        Err(e) => { encbot_send(env, chat, &format!("\u{274C} {}", html_escape(&e)), None).await; return; }
     };
-    send_card(env, chat, it, &head, markup).await;
+    let Some(season) = usize::try_from(nav.j).ok().and_then(|j| ss.get(j)) else { return };
+    let eps = match episodes(env, &it.s, &season.slug).await {
+        Ok(e) if !e.is_empty() => e,
+        Ok(_) => { encbot_send(env, chat, "\u{1F937} Bu faslda qismlar topilmadi.", None).await; return; }
+        Err(e) => { encbot_send(env, chat, &format!("\u{274C} {}", html_escape(&e)), None).await; return; }
+    };
+    let pages = eps.len().div_ceil(EP_PAGE).max(1) as i64;
+    nav.ep = nav.ep.clamp(0, pages - 1);
+    nav.v = "eps".into();
+    nav_put(env, &nav).await;
+    let start = nav.ep as usize * EP_PAGE;
+    let part = &eps[start..(start + EP_PAGE).min(eps.len())];
+    let mut rows: Vec<Vec<String>> = part.chunks(3)
+        .map(|ch| ch.iter().map(|e| format!("\u{25B6}\u{FE0F} {}-qism", e.num)).collect()).collect();
+    let mut nr = Vec::new();
+    if nav.ep > 0 { nr.push(BTN_PREV.to_string()); }
+    if nav.ep + 1 < pages { nr.push(BTN_NEXT.to_string()); }
+    if !nr.is_empty() { rows.push(nr); }
+    let text = format!("{}\n{} \u{00B7} {} ta qism{}\n\n\u{2B07}\u{FE0F} Qismni pastdan tanlang:",
+        item_head(&it, card), html_escape(&season_label(season)), eps.len(),
+        if pages > 1 { format!(" \u{00B7} {}\u{2013}{}-qismlar", part[0].num, part[part.len() - 1].num) } else { String::new() });
+    if card {
+        send_card(env, chat, &it, &text, panel(rows, true)).await;
+    } else {
+        encbot_send(env, chat, &text, Some(panel(rows, true))).await;
+    }
+}
+
+/// Qism tanlandi: sifatlar (qatorga bitta).
+async fn show_qualities(env: &Env, chat: i64, mut nav: Nav, num: i64) {
+    let Some(it) = cur_item(&nav) else { return };
+    let Ok(ss) = seasons(env, &it.s).await else { return };
+    let Some(season) = usize::try_from(nav.j).ok().and_then(|j| ss.get(j)) else { return };
+    let eps = episodes(env, &it.s, &season.slug).await.unwrap_or_default();
+    let Some(k) = eps.iter().position(|e| e.num == num) else {
+        encbot_send(env, chat, &format!("\u{1F937} {num}-qism topilmadi."), None).await;
+        return;
+    };
+    let e = &eps[k];
+    let head = format!("\u{1F4FA} <b>{}</b>\n{} \u{00B7} {}-qism{}", html_escape(&it.t),
+        html_escape(&season_label(season)), e.num,
+        if e.title.is_empty() { String::new() } else { format!(": {}", html_escape(&e.title)) });
+    match qualities_text(env, &it, Some((&season.slug, e))).await {
+        Ok((t, rows)) => {
+            nav.k = k as i64;
+            nav.v = "q".into();
+            nav_put(env, &nav).await;
+            let rows = rows.into_iter().map(|(l, _)| vec![l]).collect();
+            encbot_send(env, chat, &format!("{head}\n\n{t}"), Some(panel(rows, true))).await;
+        }
+        Err(err) => encbot_send(env, chat, &format!("{head}\n\n\u{274C} {}", html_escape(&err)), None).await,
+    }
+}
+
+/// Sifat tanlandi — navbatga.
+async fn pick_quality(env: &Env, chat: i64, nav: &Nav, height: i64) {
+    let Some(it) = cur_item(nav) else { return };
+    if nav.v != "q" {
+        encbot_send(env, chat, "Avval anime va qismni tanlang.", None).await;
+        return;
+    }
+    if it.movie() {
+        start(env, chat, &it, None, height).await;
+        return;
+    }
+    let Ok(ss) = seasons(env, &it.s).await else { return };
+    let Some(season) = usize::try_from(nav.j).ok().and_then(|j| ss.get(j)) else { return };
+    let eps = episodes(env, &it.s, &season.slug).await.unwrap_or_default();
+    let Some(e) = usize::try_from(nav.k).ok().and_then(|k| eps.get(k)) else { return };
+    let label = format!("{} \u{00B7} {}-qism{}", season_label(season), e.num,
+        if e.title.is_empty() || e.title == e.num.to_string() { String::new() } else { format!(": {}", e.title) });
+    start(env, chat, &it, Some((&season.slug, e, label)), height).await;
 }
 
 /// Muqova rasmi bilan (bo'lmasa oddiy matn).
 async fn send_card(env: &Env, chat: i64, it: &Item, text: &str, markup: Value) {
+    let markup = if markup["remove_keyboard"].is_boolean() { None } else { Some(markup) };
     if !it.img.is_empty() && text.chars().count() <= 1000 {
-        let r = encbot_api(env, "sendPhoto", json!({
+        let mut body = json!({
             "chat_id": chat, "photo": format!("{}/{}", site(env), it.img),
-            "caption": text, "parse_mode": "HTML", "reply_markup": markup,
-        })).await;
-        if r.is_ok() {
+            "caption": text, "parse_mode": "HTML",
+        });
+        if let Some(m) = &markup {
+            body["reply_markup"] = m.clone();
+        }
+        if encbot_api(env, "sendPhoto", body).await.is_ok() {
             return;
         }
     }
-    encbot_send(env, chat, text, Some(markup)).await;
-}
-
-/// Qism tugmalari (5 tadan), sahifalab.
-fn episode_kb(n: &str, i: usize, j: usize, eps: &[Episode], page: usize) -> Value {
-    let pages = eps.len().div_ceil(EP_PAGE).max(1);
-    let page = page.min(pages - 1);
-    let start = page * EP_PAGE;
-    let mut rows: Vec<Vec<Value>> = eps[start..(start + EP_PAGE).min(eps.len())].chunks(5).enumerate()
-        .map(|(r, ch)| ch.iter().enumerate()
-            .map(|(c, e)| btn(&e.num.to_string(), format!("ze:{n}:{i}:{j}:{}", start + r * 5 + c))).collect())
-        .collect();
-    if pages > 1 {
-        let mut r = Vec::new();
-        if page > 0 { r.push(btn("\u{25C0}\u{FE0F}", format!("zp:{n}:{i}:{j}:{}", page - 1))); }
-        let a = eps[start].num;
-        let b = eps[(start + EP_PAGE).min(eps.len()) - 1].num;
-        r.push(btn(&format!("{a}\u{2013}{b} / {}", eps.len()), format!("zp:{n}:{i}:{j}:{page}")));
-        if page + 1 < pages { r.push(btn("\u{25B6}\u{FE0F}", format!("zp:{n}:{i}:{j}:{}", page + 1))); }
-        rows.push(r);
-    }
-    kb(rows)
+    encbot_send(env, chat, text, markup).await;
 }
 
 // ── Video va sifatlar ────────────────────────────────────────
@@ -624,123 +801,30 @@ fn hms(s: i64) -> String {
     if h > 0 { format!("{h}:{m:02}:{s:02}") } else { format!("{m:02}:{s:02}") }
 }
 
-// ── Bot: tugmalar ────────────────────────────────────────────
+// ── Bot: inline tugmalar (faqat navbat) ──────────────────────
 
-/// Inline tugmalar (`z?:<nav>:...`). `true` — ishlandi.
-pub(crate) async fn on_callback(env: &Env, chat: i64, msg_id: i64, data: &str) -> bool {
+/// Inline tugmalar: navbat (`zx`, `zxa`, `zr`). Eski xabarlardagi ro'yxat
+/// tugmalari (`zg`, `zi`, ...) endi pastki panelda — ular uchun eslatma.
+pub(crate) async fn on_callback(env: &Env, chat: i64, _msg_id: i64, data: &str) -> bool {
     let p: Vec<&str> = data.split(':').collect();
     let kind = p[0];
-    // Bo'lim tugmasi: `zc:<id>` yoki `zc:new`.
-    if kind == "zc" {
-        let id = p.get(1).copied().unwrap_or("new");
-        let label = if id == "new" {
-            "Oxirgi yuklanganlar".to_string()
-        } else {
-            categories(env).await.into_iter().find(|(c, _)| c == id).map(|(_, n)| n)
-                .unwrap_or_else(|| "Bo'lim".into())
-        };
-        listing(env, chat, 0, "", id, &label, 1).await;
+    if kind == "zxa" {
+        queue_callback(env, chat, kind, 0).await;
         return true;
     }
-    if matches!(kind, "zx" | "zr" | "zxa") {
-        if kind == "zxa" {
-            queue_callback(env, chat, kind, 0).await;
-            return true;
-        }
+    if matches!(kind, "zx" | "zr") {
         if let Some(id) = p.get(1).and_then(|x| x.parse::<i64>().ok()) {
             queue_callback(env, chat, kind, id).await;
         }
         return true;
     }
-    if !matches!(kind, "zg" | "zi" | "zs" | "zp" | "ze" | "zq") {
-        return false;
-    }
-    let nav = nav_get(env).await;
-    if p.get(1).copied() != Some(nav.n.as_str()) || nav.n.is_empty() {
-        encbot_send(env, chat, "\u{267B}\u{FE0F} Bu eski qidiruv natijasi \u{2014} nomni qaytadan yozing.",
-            Some(menu_keyboard())).await;
+    if matches!(kind, "zc" | "zg" | "zi" | "zs" | "zp" | "ze" | "zq") {
+        config_put(env, "encbot_mode", "anibla").await;
+        let panel = home_panel(env).await;
+        encbot_send(env, chat, "\u{267B}\u{FE0F} Bu eski tugma \u{2014} ro'yxatlar endi pastki panelda.", Some(panel)).await;
         return true;
     }
-    let num = |k: usize| p.get(k).and_then(|x| x.parse::<i64>().ok());
-    if kind == "zg" {
-        let page = num(2).unwrap_or(1).clamp(1, nav.pages.max(1));
-        if page != nav.p {
-            listing(env, chat, msg_id, &nav.q, &nav.c, &nav.lt, page).await;
-        }
-        return true;
-    }
-    let i = num(2).unwrap_or(-1);
-    let Some(it) = usize::try_from(i).ok().and_then(|i| nav.items.get(i)).cloned() else {
-        return true;
-    };
-    let i = i as usize;
-    if kind == "zi" {
-        show_item(env, chat, &nav, i).await;
-        return true;
-    }
-    // Film sifati: `zq:<n>:<i>:-:-:<h>`.
-    if kind == "zq" && it.movie() {
-        start(env, chat, &it, None, num(5).unwrap_or(0)).await;
-        return true;
-    }
-    let ss = match seasons(env, &it.s).await {
-        Ok(ss) => ss,
-        Err(e) => {
-            encbot_send(env, chat, &format!("\u{274C} {}", html_escape(&e)), None).await;
-            return true;
-        }
-    };
-    let Some(season) = num(3).and_then(|j| usize::try_from(j).ok()).and_then(|j| ss.get(j)) else {
-        return true;
-    };
-    let j = num(3).unwrap_or(0) as usize;
-    let eps = match episodes(env, &it.s, &season.slug).await {
-        Ok(e) if !e.is_empty() => e,
-        Ok(_) => {
-            encbot_send(env, chat, "\u{1F937} Bu faslda qismlar topilmadi.", None).await;
-            return true;
-        }
-        Err(e) => {
-            encbot_send(env, chat, &format!("\u{274C} {}", html_escape(&e)), None).await;
-            return true;
-        }
-    };
-    match kind {
-        "zs" => {
-            encbot_send(env, chat, &format!("\u{1F4FA} <b>{}</b> \u{00B7} {} \u{00B7} {} ta qism\n\nQismni tanlang:",
-                html_escape(&it.t), html_escape(&season_label(season)), eps.len()),
-                Some(episode_kb(&nav.n, i, j, &eps, 0))).await;
-        }
-        "zp" => {
-            let page = num(4).unwrap_or(0).max(0) as usize;
-            let _ = encbot_api(env, "editMessageReplyMarkup", json!({
-                "chat_id": chat, "message_id": msg_id, "reply_markup": episode_kb(&nav.n, i, j, &eps, page),
-            })).await;
-        }
-        "ze" => {
-            let Some(e) = num(4).and_then(|k| usize::try_from(k).ok()).and_then(|k| eps.get(k)) else { return true };
-            let k = num(4).unwrap_or(0);
-            let head = format!("\u{1F4FA} <b>{}</b>\n{} \u{00B7} {}-qism{}", html_escape(&it.t),
-                html_escape(&season_label(season)), e.num,
-                if e.title.is_empty() { String::new() } else { format!(": {}", html_escape(&e.title)) });
-            match qualities_text(env, &it, Some((&season.slug, e))).await {
-                Ok((t, rows)) => {
-                    let rows = rows.into_iter()
-                        .map(|(label, h)| vec![btn(&label, format!("zq:{}:{i}:{j}:{k}:{h}", nav.n))]).collect();
-                    encbot_send(env, chat, &format!("{head}\n\n{t}"), Some(kb(rows))).await;
-                }
-                Err(err) => encbot_send(env, chat, &format!("{head}\n\n\u{274C} {}", html_escape(&err)), None).await,
-            }
-        }
-        "zq" => {
-            let Some(e) = num(4).and_then(|k| usize::try_from(k).ok()).and_then(|k| eps.get(k)) else { return true };
-            let label = format!("{} \u{00B7} {}-qism{}", season_label(season), e.num,
-                if e.title.is_empty() { String::new() } else { format!(": {}", e.title) });
-            start(env, chat, &it, Some((&season.slug, e, label)), num(5).unwrap_or(0)).await;
-        }
-        _ => {}
-    }
-    true
+    false
 }
 
 // ── Yuklash navbati (Turso) va GitHub Actions ────────────────
@@ -836,7 +920,7 @@ async fn start(env: &Env, chat: i64, it: &Item, ep: Option<(&str, &Episode, Stri
     caption.push_str(&format!("\n{}", quality_name(height)));
     let head = job_head(&caption);
     let status = encbot_api(env, "sendMessage", json!({
-        "chat_id": chat, "parse_mode": "HTML", "text": format!("{head}\n\n\u{23F3} tayyorlanmoqda..."),
+        "chat_id": chat, "parse_mode": "HTML", "text": format!("{head}\n\n\u{23F3} navbatga qo'shilmoqda..."),
     })).await.ok().and_then(|v| v["message_id"].as_i64()).unwrap_or(0);
     let edit = |line: String| json!({"chat_id": chat, "message_id": status, "parse_mode": "HTML",
         "text": format!("{head}\n\n{line}")});
@@ -874,9 +958,11 @@ async fn start(env: &Env, chat: i64, it: &Item, ep: Option<(&str, &Episode, Stri
     let ahead = turso_exec(env, "SELECT COUNT(*) AS n FROM anibla_jobs WHERE state IN ('queued','running') AND id<?",
         vec![TursoArg::int(id)]).await.ok().and_then(|r| first_row(&r)).map(|r| jint(&r, "n")).unwrap_or(0);
     let kick = kick(env).await;
-    let place = if ahead > 0 { format!("\u{1F4CB} Navbatda #{id} \u{2014} oldinda {ahead} ta video.") }
-                else { format!("\u{1F4CB} Navbatda #{id} \u{2014} birinchi.") };
-    let _ = encbot_api(env, "editMessageText", edit(format!("{place}\n{kick}"))).await;
+    let place = if ahead > 0 { format!("oldinda {ahead} ta video bor") } else { "birinchi bo'lib yuklanadi".to_string() };
+    let _ = encbot_api(env, "editMessageText", json!({"chat_id": chat, "message_id": status, "parse_mode": "HTML",
+        "text": format!("\u{2705} <b>Navbatga qo'shildi</b> (#{id}, {place})\n{}\n\n{kick}\n\
+                         Yuklash boshlanganda jonli holat (log bilan) pastda alohida xabarda chiqadi.",
+                        html_escape(&caption))})).await;
 }
 
 fn state_icon(job: &Value) -> &'static str {
@@ -890,19 +976,24 @@ fn state_icon(job: &Value) -> &'static str {
 /// "📋 Yuklash navbati": har video alohida qator, o'chirish tugmasi bilan.
 async fn queue_list(env: &Env, chat: i64) {
     let rows = turso_exec(env,
-        "SELECT id, caption, state, lease_until, error FROM anibla_jobs ORDER BY queued_at ASC LIMIT 30", vec![]).await
+        "SELECT id, caption, state, lease_until, error, status_msg FROM anibla_jobs ORDER BY queued_at ASC LIMIT 30", vec![]).await
         .map(|r| rows_of(&r)).unwrap_or_default();
     if rows.is_empty() {
         encbot_send(env, chat, "\u{1F4CB} Yuklash navbati bo'sh.", Some(menu_keyboard())).await;
         return;
     }
-    let mut text = format!("\u{1F4CB} <b>Yuklash navbati</b> \u{2014} {} ta\n\
-                            \u{23F3} kutmoqda \u{00B7} \u{2699}\u{FE0F} yuklanmoqda \u{00B7} \u{274C} xato\n", rows.len());
+    let mut text = format!("\u{1F4CB} <b>Yuklash navbati</b> \u{2014} {} ta\n", rows.len());
     let mut kb_rows = Vec::new();
+    let mut live = None;
     for r in &rows {
         let id = jint(r, "id");
         let cap = r["caption"].as_str().unwrap_or("").replace('\n', " \u{00B7} ");
-        text.push_str(&format!("\n{} #{id} {}", state_icon(r), html_escape(&cap)));
+        let st = match state_icon(r) {
+            "\u{2699}\u{FE0F}" => { live = Some(r.clone()); "\u{2699}\u{FE0F} yuklanmoqda" }
+            "\u{274C}" => "\u{274C} xato",
+            _ => "\u{23F3} navbatda",
+        };
+        text.push_str(&format!("\n#{id} {} \u{2014} {st}", html_escape(&cap)));
         if r["state"].as_str() == Some("error") {
             text.push_str(&format!("\n   <i>{}</i>", html_escape(r["error"].as_str().unwrap_or(""))));
             kb_rows.push(vec![btn(&format!("\u{1F501} #{id} qayta"), format!("zr:{id}")),
@@ -915,6 +1006,24 @@ async fn queue_list(env: &Env, chat: i64) {
         kb_rows.push(vec![btn("\u{1F9F9} Navbatdagilarning hammasini o'chirish", "zxa".into())]);
     }
     encbot_send(env, chat, &text, Some(kb(kb_rows))).await;
+    // Yuklanayotgan videoning jonli holati (log bilan) shu ro'yxat ostiga
+    // ko'chadi: yangi xabar, runner keyingi yangilanishda shuni tahrirlaydi.
+    if let Some(j) = live {
+        let id = jint(&j, "id");
+        let fresh = encbot_api(env, "sendMessage", json!({
+            "chat_id": chat, "parse_mode": "HTML",
+            "text": format!("{}\n\n\u{2699}\u{FE0F} yuklanmoqda \u{2014} holat bir necha soniyada shu yerda yangilanadi...",
+                job_head(j["caption"].as_str().unwrap_or(""))),
+        })).await.ok().and_then(|v| v["message_id"].as_i64()).unwrap_or(0);
+        if fresh > 0 {
+            let old = turso_exec(env, "UPDATE anibla_jobs SET status_msg=? WHERE id=? RETURNING chat",
+                vec![TursoArg::int(fresh), TursoArg::int(id)]).await.ok().and_then(|r| first_row(&r));
+            let prev = jint(&j, "status_msg");
+            if old.is_some() && prev > 0 {
+                let _ = encbot_api(env, "deleteMessage", json!({"chat_id": chat, "message_id": prev})).await;
+            }
+        }
+    }
 }
 
 /// Navbat tugmalari: `zx:<id>` olib tashlash, `zr:<id>` qayta urinish.
@@ -1022,9 +1131,29 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
             let Some(got) = first_row(&got) else {
                 continue;
             };
+            // Yuklash boshlandi: jonli holat uchun chat OXIRIGA yangi xabar (eski
+            // "navbatga qo'shildi" xabari yuqorida qolib ketadi va ko'rinmaydi).
+            let chat = jint(&job, "chat");
+            let mut status = jint(&job, "status_msg");
+            let fresh = encbot_api(env, "sendMessage", json!({
+                "chat_id": chat, "parse_mode": "HTML",
+                "text": format!("{}\n\n\u{2699}\u{FE0F} Yuklash boshlandi...", job_head(job["caption"].as_str().unwrap_or(""))),
+            })).await.ok().and_then(|v| v["message_id"].as_i64()).unwrap_or(0);
+            if fresh > 0 {
+                let _ = turso_exec(env, "UPDATE anibla_jobs SET status_msg=? WHERE id=?",
+                    vec![TursoArg::int(fresh), TursoArg::int(id)]).await;
+                if status > 0 {
+                    let _ = encbot_api(env, "editMessageText", json!({
+                        "chat_id": chat, "message_id": status, "parse_mode": "HTML",
+                        "text": format!("{}\n\n\u{2699}\u{FE0F} Yuklanmoqda \u{2014} jonli holat pastda \u{2B07}\u{FE0F}",
+                            job_head(job["caption"].as_str().unwrap_or(""))),
+                    })).await;
+                }
+                status = fresh;
+            }
             return ok(json!({"channel": tg_channel_id(env), "job": {
                 "id": id, "url": job["url"], "caption": job["caption"], "file_name": job["file_name"],
-                "chat": jint(&job, "chat"), "status_msg": jint(&job, "status_msg"),
+                "chat": chat, "status_msg": status,
                 "attempt": jint(&got, "attempts"),
             }}));
         }
@@ -1034,12 +1163,18 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
     // Jonli holat: holat xabarini tahrirlaydi (bazaga tegmaydi).
     if path == "/api/anibla/progress" {
         let text: String = b["text"].as_str().unwrap_or("").chars().take(3500).collect();
-        let msg = jint(&b, "status_msg");
-        // Runner har soniyada yuboradi. Telegram cheklasa ("Too Many Requests:
+        // Holat xabari ko'chgan bo'lishi mumkin ("📋 Yuklash navbati" uni pastga
+        // ko'chiradi) — joriy raqam bazadan (faqat O'QISH).
+        let row = own(env, &b).await;
+        let Some(row) = row else {
+            return ok_nostore(json!({"ok": false, "gone": true}));
+        };
+        let msg = jint(&row, "status_msg");
+        // Runner har bir necha soniyada yuboradi. Telegram cheklasa ("Too Many Requests:
         // retry after N") — N runner'ga qaytadi va u shuncha kutadi.
         if msg > 0 && !text.is_empty() {
             if let Err(e) = encbot_api(env, "editMessageText", json!({
-                "chat_id": jint(&b, "chat"), "message_id": msg, "text": text,
+                "chat_id": jint(&row, "chat"), "message_id": msg, "text": text,
             })).await {
                 let e = e.to_string();
                 if let Some(rest) = e.split("retry after").nth(1) {
