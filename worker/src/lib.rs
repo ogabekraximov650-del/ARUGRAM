@@ -38,6 +38,8 @@ mod channels;
 mod postbot;
 // anibla.uz dan qidirib yuklash (kodlash botining uchinchi bo'limi).
 mod anibla;
+// Uchala bo'lim uchun bitta jonli "Holat" xabari.
+mod livewatch;
 
 // ── CORS + JSON yordamchi ──────────────────────────────────────
 
@@ -11304,7 +11306,9 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
         if !text.starts_with("#arustatus") || text.len() > 16_000 {
             return json_resp(&json!({"error": "matn"}), 400);
         }
-        let ok_put = encode_live_store(env, Some(text)).await.is_some();
+        let ok_put = encode_live_store(env, Some(text.clone())).await.is_some();
+        // Botda "Ilova uchun" holati kuzatilayotgan bo'lsa — o'sha xabar yangilanadi.
+        livewatch::app_push(env, &text).await;
         return ok_nostore(json!({"ok": ok_put}));
     }
 
@@ -11983,6 +11987,27 @@ async fn encbot_video(env: &Env, msg: &Value, a: i64, s: i64, n: i64) {
         if replaced { "almashtirildi" } else { "qo'shildi" }), None).await;
 }
 
+/// "📱 Ilova uchun" bo'limidagi "📋 Holat": navbat soni (bir martalik xabar).
+/// Jonli holat esa alohida xabarda (`livewatch::app_status`) yangilanib turadi.
+async fn encbot_queue_summary(env: &Env, chat: i64) {
+    let res = turso_exec(env,
+        "SELECT state, COUNT(*) AS n FROM encode_jobs GROUP BY state", vec![]).await;
+    let lines: Vec<String> = res.map(|r| rows_of(&r)).unwrap_or_default().iter()
+        .map(|r| {
+            let label = match r["state"].as_str().unwrap_or("") {
+                "queued" => "\u{23F3} Navbatda kutmoqda",
+                "running" => "\u{2699}\u{FE0F} Hozir kodlanmoqda",
+                "error" => "\u{274C} Xato bilan to'xtagan",
+                "done" => "\u{2705} Tayyor",
+                _ => "\u{2753} Boshqa",
+            };
+            format!("{label}: {} ta", jint(r, "n"))
+        }).collect();
+    let kick = encode_kick(env).await;
+    encbot_send(env, chat, &format!("\u{1F4CB} <b>Ilova uchun kodlash navbati</b>\n\n{}\n\n{kick}",
+        if lines.is_empty() { "Navbatda hech narsa yo'q.".to_string() } else { lines.join("\n") }), None).await;
+}
+
 async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
     let got = req.headers().get("X-Telegram-Bot-Api-Secret-Token").ok().flatten().unwrap_or_default();
     let want = config_get(env, "encbot_secret").await.unwrap_or_default();
@@ -12061,6 +12086,19 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
         return ok(json!({"ok": true}));
     }
     let is_status = text.starts_with("/holat") || text == ENCBOT_BTN_STATUS;
+    // "📋 Holat" — qaysi bo'limda bosilsa, AYNAN o'sha bo'limning jonli
+    // holati (`livewatch.rs`): yangi xabar, faqat shu xabar yangilanadi.
+    if is_status {
+        match config_get(env, "encbot_mode").await.as_deref() {
+            Some("anibla") => anibla::status(env, chat).await,
+            Some("post") => postbot::status(env, chat).await,
+            _ => {
+                encbot_queue_summary(env, chat).await;
+                livewatch::app_status(env, chat).await;
+            }
+        }
+        return ok(json!({"ok": true}));
+    }
     if !is_status && config_get(env, "encbot_mode").await.as_deref() == Some("anibla") {
         anibla::on_message(env, msg, chat).await;
         return ok(json!({"ok": true}));
@@ -12091,33 +12129,6 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
                 "Avval anime va bo'limni tanlang, keyin \u{00AB}Yangi qism qo'shish\u{00BB} yoki qism tugmasini bosing: /start",
                 None).await,
         }
-        return ok(json!({"ok": true}));
-    }
-    if text.starts_with("/holat") || text == ENCBOT_BTN_STATUS {
-        let res = turso_exec(env,
-            "SELECT state, COUNT(*) AS n FROM encode_jobs GROUP BY state", vec![]).await;
-        let lines: Vec<String> = res.map(|r| rows_of(&r)).unwrap_or_default().iter()
-            .map(|r| {
-                let label = match r["state"].as_str().unwrap_or("") {
-                    "queued" => "\u{23F3} Navbatda kutmoqda",
-                    "running" => "\u{2699}\u{FE0F} Hozir kodlanmoqda",
-                    "error" => "\u{274C} Xato bilan to'xtagan",
-                    "done" => "\u{2705} Tayyor",
-                    _ => "\u{2753} Boshqa",
-                };
-                format!("{label}: {} ta", jint(r, "n"))
-            }).collect();
-        let kick = encode_kick(env).await;
-        // Hozir ishlayotgan qism — JONLI holat, faqat shu so'rovda o'qiladi
-        // (qadalgan xabar va GitHub; bazaga yozuv yo'q).
-        let live = encode_live_text(env).await;
-        let running: Vec<String> = if live.is_empty() { Vec::new() } else { vec![live] };
-        let running = if running.is_empty() { String::new() } else { format!("{}\n\n", running.join("\n")) };
-        let posts = turso_exec(env,
-            "SELECT COUNT(*) AS n FROM post_jobs WHERE state IN ('queued','running')", vec![]).await
-            .ok().and_then(|r| first_row(&r)).map(|r| jint(&r, "n")).unwrap_or(0);
-        encbot_send(env, chat, &format!("\u{1F4CB} <b>Kodlash navbati</b>\n\n{running}{}\n\u{1F3AC} Postlar navbatda: {posts} ta\n\n{kick}",
-            if lines.is_empty() { "Navbatda hech narsa yo'q.".to_string() } else { lines.join("\n") }), None).await;
         return ok(json!({"ok": true}));
     }
     if text == ENCBOT_BTN_ADD {
@@ -12366,7 +12377,9 @@ async fn encode_log_chat(env: &Env) -> String {
 // bot "Holat" tugmasi, ilovaning zaxira yo'li) Telegram'ga ham, GitHub'ga
 // ham, bazaga ham bormaydi.
 const ENCODE_LIVE_CACHE_URL: &str = "https://arugram-encode-live.internal/v1";
-const ENCODE_LIVE_CACHE_SECS: u32 = 30;
+// Runner endi holatni har ~5 soniyada yuboradi — kesh qisqa bo'lmasa ilova
+// eski holatni ko'rib turardi (foydalanuvchi: "log yangilanmayapti").
+const ENCODE_LIVE_CACHE_SECS: u32 = 4;
 
 async fn encode_live(env: &Env) -> Value {
     if let Ok(req) = Request::new(ENCODE_LIVE_CACHE_URL, Method::Get) {
@@ -12529,6 +12542,8 @@ async fn encode_live_github(env: &Env, mut out: Value) -> Value {
 }
 
 /// Bot "Holat" xabari uchun jonli holat matni (bo'sh — ma'lumot yo'q).
+/// Endi "Holat" `livewatch::app_status` dan foydalanadi; bu zaxira uchun qoldi.
+#[allow(dead_code)]
 async fn encode_live_text(env: &Env) -> String {
     let live = encode_live(env).await;
     let mut parts = Vec::new();

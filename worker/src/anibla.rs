@@ -292,12 +292,12 @@ fn panel(rows: Vec<Vec<String>>, back: bool) -> Value {
     let mut all = if back {
         vec![
             vec![BTN_BACK.to_string(), postbot::BTN_HOME.to_string()],
-            vec![BTN_SEARCH.to_string(), BTN_QUEUE.to_string()],
+            vec![BTN_SEARCH.to_string(), BTN_QUEUE.to_string(), ENCBOT_BTN_STATUS.to_string()],
         ]
     } else {
         vec![
             vec![BTN_CATS.to_string(), BTN_SEARCH.to_string()],
-            vec![BTN_QUEUE.to_string(), postbot::BTN_HOME.to_string()],
+            vec![BTN_QUEUE.to_string(), ENCBOT_BTN_STATUS.to_string(), postbot::BTN_HOME.to_string()],
         ]
     };
     all.extend(rows);
@@ -1158,10 +1158,28 @@ fn state_icon(job: &Value) -> &'static str {
     }
 }
 
+/// "📋 Holat" — "Anibla yuklash" bo'limida: yuklanayotgan video holati yangi
+/// xabarda, faqat shu xabar yangilanib turadi (`livewatch.rs`).
+pub(crate) async fn status(env: &Env, chat: i64) {
+    let now = now_ms();
+    let run = turso_exec(env,
+        "SELECT * FROM anibla_jobs WHERE state='running' AND lease_until>? ORDER BY queued_at ASC LIMIT 1",
+        vec![TursoArg::int(now)]).await.ok().and_then(|r| first_row(&r));
+    let waiting = turso_exec(env, "SELECT COUNT(*) AS n FROM anibla_jobs WHERE state='queued'", vec![]).await
+        .ok().and_then(|r| first_row(&r)).map(|r| jint(&r, "n")).unwrap_or(0);
+    let html = match run {
+        Some(j) => live_text(&j, &format!("\u{2699}\u{FE0F} yuklanmoqda \u{2014} holat bir necha soniyada shu yerda yangilanadi...\n\
+                                         \u{1F4CB} Navbatda yana: {waiting} ta")),
+        None => format!("\u{1F39E} <b>Anibla yuklash</b>\n\n\u{1F4A4} Hozir yuklanayotgan video yo'q.\n\
+                         \u{1F4CB} Navbatda: {waiting} ta\n\nYuklash boshlansa, shu xabar o'zi yangilanadi."),
+    };
+    livewatch::start(env, livewatch::ANIBLA, chat, &html).await;
+}
+
 /// "📋 Yuklash navbati": har video alohida qator, o'chirish tugmasi bilan.
 async fn queue_list(env: &Env, chat: i64) {
     let rows = turso_exec(env,
-        "SELECT id, caption, state, lease_until, error, status_msg FROM anibla_jobs ORDER BY queued_at ASC LIMIT 30", vec![]).await
+        "SELECT id, caption, state, lease_until, error FROM anibla_jobs ORDER BY queued_at ASC LIMIT 30", vec![]).await
         .map(|r| rows_of(&r)).unwrap_or_default();
     if rows.is_empty() {
         encbot_send(env, chat, "\u{1F4CB} Yuklash navbati bo'sh.", Some(menu_keyboard())).await;
@@ -1169,12 +1187,11 @@ async fn queue_list(env: &Env, chat: i64) {
     }
     let mut text = format!("\u{1F4CB} <b>Yuklash navbati</b> \u{2014} {} ta\n", rows.len());
     let mut kb_rows = Vec::new();
-    let mut live = None;
     for r in &rows {
         let id = jint(r, "id");
         let cap = r["caption"].as_str().unwrap_or("").replace('\n', " \u{00B7} ");
         let st = match state_icon(r) {
-            "\u{2699}\u{FE0F}" => { live = Some(r.clone()); "\u{2699}\u{FE0F} yuklanmoqda" }
+            "\u{2699}\u{FE0F}" => "\u{2699}\u{FE0F} yuklanmoqda",
             "\u{274C}" => "\u{274C} xato",
             _ => "\u{23F3} navbatda",
         };
@@ -1191,23 +1208,6 @@ async fn queue_list(env: &Env, chat: i64) {
         kb_rows.push(vec![btn("\u{1F9F9} Navbatdagilarning hammasini o'chirish", "zxa".into())]);
     }
     encbot_send(env, chat, &text, Some(kb(kb_rows))).await;
-    // Yuklanayotgan videoning jonli holati (log bilan) shu ro'yxat ostiga
-    // ko'chadi: yangi xabar, runner keyingi yangilanishda shuni tahrirlaydi.
-    if let Some(j) = live {
-        let id = jint(&j, "id");
-        let fresh = encbot_api(env, "sendMessage", json!({
-            "chat_id": chat, "parse_mode": "HTML",
-            "text": live_text(&j, "\u{2699}\u{FE0F} yuklanmoqda \u{2014} holat bir necha soniyada shu yerda yangilanadi..."),
-        })).await.ok().and_then(|v| v["message_id"].as_i64()).unwrap_or(0);
-        if fresh > 0 {
-            let old = turso_exec(env, "UPDATE anibla_jobs SET status_msg=? WHERE id=? RETURNING chat",
-                vec![TursoArg::int(fresh), TursoArg::int(id)]).await.ok().and_then(|r| first_row(&r));
-            let prev = jint(&j, "status_msg");
-            if old.is_some() && prev > 0 {
-                let _ = encbot_api(env, "deleteMessage", json!({"chat_id": chat, "message_id": prev})).await;
-            }
-        }
-    }
 }
 
 /// Navbat tugmalari: `zx:<id>` olib tashlash, `zr:<id>` qayta urinish.
@@ -1335,6 +1335,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
                 }
                 status = fresh;
             }
+            livewatch::claim(env, livewatch::ANIBLA, chat, status).await;
             return ok(json!({"channel": tg_channel_id(env), "job": {
                 "id": id, "url": job["url"], "caption": job["caption"], "file_name": job["file_name"],
                 "chat": chat, "status_msg": status,
@@ -1347,27 +1348,17 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
     // Jonli holat: holat xabarini tahrirlaydi (bazaga tegmaydi).
     if path == "/api/anibla/progress" {
         let text: String = b["text"].as_str().unwrap_or("").chars().take(3500).collect();
-        // Holat xabari ko'chgan bo'lishi mumkin ("📋 Yuklash navbati" uni pastga
-        // ko'chiradi) — joriy raqam bazadan (faqat O'QISH).
-        let row = own(env, &b).await;
-        let Some(row) = row else {
+        // Faqat "Anibla yuklash" kuzatilayotgan bo'lsa (`livewatch.rs`) — o'sha
+        // bitta xabar tahrirlanadi. Bazadan o'qish ham shundagina.
+        if text.is_empty() || livewatch::target(env, livewatch::ANIBLA).await.is_none() {
+            return ok_nostore(json!({"ok": true}));
+        }
+        let Some(row) = own(env, &b).await else {
             return ok_nostore(json!({"ok": false, "gone": true}));
         };
-        let msg = jint(&row, "status_msg");
-        // Runner har bir necha soniyada yuboradi. Telegram cheklasa ("Too Many Requests:
-        // retry after N") — N runner'ga qaytadi va u shuncha kutadi.
-        if msg > 0 && !text.is_empty() {
-            if let Err(e) = encbot_api(env, "editMessageText", json!({
-                "chat_id": jint(&row, "chat"), "message_id": msg, "parse_mode": "HTML",
-                "text": live_text(&row, &text),
-            })).await {
-                let e = e.to_string();
-                if let Some(rest) = e.split("retry after").nth(1) {
-                    let secs: i64 = rest.trim().chars().take_while(|c| c.is_ascii_digit()).collect::<String>()
-                        .parse().unwrap_or(5);
-                    return ok_nostore(json!({"ok": false, "retry_after": secs.max(1)}));
-                }
-            }
+        // Telegram cheklasa ("retry after N") — N runner'ga qaytadi va u shuncha kutadi.
+        if let Err(secs) = livewatch::edit(env, livewatch::ANIBLA, &live_text(&row, &text)).await {
+            return ok_nostore(json!({"ok": false, "retry_after": secs}));
         }
         return ok_nostore(json!({"ok": true}));
     }
@@ -1382,6 +1373,14 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
         let status = |line: String| json!({"chat_id": chat, "message_id": jint(&job, "status_msg"),
             "parse_mode": "HTML",
             "text": live_text(&job, &if text.is_empty() { line.clone() } else { format!("{text}\n{line}") })});
+        // Yakuniy holat "Holat" bilan ochilgan kuzatilayotgan xabarga ham.
+        let watch = livewatch::target(env, livewatch::ANIBLA).await
+            .filter(|(_, m)| *m != jint(&job, "status_msg"));
+        let mirror = |body: Value| async move {
+            if let Some((c, m)) = watch {
+                let _ = livewatch::edit_msg(env, c, m, body["text"].as_str().unwrap_or("")).await;
+            }
+        };
         if b["ok"].as_bool() == Some(true) {
             // Tayyor video kanaldan BOT CHATIGA ko'chiriladi, kanal posti o'chadi.
             let channel = tg_channel_id(env);
@@ -1395,7 +1394,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
                 }
                 Err(e) => format!("\u{26A0}\u{FE0F} Botga ko'chmadi ({e}) \u{2014} video yopiq kanalda qoldi."),
             };
-            let _ = encbot_api(env, "editMessageText", status(line)).await;
+            { let body = status(line); mirror(body.clone()).await; let _ = encbot_api(env, "editMessageText", body).await; }
             turso_exec(env, "DELETE FROM anibla_jobs WHERE id=?", vec![TursoArg::int(id)]).await?;
             return ok(json!({"ok": true}));
         }
@@ -1404,7 +1403,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
             turso_exec(env,
                 "UPDATE anibla_jobs SET state='queued', runner='', lease_until=0, attempts=MAX(attempts-1,0) WHERE id=?",
                 vec![TursoArg::int(id)]).await?;
-            let _ = encbot_api(env, "editMessageText", status("\u{23F8} Run to'xtatildi \u{2014} video navbatga qaytdi.".into())).await;
+            { let body = status("\u{23F8} Run to'xtatildi \u{2014} video navbatga qaytdi.".into()); mirror(body.clone()).await; let _ = encbot_api(env, "editMessageText", body).await; }
             return ok(json!({"ok": true}));
         }
         let fatal = b["fatal"].as_bool() == Some(true) || jint(&job, "attempts") >= MAX_ATTEMPTS;
@@ -1415,7 +1414,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
         } else {
             format!("\u{26A0}\u{FE0F} Xato: {err}\nKeyinroq yana urinib ko'riladi.")
         };
-        let _ = encbot_api(env, "editMessageText", status(line)).await;
+        { let body = status(line); mirror(body.clone()).await; let _ = encbot_api(env, "editMessageText", body).await; }
         return ok(json!({"ok": true}));
     }
 

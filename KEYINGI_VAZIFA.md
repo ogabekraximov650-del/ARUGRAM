@@ -5220,3 +5220,38 @@ Qanday ishlaydi:
   ETDI, 150 tasini qabul qildi. Shu sabab anime ro'yxati 100 tadan (foydalanuvchi
   talabi, `SEARCH_PAGE`=100, "Oldingi/Keyingi" tepada), qismlar 150 tagacha
   (`EP_PAGE`=150). `send_list` zaxira zinasi: hammasi → 150 → 100 → 60.
+
+## Bitta jonli "Holat" xabari — uchala bo'limda (2026-10)
+
+TALAB (foydalanuvchi): botdagi uchala bo'limda ("📱 Ilova uchun", "🎬 Post
+kodlash", "🎞 Anibla yuklash") "📋 Holat" tugmasi; qaysi bo'limda bosilsa,
+AYNAN o'sha bo'limning jonli holati va log'i yangi xabarda, FAQAT shu xabar
+yangilanadi (oldingilari to'xtaydi). Ilova admin panelida — faqat ilova
+avto-kodlash logi, real vaqtga yaqin. Sabab: "ilovadagi log va botdagi
+ilova uchun bo'limidagi log yangilanmayapti".
+
+TOPILGAN SABAB (ilova logi): runner holatni worker'ga (`EncodeLive`) har
+60 s da yuborardi, worker javobni 30 s keshlardi, ilova esa 16 s da
+so'rardi — amalda daqiqada bir yangilanish. Endi: `run.py`
+`WORKER_PUSH_SEC`=5 (qadalgan xabar avvalgidek ~3 s), worker kesh 4 s
+(`ENCODE_LIVE_CACHE_SECS`), ilova (`admin_encode_screen.dart`) ~4 s da
+so'raydi. Botdagi eski "Holat" bir martalik matn edi — endi jonli.
+
+- `worker/src/livewatch.rs` — kuzatilayotgan bitta xabar:
+  `app_config.live_watch` = `bo'lim|chat|xabar|vaqt` (o'qish izolyatda 4 s
+  eslab qolinadi; yozuv faqat "Holat" bosilganda yoki ish boshlanganda).
+  `edit(bo'lim, html)` — faqat shu bo'lim kuzatilayotgan bo'lsa tahrirlaydi
+  (Telegram "retry after" — soniyalar qaytadi).
+- Ilova uchun: `/api/encode/push` -> `livewatch::app_push` -> `app_html`
+  (anime/bo'lim nomi izolyatda keshlanadi; manba, sifatlar zinasi
+  ✅/⚙️/⬆️/⏳, joriy bosqich foiz-chiziq/tezlik/hajm/o'tdi-qoldi, oxirgi 4
+  log qatori, jami). "Holat": navbat soni (`encbot_queue_summary`, bir
+  martalik) + jonli xabar (`livewatch::app_status`).
+- Post: `/api/post/progress` endi faqat kuzatilayotgan xabarni tahrirlaydi;
+  `claim` yangi holat xabarini `livewatch::claim` bilan kuzatuvga qo'yadi
+  (hech narsa kuzatilmasa, shu bo'lim kuzatilsa yoki tanlov 30 daqiqadan
+  eski bo'lsa); yakuniy holat (`post_final`) postning o'z xabariga ham,
+  kuzatilayotganiga ham. Post panelida "📋 Holat" (`postbot::status`).
+- Anibla: xuddi shunday (`anibla::status`, `claim`, `progress`, `done`);
+  "📋 Yuklash navbati" endi holat xabarini ko'chirmaydi. Panelda "📋 Holat".
+- `lib.rs`: `is_status` — `encbot_mode` bo'yicha (anibla / post / ilova).

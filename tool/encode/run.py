@@ -71,7 +71,7 @@ LOG_INTERVAL = max(1.0, float(os.environ.get("LOG_INTERVAL_SEC", "10") or 10))
 # Telegram bundan tez tahrirlashga ruxsat bermaydi (FloodWait).
 STATUS_INTERVAL = max(2.0, float(os.environ.get("STATUS_INTERVAL_SEC", "3") or 3))
 # To'liq holat worker'ga (`EncodeLive`) shu oraliqda yuboriladi.
-WORKER_PUSH_SEC = max(20.0, float(os.environ.get("WORKER_PUSH_SEC", "60") or 60))
+WORKER_PUSH_SEC = max(3.0, float(os.environ.get("WORKER_PUSH_SEC", "5") or 5))
 SESSION = str(Path(__file__).with_name("pyro_session"))
 WORK = Path(os.environ.get("RUNNER_TEMP", "/tmp")) / "arugram_encode"
 

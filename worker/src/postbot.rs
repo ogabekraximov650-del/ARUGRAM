@@ -122,7 +122,29 @@ pub(crate) async fn main_menu(env: &Env, chat: i64) {
 }
 
 fn post_keyboard() -> Value {
-    encbot_keyboard(vec![vec![BTN_QUEUE.to_string()], vec![BTN_HOME.to_string()]])
+    encbot_keyboard(vec![
+        vec![BTN_QUEUE.to_string(), ENCBOT_BTN_STATUS.to_string()],
+        vec![BTN_HOME.to_string()],
+    ])
+}
+
+/// "📋 Holat" — "Post kodlash" bo'limida: hozir kodlanayotgan post holati
+/// yangi xabarda, faqat shu xabar yangilanib turadi (`livewatch.rs`).
+pub(crate) async fn status(env: &Env, chat: i64) {
+    let now = now_ms();
+    let run = turso_exec(env,
+        "SELECT id, name, attempts FROM post_jobs WHERE state='running' AND lease_until>? ORDER BY queued_at ASC LIMIT 1",
+        vec![TursoArg::int(now)]).await.ok().and_then(|r| first_row(&r));
+    let waiting = turso_exec(env, "SELECT COUNT(*) AS n FROM post_jobs WHERE state='queued'", vec![]).await
+        .ok().and_then(|r| first_row(&r)).map(|r| jint(&r, "n")).unwrap_or(0);
+    let html = match run {
+        Some(j) => format!("{}\n\n\u{2699}\u{FE0F} kodlanmoqda \u{2014} holat bir necha soniyada shu yerda yangilanadi...\n\
+                            \u{1F4CB} Navbatda yana: {waiting} ta",
+            status_head(jint(&j, "id"), j["name"].as_str().unwrap_or(""), jint(&j, "attempts"))),
+        None => format!("\u{1F3AC} <b>Post kodlash</b>\n\n\u{1F4A4} Hozir kodlanayotgan post yo'q.\n\
+                         \u{1F4CB} Navbatda: {waiting} ta\n\nKodlash boshlansa, shu xabar o'zi yangilanadi."),
+    };
+    livewatch::start(env, livewatch::POST, chat, &html).await;
 }
 
 pub(crate) async fn post_menu(env: &Env, chat: i64) {
@@ -529,6 +551,17 @@ pub(crate) async fn on_callback(env: &Env, chat: i64, data: &str) -> bool {
 
 // ── Actions (`post.yml` -> `tool/post/post.py`) ──────────────
 
+/// Yakuniy holat: postning o'z holat xabari va (boshqa bo'lsa) "Holat"
+/// bilan ochilgan kuzatilayotgan xabar.
+async fn post_final(env: &Env, body: Value) {
+    let _ = encbot_api(env, "editMessageText", body.clone()).await;
+    if let Some((chat, msg)) = livewatch::target(env, livewatch::POST).await {
+        if msg != jint(&body, "message_id") {
+            let _ = livewatch::edit_msg(env, chat, msg, body["text"].as_str().unwrap_or("")).await;
+        }
+    }
+}
+
 async fn own(env: &Env, b: &Value) -> Option<Value> {
     let runner = b["runner"].as_str().unwrap_or("");
     if runner.is_empty() {
@@ -590,6 +623,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
                 "chat_id": ADMIN_TELEGRAM_ID, "parse_mode": "HTML",
                 "text": format!("{head}\n\n\u{23F3} boshlanmoqda..."),
             })).await.ok().and_then(|v| v["message_id"].as_i64()).unwrap_or(0);
+            livewatch::claim(env, livewatch::POST, ADMIN_TELEGRAM_ID, status_msg).await;
             return ok(json!({"channel": channel, "status_msg": status_msg, "job": {
                 "id": id, "name": name, "photo_msg": jint(&job, "photo_msg"),
                 "video_msg": jint(&job, "video_msg"), "attempt": jint(&got, "attempts"),
@@ -599,15 +633,13 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
     }
 
     // Jonli holat: holat xabarini tahrirlaydi. Bazaga tegmaydi (har ~10 s keladi).
+    // Faqat "Post kodlash" kuzatilayotgan bo'lsa (`livewatch.rs`) — o'sha
+    // bitta xabar tahrirlanadi; boshqa bo'lim tanlangan bo'lsa, tegilmaydi.
     if path == "/api/post/progress" {
-        let msg = jint(&b, "status_msg");
         let text: String = b["text"].as_str().unwrap_or("").chars().take(3000).collect();
-        if msg > 0 && !text.is_empty() {
+        if !text.is_empty() {
             let head = status_head(jint(&b, "id"), b["name"].as_str().unwrap_or(""), jint(&b, "attempt"));
-            let _ = encbot_api(env, "editMessageText", json!({
-                "chat_id": ADMIN_TELEGRAM_ID, "message_id": msg, "parse_mode": "HTML",
-                "text": format!("{head}\n\n{}", html_escape(&text)),
-            })).await;
+            let _ = livewatch::edit(env, livewatch::POST, &format!("{head}\n\n{}", html_escape(&text))).await;
         }
         return ok_nostore(json!({"ok": true}));
     }
@@ -634,7 +666,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
         };
         if b["ok"].as_bool() == Some(true) {
             if status_msg > 0 {
-                let _ = encbot_api(env, "editMessageText", final_status(format!(
+                post_final(env, final_status(format!(
                     "\u{2705} Tayyor va {} ga yuborildi ({:.1} MB)",
                     html_escape(b["to"].as_str().unwrap_or("")), jint(&b, "size") as f64 / 1048576.0))).await;
             }
@@ -651,7 +683,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
         let err = b["error"].as_str().unwrap_or("").chars().take(300).collect::<String>();
         if b["cancelled"].as_bool() == Some(true) {
             if status_msg > 0 {
-                let _ = encbot_api(env, "editMessageText",
+                post_final(env,
                     final_status("\u{23F8} Run to'xtatildi \u{2014} post navbatga qaytdi".to_string())).await;
             }
             turso_exec(env,
@@ -661,7 +693,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
         }
         let fatal = b["fatal"].as_bool() == Some(true) || jint(&job, "attempts") >= POST_MAX_ATTEMPTS;
         if status_msg > 0 {
-            let _ = encbot_api(env, "editMessageText", final_status(format!(
+            post_final(env, final_status(format!(
                 "{} xato: {}", if fatal { "\u{274C}" } else { "\u{26A0}\u{FE0F}" }, html_escape(&err)))).await;
         }
         turso_exec(env,

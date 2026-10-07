@@ -15,7 +15,7 @@
 //     keshga yozilsin va kesh orqali ko'rsatilsin"): runner har daqiqada
 //     to'liq holat va log'ni worker'ga yuboradi (`/api/encode/push`), worker
 //     uni `EncodeLive` xotirasida saqlaydi (butun dunyo uchun bitta nusxa,
-//     Turso'siz). Ilova `GET /api/encode/live` ni ~16 soniyada so'raydi.
+//     Turso'siz). Ilova `GET /api/encode/live` ni ~4 soniyada so'raydi.
 //   * ZAXIRA (worker'da yangi holat yo'q — masalan eski skriptli run):
 //     log kanalidagi QADALGAN `#arustatus` xabari, adminning O'Z Telegram
 //     hisobi bilan (`rust_tg_read_pinned`), ~2 soniyada.
@@ -241,14 +241,16 @@ class _AdminEncodeScreenState extends State<AdminEncodeScreen> {
     _polling = true;
     _ticks++;
     try {
-      // ASOSIY YO'L (foydalanuvchi talabi): runner har daqiqada to'liq log
-      // va statistikani worker xotirasiga yozadi — ilova uni ~16 soniyada
+      // ASOSIY YO'L (foydalanuvchi talabi): runner ~5 soniyada to'liq log
+      // va statistikani worker xotirasiga yozadi — ilova uni ~4 soniyada
       // so'raydi. Worker'da yangi holat bo'lmasa (eski skriptli run) —
       // zaxira: Telegram'dagi qadalgan xabar, adminning o'z hisobi bilan.
       if (!_cache && _logChat.isNotEmpty) await _readDirect();
       if (!mounted) return;
       if (_gh != null && _ticks % 15 == 0) unawaited(_readGithub());
-      if (_ticks % 8 == 0) {
+      // Runner holatni worker'ga ~5 soniyada yuboradi (avval 60) — ilova uni
+      // ~4 soniyada so'raydi (foydalanuvchi: "log yangilanmayapti").
+      if (_ticks % 2 == 0) {
         final live = await _get('/api/encode/live');
         if (!mounted) return;
         setState(() => _applyWorkerLive(live ?? const {}));
