@@ -653,23 +653,57 @@ async fn show_qualities(env: &Env, chat: i64, mut nav: Nav, num: i64) {
 }
 
 /// Sifat tanlandi — navbatga.
+///
+/// TALAB (foydalanuvchi): sifat bosilganda bot DARHOL javob bersin — navbatga
+/// qo'shildimi yoki nima xato bo'ldi. Shu sabab birinchi ish — oddiy matnli
+/// (HTML'siz, rad etilmaydigan) "qabul qilindi" xabari; keyingi har qanday
+/// natija (navbat raqami yoki xato sababi) shu xabarni tahrirlaydi.
 async fn pick_quality(env: &Env, chat: i64, nav: &Nav, height: i64) {
-    let Some(it) = cur_item(nav) else { return };
+    let status = encbot_api(env, "sendMessage", json!({
+        "chat_id": chat,
+        "text": format!("\u{23F3} {} qabul qilindi \u{2014} navbatga qo'shilmoqda...", quality_name(height)),
+    })).await.ok().and_then(|v| v["message_id"].as_i64()).unwrap_or(0);
+    let fail = |why: &str| {
+        let why = why.to_string();
+        async move {
+            let body = json!({"chat_id": chat, "message_id": status,
+                "text": format!("\u{274C} Navbatga qo'shilmadi: {why}")});
+            if status == 0 || encbot_api(env, "editMessageText", body.clone()).await.is_err() {
+                let _ = encbot_api(env, "sendMessage", json!({"chat_id": chat, "text": body["text"]})).await;
+            }
+        }
+    };
+    let Some(it) = cur_item(nav) else {
+        fail("tanlangan anime topilmadi \u{2014} ro'yxatdan qaytadan tanlang.").await;
+        return;
+    };
     if nav.v != "q" {
-        encbot_send(env, chat, "Avval anime va qismni tanlang.", None).await;
+        fail("avval anime va qismni tanlang.").await;
         return;
     }
     if it.movie() {
-        start(env, chat, &it, None, height).await;
+        start(env, chat, status, &it, None, height).await;
         return;
     }
-    let Ok(ss) = seasons(env, &it.s).await else { return };
-    let Some(season) = usize::try_from(nav.j).ok().and_then(|j| ss.get(j)) else { return };
-    let eps = episodes(env, &it.s, &season.slug).await.unwrap_or_default();
-    let Some(e) = usize::try_from(nav.k).ok().and_then(|k| eps.get(k)) else { return };
+    let ss = match seasons(env, &it.s).await {
+        Ok(ss) => ss,
+        Err(e) => { fail(&format!("fasllarni olib bo'lmadi ({e}).")).await; return; }
+    };
+    let Some(season) = usize::try_from(nav.j).ok().and_then(|j| ss.get(j)) else {
+        fail("fasl topilmadi \u{2014} qaytadan tanlang.").await;
+        return;
+    };
+    let eps = match episodes(env, &it.s, &season.slug).await {
+        Ok(e) => e,
+        Err(e) => { fail(&format!("qismlarni olib bo'lmadi ({e}).")).await; return; }
+    };
+    let Some(e) = usize::try_from(nav.k).ok().and_then(|k| eps.get(k)) else {
+        fail("qism topilmadi \u{2014} qismni qaytadan tanlang.").await;
+        return;
+    };
     let label = format!("{} \u{00B7} {}-qism{}", season_label(season), e.num,
         if e.title.is_empty() || e.title == e.num.to_string() { String::new() } else { format!(": {}", e.title) });
-    start(env, chat, &it, Some((&season.slug, e, label)), height).await;
+    start(env, chat, status, &it, Some((&season.slug, e, label)), height).await;
 }
 
 /// Muqova rasmi bilan (bo'lmasa oddiy matn).
@@ -988,16 +1022,20 @@ fn live_text(job: &Value, body: &str) -> String {
 }
 
 /// Sifat tanlandi: variant manzilini aniqlaydi va navbatga qo'yadi.
-async fn start(env: &Env, chat: i64, it: &Item, ep: Option<(&str, &Episode, String)>, height: i64) {
+async fn start(env: &Env, chat: i64, status: i64, it: &Item, ep: Option<(&str, &Episode, String)>, height: i64) {
     let mut caption = it.t.clone();
     if let Some((_, _, label)) = &ep {
         caption.push_str(&format!("\n{label}"));
     }
     caption.push_str(&format!("\n{}", quality_name(height)));
     let head = job_head(&caption);
-    let status = encbot_api(env, "sendMessage", json!({
-        "chat_id": chat, "parse_mode": "HTML", "text": format!("{head}\n\n\u{23F3} navbatga qo'shilmoqda..."),
-    })).await.ok().and_then(|v| v["message_id"].as_i64()).unwrap_or(0);
+    let status = if status > 0 { status } else {
+        encbot_api(env, "sendMessage", json!({
+            "chat_id": chat, "text": format!("\u{23F3} {} navbatga qo'shilmoqda...", quality_name(height)),
+        })).await.ok().and_then(|v| v["message_id"].as_i64()).unwrap_or(0)
+    };
+    let _ = encbot_api(env, "editMessageText", json!({"chat_id": chat, "message_id": status, "parse_mode": "HTML",
+        "text": format!("{head}\n\n\u{23F3} navbatga qo'shilmoqda (video manzili tekshirilmoqda)...")})).await;
     let edit = |line: String| json!({"chat_id": chat, "message_id": status, "parse_mode": "HTML",
         "text": format!("{head}\n\n{line}")});
 

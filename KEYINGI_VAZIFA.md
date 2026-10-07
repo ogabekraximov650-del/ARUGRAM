@@ -5188,3 +5188,20 @@ Qanday ishlaydi:
   proporsional: 12 — 2.5 MB/s, 32 — 6.5, 48 — 8.1, 64 — 8.0 MB/s. Shu sabab
   bunday qismlar `PARALLEL_EXT=48` oqimda (oddiylari `PARALLEL=12`). Sinov
   (Muzli devor 14, 480p, video+ovoz 304 bo'lak): 66 s -> 23 s.
+- SIFAT BOSILGANDA JAVOB (foydalanuvchi: 3 ta sifat bosildi, bot hech narsa
+  demadi): `pick_quality` endi BIRINCHI ish sifatida oddiy matnli (HTML'siz)
+  "⏳ 1080p qabul qilindi — navbatga qo'shilmoqda..." xabarini yuboradi;
+  keyingi har qanday natija shu xabarni tahrirlaydi: "✅ Navbatga qo'shildi
+  (#N, oldinda K ta)" yoki "❌ Navbatga qo'shilmadi: <sabab>". Avval bir necha
+  joyda (anime/fasl/qism topilmasa) jim `return` bo'lardi.
+- TELEGRAM'GA TEZ YUKLASH (foydalanuvchi talabi): Pyrogram 2.0.106 katta
+  faylni BITTA media-ulanishda 4 so'rov bilan yuboradi va xato bo'lgan
+  bo'lakni jimgina tashlab ketadi. `download.py` -> `fast_save_file`:
+  `app.save_file` vaqtincha almashtiriladi, 512 KB bo'laklar `UP_CONN`=4
+  ulanish x `UP_WORKERS`=4 so'rov bilan parallel; har bo'lak xato/FloodWait da
+  qayta yuboriladi. Kichik fayllar (muqova) va `FilePartMissing` qayta
+  yuborish — Pyrogram'ning o'z usuli. Tez usul xato bersa — oddiy usulda
+  qayta. Soxta ulanish bilan sinaldi (bo'laklar to'g'ri, xatolarda qayta
+  yuboradi); haqiqiy Telegram'da sinalmagan (sessiyani bu yerdan ishlatish
+  AUTH_KEY_DUPLICATED xavfi). Sessiya kodlash bilan umumiy — Telegram
+  cheklasa, `UP_CONN` ni kamaytirish kerak.

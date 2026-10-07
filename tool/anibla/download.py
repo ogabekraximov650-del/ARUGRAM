@@ -428,6 +428,75 @@ def download_ffmpeg(url, out, live, audio=""):
     return time.time() - t0
 
 
+# TELEGRAM'GA TEZ YUKLASH (foydalanuvchi talabi). Pyrogram katta faylni BITTA
+# ulanishda (4 ta so'rov navbatda) yuboradi. Bu yerda bo'laklar (512 KB) `UP_CONN`
+# ta alohida ulanish x `UP_WORKERS` ta so'rov bilan parallel yuboriladi. Har
+# bo'lak xato/FloodWait bo'lsa qayta yuboriladi (Pyrogram'niki xatoni yutib
+# yuborardi). Biror sabab bilan ishlamasa — Pyrogram'ning o'z usuli.
+UP_CONN = int(os.environ.get("UP_CONN", "4"))
+UP_WORKERS = int(os.environ.get("UP_WORKERS", "4"))
+PART = 512 * 1024
+
+
+async def fast_save_file(app, orig, path, progress=None, progress_args=(), file_id=None, file_part=0):
+    import math
+    from pyrogram import raw
+    from pyrogram.errors import FloodWait
+    from pyrogram.session import Session
+    size = os.path.getsize(path) if isinstance(path, (str, Path)) else 0
+    # Kichik fayl (rasm), qayta yuborish (`file_id`) yoki fayl yo'li emas — asl usul.
+    if file_id is not None or size <= 10 * 1048576 or UP_CONN <= 1:
+        return await orig(path, progress=progress, progress_args=progress_args, file_id=file_id, file_part=file_part)
+    total = int(math.ceil(size / PART))
+    fid = app.rnd_id()
+    dc, key, test = await app.storage.dc_id(), await app.storage.auth_key(), await app.storage.test_mode()
+    sessions = [Session(app, dc, key, test, is_media=True) for _ in range(UP_CONN)]
+    queue = asyncio.Queue()
+    for i in range(total):
+        queue.put_nowait(i)
+    sent = [0]
+
+    async def worker(sess):
+        with open(path, "rb") as f:
+            while True:
+                try:
+                    i = queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    return
+                f.seek(i * PART)
+                chunk = f.read(PART)
+                for attempt in range(8):
+                    try:
+                        await sess.invoke(raw.functions.upload.SaveBigFilePart(
+                            file_id=fid, file_part=i, file_total_parts=total, bytes=chunk))
+                        break
+                    except FloodWait as e:
+                        log(f"Telegram FloodWait {e.value} s")
+                        await asyncio.sleep(int(e.value) + 1)
+                    except Exception as e:  # noqa: BLE001
+                        if attempt == 7:
+                            raise RuntimeError(f"{i}-bo'lak Telegram'ga yuborilmadi: {e}")
+                        await asyncio.sleep(2 * (attempt + 1))
+                sent[0] += len(chunk)
+                if progress:
+                    progress(min(sent[0], size), size, *progress_args)
+
+    started = []
+    try:
+        for sess in sessions:
+            await sess.start()
+            started.append(sess)
+        log(f"Telegram'ga {UP_CONN} ulanish x {UP_WORKERS} so'rov bilan yuklanmoqda ({total} bo'lak)")
+        await asyncio.gather(*[worker(sess) for sess in started for _ in range(UP_WORKERS)])
+    finally:
+        for sess in started:
+            try:
+                await sess.stop()
+            except Exception:  # noqa: BLE001
+                pass
+    return raw.types.InputFileBig(id=fid, parts=total, name=os.path.basename(str(path)))
+
+
 async def upload(app, job, out, thumb, live):
     extra = {}
     for k, v in (("duration", ffprobe(out, "duration")),
@@ -437,10 +506,28 @@ async def upload(app, job, out, thumb, live):
             extra[k] = v
     if thumb.exists() and thumb.stat().st_size > 0:
         extra["thumb"] = str(thumb)
-    m = await app.send_video(
-        job.channel, str(out), caption=job.caption[:1024], file_name=f"{job.file_name}.mp4",
-        supports_streaming=True, disable_notification=True,
-        progress=live.transfer("⬆️ Telegram'ga yuklanmoqda"), **extra)
+    orig = app.save_file
+
+    async def patched(path, progress=None, progress_args=(), file_id=None, file_part=0):
+        return await fast_save_file(app, orig, path, progress, progress_args, file_id, file_part)
+
+    def send():
+        return app.send_video(
+            job.channel, str(out), caption=job.caption[:1024], file_name=f"{job.file_name}.mp4",
+            supports_streaming=True, disable_notification=True,
+            progress=live.transfer("⬆️ Telegram'ga yuklanmoqda"), **extra)
+
+    app.save_file = patched
+    try:
+        m = await send()
+    except Exception as e:  # noqa: BLE001
+        log(f"tez yuklash ishlamadi ({e}) — oddiy usulda qayta urinilmoqda")
+        app.save_file = orig
+        m = await send()
+    finally:
+        app.save_file = orig
+    if not m:
+        raise RuntimeError("Telegram'ga yuklanmadi")
     return m.id
 
 
