@@ -48,8 +48,9 @@ const WORKFLOW: &str = "anibla.yml";
 const DEFAULT_SITE: &str = "https://anibla.uz";
 /// Qidiruv natijalari bir sahifada.
 const SEARCH_PAGE: i64 = 8;
-/// Qism tugmalari bir sahifada (5 tadan 6 qator).
-const EP_PAGE: usize = 30;
+/// Qismlar BITTA sahifada (foydalanuvchi talabi). Juda uzun seriallar (Naruto
+/// 500 qism) uchun Telegram panelini haddan oshirmaslik maqsadida — 300 tadan.
+const EP_PAGE: usize = 300;
 const UA: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
 
 thread_local! {
@@ -283,16 +284,22 @@ const BTN_PREV: &str = "\u{25C0}\u{FE0F} Oldingi";
 const BTN_NEXT: &str = "Keyingi \u{25B6}\u{FE0F}";
 const BTN_BACK: &str = "\u{2B05}\u{FE0F} Orqaga";
 
-/// Pastki panel: berilgan qatorlar + doimiy pastki qatorlar.
-fn panel(mut rows: Vec<Vec<String>>, back: bool) -> Value {
-    if back {
-        rows.push(vec![BTN_BACK.to_string(), postbot::BTN_HOME.to_string()]);
-        rows.push(vec![BTN_SEARCH.to_string(), BTN_QUEUE.to_string()]);
+/// Pastki panel: doimiy boshqaruv tugmalari TEPADA (foydalanuvchi talabi:
+/// uzun ro'yxatda pastga aylantirmasdan ko'rinsin), keyin berilgan qatorlar.
+fn panel(rows: Vec<Vec<String>>, back: bool) -> Value {
+    let mut all = if back {
+        vec![
+            vec![BTN_BACK.to_string(), postbot::BTN_HOME.to_string()],
+            vec![BTN_SEARCH.to_string(), BTN_QUEUE.to_string()],
+        ]
     } else {
-        rows.push(vec![BTN_CATS.to_string(), BTN_SEARCH.to_string()]);
-        rows.push(vec![BTN_QUEUE.to_string(), postbot::BTN_HOME.to_string()]);
-    }
-    encbot_keyboard(rows)
+        vec![
+            vec![BTN_CATS.to_string(), BTN_SEARCH.to_string()],
+            vec![BTN_QUEUE.to_string(), postbot::BTN_HOME.to_string()],
+        ]
+    };
+    all.extend(rows);
+    encbot_keyboard(all)
 }
 
 fn menu_keyboard() -> Value {
@@ -481,11 +488,12 @@ async fn listing(env: &Env, chat: i64, q: &str, cat: &str, label: &str, page: i6
 /// Saqlangan ro'yxatni (qayta so'ramasdan) pastki panelga chiqaradi.
 async fn list_view(env: &Env, chat: i64, mut nav: Nav) {
     nav.v = "list".into();
-    let mut rows: Vec<Vec<String>> = nav.items.iter().map(|it| vec![it.label()]).collect();
+    let mut rows: Vec<Vec<String>> = Vec::new();
     let mut nr = Vec::new();
     if nav.p > 1 { nr.push(BTN_PREV.to_string()); }
     if nav.p < nav.pages { nr.push(BTN_NEXT.to_string()); }
     if !nr.is_empty() { rows.push(nr); }
+    rows.extend(nav.items.iter().map(|it| vec![it.label()]));
     let head = if nav.q.is_empty() {
         format!("\u{1F4C2} <b>{}</b> \u{2014} {} ta", html_escape(&nav.lt), nav.total)
     } else {
@@ -599,24 +607,27 @@ async fn show_eps(env: &Env, chat: i64, mut nav: Nav, card: bool) {
         Err(e) => { encbot_send(env, chat, &format!("\u{274C} {}", html_escape(&e)), None).await; return; }
     };
     let Some(season) = usize::try_from(nav.j).ok().and_then(|j| ss.get(j)) else { return };
-    let eps = match episodes(env, &it.s, &season.slug).await {
+    let mut eps = match episodes(env, &it.s, &season.slug).await {
         Ok(e) if !e.is_empty() => e,
         Ok(_) => { encbot_send(env, chat, "\u{1F937} Bu faslda qismlar topilmadi.", None).await; return; }
         Err(e) => { encbot_send(env, chat, &format!("\u{274C} {}", html_escape(&e)), None).await; return; }
     };
+    // Teskari tartib (foydalanuvchi talabi): eng yangi qism birinchi — 10, 9, 8 ...
+    eps.reverse();
     let pages = eps.len().div_ceil(EP_PAGE).max(1) as i64;
     nav.ep = nav.ep.clamp(0, pages - 1);
     nav.v = "eps".into();
     nav_put(env, &nav).await;
     let start = nav.ep as usize * EP_PAGE;
     let part = &eps[start..(start + EP_PAGE).min(eps.len())];
-    let mut rows: Vec<Vec<String>> = part.chunks(3)
-        .map(|ch| ch.iter().map(|e| format!("\u{25B6}\u{FE0F} {}-qism", e.num)).collect()).collect();
+    let mut rows: Vec<Vec<String>> = Vec::new();
     let mut nr = Vec::new();
     if nav.ep > 0 { nr.push(BTN_PREV.to_string()); }
     if nav.ep + 1 < pages { nr.push(BTN_NEXT.to_string()); }
     if !nr.is_empty() { rows.push(nr); }
-    let text = format!("{}\n{} \u{00B7} {} ta qism{}\n\n\u{2B07}\u{FE0F} Qismni pastdan tanlang:",
+    rows.extend(part.chunks(3)
+        .map(|ch| ch.iter().map(|e| format!("\u{25B6}\u{FE0F} {}-qism", e.num)).collect::<Vec<_>>()));
+    let text = format!("{}\n{} \u{00B7} {} ta qism{}\n\n\u{2B07}\u{FE0F} Qismni pastdagi paneldan tanlang (eng yangisi birinchi):",
         item_head(&it, card), html_escape(&season_label(season)), eps.len(),
         if pages > 1 { format!(" \u{00B7} {}\u{2013}{}-qismlar", part[0].num, part[part.len() - 1].num) } else { String::new() });
     if card {

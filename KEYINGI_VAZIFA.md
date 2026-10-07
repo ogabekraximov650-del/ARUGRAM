@@ -5205,3 +5205,7 @@ Qanday ishlaydi:
   yuboradi); haqiqiy Telegram'da sinalmagan (sessiyani bu yerdan ishlatish
   AUTH_KEY_DUPLICATED xavfi). Sessiya kodlash bilan umumiy — Telegram
   cheklasa, `UP_CONN` ni kamaytirish kerak.
+- PANEL TARTIBI (foydalanuvchi talabi): doimiy 6 tugma (Orqaga, Bosh menyu,
+  Izlash, Yuklash navbati / Bo'limlar) va "◀️ Oldingi / Keyingi ▶️" panelning
+  TEPASIDA. Qismlar bitta sahifada (`EP_PAGE`=300, faqat juda uzun seriallar
+  bo'linadi) va TESKARI tartibda (eng yangisi birinchi).
