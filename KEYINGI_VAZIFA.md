@@ -5183,3 +5183,8 @@ Qanday ishlaydi:
   tashlanadi). Sinov: natijadagi ovoz o'zbekcha playlist bilan bayt-bayt bir
   xil (MD5). Sifat tanlashda "🔊 Ovoz: Ўзбек" ko'rinadi. Oddiy (`/content/...`)
   qismlarda bitta ovoz — o'zgarishsiz.
+- O'ZBEKCHA OVOZLI QISMLAR TEZLIGI: `external-hls` bo'laklari har biri ~2.3 s
+  kutadi (sayt ularni boshqa serverdan olib beradi), tezlik oqimlar soniga
+  proporsional: 12 — 2.5 MB/s, 32 — 6.5, 48 — 8.1, 64 — 8.0 MB/s. Shu sabab
+  bunday qismlar `PARALLEL_EXT=48` oqimda (oddiylari `PARALLEL=12`). Sinov
+  (Muzli devor 14, 480p, video+ovoz 304 bo'lak): 66 s -> 23 s.

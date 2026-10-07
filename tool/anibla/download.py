@@ -51,6 +51,10 @@ LIVE = None
 # Saytdan bir vaqtda yuklanadigan HLS bo'laklari soni (foydalanuvchi: sayt
 # 10+ MB/s bera oladi, bitta oqim ~2 MB/s).
 PARALLEL = int(os.environ.get("PARALLEL", "12"))
+# `external-hls` (alohida o'zbekcha ovozli qismlar) bo'laklari sayt orqali
+# boshqa serverdan olinadi: har biri ~2.3 s kutadi, tezlik oqimlar soniga
+# to'g'ri proporsional. Sinov: 12 oqim — 2.5 MB/s, 32 — 6.5, 48 — 8.1, 64 — 8.0.
+PARALLEL_EXT = int(os.environ.get("PARALLEL_EXT", "48"))
 
 
 class Lost(Exception):
@@ -288,10 +292,11 @@ def download(url, out, live):
         return download_ffmpeg(vurl, out, live, aurl)
     if aurl:
         log(f"  alohida ovoz yo'li: {len(asegs)} bo'lak (video ichidagi ovoz tashlanadi)")
+    par = PARALLEL_EXT if "external-hls" in vurl else PARALLEL
     jobs = [("v", k, u, d) for k, (u, d) in enumerate(vsegs)] + [("a", k, u, d) for k, (u, d) in enumerate(asegs)]
     total = sum(d for _, _, _, d in jobs)
     n = len(jobs)
-    log(f"  yuklanmoqda: {n} bo'lak, {hms(sum(d for _, d in vsegs))}, {PARALLEL} tadan parallel")
+    log(f"  yuklanmoqda: {n} bo'lak, {hms(sum(d for _, d in vsegs))}, {par} tadan parallel")
     parts = WORK / "parts"
     parts.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
@@ -318,7 +323,7 @@ def download(url, out, live):
                 time.sleep(min(2 * (attempt + 1), 10))
         raise RuntimeError(f"{'ovoz' if kind == 'a' else 'video'} {idx + 1}-bo'lagi yuklanmadi: {err}")
 
-    with ThreadPoolExecutor(max_workers=PARALLEL) as ex:
+    with ThreadPoolExecutor(max_workers=par) as ex:
         pending = {ex.submit(one, jb) for jb in jobs}
         while pending:
             done_now = {f for f in pending if f.done()}
@@ -332,7 +337,7 @@ def download(url, out, live):
             sp = b / max(el, 0.1) / 1048576
             eta = el * (100 - pct) / pct if pct > 0.5 else 0
             est = f" (~{b / 1048576 * 100 / pct:.0f} MB bo'ladi)" if pct > 3 else ""
-            live.send(f"\u2B07\uFE0F Saytdan yuklanmoqda ({PARALLEL} oqim)\n{bar(pct)} {pct:.1f}%\n"
+            live.send(f"\u2B07\uFE0F Saytdan yuklanmoqda ({par} oqim)\n{bar(pct)} {pct:.1f}%\n"
                       f"tezlik {sp:.2f} MB/s \u00B7 bo'lak {c}/{n}\n"
                       f"hajm {b / 1048576:.1f} MB{est}\n"
                       f"o'tdi {hms(el)} \u00B7 qoldi ~{hms(eta)}")
