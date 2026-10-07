@@ -5137,3 +5137,12 @@ Qanday ishlaydi:
   log'ining oxirgi 8 qatori ("📜 Log", `LOG_LINES`): bosqichlar, har 10 s
   foiz/tezlik, ffmpeg ogohlantirishlari. Telegram "retry after N" bersa,
   `/api/anibla/progress` N ni qaytaradi va runner shuncha kutadi.
+- BO'LIMLAR (foydalanuvchi talabi: "saytdagidek kategoriyali tugmalar, nom
+  yozib qidirish ham tursin"): "📂 Bo'limlar" — inline tugmalar: "🆕 Oxirgi
+  yuklanganlar" (filtrsiz `media/mobile`, sayt yangilarini boshida beradi) va
+  saytning `GET categories` ro'yxati (Ongoing, Hamma animelar, Yakunlangan,
+  Anime filmlar, ...; kodga yozilmagan, saytdan olinadi). `zc:<id>` ->
+  `media/mobile?categories=<id>` — qidiruv bilan bir xil ro'yxat/sahifalash
+  (`listing`, `anibla_nav.c/lt`).
+- Navbat: har bir kutayotgan videoni (`zx`) yoki hammasini birdan (`zxa`)
+  o'chirish; yuklanayotganiga tegilmaydi.

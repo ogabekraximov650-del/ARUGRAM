@@ -43,6 +43,7 @@ use super::*;
 pub(crate) const BTN: &str = "\u{1F39E} Anibla yuklash";
 const BTN_SEARCH: &str = "\u{1F50D} Izlash";
 const BTN_QUEUE: &str = "\u{1F4CB} Yuklash navbati";
+const BTN_CATS: &str = "\u{1F4C2} Bo'limlar";
 const WORKFLOW: &str = "anibla.yml";
 const DEFAULT_SITE: &str = "https://anibla.uz";
 /// Qidiruv natijalari bir sahifada.
@@ -222,6 +223,12 @@ impl Item {
 struct Nav {
     n: String,
     q: String,
+    /// Bo'lim (kategoriya) ID si; `new` — oxirgi yuklanganlar. Qidiruvda bo'sh.
+    #[serde(default)]
+    c: String,
+    /// Bo'lim nomi (sarlavha uchun).
+    #[serde(default)]
+    lt: String,
     p: i64,
     pages: i64,
     total: i64,
@@ -243,7 +250,10 @@ fn btn(text: &str, data: String) -> Value {
 }
 
 fn menu_keyboard() -> Value {
-    encbot_keyboard(vec![vec![BTN_SEARCH.to_string(), BTN_QUEUE.to_string()], vec![postbot::BTN_HOME.to_string()]])
+    encbot_keyboard(vec![
+        vec![BTN_CATS.to_string(), BTN_SEARCH.to_string()],
+        vec![BTN_QUEUE.to_string(), postbot::BTN_HOME.to_string()],
+    ])
 }
 
 // ── Bot: menyu va qidiruv ────────────────────────────────────
@@ -256,10 +266,33 @@ pub(crate) async fn menu(env: &Env, chat: i64) {
     } else { "" };
     encbot_send(env, chat, &format!(
         "\u{1F39E} <b>Anibla.uz yuklash</b>\n\n\
-         \u{1F50D} Anime yoki film nomini yozing (kamida 3 harf).\n\
+         \u{1F4C2} Saytdagi bo'limlardan tanlang yoki \u{1F50D} anime/film nomini yozing (kamida 3 harf).\n\
          Natijadan tanlang \u{2192} fasl va qism \u{2192} sifat.\n\
          Video navbatga tushadi va GitHub Actions orqali ketma-ket yuklanib, shu chatga yuboriladi.{warn}"),
         Some(menu_keyboard())).await;
+    categories_menu(env, chat).await;
+}
+
+/// Saytdagi bo'limlar: `GET categories` (Ongoing, Hamma animelar, Anime
+/// filmlar, ...) — ro'yxat saytdan olinadi, kodga yozilmagan. Birinchisi —
+/// "Oxirgi yuklanganlar" (filtrsiz ro'yxat, sayt yangilarini boshida beradi).
+async fn categories(env: &Env) -> Vec<(String, String)> {
+    let v = get(env, "categories?sortBy=name.uz&sortDirection=-1", false).await.unwrap_or(json!({}));
+    let list = v["data"]["categories"].as_array().or_else(|| v["data"].as_array()).cloned().unwrap_or_default();
+    list.iter().filter(|c| c["status"].as_bool() != Some(false)).filter_map(|c| {
+        let id = c["_id"].as_str()?.to_string();
+        let name = c["name"]["uz"].as_str().or_else(|| c["name"].as_str()).unwrap_or("").trim().to_string();
+        (!id.is_empty() && !name.is_empty()).then_some((id, name))
+    }).collect()
+}
+
+async fn categories_menu(env: &Env, chat: i64) {
+    let mut rows = vec![vec![btn("\u{1F195} Oxirgi yuklanganlar", "zc:new".into())]];
+    let cats = categories(env).await;
+    for ch in cats.chunks(2) {
+        rows.push(ch.iter().map(|(id, name)| btn(&format!("\u{1F4C2} {name}"), format!("zc:{id}"))).collect());
+    }
+    encbot_send(env, chat, "\u{1F4C2} <b>Bo'limlar</b> (saytdagidek):", Some(kb(rows))).await;
 }
 
 /// Anibla rejimidagi matn — qidiruv.
@@ -267,6 +300,10 @@ pub(crate) async fn on_message(env: &Env, msg: &Value, chat: i64) {
     let text = msg["text"].as_str().unwrap_or("").trim().to_string();
     if text == BTN_QUEUE {
         queue_list(env, chat).await;
+        return;
+    }
+    if text == BTN_CATS {
+        categories_menu(env, chat).await;
         return;
     }
     if text.is_empty() || text == BTN_SEARCH {
@@ -278,12 +315,19 @@ pub(crate) async fn on_message(env: &Env, msg: &Value, chat: i64) {
         return;
     }
     let q: String = text.chars().take(80).collect();
-    search(env, chat, 0, &q, 1).await;
+    listing(env, chat, 0, &q, "", "", 1).await;
 }
 
 /// Qidiruv sahifasi. `edit` > 0 — shu xabarni tahrirlaydi (sahifa almashganda).
-async fn search(env: &Env, chat: i64, edit: i64, q: &str, page: i64) {
-    let path = format!("media/mobile?search={}&limit={SEARCH_PAGE}&page={page}", enc(q));
+/// Ro'yxat sahifasi: qidiruv (`q`) yoki bo'lim (`cat`: ID yoki `new`).
+/// `edit` > 0 — shu xabarni tahrirlaydi (sahifa almashganda).
+async fn listing(env: &Env, chat: i64, edit: i64, q: &str, cat: &str, label: &str, page: i64) {
+    let mut path = format!("media/mobile?limit={SEARCH_PAGE}&page={page}");
+    if !q.is_empty() {
+        path.push_str(&format!("&search={}", enc(q)));
+    } else if !cat.is_empty() && cat != "new" {
+        path.push_str(&format!("&categories={}", enc(cat)));
+    }
     let v = match get(env, &path, false).await {
         Ok(v) => v,
         Err(e) => {
@@ -301,8 +345,12 @@ async fn search(env: &Env, chat: i64, edit: i64, q: &str, page: i64) {
         img: x["thumbnail"].as_str().unwrap_or("").trim_start_matches('/').to_string(),
     }).filter(|i| !i.s.is_empty()).collect();
     if items.is_empty() {
-        let t = format!("\u{1F937} <b>\u{00AB}{}\u{00BB}</b> bo'yicha hech narsa topilmadi.\n\
-                         Boshqacha yozib ko'ring (masalan, o'zbekcha nomining bir qismi).", html_escape(q));
+        let t = if q.is_empty() {
+            format!("\u{1F937} <b>{}</b> bo'limida hozircha hech narsa yo'q.", html_escape(label))
+        } else {
+            format!("\u{1F937} <b>\u{00AB}{}\u{00BB}</b> bo'yicha hech narsa topilmadi.\n\
+                     Boshqacha yozib ko'ring (masalan, o'zbekcha nomining bir qismi).", html_escape(q))
+        };
         encbot_send(env, chat, &t, Some(menu_keyboard())).await;
         return;
     }
@@ -310,7 +358,7 @@ async fn search(env: &Env, chat: i64, edit: i64, q: &str, page: i64) {
     let total = jint(&v["pagination"], "total").max(items.len() as i64);
     let nav = Nav {
         n: (now_ms() % 1_000_000).to_string(),
-        q: q.to_string(), p: page, pages, total, items,
+        q: q.to_string(), c: cat.to_string(), lt: label.to_string(), p: page, pages, total, items,
     };
     config_put(env, "anibla_nav", &serde_json::to_string(&nav).unwrap_or_default()).await;
 
@@ -327,8 +375,13 @@ async fn search(env: &Env, chat: i64, edit: i64, q: &str, page: i64) {
         if page < pages { r.push(btn("\u{25B6}\u{FE0F}", format!("zg:{}:{}", nav.n, page + 1))); }
         rows.push(r);
     }
-    let text = format!("\u{1F50D} <b>\u{00AB}{}\u{00BB}</b> \u{2014} {total} ta natija\n\
-                        \u{1F4FA} serial \u{00B7} \u{1F3AC} film\n\nKeraklisini tanlang:", html_escape(q));
+    let head = if q.is_empty() {
+        format!("\u{1F4C2} <b>{}</b> \u{2014} {total} ta", html_escape(label))
+    } else {
+        format!("\u{1F50D} <b>\u{00AB}{}\u{00BB}</b> \u{2014} {total} ta natija", html_escape(q))
+    };
+    let text = format!("{head} \u{00B7} {page}/{pages}-sahifa\n\
+                        \u{1F4FA} serial \u{00B7} \u{1F3AC} film\n\nKeraklisini tanlang:");
     if edit > 0 {
         let _ = encbot_api(env, "editMessageText", json!({
             "chat_id": chat, "message_id": edit, "text": text, "parse_mode": "HTML",
@@ -577,7 +630,23 @@ fn hms(s: i64) -> String {
 pub(crate) async fn on_callback(env: &Env, chat: i64, msg_id: i64, data: &str) -> bool {
     let p: Vec<&str> = data.split(':').collect();
     let kind = p[0];
-    if matches!(kind, "zx" | "zr") {
+    // Bo'lim tugmasi: `zc:<id>` yoki `zc:new`.
+    if kind == "zc" {
+        let id = p.get(1).copied().unwrap_or("new");
+        let label = if id == "new" {
+            "Oxirgi yuklanganlar".to_string()
+        } else {
+            categories(env).await.into_iter().find(|(c, _)| c == id).map(|(_, n)| n)
+                .unwrap_or_else(|| "Bo'lim".into())
+        };
+        listing(env, chat, 0, "", id, &label, 1).await;
+        return true;
+    }
+    if matches!(kind, "zx" | "zr" | "zxa") {
+        if kind == "zxa" {
+            queue_callback(env, chat, kind, 0).await;
+            return true;
+        }
         if let Some(id) = p.get(1).and_then(|x| x.parse::<i64>().ok()) {
             queue_callback(env, chat, kind, id).await;
         }
@@ -596,7 +665,7 @@ pub(crate) async fn on_callback(env: &Env, chat: i64, msg_id: i64, data: &str) -
     if kind == "zg" {
         let page = num(2).unwrap_or(1).clamp(1, nav.pages.max(1));
         if page != nav.p {
-            search(env, chat, msg_id, &nav.q, page).await;
+            listing(env, chat, msg_id, &nav.q, &nav.c, &nav.lt, page).await;
         }
         return true;
     }
@@ -842,6 +911,9 @@ async fn queue_list(env: &Env, chat: i64) {
             kb_rows.push(vec![btn(&format!("\u{1F5D1} #{id} ni olib tashlash"), format!("zx:{id}"))]);
         }
     }
+    if rows.iter().filter(|r| state_icon(r) != "\u{2699}\u{FE0F}").count() > 1 {
+        kb_rows.push(vec![btn("\u{1F9F9} Navbatdagilarning hammasini o'chirish", "zxa".into())]);
+    }
     encbot_send(env, chat, &text, Some(kb(kb_rows))).await;
 }
 
@@ -859,9 +931,24 @@ async fn queue_callback(env: &Env, chat: i64, kind: &str, id: i64) {
                         "text": format!("\u{1F5D1} #{id} navbatdan olib tashlandi."),
                     })).await;
                     encbot_send(env, chat, &format!("\u{1F5D1} #{id} olib tashlandi."), None).await;
+                    queue_list(env, chat).await;
                 }
                 None => encbot_send(env, chat, &format!("#{id} yo'q yoki hozir yuklanmoqda."), None).await,
             }
+        }
+        // Navbatdagi (yuklanmayotgan) hamma videolar.
+        "zxa" => {
+            let gone = turso_exec(env,
+                "DELETE FROM anibla_jobs WHERE NOT (state='running' AND lease_until>?) RETURNING id, status_msg, chat",
+                vec![TursoArg::int(now_ms())]).await.map(|r| rows_of(&r)).unwrap_or_default();
+            for j in &gone {
+                let _ = encbot_api(env, "editMessageText", json!({
+                    "chat_id": jint(j, "chat"), "message_id": jint(j, "status_msg"),
+                    "text": format!("\u{1F5D1} #{} navbatdan olib tashlandi.", jint(j, "id")),
+                })).await;
+            }
+            encbot_send(env, chat, &format!("\u{1F9F9} Navbatdan {} ta video o'chirildi.", gone.len()), None).await;
+            queue_list(env, chat).await;
         }
         "zr" => {
             let _ = turso_exec(env,
