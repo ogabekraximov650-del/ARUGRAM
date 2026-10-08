@@ -636,13 +636,22 @@ class StatusPin:
             print(f"Holat worker'ga yuborilmadi: {e}", flush=True)
 
     async def loop(self, app):
-        last_push = 0.0
+        """Telegram'dagi QADALGAN xabarni tahrirlaydi. FloodWait bo'lsa oraliq
+        o'sadi — lekin bu worker'ga yuborishga (bot/ilova logi) TEGMAYDI."""
         while True:
             await asyncio.sleep(self.interval)
             await self.push(app)
-            if time.time() - last_push >= WORKER_PUSH_SEC:
-                last_push = time.time()
-                await asyncio.to_thread(self.send_worker)
+
+    async def worker_loop(self):
+        """To'liq holatni worker'ga MUSTAQIL, qat'iy `WORKER_PUSH_SEC` oralig'ida
+        yuboradi (bot "Ilova uchun" va ilova admin paneli shundan yangilanadi).
+        TOPILGAN MUAMMO: avval bu Telegram pin-tahririga bog'langan edi —
+        Telegram cheklaganda (FloodWait) bot/ilova logi ham 15 s gacha
+        sekinlashar, ba'zida muzlab qolganday ko'rinardi. Endi ajratildi:
+        anibla/post'dagidek doim ~5 soniyada yangilanadi."""
+        while True:
+            await asyncio.sleep(WORKER_PUSH_SEC)
+            await asyncio.to_thread(self.send_worker)
 
 
 STATUS = StatusPin()
@@ -835,6 +844,7 @@ async def main():
         flusher = asyncio.create_task(CHLOG.loop(app))
         status_started = False
         status_task = None
+        worker_task = None
         worked = False
         while True:
             if time.time() - T0 > START_BUDGET:
@@ -847,6 +857,7 @@ async def main():
                 STATUS.bots = [b for b in (r.get("status_bots") or []) if isinstance(b, str) and b]
                 await STATUS.start(app)
                 status_task = asyncio.create_task(STATUS.loop(app))
+                worker_task = asyncio.create_task(STATUS.worker_loop())
             if r.get("busy"):
                 log("Boshqa run ishlayapti — kutiladi.")
                 break
@@ -865,6 +876,10 @@ async def main():
         await STATUS.push(app)
         if status_task:
             status_task.cancel()
+        if worker_task:
+            worker_task.cancel()
+        # Oxirgi holat ("Run tugadi", idle) darhol worker'ga ham.
+        await asyncio.to_thread(STATUS.send_worker)
         for _ in range(6):
             await CHLOG.flush(app)
         CHLOG.stop()

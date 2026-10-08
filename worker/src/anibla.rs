@@ -46,6 +46,10 @@ const BTN_QUEUE: &str = "\u{1F4CB} Yuklash navbati";
 const BTN_CATS: &str = "\u{1F4C2} Bo'limlar";
 const WORKFLOW: &str = "anibla.yml";
 const DEFAULT_SITE: &str = "https://anibla.uz";
+/// Rasmlar (poster/thumbnail) anibla.uz'da EMAS, ortidagi serverda turadi
+/// (sayt JS: `NEXT_PUBLIC_API_BASE_URL || "https://amediatv.up-it.uz"`).
+/// `anibla.uz/uploads/...` 404 beradi — shu sabab rasm botda chiqmasdi.
+const IMG_BASE: &str = "https://amediatv.up-it.uz";
 /// Qidiruv natijalari bir sahifada.
 /// Ro'yxat sahifasi — 100 tadan (foydalanuvchi talabi). Telegram pastki panelga
 /// 150 tagacha tugmani qabul qildi, 300 ni rad etdi (sinab ko'rilgan).
@@ -89,6 +93,19 @@ fn creds(env: &Env) -> Option<Creds> {
 
 fn site(env: &Env) -> String {
     creds(env).map(|c| c.site).unwrap_or_else(|| DEFAULT_SITE.to_string())
+}
+
+/// `thumbnail`/`cover` maydonidan to'liq rasm manzili. Bo'sh — bo'sh;
+/// http bilan boshlansa — o'zicha; aks holda `IMG_BASE` old qo'shiladi.
+fn img_url(img: &str) -> String {
+    let i = img.trim();
+    if i.is_empty() {
+        String::new()
+    } else if i.starts_with("http://") || i.starts_with("https://") {
+        i.to_string()
+    } else {
+        format!("{IMG_BASE}/{}", i.trim_start_matches('/'))
+    }
 }
 
 fn api_base(env: &Env) -> String {
@@ -745,7 +762,7 @@ async fn try_send(env: &Env, chat: i64, text: &str, markup: &Value, card: Option
     if let Some(it) = card {
         if !it.img.is_empty() && text.chars().count() <= 1000 {
             let r = encbot_api(env, "sendPhoto", json!({
-                "chat_id": chat, "photo": format!("{}/{}", site(env), it.img),
+                "chat_id": chat, "photo": img_url(&it.img),
                 "caption": text, "parse_mode": "HTML", "reply_markup": markup,
             })).await;
             if r.is_ok() {
@@ -789,7 +806,7 @@ async fn send_card(env: &Env, chat: i64, it: &Item, text: &str, markup: Value) {
     let markup = if markup["remove_keyboard"].is_boolean() { None } else { Some(markup) };
     if !it.img.is_empty() && text.chars().count() <= 1000 {
         let mut body = json!({
-            "chat_id": chat, "photo": format!("{}/{}", site(env), it.img),
+            "chat_id": chat, "photo": img_url(&it.img),
             "caption": text, "parse_mode": "HTML",
         });
         if let Some(m) = &markup {

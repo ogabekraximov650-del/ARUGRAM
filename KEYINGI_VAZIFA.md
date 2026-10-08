@@ -5294,3 +5294,25 @@ tugmalari oddiy matn xabarida (rasmsiz). Endi `show_seasons` tavsifni ham
 oladi (`describe`, lazy) va rasm + tavsif + fasl tugmalarini BITTA
 `send_card` chaqiruvida yuboradi — "⬅️ Orqaga" bilan qaytganda ham xuddi
 shunday. `worker/src/anibla.rs`.
+
+## Anibla rasm chiqmasligi + Ilova kodlash logi sekin/muzlashi — tuzatish (2026-10)
+
+FOYDALANUVCHI: (1) anime ustiga bosilganda rasm chiqmayapti; (2) ilova
+avto-kodlash logi anibla/post'dek yangilanmayapti (ba'zan umuman).
+
+TOPILGAN SABABLAR:
+1. RASM: anibla.uz rasmlarni O'ZIDA bermaydi — `anibla.uz/uploads/...` 404.
+   Sayt JS: rasm bazasi `NEXT_PUBLIC_API_BASE_URL || "https://amediatv.up-it.uz"`.
+   `https://amediatv.up-it.uz/uploads/<thumbnail>` -> 200 image/jpeg (sinaldi).
+   Worker esa `site(env)` (anibla.uz) bilan qurardi — sendPhoto 404 olib,
+   jim matnga tushardi. TUZATISH: `anibla.rs` -> `IMG_BASE` +
+   `img_url()` (http bo'lsa o'zicha, aks holda IMG_BASE old qo'shiladi);
+   `send_card`/`try_send` shuni ishlatadi.
+2. LOG: `run.py` -> `StatusPin.loop` Telegram QADALGAN xabar tahriri bilan
+   worker'ga yuborishni BITTA siklda qilardi; Telegram FloodWait'da
+   `self.interval` 15 s gacha o'sib, worker push (bot "Ilova uchun" va ilova
+   admin paneli manbai) ham sekinlashardi — "muzladi" ko'rinishi. TUZATISH:
+   `worker_loop` — mustaqil, qat'iy `WORKER_PUSH_SEC` (5 s) oralig'ida
+   `send_worker`; `loop` faqat pin tahriri. main() ikkala task'ni ishga
+   tushiradi/to'xtatadi; tugashda oxirgi holat ham yuboriladi.
+   (Ishlab turgan run ESKI kod bilan; yangi oqim keyingi run'dan.)
