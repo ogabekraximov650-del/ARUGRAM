@@ -11434,6 +11434,19 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
                     }
                 }
             }
+            // "Ilova uchun" avtomatik kuzatiladi (`livewatch::claim`): agar hech
+            // narsa kuzatilmayotgan, shu bo'lim allaqachon kuzatilayotgan yoki
+            // tanlov 30 daqiqadan eski bo'lsa. Avval Post/Anibla buni
+            // qilardi, "Ilova uchun" qilmasdi — shu sabab uning holati
+            // "o'zi yangilanmasdi": hech kim uni kuzatuvga qo'ymasdi.
+            let (an, sn) = encbot_titles(env, a, s).await
+                .unwrap_or_else(|| (format!("anime #{a}"), format!("bo'lim #{s}")));
+            let watch_msg = encbot_api(env, "sendMessage", json!({
+                "chat_id": ADMIN_TELEGRAM_ID, "parse_mode": "HTML",
+                "text": format!("\u{1F4F1} <b>Ilova uchun: {}</b>\n{}, {}-qism\n\n\u{23F3} boshlanmoqda...",
+                    html_escape(&an), html_escape(&sn), jint(&ep, "epizod_number")),
+            })).await.ok().and_then(|v| v["message_id"].as_i64()).unwrap_or(0);
+            livewatch::claim(env, livewatch::APP, ADMIN_TELEGRAM_ID, watch_msg).await;
             return ok(json!({
                 "job": {
                     "anime_id": a, "season_id": s, "epizod_id": e,

@@ -5255,3 +5255,31 @@ so'raydi. Botdagi eski "Holat" bir martalik matn edi — endi jonli.
 - Anibla: xuddi shunday (`anibla::status`, `claim`, `progress`, `done`);
   "📋 Yuklash navbati" endi holat xabarini ko'chirmaydi. Panelda "📋 Holat".
 - `lib.rs`: `is_status` — `encbot_mode` bo'yicha (anibla / post / ilova).
+
+## "Ilova uchun" logi Anibla/Post'dek avtomatik yangilanmasdi — topilgan sabab (2026-10)
+
+FOYDALANUVCHI SAVOLI: "nega ilovaning avto-kodlash logi anibladan yuklash va
+post kodlashdek tez yangilanmayapti va ba'zida ishlamay qolyapti".
+
+TOPILGAN SABAB: `livewatch.rs` — uchala bo'lim BITTA umumiy "kuzatilayotgan
+xabar" joyini (`live_watch`) baham ko'radi. Post va Anibla o'z ishi
+boshlanganda (`claim`) O'ZINI AVTOMATIK kuzatuvga qo'yadi
+(`livewatch::claim`) — shu sabab ularning holati har doim "o'zi ishlab
+turganday" ko'rinadi. **"Ilova uchun" (avto-kodlash, `encode.yml`) buni
+UMUMAN qilmasdi** — faqat admin botda "📋 Holat" ni QO'LDA bossagina
+kuzatuvga tushardi. Natijada:
+  - odatda hech kim bosmagani uchun log "yangilanmasdi" (aslida kuzatuvga
+    umuman qo'yilmagan edi);
+  - admin bossa ham, keyin Post yoki Anibla ishi boshlanib (ular ham shu
+    BITTA joyni so'rайdi) va ustidan 30 daqiqa o'tsa (`TAKEOVER_MS`),
+    ularning avtomatik `claim` bu joyni "egallab olardi" — Ilova uchun
+    xabari hech qanday ogohlantirishsiz yangilanishdan to'xtardi
+    ("ba'zida ishlamay qolyapti").
+
+TUZATISH: `worker/src/lib.rs` -> `/api/encode/claim` endi har muvaffaqiyatli
+ish olinganda (har yangi qism) Post/Anibla kabi o'zi uchun holat xabarini
+yuboradi va `livewatch::claim(env, livewatch::APP, ADMIN_TELEGRAM_ID, msg)`
+bilan kuzatuvga qo'yadi — xuddi Post/Anibla'dagidek. Qoida o'zgarmadi:
+bir vaqtning o'zida faqat BITTA bo'lim kuzatiladi (foydalanuvchi talabi),
+lekin endi "Ilova uchun" ham boshqalar kabi o'z-o'zidan ishga tushadi va
+30 daqiqa ichida boshqasi uni bosib o'tmasa, davom etaveradi.
