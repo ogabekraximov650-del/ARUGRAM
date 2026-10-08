@@ -131,18 +131,26 @@ def main():
     files[".github/workflows/anibla.yml"] = ANIBLA / "anibla.workflow.yml"
     files["tool/anibla/download.py"] = ANIBLA / "download.py"
     for dest, src in files.items():
-        body = {"message": f"Avto-kodlash: {dest}",
-                "content": base64.b64encode(src.read_bytes()).decode(),
-                "branch": "main"}
-        code, cur = api("GET", f"{repo}/contents/{dest}?ref=main", ok=(200, 404))
-        if code == 200:
-            raw = src.read_bytes()
-            if cur.get("sha") == hashlib.sha1(b"blob %d\0" % len(raw) + raw).hexdigest():
-                print(f"O'zgarmagan: {dest}")
-                continue
-            body["sha"] = cur["sha"]
-        api("PUT", f"{repo}/contents/{dest}", body)
-        print(f"Yuklandi: {dest}")
+        raw = src.read_bytes()
+        # 409 — shu payt boshqa workflow (`sync-packs.yml`) ham shu repoga
+        # yozyapti: qayta o'qib, yana urinadi.
+        for attempt in range(6):
+            body = {"message": f"Avto-kodlash: {dest}",
+                    "content": base64.b64encode(raw).decode(),
+                    "branch": "main"}
+            code, cur = api("GET", f"{repo}/contents/{dest}?ref=main", ok=(200, 404))
+            if code == 200:
+                if cur.get("sha") == hashlib.sha1(b"blob %d\0" % len(raw) + raw).hexdigest():
+                    print(f"O'zgarmagan: {dest}")
+                    break
+                body["sha"] = cur["sha"]
+            code, _ = api("PUT", f"{repo}/contents/{dest}", body, ok=(200, 201, 409))
+            if code != 409:
+                print(f"Yuklandi: {dest}")
+                break
+            time.sleep(2 + attempt * 2)
+        else:
+            sys.exit(f"::error::{dest} yuklanmadi (409 takrorlandi)")
 
     _, pk = api("GET", f"{repo}/actions/secrets/public-key")
     box = public.SealedBox(public.PublicKey(pk["key"].encode(), encoding.Base64Encoder()))
