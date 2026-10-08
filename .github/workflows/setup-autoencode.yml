@@ -50,7 +50,7 @@ jobs:
           NEW_GH_TOKEN: ${{ secrets.NEW_GH_TOKEN }}
           REPO_NAME: ${{ inputs.repo_name }}
           REPO_PRIVATE: ${{ inputs.private }}
-          ALLOW_SAME_ACCOUNT: ${{ inputs.allow_same_account == false && 'false' || 'true' }}
+          ALLOW_SAME_ACCOUNT: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_same_account == false && 'false' || 'true' }}
           TG_API_ID: ${{ secrets.TG_API_ID }}
           TG_API_HASH: ${{ secrets.TG_API_HASH }}
           ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
