@@ -5283,3 +5283,14 @@ bilan kuzatuvga qo'yadi — xuddi Post/Anibla'dagidek. Qoida o'zgarmadi:
 bir vaqtning o'zida faqat BITTA bo'lim kuzatiladi (foydalanuvchi talabi),
 lekin endi "Ilova uchun" ham boshqalar kabi o'z-o'zidan ishga tushadi va
 30 daqiqa ichida boshqasi uni bosib o'tmasa, davom etaveradi.
+
+## Anibla: bir nechta fasli bor anime tanlanganda rasm fasl tugmalari bilan bitta xabarda (2026-10)
+
+FOYDALANUVCHI: "anime ustiga bosilganda animeni rasmi bilan chiqaradigan
+qil". Film va bitta faslli serial allaqachon rasm bilan chiqardi
+(`send_card`/`try_send`, `it.img`); ko'p faslli serialda esa ikkita
+ALOHIDA xabar yuborilardi — avval faqat sarlavha bilan rasm, keyin fasl
+tugmalari oddiy matn xabarida (rasmsiz). Endi `show_seasons` tavsifni ham
+oladi (`describe`, lazy) va rasm + tavsif + fasl tugmalarini BITTA
+`send_card` chaqiruvida yuboradi — "⬅️ Orqaga" bilan qaytganda ham xuddi
+shunday. `worker/src/anibla.rs`.

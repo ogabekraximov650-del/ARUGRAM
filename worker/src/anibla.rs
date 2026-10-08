@@ -595,7 +595,8 @@ async fn show_item(env: &Env, chat: i64, mut nav: Nav) {
     }
     match seasons(env, &it.s).await {
         Ok(ss) if ss.len() > 1 => {
-            send_card(env, chat, &it, &item_head(&it, true), json!({"remove_keyboard": false})).await;
+            // Rasm, tavsif va fasl tugmalari BITTA xabarda (foydalanuvchi
+            // talabi: "anime ustiga bosilganda rasmi bilan chiqsin").
             show_seasons(env, chat, nav).await;
         }
         Ok(ss) if ss.len() == 1 => {
@@ -609,14 +610,20 @@ async fn show_item(env: &Env, chat: i64, mut nav: Nav) {
 }
 
 async fn show_seasons(env: &Env, chat: i64, mut nav: Nav) {
+    if let Some(i) = usize::try_from(nav.i).ok().filter(|i| *i < nav.items.len()) {
+        if nav.items[i].d.is_empty() {
+            let d = describe(env, &nav.items[i]).await;
+            nav.items[i].d = d;
+        }
+    }
     let Some(it) = cur_item(&nav) else { return };
     let ss = seasons(env, &it.s).await.unwrap_or_default();
     nav.v = "seasons".into();
     nav_put(env, &nav).await;
     let rows: Vec<Vec<String>> = ss.chunks(2)
         .map(|ch| ch.iter().map(|s| format!("\u{1F5C2} {}", season_label(s))).collect()).collect();
-    encbot_send(env, chat, &format!("{}\n\n{} ta fasl \u{2014} pastdan tanlang:", item_head(&it, false), ss.len()),
-        Some(panel(rows, true))).await;
+    let text = format!("{}\n\n{} ta fasl \u{2014} pastdan tanlang:", item_head(&it, true), ss.len());
+    send_card(env, chat, &it, &text, panel(rows, true)).await;
 }
 
 /// Qismlar: qatorga 3 tadan, `EP_PAGE` tadan sahifa. `card` — muqova bilan.
