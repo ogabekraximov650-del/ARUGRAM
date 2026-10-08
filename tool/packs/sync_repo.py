@@ -44,15 +44,18 @@ FILES["tool/anibla/download.py"] = HERE.parent / "anibla" / "download.py"
 
 
 def token() -> str:
-    t = os.environ.get("NEW_GH_TOKEN", "").strip()
+    # Shifrlangan fayl USTUN (akkaunt almashsa faqat u yangilanadi).
+    t = ""
     enc = ENC / "gh_token.enc"
-    if not t and enc.exists():
+    if enc.exists():
         k = "".join(os.environ.get("ENCODE_TOKEN", "").split())
         r = subprocess.run(
             ["openssl", "enc", "-d", "-aes-256-cbc", "-pbkdf2", "-iter", "200000",
              "-pass", "env:K", "-in", str(enc)],
             env={**os.environ, "K": k}, capture_output=True)
         t = r.stdout.decode().strip()
+    if not t:
+        t = os.environ.get("NEW_GH_TOKEN", "").strip()
     if not t:
         sys.exit("::error::Token yo'q (gh_token.enc ochilmadi va NEW_GH_TOKEN yo'q)")
     return t
@@ -81,6 +84,13 @@ def api(method, path, body=None, ok=(200, 201)):
         if e.code in ok:
             return e.code, data
         sys.exit(f"::error::{method} {path} -> {e.code}: {data.get('message')}")
+
+
+# `gh_repo.txt` da faqat repo nomi bo'lsa (`avtoencode`) — egasi token
+# akkauntidan olinadi (akkaunt almashsa fayl o'zgarmaydi).
+if "/" not in REPO:
+    REPO = f"{api('GET', '/user')[1]['login']}/{REPO or 'avtoencode'}"
+print(f"Repo: {REPO}")
 
 
 def main():

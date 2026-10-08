@@ -5316,3 +5316,22 @@ TOPILGAN SABABLAR:
    `send_worker`; `loop` faqat pin tahriri. main() ikkala task'ni ishga
    tushiradi/to'xtatadi; tugashda oxirgi holat ham yuboriladi.
    (Ishlab turgan run ESKI kod bilan; yangi oqim keyingi run'dan.)
+
+## GitHub akkauntini almashtirish (Actions'li ikkinchi akkaunt)
+
+- Sabab: `ogabek008` akkauntida GitHub "Actions has been disabled for this
+  user" (422) berdi — encode/post/anibla/packs workflow'lari ishlamay qoldi.
+- Endi akkaunt almashtirish uchun FAQAT `tool/encode/gh_token.enc` ni
+  yangilab main'ga push qilish yetadi (secret qo'yish shart emas):
+  - `setup-autoencode.yml` push'da o'zi ishga tushadi: token akkauntida
+    `gh_repo.txt` dagi nomli repo'ni yaratadi, 4 ta workflow'ni
+    (`encode.yml`, `packs.yml`, `post.yml`, `anibla.yml`), kodni,
+    `session.enc` ni va secret'larni (TG_API_ID, TG_API_HASH,
+    ENCODE_TOKEN, API_BASE) qo'yadi;
+  - `deploy-worker.yml` worker'ga `GH_ACTIONS_TOKEN` va `GH_REPO` ni beradi.
+- `gh_repo.txt` endi faqat repo nomi (`avtoencode`) — egasi token
+  akkauntidan (`GET /user`) aniqlanadi (`owner/repo` yozilsa — o'shasi).
+- Token tartibi: `gh_token.enc` USTUN, keyin `NEW_GH_TOKEN` secret'i
+  (eski akkaunt secret'i yangisiga xalaqit bermasin). Shifrlash:
+  `printf '%s' "$TOKEN" | K="$ENCODE_TOKEN" openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:K -out tool/encode/gh_token.enc`.
+- Token classic bo'lishi kerak: `repo` + `workflow` huquqlari.

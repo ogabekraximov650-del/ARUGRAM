@@ -26,14 +26,17 @@ ENCODE_TOKEN = "".join(os.environ.get("ENCODE_TOKEN", "").split())
 
 
 def token():
-    t = os.environ.get("NEW_GH_TOKEN", "").strip()
+    # Shifrlangan fayl USTUN (akkaunt almashsa faqat u yangilanadi).
+    t = ""
     enc = HERE / "gh_token.enc"
-    if not t and enc.exists():
+    if enc.exists():
         r = subprocess.run(
             ["openssl", "enc", "-d", "-aes-256-cbc", "-pbkdf2", "-iter", "200000",
              "-pass", "env:K", "-in", str(enc)],
             env={**os.environ, "K": ENCODE_TOKEN}, capture_output=True)
         t = r.stdout.decode().strip()
+    if not t:
+        t = os.environ.get("NEW_GH_TOKEN", "").strip()
     if not t:
         sys.exit("::error::Token yo'q")
     return t
@@ -69,6 +72,13 @@ def active_runs():
         _, v = gh("GET", f"/repos/{REPO}/actions/workflows/encode.yml/runs?status={st}&per_page=30")
         out += [r["id"] for r in v.get("workflow_runs", [])]
     return sorted(set(out))
+
+
+# `gh_repo.txt` da faqat repo nomi bo'lsa (`avtoencode`) — egasi token
+# akkauntidan olinadi (akkaunt almashsa fayl o'zgarmaydi).
+if "/" not in REPO:
+    REPO = f"{gh('GET', '/user')[1]['login']}/{REPO or 'avtoencode'}"
+print(f"Repo: {REPO}")
 
 
 def main():

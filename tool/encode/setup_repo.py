@@ -5,8 +5,8 @@
   1. NEW_GH_TOKEN qaysi akkauntniki ekanini aniqlaydi (eski akkaunt bo'lsa —
      to'xtaydi: adashib eski akkauntda repo ochilmasin);
   2. bo'sh repo yaratadi (bor bo'lsa — o'shani ishlatadi);
-  3. run.py, requirements.txt, session.enc, workflow'ni va "Post kodlash"
-     fayllarini (`post.yml`, `tool/post/`: post.py, encode.sh, <ID>_logo.png) yuklaydi;
+  3. run.py, requirements.txt, session.enc, 4 ta workflow'ni (`encode.yml`,
+     `packs.yml`, `post.yml`, `anibla.yml`) va ularning fayllarini yuklaydi;
   4. secret'larni (TG_API_ID, TG_API_HASH, ENCODE_TOKEN, API_BASE) shifrlab
      o'rnatadi — qiymatlar logda ko'rinmaydi;
   5. kodlashni ishga tushirmaydi (buni worker qiladi).
@@ -27,10 +27,14 @@ from nacl import encoding, public
 
 
 def _token():
-    """NEW_GH_TOKEN secret'i yoki `gh_token.enc` (ENCODE_TOKEN bilan shifrlangan)."""
-    t = os.environ.get("NEW_GH_TOKEN", "").strip()
+    """`gh_token.enc` (ENCODE_TOKEN bilan shifrlangan) yoki NEW_GH_TOKEN secret'i.
+
+    Shifrlangan fayl USTUN: akkaunt almashganda faqat shu fayl yangilanadi,
+    eski NEW_GH_TOKEN secret'i (eski akkaunt) unga xalaqit bermasin.
+    """
+    t = ""
     enc = HERE / "gh_token.enc"
-    if not t and enc.exists():
+    if enc.exists():
         import subprocess
         k = "".join(os.environ.get("ENCODE_TOKEN", "").split())
         r = subprocess.run(
@@ -40,6 +44,8 @@ def _token():
         t = r.stdout.decode().strip()
         print("Token shifrlangan fayldan olindi" if t else "gh_token.enc ochilmadi")
     if not t:
+        t = os.environ.get("NEW_GH_TOKEN", "").strip()
+    if not t:
         sys.exit("::error::Token yo'q (NEW_GH_TOKEN secret'i yoki gh_token.enc)")
     return t
 
@@ -47,12 +53,16 @@ def _token():
 HERE = Path(__file__).parent
 PACKS = HERE.parent / "packs"
 POST = HERE.parent / "post"
+ANIBLA = HERE.parent / "anibla"
 TOKEN = _token()
-NAME = os.environ.get("REPO_NAME", "avtoencode").strip() or "avtoencode"
+# Repo nomi: qo'lda berilgani yoki `gh_repo.txt` (`owner/repo` yoki faqat `repo`).
+NAME = (os.environ.get("REPO_NAME", "").strip()
+        or (HERE / "gh_repo.txt").read_text().strip().split("/")[-1]
+        or "avtoencode")
 # Bo'sh (masalan `push` bilan avtomatik sinxronlash) — ko'rinish O'ZGARTIRILMAYDI.
 PRIVATE_RAW = os.environ.get("REPO_PRIVATE", "").strip()
 PRIVATE = PRIVATE_RAW != "false"
-ALLOW_SAME = os.environ.get("ALLOW_SAME_ACCOUNT", "false") == "true"
+ALLOW_SAME = os.environ.get("ALLOW_SAME_ACCOUNT", "true") != "false"
 OLD_OWNER = os.environ.get("GITHUB_REPOSITORY_OWNER", "")
 def api(method, path, body=None, ok=(200, 201, 204)):
     req = urllib.request.Request(
@@ -117,6 +127,9 @@ def main():
     for src in sorted(POST.iterdir()):
         if src.is_file() and src.suffix in (".py", ".sh", ".png"):
             files[f"tool/post/{src.name}"] = src
+    # "Anibla yuklash" — ALOHIDA workflow `anibla.yml` (`creds.enc` KO'CHIRILMAYDI).
+    files[".github/workflows/anibla.yml"] = ANIBLA / "anibla.workflow.yml"
+    files["tool/anibla/download.py"] = ANIBLA / "download.py"
     for dest, src in files.items():
         body = {"message": f"Avto-kodlash: {dest}",
                 "content": base64.b64encode(src.read_bytes()).decode(),

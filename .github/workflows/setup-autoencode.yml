@@ -1,16 +1,25 @@
 name: Avto-kodlash repo'sini yaratish (yangi akkaunt)
 
-# Bir martalik. Kerakli secret: NEW_GH_TOKEN — YANGI akkauntning tokeni
-# (classic, `repo` + `workflow`). TG_API_ID, TG_API_HASH, ENCODE_TOKEN
-# (va ixtiyoriy API_BASE) shu repodagilardan ko'chiriladi.
-# Ish tugagach NEW_GH_TOKEN'ni o'chirib, tokenni GitHub'da bekor qiling.
+# Token: `tool/encode/gh_token.enc` (ENCODE_TOKEN bilan shifrlangan; classic,
+# `repo` + `workflow`), bo'lmasa NEW_GH_TOKEN secret'i. Repo nomi —
+# `tool/encode/gh_repo.txt`. TG_API_ID, TG_API_HASH, ENCODE_TOKEN (va ixtiyoriy
+# API_BASE) shu repodagilardan ko'chiriladi.
+# Akkaunt almashganda: `gh_token.enc` yangilanib main'ga push qilinsa — shu
+# workflow O'ZI ishga tushadi (repo yaratiladi, 4 ta workflow va secret'lar
+# qo'yiladi), `deploy-worker.yml` esa worker'ga yangi token/repo'ni beradi.
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'tool/encode/gh_token.enc'
+      - 'tool/encode/gh_repo.txt'
+      - '.github/workflows/setup-autoencode.yml'
   workflow_dispatch:
     inputs:
       repo_name:
-        description: Yangi repo nomi
-        default: avtoencode
+        description: Yangi repo nomi (bo'sh — gh_repo.txt dan)
+        default: ''
       private:
         description: Private repo
         type: boolean
@@ -27,6 +36,8 @@ jobs:
   setup:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # ENCODE_TOKEN va boshqalar "secret" environment'ida.
+    environment: secret
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -38,7 +49,7 @@ jobs:
           NEW_GH_TOKEN: ${{ secrets.NEW_GH_TOKEN }}
           REPO_NAME: ${{ inputs.repo_name }}
           REPO_PRIVATE: ${{ inputs.private }}
-          ALLOW_SAME_ACCOUNT: ${{ inputs.allow_same_account }}
+          ALLOW_SAME_ACCOUNT: ${{ inputs.allow_same_account == false && 'false' || 'true' }}
           TG_API_ID: ${{ secrets.TG_API_ID }}
           TG_API_HASH: ${{ secrets.TG_API_HASH }}
           ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}

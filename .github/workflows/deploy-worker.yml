@@ -10,6 +10,8 @@ on:
       - 'worker/**'
       - 'ci/WIPE_DB_ONCE'
       - 'tool/anibla/creds.enc'
+      - 'tool/encode/gh_token.enc'
+      - 'tool/encode/gh_repo.txt'
       - '.github/workflows/deploy-worker.yml'
   workflow_dispatch:
 
@@ -133,7 +135,15 @@ jobs:
               -in ../tool/encode/gh_token.enc 2>/dev/null | tr -d '[:space:]')
             if [ -n "$GHT" ]; then
               put GH_ACTIONS_TOKEN "$GHT"
-              put GH_REPO "$(tr -d '[:space:]' < ../tool/encode/gh_repo.txt)"
+              # `gh_repo.txt` da faqat repo nomi bo'lsa — egasi token akkauntidan.
+              GR=$(tr -d '[:space:]' < ../tool/encode/gh_repo.txt)
+              case "$GR" in
+                */*) ;;
+                *) GO=$(curl -fsS -H "Authorization: Bearer $GHT" -H "User-Agent: arugram-deploy" \
+                       https://api.github.com/user | python3 -c 'import json,sys; print(json.load(sys.stdin)["login"])' || true)
+                   [ -n "$GO" ] && GR="$GO/${GR:-avtoencode}" || GR="" ;;
+              esac
+              if [ -n "$GR" ]; then put GH_REPO "$GR"; echo "GH_REPO: $GR"; else echo "⚠️  token akkaunti aniqlanmadi — eski GH_REPO saqlanadi"; fi
               echo "✅ GH_ACTIONS_TOKEN va GH_REPO shifrlangan fayldan o'rnatildi"
             else
               echo "⚠️  gh_token.enc ochilmadi — eski GH_ACTIONS_TOKEN saqlanadi"
