@@ -21,7 +21,7 @@ export async function openFile(name, opts) { return (await load()).openFile(name
 export async function fetchFile(name, opts) { return (await load()).fetchFile(name, opts); }
 export async function mediaUrl(name, opts) { return (await load()).mediaUrl(name, opts); }
 export async function uploadFile(file, name) { return (await load()).uploadFile(file, name); }
-export async function clearBotChat() { if (impl) return (await load()).clearBotChat(); return undefined; }
+export async function clearOldBotChat() { return (await load()).clearOldBotChat(); }
 export async function ctrApply(hex, offset, data) { return (await load()).ctrApply(hex, offset, data); }
 export async function telegramLogout() { const m = await load(); await m.logout(); authorized = false; }
 export async function telegramMe() { return (await load()).me(); }

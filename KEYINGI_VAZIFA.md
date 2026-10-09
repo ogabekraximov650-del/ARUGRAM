@@ -5510,3 +5510,18 @@ SABAB ("rasmlar, pleyer va boshqa fayllar yuklanmayapti"): sayt posterlarni
   ochiladi (ilovadagidek), kirilgach rasmlar qayta yuklanadi (`rescanImages`).
 - Pleyer videosi ham Telegram orqali; qism uchun fMP4 nusxa yo'q bo'lsa
   Actions yasaguncha "Video tayyorlanyabdi..." turadi (`fmp4.yml`).
+
+## MINI APP: SKRINSHOT TAQIQI VA BOT CHATINI O'CHIRISH OLIB TASHLANDI (2026-10)
+
+Foydalanuvchi talabi: skrinshotni taqiqlash va bot chatidagi fayllarni
+o'chirish olib tashlansin; Mini App OCHILGANDA eski nusxalar tozalanib,
+yangidan so'ralsin — boshqa vaqtda chatga tegilmasin.
+- Worker `/api/tg/deliver`: `copyMessages` dan `protect_content` olib
+  tashlandi (nusxa himoyasiz). Android ilovadagi `ScreenGuard`/`FLAG_SECURE`
+  (pleyer va support chat) O'ZGARMADI — u faqat ilovada.
+- Sayt: pleyer yopilganda (`releasePlayback`) va rasmlardan keyin chat
+  tozalanmaydi. Yagona tozalash — `tg/media-impl.js -> clearOldBotChat`
+  (butun chat sahifalab o'chiriladi), `app.js` ishga tushganda bir marta.
+  Rasm/video yuklash shu tugaguncha kutadi (`tg/startup.js`).
+- Eslatma: bot chati Android ilova bilan umumiy — sayt ochilganda ilova
+  nusxalari ham o'chadi.

@@ -22,7 +22,8 @@
 
 import { apiPost, api, ApiError } from '../api.js';
 import { createEngine, engineSupported } from './engine.js';
-import { ensureTelegram, clearBotChat } from '../tg/media.js';
+import { ensureTelegram } from '../tg/media.js';
+import { startup } from '../tg/startup.js';
 
 export const QUALITIES = ['1080p', '720p', '480p', '360p'];
 
@@ -72,14 +73,15 @@ export async function startPlayback(video, ep, q, { startAt = 0, ahead = 60, onS
   }
   const name = fileNameOf(ep[`fmp4_url_${q}`]);
   if (!name) throw new Error('no_fmp4');
+  await startup();
   if (!(await ensureTelegram())) throw new Error('tg_login_cancelled');
   const eng = createEngine(video, { name, ahead, onState, onError });
   if (startAt > 0) eng.startAt(startAt);
   return eng;
 }
 
-/** Pleyer yopilganda — bot chatidagi nusxalar o'chiriladi. */
-export function releasePlayback() { clearBotChat().catch(() => {}); }
+/** Pleyer yopilganda bot chatiga TEGILMAYDI (eski nusxalar faqat ilova ochilganda tozalanadi). */
+export function releasePlayback() {}
 
 export function explainError(e) {
   const code = e instanceof ApiError ? (e.body?.error || `http_${e.status}`) : `${e?.message || e}`;

@@ -2,14 +2,14 @@
 //
 // Ilovadagi yo'l bilan AYNAN bir xil (`rust/src/telegram.rs`):
 //   1. `POST /api/tg/deliver {files}` — bot fayllarni yopiq kanaldan
-//      foydalanuvchining bot chatiga nusxalaydi (`protect_content`) va
+//      foydalanuvchining bot chatiga nusxalaydi va
 //      ochish kalitlarini (`keys`) qaytaradi;
 //   2. sayt foydalanuvchining O'Z Telegram hisobi bilan (mtcute) bot
 //      chatining oxirgi 100 xabaridan faylni NOMI bo'yicha topadi;
 //   3. kerakli bo'laklarni (`upload.getFile`, 1 MB) oladi va xotirada
 //      AES-128-CTR bilan ochadi (IV nol, hisoblagich = bayt / 16).
 // Worker orqali bayt o'tmaydi; diskka hech narsa yozilmaydi.
-// Nusxalar ishlatilgach bot chatidan o'chiriladi (`clearBotChat`).
+// Bot chati FAQAT Mini App ochilganda tozalanadi (`clearOldBotChat`).
 //
 // Eksport:
 //   ensureTelegram()                 — kirilmagan bo'lsa kirish oynasi; bool
@@ -18,7 +18,7 @@
 //   fetchFile(name, {key})           — Blob (kichik fayllar)
 //   mediaUrl(name, {key})            — objectURL (keshlanadi)
 //   uploadFile(file, name)           — {name, key} (bot chati -> kanal)
-//   clearBotChat()                   — bot chatidagi nusxalarni o'chirish
+//   clearOldBotChat()                — ochilganda eski nusxalarni o'chirish
 
 import { api, apiPost, ApiError } from '../api.js';
 import { getClient, tgConfig, isAuthorized, authorizedCached } from './client.js';
@@ -268,16 +268,23 @@ export async function uploadFile(file, name) {
   throw new Error('upload_not_claimed');
 }
 
-/** Bot chatidagi nusxalarni o'chiradi (ilovadagi `rust_tg_clear_bot_chat`). */
-export async function clearBotChat() {
-  if (!delivered.size) return;
+/**
+ * Bot chatidagi ESKI nusxalarni o'chiradi — faqat Mini App ochilganda
+ * (`app.js`). Chatning hamma xabarlari sahifalab o'qilib o'chiriladi.
+ */
+export async function clearOldBotChat() {
   try {
     const cl = await getClient();
-    const ids = [...delivered];
-    delivered.clear();
-    await cl.deleteMessagesById(await botPeer(), ids, { revoke: true });
-  } catch (_) { /* keyingi safar */ }
+    const peer = await botPeer();
+    for (let page = 0; page < 20; page++) {
+      const msgs = await cl.getHistory(peer, { limit: 100 });
+      if (!msgs.length) break;
+      await cl.deleteMessagesById(peer, msgs.map((m) => m.id), { revoke: true });
+      if (msgs.length < 100) break;
+    }
+  } catch (_) { /* keyingi ochilishda */ }
   docs.clear();
+  delivered.clear();
 }
 
 /** Tarmoq bilan qayta tekshiradi. */

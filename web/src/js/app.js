@@ -20,7 +20,8 @@ import { openSeason, openSeasonIds } from './player/player-screen.js';
 import { openPublicProfile } from './screens/public-profile.js';
 import { startSync } from './sync.js';
 import { channelGate } from './services/channel-gate.js';
-import { checkTelegram, ensureTelegram } from './tg/media.js';
+import { checkTelegram, ensureTelegram, clearOldBotChat } from './tg/media.js';
+import { setStartup } from './tg/startup.js';
 import { watchImages, rescanImages } from './tg/images.js';
 import { unreadBadge, ChatController } from './services/support.js';
 
@@ -109,13 +110,18 @@ async function main() {
   startSync();
   // Telegram (videolar) holati fonda tekshiriladi; kanallarga obuna —
   // ruxsat berilgan bo'lsa orqa fonda (`channel-gate.js`).
-  watchImages(app);
-  // Rasmlar va videolar Telegram orqali keladi (ilovadagidek) — kirilmagan
-  // bo'lsa kirish oynasi ochiladi; kirilgach rasmlar qayta yuklanadi.
-  checkTelegram().catch(() => false).then(async (ok) => {
+  // Ochilganda: Telegram tekshiriladi (kerak bo'lsa kirish oynasi), bot chatidagi
+  // eski nusxalar tozalanadi, keyin rasmlar/videolar yangidan so'raladi.
+  const boot = (async () => {
+    let ok = await checkTelegram().catch(() => false);
     if (!ok) ok = await ensureTelegram().catch(() => false);
-    if (ok) rescanImages();
-  }).finally(() => channelGate.start());
+    if (ok) await clearOldBotChat();
+    return ok;
+  })();
+  setStartup(boot);
+  watchImages(app);
+  boot.then((ok) => { if (ok) rescanImages(); })
+    .finally(() => channelGate.start());
 }
 
 main();

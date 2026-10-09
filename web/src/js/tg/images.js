@@ -6,11 +6,11 @@
 // fayl nomini beradi; bu modul uni kuzatib, haqiqiy rasmni qo'yadi.
 // Telegram'dan olib bo'lmasa — oddiy (worker) manzilga qaytadi.
 
-import { mediaUrl, prefetchNames, clearBotChat, isTelegramAuthorized } from './media.js';
+import { mediaUrl, prefetchNames, isTelegramAuthorized } from './media.js';
+import { startup } from './startup.js';
 
 const queue = new Map(); // nom -> [{img, orig}]
 let timer = 0;
-let clearT = 0;
 
 const nameOf = (src) => { const m = /\/api\/(?:image|media)\/([^?#]+)/.exec(src); return m ? decodeURIComponent(m[1]) : ''; };
 const tgOn = () => { try { return localStorage.getItem('aru_tg_on') === '1'; } catch (_) { return false; } };
@@ -40,6 +40,7 @@ async function flush() {
   const batch = [...queue.entries()];
   queue.clear();
   if (!batch.length) return;
+  await startup();
   const names = batch.map(([n]) => n);
   await prefetchNames(names).catch(() => {});
   let i = 0;
@@ -52,9 +53,6 @@ async function flush() {
     }
   };
   await Promise.all([worker(), worker(), worker(), worker()]);
-  // Bot chatidagi nusxalar tozalanadi (pleyer ochiq bo'lmasa).
-  clearTimeout(clearT);
-  clearT = setTimeout(() => { if (!document.querySelector('.pl-box')) clearBotChat().catch(() => {}); }, 20000);
 }
 
 export function scanImages(root = document) { root.querySelectorAll('img').forEach(consider); }
