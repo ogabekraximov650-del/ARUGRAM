@@ -390,8 +390,18 @@ pub(crate) async fn route(req: Request, env: &Env, path: &str, method: Method) -
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  ASOSIY BOT: "🔐 Majburiy obunalar" (faqat admin, shaxsiy chatda)
+//  PANEL BOT: "🔐 Majburiy obunalar" (faqat admin, shaxsiy chatda)
 // ═══════════════════════════════════════════════════════════════
+//
+// TALAB (foydalanuvchi): majburiy obuna boshqaruvi ASOSIY (kirish)
+// botdan PANEL botga (kodlash boti, `ENCODE_BOT_TOKEN`) ko'chirildi —
+// asosiy botda /start endi faqat Mini App'ni ochadi.
+//
+// Menyu xabarlari panel bot orqali (`encbot_api`), lekin kanal bilan
+// ishlash (`getChat`, `getChatMember`, `createChatInviteLink`) va
+// qo'shilish hodisalari (`on_update`) AVVALGIDEK ASOSIY botda: kanalda
+// admin bo'lishi kerak bo'lgan bot — o'sha. Shu sabab "Botni kanalga
+// admin qilish" endi ASOSIY botni qo'shadigan havola (`startchannel`).
 //
 // `aniraxuzbot15` dagi menyu: yangi kanal qo'shish (turini tanlash),
 // ro'yxat, kanal ichida limitni oshirish/kamaytirish va o'chirish.
@@ -403,15 +413,12 @@ pub(crate) async fn route(req: Request, env: &Env, path: &str, method: Method) -
 // Matn kutilayotgan holat `app_config.chan_wait` da turadi.
 
 pub(crate) const BTN_CHANNELS: &str = "\u{1F510} Majburiy obunalar";
-const BTN_PICK_ADMIN: &str = "\u{1F916} Botni kanalga admin qilish";
 const BTN_PICK_ID: &str = "\u{1F194} Kanal IDsi botga yuborish";
 const BTN_PICK_BACK: &str = "\u{27E8} Orqaga";
 const WAIT_KEY: &str = "chan_wait";
 
-/// `request_chat` tugmalari raqami: ochiq kanal 100/101, yopiq 110/111.
-const REQ_PUB_ADMIN: i64 = 100;
+/// `request_chat` tugmalari raqami: ochiq kanal 101, yopiq 111.
 const REQ_PUB_ID: i64 = 101;
-const REQ_PRIV_ADMIN: i64 = 110;
 const REQ_PRIV_ID: i64 = 111;
 
 fn ikb(rows: Vec<Vec<(String, String)>>) -> Value {
@@ -428,9 +435,9 @@ fn back(to: &str) -> Value {
     ikb(vec![vec![b("\u{27E8} Orqaga", to)]])
 }
 
-/// Adminning doimiy pastki tugmasi.
+/// Adminning doimiy pastki tugmalari (panel bot).
 fn admin_kb() -> Value {
-    json!({"keyboard": [[{"text": BTN_CHANNELS}]], "resize_keyboard": true})
+    json!({"keyboard": [[{"text": BTN_CHANNELS}], [{"text": super::postbot::BTN_HOME}]], "resize_keyboard": true})
 }
 
 /// Bot API `ChatAdministratorRights` (aniraxuzbot15 `chat_picker.ts`).
@@ -446,14 +453,9 @@ fn rights(invite: bool, promote: bool) -> Value {
 
 /// Kanal tanlash tugmalari (pastda).
 fn picker_kb(public: bool) -> Value {
-    let (adm, id) = if public { (REQ_PUB_ADMIN, REQ_PUB_ID) } else { (REQ_PRIV_ADMIN, REQ_PRIV_ID) };
+    let id = if public { REQ_PUB_ID } else { REQ_PRIV_ID };
     json!({
         "keyboard": [
-            [{"text": BTN_PICK_ADMIN, "request_chat": {
-                "request_id": adm, "chat_is_channel": true, "bot_is_member": false,
-                "user_administrator_rights": rights(true, true),
-                "bot_administrator_rights": rights(true, false),
-            }}],
             [{"text": BTN_PICK_ID, "request_chat": {
                 "request_id": id, "chat_is_channel": true,
                 "user_administrator_rights": rights(false, false),
@@ -473,13 +475,21 @@ async fn send(env: &Env, chat: i64, text: &str, markup: Option<Value>) {
     if let Some(m) = markup {
         body["reply_markup"] = m;
     }
-    let _ = tg_api(env, "sendMessage", body).await;
+    let _ = encbot_api(env, "sendMessage", body).await;
+}
+
+/// ASOSIY botni kanalga admin qiladigan havola (Telegram `startchannel`):
+/// kanal tanlanadi va bot kerakli huquqlar bilan qo'shiladi.
+async fn add_bot_url(env: &Env) -> Option<String> {
+    let me = tg_api(env, "getMe", json!({})).await.ok()?;
+    let name = me["username"].as_str()?;
+    Some(format!("https://t.me/{name}?startchannel&admin=post_messages+edit_messages+delete_messages+invite_users"))
 }
 
 /// Xabarni tahrirlaydi (tugma bosilgan bo'lsa), bo'lmasa yangisini yuboradi.
 async fn show(env: &Env, chat: i64, msg_id: i64, text: &str, kb: Value) {
     if msg_id > 0 {
-        let r = tg_api(env, "editMessageText", json!({
+        let r = encbot_api(env, "editMessageText", json!({
             "chat_id": chat, "message_id": msg_id, "text": text,
             "parse_mode": "HTML", "disable_web_page_preview": true, "reply_markup": kb,
         })).await;
@@ -501,7 +511,7 @@ const MENU_TEXT: &str = "\u{1F510} <b>Majburiy obunalar</b>\n\n\
     Bepul bo'limni ko'rishdan oldin ilova foydalanuvchidan ruxsat so'raydi va uning \
     Telegram hisobi bilan shu kanallarga o'zi qo'shiladi (yopiq kanalga so'rov yuboradi).";
 
-async fn menu(env: &Env, chat: i64) {
+pub(crate) async fn menu(env: &Env, chat: i64) {
     config_put(env, WAIT_KEY, "").await;
     // Pastki tugma (kanal tanlash tugmalari o'rniga) va menyu.
     send(env, chat, "\u{1F447}", Some(admin_kb())).await;
@@ -574,10 +584,11 @@ const HOW_TO_ADD: &str = "1. Botni kanalingizga admin qiling (\"Foydalanuvchi qo
     \"Havola orqali taklif qilish\" huquqi bilan).\n\
     2. Kanaldagi istalgan postni shu yerga FORWARD qiling yoki @username / \
     <code>-100...</code> IDsini yuboring.\n\n\
-    Yoki pastdagi tugmalardan:\n\n\
-    \u{1F916} <b>Botni kanalga admin qilish</b> — kanalni tanlang va botni admin qiling.\n\n\
-    \u{1F194} <b>Kanal IDsi botga yuborish</b> — kanalni tanlang, bot IDsini o'zi oladi va \
-    kanalni qo'shadi.";
+    Yoki:\n\n\
+    \u{1F916} <b>Asosiy botni kanalga admin qilish</b> (xabardagi tugma) — kanalni tanlang, \
+    asosiy bot admin bo'ladi.\n\n\
+    \u{1F194} <b>Kanal IDsi botga yuborish</b> (pastdagi tugma) — kanalni tanlang, bot IDsini o'zi \
+    oladi va kanalni qo'shadi.";
 
 /// Inline tugma (`ch:...`). `true` — shu yerda bajarildi.
 pub(crate) async fn on_callback(env: &Env, chat: i64, msg_id: i64, data: &str) -> bool {
@@ -606,7 +617,12 @@ pub(crate) async fn on_callback(env: &Env, chat: i64, msg_id: i64, data: &str) -
             let wait = if kind == "public" { "pub" } else { "priv" };
             let text = format!("<b>Turi:</b> {}\n\n{HOW_TO_ADD}", kind_label(kind));
             config_put(env, WAIT_KEY, wait).await;
-            show(env, chat, msg_id, &text, back("ch:add")).await;
+            let mut rows: Vec<Value> = Vec::new();
+            if let Some(url) = add_bot_url(env).await {
+                rows.push(json!([{"text": "\u{1F916} Asosiy botni kanalga admin qilish", "url": url}]));
+            }
+            rows.push(json!([{"text": "\u{27E8} Orqaga", "callback_data": "ch:add"}]));
+            show(env, chat, msg_id, &text, json!({"inline_keyboard": rows})).await;
             // Pastdagi tugmalar: botni kanalga admin qilish va kanal IDsini
             // yuborish (aniraxuzbot15 `chat_picker.ts`).
             send(env, chat, "\u{1F447} Pastdagi tugmalardan foydalaning:", Some(picker_kb(kind == "public"))).await;
@@ -679,7 +695,7 @@ pub(crate) async fn on_message(env: &Env, msg: &Value) -> bool {
         return false;
     }
     let text = msg["text"].as_str().unwrap_or("").trim().to_string();
-    if text == BTN_CHANNELS || text == "/kanallar" || text == "/start" {
+    if text == BTN_CHANNELS || text == "/kanallar" {
         menu(env, chat).await;
         return true;
     }
@@ -693,9 +709,6 @@ pub(crate) async fn on_message(env: &Env, msg: &Value) -> bool {
         let rid = jint(cs, "request_id");
         let chat_id = cs["chat_id"].as_i64().unwrap_or(0);
         match rid {
-            REQ_PUB_ADMIN | REQ_PRIV_ADMIN => send(env, chat,
-                "\u{2705} Bot kanalga admin qilindi.\n\nEndi \u{1F194} <b>Kanal IDsi botga yuborish</b> \
-                 tugmasini bosib, o'sha kanalni tanlang.", None).await,
             REQ_PUB_ID | REQ_PRIV_ID => {
                 let kind = if rid == REQ_PUB_ID { "public" } else { "private" };
                 add_and_ask_limit(env, chat, kind, &chat_id.to_string()).await;

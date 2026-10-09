@@ -3897,8 +3897,13 @@ async fn tg_send(env: &Env, chat_id: i64, text: &str) {
     })).await;
 }
 
-/// Yordam xabari + Mini App'ni ochadigan tugma (`tma.rs`).
+/// Yordam xabari + Mini App'ni ochadigan tugma (`tma.rs`). Chat
+/// pastidagi menyu tugmasi ham Mini App'ni ochadigan qilinadi.
 async fn tg_send_help(env: &Env, chat_id: i64) {
+    let _ = tg_api(env, "setChatMenuButton", json!({
+        "chat_id": chat_id,
+        "menu_button": {"type": "web_app", "text": "ARUmediaTV", "web_app": {"url": tma::WEB_URL}},
+    })).await;
     let _ = tg_api(env, "sendMessage", json!({
         "chat_id": chat_id,
         "text": MSG_HELP,
@@ -4751,16 +4756,11 @@ async fn handle_tg_webhook(env: &Env, mut req: Request) -> Result<Response> {
     if channels::on_update(env, &update).await {
         return ok(json!({"ok": true}));
     }
-    // Admin: kanal menyusidagi tugmalar (`channels.rs`).
+    // Eski xabarlardagi tugmalar: majburiy obuna menyusi endi PANEL botda
+    // (`channels.rs`), bu yerda faqat javob beriladi.
     let cb = &update["callback_query"];
     if cb.is_object() {
         let _ = tg_api(env, "answerCallbackQuery", json!({"callback_query_id": cb["id"]})).await;
-        if cb["from"]["id"].as_i64() == Some(ADMIN_TELEGRAM_ID) {
-            channels::on_callback(env,
-                cb["message"]["chat"]["id"].as_i64().unwrap_or(0),
-                cb["message"]["message_id"].as_i64().unwrap_or(0),
-                cb["data"].as_str().unwrap_or("")).await;
-        }
         return ok(json!({"ok": true}));
     }
     // Yopiq video kanalidagi yangi post (`tg_channel_post`).
@@ -4771,16 +4771,8 @@ async fn handle_tg_webhook(env: &Env, mut req: Request) -> Result<Response> {
         }
     }
     let msg = update["message"].clone();
-    // Admin shaxsiy chatda: "🔐 Majburiy obunalar" menyusi, kanal tanlash
-    // tugmalari va kanaldan forward qilingan post (`channels.rs`).
-    // `/start <token>` (kirish) bu yerda ushlanmaydi.
-    if msg["from"]["id"].as_i64() == Some(ADMIN_TELEGRAM_ID)
-        && msg["chat"]["id"].as_i64() == Some(ADMIN_TELEGRAM_ID)
-        && (!tg_has_media(&msg) || msg["forward_origin"]["type"] == "channel")
-        && channels::on_message(env, &msg).await
-    {
-        return ok(json!({"ok": true}));
-    }
+    // "🔐 Majburiy obunalar" menyusi endi PANEL botda (`channels.rs`):
+    // asosiy botda admin ham /start bosganda Mini App tugmasini ko'radi.
     // Foydalanuvchi ilovadan bot chatiga yuborgan fayl (surat, video,
     // ovozli xabar) — bot uni kanalga ko'chiradi (`tg_user_media`).
     if tg_has_media(&msg) {
@@ -12062,6 +12054,10 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
         }
         let chat = cb["message"]["chat"]["id"].as_i64().unwrap_or(0);
         let data = cb["data"].as_str().unwrap_or("");
+        // Majburiy obunalar menyusi (`channels.rs`).
+        if channels::on_callback(env, chat, cb["message"]["message_id"].as_i64().unwrap_or(0), data).await {
+            return ok(json!({"ok": true}));
+        }
         // anibla.uz qidiruvi, qism va sifat tugmalari (`anibla.rs`).
         if anibla::on_callback(env, chat, cb["message"]["message_id"].as_i64().unwrap_or(0), data).await {
             return ok(json!({"ok": true}));
@@ -12115,6 +12111,17 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
     }
     if text == anibla::BTN {
         anibla::menu(env, chat).await;
+        return ok(json!({"ok": true}));
+    }
+    // Majburiy obunalar (`channels.rs`) — kanal qo'shish, limit, o'chirish.
+    if text == channels::BTN_CHANNELS || text == "/kanallar" {
+        config_put(env, "encbot_mode", "chan").await;
+        channels::menu(env, chat).await;
+        return ok(json!({"ok": true}));
+    }
+    if config_get(env, "encbot_mode").await.as_deref() == Some("chan")
+        && channels::on_message(env, msg).await
+    {
         return ok(json!({"ok": true}));
     }
     if let Some(id) = postbot::button_id(&text) {

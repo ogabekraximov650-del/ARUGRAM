@@ -5353,3 +5353,15 @@ TOPILGAN SABABLAR:
 - Bosqichlar: 1) pastki panel + bosh sahifa (tayyor); keyin qidiruv,
   katalog, anime sahifasi, kutubxona, profil; video — eng oxirida
   (fMP4 nusxalar `epizod_db.fmp4_*` + mtcute, iPhone'da MSE).
+
+## Majburiy obuna boshqaruvi panel botga ko'chirildi
+
+- Nega: asosiy (kirish) botda admin /start bosganda kanal menyusi
+  chiqardi; endi asosiy botda /start har kimga Mini App tugmasini
+  (va chat menyu tugmasini — `setChatMenuButton`) ko'rsatadi.
+- Panel bot (`ENCODE_BOT_TOKEN`) bosh menyusida "🔐 Majburiy obunalar"
+  (`encbot_mode = chan`). Menyu xabarlari `encbot_api` orqali.
+- Kanal bilan ishlash va qo'shilish hodisalari (`channels::add`,
+  `on_update`) ASOSIY botda qoldi — kanalda admin bo'ladigan bot o'sha.
+  "Asosiy botni kanalga admin qilish" — `t.me/<asosiy_bot>?startchannel`
+  havolasi (avvalgi `request_chat` tugmasi panel botni qo'shib qo'yardi).
