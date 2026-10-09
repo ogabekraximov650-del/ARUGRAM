@@ -1,8 +1,8 @@
 name: Mini App saytini deploy qilish (arumediatv.pages.dev)
 
 # `web/` o'zgarsa avtomatik: Telegram Mini App (ilovaning onlayn nusxasi)
-# Cloudflare Pages'ga chiqariladi. Yig'ish (build) yo'q — `web/` papkasi
-# o'zicha tayyor sayt. Loyiha yo'q bo'lsa birinchi marta yaratiladi.
+# yig'iladi (`web/build.mjs`: esbuild, mtcute bilan) va `web/dist`
+# Cloudflare Pages'ga chiqariladi. Loyiha yo'q bo'lsa birinchi marta yaratiladi.
 #
 # Kerak: CLOUDFLARE_API_TOKEN ("Cloudflare Pages: Edit" huquqi bilan) va
 # CLOUDFLARE_ACCOUNT_ID — worker deploy'dagi o'sha secret'lar.
@@ -34,6 +34,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+      - name: Yig'ish
+        working-directory: web
+        run: npm ci --no-audit --no-fund && node build.mjs
       - name: Pages loyihasi (bo'lmasa yaratiladi)
         run: |
           if npx --yes wrangler@3 pages project list 2>/dev/null | grep -qw arumediatv; then
@@ -42,4 +45,4 @@ jobs:
             npx --yes wrangler@3 pages project create arumediatv --production-branch main
           fi
       - name: Deploy
-        run: npx --yes wrangler@3 pages deploy web --project-name arumediatv --branch main --commit-dirty=true
+        run: npx --yes wrangler@3 pages deploy web/dist --project-name arumediatv --branch main --commit-dirty=true

@@ -1,0 +1,133 @@
+/* Statistika: umumiy ekran (`stats_screen.dart`, st-), grafik
+ * (`trend_chart.dart`, tc-), bosh sahifa banneri (`stats_banner.dart`, sb-),
+ * bitta statistika oynasi (`stat_detail_screen.dart`, sd-). */
+
+/* ── Umumiy statistika ───────────────────────────────────────── */
+.st-top { display: flex; align-items: center; padding: 12px 16px 10px; flex-shrink: 0; line-height: normal; }
+.st-title { flex: 1; min-width: 0; margin-left: 14px; color: #fff; font-size: 18px; font-weight: 700; }
+.st-load { display: flex; }
+.st-list { padding: 4px 16px 120px; line-height: normal; }
+.st-card { border-radius: 20px; padding: 16px 18px 14px; margin-bottom: 12px; overflow: visible; }
+.st-card.st-content { padding: 16px 16px 14px; }
+.st-ch { display: flex; align-items: center; }
+.st-ct { margin-left: 10px; color: #fff; font-size: 16.5px; font-weight: 700; }
+.st-rows { margin-top: 12px; }
+.st-row { display: flex; align-items: baseline; padding: 5px 0; }
+.st-rl { flex: 1; color: rgba(255, 255, 255, 0.6); font-size: 13.5px; font-weight: 500; }
+.st-rv { color: #fff; font-size: 14.5px; font-weight: 600; }
+.st-row.strong .st-rl { color: rgba(255, 255, 255, 0.85); font-weight: 600; }
+.st-row.strong .st-rv { font-size: 16px; font-weight: 800; }
+.st-chart { margin-top: 14px; }
+.st-note { margin-top: 8px; color: rgba(255, 255, 255, 0.35); font-size: 11.5px; line-height: 1.3; }
+.st-bigs { display: flex; gap: 8px; margin-top: 12px; }
+.st-big {
+  flex: 1; min-width: 0; padding: 12px 8px; border-radius: 14px; background: rgba(255, 255, 255, 0.05);
+  display: flex; flex-direction: column; align-items: center;
+}
+.st-bv { margin-top: 6px; color: #fff; font-size: 18px; font-weight: 800; }
+.st-bl { color: rgba(255, 255, 255, 0.55); font-size: 12px; }
+.st-new { margin-top: 12px; color: rgba(255, 255, 255, 0.6); font-size: 12.5px; }
+.st-tz { margin-top: 4px; text-align: center; color: rgba(255, 255, 255, 0.35); font-size: 11.5px; }
+
+/* ── Grafik ──────────────────────────────────────────────────── */
+.tc { line-height: normal; }
+.tc-head { display: flex; align-items: flex-end; }
+.tc-hl { flex: 1; min-width: 0; }
+.tc-v { color: #fff; font-size: 20px; font-weight: 800; }
+.tc-l { color: rgba(255, 255, 255, 0.54); font-size: 11.5px; }
+.tc-chg { padding: 4px 8px; border-radius: 8px; font-size: 12.5px; font-weight: 800; }
+.tc-box { margin-top: 10px; position: relative; }
+.tc-box canvas { display: block; touch-action: pan-y; }
+.tc-center { height: 100%; display: flex; align-items: center; justify-content: center; }
+.tc-err { color: rgba(255, 255, 255, 0.54); font-size: 12.5px; }
+.tc-axis { margin-top: 4px; display: flex; justify-content: space-between; color: rgba(255, 255, 255, 0.38); font-size: 10px; }
+.tc-ranges { margin-top: 10px; display: flex; }
+.tc-r {
+  flex: 1; margin: 0 3px; padding: 7px 0; text-align: center; border-radius: 9px; border: 1px solid transparent;
+  color: rgba(255, 255, 255, 0.6); font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.tc-r.on { color: #fff; }
+
+/* ── Bosh sahifadagi banner ──────────────────────────────────── */
+.sb { border-radius: 18px; padding: 12px 12px 12px 16px; cursor: pointer; line-height: normal; }
+.sb-h { display: flex; align-items: center; }
+.sb-t { flex: 1; color: #fff; font-size: 14.5px; font-weight: 700; }
+.sb-u { margin-top: 4px; color: var(--accent); font-size: 13px; font-weight: 600; }
+.sb-clip { margin-top: 8px; position: relative; overflow: hidden; height: 17px; }
+.sb-item {
+  position: absolute; left: 0; right: 0; top: 0; display: flex; align-items: center;
+  transition: transform 420ms cubic-bezier(0.215, 0.61, 0.355, 1), opacity 420ms;
+}
+.sb-item span:last-child {
+  margin-left: 6px; flex: 1; min-width: 0; color: rgba(255, 255, 255, 0.72); font-size: 12.5px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sb-item.in-start { transform: translateX(100%); opacity: 0; transition: none; }
+.sb-item.out { transform: translateX(-100%); opacity: 0; transition-timing-function: cubic-bezier(0.55, 0.055, 0.675, 0.19); }
+
+/* ── Bitta statistika oynasi ─────────────────────────────────── */
+.sd-list { padding: 4px 16px 32px; line-height: normal; }
+.sd-list > * + * { margin-top: 12px; }
+.sd-grid { padding-top: 8px; padding-bottom: 32px; }
+.sd-spin { padding: 18px 0; display: flex; justify-content: center; }
+.sd-empty { padding-top: 120px; text-align: center; color: rgba(255, 255, 255, 0.54); font-size: 14px; }
+
+.sd-ep {
+  position: relative; aspect-ratio: 16 / 9; border-radius: 16px; overflow: hidden; background: var(--card-alt); cursor: pointer;
+}
+.sd-ep-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.sd-ep-paid { position: absolute; top: 8px; right: 8px; }
+.sd-ep-txt { position: absolute; left: 8px; right: 8px; bottom: 8px; display: flex; align-items: flex-end; }
+.sd-ep-l { flex: 1; min-width: 0; }
+.sd-ep-r { margin-left: 8px; font-size: 10.5px; font-weight: 600; text-align: right; }
+.sd-ep .sh {
+  color: #fff; font-weight: 500; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  text-shadow: 0 1px 3px #000, 1px 0 2px rgba(0, 0, 0, 0.87), -1px 0 2px rgba(0, 0, 0, 0.87), 0 -1px 2px rgba(0, 0, 0, 0.87);
+}
+.sd-ep-l .sh:first-child { font-weight: 700; }
+.sd-ep-r.sh { font-weight: 600; }
+.sd-ep-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 3.5px; background: rgba(255, 255, 255, 0.24); }
+.sd-ep-bar > div { height: 100%; background: linear-gradient(to right, var(--accent), var(--accent2)); }
+.sd-tag {
+  position: absolute; top: 8px; right: 8px; padding: 4px 8px; border-radius: 999px;
+  background: rgba(0, 0, 0, 0.62); color: rgba(255, 255, 255, 0.7); font-size: 10.5px;
+}
+
+.sd-star {
+  display: inline-flex; align-items: center; padding: 4px 8px; border-radius: 999px;
+  background: rgba(0, 0, 0, 0.62); border: 1px solid var(--border-bright);
+}
+.sd-star span:last-child { margin-left: 3px; color: #fff; font-size: 11.5px; font-weight: 800; line-height: normal; }
+
+.sd-cm { border-radius: 18px; padding: 12px; }
+.sd-cm-row { display: flex; align-items: flex-start; }
+.sd-cm-poster {
+  position: relative; width: 62px; height: 88px; border-radius: 10px; overflow: hidden; flex-shrink: 0; background: var(--card-alt);
+}
+.sd-cm-poster img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.sd-cm-paid { position: absolute; top: 4px; right: 4px; }
+.sd-cm-main { flex: 1; min-width: 0; margin-left: 12px; }
+.sd-cm-t { color: #fff; font-size: 13.5px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sd-cm-c { margin-top: 3px; color: rgba(255, 255, 255, 0.54); font-size: 11.5px; }
+.sd-cm-b { margin-top: 5px; color: rgba(255, 255, 255, 0.9); font-size: 13px; line-height: 1.35; word-break: break-word; user-select: text; }
+.sd-cm-f { margin-top: 8px; display: flex; align-items: center; }
+.sd-cm-likes { margin: 0 14px 0 4px; color: rgba(255, 255, 255, 0.7); font-size: 12px; }
+.sd-cm-rep { display: inline-flex; align-items: center; cursor: pointer; }
+.sd-cm-rep span:last-child { margin-left: 2px; color: var(--accent3); font-size: 12px; }
+.sd-cm-none { color: rgba(255, 255, 255, 0.38); font-size: 12px; }
+.sd-cm-f .grow { flex: 1; }
+.sd-cm-d { color: rgba(255, 255, 255, 0.38); font-size: 11px; }
+.sd-div { height: 1px; background: rgba(255, 255, 255, 0.08); margin: 10px 0; }
+.sd-rp { display: flex; align-items: flex-start; padding-bottom: 10px; }
+.sd-rp-av { position: relative; width: 26px; height: 26px; border-radius: 50%; overflow: hidden; flex-shrink: 0; background: var(--card-alt); }
+.sd-rp-av img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.sd-rp-main { flex: 1; min-width: 0; margin-left: 8px; }
+.sd-rp-h { display: flex; align-items: center; }
+.sd-rp-n { min-width: 0; margin-right: 8px; color: #fff; font-size: 12px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sd-rp-l { margin-left: 3px; color: rgba(255, 255, 255, 0.54); font-size: 11px; }
+.sd-rp-b { margin-top: 2px; color: rgba(255, 255, 255, 0.78); font-size: 12.5px; line-height: 1.3; word-break: break-word; }
+.sd-rp-err { color: rgba(255, 255, 255, 0.54); font-size: 12px; }
+.sd-media {
+  display: inline-flex; align-items: center; padding: 8px 12px; border-radius: 14px; background: rgba(36, 31, 28, 0.94);
+}
+.sd-media span:last-child { margin-left: 6px; color: rgba(255, 255, 255, 0.7); font-size: 14px; }

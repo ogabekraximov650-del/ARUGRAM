@@ -42,6 +42,8 @@ mod anibla;
 mod livewatch;
 // Telegram Mini App (`web/`, arumediatv.pages.dev) uchun kirish.
 mod tma;
+// Qismlarning fMP4 nusxasi (Mini App pleyeri uchun) va uning navbati.
+mod fmp4;
 
 // ── CORS + JSON yordamchi ──────────────────────────────────────
 
@@ -3590,6 +3592,10 @@ fn hide_keys(mut obj: Value) -> Value {
         }
         // Asl videoning kaliti ham hammaga berilmaydi.
         m.remove("origin_key");
+        // fMP4 nusxalar kaliti ham (`fmp4.rs`).
+        for q in QUALITIES {
+            m.remove(&format!("fmp4_key_{q}"));
+        }
     }
     obj
 }
@@ -10402,7 +10408,8 @@ fn needs_app_check(path: &str) -> bool {
     if matches!(path, "/api/encode/peek" | "/api/encode/claim" | "/api/encode/heartbeat" | "/api/encode/release"
         | "/api/encode/quality" | "/api/encode/finish" | "/api/encode/push"
         | "/api/post/claim" | "/api/post/check" | "/api/post/finish" | "/api/post/progress"
-        | "/api/anibla/claim" | "/api/anibla/progress" | "/api/anibla/done")
+        | "/api/anibla/claim" | "/api/anibla/progress" | "/api/anibla/done"
+        | "/api/fmp4/claim" | "/api/fmp4/done")
     {
         return false;
     }
@@ -11548,6 +11555,8 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
         ]).await?;
         // Birinchi kodlangan sifat — qism endi ilovada ko'rinadi.
         free_seasons_forget().await;
+        // MP4 almashdi — eski fMP4 nusxasi (Mini App) endi boshqa videoniki.
+        fmp4::forget_quality(env, a, s, e, q).await;
         // Eski (almashtirilgan) Telegram fayli kanaldan o'chadi.
         let old = bare_name(&old);
         if !old.is_empty() && old != file {
@@ -12800,6 +12809,8 @@ async fn scheduled(_ev: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
     let _ = postbot::kick(&env).await;
     // "Anibla yuklash" navbati — ALOHIDA workflow (`anibla::kick`).
     let _ = anibla::kick(&env).await;
+    // Mini App so'ragan eski qismlarning fMP4 nusxasi (`fmp4::kick`).
+    let _ = fmp4::kick(&env).await;
     let msg = encode_kick(&env).await;
     // Faqat ishga tushirilganda yoki xato bo'lsa adminga xabar. Xato
     // (masalan token yo'q) har 10 daqiqada takrorlanmasin — soatiga bir.
@@ -13198,6 +13209,13 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
     }
     if method == Method::Post && path == "/api/tma/auth" {
         return tma::auth(req, &env).await;
+    }
+    if method == Method::Post && path == "/api/fmp4/request" {
+        return fmp4::request(req, &env).await;
+    }
+    if method == Method::Post && (path == "/api/fmp4/claim" || path == "/api/fmp4/done") {
+        let p = path.to_string();
+        return fmp4::route(req, &env, &p).await;
     }
 
     // B2 proxy — Range header bilan uzatiladi (video seek)

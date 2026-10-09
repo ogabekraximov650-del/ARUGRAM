@@ -1,0 +1,82 @@
+/* Telegram'ga kirish oynasi — `phone_login_screen.dart` (Telegram Android tungi ranglari). */
+.tgl { background: #1C242F !important; }
+.tgl-bar { height: 56px; display: flex; align-items: center; padding: 0 4px; flex-shrink: 0; }
+.tgl-body { flex: 1; overflow-y: auto; overflow-x: hidden; }
+.tgl-step-body { padding: 8px 24px 120px; }
+.tgl-step-body.enter { animation: tglIn 280ms cubic-bezier(0.215, 0.61, 0.355, 1); }
+@keyframes tglIn { from { opacity: 0; transform: translateX(18%); } to { opacity: 1; transform: none; } }
+.tgl-h1 { color: #fff; font-size: 22px; font-weight: 600; }
+.tgl-sub { color: #7D8B99; font-size: 15px; line-height: 1.4; margin-top: 10px; margin-bottom: 30px; }
+.tgl-h1.c, .tgl-sub.c { text-align: center; }
+.tgl-head { display: flex; flex-direction: column; }
+.tgl-circle {
+  width: 104px; height: 104px; border-radius: 50%; margin: 0 auto 26px;
+  background: linear-gradient(to bottom right, #6CC3F6, #3A8FD6);
+  display: flex; align-items: center; justify-content: center;
+}
+.tgl-country { display: flex; align-items: center; padding: 12px 0; border-bottom: 1px solid #34414E; cursor: pointer; }
+.tgl-country .flag { font-size: 22px; margin-right: 12px; }
+.tgl-country .nm { flex: 1; color: #fff; font-size: 18px; }
+.tgl-country .nm.dim { color: #7D8B99; }
+.tgl-row { display: flex; align-items: flex-end; margin-top: 14px; gap: 14px; }
+.tgl-cc { width: 74px; display: flex; align-items: center; border-bottom: 1px solid #34414E; color: #fff; font-size: 18px; }
+.tgl-cc:focus-within { border-bottom: 2px solid #50A8EB; }
+.tgl-in {
+  background: transparent; border: 0; outline: none; color: #fff; font: inherit; font-size: 18px;
+  padding: 10px 0; width: 100%; user-select: text; -webkit-user-select: text; caret-color: #50A8EB;
+}
+.tgl-in::placeholder { color: #4F5D6B; }
+.tgl-row .num { flex: 1; border-bottom: 1px solid #34414E; letter-spacing: 0.6px; }
+.tgl-row .num:focus { border-bottom: 2px solid #50A8EB; }
+.tgl-center { display: flex; justify-content: center; margin-top: 26px; }
+.tgl-link {
+  background: transparent; border: 0; color: #50A8EB; font: inherit; font-size: 15px; font-weight: 500;
+  padding: 10px 12px; border-radius: 20px; display: inline-flex; align-items: center; gap: 8px; cursor: pointer;
+}
+.tgl-link:disabled { color: #4F5D6B; }
+.tgl-link:active { background: rgba(80, 168, 235, 0.12); }
+.tgl-links { display: flex; flex-direction: column; align-items: center; margin-top: 28px; }
+.tgl-cells-wrap { position: relative; display: flex; justify-content: center; }
+.tgl-cells { display: flex; justify-content: center; }
+.tgl-cell {
+  width: 44px; height: 52px; margin: 0 4px; border-radius: 8px; border: 1.6px solid #34414E;
+  display: flex; align-items: center; justify-content: center; color: #fff; font-size: 22px; font-weight: 500;
+  transition: border-color 150ms;
+}
+.tgl-cell.on { border-color: #50A8EB; }
+.tgl-cell.err { border-color: #E5575F; }
+.tgl-hidden { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; border: 0; caret-color: transparent; }
+.tgl-pass { display: flex; align-items: center; border-bottom: 1px solid #34414E; }
+.tgl-pass:focus-within { border-bottom: 2px solid #50A8EB; }
+[class*="shake-"]:not(.shake-0) { animation: tglShake 420ms; }
+@keyframes tglShake {
+  0% { transform: translateX(0); } 16% { transform: translateX(8px); } 33% { transform: translateX(-7px); }
+  50% { transform: translateX(5px); } 66% { transform: translateX(-3px); } 83% { transform: translateX(1px); } 100% { transform: none; }
+}
+.tgl-wait { margin-top: 20px; text-align: center; color: #F5A623; font-size: 15px; font-weight: 600; }
+.tgl-err { margin-top: 16px; text-align: center; color: #E5575F; font-size: 14px; }
+.tgl-fab {
+  position: absolute; right: 16px; bottom: calc(var(--safe-bottom) + 16px); width: 56px; height: 56px;
+  border-radius: 50%; border: 0; background: #50A8EB; display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3); transition: transform 200ms cubic-bezier(0.34, 1.56, 0.64, 1); cursor: pointer;
+}
+.tgl-fab.hide { transform: scale(0); }
+.tgl-qr-box {
+  width: 248px; height: 248px; margin: 8px auto 0; padding: 14px; border-radius: 20px; background: #fff;
+  display: flex; align-items: center; justify-content: center;
+}
+.tgl-steps { margin-top: 20px; }
+.tgl-step { display: flex; align-items: flex-start; margin-bottom: 14px; }
+.tgl-step .n {
+  width: 24px; height: 24px; border-radius: 50%; background: #50A8EB; color: #fff; font-size: 13px; font-weight: 600;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-right: 14px;
+}
+.tgl-step .t { color: #fff; font-size: 15px; line-height: 1.4; }
+.tgl-pick-bar { height: 56px; background: #232E3C; display: flex; align-items: center; padding: 0 4px; flex-shrink: 0; }
+.tgl-search { flex: 1; background: transparent; border: 0; outline: none; color: #fff; font: inherit; font-size: 18px; user-select: text; -webkit-user-select: text; }
+.tgl-search::placeholder { color: #7D8B99; }
+.tgl-ci { display: flex; align-items: center; padding: 14px 16px; cursor: pointer; }
+.tgl-ci:active { background: rgba(255, 255, 255, 0.05); }
+.tgl-ci .flag { font-size: 24px; width: 40px; }
+.tgl-ci .nm { flex: 1; color: #fff; font-size: 16px; }
+.tgl-ci .cd { color: #50A8EB; font-size: 16px; }

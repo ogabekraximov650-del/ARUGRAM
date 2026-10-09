@@ -1,0 +1,15 @@
+{
+  "name": "arumediatv-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "@mtcute/web": "0.32.4",
+    "qrcode-generator": "1.4.4"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

@@ -1,0 +1,112 @@
+/* Obuna va balans — `lib/screens/billing_screen.dart`. */
+
+.bill-bar-wrap { padding: 4px 16px 12px; flex-shrink: 0; }
+.bill-bar { border-radius: 18px; padding: 14px 16px; display: flex; align-items: center; }
+.bill-bar .grow { flex: 1; }
+.bill-bar .col { display: flex; flex-direction: column; min-width: 0; }
+.bill-bar .col.end { align-items: flex-end; }
+.bill-bar .k { color: rgba(255, 255, 255, 0.55); font-size: 12px; line-height: normal; }
+.bill-bar .bal { margin-top: 2px; color: #fff; font-size: 19px; font-weight: 800; line-height: normal; }
+.bill-bar .sub { margin-top: 2px; font-size: 14px; font-weight: 700; line-height: normal; white-space: nowrap; }
+
+.bill-switch { display: flex; gap: 8px; padding: 0 16px 12px; flex-shrink: 0; }
+.bill-sw {
+  flex: 1 1 0; min-width: 0; padding: 11px 0; border-radius: 14px; text-align: center;
+  background: var(--card); border: 1px solid var(--border);
+  color: rgba(255, 255, 255, 0.6); font-size: 12.5px; font-weight: 600; line-height: normal;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;
+  transition: background 180ms, color 180ms, border-color 180ms;
+}
+.bill-sw.on {
+  background: linear-gradient(to bottom right, var(--accent), var(--accent2));
+  border-color: transparent; color: #fff;
+}
+
+/* PageView: qo'lda surib o'tkaziladi. */
+.bill-pages {
+  flex: 1; min-height: 0; display: flex; overflow-x: auto; overflow-y: hidden;
+  scroll-snap-type: x mandatory; overscroll-behavior: contain;
+  padding-bottom: var(--safe-bottom);
+}
+.bill-pages::-webkit-scrollbar { display: none; }
+.bill-page {
+  flex: 0 0 100%; width: 100%; scroll-snap-align: start; scroll-snap-stop: always;
+  overflow-y: auto; overflow-x: hidden; padding: 0 16px 28px; overscroll-behavior: contain;
+}
+.bill-page::-webkit-scrollbar { display: none; }
+
+.bill-ph { height: 100%; min-height: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.bill-ph .t { margin-top: 14px; color: rgba(255, 255, 255, 0.5); font-size: 13px; text-align: center; }
+
+.bill-card { border-radius: 16px; }
+.bill-card + .bill-card { margin-top: 10px; }
+
+/* To'ldirish */
+.bill-amount { padding: 14px 16px; display: flex; flex-direction: column; }
+.bill-amount .lbl { color: rgba(255, 255, 255, 0.65); font-size: 12.5px; line-height: normal; }
+.bill-input {
+  margin-top: 8px; display: flex; align-items: center; border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06); padding: 0 14px;
+}
+.bill-input input {
+  flex: 1; min-width: 0; height: 48px; border: 0; outline: none; background: transparent;
+  color: #fff; font: inherit; font-size: 17px; font-weight: 700; padding: 0;
+  user-select: text; -webkit-user-select: text;
+}
+.bill-input input::placeholder { color: rgba(255, 255, 255, 0.25); font-weight: 400; }
+.bill-input .suf { color: rgba(255, 255, 255, 0.5); font-size: 16px; margin-left: 6px; }
+.bill-go { margin-top: 12px; height: 46px; font-size: 14px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+.bill-links { margin-top: 16px; }
+.bill-note { color: rgba(255, 255, 255, 0.45); font-size: 12px; line-height: 1.5; }
+
+.bill-link { padding: 12px 16px; }
+.bill-link + .bill-link, .bill-links > .bill-link + .bill-link { margin-top: 10px; }
+.bill-link .row { display: flex; align-items: center; }
+.bill-link .grow { flex: 1; }
+.bill-link .amt { color: #fff; font-size: 16px; font-weight: 800; line-height: normal; }
+.bill-link .left { margin-left: 4px; color: rgba(255, 255, 255, 0.55); font-size: 11.5px; }
+.bill-link .btns { margin-top: 12px; display: flex; gap: 10px; }
+.bill-link .btns .btn {
+  flex: 1 1 0; height: 42px; font-size: 13px; font-weight: 700; padding: 0 12px;
+  display: flex; align-items: center; justify-content: center;
+}
+.bill-outline { background: transparent; color: #fff; border: 1px solid var(--border); }
+.bill-outline:disabled { color: rgba(255, 255, 255, 0.38); }
+
+/* Obuna */
+.bill-active { padding: 12px 14px; display: flex; align-items: center; margin-bottom: 12px; }
+.bill-active .col { margin-left: 10px; flex: 1; min-width: 0; }
+.bill-active .t { color: #fff; font-size: 14px; font-weight: 700; line-height: normal; }
+.bill-active .r { margin-top: 3px; display: flex; align-items: baseline; min-width: 0; }
+.bill-active .y { color: rgba(255, 255, 255, 0.62); font-size: 12px; }
+.bill-active .bill-cd { color: var(--success); font-size: 12.5px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bill-active .s { margin-top: 2px; color: rgba(255, 255, 255, 0.5); font-size: 11.5px; line-height: 1.35; }
+.bill-active + .bill-card { margin-top: 0; }
+
+.bill-plan { padding: 12px 12px 12px 16px; display: flex; align-items: center; }
+.bill-plan .col { flex: 1; min-width: 0; }
+.bill-plan .r { display: flex; align-items: center; }
+.bill-plan .n { color: #fff; font-size: 16px; font-weight: 700; line-height: normal; }
+.bill-plan .disc {
+  margin-left: 8px; padding: 3px 7px; border-radius: 7px; background: rgba(74, 222, 128, 0.18);
+  color: var(--success); font-size: 10.5px; font-weight: 700; line-height: normal;
+}
+.bill-plan .p { margin-top: 3px; color: rgba(255, 255, 255, 0.65); font-size: 13px; }
+.bill-plan .buy {
+  height: 40px; padding: 0 16px; font-size: 13px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center; min-width: 64px;
+}
+.bill-foot { margin-top: 14px; color: rgba(255, 255, 255, 0.45); font-size: 11.5px; line-height: 1.45; }
+
+/* Tarix */
+.bill-hrow { padding-bottom: 10px; }
+.bill-hist { border-radius: 14px; padding: 11px 14px; display: flex; align-items: center; }
+.bill-hist .ib { width: 34px; height: 34px; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.bill-hist .col { margin-left: 12px; flex: 1; min-width: 0; }
+.bill-hist .t { color: #fff; font-size: 13.5px; font-weight: 700; line-height: normal; }
+.bill-hist .w { margin-top: 2px; color: rgba(255, 255, 255, 0.5); font-size: 11.5px; line-height: normal; white-space: pre; }
+.bill-hist .a { margin-left: 8px; font-size: 13.5px; font-weight: 800; white-space: nowrap; }
+
+.bill-dlg .dlg-title { font-size: 17px; font-weight: 400; }
+.bill-dlg .dlg-text { color: rgba(255, 255, 255, 0.7); }
+.bill-dlg .dlg-actions .btn:last-child { color: var(--accent); }

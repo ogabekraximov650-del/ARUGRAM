@@ -120,7 +120,16 @@ pub(crate) fn request_ok(req: &Request, env: &Env) -> bool {
     !t.is_empty() && token_uid(env, t.trim()).is_some()
 }
 
-/// `POST /api/tma/auth` — `{"init_data": "..."}` -> `{"token", "user"}`.
+/// `POST /api/tma/auth` — `{"init_data": "...", "session": true}` ->
+/// `{"token", "user", "session"?}`.
+///
+/// `session: true` — bazadagi ACCOUNTGA ham kiradi (ilovadagi Telegram
+/// orqali kirish bilan bir xil hisob: `users_db.telegram_id`). Hisob
+/// bo'lmasa yaratiladi (`upsert_user`), bloklangan bo'lsa — sababi.
+/// Sessiya "Telegram Mini App / web" qurilmasi bo'lib ochiladi: shu
+/// qurilmaning eski sessiyasi o'chadi (`create_session`), ya'ni
+/// ro'yxatda doim bitta qator. Sahifa sessiyani saqlab qo'yadi va uni
+/// faqat yaroqsiz bo'lib qolganda qayta so'raydi (Turso yozuvi kam).
 pub(crate) async fn auth(mut req: Request, env: &Env) -> Result<Response> {
     let b: Value = req.json().await.unwrap_or(json!({}));
     let init = b["init_data"].as_str().unwrap_or("").trim().to_string();
@@ -135,7 +144,7 @@ pub(crate) async fn auth(mut req: Request, env: &Env) -> Result<Response> {
     let Some(token) = make_token(env, uid) else {
         return err500("token");
     };
-    ok(json!({
+    let mut out = json!({
         "token": token,
         "expires_in": TOKEN_SECS,
         "user": {
@@ -145,7 +154,28 @@ pub(crate) async fn auth(mut req: Request, env: &Env) -> Result<Response> {
             "username": user["username"],
             "photo_url": user["photo_url"],
         },
-    }))
+    });
+    if b["session"].as_bool() == Some(true) {
+        let Ok(acc) = upsert_user(env, &user).await else {
+            return json_resp(&json!({"error": "try_later"}), 503);
+        };
+        if acc["is_banned"].as_i64().unwrap_or(0) == 1 {
+            let now = now_ms();
+            if let Some((until, reason)) = ban_state(&acc, now) {
+                return json_resp(&json!({
+                    "error": "banned",
+                    "message": ban_message(until, &reason, now),
+                }), 403);
+            }
+            clear_expired_ban(env, acc["id"].as_i64().unwrap_or(0)).await;
+        }
+        let login = json!({"device": "Telegram Mini App", "platform": "web", "app_version": "web"});
+        let Ok(session) = create_session(env, &acc, &login, "").await else {
+            return json_resp(&json!({"error": "try_later"}), 503);
+        };
+        out["session"] = json!(session);
+    }
+    ok_nostore(out)
 }
 
 /// Mini App'ni ochadigan tugma (xabar ostida).

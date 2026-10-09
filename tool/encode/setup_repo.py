@@ -130,6 +130,9 @@ def main():
     # "Anibla yuklash" — ALOHIDA workflow `anibla.yml` (`creds.enc` KO'CHIRILMAYDI).
     files[".github/workflows/anibla.yml"] = ANIBLA / "anibla.workflow.yml"
     files["tool/anibla/download.py"] = ANIBLA / "download.py"
+    # fMP4 nusxalar (Mini App) — ALOHIDA workflow `fmp4.yml`.
+    files[".github/workflows/fmp4.yml"] = HERE.parent / "fmp4" / "fmp4.workflow.yml"
+    files["tool/fmp4/run.py"] = HERE.parent / "fmp4" / "run.py"
     for dest, src in files.items():
         raw = src.read_bytes()
         # 409 — shu payt boshqa workflow (`sync-packs.yml`) ham shu repoga

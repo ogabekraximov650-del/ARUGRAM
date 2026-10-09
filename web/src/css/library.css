@@ -1,0 +1,226 @@
+/* Kutubxona — `library_screen.dart`, `history_screen.dart`,
+ * `favorites_screen.dart` (onlayn qismi). */
+
+.lib { height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+
+.lib-head {
+  padding: 16px 20px 12px 20px;
+  font-size: 22px;
+  font-weight: 700;
+  color: #fff;
+  line-height: normal;
+  flex-shrink: 0;
+}
+
+/* `_TabButton` */
+.lib-tabs { display: flex; gap: 8px; padding: 0 16px 12px 16px; flex-shrink: 0; }
+.lib-tab {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 11px 0;
+  border-radius: 14px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 180ms, border-color 180ms;
+}
+.lib-tab span {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.6);
+  line-height: normal;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color 180ms;
+}
+.lib-tab.active {
+  background: linear-gradient(to bottom right, var(--accent), var(--accent2));
+  border-color: transparent;
+}
+.lib-tab.active span { color: #fff; }
+
+/* `PageView` */
+.lib-pager {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.lib-pager::-webkit-scrollbar { display: none; }
+.lib-pane {
+  position: relative;
+  flex: 0 0 100%;
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.lib-pane::-webkit-scrollbar { display: none; }
+
+.lib-list { padding: 4px 16px 120px 16px; display: flex; flex-direction: column; gap: 12px; }
+.lib-list-ah { padding-bottom: 40px; }
+.lib-grid { padding-top: 4px; padding-bottom: 120px; }
+.lib-fav .empty-glass, .lib-hist .empty-glass { padding-bottom: 120px; }
+
+/* Poster (kadr o'rnida) */
+.lib-poster { position: absolute; inset: 0; background: var(--card-alt); }
+.lib-poster img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  opacity: 0;
+  transition: opacity 120ms;
+}
+.lib-poster img.ok { opacity: 1; }
+.lib-paid { position: absolute; top: 8px; right: 8px; }
+
+/* `AnimeRow` */
+.lib-arow { border-radius: 18px; padding: 10px; cursor: pointer; }
+.lib-frame { position: relative; aspect-ratio: 16 / 9; border-radius: 12px; overflow: hidden; }
+.lib-arow-t {
+  margin-top: 10px;
+  color: #fff;
+  font-size: 15.5px;
+  font-weight: 700;
+  line-height: 1.25;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  word-break: break-word;
+}
+.lib-arow-s {
+  margin-top: 6px;
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 12.5px;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.lib-arow-d {
+  margin-top: 2px;
+  color: rgba(255, 255, 255, 0.52);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* `EpisodeRow` */
+.lib-erow {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  border-radius: 16px;
+  overflow: hidden;
+  cursor: pointer;
+  -webkit-touch-callout: none;
+}
+.lib-etexts {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+.lib-eleft { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.lib-st {
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-shadow:
+    0 1px 3px #000,
+    1px 0 2px rgba(0, 0, 0, 0.87),
+    -1px 0 2px rgba(0, 0, 0, 0.87),
+    0 -1px 2px rgba(0, 0, 0, 0.87);
+}
+.lib-etexts > .lib-st { flex-shrink: 0; }
+.lib-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3.5px;
+  background: rgba(255, 255, 255, 0.24);
+}
+.lib-bar > div { height: 100%; background: linear-gradient(to right, var(--accent), var(--accent2)); }
+
+/* `AnimeHistoryScreen` */
+.lib-ah-head { display: flex; align-items: center; padding: 12px 16px 10px 16px; flex-shrink: 0; }
+.lib-ah-back { border-radius: 14px; padding: 8px; display: flex; cursor: pointer; }
+.lib-ah-t {
+  flex: 1;
+  min-width: 0;
+  margin-left: 14px;
+  color: #fff;
+  font-size: 18px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* O'chirishni tasdiqlash (`_confirmRemove`) */
+.lib-cf { display: flex; flex-direction: column; align-items: center; text-align: center; }
+.lib-cf-t { margin-top: 12px; color: #fff; font-size: 15px; line-height: 1.4; }
+.lib-cf-s {
+  margin-top: 6px;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 12.5px;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.lib-cf-row { margin-top: 18px; display: flex; gap: 10px; width: 100%; }
+.lib-cf-row .btn { flex: 1; padding: 0 12px; }
+.lib-cf-row .lib-yes { background: #E53935; color: #fff; }
+
+/* `RefreshIndicator` */
+.lib-ptr {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 40px;
+  height: 40px;
+  margin-top: 0;
+  border-radius: 50%;
+  background: var(--card);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  transform: translate(-50%, -40px);
+  opacity: 0;
+  z-index: 5;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.lib-ptr-arc {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2.5px solid transparent;
+  border-top-color: var(--accent);
+  border-right-color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+.lib-ptr.spin .lib-ptr-arc { animation: spin 0.9s linear infinite; }
