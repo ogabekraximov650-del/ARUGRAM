@@ -21,6 +21,7 @@ import { openPublicProfile } from './screens/public-profile.js';
 import { startSync } from './sync.js';
 import { channelGate } from './services/channel-gate.js';
 import { checkTelegram } from './tg/media.js';
+import { unreadBadge, ChatController } from './services/support.js';
 
 const tg = window.Telegram?.WebApp;
 const app = document.getElementById('app');
@@ -92,6 +93,17 @@ async function main() {
     tabs[i]?.onShow?.();
   });
   hooks.goTab = (i) => nav.go(i);
+
+  // Profil tugmasidagi nuqta: admin yozishmasida o'qilmagan xabar bor (45 s da bir marta).
+  const dot = app.querySelector('.nav-item[data-i="4"] .nav-dot');
+  const paintDot = () => { if (dot) dot.style.display = unreadBadge.has ? 'block' : 'none'; };
+  unreadBadge.listen(paintDot);
+  unreadBadge.refresh();
+  setInterval(() => {
+    if (document.hidden || (ChatController.watchingCount || 0) > 0) return;
+    unreadBadge.refresh();
+  }, 45000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) unreadBadge.refresh(); });
 
   startSync();
   // Telegram (videolar) holati fonda tekshiriladi; kanallarga obuna —

@@ -15,5 +15,4 @@ export { openTelegramAccount, isTelegramAuthorized, checkTelegram } from '../tg/
 export { uploadFile } from '../tg/media.js'; // profil rasmi (ilovadagi `TelegramService.uploadFile`)
 
 export { openSupport } from './support.js';
-// SHIM — `./packs.js` hali yo'q.
-export function openMyPacks() { toast('Tez orada'); }
+export { openMyPacks } from './packs.js';

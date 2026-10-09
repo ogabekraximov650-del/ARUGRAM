@@ -5467,3 +5467,30 @@ pleyer, rasmlarni ko'rsatish va h.k. Shartlar:
 - Mini App sessiyasi 4 qurilma chegarasiga kiradi (eng eski qurilma chiqadi).
 - Bot `/start` (argumentsiz) javobi va chat menyusi tugmasi Mini App'ni ochadi;
   majburiy obuna boshqaruvi endi PANEL botda.
+
+## MINI APP: PLEYER, TO'PLAMLAR, KIRISH KODI (2026-10)
+
+- **Pleyer ekrani** — `web/src/js/player/player-screen.js` + `css/player.css`
+  (`video_player_screen.dart` nusxasi): inline va to'liq ekran pleyer, ±5 s
+  ikki marta bosish, progress/bufer, sifat tanlash (`qualityDialog`), tezlik,
+  intro o'tkazish (qo'lda/avto), avto keyingi qism, uxlash vaqti, qulf, qismlar
+  ro'yxati paneli; tablar: Ma'lumot (baho, sevimli, raqamlar), Qismlar,
+  Bo'limlar, Izohlar (`createCommentsTab`). Obuna/kanal eshiklari `gates.js`.
+  Tarix/to'xtagan joy `watchHistory`/`watchProgress`. fMP4 yo'q qism bo'lsa
+  `requestFmp4` + `waitForFmp4` ("Video tayyorlanyabdi..."). Yuklab olish,
+  o'chirish, kesh YO'Q (faqat onlayn).
+- **To'plamlar** — `web/src/js/screens/packs.js` + `css/packs.css`: Mening /
+  Obunalar / Ommaviy, yangi to'plam, to'plam ichi (kichik rasmlar `.arp`
+  sarlavhasidan), element ko'rish, rasm qo'shish (`uploadFile` + `putPack add`),
+  obuna, o'chirish. Admin tasdiqlashi ilovadagidek. Emoji tanlagich o'rniga
+  oddiy matn maydoni; video kesish oynasi va animatsion o'yin joylari
+  (`AnimSlots`) YO'Q.
+- **Profil nuqtasi**: `app.js` — `unreadBadge` bilan pastki paneldagi Profil
+  tugmasi nuqtasi (45 s).
+- **TUZATILGAN XATO — kirish kodi**: `tg/login.js` kod kiritilganda butun
+  oyna qayta chizilar (`render()`), `<input>` yangidan yaratilib kursor boshiga
+  tushar va raqamlar teskari/o'chib ketardi. Endi maydon qayta yaratilmaydi,
+  faqat kataklar (`paintCells`) yangilanadi; kutish taymeri ham maydonni
+  buzmaydi.
+- Tekshirilmagan: haqiqiy Telegram'da video ijrosi (Android/iPhone), to'plam
+  yuklash, admin chat. Skrinshot sinovi faqat soxta server bilan.
