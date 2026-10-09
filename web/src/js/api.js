@@ -159,12 +159,23 @@ export async function api(path, opts = {}) {
 export const apiGet = (p) => api(p);
 export const apiPost = (p, body) => api(p, { method: 'POST', body });
 
-/** Worker rasmi (`/api/...`) — tokenni manzilga qo'shadi. */
+const PIX = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+const tgOn = () => { try { return localStorage.getItem('aru_tg_on') === '1'; } catch (_) { return false; } };
+
+/**
+ * Worker rasmi (`/api/image/...`). Telegram ulangan bo'lsa fayl worker'dan
+ * EMAS (ilovadagidek: worker orqali fayl o'tmaydi), Telegram'dan olinadi —
+ * shu sabab bu yerda 1x1 rasm + fayl nomi qaytadi, `tg/images.js` uni
+ * almashtiradi. Telegram'da bo'lmasa — oddiy manzil (zaxira).
+ */
 export function imageUrl(url) {
   const u = `${url ?? ''}`.trim();
   if (!u) return '';
   if (!u.includes('/api/') || !token) return u;
-  return u + (u.includes('?') ? '&' : '?') + 'tma=' + encodeURIComponent(token);
+  const full = u + (u.includes('?') ? '&' : '?') + 'tma=' + encodeURIComponent(token);
+  const m = /\/api\/(?:image|media)\/([^?#]+)/.exec(u);
+  if (m && tgOn()) return `${PIX}#aru=${encodeURIComponent(decodeURIComponent(m[1]))}&o=${encodeURIComponent(full)}`;
+  return full;
 }
 
 /** Saytdan chiqish: sessiya serverda o'chiriladi. */

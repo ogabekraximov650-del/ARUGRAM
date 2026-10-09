@@ -5494,3 +5494,19 @@ pleyer, rasmlarni ko'rsatish va h.k. Shartlar:
   buzmaydi.
 - Tekshirilmagan: haqiqiy Telegram'da video ijrosi (Android/iPhone), to'plam
   yuklash, admin chat. Skrinshot sinovi faqat soxta server bilan.
+
+## MINI APP: RASMLAR TELEGRAM ORQALI (2026-10)
+
+SABAB ("rasmlar, pleyer va boshqa fayllar yuklanmayapti"): sayt posterlarni
+`/api/image/...` (B2) dan olardi, ilova esa fayllarni Telegram orqali oladi
+(`_TelegramFileService`) — B2 bo'sh, shu sabab rasmlar chiqmasdi.
+- `api.js -> imageUrl`: Telegram ulangan bo'lsa (`aru_tg_on`) 1x1 rasm +
+  `#aru=<fayl nomi>&o=<asl manzil>` qaytaradi;
+- `tg/images.js`: `<img>` larni kuzatadi (MutationObserver), nomlarni bitta
+  `/api/tg/deliver` bilan yetkazadi (`prefetchNames`), `mediaUrl` bilan
+  qo'yadi; xato bo'lsa asl manzilga qaytadi; 20 s dan keyin bot chati
+  tozalanadi (pleyer ochiq bo'lmasa);
+- `app.js`: Telegram'ga kirilmagan bo'lsa ishga tushganda kirish oynasi
+  ochiladi (ilovadagidek), kirilgach rasmlar qayta yuklanadi (`rescanImages`).
+- Pleyer videosi ham Telegram orqali; qism uchun fMP4 nusxa yo'q bo'lsa
+  Actions yasaguncha "Video tayyorlanyabdi..." turadi (`fmp4.yml`).

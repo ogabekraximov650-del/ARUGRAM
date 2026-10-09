@@ -20,7 +20,8 @@ import { openSeason, openSeasonIds } from './player/player-screen.js';
 import { openPublicProfile } from './screens/public-profile.js';
 import { startSync } from './sync.js';
 import { channelGate } from './services/channel-gate.js';
-import { checkTelegram } from './tg/media.js';
+import { checkTelegram, ensureTelegram } from './tg/media.js';
+import { watchImages, rescanImages } from './tg/images.js';
 import { unreadBadge, ChatController } from './services/support.js';
 
 const tg = window.Telegram?.WebApp;
@@ -108,7 +109,13 @@ async function main() {
   startSync();
   // Telegram (videolar) holati fonda tekshiriladi; kanallarga obuna —
   // ruxsat berilgan bo'lsa orqa fonda (`channel-gate.js`).
-  checkTelegram().catch(() => {}).finally(() => channelGate.start());
+  watchImages(app);
+  // Rasmlar va videolar Telegram orqali keladi (ilovadagidek) — kirilmagan
+  // bo'lsa kirish oynasi ochiladi; kirilgach rasmlar qayta yuklanadi.
+  checkTelegram().catch(() => false).then(async (ok) => {
+    if (!ok) ok = await ensureTelegram().catch(() => false);
+    if (ok) rescanImages();
+  }).finally(() => channelGate.start());
 }
 
 main();

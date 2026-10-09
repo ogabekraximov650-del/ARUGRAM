@@ -200,6 +200,13 @@ export async function openFile(name, { key = '' } = {}) {
   };
 }
 
+/** Bir nechta faylni BITTA so'rov bilan yetkazadi (xato bo'lsa jim). */
+export async function prefetchNames(names) {
+  const need = names.filter((n) => !docs.has(n));
+  if (!need.length) return;
+  try { await locate(need); } catch (_) { /* topilganlari docs'da qoladi */ }
+}
+
 /** Kichik fayl — butunlay (rasm, ovozli xabar). */
 export async function fetchFile(name, { key = '', type = '' } = {}) {
   const f = await openFile(name, { key });

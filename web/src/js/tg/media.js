@@ -26,3 +26,4 @@ export async function ctrApply(hex, offset, data) { return (await load()).ctrApp
 export async function telegramLogout() { const m = await load(); await m.logout(); authorized = false; }
 export async function telegramMe() { return (await load()).me(); }
 export async function joinChannel(kind, url) { return (await load()).joinChannel(kind, url); }
+export async function prefetchNames(names) { return (await load()).prefetchNames(names); }
