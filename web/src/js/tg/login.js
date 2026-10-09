@@ -151,6 +151,17 @@ export function openTelegramLogin() {
 
       function focus(sel) { setTimeout(() => body.querySelector(sel)?.focus(), 60); }
 
+      /** Kod kataklari — maydonga tegmasdan, joyida yangilanadi. */
+      function paintCells() {
+        const n = codeLen();
+        body.querySelectorAll('.tgl-cell').forEach((c, i) => {
+          const on = i === st.code.length || (i === n - 1 && st.code.length === n);
+          c.className = `tgl-cell${st.error ? ' err' : on ? ' on' : ''}`;
+          const ch = st.code[i] || '';
+          if (c.textContent !== ch) c.textContent = ch;
+        });
+      }
+
       function bind() {
         body.querySelector('.tgl-country')?.addEventListener('click', () => { if (!st.busy) pickCountry(); });
         const cc = body.querySelector('.cc');
@@ -179,16 +190,22 @@ export function openTelegramLogin() {
         body.querySelector('.qr')?.addEventListener('click', () => { if (!st.busy) startQr(); });
         const code = body.querySelector('.code');
         if (code) {
+          // Maydon QAYTA YARATILMAYDI: har raqamda butun oynani qayta chizish
+          // telefonda klaviaturani uzar, kursor boshiga tushib raqamlar
+          // teskari yozilar yoki o'chib ketardi. Faqat kataklar yangilanadi.
+          const toEnd = () => { try { const l = code.value.length; code.setSelectionRange(l, l); } catch (_) { /* */ } };
           code.addEventListener('input', () => {
-            code.value = code.value.replace(/\D/g, '').slice(0, codeLen());
-            st.code = code.value;
-            st.error = '';
-            render();
-            const n = body.querySelector('.code');
-            n.focus();
+            const clean = code.value.replace(/\D/g, '').slice(0, codeLen());
+            if (clean !== code.value) code.value = clean;
+            toEnd();
+            st.code = clean;
+            if (st.error) { st.error = ''; body.querySelector('.tgl-err')?.remove(); }
+            paintCells();
             if (st.code.length === codeLen()) submit();
           });
-          body.querySelector('.tgl-cells-wrap').addEventListener('click', () => body.querySelector('.code').focus());
+          code.addEventListener('focus', toEnd);
+          code.addEventListener('click', toEnd);
+          body.querySelector('.tgl-cells-wrap').addEventListener('click', () => { code.focus(); toEnd(); });
           focus('.code');
         }
         body.querySelector('.resend')?.addEventListener('click', resend);
@@ -210,8 +227,9 @@ export function openTelegramLogin() {
         if (secs > 0) {
           const t = setInterval(() => {
             st.wait -= 1;
-            if (st.wait <= 0) { clearInterval(t); st.error = ''; }
-            render();
+            if (st.wait <= 0) { clearInterval(t); st.error = ''; render(); return; }
+            const w = body.querySelector('.tgl-wait');
+            if (w) w.textContent = `Qayta urinish mumkin: ${clock(st.wait)} dan keyin`; else render();
           }, 1000);
           timers.push(t);
         }
