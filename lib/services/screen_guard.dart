@@ -35,6 +35,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 import 'app_build.dart';
+import 'auth_service.dart';
 
 class ScreenGuard {
   const ScreenGuard._();
@@ -48,17 +49,22 @@ class ScreenGuard {
   /// oldini oladi).
   static bool _on = false;
 
+  /// Admin buildda YOKI admin hisobi bilan kirilganda himoya yo'q
+  /// (foydalanuvchi talabi: skrinshot faqat admin ID uchun ruxsat).
+  static bool get _exempt =>
+      kAdminBuild || (AuthService.instance.user?.isAdmin ?? false);
+
   /// Himoyani yoqadi (ekran `initState` da chaqiradi).
   /// Admin buildda screenshot va ekran yozuviga ruxsat beriladi.
   static void enable() {
-    if (kAdminBuild) return;
+    if (_exempt) return;
     _depth++;
     _apply();
   }
 
   /// Himoyani o'chiradi (ekran `dispose` da chaqiradi).
   static void disable() {
-    if (kAdminBuild) return;
+    if (_exempt) return;
     if (_depth > 0) _depth--;
     _apply();
   }

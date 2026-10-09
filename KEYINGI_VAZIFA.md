@@ -5525,3 +5525,14 @@ yangidan so'ralsin — boshqa vaqtda chatga tegilmasin.
   Rasm/video yuklash shu tugaguncha kutadi (`tg/startup.js`).
 - Eslatma: bot chati Android ilova bilan umumiy — sayt ochilganda ilova
   nusxalari ham o'chadi.
+
+### TUZATISH: skrinshot/`protect_content` QAYTARILDI, faqat ADMIN uchun ochiq
+
+Oldingi bo'lim ("olib tashlandi") noto'g'ri tushunilgan edi. Talab: himoya
+HAMMA uchun qoladi, faqat admin ID (`ADMIN_TELEGRAM_ID`) hisobida ishlamasin.
+- Worker `/api/tg/deliver`: `"protect_content": tg_user != ADMIN_TELEGRAM_ID`.
+- Android `ScreenGuard` (pleyer, support chat): admin hisobi bilan kirilganda
+  ham `FLAG_SECURE` qo'yilmaydi (`_exempt` = `kAdminBuild` yoki
+  `AuthService.user.isAdmin`).
+- Bot chatini tozalash qoidasi (faqat Mini App ochilganda) o'zgarmadi.
+- Flutter muhitda yo'q edi — Dart tekshirilmagan (`flutter analyze` kerak).

@@ -10762,8 +10762,8 @@ async fn app_gate(req: &Request, env: &Env, path: &str) -> Option<Response> {
 //    Bot postni ko'rib `tg_files` ga yozadi va adminga xabar beradi.
 // 2. Ilova `/api/tg/deliver` ni chaqiradi. Obuna tekshiriladi va
 //    bot videoni kanaldan foydalanuvchining bot bilan chatiga
-//    `copyMessage` qiladi (nusxa himoyasiz — skrinshot va
-//    saqlash taqiqlanmagan). Foydalanuvchi kanalga A'ZO EMAS.
+//    `copyMessage` qiladi (`protect_content` — Telegram ichida
+//    forward/saqlash yopiq; faqat ADMIN hisobi uchun yopiq emas). Foydalanuvchi kanalga A'ZO EMAS.
 // 3. Ilova foydalanuvchining O'Z Telegram hisobi bilan faylni shu
 //    chatdan oladi (`rust/src/telegram.rs`). Trafik Telegram'dan
 //    ketadi — B2 ham, worker ham ishtirok etmaydi.
@@ -13019,6 +13019,9 @@ async fn tg_route(mut req: Request, env: &Env, path: &str, method: Method) -> Re
                     // IZOHSIZ boradi (ilova faylni nomi bo'yicha topadi,
                     // kalitni `keys` dan oladi).
                     "remove_caption": remove,
+                    // Nusxa himoyasi (skrinshot/saqlash/forward taqiqi) hamma uchun,
+                    // FAQAT admin hisobi (`ADMIN_TELEGRAM_ID`) bundan ozod.
+                    "protect_content": tg_user != ADMIN_TELEGRAM_ID,
                     "disable_notification": true,
                 })).await;
                 if let Ok(v) = &copied {
