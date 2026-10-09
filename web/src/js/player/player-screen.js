@@ -285,14 +285,11 @@ function buildPlayer(el, route, season, opts) {
     if (loadingEps) { pane.innerHTML = `<div class="mid"><div class="spinner" style="width:36px;height:36px"></div></div>`; return; }
     const list = ordered();
     if (!list.length) { pane.innerHTML = `<div class="mid">Qismlar topilmadi</div>`; return; }
-    pane.innerHTML = list.map((e) => {
+    pane.innerHTML = `<div class="pl-epgrid">${list.map((e) => {
       const isCur = cur && epKey(e) === epKey(cur);
-      const ready = fmp4Qualities(e).length > 0;
-      return `<div class="pl-ep${isCur ? ' cur' : ''}" data-k="${esc(epKey(e))}">
-        <div class="bx">${icon(isCur && intended ? 'pause' : 'play_arrow', { size: 20, color: isCur ? '#C2410C' : 'rgba(255,255,255,0.54)' })}</div>
-        <div class="t">${epNum(e)}-qism</div>${ready ? '' : `<span class="rdy">tayyorlanadi</span>`}</div>`;
-    }).join('') + '<div style="height:8px"></div>';
-    pane.querySelectorAll('.pl-ep').forEach((n) => n.addEventListener('click', () => {
+      return `<div class="pl-eg${isCur ? ' cur' : ''}" data-k="${esc(epKey(e))}">${epNum(e)}-qism</div>`;
+    }).join('')}</div><div style="height:8px"></div>`;
+    pane.querySelectorAll('.pl-eg').forEach((n) => n.addEventListener('click', () => {
       const e = list.find((x) => epKey(x) === n.dataset.k);
       if (!e) return;
       if (cur && epKey(e) === epKey(cur)) togglePlay();
@@ -302,7 +299,7 @@ function buildPlayer(el, route, season, opts) {
 
   function centerOnCur() {
     requestAnimationFrame(() => {
-      const n = panes[1].querySelector('.pl-ep.cur');
+      const n = panes[1].querySelector('.pl-eg.cur');
       if (n && panes[1].clientHeight) panes[1].scrollTop = n.offsetTop - (panes[1].clientHeight - n.offsetHeight) / 2;
     });
   }
@@ -626,7 +623,12 @@ function buildPlayer(el, route, season, opts) {
 
   // ── Progress chizig'ini surish ─────────────────────────────────
   const track = $('.pl-track');
-  const ratioAt = (e) => { const r = track.getBoundingClientRect(); return Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)); };
+  const isRot = () => box.classList.contains('rot');
+  const ratioAt = (e) => {
+    const r = track.getBoundingClientRect();
+    const v = isRot() ? (e.clientY - r.top) / r.height : (e.clientX - r.left) / r.width;
+    return Math.min(1, Math.max(0, v));
+  };
   track.addEventListener('pointerdown', (e) => {
     if (!video.duration) return;
     track.setPointerCapture(e.pointerId);
@@ -654,7 +656,7 @@ function buildPlayer(el, route, season, opts) {
     if (Math.abs(e.clientX - g.x) > 14 || Math.abs(e.clientY - g.y) > 14 || Date.now() - g.t > 350) return;
     if (locked) { showCtl = !showCtl; paintShow(); if (showCtl) { clearTimeout(hideT); hideT = setTimeout(() => { showCtl = false; paintShow(); }, 3000); } return; }
     const r = gest.getBoundingClientRect();
-    const side = e.clientX - r.left < r.width / 2 ? 'l' : 'r';
+    const side = (isRot() ? e.clientY - r.top < r.height / 2 : e.clientX - r.left < r.width / 2) ? 'l' : 'r';
     const now = Date.now();
     if (lastSide === side && now - lastTap < 300) {
       clearTimeout(singleT); lastTap = now;
@@ -822,6 +824,23 @@ function buildPlayer(el, route, season, opts) {
   }
 
   // ── To'liq ekran ──────────────────────────────────────────────
+  // To'liq ekran: avval haqiqiy (element) to'liq ekran + gorizontal qulf; bo'lmasa
+  // Telegram to'liq ekrani va portretda videoni 90° AYLANTIRIB gorizontal qilamiz.
+  function applyRot() {
+    const portrait = window.innerHeight > window.innerWidth;
+    const rot = fs && portrait;
+    box.classList.toggle('rot', rot);
+    if (rot) {
+      box.style.width = `${window.innerHeight}px`;
+      box.style.height = `${window.innerWidth}px`;
+      box.style.transform = `translateX(${window.innerWidth}px) rotate(90deg)`;
+    } else { box.style.width = ''; box.style.height = ''; box.style.transform = ''; }
+  }
+  window.addEventListener('resize', applyRot);
+  const onFsChange = () => { if (fs && nativeFs && !document.fullscreenElement) setFs(false); };
+  document.addEventListener('fullscreenchange', onFsChange);
+  let nativeFs = false;
+
   async function setFs(on) {
     if (fs === on) return;
     fs = on;
@@ -830,13 +849,20 @@ function buildPlayer(el, route, season, opts) {
     const tg = window.Telegram?.WebApp;
     try {
       if (on) {
-        tg?.requestFullscreen?.();
-        await screen.orientation?.lock?.('landscape').catch(() => {});
+        nativeFs = false;
+        try { await document.documentElement.requestFullscreen?.({ navigationUI: 'hide' }); nativeFs = !!document.fullscreenElement; } catch (_) { /* */ }
+        if (nativeFs) await screen.orientation?.lock?.('landscape').catch(() => {});
+        else tg?.requestFullscreen?.();
+        await new Promise((r) => setTimeout(r, 250));
       } else {
-        screen.orientation?.unlock?.();
-        tg?.exitFullscreen?.();
+        const was = nativeFs; nativeFs = false;
+        try { screen.orientation?.unlock?.(); } catch (_) { /* */ }
+        if (was && document.fullscreenElement) await document.exitFullscreen().catch(() => {});
+        else tg?.exitFullscreen?.();
       }
     } catch (_) { /* */ }
+    applyRot();
+    setTimeout(applyRot, 350);
     keepShown();
   }
 
@@ -880,6 +906,9 @@ function buildPlayer(el, route, season, opts) {
       token += 1;
       clearTimeout(hideT); clearTimeout(noticeT); clearTimeout(singleT); clearInterval(sleepT);
       document.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('resize', applyRot);
+      document.removeEventListener('fullscreenchange', onFsChange);
+      try { if (document.fullscreenElement) document.exitFullscreen(); } catch (_) { /* */ }
       try { if (curName && video.duration) watchProgress.save(curName, video.currentTime * 1000, video.duration * 1000); } catch (_) { /* */ }
       watchProgress.flush();
       watchHistory.flush();

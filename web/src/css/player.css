@@ -76,7 +76,7 @@
 .pl-center { position: absolute; left: 50%; top: 50%; width: 64px; height: 64px; transform: translate(-50%, -50%); z-index: 5; display: flex; align-items: center; justify-content: center; pointer-events: none; }
 .pl-center .ring { position: absolute; inset: -6px; display: none; }
 .pl-box.busy .pl-center .ring { display: block; }
-.pl-center .pp { width: 64px; height: 64px; border-radius: 50%; background: transparent; filter: drop-shadow(0 1px 4px rgba(0, 0, 0, 0.55)); display: none; align-items: center; justify-content: center; }
+.pl-center .pp { width: 64px; height: 64px; border-radius: 50%; background: rgba(0, 0, 0, 0.42); display: none; align-items: center; justify-content: center; }
 .pl-box.show:not(.fs) .pl-center .pp { display: grid; place-items: center; pointer-events: auto; }
 .pl-center .pp[hidden] { display: none; }
 .pl-wait { position: absolute; left: 0; right: 0; top: calc(50% + 60px); text-align: center; color: rgba(255, 255, 255, 0.7); font-size: 13px; font-weight: 600; z-index: 5; display: none; padding: 0 16px; }
@@ -214,3 +214,13 @@
 .pl-box:not(.fs) .pl-menu { position: fixed; z-index: 71; }
 .pl-center .pp .ic, .pp2 .ic { display: block; }
 .pl-center .pp .ic { position: relative; top: 4px; }
+
+/* Qismlar: 3 ustunli to'r, faqat "N-qism" yozuvi */
+.pl-epgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.pl-eg { display: flex; align-items: center; justify-content: center; height: 46px; border-radius: 14px; background: rgba(255, 255, 255, 0.07); border: 1px solid rgba(255, 255, 255, 0.12); color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; }
+.pl-eg.cur { background: rgba(194, 65, 12, 0.14); border-color: rgba(194, 65, 12, 0.5); color: var(--accent); }
+
+/* Portretda to'liq ekran — 90° aylantirilgan (gorizontal) */
+.pl-box.fs.rot { top: 0; left: 0; right: auto; bottom: auto; transform-origin: 0 0; }
+.pl-box.rot .pl-top { top: 6px; left: calc(12px + var(--safe-top) + var(--content-top)); }
+.pl-box.rot .pl-bottom { padding-left: calc(12px + var(--safe-top) + var(--content-top)); }

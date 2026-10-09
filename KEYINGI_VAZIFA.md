@@ -5549,3 +5549,15 @@ HAMMA uchun qoladi, faqat admin ID (`ADMIN_TELEGRAM_ID`) hisobida ishlamasin.
   qoldirardi. Endi `app.js -> applyInsets`: faqat Telegram TO'LIQ EKRAN
   rejimida (`tg.isFullscreen`) qo'yiladi, hodisalar bo'yicha yangilanadi.
 - Bufer: oldinga 60 -> 20 s, orqaga 30 -> 10 s (`engine.js`, `source.js`).
+
+## MINI APP: TO'LIQ EKRAN GORIZONTAL, QISMLAR TO'RI (2026-10)
+
+- Play/pause qora doirasi QAYTARILDI (ilovadagidek `rgba(0,0,0,.42)`).
+- To'liq ekran portretda qolib ketardi: Telegram WebView `screen.orientation.lock`
+  ni qo'llamaydi. Endi `setFs`: avval `documentElement.requestFullscreen` +
+  gorizontal qulf, bo'lmasa Telegram to'liq ekrani; ekran baribir portret
+  bo'lsa pleyer 90° AYLANTIRILADI (`.pl-box.rot`, `applyRot`; surish/tap
+  koordinatalari `clientY` bo'yicha). Telefonni gorizontal burilsa aylantirish
+  o'chadi (`resize`).
+- Qismlar tabi: ikonkasiz, 3 ustunli to'r, har birida "N-qism"; tartib
+  kamayish bo'yicha (eng yangi — tepada chapda, ilovadagidek).
