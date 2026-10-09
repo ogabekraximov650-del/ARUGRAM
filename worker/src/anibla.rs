@@ -240,6 +240,10 @@ struct Item {
     /// berganlar, tavsif ...) — faqat tanlangan anime uchun olinadi (`describe`).
     #[serde(default)]
     info: String,
+    /// To'liq tavsif (tayyor HTML) — `info` dan alohida: rasm izohiga
+    /// sig'masa keyingi xabarga o'tadi (`send_photo_card`).
+    #[serde(default)]
+    about: String,
 }
 
 impl Item {
@@ -489,6 +493,7 @@ async fn listing(env: &Env, chat: i64, q: &str, cat: &str, label: &str, page: i6
         // anime tanlanganda alohida olinadi (`describe`).
         d: String::new(),
         info: String::new(),
+        about: String::new(),
         img: x["thumbnail"].as_str().unwrap_or("").trim_start_matches('/').to_string(),
     }).filter(|i| !i.s.is_empty()).collect();
     if items.is_empty() {
@@ -578,7 +583,29 @@ fn item_head(it: &Item, desc: bool) -> String {
     if desc && !it.info.is_empty() {
         head.push_str(&format!("\n\n{}", it.info));
     }
+    if desc && !it.about.is_empty() {
+        head.push_str(&format!("\n\n{}", it.about));
+    }
     head
+}
+
+/// Telegram hisoblaydigan uzunlik (HTML teglari va `&amp;` kabilar hisobga kirmaydi).
+fn visible_len(html: &str) -> usize {
+    let mut n = 0;
+    let mut tag = false;
+    let mut ent = false;
+    for c in html.chars() {
+        match c {
+            '<' => tag = true,
+            '>' if tag => tag = false,
+            _ if tag => {}
+            '&' => { ent = true; n += 1; }
+            ';' if ent => ent = false,
+            _ if ent => {}
+            _ => n += 1,
+        }
+    }
+    n
 }
 
 /// `[{name: {uz, ru}}]` yoki `[{name: "..."}]` ro'yxatidan nomlar.
@@ -604,9 +631,9 @@ const DESC_MAX: usize = 2600;
 /// TALAB (foydalanuvchi): anime tanlanganda rasm tagida saytdagi to'liq
 /// ma'lumot chiqsin — davlat, yil, janrlar, studiya, rejissyor, ovoz
 /// berganlar, yosh chegarasi, qismlar, bo'limlar, treyler va to'liq tavsif.
-async fn describe(env: &Env, it: &Item) -> String {
+async fn describe(env: &Env, it: &Item) -> (String, String) {
     let path = format!("{}/{}", if it.movie() { "movies" } else { "series" }, enc(&it.s));
-    let Ok(v) = get(env, &path, false).await else { return String::new() };
+    let Ok(v) = get(env, &path, false).await else { return Default::default() };
     let d = if v["data"].is_array() { &v["data"][0] } else { &v["data"] };
     let mut lines: Vec<String> = Vec::new();
     let mut add = |icon: &str, key: &str, val: String| {
@@ -653,21 +680,23 @@ async fn describe(env: &Env, it: &Item) -> String {
         let tr = tr.replace("youtube.com/embed/", "youtu.be/").replace("www.youtu.be/", "youtu.be/");
         out.push_str(&format!("\n\u{25B6}\u{FE0F} <a href=\"{}\">Treyler</a>", html_escape(&tr)));
     }
+    let mut about = String::new();
     let desc = d["uz"]["description"].as_str().filter(|s| !s.trim().is_empty())
         .or_else(|| d["ru"]["description"].as_str()).unwrap_or("").trim();
     if !desc.is_empty() {
         let mut t: String = desc.chars().take(DESC_MAX).collect();
         if desc.chars().count() > DESC_MAX { t.push('\u{2026}'); }
-        out.push_str(&format!("\n\n\u{1F4DD} <b>Tavsif:</b>\n{}", html_escape(&t)));
+        about = format!("\u{1F4DD} <b>Tavsif:</b>\n{}", html_escape(&t));
     }
-    out
+    (out, about)
 }
 
 async fn show_item(env: &Env, chat: i64, mut nav: Nav) {
     if let Some(i) = usize::try_from(nav.i).ok().filter(|i| *i < nav.items.len()) {
         if nav.items[i].info.is_empty() {
-            let d = describe(env, &nav.items[i]).await;
-            nav.items[i].info = d;
+            let (info, about) = describe(env, &nav.items[i]).await;
+            nav.items[i].info = info;
+            nav.items[i].about = about;
         }
     }
     let Some(it) = cur_item(&nav) else { return };
@@ -705,8 +734,9 @@ async fn show_item(env: &Env, chat: i64, mut nav: Nav) {
 async fn show_seasons(env: &Env, chat: i64, mut nav: Nav) {
     if let Some(i) = usize::try_from(nav.i).ok().filter(|i| *i < nav.items.len()) {
         if nav.items[i].info.is_empty() {
-            let d = describe(env, &nav.items[i]).await;
-            nav.items[i].info = d;
+            let (info, about) = describe(env, &nav.items[i]).await;
+            nav.items[i].info = info;
+            nav.items[i].about = about;
         }
     }
     let Some(it) = cur_item(&nav) else { return };
@@ -833,25 +863,50 @@ async fn pick_quality(env: &Env, chat: i64, nav: &Nav, height: i64) {
     start(env, chat, status, &it, Some((&season.slug, e, label)), height).await;
 }
 
-/// Muqovali xabar. Rasm izohi (caption) 1024 belgigacha: sig'sa — `sendPhoto`;
-/// sig'masa (to'liq ma'lumot uzun) — oddiy xabar (4096 belgigacha), rasm esa
-/// matn USTIDA katta ko'rinishda (`link_preview_options`). Muvaffaqiyatini qaytaradi.
+/// Rasm izohiga sig'masa: (izoh — sarlavha + ma'lumotlar, qolgan matn).
+/// Sig'sa — `None`.
+fn card_split(it: &Item, text: &str) -> Option<(String, String)> {
+    if visible_len(text) <= 1024 {
+        return None;
+    }
+    let mut cap = item_head(&Item { about: String::new(), ..it.clone() }, true);
+    if !text.starts_with(&cap) || visible_len(&cap) > 1024 {
+        cap = item_head(it, false);
+    }
+    let rest = text.strip_prefix(cap.as_str()).unwrap_or(text).trim_start().to_string();
+    Some((cap, rest))
+}
+
+/// Muqovali xabar — HAQIQIY rasm (`sendPhoto`, galereyaga saqlasa bo'ladi).
+///
+/// Rasm izohi (caption) Telegram'da 1024 belgigacha. Sig'sa — hammasi bitta
+/// xabarda. Sig'masa: rasm izohida sarlavha va ma'lumotlar, tavsif va qolgan
+/// matn (tugmalar bilan) darhol keyingi xabarda. Muvaffaqiyatini qaytaradi.
 async fn send_photo_card(env: &Env, chat: i64, it: &Item, text: &str, markup: Option<&Value>) -> bool {
     if it.img.is_empty() {
         return false;
     }
-    let mut body = if text.chars().count() <= 1000 {
-        json!({"chat_id": chat, "photo": img_url(&it.img), "caption": text, "parse_mode": "HTML"})
-    } else {
-        json!({"chat_id": chat, "text": text, "parse_mode": "HTML",
-               "link_preview_options": {"url": img_url(&it.img), "prefer_large_media": true,
-                                        "show_above_text": true}})
+    let photo = |caption: &str, markup: Option<&Value>| {
+        let mut body = json!({"chat_id": chat, "photo": img_url(&it.img), "caption": caption, "parse_mode": "HTML"});
+        if let Some(m) = markup {
+            body["reply_markup"] = m.clone();
+        }
+        body
     };
+    let Some((cap, rest)) = card_split(it, text) else {
+        return encbot_api(env, "sendPhoto", photo(text, markup)).await.is_ok();
+    };
+    if encbot_api(env, "sendPhoto", photo(&cap, None)).await.is_err() {
+        return false;
+    }
+    let mut body = json!({"chat_id": chat, "text": rest, "parse_mode": "HTML", "disable_web_page_preview": true});
     if let Some(m) = markup {
         body["reply_markup"] = m.clone();
     }
-    let method = if body["photo"].is_string() { "sendPhoto" } else { "sendMessage" };
-    encbot_api(env, method, body).await.is_ok()
+    // Rasm ketdi — ikkinchi xabar o'tmasa ham `true` (aks holda chaqiruvchi
+    // hammasini rasmsiz qayta yuborib, takror chiqarardi).
+    let _ = encbot_api(env, "sendMessage", body).await;
+    true
 }
 
 /// Xabar (muqova bilan yoki oddiy) yuboradi; muvaffaqiyatini qaytaradi.
@@ -873,6 +928,23 @@ async fn try_send(env: &Env, chat: i64, text: &str, markup: &Value, card: Option
 async fn send_list(env: &Env, chat: i64, text: &str, top: Vec<Vec<String>>, items: Vec<Vec<String>>,
                    back: bool, card: Option<&Item>) {
     let total: usize = items.iter().map(|r| r.len()).sum();
+    // Rasm izohiga sig'maydigan uzun karta: rasm (ma'lumotlar bilan) BIR MARTA
+    // oldin ketadi, panel esa keyingi xabarda — Telegram tugmalarni rad etsa,
+    // pastdagi qayta urinishlar rasmni takror yubormaydi.
+    let mut text = text.to_string();
+    let mut card = card;
+    if let Some(it) = card {
+        if let Some((c, rest)) = card_split(it, &text) {
+            let r = encbot_api(env, "sendPhoto", json!({
+                "chat_id": chat, "photo": img_url(&it.img), "caption": c, "parse_mode": "HTML",
+            })).await;
+            if r.is_ok() {
+                text = rest;
+                card = None;
+            }
+        }
+    }
+    let text = text.as_str();
     for cap in [usize::MAX, 150, 100, 60] {
         let mut rows = top.clone();
         let mut shown = 0usize;
