@@ -135,7 +135,7 @@ export function engineSupported() {
  * `name` — fMP4 fayl nomi (kanalda), `key` — AES-CTR kaliti (hex).
  * `ahead` — oldindan yuklanadigan oyna (soniya): 20 s (ilova buferi 15..30 s).
  */
-export function createEngine(video, { name, key = '', ahead = 20, behind = 10, onState = () => {}, onError = () => {} }) {
+export function createEngine(video, { name, key = '', ahead = 20, behind = 10, startAt = 0, onState = () => {}, onError = () => {} }) {
   const MS = window.ManagedMediaSource || window.MediaSource;
   let file = null;
   let ms = null;
@@ -149,6 +149,7 @@ export function createEngine(video, { name, key = '', ahead = 20, behind = 10, o
   let objectUrl = '';
   let duration = 0;
   let gen = 0; // seek'dan keyin eski yuklashlar tashlanadi
+  let gapT = 0;
 
   const st = (s, extra = {}) => { if (!destroyed) onState({ state: s, ...extra }); };
 
@@ -202,7 +203,7 @@ export function createEngine(video, { name, key = '', ahead = 20, behind = 10, o
     try {
       while (!destroyed && my === gen && next < segs.length) {
         if (!streaming) break;
-        if (bufferedAhead() > ahead && !video.seeking) break;
+        if (bufferedAhead() > ahead) break;
         const seg = segs[next];
         st(video.readyState < 3 ? 'buffering' : 'playing');
         // Keyingi fragmentni ham oldindan so'rab qo'yamiz (tarmoq bo'sh turmasin).
@@ -230,6 +231,8 @@ export function createEngine(video, { name, key = '', ahead = 20, behind = 10, o
       if (!destroyed) onError(e);
     } finally {
       pumping = false;
+      // Surishdan keyin eski sikl tugadi — yangi joydan davom etamiz.
+      if (!destroyed && my !== gen) pump();
     }
   }
 
@@ -242,9 +245,6 @@ export function createEngine(video, { name, key = '', ahead = 20, behind = 10, o
     gen += 1;
     next = segIndexAt(t);
     st('buffering');
-    // Eski yuklash tugashini kutamiz (sb band bo'lmasin).
-    for (let i = 0; i < 50 && pumping; i++) await new Promise((res) => setTimeout(res, 40));
-    if (ms.readyState === 'ended') { try { /* qayta ochish */ } catch (_) { /* */ } }
     pump();
   }
 
@@ -295,12 +295,24 @@ export function createEngine(video, { name, key = '', ahead = 20, behind = 10, o
     sb.mode = 'segments';
     try { ms.duration = duration; } catch (_) { /* */ }
     await appendAsync(init);
+    // Boshlanish nuqtasi OLDINDAN qo'yiladi — bufer 0 dan emas, kerakli joydan to'ladi.
+    if (startAt > 0) { try { video.currentTime = Math.max(0, Math.min(startAt, Math.max(0, duration - 1))); } catch (_) { /* */ } }
     video.addEventListener('seeking', onSeeking);
     video.addEventListener('timeupdate', onTime);
     video.addEventListener('waiting', onWaiting);
     video.addEventListener('playing', onPlaying);
     next = segIndexAt(video.currentTime || 0);
     pump();
+    // Bo'shliqdan sakrash: bufer joriy joydan biroz keyin boshlansa (B-kadr/tekislash)
+    // video qotib qolmasin.
+    gapT = setInterval(() => {
+      if (destroyed || video.readyState >= 3) return;
+      const t = video.currentTime; const r = video.buffered;
+      for (let i = 0; i < r.length; i++) {
+        if (r.start(i) > t && r.start(i) - t < 1.5) { try { video.currentTime = r.start(i) + 0.02; } catch (_) { /* */ } return; }
+      }
+      if (!pumping && next < segs.length && bufferedAhead() <= ahead) pump();
+    }, 500);
   })();
   ready.catch((e) => { if (!destroyed) onError(e); });
 
@@ -314,6 +326,7 @@ export function createEngine(video, { name, key = '', ahead = 20, behind = 10, o
     setAhead(sec) { ahead = sec; pump(); },
     destroy() {
       destroyed = true;
+      clearInterval(gapT);
       gen += 1;
       video.removeEventListener('seeking', onSeeking);
       video.removeEventListener('timeupdate', onTime);

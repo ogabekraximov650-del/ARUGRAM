@@ -75,8 +75,7 @@ export async function startPlayback(video, ep, q, { startAt = 0, ahead = 20, onS
   if (!name) throw new Error('no_fmp4');
   await startup();
   if (!(await ensureTelegram())) throw new Error('tg_login_cancelled');
-  const eng = createEngine(video, { name, ahead, onState, onError });
-  if (startAt > 0) eng.startAt(startAt);
+  const eng = createEngine(video, { name, ahead, startAt, onState, onError });
   return eng;
 }
 

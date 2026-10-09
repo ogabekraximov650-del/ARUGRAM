@@ -12,8 +12,9 @@
 import qrcode from 'qrcode-generator';
 import { push } from '../router.js';
 import { esc } from '../format.js';
+import { tgUser } from '../api.js';
 import { icon } from '../ui.js';
-import { getClient, tgError, markAuthorized, isAuthorized } from './client.js';
+import { getClient, tgError, markAuthorized, isAuthorized, tgLogout } from './client.js';
 import { countries, countryByIso, countryByCode } from './countries.js';
 
 const TG = {
@@ -354,6 +355,13 @@ export function openTelegramLogin() {
         st.busy = true; st.error = ''; st.step = 'finishing'; render(true);
         const ok = await isAuthorized({ fresh: true });
         if (ok) {
+          const opener = tgUser()?.id;
+          const me = await getClient().then((c) => c.getMe()).catch(() => null);
+          if (me && opener && `${me.id}` !== `${opener}`) {
+            await tgLogout();
+            fail("Bu Telegram hisobi Mini App ochilgan hisobga mos emas — shu hisobning o'z raqami bilan kiring");
+            return;
+          }
           markAuthorized(true);
           done = true;
           resolve(true);

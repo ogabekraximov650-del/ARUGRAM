@@ -5561,3 +5561,25 @@ HAMMA uchun qoladi, faqat admin ID (`ADMIN_TELEGRAM_ID`) hisobida ishlamasin.
   o'chadi (`resize`).
 - Qismlar tabi: ikonkasiz, 3 ustunli to'r, har birida "N-qism"; tartib
   kamayish bo'yicha (eng yangi — tepada chapda, ilovadagidek).
+
+## MINI APP: BOSHQA HISOB, DVIGATEL (BUFER/SEK), TIZIM TUGMALARI (2026-10)
+
+- **Boshqa Telegram hisobi bilan ochilganda kirish oynasi chiqmasdi**: Telegram
+  sessiyasi brauzer omborida (IndexedDB `aru-tg`) qurilmada umumiy, avvalgi
+  hisob sessiyasi "kirilgan" deb olinardi. Endi `app.js` ochilganda
+  `telegramMe().id` ni `initData` dagi ochgan hisob IDsi bilan solishtiradi;
+  mos kelmasa eski sessiya tugatiladi (`telegramLogout`) va kirish oynasi
+  ochiladi. `login.js -> finish` ham xuddi shuni tekshiradi (mos kelmasa
+  chiqarib yuboradi).
+- **Video ochilmasdi, bufer 10 barobar ko'p yuklanardi** (`player/engine.js`):
+  (1) `pump` sikli `video.seeking` paytida bufer chegarasini tekshirmasdi;
+  (2) boshlanish nuqtasi (`startAt`) pleyer 0 dan yuklashni boshlagach
+  qo'yilar, `onSeeking` eski sikl tugashini 2 s kutib, baribir uni qayta
+  ishga tushirmasdi — sek qotib qolardi. Endi: `startAt` dvigatelga
+  boshidan beriladi, bufer chegarasi har doim tekshiriladi, sek tugagan sikl
+  `finally` da yangi gen uchun qayta ishga tushadi, bo'shliqdan sakrash
+  (`gapT`, 0.5 s) qo'shildi. Haqiqiy VP9+Opus fMP4 bilan Chromium'da sinaldi
+  (0 dan, 100 s dan, ijro paytida sek): bufer ~25 s.
+- **To'liq ekran (aylantirilgan)**: mahalliy "o'ng" chet — ekran pasti, u yerda
+  Android tizim tugmalari bor edi. `.pl-box.rot` da `.pl-top`/`.pl-bottom`
+  72 px ichkariga surildi.

@@ -224,3 +224,9 @@
 .pl-box.fs.rot { top: 0; left: 0; right: auto; bottom: auto; transform-origin: 0 0; }
 .pl-box.rot .pl-top { top: 6px; left: calc(12px + var(--safe-top) + var(--content-top)); }
 .pl-box.rot .pl-bottom { padding-left: calc(12px + var(--safe-top) + var(--content-top)); }
+
+/* Aylantirilgan rejimda mahalliy "o'ng" chet — ekran PASTI: tizim tugmalari (uy / orqaga) shu yerda */
+.pl-box.rot .pl-top { right: calc(var(--safe-bottom, 0px) + 72px); }
+.pl-box.rot .pl-bottom { padding-right: calc(var(--safe-bottom, 0px) + 72px); }
+.pl-box.rot .pl-speed { right: 96px; }
+.pl-box.rot .pl-eplist { right: 88px; }

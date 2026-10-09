@@ -7,7 +7,7 @@
 //
 // Tab ekranlari: `createX(pageEl) -> { onShow?(), onHide?() }`.
 
-import { bootstrap } from './api.js';
+import { bootstrap, tgUser } from './api.js';
 import { createBottomNav } from './nav.js';
 import { createHome } from './home.js';
 import { initRouter } from './router.js';
@@ -20,7 +20,7 @@ import { openSeason, openSeasonIds } from './player/player-screen.js';
 import { openPublicProfile } from './screens/public-profile.js';
 import { startSync } from './sync.js';
 import { channelGate } from './services/channel-gate.js';
-import { checkTelegram, ensureTelegram, clearOldBotChat } from './tg/media.js';
+import { checkTelegram, ensureTelegram, clearOldBotChat, telegramMe, telegramLogout } from './tg/media.js';
 import { setStartup } from './tg/startup.js';
 import { watchImages, rescanImages } from './tg/images.js';
 import { unreadBadge, ChatController } from './services/support.js';
@@ -123,6 +123,13 @@ async function main() {
   // eski nusxalar tozalanadi, keyin rasmlar/videolar yangidan so'raladi.
   const boot = (async () => {
     let ok = await checkTelegram().catch(() => false);
+    if (ok) {
+      // Boshqa Telegram hisobi bilan ochilgan bo'lsa (qurilmada avvalgi hisob
+      // sessiyasi qolgan) — eski sessiya tugatiladi va kirish oynasi ochiladi.
+      const me = await telegramMe().catch(() => null);
+      const opener = tgUser()?.id;
+      if (me && opener && `${me.id}` !== `${opener}`) { await telegramLogout().catch(() => {}); ok = false; }
+    }
     if (!ok) ok = await ensureTelegram().catch(() => false);
     if (ok) await clearOldBotChat();
     return ok;
