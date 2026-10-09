@@ -5536,3 +5536,16 @@ HAMMA uchun qoladi, faqat admin ID (`ADMIN_TELEGRAM_ID`) hisobida ishlamasin.
   `AuthService.user.isAdmin`).
 - Bot chatini tozalash qoidasi (faqat Mini App ochilganda) o'zgarmadi.
 - Flutter muhitda yo'q edi — Dart tekshirilmagan (`flutter analyze` kerak).
+
+## MINI APP: PLEYER KO'RINISHI, YUQORI CHEKINISH, BUFER (2026-10)
+
+- HQ tugmasi: `.pl-ctrl button { font: inherit }` HQ ning 10.5 px yozuvini
+  bosib ketardi — `.pl-ctrl button.pl-hq` bilan tuzatildi. Oddiy rejimdagi
+  fullscreen tugmasi — ilovadagi `fullscreen_rounded` ning SVG yo'li.
+- Play/pause: qora doira olib tashlandi (soya qoldi), ikonka halqa markaziga
+  keltirildi (oldin ~4 px tepada edi).
+- Yuqori chekinish: `--safe-top`/`--content-top` ilgari `env()` + Telegram
+  qiymatlaridan hisoblanib oddiy rejimda ham sarlavha ostida katta bo'shliq
+  qoldirardi. Endi `app.js -> applyInsets`: faqat Telegram TO'LIQ EKRAN
+  rejimida (`tg.isFullscreen`) qo'yiladi, hodisalar bo'yicha yangilanadi.
+- Bufer: oldinga 60 -> 20 s, orqaga 30 -> 10 s (`engine.js`, `source.js`).

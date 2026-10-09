@@ -133,9 +133,9 @@ export function engineSupported() {
 
 /**
  * `name` — fMP4 fayl nomi (kanalda), `key` — AES-CTR kaliti (hex).
- * `ahead` — oldindan yuklanadigan oyna (soniya), ilovadagi 1 daqiqa.
+ * `ahead` — oldindan yuklanadigan oyna (soniya): 20 s (ilova buferi 15..30 s).
  */
-export function createEngine(video, { name, key = '', ahead = 60, behind = 30, onState = () => {}, onError = () => {} }) {
+export function createEngine(video, { name, key = '', ahead = 20, behind = 10, onState = () => {}, onError = () => {} }) {
   const MS = window.ManagedMediaSource || window.MediaSource;
   let file = null;
   let ms = null;

@@ -68,7 +68,7 @@
 .pl-fs-only { display: none !important; }
 .pl-box.fs .pl-fs-only { display: flex !important; }
 .pl-box.fs .pl-nfs-only { display: none !important; }
-.pl-top { position: absolute; top: 6px; left: 12px; right: 8px; align-items: center; }
+.pl-top { position: absolute; top: calc(6px + var(--safe-top, 0px) + var(--content-top, 0px)); left: 12px; right: 8px; align-items: center; }
 .pl-top .tt { flex: 1; min-width: 0; margin-left: 4px; }
 .pl-top .t1 { color: #fff; font-weight: 700; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pl-top .t2 { color: rgba(255, 255, 255, 0.7); font-size: 11.5px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -76,8 +76,8 @@
 .pl-center { position: absolute; left: 50%; top: 50%; width: 64px; height: 64px; transform: translate(-50%, -50%); z-index: 5; display: flex; align-items: center; justify-content: center; pointer-events: none; }
 .pl-center .ring { position: absolute; inset: -6px; display: none; }
 .pl-box.busy .pl-center .ring { display: block; }
-.pl-center .pp { width: 64px; height: 64px; border-radius: 50%; background: rgba(0, 0, 0, 0.42); display: none; align-items: center; justify-content: center; }
-.pl-box.show:not(.fs) .pl-center .pp { display: flex; pointer-events: auto; }
+.pl-center .pp { width: 64px; height: 64px; border-radius: 50%; background: transparent; filter: drop-shadow(0 1px 4px rgba(0, 0, 0, 0.55)); display: none; align-items: center; justify-content: center; }
+.pl-box.show:not(.fs) .pl-center .pp { display: grid; place-items: center; pointer-events: auto; }
 .pl-center .pp[hidden] { display: none; }
 .pl-wait { position: absolute; left: 0; right: 0; top: calc(50% + 60px); text-align: center; color: rgba(255, 255, 255, 0.7); font-size: 13px; font-weight: 600; z-index: 5; display: none; padding: 0 16px; }
 .pl-box.busy .pl-wait.on { display: block; }
@@ -104,7 +104,7 @@
 .pl-box.fs .pl-track .th { width: 16px; height: 16px; margin: -8px 0 0 -8px; }
 .pl-time { color: #fff; font-size: 11.5px; font-weight: 600; margin: 0 6px; white-space: nowrap; }
 .pl-box.fs .pl-time { font-size: 13px; font-weight: 700; margin-left: 10px; margin-right: 0; }
-.pl-hq { padding: 4px 7px !important; border-radius: 7px; background: rgba(255, 255, 255, 0.15) !important; border: 1px solid rgba(255, 255, 255, 0.3) !important; font-size: 10.5px; font-weight: 700; margin-right: 3px; }
+.pl-ctrl button.pl-hq { padding: 4px 7px !important; border-radius: 7px; background: rgba(255, 255, 255, 0.15) !important; border: 1px solid rgba(255, 255, 255, 0.3) !important; font-size: 10.5px; font-weight: 700; line-height: normal; margin-right: 3px; }
 .pl-fsx { padding: 4px 3px !important; display: flex; }
 
 /* Nozik chiziq (boshqaruv yashirin) */
@@ -212,3 +212,5 @@
 /* Oddiy rejimda panellar pleyer ramkasidan chiqib, butun ekranda chiziladi */
 .pl-box:not(.fs) .pl-scrim { position: fixed; inset: 0; z-index: 70; }
 .pl-box:not(.fs) .pl-menu { position: fixed; z-index: 71; }
+.pl-center .pp .ic, .pp2 .ic { display: block; }
+.pl-center .pp .ic { position: relative; top: 4px; }

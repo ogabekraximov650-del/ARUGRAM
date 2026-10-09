@@ -24,8 +24,10 @@
   --telegram: #229ED9;
 
   /* Xavfsiz hudud: Telegram (8.0+) o'z o'zgaruvchilarini beradi. */
-  --safe-top: max(env(safe-area-inset-top, 0px), var(--tg-safe-area-inset-top, 0px));
-  --content-top: var(--tg-content-safe-area-inset-top, 0px);
+  /* Yuqori chekinish FAQAT Telegram to'liq ekran rejimida (`app.js -> applyInsets`):
+     oddiy rejimda Telegram o'z sarlavhasini o'zi chizadi, chekinish ikki marta qo'shilmasin. */
+  --safe-top: 0px;
+  --content-top: 0px;
   --safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--tg-safe-area-inset-bottom, 0px));
 }
 

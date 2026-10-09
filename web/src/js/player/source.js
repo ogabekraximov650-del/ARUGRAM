@@ -66,7 +66,7 @@ export async function waitForFmp4(ep, q, { signal, onTick } = {}) {
 }
 
 /** Qismni o'ynatadi. Telegram'ga kirilmagan bo'lsa — kirish oynasi. */
-export async function startPlayback(video, ep, q, { startAt = 0, ahead = 60, onState, onError } = {}) {
+export async function startPlayback(video, ep, q, { startAt = 0, ahead = 20, onState, onError } = {}) {
   if (!engineSupported()) {
     const e = new Error('mse_unsupported');
     throw e;

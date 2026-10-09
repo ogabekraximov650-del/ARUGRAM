@@ -28,6 +28,13 @@ import { unreadBadge, ChatController } from './services/support.js';
 const tg = window.Telegram?.WebApp;
 const app = document.getElementById('app');
 
+function applyInsets() {
+  const root = document.documentElement.style;
+  const full = !!tg?.isFullscreen;
+  root.setProperty('--safe-top', `${full ? (tg.safeAreaInset?.top || 0) : 0}px`);
+  root.setProperty('--content-top', `${full ? (tg.contentSafeAreaInset?.top || 0) : 0}px`);
+}
+
 function setupTelegram() {
   if (!tg) return;
   try {
@@ -39,6 +46,8 @@ function setupTelegram() {
     // Ro'yxatni surganda Mini App yopilib ketmasin.
     tg.disableVerticalSwipes?.();
     tg.enableClosingConfirmation?.();
+    applyInsets();
+    ['fullscreenChanged', 'safeAreaChanged', 'contentSafeAreaChanged'].forEach((e) => tg.onEvent?.(e, applyInsets));
   } catch (_) { /* eski Telegram — e'tiborsiz */ }
 }
 
