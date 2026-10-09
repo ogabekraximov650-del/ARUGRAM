@@ -19,6 +19,8 @@ import { createProfile } from './screens/profile.js';
 import { openSeason, openSeasonIds } from './player/player-screen.js';
 import { openPublicProfile } from './screens/public-profile.js';
 import { startSync } from './sync.js';
+import { channelGate } from './services/channel-gate.js';
+import { checkTelegram } from './tg/media.js';
 
 const tg = window.Telegram?.WebApp;
 const app = document.getElementById('app');
@@ -92,6 +94,9 @@ async function main() {
   hooks.goTab = (i) => nav.go(i);
 
   startSync();
+  // Telegram (videolar) holati fonda tekshiriladi; kanallarga obuna —
+  // ruxsat berilgan bo'lsa orqa fonda (`channel-gate.js`).
+  checkTelegram().catch(() => {}).finally(() => channelGate.start());
 }
 
 main();

@@ -10,7 +10,13 @@ let authorized = false;
 
 export async function ensureTelegram() { const ok = await (await load()).ensureTelegram(); authorized = ok; return ok; }
 export function isTelegramAuthorized() { return authorized; }
-export async function checkTelegram() { const m = await load(); authorized = await m.isAuthorizedFresh(); return authorized; }
+// Telegram'ga hech kirilmagan bo'lsa mtcute umuman yuklanmaydi (belgi —
+// `client.js` -> `markAuthorized`).
+const flag = () => { try { return localStorage.getItem('aru_tg_on') === '1'; } catch (_) { return false; } };
+export async function checkTelegram() {
+  if (!flag()) { authorized = false; return false; }
+  const m = await load(); authorized = await m.isAuthorizedFresh(); return authorized;
+}
 export async function openFile(name, opts) { return (await load()).openFile(name, opts); }
 export async function fetchFile(name, opts) { return (await load()).fetchFile(name, opts); }
 export async function mediaUrl(name, opts) { return (await load()).mediaUrl(name, opts); }

@@ -19,7 +19,10 @@ let authorized = null;
 const subs = new Set();
 
 export function onTgChange(fn) { subs.add(fn); return () => subs.delete(fn); }
-function emit() { subs.forEach((f) => { try { f(authorized); } catch (_) { /* */ } }); }
+function emit() {
+  try { if (authorized === true) localStorage.setItem('aru_tg_on', '1'); else if (authorized === false) localStorage.removeItem('aru_tg_on'); } catch (_) { /* */ }
+  subs.forEach((f) => { try { f(authorized); } catch (_) { /* */ } });
+}
 
 /** Worker sozlamasi: `{enabled, video, channel, api_id, api_hash, bot}`. */
 export async function tgConfig() {
@@ -65,7 +68,11 @@ export async function isAuthorized({ fresh = false } = {}) {
     const me = await cl.getMe();
     authorized = !!me;
   } catch (e) {
-    authorized = false;
+    // Faqat Telegram "kirilmagan" desa — chiqqan deb hisoblanadi; tarmoq
+    // xatosida holat o'zgarmaydi (keyingi safar qayta tekshiriladi).
+    const t = `${e?.text || e?.message || ''}`;
+    if (/AUTH_KEY|SESSION_|UNAUTHORIZED|USER_DEACTIVATED|not authorized/i.test(t)) authorized = false;
+    else return false;
   }
   emit();
   return authorized;
