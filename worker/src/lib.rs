@@ -40,6 +40,8 @@ mod postbot;
 mod anibla;
 // Uchala bo'lim uchun bitta jonli "Holat" xabari.
 mod livewatch;
+// Telegram Mini App (`web/`, arumediatv.pages.dev) uchun kirish.
+mod tma;
 
 // ── CORS + JSON yordamchi ──────────────────────────────────────
 
@@ -47,7 +49,7 @@ fn set_cors(resp: &mut Response) {
     let h = resp.headers_mut();
     let _ = h.set("Access-Control-Allow-Origin", "*");
     let _ = h.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-    let _ = h.set("Access-Control-Allow-Headers", "Content-Type, Authorization, Range");
+    let _ = h.set("Access-Control-Allow-Headers", "Content-Type, Authorization, Range, X-Tma");
     let _ = h.set("Access-Control-Expose-Headers", "Content-Range, Content-Length, Accept-Ranges");
 }
 
@@ -3895,6 +3897,17 @@ async fn tg_send(env: &Env, chat_id: i64, text: &str) {
     })).await;
 }
 
+/// Yordam xabari + Mini App'ni ochadigan tugma (`tma.rs`).
+async fn tg_send_help(env: &Env, chat_id: i64) {
+    let _ = tg_api(env, "sendMessage", json!({
+        "chat_id": chat_id,
+        "text": MSG_HELP,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": true,
+    })).await;
+    // Mini App tugmasi (`tma::open_button`) sayt deploy qilingach yoqiladi.
+}
+
 /// Webhook SHU IZOLYATDA allaqachon ro'yxatdan o'tkazilganmi.
 static WEBHOOK_READY: core::sync::atomic::AtomicBool =
     core::sync::atomic::AtomicBool::new(false);
@@ -4782,7 +4795,7 @@ async fn handle_tg_webhook(env: &Env, mut req: Request) -> Result<Response> {
     // Telegram takroriy urinmasligi uchun bu yerdan keyin HAR DOIM
     // 200 qaytadi — xatolar foydalanuvchiga xabar sifatida boradi.
     if !text.starts_with("/start") {
-        tg_send(env, chat_id, MSG_HELP).await;
+        tg_send_help(env, chat_id).await;
         return ok(json!({"ok": true}));
     }
 
@@ -4793,7 +4806,7 @@ async fn handle_tg_webhook(env: &Env, mut req: Request) -> Result<Response> {
         arg = arg.split_whitespace().skip(1).collect::<Vec<_>>().join(" ");
     }
     if arg.is_empty() {
-        tg_send(env, chat_id, MSG_HELP).await;
+        tg_send_help(env, chat_id).await;
         return ok(json!({"ok": true}));
     }
 
@@ -10382,6 +10395,11 @@ fn needs_app_check(path: &str) -> bool {
     if path == "/api/billing/webhook" {
         return false;
     }
+    // Mini App kirishi: imzoni Telegram `initData` o'zi isbotlaydi
+    // (`tma.rs`). Keyingi so'rovlar `X-Tma` tokeni bilan keladi.
+    if path == "/api/tma/auth" {
+        return false;
+    }
     // ── AVTO-KODLASH (GitHub Actions) ────────────────────────
     //
     // Ularni ilova emas, GitHub Actions chaqiradi — APK imzosi yo'q.
@@ -10574,6 +10592,11 @@ fn verify_play_token(secret: &str, token: &str, path: &str) -> bool {
 /// So'rovni o'tkazamizmi. `None` — o'tadi, `Some(resp)` — rad.
 async fn app_gate(req: &Request, env: &Env, path: &str) -> Option<Response> {
     if !needs_app_check(path) {
+        return None;
+    }
+    // Telegram Mini App (`tma.rs`): Telegram imzosi bilan berilgan token.
+    // Versiya tekshiruvi unga tegishli emas (sahifa doim eng yangisi).
+    if tma::request_ok(req, env) {
         return None;
     }
     let head = |k: &str| -> String {
@@ -13164,6 +13187,9 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
         let mut r = Response::empty()?;
         set_cors(&mut r);
         return Ok(r);
+    }
+    if method == Method::Post && path == "/api/tma/auth" {
+        return tma::auth(req, &env).await;
     }
 
     // B2 proxy — Range header bilan uzatiladi (video seek)
