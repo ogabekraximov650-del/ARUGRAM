@@ -236,6 +236,10 @@ struct Item {
     d: String,
     #[serde(default)]
     img: String,
+    /// Saytdagi to'liq ma'lumot (tayyor HTML: davlat, janr, studiya, ovoz
+    /// berganlar, tavsif ...) — faqat tanlangan anime uchun olinadi (`describe`).
+    #[serde(default)]
+    info: String,
 }
 
 impl Item {
@@ -484,6 +488,7 @@ async fn listing(env: &Env, chat: i64, q: &str, cat: &str, label: &str, page: i6
         // Tavsif ro'yxatda SAQLANMAYDI (500 ta anime bazadagi yozuvni shishirardi):
         // anime tanlanganda alohida olinadi (`describe`).
         d: String::new(),
+        info: String::new(),
         img: x["thumbnail"].as_str().unwrap_or("").trim_start_matches('/').to_string(),
     }).filter(|i| !i.s.is_empty()).collect();
     if items.is_empty() {
@@ -570,28 +575,99 @@ fn cur_item(nav: &Nav) -> Option<Item> {
 fn item_head(it: &Item, desc: bool) -> String {
     let mut head = format!("{} <b>{}</b>", if it.movie() { "\u{1F3AC}" } else { "\u{1F4FA}" }, html_escape(&it.t));
     if it.y > 0 { head.push_str(&format!(" ({})", it.y)); }
-    if desc && !it.d.is_empty() {
-        head.push_str(&format!("\n\n{}\u{2026}", html_escape(&it.d)));
+    if desc && !it.info.is_empty() {
+        head.push_str(&format!("\n\n{}", it.info));
     }
     head
 }
 
-/// Tanlangan anime/film: muqova va keyingi qadam (film — sifatlar, serial —
-/// fasllar yoki bitta fasl bo'lsa darhol qismlar).
-/// Tanlangan anime/film tavsifi (ro'yxatda saqlanmagan).
+/// `[{name: {uz, ru}}]` yoki `[{name: "..."}]` ro'yxatidan nomlar.
+fn names(v: &Value) -> Vec<String> {
+    v.as_array().map(|a| a.iter().filter_map(|x| {
+        let n = &x["name"];
+        n["uz"].as_str().or_else(|| n["ru"].as_str()).or_else(|| n.as_str())
+            .map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+    }).collect()).unwrap_or_default()
+}
+
+/// Son yoki satr ko'rinishidagi butun son (`age`: 13 yoki "17").
+fn num_of(v: &Value) -> i64 {
+    v.as_i64().or_else(|| v.as_str().and_then(|s| s.trim().parse().ok())).unwrap_or(0)
+}
+
+/// Tavsif uzunligi chegarasi: butun xabar Telegram'ning 4096 belgilik
+/// chegarasiga sig'ishi uchun (sarlavha, ma'lumot va izohlarga joy qoladi).
+const DESC_MAX: usize = 2600;
+
+/// Tanlangan anime/film haqida saytdagi TO'LIQ ma'lumot (tayyor HTML).
+///
+/// TALAB (foydalanuvchi): anime tanlanganda rasm tagida saytdagi to'liq
+/// ma'lumot chiqsin — davlat, yil, janrlar, studiya, rejissyor, ovoz
+/// berganlar, yosh chegarasi, qismlar, bo'limlar, treyler va to'liq tavsif.
 async fn describe(env: &Env, it: &Item) -> String {
     let path = format!("{}/{}", if it.movie() { "movies" } else { "series" }, enc(&it.s));
     let Ok(v) = get(env, &path, false).await else { return String::new() };
     let d = if v["data"].is_array() { &v["data"][0] } else { &v["data"] };
-    d["uz"]["description"].as_str().or_else(|| d["ru"]["description"].as_str())
-        .unwrap_or("").chars().take(350).collect()
+    let mut lines: Vec<String> = Vec::new();
+    let mut add = |icon: &str, key: &str, val: String| {
+        if !val.trim().is_empty() {
+            lines.push(format!("{icon} <b>{key}:</b> {}", html_escape(val.trim())));
+        }
+    };
+    let alt = d["ru"]["title"].as_str().unwrap_or("").trim().to_string();
+    if !alt.is_empty() && alt != it.t { add("\u{1F524}", "Boshqa nomi", alt); }
+    let c = &d["country"]["name"];
+    add("\u{1F30D}", "Davlat", c["uz"].as_str().or_else(|| c["ru"].as_str()).unwrap_or("").to_string());
+    let year = num_of(&d["published_year"]);
+    if year > 0 { add("\u{1F4C5}", "Yili", year.to_string()); }
+    add("\u{1F3AD}", "Janrlar", names(&d["genres"]).join(", "));
+    add("\u{1F3E2}", "Studiya", d["studio"]["name"].as_str().unwrap_or("").to_string());
+    add("\u{1F3AC}", "Rejissyor", d["director"]["name"].as_str().unwrap_or("").to_string());
+    add("\u{1F399}", "Ovoz berganlar", names(&d["creators"]).join(", "));
+    let age = num_of(&d["age"]);
+    if age > 0 { add("\u{1F51E}", "Yosh chegarasi", format!("{age}+")); }
+    if it.movie() {
+        let dur = num_of(&d["duration"]);
+        if dur > 0 { add("\u{23F1}", "Davomiyligi", format!("{dur} daqiqa")); }
+    } else {
+        let total = num_of(&d["total_episodes"]);
+        let eps = match (it.e, total) {
+            (a, t) if a > 0 && t > 0 && a != t => format!("{a} ta chiqqan / jami {t} ta"),
+            (a, _) if a > 0 => format!("{a} ta"),
+            (_, t) if t > 0 => format!("{t} ta"),
+            _ => String::new(),
+        };
+        add("\u{1F4FA}", "Qismlar", eps);
+    }
+    match d["type"].as_str().unwrap_or("") {
+        "paid" => add("\u{1F4B0}", "Turi", "Pullik".into()),
+        "free" => add("\u{1F193}", "Turi", "Bepul".into()),
+        _ => {}
+    }
+    let cats: Vec<String> = names(&d["categories"]).into_iter()
+        .filter(|n| !n.to_lowercase().starts_with("hamma")).collect();
+    add("\u{1F4C2}", "Bo'limlar", cats.join(", "));
+    let mut out = lines.join("\n");
+    let tr = d["trailer"].as_str().unwrap_or("").trim();
+    if tr.starts_with("http") {
+        let tr = tr.replace("youtube.com/embed/", "youtu.be/").replace("www.youtu.be/", "youtu.be/");
+        out.push_str(&format!("\n\u{25B6}\u{FE0F} <a href=\"{}\">Treyler</a>", html_escape(&tr)));
+    }
+    let desc = d["uz"]["description"].as_str().filter(|s| !s.trim().is_empty())
+        .or_else(|| d["ru"]["description"].as_str()).unwrap_or("").trim();
+    if !desc.is_empty() {
+        let mut t: String = desc.chars().take(DESC_MAX).collect();
+        if desc.chars().count() > DESC_MAX { t.push('\u{2026}'); }
+        out.push_str(&format!("\n\n\u{1F4DD} <b>Tavsif:</b>\n{}", html_escape(&t)));
+    }
+    out
 }
 
 async fn show_item(env: &Env, chat: i64, mut nav: Nav) {
     if let Some(i) = usize::try_from(nav.i).ok().filter(|i| *i < nav.items.len()) {
-        if nav.items[i].d.is_empty() {
+        if nav.items[i].info.is_empty() {
             let d = describe(env, &nav.items[i]).await;
-            nav.items[i].d = d;
+            nav.items[i].info = d;
         }
     }
     let Some(it) = cur_item(&nav) else { return };
@@ -628,9 +704,9 @@ async fn show_item(env: &Env, chat: i64, mut nav: Nav) {
 
 async fn show_seasons(env: &Env, chat: i64, mut nav: Nav) {
     if let Some(i) = usize::try_from(nav.i).ok().filter(|i| *i < nav.items.len()) {
-        if nav.items[i].d.is_empty() {
+        if nav.items[i].info.is_empty() {
             let d = describe(env, &nav.items[i]).await;
-            nav.items[i].d = d;
+            nav.items[i].info = d;
         }
     }
     let Some(it) = cur_item(&nav) else { return };
@@ -757,17 +833,32 @@ async fn pick_quality(env: &Env, chat: i64, nav: &Nav, height: i64) {
     start(env, chat, status, &it, Some((&season.slug, e, label)), height).await;
 }
 
+/// Muqovali xabar. Rasm izohi (caption) 1024 belgigacha: sig'sa — `sendPhoto`;
+/// sig'masa (to'liq ma'lumot uzun) — oddiy xabar (4096 belgigacha), rasm esa
+/// matn USTIDA katta ko'rinishda (`link_preview_options`). Muvaffaqiyatini qaytaradi.
+async fn send_photo_card(env: &Env, chat: i64, it: &Item, text: &str, markup: Option<&Value>) -> bool {
+    if it.img.is_empty() {
+        return false;
+    }
+    let mut body = if text.chars().count() <= 1000 {
+        json!({"chat_id": chat, "photo": img_url(&it.img), "caption": text, "parse_mode": "HTML"})
+    } else {
+        json!({"chat_id": chat, "text": text, "parse_mode": "HTML",
+               "link_preview_options": {"url": img_url(&it.img), "prefer_large_media": true,
+                                        "show_above_text": true}})
+    };
+    if let Some(m) = markup {
+        body["reply_markup"] = m.clone();
+    }
+    let method = if body["photo"].is_string() { "sendPhoto" } else { "sendMessage" };
+    encbot_api(env, method, body).await.is_ok()
+}
+
 /// Xabar (muqova bilan yoki oddiy) yuboradi; muvaffaqiyatini qaytaradi.
 async fn try_send(env: &Env, chat: i64, text: &str, markup: &Value, card: Option<&Item>) -> bool {
     if let Some(it) = card {
-        if !it.img.is_empty() && text.chars().count() <= 1000 {
-            let r = encbot_api(env, "sendPhoto", json!({
-                "chat_id": chat, "photo": img_url(&it.img),
-                "caption": text, "parse_mode": "HTML", "reply_markup": markup,
-            })).await;
-            if r.is_ok() {
-                return true;
-            }
+        if send_photo_card(env, chat, it, text, Some(markup)).await {
+            return true;
         }
     }
     encbot_api(env, "sendMessage", json!({
@@ -804,17 +895,8 @@ async fn send_list(env: &Env, chat: i64, text: &str, top: Vec<Vec<String>>, item
 /// Muqova rasmi bilan (bo'lmasa oddiy matn).
 async fn send_card(env: &Env, chat: i64, it: &Item, text: &str, markup: Value) {
     let markup = if markup["remove_keyboard"].is_boolean() { None } else { Some(markup) };
-    if !it.img.is_empty() && text.chars().count() <= 1000 {
-        let mut body = json!({
-            "chat_id": chat, "photo": img_url(&it.img),
-            "caption": text, "parse_mode": "HTML",
-        });
-        if let Some(m) = &markup {
-            body["reply_markup"] = m.clone();
-        }
-        if encbot_api(env, "sendPhoto", body).await.is_ok() {
-            return;
-        }
+    if send_photo_card(env, chat, it, text, markup.as_ref()).await {
+        return;
     }
     encbot_send(env, chat, text, markup).await;
 }
