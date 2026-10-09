@@ -3904,8 +3904,8 @@ async fn tg_send_help(env: &Env, chat_id: i64) {
         "text": MSG_HELP,
         "parse_mode": "HTML",
         "disable_web_page_preview": true,
+        "reply_markup": tma::open_button(),
     })).await;
-    // Mini App tugmasi (`tma::open_button`) sayt deploy qilingach yoqiladi.
 }
 
 /// Webhook SHU IZOLYATDA allaqachon ro'yxatdan o'tkazilganmi.
@@ -4717,7 +4717,8 @@ async fn tg_avatar(env: &Env, user_id: i64) -> Result<Response> {
 /// foydalanuvchiga hech narsa tushuntirmaydi, faqat qo'rqitadi.
 const MSG_HELP: &str = "\u{1F44B} Salom! Men \u{2014} <b>ARUGRAM</b> ilovasining kirish yordamchisiman.\n\n\
      Kirish uchun: ilovani oching \u{2192} pastdagi <b>Profil</b> bo'limi \u{2192} \u{AB}Telegram orqali kirish\u{BB} tugmasi.\n\n\
-     O'sha tugma meni o'zi ochadi \u{2014} bu yerda hech narsa yozishingiz shart emas.";
+     O'sha tugma meni o'zi ochadi \u{2014} bu yerda hech narsa yozishingiz shart emas.\n\n\
+     \u{1F4FA} Animelarni shu yerning o'zida ko'rish uchun pastdagi tugmani bosing.";
 
 /// Havola yaroqsiz (bazada topilmadi yoki allaqachon ishlatilgan).
 const MSG_BAD_LINK: &str = "\u{231B} Bu havola ishlamaydi \u{2014} u eskirgan yoki allaqachon ishlatilgan.\n\n\

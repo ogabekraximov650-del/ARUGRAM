@@ -29,7 +29,6 @@
 use super::*;
 
 /// Mini App manzili (bot tugmasi shu yerni ochadi).
-#[allow(dead_code)]
 pub(crate) const WEB_URL: &str = "https://arumediatv.pages.dev";
 
 /// Token muddati: 12 soat.
@@ -150,7 +149,6 @@ pub(crate) async fn auth(mut req: Request, env: &Env) -> Result<Response> {
 }
 
 /// Mini App'ni ochadigan tugma (xabar ostida).
-#[allow(dead_code)]
 pub(crate) fn open_button() -> Value {
     json!({"inline_keyboard": [[{
         "text": "\u{1F4FA} ARUmediaTV'ni ochish",

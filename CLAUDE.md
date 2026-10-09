@@ -56,6 +56,7 @@ kanali orqali uzatiladi (xarajatni kamaytirish uchun).
 | `worker/src/anibla.rs`, `tool/anibla/` | Kodlash botining "Anibla yuklash" bo'limi: anibla.uz dan qidirish -> qism -> sifat -> ALOHIDA workflow `anibla.yml` (avtoencode repoda) yuklab, bot chatiga yuboradi. Login/parol `tool/anibla/creds.enc` (kalit — `ENCODE_TOKEN`) |
 | `tool/packs/` | Emoji/GIF/stiker to'plamlarini yig'ish (ALOHIDA workflow `packs.yml`, yangi akkauntdagi repoda) |
 | `worker/src/packs.rs` | Emoji/GIF/stiker to'plamlari (o'z tizimimiz; Telegram'niki olib tashlangan) — `KEYINGI_VAZIFA.md` oxirgi bo'lim |
+| `web/`, `worker/src/tma.rs` | Telegram Mini App — ilovaning onlayn nusxasi (arumediatv.pages.dev, `deploy-web.yml`). `KEYINGI_VAZIFA.md` oxirgi bo'limlar |
 | `ci/` | Imzo kaliti (`release.keystore`), baza tozalash skripti |
 | `android-template/` | CI `flutter create` dan keyin qo'yadigan `MainActivity.kt` (`/android/` repoda yo'q) |
 

@@ -5335,3 +5335,21 @@ TOPILGAN SABABLAR:
   (eski akkaunt secret'i yangisiga xalaqit bermasin). Shifrlash:
   `printf '%s' "$TOKEN" | K="$ENCODE_TOKEN" openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:K -out tool/encode/gh_token.enc`.
 - Token classic bo'lishi kerak: `repo` + `workflow` huquqlari.
+
+## Telegram Mini App — ilovaning onlayn nusxasi (`web/`, arumediatv.pages.dev)
+
+- Nima: ilova ko'rinishini "ikki tomchi suvdek" takrorlaydigan veb-sayt,
+  Telegram Mini App bo'lib ochiladi. Faqat onlayn (oflaynga xos narsalar
+  yo'q), admin paneli yo'q (ilovaning o'zidagi panel yetadi).
+- Kod: `web/` (yig'ishsiz oddiy JS/CSS). Har ekran Flutter kodidan
+  o'lchamlari bilan ko'chiriladi (`lib/screens/*`, `lib/widgets/glass.dart`).
+  Deploy: `deploy-web.yml` (`web/**` o'zgarsa avtomatik, Cloudflare Pages
+  loyihasi `arumediatv`).
+- Kirish (`worker/src/tma.rs`): Telegram `initData` -> `POST /api/tma/auth`
+  -> 12 soatlik token (`X-Tma` sarlavhasi, rasmlarda `?tma=`). `app_gate`
+  shu tokenni qabul qiladi. Bazadagi accountga ulash — keyingi bosqich.
+- Bot: asosiy kirish botiga `/start` (argumentsiz) yoki boshqa matn
+  yuborilsa javob ostida "ARUmediaTV'ni ochish" tugmasi (`tma::open_button`).
+- Bosqichlar: 1) pastki panel + bosh sahifa (tayyor); keyin qidiruv,
+  katalog, anime sahifasi, kutubxona, profil; video — eng oxirida
+  (fMP4 nusxalar `epizod_db.fmp4_*` + mtcute, iPhone'da MSE).
