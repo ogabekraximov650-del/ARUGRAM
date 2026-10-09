@@ -5365,3 +5365,105 @@ TOPILGAN SABABLAR:
   `on_update`) ASOSIY botda qoldi — kanalda admin bo'ladigan bot o'sha.
   "Asosiy botni kanalga admin qilish" — `t.me/<asosiy_bot>?startchannel`
   havolasi (avvalgi `request_chat` tugmasi panel botni qo'shib qo'yardi).
+
+## MINI APP — QOLGAN ISHLAR (keyingi chat shundan boshlasin)
+
+Foydalanuvchi talabi (to'liq): Telegram Mini App (`web/`, arumediatv.pages.dev)
+Android ilovaning "ikki tomchi suvdek" ONLAYN nusxasi bo'lsin — barcha
+onlayn ekranlar, bazadagi accountga va Telegram accountga kirish, video
+pleyer, rasmlarni ko'rsatish va h.k. Shartlar:
+- pleyerdagi qism tugmalarida YUKLAB OLISH va O'CHIRISH tugmasi YO'Q, xotira
+  (kesh) va xotira tozalash joyi ham YO'Q (faqat webda; ilovaga tegilmaydi);
+- admin paneli saytda yo'q (ilovadagi yetadi);
+- oflaynga xos hamma narsa olib tashlanadi;
+- web so'ragan qism fMP4 bo'lmasa, worker tayyor sifatlarni navbatga qo'yadi
+  va Actions fMP4 qilib chiqadi (QILINGAN, pastga qarang).
+
+### Tuzilish (qilingan, ishlaydi)
+- Yig'ish: `web/build.mjs` (esbuild; `src/js/app.js` -> `dist/app.js`,
+  `src/css/*.css` -> `dist/app.css`, mtcute WASM -> `dist/assets/mtcute.wasm`).
+  Deploy: `.github/workflows/deploy-web.yml` (`web/**` o'zgarsa, Pages `arumediatv`).
+- Freymvork: `api.js` (X-Tma token + Bearer sessiya, 403/401 da o'zi yangilaydi),
+  `router.js` (ekranlar steki, Telegram BackButton), `ui.js` (icon, toast,
+  dialog, sheet, appBar, SeasonCard...), `hooks.js`, `seasons.js`, `nav.js`.
+  Ekran ko'chirish qoidalari: `web/AGENTS-BRIEF.md`.
+- Mahalliy sinov: `cd web && npm ci && node build.mjs && node tools/preview.mjs <mocks.mjs> <out>`
+  (Playwright, soxta Telegram/worker; mock fayl formati `tools/preview.mjs` boshida).
+- Worker: `tma.rs` — initData -> 12 soatlik token + bazadagi ACCOUNT sessiyasi
+  (`create_session`, qurilma "Telegram Mini App / web"; DIQQAT: u 4 qurilma
+  chegarasiga kiradi). `fmp4.rs` — `/api/fmp4/request|claim|done`, `fmp4_jobs`,
+  `epizod_db.fmp4_url|size|key_<q>` (mig `mig_fmp4`), cron `fmp4::kick`.
+- Actions: `tool/encode/run.py` har sifat MP4 dan keyin fMP4 (`make_fmp4`,
+  `-c copy`, `+frag_keyframe+empty_moov+default_base_moof+global_sidx`) yasab
+  kanalga yuklaydi va `/api/fmp4/done`. Eski qismlar: `tool/fmp4/run.py` +
+  `tool/fmp4/fmp4.workflow.yml` (avtoencode repoga `sync-packs.yml` ko'chiradi).
+  fMP4 nomi `ep_<a>_<s>_<e>_<q>_<vaqt>_f.mp4` (`ep_` — obuna tekshiruvi ishlaydi).
+- Telegram: `tg/client.js` (mtcute, IndexedDB `aru-tg`), `tg/login.js`
+  (phone_login_screen nusxasi: raqam/kod/parol/QR), `tg/media.js` (YENGIL
+  fasad, mtcute faqat kerak bo'lganda) + `tg/media-impl.js` (deliver -> bot
+  chatidan nomi bo'yicha topish -> 1 MB bo'laklar -> AES-CTR ochish;
+  uploadFile; clearBotChat; joinChannel), `tg/account.js`, `tg/countries.js`.
+- Pleyer dvigateli: `player/engine.js` (fMP4 + sidx -> MSE/ManagedMediaSource,
+  seek, oldindan 60 s, orqada 30 s; Chromium'da VP9 sinov fayli bilan
+  sinalgan: ijro + seek ishladi). `player/source.js` — qism manbasi:
+  fileNameOf, mp4Qualities, fmp4Qualities, requestFmp4, waitForFmp4,
+  startPlayback, releasePlayback, explainError.
+- Tayyor ekranlar: bosh sahifa, qidiruv, katalog (+Filtrlash), kutubxona
+  (tarix, sevimlilar), profil, profilni tahrirlash, sozlamalar, qurilmalar,
+  boshqa odam profili, statistika, to'lov (`screens/billing.js`), kanallarga
+  fonda obuna (`services/channel-gate.js`), yozuvlar navbati (`sync.js` —
+  SyncQueue nusxasi), tarix/progress (`services/history.js`), sevimlilar.
+
+### QOLGAN ISHLAR (tartib bilan)
+1. **Pleyer / anime ekrani — ENG MUHIMI.** `web/src/js/player/player-screen.js`
+   hali VAQTINCHALIK (kartochka bosilsa "Pleyer tayyorlanmoqda" chiqadi).
+   `lib/screens/video_player_screen.dart` (8500 qator) TO'LIQ ko'chirilishi
+   kerak: tepada inline pleyer, now-playing paneli, tablar (qismlar /
+   bo'limlar / ma'lumot / izohlar), qism navigatsiyasi, sifat tanlash, to'liq
+   ekran pleyer va barcha boshqaruvlar (o'rtadagi play/pause, ikki marta
+   bosib ±10 s, progress chizig'i (bufer — faqat `video.buffered`),
+   vaqt, tezlik, uyqu taymeri, intro'ni o'tkazish, menyu, keyingi qism),
+   baho oynasi, sevimli tugmasi, obuna kerak ekrani, kanal ruxsati ekrani.
+   Qism tugmalarida yuklab olish/o'chirish YO'Q. Tayyor bo'laklar:
+   `player/gates.js` (subRequired, channelConsent, ratingSheet,
+   qualityDialog — boshqa agent boshlagan, tekshirib ishlating),
+   `player/util.js`, `player/season-info.js` (`GET /api/season/:a/:s`).
+   Ulanish nuqtalari: `openSeason(season)`, `openSeasonIds(a, s, ep?,
+   {startAtMs, season})` (kutubxona to'rtinchi argument beradi). Ijro:
+   `startPlayback(video, ep, q, {startAt, onState, onError})`; fMP4 yo'q
+   bo'lsa `requestFmp4` + "Video tayyorlanmoqda..." + `waitForFmp4`; yopilganda
+   `releasePlayback()`; o'ynayotganda `setVideoBusy(true)` (channel-gate).
+   Tarix: `watchHistory.startEpisode/note/addWatched/flush`,
+   `watchProgress.positionOf/save/forget`; baho `putRating`; sevimli
+   `favorites.set`; izohlar `createCommentsTab(el, {animeId, seasonId,
+   expanded, onExpanded})` (`comments.js`); obuna `billing` +
+   `openBilling`. To'liq ekran: `Telegram.WebApp.requestFullscreen()`.
+2. **Emoji/GIF/stiker to'plamlari** — `web/src/js/screens/packs.js` YO'Q
+   (agent tugatmadi). `my_packs_screen.dart`, `pack_detail_screen.dart`,
+   `pack_views.dart`, `pack_preview.dart`, `pack_service.dart` ko'chirilsin;
+   keyin `screens/profile-links.js` dagi `openMyPacks` SHIM'ini
+   `export { openMyPacks } from './packs.js';` ga almashtiring.
+3. **Admin bilan yozishma** (`screens/support.js`, 1459 qator) — agent
+   oxirigacha yetkazganini TEKSHIRING (preview bilan): matn, javob (reply),
+   tahrir/o'chirish, o'qilgan belgisi, rasm/video/ovozli xabar (Telegram
+   orqali `mediaUrl`/`uploadFile`), ovoz yozish. Profil va pastki paneldagi
+   o'qilmagan nuqta: `services/support.js` -> `unreadBadge` (nav.js'dagi
+   `.nav-dot` ga hali ulanmagan — `app.js`/`nav.js` da ulang).
+4. **Izohlar** (`comments.js`, 651 qator) va **media ko'rish**
+   (`screens/media-view.js`) — tekshirib, pleyerga ulang.
+5. Bosh sahifadagi qo'ng'iroqcha (bildirishnoma) — ilovada ham bosilmaydi,
+   shunday qoladi. `kHomeStats` o'chiq — statistik banner chiqmaydi.
+6. Yakuniy tekshiruv: har ekranni ilova skrinshotlari bilan solishtirish
+   (foydalanuvchi skrinshot beradi), haqiqiy Telegram'da: account kirishi,
+   Telegram'ga kirish (kod/parol/QR), video ijrosi (Android va iPhone —
+   iOS 17.1+ ManagedMediaSource; H.265 qo'llanmasa `codec_unsupported`),
+   fMP4 navbati (`fmp4.yml` avtoencode repoda ishga tushishi).
+
+### Ma'lum xavf/eslatmalar
+- `sync.js` tarix paketini 100 qatorgacha bo'ladi (worker chegarasi). Ilova
+  (`sync_queue.dart`) 150 gacha yuboradi — worker 100 dan oshganini 413 bilan
+  rad etadi, ilova paketni tashlab yuborishi mumkin (ilovadagi ehtimoliy xato,
+  tekshirilmagan).
+- Mini App sessiyasi 4 qurilma chegarasiga kiradi (eng eski qurilma chiqadi).
+- Bot `/start` (argumentsiz) javobi va chat menyusi tugmasi Mini App'ni ochadi;
+  majburiy obuna boshqaruvi endi PANEL botda.

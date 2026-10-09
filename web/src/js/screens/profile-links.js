@@ -14,7 +14,6 @@ export { openBilling } from './billing.js'; // openBilling({ startPage }) — 0:
 export { openTelegramAccount, isTelegramAuthorized, checkTelegram } from '../tg/account.js';
 export { uploadFile } from '../tg/media.js'; // profil rasmi (ilovadagi `TelegramService.uploadFile`)
 
-// SHIM — `./support.js` hali yo'q.
-export function openSupport() { toast('Tez orada'); }
+export { openSupport } from './support.js';
 // SHIM — `./packs.js` hali yo'q.
 export function openMyPacks() { toast('Tez orada'); }
