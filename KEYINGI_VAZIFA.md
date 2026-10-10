@@ -5695,3 +5695,22 @@ avto-kodlash (H.265, 4 sifat, MP4 + fMP4).
   yasagan emoji/GIF/stiker YUBORISH uchun: `needs_pack_sub` (izoh va
   yordam chati; admin ozod) 402 + "Foydalanuvchilar yasagan emoji, GIF va
   stikerlarni yuborish uchun obuna kerak". Ko'rish/yaratish obunasiz.
+
+- ADMIN PANELI WEB'DAN OLIB TASHLANDI (foydalanuvchi: "keragi yo'q"):
+  `web/src/js/screens/admin.js`, `css/admin.css` va profildagi tugma o'chirildi.
+  Yuqoridagi "admin.js" tavsifi eskirgan; admin panel faqat ilovada.
+
+## Mini App pleyeri: qurilmaga qarab format (MP4 yoki fMP4) (2026-10)
+
+- `source.js`: `devicePlatform()` (`Telegram.WebApp.platform`, zaxira — brauzer
+  qatori) va `chooseSource(ep, q)`: iOS -> fMP4 + MSE; Android va boshqalar ->
+  oddiy MP4 (brauzerning o'z pleyeri), MP4 oqimi ishlamasa yoki fayl yo'q bo'lsa
+  fMP4. Ikkalasi ham yaroqsiz bo'lsa `requestFmp4` (avvalgidek).
+- Oddiy MP4: `player/mp4-stream.js` + `src/sw.js` (Service Worker, `dist/sw.js`
+  ildizda): `<video src="/__aru/mp4/<id>.mp4">` -> SW "Range" so'rovini sahifaga
+  yuboradi -> sahifa baytlarni Telegram'dan olib ochadi (`openFile`) -> 206 javob.
+  Bo'lak 2 MB, keyingilari oldindan yuklanadi. SW ro'yxatdan o'tmasa/boshqarmasa
+  yoki MP4 ochilmasa avtomatik fMP4 + MSE.
+- Ko'rish joyi (`watchProgress`) kaliti qurilmadan qat'i nazar bir xil (MP4 nomi).
+- Tekshirilmagan: haqiqiy Android Telegram'da SW ishlashi (Telegram WebView
+  Service Worker'ni o'chirgan bo'lishi mumkin — shunda fMP4 ga tushadi).

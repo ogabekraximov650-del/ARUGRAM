@@ -18,7 +18,7 @@ import { createCommentsTab } from '../comments.js';
 import { subRequired, channelConsent, ratingSheet, qualityDialog } from './gates.js';
 import { loadSeasonInfo, seasonFromDisk, rateSeason, setSeasonFavorite, SeasonInfo } from './season-info.js';
 import {
-  QUALITIES, fileNameOf, mp4Qualities, fmp4Qualities, requestFmp4, waitForFmp4,
+  QUALITIES, fileNameOf, mp4Qualities, fmp4Qualities, requestFmp4, waitForFmp4, chooseSource,
   startPlayback, releasePlayback, explainError,
 } from './source.js';
 import {
@@ -522,7 +522,7 @@ function buildPlayer(el, route, season, opts) {
     try {
       let start = resumeMs;
       if (start == null && !recovery) start = savedPosMs(e);
-      if (!fileNameOf(e[`fmp4_url_${q}`])) {
+      if (!(await chooseSource(e, q))) {
         waiting = 'Video tayyorlanyabdi...'; paintBusy();
         const r = await requestFmp4(e).catch(() => null);
         if (my !== token) return;
@@ -533,7 +533,8 @@ function buildPlayer(el, route, season, opts) {
         }
         waiting = '';
       }
-      curName = fileNameOf(e[`fmp4_url_${q}`]);
+      // Progress kaliti qurilmadan qat'i nazar bir xil: oddiy MP4 nomi (bo'lmasa fMP4).
+      curName = fileNameOf(e[`url_${q}`]) || fileNameOf(e[`fmp4_url_${q}`]);
       const secs = start && start > 0 ? start / 1000 : 0;
       eng = await startPlayback(video, e, q, {
         startAt: secs,
