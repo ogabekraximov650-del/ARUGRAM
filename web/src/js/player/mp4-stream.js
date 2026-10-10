@@ -25,7 +25,7 @@ function wire() {
       if (d.t === 'aru-stat') { port.postMessage({ size: src.file.size }); return; }
       const buf = await src.file.read(d.offset, d.length);
       // Keyingi bo'laklar oldindan (parallel) — qotmasin.
-      src.file.prefetch(d.offset + d.length, 6 * 1024 * 1024);
+      src.file.prefetch(d.offset + d.length, 24 * 1024 * 1024);
       const ab = buf.byteOffset === 0 && buf.byteLength === buf.buffer.byteLength ? buf.buffer : buf.slice().buffer;
       port.postMessage({ buf: ab }, [ab]);
     } catch (e) { port?.postMessage({ error: `${e?.message || e}` }); }
@@ -55,13 +55,39 @@ export function mp4Streaming() {
 }
 
 let seq = 0;
-export function createMp4Stream(video, { name, startAt = 0, onState = () => {}, onError = () => {} }) {
+export function createMp4Stream(video, { name, startAt = 0, onState = () => {}, onError = () => {}, onStall = () => {}, shouldPlay = () => true }) {
   let destroyed = false;
   const id = `${Date.now().toString(36)}${(seq++).toString(36)}`;
   let file = null;
   const st = (s) => { if (!destroyed) onState({ state: s }); };
-  const onWaiting = () => st('buffering');
-  const onPlaying = () => st('playing');
+  // Qotish boshqaruvi `engine.js` bilan bir xil: qotsa pauzada ushlab turiladi va
+  // bufer 3/6/10/15 s to'lgach davom etadi; qayta-qayta qotsa `onStall` (sifat pasayadi).
+  let played = false; let holding = false; let stalls = 0; let hold = 0;
+  const GOALS = [3, 6, 10, 15];
+  const ahead = () => {
+    const t = video.currentTime; const r = video.buffered;
+    for (let i = 0; i < r.length; i++) if (r.start(i) <= t + 0.3 && r.end(i) >= t) return r.end(i) - t;
+    return 0;
+  };
+  const need = () => (video.duration > 0 && file ? Math.round((file.size * 8) / video.duration / 1000) : 0);
+  const onWaiting = () => {
+    st('buffering');
+    if (!played || holding || video.seeking || video.ended || destroyed) return;
+    if (video.duration - video.currentTime < 1) return;
+    stalls += 1; holding = true;
+    try { video.pause(); } catch (_) { /* */ }
+    try { onStall({ count: stalls, kbps: file?.rateKbps?.() || 0, needKbps: need() }); } catch (_) { /* */ }
+    clearInterval(hold);
+    hold = setInterval(() => {
+      if (destroyed || !holding) { clearInterval(hold); return; }
+      if (!shouldPlay()) { holding = false; clearInterval(hold); return; }
+      const left = Math.max(0.3, video.duration - video.currentTime - 0.3);
+      if (ahead() >= Math.min(GOALS[Math.min(stalls - 1, GOALS.length - 1)], left)) {
+        holding = false; clearInterval(hold); st('playing'); video.play().catch(() => {});
+      }
+    }, 250);
+  };
+  const onPlaying = () => { played = true; st('playing'); };
   const onErr = () => {
     const c = video.error;
     // Manba (SW/Telegram) xatosi — pleyer qayta urinadi (player-screen: MEDIA_ERR).
@@ -90,13 +116,15 @@ export function createMp4Stream(video, { name, startAt = 0, onState = () => {}, 
   return {
     ready,
     get duration() { return video.duration || 0; },
-    get holding() { return false; },
-    cancelHold() {},
-    health() { return { kbps: 0, needKbps: 0, stalls: 0 }; },
+    format: 'mp4',
+    get holding() { return holding; },
+    cancelHold() { holding = false; clearInterval(hold); },
+    health() { return { kbps: file?.rateKbps?.() || 0, needKbps: need(), stalls }; },
     startAt(sec) { ready.then(() => { video.currentTime = Math.max(0, sec); }); },
     setAhead() {},
     destroy() {
       destroyed = true;
+      clearInterval(hold);
       video.removeEventListener('waiting', onWaiting);
       video.removeEventListener('playing', onPlaying);
       video.removeEventListener('error', onErr);

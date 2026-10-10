@@ -555,6 +555,8 @@ function buildPlayer(el, route, season, opts) {
       if (my !== token) { eng?.destroy(); return; }
       await eng.ready;
       if (my !== token) return;
+      // Qaysi format ishlayotgani (MP4 yoki fMP4) — qisqa xabar va konsol.
+      try { console.info('[pleyer] format:', eng.format); toast(eng.format === 'mp4' ? 'MP4 (oddiy)' : 'fMP4 (MSE)', 1400); } catch (_) { /* */ }
       // Sahifa pauzada ochiladi; yetarli bayt yuklangach (~3 s) o'zi boshlanadi.
       if (intended) {
         await waitEnoughBuffer(my);

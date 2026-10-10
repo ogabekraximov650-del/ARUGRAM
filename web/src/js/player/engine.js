@@ -392,6 +392,7 @@ export function createEngine(video, { name, key = '', ahead: aheadOpt = 60, behi
 
   return {
     ready,
+    format: 'fmp4',
     get duration() { return duration; },
     /** Qotgani uchun pauzada ushlab turilibdimi (foydalanuvchi pauzasi emas). */
     get holding() { return holding; },

@@ -102,7 +102,7 @@ export async function chooseSource(ep, q) {
 }
 
 /** Qismni o'ynatadi. Telegram'ga kirilmagan bo'lsa — kirish oynasi. */
-export async function startPlayback(video, ep, q, { startAt = 0, ahead = 20, onState, onError } = {}) {
+export async function startPlayback(video, ep, q, { startAt = 0, ahead = 60, onState, onError, onStall, shouldPlay } = {}) {
   await startup();
   if (!(await ensureTelegram())) throw new Error('tg_login_cancelled');
   const pick = await chooseSource(ep, q);
@@ -111,7 +111,7 @@ export async function startPlayback(video, ep, q, { startAt = 0, ahead = 20, onS
     throw new Error('no_fmp4');
   }
   if (pick.kind === 'mp4') {
-    const eng = createMp4Stream(video, { name: pick.name, startAt, onState, onError });
+    const eng = createMp4Stream(video, { name: pick.name, startAt, onState, onError, onStall, shouldPlay });
     try {
       await eng.ready;
       return eng;
@@ -122,7 +122,7 @@ export async function startPlayback(video, ep, q, { startAt = 0, ahead = 20, onS
       if (!alt || !engineSupported()) throw e;
     }
   }
-  return createEngine(video, { name: pick.kind === 'mp4' ? fileNameOf(ep[`fmp4_url_${q}`]) : pick.name, ahead, startAt, onState, onError });
+  return createEngine(video, { name: pick.kind === 'mp4' ? fileNameOf(ep[`fmp4_url_${q}`]) : pick.name, ahead, startAt, onState, onError, onStall, shouldPlay });
 }
 
 /** Pleyer yopilganda bot chatiga TEGILMAYDI (eski nusxalar faqat ilova ochilganda tozalanadi). */

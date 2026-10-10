@@ -2,7 +2,7 @@
 // "Range" so'rovlari bilan beradi. Baytlarni sahifaning o'zi Telegram'dan olib ochadi
 // (`player/mp4-stream.js`); worker/server orqali bayt o'tmaydi.
 //   /__aru/mp4/<id>.mp4   — virtual manzil; so'rov -> sahifaga xabar -> baytlar -> 206 javob.
-const PART = 2 * 1024 * 1024; // bitta javobda ko'pi bilan (ochiq `bytes=N-` so'rovlari uchun)
+const PART = 4 * 1024 * 1024; // bitta javobda ko'pi bilan (ochiq `bytes=N-` so'rovlari uchun)
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
