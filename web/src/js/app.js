@@ -21,7 +21,7 @@ import { openPublicProfile } from './screens/public-profile.js';
 import { startSync } from './sync.js';
 import { channelGate } from './services/channel-gate.js';
 import { checkTelegram, ensureTelegram, clearOldBotChat, telegramMe, telegramLogout } from './tg/media.js';
-import { setStartup } from './tg/startup.js';
+import { setStartup, withTimeout } from './tg/startup.js';
 import { watchImages, rescanImages } from './tg/images.js';
 import { unreadBadge, ChatController } from './services/support.js';
 
@@ -122,7 +122,7 @@ async function main() {
   // Ochilganda: Telegram tekshiriladi (kerak bo'lsa kirish oynasi), bot chatidagi
   // eski nusxalar tozalanadi, keyin rasmlar/videolar yangidan so'raladi.
   const boot = (async () => {
-    let ok = await checkTelegram().catch(() => false);
+    let ok = await withTimeout(checkTelegram(), 30000).catch(() => false);
     if (ok) {
       // Boshqa Telegram hisobi bilan ochilgan bo'lsa (qurilmada avvalgi hisob
       // sessiyasi qolgan) — eski sessiya tugatiladi va kirish oynasi ochiladi.
@@ -131,7 +131,7 @@ async function main() {
       if (me && opener && `${me.id}` !== `${opener}`) { await telegramLogout().catch(() => {}); ok = false; }
     }
     if (!ok) ok = await ensureTelegram().catch(() => false);
-    if (ok) await clearOldBotChat();
+    if (ok) await withTimeout(clearOldBotChat(), 20000).catch(() => {});
     return ok;
   })();
   setStartup(boot);

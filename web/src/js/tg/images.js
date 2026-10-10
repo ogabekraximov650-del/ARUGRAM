@@ -7,10 +7,11 @@
 // Telegram'dan olib bo'lmasa — oddiy (worker) manzilga qaytadi.
 
 import { mediaUrl, prefetchNames, isTelegramAuthorized } from './media.js';
-import { startup } from './startup.js';
+import { startup, withTimeout } from './startup.js';
 
 const queue = new Map(); // nom -> [{img, orig}]
 let timer = 0;
+let shown = false;
 
 const nameOf = (src) => { const m = /\/api\/(?:image|media)\/([^?#]+)/.exec(src); return m ? decodeURIComponent(m[1]) : ''; };
 const tgOn = () => { try { return localStorage.getItem('aru_tg_on') === '1'; } catch (_) { return false; } };
@@ -47,7 +48,8 @@ async function flush() {
   const worker = async () => {
     while (i < batch.length) {
       const [name, list] = batch[i++];
-      try { setSrc(list, await mediaUrl(name)); } catch (_) {
+      try { setSrc(list, await withTimeout(mediaUrl(name), 60000, 'img_timeout')); } catch (e) {
+        if (!shown) { shown = true; try { window.Telegram?.WebApp?.showAlert?.(`Rasm yuklanmadi: ${e?.text || e?.message || e}`); } catch (_) { /* */ } }
         list.forEach(({ img, orig }) => { if (img.isConnected && orig) img.src = orig; });
       }
     }

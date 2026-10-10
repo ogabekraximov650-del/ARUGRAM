@@ -11,12 +11,14 @@
 
 import { TelegramClient, WebCryptoProvider } from '@mtcute/web';
 import { api } from '../api.js';
+import { withTimeout } from './startup.js';
 
 let cfg = null;
 let client = null;
 let starting = null;
 let authorized = null;
 const subs = new Set();
+
 
 export function onTgChange(fn) { subs.add(fn); return () => subs.delete(fn); }
 function emit() {
@@ -53,7 +55,7 @@ export async function getClient() {
       disableUpdates: false,
       logLevel: 1,
     });
-    await cl.connect();
+    try { await withTimeout(cl.connect(), 20000, 'tg_connect_timeout'); } catch (e) { try { cl.close?.(); } catch (_) { /* */ } throw e; }
     client = cl;
     return cl;
   })();
@@ -65,7 +67,7 @@ export async function isAuthorized({ fresh = false } = {}) {
   if (authorized !== null && !fresh) return authorized;
   try {
     const cl = await getClient();
-    const me = await cl.getMe();
+    const me = await withTimeout(cl.getMe(), 20000, 'tg_getme_timeout');
     authorized = !!me;
   } catch (e) {
     // Faqat Telegram "kirilmagan" desa — chiqqan deb hisoblanadi; tarmoq

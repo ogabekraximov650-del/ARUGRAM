@@ -6,3 +6,8 @@
 let p = Promise.resolve();
 export const startup = () => p;
 export function setStartup(promise) { p = promise.catch(() => {}); }
+
+export function withTimeout(p, ms, what = 'timeout') {
+  let t;
+  return Promise.race([p, new Promise((_, rej) => { t = setTimeout(() => rej(new Error(what)), ms); })]).finally(() => clearTimeout(t));
+}

@@ -5583,3 +5583,13 @@ HAMMA uchun qoladi, faqat admin ID (`ADMIN_TELEGRAM_ID`) hisobida ishlamasin.
 - **To'liq ekran (aylantirilgan)**: mahalliy "o'ng" chet — ekran pasti, u yerda
   Android tizim tugmalari bor edi. `.pl-box.rot` da `.pl-top`/`.pl-bottom`
   72 px ichkariga surildi.
+
+## MINI APP: TELEGRAM ULANISHI OSILIB QOLMASLIGI (2026-10)
+
+Belgi: rasmlar abadiy aylanib turadi (spinner). Sabab ehtimoli — mtcute
+`connect()` / `getMe()` javob bermay osilib qoladi va `startup()` kutib
+turgan rasm/video yuklash hech qachon boshlanmaydi.
+- `tg/startup.js -> withTimeout`; `tg/client.js`: connect/getMe 20 s;
+- `app.js`: boot'dagi tekshiruv 30 s, bot chatini tozalash 20 s;
+- `tg/images.js`: rasm 60 s; xato bo'lsa sababi bir marta alert bilan ko'rsatiladi.
+QOLGAN: emoji panelining GIF/Stiker/maxsus emoji oynalari Mini App'ga hali ko'chirilmagan.
