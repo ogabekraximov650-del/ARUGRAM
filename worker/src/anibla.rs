@@ -1437,7 +1437,18 @@ async fn start(env: &Env, chat: i64, status: i64, it: &Item, ep: Option<(&str, &
                 Some(n) => *n,
                 None => encbot_numbers(env, a, s).await.iter().max().copied().unwrap_or(0) + 1,
             };
-            let res = encbot_register(env, a, s, n, &format!("anibla:{}", v.job_url()), 0, 0, v.height).await;
+            // Navbatda AYNAN qaysi anime va qism (saytdagi slug'lar) — Actions o'chib
+            // yonsa ham shu yozuvdan davom etadi; HLS manzil esa har `claim` da
+            // yangidan olinadi (`resolve`), eskirib qolmaydi. `u` — zaxira.
+            let src = json!({
+                "t": it.t, "s": it.s, "m": it.m,
+                "ss": ep.as_ref().map(|(ss, _, _)| ss.to_string()).unwrap_or_default(),
+                "e": ep.as_ref().map(|(_, e, _)| e.slug.clone()).unwrap_or_default(),
+                "n": ep.as_ref().map(|(_, e, _)| e.num).unwrap_or(0),
+                "l": ep.as_ref().map(|(_, _, l)| l.clone()).unwrap_or_default(),
+                "h": v.height, "u": v.job_url(),
+            });
+            let res = encbot_register(env, a, s, n, &format!("anibla:{src}"), 0, 0, v.height).await;
             let line = if res.starts_with('\u{2705}') {
                 format!("\u{2705} {} \u{2014} {n}-qism. Kodlash run'i videoni saytdan yuklab, darhol H.265 da kodlaydi \
                          (Telegram'ga asl video yuklanmaydi).", html_escape(label))
@@ -1774,4 +1785,34 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
     }
 
     err404("topilmadi")
+}
+
+/// Kodlash navbatidagi "Anibla orqali" manbasi (`anibla:{json}`) -> yangi HLS
+/// manzil (`video` yoki `video\naudio`) va o'qiladigan nom. Sayt manzili
+/// eskirgan bo'lishi mumkin — shuning uchun har `claim` da qayta olinadi;
+/// sayt javob bermasa saqlangan `u` ishlatiladi.
+pub(crate) async fn resolve_origin(env: &Env, raw: &str) -> (String, String) {
+    let Ok(j) = serde_json::from_str::<Value>(raw) else {
+        return (raw.to_string(), String::new()); // eski yozuv: to'g'ridan-to'g'ri manzil
+    };
+    let label = format!("{}{}", j["t"].as_str().unwrap_or(""),
+        j["l"].as_str().filter(|l| !l.is_empty()).map(|l| format!(" \u{00B7} {l}")).unwrap_or_default());
+    let saved = j["u"].as_str().unwrap_or("").to_string();
+    let it = Item {
+        s: j["s"].as_str().unwrap_or("").to_string(),
+        t: j["t"].as_str().unwrap_or("").to_string(),
+        m: j["m"].as_str().unwrap_or("").to_string(),
+        ..Default::default()
+    };
+    let ss = j["ss"].as_str().unwrap_or("").to_string();
+    let ep = Episode { slug: j["e"].as_str().unwrap_or("").to_string(), num: jint(&j, "n"), title: String::new() };
+    let ep_ref = if ss.is_empty() { None } else { Some((ss.as_str(), &ep)) };
+    let fresh = async {
+        let video = video_of(env, &it, ep_ref).await?;
+        let vs = variants(&video).await?;
+        let h = jint(&j, "h");
+        vs.iter().find(|v| v.height == h).or_else(|| vs.iter().max_by_key(|v| v.height))
+            .map(|v| v.job_url()).ok_or_else(|| "sifat topilmadi".to_string())
+    }.await;
+    (fresh.unwrap_or(saved), label)
 }

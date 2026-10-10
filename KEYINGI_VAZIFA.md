@@ -5667,3 +5667,11 @@ avto-kodlash (H.265, 4 sifat, MP4 + fMP4).
   oladi va o'sha run'da kodlaydi. Raqam tanlash paytida beriladi.
   Xavf: navbat juda uzun bo'lsa HLS manzil eskirishi mumkin — kodlash xatosi
   bilan to'xtaydi (qismni qayta "Anibla orqali" bilan almashtirish kerak).
+- NAVBAT YOZUVI (foydalanuvchi: "bazadagi navbatda qaysi anime va qism aniq
+  yozilsin, Actions o'chib yonsa kelgan joydan davom etsin"): `encode_jobs.origin`
+  = `anibla:{"t":nom,"s":slug,"m":tur,"ss":fasl slug,"e":qism slug,"n":raqam,
+  "l":"2-fasl · 5-qism","h":balandlik,"u":zaxira manzil}` (+ ilovadagi
+  anime/bo'lim/qism `encode_jobs` ning o'z ustunlarida). `claim` har safar
+  `anibla::resolve_origin` bilan YANGI HLS manzil oladi (eskirmaydi), run
+  qayta ishga tushsa tayyor sifatlar (`done`) o'tkazib yuboriladi, qolganlari
+  davom etadi. `origin_label` — run log'ida anime va qism nomi.

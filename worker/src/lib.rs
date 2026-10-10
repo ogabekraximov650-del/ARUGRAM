@@ -11420,7 +11420,8 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
                 continue;
             };
             // "Anibla orqali": asl video Telegram'da emas — run uni saytdan yuklaydi.
-            let anibla_url = origin.strip_prefix("anibla:").map(|u| u.to_string());
+            let anibla_raw = origin.strip_prefix("anibla:").map(|u| u.to_string());
+            let anibla_url = anibla_raw.is_some().then(String::new);
             let src = if anibla_url.is_some() {
                 Some(json!({"msg_id": 0, "file_key": ""}))
             } else {
@@ -11443,6 +11444,14 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
                 ENCODE_RUN_LEASE_MS
             } else {
                 ENCODE_LEASE_MS
+            };
+            // anibla: manzil har safar yangidan (eskirmasin), nomi log uchun.
+            let (anibla_url, anibla_label) = match &anibla_raw {
+                Some(raw) => {
+                    let (u, l) = anibla::resolve_origin(env, raw).await;
+                    (Some(u), l)
+                }
+                None => (anibla_url, String::new()),
             };
             let mut args = vec![TursoArg::text(&runner), TursoArg::int(now + lease)];
             args.extend(pk.clone());
@@ -11496,6 +11505,7 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
                     "uploaded": uploaded,
                     "origin_msg": src["msg_id"],
                     "origin_url": anibla_url.unwrap_or_default(),
+                    "origin_label": anibla_label,
                     // Kanal postidagi kalit; bo'lmasa bazadagisi.
                     "origin_key": match src["file_key"].as_str().unwrap_or("") {
                         k if valid_file_key(k) => k.to_string(),
