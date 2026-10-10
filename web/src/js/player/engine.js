@@ -207,8 +207,12 @@ export function createEngine(video, { name, key = '', ahead = 20, behind = 10, s
         const seg = segs[next];
         st(video.readyState < 3 ? 'buffering' : 'playing');
         // Keyingi fragmentni ham oldindan so'rab qo'yamiz (tarmoq bo'sh turmasin).
-        const n2 = segs[next + 1];
-        if (n2) file.prefetch(n2.start, n2.size);
+        // Bir nechta keyingisini ham (jami ~12 MB gacha): Telegram bo'laklari parallel keladi, qotish kamayadi.
+        for (let k = 1, bytes = 0; k <= 4 && next + k < segs.length && bytes < 12 * 1024 * 1024; k++) {
+          const n2 = segs[next + k];
+          bytes += n2.size;
+          file.prefetch(n2.start, n2.size);
+        }
         const data = await file.read(seg.start, seg.size);
         if (destroyed || my !== gen) break;
         try {

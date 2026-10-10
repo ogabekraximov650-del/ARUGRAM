@@ -439,7 +439,7 @@ function buildPlayer(el, route, season, opts) {
       if (last) { target = list.find((e) => epId(e) === last.epizodId) || null; if (target) at = savedPosMs(target); }
     }
     if (!target) target = list[list.length - 1];
-    playEpisode(target, { resumeMs: at, playing: !!opts.startEpizodId });
+    playEpisode(target, { resumeMs: at, playing: true });
   }
 
   // ── Ijro ───────────────────────────────────────────────────────
@@ -623,6 +623,7 @@ function buildPlayer(el, route, season, opts) {
 
   // ── Progress chizig'ini surish ─────────────────────────────────
   const track = $('.pl-track');
+  let dragWasPlaying = false;
   const isRot = () => box.classList.contains('rot');
   const ratioAt = (e) => {
     const r = track.getBoundingClientRect();
@@ -633,6 +634,9 @@ function buildPlayer(el, route, season, opts) {
     if (!video.duration) return;
     track.setPointerCapture(e.pointerId);
     drag = ratioAt(e); clearTimeout(hideT); paintProgress();
+    // Surish davomida video pauzada turadi, qo'yib yuborilgach davom etadi.
+    dragWasPlaying = !video.paused && !video.ended;
+    if (dragWasPlaying) video.pause();
   });
   track.addEventListener('pointermove', (e) => { if (drag != null) { drag = ratioAt(e); paintProgress(); } });
   const endDrag = () => {
@@ -640,6 +644,8 @@ function buildPlayer(el, route, season, opts) {
     const v = drag; drag = null;
     seekTo(v * (video.duration || 0));
     paintProgress(); scheduleHide();
+    if (dragWasPlaying && intended) video.play().catch(() => {});
+    dragWasPlaying = false;
   };
   track.addEventListener('pointerup', endDrag);
   track.addEventListener('pointercancel', endDrag);
@@ -679,7 +685,8 @@ function buildPlayer(el, route, season, opts) {
     if (side === 'l') accL = Math.min(accL + 5, Math.floor(base)); else accR = Math.min(accR + 5, Math.max(0, Math.floor(d - 1 - base)));
     const b = $(`.pl-badge.${side}`);
     const acc = side === 'l' ? accL : accR;
-    b.innerHTML = `${icon(side === 'l' ? 'arrow_left' : 'arrow_right', { size: 22, color: '#fff' })}<span>${acc}s</span>`;
+    const chev = [0, 1, 2].map((k) => `<i style="animation-delay:${(side === 'l' ? 2 - k : k) * 0.135}s">${icon(side === 'l' ? 'arrow_left' : 'arrow_right', { size: 13, color: '#fff' })}</i>`).join('');
+    b.innerHTML = `<div class="ch">${chev}</div><span>${acc}s</span>`;
     b.classList.add('on');
     seekTo(base + (side === 'l' ? -5 : 5));
     try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred('light'); } catch (_) { /* */ }

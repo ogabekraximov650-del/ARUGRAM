@@ -40,6 +40,7 @@ const html = fs.readFileSync(path.join(src, 'index.html'), 'utf8')
   .replace('js/app.js', `app.js?v=${v}`);
 fs.writeFileSync(path.join(dist, 'index.html'), html);
 fs.cpSync(path.join(src, 'assets'), path.join(dist, 'assets'), { recursive: true });
+fs.copyFileSync(path.join(root, '../fonts/TgEmoji.ttf'), path.join(dist, 'assets/TgEmoji.ttf'));
 // mtcute shifrlash yadrosi (WASM) — `tg/client.js` shu manzildan yuklaydi.
 fs.copyFileSync(path.join(root, 'node_modules/@mtcute/wasm/mtcute.wasm'), path.join(dist, 'assets/mtcute.wasm'));
 console.log('dist tayyor');

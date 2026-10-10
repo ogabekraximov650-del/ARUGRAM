@@ -33,13 +33,14 @@
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
+@font-face { font-family: 'TgEmoji'; src: url('assets/TgEmoji.ttf') format('truetype'); font-display: swap; }
 html, body {
   margin: 0;
   padding: 0;
   height: 100%;
   background: var(--bg);
   color: var(--text);
-  font-family: 'Roboto', sans-serif;
+  font-family: 'Roboto', 'TgEmoji', sans-serif;
   -webkit-font-smoothing: antialiased;
   overscroll-behavior: none;
   user-select: none;
@@ -453,3 +454,5 @@ textarea.field { height: auto; min-height: 96px; padding: 12px 14px; resize: non
 .switch .th { position: absolute; top: 8px; left: 8px; width: 16px; height: 16px; border-radius: 50%; background: rgba(255, 255, 255, 0.55); transition: all 150ms; }
 .switch input:checked + .tr { background: var(--accent); border-color: var(--accent); }
 .switch input:checked + .tr + .th { left: 24px; top: 4px; width: 24px; height: 24px; background: #fff; }
+
+input, textarea { font-family: inherit; }

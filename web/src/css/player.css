@@ -115,6 +115,10 @@
 
 /* Sek belgisi, xabar, intro */
 .pl-badge { position: absolute; top: 50%; width: 64px; height: 64px; margin-top: -32px; border-radius: 50%; background: rgba(0, 0, 0, 0.55); z-index: 5; display: none; flex-direction: column; align-items: center; justify-content: center; color: #fff; font-weight: 700; font-size: 10px; pointer-events: none; }
+.pl-badge .ch { display: flex; margin-bottom: 4px; }
+.pl-badge .ch i { display: flex; opacity: 0.3; animation: plchev 0.9s linear infinite; }
+.pl-badge span { font-size: 9.6px; }
+@keyframes plchev { 0% { opacity: 0.3; } 50% { opacity: 1; } 100% { opacity: 0.3; } }
 .pl-badge.l { left: 25%; margin-left: -32px; }
 .pl-badge.r { left: 75%; margin-left: -32px; }
 .pl-badge.on { display: flex; }
@@ -226,7 +230,7 @@
 .pl-box.rot .pl-bottom { padding-left: calc(12px + var(--safe-top) + var(--content-top)); }
 
 /* Aylantirilgan rejimda mahalliy "o'ng" chet — ekran PASTI: tizim tugmalari (uy / orqaga) shu yerda */
-.pl-box.rot .pl-top { right: calc(var(--safe-bottom, 0px) + 72px); }
-.pl-box.rot .pl-bottom { padding-right: calc(var(--safe-bottom, 0px) + 72px); }
-.pl-box.rot .pl-speed { right: 96px; }
-.pl-box.rot .pl-eplist { right: 88px; }
+.pl-box.rot .pl-top { right: calc(var(--safe-bottom, 0px) + 120px); }
+.pl-box.rot .pl-bottom { padding-right: calc(var(--safe-bottom, 0px) + 120px); }
+.pl-box.rot .pl-speed { right: 144px; }
+.pl-box.rot .pl-eplist { right: 136px; }
