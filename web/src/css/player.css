@@ -230,10 +230,14 @@
 .pl-box.rot .pl-bottom { padding-left: calc(12px + var(--safe-top) + var(--content-top)); }
 
 /* Aylantirilgan rejimda mahalliy "o'ng" chet — ekran PASTI: tizim tugmalari (uy / orqaga) shu yerda */
-.pl-box.rot .pl-top { right: calc(var(--safe-bottom, 0px) + 88px); }
-.pl-box.rot .pl-bottom { padding-right: calc(var(--safe-bottom, 0px) + 88px); }
-.pl-box.rot .pl-speed { right: 112px; }
-.pl-box.rot .pl-eplist { right: 104px; }
+.pl-box.rot .pl-top { right: calc(var(--safe-bottom, 0px) + var(--rot-gap)); }
+.pl-box.rot .pl-bottom { padding-right: calc(var(--safe-bottom, 0px) + var(--rot-gap)); }
+.pl-box.rot .pl-speed { right: calc(var(--rot-gap) + 24px); }
+.pl-box.rot .pl-eplist { right: calc(var(--rot-gap) + 16px); }
 
 /* Izohlar paneli: `.pl-pane.on` (display:block) `.cm` ning flex ustuni bilan to'qnashmasin — yozish maydoni doim pastda */
 .pl-pane.cm-pane.on { display: flex; flex-direction: column; overflow: hidden; }
+
+/* Aylantirilgan to'liq ekranda tizim tugmalaridan masofa: telefonda 88 px, planshetda (keng ekran) ancha kam */
+:root { --rot-gap: 88px; }
+@media (min-width: 600px) { :root { --rot-gap: 28px; } }
