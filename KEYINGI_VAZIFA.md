@@ -5675,3 +5675,23 @@ avto-kodlash (H.265, 4 sifat, MP4 + fMP4).
   `anibla::resolve_origin` bilan YANGI HLS manzil oladi (eskirmaydi), run
   qayta ishga tushsa tayyor sifatlar (`done`) o'tkazib yuboriladi, qolganlari
   davom etadi. `origin_label` — run log'ida anime va qism nomi.
+
+## Mini App: admin paneli; B2 tozalash olib tashlandi; anime bepul, emoji/GIF/stiker obunali (2026-10)
+
+- `web/src/js/screens/admin.js` + `css/admin.css`: ilovadagi admin paneli
+  nusxasi (Profil -> "Admin paneli", faqat `is_admin`): Animelarni boshqarish
+  (anime/bo'lim qo'shish-tahrirlash-o'chirish, poster Telegram orqali),
+  Foydalanuvchilar (izlash, balans, obuna, bloklash), Shikoyatlar, Emoji/GIF/
+  stiker tasdiqlash, Majburiy obunalar, Umumiy statistika (`openStats`),
+  Kodlash navbati (jonli log), Ilova va xavfsizlik (eng past versiya).
+  Yo'q: qism qo'shish (kodlash botida), foydalanuvchi qurilmalari/statistika
+  oynalari, APK imzosi.
+- "B2 tozalash" butunlay olib tashlandi: ilova tugmasi (`admin_screen.dart`),
+  `b2Cleanup` (`admin_users_service.dart`), worker `b2_cleanup` va
+  `POST /api/admin/b2-cleanup`.
+- NARX (foydalanuvchi): hamma anime BEPUL — qismlar uchun obuna tekshirilmaydi
+  (`/api/tg/deliver` 402 qaytarmaydi, `free` doim `true`); majburiy kanal
+  obunasi (`channels.rs`) o'zgarmadi. Pullik obuna endi FAQAT foydalanuvchi
+  yasagan emoji/GIF/stiker YUBORISH uchun: `needs_pack_sub` (izoh va
+  yordam chati; admin ozod) 402 + "Foydalanuvchilar yasagan emoji, GIF va
+  stikerlarni yuborish uchun obuna kerak". Ko'rish/yaratish obunasiz.
