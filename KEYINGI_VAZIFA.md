@@ -5788,3 +5788,10 @@ Foydalanuvchi talabi: web app faqat fMP4 (MSE) da ishlasin. O'chirildi: `web/src
 `web/src/sw.js` (Service Worker) va `build.mjs` dagi nusxalash; sozlamalardagi "Video formati" bo'limi
 (`aru_mp4`); pleyerdagi format xabari. `chooseSource` faqat fMP4 qaytaradi. `mp4Qualities` qoldi —
 faqat fMP4 tayyorlash navbatiga qo'yish uchun (`url_<q>` bor, `fmp4_url_<q>` yo'q holat).
+
+## Mini App pleyeri: tugmalar bosilishi (2026-10)
+
+Sabab: boshqaruv 5 s da yashirilganda `pointer-events: none` bo'ladi — bosib turgan paytda yashirilsa bosish
+yo'qolardi; gesturada bosish 14 px / 350 ms dan oshsa e'tiborsiz qoldirilardi. Tuzatish (`player-screen.js`):
+tugma bosilganda yashirish taymeri to'xtatiladi, qo'yib yuborilgach qayta ishga tushadi; bosish chegarasi
+24 px / 600 ms; `pointercancel` da holat tozalanadi.

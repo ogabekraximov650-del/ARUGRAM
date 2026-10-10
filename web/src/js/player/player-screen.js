@@ -746,10 +746,11 @@ function buildPlayer(el, route, season, opts) {
   const gest = $('.pl-gest');
   let gdown = null;
   gest.addEventListener('pointerdown', (e) => { gdown = { x: e.clientX, y: e.clientY, t: Date.now() }; });
+  gest.addEventListener('pointercancel', () => { gdown = null; });
   gest.addEventListener('pointerup', (e) => {
     const g = gdown; gdown = null;
     if (!g || !cur) return;
-    if (Math.abs(e.clientX - g.x) > 14 || Math.abs(e.clientY - g.y) > 14 || Date.now() - g.t > 350) return;
+    if (Math.abs(e.clientX - g.x) > 24 || Math.abs(e.clientY - g.y) > 24 || Date.now() - g.t > 600) return;
     if (locked) { showCtl = !showCtl; paintShow(); if (showCtl) { clearTimeout(hideT); hideT = setTimeout(() => { showCtl = false; paintShow(); }, 3000); } return; }
     const r = gest.getBoundingClientRect();
     const side = (isRot() ? e.clientY - r.top < r.height / 2 : e.clientX - r.left < r.width / 2) ? 'l' : 'r';
@@ -794,6 +795,13 @@ function buildPlayer(el, route, season, opts) {
   }
 
   // ── Tugmalar ──────────────────────────────────────────────────
+  // Tugma bosilib turganda boshqaruv avto-yashirilmasin (yashirilsa `pointer-events: none` bo'lib,
+  // bosish yo'qolardi); qo'yib yuborilgach yashirish taymeri qayta ishga tushadi.
+  const ctrlEl = $('.pl-ctrl');
+  ctrlEl.addEventListener('pointerdown', () => { clearTimeout(hideT); }, true);
+  const ctrlRelease = () => { if (showCtl && !locked) scheduleHide(); };
+  ctrlEl.addEventListener('pointerup', ctrlRelease, true);
+  ctrlEl.addEventListener('pointercancel', ctrlRelease, true);
   $('.pl-back').addEventListener('click', () => routerBack());
   $('.pl-center .pp').addEventListener('click', togglePlay);
   $('.pp2').addEventListener('click', togglePlay);
