@@ -475,7 +475,9 @@ function buildPlayer(el, route, season, opts) {
   }
   function clearError() { $('.pl-err').classList.remove('on'); errShown = false; }
 
-  async function playEpisode(e, { resumeMs = null, playing = true, recovery = false } = {}) {
+  let autoRetry = 0;
+  async function playEpisode(e, { resumeMs = null, playing = true, recovery = false, auto = false } = {}) {
+    if (!auto) autoRetry = 0;
     const q = pickQuality(e);
     if (!q) { toast('Bu qism hali tayyor emas'); return; }
     const my = ++token;
@@ -520,7 +522,16 @@ function buildPlayer(el, route, season, opts) {
       eng = await startPlayback(video, e, q, {
         startAt: secs,
         onState: ({ state }) => { if (my !== token) return; busy = state === 'buffering' || state === 'loading'; paintBusy(); },
-        onError: (er) => { if (my === token) showError(er); },
+        onError: (er) => {
+          if (my !== token) return;
+          // Media/append xatosi — pleyerni joriy joydan o'zi qayta ishga tushiradi (2 martagacha).
+          if (autoRetry < 2 && /appendBuffer|append_error|MEDIA_ERR|HTMLMediaElement/i.test(`${er?.message || er}`)) {
+            autoRetry += 1;
+            playEpisode(e, { resumeMs: (pendingT ?? video.currentTime) * 1000, playing: intended, recovery: true, auto: true });
+            return;
+          }
+          showError(er);
+        },
       });
       if (my !== token) { eng?.destroy(); return; }
       await eng.ready;

@@ -194,6 +194,7 @@ export function createEngine(video, { name, key = '', ahead: aheadOpt = 20, behi
   }
 
   let seekReq = 0;
+  let abortPending = false;
   let focus = null; // sek tayyorlanayotgan nuqta (video hali eski joyda o'ynayapti)
   function bufferedAheadAt(t) {
     const r = video.buffered;
@@ -224,10 +225,12 @@ export function createEngine(video, { name, key = '', ahead: aheadOpt = 20, behi
         const B = 256 * 1024;
         const end = seg.start + seg.size;
         file.prefetch(seg.start, seg.size);
+        // Oldingi fragment sek tufayli yarmida uzilgan bo'lsa, parser holatini tozalaymiz (aks holda media xatosi).
+        if (abortPending) { abortPending = false; try { sb.abort(); } catch (_) { /* */ } }
         for (let pos = seg.start; pos < end;) {
           const to = Math.min(end, (Math.floor(pos / B) + 1) * B);
           const data = await file.read(pos, to - pos);
-          if (destroyed || my !== gen) break;
+          if (destroyed || my !== gen) { if (pos > seg.start) abortPending = true; break; }
           try {
             await appendAsync(data);
           } catch (e) {
