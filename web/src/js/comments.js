@@ -510,7 +510,7 @@ export function createCommentsTab(container, { animeId, seasonId, expanded = fal
         </div>`;
       }).join('') + (ctl.hasMore ? `<div class="cm-more-load">${spinner(20, 2, 'rgba(255,255,255,0.38)')}</div>` : '');
       itemsEl.querySelectorAll('.cm-media[data-f]').forEach((n) => renderPackMedia(n, n.dataset.f, n.dataset.t));
-      itemsEl.querySelectorAll('img').forEach((img) => { if (img.complete && !img.naturalWidth) img.remove(); });
+      itemsEl.querySelectorAll('img:not(.pk-msg img)').forEach((img) => { if (img.complete && !img.naturalWidth) img.remove(); });
     }
     changeSubs.forEach((f) => { try { f(); } catch (_) { /* */ } });
   }

@@ -97,43 +97,73 @@ window.addEventListener('aru-playerplay', () => {
   });
 });
 
+// Chat/izohlar ro'yxati qayta chizilganda stiker/GIF "o'chib yonmasin": yuklangan natija keshlanadi va
+// yangi katakka DARHOL (sinxron) qo'yiladi. Bir xil element uchun yuklash bir marta ketadi.
+const mediaCache = new Map(); // kalit -> {th, full, task, waiters:Set}
+let soundKey = null; // ovozi yoqilgan element kaliti (qayta chizilganda saqlanadi)
+
+function mediaBox(size, inner) { return `<div class="pk-msg" style="width:${size}px;height:${size}px">${inner}</div>`; }
+
+function paintMedia(el, key, type, size) {
+  const c = mediaCache.get(key);
+  const phIc = icon(type === 'gif' ? 'gif_box' : 'emoji_emotions', { fill: false, size: 40, color: 'rgba(255,255,255,0.38)' });
+  if (!c || (!c.th && !c.full)) { el.innerHTML = mediaBox(size, phIc); return; }
+  if (!c.full) { el.innerHTML = mediaBox(size, `<img src="${c.th.url}" alt="" draggable="false">`); return; }
+  const vid = c.full.type.startsWith('video');
+  el.innerHTML = mediaBox(size, vid ? `<video src="${c.full.url}" autoplay loop ${soundKey === key ? '' : 'muted'} playsinline></video>` : `<img src="${c.full.url}" alt="" draggable="false">`);
+  if (!vid) return;
+  const box = el.querySelector('.pk-msg');
+  const v = box.querySelector('video');
+  box.insertAdjacentHTML('beforeend', `<div class="pk-spk">${icon(soundKey === key ? 'volume_up' : 'volume_off', { size: 16, color: '#fff' })}</div>`);
+  const spk = box.querySelector('.pk-spk');
+  v.play().catch(() => {});
+  box.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const turnOn = soundKey !== key;
+    document.querySelectorAll('.pk-msg video').forEach((x) => { x.muted = true; const o = x.parentElement?.querySelector('.pk-spk'); if (o) o.innerHTML = icon('volume_off', { size: 16, color: '#fff' }); });
+    soundKey = turnOn ? key : null;
+    v.muted = !turnOn;
+    spk.innerHTML = icon(turnOn ? 'volume_up' : 'volume_off', { size: 16, color: '#fff' });
+    if (turnOn) v.play().catch(() => {});
+    window.dispatchEvent(new CustomEvent('aru-packsound', { detail: { on: turnOn } }));
+  });
+}
+
+window.addEventListener('aru-playerplay', () => {
+  soundKey = null;
+  document.querySelectorAll('.pk-msg video').forEach((x) => {
+    x.muted = true;
+    const o = x.parentElement?.querySelector('.pk-spk');
+    if (o) o.innerHTML = icon('volume_off', { size: 16, color: '#fff' });
+  });
+});
+
 /** Xabar/izoh ichiga stiker yoki GIF qo'yadi (`PackMessage`: GIF 200, stiker 150). */
-export async function renderPackMedia(el, file, type) {
+export function renderPackMedia(el, file, type) {
   const m = /^pk_(\d{1,16})_(\d{1,9})$/.exec(file || '');
   const size = type === 'gif' ? 200 : 150;
-  const ph = (ic) => `<div class="pk-msg" style="width:${size}px;height:${size}px">${ic ? icon(type === 'gif' ? 'gif_box' : 'emoji_emotions', { fill: false, size: 40, color: 'rgba(255,255,255,0.38)' }) : ''}</div>`;
-  el.innerHTML = ph(true);
-  if (!m || !isTelegramAuthorized()) return;
-  try {
-    const p = await packInfo(m[1]);
-    if (!p?.file) return;
-    const hd = await header(p);
-    const it = (hd.h.items || []).find((x) => `${x.i}` === m[2]);
-    if (!it || !el.isConnected) return;
-    const th = await thumbOf(p, hd, it);
-    if (el.isConnected) el.innerHTML = `<div class="pk-msg" style="width:${size}px;height:${size}px"><img src="${th.url}" alt=""></div>`;
-    const full = await itemOf(p, hd, it);
-    if (!el.isConnected) return;
-    const vid = full.type.startsWith('video');
-    el.innerHTML = `<div class="pk-msg" style="width:${size}px;height:${size}px">${vid ? `<video src="${full.url}" autoplay loop muted playsinline></video>` : `<img src="${full.url}" alt="" draggable="false">`}</div>`;
-    // Video/GIF ustiga bosilsa ovozi yoqiladi (ilovadagi PackSoundHub: bir vaqtda bittasida); o'ng pastda karnay belgisi.
-    if (vid) {
-      const box = el.querySelector('.pk-msg');
-      const v = box.querySelector('video');
-      box.insertAdjacentHTML('beforeend', `<div class="pk-spk">${icon('volume_off', { size: 16, color: '#fff' })}</div>`);
-      const spk = box.querySelector('.pk-spk');
-      const paint = () => { spk.innerHTML = icon(v.muted ? 'volume_off' : 'volume_up', { size: 16, color: '#fff' }); };
-      box.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const turnOn = v.muted;
-        document.querySelectorAll('.pk-msg video').forEach((x) => { if (x !== v) { x.muted = true; const o = x.parentElement?.querySelector('.pk-spk'); if (o) o.innerHTML = icon('volume_off', { size: 16, color: '#fff' }); } });
-        v.muted = !turnOn;
-        paint();
-        if (turnOn) v.play().catch(() => {});
-        window.dispatchEvent(new CustomEvent('aru-packsound', { detail: { on: turnOn } }));
-      });
-    }
-  } catch (_) { /* belgi qoladi */ }
+  const key = `${file}|${type}`;
+  let c = mediaCache.get(key);
+  paintMedia(el, key, type, size);
+  if (!m || (c && c.full) || !isTelegramAuthorized()) return;
+  if (!c) {
+    c = { th: null, full: null, waiters: new Set() };
+    mediaCache.set(key, c);
+    c.task = (async () => {
+      try {
+        const p = await packInfo(m[1]);
+        if (!p?.file) throw new Error('no_pack');
+        const hd = await header(p);
+        const it = (hd.h.items || []).find((x) => `${x.i}` === m[2]);
+        if (!it) throw new Error('no_item');
+        c.th = await thumbOf(p, hd, it);
+        c.waiters.forEach((w) => { if (w.isConnected) paintMedia(w, key, type, size); else c.waiters.delete(w); });
+        c.full = await itemOf(p, hd, it);
+        c.waiters.forEach((w) => { if (w.isConnected) paintMedia(w, key, type, size); });
+      } catch (_) { mediaCache.delete(key); }
+    })();
+  }
+  c.waiters.add(el);
 }
 
 // ── Sevimlilar / yaqinda ishlatilganlar (mahalliy) ─────────────
