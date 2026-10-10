@@ -463,5 +463,3 @@ textarea.field { height: auto; min-height: 96px; padding: 12px 14px; resize: non
 input, textarea { font-family: inherit; }
 .emj, .tge-cell, input, textarea { font-family: 'Roboto', 'TgEmoji', sans-serif; }
 
-.aru-wm-box { display: none; }
-.pl-box:fullscreen .aru-wm-box { display: block; }

@@ -12,6 +12,7 @@ on:
       - 'tool/anibla/creds.enc'
       - 'tool/encode/gh_token.enc'
       - 'tool/encode/gh_repo.txt'
+      - 'tool/bot/main_bot.enc'
       - '.github/workflows/deploy-worker.yml'
   workflow_dispatch:
 
@@ -79,7 +80,6 @@ jobs:
           put TURSO_TOKEN "${{ secrets.TURSO_TOKEN }}"
           put B2_KEY_ID "${{ secrets.B2_KEY_ID }}"
           put B2_APPLICATION_KEY "${{ secrets.B2_APPLICATION_KEY }}"
-          put TELEGRAM_BOT_TOKEN "${{ secrets.TELEGRAM_BOT_TOKEN }}"
           # tezcheck.uz — balans to'ldirish to'lov havolalari uchun.
           put TEZCHECK_TOKEN "${{ secrets.TEZCHECK_TOKEN }}"
           put TEZCHECK_DESK "${{ secrets.TEZCHECK_DESK }}"
@@ -147,6 +147,19 @@ jobs:
               echo "✅ GH_ACTIONS_TOKEN va GH_REPO shifrlangan fayldan o'rnatildi"
             else
               echo "⚠️  gh_token.enc ochilmadi — eski GH_ACTIONS_TOKEN saqlanadi"
+            fi
+          fi
+          # Asosiy bot (`TELEGRAM_BOT_TOKEN`): `tool/bot/main_bot.enc` (AES-256-CBC, PBKDF2),
+          # `ENCODE_TOKEN` bilan ochiladi. Bot almashsa shu fayl qayta shifrlanadi.
+          if [ -f ../tool/bot/main_bot.enc ]; then
+            K=$(printf '%s' "${{ secrets.ENCODE_TOKEN }}" | tr -d '[:space:]')
+            MB=$(K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K \
+              -in ../tool/bot/main_bot.enc 2>/dev/null | tr -d '[:space:]')
+            if [ -n "$MB" ]; then
+              put TELEGRAM_BOT_TOKEN "$MB"
+              echo "✅ TELEGRAM_BOT_TOKEN shifrlangan fayldan o'rnatildi"
+            else
+              echo "⚠️  main_bot.enc ochilmadi — eski TELEGRAM_BOT_TOKEN saqlanadi"
             fi
           fi
 
