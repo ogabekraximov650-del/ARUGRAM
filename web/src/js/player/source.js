@@ -92,8 +92,12 @@ export async function chooseSource(ep, q) {
   const mp4 = fileNameOf(ep?.[`url_${q}`]);
   const fmp4 = fileNameOf(ep?.[`fmp4_url_${q}`]);
   const mse = engineSupported();
-  const sw = devicePlatform() === 'ios' ? false : await mp4Streaming();
-  const order = devicePlatform() === 'ios' ? ['fmp4', 'mp4'] : ['mp4', 'fmp4'];
+  // Oddiy MP4 (Service Worker) HOZIRCHA faqat yoqib qo'yilsa (localStorage aru_mp4=1):
+  // Androidda video ochilmay, aylanib turib qolgan — fMP4 + MSE sinalgan yo'l, standart.
+  let optIn = false;
+  try { optIn = localStorage.getItem('aru_mp4') === '1'; } catch (_) { /* */ }
+  const sw = optIn && devicePlatform() !== 'ios' ? await mp4Streaming() : false;
+  const order = devicePlatform() === 'ios' || !optIn ? ['fmp4', 'mp4'] : ['mp4', 'fmp4'];
   for (const kind of order) {
     if (kind === 'mp4' && mp4 && sw) return { kind, name: mp4 };
     if (kind === 'fmp4' && fmp4 && mse) return { kind, name: fmp4 };

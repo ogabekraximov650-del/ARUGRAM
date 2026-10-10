@@ -5714,3 +5714,6 @@ avto-kodlash (H.265, 4 sifat, MP4 + fMP4).
 - Ko'rish joyi (`watchProgress`) kaliti qurilmadan qat'i nazar bir xil (MP4 nomi).
 - Tekshirilmagan: haqiqiy Android Telegram'da SW ishlashi (Telegram WebView
   Service Worker'ni o'chirgan bo'lishi mumkin — shunda fMP4 ga tushadi).
+- MP4 (Service Worker) yo'li o'chirildi-default: Androidda video ochilmay aylanib
+  qoldi. Endi standart — fMP4 + MSE; MP4 faqat `localStorage.aru_mp4='1'` bilan
+  yoqiladi va 15 s ichida ochilmasa o'zi fMP4 ga o'tadi.

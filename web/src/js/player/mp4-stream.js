@@ -105,8 +105,10 @@ export function createMp4Stream(video, { name, startAt = 0, onState = () => {}, 
     video.addEventListener('error', onErr);
     video.src = `/__aru/mp4/${id}.mp4`;
     await new Promise((res, rej) => {
-      const ok = () => { video.removeEventListener('loadedmetadata', ok); video.removeEventListener('error', bad); res(); };
-      const bad = () => { video.removeEventListener('loadedmetadata', ok); video.removeEventListener('error', bad); rej(new Error('mp4_open_failed')); };
+      // 15 s ichida metadata kelmasa — manba ishlamayapti: fMP4 ga o'tiladi (abadiy aylanib turmasin).
+      const tm = setTimeout(() => bad(), 15000);
+      const ok = () => { clearTimeout(tm); video.removeEventListener('loadedmetadata', ok); video.removeEventListener('error', bad); res(); };
+      const bad = () => { clearTimeout(tm); video.removeEventListener('loadedmetadata', ok); video.removeEventListener('error', bad); rej(new Error('mp4_open_failed')); };
       video.addEventListener('loadedmetadata', ok);
       video.addEventListener('error', bad);
     });
