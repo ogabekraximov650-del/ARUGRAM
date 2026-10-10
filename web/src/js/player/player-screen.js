@@ -476,6 +476,22 @@ function buildPlayer(el, route, season, opts) {
   function clearError() { $('.pl-err').classList.remove('on'); errShown = false; }
 
   let autoRetry = 0;
+  let lastDown = 0;
+  /** Internet sekin (qayta-qayta qotyapti) — keyingi pastroq tayyor sifatga o'tadi. */
+  function maybeDowngrade(e, { count, kbps, needKbps }) {
+    if (userChose || cur !== e || Date.now() - lastDown < 30000) return;
+    const slow = kbps > 0 && needKbps > 0 && kbps < needKbps * 1.15;
+    if (!(count >= 3 || (count >= 2 && slow))) return;
+    const have = fmp4Qualities(e);
+    const curQ = pickQuality(e);
+    const lower = have.filter((x) => QUALITIES.indexOf(x) > QUALITIES.indexOf(curQ))[0];
+    if (!lower) return;
+    lastDown = Date.now();
+    selQ = lower;
+    toast(`Internet sekin — ${lower} ga o'tildi`);
+    playEpisode(e, { resumeMs: (pendingT ?? video.currentTime) * 1000, playing: intended, recovery: true, auto: true });
+  }
+
   async function playEpisode(e, { resumeMs = null, playing = true, recovery = false, auto = false } = {}) {
     if (!auto) autoRetry = 0;
     const q = pickQuality(e);
@@ -522,10 +538,12 @@ function buildPlayer(el, route, season, opts) {
       eng = await startPlayback(video, e, q, {
         startAt: secs,
         onState: ({ state }) => { if (my !== token) return; busy = state === 'buffering' || state === 'loading'; paintBusy(); },
+        shouldPlay: () => my === token && intended && !document.hidden,
+        onStall: (info) => { if (my === token) maybeDowngrade(e, info); },
         onError: (er) => {
           if (my !== token) return;
-          // Media/append xatosi — pleyerni joriy joydan o'zi qayta ishga tushiradi (2 martagacha).
-          if (autoRetry < 2 && /appendBuffer|append_error|MEDIA_ERR|HTMLMediaElement/i.test(`${er?.message || er}`)) {
+          // Media/append yoki tarmoq xatosi — pleyerni joriy joydan o'zi qayta ishga tushiradi (3 martagacha).
+          if (autoRetry < 3 && /appendBuffer|append_error|MEDIA_ERR|HTMLMediaElement|chunk_timeout|download_failed|timeout|network|connect|fetch|socket/i.test(`${er?.message || er?.text || er}`)) {
             autoRetry += 1;
             playEpisode(e, { resumeMs: (pendingT ?? video.currentTime) * 1000, playing: intended, recovery: true, auto: true });
             return;
@@ -560,7 +578,8 @@ function buildPlayer(el, route, season, opts) {
         if (my !== token || !intended) { done(); return; }
         const d = video.duration || 0;
         const ahead = bufferedEnd() - video.currentTime;
-        if (ahead >= Math.min(1.5, Math.max(0.5, d - video.currentTime - 0.3)) || Date.now() - t0 > 20000) done();
+        // Sekin internetda 1.5 s bilan boshlansa darhol qotadi — kamida 3 s kutiladi.
+        if (ahead >= Math.min(3, Math.max(0.5, d - video.currentTime - 0.3)) || Date.now() - t0 > 25000) done();
         else { busy = true; paintBusy(); }
       };
       const iv = setInterval(check, 150);
@@ -580,7 +599,8 @@ function buildPlayer(el, route, season, opts) {
   function togglePlay() {
     if (!cur) return;
     if (errShown) return;
-    if (!video.paused && !video.ended) { intended = false; video.pause(); }
+    // Qotgani uchun pauzada ushlab turilgan bo'lsa ham — bu "o'ynayapti" holati.
+    if ((!video.paused && !video.ended) || eng?.holding) { intended = false; eng?.cancelHold?.(); video.pause(); }
     else {
       intended = true;
       if (video.ended || (video.duration && video.duration - video.currentTime < 3)) video.currentTime = 0;
@@ -954,7 +974,7 @@ function buildPlayer(el, route, season, opts) {
   let pausedByPack = false;
   const onPackSound = (e) => {
     if (e.detail?.on) {
-      if (cur && !video.paused && !video.ended) { pausedByPack = true; intended = false; video.pause(); paintPP(); paintEps(); }
+      if (cur && ((!video.paused && !video.ended) || eng?.holding)) { eng?.cancelHold?.(); pausedByPack = true; intended = false; video.pause(); paintPP(); paintEps(); }
     } else if (pausedByPack) {
       pausedByPack = false; intended = true; video.play().catch(() => {}); paintPP(); paintEps();
     }

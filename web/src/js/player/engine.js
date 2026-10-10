@@ -11,8 +11,15 @@
 //   ftyp | moov (bo'sh jadvallar) | sidx (video) | sidx (audio) | moof+mdat ...
 // `sidx` — "qaysi soniya qaysi baytda" jadvali: surish (seek) shu bilan.
 //
-//   const eng = createEngine(videoEl, { name, key, onState, onError, ahead })
-//   await eng.ready;     eng.duration;   eng.destroy();
+//   const eng = createEngine(videoEl, { name, key, onState, onError, onStall, shouldPlay, ahead })
+//   await eng.ready;     eng.duration;   eng.holding;   eng.cancelHold();   eng.destroy();
+//
+// Sekin internet uchun:
+//   * oldinda bir nechta fragment PARALLEL yuklanadi (tarmoq bo'sh turmaydi);
+//   * qotib qolsa (`waiting`) pleyer pauzada "ushlab turiladi" va bufer
+//     yetarli to'lgach (3 s, keyin 6 s, 10 s ...) davom etadi — har soniyada
+//     to'xtab-yurish o'rniga bitta qisqa kutish;
+//   * `onStall({count, kbps, needKbps})` — pleyer sifatni pasaytirishi uchun.
 
 import { openFile } from '../tg/media.js';
 
@@ -135,7 +142,7 @@ export function engineSupported() {
  * `name` — fMP4 fayl nomi (kanalda), `key` — AES-CTR kaliti (hex).
  * `ahead` — oldindan yuklanadigan oyna (soniya): 20 s (ilova buferi 15..30 s).
  */
-export function createEngine(video, { name, key = '', ahead: aheadOpt = 20, behind = 10, startAt = 0, onState = () => {}, onError = () => {} }) {
+export function createEngine(video, { name, key = '', ahead: aheadOpt = 60, behind = 10, startAt = 0, onState = () => {}, onError = () => {}, onStall = () => {}, shouldPlay = () => true }) {
   const MS = window.ManagedMediaSource || window.MediaSource;
   let file = null;
   let ms = null;
@@ -147,11 +154,17 @@ export function createEngine(video, { name, key = '', ahead: aheadOpt = 20, behi
   let destroyed = false;
   let streaming = true; // ManagedMediaSource "hozir yuklash mumkin" belgisi
   let objectUrl = '';
-  const MAX_AHEAD = 55; // bufer 1 daqiqadan oshmasin
+  const MAX_AHEAD = 90; // bufer 1.5 daqiqadan oshmasin (xotira)
+  const PREFETCH_BYTES = 12 * 1024 * 1024; // oldindan parallel so'raladigan hajm
   let ahead = Math.min(MAX_AHEAD, aheadOpt);
   let duration = 0;
   let gen = 0; // seek'dan keyin eski yuklashlar tashlanadi
   let gapT = 0;
+  // Qotish (rebuffer) boshqaruvi.
+  let played = false; // birinchi `playing` bo'ldimi
+  let holding = false; // qotgani uchun pauzada ushlab turilibdi
+  let stalls = 0;
+  const RESUME_GOALS = [3, 6, 10, 15];
 
   const st = (s, extra = {}) => { if (!destroyed) onState({ state: s, ...extra }); };
 
@@ -215,11 +228,18 @@ export function createEngine(video, { name, key = '', ahead: aheadOpt = 20, behi
         if (!streaming) break;
         if (bufferedAheadAt(focus ?? video.currentTime) > ahead) break;
         const seg = segs[next];
-        st(video.readyState < 3 ? 'buffering' : 'playing');
-        // Keyingi fragmentni ham oldindan so'rab qo'yamiz (tarmoq bo'sh turmasin).
-        // Faqat keyingi fragment oldindan so'raladi (ortiqcha yuklanmasin, boshlanish sekinlashmasin).
-        const n2 = segs[next + 1];
-        if (n2 && n2.size <= 6 * 1024 * 1024) file.prefetch(n2.start, n2.size);
+        st(holding || video.readyState < 3 ? 'buffering' : 'playing');
+        // Oldindagi fragmentlar ham parallel so'rab qo'yiladi (tarmoq bo'sh turmasin,
+        // sekin/uzoq ulanishda bir vaqtda bir nechta so'rov tezlikni oshiradi).
+        // Chegara: `ahead` soniya va PREFETCH_BYTES — ortiqcha yuklanmasin.
+        {
+          const tEnd = (focus ?? video.currentTime) + ahead;
+          let bytes = seg.size;
+          for (let k = next + 1; k < segs.length && bytes < PREFETCH_BYTES && segs[k].time < tEnd; k++) {
+            file.prefetch(segs[k].start, segs[k].size);
+            bytes += segs[k].size;
+          }
+        }
         // Fragment 256 KB bo'laklar bilan keladi va keldi-keldisiga qo'shiladi (butun fragment kutilmaydi):
         // o'ynash tezroq boshlanadi, sekdan keyin ham kutish kam.
         const B = 256 * 1024;
@@ -235,8 +255,12 @@ export function createEngine(video, { name, key = '', ahead: aheadOpt = 20, behi
             await appendAsync(data);
           } catch (e) {
             if (e?.name === 'QuotaExceededError') {
+              // Xotira to'ldi: orqadagini o'chirib, oldinga oynani kichraytiramiz.
+              ahead = Math.max(12, Math.floor(ahead * 0.7));
               await trimBehind();
               await removeAsync(video.currentTime + ahead, duration);
+              await new Promise((r) => setTimeout(r, 500));
+              if (destroyed || my !== gen) break;
               continue;
             }
             throw e;
@@ -272,8 +296,31 @@ export function createEngine(video, { name, key = '', ahead: aheadOpt = 20, behi
   }
 
   const onTime = () => { if (!pumping) pump(); };
-  const onWaiting = () => st('buffering');
-  const onPlaying = () => st('playing');
+  // Qotdi: video pauzada ushlab turiladi, bufer maqsadga yetgach davom etadi
+  // (aks holda brauzer har 0.3 s ma'lumotda yurib, yana to'xtaydi).
+  const onWaiting = () => {
+    st('buffering');
+    if (!played || holding || video.seeking || focus != null || video.ended) return;
+    if (duration - video.currentTime < 1) return;
+    stalls += 1;
+    holding = true;
+    try { video.pause(); } catch (_) { /* */ }
+    try { onStall({ count: stalls, kbps: file?.rateKbps?.() || 0, needKbps: needKbps() }); } catch (_) { /* */ }
+    pump();
+  };
+  const onPlaying = () => { played = true; st('playing'); };
+  function needKbps() { return duration > 0 && file ? Math.round((file.size * 8) / duration / 1000) : 0; }
+  function checkHold() {
+    if (!holding) return;
+    if (!shouldPlay()) { holding = false; return; }
+    const goal = RESUME_GOALS[Math.min(stalls - 1, RESUME_GOALS.length - 1)];
+    const left = Math.max(0.3, duration - video.currentTime - 0.3);
+    if (bufferedAhead() >= Math.min(goal, left) || (next >= segs.length && !pumping)) {
+      holding = false;
+      st('playing');
+      video.play().catch(() => {});
+    } else st('buffering');
+  }
 
   const ready = (async () => {
     st('loading');
@@ -331,19 +378,27 @@ export function createEngine(video, { name, key = '', ahead: aheadOpt = 20, behi
     // Bo'shliqdan sakrash: bufer joriy joydan biroz keyin boshlansa (B-kadr/tekislash)
     // video qotib qolmasin.
     gapT = setInterval(() => {
-      if (destroyed || video.readyState >= 3) return;
+      if (destroyed) return;
+      checkHold();
+      if (video.readyState >= 3) { if (!pumping && next < segs.length && bufferedAhead() <= ahead) pump(); return; }
       const t = video.currentTime; const r = video.buffered;
       for (let i = 0; i < r.length; i++) {
         if (r.start(i) > t && r.start(i) - t < 1.5) { try { video.currentTime = r.start(i) + 0.02; } catch (_) { /* */ } return; }
       }
       if (!pumping && next < segs.length && bufferedAhead() <= ahead) pump();
-    }, 500);
+    }, 250);
   })();
   ready.catch((e) => { if (!destroyed) onError(e); });
 
   return {
     ready,
     get duration() { return duration; },
+    /** Qotgani uchun pauzada ushlab turilibdimi (foydalanuvchi pauzasi emas). */
+    get holding() { return holding; },
+    /** Foydalanuvchi pauza bosdi — ushlab turish bekor (o'zi davom etmaydi). */
+    cancelHold() { holding = false; },
+    /** Yuklash tezligi va videoning o'rtacha bitreyti (kbit/s). */
+    health() { return { kbps: file?.rateKbps?.() || 0, needKbps: needKbps(), stalls }; },
     /** Boshlanish nuqtasi (to'xtagan joydan davom etish). */
     startAt(sec) {
       ready.then(() => { video.currentTime = Math.max(0, Math.min(sec, duration - 1)); });

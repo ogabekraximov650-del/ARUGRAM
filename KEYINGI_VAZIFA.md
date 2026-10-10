@@ -5608,3 +5608,18 @@ QOLGAN: emoji panelining GIF/Stiker/maxsus emoji oynalari Mini App'ga hali ko'ch
   `anibla_years` (config) da saqlanadi. Yil tugmasi "📅 2026-yil · 53 ta anime";
   bosilsa `media/mobile?years=2026` (sayt filtri, sinab tasdiqlangan) —
   oddiy ro'yxat (`listing`, `nav.c = "y:2026"`, sahifalash ishlaydi).
+
+## Mini App pleyeri: sekin internetda silliq ijro (2026-10)
+
+- `web/src/js/tg/media-impl.js`: har `upload.getFile` so'roviga 25 s taymaut
+  (osilib qolgan so'rov qayta yuboriladi), tarmoq xatosida 30 tagacha urinish
+  (oldin 5 ta edi — keyin "Video ochilmadi" chiqardi), parallel so'rov 6 ta,
+  `rateKbps()` — yuklash tezligi.
+- `web/src/js/player/engine.js`: bufer oldinga 60 s (max 90 s); oldindagi
+  fragmentlar 12 MB gacha parallel so'raladi; qotsa (`waiting`) video pauzada
+  ushlab turiladi va bufer 3/6/10/15 s to'lgach davom etadi (to'xtab-yurish
+  o'rniga); `onStall` chaqiriladi.
+- `player-screen.js`: boshlashdan oldin 3 s bufer; 2-3 marta qotsa va tezlik
+  bitreytdan past bo'lsa — keyingi pastroq tayyor sifatga avtomatik o'tadi
+  (foydalanuvchi sifatni o'zi tanlagan bo'lsa — yo'q); tarmoq xatosida
+  joriy joydan 3 martagacha o'zi qayta ochadi.

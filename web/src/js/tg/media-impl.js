@@ -25,7 +25,17 @@ import { getClient, tgConfig, isAuthorized, authorizedCached } from './client.js
 import { openTelegramLogin } from './login.js';
 
 const CHUNK = 1024 * 1024; // Telegram upload.getFile: bir so'rovda ko'pi bilan 1 MB
-const MAX_PAR = 5; // bir vaqtda ketadigan upload.getFile so'rovlari
+const MAX_PAR = 6; // bir vaqtda ketadigan upload.getFile so'rovlari
+const REQ_TIMEOUT = 25000; // javobsiz qolgan so'rov shu vaqtdan keyin qayta yuboriladi
+const NET_TRIES = 30; // tarmoq xatosida urinishlar (sekin/uzilgan internetda video to'xtab qolmasin)
+
+function withTimeout(p, ms) {
+  let t = 0;
+  return Promise.race([
+    p,
+    new Promise((_, j) => { t = setTimeout(() => j(new Error('chunk_timeout')), ms); }),
+  ]).finally(() => clearTimeout(t));
+}
 let parActive = 0; const parQ = [];
 async function limited(fn) {
   if (parActive >= MAX_PAR) await new Promise((r) => parQ.push(r));
@@ -179,30 +189,41 @@ export async function openFile(name, { key = '' } = {}) {
   const hex = key || keys.get(name) || '';
   const cache = new Map(); // bo'lak raqami -> Promise<Uint8Array>
   const ORDER = [];
-  const MAX_CACHE = 96;
+  const MAX_CACHE = 64;
+  let closed = false;
+  const done = []; // [vaqt, bayt] — tezlikni o'lchash uchun (oxirgi 20 s)
+  const opened = Date.now();
 
   async function chunk(idx) {
     if (cache.has(idx)) return cache.get(idx);
     const p = (async () => {
       const off = idx * CHUNK;
       const lim = Math.min(CHUNK, doc.size - off);
-      for (let attempt = 0; attempt < 5; attempt++) {
+      let refreshes = 0;
+      for (let attempt = 0; attempt < NET_TRIES; attempt++) {
+        if (closed) throw new Error('aborted');
         try {
-          const raw = await limited(() => cl.downloadChunk({ location: doc.media, offset: off, limit: CHUNK }));
+          // Taymaut `limited` ichida: osilib qolgan so'rov navbatdagi o'rinni band qilib turmaydi.
+          const raw = await limited(() => withTimeout(cl.downloadChunk({ location: doc.media, offset: off, limit: CHUNK }), REQ_TIMEOUT));
           const part = raw.length > lim ? raw.subarray(0, lim) : raw;
+          done.push([Date.now(), part.length]);
+          if (done.length > 200) done.splice(0, done.length - 200);
           return await ctrApply(hex, off, part);
         } catch (e) {
           const t = `${e?.text || e?.message || ''}`;
-          if (/FILE_REFERENCE|MEDIA_EMPTY|not_in_chat/.test(t) && attempt < 4) {
+          if (/FILE_REFERENCE|MEDIA_EMPTY|not_in_chat/.test(t) && refreshes < 4) {
             // Nusxa eskirgan yoki o'chirilgan — qayta yetkaziladi.
+            refreshes += 1;
             docs.delete(name);
             await locate([name], { force: true });
             doc = docs.get(name);
             continue;
           }
-          if (attempt === 4) throw e;
+          // Tuzalmaydigan xatolar (hisob/ruxsat) — darhol; tarmoq xatolari — qayta-qayta.
+          if (/AUTH_KEY|SESSION_REVOKED|USER_DEACTIVATED|FILE_ID_INVALID|LIMIT_INVALID|OFFSET_INVALID/.test(t)) throw e;
+          if (attempt === NET_TRIES - 1) throw e;
           const fw = /FLOOD(?:_PREMIUM)?_WAIT_(\d+)/.exec(t);
-          await new Promise((r) => setTimeout(r, fw ? Math.min(15, +fw[1]) * 1000 : 400 * (attempt + 1)));
+          await new Promise((r) => setTimeout(r, fw ? Math.min(15, +fw[1]) * 1000 : Math.min(5000, 400 * 2 ** Math.min(attempt, 4))));
         }
       }
       throw new Error('download_failed');
@@ -240,7 +261,15 @@ export async function openFile(name, { key = '' } = {}) {
       const end = Math.min(doc.size, offset + length);
       for (let i = Math.floor(offset / CHUNK); i <= Math.floor((end - 1) / CHUNK); i++) chunk(i).catch(() => {});
     },
-    close() { cache.clear(); },
+    /** So'nggi ~20 s dagi yuklash tezligi (kbit/s). */
+    rateKbps() {
+      const now = Date.now();
+      const win = Math.max(3000, Math.min(20000, now - opened));
+      let b = 0;
+      for (const [t, n] of done) if (now - t <= win) b += n;
+      return Math.round((b * 8) / win);
+    },
+    close() { closed = true; cache.clear(); },
   };
 }
 
