@@ -900,7 +900,9 @@ function buildPlayer(el, route, season, opts) {
     try {
       if (on) {
         nativeFs = false;
-        try { await document.documentElement.requestFullscreen?.({ navigationUI: 'hide' }); nativeFs = !!document.fullscreenElement; } catch (_) { /* */ }
+        // Avval pleyer ramkasi (video kabi — Android'da tizim tugmalari yashirinib, faqat surganda chiqadi), keyin butun sahifa.
+        try { await box.requestFullscreen?.({ navigationUI: 'hide' }); nativeFs = !!document.fullscreenElement; } catch (_) { /* */ }
+        if (!nativeFs) { try { await document.documentElement.requestFullscreen?.({ navigationUI: 'hide' }); nativeFs = !!document.fullscreenElement; } catch (_) { /* */ } }
         if (nativeFs) await screen.orientation?.lock?.('landscape').catch(() => {});
         else tg?.requestFullscreen?.();
         await new Promise((r) => setTimeout(r, 250));

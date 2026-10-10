@@ -241,3 +241,7 @@
 /* Aylantirilgan to'liq ekranda tizim tugmalaridan masofa: telefonda 88 px, planshetda (keng ekran) ancha kam */
 :root { --rot-gap: 88px; }
 @media (min-width: 600px) { :root { --rot-gap: 28px; } }
+
+/* Qulflangan holatda "ochish" tugmasi: aylantirilgan rejimda tizim tugmalari yoniga tushmasin */
+.pl-box.rot .pl-unlock { right: calc(var(--safe-bottom, 0px) + var(--rot-gap)); top: calc(10px + var(--safe-top, 0px) + var(--content-top, 0px)); padding: 12px 14px; }
+.pl-box.fs .pl-unlock { padding: 12px 14px; }
