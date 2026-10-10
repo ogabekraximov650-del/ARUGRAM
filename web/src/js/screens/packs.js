@@ -7,12 +7,13 @@
 
 import { api, currentUser } from '../api.js';
 import { push, back as routerBack } from '../router.js';
-import { icon, spinner, bindTap, toast, appBar, bindAppBar, confirmDialog, promptDialog, dialog, emptyGlass } from '../ui.js';
+import { icon, spinner, bindTap, toast, appBar, bindAppBar, confirmDialog, promptDialog, dialog, emptyGlass, haptic } from '../ui.js';
 import { esc } from '../format.js';
 import { putPack, flushNow } from '../sync.js';
 import { ensureTelegram, openFile, uploadFile, isTelegramAuthorized } from '../tg/media.js';
 
 const KINDS = [['sticker', 'Stikerlar'], ['emoji', 'Emojilar'], ['gif', 'GIFlar']];
+const SINGLE = { sticker: 'Stiker', emoji: 'Emoji', gif: 'GIF' };
 const kindLabel = (k) => (KINDS.find((x) => x[0] === k) || [0, k])[1];
 const MAX_ITEM = 5 * 1024 * 1024;
 
@@ -70,8 +71,9 @@ async function loadLibrary() {
 }
 const newId = () => (Math.floor(Math.random() * 0x7ffffffe) + 1) * 2097152 + Math.floor(Math.random() * 2097152);
 function op(key, data) { putPack(key, data); flushNow?.(); }
+export const packOp = op;
 
-export { lib, loadLibrary, header as packHeader, thumbOf as packThumb, itemOf as packItem };
+export { lib, loadLibrary, header as packHeader, thumbOf as packThumb, itemOf as packItem, packInfo };
 
 // ── Xabar ichidagi stiker / GIF (`pk_<to'plam>_<element>`) ─────────
 const infos = new Map();
@@ -134,140 +136,274 @@ export async function renderPackMedia(el, file, type) {
   } catch (_) { /* belgi qoladi */ }
 }
 
-function packRow(p, { sub, owner } = {}) {
-  return `<div class="pk-row" data-id="${p.id}">
-    <div class="pk-ic">${icon(p.kind === 'gif' ? 'gif_box' : p.kind === 'emoji' ? 'mood' : 'sticky_note_2', { size: 26, color: '#E2620F' })}</div>
-    <div class="pk-tx"><div class="n1">${esc(p.title)}</div>
-      <div class="n2">${kindLabel(p.kind)} · ${p.items} ta${owner && p.owner_name ? ` · ${esc(p.owner_name)}` : ''}</div></div>
-    ${sub ? icon('check_circle', { size: 20, color: '#4ADE80' }) : ''}${icon('chevron_right', { size: 22, color: 'rgba(255,255,255,0.4)' })}</div>`;
+// ── Sevimlilar / yaqinda ishlatilganlar (mahalliy) ─────────────
+const LS_FAV = 'aru_pk_fav'; const LS_REC = 'aru_pk_rec';
+const lsGet = (k) => { try { return JSON.parse(localStorage.getItem(k) || '[]'); } catch (_) { return []; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (_) { /* */ } };
+const same = (a, b) => a.kind === b.kind && a.pack === b.pack && a.item === b.item;
+export const packFavorites = (kind) => lsGet(LS_FAV).filter((x) => x.kind === kind);
+export const packRecents = (kind) => lsGet(LS_REC).filter((x) => x.kind === kind);
+export const isPackFavorite = (p) => lsGet(LS_FAV).some((x) => same(x, p));
+export function togglePackFavorite(p) {
+  const l = lsGet(LS_FAV); const i = l.findIndex((x) => same(x, p));
+  if (i >= 0) l.splice(i, 1); else l.unshift({ kind: p.kind, pack: p.pack, item: p.item, emoji: p.emoji || '' });
+  lsSet(LS_FAV, l.slice(0, 120));
+}
+export function notePackRecent(p) {
+  const l = lsGet(LS_REC).filter((x) => !same(x, p));
+  l.unshift({ kind: p.kind, pack: p.pack, item: p.item, emoji: p.emoji || '' });
+  lsSet(LS_REC, l.slice(0, 80));
+}
+export function usablePacks(kind) {
+  const seen = new Set();
+  return [...lib.mine, ...lib.subs].filter((p) => p.kind === kind && p.file && !seen.has(p.id) && seen.add(p.id));
+}
+export const packSingle = (k) => SINGLE[k] || k;
+
+/** Bosib turish tugmasi: qisqa bosish — onTap, uzoq (450 ms) — onLong. */
+export function bindPress(el, { onTap, onLong, scale = 0.9 }) {
+  let t = 0; let sx = 0; let sy = 0; let live = false; let long = false;
+  const clear = () => { clearTimeout(t); el.style.transform = ''; };
+  el.addEventListener('pointerdown', (e) => {
+    sx = e.clientX; sy = e.clientY; live = true; long = false;
+    el.style.transition = 'transform 90ms ease-out'; el.style.transform = `scale(${scale})`;
+    t = setTimeout(() => { if (live && onLong) { long = true; live = false; clear(); haptic('light'); onLong(); } }, 450);
+  });
+  el.addEventListener('pointermove', (e) => { if (live && (Math.abs(e.clientX - sx) > 10 || Math.abs(e.clientY - sy) > 10)) { live = false; clear(); } });
+  el.addEventListener('pointerup', () => { const was = live; live = false; clear(); if (was && !long) onTap?.(); });
+  el.addEventListener('pointercancel', () => { live = false; clear(); });
+  el.addEventListener('contextmenu', (e) => e.preventDefault());
 }
 
-export function openMyPacks() {
+/** Katta ko'rinish + menyu (Telegram'dagidek bosib turganda). */
+export async function showPackPreview({ pick, aspect = 1, actions = [] }) {
+  const app = document.getElementById('app');
+  const wrap = document.createElement('div');
+  wrap.className = 'pkp-wrap';
+  const w = Math.min(window.innerWidth * 0.72, 300);
+  const h = Math.min(w / (aspect || 1), window.innerHeight * 0.42);
+  wrap.innerHTML = `<div class="pkp"><div class="pkp-img" style="width:${aspect >= 1 ? w : h * aspect}px;height:${aspect >= 1 ? w / aspect : h}px"></div>
+    <div class="pkp-menu">${actions.map((a, i) => `<div class="pkp-it${a.danger ? ' danger' : ''}" data-i="${i}">${icon(a.icon, { size: 22, fill: false, color: a.danger ? '#E5484D' : '#fff' })}<span>${esc(a.text)}</span></div>`).join('')}</div></div>`;
+  app.appendChild(wrap);
+  requestAnimationFrame(() => wrap.classList.add('in'));
+  const close = () => { wrap.classList.remove('in'); setTimeout(() => wrap.remove(), 180); };
+  wrap.addEventListener('click', (e) => {
+    const it = e.target.closest('.pkp-it');
+    if (it) { const a = actions[+it.dataset.i]; close(); a?.run?.(); return; }
+    if (!e.target.closest('.pkp-img')) close();
+  });
+  wrap.addEventListener('contextmenu', (e) => e.preventDefault());
+  try {
+    const p = await packInfo(pick.pack);
+    const hd = await header(p);
+    const it = (hd.h.items || []).find((x) => x.i === pick.item);
+    const full = await itemOf(p, hd, it);
+    const box = wrap.querySelector('.pkp-img');
+    if (box?.isConnected) box.innerHTML = full.type.startsWith('video') ? `<video src="${full.url}" autoplay loop muted playsinline></video>` : `<img src="${full.url}" alt="" draggable="false">`;
+  } catch (_) { /* */ }
+}
+
+// ── Qutilar ──────────────────────────────────────────────────────
+const fmtSize = (b) => (b <= 0 ? '0 KB' : b < 1048576 ? `${Math.ceil(b / 1024)} KB` : `${(b / 1048576).toFixed(1)} MB`);
+
+function coverHtml(size) { return `<div class="pkh-cover" style="width:${size}px;height:${size}px"></div>`; }
+async function fillCover(box, p, size) {
+  box.innerHTML = icon(p.kind === 'gif' ? 'gif_box' : 'emoji_emotions', { fill: false, size: 24, color: 'rgba(255,255,255,0.38)' });
+  if (!p.file || !isTelegramAuthorized()) return;
+  try {
+    const hd = await header(p);
+    const it = (hd.h.items || [])[0];
+    if (!it) return;
+    const th = await thumbOf(p, hd, it);
+    if (box.isConnected) box.innerHTML = `<img src="${th.url}" alt="" style="width:${size - 12}px;height:${size - 12}px">`;
+  } catch (_) { /* */ }
+}
+
+function tileHtml(p, { mine, ops = [] } = {}) {
+  const waiting = ops.filter((o) => o.op === 'add' && o.state !== 'rejected').length;
+  const rejected = ops.filter((o) => o.op === 'add' && o.state === 'rejected').length;
+  return `<div class="pkh-tile" data-id="${p.id}">${coverHtml(52)}
+    <div class="tx"><div class="n1">${esc(p.title)}</div>
+      <div class="n2${rejected ? ' warn' : ''}">${p.items} ta · ${fmtSize(p.bytes)}${waiting ? ` · ${waiting} ta kutmoqda` : ''}${rejected ? ` · ${rejected} ta rad etilgan` : ''}</div></div>
+    ${icon('chevron_right', { size: 24, color: 'rgba(255,255,255,0.38)' })}</div>`;
+}
+
+// ── "Emoji, GIF va stikerlar" ekrani (`my_packs_screen.dart`) ─────
+export function openMyPacks(initialKind = 'sticker') {
   push((el) => {
-    let page = 0; let pub = null; let disposed = false;
-    el.innerHTML = `${appBar({ title: "To'plamlarim", actions: `<button class="icon-btn pk-new">${icon('add', { size: 24 })}</button>` })}
-      <div class="pk-tabs">${['Mening', 'Obunalar', 'Ommaviy'].map((t, i) => `<div class="pk-tab" data-i="${i}">${t}</div>`).join('')}</div>
-      <div class="scroll pk-body"></div>`;
+    let kind = KINDS.some((k) => k[0] === initialKind) ? initialKind : 'sticker';
+    let disposed = false;
+    el.innerHTML = `${appBar({ title: 'Emoji, GIF va stikerlar' })}
+      <div class="pkh-kinds">${KINDS.map(([k, l]) => `<div class="pkh-kind" data-k="${k}">${l}</div>`).join('')}</div>
+      <div class="scroll pkh-body"></div>
+      <div class="pkh-fab">${icon('add', { size: 24, color: '#fff' })}<span>Yangi to'plam</span></div>`;
     bindAppBar(el);
-    const body = el.querySelector('.pk-body');
+    const body = el.querySelector('.pkh-body');
     const paint = () => {
-      el.querySelectorAll('.pk-tab').forEach((t) => t.classList.toggle('on', +t.dataset.i === page));
-      const list = page === 0 ? lib.mine : page === 1 ? lib.subs : pub;
-      if (list == null || (page < 2 && !lib.loaded)) { body.innerHTML = `<div class="center-box">${spinner(36, 3)}</div>`; return; }
-      if (!list.length) { body.innerHTML = emptyGlass('folder_open', page === 0 ? "Sizda hali to'plam yo'q" : page === 1 ? "Obuna bo'lgan to'plamlar yo'q" : "Ommaviy to'plamlar yo'q", page === 0 ? "Yuqoridagi + tugmasi bilan yangisini yarating" : ''); return; }
-      body.innerHTML = `<div class="pk-list">${list.map((p) => packRow(p, { sub: page === 2 && p.sub, owner: page === 2 })).join('')}</div><div class="bottom-space"></div>`;
-      body.querySelectorAll('.pk-row').forEach((n) => bindTap(n, () => {
-        const p = list.find((x) => `${x.id}` === n.dataset.id);
-        if (p) openPackDetail(p, { mine: page === 0 }, () => refresh());
-      }));
-    };
-    const refresh = async () => { await loadLibrary(); if (page === 2) pub = (await api('/api/packs/public').catch(() => ({ packs: [] }))).packs; if (!disposed) paint(); };
-    el.querySelectorAll('.pk-tab').forEach((t) => t.addEventListener('click', async () => {
-      page = +t.dataset.i; paint();
-      if (page === 2 && pub == null) { pub = (await api('/api/packs/public').catch(() => ({ packs: [] }))).packs; if (!disposed) paint(); }
-    }));
-    el.querySelector('.pk-new').addEventListener('click', async () => {
-      let kind = 'sticker';
-      const ok = await dialog({
-        title: "Yangi to'plam",
-        content: (b) => {
-          b.innerHTML = `<div class="pk-kinds">${KINDS.map(([k, l]) => `<div class="pk-kind${k === kind ? ' on' : ''}" data-k="${k}">${l}</div>`).join('')}</div>`;
-          b.querySelectorAll('.pk-kind').forEach((n) => n.addEventListener('click', () => { kind = n.dataset.k; b.querySelectorAll('.pk-kind').forEach((m) => m.classList.toggle('on', m === n)); }));
-        },
-        actions: [{ text: 'Bekor qilish', value: false }, { text: 'Davom etish', value: true, primary: true }],
+      el.querySelectorAll('.pkh-kind').forEach((n) => n.classList.toggle('on', n.dataset.k === kind));
+      const uid = currentUser()?.id;
+      const mine = lib.mine.filter((p) => p.kind === kind);
+      const subs = lib.subs.filter((p) => p.kind === kind);
+      const plural = kindLabel(kind).toLowerCase();
+      body.innerHTML = `<div class="pkh-in">${!uid ? `<div class="pkh-hint">To'plam yaratish uchun hisobingizga kiring.</div>` : `
+        <div class="pkh-sec">Mening to'plamlarim</div>
+        ${mine.length ? mine.map((p) => tileHtml(p, { mine: true, ops: lib.ops.filter((o) => o.pack === p.id) })).join('')
+    : `<div class="pkh-hint">${!lib.loaded ? 'Yuklanmoqda...' : `Hali to'plam yo'q. "Yangi to'plam" tugmasi bilan o'zingiznikini yarating: rasmlar admin ko'rib chiqqach to'plamga qo'shiladi.`}</div>`}
+        <div style="height:14px"></div>
+        <div class="pkh-sec">Qo'shilgan to'plamlar</div>
+        ${subs.length ? subs.map((p) => tileHtml(p)).join('') : `<div class="pkh-hint">Boshqalarning to'plamlarini pastdagi tugma orqali qo'shing.</div>`}
+        <div class="pkh-browse">${icon('explore', { size: 24, color: '#E2620F' })}<span>Ommaviy ${esc(plural)}ni ko'rish</span>${icon('chevron_right', { size: 24, color: 'rgba(255,255,255,0.38)' })}</div>`}
+        <div style="height:110px"></div></div>`;
+      body.querySelectorAll('.pkh-tile').forEach((n) => {
+        const p = [...mine, ...subs].find((x) => `${x.id}` === n.dataset.id);
+        if (!p) return;
+        fillCover(n.querySelector('.pkh-cover'), p, 52);
+        bindTap(n, () => openPackDetail(p, { mine: mine.includes(p) }, refresh), { scale: false });
       });
-      if (ok !== true) return;
-      const title = ((await promptDialog("To'plam nomi", { maxLength: 40, ok: 'Yaratish' })) || '').trim();
+      const br = body.querySelector('.pkh-browse');
+      if (br) bindTap(br, () => openPackBrowse(kind, refresh), { scale: false });
+      el.querySelector('.pkh-fab').style.display = uid ? '' : 'none';
+    };
+    const refresh = async () => { await loadLibrary(); if (!disposed) paint(); };
+    el.querySelectorAll('.pkh-kind').forEach((n) => n.addEventListener('click', () => { kind = n.dataset.k; paint(); }));
+    el.querySelector('.pkh-fab').addEventListener('click', async () => {
+      if (lib.mine.length >= 30) { toast("30 tadan ko'p to'plam yaratib bo'lmaydi"); return; }
+      const title = ((await promptDialog(`Yangi ${packSingle(kind).toLowerCase()} to'plami`, { maxLength: 40, ok: 'Yaratish', placeholder: "To'plam nomi" })) || '').trim();
       if (!title) return;
       const id = newId();
       op(`p:new:${id}`, { op: 'new', id, kind, title });
-      lib.mine = [{ id, kind, title, file: '', version: 0, items: 0, bytes: 0, owner_id: currentUser()?.id }, ...lib.mine];
-      page = 0; paint(); toast("To'plam yaratildi");
+      const np = { id, kind, title, file: '', version: 0, items: 0, bytes: 0, owner_id: currentUser()?.id };
+      lib.mine = [np, ...lib.mine];
+      paint(); openPackDetail(np, { mine: true }, refresh);
     });
     refresh(); paint();
     return { dispose() { disposed = true; } };
   });
 }
 
+// ── Ommaviy to'plamlar (`PackBrowseScreen`) ──────────────────────
+export function openPackBrowse(kind, onChange = () => {}) {
+  push((el) => {
+    let disposed = false; let list = []; let more = true; let loading = false; let before = 0; let failed = false;
+    el.innerHTML = `${appBar({ title: `Ommaviy ${kindLabel(kind).toLowerCase()}` })}<div class="scroll pkh-body"></div>`;
+    bindAppBar(el);
+    const body = el.querySelector('.pkh-body');
+    const paint = () => {
+      body.innerHTML = `<div class="pkh-in">${list.map((p) => tileHtml(p)).join('')}
+        ${loading ? `<div class="center-box" style="height:80px">${spinner(30, 3)}</div>` : ''}
+        ${!loading && !list.length ? emptyGlass('folder_open', failed ? "Yuklab bo'lmadi" : "Ommaviy to'plamlar yo'q") : ''}
+        <div style="height:40px"></div></div>`;
+      body.querySelectorAll('.pkh-tile').forEach((n) => {
+        const p = list.find((x) => `${x.id}` === n.dataset.id);
+        if (!p) return;
+        fillCover(n.querySelector('.pkh-cover'), p, 52);
+        bindTap(n, () => openPackDetail(p, { mine: false }, () => { onChange(); }), { scale: false });
+      });
+    };
+    async function next() {
+      if (!more || loading) return;
+      loading = true; failed = false; paint();
+      try {
+        const j = await api(`/api/packs/public?kind=${kind}${before ? `&before=${before}` : ''}`);
+        const r = j.packs || [];
+        list = list.concat(r.filter((p) => !list.some((x) => x.id === p.id)));
+        more = r.length >= 30;
+        if (r.length) before = r[r.length - 1].created_at || 0;
+      } catch (_) { failed = true; more = false; }
+      loading = false; if (!disposed) paint();
+    }
+    body.addEventListener('scroll', () => { if (body.scrollTop + body.clientHeight > body.scrollHeight - 300) next(); }, { passive: true });
+    next();
+    return { dispose() { disposed = true; } };
+  });
+}
+
+// ── To'plam ekrani (`pack_detail_screen.dart`) ───────────────────
 export function openPackDetail(p, { mine = false } = {}, onChange = () => {}) {
   push((el) => {
     let disposed = false; let sub = !!p.sub || lib.subs.some((x) => x.id === p.id);
-    const myOps = () => lib.ops.filter((o) => o.pack === p.id);
-    el.innerHTML = `${appBar({ title: esc(p.title), sub: `${kindLabel(p.kind)} · ${p.items} ta`, actions: mine
-      ? `<button class="icon-btn pk-add">${icon('add_photo_alternate', { size: 24 })}</button><button class="icon-btn pk-del">${icon('delete', { fill: false, size: 24 })}</button>`
-      : `<button class="icon-btn pk-sub"></button>` })}
-      <div class="scroll pk-body"></div><input type="file" accept="image/*,video/mp4,video/webm" hidden class="pk-file">`;
+    const admin = currentUser()?.is_admin === true || currentUser()?.isAdmin === true;
+    const myOps = () => lib.ops.filter((o) => o.pack === p.id && o.op === 'add');
+    el.innerHTML = `${appBar({ title: esc(p.title), actions: (mine || admin) ? `<button class="icon-btn pk-del">${icon('delete', { fill: false, size: 24 })}</button>` : '' })}
+      <div class="scroll pk-body"></div>
+      ${mine ? `<div class="pkh-fab">${icon('add_photo_alternate', { size: 24, color: '#fff' })}<span>Qo'shish</span></div>` : ''}
+      <input type="file" accept="image/*,video/mp4,video/webm" hidden class="pk-file">`;
     bindAppBar(el);
     const body = el.querySelector('.pk-body');
-    const subBtn = el.querySelector('.pk-sub');
-    const paintSub = () => { if (subBtn) subBtn.innerHTML = icon(sub ? 'bookmark_added' : 'bookmark_add', { size: 24, color: sub ? '#4ADE80' : '#fff' }); };
-    subBtn?.addEventListener('click', () => { sub = !sub; op(`p:sub:${p.id}`, { op: 'sub', pack: p.id, on: sub }); paintSub(); toast(sub ? "Obuna bo'ldingiz" : 'Obuna bekor qilindi'); onChange(); });
-    paintSub();
+    const cols = p.kind === 'gif' ? 3 : 4;
 
     async function paint() {
-      const ops = myOps();
-      const opsHtml = mine && ops.length ? `<div class="pk-ops">${ops.map((o) => `<div class="pk-op ${o.state}">${icon(o.state === 'rejected' ? 'cancel' : 'hourglass_top', { size: 16, color: o.state === 'rejected' ? '#E5484D' : '#FFC93C' })}
-        <span>${o.state === 'rejected' ? `Rad etildi${o.reason ? `: ${esc(o.reason)}` : ''}` : "Ko'rib chiqilmoqda"}</span>
-        ${o.state === 'rejected' ? `<button data-o="${o.id}">Tozalash</button>` : ''}</div>`).join('')}</div>` : '';
-      if (!p.file) { body.innerHTML = `${opsHtml}${emptyGlass('image', "Bu to'plamda hali element yo'q", mine ? "Yuqoridagi tugma bilan rasm qo'shing — admin tasdiqlagach paydo bo'ladi" : '')}`; bindOps(); return; }
-      body.innerHTML = `${opsHtml}<div class="center-box">${spinner(36, 3)}</div>`; bindOps();
+      const ops = mine ? myOps() : [];
+      const subline = `${packSingle(p.kind)} · ${p.items} ta${p.owner_name ? ` · ${esc(p.owner_name)}` : ''}`;
+      const subBar = !mine && p.owner_id ? `<div class="pkd-sub${sub ? ' on' : ''}">${sub ? "Qo'shilgan — olib tashlash" : "To'plamni qo'shish"}</div>` : '';
+      const label = (o) => ({ queued: 'Yuborilmoqda...', pending: "Admin ko'rib chiqmoqda", approved: "Tasdiqlandi — to'plamga qo'shilmoqda", rejected: `Rad etildi: ${o.reason || "sabab ko'rsatilmagan"}` }[o.state] || o.state);
+      const opsHtml = ops.length ? `<div class="pkd-ops"><div class="hd"><span>Yuborilgan rasmlar</span>${ops.some((o) => o.state === 'rejected') ? `<b class="clr">Rad etilganlarni tozalash</b>` : ''}</div>
+        ${ops.map((o) => `<div class="it"><i class="dot ${o.state}"></i><span>${esc(label(o))}</span></div>`).join('')}</div>` : '';
+      const head = `<div class="pkd-in"><div class="pkd-line">${subline}</div>${subBar}${opsHtml}`;
+      const bindTop = () => {
+        body.querySelector('.pkd-sub')?.addEventListener('click', () => {
+          sub = !sub; op(`p:sub:${p.id}`, { op: 'sub', pack: p.id, on: sub });
+          if (sub) lib.subs = [p, ...lib.subs.filter((x) => x.id !== p.id)]; else lib.subs = lib.subs.filter((x) => x.id !== p.id);
+          toast(sub ? "Obuna bo'ldingiz" : 'Obuna bekor qilindi'); onChange(); paint();
+        });
+        body.querySelector('.clr')?.addEventListener('click', () => {
+          ops.filter((o) => o.state === 'rejected').forEach((o) => op(`p:clear:${o.id}`, { op: 'clear', pack: p.id, id: o.id }));
+          lib.ops = lib.ops.filter((o) => !(o.pack === p.id && o.state === 'rejected')); paint();
+        });
+      };
+      if (!p.file) {
+        body.innerHTML = `${head}<div class="pkh-hint c" style="margin-top:30px">${mine ? `To'plam bo'sh. "Qo'shish" tugmasi bilan rasm yoki video yuboring — admin tasdiqlagach shu yerda ko'rinadi.` : "To'plam hali bo'sh."}</div></div>`;
+        bindTop(); return;
+      }
+      body.innerHTML = `${head}<div class="center-box" style="height:140px">${spinner(34, 3)}</div></div>`; bindTop();
       let hd;
       try { hd = await header(p); } catch (e) {
-        if (!disposed) body.innerHTML = `${opsHtml}${emptyGlass('error', "To'plamni ochib bo'lmadi", `${e?.message === 'tg_login_cancelled' ? "Avval Telegram hisobini ulang" : "Internetni tekshirib qayta urinib ko'ring"}`)}`;
+        if (!disposed) body.innerHTML = `${head}${emptyGlass('error', "To'plamni ochib bo'lmadi", `${e?.message === 'tg_login_cancelled' ? 'Avval Telegram hisobini ulang' : `${e?.message || ''}`}`)}</div>`;
         return;
       }
       if (disposed) return;
       const items = hd.h.items || [];
-      body.innerHTML = `${opsHtml}<div class="pk-grid pk-${p.kind}">${items.map((it) => `<div class="pk-cell" data-i="${it.i}"><div class="ph"></div></div>`).join('')}</div><div class="bottom-space"></div>`;
-      bindOps();
-      body.querySelectorAll('.pk-cell').forEach((cell) => {
+      body.innerHTML = `${head}<div class="pkd-grid" style="grid-template-columns:repeat(${cols},1fr)">${items.map((it) => `<div class="pkd-cell" data-i="${it.i}"></div>`).join('')}</div><div style="height:110px"></div></div>`;
+      bindTop();
+      body.querySelectorAll('.pkd-cell').forEach((cell) => {
         const it = items.find((x) => `${x.i}` === cell.dataset.i);
-        thumbOf(p, hd, it).then((b) => { if (!disposed) cell.querySelector('.ph').innerHTML = `<img src="${b.url}" alt="">`; }).catch(() => {});
-        bindTap(cell, () => preview(p, hd, it, mine));
+        thumbOf(p, hd, it).then((b) => { if (!disposed) cell.innerHTML = `<img src="${b.url}" alt="" draggable="false">`; }).catch(() => {});
+        bindTap(cell, () => openItem(hd, it), { scale: false });
       });
-    }
-    function bindOps() {
-      body.querySelectorAll('.pk-op button').forEach((b) => b.addEventListener('click', () => {
-        const id = +b.dataset.o; op(`p:clear:${id}`, { op: 'clear', pack: p.id, id });
-        lib.ops = lib.ops.filter((o) => o.id !== id); paint();
-      }));
     }
 
-    async function preview(pk, hd, it, canRemove) {
-      const full = await itemOf(pk, hd, it).catch(() => null);
-      dialog({
-        title: it.e ? esc(it.e) : '',
+    async function openItem(hd, it) {
+      const full = await itemOf(p, hd, it).catch(() => null);
+      const act = await dialog({
         cls: 'pk-prev',
-        content: (b, close) => {
-          b.innerHTML = `<div class="pk-big">${!full ? spinner(36, 3) : full.type.startsWith('video') ? `<video src="${full.url}" autoplay loop muted playsinline></video>` : `<img src="${full.url}" alt="">`}</div>`;
+        content: (b) => {
+          b.innerHTML = `<div class="pk-big">${!full ? spinner(36, 3) : full.type.startsWith('video') ? `<video src="${full.url}" autoplay loop playsinline></video>` : `<img src="${full.url}" alt="" draggable="false">`}</div>${it.e ? `<div class="pk-em">${esc(it.e)}</div>` : ''}`;
         },
-        actions: [{ text: 'Yopish', value: 'x' }, ...(canRemove ? [{ text: "O'chirish", value: 'rm', danger: true }] : [])],
-      }).then(async (v) => {
-        if (v !== 'rm') return;
-        if (await confirmDialog("Elementni o'chirish", "Bu elementni to'plamdan o'chirasizmi?", { ok: "O'chirish", danger: true })) {
-          op(`p:rm:${p.id}:${it.i}`, { op: 'remove', pack: p.id, item: it.i }); toast("O'chirish navbatga qo'yildi");
-        }
+        actions: [{ text: 'Yopish', value: 'x' }, ...(mine ? [{ text: "To'plamdan olib tashlash", value: 'rm', danger: true }] : [])],
       });
+      if (act === 'rm' && await confirmDialog("Elementni o'chirish", "Bu element to'plamdan olib tashlansinmi?", { ok: 'Olib tashlash', danger: true })) {
+        op(`p:rm:${p.id}:${it.i}`, { op: 'remove', pack: p.id, item: it.i }); toast("O'chirish navbatga qo'yildi");
+      }
     }
 
     el.querySelector('.pk-del')?.addEventListener('click', async () => {
-      if (!(await confirmDialog("To'plamni o'chirish", `"${esc(p.title)}" to'plamini o'chirasizmi?`, { ok: "O'chirish", danger: true }))) return;
+      if (!(await confirmDialog("To'plamni o'chirish", "To'plam butunlay o'chirilsinmi? Uni qo'shgan foydalanuvchilarda ham yo'qoladi.", { ok: "O'chirish", danger: true }))) return;
       op(`p:del:${p.id}`, { op: 'delete', pack: p.id });
       lib.mine = lib.mine.filter((x) => x.id !== p.id); onChange(); routerBack();
     });
     const fileEl = el.querySelector('.pk-file');
-    el.querySelector('.pk-add')?.addEventListener('click', () => fileEl.click());
+    el.querySelector('.pkh-fab')?.addEventListener('click', () => fileEl.click());
     fileEl.addEventListener('change', async () => {
       const f = fileEl.files?.[0]; fileEl.value = '';
       if (!f) return;
       if (f.size > MAX_ITEM) { toast(`Fayl 5 MB dan katta (${(f.size / 1048576).toFixed(1)} MB)`); return; }
       const head = new Uint8Array(await f.slice(0, 32).arrayBuffer());
-      if (sniff(head) === 'application/octet-stream') { toast('Faqat rasm (PNG, JPG, GIF, WebP) yoki video (MP4, WebM) mumkin'); return; }
+      if (sniff(head) === 'application/octet-stream') { toast("Faqat rasm (PNG, JPG, GIF, WebP) yoki video (MP4, WebM) mumkin"); return; }
       const emoji = Array.from(((await promptDialog('Mos emoji', { placeholder: '😀', maxLength: 8 })) || '').replace(/[\[\]]/g, '')).slice(0, 3).join('');
       const uid = currentUser()?.id || 0;
       const name = `pki_${uid}_${Date.now()}_${Math.floor(Math.random() * 0xffff).toString(16)}.bin`;
       toast('Yuklanmoqda...', 8000);
-      try { await uploadFile(f, name); } catch (e) { toast(e?.message === 'tg_not_ready' ? 'Avval Telegram hisobini ulang' : 'Yuklab bo\'lmadi — qayta urinib ko\'ring'); return; }
+      try { await uploadFile(f, name); } catch (e) { toast(e?.message === 'tg_not_ready' ? 'Avval Telegram hisobini ulang' : "Yuklab bo'lmadi — qayta urinib ko'ring"); return; }
       op(`p:add:${name}`, { op: 'add', pack: p.id, file: name, emoji, size: f.size });
       lib.ops = [{ id: -Date.now(), pack: p.id, op: 'add', file: name, state: 'pending', reason: '' }, ...lib.ops];
       toast("Yuborildi — admin ko'rib chiqadi"); paint();

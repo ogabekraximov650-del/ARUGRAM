@@ -429,7 +429,7 @@ export function createCommentsTab(container, { animeId, seasonId, expanded = fal
   function setExpandedReq(v) {
     if (isExpanded === v) return;
     const now = Date.now();
-    if (now - lastToggle < 400) return;
+    if (now - lastToggle < 700) return;
     lastToggle = now;
     onExpanded?.(v);
   }
@@ -437,8 +437,8 @@ export function createCommentsTab(container, { animeId, seasonId, expanded = fal
   listEl.addEventListener('scroll', () => {
     const left = listEl.scrollHeight - listEl.clientHeight - listEl.scrollTop;
     if (left < 400) ctl.loadMore();
+    // Faqat yuqoriga surilganda kattalashadi; kichrayish — tepada pastga tortilganda (touchmove), o'z-o'zidan emas.
     if (listEl.scrollTop > 24) setExpandedReq(true);
-    else if (listEl.scrollTop <= 2) setExpandedReq(false);
   }, { passive: true });
 
   // Tepadan tortib yangilash (`RefreshIndicator`).
@@ -449,6 +449,7 @@ export function createCommentsTab(container, { animeId, seasonId, expanded = fal
     if (listEl.scrollTop <= 0 && y > py && !refreshing) {
       pull = Math.min(100, y - py);
       pullEl.style.height = `${pull * 0.6}px`;
+      if (isExpanded && y - py > 60) setExpandedReq(false);
     }
   }, { passive: true });
   listEl.addEventListener('touchend', async () => {

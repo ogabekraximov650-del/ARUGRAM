@@ -275,7 +275,7 @@
 .tge-bs.down { transform: scale(0.86); transition: transform 90ms ease-out; }
 
 /* ── Emoji paneli: GIF / Stiker sahifalari ── */
-.tge-pkv { position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; padding: 0 5px; }
+.tge-pkv { position: absolute; inset: 0; overflow: hidden; }
 .tge-pkv::-webkit-scrollbar { display: none; }
 .tge-pkin { padding-top: 6px; }
 .tge-pkgrid { display: grid; gap: 4px; padding: 0 0 6px; min-height: 60px; }
@@ -297,3 +297,33 @@
 .pk-msg { position: relative; }
 .pk-spk { position: absolute; right: 6px; bottom: 6px; padding: 4px; border-radius: 50%; background: rgba(0, 0, 0, 0.54); display: flex; pointer-events: none; }
 .pk-msg { contain: layout paint; flex: none; }
+
+/* ── Emoji paneli: GIF / Stiker sahifalari (`pack-panel.js`) ── */
+.tgp { position: absolute; inset: 0; }
+.tgp-strip { top: 0; }
+.tgp-scroll { position: absolute; inset: 40px 0 0 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+.tgp-scroll.gif { inset: 0; }
+.tgp-scroll::-webkit-scrollbar { display: none; }
+.tgp-q { padding: 0; }
+.tgp-qin { height: 42px; margin: 4px 10px; background: rgba(255, 255, 255, 0.07); border-radius: 22px; display: flex; align-items: center; }
+.tgp-qin .s { display: flex; align-items: center; gap: 8px; padding: 0 12px 0 14px; cursor: pointer; flex-shrink: 0; }
+.tgp-qin .s span { max-width: 90px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #8E8E93; font-size: 16px; }
+.tgp-qin .s span.has { color: #fff; }
+.tgp-qin .ch { flex: 1; display: flex; overflow-x: auto; padding-right: 8px; min-width: 0; }
+.tgp-qin .ch::-webkit-scrollbar { display: none; }
+.tgp-qin .c { width: 40px; height: 34px; margin: 4px 1px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; border-radius: 16px; font-size: 21px; line-height: 1.1; cursor: pointer; font-family: 'Roboto', 'TgEmoji', sans-serif; }
+.tgp-qin .c.on { background: rgba(255, 255, 255, 0.16); }
+.tgp-grid { display: grid; }
+.tgp-cell { padding: 3px; cursor: pointer; }
+.tgp-cell .in { width: 100%; height: 100%; border-radius: 12px; overflow: hidden; display: flex; align-items: center; justify-content: center; }
+.tgp-cell img { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+.tgp-row { display: flex; gap: 2px; margin-bottom: 2px; }
+.tgp-gc { flex-shrink: 0; overflow: hidden; cursor: pointer; background: rgba(255, 255, 255, 0.04); }
+.tgp-gc img { width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+.tge-head.tap { cursor: pointer; }
+.tgp-empty { min-height: 260px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 0 32px; }
+.tgp-empty .t { margin-top: 12px; color: rgba(255, 255, 255, 0.8); font-size: 16px; font-weight: 600; }
+.tgp-empty .s { margin-top: 6px; color: rgba(255, 255, 255, 0.5); font-size: 13px; line-height: 1.5; }
+.tgp-empty .b { margin-top: 16px; padding: 10px 18px; border-radius: 18px; background: var(--accent); color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; }
+.tge-tab .cv { width: 26px; height: 26px; border-radius: 8px; overflow: hidden; display: block; background: rgba(255, 255, 255, 0.06); }
+.tge-tab .cv img { width: 100%; height: 100%; object-fit: cover; }

@@ -40,7 +40,7 @@
 /* ── Ekran ────────────────────────────────────────────────────── */
 .pl { background: var(--bg); }
 .pl-main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.pl-top-part { flex-shrink: 0; max-height: 1000px; overflow: hidden; transition: max-height 220ms ease-out; }
+.pl-top-part { flex-shrink: 0; max-height: var(--tp-h, 1000px); overflow: hidden; transition: max-height 220ms ease-out; }
 .pl.cx .pl-top-part { max-height: 0; }
 .pl-head { display: flex; align-items: center; padding: 12px 16px 8px; }
 .pl-head .gbtn { width: 40px; height: 40px; border-radius: 14px; background: var(--card); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }

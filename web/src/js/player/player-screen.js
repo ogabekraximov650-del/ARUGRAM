@@ -378,6 +378,7 @@ function buildPlayer(el, route, season, opts) {
   }
   const baseInfo = () => info || new SeasonInfo({ season: { ...season }, rating: 0, myStars: 0, isFav: false });
 
+  let tpT = 0;
   function setTab(i) {
     tab = i;
     panes.forEach((p, k) => p.classList.toggle('on', k === i));
@@ -386,7 +387,13 @@ function buildPlayer(el, route, season, opts) {
     if (i === 3 && !commentsCtl) {
       commentsCtl = createCommentsTab(panes[3], {
         animeId: A, seasonId: S, expanded: false,
-        onExpanded: (v) => { el.classList.toggle('cx', !!v); commentsCtl?.setExpanded(!!v); },
+        onExpanded: (v) => {
+          // Haqiqiy balandlikdan silliq animatsiya (ilovadagi AnimatedAlign 220 ms): max-height 1000 px dan emas.
+          const tp = $('.pl-top-part');
+          tp.style.setProperty('--tp-h', `${tp.scrollHeight}px`);
+          el.classList.toggle('cx', !!v); commentsCtl?.setExpanded(!!v);
+          clearTimeout(tpT); if (!v) tpT = setTimeout(() => tp.style.removeProperty('--tp-h'), 300);
+        },
       });
     }
     if (i !== 3) { el.classList.remove('cx'); commentsCtl?.setExpanded(false); }
