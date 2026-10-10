@@ -24,7 +24,7 @@ import { api, apiPost, ApiError } from '../api.js';
 import { getClient, tgConfig, isAuthorized, authorizedCached } from './client.js';
 import { openTelegramLogin } from './login.js';
 
-const CHUNK = 512 * 1024; // 1 MB emas (kerakli baytlar), lekin juda mayda ham emas: so'rovlar soni FLOOD'ga olib kelmasin
+const CHUNK = 1024 * 1024; // Telegram upload.getFile: bir so'rovda ko'pi bilan 1 MB
 const MAX_PAR = 5; // bir vaqtda ketadigan upload.getFile so'rovlari
 let parActive = 0; const parQ = [];
 async function limited(fn) {
