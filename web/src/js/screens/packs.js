@@ -106,15 +106,21 @@ export async function renderPackMedia(el, file, type) {
     if (!el.isConnected) return;
     const vid = full.type.startsWith('video');
     el.innerHTML = `<div class="pk-msg" style="width:${size}px;height:${size}px">${vid ? `<video src="${full.url}" autoplay loop muted playsinline></video>` : `<img src="${full.url}" alt="" draggable="false">`}</div>`;
-    // Video/GIF ustiga bosilsa ovozi yoqiladi (ilovadagi PackSoundHub: bir vaqtda bittasida).
+    // Video/GIF ustiga bosilsa ovozi yoqiladi (ilovadagi PackSoundHub: bir vaqtda bittasida); o'ng pastda karnay belgisi.
     if (vid) {
-      const v = el.querySelector('video');
-      el.querySelector('.pk-msg').addEventListener('click', (e) => {
+      const box = el.querySelector('.pk-msg');
+      const v = box.querySelector('video');
+      box.insertAdjacentHTML('beforeend', `<div class="pk-spk">${icon('volume_off', { size: 16, color: '#fff' })}</div>`);
+      const spk = box.querySelector('.pk-spk');
+      const paint = () => { spk.innerHTML = icon(v.muted ? 'volume_off' : 'volume_up', { size: 16, color: '#fff' }); };
+      box.addEventListener('click', (e) => {
         e.stopPropagation();
-        const on = v.muted;
-        document.querySelectorAll('.pk-msg video').forEach((x) => { x.muted = true; });
-        v.muted = !on ? true : false;
-        if (!v.muted) v.play().catch(() => {});
+        const turnOn = v.muted;
+        document.querySelectorAll('.pk-msg video').forEach((x) => { if (x !== v) { x.muted = true; const o = x.parentElement?.querySelector('.pk-spk'); if (o) o.innerHTML = icon('volume_off', { size: 16, color: '#fff' }); } });
+        v.muted = !turnOn;
+        paint();
+        if (turnOn) v.play().catch(() => {});
+        window.dispatchEvent(new CustomEvent('aru-packsound', { detail: { on: turnOn } }));
       });
     }
   } catch (_) { /* belgi qoladi */ }

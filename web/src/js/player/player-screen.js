@@ -903,6 +903,16 @@ function buildPlayer(el, route, season, opts) {
     else if (intended && cur && !errShown) video.play().catch(() => {});
   };
   document.addEventListener('visibilitychange', onVis);
+  // Izohdagi GIF ovozi yoqilsa pleyer pauza bo'ladi, o'chirilsa davom etadi.
+  let pausedByPack = false;
+  const onPackSound = (e) => {
+    if (e.detail?.on) {
+      if (cur && !video.paused && !video.ended) { pausedByPack = true; intended = false; video.pause(); paintPP(); paintEps(); }
+    } else if (pausedByPack) {
+      pausedByPack = false; intended = true; video.play().catch(() => {}); paintPP(); paintEps();
+    }
+  };
+  window.addEventListener('aru-packsound', onPackSound);
 
   // ── Boshlash ──────────────────────────────────────────────────
   paintTitle(); paintNav(); paintInfo(); paintEps(); paintSeasons();
@@ -926,6 +936,7 @@ function buildPlayer(el, route, season, opts) {
       token += 1;
       clearTimeout(hideT); clearTimeout(noticeT); clearTimeout(singleT); clearInterval(sleepT);
       document.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('aru-packsound', onPackSound);
       window.removeEventListener('resize', applyRot);
       document.removeEventListener('fullscreenchange', onFsChange);
       try { if (document.fullscreenElement) document.exitFullscreen(); } catch (_) { /* */ }
