@@ -423,11 +423,23 @@ function buildPlayer(el, route, season, opts) {
 
   function afterEps() { paintEps(); paintNav(); autoOpen(); }
 
+  // To'xtagan joy kaliti qism bo'yicha — sifat va format (MP4/fMP4) o'zgarsa ham bitta.
+  // (Avval fayl nomi bo'yicha edi: formatni tanlash kiritilgach saqlash va o'qish turli kalit
+  // ishlatib, eski nuqtadan boshlanardi.)
+  const progKey = (e) => `pg:${toI(e?.anime_id) || A}:${toI(e?.season_id) || S}:${epId(e)}`;
   function savedPosMs(e) {
-    const q = qualitiesOf(e)[0] || '';
-    const name = fileNameOf(e[`fmp4_url_${q}`] || e[`url_${q}`]);
-    const local = name ? watchProgress.positionOf(name) : null;
-    if (local != null) return local;
+    const own = watchProgress.positionOf(progKey(e));
+    if (own != null) return own;
+    // Eski yozuvlar (fayl nomi bo'yicha): hamma sifat va format ichidan eng kattasi.
+    let best = null;
+    for (const q of QUALITIES) {
+      for (const f of ['url_', 'fmp4_url_']) {
+        const n = fileNameOf(e[`${f}${q}`]);
+        const p = n ? watchProgress.positionOf(n) : null;
+        if (p != null && (best == null || p > best)) best = p;
+      }
+    }
+    if (best != null) return best;
     const h = watchHistory.findEpisode(A, S, epId(e));
     return h && h.positionMs > 0 ? h.positionMs : null;
   }
@@ -533,8 +545,7 @@ function buildPlayer(el, route, season, opts) {
         }
         waiting = '';
       }
-      // Progress kaliti qurilmadan qat'i nazar bir xil: oddiy MP4 nomi (bo'lmasa fMP4).
-      curName = fileNameOf(e[`url_${q}`]) || fileNameOf(e[`fmp4_url_${q}`]);
+      curName = progKey(e);
       const secs = start && start > 0 ? start / 1000 : 0;
       eng = await startPlayback(video, e, q, {
         startAt: secs,

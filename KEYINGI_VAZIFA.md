@@ -5769,3 +5769,7 @@ boshqa metod yurmaydigan ALOHIDA ulanishlarda.
   qayta urinilmaydi (havodagisi `AbortController` bilan to'xtatiladi), bekor qilingan bo'lak
   talab bo'lsa qayta so'raladi; kesh "oxirgi ishlatilgan" vaqti 5 s da bir paketda yoziladi.
   Diagnostika: `window.__aruCache` ({hit, miss, cancelled}) — konsolda.
+- TO'XTAGAN JOY (foydalanuvchi: 15:00 gacha ko'rdim, qayta kirsam 4:13 dan boshlandi): format tanlash
+  kiritilgach saqlash kaliti (`curName` = MP4 nomi) va o'qish kaliti (`savedPosMs` = fMP4 nomi)
+  farq qilib qolgan edi. Endi ikkalasi bitta qism kaliti: `pg:<anime>:<bo'lim>:<qism>`
+  (sifat va formatga bog'liq emas); eski fayl-nomi yozuvlari bo'lsa, ulardan eng kattasi olinadi.
