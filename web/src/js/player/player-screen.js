@@ -479,6 +479,7 @@ function buildPlayer(el, route, season, opts) {
     const q = pickQuality(e);
     if (!q) { toast('Bu qism hali tayyor emas'); return; }
     const my = ++token;
+    pendingT = null; seekTok++;
     destroyEngine();
     clearError();
     watchHistory.flush();
@@ -577,26 +578,23 @@ function buildPlayer(el, route, season, opts) {
     paintPP(); paintEps(); keepShown();
   }
 
-  // Sek paytida video pauzada turadi, joy tayyor bo'lgach (kamida ~1 s bufer) davom etadi.
-  let resumeAfterSeek = false;
+  // Sek: video eski joyda 1x da o'ynashda davom etadi; nishon atrofida bufer yig'ilgach birdaniga sakraydi.
+  let pendingT = null; let seekTok = 0;
+  function bufferedAtPlayer(t) {
+    const r = video.buffered;
+    for (let i = 0; i < r.length; i++) if (r.start(i) <= t + 0.05 && r.end(i) >= t) return r.end(i) - t;
+    return 0;
+  }
   function seekTo(sec) {
     const d = video.duration || 0;
-    if (!video.paused && !video.ended && intended) { resumeAfterSeek = true; video.pause(); }
-    video.currentTime = Math.max(0, Math.min(sec, d > 1 ? d - 1 : sec));
-    if (resumeAfterSeek) { busy = true; paintBusy(); resumeWhenReady(); }
-  }
-  function resumeWhenReady() {
-    const t0 = Date.now();
-    const iv = setInterval(() => {
-      if (!resumeAfterSeek) { clearInterval(iv); return; }
-      const d = video.duration || 0;
-      const ahead = bufferedEnd() - video.currentTime;
-      const ok = !video.seeking && ahead >= Math.min(1, Math.max(0.3, d - video.currentTime - 0.3));
-      if (ok || Date.now() - t0 > 8000) {
-        clearInterval(iv); resumeAfterSeek = false; busy = false; paintBusy();
-        if (intended) video.play().catch(() => {});
-      }
-    }, 100);
+    const t = Math.max(0, Math.min(sec, d > 1 ? d - 1 : sec));
+    const tok = ++seekTok;
+    if (!eng?.requestSeek || bufferedAtPlayer(t) >= 1.5) { pendingT = null; video.currentTime = t; return; }
+    pendingT = t; paintProgress();
+    eng.requestSeek(t).then((ok) => {
+      if (!ok || tok !== seekTok) return;
+      pendingT = null; video.currentTime = t; paintProgress();
+    });
   }
 
   // ── Video hodisalari ──────────────────────────────────────────
@@ -608,7 +606,7 @@ function buildPlayer(el, route, season, opts) {
 
   function paintProgress() {
     const d = video.duration || 0;
-    const t = drag != null ? drag * d : video.currentTime;
+    const t = drag != null ? drag * d : (pendingT ?? video.currentTime);
     const p = d > 0 ? Math.min(1, Math.max(0, t / d)) : 0;
     const b = d > 0 ? Math.min(1, bufferedEnd() / d) : 0;
     const tr = $('.pl-track');
@@ -670,7 +668,6 @@ function buildPlayer(el, route, season, opts) {
 
   // ── Progress chizig'ini surish ─────────────────────────────────
   const track = $('.pl-track');
-  let dragWasPlaying = false;
   const isRot = () => box.classList.contains('rot');
   const ratioAt = (e) => {
     const r = track.getBoundingClientRect();
@@ -681,9 +678,6 @@ function buildPlayer(el, route, season, opts) {
     if (!video.duration) return;
     track.setPointerCapture(e.pointerId);
     drag = ratioAt(e); clearTimeout(hideT); paintProgress();
-    // Surish davomida video pauzada turadi, qo'yib yuborilgach davom etadi.
-    dragWasPlaying = !video.paused && !video.ended;
-    if (dragWasPlaying) video.pause();
   });
   track.addEventListener('pointermove', (e) => { if (drag != null) { drag = ratioAt(e); paintProgress(); } });
   const endDrag = () => {
@@ -691,8 +685,6 @@ function buildPlayer(el, route, season, opts) {
     const v = drag; drag = null;
     seekTo(v * (video.duration || 0));
     paintProgress(); scheduleHide();
-    if (dragWasPlaying && intended) { resumeAfterSeek = true; busy = true; paintBusy(); resumeWhenReady(); }
-    dragWasPlaying = false;
   };
   track.addEventListener('pointerup', endDrag);
   track.addEventListener('pointercancel', endDrag);
@@ -786,7 +778,7 @@ function buildPlayer(el, route, season, opts) {
     const sel = pickQuality(cur);
     const q = await qualityDialog(have.map((x) => ({
       q: x, title: x, size: fileSizeLabel(cur[`size_${x}`]), sel: x === sel,
-    })));
+    })), fs ? box : undefined);
     scheduleHide();
     if (!q || q === sel) return;
     selQ = q; userChose = true;

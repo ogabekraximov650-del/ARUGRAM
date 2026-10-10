@@ -24,7 +24,14 @@ import { api, apiPost, ApiError } from '../api.js';
 import { getClient, tgConfig, isAuthorized, authorizedCached } from './client.js';
 import { openTelegramLogin } from './login.js';
 
-const CHUNK = 256 * 1024; // faqat kerakli baytlar (1 MB emas); offset % limit == 0 sharti bajariladi
+const CHUNK = 512 * 1024; // 1 MB emas (kerakli baytlar), lekin juda mayda ham emas: so'rovlar soni FLOOD'ga olib kelmasin
+const MAX_PAR = 5; // bir vaqtda ketadigan upload.getFile so'rovlari
+let parActive = 0; const parQ = [];
+async function limited(fn) {
+  if (parActive >= MAX_PAR) await new Promise((r) => parQ.push(r));
+  parActive++;
+  try { return await fn(); } finally { parActive--; parQ.shift()?.(); }
+}
 const docs = new Map(); // nom -> {media, size, msgId}
 const keys = new Map(); // nom -> hex
 const urls = new Map(); // nom -> objectURL
@@ -179,22 +186,23 @@ export async function openFile(name, { key = '' } = {}) {
     const p = (async () => {
       const off = idx * CHUNK;
       const lim = Math.min(CHUNK, doc.size - off);
-      for (let attempt = 0; attempt < 3; attempt++) {
+      for (let attempt = 0; attempt < 5; attempt++) {
         try {
-          const raw = await cl.downloadChunk({ location: doc.media, offset: off, limit: CHUNK });
+          const raw = await limited(() => cl.downloadChunk({ location: doc.media, offset: off, limit: CHUNK }));
           const part = raw.length > lim ? raw.subarray(0, lim) : raw;
           return await ctrApply(hex, off, part);
         } catch (e) {
           const t = `${e?.text || e?.message || ''}`;
-          if (/FILE_REFERENCE|MEDIA_EMPTY|not_in_chat/.test(t) && attempt < 2) {
+          if (/FILE_REFERENCE|MEDIA_EMPTY|not_in_chat/.test(t) && attempt < 4) {
             // Nusxa eskirgan yoki o'chirilgan — qayta yetkaziladi.
             docs.delete(name);
             await locate([name], { force: true });
             doc = docs.get(name);
             continue;
           }
-          if (attempt === 2) throw e;
-          await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
+          if (attempt === 4) throw e;
+          const fw = /FLOOD(?:_PREMIUM)?_WAIT_(\d+)/.exec(t);
+          await new Promise((r) => setTimeout(r, fw ? Math.min(15, +fw[1]) * 1000 : 400 * (attempt + 1)));
         }
       }
       throw new Error('download_failed');

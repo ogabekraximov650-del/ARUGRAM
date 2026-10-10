@@ -247,3 +247,7 @@
 .pl-box.fs .pl-unlock { padding: 12px 14px; }
 
 .pl-box.rot .pl-unlock { left: calc(12px + var(--safe-top, 0px) + var(--content-top, 0px)); right: auto; top: 10px; }
+
+/* Qulfni ochish tugmasi — "to'liq ekrandan chiqish" tugmasi o'rnida (yuqori o'ng) */
+.pl-box.fs .pl-unlock { top: calc(6px + var(--safe-top, 0px) + var(--content-top, 0px)); right: 8px; left: auto; }
+.pl-box.rot .pl-unlock { top: 6px; left: auto; right: calc(var(--safe-bottom, 0px) + var(--rot-gap) + 4px); }

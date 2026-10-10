@@ -193,8 +193,15 @@ export function createEngine(video, { name, key = '', ahead: aheadOpt = 20, behi
     return 0;
   }
 
+  let seekReq = 0;
+  let focus = null; // sek tayyorlanayotgan nuqta (video hali eski joyda o'ynayapti)
+  function bufferedAheadAt(t) {
+    const r = video.buffered;
+    for (let i = 0; i < r.length; i++) if (r.start(i) <= t + 0.05 && r.end(i) >= t) return r.end(i) - t;
+    return 0;
+  }
   async function trimBehind() {
-    const cut = video.currentTime - behind;
+    const cut = Math.min(video.currentTime, focus ?? Infinity) - behind;
     if (cut > 1 && sb.buffered.length && sb.buffered.start(0) < cut) await removeAsync(0, cut);
   }
 
@@ -205,7 +212,7 @@ export function createEngine(video, { name, key = '', ahead: aheadOpt = 20, behi
     try {
       while (!destroyed && my === gen && next < segs.length) {
         if (!streaming) break;
-        if (bufferedAhead() > ahead) break;
+        if (bufferedAheadAt(focus ?? video.currentTime) > ahead) break;
         const seg = segs[next];
         st(video.readyState < 3 ? 'buffering' : 'playing');
         // Keyingi fragmentni ham oldindan so'rab qo'yamiz (tarmoq bo'sh turmasin).
@@ -287,6 +294,8 @@ export function createEngine(video, { name, key = '', ahead: aheadOpt = 20, behi
     // Video trek indeksi (birinchi sidx — ffmpeg video trekdan boshlaydi).
     segs = parseSidx(head, sidxBoxes[0], 0).segs;
     duration = segs.reduce((a, s) => a + s.dur, 0);
+    // Boshlanadigan fragmentni DARHOL yuklab boshlaymiz (MSE tayyorlanishini kutmasdan).
+    { const f0 = segs[segIndexAt(startAt || 0)]; if (f0) file.prefetch(f0.start, f0.size); }
     const codecs = trackCodecs(head, moov);
     const mime = `video/mp4; codecs="${codecs.join(', ')}"`;
     if (!MS || !MS.isTypeSupported(mime)) {
@@ -335,6 +344,26 @@ export function createEngine(video, { name, key = '', ahead: aheadOpt = 20, behi
     /** Boshlanish nuqtasi (to'xtagan joydan davom etish). */
     startAt(sec) {
       ready.then(() => { video.currentTime = Math.max(0, Math.min(sec, duration - 1)); });
+    },
+    /**
+     * Sek: video eski joyda 1x da o'ynashda davom etadi, `t` atrofida bufer yig'iladi
+     * (>= 2 s yoki fayl oxirigacha); tayyor bo'lgach `true` (eskirgan so'rov — `false`).
+     */
+    requestSeek(t) {
+      const my = ++seekReq;
+      focus = t;
+      gen += 1;
+      next = segIndexAt(t);
+      pump();
+      return new Promise((resolve) => {
+        const t0 = Date.now();
+        const iv = setInterval(() => {
+          if (destroyed || my !== seekReq) { clearInterval(iv); resolve(false); return; }
+          if (bufferedAheadAt(t) >= Math.min(2, Math.max(0.3, duration - t - 0.3)) || Date.now() - t0 > 20000) {
+            clearInterval(iv); if (my === seekReq) focus = null; resolve(true);
+          }
+        }, 80);
+      });
     },
     setAhead(sec) { ahead = Math.min(MAX_AHEAD, sec); pump(); },
     destroy() {

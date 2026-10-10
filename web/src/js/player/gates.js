@@ -62,9 +62,9 @@ export function channelConsent(el) {
 // ── Oynalar ─────────────────────────────────────────────────────────
 
 /** Ekran ustidagi qatlam (orqa fon bosilsa yopiladi). */
-function overlay(cls, build) {
+function overlay(cls, build, hostEl) {
   return new Promise((resolve) => {
-    const app = document.getElementById('app');
+    const app = hostEl || document.getElementById('app');
     const wrap = document.createElement('div');
     wrap.className = `pl-ov ${cls}`;
     const close = (v) => {
@@ -110,7 +110,7 @@ export function ratingSheet(current) {
 }
 
 /** Sifat tanlash (`_showQualityDialog`). `items`: [{q, title, size, sel}]. */
-export function qualityDialog(items) {
+export function qualityDialog(items, hostEl) {
   return overlay('pl-qd-ov', (wrap, close) => {
     wrap.innerHTML = `<div class="pl-qd">
       <div class="pl-qd-t">Sifatni tanlang</div>
@@ -120,5 +120,5 @@ export function qualityDialog(items) {
       </div>`).join('')}
     </div>`;
     wrap.querySelectorAll('.pl-qd-item').forEach((n) => bindTap(n, () => close(n.dataset.q), { scale: false }));
-  });
+  }, hostEl);
 }

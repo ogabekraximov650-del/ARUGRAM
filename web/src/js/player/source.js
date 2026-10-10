@@ -103,6 +103,6 @@ export function explainError(e) {
     case 'tg_disabled':
       return { code, title: 'Video ochilmadi', text: "Telegram orqali ko'rish hozircha o'chiq." };
     default:
-      return { code, title: 'Video ochilmadi', text: "Videoni ochib bo'lmadi — internetni tekshirib, qayta urinib ko'ring." };
+      return { code, title: 'Video ochilmadi', text: `Videoni ochib bo'lmadi — internetni tekshirib, qayta urinib ko'ring. (${`${code}`.slice(0, 80)})` };
   }
 }
