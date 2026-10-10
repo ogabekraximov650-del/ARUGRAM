@@ -24,7 +24,7 @@ import { api, apiPost, ApiError } from '../api.js';
 import { getClient, tgConfig, isAuthorized, authorizedCached } from './client.js';
 import { openTelegramLogin } from './login.js';
 
-const CHUNK = 1024 * 1024;
+const CHUNK = 256 * 1024; // faqat kerakli baytlar (1 MB emas); offset % limit == 0 sharti bajariladi
 const docs = new Map(); // nom -> {media, size, msgId}
 const keys = new Map(); // nom -> hex
 const urls = new Map(); // nom -> objectURL
@@ -172,7 +172,7 @@ export async function openFile(name, { key = '' } = {}) {
   const hex = key || keys.get(name) || '';
   const cache = new Map(); // bo'lak raqami -> Promise<Uint8Array>
   const ORDER = [];
-  const MAX_CACHE = 24;
+  const MAX_CACHE = 96;
 
   async function chunk(idx) {
     if (cache.has(idx)) return cache.get(idx);

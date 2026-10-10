@@ -87,6 +87,14 @@ async function packInfo(id) {
   return infos.get(`${id}`);
 }
 
+window.addEventListener('aru-playerplay', () => {
+  document.querySelectorAll('.pk-msg video').forEach((x) => {
+    x.muted = true;
+    const o = x.parentElement?.querySelector('.pk-spk');
+    if (o) o.innerHTML = icon('volume_off', { size: 16, color: '#fff' });
+  });
+});
+
 /** Xabar/izoh ichiga stiker yoki GIF qo'yadi (`PackMessage`: GIF 200, stiker 150). */
 export async function renderPackMedia(el, file, type) {
   const m = /^pk_(\d{1,16})_(\d{1,9})$/.exec(file || '');

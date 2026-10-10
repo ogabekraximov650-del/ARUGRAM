@@ -122,3 +122,7 @@
 .cm-cancel { background: transparent; color: rgba(255, 255, 255, 0.7); border: 1px solid rgba(255, 255, 255, 0.18); }
 .cm-go { background: #E53935; color: #fff; font-weight: 700; }
 .cm-go:disabled { background: rgba(255, 255, 255, 0.12); color: rgba(255, 255, 255, 0.38); }
+
+/* Yozish maydoni doim pastda; GIF/stiker o'z o'lchamida */
+.cm-pane .cm { position: absolute; inset: 0; height: auto; }
+.cm-media { width: auto; height: auto; justify-content: flex-start; }

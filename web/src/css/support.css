@@ -296,3 +296,4 @@
 
 .pk-msg { position: relative; }
 .pk-spk { position: absolute; right: 6px; bottom: 6px; padding: 4px; border-radius: 50%; background: rgba(0, 0, 0, 0.54); display: flex; pointer-events: none; }
+.pk-msg { contain: layout paint; flex: none; }

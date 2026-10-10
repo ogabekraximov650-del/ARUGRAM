@@ -386,7 +386,7 @@ function buildPlayer(el, route, season, opts) {
     if (i === 3 && !commentsCtl) {
       commentsCtl = createCommentsTab(panes[3], {
         animeId: A, seasonId: S, expanded: false,
-        onExpanded: (v) => { el.classList.toggle('cx', !!v); },
+        onExpanded: (v) => { el.classList.toggle('cx', !!v); commentsCtl?.setExpanded(!!v); },
       });
     }
     if (i !== 3) { el.classList.remove('cx'); commentsCtl?.setExpanded(false); }
@@ -517,14 +517,37 @@ function buildPlayer(el, route, season, opts) {
       if (my !== token) { eng?.destroy(); return; }
       await eng.ready;
       if (my !== token) return;
+      // Sahifa pauzada ochiladi; yetarli bayt yuklangach (~3 s) o'zi boshlanadi.
+      if (intended) {
+        await waitEnoughBuffer(my);
+        if (my !== token) return;
+        busy = false; paintBusy();
+        if (intended) { try { await video.play(); } catch (_) { /* brauzer to'sdi — tugma bosiladi */ } }
+      }
       busy = false; paintBusy();
-      if (intended) { try { await video.play(); } catch (_) { /* brauzer to'sdi — tugma bosiladi */ } }
       video.playbackRate = rate;
       scheduleHide();
     } catch (er) {
       if (my !== token || `${er?.message}` === 'aborted') return;
       showError(er);
     }
+  }
+
+  /** Joriy joydan oldinga kamida ~3 s (yoki fayl oxirigacha) bufer to'lguncha kutadi (20 s dan ko'p emas). */
+  function waitEnoughBuffer(my) {
+    return new Promise((resolve) => {
+      const t0 = Date.now();
+      const check = () => {
+        if (my !== token || !intended) { done(); return; }
+        const d = video.duration || 0;
+        const ahead = bufferedEnd() - video.currentTime;
+        if (ahead >= Math.min(3, Math.max(0.5, d - video.currentTime - 0.3)) || Date.now() - t0 > 20000) done();
+        else { busy = true; paintBusy(); }
+      };
+      const iv = setInterval(check, 150);
+      function done() { clearInterval(iv); resolve(); }
+      check();
+    });
   }
 
   function stepEpisode(delta) {
@@ -913,6 +936,8 @@ function buildPlayer(el, route, season, opts) {
     }
   };
   window.addEventListener('aru-packsound', onPackSound);
+  // Pleyer ijro etilsa izohdagi GIF ovozi o'chadi.
+  video.addEventListener('play', () => { pausedByPack = false; window.dispatchEvent(new Event('aru-playerplay')); });
 
   // ── Boshlash ──────────────────────────────────────────────────
   paintTitle(); paintNav(); paintInfo(); paintEps(); paintSeasons();
