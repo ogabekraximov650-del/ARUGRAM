@@ -5637,3 +5637,23 @@ QOLGAN: emoji panelining GIF/Stiker/maxsus emoji oynalari Mini App'ga hali ko'ch
   ko'chirish kutilmaydi (fonda) — avval 30 s ichida bot ko'chirmasa "Yuklab
   bo'lmadi" chiqardi. `tg/media.js` o'rami `opts` ni o'tkazmasdi (yordam
   chatidagi yuklash foizi ham ishlamasdi) — tuzatildi.
+
+## Kodlash boti: "Ilova uchun" -> "Anibla orqali" (2026-10)
+
+TALAB: "Ilova uchun"da anime/bo'lim tanlab "Yangi qism qo'shish" (yoki qism
+tugmasi) bosilganda video yuborish o'rniga "🎞 Anibla orqali" — anibla.uz dan
+anime va qism tanlanadi, Actions eng yuqori sifatni yuklaydi, keyin odatdagi
+avto-kodlash (H.265, 4 sifat, MP4 + fMP4).
+- `lib.rs`: `ENCBOT_BTN_ANIBLA` tugmasi (`encbot_mode_add`/`encbot_mode_replace`
+  xabarlarida); bosilganda `anibla::menu_for_app` (`encbot_target` olinadi).
+  `encbot_video` ikkiga bo'lindi: kanalga nusxa + `encbot_register` (tg_files,
+  qism yozuvi yoki almashtirish, `encode_jobs`) — anibla ham shuni chaqiradi.
+- `anibla.rs`: `app_config.anibla_target` ("a/s" — har qism navbatdagi yangi
+  raqam; "a/s/n" — bitta almashtirish, keyin o'chadi) va `anibla_target_label`.
+  Shu rejimda qism/film tanlansa sifat so'ralmaydi (`pick_best`: eng katta
+  balandlik). `anibla_jobs.target` ustuni (migratsiya `mig_anibla_target`).
+  `done`: target bo'lsa kanal posti O'CHIRILMAYDI — `orig_bot_<a>_<s>_<n>_<vaqt>.mp4`
+  nomi bilan qismning asl videosi bo'ladi; raqam (yangi qism) `done` paytida
+  (bo'limdagi eng kattasi + 1) — navbat ketma-ket, tartib saqlanadi.
+  Oddiy "🎞 Anibla yuklash" menyusi `anibla_target` ni tozalaydi.
+- `download.py`: `done` ga `size`, `height` (qism yozuvidagi origin_size/height).

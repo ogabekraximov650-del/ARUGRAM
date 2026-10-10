@@ -1392,6 +1392,14 @@ async fn init_db(env: &Env) -> bool {
         config_put(env, "mig_hist_srv_at", "1").await;
     }
 
+    // Anibla'dan to'g'ridan-to'g'ri ilovaga qism (`anibla.rs`, "Anibla orqali"):
+    // `target` — "anime/bo'lim" (yangi qism) yoki "anime/bo'lim/raqam" (almashtirish).
+    if ok && config_get(env, "mig_anibla_target").await.is_none() {
+        let _ = turso_exec(env,
+            "ALTER TABLE anibla_jobs ADD COLUMN target TEXT DEFAULT ''", vec![]).await;
+        config_put(env, "mig_anibla_target", "1").await;
+    }
+
     ok
 }
 
@@ -3812,6 +3820,7 @@ const CONFIG_MEMO_KEYS: &[&str] = &[
     "encbot_secret", "encbot_webhook_for", "encode_log_chat",
     "mig_comment_media", "mig_origin_video", "mig_origin_key",
     "mig_encode_progress", "mig_origin_meta", "mig_chan_consent", "mig_hist_srv_at",
+    "mig_anibla_target",
 ];
 const CONFIG_MEMO_MS: i64 = 10 * 60 * 1000;
 
@@ -11824,6 +11833,8 @@ async fn encbot_numbers(env: &Env, a: i64, s: i64) -> Vec<i64> {
 }
 
 const ENCBOT_BTN_ADD: &str = "\u{2795} Yangi qism qo'shish";
+/// "Yangi qism qo'shish" / qism almashtirishda: videoni anibla.uz dan olish (`anibla.rs`).
+pub(crate) const ENCBOT_BTN_ANIBLA: &str = "\u{1F39E} Anibla orqali";
 
 /// 3-qadam: bo'lim tanlandi — pastda: tepada "Yangi qism qo'shish", ostida
 /// qismlar (eng yangisi tepada, 1-qism eng pastda). Qism tugmasi — o'sha
@@ -11874,7 +11885,10 @@ async fn encbot_mode_add(env: &Env, chat: i64) {
     encbot_send(env, chat, &format!(
         "\u{1F4E4} Endi videolarni shu yerga yuboring yoki boshqa kanaldan uzating (forward).\n\
          Har bir video navbatdagi qism bo'lib qo'shiladi: {next}-qism, {}-qism va hokazo.\n\n\
-         \u{270F}\u{FE0F} Qism raqamini keyin ilovadan o'zgartirish mumkin.", next + 1), None).await;
+         \u{1F39E} Yoki pastdagi \u{00AB}Anibla orqali\u{00BB} tugmasi: anibla.uz dan anime va qismni \
+         tanlaysiz, eng yuqori sifati yuklanib, shu bo'limga qo'shiladi va kodlanadi.\n\n\
+         \u{270F}\u{FE0F} Qism raqamini keyin ilovadan o'zgartirish mumkin.", next + 1),
+        Some(encbot_keyboard(vec![vec![ENCBOT_BTN_ANIBLA.to_string()], vec![postbot::BTN_HOME.to_string()]]))).await;
 }
 
 /// Qism tugmasi bosildi — keyingi video shu qismni almashtiradi.
@@ -11886,7 +11900,9 @@ async fn encbot_mode_replace(env: &Env, chat: i64, n: i64) {
     config_put(env, "encbot_target", &format!("{a}/{s}/{n}")).await;
     encbot_send(env, chat, &format!(
         "\u{1F501} <b>{n}-qism</b> uchun yangi videoni yuboring yoki uzating.\n\
-         Eski video va uning sifatlari o'chiriladi, yangisi qayta kodlanadi."), None).await;
+         Eski video va uning sifatlari o'chiriladi, yangisi qayta kodlanadi.\n\n\
+         \u{1F39E} Yoki \u{00AB}Anibla orqali\u{00BB} \u{2014} videoni anibla.uz dan olish."),
+        Some(encbot_keyboard(vec![vec![ENCBOT_BTN_ANIBLA.to_string()], vec![postbot::BTN_HOME.to_string()]]))).await;
 }
 
 /// 5-qadam: video keldi — kanalga, qism yozuviga va navbatga.
@@ -11938,10 +11954,20 @@ async fn encbot_video(env: &Env, msg: &Value, a: i64, s: i64, n: i64) {
         encbot_send(env, chat, "\u{274C} Kanalga ko'chirib bo'lmadi.", None).await;
         return;
     }
+    let line = encbot_register(env, a, s, n, &origin, ch_msg, size, height).await;
+    encbot_send(env, chat, &line, None).await;
+}
+
+/// Yopiq kanaldagi video (`ch_msg`) qismning asl videosi bo'ladi: `tg_files`,
+/// qism yozuvi (yangi yoki almashtirilgan) va kodlash navbati. Natija — bot
+/// xabari matni. `encbot_video` (botga yuborilgan video) va `anibla.rs`
+/// ("Anibla orqali" yuklangan video) shu bilan.
+pub(crate) async fn encbot_register(env: &Env, a: i64, s: i64, n: i64, origin: &str, ch_msg: i64, size: i64, height: i64) -> String {
+    let now = now_ms();
     let _ = turso_exec(env,
         "INSERT INTO tg_files (file_name, msg_id, file_key) VALUES (?, ?, '')
          ON CONFLICT(file_name) DO UPDATE SET msg_id=excluded.msg_id",
-        vec![TursoArg::text(&origin), TursoArg::int(ch_msg)]).await;
+        vec![TursoArg::text(origin), TursoArg::int(ch_msg)]).await;
 
     // Qism bormi (raqami bo'yicha).
     let old = turso_exec(env,
@@ -11957,11 +11983,10 @@ async fn encbot_video(env: &Env, msg: &Value, a: i64, s: i64, n: i64) {
                     url_720p='',size_720p=0,key_720p='',url_1080p='',size_1080p=0,key_1080p='',
                     origin_video=?, origin_key='', origin_size=?, origin_height=?
                   WHERE anime_id=? AND season_id=? AND epizod_id=?",
-                vec![TursoArg::text(&origin), TursoArg::int(size), TursoArg::int(height),
+                vec![TursoArg::text(origin), TursoArg::int(size), TursoArg::int(height),
                      TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]).await;
             if r.is_err() {
-                encbot_send(env, chat, "\u{274C} Qismni yangilab bo'lmadi (baza xatosi).", None).await;
-                return;
+                return "\u{274C} Qismni yangilab bo'lmadi (baza xatosi).".into();
             }
             // Almashtirilgan sifatlar va eski asl video kanaldan o'chadi.
             for q in QUALITIES {
@@ -11978,8 +12003,7 @@ async fn encbot_video(env: &Env, msg: &Value, a: i64, s: i64, n: i64) {
         }
         None => {
             let Ok(e) = next_epizod_id(env).await else {
-                encbot_send(env, chat, "\u{274C} Baza xatosi.", None).await;
-                return;
+                return "\u{274C} Baza xatosi.".into();
             };
             let r = turso_batch(env, &[
                 ("INSERT INTO epizod_db (anime_id,season_id,epizod_id,epizod_number,epizod_name,
@@ -11989,14 +12013,13 @@ async fn encbot_video(env: &Env, msg: &Value, a: i64, s: i64, n: i64) {
                     created_at,origin_video,origin_key,origin_size,origin_height)
                   VALUES (?,?,?,?,'','',0,'','',0,'','',0,'','',0,'','','','','','','','','','','',?,?,'',?,?)",
                  vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e), TursoArg::int(n),
-                      TursoArg::int(now), TursoArg::text(&origin), TursoArg::int(size), TursoArg::int(height)]),
+                      TursoArg::int(now), TursoArg::text(origin), TursoArg::int(size), TursoArg::int(height)]),
                 ("UPDATE season_db SET epizod_count=(SELECT COUNT(*) FROM epizod_db WHERE anime_id=? AND season_id=?)
                    WHERE anime_id=? AND season_id=?",
                  vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(a), TursoArg::int(s)]),
             ]).await;
             if r.is_err() {
-                encbot_send(env, chat, "\u{274C} Qism qo'shib bo'lmadi (baza xatosi).", None).await;
-                return;
+                return "\u{274C} Qism qo'shib bo'lmadi (baza xatosi).".into();
             }
             e
         }
@@ -12009,20 +12032,19 @@ async fn encbot_video(env: &Env, msg: &Value, a: i64, s: i64, n: i64) {
          ON CONFLICT(anime_id,season_id,epizod_id) DO UPDATE SET origin=excluded.origin,
             queued_at=excluded.queued_at, state='queued', done='', runner='', lease_until=0,
             attempts=0, error='', origin_key=''",
-        vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e), TursoArg::text(&origin), TursoArg::int(now)]).await;
+        vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e), TursoArg::text(origin), TursoArg::int(now)]).await;
     if q.is_err() {
-        encbot_send(env, chat, "\u{274C} Navbatga qo'yib bo'lmadi (baza xatosi). Videoni qayta yuboring.", None).await;
-        return;
+        return "\u{274C} Navbatga qo'yib bo'lmadi (baza xatosi). Videoni qayta yuboring.".into();
     }
     let inq = turso_exec(env,
         "SELECT COUNT(*) AS n FROM encode_jobs WHERE state IN ('queued','running')", vec![]).await
         .ok().and_then(|r| first_row(&r)).map(|r| jint(&r, "n")).unwrap_or(1);
     let kick = encode_kick(env).await;
-    encbot_send(env, chat, &format!(
+    format!(
         "\u{2705} {n}-qism {} va kodlashga navbatga qo'yildi.\n\
          \u{1F4CB} Navbatda jami: {inq} ta video.\n\
          \u{1F4FA} Qism ilovada birinchi sifat kodlangach ko'rinadi.\n\n{kick}",
-        if replaced { "almashtirildi" } else { "qo'shildi" }), None).await;
+        if replaced { "almashtirildi" } else { "qo'shildi" })
 }
 
 /// "📱 Ilova uchun" bo'limidagi "📋 Holat": navbat soni (bir martalik xabar).
@@ -12182,6 +12204,23 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
                 "Avval anime va bo'limni tanlang, keyin \u{00AB}Yangi qism qo'shish\u{00BB} yoki qism tugmasini bosing: /start",
                 None).await,
         }
+        return ok(json!({"ok": true}));
+    }
+    if text == ENCBOT_BTN_ANIBLA {
+        let target = config_get(env, "encbot_target").await.unwrap_or_default();
+        let v: Vec<i64> = target.split('/').filter_map(|p| p.parse().ok()).collect();
+        let Some((an, sn)) = (match v.as_slice() {
+            [a, s] | [a, s, _] => encbot_titles(env, *a, *s).await,
+            _ => None,
+        }) else {
+            encbot_send(env, chat, "Avval anime va bo'limni tanlang, keyin \u{00AB}Yangi qism qo'shish\u{00BB}: /start", None).await;
+            return ok(json!({"ok": true}));
+        };
+        let what = match v.as_slice() {
+            [_, _, n] => format!("{n}-qism almashtiriladi"),
+            _ => "yangi qism bo'lib qo'shiladi".to_string(),
+        };
+        anibla::menu_for_app(env, chat, &target, &format!("{an}, {sn} \u{2014} {what}")).await;
         return ok(json!({"ok": true}));
     }
     if text == ENCBOT_BTN_ADD {

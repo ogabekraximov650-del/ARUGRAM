@@ -336,6 +336,48 @@ fn menu_keyboard() -> Value {
     panel(vec![], false)
 }
 
+// ── "Ilova uchun" -> "Anibla orqali" ─────────────────────────
+//
+// TALAB (foydalanuvchi): "Ilova uchun" bo'limida anime va bo'lim tanlanib
+// "Yangi qism qo'shish" (yoki qism tugmasi) bosilganda "Anibla orqali" tugmasi;
+// bosilsa shu bo'limning o'zi (bo'limlar, qidiruv, fasl, qism) chiqadi. Qism
+// tanlanganda sifat SO'RALMAYDI — eng yuqorisi navbatga tushadi, Actions uni
+// yuklab yopiq kanalga qo'yadi, `done` esa uni botga yuborilgan videodek
+// qismning asl videosi qiladi (`encbot_register`): kodlash navbati -> H.265,
+// 4 sifat, MP4 + fMP4 (`tool/encode/run.py`).
+// `anibla_target`: "anime/bo'lim" (har tanlangan qism — navbatdagi yangi qism)
+// yoki "anime/bo'lim/raqam" (bitta qism almashtiriladi, keyin rejim o'chadi).
+
+async fn app_target(env: &Env) -> Option<(String, String)> {
+    let t = config_get(env, "anibla_target").await.filter(|t| !t.is_empty())?;
+    let label = config_get(env, "anibla_target_label").await.unwrap_or_default();
+    Some((t, label))
+}
+
+pub(crate) async fn menu_for_app(env: &Env, chat: i64, target: &str, label: &str) {
+    config_put(env, "anibla_target", target).await;
+    config_put(env, "anibla_target_label", label).await;
+    config_put(env, "encbot_mode", "anibla").await;
+    let warn = if creds(env).is_none() {
+        "\n\n\u{26A0}\u{FE0F} anibla.uz login/paroli sozlanmagan (<code>tool/anibla/creds.enc</code>)."
+    } else { "" };
+    let panel = home_panel(env).await;
+    encbot_send(env, chat, &format!(
+        "\u{1F4F1} <b>Ilova uchun \u{2014} Anibla orqali</b>\n\u{1F3AF} {}\n\n\
+         \u{1F4C2} Pastdagi bo'limlardan tanlang yoki anime nomini yozing. Anime \u{2192} fasl \u{2192} qism: \
+         sifat so'ralmaydi \u{2014} eng yuqorisi yuklanadi, keyin H.265 da 4 sifatga (MP4 va fMP4) kodlanadi.\n\
+         \u{21A9}\u{FE0F} Chiqish: \u{00AB}Bosh menyu\u{00BB}.{warn}", html_escape(label)),
+        Some(panel)).await;
+}
+
+/// Ilova rejimida qism (yoki film) tanlandi: eng yuqori sifat navbatga.
+async fn pick_best(env: &Env, chat: i64, mut nav: Nav, rows: &[(String, i64)]) {
+    let h = rows.iter().map(|(_, h)| *h).max().unwrap_or(0);
+    nav.v = "q".into();
+    nav_put(env, &nav).await;
+    pick_quality(env, chat, &nav, h).await;
+}
+
 // ── Bot: menyu, bo'limlar va qidiruv ─────────────────────────
 
 /// Bosh panel: "Oxirgi yuklanganlar" va saytdagi bo'limlar (2 tadan).
@@ -349,6 +391,10 @@ async fn home_panel(env: &Env) -> Value {
 }
 
 pub(crate) async fn menu(env: &Env, chat: i64) {
+    // Oddiy "Anibla yuklash" — video bot chatiga keladi (ilovaga emas).
+    if app_target(env).await.is_some() {
+        config_put(env, "anibla_target", "").await;
+    }
     config_put(env, "encbot_mode", "anibla").await;
     let warn = if creds(env).is_none() {
         "\n\n\u{26A0}\u{FE0F} Login/parol hali sozlanmagan: <code>tool/anibla/creds.enc</code> \
@@ -767,6 +813,7 @@ async fn show_item(env: &Env, chat: i64, mut nav: Nav) {
         nav.k = -1;
         let head = item_head(&it, true);
         match qualities_text(env, &it, None).await {
+            Ok((_, rows)) if app_target(env).await.is_some() => pick_best(env, chat, nav, &rows).await,
             Ok((t, rows)) => {
                 nav.v = "q".into();
                 nav_put(env, &nav).await;
@@ -860,6 +907,10 @@ async fn show_qualities(env: &Env, chat: i64, mut nav: Nav, num: i64) {
         html_escape(&season_label(season)), e.num,
         if e.title.is_empty() { String::new() } else { format!(": {}", html_escape(&e.title)) });
     match qualities_text(env, &it, Some((&season.slug, e))).await {
+        Ok((_, rows)) if app_target(env).await.is_some() => {
+            nav.k = k as i64;
+            pick_best(env, chat, nav, &rows).await;
+        }
         Ok((t, rows)) => {
             nav.k = k as i64;
             nav.v = "q".into();
@@ -1339,6 +1390,10 @@ async fn start(env: &Env, chat: i64, status: i64, it: &Item, ep: Option<(&str, &
         caption.push_str(&format!("\n{label}"));
     }
     caption.push_str(&format!("\n{}", quality_name(height)));
+    let target = app_target(env).await;
+    if let Some((_, label)) = &target {
+        caption.push_str(&format!("\n\u{1F4F1} Ilovaga: {label}"));
+    }
     let head = job_head(&caption);
     let status = if status > 0 { status } else {
         encbot_api(env, "sendMessage", json!({
@@ -1373,13 +1428,20 @@ async fn start(env: &Env, chat: i64, status: i64, it: &Item, ep: Option<(&str, &
         return;
     }
     let ins = turso_exec(env,
-        "INSERT INTO anibla_jobs (url, caption, file_name, chat, status_msg, queued_at) VALUES (?,?,?,?,?,?) RETURNING id",
+        "INSERT INTO anibla_jobs (url, caption, file_name, chat, status_msg, queued_at, target) VALUES (?,?,?,?,?,?,?) RETURNING id",
         vec![TursoArg::text(&v.job_url()), TursoArg::text(&caption), TursoArg::text(&fname),
-             TursoArg::int(chat), TursoArg::int(status), TursoArg::int(now_ms())]).await;
+             TursoArg::int(chat), TursoArg::int(status), TursoArg::int(now_ms()),
+             TursoArg::text(target.as_ref().map(|(t, _)| t.as_str()).unwrap_or(""))]).await;
     let Some(id) = ins.ok().and_then(|r| first_row(&r)).map(|r| jint(&r, "id")) else {
         let _ = encbot_api(env, "editMessageText", edit("\u{274C} Navbatga qo'yib bo'lmadi (baza xatosi).".into())).await;
         return;
     };
+    // Almashtirish — faqat bitta video; keyingi tanlov oddiy bo'ladi.
+    if let Some((t, _)) = &target {
+        if t.split('/').count() == 3 {
+            config_put(env, "anibla_target", "").await;
+        }
+    }
     let ahead = turso_exec(env, "SELECT COUNT(*) AS n FROM anibla_jobs WHERE state IN ('queued','running') AND id<?",
         vec![TursoArg::int(id)]).await.ok().and_then(|r| first_row(&r)).map(|r| jint(&r, "n")).unwrap_or(0);
     let kick = kick(env).await;
@@ -1622,9 +1684,32 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
             }
         };
         if b["ok"].as_bool() == Some(true) {
-            // Tayyor video kanaldan BOT CHATIGA ko'chiriladi, kanal posti o'chadi.
             let channel = tg_channel_id(env);
             let msg = jint(&b, "channel_msg");
+            // "Ilova uchun -> Anibla orqali": kanal posti qismning asl videosi bo'ladi
+            // va kodlashga navbatga tushadi (botga yuborilgan video bilan bir xil).
+            let target: Vec<i64> = job["target"].as_str().unwrap_or("").split('/')
+                .filter_map(|p| p.parse().ok()).collect();
+            if target.len() >= 2 && msg > 0 {
+                let (a, s) = (target[0], target[1]);
+                let n = match target.get(2) {
+                    Some(n) => *n,
+                    None => encbot_numbers(env, a, s).await.iter().max().copied().unwrap_or(0) + 1,
+                };
+                let origin = format!("orig_bot_{a}_{s}_{n}_{}.mp4", now_ms());
+                let res = if encbot_titles(env, a, s).await.is_some() {
+                    encbot_register(env, a, s, n, &origin, msg, jint(&b, "size"), jint(&b, "height")).await
+                } else {
+                    "\u{274C} Anime yoki bo'lim topilmadi (o'chirilgan bo'lishi mumkin) \u{2014} video yopiq kanalda qoldi.".into()
+                };
+                let ok_line = if res.starts_with('\u{2705}') { format!("\u{2705} Ilovaga {n}-qism bo'lib qo'shildi \u{2014} kodlash navbatida.") }
+                              else { "\u{26A0}\u{FE0F} Ilovaga qo'shilmadi \u{2014} sababi pastda.".to_string() };
+                { let body = status(ok_line); mirror(body.clone()).await; let _ = encbot_api(env, "editMessageText", body).await; }
+                encbot_send(env, chat, &res, None).await;
+                turso_exec(env, "DELETE FROM anibla_jobs WHERE id=?", vec![TursoArg::int(id)]).await?;
+                return ok(json!({"ok": true}));
+            }
+            // Tayyor video kanaldan BOT CHATIGA ko'chiriladi, kanal posti o'chadi.
             let line = match encbot_api(env, "copyMessage", json!({
                 "chat_id": chat, "from_chat_id": channel, "message_id": msg,
             })).await {
