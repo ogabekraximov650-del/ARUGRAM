@@ -289,3 +289,7 @@
 .tge-gear { position: absolute; right: 10px; bottom: 12px; width: 44px; height: 44px; border-radius: 50%; background: rgba(53, 44, 39, 0.95); box-shadow: 0 0 12px rgba(0, 0, 0, 0.45); align-items: center; justify-content: center; cursor: pointer; z-index: 2; }
 .pk-msg { border-radius: 12px; overflow: hidden; display: flex; align-items: center; justify-content: center; max-width: 100%; }
 .pk-msg img, .pk-msg video { width: 100%; height: 100%; object-fit: contain; }
+
+/* Rasm/videoga uzoq bosilganda brauzer menyusi (blob manzili) chiqmasin */
+.pk-msg img, .pk-msg video, .tge-pkc img, .pk-cell img, .pk-big img, .pk-big video { pointer-events: none; -webkit-touch-callout: none; }
+.pk-msg { cursor: pointer; }

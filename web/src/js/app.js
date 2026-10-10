@@ -141,3 +141,9 @@ async function main() {
 }
 
 main();
+
+// Uzoq bosilganda brauzer menyusi (rasm manzili va h.k.) chiqmasin; matn maydonlarida (joylash/nusxa) qoladi.
+document.addEventListener('contextmenu', (e) => {
+  if (e.target?.closest?.('input, textarea, [contenteditable="true"]')) return;
+  e.preventDefault();
+});

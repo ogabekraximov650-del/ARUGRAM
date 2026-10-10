@@ -16,6 +16,19 @@
 </head>
 <body>
   <div id="app"></div>
-  <script type="module" src="js/app.js"></script>
+  <script>
+    // Faqat Telegram Mini App ichida ishlaydi: oddiy brauzerda "404" ko'rinadi va ilova yuklanmaydi.
+    (function () {
+      var t = window.Telegram && window.Telegram.WebApp;
+      if (t && t.initData) {
+        var s = document.createElement('script');
+        s.type = 'module'; s.src = 'js/app.js';
+        document.body.appendChild(s);
+      } else {
+        document.title = '404 Not Found';
+        document.body.innerHTML = '<div style="font:16px sans-serif;color:#ddd;text-align:center;padding-top:20vh"><h1 style="font-size:28px;margin:0 0 8px">404</h1>Not Found</div>';
+      }
+    })();
+  </script>
 </body>
 </html>

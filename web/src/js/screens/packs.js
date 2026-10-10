@@ -104,7 +104,19 @@ export async function renderPackMedia(el, file, type) {
     if (el.isConnected) el.innerHTML = `<div class="pk-msg" style="width:${size}px;height:${size}px"><img src="${th.url}" alt=""></div>`;
     const full = await itemOf(p, hd, it);
     if (!el.isConnected) return;
-    el.innerHTML = `<div class="pk-msg" style="width:${size}px;height:${size}px">${full.type.startsWith('video') ? `<video src="${full.url}" autoplay loop muted playsinline></video>` : `<img src="${full.url}" alt="">`}</div>`;
+    const vid = full.type.startsWith('video');
+    el.innerHTML = `<div class="pk-msg" style="width:${size}px;height:${size}px">${vid ? `<video src="${full.url}" autoplay loop muted playsinline></video>` : `<img src="${full.url}" alt="" draggable="false">`}</div>`;
+    // Video/GIF ustiga bosilsa ovozi yoqiladi (ilovadagi PackSoundHub: bir vaqtda bittasida).
+    if (vid) {
+      const v = el.querySelector('video');
+      el.querySelector('.pk-msg').addEventListener('click', (e) => {
+        e.stopPropagation();
+        const on = v.muted;
+        document.querySelectorAll('.pk-msg video').forEach((x) => { x.muted = true; });
+        v.muted = !on ? true : false;
+        if (!v.muted) v.play().catch(() => {});
+      });
+    }
   } catch (_) { /* belgi qoladi */ }
 }
 
