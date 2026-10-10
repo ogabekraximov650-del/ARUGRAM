@@ -27,7 +27,7 @@ async function header(p) {
     const pre = await f.read(0, 16);
     const dv = new DataView(pre.buffer, pre.byteOffset, 16);
     if (String.fromCharCode(...pre.slice(0, 4)) !== 'ARUP') throw new Error('bad_pack');
-    const hl = dv.getUint32(8, true);
+    const hl = dv.getUint32(8, false); // big-endian (arupack.py: ">HHII")
     const raw = await f.read(16, hl);
     const h = JSON.parse(new TextDecoder().decode(raw));
     return { f, h, base: 16 + hl };
