@@ -11419,9 +11419,16 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
                 let _ = turso_exec(env, fail_sql, args).await;
                 continue;
             };
-            let src = turso_exec(env, "SELECT msg_id, file_key FROM tg_files WHERE file_name=?",
-                vec![TursoArg::text(&origin)]).await?;
-            let Some(src) = first_row(&src) else {
+            // "Anibla orqali": asl video Telegram'da emas — run uni saytdan yuklaydi.
+            let anibla_url = origin.strip_prefix("anibla:").map(|u| u.to_string());
+            let src = if anibla_url.is_some() {
+                Some(json!({"msg_id": 0, "file_key": ""}))
+            } else {
+                let r = turso_exec(env, "SELECT msg_id, file_key FROM tg_files WHERE file_name=?",
+                    vec![TursoArg::text(&origin)]).await?;
+                first_row(&r)
+            };
+            let Some(src) = src else {
                 if now - queued_at > ENCODE_ORIGIN_WAIT_MS {
                     let (why, args) = fail("Asl video Telegram'da topilmadi".to_string());
                     let _ = turso_exec(env, fail_sql, args).await;
@@ -11488,6 +11495,7 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
                     "done": done,
                     "uploaded": uploaded,
                     "origin_msg": src["msg_id"],
+                    "origin_url": anibla_url.unwrap_or_default(),
                     // Kanal postidagi kalit; bo'lmasa bazadagisi.
                     "origin_key": match src["file_key"].as_str().unwrap_or("") {
                         k if valid_file_key(k) => k.to_string(),
@@ -11961,13 +11969,20 @@ async fn encbot_video(env: &Env, msg: &Value, a: i64, s: i64, n: i64) {
 /// Yopiq kanaldagi video (`ch_msg`) qismning asl videosi bo'ladi: `tg_files`,
 /// qism yozuvi (yangi yoki almashtirilgan) va kodlash navbati. Natija — bot
 /// xabari matni. `encbot_video` (botga yuborilgan video) va `anibla.rs`
-/// ("Anibla orqali" yuklangan video) shu bilan.
+/// ("Anibla orqali") shu bilan.
+///
+/// `ch_msg == 0` — asl video Telegram'da YO'Q: `origin` = `anibla:<HLS manzil>`,
+/// kodlash run'i uni saytdan o'zi yuklab, darhol kodlaydi (2 GB chegarasi yo'q).
+/// Bunda qismda asl video ko'rsatilmaydi (`origin_video` bo'sh).
 pub(crate) async fn encbot_register(env: &Env, a: i64, s: i64, n: i64, origin: &str, ch_msg: i64, size: i64, height: i64) -> String {
     let now = now_ms();
-    let _ = turso_exec(env,
-        "INSERT INTO tg_files (file_name, msg_id, file_key) VALUES (?, ?, '')
-         ON CONFLICT(file_name) DO UPDATE SET msg_id=excluded.msg_id",
-        vec![TursoArg::text(origin), TursoArg::int(ch_msg)]).await;
+    if ch_msg > 0 {
+        let _ = turso_exec(env,
+            "INSERT INTO tg_files (file_name, msg_id, file_key) VALUES (?, ?, '')
+             ON CONFLICT(file_name) DO UPDATE SET msg_id=excluded.msg_id",
+            vec![TursoArg::text(origin), TursoArg::int(ch_msg)]).await;
+    }
+    let ov_name = if ch_msg > 0 { origin } else { "" };
 
     // Qism bormi (raqami bo'yicha).
     let old = turso_exec(env,
@@ -11983,7 +11998,7 @@ pub(crate) async fn encbot_register(env: &Env, a: i64, s: i64, n: i64, origin: &
                     url_720p='',size_720p=0,key_720p='',url_1080p='',size_1080p=0,key_1080p='',
                     origin_video=?, origin_key='', origin_size=?, origin_height=?
                   WHERE anime_id=? AND season_id=? AND epizod_id=?",
-                vec![TursoArg::text(origin), TursoArg::int(size), TursoArg::int(height),
+                vec![TursoArg::text(ov_name), TursoArg::int(size), TursoArg::int(height),
                      TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]).await;
             if r.is_err() {
                 return "\u{274C} Qismni yangilab bo'lmadi (baza xatosi).".into();
@@ -12013,7 +12028,7 @@ pub(crate) async fn encbot_register(env: &Env, a: i64, s: i64, n: i64, origin: &
                     created_at,origin_video,origin_key,origin_size,origin_height)
                   VALUES (?,?,?,?,'','',0,'','',0,'','',0,'','',0,'','','','','','','','','','','',?,?,'',?,?)",
                  vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e), TursoArg::int(n),
-                      TursoArg::int(now), TursoArg::text(origin), TursoArg::int(size), TursoArg::int(height)]),
+                      TursoArg::int(now), TursoArg::text(ov_name), TursoArg::int(size), TursoArg::int(height)]),
                 ("UPDATE season_db SET epizod_count=(SELECT COUNT(*) FROM epizod_db WHERE anime_id=? AND season_id=?)
                    WHERE anime_id=? AND season_id=?",
                  vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(a), TursoArg::int(s)]),

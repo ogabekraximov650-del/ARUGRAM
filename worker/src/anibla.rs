@@ -1418,6 +1418,36 @@ async fn start(env: &Env, chat: i64, status: i64, it: &Item, ep: Option<(&str, &
         .chars().filter(|c| !"\\/:*?\"<>|".contains(*c)).take(90).collect();
     let fname = format!("{} {}", fname.trim(), quality_name(v.height));
 
+    // "Ilova uchun -> Anibla orqali": Telegram'ga YUKLANMAYDI (2 GB chegarasi).
+    // Qism darhol yaratiladi va kodlash navbatiga `anibla:<manzil>` bilan tushadi —
+    // kodlash run'i (`tool/encode/run.py`) videoni saytdan yuklab, shu zahoti
+    // H.265 da 4 sifatga (MP4 + fMP4) kodlaydi.
+    if let Some((t, label)) = &target {
+        let v2: Vec<i64> = t.split('/').filter_map(|p| p.parse().ok()).collect();
+        if v2.len() >= 2 {
+            let (a, s) = (v2[0], v2[1]);
+            if v2.len() == 3 {
+                config_put(env, "anibla_target", "").await;
+            }
+            if encbot_titles(env, a, s).await.is_none() {
+                let _ = encbot_api(env, "editMessageText", edit("\u{274C} Anime yoki bo'lim topilmadi (o'chirilgan bo'lishi mumkin).".into())).await;
+                return;
+            }
+            let n = match v2.get(2) {
+                Some(n) => *n,
+                None => encbot_numbers(env, a, s).await.iter().max().copied().unwrap_or(0) + 1,
+            };
+            let res = encbot_register(env, a, s, n, &format!("anibla:{}", v.job_url()), 0, 0, v.height).await;
+            let line = if res.starts_with('\u{2705}') {
+                format!("\u{2705} {} \u{2014} {n}-qism. Kodlash run'i videoni saytdan yuklab, darhol H.265 da kodlaydi \
+                         (Telegram'ga asl video yuklanmaydi).", html_escape(label))
+            } else { "\u{26A0}\u{FE0F} Qo'shilmadi \u{2014} sababi pastda.".to_string() };
+            let _ = encbot_api(env, "editMessageText", edit(line)).await;
+            encbot_send(env, chat, &res, None).await;
+            return;
+        }
+    }
+
     // Bir xil video ikki marta navbatga tushmasin (tugma ikki bosilsa yoki
     // Telegram webhook'ni qayta yuborsa).
     let dup = turso_exec(env, "SELECT id FROM anibla_jobs WHERE url=? AND state IN ('queued','running') LIMIT 1",

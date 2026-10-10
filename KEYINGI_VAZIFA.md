@@ -5657,3 +5657,13 @@ avto-kodlash (H.265, 4 sifat, MP4 + fMP4).
   (bo'limdagi eng kattasi + 1) — navbat ketma-ket, tartib saqlanadi.
   Oddiy "🎞 Anibla yuklash" menyusi `anibla_target` ni tozalaydi.
 - `download.py`: `done` ga `size`, `height` (qism yozuvidagi origin_size/height).
+- YANGILANDI (foydalanuvchi: "2 GB dan kattalari sig'maydi — yuklab olinishi
+  bilan kodlansin, Telegram'ga yuklamasdan"): "Anibla orqali" endi
+  `anibla_jobs` ga TUSHMAYDI. Qism tanlanganda (`anibla::start`) qism darhol
+  yaratiladi va `encode_jobs.origin = "anibla:<HLS manzil>"` (`encbot_register`,
+  `ch_msg=0`: `tg_files` yo'q, `origin_video` bo'sh). `/api/encode/claim`
+  bunday ishga `origin_url` beradi; `tool/encode/run.py` (`anibla_download`)
+  uni `tool/anibla/download.py` ning parallel HLS yuklovchisi bilan saytdan
+  oladi va o'sha run'da kodlaydi. Raqam tanlash paytida beriladi.
+  Xavf: navbat juda uzun bo'lsa HLS manzil eskirishi mumkin — kodlash xatosi
+  bilan to'xtaydi (qismni qayta "Anibla orqali" bilan almashtirish kerak).
