@@ -350,21 +350,6 @@ export function createProfile(page) {
     </div>`;
   }
 
-  function trafficHtml() {
-    const total = myStats.stats.traffic;
-    // Toifalar faqat telefonda bo'ladi — saytda jami raqam bitta qator.
-    const rows = total > 0 ? [{ label: 'Oldingi hisob', bytes: total }] : [];
-    return `<div class="glass pf-traf">
-      <div class="pf-traf-h">${icon('cloud_download', { size: 15, color: C.accent })}<span class="pf-traf-l">Trafik</span>
-        <span class="grow"></span><span class="pf-traf-v">${formatBytes(total)}</span></div>
-      <div class="pf-traf-bar">${rows.map((r) => `<div style="flex:1000;background:${C.textFaint}"></div>`).join('')}</div>
-      ${rows.length === 0 ? '<div class="pf-traf-empty">Hozircha trafik sarflanmagan</div>'
-    : rows.map((r) => `<div class="pf-urow"><span class="dot" style="background:${C.textFaint}"></span>
-        <span class="lbl">${r.label}</span><span class="sz">${formatBytes(r.bytes)}</span>
-        <span class="pc">${(total > 0 ? Math.min(100, (r.bytes / total) * 100) : 0).toFixed(2)}%</span></div>`).join('')}
-    </div>`;
-  }
-
   function tile(id, ic, label, { fill = true, trailing = '' } = {}) {
     return `<div class="pf-tile" data-t="${id}">${icon(ic, { fill, size: 24, color: 'rgba(255,255,255,0.7)' })}
       <span class="pf-tile-l">${label}</span>${trailing}${icon('chevron_right', { size: 24, color: 'rgba(255,255,255,0.38)' })}</div>`;
@@ -391,7 +376,6 @@ export function createProfile(page) {
       ${cardHtml(u)}
       <div class="pf-bill-slot">${billingHtml()}</div>
       <div class="pf-stats-slot">${statsHtml()}</div>
-      <div class="pf-traf-slot">${trafficHtml()}</div>
       ${menuHtml()}
       <div class="glass pf-danger" data-t="delete">
         <span class="pf-danger-ic">${icon('delete_forever', { size: 22, color: C.accent })}</span>
@@ -411,10 +395,8 @@ export function createProfile(page) {
 
   function renderStats() {
     const s1 = root.querySelector('.pf-stats-slot');
-    const s2 = root.querySelector('.pf-traf-slot');
     if (!s1) return;
     s1.innerHTML = statsHtml();
-    s2.innerHTML = trafficHtml();
     const me = currentUser()?.id || 0;
     s1.querySelectorAll('.pf-stat.open').forEach((el) => bindTap(el, () => {
       if (me > 0) openStatDetail({ userId: me, kind: el.dataset.k, isMe: true });
