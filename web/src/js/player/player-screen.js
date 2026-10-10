@@ -644,7 +644,12 @@ function buildPlayer(el, route, season, opts) {
     const v = drag; drag = null;
     seekTo(v * (video.duration || 0));
     paintProgress(); scheduleHide();
-    if (dragWasPlaying && intended) video.play().catch(() => {});
+    // Joy tayyor bo'lgach (seeked) davom etadi — kutish paytida tezlashib ketmaydi.
+    if (dragWasPlaying && intended) {
+      const go = () => { video.removeEventListener('seeked', go); clearTimeout(t); video.play().catch(() => {}); };
+      const t = setTimeout(go, 5000);
+      video.addEventListener('seeked', go);
+    }
     dragWasPlaying = false;
   };
   track.addEventListener('pointerup', endDrag);
@@ -653,6 +658,7 @@ function buildPlayer(el, route, season, opts) {
   // ── Gesturalar: bitta bosish — boshqaruv, ikki bosish — ±5 s ────
   let lastTap = 0; let lastSide = ''; let singleT = 0;
   let accL = 0; let accR = 0; const badgeT = {};
+  let contUntil = 0; let contSide = ''; let pendSeek = null; let pendT = 0;
   const gest = $('.pl-gest');
   let gdown = null;
   gest.addEventListener('pointerdown', (e) => { gdown = { x: e.clientX, y: e.clientY, t: Date.now() }; });
@@ -664,6 +670,8 @@ function buildPlayer(el, route, season, opts) {
     const r = gest.getBoundingClientRect();
     const side = (isRot() ? e.clientY - r.top < r.height / 2 : e.clientX - r.left < r.width / 2) ? 'l' : 'r';
     const now = Date.now();
+    // Ikki marta bosib sek boshlangach, tez-tez bosishlar sekni davom ettiradi (boshqaruv chiqmaydi).
+    if (now < contUntil && side === contSide) { clearTimeout(singleT); lastTap = now; lastSide = side; doubleSeek(side); return; }
     if (lastSide === side && now - lastTap < 300) {
       clearTimeout(singleT); lastTap = now;
       doubleSeek(side);
@@ -682,13 +690,18 @@ function buildPlayer(el, route, season, opts) {
   function doubleSeek(side) {
     const d = video.duration || 0;
     const base = video.currentTime;
+    const from = pendSeek ?? base;
+    contUntil = Date.now() + 700; contSide = side;
     if (side === 'l') accL = Math.min(accL + 5, Math.floor(base)); else accR = Math.min(accR + 5, Math.max(0, Math.floor(d - 1 - base)));
     const b = $(`.pl-badge.${side}`);
     const acc = side === 'l' ? accL : accR;
     const chev = [0, 1, 2].map((k) => `<i style="animation-delay:${(side === 'l' ? 2 - k : k) * 0.135}s">${icon(side === 'l' ? 'arrow_left' : 'arrow_right', { size: 13, color: '#fff' })}</i>`).join('');
     b.innerHTML = `<div class="ch">${chev}</div><span>${acc}s</span>`;
     b.classList.add('on');
-    seekTo(base + (side === 'l' ? -5 : 5));
+    // Sek qisqa tinchlikdan keyin BITTA marta bajariladi (har bosishda dvigatel qayta ishga tushmasin).
+    pendSeek = Math.max(0, Math.min(from + (side === 'l' ? -5 : 5), d > 1 ? d - 1 : from + 5));
+    clearTimeout(pendT);
+    pendT = setTimeout(() => { const t = pendSeek; pendSeek = null; if (t != null) seekTo(t); }, 250);
     try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred('light'); } catch (_) { /* */ }
     clearTimeout(badgeT[side]);
     badgeT[side] = setTimeout(() => { b.classList.remove('on'); if (side === 'l') accL = 0; else accR = 0; }, 700);
