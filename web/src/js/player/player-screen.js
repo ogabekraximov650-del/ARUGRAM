@@ -740,7 +740,7 @@ function buildPlayer(el, route, season, opts) {
   track.addEventListener('pointercancel', endDrag);
 
   // ── Gesturalar: bitta bosish — boshqaruv, ikki bosish — ±5 s ────
-  let lastTap = 0; let lastSide = ''; let singleT = 0;
+  let lastTap = 0; let lastSide = ''; let singleT = 0; let prevCtl = null;
   let accL = 0; let accR = 0; const badgeT = {};
   let contUntil = 0; let contSide = ''; let pendSeek = null; let pendT = 0;
   const gest = $('.pl-gest');
@@ -756,19 +756,19 @@ function buildPlayer(el, route, season, opts) {
     const side = (isRot() ? e.clientY - r.top < r.height / 2 : e.clientX - r.left < r.width / 2) ? 'l' : 'r';
     const now = Date.now();
     // Ikki marta bosib sek boshlangach, tez-tez bosishlar sekni davom ettiradi (boshqaruv chiqmaydi).
-    if (now < contUntil && side === contSide) { clearTimeout(singleT); lastTap = now; lastSide = side; doubleSeek(side); return; }
+    if (now < contUntil && side === contSide) { prevCtl = null; lastTap = now; lastSide = side; doubleSeek(side); return; }
     if (lastSide === side && now - lastTap < 300) {
-      clearTimeout(singleT); lastTap = now;
+      // Ikkinchi bosish: birinchi bosish boshqaruvni almashtirgan edi — avvalgi holatga qaytaramiz.
+      lastTap = now;
+      if (prevCtl != null) { showCtl = prevCtl; prevCtl = null; paintShow(); if (showCtl) scheduleHide(); else clearTimeout(hideT); }
       doubleSeek(side);
     } else {
+      // Bitta bosish: boshqaruv DARHOL almashadi (kechikishsiz).
       lastTap = now; lastSide = side;
-      clearTimeout(singleT);
-      singleT = setTimeout(() => {
-        lastTap = 0;
-        if (errShown) return;
-        showCtl = !showCtl; paintShow();
-        if (showCtl) scheduleHide(); else clearTimeout(hideT);
-      }, 300);
+      if (errShown) return;
+      prevCtl = showCtl;
+      showCtl = !showCtl; paintShow();
+      if (showCtl) scheduleHide(); else clearTimeout(hideT);
     }
   });
 

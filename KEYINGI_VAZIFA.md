@@ -5795,3 +5795,9 @@ Sabab: boshqaruv 5 s da yashirilganda `pointer-events: none` bo'ladi — bosib t
 yo'qolardi; gesturada bosish 14 px / 350 ms dan oshsa e'tiborsiz qoldirilardi. Tuzatish (`player-screen.js`):
 tugma bosilganda yashirish taymeri to'xtatiladi, qo'yib yuborilgach qayta ishga tushadi; bosish chegarasi
 24 px / 600 ms; `pointercancel` da holat tozalanadi.
+
+## Mini App pleyeri: bosishda boshqaruv darhol almashadi (2026-10)
+
+Bitta bosish 300 ms kechikib ishlardi va tez ikkinchi bosish (yashirish uchun) sek deb o'qilardi; `.pl-gest`
+da `touch-action` bo'lmagani uchun brauzer bosishni `pointercancel` qilib yuborardi. Endi: boshqaruv bosishda
+DARHOL almashadi, ikki marta bosilsa avvalgi holat qaytarilib ±10 s qilinadi; `.pl-gest { touch-action: none }`.
