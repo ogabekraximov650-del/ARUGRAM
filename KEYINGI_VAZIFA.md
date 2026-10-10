@@ -5734,3 +5734,10 @@ boshqa metod yurmaydigan ALOHIDA ulanishlarda.
 - DISK KESHI (web): `media-impl.js` — bo'laklar Telegram'dan kelgan (shifrlangan) holida
   IndexedDB `aru-chunks` ga (faqat 4 MB dan katta fayllar), 400 MB gacha, eng eskisi
   o'chadi (LRU). Qayta ochish/orqaga surish tarmoqsiz. Parallel so'rovlar 16.
+- KESH SOZLAMALARI (foydalanuvchi: "keshni tozalash tugmasi, hajm sozlamasi; qancha sig'sa shuncha,
+  to'lganda faqat yangisi sig'masa eng eskisi o'chsin"): kesh kodi `tg/chunk-cache.js` ga
+  ajratildi (mtcute'ga bog'liq emas). Standart "Avtomatik": `navigator.storage.estimate()`
+  ruxsatining ~95% gacha; joy yetmasa (yoki QuotaExceededError) FAQAT kerakli miqdorda eng
+  uzoq ishlatilmagan bo'lak o'chadi (LRU, xotiradagi indeks). Sozlamalar -> "Kesh (video)":
+  hajm (Avtomatik/500 MB/1/2/5 GB) va "Keshni tozalash". Qat'iy chegara kichraytirilsa,
+  ortig'i darhol o'chadi.
