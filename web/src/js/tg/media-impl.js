@@ -21,11 +21,12 @@
 //   clearOldBotChat()                — ochilganda eski nusxalarni o'chirish
 
 import { api, apiPost, ApiError } from '../api.js';
+import { downloadChunk } from '@mtcute/web/methods.js';
 import { getClient, tgConfig, isAuthorized, authorizedCached } from './client.js';
 import { openTelegramLogin } from './login.js';
 
 const CHUNK = 1024 * 1024; // Telegram upload.getFile: bir so'rovda ko'pi bilan 1 MB
-const MAX_PAR = 6; // bir vaqtda ketadigan upload.getFile so'rovlari
+const MAX_PAR = 12; // bir vaqtda ketadigan upload.getFile so'rovlari (4 ta ulanishga taqsimlanadi)
 const REQ_TIMEOUT = 25000; // javobsiz qolgan so'rov shu vaqtdan keyin qayta yuboriladi
 const NET_TRIES = 30; // tarmoq xatosida urinishlar (sekin/uzilgan internetda video to'xtab qolmasin)
 
@@ -36,11 +37,41 @@ function withTimeout(p, ms) {
     new Promise((_, j) => { t = setTimeout(() => j(new Error('chunk_timeout')), ms); }),
   ]).finally(() => clearTimeout(t));
 }
-let parActive = 0; const parQ = [];
-async function limited(fn) {
-  if (parActive >= MAX_PAR) await new Promise((r) => parQ.push(r));
-  parActive++;
-  try { return await fn(); } finally { parActive--; parQ.shift()?.(); }
+let parActive = 0;
+// Navbat: `prio` 0 — pleyer HOZIR kutayotgan bo'lak, 1 — oldindan yuklash. Surishdan keyin
+// eski joyning hali boshlanmagan oldindan yuklashlari bekor qilinadi (yangi joy ularni
+// kutib o'tirmasin).
+const parQ = [];
+function pump() {
+  while (parActive < MAX_PAR && parQ.length) {
+    let bi = 0;
+    for (let i = 1; i < parQ.length; i++) if (parQ[i].prio < parQ[bi].prio) bi = i;
+    const it = parQ.splice(bi, 1)[0];
+    if (it.cancelled) { it.reject(new Error('cancelled')); continue; }
+    parActive++;
+    it.fn().then(it.resolve, it.reject).finally(() => { parActive--; pump(); });
+  }
+}
+function limited(fn, prio = 0, hold) {
+  return new Promise((resolve, reject) => {
+    const it = { fn, prio, resolve, reject, cancelled: false };
+    if (hold) hold(it);
+    parQ.push(it);
+    pump();
+  });
+}
+function cancelPrefetches() { for (const it of parQ) if (it.prio > 0) it.cancelled = true; }
+/** Pleyer ulanishi: `downloadChunk` ni "download" turidagi ulanishlar orqali yuboradi. */
+function dlClient(cl) {
+  if (cl.__aruDl) return cl.__aruDl;
+  cl.__aruDl = new Proxy(cl, {
+    get(t, k) {
+      if (k === 'call') return (m, o) => t.call(m, { ...(o || {}), kind: 'download' });
+      const v = t[k];
+      return typeof v === 'function' ? v.bind(t) : v;
+    },
+  });
+  return cl.__aruDl;
 }
 const docs = new Map(); // nom -> {media, size, msgId}
 const keys = new Map(); // nom -> hex
@@ -194,8 +225,9 @@ export async function openFile(name, { key = '' } = {}) {
   const done = []; // [vaqt, bayt] — tezlikni o'lchash uchun (oxirgi 20 s)
   const opened = Date.now();
 
-  async function chunk(idx) {
-    if (cache.has(idx)) return cache.get(idx);
+  const items = new Map(); // bo'lak -> navbatdagi so'rov (oldindan yuklash talabga aylansa — ustuvorlik oshadi)
+  async function chunk(idx, prio = 0) {
+    if (cache.has(idx)) { if (prio === 0) { const it = items.get(idx); if (it) it.prio = 0; } return cache.get(idx); }
     const p = (async () => {
       const off = idx * CHUNK;
       const lim = Math.min(CHUNK, doc.size - off);
@@ -204,7 +236,10 @@ export async function openFile(name, { key = '' } = {}) {
         if (closed) throw new Error('aborted');
         try {
           // Taymaut `limited` ichida: osilib qolgan so'rov navbatdagi o'rinni band qilib turmaydi.
-          const raw = await limited(() => withTimeout(cl.downloadChunk({ location: doc.media, offset: off, limit: CHUNK }), REQ_TIMEOUT));
+          const dc = Number.isInteger(doc.media?.dcId) ? doc.media.dcId : undefined;
+          const raw = await limited(
+            () => withTimeout(downloadChunk(dlClient(cl), { location: doc.media, offset: off, limit: CHUNK, ...(dc ? { dcId: dc } : {}) }), REQ_TIMEOUT),
+            prio, (it) => items.set(idx, it));
           const part = raw.length > lim ? raw.subarray(0, lim) : raw;
           done.push([Date.now(), part.length]);
           if (done.length > 200) done.splice(0, done.length - 200);
@@ -232,6 +267,7 @@ export async function openFile(name, { key = '' } = {}) {
     ORDER.push(idx);
     while (ORDER.length > MAX_CACHE) cache.delete(ORDER.shift());
     p.catch(() => cache.delete(idx));
+    p.finally(() => items.delete(idx)).catch(() => {});
     return p;
   }
 
@@ -259,8 +295,10 @@ export async function openFile(name, { key = '' } = {}) {
     /** Oldindan yuklab qo'yish (pleyer buferi uchun). */
     prefetch(offset, length) {
       const end = Math.min(doc.size, offset + length);
-      for (let i = Math.floor(offset / CHUNK); i <= Math.floor((end - 1) / CHUNK); i++) chunk(i).catch(() => {});
+      for (let i = Math.floor(offset / CHUNK); i <= Math.floor((end - 1) / CHUNK); i++) chunk(i, 1).catch(() => {});
     },
+    /** Surishdan keyin: hali boshlanmagan oldindan yuklashlarni bekor qiladi. */
+    cancelPrefetch() { cancelPrefetches(); },
     /** So'nggi ~20 s dagi yuklash tezligi (kbit/s). */
     rateKbps() {
       const now = Date.now();

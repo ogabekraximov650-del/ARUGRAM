@@ -290,6 +290,7 @@ export function createEngine(video, { name, key = '', ahead: aheadOpt = 60, behi
     const r = video.buffered;
     for (let i = 0; i < r.length; i++) if (r.start(i) <= t && r.end(i) > t + 1) { next = Math.max(next, segIndexAt(r.end(i) - 0.05)); pump(); return; }
     gen += 1;
+    try { file?.cancelPrefetch?.(); } catch (_) { /* */ }
     next = segIndexAt(t);
     st('buffering');
     pump();
@@ -412,6 +413,7 @@ export function createEngine(video, { name, key = '', ahead: aheadOpt = 60, behi
       const my = ++seekReq;
       focus = t;
       gen += 1;
+      try { file?.cancelPrefetch?.(); } catch (_) { /* */ }
       next = segIndexAt(t);
       pump();
       return new Promise((resolve) => {

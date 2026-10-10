@@ -5717,3 +5717,17 @@ avto-kodlash (H.265, 4 sifat, MP4 + fMP4).
 - MP4 (Service Worker) yo'li o'chirildi-default: Androidda video ochilmay aylanib
   qoldi. Endi standart — fMP4 + MSE; MP4 faqat `localStorage.aru_mp4='1'` bilan
   yoqiladi va 15 s ichida ochilmasa o'zi fMP4 ga o'tadi.
+
+## Mini App: yuklash tezligi — bitta ulanish sababi (2026-10)
+
+TOPILDI: mtcute `downloadChunk` `kind` bermaydi, ya'ni HAMMA `upload.getFile` bitta
+ASOSIY WebSocket ulanishdan navbat bilan o'tardi — ilovadagi Rust yadrosida topilgan
+xuddi shu sabab (`rust/src/telegram.rs` -> `DL_CONNS`, "grammers har DC ga bitta
+ulanish"). Telegram hujjati (core.telegram.org/api/files): katta fayllar media-DC da,
+boshqa metod yurmaydigan ALOHIDA ulanishlarda.
+- `tg/client.js`: `network.connectionCount` — "download" 4 ta (premium 8), "downloadSmall" 2.
+- `tg/media-impl.js`: `downloadChunk` "download" ulanishlari orqali (`dlClient` proxy),
+  fayl DC si (`media.dcId`) beriladi; parallel so'rovlar 12; navbat ustuvorlik bilan
+  (pleyer hozir kutgan bo'lak — 0, oldindan yuklash — 1); surishda boshlanmagan
+  oldindan yuklashlar bekor (`cancelPrefetch`, `engine.js`).
+- Tekshirilmagan: haqiqiy tezlik o'lchovi (telefonda).

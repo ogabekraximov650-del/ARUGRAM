@@ -52,6 +52,18 @@ export async function getClient() {
         langCode: 'uz',
         systemLangCode: 'uz',
       },
+      // Fayl yuklash alohida ulanishlarda ("download" turi): avval hamma `getFile` asosiy
+      // ulanishdan o'tardi (ilovadagi Rust yadrosida topilgan xuddi shu sekinlik sababi:
+      // bitta ulanish — bitta so'rovlar navbati). Telegram: katta fayllar media-DC da
+      // alohida ulanishlarda. Rasmiy ilovalar kabi 4 ta (premium 8).
+      network: {
+        connectionCount: (kind, dcId, isPremium) => {
+          if (kind === 'main') return 0;
+          if (kind === 'download') return isPremium ? 8 : 4;
+          if (kind === 'downloadSmall') return 2;
+          return isPremium || (dcId !== 2 && dcId !== 4) ? 8 : 4; // upload
+        },
+      },
       disableUpdates: false,
       logLevel: 1,
     });
