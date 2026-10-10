@@ -212,18 +212,28 @@ export function createEngine(video, { name, key = '', ahead: aheadOpt = 20, behi
         // Faqat keyingi fragment oldindan so'raladi (ortiqcha yuklanmasin, boshlanish sekinlashmasin).
         const n2 = segs[next + 1];
         if (n2 && n2.size <= 6 * 1024 * 1024) file.prefetch(n2.start, n2.size);
-        const data = await file.read(seg.start, seg.size);
-        if (destroyed || my !== gen) break;
-        try {
-          await appendAsync(data);
-        } catch (e) {
-          if (e?.name === 'QuotaExceededError') {
-            await trimBehind();
-            await removeAsync(video.currentTime + ahead, duration);
-            continue;
+        // Fragment 256 KB bo'laklar bilan keladi va keldi-keldisiga qo'shiladi (butun fragment kutilmaydi):
+        // o'ynash tezroq boshlanadi, sekdan keyin ham kutish kam.
+        const B = 256 * 1024;
+        const end = seg.start + seg.size;
+        file.prefetch(seg.start, seg.size);
+        for (let pos = seg.start; pos < end;) {
+          const to = Math.min(end, (Math.floor(pos / B) + 1) * B);
+          const data = await file.read(pos, to - pos);
+          if (destroyed || my !== gen) break;
+          try {
+            await appendAsync(data);
+          } catch (e) {
+            if (e?.name === 'QuotaExceededError') {
+              await trimBehind();
+              await removeAsync(video.currentTime + ahead, duration);
+              continue;
+            }
+            throw e;
           }
-          throw e;
+          pos = to;
         }
+        if (destroyed || my !== gen) break;
         next += 1;
         if (next % 4 === 0) await trimBehind();
       }

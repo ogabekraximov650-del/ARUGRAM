@@ -69,16 +69,16 @@ function docName(msg) {
 }
 
 /** Bot chatining oxirgi 100 xabaridan fayllarni nomi bo'yicha eslab qoladi. */
-async function scanBotChat() {
+async function scanBotChat(limit = 100) {
   const cl = await getClient();
   let msgs;
   try {
-    msgs = await cl.getHistory(await botPeer(), { limit: 100 });
+    msgs = await cl.getHistory(await botPeer(), { limit });
   } catch (e) {
     // Sessiya almashgan/o'chirilgan bo'lsa peer access_hash'i eskirib qoladi — qayta aniqlab, bir marta urinamiz.
     if (!/PEER_ID_INVALID|ACCESS_HASH|USER_BANNED/.test(`${e?.text || e?.message || ''}`)) throw e;
     peerP = null;
-    msgs = await cl.getHistory(await botPeer(), { limit: 100 });
+    msgs = await cl.getHistory(await botPeer(), { limit });
   }
   scanInfo = `msgs=${msgs.length}`;
   const kinds = [];
@@ -111,9 +111,9 @@ async function locate(names, { force = false } = {}) {
       for (const [k, v] of Object.entries(j?.keys || {})) keys.set(k, `${v}`);
       still.forEach((n) => keyChecked.add(n));
       // Bot nusxani bir-ikki soniyada yuboradi.
-      for (let i = 0; i < 12; i++) {
-        await new Promise((r) => setTimeout(r, i === 0 ? 400 : 700));
-        try { await scanBotChat(); } catch (e) { scanInfo = `scan:${e?.text || e?.message || e}`; }
+      for (let i = 0; i < 20; i++) {
+        await new Promise((r) => setTimeout(r, i === 0 ? 250 : 400));
+        try { await scanBotChat(Math.min(100, 12 + still.length * 6)); } catch (e) { scanInfo = `scan:${e?.text || e?.message || e}`; }
         if (still.every((n) => docs.has(n))) break;
       }
     }

@@ -245,3 +245,5 @@
 /* Qulflangan holatda "ochish" tugmasi: aylantirilgan rejimda tizim tugmalari yoniga tushmasin */
 .pl-box.rot .pl-unlock { right: calc(var(--safe-bottom, 0px) + var(--rot-gap)); top: calc(10px + var(--safe-top, 0px) + var(--content-top, 0px)); padding: 12px 14px; }
 .pl-box.fs .pl-unlock { padding: 12px 14px; }
+
+.pl-box.rot .pl-unlock { left: calc(12px + var(--safe-top, 0px) + var(--content-top, 0px)); right: auto; top: 10px; }

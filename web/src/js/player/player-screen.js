@@ -548,7 +548,7 @@ function buildPlayer(el, route, season, opts) {
         if (my !== token || !intended) { done(); return; }
         const d = video.duration || 0;
         const ahead = bufferedEnd() - video.currentTime;
-        if (ahead >= Math.min(3, Math.max(0.5, d - video.currentTime - 0.3)) || Date.now() - t0 > 20000) done();
+        if (ahead >= Math.min(1.5, Math.max(0.5, d - video.currentTime - 0.3)) || Date.now() - t0 > 20000) done();
         else { busy = true; paintBusy(); }
       };
       const iv = setInterval(check, 150);
@@ -577,9 +577,26 @@ function buildPlayer(el, route, season, opts) {
     paintPP(); paintEps(); keepShown();
   }
 
+  // Sek paytida video pauzada turadi, joy tayyor bo'lgach (kamida ~1 s bufer) davom etadi.
+  let resumeAfterSeek = false;
   function seekTo(sec) {
     const d = video.duration || 0;
+    if (!video.paused && !video.ended && intended) { resumeAfterSeek = true; video.pause(); }
     video.currentTime = Math.max(0, Math.min(sec, d > 1 ? d - 1 : sec));
+    if (resumeAfterSeek) { busy = true; paintBusy(); resumeWhenReady(); }
+  }
+  function resumeWhenReady() {
+    const t0 = Date.now();
+    const iv = setInterval(() => {
+      if (!resumeAfterSeek) { clearInterval(iv); return; }
+      const d = video.duration || 0;
+      const ahead = bufferedEnd() - video.currentTime;
+      const ok = !video.seeking && ahead >= Math.min(1, Math.max(0.3, d - video.currentTime - 0.3));
+      if (ok || Date.now() - t0 > 8000) {
+        clearInterval(iv); resumeAfterSeek = false; busy = false; paintBusy();
+        if (intended) video.play().catch(() => {});
+      }
+    }, 100);
   }
 
   // ── Video hodisalari ──────────────────────────────────────────
@@ -674,12 +691,7 @@ function buildPlayer(el, route, season, opts) {
     const v = drag; drag = null;
     seekTo(v * (video.duration || 0));
     paintProgress(); scheduleHide();
-    // Joy tayyor bo'lgach (seeked) davom etadi — kutish paytida tezlashib ketmaydi.
-    if (dragWasPlaying && intended) {
-      const go = () => { video.removeEventListener('seeked', go); clearTimeout(t); video.play().catch(() => {}); };
-      const t = setTimeout(go, 5000);
-      video.addEventListener('seeked', go);
-    }
+    if (dragWasPlaying && intended) { resumeAfterSeek = true; busy = true; paintBusy(); resumeWhenReady(); }
     dragWasPlaying = false;
   };
   track.addEventListener('pointerup', endDrag);
