@@ -12797,6 +12797,13 @@ async fn cleanup_orphan_history(env: &Env) {
 
 #[event(scheduled)]
 async fn scheduled(_ev: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
+    // Asosiy bot webhook'i: bot almashsa (token yangilansa) unga hech kim so'rov
+    // yubormaguncha webhook qo'yilmasdi va bot /start'ga jim turardi. Cron uni
+    // 10 daqiqa ichida o'zi qo'yadi (manzil — oldingi webhook'dan saqlangan).
+    {
+        let origin = worker_origin(&env).await;
+        if !origin.is_empty() { ensure_webhook(&env, &origin).await; }
+    }
     if !encbot_token(&env).is_empty() {
         let origin = worker_origin(&env).await;
         ensure_encbot_webhook(&env, &origin).await;
