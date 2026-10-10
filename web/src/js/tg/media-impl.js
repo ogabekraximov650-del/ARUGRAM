@@ -346,9 +346,26 @@ export async function me() {
  * so'rovi bilan havola) — so'rov yuboradi. `{ok}` yoki `{error, wait?}`.
  */
 export async function joinChannel(kind, url) {
+  // Ilovadagi `join_one` (rust/src/telegram.rs) bilan bir xil: ochiq — resolveUsername + joinChannel,
+  // yopiq — checkChatInvite + importChatInvite. (`joinChat(url)` to'liq t.me havolani tushunmasdi.)
   try {
     const cl = await getClient();
-    await cl.joinChat(url);
+    const raw = `${url || ''}`.trim();
+    const hashM = /(?:t\.me\/\+|t\.me\/joinchat\/|^\+)([A-Za-z0-9_-]+)/i.exec(raw);
+    if (kind === 'private' || hashM) {
+      const hash = hashM?.[1];
+      if (!hash) return { ok: false, error: 'invite_hash_invalid' };
+      const chk = await cl.call({ _: 'messages.checkChatInvite', hash });
+      if (chk?._ === 'chatInviteAlready') return { ok: true };
+      await cl.call({ _: 'messages.importChatInvite', hash });
+      return { ok: true };
+    }
+    const name = raw.replace(/^https?:\/\//i, '').replace(/^(?:www\.)?t\.me\//i, '').replace(/^@/, '').split(/[/?#]/)[0];
+    if (!name) return { ok: false, error: 'USERNAME_INVALID' };
+    const r = await cl.call({ _: 'contacts.resolveUsername', username: name });
+    const ch = (r.chats || []).find((c) => c._ === 'channel' && c.accessHash != null);
+    if (!ch) return { ok: false, error: 'USERNAME_NOT_OCCUPIED' };
+    await cl.call({ _: 'channels.joinChannel', channel: { _: 'inputChannel', channelId: ch.id, accessHash: ch.accessHash } });
     return { ok: true };
   } catch (e) {
     const t = `${e?.text || e?.message || e}`;
