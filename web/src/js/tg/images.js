@@ -9,6 +9,7 @@
 import { mediaUrl, prefetchNames, isTelegramAuthorized } from './media.js';
 import { startup, withTimeout } from './startup.js';
 import { cachedMediaUrl } from './file-cache.js';
+import { ensureKeys } from './ctr.js';
 
 const queue = new Map(); // nom -> [{img, orig}]
 let timer = 0;
@@ -45,7 +46,11 @@ async function flush() {
   if (!batch.length) return;
   // Avval DISK keshi: bor rasmlar Telegram'ga umuman so'rovsiz, darhol chiqadi.
   const rest = [];
+  // Kalitlar onlayn (bitta so'rov, bot nusxasiz); tarmoq yo'q bo'lsa kesh ishlatilmaydi.
+  let keyOk = true;
+  try { await ensureKeys(batch.map((b) => b[0])); } catch (_) { keyOk = false; }
   await Promise.all(batch.map(async (b) => {
+    if (!keyOk) { rest.push(b); return; }
     const u = await cachedMediaUrl(b[0]).catch(() => null);
     if (u) setSrc(b[1], u); else rest.push(b);
   }));

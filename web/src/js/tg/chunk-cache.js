@@ -228,9 +228,22 @@ export async function filePut(name, bytes, type) {
 export async function metaGet(name) {
   try {
     const u = await getSealed(`f:meta:${name}`);
-    return u ? JSON.parse(new TextDecoder().decode(u)) : null;
+    const m = u ? JSON.parse(new TextDecoder().decode(u)) : null;
+    // Eski yozuvda ochish kaliti bor edi — diskdan o'chiriladi (kalitlar faqat onlayn olinadi).
+    if (m && 'key' in m) { const clean = { size: m.size }; metaPut(name, clean); return clean; }
+    return m;
   } catch (_) { return null; }
 }
 export async function metaPut(name, meta) {
   try { await putSealed(`f:meta:${name}`, await seal(new TextEncoder().encode(JSON.stringify(meta)))); } catch (_) { /* */ }
+}
+
+/** Hisobdan chiqishda: hamma kesh va qurilma kaliti o'chadi (keyingi hisob eskisini ko'rmasin). */
+export async function cacheWipe() {
+  try { await cacheClear(); } catch (_) { /* */ }
+  try {
+    const d = await db();
+    if (d) { const tx = d.transaction('k', 'readwrite'); tx.objectStore('k').clear(); await txDone(tx); }
+  } catch (_) { /* */ }
+  devKeyP = null;
 }

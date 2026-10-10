@@ -11,6 +11,7 @@
 
 import { TelegramClient, WebCryptoProvider } from '@mtcute/web';
 import { api } from '../api.js';
+import { cacheWipe } from './chunk-cache.js';
 import { withTimeout } from './startup.js';
 
 let cfg = null;
@@ -124,6 +125,7 @@ export function tgError(e) {
 /** Telegram'dan chiqish (shu qurilma sessiyasi). */
 export async function tgLogout() {
   try { const cl = await getClient(); await cl.logOut(); } catch (_) { /* */ }
+  try { await cacheWipe(); } catch (_) { /* */ }
   authorized = false;
   emit();
 }

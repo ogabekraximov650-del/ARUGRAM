@@ -25,7 +25,9 @@ import { downloadChunk } from '@mtcute/web/methods.js';
 import { getClient, tgConfig, isAuthorized, authorizedCached } from './client.js';
 import { openTelegramLogin } from './login.js';
 import { cacheGet, cachePut, metaGet, metaPut } from './chunk-cache.js';
-import { cachedMediaUrl, rememberFile, rememberUrl } from './file-cache.js';
+import { cachedMediaUrl, rememberUrl } from './file-cache.js';
+import { keys, ensureKeys, ctrApply, guessType } from './ctr.js';
+export { ctrApply };
 
 const CHUNK = 1024 * 1024; // Telegram upload.getFile: bir so'rovda ko'pi bilan 1 MB
 const MAX_PAR = 16; // bir vaqtda ketadigan upload.getFile so'rovlari (4 ta ulanishga taqsimlanadi)
@@ -76,7 +78,6 @@ function dlClient(cl) {
   return cl.__aruDl;
 }
 const docs = new Map(); // nom -> {media, size, msgId}
-const keys = new Map(); // nom -> hex
 const urls = new Map(); // nom -> objectURL
 let scanInfo = '';
 const keyChecked = new Set(); // kaliti serverdan so'ralgan nomlar
@@ -171,38 +172,6 @@ async function locate(names, { force = false } = {}) {
   for (const n of names) if (!docs.has(n)) throw new Error(`not_in_chat (${scanInfo}; bot=${await botPeer().then(() => 'ok', (e) => e?.text || e?.message || '?')})`);
 }
 
-function hexToBytes(hex) {
-  const out = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.substr(i * 2, 2), 16);
-  return out;
-}
-
-const cryptoKeys = new Map();
-async function aesKey(hex) {
-  if (!cryptoKeys.has(hex)) {
-    cryptoKeys.set(hex, crypto.subtle.importKey('raw', hexToBytes(hex), { name: 'AES-CTR' }, false, ['encrypt', 'decrypt']));
-  }
-  return cryptoKeys.get(hex);
-}
-
-/** AES-128-CTR: `data` fayldagi `offset` dan boshlanadi (offset % 16 == 0). */
-export async function ctrApply(hex, offset, data) {
-  if (!hex) return data;
-  const k = await aesKey(hex);
-  const counter = new Uint8Array(16);
-  let block = BigInt(Math.floor(offset / 16));
-  for (let i = 15; i >= 0 && block > 0n; i--) { counter[i] = Number(block & 0xffn); block >>= 8n; }
-  const head = offset % 16;
-  if (head === 0) {
-    return new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-CTR', counter, length: 128 }, k, data));
-  }
-  // Blok o'rtasidan — oldiga to'ldiruvchi qo'shib, keyin kesiladi.
-  const pad = new Uint8Array(head + data.length);
-  pad.set(data, head);
-  const outp = new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-CTR', counter, length: 128 }, k, pad));
-  return outp.subarray(head);
-}
-
 /**
  * Faylni ochadi: `read(offset, length)` kerakli baytlarni (ochilgan holda)
  * qaytaradi. Bo'laklar 1 MB chegarasiga tekislanib olinadi.
@@ -235,8 +204,10 @@ export async function openFile(name, { key = '' } = {}) {
       for (const [k, v] of Object.entries(j?.keys || {})) keys.set(k, `${v}`);
     } catch (_) { /* kalitsiz (shifrlanmagan) fayl */ }
   }
-  const hex = key || keys.get(name) || (meta && meta.key) || '';
-  if (!lazy && doc) metaPut(name, { size: doc.size, key: hex });
+  // Keshdagi fayl: kalit diskda YO'Q — ONLAYN olinadi (`keys_only`); internet bo'lmasa ochilmaydi.
+  if (lazy && !key && !keys.get(name)) await ensureKeys([name]);
+  const hex = key || keys.get(name) || '';
+  if (!lazy && doc) metaPut(name, { size: doc.size });
   const cache = new Map(); // bo'lak raqami -> Promise<Uint8Array>
   const ORDER = [];
   const MAX_CACHE = 64;
@@ -364,22 +335,9 @@ export async function mediaUrl(name, opts = {}) {
   const u = URL.createObjectURL(blob);
   urls.set(name, u);
   rememberUrl(name, u);
-  try { rememberFile(name, new Uint8Array(await blob.arrayBuffer()), blob.type); } catch (_) { /* */ }
   return u;
 }
 
-function guessType(name) {
-  const n = name.toLowerCase();
-  if (/\.(jpe?g)$/.test(n)) return 'image/jpeg';
-  if (n.endsWith('.png')) return 'image/png';
-  if (n.endsWith('.webp')) return 'image/webp';
-  if (n.endsWith('.gif')) return 'image/gif';
-  if (n.endsWith('.mp4')) return 'video/mp4';
-  if (n.endsWith('.webm')) return 'video/webm';
-  if (/\.(m4a|aac)$/.test(n)) return 'audio/mp4';
-  if (n.endsWith('.ogg') || n.endsWith('.oga')) return 'audio/ogg';
-  return 'application/octet-stream';
-}
 
 /**
  * Fayl yuborish (yozishma, avatar va h.k.) — ilovadagidek: fayl SHIFRLANIB

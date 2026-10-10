@@ -12878,6 +12878,11 @@ async fn tg_route(mut req: Request, env: &Env, path: &str, method: Method) -> Re
             // pullik obuna endi faqat foydalanuvchi yasagan emoji/GIF/stiker
             // yuborish uchun (`needs_pack_sub`). `until` ishlatilmaydi.
             let _ = until;
+            // `keys_only`: faqat ochish kalitlari (fayl botga NUSXALANMAYDI). Web keshdagi
+            // fayllarni ochish uchun kalitni har safar ONLAYN oladi (diskda saqlanmaydi).
+            if body["keys_only"].as_bool() == Some(true) {
+                return ok_nostore(json!({"sent": 0, "files": [], "keys": keys}));
+            }
             // `copyMessages` raqamlar O'SIB boradigan tartibda bo'lishini talab qiladi.
             pairs.sort_by_key(|(_, id)| *id);
             pairs.dedup_by_key(|(_, id)| *id);

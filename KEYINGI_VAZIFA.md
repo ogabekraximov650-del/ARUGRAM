@@ -5750,3 +5750,10 @@ boshqa metod yurmaydigan ALOHIDA ulanishlarda.
   ham shifrlab saqlanadi: `openFile` keshdagi faylni bot nusxasini kutmasdan ochadi
   (bo'lak keshda bo'lmasa shundagina Telegram'dan, `ensureRemote`). JSON ro'yxatlar
   (bo'limlar, qismlar) avvaldan localStorage'da. Keshni tozalash/hajm — Sozlamalar.
+- KESH XAVFSIZLIGI (foydalanuvchi): (1) hisobdan chiqishda (`api.js -> logout`, `tgLogout`) hamma
+  kesh va qurilma kaliti o'chadi (`cacheWipe`); boshqa hisob kirsa ham (`aru_cache_owner`).
+  (2) Fayl ochish KALITLARI DISKDA SAQLANMAYDI — faqat xotirada, har safar ONLAYN:
+  `POST /api/tg/deliver {files, keys_only:true}` (bot nusxasiz, tez; `tg/ctr.js -> ensureKeys`).
+  Diskda faqat Telegram'dan kelgan shifrlangan bo'laklar (rasm ham — `f` da to'liq fayl endi YO'Q;
+  `file-cache.js` bo'laklardan yig'ib kalit bilan ochadi). Internet yo'q bo'lsa kesh ochilmaydi.
+  Eski keshdagi kalit yozuvlari `metaGet` da o'chadi.

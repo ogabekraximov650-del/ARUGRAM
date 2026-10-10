@@ -1,3 +1,4 @@
+import { cacheWipe } from './tg/chunk-cache.js';
 // Worker bilan aloqa.
 //
 // Ikki xil kirish (ikkalasi ham avtomatik, Telegram `initData` orqali —
@@ -54,7 +55,16 @@ function tgUserId() {
 /** Bazadagi account (`/api/auth/me` -> `user`). */
 export function currentUser() { return me; }
 export function onUser(fn) { listeners.add(fn); return () => listeners.delete(fn); }
-function setMe(u) { me = u; listeners.forEach((f) => { try { f(u); } catch (_) { /* */ } }); }
+// Kesh egasi: boshqa hisob kirsa (yoki chiqilsa) avvalgi hisob keshi o'chadi.
+function cacheOwner(u) {
+  try {
+    const cur = u?.id ? `${u.id}` : '';
+    const was = localStorage.getItem('aru_cache_owner') || '';
+    if (cur && was && was !== cur) cacheWipe();
+    if (cur) localStorage.setItem('aru_cache_owner', cur);
+  } catch (_) { /* */ }
+}
+function setMe(u) { me = u; cacheOwner(u); listeners.forEach((f) => { try { f(u); } catch (_) { /* */ } }); }
 
 export class ApiError extends Error {
   constructor(status, body) {
@@ -183,5 +193,7 @@ export async function logout() {
   try { await api('/api/auth/logout', { method: 'POST', noSessionRetry: true }); } catch (_) { /* */ }
   session = '';
   lsSet(SES_KEY, null);
+  try { localStorage.removeItem('aru_cache_owner'); } catch (_) { /* */ }
+  await cacheWipe();
   setMe(null);
 }
