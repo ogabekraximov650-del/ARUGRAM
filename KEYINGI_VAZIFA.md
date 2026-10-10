@@ -5780,8 +5780,4 @@ boshqa metod yurmaydigan ALOHIDA ulanishlarda.
   sek: nishonda bufer 2 s o'rniga 1,2 s bo'lgach sakraydi. Eslatma: x265 standart keyint=250
   (~10 s) — sek har doim oldingi kalit kadrdan boshlab oladi; zichroq kalit kadr (keyint ~2-3 s,
   `open-gop=0`) yangi kodlashlarda sekni tezlashtiradi (hozircha qo'llanmagan).
-- KALIT KADRLAR ZICH (foydalanuvchi: "kalit kadrlarni zichlashtir"): `tool/encode/run.py -> encode`:
-  `-force_key_frames expr:gte(t,n_forced*2)` (har 2 s IDR, fps'dan qat'i nazar) + x265
-  `open-gop=0:keyint=120:min-keyint=24`. Sinov (ffmpeg libx265): 0, 2.002, 4.004 ... s da kalit kadr.
-  FAQAT YANGI kodlanadigan qismlarga tegadi (eskilari 10 s oraliqda qoladi; qayta kodlash kerak).
-  Taxminan +5..10% hajm. fMP4 nusxalar (`make_fmp4`, `frag_keyframe`) endi ~2 s lik fragmentlardan.
+- KALIT KADRLAR ZICHLASHTIRISH BEKOR QILINDI (foydalanuvchi: "kerak emas"): kodlash avvalgi holda (x265 standart).
