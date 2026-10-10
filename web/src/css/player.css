@@ -234,3 +234,6 @@
 .pl-box.rot .pl-bottom { padding-right: calc(var(--safe-bottom, 0px) + 88px); }
 .pl-box.rot .pl-speed { right: 112px; }
 .pl-box.rot .pl-eplist { right: 104px; }
+
+/* Izohlar paneli: `.pl-pane.on` (display:block) `.cm` ning flex ustuni bilan to'qnashmasin — yozish maydoni doim pastda */
+.pl-pane.cm-pane.on { display: flex; flex-direction: column; overflow: hidden; }
