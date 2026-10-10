@@ -5757,3 +5757,9 @@ boshqa metod yurmaydigan ALOHIDA ulanishlarda.
   Diskda faqat Telegram'dan kelgan shifrlangan bo'laklar (rasm ham — `f` da to'liq fayl endi YO'Q;
   `file-cache.js` bo'laklardan yig'ib kalit bilan ochadi). Internet yo'q bo'lsa kesh ochilmaydi.
   Eski keshdagi kalit yozuvlari `metaGet` da o'chadi.
+- XOTIRA OYNASI (foydalanuvchi: "profilga xotira oynasini qo'sh ilovadagidek, sozlamalardan kesh olib tashlansin"):
+  `web/src/js/screens/storage.js` + `css/storage.css` — `storage_screen.dart` nusxasi (halqa diagramma,
+  toifalar: Videolar / Rasmlar / Emoji-GIF-stiker / Yozishma fayllari / Boshqa — belgilanadi,
+  "Keshni tozalash"/"Tanlanganini tozalash", tasdiq, yashil "Xotira tozalandi"; qo'shimcha "Kesh
+  chegarasi"). Profil menyusida "Xotiradan foydalanish". Sozlamalardan kesh bo'limi olib tashlandi.
+  Toifalar fayl nomidan (`chunk-cache.js -> cacheBreakdown/cacheClearCats`).

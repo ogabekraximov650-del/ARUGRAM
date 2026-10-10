@@ -247,3 +247,46 @@ export async function cacheWipe() {
   } catch (_) { /* */ }
   devKeyP = null;
 }
+
+// ── Toifalar (Xotiradan foydalanish oynasi uchun) ─────────────────────────────
+export const CAT_VIDEO = 'Videolar';
+export const CAT_PACKS = 'Emoji, GIF va stikerlar';
+export const CAT_CHAT = 'Yozishma fayllari';
+export const CAT_IMG = 'Rasmlar';
+export const CAT_OTHER = 'Boshqa';
+
+function nameOfKey(k) {
+  if (k.startsWith('f:meta:')) return k.slice(7);
+  if (k.startsWith('f:')) return k.slice(2);
+  const i = k.lastIndexOf('#');
+  return i > 0 ? k.slice(0, i) : k;
+}
+function catOf(name) {
+  if (/^(ep_|orig_)/.test(name)) return CAT_VIDEO;
+  if (/^pk_|^pki_|\.arp$/.test(name)) return CAT_PACKS;
+  if (/^chat_/.test(name)) return CAT_CHAT;
+  if (/\.(jpe?g|png|webp|gif)$/i.test(name)) return CAT_IMG;
+  return CAT_OTHER;
+}
+
+/** `Map<toifa, bayt>` */
+export async function cacheBreakdown() {
+  const m = await index();
+  const out = new Map();
+  for (const [k, v] of m) { const c = catOf(nameOfKey(k)); out.set(c, (out.get(c) || 0) + v.size); }
+  return out;
+}
+
+/** Tanlangan toifalarni o'chiradi. */
+export async function cacheClearCats(cats) {
+  const d = await db(); const m = await index();
+  if (!d) return;
+  const tx = d.transaction(['c', 'm', 'f'], 'readwrite');
+  for (const [k, v] of [...m]) {
+    if (!cats.has(catOf(nameOfKey(k)))) continue;
+    tx.objectStore('c').delete(k); tx.objectStore('f').delete(k); tx.objectStore('m').delete(k);
+    m.delete(k); total -= v.size;
+  }
+  await txDone(tx);
+  quotaAt = 0;
+}

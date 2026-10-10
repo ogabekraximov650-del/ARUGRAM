@@ -24,6 +24,7 @@ import { myStats, formatBytes, formatHours, STAT_KINDS, openStatDetail } from '.
 import { openProfileEdit } from './profile-edit.js';
 import { openSettings } from './settings.js';
 import { openSessions } from './sessions.js';
+import { openStorage } from './storage.js';
 import { billing, formatLeft } from '../services/billing.js';
 import {
   openBilling, openSupport, openMyPacks, openTelegramAccount, isTelegramAuthorized, checkTelegram, uploadFile,
@@ -361,6 +362,7 @@ export function createProfile(page) {
       tile('settings', 'settings', 'Sozlamalar'),
       isTelegramAuthorized() ? '' : tile('telegram', 'send', "Telegram'ni ulash"),
       tile('sessions', 'devices', 'Qurilmalar'),
+      tile('storage', 'storage', 'Xotiradan foydalanish'),
       tile('packs', 'emoji_emotions', 'Emoji, GIF va stikerlar'),
       tile('support', 'support_agent', "Admin bilan bog'lanish",
         { trailing: unread.count > 0 && !unread.admin ? '<span class="pf-dot"></span>' : '' }),
@@ -455,6 +457,7 @@ export function createProfile(page) {
           case 'settings': openSettings(); break;
           case 'telegram': Promise.resolve(openTelegramAccount()).catch(() => {}).then(redrawMenu); break;
           case 'sessions': openSessions(); break;
+          case 'storage': openStorage(); break;
           case 'packs': openMyPacks(); break;
           case 'support': openSupport(); break;
           default: toast(`«${label}» bo'limi tez orada qo'shiladi`, 1600);
