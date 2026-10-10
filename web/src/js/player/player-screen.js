@@ -13,6 +13,7 @@ import { esc, formatCount } from '../format.js';
 import { seasonsRepo } from '../seasons.js';
 import { billing } from '../services/billing.js';
 import { channelGate, setVideoBusy } from '../services/channel-gate.js';
+import { installWatermark } from '../watermark.js';
 import { watchHistory, watchProgress } from '../services/history.js';
 import { createCommentsTab } from '../comments.js';
 import { subRequired, channelConsent, ratingSheet, qualityDialog } from './gates.js';
@@ -154,6 +155,8 @@ function buildPlayer(el, route, season, opts) {
 
   const $ = (s) => el.querySelector(s);
   const box = $('.pl-box');
+  // Brauzer to'liq ekranida faqat pleyer ramkasi ko'rinadi — suv belgisi shu yerda ham (oddiy holatda umumiy qatlam bor).
+  installWatermark(box, { cls: 'aru-wm-box' });
   const video = $('video');
   const panes = [...el.querySelectorAll('.pl-pane')];
   const tabEls = [...el.querySelectorAll('.pl-tab')];

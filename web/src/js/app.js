@@ -24,6 +24,7 @@ import { checkTelegram, ensureTelegram, clearOldBotChat, telegramMe, telegramLog
 import { setStartup, withTimeout } from './tg/startup.js';
 import { watchImages, rescanImages } from './tg/images.js';
 import { unreadBadge, ChatController } from './services/support.js';
+import { installWatermark } from './watermark.js';
 
 const tg = window.Telegram?.WebApp;
 const app = document.getElementById('app');
@@ -116,6 +117,7 @@ async function main() {
   }, 45000);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) unreadBadge.refresh(); });
 
+  installWatermark(document.body, { fixed: true });
   startSync();
   // Telegram (videolar) holati fonda tekshiriladi; kanallarga obuna —
   // ruxsat berilgan bo'lsa orqa fonda (`channel-gate.js`).

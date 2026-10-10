@@ -44,6 +44,9 @@ pub(crate) const BTN: &str = "\u{1F39E} Anibla yuklash";
 const BTN_SEARCH: &str = "\u{1F50D} Izlash";
 const BTN_QUEUE: &str = "\u{1F4CB} Yuklash navbati";
 const BTN_CATS: &str = "\u{1F4C2} Bo'limlar";
+const BTN_YEARS: &str = "\u{1F4C5} Yil bo'yicha";
+/// Yil tugmasi: "📅 2026-yil · 53 ta anime".
+const YEAR_PREFIX: &str = "\u{1F4C5} ";
 const WORKFLOW: &str = "anibla.yml";
 const DEFAULT_SITE: &str = "https://anibla.uz";
 /// Rasmlar (poster/thumbnail) anibla.uz'da EMAS, ortidagi serverda turadi
@@ -321,7 +324,7 @@ fn panel(rows: Vec<Vec<String>>, back: bool) -> Value {
         ]
     } else {
         vec![
-            vec![BTN_CATS.to_string(), BTN_SEARCH.to_string()],
+            vec![BTN_CATS.to_string(), BTN_YEARS.to_string(), BTN_SEARCH.to_string()],
             vec![BTN_QUEUE.to_string(), ENCBOT_BTN_STATUS.to_string(), postbot::BTN_HOME.to_string()],
         ]
     };
@@ -391,6 +394,19 @@ pub(crate) async fn on_message(env: &Env, msg: &Value, chat: i64) {
     if text == BTN_NEW {
         listing(env, chat, "", "new", "Oxirgi yuklanganlar", 1).await;
         return;
+    }
+    if text == BTN_YEARS {
+        years_panel(env, chat).await;
+        return;
+    }
+    // "📅 2026-yil · 53 ta anime" — shu yilning animelari.
+    if let Some(rest) = text.strip_prefix(YEAR_PREFIX) {
+        if let Some(y) = rest.split("-yil").next().and_then(|n| n.trim().parse::<i64>().ok()) {
+            if rest.contains("-yil") && (1900..=2200).contains(&y) {
+                listing(env, chat, "", &format!("y:{y}"), &format!("{y}-yil"), 1).await;
+                return;
+            }
+        }
     }
     if let Some(name) = text.strip_prefix("\u{1F4C2} ") {
         if let Some((id, n)) = categories(env).await.into_iter().find(|(_, n)| n == name.trim()) {
@@ -468,11 +484,57 @@ pub(crate) async fn on_message(env: &Env, msg: &Value, chat: i64) {
     listing(env, chat, &q, "", "", 1).await;
 }
 
+/// Saytdagi animelar yillar bo'yicha: `(yil, soni)`, yangi yil tepada.
+/// Sayt ro'yxatidan (`media/mobile`, hammasi) hisoblanadi va 6 soat saqlanadi.
+async fn year_counts(env: &Env) -> Vec<(i64, i64)> {
+    const TTL: i64 = 6 * 3600 * 1000;
+    if let Some(j) = config_get(env, "anibla_years").await.and_then(|v| serde_json::from_str::<Value>(&v).ok()) {
+        if now_ms() - j["at"].as_i64().unwrap_or(0) < TTL {
+            let l: Vec<(i64, i64)> = j["l"].as_array().cloned().unwrap_or_default().iter()
+                .filter_map(|x| Some((x[0].as_i64()?, x[1].as_i64()?))).collect();
+            if !l.is_empty() { return l; }
+        }
+    }
+    let mut counts: std::collections::BTreeMap<i64, i64> = std::collections::BTreeMap::new();
+    for page in 1..=4 {
+        let Ok(v) = get(env, &format!("media/mobile?limit=500&page={page}"), false).await else { break };
+        for x in data_list(&v) {
+            let y = jint(&x, "published_year");
+            if y > 0 { *counts.entry(y).or_insert(0) += 1; }
+        }
+        if page >= jint(&v["pagination"], "pages").max(1) { break; }
+    }
+    let mut l: Vec<(i64, i64)> = counts.into_iter().collect();
+    l.sort_by(|a, b| b.0.cmp(&a.0));
+    if !l.is_empty() {
+        config_put(env, "anibla_years", &json!({"at": now_ms(), "l": l}).to_string()).await;
+    }
+    l
+}
+
+/// "📅 Yil bo'yicha": saytdagi yillar va har yildagi animelar soni (tugma — shu yil ro'yxati).
+async fn years_panel(env: &Env, chat: i64) {
+    let l = year_counts(env).await;
+    if l.is_empty() {
+        encbot_send(env, chat, "\u{274C} Yillar ro'yxatini olib bo'lmadi, birozdan keyin qayta urinib ko'ring.", None).await;
+        return;
+    }
+    let total: i64 = l.iter().map(|x| x.1).sum();
+    let rows: Vec<Vec<String>> = l.chunks(2).map(|ch| {
+        ch.iter().map(|(y, n)| format!("{YEAR_PREFIX}{y}-yil \u{00B7} {n} ta anime")).collect()
+    }).collect();
+    let text = format!("\u{1F4C5} <b>Yil bo'yicha</b> \u{2014} saytda jami {total} ta anime, {} ta yil.\n\n\
+                        \u{2B07}\u{FE0F} Yilni tanlang:", l.len());
+    encbot_send(env, chat, &text, Some(panel(rows, false))).await;
+}
+
 /// Ro'yxat sahifasi: qidiruv (`q`) yoki bo'lim (`cat`: ID yoki `new`).
 async fn listing(env: &Env, chat: i64, q: &str, cat: &str, label: &str, page: i64) {
     let mut path = format!("media/mobile?limit={SEARCH_PAGE}&page={page}");
     if !q.is_empty() {
         path.push_str(&format!("&search={}", enc(q)));
+    } else if let Some(y) = cat.strip_prefix("y:") {
+        path.push_str(&format!("&years={}", enc(y)));
     } else if !cat.is_empty() && cat != "new" {
         path.push_str(&format!("&categories={}", enc(cat)));
     }

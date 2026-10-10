@@ -5593,3 +5593,18 @@ turgan rasm/video yuklash hech qachon boshlanmaydi.
 - `app.js`: boot'dagi tekshiruv 30 s, bot chatini tozalash 20 s;
 - `tg/images.js`: rasm 60 s; xato bo'lsa sababi bir marta alert bilan ko'rsatiladi.
 QOLGAN: emoji panelining GIF/Stiker/maxsus emoji oynalari Mini App'ga hali ko'chirilmagan.
+
+## MINI APP: SUV BELGISI; ANIBLA "YIL BO'YICHA" (2026-10)
+
+- Skrinshot taqiqi web'da yo'q (Telegram Mini App uchun API yo'q; `FLAG_SECURE`
+  faqat Android ilovada), shu sabab foydalanuvchi talabi bilan SUV BELGISI:
+  `web/src/js/watermark.js` — `@nom · ID <id>` qiyshaygan, xira, har 17 s da
+  surilib turadigan qatlam. Butun ekranda (`app.js`, `fixed`) va pleyer
+  ramkasida (brauzer to'liq ekrani faqat `.pl-box` ni ko'rsatadi; `.aru-wm-box`
+  faqat `:fullscreen` da ko'rinadi). `pointer-events: none`.
+- Kodlash boti -> "Anibla yuklash": yangi tugma "📅 Yil bo'yicha"
+  (`worker/src/anibla.rs`: `years_panel`, `year_counts`). Yillar soni sayt
+  ro'yxatidan (`media/mobile?limit=500`, `published_year`) hisoblanadi, 6 soat
+  `anibla_years` (config) da saqlanadi. Yil tugmasi "📅 2026-yil · 53 ta anime";
+  bosilsa `media/mobile?years=2026` (sayt filtri, sinab tasdiqlangan) —
+  oddiy ro'yxat (`listing`, `nav.c = "y:2026"`, sahifalash ishlaydi).
