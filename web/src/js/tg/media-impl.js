@@ -28,6 +28,7 @@ const CHUNK = 1024 * 1024;
 const docs = new Map(); // nom -> {media, size, msgId}
 const keys = new Map(); // nom -> hex
 const urls = new Map(); // nom -> objectURL
+let scanInfo = '';
 const delivered = new Set(); // bot chatiga yuborilgan xabarlar (o'chirish uchun)
 
 export function isTelegramAuthorized() { return authorizedCached(); }
@@ -56,12 +57,15 @@ async function scanBotChat() {
   const cl = await getClient();
   const peer = await botPeer();
   const msgs = await cl.getHistory(peer, { limit: 100 });
+  scanInfo = `msgs=${msgs.length}`;
+  const kinds = [];
   for (const m of [...msgs].reverse()) {
     const n = docName(m);
-    if (!n) continue;
+    if (!n) { if (kinds.length < 3) kinds.push(`${m.media?.type || 'none'}`); continue; }
     docs.set(n, { media: m.media, size: Number(m.media.fileSize || 0), msgId: m.id });
     delivered.add(m.id);
   }
+  if (kinds.length) scanInfo += ` unnamed=${kinds.join(',')}`;
 }
 
 /** Fayllarni bot chatiga yetkazadi (kerak bo'lsa) va topadi. */
@@ -70,7 +74,7 @@ async function locate(names, { force = false } = {}) {
   if (need.length) {
     if (!force) {
       // Avval chatning o'zida bormi (oldingi nusxa) — bot'dan qayta so'ramaslik.
-      try { await scanBotChat(); } catch (_) { /* */ }
+      try { await scanBotChat(); } catch (e) { scanInfo = `scan:${e?.text || e?.message || e}`; }
     }
     const still = names.filter((n) => force || !docs.has(n));
     if (still.length) {
@@ -85,12 +89,12 @@ async function locate(names, { force = false } = {}) {
       // Bot nusxani bir-ikki soniyada yuboradi.
       for (let i = 0; i < 12; i++) {
         await new Promise((r) => setTimeout(r, i === 0 ? 400 : 700));
-        try { await scanBotChat(); } catch (_) { /* */ }
+        try { await scanBotChat(); } catch (e) { scanInfo = `scan:${e?.text || e?.message || e}`; }
         if (still.every((n) => docs.has(n))) break;
       }
     }
   }
-  for (const n of names) if (!docs.has(n)) throw new Error('not_in_chat');
+  for (const n of names) if (!docs.has(n)) throw new Error(`not_in_chat (${scanInfo}; bot=${await botPeer().catch(() => '?')})`);
 }
 
 function hexToBytes(hex) {
