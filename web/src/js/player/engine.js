@@ -135,7 +135,7 @@ export function engineSupported() {
  * `name` — fMP4 fayl nomi (kanalda), `key` — AES-CTR kaliti (hex).
  * `ahead` — oldindan yuklanadigan oyna (soniya): 20 s (ilova buferi 15..30 s).
  */
-export function createEngine(video, { name, key = '', ahead = 20, behind = 10, startAt = 0, onState = () => {}, onError = () => {} }) {
+export function createEngine(video, { name, key = '', ahead: aheadOpt = 20, behind = 10, startAt = 0, onState = () => {}, onError = () => {} }) {
   const MS = window.ManagedMediaSource || window.MediaSource;
   let file = null;
   let ms = null;
@@ -147,6 +147,8 @@ export function createEngine(video, { name, key = '', ahead = 20, behind = 10, s
   let destroyed = false;
   let streaming = true; // ManagedMediaSource "hozir yuklash mumkin" belgisi
   let objectUrl = '';
+  const MAX_AHEAD = 55; // bufer 1 daqiqadan oshmasin
+  let ahead = Math.min(MAX_AHEAD, aheadOpt);
   let duration = 0;
   let gen = 0; // seek'dan keyin eski yuklashlar tashlanadi
   let gapT = 0;
@@ -327,7 +329,7 @@ export function createEngine(video, { name, key = '', ahead = 20, behind = 10, s
     startAt(sec) {
       ready.then(() => { video.currentTime = Math.max(0, Math.min(sec, duration - 1)); });
     },
-    setAhead(sec) { ahead = sec; pump(); },
+    setAhead(sec) { ahead = Math.min(MAX_AHEAD, sec); pump(); },
     destroy() {
       destroyed = true;
       clearInterval(gapT);

@@ -69,6 +69,8 @@ export async function isAuthorized({ fresh = false } = {}) {
     const cl = await getClient();
     const me = await withTimeout(cl.getMe(), 20000, 'tg_getme_timeout');
     authorized = !!me;
+    // Yangilanishlar (updates) Mini App'ga kerak emas — asosiy oqimni band qilmasin.
+    if (authorized) { try { cl.stopUpdatesLoop?.(); } catch (_) { /* */ } }
   } catch (e) {
     // Faqat Telegram "kirilmagan" desa — chiqqan deb hisoblanadi; tarmoq
     // xatosida holat o'zgarmaydi (keyingi safar qayta tekshiriladi).

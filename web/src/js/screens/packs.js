@@ -10,7 +10,7 @@ import { push, back as routerBack } from '../router.js';
 import { icon, spinner, bindTap, toast, appBar, bindAppBar, confirmDialog, promptDialog, dialog, emptyGlass } from '../ui.js';
 import { esc } from '../format.js';
 import { putPack, flushNow } from '../sync.js';
-import { ensureTelegram, openFile, uploadFile } from '../tg/media.js';
+import { ensureTelegram, openFile, uploadFile, isTelegramAuthorized } from '../tg/media.js';
 
 const KINDS = [['sticker', 'Stikerlar'], ['emoji', 'Emojilar'], ['gif', 'GIFlar']];
 const kindLabel = (k) => (KINDS.find((x) => x[0] === k) || [0, k])[1];
@@ -70,6 +70,43 @@ async function loadLibrary() {
 }
 const newId = () => (Math.floor(Math.random() * 0x7ffffffe) + 1) * 2097152 + Math.floor(Math.random() * 2097152);
 function op(key, data) { putPack(key, data); flushNow?.(); }
+
+export { lib, loadLibrary, header as packHeader, thumbOf as packThumb, itemOf as packItem };
+
+// ── Xabar ichidagi stiker / GIF (`pk_<to'plam>_<element>`) ─────────
+const infos = new Map();
+let libTask = null;
+async function packInfo(id) {
+  if (!lib.loaded) { libTask = libTask || loadLibrary(); await libTask; }
+  const f = [...lib.mine, ...lib.subs].find((p) => `${p.id}` === `${id}`);
+  if (f) return f;
+  if (!infos.has(`${id}`)) {
+    const t = api(`/api/packs/info?ids=${id}`).then((j) => (j.packs || [])[0] || null);
+    infos.set(`${id}`, t); t.catch(() => infos.delete(`${id}`));
+  }
+  return infos.get(`${id}`);
+}
+
+/** Xabar/izoh ichiga stiker yoki GIF qo'yadi (`PackMessage`: GIF 200, stiker 150). */
+export async function renderPackMedia(el, file, type) {
+  const m = /^pk_(\d{1,16})_(\d{1,9})$/.exec(file || '');
+  const size = type === 'gif' ? 200 : 150;
+  const ph = (ic) => `<div class="pk-msg" style="width:${size}px;height:${size}px">${ic ? icon(type === 'gif' ? 'gif_box' : 'emoji_emotions', { fill: false, size: 40, color: 'rgba(255,255,255,0.38)' }) : ''}</div>`;
+  el.innerHTML = ph(true);
+  if (!m || !isTelegramAuthorized()) return;
+  try {
+    const p = await packInfo(m[1]);
+    if (!p?.file) return;
+    const hd = await header(p);
+    const it = (hd.h.items || []).find((x) => `${x.i}` === m[2]);
+    if (!it || !el.isConnected) return;
+    const th = await thumbOf(p, hd, it);
+    if (el.isConnected) el.innerHTML = `<div class="pk-msg" style="width:${size}px;height:${size}px"><img src="${th.url}" alt=""></div>`;
+    const full = await itemOf(p, hd, it);
+    if (!el.isConnected) return;
+    el.innerHTML = `<div class="pk-msg" style="width:${size}px;height:${size}px">${full.type.startsWith('video') ? `<video src="${full.url}" autoplay loop muted playsinline></video>` : `<img src="${full.url}" alt="">`}</div>`;
+  } catch (_) { /* belgi qoladi */ }
+}
 
 function packRow(p, { sub, owner } = {}) {
   return `<div class="pk-row" data-id="${p.id}">

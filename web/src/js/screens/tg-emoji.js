@@ -17,6 +17,7 @@
 
 import { icon } from '../ui.js';
 import { esc } from '../format.js';
+import { lib, loadLibrary, packHeader, packThumb, openMyPacks } from './packs.js';
 
 const CE = /\[ce:(-?\d{1,20}):([^\]]{1,16})\]/g;
 const PE = /\[pe:(\d{1,16}):(\d{1,9}):([^\]]{0,16})\]/g;
@@ -144,11 +145,14 @@ export function emojiButtonHtml() {
  * Emoji paneli (`TgMediaPanel` -> Emoji sahifasi). Qaytaradi: element.
  * `onPick(emoji)`, `onBackspace()`.
  */
-export function createEmojiPanel({ onPick, onBackspace }) {
+export function createEmojiPanel({ onPick, onBackspace, onPickMedia }) {
   const el = document.createElement('div');
   el.className = 'tge-panel';
   el.innerHTML = `<div class="tge-scroll"></div><div class="tge-strip"><div class="tge-strip-in"><div class="tge-sel"></div></div></div>
-    <div class="tge-bs">${icon('backspace', { fill: false, size: 20, color: 'rgba(255,255,255,0.7)' })}</div>`;
+    <div class="tge-pkv"></div>
+    <div class="tge-bs">${icon('backspace', { fill: false, size: 20, color: 'rgba(255,255,255,0.7)' })}</div>
+    <div class="tge-gear">${icon('settings', { fill: false, size: 22, color: 'rgba(255,255,255,0.7)' })}</div>
+    ${onPickMedia ? `<div class="tge-pill">${['Emoji', 'GIF', 'Stiker'].map((t, i) => `<div class="tge-pt" data-t="${i}">${t}</div>`).join('')}</div>` : ''}`;
   const scroll = el.querySelector('.tge-scroll');
   const strip = el.querySelector('.tge-strip');
   const stripIn = el.querySelector('.tge-strip-in');
@@ -266,6 +270,56 @@ export function createEmojiPanel({ onPick, onBackspace }) {
   bs.addEventListener('pointercancel', () => stop(false));
   bs.addEventListener('pointerleave', () => { if (hold || rep) stop(false); });
 
+  // ── GIF va Stikerlar sahifalari (ilovaning o'z to'plamlari) ──
+  const pkv = el.querySelector('.tge-pkv');
+  const gear = el.querySelector('.tge-gear');
+  let tab = 0;
+  const pills = [...el.querySelectorAll('.tge-pt')];
+  const loaded = {};
+  async function fillPacks(kind) {
+    pkv.innerHTML = `<div class="tge-pkmid"><div class="spinner" style="width:30px;height:30px"></div></div>`;
+    if (!lib.loaded) await loadLibrary();
+    if ((tab === 1 ? 'gif' : 'sticker') !== kind) return;
+    const seen = new Set();
+    const packs = [...lib.mine, ...lib.subs].filter((p) => p.kind === kind && p.file && !seen.has(p.id) && seen.add(p.id));
+    if (!packs.length) { pkv.innerHTML = `<div class="tge-pkmid">${kind === 'gif' ? 'GIF' : 'Stiker'} to'plami yo'q<br>⚙ tugmasi bilan qo'shing</div>`; return; }
+    loaded[kind] = true;
+    const cols = kind === 'gif' ? 3 : 4;
+    pkv.innerHTML = `<div class="tge-pkin">${packs.map((p) => `<div class="tge-head">${esc(p.title)}</div><div class="tge-pkgrid" data-p="${p.id}" style="grid-template-columns:repeat(${cols},1fr)"></div>`).join('')}<div style="height:64px"></div></div>`;
+    const io = new IntersectionObserver((ents) => ents.forEach(async (en) => {
+      if (!en.isIntersecting) return;
+      io.unobserve(en.target);
+      const p = packs.find((x) => `${x.id}` === en.target.dataset.p);
+      try {
+        const hd = await packHeader(p);
+        const items = hd.h.items || [];
+        en.target.innerHTML = items.map((it) => `<div class="tge-pkc" data-i="${it.i}" data-e="${esc(it.e || '')}"></div>`).join('');
+        en.target.querySelectorAll('.tge-pkc').forEach((c) => {
+          const it = items.find((x) => `${x.i}` === c.dataset.i);
+          packThumb(p, hd, it).then((b) => { c.innerHTML = `<img src="${b.url}" alt="">`; }).catch(() => {});
+          c.addEventListener('click', () => onPickMedia?.({ kind, pack: p.id, item: it.i, emoji: it.e || '' }));
+        });
+      } catch (_) { en.target.innerHTML = `<div class="tge-pkmid" style="grid-column:1/-1">Ochib bo'lmadi</div>`; }
+    }), { root: pkv, rootMargin: '200px' });
+    pkv.querySelectorAll('.tge-pkgrid').forEach((g) => io.observe(g));
+  }
+  function setTab(i) {
+    tab = i;
+    pills.forEach((x, k) => x.classList.toggle('on', k === i));
+    const emo = i === 0;
+    scroll.style.display = emo ? '' : 'none';
+    strip.style.display = emo ? '' : 'none';
+    pkv.style.display = emo ? 'none' : 'block';
+    bs.style.display = emo ? '' : 'none';
+    gear.style.display = emo ? 'none' : 'flex';
+    if (!emo) fillPacks(i === 1 ? 'gif' : 'sticker');
+  }
+  pills.forEach((x, k) => x.addEventListener('click', () => setTab(k)));
+  gear.addEventListener('click', () => openMyPacks());
+  pkv.style.display = 'none';
+  gear.style.display = 'none';
+  pills[0]?.classList.add('on');
+
   return {
     el,
     /** Panel ochilganda (yaqinda ishlatilganlar yangilanadi). */
@@ -282,7 +336,7 @@ export function createEmojiPanel({ onPick, onBackspace }) {
  * `panelHost` — panel qo'yiladigan joy (qator ostida), `input` — textarea.
  * Qaytaradi: `{ close(), isOpen() }`.
  */
-export function bindEmojiInput({ button, panelHost, input, height = 300 }) {
+export function bindEmojiInput({ button, panelHost, input, height = 300, onPickMedia }) {
   let open = false;
   let panel = null;
   panelHost.classList.add('tge-host');
@@ -294,6 +348,7 @@ export function bindEmojiInput({ button, panelHost, input, height = 300 }) {
       panel = createEmojiPanel({
         onPick: (e) => insertAtCursor(input, e),
         onBackspace: () => backspaceAt(input),
+        onPickMedia,
       });
       panel.el.style.height = `${height}px`;
       panelHost.appendChild(panel.el);

@@ -32,6 +32,7 @@ import { icon, spinner, toast, C } from './ui.js';
 import { esc } from './format.js';
 import { hooks } from './hooks.js';
 import { richText, emojiButtonHtml, bindEmojiInput } from './screens/tg-emoji.js';
+import { renderPackMedia } from './screens/packs.js';
 
 const SORTS = [
   { code: 'yangi', label: 'Yangilar' },
@@ -254,13 +255,13 @@ class Comments {
     this.emit();
   }
 
-  async add(body, { parentId = '' } = {}) {
+  async add(body, { parentId = '', mediaFile = '', mediaType = '' } = {}) {
     const text = body.trim();
-    if (!text) return "Izoh bo'sh";
+    if (!text && !mediaFile) return "Izoh bo'sh";
     try {
       const j = await api(this.base, {
         method: 'POST',
-        body: { anime_id: this.animeId, season_id: this.seasonId, parent_id: parentId, body: text },
+        body: { anime_id: this.animeId, season_id: this.seasonId, parent_id: parentId, body: text, ...(mediaFile ? { media_file: mediaFile, media_type: mediaType } : {}) },
       });
       const c = fromJson(j);
       if (c.parentId) {
@@ -417,7 +418,7 @@ export function createCommentsTab(container, { animeId, seasonId, expanded = fal
   const replyingEl = container.querySelector('.cm-replying');
   const ta = container.querySelector('textarea');
   const sendEl = container.querySelector('.cm-send');
-  const emoji = bindEmojiInput({ button: container.querySelector('.tge-btn'), panelHost: container.querySelector('.cm-panel'), input: ta, height: 280 });
+  const emoji = bindEmojiInput({ button: container.querySelector('.tge-btn'), panelHost: container.querySelector('.cm-panel'), input: ta, height: 280, onPickMedia: (p) => sendPackComment(p) });
 
   function paintExp() {
     expEl.querySelector('.ic').textContent = isExpanded ? 'keyboard_arrow_down' : 'keyboard_arrow_up';
@@ -474,7 +475,7 @@ export function createCommentsTab(container, { animeId, seasonId, expanded = fal
       <div class="cm-main">
         <div class="cm-hd"><span class="cm-n cm-prof">${esc(nameOf(c))}</span>
           <span class="cm-t">${esc(`${commentAgo(c.createdAt)} · ${commentClock(c.createdAt)}`)}</span></div>
-        ${media ? `<div class="cm-media">${icon(c.mediaType === 'gif' ? 'gif_box' : 'emoji_emotions', { fill: false, size: 40, color: 'rgba(255,255,255,0.38)' })}</div>`
+        ${media ? `<div class="cm-media" data-f="${esc(c.mediaFile)}" data-t="${c.mediaType}"></div>`
     : `<div class="cm-body${c.deleted ? ' del' : ''}">${c.deleted ? "Izoh o'chirilgan" : richText(c.body)}</div>`}
         ${!c.deleted ? `<div class="cm-acts">
           <div class="cm-like${c.liked ? ' on' : ''}">${icon('thumb_up', { fill: c.liked, size: 20 })}${c.likes > 0 ? `<span>${c.likes}</span>` : ''}</div>
@@ -507,6 +508,7 @@ export function createCommentsTab(container, { animeId, seasonId, expanded = fal
           ${open ? `<div class="cm-replies">${reps.map((r) => `<div class="cm-rw">${rowHtml(r, true)}</div>`).join('')}</div>` : ''}
         </div>`;
       }).join('') + (ctl.hasMore ? `<div class="cm-more-load">${spinner(20, 2, 'rgba(255,255,255,0.38)')}</div>` : '');
+      itemsEl.querySelectorAll('.cm-media[data-f]').forEach((n) => renderPackMedia(n, n.dataset.f, n.dataset.t));
       itemsEl.querySelectorAll('img').forEach((img) => { if (img.complete && !img.naturalWidth) img.remove(); });
     }
     changeSubs.forEach((f) => { try { f(); } catch (_) { /* */ } });
@@ -544,6 +546,17 @@ export function createCommentsTab(container, { animeId, seasonId, expanded = fal
     replyingEl.querySelector('.x').addEventListener('click', () => { replyTo = null; paintReplying(); });
   }
   function startReply(c) { replyTo = c; paintReplying(); ta.focus(); }
+
+  async function sendPackComment(p) {
+    if (sending) return;
+    if (!currentUser()) { toast('Izoh yozish uchun hisobingizga kiring'); return; }
+    sending = true; paintSend();
+    const err = await ctl.add('', { parentId: replyTo?.id ?? '', mediaFile: `pk_${p.pack}_${p.item}`, mediaType: p.kind });
+    sending = false;
+    if (disposed) return;
+    if (err) { paintSend(); toast(err); return; }
+    paintSend(); replyTo = null; paintReplying(); emoji.close();
+  }
 
   sendEl.addEventListener('click', async () => {
     if (sending || blank()) return;

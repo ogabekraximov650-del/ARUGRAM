@@ -25,6 +25,7 @@ import {
   ChatController, unreadBadge, hasMedia, isVoice, isInline, isViewable, fileNameOf,
 } from '../services/support.js';
 import { richText, plainEmojiText, emojiButtonHtml, bindEmojiInput } from './tg-emoji.js';
+import { renderPackMedia } from './packs.js';
 import { openMediaView, loadMedia, isTgNotReady, tgRetry } from './media-view.js';
 
 // Telegram qorong'i mavzusi ranglari (aksentga moslangan).
@@ -741,7 +742,7 @@ function buildChat(el) {
     if (m.mediaType === 'file') { fileBubble(md, m, mine); return; }
     if (m.mediaType === 'round') { roundBubble(md, m); return; }
     if (m.mediaType === 'sticker' || m.mediaType === 'gif') {
-      md.innerHTML = `<div class="tgc-pack">${icon(m.mediaType === 'gif' ? 'gif_box' : 'emoji_emotions', { fill: false, size: 40, color: 'rgba(255,255,255,0.38)' })}</div>`;
+      renderPackMedia(md, name, m.mediaType);
       return;
     }
     const video = m.mediaType === 'video';
@@ -1094,7 +1095,7 @@ function buildChat(el) {
     const slideEl = info.querySelector('.slide');
     const cancelBtn = info.querySelector('.cancel');
     const tmEl = info.querySelector('.tm');
-    const emoji = bindEmojiInput({ button: wrap.querySelector('.tge-btn'), panelHost: wrap.querySelector('.sup-panel'), input: ta });
+    const emoji = bindEmojiInput({ button: wrap.querySelector('.tge-btn'), panelHost: wrap.querySelector('.sup-panel'), input: ta, onPickMedia: (p) => sendPack(p) });
 
     const blank = () => !ta.value.trim();
     function autosize() {
@@ -1117,6 +1118,19 @@ function buildChat(el) {
         <div class="col"><div class="n">${esc(nameOf(replyTo))}</div><div class="t">${richText(snippet(replyTo))}</div></div>
         <button class="icon-btn x">${icon('close', { size: 24, color: 'rgba(255,255,255,0.6)' })}</button></div>`;
       replyEl.querySelector('.x').addEventListener('click', () => { replyTo = null; paintReply(); });
+    }
+
+    async function sendPack(p) {
+      if (sending) return;
+      sending = true; paintBtn();
+      const reply = replyTo;
+      const err = await chat.send(tgWithReply(reply?.id, ''), { mediaFile: `pk_${p.pack}_${p.item}`, mediaType: p.kind });
+      sending = false;
+      if (closed) return;
+      if (err) { paintBtn(); toast(err); return; }
+      replyTo = null; paintReply(); paintBtn();
+      emoji.close();
+      toBottom();
     }
 
     async function send() {

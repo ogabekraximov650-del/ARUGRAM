@@ -29,6 +29,7 @@ function consider(img) {
   }
   if (!name) return;
   img.dataset.aru = '1';
+  img.decoding = 'async';
   if (!queue.has(name)) queue.set(name, []);
   queue.get(name).push({ img, orig });
   clearTimeout(timer);
