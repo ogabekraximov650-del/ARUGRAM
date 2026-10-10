@@ -48,12 +48,15 @@ async function botPeer() {
     const name = `${c.bot || ''}`.replace(/^@/, '');
     if (!name) throw new Error('bot_unknown');
     const cl = await getClient();
-    try { return await cl.resolvePeer(`@${name}`); } catch (_) { /* pastdagi yo'l */ }
+    // Keshdagi (eskirgan access_hash'li) peer'ga ishonmaymiz: avval serverdan yangisini olamiz.
     const r = await cl.call({ _: 'contacts.resolveUsername', username: name });
     const u = (r.users || []).find((x) => `${x.username || ''}`.toLowerCase() === name.toLowerCase()) || r.users?.[0];
     if (!u) throw new Error('bot_unresolved');
     return { _: 'inputPeerUser', userId: u.id, accessHash: u.accessHash };
-  })();
+  })().catch(async (e) => {
+    // Tarmoq/FLOOD xatosi bo'lsa — keshdagi peer'ga qaytamiz.
+    try { return await (await getClient()).resolvePeer(`@${`${(await tgConfig()).bot || ''}`.replace(/^@/, '')}`); } catch (_) { throw e; }
+  });
   peerP.catch(() => { peerP = null; });
   return peerP;
 }
@@ -67,8 +70,15 @@ function docName(msg) {
 /** Bot chatining oxirgi 100 xabaridan fayllarni nomi bo'yicha eslab qoladi. */
 async function scanBotChat() {
   const cl = await getClient();
-  const peer = await botPeer();
-  const msgs = await cl.getHistory(peer, { limit: 100 });
+  let msgs;
+  try {
+    msgs = await cl.getHistory(await botPeer(), { limit: 100 });
+  } catch (e) {
+    // Sessiya almashgan/o'chirilgan bo'lsa peer access_hash'i eskirib qoladi — qayta aniqlab, bir marta urinamiz.
+    if (!/PEER_ID_INVALID|ACCESS_HASH|USER_BANNED/.test(`${e?.text || e?.message || ''}`)) throw e;
+    peerP = null;
+    msgs = await cl.getHistory(await botPeer(), { limit: 100 });
+  }
   scanInfo = `msgs=${msgs.length}`;
   const kinds = [];
   for (const m of [...msgs].reverse()) {
