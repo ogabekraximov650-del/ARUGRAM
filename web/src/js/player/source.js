@@ -19,12 +19,11 @@
 //   waitForFmp4(ep, q, {signal, onTick}) — tayyor bo'lgach yangilangan nom
 //   startPlayback(video, ep, q, {startAt, ahead, onState, onError}) — engine
 //   devicePlatform()                — 'android' | 'ios' | 'desktop' | 'other' (Telegram.WebApp.platform)
-//   chooseSource(ep, q)             — {kind:'mp4'|'fmp4', name} yoki null (qurilma qo'llagan format)
+//   chooseSource(ep, q)             — {kind:'fmp4', name} yoki null (fMP4 yo'q yoki MSE qo'llanmaydi)
 //   explainError(e)                 — foydalanuvchiga matn {title, text, code}
 
 import { apiPost, api, ApiError } from '../api.js';
 import { createEngine, engineSupported } from './engine.js';
-import { createMp4Stream, mp4Streaming } from './mp4-stream.js';
 import { ensureTelegram } from '../tg/media.js';
 import { startup } from '../tg/startup.js';
 
@@ -80,29 +79,10 @@ export function devicePlatform() {
   return p ? 'other' : 'desktop';
 }
 
-/**
- * Qurilma qo'llaydigan formatni tanlaydi (foydalanuvchi: "Android bo'lsa MP4, iOS bo'lsa fMP4 —
- * qurilma qo'llab-quvvatlaydigan formatda"):
- *   * iOS (WebKit): fMP4 + MSE (`ManagedMediaSource`); MP4 oqimi (Service Worker) ishonchsiz;
- *   * boshqalar: oddiy MP4 — brauzerning o'z pleyeri (Service Worker bo'lsa), bo'lmasa fMP4 + MSE.
- * Tanlangan format faylda yo'q bo'lsa, ikkinchisi olinadi; ikkalasi ham yaroqsiz bo'lsa — `null`
- * (fMP4 tayyorlash so'raladi, `requestFmp4`).
- */
+/** Faqat fMP4 + MSE. fMP4 nusxa yo'q yoki MSE qo'llanmasa — `null` (fMP4 tayyorlash so'raladi, `requestFmp4`). */
 export async function chooseSource(ep, q) {
-  const mp4 = fileNameOf(ep?.[`url_${q}`]);
   const fmp4 = fileNameOf(ep?.[`fmp4_url_${q}`]);
-  const mse = engineSupported();
-  // Oddiy MP4 (Service Worker) HOZIRCHA faqat yoqib qo'yilsa (localStorage aru_mp4=1):
-  // Androidda video ochilmay, aylanib turib qolgan — fMP4 + MSE sinalgan yo'l, standart.
-  let optIn = false;
-  try { optIn = localStorage.getItem('aru_mp4') === '1'; } catch (_) { /* */ }
-  const sw = optIn && devicePlatform() !== 'ios' ? await mp4Streaming() : false;
-  const order = devicePlatform() === 'ios' || !optIn ? ['fmp4', 'mp4'] : ['mp4', 'fmp4'];
-  for (const kind of order) {
-    if (kind === 'mp4' && mp4 && sw) return { kind, name: mp4 };
-    if (kind === 'fmp4' && fmp4 && mse) return { kind, name: fmp4 };
-  }
-  return null;
+  return fmp4 && engineSupported() ? { kind: 'fmp4', name: fmp4 } : null;
 }
 
 /** Qismni o'ynatadi. Telegram'ga kirilmagan bo'lsa — kirish oynasi. */
@@ -114,19 +94,7 @@ export async function startPlayback(video, ep, q, { startAt = 0, ahead = 60, onS
     if (!engineSupported() && fileNameOf(ep[`fmp4_url_${q}`])) throw new Error('mse_unsupported');
     throw new Error('no_fmp4');
   }
-  if (pick.kind === 'mp4') {
-    const eng = createMp4Stream(video, { name: pick.name, startAt, onState, onError, onStall, shouldPlay });
-    try {
-      await eng.ready;
-      return eng;
-    } catch (e) {
-      // Oddiy MP4 ochilmadi (SW/kodek) — fMP4 ga o'tamiz (bo'lsa).
-      eng.destroy();
-      const alt = fileNameOf(ep[`fmp4_url_${q}`]);
-      if (!alt || !engineSupported()) throw e;
-    }
-  }
-  return createEngine(video, { name: pick.kind === 'mp4' ? fileNameOf(ep[`fmp4_url_${q}`]) : pick.name, ahead, startAt, onState, onError, onStall, shouldPlay });
+  return createEngine(video, { name: pick.name, ahead, startAt, onState, onError, onStall, shouldPlay });
 }
 
 /** Pleyer yopilganda bot chatiga TEGILMAYDI (eski nusxalar faqat ilova ochilganda tozalanadi). */

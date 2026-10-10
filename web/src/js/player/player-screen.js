@@ -423,7 +423,7 @@ function buildPlayer(el, route, season, opts) {
 
   function afterEps() { paintEps(); paintNav(); autoOpen(); }
 
-  // To'xtagan joy kaliti qism bo'yicha — sifat va format (MP4/fMP4) o'zgarsa ham bitta.
+  // To'xtagan joy kaliti qism bo'yicha — sifat o'zgarsa ham bitta.
   // (Avval fayl nomi bo'yicha edi: formatni tanlash kiritilgach saqlash va o'qish turli kalit
   // ishlatib, eski nuqtadan boshlanardi.)
   const progKey = (e) => `pg:${toI(e?.anime_id) || A}:${toI(e?.season_id) || S}:${epId(e)}`;
@@ -566,8 +566,6 @@ function buildPlayer(el, route, season, opts) {
       if (my !== token) { eng?.destroy(); return; }
       await eng.ready;
       if (my !== token) return;
-      // Qaysi format ishlayotgani (MP4 yoki fMP4) — qisqa xabar va konsol.
-      try { console.info('[pleyer] format:', eng.format); toast(eng.format === 'mp4' ? 'MP4 (oddiy)' : 'fMP4 (MSE)', 1400); } catch (_) { /* */ }
       // Sahifa pauzada ochiladi; yetarli bayt yuklangach (~3 s) o'zi boshlanadi.
       if (intended) {
         await waitEnoughBuffer(my);

@@ -5781,3 +5781,10 @@ boshqa metod yurmaydigan ALOHIDA ulanishlarda.
   (~10 s) — sek har doim oldingi kalit kadrdan boshlab oladi; zichroq kalit kadr (keyint ~2-3 s,
   `open-gop=0`) yangi kodlashlarda sekni tezlashtiradi (hozircha qo'llanmagan).
 - KALIT KADRLAR ZICHLASHTIRISH BEKOR QILINDI (foydalanuvchi: "kerak emas"): kodlash avvalgi holda (x265 standart).
+
+## Mini App: oddiy MP4 yo'li olib tashlandi, faqat fMP4 (2026-10)
+
+Foydalanuvchi talabi: web app faqat fMP4 (MSE) da ishlasin. O'chirildi: `web/src/js/player/mp4-stream.js`,
+`web/src/sw.js` (Service Worker) va `build.mjs` dagi nusxalash; sozlamalardagi "Video formati" bo'limi
+(`aru_mp4`); pleyerdagi format xabari. `chooseSource` faqat fMP4 qaytaradi. `mp4Qualities` qoldi —
+faqat fMP4 tayyorlash navbatiga qo'yish uchun (`url_<q>` bor, `fmp4_url_<q>` yo'q holat).
