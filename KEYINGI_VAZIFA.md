@@ -5741,3 +5741,12 @@ boshqa metod yurmaydigan ALOHIDA ulanishlarda.
   uzoq ishlatilmagan bo'lak o'chadi (LRU, xotiradagi indeks). Sozlamalar -> "Kesh (video)":
   hajm (Avtomatik/500 MB/1/2/5 GB) va "Keshni tozalash". Qat'iy chegara kichraytirilsa,
   ortig'i darhol o'chadi.
+- HAMMA NARSA KESHDA (foydalanuvchi: "ilovadagidek rasm va boshqa hamma narsa keshda"):
+  `tg/chunk-cache.js` (IndexedDB v2: `c` bo'laklar, `f` kichik fayllar, `k` qurilma kaliti,
+  `m` indeks — bitta hajm va bitta LRU). Hamma fayl bo'laklari (kichik ham) keshlanadi.
+  Rasm/ovoz/avatar `f` da, qurilma kaliti (AES-GCM, `extractable:false`) bilan shifrlangan;
+  `tg/file-cache.js` -> `cachedMediaUrl`: `images.js` avval shuni so'raydi, bor rasm
+  Telegram/bot nusxasiz DARHOL chiqadi (yangi ochilishda ham). Fayl ma'lumoti (`size`, kalit)
+  ham shifrlab saqlanadi: `openFile` keshdagi faylni bot nusxasini kutmasdan ochadi
+  (bo'lak keshda bo'lmasa shundagina Telegram'dan, `ensureRemote`). JSON ro'yxatlar
+  (bo'limlar, qismlar) avvaldan localStorage'da. Keshni tozalash/hajm — Sozlamalar.

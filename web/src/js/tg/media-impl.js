@@ -24,7 +24,8 @@ import { api, apiPost, ApiError } from '../api.js';
 import { downloadChunk } from '@mtcute/web/methods.js';
 import { getClient, tgConfig, isAuthorized, authorizedCached } from './client.js';
 import { openTelegramLogin } from './login.js';
-import { cacheGet, cachePut } from './chunk-cache.js';
+import { cacheGet, cachePut, metaGet, metaPut } from './chunk-cache.js';
+import { cachedMediaUrl, rememberFile, rememberUrl } from './file-cache.js';
 
 const CHUNK = 1024 * 1024; // Telegram upload.getFile: bir so'rovda ko'pi bilan 1 MB
 const MAX_PAR = 16; // bir vaqtda ketadigan upload.getFile so'rovlari (4 ta ulanishga taqsimlanadi)
@@ -207,18 +208,35 @@ export async function ctrApply(hex, offset, data) {
  * qaytaradi. Bo'laklar 1 MB chegarasiga tekislanib olinadi.
  */
 export async function openFile(name, { key = '' } = {}) {
-  await locate([name]);
-  const cl = await getClient();
-  let doc = docs.get(name);
+  // Keshda bor fayl (ma'lumoti saqlangan): bot nusxasini va Telegram'ni KUTMASDAN ochiladi;
+  // bo'lak keshda bo'lmagandagina (chunk) Telegram'dan olinadi.
+  const meta = docs.has(name) ? null : await metaGet(name);
+  let lazy = !docs.has(name) && !!meta && Number(meta.size) > 0;
+  let doc = lazy ? { media: null, size: Number(meta.size) } : null;
+  if (!lazy) { await locate([name]); doc = docs.get(name); }
+  const clP = lazy ? null : getClient();
+  let cl = lazy ? null : await clP;
+  let remoteP = null;
+  const ensureRemote = () => {
+    if (!lazy) return null;
+    return (remoteP ||= (async () => {
+      await locate([name]);
+      cl = await getClient();
+      doc = docs.get(name);
+      lazy = false;
+      if (doc.size !== Number(meta.size)) throw new Error('cache_stale');
+    })().catch((e) => { remoteP = null; throw e; }));
+  };
   // Fayl bot chatida allaqachon bor edi (deliver chaqirilmagan) — kalit yo'q bo'lishi mumkin: serverdan olinadi.
-  if (!key && !keys.get(name) && !keyChecked.has(name)) {
+  if (!lazy && !key && !keys.get(name) && !keyChecked.has(name)) {
     keyChecked.add(name);
     try {
       const j = await apiPost('/api/tg/deliver', { files: [name] });
       for (const [k, v] of Object.entries(j?.keys || {})) keys.set(k, `${v}`);
     } catch (_) { /* kalitsiz (shifrlanmagan) fayl */ }
   }
-  const hex = key || keys.get(name) || '';
+  const hex = key || keys.get(name) || (meta && meta.key) || '';
+  if (!lazy && doc) metaPut(name, { size: doc.size, key: hex });
   const cache = new Map(); // bo'lak raqami -> Promise<Uint8Array>
   const ORDER = [];
   const MAX_CACHE = 64;
@@ -243,6 +261,8 @@ export async function openFile(name, { key = '' } = {}) {
             done.push([Date.now(), hit.length]);
             return await ctrApply(hex, off, hit);
           }
+          if (lazy) await ensureRemote();
+
           const dc = Number.isInteger(doc.media?.dcId) ? doc.media.dcId : undefined;
           const raw = await limited(
             () => withTimeout(downloadChunk(dlClient(cl), { location: doc.media, offset: off, limit: CHUNK, ...(dc ? { dcId: dc } : {}) }), REQ_TIMEOUT),
@@ -250,7 +270,7 @@ export async function openFile(name, { key = '' } = {}) {
           const part = raw.length > lim ? raw.subarray(0, lim) : raw;
           done.push([Date.now(), part.length]);
           if (done.length > 200) done.splice(0, done.length - 200);
-          if (part.length === lim && doc.size > 4 * 1024 * 1024) cachePut(`${name}#${idx}`, part); // faqat katta fayllar (video)
+          if (part.length === lim) cachePut(`${name}#${idx}`, part);
           return await ctrApply(hex, off, part);
         } catch (e) {
           const t = `${e?.text || e?.message || ''}`;
@@ -263,7 +283,7 @@ export async function openFile(name, { key = '' } = {}) {
             continue;
           }
           // Tuzalmaydigan xatolar (hisob/ruxsat) — darhol; tarmoq xatolari — qayta-qayta.
-          if (/AUTH_KEY|SESSION_REVOKED|USER_DEACTIVATED|FILE_ID_INVALID|LIMIT_INVALID|OFFSET_INVALID/.test(t)) throw e;
+          if (/AUTH_KEY|SESSION_REVOKED|USER_DEACTIVATED|FILE_ID_INVALID|LIMIT_INVALID|OFFSET_INVALID|cache_stale/.test(t)) throw e;
           if (attempt === NET_TRIES - 1) throw e;
           const fw = /FLOOD(?:_PREMIUM)?_WAIT_(\d+)/.exec(t);
           await new Promise((r) => setTimeout(r, fw ? Math.min(15, +fw[1]) * 1000 : Math.min(5000, 400 * 2 ** Math.min(attempt, 4))));
@@ -336,11 +356,15 @@ export async function fetchFile(name, { key = '', type = '' } = {}) {
 
 export async function mediaUrl(name, opts = {}) {
   if (urls.has(name)) return urls.get(name);
+  const c = await cachedMediaUrl(name); // diskdan — Telegram'siz, darhol
+  if (c) { urls.set(name, c); return c; }
   const ok = await isAuthorized();
   if (!ok) throw new Error('tg_not_ready');
   const blob = await fetchFile(name, opts);
   const u = URL.createObjectURL(blob);
   urls.set(name, u);
+  rememberUrl(name, u);
+  try { rememberFile(name, new Uint8Array(await blob.arrayBuffer()), blob.type); } catch (_) { /* */ }
   return u;
 }
 

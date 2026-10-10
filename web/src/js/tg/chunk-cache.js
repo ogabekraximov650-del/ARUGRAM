@@ -8,6 +8,13 @@
 // hajmgacha, ortig'i emas). Sozlamalarda qat'iy chegara (500 MB ... 5 GB) tanlash va keshni
 // tozalash mumkin (`screens/settings.js`). IndexedDB bo'lmasa (maxfiy rejim) — jim o'tkaziladi.
 // Mtcute'ga bog'liq emas: sozlamalar ekrani uni yuklamasin.
+//
+// Uch xil yozuv (hammasi bitta hajm hisobida, bitta LRU):
+//   * video bo'laklari `c` — Telegram'dan kelgan (shifrlangan) holida;
+//   * kichik fayllar `f` (rasm, ovoz, avatar) — to'liq, qurilma kaliti bilan AES-GCM;
+//   * fayl ma'lumoti (`size`, ochish kaliti) — o'sha kalit bilan shifrlangan, shu sabab
+//     keshdagi fayl Telegram'ga bot nusxasini kutmasdan DARHOL ochiladi.
+// Qurilma kaliti — shu brauzerdan chiqmaydigan (`extractable: false`) AES-GCM kaliti.
 
 const LS_LIMIT = 'aru_cache_limit'; // 'auto' | bayt
 let dbP = null;
@@ -22,8 +29,10 @@ function db() {
   if (!dbP) {
     dbP = new Promise((res, rej) => {
       try {
-        const r = indexedDB.open('aru-chunks', 1);
-        r.onupgradeneeded = () => { r.result.createObjectStore('c'); r.result.createObjectStore('m'); };
+        const r = indexedDB.open('aru-chunks', 2);
+        r.onupgradeneeded = () => {
+          for (const n of ['c', 'm', 'f', 'k']) if (!r.result.objectStoreNames.contains(n)) r.result.createObjectStore(n);
+        };
         r.onsuccess = () => res(r.result);
         r.onerror = () => rej(r.error);
       } catch (e) { rej(e); }
@@ -72,8 +81,8 @@ async function evictOldest(d) {
   for (const [k, v] of idx) if (v.at < oldAt) { oldAt = v.at; oldK = k; }
   if (oldK == null) return 0;
   const size = idx.get(oldK).size;
-  const tx = d.transaction(['c', 'm'], 'readwrite');
-  tx.objectStore('c').delete(oldK); tx.objectStore('m').delete(oldK);
+  const tx = d.transaction(['c', 'm', 'f'], 'readwrite');
+  tx.objectStore('c').delete(oldK); tx.objectStore('f').delete(oldK); tx.objectStore('m').delete(oldK);
   await txDone(tx);
   idx.delete(oldK); total -= size; usage = Math.max(0, usage - size);
   return size;
@@ -139,9 +148,89 @@ export async function cacheClear() {
   const d = await db();
   const m = await index();
   if (d) {
-    const tx = d.transaction(['c', 'm'], 'readwrite');
-    tx.objectStore('c').clear(); tx.objectStore('m').clear();
+    const tx = d.transaction(['c', 'm', 'f'], 'readwrite');
+    tx.objectStore('c').clear(); tx.objectStore('f').clear(); tx.objectStore('m').clear();
     await txDone(tx);
   }
   m.clear(); total = 0; quotaAt = 0;
+}
+
+// ── Kichik fayllar va fayl ma'lumoti (qurilma kaliti bilan shifrlangan) ──────────
+let devKeyP = null;
+function devKey() {
+  if (!devKeyP) {
+    devKeyP = (async () => {
+      const d = await db(); if (!d) return null;
+      let k = await req(d.transaction('k').objectStore('k').get('dev'));
+      if (!k) {
+        k = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+        const tx = d.transaction('k', 'readwrite'); tx.objectStore('k').put(k, 'dev'); await txDone(tx);
+      }
+      return k;
+    })().catch(() => null);
+  }
+  return devKeyP;
+}
+async function seal(bytes) {
+  const k = await devKey(); if (!k) return null;
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, k, bytes));
+  const out = new Uint8Array(12 + ct.length); out.set(iv); out.set(ct, 12);
+  return out.buffer;
+}
+async function unseal(buf) {
+  const k = await devKey(); if (!k || !buf) return null;
+  const u = new Uint8Array(buf);
+  try { return new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: u.subarray(0, 12) }, k, u.subarray(12))); } catch (_) { return null; }
+}
+
+async function putSealed(key, buf) {
+  const d = await db(); if (!d || !buf) return;
+  const m = await index();
+  const size = buf.byteLength;
+  if (m.has(key)) { total -= m.get(key).size; m.delete(key); }
+  await makeRoom(d, size);
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const tx = d.transaction(['f', 'm'], 'readwrite');
+    const at = Date.now();
+    tx.objectStore('f').put(buf, key); tx.objectStore('m').put({ size, at }, key);
+    if (await txDone(tx)) { m.set(key, { size, at }); total += size; usage += size; return; }
+    if (!m.size || !(await evictOldest(d))) return;
+  }
+}
+async function getSealed(key) {
+  const d = await db(); if (!d) return null;
+  const buf = await req(d.transaction('f').objectStore('f').get(key));
+  if (!buf) return null;
+  const m = await index(); const e = m.get(key);
+  if (e) { e.at = Date.now(); d.transaction('m', 'readwrite').objectStore('m').put({ size: e.size, at: e.at }, key); }
+  return unseal(buf);
+}
+
+/** Kichik fayl (rasm, ovoz): `{bytes, type}` yoki null. */
+export async function fileGet(name) {
+  try {
+    const u = await getSealed(`f:${name}`);
+    if (!u || u.length < 2) return null;
+    const tl = u[0]; const type = new TextDecoder().decode(u.subarray(1, 1 + tl));
+    return { bytes: u.subarray(1 + tl), type };
+  } catch (_) { return null; }
+}
+export async function filePut(name, bytes, type) {
+  try {
+    const t = new TextEncoder().encode(type || '');
+    const buf = new Uint8Array(1 + t.length + bytes.length);
+    buf[0] = t.length; buf.set(t, 1); buf.set(bytes, 1 + t.length);
+    await putSealed(`f:${name}`, await seal(buf));
+  } catch (_) { /* */ }
+}
+/** Fayl ma'lumoti: `{size, key}` (video/to'plam fayllari Telegram'ga so'rovsiz ochilishi uchun). */
+export async function metaGet(name) {
+  try {
+    const u = await getSealed(`f:meta:${name}`);
+    return u ? JSON.parse(new TextDecoder().decode(u)) : null;
+  } catch (_) { return null; }
+}
+export async function metaPut(name, meta) {
+  try { await putSealed(`f:meta:${name}`, await seal(new TextEncoder().encode(JSON.stringify(meta)))); } catch (_) { /* */ }
 }

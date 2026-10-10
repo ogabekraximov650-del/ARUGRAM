@@ -8,6 +8,7 @@
 
 import { mediaUrl, prefetchNames, isTelegramAuthorized } from './media.js';
 import { startup, withTimeout } from './startup.js';
+import { cachedMediaUrl } from './file-cache.js';
 
 const queue = new Map(); // nom -> [{img, orig}]
 let timer = 0;
@@ -41,6 +42,14 @@ function setSrc(list, url) { list.forEach(({ img }) => { if (img.isConnected) im
 async function flush() {
   const batch = [...queue.entries()];
   queue.clear();
+  if (!batch.length) return;
+  // Avval DISK keshi: bor rasmlar Telegram'ga umuman so'rovsiz, darhol chiqadi.
+  const rest = [];
+  await Promise.all(batch.map(async (b) => {
+    const u = await cachedMediaUrl(b[0]).catch(() => null);
+    if (u) setSrc(b[1], u); else rest.push(b);
+  }));
+  batch.length = 0; batch.push(...rest);
   if (!batch.length) return;
   await startup();
   const names = batch.map(([n]) => n);
