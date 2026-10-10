@@ -5623,3 +5623,17 @@ QOLGAN: emoji panelining GIF/Stiker/maxsus emoji oynalari Mini App'ga hali ko'ch
   bitreytdan past bo'lsa — keyingi pastroq tayyor sifatga avtomatik o'tadi
   (foydalanuvchi sifatni o'zi tanlagan bo'lsa — yo'q); tarmoq xatosida
   joriy joydan 3 martagacha o'zi qayta ochadi.
+
+## Mini App: sek pauzada, to'plamga qo'shish oynasi (2026-10)
+
+- Sek (`player-screen.js -> seekTo`): bufer bo'lmagan joyga sakrashda video
+  PAUZADA turadi, nishonda bufer yig'ilgach sakraydi va davom etadi (avval eski
+  joyda o'ynashda davom etardi).
+- To'plamga qo'shish (`packs.js -> openPackAdd`, `pack_add_screen.dart` nusxasi):
+  fayl ko'rinishi, mos emoji ilovaning emoji panelidan (`createEmojiPanel`),
+  video uchun boshi/oxiri (stiker 12 s, emoji 8 s, GIF cheklanmaydi) va ovoz;
+  nom ilovadagidek `pki_<id>_<vaqt>_<rnd>[_t<a>-<b>][_m].bin`.
+- `uploadFile(file, name, {waitForClaim, onProgress})`: to'plam uchun kanalga
+  ko'chirish kutilmaydi (fonda) — avval 30 s ichida bot ko'chirmasa "Yuklab
+  bo'lmadi" chiqardi. `tg/media.js` o'rami `opts` ni o'tkazmasdi (yordam
+  chatidagi yuklash foizi ham ishlamasdi) — tuzatildi.

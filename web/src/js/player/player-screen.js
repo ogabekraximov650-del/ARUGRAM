@@ -600,7 +600,8 @@ function buildPlayer(el, route, season, opts) {
     if (!cur) return;
     if (errShown) return;
     // Qotgani uchun pauzada ushlab turilgan bo'lsa ham — bu "o'ynayapti" holati.
-    if ((!video.paused && !video.ended) || eng?.holding) { intended = false; eng?.cancelHold?.(); video.pause(); }
+    if (pendingT != null) { intended = !intended; }
+    else if ((!video.paused && !video.ended) || eng?.holding) { intended = false; eng?.cancelHold?.(); video.pause(); }
     else {
       intended = true;
       if (video.ended || (video.duration && video.duration - video.currentTime < 3)) video.currentTime = 0;
@@ -609,7 +610,8 @@ function buildPlayer(el, route, season, opts) {
     paintPP(); paintEps(); keepShown();
   }
 
-  // Sek: video eski joyda 1x da o'ynashda davom etadi; nishon atrofida bufer yig'ilgach birdaniga sakraydi.
+  // Sek: video eski joyda PAUZADA turadi (kadr qotgan), nishon atrofida bufer yig'ilgach
+  // birdaniga o'sha joyga sakraydi va (o'ynayotgan bo'lsa) davom etadi.
   let pendingT = null; let seekTok = 0;
   function bufferedAtPlayer(t) {
     const r = video.buffered;
@@ -622,9 +624,14 @@ function buildPlayer(el, route, season, opts) {
     const tok = ++seekTok;
     if (!eng?.requestSeek || bufferedAtPlayer(t) >= 1.5) { pendingT = null; video.currentTime = t; return; }
     pendingT = t; paintProgress();
+    eng.cancelHold?.();
+    if (!video.paused) video.pause();
+    busy = true; paintBusy();
     eng.requestSeek(t).then((ok) => {
       if (!ok || tok !== seekTok) return;
       pendingT = null; video.currentTime = t; paintProgress();
+      busy = false; paintBusy();
+      if (intended && !document.hidden) video.play().catch(() => {});
     });
   }
 

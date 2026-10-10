@@ -68,3 +68,31 @@
 .pkp-it + .pkp-it { border-top: 1px solid rgba(255, 255, 255, 0.08); }
 .pkp-it.danger { color: #E5484D; }
 .pkp-it:active { background: rgba(255, 255, 255, 0.08); }
+
+/* To'plamga qo'shish oynasi (`pack_add_screen.dart`) */
+.pka-in { padding: 4px 16px 0; }
+.pka-lim { color: rgba(255, 255, 255, 0.55); font-size: 12.5px; line-height: 1.45; margin: 0 4px 12px; }
+.pka-card { display: flex; gap: 12px; padding: 12px; border-radius: 18px; background: var(--card); border: 1px solid var(--border); }
+.pka-prev { width: 96px; height: 96px; flex-shrink: 0; border-radius: 14px; overflow: hidden; background: rgba(255, 255, 255, 0.06); display: flex; align-items: center; justify-content: center; }
+.pka-prev img, .pka-prev video { width: 100%; height: 100%; object-fit: contain; }
+.pka-meta { flex: 1; min-width: 0; }
+.pka-meta .t1 { color: #fff; font-size: 14px; font-weight: 600; }
+.pka-meta .t2 { margin-top: 3px; color: rgba(255, 255, 255, 0.6); font-size: 12.5px; }
+.pka-meta .bad { margin-top: 4px; color: #E5484D; font-size: 12.5px; }
+.pka-meta .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.pka-meta .st { margin-top: 8px; font-size: 12.5px; color: var(--gold); }
+.pka-meta .st.failed { color: #E5484D; } .pka-meta .st.done { color: #4ADE80; }
+.pka-chip { display: flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 12px; background: rgba(255, 255, 255, 0.09); color: rgba(255, 255, 255, 0.75); font-size: 13px; cursor: pointer; }
+.pka-chip.off { background: rgba(255, 255, 255, 0.04); cursor: default; }
+.pka-chip .em { font-size: 19px; line-height: 1; font-family: 'Roboto', 'TgEmoji', sans-serif; }
+.pka-trim { margin-top: 14px; padding: 14px; border-radius: 18px; background: var(--card); border: 1px solid var(--border); }
+.pka-trim .row { display: flex; justify-content: space-between; color: rgba(255, 255, 255, 0.7); font-size: 13px; margin-top: 4px; }
+.pka-trim .row b { color: #fff; font-weight: 600; }
+.pka-trim input[type=range] { width: 100%; accent-color: var(--accent); margin: 8px 0 6px; }
+.pka-trim .hint { color: rgba(255, 255, 255, 0.45); font-size: 12px; }
+.pka-bottom { position: absolute; left: 16px; right: 16px; bottom: calc(var(--safe-bottom, 0px) + 12px); z-index: 5; }
+.pka-send { width: 100%; height: 50px; border-radius: 16px; font-size: 16px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+.pka-send:disabled { opacity: 0.5; }
+.pka-sheet .sheet-body { padding: 0; }
+.pka-emh { display: flex; align-items: center; justify-content: space-between; padding: 4px 18px 10px; color: #fff; font-size: 15px; font-weight: 600; }
+.pka-emh .pka-none { color: var(--accent); font-size: 13.5px; cursor: pointer; }

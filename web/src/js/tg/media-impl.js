@@ -316,7 +316,7 @@ function guessType(name) {
  * foydalanuvchining bot chatiga yuboriladi, bot uni kanalga ko'chiradi,
  * sayt esa `/api/tg/claim` orqali tayyor bo'lishini kutadi.
  */
-export async function uploadFile(file, name) {
+export async function uploadFile(file, name, { waitForClaim = true, onProgress } = {}) {
   if (!(await ensureTelegram())) throw new Error('tg_not_ready');
   const cl = await getClient();
   const keyBytes = crypto.getRandomValues(new Uint8Array(16));
@@ -330,14 +330,21 @@ export async function uploadFile(file, name) {
     file: sealed,
     fileName: name,
     fileMime: 'application/octet-stream',
-  });
+  }, onProgress ? { progressCallback: (a, b) => { try { onProgress(a, b || sealed.length); } catch (_) { /* */ } } } : undefined);
   if (sent?.id) delivered.add(sent.id);
   keys.set(name, hex);
-  for (let i = 0; i < 40; i++) {
-    await new Promise((r) => setTimeout(r, 750));
-    const j = await api(`/api/tg/claim?file=${encodeURIComponent(name)}&key=${hex}`).catch(() => null);
-    if (j?.ready) return { name, key: hex };
-  }
+  // Fayl Telegram'da — kanalga ko'chirishni bot o'zi qiladi. Ilovadagidek
+  // (`waitForClaim: false`) kutish fonda: sekin internetda "yuklab bo'lmadi" chiqmaydi.
+  const claim = async () => {
+    for (const w of [1, 1, 2, 2, 3, 4, 5, 8, 10, 15]) {
+      await new Promise((r) => setTimeout(r, w * 1000));
+      const j = await api(`/api/tg/claim?file=${encodeURIComponent(name)}&key=${hex}`).catch(() => null);
+      if (j?.ready) return true;
+    }
+    return false;
+  };
+  if (!waitForClaim) { claim(); return { name, key: hex }; }
+  if (await claim()) return { name, key: hex };
   throw new Error('upload_not_claimed');
 }
 

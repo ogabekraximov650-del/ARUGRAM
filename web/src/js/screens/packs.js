@@ -11,6 +11,8 @@ import { icon, spinner, bindTap, toast, appBar, bindAppBar, confirmDialog, promp
 import { esc } from '../format.js';
 import { putPack, flushNow } from '../sync.js';
 import { ensureTelegram, openFile, uploadFile, isTelegramAuthorized } from '../tg/media.js';
+import { createEmojiPanel } from './tg-emoji.js';
+import { sheet } from '../ui.js';
 
 const KINDS = [['sticker', 'Stikerlar'], ['emoji', 'Emojilar'], ['gif', 'GIFlar']];
 const SINGLE = { sticker: 'Stiker', emoji: 'Emoji', gif: 'GIF' };
@@ -423,22 +425,173 @@ export function openPackDetail(p, { mine = false } = {}, onChange = () => {}) {
     });
     const fileEl = el.querySelector('.pk-file');
     el.querySelector('.pkh-fab')?.addEventListener('click', () => fileEl.click());
-    fileEl.addEventListener('change', async () => {
+    fileEl.addEventListener('change', () => {
       const f = fileEl.files?.[0]; fileEl.value = '';
-      if (!f) return;
-      if (f.size > MAX_ITEM) { toast(`Fayl 5 MB dan katta (${(f.size / 1048576).toFixed(1)} MB)`); return; }
-      const head = new Uint8Array(await f.slice(0, 32).arrayBuffer());
-      if (sniff(head) === 'application/octet-stream') { toast("Faqat rasm (PNG, JPG, GIF, WebP) yoki video (MP4, WebM) mumkin"); return; }
-      const emoji = Array.from(((await promptDialog('Mos emoji', { placeholder: '😀', maxLength: 8 })) || '').replace(/[\[\]]/g, '')).slice(0, 3).join('');
-      const uid = currentUser()?.id || 0;
-      const name = `pki_${uid}_${Date.now()}_${Math.floor(Math.random() * 0xffff).toString(16)}.bin`;
-      toast('Yuklanmoqda...', 8000);
-      try { await uploadFile(f, name); } catch (e) { toast(e?.message === 'tg_not_ready' ? 'Avval Telegram hisobini ulang' : "Yuklab bo'lmadi — qayta urinib ko'ring"); return; }
-      op(`p:add:${name}`, { op: 'add', pack: p.id, file: name, emoji, size: f.size });
-      lib.ops = [{ id: -Date.now(), pack: p.id, op: 'add', file: name, state: 'pending', reason: '' }, ...lib.ops];
-      toast("Yuborildi — admin ko'rib chiqadi"); paint();
+      if (f) openPackAdd(p, f, () => { if (!disposed) paint(); });
     });
     paint();
     return { dispose() { disposed = true; } };
+  });
+}
+
+// ── To'plamga qo'shish oynasi (`pack_add_screen.dart` + `pack_video_trim_screen.dart`) ──
+// Tanlangan fayl ko'rinib turadi: mos emoji (ilovaning emoji oynasidan), video bo'lsa
+// kesish (boshi/oxiri) va ovoz, keyin "Yuborish". Bittada bitta fayl (ilovadagidek).
+const packMaxSeconds = (kind) => (kind === 'emoji' ? 8 : kind === 'gif' ? 0 : 12);
+const fmtMs = (ms) => { const t = ms / 1000; const m = Math.floor(t / 60); return `${m}:${(t - m * 60).toFixed(1).padStart(4, '0')}`; };
+
+function pickEmoji() {
+  return sheet((b, close) => {
+    b.innerHTML = `<div class="pka-emh"><span>Mos emoji</span><b class="pka-none">Emojisiz</b></div>`;
+    const panel = createEmojiPanel({ onPick: (e) => close(e), onBackspace: () => {} });
+    panel.el.style.height = `${Math.min(380, Math.round(window.innerHeight * 0.55))}px`;
+    b.appendChild(panel.el);
+    b.querySelector('.pka-none').addEventListener('click', () => close(''));
+    requestAnimationFrame(() => panel.show?.());
+  }, { cls: 'pka-sheet' });
+}
+
+export function openPackAdd(p, firstFile, onDone = () => {}) {
+  push((el) => {
+    let disposed = false;
+    let busy = false;
+    let d = null;
+    const max = packMaxSeconds(p.kind) * 1000;
+    el.innerHTML = `${appBar({ title: `${packSingle(p.kind)} qo'shish`, actions: `<button class="icon-btn pka-swap">${icon('swap_horiz', { size: 24 })}</button>` })}
+      <div class="scroll pka-body"></div>
+      <div class="pka-bottom"><button class="btn btn-filled pka-send"></button></div>
+      <input type="file" accept="image/*,video/mp4,video/webm" hidden class="pka-file">`;
+    bindAppBar(el, () => { if (busy) { toast('Yuklash tugashini kuting'); return; } routerBack(); });
+    const body = el.querySelector('.pka-body');
+    const send = el.querySelector('.pka-send');
+    const fileEl = el.querySelector('.pka-file');
+
+    async function load(f) {
+      if (d?.url) URL.revokeObjectURL(d.url);
+      d = { f, size: f.size, type: '', url: URL.createObjectURL(f), dur: 0, a: 0, b: 0, sound: true, emoji: '', problem: '', stage: 'ready', status: '' };
+      const head = new Uint8Array(await f.slice(0, 32).arrayBuffer());
+      d.type = sniff(head);
+      if (d.type === 'application/octet-stream') {
+        // WebM (EBML sarlavhasi) ham video sifatida qabul qilinadi.
+        if (head[0] === 0x1a && head[1] === 0x45 && head[2] === 0xdf && head[3] === 0xa3) d.type = 'video/webm';
+        else d.problem = "Fayl turi qo'llanmaydi (PNG, JPG, GIF, WebP, MP4, WebM)";
+      }
+      if (!d.problem && d.size > MAX_ITEM) d.problem = `${(d.size / 1048576).toFixed(1)} MB — 5 MB dan katta, yuklab bo'lmaydi`;
+      if (!d.problem && d.type.startsWith('video')) {
+        d.dur = await new Promise((res) => {
+          const v = document.createElement('video');
+          v.preload = 'metadata'; v.muted = true;
+          const t = setTimeout(() => res(0), 12000);
+          v.onloadedmetadata = () => { clearTimeout(t); res(Number.isFinite(v.duration) ? Math.round(v.duration * 1000) : 0); };
+          v.onerror = () => { clearTimeout(t); res(0); };
+          v.src = d.url;
+        });
+        d.a = 0; d.b = d.dur <= 0 ? 0 : (max <= 0 || d.dur < max ? d.dur : max);
+      }
+      if (!disposed) paint();
+    }
+
+    function paint() {
+      const sec = packMaxSeconds(p.kind);
+      const limits = sec > 0
+        ? `Rasm yoki video (5 MB gacha). Video ko'pi bilan ${sec} soniya: kerakli bo'lagini pastda tanlang. Admin tasdiqlagach "${esc(p.title)}" to'plamida ko'rinadi.`
+        : `Rasm yoki video (5 MB gacha, uzunligi cheklanmaydi). Kerak bo'lsa bo'lagini pastda tanlang. Admin tasdiqlagach "${esc(p.title)}" to'plamida ko'rinadi.`;
+      if (!d) { body.innerHTML = `<div class="center-box" style="height:200px">${spinner(32, 3)}</div>`; return; }
+      const vid = d.type.startsWith('video');
+      const locked = d.stage === 'uploading' || d.stage === 'done';
+      const canTrim = vid && d.dur > 0 && !d.problem;
+      body.innerHTML = `<div class="pka-in"><div class="pka-lim">${limits}</div>
+        <div class="pka-card">
+          <div class="pka-prev">${d.problem ? icon('error', { size: 32, color: '#E5484D' }) : vid ? `<video src="${d.url}" playsinline loop autoplay muted></video>` : `<img src="${d.url}" alt="">`}</div>
+          <div class="pka-meta">
+            <div class="t1">${vid ? 'Video' : (d.type.split('/')[1] || 'Fayl').toUpperCase()} · ${(d.size / 1048576).toFixed(1)} MB</div>
+            ${d.problem ? `<div class="bad">${esc(d.problem)}</div>` : `
+              ${canTrim ? `<div class="t2">Bo'lak: ${fmtMs(d.a)} – ${fmtMs(d.b)} (${((d.b - d.a) / 1000).toFixed(1)} s)</div>` : ''}
+              <div class="chips"><div class="pka-chip pka-emo${locked ? ' off' : ''}">${d.emoji ? `<span class="em">${esc(d.emoji)}</span>` : `${icon('sentiment_satisfied', { fill: false, size: 16 })}<span>Emoji</span>`}</div>
+              ${vid ? `<div class="pka-chip pka-snd${locked ? ' off' : ''}">${icon(d.sound ? 'volume_up' : 'volume_off', { size: 16 })}<span>${d.sound ? 'Ovozli' : 'Ovozsiz'}</span></div>` : ''}</div>`}
+            ${d.stage !== 'ready' ? `<div class="st ${d.stage}">${esc(d.status)}</div>` : ''}
+          </div>
+        </div>
+        ${canTrim && !locked ? `<div class="pka-trim">
+          <div class="row"><span>Boshi</span><b class="va">${fmtMs(d.a)}</b></div>
+          <input type="range" class="ra" min="0" max="${d.dur}" step="100" value="${d.a}">
+          <div class="row"><span>Oxiri</span><b class="vb">${fmtMs(d.b)}</b></div>
+          <input type="range" class="rb" min="0" max="${d.dur}" step="100" value="${d.b}">
+          ${max > 0 ? `<div class="hint">Ko'pi bilan ${max / 1000} soniya</div>` : ''}
+        </div>` : ''}
+        <div style="height:100px"></div></div>`;
+      const ok = !d.problem && (d.stage === 'ready' || d.stage === 'failed');
+      send.disabled = busy || !ok;
+      send.innerHTML = busy ? spinner(20, 2, '#fff') : ok ? 'Yuborish' : (d.stage === 'done' ? 'Yuborildi' : "Yuboradigan narsa yo'q");
+      const v = body.querySelector('.pka-prev video');
+      if (v) {
+        // Faqat tanlangan bo'lak takrorlanadi.
+        v.currentTime = d.a / 1000;
+        v.addEventListener('timeupdate', () => { if (canTrim && (v.currentTime * 1000 >= d.b || v.currentTime * 1000 < d.a - 200)) v.currentTime = d.a / 1000; });
+      }
+      body.querySelector('.pka-emo:not(.off)')?.addEventListener('click', async () => {
+        const e = await pickEmoji();
+        if (e == null || disposed) return;
+        d.emoji = e; paint();
+      });
+      body.querySelector('.pka-snd:not(.off)')?.addEventListener('click', () => { d.sound = !d.sound; paint(); });
+      const ra = body.querySelector('.ra'); const rb = body.querySelector('.rb');
+      if (ra && rb) {
+        const upd = (which) => {
+          let a = +ra.value; let b = +rb.value;
+          if (which === 'a') { if (a > b - 500) b = Math.min(d.dur, a + 500); if (max > 0 && b - a > max) b = a + max; } else { if (b < a + 500) a = Math.max(0, b - 500); if (max > 0 && b - a > max) a = b - max; }
+          d.a = a; d.b = b; ra.value = a; rb.value = b;
+          body.querySelector('.va').textContent = fmtMs(a); body.querySelector('.vb').textContent = fmtMs(b);
+          const t2 = body.querySelector('.t2'); if (t2) t2.textContent = `Bo'lak: ${fmtMs(a)} – ${fmtMs(b)} (${((b - a) / 1000).toFixed(1)} s)`;
+          if (v) v.currentTime = (which === 'a' ? a : Math.max(a, b - 1000)) / 1000;
+        };
+        ra.addEventListener('input', () => upd('a'));
+        rb.addEventListener('input', () => upd('b'));
+      }
+    }
+
+    async function upload() {
+      if (busy || !d || d.problem) return;
+      const waiting = lib.ops.filter((o) => o.op === 'add' && (o.state === 'pending' || o.state === 'queued')).length;
+      if (waiting >= 100) { toast("Ko'rib chiqilayotgan rasmlar juda ko'p (100 ta). Admin ko'rib chiqquncha kuting"); return; }
+      const uid = currentUser()?.id || 0;
+      if (!uid) { toast('Avval hisobga kiring'); return; }
+      const vid = d.type.startsWith('video');
+      // Nom ilovadagidek: `_t<boshi>-<oxiri>` — kesish, `_m` — ovozsiz (Actions bajaradi).
+      const trim = vid && d.b > d.a ? `_t${d.a}-${d.b}` : '';
+      const mute = vid && !d.sound ? '_m' : '';
+      const name = `pki_${uid}_${Date.now()}_${Math.floor(Math.random() * 0xffff).toString(16)}${trim}${mute}.bin`;
+      busy = true; d.stage = 'uploading'; d.status = 'Yuklanmoqda 0%'; paint();
+      try {
+        await uploadFile(d.f, name, {
+          waitForClaim: false,
+          onProgress: (a, b) => {
+            if (disposed || !b) return;
+            d.status = a >= b ? 'Telegram qabul qilmoqda...' : `Yuklanmoqda ${Math.floor((a * 100) / b)}%`;
+            const st = body.querySelector('.pka-meta .st'); if (st) st.textContent = d.status;
+          },
+        });
+      } catch (e) {
+        busy = false; d.stage = 'failed';
+        d.status = e?.message === 'tg_not_ready' ? 'Fayl Telegram orqali yuklanadi — avval Telegram hisobini ulang' : "Yuklab bo'lmadi — internetni tekshirib, qayta urinib ko'ring";
+        if (!disposed) paint();
+        return;
+      }
+      const emoji = Array.from(d.emoji.replace(/[\[\]]/g, '')).slice(0, 3).join('');
+      op(`p:add:${name}`, { op: 'add', pack: p.id, file: name, emoji, size: d.size });
+      lib.ops = [{ id: -Date.now(), pack: p.id, op: 'add', file: name, state: 'pending', reason: '' }, ...lib.ops];
+      busy = false; d.stage = 'done'; d.status = "Yuborildi — admin ko'rib chiqadi";
+      onDone();
+      if (disposed) return;
+      paint();
+      setTimeout(() => { if (!disposed) routerBack(); }, 700);
+    }
+
+    send.addEventListener('click', upload);
+    el.querySelector('.pka-swap').addEventListener('click', () => { if (!busy) fileEl.click(); });
+    fileEl.addEventListener('change', () => { const f = fileEl.files?.[0]; fileEl.value = ''; if (f) { d = null; paint(); load(f); } });
+    paint();
+    load(firstFile);
+    return { dispose() { disposed = true; if (d?.url) setTimeout(() => URL.revokeObjectURL(d.url), 1000); } };
   });
 }
