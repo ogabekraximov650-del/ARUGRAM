@@ -26,7 +26,7 @@ import { getClient, tgConfig, isAuthorized, authorizedCached } from './client.js
 import { openTelegramLogin } from './login.js';
 
 const CHUNK = 1024 * 1024; // Telegram upload.getFile: bir so'rovda ko'pi bilan 1 MB
-const MAX_PAR = 12; // bir vaqtda ketadigan upload.getFile so'rovlari (4 ta ulanishga taqsimlanadi)
+const MAX_PAR = 16; // bir vaqtda ketadigan upload.getFile so'rovlari (4 ta ulanishga taqsimlanadi)
 const REQ_TIMEOUT = 25000; // javobsiz qolgan so'rov shu vaqtdan keyin qayta yuboriladi
 const NET_TRIES = 30; // tarmoq xatosida urinishlar (sekin/uzilgan internetda video to'xtab qolmasin)
 
@@ -73,6 +73,66 @@ function dlClient(cl) {
   });
   return cl.__aruDl;
 }
+// ── DISK KESHI (ilovadagi shifrlangan bo'lak keshi kabi) ─────────────────────
+// Bo'laklar Telegram'dan KELGAN holida (hali shifrlangan, kalitsiz o'qib bo'lmaydi) IndexedDB'ga
+// yoziladi: qayta ochish, orqaga surish va uzilgan joydan davom etish tarmoqsiz, darhol.
+// Hajm chegarasi — eng eskisi o'chadi (LRU). Mavjud bo'lmasa (maxfiy rejim) — jim o'tkazib yuboriladi.
+const CACHE_LIMIT = 400 * 1024 * 1024;
+let cdbP = null;
+function cdb() {
+  if (!cdbP) {
+    cdbP = new Promise((res, rej) => {
+      try {
+        const r = indexedDB.open('aru-chunks', 1);
+        r.onupgradeneeded = () => { r.result.createObjectStore('c'); r.result.createObjectStore('m'); };
+        r.onsuccess = () => res(r.result);
+        r.onerror = () => rej(r.error);
+      } catch (e) { rej(e); }
+    }).catch(() => null);
+  }
+  return cdbP;
+}
+const idbReq = (r) => new Promise((res) => { r.onsuccess = () => res(r.result); r.onerror = () => res(undefined); });
+async function cacheGet(key, len) {
+  try {
+    const d = await cdb(); if (!d) return null;
+    const buf = await idbReq(d.transaction('c').objectStore('c').get(key));
+    if (!buf || buf.byteLength !== len) return null;
+    d.transaction('m', 'readwrite').objectStore('m').put({ size: len, at: Date.now() }, key);
+    return new Uint8Array(buf);
+  } catch (_) { return null; }
+}
+let putCount = 0;
+async function cachePut(key, u8) {
+  try {
+    const d = await cdb(); if (!d) return;
+    const buf = u8.slice().buffer; // subarray butun xotirani nusxalamasin
+    await new Promise((res) => {
+      const tx = d.transaction(['c', 'm'], 'readwrite');
+      tx.objectStore('c').put(buf, key);
+      tx.objectStore('m').put({ size: buf.byteLength, at: Date.now() }, key);
+      tx.oncomplete = res; tx.onerror = res; tx.onabort = res;
+    });
+    if (++putCount % 24 === 0) cacheTrim(d);
+  } catch (_) { /* */ }
+}
+async function cacheTrim(d) {
+  try {
+    const keys = await idbReq(d.transaction('m').objectStore('m').getAllKeys());
+    const vals = await idbReq(d.transaction('m').objectStore('m').getAll());
+    if (!keys || !vals) return;
+    const rows = keys.map((k, i) => ({ k, size: vals[i]?.size || 0, at: vals[i]?.at || 0 }));
+    let total = rows.reduce((a, r) => a + r.size, 0);
+    if (total <= CACHE_LIMIT) return;
+    rows.sort((a, b) => a.at - b.at);
+    const tx = d.transaction(['c', 'm'], 'readwrite');
+    for (const r of rows) {
+      if (total <= CACHE_LIMIT * 0.8) break;
+      tx.objectStore('c').delete(r.k); tx.objectStore('m').delete(r.k); total -= r.size;
+    }
+  } catch (_) { /* */ }
+}
+
 const docs = new Map(); // nom -> {media, size, msgId}
 const keys = new Map(); // nom -> hex
 const urls = new Map(); // nom -> objectURL
@@ -236,6 +296,12 @@ export async function openFile(name, { key = '' } = {}) {
         if (closed) throw new Error('aborted');
         try {
           // Taymaut `limited` ichida: osilib qolgan so'rov navbatdagi o'rinni band qilib turmaydi.
+          // Diskda bor bo'lsa — tarmoqsiz (kalit: fayl nomi + bo'lak; nom har yuklashda yangi).
+          const hit = await cacheGet(`${name}#${idx}`, lim);
+          if (hit) {
+            done.push([Date.now(), hit.length]);
+            return await ctrApply(hex, off, hit);
+          }
           const dc = Number.isInteger(doc.media?.dcId) ? doc.media.dcId : undefined;
           const raw = await limited(
             () => withTimeout(downloadChunk(dlClient(cl), { location: doc.media, offset: off, limit: CHUNK, ...(dc ? { dcId: dc } : {}) }), REQ_TIMEOUT),
@@ -243,6 +309,7 @@ export async function openFile(name, { key = '' } = {}) {
           const part = raw.length > lim ? raw.subarray(0, lim) : raw;
           done.push([Date.now(), part.length]);
           if (done.length > 200) done.splice(0, done.length - 200);
+          if (part.length === lim && doc.size > 4 * 1024 * 1024) cachePut(`${name}#${idx}`, part); // faqat katta fayllar (video)
           return await ctrApply(hex, off, part);
         } catch (e) {
           const t = `${e?.text || e?.message || ''}`;

@@ -5731,3 +5731,6 @@ boshqa metod yurmaydigan ALOHIDA ulanishlarda.
   (pleyer hozir kutgan bo'lak — 0, oldindan yuklash — 1); surishda boshlanmagan
   oldindan yuklashlar bekor (`cancelPrefetch`, `engine.js`).
 - Tekshirilmagan: haqiqiy tezlik o'lchovi (telefonda).
+- DISK KESHI (web): `media-impl.js` — bo'laklar Telegram'dan kelgan (shifrlangan) holida
+  IndexedDB `aru-chunks` ga (faqat 4 MB dan katta fayllar), 400 MB gacha, eng eskisi
+  o'chadi (LRU). Qayta ochish/orqaga surish tarmoqsiz. Parallel so'rovlar 16.
