@@ -50,6 +50,14 @@ export function openSettings() {
         ${rowHtml('__chan', 'campaign', 'Kanallarga avtomatik obuna',
     "Bepul bo'limlar uchun ilova Telegram hisobingiz bilan majburiy kanallarga qo'shiladi (yopiq kanalga so'rov yuboradi). O'chirsangiz, bepul bo'lim ochilganda ruxsat yana so'raladi.",
     chanConsent())}
+        <div class="ss-sec" style="margin-top:22px">PLEYER</div>
+        <div class="ss-note" style="margin-top:6px">Video formati. fMP4 — sinalgan standart yo'l. MP4 — brauzerning o'z pleyeri (tajriba: ba'zi telefonlarda surish tezroq bo'lishi mumkin, ishlamasa o'zi fMP4 ga qaytadi). O'zgartirgach videoni qayta oching.</div>
+        <div style="height:12px"></div>
+        <div class="glass ss-row">
+          <div class="ss-ic">${icon('play_circle', { fill: false, size: 18, color: C.accent })}</div>
+          <div class="ss-main"><div class="ss-t">Video formati</div></div>
+          <select class="ss-fmt field" style="width:auto;max-width:55%"><option value="0">fMP4 (standart)</option><option value="1">MP4 (tajriba)</option></select>
+        </div>
       </div></div>`;
     bindAppBar(el);
 
@@ -72,6 +80,12 @@ export function openSettings() {
           toast(on ? `${label} yashirildi` : `${label} endi boshqalarga ko'rinadi`);
         }
       });
+    });
+    const fmt = el.querySelector('.ss-fmt');
+    try { fmt.value = localStorage.getItem('aru_mp4') === '1' ? '1' : '0'; } catch (_) { /* */ }
+    fmt.addEventListener('change', () => {
+      try { localStorage.setItem('aru_mp4', fmt.value); } catch (_) { /* */ }
+      toast(fmt.value === '1' ? 'MP4 yoqildi — videoni qayta oching' : 'fMP4 yoqildi — videoni qayta oching');
     });
     return {};
   });

@@ -403,10 +403,13 @@ export async function clearOldBotChat() {
   try {
     const cl = await getClient();
     const peer = await botPeer();
+    // OXIRGI XABAR QOLADI: chat butunlay bo'shab qolsa bot chatlar ro'yxatidan yo'qolardi.
+    // `getHistory` eng yangisidan boshlaydi — birinchisini tashlab, qolganini o'chiramiz.
     for (let page = 0; page < 20; page++) {
       const msgs = await cl.getHistory(peer, { limit: 100 });
-      if (!msgs.length) break;
-      await cl.deleteMessagesById(peer, msgs.map((m) => m.id), { revoke: true });
+      const rest = msgs.slice(1);
+      if (!rest.length) break;
+      await cl.deleteMessagesById(peer, rest.map((m) => m.id), { revoke: true });
       if (msgs.length < 100) break;
     }
   } catch (_) { /* keyingi ochilishda */ }

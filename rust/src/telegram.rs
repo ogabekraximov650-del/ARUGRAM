@@ -2161,6 +2161,32 @@ pub extern "C" fn rust_tg_clear_bot_chat() -> *mut c_char {
         // so'rovlari) abadiy turib qolmasin — ko'pi 40 soniya.
         run_tmo(t, 40, async {
             let (id, hash) = bot_peer(t, &client).await?;
+            // OXIRGI XABAR QOLADI (foydalanuvchi: "chat to'liq tozalanganda bot chatlar
+            // ro'yxatidan yo'qolyapti"). Eng yangi xabar raqami olinadi, undan oldingilari
+            // o'chadi (`max_id = oxirgi - 1`). Xabar bo'lmasa yoki bitta bo'lsa — tegilmaydi.
+            let last_id = {
+                let r = client
+                    .invoke(&tl::functions::messages::GetHistory {
+                        peer: tl::enums::InputPeer::User(tl::types::InputPeerUser { user_id: id, access_hash: hash }),
+                        offset_id: 0,
+                        offset_date: 0,
+                        add_offset: 0,
+                        limit: 1,
+                        max_id: 0,
+                        min_id: 0,
+                        hash: 0,
+                    })
+                    .await
+                    .map_err(|e| inv_err(&e))?;
+                messages_of(r)
+                    .iter()
+                    .filter_map(|m| if let tl::enums::Message::Message(m) = m { Some(m.id) } else { None })
+                    .max()
+                    .unwrap_or(0)
+            };
+            if last_id <= 1 {
+                return Ok::<(), String>(());
+            }
             // Katta tarix bir necha qadamda o'chadi (`offset > 0`).
             //
             // `revoke` (ikkala tomondan) bot bilan suhbatda ba'zan rad
@@ -2179,7 +2205,7 @@ pub extern "C" fn rust_tg_clear_bot_chat() -> *mut c_char {
                             user_id: id,
                             access_hash: hash,
                         }),
-                        max_id: 0,
+                        max_id: last_id - 1,
                         min_date: None,
                         max_date: None,
                     })

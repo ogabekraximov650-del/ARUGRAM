@@ -5773,3 +5773,10 @@ boshqa metod yurmaydigan ALOHIDA ulanishlarda.
   kiritilgach saqlash kaliti (`curName` = MP4 nomi) va o'qish kaliti (`savedPosMs` = fMP4 nomi)
   farq qilib qolgan edi. Endi ikkalasi bitta qism kaliti: `pg:<anime>:<bo'lim>:<qism>`
   (sifat va formatga bog'liq emas); eski fayl-nomi yozuvlari bo'lsa, ulardan eng kattasi olinadi.
+- BOT CHATI TOZALANGANDA OXIRGI XABAR QOLADI (foydalanuvchi: "chat to'liq tozalanganda bot chatlar
+  ro'yxatidan yo'qolyapti"): ilova (`rust_tg_clear_bot_chat`: `GetHistory(limit 1)` -> `DeleteHistory
+  max_id = oxirgi-1`) va web (`clearOldBotChat`: birinchi, ya'ni eng yangi xabarni tashlab o'chiradi).
+- PLEYER (web): Sozlamalar -> "PLEYER" -> "Video formati" (fMP4 standart / MP4 tajriba, `aru_mp4`);
+  sek: nishonda bufer 2 s o'rniga 1,2 s bo'lgach sakraydi. Eslatma: x265 standart keyint=250
+  (~10 s) — sek har doim oldingi kalit kadrdan boshlab oladi; zichroq kalit kadr (keyint ~2-3 s,
+  `open-gop=0`) yangi kodlashlarda sekni tezlashtiradi (hozircha qo'llanmagan).

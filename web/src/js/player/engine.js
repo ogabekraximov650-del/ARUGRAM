@@ -420,7 +420,7 @@ export function createEngine(video, { name, key = '', ahead: aheadOpt = 60, behi
         const t0 = Date.now();
         const iv = setInterval(() => {
           if (destroyed || my !== seekReq) { clearInterval(iv); resolve(false); return; }
-          if (bufferedAheadAt(t) >= Math.min(2, Math.max(0.3, duration - t - 0.3)) || Date.now() - t0 > 20000) {
+          if (bufferedAheadAt(t) >= Math.min(1.2, Math.max(0.3, duration - t - 0.3)) || Date.now() - t0 > 20000) {
             clearInterval(iv); if (my === seekReq) focus = null; resolve(true);
           }
         }, 80);
