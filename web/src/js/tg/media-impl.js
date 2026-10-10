@@ -39,11 +39,23 @@ export async function ensureTelegram() {
   return openTelegramLogin();
 }
 
+let peerP = null;
+/** Bot chatining peer'i: avval @username bilan, bo'lmasa `contacts.resolveUsername` orqali. */
 async function botPeer() {
-  const c = await tgConfig();
-  const name = `${c.bot || ''}`.replace(/^@/, '');
-  if (!name) throw new Error('bot_unknown');
-  return name;
+  if (peerP) return peerP;
+  peerP = (async () => {
+    const c = await tgConfig();
+    const name = `${c.bot || ''}`.replace(/^@/, '');
+    if (!name) throw new Error('bot_unknown');
+    const cl = await getClient();
+    try { return await cl.resolvePeer(`@${name}`); } catch (_) { /* pastdagi yo'l */ }
+    const r = await cl.call({ _: 'contacts.resolveUsername', username: name });
+    const u = (r.users || []).find((x) => `${x.username || ''}`.toLowerCase() === name.toLowerCase()) || r.users?.[0];
+    if (!u) throw new Error('bot_unresolved');
+    return { _: 'inputPeerUser', userId: u.id, accessHash: u.accessHash };
+  })();
+  peerP.catch(() => { peerP = null; });
+  return peerP;
 }
 
 function docName(msg) {
@@ -94,7 +106,7 @@ async function locate(names, { force = false } = {}) {
       }
     }
   }
-  for (const n of names) if (!docs.has(n)) throw new Error(`not_in_chat (${scanInfo}; bot=${await botPeer().catch(() => '?')})`);
+  for (const n of names) if (!docs.has(n)) throw new Error(`not_in_chat (${scanInfo}; bot=${await botPeer().then(() => 'ok', (e) => e?.text || e?.message || '?')})`);
 }
 
 function hexToBytes(hex) {
