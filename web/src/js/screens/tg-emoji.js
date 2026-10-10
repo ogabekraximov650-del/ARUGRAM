@@ -299,7 +299,7 @@ export function createEmojiPanel({ onPick, onBackspace, onPickMedia }) {
           packThumb(p, hd, it).then((b) => { c.innerHTML = `<img src="${b.url}" alt="">`; }).catch(() => {});
           c.addEventListener('click', () => onPickMedia?.({ kind, pack: p.id, item: it.i, emoji: it.e || '' }));
         });
-      } catch (_) { en.target.innerHTML = `<div class="tge-pkmid" style="grid-column:1/-1">Ochib bo'lmadi</div>`; }
+      } catch (e) { en.target.innerHTML = `<div class="tge-pkmid" style="grid-column:1/-1">Ochib bo'lmadi<br><small>${esc(`${e?.message || e}`.slice(0, 90))}</small></div>`; }
     }), { root: pkv, rootMargin: '200px' });
     pkv.querySelectorAll('.tge-pkgrid').forEach((g) => io.observe(g));
   }

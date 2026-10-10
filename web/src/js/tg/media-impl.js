@@ -29,6 +29,7 @@ const docs = new Map(); // nom -> {media, size, msgId}
 const keys = new Map(); // nom -> hex
 const urls = new Map(); // nom -> objectURL
 let scanInfo = '';
+const keyChecked = new Set(); // kaliti serverdan so'ralgan nomlar
 const delivered = new Set(); // bot chatiga yuborilgan xabarlar (o'chirish uchun)
 
 export function isTelegramAuthorized() { return authorizedCached(); }
@@ -108,6 +109,7 @@ async function locate(names, { force = false } = {}) {
         throw e;
       }
       for (const [k, v] of Object.entries(j?.keys || {})) keys.set(k, `${v}`);
+      still.forEach((n) => keyChecked.add(n));
       // Bot nusxani bir-ikki soniyada yuboradi.
       for (let i = 0; i < 12; i++) {
         await new Promise((r) => setTimeout(r, i === 0 ? 400 : 700));
@@ -159,6 +161,14 @@ export async function openFile(name, { key = '' } = {}) {
   await locate([name]);
   const cl = await getClient();
   let doc = docs.get(name);
+  // Fayl bot chatida allaqachon bor edi (deliver chaqirilmagan) — kalit yo'q bo'lishi mumkin: serverdan olinadi.
+  if (!key && !keys.get(name) && !keyChecked.has(name)) {
+    keyChecked.add(name);
+    try {
+      const j = await apiPost('/api/tg/deliver', { files: [name] });
+      for (const [k, v] of Object.entries(j?.keys || {})) keys.set(k, `${v}`);
+    } catch (_) { /* kalitsiz (shifrlanmagan) fayl */ }
+  }
   const hex = key || keys.get(name) || '';
   const cache = new Map(); // bo'lak raqami -> Promise<Uint8Array>
   const ORDER = [];

@@ -94,7 +94,7 @@
 .tgc-trow { display: flex; justify-content: flex-end; padding-top: 3px; }
 .tgc-trow.pv { padding-right: 7px; }
 .tgc-time { display: inline-flex; align-items: center; font-size: 12px; line-height: 1.1; white-space: nowrap; }
-.tgc-time .ss { margin-left: 3px; display: inline-flex; align-items: center; }
+.tgc-time .ss { padding: 0; line-height: 1; margin-left: 3px; display: inline-flex; align-items: center; }
 .tgc-clock { animation: spin 1.4s linear infinite; }
 .tgc-tpill { display: inline-flex; padding: 2px 6px; background: rgba(0, 0, 0, 0.4); border-radius: 10px; }
 .tgc-mediaonly.out { padding-right: 8px; }
