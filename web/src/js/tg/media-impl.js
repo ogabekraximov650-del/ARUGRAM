@@ -60,11 +60,21 @@ function limited(fn, prio = 0, hold) {
   return new Promise((resolve, reject) => {
     const it = { fn, prio, resolve, reject, cancelled: false };
     if (hold) hold(it);
+    liveItems.add(it);
+    const done = () => liveItems.delete(it);
+    it.resolve = (v) => { done(); resolve(v); };
+    it.reject = (e) => { done(); reject(e); };
     parQ.push(it);
     pump();
   });
 }
-function cancelPrefetches() { for (const it of parQ) if (it.prio > 0) it.cancelled = true; }
+const liveItems = new Set(); // navbatdagi va havodagi so'rovlar
+function cancelPrefetches() {
+  // Surishdan keyin eski joyning oldindan yuklashlari: navbatdagisi ham, havodagisi ham bekor
+  // (ular tarmoqni band qilib, yangi joyni sekinlashtirmasin va ortiqcha trafik sarflamasin).
+  for (const it of liveItems) if (it.prio > 0) { it.cancelled = true; try { it.ac?.abort(); } catch (_) { /* */ } }
+}
+window.__aruCache = window.__aruCache || { hit: 0, miss: 0, cancelled: 0 };
 /** Pleyer ulanishi: `downloadChunk` ni "download" turidagi ulanishlar orqali yuboradi. */
 function dlClient(cl) {
   if (cl.__aruDl) return cl.__aruDl;
@@ -217,7 +227,11 @@ export async function openFile(name, { key = '' } = {}) {
 
   const items = new Map(); // bo'lak -> navbatdagi so'rov (oldindan yuklash talabga aylansa — ustuvorlik oshadi)
   async function chunk(idx, prio = 0) {
-    if (cache.has(idx)) { if (prio === 0) { const it = items.get(idx); if (it) it.prio = 0; } return cache.get(idx); }
+    if (cache.has(idx)) {
+      const it0 = items.get(idx);
+      if (it0 && it0.cancelled) { cache.delete(idx); items.delete(idx); } // bekor qilingan — qayta so'raladi
+      else { if (prio === 0 && it0) it0.prio = 0; return cache.get(idx); }
+    }
     const p = (async () => {
       const off = idx * CHUNK;
       const lim = Math.min(CHUNK, doc.size - off);
@@ -229,15 +243,18 @@ export async function openFile(name, { key = '' } = {}) {
           // Diskda bor bo'lsa — tarmoqsiz (kalit: fayl nomi + bo'lak; nom har yuklashda yangi).
           const hit = await cacheGet(`${name}#${idx}`, lim);
           if (hit) {
+            window.__aruCache.hit++;
             done.push([Date.now(), hit.length]);
             return await ctrApply(hex, off, hit);
           }
+          window.__aruCache.miss++;
           if (lazy) await ensureRemote();
+          const ac = new AbortController();
 
           const dc = Number.isInteger(doc.media?.dcId) ? doc.media.dcId : undefined;
           const raw = await limited(
-            () => withTimeout(downloadChunk(dlClient(cl), { location: doc.media, offset: off, limit: CHUNK, ...(dc ? { dcId: dc } : {}) }), REQ_TIMEOUT),
-            prio, (it) => items.set(idx, it));
+            () => withTimeout(downloadChunk(dlClient(cl), { location: doc.media, offset: off, limit: CHUNK, abortSignal: ac.signal, ...(dc ? { dcId: dc } : {}) }), REQ_TIMEOUT),
+            prio, (it) => { it.ac = ac; items.set(idx, it); });
           const part = raw.length > lim ? raw.subarray(0, lim) : raw;
           done.push([Date.now(), part.length]);
           if (done.length > 200) done.splice(0, done.length - 200);
@@ -245,6 +262,8 @@ export async function openFile(name, { key = '' } = {}) {
           return await ctrApply(hex, off, part);
         } catch (e) {
           const t = `${e?.text || e?.message || ''}`;
+          // Bekor qilingan oldindan yuklash — qayta urinilmaydi (aks holda eski joy trafik yeyardi).
+          if (e?.name === 'AbortError' || /^cancelled$|aborted/i.test(t)) { window.__aruCache.cancelled++; throw new Error('cancelled'); }
           if (/FILE_REFERENCE|MEDIA_EMPTY|not_in_chat/.test(t) && refreshes < 4) {
             // Nusxa eskirgan yoki o'chirilgan — qayta yetkaziladi.
             refreshes += 1;

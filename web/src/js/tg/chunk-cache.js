@@ -107,13 +107,29 @@ async function makeRoom(d, size) {
   while (idx.size && quota > 0 && usage + size > quota * 0.95) { if (!(await evictOldest(d))) break; }
 }
 
+// "Oxirgi ishlatilgan vaqt" xotirada yangilanadi, diskka 5 s da bir paketda (har o'qishga alohida yozuv emas).
+const touched = new Set();
+let touchT = 0;
+function scheduleTouch() {
+  if (touchT) return;
+  touchT = setTimeout(async () => {
+    touchT = 0;
+    try {
+      const d = await db(); if (!d || !idx) return;
+      const tx = d.transaction('m', 'readwrite'); const st = tx.objectStore('m');
+      for (const k of touched) { const e = idx.get(k); if (e) st.put({ size: e.size, at: e.at }, k); }
+      touched.clear();
+    } catch (_) { /* */ }
+  }, 5000);
+}
+
 export async function cacheGet(key, len) {
   try {
     const d = await db(); if (!d) return null;
     const buf = await req(d.transaction('c').objectStore('c').get(key));
     if (!buf || buf.byteLength !== len) return null;
     const m = await index(); const e = m.get(key);
-    if (e) { e.at = Date.now(); d.transaction('m', 'readwrite').objectStore('m').put({ size: e.size, at: e.at }, key); }
+    if (e) { e.at = Date.now(); touched.add(key); scheduleTouch(); }
     return new Uint8Array(buf);
   } catch (_) { return null; }
 }

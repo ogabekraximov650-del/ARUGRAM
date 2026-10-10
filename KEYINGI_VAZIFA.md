@@ -5763,3 +5763,9 @@ boshqa metod yurmaydigan ALOHIDA ulanishlarda.
   "Keshni tozalash"/"Tanlanganini tozalash", tasdiq, yashil "Xotira tozalandi"; qo'shimcha "Kesh
   chegarasi"). Profil menyusida "Xotiradan foydalanish". Sozlamalardan kesh bo'limi olib tashlandi.
   Toifalar fayl nomidan (`chunk-cache.js -> cacheBreakdown/cacheClearCats`).
+- ORQAGA SEK TRAFIK YEYISHI (foydalanuvchi): `cancelPrefetch` bekor qilingan oldindan yuklashlar
+  "xato" deb 30 martagacha QAYTA urinardi (eski joy trafik yer, yangisini sekinlatardi) va talab
+  qilingan bo'lak bekor qilingan promise'ga ulanib qolishi mumkin edi. Endi: bekor qilingan so'rov
+  qayta urinilmaydi (havodagisi `AbortController` bilan to'xtatiladi), bekor qilingan bo'lak
+  talab bo'lsa qayta so'raladi; kesh "oxirgi ishlatilgan" vaqti 5 s da bir paketda yoziladi.
+  Diagnostika: `window.__aruCache` ({hit, miss, cancelled}) — konsolda.
