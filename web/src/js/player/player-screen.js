@@ -773,19 +773,20 @@ function buildPlayer(el, route, season, opts) {
     }
   });
 
+  const SEEK_STEP = 10; // ikki marta bosish: ±10 s
   function doubleSeek(side) {
     const d = video.duration || 0;
     const base = video.currentTime;
     const from = pendSeek ?? base;
     contUntil = Date.now() + 700; contSide = side;
-    if (side === 'l') accL = Math.min(accL + 5, Math.floor(base)); else accR = Math.min(accR + 5, Math.max(0, Math.floor(d - 1 - base)));
+    if (side === 'l') accL = Math.min(accL + SEEK_STEP, Math.floor(base)); else accR = Math.min(accR + SEEK_STEP, Math.max(0, Math.floor(d - 1 - base)));
     const b = $(`.pl-badge.${side}`);
     const acc = side === 'l' ? accL : accR;
     const chev = [0, 1, 2].map((k) => `<i style="animation-delay:${(side === 'l' ? 2 - k : k) * 0.135}s">${icon(side === 'l' ? 'arrow_left' : 'arrow_right', { size: 13, color: '#fff' })}</i>`).join('');
     b.innerHTML = `<div class="ch">${chev}</div><span>${acc}s</span>`;
     b.classList.add('on');
     // Sek qisqa tinchlikdan keyin BITTA marta bajariladi (har bosishda dvigatel qayta ishga tushmasin).
-    pendSeek = Math.max(0, Math.min(from + (side === 'l' ? -5 : 5), d > 1 ? d - 1 : from + 5));
+    pendSeek = Math.max(0, Math.min(from + (side === 'l' ? -SEEK_STEP : SEEK_STEP), d > 1 ? d - 1 : from + SEEK_STEP));
     clearTimeout(pendT);
     pendT = setTimeout(() => { const t = pendSeek; pendSeek = null; if (t != null) seekTo(t); }, 250);
     try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred('light'); } catch (_) { /* */ }
