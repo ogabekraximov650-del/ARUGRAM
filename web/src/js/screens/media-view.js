@@ -185,7 +185,17 @@ function build(el, name, type) {
     slider.addEventListener('pointerup', end);
     slider.addEventListener('pointercancel', () => { dragging = false; });
     // Kodek/format qo'llanmasa jim qotib qolmasin — xato ko'rsatiladi.
-    video.addEventListener('error', () => { if (!closed) showError(video.error ? `video_error_${video.error.code}` : 'video_error'); }, { once: true });
+    video.addEventListener('error', async () => {
+      if (closed) return;
+      let info = video.error ? `video_error_${video.error.code}` : 'video_error';
+      // Aniqlash: fayl boshi (mp4 da 5-8 baytlar `ftyp` bo'lishi kerak) va hajmi.
+      try {
+        const b = await (await fetch(src)).blob();
+        const h = new Uint8Array(await b.slice(0, 12).arrayBuffer());
+        info += ` sz=${b.size} t=${b.type} hd=${[...h].map((x) => x.toString(16).padStart(2, '0')).join('')}`;
+      } catch (_) { /* */ }
+      if (!closed) showError(info);
+    }, { once: true });
     video.src = src;
     video.volume = 1;
     video.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
