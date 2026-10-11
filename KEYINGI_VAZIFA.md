@@ -5807,3 +5807,9 @@ DARHOL almashadi, ikki marta bosilsa avvalgi holat qaytarilib ±10 s qilinadi; `
 Ekran ochilgach (360 ms) pastdagi sahifalar, pastki navigatsiya va pastdagi ekranlar `visibility: hidden` bo'ladi
 (`web/src/js/router.js` `cover`) — brauzer ularni chizmaydi; yopilishdan oldin darhol qaytariladi. Tugmalarga
 `touch-action: manipulation` (bosishdagi kechikish yo'q), `.ink-wave` ga `will-change`.
+
+## Mini App: yordam chatida fayl yuklash 100% da qotib qolishi (2026-10)
+
+Sabab: `uploadFile` standart `waitForClaim: true` bilan ~50 s gacha kanalga ko'chirilishini kutardi (halqa 100% da turardi,
+xabar yuborilmasdi). Ilovadagidek (`waitForClaim: false`) kutish fonda; fayl Telegram'ga yetgach xabar darhol yuboriladi
+(`web/src/js/screens/support.js` `uploadNow`).

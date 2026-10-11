@@ -1390,7 +1390,7 @@ function buildChat(el) {
     render();
     toBottom();
     try {
-      const up = async () => tgMedia.uploadFile(file, name, { onProgress: (sent, total) => ring.set(total > 0 ? sent / total : 0) });
+      const up = async () => tgMedia.uploadFile(file, name, { waitForClaim: false, onProgress: (sent, total) => ring.set(total > 0 ? sent / total : 0) });
       let res;
       try {
         res = await up();
