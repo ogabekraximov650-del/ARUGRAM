@@ -1,5 +1,5 @@
 // Admin paneli — `lib/screens/admin_screen.dart`. Hozircha faqat "Animelarni boshqarish"
-// (`anime_management_screen.dart`, `add_anime_screen.dart`); qolgan bo'limlar keyinroq.
+// (anime -> bo'limlar -> qismlar: `admin-seasons.js`, `admin-episodes.js`); qolgan bo'limlar keyinroq.
 //
 // Server so'rovlari ilovadagi bilan BIR XIL: GET/POST /api/anime, PUT/DELETE /api/anime/:id.
 // Rasm ilovadagidek Telegram orqali yuklanadi (`anime_<vaqt>.jpg`), bazaga FAQAT fayl nomi yoziladi.
@@ -8,13 +8,8 @@ import { api, imageUrl } from '../api.js';
 import { esc } from '../format.js';
 import { push } from '../router.js';
 import { icon, appBar, bindAppBar, bindTap, ripple, toast, confirmDialog, spinner, C } from '../ui.js';
-import * as tgMedia from '../tg/media.js';
-
-const fileOf = (url) => {
-  const u = `${url ?? ''}`.trim();
-  const i = u.indexOf('/api/image/');
-  return (i < 0 ? u : u.slice(i + '/api/image/'.length)).split('?')[0];
-};
+import { fileOf, toJpeg, uploadImage } from './admin-util.js';
+import { openAdminSeasons } from './admin-seasons.js';
 
 function adminTile(id, ic, title, sub) {
   return `<div class="glass ad-tile" data-t="${id}">
@@ -60,8 +55,9 @@ function openAdminAnimes() {
       </div>`).join('');
       host.querySelectorAll('.ad-row').forEach((r) => {
         const a = list[+r.dataset.i];
-        r.querySelector('.ad-edit').addEventListener('click', () => openAnimeForm(a, load));
-        r.querySelector('.ad-del').addEventListener('click', () => remove(a));
+        r.querySelector('.ad-edit').addEventListener('click', (e) => { e.stopPropagation(); openAnimeForm(a, load); });
+        r.querySelector('.ad-del').addEventListener('click', (e) => { e.stopPropagation(); remove(a); });
+        r.addEventListener('click', () => openAdminSeasons(a));
       });
     }
 
@@ -96,24 +92,6 @@ function openAdminAnimes() {
 }
 
 // ── Anime qo'shish / tahrirlash ───────────────────────────────────
-/** Rasm: eng uzun tomoni 1600 px, JPEG 85% (ilovadagi `imageQuality: 85`). */
-function toJpeg(file) {
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    img.onload = () => {
-      const k = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
-      const c = document.createElement('canvas');
-      c.width = Math.max(1, Math.round(img.naturalWidth * k));
-      c.height = Math.max(1, Math.round(img.naturalHeight * k));
-      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-      c.toBlob((b) => { URL.revokeObjectURL(url); b ? resolve(b) : reject(new Error('rasm_xato')); }, 'image/jpeg', 0.85);
-    };
-    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('rasm_ochilmadi')); };
-    img.src = url;
-  });
-}
-
 function openAnimeForm(anime, onSaved) {
   push((el) => {
     const edit = !!anime;
@@ -163,10 +141,7 @@ function openAnimeForm(anime, onSaved) {
       save.disabled = true; save.textContent = picked ? 'Rasm yuklanmoqda…' : 'Saqlanmoqda…';
       try {
         if (picked) {
-          if (!(await tgMedia.ensureTelegram())) throw new Error("Telegram ulanmagan — rasm yuklab bo'lmaydi");
-          const name = `anime_${Date.now()}.jpg`;
-          const res = await tgMedia.uploadFile(picked, name);
-          photoName = res?.name || name;
+          photoName = await uploadImage(picked, 'anime');
           save.textContent = 'Saqlanmoqda…';
         }
         const body = {

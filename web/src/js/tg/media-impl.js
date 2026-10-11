@@ -369,9 +369,15 @@ export async function uploadFile(file, name, { waitForClaim = true, onProgress }
   const cl = await getClient();
   const keyBytes = crypto.getRandomValues(new Uint8Array(16));
   const hex = [...keyBytes].map((b) => b.toString(16).padStart(2, '0')).join('');
-  const plain = new Uint8Array(await file.arrayBuffer());
-  // CTR: shifrlash va ochish bir xil amal.
-  const sealed = await ctrApply(hex, 0, plain);
+  // CTR: shifrlash va ochish bir xil amal. 1 MB bo'laklab (katta video xotirani to'ldirmasin;
+  // bo'lak chegarasi 16 ga karrali — hisoblagich to'g'ri davom etadi). Blob brauzerda diskka o'tishi mumkin.
+  const STEP = 1024 * 1024;
+  const parts = [];
+  for (let off = 0; off < file.size; off += STEP) {
+    parts.push(await ctrApply(hex, off, new Uint8Array(await file.slice(off, off + STEP).arrayBuffer())));
+  }
+  const sealed = new Blob(parts, { type: 'application/octet-stream' });
+  parts.length = 0;
   const peer = await botPeer();
   const sent = await cl.sendMedia(peer, {
     type: 'document',
@@ -383,7 +389,7 @@ export async function uploadFile(file, name, { waitForClaim = true, onProgress }
     // Izohsiz bot e'tibor bermaydi — fayl kanalga yetmay, boshqa qurilmada (ilovada ham) buzuq ochilardi.
     caption: name,
     silent: true,
-    ...(onProgress ? { progressCallback: (a, b) => { try { onProgress(a, b || sealed.length); } catch (_) { /* */ } } } : {}),
+    ...(onProgress ? { progressCallback: (a, b) => { try { onProgress(a, b || sealed.size); } catch (_) { /* */ } } } : {}),
   });
   if (sent?.id) delivered.add(sent.id);
   keys.set(name, hex);

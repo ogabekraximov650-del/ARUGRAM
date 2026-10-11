@@ -5840,3 +5840,11 @@ Fayllar: `web/src/js/screens/admin.js`, `web/src/css/admin.css`, `profile.js` (t
 (`season_management_screen`, `add_season_screen`), foydalanuvchilar, kanallar, kodlash va h.k.
 Eslatma: worker'da `/api/anime` yozuvlari admin'ga cheklanmagan (faqat ilova/Mini App tekshiruvi bor) — `admin_only` qo'shilsa
 ilovadagi `http` chaqiruvlariga ham `Authorization` kerak bo'ladi.
+
+## Mini App admin: bo'limlar va qismlar (2026-10)
+
+`admin.js` (anime) -> `admin-seasons.js` (bo'limlar: GET /api/seasons/anime/:a, POST /api/seasons, PUT/DELETE /api/seasons/:a/:s;
+janr tugmalari, turi/holati, yosh, rasm) -> `admin-episodes.js` (qismlar: GET /api/epizods/:a/:s?all=1, POST/PUT/DELETE;
+intro oraliqlari; asl video yuklash -> /api/encode/queue; sifatlarni qo'lda yuklash va o'chirish; kodlash holati/qayta urinish).
+`admin-util.js` — umumiy yordamchilar. Videolar ilovadagidek Telegram orqali (bot chati -> kanal). `tg/media-impl.js` `uploadFile`
+endi faylni 1 MB bo'laklab shifrlab Blob yig'adi (katta video xotirani to'ldirmasin). Stillar: `css/admin.css`.
