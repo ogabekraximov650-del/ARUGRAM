@@ -111,7 +111,7 @@ function build(el, name, type) {
     loading();
     let src;
     try {
-      src = await loadMedia(name);
+      src = await loadMedia(name, { fallbackType: 'video/mp4' });
     } catch (e) {
       if (closed) return;
       if (isTgNotReady(e)) { notReady(openVideo); return; }
@@ -183,6 +183,8 @@ function build(el, name, type) {
     };
     slider.addEventListener('pointerup', end);
     slider.addEventListener('pointercancel', () => { dragging = false; });
+    // Kodek/format qo'llanmasa jim qotib qolmasin — xato ko'rsatiladi.
+    video.addEventListener('error', () => { if (!closed) showError(); }, { once: true });
     video.src = src;
     video.volume = 1;
     video.play().then(() => setPlaying(true)).catch(() => setPlaying(false));

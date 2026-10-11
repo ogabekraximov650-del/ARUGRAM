@@ -5813,3 +5813,9 @@ Ekran ochilgach (360 ms) pastdagi sahifalar, pastki navigatsiya va pastdagi ekra
 Sabab: `uploadFile` standart `waitForClaim: true` bilan ~50 s gacha kanalga ko'chirilishini kutardi (halqa 100% da turardi,
 xabar yuborilmasdi). Ilovadagidek (`waitForClaim: false`) kutish fonda; fayl Telegram'ga yetgach xabar darhol yuboriladi
 (`web/src/js/screens/support.js` `uploadNow`).
+
+## Mini App: yordam chatidagi video ochilmasligi (2026-10)
+
+`guessType` .mov/.m4v/.3gp/.mkv ni bilmasdi — Blob `application/octet-stream` bo'lib, `<video>` ochmasdi, xato ham
+ko'rsatilmasdi. Endi turlar qo'shildi, noma'lum kengaytmada `video/mp4` olinadi (`fallbackType`), `<video>` `error`
+bo'lsa "Videoni ochib bo'lmadi" + qayta urinish chiqadi (`tg/ctr.js`, `tg/media-impl.js`, `screens/media-view.js`).

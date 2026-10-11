@@ -53,7 +53,9 @@ export function guessType(name) {
   if (n.endsWith('.png')) return 'image/png';
   if (n.endsWith('.webp')) return 'image/webp';
   if (n.endsWith('.gif')) return 'image/gif';
-  if (n.endsWith('.mp4')) return 'video/mp4';
+  if (/\.(mp4|m4v|mov)$/.test(n)) return 'video/mp4';
+  if (/\.(3gp|3gpp)$/.test(n)) return 'video/3gpp';
+  if (n.endsWith('.mkv')) return 'video/x-matroska';
   if (n.endsWith('.webm')) return 'video/webm';
   if (/\.(m4a|aac)$/.test(n)) return 'audio/mp4';
   if (n.endsWith('.ogg') || n.endsWith('.oga')) return 'audio/ogg';

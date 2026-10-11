@@ -337,11 +337,12 @@ export async function prefetchNames(names) {
 }
 
 /** Kichik fayl — butunlay (rasm, ovozli xabar). */
-export async function fetchFile(name, { key = '', type = '' } = {}) {
+export async function fetchFile(name, { key = '', type = '', fallbackType = '' } = {}) {
   const f = await openFile(name, { key });
   const bytes = await f.read(0, f.size);
   f.close();
-  return new Blob([bytes], { type: type || guessType(name) });
+  const g = guessType(name);
+  return new Blob([bytes], { type: type || (g === 'application/octet-stream' && fallbackType ? fallbackType : g) });
 }
 
 export async function mediaUrl(name, opts = {}) {
