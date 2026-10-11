@@ -5904,3 +5904,12 @@ tugmalar chiqmaydi, faqat sek.
 2) Tez-tez sek qilinganda `engine.js` `pump` ning ESKIRGAN sikli `cancelled` (bekor qilingan oldindan yuklash) xatosi bilan tugab,
 `onError` ni chaqirardi -> "Videoni ochib bo'lmadi". Endi eskirgan sikl (`my !== gen`) yoki `cancelled/aborted` xatosi e'tiborsiz,
 yangi sikl davom etadi; `player-screen.js` `onError` ham `cancelled` ni o'tkazib yuboradi.
+
+## Mini App: qobiq keshi (Service Worker) va bot tugmasidan ochilganda avto-boshlash (2026-10)
+
+1) `web/src/sw.js` (`build.mjs` uni `dist/sw.js` ga versiya bilan yozadi, `index.html` ro'yxatdan o'tkazadi): HTML/JS/CSS, `chunks/`, `assets/`,
+Google Shrifti va `telegram-web-app.js` keshlanadi — keyingi ochilish tarmoqsiz darhol; yangilanish orqa fonda (stale-while-revalidate),
+ya'ni yangi versiya KEYINGI ochilishda ko'rinadi. API (worker domeni) va fayl/video keshlanmaydi. `?w=` bilan ochilgan sahifa ham bitta nusxa.
+(Eslatma: eski MP4-oqim Service Worker'i `sw.js` olib tashlangan edi — bu yangisi boshqa vazifada.)
+2) Bot tugmasidan (`?w=`) ochilganda foydalanuvchi bosishi yo'q — brauzer `video.play()` ni to'sadi, lekin ekranda "pauza" belgisi va
+aylanish qolardi. Endi to'silsa pleyer pauzada (▶) ko'rsatiladi, aylanish faqat o'ynash niyati bo'lganda (`player-screen.js`).

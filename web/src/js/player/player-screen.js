@@ -549,7 +549,7 @@ function buildPlayer(el, route, season, opts) {
       const secs = start && start > 0 ? start / 1000 : 0;
       eng = await startPlayback(video, e, q, {
         startAt: secs,
-        onState: ({ state }) => { if (my !== token) return; busy = state === 'buffering' || state === 'loading'; paintBusy(); },
+        onState: ({ state }) => { if (my !== token) return; busy = intended && (state === 'buffering' || state === 'loading'); paintBusy(); },
         shouldPlay: () => my === token && intended && !document.hidden,
         onStall: (info) => { if (my === token) maybeDowngrade(e, info); },
         onError: (er) => {
@@ -572,7 +572,13 @@ function buildPlayer(el, route, season, opts) {
         await waitEnoughBuffer(my);
         if (my !== token) return;
         busy = false; paintBusy();
-        if (intended) { try { await video.play(); } catch (_) { /* brauzer to'sdi — tugma bosiladi */ } }
+        if (intended) {
+          try { await video.play(); } catch (e) {
+            // Avto-boshlash bloklandi (bot tugmasidan ochilganda foydalanuvchi bosishi yo'q): "pauza" belgisi va
+            // aylanish chalkashtirmasin — pauzada ko'rsatiladi, ▶ bitta bosilsa boshlanadi.
+            if (my === token && video.paused) { intended = false; paintPP(); paintEps(); keepShown(); }
+          }
+        }
       }
       busy = false; paintBusy();
       video.playbackRate = rate;
