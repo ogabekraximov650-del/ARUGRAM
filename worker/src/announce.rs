@@ -74,13 +74,15 @@ fn episode_text(season: &Value, ep_number: i64) -> String {
     format!("{}-bo'lim {ep_number}-qism", jint(season, "bolim_id").max(1))
 }
 
-/// Kanal posti matni (foydalanuvchi talabi):
-///   • Anime nomi: <bo'lim nomi>
-///   • Qismi: <joylangan qism yoki film>
+/// Kanal posti matni (foydalanuvchi namunasi):
+///   • <bo'lim nomi>
+///   • <N-qism>  (film bo'lsa: Film)
 ///   • Ovoz berdi: <bo'limdagi tarjimon>
 fn caption(season: &Value, ep_number: i64) -> String {
-    let mut out = format!("\u{2022} Anime nomi: {}\n\u{2022} Qismi: {}",
-        html_escape(season["nomi"].as_str().unwrap_or("").trim()), html_escape(&episode_text(season, ep_number)));
+    let film = season["turi"].as_str().unwrap_or("").trim().eq_ignore_ascii_case("film");
+    let ep = if film { "Film".to_string() } else { format!("{ep_number}-qism") };
+    let mut out = format!("\u{2022} {}\n\u{2022} {}",
+        html_escape(season["nomi"].as_str().unwrap_or("").trim()), html_escape(&ep));
     let tarjimon = season["tarjimon"].as_str().unwrap_or("").trim();
     if !tarjimon.is_empty() {
         out.push_str(&format!("\n\u{2022} Ovoz berdi: {}", html_escape(tarjimon)));

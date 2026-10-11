@@ -5932,3 +5932,6 @@ shularni yozadi). Botdagi anime kartasida (`announce.rs`) ham ko'rinadi (davlat 
 Foydalanuvchi: "web app keshda saqlanmasin". `index.html` endi Service Worker'ni ro'yxatdan o'tkazmaydi; `web/src/sw.js` faqat avval o'rnatilgan
 eski Service Worker'ni o'chiruvchi "o'zini o'chirish" kodi: brauzer uni o'zi yangilaydi, u hamma keshni tozalaydi va ro'yxatdan chiqadi
 (keyingi ochilishda ilova har safar tarmoqdan yangi yuklanadi). Video/rasm/fayl keshi (`tg/chunk-cache.js`) o'zgarmadi.
+
+Yangilanish (e'lon posti namunasi): matn endi "• <bo'lim nomi>", "• <N-qism>" (film bo'lsa "• Film"), "• Ovoz berdi: <tarjimon>"
+(`announce.rs` `caption`). Botdagi karta (`watch_card`) "Qismi" qatori o'zgarmadi.
