@@ -229,6 +229,34 @@ def transfer_progress(kind: str):
     return cb
 
 
+async def send_doc_guard(app, channel, path, name, kind, wait_after_full=240):
+    """`send_document` + qo'riqchi: yuklash 100% ga yetgach Telegram `wait_after_full`
+    soniya ichida javob bermasa (osilib qolgan) — bekor qilinib, BIR marta qayta
+    yuboriladi. Aks holda run soatlab "100%" da turib qolardi."""
+    for attempt in (1, 2):
+        base = transfer_progress(kind)
+        full_at = [None]
+
+        def prog(cur, total, _base=base, _full=full_at):
+            _base(cur, total)
+            if total and cur >= total and _full[0] is None:
+                _full[0] = time.time()
+
+        task = asyncio.ensure_future(app.send_document(
+            channel, str(path), file_name=name, force_document=True,
+            caption=name, disable_notification=True, progress=prog))
+        while not task.done():
+            await asyncio.wait({task}, timeout=5)
+            if full_at[0] and not task.done() and time.time() - full_at[0] > wait_after_full:
+                break
+        if task.done():
+            return task.result()
+        task.cancel()
+        log(f"    {kind}: 100% dan keyin {wait_after_full} s javob yo'q — "
+            + ("qayta yuklanmoqda" if attempt == 1 else "to'xtatildi"))
+    raise RuntimeError(f"{name}: Telegram yuklashni tasdiqlamadi")
+
+
 def log(*a):
     print(time.strftime("%H:%M:%S"), *a, flush=True)
     line = time.strftime("%H:%M:%S ") + " ".join(str(x) for x in a)
@@ -849,20 +877,16 @@ async def process(app: Client, channel: int, job: dict):
                 f"— yuklanmoqda...")
             await asyncio.to_thread(hb.set, f"upload|{label}|{idx}|{len(steps)}", True)
             # Kalit kanal postiga YOZILMAYDI (xavfsizlik) — faqat worker'ga.
-            sent = await app.send_document(
-                channel, str(sealed), file_name=name, force_document=True,
-                caption=name, disable_notification=True,
-                progress=transfer_progress(f"{label} Telegram'ga yuklanmoqda"))
+            sent = await send_doc_guard(app, channel, sealed, name,
+                                        f"{label} Telegram'ga yuklanmoqda")
             sealed.unlink()
             api("quality", {**ident, "quality": label, "file": name, "size": size,
                             "key": k.hex(), "msg_id": sent.id})
             if frag is not None:
                 fpath, fk, fsize = frag
                 try:
-                    fsent = await app.send_document(
-                        channel, str(fpath), file_name=fpath.name, force_document=True,
-                        caption=fpath.name, disable_notification=True,
-                        progress=transfer_progress(f"{label} fMP4 Telegram'ga yuklanmoqda"))
+                    fsent = await send_doc_guard(app, channel, fpath, fpath.name,
+                                                 f"{label} fMP4 Telegram'ga yuklanmoqda")
                     api_fmp4("done", {"anime_id": ident.get("anime_id"), "season_id": ident.get("season_id"),
                                       "epizod_id": ident.get("epizod_id"), "quality": label, "ok": True,
                                       "file": fpath.name, "size": fsize, "key": fk.hex(),
