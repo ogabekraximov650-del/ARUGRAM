@@ -5926,3 +5926,9 @@ Ilova (`add_season_screen.dart`) va web admin (`admin-seasons.js`) "Bo'lim qo'sh
 `season_db.davlat`, `season_db.rejissyor` (migratsiya `mig_season_davlat`, `worker/src/lib.rs`: POST `/api/seasons` va PUT `/api/seasons/:a/:s`
 shularni yozadi). Botdagi anime kartasida (`announce.rs`) ham ko'rinadi (davlat bo'sh bo'lsa animedagisi). Dart tomoni muhitda
 `flutter analyze` bilan tekshirilmagan.
+
+## Mini App: qobiq keshi olib tashlandi (2026-10)
+
+Foydalanuvchi: "web app keshda saqlanmasin". `index.html` endi Service Worker'ni ro'yxatdan o'tkazmaydi; `web/src/sw.js` faqat avval o'rnatilgan
+eski Service Worker'ni o'chiruvchi "o'zini o'chirish" kodi: brauzer uni o'zi yangilaydi, u hamma keshni tozalaydi va ro'yxatdan chiqadi
+(keyingi ochilishda ilova har safar tarmoqdan yangi yuklanadi). Video/rasm/fayl keshi (`tg/chunk-cache.js`) o'zgarmadi.
