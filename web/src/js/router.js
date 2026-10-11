@@ -25,7 +25,9 @@ function cover(on) {
   clearTimeout(coverT);
   const apply = () => {
     host.querySelectorAll(':scope > .pages, :scope > .bottom-nav-wrap').forEach((n) => { n.style.visibility = on ? 'hidden' : ''; });
-    stack.slice(0, -1).forEach((r) => { r.el.style.visibility = on ? 'hidden' : ''; });
+    // Eng ustdagi ekran HAR DOIM ko'rinadi (u yopilgach pastdagisi ochiladi —
+    // aks holda u `hidden` qolib, orqada profil sahifasi ko'rinib qolardi).
+    stack.forEach((r, i) => { r.el.style.visibility = on && i < stack.length - 1 ? 'hidden' : ''; });
   };
   if (on) coverT = setTimeout(apply, 360); else apply();
 }
