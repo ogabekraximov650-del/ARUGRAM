@@ -1,0 +1,11 @@
+/* Admin paneli (`js/screens/admin.js`) */
+.ad-tile { border-radius: 18px; padding: 14px 12px 14px 16px; display: flex; align-items: center; margin-bottom: 10px; cursor: pointer; position: relative; }
+.ad-row { border-radius: 18px; padding: 10px 4px 10px 10px; display: flex; align-items: center; margin-bottom: 10px; }
+.ad-row .icon-btn { width: 40px; height: 40px; flex-shrink: 0; }
+.ad-ph { width: 64px; height: 64px; border-radius: 12px; background: rgba(255, 255, 255, 0.08); flex-shrink: 0; margin-right: 12px; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.ad-ph img { width: 100%; height: 100%; object-fit: cover; }
+.ad-row .ss-main { min-width: 0; }
+.ad-row .ss-t, .ad-row .ss-h { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ad-pick { border-radius: 18px; padding: 14px; display: flex; flex-direction: column; align-items: center; cursor: pointer; }
+.ad-pv { width: 140px; height: 200px; border-radius: 14px; background: rgba(255, 255, 255, 0.06); display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.ad-pv img { width: 100%; height: 100%; object-fit: cover; }

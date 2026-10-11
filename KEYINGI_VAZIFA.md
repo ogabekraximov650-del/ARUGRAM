@@ -5830,3 +5830,13 @@ Web `sendMedia` izohsiz yuborardi — bot e'tibor bermasdi: `tg_files` da qator 
 (`/api/tg/claim` hech qachon "tayyor" demasdi — 100% da qotib qolish ham shundan), ilovada va qayta ochilganda
 shifrlangan baytlar kalitsiz chiqib, video ochilmasdi. Tuzatish: `tg/media-impl.js` `uploadFile` — `caption: name`.
 Eski (izohsiz) yuklangan fayllar tiklanmaydi — qayta yuborish kerak.
+
+## Mini App: admin paneli (2026-10)
+
+Ilovadagi `admin_screen.dart` ning web nusxasi. Profil menyusida "Admin paneli" faqat `is_admin` bo'lgan hisobga ko'rinadi.
+Hozircha faqat "Animelarni boshqarish": ro'yxat, qo'shish, tahrirlash, o'chirish (`GET/POST /api/anime`, `PUT/DELETE /api/anime/:id` —
+ilovadagi bilan bir xil). Rasm Telegram orqali `anime_<vaqt>.jpg` nomi bilan yuklanadi, bazaga faqat nom yoziladi.
+Fayllar: `web/src/js/screens/admin.js`, `web/src/css/admin.css`, `profile.js` (tugma). Keyingi: bo'limlar/qismlar
+(`season_management_screen`, `add_season_screen`), foydalanuvchilar, kanallar, kodlash va h.k.
+Eslatma: worker'da `/api/anime` yozuvlari admin'ga cheklanmagan (faqat ilova/Mini App tekshiruvi bor) — `admin_only` qo'shilsa
+ilovadagi `http` chaqiruvlariga ham `Authorization` kerak bo'ladi.

@@ -23,6 +23,7 @@ import { C, icon, spinner, bindTap, ripple, toast } from '../ui.js';
 import { myStats, formatBytes, formatHours, STAT_KINDS, openStatDetail } from './stats.js';
 import { openProfileEdit } from './profile-edit.js';
 import { openSettings } from './settings.js';
+import { openAdmin } from './admin.js';
 import { openSessions } from './sessions.js';
 import { openStorage } from './storage.js';
 import { billing, formatLeft } from '../services/billing.js';
@@ -359,6 +360,7 @@ export function createProfile(page) {
   function menuHtml() {
     const items = [
       tile('notif', 'notifications', 'Bildirishnoma', { fill: false }),
+      currentUser()?.is_admin ? tile('admin', 'admin_panel_settings', 'Admin paneli') : '',
       tile('settings', 'settings', 'Sozlamalar'),
       isTelegramAuthorized() ? '' : tile('telegram', 'send', "Telegram'ni ulash"),
       tile('sessions', 'devices', 'Qurilmalar'),
@@ -454,6 +456,7 @@ export function createProfile(page) {
       const label = el.querySelector('.pf-tile-l').textContent;
       ripple(el, () => {
         switch (el.dataset.t) {
+          case 'admin': openAdmin(); break;
           case 'settings': openSettings(); break;
           case 'telegram': Promise.resolve(openTelegramAccount()).catch(() => {}).then(redrawMenu); break;
           case 'sessions': openSessions(); break;
