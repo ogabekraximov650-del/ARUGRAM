@@ -18,6 +18,18 @@ function syncBackButton() {
   try { if (stack.length) bb.show(); else bb.hide(); } catch (_) { /* */ }
 }
 
+// Ekran to'liq ochilgach pastdagi sahifalar/navigatsiya yashiriladi (brauzer ularni chizmaydi) —
+// shunda ekranlar silliq ishlaydi. Yopilishdan oldin darhol qaytariladi.
+let coverT = 0;
+function cover(on) {
+  clearTimeout(coverT);
+  const apply = () => {
+    host.querySelectorAll(':scope > .pages, :scope > .bottom-nav-wrap').forEach((n) => { n.style.visibility = on ? 'hidden' : ''; });
+    stack.slice(0, -1).forEach((r) => { r.el.style.visibility = on ? 'hidden' : ''; });
+  };
+  if (on) coverT = setTimeout(apply, 360); else apply();
+}
+
 function onTgBack() { back(); }
 
 export function initRouter(root) {
@@ -41,7 +53,9 @@ export function push(builder, { transition = 'slide' } = {}) {
   stack.push(route);
   try { history.pushState({ aru: stack.length }, ''); } catch (_) { /* */ }
   route.api = builder(el, route) || {};
+  cover(false);
   requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('in')));
+  cover(true);
   syncBackButton();
   return route;
 }
@@ -51,6 +65,8 @@ function remove(route, fromHistory = false) {
   if (i < 0 || route.closed) return;
   route.closed = true;
   stack.splice(i, 1);
+  cover(false);
+  if (stack.length) cover(true);
   try { route.api?.dispose?.(); } catch (_) { /* */ }
   route.el.classList.remove('in');
   route.el.classList.add('out');

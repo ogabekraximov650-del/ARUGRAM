@@ -5801,3 +5801,9 @@ tugma bosilganda yashirish taymeri to'xtatiladi, qo'yib yuborilgach qayta ishga 
 Bitta bosish 300 ms kechikib ishlardi va tez ikkinchi bosish (yashirish uchun) sek deb o'qilardi; `.pl-gest`
 da `touch-action` bo'lmagani uchun brauzer bosishni `pointercancel` qilib yuborardi. Endi: boshqaruv bosishda
 DARHOL almashadi, ikki marta bosilsa avvalgi holat qaytarilib ±10 s qilinadi; `.pl-gest { touch-action: none }`.
+
+## Mini App: silliqlik (2026-10)
+
+Ekran ochilgach (360 ms) pastdagi sahifalar, pastki navigatsiya va pastdagi ekranlar `visibility: hidden` bo'ladi
+(`web/src/js/router.js` `cover`) — brauzer ularni chizmaydi; yopilishdan oldin darhol qaytariladi. Tugmalarga
+`touch-action: manipulation` (bosishdagi kechikish yo'q), `.ink-wave` ga `will-change`.
