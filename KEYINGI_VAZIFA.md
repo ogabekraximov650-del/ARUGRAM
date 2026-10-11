@@ -5864,7 +5864,7 @@ sifat tanlanadi, bot rasm so'raydi, rasm yuborilgach video saytdan yuklanib, ras
 
 ## Mini App admin: foydalanuvchilar (2026-10)
 
-`web/src/js/screens/admin-users.js` — ilovadagi `admin_users_screen.dart` nusxasi. Uch varaq ilovadagi tartibda: "Yangi", "Onlayn",
+`web/src/js/screens/admin-users.js` — ilovadagi `admin_users_screen.dart` nusxasi. Uch varaq (foydalanuvchi talabi: suhbatlar BIRINCHI): "Suhbatlar" (ochilganda shu varaq), "Yangi", "Onlayn". Oldingi tartib:
 "Suhbatlar" (uchinchi; o'qilmagan xabar bo'lsa nishon va ochilishda shu varaqqa o'tadi). Izlash (ID yoki username), cheksiz
 ro'yxat, surish bilan varaq almashtirish. Foydalanuvchi bosilsa: balans (qo'shish/ayirish), obuna muddati (kun qo'shish/ayirish/
 bekor qilish), yozishmani ochish, profilini ko'rish, bloklash (muddat tugmalari + sabab) va blokdan chiqarish. Suhbatlar:

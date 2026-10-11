@@ -1,5 +1,5 @@
 // Admin: foydalanuvchilar — `lib/screens/admin_users_screen.dart`.
-// Uch varaq (ilovadagi tartibda): Yangi, Onlayn, Suhbatlar (uchinchi).
+// Uch varaq: Suhbatlar (birinchi), Yangi, Onlayn.
 // Server (ilovadagi bilan bir xil): GET /api/admin/users?sort=new|online&q=&page=,
 // POST /api/admin/user/:id {action: balance|sub|sub_clear|ban|unban}, GET /api/chat/threads,
 // DELETE /api/chat/thread/:id. Suhbat ichi — `support.js` (admin ko'rinishi).
@@ -14,9 +14,9 @@ import { openSupport } from './support.js';
 import { openPublicProfile } from './public-profile.js';
 
 const TABS = [
+  { id: 'chats', label: 'Suhbatlar' },
   { id: 'new', label: 'Yangi' },
   { id: 'online', label: 'Onlayn' },
-  { id: 'chats', label: 'Suhbatlar' },
 ];
 
 const nameOf = (u) => {
@@ -49,7 +49,7 @@ const errText = (e) => `${e?.body?.error || e?.message || e}`;
 
 export function openAdminUsers() {
   push((el) => {
-    let tab = 'new';
+    let tab = 'chats';
     let closed = false;
     let picked = false;
     let query = '';
@@ -364,12 +364,8 @@ export function openAdminUsers() {
     // Suhbatlarni vaqti-vaqti bilan yangilab turish (ekran ochiq va ko'rinib turganda).
     pollT = setInterval(() => { if (!document.hidden && !document.querySelector('.sup')) loadThreads({ quiet: true }); }, 8000);
 
-    // Boshlanish: o'qilmagan xabar bo'lsa — Suhbatlar, aks holda Yangi.
-    setTab('new');
-    loadThreads({ quiet: true }).then(() => {
-      if (closed || picked || tab === 'chats') return;
-      if (threads.items.some((t) => Number(t.unread) > 0)) setTab('chats');
-    });
+    // Boshlanish: Suhbatlar (birinchi varaq).
+    setTab('chats');
 
     return { dispose() { closed = true; clearInterval(pollT); clearTimeout(debounce); } };
   });
