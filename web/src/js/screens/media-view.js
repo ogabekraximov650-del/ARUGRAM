@@ -15,6 +15,7 @@
 import * as tgMedia from '../tg/media.js';
 import { push } from '../router.js';
 import { icon, spinner, bindAppBar } from '../ui.js';
+import { esc } from '../format.js';
 
 const cache = new Map(); // nom -> Promise<objectURL>
 
@@ -115,7 +116,7 @@ function build(el, name, type) {
     } catch (e) {
       if (closed) return;
       if (isTgNotReady(e)) { notReady(openVideo); return; }
-      showError();
+      showError(e);
       return;
     }
     if (closed) return;
@@ -184,18 +185,19 @@ function build(el, name, type) {
     slider.addEventListener('pointerup', end);
     slider.addEventListener('pointercancel', () => { dragging = false; });
     // Kodek/format qo'llanmasa jim qotib qolmasin — xato ko'rsatiladi.
-    video.addEventListener('error', () => { if (!closed) showError(); }, { once: true });
+    video.addEventListener('error', () => { if (!closed) showError(video.error ? `video_error_${video.error.code}` : 'video_error'); }, { once: true });
     video.src = src;
     video.volume = 1;
     video.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
     cleanup = () => { clearInterval(tick); try { video.pause(); } catch (_) { /* */ } };
   }
 
-  function showError() {
+  function showError(why) {
     cleanup();
     cleanup = () => {};
     body.innerHTML = `<div class="mv-center col">
       <div class="mv-err">Videoni ochib bo'lmadi</div>
+      <div class="mv-err" style="font-size:11px;opacity:.6;max-width:80%;word-break:break-all">${esc(`${why?.text || why?.message || why || ''}`.slice(0, 160))}</div>
       <button class="mv-retry">${icon('refresh', { size: 18 })}<span>Qayta urinish</span></button></div>`;
     body.querySelector('.mv-retry').addEventListener('click', () => openVideo());
   }

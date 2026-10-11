@@ -5819,3 +5819,6 @@ xabar yuborilmasdi). Ilovadagidek (`waitForClaim: false`) kutish fonda; fayl Tel
 `guessType` .mov/.m4v/.3gp/.mkv ni bilmasdi — Blob `application/octet-stream` bo'lib, `<video>` ochmasdi, xato ham
 ko'rsatilmasdi. Endi turlar qo'shildi, noma'lum kengaytmada `video/mp4` olinadi (`fallbackType`), `<video>` `error`
 bo'lsa "Videoni ochib bo'lmadi" + qayta urinish chiqadi (`tg/ctr.js`, `tg/media-impl.js`, `screens/media-view.js`).
+
+Qo'shimcha (video ochilmasligi): foydalanuvchi yuborgan fayl tekshirildi — H.264+AAC, moov boshida, 720x720, 1.7 MB (format yaroqli).
+Demak muammo kodek/konteynerda emas, yuklash/ochishda. Aniqlash uchun `media-view.js` xato ekranida sabab matni ko'rsatiladi.
