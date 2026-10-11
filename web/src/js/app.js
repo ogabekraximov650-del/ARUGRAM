@@ -136,6 +136,17 @@ async function main() {
   })();
   setStartup(boot);
   watchImages(app);
+  // Kanal e'lonidagi "Tomosha qilish" (`worker/src/announce.rs`): `?w=<anime>_<bo'lim>_<qism>` —
+  // aynan o'sha anime va qism ochiladi (pleyer). Bir marta: manzildan olib tashlanadi.
+  try {
+    const raw = new URLSearchParams(location.search).get('w')
+      || `${window.Telegram?.WebApp?.initDataUnsafe?.start_param || ''}`.replace(/^w/, '');
+    const m = /^(\d+)_(\d+)(?:_(\d+))?$/.exec(raw || '');
+    if (m) {
+      try { history.replaceState(history.state, '', location.pathname + location.hash); } catch (_) { /* */ }
+      setTimeout(() => openSeasonIds(m[1], m[2], m[3] || null), 0);
+    }
+  } catch (_) { /* */ }
   boot.then((ok) => { if (ok) rescanImages(); })
     .finally(() => channelGate.start());
 }

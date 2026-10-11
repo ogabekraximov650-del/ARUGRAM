@@ -5888,3 +5888,10 @@ tagida "Tomosha qilish" tugmasi (asosiy botga `/start` yuboradigan havola).
   `getFile`), AES-128-CTR bilan ochadi va e'lon kanaliga yuklaydi; `file_id` `announce_cover` da eslab qolinadi (har bo'lim uchun
   BIR marta). "Worker orqali fayl baytlari o'tmaydi" qoidasidan yagona (kichik rasm) istisno. Rasm olinmasa — post faqat matn.
 - Taxmin: film bo'limida "N ta Film" — shu bo'limdagi qismlar (filmlar) soni (`season_db.epizod_count`).
+
+Yangilanish (e'lon kanali posti va "Tomosha qilish"):
+- Post matni: "• Anime nomi: <bo'lim nomi>", "• Qismi: <N-bo'lim M-qism | Film | N ta Film>", "• Ovoz berdi: <bo'lim tarjimoni>".
+- Tugma havolasi endi aynan shu qismga: `https://t.me/<bot>?start=w<anime>_<bo'lim>_<qism>`. Asosiy bot (`announce::watch_card`) anime
+  rasmi va TAVSIFDAN boshqa hamma ma'lumot (bo'lim nomi, bo'limlar va qismlar soni, yili, janr, studiya, tarjimon, turi/holati, yosh,
+  davlat) bilan javob beradi; tagida Mini App tugmasi `https://arumediatv.pages.dev/?w=<a>_<s>_<e>` — `web/src/js/app.js` shu parametrni
+  o'qib `openSeasonIds(a, s, e)` bilan aynan o'sha qismni (pleyer) ochadi.
