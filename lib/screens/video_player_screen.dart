@@ -4200,7 +4200,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     final num_ = _epNumOf(ep);
     final views = (ep['views_total'] as num?)?.toInt() ?? 0;
     final watchMs = (ep['watch_ms_total'] as num?)?.toInt() ?? 0;
-    final added = (ep['created_at'] as num?)?.toInt() ?? 0;
+    final added = ((ep['ready_at'] as num?)?.toInt() ?? 0) > 0
+        ? (ep['ready_at'] as num).toInt()
+        : (ep['created_at'] as num?)?.toInt() ?? 0; // birinchi sifat joylangan vaqt
 
     // Karta BUTUN ENNI EGALLAMAYDI — kontent qancha bo'lsa
     // shuncha joy oladi (foydalanuvchi talabi: "eniga cho'zilgan,
@@ -4231,7 +4233,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
               _nowStat(Icons.visibility_outlined, formatCount(views)),
               _nowStat(Icons.schedule_rounded, formatHours(watchMs)),
               if (added > 0)
-                _nowStat(Icons.event_available_rounded, formatMoment(added)),
+                _nowStat(Icons.event_available_rounded, formatMomentYmd(added)),
             ],
           ),
         ),
@@ -6454,7 +6456,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                 ),
                 if (created > 0)
                   _statLine(Icons.event_available_rounded, 'Qo\'shilgan sana',
-                      formatMoment(created)),
+                      formatMomentYmd(created)),
               ],
             ),
           ),

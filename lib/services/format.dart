@@ -77,6 +77,14 @@ String formatMoment(int ms) {
       '${two(d.day)}/${two(d.month)}/${d.year}';
 }
 
+/// `2026/01/01/12:34` — yil/oy/kun/soat:daqiqa (pleyer sanalari uchun).
+String formatMomentYmd(int ms) {
+  if (ms <= 0) return '';
+  final d = DateTime.fromMillisecondsSinceEpoch(ms);
+  String two(int v) => v.toString().padLeft(2, '0');
+  return '${d.year}/${two(d.month)}/${two(d.day)}/${two(d.hour)}:${two(d.minute)}';
+}
+
 /// Reyting: `07.62` — ikki xonali butun qism, ikkita kasr.
 String formatRating(num value) {
   final v = value.toDouble().clamp(0, 10).toDouble();

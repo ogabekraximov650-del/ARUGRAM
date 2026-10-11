@@ -22,6 +22,14 @@ export function formatMoment(ms) {
   return `${two(d.getHours())}:${two(d.getMinutes())}/${two(d.getDate())}/${two(d.getMonth() + 1)}/${d.getFullYear()}`;
 }
 
+/** `2026/01/01/12:34` — yil/oy/kun/soat:daqiqa (telefon mintaqasida). Pleyer sanalari uchun. */
+export function formatMomentYmd(ms) {
+  const n = Number(ms) || 0;
+  if (n <= 0) return '';
+  const d = new Date(n);
+  return `${d.getFullYear()}/${two(d.getMonth() + 1)}/${two(d.getDate())}/${two(d.getHours())}:${two(d.getMinutes())}`;
+}
+
 /** Reyting: `07.62`. */
 export function formatRating(value) {
   const v = Math.min(10, Math.max(0, Number(value) || 0));

@@ -844,6 +844,9 @@ async fn init_db(env: &Env) -> bool {
             views_total INTEGER DEFAULT 0,
             watch_ms_total INTEGER DEFAULT 0,
             created_at INTEGER,
+            -- Birinchi sifat joylangan vaqt (qism ilovada ko'rinadigan payt).
+            -- `created_at` — qator yaratilgan (asl video joylangan) vaqt.
+            ready_at INTEGER DEFAULT 0,
             PRIMARY KEY (anime_id, season_id, epizod_id)
         )", vec![]),
 
@@ -1344,6 +1347,17 @@ async fn init_db(env: &Env) -> bool {
         config_put(env, "mig_comment_media", "1").await;
     }
     // Oxirgi qism vaqti (2026-10): mavjud bo'limlar uchun bir marta to'ldiriladi.
+    // Qism "joylangan sana" = birinchi sifat joylangan vaqt (2026-10).
+    if ok && config_get(env, "mig_ready_at").await.is_none() {
+        let _ = turso_exec(env,
+            "ALTER TABLE epizod_db ADD COLUMN ready_at INTEGER DEFAULT 0", vec![]).await;
+        let r = turso_exec(env,
+            "UPDATE epizod_db SET ready_at=COALESCE(created_at,0)
+              WHERE COALESCE(ready_at,0)=0
+                AND (COALESCE(url_360p,'')<>'' OR COALESCE(url_480p,'')<>''
+                  OR COALESCE(url_720p,'')<>'' OR COALESCE(url_1080p,'')<>'')", vec![]).await;
+        if r.is_ok() { config_put(env, "mig_ready_at", "1").await; }
+    }
     // 2-versiya: faqat kodlangan sifati bor qismlar sanaladi.
     if ok && config_get(env, "mig_last_ep_at2").await.is_none() {
         let _ = turso_exec(env,
@@ -11453,6 +11467,8 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
         if !had_any {
             stmts.push(("UPDATE season_db SET last_ep_at=? WHERE anime_id=? AND season_id=?",
                 vec![TursoArg::int(now_ms()), TursoArg::int(a), TursoArg::int(s)]));
+            stmts.push(("UPDATE epizod_db SET ready_at=? WHERE anime_id=? AND season_id=? AND epizod_id=?",
+                vec![TursoArg::int(now_ms()), TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]));
         }
         turso_batch(env, &stmts).await?;
         // Birinchi kodlangan sifat — qism endi ilovada ko'rinadi.
@@ -13633,12 +13649,14 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
             }
             for v in &ef.intros { args.push(TursoArg::text(v)); }
             args.push(TursoArg::int(now_ms()));
+            // Sifat bilan qo'shilsa — shu payt "joylangan sana" ham belgilanadi.
+            args.push(TursoArg::int(if ef.media.iter().any(|(u, _, _)| !u.trim().is_empty()) { now_ms() } else { 0 }));
             let res = turso_exec(&env,
                 "INSERT INTO epizod_db (anime_id,season_id,epizod_id,epizod_number,epizod_name,
                     url_360p,size_360p,key_360p,url_480p,size_480p,key_480p,
                     url_720p,size_720p,key_720p,url_1080p,size_1080p,key_1080p,
-                    intro_1,intro_2,intro_3,intro_4,intro_5,intro_6,intro_7,intro_8,intro_9,intro_10,created_at)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING *",
+                    intro_1,intro_2,intro_3,intro_4,intro_5,intro_6,intro_7,intro_8,intro_9,intro_10,created_at,ready_at)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING *",
                 args,
             ).await?;
             free_seasons_forget().await;
@@ -13793,6 +13811,13 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
                                  WHERE anime_id=? AND season_id=? AND epizod_id=? RETURNING *"),
                                 args,
                             ).await?;
+                            // Qismga endi birinchi sifat qo'shilgan bo'lsa — "joylangan sana" shu payt.
+                            let _ = turso_exec(&env,
+                                "UPDATE epizod_db SET ready_at=? WHERE anime_id=? AND season_id=? AND epizod_id=?
+                                    AND COALESCE(ready_at,0)=0
+                                    AND (COALESCE(url_360p,'')<>'' OR COALESCE(url_480p,'')<>''
+                                      OR COALESCE(url_720p,'')<>'' OR COALESCE(url_1080p,'')<>'')",
+                                vec![TursoArg::int(now_ms()), TursoArg::int(aid), TursoArg::int(sid), TursoArg::int(eid)]).await;
                             free_seasons_forget().await;
                             let cols = res["cols"].as_array().cloned().unwrap_or_default();
                             let rows = res["rows"].as_array().cloned().unwrap_or_default();

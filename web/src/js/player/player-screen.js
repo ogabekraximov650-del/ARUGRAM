@@ -22,7 +22,7 @@ import {
   startPlayback, releasePlayback, explainError,
 } from './source.js';
 import {
-  formatHours, formatMoment, formatRating, fileSizeLabel, fmtDur, introRangesOf,
+  formatHours, formatMomentYmd, formatRating, fileSizeLabel, fmtDur, introRangesOf,
   seasonIsFree, playerSettings,
 } from './util.js';
 
@@ -262,10 +262,10 @@ function buildPlayer(el, route, season, opts) {
   function paintNow() {
     const host = $('.pl-now');
     if (!cur) { host.innerHTML = ''; return; }
-    const views = toI(cur.views_total); const wm = toI(cur.watch_ms_total); const added = toI(cur.created_at);
+    const views = toI(cur.views_total); const wm = toI(cur.watch_ms_total); const added = toI(cur.ready_at) || toI(cur.created_at); // birinchi sifat joylangan vaqt
     const stat = (ic, t) => `<span class="s">${icon(ic, { size: 11.5, fill: false, color: 'rgba(255,255,255,0.45)' })}${esc(t)}</span>`;
     host.innerHTML = `<div class="in"><span class="a">${bolim()}-bo'lim · ${epNum(cur)}-qism</span>
-      ${stat('visibility', formatCount(views))}${stat('schedule', formatHours(wm))}${added > 0 ? stat('event_available', formatMoment(added)) : ''}</div>`;
+      ${stat('visibility', formatCount(views))}${stat('schedule', formatHours(wm))}${added > 0 ? stat('event_available', formatMomentYmd(added)) : ''}</div>`;
   }
 
   function paintNav() {
@@ -358,7 +358,7 @@ function buildPlayer(el, route, season, opts) {
         ${line('favorite', "Sevimlilarga qo'shilgan", formatCount(sNum('fav_count')))}
         ${line('star', 'Reyting', rc > 0 ? `${formatRating(info?.rating || 0)}  (${formatCount(rc)} ta baho)` : 'hali baholanmagan')}
         ${line('movie_creation', "Bo'lim", `${bolim()}-bo'lim · ${formatCount(sNum('epizod_count'))} qism`)}
-        ${created > 0 ? line('event_available', "Qo'shilgan sana", formatMoment(created)) : ''}
+        ${created > 0 ? line('event_available', "Qo'shilgan sana", formatMomentYmd(created)) : ''}
       </div>
       <div class="pl-card big">
         ${inf('Turi', sStr('turi'))}${inf('Yili', sStr('yili'))}${inf('Janri', sStr('janri'))}
