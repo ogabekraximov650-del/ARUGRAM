@@ -781,6 +781,9 @@ async fn init_db(env: &Env) -> bool {
             -- Kartochkada 18+ ko'rinishida chiqadi.
             yosh INTEGER DEFAULT 0,
             created_at INTEGER,
+            -- Oxirgi qism joylangan vaqt: ro'yxatlarda eng yangi qism
+            -- joylangan anime eng tepada turadi (foydalanuvchi talabi).
+            last_ep_at INTEGER DEFAULT 0,
             PRIMARY KEY (anime_id, season_id)
         )", vec![]),
         // Indeks yo'q: "anime bo'limlari" so'rovi PK boshidagi
@@ -1339,6 +1342,15 @@ async fn init_db(env: &Env) -> bool {
             let _ = turso_exec(env, sql, vec![]).await;
         }
         config_put(env, "mig_comment_media", "1").await;
+    }
+    // Oxirgi qism vaqti (2026-10): mavjud bo'limlar uchun bir marta to'ldiriladi.
+    if ok && config_get(env, "mig_last_ep_at").await.is_none() {
+        let _ = turso_exec(env,
+            "ALTER TABLE season_db ADD COLUMN last_ep_at INTEGER DEFAULT 0", vec![]).await;
+        let r = turso_exec(env,
+            "UPDATE season_db SET last_ep_at=COALESCE((SELECT MAX(COALESCE(e.created_at,0)) FROM epizod_db e
+               WHERE e.anime_id=season_db.anime_id AND e.season_id=season_db.season_id),0)", vec![]).await;
+        if r.is_ok() { config_put(env, "mig_last_ep_at", "1").await; }
     }
     // Avto-kodlash: qismning asl (original) videosi (2026-09).
     if ok && config_get(env, "mig_origin_video").await.is_none() {
@@ -11634,7 +11646,8 @@ async fn encbot_anime_page(env: &Env, page: i64) -> (String, Value) {
     let res = turso_exec(env,
         "SELECT a.id, a.name FROM anime_db a
           WHERE EXISTS (SELECT 1 FROM season_db s WHERE s.anime_id=a.id)
-          ORDER BY a.id DESC LIMIT ? OFFSET ?",
+          ORDER BY (SELECT MAX(s.last_ep_at) FROM season_db s WHERE s.anime_id=a.id) DESC, a.id DESC
+          LIMIT ? OFFSET ?",
         vec![TursoArg::int(ENCBOT_PAGE + 1), TursoArg::int(page * ENCBOT_PAGE)]).await;
     let rows = res.map(|r| rows_of(&r)).unwrap_or_default();
     if rows.is_empty() && page == 0 {
@@ -11895,9 +11908,10 @@ pub(crate) async fn encbot_register(env: &Env, a: i64, s: i64, n: i64, origin: &
                   VALUES (?,?,?,?,'','',0,'','',0,'','',0,'','',0,'','','','','','','','','','','',?,?,'',?,?)",
                  vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e), TursoArg::int(n),
                       TursoArg::int(now), TursoArg::text(ov_name), TursoArg::int(size), TursoArg::int(height)]),
-                ("UPDATE season_db SET epizod_count=(SELECT COUNT(*) FROM epizod_db WHERE anime_id=? AND season_id=?)
+                ("UPDATE season_db SET epizod_count=(SELECT COUNT(*) FROM epizod_db WHERE anime_id=? AND season_id=?),
+                   last_ep_at=?
                    WHERE anime_id=? AND season_id=?",
-                 vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(a), TursoArg::int(s)]),
+                 vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(now), TursoArg::int(a), TursoArg::int(s)]),
             ]).await;
             if r.is_err() {
                 return "\u{274C} Qism qo'shib bo'lmadi (baza xatosi).".into();
@@ -13472,7 +13486,7 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
 
         // ── anime_db ──────────────────────────────────────────
         (Method::Get, "/api/anime") => {
-            let res = turso_exec(&env, "SELECT * FROM anime_db ORDER BY id DESC LIMIT 100", vec![]).await?;
+            let res = turso_exec(&env, "SELECT * FROM anime_db a ORDER BY COALESCE((SELECT MAX(s.last_ep_at) FROM season_db s WHERE s.anime_id=a.id),0) DESC, a.id DESC LIMIT 100", vec![]).await?;
             let cols = res["cols"].as_array().cloned().unwrap_or_default();
             let rows = res["rows"].as_array().cloned().unwrap_or_default();
             let items = rows.iter().map(|r| row_to_obj(&cols, r.as_array().unwrap_or(&vec![]))).collect::<Vec<_>>();
@@ -13520,7 +13534,7 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
 
         // ── season_db ──────────────────────────────────────────
         (Method::Get, "/api/seasons") => {
-            let res = turso_exec(&env, "SELECT * FROM season_db ORDER BY anime_id DESC, season_id ASC LIMIT 200", vec![]).await?;
+            let res = turso_exec(&env, "SELECT * FROM season_db ORDER BY last_ep_at DESC, anime_id DESC, season_id ASC LIMIT 200", vec![]).await?;
             let cols = res["cols"].as_array().cloned().unwrap_or_default();
             let rows = res["rows"].as_array().cloned().unwrap_or_default();
             let mut items = rows.iter().map(|r| row_to_obj(&cols, r.as_array().unwrap_or(&vec![]))).collect::<Vec<_>>();
@@ -13638,10 +13652,11 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
             // Bo'limdagi qismlar soni — Ma'lumot oynasidagi
             // "N-bo'lim M-qism" shundan olinadi.
             let _ = turso_exec(&env,
-                "UPDATE season_db SET epizod_count=(SELECT COUNT(*) FROM epizod_db WHERE anime_id=? AND season_id=?)
+                "UPDATE season_db SET epizod_count=(SELECT COUNT(*) FROM epizod_db WHERE anime_id=? AND season_id=?),
+                 last_ep_at=?
                  WHERE anime_id=? AND season_id=?",
                 vec![
-                    TursoArg::text(&anime_id), TursoArg::text(&season_id),
+                    TursoArg::text(&anime_id), TursoArg::text(&season_id), TursoArg::int(now_ms()),
                     TursoArg::text(&anime_id), TursoArg::text(&season_id),
                 ]).await;
             created(hide_keys(resolve_fields(&origin, row_to_obj(&cols, rows[0].as_array().unwrap_or(&vec![])), EPIZOD_URL_KEYS)))
