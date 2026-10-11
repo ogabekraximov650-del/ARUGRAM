@@ -1411,6 +1411,13 @@ async fn init_db(env: &Env) -> bool {
         config_put(env, "mig_post_src", "1").await;
     }
 
+    // Bo'limga davlat va rejissyor (admin "Bo'lim qo'shish/tahrirlash" oynasi).
+    if ok && config_get(env, "mig_season_davlat").await.is_none() {
+        let _ = turso_exec(env, "ALTER TABLE season_db ADD COLUMN davlat TEXT DEFAULT ''", vec![]).await;
+        let _ = turso_exec(env, "ALTER TABLE season_db ADD COLUMN rejissyor TEXT DEFAULT ''", vec![]).await;
+        config_put(env, "mig_season_davlat", "1").await;
+    }
+
     ok
 }
 
@@ -3632,7 +3639,7 @@ const CONFIG_MEMO_KEYS: &[&str] = &[
     "encbot_secret", "encbot_webhook_for", "encode_log_chat",
     "mig_comment_media", "mig_origin_video", "mig_origin_key",
     "mig_encode_progress", "mig_origin_meta", "mig_chan_consent", "mig_hist_srv_at",
-    "mig_anibla_target", "mig_post_src",
+    "mig_anibla_target", "mig_post_src", "mig_season_davlat",
 ];
 const CONFIG_MEMO_MS: i64 = 10 * 60 * 1000;
 
@@ -13558,8 +13565,8 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
             let janri_text = janrs.join(", ");
 
             let res = turso_exec(&env,
-                "INSERT INTO season_db (anime_id,season_id,bolim_id,photo_url,nomi,studio,tarjimon,yili,janri,turi,holati,tavsif,yosh,created_at)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING *",
+                "INSERT INTO season_db (anime_id,season_id,bolim_id,photo_url,nomi,studio,tarjimon,yili,janri,turi,holati,tavsif,yosh,created_at,davlat,rejissyor)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING *",
                 vec![
                     TursoArg::int(anime_id), TursoArg::int(sid), TursoArg::int(bid),
                     TursoArg::text(&pu), TursoArg::text(&nomi), TursoArg::text(&studio),
@@ -13570,6 +13577,9 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
                     // bo'lim uchun amal qiladi").
                     TursoArg::int(yosh_of(&b["yosh"])),
                     TursoArg::int(now_ms()),
+                    // Davlat va rejissyor — bo'limga (admin "Bo'lim qo'shish" oynasida yozadi).
+                    TursoArg::text(b["davlat"].as_str().unwrap_or("").trim()),
+                    TursoArg::text(b["rejissyor"].as_str().unwrap_or("").trim()),
                 ],
             ).await?;
             let cols = res["cols"].as_array().cloned().unwrap_or_default();
@@ -13835,13 +13845,15 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
                             let janri = janrs.join(", ");
                             save_janrs(&env, aid, sid, &janrs).await;
                             let res = turso_exec(&env,
-                                "UPDATE season_db SET bolim_id=?,photo_url=?,nomi=?,studio=?,tarjimon=?,yili=?,janri=?,turi=?,holati=?,tavsif=?,yosh=?
+                                "UPDATE season_db SET bolim_id=?,photo_url=?,nomi=?,studio=?,tarjimon=?,yili=?,janri=?,turi=?,holati=?,tavsif=?,yosh=?,davlat=?,rejissyor=?
                                  WHERE anime_id=? AND season_id=? RETURNING *",
                                 vec![
                                     TursoArg::int(bid), TursoArg::text(&pu), TursoArg::text(&nomi),
                                     TursoArg::text(&studio), TursoArg::text(&tarjimon), TursoArg::text(&yili),
                                     TursoArg::text(&janri), TursoArg::text(&turi), TursoArg::text(&holati),
                                     TursoArg::text(&tavsif), TursoArg::int(yosh_of(&b["yosh"])),
+                                    TursoArg::text(b["davlat"].as_str().unwrap_or("").trim()),
+                                    TursoArg::text(b["rejissyor"].as_str().unwrap_or("").trim()),
                                     TursoArg::int(aid), TursoArg::int(sid),
                                 ],
                             ).await?;

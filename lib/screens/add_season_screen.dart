@@ -37,6 +37,8 @@ class _AddSeasonScreenState extends State<AddSeasonScreen> {
   final _tarjimonCtrl = TextEditingController();
   final _yiliCtrl = TextEditingController();
   final _tavsifCtrl = TextEditingController();
+  final _davlatCtrl = TextEditingController();
+  final _rejissyorCtrl = TextEditingController();
 
   // ══════════════════════════════════════════════════════════
   //  YOSH CHEGARASI
@@ -98,6 +100,8 @@ class _AddSeasonScreenState extends State<AddSeasonScreen> {
       _tarjimonCtrl.text = s['tarjimon'] ?? '';
       _yiliCtrl.text = s['yili'] ?? '';
       _tavsifCtrl.text = s['tavsif'] ?? '';
+      _davlatCtrl.text = s['davlat'] ?? '';
+      _rejissyorCtrl.text = s['rejissyor'] ?? '';
       final yosh = int.tryParse('${s['yosh'] ?? 0}') ?? 0;
       if (yosh > 0) _yoshCtrl.text = '$yosh';
       // Eski yozuvlarda janrlar vergul bilan ajratilgan matn.
@@ -120,6 +124,8 @@ class _AddSeasonScreenState extends State<AddSeasonScreen> {
     _tarjimonCtrl.dispose();
     _yiliCtrl.dispose();
     _tavsifCtrl.dispose();
+    _davlatCtrl.dispose();
+    _rejissyorCtrl.dispose();
     _yoshCtrl.dispose();
     super.dispose();
   }
@@ -221,6 +227,8 @@ class _AddSeasonScreenState extends State<AddSeasonScreen> {
         'turi': _turi,
         'holati': _holati,
         'tavsif': _tavsifCtrl.text,
+        'davlat': _davlatCtrl.text.trim(),
+        'rejissyor': _rejissyorCtrl.text.trim(),
         // Yosh chegarasi — butun bo'lim uchun.
         'yosh': int.tryParse(_yoshCtrl.text.trim()) ?? 0,
       });
@@ -381,6 +389,12 @@ class _AddSeasonScreenState extends State<AddSeasonScreen> {
                       const SizedBox(height: 12),
                       _buildTextField(
                           'Tarjimon', _tarjimonCtrl, Icons.translate_rounded),
+                      const SizedBox(height: 12),
+                      _buildTextField(
+                          'Davlat', _davlatCtrl, Icons.location_on_outlined),
+                      const SizedBox(height: 12),
+                      _buildTextField(
+                          'Rejissyor', _rejissyorCtrl, Icons.videocam_outlined),
                       const SizedBox(height: 12),
                       _buildTextField(
                           'Yili', _yiliCtrl, Icons.calendar_today_outlined,

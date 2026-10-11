@@ -5919,3 +5919,10 @@ aylanish qolardi. Endi to'silsa pleyer pauzada (▶) ko'rsatiladi, aylanish faqa
 "Brauzer ruxsati ... ishlatilgan ..." qatori va "Kesh chegarasi" bo'limi (`web/src/js/screens/storage.js`) olib tashlandi, `chunk-cache.js` dan
 `cacheLimitSetting`/`setCacheLimitSetting`/`shrinkTo` ham. Kesh doim "avtomatik": qurilmaga sig'ganicha saqlanadi (brauzer ruxsatining ~95%
 gacha), joy tugaganda eng eskisi o'chadi.
+
+## Bo'limga "Davlat" va "Rejissyor" (2026-10)
+
+Ilova (`add_season_screen.dart`) va web admin (`admin-seasons.js`) "Bo'lim qo'shish/tahrirlash" oynasiga ikkita matn maydoni qo'shildi.
+`season_db.davlat`, `season_db.rejissyor` (migratsiya `mig_season_davlat`, `worker/src/lib.rs`: POST `/api/seasons` va PUT `/api/seasons/:a/:s`
+shularni yozadi). Botdagi anime kartasida (`announce.rs`) ham ko'rinadi (davlat bo'sh bo'lsa animedagisi). Dart tomoni muhitda
+`flutter analyze` bilan tekshirilmagan.

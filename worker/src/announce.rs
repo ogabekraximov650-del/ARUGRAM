@@ -278,7 +278,9 @@ pub(crate) async fn watch_card(env: &Env, chat: i64, a: i64, s: i64, e: Option<i
     let tur = [st("turi"), st("holati")].iter().filter(|x| !x.trim().is_empty()).cloned().collect::<Vec<_>>().join(" \u{00B7} ");
     t.push_str(&line("\u{1F4FA}", "Turi", &tur));
     t.push_str(&line("\u{1F51E}", "Yosh chegarasi", &if jint(&season, "yosh") > 0 { format!("{}+", jint(&season, "yosh")) } else { String::new() }));
-    t.push_str(&line("\u{1F30D}", "Davlat", anime["davlat"].as_str().unwrap_or("")));
+    let davlat = st("davlat");
+    t.push_str(&line("\u{1F30D}", "Davlat", if davlat.trim().is_empty() { anime["davlat"].as_str().unwrap_or("") } else { &davlat }));
+    t.push_str(&line("\u{1F3AC}", "Rejissyor", &st("rejissyor")));
 
     let url = match e {
         Some(e) => format!("{}/?w={a}_{s}_{e}", tma::WEB_URL),
