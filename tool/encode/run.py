@@ -229,9 +229,9 @@ def transfer_progress(kind: str):
     return cb
 
 
-async def send_doc_guard(app, channel, path, name, kind, wait_after_full=240):
+async def send_doc_guard(app, channel, path, name, kind, wait_after_full=1500):
     """`send_document` + qo'riqchi: yuklash 100% ga yetgach Telegram `wait_after_full`
-    soniya ichida javob bermasa (osilib qolgan) — bekor qilinib, BIR marta qayta
+    soniya (25 daqiqa) ichida javob bermasa (haqiqatan osilgan; Telegram katta faylni 10 daqiqagacha tasdiqlashi mumkin) — bekor qilinib, BIR marta qayta
     yuboriladi. Aks holda run soatlab "100%" da turib qolardi."""
     for attempt in (1, 2):
         base = transfer_progress(kind)
