@@ -378,7 +378,13 @@ export async function uploadFile(file, name, { waitForClaim = true, onProgress }
     file: sealed,
     fileName: name,
     fileMime: 'application/octet-stream',
-  }, onProgress ? { progressCallback: (a, b) => { try { onProgress(a, b || sealed.length); } catch (_) { /* */ } } } : undefined);
+  }, {
+    // Izoh = fayl nomi: bot postni shu bo'yicha taniydi va kanalga ko'chiradi (`worker` -> `tg_user_media`).
+    // Izohsiz bot e'tibor bermaydi — fayl kanalga yetmay, boshqa qurilmada (ilovada ham) buzuq ochilardi.
+    caption: name,
+    silent: true,
+    ...(onProgress ? { progressCallback: (a, b) => { try { onProgress(a, b || sealed.length); } catch (_) { /* */ } } } : {}),
+  });
   if (sent?.id) delivered.add(sent.id);
   keys.set(name, hex);
   // Fayl Telegram'da — kanalga ko'chirishni bot o'zi qiladi. Ilovadagidek

@@ -5822,3 +5822,11 @@ bo'lsa "Videoni ochib bo'lmadi" + qayta urinish chiqadi (`tg/ctr.js`, `tg/media-
 
 Qo'shimcha (video ochilmasligi): foydalanuvchi yuborgan fayl tekshirildi — H.264+AAC, moov boshida, 720x720, 1.7 MB (format yaroqli).
 Demak muammo kodek/konteynerda emas, yuklash/ochishda. Aniqlash uchun `media-view.js` xato ekranida sabab matni ko'rsatiladi.
+
+## Mini App: yuklangan fayl izohi (caption) — video/fayl boshqa qurilmada buzuq ochilishi (2026-10)
+
+Sabab: bot foydalanuvchi faylini kanalga FAQAT izohi = fayl nomi bo'lsa ko'chiradi (`worker` `tg_user_media`).
+Web `sendMedia` izohsiz yuborardi — bot e'tibor bermasdi: `tg_files` da qator yo'q, kalit saqlanmasdi
+(`/api/tg/claim` hech qachon "tayyor" demasdi — 100% da qotib qolish ham shundan), ilovada va qayta ochilganda
+shifrlangan baytlar kalitsiz chiqib, video ochilmasdi. Tuzatish: `tg/media-impl.js` `uploadFile` — `caption: name`.
+Eski (izohsiz) yuklangan fayllar tiklanmaydi — qayta yuborish kerak.
