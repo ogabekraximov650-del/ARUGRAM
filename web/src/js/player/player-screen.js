@@ -401,6 +401,7 @@ function buildPlayer(el, route, season, opts) {
 
   // ── Qismlarni yuklash ─────────────────────────────────────────
   const epsKey = `aru_eps_${A}_${S}`;
+  let epsFresh = false; // ro'yxat serverdan keldimi (keshdagisi eskirgan bo'lishi mumkin)
   async function loadEpisodes() {
     try {
       const c = JSON.parse(localStorage.getItem(epsKey) || 'null');
@@ -418,6 +419,7 @@ function buildPlayer(el, route, season, opts) {
       }
     } catch (_) { /* */ }
     loadingEps = false;
+    epsFresh = true;
     if (!disposed) afterEps();
   }
 
@@ -453,6 +455,9 @@ function buildPlayer(el, route, season, opts) {
       target = list.find((e) => epId(e) === opts.startEpizodId) || null;
       if (target) at = opts.startAtMs ?? null;
     }
+    // So'ralgan qism keshdagi (eski) ro'yxatda yo'q — yangi ro'yxatni kutamiz,
+    // aks holda boshqa qism ochilib qolardi (yangi qo'shilgan qism e'lonidan kirganda).
+    if (!target && opts.startEpizodId && !epsFresh) return;
     if (!target) {
       const last = watchHistory.lastOfSeason(A, S);
       if (last) { target = list.find((e) => epId(e) === last.epizodId) || null; if (target) at = savedPosMs(target); }
