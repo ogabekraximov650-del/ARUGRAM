@@ -289,6 +289,7 @@ class _HistoryListState extends State<_HistoryList>
                                 MaterialPageRoute<void>(
                                   builder: (_) => AnimeHistoryScreen(
                                     animeId: item.animeId,
+                                    seasonId: item.seasonId,
                                     title: item.title,
                                   ),
                                 ),
@@ -2270,9 +2271,10 @@ class _ShadowText extends StatelessWidget {
 
 class AnimeHistoryScreen extends StatelessWidget {
   final int animeId;
+  final int? seasonId;
   final String title;
   const AnimeHistoryScreen(
-      {super.key, required this.animeId, required this.title});
+      {super.key, required this.animeId, this.seasonId, required this.title});
 
   @override
   Widget build(BuildContext context) {
@@ -2285,7 +2287,7 @@ class AnimeHistoryScreen extends StatelessWidget {
                 [WatchHistory.instance, OfflineLibrary.instance]),
             builder: (context, _) {
               final lib = OfflineLibrary.instance;
-              var rows = WatchHistory.instance.episodesOf(animeId);
+              var rows = WatchHistory.instance.episodesOf(animeId, seasonId);
               // Oflaynda faqat yuklab olingan qismlar (qolganlari
               // yashiriladi, xotirada esa turaveradi).
               if (lib.isOffline && lib.ready) {

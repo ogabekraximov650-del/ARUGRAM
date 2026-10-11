@@ -900,17 +900,20 @@ class WatchHistory extends ChangeNotifier {
   /// Ro'yxat allaqachon vaqt bo'yicha saralangan, shu sabab har bir
   /// animening birinchi uchragan yozuvi — eng oxirgisi.
   List<HistoryItem> get byAnime {
-    final seen = <int>{};
+    // Har bir BO'LIM alohida qatorda (bir animening ikki bo'limi aralashmaydi).
+    final seen = <String>{};
     final out = <HistoryItem>[];
     for (final it in _items) {
-      if (seen.add(it.animeId)) out.add(it);
+      if (seen.add('${it.animeId}:${it.seasonId}')) out.add(it);
     }
     return out;
   }
 
   /// Bitta animening barcha ko'rilgan qismlari (oxirgisi tepada).
-  List<HistoryItem> episodesOf(int animeId) =>
-      _items.where((e) => e.animeId == animeId).toList();
+  List<HistoryItem> episodesOf(int animeId, [int? seasonId]) => _items
+      .where((e) =>
+          e.animeId == animeId && (seasonId == null || e.seasonId == seasonId))
+      .toList();
 
   // ═══════════════════════════════════════════════════════════
   //  TO'XTAGAN JOYDAGI KADR

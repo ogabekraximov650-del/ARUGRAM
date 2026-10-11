@@ -438,14 +438,17 @@ class WatchHistory {
     const seen = new Set();
     const out = [];
     for (const it of this._items) {
-      if (!seen.has(it.animeId)) { seen.add(it.animeId); out.push(it); }
+      // Har bir BO'LIM alohida qatorda (bir animening ikki bo'limi aralashmaydi).
+      const k = `${it.animeId}:${it.seasonId}`;
+      if (!seen.has(k)) { seen.add(k); out.push(it); }
     }
     return out;
   }
 
-  episodesOf(animeId) {
+  episodesOf(animeId, seasonId = null) {
     const a = toI(animeId);
-    return this._items.filter((e) => e.animeId === a);
+    const s = seasonId == null ? null : toI(seasonId);
+    return this._items.filter((e) => e.animeId === a && (s === null || e.seasonId === s));
   }
 }
 

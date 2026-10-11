@@ -187,7 +187,7 @@ function bindEpisodeRows(root, rows) {
 
 // ── BITTA ANIMENING QISMLARI (`AnimeHistoryScreen`) ─────────────
 
-function openAnimeHistory(animeId, title) {
+function openAnimeHistory(animeId, title, seasonId = null) {
   push((el) => {
     el.innerHTML = `
       <div class="lib-ah-head">
@@ -199,7 +199,7 @@ function openAnimeHistory(animeId, title) {
     const list = el.querySelector('.lib-ah-list');
     let sig = '';
     const render = () => {
-      const rows = watchHistory.episodesOf(animeId);
+      const rows = watchHistory.episodesOf(animeId, seasonId);
       const s = rows.map((r) => `${r.animeId}:${r.seasonId}:${r.epizodId}:${r.positionMs}:${r.updatedAt}`).join('|')
         + `#${seasonsRepo.items.length}`;
       if (s === sig) return;
@@ -327,7 +327,7 @@ export function createLibrary(page) {
     histEl.innerHTML = `<div class="lib-list">${rows.map(animeRowHtml).join('')}</div>`;
     histEl.querySelectorAll('.lib-arow').forEach((el, i) => {
       const it = rows[i];
-      bindTap(el, () => openAnimeHistory(it.animeId, it.title), { scale: false });
+      bindTap(el, () => openAnimeHistory(it.animeId, it.title, it.seasonId), { scale: false });
     });
     bindPosters(histEl);
   }

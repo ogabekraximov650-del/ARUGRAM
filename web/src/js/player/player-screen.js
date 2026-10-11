@@ -753,7 +753,7 @@ function buildPlayer(el, route, season, opts) {
 
   // ── Gesturalar: bitta bosish — boshqaruv, ikki bosish — ±5 s ────
   let lastTap = 0; let lastSide = ''; let singleT = 0;
-  const TAP_GAP = 230; // ikki marta bosish oralig'i (va bitta bosishni kutish)
+  const TAP_GAP = 500; // ikki marta bosish oralig'i (va bitta bosishni kutish)
   let accL = 0; let accR = 0; const badgeT = {};
   let contUntil = 0; let contSide = ''; let pendSeek = null; let pendT = 0;
   const gest = $('.pl-gest');
