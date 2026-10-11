@@ -5895,3 +5895,12 @@ Yangilanish (e'lon kanali posti va "Tomosha qilish"):
   rasmi va TAVSIFDAN boshqa hamma ma'lumot (bo'lim nomi, bo'limlar va qismlar soni, yili, janr, studiya, tarjimon, turi/holati, yosh,
   davlat) bilan javob beradi; tagida Mini App tugmasi `https://arumediatv.pages.dev/?w=<a>_<s>_<e>` — `web/src/js/app.js` shu parametrni
   o'qib `openSeasonIds(a, s, e)` bilan aynan o'sha qismni (pleyer) ochadi.
+
+## Mini App pleyeri: ikki marta bosib sek va ko'p sek xatosi (2026-10)
+
+1) Bitta bosish boshqaruvni DARHOL almashtirardi, ikki marta bosilsa qaytarilardi — sekdan oldin tugmalar "chaqnab" chiqardi va tez
+bosishlar chalkashardi. Endi bitta bosish 230 ms kutadi (`TAP_GAP`), ikkinchi bosish kelsa kutilayotgan almashtirish bekor qilinadi:
+tugmalar chiqmaydi, faqat sek.
+2) Tez-tez sek qilinganda `engine.js` `pump` ning ESKIRGAN sikli `cancelled` (bekor qilingan oldindan yuklash) xatosi bilan tugab,
+`onError` ni chaqirardi -> "Videoni ochib bo'lmadi". Endi eskirgan sikl (`my !== gen`) yoki `cancelled/aborted` xatosi e'tiborsiz,
+yangi sikl davom etadi; `player-screen.js` `onError` ham `cancelled` ni o'tkazib yuboradi.

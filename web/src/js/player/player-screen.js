@@ -554,6 +554,7 @@ function buildPlayer(el, route, season, opts) {
         onStall: (info) => { if (my === token) maybeDowngrade(e, info); },
         onError: (er) => {
           if (my !== token) return;
+          if (/^cancelled$/i.test(`${er?.message || er}`)) return; // sek tufayli bekor qilingan so'rov — xato emas
           // Media/append yoki tarmoq xatosi — pleyerni joriy joydan o'zi qayta ishga tushiradi (3 martagacha).
           if (autoRetry < 3 && /appendBuffer|append_error|MEDIA_ERR|HTMLMediaElement|chunk_timeout|download_failed|timeout|network|connect|fetch|socket/i.test(`${er?.message || er?.text || er}`)) {
             autoRetry += 1;
@@ -740,7 +741,8 @@ function buildPlayer(el, route, season, opts) {
   track.addEventListener('pointercancel', endDrag);
 
   // ── Gesturalar: bitta bosish — boshqaruv, ikki bosish — ±5 s ────
-  let lastTap = 0; let lastSide = ''; let singleT = 0; let prevCtl = null;
+  let lastTap = 0; let lastSide = ''; let singleT = 0;
+  const TAP_GAP = 230; // ikki marta bosish oralig'i (va bitta bosishni kutish)
   let accL = 0; let accR = 0; const badgeT = {};
   let contUntil = 0; let contSide = ''; let pendSeek = null; let pendT = 0;
   const gest = $('.pl-gest');
@@ -756,19 +758,21 @@ function buildPlayer(el, route, season, opts) {
     const side = (isRot() ? e.clientY - r.top < r.height / 2 : e.clientX - r.left < r.width / 2) ? 'l' : 'r';
     const now = Date.now();
     // Ikki marta bosib sek boshlangach, tez-tez bosishlar sekni davom ettiradi (boshqaruv chiqmaydi).
-    if (now < contUntil && side === contSide) { prevCtl = null; lastTap = now; lastSide = side; doubleSeek(side); return; }
-    if (lastSide === side && now - lastTap < 300) {
-      // Ikkinchi bosish: birinchi bosish boshqaruvni almashtirgan edi — avvalgi holatga qaytaramiz.
-      lastTap = now;
-      if (prevCtl != null) { showCtl = prevCtl; prevCtl = null; paintShow(); if (showCtl) scheduleHide(); else clearTimeout(hideT); }
+    if (now < contUntil && side === contSide) { clearTimeout(singleT); lastTap = now; lastSide = side; doubleSeek(side); return; }
+    if (lastSide === side && now - lastTap < TAP_GAP) {
+      // Ikkinchi bosish: kutilayotgan "boshqaruvni almashtirish" bekor qilinadi — pleyer tugmalari
+      // umuman chiqmaydi, faqat sek bo'ladi.
+      clearTimeout(singleT); lastTap = now;
       doubleSeek(side);
     } else {
-      // Bitta bosish: boshqaruv DARHOL almashadi (kechikishsiz).
       lastTap = now; lastSide = side;
-      if (errShown) return;
-      prevCtl = showCtl;
-      showCtl = !showCtl; paintShow();
-      if (showCtl) scheduleHide(); else clearTimeout(hideT);
+      clearTimeout(singleT);
+      singleT = setTimeout(() => {
+        lastTap = 0;
+        if (errShown) return;
+        showCtl = !showCtl; paintShow();
+        if (showCtl) scheduleHide(); else clearTimeout(hideT);
+      }, TAP_GAP);
     }
   });
 

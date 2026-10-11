@@ -275,7 +275,10 @@ export function createEngine(video, { name, key = '', ahead: aheadOpt = 60, behi
         try { ms.endOfStream(); } catch (_) { /* */ }
       }
     } catch (e) {
-      if (!destroyed) onError(e);
+      // Sek tufayli eskirgan sikl (`my !== gen`) yoki bekor qilingan so'rov — xato emas: yangi sikl davom etadi.
+      // (Tez-tez sek qilinganda shu xato "Videoni ochib bo'lmadi" chiqarardi.)
+      const stale = my !== gen || /^cancelled$|aborted/i.test(`${e?.message || e}`);
+      if (!destroyed && !stale) onError(e);
     } finally {
       pumping = false;
       // Surishdan keyin eski sikl tugadi — yangi joydan davom etamiz.
