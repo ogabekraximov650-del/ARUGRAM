@@ -5848,3 +5848,16 @@ janr tugmalari, turi/holati, yosh, rasm) -> `admin-episodes.js` (qismlar: GET /a
 intro oraliqlari; asl video yuklash -> /api/encode/queue; sifatlarni qo'lda yuklash va o'chirish; kodlash holati/qayta urinish).
 `admin-util.js` — umumiy yordamchilar. Videolar ilovadagidek Telegram orqali (bot chati -> kanal). `tg/media-impl.js` `uploadFile`
 endi faylni 1 MB bo'laklab shifrlab Blob yig'adi (katta video xotirani to'ldirmasin). Stillar: `css/admin.css`.
+
+## Post kodlash: "Anibla'dan post" (2026-10)
+
+TALAB (foydalanuvchi): anibladan yuklab olib keyin post kodlashga yuborish o'rniga — bot ichida anibla orqali anime, qism va
+sifat tanlanadi, bot rasm so'raydi, rasm yuborilgach video saytdan yuklanib, rasm va logotip bilan H.265 da kodlanadi.
+- Post kodlash menyusida "🎞 Anibla'dan post" (`postbot::BTN_ANIBLA`) -> `anibla::menu_for_post` (`app_config.anibla_post='1'`;
+  sifat foydalanuvchi tomonidan tanlanadi). Sifat bosilganda `anibla::start` navbatga QO'YMAYDI: `postbot::anibla_pending` post
+  nomini ("Anime · fasl · qism") va manbani (`post_draft.anibla` — `resolve_origin` formatidagi JSON) eslab, rasm so'raydi.
+- Rasm kelganda (izohi nom bo'lishi mumkin) `post_jobs` ga yozuv: `video_msg=0`, `src=<JSON>` (yangi ustun, migratsiya
+  `mig_post_src`). Video yuborilsa anibla manbasi bekor bo'ladi.
+- `/api/post/claim` har safar `origin_url` (yangi HLS manzil, `anibla::resolve_origin`) va `origin_label` beradi;
+  `tool/post/post.py` video kanal posti o'rniga `tool/anibla/download.py` bilan saytdan yuklaydi (`anibla_download`), keyin odatdagi
+  `encode.sh` (3 s rasm, logotip, H.265) va yuborish. Navbat ro'yxati, tahrirlash, o'chirish, qayta urinish o'zgarmadi.

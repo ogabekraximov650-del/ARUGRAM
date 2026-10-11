@@ -6,7 +6,8 @@ ALOHIDA workflow (`avtoencode` repoda `.github/workflows/post.yml`, shablon —
 tushiradi. Avto-kodlash (H.265, ilova qismlari) bilan bog'liq emas.
 
 Run navbat bo'shaguncha postlarni KETMA-KET ishlaydi. Bitta post:
-  1. rasm va video yopiq kanaldan yuklab olinadi (bot ko'chirgan postlar);
+  1. rasm va video yopiq kanaldan yuklab olinadi (bot ko'chirgan postlar); "Anibla'dan post"
+     bo'lsa video saytdan (HLS) yuklanadi (`origin_url`, `tool/anibla/download.py`);
   2. `encode.sh` — `anime` repodagi "Encode (H265)" bilan bir xil (H.265,
      boshida 3 soniya rasm, burchakda logotip);
   3. tayyor video `<ID>_logo.png` fayl nomidagi ID'ga Telegram'da
@@ -185,6 +186,19 @@ def run_encode(args, log, live=None):
     return p.wait()
 
 
+def anibla_download(url: str, dst: Path):
+    """anibla.uz HLS -> mp4: `tool/anibla/download.py` dagi parallel yuklovchi
+    (avtoencode reposida ham shu yo'lda turadi; `tool/encode/run.py` ham shuni ishlatadi)."""
+    sys.path.insert(0, str(HERE.parent / "anibla"))
+    import download as anibla  # noqa: E402
+
+    class _Live:  # holat xabari yo'q: yuklovchi o'zi har 10 s log yozadi
+        def __getattr__(self, _):
+            return lambda *a, **k: ""
+
+    anibla.download(url, dst, _Live())
+
+
 async def process(app, r, runner, log):
     channel = int(r["channel"])
     job = r["job"]
@@ -198,22 +212,36 @@ async def process(app, r, runner, log):
         log(f"\U0001F3AC Post #{pid}: {name.splitlines()[0] if name else ''} "
             f"(urinish {job.get('attempt')}) -> {uid}")
 
+        origin_url = (r.get("origin_url") or "").strip()
         pm = await app.get_messages(channel, int(job["photo_msg"]))
-        vm = await app.get_messages(channel, int(job["video_msg"]))
         if not pm or pm.empty or not (pm.photo or pm.document):
             raise Fatal("rasm kanalda topilmadi")
-        if not vm or vm.empty or not (vm.video or vm.document):
-            raise Fatal("video kanalda topilmadi")
+        vm = None
+        if not origin_url:
+            if int(job.get("video_msg") or 0) <= 0:
+                raise Fatal("video manbasi yo'q (anibla manzili ham, kanal posti ham)")
+            vm = await app.get_messages(channel, int(job["video_msg"]))
+            if not vm or vm.empty or not (vm.video or vm.document):
+                raise Fatal("video kanalda topilmadi")
 
         live.send("\u2B07\uFE0F Rasm va video yuklab olinmoqda...", force=True)
         raw = await app.download_media(pm, file_name=str(WORK / "cover.raw"))
         if not raw or Path(raw).stat().st_size == 0:
             raise RuntimeError("rasm yuklab olinmadi")
-        log("  video yuklab olinmoqda...")
-        src = await app.download_media(vm, file_name=str(WORK / "source.video"),
-                                       progress=live.transfer("\u2B07\uFE0F Video yuklab olinmoqda"))
-        if not src or Path(src).stat().st_size == 0:
-            raise RuntimeError("video yuklab olinmadi")
+        if origin_url:
+            # "Anibla'dan post": video Telegram'da emas — saytdan (HLS) to'g'ridan-to'g'ri yuklanadi.
+            log(f"  video anibla.uz dan yuklab olinmoqda: {r.get('origin_label') or ''}")
+            live.send("\u2B07\uFE0F Video anibla.uz dan yuklab olinmoqda...", force=True)
+            src = WORK / "source.mp4"
+            await asyncio.to_thread(anibla_download, origin_url, src)
+            if not src.exists() or src.stat().st_size == 0:
+                raise RuntimeError("anibla.uz dan yuklab bo'lmadi")
+        else:
+            log("  video yuklab olinmoqda...")
+            src = await app.download_media(vm, file_name=str(WORK / "source.video"),
+                                           progress=live.transfer("\u2B07\uFE0F Video yuklab olinmoqda"))
+            if not src or Path(src).stat().st_size == 0:
+                raise RuntimeError("video yuklab olinmadi")
         src_mb = Path(src).stat().st_size / 1048576
         sw, sh = ffprobe(src, "width", "v:0"), ffprobe(src, "height", "v:0")
         sd = ffprobe(src, "duration")

@@ -355,6 +355,7 @@ async fn app_target(env: &Env) -> Option<(String, String)> {
 }
 
 pub(crate) async fn menu_for_app(env: &Env, chat: i64, target: &str, label: &str) {
+    config_put(env, "anibla_post", "").await;
     config_put(env, "anibla_target", target).await;
     config_put(env, "anibla_target_label", label).await;
     config_put(env, "encbot_mode", "anibla").await;
@@ -390,8 +391,28 @@ async fn home_panel(env: &Env) -> Value {
     panel(rows, false)
 }
 
+/// "Post kodlash -> Anibla'dan post": anime/qism/sifat tanlanadi (sifatni o'zingiz tanlaysiz), keyin
+/// bot rasm so'raydi (`postbot::anibla_pending`) va video saytdan yuklanib kodlanadi.
+pub(crate) async fn menu_for_post(env: &Env, chat: i64) {
+    config_put(env, "anibla_target", "").await;
+    config_put(env, "anibla_post", "1").await;
+    config_put(env, "post_edit", "").await;
+    config_put(env, "encbot_mode", "anibla").await;
+    let warn = if creds(env).is_none() {
+        "\n\n\u{26A0}\u{FE0F} anibla.uz login/paroli sozlanmagan (<code>tool/anibla/creds.enc</code>)."
+    } else { "" };
+    let panel = home_panel(env).await;
+    encbot_send(env, chat, &format!(
+        "\u{1F3AC} <b>Post kodlash \u{2014} Anibla'dan</b>\n\n\
+         \u{1F4C2} Pastdagi bo'limlardan tanlang yoki anime nomini yozing. Anime \u{2192} fasl \u{2192} qism \u{2192} <b>sifat</b>. \
+         Keyin bot rasm so'raydi; video saytdan yuklanib, rasm va logotip bilan H.265 da kodlanadi.\n\
+         \u{21A9}\u{FE0F} Chiqish: \u{00AB}Bosh menyu\u{00BB}.{warn}"),
+        Some(panel)).await;
+}
+
 pub(crate) async fn menu(env: &Env, chat: i64) {
-    // Oddiy "Anibla yuklash" — video bot chatiga keladi (ilovaga emas).
+    // Oddiy "Anibla yuklash" — video bot chatiga keladi (ilovaga emas, postga emas).
+    config_put(env, "anibla_post", "").await;
     if app_target(env).await.is_some() {
         config_put(env, "anibla_target", "").await;
     }
@@ -1417,6 +1438,26 @@ async fn start(env: &Env, chat: i64, status: i64, it: &Item, ep: Option<(&str, &
     let fname: String = caption.lines().take(2).collect::<Vec<_>>().join(" ")
         .chars().filter(|c| !"\\/:*?\"<>|".contains(*c)).take(90).collect();
     let fname = format!("{} {}", fname.trim(), quality_name(v.height));
+
+    // "Post kodlash -> Anibla'dan post": navbatga qo'yilmaydi — nom va manba eslab qolinadi, bot rasm so'raydi.
+    if config_get(env, "anibla_post").await.as_deref() == Some("1") {
+        let src = json!({
+            "t": it.t, "s": it.s, "m": it.m,
+            "ss": ep.as_ref().map(|(ss, _, _)| ss.to_string()).unwrap_or_default(),
+            "e": ep.as_ref().map(|(_, e, _)| e.slug.clone()).unwrap_or_default(),
+            "n": ep.as_ref().map(|(_, e, _)| e.num).unwrap_or(0),
+            "l": ep.as_ref().map(|(_, _, l)| l.clone()).unwrap_or_default(),
+            "h": v.height, "u": v.job_url(),
+        });
+        let name = match &ep {
+            Some((_, _, l)) => format!("{} \u{00B7} {l}", it.t),
+            None => it.t.clone(),
+        };
+        let _ = encbot_api(env, "editMessageText", edit(format!(
+            "\u{2705} Tanlandi: {}", html_escape(&format!("{name} \u{00B7} {}", quality_name(v.height)))))).await;
+        super::postbot::anibla_pending(env, chat, &src.to_string(), &name).await;
+        return;
+    }
 
     // "Ilova uchun -> Anibla orqali": Telegram'ga YUKLANMAYDI (2 GB chegarasi).
     // Qism darhol yaratiladi va kodlash navbatiga `anibla:<manzil>` bilan tushadi —

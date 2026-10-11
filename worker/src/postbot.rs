@@ -55,6 +55,9 @@ pub(crate) const BTN_APP: &str = "\u{1F4F1} Ilova uchun";
 pub(crate) const BTN_POST: &str = "\u{1F3AC} Post kodlash";
 pub(crate) const BTN_HOME: &str = "\u{1F3E0} Bosh menyu";
 const BTN_QUEUE: &str = "\u{1F4CB} Navbatdagi postlar";
+/// "Anibla'dan post": anime, qism va sifat anibla.uz dan tanlanadi, bot rasm so'raydi,
+/// video saytdan to'g'ridan-to'g'ri yuklab olinib kodlanadi (`anibla.rs`, `tool/post/post.py`).
+pub(crate) const BTN_ANIBLA: &str = "\u{1F39E} Anibla'dan post";
 
 const POST_WORKFLOW: &str = "post.yml";
 
@@ -109,6 +112,7 @@ pub(crate) async fn kick(env: &Env) -> String {
 
 pub(crate) async fn main_menu(env: &Env, chat: i64) {
     config_put(env, "post_edit", "").await;
+    config_put(env, "anibla_post", "").await;
     encbot_send(env, chat,
         "\u{1F3E0} <b>Bosh menyu</b>\n\n\
          \u{1F4F1} <b>Ilova uchun</b> \u{2014} ilovadagi anime bo'limiga qism qo'shish.\n\
@@ -125,6 +129,7 @@ pub(crate) async fn main_menu(env: &Env, chat: i64) {
 
 fn post_keyboard() -> Value {
     encbot_keyboard(vec![
+        vec![BTN_ANIBLA.to_string()],
         vec![BTN_QUEUE.to_string(), ENCBOT_BTN_STATUS.to_string()],
         vec![BTN_HOME.to_string()],
     ])
@@ -152,15 +157,32 @@ pub(crate) async fn status(env: &Env, chat: i64) {
 pub(crate) async fn post_menu(env: &Env, chat: i64) {
     config_put(env, "encbot_mode", "post").await;
     config_put(env, "post_edit", "").await;
+    config_put(env, "anibla_post", "").await;
     let n = turso_exec(env, "SELECT COUNT(*) AS n FROM post_jobs", vec![]).await
         .ok().and_then(|r| first_row(&r)).map(|r| jint(&r, "n")).unwrap_or(0);
     encbot_send(env, chat, &format!(
         "\u{1F3AC} <b>Post kodlash</b>\n\n\
          Rasm va videoni yuboring, izohiga (caption) post nomini yozing.\n\
-         Bittasiga yozsangiz ham bo'ladi, albom qilib yuborsangiz ham bo'ladi.\n\n\
+         Bittasiga yozsangiz ham bo'ladi, albom qilib yuborsangiz ham bo'ladi.\n\
+         \u{1F39E} Videoni anibla.uz dan olmoqchi bo'lsangiz \u{00AB}Anibla'dan post\u{00BB} ni bosing: \
+         anime, qism va sifatni tanlaysiz, bot rasm so'raydi.\n\n\
          Video H.265 bilan kodlanadi (boshida rasm, burchakda logotip) va \
          tagida shu nom bilan yuboriladi.\n\n\u{1F4CB} Navbatda: {n} ta post."),
         Some(post_keyboard())).await;
+}
+
+/// Anibla'dan anime, qism va sifat tanlandi (`anibla::start`): post nomi va manba eslab qolinadi,
+/// bot rasm so'raydi. Keyingi xabarlar post bo'limiga ketadi.
+pub(crate) async fn anibla_pending(env: &Env, chat: i64, src: &str, name: &str) {
+    config_put(env, "anibla_post", "").await;
+    config_put(env, "encbot_mode", "post").await;
+    config_put(env, "post_edit", "").await;
+    let d = Draft { name: clip_name(name), photo: 0, video: 0, size: 0, anibla: src.to_string() };
+    draft_put(env, &d).await;
+    encbot_send(env, chat, &format!(
+        "\u{1F39E} <b>{}</b>\n\nVideo anibla.uz dan olinadi. Endi post <b>rasmini</b> yuboring \u{1F5BC}\n\
+         Rasm izohiga yozsangiz, post nomi shu bo'ladi (aks holda yuqoridagi nom). Bekor qilish: {BTN_HOME}",
+        html_escape(&short(name))), Some(post_keyboard())).await;
 }
 
 // ── Bot: xabarlar ────────────────────────────────────────────
@@ -176,6 +198,9 @@ struct Draft {
     video: i64,
     #[serde(default)]
     size: i64,
+    /// "Anibla'dan post": saytdagi video (JSON, `anibla::resolve_origin` formati). Bo'lsa video xabari kerak emas.
+    #[serde(default)]
+    anibla: String,
 }
 
 async fn draft_get(env: &Env) -> Draft {
@@ -288,7 +313,7 @@ pub(crate) async fn on_message(env: &Env, msg: &Value, chat: i64) -> bool {
             },
             "v" if video.is_some() => match to_channel(env, chat, msg_id, &format!("post_video_{id}")).await {
                 Ok(m) => {
-                    let r = turso_exec(env, "UPDATE post_jobs SET video_msg=?, video_size=? WHERE id=?",
+                    let r = turso_exec(env, "UPDATE post_jobs SET video_msg=?, video_size=?, src='' WHERE id=?",
                         vec![TursoArg::int(m), TursoArg::int(video.unwrap_or(0)), TursoArg::int(id)]).await;
                     if r.is_ok() { channel_delete(env, jint(&job, "video_msg")).await; }
                     r.map(|_| ()).map_err(|e| e.to_string())
@@ -330,12 +355,13 @@ pub(crate) async fn on_message(env: &Env, msg: &Value, chat: i64) -> bool {
     if let Some(size) = video {
         d.video = msg_id;
         d.size = size;
+        d.anibla.clear(); // video yuborilsa anibla manbasi kerak emas
     }
     if label.is_empty() && !photo && video.is_none() {
         encbot_send(env, chat, "Rasm, video yoki post nomini yuboring.", Some(post_keyboard())).await;
         return true;
     }
-    if d.name.is_empty() || d.photo == 0 || d.video == 0 {
+    if d.name.is_empty() || d.photo == 0 || (d.video == 0 && d.anibla.is_empty()) {
         draft_put(env, &d).await;
         // Albomning birinchi qismi — qolgani hozir keladi, ortiqcha xabar yo'q.
         if msg["media_group_id"].is_string() && !(d.photo == 0 && d.video == 0) {
@@ -344,7 +370,7 @@ pub(crate) async fn on_message(env: &Env, msg: &Value, chat: i64) -> bool {
         let mut need = Vec::new();
         if d.name.is_empty() { need.push("\u{270F}\u{FE0F} post nomi (matn yoki izoh)"); }
         if d.photo == 0 { need.push("\u{1F5BC} rasm"); }
-        if d.video == 0 { need.push("\u{1F3AC} video"); }
+        if d.video == 0 && d.anibla.is_empty() { need.push("\u{1F3AC} video"); }
         let have = if d.name.is_empty() { String::new() } else {
             format!("\u{270F}\u{FE0F} Nom: <b>{}</b>\n", html_escape(&short(&d.name)))
         };
@@ -373,21 +399,25 @@ pub(crate) async fn on_message(env: &Env, msg: &Value, chat: i64) -> bool {
             return true;
         }
     };
-    let video_ch = match to_channel(env, chat, d.video, &format!("post_video_{now}")).await {
-        Ok(m) => m,
-        Err(e) => {
-            channel_delete(env, photo_ch).await;
-            d.video = 0;
-            draft_put(env, &d).await;
-            encbot_send(env, chat, &format!("\u{274C} Videoni kanalga ko'chirib bo'lmadi: <code>{}</code>\nVideoni qayta yuboring.",
-                html_escape(&e)), Some(post_keyboard())).await;
-            return true;
+    let video_ch = if !d.anibla.is_empty() {
+        0 // video saytdan yuklanadi — kanalga ko'chadigan xabar yo'q
+    } else {
+        match to_channel(env, chat, d.video, &format!("post_video_{now}")).await {
+            Ok(m) => m,
+            Err(e) => {
+                channel_delete(env, photo_ch).await;
+                d.video = 0;
+                draft_put(env, &d).await;
+                encbot_send(env, chat, &format!("\u{274C} Videoni kanalga ko'chirib bo'lmadi: <code>{}</code>\nVideoni qayta yuboring.",
+                    html_escape(&e)), Some(post_keyboard())).await;
+                return true;
+            }
         }
     };
     let ins = turso_exec(env,
-        "INSERT INTO post_jobs (name, photo_msg, video_msg, video_size, queued_at) VALUES (?,?,?,?,?) RETURNING id",
+        "INSERT INTO post_jobs (name, photo_msg, video_msg, video_size, queued_at, src) VALUES (?,?,?,?,?,?) RETURNING id",
         vec![TursoArg::text(&d.name), TursoArg::int(photo_ch), TursoArg::int(video_ch),
-             TursoArg::int(d.size.max(0)), TursoArg::int(now)]).await;
+             TursoArg::int(d.size.max(0)), TursoArg::int(now), TursoArg::text(&d.anibla)]).await;
     let Some(id) = ins.ok().and_then(|r| first_row(&r)).map(|r| jint(&r, "id")) else {
         channel_delete(env, photo_ch).await;
         channel_delete(env, video_ch).await;
@@ -399,8 +429,10 @@ pub(crate) async fn on_message(env: &Env, msg: &Value, chat: i64) -> bool {
         .ok().and_then(|r| first_row(&r)).map(|r| jint(&r, "n")).unwrap_or(1);
     let kick = kick(env).await;
     encbot_send(env, chat, &format!(
-        "\u{2705} Navbatga qo'yildi: <b>#{id} {}</b>\n\u{1F4E6} Video: {:.1} MB\n\u{1F4CB} Navbatdagi postlar: {n} ta\n\n{kick}",
-        html_escape(&short(&d.name)), d.size as f64 / 1048576.0), Some(post_keyboard())).await;
+        "\u{2705} Navbatga qo'yildi: <b>#{id} {}</b>\n{}\n\u{1F4CB} Navbatdagi postlar: {n} ta\n\n{kick}",
+        html_escape(&short(&d.name)),
+        if d.anibla.is_empty() { format!("\u{1F4E6} Video: {:.1} MB", d.size as f64 / 1048576.0) }
+        else { "\u{1F39E} Video anibla.uz dan yuklab olinadi".to_string() }), Some(post_keyboard())).await;
     true
 }
 
@@ -450,6 +482,18 @@ pub(crate) fn button_id(text: &str) -> Option<i64> {
     rest.trim().strip_prefix('#')?.split_whitespace().next()?.parse().ok()
 }
 
+/// Anibla manbasining qisqa tavsifi: "Anime nomi · 2-fasl · 5-qism · 1080p".
+fn anibla_label(src: &str) -> String {
+    let Ok(j) = serde_json::from_str::<Value>(src) else { return String::new() };
+    let mut out = j["t"].as_str().unwrap_or("").to_string();
+    if let Some(l) = j["l"].as_str().filter(|l| !l.is_empty()) {
+        out.push_str(&format!(" \u{00B7} {l}"));
+    }
+    let h = jint(&j, "h");
+    if h > 0 { out.push_str(&format!(" \u{00B7} {h}p")); }
+    out
+}
+
 /// Post: rasm, video va tagida inline tugmalar.
 pub(crate) async fn show(env: &Env, chat: i64, id: i64) {
     let Some(job) = job_get(env, id).await else {
@@ -483,6 +527,13 @@ pub(crate) async fn show(env: &Env, chat: i64, id: i64) {
         kb.push(vec![json!({"text": "\u{1F5D1} O'chirish", "callback_data": format!("pd:{id}")})]);
     }
     let caption: String = format!("{name}\n\n#{id} \u{00B7} {state}").chars().take(1020).collect();
+    // Anibla'dan: video kanalda emas, saytdan olinadi — rasm ustida matn va tugmalar.
+    if jint(&job, "video_msg") <= 0 {
+        let label = anibla_label(job["src"].as_str().unwrap_or(""));
+        encbot_send(env, chat, &format!("{}\n\n\u{1F39E} Video: anibla.uz \u{2014} {}",
+            html_escape(&caption), html_escape(&label)), Some(json!({"inline_keyboard": kb}))).await;
+        return;
+    }
     let r = encbot_api(env, "copyMessage", json!({
         "chat_id": chat, "from_chat_id": channel, "message_id": jint(&job, "video_msg"),
         "caption": caption, "reply_markup": {"inline_keyboard": kb},
@@ -626,7 +677,12 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
                 "text": format!("{head}\n\n\u{23F3} boshlanmoqda..."),
             })).await.ok().and_then(|v| v["message_id"].as_i64()).unwrap_or(0);
             livewatch::claim(env, livewatch::POST, ADMIN_TELEGRAM_ID, status_msg).await;
-            return ok(json!({"channel": channel, "status_msg": status_msg, "job": {
+            // "Anibla'dan post": HLS manzil HAR claim'da yangidan olinadi (eskirmaydi).
+            let src = job["src"].as_str().unwrap_or("").to_string();
+            let (origin_url, origin_label) = if src.is_empty() { (String::new(), String::new()) }
+                else { super::anibla::resolve_origin(env, &src).await };
+            return ok(json!({"channel": channel, "status_msg": status_msg,
+                "origin_url": origin_url, "origin_label": origin_label, "job": {
                 "id": id, "name": name, "photo_msg": jint(&job, "photo_msg"),
                 "video_msg": jint(&job, "video_msg"), "attempt": jint(&got, "attempts"),
             }}));

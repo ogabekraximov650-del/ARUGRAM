@@ -1400,6 +1400,13 @@ async fn init_db(env: &Env) -> bool {
         config_put(env, "mig_anibla_target", "1").await;
     }
 
+    // "Anibla'dan post" (`postbot.rs`): post videosi saytdan olinadi — `src` (anibla manbasi JSON).
+    if ok && config_get(env, "mig_post_src").await.is_none() {
+        let _ = turso_exec(env,
+            "ALTER TABLE post_jobs ADD COLUMN src TEXT DEFAULT ''", vec![]).await;
+        config_put(env, "mig_post_src", "1").await;
+    }
+
     ok
 }
 
@@ -3621,7 +3628,7 @@ const CONFIG_MEMO_KEYS: &[&str] = &[
     "encbot_secret", "encbot_webhook_for", "encode_log_chat",
     "mig_comment_media", "mig_origin_video", "mig_origin_key",
     "mig_encode_progress", "mig_origin_meta", "mig_chan_consent", "mig_hist_srv_at",
-    "mig_anibla_target",
+    "mig_anibla_target", "mig_post_src",
 ];
 const CONFIG_MEMO_MS: i64 = 10 * 60 * 1000;
 
@@ -11986,6 +11993,10 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
     }
     if text == postbot::BTN_POST {
         postbot::post_menu(env, chat).await;
+        return ok(json!({"ok": true}));
+    }
+    if text == postbot::BTN_ANIBLA {
+        anibla::menu_for_post(env, chat).await;
         return ok(json!({"ok": true}));
     }
     if text == anibla::BTN {
