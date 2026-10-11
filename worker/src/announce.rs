@@ -119,7 +119,7 @@ async fn post(env: &Env, ch: i64, a: i64, s: i64, e: i64) -> std::result::Result
     }
     // "Tomosha qilish" — asosiy botga /start (Mini App tugmasi bilan javob beradi).
     let markup = json!({"inline_keyboard": [[{
-        "text": "\u{25B6}\u{FE0F} Tomosha qilish",
+        "text": "Tomosha qilish",
         "url": format!("https://t.me/{bot}?start=w{a}_{s}_{e}"),
     }]]});
 
@@ -282,7 +282,7 @@ pub(crate) async fn watch_card(env: &Env, chat: i64, a: i64, s: i64, e: Option<i
     }
     t.push('\n');
     if let Some(n) = ep_number {
-        t.push_str(&line("\u{25B6}\u{FE0F}", "Qismi", &episode_text(&season, n)));
+        t.push_str(&line("\u{25B6}\u{FE0F}", "Qism", &episode_text(&season, n)));
     }
     t.push_str(&line("\u{1F522}", "Bo'limlar", &if seasons > 0 { format!("{seasons} ta") } else { String::new() }));
     t.push_str(&line("\u{1F39E}", if is_film { "Filmlar" } else { "Qismlar" },
@@ -302,7 +302,7 @@ pub(crate) async fn watch_card(env: &Env, chat: i64, a: i64, s: i64, e: Option<i
         Some(e) => format!("{}/?w={a}_{s}_{e}", tma::WEB_URL),
         None => format!("{}/?w={a}_{s}", tma::WEB_URL),
     };
-    let markup = json!({"inline_keyboard": [[{"text": "\u{25B6}\u{FE0F} Tomosha qilish", "web_app": {"url": url}}]]});
+    let markup = json!({"inline_keyboard": [[{"text": "Tomosha qilish", "web_app": {"url": url}}]]});
     // Bot menyu tugmasi ham (eski odatdagidek).
     let _ = tg_api(env, "setChatMenuButton", json!({
         "chat_id": chat,
