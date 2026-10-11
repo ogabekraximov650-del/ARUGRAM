@@ -50,7 +50,7 @@ class _EpizodManagementScreenState extends State<EpizodManagementScreen> {
     if (_epizodlar.isEmpty) {
       final cached = RustCore.instance.getCachedList(_diskKey);
       if (cached != null && cached.isNotEmpty) {
-        setState(() => _epizodlar = cached);
+        setState(() => _epizodlar = cached.reversed.toList());
       }
     }
     setState(() {
@@ -75,7 +75,7 @@ class _EpizodManagementScreenState extends State<EpizodManagementScreen> {
         final data = jsonDecode(res.body) as List;
         final rows = data.cast<Map<String, dynamic>>();
         RustCore.instance.saveListCache(_diskKey, rows);
-        setState(() => _epizodlar = rows);
+        setState(() => _epizodlar = rows.reversed.toList());
       } else {
         throw 'Epizodlar yuklab olib bo\'lmadi';
       }

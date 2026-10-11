@@ -71,6 +71,8 @@ export function openAdminEpisodes(anime, season) {
         const rows = await api(`/api/epizods/${anime.id}/${season.season_id}?all=1`);
         if (closed) return;
         list = Array.isArray(rows) ? rows : (rows?.items || []);
+        // Oxirgi qism eng yuqorida.
+        list = list.slice().sort((a, b) => (Number(b.epizod_number) || 0) - (Number(a.epizod_number) || 0));
         paint();
       } catch (_) {
         if (closed) return;

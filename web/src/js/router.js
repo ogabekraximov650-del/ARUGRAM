@@ -9,7 +9,6 @@
 
 const stack = [];
 let host = null;
-const selfPops = []; // o'zimiz chaqirgan history.back() lar (kutilayotgan popstate'lar)
 
 const tg = () => window.Telegram?.WebApp;
 
@@ -37,11 +36,17 @@ export function initRouter(root) {
   host = root;
   try { tg()?.BackButton?.onClick(onTgBack); } catch (_) { /* */ }
   // Brauzer (Telegram Desktop/Web) "orqaga" tugmasi.
-  window.addEventListener('popstate', () => {
-    // Ekranni o'zimiz yopganda chaqirgan `history.back()` ning popstate'i —
-    // e'tiborsiz (aks holda keyingi ekran ham yopilib, boshiga qaytardi).
-    if (selfPops.length) { selfPops.shift(); return; }
-    if (stack.length) back(true);
+  window.addEventListener('popstate', (ev) => {
+    // Tarix yozuvi `{ aru: <stek chuqurligi> }` bilan belgilanadi. Brauzer shu
+    // chuqurlikka qaytgan bo'lsa-yu, stek allaqachon shuncha bo'lsa (ekranni
+    // o'zimiz yopib `history.back()` chaqirgan edik) — hech narsa qilinmaydi,
+    // aks holda keyingi ekran ham yopilib, boshiga qaytardi. Vaqtga bog'liq emas.
+    const target = Number(ev.state?.aru) || 0;
+    while (stack.length > target) {
+      const before = stack.length;
+      back(true);
+      if (stack.length >= before) break; // ekran yopilishga rozi emas (onBack)
+    }
   });
 }
 
@@ -75,15 +80,7 @@ function remove(route, fromHistory = false) {
   route.el.classList.remove('in');
   route.el.classList.add('out');
   setTimeout(() => route.el.remove(), 260);
-  if (!fromHistory) {
-    try {
-      history.back();
-      // popstate kelmasa ham hisob qolib ketmasin.
-      const tok = {};
-      selfPops.push(tok);
-      setTimeout(() => { const k = selfPops.indexOf(tok); if (k >= 0) selfPops.splice(k, 1); }, 600);
-    } catch (_) { /* */ }
-  }
+  if (!fromHistory) { try { history.back(); } catch (_) { /* */ } }
   syncBackButton();
 }
 
