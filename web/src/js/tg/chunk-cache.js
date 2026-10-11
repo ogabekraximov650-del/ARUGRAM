@@ -16,7 +16,6 @@
 //     keshdagi fayl Telegram'ga bot nusxasini kutmasdan DARHOL ochiladi.
 // Qurilma kaliti — shu brauzerdan chiqmaydigan (`extractable: false`) AES-GCM kaliti.
 
-const LS_LIMIT = 'aru_cache_limit'; // 'auto' | bayt
 let dbP = null;
 let idx = null; // Map: kalit -> {size, at}
 let total = 0;
@@ -61,15 +60,6 @@ async function index() {
   return loading;
 }
 
-export function cacheLimitSetting() {
-  try { return localStorage.getItem(LS_LIMIT) || 'auto'; } catch (_) { return 'auto'; }
-}
-export async function setCacheLimitSetting(v) {
-  try { localStorage.setItem(LS_LIMIT, `${v}`); } catch (_) { /* */ }
-  const lim = Number(v);
-  if (Number.isFinite(lim) && lim > 0) await shrinkTo(lim); // yangi (kichik) chegaradan oshganini darhol tozalaydi
-}
-
 async function refreshQuota() {
   if (Date.now() - quotaAt < 15000) return;
   quotaAt = Date.now();
@@ -88,22 +78,11 @@ async function evictOldest(d) {
   return size;
 }
 
-async function shrinkTo(limit) {
-  const d = await db(); if (!d) return;
-  await index();
-  while (total > limit && idx.size) { if (!(await evictOldest(d))) break; }
-}
-
 /** Yangi `size` bayt uchun joy bormi — yo'q bo'lsa FAQAT kerakli miqdorda eskisini o'chiradi. */
 async function makeRoom(d, size) {
-  const set = cacheLimitSetting();
-  if (set !== 'auto') {
-    const lim = Number(set);
-    while (idx.size && total + size > lim) { if (!(await evictOldest(d))) break; }
-    return;
-  }
+  // Chegara YO'Q (foydalanuvchi talabi): qurilmaga sig'ganicha saqlanadi — brauzer ruxsatining ~95% gacha;
+  // to'lib borsa eng eskisi o'chadi (to'lib ketsa Quota xatosi `cachePut` da ushlanadi).
   await refreshQuota();
-  // Avtomatik: brauzer ruxsatining ~95% gacha; to'lib borsa (yoki baho yo'q) — Quota xatosi kutiladi.
   while (idx.size && quota > 0 && usage + size > quota * 0.95) { if (!(await evictOldest(d))) break; }
 }
 
@@ -153,11 +132,11 @@ export async function cachePut(key, u8) {
   } catch (_) { /* */ }
 }
 
-/** `{used, count, setting, quota, usage}` — sozlamalar ekrani uchun. */
+/** `{used, count, quota, usage}` */
 export async function cacheStats() {
   const m = await index();
   await refreshQuota();
-  return { used: total, count: m.size, setting: cacheLimitSetting(), quota, usage };
+  return { used: total, count: m.size, quota, usage };
 }
 
 export async function cacheClear() {

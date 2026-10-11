@@ -5913,3 +5913,9 @@ ya'ni yangi versiya KEYINGI ochilishda ko'rinadi. API (worker domeni) va fayl/vi
 (Eslatma: eski MP4-oqim Service Worker'i `sw.js` olib tashlangan edi — bu yangisi boshqa vazifada.)
 2) Bot tugmasidan (`?w=`) ochilganda foydalanuvchi bosishi yo'q — brauzer `video.play()` ni to'sadi, lekin ekranda "pauza" belgisi va
 aylanish qolardi. Endi to'silsa pleyer pauzada (▶) ko'rsatiladi, aylanish faqat o'ynash niyati bo'lganda (`player-screen.js`).
+
+## Mini App: xotira ekranida brauzer ruxsati va kesh chegarasi olib tashlandi (2026-10)
+
+"Brauzer ruxsati ... ishlatilgan ..." qatori va "Kesh chegarasi" bo'limi (`web/src/js/screens/storage.js`) olib tashlandi, `chunk-cache.js` dan
+`cacheLimitSetting`/`setCacheLimitSetting`/`shrinkTo` ham. Kesh doim "avtomatik": qurilmaga sig'ganicha saqlanadi (brauzer ruxsatining ~95%
+gacha), joy tugaganda eng eskisi o'chadi.

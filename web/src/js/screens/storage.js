@@ -1,13 +1,13 @@
 // Xotiradan foydalanish — `lib/screens/storage_screen.dart` (Cherrygram `CacheControlActivity`) nusxasi:
 // halqa diagrammasi, toifalar (belgilanadi), "Keshni tozalash / Tanlanganini tozalash", tasdiqlash,
 // tozalangach yashil halqa. Ma'lumot — brauzerdagi disk keshi (`tg/chunk-cache.js`).
-// Qo'shimcha: "Kesh chegarasi" (Avtomatik / 500 MB ... 5 GB).
+// Kesh chegarasi YO'Q: qurilmaga sig'ganicha saqlanadi, joy tugaganda eng eskisi o'chadi (`tg/chunk-cache.js`).
 
 import { push } from '../router.js';
 import { icon, appBar, bindAppBar, toast, confirmDialog } from '../ui.js';
 import { formatBytes } from './stats.js';
 import {
-  cacheBreakdown, cacheClearCats, cacheStats, cacheLimitSetting, setCacheLimitSetting,
+  cacheBreakdown, cacheClearCats, cacheStats,
   CAT_VIDEO, CAT_PACKS, CAT_CHAT, CAT_IMG, CAT_OTHER,
 } from '../tg/chunk-cache.js';
 
@@ -40,13 +40,9 @@ export function openStorage() {
 
     const paint = () => {
       const t = total(); const sb = selBytes(); const all = off.size === 0;
-      const GB = 1024 * 1024 * 1024;
-      const opts = [['auto', "Avtomatik (qurilma sig'ganicha)"], [`${500 * 1024 * 1024}`, '500 MB'], [`${GB}`, '1 GB'], [`${2 * GB}`, '2 GB'], [`${5 * GB}`, '5 GB']];
-      const cur = opts.some(([v]) => v === cacheLimitSetting()) ? cacheLimitSetting() : 'auto';
       body.innerHTML = `<div class="sg-in">
         <div class="sg-chart">${ring(rows, t, hi, cleared && t === 0)}
           <div class="sg-center">${t > 0 ? `<b>${formatBytes(t)}</b><span>Kesh</span>` : `<b>${cleared ? 'Xotira tozalandi' : "Kesh bo'sh"}</b>`}</div></div>
-        ${st?.quota ? `<div class="sg-dev">Brauzer ruxsati: <b>${formatBytes(st.quota)}</b> · ishlatilgan ${formatBytes(st.usage)}</div>` : ''}
         <div class="sg-sec">Kesh</div>
         <div class="glass sg-list">${rows.length ? rows.map((r) => `<div class="sg-row${hi === r.label ? ' hi' : ''}" data-l="${r.label}">
           <span class="sg-chk${off.has(r.label) ? '' : ' on'}" style="--c:${COLORS[r.label]}">${off.has(r.label) ? '' : icon('check', { size: 14, color: '#fff' })}</span>
@@ -55,15 +51,11 @@ export function openStorage() {
     : '<div class="sg-empty">Saqlangan narsa yo\'q</div>'}</div>
         ${rows.length ? `<button class="sg-btn" ${busy || !sb ? 'disabled' : ''}>${busy ? 'Kesh tozalanmoqda...' : `${all ? 'Keshni tozalash' : 'Tanlanganini tozalash'} (${formatBytes(sb)})`}</button>` : ''}
         <div class="sg-note">Ko'rilgan video bo'laklari, rasmlar va fayllar shu qurilmada shifrlangan holda saqlanadi: qayta ochish va orqaga surish tezroq bo'ladi. Joy tugagandagina eng eskisi o'chadi. Hisobdan chiqsangiz kesh to'liq tozalanadi.</div>
-        <div class="sg-sec">Kesh chegarasi</div>
-        <div class="glass sg-list"><div class="sg-row" style="cursor:default"><span class="sg-t">Eng katta hajm</span>
-          <select class="sg-limit field">${opts.map(([v, l]) => `<option value="${v}"${v === cur ? ' selected' : ''}>${l}</option>`).join('')}</select></div></div>
         <div style="height:40px"></div></div>`;
       body.querySelectorAll('.sg-row[data-l]').forEach((r) => r.addEventListener('click', () => {
         const l = r.dataset.l; if (off.has(l)) off.delete(l); else off.add(l); hi = l; paint();
       }));
       body.querySelector('.sg-btn')?.addEventListener('click', clear);
-      body.querySelector('.sg-limit')?.addEventListener('change', async (e) => { await setCacheLimitSetting(e.target.value); toast('Saqlandi'); await load(); });
     };
 
     async function clear() {
