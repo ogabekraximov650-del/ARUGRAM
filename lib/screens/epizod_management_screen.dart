@@ -159,6 +159,45 @@ class _EpizodManagementScreenState extends State<EpizodManagementScreen> {
     }
   }
 
+  Future<void> _postToChannel(Map<String, dynamic> e) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.cardAlt,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Kanalga joylash?',
+            style: TextStyle(color: Colors.white)),
+        content: Text(
+          '${e['epizod_number'] ?? '?'}-qism kanalga post qilib joylansinmi?',
+          style: TextStyle(color: Colors.white.withValues(alpha: 0.7)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Yo\'q',
+                style: TextStyle(color: Colors.white.withValues(alpha: 0.5))),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Ha, joylash'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    String msg;
+    try {
+      final res = await http.post(Uri.parse(
+          '$_apiBase/api/epizods/$_animeId/$_seasonId/${e['epizod_id']}/announce'));
+      msg = res.statusCode == 200 ? 'Kanalga joylandi' : 'Joylashda xato (${res.statusCode})';
+    } catch (ex) {
+      msg = 'Xato: $ex';
+    }
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final seasonName = widget.season['nomi'] ?? '';
@@ -306,6 +345,7 @@ class _EpizodManagementScreenState extends State<EpizodManagementScreen> {
                                     onTap: () =>
                                         _navigateToAddEpizod(epizod: ep),
                                     onDelete: () => _deleteEpizod(ep),
+                                    onPost: () => _postToChannel(ep),
                                   );
                                 },
                               ),
@@ -322,8 +362,12 @@ class _AdminEpizodCard extends StatelessWidget {
   final Map<String, dynamic> epizod;
   final VoidCallback onTap;
   final VoidCallback onDelete;
+  final VoidCallback onPost;
   const _AdminEpizodCard(
-      {required this.epizod, required this.onTap, required this.onDelete});
+      {required this.epizod,
+      required this.onTap,
+      required this.onDelete,
+      required this.onPost});
 
   String get _qualities {
     // Kodlanguncha worker ASL videoni bo'sh sifat o'rnida beradi — u
@@ -388,6 +432,12 @@ class _AdminEpizodCard extends StatelessWidget {
                           fontSize: 11, color: Colors.white.withValues(alpha: 0.5))),
                 ],
               ),
+            ),
+            IconButton(
+              onPressed: onPost,
+              icon: const Icon(Icons.send_rounded,
+                  color: Colors.white54, size: 20),
+              splashRadius: 22,
             ),
             const Icon(Icons.edit_rounded, color: Colors.white38, size: 18),
             const SizedBox(width: 4),

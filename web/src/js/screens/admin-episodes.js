@@ -51,12 +51,14 @@ export function openAdminEpisodes(anime, season) {
         return `<div class="glass ad-row" data-i="${i}">
           <div class="ad-num">${esc(e.epizod_number ?? '?')}</div>
           <div class="ss-main"><div class="ss-t">${esc(e.epizod_name || `${e.epizod_number ?? ''}-qism`)}</div><div class="ss-h">${esc(sub)}</div></div>
+          <button class="icon-btn ad-post" aria-label="Kanalga joylash">${icon('send', { fill: false, size: 20, color: 'rgba(255,255,255,0.7)' })}</button>
           <button class="icon-btn ad-edit" aria-label="Tahrirlash">${icon('edit', { fill: false, size: 20, color: 'rgba(255,255,255,0.7)' })}</button>
           <button class="icon-btn ad-del" aria-label="O'chirish">${icon('delete', { fill: false, size: 20, color: C.danger })}</button>
         </div>`;
       }).join('');
       host.querySelectorAll('.ad-row').forEach((r) => {
         const e = list[+r.dataset.i];
+        r.querySelector('.ad-post').addEventListener('click', () => postToChannel(e));
         r.querySelector('.ad-edit').addEventListener('click', () => openEpisodeForm(anime.id, season.season_id, e, load));
         r.querySelector('.ad-del').addEventListener('click', () => remove(e));
         r.addEventListener('click', (ev) => { if (!ev.target.closest('button')) openEpisodeForm(anime.id, season.season_id, e, load); });
@@ -75,6 +77,15 @@ export function openAdminEpisodes(anime, season) {
         host.innerHTML = '<div class="ss-note" style="text-align:center;margin-top:48px">Yuklab bo\'lmadi<br><button class="btn btn-filled ad-retry" style="margin-top:14px">Qayta urinish</button></div>';
         host.querySelector('.ad-retry').addEventListener('click', load);
       }
+    }
+
+    async function postToChannel(e) {
+      const ok = await confirmDialog('Kanalga joylash?', `${esc(e.epizod_number ?? '')}-qism kanalga post qilib joylansinmi?`, { ok: 'Ha, joylash', cancel: "Yo'q" });
+      if (!ok) return;
+      try {
+        await api(`/api/epizods/${anime.id}/${season.season_id}/${e.epizod_id}/announce`, { method: 'POST' });
+        toast('Kanalga joylandi');
+      } catch (er) { toast(`Xato: ${errText(er)}`); }
     }
 
     async function remove(e) {

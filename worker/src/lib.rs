@@ -13703,6 +13703,18 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
             if let Some(rest) = path.strip_prefix("/api/epizods/") {
                 let parts: Vec<&str> = rest.split('/').collect();
 
+                // Admin tugmasi: qismni kanalga qo'lda joylash.
+                if parts.len() == 4 && parts[3] == "announce" && method == Method::Post {
+                    let admin = session_user(&env, &bearer(&req)).await?.map(|u| is_admin(&u)).unwrap_or(false);
+                    if !admin { return json_resp(&json!({"error": "Ruxsat yo'q"}), 403); }
+                    let ids: Vec<i64> = parts[..3].iter().filter_map(|p| p.parse().ok()).collect();
+                    if ids.len() != 3 { return json_resp(&json!({"error": "Noto'g'ri manzil"}), 400); }
+                    return match announce::repost(&env, ids[0], ids[1], ids[2]).await {
+                        Ok(()) => ok(json!({"success": true})),
+                        Err(why) => json_resp(&json!({"error": why}), 502),
+                    };
+                }
+
                 if parts.len() == 2 && method == Method::Get {
                     let res = turso_exec(&env,
                         "SELECT * FROM epizod_db WHERE anime_id = ? AND season_id = ? ORDER BY epizod_number ASC",

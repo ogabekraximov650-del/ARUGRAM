@@ -65,6 +65,20 @@ pub(crate) async fn episode_ready(env: &Env, a: i64, s: i64, e: i64) {
     }
 }
 
+/// Admin tugmasi: qismni kanalga QO'LDA qayta joylash (avval e'lon qilingan bo'lsa ham).
+pub(crate) async fn repost(env: &Env, a: i64, s: i64, e: i64) -> std::result::Result<(), String> {
+    let ch = channel(env);
+    if ch == 0 {
+        return Err("e'lon kanali sozlanmagan".into());
+    }
+    post(env, ch, a, s, e).await?;
+    let _ = turso_exec(env,
+        "INSERT INTO announced (anime_id, season_id, epizod_id, at) VALUES (?,?,?,?)
+         ON CONFLICT DO NOTHING",
+        vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e), TursoArg::int(now_ms())]).await;
+    Ok(())
+}
+
 /// Qismi: "N-bo'lim M-qism" yoki film bo'lsa "Film" ("N ta Film" — bo'limda bir nechta bo'lsa).
 fn episode_text(season: &Value, ep_number: i64) -> String {
     if season["turi"].as_str().unwrap_or("").trim().eq_ignore_ascii_case("film") {
