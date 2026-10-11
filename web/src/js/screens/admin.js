@@ -10,6 +10,7 @@ import { push } from '../router.js';
 import { icon, appBar, bindAppBar, bindTap, ripple, toast, confirmDialog, spinner, C } from '../ui.js';
 import { fileOf, toJpeg, uploadImage } from './admin-util.js';
 import { openAdminSeasons } from './admin-seasons.js';
+import { openAdminUsers } from './admin-users.js';
 
 function adminTile(id, ic, title, sub) {
   return `<div class="glass ad-tile" data-t="${id}">
@@ -24,9 +25,10 @@ export function openAdmin() {
     el.innerHTML = `${appBar({ title: 'Admin paneli' })}
       <div class="scroll"><div class="ss">
         ${adminTile('anime', 'movie_filter', 'Animelarni boshqarish', "Qo'shish, tahrirlash, o'chirish")}
+        ${adminTile('users', 'people_alt', 'Foydalanuvchilar', 'Hisoblar, balans, obuna, blok va yozishmalar')}
       </div></div>`;
     bindAppBar(el);
-    el.querySelectorAll('.ad-tile').forEach((t) => ripple(t, () => { if (t.dataset.t === 'anime') openAdminAnimes(); }));
+    el.querySelectorAll('.ad-tile').forEach((t) => ripple(t, () => { if (t.dataset.t === 'anime') openAdminAnimes(); else if (t.dataset.t === 'users') openAdminUsers(); }));
     return {};
   });
 }

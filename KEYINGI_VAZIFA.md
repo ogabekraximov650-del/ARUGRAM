@@ -5861,3 +5861,12 @@ sifat tanlanadi, bot rasm so'raydi, rasm yuborilgach video saytdan yuklanib, ras
 - `/api/post/claim` har safar `origin_url` (yangi HLS manzil, `anibla::resolve_origin`) va `origin_label` beradi;
   `tool/post/post.py` video kanal posti o'rniga `tool/anibla/download.py` bilan saytdan yuklaydi (`anibla_download`), keyin odatdagi
   `encode.sh` (3 s rasm, logotip, H.265) va yuborish. Navbat ro'yxati, tahrirlash, o'chirish, qayta urinish o'zgarmadi.
+
+## Mini App admin: foydalanuvchilar (2026-10)
+
+`web/src/js/screens/admin-users.js` — ilovadagi `admin_users_screen.dart` nusxasi. Uch varaq ilovadagi tartibda: "Yangi", "Onlayn",
+"Suhbatlar" (uchinchi; o'qilmagan xabar bo'lsa nishon va ochilishda shu varaqqa o'tadi). Izlash (ID yoki username), cheksiz
+ro'yxat, surish bilan varaq almashtirish. Foydalanuvchi bosilsa: balans (qo'shish/ayirish), obuna muddati (kun qo'shish/ayirish/
+bekor qilish), yozishmani ochish, profilini ko'rish, bloklash (muddat tugmalari + sabab) va blokdan chiqarish. Suhbatlar:
+`GET /api/chat/threads`, bosib turilsa `DELETE /api/chat/thread/:id`; suhbat ichi — `support.js` ning admin ko'rinishi
+(`openSupport({userId, title, photoUrl})`, `ChatController({userId})`). Server so'rovlari ilovadagi bilan bir xil.

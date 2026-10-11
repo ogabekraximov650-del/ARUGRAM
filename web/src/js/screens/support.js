@@ -18,7 +18,7 @@
 
 import * as tgMedia from '../tg/media.js';
 import { push, back } from '../router.js';
-import { icon, spinner, toast, haptic, C } from '../ui.js';
+import { icon, spinner, toast, haptic, avatarHtml, C } from '../ui.js';
 import { esc } from '../format.js';
 import { currentUser } from '../api.js';
 import {
@@ -494,12 +494,14 @@ const MIMES = {
   xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 };
 
-export function openSupport() {
-  push((el) => buildChat(el));
+/** Oddiy foydalanuvchi: admin bilan yozishma. Admin: `{ userId, title, photoUrl }` — shu foydalanuvchi bilan suhbat. */
+export function openSupport(opts = {}) {
+  push((el) => buildChat(el, opts));
 }
 
-function buildChat(el) {
-  const chat = new ChatController();
+function buildChat(el, opts = {}) {
+  const chat = new ChatController({ userId: opts.userId ?? null });
+  const title = chat.isAdminView ? (opts.title || 'Foydalanuvchi') : TITLE;
   el.classList.add('sup');
   el.innerHTML = `
     <div class="sup-bg"><div class="g1"></div><div class="g2"></div><div class="pat"></div></div>
@@ -531,7 +533,7 @@ function buildChat(el) {
   const rows = new Map(); // id -> {sig, el}
 
   const isMine = (m) => (chat.isAdminView ? m.fromAdmin : !m.fromAdmin);
-  const nameOf = (m) => (isMine(m) ? 'Siz' : TITLE);
+  const nameOf = (m) => (isMine(m) ? 'Siz' : title);
 
   function snippet(m) {
     const body = tgSplitReply(m.body)[1];
@@ -558,8 +560,8 @@ function buildChat(el) {
     headEl.innerHTML = `
       <div class="sup-pill sup-rb" data-a="back">${icon('arrow_back', { size: 26, color: '#fff' })}</div>
       <div class="sup-pill sup-mid">
-        <div class="sup-ava"><img src="assets/aru-mark.png" alt=""></div>
-        <div class="sup-tt"><div class="t">${esc(TITLE)}</div><div class="s">yordam xizmati</div></div>
+        <div class="sup-ava">${chat.isAdminView ? avatarHtml(opts.photoUrl, title, 40) : '<img src="assets/aru-mark.png" alt="">'}</div>
+        <div class="sup-tt"><div class="t">${esc(title)}</div><div class="s">${chat.isAdminView ? 'foydalanuvchi' : 'yordam xizmati'}</div></div>
       </div>
       <div class="sup-pill sup-rb" data-a="more">${icon('more_vert', { size: 26, color: '#fff' })}</div>`;
     headEl.querySelector('[data-a="back"]').addEventListener('click', () => back());
