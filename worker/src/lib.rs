@@ -36,6 +36,7 @@ use worker::*;
 mod packs;
 mod channels;
 mod postbot;
+mod announce;
 // anibla.uz dan qidirib yuklash (kodlash botining uchinchi bo'limi).
 mod anibla;
 // Uchala bo'lim uchun bitta jonli "Holat" xabari.
@@ -1320,6 +1321,9 @@ async fn init_db(env: &Env) -> bool {
         // ── ANIBLA YUKLASH NAVBATI (kodlash botining uchinchi bo'limi, `anibla.rs`) ──
         (anibla::DDL[0], vec![]),
         (anibla::DDL[1], vec![]),
+        // ── YANGI QISM E'LONI (`announce.rs`) ──
+        (announce::DDL[0], vec![]),
+        (announce::DDL[1], vec![]),
     ]).await.is_ok();
 
     // ── USTUN QO'SHISH (eski bazalar uchun, bir marta) ────────
@@ -4622,6 +4626,12 @@ async fn handle_tg_webhook(env: &Env, mut req: Request) -> Result<Response> {
         arg = arg.split_whitespace().skip(1).collect::<Vec<_>>().join(" ");
     }
     if arg.is_empty() {
+        tg_send_help(env, chat_id).await;
+        return ok(json!({"ok": true}));
+    }
+
+    // E'londagi "Tomosha qilish" (`announce.rs`): /start w<anime>_<bo'lim> — Mini App tugmasi bilan javob.
+    if announce::is_watch_arg(&arg) {
         tg_send_help(env, chat_id).await;
         return ok(json!({"ok": true}));
     }
@@ -11388,6 +11398,12 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
             &format!("SELECT url_{q} AS u FROM epizod_db WHERE anime_id=? AND season_id=? AND epizod_id=?"),
             vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]).await?;
         let old = first_row(&old).and_then(|r| r["u"].as_str().map(String::from)).unwrap_or_default();
+        // Qismda hali birorta sifat yo'q edimi — e'lon (`announce.rs`) FAQAT birinchi sifat joylanganda.
+        let had_any = turso_exec(env,
+            "SELECT 1 AS x FROM epizod_db WHERE anime_id=? AND season_id=? AND epizod_id=?
+               AND (COALESCE(url_360p,'')<>'' OR COALESCE(url_480p,'')<>'' OR COALESCE(url_720p,'')<>'' OR COALESCE(url_1080p,'')<>'')",
+            vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]).await
+            .ok().and_then(|r| first_row(&r)).is_some();
         let mut done = done_list(job["done"].as_str().unwrap_or(""));
         if !done.iter().any(|d| d == q) {
             done.push(q.to_string());
@@ -11412,6 +11428,9 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
         ]).await?;
         // Birinchi kodlangan sifat — qism endi ilovada ko'rinadi.
         free_seasons_forget().await;
+        if !had_any {
+            announce::episode_ready(env, a, s, e).await;
+        }
         // MP4 almashdi — eski fMP4 nusxasi (Mini App) endi boshqa videoniki.
         fmp4::forget_quality(env, a, s, e, q).await;
         // Eski (almashtirilgan) Telegram fayli kanaldan o'chadi.
@@ -13593,6 +13612,19 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
             let cols = res["cols"].as_array().cloned().unwrap_or_default();
             let rows = res["rows"].as_array().cloned().unwrap_or_default();
             if rows.is_empty() { return err500("Epizod qo'shib bo'lmadi"); }
+            // Qism darhol fayl bilan qo'shilgan bo'lsa — kanalga e'lon (`announce.rs`).
+            {
+                let row = row_to_obj(&cols, rows[0].as_array().unwrap_or(&vec![]));
+                if episode_ready(&row) {
+                    if let (Some(a), Some(s), Some(e)) = (
+                        row["anime_id"].as_i64().or_else(|| row["anime_id"].as_str().and_then(|v| v.parse().ok())),
+                        row["season_id"].as_i64().or_else(|| row["season_id"].as_str().and_then(|v| v.parse().ok())),
+                        row["epizod_id"].as_i64(),
+                    ) {
+                        announce::episode_ready(&env, a, s, e).await;
+                    }
+                }
+            }
             // Bo'limdagi qismlar soni — Ma'lumot oynasidagi
             // "N-bo'lim M-qism" shundan olinadi.
             let _ = turso_exec(&env,

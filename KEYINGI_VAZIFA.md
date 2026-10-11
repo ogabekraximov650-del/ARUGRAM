@@ -5870,3 +5870,21 @@ ro'yxat, surish bilan varaq almashtirish. Foydalanuvchi bosilsa: balans (qo'shis
 bekor qilish), yozishmani ochish, profilini ko'rish, bloklash (muddat tugmalari + sabab) va blokdan chiqarish. Suhbatlar:
 `GET /api/chat/threads`, bosib turilsa `DELETE /api/chat/thread/:id`; suhbat ichi — `support.js` ning admin ko'rinishi
 (`openSupport({userId, title, photoUrl})`, `ChatController({userId})`). Server so'rovlari ilovadagi bilan bir xil.
+
+## Yangi qism e'loni kanalga (2026-10)
+
+TALAB (foydalanuvchi): kanal ID si `ENCODE_TOKEN` bilan shifrlangan faylga; shu kanalga bazaga qo'shilgan har bir yangi qism —
+FAQAT birinchi sifati joylangach — post bo'lib tushsin: bo'lim rasmi, bo'lim nomi, "N-bo'lim M-qism" (film bo'lsa "N ta Film"),
+tagida "Tomosha qilish" tugmasi (asosiy botga `/start` yuboradigan havola).
+- `tool/announce/channel.enc` — JSON `{"channel_id": ...}`, AES-256-CBC + PBKDF2 (`creds.enc` bilan bir xil, kalit `ENCODE_TOKEN`).
+  Yangilash: `ANNOUNCE_KEY=<ENCODE_TOKEN> bash tool/announce/set_channel.sh <kanal id>`. `deploy-worker.yml` uni ochib worker secret
+  `ANNOUNCE_CHANNEL` qiladi (fayl o'zgarsa deploy avtomatik).
+- `worker/src/announce.rs`: `episode_ready(a,s,e)` — jadval `announced` (qism BIR marta); chaqiriladi: `/api/encode/quality` (qismda
+  hali sifat yo'q bo'lgan paytda yozilgan birinchi sifat) va `POST /api/epizods` (qism darhol fayl bilan qo'shilsa). Post asosiy bot
+  nomidan (u e'lon kanalida ADMIN bo'lishi shart; bo'lmasa kodlash boti); xato bo'lsa adminga xabar va belgi olib tashlanadi.
+- Tugma: `https://t.me/<bot>?start=w<anime>_<bo'lim>`; asosiy bot (`lib.rs`, /start) `announce::is_watch_arg` bo'lsa Mini App tugmasi
+  bilan javob beradi (`tg_send_help`).
+- MUQOVA ISTISNOSI: bo'lim rasmi Telegram'da shifrlangan, shuning uchun worker uni saqlash kanalidan oladi (`forwardMessage` ->
+  `getFile`), AES-128-CTR bilan ochadi va e'lon kanaliga yuklaydi; `file_id` `announce_cover` da eslab qolinadi (har bo'lim uchun
+  BIR marta). "Worker orqali fayl baytlari o'tmaydi" qoidasidan yagona (kichik rasm) istisno. Rasm olinmasa — post faqat matn.
+- Taxmin: film bo'limida "N ta Film" — shu bo'limdagi qismlar (filmlar) soni (`season_db.epizod_count`).
