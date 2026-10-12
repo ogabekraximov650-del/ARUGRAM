@@ -5935,3 +5935,16 @@ eski Service Worker'ni o'chiruvchi "o'zini o'chirish" kodi: brauzer uni o'zi yan
 
 Yangilanish (e'lon posti namunasi): matn endi "• <bo'lim nomi>", "• <N-qism>" (film bo'lsa "• Film"), "• Ovoz berdi: <tarjimon>"
 (`announce.rs` `caption`). Botdagi karta (`watch_card`) "Qismi" qatori o'zgarmadi.
+
+## Avto-kodlash: har run BITTA sifat (2026-10)
+
+Nima: `tool/encode/run.py` — bitta run qismning faqat BITTA sifatini (1080p, keyin 720p...) kodlaydi,
+yuklaydi, `quality` bilan jurnalga yozadi va ishni `finish {cancelled: true}` bilan (urinish
+sanalmasdan, tayyor sifatlar saqlangan holda) navbatga qaytaradi. Run tugaydi, workflow'ning
+"Davom ettirish" qadami (`worked=1`) yangi run ochadi, u shu ishni olib KEYINGI sifatni qiladi.
+Oxirgi sifatdan keyin odatdagidek `finish ok` (asl video o'chadi).
+Nega: uzoq run'lar (3-4 soat) o'rniga qisqa run'lar; birinchi sifat (1080p) tayyor bo'lgach qism ko'rinadi.
+Narxi: har run asl videoni qayta yuklab oladi (Telegram'dan, ~3-4 daqiqa) va workflow qadamlari
+(ffmpeg, pip) qayta bajariladi. Eski tartib: `ONE_QUALITY_PER_RUN=0` (workflow `env` ga).
+Fayllar: `tool/encode/run.py` (`ONE_QUALITY_PER_RUN`, `STOP_RUN`, `process`, `main`).
+Eslatma: o'zgarish avtoencode repoga `tool/encode/setup_repo.py` orqali ko'chiriladi.

@@ -62,6 +62,11 @@ PRESET = os.environ.get("H265_PRESET", "medium")
 X265_EXTRA = os.environ.get("H265_X265_EXTRA", "").strip(":")
 # Shu vaqtdan keyin YANGI ish olinmaydi (Actions limiti 6 soat).
 START_BUDGET = int(os.environ.get("START_BUDGET_MIN", "240")) * 60
+# Har run BITTA sifat tayyorlaydi (1080p, keyin 720p...): sifat yuklangach ish navbatga
+# qaytariladi va workflow keyingi sifat uchun YANGI run ochadi (foydalanuvchi talabi).
+# "0" — eski tartib (bitta run hamma sifatni ketma-ket kodlaydi).
+ONE_QUALITY_PER_RUN = os.environ.get("ONE_QUALITY_PER_RUN", "1") != "0"
+STOP_RUN = False  # process() keyingi sifatni yangi run'ga qoldirdi — main sikli to'xtaydi
 # Actions log'i shu YOPIQ kanalga yoziladi (yangi xabarlar, har 10 soniyada).
 # 0 yoki bo'sh — o'chiq.
 LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL_ID", "0") or 0)
@@ -744,6 +749,8 @@ async def process(app: Client, channel: int, job: dict):
     await STATUS.push(app)
     shutil.rmtree(WORK, ignore_errors=True)
     WORK.mkdir(parents=True)
+    global STOP_RUN
+    requeue = False
     try:
         done = set(job.get("done") or [])
         # Oldingi run yuklagan, jurnalga yozilmay qolgan sifatlar —
@@ -876,9 +883,19 @@ async def process(app: Client, channel: int, job: dict):
             STATUS.quality(label, state="done")
             STATUS.update(xfer=None)
             log(f"  {label}: jurnalga yozildi")
+            nxt = [l for l, _, _ in steps if l not in done]
+            if ONE_QUALITY_PER_RUN and nxt:
+                log(f"  keyingi sifat ({nxt[0]}) yangi run'da — bu run tugaydi")
+                requeue = True
+                break
 
-        api("finish", {**ident, "ok": True})
-        log("  tayyor")
+        if requeue:
+            # Ish xatosiz, urinish sanalmasdan navbatga qaytadi (tayyor sifatlar saqlanadi).
+            api("finish", {**ident, "ok": False, "cancelled": True})
+            STOP_RUN = True
+        else:
+            api("finish", {**ident, "ok": True})
+            log("  tayyor")
     except JobLost:
         log("  ish boshqa run'ga o'tdi — to'xtatildi")
     except Fatal as ex:
@@ -950,6 +967,9 @@ async def main():
                 break
             await process(app, int(r["channel"]), job)
             worked = True
+            if STOP_RUN:
+                log("Keyingi sifat uchun yangi run ochiladi.")
+                break
         log("Run tugadi.")
         STATUS.set_job("", "")
         STATUS.set_progress("idle")
