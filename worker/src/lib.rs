@@ -12098,6 +12098,17 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
         }
         return ok(json!({"ok": true}));
     }
+    // "Ilova uchun" tugmalari (Anibla orqali / Yangi qism / Animelar / "🎞 5-qism" /
+    // "📂 2-bo'lim: ...") — rejim `anibla` bo'lib qolgan bo'lsa ham o'z ishini qiladi
+    // (aks holda matn Anibla'da qidiruv so'zi bo'lib ketardi: "«🎞 Anibla orqali» bo'yicha
+    // hech narsa topilmadi").
+    let ilova_btn = text == ENCBOT_BTN_ANIBLA || text == ENCBOT_BTN_ADD || text == ENCBOT_BTN_ANIMES
+        || text.strip_prefix("\u{1F39E}")
+            .map(|r| r.trim().trim_end_matches("-qism").trim().parse::<i64>().is_ok()).unwrap_or(false)
+        || text.strip_prefix("\u{1F4C2}").map(|r| r.contains("-bo'lim")).unwrap_or(false);
+    if ilova_btn && config_get(env, "encbot_mode").await.as_deref() == Some("anibla") {
+        config_put(env, "encbot_mode", "").await;
+    }
     if !is_status && config_get(env, "encbot_mode").await.as_deref() == Some("anibla") {
         anibla::on_message(env, msg, chat).await;
         return ok(json!({"ok": true}));
