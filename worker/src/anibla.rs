@@ -57,10 +57,10 @@ const IMG_BASE: &str = "https://amediatv.up-it.uz";
 /// Ro'yxat sahifasi — 100 tadan (foydalanuvchi talabi). Telegram pastki panelga
 /// 150 tagacha tugmani qabul qildi, 300 ni rad etdi (sinab ko'rilgan).
 const SEARCH_PAGE: i64 = 100;
-/// Qismlar sahifasi (inline tugmalar, 5 tadan qatorda). Telegram paneli JAMI 150 tugmagacha
+/// Qismlar sahifasi (inline tugmalar, 5 tadan qatorda, 50 ta). Telegram paneli JAMI 150 tugmagacha
 /// (qism tugmalari + boshqaruv qatorlari ~6 ta); 150 qism + 6 = 156 rad etilib, keyin
 /// 429 flood berdi. 100 + 6 = 106 — ishlab turgan anime ro'yxati bilan bir xil.
-const EP_PAGE: usize = 90;
+const EP_PAGE: usize = 50;
 const UA: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
 
 thread_local! {
@@ -984,7 +984,7 @@ async fn ep_list(env: &Env, nav: &Nav) -> std::result::Result<(Item, String, Vec
 }
 
 /// Qismlar INLINE tugmalarda (xabar ostida): `aq:<qism>` — tanlash, `ap:<sahifa>` — sahifa.
-/// Inline klaviaturada 100 tagacha tugma mumkin; shu sabab sahifada EP_PAGE (90) ta qism.
+/// Sahifada EP_PAGE (50) ta qism (inline klaviaturada 100 tagacha tugma mumkin).
 fn ep_markup(eps: &[Episode], ep: i64) -> (Value, i64) {
     let pages = eps.len().div_ceil(EP_PAGE).max(1) as i64;
     let ep = ep.clamp(0, pages - 1);
@@ -1000,7 +1000,9 @@ fn ep_markup(eps: &[Episode], ep: i64) -> (Value, i64) {
     (kb(rows), ep)
 }
 
-async fn show_eps(env: &Env, chat: i64, mut nav: Nav, card: bool) {
+async fn show_eps(env: &Env, chat: i64, mut nav: Nav, _card: bool) {
+    // Har doim muqova (rasm + ma'lumot + tavsif) bilan, avvalgidek.
+    let card = true;
     let (it, label, eps) = match ep_list(env, &nav).await {
         Ok(x) => x,
         Err(e) => { encbot_send(env, chat, &format!("\u{274C} {}", html_escape(&e)), None).await; return; }
