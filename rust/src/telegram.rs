@@ -2162,58 +2162,63 @@ pub extern "C" fn rust_tg_clear_bot_chat() -> *mut c_char {
         run_tmo(t, 40, async {
             let (id, hash) = bot_peer(t, &client).await?;
             // OXIRGI XABAR QOLADI (foydalanuvchi: "chat to'liq tozalanganda bot chatlar
-            // ro'yxatidan yo'qolyapti"). Eng yangi xabar raqami olinadi, undan oldingilari
-            // o'chadi (`max_id = oxirgi - 1`). Xabar bo'lmasa yoki bitta bo'lsa — tegilmaydi.
-            let last_id = {
+            // ro'yxatidan yo'qolyapti"). Web ilovadagidek: `GetHistory` eng yangisidan
+            // boshlaydi — birinchisini (eng yangi xabar) tashlab, qolgani aniq raqamlar
+            // bilan o'chiriladi (`DeleteMessages`). Avval `DeleteHistory max_id` ishlatilardi,
+            // u ba'zan oxirgi xabarni ham o'chirib yuborardi.
+            //
+            // `revoke` (ikkala tomondan) bot bilan suhbatda ba'zan rad etiladi — shunda
+            // faqat o'z tomonidan o'chiriladi. Uzilgan so'rov bir necha marta qayta yuboriladi.
+            let peer = tl::enums::InputPeer::User(tl::types::InputPeerUser { user_id: id, access_hash: hash });
+            let mut revoke = true;
+            let mut tries = 0;
+            let mut pages = 0;
+            while pages < 30 {
                 let r = client
                     .invoke(&tl::functions::messages::GetHistory {
-                        peer: tl::enums::InputPeer::User(tl::types::InputPeerUser { user_id: id, access_hash: hash }),
+                        peer: peer.clone(),
                         offset_id: 0,
                         offset_date: 0,
                         add_offset: 0,
-                        limit: 1,
+                        limit: 100,
                         max_id: 0,
                         min_id: 0,
                         hash: 0,
                     })
-                    .await
-                    .map_err(|e| inv_err(&e))?;
-                messages_of(r)
-                    .iter()
-                    .filter_map(|m| if let tl::enums::Message::Message(m) = m { Some(m.id) } else { None })
-                    .max()
-                    .unwrap_or(0)
-            };
-            if last_id <= 1 {
-                return Ok::<(), String>(());
-            }
-            // Katta tarix bir necha qadamda o'chadi (`offset > 0`).
-            //
-            // `revoke` (ikkala tomondan) bot bilan suhbatda ba'zan rad
-            // etiladi — shunda faqat o'z tomonidan o'chiriladi (Telegram
-            // ilovasi ham bot chatini shunday tozalaydi). Uzilgan so'rov
-            // ("dropped") bir necha marta qayta yuboriladi.
-            let mut revoke = true;
-            let mut tries = 0;
-            let mut steps = 0;
-            while steps < 20 {
-                let r = client
-                    .invoke(&tl::functions::messages::DeleteHistory {
-                        just_clear: false,
-                        revoke,
-                        peer: tl::enums::InputPeer::User(tl::types::InputPeerUser {
-                            user_id: id,
-                            access_hash: hash,
-                        }),
-                        max_id: last_id - 1,
-                        min_date: None,
-                        max_date: None,
-                    })
                     .await;
-                match r {
-                    Ok(tl::enums::messages::AffectedHistory::History(r)) => {
-                        steps += 1;
-                        if r.offset <= 0 {
+                let msgs = match r {
+                    Ok(r) => messages_of(r),
+                    Err(e) if is_transient(&e) && tries < 3 => {
+                        tries += 1;
+                        tokio::time::sleep(Duration::from_millis(500 * tries as u64)).await;
+                        continue;
+                    }
+                    Err(e) => return Err(inv_err(&e)),
+                };
+                let total = msgs.len();
+                // Eng yangisi — birinchi; u qoladi.
+                let mut ids: Vec<i32> = msgs
+                    .iter()
+                    .map(|m| match m {
+                        tl::enums::Message::Message(m) => m.id,
+                        tl::enums::Message::Service(m) => m.id,
+                        tl::enums::Message::Empty(m) => m.id,
+                    })
+                    .collect();
+                ids.sort_unstable_by(|a, b| b.cmp(a));
+                if !ids.is_empty() {
+                    ids.remove(0);
+                }
+                if ids.is_empty() {
+                    break;
+                }
+                let d = client
+                    .invoke(&tl::functions::messages::DeleteMessages { revoke, id: ids })
+                    .await;
+                match d {
+                    Ok(_) => {
+                        pages += 1;
+                        if total < 100 {
                             break;
                         }
                     }

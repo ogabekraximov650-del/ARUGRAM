@@ -6005,3 +6005,10 @@ kodlangan qism joylansa anime tepaga chiqadi. Joylar: `GET /api/anime`, `encbot_
 qirqilgan ro'yxatdan yig'ilardi. Endi `janri` matni to'liq saqlanadi, `season_janr` 20 ustunga
 kengaytirildi (`janr_11..janr_20`, migratsiya `mig_janr_20`, `JANR_SLOTS=20`). Fayl: `worker/src/lib.rs`.
 Eski bo'limlarda 11-janr tiklanmaydi — bo'limni tahrirlab qayta saqlang.
+
+## Bot chatini tozalash: oxirgi xabar qolmasdi (2026-10)
+
+`rust_tg_clear_bot_chat` `DeleteHistory max_id=oxirgi-1` ishlatardi — ba'zan oxirgi xabarni ham o'chirib
+yuborgan (foydalanuvchi: "o'sha bitta xabarni ham qoldirmasdan tozalayapti"; web esa to'g'ri ishlaydi).
+Endi web (`clearOldBotChat`) kabi: `GetHistory(100)` -> eng yangisini tashlab, qolganini aniq raqamlar bilan
+`DeleteMessages` (revoke, rad etilsa o'z tomonidan). Fayl: `rust/src/telegram.rs`. APK qayta yig'iladi.
