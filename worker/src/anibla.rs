@@ -983,43 +983,30 @@ async fn ep_list(env: &Env, nav: &Nav) -> std::result::Result<(Item, String, Vec
     Ok((it, season_label(season), eps))
 }
 
-/// Qismlar INLINE tugmalarda (xabar ostida): `aq:<qism>` — tanlash, `ap:<sahifa>` — sahifa.
-/// Sahifada EP_PAGE (50) ta qism (inline klaviaturada 100 tagacha tugma mumkin).
-fn ep_markup(eps: &[Episode], ep: i64) -> (Value, i64) {
-    let pages = eps.len().div_ceil(EP_PAGE).max(1) as i64;
-    let ep = ep.clamp(0, pages - 1);
-    let start = ep as usize * EP_PAGE;
-    let part = &eps[start..(start + EP_PAGE).min(eps.len())];
-    let mut rows: Vec<Vec<Value>> = Vec::new();
-    let mut nr = Vec::new();
-    if ep > 0 { nr.push(btn(BTN_PREV, format!("ap:{}", ep - 1))); }
-    if ep + 1 < pages { nr.push(btn(BTN_NEXT, format!("ap:{}", ep + 1))); }
-    if !nr.is_empty() { rows.push(nr); }
-    rows.extend(part.chunks(5).map(|ch| ch.iter()
-        .map(|e| btn(&format!("{}", e.num), format!("aq:{}", e.num))).collect::<Vec<_>>()));
-    (kb(rows), ep)
-}
-
+/// Qismlar pastki panelda: qatorga 3 tadan, `EP_PAGE` (50) tadan sahifa. Muqova bilan.
 async fn show_eps(env: &Env, chat: i64, mut nav: Nav, _card: bool) {
-    // Har doim muqova (rasm + ma'lumot + tavsif) bilan, avvalgidek.
     let card = true;
     let (it, label, eps) = match ep_list(env, &nav).await {
         Ok(x) => x,
         Err(e) => { encbot_send(env, chat, &format!("\u{274C} {}", html_escape(&e)), None).await; return; }
     };
-    let (markup, ep) = ep_markup(&eps, nav.ep);
-    nav.ep = ep;
+    let pages = eps.len().div_ceil(EP_PAGE).max(1) as i64;
+    nav.ep = nav.ep.clamp(0, pages - 1);
     nav.v = "eps".into();
     nav_put(env, &nav).await;
-    // Pastki panel: Orqaga / Bosh menyu (qismlarning o'zi xabar ostidagi inline tugmalarda).
-    encbot_send(env, chat, "\u{1F3AC} Qismlar \u{2014} xabar ostidagi tugmalardan tanlang. Orqaga \u{2014} pastda.",
-        Some(panel(vec![], true))).await;
-    let text = format!("{}\n{} \u{00B7} {} ta qism\n\n\u{2B07}\u{FE0F} Qismni tanlang (eng yangisi birinchi):",
-        item_head(&it, card), html_escape(&label), eps.len());
-    if card && send_photo_card(env, chat, &it, &text, Some(&markup)).await {
-        return;
-    }
-    encbot_send(env, chat, &text, Some(markup)).await;
+    let start = nav.ep as usize * EP_PAGE;
+    let part = &eps[start..(start + EP_PAGE).min(eps.len())];
+    let mut top: Vec<Vec<String>> = Vec::new();
+    let mut nr = Vec::new();
+    if nav.ep > 0 { nr.push(BTN_PREV.to_string()); }
+    if nav.ep + 1 < pages { nr.push(BTN_NEXT.to_string()); }
+    if !nr.is_empty() { top.push(nr); }
+    let rows: Vec<Vec<String>> = part.chunks(3)
+        .map(|ch| ch.iter().map(|e| format!("\u{25B6}\u{FE0F} {}-qism", e.num)).collect::<Vec<_>>()).collect();
+    let text = format!("{}\n{} \u{00B7} {} ta qism{}\n\n\u{2B07}\u{FE0F} Qismni pastdagi paneldan tanlang (eng yangisi birinchi):",
+        item_head(&it, card), html_escape(&label), eps.len(),
+        if pages > 1 { format!(" \u{00B7} {}\u{2013}{}-qismlar", part[0].num, part[part.len() - 1].num) } else { String::new() });
+    send_list(env, chat, &text, top, rows, true, Some(&it)).await;
 }
 
 /// Qism tanlandi: sifatlar (qatorga bitta).
@@ -1431,29 +1418,9 @@ fn hms(s: i64) -> String {
 
 /// Inline tugmalar: navbat (`zx`, `zxa`, `zr`). Eski xabarlardagi ro'yxat
 /// tugmalari (`zg`, `zi`, ...) endi pastki panelda — ular uchun eslatma.
-pub(crate) async fn on_callback(env: &Env, chat: i64, msg_id: i64, data: &str) -> bool {
+pub(crate) async fn on_callback(env: &Env, chat: i64, _msg_id: i64, data: &str) -> bool {
     let p: Vec<&str> = data.split(':').collect();
     let kind = p[0];
-    if kind == "aq" {
-        if let Some(num) = p.get(1).and_then(|x| x.parse::<i64>().ok()) {
-            let nav = nav_get(env).await;
-            show_qualities(env, chat, nav, num).await;
-        }
-        return true;
-    }
-    if kind == "ap" {
-        if let Some(pg) = p.get(1).and_then(|x| x.parse::<i64>().ok()) {
-            let mut nav = nav_get(env).await;
-            if let Ok((_, _, eps)) = ep_list(env, &nav).await {
-                let (markup, ep) = ep_markup(&eps, pg);
-                nav.ep = ep;
-                nav_put(env, &nav).await;
-                let _ = encbot_api(env, "editMessageReplyMarkup", json!({
-                    "chat_id": chat, "message_id": msg_id, "reply_markup": markup})).await;
-            }
-        }
-        return true;
-    }
     if kind == "zxa" {
         queue_callback(env, chat, kind, 0).await;
         return true;
@@ -1855,9 +1822,11 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
         let mut test = String::from("o'tkazib yuborildi");
         if let Ok(mut eps) = eps {
             eps.reverse();
-            let (markup, _) = ep_markup(&eps, 0);
+            let rows: Vec<Vec<String>> = eps.iter().take(EP_PAGE).collect::<Vec<_>>().chunks(3)
+                .map(|ch| ch.iter().map(|e| format!("\u{25B6}\u{FE0F} {}-qism", e.num)).collect()).collect();
+            let markup = panel(rows, true);
             test = match encbot_api(env, "sendMessage", json!({
-                "chat_id": ADMIN_TELEGRAM_ID, "text": "\u{1F50E} Tashxis: inline qismlar sinovi (90 tugma)",
+                "chat_id": ADMIN_TELEGRAM_ID, "text": "\u{1F50E} Tashxis: pastki panel sinovi (50 qism)",
                 "reply_markup": markup})).await {
                 Ok(_) => "ok".to_string(),
                 Err(e) => e.to_string(),
