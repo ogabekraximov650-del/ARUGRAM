@@ -6020,11 +6020,17 @@ sarlavhasiz appbar, halqa atrofida foiz yorlig'i, markazda "49,6 / MB", sarlavha
 (brauzer kvotasiga nisbatan), ingichka chiziq, qatorlarda "Nom 90.09%" va to'q sariq hajm, toifalar ilovadagidek
 (Videolar / Posterlar / Emoji, GIF va stikerlar / Vaqtinchalik fayllar). Tozalashda pastdan parda: jo'ja
 (`chick.js`, shakllar `chick-parts.js` — `utyan_parts.dart` dan avtomatik olingan) chiqindini qutiga tashlaydi,
-foiz vaqtga bog'langan, halqa jo'ja bilan bo'shaydi. DIQQAT: web animatsiyasi SODDALASHTIRILGAN (4 sahna hajmga
-qarab, davomiylik ilovadagidek 7/13.5/16.5/22.5 s), ilovadagi qo'l-oyoq harakatlari to'liq ko'chirilmagan.
+foiz vaqtga bog'langan, halqa jo'ja bilan bo'shaydi. `chick.js` — `trash_chick.dart` ning Canvas 2D'ga QADAMMA-QADAM
+ko'chirilgan nusxasi (uy, panjara, quti, 4 sahna, qo'llar, qop, ko'z yoshi, chang/uchqun; davomiylik 7/13.5/16.5/22.5 s).
+Ilovadagi `trash_chick.dart` o'zgarsa, `chick.js` ham yangilansin.
 
 ## Anime o'chirilganda uning izohlari ham o'chadi (2026-10)
 
 `DELETE /api/anime/:id` endi animega yozilgan hamma izohni (javoblar bilan), ularning layklari (`comment_likes`) va
 shikoyatlarini (`reports_db`) ham o'chiradi. Avval o'chirilgan animelarning yetim izohlari (Izohlar ekranida
 rasmsiz "Bo'lim" kartalari) bir martalik migratsiya `mig_orphan_comments` bilan tozalanadi. Fayl: `worker/src/lib.rs`.
+
+## Bo'lim o'chirilganda uning izohlari ham o'chadi (2026-10)
+
+Bo'lim (`season_db`) o'chirilganda unga yozilgan hamma izoh (javoblar bilan), layk va shikoyatlar ham o'chadi;
+bo'limi allaqachon yo'q izohlar bir martalik migratsiya `mig_orphan_comments2` bilan tozalanadi. Fayl: `worker/src/lib.rs`.

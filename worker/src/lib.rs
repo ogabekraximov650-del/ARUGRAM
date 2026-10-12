@@ -1384,6 +1384,20 @@ async fn init_db(env: &Env) -> bool {
         ]).await;
         if r.is_ok() { config_put(env, "mig_orphan_comments", "1").await; }
     }
+    // Bo'limi o'chirilgan izohlar ham (yetim) bir marta tozalanadi.
+    if ok && config_get(env, "mig_orphan_comments2").await.is_none() {
+        let r = turso_batch(env, &[
+            ("DELETE FROM comment_likes WHERE comment_id IN
+               (SELECT c.id FROM comments_db c WHERE NOT EXISTS
+                 (SELECT 1 FROM season_db s WHERE s.anime_id=c.anime_id AND s.season_id=c.season_id))", vec![]),
+            ("DELETE FROM reports_db WHERE kind='comment' AND target_id IN
+               (SELECT c.id FROM comments_db c WHERE NOT EXISTS
+                 (SELECT 1 FROM season_db s WHERE s.anime_id=c.anime_id AND s.season_id=c.season_id))", vec![]),
+            ("DELETE FROM comments_db WHERE NOT EXISTS
+               (SELECT 1 FROM season_db s WHERE s.anime_id=comments_db.anime_id AND s.season_id=comments_db.season_id)", vec![]),
+        ]).await;
+        if r.is_ok() { config_put(env, "mig_orphan_comments2", "1").await; }
+    }
     // Janrlar 10 tadan 20 tagacha (11-janr saqlanmasdi) (2026-10).
     if ok && config_get(env, "mig_janr_20").await.is_none() {
         for i in 11..=20 {
@@ -14011,6 +14025,15 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
                                  vec![TursoArg::int(aid), TursoArg::int(sid)]),
                                 // Hamma foydalanuvchining tomosha tarixidan ham.
                                 ("DELETE FROM watch_history_db WHERE anime_id=? AND season_id=?",
+                                 vec![TursoArg::int(aid), TursoArg::int(sid)]),
+                                // Shu bo'limga yozilgan hamma izoh (javoblar bilan), layk va shikoyatlari.
+                                ("DELETE FROM comment_likes WHERE comment_id IN
+                                   (SELECT id FROM comments_db WHERE anime_id=? AND season_id=?)",
+                                 vec![TursoArg::int(aid), TursoArg::int(sid)]),
+                                ("DELETE FROM reports_db WHERE kind='comment' AND target_id IN
+                                   (SELECT id FROM comments_db WHERE anime_id=? AND season_id=?)",
+                                 vec![TursoArg::int(aid), TursoArg::int(sid)]),
+                                ("DELETE FROM comments_db WHERE anime_id=? AND season_id=?",
                                  vec![TursoArg::int(aid), TursoArg::int(sid)]),
                                 ("DELETE FROM season_db WHERE anime_id=? AND season_id=?",
                                  vec![TursoArg::int(aid), TursoArg::int(sid)]),
