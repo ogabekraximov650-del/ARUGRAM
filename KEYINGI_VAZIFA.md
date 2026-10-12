@@ -6012,3 +6012,13 @@ Eski bo'limlarda 11-janr tiklanmaydi — bo'limni tahrirlab qayta saqlang.
 yuborgan (foydalanuvchi: "o'sha bitta xabarni ham qoldirmasdan tozalayapti"; web esa to'g'ri ishlaydi).
 Endi web (`clearOldBotChat`) kabi: `GetHistory(100)` -> eng yangisini tashlab, qolganini aniq raqamlar bilan
 `DeleteMessages` (revoke, rad etilsa o'z tomonidan). Fayl: `rust/src/telegram.rs`. APK qayta yig'iladi.
+
+## Web: "Xotiradan foydalanish" ilovadagidek + jo'ja animatsiyasi (2026-10)
+
+`web/src/js/screens/storage.js` + `web/src/css/storage.css` ilovadagi `storage_screen.dart` ko'rinishiga keltirildi:
+sarlavhasiz appbar, halqa atrofida foiz yorlig'i, markazda "49,6 / MB", sarlavha + "ARUGRAM qurilma xotirasining ..."
+(brauzer kvotasiga nisbatan), ingichka chiziq, qatorlarda "Nom 90.09%" va to'q sariq hajm, toifalar ilovadagidek
+(Videolar / Posterlar / Emoji, GIF va stikerlar / Vaqtinchalik fayllar). Tozalashda pastdan parda: jo'ja
+(`chick.js`, shakllar `chick-parts.js` — `utyan_parts.dart` dan avtomatik olingan) chiqindini qutiga tashlaydi,
+foiz vaqtga bog'langan, halqa jo'ja bilan bo'shaydi. DIQQAT: web animatsiyasi SODDALASHTIRILGAN (4 sahna hajmga
+qarab, davomiylik ilovadagidek 7/13.5/16.5/22.5 s), ilovadagi qo'l-oyoq harakatlari to'liq ko'chirilmagan.
