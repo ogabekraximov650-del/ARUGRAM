@@ -1373,6 +1373,17 @@ async fn init_db(env: &Env) -> bool {
                    OR COALESCE(e.url_720p,'')<>'' OR COALESCE(e.url_1080p,'')<>'')),0)", vec![]).await;
         if r.is_ok() { config_put(env, "mig_last_ep_at2", "1").await; }
     }
+    // Allaqachon o'chirilgan animelarning yetim izohlari bir marta tozalanadi (2026-10).
+    if ok && config_get(env, "mig_orphan_comments").await.is_none() {
+        let r = turso_batch(env, &[
+            ("DELETE FROM comment_likes WHERE comment_id IN
+               (SELECT id FROM comments_db WHERE anime_id NOT IN (SELECT id FROM anime_db))", vec![]),
+            ("DELETE FROM reports_db WHERE kind='comment' AND target_id IN
+               (SELECT id FROM comments_db WHERE anime_id NOT IN (SELECT id FROM anime_db))", vec![]),
+            ("DELETE FROM comments_db WHERE anime_id NOT IN (SELECT id FROM anime_db)", vec![]),
+        ]).await;
+        if r.is_ok() { config_put(env, "mig_orphan_comments", "1").await; }
+    }
     // Janrlar 10 tadan 20 tagacha (11-janr saqlanmasdi) (2026-10).
     if ok && config_get(env, "mig_janr_20").await.is_none() {
         for i in 11..=20 {
@@ -14080,6 +14091,15 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
                         // 4. Hamma foydalanuvchining tomosha tarixidan ham.
                         let _ = turso_exec(&env, "DELETE FROM watch_history_db WHERE anime_id=?",
                             vec![TursoArg::int(id)]).await;
+                        // 5. Shu animega yozilgan HAMMA izohlar (javoblar bilan), ularning layklari va shikoyatlari.
+                        let _ = turso_batch(&env, &[
+                            ("DELETE FROM comment_likes WHERE comment_id IN (SELECT id FROM comments_db WHERE anime_id=?)",
+                             vec![TursoArg::int(id)]),
+                            ("DELETE FROM reports_db WHERE kind='comment'
+                               AND target_id IN (SELECT id FROM comments_db WHERE anime_id=?)",
+                             vec![TursoArg::int(id)]),
+                            ("DELETE FROM comments_db WHERE anime_id=?", vec![TursoArg::int(id)]),
+                        ]).await;
                         return ok(json!({"success": true}));
                     }
                 }
