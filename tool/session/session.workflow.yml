@@ -1,0 +1,36 @@
+name: Yangi Telegram sessiyasi
+
+# Kodlash botidagi "🔑 Yangi sessiya" tugmasi bosilganda worker ishga tushiradi
+# (`worker/src/sessionbot.rs`). Telefon raqami va kod workflow kiritmalarida EMAS —
+# run ularni worker'dan oladi. Yangi sessiya `tool/encode/session.enc` ga commit qilinadi.
+
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: arugram-session
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  session:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      API_BASE: ${{ secrets.API_BASE || 'https://arugram.uzcom.workers.dev' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Python paketlari
+        run: pip install --no-cache-dir -r tool/encode/requirements.txt
+      - name: Yangi sessiya
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+          PYTHONUNBUFFERED: '1'
+        run: python3 tool/session/session.py

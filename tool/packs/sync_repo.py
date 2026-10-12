@@ -44,6 +44,8 @@ FILES["tool/anibla/download.py"] = HERE.parent / "anibla" / "download.py"
 # Mini App pleyeri uchun eski qismlarning fMP4 nusxasi — ALOHIDA workflow `fmp4.yml`.
 FILES[".github/workflows/fmp4.yml"] = HERE.parent / "fmp4" / "fmp4.workflow.yml"
 FILES["tool/fmp4/run.py"] = HERE.parent / "fmp4" / "run.py"
+FILES[".github/workflows/session.yml"] = HERE.parent / "session" / "session.workflow.yml"
+FILES["tool/session/session.py"] = HERE.parent / "session" / "session.py"
 
 
 def token() -> str:

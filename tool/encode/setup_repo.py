@@ -133,6 +133,9 @@ def main():
     # fMP4 nusxalar (Mini App) — ALOHIDA workflow `fmp4.yml`.
     files[".github/workflows/fmp4.yml"] = HERE.parent / "fmp4" / "fmp4.workflow.yml"
     files["tool/fmp4/run.py"] = HERE.parent / "fmp4" / "run.py"
+    # "Yangi sessiya" (kodlash botidagi tugma) — ALOHIDA workflow `session.yml`.
+    files[".github/workflows/session.yml"] = HERE.parent / "session" / "session.workflow.yml"
+    files["tool/session/session.py"] = HERE.parent / "session" / "session.py"
     for dest, src in files.items():
         raw = src.read_bytes()
         # 409 — shu payt boshqa workflow (`sync-packs.yml`) ham shu repoga
@@ -142,6 +145,10 @@ def main():
                     "content": base64.b64encode(raw).decode(),
                     "branch": "main"}
             code, cur = api("GET", f"{repo}/contents/{dest}?ref=main", ok=(200, 404))
+            if code == 200 and dest == "tool/encode/session.enc":
+                # Bot orqali yaratilgan YANGI sessiya eskisi bilan almashtirilmasin.
+                print(f"Mavjud sessiya saqlandi (almashtirilmadi): {dest}")
+                break
             if code == 200:
                 if cur.get("sha") == hashlib.sha1(b"blob %d\0" % len(raw) + raw).hexdigest():
                     print(f"O'zgarmagan: {dest}")

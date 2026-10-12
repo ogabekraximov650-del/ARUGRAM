@@ -835,8 +835,6 @@ async fn show_item(env: &Env, chat: i64, mut nav: Nav) {
         }
     }
     let Some(it) = cur_item(&nav) else { return };
-    trace(env, chat, &format!("T0 anime tanlandi: {} | info {} belgi, tavsif {} belgi",
-        it.s, visible_len(&it.info), visible_len(&it.about))).await;
     if it.movie() {
         nav.j = -1;
         nav.k = -1;
@@ -853,12 +851,7 @@ async fn show_item(env: &Env, chat: i64, mut nav: Nav) {
         }
         return;
     }
-    trace(env, chat, "T0b fasllar so'ralmoqda").await;
-    let t0 = now_ms();
-    let got = seasons(env, &it.s).await;
-    trace(env, chat, &format!("T0c fasllar javobi ({} ms): {}", now_ms() - t0,
-        match &got { Ok(ss) => format!("{} ta", ss.len()), Err(e) => e.clone() })).await;
-    match got {
+    match seasons(env, &it.s).await {
         Ok(ss) if ss.len() > 1 => {
             // Rasm, tavsif va fasl tugmalari BITTA xabarda (foydalanuvchi
             // talabi: "anime ustiga bosilganda rasmi bilan chiqsin").
@@ -895,7 +888,6 @@ async fn show_seasons(env: &Env, chat: i64, mut nav: Nav) {
 /// Qismlar: qatorga 3 tadan, `EP_PAGE` tadan sahifa. `card` — muqova bilan.
 async fn show_eps(env: &Env, chat: i64, mut nav: Nav, card: bool) {
     let Some(it) = cur_item(&nav) else { return };
-    trace(env, chat, "T1 show_eps boshlandi").await;
     let ss = match seasons(env, &it.s).await {
         Ok(ss) => ss,
         Err(e) => { encbot_send(env, chat, &format!("\u{274C} {}", html_escape(&e)), None).await; return; }
@@ -906,7 +898,6 @@ async fn show_eps(env: &Env, chat: i64, mut nav: Nav, card: bool) {
         Ok(_) => { encbot_send(env, chat, "\u{1F937} Bu faslda qismlar topilmadi.", None).await; return; }
         Err(e) => { encbot_send(env, chat, &format!("\u{274C} {}", html_escape(&e)), None).await; return; }
     };
-    trace(env, chat, &format!("T2 qismlar olindi: {}", eps.len())).await;
     // Teskari tartib (foydalanuvchi talabi): eng yangi qism birinchi — 10, 9, 8 ...
     eps.reverse();
     let pages = eps.len().div_ceil(EP_PAGE).max(1) as i64;
@@ -925,9 +916,7 @@ async fn show_eps(env: &Env, chat: i64, mut nav: Nav, card: bool) {
     let text = format!("{}\n{} \u{00B7} {} ta qism{}\n\n\u{2B07}\u{FE0F} Qismni pastdagi paneldan tanlang (eng yangisi birinchi):",
         item_head(&it, card), html_escape(&season_label(season)), eps.len(),
         if pages > 1 { format!(" \u{00B7} {}\u{2013}{}-qismlar", part[0].num, part[part.len() - 1].num) } else { String::new() });
-    trace(env, chat, &format!("T3 send_list: matn {} belgi, tugma qatori {}", visible_len(&text), rows.len())).await;
     send_list(env, chat, &text, top, rows, true, if card { Some(&it) } else { None }).await;
-    trace(env, chat, "T4 send_list tugadi").await;
 }
 
 /// Qism tanlandi: sifatlar (qatorga bitta).
@@ -1092,11 +1081,6 @@ async fn try_send(env: &Env, chat: i64, text: &str, markup: &Value, card: Option
     Err(msg)
 }
 
-/// VAQTINCHALIK tashxis: qismlar paneli yuborilmayotgan muammo uchun (olib tashlanadi).
-async fn trace(env: &Env, chat: i64, msg: &str) {
-    encbot_send(env, chat, &format!("\u{1F50E} {}", html_escape(msg)), None).await;
-}
-
 /// Telegram HTML'idan oddiy matn (teglar olib tashlanadi, `&lt;` kabilar qaytariladi).
 fn strip_html(s: &str) -> String {
     let mut out = String::new();
@@ -1128,9 +1112,6 @@ async fn send_list(env: &Env, chat: i64, text: &str, top: Vec<Vec<String>>, item
             let r = encbot_api(env, "sendPhoto", json!({
                 "chat_id": chat, "photo": img_url(&it.img), "caption": c, "parse_mode": "HTML",
             })).await;
-            trace(env, chat, &format!("S1 rasm: {} | izoh {} belgi, qolgan matn {} belgi",
-                match &r { Ok(_) => "ok".to_string(), Err(e) => e.to_string() },
-                visible_len(&c), visible_len(&rest))).await;
             if r.is_ok() {
                 text = rest;
                 card = None;
@@ -1152,10 +1133,13 @@ async fn send_list(env: &Env, chat: i64, text: &str, top: Vec<Vec<String>>, item
                      ko'rsatildi. Qolganini nom yozib qidiring.")
         } else { text.to_string() };
         let r = try_send(env, chat, &t, &panel(rows, back), card).await;
-        trace(env, chat, &format!("S2 panel cap={cap}: {}", match &r { Ok(()) => "ok".to_string(), Err(e) => e.clone() })).await;
         match r {
             Ok(()) => return,
-            Err(e) => last_err = e,
+            Err(e) => {
+                last_err = e;
+                // Telegram flood chegarasi (429): qayta urinish uni YANADA uzaytiradi — to'xtaymiz.
+                if last_err.contains("Too Many Requests") { break; }
+            }
         }
     }
     encbot_send(env, chat, &format!(

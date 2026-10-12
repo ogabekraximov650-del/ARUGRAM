@@ -5948,3 +5948,19 @@ Narxi: har run asl videoni qayta yuklab oladi (Telegram'dan, ~3-4 daqiqa) va wor
 (ffmpeg, pip) qayta bajariladi. Eski tartib: `ONE_QUALITY_PER_RUN=0` (workflow `env` ga).
 Fayllar: `tool/encode/run.py` (`ONE_QUALITY_PER_RUN`, `STOP_RUN`, `process`, `main`).
 Eslatma: o'zgarish avtoencode repoga `tool/encode/setup_repo.py` orqali ko'chiriladi.
+
+## Kodlash boti: "🔑 Yangi sessiya" (2026-10)
+
+Nima: botning bosh menyusida yangi tugma. Bosilsa bot telefon raqamini so'raydi -> worker
+`session.yml` (avtoencode repoda) ni ishga tushiradi -> run raqamga Telegram kodini yuboradi ->
+kod botga yuboriladi (probel bilan: `1 2 3 4 5`, aks holda Telegram bekor qiladi; xabar o'chiriladi)
+-> 2FA bo'lsa parol so'raladi -> run yangi sessiyani `ENCODE_TOKEN` bilan shifrlab
+`tool/encode/session.enc` ga commit qiladi (hamma workflow shu fayldan oladi).
+Nega Actions: worker (WASM) MTProto kirishni o'zi bajara olmaydi; Pyrogram run'da ishlaydi.
+Holat `app_config` da (`sess_state`, `sess_phone`, `sess_code`, `sess_pw`, `sess_at`, TTL 20 daqiqa),
+run `/api/session/poll` va `/api/session/report` orqali (X-Encode-Token). Raqam/kod workflow
+kiritmalarida YO'Q.
+`setup_repo.py` mavjud `session.enc` ni ALMASHTIRMAYDI (bot yaratgan yangi sessiya yo'qolmasin).
+Fayllar: `worker/src/sessionbot.rs`, `worker/src/postbot.rs` (menyu), `worker/src/lib.rs` (marshrut va
+bot), `tool/session/{session.py,session.workflow.yml}`, `tool/encode/setup_repo.py`,
+`tool/packs/sync_repo.py`, `.github/workflows/sync-packs.yml`.

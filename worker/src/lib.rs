@@ -37,6 +37,7 @@ mod packs;
 mod channels;
 mod postbot;
 mod announce;
+mod sessionbot;
 // anibla.uz dan qidirib yuklash (kodlash botining uchinchi bo'limi).
 mod anibla;
 // Uchala bo'lim uchun bitta jonli "Holat" xabari.
@@ -12068,6 +12069,16 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
         anibla::menu(env, chat).await;
         return ok(json!({"ok": true}));
     }
+    // "🔑 Yangi sessiya" (`sessionbot.rs`): raqam -> kod -> yangi Telegram sessiyasi.
+    if text == sessionbot::BTN {
+        sessionbot::start(env, chat).await;
+        return ok(json!({"ok": true}));
+    }
+    if config_get(env, "encbot_mode").await.as_deref() == Some("sess")
+        && sessionbot::on_message(env, msg, chat).await
+    {
+        return ok(json!({"ok": true}));
+    }
     // Majburiy obunalar (`channels.rs`) — kanal qo'shish, limit, o'chirish.
     if text == channels::BTN_CHANNELS || text == "/kanallar" {
         config_put(env, "encbot_mode", "chan").await;
@@ -13284,6 +13295,10 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
 
     if path.starts_with("/api/anibla/") {
         return anibla::route(req, &env, path, method.clone()).await;
+    }
+
+    if path.starts_with("/api/session/") {
+        return sessionbot::route(req, &env, path, method.clone()).await;
     }
 
     if path.starts_with("/api/packs/") {
