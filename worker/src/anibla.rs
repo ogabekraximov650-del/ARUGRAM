@@ -1038,22 +1038,56 @@ async fn send_photo_card(env: &Env, chat: i64, it: &Item, text: &str, markup: Op
         body["reply_markup"] = m.clone();
     }
     // Rasm ketdi — ikkinchi xabar o'tmasa ham `true` (aks holda chaqiruvchi
-    // hammasini rasmsiz qayta yuborib, takror chiqarardi).
-    let _ = encbot_api(env, "sendMessage", body).await;
+    // hammasini rasmsiz qayta yuborib, takror chiqarardi). Lekin xato JIM qolmaydi:
+    // avval oddiy matn (HTML'siz) bilan qayta uriniladi, bo'lmasa sababi chatga yoziladi.
+    if let Err(e) = encbot_api(env, "sendMessage", body.clone()).await {
+        let mut plain = body.clone();
+        plain["text"] = json!(strip_html(&rest));
+        plain.as_object_mut().map(|o| o.remove("parse_mode"));
+        if let Err(e2) = encbot_api(env, "sendMessage", plain).await {
+            encbot_send(env, chat, &format!(
+                "\u{274C} Ro'yxatni yuborib bo'lmadi: {} / {}", html_escape(&e.to_string()), html_escape(&e2.to_string())), None).await;
+        }
+    }
     true
 }
 
 /// Xabar (muqova bilan yoki oddiy) yuboradi; muvaffaqiyatini qaytaradi.
-async fn try_send(env: &Env, chat: i64, text: &str, markup: &Value, card: Option<&Item>) -> bool {
+async fn try_send(env: &Env, chat: i64, text: &str, markup: &Value, card: Option<&Item>) -> std::result::Result<(), String> {
     if let Some(it) = card {
         if send_photo_card(env, chat, it, text, Some(markup)).await {
-            return true;
+            return Ok(());
         }
     }
-    encbot_api(env, "sendMessage", json!({
+    let first = encbot_api(env, "sendMessage", json!({
         "chat_id": chat, "text": text, "parse_mode": "HTML",
         "disable_web_page_preview": true, "reply_markup": markup,
-    })).await.is_ok()
+    })).await;
+    let Err(e) = first else { return Ok(()) };
+    let msg = e.to_string();
+    // Matndagi belgilar HTML'ni buzsa (tavsifda `<`, `&` va h.k.) — oddiy matn bilan.
+    if msg.contains("parse entities") {
+        return encbot_api(env, "sendMessage", json!({
+            "chat_id": chat, "text": strip_html(text),
+            "disable_web_page_preview": true, "reply_markup": markup,
+        })).await.map(|_| ()).map_err(|e| e.to_string());
+    }
+    Err(msg)
+}
+
+/// Telegram HTML'idan oddiy matn (teglar olib tashlanadi, `&lt;` kabilar qaytariladi).
+fn strip_html(s: &str) -> String {
+    let mut out = String::new();
+    let mut tag = false;
+    for c in s.chars() {
+        match c {
+            '<' => tag = true,
+            '>' if tag => tag = false,
+            _ if tag => {}
+            _ => out.push(c),
+        }
+    }
+    out.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
 }
 
 /// Uzun ro'yxatni pastki panelga chiqaradi. Telegram panelga tugmalar sonini
@@ -1079,6 +1113,7 @@ async fn send_list(env: &Env, chat: i64, text: &str, top: Vec<Vec<String>>, item
         }
     }
     let text = text.as_str();
+    let mut last_err = String::new();
     for cap in [usize::MAX, 150, 100, 60] {
         let mut rows = top.clone();
         let mut shown = 0usize;
@@ -1091,11 +1126,13 @@ async fn send_list(env: &Env, chat: i64, text: &str, top: Vec<Vec<String>>, item
             format!("{text}\n\n\u{26A0}\u{FE0F} Telegram paneli cheklovi: {total} tadan faqat birinchi {shown} tasi \
                      ko'rsatildi. Qolganini nom yozib qidiring.")
         } else { text.to_string() };
-        if try_send(env, chat, &t, &panel(rows, back), card).await {
-            return;
+        match try_send(env, chat, &t, &panel(rows, back), card).await {
+            Ok(()) => return,
+            Err(e) => last_err = e,
         }
     }
-    encbot_send(env, chat, "\u{274C} Ro'yxatni yuborib bo'lmadi. Nom yozib qidiring.", None).await;
+    encbot_send(env, chat, &format!(
+        "\u{274C} Ro'yxatni yuborib bo'lmadi: {}\nNom yozib qidiring.", html_escape(&last_err)), None).await;
 }
 
 /// Muqova rasmi bilan (bo'lmasa oddiy matn).
