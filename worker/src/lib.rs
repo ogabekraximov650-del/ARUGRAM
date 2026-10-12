@@ -880,6 +880,8 @@ async fn init_db(env: &Env) -> bool {
             anime_id INTEGER, season_id INTEGER,
             janr_1 TEXT, janr_2 TEXT, janr_3 TEXT, janr_4 TEXT, janr_5 TEXT,
             janr_6 TEXT, janr_7 TEXT, janr_8 TEXT, janr_9 TEXT, janr_10 TEXT,
+            janr_11 TEXT, janr_12 TEXT, janr_13 TEXT, janr_14 TEXT, janr_15 TEXT,
+            janr_16 TEXT, janr_17 TEXT, janr_18 TEXT, janr_19 TEXT, janr_20 TEXT,
             PRIMARY KEY (anime_id, season_id)
         )", vec![]),
     ]).await.is_ok();
@@ -1370,6 +1372,14 @@ async fn init_db(env: &Env) -> bool {
                  AND (COALESCE(e.url_360p,'')<>'' OR COALESCE(e.url_480p,'')<>''
                    OR COALESCE(e.url_720p,'')<>'' OR COALESCE(e.url_1080p,'')<>'')),0)", vec![]).await;
         if r.is_ok() { config_put(env, "mig_last_ep_at2", "1").await; }
+    }
+    // Janrlar 10 tadan 20 tagacha (11-janr saqlanmasdi) (2026-10).
+    if ok && config_get(env, "mig_janr_20").await.is_none() {
+        for i in 11..=20 {
+            let _ = turso_exec(env,
+                &format!("ALTER TABLE season_janr ADD COLUMN janr_{i} TEXT"), vec![]).await;
+        }
+        config_put(env, "mig_janr_20", "1").await;
     }
     // Anime qo'shilgan vaqt: yangi anime ro'yxatda eng tepaga chiqadi (2026-10).
     if ok && config_get(env, "mig_anime_created_at").await.is_none() {
@@ -3354,13 +3364,13 @@ fn janr_list(b: &Value, janri_text: &str) -> Vec<String> {
     }
     // Alifbo tartibida — ilovadagi tugmalar bilan bir xil ko'rinsin.
     out.sort();
-    // Jadvalda 10 ta ustun bor, ortig'i sig'maydi.
-    out.truncate(JANR_SLOTS);
+    // Ro'yxat qirqilmaydi (`janri` matni to'liq saqlanadi); `season_janr` ga
+    // faqat dastlabki `JANR_SLOTS` tasi yoziladi (`save_janrs`).
     out
 }
 
 /// `season_janr` dagi janr ustunlari soni.
-const JANR_SLOTS: usize = 10;
+const JANR_SLOTS: usize = 20;
 
 /// Bo'limning janrlarini BITTA qatorga yozadi.
 ///
@@ -3375,18 +3385,14 @@ async fn save_janrs(env: &Env, anime_id: i64, season_id: i64, janrs: &[String]) 
     for i in 0..JANR_SLOTS {
         args.push(TursoArg::text(janrs.get(i).map(|s| s.as_str()).unwrap_or("")));
     }
-    let _ = turso_exec(env,
-        "INSERT INTO season_janr
-            (anime_id,season_id,janr_1,janr_2,janr_3,janr_4,janr_5,
-             janr_6,janr_7,janr_8,janr_9,janr_10)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-         ON CONFLICT(anime_id,season_id) DO UPDATE SET
-            janr_1=excluded.janr_1, janr_2=excluded.janr_2,
-            janr_3=excluded.janr_3, janr_4=excluded.janr_4,
-            janr_5=excluded.janr_5, janr_6=excluded.janr_6,
-            janr_7=excluded.janr_7, janr_8=excluded.janr_8,
-            janr_9=excluded.janr_9, janr_10=excluded.janr_10",
-        args).await;
+    let cols: Vec<String> = (1..=JANR_SLOTS).map(|i| format!("janr_{i}")).collect();
+    let marks = vec!["?"; JANR_SLOTS + 2].join(",");
+    let sets: Vec<String> = cols.iter().map(|c| format!("{c}=excluded.{c}")).collect();
+    let sql = format!(
+        "INSERT INTO season_janr (anime_id,season_id,{}) VALUES ({marks})
+         ON CONFLICT(anime_id,season_id) DO UPDATE SET {}",
+        cols.join(","), sets.join(","));
+    let _ = turso_exec(env, &sql, args).await;
 }
 
 /// Yosh chegarasini har qanday ko'rinishdan songa aylantiradi.

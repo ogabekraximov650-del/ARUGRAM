@@ -5998,3 +5998,10 @@ Yangi anime (qismsiz) `last_ep_at=0` bo'lgani uchun ro'yxat tagiga tushib qolard
 MAX(anime.created_at, bo'lim `last_ep_at`, bo'lim `created_at`) — yangi anime, yangi bo'lim yoki yangi
 kodlangan qism joylansa anime tepaga chiqadi. Joylar: `GET /api/anime`, `encbot_anime_page`, `GET /api/seasons`
 (`worker/src/lib.rs`). Eski animelarda `created_at=0` — ular avvalgi tartibda qoladi.
+
+## 11-janr saqlanmasdi — tuzatish (2026-10)
+
+`janr_list` janrlarni 10 taga qirqardi (`season_janr` da 10 ustun) va `season_db.janri` matni ham shu
+qirqilgan ro'yxatdan yig'ilardi. Endi `janri` matni to'liq saqlanadi, `season_janr` 20 ustunga
+kengaytirildi (`janr_11..janr_20`, migratsiya `mig_janr_20`, `JANR_SLOTS=20`). Fayl: `worker/src/lib.rs`.
+Eski bo'limlarda 11-janr tiklanmaydi — bo'limni tahrirlab qayta saqlang.
