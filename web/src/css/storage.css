@@ -1,35 +1,45 @@
 /* Xotiradan foydalanish (`storage.js`) — ilovadagi `storage_screen.dart` bilan bir xil ko'rinish */
-.sg-in { padding: 8px 16px 0; }
-.sg-chart { position: relative; width: 240px; height: 240px; margin: 28px auto 24px; }
-.sg-ring { width: 100%; height: 100%; }
-.sg-ring circle { transition: stroke-width 160ms; }
-.sg-pl { position: absolute; transform: translate(-50%, -50%); font-size: 14px; font-weight: 700; white-space: nowrap; }
-.sg-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 0 60px; }
-.sg-center b { color: #fff; font-size: 44px; font-weight: 700; line-height: 1.05; }
-.sg-center span { color: rgba(255, 255, 255, 0.55); font-size: 15px; margin-top: 2px; }
-.sg-h { text-align: center; font-size: 20px; font-weight: 700; margin-top: 6px; }
-.sg-sub { text-align: center; color: #8a8a8e; font-size: 13px; margin: 6px 24px 0; }
-.sg-bar { width: min(174px, 80%); height: 4px; margin: 12px auto 18px; border-radius: 2px; background: rgba(255, 255, 255, 0.1); overflow: hidden; }
-.sg-bar i { display: block; height: 100%; background: var(--accent); border-radius: 2px; }
-.sg-list { overflow: hidden; }
-.sg-row { display: flex; align-items: center; gap: 12px; height: 50px; padding: 0 21px 0 15px; cursor: pointer; transition: background 140ms; position: relative; }
-.sg-row:not(:last-child)::after { content: ''; position: absolute; left: 60px; right: 0; bottom: 0; height: 1px; background: #000; }
+.sg-route { background: var(--bg); }
+.sg-top { background: var(--card); flex-shrink: 0; position: relative; }
+.sg-top .appbar-title .t { font-size: 20px; font-weight: 600; opacity: 0; transition: opacity 200ms; }
+.sg-top.pinned .appbar-title .t { opacity: 1; }
+.sg-top::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: #000; opacity: 0; transition: opacity 200ms; }
+.sg-top.pinned::after { opacity: 1; }
+.sg-card { background: var(--card); }
+.sg-chartbox { height: 270px; }
+.sg-head { padding-bottom: 8px; text-align: center; }
+.sg-h { font-size: 20px; font-weight: 700; margin-top: 0; }
+.sg-sub { color: #8a8a8e; font-size: 13px; margin: 6px 24px 0; }
+.sg-bar { position: relative; width: min(174px, 80%); height: 4px; margin: 12px auto 0; }
+.sg-bar i { position: absolute; top: 0; bottom: 0; }
+.sg-rows { overflow: hidden; }
+.sg-row { display: flex; align-items: center; height: 50px; padding: 0 21px 0 15px; cursor: pointer; transition: background 140ms; position: relative; }
 .sg-row.hi { background: rgba(255, 255, 255, 0.08); }
-.sg-chk { width: 24px; height: 24px; margin: 0 6px 0 6px; border-radius: 50%; border: 2px solid var(--c); display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-sizing: border-box; }
-.sg-chk.on { background: var(--c); }
-.sg-t { flex: 1; color: #fff; font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sg-t b { font-size: 13.3px; font-weight: 700; margin-left: 8px; }
-.sg-s { color: var(--accent2); font-size: 16px; }
-.sg-btn { width: 100%; height: 50px; margin-top: 18px; border: 0; border-radius: 16px; background: var(--accent); color: #fff; font: inherit; font-size: 16px; font-weight: 700; cursor: pointer; }
-.sg-btn:disabled { opacity: 0.5; }
-.sg-note { color: #8a8a8e; font-size: 14.5px; line-height: 1.4; margin: 16px 4px 0; }
+.sg-row.dv::after { content: ''; position: absolute; left: 60px; right: 0; bottom: 0; height: 1px; background: #000; }
+.sg-chk { width: 21px; height: 21px; box-sizing: border-box; margin: 0 18px 0 6px; border-radius: 50%; border: 1.5px solid #8a8a8e; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: background 200ms, border-color 200ms; }
+.sg-chk svg { transform: scale(0); transition: transform 200ms; }
+.sg-chk.on { background: var(--c); border-color: var(--c); }
+.sg-chk.on svg { transform: scale(1); }
+.sg-t { flex: 1; min-width: 0; color: #fff; font-size: 16px; white-space: pre; overflow: hidden; text-overflow: ellipsis; }
+.sg-t b { font-size: 13.3px; font-weight: 700; margin-left: 10px; }
+.sg-s { color: var(--accent2); font-size: 16px; margin-left: 8px; }
+.sg-row.ld { cursor: default; }
+.sg-row.ld .sp { flex: 1; }
+.sg-row .ldb { display: block; height: 10px; border-radius: 5px; background: rgba(255, 255, 255, 0.08); }
+.sg-row .ldb.sg-chk { height: 21px; border: 0; border-radius: 50%; }
+.sg-row .w140 { width: 140px; } .sg-row .w48 { width: 48px; }
+.sg-btnbox { padding: 21px 16px 16px; }
+.sg-btn { width: 100%; height: 48px; border: 0; border-radius: 24px; background: var(--accent2); color: #fff; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; transition: opacity 200ms; }
+.sg-btn span { margin-left: 10px; color: rgb(246, 224, 207); }
+.sg-btn.dis { opacity: 0.5; }
+.sg-info { padding: 10px 21px 17px; }
+.sg-note { color: #8a8a8e; font-size: 14px; line-height: 1.3; }
 
 /* "Kesh tozalanmoqda" pardasi (jo'ja animatsiyasi) */
-.ch-sheet { position: fixed; left: 0; right: 0; bottom: 0; height: 50%; z-index: 50; background: var(--card, #1c1c1e); border-radius: 12px 12px 0 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 12px; box-sizing: border-box; box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.45); }
+.ch-sheet { position: fixed; left: 0; right: 0; bottom: 0; height: 50%; z-index: 50; background: var(--card, #151517); border-radius: 12px 12px 0 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 12px; box-sizing: border-box; box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.45); }
 .ch-host { width: min(440px, 100%); aspect-ratio: 2 / 1; }
-.ch-svg { width: 100%; height: 100%; display: block; }
-.ch-pct { margin-top: 10px; height: 32px; font-size: 24px; font-weight: 700; color: #fff; }
-.ch-bar { width: 240px; height: 5px; margin-top: 12px; border-radius: 3px; background: rgba(255, 138, 40, 0.2); overflow: hidden; }
+.ch-pct { margin-top: 10px; height: 32px; font-size: 24px; font-weight: 700; color: #fff; text-align: center; }
+.ch-bar { width: 240px; height: 5px; margin-top: 12px; border-radius: 3px; background: rgba(226, 98, 15, 0.2); overflow: hidden; }
 .ch-bar i { display: block; height: 100%; width: 0; background: var(--accent2); }
 .ch-t { margin-top: 30px; font-size: 16px; font-weight: 700; color: #fff; }
 .ch-d { margin-top: 10px; width: 240px; text-align: center; font-size: 14px; color: #fff; }

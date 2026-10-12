@@ -6034,3 +6034,11 @@ rasmsiz "Bo'lim" kartalari) bir martalik migratsiya `mig_orphan_comments` bilan 
 
 Bo'lim (`season_db`) o'chirilganda unga yozilgan hamma izoh (javoblar bilan), layk va shikoyatlar ham o'chadi;
 bo'limi allaqachon yo'q izohlar bir martalik migratsiya `mig_orphan_comments2` bilan tozalanadi. Fayl: `worker/src/lib.rs`.
+
+## Web "Xotiradan foydalanish" — ilova bilan aynan bir xil (2026-10)
+
+`web/src/js/screens/storage-chart.js` — `_CacheChart`/`_ChartPainter` ning Canvas 2D nusxasi (bo'laklar ulangan holda 3200 ms
+siljiydi, zarrachalar, bosilganda 9 px kattalashish, halqa tashqarisidagi foizlar ustma-ust tushmaydi, o'rtada hajm, yashil
+"tayyor" belgi, tozalashda halqa jo'ja bilan bo'shaydi). `storage.js` — sahifa tuzilishi `storage_screen.dart` dagidek:
+sarlavha 230 px dan keyin yuqori panelga chiqadi, ulush chizig'i (ilova / boshqa / bo'sh), qatorlar hajm bo'yicha kamayish
+tartibida, pill tugma, kulrang izoh. Webda "Emoji, GIF va stikerlar" ichki bo'limlarga ochilmaydi (kesh ularni ajratmaydi).
