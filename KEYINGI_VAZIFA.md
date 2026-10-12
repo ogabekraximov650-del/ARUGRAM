@@ -5982,3 +5982,11 @@ Qismlar ro'yxati pastki panel o'rniga xabar ostidagi inline tugmalarda (5 tadan 
 panel jami 150 tugmagacha (150 qism + ~6 boshqaruv = 156 rad etilib, keyin 429 flood bergan edi); inline
 chegara 100. Pastki panelda faqat Orqaga/Bosh menyu qoladi. Fayl: `worker/src/anibla.rs` (`ep_list`, `ep_markup`,
 `show_eps`, `on_callback`). Fasl va sifat tugmalari hozircha pastki panelda.
+
+## Kodlash boti tokeni shifrlangan faylda (2026-10)
+
+Eski panel bot Telegram flood (429) bloklashiga tushgani uchun yangi bot (`@arumediatvpanelbot`) ulandi.
+Token `tool/bot/encode_bot.enc` (AES-256-CBC, PBKDF2, kalit — `ENCODE_TOKEN`) da; `deploy-worker.yml`
+uni ochib `ENCODE_BOT_TOKEN` ga qo'yadi (GitHub Secret'dan ustun). Almashtirish: faylni qayta shifrlang
+(`main_bot.enc` kabi). Yangi bot yopiq kanalda ADMIN bo'lishi va adminga /start bosilgan bo'lishi kerak;
+webhook worker'ning o'zi (`ensure_encbot_webhook`) o'rnatadi.
