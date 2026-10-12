@@ -760,7 +760,8 @@ async fn init_db(env: &Env) -> bool {
         ("CREATE TABLE IF NOT EXISTS anime_db (
             id INTEGER PRIMARY KEY,
             photo_url TEXT, name TEXT, davlat TEXT, studiya TEXT,
-            janri TEXT, tavsif TEXT
+            janri TEXT, tavsif TEXT,
+            created_at INTEGER DEFAULT 0
         )", vec![]),
         // Indeks yo'q: ro'yxat `ORDER BY id DESC LIMIT 100` (PK),
         // qidiruv esa ILOVANING O'ZIDA (Rust yadrosi) bajariladi.
@@ -1369,6 +1370,12 @@ async fn init_db(env: &Env) -> bool {
                  AND (COALESCE(e.url_360p,'')<>'' OR COALESCE(e.url_480p,'')<>''
                    OR COALESCE(e.url_720p,'')<>'' OR COALESCE(e.url_1080p,'')<>'')),0)", vec![]).await;
         if r.is_ok() { config_put(env, "mig_last_ep_at2", "1").await; }
+    }
+    // Anime qo'shilgan vaqt: yangi anime ro'yxatda eng tepaga chiqadi (2026-10).
+    if ok && config_get(env, "mig_anime_created_at").await.is_none() {
+        let _ = turso_exec(env,
+            "ALTER TABLE anime_db ADD COLUMN created_at INTEGER DEFAULT 0", vec![]).await;
+        config_put(env, "mig_anime_created_at", "1").await;
     }
     // Avto-kodlash: qismning asl (original) videosi (2026-09).
     if ok && config_get(env, "mig_origin_video").await.is_none() {
@@ -11673,7 +11680,7 @@ async fn encbot_anime_page(env: &Env, page: i64) -> (String, Value) {
     let res = turso_exec(env,
         "SELECT a.id, a.name FROM anime_db a
           WHERE EXISTS (SELECT 1 FROM season_db s WHERE s.anime_id=a.id)
-          ORDER BY (SELECT MAX(s.last_ep_at) FROM season_db s WHERE s.anime_id=a.id) DESC, a.id DESC
+          ORDER BY MAX(COALESCE(a.created_at,0), COALESCE((SELECT MAX(MAX(COALESCE(s.last_ep_at,0), COALESCE(s.created_at,0))) FROM season_db s WHERE s.anime_id=a.id),0)) DESC, a.id DESC
           LIMIT ? OFFSET ?",
         vec![TursoArg::int(ENCBOT_PAGE + 1), TursoArg::int(page * ENCBOT_PAGE)]).await;
     let rows = res.map(|r| rows_of(&r)).unwrap_or_default();
@@ -13541,7 +13548,7 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
 
         // ── anime_db ──────────────────────────────────────────
         (Method::Get, "/api/anime") => {
-            let res = turso_exec(&env, "SELECT * FROM anime_db a ORDER BY COALESCE((SELECT MAX(s.last_ep_at) FROM season_db s WHERE s.anime_id=a.id),0) DESC, a.id DESC LIMIT 100", vec![]).await?;
+            let res = turso_exec(&env, "SELECT * FROM anime_db a ORDER BY MAX(COALESCE(a.created_at,0), COALESCE((SELECT MAX(MAX(COALESCE(s.last_ep_at,0), COALESCE(s.created_at,0))) FROM season_db s WHERE s.anime_id=a.id),0)) DESC, a.id DESC LIMIT 100", vec![]).await?;
             let cols = res["cols"].as_array().cloned().unwrap_or_default();
             let rows = res["rows"].as_array().cloned().unwrap_or_default();
             let items = rows.iter().map(|r| row_to_obj(&cols, r.as_array().unwrap_or(&vec![]))).collect::<Vec<_>>();
@@ -13553,8 +13560,8 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
             let b: Value = req.json().await?;
             let new_id = next_anime_id(&env).await?;
             let res = turso_exec(&env,
-                "INSERT INTO anime_db (id,photo_url,name,davlat,studiya,janri,tavsif)
-                 VALUES (?,?,?,?,?,?,?) RETURNING *",
+                "INSERT INTO anime_db (id,photo_url,name,davlat,studiya,janri,tavsif,created_at)
+                 VALUES (?,?,?,?,?,?,?,?) RETURNING *",
                 vec![
                     TursoArg::int(new_id),
                     TursoArg::text(b["photo_url"].as_str().unwrap_or("")),
@@ -13563,6 +13570,7 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
                     TursoArg::text(b["studiya"].as_str().unwrap_or("")),
                     TursoArg::text(b["janri"].as_str().unwrap_or("")),
                     TursoArg::text(b["tavsif"].as_str().unwrap_or("")),
+                    TursoArg::int(now_ms()),
                 ],
             ).await?;
             let cols = res["cols"].as_array().cloned().unwrap_or_default();
@@ -13589,7 +13597,7 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
 
         // ── season_db ──────────────────────────────────────────
         (Method::Get, "/api/seasons") => {
-            let res = turso_exec(&env, "SELECT * FROM season_db ORDER BY last_ep_at DESC, anime_id DESC, season_id ASC LIMIT 200", vec![]).await?;
+            let res = turso_exec(&env, "SELECT * FROM season_db ORDER BY MAX(COALESCE(last_ep_at,0), COALESCE(created_at,0)) DESC, anime_id DESC, season_id ASC LIMIT 200", vec![]).await?;
             let cols = res["cols"].as_array().cloned().unwrap_or_default();
             let rows = res["rows"].as_array().cloned().unwrap_or_default();
             let mut items = rows.iter().map(|r| row_to_obj(&cols, r.as_array().unwrap_or(&vec![]))).collect::<Vec<_>>();

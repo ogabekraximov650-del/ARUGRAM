@@ -5990,3 +5990,11 @@ Token `tool/bot/encode_bot.enc` (AES-256-CBC, PBKDF2, kalit — `ENCODE_TOKEN`) 
 uni ochib `ENCODE_BOT_TOKEN` ga qo'yadi (GitHub Secret'dan ustun). Almashtirish: faylni qayta shifrlang
 (`main_bot.enc` kabi). Yangi bot yopiq kanalda ADMIN bo'lishi va adminga /start bosilgan bo'lishi kerak;
 webhook worker'ning o'zi (`ensure_encbot_webhook`) o'rnatadi.
+
+## Yangi anime/bo'lim ro'yxatda eng tepaga chiqadi (2026-10)
+
+Yangi anime (qismsiz) `last_ep_at=0` bo'lgani uchun ro'yxat tagiga tushib qolardi. Endi `anime_db.created_at`
+(migratsiya `mig_anime_created_at`, `POST /api/anime` yozadi) bor va tartib kaliti =
+MAX(anime.created_at, bo'lim `last_ep_at`, bo'lim `created_at`) — yangi anime, yangi bo'lim yoki yangi
+kodlangan qism joylansa anime tepaga chiqadi. Joylar: `GET /api/anime`, `encbot_anime_page`, `GET /api/seasons`
+(`worker/src/lib.rs`). Eski animelarda `created_at=0` — ular avvalgi tartibda qoladi.
