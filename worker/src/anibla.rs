@@ -130,6 +130,8 @@ fn enc(s: &str) -> String {
 
 // ── Sayt bilan aloqa ─────────────────────────────────────────
 
+const HTTP_TIMEOUT_MS: u32 = 20_000;
+
 async fn http(url: &str, method: Method, body: Option<Value>, cookie: Option<&str>)
     -> std::result::Result<(u16, String), String> {
     let h = Headers::new();
@@ -147,7 +149,11 @@ async fn http(url: &str, method: Method, body: Option<Value>, cookie: Option<&st
         init.with_body(Some(b.to_string().into()));
     }
     let req = Request::new_with_init(url, &init).map_err(|e| e.to_string())?;
-    let mut r = Fetch::Request(req).send().await.map_err(|e| format!("tarmoq: {e}"))?;
+    // Sayt javob bermasa so'rov cheksiz osilib qolmasin: 20 s dan keyin bekor qilinadi
+    // va foydalanuvchiga xato chiqadi (aks holda bot jim qolardi).
+    let signal = AbortSignal::from(worker::web_sys::AbortSignal::timeout_with_u32(HTTP_TIMEOUT_MS));
+    let mut r = Fetch::Request(req).send_with_signal(&signal).await
+        .map_err(|e| if signal.aborted() { format!("sayt {} s ichida javob bermadi", HTTP_TIMEOUT_MS / 1000) } else { format!("tarmoq: {e}") })?;
     let code = r.status_code();
     let text = r.text().await.unwrap_or_default();
     Ok((code, text))
@@ -847,7 +853,12 @@ async fn show_item(env: &Env, chat: i64, mut nav: Nav) {
         }
         return;
     }
-    match seasons(env, &it.s).await {
+    trace(env, chat, "T0b fasllar so'ralmoqda").await;
+    let t0 = now_ms();
+    let got = seasons(env, &it.s).await;
+    trace(env, chat, &format!("T0c fasllar javobi ({} ms): {}", now_ms() - t0,
+        match &got { Ok(ss) => format!("{} ta", ss.len()), Err(e) => e.clone() })).await;
+    match got {
         Ok(ss) if ss.len() > 1 => {
             // Rasm, tavsif va fasl tugmalari BITTA xabarda (foydalanuvchi
             // talabi: "anime ustiga bosilganda rasmi bilan chiqsin").
