@@ -5964,3 +5964,13 @@ kiritmalarida YO'Q.
 Fayllar: `worker/src/sessionbot.rs`, `worker/src/postbot.rs` (menyu), `worker/src/lib.rs` (marshrut va
 bot), `tool/session/{session.py,session.workflow.yml}`, `tool/encode/setup_repo.py`,
 `tool/packs/sync_repo.py`, `.github/workflows/sync-packs.yml`.
+
+## Kodlash boti: "🔗 Anibla akkaunt" va qismlar paneli (2026-10)
+
+Anibla akkaunti: bosh menyudagi tugma -> login (telefon) -> parol -> worker `anibla::connect_account`
+saytga kirib tekshiradi va `app_config.anibla_creds` ga SHIFRLAB saqlaydi (AES-128-CTR, kalit
+`ENCODE_TOKEN` dan olinadi, bazada yo'q). `login()` avval shuni, bo'lmasa `ANIBLA_CREDS`
+(creds.enc) ni ishlatadi. Token (JWT) 14 kun amal qiladi, 401 da worker o'zi qayta kiradi.
+Qismlar paneli: `EP_PAGE` 150 -> 60 (150 tugmali panelni Telegram rad etib, keyin 429 flood
+(`retry after ~6500 s`) berdi); `send_list` endi faqat [to'liq, 40] urinadi, 429 da qayta urinmaydi.
+Fayllar: `worker/src/anibla.rs`, `worker/src/sessionbot.rs`, `worker/src/postbot.rs`, `worker/src/lib.rs`.

@@ -22,6 +22,8 @@
 use super::*;
 
 pub(crate) const BTN: &str = "\u{1F511} Yangi sessiya";
+/// Workerga yangi Anibla akkauntini ulash (login + parol, `anibla::connect_account`).
+pub(crate) const BTN_ANIBLA_ACC: &str = "\u{1F517} Anibla akkaunt";
 const BTN_CANCEL: &str = "\u{274C} Bekor qilish";
 const WORKFLOW: &str = "session.yml";
 /// Jarayon shu vaqtdan keyin eskirgan hisoblanadi.
@@ -55,6 +57,19 @@ pub(crate) async fn start(env: &Env, chat: i64) {
         "\u{1F511} <b>Yangi sessiya</b>\n\n\
          \u{1F4F1} Telegram akkaunt <b>telefon raqamini</b> yuboring (masalan <code>+998901234567</code>).\n\
          Shu raqamga Telegram'dan kirish kodi keladi.",
+        Some(keyboard())).await;
+}
+
+/// "🔗 Anibla akkaunt" bosildi: login (telefon) so'raladi.
+pub(crate) async fn start_anibla(env: &Env, chat: i64) {
+    reset(env).await;
+    config_put(env, "encbot_mode", "sess").await;
+    config_put(env, "sess_state", "al_phone").await;
+    config_put(env, "sess_at", &now_ms().to_string()).await;
+    encbot_send(env, chat,
+        "\u{1F517} <b>Anibla akkaunt</b>\n\n\
+         anibla.uz dagi akkauntingiz <b>telefon raqamini</b> (login) yuboring, masalan <code>998901234567</code>.\n\
+         Keyin parol so'raladi. Worker saytga kirib tekshiradi va akkauntni <b>shifrlab</b> saqlaydi.",
         Some(keyboard())).await;
 }
 
@@ -116,6 +131,44 @@ pub(crate) async fn on_message(env: &Env, msg: &Value, chat: i64) -> bool {
             config_put(env, "sess_pw", &text).await;
             config_put(env, "sess_state", "wait_pw").await;
             encbot_send(env, chat, "\u{23F3} Parol tekshirilmoqda...", Some(keyboard())).await;
+        }
+        "al_phone" => {
+            let d = digits(&text);
+            if d.len() < 9 || d.len() > 15 {
+                encbot_send(env, chat, "\u{26A0}\u{FE0F} Raqam noto'g'ri. Masalan: <code>998901234567</code>", Some(keyboard())).await;
+                return true;
+            }
+            config_put(env, "sess_phone", &d).await;
+            config_put(env, "sess_state", "al_pw").await;
+            encbot_send(env, chat, "\u{1F510} Endi anibla.uz <b>parolini</b> yuboring (xabar darhol o'chiriladi).", Some(keyboard())).await;
+        }
+        "al_pw" => {
+            delete_msg(env, chat, msg).await;
+            if text.is_empty() {
+                encbot_send(env, chat, "\u{26A0}\u{FE0F} Parolni yozib yuboring.", Some(keyboard())).await;
+                return true;
+            }
+            let phone = get(env, "sess_phone").await;
+            match anibla::connect_account(env, &phone, &text).await {
+                Ok(()) => {
+                    reset(env).await;
+                    config_put(env, "encbot_mode", "").await;
+                    encbot_send(env, chat, &format!(
+                        "\u{2705} <b>Anibla akkaunt ulandi</b> (<code>+{phone}</code>).\n\
+                         Worker saytga kirdi; login/parol shifrlangan holda saqlandi va avvalgisidan USTUN turadi."),
+                        None).await;
+                    postbot::main_menu(env, chat).await;
+                }
+                Err(e) if e.contains("parol noto'g'ri") => {
+                    encbot_send(env, chat, "\u{274C} Parol noto'g'ri. Qayta yuboring yoki \u{00AB}\u{274C} Bekor qilish\u{00BB}.", Some(keyboard())).await;
+                }
+                Err(e) => {
+                    reset(env).await;
+                    config_put(env, "encbot_mode", "").await;
+                    encbot_send(env, chat, &format!("\u{274C} Akkaunt ulanmadi: {}", html_escape(&e)), None).await;
+                    postbot::main_menu(env, chat).await;
+                }
+            }
         }
         "" => {
             encbot_send(env, chat, "\u{1F511} Boshlash uchun \u{00AB}\u{1F511} Yangi sessiya\u{00BB} tugmasini bosing (Bosh menyu).", None).await;

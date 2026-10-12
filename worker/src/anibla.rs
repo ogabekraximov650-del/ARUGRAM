@@ -57,9 +57,9 @@ const IMG_BASE: &str = "https://amediatv.up-it.uz";
 /// Ro'yxat sahifasi — 100 tadan (foydalanuvchi talabi). Telegram pastki panelga
 /// 150 tagacha tugmani qabul qildi, 300 ni rad etdi (sinab ko'rilgan).
 const SEARCH_PAGE: i64 = 100;
-/// Qismlar sahifasi: 3 tadan qatorda 150 tagacha (Telegram chegarasidan ichkarida;
-/// 150 tugma sinab ko'rilgan). Qisqa seriallar bitta sahifaga sig'adi.
-const EP_PAGE: usize = 150;
+/// Qismlar sahifasi: 3 tadan qatorda 60 tagacha. 150 tugmali panelni Telegram rad etdi
+/// (keyin 429 flood chegarasi berdi), shu sabab kichik sahifa. Qisqa seriallar bitta sahifaga sig'adi.
+const EP_PAGE: usize = 60;
 const UA: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
 
 thread_local! {
@@ -159,8 +159,91 @@ async fn http(url: &str, method: Method, body: Option<Value>, cookie: Option<&st
     Ok((code, text))
 }
 
+// ── Bot orqali ulangan Anibla akkaunti ───────────────────────
+//
+// "🔗 Anibla akkaunt" (`sessionbot.rs`): login/parol botga yuboriladi, worker saytga kirib
+// tekshiradi va `app_config.anibla_creds` ga SHIFRLANGAN saqlaydi (AES-128-CTR, kalit
+// `ENCODE_TOKEN` dan; kalit bazada yo'q). Bu `ANIBLA_CREDS` (creds.enc) dan USTUN.
+
+fn cfg_key(env: &Env) -> [u8; 16] {
+    let mut h = <sha2::Sha256 as sha2::Digest>::new();
+    sha2::Digest::update(&mut h, b"anibla-creds|");
+    sha2::Digest::update(&mut h, tg_secret(env, "ENCODE_TOKEN").as_bytes());
+    let d: [u8; 32] = sha2::Digest::finalize(h).into();
+    let mut k = [0u8; 16];
+    k.copy_from_slice(&d[..16]);
+    k
+}
+
+fn hex_of(b: &[u8]) -> String {
+    b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
+fn unhex(s: &str) -> Option<Vec<u8>> {
+    if s.len() % 2 != 0 { return None; }
+    (0..s.len()).step_by(2).map(|i| u8::from_str_radix(s.get(i..i + 2)?, 16).ok()).collect()
+}
+
+fn xor_ctr(env: &Env, iv: &[u8], data: &mut [u8]) -> bool {
+    use ctr::cipher::{KeyIvInit, StreamCipher};
+    let Ok(iv) = <[u8; 16]>::try_from(iv) else { return false };
+    let mut c = ctr::Ctr128BE::<aes::Aes128>::new(&cfg_key(env).into(), &iv.into());
+    c.apply_keystream(data);
+    true
+}
+
+/// Bot orqali saqlangan login/parol (bo'lsa).
+async fn creds_cfg(env: &Env) -> Option<Creds> {
+    let raw = config_get(env, "anibla_creds").await.filter(|v| !v.is_empty())?;
+    let (iv, ct) = raw.split_once(':')?;
+    let iv = unhex(iv)?;
+    let mut buf = unhex(ct)?;
+    if !xor_ctr(env, &iv, &mut buf) { return None; }
+    let v: Value = serde_json::from_slice(&buf).ok()?;
+    let phone: i64 = v["login"].as_str()?.chars().filter(|c| c.is_ascii_digit()).collect::<String>().parse().ok()?;
+    let password = v["password"].as_str()?.to_string();
+    if password.is_empty() { return None; }
+    let site = creds(env).map(|c| c.site).unwrap_or_else(|| DEFAULT_SITE.to_string());
+    Some(Creds { site, phone, password })
+}
+
+async fn has_creds(env: &Env) -> bool {
+    creds_cfg(env).await.is_some() || creds(env).is_some()
+}
+
+/// Yangi login/parol bilan saytga kiradi; muvaffaqiyatli bo'lsa shifrlab saqlaydi.
+pub(crate) async fn connect_account(env: &Env, phone: &str, password: &str) -> std::result::Result<(), String> {
+    let digits: String = phone.chars().filter(|c| c.is_ascii_digit()).collect();
+    let n: i64 = digits.parse().map_err(|_| "telefon raqami noto'g'ri".to_string())?;
+    let site = site(env);
+    let (code, text) = http(&format!("{site}/api/backend/api/v1/auth/login-password"), Method::Post,
+        Some(json!({"phone_number": n, "password": password})), None).await?;
+    let v: Value = serde_json::from_str(&text).unwrap_or(json!({}));
+    let tok = v["token"]["accessToken"].as_str()
+        .or_else(|| v["data"]["token"]["accessToken"].as_str())
+        .unwrap_or("").to_string();
+    if tok.is_empty() {
+        let why = v["code"].as_str().or_else(|| v["message"].as_str()).unwrap_or("").to_string();
+        return Err(match why.as_str() {
+            "invalid_password" => "parol noto'g'ri".into(),
+            "user_not_found" => "bunday login yo'q".into(),
+            "password_login_rate_limited" => "juda ko'p urinish \u{2014} birozdan keyin".into(),
+            _ => format!("saytga kirib bo'lmadi (HTTP {code} {why})"),
+        });
+    }
+    let iv_hex = random_hex(32);
+    let iv = unhex(&iv_hex).ok_or("tasodifiy son olinmadi")?;
+    let mut buf = serde_json::to_vec(&json!({"login": digits, "password": password})).map_err(|e| e.to_string())?;
+    if !xor_ctr(env, &iv, &mut buf) { return Err("shifrlab bo'lmadi".into()); }
+    config_put(env, "anibla_creds", &format!("{iv_hex}:{}", hex_of(&buf))).await;
+    TOKEN.with(|t| *t.borrow_mut() = tok.clone());
+    config_put(env, "anibla_token", &tok).await;
+    Ok(())
+}
+
 async fn login(env: &Env) -> std::result::Result<String, String> {
-    let Some(c) = creds(env) else {
+    let cfg = creds_cfg(env).await;
+    let Some(c) = cfg.or_else(|| creds(env)) else {
         return Err("login/parol sozlanmagan (ANIBLA_CREDS)".into());
     };
     let (code, text) = http(&format!("{}/api/backend/api/v1/auth/login-password", c.site), Method::Post,
@@ -365,7 +448,7 @@ pub(crate) async fn menu_for_app(env: &Env, chat: i64, target: &str, label: &str
     config_put(env, "anibla_target", target).await;
     config_put(env, "anibla_target_label", label).await;
     config_put(env, "encbot_mode", "anibla").await;
-    let warn = if creds(env).is_none() {
+    let warn = if !has_creds(env).await {
         "\n\n\u{26A0}\u{FE0F} anibla.uz login/paroli sozlanmagan (<code>tool/anibla/creds.enc</code>)."
     } else { "" };
     let panel = home_panel(env).await;
@@ -404,7 +487,7 @@ pub(crate) async fn menu_for_post(env: &Env, chat: i64) {
     config_put(env, "anibla_post", "1").await;
     config_put(env, "post_edit", "").await;
     config_put(env, "encbot_mode", "anibla").await;
-    let warn = if creds(env).is_none() {
+    let warn = if !has_creds(env).await {
         "\n\n\u{26A0}\u{FE0F} anibla.uz login/paroli sozlanmagan (<code>tool/anibla/creds.enc</code>)."
     } else { "" };
     let panel = home_panel(env).await;
@@ -423,7 +506,7 @@ pub(crate) async fn menu(env: &Env, chat: i64) {
         config_put(env, "anibla_target", "").await;
     }
     config_put(env, "encbot_mode", "anibla").await;
-    let warn = if creds(env).is_none() {
+    let warn = if !has_creds(env).await {
         "\n\n\u{26A0}\u{FE0F} Login/parol hali sozlanmagan: <code>tool/anibla/creds.enc</code> \
          <code>ENCODE_TOKEN</code> bilan ochilmadi (deploy log'iga qarang)."
     } else { "" };
@@ -1120,7 +1203,7 @@ async fn send_list(env: &Env, chat: i64, text: &str, top: Vec<Vec<String>>, item
     }
     let text = text.as_str();
     let mut last_err = String::new();
-    for cap in [usize::MAX, 150, 100, 60] {
+    for cap in [usize::MAX, 40] {
         let mut rows = top.clone();
         let mut shown = 0usize;
         for r in &items {
