@@ -57,10 +57,10 @@ const IMG_BASE: &str = "https://amediatv.up-it.uz";
 /// Ro'yxat sahifasi — 100 tadan (foydalanuvchi talabi). Telegram pastki panelga
 /// 150 tagacha tugmani qabul qildi, 300 ni rad etdi (sinab ko'rilgan).
 const SEARCH_PAGE: i64 = 100;
-/// Qismlar sahifasi: 3 tadan qatorda 100 tagacha. Telegram paneli JAMI 150 tugmagacha
+/// Qismlar sahifasi (inline tugmalar, 5 tadan qatorda). Telegram paneli JAMI 150 tugmagacha
 /// (qism tugmalari + boshqaruv qatorlari ~6 ta); 150 qism + 6 = 156 rad etilib, keyin
 /// 429 flood berdi. 100 + 6 = 106 — ishlab turgan anime ro'yxati bilan bir xil.
-const EP_PAGE: usize = 100;
+const EP_PAGE: usize = 90;
 const UA: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
 
 thread_local! {
@@ -970,37 +970,54 @@ async fn show_seasons(env: &Env, chat: i64, mut nav: Nav) {
 }
 
 /// Qismlar: qatorga 3 tadan, `EP_PAGE` tadan sahifa. `card` — muqova bilan.
-async fn show_eps(env: &Env, chat: i64, mut nav: Nav, card: bool) {
-    let Some(it) = cur_item(&nav) else { return };
-    let ss = match seasons(env, &it.s).await {
-        Ok(ss) => ss,
-        Err(e) => { encbot_send(env, chat, &format!("\u{274C} {}", html_escape(&e)), None).await; return; }
-    };
-    let Some(season) = usize::try_from(nav.j).ok().and_then(|j| ss.get(j)) else { return };
-    let mut eps = match episodes(env, &it.s, &season.slug).await {
-        Ok(e) if !e.is_empty() => e,
-        Ok(_) => { encbot_send(env, chat, "\u{1F937} Bu faslda qismlar topilmadi.", None).await; return; }
-        Err(e) => { encbot_send(env, chat, &format!("\u{274C} {}", html_escape(&e)), None).await; return; }
-    };
+async fn ep_list(env: &Env, nav: &Nav) -> std::result::Result<(Item, String, Vec<Episode>), String> {
+    let it = cur_item(nav).ok_or("anime tanlanmagan")?;
+    let ss = seasons(env, &it.s).await?;
+    let season = usize::try_from(nav.j).ok().and_then(|j| ss.get(j)).ok_or("fasl topilmadi")?;
+    let mut eps = episodes(env, &it.s, &season.slug).await?;
+    if eps.is_empty() {
+        return Err("Bu faslda qismlar topilmadi.".into());
+    }
     // Teskari tartib (foydalanuvchi talabi): eng yangi qism birinchi — 10, 9, 8 ...
     eps.reverse();
+    Ok((it, season_label(season), eps))
+}
+
+/// Qismlar INLINE tugmalarda (xabar ostida): `aq:<qism>` — tanlash, `ap:<sahifa>` — sahifa.
+/// Inline klaviaturada 100 tagacha tugma mumkin; shu sabab sahifada EP_PAGE (90) ta qism.
+fn ep_markup(eps: &[Episode], ep: i64) -> (Value, i64) {
     let pages = eps.len().div_ceil(EP_PAGE).max(1) as i64;
-    nav.ep = nav.ep.clamp(0, pages - 1);
+    let ep = ep.clamp(0, pages - 1);
+    let start = ep as usize * EP_PAGE;
+    let part = &eps[start..(start + EP_PAGE).min(eps.len())];
+    let mut rows: Vec<Vec<Value>> = Vec::new();
+    let mut nr = Vec::new();
+    if ep > 0 { nr.push(btn(BTN_PREV, format!("ap:{}", ep - 1))); }
+    if ep + 1 < pages { nr.push(btn(BTN_NEXT, format!("ap:{}", ep + 1))); }
+    if !nr.is_empty() { rows.push(nr); }
+    rows.extend(part.chunks(5).map(|ch| ch.iter()
+        .map(|e| btn(&format!("{}", e.num), format!("aq:{}", e.num))).collect::<Vec<_>>()));
+    (kb(rows), ep)
+}
+
+async fn show_eps(env: &Env, chat: i64, mut nav: Nav, card: bool) {
+    let (it, label, eps) = match ep_list(env, &nav).await {
+        Ok(x) => x,
+        Err(e) => { encbot_send(env, chat, &format!("\u{274C} {}", html_escape(&e)), None).await; return; }
+    };
+    let (markup, ep) = ep_markup(&eps, nav.ep);
+    nav.ep = ep;
     nav.v = "eps".into();
     nav_put(env, &nav).await;
-    let start = nav.ep as usize * EP_PAGE;
-    let part = &eps[start..(start + EP_PAGE).min(eps.len())];
-    let mut top: Vec<Vec<String>> = Vec::new();
-    let mut nr = Vec::new();
-    if nav.ep > 0 { nr.push(BTN_PREV.to_string()); }
-    if nav.ep + 1 < pages { nr.push(BTN_NEXT.to_string()); }
-    if !nr.is_empty() { top.push(nr); }
-    let rows: Vec<Vec<String>> = part.chunks(3)
-        .map(|ch| ch.iter().map(|e| format!("\u{25B6}\u{FE0F} {}-qism", e.num)).collect::<Vec<_>>()).collect();
-    let text = format!("{}\n{} \u{00B7} {} ta qism{}\n\n\u{2B07}\u{FE0F} Qismni pastdagi paneldan tanlang (eng yangisi birinchi):",
-        item_head(&it, card), html_escape(&season_label(season)), eps.len(),
-        if pages > 1 { format!(" \u{00B7} {}\u{2013}{}-qismlar", part[0].num, part[part.len() - 1].num) } else { String::new() });
-    send_list(env, chat, &text, top, rows, true, if card { Some(&it) } else { None }).await;
+    // Pastki panel: Orqaga / Bosh menyu (qismlarning o'zi xabar ostidagi inline tugmalarda).
+    encbot_send(env, chat, "\u{1F3AC} Qismlar \u{2014} xabar ostidagi tugmalardan tanlang. Orqaga \u{2014} pastda.",
+        Some(panel(vec![], true))).await;
+    let text = format!("{}\n{} \u{00B7} {} ta qism\n\n\u{2B07}\u{FE0F} Qismni tanlang (eng yangisi birinchi):",
+        item_head(&it, card), html_escape(&label), eps.len());
+    if card && send_photo_card(env, chat, &it, &text, Some(&markup)).await {
+        return;
+    }
+    encbot_send(env, chat, &text, Some(markup)).await;
 }
 
 /// Qism tanlandi: sifatlar (qatorga bitta).
@@ -1412,9 +1429,29 @@ fn hms(s: i64) -> String {
 
 /// Inline tugmalar: navbat (`zx`, `zxa`, `zr`). Eski xabarlardagi ro'yxat
 /// tugmalari (`zg`, `zi`, ...) endi pastki panelda — ular uchun eslatma.
-pub(crate) async fn on_callback(env: &Env, chat: i64, _msg_id: i64, data: &str) -> bool {
+pub(crate) async fn on_callback(env: &Env, chat: i64, msg_id: i64, data: &str) -> bool {
     let p: Vec<&str> = data.split(':').collect();
     let kind = p[0];
+    if kind == "aq" {
+        if let Some(num) = p.get(1).and_then(|x| x.parse::<i64>().ok()) {
+            let nav = nav_get(env).await;
+            show_qualities(env, chat, nav, num).await;
+        }
+        return true;
+    }
+    if kind == "ap" {
+        if let Some(pg) = p.get(1).and_then(|x| x.parse::<i64>().ok()) {
+            let mut nav = nav_get(env).await;
+            if let Ok((_, _, eps)) = ep_list(env, &nav).await {
+                let (markup, ep) = ep_markup(&eps, pg);
+                nav.ep = ep;
+                nav_put(env, &nav).await;
+                let _ = encbot_api(env, "editMessageReplyMarkup", json!({
+                    "chat_id": chat, "message_id": msg_id, "reply_markup": markup})).await;
+            }
+        }
+        return true;
+    }
     if kind == "zxa" {
         queue_callback(env, chat, kind, 0).await;
         return true;

@@ -5974,3 +5974,11 @@ saytga kirib tekshiradi va `app_config.anibla_creds` ga SHIFRLAB saqlaydi (AES-1
 Qismlar paneli: `EP_PAGE` 150 -> 60 (150 tugmali panelni Telegram rad etib, keyin 429 flood
 (`retry after ~6500 s`) berdi); `send_list` endi faqat [to'liq, 40] urinadi, 429 da qayta urinmaydi.
 Fayllar: `worker/src/anibla.rs`, `worker/src/sessionbot.rs`, `worker/src/postbot.rs`, `worker/src/lib.rs`.
+
+## Anibla: qismlar INLINE tugmalarda (2026-10)
+
+Qismlar ro'yxati pastki panel o'rniga xabar ostidagi inline tugmalarda (5 tadan qatorda, sahifada 90 ta,
+`aq:<qism>` — tanlash, `ap:<sahifa>` — `editMessageReplyMarkup` bilan sahifa almashtirish). Sabab: pastki
+panel jami 150 tugmagacha (150 qism + ~6 boshqaruv = 156 rad etilib, keyin 429 flood bergan edi); inline
+chegara 100. Pastki panelda faqat Orqaga/Bosh menyu qoladi. Fayl: `worker/src/anibla.rs` (`ep_list`, `ep_markup`,
+`show_eps`, `on_callback`). Fasl va sifat tugmalari hozircha pastki panelda.
