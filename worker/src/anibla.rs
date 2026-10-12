@@ -1839,6 +1839,35 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
     let b: Value = req.json().await.unwrap_or(json!({}));
     let now = now_ms();
 
+    // TASHXIS: webhook holati, sayt so'rovlari va 90 tugmali inline xabarni adminga sinab yuborish.
+    if path == "/api/anibla/diag" {
+        let wi = encbot_api(env, "getWebhookInfo", json!({})).await
+            .map(|v| v["result"].clone()).map_err(|e| e.to_string());
+        let t0 = now_ms();
+        let ss = seasons(env, "one-piece").await;
+        let ss_info = match &ss { Ok(x) => format!("{} fasl", x.len()), Err(e) => e.clone() };
+        let t1 = now_ms();
+        let eps = episodes(env, "one-piece", "1").await;
+        let ep_info = match &eps { Ok(x) => format!("{} qism", x.len()), Err(e) => e.clone() };
+        let t2 = now_ms();
+        let mut test = String::from("o'tkazib yuborildi");
+        if let Ok(mut eps) = eps {
+            eps.reverse();
+            let (markup, _) = ep_markup(&eps, 0);
+            test = match encbot_api(env, "sendMessage", json!({
+                "chat_id": ADMIN_TELEGRAM_ID, "text": "\u{1F50E} Tashxis: inline qismlar sinovi (90 tugma)",
+                "reply_markup": markup})).await {
+                Ok(_) => "ok".to_string(),
+                Err(e) => e.to_string(),
+            };
+        }
+        return ok(json!({
+            "webhook": wi, "seasons": ss_info, "seasons_ms": t1 - t0,
+            "episodes": ep_info, "episodes_ms": t2 - t1, "inline_test": test,
+            "creds": creds(env).is_some(),
+        }));
+    }
+
     // Navbatdagi keyingi video (eng eskisi).
     if path == "/api/anibla/claim" {
         let runner = b["runner"].as_str().unwrap_or("").trim().to_string();
