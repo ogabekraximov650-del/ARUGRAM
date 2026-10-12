@@ -231,7 +231,16 @@ export async function showPackPreview({ pick, aspect = 1, actions = [] }) {
     const it = (hd.h.items || []).find((x) => x.i === pick.item);
     const full = await itemOf(p, hd, it);
     const box = wrap.querySelector('.pkp-img');
-    if (box?.isConnected) box.innerHTML = full.type.startsWith('video') ? `<video src="${full.url}" autoplay loop muted playsinline></video>` : `<img src="${full.url}" alt="" draggable="false">`;
+    if (box?.isConnected) {
+      box.innerHTML = full.type.startsWith('video') ? `<video src="${full.url}" loop playsinline></video>` : `<img src="${full.url}" alt="" draggable="false">`;
+      // GIF bosib turilganda OVOZI bilan o'ynaydi (ilovadagi `pack_preview.dart` kabi); brauzer ovozli
+      // boshlashga ruxsat bermasa — ovozsiz boshlanadi.
+      const v = box.querySelector('video');
+      if (v) {
+        v.muted = false; v.volume = 1;
+        v.play().catch(() => { v.muted = true; v.play().catch(() => {}); });
+      }
+    }
   } catch (_) { /* */ }
 }
 
