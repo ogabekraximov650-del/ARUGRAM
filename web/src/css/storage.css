@@ -43,3 +43,5 @@
 .ch-bar i { display: block; height: 100%; width: 0; background: var(--accent2); }
 .ch-t { margin-top: 30px; font-size: 16px; font-weight: 700; color: #fff; }
 .ch-d { margin-top: 10px; width: 240px; text-align: center; font-size: 14px; color: #fff; }
+.sg-row.kid { padding-left: 57px; }
+.sg-chev { display: flex; padding: 0 6px; }

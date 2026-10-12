@@ -6042,3 +6042,13 @@ siljiydi, zarrachalar, bosilganda 9 px kattalashish, halqa tashqarisidagi foizla
 "tayyor" belgi, tozalashda halqa jo'ja bilan bo'shaydi). `storage.js` — sahifa tuzilishi `storage_screen.dart` dagidek:
 sarlavha 230 px dan keyin yuqori panelga chiqadi, ulush chizig'i (ilova / boshqa / bo'sh), qatorlar hajm bo'yicha kamayish
 tartibida, pill tugma, kulrang izoh. Webda "Emoji, GIF va stikerlar" ichki bo'limlarga ochilmaydi (kesh ularni ajratmaydi).
+
+## Web: kesh ichki bo'limlari + to'plamga qo'shish/kesish oynasi ilovadagidek (2026-10)
+
+- `storage.js`: "Emoji, GIF va stikerlar" ichki bo'limlarga (Emoji/GIF/Stiker) ochiladi — to'plam fayllari (`pk_<id>_...`)
+  to'plam raqami bo'yicha tur'ga ajratiladi (`chunk-cache.js`: `cachePackBreakdown`, `cacheClearPackKinds`; turlar
+  `lib.mine/subs` dan). Qatorga bosish ochadi/yopadi, doira hammasini tanlaydi (ilovadagi `_toggleSlice`).
+- `packs.js`: `openPackTrim` — `pack_video_trim_screen.dart` nusxasi (to'liq ekran qora oyna, aylanib turuvchi video, 8 kadrli
+  vaqt chizig'i, tutqichlar/oyna sudralishi, Boshi/Oxiri ±100 ms, uzunlik tugmasi, ovoz — faqat GIF, yashil/aksent ✓).
+  `openPackAdd` — `pack_add_screen.dart` kabi: video tanlansa kesish oynasi darhol ochiladi, kartada "Emoji" va "Kesish"
+  chiplari, olib tashlash (×), "Yuborish (n)". Inline slayderlar va har tur uchun ovoz chipi olib tashlandi.

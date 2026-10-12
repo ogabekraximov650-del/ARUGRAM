@@ -272,6 +272,38 @@ export async function cacheBreakdown() {
   return out;
 }
 
+/** To'plam fayllari (`pk_<id>_<versiya>.arp`, `pk_<id>_<element>`) — to'plam raqami. */
+const packIdOf = (name) => { const m = /^pk_(\d+)_/.exec(name); return m ? Number(m[1]) : null; };
+
+/** `Map<tur, bayt>`: "Emoji, GIF va stikerlar" ichidagi turlar (`kinds`: Map<to'plam raqami, tur>). */
+export async function cachePackBreakdown(kinds) {
+  const m = await index(); const out = new Map();
+  for (const [k, v] of m) {
+    const name = nameOfKey(k);
+    if (catOf(name) !== CAT_PACKS) continue;
+    const id = packIdOf(name); const kind = id == null ? null : kinds.get(id);
+    if (kind) out.set(kind, (out.get(kind) || 0) + v.size);
+  }
+  return out;
+}
+
+/** Faqat berilgan turdagi to'plamlar keshini o'chiradi. */
+export async function cacheClearPackKinds(kinds, wanted) {
+  const d = await db(); const m = await index();
+  if (!d) return;
+  const tx = d.transaction(['c', 'm', 'f'], 'readwrite');
+  for (const [k, v] of [...m]) {
+    const name = nameOfKey(k);
+    if (catOf(name) !== CAT_PACKS) continue;
+    const id = packIdOf(name); const kind = id == null ? null : kinds.get(id);
+    if (!kind || !wanted.has(kind)) continue;
+    tx.objectStore('c').delete(k); tx.objectStore('f').delete(k); tx.objectStore('m').delete(k);
+    m.delete(k); total -= v.size;
+  }
+  await txDone(tx);
+  quotaAt = 0;
+}
+
 /** Tanlangan toifalarni o'chiradi. */
 export async function cacheClearCats(cats) {
   const d = await db(); const m = await index();

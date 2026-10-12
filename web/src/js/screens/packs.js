@@ -434,9 +434,9 @@ export function openPackDetail(p, { mine = false } = {}, onChange = () => {}) {
   });
 }
 
-// ── To'plamga qo'shish oynasi (`pack_add_screen.dart` + `pack_video_trim_screen.dart`) ──
-// Tanlangan fayl ko'rinib turadi: mos emoji (ilovaning emoji oynasidan), video bo'lsa
-// kesish (boshi/oxiri) va ovoz, keyin "Yuborish". Bittada bitta fayl (ilovadagidek).
+// ── To'plamga qo'shish oynasi (`pack_add_screen.dart`) va videoni kesish oynasi (`pack_video_trim_screen.dart`) ──
+// Tanlangan fayl ko'rinib turadi: mos emoji (ilovaning emoji oynasidan), video bo'lsa — "Kesish" (CapCut uslubidagi
+// to'liq ekran oyna), keyin "Yuborish". Bittada bitta fayl; video tanlansa kesish oynasi darhol ochiladi (ilovadagidek).
 const packMaxSeconds = (kind) => (kind === 'emoji' ? 8 : kind === 'gif' ? 0 : 12);
 const fmtMs = (ms) => { const t = ms / 1000; const m = Math.floor(t / 60); return `${m}:${(t - m * 60).toFixed(1).padStart(4, '0')}`; };
 
@@ -451,13 +451,158 @@ function pickEmoji() {
   }, { cls: 'pka-sheet' });
 }
 
+/** Videodan tekis oraliqda kadrlar (JPEG, data: manzil) — vaqt chizig'i uchun (`grabVideoFrames`). */
+async function grabVideoFrames(url, dur, count = 8, maxWidth = 160) {
+  const out = [];
+  try {
+    const v = document.createElement('video');
+    v.muted = true; v.preload = 'auto'; v.playsInline = true; v.src = url;
+    await new Promise((res, rej) => { v.onloadeddata = res; v.onerror = rej; setTimeout(rej, 12000); });
+    const cv = document.createElement('canvas');
+    const k = Math.min(1, maxWidth / (v.videoWidth || maxWidth));
+    cv.width = Math.max(1, Math.round((v.videoWidth || maxWidth) * k)); cv.height = Math.max(1, Math.round((v.videoHeight || maxWidth) * k));
+    const ctx = cv.getContext('2d');
+    for (let i = 0; i < count; i++) {
+      v.currentTime = Math.min(dur / 1000 - 0.05, ((i + 0.5) / count) * (dur / 1000));
+      await new Promise((res) => { v.onseeked = res; setTimeout(res, 2500); });
+      ctx.drawImage(v, 0, 0, cv.width, cv.height);
+      out.push(cv.toDataURL('image/jpeg', 0.6));
+    }
+  } catch (_) { /* kadrlar bo'lmasa — qora joy */ }
+  return out;
+}
+
+/** Videoni kesish: `{a, b, sound}` yoki null (bekor). */
+export function openPackTrim({ url, kind, dur, start = 0, end = 0, sound = true }) {
+  return new Promise((resolve) => {
+    let result = null;
+    push((el) => {
+      el.style.background = '#000';
+      let disposed = false; let raf = 0;
+      const MIN = 500, HANDLE = 20, FRAMES = 8;
+      const canSound = kind === 'gif';
+      const maxMs = packMaxSeconds(kind) * 1000;
+      const maxSel = maxMs <= 0 || dur < maxMs ? dur : maxMs;
+      const minSel = dur < MIN ? dur : MIN;
+      let a = end > start ? start : 0; let b = end > start ? end : maxSel;
+      a = Math.min(Math.max(a, 0), dur); b = Math.min(Math.max(b, a), dur); if (b - a > maxSel) b = a + maxSel;
+      let snd = sound; let pos = a; let frames = []; let drag = 'none'; let playing = true;
+      el.innerHTML = `<div class="ptr-bar">${appBar({ title: kind === 'gif' ? 'GIF' : kind === 'emoji' ? 'Emoji' : 'Stiker' })}</div>
+        <div class="ptr-vid"><video src="${url}" playsinline loop muted></video><div class="ptr-play">${icon('play_arrow', { size: 44, color: '#fff' })}</div></div>
+        <div class="ptr-ctl"><button class="ptr-snd"></button><span class="sp"></span><button class="ptr-pill"></button><span class="sp"></span><span style="width:44px"></span></div>
+        <div class="ptr-tl"></div>
+        <div class="ptr-tt"><span class="ta"></span><span class="tb"></span></div>
+        <div class="ptr-row"><div class="ptr-step" data-s="1"><i data-d="-100">${icon('chevron_left', { size: 22, color: '#fff' })}</i><span>Boshi</span><i data-d="100">${icon('chevron_right', { size: 22, color: '#fff' })}</i></div>
+          <div class="ptr-step" data-s="0"><i data-d="-100">${icon('chevron_left', { size: 22, color: '#fff' })}</i><span>Oxiri</span><i data-d="100">${icon('chevron_right', { size: 22, color: '#fff' })}</i></div>
+          <span class="sp"></span><button class="ptr-ok">${icon('check', { size: 30, color: '#fff' })}</button></div>`;
+      bindAppBar(el);
+      const vid = el.querySelector('video'); const playEl = el.querySelector('.ptr-play');
+      const tl = el.querySelector('.ptr-tl'); const sndEl = el.querySelector('.ptr-snd'); const pill = el.querySelector('.ptr-pill');
+      vid.muted = !(canSound && snd);
+
+      const seek = (ms) => { pos = ms; try { vid.currentTime = ms / 1000; } catch (_) { /* */ } };
+      const play = () => { playing = true; vid.play().catch(() => {}); };
+      const pause = () => { playing = false; vid.pause(); };
+      const tlW = () => tl.clientWidth || 300;
+
+      function paintTl() {
+        const w = tlW(); const ax = a / dur * w; const bx = b / dur * w;
+        const px = Math.min(Math.max(pos, a), b) / dur * w;
+        const cells = Array.from({ length: FRAMES }, (_, i) => `<div style="flex:1;background:${frames[i] ? `url(${frames[i]}) center/cover` : '#151515'}"></div>`).join('');
+        tl.innerHTML = `<div class="strip">${cells}</div>
+          <div class="dim" style="left:0;width:${ax}px"></div><div class="dim" style="left:${bx}px;right:0"></div>
+          <div class="frame" style="left:${ax}px;width:${bx - ax}px"></div>
+          <div class="hd l" style="left:${ax - HANDLE}px"><i></i></div><div class="hd r" style="left:${bx}px"><i></i></div>
+          <div class="ph" style="left:${px - 1.5}px"></div>`;
+      }
+      function paintInfo() {
+        const len = Math.round(b - a); const atMax = b - a >= maxSel - 1; const maxS = packMaxSeconds(kind);
+        pill.innerHTML = `<b style="color:${atMax ? 'var(--accent)' : '#fff'}">${(len / 1000).toFixed(1)} s</b>${maxS > 0 ? `<em>  ·  eng ko'pi ${maxS} s</em>` : ''}`;
+        pill.disabled = atMax;
+        el.querySelector('.ta').textContent = fmtMs(Math.round(a)); el.querySelector('.tb').textContent = fmtMs(Math.round(b));
+        sndEl.innerHTML = icon(canSound && snd ? 'volume_up' : 'volume_off', { size: 22, color: canSound ? '#fff' : 'rgba(255,255,255,0.54)' });
+        sndEl.style.background = canSound && snd ? 'var(--accent)' : '#1C1C1E';
+        playEl.style.display = playing ? 'none' : 'flex';
+      }
+      const paintAll = () => { paintTl(); paintInfo(); };
+
+      el.querySelector('.ptr-vid').addEventListener('click', () => {
+        if (playing) pause(); else { if (pos >= b - 30 || pos < a) seek(a); play(); }
+        paintInfo();
+      });
+      sndEl.addEventListener('click', () => {
+        if (!canSound) { toast("Ovoz faqat GIF to'plamida saqlanadi"); return; }
+        snd = !snd; vid.muted = !snd; paintInfo();
+      });
+      pill.addEventListener('click', () => {
+        let na = a; let nb = na + maxSel;
+        if (nb > dur) { nb = dur; na = Math.max(0, nb - maxSel); }
+        a = na; b = nb; seek(a); play(); paintAll();
+      });
+      const nudge = (start, dm) => {
+        let na = a; let nb = b;
+        if (start) { na = Math.min(Math.max(na + dm, 0), nb - minSel); if (nb - na > maxSel) na = nb - maxSel; }
+        else { nb = Math.min(Math.max(nb + dm, na + minSel), dur); if (nb - na > maxSel) nb = na + maxSel; }
+        a = na; b = nb; pause(); seek(start ? a : (b - 400 < a ? a : b - 400)); paintAll();
+      };
+      el.querySelectorAll('.ptr-step').forEach((st) => st.querySelectorAll('i').forEach((i) => i.addEventListener('click', () => nudge(st.dataset.s === '1', Number(i.dataset.d)))));
+
+      // Vaqt chizig'i: tutqichlarni yoki oynaning o'zini sudrash.
+      const hit = (x, w) => {
+        const ax = a / dur * w, bx = b / dur * w;
+        if (Math.abs(x - ax) <= 36 && Math.abs(x - ax) <= Math.abs(x - bx)) return 'left';
+        if (Math.abs(x - bx) <= 36) return 'right';
+        if (x > ax && x < bx) return 'body';
+        return 'none';
+      };
+      let lastX = 0; let moved = false;
+      tl.addEventListener('pointerdown', (e) => {
+        const r = tl.getBoundingClientRect(); lastX = e.clientX; moved = false;
+        drag = hit(e.clientX - r.left, r.width);
+        tl.setPointerCapture(e.pointerId);
+        if (drag !== 'none') pause();
+      });
+      tl.addEventListener('pointermove', (e) => {
+        if (drag === 'none') return;
+        const w = tlW(); const dm = (e.clientX - lastX) / w * dur; lastX = e.clientX; if (Math.abs(dm) > 0) moved = true;
+        let na = a; let nb = b;
+        if (drag === 'left') { na = Math.min(Math.max(na + dm, 0), nb - minSel); if (nb - na > maxSel) na = nb - maxSel; }
+        else if (drag === 'right') { nb = Math.min(Math.max(nb + dm, na + minSel), dur); if (nb - na > maxSel) nb = na + maxSel; }
+        else { const len = nb - na; na = Math.min(Math.max(na + dm, 0), dur - len); nb = na + len; }
+        a = na; b = nb; seek(drag === 'right' ? (b - 400 < a ? a : b - 400) : a); paintAll();
+      });
+      const onUp = (e) => {
+        if (drag === 'none') {
+          const r = tl.getBoundingClientRect(); const ms = Math.min(Math.max((e.clientX - r.left) / r.width * dur, a), b); seek(ms); paintAll(); return;
+        }
+        drag = 'none'; seek(a); play(); paintInfo();
+      };
+      tl.addEventListener('pointerup', onUp); tl.addEventListener('pointercancel', () => { drag = 'none'; });
+
+      el.querySelector('.ptr-ok').addEventListener('click', () => { result = { a: Math.round(a), b: Math.round(b), sound: canSound && snd }; routerBack(); });
+
+      const loop = () => {
+        if (disposed) return;
+        const p = vid.currentTime * 1000;
+        if (drag === 'none' && playing && p >= b - 30) seek(a);
+        else if (Math.abs(p - pos) > 16) { pos = p; paintTl(); }
+        raf = requestAnimationFrame(loop);
+      };
+      vid.addEventListener('loadedmetadata', () => { seek(a); play(); });
+      vid.addEventListener('canplay', () => { if (playing) vid.play().catch(() => {}); }, { once: true });
+      paintAll(); raf = requestAnimationFrame(loop);
+      grabVideoFrames(url, dur, FRAMES).then((f) => { frames = f; if (!disposed) paintTl(); });
+      return { dispose() { disposed = true; cancelAnimationFrame(raf); resolve(result); } };
+    });
+  });
+}
+
 export function openPackAdd(p, firstFile, onDone = () => {}) {
   push((el) => {
     let disposed = false;
     let busy = false;
-    let d = null;
-    const max = packMaxSeconds(p.kind) * 1000;
-    el.innerHTML = `${appBar({ title: `${packSingle(p.kind)} qo'shish`, actions: `<button class="icon-btn pka-swap">${icon('swap_horiz', { size: 24 })}</button>` })}
+    let d = null; let loadedOnce = false;
+    el.innerHTML = `${appBar({ title: `${packSingle(p.kind)} qo'shish`, actions: `<button class="icon-btn pka-swap" title="Boshqa fayl tanlash">${icon('swap_horiz', { size: 24 })}</button>` })}
       <div class="scroll pka-body"></div>
       <div class="pka-bottom"><button class="btn btn-filled pka-send"></button></div>
       <input type="file" accept="image/*,video/mp4,video/webm" hidden class="pka-file">`;
@@ -465,10 +610,20 @@ export function openPackAdd(p, firstFile, onDone = () => {}) {
     const body = el.querySelector('.pka-body');
     const send = el.querySelector('.pka-send');
     const fileEl = el.querySelector('.pka-file');
+    const sendable = () => (d && !d.problem && (d.stage === 'ready' || d.stage === 'failed') ? 1 : 0);
+
+    async function trim() {
+      if (!d || d.problem || !(d.dur > 0)) return;
+      const r = await openPackTrim({ url: d.url, kind: p.kind, dur: d.dur, start: d.a, end: d.b, sound: d.sound });
+      if (!r || disposed) return;
+      d.a = r.a; d.b = r.b; d.sound = r.sound; paint();
+    }
 
     async function load(f) {
       if (d?.url) URL.revokeObjectURL(d.url);
+      const max = packMaxSeconds(p.kind) * 1000;
       d = { f, size: f.size, type: '', url: URL.createObjectURL(f), dur: 0, a: 0, b: 0, sound: true, emoji: '', problem: '', stage: 'ready', status: '' };
+      const cur = d;
       const head = new Uint8Array(await f.slice(0, 32).arrayBuffer());
       d.type = sniff(head);
       if (d.type === 'application/octet-stream') {
@@ -488,66 +643,56 @@ export function openPackAdd(p, firstFile, onDone = () => {}) {
         });
         d.a = 0; d.b = d.dur <= 0 ? 0 : (max <= 0 || d.dur < max ? d.dur : max);
       }
-      if (!disposed) paint();
+      loadedOnce = true;
+      if (disposed || d !== cur) return;
+      paint();
+      // Video tanlansa — darhol tahrirlash (kesish) oynasi ochiladi.
+      if (!d.problem && d.type.startsWith('video') && d.dur > 0) await trim();
     }
 
     function paint() {
       const sec = packMaxSeconds(p.kind);
       const limits = sec > 0
-        ? `Rasm yoki video (5 MB gacha). Video ko'pi bilan ${sec} soniya: kerakli bo'lagini pastda tanlang. Admin tasdiqlagach "${esc(p.title)}" to'plamida ko'rinadi.`
-        : `Rasm yoki video (5 MB gacha, uzunligi cheklanmaydi). Kerak bo'lsa bo'lagini pastda tanlang. Admin tasdiqlagach "${esc(p.title)}" to'plamida ko'rinadi.`;
-      if (!d) { body.innerHTML = `<div class="center-box" style="height:200px">${spinner(32, 3)}</div>`; return; }
+        ? `Rasm yoki video (har biri 5 MB gacha). Video ko'pi bilan ${sec} soniya: kerakli bo'lagini "Kesish" bilan tanlang. Admin tasdiqlagach "${esc(p.title)}" to'plamida ko'rinadi.`
+        : `Rasm yoki video (har biri 5 MB gacha, uzunligi cheklanmaydi). Kerak bo'lsa bo'lagini "Kesish" bilan tanlang. Admin tasdiqlagach "${esc(p.title)}" to'plamida ko'rinadi.`;
+      const n = sendable();
+      send.disabled = busy || n === 0;
+      send.innerHTML = busy ? spinner(20, 2, '#fff') : (n === 0 ? "Yuboradigan narsa yo'q" : `Yuborish (${n})`);
+      if (!d) { body.innerHTML = loadedOnce ? `<div class="pka-in"><div class="pka-lim">${limits}</div></div>` : `<div class="center-box" style="height:200px">${spinner(32, 3)}</div>`; return; }
       const vid = d.type.startsWith('video');
       const locked = d.stage === 'uploading' || d.stage === 'done';
       const canTrim = vid && d.dur > 0 && !d.problem;
       body.innerHTML = `<div class="pka-in"><div class="pka-lim">${limits}</div>
         <div class="pka-card">
-          <div class="pka-prev">${d.problem ? icon('error', { size: 32, color: '#E5484D' }) : vid ? `<video src="${d.url}" playsinline loop autoplay muted></video>` : `<img src="${d.url}" alt="">`}</div>
+          <div class="pka-prev">${d.problem ? icon('error', { size: 32, color: '#E5484D' }) : vid ? `<video src="${d.url}" playsinline loop muted></video><span class="pka-pl">${icon('play_circle', { size: 30, color: 'rgba(255,255,255,0.7)' })}</span>` : `<img src="${d.url}" alt="">`}</div>
           <div class="pka-meta">
             <div class="t1">${vid ? 'Video' : (d.type.split('/')[1] || 'Fayl').toUpperCase()} · ${(d.size / 1048576).toFixed(1)} MB</div>
             ${d.problem ? `<div class="bad">${esc(d.problem)}</div>` : `
               ${canTrim ? `<div class="t2">Bo'lak: ${fmtMs(d.a)} – ${fmtMs(d.b)} (${((d.b - d.a) / 1000).toFixed(1)} s)</div>` : ''}
               <div class="chips"><div class="pka-chip pka-emo${locked ? ' off' : ''}">${d.emoji ? `<span class="em">${esc(d.emoji)}</span>` : `${icon('sentiment_satisfied', { fill: false, size: 16 })}<span>Emoji</span>`}</div>
-              ${vid ? `<div class="pka-chip pka-snd${locked ? ' off' : ''}">${icon(d.sound ? 'volume_up' : 'volume_off', { size: 16 })}<span>${d.sound ? 'Ovozli' : 'Ovozsiz'}</span></div>` : ''}</div>`}
+              ${canTrim ? `<div class="pka-chip pka-cut${locked ? ' off' : ''}">${icon('content_cut', { size: 16 })}<span>Kesish</span></div>` : ''}</div>`}
             ${d.stage !== 'ready' ? `<div class="st ${d.stage}">${esc(d.status)}</div>` : ''}
           </div>
+          ${locked ? '' : `<button class="icon-btn pka-rm" ${busy ? 'disabled' : ''}>${icon('close', { size: 22, color: 'rgba(255,255,255,0.54)' })}</button>`}
         </div>
-        ${canTrim && !locked ? `<div class="pka-trim">
-          <div class="row"><span>Boshi</span><b class="va">${fmtMs(d.a)}</b></div>
-          <input type="range" class="ra" min="0" max="${d.dur}" step="100" value="${d.a}">
-          <div class="row"><span>Oxiri</span><b class="vb">${fmtMs(d.b)}</b></div>
-          <input type="range" class="rb" min="0" max="${d.dur}" step="100" value="${d.b}">
-          ${max > 0 ? `<div class="hint">Ko'pi bilan ${max / 1000} soniya</div>` : ''}
-        </div>` : ''}
         <div style="height:100px"></div></div>`;
-      const ok = !d.problem && (d.stage === 'ready' || d.stage === 'failed');
-      send.disabled = busy || !ok;
-      send.innerHTML = busy ? spinner(20, 2, '#fff') : ok ? 'Yuborish' : (d.stage === 'done' ? 'Yuborildi' : "Yuboradigan narsa yo'q");
-      const v = body.querySelector('.pka-prev video');
+      // Karta ichidagi video: birinchi kadr to'xtab turadi, bosilsa o'ynaydi.
+      const v = body.querySelector('.pka-prev video'); const pl = body.querySelector('.pka-pl');
       if (v) {
-        // Faqat tanlangan bo'lak takrorlanadi.
-        v.currentTime = d.a / 1000;
-        v.addEventListener('timeupdate', () => { if (canTrim && (v.currentTime * 1000 >= d.b || v.currentTime * 1000 < d.a - 200)) v.currentTime = d.a / 1000; });
+        v.addEventListener('click', () => { if (v.paused) { v.play().catch(() => {}); pl.style.display = 'none'; } else { v.pause(); pl.style.display = ''; } });
+        pl?.addEventListener('click', () => v.click());
       }
       body.querySelector('.pka-emo:not(.off)')?.addEventListener('click', async () => {
         const e = await pickEmoji();
         if (e == null || disposed) return;
         d.emoji = e; paint();
       });
-      body.querySelector('.pka-snd:not(.off)')?.addEventListener('click', () => { d.sound = !d.sound; paint(); });
-      const ra = body.querySelector('.ra'); const rb = body.querySelector('.rb');
-      if (ra && rb) {
-        const upd = (which) => {
-          let a = +ra.value; let b = +rb.value;
-          if (which === 'a') { if (a > b - 500) b = Math.min(d.dur, a + 500); if (max > 0 && b - a > max) b = a + max; } else { if (b < a + 500) a = Math.max(0, b - 500); if (max > 0 && b - a > max) a = b - max; }
-          d.a = a; d.b = b; ra.value = a; rb.value = b;
-          body.querySelector('.va').textContent = fmtMs(a); body.querySelector('.vb').textContent = fmtMs(b);
-          const t2 = body.querySelector('.t2'); if (t2) t2.textContent = `Bo'lak: ${fmtMs(a)} – ${fmtMs(b)} (${((b - a) / 1000).toFixed(1)} s)`;
-          if (v) v.currentTime = (which === 'a' ? a : Math.max(a, b - 1000)) / 1000;
-        };
-        ra.addEventListener('input', () => upd('a'));
-        rb.addEventListener('input', () => upd('b'));
-      }
+      body.querySelector('.pka-cut:not(.off)')?.addEventListener('click', trim);
+      body.querySelector('.pka-rm')?.addEventListener('click', () => {
+        if (busy) return;
+        if (d?.url) URL.revokeObjectURL(d.url);
+        d = null; paint();
+      });
     }
 
     async function upload() {
@@ -558,9 +703,9 @@ export function openPackAdd(p, firstFile, onDone = () => {}) {
       if (!uid) { toast('Avval hisobga kiring'); return; }
       const vid = d.type.startsWith('video');
       // Nom ilovadagidek: `_t<boshi>-<oxiri>` — kesish, `_m` — ovozsiz (Actions bajaradi).
-      const trim = vid && d.b > d.a ? `_t${d.a}-${d.b}` : '';
+      const trimTag = vid && d.b > d.a ? `_t${d.a}-${d.b}` : '';
       const mute = vid && !d.sound ? '_m' : '';
-      const name = `pki_${uid}_${Date.now()}_${Math.floor(Math.random() * 0xffff).toString(16)}${trim}${mute}.bin`;
+      const name = `pki_${uid}_${Date.now()}_${Math.floor(Math.random() * 0xffff).toString(16)}${trimTag}${mute}.bin`;
       busy = true; d.stage = 'uploading'; d.status = 'Yuklanmoqda 0%'; paint();
       try {
         await uploadFile(d.f, name, {
@@ -589,7 +734,8 @@ export function openPackAdd(p, firstFile, onDone = () => {}) {
 
     send.addEventListener('click', upload);
     el.querySelector('.pka-swap').addEventListener('click', () => { if (!busy) fileEl.click(); });
-    fileEl.addEventListener('change', () => { const f = fileEl.files?.[0]; fileEl.value = ''; if (f) { d = null; paint(); load(f); } });
+    // Bittada bitta fayl: yangisi eskisining o'rnini oladi.
+    fileEl.addEventListener('change', () => { const f = fileEl.files?.[0]; fileEl.value = ''; if (f) { if (d?.url) URL.revokeObjectURL(d.url); d = null; loadedOnce = false; paint(); load(f); } });
     paint();
     load(firstFile);
     return { dispose() { disposed = true; if (d?.url) setTimeout(() => URL.revokeObjectURL(d.url), 1000); } };

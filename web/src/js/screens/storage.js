@@ -8,8 +8,9 @@ import { icon, appBar, bindAppBar, toast, confirmDialog } from '../ui.js';
 import { formatBytes } from './stats.js';
 import { mountChick, chickDuration } from './chick.js';
 import { Chart, pctText, roundPercents } from './storage-chart.js';
+import { lib, loadLibrary } from './packs.js';
 import {
-  cacheBreakdown, cacheClearCats, cacheStats,
+  cacheBreakdown, cacheClearCats, cacheStats, cachePackBreakdown, cacheClearPackKinds,
   CAT_VIDEO, CAT_PACKS, CAT_CHAT, CAT_IMG, CAT_OTHER,
 } from '../tg/chunk-cache.js';
 
@@ -20,13 +21,20 @@ const GROUPS = [
   { label: 'Emoji, GIF va stikerlar', cats: [CAT_PACKS], color: '#E08A3C' },
   { label: 'Vaqtinchalik fayllar', cats: [CAT_CHAT, CAT_OTHER], color: '#9A6FE2' },
 ];
+// "Emoji, GIF va stikerlar" ichki bo'limlari (`_kPackEmoji` ...).
+const PACK_KIDS = [
+  { label: 'Emoji', kind: 'emoji', color: '#F0B04A' },
+  { label: 'GIF', kind: 'gif', color: '#E0703C' },
+  { label: 'Stiker', kind: 'sticker', color: '#C95A8A' },
+];
+const PACKS = 'Emoji, GIF va stikerlar';
 const INFO = "Barcha videolar, rasmlar, stikerlar va emojilar serverda qoladi — kerak bo'lsa ularni qayta yuklab olishingiz mumkin.";
 const clamp01 = (v) => Math.min(1, Math.max(0, v));
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 export function openStorage() {
   push((el) => {
-    let disposed = false; let rows = []; let off = new Set(); let hi = null; let loading = true; let st = null; let drain = null; let chart = null;
+    let disposed = false; let rows = []; let off = new Set(); let hi = null; let loading = true; let st = null; let drain = null; let chart = null; let packsOpen = false; let packKinds = new Map();
     el.classList.add('sg-route');
     el.innerHTML = `<div class="sg-top">${appBar({ title: 'Xotiradan foydalanish' })}</div>
       <div class="scroll sg-body"><div class="sg-card"><div class="sg-chartbox"></div><div class="sg-head"></div><div class="sg-rows"></div><div class="sg-btnbox"></div></div><div class="sg-info"></div><div style="height:16px"></div></div>`;
@@ -40,9 +48,24 @@ export function openStorage() {
     });
     body.addEventListener('scroll', () => top.classList.toggle('pinned', body.scrollTop > 230), { passive: true });
 
+    const kids = (r) => r.children || [];
     const total = () => rows.reduce((a, r) => a + r.bytes, 0);
-    const selected = () => rows.filter((r) => !off.has(r.label));
-    const selBytes = () => selected().reduce((a, r) => a + r.bytes, 0);
+    // Ilovadagi `_isOn` / `_fullyOn` / `_bytesOf` / `_labelsOf`.
+    const isOn = (r) => (kids(r).length ? kids(r).some((c) => !off.has(c.label)) : !off.has(r.label));
+    const fullyOn = (r) => (kids(r).length ? kids(r).every((c) => !off.has(c.label)) : !off.has(r.label));
+    const bytesOf = (r) => {
+      if (!kids(r).length) return off.has(r.label) ? 0 : r.bytes;
+      const on = kids(r).filter((c) => !off.has(c.label));
+      const rest = r.bytes - kids(r).reduce((a, c) => a + c.bytes, 0);
+      return on.reduce((a, c) => a + c.bytes, 0) + (on.length === kids(r).length ? rest : 0);
+    };
+    const selected = () => rows.filter((r) => bytesOf(r) > 0);
+    const selBytes = () => rows.reduce((a, r) => a + bytesOf(r), 0);
+    const allSelected = () => rows.every(fullyOn);
+    const toggleRow = (r) => {
+      const labels = kids(r).length ? kids(r).map((c) => c.label) : [r.label];
+      if (fullyOn(r)) labels.forEach((l) => off.add(l)); else labels.forEach((l) => off.delete(l));
+    };
 
     const subtitle = (t) => {
       if (loading) return 'Hisoblanmoqda...';
@@ -81,18 +104,42 @@ export function openStorage() {
         return;
       }
       const pcts = roundPercents(rows.map((r) => (t > 0 ? r.bytes / t : 0)));
-      rowsEl.innerHTML = rows.map((r, i) => `<div class="sg-row${hi === r.label ? ' hi' : ''}${i < rows.length - 1 ? ' dv' : ''}" data-l="${esc(r.label)}">
-        <span class="sg-chk${off.has(r.label) ? '' : ' on'}" style="--c:${r.color}">${icon('check', { size: 15, color: '#fff' })}</span>
-        <span class="sg-t">${esc(r.label)}<b>${pctText(pcts[i] || 0)}</b></span><span class="sg-s">${formatBytes(r.bytes)}</span></div>`).join('');
-      rowsEl.querySelectorAll('.sg-row[data-l]').forEach((r) => r.addEventListener('click', () => {
+      const chk = (on, color) => `<span class="sg-chk${on ? ' on' : ''}" style="--c:${color}" data-chk="1">${icon('check', { size: 15, color: '#fff' })}</span>`;
+      const html = [];
+      rows.forEach((r, i) => {
+        const open = kids(r).length && packsOpen;
+        const dv = i < rows.length - 1 || open;
+        html.push(`<div class="sg-row${hi === r.label ? ' hi' : ''}${dv ? ' dv' : ''}" data-l="${esc(r.label)}" data-i="${i}">
+          ${chk(isOn(r), r.color)}
+          <span class="sg-t">${esc(r.label)}<b>${pctText(pcts[i] || 0)}</b></span>
+          ${kids(r).length ? `<span class="sg-chev" data-chev="1">${icon(packsOpen ? 'keyboard_arrow_up' : 'keyboard_arrow_down', { size: 22, color: '#8A8A8E' })}</span>` : ''}
+          <span class="sg-s">${formatBytes(r.bytes)}</span></div>`);
+        if (open) kids(r).forEach((c, k) => {
+          const pc = t > 0 ? Math.round(c.bytes * 10000 / t) / 100 : 0;
+          html.push(`<div class="sg-row kid${k < kids(r).length - 1 || i < rows.length - 1 ? ' dv' : ''}" data-kid="${esc(c.label)}">
+            ${chk(!off.has(c.label), c.color)}<span class="sg-t">${esc(c.label)}<b>${pctText(pc)}</b></span><span class="sg-s">${formatBytes(c.bytes)}</span></div>`);
+        });
+      });
+      rowsEl.innerHTML = html.join('');
+      rowsEl.querySelectorAll('.sg-row[data-i]').forEach((rowEl) => {
+        const r = rows[Number(rowEl.dataset.i)];
+        rowEl.addEventListener('click', (e) => {
+          if (drain != null) return;
+          const onCheck = e.target.closest('[data-chk]');
+          // Ichki bo'limli toifa: qatorga bosish ochadi/yopadi, doira — hammasini tanlaydi.
+          if (kids(r).length && !onCheck) { packsOpen = !packsOpen; paintRows(); return; }
+          toggleRow(r); refresh();
+        });
+      });
+      rowsEl.querySelectorAll('.sg-row[data-kid]').forEach((rowEl) => rowEl.addEventListener('click', () => {
         if (drain != null) return;
-        const l = r.dataset.l; if (off.has(l)) off.delete(l); else off.add(l);
+        const l = rowEl.dataset.kid; if (off.has(l)) off.delete(l); else off.add(l);
         refresh();
       }));
     }
 
     function paintBtn() {
-      const t = total(); const sb = selBytes(); const all = off.size === 0; const hasCache = loading || t > 0;
+      const t = total(); const sb = selBytes(); const all = allSelected(); const hasCache = loading || t > 0;
       if (!hasCache) { btnBox.innerHTML = ''; infoEl.innerHTML = ''; return; }
       const enabled = !loading && sb > 0 && drain == null;
       btnBox.innerHTML = `<button class="sg-btn${enabled ? '' : ' dis'}" ${enabled ? '' : 'disabled'}>${all ? 'Keshni tozalash' : 'Tanlanganini tozalash'}${sb > 0 ? `<span>${formatBytes(sb)}</span>` : ''}</button>`;
@@ -103,17 +150,21 @@ export function openStorage() {
     function refresh() {
       const t = total();
       chart.set({
-        slices: selected().map((r) => ({ label: r.label, bytes: r.bytes, color: r.color })),
+        slices: rows.filter((r) => bytesOf(r) > 0).map((r) => ({ label: r.label, bytes: bytesOf(r), color: r.color })),
         selectedBytes: selBytes(), loading, complete: !loading && t <= 0, drain,
       });
       paintHead(); paintRows(); paintBtn();
     }
 
     async function clear() {
-      const chosen = selected();
-      const cats = new Set(chosen.flatMap((r) => r.cats));
+      const cats = new Set(); const wantKinds = new Set();
+      for (const r of rows) {
+        if (!kids(r).length) { if (!off.has(r.label)) r.cats.forEach((c) => cats.add(c)); continue; }
+        const on = kids(r).filter((c) => !off.has(c.label));
+        if (on.length === kids(r).length) r.cats.forEach((c) => cats.add(c)); else on.forEach((c) => wantKinds.add(c.kind));
+      }
       const size = selBytes();
-      if (!cats.size || size <= 0) return;
+      if ((!cats.size && !wantKinds.size) || size <= 0) return;
       if (!(await confirmDialog(`Keshni tozalash (${formatBytes(size)})`, "Tanlangan toifalardagi saqlangan fayllar o'chiriladi. Ular keyin qayta yuklanadi.", { ok: "O'chirish", danger: true }))) return;
       // Jo'ja chiqindini qutiga tashlaydi (ilovadagi kabi): parda animatsiya oxirigacha ko'rinadi, halqa jo'ja bilan
       // bir sur'atda bo'shaydi, foiz vaqtga bog'langan (tozalash tez tugasa ham sekin o'sadi), ish tugamasa 95% da kutadi.
@@ -134,7 +185,7 @@ export function openStorage() {
         if (!(done && r >= 1) && !disposed) requestAnimationFrame(tick);
       };
       requestAnimationFrame(tick);
-      try { await cacheClearCats(cats); } catch (_) { ok = false; }
+      try { await cacheClearCats(cats); if (wantKinds.size) await cacheClearPackKinds(packKinds, wantKinds); } catch (_) { ok = false; }
       done = true;
       await new Promise((res) => { const w = () => ((performance.now() - t0 >= minMs || disposed) ? res() : setTimeout(w, 100)); w(); });
       stop(); sheet.remove(); drain = null; off = new Set(); hi = null;
@@ -145,7 +196,14 @@ export function openStorage() {
     async function load() {
       try {
         const m = await cacheBreakdown();
-        rows = GROUPS.map((g) => ({ ...g, bytes: g.cats.reduce((a, c) => a + (m.get(c) || 0), 0) })).filter((g) => g.bytes > 0).sort((a, b) => b.bytes - a.bytes);
+        try { await loadLibrary(); } catch (_) { /* */ }
+        packKinds = new Map([...(lib.mine || []), ...(lib.subs || [])].map((p) => [Number(p.id), p.kind]));
+        const pk = await cachePackBreakdown(packKinds);
+        rows = GROUPS.map((g) => {
+          const row = { ...g, bytes: g.cats.reduce((a, c) => a + (m.get(c) || 0), 0) };
+          if (g.label === PACKS) row.children = PACK_KIDS.filter((k) => (pk.get(k.kind) || 0) > 0).map((k) => ({ ...k, bytes: pk.get(k.kind) }));
+          return row;
+        }).filter((g) => g.bytes > 0).sort((a, b) => b.bytes - a.bytes);
         st = await cacheStats();
       } catch (_) { rows = []; }
       loading = false;
