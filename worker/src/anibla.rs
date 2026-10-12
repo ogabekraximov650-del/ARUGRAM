@@ -57,9 +57,10 @@ const IMG_BASE: &str = "https://amediatv.up-it.uz";
 /// Ro'yxat sahifasi — 100 tadan (foydalanuvchi talabi). Telegram pastki panelga
 /// 150 tagacha tugmani qabul qildi, 300 ni rad etdi (sinab ko'rilgan).
 const SEARCH_PAGE: i64 = 100;
-/// Qismlar sahifasi: 3 tadan qatorda 60 tagacha. 150 tugmali panelni Telegram rad etdi
-/// (keyin 429 flood chegarasi berdi), shu sabab kichik sahifa. Qisqa seriallar bitta sahifaga sig'adi.
-const EP_PAGE: usize = 60;
+/// Qismlar sahifasi: 3 tadan qatorda 100 tagacha. Telegram paneli JAMI 150 tugmagacha
+/// (qism tugmalari + boshqaruv qatorlari ~6 ta); 150 qism + 6 = 156 rad etilib, keyin
+/// 429 flood berdi. 100 + 6 = 106 — ishlab turgan anime ro'yxati bilan bir xil.
+const EP_PAGE: usize = 100;
 const UA: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
 
 thread_local! {
