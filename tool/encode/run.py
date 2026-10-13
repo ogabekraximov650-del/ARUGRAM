@@ -1023,6 +1023,11 @@ async def process(app: Client, channel: int, job: dict):
         else:
             api("finish", {**ident, "ok": True})
             log("  tayyor")
+            if QUALITY:
+                # Sifat-workflow: har run BITTA sifatni tayyorlab o'chadi — navbat qolgan bo'lsa workflow
+                # ("Davom ettirish" qadami) va worker YANGI run ochadi (toza mashina, disk va xotira).
+                log("  bitta sifat tayyor — run tugaydi, keyingisi yangi run'da")
+                STOP_RUN = True
     except JobLost:
         log("  ish boshqa run'ga o'tdi — to'xtatildi")
     except Fatal as ex:

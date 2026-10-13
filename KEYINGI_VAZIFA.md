@@ -6096,3 +6096,7 @@ yuklaydi — worker'dagi qulf (`/api/encode/ulock`, `EncodeLive` DO ichida, ijar
 qolganlari navbat kutadi (kodlash parallel davom etadi); (2) `run.py` `send_file`: progress `UPLOAD_STALL_SEC` (120 s) o'zgarmasa
 yuklash bekor qilinadi va TAYYOR shifrlangan fayl QAYTA KODLANMASDAN qayta yuboriladi (5 urinish); har urinishdan oldin kanalning
 oxirgi 20 xabarida shu nomli fayl bor-yo'qligi tekshiriladi (javob yo'qolgan, lekin fayl o'tgan bo'lsa — takror yuklanmaydi).
+
+Sifat-workflow run'i BITTA sifatni (bitta qismning o'z sifatini) tayyorlab bo'lgach tugaydi (`run.py`, `STOP_RUN`); navbat
+qolgan bo'lsa workflow'ning "Davom ettirish" qadami (va worker `encode_kick`) shu workflow'ning YANGI run'ini ochadi — har
+sifat toza mashinada boshlanadi. `skip` qilingan qismlar run'ni tugatmaydi (kodlash bo'lmagani uchun).
