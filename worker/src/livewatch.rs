@@ -415,12 +415,13 @@ pub(crate) async fn app_all_html(env: &Env) -> String {
 
 /// Sifat-workflow holat yubordi: umumiy xabar yangilanadi — butun dunyo bo'yicha ~6 soniyada BIR marta
 /// (Durable Object darvozasi: 4 ta run bir vaqtda yuborsa ham Telegram'ni ko'p tahrirlamaymiz).
-pub(crate) async fn app_push_all(env: &Env) -> String {
+pub(crate) async fn app_push_all(env: &Env, gate: bool) -> String {
+    // Darvoza DO'dan push bilan birga kelgan: ruxsat bo'lmasa bazaga ham, Telegram'ga ham bormaymiz.
+    if !gate {
+        return "kutilmoqda (6 s)".into();
+    }
     if target(env, APP).await.is_none() {
         return "kuzatuv yo'q".into();
-    }
-    if !encode_live_gate(env, 6_000).await {
-        return "kutilmoqda (6 s)".into();
     }
     let html = app_all_html(env).await;
     let Some((chat, msg)) = target(env, APP).await else { return "kuzatuv yo'q".into() };

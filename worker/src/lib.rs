@@ -11695,18 +11695,21 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
         if !text.starts_with("#arustatus") || text.len() > 16_000 {
             return json_resp(&json!({"error": "matn"}), 400);
         }
-        let ok_put = encode_live_store(env, Some(text.clone())).await.is_some();
+        let wq = req.headers().get("X-Encode-Quality").ok().flatten().unwrap_or_default();
+        let wq = QUALITIES.iter().copied().find(|x| *x == wq.trim());
+        // Sifat-workflow: bitta DO so'rovi (holat + darvoza); eskisi: faqat oxirgi matn.
+        let (ok_put, gate) = match wq {
+            Some(q) => { let g = encode_live_put(env, q, &text, 6_000).await; (g.is_some(), g.unwrap_or(true)) }
+            None => (encode_live_store(env, Some(text.clone())).await.is_some(), false),
+        };
         // Sifat-workflow (`X-Encode-Quality`): holat sifat bo'yicha ham saqlanadi. Botdagi "Ilova uchun" xabari
         // faqat ASOSIY sifat-run'ning holati bilan yangilanadi (4 ta run bir xabarni almashtirib tursa
         // miltillaydi va Telegram cheklaydi).
-        let wq = req.headers().get("X-Encode-Quality").ok().flatten().unwrap_or_default();
-        let wq = QUALITIES.iter().copied().find(|x| *x == wq.trim());
         let mut bot = String::new();
         match wq {
             // Har sifat-workflow'ning o'z xabari (bosh menyudagi "Holat"): faqat shu sifatniki yangilanadi.
-            Some(q) => {
-                encode_live_put(env, q, &text).await;
-                bot = livewatch::app_push_all(env).await;
+            Some(_) => {
+                bot = livewatch::app_push_all(env, gate).await;
             }
             // Botda "Ilova uchun" holati kuzatilayotgan bo'lsa (eski usul) — o'sha xabar yangilanadi.
             None => livewatch::app_push(env, &text).await,
@@ -13050,17 +13053,42 @@ async fn encode_live(env: &Env) -> Value {
 pub struct EncodeLive {
     state: State,
     last: std::cell::RefCell<Option<String>>,
+    /// Sifatlarning oxirgi holati — XOTIRADA (Durable Object'ning kunlik yozuv/so'rov chegarasi tez tugamasin).
+    map: std::cell::RefCell<Option<serde_json::Map<String, Value>>>,
+    gate_at: std::cell::Cell<i64>,
+    persisted_at: std::cell::Cell<i64>,
+}
+
+/// Omborga (storage) yozish oralig'i: har push'da emas, ~60 s da bir marta.
+const LIVE_PERSIST_MS: i64 = 60_000;
+
+impl EncodeLive {
+    async fn load_map(&self) {
+        if self.map.borrow().is_some() {
+            return;
+        }
+        let m = self.state.storage().get::<String>("m").await.ok().flatten()
+            .and_then(|m| serde_json::from_str::<serde_json::Map<String, Value>>(&m).ok()).unwrap_or_default();
+        *self.map.borrow_mut() = Some(m);
+    }
 }
 
 impl DurableObject for EncodeLive {
     fn new(state: State, _env: Env) -> Self {
-        Self { state, last: std::cell::RefCell::new(None) }
+        Self {
+            state,
+            last: std::cell::RefCell::new(None),
+            map: std::cell::RefCell::new(None),
+            gate_at: std::cell::Cell::new(0),
+            persisted_at: std::cell::Cell::new(0),
+        }
     }
 
     async fn fetch(&self, mut req: Request) -> Result<Response> {
         let url = req.url()?;
         let q = url.query_pairs().find(|(k, _)| k == "q").map(|(_, v)| v.to_string()).unwrap_or_default();
         let want_all = url.query_pairs().any(|(k, _)| k == "all");
+        let gate_ms = url.query_pairs().find(|(k, _)| k == "gate").and_then(|(_, v)| v.parse::<i64>().ok());
         // Telegram'ga yuklash NAVBATI (`?lock=acquire|release&owner=..&ttl=<ms>`): bir vaqtda faqat bitta sifat-run
         // yuklaydi, qolganlari kutadi. Bitta DO — ketma-ket, ya'ni ikki run bir vaqtda ololmaydi. Ijara `ttl` dan
         // keyin o'zi bo'shaydi (run o'lib qolsa navbat qotib qolmasin).
@@ -13089,32 +13117,51 @@ impl DurableObject for EncodeLive {
                 _ => Response::error("lock", 400),
             };
         }
-        // Darvoza: `?gate=<ms>` — oxirgi ruxsatdan beri `ms` o'tgan bo'lsagina "1" (va vaqt yangilanadi).
-        // Bitta DO butun dunyo uchun — ikki run bir vaqtda so'rasa ham faqat bittasiga ruxsat.
-        if let Some(ms) = url.query_pairs().find(|(k, _)| k == "gate").and_then(|(_, v)| v.parse::<i64>().ok()) {
+        // Darvoza: oxirgi ruxsatdan beri `ms` o'tgan bo'lsagina "1" (vaqt xotirada yangilanadi — omborga yozilmaydi).
+        let gate = |ms: i64| -> bool {
             let now = now_ms();
-            let last = self.state.storage().get::<i64>("g").await.ok().flatten().unwrap_or(0);
-            if now - last >= ms {
-                self.state.storage().put("g", now).await?;
-                return Response::ok("1");
+            if now - self.gate_at.get() >= ms {
+                self.gate_at.set(now);
+                true
+            } else {
+                false
             }
-            return Response::ok("0");
-        }
+        };
         if req.method() == Method::Post {
             let text = req.text().await?;
+            let now = now_ms();
             *self.last.borrow_mut() = Some(text.clone());
-            self.state.storage().put("s", text.clone()).await?;
             // Sifat-workflow'lar: har sifatning oxirgi holati alohida (`?q=360p`).
+            let mut dirty = false;
             if !q.is_empty() {
-                let mut map: serde_json::Map<String, Value> = self.state.storage().get::<String>("m").await.ok().flatten()
-                    .and_then(|m| serde_json::from_str(&m).ok()).unwrap_or_default();
-                map.insert(q, json!({"t": text, "at": now_ms()}));
-                self.state.storage().put("m", Value::Object(map).to_string()).await?;
+                self.load_map().await;
+                if let Some(m) = self.map.borrow_mut().as_mut() {
+                    m.insert(q, json!({"t": text, "at": now}));
+                }
+                dirty = true;
             }
-            return Response::ok("ok");
+            if now - self.persisted_at.get() >= LIVE_PERSIST_MS {
+                self.persisted_at.set(now);
+                self.state.storage().put("s", text.clone()).await?;
+                if dirty {
+                    let snap = self.map.borrow().as_ref().map(|m| Value::Object(m.clone()).to_string());
+                    if let Some(snap) = snap {
+                        self.state.storage().put("m", snap).await?;
+                    }
+                }
+            }
+            // Bitta so'rovda push + darvoza (`?q=..&gate=6000`): worker DO'ga bir marta murojaat qilsin.
+            return match gate_ms {
+                Some(ms) => Response::ok(if gate(ms) { "1" } else { "0" }),
+                None => Response::ok("ok"),
+            };
+        }
+        if let Some(ms) = gate_ms {
+            return Response::ok(if gate(ms) { "1" } else { "0" });
         }
         if want_all {
-            let m = self.state.storage().get::<String>("m").await.ok().flatten().unwrap_or_else(|| "{}".to_string());
+            self.load_map().await;
+            let m = self.map.borrow().as_ref().map(|m| Value::Object(m.clone()).to_string()).unwrap_or_else(|| "{}".to_string());
             return Response::ok(m);
         }
         let mem = self.last.borrow().clone();
@@ -13156,14 +13203,17 @@ async fn encode_live_store(env: &Env, text: Option<String>) -> Option<String> {
     }
 }
 
-/// Sifat-workflow'ning holatini yozadi (`?q=360p`).
-async fn encode_live_put(env: &Env, q: &str, text: &str) -> bool {
-    let Ok(ns) = env.durable_object("ENCODE_LIVE") else { return false };
-    let Ok(stub) = ns.get_by_name("encode") else { return false };
+/// Sifat-workflow'ning holatini yozadi va umumiy xabarni tahrirlash darvozasini so'raydi — BITTA DO so'rovida
+/// (`?q=360p&gate=6000`). `None` — DO javob bermadi; `Some(true)` — xabarni tahrirlash mumkin.
+async fn encode_live_put(env: &Env, q: &str, text: &str, gate_ms: i64) -> Option<bool> {
+    let ns = env.durable_object("ENCODE_LIVE").ok()?;
+    let stub = ns.get_by_name("encode").ok()?;
     let mut init = RequestInit::new();
     init.with_method(Method::Post).with_body(Some(text.to_string().into()));
-    let Ok(req) = Request::new_with_init(&format!("https://encode-live.internal/?q={q}"), &init) else { return false };
-    matches!(stub.fetch_with_request(req).await, Ok(r) if r.status_code() == 200)
+    let req = Request::new_with_init(&format!("https://encode-live.internal/?q={q}&gate={gate_ms}"), &init).ok()?;
+    let mut resp = stub.fetch_with_request(req).await.ok()?;
+    if resp.status_code() != 200 { return None; }
+    Some(resp.text().await.ok()?.trim() == "1")
 }
 
 /// Telegram'ga yuklash navbati (`encode_live` DO ichida). `Ok(true)` — navbat sizniki.

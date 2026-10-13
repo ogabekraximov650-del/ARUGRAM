@@ -6121,3 +6121,12 @@ Keyin panel bot yana almashtirildi (`tool/bot/encode_bot.enc` qayta shifrlandi, 
 
 `tool/post/encode.sh`: chiqish balandligi 648..971 (720p sinfi) bo'lsa CRF `H265_CRF_720` (25), qolgan sifatlarda `H265_CRF` (30).
 `post.workflow.yml` shablonida `H265_CRF_720: '25'` (avtoencode repoga `setup-autoencode.yml` o'zi o'rnatadi).
+
+## EncodeLive: Durable Object so'rov/yozuv sarfi kamaytirildi (2026-10)
+
+Tashxis: `/api/encode/ulock` javobi `info: do_xato`, `/api/encode/push` javobi `ok:false` — `EncodeLive` DO butunlay javob
+bermayotgan edi (sabab ehtimoli: Cloudflare Durable Object kunlik chegarasi — har push 4-5 so'rov va 2 ta ombor yozuvi
+edi, 4 run × har 5 s). Natijada "Holat"da jonli log yo'q, Telegram'ga yuklash navbati (`ulock`) ham ochiq (`do_xato` → ruxsat).
+Endi: sifatlar xaritasi va darvoza XOTIRADA, omborga ~60 s da bir marta yoziladi; push + darvoza BITTA DO so'rovida
+(`?q=..&gate=6000`); darvoza yopiq bo'lsa baza/Telegram'ga umuman borilmaydi (`livewatch::app_push_all(env, gate)`);
+run'larning push oralig'i 5 → 8 s (`WORKER_PUSH_SEC`). Chegara tiklangach (UTC yarim tun) o'zi ishlaydi.
