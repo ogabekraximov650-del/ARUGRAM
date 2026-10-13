@@ -6130,3 +6130,11 @@ edi, 4 run × har 5 s). Natijada "Holat"da jonli log yo'q, Telegram'ga yuklash n
 Endi: sifatlar xaritasi va darvoza XOTIRADA, omborga ~60 s da bir marta yoziladi; push + darvoza BITTA DO so'rovida
 (`?q=..&gate=6000`); darvoza yopiq bo'lsa baza/Telegram'ga umuman borilmaydi (`livewatch::app_push_all(env, gate)`);
 run'larning push oralig'i 5 → 8 s (`WORKER_PUSH_SEC`). Chegara tiklangach (UTC yarim tun) o'zi ishlaydi.
+
+## Sifat-run holati worker orqali o'tmaydi (2026-10)
+
+Worker so'rovlari (~50k) tejash uchun sifat-run (`ENCODE_QUALITY`) holatni `/api/encode/push` ga YUBORMAYDI
+(`send_worker` — `QUALITY` bo'lsa qaytadi). Har sifat-run ishga tushganda log kanaliga O'Z xabarini yuboradi (qadalmaydi,
+boshqa run bilan bo'lishilmaydi; sarlavha `🔹 360p · run · N-qism · bosqich`) va faqat shuni `STATUS_INTERVAL_SEC` (3 s)
+da tahrirlaydi (`StatusPin.start/text`, `tool/encode/run.py`). Botdagi "📋 Holat" faqat navbat/sanoqni ko'rsatadi,
+ishlayotgan sifat yonida "jonli log kodlash log kanalida" yoziladi. Eski (sifatsiz) rejim o'zgarmadi.

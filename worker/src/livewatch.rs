@@ -401,7 +401,7 @@ pub(crate) async fn app_all_html(env: &Env) -> String {
                 && s["progress"].as_str().unwrap_or("idle") != "idle" && jint(s, "anime_id") > 0);
             match live {
                 Some(s) => blocks.push(q_block(env, q, s, pend[i], nlog).await),
-                None if running[i] => blocks.push(format!("\u{2699}\u{FE0F} <b>{q}</b>: ishlayapti, jonli holat hali kelmadi \u{00B7} kutayotgan: {}", pend[i])),
+                None if running[i] => blocks.push(format!("\u{2699}\u{FE0F} <b>{q}</b>: ishlayapti (jonli log kodlash log kanalida) \u{00B7} kutayotgan: {}", pend[i])),
                 None => blocks.push(format!("\u{1F4A4} <b>{q}</b>: hozir ishlamayapti \u{00B7} kutayotgan: {}", pend[i])),
             }
         }

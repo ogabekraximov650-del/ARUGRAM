@@ -705,6 +705,8 @@ class StatusPin:
                     "---"]
             body = [t for _, t in self.lines]
         # Telegram xabari 4096 belgidan oshmasin — eski qatorlar tashlanadi.
+        if QUALITY:
+            head = [f"\U0001F539 {QUALITY} \u00B7 {RUNNER} \u00B7 {self.num or '-'}-qism \u00B7 {self.progress}"] + head
         while body and len("\n".join(head + body)) > 4000:
             body.pop(0)
         return "\n".join(head + body)[:4000]
@@ -722,6 +724,16 @@ class StatusPin:
 
     async def start(self, app):
         if self.off:
+            return
+        if QUALITY:
+            # Har sifat-run ishga tushganda kanalga O'Z xabarini yuboradi va faqat shuni tahrirlaydi.
+            try:
+                m = await app.send_message(LOG_CHANNEL, self.text(), disable_notification=True,
+                                           parse_mode=enums.ParseMode.DISABLED)
+                self.msg_id = m.id
+            except Exception as e:
+                print(f"Holat xabari ochilmadi: {e}", flush=True)
+                self.off = True
             return
         try:
             await self._promote(app)
@@ -767,7 +779,12 @@ class StatusPin:
         TALAB (foydalanuvchi): "har daqiqada oxirgi to'liq log keshga
         yozilsin va to'g'ridan-to'g'ri kesh orqali ko'rsatilsin". Bazaga
         (Turso) yozilmaydi. Xato bo'lsa kodlashga tegmaydi.
+
+        Sifat-run (`ENCODE_QUALITY`) holatni worker orqali YUBORMAYDI (worker so'rovlari tejaladi) — u log kanalidagi
+        o'z xabarini o'zi tahrirlaydi.
         """
+        if QUALITY:
+            return
         try:
             req = urllib.request.Request(
                 f"{API}/api/encode/push", data=self.text().encode(), method="POST",
