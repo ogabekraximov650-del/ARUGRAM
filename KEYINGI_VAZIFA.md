@@ -6100,3 +6100,11 @@ oxirgi 20 xabarida shu nomli fayl bor-yo'qligi tekshiriladi (javob yo'qolgan, le
 Sifat-workflow run'i BITTA sifatni (bitta qismning o'z sifatini) tayyorlab bo'lgach tugaydi (`run.py`, `STOP_RUN`); navbat
 qolgan bo'lsa workflow'ning "Davom ettirish" qadami (va worker `encode_kick`) shu workflow'ning YANGI run'ini ochadi — har
 sifat toza mashinada boshlanadi. `skip` qilingan qismlar run'ni tugatmaydi (kodlash bo'lmagani uchun).
+
+## Holat xabari: jonli holat kelmasa ham sifatlar ko'rinadi
+
+"📋 Holat" avval faqat DO'da jonli holat (`encode_live_all`) bo'lsagina umumiy xabarni ko'rsatardi; bo'sh bo'lsa eski
+qisqa matn chiqardi (log yo'q). Endi bazada ijarasi tugamagan `encode_q` qatori bo'lsa ham umumiy xabar chiqadi, jonli
+holati kelmagan sifat "ishlayapti, jonli holat hali kelmadi" deb ko'rsatiladi (`livewatch::running_flags`).
+Sabab: run'lar `/api/encode/push` ga holat yubormayotgan bo'lishi mumkin — shu qatorni ko'rsangiz, run logida
+"Holat worker'ga yuborilmadi" ni qidiring.

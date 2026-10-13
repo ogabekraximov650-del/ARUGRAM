@@ -277,7 +277,7 @@ pub(crate) async fn app_push(env: &Env, text: &str) {
 /// "📋 Holat" — "Ilova uchun" bo'limida.
 pub(crate) async fn app_status(env: &Env, chat: i64) {
     // Sifat-workflow'lar (360p/480p/720p/1080p) ishlatilyapti — hamma sifat BITTA xabarda, o'zi yangilanadi.
-    if !encode_live_all(env).await.is_empty() {
+    if !encode_live_all(env).await.is_empty() || running_flags(env).await.iter().any(|b| *b) {
         let html = app_all_html(env).await;
         start(env, APP, chat, &html).await;
         return;
@@ -314,6 +314,19 @@ async fn pending_all(env: &Env) -> ([i64; 4], i64) {
         .and_then(|r| first_row(&r)).map(|r| jint(&r, "n")).unwrap_or(0);
     PEND.with(|m| *m.borrow_mut() = (now, counts, queued));
     (counts, queued)
+}
+
+/// Bazada hozir ishlayotgan (ijarasi tugamagan) sifat-run'lar — jonli holat kelmasa ham ko'rinsin.
+async fn running_flags(env: &Env) -> [bool; 4] {
+    let mut f = [false; 4];
+    let res = turso_exec(env, "SELECT DISTINCT quality FROM encode_q WHERE state='running' AND lease_until>?",
+        vec![TursoArg::int(now_ms())]).await;
+    if let Ok(res) = res {
+        for r in rows_of(&res) {
+            if let Some(i) = QUALITIES.iter().position(|q| *q == r["quality"].as_str().unwrap_or("")) { f[i] = true; }
+        }
+    }
+    f
 }
 
 fn short(s: &str, n: usize) -> String {
@@ -378,6 +391,7 @@ pub(crate) async fn app_all_html(env: &Env) -> String {
     let all = encode_live_all(env).await;
     let (pend, queued) = pending_all(env).await;
     let now = now_ms();
+    let running = running_flags(env).await;
     let mut nlog = 3usize;
     loop {
         let mut blocks = Vec::new();
@@ -387,6 +401,7 @@ pub(crate) async fn app_all_html(env: &Env) -> String {
                 && s["progress"].as_str().unwrap_or("idle") != "idle" && jint(s, "anime_id") > 0);
             match live {
                 Some(s) => blocks.push(q_block(env, q, s, pend[i], nlog).await),
+                None if running[i] => blocks.push(format!("\u{2699}\u{FE0F} <b>{q}</b>: ishlayapti, jonli holat hali kelmadi \u{00B7} kutayotgan: {}", pend[i])),
                 None => blocks.push(format!("\u{1F4A4} <b>{q}</b>: hozir ishlamayapti \u{00B7} kutayotgan: {}", pend[i])),
             }
         }
