@@ -254,7 +254,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
             "code": get(env, "sess_code").await,
             "pw": get(env, "sess_pw").await,
             "target": get(env, "sess_target").await,
-            "bot": encbot_username(env).await,
+            "bot": bot_username(env).await,
             // Run'dan kelgan oxirgi xabar (tashxis uchun; `reset` tegmaydi).
             "last": get(env, "sess_last").await,
         }));

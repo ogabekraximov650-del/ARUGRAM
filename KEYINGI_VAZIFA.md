@@ -6184,3 +6184,8 @@ Sifat-run (`QUALITY` va `BOT` bor) asl videoni kanaldan emas, BOT chatidan oladi
 tarixidan topib yuklaydi va nusxani o'chiradi. Shu tufayli sessiya akkaunti asl video kanalida a'zo bo'lishi shart emas
 (faqat botni /start qilgan bo'lsin — `session.py` buni o'zi qiladi). Anibla manbali qismlar o'zgarmadi: video saytdan olinadi.
 Log kanalida esa akkaunt baribir admin/a'zo bo'lishi kerak.
+
+Keyin (foydalanuvchi aniqlashtirdi): fayl uzatuvchi bot — ASOSIY bot (`TELEGRAM_BOT_TOKEN`), panel bot emas. Shu sababli
+`ARUENC|...` fayllar va asl video nusxasi (`/api/encode/origin`) asosiy bot orqali: `encupload::on_file` endi `handle_tg_webhook`
+ichida, `claim`/`poll` javobidagi `bot` — asosiy bot username'i (`bot_username`). Sessiya akkauntlari asosiy botni /start qiladi
+(u yordam xabari bilan javob beradi — zarari yo'q). Asosiy bot yopiq kanalda admin bo'lishi shart (ilova fayllarini ham shu ko'chiradi).

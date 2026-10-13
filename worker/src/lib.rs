@@ -4693,6 +4693,11 @@ async fn handle_tg_webhook(env: &Env, mut req: Request) -> Result<Response> {
         }
     }
     let msg = update["message"].clone();
+    // Sifat-workflow'larning tayyor fayli (`ARUENC|...` izohli hujjat) — yuboruvchi ro'yxatdan o'tgan sessiya
+    // (`encupload.rs`): asosiy bot uni yopiq kanalga saqlaydi, bazaga yozadi va chatdan o'chiradi.
+    if encupload::on_file(env, &msg).await {
+        return ok(json!({"ok": true}));
+    }
     // "🔐 Majburiy obunalar" menyusi endi PANEL botda (`channels.rs`):
     // asosiy botda admin ham /start bosganda Mini App tugmasini ko'radi.
     // Foydalanuvchi ilovadan bot chatiga yuborgan fayl (surat, video,
@@ -11398,7 +11403,7 @@ async fn encode_claim_q(env: &Env, b: &Value, wq: &'static str, now: i64) -> Res
                     },
                 },
                 "channel": tg_channel_id(env),
-                "bot": encbot_username(env).await,
+                "bot": bot_username(env).await,
                 "status_bots": encode_status_bots(env).await,
             }));
         }
@@ -12096,7 +12101,7 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
             return json_resp(&json!({"error": "origin"}), 400);
         }
         let tag = format!("ARUORIG|{origin}");
-        return match encbot_api(env, "copyMessage", json!({
+        return match tg_api(env, "copyMessage", json!({
             "chat_id": uid, "from_chat_id": channel, "message_id": msg,
             "caption": tag, "disable_notification": true,
         })).await {
@@ -12709,10 +12714,6 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
     }
 
     let msg = &update["message"];
-    // Sifat-workflow'larning tayyor fayli (`ARUENC|...` izohli hujjat) — yuboruvchi ro'yxatdan o'tgan sessiya (`encupload.rs`).
-    if encupload::on_file(env, msg).await {
-        return ok(json!({"ok": true}));
-    }
     let chat = msg["chat"]["id"].as_i64().unwrap_or(0);
     // Faqat admin va faqat shaxsiy chat — boshqalarga javob yo'q.
     if chat == 0 || !is_encbot_admin(chat) || msg["from"]["id"].as_i64() != Some(chat) {

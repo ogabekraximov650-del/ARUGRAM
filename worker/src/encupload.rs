@@ -2,14 +2,14 @@
 //  KODLASH FAYLLARI BOT ORQALI: workflow -> bot chati -> yopiq kanal -> baza
 // ══════════════════════════════════════════════════════════════
 //
-// TALAB (foydalanuvchi): sifat-workflow'lar tayyor faylni KANALGA emas, kodlash botining CHATIGA yuboradi; bot uni yopiq
+// TALAB (foydalanuvchi): sifat-workflow'lar tayyor faylni KANALGA emas, ASOSIY fayl uzatuvchi botning CHATIGA yuboradi; bot uni yopiq
 // kanalga saqlaydi va bazaga yozadi; shundan keyin workflow o'chadi.
 //
 // QANDAY ISHLAYDI:
 //   1. Run (o'z Telegram sessiyasi bilan) shifrlangan faylni bot chatiga hujjat qilib yuboradi. Izoh (caption):
 //        `ARUENC|<mp4|fmp4>|anime|bo'lim|qism|queued_at|sifat|kalit|hajm`
 //      Fayl nomi esa `ep_<a>_<s>_<e>_<q>_<queued_at>.mp4` (fMP4 uchun `..._f.mp4`).
-//   2. Bot webhook'i xabarni oladi (`on_file`). Yuboruvchi shu sifatning RO'YXATDAN O'TGAN sessiyasi bo'lishi shart
+//   2. Asosiy botning webhook'i xabarni oladi (`handle_tg_webhook`) (`on_file`). Yuboruvchi shu sifatning RO'YXATDAN O'TGAN sessiyasi bo'lishi shart
 //      (`sess_uid_<q>`, "🔑 Yangi sessiya" da yoziladi) — boshqa odam fayl yubora olmaydi.
 //   3. Fayl yopiq kanalga `copyMessage` bilan ko'chadi (qayta yuklanmaydi), `tg_files` va qism yozuviga yoziladi
 //      (`encode_commit_quality` / `fmp4::commit`), chatdagi xabar o'chadi.
@@ -63,19 +63,19 @@ pub(crate) async fn on_file(env: &Env, msg: &Value) -> bool {
         .ok().and_then(|r| first_row(&r)).is_some();
     let channel = tg_channel_id(env);
     if !name_ok || !job || channel == 0 {
-        let _ = encbot_api(env, "deleteMessage", json!({"chat_id": chat, "message_id": msg_id})).await;
+        let _ = tg_api(env, "deleteMessage", json!({"chat_id": chat, "message_id": msg_id})).await;
         return true;
     }
-    let copied = encbot_api(env, "copyMessage", json!({
+    let copied = tg_api(env, "copyMessage", json!({
         "chat_id": channel, "from_chat_id": chat, "message_id": msg_id,
         "caption": name, "disable_notification": true,
     })).await;
     let ch_msg = copied.ok().and_then(|c| c["message_id"].as_i64()).unwrap_or(0);
     if ch_msg <= 0 {
         // Run tasdiqni kutib, vaqt tugagach qayta yuboradi; xabar chatda qoladi (qayta nusxalash mumkin).
-        encbot_send(env, ADMIN_TELEGRAM_ID, &format!(
+        tg_send(env, ADMIN_TELEGRAM_ID, &format!(
             "\u{274C} {q}: <code>{}</code> yopiq kanalga ko'chmadi (bot kanalda admin ekanini tekshiring).",
-            html_escape(&name)), None).await;
+            html_escape(&name))).await;
         return true;
     }
     let res = if kind == "mp4" {
@@ -88,13 +88,13 @@ pub(crate) async fn on_file(env: &Env, msg: &Value) -> bool {
     };
     match res {
         Ok(()) => {
-            let _ = encbot_api(env, "deleteMessage", json!({"chat_id": chat, "message_id": msg_id})).await;
+            let _ = tg_api(env, "deleteMessage", json!({"chat_id": chat, "message_id": msg_id})).await;
         }
         Err(err) => {
             // Bazaga yozilmadi: kanaldagi nusxa yetim qolmasin.
             let _ = tg_api(env, "deleteMessage", json!({"chat_id": channel, "message_id": ch_msg})).await;
-            encbot_send(env, ADMIN_TELEGRAM_ID, &format!(
-                "\u{274C} {q}: <code>{}</code> bazaga yozilmadi: {}", html_escape(&name), html_escape(&err.to_string())), None).await;
+            tg_send(env, ADMIN_TELEGRAM_ID, &format!(
+                "\u{274C} {q}: <code>{}</code> bazaga yozilmadi: {}", html_escape(&name), html_escape(&err.to_string()))).await;
         }
     }
     true
