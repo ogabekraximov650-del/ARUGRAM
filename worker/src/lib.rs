@@ -10349,7 +10349,7 @@ fn needs_app_check(path: &str) -> bool {
     // himoyalangan. Ilova chaqiradiganlari (`queue`, `status`) esa
     // tekshiruvdan o'tadi.
     if matches!(path, "/api/encode/peek" | "/api/encode/claim" | "/api/encode/heartbeat" | "/api/encode/release"
-        | "/api/encode/quality" | "/api/encode/finish" | "/api/encode/push"
+        | "/api/encode/quality" | "/api/encode/finish" | "/api/encode/push" | "/api/encode/meta"
         | "/api/post/claim" | "/api/post/check" | "/api/post/finish" | "/api/post/progress"
         | "/api/anibla/claim" | "/api/anibla/diag" | "/api/anibla/progress" | "/api/anibla/done"
         | "/api/fmp4/claim" | "/api/fmp4/done")
