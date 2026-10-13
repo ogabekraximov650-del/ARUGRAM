@@ -154,7 +154,8 @@ class ChannelLog:
         self.active = False
         self.fails = 0
         self.hold_until = 0.0
-        self.off = LOG_CHANNEL == 0
+        # Sifat-run'da kanalga alohida log oqimi yuborilmaydi — faqat run'ning o'z (tahrirlanadigan) xabari bor.
+        self.off = LOG_CHANNEL == 0 or bool(QUALITY)
 
     def start(self, title):
         with self.lock:
@@ -641,6 +642,60 @@ class StatusPin:
                 if row.get("q") == q:
                     row.update(kv)
 
+    def html_text(self) -> str:
+        """Sifat-run xabari — botdagi "Holat" ko'rinishida: sarlavha, manba, bosqich (foiz-chiziq), oxirgi loglar."""
+        esc = html.escape
+
+        def bar(p):
+            n = round(max(0.0, min(100.0, p)) / 100 * 12)
+            return "\u2593" * n + "\u2591" * (12 - n)
+
+        with self.lock:
+            d = dict(self.data)
+            num, progress = self.num, self.progress
+            lines = [t for _, t in self.lines][-3:]
+        head = f"\U0001F539 <b>{QUALITY}</b>"
+        if progress == "idle":
+            return head + " \u00B7 run tugadi, yangisi ochiladi\u2026"
+        title = ", ".join(x for x in (d.get("anime_title"), d.get("season_title")) if x)
+        head += f" \u00B7 {esc(title)}, {esc(num or '-')}-qism" if title else f" \u00B7 {esc(num or '-')}-qism"
+        if (d.get("attempt") or 1) > 1:
+            head += f" (urinish {d['attempt']})"
+        t = head
+        src = d.get("src")
+        if isinstance(src, dict):
+            t += (f"\n\U0001F39E Manba: {src.get('h')}p \u00B7 {hms(src.get('dur_s') or 0)} \u00B7 "
+                  f"{src.get('mb')} MB")
+        cur, x = d.get("cur"), d.get("xfer")
+        if progress.startswith("enc") and isinstance(cur, dict):
+            pct = float(cur.get("pct") or 0)
+            est = f" (~{cur['est_mb']} MB)" if cur.get("est_mb") else ""
+            t += (f"\n\u2699\uFE0F Kodlanmoqda {bar(pct)} {pct:.0f}%"
+                  f"\n    tezlik {cur.get('speed')}x \u00B7 {cur.get('fps')} kadr/s \u00B7 {cur.get('bitrate_kbps')} kb/s"
+                  f" \u00B7 hajm {cur.get('size_mb')} MB{est}"
+                  f"\n    o'tdi {hms(cur.get('elapsed') or 0)} \u00B7 qoldi ~{hms(cur.get('eta') or 0)}")
+        elif isinstance(x, dict):
+            up = "Telegram" in str(x.get("kind"))
+            pct = float(x.get("pct") or 0)
+            what = "\u2B06\uFE0F Telegram'ga yuklanmoqda" if up else "\u2B07\uFE0F Asl video yuklab olinmoqda"
+            eta_s = hms(x["eta"]) if (x.get("eta") or -1) >= 0 else "--:--"
+            t += (f"\n{what} {bar(pct)} {pct:.1f}%"
+                  f"\n    tezlik {x.get('mbps')} MB/s \u00B7 {x.get('cur_mb')} / {x.get('total_mb')} MB"
+                  f"\n    o'tdi {hms(x.get('elapsed') or 0)} \u00B7 qoldi ~{eta_s}")
+        elif progress.startswith("upload"):
+            t += "\n\u2B06\uFE0F Telegram'ga yuklanmoqda"
+        elif progress.startswith("download"):
+            t += "\n\u2B07\uFE0F Asl video yuklab olinmoqda"
+        else:
+            t += "\n\u23F3 boshlanmoqda..."
+        for ln in lines:
+            ln = ln.strip()
+            if ln:
+                t += f"\n\U0001F4DC {esc(ln[:90])}"
+        if d.get("job_started"):
+            t += f"\n\u23F1 jami: {hms(time.time() - d['job_started'])}"
+        return t[:4000]
+
     def _sys(self):
         """CPU, RAM, disk — Linux runner'da /proc dan (xato bo'lsa bo'sh)."""
         out = {}
@@ -705,8 +760,6 @@ class StatusPin:
                     "---"]
             body = [t for _, t in self.lines]
         # Telegram xabari 4096 belgidan oshmasin — eski qatorlar tashlanadi.
-        if QUALITY:
-            head = [f"\U0001F539 {QUALITY} \u00B7 {RUNNER} \u00B7 {self.num or '-'}-qism \u00B7 {self.progress}"] + head
         while body and len("\n".join(head + body)) > 4000:
             body.pop(0)
         return "\n".join(head + body)[:4000]
@@ -728,9 +781,10 @@ class StatusPin:
         if QUALITY:
             # Har sifat-run ishga tushganda kanalga O'Z xabarini yuboradi va faqat shuni tahrirlaydi.
             try:
-                m = await app.send_message(LOG_CHANNEL, self.text(), disable_notification=True,
-                                           parse_mode=enums.ParseMode.DISABLED)
-                self.msg_id = m.id
+                t = self.html_text()
+                m = await app.send_message(LOG_CHANNEL, t, disable_notification=True,
+                                           parse_mode=enums.ParseMode.HTML, disable_web_page_preview=True)
+                self.msg_id, self.sent = m.id, t
             except Exception as e:
                 print(f"Holat xabari ochilmadi: {e}", flush=True)
                 self.off = True
@@ -753,7 +807,7 @@ class StatusPin:
     async def push(self, app):
         if self.off or not self.msg_id:
             return
-        t = self.text()
+        t = self.html_text() if QUALITY else self.text()
         if t == self.sent:
             return
         try:
@@ -763,7 +817,7 @@ class StatusPin:
             # topa olmasdi ("Log hali bo'sh"). Endi matn O'Z HOLICHA ketadi.
             await app.edit_message_text(LOG_CHANNEL, self.msg_id, t,
                                         disable_web_page_preview=True,
-                                        parse_mode=enums.ParseMode.DISABLED)
+                                        parse_mode=enums.ParseMode.HTML if QUALITY else enums.ParseMode.DISABLED)
             self.sent = t
         except Exception as e:
             if type(e).__name__ == "FloodWait":
@@ -874,6 +928,7 @@ async def process(app: Client, channel: int, job: dict):
     STATUS.set_job(f"{a}/{s}/{e}", str(job.get("epizod_number") or ""))
     STATUS.set_progress("start")
     STATUS.update(job_started=int(time.time()), attempt=job.get("attempt"),
+                  anime_title=job.get("anime_title"), season_title=job.get("season_title"),
                   src=None, ladder=None, cur=None, xfer=None)
     await asyncio.to_thread(STATUS.send_worker)
     await STATUS.push(app)

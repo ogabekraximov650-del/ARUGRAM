@@ -6138,3 +6138,11 @@ Worker so'rovlari (~50k) tejash uchun sifat-run (`ENCODE_QUALITY`) holatni `/api
 boshqa run bilan bo'lishilmaydi; sarlavha `🔹 360p · run · N-qism · bosqich`) va faqat shuni `STATUS_INTERVAL_SEC` (3 s)
 da tahrirlaydi (`StatusPin.start/text`, `tool/encode/run.py`). Botdagi "📋 Holat" faqat navbat/sanoqni ko'rsatadi,
 ishlayotgan sifat yonida "jonli log kodlash log kanalida" yoziladi. Eski (sifatsiz) rejim o'zgarmadi.
+
+## Sifat-run xabari botdagidek ko'rinishda; kanalga alohida log oqimi o'chirildi (2026-10)
+
+`tool/encode/run.py`: sifat-run (`ENCODE_QUALITY`) da `ChannelLog` (har soniyada yangi xabar yuboradigan eski oqim) butunlay o'chiq
+(`self.off`). Run'ning o'z xabari endi HTML (`StatusPin.html_text`): `🔹 360p · Anime, Bo'lim, N-qism`, manba, bosqich
+(foiz-chiziq, tezlik, hajm, o'tdi/qoldi), oxirgi 3 log qatori, jami vaqt — botdagi "Holat" bilan bir xil. Anime/bo'lim nomlarini
+worker quality-claim javobida beradi (`job.anime_title/season_title`). Eslatma: run `run.py` ni boshlanishida oladi — eski
+run'lar eski xabarni yuboraveradi.

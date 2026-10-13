@@ -11347,8 +11347,12 @@ async fn encode_claim_q(env: &Env, b: &Value, wq: &'static str, now: i64) -> Res
             };
             // Umumiy "Ilova uchun" holat xabari: hech narsa kuzatilmayotgan bo'lsa, ish boshlanganda ochiladi.
             livewatch::app_autostart(env).await;
+            // Run o'z log xabarida anime/bo'lim nomini ko'rsatadi.
+            let (an, sn) = encbot_titles(env, a, s).await
+                .unwrap_or_else(|| (format!("anime #{a}"), format!("bo'lim #{s}")));
             return ok(json!({
                 "job": {
+                    "anime_title": an, "season_title": sn,
                     "anime_id": a, "season_id": s, "epizod_id": e,
                     "queued_at": queued_at, "origin": origin,
                     "epizod_number": ep["epizod_number"],
