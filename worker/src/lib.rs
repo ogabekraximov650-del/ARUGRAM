@@ -13516,8 +13516,10 @@ async fn encode_kick(env: &Env) -> String {
         return encode_kick_legacy(env).await;
     }
     if !started.is_empty() {
-        return format!("\u{25B6}\u{FE0F} Kodlash boshlandi: {} (GitHub Actions ishga tushirildi).{}",
-            started.join(", "), if notes.is_empty() { String::new() } else { format!("\n{}", notes.join("\n")) });
+        return format!("\u{25B6}\u{FE0F} Kodlash boshlandi: {} (GitHub Actions ishga tushirildi).{}{}",
+            started.join(", "),
+            if running.is_empty() { String::new() } else { format!("\n\u{2699}\u{FE0F} Allaqachon ishlayapti: {}.", running.join(", ")) },
+            if notes.is_empty() { String::new() } else { format!("\n{}", notes.join("\n")) });
     }
     if !notes.is_empty() {
         return format!("\u{26A0}\u{FE0F} Actions ishga tushmadi: {}", notes.join("; "));
