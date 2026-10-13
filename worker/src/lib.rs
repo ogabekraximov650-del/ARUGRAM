@@ -11318,17 +11318,6 @@ async fn encode_claim_q(env: &Env, b: &Value, wq: &'static str, now: i64) -> Res
                 Some(raw) => { let (u, l) = anibla::resolve_origin(env, raw).await; (Some(u), l) }
                 None => (None, String::new()),
             };
-            // "Ilova uchun" holat xabari — faqat 360p workflow ochadi (4 ta bir xil xabar bo'lmasin).
-            if wq == "360p" {
-                let (an, sn) = encbot_titles(env, a, s).await
-                    .unwrap_or_else(|| (format!("anime #{a}"), format!("bo'lim #{s}")));
-                let watch_msg = encbot_api(env, "sendMessage", json!({
-                    "chat_id": ADMIN_TELEGRAM_ID, "parse_mode": "HTML",
-                    "text": format!("\u{1F4F1} <b>Ilova uchun: {}</b>\n{}, {}-qism\n\n\u{23F3} boshlanmoqda...",
-                        html_escape(&an), html_escape(&sn), jint(&ep, "epizod_number")),
-                })).await.ok().and_then(|v| v["message_id"].as_i64()).unwrap_or(0);
-                livewatch::claim(env, livewatch::APP, ADMIN_TELEGRAM_ID, watch_msg).await;
-            }
             return ok(json!({
                 "job": {
                     "anime_id": a, "season_id": s, "epizod_id": e,
@@ -11375,6 +11364,18 @@ async fn encode_own_job(env: &Env, b: &Value) -> Option<Value> {
         vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e),
              TursoArg::int(jint(b, "queued_at")), TursoArg::text(runner)]).await.ok()?;
     first_row(&res)
+}
+
+/// Shu sifat bo'yicha hali tayyorlanmagan (kutayotgan yoki ijarasi tugagan) qismlar soni.
+pub(crate) async fn encode_pending_q(env: &Env, wq: &str) -> i64 {
+    turso_exec(env,
+        "SELECT COUNT(*) AS n FROM encode_jobs j
+           LEFT JOIN encode_q q ON q.anime_id=j.anime_id AND q.season_id=j.season_id
+                               AND q.epizod_id=j.epizod_id AND q.quality=? AND q.queued_at=j.queued_at
+          WHERE j.state='queued' AND instr(j.done, ?)=0
+            AND (q.state IS NULL OR q.state='queued' OR (q.state='running' AND q.lease_until<=?))",
+        vec![TursoArg::text(wq), TursoArg::text(&format!(",{wq},")), TursoArg::int(now_ms())]).await.ok()
+        .and_then(|r| first_row(&r)).map(|r| jint(&r, "n")).unwrap_or(0)
 }
 
 /// Sifat-workflow `wq` ishini tugatdi: `ok` — tayyor, `skip` — bu sifat qismga to'g'ri kelmaydi (run asl videoni
@@ -11679,14 +11680,14 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
         // miltillaydi va Telegram cheklaydi).
         let wq = req.headers().get("X-Encode-Quality").ok().flatten().unwrap_or_default();
         let wq = QUALITIES.iter().copied().find(|x| *x == wq.trim());
-        let mut update_bot = true;
-        if let Some(q) = wq {
-            encode_live_put(env, q, &text).await;
-            update_bot = encode_live_primary(env).await.map(|(pq, _)| pq == q).unwrap_or(true);
-        }
-        // Botda "Ilova uchun" holati kuzatilayotgan bo'lsa — o'sha xabar yangilanadi.
-        if update_bot {
-            livewatch::app_push(env, &text).await;
+        match wq {
+            // Har sifat-workflow'ning o'z xabari (bosh menyudagi "Holat"): faqat shu sifatniki yangilanadi.
+            Some(q) => {
+                encode_live_put(env, q, &text).await;
+                livewatch::q_push(env, q, &text).await;
+            }
+            // Botda "Ilova uchun" holati kuzatilayotgan bo'lsa (eski usul) — o'sha xabar yangilanadi.
+            None => livewatch::app_push(env, &text).await,
         }
         return ok_nostore(json!({"ok": ok_put}));
     }
@@ -11699,14 +11700,7 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
             let legacy = turso_exec(env,
                 "SELECT 1 AS x FROM encode_jobs WHERE state='running' AND lease_until>? LIMIT 1",
                 vec![TursoArg::int(now)]).await?;
-            let res = turso_exec(env,
-                "SELECT COUNT(*) AS n FROM encode_jobs j
-                   LEFT JOIN encode_q q ON q.anime_id=j.anime_id AND q.season_id=j.season_id
-                                       AND q.epizod_id=j.epizod_id AND q.quality=? AND q.queued_at=j.queued_at
-                  WHERE j.state='queued' AND instr(j.done, ?)=0
-                    AND (q.state IS NULL OR q.state='queued' OR (q.state='running' AND q.lease_until<=?))",
-                vec![TursoArg::text(wq), TursoArg::text(&format!(",{wq},")), TursoArg::int(now)]).await?;
-            let n = first_row(&res).and_then(|r| r["n"].as_i64()).unwrap_or(0);
+            let n = encode_pending_q(env, wq).await;
             return ok(json!({"pending": if first_row(&legacy).is_some() { 0 } else { n }}));
         }
         let res = turso_exec(env,
