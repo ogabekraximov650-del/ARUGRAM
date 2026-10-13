@@ -6114,3 +6114,5 @@ Sabab: run'lar `/api/encode/push` ga holat yubormayotgan bo'lishi mumkin — shu
 `tool/bot/encode_bot.enc` yangi bot tokeni bilan qayta shifrlandi (oldingi bilan bir xil usul). Deploy uni
 `ENCODE_BOT_TOKEN` ga qo'yadi, webhook'ni worker o'zi o'rnatadi. Yangi bot yopiq kanalda ADMIN bo'lishi va
 adminga /start bosilgan bo'lishi kerak.
+
+Keyin panel bot yana almashtirildi (`tool/bot/encode_bot.enc` qayta shifrlandi, usul o'sha).
