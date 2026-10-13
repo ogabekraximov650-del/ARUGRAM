@@ -38,6 +38,7 @@ mod channels;
 mod postbot;
 mod announce;
 mod sessionbot;
+mod encupload;
 // anibla.uz dan qidirib yuklash (kodlash botining uchinchi bo'limi).
 mod anibla;
 // Uchala bo'lim uchun bitta jonli "Holat" xabari.
@@ -10349,7 +10350,7 @@ fn needs_app_check(path: &str) -> bool {
     // himoyalangan. Ilova chaqiradiganlari (`queue`, `status`) esa
     // tekshiruvdan o'tadi.
     if matches!(path, "/api/encode/peek" | "/api/encode/claim" | "/api/encode/heartbeat" | "/api/encode/release"
-        | "/api/encode/quality" | "/api/encode/finish" | "/api/encode/push" | "/api/encode/meta" | "/api/encode/ulock"
+        | "/api/encode/quality" | "/api/encode/finish" | "/api/encode/push" | "/api/encode/meta" | "/api/encode/ulock" | "/api/encode/committed"
         | "/api/post/claim" | "/api/post/check" | "/api/post/finish" | "/api/post/progress"
         | "/api/anibla/claim" | "/api/anibla/diag" | "/api/anibla/progress" | "/api/anibla/done"
         | "/api/fmp4/claim" | "/api/fmp4/done")
@@ -11217,6 +11218,27 @@ async fn encode_settle(env: &Env, a: i64, s: i64, e: i64, queued_at: i64) {
         html_escape(&an), html_escape(&sn), done.join(", "))).await;
 }
 
+/// Shu sifat-workflow uchun Telegram sessiyasi ulanganmi (`sess_ok_<q>`, "🔑 Yangi sessiya" tugagach yoziladi).
+pub(crate) async fn encode_sess_ok(env: &Env, q: &str) -> bool {
+    config_get(env, &format!("sess_ok_{q}")).await.as_deref() == Some("1")
+}
+
+thread_local! {
+    static ENCBOT_NAME: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+}
+
+/// Kodlash botining username'i (`getMe`, izolyat xotirasida saqlanadi). Run fayllarni shu botga yuboradi.
+pub(crate) async fn encbot_username(env: &Env) -> String {
+    let c = ENCBOT_NAME.with(|n| n.borrow().clone());
+    if !c.is_empty() {
+        return c;
+    }
+    let name = encbot_api(env, "getMe", json!({})).await.ok()
+        .and_then(|v| v["username"].as_str().map(String::from)).unwrap_or_default();
+    ENCBOT_NAME.with(|n| *n.borrow_mut() = name.clone());
+    name
+}
+
 /// Sifat-workflow `wq` uchun navbatdagi qismni beradi. Har workflow asl videoni O'ZI yuklab tekshiradi:
 /// to'g'ri kelmasa `finish` (`skip`) bilan xabar beradi — worker buni bazaga yozib, keyingisini beradi.
 async fn encode_claim_q(env: &Env, b: &Value, wq: &'static str, now: i64) -> Result<Response> {
@@ -11370,6 +11392,7 @@ async fn encode_claim_q(env: &Env, b: &Value, wq: &'static str, now: i64) -> Res
                     },
                 },
                 "channel": tg_channel_id(env),
+                "bot": encbot_username(env).await,
                 "status_bots": encode_status_bots(env).await,
             }));
         }
@@ -11409,6 +11432,78 @@ pub(crate) async fn encode_pending_q(env: &Env, wq: &str) -> i64 {
             AND (q.state IS NULL OR q.state='queued' OR (q.state='running' AND q.lease_until<=?))",
         vec![TursoArg::text(wq), TursoArg::text(&format!(",{wq},")), TursoArg::int(now_ms())]).await.ok()
         .and_then(|r| first_row(&r)).map(|r| jint(&r, "n")).unwrap_or(0)
+}
+
+/// Tayyor sifat faylini bazaga yozadi: `tg_files`, qism yozuvi (`url_<q>`, `key_<q>`), `done` ro'yxati, e'lon va eski
+/// fayl tozalash. Ikki yo'ldan chaqiriladi: run'ning `/api/encode/quality` so'rovi va kodlash botiga yuborilgan fayl
+/// (`encupload.rs`). `atomic` — sifat-workflow'larda `done` bir vaqtda yozilgani uchun atomik qo'shiladi.
+pub(crate) async fn encode_commit_quality(env: &Env, (a, s, e): (i64, i64, i64), queued_at: i64, q: &str, file: &str,
+        key: &str, size: i64, msg_id: i64, atomic: bool, job_done: &str) -> Result<Vec<String>> {
+    let now = now_ms();
+    let pk = || vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e), TursoArg::int(queued_at)];
+    let key = key.to_string();
+        let old = turso_exec(env,
+            &format!("SELECT url_{q} AS u FROM epizod_db WHERE anime_id=? AND season_id=? AND epizod_id=?"),
+            vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]).await?;
+        let old = first_row(&old).and_then(|r| r["u"].as_str().map(String::from)).unwrap_or_default();
+        // Qismda hali birorta sifat yo'q edimi — e'lon (`announce.rs`) FAQAT birinchi sifat joylanganda.
+        let had_any = turso_exec(env,
+            "SELECT 1 AS x FROM epizod_db WHERE anime_id=? AND season_id=? AND epizod_id=?
+               AND (COALESCE(url_360p,'')<>'' OR COALESCE(url_480p,'')<>'' OR COALESCE(url_720p,'')<>'' OR COALESCE(url_1080p,'')<>'')",
+            vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]).await
+            .ok().and_then(|r| first_row(&r)).is_some();
+        let mut done = done_list(job_done);
+        if !done.iter().any(|d| d == q) {
+            done.push(q.to_string());
+        }
+        // Sifat-workflow'larda `done` bir vaqtda 4 ta run tomonidan yoziladi — o'qib-yozish emas, ATOMIK qo'shish.
+        let (job_sql, jargs): (&str, Vec<TursoArg>) = if atomic {
+            let mut v = vec![TursoArg::text(&format!(",{q},")), TursoArg::text(&format!(",{q},")), TursoArg::text(&format!("{q},"))];
+            v.extend(pk());
+            ("UPDATE encode_jobs SET done=CASE WHEN instr(done, ?)>0 THEN done WHEN done='' THEN ? ELSE done||? END
+               WHERE anime_id=? AND season_id=? AND epizod_id=? AND queued_at=?", v)
+        } else {
+            let mut v = vec![TursoArg::text(&format!(",{},", done.join(","))), TursoArg::int(now + ENCODE_LEASE_MS)];
+            v.extend(pk());
+            ("UPDATE encode_jobs SET done=?, lease_until=MAX(lease_until, ?)
+               WHERE anime_id=? AND season_id=? AND epizod_id=? AND queued_at=?", v)
+        };
+        // Kalit kanal postida YO'Q (xavfsizlik) — shu yerda yoziladi.
+        if msg_id > 0 {
+            let _ = turso_exec(env,
+                "INSERT INTO tg_files (file_name, msg_id, file_key) VALUES (?, ?, ?)
+                 ON CONFLICT(file_name) DO UPDATE SET msg_id=excluded.msg_id, file_key=excluded.file_key",
+                vec![TursoArg::text(file), TursoArg::int(msg_id), TursoArg::text(&key)]).await;
+        }
+        let upd_sql = format!("UPDATE epizod_db SET url_{q}=?, size_{q}=?, key_{q}=?
+                        WHERE anime_id=? AND season_id=? AND epizod_id=?");
+        let mut stmts: Vec<(&str, Vec<TursoArg>)> = vec![
+            (upd_sql.as_str(),
+             vec![TursoArg::text(file), TursoArg::int(size), TursoArg::text(&key),
+                  TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]),
+            (job_sql, jargs),
+        ];
+        // Birinchi sifat joylandi — anime ro'yxatda eng tepaga chiqadi.
+        if !had_any {
+            stmts.push(("UPDATE season_db SET last_ep_at=? WHERE anime_id=? AND season_id=?",
+                vec![TursoArg::int(now_ms()), TursoArg::int(a), TursoArg::int(s)]));
+            stmts.push(("UPDATE epizod_db SET ready_at=? WHERE anime_id=? AND season_id=? AND epizod_id=?",
+                vec![TursoArg::int(now_ms()), TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]));
+        }
+        turso_batch(env, &stmts).await?;
+        // Birinchi kodlangan sifat — qism endi ilovada ko'rinadi.
+        free_seasons_forget().await;
+        if !had_any {
+            announce::episode_ready(env, a, s, e).await;
+        }
+        // MP4 almashdi — eski fMP4 nusxasi (Mini App) endi boshqa videoniki.
+        fmp4::forget_quality(env, a, s, e, q).await;
+        // Eski (almashtirilgan) Telegram fayli kanaldan o'chadi.
+        let old = bare_name(&old);
+        if !old.is_empty() && old != file {
+            tg_forget_file(env, &old).await;
+        }
+    Ok(done)
 }
 
 /// Sifat-workflow `wq` ishini tugatdi: `ok` — tayyor, `skip` — bu sifat qismga to'g'ri kelmaydi (run asl videoni
@@ -11721,6 +11816,12 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
         return ok_nostore(json!({"ok": ok_put, "bot": bot}));
     }
 
+    // Fayl bot orqali yopiq kanalga saqlanib bazaga yozildimi (`encupload.rs`) — run tasdiqni shu bilan kutadi.
+    if path == "/api/encode/committed" && method == Method::Get {
+        let file = req.url().ok().and_then(|u| u.query_pairs().find(|(k, _)| k == "file").map(|(_, v)| v.to_string())).unwrap_or_default();
+        return ok(json!({"ok": encupload::committed(env, &file).await}));
+    }
+
     if path == "/api/encode/peek" && method == Method::Get {
         // Sifat-workflow: faqat o'z sifati bo'yicha kutayotgan qismlar (`?quality=360p`).
         let wq = req.url().ok().and_then(|u| u.query_pairs().find(|(k, _)| k == "quality").map(|(_, v)| v.to_string()))
@@ -11729,7 +11830,8 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
             let legacy = turso_exec(env,
                 "SELECT 1 AS x FROM encode_jobs WHERE state='running' AND lease_until>? LIMIT 1",
                 vec![TursoArg::int(now)]).await?;
-            let n = encode_pending_q(env, wq).await;
+            // Sessiyasiz workflow hech narsa o'rnatmasdan o'chadi.
+            let n = if encode_sess_ok(env, wq).await { encode_pending_q(env, wq).await } else { 0 };
             return ok(json!({"pending": if first_row(&legacy).is_some() { 0 } else { n }}));
         }
         let res = turso_exec(env,
@@ -11808,6 +11910,10 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
         }
         // Sifat-workflow (`wq`): har biri o'z sifatini mustaqil, bir vaqtda tayyorlaydi.
         if let Some(wq) = encode_wq(&b) {
+            // Shu sifat uchun Telegram sessiyasi ulanmagan bo'lsa — ish berilmaydi ("🔑 Yangi sessiya" bo'limi).
+            if !encode_sess_ok(env, wq).await {
+                return ok(json!({"none": true, "nosession": true}));
+            }
             return encode_claim_q(env, &b, wq, now).await;
         }
         // Boshqa run ishlayapti — KETMA-KET: kutiladi (sifat-workflow'lar ishlayotgan bo'lsa ham).
@@ -12004,68 +12110,8 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
         if file != encode_file_name(a, s, e, q, queued_at) || !valid_file_key(&key) || size <= 0 {
             return json_resp(&json!({"error": "fayl"}), 400);
         }
-        let old = turso_exec(env,
-            &format!("SELECT url_{q} AS u FROM epizod_db WHERE anime_id=? AND season_id=? AND epizod_id=?"),
-            vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]).await?;
-        let old = first_row(&old).and_then(|r| r["u"].as_str().map(String::from)).unwrap_or_default();
-        // Qismda hali birorta sifat yo'q edimi — e'lon (`announce.rs`) FAQAT birinchi sifat joylanganda.
-        let had_any = turso_exec(env,
-            "SELECT 1 AS x FROM epizod_db WHERE anime_id=? AND season_id=? AND epizod_id=?
-               AND (COALESCE(url_360p,'')<>'' OR COALESCE(url_480p,'')<>'' OR COALESCE(url_720p,'')<>'' OR COALESCE(url_1080p,'')<>'')",
-            vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]).await
-            .ok().and_then(|r| first_row(&r)).is_some();
-        let mut done = done_list(job["done"].as_str().unwrap_or(""));
-        if !done.iter().any(|d| d == q) {
-            done.push(q.to_string());
-        }
-        // Sifat-workflow'larda `done` bir vaqtda 4 ta run tomonidan yoziladi — o'qib-yozish emas, ATOMIK qo'shish.
-        let (job_sql, jargs): (&str, Vec<TursoArg>) = if wq.is_some() {
-            let mut v = vec![TursoArg::text(&format!(",{q},")), TursoArg::text(&format!(",{q},")), TursoArg::text(&format!("{q},"))];
-            v.extend(pk());
-            ("UPDATE encode_jobs SET done=CASE WHEN instr(done, ?)>0 THEN done WHEN done='' THEN ? ELSE done||? END
-               WHERE anime_id=? AND season_id=? AND epizod_id=? AND queued_at=?", v)
-        } else {
-            let mut v = vec![TursoArg::text(&format!(",{},", done.join(","))), TursoArg::int(now + ENCODE_LEASE_MS)];
-            v.extend(pk());
-            ("UPDATE encode_jobs SET done=?, lease_until=MAX(lease_until, ?)
-               WHERE anime_id=? AND season_id=? AND epizod_id=? AND queued_at=?", v)
-        };
-        // Kalit kanal postida YO'Q (xavfsizlik) — shu yerda yoziladi.
-        let msg_id = jint(&b, "msg_id");
-        if msg_id > 0 {
-            let _ = turso_exec(env,
-                "INSERT INTO tg_files (file_name, msg_id, file_key) VALUES (?, ?, ?)
-                 ON CONFLICT(file_name) DO UPDATE SET msg_id=excluded.msg_id, file_key=excluded.file_key",
-                vec![TursoArg::text(file), TursoArg::int(msg_id), TursoArg::text(&key)]).await;
-        }
-        let upd_sql = format!("UPDATE epizod_db SET url_{q}=?, size_{q}=?, key_{q}=?
-                        WHERE anime_id=? AND season_id=? AND epizod_id=?");
-        let mut stmts: Vec<(&str, Vec<TursoArg>)> = vec![
-            (upd_sql.as_str(),
-             vec![TursoArg::text(file), TursoArg::int(size), TursoArg::text(&key),
-                  TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]),
-            (job_sql, jargs),
-        ];
-        // Birinchi sifat joylandi — anime ro'yxatda eng tepaga chiqadi.
-        if !had_any {
-            stmts.push(("UPDATE season_db SET last_ep_at=? WHERE anime_id=? AND season_id=?",
-                vec![TursoArg::int(now_ms()), TursoArg::int(a), TursoArg::int(s)]));
-            stmts.push(("UPDATE epizod_db SET ready_at=? WHERE anime_id=? AND season_id=? AND epizod_id=?",
-                vec![TursoArg::int(now_ms()), TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]));
-        }
-        turso_batch(env, &stmts).await?;
-        // Birinchi kodlangan sifat — qism endi ilovada ko'rinadi.
-        free_seasons_forget().await;
-        if !had_any {
-            announce::episode_ready(env, a, s, e).await;
-        }
-        // MP4 almashdi — eski fMP4 nusxasi (Mini App) endi boshqa videoniki.
-        fmp4::forget_quality(env, a, s, e, q).await;
-        // Eski (almashtirilgan) Telegram fayli kanaldan o'chadi.
-        let old = bare_name(&old);
-        if !old.is_empty() && old != file {
-            tg_forget_file(env, &old).await;
-        }
+        let done = encode_commit_quality(env, (a, s, e), queued_at, q, file, &key, size, jint(&b, "msg_id"),
+            wq.is_some(), job["done"].as_str().unwrap_or("")).await?;
         return ok(json!({"ok": true, "done": done}));
     }
 
@@ -12635,6 +12681,10 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
     }
 
     let msg = &update["message"];
+    // Sifat-workflow'larning tayyor fayli (`ARUENC|...` izohli hujjat) — yuboruvchi ro'yxatdan o'tgan sessiya (`encupload.rs`).
+    if encupload::on_file(env, msg).await {
+        return ok(json!({"ok": true}));
+    }
     let chat = msg["chat"]["id"].as_i64().unwrap_or(0);
     // Faqat admin va faqat shaxsiy chat — boshqalarga javob yo'q.
     if chat == 0 || msg["from"]["id"].as_i64() != Some(ADMIN_TELEGRAM_ID) || chat != ADMIN_TELEGRAM_ID {
@@ -13648,8 +13698,17 @@ async fn encode_kick_full(env: &Env, full: bool) -> String {
     }
     let (mut started, mut running, mut missing, mut asked) = (Vec::new(), Vec::new(), 0usize, 0usize);
     let mut notes: Vec<String> = Vec::new();
+    // Telegram sessiyasi ulangan sifatlar (`sess_ok_<q>`): sessiyasiz workflow ishga tushirilmaydi.
+    let sess_ok: Vec<String> = turso_exec(env,
+        "SELECT cfg_key FROM app_config WHERE cfg_key LIKE 'sess_ok_%' AND cfg_value='1'", vec![]).await.ok()
+        .map(|r| rows_of(&r).iter().filter_map(|x| x["cfg_key"].as_str().map(String::from)).collect()).unwrap_or_default();
+    let mut nosess: Vec<&str> = Vec::new();
     for (i, (q, wf)) in ENCODE_WORKFLOWS.iter().enumerate() {
         if counts[i] <= 0 {
+            continue;
+        }
+        if !sess_ok.iter().any(|k| *k == format!("sess_ok_{q}")) {
+            nosess.push(*q);
             continue;
         }
         asked += 1;
@@ -13683,6 +13742,12 @@ async fn encode_kick_full(env: &Env, full: bool) -> String {
             Ok((404, _)) => missing += 1,
             Ok((code, v)) => notes.push(format!("{q}: GitHub {code} {}", html_escape(v["message"].as_str().unwrap_or("")))),
             Err(e) => notes.push(format!("{q}: {}", html_escape(&e.to_string()))),
+        }
+    }
+    if !nosess.is_empty() {
+        notes.push(format!("\u{1F511} {}: Telegram sessiyasi ulanmagan (Bosh menyu \u{2192} \u{00AB}\u{1F511} Yangi sessiya\u{00BB})", nosess.join(", ")));
+        if started.is_empty() && running.is_empty() && asked == 0 {
+            return format!("\u{26A0}\u{FE0F} Kodlash boshlanmadi: {}", notes.join("; "));
         }
     }
     // Yangi workflow fayllari repoda hali yo'q (`setup-autoencode` ishlamagan) — eski usulga qaytiladi.

@@ -28,7 +28,7 @@ API = os.environ["API_BASE"].rstrip("/")
 TOKEN = "".join(os.environ["ENCODE_TOKEN"].split())
 WORK = Path(os.environ.get("RUNNER_TEMP", "/tmp")) / "arugram_newsession"
 SESS = WORK / "new_session"
-OUT = Path("tool/encode/session.enc")
+OUT = Path("tool/encode/session.enc")  # run boshlanganda tanlangan sifatga qarab `session_<n>.enc` bo'ladi
 
 WAIT_PHONE = 300   # raqam kelguncha (s)
 WAIT_CODE = 480    # kod kelguncha (s)
@@ -60,9 +60,9 @@ def call(path, body=None):
     raise RuntimeError(f"{path}: {err}")
 
 
-def report(event, text=""):
+def report(event, text="", **extra):
     try:
-        call("report", {"event": event, "text": text})
+        call("report", {"event": event, "text": text, **extra})
     except Exception as e:  # noqa: BLE001
         log("report xato:", e)
 
@@ -106,7 +106,7 @@ def save_session():
     run(["git", "config", "user.name", "arugram-session"])
     run(["git", "config", "user.email", "session@users.noreply.github.com"])
     run(["git", "add", str(OUT)])
-    run(["git", "commit", "-m", "Yangi Telegram sessiyasi (bot orqali)"])
+    run(["git", "commit", "-m", f"Yangi Telegram sessiyasi ({OUT.stem}, bot orqali)"])
     for attempt in range(4):
         p = subprocess.run(["git", "push", "origin", "HEAD:main"], capture_output=True, text=True)
         if p.returncode == 0:
@@ -121,6 +121,13 @@ async def main():
     for f in WORK.glob("new_session*"):
         f.unlink()
     r = wait_state("wait_send", WAIT_PHONE)
+    # Har sifat-workflow'ning O'Z sessiyasi: `session_360.enc`, `session_480.enc`, ...
+    global OUT
+    target = "".join(c for c in str(r.get("target", "")) if c.isdigit())
+    if target not in ("360", "480", "720", "1080"):
+        raise RuntimeError("qaysi workflow uchun ekani aniqlanmadi")
+    OUT = Path(f"tool/encode/session_{target}.enc")
+    bot = str(r.get("bot", "")).lstrip("@")
     phone = "+" + "".join(c for c in r.get("phone", "") if c.isdigit())
     log("kod so'ralmoqda")
     app = Client(str(SESS), api_id=int(os.environ["TG_API_ID"]),
@@ -167,6 +174,13 @@ async def main():
             await app.storage.save()
         except Exception:  # noqa: BLE001
             pass
+        # Bot bu akkauntdan fayl qabul qilishi uchun akkaunt botni bir marta ochgan bo'lsin.
+        if bot:
+            try:
+                await app.send_message(bot, "/start")
+            except Exception as ex:  # noqa: BLE001
+                log("botga /start yuborilmadi:", ex)
+        uid = int(getattr(me, "id", 0) or 0)
     finally:
         try:
             await app.disconnect()
@@ -174,7 +188,7 @@ async def main():
             pass
     save_session()
     log("sessiya saqlandi:", name)
-    report("done", f"({name})" if name else "")
+    report("done", f"({name})" if name else "", uid=uid)
 
 
 if __name__ == "__main__":

@@ -6146,3 +6146,19 @@ ishlayotgan sifat yonida "jonli log kodlash log kanalida" yoziladi. Eski (sifats
 (foiz-chiziq, tezlik, hajm, o'tdi/qoldi), oxirgi 3 log qatori, jami vaqt — botdagi "Holat" bilan bir xil. Anime/bo'lim nomlarini
 worker quality-claim javobida beradi (`job.anime_title/season_title`). Eslatma: run `run.py` ni boshlanishida oladi — eski
 run'lar eski xabarni yuboraveradi.
+
+## Sifat-workflow: o'z log kanali, o'z sessiyasi, fayllar bot orqali saqlanadi (2026-10)
+
+1. **Log kanallari** (`tool/encode/run.py` → `QUALITY_LOG_CHANNELS`): 360p `-1004368645279`, 480p `-1003878978358`, 720p
+   `-1003581997218`, 1080p `-1003954950031`. Har sifat-run o'z kanaliga o'z xabarini yuboradi va 10 s da tahrirlaydi
+   (`STATUS_INTERVAL`). Sessiya shu kanalda admin bo'lishi kerak. `LOG_CHANNEL_<Q>` env bilan almashtirish mumkin.
+2. **Har workflow'ning O'Z Telegram sessiyasi**: botdagi "🔑 Yangi sessiya" avval workflow'ni so'raydi (`sessionbot.rs`,
+   holat `target`), `tool/session/session.py` sessiyani `tool/encode/session_<360|480|720|1080>.enc` ga commit qiladi, akkaunt
+   ID'si `sess_uid_<q>`, belgi `sess_ok_<q>=1` ga yoziladi. Sessiyasiz workflow ishlamaydi: `peek` 0 qaytaradi, `claim`
+   `{none, nosession}` qaytaradi, `encode_kick_full` ishga tushirmaydi, workflow shabloni (`avtoencode_q.workflow.yml`)
+   `session_<N>.enc` yo'q bo'lsa xato beradi (umumiy `session.enc` ga qaytish YO'Q; u faqat eski `encode.yml` uchun).
+3. **Fayllar bot orqali** (`worker/src/encupload.rs`): run tayyor faylni (MP4 va fMP4) kodlash boti CHATIGA yuboradi, izoh
+   `ARUENC|mp4|fmp4|a|s|e|queued_at|sifat|kalit|hajm`; bot (faqat shu sifat sessiyasidan) `copyMessage` bilan yopiq kanalga
+   saqlaydi, `encode_commit_quality` / `fmp4::commit` bazaga yozadi, chatdagi xabarni o'chiradi; run `/api/encode/committed`
+   bilan tasdiqni kutadi va keyin tugaydi. Claim javobida `bot` (username) bor; bo'sh bo'lsa eski usul (kanalga to'g'ridan-to'g'ri).
+   Sessiya akkaunti asl video turgan yopiq kanalda a'zo bo'lishi kerak (yuklab olish uchun) va bot kanalda admin.

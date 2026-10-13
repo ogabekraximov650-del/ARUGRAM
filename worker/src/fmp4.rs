@@ -67,7 +67,7 @@ pub(crate) async fn migrate(env: &Env) {
 }
 
 /// fMP4 fayl nomi to'g'rimi (shu qism va sifatga tegishli).
-fn valid_name(name: &str, a: i64, s: i64, e: i64, q: &str) -> bool {
+pub(crate) fn valid_name(name: &str, a: i64, s: i64, e: i64, q: &str) -> bool {
     tg_safe_name(name) && name.starts_with(&format!("ep_{a}_{s}_{e}_{q}_")) && name.ends_with("_f.mp4")
 }
 
@@ -239,6 +239,19 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
         if !valid_name(&file, a, s, e, &q) || !valid_file_key(&key) || size <= 0 || msg_id <= 0 {
             return bad("fayl");
         }
+        commit(env, (a, s, e), &q, &file, &key, size, msg_id).await?;
+        return ok(json!({"ok": true}));
+    }
+
+    err404("topilmadi")
+}
+
+/// fMP4 nusxa tayyor: `tg_files`, qism yozuvi (`fmp4_*_<q>`), navbat qatori o'chadi, eski fayl kanaldan ketadi.
+/// `/api/fmp4/done` va kodlash botiga yuborilgan fayl (`encupload.rs`) shu bilan.
+pub(crate) async fn commit(env: &Env, (a, s, e): (i64, i64, i64), q: &str, file: &str, key: &str,
+        size: i64, msg_id: i64) -> Result<()> {
+    let (file, key) = (file.to_string(), key.to_string());
+    let pk = || vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e), TursoArg::text(q)];
         let old = turso_exec(env,
             &format!("SELECT fmp4_url_{q} AS u FROM epizod_db WHERE anime_id=? AND season_id=? AND epizod_id=?"),
             vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]).await.ok()
@@ -256,10 +269,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
         if !old.is_empty() && old != file {
             tg_forget_file(env, &old).await;
         }
-        return ok(json!({"ok": true}));
-    }
-
-    err404("topilmadi")
+    Ok(())
 }
 
 /// MP4 almashtirildi (qayta kodlandi) — shu sifatning eski fMP4'i endi

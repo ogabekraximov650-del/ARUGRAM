@@ -34,7 +34,7 @@ async fn get(env: &Env, key: &str) -> String {
 }
 
 async fn reset(env: &Env) {
-    for k in ["sess_state", "sess_phone", "sess_code", "sess_pw", "sess_at"] {
+    for k in ["sess_state", "sess_phone", "sess_code", "sess_pw", "sess_at", "sess_target"] {
         config_put(env, k, "").await;
     }
 }
@@ -47,16 +47,37 @@ fn digits(s: &str) -> String {
     s.chars().filter(|c| c.is_ascii_digit()).collect()
 }
 
-/// "🔑 Yangi sessiya" bosildi.
+/// "🔑 Yangi sessiya" bosildi: avval qaysi workflow uchun ekani so'raladi (har sifat-workflow'ning O'Z sessiyasi bor).
 pub(crate) async fn start(env: &Env, chat: i64) {
     reset(env).await;
     config_put(env, "encbot_mode", "sess").await;
+    config_put(env, "sess_state", "target").await;
+    config_put(env, "sess_at", &now_ms().to_string()).await;
+    let mut lines = String::new();
+    for q in QUALITIES {
+        let ok = encode_sess_ok(env, q).await;
+        lines.push_str(&format!("{} <b>{q}</b>: {}\n", if ok { "\u{2705}" } else { "\u{274C}" },
+            if ok { "ulangan" } else { "ULANMAGAN \u{2014} workflow ishga tushmaydi" }));
+    }
+    let kb = encbot_keyboard(vec![
+        vec![format!("\u{1F511} {}", QUALITIES[0]), format!("\u{1F511} {}", QUALITIES[1])],
+        vec![format!("\u{1F511} {}", QUALITIES[2]), format!("\u{1F511} {}", QUALITIES[3])],
+        vec![BTN_CANCEL.to_string()], vec![postbot::BTN_HOME.to_string()],
+    ]);
+    encbot_send(env, chat, &format!(
+        "\u{1F511} <b>Workflow sessiyalari</b>\n\n{lines}\n\
+         Qaysi workflow uchun <b>yangi Telegram sessiya</b> ulaysiz? Tugmani bosing. Workflow shu sessiyasiz ishga tushmaydi; \
+         u kodlangan fayllarni shu akkaunt orqali shu botga yuboradi."), Some(kb)).await;
+}
+
+async fn ask_phone(env: &Env, chat: i64, q: &str) {
+    config_put(env, "sess_target", q).await;
     config_put(env, "sess_state", "phone").await;
     config_put(env, "sess_at", &now_ms().to_string()).await;
-    encbot_send(env, chat,
-        "\u{1F511} <b>Yangi sessiya</b>\n\n\
+    encbot_send(env, chat, &format!(
+        "\u{1F511} <b>{q}</b> workflow sessiyasi\n\n\
          \u{1F4F1} Telegram akkaunt <b>telefon raqamini</b> yuboring (masalan <code>+998901234567</code>).\n\
-         Shu raqamga Telegram'dan kirish kodi keladi.",
+         Shu raqamga Telegram'dan kirish kodi keladi. Akkaunt yopiq kanalda a'zo/admin bo'lishi va shu sifatning log kanalida admin bo'lishi kerak."),
         Some(keyboard())).await;
 }
 
@@ -96,6 +117,12 @@ pub(crate) async fn on_message(env: &Env, msg: &Value, chat: i64) -> bool {
         state.clear();
     }
     match state.as_str() {
+        "target" => {
+            match QUALITIES.iter().find(|q| text.contains(**q)) {
+                Some(q) => ask_phone(env, chat, q).await,
+                None => encbot_send(env, chat, "\u{26A0}\u{FE0F} Pastdagi tugmalardan birini tanlang.", None).await,
+            }
+        }
         "phone" => {
             let d = digits(&text);
             if d.len() < 8 || d.len() > 15 {
@@ -224,6 +251,8 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
             "phone": get(env, "sess_phone").await,
             "code": get(env, "sess_code").await,
             "pw": get(env, "sess_pw").await,
+            "target": get(env, "sess_target").await,
+            "bot": encbot_username(env).await,
         }));
     }
 
@@ -255,11 +284,18 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
                 encbot_send(env, admin, "\u{274C} Parol noto'g'ri. Qayta yuboring.", Some(keyboard())).await;
             }
             "done" => {
+                // Shu sifatning sessiyasi ulandi: yuboruvchi akkaunt ID'si (fayl qabul qilish) va "ulangan" belgisi.
+                let target = get(env, "sess_target").await;
+                let uid = b["uid"].as_i64().unwrap_or(0);
+                if QUALITIES.contains(&target.as_str()) && uid > 0 {
+                    config_put(env, &format!("sess_uid_{target}"), &uid.to_string()).await;
+                    config_put(env, &format!("sess_ok_{target}"), "1").await;
+                }
                 reset(env).await;
                 config_put(env, "encbot_mode", "").await;
                 encbot_send(env, admin, &format!(
-                    "\u{2705} <b>Yangi sessiya yaratildi va saqlandi</b> {text}\n\
-                     Endi hamma kodlash/yuklash workflow'lari shu sessiyadan foydalanadi (keyingi run'dan)."),
+                    "\u{2705} <b>{target} sessiyasi ulandi</b> {text}\n\
+                     Endi {target} workflow shu sessiya bilan ishlaydi (keyingi run'dan)."),
                     None).await;
                 postbot::main_menu(env, admin).await;
             }

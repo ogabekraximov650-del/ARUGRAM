@@ -48,6 +48,7 @@ import sys
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -81,11 +82,18 @@ STOP_RUN = False  # process() keyingi sifatni yangi run'ga qoldirdi — main sik
 # Actions log'i shu YOPIQ kanalga yoziladi (yangi xabarlar, har 10 soniyada).
 # 0 yoki bo'sh — o'chiq.
 LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL_ID", "0") or 0)
+# Sifat-workflow'larning har biri O'Z log kanaliga yozadi (foydalanuvchi talabi). Sessiya shu kanalda admin bo'lishi kerak.
+QUALITY_LOG_CHANNELS = {
+    "360p": -1004368645279, "480p": -1003878978358, "720p": -1003581997218, "1080p": -1003954950031,
+}
+if QUALITY in QUALITY_LOG_CHANNELS:
+    LOG_CHANNEL = int(os.environ.get(f"LOG_CHANNEL_{QUALITY.upper()}", "0") or 0) or QUALITY_LOG_CHANNELS[QUALITY]
 LOG_INTERVAL = max(1.0, float(os.environ.get("LOG_INTERVAL_SEC", "10") or 10))
 # Qadalgan holat xabari shu oraliqda tahrirlanadi (`StatusPin`).
 # 3 soniya — admin paneli uni ~2 soniyada o'qiydi (deyarli real vaqt);
 # Telegram bundan tez tahrirlashga ruxsat bermaydi (FloodWait).
-STATUS_INTERVAL = max(2.0, float(os.environ.get("STATUS_INTERVAL_SEC", "3") or 3))
+# Sifat-run o'z log kanaliga har 10 soniyada yozadi (foydalanuvchi talabi).
+STATUS_INTERVAL = max(2.0, float(os.environ.get("STATUS_INTERVAL_SEC", "10" if QUALITY else "3") or 3))
 # To'liq holat worker'ga (`EncodeLive`) shu oraliqda yuboriladi.
 WORKER_PUSH_SEC = max(3.0, float(os.environ.get("WORKER_PUSH_SEC", "8") or 8))
 SESSION = str(Path(__file__).with_name("pyro_session"))
@@ -293,8 +301,36 @@ async def find_sent(app, channel: int, name: str, size: int):
     return None
 
 
-async def send_file(app, channel: int, path: Path, name: str, label: str):
-    """Faylni kanalga yuboradi (qotib qolsa bekor qilib, o'sha faylni qayta yuboradi)."""
+BOT = ""  # kodlash botining username'i (worker `claim` javobida beradi); bo'sh — eski usul (kanalga to'g'ridan-to'g'ri)
+
+
+def is_committed(name: str) -> bool:
+    """Bot faylni yopiq kanalga saqlab, bazaga yozdimi (`/api/encode/committed`)."""
+    try:
+        req = urllib.request.Request(
+            f"{API}/api/encode/committed?file={urllib.parse.quote(name)}",
+            headers={"X-Encode-Token": TOKEN, "User-Agent": "arugram-encoder"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return bool(json.loads(r.read() or b"{}").get("ok"))
+    except Exception as ex:  # noqa: BLE001
+        print(f"committed tekshiruvi xato: {ex}", flush=True)
+        return False
+
+
+async def wait_committed(name: str, label: str, timeout: int = 300):
+    """Bot faylni saqlab bazaga yozguncha kutadi; shundan keyingina run davom etadi/o'chadi."""
+    end = time.time() + timeout
+    while time.time() < end:
+        if await asyncio.to_thread(is_committed, name):
+            log(f"  {label}: bot faylni yopiq kanalga saqladi va bazaga yozdi")
+            return
+        await asyncio.sleep(3)
+    raise RuntimeError(f"{label}: bot {timeout} soniyada faylni saqlamadi (bot kanalda adminmi? sessiya ro'yxatdan o'tganmi?)")
+
+
+async def send_file(app, channel, path: Path, name: str, label: str, caption: str = ""):
+    """Faylni yuboradi (qotib qolsa bekor qilib, o'sha faylni qayta yuboradi). `channel` — kanal ID yoki bot username;
+    `caption` berilsa (bot chatiga) — shu izoh, aks holda fayl nomi."""
     size = path.stat().st_size
     last_err = ""
     for attempt in range(1, SEND_TRIES + 1):
@@ -307,7 +343,7 @@ async def send_file(app, channel: int, path: Path, name: str, label: str):
             return base(cur, total)
 
         task = asyncio.create_task(app.send_document(
-            channel, str(path), file_name=name, force_document=True, caption=name,
+            channel, str(path), file_name=name, force_document=True, caption=caption or name,
             disable_notification=True, progress=cb))
         renew = time.time()
         stalled = False
@@ -337,9 +373,13 @@ async def send_file(app, channel: int, path: Path, name: str, label: str):
         else:
             last_err = f"{STALL_S} soniya qimirlamadi ({prog['p'] * 100 // max(size, 1)}%)"
         log(f"  {label}: yuklash {attempt}/{SEND_TRIES} muvaffaqiyatsiz — {last_err}")
+        # Bot chatiga yuborilgan bo'lsa bot uni allaqachon saqlab, chatdan o'chirgan bo'lishi mumkin.
+        if caption and await asyncio.to_thread(is_committed, name):
+            log(f"  {label}: fayl allaqachon saqlangan — qayta yuklanmaydi")
+            return None
         found = await find_sent(app, channel, name, size)
         if found:
-            log(f"  {label}: fayl kanalda topildi — qayta yuklanmaydi")
+            log(f"  {label}: fayl topildi — qayta yuklanmaydi")
             return found
         await asyncio.sleep(5 * attempt)
     raise RuntimeError(f"{label}: Telegram'ga yuklab bo'lmadi ({SEND_TRIES} urinish): {last_err}")
@@ -1058,24 +1098,44 @@ async def process(app: Client, channel: int, job: dict):
             # Bir vaqtda faqat bitta sifat yuklaydi: navbat kutiladi (kodlash esa parallel davom etadi).
             await upload_turn(label)
             try:
-                # Kalit kanal postiga YOZILMAYDI (xavfsizlik) — faqat worker'ga.
-                sent = await send_file(app, channel, sealed, name, label)
-                sealed.unlink()
-                api("quality", {**ident, "quality": label, "file": name, "size": size,
-                                "key": k.hex(), "msg_id": sent.id})
-                if frag is not None:
-                    fpath, fk, fsize = frag
-                    try:
-                        fsent = await send_file(app, channel, fpath, fpath.name, f"{label} fMP4")
-                        api_fmp4("done", {"anime_id": ident.get("anime_id"), "season_id": ident.get("season_id"),
-                                          "epizod_id": ident.get("epizod_id"), "quality": label, "ok": True,
-                                          "file": fpath.name, "size": fsize, "key": fk.hex(),
-                                          "msg_id": fsent.id})
-                        log(f"  {label}: fMP4 nusxa ham tayyor ({fsize / 1048576:.1f} MB)")
-                    except Exception as ex:  # noqa: BLE001
-                        log(f"  {label}: fMP4 yuklanmadi ({ex}) — keyin navbat orqali")
-                    finally:
-                        fpath.unlink(missing_ok=True)
+                if QUALITY and BOT:
+                    # Sifat-workflow: fayl KANALGA emas, kodlash BOTI chatiga ketadi; bot uni yopiq kanalga saqlab
+                    # bazaga yozadi (`worker/src/encupload.rs`). Run tasdiqni kutadi va shundan keyin tugaydi.
+                    qa = ident["queued_at"]
+                    cap = f"ARUENC|mp4|{a}|{s}|{e}|{qa}|{label}|{k.hex()}|{size}"
+                    await send_file(app, BOT, sealed, name, label, caption=cap)
+                    sealed.unlink(missing_ok=True)
+                    await wait_committed(name, label)
+                    if frag is not None:
+                        fpath, fk, fsize = frag
+                        try:
+                            fcap = f"ARUENC|fmp4|{a}|{s}|{e}|{qa}|{label}|{fk.hex()}|{fsize}"
+                            await send_file(app, BOT, fpath, fpath.name, f"{label} fMP4", caption=fcap)
+                            await wait_committed(fpath.name, f"{label} fMP4")
+                            log(f"  {label}: fMP4 nusxa ham tayyor ({fsize / 1048576:.1f} MB)")
+                        except Exception as ex:  # noqa: BLE001
+                            log(f"  {label}: fMP4 saqlanmadi ({ex}) — keyin navbat orqali")
+                        finally:
+                            fpath.unlink(missing_ok=True)
+                else:
+                    # Kalit kanal postiga YOZILMAYDI (xavfsizlik) — faqat worker'ga.
+                    sent = await send_file(app, channel, sealed, name, label)
+                    sealed.unlink()
+                    api("quality", {**ident, "quality": label, "file": name, "size": size,
+                                    "key": k.hex(), "msg_id": sent.id})
+                    if frag is not None:
+                        fpath, fk, fsize = frag
+                        try:
+                            fsent = await send_file(app, channel, fpath, fpath.name, f"{label} fMP4")
+                            api_fmp4("done", {"anime_id": ident.get("anime_id"), "season_id": ident.get("season_id"),
+                                              "epizod_id": ident.get("epizod_id"), "quality": label, "ok": True,
+                                              "file": fpath.name, "size": fsize, "key": fk.hex(),
+                                              "msg_id": fsent.id})
+                            log(f"  {label}: fMP4 nusxa ham tayyor ({fsize / 1048576:.1f} MB)")
+                        except Exception as ex:  # noqa: BLE001
+                            log(f"  {label}: fMP4 yuklanmadi ({ex}) — keyin navbat orqali")
+                        finally:
+                            fpath.unlink(missing_ok=True)
             finally:
                 await asyncio.to_thread(ulock, "release")
             done.add(label)
@@ -1159,6 +1219,12 @@ async def main():
                 await STATUS.start(app)
                 status_task = asyncio.create_task(STATUS.loop(app))
                 worker_task = asyncio.create_task(STATUS.worker_loop())
+            if r.get("nosession"):
+                log(f"{QUALITY} uchun Telegram sessiyasi ulanmagan — botda 'Yangi sessiya' orqali ulang. Run tugadi.")
+                break
+            global BOT
+            if QUALITY and r.get("bot"):
+                BOT = str(r["bot"]).lstrip("@")
             if r.get("busy"):
                 log("Boshqa run ishlayapti — kutiladi.")
                 break
