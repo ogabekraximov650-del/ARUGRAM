@@ -245,6 +245,105 @@ def transfer_progress(kind: str):
     return cb
 
 
+# ── Telegram'ga yuklash: NAVBAT va qotib qolsa QAYTA URINISH ─────────────────────────────
+# Bir vaqtda faqat BITTA sifat yuklaydi (worker'dagi qulf: `/api/encode/ulock`), qolganlari kutadi — 4 ta run bir
+# Telegram sessiyasidan birdan yuklasa, yuklash oxirida (100%) qotib qolardi. Yuklash to'xtab qolsa (progress
+# `STALL_S` soniya o'zgarmasa) bekor qilinadi va TAYYOR (shifrlangan) fayl QAYTA kodlanmasdan qayta yuboriladi;
+# oldingi urinish aslida kanalga o'tib ulgurgan bo'lsa (javob yo'qolgan) — o'sha xabar ishlatiladi.
+STALL_S = int(os.environ.get("UPLOAD_STALL_SEC", "120"))
+SEND_TRIES = int(os.environ.get("UPLOAD_TRIES", "5"))
+LOCK_TTL_S = 900
+
+
+def ulock(op: str) -> bool:
+    """Yuklash navbati: `acquire` — navbat sizniki bo'lsa True; `release` — qaytaradi. Xato bo'lsa — kutmaymiz."""
+    try:
+        r = api("ulock", {"runner": RUNNER, "wq": QUALITY or "all", "op": op, "ttl_s": LOCK_TTL_S})
+        return bool(r.get("ok"))
+    except JobLost:
+        return True
+    except Exception as ex:  # noqa: BLE001
+        print(f"yuklash navbati xato ({ex}) — kutilmaydi", flush=True)
+        return True
+
+
+async def upload_turn(label: str):
+    """Telegram'ga yuklash navbatini kutadi (boshqa sifat yuklayotgan bo'lsa)."""
+    waited = 0
+    while not await asyncio.to_thread(ulock, "acquire"):
+        if waited == 0:
+            log(f"  {label}: boshqa sifat Telegram'ga yuklayapti — navbat kutilmoqda...")
+        await asyncio.sleep(3)
+        waited += 3
+        if waited >= 40 * 60:
+            log(f"  {label}: navbat 40 daqiqa kutildi — baribir yuklanadi")
+            return
+
+
+async def find_sent(app, channel: int, name: str, size: int):
+    """Kanalning oxirgi xabarlarida shu nomli fayl bormi (oldingi urinish aslida o'tgan bo'lishi mumkin)."""
+    try:
+        async for m in app.get_chat_history(channel, limit=20):
+            d = getattr(m, "document", None)
+            if d and getattr(d, "file_name", "") == name and (not size or getattr(d, "file_size", 0) == size):
+                return m
+    except Exception as ex:  # noqa: BLE001
+        log(f"    kanal tarixi o'qilmadi: {ex}")
+    return None
+
+
+async def send_file(app, channel: int, path: Path, name: str, label: str):
+    """Faylni kanalga yuboradi (qotib qolsa bekor qilib, o'sha faylni qayta yuboradi)."""
+    size = path.stat().st_size
+    last_err = ""
+    for attempt in range(1, SEND_TRIES + 1):
+        prog = {"p": -1, "t": time.time()}
+        base = transfer_progress(f"{label} Telegram'ga yuklanmoqda")
+
+        def cb(cur, total, base=base, prog=prog):
+            if cur != prog["p"]:
+                prog["p"], prog["t"] = cur, time.time()
+            return base(cur, total)
+
+        task = asyncio.create_task(app.send_document(
+            channel, str(path), file_name=name, force_document=True, caption=name,
+            disable_notification=True, progress=cb))
+        renew = time.time()
+        stalled = False
+        while True:
+            done, _ = await asyncio.wait({task}, timeout=10)
+            if done:
+                break
+            now = time.time()
+            if now - renew > 60:  # navbat ijarasi uzaytiriladi
+                await asyncio.to_thread(ulock, "acquire")
+                renew = now
+            if now - prog["t"] > STALL_S:
+                stalled = True
+                task.cancel()
+                try:
+                    await task
+                except BaseException:  # noqa: BLE001 — CancelledError ham
+                    pass
+                break
+        if not stalled:
+            try:
+                return task.result()
+            except Exception as ex:  # noqa: BLE001
+                last_err = f"{type(ex).__name__}: {ex}"
+                if type(ex).__name__ == "FloodWait":
+                    await asyncio.sleep(int(getattr(ex, "value", 10) or 10))
+        else:
+            last_err = f"{STALL_S} soniya qimirlamadi ({prog['p'] * 100 // max(size, 1)}%)"
+        log(f"  {label}: yuklash {attempt}/{SEND_TRIES} muvaffaqiyatsiz — {last_err}")
+        found = await find_sent(app, channel, name, size)
+        if found:
+            log(f"  {label}: fayl kanalda topildi — qayta yuklanmaydi")
+            return found
+        await asyncio.sleep(5 * attempt)
+    raise RuntimeError(f"{label}: Telegram'ga yuklab bo'lmadi ({SEND_TRIES} urinish): {last_err}")
+
+
 def log(*a):
     print(time.strftime("%H:%M:%S"), *a, flush=True)
     line = time.strftime("%H:%M:%S ") + " ".join(str(x) for x in a)
@@ -884,30 +983,29 @@ async def process(app: Client, channel: int, job: dict):
                 f"{size * 8 / src_d / 1000:.0f} kb/s, kodlash {hms(time.time() - t)} "
                 f"— yuklanmoqda...")
             await asyncio.to_thread(hb.set, f"upload|{label}|{idx}|{len(steps)}", True)
-            # Kalit kanal postiga YOZILMAYDI (xavfsizlik) — faqat worker'ga.
-            sent = await app.send_document(
-                channel, str(sealed), file_name=name, force_document=True,
-                caption=name, disable_notification=True,
-                progress=transfer_progress(f"{label} Telegram'ga yuklanmoqda"))
-            sealed.unlink()
-            api("quality", {**ident, "quality": label, "file": name, "size": size,
-                            "key": k.hex(), "msg_id": sent.id})
-            if frag is not None:
-                fpath, fk, fsize = frag
-                try:
-                    fsent = await app.send_document(
-                        channel, str(fpath), file_name=fpath.name, force_document=True,
-                        caption=fpath.name, disable_notification=True,
-                        progress=transfer_progress(f"{label} fMP4 Telegram'ga yuklanmoqda"))
-                    api_fmp4("done", {"anime_id": ident.get("anime_id"), "season_id": ident.get("season_id"),
-                                      "epizod_id": ident.get("epizod_id"), "quality": label, "ok": True,
-                                      "file": fpath.name, "size": fsize, "key": fk.hex(),
-                                      "msg_id": fsent.id})
-                    log(f"  {label}: fMP4 nusxa ham tayyor ({fsize / 1048576:.1f} MB)")
-                except Exception as ex:  # noqa: BLE001
-                    log(f"  {label}: fMP4 yuklanmadi ({ex}) — keyin navbat orqali")
-                finally:
-                    fpath.unlink(missing_ok=True)
+            # Bir vaqtda faqat bitta sifat yuklaydi: navbat kutiladi (kodlash esa parallel davom etadi).
+            await upload_turn(label)
+            try:
+                # Kalit kanal postiga YOZILMAYDI (xavfsizlik) — faqat worker'ga.
+                sent = await send_file(app, channel, sealed, name, label)
+                sealed.unlink()
+                api("quality", {**ident, "quality": label, "file": name, "size": size,
+                                "key": k.hex(), "msg_id": sent.id})
+                if frag is not None:
+                    fpath, fk, fsize = frag
+                    try:
+                        fsent = await send_file(app, channel, fpath, fpath.name, f"{label} fMP4")
+                        api_fmp4("done", {"anime_id": ident.get("anime_id"), "season_id": ident.get("season_id"),
+                                          "epizod_id": ident.get("epizod_id"), "quality": label, "ok": True,
+                                          "file": fpath.name, "size": fsize, "key": fk.hex(),
+                                          "msg_id": fsent.id})
+                        log(f"  {label}: fMP4 nusxa ham tayyor ({fsize / 1048576:.1f} MB)")
+                    except Exception as ex:  # noqa: BLE001
+                        log(f"  {label}: fMP4 yuklanmadi ({ex}) — keyin navbat orqali")
+                    finally:
+                        fpath.unlink(missing_ok=True)
+            finally:
+                await asyncio.to_thread(ulock, "release")
             done.add(label)
             STATUS.quality(label, state="done")
             STATUS.update(xfer=None)

@@ -10349,7 +10349,7 @@ fn needs_app_check(path: &str) -> bool {
     // himoyalangan. Ilova chaqiradiganlari (`queue`, `status`) esa
     // tekshiruvdan o'tadi.
     if matches!(path, "/api/encode/peek" | "/api/encode/claim" | "/api/encode/heartbeat" | "/api/encode/release"
-        | "/api/encode/quality" | "/api/encode/finish" | "/api/encode/push" | "/api/encode/meta"
+        | "/api/encode/quality" | "/api/encode/finish" | "/api/encode/push" | "/api/encode/meta" | "/api/encode/ulock"
         | "/api/post/claim" | "/api/post/check" | "/api/post/finish" | "/api/post/progress"
         | "/api/anibla/claim" | "/api/anibla/diag" | "/api/anibla/progress" | "/api/anibla/done"
         | "/api/fmp4/claim" | "/api/fmp4/done")
@@ -11752,6 +11752,18 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
         return ok(json!({"ok": true}));
     }
 
+    // Telegram'ga yuklash navbati: bir vaqtda faqat bitta sifat-run yuklaydi (`op`: acquire | release).
+    if path == "/api/encode/ulock" {
+        let owner = format!("{}-{}", b["runner"].as_str().unwrap_or(""), b["wq"].as_str().unwrap_or(""));
+        if owner.len() < 3 || owner.len() > 96 {
+            return json_resp(&json!({"error": "owner"}), 400);
+        }
+        let op = if b["op"].as_str() == Some("release") { "release" } else { "acquire" };
+        let ttl = (jint(&b, "ttl_s").clamp(30, 3600)) * 1000;
+        let (got, info) = encode_ulock(env, op, &owner, ttl).await;
+        return ok(json!({"ok": got, "info": info}));
+    }
+
     // Run asl videoni yuklab, haqiqiy balandligini o'lchadi: bazaga yoziladi, to'g'ri kelmaydigan
     // sifatlar "skip" bo'ladi (o'lchov oldingisidan farq qilsa — qayta hisoblanadi).
     if path == "/api/encode/meta" {
@@ -13049,6 +13061,34 @@ impl DurableObject for EncodeLive {
         let url = req.url()?;
         let q = url.query_pairs().find(|(k, _)| k == "q").map(|(_, v)| v.to_string()).unwrap_or_default();
         let want_all = url.query_pairs().any(|(k, _)| k == "all");
+        // Telegram'ga yuklash NAVBATI (`?lock=acquire|release&owner=..&ttl=<ms>`): bir vaqtda faqat bitta sifat-run
+        // yuklaydi, qolganlari kutadi. Bitta DO — ketma-ket, ya'ni ikki run bir vaqtda ololmaydi. Ijara `ttl` dan
+        // keyin o'zi bo'shaydi (run o'lib qolsa navbat qotib qolmasin).
+        if let Some(op) = url.query_pairs().find(|(k, _)| k == "lock").map(|(_, v)| v.to_string()) {
+            let owner = url.query_pairs().find(|(k, _)| k == "owner").map(|(_, v)| v.to_string()).unwrap_or_default();
+            let ttl = url.query_pairs().find(|(k, _)| k == "ttl").and_then(|(_, v)| v.parse::<i64>().ok()).unwrap_or(900_000);
+            let now = now_ms();
+            let cur = self.state.storage().get::<String>("lk").await.ok().flatten().unwrap_or_default();
+            let (cur_owner, until) = cur.split_once('|')
+                .map(|(o, u)| (o.to_string(), u.parse::<i64>().unwrap_or(0))).unwrap_or_default();
+            return match op.as_str() {
+                "acquire" => {
+                    if cur_owner.is_empty() || until <= now || cur_owner == owner {
+                        self.state.storage().put("lk", format!("{owner}|{}", now + ttl)).await?;
+                        Response::ok("1")
+                    } else {
+                        Response::ok(format!("0|{cur_owner}|{}", (until - now) / 1000))
+                    }
+                }
+                "release" => {
+                    if cur_owner == owner {
+                        self.state.storage().delete("lk").await?;
+                    }
+                    Response::ok("1")
+                }
+                _ => Response::error("lock", 400),
+            };
+        }
         // Darvoza: `?gate=<ms>` — oxirgi ruxsatdan beri `ms` o'tgan bo'lsagina "1" (va vaqt yangilanadi).
         // Bitta DO butun dunyo uchun — ikki run bir vaqtda so'rasa ham faqat bittasiga ruxsat.
         if let Some(ms) = url.query_pairs().find(|(k, _)| k == "gate").and_then(|(_, v)| v.parse::<i64>().ok()) {
@@ -13124,6 +13164,29 @@ async fn encode_live_put(env: &Env, q: &str, text: &str) -> bool {
     init.with_method(Method::Post).with_body(Some(text.to_string().into()));
     let Ok(req) = Request::new_with_init(&format!("https://encode-live.internal/?q={q}"), &init) else { return false };
     matches!(stub.fetch_with_request(req).await, Ok(r) if r.status_code() == 200)
+}
+
+/// Telegram'ga yuklash navbati (`encode_live` DO ichida). `Ok(true)` — navbat sizniki.
+async fn encode_ulock(env: &Env, op: &str, owner: &str, ttl_ms: i64) -> (bool, String) {
+    let go = async {
+        let ns = env.durable_object("ENCODE_LIVE").ok()?;
+        let stub = ns.get_by_name("encode").ok()?;
+        let mut init = RequestInit::new();
+        init.with_method(Method::Post).with_body(Some(String::new().into()));
+        let url = format!("https://encode-live.internal/?lock={op}&owner={}&ttl={ttl_ms}", url_encode_simple(owner));
+        let req = Request::new_with_init(&url, &init).ok()?;
+        let mut resp = stub.fetch_with_request(req).await.ok()?;
+        resp.text().await.ok()
+    };
+    match go.await {
+        Some(t) => (t.trim().starts_with('1'), t.trim().to_string()),
+        // DO javob bermasa — yuklash to'xtab qolmasin.
+        None => (true, "do_xato".to_string()),
+    }
+}
+
+fn url_encode_simple(s: &str) -> String {
+    s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect()
 }
 
 /// Umumiy holat xabarini tahrirlash huquqi (`ms` ichida ikki marta emas). Aniqlab bo'lmasa — ruxsat (yo'qolmasin).

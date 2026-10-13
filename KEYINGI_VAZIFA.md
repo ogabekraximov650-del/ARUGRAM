@@ -6088,3 +6088,11 @@ Eski usulda — avvalgidek bitta run xabari.
 XAVF: 4 run bir Telegram sessiyasidan (`session.enc`) bir vaqtda kiradi (oldin ham fmp4/anibla/post bilan shunday edi).
 Telegram `AUTH_KEY_DUPLICATED` bersa — har sifat uchun alohida sessiya: `tool/encode/session_360.enc` ... (workflow
 mavjud bo'lsa shuni ishlatadi, `setup_repo.py` ko'chiradi).
+
+## Telegram'ga yuklash: navbat va qotib qolganda qayta urinish (2026-10)
+
+Muammo: 4 sifat-run bir vaqtda Telegram'ga yuklaganda yuklash 100% da qotib qolardi. Endi: (1) bir vaqtda FAQAT BITTA sifat
+yuklaydi — worker'dagi qulf (`/api/encode/ulock`, `EncodeLive` DO ichida, ijara 15 daqiqa, yuklash paytida har 60 s uzaytiriladi),
+qolganlari navbat kutadi (kodlash parallel davom etadi); (2) `run.py` `send_file`: progress `UPLOAD_STALL_SEC` (120 s) o'zgarmasa
+yuklash bekor qilinadi va TAYYOR shifrlangan fayl QAYTA KODLANMASDAN qayta yuboriladi (5 urinish); har urinishdan oldin kanalning
+oxirgi 20 xabarida shu nomli fayl bor-yo'qligi tekshiriladi (javob yo'qolgan, lekin fayl o'tgan bo'lsa — takror yuklanmaydi).
