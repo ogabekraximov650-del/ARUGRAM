@@ -6176,3 +6176,11 @@ shu ikki akkauntdan qabul qilinadi; javob so'ragan odamning o'z chatiga ketadi. 
 boshlagan adminga (`sess_chat`). Fon xabarlari (kodlash tugadi, Post/Holat jonli xabari) hozircha faqat asosiy adminga.
 Eslatma: ikkinchi admin botda /start bosgan bo'lishi kerak. Holat/rejim (`encbot_mode`, `sess_*`) umumiy — ikki admin bir vaqtda
 bir jarayonni olib bormasin.
+
+## Asl video bot chatidan olinadi (2026-10)
+
+Sifat-run (`QUALITY` va `BOT` bor) asl videoni kanaldan emas, BOT chatidan oladi: `POST /api/encode/origin` — worker (`lib.rs`) botni
+`copyMessage` qildiradi (kanal -> shu sifat sessiyasining chati, izoh `ARUORIG|<nom>`); run (`fetch_origin_via_bot`) chat
+tarixidan topib yuklaydi va nusxani o'chiradi. Shu tufayli sessiya akkaunti asl video kanalida a'zo bo'lishi shart emas
+(faqat botni /start qilgan bo'lsin — `session.py` buni o'zi qiladi). Anibla manbali qismlar o'zgarmadi: video saytdan olinadi.
+Log kanalida esa akkaunt baribir admin/a'zo bo'lishi kerak.

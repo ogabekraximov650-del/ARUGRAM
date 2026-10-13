@@ -328,6 +328,22 @@ async def wait_committed(name: str, label: str, timeout: int = 300):
     raise RuntimeError(f"{label}: bot {timeout} soniyada faylni saqlamadi (bot kanalda adminmi? sessiya ro'yxatdan o'tganmi?)")
 
 
+async def fetch_origin_via_bot(app, ident: dict):
+    """Worker orqali bot asl videoni shu sessiya chatiga yuboradi; chat tarixidan topib qaytaradi."""
+    r = await asyncio.to_thread(api, "origin", ident)
+    tag = r.get("tag", "")
+    end = time.time() + 180
+    while time.time() < end:
+        try:
+            async for m in app.get_chat_history(BOT, limit=15):
+                if (m.caption or "") == tag and (m.document or m.video):
+                    return m
+        except Exception as ex:  # noqa: BLE001
+            log(f"    bot chati o'qilmadi: {ex}")
+        await asyncio.sleep(3)
+    raise RuntimeError("bot asl videoni yubormadi (sessiya botni /start qilganmi?)")
+
+
 async def send_file(app, channel, path: Path, name: str, label: str, caption: str = ""):
     """Faylni yuboradi (qotib qolsa bekor qilib, o'sha faylni qayta yuboradi). `channel` — kanal ID yoki bot username;
     `caption` berilsa (bot chatiga) — shu izoh, aks holda fayl nomi."""
@@ -1008,7 +1024,13 @@ async def process(app: Client, channel: int, job: dict):
             if not src.exists() or src.stat().st_size == 0:
                 raise RuntimeError("anibla.uz dan yuklab bo'lmadi")
         else:
-            m = await app.get_messages(channel, int(job["origin_msg"]))
+            bot_msg = None
+            if QUALITY and BOT:
+                # Xavfsizlik: asl videoni kanaldan emas, BOT chatidan olamiz — bot uni shu sessiya chatiga nusxalaydi.
+                bot_msg = await fetch_origin_via_bot(app, ident)
+                m = bot_msg
+            else:
+                m = await app.get_messages(channel, int(job["origin_msg"]))
             if not m or m.empty or not (m.document or m.video):
                 raise Fatal("asl video kanalda topilmadi")
             log("  asl video yuklab olinmoqda...")
@@ -1017,6 +1039,11 @@ async def process(app: Client, channel: int, job: dict):
                                            progress=transfer_progress("yuklab olinmoqda"))
             if not got or Path(got).stat().st_size == 0:
                 raise RuntimeError("asl video yuklab olinmadi")
+            if bot_msg is not None:
+                try:
+                    await app.delete_messages(BOT, bot_msg.id)
+                except Exception as ex:  # noqa: BLE001
+                    log(f"  bot chatidagi nusxa o'chirilmadi: {ex}")
             key = (job.get("origin_key") or "").strip()
             if key:
                 await asyncio.to_thread(ctr_file, Path(got), src, bytes.fromhex(key))

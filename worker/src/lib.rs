@@ -10356,7 +10356,7 @@ fn needs_app_check(path: &str) -> bool {
     // himoyalangan. Ilova chaqiradiganlari (`queue`, `status`) esa
     // tekshiruvdan o'tadi.
     if matches!(path, "/api/encode/peek" | "/api/encode/claim" | "/api/encode/heartbeat" | "/api/encode/release"
-        | "/api/encode/quality" | "/api/encode/finish" | "/api/encode/push" | "/api/encode/meta" | "/api/encode/ulock" | "/api/encode/committed"
+        | "/api/encode/quality" | "/api/encode/finish" | "/api/encode/push" | "/api/encode/meta" | "/api/encode/ulock" | "/api/encode/committed" | "/api/encode/origin"
         | "/api/post/claim" | "/api/post/check" | "/api/post/finish" | "/api/post/progress"
         | "/api/anibla/claim" | "/api/anibla/diag" | "/api/anibla/progress" | "/api/anibla/done"
         | "/api/fmp4/claim" | "/api/fmp4/done" | "/api/session/poll" | "/api/session/report")
@@ -12082,6 +12082,28 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
     let (a, s, e) = encode_pk(&job);
     let queued_at = jint(&job, "queued_at");
     let pk = || vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e), TursoArg::int(queued_at)];
+
+    // Asl videoni run'ga BOT orqali beradi (xavfsizlik): bot yopiq kanaldagi videoni shu sifatning sessiya akkaunti
+    // chatiga `copyMessage` qiladi (izoh `ARUORIG|<nom>`); run uni shu chatdan yuklab oladi va o'chiradi.
+    if path == "/api/encode/origin" {
+        let Some(q) = wq else { return json_resp(&json!({"error": "sifat"}), 400) };
+        let uid: i64 = config_get(env, &format!("sess_uid_{q}")).await.and_then(|v| v.parse().ok()).unwrap_or(0);
+        let origin = job["origin"].as_str().unwrap_or("").to_string();
+        let msg = turso_exec(env, "SELECT msg_id FROM tg_files WHERE file_name=?", vec![TursoArg::text(&origin)]).await.ok()
+            .and_then(|r| first_row(&r)).map(|r| jint(&r, "msg_id")).unwrap_or(0);
+        let channel = tg_channel_id(env);
+        if uid <= 0 || msg <= 0 || channel == 0 {
+            return json_resp(&json!({"error": "origin"}), 400);
+        }
+        let tag = format!("ARUORIG|{origin}");
+        return match encbot_api(env, "copyMessage", json!({
+            "chat_id": uid, "from_chat_id": channel, "message_id": msg,
+            "caption": tag, "disable_notification": true,
+        })).await {
+            Ok(_) => ok(json!({"ok": true, "tag": tag})),
+            Err(e) => json_resp(&json!({"error": e.to_string().chars().take(200).collect::<String>()}), 502),
+        };
+    }
 
     if path == "/api/encode/heartbeat" {
         // Jarayon matni (`enc|1080p|37|1|4`, `download`, `upload|720p|2|4`) —
