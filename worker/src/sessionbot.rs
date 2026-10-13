@@ -253,12 +253,16 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
             "pw": get(env, "sess_pw").await,
             "target": get(env, "sess_target").await,
             "bot": encbot_username(env).await,
+            // Run'dan kelgan oxirgi xabar (tashxis uchun; `reset` tegmaydi).
+            "last": get(env, "sess_last").await,
         }));
     }
 
     if path == "/api/session/report" {
         let event = b["event"].as_str().unwrap_or("");
         let text = html_escape(b["text"].as_str().unwrap_or("").trim());
+        config_put(env, "sess_last", &format!("{} | {event} | {} | state={state}", now_ms() / 1000,
+            b["text"].as_str().unwrap_or("").chars().take(300).collect::<String>())).await;
         match event {
             "code_sent" if state == "wait_send" => {
                 config_put(env, "sess_state", "code").await;

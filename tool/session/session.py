@@ -201,6 +201,8 @@ if __name__ == "__main__":
         report("error", str(e))
         sys.exit(0)
     except Exception as e:  # noqa: BLE001
+        import traceback
         log("XATO:", e)
-        report("error", str(e))
+        traceback.print_exc()
+        report("error", f"{type(e).__name__}: {e}")
         sys.exit(1)
