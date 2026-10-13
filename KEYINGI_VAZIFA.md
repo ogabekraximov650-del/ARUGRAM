@@ -6116,3 +6116,8 @@ Sabab: run'lar `/api/encode/push` ga holat yubormayotgan bo'lishi mumkin — shu
 adminga /start bosilgan bo'lishi kerak.
 
 Keyin panel bot yana almashtirildi (`tool/bot/encode_bot.enc` qayta shifrlandi, usul o'sha).
+
+## Post kodlash: 720p ga CRF 25
+
+`tool/post/encode.sh`: chiqish balandligi 648..971 (720p sinfi) bo'lsa CRF `H265_CRF_720` (25), qolgan sifatlarda `H265_CRF` (30).
+`post.workflow.yml` shablonida `H265_CRF_720: '25'` (avtoencode repoga `setup-autoencode.yml` o'zi o'rnatadi).

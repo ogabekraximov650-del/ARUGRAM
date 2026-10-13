@@ -58,6 +58,8 @@ echo "    Manba : $(basename "$SRC_MAIN") | ${w}x${h} | ${fps_val} fps | ${total
 # H.265: sof CRF (bitrate chegarasi yo'q). Foydalanuvchi talabi: CRF har
 # qanday sifatda 30 (`H265_CRF`). Katta qiymat = kichik fayl.
 crf="${H265_CRF:-30}"
+# Foydalanuvchi talabi: 720p sinfidagi (balandligi 648..971) videoga CRF 25 (`H265_CRF_720`).
+if [ "$h" -ge 648 ] && [ "$h" -le 971 ]; then crf="${H265_CRF_720:-25}"; fi
 echo "    Kodek : H.265 (libx265, ${h}p, CRF $crf, preset ${H265_PRESET:-medium}, audio 128k)"
 
 FILTER="[1:v]scale=$w:$h:force_original_aspect_ratio=increase,crop=$w:$h,setsar=1,fps=$fps_val[c_v];\
