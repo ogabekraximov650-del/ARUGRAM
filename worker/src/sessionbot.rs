@@ -50,6 +50,7 @@ fn digits(s: &str) -> String {
 /// "🔑 Yangi sessiya" bosildi: avval qaysi workflow uchun ekani so'raladi (har sifat-workflow'ning O'Z sessiyasi bor).
 pub(crate) async fn start(env: &Env, chat: i64) {
     reset(env).await;
+    config_put(env, "sess_chat", &chat.to_string()).await;
     config_put(env, "encbot_mode", "sess").await;
     config_put(env, "sess_state", "target").await;
     config_put(env, "sess_at", &now_ms().to_string()).await;
@@ -237,7 +238,8 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
         return err404("topilmadi");
     }
     let b: Value = req.json().await.unwrap_or(json!({}));
-    let admin = ADMIN_TELEGRAM_ID;
+    // Run xabarlari jarayonni boshlagan adminga boradi (bir nechta admin bo'lishi mumkin).
+    let admin: i64 = get(env, "sess_chat").await.parse().ok().filter(|c| is_encbot_admin(*c)).unwrap_or(ADMIN_TELEGRAM_ID);
     let started: i64 = get(env, "sess_at").await.parse().unwrap_or(0);
     let mut state = get(env, "sess_state").await;
     if !state.is_empty() && now_ms() - started > TTL_MS {

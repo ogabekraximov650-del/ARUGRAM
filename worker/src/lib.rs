@@ -7079,6 +7079,12 @@ async fn comments_delete(req: &Request, env: &Env, ctx: &Context, id: &str) -> R
 // qo'yiladi. Ya'ni o'zgartirilgan ilova bilan ham begona odam
 // boshqalarning yozishmasini o'qiy olmaydi.
 const ADMIN_TELEGRAM_ID: i64 = 6_805_215_964;
+/// Kodlash (panel) botiga kirish huquqi: asosiy admin va qo'shimcha adminlar. Bot javobi so'ragan odamning o'z chatiga
+/// boradi; fon xabarlari (kodlash tugadi, holat) hozircha asosiy adminga.
+const ENCBOT_ADMINS: [i64; 2] = [ADMIN_TELEGRAM_ID, 8_827_179_336];
+fn is_encbot_admin(id: i64) -> bool {
+    ENCBOT_ADMINS.contains(&id)
+}
 
 fn is_admin(u: &Value) -> bool {
     u["telegram_id"].as_i64().unwrap_or(0) == ADMIN_TELEGRAM_ID
@@ -12646,7 +12652,7 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
     let cb = &update["callback_query"];
     if cb.is_object() {
         let _ = encbot_api(env, "answerCallbackQuery", json!({"callback_query_id": cb["id"]})).await;
-        if cb["from"]["id"].as_i64() != Some(ADMIN_TELEGRAM_ID) {
+        if !cb["from"]["id"].as_i64().map(is_encbot_admin).unwrap_or(false) {
             return ok(json!({"ok": true}));
         }
         let chat = cb["message"]["chat"]["id"].as_i64().unwrap_or(0);
@@ -12687,7 +12693,7 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
     }
     let chat = msg["chat"]["id"].as_i64().unwrap_or(0);
     // Faqat admin va faqat shaxsiy chat — boshqalarga javob yo'q.
-    if chat == 0 || msg["from"]["id"].as_i64() != Some(ADMIN_TELEGRAM_ID) || chat != ADMIN_TELEGRAM_ID {
+    if chat == 0 || !is_encbot_admin(chat) || msg["from"]["id"].as_i64() != Some(chat) {
         return ok(json!({"ok": true}));
     }
     let has_video = msg["video"].is_object() || msg["document"].is_object();

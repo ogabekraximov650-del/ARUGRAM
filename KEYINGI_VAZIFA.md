@@ -6168,3 +6168,11 @@ Keyin (foydalanuvchi talabi): sifat-run log kanaliga holatni tahrirlamaydi — h
 
 Tuzatish: `/api/session/poll` va `/api/session/report` ilova imzosi tekshiruvidan istisno qilindi (faqat `ENCODE_TOKEN`) —
 aks holda "Yangi sessiya" run'i HTTP 403 bilan yiqilardi (`session.py: poll: HTTP 403`).
+
+## Panel botga ikkinchi admin (2026-10)
+
+`worker/src/lib.rs`: `ENCBOT_ADMINS = [ADMIN_TELEGRAM_ID, 8827179336]`, `is_encbot_admin` — kodlash (panel) botidagi xabar va tugmalar
+shu ikki akkauntdan qabul qilinadi; javob so'ragan odamning o'z chatiga ketadi. "Yangi sessiya" jarayoni xabarlari uni
+boshlagan adminga (`sess_chat`). Fon xabarlari (kodlash tugadi, Post/Holat jonli xabari) hozircha faqat asosiy adminga.
+Eslatma: ikkinchi admin botda /start bosgan bo'lishi kerak. Holat/rejim (`encbot_mode`, `sess_*`) umumiy — ikki admin bir vaqtda
+bir jarayonni olib bormasin.
