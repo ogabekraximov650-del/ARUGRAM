@@ -6162,3 +6162,6 @@ run'lar eski xabarni yuboraveradi.
    saqlaydi, `encode_commit_quality` / `fmp4::commit` bazaga yozadi, chatdagi xabarni o'chiradi; run `/api/encode/committed`
    bilan tasdiqni kutadi va keyin tugaydi. Claim javobida `bot` (username) bor; bo'sh bo'lsa eski usul (kanalga to'g'ridan-to'g'ri).
    Sessiya akkaunti asl video turgan yopiq kanalda a'zo bo'lishi kerak (yuklab olish uchun) va bot kanalda admin.
+
+Keyin (foydalanuvchi talabi): sifat-run log kanaliga holatni tahrirlamaydi — har 5 soniyada YANGI xabar yuboradi
+(`StatusPin.push`, `STATUS_INTERVAL` 5 s). Telegram FloodWait bersa oraliq o'zi uzayadi.

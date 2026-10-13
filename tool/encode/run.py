@@ -92,8 +92,8 @@ LOG_INTERVAL = max(1.0, float(os.environ.get("LOG_INTERVAL_SEC", "10") or 10))
 # Qadalgan holat xabari shu oraliqda tahrirlanadi (`StatusPin`).
 # 3 soniya — admin paneli uni ~2 soniyada o'qiydi (deyarli real vaqt);
 # Telegram bundan tez tahrirlashga ruxsat bermaydi (FloodWait).
-# Sifat-run o'z log kanaliga har 10 soniyada yozadi (foydalanuvchi talabi).
-STATUS_INTERVAL = max(2.0, float(os.environ.get("STATUS_INTERVAL_SEC", "10" if QUALITY else "3") or 3))
+# Sifat-run o'z log kanaliga har 5 soniyada YANGI xabar yuboradi (foydalanuvchi talabi).
+STATUS_INTERVAL = max(2.0, float(os.environ.get("STATUS_INTERVAL_SEC", "5" if QUALITY else "3") or 3))
 # To'liq holat worker'ga (`EncodeLive`) shu oraliqda yuboriladi.
 WORKER_PUSH_SEC = max(3.0, float(os.environ.get("WORKER_PUSH_SEC", "8") or 8))
 SESSION = str(Path(__file__).with_name("pyro_session"))
@@ -851,6 +851,12 @@ class StatusPin:
         if t == self.sent:
             return
         try:
+            if QUALITY:
+                # Sifat-run: har safar YANGI xabar (tahrir emas) — foydalanuvchi talabi, har 5 soniyada.
+                m = await app.send_message(LOG_CHANNEL, t, disable_notification=True,
+                                           parse_mode=enums.ParseMode.HTML, disable_web_page_preview=True)
+                self.msg_id, self.sent = m.id, t
+                return
             # TOPILGAN XATO: Pyrogram matnni sukut bo'yicha Markdown deb
             # o'qiydi — `---` ajratgich va log'dagi `--:--` "tagiga chizish"
             # belgisi bo'lib yo'qolardi, ilova esa log va statistikani
