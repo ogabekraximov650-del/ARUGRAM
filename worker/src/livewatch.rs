@@ -400,15 +400,27 @@ pub(crate) async fn app_all_html(env: &Env) -> String {
 
 /// Sifat-workflow holat yubordi: umumiy xabar yangilanadi — butun dunyo bo'yicha ~6 soniyada BIR marta
 /// (Durable Object darvozasi: 4 ta run bir vaqtda yuborsa ham Telegram'ni ko'p tahrirlamaymiz).
-pub(crate) async fn app_push_all(env: &Env) {
+pub(crate) async fn app_push_all(env: &Env) -> String {
     if target(env, APP).await.is_none() {
-        return;
+        return "kuzatuv yo'q".into();
     }
     if !encode_live_gate(env, 6_000).await {
-        return;
+        return "kutilmoqda (6 s)".into();
     }
     let html = app_all_html(env).await;
-    let _ = edit(env, APP, &html).await;
+    let Some((chat, msg)) = target(env, APP).await else { return "kuzatuv yo'q".into() };
+    let text: String = html.chars().take(4000).collect();
+    match encbot_api(env, "editMessageText", json!({
+        "chat_id": chat, "message_id": msg, "parse_mode": "HTML",
+        "text": text, "disable_web_page_preview": true,
+    })).await {
+        Ok(_) => "tahrirlandi".into(),
+        Err(e) => {
+            let e = e.to_string();
+            // "o'zgarmadi" — xato emas; qolgani javobda ko'rinadi (tashxis).
+            if e.contains("not modified") { "o'zgarmadi".into() } else { format!("xato: {}", e.chars().take(200).collect::<String>()) }
+        }
+    }
 }
 
 /// Ish boshlandi: hech narsa kuzatilmayotgan (yoki kuzatuv eski, boshqa bo'limniki) bo'lsa — umumiy holat xabari

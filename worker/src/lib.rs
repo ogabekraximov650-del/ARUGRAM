@@ -11682,16 +11682,17 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
         // miltillaydi va Telegram cheklaydi).
         let wq = req.headers().get("X-Encode-Quality").ok().flatten().unwrap_or_default();
         let wq = QUALITIES.iter().copied().find(|x| *x == wq.trim());
+        let mut bot = String::new();
         match wq {
             // Har sifat-workflow'ning o'z xabari (bosh menyudagi "Holat"): faqat shu sifatniki yangilanadi.
             Some(q) => {
                 encode_live_put(env, q, &text).await;
-                livewatch::app_push_all(env).await;
+                bot = livewatch::app_push_all(env).await;
             }
             // Botda "Ilova uchun" holati kuzatilayotgan bo'lsa (eski usul) — o'sha xabar yangilanadi.
             None => livewatch::app_push(env, &text).await,
         }
-        return ok_nostore(json!({"ok": ok_put}));
+        return ok_nostore(json!({"ok": ok_put, "bot": bot}));
     }
 
     if path == "/api/encode/peek" && method == Method::Get {
