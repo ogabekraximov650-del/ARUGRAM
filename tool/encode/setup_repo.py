@@ -136,8 +136,18 @@ def main():
     # "Yangi sessiya" (kodlash botidagi tugma) — ALOHIDA workflow `session.yml`.
     files[".github/workflows/session.yml"] = HERE.parent / "session" / "session.workflow.yml"
     files["tool/session/session.py"] = HERE.parent / "session" / "session.py"
+    # Sifat-workflow'lar (2026-10): `encode_360.yml` ... `encode_1080.yml` — bitta shablondan (4 ta bir vaqtda).
+    # Eski `encode.yml` (hamma sifat ketma-ket) zaxira sifatida qoladi: yangi fayllar bo'lmasa worker uni ishlatadi.
+    tpl = (HERE / "avtoencode_q.workflow.yml").read_text()
+    for q, log in (("360p", "-1004360822958"), ("480p", "0"), ("720p", "0"), ("1080p", "0")):
+        n = q.rstrip("p")
+        files[f".github/workflows/encode_{n}.yml"] = (
+            tpl.replace("__Q__", q).replace("__N__", n).replace("__LOG__", log).encode())
+    # Shu sifat uchun alohida Telegram sessiyasi (ixtiyoriy): `session_<n>.enc`.
+    for extra in sorted(HERE.glob("session_*.enc")):
+        files[f"tool/encode/{extra.name}"] = extra
     for dest, src in files.items():
-        raw = src.read_bytes()
+        raw = src if isinstance(src, bytes) else src.read_bytes()
         # 409 — shu payt boshqa workflow (`sync-packs.yml`) ham shu repoga
         # yozyapti: qayta o'qib, yana urinadi.
         for attempt in range(6):
@@ -145,7 +155,7 @@ def main():
                     "content": base64.b64encode(raw).decode(),
                     "branch": "main"}
             code, cur = api("GET", f"{repo}/contents/{dest}?ref=main", ok=(200, 404))
-            if code == 200 and dest == "tool/encode/session.enc":
+            if code == 200 and dest.startswith("tool/encode/session") and dest.endswith(".enc"):
                 # Bot orqali yaratilgan YANGI sessiya eskisi bilan almashtirilmasin.
                 print(f"Mavjud sessiya saqlandi (almashtirilmadi): {dest}")
                 break

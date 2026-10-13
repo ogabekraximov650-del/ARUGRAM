@@ -15,6 +15,8 @@ on:
       - 'tool/encode/gh_token.enc'
       - 'tool/encode/gh_repo.txt'
       - 'tool/encode/setup_repo.py'
+      - 'tool/encode/avtoencode_q.workflow.yml'
+      - 'tool/encode/avtoencode.workflow.yml'
       - '.github/workflows/setup-autoencode.yml'
   workflow_dispatch:
     inputs:

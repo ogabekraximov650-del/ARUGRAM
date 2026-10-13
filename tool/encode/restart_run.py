@@ -66,11 +66,18 @@ def gh(method, path, body=None, ok=(200, 201, 202, 204)):
         sys.exit(f"::error::{method} {path} -> {e.code}: {data.get('message')}")
 
 
+# Sifat-workflow'lar (360p/480p/720p/1080p, bir vaqtda) va eski `encode.yml` (zaxira).
+WORKFLOWS = ["encode_360.yml", "encode_480.yml", "encode_720.yml", "encode_1080.yml", "encode.yml"]
+
+
 def active_runs():
     out = []
-    for st in ("in_progress", "queued", "waiting", "pending", "requested"):
-        _, v = gh("GET", f"/repos/{REPO}/actions/workflows/encode.yml/runs?status={st}&per_page=30")
-        out += [r["id"] for r in v.get("workflow_runs", [])]
+    for wf in WORKFLOWS:
+        for st in ("in_progress", "queued", "waiting", "pending", "requested"):
+            # Workflow fayli hali yo'q bo'lsa (404) — o'tkazib yuboriladi.
+            code, v = gh("GET", f"/repos/{REPO}/actions/workflows/{wf}/runs?status={st}&per_page=30", ok=(200, 404))
+            if code == 200:
+                out += [r["id"] for r in v.get("workflow_runs", [])]
     return sorted(set(out))
 
 
@@ -111,9 +118,15 @@ def main():
     if os.environ.get("NO_DISPATCH") == "1":
         print("Yangi run ISHGA TUSHIRILMADI (dispatch=false) — faqat to'xtatildi va bo'shatildi.")
         return
-    code, _ = gh("POST", f"/repos/{REPO}/actions/workflows/encode.yml/dispatches",
-                 {"ref": "main"}, ok=(204,))
-    print("Yangi run ishga tushirildi" if code == 204 else f"dispatch -> {code}")
+    started = 0
+    for wf in WORKFLOWS[:4]:
+        code, _ = gh("POST", f"/repos/{REPO}/actions/workflows/{wf}/dispatches", {"ref": "main"}, ok=(204, 404))
+        print(f"  {wf}: " + ("ishga tushirildi" if code == 204 else f"dispatch -> {code}"))
+        started += code == 204
+    if not started:
+        # Yangi workflow fayllari hali yo'q — eski usul.
+        code, _ = gh("POST", f"/repos/{REPO}/actions/workflows/encode.yml/dispatches", {"ref": "main"}, ok=(204,))
+        print("Yangi run ishga tushirildi" if code == 204 else f"dispatch -> {code}")
 
 
 main()

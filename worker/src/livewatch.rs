@@ -271,7 +271,7 @@ pub(crate) async fn app_push(env: &Env, text: &str) {
 
 /// "📋 Holat" — "Ilova uchun" bo'limida.
 pub(crate) async fn app_status(env: &Env, chat: i64) {
-    let st = encode_live_store(env, None).await.and_then(|t| parse_status_pin(&t));
+    let st = encode_live_current(env).await.and_then(|t| parse_status_pin(&t));
     let html = app_html(env, st.as_ref()).await;
     start(env, APP, chat, &html).await;
 }

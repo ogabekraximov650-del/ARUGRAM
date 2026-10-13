@@ -15,6 +15,13 @@ Navbat worker'da (`worker/src/lib.rs` -> `encode_route`). Bu skript:
      va `quality` bilan jurnalga (`epizod_db`) yozadi;
   5. `finish`.
 
+SIFAT-WORKFLOW REJIMI (`ENCODE_QUALITY=360p|480p|720p|1080p`, 2026-10): 4 ta alohida workflow
+(`encode_360.yml` ...) BIR VAQTDA ishlaydi, har biri FAQAT o'z sifatini tayyorlaydi va navbatdagi
+barcha qismlarni to'xtamasdan yuradi. Har run asl videoni O'ZI yuklab, haqiqiy balandligini
+o'lchaydi; sifat qismga to'g'ri kelmasa (upscale yo'q) worker'ga `skip` deb xabar beradi — worker
+buni bazaga yozib, keyingi qismni beradi. 4 sifatning hammasi hal bo'lgach (tayyor yoki `skip`)
+worker asl videoni o'chiradi. `ENCODE_QUALITY` berilmasa — eski usul (hamma sifat ketma-ket).
+
 XAVFSIZLIK:
   * tayyor sifat (`done`) QAYTA kodlanmaydi; yuklangan-u jurnalga yozilmay
     qolgani (`uploaded`) faqat jurnalga yoziladi;
@@ -66,6 +73,10 @@ START_BUDGET = int(os.environ.get("START_BUDGET_MIN", "240")) * 60
 # qaytariladi va workflow keyingi sifat uchun YANGI run ochadi (foydalanuvchi talabi).
 # "0" — eski tartib (bitta run hamma sifatni ketma-ket kodlaydi).
 ONE_QUALITY_PER_RUN = os.environ.get("ONE_QUALITY_PER_RUN", "1") != "0"
+# Sifat-workflow rejimi: shu run faqat shu sifatni tayyorlaydi (bo'sh — eski usul).
+QUALITY = os.environ.get("ENCODE_QUALITY", "").strip()
+if QUALITY not in ("", "360p", "480p", "720p", "1080p"):
+    raise SystemExit(f"ENCODE_QUALITY noto'g'ri: {QUALITY!r}")
 STOP_RUN = False  # process() keyingi sifatni yangi run'ga qoldirdi — main sikli to'xtaydi
 # Actions log'i shu YOPIQ kanalga yoziladi (yangi xabarlar, har 10 soniyada).
 # 0 yoki bo'sh — o'chiq.
@@ -662,7 +673,7 @@ class StatusPin:
             req = urllib.request.Request(
                 f"{API}/api/encode/push", data=self.text().encode(), method="POST",
                 headers={"X-Encode-Token": TOKEN, "Content-Type": "text/plain; charset=utf-8",
-                         "User-Agent": "arugram-encoder"})
+                         "User-Agent": "arugram-encoder", **({"X-Encode-Quality": QUALITY} if QUALITY else {})})
             urllib.request.urlopen(req, timeout=20).read()
         except Exception as e:
             print(f"Holat worker'ga yuborilmadi: {e}", flush=True)
@@ -737,9 +748,12 @@ class Heartbeat:
 async def process(app: Client, channel: int, job: dict):
     a, s, e, qa = job["anime_id"], job["season_id"], job["epizod_id"], job["queued_at"]
     ident = {"runner": RUNNER, "anime_id": a, "season_id": s, "epizod_id": e, "queued_at": qa}
+    if QUALITY:
+        ident["wq"] = QUALITY
     global CURRENT
     CURRENT = ident
-    CHLOG.heading(f"\U0001F3AC Qism {a}/{s}/{e} (#{job.get('epizod_number')}) — run {RUNNER}")
+    CHLOG.heading(f"\U0001F3AC Qism {a}/{s}/{e} (#{job.get('epizod_number')}) — run {RUNNER}"
+                  + (f" [{QUALITY}]" if QUALITY else ""))
     hb = Heartbeat(ident)
     STATUS.set_job(f"{a}/{s}/{e}", str(job.get("epizod_number") or ""))
     STATUS.set_progress("start")
@@ -795,6 +809,21 @@ async def process(app: Client, channel: int, job: dict):
         hb.check()
         src_h, src_d = await asyncio.to_thread(probe, src)
         steps = plan(src_h)
+        if QUALITY:
+            # Haqiqiy balandlik worker'ga yoziladi: boshqa sifatlar uchun to'g'ri kelmaydiganlari
+            # (upscale yo'q) "skip" bo'ladi, asl video bekorga yuklanmaydi.
+            if src_h > 0 and src_h != int(job.get("src_h") or 0):
+                try:
+                    api("meta", {**ident, "h": src_h})
+                except JobLost:
+                    raise
+                except Exception as ex:  # noqa: BLE001
+                    log(f"  meta yozilmadi ({ex}) — davom etiladi")
+            steps = [x for x in steps if x[0] == QUALITY]
+            if not steps:
+                log(f"  manba {src_h}p — {QUALITY} to'g'ri kelmaydi (upscale yo'q) — o'tkazib yuborildi")
+                api("finish", {**ident, "ok": False, "skip": True})
+                return
         src_mb = src.stat().st_size / 1048576
         extra = await asyncio.to_thread(src_info, src)
         STATUS.update(xfer=None, src={
@@ -948,7 +977,7 @@ async def main():
                 log("Vaqt limiti yaqin — qolgan ishlar keyingi run'da.")
                 break
             r = api("claim", {"runner": RUNNER, "no_heartbeat": True,
-                              "log_chat": LOG_CHANNEL})
+                              "log_chat": LOG_CHANNEL, **({"wq": QUALITY} if QUALITY else {})})
             if not status_started:
                 status_started = True
                 STATUS.bots = [b for b in (r.get("status_bots") or []) if isinstance(b, str) and b]

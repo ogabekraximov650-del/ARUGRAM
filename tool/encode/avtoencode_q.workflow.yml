@@ -1,0 +1,105 @@
+name: Avto-kodlash __Q__ (H.265)
+
+# SIFAT-WORKFLOW (2026-10): 4 ta alohida workflow (`encode_360.yml`, `encode_480.yml`, `encode_720.yml`,
+# `encode_1080.yml`) BIR VAQTDA ishlaydi; har biri FAQAT o'z sifatini (__Q__) tayyorlaydi va navbatdagi
+# barcha qismlarni to'xtamasdan yuradi. Asl videoni har biri o'zi yuklab o'lchaydi: sifat qismga to'g'ri
+# kelmasa worker'ga "skip" deb xabar beradi va keyingisiga o'tadi.
+# Bu fayl `avtoencode_q.workflow.yml` shablonidan `setup_repo.py` bilan yaratiladi (`__Q__`, `__N__`,
+# `__LOG__` almashtiriladi) — qo'lda tahrirlamang.
+on:
+  # Faqat worker (Cloudflare): navbatga qism qo'yilganda va cron (har 10 daqiqa) — kutayotgan qism bo'lsa
+  # va run ishlamayotgan bo'lsa ishga tushiradi. Run 4 soatdan keyin yangi ish olmaydi, 5 soatda to'xtaydi.
+  workflow_dispatch: {}
+
+concurrency:
+  group: arugram-encode-__N__
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  encode:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      API_BASE: ${{ secrets.API_BASE || 'https://arugram.uzcom.workers.dev' }}
+    steps:
+      - name: Navbat
+        id: peek
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+        run: |
+          if [ -z "$ENCODE_TOKEN" ]; then
+            echo "::error::ENCODE_TOKEN secret'i yo'q"
+            exit 1
+          fi
+          N=$(curl -fsS -H "X-Encode-Token: $ENCODE_TOKEN" -H "User-Agent: arugram-encoder" \
+            "$API_BASE/api/encode/peek?quality=__Q__" | jq -r '.pending // 0')
+          echo "Navbatda (__Q__): $N"
+          echo "pending=$N" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        if: steps.peek.outputs.pending != '0'
+
+      - name: ffmpeg
+        if: steps.peek.outputs.pending != '0'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+
+      - uses: actions/setup-python@v5
+        if: steps.peek.outputs.pending != '0'
+        with:
+          python-version: '3.11'
+
+      - name: Python paketlari
+        if: steps.peek.outputs.pending != '0'
+        run: pip install --no-cache-dir -r tool/encode/requirements.txt
+
+      - name: Telegram sessiyasi
+        if: steps.peek.outputs.pending != '0'
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+        run: |
+          OUT=tool/encode/pyro_session.session
+          K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          # Shu sifat uchun alohida sessiya bo'lsa (`session___N__.enc`) — o'sha, bo'lmasa umumiy.
+          SRC=tool/encode/session.enc
+          [ -f tool/encode/session___N__.enc ] && SRC=tool/encode/session___N__.enc
+          K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K \
+            -in "$SRC" -out "$OUT"
+          head -c 16 "$OUT" | grep -q "SQLite format 3" || { echo "::error::Sessiya ochilmadi (ENCODE_TOKEN noto'g'ri?)"; exit 1; }
+          echo "Sessiya tiklandi ($SRC)"
+
+      - name: Kodlash (__Q__)
+        id: enc
+        if: steps.peek.outputs.pending != '0'
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+          ENCODE_QUALITY: '__Q__'
+          H265_CRF: '30'
+          H265_PRESET: medium
+          # Log kanali va qadalgan holat xabari FAQAT 360p workflow'da (4 ta run bir xabarni tahrirlamasin);
+          # qolganlarning holati worker'ga yuboriladi (admin paneli va bot hammasini ko'radi).
+          LOG_CHANNEL_ID: '__LOG__'
+          START_BUDGET_MIN: '240'
+          PYTHONUNBUFFERED: '1'
+        run: python3 tool/encode/run.py
+
+      - name: Sessiyani o'chirish
+        if: always()
+        run: rm -f tool/encode/pyro_session.session
+
+      # Shu sifat bo'yicha navbat qolgan bo'lsa — keyingi cron'ni kutmasdan qayta ishga tushadi.
+      - name: Davom ettirish
+        if: success() && steps.enc.outputs.worked == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+        run: |
+          N=$(curl -fsS -H "X-Encode-Token: $ENCODE_TOKEN" -H "User-Agent: arugram-encoder" \
+            "$API_BASE/api/encode/peek?quality=__Q__" | jq -r '.pending // 0')
+          echo "Qolgan (__Q__): $N"
+          if [ "$N" != "0" ]; then gh workflow run encode___N__.yml --repo "$GITHUB_REPOSITORY"; fi

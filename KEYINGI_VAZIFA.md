@@ -6052,3 +6052,33 @@ tartibida, pill tugma, kulrang izoh. Webda "Emoji, GIF va stikerlar" ichki bo'li
   vaqt chizig'i, tutqichlar/oyna sudralishi, Boshi/Oxiri ±100 ms, uzunlik tugmasi, ovoz — faqat GIF, yashil/aksent ✓).
   `openPackAdd` — `pack_add_screen.dart` kabi: video tanlansa kesish oynasi darhol ochiladi, kartada "Emoji" va "Kesish"
   chiplari, olib tashlash (×), "Yuborish (n)". Inline slayderlar va har tur uchun ovoz chipi olib tashlandi.
+
+## Avto-kodlash: 4 ta sifat-workflow bir vaqtda (2026-10)
+
+Maqsad: kodlashni tezlashtirish. Oldin bitta run qismning har sifatini ketma-ket qilardi (`ONE_QUALITY_PER_RUN=1` bilan
+har sifat uchun yangi run + asl videoni qayta yuklash). Endi 4 ta ALOHIDA workflow (avtoencode repoda `encode_360.yml`,
+`encode_480.yml`, `encode_720.yml`, `encode_1080.yml`; shablon `tool/encode/avtoencode_q.workflow.yml`, `setup_repo.py`
+yaratadi) bir vaqtda ishlaydi, har biri FAQAT o'z sifatini tayyorlaydi va navbatdagi hamma qismni to'xtamasdan yuradi.
+
+OQIM (foydalanuvchi talabi): har workflow asl videoni O'ZI yuklab, haqiqiy balandligini o'lchaydi (`run.py`, `ENCODE_QUALITY`).
+Sifat qismga to'g'ri kelmasa (upscale YO'Q: `plan()`) — worker'ga `finish {skip}` deb xabar beradi, worker buni bazaga
+yozadi va keyingi qismni beradi. Asl video balandligi navbatga qo'yilganda ma'lum bo'lsa (bot/Anibla `height`), to'g'ri
+kelmaydigan sifatlar worker'ning o'zida darhol `skip` bo'ladi (video bekorga yuklanmaydi); run o'lchagan balandlik
+(`/api/encode/meta`) oldingisidan farq qilsa — qayta hisoblanadi (`encode_apply_plan`).
+
+WORKER (`worker/src/lib.rs`): yangi jadval `encode_q(anime,season,epizod,quality)` — har qism-sifat uchun holat
+(`queued|running|done|skip|error`), ijara, urinishlar; `encode_jobs.src_h` — asl video balandligi; `done` ro'yxati ATOMIK
+qo'shiladi. `claim {wq}` (`encode_claim_q`): shu sifat bo'yicha eng eski qismni ATOMIK `INSERT..ON CONFLICT` bilan oladi,
+asl video hali kanalga ko'chmagan qismni o'tkazib boshqasini beradi. `quality`/`heartbeat`/`finish` `wq` bilan sifat
+bo'yicha ishlaydi. Qism "hal bo'ldi" = 4 sifatning hammasi `done|skip|error` (`encode_settle`): xato yo'q — asl video
+va hamma bog'liq narsa o'chadi (bir marta, `DELETE..RETURNING`); xato bor — qism `error`. `encode_kick` har sifat uchun
+kutayotgan ishni sanab, FAQAT kerakli workflow'ni ishga tushiradi (qism qo'yilganda, o'lchovda va cron'da; 90 s ichida
+ikki marta emas), eskirgan "running"ni GitHub'dan tekshirib bo'shatadi. Repoda yangi workflow fayllari yo'q (404) bo'lsa
+eski `encode.yml`ga qaytadi (`encode_kick_legacy`); eski va yangi run'lar bir vaqtda ishlamaydi (`busy`).
+Jonli holat: har run `X-Encode-Quality` bilan yuboradi, DO sifat bo'yicha saqlaydi; asosiy holat = ishlayotgan eng past
+sifat (`encode_live_primary`), hammasi `runs` maydonida; botdagi "Ilova uchun" xabari faqat asosiy run bilan yangilanadi.
+Log kanali va qadalgan holat xabari faqat 360p workflow'da (`LOG_CHANNEL_ID`), qolganlarida o'chiq.
+
+XAVF: 4 run bir Telegram sessiyasidan (`session.enc`) bir vaqtda kiradi (oldin ham fmp4/anibla/post bilan shunday edi).
+Telegram `AUTH_KEY_DUPLICATED` bersa — har sifat uchun alohida sessiya: `tool/encode/session_360.enc` ... (workflow
+mavjud bo'lsa shuni ishlatadi, `setup_repo.py` ko'chiradi).
