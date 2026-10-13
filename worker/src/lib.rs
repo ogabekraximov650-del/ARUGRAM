@@ -11093,30 +11093,57 @@ async fn encode_q_own(env: &Env, b: &Value, wq: &str) -> Option<Value> {
     first_row(&res)
 }
 
+const ENCODE_SKIP_SQL: &str = "INSERT INTO encode_q (anime_id,season_id,epizod_id,quality,queued_at,state)
+     VALUES (?,?,?,?,?,'skip')
+     ON CONFLICT(anime_id,season_id,epizod_id,quality) DO UPDATE SET
+        queued_at=excluded.queued_at, state='skip', runner='', lease_until=0, progress=''
+      WHERE encode_q.queued_at<>excluded.queued_at
+         OR encode_q.state IN ('queued','error')
+         OR (encode_q.state='running' AND encode_q.lease_until<=?)";
+const ENCODE_UNSKIP_SQL: &str = "DELETE FROM encode_q WHERE anime_id=? AND season_id=? AND epizod_id=? AND quality=?
+       AND queued_at=? AND state='skip'";
+
+/// Asl video balandligi `h` ma'lum bo'lsa kerakli yozuvlar (`encode_q`): to'g'ri kelmaydigan sifatlar "skip",
+/// kerak bo'lganlarning eski "skip"i olinadi. BITTA so'rovda (Cloudflare subrequest chegarasi).
+fn encode_plan_stmts(a: i64, s: i64, e: i64, queued_at: i64, h: i64, now: i64) -> Vec<(&'static str, Vec<TursoArg>)> {
+    let mut out: Vec<(&'static str, Vec<TursoArg>)> = Vec::new();
+    if h <= 0 {
+        return out;
+    }
+    for q in QUALITIES {
+        let mut pk = vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e), TursoArg::text(q), TursoArg::int(queued_at)];
+        if encode_planned(q, h) {
+            out.push((ENCODE_UNSKIP_SQL, pk));
+        } else {
+            pk.push(TursoArg::int(now));
+            out.push((ENCODE_SKIP_SQL, pk));
+        }
+    }
+    out
+}
+
 /// Asl video balandligi ma'lum bo'lsa — to'g'ri kelmaydigan sifatlar darhol "skip" bo'ladi
 /// (asl video bekorga yuklanmaydi). Ilgari "skip" qilingan, endi kerak bo'lsa — qayta ochiladi.
 async fn encode_apply_plan(env: &Env, a: i64, s: i64, e: i64, queued_at: i64, h: i64) {
-    if h <= 0 {
-        return;
+    let stmts = encode_plan_stmts(a, s, e, queued_at, h, now_ms());
+    if !stmts.is_empty() {
+        let _ = turso_batch(env, &stmts).await;
     }
-    for q in QUALITIES {
-        let pk = vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e), TursoArg::text(q), TursoArg::int(queued_at)];
-        if encode_planned(q, h) {
-            let _ = turso_exec(env,
-                "DELETE FROM encode_q WHERE anime_id=? AND season_id=? AND epizod_id=? AND quality=?
-                   AND queued_at=? AND state='skip'", pk).await;
-        } else {
-            let _ = turso_exec(env,
-                "INSERT INTO encode_q (anime_id,season_id,epizod_id,quality,queued_at,state)
-                 VALUES (?,?,?,?,?,'skip')
-                 ON CONFLICT(anime_id,season_id,epizod_id,quality) DO UPDATE SET
-                    queued_at=excluded.queued_at, state='skip', runner='', lease_until=0, progress=''
-                  WHERE encode_q.queued_at<>excluded.queued_at
-                     OR encode_q.state IN ('queued','error')
-                     OR (encode_q.state='running' AND encode_q.lease_until<=?)",
-                { let mut v = pk; v.push(TursoArg::int(now_ms())); v }).await;
-        }
+}
+
+/// Yangi ish navbatga qo'yildi: eski sifat yozuvlari tozalanadi, balandlik (`h` > 0) yoziladi va to'g'ri kelmaydigan
+/// sifatlar "skip" bo'ladi — hammasi BITTA so'rovda.
+async fn encode_reset_plan(env: &Env, a: i64, s: i64, e: i64, queued_at: i64, h: i64) {
+    let mut stmts: Vec<(&'static str, Vec<TursoArg>)> = vec![
+        ("DELETE FROM encode_q WHERE anime_id=? AND season_id=? AND epizod_id=?",
+         vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]),
+    ];
+    if h > 0 {
+        stmts.push(("UPDATE encode_jobs SET src_h=? WHERE anime_id=? AND season_id=? AND epizod_id=? AND queued_at=?",
+            vec![TursoArg::int(h), TursoArg::int(a), TursoArg::int(s), TursoArg::int(e), TursoArg::int(queued_at)]));
+        stmts.extend(encode_plan_stmts(a, s, e, queued_at, h, now_ms()));
     }
+    let _ = turso_batch(env, &stmts).await;
 }
 
 /// Qism "hal bo'ldi" deb hisoblanadi: 4 ta sifatning hammasi tayyor yoki to'g'ri kelmagan (yoki xato).
@@ -11513,15 +11540,7 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
                   WHERE anime_id=? AND season_id=? AND epizod_id=? AND state='error'",
                 vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]).await;
         } else {
-            let _ = turso_exec(env, "DELETE FROM encode_q WHERE anime_id=? AND season_id=? AND epizod_id=?",
-                vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]).await;
-            let h = jint(&b, "height").max(0);
-            if h > 0 {
-                let _ = turso_exec(env,
-                    "UPDATE encode_jobs SET src_h=? WHERE anime_id=? AND season_id=? AND epizod_id=? AND queued_at=?",
-                    vec![TursoArg::int(h), TursoArg::int(a), TursoArg::int(s), TursoArg::int(e), TursoArg::int(now)]).await;
-                encode_apply_plan(env, a, s, e, now, h).await;
-            }
+            encode_reset_plan(env, a, s, e, now, jint(&b, "height").max(0)).await;
         }
         // Kalitli asl video — qism ilovada darhol ko'rinadi.
         if !okey.is_empty() {
@@ -12508,14 +12527,7 @@ pub(crate) async fn encbot_register(env: &Env, a: i64, s: i64, n: i64, origin: &
     }
     // Sifat-workflow'lar uchun: eski sifat yozuvlari tozalanadi, balandlik ma'lum bo'lsa
     // to'g'ri kelmaydigan sifatlar darhol "skip" bo'ladi.
-    let _ = turso_exec(env, "DELETE FROM encode_q WHERE anime_id=? AND season_id=? AND epizod_id=?",
-        vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]).await;
-    if height > 0 {
-        let _ = turso_exec(env,
-            "UPDATE encode_jobs SET src_h=? WHERE anime_id=? AND season_id=? AND epizod_id=? AND queued_at=?",
-            vec![TursoArg::int(height), TursoArg::int(a), TursoArg::int(s), TursoArg::int(e), TursoArg::int(now)]).await;
-        encode_apply_plan(env, a, s, e, now, height).await;
-    }
+    encode_reset_plan(env, a, s, e, now, height.max(0)).await;
     let inq = turso_exec(env,
         "SELECT COUNT(*) AS n FROM encode_jobs WHERE state IN ('queued','running')", vec![]).await
         .ok().and_then(|r| first_row(&r)).map(|r| jint(&r, "n")).unwrap_or(1);
@@ -13435,14 +13447,20 @@ async fn encode_kick_legacy(env: &Env) -> String {
 /// sifati uchun alohida va bir vaqtda. Navbatga qism qo'yilganda, o'lchov yozilganda va cron'da (har 10 daqiqa)
 /// chaqiriladi. Natija matni (bot xabari uchun). Repoda yangi workflow fayllari hali yo'q bo'lsa —
 /// eski `encode.yml` (hamma sifat ketma-ket) ishga tushadi.
+/// Yengil variant (bot/ilova so'rovi ichida: Cloudflare subrequest chegarasi) — faqat sanash va ishga tushirish.
 async fn encode_kick(env: &Env) -> String {
+    encode_kick_full(env, false).await
+}
+
+/// `full` — cron: hal bo'lib qolgan qismlarni yakunlash va eskirgan "ishlayapti"ni GitHub'dan tekshirib bo'shatish ham.
+async fn encode_kick_full(env: &Env, full: bool) -> String {
     let now = now_ms();
     let repo = tg_secret(env, "GH_REPO");
     if !repo.contains('/') {
         return "\u{26A0}\u{FE0F} GH_REPO o'rnatilmagan — Actions ishga tushirilmadi.".into();
     }
     // 1. Hal bo'lib qolgan, lekin yakunlanmagan qismlar (zaxira: yakunlash yozuvi yo'qolgan bo'lsa).
-    {
+    if full {
         let per_q: Vec<String> = QUALITIES.iter().map(|q| format!(
             "(CASE WHEN instr(j.done, ',{q},')>0 OR EXISTS (SELECT 1 FROM encode_q w WHERE w.anime_id=j.anime_id
                   AND w.season_id=j.season_id AND w.epizod_id=j.epizod_id AND w.queued_at=j.queued_at
@@ -13460,6 +13478,7 @@ async fn encode_kick(env: &Env) -> String {
     // Run (`runner` = `<run_id>-<attempt>`) GitHub'dan TO'G'RIDAN-TO'G'RI tekshiriladi; faqat TUGAGAN
     // bo'lsagina bo'shatiladi (aniqlab bo'lmasa tegilmaydi).
     for (table, extra) in [("encode_q", "progress=''"), ("encode_jobs", "progress=''")] {
+        if !full { break; }
         if let Ok(runners) = turso_exec(env,
             &format!("SELECT DISTINCT runner FROM {table} WHERE state='running' AND lease_until>?"),
             vec![TursoArg::int(now)]).await {
@@ -13490,7 +13509,13 @@ async fn encode_kick(env: &Env) -> String {
                   AND w{i}.epizod_id=j.epizod_id AND w{i}.quality='{q}' AND w{i}.queued_at=j.queued_at"));
         args.push(TursoArg::int(now));
     }
-    let sql = format!("{sel}, (SELECT COUNT(*) FROM encode_jobs WHERE state='running' AND lease_until>?) AS legacy
+    // Shu sifat-workflow hozir ish bajarayotgan bo'lsa (faol ijara) — GitHub'dan so'ralmaydi (subrequest tejaladi).
+    let mut act = String::new();
+    for (i, q) in QUALITIES.iter().enumerate() {
+        act.push_str(&format!(", (SELECT COUNT(*) FROM encode_q r WHERE r.quality='{q}' AND r.state='running' AND r.lease_until>?) AS r{i}"));
+        args.push(TursoArg::int(now));
+    }
+    let sql = format!("{sel}{act}, (SELECT COUNT(*) FROM encode_jobs WHERE state='running' AND lease_until>?) AS legacy
                        FROM encode_jobs j{joins} WHERE j.state='queued'");
     args.push(TursoArg::int(now));
     let Some(r) = turso_exec(env, &sql, args).await.ok().and_then(|r| first_row(&r)) else {
@@ -13511,6 +13536,10 @@ async fn encode_kick(env: &Env) -> String {
             continue;
         }
         asked += 1;
+        if jint(&r, &format!("r{i}")) > 0 {
+            running.push(*q);
+            continue;
+        }
         match gh_workflow_busy(env, &repo, wf).await {
             Ok(true) => { running.push(*q); continue; }
             Ok(false) => {}
@@ -13599,7 +13628,7 @@ async fn scheduled(_ev: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
     let _ = anibla::kick(&env).await;
     // Mini App so'ragan eski qismlarning fMP4 nusxasi (`fmp4::kick`).
     let _ = fmp4::kick(&env).await;
-    let msg = encode_kick(&env).await;
+    let msg = encode_kick_full(&env, true).await;
     // Faqat ishga tushirilganda yoki xato bo'lsa adminga xabar. Xato
     // (masalan token yo'q) har 10 daqiqada takrorlanmasin — soatiga bir.
     let hourly = (now_ms() / 600_000) % 6 == 0;
