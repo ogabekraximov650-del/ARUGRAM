@@ -6165,3 +6165,6 @@ run'lar eski xabarni yuboraveradi.
 
 Keyin (foydalanuvchi talabi): sifat-run log kanaliga holatni tahrirlamaydi — har 5 soniyada YANGI xabar yuboradi
 (`StatusPin.push`, `STATUS_INTERVAL` 5 s). Telegram FloodWait bersa oraliq o'zi uzayadi.
+
+Tuzatish: `/api/session/poll` va `/api/session/report` ilova imzosi tekshiruvidan istisno qilindi (faqat `ENCODE_TOKEN`) —
+aks holda "Yangi sessiya" run'i HTTP 403 bilan yiqilardi (`session.py: poll: HTTP 403`).
