@@ -272,8 +272,9 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
                 encbot_send(env, admin, &format!(
                     "\u{1F4E9} <b>Kod yuborildi</b> {text}\n\n\
                      Telegram'da kelgan <b>kodni</b> shu yerga yuboring.\n\
-                     \u{26A0}\u{FE0F} Raqamlar orasiga <b>probel</b> qo'ying: <code>1 2 3 4 5</code> \u{2014} aks holda Telegram kodni \
-                     ochiq yozilgani uchun bekor qiladi."), Some(keyboard())).await;
+                     \u{26A0}\u{FE0F} Kodni ulanayotgan akkauntning <b>o'zidan</b> yuborsangiz Telegram uni bloklaydi. Ikkita yo'l: \
+                     (1) kodni <b>boshqa admin akkauntdan</b> yuboring; yoki (2) raqamlar orasiga <b>harf</b> qo'ying: <code>1a2b3c4d5e</code> \
+                     (harflar olib tashlanadi)."), Some(keyboard())).await;
             }
             // Run bosqichlari haqida xabar (foydalanuvchi jarayonni ko'rib tursin).
             "info" if !state.is_empty() => {
