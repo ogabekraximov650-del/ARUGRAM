@@ -6108,3 +6108,9 @@ qisqa matn chiqardi (log yo'q). Endi bazada ijarasi tugamagan `encode_q` qatori 
 holati kelmagan sifat "ishlayapti, jonli holat hali kelmadi" deb ko'rsatiladi (`livewatch::running_flags`).
 Sabab: run'lar `/api/encode/push` ga holat yubormayotgan bo'lishi mumkin — shu qatorni ko'rsangiz, run logida
 "Holat worker'ga yuborilmadi" ni qidiring.
+
+## Panel bot yangisiga almashtirildi (2026-10)
+
+`tool/bot/encode_bot.enc` yangi bot tokeni bilan qayta shifrlandi (oldingi bilan bir xil usul). Deploy uni
+`ENCODE_BOT_TOKEN` ga qo'yadi, webhook'ni worker o'zi o'rnatadi. Yangi bot yopiq kanalda ADMIN bo'lishi va
+adminga /start bosilgan bo'lishi kerak.
