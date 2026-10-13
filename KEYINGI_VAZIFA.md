@@ -6078,9 +6078,12 @@ eski `encode.yml`ga qaytadi (`encode_kick_legacy`); eski va yangi run'lar bir va
 Jonli holat: har run `X-Encode-Quality` bilan yuboradi, DO sifat bo'yicha saqlaydi; asosiy holat = ishlayotgan eng past
 sifat (`encode_live_primary`), hammasi `runs` maydonida; botdagi "Ilova uchun" xabari faqat asosiy run bilan yangilanadi.
 Log kanali va qadalgan holat xabari faqat 360p workflow'da (`LOG_CHANNEL_ID`), qolganlarida o'chiq.
-Panel bot bosh menyusidagi "📋 Holat": sifat-workflow'lar ishlatilsa (`livewatch::q_status`) har biri uchun ALOHIDA to'liq
-xabar (statistika + oxirgi 10 log qatori + kutayotgan qismlar soni) chiqadi va shu workflow holat yuborgan sari o'zi
-yangilanadi (`q_push`, ~10 s da bir — Telegram cheklamasin; kalit `live_app_<sifat>`). Eski usulda — avvalgidek bitta xabar.
+Panel bot bosh menyusidagi "📋 Holat": sifat-workflow'lar ishlatilsa hamma sifat BITTA xabarda (`livewatch::app_all_html`):
+har sifat uchun qism, bosqich (yuklab olish / kodlash / Telegram'ga yuklash) foiz-chiziq, tezlik, hajm, o'tdi/qoldi
+va oxirgi log qatorlari, kutayotgan qismlar soni. Xabar `APP` kuzatuvi bilan OXIRGI xabar bo'lib o'zi yangilanadi:
+har run holat yuborganda (`app_push_all`), lekin Durable Object darvozasi (`?gate=6000`) tufayli ~6 s da bir marta tahrirlanadi.
+Ish boshlanganda hech narsa kuzatilmasa (yoki xabar 1 soatdan eski bo'lsa) yangi xabar o'zi ochiladi (`app_autostart`).
+Eski usulda — avvalgidek bitta run xabari.
 
 XAVF: 4 run bir Telegram sessiyasidan (`session.enc`) bir vaqtda kiradi (oldin ham fmp4/anibla/post bilan shunday edi).
 Telegram `AUTH_KEY_DUPLICATED` bersa — har sifat uchun alohida sessiya: `tool/encode/session_360.enc` ... (workflow

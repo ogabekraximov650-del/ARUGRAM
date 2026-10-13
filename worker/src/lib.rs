@@ -11318,6 +11318,8 @@ async fn encode_claim_q(env: &Env, b: &Value, wq: &'static str, now: i64) -> Res
                 Some(raw) => { let (u, l) = anibla::resolve_origin(env, raw).await; (Some(u), l) }
                 None => (None, String::new()),
             };
+            // Umumiy "Ilova uchun" holat xabari: hech narsa kuzatilmayotgan bo'lsa, ish boshlanganda ochiladi.
+            livewatch::app_autostart(env).await;
             return ok(json!({
                 "job": {
                     "anime_id": a, "season_id": s, "epizod_id": e,
@@ -11684,7 +11686,7 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
             // Har sifat-workflow'ning o'z xabari (bosh menyudagi "Holat"): faqat shu sifatniki yangilanadi.
             Some(q) => {
                 encode_live_put(env, q, &text).await;
-                livewatch::q_push(env, q, &text).await;
+                livewatch::app_push_all(env).await;
             }
             // Botda "Ilova uchun" holati kuzatilayotgan bo'lsa (eski usul) — o'sha xabar yangilanadi.
             None => livewatch::app_push(env, &text).await,
@@ -13034,6 +13036,17 @@ impl DurableObject for EncodeLive {
         let url = req.url()?;
         let q = url.query_pairs().find(|(k, _)| k == "q").map(|(_, v)| v.to_string()).unwrap_or_default();
         let want_all = url.query_pairs().any(|(k, _)| k == "all");
+        // Darvoza: `?gate=<ms>` — oxirgi ruxsatdan beri `ms` o'tgan bo'lsagina "1" (va vaqt yangilanadi).
+        // Bitta DO butun dunyo uchun — ikki run bir vaqtda so'rasa ham faqat bittasiga ruxsat.
+        if let Some(ms) = url.query_pairs().find(|(k, _)| k == "gate").and_then(|(_, v)| v.parse::<i64>().ok()) {
+            let now = now_ms();
+            let last = self.state.storage().get::<i64>("g").await.ok().flatten().unwrap_or(0);
+            if now - last >= ms {
+                self.state.storage().put("g", now).await?;
+                return Response::ok("1");
+            }
+            return Response::ok("0");
+        }
         if req.method() == Method::Post {
             let text = req.text().await?;
             *self.last.borrow_mut() = Some(text.clone());
@@ -13098,6 +13111,20 @@ async fn encode_live_put(env: &Env, q: &str, text: &str) -> bool {
     init.with_method(Method::Post).with_body(Some(text.to_string().into()));
     let Ok(req) = Request::new_with_init(&format!("https://encode-live.internal/?q={q}"), &init) else { return false };
     matches!(stub.fetch_with_request(req).await, Ok(r) if r.status_code() == 200)
+}
+
+/// Umumiy holat xabarini tahrirlash huquqi (`ms` ichida ikki marta emas). Aniqlab bo'lmasa — ruxsat (yo'qolmasin).
+async fn encode_live_gate(env: &Env, ms: i64) -> bool {
+    let go = async {
+        let ns = env.durable_object("ENCODE_LIVE").ok()?;
+        let stub = ns.get_by_name("encode").ok()?;
+        let mut init = RequestInit::new();
+        init.with_method(Method::Post).with_body(Some(String::new().into()));
+        let req = Request::new_with_init(&format!("https://encode-live.internal/?gate={ms}"), &init).ok()?;
+        let mut resp = stub.fetch_with_request(req).await.ok()?;
+        Some(resp.text().await.ok()?.trim() == "1")
+    };
+    go.await.unwrap_or(true)
 }
 
 /// Hamma sifat-workflow'larning oxirgi holati: `{ "360p": {"t": matn, "at": ms}, ... }`.

@@ -276,9 +276,10 @@ pub(crate) async fn app_push(env: &Env, text: &str) {
 
 /// "📋 Holat" — "Ilova uchun" bo'limida.
 pub(crate) async fn app_status(env: &Env, chat: i64) {
-    // Sifat-workflow'lar (360p/480p/720p/1080p) ishlatilyapti — har biri uchun alohida to'liq holat xabari.
-    if q_active(env).await {
-        q_status(env, chat).await;
+    // Sifat-workflow'lar (360p/480p/720p/1080p) ishlatilyapti — hamma sifat BITTA xabarda, o'zi yangilanadi.
+    if !encode_live_all(env).await.is_empty() {
+        let html = app_all_html(env).await;
+        start(env, APP, chat, &html).await;
         return;
     }
     let st = encode_live_current(env).await.and_then(|t| parse_status_pin(&t));
@@ -286,94 +287,141 @@ pub(crate) async fn app_status(env: &Env, chat: i64) {
     start(env, APP, chat, &html).await;
 }
 
-// ── SIFAT-WORKFLOW'LAR (360p/480p/720p/1080p) HOLATI ─────────────
+// ── SIFAT-WORKFLOW'LAR (360p/480p/720p/1080p): BITTA UMUMIY XABAR ─────────
 //
-// "📋 Holat" (bosh menyu): har sifat-workflow uchun ALOHIDA xabar — to'liq statistika va log. Har xabar shu
-// workflow yuborgan holat (`X-Encode-Quality`) bilan o'zi yangilanadi. Kalit `live_app_<sifat>` = `chat|msg`.
+// "Ilova uchun" holati — BITTA xabarda hamma sifat: har biri uchun qaysi qism, bosqich (yuklab olish / kodlash /
+// Telegram'ga yuklash) foiz-chiziq bilan, tezlik, hajm, o'tdi/qoldi va oxirgi log qatorlari. Xabar "📋 Holat" bosilganda
+// (yoki ish boshlanganda, hech narsa kuzatilmayotgan bo'lsa) ochiladi va OXIRGI xabar bo'lib o'zi yangilanib turadi
+// (boshqa bo'limlardagidek: kuzatuv `APP`).
 
 thread_local! {
-    static QMEMO: std::cell::RefCell<std::collections::HashMap<String, (Option<(i64, i64)>, i64)>> =
-        std::cell::RefCell::new(std::collections::HashMap::new());
+    /// Kutayotgan qismlar soni (sifat bo'yicha) va jami navbat — har yangilanishda bazaga bormasin.
+    static PEND: std::cell::RefCell<(i64, [i64; 4], i64)> = const { std::cell::RefCell::new((0, [0; 4], 0)) };
 }
-const QMEMO_MS: i64 = 15_000;
+const PEND_MS: i64 = 30_000;
 
-async fn q_get(env: &Env, q: &str) -> Option<(i64, i64)> {
+async fn pending_all(env: &Env) -> ([i64; 4], i64) {
     let now = now_ms();
-    if let Some((v, at)) = QMEMO.with(|m| m.borrow().get(q).cloned()) {
-        if now - at < QMEMO_MS {
-            return v;
-        }
+    let (at, c, q) = PEND.with(|m| *m.borrow());
+    if now - at < PEND_MS {
+        return (c, q);
     }
-    let v = config_get(env, &format!("live_app_{q}")).await.and_then(|s| {
-        let mut it = s.split('|');
-        let chat = it.next()?.parse::<i64>().ok()?;
-        let msg = it.next()?.parse::<i64>().ok().filter(|m| *m > 0)?;
-        Some((chat, msg))
-    });
-    QMEMO.with(|m| m.borrow_mut().insert(q.to_string(), (v, now)));
-    v
+    let mut counts = [0i64; 4];
+    for (i, qq) in QUALITIES.iter().enumerate() {
+        counts[i] = encode_pending_q(env, qq).await;
+    }
+    let queued = turso_exec(env, "SELECT COUNT(*) AS n FROM encode_jobs WHERE state='queued'", vec![]).await.ok()
+        .and_then(|r| first_row(&r)).map(|r| jint(&r, "n")).unwrap_or(0);
+    PEND.with(|m| *m.borrow_mut() = (now, counts, queued));
+    (counts, queued)
 }
 
-async fn q_set(env: &Env, q: &str, chat: i64, msg: i64) {
-    config_put(env, &format!("live_app_{q}"), &format!("{chat}|{msg}")).await;
-    QMEMO.with(|m| m.borrow_mut().insert(q.to_string(), (Some((chat, msg)), now_ms())));
+fn short(s: &str, n: usize) -> String {
+    let t: String = s.chars().take(n).collect();
+    if s.chars().count() > n { format!("{t}\u{2026}") } else { t }
 }
 
-/// Sifat-workflow holati ishlatilyaptimi: hech bo'lmasa bir marta holat yuborgan (yangi usul).
-pub(crate) async fn q_active(env: &Env) -> bool {
-    !encode_live_all(env).await.is_empty()
+/// Bitta sifat bloki: qism, bosqich (foiz-chiziq bilan), manba va oxirgi `nlog` ta log qatori.
+async fn q_block(env: &Env, q: &str, st: &Value, pending: i64, nlog: usize) -> String {
+    let d = &st["data"];
+    let (a, s) = (jint(st, "anime_id"), jint(st, "season_id"));
+    let (an, sn) = titles(env, a, s).await;
+    let mut t = format!("\u{1F539} <b>{q}</b> \u{00B7} {}, {}, {}-qism", html_escape(&short(&an, 28)),
+        html_escape(&short(&sn, 20)), jint(st, "epizod_number"));
+    if jint(d, "attempt") > 1 {
+        t.push_str(&format!(" (urinish {})", jint(d, "attempt")));
+    }
+    t.push_str(&format!(" \u{00B7} kutayotgan: {pending}"));
+    if d["src"].is_object() {
+        let src = &d["src"];
+        t.push_str(&format!("\n\u{1F39E} Manba: {}p \u{00B7} {} \u{00B7} {:.1} MB",
+            jint(src, "h"), hms(src["dur_s"].as_f64().unwrap_or(0.0) as i64), src["mb"].as_f64().unwrap_or(0.0)));
+    }
+    let p: Vec<&str> = st["progress"].as_str().unwrap_or("").split('|').collect();
+    let x = &d["xfer"];
+    let stage = match p.as_slice() {
+        ["enc", _, pct, _, _, speed, fps, br, mb, est, el, eta] => {
+            let pf = pct.parse::<f64>().unwrap_or(0.0);
+            let est = if *est == "-" { String::new() } else { format!(" (~{est} MB)") };
+            format!("\u{2699}\u{FE0F} Kodlanmoqda {} {pct}%\n    tezlik {speed} \u{00B7} {fps} kadr/s \u{00B7} {br} kb/s \u{00B7} hajm {mb} MB{est}\n    o'tdi {} \u{00B7} qoldi ~{}",
+                bar(pf), hms(el.parse().unwrap_or(-1)), hms(eta.parse().unwrap_or(-1)))
+        }
+        ["enc", _, pct, _, _] => format!("\u{2699}\u{FE0F} Kodlanmoqda {} {pct}%", bar(pct.parse::<f64>().unwrap_or(0.0))),
+        _ if x.is_object() => {
+            let kind = x["kind"].as_str().unwrap_or("");
+            let head = if kind.contains("Telegram") { "\u{2B06}\u{FE0F} Telegram'ga yuklanmoqda" } else { "\u{2B07}\u{FE0F} Asl video yuklab olinmoqda" };
+            let pct = x["pct"].as_f64().unwrap_or(0.0);
+            format!("{head} {} {pct:.1}%\n    tezlik {:.2} MB/s \u{00B7} {:.1} / {:.1} MB\n    o'tdi {} \u{00B7} qoldi ~{}",
+                bar(pct), x["mbps"].as_f64().unwrap_or(0.0), x["cur_mb"].as_f64().unwrap_or(0.0),
+                x["total_mb"].as_f64().unwrap_or(0.0), hms(jint(x, "elapsed")), hms(jint(x, "eta")))
+        }
+        ["upload", ..] => "\u{2B06}\u{FE0F} Telegram'ga yuklanmoqda".to_string(),
+        ["download"] => "\u{2B07}\u{FE0F} Asl video yuklab olinmoqda".to_string(),
+        _ => "\u{23F3} boshlanmoqda...".to_string(),
+    };
+    t.push_str(&format!("\n{stage}"));
+    let lines: Vec<String> = st["lines"].as_array().cloned().unwrap_or_default().iter()
+        .rev().take(nlog).rev()
+        .filter_map(|l| l.as_str().map(|s| html_escape(&short(s.trim(), 90)))).filter(|s| !s.is_empty()).collect();
+    if !lines.is_empty() {
+        t.push_str(&format!("\n\u{1F4DC} {}", lines.join("\n\u{1F4DC} ")));
+    }
+    let started = jint(d, "job_started");
+    if started > 0 {
+        t.push_str(&format!("\n\u{23F1} jami: {}", hms(now_ms() / 1000 - started)));
+    }
+    t
 }
 
-/// Bitta sifat-workflow xabari matni. 4096 belgidan oshmasligi uchun log qatorlari kamaytiriladi.
-async fn q_html(env: &Env, q: &str, st: Option<&Value>, pending: i64) -> String {
-    let fresh = st.filter(|s| now_ms() - jint(s, "updated_at") < 3 * 60 * 1000
-        && s["progress"].as_str().unwrap_or("idle") != "idle" && jint(s, "anime_id") > 0);
-    let Some(st) = fresh else {
-        let mut t = format!("\u{1F4A4} <b>{q}</b> workflow: hozir ishlamayapti.\n\u{1F4CB} Kutayotgan qism: {pending} ta");
-        if let Some(s) = st {
-            let upd = jint(s, "updated_at");
-            if upd > 0 {
-                t.push_str(&format!("\n\u{1F552} Oxirgi holat {} oldin.", hms((now_ms() - upd) / 1000)));
+/// Hamma sifat-workflow'lar BITTA xabarda (4096 belgidan oshmasligi uchun log qatorlari kamaytiriladi).
+pub(crate) async fn app_all_html(env: &Env) -> String {
+    let all = encode_live_all(env).await;
+    let (pend, queued) = pending_all(env).await;
+    let now = now_ms();
+    let mut nlog = 3usize;
+    loop {
+        let mut blocks = Vec::new();
+        for (i, q) in QUALITIES.iter().enumerate() {
+            let st = all.get(*q).and_then(|e| parse_status_pin(e["t"].as_str().unwrap_or("")));
+            let live = st.as_ref().filter(|s| now - jint(s, "updated_at") < 3 * 60 * 1000
+                && s["progress"].as_str().unwrap_or("idle") != "idle" && jint(s, "anime_id") > 0);
+            match live {
+                Some(s) => blocks.push(q_block(env, q, s, pend[i], nlog).await),
+                None => blocks.push(format!("\u{1F4A4} <b>{q}</b>: hozir ishlamayapti \u{00B7} kutayotgan: {}", pend[i])),
             }
         }
-        t.push_str("\n\nIsh boshlansa, shu xabar o'zi yangilanadi.");
-        return t;
-    };
-    let mut n = 10usize;
-    loop {
-        let body = app_html_n(env, Some(st), n).await;
-        let t = format!("\u{1F539} <b>{q}</b> workflow \u{00B7} kutayotgan: {pending} ta\n{body}");
-        if t.chars().count() <= 3900 || n <= 1 {
+        let t = format!("\u{1F4F1} <b>Ilova uchun kodlash</b> \u{00B7} navbatda: {queued} ta qism\n\n{}", blocks.join("\n\n"));
+        if t.chars().count() <= 3900 || nlog == 0 {
             return t;
         }
-        n -= 1;
+        nlog -= 1;
     }
 }
 
-/// Sifat-workflow holat yubordi: shu sifatning xabari yangilanadi (Telegram'ni ko'p tahrirlamaslik uchun ~10 soniyada bir).
-pub(crate) async fn q_push(env: &Env, q: &str, text: &str) {
-    if (now_ms() / 5000) % 2 != 0 {
+/// Sifat-workflow holat yubordi: umumiy xabar yangilanadi — butun dunyo bo'yicha ~6 soniyada BIR marta
+/// (Durable Object darvozasi: 4 ta run bir vaqtda yuborsa ham Telegram'ni ko'p tahrirlamaymiz).
+pub(crate) async fn app_push_all(env: &Env) {
+    if target(env, APP).await.is_none() {
         return;
     }
-    let Some((chat, msg)) = q_get(env, q).await else { return };
-    let st = parse_status_pin(text);
-    let pending = encode_pending_q(env, q).await;
-    let html = q_html(env, q, st.as_ref(), pending).await;
-    let _ = edit_msg(env, chat, msg, &html).await;
+    if !encode_live_gate(env, 6_000).await {
+        return;
+    }
+    let html = app_all_html(env).await;
+    let _ = edit(env, APP, &html).await;
 }
 
-/// "📋 Holat": har sifat-workflow uchun yangi xabar (keyin o'zi yangilanadi).
-pub(crate) async fn q_status(env: &Env, chat: i64) {
-    let all = encode_live_all(env).await;
-    for q in QUALITIES {
-        let st = all.get(q).and_then(|e| parse_status_pin(e["t"].as_str().unwrap_or("")));
-        let pending = encode_pending_q(env, q).await;
-        let html = q_html(env, q, st.as_ref(), pending).await;
-        let msg = encbot_api(env, "sendMessage", json!({
-            "chat_id": chat, "parse_mode": "HTML", "text": html, "disable_web_page_preview": true,
-        })).await.ok().and_then(|v| v["message_id"].as_i64()).unwrap_or(0);
-        if msg > 0 {
-            q_set(env, q, chat, msg).await;
-        }
+/// Ish boshlandi: hech narsa kuzatilmayotgan (yoki kuzatuv eski, boshqa bo'limniki) bo'lsa — umumiy holat xabari
+/// ochiladi va kuzatiladi. Allaqachon "Ilova uchun" kuzatilayotgan bo'lsa — o'sha xabar yangilanaveradi.
+pub(crate) async fn app_autostart(env: &Env) {
+    let take = match get(env).await {
+        None => true,
+        // "Ilova uchun" xabari 1 soatdan eski bo'lsa — yangisi ochiladi (OXIRGI xabar yangilanib tursin).
+        Some(w) if w.sec == APP => now_ms() - w.at > 60 * 60 * 1000,
+        Some(w) => now_ms() - w.at > TAKEOVER_MS,
+    };
+    if take {
+        let html = app_all_html(env).await;
+        start(env, APP, ADMIN_TELEGRAM_ID, &html).await;
     }
 }
