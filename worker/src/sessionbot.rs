@@ -269,6 +269,10 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
                      \u{26A0}\u{FE0F} Raqamlar orasiga <b>probel</b> qo'ying: <code>1 2 3 4 5</code> \u{2014} aks holda Telegram kodni \
                      ochiq yozilgani uchun bekor qiladi."), Some(keyboard())).await;
             }
+            // Run bosqichlari haqida xabar (foydalanuvchi jarayonni ko'rib tursin).
+            "info" if !state.is_empty() => {
+                encbot_send(env, admin, &text, Some(keyboard())).await;
+            }
             "bad_code" => {
                 config_put(env, "sess_code", "").await;
                 config_put(env, "sess_state", "code").await;

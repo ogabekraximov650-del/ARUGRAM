@@ -149,6 +149,7 @@ async def main():
         while me is None:
             if not code_ok:
                 r = wait_state("wait_sign", WAIT_CODE)
+                report("info", "\U0001F510 Kod qabul qilindi, Telegram'ga kirilmoqda...")
                 try:
                     res = await app.sign_in(phone, sent.phone_code_hash, r["code"])
                     if res is False:
@@ -186,6 +187,7 @@ async def main():
             await app.disconnect()
         except Exception:  # noqa: BLE001
             pass
+    report("info", "\U0001F4BE Kirildi. Sessiya shifrlanib repoga saqlanmoqda...")
     save_session()
     log("sessiya saqlandi:", name)
     report("done", f"({name})" if name else "", uid=uid)
