@@ -6328,3 +6328,7 @@ Botdagi "Holat" xabarida R2 bloki endi ombor holatini ham ko'rsatadi (`livewatch
   worker cron (`encode_kick`) kodlovchilarni qayta ishga tushiradi. Allaqachon kodlangan fayl joy bo'shashini kutishda davom etadi.
 - R2 yuklovchi (`upload.workflow.yml`): `START_BUDGET_MIN=55` (yangi fayl 55 daqiqadan keyin olinmaydi), `timeout-minutes: 90`;
   R2'da fayl qolsa "Davom ettirish" yangi run ochadi.
+
+Holat xabarida yuklovchi logi: tashxis (`qdiag`) ko'rsatdi — xabar uzunligi me'yorda (1254 belgi), blok to'g'ri chiqadi; lekin yuklovchi holatni
+55 s da bir marta yuborgani uchun yuklab olish bosqichi (≈30 s) deyarli ushlanmay, tugagan "100%" qolib ketardi. Endi `upload.py`
+har fayl uchun bosqich almashganda (yuklab olish boshlandi / Telegram'ga yuklash boshlandi) majburiy yuboradi va tugagach `xfer` tozalanadi.

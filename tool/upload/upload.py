@@ -480,10 +480,12 @@ async def one(app, job: dict):
     try:
         ST.set(name, "download", kind=job.get("kind"), attempt=job.get("attempt"), job_started=int(time.time()))
         log(f"{name}: R2'dan olinmoqda ({size / 1048576:.1f} MB), urinish {job.get('attempt')}")
+        ST.push(True)
         await asyncio.to_thread(download, name, path, size, job.get("url"))
         ST.progress = "upload"
         ST.data.pop("xfer", None)
         log(f"{name}: botga yuborilmoqda")
+        ST.push(True)
         await send_to_bot(app, job["bot"], path, name, job["caption"])
         end = time.time() + COMMIT_WAIT
         while time.time() < end and not await asyncio.to_thread(is_committed, name):
@@ -491,6 +493,7 @@ async def one(app, job: dict):
         if not await asyncio.to_thread(is_committed, name):
             raise RuntimeError(f"bot {COMMIT_WAIT} soniyada faylni saqlamadi (bot kanalda adminmi? sessiya ro'yxatdan o'tganmi?)")
         r = await asyncio.to_thread(api, "done", {"file": name})
+        ST.data.pop("xfer", None)
         log(f"{name}: bazaga yozildi, R2'dan o'chirildi ({r.get('deleted')})")
     finally:
         beat.cancel()
@@ -507,10 +510,12 @@ async def one_deliver(app, job: dict):
     try:
         ST.set(name, "download", kind="deliver", attempt=job.get("attempt"), job_started=int(time.time()))
         log(f"{name}: R2'dan olinmoqda ({size / 1048576:.1f} MB), urinish {job.get('attempt')}")
+        ST.push(True)
         await asyncio.to_thread(download, name, path, size, job.get("url"))
         ST.progress = "upload"
         ST.data.pop("xfer", None)
         log(f"{name}: {dest.get('to')} ga yuborilmoqda")
+        ST.push(True)
         try:
             msg = await send_dest(app, dest, path, name)
         except Exception as ex:  # noqa: BLE001
@@ -528,6 +533,7 @@ async def one_deliver(app, job: dict):
                     except Exception as ex:  # noqa: BLE001
                         log(f"  xabar o'chirilmadi: {ex}")
         await asyncio.to_thread(api, "done", {"file": name})
+        ST.data.pop("xfer", None)
         log(f"{name}: yetkazildi, R2'dan o'chirildi")
     finally:
         beat.cancel()
