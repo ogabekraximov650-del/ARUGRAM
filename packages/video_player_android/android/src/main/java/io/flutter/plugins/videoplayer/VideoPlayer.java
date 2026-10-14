@@ -238,40 +238,6 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
     }
   }
 
-              @Override
-              public void onPlayerError(androidx.media3.common.PlaybackException error) {
-                if (enhanceLevel <= 0) {
-                  return;
-                }
-                for (Throwable t = error; t != null; t = t.getCause()) {
-                  if (t instanceof androidx.media3.common.VideoFrameProcessingException) {
-                    enhanceLevel = 0;
-                    exoPlayer.setVideoEffects(
-                        java.util.Collections.<androidx.media3.common.Effect>emptyList());
-                    exoPlayer.prepare();
-                    return;
-                  }
-                }
-              }
-            });
-      }
-      exoPlayer.setVideoEffects(
-          java.util.Collections.<androidx.media3.common.Effect>singletonList(
-              new AruEnhanceEffect(level)));
-      enhanceLevel = level;
-      return true;
-    } catch (Throwable t) {
-      enhanceLevel = 0;
-      try {
-        exoPlayer.setVideoEffects(java.util.Collections.<androidx.media3.common.Effect>emptyList());
-      } catch (Throwable ignored) {
-        // e'tiborsiz
-      }
-      return false;
-    }
-  }
-
-
   @Override
   public void play() {
     exoPlayer.play();
