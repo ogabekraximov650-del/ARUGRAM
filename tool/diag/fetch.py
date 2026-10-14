@@ -6,6 +6,7 @@ import io
 import json
 import os
 import subprocess
+import urllib.error
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -23,7 +24,24 @@ if not TOKEN:
     raise SystemExit("gh_token.enc ochilmadi")
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **k):
+        return None
+
+
 def get(path, raw=False):
+    if raw and "/logs" in path:
+        # Yo'naltirilgan manzilga Authorization yuborilmasin (Azure 401 beradi).
+        try:
+            urllib.request.build_opener(_NoRedirect).open(urllib.request.Request(
+                "https://api.github.com" + path,
+                headers={"Authorization": f"Bearer {TOKEN}", "Accept": "application/vnd.github+json"}), timeout=60)
+        except urllib.error.HTTPError as e:
+            loc = e.headers.get("Location")
+            if e.code not in (301, 302, 303, 307, 308) or not loc:
+                raise
+            with urllib.request.urlopen(loc, timeout=120) as f:
+                return f.read()
     req = urllib.request.Request(path if path.startswith("http") else "https://api.github.com" + path,
                                  headers={"Authorization": f"Bearer {TOKEN}", "Accept": "application/vnd.github+json"})
     with urllib.request.urlopen(req, timeout=60) as f:
