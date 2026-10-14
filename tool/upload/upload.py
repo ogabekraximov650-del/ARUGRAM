@@ -191,15 +191,21 @@ async def main():
     async with app:
         async for _ in app.get_dialogs():
             pass
+        me = await app.get_me()
+        started_bot = False
         worked = 0
         while time.time() - T0 < START_BUDGET:
-            job = api("claim", {"runner": RUNNER})
-            if job.get("nosession"):
-                log("Yuklovchi sessiyasi ulanmagan (botda 'Yangi sessiya' -> upload).")
-                break
+            job = api("claim", {"runner": RUNNER, "uid": me.id})
             if job.get("none") or not job.get("file"):
                 log("Navbat bo'sh.")
                 break
+            if not started_bot and job.get("bot"):
+                # Bot shu akkauntdan fayl qabul qilishi uchun akkaunt botni bir marta ochgan bo'lsin.
+                started_bot = True
+                try:
+                    await app.send_message(str(job["bot"]).lstrip("@"), "/start")
+                except Exception as ex:  # noqa: BLE001
+                    log(f"botga /start yuborilmadi: {ex}")
             try:
                 await one(app, job)
                 worked += 1

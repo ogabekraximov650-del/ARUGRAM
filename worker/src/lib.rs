@@ -10996,7 +10996,7 @@ const ENCODE_LEASE_MS: i64 = 25 * 60 * 1000;
 /// (Actions 5 soatda to'xtaydi). O'lgan run'ni `encode_kick` GitHub'dan
 /// tekshirib bo'shatadi, ya'ni bazaga davriy yozuv kerak emas.
 const ENCODE_RUN_LEASE_MS: i64 = 320 * 60 * 1000;
-const ENCODE_MAX_ATTEMPTS: i64 = 3;
+const ENCODE_MAX_ATTEMPTS: i64 = 5;
 /// Bot asl videoni kanalga ko'chirib ulgurmagan bo'lsa shuncha kutiladi.
 const ENCODE_ORIGIN_WAIT_MS: i64 = 2 * 60 * 60 * 1000;
 
@@ -13685,11 +13685,38 @@ async fn encode_kick(env: &Env) -> String {
 }
 
 /// `full` — cron: hal bo'lib qolgan qismlarni yakunlash va eskirgan "ishlayapti"ni GitHub'dan tekshirib bo'shatish ham.
+/// Qolib ketgan sifatlarni qayta navbatga qo'yadi (urinishlar `ENCODE_MAX_ATTEMPTS` dan kam bo'lsa):
+///   * `error` holatidagi sifat/qism (fatal bo'lmagan yoki urinishi tugamagan);
+///   * `done` deb belgilangan, lekin jurnalda (`done` ro'yxati) yo'q va R2'da ham kutmayotgan sifat (yuklanmay yo'qolgan).
+async fn encode_requeue_stuck(env: &Env) {
+    let m = TursoArg::int(ENCODE_MAX_ATTEMPTS);
+    let _ = turso_exec(env,
+        "UPDATE encode_jobs SET state='queued', runner='', lease_until=0, error=''
+          WHERE state='error' AND attempts<? AND EXISTS (SELECT 1 FROM encode_q w WHERE w.anime_id=encode_jobs.anime_id
+                AND w.season_id=encode_jobs.season_id AND w.epizod_id=encode_jobs.epizod_id
+                AND w.queued_at=encode_jobs.queued_at AND w.state IN ('error','done') AND w.attempts<?)",
+        vec![m.clone(), m.clone()]).await;
+    let _ = turso_exec(env,
+        "UPDATE encode_q SET state='queued', runner='', lease_until=0, progress='', error=''
+          WHERE attempts<? AND state IN ('error','done')
+            AND EXISTS (SELECT 1 FROM encode_jobs j WHERE j.anime_id=encode_q.anime_id AND j.season_id=encode_q.season_id
+                  AND j.epizod_id=encode_q.epizod_id AND j.queued_at=encode_q.queued_at
+                  AND instr(j.done, ',' || encode_q.quality || ',')=0)
+            AND NOT EXISTS (SELECT 1 FROM r2_files r WHERE r.anime_id=encode_q.anime_id AND r.season_id=encode_q.season_id
+                  AND r.epizod_id=encode_q.epizod_id AND r.queued_at=encode_q.queued_at AND r.quality=encode_q.quality
+                  AND r.kind='mp4')",
+        vec![m]).await;
+}
+
 async fn encode_kick_full(env: &Env, full: bool) -> String {
     let now = now_ms();
     let repo = tg_secret(env, "GH_REPO");
     if !repo.contains('/') {
         return "\u{26A0}\u{FE0F} GH_REPO o'rnatilmagan — Actions ishga tushirilmadi.".into();
+    }
+    // 0. Navbatda qolib ketgan, Telegram'ga yetib bormagan sifatlar — urinishlar tugamagan bo'lsa qayta kodlanadi.
+    if full {
+        encode_requeue_stuck(env).await;
     }
     // 1. Hal bo'lib qolgan, lekin yakunlanmagan qismlar (zaxira: yakunlash yozuvi yo'qolgan bo'lsa).
     if full {

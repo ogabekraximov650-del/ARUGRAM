@@ -141,6 +141,14 @@ async fn r2_fetch(env: &Env, method: &str, file: &str) -> Option<(u16, Option<i6
 pub(crate) async fn register(env: &Env, (a, s, e): (i64, i64, i64), queued_at: i64, q: &str, kind: &str, file: &str,
         key: &str, size: i64) -> Option<String> {
     migrate(env).await;
+    // Sig'im himoyasi: R2 bepul 10 GB; navbatdagi fayllar yig'indisi chegaradan oshsa — `None` (run to'g'ridan-to'g'ri
+    // bot chatiga yuklaydi). Chegara: `R2_MAX_GB` (standart 8).
+    let cap: i64 = tg_secret(env, "R2_MAX_GB").parse::<i64>().unwrap_or(8).max(1) * 1024 * 1024 * 1024;
+    let used = turso_exec(env, "SELECT COALESCE(SUM(size),0) AS n FROM r2_files WHERE file_name<>?", vec![TursoArg::text(file)]).await
+        .ok().and_then(|r| first_row(&r)).map(|r| jint(&r, "n")).unwrap_or(0);
+    if used + size > cap {
+        return None;
+    }
     let put = url(env, "PUT", file, 7200)?;
     turso_exec(env,
         "INSERT INTO r2_files (file_name, kind, anime_id, season_id, epizod_id, queued_at, quality, file_key, size, state, created_at)
@@ -199,9 +207,6 @@ pub(crate) async fn kick(env: &Env) -> String {
     if jint(&r, "active") > 0 || jint(&r, "pending") == 0 {
         return String::new();
     }
-    if !encode_sess_ok(env, "upload").await {
-        return "\u{1F511} Yuklovchi workflow sessiyasi ulanmagan (botda \u{00AB}Yangi sessiya\u{00BB} \u{2192} upload)".into();
-    }
     let repo = tg_secret(env, "GH_REPO");
     if !repo.contains('/') {
         return "GH_REPO yo'q".into();
@@ -243,6 +248,21 @@ pub(crate) async fn cleanup(env: &Env) {
             finish(env, f).await;
         }
     }
+    // Telegram'ga 6 urinishda ham yetmagan fayllar: R2'dan o'chadi, sifat qayta kodlanadi (kodlash urinishi tugamagan bo'lsa).
+    let Ok(res) = turso_exec(env,
+        "SELECT file_name, anime_id, season_id, epizod_id, queued_at, quality FROM r2_files WHERE state='error' LIMIT 5",
+        vec![]).await else { return };
+    for r in rows_of(&res) {
+        let (a, s, e, qa) = (jint(&r, "anime_id"), jint(&r, "season_id"), jint(&r, "epizod_id"), jint(&r, "queued_at"));
+        if let Some(f) = r["file_name"].as_str() {
+            finish(env, f).await;
+        }
+        let _ = turso_exec(env,
+            "UPDATE encode_q SET state='queued', runner='', lease_until=0, progress='', error=''
+              WHERE anime_id=? AND season_id=? AND epizod_id=? AND queued_at=? AND quality=? AND attempts<?",
+            vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e), TursoArg::int(qa),
+                 TursoArg::text(r["quality"].as_str().unwrap_or("")), TursoArg::int(ENCODE_MAX_ATTEMPTS)]).await;
+    }
 }
 
 /// `X-Encode-Token` bilan: `/api/r2/claim`, `/api/r2/beat`, `/api/r2/fail`, `/api/r2/done`.
@@ -256,8 +276,14 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
     let now = now_ms();
     match path {
         "/api/r2/claim" => {
-            if !ready(env) || !encode_sess_ok(env, "upload").await {
-                return ok(json!({"none": true, "nosession": ready(env)}));
+            if !ready(env) {
+                return ok(json!({"none": true}));
+            }
+            // Yuklovchi ESKI umumiy sessiya bilan ishlaydi: akkaunt ID'si shu yerda ro'yxatga olinadi (bot undan fayl qabul qiladi).
+            if let Some(uid) = b["uid"].as_i64().filter(|u| *u > 0) {
+                if config_get(env, "sess_uid_upload").await.as_deref() != Some(uid.to_string().as_str()) {
+                    config_put(env, "sess_uid_upload", &uid.to_string()).await;
+                }
             }
             let runner: String = b["runner"].as_str().unwrap_or("").chars().take(64).collect();
             let res = turso_exec(env,
@@ -278,6 +304,22 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
                 "caption": format!("ARUENC|{kind}|{a}|{s}|{e}|{qa}|{q}|{key}|{size}"),
                 "attempt": jint(&r, "attempts"),
             }));
+        }
+        // Tashxis: R2 sozlanganmi va kalitlar bucket'ga yetadimi (imzolangan HEAD).
+        "/api/r2/diag" => {
+            if !ready(env) {
+                return ok(json!({"ready": false}));
+            }
+            let host = format!("{}.r2.cloudflarestorage.com", tg_secret(env, "R2_ACCOUNT_ID"));
+            let u = presign("HEAD", &host, &format!("/{BUCKET}"), &tg_secret(env, "R2_ACCESS_KEY_ID"),
+                &tg_secret(env, "R2_SECRET_ACCESS_KEY"), REGION, &amz_date(now), 300);
+            let mut init = RequestInit::new();
+            init.with_method(Method::Head);
+            let st = match Request::new_with_init(&u, &init) {
+                Ok(rq) => Fetch::Request(rq).send().await.map(|r| r.status_code() as i64).unwrap_or(-1),
+                Err(_) => -2,
+            };
+            return ok(json!({"ready": true, "bucket_status": st, "ok": st == 200}));
         }
         "/api/r2/beat" => {
             let _ = turso_exec(env, "UPDATE r2_files SET lease_until=? WHERE file_name=? AND state='sending'",

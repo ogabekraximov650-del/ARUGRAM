@@ -6211,3 +6211,11 @@ asl videoni olish uchun qoladi. Kalitlar yo'q bo'lsa (`r2::ready` false) run'lar
 Yoqish uchun kerak: R2 S3 API token (bucket `arumediatv`, Object Read & Write) -> `tool/r2/r2_keys.enc` (`ACCESS_KEY_ID:SECRET`,
 `openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt`, kalit `ENCODE_TOKEN`) yoki GitHub secret'lar `R2_ACCESS_KEY_ID` /
 `R2_SECRET_ACCESS_KEY`; hisob ID'si `CLOUDFLARE_ACCOUNT_ID` dan `R2_ACCOUNT_ID` bo'lib qo'yiladi (`deploy-worker.yml`).
+
+Keyin (R2 aniqlashtirishlari): (1) R2 kalitlari deploy paytida `CLOUDFLARE_API_TOKEN` dan olinadi (Access Key ID = token ID, Secret =
+token SHA-256) — token R2 ruxsatiga ega bo'lsa qo'shimcha hech narsa shart emas; `POST /api/r2/diag` (ENCODE_TOKEN) bucket'ga
+yetishni tekshiradi. (2) Yuklovchi (`upload.yml`) ESKI umumiy `session.enc` bilan ishlaydi; uning akkaunt ID'si `/api/r2/claim` da
+(`uid`) ro'yxatga olinadi. (3) `encode_requeue_stuck` (cron, `encode_kick_full`): `error`/yo'qolgan (`done`, lekin jurnalda ham R2'da ham
+yo'q) sifatlar urinish `ENCODE_MAX_ATTEMPTS` (5) dan kam bo'lsa qayta kodlanadi; R2'dan Telegram'ga 6 urinishda yetmagan fayl o'chib
+sifat qayta kodlanadi. (4) R2 sig'imi: navbatdagi fayllar yig'indisi `R2_MAX_GB` (8) dan oshsa yoki R2 ishlamasa run to'g'ridan-to'g'ri
+bot chatiga yuklaydi (kodlash yo'qolmaydi).

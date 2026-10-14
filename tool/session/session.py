@@ -123,9 +123,8 @@ async def main():
     r = wait_state("wait_send", WAIT_PHONE)
     # Har sifat-workflow'ning O'Z sessiyasi: `session_360.enc`, `session_480.enc`, ...
     global OUT
-    target = str(r.get("target", ""))
-    target = target if target == "upload" else "".join(c for c in target if c.isdigit())
-    if target not in ("360", "480", "720", "1080", "upload"):
+    target = "".join(c for c in str(r.get("target", "")) if c.isdigit())
+    if target not in ("360", "480", "720", "1080"):
         raise RuntimeError("qaysi workflow uchun ekani aniqlanmadi")
     OUT = Path(f"tool/encode/session_{target}.enc")
     bot = str(r.get("bot", "")).lstrip("@")

@@ -366,11 +366,15 @@ async def upload_r2(ident: dict, path: Path, name: str, kind: str, key: str, lab
         except Exception as ex:  # noqa: BLE001
             last = str(ex)
             if "503" in last and attempt == 1:
-                log(f"  {label}: R2 sozlanmagan — to'g'ridan-to'g'ri bot chatiga yuklanadi")
+                log(f"  {label}: R2 sozlanmagan yoki to'lgan — to'g'ridan-to'g'ri bot chatiga yuklanadi")
                 return False
-            log(f"  {label}: R2'ga yozish {attempt}/5 muvaffaqiyatsiz: {last}")
+            log(f"  {label}: R2'ga yozish {attempt}/3 muvaffaqiyatsiz: {last}")
+            if attempt >= 3:
+                break
             await asyncio.sleep(4 * attempt)
-    raise RuntimeError(f"{label}: R2'ga yozib bo'lmadi: {last}")
+    # R2 ishlamasa (to'lgan, uzilgan) kodlash yo'qolmasin: eski usulda to'g'ridan-to'g'ri bot chatiga yuklanadi.
+    log(f"  {label}: R2 ishlamadi — to'g'ridan-to'g'ri bot chatiga yuklanadi")
+    return False
 
 
 def is_committed(name: str) -> bool:

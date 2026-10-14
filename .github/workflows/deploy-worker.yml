@@ -182,6 +182,17 @@ jobs:
           if [ -z "$R2K" ] && [ -n "${{ secrets.R2_ACCESS_KEY_ID }}" ] && [ -n "${{ secrets.R2_SECRET_ACCESS_KEY }}" ]; then
             R2K="${{ secrets.R2_ACCESS_KEY_ID }}:${{ secrets.R2_SECRET_ACCESS_KEY }}"
           fi
+          # Hech narsa berilmagan bo'lsa — deploy tokenining o'zidan: Access Key ID = token ID, Secret = token qiymatining SHA-256
+          # (Cloudflare R2 qoidasi). Buning uchun token R2 ruxsatiga (Workers R2 Storage: Edit) ega bo'lishi kerak.
+          CFT=$(printf '%s' "${{ secrets.CLOUDFLARE_API_TOKEN }}" | tr -d '[:space:]')
+          if [ -z "$R2K" ] && [ -n "$CFT" ]; then
+            TID=$(curl -fsS -H "Authorization: Bearer $CFT" https://api.cloudflare.com/client/v4/user/tokens/verify 2>/dev/null \
+                  | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["id"])' 2>/dev/null || true)
+            [ -z "$TID" ] && TID=$(curl -fsS -H "Authorization: Bearer $CFT" \
+                  "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CLOUDFLARE_ACCOUNT_ID }}/tokens/verify" 2>/dev/null \
+                  | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["id"])' 2>/dev/null || true)
+            [ -n "$TID" ] && R2K="$TID:$(printf '%s' "$CFT" | sha256sum | cut -d' ' -f1)"
+          fi
           case "$R2K" in
             *:*) put R2_ACCESS_KEY_ID "${R2K%%:*}"; put R2_SECRET_ACCESS_KEY "${R2K#*:}"
                  echo "✅ R2 kalitlari o'rnatildi" ;;

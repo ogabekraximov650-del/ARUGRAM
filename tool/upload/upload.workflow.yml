@@ -37,8 +37,8 @@ jobs:
           ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
         run: |
           OUT=tool/upload/pyro_session.session
-          SRC=tool/encode/session_upload.enc
-          [ -f "$SRC" ] || { echo "::error::Yuklovchi sessiyasi yo'q ($SRC) — botda 'Yangi sessiya' -> upload orqali ulang"; exit 1; }
+          # Telegram'ga yuklash ESKI umumiy sessiya bilan (kodlovchilarning sessiyalari alohida).
+          SRC=tool/encode/session.enc
           K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
           K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in "$SRC" -out "$OUT"
           head -c 16 "$OUT" | grep -q "SQLite format 3" || { echo "::error::Sessiya ochilmadi (ENCODE_TOKEN noto'g'ri?)"; exit 1; }
