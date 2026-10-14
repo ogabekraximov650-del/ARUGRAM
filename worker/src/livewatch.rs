@@ -375,9 +375,13 @@ async fn q_block(env: &Env, q: &str, st: &Value, pending: i64, nlog: usize) -> S
         _ => "\u{23F3} boshlanmoqda...".to_string(),
     };
     t.push_str(&format!("\n{stage}"));
+    // Muhim bo'lmagan qatorlar (progress takrori, "manba ...", "kodlanmoqda...") ko'rsatilmaydi.
+    let noise = |l: &str| l.contains(" | video ") || l.contains("manba ") || l.contains("kodlanmoqda") || l.contains("yuklab olinmoqda")
+        || l.contains("Telegram'ga yuklanmoqda") || l.contains("yuklanmoqda...");
     let lines: Vec<String> = st["lines"].as_array().cloned().unwrap_or_default().iter()
-        .rev().take(nlog).rev()
-        .filter_map(|l| l.as_str().map(|s| html_escape(&short(s.trim(), 90)))).filter(|s| !s.is_empty()).collect();
+        .filter_map(|l| l.as_str()).filter(|l| !noise(l))
+        .collect::<Vec<_>>().into_iter().rev().take(nlog).rev()
+        .map(|s| html_escape(&short(s.trim(), 90))).filter(|s| !s.is_empty()).collect();
     if !lines.is_empty() {
         t.push_str(&format!("\n\u{1F4DC} {}", lines.join("\n\u{1F4DC} ")));
     }
@@ -467,8 +471,8 @@ pub(crate) async fn app_all_html(env: &Env) -> String {
             let live = st.as_ref().filter(|s| now - jint(s, "updated_at") < 3 * 60 * 1000
                 && s["progress"].as_str().unwrap_or("idle") != "idle" && jint(s, "anime_id") > 0);
             match live {
-                // Sifat bloklarida log qatorlari ko'rsatilmaydi (xabar qisqa bo'lsin, R2 yuklovchi logi sig'sin); jonli log — kodlash log kanalida.
-                Some(s) => blocks.push(q_block(env, q, s, pend[i], 0).await),
+                // Sifat bloklarida faqat MUHIM log qatorlari (xato, R2, yuklash natijasi) — progress/boshlanish qatorlari takrorlanadi va olib tashlangan.
+                Some(s) => blocks.push(q_block(env, q, s, pend[i], 2).await),
                 None if running[i] => blocks.push(format!("\u{2699}\u{FE0F} <b>{q}</b>: ishlayapti (jonli log kodlash log kanalida) \u{00B7} kutayotgan: {}", pend[i])),
                 None => blocks.push(format!("\u{1F4A4} <b>{q}</b>: hozir ishlamayapti \u{00B7} kutayotgan: {}", pend[i])),
             }

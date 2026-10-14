@@ -6344,3 +6344,4 @@ har fayl uchun bosqich almashganda (yuklab olish boshlandi / Telegram'ga yuklash
 Panel bot yana almashtirildi (`tool/bot/encode_bot.enc` qayta shifrlandi, usul o'sha).
 
 Holat xabari: sifat bloklaridan log qatorlari (📜) olib tashlandi (progress, tezlik va vaqt qoladi) — xabar qisqaradi va R2 yuklovchi bloki (5 ta log qatori bilan) to'liq sig'adi.
+(Aniqlashtirish) Sifat bloklarida log butunlay o'chirilmadi: faqat takrorlanuvchi/ahamiyatsiz qatorlar (progress, "manba ...", "kodlanmoqda...", yuklanmoqda foizlari) filtrlanadi, xato va muhim qatorlar (oxirgi 2 ta) qoladi.
