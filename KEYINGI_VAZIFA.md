@@ -6292,3 +6292,8 @@ fayl saqlangan bo'lsa kutish tugaydi. Tekshiruv: `/api/r2/diag` da `by_state` ka
 `.github/workflows/diag-logs.yml` + `tool/diag/fetch.py`: `tool/diag/**` o'zgarganda `gh_token.enc` (kalit `ENCODE_TOKEN`)
 bilan avtoencode repo'ning oxirgi 12 run'ini (job holati, xato qadamlar, har job logining oxirgi 60 qatori) shu repo job logiga
 chiqaradi. Faqat o'qish. Qayta ko'rish uchun `tool/diag/` ichidagi biror faylni o'zgartirib push qiling.
+
+**Sabab topildi (diag-logs.yml orqali):** eski yuklovchi run logida `FLOOD_WAIT_X ... upload.SaveBigFilePart` (12 s) ketma-ket
+chiqqan — Telegram yuklashni cheklagan, Pyrogram `save_file` bu xatoni yutib, yuklash 100% da "qotgan". `fast_save_file` da
+FloodWait endi umumiy to'siq (`gate`) bilan hamma ulanishni birga kutdiradi, urinishlar 12 taga oshirildi.
+Ikkinchi akkaunt loglarini ko'rish: `tool/diag/run.txt` ni o'zgartirib push qiling (`diag-logs.yml`).

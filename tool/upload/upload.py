@@ -189,6 +189,7 @@ async def fast_save_file(app, orig, path, progress=None, progress_args=(), file_
     for i in range(total):
         queue.put_nowait(i)
     sent = [0]
+    gate = [0.0]  # FloodWait: hamma ishchi birga kutadi (har biri alohida urilmasin)
 
     async def worker(sess):
         with open(path, "rb") as f:
@@ -199,16 +200,21 @@ async def fast_save_file(app, orig, path, progress=None, progress_args=(), file_
                     return
                 f.seek(i * PART)
                 chunk = f.read(PART)
-                for attempt in range(8):
+                for attempt in range(12):
+                    wait = gate[0] - time.time()
+                    if wait > 0:
+                        await asyncio.sleep(wait)
                     try:
                         await sess.invoke(raw.functions.upload.SaveBigFilePart(
                             file_id=fid, file_part=i, file_total_parts=total, bytes=chunk))
                         break
                     except FloodWait as e:
-                        log(f"Telegram FloodWait {e.value} s")
-                        await asyncio.sleep(int(e.value) + 1)
+                        until = time.time() + int(e.value) + 1
+                        if until > gate[0] + 1:
+                            log(f"Telegram FloodWait {e.value} s — hamma ulanish kutadi")
+                        gate[0] = max(gate[0], until)
                     except Exception as e:  # noqa: BLE001
-                        if attempt == 7:
+                        if attempt == 11:
                             raise RuntimeError(f"{i}-bo'lak Telegram'ga yuborilmadi: {e}")
                         await asyncio.sleep(2 * (attempt + 1))
                 sent[0] += len(chunk)
