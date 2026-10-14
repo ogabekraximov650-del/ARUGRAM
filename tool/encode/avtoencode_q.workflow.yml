@@ -63,10 +63,8 @@ jobs:
         run: |
           OUT=tool/encode/pyro_session.session
           K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
-          # Har sifat-workflow'ning O'Z sessiyasi bor (`session___N__.enc`, botdagi "🔑 Yangi sessiya" bo'limi yaratadi).
-          # Sessiyasiz workflow ishga tushmaydi.
-          SRC=tool/encode/session___N__.enc
-          [ -f "$SRC" ] || { echo "::error::__Q__ uchun Telegram sessiyasi yo'q ($SRC) — botda 'Yangi sessiya' orqali ulang"; exit 1; }
+          # Hamma sifat-workflow BITTA umumiy sessiya bilan ishlaydi (`session.enc`; botdagi "🔑 Yangi sessiya" uni yangilaydi).
+          SRC=tool/encode/session.enc
           K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K \
             -in "$SRC" -out "$OUT"
           head -c 16 "$OUT" | grep -q "SQLite format 3" || { echo "::error::Sessiya ochilmadi (ENCODE_TOKEN noto'g'ri?)"; exit 1; }

@@ -123,10 +123,9 @@ async def main():
     r = wait_state("wait_send", WAIT_PHONE)
     # Har sifat-workflow'ning O'Z sessiyasi: `session_360.enc`, `session_480.enc`, ...
     global OUT
+    # Hamma workflow BITTA umumiy sessiya bilan ishlaydi (`tool/encode/session.enc`); `target` sifat bo'lsa — eski usul (`session_<n>.enc`).
     target = "".join(c for c in str(r.get("target", "")) if c.isdigit())
-    if target not in ("360", "480", "720", "1080"):
-        raise RuntimeError("qaysi workflow uchun ekani aniqlanmadi")
-    OUT = Path(f"tool/encode/session_{target}.enc")
+    OUT = Path(f"tool/encode/session_{target}.enc") if target in ("360", "480", "720", "1080") else Path("tool/encode/session.enc")
     bot = str(r.get("bot", "")).lstrip("@")
     phone = "+" + "".join(c for c in r.get("phone", "") if c.isdigit())
     log("kod so'ralmoqda")

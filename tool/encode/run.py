@@ -1160,13 +1160,9 @@ async def process(app: Client, channel: int, job: dict):
             if not src.exists() or src.stat().st_size == 0:
                 raise RuntimeError("anibla.uz dan yuklab bo'lmadi")
         else:
+            # Telegram YUKLAB OLISHNI cheklamaydi (cheklov faqat yuklashda) — asl video kanaldan umumiy sessiya bilan olinadi.
             bot_msg = None
-            if QUALITY and BOT:
-                # Xavfsizlik: asl videoni kanaldan emas, BOT chatidan olamiz — bot uni shu sessiya chatiga nusxalaydi.
-                bot_msg = await fetch_origin_via_bot(app, ident)
-                m = bot_msg
-            else:
-                m = await app.get_messages(channel, int(job["origin_msg"]))
+            m = await app.get_messages(channel, int(job["origin_msg"]))
             if not m or m.empty or not (m.document or m.video):
                 raise Fatal("asl video kanalda topilmadi")
             log("  asl video yuklab olinmoqda...")
@@ -1398,7 +1394,7 @@ async def main():
                 log("Vaqt limiti yaqin — qolgan ishlar keyingi run'da.")
                 break
             r = api("claim", {"runner": RUNNER, "no_heartbeat": True,
-                              "log_chat": LOG_CHANNEL, **({"wq": QUALITY} if QUALITY else {})})
+                              "log_chat": LOG_CHANNEL, **({"wq": QUALITY, "uid": getattr(app.me, "id", 0)} if QUALITY else {})})
             if not status_started:
                 status_started = True
                 STATUS.bots = [b for b in (r.get("status_bots") or []) if isinstance(b, str) and b]

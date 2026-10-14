@@ -11236,8 +11236,10 @@ async fn encode_settle(env: &Env, a: i64, s: i64, e: i64, queued_at: i64) {
 }
 
 /// Shu sifat-workflow uchun Telegram sessiyasi ulanganmi (`sess_ok_<q>`, "🔑 Yangi sessiya" tugagach yoziladi).
-pub(crate) async fn encode_sess_ok(env: &Env, q: &str) -> bool {
-    config_get(env, &format!("sess_ok_{q}")).await.as_deref() == Some("1")
+/// (2026-10, foydalanuvchi talabi: "barchasi bitta sessiyada ishlasin") — hamma workflow BITTA umumiy sessiya
+/// (`tool/encode/session.enc`) bilan ishlaydi, shu sabab sifat bo'yicha sessiya tekshiruvi YO'Q: har doim `true`.
+pub(crate) async fn encode_sess_ok(_env: &Env, _q: &str) -> bool {
+    true
 }
 
 thread_local! {
@@ -11931,8 +11933,12 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
         // Sifat-workflow (`wq`): har biri o'z sifatini mustaqil, bir vaqtda tayyorlaydi.
         if let Some(wq) = encode_wq(&b) {
             // Shu sifat uchun Telegram sessiyasi ulanmagan bo'lsa — ish berilmaydi ("🔑 Yangi sessiya" bo'limi).
-            if !encode_sess_ok(env, wq).await {
-                return ok(json!({"none": true, "nosession": true}));
+            // Umumiy sessiya akkaunti ID'si (bot undan fayl qabul qiladi — faqat R2 bo'lmagan zaxira yo'lida kerak).
+            if let Some(uid) = b["uid"].as_i64().filter(|u| *u > 0) {
+                let k = format!("sess_uid_{wq}");
+                if config_get(env, &k).await.as_deref() != Some(uid.to_string().as_str()) {
+                    config_put(env, &k, &uid.to_string()).await;
+                }
             }
             return encode_claim_q(env, &b, wq, now).await;
         }
@@ -13802,7 +13808,7 @@ async fn encode_kick_full(env: &Env, full: bool) -> String {
         if counts[i] <= 0 {
             continue;
         }
-        if !sess_ok.iter().any(|k| *k == format!("sess_ok_{q}")) {
+        if false && !sess_ok.iter().any(|k| *k == format!("sess_ok_{q}")) {
             nosess.push(*q);
             continue;
         }

@@ -6244,3 +6244,10 @@ PBKDF2, kalit `ENCODE_TOKEN`); `deploy-worker.yml` ularni ochib `R2_ACCESS_KEY_I
 PUT bilan R2'ga, yuklovchi (Range bilan, uzilsa davom etib) R2'dan to'g'ridan-to'g'ri oladi — fayl baytlari worker'dan O'TMAYDI
 (`/api/encode/r2put` javobida `url`, `/api/r2/claim` javobida `url`). Kalit bo'lmasa — oldingi binding orqali rejim (zaxira). Haqiqiy R2'da
 PUT/GET/DELETE sinovdan o'tdi. Cloudflare API tokeni (`cfat_...`) saqlanmadi — kerak emas.
+
+**Hamma workflow BITTA umumiy sessiyada (foydalanuvchi talabi, 2026-10):** sifat-workflow'lar uchun alohida sessiya talabi olib tashlandi —
+`avtoencode_q.workflow.yml` `tool/encode/session.enc` dan oladi, `encode_sess_ok` har doim `true`, "🔑 Yangi sessiya" qaysi workflow
+so'ramaydi va `session.enc` ni yangilaydi. Telegram YUKLAB OLISHNI cheklamaydi (cheklov faqat yuklashda) — asl video kanaldan umumiy
+sessiya bilan olinadi (bot orqali nusxalash olib tashlandi); yuklash esa R2 orqali (kodlovchilar Telegram'ga yuklamaydi). Kodlovchi
+akkaunt ID'sini `claim` da yuboradi (`sess_uid_<q>` — faqat R2 bo'lmagan zaxira yo'li uchun). Eslatma: bir sessiya fayli bir vaqtda ko'p
+run'da ishlaydi — Telegram kamdan-kam `AUTH_KEY_DUPLICATED` berishi mumkin; shunda "Yangi sessiya" bilan yangilang.

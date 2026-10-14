@@ -54,6 +54,11 @@ pub(crate) async fn start(env: &Env, chat: i64) {
     config_put(env, "encbot_mode", "sess").await;
     config_put(env, "sess_state", "target").await;
     config_put(env, "sess_at", &now_ms().to_string()).await;
+    // Hamma workflow BITTA umumiy sessiyada ishlaydi — qaysi workflow so'ralmaydi, to'g'ri raqamga o'tiladi.
+    if true {
+        ask_phone(env, chat, "shared").await;
+        return;
+    }
     let mut lines = String::new();
     for q in QUALITIES.iter() {
         let ok = encode_sess_ok(env, q).await;
@@ -119,6 +124,9 @@ pub(crate) async fn on_message(env: &Env, msg: &Value, chat: i64) -> bool {
     }
     match state.as_str() {
         "target" => {
+            if text.is_empty() {
+                return true;
+            }
             match QUALITIES.iter().find(|q| text.contains(**q)) {
                 Some(q) => ask_phone(env, chat, q).await,
                 None => encbot_send(env, chat, "\u{26A0}\u{FE0F} Pastdagi tugmalardan birini tanlang.", None).await,
