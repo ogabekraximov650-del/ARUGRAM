@@ -6232,3 +6232,8 @@ hech qanday R2/S3 kaliti yoki Cloudflare tokeni kerak emas. Run'lar faqat worker
 qo'shib bo'lmasa — binding'siz deploy (R2 o'chiq, eski usul). `/api/r2/diag` bucket'ga yetishni tekshiradi. Yuqoridagi "kalitlar
 `CLOUDFLARE_API_TOKEN` dan" va `R2_ACCESS_KEY_ID` haqidagi qismlar eskirdi. Eslatma: bu yo'lda fayl baytlari worker orqali o'tadi
 (foydalanuvchi talabi); worker so'rovlari soni: fayl hajmi/32 MB + /64 MB (≈ 400 MB fayl uchun ~20 so'rov).
+
+**Oqim (streaming) bilan uzatish (2026-10):** yuklab olish — fayl BITTA oqim (`GET /api/r2/get`, uzilsa `offset` dan davom etadi), 1 so'rov.
+Yuklash — bo'laklar xotiraga yig'ilmaydi (`FixedLengthStream` — so'rov tanasi to'g'ridan-to'g'ri R2 multipart'ga uzatiladi), shu sabab
+bo'lak 32 MB emas, Cloudflare so'rov tanasi limiti ostida 90 MB (`R2_PART_MB`; Free/Pro 100 MB). 400 MB fayl: ~5 yozish + 1 olish
+so'rovi (avval ~20). Butun faylni bitta oqimda yozib bo'lmaydi — limit so'rov tanasining o'ziga qo'yilgan.

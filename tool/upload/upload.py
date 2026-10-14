@@ -78,36 +78,34 @@ def is_committed(name: str) -> bool:
 
 
 def download(name: str, dst: Path, size: int):
-    """R2'dan worker orqali bo'laklab (Range) yuklab oladi; har bo'lak alohida qayta uriniladi."""
-    CH = 64 * 1048576
-    t0, last_log, got = time.time(), 0.0, 0
+    """R2'dan worker orqali BITTA oqim (stream) bilan yuklab oladi; uzilsa qolgan joyidan (`offset`) davom ettiradi."""
+    t0, last_log, got, err = time.time(), 0.0, 0, None
     with open(dst, "wb") as f:
-        while got < size:
-            length = min(CH, size - got)
-            err = None
-            for attempt in range(1, 6):
-                try:
-                    req = urllib.request.Request(
-                        f"{API}/api/r2/get?file={urllib.parse.quote(name)}&offset={got}&length={length}",
-                        headers={"X-Encode-Token": TOKEN, "User-Agent": "arugram-upload"})
-                    with urllib.request.urlopen(req, timeout=300) as r:
-                        data = r.read()
-                    if len(data) != length:
-                        raise RuntimeError(f"bo'lak hajmi {len(data)} != {length}")
-                    f.write(data)
-                    err = None
+        for attempt in range(1, 9):
+            try:
+                req = urllib.request.Request(
+                    f"{API}/api/r2/get?file={urllib.parse.quote(name)}&offset={got}",
+                    headers={"X-Encode-Token": TOKEN, "User-Agent": "arugram-upload"})
+                with urllib.request.urlopen(req, timeout=120) as r:
+                    while True:
+                        chunk = r.read(1 << 20)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        got += len(chunk)
+                        if time.time() - last_log >= 5:
+                            last_log = time.time()
+                            log(f"    R2'dan yuklab olinmoqda {got * 100 // max(size, 1)}% "
+                                f"({got / 1048576:.0f}/{size / 1048576:.0f} MB, {got / 1048576 / max(time.time() - t0, 0.1):.1f} MB/s)")
+                if got >= size:
                     break
-                except Exception as ex:  # noqa: BLE001
-                    err = ex
-                    log(f"  R2'dan olish ({got // 1048576} MB) {attempt}/5 muvaffaqiyatsiz: {ex}")
-                    time.sleep(3 * attempt)
-            if err is not None:
-                raise RuntimeError(f"R2'dan olib bo'lmadi: {err}")
-            got += length
-            if time.time() - last_log >= 5:
-                last_log = time.time()
-                log(f"    R2'dan yuklab olinmoqda {got * 100 // max(size, 1)}% "
-                    f"({got / 1048576:.0f}/{size / 1048576:.0f} MB, {got / 1048576 / max(time.time() - t0, 0.1):.1f} MB/s)")
+                err = RuntimeError(f"oqim erta tugadi ({got}/{size})")
+            except Exception as ex:  # noqa: BLE001
+                err = ex
+            log(f"  R2'dan olish {attempt}/8 uzildi ({got // 1048576} MB da): {err} — davom ettiriladi")
+            time.sleep(3 * attempt)
+    if got != size:
+        raise RuntimeError(f"R2'dan olib bo'lmadi: {err}")
 
 
 async def beat_loop(name: str):

@@ -12114,7 +12114,7 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
         }
         if path == "/api/encode/r2put" {
             return match r2::register(env, (a, s, e), queued_at, q, kind, file, &key, size).await {
-                Ok(upload_id) => ok(json!({"ok": true, "upload_id": upload_id, "part_size": r2::PART_SIZE})),
+                Ok(upload_id) => ok(json!({"ok": true, "upload_id": upload_id, "part_size": r2::part_size(env)})),
                 // R2'da joy yo'q: kodlovchi bo'shaguncha kutadi (yuklovchi workflow fayllarni olib borib o'chiradi).
                 Err("full") => ok(json!({"ok": false, "wait": true})),
                 Err(_) => json_resp(&json!({"error": "r2"}), 503),

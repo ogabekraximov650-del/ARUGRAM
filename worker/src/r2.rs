@@ -17,11 +17,15 @@
 // Bot faylni yopiq kanalga saqlab bazaga yozgach (`encupload::on_file`) `finish` R2 obyekti va qatorni o'chiradi.
 
 use super::*;
-use worker::{Bucket, Range, UploadedPart};
+use worker::{Bucket, FixedLengthStream, Range, UploadedPart};
 
 const WORKFLOW: &str = "upload.yml";
-/// Kodlovchi bo'lak hajmi (multipart: oxirgisidan boshqalari bir xil va kamida 5 MiB bo'lishi shart).
-pub(crate) const PART_SIZE: i64 = 32 * 1024 * 1024;
+/// Kodlovchi bo'lak hajmi (multipart: oxirgisidan boshqalari bir xil va kamida 5 MiB bo'lishi shart). Bo'lak xotiraga
+/// YIGILMAYDI — so'rov tanasi oqim (stream) bilan to'g'ridan-to'g'ri R2'ga uzatiladi, shu sabab chegara faqat Cloudflare'ning
+/// so'rov tanasi limiti (Free/Pro 100 MB): standart 90 MB (`R2_PART_MB` bilan o'zgartiriladi; Business/Enterprise'da kattaroq mumkin).
+pub(crate) fn part_size(env: &Env) -> i64 {
+    tg_secret(env, "R2_PART_MB").parse::<i64>().unwrap_or(90).clamp(5, 5000) * 1024 * 1024
+}
 /// Yuklovchi ijarasi: shu vaqtda `beat` kelmasa fayl boshqa run'ga o'tadi.
 const LEASE_MS: i64 = 15 * 60 * 1000;
 const MAX_ATTEMPTS: i64 = 6;
@@ -96,7 +100,7 @@ pub(crate) async fn register(env: &Env, (a, s, e): (i64, i64, i64), queued_at: i
     Ok(id)
 }
 
-/// `PUT /api/r2/part?file=..&n=..` — bitta bo'lak (so'rov tanasi) R2 multipart yuklashiga yoziladi; `etag` qaytadi.
+/// `PUT /api/r2/part?file=..&n=..` — bitta bo'lak (so'rov tanasi, OQIM bilan) R2 multipart yuklashiga yoziladi; `etag` qaytadi.
 async fn put_part(mut req: Request, env: &Env) -> Result<Response> {
     let url = req.url()?;
     let q = |k: &str| url.query_pairs().find(|(a, _)| a == k).map(|(_, v)| v.to_string()).unwrap_or_default();
@@ -109,11 +113,13 @@ async fn put_part(mut req: Request, env: &Env) -> Result<Response> {
     if n == 0 || id.is_empty() {
         return json_resp(&json!({"error": "bolak"}), 400);
     }
-    let bytes = req.bytes().await?;
-    if bytes.is_empty() || bytes.len() as i64 > PART_SIZE {
+    // OQIM: tana xotiraga yig'ilmaydi, R2'ga to'g'ridan-to'g'ri uzatiladi (Content-Length shart).
+    let len = req.headers().get("Content-Length").ok().flatten().and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+    if len == 0 || len as i64 > part_size(env) {
         return json_resp(&json!({"error": "hajm"}), 400);
     }
-    let part = b.resume_multipart_upload(&file, id)?.upload_part(n, bytes).await?;
+    let stream = FixedLengthStream::wrap(req.stream()?, len);
+    let part = b.resume_multipart_upload(&file, id)?.upload_part(n, stream).await?;
     ok(json!({"ok": true, "etag": part.etag(), "n": part.part_number()}))
 }
 
@@ -249,14 +255,20 @@ async fn get_part(req: Request, env: &Env) -> Result<Response> {
     }
     let Some(b) = bucket(env) else { return json_resp(&json!({"error": "r2"}), 503) };
     let (offset, length) = (q("offset").parse::<u64>().unwrap_or(0), q("length").parse::<u64>().unwrap_or(0));
+    // Butun fayl BITTA oqim (stream) bilan; uzilsa yuklovchi `offset` dan davom ettiradi (`length` — ixtiyoriy).
     let mut g = b.get(&file);
     if length > 0 {
         g = g.range(Range::OffsetWithLength { offset, length });
+    } else if offset > 0 {
+        g = g.range(Range::OffsetToEnd { offset });
     }
     let Some(obj) = g.execute().await? else { return json_resp(&json!({"error": "yoq"}), 404) };
+    let total = obj.size();
+    let want = if length > 0 { length.min(total.saturating_sub(offset)) } else { total.saturating_sub(offset) };
     let Some(body) = obj.body() else { return json_resp(&json!({"error": "tana"}), 404) };
     let resp = Response::from_body(body.response_body()?)?;
     let h = Headers::new();
+    h.set("Content-Length", &want.to_string())?;
     h.set("Content-Type", "application/octet-stream")?;
     h.set("Cache-Control", "no-store")?;
     Ok(resp.with_headers(h))

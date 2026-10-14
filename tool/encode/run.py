@@ -304,27 +304,57 @@ BOT = ""  # kodlash botining username'i (worker `claim` javobida beradi); bo'sh 
 R2 = False  # worker `claim` javobida (`r2`): R2 sozlangan bo'lsa tayyor fayllar R2'ga yoziladi (yuklovchi workflow Telegram'ga olib boradi)
 
 
+class _Slice:
+    """Fayldan `length` bayt (bo'lak) o'qiydi — xotiraga yig'ilmaydi (oqim); o'qilgan sari foiz yangilanadi."""
+
+    def __init__(self, f, length: int, cb):
+        self.f, self.left, self.cb = f, length, cb
+
+    def read(self, n=-1):
+        if self.left <= 0:
+            return b""
+        n = self.left if n is None or n < 0 else min(n, self.left)
+        b = self.f.read(n)
+        self.left -= len(b)
+        self.cb(len(b))
+        return b
+
+
 def put_parts(path: Path, name: str, part_size: int, label: str) -> list:
-    """Faylni worker orqali R2'ga bo'laklab (multipart) yozadi: hech qanday R2 kaliti kerak emas — worker o'z binding'i bilan yozadi.
-    Qaytadi: `[{"n": 1, "etag": "..."}, ...]` (worker `r2ready` da yig'adi)."""
+    """Faylni worker orqali R2'ga yozadi: har bo'lak (standart 90 MB) OQIM bilan, xotiraga yig'ilmasdan; hech qanday R2/S3 kaliti
+    kerak emas — worker o'z binding'i bilan yozadi. Qaytadi: `[{"n": 1, "etag": "..."}, ...]` (worker `r2ready` da yig'adi)."""
     size = path.stat().st_size
-    t0, last = time.time(), 0.0
-    parts, done = [], 0
+    t0, state = time.time(), {"done": 0, "last": 0.0}
+
+    def progress(k):
+        state["done"] += k
+        now = time.time()
+        if now - state["last"] >= 1.0 or state["done"] >= size:
+            state["last"] = now
+            d = state["done"]
+            sp = d / max(now - t0, 0.1) / 1048576
+            STATUS.update(xfer={
+                "kind": "R2'ga yuklash", "pct": round(d * 100 / size, 1) if size else 0,
+                "cur_mb": round(d / 1048576, 1), "total_mb": round(size / 1048576, 1), "mbps": round(sp, 2),
+                "elapsed": int(now - t0), "eta": int((size - d) / 1048576 / sp) if sp > 0 else -1,
+            })
+
+    parts = []
     with open(path, "rb") as f:
-        n = 0
-        while True:
-            chunk = f.read(part_size)
-            if not chunk:
-                break
+        n, off = 0, 0
+        while off < size:
             n += 1
+            length = min(part_size, size - off)
             err = None
             for attempt in range(1, 5):
                 try:
+                    f.seek(off)
+                    state["done"] = off  # qayta urinishda foiz orqaga qaytadi
                     req = urllib.request.Request(
-                        f"{API}/api/r2/part?file={urllib.parse.quote(name)}&n={n}", data=chunk, method="PUT",
+                        f"{API}/api/r2/part?file={urllib.parse.quote(name)}&n={n}", data=_Slice(f, length, progress), method="PUT",
                         headers={"X-Encode-Token": TOKEN, "Content-Type": "application/octet-stream",
-                                 "User-Agent": "arugram-encoder"})
-                    with urllib.request.urlopen(req, timeout=300) as r:
+                                 "Content-Length": str(length), "User-Agent": "arugram-encoder"})
+                    with urllib.request.urlopen(req, timeout=900) as r:
                         parts.append({"n": n, "etag": json.loads(r.read())["etag"]})
                     err = None
                     break
@@ -333,16 +363,7 @@ def put_parts(path: Path, name: str, part_size: int, label: str) -> list:
                     time.sleep(3 * attempt)
             if err is not None:
                 raise RuntimeError(f"bo'lak {n}: {err}")
-            done += len(chunk)
-            now = time.time()
-            if now - last >= 1.0 or done >= size:
-                last = now
-                sp = done / max(now - t0, 0.1) / 1048576
-                STATUS.update(xfer={
-                    "kind": "R2'ga yuklash", "pct": round(done * 100 / size, 1) if size else 0,
-                    "cur_mb": round(done / 1048576, 1), "total_mb": round(size / 1048576, 1), "mbps": round(sp, 2),
-                    "elapsed": int(now - t0), "eta": int((size - done) / 1048576 / sp) if sp > 0 else -1,
-                })
+            off += length
     return parts
 
 
@@ -370,7 +391,7 @@ async def upload_r2(ident: dict, path: Path, name: str, kind: str, key: str, lab
             if waited:
                 log(f"  {label}: R2'da joy ochildi ({waited // 60} daqiqa kutildi)")
                 waited = 0
-            parts = await asyncio.to_thread(put_parts, path, name, int(r.get("part_size") or 33554432), label)
+            parts = await asyncio.to_thread(put_parts, path, name, int(r.get("part_size") or 94371840), label)
             await asyncio.to_thread(api, "r2ready", {**ident, "kind": kind, "file": name, "size": size, "parts": parts})
             STATUS.update(xfer=None)
             log(f"  {label}: {name} R2'ga yozildi ({size / 1048576:.1f} MB) — Telegram'ga yuklovchi workflow olib boradi")
