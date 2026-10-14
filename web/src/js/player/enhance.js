@@ -5,9 +5,9 @@ import { ENHANCE_FRAG } from './enhance-shader.js';
 
 const VERT = 'attribute vec2 p; varying vec2 vTexSamplingCoord; void main(){ vTexSamplingCoord = p * 0.5 + 0.5; gl_Position = vec4(p, 0.0, 1.0); }';
 // sharp, sat, con, deband, line — ilovadagi AruEnhanceShaderProgram bilan bir xil
-const LEVELS = { 1: [0.35, 1.12, 1.04, 0.5, 0.0], 2: [0.65, 1.25, 1.09, 0.8, 0.5] };
-const MAX_W = 1920;
-const MAX_H = 1080;
+const LEVELS = { 1: [0.45, 1.18, 1.07, 0.5, 0.0], 2: [0.8, 1.35, 1.14, 0.8, 0.6] };
+// Daraja bo'yicha chiqish o'lchami chegarasi (sekin qurilmada pasaytiriladi).
+const CAP = { 1: [1280, 720], 2: [1920, 1080] };
 
 export function createEnhancer(video, box) {
   let canvas = null;
@@ -21,6 +21,11 @@ export function createEnhancer(video, box) {
   let raf = 0;
   let vfc = 0;
   let seed = 0;
+  let scale = 1;       // 1 -> 0.75 -> 0.5 (kadr tashlansa avtomatik pasayadi)
+  let guardT = 0;
+  let lastDropped = 0;
+  let lastTotal = 0;
+  let guardHits = 0;
   let evs = null;
 
   function init() {
@@ -82,7 +87,8 @@ export function createEnhancer(video, box) {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const k = Math.min((r.width || vw) / vw, (r.height || vh) / vh) * dpr;
     let w = Math.max(2, Math.round(vw * k)); let h = Math.max(2, Math.round(vh * k));
-    const cap = Math.min(MAX_W / w, MAX_H / h, 1);
+    const [mw, mh] = CAP[level] || CAP[1];
+    const cap = Math.min(mw / w, mh / h, 1) * scale;
     w = Math.max(2, Math.round(w * cap)); h = Math.max(2, Math.round(h * cap));
     if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
     return true;
@@ -118,6 +124,22 @@ export function createEnhancer(video, box) {
     }
   }
 
+  // Himoya: kadr tashlansa avval o'lcham pasayadi (0.75 -> 0.5), baribir sekin bo'lsa effekt o'chadi (qotmasin).
+  function guard() {
+    if (!active || !video.getVideoPlaybackQuality) return;
+    const q = video.getVideoPlaybackQuality();
+    const dd = q.droppedVideoFrames - lastDropped; const dt = q.totalVideoFrames - lastTotal;
+    lastDropped = q.droppedVideoFrames; lastTotal = q.totalVideoFrames;
+    if (video.paused || dt < 20) return;
+    if (dd / dt > 0.12) {
+      guardHits += 1;
+      if (scale > 0.5) { scale = scale > 0.75 ? 0.75 : 0.5; guardHits = 0; } else if (guardHits >= 2) {
+        fail();
+        try { window.dispatchEvent(new Event('aru-enhance-failed')); } catch (_) { /* */ }
+      }
+    } else guardHits = 0;
+  }
+
   const once = () => requestAnimationFrame(draw);
 
   function start(lv) {
@@ -129,6 +151,9 @@ export function createEnhancer(video, box) {
       evs = ['seeked', 'loadeddata', 'pause', 'playing', 'resize', 'emptied'];
       evs.forEach((n) => video.addEventListener(n, once));
       window.addEventListener('resize', once);
+      scale = 1; guardHits = 0;
+      const q0 = video.getVideoPlaybackQuality?.(); lastDropped = q0?.droppedVideoFrames || 0; lastTotal = q0?.totalVideoFrames || 0;
+      guardT = setInterval(guard, 2500);
       schedule();
     }
     once();
@@ -142,6 +167,7 @@ export function createEnhancer(video, box) {
     vfc = 0; raf = 0;
     if (evs) { evs.forEach((n) => video.removeEventListener(n, once)); evs = null; }
     window.removeEventListener('resize', once);
+    clearInterval(guardT); guardT = 0;
     if (canvas) canvas.style.display = 'none';
   }
 

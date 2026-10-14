@@ -125,12 +125,26 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
   }
 
   // ── ARUGRAM: TASVIRNI YAXSHILASH ─────────────────────────────
+  /** Qurilma effektni ko'tara olmasa (kadr tashlanadi) darajasi tushiriladi — Dart'ga xabar beriladi. */
+  public interface EnhanceListener {
+    void onEnhanceDegraded(int newLevel);
+  }
+
   private int enhanceLevel = 0;
   private boolean enhanceListenerAdded = false;
+  @Nullable private EnhanceListener enhanceListener;
+  private int enhanceDrops = 0;
+  private long enhanceWindowMs = 0;
+
+  public void setEnhanceListener(@Nullable EnhanceListener l) {
+    enhanceListener = l;
+  }
 
   /**
    * Tasvirni yaxshilashni yoqadi/o'chiradi (0 — o'chiq, 1 — yengil, 2 — kuchli). Muvaffaqiyatli bo'lsa
    * {@code true}; effektni qo'llab bo'lmasa {@code false} (Dart tomoni rang filtriga qaytadi).
+   *
+   * <p>Manba past o'lchamli bo'lsa avval GPU'da kattalashtiriladi (1 — 720p, 2 — 1080p gacha), keyin shader o'tkazadi.
    */
   @UnstableApi
   public boolean setEnhance(int level) {
@@ -145,6 +159,76 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
         // Effekt konveyeri (GL) ishlamasa — effektsiz qayta tiklanadi, ijro to'xtab qolmasin.
         exoPlayer.addListener(
             new androidx.media3.common.Player.Listener() {
+              @Override
+              public void onPlayerError(androidx.media3.common.PlaybackException error) {
+                if (enhanceLevel <= 0) {
+                  return;
+                }
+                for (Throwable t = error; t != null; t = t.getCause()) {
+                  if (t instanceof androidx.media3.common.VideoFrameProcessingException) {
+                    enhanceLevel = 0;
+                    exoPlayer.setVideoEffects(
+                        java.util.Collections.<androidx.media3.common.Effect>emptyList());
+                    exoPlayer.prepare();
+                    if (enhanceListener != null) {
+                      enhanceListener.onEnhanceDegraded(0);
+                    }
+                    return;
+                  }
+                }
+              }
+            });
+        // Sekin telefon: kadrlar tashlansa daraja avtomatik tushiriladi (qotib qolmasin).
+        exoPlayer.addAnalyticsListener(
+            new androidx.media3.exoplayer.analytics.AnalyticsListener() {
+              @Override
+              public void onDroppedVideoFrames(
+                  androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime eventTime,
+                  int droppedFrames,
+                  long elapsedMs) {
+                if (enhanceLevel <= 0) {
+                  return;
+                }
+                enhanceDrops += droppedFrames;
+                enhanceWindowMs += Math.max(elapsedMs, 1);
+                if (enhanceWindowMs >= 3000) {
+                  final double perSec = enhanceDrops * 1000.0 / enhanceWindowMs;
+                  enhanceDrops = 0;
+                  enhanceWindowMs = 0;
+                  if (perSec > 3.0) {
+                    final int next = enhanceLevel >= 2 ? 1 : 0;
+                    setEnhance(next);
+                    if (enhanceListener != null) {
+                      enhanceListener.onEnhanceDegraded(next);
+                    }
+                  }
+                }
+              }
+            });
+      }
+      enhanceDrops = 0;
+      enhanceWindowMs = 0;
+      final java.util.List<androidx.media3.common.Effect> effects = new java.util.ArrayList<>();
+      final androidx.media3.common.Format f = exoPlayer.getVideoFormat();
+      final int target = level >= 2 ? 1080 : 720;
+      if (f != null && f.height > 0 && f.height < target) {
+        effects.add(androidx.media3.effect.Presentation.createForHeight(target));
+      }
+      effects.add(new AruEnhanceEffect(level));
+      exoPlayer.setVideoEffects(effects);
+      enhanceLevel = level;
+      return true;
+    } catch (Throwable t) {
+      enhanceLevel = 0;
+      try {
+        exoPlayer.setVideoEffects(java.util.Collections.<androidx.media3.common.Effect>emptyList());
+      } catch (Throwable ignored) {
+        // e'tiborsiz
+      }
+      return false;
+    }
+  }
+
               @Override
               public void onPlayerError(androidx.media3.common.PlaybackException error) {
                 if (enhanceLevel <= 0) {

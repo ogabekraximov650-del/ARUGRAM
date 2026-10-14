@@ -1516,6 +1516,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     // boshlaydi.
     _lastPlayedUrl = _currentUrl;
     _enhanceNative = false;
+    _enhanceTouched = false;
     _applyEnhance();
     _syncWatchedUrls();
     _startHealthWatchdog();
@@ -3115,31 +3116,55 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   static const MethodChannel _enhanceCh = MethodChannel('uz.arugram.player/enhance');
 
   /// `true` — effekt ExoPlayer ichida (GPU shader: deband, o'tkirlik, chiziqlar, rang) ishlayapti;
-  /// `false` — native yo'q/ishlamadi, [_enhanced] rang filtriga qaytadi.
+  /// `false` — native yo'q/ishlamadi, [_enhanceFallback] rang filtriga qaytadi.
   bool _enhanceNative = false;
 
-  Future<void> _applyEnhance() async {
+  /// Shu controller uchun effekt hech yoqilmagan bo'lsa — o'chirish buyrug'i yuborilmaydi (ExoPlayer'ning effekt
+  /// konveyeri bekorga ishga tushmasin: sekinlashish bo'lmasligi uchun).
+  bool _enhanceTouched = false;
+
+  void _ensureEnhanceHandler() {
+    _enhanceCh.setMethodCallHandler((call) async {
+      if (call.method != 'degraded') return;
+      final args = call.arguments;
+      if (args is! Map || args['playerId'] != _controller?.playerId) return;
+      final next = (args['level'] as num?)?.toInt() ?? 0;
+      AppSettings.instance.setVideoEnhance(next);
+      if (!mounted) return;
+      setState(() => _enhanceNative = next > 0);
+      _showNotice(next > 0
+          ? 'Telefon sekin — yaxshilash "${_enhanceNames[next]}" ga tushirildi'
+          : 'Telefon sekin — tasvirni yaxshilash o\'chirildi');
+    });
+  }
+
+  Future<void> _applyEnhance({bool announce = false}) async {
     final ctrl = _controller;
     final level = AppSettings.instance.videoEnhance;
     if (ctrl == null) return;
-    var ok = false;
-    if (level > 0) {
-      try {
-        ok = (await _enhanceCh.invokeMethod<bool>(
-                'set', {'playerId': ctrl.playerId, 'level': level})) ==
-            true;
-      } catch (_) {
-        ok = false;
-      }
-    } else {
-      // O'chirish: native effekt bo'lsa ham olib tashlanadi.
-      try {
-        await _enhanceCh.invokeMethod<bool>(
-            'set', {'playerId': ctrl.playerId, 'level': 0});
-      } catch (_) {}
+    if (level == 0 && !_enhanceTouched) {
+      if (announce) _showNotice('Tasvirni yaxshilash: o\'chiq');
+      return;
     }
+    _ensureEnhanceHandler();
+    var ok = false;
+    try {
+      ok = (await _enhanceCh.invokeMethod<bool>(
+              'set', {'playerId': ctrl.playerId, 'level': level})) ==
+          true;
+    } catch (_) {
+      ok = false;
+    }
+    if (level > 0) _enhanceTouched = true;
     if (!mounted || ctrl != _controller) return;
-    setState(() => _enhanceNative = ok);
+    setState(() => _enhanceNative = level > 0 && ok);
+    if (announce) {
+      _showNotice(level == 0
+          ? 'Tasvirni yaxshilash: o\'chiq'
+          : ok
+              ? 'Tasvirni yaxshilash: ${_enhanceNames[level]} (GPU)'
+              : 'GPU effekt ishlamadi — oddiy rang filtri (${_enhanceNames[level]})');
+    }
   }
 
   /// Native effekt ishlamasa — GPU'siz oddiy rang filtri (zaxira).
@@ -3147,8 +3172,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     final lv = AppSettings.instance.videoEnhance;
     if (lv == 0 || _enhanceNative) return video;
     final m = lv == 1
-        ? _enhanceMatrix(1.16, 1.06, 0.01)
-        : _enhanceMatrix(1.30, 1.11, 0.015);
+        ? _enhanceMatrix(1.18, 1.07, 0.01)
+        : _enhanceMatrix(1.35, 1.14, 0.015);
     return ColorFiltered(colorFilter: ColorFilter.matrix(m), child: video);
   }
 
@@ -3156,7 +3181,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     AppSettings.instance
         .setVideoEnhance((AppSettings.instance.videoEnhance + 1) % 3);
     if (mounted) setState(() {});
-    _applyEnhance();
+    _applyEnhance(announce: true);
   }
 
   /// "Avto o'tkazish" tugmasi bosildi.

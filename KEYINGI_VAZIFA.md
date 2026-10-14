@@ -6379,3 +6379,11 @@ dither; past bitreyt "zinapoya"), CAS-o'tkirlik (faqat chegaralarda), chiziqlarn
   shader matni `enhance-shader.js` (AVTOMATIK: `node tool/shaders/sync-web.mjs`). WebGL bo'lmasa/CORS bo'lsa — CSS filtri.
 - Tekshirildi: shader headless Chromium (WebGL) da kompilyatsiya va ishlashi; Java/Dart kodi bu muhitda kompilyatsiya QILINMAGAN (SDK yo'q) — CI loglari bilan tekshiriladi.
 - `build-flutter-apk.yml` yo'llariga `packages/**` qo'shildi.
+
+(Tuzatish) Foydalanuvchi: "grafika o'zgarmadi, ilova va web biroz qotdi". Chora:
+- Effekt O'CHIQ bo'lsa ExoPlayer'ning effekt konveyeri umuman ishga tushirilmaydi (`_enhanceTouched`; avval har controller'da bo'sh ro'yxat yuborilardi).
+- Web: CSS zaxirasidan SVG konvolyutsiya olib tashlandi (CPU'da qotirardi); WebGL himoyasi — `getVideoPlaybackQuality` bo'yicha kadr tashlansa chiqish o'lchami 1 -> 0.75 -> 0.5, baribir sekin bo'lsa effekt o'chadi.
+- Ilova: `AnalyticsListener.onDroppedVideoFrames` — kadr tashlansa daraja 2 -> 1 -> 0 ga avtomatik tushadi va ekranda xabar chiqadi.
+- Past o'lchamli manba GPU'da kattalashtiriladi (1 — 720p, 2 — 1080p gacha: `Presentation.createForHeight`) — chiziqlar haqiqatan aniqroq bo'lishi uchun.
+- Presetlar kuchaytirildi (Yengil: o'tkirlik .45, to'yinganlik 1.18, kontrast 1.07; Kuchli: .8, 1.35, 1.14, chiziq .6) — farq ko'zga tashlansin.
+- Yoqilganda ekranda holat xabari ("(GPU)" yoki "GPU effekt ishlamadi — oddiy rang filtri") — qaysi yo'l ishlayotgani ko'rinadi.

@@ -161,26 +161,17 @@ function buildPlayer(el, route, season, opts) {
   // WebGL shader (ilovadagi bilan bir xil: deband/denoise, o'tkirlik, chiziqlar, rang). WebGL bo'lmasa — CSS filtri.
   const ENH_LABEL = ["O'chiq", 'Yengil', 'Kuchli'];
   const enhancer = createEnhancer(video, box);
-  function ensureSharpFilter() {
-    if (document.getElementById('aru-sharp-svg')) return;
-    const d = document.createElement('div');
-    d.id = 'aru-sharp-svg';
-    d.style.cssText = 'position:absolute;width:0;height:0;overflow:hidden';
-    d.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0"><filter id="aru-sharp" color-interpolation-filters="sRGB">'
-      + '<feConvolveMatrix order="3" preserveAlpha="true" kernelMatrix="0 -0.45 0 -0.45 2.8 -0.45 0 -0.45 0"/></filter></svg>';
-    document.body.appendChild(d);
-  }
+  // CSS zaxirasi FAQAT rang (SVG konvolyutsiya CPU'da ishlab qotirardi — olib tashlandi).
   function cssEnhance(lv) {
-    if (lv === 2) ensureSharpFilter();
-    video.style.filter = lv === 1 ? 'saturate(1.16) contrast(1.06) brightness(1.02)'
-      : lv === 2 ? 'saturate(1.28) contrast(1.1) brightness(1.03) url(#aru-sharp)' : '';
+    video.style.filter = lv === 1 ? 'saturate(1.18) contrast(1.07) brightness(1.02)'
+      : lv === 2 ? 'saturate(1.35) contrast(1.14) brightness(1.03)' : '';
   }
   function applyEnhance() {
     const lv = playerSettings.enhance;
     if (lv === 0) { enhancer.stop(); cssEnhance(0); return; }
     if (enhancer.start(lv)) cssEnhance(0); else cssEnhance(lv);
   }
-  const onEnhFail = () => cssEnhance(playerSettings.enhance);
+  const onEnhFail = () => cssEnhance(Math.min(1, playerSettings.enhance));
   window.addEventListener('aru-enhance-failed', onEnhFail);
   applyEnhance();
   const panes = [...el.querySelectorAll('.pl-pane')];

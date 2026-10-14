@@ -31,8 +31,8 @@ final class AruEnhanceShaderProgram extends BaseGlShaderProgram {
           + "}\n";
 
   // sharp, sat, con, deband, line
-  private static final float[] LEVEL1 = {0.35f, 1.12f, 1.04f, 0.5f, 0.0f};
-  private static final float[] LEVEL2 = {0.65f, 1.25f, 1.09f, 0.8f, 0.5f};
+  private static final float[] LEVEL1 = {0.45f, 1.18f, 1.07f, 0.5f, 0.0f};
+  private static final float[] LEVEL2 = {0.8f, 1.35f, 1.14f, 0.8f, 0.6f};
 
   private final GlProgram glProgram;
 

@@ -59,6 +59,16 @@ public class VideoPlayerPlugin implements FlutterPlugin, AndroidVideoPlayerApi {
             result.success(false);
             return;
           }
+          final long pid = id.longValue();
+          vp.setEnhanceListener(
+              newLevel -> {
+                if (enhanceChannel != null) {
+                  final java.util.HashMap<String, Object> m = new java.util.HashMap<>();
+                  m.put("playerId", pid);
+                  m.put("level", newLevel);
+                  enhanceChannel.invokeMethod("degraded", m);
+                }
+              });
           result.success(vp.setEnhance(lv.intValue()));
         });
 
