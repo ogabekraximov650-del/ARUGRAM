@@ -1,27 +1,27 @@
 // ══════════════════════════════════════════════════════════════
-//  R2 ORALIQ OMBORI: kodlovchi -> R2 -> yuklovchi workflow -> Telegram (bot) -> baza
+//  R2 ORALIQ OMBORI: kodlovchi -> worker -> R2 -> yuklovchi workflow -> Telegram (bot) -> baza
 // ══════════════════════════════════════════════════════════════
 //
 // TALAB (foydalanuvchi): tayyor fayllar avval Cloudflare R2 (`arumediatv` bucket) ga yuklansin; ALOHIDA workflow
 // (`upload.yml`) ularni R2'dan olib Telegram'ga (asosiy bot chatiga) yuklasin; baza to'liq yozilgach fayl R2'dan o'chsin.
 // Shunda kodlash Telegram yuklashini kutmaydi, yuklash qotib qolsa fayl R2'da turaveradi va qayta uriniladi.
 //
-// FAYL BAYTLARI WORKER ORQALI O'TMAYDI: worker faqat imzolangan (AWS SigV4 presigned) havolalar beradi:
-//   * kodlovchi `PUT` havolasi bilan R2'ga to'g'ridan-to'g'ri yozadi (`/api/encode/r2put`, `/api/encode/r2ready`);
-//   * yuklovchi `GET` havolasi bilan R2'dan oladi (`/api/r2/claim`).
-// Kalitlar: `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` (R2 -> Manage API tokens, "Object Read & Write"), `R2_ACCOUNT_ID`.
-// Ular yo'q bo'lsa `ready()` false — run'lar eski usulda (bot chatiga to'g'ridan-to'g'ri) yuklaydi.
+// R2 BILAN ALOQA — WORKER'NING O'Z BINDING'I (`R2`, deploy paytida `wrangler.toml` ga qo'shiladi): hech qanday R2/S3 kaliti
+// yoki token KERAK EMAS. Run'lar faqat worker manziliga so'rov yuboradi (`ENCODE_TOKEN` — worker yo'llarini himoyalaydi):
+//   * kodlovchi: `/api/encode/r2put` ("shuncha MB sig'adimi?") -> `PUT /api/r2/part` (32 MB bo'laklar, multipart)
+//     -> `/api/encode/r2ready` (yig'ish va hajmni tekshirish);
+//   * yuklovchi: `/api/r2/claim` -> `GET /api/r2/get` (Range bo'laklar) -> Telegram -> `/api/r2/done`.
+// Bo'laklar kichik (worker so'rov tanasi chegarasi 100 MB va xotira 128 MB dan past), shu sabab katta fayl ham o'tadi.
 //
 // Holat jadvali `r2_files`: `uploading` (kodlovchi yozyapti) -> `ready` (R2'da, navbatda) -> `sending` (yuklovchi oldi).
 // Bot faylni yopiq kanalga saqlab bazaga yozgach (`encupload::on_file`) `finish` R2 obyekti va qatorni o'chiradi.
 
 use super::*;
-use hmac::{Hmac, Mac};
-use sha2::{Digest, Sha256};
+use worker::{Bucket, Range, UploadedPart};
 
-const BUCKET: &str = "arumediatv";
-const REGION: &str = "auto";
 const WORKFLOW: &str = "upload.yml";
+/// Kodlovchi bo'lak hajmi (multipart: oxirgisidan boshqalari bir xil va kamida 5 MiB bo'lishi shart).
+pub(crate) const PART_SIZE: i64 = 32 * 1024 * 1024;
 /// Yuklovchi ijarasi: shu vaqtda `beat` kelmasa fayl boshqa run'ga o'tadi.
 const LEASE_MS: i64 = 15 * 60 * 1000;
 const MAX_ATTEMPTS: i64 = 6;
@@ -45,107 +45,35 @@ const DDL: &str = "CREATE TABLE IF NOT EXISTS r2_files (
 ) WITHOUT ROWID";
 
 pub(crate) async fn migrate(env: &Env) {
-    if config_get(env, "mig_r2").await.is_some() {
+    if config_get(env, "mig_r2b").await.is_some() {
         return;
     }
     let _ = turso_exec(env, DDL, vec![]).await;
-    config_put(env, "mig_r2", "1").await;
+    // Multipart yuklash identifikatori (birinchi variantda yo'q edi).
+    let _ = turso_exec(env, "ALTER TABLE r2_files ADD COLUMN upload_id TEXT DEFAULT ''", vec![]).await;
+    config_put(env, "mig_r2b", "1").await;
 }
 
-// ── AWS SigV4 (presigned URL) ────────────────────────────────
-
-fn hex(b: &[u8]) -> String {
-    b.iter().map(|x| format!("{x:02x}")).collect()
+fn bucket(env: &Env) -> Option<Bucket> {
+    env.bucket("R2").ok()
 }
 
-fn hmac256(key: &[u8], data: &str) -> Vec<u8> {
-    let mut m = <Hmac<Sha256> as Mac>::new_from_slice(key).expect("hmac kaliti");
-    m.update(data.as_bytes());
-    m.finalize().into_bytes().to_vec()
-}
-
-fn pct(s: &str) -> String {
-    s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect()
-}
-
-/// `YYYYMMDDTHHMMSSZ` (UTC).
-fn amz_date(ms: i64) -> String {
-    let secs = ms.div_euclid(1000);
-    let days = secs.div_euclid(86_400);
-    let rem = secs.rem_euclid(86_400);
-    // Fuqaro sanasi (Howard Hinnant algoritmi).
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = if m <= 2 { y + 1 } else { y };
-    format!("{y:04}{m:02}{d:02}T{:02}{:02}{:02}Z", rem / 3600, rem % 3600 / 60, rem % 60)
-}
-
-/// Imzolangan havola (faqat `host` sarlavhasi imzolanadi, tana — `UNSIGNED-PAYLOAD`).
-fn presign(method: &str, host: &str, path: &str, akid: &str, secret: &str, region: &str, amzdate: &str, expires: i64) -> String {
-    let date = &amzdate[..8];
-    let scope = format!("{date}/{region}/s3/aws4_request");
-    let mut q = vec![
-        ("X-Amz-Algorithm", "AWS4-HMAC-SHA256".to_string()),
-        ("X-Amz-Credential", format!("{akid}/{scope}")),
-        ("X-Amz-Date", amzdate.to_string()),
-        ("X-Amz-Expires", expires.to_string()),
-        ("X-Amz-SignedHeaders", "host".to_string()),
-    ];
-    q.sort_by(|a, b| a.0.cmp(b.0));
-    let cq = q.iter().map(|(k, v)| format!("{}={}", pct(k), pct(v))).collect::<Vec<_>>().join("&");
-    let creq = format!("{method}\n{path}\n{cq}\nhost:{host}\n\nhost\nUNSIGNED-PAYLOAD");
-    let sts = format!("AWS4-HMAC-SHA256\n{amzdate}\n{scope}\n{}", hex(&Sha256::digest(creq.as_bytes())));
-    let mut k = hmac256(format!("AWS4{secret}").as_bytes(), date);
-    for part in [region, "s3", "aws4_request"] {
-        k = hmac256(&k, part);
-    }
-    let sig = hex(&hmac256(&k, &sts));
-    format!("https://{host}{path}?{cq}&X-Amz-Signature={sig}")
-}
-
-/// R2 sozlanganmi (kalitlar va hisob ID'si bor).
+/// R2 binding'i bormi (deploy paytida qo'shiladi; yo'q bo'lsa run'lar eski usulda yuklaydi).
 pub(crate) fn ready(env: &Env) -> bool {
-    !tg_secret(env, "R2_ACCESS_KEY_ID").is_empty() && !tg_secret(env, "R2_SECRET_ACCESS_KEY").is_empty()
-        && !tg_secret(env, "R2_ACCOUNT_ID").is_empty()
-}
-
-fn url(env: &Env, method: &str, file: &str, expires: i64) -> Option<String> {
-    if !ready(env) || !tg_safe_name(file) {
-        return None;
-    }
-    let host = format!("{}.r2.cloudflarestorage.com", tg_secret(env, "R2_ACCOUNT_ID"));
-    Some(presign(method, &host, &format!("/{BUCKET}/{file}"), &tg_secret(env, "R2_ACCESS_KEY_ID"),
-        &tg_secret(env, "R2_SECRET_ACCESS_KEY"), REGION, &amz_date(now_ms()), expires))
-}
-
-async fn r2_fetch(env: &Env, method: &str, file: &str) -> Option<(u16, Option<i64>)> {
-    let u = url(env, method, file, 300)?;
-    let mut init = RequestInit::new();
-    init.with_method(if method == "HEAD" { Method::Head } else { Method::Delete });
-    let req = Request::new_with_init(&u, &init).ok()?;
-    let r = Fetch::Request(req).send().await.ok()?;
-    let len = r.headers().get("content-length").ok().flatten().and_then(|v| v.parse::<i64>().ok());
-    Some((r.status_code(), len))
+    bucket(env).is_some()
 }
 
 // ── Kodlovchi tomoni ─────────────────────────────────────────
 
-/// Kodlovchi faylni R2'ga yozmoqchi ("shuncha MB sig'adimi?"): joy bo'lsa qator ochiladi va `PUT` havolasi qaytadi (2 soat);
-/// joy yo'q bo'lsa `Err("full")` — kodlovchi R2 bo'shaguncha KUTADI; R2 sozlanmagan yoki fayl butunlay sig'maydigan bo'lsa
-/// `Err("na")` — kodlovchi to'g'ridan-to'g'ri bot chatiga yuklaydi. Sig'im: `R2_MAX_GB` (standart 8; R2 bepul 10 GB).
+/// Kodlovchi faylni R2'ga yozmoqchi ("shuncha MB sig'adimi?"): joy bo'lsa qator ochiladi, multipart yuklash boshlanadi va
+/// `upload_id` qaytadi; joy yo'q bo'lsa `Err("full")` — kodlovchi R2 bo'shaguncha KUTADI; R2 yo'q yoki fayl butunlay
+/// sig'maydigan bo'lsa `Err("na")` — kodlovchi to'g'ridan-to'g'ri bot chatiga yuklaydi. Sig'im: `R2_MAX_GB` (standart 8).
 pub(crate) async fn register(env: &Env, (a, s, e): (i64, i64, i64), queued_at: i64, q: &str, kind: &str, file: &str,
         key: &str, size: i64) -> std::result::Result<String, &'static str> {
     migrate(env).await;
+    let Some(b) = bucket(env) else { return Err("na") };
     let cap: i64 = tg_secret(env, "R2_MAX_GB").parse::<i64>().unwrap_or(8).max(1) * 1024 * 1024 * 1024;
-    let Some(put) = url(env, "PUT", file, 7200) else { return Err("na") };
-    if size > cap {
+    if size > cap || !tg_safe_name(file) {
         return Err("na");
     }
     // Sig'im tekshiruvi va qator ochish BITTA so'rovda (4 ta run bir vaqtda so'rasa ham chegara oshmaydi).
@@ -162,14 +90,52 @@ pub(crate) async fn register(env: &Env, (a, s, e): (i64, i64, i64), queued_at: i
     if first_row(&r).is_none() {
         return Err("full");
     }
-    Ok(put)
+    let up = b.create_multipart_upload(file).execute().await.map_err(|_| "na")?;
+    let id = up.upload_id().await;
+    let _ = turso_exec(env, "UPDATE r2_files SET upload_id=? WHERE file_name=?", vec![TursoArg::text(&id), TursoArg::text(file)]).await;
+    Ok(id)
 }
 
-/// Kodlovchi yuklab bo'ldi: R2'da fayl bor va hajmi to'g'rimi tekshiriladi, keyin `ready` (yuklovchi olishi mumkin).
-pub(crate) async fn mark_ready(env: &Env, file: &str, size: i64) -> std::result::Result<(), String> {
-    let Some((code, len)) = r2_fetch(env, "HEAD", file).await else { return Err("r2_yetib_bormadi".into()) };
-    if code != 200 || len != Some(size) {
-        return Err(format!("r2_hajm ({code}, {len:?})"));
+/// `PUT /api/r2/part?file=..&n=..` — bitta bo'lak (so'rov tanasi) R2 multipart yuklashiga yoziladi; `etag` qaytadi.
+async fn put_part(mut req: Request, env: &Env) -> Result<Response> {
+    let url = req.url()?;
+    let q = |k: &str| url.query_pairs().find(|(a, _)| a == k).map(|(_, v)| v.to_string()).unwrap_or_default();
+    let (file, n) = (q("file"), q("n").parse::<u16>().unwrap_or(0));
+    let Some(row) = row(env, &file).await.filter(|r| r["state"].as_str() == Some("uploading")) else {
+        return json_resp(&json!({"error": "qator"}), 404);
+    };
+    let id = row["upload_id"].as_str().unwrap_or("").to_string();
+    let Some(b) = bucket(env) else { return json_resp(&json!({"error": "r2"}), 503) };
+    if n == 0 || id.is_empty() {
+        return json_resp(&json!({"error": "bolak"}), 400);
+    }
+    let bytes = req.bytes().await?;
+    if bytes.is_empty() || bytes.len() as i64 > PART_SIZE {
+        return json_resp(&json!({"error": "hajm"}), 400);
+    }
+    let part = b.resume_multipart_upload(&file, id)?.upload_part(n, bytes).await?;
+    ok(json!({"ok": true, "etag": part.etag(), "n": part.part_number()}))
+}
+
+/// Kodlovchi hamma bo'lakni yozdi: yig'iladi (`complete`), hajm tekshiriladi, qator `ready` (yuklovchi olishi mumkin).
+pub(crate) async fn mark_ready(env: &Env, file: &str, size: i64, parts: &Value) -> std::result::Result<(), String> {
+    let Some(b) = bucket(env) else { return Err("r2_yoq".into()) };
+    let Some(row) = row(env, file).await.filter(|r| r["state"].as_str() == Some("uploading")) else {
+        return Err("qator".into());
+    };
+    let id = row["upload_id"].as_str().unwrap_or("").to_string();
+    let list: Vec<UploadedPart> = parts.as_array().map(|a| a.iter().filter_map(|p| {
+        Some(UploadedPart::new(p["n"].as_u64()? as u16, p["etag"].as_str()?.to_string()))
+    }).collect()).unwrap_or_default();
+    if list.is_empty() {
+        return Err("bolaklar".into());
+    }
+    let up = b.resume_multipart_upload(file, id).map_err(|e| e.to_string())?;
+    up.complete(list).await.map_err(|e| format!("yigish: {e}"))?;
+    let got = b.head(file).await.map_err(|e| e.to_string())?.map(|o| o.size() as i64);
+    if got != Some(size) {
+        let _ = b.delete(file).await;
+        return Err(format!("r2_hajm ({got:?} != {size})"));
     }
     turso_exec(env, "UPDATE r2_files SET state='ready' WHERE file_name=? AND state='uploading'",
         vec![TursoArg::text(file)]).await.map_err(|e| e.to_string())?;
@@ -187,7 +153,9 @@ pub(crate) async fn pending_for(env: &Env, a: i64, s: i64, e: i64, queued_at: i6
 
 /// Bot faylni saqlab bazaga yozdi (yoki fayl kerak emas) — R2 obyekti va qator o'chadi.
 pub(crate) async fn finish(env: &Env, file: &str) {
-    let _ = r2_fetch(env, "DELETE", file).await;
+    if let Some(b) = bucket(env) {
+        let _ = b.delete(file).await;
+    }
     let _ = turso_exec(env, "DELETE FROM r2_files WHERE file_name=?", vec![TursoArg::text(file)]).await;
 }
 
@@ -197,7 +165,7 @@ pub(crate) async fn row(env: &Env, file: &str) -> Option<Value> {
 
 // ── Yuklovchi workflow ───────────────────────────────────────
 
-/// Navbatda tayyor fayl bo'lsa va `upload.yml` ishlamayotgan bo'lsa — ishga tushiradi. Eski/yarim fayllarni ham tozalaydi.
+/// Navbatda tayyor fayl bo'lsa va `upload.yml` ishlamayotgan bo'lsa — ishga tushiradi.
 pub(crate) async fn kick(env: &Env) -> String {
     if !ready(env) {
         return String::new();
@@ -239,21 +207,22 @@ pub(crate) async fn kick(env: &Env) -> String {
     }
 }
 
-/// Cron: eskirgan qatorlar (yuklab bo'lmagan `uploading` 3 soatdan, `ready`/`sending` 24 soatdan eski) R2'dan o'chadi.
+/// Cron: eskirgan qatorlar (yuklab bo'lmagan `uploading` 3 soatdan, `ready`/`sending` 24 soatdan eski) R2'dan o'chadi;
+/// Telegram'ga 6 urinishda ham yetmagan fayl R2'dan o'chib, sifat qayta kodlanadi (kodlash urinishi tugamagan bo'lsa).
 pub(crate) async fn cleanup(env: &Env) {
-    if !ready(env) || config_get(env, "mig_r2").await.is_none() {
+    if !ready(env) || config_get(env, "mig_r2b").await.is_none() {
         return;
     }
     let now = now_ms();
-    let Ok(res) = turso_exec(env,
+    if let Ok(res) = turso_exec(env,
         "SELECT file_name FROM r2_files WHERE (state='uploading' AND created_at<?) OR created_at<? LIMIT 10",
-        vec![TursoArg::int(now - 3 * 3600 * 1000), TursoArg::int(now - 24 * 3600 * 1000)]).await else { return };
-    for r in rows_of(&res) {
-        if let Some(f) = r["file_name"].as_str() {
-            finish(env, f).await;
+        vec![TursoArg::int(now - 3 * 3600 * 1000), TursoArg::int(now - 24 * 3600 * 1000)]).await {
+        for r in rows_of(&res) {
+            if let Some(f) = r["file_name"].as_str() {
+                finish(env, f).await;
+            }
         }
     }
-    // Telegram'ga 6 urinishda ham yetmagan fayllar: R2'dan o'chadi, sifat qayta kodlanadi (kodlash urinishi tugamagan bo'lsa).
     let Ok(res) = turso_exec(env,
         "SELECT file_name, anime_id, season_id, epizod_id, queued_at, quality FROM r2_files WHERE state='error' LIMIT 5",
         vec![]).await else { return };
@@ -270,12 +239,41 @@ pub(crate) async fn cleanup(env: &Env) {
     }
 }
 
-/// `X-Encode-Token` bilan: `/api/r2/claim`, `/api/r2/beat`, `/api/r2/fail`, `/api/r2/done`.
+/// `GET /api/r2/get?file=..&offset=..&length=..` — R2'dan bo'lak (Range) beradi (yuklovchi).
+async fn get_part(req: Request, env: &Env) -> Result<Response> {
+    let url = req.url()?;
+    let q = |k: &str| url.query_pairs().find(|(a, _)| a == k).map(|(_, v)| v.to_string()).unwrap_or_default();
+    let file = q("file");
+    if !tg_safe_name(&file) {
+        return json_resp(&json!({"error": "nom"}), 400);
+    }
+    let Some(b) = bucket(env) else { return json_resp(&json!({"error": "r2"}), 503) };
+    let (offset, length) = (q("offset").parse::<u64>().unwrap_or(0), q("length").parse::<u64>().unwrap_or(0));
+    let mut g = b.get(&file);
+    if length > 0 {
+        g = g.range(Range::OffsetWithLength { offset, length });
+    }
+    let Some(obj) = g.execute().await? else { return json_resp(&json!({"error": "yoq"}), 404) };
+    let Some(body) = obj.body() else { return json_resp(&json!({"error": "tana"}), 404) };
+    let resp = Response::from_body(body.response_body()?)?;
+    let h = Headers::new();
+    h.set("Content-Type", "application/octet-stream")?;
+    h.set("Cache-Control", "no-store")?;
+    Ok(resp.with_headers(h))
+}
+
+/// `X-Encode-Token` bilan: `PUT /api/r2/part`, `GET /api/r2/get`, `POST /api/r2/{claim,beat,fail,done,diag}`.
 pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Response> {
     if !encode_token_ok(&req, env) {
         return json_resp(&json!({"error": "forbidden"}), 403);
     }
     migrate(env).await;
+    match (req.method(), path) {
+        (Method::Put, "/api/r2/part") => return put_part(req, env).await,
+        (Method::Get, "/api/r2/get") => return get_part(req, env).await,
+        (Method::Post, _) => {}
+        _ => return err404("topilmadi"),
+    }
     let b: Value = req.json().await.unwrap_or(json!({}));
     let file = b["file"].as_str().unwrap_or("").to_string();
     let now = now_ms();
@@ -300,31 +298,20 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
                 vec![TursoArg::text(&runner), TursoArg::int(now + LEASE_MS), TursoArg::int(now), TursoArg::int(MAX_ATTEMPTS)]).await?;
             let Some(r) = first_row(&res) else { return ok(json!({"none": true})) };
             let name = r["file_name"].as_str().unwrap_or("").to_string();
-            let Some(get) = url(env, "GET", &name, 7200) else { return ok(json!({"none": true})) };
             let (a, s, e, qa) = (jint(&r, "anime_id"), jint(&r, "season_id"), jint(&r, "epizod_id"), jint(&r, "queued_at"));
             let (kind, q, key, size) = (r["kind"].as_str().unwrap_or(""), r["quality"].as_str().unwrap_or(""),
                 r["file_key"].as_str().unwrap_or(""), jint(&r, "size"));
             return ok(json!({
-                "file": name, "url": get, "size": size, "bot": bot_username(env).await,
+                "file": name, "size": size, "bot": bot_username(env).await,
                 "caption": format!("ARUENC|{kind}|{a}|{s}|{e}|{qa}|{q}|{key}|{size}"),
                 "attempt": jint(&r, "attempts"),
             }));
         }
-        // Tashxis: R2 sozlanganmi va kalitlar bucket'ga yetadimi (imzolangan HEAD).
+        // Tashxis: R2 binding'i bormi va bucket'ga yetib boradimi.
         "/api/r2/diag" => {
-            if !ready(env) {
-                return ok(json!({"ready": false}));
-            }
-            let host = format!("{}.r2.cloudflarestorage.com", tg_secret(env, "R2_ACCOUNT_ID"));
-            let u = presign("HEAD", &host, &format!("/{BUCKET}"), &tg_secret(env, "R2_ACCESS_KEY_ID"),
-                &tg_secret(env, "R2_SECRET_ACCESS_KEY"), REGION, &amz_date(now), 300);
-            let mut init = RequestInit::new();
-            init.with_method(Method::Head);
-            let st = match Request::new_with_init(&u, &init) {
-                Ok(rq) => Fetch::Request(rq).send().await.map(|r| r.status_code() as i64).unwrap_or(-1),
-                Err(_) => -2,
-            };
-            return ok(json!({"ready": true, "bucket_status": st, "ok": st == 200}));
+            let Some(bk) = bucket(env) else { return ok(json!({"ready": false})) };
+            let listed = bk.list().limit(1).execute().await;
+            return ok(json!({"ready": true, "ok": listed.is_ok(), "error": listed.err().map(|e| e.to_string())}));
         }
         "/api/r2/beat" => {
             let _ = turso_exec(env, "UPDATE r2_files SET lease_until=? WHERE file_name=? AND state='sending'",
@@ -356,23 +343,4 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
         _ => {}
     }
     err404("topilmadi")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn aws_presign_vektori() {
-        // AWS hujjatidagi rasmiy namuna (GET /test.txt).
-        let u = presign("GET", "examplebucket.s3.amazonaws.com", "/test.txt", "AKIAIOSFODNN7EXAMPLE",
-            "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "us-east-1", "20130524T000000Z", 86400);
-        assert!(u.ends_with("X-Amz-Signature=aeeed9bbccd4d02ee5c0109b86d86835f995330da4c265957d157751f604d404"));
-    }
-
-    #[test]
-    fn sana_formati() {
-        assert_eq!(amz_date(1_369_353_600_000), "20130524T000000Z");
-        assert_eq!(amz_date(0), "19700101T000000Z");
-    }
 }

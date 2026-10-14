@@ -10366,7 +10366,7 @@ fn needs_app_check(path: &str) -> bool {
         | "/api/post/claim" | "/api/post/check" | "/api/post/finish" | "/api/post/progress"
         | "/api/anibla/claim" | "/api/anibla/diag" | "/api/anibla/progress" | "/api/anibla/done"
         | "/api/fmp4/claim" | "/api/fmp4/done" | "/api/session/poll" | "/api/session/report"
-        | "/api/encode/r2put" | "/api/encode/r2ready" | "/api/r2/claim" | "/api/r2/beat" | "/api/r2/fail" | "/api/r2/done")
+        | "/api/encode/r2put" | "/api/encode/r2ready" | "/api/r2/claim" | "/api/r2/beat" | "/api/r2/fail" | "/api/r2/done" | "/api/r2/diag" | "/api/r2/part" | "/api/r2/get")
     {
         return false;
     }
@@ -12114,13 +12114,13 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
         }
         if path == "/api/encode/r2put" {
             return match r2::register(env, (a, s, e), queued_at, q, kind, file, &key, size).await {
-                Ok(url) => ok(json!({"ok": true, "url": url})),
+                Ok(upload_id) => ok(json!({"ok": true, "upload_id": upload_id, "part_size": r2::PART_SIZE})),
                 // R2'da joy yo'q: kodlovchi bo'shaguncha kutadi (yuklovchi workflow fayllarni olib borib o'chiradi).
                 Err("full") => ok(json!({"ok": false, "wait": true})),
                 Err(_) => json_resp(&json!({"error": "r2"}), 503),
             };
         }
-        return match r2::mark_ready(env, file, size).await {
+        return match r2::mark_ready(env, file, size, &b["parts"]).await {
             Ok(()) => ok(json!({"ok": true})),
             Err(e) => json_resp(&json!({"error": e}), 409),
         };
@@ -14308,7 +14308,7 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
     if method == Method::Post && path == "/api/fmp4/request" {
         return fmp4::request(req, &env).await;
     }
-    if method == Method::Post && path.starts_with("/api/r2/") {
+    if path.starts_with("/api/r2/") {
         let p = path.to_string();
         return r2::route(req, &env, &p).await;
     }

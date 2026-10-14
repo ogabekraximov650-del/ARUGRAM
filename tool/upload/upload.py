@@ -77,32 +77,37 @@ def is_committed(name: str) -> bool:
         return False
 
 
-def download(url: str, dst: Path, size: int):
-    """R2'dan oqim bilan yuklab oladi (xato bo'lsa qayta urinadi)."""
-    last = None
-    for attempt in range(1, 6):
-        try:
-            got, t0, last_log = 0, time.time(), 0.0
-            with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "arugram-upload"}), timeout=120) as r, \
-                    open(dst, "wb") as f:
-                while True:
-                    chunk = r.read(1 << 20)
-                    if not chunk:
-                        break
-                    f.write(chunk)
-                    got += len(chunk)
-                    if time.time() - last_log >= 5:
-                        last_log = time.time()
-                        log(f"    R2'dan yuklab olinmoqda {got * 100 // max(size, 1)}% "
-                            f"({got / 1048576:.0f}/{size / 1048576:.0f} MB, {got / 1048576 / max(time.time() - t0, 0.1):.1f} MB/s)")
-            if dst.stat().st_size == size:
-                return
-            last = f"hajm mos emas ({dst.stat().st_size} != {size})"
-        except Exception as ex:  # noqa: BLE001
-            last = ex
-        log(f"  R2'dan olish {attempt}/5 muvaffaqiyatsiz: {last}")
-        time.sleep(3 * attempt)
-    raise RuntimeError(f"R2'dan olib bo'lmadi: {last}")
+def download(name: str, dst: Path, size: int):
+    """R2'dan worker orqali bo'laklab (Range) yuklab oladi; har bo'lak alohida qayta uriniladi."""
+    CH = 64 * 1048576
+    t0, last_log, got = time.time(), 0.0, 0
+    with open(dst, "wb") as f:
+        while got < size:
+            length = min(CH, size - got)
+            err = None
+            for attempt in range(1, 6):
+                try:
+                    req = urllib.request.Request(
+                        f"{API}/api/r2/get?file={urllib.parse.quote(name)}&offset={got}&length={length}",
+                        headers={"X-Encode-Token": TOKEN, "User-Agent": "arugram-upload"})
+                    with urllib.request.urlopen(req, timeout=300) as r:
+                        data = r.read()
+                    if len(data) != length:
+                        raise RuntimeError(f"bo'lak hajmi {len(data)} != {length}")
+                    f.write(data)
+                    err = None
+                    break
+                except Exception as ex:  # noqa: BLE001
+                    err = ex
+                    log(f"  R2'dan olish ({got // 1048576} MB) {attempt}/5 muvaffaqiyatsiz: {ex}")
+                    time.sleep(3 * attempt)
+            if err is not None:
+                raise RuntimeError(f"R2'dan olib bo'lmadi: {err}")
+            got += length
+            if time.time() - last_log >= 5:
+                last_log = time.time()
+                log(f"    R2'dan yuklab olinmoqda {got * 100 // max(size, 1)}% "
+                    f"({got / 1048576:.0f}/{size / 1048576:.0f} MB, {got / 1048576 / max(time.time() - t0, 0.1):.1f} MB/s)")
 
 
 async def beat_loop(name: str):
@@ -170,7 +175,7 @@ async def one(app, job: dict):
     beat = asyncio.create_task(beat_loop(name))
     try:
         log(f"{name}: R2'dan olinmoqda ({size / 1048576:.1f} MB), urinish {job.get('attempt')}")
-        await asyncio.to_thread(download, job["url"], path, size)
+        await asyncio.to_thread(download, name, path, size)
         log(f"{name}: botga yuborilmoqda")
         await send_to_bot(app, job["bot"], path, name, job["caption"])
         end = time.time() + COMMIT_WAIT

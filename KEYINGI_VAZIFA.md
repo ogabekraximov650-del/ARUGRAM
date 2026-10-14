@@ -6224,3 +6224,11 @@ Keyin: R2'ga yozishdan oldin run worker'dan "shuncha MB sig'adimi?" deb so'raydi
 tekshiruvi va qator ochish bitta SQL'da — 4 run bir vaqtda so'rasa ham chegara oshmaydi); sig'masa `{wait:true}` va run har 30 s
 qayta so'rab R2 bo'shaguncha KUTADI (8 soatgacha; yuklovchi workflow fayllarni Telegram'ga olib borib o'chiradi). Fayl butunlay
 sig'maydigan (`R2_MAX_GB` dan katta) yoki R2 sozlanmagan bo'lsa — to'g'ridan-to'g'ri bot chatiga.
+
+**TUZATISH (R2 — tokensiz):** S3 kalitlari/presigned havolalar O'RNIGA worker'ning o'z R2 BINDING'i ishlatiladi (`env.bucket("R2")`):
+hech qanday R2/S3 kaliti yoki Cloudflare tokeni kerak emas. Run'lar faqat worker manziliga so'rov yuboradi: kodlovchi `PUT /api/r2/part`
+(32 MB bo'laklar, multipart — so'rov tanasi chegarasi va xotiradan past), yuklovchi `GET /api/r2/get` (64 MB Range bo'laklar). Binding
+`deploy-worker.yml` da deploy paytida `wrangler.toml` ga qo'shiladi (`[[env.production.r2_buckets]] binding="R2" bucket_name="arumediatv"`);
+qo'shib bo'lmasa — binding'siz deploy (R2 o'chiq, eski usul). `/api/r2/diag` bucket'ga yetishni tekshiradi. Yuqoridagi "kalitlar
+`CLOUDFLARE_API_TOKEN` dan" va `R2_ACCESS_KEY_ID` haqidagi qismlar eskirdi. Eslatma: bu yo'lda fayl baytlari worker orqali o'tadi
+(foydalanuvchi talabi); worker so'rovlari soni: fayl hajmi/32 MB + /64 MB (≈ 400 MB fayl uchun ~20 so'rov).
