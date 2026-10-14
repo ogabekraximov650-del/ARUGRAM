@@ -155,6 +155,26 @@ function buildPlayer(el, route, season, opts) {
   const $ = (s) => el.querySelector(s);
   const box = $('.pl-box');
   const video = $('video');
+
+  // ── Tasvirni yaxshilash (MX Pleyerdagi "Smart Enhance" kabi, lekin anime uchun sozlangan) ──
+  // 1 — yengil: to'yinganlik + kontrast; 2 — kuchli: shular + aniqlik (SVG konvolyutsiya, GPU).
+  const ENH_LABEL = ["O'chiq", 'Yengil', 'Kuchli'];
+  function ensureSharpFilter() {
+    if (document.getElementById('aru-sharp-svg')) return;
+    const d = document.createElement('div');
+    d.id = 'aru-sharp-svg';
+    d.style.cssText = 'position:absolute;width:0;height:0;overflow:hidden';
+    d.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0"><filter id="aru-sharp" color-interpolation-filters="sRGB">'
+      + '<feConvolveMatrix order="3" preserveAlpha="true" kernelMatrix="0 -0.45 0 -0.45 2.8 -0.45 0 -0.45 0"/></filter></svg>';
+    document.body.appendChild(d);
+  }
+  function applyEnhance() {
+    const lv = playerSettings.enhance;
+    if (lv === 2) ensureSharpFilter();
+    video.style.filter = lv === 1 ? 'saturate(1.16) contrast(1.06) brightness(1.02)'
+      : lv === 2 ? 'saturate(1.28) contrast(1.1) brightness(1.03) url(#aru-sharp)' : '';
+  }
+  applyEnhance();
   const panes = [...el.querySelectorAll('.pl-pane')];
   const tabEls = [...el.querySelectorAll('.pl-tab')];
 
@@ -871,7 +891,9 @@ function buildPlayer(el, route, season, opts) {
 
   const toggleRow = (id, ic, label, on) => `<div class="pl-row" data-id="${id}">${icon(ic, { size: 20, color: 'rgba(255,255,255,0.7)' })}<span class="lb">${label}</span>${icon(on ? 'toggle_on' : 'toggle_off', { size: 30, color: on ? '#C2410C' : 'rgba(255,255,255,0.3)' })}</div>`;
   function settingsHtml() {
-    return `${toggleRow('skip', 'fast_forward', "Avto intro o'tkazish", playerSettings.autoSkipIntro)}<div class="pl-hr"></div>
+    const enh = playerSettings.enhance;
+    return `<div class="pl-row${enh ? ' acc' : ''}" data-id="enh">${icon('auto_awesome', { size: 20, color: enh ? '#C2410C' : 'rgba(255,255,255,0.7)' })}<span class="lb">Tasvirni yaxshilash: ${ENH_LABEL[enh]}</span></div><div class="pl-hr"></div>
+      ${toggleRow('skip', 'fast_forward', "Avto intro o'tkazish", playerSettings.autoSkipIntro)}<div class="pl-hr"></div>
       ${toggleRow('next', 'skip_next', "Avto qism o'tkazish", playerSettings.autoNextEpisode)}<div class="pl-hr"></div>
       <div class="pl-row${sleepMin > 0 ? ' acc' : ''}" data-id="sleep">${icon('schedule', { size: 20, color: sleepMin > 0 ? '#C2410C' : 'rgba(255,255,255,0.7)' })}<span class="lb">${sleepMin > 0 ? `Uxlash: ${sleepLabel()}` : 'Uxlash vaqti'}</span></div>`;
   }
@@ -884,7 +906,8 @@ function buildPlayer(el, route, season, opts) {
         playerSettings.setAutoSkipIntro(on);
         if (on) { introTries = {}; lastSkip = 0; if (introIdx >= 0) { introTries[introIdx] = 1; lastSkip = Date.now(); seekTo((ranges[introIdx][1] + 400) / 1000); $('.pl-intro').classList.remove('on'); } }
         bindSettings(p);
-      } else if (id === 'next') { playerSettings.setAutoNextEpisode(!playerSettings.autoNextEpisode); bindSettings(p); }
+      } else if (id === 'enh') { playerSettings.setEnhance((playerSettings.enhance + 1) % 3); applyEnhance(); bindSettings(p); }
+      else if (id === 'next') { playerSettings.setAutoNextEpisode(!playerSettings.autoNextEpisode); bindSettings(p); }
       else if (id === 'sleep') { closePanels(); openSleep(); }
     }));
   }

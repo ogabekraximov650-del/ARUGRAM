@@ -57,6 +57,12 @@ class AppSettings extends ChangeNotifier {
   /// ochib yuborish kutilmagan bo'lardi.
   bool autoNextEpisode = false;
 
+  /// Tasvirni yaxshilash (pleyer): 0 — o'chiq, 1 — yengil, 2 — kuchli.
+  ///
+  /// TALAB (foydalanuvchi): MX Pleyerdagi "Smart Enhance" kabi, lekin undan kuchliroq.
+  /// Faqat shu qurilmada saqlanadi (diskdagi sozlama ro'yxati).
+  int videoEnhance = 0;
+
   bool _loaded = false;
 
   /// Diskdan o'qiydi. Bir necha marta chaqirilsa ham bir marta
@@ -89,12 +95,22 @@ class AppSettings extends ChangeNotifier {
     notifyListeners();
   }
 
+  void setVideoEnhance(int level) {
+    final v = level.clamp(0, 2);
+    if (videoEnhance == v) return;
+    videoEnhance = v;
+    _write();
+    notifyListeners();
+  }
+
   void _read() {
     try {
       final rows = RustCore.instance.getCachedList(_key);
       if (rows == null || rows.isEmpty) return;
       autoSkipIntro = rows.first['auto_skip_intro'] == true;
       autoNextEpisode = rows.first['auto_next_episode'] == true;
+      final e = rows.first['video_enhance'];
+      videoEnhance = e is num ? e.toInt().clamp(0, 2) : 0;
     } catch (_) {
       // O'qib bo'lmadi — boshlang'ich qiymatlar qoladi.
     }
@@ -106,6 +122,7 @@ class AppSettings extends ChangeNotifier {
         {
           'auto_skip_intro': autoSkipIntro,
           'auto_next_episode': autoNextEpisode,
+          'video_enhance': videoEnhance,
         },
       ]);
     } catch (_) {

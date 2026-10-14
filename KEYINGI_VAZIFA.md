@@ -6354,3 +6354,13 @@ Yechim: yopiq kanalga ketadigan `deliver` fayllari (`via_bot`, `dest.to == TG_CH
 manzil faqat o'z kanalimiz), `copyMessage` bilan kanalga ko'chiradi (video/hujjat turi va tavsif saqlanadi), xabar raqamini
 `dlv_msg_<nom>` ga yozadi va chatdagi nusxani o'chiradi. Yuklovchi `/api/r2/dmsg` bilan raqamni olib, egasining yo'lini
 (`callback`: Anibla/To'plam) chaqiradi. Post bundan mustasno (to'g'ridan-to'g'ri yoki panel bot).
+
+## Universal APK (32+64 bit) va "Tasvirni yaxshilash" (2026-10)
+
+- `build-flutter-apk.yml`: endi IKKITA APK, har biri BIR BUTUN 32-bit (armeabi-v7a) + 64-bit (arm64-v8a): `arumediatv-admin-build-N.apk`
+  va `arumediatv-user-build-N.apk`. Rust yadrosi ikkala ABI uchun quriladi (`cargo ndk -t armeabi-v7a -t arm64-v8a`), `--target-platform
+  android-arm,android-arm64`; ABI tekshiruvi aynan ikki papkani talab qiladi (x86/x86_64 olib tashlanadi), 16 KB tekshiruvi arm64 uchun.
+- **Tasvirni yaxshilash** (MX Pleyerdagi "Smart Enhance" o'rniga, o'zimizniki): uch nuqta menyusi va fullscreen sozlamalar panelida
+  "Tasvirni yaxshilash: O'chiq / Yengil / Kuchli" (bosilganda almashadi). Ilova: `ColorFiltered` rang matritsasi (to'yinganlik+kontrast+yorqinlik),
+  `AppSettings.videoEnhance` (qurilmada saqlanadi, bazaga yozilmaydi). Web: `<video>` CSS filtri; "Kuchli" da SVG konvolyutsiya (aniqlik),
+  `playerSettings.enhance` (localStorage). Keyingi bosqich (taklif): Media3 GPU shader (Anime4K-lite) — chiziqlarni aniqlash/upscale.

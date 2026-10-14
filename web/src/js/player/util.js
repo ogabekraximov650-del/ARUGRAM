@@ -128,6 +128,13 @@ export const playerSettings = {
     o[k] = !!v;
     try { localStorage.setItem(SET_KEY, JSON.stringify(o)); } catch (_) { /* */ }
   },
+  /** Tasvirni yaxshilash: 0 — o'chiq, 1 — yengil (rang), 2 — kuchli (rang + aniqlik). */
+  get enhance() { const v = readSettings().video_enhance; return v === 1 || v === 2 ? v : 0; },
+  setEnhance(v) {
+    const o = readSettings();
+    o.video_enhance = v === 1 || v === 2 ? v : 0;
+    try { localStorage.setItem(SET_KEY, JSON.stringify(o)); } catch (_) { /* */ }
+  },
   setAutoSkipIntro(v) { this.set('auto_skip_intro', v); },
   setAutoNextEpisode(v) { this.set('auto_next_episode', v); },
 };

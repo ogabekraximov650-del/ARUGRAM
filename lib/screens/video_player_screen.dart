@@ -3090,6 +3090,41 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     _scheduleHide();
   }
 
+  // ── TASVIRNI YAXSHILASH (MX Pleyerdagi "Smart Enhance" kabi) ───
+  //
+  // 0 — o'chiq; 1 — yengil (to'yinganlik + kontrast); 2 — kuchli
+  // (kuchliroq rang va kontrast). Filtr videoga GPU'da qo'llanadi,
+  // sozlama qurilmada saqlanadi.
+  static const _enhanceNames = ['O\'chiq', 'Yengil', 'Kuchli'];
+
+  /// Rang matritsasi: to'yinganlik [sat], kontrast [con], yorqinlik [br] (0..1 shkala).
+  static List<double> _enhanceMatrix(double sat, double con, double br) {
+    const lr = 0.2126, lg = 0.7152, lb = 0.0722;
+    final i = 1 - sat;
+    final off = 255 * (0.5 * (1 - con) + br);
+    return <double>[
+      (lr * i + sat) * con, lg * i * con, lb * i * con, 0, off,
+      lr * i * con, (lg * i + sat) * con, lb * i * con, 0, off,
+      lr * i * con, lg * i * con, (lb * i + sat) * con, 0, off,
+      0, 0, 0, 1, 0,
+    ];
+  }
+
+  Widget _enhanced(Widget video) {
+    final lv = AppSettings.instance.videoEnhance;
+    if (lv == 0) return video;
+    final m = lv == 1
+        ? _enhanceMatrix(1.16, 1.06, 0.01)
+        : _enhanceMatrix(1.30, 1.11, 0.015);
+    return ColorFiltered(colorFilter: ColorFilter.matrix(m), child: video);
+  }
+
+  void _cycleEnhance() {
+    AppSettings.instance
+        .setVideoEnhance((AppSettings.instance.videoEnhance + 1) % 3);
+    if (mounted) setState(() {});
+  }
+
   /// "Avto o'tkazish" tugmasi bosildi.
   ///
   /// MENYU YOPILMAYDI (foydalanuvchi talabi) — holat o'sha yerda
@@ -3292,6 +3327,20 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      _MenuValueRow(
+                        icon: Icons.auto_awesome_rounded,
+                        label: 'Tasvirni yaxshilash',
+                        value: _enhanceNames[AppSettings.instance.videoEnhance],
+                        active: AppSettings.instance.videoEnhance > 0,
+                        onTap: _cycleEnhance,
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Divider(
+                          height: 1,
+                          color: Colors.white.withValues(alpha: 0.12),
+                        ),
+                      ),
                       _MenuToggleRow(
                         icon: Icons.fast_forward_rounded,
                         label: 'Avto intro o\'tkazish',
@@ -4372,7 +4421,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                 ? Center(
                     child: AspectRatio(
                       aspectRatio: ctrl.value.aspectRatio,
-                      child: VideoPlayer(ctrl),
+                      child: _enhanced(VideoPlayer(ctrl)),
                     ),
                   )
                 : const SizedBox.shrink(),
@@ -5240,6 +5289,20 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                           crossAxisAlignment: CrossAxisAlignment.start,
                           mainAxisSize: MainAxisSize.min,
                           children: [
+                            _MenuValueRow(
+                              icon: Icons.auto_awesome_rounded,
+                              label: 'Tasvirni yaxshilash',
+                              value: _enhanceNames[AppSettings.instance.videoEnhance],
+                              active: AppSettings.instance.videoEnhance > 0,
+                              onTap: _cycleEnhance,
+                            ),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 4),
+                              child: Divider(
+                                height: 1,
+                                color: Colors.white.withValues(alpha: 0.12),
+                              ),
+                            ),
                             _MenuToggleRow(
                               icon: Icons.fast_forward_rounded,
                               label: 'Avto intro o\'tkazish',
@@ -8063,6 +8126,53 @@ class _SkipIntroButton extends StatelessWidget {
 // Ko'rinishi pastki paneldagi `HQ` tugmasidan olingan: fon oq
 // 15%, chekkasi `white30`, burchagi 7 — uchovi birga
 // o'zgartiriladi.
+class _MenuValueRow extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final String value;
+  final bool active;
+  final VoidCallback onTap;
+
+  const _MenuValueRow({
+    required this.label,
+    required this.icon,
+    required this.value,
+    required this.active,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = active ? AppColors.accent : Colors.white;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: SizedBox(
+        height: 46,
+        child: Row(
+          children: [
+            Icon(icon, size: 20, color: active ? AppColors.accent : Colors.white70),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: c, fontSize: 14, fontWeight: FontWeight.w600),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              value,
+              style: TextStyle(color: c, fontSize: 13, fontWeight: FontWeight.w700),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _MenuToggleRow extends StatelessWidget {
   final String label;
   final IconData icon;

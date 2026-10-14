@@ -101,14 +101,12 @@ jobs:
           # telefoni AYNAN 32-bit ekanini aytdi — ya'ni taxmin
           # noto'g'ri, 64-bit variant esa bekorga har build'da
           # bitta qo'shimcha ish bo'lib turardi.)
-          - name: admin-32
+          # HAR APK BIR BUTUN (UNIVERSAL): 32-bit (armeabi-v7a) + 64-bit (arm64-v8a) bitta faylda
+          # (foydalanuvchi talabi, 2026-10: "admin va user apklar 32+64 bitli bir butun apk bo'lib yig'ilsin").
+          - name: admin
             admin: 'true'
-            abi: armeabi-v7a
-            platform: android-arm
-          - name: user-64
+          - name: user
             admin: 'false'
-            abi: arm64-v8a
-            platform: android-arm64
 
     steps:
       - name: Checkout code
@@ -131,7 +129,7 @@ jobs:
       # FAQAT SHU JOB'NING ABI'si quriladi — har APK bitta
       # arxitektura uchun (foydalanuvchi talabi: "barchasi alohida
       # tayyorlanishi kerak ... hajmi katta bo'lib ketgan").
-      - name: Build rust_core for Android (${{ matrix.abi }})
+      - name: Build rust_core for Android (armeabi-v7a + arm64-v8a)
         working-directory: rust
         env:
           # ── SO'ROV IMZOSINING SIRI ──────────────────────────
@@ -153,7 +151,7 @@ jobs:
             echo "⚠️  APP_SIGN_SECRET yo'q — yadro imzosiz yig'ilmoqda"
           fi
           cargo ndk \
-            -t ${{ matrix.abi }} \
+            -t armeabi-v7a -t arm64-v8a \
             -o ../jniLibs-out \
             build --release
 
@@ -163,10 +161,9 @@ jobs:
       # (0x4000) yoki undan kattaga tekislangan bo'lishi shart —
       # aks holda 16 KB sahifali qurilmalarda (masalan yangi
       # planshetlar) ilova yadrosi umuman ochilmaydi.
-      - name: Check 16 KB page alignment (${{ matrix.abi }})
-        if: matrix.abi == 'arm64-v8a'
+      - name: Check 16 KB page alignment (arm64-v8a)
         run: |
-          SO="jniLibs-out/${{ matrix.abi }}/librust_core.so"
+          SO="jniLibs-out/arm64-v8a/librust_core.so"
           READELF=$(ls "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/*/bin/llvm-readelf 2>/dev/null | head -1)
           [ -z "$READELF" ] && READELF=$(ls "$ANDROID_NDK_LATEST_HOME"/toolchains/llvm/prebuilt/*/bin/llvm-readelf 2>/dev/null | head -1)
           [ -z "$READELF" ] && READELF=readelf
@@ -195,9 +192,10 @@ jobs:
       - name: Copy librust_core.so into jniLibs
         run: |
           set -e
-          mkdir -p "android/app/src/main/jniLibs/${{ matrix.abi }}"
-          cp "jniLibs-out/${{ matrix.abi }}/librust_core.so" \
-             "android/app/src/main/jniLibs/${{ matrix.abi }}/"
+          for ABI in armeabi-v7a arm64-v8a; do
+            mkdir -p "android/app/src/main/jniLibs/$ABI"
+            cp "jniLibs-out/$ABI/librust_core.so" "android/app/src/main/jniLibs/$ABI/"
+          done
           echo "✅ Rust .so fayl joylashtirildi:"
           find android/app/src/main/jniLibs -name "*.so"
 
@@ -543,7 +541,7 @@ jobs:
       # bir nechta APK chiqaradi va ularning nomini boshqarish
       # qiyin; bu yerda ABI matritsadan keladi, ya'ni har job
       # bitta toza APK beradi.
-      - name: Build APK (Release — ${{ matrix.abi }})
+      - name: Build APK (Release — universal 32+64 bit)
         env:
           API_BASE: ${{ secrets.API_BASE }}
           CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -620,7 +618,7 @@ jobs:
           echo "server manzili             : ${API_BASE:-(zaxira)}"
 
           flutter build apk --release \
-            --target-platform ${{ matrix.platform }} \
+            --target-platform android-arm,android-arm64 \
             --build-name "$BUILD_NAME" \
             --build-number "$VERSION_CODE" \
             --dart-define=ADMIN_BUILD=${{ matrix.admin }} \
@@ -639,11 +637,11 @@ jobs:
       # Shu sabab BEGONA papkalar o'chiriladi va shu ABI'da
       # uchchala .so borligi tekshiriladi. Bu APK hajmini ham
       # keskin kichraytiradi.
-      - name: ABI tozalash va tekshiruv (faqat ${{ matrix.abi }})
+      - name: ABI tozalash va tekshiruv (armeabi-v7a + arm64-v8a)
         run: |
           set -e
           APK="build/app/outputs/flutter-apk/app-release.apk"
-          KEEP="${{ matrix.abi }}"
+          KEEP="armeabi-v7a arm64-v8a"
 
           echo "── O'zgartirishdan OLDIN ──"
           unzip -l "$APK" | grep "lib/" || true
@@ -652,16 +650,17 @@ jobs:
           # Bo'lmasa — o'chirish ilovani buzardi, shu sabab build
           # ATAYLAB yiqiladi (jimgina buzuq APK chiqarishdan
           # yaxshiroq).
-          for so in libapp.so libflutter.so librust_core.so; do
-            if ! unzip -l "$APK" | grep -q "lib/$KEEP/$so"; then
-              echo "❌ XATO: lib/$KEEP/$so topilmadi — APK to'liq emas"
-              exit 1
-            fi
+          for K in $KEEP; do
+            for so in libapp.so libflutter.so librust_core.so; do
+              if ! unzip -l "$APK" | grep -q "lib/$K/$so"; then
+                echo "❌ XATO: lib/$K/$so topilmadi — APK to'liq emas"
+                exit 1
+              fi
+            done
           done
 
           # Qolgan barcha arxitekturalar olib tashlanadi.
-          for abi in armeabi-v7a arm64-v8a x86 x86_64; do
-            [ "$abi" = "$KEEP" ] && continue
+          for abi in x86 x86_64; do
             zip -q -d "$APK" "lib/$abi/*" || true
           done
 
@@ -836,14 +835,14 @@ jobs:
           ABIS=$(unzip -l "$APK" | grep "lib/" | awk '{print $4}' | cut -d/ -f2 | sort -u)
           echo "$ABIS"
 
-          # QAT'IY TEKSHIRUV: APK ichida AYNAN BITTA ABI
+          # QAT'IY TEKSHIRUV: APK ichida AYNAN IKKI ABI (32+64)
           # bo'lishi SHART. Boshqasi qolib ketsa, Android o'shani
           # tanlab, Rust yadrosini topa olmasdi.
-          if [ "$ABIS" != "${{ matrix.abi }}" ]; then
-            echo "❌ XATO: faqat ${{ matrix.abi }} bo'lishi kerak edi, ichidagisi: $ABIS"
+          if [ "$ABIS" != "$(printf 'arm64-v8a\narmeabi-v7a')" ]; then
+            echo "❌ XATO: aynan arm64-v8a va armeabi-v7a bo'lishi kerak edi, ichidagisi: $ABIS"
             exit 1
           fi
-          echo "✅ APK faqat ${{ matrix.abi }}"
+          echo "✅ APK: 32-bit (armeabi-v7a) + 64-bit (arm64-v8a)"
 
       # ── APK ICHIDA HAQIQATAN ARU BELGISI BORMI ────────────────
       #
@@ -1081,7 +1080,7 @@ jobs:
           SRC="build/app/outputs/flutter-apk/app-release.apk"
           # TALAB (foydalanuvchi): "APK nomiga build raqami ham yozilsin
           # — qaysi build'ni o'rnatganimni aniq bilish uchun".
-          # Masalan: `arumediatv-admin-32-build-412.apk`.
+          # Masalan: `arumediatv-admin-build-412.apk`.
           # GitHub'dagi nom — `arumediatv` (foydalanuvchi talabi, 2026-10).
           OUT="build/app/outputs/flutter-apk/arumediatv-${{ matrix.name }}-build-${{ github.run_number }}.apk"
           cp "$SRC" "$OUT"
@@ -1097,12 +1096,11 @@ jobs:
             Telefonga to'g'ridan-to'g'ri o'rnatish uchun `.apk`
             faylini yuklab oling (ZIP emas).
 
-            Har bir APK FAQAT bitta arxitektura uchun — shu sabab
-            hajmi kichik. Telefoningiz 64-bitli bo'lsa `-64`,
-            eskiroq bo'lsa `-32` ni oling.
+            Har bir APK BIR BUTUN: 32-bit (armeabi-v7a) va 64-bit (arm64-v8a)
+            telefonlar uchun bitta fayl.
 
-            * `arumediatv-admin-32-build-${{ github.run_number }}.apk` — admin paneli bilan, 32-bit (armeabi-v7a)
-            * `arumediatv-user-64-build-${{ github.run_number }}.apk`  — foydalanuvchi, 64-bit (arm64-v8a)
+            * `arumediatv-admin-build-${{ github.run_number }}.apk` — admin paneli bilan
+            * `arumediatv-user-build-${{ github.run_number }}.apk`  — foydalanuvchi
 
             Foydalanuvchi APK'sida admin paneli kodi umuman yo'q.
 
@@ -1116,10 +1114,8 @@ jobs:
             1. Telefondagi eski ARUmediaTV ni butunlay o'chiring
                (MIUI'da "Ikkinchi makon"/"Ikki ilova" ichidagisini
                ham) va qaytadan urinib ko'ring.
-            2. Baribir chiqsa — `arumediatv-user-64-build-${{ github.run_number }}.apk` ni
-               o'rnatib ko'ring. AGAR U O'RNATILSA, telefoningiz
-               32-bit ilovalarni qo'llab-quvvatlamaydi va
-               `-32` APK shu sabab rad etilyapti.
+            2. Eski ilova imzosi boshqa bo'lsa ham shunday xato chiqadi —
+               o'chirib qayta o'rnating.
           prerelease: true
           files: ${{ steps.rename.outputs.out }}
 
@@ -1173,4 +1169,4 @@ jobs:
       - name: Done
         run: |
           echo "✅ APK tayyor: ${{ steps.rename.outputs.out }}"
-          echo "   Faqat ${{ matrix.abi }}, imzolar: v1+v2+v3(+v4)."
+          echo "   32+64 bit, imzolar: v1+v2+v3(+v4)."
