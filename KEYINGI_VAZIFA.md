@@ -6237,3 +6237,10 @@ qo'shib bo'lmasa — binding'siz deploy (R2 o'chiq, eski usul). `/api/r2/diag` b
 Yuklash — bo'laklar xotiraga yig'ilmaydi (`FixedLengthStream` — so'rov tanasi to'g'ridan-to'g'ri R2 multipart'ga uzatiladi), shu sabab
 bo'lak 32 MB emas, Cloudflare so'rov tanasi limiti ostida 90 MB (`R2_PART_MB`; Free/Pro 100 MB). 400 MB fayl: ~5 yozish + 1 olish
 so'rovi (avval ~20). Butun faylni bitta oqimda yozib bo'lmaydi — limit so'rov tanasining o'ziga qo'yilgan.
+
+**R2 to'g'ridan-to'g'ri rejimi (2026-10, S3 kalitlari berildi):** kalitlar `tool/r2/r2_keys.enc` da (`ACCESS_KEY_ID:SECRET`, AES-256-CBC,
+PBKDF2, kalit `ENCODE_TOKEN`); `deploy-worker.yml` ularni ochib `R2_ACCESS_KEY_ID`/`R2_SECRET_ACCESS_KEY`, hisob ID'sini
+`CLOUDFLARE_ACCOUNT_ID` dan `R2_ACCOUNT_ID` qilib qo'yadi. Kalitlar bor bo'lsa worker imzolangan (SigV4) havolalar beradi: kodlovchi bitta
+PUT bilan R2'ga, yuklovchi (Range bilan, uzilsa davom etib) R2'dan to'g'ridan-to'g'ri oladi — fayl baytlari worker'dan O'TMAYDI
+(`/api/encode/r2put` javobida `url`, `/api/r2/claim` javobida `url`). Kalit bo'lmasa — oldingi binding orqali rejim (zaxira). Haqiqiy R2'da
+PUT/GET/DELETE sinovdan o'tdi. Cloudflare API tokeni (`cfat_...`) saqlanmadi — kerak emas.

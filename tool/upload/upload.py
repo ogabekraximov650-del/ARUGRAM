@@ -77,15 +77,19 @@ def is_committed(name: str) -> bool:
         return False
 
 
-def download(name: str, dst: Path, size: int):
-    """R2'dan worker orqali BITTA oqim (stream) bilan yuklab oladi; uzilsa qolgan joyidan (`offset`) davom ettiradi."""
+def download(name: str, dst: Path, size: int, url: str | None = None):
+    """R2'dan BITTA oqim (stream) bilan yuklab oladi; uzilsa qolgan joyidan davom ettiradi. `url` (imzolangan havola) bo'lsa
+    R2'dan TO'G'RIDAN-TO'G'RI (worker'dan o'tmasdan, `Range`), aks holda worker orqali (`offset`)."""
     t0, last_log, got, err = time.time(), 0.0, 0, None
     with open(dst, "wb") as f:
         for attempt in range(1, 9):
             try:
-                req = urllib.request.Request(
-                    f"{API}/api/r2/get?file={urllib.parse.quote(name)}&offset={got}",
-                    headers={"X-Encode-Token": TOKEN, "User-Agent": "arugram-upload"})
+                if url:
+                    req = urllib.request.Request(url, headers={"Range": f"bytes={got}-", "User-Agent": "arugram-upload"})
+                else:
+                    req = urllib.request.Request(
+                        f"{API}/api/r2/get?file={urllib.parse.quote(name)}&offset={got}",
+                        headers={"X-Encode-Token": TOKEN, "User-Agent": "arugram-upload"})
                 with urllib.request.urlopen(req, timeout=120) as r:
                     while True:
                         chunk = r.read(1 << 20)
@@ -173,7 +177,7 @@ async def one(app, job: dict):
     beat = asyncio.create_task(beat_loop(name))
     try:
         log(f"{name}: R2'dan olinmoqda ({size / 1048576:.1f} MB), urinish {job.get('attempt')}")
-        await asyncio.to_thread(download, name, path, size)
+        await asyncio.to_thread(download, name, path, size, job.get("url"))
         log(f"{name}: botga yuborilmoqda")
         await send_to_bot(app, job["bot"], path, name, job["caption"])
         end = time.time() + COMMIT_WAIT

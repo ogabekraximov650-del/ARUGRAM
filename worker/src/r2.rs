@@ -17,7 +17,107 @@
 // Bot faylni yopiq kanalga saqlab bazaga yozgach (`encupload::on_file`) `finish` R2 obyekti va qatorni o'chiradi.
 
 use super::*;
+use hmac::{Hmac, Mac};
+use sha2::{Digest, Sha256};
 use worker::{Bucket, FixedLengthStream, Range, UploadedPart};
+
+// ── IKKI REJIM ───────────────────────────────────────────────
+//   1. TO'G'RIDAN-TO'G'RI (S3 kalitlari bor: `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_ACCOUNT_ID`): worker imzolangan
+//      (AWS SigV4 presigned) PUT/GET havolalarini beradi, run R2 bilan to'g'ridan-to'g'ri gaplashadi — fayl baytlari worker'dan
+//      O'TMAYDI, so'rovlar soni minimal. Kalitlar `tool/r2/r2_keys.enc` da (deploy `ENCODE_TOKEN` bilan ochib secret qiladi).
+//   2. WORKER ORQALI (faqat `R2` binding): kalit kerak emas, baytlar worker'dan oqim bilan o'tadi (quyida).
+// Kalitlar bor bo'lsa 1-rejim ishlatiladi.
+
+fn hex(b: &[u8]) -> String {
+    b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
+fn hmac256(key: &[u8], data: &str) -> Vec<u8> {
+    let mut m = <Hmac<Sha256> as Mac>::new_from_slice(key).expect("hmac kaliti");
+    m.update(data.as_bytes());
+    m.finalize().into_bytes().to_vec()
+}
+
+fn pct(s: &str) -> String {
+    s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect()
+}
+
+/// `YYYYMMDDTHHMMSSZ` (UTC).
+fn amz_date(ms: i64) -> String {
+    let secs = ms.div_euclid(1000);
+    let days = secs.div_euclid(86_400);
+    let rem = secs.rem_euclid(86_400);
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    format!("{y:04}{m:02}{d:02}T{:02}{:02}{:02}Z", rem / 3600, rem % 3600 / 60, rem % 60)
+}
+
+/// Imzolangan havola (faqat `host` sarlavhasi imzolanadi, tana — `UNSIGNED-PAYLOAD`).
+fn presign(method: &str, host: &str, path: &str, akid: &str, secret: &str, region: &str, amzdate: &str, expires: i64) -> String {
+    let date = &amzdate[..8];
+    let scope = format!("{date}/{region}/s3/aws4_request");
+    let mut q = vec![
+        ("X-Amz-Algorithm", "AWS4-HMAC-SHA256".to_string()),
+        ("X-Amz-Credential", format!("{akid}/{scope}")),
+        ("X-Amz-Date", amzdate.to_string()),
+        ("X-Amz-Expires", expires.to_string()),
+        ("X-Amz-SignedHeaders", "host".to_string()),
+    ];
+    q.sort_by(|a, b| a.0.cmp(b.0));
+    let cq = q.iter().map(|(k, v)| format!("{}={}", pct(k), pct(v))).collect::<Vec<_>>().join("&");
+    let creq = format!("{method}\n{path}\n{cq}\nhost:{host}\n\nhost\nUNSIGNED-PAYLOAD");
+    let sts = format!("AWS4-HMAC-SHA256\n{amzdate}\n{scope}\n{}", hex(&Sha256::digest(creq.as_bytes())));
+    let mut k = hmac256(format!("AWS4{secret}").as_bytes(), date);
+    for part in [region, "s3", "aws4_request"] {
+        k = hmac256(&k, part);
+    }
+    let sig = hex(&hmac256(&k, &sts));
+    format!("https://{host}{path}?{cq}&X-Amz-Signature={sig}")
+}
+
+/// S3 kalitlari bormi (1-rejim).
+fn direct(env: &Env) -> bool {
+    !tg_secret(env, "R2_ACCESS_KEY_ID").is_empty() && !tg_secret(env, "R2_SECRET_ACCESS_KEY").is_empty()
+        && !tg_secret(env, "R2_ACCOUNT_ID").is_empty()
+}
+
+/// Imzolangan havola (`method` — GET/PUT/HEAD/DELETE) `arumediatv/<file>` uchun.
+fn signed_url(env: &Env, method: &str, file: &str, expires: i64) -> Option<String> {
+    if !direct(env) || !tg_safe_name(file) {
+        return None;
+    }
+    let host = format!("{}.r2.cloudflarestorage.com", tg_secret(env, "R2_ACCOUNT_ID"));
+    Some(presign(method, &host, &format!("/arumediatv/{file}"), &tg_secret(env, "R2_ACCESS_KEY_ID"),
+        &tg_secret(env, "R2_SECRET_ACCESS_KEY"), "auto", &amz_date(now_ms()), expires))
+}
+
+async fn signed_call(env: &Env, method: &str, file: &str) -> Option<(u16, Option<i64>)> {
+    let u = signed_url(env, method, file, 300)?;
+    let mut init = RequestInit::new();
+    init.with_method(if method == "HEAD" { Method::Head } else { Method::Delete });
+    let r = Fetch::Request(Request::new_with_init(&u, &init).ok()?).send().await.ok()?;
+    let len = r.headers().get("content-length").ok().flatten().and_then(|v| v.parse::<i64>().ok());
+    Some((r.status_code(), len))
+}
+
+/// Faylning R2'dagi hajmi (binding bo'lsa u, aks holda imzolangan HEAD).
+async fn head_size(env: &Env, file: &str) -> Option<i64> {
+    if let Some(b) = bucket(env) {
+        return b.head(file).await.ok().flatten().map(|o| o.size() as i64);
+    }
+    match signed_call(env, "HEAD", file).await {
+        Some((200, len)) => len,
+        _ => None,
+    }
+}
 
 const WORKFLOW: &str = "upload.yml";
 /// Kodlovchi bo'lak hajmi (multipart: oxirgisidan boshqalari bir xil va kamida 5 MiB bo'lishi shart). Bo'lak xotiraga
@@ -62,9 +162,9 @@ fn bucket(env: &Env) -> Option<Bucket> {
     env.bucket("R2").ok()
 }
 
-/// R2 binding'i bormi (deploy paytida qo'shiladi; yo'q bo'lsa run'lar eski usulda yuklaydi).
+/// R2 ishlatsa bo'ladimi: binding (worker orqali) YOKI S3 kalitlari (to'g'ridan-to'g'ri). Yo'q bo'lsa run'lar eski usulda yuklaydi.
 pub(crate) fn ready(env: &Env) -> bool {
-    bucket(env).is_some()
+    bucket(env).is_some() || direct(env)
 }
 
 // ── Kodlovchi tomoni ─────────────────────────────────────────
@@ -73,9 +173,11 @@ pub(crate) fn ready(env: &Env) -> bool {
 /// `upload_id` qaytadi; joy yo'q bo'lsa `Err("full")` — kodlovchi R2 bo'shaguncha KUTADI; R2 yo'q yoki fayl butunlay
 /// sig'maydigan bo'lsa `Err("na")` — kodlovchi to'g'ridan-to'g'ri bot chatiga yuklaydi. Sig'im: `R2_MAX_GB` (standart 8).
 pub(crate) async fn register(env: &Env, (a, s, e): (i64, i64, i64), queued_at: i64, q: &str, kind: &str, file: &str,
-        key: &str, size: i64) -> std::result::Result<String, &'static str> {
+        key: &str, size: i64) -> std::result::Result<Value, &'static str> {
     migrate(env).await;
-    let Some(b) = bucket(env) else { return Err("na") };
+    if !ready(env) {
+        return Err("na");
+    }
     let cap: i64 = tg_secret(env, "R2_MAX_GB").parse::<i64>().unwrap_or(8).max(1) * 1024 * 1024 * 1024;
     if size > cap || !tg_safe_name(file) {
         return Err("na");
@@ -94,10 +196,16 @@ pub(crate) async fn register(env: &Env, (a, s, e): (i64, i64, i64), queued_at: i
     if first_row(&r).is_none() {
         return Err("full");
     }
+    // 1-rejim: imzolangan PUT havolasi (2 soat) — run R2'ga to'g'ridan-to'g'ri yozadi.
+    if let Some(put) = signed_url(env, "PUT", file, 7200) {
+        return Ok(json!({"url": put}));
+    }
+    // 2-rejim: worker orqali multipart (binding).
+    let Some(b) = bucket(env) else { return Err("na") };
     let up = b.create_multipart_upload(file).execute().await.map_err(|_| "na")?;
     let id = up.upload_id().await;
     let _ = turso_exec(env, "UPDATE r2_files SET upload_id=? WHERE file_name=?", vec![TursoArg::text(&id), TursoArg::text(file)]).await;
-    Ok(id)
+    Ok(json!({"upload_id": id, "part_size": part_size(env)}))
 }
 
 /// `PUT /api/r2/part?file=..&n=..` — bitta bo'lak (so'rov tanasi, OQIM bilan) R2 multipart yuklashiga yoziladi; `etag` qaytadi.
@@ -125,22 +233,25 @@ async fn put_part(mut req: Request, env: &Env) -> Result<Response> {
 
 /// Kodlovchi hamma bo'lakni yozdi: yig'iladi (`complete`), hajm tekshiriladi, qator `ready` (yuklovchi olishi mumkin).
 pub(crate) async fn mark_ready(env: &Env, file: &str, size: i64, parts: &Value) -> std::result::Result<(), String> {
-    let Some(b) = bucket(env) else { return Err("r2_yoq".into()) };
     let Some(row) = row(env, file).await.filter(|r| r["state"].as_str() == Some("uploading")) else {
         return Err("qator".into());
     };
     let id = row["upload_id"].as_str().unwrap_or("").to_string();
-    let list: Vec<UploadedPart> = parts.as_array().map(|a| a.iter().filter_map(|p| {
-        Some(UploadedPart::new(p["n"].as_u64()? as u16, p["etag"].as_str()?.to_string()))
-    }).collect()).unwrap_or_default();
-    if list.is_empty() {
-        return Err("bolaklar".into());
+    // 2-rejim (multipart): bo'laklar yig'iladi. 1-rejimda (to'g'ridan-to'g'ri PUT) `upload_id` bo'sh — faqat hajm tekshiriladi.
+    if !id.is_empty() {
+        let Some(b) = bucket(env) else { return Err("r2_yoq".into()) };
+        let list: Vec<UploadedPart> = parts.as_array().map(|a| a.iter().filter_map(|p| {
+            Some(UploadedPart::new(p["n"].as_u64()? as u16, p["etag"].as_str()?.to_string()))
+        }).collect()).unwrap_or_default();
+        if list.is_empty() {
+            return Err("bolaklar".into());
+        }
+        let up = b.resume_multipart_upload(file, id).map_err(|e| e.to_string())?;
+        up.complete(list).await.map_err(|e| format!("yigish: {e}"))?;
     }
-    let up = b.resume_multipart_upload(file, id).map_err(|e| e.to_string())?;
-    up.complete(list).await.map_err(|e| format!("yigish: {e}"))?;
-    let got = b.head(file).await.map_err(|e| e.to_string())?.map(|o| o.size() as i64);
+    let got = head_size(env, file).await;
     if got != Some(size) {
-        let _ = b.delete(file).await;
+        finish(env, file).await;
         return Err(format!("r2_hajm ({got:?} != {size})"));
     }
     turso_exec(env, "UPDATE r2_files SET state='ready' WHERE file_name=? AND state='uploading'",
@@ -161,6 +272,8 @@ pub(crate) async fn pending_for(env: &Env, a: i64, s: i64, e: i64, queued_at: i6
 pub(crate) async fn finish(env: &Env, file: &str) {
     if let Some(b) = bucket(env) {
         let _ = b.delete(file).await;
+    } else {
+        let _ = signed_call(env, "DELETE", file).await;
     }
     let _ = turso_exec(env, "DELETE FROM r2_files WHERE file_name=?", vec![TursoArg::text(file)]).await;
 }
@@ -314,6 +427,8 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
             let (kind, q, key, size) = (r["kind"].as_str().unwrap_or(""), r["quality"].as_str().unwrap_or(""),
                 r["file_key"].as_str().unwrap_or(""), jint(&r, "size"));
             return ok(json!({
+                // 1-rejimda R2'dan to'g'ridan-to'g'ri olish havolasi (2 soat); aks holda yuklovchi worker'dan oqim bilan oladi.
+                "url": signed_url(env, "GET", &name, 7200),
                 "file": name, "size": size, "bot": bot_username(env).await,
                 "caption": format!("ARUENC|{kind}|{a}|{s}|{e}|{qa}|{q}|{key}|{size}"),
                 "attempt": jint(&r, "attempts"),
@@ -321,9 +436,27 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
         }
         // Tashxis: R2 binding'i bormi va bucket'ga yetib boradimi.
         "/api/r2/diag" => {
-            let Some(bk) = bucket(env) else { return ok(json!({"ready": false})) };
-            let listed = bk.list().limit(1).execute().await;
-            return ok(json!({"ready": true, "ok": listed.is_ok(), "error": listed.err().map(|e| e.to_string())}));
+            if !ready(env) {
+                return ok(json!({"ready": false}));
+            }
+            let binding = match bucket(env) {
+                Some(bk) => Some(bk.list().limit(1).execute().await.is_ok()),
+                None => None,
+            };
+            let head = if direct(env) {
+                let host = format!("{}.r2.cloudflarestorage.com", tg_secret(env, "R2_ACCOUNT_ID"));
+                let u = presign("HEAD", &host, "/arumediatv", &tg_secret(env, "R2_ACCESS_KEY_ID"),
+                    &tg_secret(env, "R2_SECRET_ACCESS_KEY"), "auto", &amz_date(now), 300);
+                let mut init = RequestInit::new();
+                init.with_method(Method::Head);
+                match Request::new_with_init(&u, &init) {
+                    Ok(rq) => Some(Fetch::Request(rq).send().await.map(|r| r.status_code() as i64).unwrap_or(-1)),
+                    Err(_) => Some(-2),
+                }
+            } else {
+                None
+            };
+            return ok(json!({"ready": true, "direct": direct(env), "binding_ok": binding, "s3_bucket_status": head}));
         }
         "/api/r2/beat" => {
             let _ = turso_exec(env, "UPDATE r2_files SET lease_until=? WHERE file_name=? AND state='sending'",
@@ -355,4 +488,23 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
         _ => {}
     }
     err404("topilmadi")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn aws_presign_vektori() {
+        // AWS hujjatidagi rasmiy namuna (GET /test.txt).
+        let u = presign("GET", "examplebucket.s3.amazonaws.com", "/test.txt", "AKIAIOSFODNN7EXAMPLE",
+            "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "us-east-1", "20130524T000000Z", 86400);
+        assert!(u.ends_with("X-Amz-Signature=aeeed9bbccd4d02ee5c0109b86d86835f995330da4c265957d157751f604d404"));
+    }
+
+    #[test]
+    fn sana_formati() {
+        assert_eq!(amz_date(1_369_353_600_000), "20130524T000000Z");
+        assert_eq!(amz_date(0), "19700101T000000Z");
+    }
 }
