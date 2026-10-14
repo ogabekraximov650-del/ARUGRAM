@@ -12,7 +12,7 @@ from pathlib import Path
 
 ENC = Path("tool/encode/gh_token.enc")
 REPO = Path("tool/encode/gh_repo.txt").read_text().strip().split("/")[-1]
-RUNS = int(os.environ.get("DIAG_RUNS", "25"))
+RUNS = int(os.environ.get("DIAG_RUNS", "8"))
 TAIL = int(os.environ.get("DIAG_TAIL", "60"))
 
 k = "".join(os.environ.get("ENCODE_TOKEN", "").split())
@@ -49,6 +49,18 @@ for run in runs:
         for st in j.get("steps", []):
             if st.get("conclusion") not in (None, "success", "skipped"):
                 print(f"      qadam xato: {st['name']} -> {st['conclusion']}")
+    if "R2" in run["name"] or "ukl" in run["name"].lower():
+        for j in jobs:
+            try:
+                txt = get(f"/repos/{login}/{REPO}/actions/jobs/{j['id']}/logs", raw=True).decode("utf-8", "replace")
+            except Exception as ex:  # noqa: BLE001
+                print("  job logi olinmadi:", ex)
+                continue
+            lines = [l for l in txt.splitlines() if "##[" not in l and "[36;1m" not in l and "Node.js" not in l]
+            print(f"  >>> JOB LOG {j['name']} ({len(lines)} qator), oxirgi 250:")
+            for ln in lines[-250:]:
+                print("    " + ln[:300])
+        continue
     try:
         z = zipfile.ZipFile(io.BytesIO(get(f"/repos/{login}/{REPO}/actions/runs/{run['id']}/logs", raw=True)))
     except Exception as ex:  # noqa: BLE001
