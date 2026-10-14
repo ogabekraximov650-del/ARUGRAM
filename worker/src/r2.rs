@@ -187,6 +187,11 @@ pub(crate) async fn register(env: &Env, (a, s, e): (i64, i64, i64), queued_at: i
 }
 
 /// `dest` — "yetkazish" (`kind == "deliver"`) faylining tavsifi (JSON): qayerga, qanday yuborilsin va keyin qaysi yo'lni chaqirish.
+/// R2 oraliq ombori sig'imi (bayt): `R2_MAX_GB` (standart 8 GB).
+pub(crate) fn cap_bytes(env: &Env) -> i64 {
+    tg_secret(env, "R2_MAX_GB").parse::<i64>().unwrap_or(8).max(1) * 1024 * 1024 * 1024
+}
+
 pub(crate) async fn register_dest(env: &Env, (a, s, e): (i64, i64, i64), queued_at: i64, q: &str, kind: &str, file: &str,
         key: &str, size: i64, dest: &str) -> std::result::Result<Value, &'static str> {
     migrate(env).await;
@@ -194,7 +199,7 @@ pub(crate) async fn register_dest(env: &Env, (a, s, e): (i64, i64, i64), queued_
     if !ready(env) {
         return Err("na");
     }
-    let cap: i64 = tg_secret(env, "R2_MAX_GB").parse::<i64>().unwrap_or(8).max(1) * 1024 * 1024 * 1024;
+    let cap = cap_bytes(env);
     if size > cap || !tg_safe_name(file) {
         return Err("na");
     }

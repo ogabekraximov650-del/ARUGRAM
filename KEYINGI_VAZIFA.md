@@ -6317,3 +6317,5 @@ Fayl oqimi o'zgarmadi: hamma narsa asosiy bot chatiga yuboriladi.
   VA adminga yuboradi (`send_via_panel_bot`). Token faqat `fallback_bot` belgili yetkazish `claim`ida beriladi (`r2.rs`).
 - Qolgan fayllar (sifat MP4/fMP4, Anibla, To'plam) avval **qo'shimcha akkauntlar** orqali yuboriladi; ular hammasi dam olayotgan
   bo'lsa — asosiy akkaunt (`pick_app`). Foydalanuvchi panel botni bir marta ochgan bo'lishi shart.
+
+Botdagi "Holat" xabarida R2 bloki endi ombor holatini ham ko'rsatadi (`livewatch.rs` `r2_space`): band hajm, bo'sh joy, jami (`R2_MAX_GB`, `r2::cap_bytes`) va foiz-chiziq (30 s keshda, qo'shimcha so'rovsiz — mavjud hisoblash so'roviga qo'shildi).
