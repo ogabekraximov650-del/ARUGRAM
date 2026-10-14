@@ -6342,3 +6342,5 @@ har fayl uchun bosqich almashganda (yuklab olish boshlandi / Telegram'ga yuklash
   Post zaxirasi (`fallback_bot`): avval panel bot userga va adminga yuboradi, bo'lmasa pool sessiyalari.
 
 Panel bot yana almashtirildi (`tool/bot/encode_bot.enc` qayta shifrlandi, usul o'sha).
+
+Holat xabari: sifat bloklaridan log qatorlari (📜) olib tashlandi (progress, tezlik va vaqt qoladi) — xabar qisqaradi va R2 yuklovchi bloki (5 ta log qatori bilan) to'liq sig'adi.

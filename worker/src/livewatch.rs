@@ -459,7 +459,7 @@ pub(crate) async fn app_all_html(env: &Env) -> String {
     let (pend, queued) = pending_all(env).await;
     let now = now_ms();
     let running = running_flags(env).await;
-    let mut nlog = 3usize;
+    let mut nlog = 5usize;
     loop {
         let mut blocks = Vec::new();
         for (i, q) in QUALITIES.iter().enumerate() {
@@ -467,7 +467,8 @@ pub(crate) async fn app_all_html(env: &Env) -> String {
             let live = st.as_ref().filter(|s| now - jint(s, "updated_at") < 3 * 60 * 1000
                 && s["progress"].as_str().unwrap_or("idle") != "idle" && jint(s, "anime_id") > 0);
             match live {
-                Some(s) => blocks.push(q_block(env, q, s, pend[i], nlog).await),
+                // Sifat bloklarida log qatorlari ko'rsatilmaydi (xabar qisqa bo'lsin, R2 yuklovchi logi sig'sin); jonli log — kodlash log kanalida.
+                Some(s) => blocks.push(q_block(env, q, s, pend[i], 0).await),
                 None if running[i] => blocks.push(format!("\u{2699}\u{FE0F} <b>{q}</b>: ishlayapti (jonli log kodlash log kanalida) \u{00B7} kutayotgan: {}", pend[i])),
                 None => blocks.push(format!("\u{1F4A4} <b>{q}</b>: hozir ishlamayapti \u{00B7} kutayotgan: {}", pend[i])),
             }
