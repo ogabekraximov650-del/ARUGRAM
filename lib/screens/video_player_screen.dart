@@ -3159,11 +3159,21 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     if (!mounted || ctrl != _controller) return;
     setState(() => _enhanceNative = level > 0 && ok);
     if (announce) {
+      var why = '';
+      if (level > 0 && !ok) {
+        // Sababi (native xato matni) — diagnostika uchun ekranda ko'rsatiladi.
+        try {
+          final e = await _enhanceCh.invokeMethod<String>('error', {'playerId': ctrl.playerId});
+          if (e != null && e.isNotEmpty) why = ' [${e.length > 90 ? e.substring(0, 90) : e}]';
+        } catch (_) {
+          why = ' [native kanal yo\'q]';
+        }
+      }
       _showNotice(level == 0
           ? 'Tasvirni yaxshilash: o\'chiq'
           : ok
               ? 'Tasvirni yaxshilash: ${_enhanceNames[level]} (GPU)'
-              : 'GPU effekt ishlamadi — oddiy rang filtri (${_enhanceNames[level]})');
+              : 'GPU effekt ishlamadi — oddiy rang filtri (${_enhanceNames[level]})$why');
     }
   }
 

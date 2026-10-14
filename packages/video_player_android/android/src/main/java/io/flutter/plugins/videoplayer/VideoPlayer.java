@@ -134,6 +134,8 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
   private boolean enhanceListenerAdded = false;
   @Nullable private EnhanceListener enhanceListener;
   private int enhanceDrops = 0;
+  /** Oxirgi effekt xatosi (diagnostika: Dart ekranda ko'rsatadi). */
+  @Nullable public String enhanceError;
   private long enhanceWindowMs = 0;
 
   public void setEnhanceListener(@Nullable EnhanceListener l) {
@@ -166,6 +168,7 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
                 }
                 for (Throwable t = error; t != null; t = t.getCause()) {
                   if (t instanceof androidx.media3.common.VideoFrameProcessingException) {
+                    enhanceError = t.getClass().getSimpleName() + ": " + t.getMessage();
                     enhanceLevel = 0;
                     exoPlayer.setVideoEffects(
                         java.util.Collections.<androidx.media3.common.Effect>emptyList());
@@ -220,6 +223,7 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
       return true;
     } catch (Throwable t) {
       enhanceLevel = 0;
+      enhanceError = t.getClass().getSimpleName() + ": " + t.getMessage();
       try {
         exoPlayer.setVideoEffects(java.util.Collections.<androidx.media3.common.Effect>emptyList());
       } catch (Throwable ignored) {

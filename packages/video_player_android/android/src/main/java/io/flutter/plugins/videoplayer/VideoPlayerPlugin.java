@@ -48,6 +48,12 @@ public class VideoPlayerPlugin implements FlutterPlugin, AndroidVideoPlayerApi {
     enhanceChannel = new MethodChannel(binding.getBinaryMessenger(), "uz.arugram.player/enhance");
     enhanceChannel.setMethodCallHandler(
         (call, result) -> {
+          if ("error".equals(call.method)) {
+            final Number eid = call.argument("playerId");
+            final VideoPlayer evp = eid == null ? null : videoPlayers.get(eid.longValue());
+            result.success(evp == null ? null : evp.enhanceError);
+            return;
+          }
           if (!"set".equals(call.method)) {
             result.notImplemented();
             return;
