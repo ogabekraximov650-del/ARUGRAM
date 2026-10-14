@@ -134,12 +134,18 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
   private boolean enhanceListenerAdded = false;
   @Nullable private EnhanceListener enhanceListener;
   private int enhanceDrops = 0;
+  private long enhanceFramesBase = 0;
   /** Oxirgi effekt xatosi (diagnostika: Dart ekranda ko'rsatadi). */
   @Nullable public String enhanceError;
   private long enhanceWindowMs = 0;
 
   public void setEnhanceListener(@Nullable EnhanceListener l) {
     enhanceListener = l;
+  }
+
+  /** Effekt yoqilgandan beri shader o'tkazgan kadrlar soni (0 bo'lsa effekt konveyerda ishlamayapti). */
+  public long enhanceFrames() {
+    return AruEnhanceShaderProgram.FRAMES.get() - enhanceFramesBase;
   }
 
   /**
@@ -211,12 +217,13 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
       }
       enhanceDrops = 0;
       enhanceWindowMs = 0;
+      enhanceFramesBase = AruEnhanceShaderProgram.FRAMES.get();
       final java.util.List<androidx.media3.common.Effect> effects = new java.util.ArrayList<>();
       final androidx.media3.common.Format f = exoPlayer.getVideoFormat();
       final int target = level >= 2 ? 1080 : 720;
       if (f != null && f.height > 0 && f.height < target) {
-        if (level >= 3) {
-          // Maksimal: Lanczos (sinc) kattalashtirish — bilinear'dan ancha aniq chiziqlar.
+        if (level >= 2) {
+          // Kuchli/Maksimal: Lanczos (sinc) kattalashtirish — bilinear'dan ancha aniq chiziqlar.
           effects.add(androidx.media3.effect.LanczosResample.scaleToFit(1920, 1080));
         } else {
           effects.add(androidx.media3.effect.Presentation.createForHeight(target));

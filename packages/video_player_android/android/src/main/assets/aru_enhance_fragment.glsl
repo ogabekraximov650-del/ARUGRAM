@@ -63,7 +63,7 @@ void main() {
     vec3 avg = (a + b + c + d + e + f + g + h + i + far0 + far1 + far2 + far3) / 13.0;
     float spread = max(contrast, max(abs(luma(far0) - le), max(abs(luma(far1) - le),
                    max(abs(luma(far2) - le), abs(luma(far3) - le)))));
-    float flatAmt = 1.0 - smoothstep(0.012, 0.035, spread);
+    float flatAmt = 1.0 - smoothstep(0.015, 0.07, spread);
     col = mix(e, avg, flatAmt * uDeband);
     // uchburchakli dither: zinapoyalar ko'rinmasin
     float n = hash12(gl_FragCoord.xy + uSeed) + hash12(gl_FragCoord.yx * 1.37 + uSeed * 1.7) - 1.0;
@@ -79,8 +79,10 @@ void main() {
     vec3 w = amp * peak;
     vec3 rcp = 1.0 / (1.0 + 4.0 * w);
     vec3 sharp = (w * (b + d + f + h) + col) * rcp;
-    float edge = smoothstep(0.02, 0.12, contrast);
-    col = mix(col, sharp, edge * 0.85 + 0.15);
+    // Anti-ringing: natija mahalliy min/max oralig'idan chiqmasin (galo va "piksellanish" bo'lmasin).
+    sharp = clamp(sharp, mn - 0.01, mx + 0.01);
+    float edge = smoothstep(0.03, 0.16, contrast);
+    col = mix(col, sharp, edge * 0.9 + 0.1);
   }
 
   // 3) Chiziqlarni qoraytirish: atrofidan qoraroq piksel (kontur) biroz qoraytiriladi.

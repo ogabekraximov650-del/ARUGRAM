@@ -159,12 +159,13 @@ function buildPlayer(el, route, season, opts) {
 
   // ── Tasvirni yaxshilash (MX Pleyerdagi "Smart Enhance" kabi, lekin anime uchun sozlangan) ──
   // WebGL shader (ilovadagi bilan bir xil: deband/denoise, o'tkirlik, chiziqlar, rang). WebGL bo'lmasa — CSS filtri.
-  const ENH_LABEL = ["O'chiq", 'Yengil', 'Kuchli'];
+  const ENH_LABEL = ["O'chiq", 'Yengil', 'Kuchli', 'Maksimal'];
   const enhancer = createEnhancer(video, box);
   // CSS zaxirasi FAQAT rang (SVG konvolyutsiya CPU'da ishlab qotirardi — olib tashlandi).
   function cssEnhance(lv) {
     video.style.filter = lv === 1 ? 'saturate(1.18) contrast(1.07) brightness(1.02)'
-      : lv === 2 ? 'saturate(1.35) contrast(1.14) brightness(1.03)' : '';
+      : lv === 2 ? 'saturate(1.35) contrast(1.14) brightness(1.03)'
+      : lv >= 3 ? 'saturate(1.4) contrast(1.17) brightness(1.03)' : '';
   }
   function applyEnhance() {
     const lv = playerSettings.enhance;
@@ -905,7 +906,7 @@ function buildPlayer(el, route, season, opts) {
         playerSettings.setAutoSkipIntro(on);
         if (on) { introTries = {}; lastSkip = 0; if (introIdx >= 0) { introTries[introIdx] = 1; lastSkip = Date.now(); seekTo((ranges[introIdx][1] + 400) / 1000); $('.pl-intro').classList.remove('on'); } }
         bindSettings(p);
-      } else if (id === 'enh') { playerSettings.setEnhance((playerSettings.enhance + 1) % 3); applyEnhance(); bindSettings(p); }
+      } else if (id === 'enh') { playerSettings.setEnhance((playerSettings.enhance + 1) % 4); applyEnhance(); bindSettings(p); }
       else if (id === 'next') { playerSettings.setAutoNextEpisode(!playerSettings.autoNextEpisode); bindSettings(p); }
       else if (id === 'sleep') { closePanels(); openSleep(); }
     }));

@@ -6398,3 +6398,13 @@ Shaderga ikki yangi uniforma (`uClarity`, `uVib`, 0 = o'chiq) qo'shildi; web ula
 Anibla: "Yillar ro'yxatini olib bo'lmadi" xabari endi SABABNI ham ko'rsatadi (`year_counts` xato matnini qaytaradi). `/api/anibla/probe` (faqat o'qish, xabar yubormaydi) — sayt ro'yxati HTTP javobi va saqlangan login bilan kirish natijasi; `diag-logs.yml` uni chaqiradi.
 
 Anibla sekinligi (diag): worker -> anibla.uz har so'rovga ~1.2-1.4 s (login 1.4 s, ro'yxat 1.4 s, 500 ta — 1.2 s/935 KB). Chora: login talab qilmaydigan ro'yxat so'rovlari 3 daqiqa xotirada keshlanadi (`GET_CACHE`, takroriy bosish darhol); yillar ro'yxati keshi 6 -> 24 soat va sayt javob bermasa eskisi ko'rsatiladi.
+
+## Tasvirni yaxshilash: ilovada tekshiruv, webga "Maksimal", piksellanish tuzatildi (2026-10)
+
+- Foydalanuvchi: ilovada umuman ishlamayapti (web'da ishlaydi); "Kuchli" da ba'zan piksellanadi.
+- **Ilova:** effekt "yoqildi" desa ham kadrlar shader'dan o'tmayotgan bo'lishi mumkin (jim ishlamaslik). Endi `AruEnhanceShaderProgram.FRAMES` sanagichi
+  (`stats` kanal usuli) bilan 3 s dan keyin tekshiriladi; 0 kadr bo'lsa rang filtriga qaytiladi va ekranda xabar chiqadi. Kuchli/Maksimal uchun GPU'da
+  Lanczos kattalashtirish (`LanczosResample`).
+- **Web:** "Maksimal" daraja (qurilma ko'targanicha: 2560x1440 gacha, kadr tashlansa avtomatik pasayadi; MIN 0.75 dan pastda effekt o'chadi — piksellanmasin).
+  Ikki o'tish: Catmull-Rom bikubik kattalashtirish -> yaxshilash shaderi (avval bilinear + o'tkirlik zinapoyalarni (aliasing) kuchaytirardi).
+- **Piksellanish:** shaderda anti-ringing (o'tkirlik natijasi mahalliy min/max bilan cheklanadi), deband chegaralari yumshoqroq, o'tkirlik faqat chegaralarda.

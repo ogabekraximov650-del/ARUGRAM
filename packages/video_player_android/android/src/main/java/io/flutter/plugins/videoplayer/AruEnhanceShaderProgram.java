@@ -36,6 +36,9 @@ final class AruEnhanceShaderProgram extends BaseGlShaderProgram {
   // 3 — MAKSIMAL (faqat ilovada): kuchli o'tkirlik + ravshanlik + vibrance (GPU'da Lanczos kattalashtirish bilan birga)
   private static final float[] LEVEL3 = {1.0f, 1.32f, 1.16f, 0.9f, 0.8f, 0.35f, 0.55f};
 
+  /** Shader orqali o'tgan kadrlar soni (diagnostika: Dart effekt haqiqatan ishlayotganini tekshiradi). */
+  static final java.util.concurrent.atomic.AtomicLong FRAMES = new java.util.concurrent.atomic.AtomicLong();
+
   private final GlProgram glProgram;
 
   AruEnhanceShaderProgram(@NonNull Context context, int level) throws VideoFrameProcessingException {
@@ -92,6 +95,7 @@ final class AruEnhanceShaderProgram extends BaseGlShaderProgram {
       glProgram.setFloatUniform("uSeed", (presentationTimeUs / 1000 % 997) * 0.137f);
       glProgram.bindAttributesAndUniforms();
       GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, /* first= */ 0, /* count= */ 4);
+      FRAMES.incrementAndGet();
     } catch (GlUtil.GlException e) {
       throw new VideoFrameProcessingException(e, presentationTimeUs);
     }

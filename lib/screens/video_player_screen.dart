@@ -3158,6 +3158,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     if (level > 0) _enhanceTouched = true;
     if (!mounted || ctrl != _controller) return;
     setState(() => _enhanceNative = level > 0 && ok);
+    if (level > 0 && ok) _verifyEnhance(ctrl, level);
     if (announce) {
       var why = '';
       if (level > 0 && !ok) {
@@ -3174,6 +3175,31 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
           : ok
               ? 'Tasvirni yaxshilash: ${_enhanceNames[level]} (GPU)'
               : 'GPU effekt ishlamadi — oddiy rang filtri (${_enhanceNames[level]})$why');
+    }
+  }
+
+  /// Effekt "yoqildi" desa ham kadrlar shader'dan o'tmayotgan bo'lsa (0 kadr) — rang filtriga qaytiladi
+  /// va foydalanuvchiga aytiladi (jimgina "ishlamaydigan" holat bo'lmasin).
+  Future<void> _verifyEnhance(VideoPlayerController ctrl, int level) async {
+    await Future<void>.delayed(const Duration(milliseconds: 3000));
+    if (!mounted || ctrl != _controller || AppSettings.instance.videoEnhance != level) return;
+    if (!ctrl.value.isInitialized || !ctrl.value.isPlaying) {
+      // Pauzada tekshirib bo'lmaydi — ijro boshlangach yana urinadi.
+      if (mounted && ctrl == _controller && AppSettings.instance.videoEnhance == level) {
+        Future<void>.delayed(const Duration(seconds: 4), () {
+          if (mounted && ctrl == _controller && _enhanceNative) _verifyEnhance(ctrl, level);
+        });
+      }
+      return;
+    }
+    int frames = -1;
+    try {
+      frames = (await _enhanceCh.invokeMethod<int>('stats', {'playerId': ctrl.playerId})) ?? -1;
+    } catch (_) {}
+    if (!mounted || ctrl != _controller) return;
+    if (frames == 0) {
+      setState(() => _enhanceNative = false);
+      _showNotice('GPU effekt kadrlarga qo\'llanmadi (0 kadr) — rang filtri ishlatilmoqda');
     }
   }
 
