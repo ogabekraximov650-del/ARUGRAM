@@ -158,6 +158,15 @@ pub(crate) async fn migrate(env: &Env) {
     config_put(env, "mig_r2b", "1").await;
 }
 
+/// Umumiy "yetkazish" fayllari (Post/Anibla/To'plam) uchun `dest` ustuni (JSON).
+async fn migrate_dest(env: &Env) {
+    if config_get(env, "mig_r2c").await.is_some() {
+        return;
+    }
+    let _ = turso_exec(env, "ALTER TABLE r2_files ADD COLUMN dest TEXT DEFAULT ''", vec![]).await;
+    config_put(env, "mig_r2c", "1").await;
+}
+
 fn bucket(env: &Env) -> Option<Bucket> {
     env.bucket("R2").ok()
 }
@@ -174,7 +183,14 @@ pub(crate) fn ready(env: &Env) -> bool {
 /// sig'maydigan bo'lsa `Err("na")` — kodlovchi to'g'ridan-to'g'ri bot chatiga yuklaydi. Sig'im: `R2_MAX_GB` (standart 8).
 pub(crate) async fn register(env: &Env, (a, s, e): (i64, i64, i64), queued_at: i64, q: &str, kind: &str, file: &str,
         key: &str, size: i64) -> std::result::Result<Value, &'static str> {
+    register_dest(env, (a, s, e), queued_at, q, kind, file, key, size, "").await
+}
+
+/// `dest` — "yetkazish" (`kind == "deliver"`) faylining tavsifi (JSON): qayerga, qanday yuborilsin va keyin qaysi yo'lni chaqirish.
+pub(crate) async fn register_dest(env: &Env, (a, s, e): (i64, i64, i64), queued_at: i64, q: &str, kind: &str, file: &str,
+        key: &str, size: i64, dest: &str) -> std::result::Result<Value, &'static str> {
     migrate(env).await;
+    migrate_dest(env).await;
     if !ready(env) {
         return Err("na");
     }
@@ -184,15 +200,15 @@ pub(crate) async fn register(env: &Env, (a, s, e): (i64, i64, i64), queued_at: i
     }
     // Sig'im tekshiruvi va qator ochish BITTA so'rovda (4 ta run bir vaqtda so'rasa ham chegara oshmaydi).
     let r = turso_exec(env,
-        "INSERT INTO r2_files (file_name, kind, anime_id, season_id, epizod_id, queued_at, quality, file_key, size, state, created_at)
-         SELECT ?,?,?,?,?,?,?,?,?,'uploading',?
+        "INSERT INTO r2_files (file_name, kind, anime_id, season_id, epizod_id, queued_at, quality, file_key, size, state, created_at, dest)
+         SELECT ?,?,?,?,?,?,?,?,?,'uploading',?,?
           WHERE (SELECT COALESCE(SUM(size),0) FROM r2_files WHERE file_name<>?) + ? <= ?
-         ON CONFLICT(file_name) DO UPDATE SET kind=excluded.kind, file_key=excluded.file_key, size=excluded.size,
+         ON CONFLICT(file_name) DO UPDATE SET kind=excluded.kind, file_key=excluded.file_key, size=excluded.size, dest=excluded.dest,
             state='uploading', runner='', lease_until=0, attempts=0, error='', created_at=excluded.created_at
          RETURNING file_name",
         vec![TursoArg::text(file), TursoArg::text(kind), TursoArg::int(a), TursoArg::int(s), TursoArg::int(e),
              TursoArg::int(queued_at), TursoArg::text(q), TursoArg::text(key), TursoArg::int(size), TursoArg::int(now_ms()),
-             TursoArg::text(file), TursoArg::int(size), TursoArg::int(cap)]).await.map_err(|_| "na")?;
+             TursoArg::text(dest), TursoArg::text(file), TursoArg::int(size), TursoArg::int(cap)]).await.map_err(|_| "na")?;
     if first_row(&r).is_none() {
         return Err("full");
     }
@@ -437,6 +453,14 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
             let (a, s, e, qa) = (jint(&r, "anime_id"), jint(&r, "season_id"), jint(&r, "epizod_id"), jint(&r, "queued_at"));
             let (kind, q, key, size) = (r["kind"].as_str().unwrap_or(""), r["quality"].as_str().unwrap_or(""),
                 r["file_key"].as_str().unwrap_or(""), jint(&r, "size"));
+            if kind == "deliver" {
+                // Post/Anibla/To'plam fayli: uyoqqa yuborilishi `dest` da (yuklovchi o'zi yuboradi va `callback` ni chaqiradi).
+                let dest: Value = serde_json::from_str(r["dest"].as_str().unwrap_or("{}")).unwrap_or(json!({}));
+                return ok(json!({
+                    "url": signed_url(env, "GET", &name, 7200), "file": name, "size": size, "kind": "deliver", "dest": dest,
+                    "group": "", "attempt": jint(&r, "attempts"),
+                }));
+            }
             return ok(json!({
                 // 1-rejimda R2'dan to'g'ridan-to'g'ri olish havolasi (2 soat); aks holda yuklovchi worker'dan oqim bilan oladi.
                 "url": signed_url(env, "GET", &name, 7200),
@@ -445,6 +469,42 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
                 "caption": format!("ARUENC|{kind}|{a}|{s}|{e}|{qa}|{q}|{key}|{size}"),
                 "attempt": jint(&r, "attempts"),
             }));
+        }
+        // Umumiy yetkazish (Post/Anibla/To'plam): run faylni R2'ga yozadi, yuklovchi `dest` bo'yicha Telegram'ga yuboradi.
+        "/api/r2/put" | "/api/r2/ready" => {
+            let size = jint(&b, "size");
+            if !tg_safe_name(&file) || size <= 0 {
+                return json_resp(&json!({"error": "fayl"}), 400);
+            }
+            if path == "/api/r2/put" {
+                let dest = &b["dest"];
+                let lease_ok = dest["lease"].is_null()
+                    || (["post_jobs", "anibla_jobs", "pack_db"].contains(&dest["lease"]["t"].as_str().unwrap_or(""))
+                        && dest["lease"]["id"].as_i64().is_some());
+                if !dest.is_object() || dest["to"].as_i64().is_none() || !lease_ok {
+                    return json_resp(&json!({"error": "dest"}), 400);
+                }
+                return match register_dest(env, (0, 0, 0), now.max(1), "", "deliver", &file, "", size, &dest.to_string()).await {
+                    Ok(mut v) => { v["ok"] = json!(true); ok(v) }
+                    Err("full") => ok(json!({"ok": false, "wait": true})),
+                    Err(_) => json_resp(&json!({"error": "r2"}), 503),
+                };
+            }
+            return match mark_ready(env, &file, size, &b["parts"]).await {
+                Ok(()) => {
+                    // Egasi ish (post/anibla/to'plam) navbatda kutib turganda boshqa run'ga o'tib ketmasin: ijara 12 soatga uzaytiriladi.
+                    if let Some(r) = row(env, &file).await {
+                        let dest: Value = serde_json::from_str(r["dest"].as_str().unwrap_or("{}")).unwrap_or(json!({}));
+                        let (t, id) = (dest["lease"]["t"].as_str().unwrap_or(""), dest["lease"]["id"].as_i64().unwrap_or(0));
+                        if ["post_jobs", "anibla_jobs", "pack_db"].contains(&t) && id > 0 {
+                            let _ = turso_exec(env, &format!("UPDATE {t} SET lease_until=? WHERE id=?"),
+                                vec![TursoArg::int(now + 12 * 3600 * 1000), TursoArg::int(id)]).await;
+                        }
+                    }
+                    ok(json!({"ok": true}))
+                }
+                Err(er) => json_resp(&json!({"error": er}), 409),
+            };
         }
         // Tashxis: R2 binding'i bormi va bucket'ga yetib boradimi.
         "/api/r2/diag" => {
@@ -497,6 +557,11 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
             return ok(json!({"ok": true}));
         }
         "/api/r2/done" => {
+            // "Yetkazish" fayli (Post/Anibla/To'plam): yuklovchi yuborib, qaytarish yo'lini chaqirgach — o'chadi.
+            if row(env, &file).await.map(|r| r["kind"].as_str() == Some("deliver")).unwrap_or(false) {
+                finish(env, &file).await;
+                return ok(json!({"ok": true, "deleted": true}));
+            }
             // Faqat bazaga haqiqatan yozilgan bo'lsa (tg_files) R2'dan o'chadi.
             if encupload::committed(env, &file).await {
                 finish(env, &file).await;

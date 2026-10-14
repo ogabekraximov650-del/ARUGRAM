@@ -31,6 +31,13 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+# R2 oraliq ombori: Telegram'ga yuklanadigan fayl R2 orqali o'tadi (`tool/upload/r2client.py`, `upload.yml` yetkazadi).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "upload"))
+try:
+    import r2client
+except Exception:  # noqa: BLE001 — modul yo'q bo'lsa eski usul
+    r2client = None
+
 HERE = Path(__file__).resolve().parent
 WORK = Path(os.environ.get("RUNNER_TEMP", "/tmp")) / "anibla"
 SESSION = str(HERE / "pyro_session")
@@ -573,6 +580,25 @@ async def process(app, job):
             raise Fatal(f"fayl {size / 1048576:.0f} MB — Telegram chegarasi 2 GB. Pastroq sifatni tanlang.")
         subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-ss", "10", "-i", str(out), "-frames:v", "1",
                         "-vf", "scale='min(320,iw)':-2", "-q:v", "5", str(thumb)])
+        # Telegram'ga yuklanadigan fayl avval R2'ga yoziladi; yuklovchi workflow kanalga yuboradi va `done` ni o'zi chaqiradi.
+        if r2client is not None:
+            import base64
+            ex = {k: v for k, v in (("duration", ffprobe(out, "duration")), ("width", w), ("height", h)) if v}
+            dest = {"mode": "video", "to": int(job.channel), "caption": job.caption[:1024], "file_name": f"{job.file_name}.mp4",
+                    "supports_streaming": True, "disable_notification": True, "lease": {"t": "anibla_jobs", "id": int(job.id)},
+                    "callback": {"path": "/api/anibla/done", "on_lost_delete": True,
+                                 "body": {**job.ident(), "ok": True, "channel_msg": "$MSG_ID", "size": size,
+                                          "height": int(h or 0), "text": live.text(f"✅ Tayyor ({size / 1048576:.1f} MB)")}},
+                    **ex}
+            if thumb.exists() and 0 < thumb.stat().st_size < 200_000:
+                dest["thumb_b64"] = base64.b64encode(thumb.read_bytes()).decode()
+            ok_r2 = await asyncio.to_thread(r2client.deliver, os.environ["API_BASE"], os.environ["ENCODE_TOKEN"], out,
+                                           f"anibla_{job.id}_{int(time.time())}.mp4", dest, log, "arugram-anibla")
+            if ok_r2:
+                live.done("R2'ga yozildi · Telegram'ga yuklovchi workflow yetkazadi")
+                live.close()
+                log(f"  #{job.id} R2'ga topshirildi")
+                return
         log("Telegram'ga yuklanmoqda (yopiq kanal orqali)...")
         live.send("⬆️ Telegram'ga yuklanmoqda...", force=True)
         t_up = time.time()

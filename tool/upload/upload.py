@@ -170,7 +170,98 @@ async def send_to_bot(app, bot: str, path: Path, name: str, caption: str):
     raise RuntimeError(f"Telegram'ga yuklab bo'lmadi ({SEND_TRIES} urinish): {last_err}")
 
 
+def _subst(v, msg_id: int):
+    """Qaytarish tanasidagi "$MSG_ID" qiymatlarini yuborilgan xabar raqami bilan almashtiradi."""
+    if isinstance(v, dict):
+        return {k: _subst(x, msg_id) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_subst(x, msg_id) for x in v]
+    return msg_id if v == "$MSG_ID" else v
+
+
+async def send_dest(app, dest: dict, path: Path, name: str):
+    """Post/Anibla/To'plam faylini `dest` bo'yicha yuboradi (qotib qolsa bekor qilib qayta yuboradi). Qaytadi: xabar."""
+    import base64
+    to = int(dest["to"])
+    size = path.stat().st_size
+    thumb = None
+    if dest.get("thumb_b64"):
+        thumb = WORK / "thumb.jpg"
+        thumb.write_bytes(base64.b64decode(dest["thumb_b64"]))
+    last_err = ""
+    for attempt in range(1, SEND_TRIES + 1):
+        prog = {"p": -1, "t": time.time(), "log": 0.0}
+
+        def cb(cur, total, prog=prog):
+            if cur != prog["p"]:
+                prog["p"], prog["t"] = cur, time.time()
+            if time.time() - prog["log"] >= 5:
+                prog["log"] = time.time()
+                log(f"    Telegram'ga yuklanmoqda {cur * 100 // max(total, 1)}% ({cur / 1048576:.0f}/{total / 1048576:.0f} MB)")
+
+        if dest.get("mode") == "video":
+            kw = {k: dest[k] for k in ("duration", "width", "height") if dest.get(k)}
+            coro = app.send_video(to, str(path), caption=dest.get("caption", ""), file_name=dest.get("file_name") or name,
+                                  supports_streaming=bool(dest.get("supports_streaming")),
+                                  disable_notification=bool(dest.get("disable_notification")),
+                                  thumb=str(thumb) if thumb else None, progress=cb, **kw)
+        else:
+            coro = app.send_document(to, str(path), file_name=dest.get("file_name") or name, force_document=True,
+                                     caption=dest.get("caption", ""), disable_notification=bool(dest.get("disable_notification")),
+                                     progress=cb)
+        task = asyncio.create_task(coro)
+        stalled = False
+        while True:
+            done, _ = await asyncio.wait({task}, timeout=10)
+            if done:
+                break
+            if time.time() - prog["t"] > STALL_S:
+                stalled = True
+                task.cancel()
+                try:
+                    await task
+                except BaseException:  # noqa: BLE001
+                    pass
+                break
+        if not stalled:
+            try:
+                return task.result()
+            except Exception as ex:  # noqa: BLE001
+                last_err = f"{type(ex).__name__}: {ex}"
+                if type(ex).__name__ == "FloodWait":
+                    await asyncio.sleep(int(getattr(ex, "value", 10) or 10))
+        else:
+            last_err = f"{STALL_S} soniya qimirlamadi ({prog['p'] * 100 // max(size, 1)}%)"
+        log(f"  yuklash {attempt}/{SEND_TRIES} muvaffaqiyatsiz — {last_err}")
+        await asyncio.sleep(5 * attempt)
+    raise RuntimeError(f"Telegram'ga yuklab bo'lmadi ({SEND_TRIES} urinish): {last_err}")
+
+
+def callback(cb: dict, msg_id: int):
+    """Yuborilgach egasi (Post/Anibla/To'plam) yo'lini chaqiradi. `False` — ish yo'qolgan (409)."""
+    data = json.dumps(_subst(cb.get("body") or {}, msg_id)).encode()
+    req = urllib.request.Request(
+        f"{API}{cb['path']}", data=data, method="POST",
+        headers={"X-Encode-Token": TOKEN, "Content-Type": "application/json", "User-Agent": "arugram-upload"})
+    for attempt in range(4):
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                r.read()
+            return True
+        except urllib.error.HTTPError as e:
+            if e.code == 409:
+                return False
+            if e.code in (400, 401, 403, 404):
+                raise RuntimeError(f"{cb['path']}: HTTP {e.code} {e.read()[:200]!r}")
+        except Exception as ex:  # noqa: BLE001
+            log(f"  qaytarish xato: {ex}")
+        time.sleep(3 * (attempt + 1))
+    raise RuntimeError(f"{cb['path']} ishlamadi")
+
+
 async def one(app, job: dict):
+    if job.get("kind") == "deliver":
+        return await one_deliver(app, job)
     name, size = job["file"], int(job["size"])
     path = WORK / name
     shutil.rmtree(WORK, ignore_errors=True)
@@ -188,6 +279,34 @@ async def one(app, job: dict):
             raise RuntimeError(f"bot {COMMIT_WAIT} soniyada faylni saqlamadi (bot kanalda adminmi? sessiya ro'yxatdan o'tganmi?)")
         r = await asyncio.to_thread(api, "done", {"file": name})
         log(f"{name}: bazaga yozildi, R2'dan o'chirildi ({r.get('deleted')})")
+    finally:
+        beat.cancel()
+        shutil.rmtree(WORK, ignore_errors=True)
+
+
+async def one_deliver(app, job: dict):
+    """Post/Anibla/To'plam fayli: R2'dan olinadi, `dest` bo'yicha yuboriladi, qaytarish yo'li chaqiriladi, R2'dan o'chadi."""
+    name, size, dest = job["file"], int(job["size"]), job.get("dest") or {}
+    path = WORK / name
+    shutil.rmtree(WORK, ignore_errors=True)
+    WORK.mkdir(parents=True)
+    beat = asyncio.create_task(beat_loop(name))
+    try:
+        log(f"{name}: R2'dan olinmoqda ({size / 1048576:.1f} MB), urinish {job.get('attempt')}")
+        await asyncio.to_thread(download, name, path, size, job.get("url"))
+        log(f"{name}: {dest.get('to')} ga yuborilmoqda")
+        msg = await send_dest(app, dest, path, name)
+        cb = dest.get("callback")
+        if cb:
+            if not await asyncio.to_thread(callback, cb, int(msg.id)):
+                log(f"  {name}: ish yo'qolgan (409) — yuborilgan xabar o'chiriladi" if cb.get("on_lost_delete") else f"  {name}: ish yo'qolgan (409)")
+                if cb.get("on_lost_delete"):
+                    try:
+                        await app.delete_messages(int(dest["to"]), msg.id)
+                    except Exception as ex:  # noqa: BLE001
+                        log(f"  xabar o'chirilmadi: {ex}")
+        await asyncio.to_thread(api, "done", {"file": name})
+        log(f"{name}: yetkazildi, R2'dan o'chirildi")
     finally:
         beat.cancel()
         shutil.rmtree(WORK, ignore_errors=True)
@@ -218,8 +337,11 @@ async def main():
             if job.get("none") or not job.get("file"):
                 log("Navbat bo'sh.")
                 break
-            group = job.get("group") or group
-            seen_kinds.add(job.get("kind") or "")
+            if job.get("kind") == "deliver":
+                group, seen_kinds = "", set()      # Post/Anibla/To'plam: har fayl alohida, juftlik kutilmaydi
+            else:
+                group = job.get("group") or group
+                seen_kinds.add(job.get("kind") or "")
             if not started_bot and job.get("bot"):
                 # Bot shu akkauntdan fayl qabul qilishi uchun akkaunt botni bir marta ochgan bo'lsin.
                 started_bot = True

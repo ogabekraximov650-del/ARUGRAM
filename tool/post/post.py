@@ -31,6 +31,13 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 WORK = Path(os.environ.get("RUNNER_TEMP", "/tmp")) / "arugram_post"
 
+# R2 oraliq ombori: Telegram'ga yuklanadigan fayl R2 orqali o'tadi (`tool/upload/r2client.py`, `upload.yml` yetkazadi).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "upload"))
+try:
+    import r2client
+except Exception:  # noqa: BLE001 — modul yo'q bo'lsa eski usul
+    r2client = None
+
 
 class Lost(Exception):
     """Post o'chirildi yoki boshqa run'ga o'tdi."""
@@ -281,10 +288,24 @@ async def process(app, r, runner, log):
         log(f"  {uid} ga yuborilmoqda...")
         first = (name.splitlines()[0] if name else f"post_{pid}")
         fname = re.sub(r'[\\/:*?"<>|]', "", first).strip()[:80] or f"post_{pid}"
-        await app.send_video(
-            uid, str(out), caption=name[:1024], file_name=f"{fname}.mp4",
-            supports_streaming=True,
-            progress=live.transfer(f"\u2B06\uFE0F {uid} ga yuborilmoqda"), **extra)
+        via_r2 = False
+        if r2client is not None:
+            import base64
+            dest = {"mode": "video", "to": int(uid), "caption": name[:1024], "file_name": f"{fname}.mp4",
+                    "supports_streaming": True, "lease": {"t": "post_jobs", "id": int(pid)},
+                    **{k: v for k, v in extra.items() if k in ("duration", "width", "height")}}
+            if thumb.exists() and 0 < thumb.stat().st_size < 200_000:
+                dest["thumb_b64"] = base64.b64encode(thumb.read_bytes()).decode()
+            via_r2 = await asyncio.to_thread(
+                r2client.deliver, os.environ["API_BASE"], os.environ["ENCODE_TOKEN"], out,
+                f"post_{pid}_{int(time.time())}.mp4", dest, log, "arugram-post")
+        if via_r2:
+            live.done("R2'ga yozildi \u2014 Telegram'ga yuklovchi workflow yetkazadi")
+        else:
+            await app.send_video(
+                uid, str(out), caption=name[:1024], file_name=f"{fname}.mp4",
+                supports_streaming=True,
+                progress=live.transfer(f"\u2B06\uFE0F {uid} ga yuborilmoqda"), **extra)
         api("finish", {**ident, "ok": True, "size": size, "to": str(uid)})
         log(f"  ✅ post #{pid} yuborildi")
     except Lost:

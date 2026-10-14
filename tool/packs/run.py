@@ -39,6 +39,13 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+# R2 oraliq ombori: Telegram'ga yuklanadigan fayl R2 orqali o'tadi (`tool/upload/r2client.py`, `upload.yml` yetkazadi).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "upload"))
+try:
+    import r2client
+except Exception:  # noqa: BLE001 — modul yo'q bo'lsa eski usul
+    r2client = None
+
 import arunorm
 import arupack
 
@@ -211,11 +218,21 @@ async def process(app, channel: int, job: dict, log) -> None:
             sealed, key, size = await asyncio.to_thread(arupack.seal, pack, work)
             log(f"  {len(pack.items)} ta element, {size / 1048576:.1f} MB — yuklanmoqda...")
             hb.check()
+            meta = {"file": name, "key": key.hex(), "version": pack.version, "items": len(pack.items), "bytes": size}
+            # Telegram'ga yuklanadigan to'plam fayli avval R2'ga yoziladi; yuklovchi kanalga yuboradi va `finish` ni o'zi chaqiradi.
+            via_r2 = False
+            if r2client is not None:
+                dest = {"mode": "document", "to": int(channel), "caption": name, "file_name": name,
+                        "disable_notification": True, "lease": {"t": "pack_db", "id": int(pid)},
+                        "callback": {"path": "/api/packs/job/finish", "api": "packs", "body": {**body, **meta, "msg_id": "$MSG_ID"}}}
+                via_r2 = await asyncio.to_thread(r2client.deliver, API, TOKEN, sealed, name, dest, log, "arugram-packs")
+            if via_r2:
+                log("  to'plam R2'ga topshirildi — Telegram'ga yuklovchi yetkazadi")
+                return
             sent = await app.send_document(
                 channel, str(sealed), file_name=name, force_document=True,
                 caption=name, disable_notification=True)
-            body.update({"file": name, "key": key.hex(), "msg_id": sent.id,
-                         "version": pack.version, "items": len(pack.items), "bytes": size})
+            body.update({**meta, "msg_id": sent.id})
         api("finish", body)
         bad = sum(1 for r in results if not r["ok"])
         log(f"  tayyor: {sum(1 for r in results if r['ok'])} ta bo'ldi, {bad} ta rad etildi")

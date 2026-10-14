@@ -10367,7 +10367,7 @@ fn needs_app_check(path: &str) -> bool {
         | "/api/post/claim" | "/api/post/check" | "/api/post/finish" | "/api/post/progress"
         | "/api/anibla/claim" | "/api/anibla/diag" | "/api/anibla/progress" | "/api/anibla/done"
         | "/api/fmp4/claim" | "/api/fmp4/done" | "/api/fmp4/r2put" | "/api/fmp4/r2ready" | "/api/session/poll" | "/api/session/report"
-        | "/api/encode/r2put" | "/api/encode/r2ready" | "/api/r2/claim" | "/api/r2/beat" | "/api/r2/fail" | "/api/r2/done" | "/api/r2/diag" | "/api/r2/peek" | "/api/r2/part" | "/api/r2/get")
+        | "/api/encode/r2put" | "/api/encode/r2ready" | "/api/r2/claim" | "/api/r2/beat" | "/api/r2/fail" | "/api/r2/done" | "/api/r2/diag" | "/api/r2/peek" | "/api/r2/put" | "/api/r2/ready" | "/api/r2/part" | "/api/r2/get")
     {
         return false;
     }

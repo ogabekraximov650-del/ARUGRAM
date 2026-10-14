@@ -139,6 +139,7 @@ def main():
     # R2 -> Telegram yuklovchi (`upload.yml`).
     files[".github/workflows/upload.yml"] = HERE.parent / "upload" / "upload.workflow.yml"
     files["tool/upload/upload.py"] = HERE.parent / "upload" / "upload.py"
+    files["tool/upload/r2client.py"] = HERE.parent / "upload" / "r2client.py"
     # Sifat-workflow'lar (2026-10): `encode_360.yml` ... `encode_1080.yml` — bitta shablondan (4 ta bir vaqtda).
     # Eski `encode.yml` (hamma sifat ketma-ket) zaxira sifatida qoladi: yangi fayllar bo'lmasa worker uni ishlatadi.
     tpl = (HERE / "avtoencode_q.workflow.yml").read_text()

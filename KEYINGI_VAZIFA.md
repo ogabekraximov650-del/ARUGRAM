@@ -6264,3 +6264,12 @@ Qo'shilgan admin panel botni to'liq ishlata oladi, lekin adminlarni boshqarish b
 yuklovchi Telegram'ga botga olib boradi, bot `fmp4::commit` bilan yozadi. R2 yo'q bo'lsa — eski usul (kanalga). Yuklovchi (`upload.py`)
 `group` (`a/s/e/queued_at/sifat`) bilan bitta sifatning MP4 va fMP4 sini yetkazib (ikkinchisi kelmagan bo'lsa 5 daqiqagacha kutadi) o'chadi;
 workflow "Davom ettirish" qadami (`/api/r2/peek`) R2'da fayl qolgan bo'lsa yangi run ochadi.
+
+**Hamma Telegram'ga yuklanadigan fayl R2 orqali (2026-10):** Post (`tool/post/post.py`), Anibla (`tool/anibla/download.py`) va To'plam
+(`tool/packs/run.py`) ham tayyor faylni Telegram'ga o'zi yuklamaydi: `tool/upload/r2client.py` (`deliver`) faylni R2'ga yozadi
+(`POST /api/r2/put` + to'g'ridan-to'g'ri PUT yoki worker multipart + `/api/r2/ready`; qator `kind='deliver'`, `dest` — JSON tavsif:
+`mode` video|document, `to`, `caption`, `file_name`, `thumb_b64`, `lease`, `callback`). Yuklovchi (`upload.py` `one_deliver`) R2'dan olib `dest`
+bo'yicha yuboradi (qotsa 120 s da bekor qilib qayta), so'ng `callback` yo'lini chaqiradi (`"$MSG_ID"` — yuborilgan xabar raqami;
+409 bo'lsa va `on_lost_delete` bo'lsa xabar o'chadi) va `/api/r2/done` (R2'dan o'chadi). Egasi ish (post_jobs/anibla_jobs/pack_db) ijarasi
+`r2/ready` da 12 soatga uzayadi (`dest.lease`). Post'da `finish` darhol R2'ga yozilgach chaqiriladi (video keyin yetadi). R2 yo'q/ishlamasa —
+har uchalasi eski usulda to'g'ridan-to'g'ri yuboradi. Eski `encode.yml` (sifatsiz, zaxira) o'zgarmadi.
