@@ -414,8 +414,8 @@ fn r2_space(env: &Env, used: i64) -> String {
     let used = used.clamp(0, cap);
     let pct = used as f64 * 100.0 / cap as f64;
     let gb = |b: i64| b as f64 / 1073741824.0;
-    format!("\u{1F4BE} R2 ombor: {} {pct:.1}%\n    band {:.2} GB \u{00B7} bo'sh {:.2} GB \u{00B7} jami {:.0} GB",
-        bar(pct), gb(used), gb(cap - used), gb(cap))
+    // Bitta qator (xabar 4096 belgidan oshib, oxiridagi yuklash logi kesilib qolmasin).
+    format!("\u{1F4BE} R2 {} {pct:.0}% \u{00B7} {:.1}/{:.0} GB \u{00B7} bo'sh {:.1}", bar(pct), gb(used), gb(cap), gb(cap - used))
 }
 
 /// R2 yuklovchi bloki: qaysi fayl, bosqich (R2'dan olish / Telegram'ga yuklash) foiz-chiziq bilan, oxirgi loglar.
