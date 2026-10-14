@@ -28,6 +28,9 @@ WORK = Path(os.environ.get("RUNNER_TEMP", "/tmp")) / "arugram_upload"
 RUNNER = f"up-{os.environ.get('GITHUB_RUN_ID', 'local')}-{os.environ.get('GITHUB_RUN_ATTEMPT', '1')}"
 START_BUDGET = int(float(os.environ.get("START_BUDGET_MIN", "300")) * 60)
 STALL_S = int(os.environ.get("UPLOAD_STALL_SEC", "120"))
+# Yuklash 100% ga yetgach Telegram tasdiqni uzoq kechiktirishi mumkin (akkaunt yuklashi cheklangan): bu vaqtda bekor qilinmaydi,
+# faqat shuncha kutiladi (bot faylni allaqachon olgan bo'lsa — baza yozuvidan bilinadi va kutish tugaydi).
+STALL_100_S = int(os.environ.get("UPLOAD_STALL_100_SEC", "900"))
 SEND_TRIES = int(os.environ.get("UPLOAD_TRIES", "5"))
 COMMIT_WAIT = int(os.environ.get("COMMIT_WAIT_SEC", "300"))
 SIBLING_WAIT = int(os.environ.get("SIBLING_WAIT_SEC", "300"))
@@ -159,6 +162,75 @@ def download(name: str, dst: Path, size: int, url: str | None = None):
         raise RuntimeError(f"R2'dan olib bo'lmadi: {err}")
 
 
+# TELEGRAM'GA TEZ YUKLASH (foydalanuvchi talabi). Pyrogram katta faylni BITTA
+# ulanishda (4 ta so'rov navbatda) yuboradi. Bu yerda bo'laklar (512 KB) `UP_CONN`
+# ta alohida ulanish x `UP_WORKERS` ta so'rov bilan parallel yuboriladi. Har
+# bo'lak xato/FloodWait bo'lsa qayta yuboriladi (Pyrogram'niki xatoni yutib
+# yuborardi). Biror sabab bilan ishlamasa — Pyrogram'ning o'z usuli.
+UP_CONN = int(os.environ.get("UP_CONN", "4"))
+UP_WORKERS = int(os.environ.get("UP_WORKERS", "4"))
+PART = 512 * 1024
+
+
+async def fast_save_file(app, orig, path, progress=None, progress_args=(), file_id=None, file_part=0):
+    import math
+    from pyrogram import raw
+    from pyrogram.errors import FloodWait
+    from pyrogram.session import Session
+    size = os.path.getsize(path) if isinstance(path, (str, Path)) else 0
+    # Kichik fayl (rasm), qayta yuborish (`file_id`) yoki fayl yo'li emas — asl usul.
+    if file_id is not None or size <= 10 * 1048576 or UP_CONN <= 1:
+        return await orig(path, progress=progress, progress_args=progress_args, file_id=file_id, file_part=file_part)
+    total = int(math.ceil(size / PART))
+    fid = app.rnd_id()
+    dc, key, test = await app.storage.dc_id(), await app.storage.auth_key(), await app.storage.test_mode()
+    sessions = [Session(app, dc, key, test, is_media=True) for _ in range(UP_CONN)]
+    queue = asyncio.Queue()
+    for i in range(total):
+        queue.put_nowait(i)
+    sent = [0]
+
+    async def worker(sess):
+        with open(path, "rb") as f:
+            while True:
+                try:
+                    i = queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    return
+                f.seek(i * PART)
+                chunk = f.read(PART)
+                for attempt in range(8):
+                    try:
+                        await sess.invoke(raw.functions.upload.SaveBigFilePart(
+                            file_id=fid, file_part=i, file_total_parts=total, bytes=chunk))
+                        break
+                    except FloodWait as e:
+                        log(f"Telegram FloodWait {e.value} s")
+                        await asyncio.sleep(int(e.value) + 1)
+                    except Exception as e:  # noqa: BLE001
+                        if attempt == 7:
+                            raise RuntimeError(f"{i}-bo'lak Telegram'ga yuborilmadi: {e}")
+                        await asyncio.sleep(2 * (attempt + 1))
+                sent[0] += len(chunk)
+                if progress:
+                    progress(min(sent[0], size), size, *progress_args)
+
+    started = []
+    try:
+        for sess in sessions:
+            await sess.start()
+            started.append(sess)
+        log(f"Telegram'ga {UP_CONN} ulanish x {UP_WORKERS} so'rov bilan yuklanmoqda ({total} bo'lak)")
+        await asyncio.gather(*[worker(sess) for sess in started for _ in range(UP_WORKERS)])
+    finally:
+        for sess in started:
+            try:
+                await sess.stop()
+            except Exception:  # noqa: BLE001
+                pass
+    return raw.types.InputFileBig(id=fid, parts=total, name=os.path.basename(str(path)))
+
+
 async def beat_loop(name: str):
     while True:
         await asyncio.sleep(60)
@@ -191,7 +263,17 @@ async def send_to_bot(app, bot: str, path: Path, name: str, caption: str):
             done, _ = await asyncio.wait({task}, timeout=10)
             if done:
                 break
-            if time.time() - prog["t"] > STALL_S:
+            at_end = prog["p"] >= size
+            if at_end and await asyncio.to_thread(is_committed, name):
+                # Fayl 100% yuborilgan, bot uni allaqachon saqlab bazaga yozgan — Telegram javobi kechikkan, xolos.
+                log("  bot faylni saqladi (Telegram javobi kechikdi) — kutish tugadi")
+                task.cancel()
+                try:
+                    await task
+                except BaseException:  # noqa: BLE001
+                    pass
+                return
+            if time.time() - prog["t"] > (STALL_100_S if at_end else STALL_S):
                 stalled = True
                 task.cancel()
                 try:
@@ -208,7 +290,8 @@ async def send_to_bot(app, bot: str, path: Path, name: str, caption: str):
                 if type(ex).__name__ == "FloodWait":
                     await asyncio.sleep(int(getattr(ex, "value", 10) or 10))
         else:
-            last_err = f"{STALL_S} soniya qimirlamadi ({prog['p'] * 100 // max(size, 1)}%)"
+            pct = prog["p"] * 100 // max(size, 1)
+            last_err = f"{STALL_100_S if prog['p'] >= size else STALL_S} soniya qimirlamadi ({pct}%)"
         log(f"  yuklash {attempt}/{SEND_TRIES} muvaffaqiyatsiz — {last_err}")
         if await asyncio.to_thread(is_committed, name):
             log("  fayl allaqachon saqlangan — qayta yuklanmaydi")
@@ -263,7 +346,7 @@ async def send_dest(app, dest: dict, path: Path, name: str):
             done, _ = await asyncio.wait({task}, timeout=10)
             if done:
                 break
-            if time.time() - prog["t"] > STALL_S:
+            if time.time() - prog["t"] > (STALL_100_S if prog["p"] >= size else STALL_S):
                 stalled = True
                 task.cancel()
                 try:
@@ -369,6 +452,14 @@ async def one_deliver(app, job: dict):
 async def main():
     api_id = session_api_id() or int(os.environ["TG_API_ID"])
     app = Client(SESSION, api_id=api_id, api_hash=os.environ["TG_API_HASH"], no_updates=True)
+    # Oddiy Pyrogram yuklash xatoni yutib yuboradi (progress 100% ga chiqib, tasdiq kelmay qoladi) — Anibla'da sinalgan tez yuklash
+    # (`fast_save_file`: bir nechta ulanish, har bo'lak xatoda qayta yuboriladi) ishlatiladi.
+    orig_save = app.save_file
+
+    async def patched_save(path, progress=None, progress_args=(), file_id=None, file_part=0):
+        return await fast_save_file(app, orig_save, path, progress, progress_args, file_id, file_part)
+
+    app.save_file = patched_save
     async with app:
         async for _ in app.get_dialogs():
             pass

@@ -6278,3 +6278,11 @@ har uchalasi eski usulda to'g'ridan-to'g'ri yuboradi. Eski `encode.yml` (sifatsi
 `X-Encode-Quality: upload` bilan yuboradi (qolgan sifatlar kabi, `EncodeLive` xotirasida); `livewatch::app_all_html` sifat bloklaridan keyin
 "📤 R2 → Telegram" blokini qo'shadi: qaysi fayl, bosqich (R2'dan olinmoqda / Telegram'ga yuklanmoqda, foiz-chiziq, tezlik), oxirgi loglar va
 R2'da kutayotgan fayllar soni (`r2_files`, 30 s xotirada). Yuklovchi ishlamasa — "hozir ishlamayapti · R2'da kutayotgan: N". Blok faqat R2 yoqilgan bo'lsa chiqadi.
+
+## R2 yuklovchi: Telegramga yuklash 100% da qotib qolishi (2026-10)
+
+Belgi: barcha R2→Telegram yuklashlar "120 soniya qimirlamadi (100%)" bilan tugardi.
+Taxmin (tasdiqlanmagan): Pyrogram `save_file` qism xatolarini jimgina yutadi.
+Chora (`tool/upload/upload.py`): Anibla'dagi `fast_save_file` (ko'p ulanishli, har qismga qayta urinish) ulandi;
+100% da kutish `UPLOAD_STALL_100_SEC` (900s) gacha uzaytirildi va shu paytda baza (`/api/encode/committed`) tekshiriladi —
+fayl saqlangan bo'lsa kutish tugaydi. Tekshiruv: `/api/r2/diag` da `by_state` kamayishi kerak.
