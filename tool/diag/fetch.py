@@ -13,7 +13,7 @@ from pathlib import Path
 
 ENC = Path("tool/encode/gh_token.enc")
 REPO = Path("tool/encode/gh_repo.txt").read_text().strip().split("/")[-1]
-RUNS = int(os.environ.get("DIAG_RUNS", "30"))
+RUNS = int(os.environ.get("DIAG_RUNS", "14"))
 TAIL = int(os.environ.get("DIAG_TAIL", "60"))
 
 k = "".join(os.environ.get("ENCODE_TOKEN", "").split())
@@ -92,7 +92,7 @@ for run in runs:
             continue
         lines = [l for l in z.read(n).decode("utf-8", "replace").splitlines()
                  if "##[" not in l and "[36;1m" not in l and "Node.js" not in l and "ENCODE_TOKEN" not in l]
-        up = "R2" in run["name"] or "ukl" in run["name"].lower() or "upload" in run["name"].lower()
+        up = "R2" in run["name"] or "ukl" in run["name"].lower() or "upload" in run["name"].lower() or "anibla" in run["name"].lower()
         tail = 400 if up else 6
         print(f"  >>> {n} ({len(lines)} qator), oxirgi {tail}:")
         for ln in lines[-tail:]:
