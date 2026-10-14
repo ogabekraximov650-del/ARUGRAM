@@ -39,6 +39,7 @@ mod postbot;
 mod announce;
 mod sessionbot;
 mod encupload;
+mod admins;
 mod r2;
 // anibla.uz dan qidirib yuklash (kodlash botining uchinchi bo'limi).
 mod anibla;
@@ -7087,9 +7088,9 @@ async fn comments_delete(req: &Request, env: &Env, ctx: &Context, id: &str) -> R
 const ADMIN_TELEGRAM_ID: i64 = 6_805_215_964;
 /// Kodlash (panel) botiga kirish huquqi: asosiy admin va qo'shimcha adminlar. Bot javobi so'ragan odamning o'z chatiga
 /// boradi; fon xabarlari (kodlash tugadi, holat) hozircha asosiy adminga.
-const ENCBOT_ADMINS: [i64; 2] = [ADMIN_TELEGRAM_ID, 8_827_179_336];
-fn is_encbot_admin(id: i64) -> bool {
-    ENCBOT_ADMINS.contains(&id)
+/// (Endi ro'yxat bazada — "👥 Adminlar" bo'limi, `admins.rs`.)
+async fn is_encbot_admin(env: &Env, id: i64) -> bool {
+    admins::is_admin(env, id).await
 }
 
 fn is_admin(u: &Value) -> bool {
@@ -12724,7 +12725,7 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
     let cb = &update["callback_query"];
     if cb.is_object() {
         let _ = encbot_api(env, "answerCallbackQuery", json!({"callback_query_id": cb["id"]})).await;
-        if !cb["from"]["id"].as_i64().map(is_encbot_admin).unwrap_or(false) {
+        if !is_encbot_admin(env, cb["from"]["id"].as_i64().unwrap_or(0)).await {
             return ok(json!({"ok": true}));
         }
         let chat = cb["message"]["chat"]["id"].as_i64().unwrap_or(0);
@@ -12761,7 +12762,7 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
     let msg = &update["message"];
     let chat = msg["chat"]["id"].as_i64().unwrap_or(0);
     // Faqat admin va faqat shaxsiy chat — boshqalarga javob yo'q.
-    if chat == 0 || !is_encbot_admin(chat) || msg["from"]["id"].as_i64() != Some(chat) {
+    if chat == 0 || !is_encbot_admin(env, chat).await || msg["from"]["id"].as_i64() != Some(chat) {
         return ok(json!({"ok": true}));
     }
     let has_video = msg["video"].is_object() || msg["document"].is_object();
@@ -12790,6 +12791,14 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
     }
     if text == anibla::BTN {
         anibla::menu(env, chat).await;
+        return ok(json!({"ok": true}));
+    }
+    // "👥 Adminlar" (`admins.rs`) — faqat asosiy admin.
+    if text == admins::BTN {
+        admins::start(env, chat).await;
+        return ok(json!({"ok": true}));
+    }
+    if config_get(env, "encbot_mode").await.as_deref() == Some("adm") && admins::on_message(env, msg, chat).await {
         return ok(json!({"ok": true}));
     }
     // "🔑 Yangi sessiya" (`sessionbot.rs`): raqam -> kod -> yangi Telegram sessiyasi.

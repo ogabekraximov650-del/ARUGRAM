@@ -6251,3 +6251,10 @@ so'ramaydi va `session.enc` ni yangilaydi. Telegram YUKLAB OLISHNI cheklamaydi (
 sessiya bilan olinadi (bot orqali nusxalash olib tashlandi); yuklash esa R2 orqali (kodlovchilar Telegram'ga yuklamaydi). Kodlovchi
 akkaunt ID'sini `claim` da yuboradi (`sess_uid_<q>` — faqat R2 bo'lmagan zaxira yo'li uchun). Eslatma: bir sessiya fayli bir vaqtda ko'p
 run'da ishlaydi — Telegram kamdan-kam `AUTH_KEY_DUPLICATED` berishi mumkin; shunda "Yangi sessiya" bilan yangilang.
+
+## Panel bot adminlarini boshqarish (2026-10)
+
+`worker/src/admins.rs`: Bosh menyudagi "👥 Adminlar" (faqat asosiy admin `ADMIN_TELEGRAM_ID` ko'radi): ro'yxat, "➕ Admin qo'shish" (Telegram ID
+yuboriladi), "➖ Adminni olib tashlash". Ro'yxat `app_config.encbot_admins` (vergulli ID'lar; asosiy admin har doim admin, o'chmaydi;
+yozilmagan bo'lsa boshlang'ich `8827179336`). `is_encbot_admin(env, id)` endi asinxron va bazadan (20 s xotirada) o'qiydi.
+Qo'shilgan admin panel botni to'liq ishlata oladi, lekin adminlarni boshqarish bo'limi unga ko'rinmaydi va ishlamaydi.

@@ -247,7 +247,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
     }
     let b: Value = req.json().await.unwrap_or(json!({}));
     // Run xabarlari jarayonni boshlagan adminga boradi (bir nechta admin bo'lishi mumkin).
-    let admin: i64 = get(env, "sess_chat").await.parse().ok().filter(|c| is_encbot_admin(*c)).unwrap_or(ADMIN_TELEGRAM_ID);
+    let admin: i64 = get(env, "sess_chat").await.parse().ok().unwrap_or(ADMIN_TELEGRAM_ID);
     let started: i64 = get(env, "sess_at").await.parse().unwrap_or(0);
     let mut state = get(env, "sess_state").await;
     if !state.is_empty() && now_ms() - started > TTL_MS {
