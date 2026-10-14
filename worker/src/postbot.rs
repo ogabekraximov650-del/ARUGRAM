@@ -120,13 +120,15 @@ pub(crate) async fn main_menu(env: &Env, chat: i64) {
          \u{1F39E} <b>Anibla yuklash</b> \u{2014} anibla.uz dan qidirib, tanlangan sifatda yuklab beradi.\n\
          \u{1F510} <b>Majburiy obunalar</b> \u{2014} ilova foydalanuvchilari qo'shiladigan kanallar.\n\
          \u{1F511} <b>Yangi sessiya</b> \u{2014} telefon raqami va kod orqali yangi Telegram sessiyasini yaratib saqlaydi.\n\
-         \u{1F517} <b>Anibla akkaunt</b> \u{2014} workerga yangi anibla.uz login/parolini ulaydi.",
+         \u{1F517} <b>Anibla akkaunt</b> \u{2014} workerga yangi anibla.uz login/parolini ulaydi.\n\
+         \u{1F5C2} <b>Yuklovchi sessiyalar</b> \u{2014} R2 yuklovchisi uchun qo'shimcha Telegram sessiyalarni qo'shish/o'chirish (FloodWait'da almashadi).",
         Some(encbot_keyboard({
             let mut rows = vec![
                 vec![BTN_APP.to_string(), BTN_POST.to_string()],
                 vec![super::anibla::BTN.to_string()],
                 vec![super::channels::BTN_CHANNELS.to_string()],
                 vec![super::sessionbot::BTN.to_string(), super::sessionbot::BTN_ANIBLA_ACC.to_string()],
+                vec![super::sessionbot::BTN_POOL.to_string()],
                 vec![ENCBOT_BTN_STATUS.to_string()],
             ];
             // "👥 Adminlar" — faqat asosiy adminga.

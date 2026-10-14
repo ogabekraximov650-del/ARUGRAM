@@ -37,6 +37,37 @@ SIBLING_WAIT = int(os.environ.get("SIBLING_WAIT_SEC", "300"))
 T0 = time.time()
 
 
+# ── Sessiyalar havzasi: asosiy + qo'shimcha (botdagi "🗂 Yuklovchi sessiyalar"). FloodWait chiqqan sessiya
+# `COOL` bo'yicha dam oladi, yuklash keyingi tayyor sessiyaga o'tadi.
+POOL: list = []
+COOL: dict = {}
+_rr = [0]
+
+
+def pick_app(default=None):
+    if not POOL:
+        return default
+    now = time.time()
+    n = len(POOL)
+    for k in range(n):
+        a = POOL[(_rr[0] + k) % n]
+        if COOL.get(id(a), 0) <= now:
+            _rr[0] = (_rr[0] + k + 1) % n
+            return a
+    return min(POOL, key=lambda a: COOL.get(id(a), 0))
+
+
+def flood(app, secs):
+    COOL[id(app)] = max(COOL.get(id(app), 0), time.time() + int(secs) + 1)
+
+
+def flood_sleep(app, secs):
+    """FloodWait: bu sessiya dam oladi; boshqa tayyor sessiya bo'lsa kutilmaydi, bo'lmasa shuncha kutiladi."""
+    flood(app, secs)
+    alt = [a for a in POOL if a is not app and COOL.get(id(a), 0) <= time.time()]
+    return 0 if alt else int(secs or 10)
+
+
 class Status:
     """Botdagi "Holat" xabari uchun: yuklovchi holatini daqiqada bir marta worker'ga yuboradi (`/api/encode/push`, `X-Encode-Quality: upload`)."""
 
@@ -209,6 +240,7 @@ async def fast_save_file(app, orig, path, progress=None, progress_args=(), file_
                             file_id=fid, file_part=i, file_total_parts=total, bytes=chunk))
                         break
                     except FloodWait as e:
+                        flood(app, e.value)
                         until = time.time() + int(e.value) + 1
                         if until > gate[0] + 1:
                             log(f"Telegram FloodWait {e.value} s — hamma ulanish kutadi")
@@ -250,7 +282,11 @@ async def send_to_bot(app, bot: str, path: Path, name: str, caption: str):
     """Faylni botga yuboradi; qotib qolsa (STALL_S) bekor qilib qayta yuboradi. Bot allaqachon saqlagan bo'lsa — tamom."""
     size = path.stat().st_size
     last_err = ""
+    base_app = app
     for attempt in range(1, SEND_TRIES + 1):
+        app = pick_app(base_app)
+        if len(POOL) > 1:
+            log(f"  sessiya: {getattr(app, 'my_uid', '?')} ({POOL.index(app) + 1}/{len(POOL)})")
         prog = {"p": -1, "t": time.time(), "log": 0.0, "t0": time.time()}
 
         def cb(cur, total, prog=prog):
@@ -294,8 +330,10 @@ async def send_to_bot(app, bot: str, path: Path, name: str, caption: str):
             except Exception as ex:  # noqa: BLE001
                 last_err = f"{type(ex).__name__}: {ex}"
                 if type(ex).__name__ == "FloodWait":
-                    await asyncio.sleep(int(getattr(ex, "value", 10) or 10))
+                    await asyncio.sleep(flood_sleep(app, getattr(ex, "value", 10)))
         else:
+            if prog["p"] >= size:
+                flood(app, 120)     # 100% da qotdi — shu sessiya bir oz dam olsin
             pct = prog["p"] * 100 // max(size, 1)
             last_err = f"{STALL_100_S if prog['p'] >= size else STALL_S} soniya qimirlamadi ({pct}%)"
         log(f"  yuklash {attempt}/{SEND_TRIES} muvaffaqiyatsiz — {last_err}")
@@ -325,7 +363,9 @@ async def send_dest(app, dest: dict, path: Path, name: str):
         thumb = WORK / "thumb.jpg"
         thumb.write_bytes(base64.b64decode(dest["thumb_b64"]))
     last_err = ""
+    base_app = app
     for attempt in range(1, SEND_TRIES + 1):
+        app = pick_app(base_app)
         prog = {"p": -1, "t": time.time(), "log": 0.0, "t0": time.time()}
 
         def cb(cur, total, prog=prog):
@@ -366,7 +406,7 @@ async def send_dest(app, dest: dict, path: Path, name: str):
             except Exception as ex:  # noqa: BLE001
                 last_err = f"{type(ex).__name__}: {ex}"
                 if type(ex).__name__ == "FloodWait":
-                    await asyncio.sleep(int(getattr(ex, "value", 10) or 10))
+                    await asyncio.sleep(flood_sleep(app, getattr(ex, "value", 10)))
         else:
             last_err = f"{STALL_S} soniya qimirlamadi ({prog['p'] * 100 // max(size, 1)}%)"
         log(f"  yuklash {attempt}/{SEND_TRIES} muvaffaqiyatsiz — {last_err}")
@@ -455,18 +495,50 @@ async def one_deliver(app, job: dict):
         shutil.rmtree(WORK, ignore_errors=True)
 
 
-async def main():
-    api_id = session_api_id() or int(os.environ["TG_API_ID"])
-    app = Client(SESSION, api_id=api_id, api_hash=os.environ["TG_API_HASH"], no_updates=True)
-    # Oddiy Pyrogram yuklash xatoni yutib yuboradi (progress 100% ga chiqib, tasdiq kelmay qoladi) — Anibla'da sinalgan tez yuklash
-    # (`fast_save_file`: bir nechta ulanish, har bo'lak xatoda qayta yuboriladi) ishlatiladi.
+def _patch(app):
     orig_save = app.save_file
 
     async def patched_save(path, progress=None, progress_args=(), file_id=None, file_part=0):
         return await fast_save_file(app, orig_save, path, progress, progress_args, file_id, file_part)
 
     app.save_file = patched_save
+
+
+async def main():
+    api_id = session_api_id() or int(os.environ["TG_API_ID"])
+    app = Client(SESSION, api_id=api_id, api_hash=os.environ["TG_API_HASH"], no_updates=True)
+    # Oddiy Pyrogram yuklash xatoni yutib yuboradi (progress 100% ga chiqib, tasdiq kelmay qoladi) — Anibla'da sinalgan tez yuklash
+    # (`fast_save_file`: bir nechta ulanish, har bo'lak xatoda qayta yuboriladi) ishlatiladi.
+    _patch(app)
+    extra = []
+    for f in sorted(Path(SESSION).parent.glob("pool_*.session")):
+        c = Client(str(f.with_suffix("")), api_id=api_id, api_hash=os.environ["TG_API_HASH"], no_updates=True)
+        _patch(c)
+        extra.append(c)
     async with app:
+        for c in extra:
+            try:
+                await c.start()
+                c.my_uid = (await c.get_me()).id
+                POOL.append(c)
+            except Exception as ex:  # noqa: BLE001
+                log(f"qo'shimcha sessiya ochilmadi ({c.name}): {ex}")
+        app.my_uid = (await app.get_me()).id
+        POOL.insert(0, app)
+        if len(POOL) > 1:
+            log(f"Sessiyalar: {len(POOL)} ta (asosiy + {len(POOL) - 1} qo'shimcha)")
+        try:
+            await _main(app)
+        finally:
+            for c in extra:
+                try:
+                    await c.stop()
+                except Exception:  # noqa: BLE001
+                    pass
+
+
+async def _main(app):
+    if True:
         async for _ in app.get_dialogs():
             pass
         me = await app.get_me()
@@ -476,7 +548,8 @@ async def main():
         seen_kinds = set()
         sib_wait = 0
         while time.time() - T0 < START_BUDGET:
-            job = api("claim", {"runner": RUNNER, "uid": me.id, **({"group": group} if group else {})})
+            job = api("claim", {"runner": RUNNER, "uid": me.id, "uids": [c.my_uid for c in POOL],
+                                **({"group": group} if group else {})})
             if group and (job.get("none") or not job.get("file")):
                 # Shu sifatning ikkinchi fayli (MP4 <-> fMP4) hali R2'ga yetib kelmagan bo'lishi mumkin — qisqa kutiladi.
                 if len(seen_kinds) < 2 and sib_wait < SIBLING_WAIT:
@@ -496,10 +569,11 @@ async def main():
             if not started_bot and job.get("bot"):
                 # Bot shu akkauntdan fayl qabul qilishi uchun akkaunt botni bir marta ochgan bo'lsin.
                 started_bot = True
-                try:
-                    await app.send_message(str(job["bot"]).lstrip("@"), "/start")
-                except Exception as ex:  # noqa: BLE001
-                    log(f"botga /start yuborilmadi: {ex}")
+                for c in POOL:
+                    try:
+                        await c.send_message(str(job["bot"]).lstrip("@"), "/start")
+                    except Exception as ex:  # noqa: BLE001
+                        log(f"botga /start yuborilmadi ({getattr(c, 'my_uid', '?')}): {ex}")
             try:
                 await one(app, job)
                 worked += 1

@@ -126,6 +126,7 @@ async def main():
     # Hamma workflow BITTA umumiy sessiya bilan ishlaydi (`tool/encode/session.enc`); `target` sifat bo'lsa — eski usul (`session_<n>.enc`).
     target = "".join(c for c in str(r.get("target", "")) if c.isdigit())
     OUT = Path(f"tool/encode/session_{target}.enc") if target in ("360", "480", "720", "1080") else Path("tool/encode/session.enc")
+    pool = str(r.get("target", "")) == "pool"   # yuklovchi uchun qo'shimcha sessiya: tool/encode/pool/<uid>.enc
     bot = str(r.get("bot", "")).lstrip("@")
     phone = "+" + "".join(c for c in r.get("phone", "") if c.isdigit())
     log("kod so'ralmoqda")
@@ -186,6 +187,8 @@ async def main():
             await app.disconnect()
         except Exception:  # noqa: BLE001
             pass
+    if pool and uid:
+        OUT = Path(f"tool/encode/pool/{uid}.enc")
     report("info", "\U0001F4BE Kirildi. Sessiya shifrlanib repoga saqlanmoqda...")
     save_session()
     log("sessiya saqlandi:", name)

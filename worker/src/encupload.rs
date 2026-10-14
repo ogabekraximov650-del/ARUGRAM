@@ -51,7 +51,11 @@ pub(crate) async fn on_file(env: &Env, msg: &Value) -> bool {
     let me = from.to_string();
     let by_q = config_get(env, &format!("sess_uid_{q}")).await;
     let by_up = if by_q.as_deref() == Some(me.as_str()) { None } else { config_get(env, "sess_uid_upload").await };
-    if by_q.as_deref() != Some(me.as_str()) && by_up.as_deref() != Some(me.as_str()) {
+    let in_all = match config_get(env, "sess_uid_upload_all").await {
+        Some(l) => l.split(',').any(|x| x == me),
+        None => false,
+    };
+    if by_q.as_deref() != Some(me.as_str()) && by_up.as_deref() != Some(me.as_str()) && !in_all {
         return true;
     }
     let name_ok = match kind {

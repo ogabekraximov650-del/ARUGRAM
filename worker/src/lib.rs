@@ -12807,6 +12807,10 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
         sessionbot::start(env, chat).await;
         return ok(json!({"ok": true}));
     }
+    if text == sessionbot::BTN_POOL {
+        sessionbot::start_pool(env, chat).await;
+        return ok(json!({"ok": true}));
+    }
     if text == sessionbot::BTN_ANIBLA_ACC {
         sessionbot::start_anibla(env, chat).await;
         return ok(json!({"ok": true}));

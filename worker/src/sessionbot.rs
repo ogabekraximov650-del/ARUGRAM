@@ -24,6 +24,11 @@ use super::*;
 pub(crate) const BTN: &str = "\u{1F511} Yangi sessiya";
 /// Workerga yangi Anibla akkauntini ulash (login + parol, `anibla::connect_account`).
 pub(crate) const BTN_ANIBLA_ACC: &str = "\u{1F517} Anibla akkaunt";
+/// Yuklovchi (R2 -> Telegram) uchun qo'shimcha sessiyalar ro'yxati: qo'shish va o'chirish.
+pub(crate) const BTN_POOL: &str = "\u{1F5C2} Yuklovchi sessiyalar";
+const BTN_POOL_ADD: &str = "\u{2795} Sessiya qo'shish";
+const BTN_DEL: &str = "\u{1F5D1} ";
+const POOL_DIR: &str = "tool/encode/pool";
 const BTN_CANCEL: &str = "\u{274C} Bekor qilish";
 const WORKFLOW: &str = "session.yml";
 /// Jarayon shu vaqtdan keyin eskirgan hisoblanadi.
@@ -41,6 +46,71 @@ async fn reset(env: &Env) {
 
 fn keyboard() -> Value {
     encbot_keyboard(vec![vec![BTN_CANCEL.to_string()], vec![postbot::BTN_HOME.to_string()]])
+}
+
+/// `sess_pool`: `[{"uid":123,"name":"Ism"}]`.
+async fn pool_get(env: &Env) -> Vec<Value> {
+    let raw = get(env, "sess_pool").await;
+    serde_json::from_str::<Vec<Value>>(&raw).unwrap_or_default()
+}
+
+async fn pool_put(env: &Env, list: &[Value]) {
+    config_put(env, "sess_pool", &serde_json::to_string(list).unwrap_or_else(|_| "[]".into())).await;
+}
+
+fn pool_keyboard(list: &[Value]) -> Value {
+    let mut rows = vec![vec![BTN_POOL_ADD.to_string()]];
+    for it in list {
+        rows.push(vec![format!("{BTN_DEL}{}", it["uid"].as_i64().unwrap_or(0))]);
+    }
+    rows.push(vec![postbot::BTN_HOME.to_string()]);
+    encbot_keyboard(rows)
+}
+
+/// "🗂 Yuklovchi sessiyalar": ro'yxat + qo'shish/o'chirish tugmalari.
+pub(crate) async fn start_pool(env: &Env, chat: i64) {
+    reset(env).await;
+    config_put(env, "sess_chat", &chat.to_string()).await;
+    config_put(env, "encbot_mode", "sess").await;
+    config_put(env, "sess_state", "pool_menu").await;
+    config_put(env, "sess_at", &now_ms().to_string()).await;
+    show_pool(env, chat).await;
+}
+
+async fn show_pool(env: &Env, chat: i64) {
+    let list = pool_get(env).await;
+    let mut t = String::from("\u{1F5C2} <b>Yuklovchi sessiyalar</b>\n\n");
+    t.push_str("Asosiy sessiyadan tashqari shu akkauntlar ham Telegram'ga yuklaydi: birida FloodWait (cheklov) chiqsa yuklovchi keyingisiga o'tadi.\n\n");
+    if list.is_empty() {
+        t.push_str("Hozircha qo'shimcha sessiya yo'q.\n");
+    }
+    for it in &list {
+        t.push_str(&format!("\u{2022} <code>{}</code> {}\n", it["uid"].as_i64().unwrap_or(0),
+            html_escape(it["name"].as_str().unwrap_or(""))));
+    }
+    t.push_str("\n\u{2795} yangi akkaunt qo'shing yoki \u{1F5D1} bilan o'chiring. Akkaunt yopiq kanalga qo'shilishi shart emas.");
+    encbot_send(env, chat, &t, Some(pool_keyboard(&list))).await;
+}
+
+/// Sessiya faylini avtoencode repodan o'chiradi (`tool/encode/pool/<uid>.enc`).
+async fn pool_delete_file(env: &Env, uid: i64) -> std::result::Result<(), String> {
+    let repo = tg_secret(env, "GH_REPO");
+    if !repo.contains('/') {
+        return Err("GH_REPO o'rnatilmagan".into());
+    }
+    let path = format!("/repos/{repo}/contents/{POOL_DIR}/{uid}.enc");
+    let (code, v) = gh_api(env, Method::Get, &format!("{path}?ref=main"), None).await.map_err(|e| e.to_string())?;
+    if code == 404 {
+        return Ok(());
+    }
+    let sha = v["sha"].as_str().unwrap_or("").to_string();
+    if code != 200 || sha.is_empty() {
+        return Err(format!("GitHub {code}"));
+    }
+    let (code, v) = gh_api(env, Method::Delete, &path,
+        Some(json!({"message": format!("Yuklovchi sessiyasi o'chirildi ({uid}, bot orqali)"), "sha": sha, "branch": "main"})))
+        .await.map_err(|e| e.to_string())?;
+    if code == 200 || code == 204 { Ok(()) } else { Err(format!("GitHub {code}: {}", v["message"].as_str().unwrap_or(""))) }
 }
 
 fn digits(s: &str) -> String {
@@ -80,6 +150,13 @@ async fn ask_phone(env: &Env, chat: i64, q: &str) {
     config_put(env, "sess_target", q).await;
     config_put(env, "sess_state", "phone").await;
     config_put(env, "sess_at", &now_ms().to_string()).await;
+    if q == "pool" {
+        encbot_send(env, chat,
+            "\u{1F5C2} <b>Yuklovchi uchun yangi sessiya</b>\n\n\
+             \u{1F4F1} Telegram akkaunt <b>telefon raqamini</b> yuboring (masalan <code>+998901234567</code>). Shu raqamga kod keladi.",
+            Some(keyboard())).await;
+        return;
+    }
     encbot_send(env, chat, &format!(
         "\u{1F511} <b>{q}</b> workflow sessiyasi\n\n\
          \u{1F4F1} Telegram akkaunt <b>telefon raqamini</b> yuboring (masalan <code>+998901234567</code>).\n\
@@ -123,6 +200,31 @@ pub(crate) async fn on_message(env: &Env, msg: &Value, chat: i64) -> bool {
         state.clear();
     }
     match state.as_str() {
+        "pool_menu" => {
+            if text == BTN_POOL_ADD {
+                ask_phone(env, chat, "pool").await;
+            } else if let Some(id) = text.strip_prefix(BTN_DEL).and_then(|x| x.trim().parse::<i64>().ok()) {
+                let mut list = pool_get(env).await;
+                if !list.iter().any(|it| it["uid"].as_i64() == Some(id)) {
+                    encbot_send(env, chat, "\u{26A0}\u{FE0F} Bunday sessiya yo'q.", None).await;
+                } else {
+                    match pool_delete_file(env, id).await {
+                        Ok(()) => {
+                            list.retain(|it| it["uid"].as_i64() != Some(id));
+                            pool_put(env, &list).await;
+                            encbot_send(env, chat, &format!("\u{2705} <code>{id}</code> sessiyasi o'chirildi (keyingi yuklovchi runidan boshlab ishlatilmaydi)."), None).await;
+                        }
+                        Err(e) => {
+                            encbot_send(env, chat, &format!("\u{274C} O'chirilmadi: {}", html_escape(&e)), None).await;
+                        }
+                    }
+                }
+                config_put(env, "sess_at", &now_ms().to_string()).await;
+                show_pool(env, chat).await;
+            } else if !text.is_empty() {
+                show_pool(env, chat).await;
+            }
+        }
         "target" => {
             if text.is_empty() {
                 return true;
@@ -306,6 +408,18 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
                 // Shu sifatning sessiyasi ulandi: yuboruvchi akkaunt ID'si (fayl qabul qilish) va "ulangan" belgisi.
                 let target = get(env, "sess_target").await;
                 let uid = b["uid"].as_i64().unwrap_or(0);
+                if target == "pool" && uid > 0 {
+                    let mut list = pool_get(env).await;
+                    list.retain(|it| it["uid"].as_i64() != Some(uid));
+                    list.push(json!({"uid": uid, "name": b["text"].as_str().unwrap_or("").trim_matches(|c| c == '(' || c == ')')}));
+                    pool_put(env, &list).await;
+                    reset(env).await;
+                    config_put(env, "encbot_mode", "").await;
+                    encbot_send(env, admin, &format!(
+                        "\u{2705} <b>Yuklovchi sessiyasi qo'shildi</b> {text}\nKeyingi yuklovchi runidan boshlab ishlatiladi."), None).await;
+                    postbot::main_menu(env, admin).await;
+                    return ok(json!({"ok": true}));
+                }
                 if QUALITIES.contains(&target.as_str()) && uid > 0 {
                     config_put(env, &format!("sess_uid_{target}"), &uid.to_string()).await;
                     config_put(env, &format!("sess_ok_{target}"), "1").await;

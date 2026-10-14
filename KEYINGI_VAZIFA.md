@@ -6297,3 +6297,15 @@ chiqaradi. Faqat o'qish. Qayta ko'rish uchun `tool/diag/` ichidagi biror faylni 
 chiqqan — Telegram yuklashni cheklagan, Pyrogram `save_file` bu xatoni yutib, yuklash 100% da "qotgan". `fast_save_file` da
 FloodWait endi umumiy to'siq (`gate`) bilan hamma ulanishni birga kutdiradi, urinishlar 12 taga oshirildi.
 Ikkinchi akkaunt loglarini ko'rish: `tool/diag/run.txt` ni o'zgartirib push qiling (`diag-logs.yml`).
+
+## Yuklovchi uchun sessiyalar havzasi (2026-10)
+
+Muammo: bitta akkauntda Telegram yuklashni cheklaydi (FloodWait). Yechim: panel botda "🗂 Yuklovchi sessiyalar" —
+qo'shimcha akkauntlarni qo'shish ("➕ Sessiya qo'shish": raqam -> kod, mavjud `session.yml` oqimi, `sess_target=pool`) va
+"🗑 <uid>" bilan o'chirish.
+- Fayl: `tool/encode/pool/<uid>.enc` (avtoencode repoda, `ENCODE_TOKEN` bilan shifrlangan); ro'yxat: `app_config.sess_pool`.
+  O'chirish worker orqali GitHub contents API (`GH_ACTIONS_TOKEN`) bilan.
+- `upload.workflow.yml` hamma `pool/*.enc` ni ochadi; `upload.py` har yuborish urinishida `pick_app()` bilan sessiyani
+  almashtiradi, FloodWait/100% da qotgan sessiya `COOL` bo'yicha dam oladi.
+- Bot fayl qabul qilishi uchun claim `uids` yuboradi -> `sess_uid_upload_all` (`encupload.rs` shuni ham tekshiradi).
+Fayl oqimi o'zgarmadi: hamma narsa asosiy bot chatiga yuboriladi.

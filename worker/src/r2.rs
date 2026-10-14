@@ -429,6 +429,16 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
                     config_put(env, "sess_uid_upload", &uid.to_string()).await;
                 }
             }
+            // Yuklovchining hamma sessiyalari (asosiy + qo'shimcha): bot ulardan fayl qabul qiladi.
+            if let Some(arr) = b["uids"].as_array() {
+                let ids: Vec<String> = arr.iter().filter_map(|x| x.as_i64()).filter(|u| *u > 0).take(20).map(|u| u.to_string()).collect();
+                if !ids.is_empty() {
+                    let joined = ids.join(",");
+                    if config_get(env, "sess_uid_upload_all").await.as_deref() != Some(joined.as_str()) {
+                        config_put(env, "sess_uid_upload_all", &joined).await;
+                    }
+                }
+            }
             let runner: String = b["runner"].as_str().unwrap_or("").chars().take(64).collect();
             // `group` (`a/s/e/queued_at/sifat`) — faqat shu sifatning fayllari (MP4 va fMP4): yuklovchi bitta sifatni tugatib o'chadi.
             let g: Vec<&str> = b["group"].as_str().unwrap_or("").split('/').collect();

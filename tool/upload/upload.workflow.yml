@@ -43,6 +43,16 @@ jobs:
           K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
           K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in "$SRC" -out "$OUT"
           head -c 16 "$OUT" | grep -q "SQLite format 3" || { echo "::error::Sessiya ochilmadi (ENCODE_TOKEN noto'g'ri?)"; exit 1; }
+          # Qo'shimcha sessiyalar (botdagi "🗂 Yuklovchi sessiyalar"): FloodWait'da almashish uchun.
+          for F in tool/encode/pool/*.enc; do
+            [ -f "$F" ] || continue
+            P="tool/upload/pool_$(basename "$F" .enc).session"
+            if K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in "$F" -out "$P" && head -c 16 "$P" | grep -q "SQLite format 3"; then
+              echo "qo'shimcha sessiya: $F"
+            else
+              rm -f "$P"; echo "::warning::$F ochilmadi"
+            fi
+          done
 
       - name: R2 -> Telegram
         id: up
@@ -56,7 +66,7 @@ jobs:
 
       - name: Sessiyani o'chirish
         if: always()
-        run: rm -f tool/upload/pyro_session.session
+        run: rm -f tool/upload/pyro_session.session tool/upload/pool_*.session
 
       # Har run BITTA sifatni (MP4 va fMP4) Telegram'ga yetkazib o'chadi; R2'da fayl qolgan bo'lsa — yangi run ochiladi.
       - name: Davom ettirish
