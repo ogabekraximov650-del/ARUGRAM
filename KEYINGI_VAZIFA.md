@@ -6219,3 +6219,8 @@ yetishni tekshiradi. (2) Yuklovchi (`upload.yml`) ESKI umumiy `session.enc` bila
 yo'q) sifatlar urinish `ENCODE_MAX_ATTEMPTS` (5) dan kam bo'lsa qayta kodlanadi; R2'dan Telegram'ga 6 urinishda yetmagan fayl o'chib
 sifat qayta kodlanadi. (4) R2 sig'imi: navbatdagi fayllar yig'indisi `R2_MAX_GB` (8) dan oshsa yoki R2 ishlamasa run to'g'ridan-to'g'ri
 bot chatiga yuklaydi (kodlash yo'qolmaydi).
+
+Keyin: R2'ga yozishdan oldin run worker'dan "shuncha MB sig'adimi?" deb so'raydi (`/api/encode/r2put`): sig'sa havola beradi (sig'im
+tekshiruvi va qator ochish bitta SQL'da — 4 run bir vaqtda so'rasa ham chegara oshmaydi); sig'masa `{wait:true}` va run har 30 s
+qayta so'rab R2 bo'shaguncha KUTADI (8 soatgacha; yuklovchi workflow fayllarni Telegram'ga olib borib o'chiradi). Fayl butunlay
+sig'maydigan (`R2_MAX_GB` dan katta) yoki R2 sozlanmagan bo'lsa — to'g'ridan-to'g'ri bot chatiga.

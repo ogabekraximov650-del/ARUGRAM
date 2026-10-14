@@ -12114,8 +12114,10 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
         }
         if path == "/api/encode/r2put" {
             return match r2::register(env, (a, s, e), queued_at, q, kind, file, &key, size).await {
-                Some(url) => ok(json!({"ok": true, "url": url})),
-                None => json_resp(&json!({"error": "r2"}), 503),
+                Ok(url) => ok(json!({"ok": true, "url": url})),
+                // R2'da joy yo'q: kodlovchi bo'shaguncha kutadi (yuklovchi workflow fayllarni olib borib o'chiradi).
+                Err("full") => ok(json!({"ok": false, "wait": true})),
+                Err(_) => json_resp(&json!({"error": "r2"}), 503),
             };
         }
         return match r2::mark_ready(env, file, size).await {

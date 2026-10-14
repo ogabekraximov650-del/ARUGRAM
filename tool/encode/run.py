@@ -352,10 +352,26 @@ async def upload_r2(ident: dict, path: Path, name: str, kind: str, key: str, lab
     """Tayyor faylni R2'ga yozadi (`kind` — mp4|fmp4). Worker R2 sozlanmagan desa `False` (eski usulga qaytiladi)."""
     size = path.stat().st_size
     last = ""
-    for attempt in range(1, 6):
+    waited = 0
+    attempt = 0
+    while True:
+        if waited == 0:
+            attempt += 1
         try:
             r = await asyncio.to_thread(api, "r2put", {**ident, "kind": kind, "file": name, "key": key,
                                                        "size": size, "quality": label})
+            if r.get("wait"):
+                # Worker: "R2'da joy yo'q" — bo'shaguncha kutiladi (yuklovchi workflow fayllarni Telegram'ga olib borib o'chiradi).
+                if not waited:
+                    log(f"  {label}: R2'da {size / 1048576:.0f} MB uchun joy yo'q — bo'shashi kutilmoqda...")
+                waited += 30
+                if waited > 8 * 3600:
+                    raise RuntimeError("R2 8 soat bo'shamadi")
+                await asyncio.sleep(30)
+                continue
+            if waited:
+                log(f"  {label}: R2'da joy ochildi ({waited // 60} daqiqa kutildi)")
+                waited = 0
             await asyncio.to_thread(put_file, r["url"], path, label)
             await asyncio.to_thread(api, "r2ready", {**ident, "kind": kind, "file": name, "size": size})
             STATUS.update(xfer=None)
@@ -366,7 +382,7 @@ async def upload_r2(ident: dict, path: Path, name: str, kind: str, key: str, lab
         except Exception as ex:  # noqa: BLE001
             last = str(ex)
             if "503" in last and attempt == 1:
-                log(f"  {label}: R2 sozlanmagan yoki to'lgan — to'g'ridan-to'g'ri bot chatiga yuklanadi")
+                log(f"  {label}: R2 sozlanmagan (yoki fayl R2'ga umuman sig'maydi) — to'g'ridan-to'g'ri bot chatiga yuklanadi")
                 return False
             log(f"  {label}: R2'ga yozish {attempt}/3 muvaffaqiyatsiz: {last}")
             if attempt >= 3:

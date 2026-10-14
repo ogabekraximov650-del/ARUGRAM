@@ -137,27 +137,32 @@ async fn r2_fetch(env: &Env, method: &str, file: &str) -> Option<(u16, Option<i6
 
 // ── Kodlovchi tomoni ─────────────────────────────────────────
 
-/// Kodlovchi faylni R2'ga yozmoqchi: qator ochiladi, `PUT` havolasi qaytadi (2 soat amal qiladi).
+/// Kodlovchi faylni R2'ga yozmoqchi ("shuncha MB sig'adimi?"): joy bo'lsa qator ochiladi va `PUT` havolasi qaytadi (2 soat);
+/// joy yo'q bo'lsa `Err("full")` — kodlovchi R2 bo'shaguncha KUTADI; R2 sozlanmagan yoki fayl butunlay sig'maydigan bo'lsa
+/// `Err("na")` — kodlovchi to'g'ridan-to'g'ri bot chatiga yuklaydi. Sig'im: `R2_MAX_GB` (standart 8; R2 bepul 10 GB).
 pub(crate) async fn register(env: &Env, (a, s, e): (i64, i64, i64), queued_at: i64, q: &str, kind: &str, file: &str,
-        key: &str, size: i64) -> Option<String> {
+        key: &str, size: i64) -> std::result::Result<String, &'static str> {
     migrate(env).await;
-    // Sig'im himoyasi: R2 bepul 10 GB; navbatdagi fayllar yig'indisi chegaradan oshsa — `None` (run to'g'ridan-to'g'ri
-    // bot chatiga yuklaydi). Chegara: `R2_MAX_GB` (standart 8).
     let cap: i64 = tg_secret(env, "R2_MAX_GB").parse::<i64>().unwrap_or(8).max(1) * 1024 * 1024 * 1024;
-    let used = turso_exec(env, "SELECT COALESCE(SUM(size),0) AS n FROM r2_files WHERE file_name<>?", vec![TursoArg::text(file)]).await
-        .ok().and_then(|r| first_row(&r)).map(|r| jint(&r, "n")).unwrap_or(0);
-    if used + size > cap {
-        return None;
+    let Some(put) = url(env, "PUT", file, 7200) else { return Err("na") };
+    if size > cap {
+        return Err("na");
     }
-    let put = url(env, "PUT", file, 7200)?;
-    turso_exec(env,
+    // Sig'im tekshiruvi va qator ochish BITTA so'rovda (4 ta run bir vaqtda so'rasa ham chegara oshmaydi).
+    let r = turso_exec(env,
         "INSERT INTO r2_files (file_name, kind, anime_id, season_id, epizod_id, queued_at, quality, file_key, size, state, created_at)
-         VALUES (?,?,?,?,?,?,?,?,?,'uploading',?)
+         SELECT ?,?,?,?,?,?,?,?,?,'uploading',?
+          WHERE (SELECT COALESCE(SUM(size),0) FROM r2_files WHERE file_name<>?) + ? <= ?
          ON CONFLICT(file_name) DO UPDATE SET kind=excluded.kind, file_key=excluded.file_key, size=excluded.size,
-            state='uploading', runner='', lease_until=0, attempts=0, error='', created_at=excluded.created_at",
+            state='uploading', runner='', lease_until=0, attempts=0, error='', created_at=excluded.created_at
+         RETURNING file_name",
         vec![TursoArg::text(file), TursoArg::text(kind), TursoArg::int(a), TursoArg::int(s), TursoArg::int(e),
-             TursoArg::int(queued_at), TursoArg::text(q), TursoArg::text(key), TursoArg::int(size), TursoArg::int(now_ms())]).await.ok()?;
-    Some(put)
+             TursoArg::int(queued_at), TursoArg::text(q), TursoArg::text(key), TursoArg::int(size), TursoArg::int(now_ms()),
+             TursoArg::text(file), TursoArg::int(size), TursoArg::int(cap)]).await.map_err(|_| "na")?;
+    if first_row(&r).is_none() {
+        return Err("full");
+    }
+    Ok(put)
 }
 
 /// Kodlovchi yuklab bo'ldi: R2'da fayl bor va hajmi to'g'rimi tekshiriladi, keyin `ready` (yuklovchi olishi mumkin).
