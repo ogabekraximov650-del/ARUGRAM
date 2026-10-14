@@ -13,7 +13,7 @@ from pathlib import Path
 
 ENC = Path("tool/encode/gh_token.enc")
 REPO = Path("tool/encode/gh_repo.txt").read_text().strip().split("/")[-1]
-RUNS = int(os.environ.get("DIAG_RUNS", "8"))
+RUNS = int(os.environ.get("DIAG_RUNS", "30"))
 TAIL = int(os.environ.get("DIAG_TAIL", "60"))
 
 k = "".join(os.environ.get("ENCODE_TOKEN", "").split())
@@ -67,7 +67,10 @@ for run in runs:
         for st in j.get("steps", []):
             if st.get("conclusion") not in (None, "success", "skipped"):
                 print(f"      qadam xato: {st['name']} -> {st['conclusion']}")
-    if "R2" in run["name"] or "ukl" in run["name"].lower():
+    if run["status"] != "completed" and ("R2" in run["name"] or "ukl" in run["name"].lower()):
+        print("  (davom etmoqda — GitHub tugamagan job logini bermaydi)")
+        continue
+    if False:
         for j in jobs:
             try:
                 txt = get(f"/repos/{login}/{REPO}/actions/jobs/{j['id']}/logs", raw=True).decode("utf-8", "replace")
@@ -90,7 +93,7 @@ for run in runs:
         lines = [l for l in z.read(n).decode("utf-8", "replace").splitlines()
                  if "##[" not in l and "[36;1m" not in l and "Node.js" not in l and "ENCODE_TOKEN" not in l]
         up = "R2" in run["name"] or "ukl" in run["name"].lower() or "upload" in run["name"].lower()
-        tail = TAIL * 3 if up else 12
+        tail = 400 if up else 6
         print(f"  >>> {n} ({len(lines)} qator), oxirgi {tail}:")
         for ln in lines[-tail:]:
             print("    " + ln[:300])
