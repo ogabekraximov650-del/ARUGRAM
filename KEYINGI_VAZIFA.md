@@ -6340,3 +6340,5 @@ har fayl uchun bosqich almashganda (yuklab olish boshlandi / Telegram'ga yuklash
 - **R2 yuklovchi** (`tool/upload/upload.py`, `upload.workflow.yml`): asosiy akkaunt (`session.enc`) BUTUNLAY ishlatilmaydi — faqat
   `tool/encode/pool/*.enc` sessiyalari. Pool bo'sh bo'lsa run xato bilan tugaydi (panel botda "🗂 Yuklovchi sessiyalar" orqali qo'shing).
   Post zaxirasi (`fallback_bot`): avval panel bot userga va adminga yuboradi, bo'lmasa pool sessiyalari.
+
+Panel bot yana almashtirildi (`tool/bot/encode_bot.enc` qayta shifrlandi, usul o'sha).
