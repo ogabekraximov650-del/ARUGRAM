@@ -82,6 +82,8 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
     }
 
     exoPlayer.setMediaItem(mediaItem);
+    // ARUGRAM: effekt konveyeri prepare() dan OLDIN quriladi (kerak bo'lsa).
+    preparePipelineIfNeeded();
     exoPlayer.prepare();
     exoPlayerEventListener = createExoPlayerEventListener(exoPlayer, surfaceProducer);
     exoPlayer.addListener(exoPlayerEventListener);
@@ -130,11 +132,20 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
     void onEnhanceDegraded(int newLevel);
   }
 
+  /**
+   * Yangi pleyer yaratilganda effekt konveyeri SHU darajada oldindan ulanadi (0 — ulanmaydi). Media3 talabi
+   * (`ExoPlayer.setVideoEffects`): metod kamida bir marta {@code prepare()} DAN OLDIN chaqirilishi shart, aks holda
+   * effekt konveyeri qurilmaydi va effekt kadrlarga qo'llanmaydi. Dart pleyer ochishdan oldin shuni o'rnatadi.
+   */
+  public static volatile int preEnhance = 0;
+
   private int enhanceLevel = 0;
-  private boolean enhanceListenerAdded = false;
+  private boolean enhancePipeline = false; // prepare() dan oldin effekt ulanganmi
+  private boolean enhanceListenersAdded = false;
   @Nullable private EnhanceListener enhanceListener;
   private int enhanceDrops = 0;
   private long enhanceFramesBase = 0;
+  private int enhanceSizeH = 0;
   /** Oxirgi effekt xatosi (diagnostika: Dart ekranda ko'rsatadi). */
   @Nullable public String enhanceError;
   private long enhanceWindowMs = 0;
@@ -148,79 +159,112 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
     return AruEnhanceShaderProgram.FRAMES.get() - enhanceFramesBase;
   }
 
+  @UnstableApi
+  private void ensureEnhanceListeners() {
+    if (enhanceListenersAdded) {
+      return;
+    }
+    enhanceListenersAdded = true;
+    // Effekt konveyeri (GL) ishlamasa — effektsiz qayta tiklanadi, ijro to'xtab qolmasin.
+    exoPlayer.addListener(
+        new androidx.media3.common.Player.Listener() {
+          @Override
+          public void onPlayerError(androidx.media3.common.PlaybackException error) {
+            if (enhanceLevel <= 0) {
+              return;
+            }
+            for (Throwable t = error; t != null; t = t.getCause()) {
+              if (t instanceof androidx.media3.common.VideoFrameProcessingException) {
+                enhanceError = t.getClass().getSimpleName() + ": " + t.getMessage();
+                enhanceLevel = 0;
+                exoPlayer.setVideoEffects(
+                    java.util.Collections.<androidx.media3.common.Effect>emptyList());
+                exoPlayer.prepare();
+                if (enhanceListener != null) {
+                  enhanceListener.onEnhanceDegraded(0);
+                }
+                return;
+              }
+            }
+          }
+
+          @Override
+          public void onVideoSizeChanged(androidx.media3.common.VideoSize size) {
+            // O'lcham ma'lum bo'lgach (prepare()'dan oldin noma'lum edi) kattalashtirish qo'shiladi.
+            if (enhanceLevel >= 2 && size.height > 0 && enhanceSizeH == 0) {
+              setEnhance(enhanceLevel);
+            }
+          }
+        });
+    // Sekin telefon: kadrlar tashlansa daraja avtomatik tushiriladi (qotib qolmasin).
+    exoPlayer.addAnalyticsListener(
+        new androidx.media3.exoplayer.analytics.AnalyticsListener() {
+          @Override
+          public void onDroppedVideoFrames(
+              androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime eventTime,
+              int droppedFrames,
+              long elapsedMs) {
+            if (enhanceLevel <= 0) {
+              return;
+            }
+            enhanceDrops += droppedFrames;
+            enhanceWindowMs += Math.max(elapsedMs, 1);
+            if (enhanceWindowMs >= 3000) {
+              final double perSec = enhanceDrops * 1000.0 / enhanceWindowMs;
+              enhanceDrops = 0;
+              enhanceWindowMs = 0;
+              if (perSec > 3.0) {
+                final int next = Math.max(0, enhanceLevel - 1);
+                setEnhance(next);
+                if (enhanceListener != null) {
+                  enhanceListener.onEnhanceDegraded(next);
+                }
+              }
+            }
+          }
+        });
+  }
+
+  /** prepare() dan OLDIN chaqiriladi: effekt konveyerini quradi (Media3 talabi). */
+  @UnstableApi
+  protected void preparePipelineIfNeeded() {
+    final int lv = preEnhance;
+    if (lv <= 0) {
+      return;
+    }
+    enhancePipeline = true; // setEnhance ichida tekshiriladi
+    ensureEnhanceListeners();
+    setEnhance(lv);
+  }
+
   /**
-   * Tasvirni yaxshilashni yoqadi/o'chiradi (0 — o'chiq, 1 — yengil, 2 — kuchli, 3 — maksimal). Muvaffaqiyatli bo'lsa
-   * {@code true}; effektni qo'llab bo'lmasa {@code false} (Dart tomoni rang filtriga qaytadi).
+   * Tasvirni yaxshilashni yoqadi/o'chiradi (0 — o'chiq, 1 — yengil, 2 — kuchli, 3 — maksimal).
+   * Qaytaradi: 1 — bajarildi; 0 — xato (rang filtriga qaytiladi); 2 — pleyer effekt konveyerisiz yaratilgan
+   * (Dart pleyerni qayta ochishi kerak).
    *
-   * <p>Manba past o'lchamli bo'lsa avval GPU'da kattalashtiriladi (1 — 720p, 2 — 1080p gacha), keyin shader o'tkazadi.
+   * <p>Manba past o'lchamli bo'lsa avval GPU'da kattalashtiriladi (1 — 720p, 2/3 — 1080p gacha Lanczos).
    */
   @UnstableApi
-  public boolean setEnhance(int level) {
+  public int setEnhance(int level) {
     try {
       if (level <= 0) {
-        exoPlayer.setVideoEffects(java.util.Collections.<androidx.media3.common.Effect>emptyList());
+        if (enhancePipeline) {
+          exoPlayer.setVideoEffects(java.util.Collections.<androidx.media3.common.Effect>emptyList());
+        }
         enhanceLevel = 0;
-        return true;
+        return 1;
       }
-      if (!enhanceListenerAdded) {
-        enhanceListenerAdded = true;
-        // Effekt konveyeri (GL) ishlamasa — effektsiz qayta tiklanadi, ijro to'xtab qolmasin.
-        exoPlayer.addListener(
-            new androidx.media3.common.Player.Listener() {
-              @Override
-              public void onPlayerError(androidx.media3.common.PlaybackException error) {
-                if (enhanceLevel <= 0) {
-                  return;
-                }
-                for (Throwable t = error; t != null; t = t.getCause()) {
-                  if (t instanceof androidx.media3.common.VideoFrameProcessingException) {
-                    enhanceError = t.getClass().getSimpleName() + ": " + t.getMessage();
-                    enhanceLevel = 0;
-                    exoPlayer.setVideoEffects(
-                        java.util.Collections.<androidx.media3.common.Effect>emptyList());
-                    exoPlayer.prepare();
-                    if (enhanceListener != null) {
-                      enhanceListener.onEnhanceDegraded(0);
-                    }
-                    return;
-                  }
-                }
-              }
-            });
-        // Sekin telefon: kadrlar tashlansa daraja avtomatik tushiriladi (qotib qolmasin).
-        exoPlayer.addAnalyticsListener(
-            new androidx.media3.exoplayer.analytics.AnalyticsListener() {
-              @Override
-              public void onDroppedVideoFrames(
-                  androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime eventTime,
-                  int droppedFrames,
-                  long elapsedMs) {
-                if (enhanceLevel <= 0) {
-                  return;
-                }
-                enhanceDrops += droppedFrames;
-                enhanceWindowMs += Math.max(elapsedMs, 1);
-                if (enhanceWindowMs >= 3000) {
-                  final double perSec = enhanceDrops * 1000.0 / enhanceWindowMs;
-                  enhanceDrops = 0;
-                  enhanceWindowMs = 0;
-                  if (perSec > 3.0) {
-                    final int next = Math.max(0, enhanceLevel - 1);
-                    setEnhance(next);
-                    if (enhanceListener != null) {
-                      enhanceListener.onEnhanceDegraded(next);
-                    }
-                  }
-                }
-              }
-            });
+      if (!enhancePipeline) {
+        return 2;
       }
+      ensureEnhanceListeners();
       enhanceDrops = 0;
       enhanceWindowMs = 0;
       enhanceFramesBase = AruEnhanceShaderProgram.FRAMES.get();
       final java.util.List<androidx.media3.common.Effect> effects = new java.util.ArrayList<>();
       final androidx.media3.common.Format f = exoPlayer.getVideoFormat();
       final int target = level >= 2 ? 1080 : 720;
+      enhanceSizeH = f != null ? f.height : 0;
       if (f != null && f.height > 0 && f.height < target) {
         if (level >= 2) {
           // Kuchli/Maksimal: Lanczos (sinc) kattalashtirish — bilinear'dan ancha aniq chiziqlar.
@@ -232,7 +276,7 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
       effects.add(new AruEnhanceEffect(level));
       exoPlayer.setVideoEffects(effects);
       enhanceLevel = level;
-      return true;
+      return 1;
     } catch (Throwable t) {
       enhanceLevel = 0;
       enhanceError = t.getClass().getSimpleName() + ": " + t.getMessage();
@@ -241,7 +285,7 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
       } catch (Throwable ignored) {
         // e'tiborsiz
       }
-      return false;
+      return 0;
     }
   }
 

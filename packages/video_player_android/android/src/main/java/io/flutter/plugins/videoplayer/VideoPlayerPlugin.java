@@ -48,6 +48,12 @@ public class VideoPlayerPlugin implements FlutterPlugin, AndroidVideoPlayerApi {
     enhanceChannel = new MethodChannel(binding.getBinaryMessenger(), "uz.arugram.player/enhance");
     enhanceChannel.setMethodCallHandler(
         (call, result) -> {
+          if ("preset".equals(call.method)) {
+            final Number plv = call.argument("level");
+            VideoPlayer.preEnhance = plv == null ? 0 : plv.intValue();
+            result.success(true);
+            return;
+          }
           if ("stats".equals(call.method)) {
             final Number sid = call.argument("playerId");
             final VideoPlayer svp = sid == null ? null : videoPlayers.get(sid.longValue());
@@ -81,7 +87,7 @@ public class VideoPlayerPlugin implements FlutterPlugin, AndroidVideoPlayerApi {
                   enhanceChannel.invokeMethod("degraded", m);
                 }
               });
-          result.success(vp.setEnhance(lv.intValue()));
+          result.success(vp.setEnhance(lv.intValue()));  // 1 — ok, 0 — xato, 2 — qayta ochish kerak
         });
 
     binding

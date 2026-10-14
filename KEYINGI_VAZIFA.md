@@ -6408,3 +6408,6 @@ Anibla sekinligi (diag): worker -> anibla.uz har so'rovga ~1.2-1.4 s (login 1.4 
 - **Web:** "Maksimal" daraja (qurilma ko'targanicha: 2560x1440 gacha, kadr tashlansa avtomatik pasayadi; MIN 0.75 dan pastda effekt o'chadi — piksellanmasin).
   Ikki o'tish: Catmull-Rom bikubik kattalashtirish -> yaxshilash shaderi (avval bilinear + o'tkirlik zinapoyalarni (aliasing) kuchaytirardi).
 - **Piksellanish:** shaderda anti-ringing (o'tkirlik natijasi mahalliy min/max bilan cheklanadi), deband chegaralari yumshoqroq, o'tkirlik faqat chegaralarda.
+- **"0 kadr" xatosi sababi:** Media3 `setVideoEffects` ni `prepare()` dan OLDIN kamida bir marta chaqirishni talab qiladi, aks holda effekt konveyeri
+  qurilmaydi. Yechim: `VideoPlayer.preEnhance` (Dart `preset` usuli bilan beriladi) bo'yicha konstruktorda `prepare()` dan oldin konveyer quriladi.
+  `setEnhance` 1 = qo'llandi, 0 = qo'llanmadi, 2 = konveyer yo'q (Dart epizodni shu joydan qayta ochadi).

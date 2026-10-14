@@ -1116,6 +1116,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     _restoreQuality(ep);
     final url = _getUrl(ep);
     if (url.isEmpty) return;
+    // Effekt konveyeri pleyer yaratilishidan OLDIN ulanishi kerak (Media3 talabi).
+    await _syncEnhancePreset();
 
     // ── QAYERDA TO'XTAGAN BO'LSA — O'SHA JOYDAN ──────────────
     // Sifat almashtirilganda yoki pleyer qayta ochilganda nuqta
@@ -3138,6 +3140,13 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     });
   }
 
+  /// Yangi pleyer yaratilishidan OLDIN native'ga daraja aytiladi: Media3 effekt konveyerini `prepare()` dan oldin qurishni talab qiladi.
+  Future<void> _syncEnhancePreset() async {
+    try {
+      await _enhanceCh.invokeMethod<bool>('preset', {'level': AppSettings.instance.videoEnhance});
+    } catch (_) {}
+  }
+
   Future<void> _applyEnhance({bool announce = false}) async {
     final ctrl = _controller;
     final level = AppSettings.instance.videoEnhance;
@@ -3147,16 +3156,29 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       return;
     }
     _ensureEnhanceHandler();
-    var ok = false;
+    var code = 0; // 1 — ok, 2 — pleyerni qayta ochish kerak, 0 — xato
     try {
-      ok = (await _enhanceCh.invokeMethod<bool>(
-              'set', {'playerId': ctrl.playerId, 'level': level})) ==
-          true;
+      code = (await _enhanceCh.invokeMethod<int>('set', {'playerId': ctrl.playerId, 'level': level})) ?? 0;
     } catch (_) {
-      ok = false;
+      code = 0;
     }
-    if (level > 0) _enhanceTouched = true;
     if (!mounted || ctrl != _controller) return;
+    if (level > 0 && code == 2) {
+      // Pleyer effekt konveyerisiz yaratilgan — shu qismni xuddi shu joydan qayta ochamiz (yangi pleyerda konveyer bor).
+      final ep = _currentEp;
+      if (ep != null) {
+        await _syncEnhancePreset();
+        _enhanceTouched = true;
+        if (announce) _showNotice('Tasvirni yaxshilash yoqilmoqda: video qayta ochiladi');
+        _playEpisode(ep,
+            resumeAt: ctrl.value.position,
+            resumePlaying: ctrl.value.isPlaying,
+            isRecovery: true);
+        return;
+      }
+    }
+    final ok = code == 1;
+    if (level > 0) _enhanceTouched = true;
     setState(() => _enhanceNative = level > 0 && ok);
     if (level > 0 && ok) _verifyEnhance(ctrl, level);
     if (announce) {
@@ -3219,6 +3241,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     AppSettings.instance
         .setVideoEnhance((AppSettings.instance.videoEnhance + 1) % 4);
     if (mounted) setState(() {});
+    _syncEnhancePreset();
     _applyEnhance(announce: true);
   }
 
