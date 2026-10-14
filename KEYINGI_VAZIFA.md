@@ -6396,3 +6396,5 @@ o'tkirlik 1.0, deband .9, chiziqlar .8, **ravshanlik** (`uClarity` — 3 piksell
 Shaderga ikki yangi uniforma (`uClarity`, `uVib`, 0 = o'chiq) qo'shildi; web ularni 0 qiladi. Kadr tashlansa daraja birma-bir tushadi (3 -> 2 -> 1 -> 0).
 
 Anibla: "Yillar ro'yxatini olib bo'lmadi" xabari endi SABABNI ham ko'rsatadi (`year_counts` xato matnini qaytaradi). `/api/anibla/probe` (faqat o'qish, xabar yubormaydi) — sayt ro'yxati HTTP javobi va saqlangan login bilan kirish natijasi; `diag-logs.yml` uni chaqiradi.
+
+Anibla sekinligi (diag): worker -> anibla.uz har so'rovga ~1.2-1.4 s (login 1.4 s, ro'yxat 1.4 s, 500 ta — 1.2 s/935 KB). Chora: login talab qilmaydigan ro'yxat so'rovlari 3 daqiqa xotirada keshlanadi (`GET_CACHE`, takroriy bosish darhol); yillar ro'yxati keshi 6 -> 24 soat va sayt javob bermasa eskisi ko'rsatiladi.

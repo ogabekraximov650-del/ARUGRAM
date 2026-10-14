@@ -281,8 +281,36 @@ async fn token(env: &Env, fresh: bool) -> std::result::Result<String, String> {
     login(env).await
 }
 
+thread_local! {
+    /// Ro'yxat javoblari (login talab qilmaydigan) — 3 daqiqa xotirada: sayt har so'rovga ~1.3 s javob beradi,
+    /// bir xil ro'yxat (qidiruv, sahifa, yil) qayta bosilsa darhol chiqadi.
+    static GET_CACHE: std::cell::RefCell<std::collections::HashMap<String, (i64, Value)>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+const GET_CACHE_MS: i64 = 3 * 60 * 1000;
+
 /// API'dan JSON. `auth` — login kerak (401 bo'lsa bir marta qayta kiradi).
 async fn get(env: &Env, path: &str, auth: bool) -> std::result::Result<Value, String> {
+    if !auth {
+        let now = now_ms();
+        if let Some(v) = GET_CACHE.with(|c| c.borrow().get(path).filter(|(t, _)| now - *t < GET_CACHE_MS).map(|(_, v)| v.clone())) {
+            return Ok(v);
+        }
+        let v = get_raw(env, path, auth).await?;
+        GET_CACHE.with(|c| {
+            let mut m = c.borrow_mut();
+            if m.len() >= 40 {
+                m.retain(|_, (t, _)| now - *t < GET_CACHE_MS);
+                if m.len() >= 40 { m.clear(); }
+            }
+            m.insert(path.to_string(), (now, v.clone()));
+        });
+        return Ok(v);
+    }
+    get_raw(env, path, auth).await
+}
+
+async fn get_raw(env: &Env, path: &str, auth: bool) -> std::result::Result<Value, String> {
     let url = format!("{}/{}", api_base(env), path.trim_start_matches('/'));
     for attempt in 0..2 {
         let cookie = if auth { Some(format!("access_token={}", token(env, attempt > 0).await?)) } else { None };
@@ -642,9 +670,9 @@ pub(crate) async fn on_message(env: &Env, msg: &Value, chat: i64) {
 }
 
 /// Saytdagi animelar yillar bo'yicha: `(yil, soni)`, yangi yil tepada.
-/// Sayt ro'yxatidan (`media/mobile`, hammasi) hisoblanadi va 6 soat saqlanadi.
+/// Sayt ro'yxatidan (`media/mobile`, hammasi) hisoblanadi va 24 soat saqlanadi (xatoda eskisi ko'rsatiladi).
 async fn year_counts(env: &Env) -> (Vec<(i64, i64)>, String) {
-    const TTL: i64 = 6 * 3600 * 1000;
+    const TTL: i64 = 24 * 3600 * 1000;
     if let Some(j) = config_get(env, "anibla_years").await.and_then(|v| serde_json::from_str::<Value>(&v).ok()) {
         if now_ms() - j["at"].as_i64().unwrap_or(0) < TTL {
             let l: Vec<(i64, i64)> = j["l"].as_array().cloned().unwrap_or_default().iter()
@@ -669,8 +697,14 @@ async fn year_counts(env: &Env) -> (Vec<(i64, i64)>, String) {
     l.sort_by(|a, b| b.0.cmp(&a.0));
     if !l.is_empty() {
         config_put(env, "anibla_years", &json!({"at": now_ms(), "l": l}).to_string()).await;
-    } else if why.is_empty() {
-        why = "sayt ro'yxati bo'sh qaytdi".into();
+    } else {
+        // Sayt javob bermasa — avvalgi (eskirgan bo'lsa ham) ro'yxat ko'rsatiladi.
+        if let Some(j) = config_get(env, "anibla_years").await.and_then(|v| serde_json::from_str::<Value>(&v).ok()) {
+            let old: Vec<(i64, i64)> = j["l"].as_array().cloned().unwrap_or_default().iter()
+                .filter_map(|x| Some((x[0].as_i64()?, x[1].as_i64()?))).collect();
+            if !old.is_empty() { return (old, String::new()); }
+        }
+        if why.is_empty() { why = "sayt ro'yxati bo'sh qaytdi".into(); }
     }
     (l, why)
 }
