@@ -34,8 +34,53 @@ SIBLING_WAIT = int(os.environ.get("SIBLING_WAIT_SEC", "300"))
 T0 = time.time()
 
 
+class Status:
+    """Botdagi "Holat" xabari uchun: yuklovchi holatini daqiqada bir marta worker'ga yuboradi (`/api/encode/push`, `X-Encode-Quality: upload`)."""
+
+    def __init__(self):
+        self.lines, self.data, self.progress, self.file = [], {}, "idle", ""
+        self.last_push = 0.0
+
+    def line(self, text):
+        self.lines.append(text)
+        del self.lines[:-14]
+
+    def set(self, file="", progress="idle", **data):
+        self.file, self.progress = file, progress
+        self.data = {"file": file, **data}
+
+    def xfer(self, kind, cur, total, t0):
+        el = max(time.time() - t0, 0.1)
+        sp = cur / 1048576 / el
+        self.data["xfer"] = {"kind": kind, "pct": round(cur * 100 / max(total, 1), 1), "cur_mb": round(cur / 1048576, 1),
+                             "total_mb": round(total / 1048576, 1), "mbps": round(sp, 2), "elapsed": int(el),
+                             "eta": int((total - cur) / 1048576 / sp) if sp > 0 else -1}
+
+    def push(self, force=False):
+        if not force and time.time() - self.last_push < 55:
+            return
+        self.last_push = time.time()
+        body = "\n".join(["#arustatus", f"run: {RUNNER}", "job: ", "num: ", f"progress: {self.progress}",
+                          f"updated: {int(time.time())}", "data: " + json.dumps(self.data, separators=(",", ":"), ensure_ascii=False),
+                          "---"] + self.lines)
+        try:
+            req = urllib.request.Request(
+                f"{API}/api/encode/push", data=body.encode(), method="POST",
+                headers={"X-Encode-Token": TOKEN, "X-Encode-Quality": "upload", "Content-Type": "text/plain; charset=utf-8",
+                         "User-Agent": "arugram-upload"})
+            urllib.request.urlopen(req, timeout=20).read()
+        except Exception as ex:  # noqa: BLE001
+            print(f"holat yuborilmadi: {ex}", flush=True)
+
+
+ST = Status()
+
+
 def log(*a):
-    print(time.strftime("%H:%M:%S"), *a, flush=True)
+    line = time.strftime("%H:%M:%S ") + " ".join(str(x) for x in a)
+    print(line, flush=True)
+    ST.line(line)
+    ST.push()
 
 
 def session_api_id() -> int:
@@ -98,6 +143,7 @@ def download(name: str, dst: Path, size: int, url: str | None = None):
                             break
                         f.write(chunk)
                         got += len(chunk)
+                        ST.xfer("R2'dan olish", got, size, t0)
                         if time.time() - last_log >= 5:
                             last_log = time.time()
                             log(f"    R2'dan yuklab olinmoqda {got * 100 // max(size, 1)}% "
@@ -127,11 +173,12 @@ async def send_to_bot(app, bot: str, path: Path, name: str, caption: str):
     size = path.stat().st_size
     last_err = ""
     for attempt in range(1, SEND_TRIES + 1):
-        prog = {"p": -1, "t": time.time(), "log": 0.0}
+        prog = {"p": -1, "t": time.time(), "log": 0.0, "t0": time.time()}
 
         def cb(cur, total, prog=prog):
             if cur != prog["p"]:
                 prog["p"], prog["t"] = cur, time.time()
+            ST.xfer("Telegram'ga yuklash", cur, total, prog["t0"])
             if time.time() - prog["log"] >= 5:
                 prog["log"] = time.time()
                 log(f"    Telegram'ga yuklanmoqda {cur * 100 // max(total, 1)}% ({cur / 1048576:.0f}/{total / 1048576:.0f} MB)")
@@ -190,11 +237,12 @@ async def send_dest(app, dest: dict, path: Path, name: str):
         thumb.write_bytes(base64.b64decode(dest["thumb_b64"]))
     last_err = ""
     for attempt in range(1, SEND_TRIES + 1):
-        prog = {"p": -1, "t": time.time(), "log": 0.0}
+        prog = {"p": -1, "t": time.time(), "log": 0.0, "t0": time.time()}
 
         def cb(cur, total, prog=prog):
             if cur != prog["p"]:
                 prog["p"], prog["t"] = cur, time.time()
+            ST.xfer("Telegram'ga yuklash", cur, total, prog["t0"])
             if time.time() - prog["log"] >= 5:
                 prog["log"] = time.time()
                 log(f"    Telegram'ga yuklanmoqda {cur * 100 // max(total, 1)}% ({cur / 1048576:.0f}/{total / 1048576:.0f} MB)")
@@ -268,8 +316,11 @@ async def one(app, job: dict):
     WORK.mkdir(parents=True)
     beat = asyncio.create_task(beat_loop(name))
     try:
+        ST.set(name, "download", kind=job.get("kind"), attempt=job.get("attempt"), job_started=int(time.time()))
         log(f"{name}: R2'dan olinmoqda ({size / 1048576:.1f} MB), urinish {job.get('attempt')}")
         await asyncio.to_thread(download, name, path, size, job.get("url"))
+        ST.progress = "upload"
+        ST.data.pop("xfer", None)
         log(f"{name}: botga yuborilmoqda")
         await send_to_bot(app, job["bot"], path, name, job["caption"])
         end = time.time() + COMMIT_WAIT
@@ -292,8 +343,11 @@ async def one_deliver(app, job: dict):
     WORK.mkdir(parents=True)
     beat = asyncio.create_task(beat_loop(name))
     try:
+        ST.set(name, "download", kind="deliver", attempt=job.get("attempt"), job_started=int(time.time()))
         log(f"{name}: R2'dan olinmoqda ({size / 1048576:.1f} MB), urinish {job.get('attempt')}")
         await asyncio.to_thread(download, name, path, size, job.get("url"))
+        ST.progress = "upload"
+        ST.data.pop("xfer", None)
         log(f"{name}: {dest.get('to')} ga yuborilmoqda")
         msg = await send_dest(app, dest, path, name)
         cb = dest.get("callback")
@@ -360,6 +414,8 @@ async def main():
                     log(f"fail yozilmadi: {e2}")
                 await asyncio.sleep(15)
         log(f"Run tugadi. Yuklandi: {worked}")
+        ST.set("", "idle")
+        ST.push(True)
         out = os.environ.get("GITHUB_OUTPUT")
         if out:
             with open(out, "a") as fh:

@@ -388,6 +388,56 @@ async fn q_block(env: &Env, q: &str, st: &Value, pending: i64, nlog: usize) -> S
     t
 }
 
+thread_local! {
+    /// R2'da Telegram'ga yetib bormagan fayllar soni (30 s xotirada).
+    static R2PEND: std::cell::RefCell<(i64, i64)> = const { std::cell::RefCell::new((0, 0)) };
+}
+
+async fn r2_pending(env: &Env) -> i64 {
+    let now = now_ms();
+    let (at, n) = R2PEND.with(|c| *c.borrow());
+    if at > 0 && now - at < PEND_MS {
+        return n;
+    }
+    let n = turso_exec(env, "SELECT COUNT(*) AS n FROM r2_files WHERE state IN ('ready','sending')", vec![]).await.ok()
+        .and_then(|r| first_row(&r)).map(|r| jint(&r, "n")).unwrap_or(0);
+    R2PEND.with(|c| *c.borrow_mut() = (now, n));
+    n
+}
+
+/// R2 yuklovchi bloki: qaysi fayl, bosqich (R2'dan olish / Telegram'ga yuklash) foiz-chiziq bilan, oxirgi loglar.
+fn up_block(st: &Value, pending: i64, nlog: usize) -> String {
+    let d = &st["data"];
+    let file = d["file"].as_str().unwrap_or("");
+    let mut t = format!("\u{1F4E4} <b>R2 \u{2192} Telegram</b> \u{00B7} {} \u{00B7} R2'da kutayotgan: {pending}",
+        html_escape(&short(file, 34)));
+    if let Some(a) = d["attempt"].as_i64().filter(|a| *a > 1) {
+        t.push_str(&format!(" (urinish {a})"));
+    }
+    let x = &d["xfer"];
+    if x.is_object() {
+        let up = x["kind"].as_str().unwrap_or("").contains("Telegram");
+        let pct = x["pct"].as_f64().unwrap_or(0.0);
+        t.push_str(&format!("\n{} {} {pct:.1}%\n    tezlik {:.2} MB/s \u{00B7} {:.1} / {:.1} MB\n    o'tdi {} \u{00B7} qoldi ~{}",
+            if up { "\u{2B06}\u{FE0F} Telegram'ga yuklanmoqda" } else { "\u{2B07}\u{FE0F} R2'dan olinmoqda" },
+            bar(pct), x["mbps"].as_f64().unwrap_or(0.0), x["cur_mb"].as_f64().unwrap_or(0.0), x["total_mb"].as_f64().unwrap_or(0.0),
+            hms(jint(x, "elapsed")), hms(jint(x, "eta"))));
+    } else {
+        t.push_str("\n\u{23F3} boshlanmoqda...");
+    }
+    let lines: Vec<String> = st["lines"].as_array().cloned().unwrap_or_default().iter()
+        .rev().take(nlog).rev()
+        .filter_map(|l| l.as_str().map(|s| html_escape(&short(s.trim(), 90)))).filter(|s| !s.is_empty()).collect();
+    if !lines.is_empty() {
+        t.push_str(&format!("\n\u{1F4DC} {}", lines.join("\n\u{1F4DC} ")));
+    }
+    let started = jint(d, "job_started");
+    if started > 0 {
+        t.push_str(&format!("\n\u{23F1} jami: {}", hms(now_ms() / 1000 - started)));
+    }
+    t
+}
+
 /// Hamma sifat-workflow'lar BITTA xabarda (4096 belgidan oshmasligi uchun log qatorlari kamaytiriladi).
 pub(crate) async fn app_all_html(env: &Env) -> String {
     let all = encode_live_all(env).await;
@@ -405,6 +455,17 @@ pub(crate) async fn app_all_html(env: &Env) -> String {
                 Some(s) => blocks.push(q_block(env, q, s, pend[i], nlog).await),
                 None if running[i] => blocks.push(format!("\u{2699}\u{FE0F} <b>{q}</b>: ishlayapti (jonli log kodlash log kanalida) \u{00B7} kutayotgan: {}", pend[i])),
                 None => blocks.push(format!("\u{1F4A4} <b>{q}</b>: hozir ishlamayapti \u{00B7} kutayotgan: {}", pend[i])),
+            }
+        }
+        // R2 yuklovchi (Telegram'ga yetkazuvchi) — qolgan sifatlardek shu xabarda.
+        if r2::ready(env) {
+            let pend = r2_pending(env).await;
+            let st = all.get("upload").and_then(|e| parse_status_pin(e["t"].as_str().unwrap_or("")));
+            let live = st.as_ref().filter(|s| now - jint(s, "updated_at") < 3 * 60 * 1000
+                && s["progress"].as_str().unwrap_or("idle") != "idle");
+            match live {
+                Some(s) => blocks.push(up_block(s, pend, nlog)),
+                None => blocks.push(format!("\u{1F4A4} <b>R2 \u{2192} Telegram</b>: hozir ishlamayapti \u{00B7} R2'da kutayotgan: {pend}")),
             }
         }
         let t = format!("\u{1F4F1} <b>Ilova uchun kodlash</b> \u{00B7} navbatda: {queued} ta qism\n\n{}", blocks.join("\n\n"));

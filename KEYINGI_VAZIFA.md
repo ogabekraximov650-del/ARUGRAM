@@ -6273,3 +6273,8 @@ bo'yicha yuboradi (qotsa 120 s da bekor qilib qayta), so'ng `callback` yo'lini c
 409 bo'lsa va `on_lost_delete` bo'lsa xabar o'chadi) va `/api/r2/done` (R2'dan o'chadi). Egasi ish (post_jobs/anibla_jobs/pack_db) ijarasi
 `r2/ready` da 12 soatga uzayadi (`dest.lease`). Post'da `finish` darhol R2'ga yozilgach chaqiriladi (video keyin yetadi). R2 yo'q/ishlamasa —
 har uchalasi eski usulda to'g'ridan-to'g'ri yuboradi. Eski `encode.yml` (sifatsiz, zaxira) o'zgarmadi.
+
+**Botdagi "📋 Holat" xabarida R2 yuklovchi (2026-10):** `upload.py` (`Status`) holatini daqiqada bir marta `/api/encode/push` ga
+`X-Encode-Quality: upload` bilan yuboradi (qolgan sifatlar kabi, `EncodeLive` xotirasida); `livewatch::app_all_html` sifat bloklaridan keyin
+"📤 R2 → Telegram" blokini qo'shadi: qaysi fayl, bosqich (R2'dan olinmoqda / Telegram'ga yuklanmoqda, foiz-chiziq, tezlik), oxirgi loglar va
+R2'da kutayotgan fayllar soni (`r2_files`, 30 s xotirada). Yuklovchi ishlamasa — "hozir ishlamayapti · R2'da kutayotgan: N". Blok faqat R2 yoqilgan bo'lsa chiqadi.

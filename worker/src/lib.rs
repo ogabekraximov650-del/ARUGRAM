@@ -11818,7 +11818,8 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
             return json_resp(&json!({"error": "matn"}), 400);
         }
         let wq = req.headers().get("X-Encode-Quality").ok().flatten().unwrap_or_default();
-        let wq = QUALITIES.iter().copied().find(|x| *x == wq.trim());
+        // Sifatlar (360p..1080p) yoki R2 yuklovchi (`upload`) — hammasi bitta umumiy "Holat" xabarida ko'rinadi.
+        let wq = QUALITIES.iter().copied().chain(["upload"]).find(|x| *x == wq.trim());
         // Sifat-workflow: bitta DO so'rovi (holat + darvoza); eskisi: faqat oxirgi matn.
         let (ok_put, gate) = match wq {
             Some(q) => { let g = encode_live_put(env, q, &text, 2_000).await; (g.is_some(), g.unwrap_or(true)) }
