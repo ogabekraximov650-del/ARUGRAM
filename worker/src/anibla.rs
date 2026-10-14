@@ -1848,13 +1848,25 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
 
     // Faqat o'qish: saytga ulanish tashxisi (xabar yubormaydi).
     if path == "/api/anibla/probe" {
+        let t0 = now_ms();
         let url = format!("{}/media/mobile?limit=3&page=1", api_base(env));
         let list = match http(&url, Method::Get, None, None).await {
-            Ok((code, text)) => json!({"http": code, "body": text.chars().take(300).collect::<String>()}),
+            Ok((code, text)) => json!({"http": code, "body": text.chars().take(120).collect::<String>()}),
             Err(e) => json!({"error": e}),
         };
+        let t1 = now_ms();
+        let url500 = format!("{}/media/mobile?limit=500&page=1", api_base(env));
+        let big = match http(&url500, Method::Get, None, None).await {
+            Ok((code, text)) => json!({"http": code, "kb": text.len() / 1024}),
+            Err(e) => json!({"error": e}),
+        };
+        let t2 = now_ms();
         let login_res = match login(env).await { Ok(_) => "ok".to_string(), Err(e) => e };
-        return ok(json!({"site": site(env), "list": list, "login": login_res,
+        let t3 = now_ms();
+        let ss = seasons(env, "one-piece").await;
+        let t4 = now_ms();
+        return ok(json!({"site": site(env), "list3": list, "list3_ms": t1 - t0, "list500": big, "list500_ms": t2 - t1,
+            "login": login_res, "login_ms": t3 - t2, "seasons_ok": ss.is_ok(), "seasons_ms": t4 - t3,
             "creds": has_creds(env).await}));
     }
 
