@@ -362,7 +362,9 @@ async fn q_block(env: &Env, q: &str, st: &Value, pending: i64, nlog: usize) -> S
         ["enc", _, pct, _, _] => format!("\u{2699}\u{FE0F} Kodlanmoqda {} {pct}%", bar(pct.parse::<f64>().unwrap_or(0.0))),
         _ if x.is_object() => {
             let kind = x["kind"].as_str().unwrap_or("");
-            let head = if kind.contains("Telegram") { "\u{2B06}\u{FE0F} Telegram'ga yuklanmoqda" } else { "\u{2B07}\u{FE0F} Asl video yuklab olinmoqda" };
+            let head = if kind.contains("R2") { "\u{2B06}\u{FE0F} R2'ga yuklanmoqda" }
+                else if kind.contains("Telegram") { "\u{2B06}\u{FE0F} Telegram'ga yuklanmoqda" }
+                else { "\u{2B07}\u{FE0F} Asl video yuklab olinmoqda" };
             let pct = x["pct"].as_f64().unwrap_or(0.0);
             format!("{head} {} {pct:.1}%\n    tezlik {:.2} MB/s \u{00B7} {:.1} / {:.1} MB\n    o'tdi {} \u{00B7} qoldi ~{}",
                 bar(pct), x["mbps"].as_f64().unwrap_or(0.0), x["cur_mb"].as_f64().unwrap_or(0.0),

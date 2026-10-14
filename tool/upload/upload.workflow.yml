@@ -1,0 +1,57 @@
+name: R2 -> Telegram yuklovchi
+
+# Kodlovchi workflow'lar tayyor faylni Cloudflare R2'ga yozadi; bu workflow ularni R2'dan olib asosiy botga yuboradi
+# (bot yopiq kanalga saqlab bazaga yozadi, keyin fayl R2'dan o'chadi). `tool/upload/upload.py`, `worker/src/r2.rs`.
+# Worker o'zi ishga tushiradi (fayl R2'da tayyor bo'lganda va cron). Bir vaqtda faqat BITTA run.
+#
+# Bu fayl ARUGRAM repodagi `tool/upload/upload.workflow.yml` dan ko'chiriladi (`sync-packs.yml`) — shu yerda o'zgartirmang.
+
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: arugram-upload
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    env:
+      API_BASE: ${{ secrets.API_BASE || 'https://arugram.uzcom.workers.dev' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Python paketlari
+        run: pip install --no-cache-dir -r tool/encode/requirements.txt
+
+      - name: Telegram sessiyasi
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+        run: |
+          OUT=tool/upload/pyro_session.session
+          SRC=tool/encode/session_upload.enc
+          [ -f "$SRC" ] || { echo "::error::Yuklovchi sessiyasi yo'q ($SRC) — botda 'Yangi sessiya' -> upload orqali ulang"; exit 1; }
+          K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in "$SRC" -out "$OUT"
+          head -c 16 "$OUT" | grep -q "SQLite format 3" || { echo "::error::Sessiya ochilmadi (ENCODE_TOKEN noto'g'ri?)"; exit 1; }
+
+      - name: R2 -> Telegram
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+          START_BUDGET_MIN: '320'
+          PYTHONUNBUFFERED: '1'
+        run: python3 tool/upload/upload.py
+
+      - name: Sessiyani o'chirish
+        if: always()
+        run: rm -f tool/upload/pyro_session.session

@@ -46,6 +46,9 @@ FILES[".github/workflows/fmp4.yml"] = HERE.parent / "fmp4" / "fmp4.workflow.yml"
 FILES["tool/fmp4/run.py"] = HERE.parent / "fmp4" / "run.py"
 FILES[".github/workflows/session.yml"] = HERE.parent / "session" / "session.workflow.yml"
 FILES["tool/session/session.py"] = HERE.parent / "session" / "session.py"
+# R2 -> Telegram yuklovchi workflow.
+FILES[".github/workflows/upload.yml"] = HERE.parent / "upload" / "upload.workflow.yml"
+FILES["tool/upload/upload.py"] = HERE.parent / "upload" / "upload.py"
 
 
 def token() -> str:

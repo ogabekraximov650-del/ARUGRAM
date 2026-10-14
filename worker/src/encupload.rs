@@ -47,8 +47,11 @@ pub(crate) async fn on_file(env: &Env, msg: &Value) -> bool {
     if !QUALITIES.contains(&q) || !valid_file_key(&key) || size <= 0 || a <= 0 || s <= 0 || e <= 0 || queued_at <= 0 {
         return true;
     }
-    // Yuboruvchi — shu sifatning ro'yxatdan o'tgan sessiyasi.
-    if config_get(env, &format!("sess_uid_{q}")).await.as_deref() != Some(from.to_string().as_str()) {
+    // Yuboruvchi — shu sifatning yoki R2'dan yuklovchi workflow'ning ro'yxatdan o'tgan sessiyasi.
+    let me = from.to_string();
+    let by_q = config_get(env, &format!("sess_uid_{q}")).await;
+    let by_up = if by_q.as_deref() == Some(me.as_str()) { None } else { config_get(env, "sess_uid_upload").await };
+    if by_q.as_deref() != Some(me.as_str()) && by_up.as_deref() != Some(me.as_str()) {
         return true;
     }
     let name_ok = match kind {
@@ -61,8 +64,10 @@ pub(crate) async fn on_file(env: &Env, msg: &Value) -> bool {
         "SELECT 1 AS x FROM encode_jobs WHERE anime_id=? AND season_id=? AND epizod_id=? AND queued_at=?",
         vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e), TursoArg::int(queued_at)]).await
         .ok().and_then(|r| first_row(&r)).is_some();
+    // R2 orqali kelgan fayl: ish allaqachon tugagan (qator o'chgan) bo'lishi mumkin — ruxsat R2 qatoridan.
+    let r2row = r2::row(env, &name).await.is_some();
     let channel = tg_channel_id(env);
-    if !name_ok || !job || channel == 0 {
+    if !name_ok || !(job || r2row) || channel == 0 {
         let _ = tg_api(env, "deleteMessage", json!({"chat_id": chat, "message_id": msg_id})).await;
         return true;
     }
@@ -88,7 +93,10 @@ pub(crate) async fn on_file(env: &Env, msg: &Value) -> bool {
     };
     match res {
         Ok(()) => {
+            // Baza to'liq yozildi: chatdagi fayl, R2 obyekti va qator o'chadi; qism tugagan bo'lsa tozalanadi.
             let _ = tg_api(env, "deleteMessage", json!({"chat_id": chat, "message_id": msg_id})).await;
+            r2::finish(env, &name).await;
+            encode_settle(env, a, s, e, queued_at).await;
         }
         Err(err) => {
             // Bazaga yozilmadi: kanaldagi nusxa yetim qolmasin.

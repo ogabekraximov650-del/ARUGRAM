@@ -15,6 +15,7 @@ on:
       - 'tool/anibla/anibla.workflow.yml'
       - 'tool/fmp4/**'
       - 'tool/session/**'
+      - 'tool/upload/**'
       - '.github/workflows/sync-packs.yml'
   workflow_dispatch:
 

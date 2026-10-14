@@ -39,6 +39,7 @@ mod postbot;
 mod announce;
 mod sessionbot;
 mod encupload;
+mod r2;
 // anibla.uz dan qidirib yuklash (kodlash botining uchinchi bo'limi).
 mod anibla;
 // Uchala bo'lim uchun bitta jonli "Holat" xabari.
@@ -10364,7 +10365,8 @@ fn needs_app_check(path: &str) -> bool {
         | "/api/encode/quality" | "/api/encode/finish" | "/api/encode/push" | "/api/encode/meta" | "/api/encode/ulock" | "/api/encode/committed" | "/api/encode/origin"
         | "/api/post/claim" | "/api/post/check" | "/api/post/finish" | "/api/post/progress"
         | "/api/anibla/claim" | "/api/anibla/diag" | "/api/anibla/progress" | "/api/anibla/done"
-        | "/api/fmp4/claim" | "/api/fmp4/done" | "/api/session/poll" | "/api/session/report")
+        | "/api/fmp4/claim" | "/api/fmp4/done" | "/api/session/poll" | "/api/session/report"
+        | "/api/encode/r2put" | "/api/encode/r2ready" | "/api/r2/claim" | "/api/r2/beat" | "/api/r2/fail" | "/api/r2/done")
     {
         return false;
     }
@@ -11167,6 +11169,10 @@ async fn encode_settle(env: &Env, a: i64, s: i64, e: i64, queued_at: i64) {
         "SELECT * FROM encode_jobs WHERE anime_id=? AND season_id=? AND epizod_id=? AND queued_at=?", pk()).await
     else { return };
     let Some(job) = first_row(&jr) else { return };
+    // R2'da Telegram'ga yetib bormagan fayl bor — qism hali tugamagan (oxirgi fayl yozilganda qayta chaqiriladi).
+    if r2::pending_for(env, a, s, e, queued_at).await {
+        return;
+    }
     let done = done_list(job["done"].as_str().unwrap_or(""));
     let Ok(res) = turso_exec(env,
         "SELECT quality, state, error FROM encode_q
@@ -11404,6 +11410,7 @@ async fn encode_claim_q(env: &Env, b: &Value, wq: &'static str, now: i64) -> Res
                 },
                 "channel": tg_channel_id(env),
                 "bot": bot_username(env).await,
+                "r2": r2::ready(env),
                 "status_bots": encode_status_bots(env).await,
             }));
         }
@@ -11531,7 +11538,9 @@ async fn encode_finish_q(env: &Env, b: &Value, job: &Value, wq: &str) -> Result<
     if b["ok"].as_bool() == Some(true) || b["skip"].as_bool() == Some(true) {
         let state = if b["skip"].as_bool() == Some(true) { "skip" } else { "done" };
         let done = done_list(job["done"].as_str().unwrap_or(""));
-        if state == "done" && !done.iter().any(|d| d == wq) {
+        // R2'da navbatda turgan fayl ham "yozilgan" hisoblanadi (Telegram'ga yuklovchi workflow keyin yetkazadi).
+        let in_r2 = r2::pending_for(env, a, s, e, queued_at).await;
+        if state == "done" && !done.iter().any(|d| d == wq) && !in_r2 {
             // Sifat jurnalga yozilmagan bo'lsa "tayyor" deb bo'lmaydi.
             return json_resp(&json!({"error": "sifat_yozilmagan"}), 409);
         }
@@ -11809,7 +11818,7 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
         let wq = QUALITIES.iter().copied().find(|x| *x == wq.trim());
         // Sifat-workflow: bitta DO so'rovi (holat + darvoza); eskisi: faqat oxirgi matn.
         let (ok_put, gate) = match wq {
-            Some(q) => { let g = encode_live_put(env, q, &text, 6_000).await; (g.is_some(), g.unwrap_or(true)) }
+            Some(q) => { let g = encode_live_put(env, q, &text, 2_000).await; (g.is_some(), g.unwrap_or(true)) }
             None => (encode_live_store(env, Some(text.clone())).await.is_some(), false),
         };
         // Sifat-workflow (`X-Encode-Quality`): holat sifat bo'yicha ham saqlanadi. Botdagi "Ilova uchun" xabari
@@ -12087,6 +12096,33 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
     let (a, s, e) = encode_pk(&job);
     let queued_at = jint(&job, "queued_at");
     let pk = || vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e), TursoArg::int(queued_at)];
+
+    // R2 oraliq ombori (`r2.rs`): kodlovchi tayyor faylni R2'ga to'g'ridan-to'g'ri yozadi (worker imzolangan havola beradi).
+    if path == "/api/encode/r2put" || path == "/api/encode/r2ready" {
+        let Some(q) = wq else { return json_resp(&json!({"error": "sifat"}), 400) };
+        let kind = b["kind"].as_str().unwrap_or("");
+        let file = b["file"].as_str().unwrap_or("");
+        let key = b["key"].as_str().unwrap_or("").to_ascii_lowercase();
+        let size = jint(&b, "size");
+        let name_ok = match kind {
+            "mp4" => file == encode_file_name(a, s, e, q, queued_at),
+            "fmp4" => fmp4::valid_name(file, a, s, e, q),
+            _ => false,
+        };
+        if !name_ok || size <= 0 || (path == "/api/encode/r2put" && !valid_file_key(&key)) {
+            return json_resp(&json!({"error": "fayl"}), 400);
+        }
+        if path == "/api/encode/r2put" {
+            return match r2::register(env, (a, s, e), queued_at, q, kind, file, &key, size).await {
+                Some(url) => ok(json!({"ok": true, "url": url})),
+                None => json_resp(&json!({"error": "r2"}), 503),
+            };
+        }
+        return match r2::mark_ready(env, file, size).await {
+            Ok(()) => ok(json!({"ok": true})),
+            Err(e) => json_resp(&json!({"error": e}), 409),
+        };
+    }
 
     // Asl videoni run'ga BOT orqali beradi (xavfsizlik): bot yopiq kanaldagi videoni shu sifatning sessiya akkaunti
     // chatiga `copyMessage` qiladi (izoh `ARUORIG|<nom>`); run uni shu chatdan yuklab oladi va o'chiradi.
@@ -13839,6 +13875,9 @@ async fn scheduled(_ev: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
     let _ = anibla::kick(&env).await;
     // Mini App so'ragan eski qismlarning fMP4 nusxasi (`fmp4::kick`).
     let _ = fmp4::kick(&env).await;
+    // R2 oraliq ombori: Telegram'ga yuklanmagan fayllar bo'lsa yuklovchi workflow ishga tushadi; eskirganlar tozalanadi.
+    let _ = r2::kick(&env).await;
+    r2::cleanup(&env).await;
     let msg = encode_kick_full(&env, true).await;
     // Faqat ishga tushirilganda yoki xato bo'lsa adminga xabar. Xato
     // (masalan token yo'q) har 10 daqiqada takrorlanmasin — soatiga bir.
@@ -14239,6 +14278,10 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
     }
     if method == Method::Post && path == "/api/fmp4/request" {
         return fmp4::request(req, &env).await;
+    }
+    if method == Method::Post && path.starts_with("/api/r2/") {
+        let p = path.to_string();
+        return r2::route(req, &env, &p).await;
     }
     if method == Method::Post && (path == "/api/fmp4/claim" || path == "/api/fmp4/done") {
         let p = path.to_string();

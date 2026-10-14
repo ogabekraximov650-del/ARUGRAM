@@ -55,7 +55,7 @@ pub(crate) async fn start(env: &Env, chat: i64) {
     config_put(env, "sess_state", "target").await;
     config_put(env, "sess_at", &now_ms().to_string()).await;
     let mut lines = String::new();
-    for q in QUALITIES {
+    for q in QUALITIES.iter().chain(["upload"].iter()) {
         let ok = encode_sess_ok(env, q).await;
         lines.push_str(&format!("{} <b>{q}</b>: {}\n", if ok { "\u{2705}" } else { "\u{274C}" },
             if ok { "ulangan" } else { "ULANMAGAN \u{2014} workflow ishga tushmaydi" }));
@@ -63,6 +63,7 @@ pub(crate) async fn start(env: &Env, chat: i64) {
     let kb = encbot_keyboard(vec![
         vec![format!("\u{1F511} {}", QUALITIES[0]), format!("\u{1F511} {}", QUALITIES[1])],
         vec![format!("\u{1F511} {}", QUALITIES[2]), format!("\u{1F511} {}", QUALITIES[3])],
+        vec![format!("\u{1F511} upload (R2 \u{2192} Telegram)")],
         vec![BTN_CANCEL.to_string()], vec![postbot::BTN_HOME.to_string()],
     ]);
     encbot_send(env, chat, &format!(
@@ -119,7 +120,7 @@ pub(crate) async fn on_message(env: &Env, msg: &Value, chat: i64) -> bool {
     }
     match state.as_str() {
         "target" => {
-            match QUALITIES.iter().find(|q| text.contains(**q)) {
+            match QUALITIES.iter().chain(["upload"].iter()).find(|q| text.contains(**q)) {
                 Some(q) => ask_phone(env, chat, q).await,
                 None => encbot_send(env, chat, "\u{26A0}\u{FE0F} Pastdagi tugmalardan birini tanlang.", None).await,
             }
@@ -298,7 +299,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
                 // Shu sifatning sessiyasi ulandi: yuboruvchi akkaunt ID'si (fayl qabul qilish) va "ulangan" belgisi.
                 let target = get(env, "sess_target").await;
                 let uid = b["uid"].as_i64().unwrap_or(0);
-                if QUALITIES.contains(&target.as_str()) && uid > 0 {
+                if (QUALITIES.contains(&target.as_str()) || target == "upload") && uid > 0 {
                     config_put(env, &format!("sess_uid_{target}"), &uid.to_string()).await;
                     config_put(env, &format!("sess_ok_{target}"), "1").await;
                 }

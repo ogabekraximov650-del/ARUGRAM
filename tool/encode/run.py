@@ -82,12 +82,8 @@ STOP_RUN = False  # process() keyingi sifatni yangi run'ga qoldirdi — main sik
 # Actions log'i shu YOPIQ kanalga yoziladi (yangi xabarlar, har 10 soniyada).
 # 0 yoki bo'sh — o'chiq.
 LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL_ID", "0") or 0)
-# Sifat-workflow'larning har biri O'Z log kanaliga yozadi (foydalanuvchi talabi). Sessiya shu kanalda admin bo'lishi kerak.
-QUALITY_LOG_CHANNELS = {
-    "360p": -1004368645279, "480p": -1003878978358, "720p": -1003581997218, "1080p": -1003954950031,
-}
-if QUALITY in QUALITY_LOG_CHANNELS:
-    LOG_CHANNEL = int(os.environ.get(f"LOG_CHANNEL_{QUALITY.upper()}", "0") or 0) or QUALITY_LOG_CHANNELS[QUALITY]
+# (2026-10, yangi talab) Sifat-run Telegram'ga log YUBORMAYDI: holat daqiqada bir marta worker'ga ketadi
+# (`StatusPin.send_worker`), bot "Holat" xabari shundan yangilanadi. Shu sabab kanal ID'lari ishlatilmaydi.
 LOG_INTERVAL = max(1.0, float(os.environ.get("LOG_INTERVAL_SEC", "10") or 10))
 # Qadalgan holat xabari shu oraliqda tahrirlanadi (`StatusPin`).
 # 3 soniya — admin paneli uni ~2 soniyada o'qiydi (deyarli real vaqt);
@@ -95,7 +91,8 @@ LOG_INTERVAL = max(1.0, float(os.environ.get("LOG_INTERVAL_SEC", "10") or 10))
 # Sifat-run o'z log kanaliga har 5 soniyada YANGI xabar yuboradi (foydalanuvchi talabi).
 STATUS_INTERVAL = max(2.0, float(os.environ.get("STATUS_INTERVAL_SEC", "5" if QUALITY else "3") or 3))
 # To'liq holat worker'ga (`EncodeLive`) shu oraliqda yuboriladi.
-WORKER_PUSH_SEC = max(3.0, float(os.environ.get("WORKER_PUSH_SEC", "8") or 8))
+# Sifat-run daqiqada bir marta (worker so'rovlari va Durable Object limiti tejaladi); eski rejim ~8 s.
+WORKER_PUSH_SEC = max(3.0, float(os.environ.get("WORKER_PUSH_SEC", "60" if QUALITY else "8") or 8))
 SESSION = str(Path(__file__).with_name("pyro_session"))
 WORK = Path(os.environ.get("RUNNER_TEMP", "/tmp")) / "arugram_encode"
 
@@ -302,6 +299,78 @@ async def find_sent(app, channel: int, name: str, size: int):
 
 
 BOT = ""  # kodlash botining username'i (worker `claim` javobida beradi); bo'sh — eski usul (kanalga to'g'ridan-to'g'ri)
+
+
+R2 = False  # worker `claim` javobida (`r2`): R2 sozlangan bo'lsa tayyor fayllar R2'ga yoziladi (yuklovchi workflow Telegram'ga olib boradi)
+
+
+class _Reader:
+    """Faylni o'qiyotganda foizni hisoblaydi (R2'ga PUT)."""
+
+    def __init__(self, path: Path, cb):
+        self.f, self.cb, self.n = open(path, "rb"), cb, 0
+
+    def read(self, n=-1):
+        b = self.f.read(n)
+        self.n += len(b)
+        self.cb(self.n)
+        return b
+
+    def close(self):
+        self.f.close()
+
+
+def put_file(url: str, path: Path, label: str):
+    """Faylni imzolangan havola bilan R2'ga to'g'ridan-to'g'ri yozadi (worker orqali o'tmaydi)."""
+    size = path.stat().st_size
+    t0, last = time.time(), [0.0]
+
+    def cb(cur):
+        now = time.time()
+        if now - last[0] < 1.0 and cur < size:
+            return
+        last[0] = now
+        pct = cur * 100 / size if size else 0
+        sp = cur / max(now - t0, 0.1) / 1048576
+        STATUS.update(xfer={
+            "kind": "R2'ga yuklash", "pct": round(pct, 1), "cur_mb": round(cur / 1048576, 1),
+            "total_mb": round(size / 1048576, 1), "mbps": round(sp, 2), "elapsed": int(now - t0),
+            "eta": int((size - cur) / 1048576 / sp) if sp > 0 else -1,
+        })
+
+    rd = _Reader(path, cb)
+    try:
+        req = urllib.request.Request(url, data=rd, method="PUT",
+                                     headers={"Content-Length": str(size), "User-Agent": "arugram-encoder"})
+        with urllib.request.urlopen(req, timeout=900) as r:
+            r.read()
+    finally:
+        rd.close()
+
+
+async def upload_r2(ident: dict, path: Path, name: str, kind: str, key: str, label: str) -> bool:
+    """Tayyor faylni R2'ga yozadi (`kind` — mp4|fmp4). Worker R2 sozlanmagan desa `False` (eski usulga qaytiladi)."""
+    size = path.stat().st_size
+    last = ""
+    for attempt in range(1, 6):
+        try:
+            r = await asyncio.to_thread(api, "r2put", {**ident, "kind": kind, "file": name, "key": key,
+                                                       "size": size, "quality": label})
+            await asyncio.to_thread(put_file, r["url"], path, label)
+            await asyncio.to_thread(api, "r2ready", {**ident, "kind": kind, "file": name, "size": size})
+            STATUS.update(xfer=None)
+            log(f"  {label}: {name} R2'ga yozildi ({size / 1048576:.1f} MB) — Telegram'ga yuklovchi workflow olib boradi")
+            return True
+        except JobLost:
+            raise
+        except Exception as ex:  # noqa: BLE001
+            last = str(ex)
+            if "503" in last and attempt == 1:
+                log(f"  {label}: R2 sozlanmagan — to'g'ridan-to'g'ri bot chatiga yuklanadi")
+                return False
+            log(f"  {label}: R2'ga yozish {attempt}/5 muvaffaqiyatsiz: {last}")
+            await asyncio.sleep(4 * attempt)
+    raise RuntimeError(f"{label}: R2'ga yozib bo'lmadi: {last}")
 
 
 def is_committed(name: str) -> bool:
@@ -676,7 +745,7 @@ class StatusPin:
         self.progress = "idle"
         self.msg_id = 0
         self.sent = ""
-        self.off = LOG_CHANNEL == 0
+        self.off = LOG_CHANNEL == 0 or bool(QUALITY)  # sifat-run Telegram'da xabar yuborib/tahrirlamaydi
         self.bots = []
         # Batafsil statistika (admin paneli uchun, `data:` qatorida JSON).
         self.data = {}
@@ -896,11 +965,9 @@ class StatusPin:
         yozilsin va to'g'ridan-to'g'ri kesh orqali ko'rsatilsin". Bazaga
         (Turso) yozilmaydi. Xato bo'lsa kodlashga tegmaydi.
 
-        Sifat-run (`ENCODE_QUALITY`) holatni worker orqali YUBORMAYDI (worker so'rovlari tejaladi) — u log kanalidagi
-        o'z xabarini o'zi tahrirlaydi.
+        Sifat-run (`ENCODE_QUALITY`) ham shu yo'l bilan yuboradi, lekin daqiqada bir marta (`WORKER_PUSH_SEC`);
+        worker uni `X-Encode-Quality` bo'yicha xotirada saqlaydi va bot "Holat" xabarini yangilaydi.
         """
-        if QUALITY:
-            return
         try:
             req = urllib.request.Request(
                 f"{API}/api/encode/push", data=self.text().encode(), method="POST",
@@ -1129,9 +1196,26 @@ async def process(app: Client, channel: int, job: dict):
                 f"— yuklanmoqda...")
             await asyncio.to_thread(hb.set, f"upload|{label}|{idx}|{len(steps)}", True)
             # Bir vaqtda faqat bitta sifat yuklaydi: navbat kutiladi (kodlash esa parallel davom etadi).
-            await upload_turn(label)
+            r2_used = False
+            if QUALITY and R2:
+                qa = ident["queued_at"]
+                r2_used = await upload_r2(ident, sealed, name, "mp4", k.hex(), label)
+                if r2_used:
+                    sealed.unlink(missing_ok=True)
+                    if frag is not None:
+                        fpath, fk, fsize = frag
+                        try:
+                            await upload_r2(ident, fpath, fpath.name, "fmp4", fk.hex(), f"{label} fMP4")
+                        except Exception as ex:  # noqa: BLE001
+                            log(f"  {label}: fMP4 R2'ga yozilmadi ({ex}) — keyin navbat orqali")
+                        finally:
+                            fpath.unlink(missing_ok=True)
+            if not r2_used:
+                await upload_turn(label)
             try:
-                if QUALITY and BOT:
+                if r2_used:
+                    pass
+                elif QUALITY and BOT:
                     # Sifat-workflow: fayl KANALGA emas, kodlash BOTI chatiga ketadi; bot uni yopiq kanalga saqlab
                     # bazaga yozadi (`worker/src/encupload.rs`). Run tasdiqni kutadi va shundan keyin tugaydi.
                     qa = ident["queued_at"]
@@ -1255,9 +1339,10 @@ async def main():
             if r.get("nosession"):
                 log(f"{QUALITY} uchun Telegram sessiyasi ulanmagan — botda 'Yangi sessiya' orqali ulang. Run tugadi.")
                 break
-            global BOT
+            global BOT, R2
             if QUALITY and r.get("bot"):
                 BOT = str(r["bot"]).lstrip("@")
+            R2 = bool(QUALITY and r.get("r2"))
             if r.get("busy"):
                 log("Boshqa run ishlayapti — kutiladi.")
                 break

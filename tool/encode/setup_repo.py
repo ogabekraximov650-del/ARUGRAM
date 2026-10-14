@@ -136,6 +136,9 @@ def main():
     # "Yangi sessiya" (kodlash botidagi tugma) — ALOHIDA workflow `session.yml`.
     files[".github/workflows/session.yml"] = HERE.parent / "session" / "session.workflow.yml"
     files["tool/session/session.py"] = HERE.parent / "session" / "session.py"
+    # R2 -> Telegram yuklovchi (`upload.yml`).
+    files[".github/workflows/upload.yml"] = HERE.parent / "upload" / "upload.workflow.yml"
+    files["tool/upload/upload.py"] = HERE.parent / "upload" / "upload.py"
     # Sifat-workflow'lar (2026-10): `encode_360.yml` ... `encode_1080.yml` — bitta shablondan (4 ta bir vaqtda).
     # Eski `encode.yml` (hamma sifat ketma-ket) zaxira sifatida qoladi: yangi fayllar bo'lmasa worker uni ishlatadi.
     tpl = (HERE / "avtoencode_q.workflow.yml").read_text()

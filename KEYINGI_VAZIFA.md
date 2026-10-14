@@ -6189,3 +6189,25 @@ Keyin (foydalanuvchi aniqlashtirdi): fayl uzatuvchi bot — ASOSIY bot (`TELEGRA
 `ARUENC|...` fayllar va asl video nusxasi (`/api/encode/origin`) asosiy bot orqali: `encupload::on_file` endi `handle_tg_webhook`
 ichida, `claim`/`poll` javobidagi `bot` — asosiy bot username'i (`bot_username`). Sessiya akkauntlari asosiy botni /start qiladi
 (u yordam xabari bilan javob beradi — zarari yo'q). Asosiy bot yopiq kanalda admin bo'lishi shart (ilova fayllarini ham shu ko'chiradi).
+
+## R2 oraliq ombori va loglar daqiqada bir marta worker'ga (2026-10)
+
+**Loglar** (`tool/encode/run.py`): sifat-run Telegram'ga (kanal) hech narsa yubormaydi (`StatusPin.off`, `ChannelLog.off`); to'liq holat
+daqiqada bir marta (`WORKER_PUSH_SEC` 60) `/api/encode/push` ga (`X-Encode-Quality`) boradi. Worker uni `EncodeLive` Durable Object
+xotirasida saqlaydi (yangi kelsa eskisini almashtiradi; omborga ~60 s da bir marta), bot "Holat" xabarini tahrirlaydi (darvoza 2 s).
+Oddiy Cloudflare keshi data markazga bog'liq — shu sabab DO ishlatiladi. So'rov: kuniga ~6 000 (avval ~345 000).
+
+**R2** (`worker/src/r2.rs`, `tool/upload/`): kodlovchi tayyor faylni (MP4, fMP4) worker bergan imzolangan (SigV4 presigned) PUT havolasi
+bilan `arumediatv` bucket'iga yozadi (`/api/encode/r2put` -> `PUT` -> `/api/encode/r2ready`, worker HEAD bilan hajmni tekshiradi) va
+darhol keyingiga o'tadi. ALOHIDA workflow `upload.yml` (`tool/upload/upload.py`, bitta run, bir vaqtda bitta fayl) `/api/r2/claim` dan
+GET havolasi oladi, R2'dan yuklaydi, ASOSIY botga yuboradi (`ARUENC|...`); bot kanalga saqlab bazaga yozadi (`encupload::on_file`),
+chatdan o'chiradi, worker R2 obyekti va qatorni o'chiradi (`r2::finish`) va `encode_settle` ni qayta chaqiradi. Qism R2'da fayl turguncha
+"tugamagan" (`r2::pending_for`); `encode_finish_q` R2'dagi faylni "yozilgan" deb qabul qiladi. Telegram yuklash qotsa (120 s) yuklovchi
+bekor qilib qayta yuboradi, fayl R2'da turaveradi (`/api/r2/fail` — 6 urinishdan keyin xato va adminga xabar). Cron: `r2::kick`
+(yuklovchini ishga tushiradi) va `r2::cleanup` (3 soatdan eski `uploading`, 24 soatdan eski qatorlar R2'dan o'chadi).
+Yuklovchining O'Z sessiyasi: botda "Yangi sessiya" -> `upload` (`session_upload.enc`, `sess_uid_upload`); kodlovchilar sessiyasi faqat
+asl videoni olish uchun qoladi. Kalitlar yo'q bo'lsa (`r2::ready` false) run'lar eski usulda (bot chatiga to'g'ridan-to'g'ri) yuklaydi.
+
+Yoqish uchun kerak: R2 S3 API token (bucket `arumediatv`, Object Read & Write) -> `tool/r2/r2_keys.enc` (`ACCESS_KEY_ID:SECRET`,
+`openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt`, kalit `ENCODE_TOKEN`) yoki GitHub secret'lar `R2_ACCESS_KEY_ID` /
+`R2_SECRET_ACCESS_KEY`; hisob ID'si `CLOUDFLARE_ACCOUNT_ID` dan `R2_ACCOUNT_ID` bo'lib qo'yiladi (`deploy-worker.yml`).
