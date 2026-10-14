@@ -293,6 +293,8 @@ async def process(app, r, runner, log):
             import base64
             dest = {"mode": "video", "to": int(uid), "caption": name[:1024], "file_name": f"{fname}.mp4",
                     "supports_streaming": True, "lease": {"t": "post_jobs", "id": int(pid)},
+                    # Faqat ASOSIY akkaunt yuboradi; ishlamasa — panel bot foydalanuvchiga va adminga yuboradi.
+                    "main_only": True, "fallback_bot": True,
                     **{k: v for k, v in extra.items() if k in ("duration", "width", "height")}}
             if thumb.exists() and 0 < thumb.stat().st_size < 200_000:
                 dest["thumb_b64"] = base64.b64encode(thumb.read_bytes()).decode()

@@ -466,9 +466,15 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
             if kind == "deliver" {
                 // Post/Anibla/To'plam fayli: uyoqqa yuborilishi `dest` da (yuklovchi o'zi yuboradi va `callback` ni chaqiradi).
                 let dest: Value = serde_json::from_str(r["dest"].as_str().unwrap_or("{}")).unwrap_or(json!({}));
+                // Zaxira yo'li (Post): asosiy akkaunt ishlamasa fayl PANEL BOT orqali foydalanuvchiga va adminga yuboriladi.
+                let (bot_token, admin) = if dest["fallback_bot"].as_bool() == Some(true) {
+                    (encbot_token(env), ADMIN_TELEGRAM_ID)
+                } else {
+                    (String::new(), 0)
+                };
                 return ok(json!({
                     "url": signed_url(env, "GET", &name, 7200), "file": name, "size": size, "kind": "deliver", "dest": dest,
-                    "group": "", "attempt": jint(&r, "attempts"),
+                    "group": "", "attempt": jint(&r, "attempts"), "bot_token": bot_token, "admin": admin,
                 }));
             }
             return ok(json!({

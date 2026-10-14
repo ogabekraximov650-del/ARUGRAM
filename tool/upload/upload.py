@@ -44,16 +44,21 @@ COOL: dict = {}
 _rr = [0]
 
 
-def pick_app(default=None):
+def pick_app(default=None, main_only=False):
+    """main_only (Post) — faqat asosiy akkaunt (POOL[0]). Qolganlari uchun avval QO'SHIMCHA akkauntlar, ular hammasi
+    dam olayotgan bo'lsa — asosiy akkaunt."""
     if not POOL:
         return default
+    if main_only:
+        return POOL[0]
     now = time.time()
-    n = len(POOL)
-    for k in range(n):
-        a = POOL[(_rr[0] + k) % n]
-        if COOL.get(id(a), 0) <= now:
-            _rr[0] = (_rr[0] + k + 1) % n
-            return a
+    order = POOL[1:] + POOL[:1] if len(POOL) > 1 else POOL
+    ready = [a for a in order if COOL.get(id(a), 0) <= now]
+    if ready:
+        extras = [a for a in ready if a is not POOL[0]] or ready
+        a = extras[_rr[0] % len(extras)]
+        _rr[0] += 1
+        return a
     return min(POOL, key=lambda a: COOL.get(id(a), 0))
 
 
@@ -353,6 +358,33 @@ def _subst(v, msg_id: int):
     return msg_id if v == "$MSG_ID" else v
 
 
+async def send_via_panel_bot(job: dict, dest: dict, path: Path, name: str):
+    """Zaxira (Post): panel bot foydalanuvchiga va adminga yuboradi (MTProto bot sessiyasi — 50 MB cheklovsiz)."""
+    tok = job.get("bot_token") or ""
+    if not tok:
+        raise RuntimeError("panel bot tokeni berilmadi")
+    api_id = session_api_id() or int(os.environ["TG_API_ID"])
+    bot = Client("panel_fallback", api_id=api_id, api_hash=os.environ["TG_API_HASH"], bot_token=tok,
+                 in_memory=True, no_updates=True)
+    to, admin = int(dest["to"]), int(job.get("admin") or 0)
+    kw = {k: dest[k] for k in ("duration", "width", "height") if dest.get(k)}
+    msg = None
+    async with bot:
+        for chat in dict.fromkeys([to] + ([admin] if admin else [])):
+            try:
+                m = await bot.send_video(chat, str(path), caption=dest.get("caption", ""),
+                                         file_name=dest.get("file_name") or name,
+                                         supports_streaming=bool(dest.get("supports_streaming")), **kw)
+                if chat == to:
+                    msg = m
+                log(f"  panel bot: {chat} ga yuborildi")
+            except Exception as ex:  # noqa: BLE001
+                log(f"  panel bot {chat} ga yubora olmadi: {type(ex).__name__}: {ex}")
+                if chat == to:
+                    raise
+    return msg
+
+
 async def send_dest(app, dest: dict, path: Path, name: str):
     """Post/Anibla/To'plam faylini `dest` bo'yicha yuboradi (qotib qolsa bekor qilib qayta yuboradi). Qaytadi: xabar."""
     import base64
@@ -364,8 +396,9 @@ async def send_dest(app, dest: dict, path: Path, name: str):
         thumb.write_bytes(base64.b64decode(dest["thumb_b64"]))
     last_err = ""
     base_app = app
+    main_only = bool(dest.get("main_only"))
     for attempt in range(1, SEND_TRIES + 1):
-        app = pick_app(base_app)
+        app = pick_app(base_app, main_only)
         prog = {"p": -1, "t": time.time(), "log": 0.0, "t0": time.time()}
 
         def cb(cur, total, prog=prog):
@@ -478,7 +511,13 @@ async def one_deliver(app, job: dict):
         ST.progress = "upload"
         ST.data.pop("xfer", None)
         log(f"{name}: {dest.get('to')} ga yuborilmoqda")
-        msg = await send_dest(app, dest, path, name)
+        try:
+            msg = await send_dest(app, dest, path, name)
+        except Exception as ex:  # noqa: BLE001
+            if not dest.get("fallback_bot"):
+                raise
+            log(f"  asosiy akkaunt yubora olmadi ({ex}) — panel bot orqali yuboriladi")
+            msg = await send_via_panel_bot(job, dest, path, name)
         cb = dest.get("callback")
         if cb:
             if not await asyncio.to_thread(callback, cb, int(msg.id)):

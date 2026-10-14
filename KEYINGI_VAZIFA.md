@@ -6309,3 +6309,11 @@ qo'shimcha akkauntlarni qo'shish ("➕ Sessiya qo'shish": raqam -> kod, mavjud `
   almashtiradi, FloodWait/100% da qotgan sessiya `COOL` bo'yicha dam oladi.
 - Bot fayl qabul qilishi uchun claim `uids` yuboradi -> `sess_uid_upload_all` (`encupload.rs` shuni ham tekshiradi).
 Fayl oqimi o'zgarmadi: hamma narsa asosiy bot chatiga yuboriladi.
+
+## Post kodlash: faqat asosiy akkaunt, zaxira — panel bot (2026-10)
+
+- Post videosini userga **faqat asosiy akkaunt** (`session.enc`, `POOL[0]`) yuboradi (`dest.main_only`). U ishlamasa
+  (`SEND_TRIES` urinishdan keyin) yuklovchi **panel bot** (`ENCODE_BOT_TOKEN`, Pyrogram bot sessiyasi) orqali videoni userga
+  VA adminga yuboradi (`send_via_panel_bot`). Token faqat `fallback_bot` belgili yetkazish `claim`ida beriladi (`r2.rs`).
+- Qolgan fayllar (sifat MP4/fMP4, Anibla, To'plam) avval **qo'shimcha akkauntlar** orqali yuboriladi; ular hammasi dam olayotgan
+  bo'lsa — asosiy akkaunt (`pick_app`). Foydalanuvchi panel botni bir marta ochgan bo'lishi shart.
