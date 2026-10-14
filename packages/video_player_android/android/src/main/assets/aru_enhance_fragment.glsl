@@ -21,6 +21,8 @@ uniform float uCon;      // 1.0 — o'zgarishsiz
 uniform float uDeband;   // 0..1
 uniform float uLine;     // 0..1
 uniform float uSeed;     // kadrga qarab o'zgaradigan son (dither uchun)
+uniform float uClarity;  // 0..1 — keng radiusli mahalliy kontrast ("ravshanlik")
+uniform float uVib;      // 0..1 — vibrance: kam to'yingan ranglar ko'proq kuchayadi
 
 float luma(vec3 c) {
   return dot(c, vec3(0.2126, 0.7152, 0.0722));
@@ -88,8 +90,24 @@ void main() {
     col *= 1.0 - dark * uLine;
   }
 
-  // 4) Rang: to'yinganlik va kontrast.
+  // 3b) Ravshanlik: keng radiusli (3 piksel) mahalliy o'rtachadan farqni kuchaytirish — tekstura/shakllar "jonlanadi".
+  if (uClarity > 0.0) {
+    vec3 m0 = texture2D(uTexSampler, uv + vec2(-3.0 * t.x, -3.0 * t.y)).rgb;
+    vec3 m1 = texture2D(uTexSampler, uv + vec2(3.0 * t.x, -3.0 * t.y)).rgb;
+    vec3 m2 = texture2D(uTexSampler, uv + vec2(-3.0 * t.x, 3.0 * t.y)).rgb;
+    vec3 m3 = texture2D(uTexSampler, uv + vec2(3.0 * t.x, 3.0 * t.y)).rgb;
+    vec3 mean = (m0 + m1 + m2 + m3 + col * 2.0) / 6.0;
+    float mid = 1.0 - abs(luma(col) - 0.5) * 1.4;   // o'rta tonlarda kuchliroq, qora/oqda kuchsiz
+    col += (col - mean) * uClarity * clamp(mid, 0.2, 1.0);
+  }
+
+  // 4) Rang: vibrance, to'yinganlik va kontrast.
   float l = luma(col);
+  if (uVib > 0.0) {
+    float satNow = max(col.r, max(col.g, col.b)) - min(col.r, min(col.g, col.b));
+    col = mix(vec3(l), col, 1.0 + uVib * (1.0 - clamp(satNow * 1.6, 0.0, 1.0)));
+    l = luma(col);
+  }
   col = mix(vec3(l), col, uSat);
   col = (col - 0.5) * uCon + 0.5;
 

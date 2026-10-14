@@ -62,7 +62,7 @@ export function createEnhancer(video, box) {
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
       const u = (n) => gl.getUniformLocation(prog, n);
-      loc = { tex: u('uTexSampler'), texel: u('uTexel'), sharp: u('uSharp'), sat: u('uSat'), con: u('uCon'), deband: u('uDeband'), line: u('uLine'), seed: u('uSeed') };
+      loc = { tex: u('uTexSampler'), texel: u('uTexel'), sharp: u('uSharp'), sat: u('uSat'), con: u('uCon'), deband: u('uDeband'), line: u('uLine'), seed: u('uSeed'), clarity: u('uClarity'), vib: u('uVib') };
       gl.uniform1i(loc.tex, 0);
       video.insertAdjacentElement('afterend', canvas);
       canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); fail(); });
@@ -105,6 +105,7 @@ export function createEnhancer(video, box) {
       gl.uniform2f(loc.texel, 1 / canvas.width, 1 / canvas.height);
       gl.uniform1f(loc.sharp, p[0]); gl.uniform1f(loc.sat, p[1]); gl.uniform1f(loc.con, p[2]);
       gl.uniform1f(loc.deband, p[3]); gl.uniform1f(loc.line, p[4]);
+      gl.uniform1f(loc.clarity, p[5] || 0); gl.uniform1f(loc.vib, p[6] || 0);
       seed = (seed + 0.137) % 97;
       gl.uniform1f(loc.seed, seed);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);

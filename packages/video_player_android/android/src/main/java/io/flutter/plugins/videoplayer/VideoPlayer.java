@@ -143,7 +143,7 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
   }
 
   /**
-   * Tasvirni yaxshilashni yoqadi/o'chiradi (0 — o'chiq, 1 — yengil, 2 — kuchli). Muvaffaqiyatli bo'lsa
+   * Tasvirni yaxshilashni yoqadi/o'chiradi (0 — o'chiq, 1 — yengil, 2 — kuchli, 3 — maksimal). Muvaffaqiyatli bo'lsa
    * {@code true}; effektni qo'llab bo'lmasa {@code false} (Dart tomoni rang filtriga qaytadi).
    *
    * <p>Manba past o'lchamli bo'lsa avval GPU'da kattalashtiriladi (1 — 720p, 2 — 1080p gacha), keyin shader o'tkazadi.
@@ -199,7 +199,7 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
                   enhanceDrops = 0;
                   enhanceWindowMs = 0;
                   if (perSec > 3.0) {
-                    final int next = enhanceLevel >= 2 ? 1 : 0;
+                    final int next = Math.max(0, enhanceLevel - 1);
                     setEnhance(next);
                     if (enhanceListener != null) {
                       enhanceListener.onEnhanceDegraded(next);
@@ -215,7 +215,12 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
       final androidx.media3.common.Format f = exoPlayer.getVideoFormat();
       final int target = level >= 2 ? 1080 : 720;
       if (f != null && f.height > 0 && f.height < target) {
-        effects.add(androidx.media3.effect.Presentation.createForHeight(target));
+        if (level >= 3) {
+          // Maksimal: Lanczos (sinc) kattalashtirish — bilinear'dan ancha aniq chiziqlar.
+          effects.add(androidx.media3.effect.LanczosResample.scaleToFit(1920, 1080));
+        } else {
+          effects.add(androidx.media3.effect.Presentation.createForHeight(target));
+        }
       }
       effects.add(new AruEnhanceEffect(level));
       exoPlayer.setVideoEffects(effects);

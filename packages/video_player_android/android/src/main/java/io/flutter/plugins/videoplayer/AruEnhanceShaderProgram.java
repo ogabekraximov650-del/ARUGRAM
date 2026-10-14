@@ -30,9 +30,11 @@ final class AruEnhanceShaderProgram extends BaseGlShaderProgram {
           + "  vTexSamplingCoord = (uTexTransformationMatrix * texturePosition).xy;\n"
           + "}\n";
 
-  // sharp, sat, con, deband, line
-  private static final float[] LEVEL1 = {0.45f, 1.18f, 1.07f, 0.5f, 0.0f};
-  private static final float[] LEVEL2 = {0.8f, 1.35f, 1.14f, 0.8f, 0.6f};
+  // sharp, sat, con, deband, line, clarity, vib
+  private static final float[] LEVEL1 = {0.45f, 1.18f, 1.07f, 0.5f, 0.0f, 0.0f, 0.0f};
+  private static final float[] LEVEL2 = {0.8f, 1.35f, 1.14f, 0.8f, 0.6f, 0.0f, 0.0f};
+  // 3 — MAKSIMAL (faqat ilovada): kuchli o'tkirlik + ravshanlik + vibrance (GPU'da Lanczos kattalashtirish bilan birga)
+  private static final float[] LEVEL3 = {1.0f, 1.32f, 1.16f, 0.9f, 0.8f, 0.35f, 0.55f};
 
   private final GlProgram glProgram;
 
@@ -50,12 +52,14 @@ final class AruEnhanceShaderProgram extends BaseGlShaderProgram {
     float[] identity = GlUtil.create4x4IdentityMatrix();
     glProgram.setFloatsUniform("uTransformationMatrix", identity);
     glProgram.setFloatsUniform("uTexTransformationMatrix", identity);
-    final float[] p = level >= 2 ? LEVEL2 : LEVEL1;
+    final float[] p = level >= 3 ? LEVEL3 : level == 2 ? LEVEL2 : LEVEL1;
     glProgram.setFloatUniform("uSharp", p[0]);
     glProgram.setFloatUniform("uSat", p[1]);
     glProgram.setFloatUniform("uCon", p[2]);
     glProgram.setFloatUniform("uDeband", p[3]);
     glProgram.setFloatUniform("uLine", p[4]);
+    glProgram.setFloatUniform("uClarity", p[5]);
+    glProgram.setFloatUniform("uVib", p[6]);
     glProgram.setFloatUniform("uSeed", 0f);
   }
 

@@ -6387,3 +6387,10 @@ dither; past bitreyt "zinapoya"), CAS-o'tkirlik (faqat chegaralarda), chiziqlarn
 - Past o'lchamli manba GPU'da kattalashtiriladi (1 — 720p, 2 — 1080p gacha: `Presentation.createForHeight`) — chiziqlar haqiqatan aniqroq bo'lishi uchun.
 - Presetlar kuchaytirildi (Yengil: o'tkirlik .45, to'yinganlik 1.18, kontrast 1.07; Kuchli: .8, 1.35, 1.14, chiziq .6) — farq ko'zga tashlansin.
 - Yoqilganda ekranda holat xabari ("(GPU)" yoki "GPU effekt ishlamadi — oddiy rang filtri") — qaysi yo'l ishlayotgani ko'rinadi.
+
+## Tasvirni yaxshilash: ilovada 3-daraja "Maksimal" (2026-10)
+
+Web'da (WebGL) Yengil/Kuchli ishlashi tasdiqlandi. Ilovada 4 daraja: O'chiq / Yengil / Kuchli / **Maksimal**.
+Maksimal (faqat ilovada): Lanczos (sinc) GPU kattalashtirish (`LanczosResample.scaleToFit(1920,1080)`, manba 1080p dan past bo'lsa) + shader:
+o'tkirlik 1.0, deband .9, chiziqlar .8, **ravshanlik** (`uClarity` — 3 pikselli mahalliy o'rtachadan farq), **vibrance** (`uVib`), to'yinganlik 1.32, kontrast 1.16.
+Shaderga ikki yangi uniforma (`uClarity`, `uVib`, 0 = o'chiq) qo'shildi; web ularni 0 qiladi. Kadr tashlansa daraja birma-bir tushadi (3 -> 2 -> 1 -> 0).

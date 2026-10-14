@@ -57,7 +57,7 @@ class AppSettings extends ChangeNotifier {
   /// ochib yuborish kutilmagan bo'lardi.
   bool autoNextEpisode = false;
 
-  /// Tasvirni yaxshilash (pleyer): 0 — o'chiq, 1 — yengil, 2 — kuchli.
+  /// Tasvirni yaxshilash (pleyer): 0 — o'chiq, 1 — yengil, 2 — kuchli, 3 — maksimal.
   ///
   /// TALAB (foydalanuvchi): MX Pleyerdagi "Smart Enhance" kabi, lekin undan kuchliroq.
   /// Faqat shu qurilmada saqlanadi (diskdagi sozlama ro'yxati).
@@ -96,7 +96,7 @@ class AppSettings extends ChangeNotifier {
   }
 
   void setVideoEnhance(int level) {
-    final v = level.clamp(0, 2);
+    final v = level.clamp(0, 3);
     if (videoEnhance == v) return;
     videoEnhance = v;
     _write();
@@ -110,7 +110,7 @@ class AppSettings extends ChangeNotifier {
       autoSkipIntro = rows.first['auto_skip_intro'] == true;
       autoNextEpisode = rows.first['auto_next_episode'] == true;
       final e = rows.first['video_enhance'];
-      videoEnhance = e is num ? e.toInt().clamp(0, 2) : 0;
+      videoEnhance = e is num ? e.toInt().clamp(0, 3) : 0;
     } catch (_) {
       // O'qib bo'lmadi — boshlang'ich qiymatlar qoladi.
     }
