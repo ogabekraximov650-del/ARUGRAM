@@ -31,3 +31,11 @@ jobs:
             -H "User-Agent: arugram-diag" "https://arugram.uzcom.workers.dev/api/encode/qdiag" | jq '{live_keys, now, live_upload, holat_len, holat}' || true
           curl -sS -X POST -H "X-Encode-Token: $K" -H "Content-Type: application/json" -d '{}' \
             -H "User-Agent: arugram-diag" "https://arugram.uzcom.workers.dev/api/r2/diag" | jq '{binding_ok, by_state, audit}' || true
+      - name: Anibla ulanish tashxisi (worker)
+        if: always()
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+        run: |
+          K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          curl -sS -X POST -H "X-Encode-Token: $K" -H "Content-Type: application/json" -d '{}' \
+            -H "User-Agent: arugram-diag" "https://arugram.uzcom.workers.dev/api/anibla/probe" | jq . || true

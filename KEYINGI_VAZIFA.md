@@ -6394,3 +6394,5 @@ Web'da (WebGL) Yengil/Kuchli ishlashi tasdiqlandi. Ilovada 4 daraja: O'chiq / Ye
 Maksimal (faqat ilovada): Lanczos (sinc) GPU kattalashtirish (`LanczosResample.scaleToFit(1920,1080)`, manba 1080p dan past bo'lsa) + shader:
 o'tkirlik 1.0, deband .9, chiziqlar .8, **ravshanlik** (`uClarity` — 3 pikselli mahalliy o'rtachadan farq), **vibrance** (`uVib`), to'yinganlik 1.32, kontrast 1.16.
 Shaderga ikki yangi uniforma (`uClarity`, `uVib`, 0 = o'chiq) qo'shildi; web ularni 0 qiladi. Kadr tashlansa daraja birma-bir tushadi (3 -> 2 -> 1 -> 0).
+
+Anibla: "Yillar ro'yxatini olib bo'lmadi" xabari endi SABABNI ham ko'rsatadi (`year_counts` xato matnini qaytaradi). `/api/anibla/probe` (faqat o'qish, xabar yubormaydi) — sayt ro'yxati HTTP javobi va saqlangan login bilan kirish natijasi; `diag-logs.yml` uni chaqiradi.

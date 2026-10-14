@@ -643,18 +643,22 @@ pub(crate) async fn on_message(env: &Env, msg: &Value, chat: i64) {
 
 /// Saytdagi animelar yillar bo'yicha: `(yil, soni)`, yangi yil tepada.
 /// Sayt ro'yxatidan (`media/mobile`, hammasi) hisoblanadi va 6 soat saqlanadi.
-async fn year_counts(env: &Env) -> Vec<(i64, i64)> {
+async fn year_counts(env: &Env) -> (Vec<(i64, i64)>, String) {
     const TTL: i64 = 6 * 3600 * 1000;
     if let Some(j) = config_get(env, "anibla_years").await.and_then(|v| serde_json::from_str::<Value>(&v).ok()) {
         if now_ms() - j["at"].as_i64().unwrap_or(0) < TTL {
             let l: Vec<(i64, i64)> = j["l"].as_array().cloned().unwrap_or_default().iter()
                 .filter_map(|x| Some((x[0].as_i64()?, x[1].as_i64()?))).collect();
-            if !l.is_empty() { return l; }
+            if !l.is_empty() { return (l, String::new()); }
         }
     }
+    let mut why = String::new();
     let mut counts: std::collections::BTreeMap<i64, i64> = std::collections::BTreeMap::new();
     for page in 1..=4 {
-        let Ok(v) = get(env, &format!("media/mobile?limit=500&page={page}"), false).await else { break };
+        let v = match get(env, &format!("media/mobile?limit=500&page={page}"), false).await {
+            Ok(v) => v,
+            Err(e) => { why = e; break }
+        };
         for x in data_list(&v) {
             let y = jint(&x, "published_year");
             if y > 0 { *counts.entry(y).or_insert(0) += 1; }
@@ -665,15 +669,18 @@ async fn year_counts(env: &Env) -> Vec<(i64, i64)> {
     l.sort_by(|a, b| b.0.cmp(&a.0));
     if !l.is_empty() {
         config_put(env, "anibla_years", &json!({"at": now_ms(), "l": l}).to_string()).await;
+    } else if why.is_empty() {
+        why = "sayt ro'yxati bo'sh qaytdi".into();
     }
-    l
+    (l, why)
 }
 
 /// "📅 Yil bo'yicha": saytdagi yillar va har yildagi animelar soni (tugma — shu yil ro'yxati).
 async fn years_panel(env: &Env, chat: i64) {
-    let l = year_counts(env).await;
+    let (l, why) = year_counts(env).await;
     if l.is_empty() {
-        encbot_send(env, chat, "\u{274C} Yillar ro'yxatini olib bo'lmadi, birozdan keyin qayta urinib ko'ring.", None).await;
+        encbot_send(env, chat, &format!(
+            "\u{274C} Yillar ro'yxatini olib bo'lmadi, birozdan keyin qayta urinib ko'ring.\n<code>{}</code>", html_escape(&why)), None).await;
         return;
     }
     let total: i64 = l.iter().map(|x| x.1).sum();
@@ -1837,6 +1844,18 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
             "episodes": ep_info, "episodes_ms": t2 - t1, "inline_test": test,
             "creds": creds(env).is_some(),
         }));
+    }
+
+    // Faqat o'qish: saytga ulanish tashxisi (xabar yubormaydi).
+    if path == "/api/anibla/probe" {
+        let url = format!("{}/media/mobile?limit=3&page=1", api_base(env));
+        let list = match http(&url, Method::Get, None, None).await {
+            Ok((code, text)) => json!({"http": code, "body": text.chars().take(300).collect::<String>()}),
+            Err(e) => json!({"error": e}),
+        };
+        let login_res = match login(env).await { Ok(_) => "ok".to_string(), Err(e) => e };
+        return ok(json!({"site": site(env), "list": list, "login": login_res,
+            "creds": has_creds(env).await}));
     }
 
     // Navbatdagi keyingi video (eng eskisi).
