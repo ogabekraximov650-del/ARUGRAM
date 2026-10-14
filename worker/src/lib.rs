@@ -11894,8 +11894,13 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
         for q in QUALITIES.iter() {
             pend.insert((*q).into(), json!(encode_pending_q(env, q).await));
         }
+        let live = encode_live_all(env).await;
+        let up = live.get("upload").cloned().unwrap_or(Value::Null);
+        let holat = livewatch::app_all_html(env).await;
+        let keys: Vec<String> = live.keys().cloned().collect();
         return ok_nostore(json!({"jobs": jobs, "queued_by_done_count": by_done, "q_states": qs, "pending": pend,
-            "almost_done_sample": sample, "r2": r2s}));
+            "almost_done_sample": sample, "r2": r2s, "live_keys": keys, "live_upload": up, "now": now,
+            "holat_len": holat.chars().count(), "holat": holat}));
     }
 
     // Qo'lda qayta boshlash: ishlayotgan hamma ish ijarasiz navbatga qaytadi
