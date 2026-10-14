@@ -6286,3 +6286,9 @@ Taxmin (tasdiqlanmagan): Pyrogram `save_file` qism xatolarini jimgina yutadi.
 Chora (`tool/upload/upload.py`): Anibla'dagi `fast_save_file` (ko'p ulanishli, har qismga qayta urinish) ulandi;
 100% da kutish `UPLOAD_STALL_100_SEC` (900s) gacha uzaytirildi va shu paytda baza (`/api/encode/committed`) tekshiriladi —
 fayl saqlangan bo'lsa kutish tugaydi. Tekshiruv: `/api/r2/diag` da `by_state` kamayishi kerak.
+
+## Diagnostika workflow'i: ikkinchi akkaunt loglari (2026-10)
+
+`.github/workflows/diag-logs.yml` + `tool/diag/fetch.py`: `tool/diag/**` o'zgarganda `gh_token.enc` (kalit `ENCODE_TOKEN`)
+bilan avtoencode repo'ning oxirgi 12 run'ini (job holati, xato qadamlar, har job logining oxirgi 60 qatori) shu repo job logiga
+chiqaradi. Faqat o'qish. Qayta ko'rish uchun `tool/diag/` ichidagi biror faylni o'zgartirib push qiling.

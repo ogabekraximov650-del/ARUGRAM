@@ -1,0 +1,23 @@
+name: Avtoencode repo loglarini ko'rish (diagnostika)
+
+# `tool/diag/**` o'zgarganda: ikkinchi akkauntdagi repo'ning oxirgi run loglarini shu job logiga chiqaradi (faqat o'qish).
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tool/diag/**'
+      - '.github/workflows/diag-logs.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  logs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Loglarni olish
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+        run: python3 tool/diag/fetch.py
