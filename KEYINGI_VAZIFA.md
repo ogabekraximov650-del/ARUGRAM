@@ -6345,3 +6345,12 @@ Panel bot yana almashtirildi (`tool/bot/encode_bot.enc` qayta shifrlandi, usul o
 
 Holat xabari: sifat bloklaridan log qatorlari (📜) olib tashlandi (progress, tezlik va vaqt qoladi) — xabar qisqaradi va R2 yuklovchi bloki (5 ta log qatori bilan) to'liq sig'adi.
 (Aniqlashtirish) Sifat bloklarida log butunlay o'chirilmadi: faqat takrorlanuvchi/ahamiyatsiz qatorlar (progress, "manba ...", "kodlanmoqda...", yuklanmoqda foizlari) filtrlanadi, xato va muhim qatorlar (oxirgi 2 ta) qoladi.
+
+## Anibla/To'plam fayllari ham asosiy bot chatiga (2026-10)
+
+Muammo: yuklovchi asosiy akkauntsiz ishlaydi, qo'shimcha akkauntlar yopiq kanalda a'zo emas -> `ValueError: Peer id invalid: -100...`.
+Yechim: yopiq kanalga ketadigan `deliver` fayllari (`via_bot`, `dest.to == TG_CHANNEL_ID`) yuklovchi tomonidan ASOSIY BOT chatiga
+`ARUDLV|<r2 nomi>` izohi bilan yuboriladi (`upload.py`); bot (`encupload::on_deliver`) tekshiradi (yuboruvchi ro'yxatdagi sessiya,
+manzil faqat o'z kanalimiz), `copyMessage` bilan kanalga ko'chiradi (video/hujjat turi va tavsif saqlanadi), xabar raqamini
+`dlv_msg_<nom>` ga yozadi va chatdagi nusxani o'chiradi. Yuklovchi `/api/r2/dmsg` bilan raqamni olib, egasining yo'lini
+(`callback`: Anibla/To'plam) chaqiradi. Post bundan mustasno (to'g'ridan-to'g'ri yoki panel bot).

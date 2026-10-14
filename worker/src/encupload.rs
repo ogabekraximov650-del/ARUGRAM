@@ -30,6 +30,9 @@ pub(crate) async fn committed(env: &Env, file: &str) -> bool {
 /// Bot chatiga kelgan xabar `ARUENC|` izohli hujjatmi — shuni qayta ishlaydi. `true` — xabar shu yerda tugadi.
 pub(crate) async fn on_file(env: &Env, msg: &Value) -> bool {
     let caption = msg["caption"].as_str().unwrap_or("");
+    if caption.starts_with("ARUDLV|") {
+        return on_deliver(env, msg).await;
+    }
     if !caption.starts_with("ARUENC|") || !msg["document"].is_object() {
         return false;
     }
@@ -109,5 +112,52 @@ pub(crate) async fn on_file(env: &Env, msg: &Value) -> bool {
                 "\u{274C} {q}: <code>{}</code> bazaga yozilmadi: {}", html_escape(&name), html_escape(&err.to_string()))).await;
         }
     }
+    true
+}
+
+/// Anibla/To'plam fayli yopiq kanalga: yuklovchi (asosiy akkauntsiz) faylni shu botning chatiga `ARUDLV|<r2 nomi>` izohi bilan yuboradi;
+/// bot uni yopiq kanalga `copyMessage` qiladi (media turi va tavsif saqlanadi), xabar raqamini `dlv_msg_<nom>` ga yozadi (yuklovchi
+/// `/api/r2/dmsg` bilan oladi va egasining yo'lini chaqiradi), chatdagi nusxa o'chadi.
+async fn on_deliver(env: &Env, msg: &Value) -> bool {
+    let name = msg["caption"].as_str().unwrap_or("").trim_start_matches("ARUDLV|").trim().to_string();
+    let chat = msg["chat"]["id"].as_i64().unwrap_or(0);
+    let from = msg["from"]["id"].as_i64().unwrap_or(0);
+    let msg_id = msg["message_id"].as_i64().unwrap_or(0);
+    if chat == 0 || from == 0 || chat != from || msg_id == 0 || !tg_safe_name(&name)
+        || !(msg["document"].is_object() || msg["video"].is_object()) {
+        return true;
+    }
+    let me = from.to_string();
+    let mut ok_sender = config_get(env, "sess_uid_upload").await.as_deref() == Some(me.as_str());
+    if !ok_sender {
+        ok_sender = config_get(env, "sess_uid_upload_all").await.map(|l| l.split(',').any(|x| x == me)).unwrap_or(false);
+    }
+    if !ok_sender {
+        return true;
+    }
+    let channel = tg_channel_id(env);
+    let Some(r) = r2::row(env, &name).await else {
+        let _ = tg_api(env, "deleteMessage", json!({"chat_id": chat, "message_id": msg_id})).await;
+        return true;
+    };
+    let dest: Value = serde_json::from_str(r["dest"].as_str().unwrap_or("{}")).unwrap_or(json!({}));
+    // Faqat bizning yopiq kanalga (boshqa manzilga nusxalanmaydi).
+    if channel == 0 || r["kind"].as_str() != Some("deliver") || dest["to"].as_i64() != Some(channel) {
+        let _ = tg_api(env, "deleteMessage", json!({"chat_id": chat, "message_id": msg_id})).await;
+        return true;
+    }
+    let caption: String = dest["caption"].as_str().unwrap_or("").chars().take(1024).collect();
+    let copied = tg_api(env, "copyMessage", json!({
+        "chat_id": channel, "from_chat_id": chat, "message_id": msg_id,
+        "caption": caption, "disable_notification": true,
+    })).await;
+    let ch_msg = copied.ok().and_then(|c| c["message_id"].as_i64()).unwrap_or(0);
+    if ch_msg <= 0 {
+        tg_send(env, ADMIN_TELEGRAM_ID, &format!(
+            "\u{274C} <code>{}</code> yopiq kanalga ko'chmadi (bot kanalda admin ekanini tekshiring).", html_escape(&name))).await;
+        return true;
+    }
+    config_put(env, &format!("dlv_msg_{name}"), &ch_msg.to_string()).await;
+    let _ = tg_api(env, "deleteMessage", json!({"chat_id": chat, "message_id": msg_id})).await;
     true
 }

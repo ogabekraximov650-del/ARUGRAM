@@ -380,10 +380,10 @@ async def send_via_panel_bot(job: dict, dest: dict, path: Path, name: str):
     return msg
 
 
-async def send_dest(app, dest: dict, path: Path, name: str):
+async def send_dest(app, dest: dict, path: Path, name: str, to_override=None):
     """Post/Anibla/To'plam faylini `dest` bo'yicha yuboradi (qotib qolsa bekor qilib qayta yuboradi). Qaytadi: xabar."""
     import base64
-    to = int(dest["to"])
+    to = to_override if to_override is not None else int(dest["to"])
     size = path.stat().st_size
     thumb = None
     if dest.get("thumb_b64"):
@@ -510,7 +510,22 @@ async def one_deliver(app, job: dict):
         ST.data.pop("xfer", None)
         log(f"{name}: {dest.get('to')} ga yuborilmoqda")
         ST.push(True)
-        if dest.get("fallback_bot"):
+        if job.get("via_bot") and job.get("bot"):
+            # Anibla/To'plam (yopiq kanalga): fayl ASOSIY BOT chatiga yuboriladi, bot uni kanalga ko'chiradi
+            # (`encupload::on_deliver`) va xabar raqamini beradi (qo'shimcha akkauntlar kanalda a'zo emas).
+            from types import SimpleNamespace
+            d2 = {**dest, "caption": f"ARUDLV|{name}"}
+            await send_dest(app, d2, path, name, to_override=str(job["bot"]).lstrip("@"))
+            mid, end = 0, time.time() + COMMIT_WAIT
+            while time.time() < end:
+                mid = int((await asyncio.to_thread(api, "dmsg", {"file": name})).get("msg") or 0)
+                if mid:
+                    break
+                await asyncio.sleep(3)
+            if not mid:
+                raise RuntimeError(f"bot {COMMIT_WAIT} soniyada faylni kanalga ko'chirmadi (bot kanalda adminmi?)")
+            msg = SimpleNamespace(id=mid)
+        elif dest.get("fallback_bot"):
             # Post: asosiy akkaunt yubora olmagan. Avval panel bot (userga va adminga), u ham bo'lmasa qo'shimcha sessiyalar.
             try:
                 msg = await send_via_panel_bot(job, dest, path, name)

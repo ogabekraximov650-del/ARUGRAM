@@ -496,9 +496,12 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
                 } else {
                     (String::new(), 0)
                 };
+                // Yopiq kanalga ketadigan fayl (Anibla/To'plam): yuklovchi uni bot chatiga yuboradi, bot kanalga ko'chiradi.
+                let via_bot = dest["to"].as_i64().map(|t| t != 0 && t == tg_channel_id(env)).unwrap_or(false);
                 return ok(json!({
                     "url": signed_url(env, "GET", &name, 7200), "file": name, "size": size, "kind": "deliver", "dest": dest,
                     "group": "", "attempt": jint(&r, "attempts"), "bot_token": bot_token, "admin": admin,
+                    "via_bot": via_bot, "bot": bot_username(env).await,
                 }));
             }
             return ok(json!({
@@ -623,6 +626,15 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
                 "SELECT COUNT(*) AS n FROM r2_files WHERE state='ready' OR (state='sending' AND lease_until<=? AND attempts<?)",
                 vec![TursoArg::int(now), TursoArg::int(MAX_ATTEMPTS)]).await.ok().and_then(|r| first_row(&r)).map(|r| jint(&r, "n")).unwrap_or(0);
             return ok(json!({"pending": n}));
+        }
+        // Yopiq kanalga ko'chirilgan faylning xabar raqami (`encupload::on_deliver` yozadi).
+        "/api/r2/dmsg" => {
+            let file = b["file"].as_str().unwrap_or("");
+            if !tg_safe_name(file) {
+                return json_resp(&json!({"error": "file"}), 400);
+            }
+            let m: i64 = config_get(env, &format!("dlv_msg_{file}")).await.and_then(|v| v.parse().ok()).unwrap_or(0);
+            return ok(json!({"msg": m}));
         }
         "/api/r2/beat" => {
             let _ = turso_exec(env, "UPDATE r2_files SET lease_until=? WHERE file_name=? AND state='sending'",
