@@ -30,4 +30,4 @@ jobs:
           curl -sS -X POST -H "X-Encode-Token: $K" -H "Content-Type: application/json" -d '{}' \
             -H "User-Agent: arugram-diag" "https://arugram.uzcom.workers.dev/api/encode/qdiag" | jq '{live_keys, now, live_upload, holat_len, holat}' || true
           curl -sS -X POST -H "X-Encode-Token: $K" -H "Content-Type: application/json" -d '{}' \
-            -H "User-Agent: arugram-diag" "https://arugram.uzcom.workers.dev/api/r2/diag" | jq -c '{by_state, direct, recent}' || true
+            -H "User-Agent: arugram-diag" "https://arugram.uzcom.workers.dev/api/r2/diag" | jq '{binding_ok, by_state, audit}' || true

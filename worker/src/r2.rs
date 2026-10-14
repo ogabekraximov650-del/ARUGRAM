@@ -576,8 +576,46 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
                   WHERE state<>'ready' OR attempts>0 ORDER BY created_at DESC LIMIT 6", vec![]).await
                 .ok().map(|r| rows_of(&r)).unwrap_or_default();
             let uid = config_get(env, "sess_uid_upload").await.unwrap_or_default();
+            // R2 ombori tekshiruvi: bucket'dagi haqiqiy obyektlar va baza qatorlari solishtiriladi (yetim = bazada qatori yo'q obyekt).
+            let mut audit = Value::Null;
+            if let Some(bk) = bucket(env) {
+                let mut objs: Vec<(String, i64)> = Vec::new();
+                let mut cursor: Option<String> = None;
+                for _ in 0..5 {
+                    let mut l = bk.list().limit(1000);
+                    if let Some(c) = &cursor {
+                        l = l.cursor(c.clone());
+                    }
+                    let Ok(page) = l.execute().await else { break };
+                    objs.extend(page.objects().iter().map(|o| (o.key(), o.size() as i64)));
+                    cursor = page.cursor();
+                    if !page.truncated() || cursor.is_none() {
+                        break;
+                    }
+                }
+                let rows = turso_exec(env, "SELECT file_name, state FROM r2_files", vec![]).await.ok().map(|r| rows_of(&r)).unwrap_or_default();
+                let known: std::collections::HashMap<String, String> = rows.iter()
+                    .map(|r| (r["file_name"].as_str().unwrap_or("").to_string(), r["state"].as_str().unwrap_or("").to_string())).collect();
+                let total: i64 = objs.iter().map(|o| o.1).sum();
+                let mut orphans = Vec::new();
+                let mut orphan_bytes = 0i64;
+                for (k, sz) in &objs {
+                    if !known.contains_key(k) {
+                        orphan_bytes += sz;
+                        if orphans.len() < 12 {
+                            let committed = encupload::committed(env, k).await;
+                            orphans.push(json!({"key": k, "mb": (*sz as f64 / 1048576.0 * 10.0).round() / 10.0, "in_db_tg_files": committed}));
+                        }
+                    }
+                }
+                let names: std::collections::HashSet<&String> = objs.iter().map(|o| &o.0).collect();
+                let missing: Vec<&String> = known.iter().filter(|(k, st)| !names.contains(k) && st.as_str() != "uploading").map(|(k, _)| k).take(10).collect();
+                audit = json!({"objects": objs.len(), "total_mb": (total as f64 / 1048576.0).round(), "db_rows": rows.len(),
+                    "orphans_count": objs.iter().filter(|o| !known.contains_key(&o.0)).count(),
+                    "orphans_mb": (orphan_bytes as f64 / 1048576.0).round(), "orphans": orphans, "rows_without_object": missing});
+            }
             return ok(json!({"ready": true, "direct": direct(env), "binding_ok": binding, "s3_bucket_status": head,
-                "now": now, "sess_uid_upload": uid, "bot": bot_username(env).await, "by_state": by_state, "recent": recent}));
+                "now": now, "sess_uid_upload": uid, "bot": bot_username(env).await, "by_state": by_state, "recent": recent, "audit": audit}));
         }
         // Yuklovchi "davom ettirish" qadami uchun: Telegram'ga yetkazilishi kutilayotgan fayllar soni.
         "/api/r2/peek" => {
