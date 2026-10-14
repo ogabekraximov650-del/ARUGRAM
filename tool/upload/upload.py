@@ -45,18 +45,13 @@ _rr = [0]
 
 
 def pick_app(default=None, main_only=False):
-    """main_only (Post) — faqat asosiy akkaunt (POOL[0]). Qolganlari uchun avval QO'SHIMCHA akkauntlar, ular hammasi
-    dam olayotgan bo'lsa — asosiy akkaunt."""
+    """Yuklovchi ASOSIY akkauntni ishlatmaydi: faqat qo'shimcha sessiyalar (POOL). FloodWait'dagilar dam oladi."""
     if not POOL:
         return default
-    if main_only:
-        return POOL[0]
     now = time.time()
-    order = POOL[1:] + POOL[:1] if len(POOL) > 1 else POOL
-    ready = [a for a in order if COOL.get(id(a), 0) <= now]
+    ready = [a for a in POOL if COOL.get(id(a), 0) <= now]
     if ready:
-        extras = [a for a in ready if a is not POOL[0]] or ready
-        a = extras[_rr[0] % len(extras)]
+        a = ready[_rr[0] % len(ready)]
         _rr[0] += 1
         return a
     return min(POOL, key=lambda a: COOL.get(id(a), 0))
@@ -396,9 +391,8 @@ async def send_dest(app, dest: dict, path: Path, name: str):
         thumb.write_bytes(base64.b64decode(dest["thumb_b64"]))
     last_err = ""
     base_app = app
-    main_only = bool(dest.get("main_only"))
     for attempt in range(1, SEND_TRIES + 1):
-        app = pick_app(base_app, main_only)
+        app = pick_app(base_app)
         prog = {"p": -1, "t": time.time(), "log": 0.0, "t0": time.time()}
 
         def cb(cur, total, prog=prog):
@@ -516,13 +510,15 @@ async def one_deliver(app, job: dict):
         ST.data.pop("xfer", None)
         log(f"{name}: {dest.get('to')} ga yuborilmoqda")
         ST.push(True)
-        try:
+        if dest.get("fallback_bot"):
+            # Post: asosiy akkaunt yubora olmagan. Avval panel bot (userga va adminga), u ham bo'lmasa qo'shimcha sessiyalar.
+            try:
+                msg = await send_via_panel_bot(job, dest, path, name)
+            except Exception as ex:  # noqa: BLE001
+                log(f"  panel bot yubora olmadi ({type(ex).__name__}: {ex}) — qo'shimcha sessiya bilan urinadi")
+                msg = await send_dest(app, dest, path, name)
+        else:
             msg = await send_dest(app, dest, path, name)
-        except Exception as ex:  # noqa: BLE001
-            if not dest.get("fallback_bot"):
-                raise
-            log(f"  asosiy akkaunt yubora olmadi ({ex}) — panel bot orqali yuboriladi")
-            msg = await send_via_panel_bot(job, dest, path, name)
         cb = dest.get("callback")
         if cb:
             if not await asyncio.to_thread(callback, cb, int(msg.id)):
@@ -549,43 +545,57 @@ def _patch(app):
     app.save_file = patched_save
 
 
+def api_id_of(session_base: str) -> int:
+    try:
+        c = sqlite3.connect(f"file:{session_base}.session?mode=ro", uri=True)
+        return int(c.execute("SELECT api_id FROM sessions").fetchone()[0] or 0)
+    except Exception:  # noqa: BLE001
+        return 0
+
+
 async def main():
-    api_id = session_api_id() or int(os.environ["TG_API_ID"])
-    app = Client(SESSION, api_id=api_id, api_hash=os.environ["TG_API_HASH"], no_updates=True)
-    # Oddiy Pyrogram yuklash xatoni yutib yuboradi (progress 100% ga chiqib, tasdiq kelmay qoladi) — Anibla'da sinalgan tez yuklash
-    # (`fast_save_file`: bir nechta ulanish, har bo'lak xatoda qayta yuboriladi) ishlatiladi.
-    _patch(app)
-    extra = []
-    for f in sorted(Path(SESSION).parent.glob("pool_*.session")):
-        c = Client(str(f.with_suffix("")), api_id=api_id, api_hash=os.environ["TG_API_HASH"], no_updates=True)
+    # Yuklovchi ASOSIY akkauntni (session.enc) ishlatmaydi — faqat botdagi "🗂 Yuklovchi sessiyalar" (tool/encode/pool/*.enc).
+    files = sorted(Path(SESSION).parent.glob("pool_*.session"))
+    clients = []
+    for f in files:
+        base = str(f.with_suffix(""))
+        c = Client(base, api_id=api_id_of(base) or int(os.environ["TG_API_ID"]),
+                   api_hash=os.environ["TG_API_HASH"], no_updates=True)
         _patch(c)
-        extra.append(c)
-    async with app:
-        for c in extra:
+        clients.append(c)
+    if not clients:
+        log("XATO: qo'shimcha sessiya yo'q. Yuklovchi asosiy akkauntni ishlatmaydi — panel botda "
+            "\u00AB\U0001F5C2 Yuklovchi sessiyalar\u00BB orqali kamida bitta akkaunt qo'shing.")
+        ST.set("", "idle")
+        ST.push(True)
+        return
+    started = []
+    try:
+        for c in clients:
             try:
                 await c.start()
                 c.my_uid = (await c.get_me()).id
-                POOL.append(c)
-            except Exception as ex:  # noqa: BLE001
-                log(f"qo'shimcha sessiya ochilmadi ({c.name}): {ex}")
-        app.my_uid = (await app.get_me()).id
-        POOL.insert(0, app)
-        if len(POOL) > 1:
-            log(f"Sessiyalar: {len(POOL)} ta (asosiy + {len(POOL) - 1} qo'shimcha)")
-        try:
-            await _main(app)
-        finally:
-            for c in extra:
-                try:
-                    await c.stop()
-                except Exception:  # noqa: BLE001
+                async for _ in c.get_dialogs():
                     pass
+                POOL.append(c)
+                started.append(c)
+            except Exception as ex:  # noqa: BLE001
+                log(f"sessiya ochilmadi ({c.name}): {ex}")
+        if not POOL:
+            log("XATO: birorta ham sessiya ochilmadi")
+            return
+        log(f"Sessiyalar: {len(POOL)} ta (asosiy akkaunt ishlatilmaydi)")
+        await _main(POOL[0])
+    finally:
+        for c in started:
+            try:
+                await c.stop()
+            except Exception:  # noqa: BLE001
+                pass
 
 
 async def _main(app):
     if True:
-        async for _ in app.get_dialogs():
-            pass
         me = await app.get_me()
         started_bot = False
         worked = 0

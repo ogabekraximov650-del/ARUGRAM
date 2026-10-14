@@ -288,26 +288,35 @@ async def process(app, r, runner, log):
         log(f"  {uid} ga yuborilmoqda...")
         first = (name.splitlines()[0] if name else f"post_{pid}")
         fname = re.sub(r'[\\/:*?"<>|]', "", first).strip()[:80] or f"post_{pid}"
-        via_r2 = False
-        if r2client is not None:
-            import base64
-            dest = {"mode": "video", "to": int(uid), "caption": name[:1024], "file_name": f"{fname}.mp4",
-                    "supports_streaming": True, "lease": {"t": "post_jobs", "id": int(pid)},
-                    # Faqat ASOSIY akkaunt yuboradi; ishlamasa — panel bot foydalanuvchiga va adminga yuboradi.
-                    "main_only": True, "fallback_bot": True,
-                    **{k: v for k, v in extra.items() if k in ("duration", "width", "height")}}
-            if thumb.exists() and 0 < thumb.stat().st_size < 200_000:
-                dest["thumb_b64"] = base64.b64encode(thumb.read_bytes()).decode()
-            via_r2 = await asyncio.to_thread(
-                r2client.deliver, os.environ["API_BASE"], os.environ["ENCODE_TOKEN"], out,
-                f"post_{pid}_{int(time.time())}.mp4", dest, log, "arugram-post")
-        if via_r2:
-            live.done("R2'ga yozildi \u2014 Telegram'ga yuklovchi workflow yetkazadi")
-        else:
+        # 1) Video tayyor bo'lishi bilan ASOSIY akkaunt userga darhol yuboradi.
+        sent_direct = False
+        send_err = None
+        try:
             await app.send_video(
                 uid, str(out), caption=name[:1024], file_name=f"{fname}.mp4",
                 supports_streaming=True,
                 progress=live.transfer(f"\u2B06\uFE0F {uid} ga yuborilmoqda"), **extra)
+            sent_direct = True
+        except Exception as ex:  # noqa: BLE001
+            send_err = ex
+            log(f"  asosiy akkaunt yubora olmadi ({type(ex).__name__}: {ex}) — R2 orqali yuboriladi")
+        # 2) Yubora olmasagina R2 ga yuklanadi; R2 yuklovchi (asosiy akkauntsiz) panel bot orqali userga va adminga yetkazadi.
+        if not sent_direct:
+            via_r2 = False
+            if r2client is not None:
+                import base64
+                dest = {"mode": "video", "to": int(uid), "caption": name[:1024], "file_name": f"{fname}.mp4",
+                        "supports_streaming": True, "lease": {"t": "post_jobs", "id": int(pid)},
+                        "fallback_bot": True,
+                        **{k: v for k, v in extra.items() if k in ("duration", "width", "height")}}
+                if thumb.exists() and 0 < thumb.stat().st_size < 200_000:
+                    dest["thumb_b64"] = base64.b64encode(thumb.read_bytes()).decode()
+                via_r2 = await asyncio.to_thread(
+                    r2client.deliver, os.environ["API_BASE"], os.environ["ENCODE_TOKEN"], out,
+                    f"post_{pid}_{int(time.time())}.mp4", dest, log, "arugram-post")
+            if not via_r2:
+                raise send_err
+            live.done("Asosiy akkaunt yubora olmadi \u2014 R2'ga yozildi, panel bot yetkazadi")
         api("finish", {**ident, "ok": True, "size": size, "to": str(uid)})
         log(f"  ✅ post #{pid} yuborildi")
     except Lost:

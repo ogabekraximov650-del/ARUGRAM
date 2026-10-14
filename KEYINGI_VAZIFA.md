@@ -6332,3 +6332,11 @@ Botdagi "Holat" xabarida R2 bloki endi ombor holatini ham ko'rsatadi (`livewatch
 Holat xabarida yuklovchi logi: tashxis (`qdiag`) ko'rsatdi — xabar uzunligi me'yorda (1254 belgi), blok to'g'ri chiqadi; lekin yuklovchi holatni
 55 s da bir marta yuborgani uchun yuklab olish bosqichi (≈30 s) deyarli ushlanmay, tugagan "100%" qolib ketardi. Endi `upload.py`
 har fayl uchun bosqich almashganda (yuklab olish boshlandi / Telegram'ga yuklash boshlandi) majburiy yuboradi va tugagach `xfer` tozalanadi.
+
+## Post: avval to'g'ridan-to'g'ri; yuklovchi asosiy akkauntsiz (2026-10)
+
+- **Post kodlash** (`tool/post/post.py`): video tayyor bo'lishi bilan ASOSIY akkaunt userga darhol yuboradi. Yubora olmasagina R2 ga
+  yoziladi (`dest.fallback_bot`); ikkalasi ham bo'lmasa post xato bilan qaytadi.
+- **R2 yuklovchi** (`tool/upload/upload.py`, `upload.workflow.yml`): asosiy akkaunt (`session.enc`) BUTUNLAY ishlatilmaydi — faqat
+  `tool/encode/pool/*.enc` sessiyalari. Pool bo'sh bo'lsa run xato bilan tugaydi (panel botda "🗂 Yuklovchi sessiyalar" orqali qo'shing).
+  Post zaxirasi (`fallback_bot`): avval panel bot userga va adminga yuboradi, bo'lmasa pool sessiyalari.
