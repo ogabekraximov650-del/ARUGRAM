@@ -528,7 +528,16 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
             } else {
                 None
             };
-            return ok(json!({"ready": true, "direct": direct(env), "binding_ok": binding, "s3_bucket_status": head}));
+            // Navbat holati (tashxis): holat bo'yicha sonlar va oxirgi qatorlar (xato matni, urinishlar).
+            let by_state = turso_exec(env, "SELECT state, COUNT(*) AS n, MAX(attempts) AS att FROM r2_files GROUP BY state", vec![]).await
+                .ok().map(|r| rows_of(&r)).unwrap_or_default();
+            let recent = turso_exec(env,
+                "SELECT file_name, kind, size, state, attempts, runner, lease_until, error, created_at FROM r2_files
+                  WHERE state<>'ready' OR attempts>0 ORDER BY created_at DESC LIMIT 6", vec![]).await
+                .ok().map(|r| rows_of(&r)).unwrap_or_default();
+            let uid = config_get(env, "sess_uid_upload").await.unwrap_or_default();
+            return ok(json!({"ready": true, "direct": direct(env), "binding_ok": binding, "s3_bucket_status": head,
+                "now": now, "sess_uid_upload": uid, "bot": bot_username(env).await, "by_state": by_state, "recent": recent}));
         }
         // Yuklovchi "davom ettirish" qadami uchun: Telegram'ga yetkazilishi kutilayotgan fayllar soni.
         "/api/r2/peek" => {
