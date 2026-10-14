@@ -10367,7 +10367,7 @@ fn needs_app_check(path: &str) -> bool {
         | "/api/post/claim" | "/api/post/check" | "/api/post/finish" | "/api/post/progress"
         | "/api/anibla/claim" | "/api/anibla/diag" | "/api/anibla/progress" | "/api/anibla/done"
         | "/api/fmp4/claim" | "/api/fmp4/done" | "/api/fmp4/r2put" | "/api/fmp4/r2ready" | "/api/session/poll" | "/api/session/report"
-        | "/api/encode/r2put" | "/api/encode/r2ready" | "/api/r2/claim" | "/api/r2/beat" | "/api/r2/fail" | "/api/r2/done" | "/api/r2/diag" | "/api/r2/peek" | "/api/r2/put" | "/api/r2/ready" | "/api/r2/part" | "/api/r2/get")
+        | "/api/encode/r2put" | "/api/encode/r2ready" | "/api/encode/qdiag" | "/api/r2/claim" | "/api/r2/beat" | "/api/r2/fail" | "/api/r2/done" | "/api/r2/diag" | "/api/r2/peek" | "/api/r2/put" | "/api/r2/ready" | "/api/r2/part" | "/api/r2/get")
     {
         return false;
     }
@@ -11870,6 +11870,33 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
         return err404("topilmadi");
     }
     let b: Value = req.json().await.unwrap_or(json!({}));
+
+    // Navbat tashxisi (faqat o'qish): nega "navbatda" soni kamaymaydi.
+    if path == "/api/encode/qdiag" {
+        let rows = |r: Result<Value>| r.map(|v| rows_of(&v)).unwrap_or_default();
+        let jobs = rows(turso_exec(env, "SELECT state, COUNT(*) AS n FROM encode_jobs GROUP BY state", vec![]).await);
+        let by_done = rows(turso_exec(env,
+            "SELECT (instr(done,',360p,')>0)+(instr(done,',480p,')>0)+(instr(done,',720p,')>0)+(instr(done,',1080p,')>0) AS k, COUNT(*) AS n
+               FROM encode_jobs WHERE state='queued' GROUP BY k", vec![]).await);
+        let qs = rows(turso_exec(env,
+            "SELECT q.quality AS quality, q.state AS state, COUNT(*) AS n FROM encode_q q
+               JOIN encode_jobs j ON q.anime_id=j.anime_id AND q.season_id=j.season_id AND q.epizod_id=j.epizod_id AND q.queued_at=j.queued_at
+              WHERE j.state='queued' GROUP BY q.quality, q.state", vec![]).await);
+        let sample = rows(turso_exec(env,
+            "SELECT j.anime_id AS a, j.season_id AS s, j.epizod_id AS e, j.done AS done, j.queued_at AS qa,
+                    (SELECT group_concat(q.quality||':'||q.state||':'||substr(COALESCE(q.error,''),1,40), ' | ') FROM encode_q q
+                      WHERE q.anime_id=j.anime_id AND q.season_id=j.season_id AND q.epizod_id=j.epizod_id AND q.queued_at=j.queued_at) AS qs
+               FROM encode_jobs j WHERE j.state='queued'
+                AND (instr(j.done,',360p,')>0)+(instr(j.done,',480p,')>0)+(instr(j.done,',720p,')>0)+(instr(j.done,',1080p,')>0) >= 3
+              ORDER BY j.queued_at ASC LIMIT 10", vec![]).await);
+        let r2s = rows(turso_exec(env, "SELECT state, COUNT(*) AS n FROM r2_files GROUP BY state", vec![]).await);
+        let mut pend = serde_json::Map::new();
+        for q in QUALITIES.iter() {
+            pend.insert((*q).into(), json!(encode_pending_q(env, q).await));
+        }
+        return ok_nostore(json!({"jobs": jobs, "queued_by_done_count": by_done, "q_states": qs, "pending": pend,
+            "almost_done_sample": sample, "r2": r2s}));
+    }
 
     // Qo'lda qayta boshlash: ishlayotgan hamma ish ijarasiz navbatga qaytadi
     // (`restart-autoencode.yml` run'larni bekor qilgach chaqiradi).

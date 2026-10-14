@@ -21,3 +21,13 @@ jobs:
         env:
           ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
         run: python3 tool/diag/fetch.py
+      - name: Navbat tashxisi (worker)
+        if: always()
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+        run: |
+          K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          curl -sS -X POST -H "X-Encode-Token: $K" -H "Content-Type: application/json" -d '{}' \
+            -H "User-Agent: arugram-diag" "https://arugram.uzcom.workers.dev/api/encode/qdiag" | jq . || true
+          curl -sS -X POST -H "X-Encode-Token: $K" -H "Content-Type: application/json" -d '{}' \
+            -H "User-Agent: arugram-diag" "https://arugram.uzcom.workers.dev/api/r2/diag" | jq -c '{by_state, direct, recent}' || true
