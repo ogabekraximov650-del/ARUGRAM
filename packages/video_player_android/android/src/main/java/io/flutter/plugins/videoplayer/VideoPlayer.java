@@ -124,6 +124,61 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
     return value != Format.NO_VALUE ? value : null;
   }
 
+  // ── ARUGRAM: TASVIRNI YAXSHILASH ─────────────────────────────
+  private int enhanceLevel = 0;
+  private boolean enhanceListenerAdded = false;
+
+  /**
+   * Tasvirni yaxshilashni yoqadi/o'chiradi (0 — o'chiq, 1 — yengil, 2 — kuchli). Muvaffaqiyatli bo'lsa
+   * {@code true}; effektni qo'llab bo'lmasa {@code false} (Dart tomoni rang filtriga qaytadi).
+   */
+  @UnstableApi
+  public boolean setEnhance(int level) {
+    try {
+      if (level <= 0) {
+        exoPlayer.setVideoEffects(java.util.Collections.<androidx.media3.common.Effect>emptyList());
+        enhanceLevel = 0;
+        return true;
+      }
+      if (!enhanceListenerAdded) {
+        enhanceListenerAdded = true;
+        // Effekt konveyeri (GL) ishlamasa — effektsiz qayta tiklanadi, ijro to'xtab qolmasin.
+        exoPlayer.addListener(
+            new androidx.media3.common.Player.Listener() {
+              @Override
+              public void onPlayerError(androidx.media3.common.PlaybackException error) {
+                if (enhanceLevel <= 0) {
+                  return;
+                }
+                for (Throwable t = error; t != null; t = t.getCause()) {
+                  if (t instanceof androidx.media3.common.VideoFrameProcessingException) {
+                    enhanceLevel = 0;
+                    exoPlayer.setVideoEffects(
+                        java.util.Collections.<androidx.media3.common.Effect>emptyList());
+                    exoPlayer.prepare();
+                    return;
+                  }
+                }
+              }
+            });
+      }
+      exoPlayer.setVideoEffects(
+          java.util.Collections.<androidx.media3.common.Effect>singletonList(
+              new AruEnhanceEffect(level)));
+      enhanceLevel = level;
+      return true;
+    } catch (Throwable t) {
+      enhanceLevel = 0;
+      try {
+        exoPlayer.setVideoEffects(java.util.Collections.<androidx.media3.common.Effect>emptyList());
+      } catch (Throwable ignored) {
+        // e'tiborsiz
+      }
+      return false;
+    }
+  }
+
+
   @Override
   public void play() {
     exoPlayer.play();

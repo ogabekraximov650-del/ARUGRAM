@@ -6364,3 +6364,18 @@ manzil faqat o'z kanalimiz), `copyMessage` bilan kanalga ko'chiradi (video/hujja
   "Tasvirni yaxshilash: O'chiq / Yengil / Kuchli" (bosilganda almashadi). Ilova: `ColorFiltered` rang matritsasi (to'yinganlik+kontrast+yorqinlik),
   `AppSettings.videoEnhance` (qurilmada saqlanadi, bazaga yozilmaydi). Web: `<video>` CSS filtri; "Kuchli" da SVG konvolyutsiya (aniqlik),
   `playerSettings.enhance` (localStorage). Keyingi bosqich (taklif): Media3 GPU shader (Anime4K-lite) — chiziqlarni aniqlash/upscale.
+
+## Tasvirni yaxshilash — GPU shader (2026-10, 2-bosqich)
+
+Tadqiqot (internet): Anime4K (bloc97) — mpv uchun CNN shaderlar (`//!HOOK`), og'ir; mobilda real vaqtda CNN keraksiz xavf. AMD FidelityFX CAS (MIT) —
+yengil, chegaraga moslashuvchan o'tkirlashtirish. Media3 `ExoPlayer.setVideoEffects()` + `BaseGlShaderProgram` (1.1.0+) — pleyer ichida GPU effekt.
+Flutter `ImageFilter.shader` faqat Impeller'da ishlaydi, bizda Impeller O'CHIRILGAN (kuchsiz telefonlar) -> Dart shader yo'li yopiq, native yo'l tanlandi.
+
+Bitta shader (`packages/video_player_android/android/src/main/assets/aru_enhance_fragment.glsl`, GLSL ES 1.00): deband/denoise (tekis joyda yumshatish +
+dither; past bitreyt "zinapoya"), CAS-o'tkirlik (faqat chegaralarda), chiziqlarni qoraytirish, to'yinganlik/kontrast. Darajalar: 1 Yengil, 2 Kuchli.
+- Ilova: `AruEnhanceEffect`/`AruEnhanceShaderProgram` (media3-effect 1.9.2), `VideoPlayer.setEnhance`, `MethodChannel uz.arugram.player/enhance` (`VideoPlayerPlugin`);
+  Dart `_applyEnhance` (native false bersa — `ColorFiltered` zaxirasi). Effekt xato bersa (VideoFrameProcessingException) — effektsiz qayta tiklanadi.
+- Web: `web/src/js/player/enhance.js` (WebGL canvas, kadr `requestVideoFrameCallback` bilan, ekran o'lchamigacha 1920x1080 gacha kattalashtirib o'tkirlaydi);
+  shader matni `enhance-shader.js` (AVTOMATIK: `node tool/shaders/sync-web.mjs`). WebGL bo'lmasa/CORS bo'lsa — CSS filtri.
+- Tekshirildi: shader headless Chromium (WebGL) da kompilyatsiya va ishlashi; Java/Dart kodi bu muhitda kompilyatsiya QILINMAGAN (SDK yo'q) — CI loglari bilan tekshiriladi.
+- `build-flutter-apk.yml` yo'llariga `packages/**` qo'shildi.

@@ -17,6 +17,8 @@ on:
       # va "ARU logotipi ko'rinmayapti" deb tushunilardi.
       - 'branding/**'
       - 'android-template/**'
+      # `packages/video_player_android` (pleyerning native qismi: AruDataSource, tasvirni yaxshilash shaderi) o'zgarsa ham APK yig'ilsin.
+      - 'packages/**'
       - 'pubspec.yaml'
       - '.github/workflows/build-flutter-apk.yml'
   workflow_dispatch:

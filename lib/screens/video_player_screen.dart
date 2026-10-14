@@ -1515,6 +1515,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     // Progress chizig'idagi "yuklab olingan" qism shu videoni kuzata
     // boshlaydi.
     _lastPlayedUrl = _currentUrl;
+    _enhanceNative = false;
+    _applyEnhance();
     _syncWatchedUrls();
     _startHealthWatchdog();
     // Hajm endi ma'lum (isitish javobidan meta.json'ga yozilgan) —
@@ -3110,9 +3112,40 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     ];
   }
 
+  static const MethodChannel _enhanceCh = MethodChannel('uz.arugram.player/enhance');
+
+  /// `true` — effekt ExoPlayer ichida (GPU shader: deband, o'tkirlik, chiziqlar, rang) ishlayapti;
+  /// `false` — native yo'q/ishlamadi, [_enhanced] rang filtriga qaytadi.
+  bool _enhanceNative = false;
+
+  Future<void> _applyEnhance() async {
+    final ctrl = _controller;
+    final level = AppSettings.instance.videoEnhance;
+    if (ctrl == null) return;
+    var ok = false;
+    if (level > 0) {
+      try {
+        ok = (await _enhanceCh.invokeMethod<bool>(
+                'set', {'playerId': ctrl.playerId, 'level': level})) ==
+            true;
+      } catch (_) {
+        ok = false;
+      }
+    } else {
+      // O'chirish: native effekt bo'lsa ham olib tashlanadi.
+      try {
+        await _enhanceCh.invokeMethod<bool>(
+            'set', {'playerId': ctrl.playerId, 'level': 0});
+      } catch (_) {}
+    }
+    if (!mounted || ctrl != _controller) return;
+    setState(() => _enhanceNative = ok);
+  }
+
+  /// Native effekt ishlamasa — GPU'siz oddiy rang filtri (zaxira).
   Widget _enhanced(Widget video) {
     final lv = AppSettings.instance.videoEnhance;
-    if (lv == 0) return video;
+    if (lv == 0 || _enhanceNative) return video;
     final m = lv == 1
         ? _enhanceMatrix(1.16, 1.06, 0.01)
         : _enhanceMatrix(1.30, 1.11, 0.015);
@@ -3123,6 +3156,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     AppSettings.instance
         .setVideoEnhance((AppSettings.instance.videoEnhance + 1) % 3);
     if (mounted) setState(() {});
+    _applyEnhance();
   }
 
   /// "Avto o'tkazish" tugmasi bosildi.

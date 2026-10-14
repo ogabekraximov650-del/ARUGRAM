@@ -5,6 +5,7 @@
 // Yuklab olish / o'chirish / kesh YO'Q (faqat onlayn). Video fMP4 bo'lib
 // Telegram orqali keladi (`source.js` + `engine.js`).
 
+import { createEnhancer } from './enhance.js';
 import { api, imageUrl } from '../api.js';
 import { push, back as routerBack } from '../router.js';
 import { hooks } from '../hooks.js';
@@ -157,8 +158,9 @@ function buildPlayer(el, route, season, opts) {
   const video = $('video');
 
   // ── Tasvirni yaxshilash (MX Pleyerdagi "Smart Enhance" kabi, lekin anime uchun sozlangan) ──
-  // 1 — yengil: to'yinganlik + kontrast; 2 — kuchli: shular + aniqlik (SVG konvolyutsiya, GPU).
+  // WebGL shader (ilovadagi bilan bir xil: deband/denoise, o'tkirlik, chiziqlar, rang). WebGL bo'lmasa — CSS filtri.
   const ENH_LABEL = ["O'chiq", 'Yengil', 'Kuchli'];
+  const enhancer = createEnhancer(video, box);
   function ensureSharpFilter() {
     if (document.getElementById('aru-sharp-svg')) return;
     const d = document.createElement('div');
@@ -168,12 +170,18 @@ function buildPlayer(el, route, season, opts) {
       + '<feConvolveMatrix order="3" preserveAlpha="true" kernelMatrix="0 -0.45 0 -0.45 2.8 -0.45 0 -0.45 0"/></filter></svg>';
     document.body.appendChild(d);
   }
-  function applyEnhance() {
-    const lv = playerSettings.enhance;
+  function cssEnhance(lv) {
     if (lv === 2) ensureSharpFilter();
     video.style.filter = lv === 1 ? 'saturate(1.16) contrast(1.06) brightness(1.02)'
       : lv === 2 ? 'saturate(1.28) contrast(1.1) brightness(1.03) url(#aru-sharp)' : '';
   }
+  function applyEnhance() {
+    const lv = playerSettings.enhance;
+    if (lv === 0) { enhancer.stop(); cssEnhance(0); return; }
+    if (enhancer.start(lv)) cssEnhance(0); else cssEnhance(lv);
+  }
+  const onEnhFail = () => cssEnhance(playerSettings.enhance);
+  window.addEventListener('aru-enhance-failed', onEnhFail);
   applyEnhance();
   const panes = [...el.querySelectorAll('.pl-pane')];
   const tabEls = [...el.querySelectorAll('.pl-tab')];
@@ -1072,6 +1080,8 @@ function buildPlayer(el, route, season, opts) {
       clearTimeout(hideT); clearTimeout(noticeT); clearTimeout(singleT); clearInterval(sleepT);
       document.removeEventListener('visibilitychange', onVis);
       window.removeEventListener('aru-packsound', onPackSound);
+      window.removeEventListener('aru-enhance-failed', onEnhFail);
+      enhancer.destroy();
       window.removeEventListener('resize', applyRot);
       document.removeEventListener('fullscreenchange', onFsChange);
       try { if (document.fullscreenElement) document.exitFullscreen(); } catch (_) { /* */ }

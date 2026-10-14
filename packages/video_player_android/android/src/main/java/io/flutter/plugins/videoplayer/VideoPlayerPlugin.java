@@ -14,6 +14,7 @@ import io.flutter.FlutterInjector;
 import io.flutter.Log;
 import io.flutter.embedding.engine.plugins.FlutterPlugin;
 import io.flutter.plugin.common.BinaryMessenger;
+import io.flutter.plugin.common.MethodChannel;
 import io.flutter.plugins.videoplayer.platformview.PlatformVideoViewFactory;
 import io.flutter.plugins.videoplayer.platformview.PlatformViewVideoPlayer;
 import io.flutter.plugins.videoplayer.texture.TextureVideoPlayer;
@@ -24,6 +25,7 @@ public class VideoPlayerPlugin implements FlutterPlugin, AndroidVideoPlayerApi {
   private static final String TAG = "VideoPlayerPlugin";
   private final LongSparseArray<VideoPlayer> videoPlayers = new LongSparseArray<>();
   private FlutterState flutterState;
+  private MethodChannel enhanceChannel;
   private final VideoPlayerOptions sharedOptions = new VideoPlayerOptions();
   private long nextPlayerIdentifier = 1;
 
@@ -42,6 +44,24 @@ public class VideoPlayerPlugin implements FlutterPlugin, AndroidVideoPlayerApi {
             binding.getTextureRegistry());
     flutterState.startListening(this, binding.getBinaryMessenger());
 
+    // ARUGRAM: tasvirni yaxshilash (`video_player_screen.dart`) — playerId bo'yicha effekt yoqiladi.
+    enhanceChannel = new MethodChannel(binding.getBinaryMessenger(), "uz.arugram.player/enhance");
+    enhanceChannel.setMethodCallHandler(
+        (call, result) -> {
+          if (!"set".equals(call.method)) {
+            result.notImplemented();
+            return;
+          }
+          final Number id = call.argument("playerId");
+          final Number lv = call.argument("level");
+          final VideoPlayer vp = id == null ? null : videoPlayers.get(id.longValue());
+          if (vp == null || lv == null) {
+            result.success(false);
+            return;
+          }
+          result.success(vp.setEnhance(lv.intValue()));
+        });
+
     binding
         .getPlatformViewRegistry()
         .registerViewFactory(
@@ -53,6 +73,10 @@ public class VideoPlayerPlugin implements FlutterPlugin, AndroidVideoPlayerApi {
   public void onDetachedFromEngine(@NonNull FlutterPluginBinding binding) {
     if (flutterState == null) {
       Log.wtf(TAG, "Detached from the engine before registering to it.");
+    }
+    if (enhanceChannel != null) {
+      enhanceChannel.setMethodCallHandler(null);
+      enhanceChannel = null;
     }
     flutterState.stopListening(binding.getBinaryMessenger());
     flutterState = null;

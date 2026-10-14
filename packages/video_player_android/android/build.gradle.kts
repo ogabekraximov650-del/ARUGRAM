@@ -59,6 +59,8 @@ android {
         implementation("androidx.media3:media3-exoplayer-dash:${exoplayerVersion}")
         implementation("androidx.media3:media3-exoplayer-rtsp:${exoplayerVersion}")
         implementation("androidx.media3:media3-exoplayer-smoothstreaming:${exoplayerVersion}")
+        // ARUGRAM: "Tasvirni yaxshilash" (ExoPlayer video effektlari, GPU shader).
+        implementation("androidx.media3:media3-effect:${exoplayerVersion}")
         testImplementation("junit:junit:4.13.2")
         testImplementation("androidx.test:core:1.7.0")
         testImplementation("org.mockito:mockito-core:5.23.0")
