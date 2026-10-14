@@ -11855,7 +11855,7 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
                 "SELECT 1 AS x FROM encode_jobs WHERE state='running' AND lease_until>? LIMIT 1",
                 vec![TursoArg::int(now)]).await?;
             // Sessiyasiz workflow hech narsa o'rnatmasdan o'chadi.
-            let n = if encode_sess_ok(env, wq).await { encode_pending_q(env, wq).await } else { 0 };
+            let n = if encode_sess_ok(env, wq).await && !r2::blocked(env).await { encode_pending_q(env, wq).await } else { 0 };
             return ok(json!({"pending": if first_row(&legacy).is_some() { 0 } else { n }}));
         }
         let res = turso_exec(env,
@@ -11968,6 +11968,10 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
                 if config_get(env, &k).await.as_deref() != Some(uid.to_string().as_str()) {
                     config_put(env, &k, &uid.to_string()).await;
                 }
+            }
+            // R2 to'lgan: kamida 1 GB joy ochilguncha yangi ish berilmaydi.
+            if r2::blocked(env).await {
+                return ok(json!({"none": true}));
             }
             return encode_claim_q(env, &b, wq, now).await;
         }

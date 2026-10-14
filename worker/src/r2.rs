@@ -180,16 +180,33 @@ pub(crate) fn ready(env: &Env) -> bool {
 
 /// Kodlovchi faylni R2'ga yozmoqchi ("shuncha MB sig'adimi?"): joy bo'lsa qator ochiladi, multipart yuklash boshlanadi va
 /// `upload_id` qaytadi; joy yo'q bo'lsa `Err("full")` — kodlovchi R2 bo'shaguncha KUTADI; R2 yo'q yoki fayl butunlay
-/// sig'maydigan bo'lsa `Err("na")` — kodlovchi to'g'ridan-to'g'ri bot chatiga yuklaydi. Sig'im: `R2_MAX_GB` (standart 8).
+/// sig'maydigan bo'lsa `Err("na")` — kodlovchi to'g'ridan-to'g'ri bot chatiga yuklaydi. Sig'im: `R2_MAX_GB` (standart 10).
 pub(crate) async fn register(env: &Env, (a, s, e): (i64, i64, i64), queued_at: i64, q: &str, kind: &str, file: &str,
         key: &str, size: i64) -> std::result::Result<Value, &'static str> {
     register_dest(env, (a, s, e), queued_at, q, kind, file, key, size, "").await
 }
 
 /// `dest` — "yetkazish" (`kind == "deliver"`) faylining tavsifi (JSON): qayerga, qanday yuborilsin va keyin qaysi yo'lni chaqirish.
-/// R2 oraliq ombori sig'imi (bayt): `R2_MAX_GB` (standart 8 GB).
+/// R2 oraliq ombori sig'imi (bayt): `R2_MAX_GB` (standart 10 GB).
 pub(crate) fn cap_bytes(env: &Env) -> i64 {
-    tg_secret(env, "R2_MAX_GB").parse::<i64>().unwrap_or(8).max(1) * 1024 * 1024 * 1024
+    tg_secret(env, "R2_MAX_GB").parse::<i64>().unwrap_or(10).max(1) * 1024 * 1024 * 1024
+}
+
+/// R2 to'lgach kodlovchi workflow'lar shu vaqtgacha ishlamaydi: bo'sh joy kamida shuncha bo'lguncha.
+const UNBLOCK_FREE: i64 = 1024 * 1024 * 1024;
+
+/// `true` — R2 to'lgan va hali 1 GB joy ochilmagan: kodlovchilar yangi ish olmaydi / ishga tushmaydi.
+pub(crate) async fn blocked(env: &Env) -> bool {
+    if !ready(env) || config_get(env, "r2_block").await.as_deref() != Some("1") {
+        return false;
+    }
+    let used = turso_exec(env, "SELECT COALESCE(SUM(size),0) AS u FROM r2_files", vec![]).await.ok()
+        .and_then(|r| first_row(&r)).map(|r| jint(&r, "u")).unwrap_or(0);
+    if cap_bytes(env) - used >= UNBLOCK_FREE {
+        config_put(env, "r2_block", "").await;
+        return false;
+    }
+    true
 }
 
 pub(crate) async fn register_dest(env: &Env, (a, s, e): (i64, i64, i64), queued_at: i64, q: &str, kind: &str, file: &str,
@@ -215,6 +232,8 @@ pub(crate) async fn register_dest(env: &Env, (a, s, e): (i64, i64, i64), queued_
              TursoArg::int(queued_at), TursoArg::text(q), TursoArg::text(key), TursoArg::int(size), TursoArg::int(now_ms()),
              TursoArg::text(dest), TursoArg::text(file), TursoArg::int(size), TursoArg::int(cap)]).await.map_err(|_| "na")?;
     if first_row(&r).is_none() {
+        // R2 to'ldi: kodlovchi workflow'lar yangi ish olmaydi, to'lgach kamida 1 GB bo'sh joy ochilguncha (`blocked`).
+        config_put(env, "r2_block", "1").await;
         return Err("full");
     }
     // 1-rejim: imzolangan PUT havolasi (2 soat) — run R2'ga to'g'ridan-to'g'ri yozadi.

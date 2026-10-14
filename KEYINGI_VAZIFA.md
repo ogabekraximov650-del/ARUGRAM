@@ -6319,3 +6319,12 @@ Fayl oqimi o'zgarmadi: hamma narsa asosiy bot chatiga yuboriladi.
   bo'lsa — asosiy akkaunt (`pick_app`). Foydalanuvchi panel botni bir marta ochgan bo'lishi shart.
 
 Botdagi "Holat" xabarida R2 bloki endi ombor holatini ham ko'rsatadi (`livewatch.rs` `r2_space`): band hajm, bo'sh joy, jami (`R2_MAX_GB`, `r2::cap_bytes`) va foiz-chiziq (30 s keshda, qo'shimcha so'rovsiz — mavjud hisoblash so'roviga qo'shildi).
+
+## R2 sig'imi 10 GB, to'lganda kodlovchilar to'xtaydi, yuklovchi 1 soat (2026-10)
+
+- `r2::cap_bytes`: `R2_MAX_GB` standarti 8 -> **10 GB**.
+- R2 to'lib, joy so'ralganda rad etilsa `app_config.r2_block=1` qo'yiladi (`register_dest`). `r2::blocked()`: to'lgan va bo'sh joy < 1 GB bo'lsa `true` —
+  sifat-workflow `peek` 0 qaytaradi va `claim` `none` beradi (yangi run ochilmaydi/ish olinmaydi); bo'sh joy >= 1 GB bo'lganda bayroq o'zi tozalanadi,
+  worker cron (`encode_kick`) kodlovchilarni qayta ishga tushiradi. Allaqachon kodlangan fayl joy bo'shashini kutishda davom etadi.
+- R2 yuklovchi (`upload.workflow.yml`): `START_BUDGET_MIN=55` (yangi fayl 55 daqiqadan keyin olinmaydi), `timeout-minutes: 90`;
+  R2'da fayl qolsa "Davom ettirish" yangi run ochadi.
