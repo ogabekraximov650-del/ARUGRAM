@@ -12,7 +12,7 @@ from pathlib import Path
 
 ENC = Path("tool/encode/gh_token.enc")
 REPO = Path("tool/encode/gh_repo.txt").read_text().strip().split("/")[-1]
-RUNS = int(os.environ.get("DIAG_RUNS", "12"))
+RUNS = int(os.environ.get("DIAG_RUNS", "25"))
 TAIL = int(os.environ.get("DIAG_TAIL", "60"))
 
 k = "".join(os.environ.get("ENCODE_TOKEN", "").split())
@@ -34,6 +34,9 @@ def get(path, raw=False):
 login = get("/user")["login"]
 print(f"akkaunt: {login}, repo: {REPO}")
 runs = get(f"/repos/{login}/{REPO}/actions/runs?per_page={RUNS}")["workflow_runs"]
+print("== Run ro'yxati ==")
+for run in runs:
+    print(f"#{run['run_number']} {run['name']} | {run['status']}/{run['conclusion']} | {run['created_at']} | id={run['id']}")
 for run in runs:
     print(f"\n######## #{run['run_number']} {run['name']} | {run['status']}/{run['conclusion']} | {run['created_at']} | id={run['id']}")
     try:
@@ -54,7 +57,10 @@ for run in runs:
     for n in sorted(z.namelist()):
         if "/" not in n:
             continue
-        lines = z.read(n).decode("utf-8", "replace").splitlines()
-        print(f"  >>> {n} ({len(lines)} qator), oxirgi {TAIL}:")
-        for ln in lines[-TAIL:]:
+        lines = [l for l in z.read(n).decode("utf-8", "replace").splitlines()
+                 if "##[" not in l and "[36;1m" not in l and "Node.js" not in l and "ENCODE_TOKEN" not in l]
+        up = "R2" in run["name"] or "ukl" in run["name"].lower() or "upload" in run["name"].lower()
+        tail = TAIL * 3 if up else 12
+        print(f"  >>> {n} ({len(lines)} qator), oxirgi {tail}:")
+        for ln in lines[-tail:]:
             print("    " + ln[:300])
