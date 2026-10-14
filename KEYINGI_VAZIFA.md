@@ -6258,3 +6258,9 @@ run'da ishlaydi — Telegram kamdan-kam `AUTH_KEY_DUPLICATED` berishi mumkin; sh
 yuboriladi), "➖ Adminni olib tashlash". Ro'yxat `app_config.encbot_admins` (vergulli ID'lar; asosiy admin har doim admin, o'chmaydi;
 yozilmagan bo'lsa boshlang'ich `8827179336`). `is_encbot_admin(env, id)` endi asinxron va bazadan (20 s xotirada) o'qiydi.
 Qo'shilgan admin panel botni to'liq ishlata oladi, lekin adminlarni boshqarish bo'limi unga ko'rinmaydi va ishlamaydi.
+
+**fMP4 (Mini App so'ragan) ham R2 orqali; yuklovchi har run'da bitta sifat (2026-10):** `tool/fmp4/run.py` tayyor fMP4'ni avval R2'ga yozadi
+(`/api/fmp4/r2put` -> to'g'ridan-to'g'ri PUT yoki worker multipart -> `/api/fmp4/r2ready`; ish `uploading` holatiga o'tadi, 6 soat ijara);
+yuklovchi Telegram'ga botga olib boradi, bot `fmp4::commit` bilan yozadi. R2 yo'q bo'lsa — eski usul (kanalga). Yuklovchi (`upload.py`)
+`group` (`a/s/e/queued_at/sifat`) bilan bitta sifatning MP4 va fMP4 sini yetkazib (ikkinchisi kelmagan bo'lsa 5 daqiqagacha kutadi) o'chadi;
+workflow "Davom ettirish" qadami (`/api/r2/peek`) R2'da fayl qolgan bo'lsa yangi run ochadi.

@@ -124,7 +124,7 @@ pub(crate) async fn kick(env: &Env) -> String {
     let now = now_ms();
     let res = turso_exec(env,
         "SELECT
-           (SELECT COUNT(*) FROM fmp4_jobs WHERE state='queued' OR (state='running' AND lease_until<=?)) AS pending,
+           (SELECT COUNT(*) FROM fmp4_jobs WHERE state='queued' OR (state IN ('running','uploading') AND lease_until<=?)) AS pending,
            (SELECT COUNT(*) FROM fmp4_jobs WHERE state='running' AND lease_until>?) AS active",
         vec![TursoArg::int(now), TursoArg::int(now)]).await;
     let Some(r) = res.ok().and_then(|r| first_row(&r)) else {
@@ -176,7 +176,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
             "UPDATE fmp4_jobs SET state='running', runner=?, lease_until=?, attempts=attempts+1
               WHERE (anime_id, season_id, epizod_id, quality) = (
                 SELECT anime_id, season_id, epizod_id, quality FROM fmp4_jobs
-                 WHERE state='queued' OR (state='running' AND lease_until<=?)
+                 WHERE state='queued' OR (state IN ('running','uploading') AND lease_until<=?)
                  ORDER BY queued_at ASC LIMIT 1)
              RETURNING *",
             vec![TursoArg::text(&runner), TursoArg::int(now + LEASE_MS), TursoArg::int(now)]).await?;
@@ -213,6 +213,40 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
             "name": format!("{stem}_f.mp4"),
             "channel": tg_channel_id(env),
         }}));
+    }
+
+    // R2 oraliq ombori (`r2.rs`): Mini App so'ragan fMP4 ham avval R2'ga yoziladi, yuklovchi workflow (`upload.yml`) uni Telegram'ga
+    // (botga) olib boradi, bot kanalga saqlab bazaga yozadi (`commit`). Ish R2 navbatida turganda `uploading` holatida (6 soatgacha ijara).
+    if path == "/api/fmp4/r2put" || path == "/api/fmp4/r2ready" {
+        let (a, s, e) = (jint(&b, "anime_id"), jint(&b, "season_id"), jint(&b, "epizod_id"));
+        let q = b["quality"].as_str().unwrap_or("").to_string();
+        let file = b["file"].as_str().unwrap_or("").to_string();
+        let key = b["key"].as_str().unwrap_or("").to_ascii_lowercase();
+        let size = jint(&b, "size");
+        if !QUALITIES.contains(&q.as_str()) || !valid_name(&file, a, s, e, &q) || size <= 0
+            || (path == "/api/fmp4/r2put" && !valid_file_key(&key)) {
+            return bad("fayl");
+        }
+        let job = turso_exec(env,
+            "SELECT queued_at FROM fmp4_jobs WHERE anime_id=? AND season_id=? AND epizod_id=? AND quality=? AND state IN ('running','uploading')",
+            vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e), TursoArg::text(&q)]).await.ok().and_then(|r| first_row(&r));
+        let Some(job) = job else { return json_resp(&json!({"error": "job_lost"}), 409) };
+        if path == "/api/fmp4/r2put" {
+            return match r2::register(env, (a, s, e), jint(&job, "queued_at").max(1), &q, "fmp4", &file, &key, size).await {
+                Ok(mut v) => { v["ok"] = json!(true); ok(v) }
+                Err("full") => ok(json!({"ok": false, "wait": true})),
+                Err(_) => json_resp(&json!({"error": "r2"}), 503),
+            };
+        }
+        return match r2::mark_ready(env, &file, size, &b["parts"]).await {
+            Ok(()) => {
+                let _ = turso_exec(env,
+                    "UPDATE fmp4_jobs SET state='uploading', lease_until=? WHERE anime_id=? AND season_id=? AND epizod_id=? AND quality=?",
+                    vec![TursoArg::int(now + 6 * 3600 * 1000), TursoArg::int(a), TursoArg::int(s), TursoArg::int(e), TursoArg::text(&q)]).await;
+                ok(json!({"ok": true}))
+            }
+            Err(er) => json_resp(&json!({"error": er}), 409),
+        };
     }
 
     if path == "/api/fmp4/done" {

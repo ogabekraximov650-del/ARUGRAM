@@ -15,6 +15,7 @@ concurrency:
 
 permissions:
   contents: read
+  actions: write
 
 jobs:
   upload:
@@ -44,6 +45,7 @@ jobs:
           head -c 16 "$OUT" | grep -q "SQLite format 3" || { echo "::error::Sessiya ochilmadi (ENCODE_TOKEN noto'g'ri?)"; exit 1; }
 
       - name: R2 -> Telegram
+        id: up
         env:
           ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
           TG_API_ID: ${{ secrets.TG_API_ID }}
@@ -55,3 +57,15 @@ jobs:
       - name: Sessiyani o'chirish
         if: always()
         run: rm -f tool/upload/pyro_session.session
+
+      # Har run BITTA sifatni (MP4 va fMP4) Telegram'ga yetkazib o'chadi; R2'da fayl qolgan bo'lsa — yangi run ochiladi.
+      - name: Davom ettirish
+        if: success() && steps.up.outputs.worked == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+        run: |
+          N=$(curl -fsS -X POST -H "X-Encode-Token: $ENCODE_TOKEN" -H "Content-Type: application/json" -d '{}' \
+            -H "User-Agent: arugram-upload" "$API_BASE/api/r2/peek" | jq -r '.pending // 0')
+          echo "R2'da qolgan: $N"
+          if [ "$N" != "0" ]; then gh workflow run upload.yml --repo "$GITHUB_REPOSITORY"; fi

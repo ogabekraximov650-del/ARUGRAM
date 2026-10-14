@@ -10366,8 +10366,8 @@ fn needs_app_check(path: &str) -> bool {
         | "/api/encode/quality" | "/api/encode/finish" | "/api/encode/push" | "/api/encode/meta" | "/api/encode/ulock" | "/api/encode/committed" | "/api/encode/origin"
         | "/api/post/claim" | "/api/post/check" | "/api/post/finish" | "/api/post/progress"
         | "/api/anibla/claim" | "/api/anibla/diag" | "/api/anibla/progress" | "/api/anibla/done"
-        | "/api/fmp4/claim" | "/api/fmp4/done" | "/api/session/poll" | "/api/session/report"
-        | "/api/encode/r2put" | "/api/encode/r2ready" | "/api/r2/claim" | "/api/r2/beat" | "/api/r2/fail" | "/api/r2/done" | "/api/r2/diag" | "/api/r2/part" | "/api/r2/get")
+        | "/api/fmp4/claim" | "/api/fmp4/done" | "/api/fmp4/r2put" | "/api/fmp4/r2ready" | "/api/session/poll" | "/api/session/report"
+        | "/api/encode/r2put" | "/api/encode/r2ready" | "/api/r2/claim" | "/api/r2/beat" | "/api/r2/fail" | "/api/r2/done" | "/api/r2/diag" | "/api/r2/peek" | "/api/r2/part" | "/api/r2/get")
     {
         return false;
     }
@@ -14328,7 +14328,7 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
         let p = path.to_string();
         return r2::route(req, &env, &p).await;
     }
-    if method == Method::Post && (path == "/api/fmp4/claim" || path == "/api/fmp4/done") {
+    if method == Method::Post && (path == "/api/fmp4/claim" || path == "/api/fmp4/done" || path == "/api/fmp4/r2put" || path == "/api/fmp4/r2ready") {
         let p = path.to_string();
         return fmp4::route(req, &env, &p).await;
     }

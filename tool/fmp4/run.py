@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import sys
 import time
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -85,6 +86,91 @@ def session_api_id():
         return 0
 
 
+class _Slice:
+    """Fayldan `length` bayt o'qiydi (oqim, xotiraga yig'ilmaydi)."""
+
+    def __init__(self, f, length: int):
+        self.f, self.left = f, length
+
+    def read(self, n=-1):
+        if self.left <= 0:
+            return b""
+        n = self.left if n is None or n < 0 else min(n, self.left)
+        b = self.f.read(n)
+        self.left -= len(b)
+        return b
+
+
+def put_direct(url: str, path: Path):
+    """Imzolangan havola bilan R2'ga TO'G'RIDAN-TO'G'RI bitta PUT (worker'dan o'tmaydi)."""
+    size = path.stat().st_size
+    with open(path, "rb") as f:
+        req = urllib.request.Request(url, data=_Slice(f, size), method="PUT",
+                                     headers={"Content-Length": str(size), "User-Agent": "arugram-fmp4"})
+        with urllib.request.urlopen(req, timeout=1800) as r:
+            r.read()
+
+
+def put_parts(path: Path, name: str, part_size: int) -> list:
+    """Worker orqali multipart (R2 kaliti yo'q rejimi): bo'laklar OQIM bilan."""
+    size, parts = path.stat().st_size, []
+    with open(path, "rb") as f:
+        n, off = 0, 0
+        while off < size:
+            n += 1
+            length = min(part_size, size - off)
+            err = None
+            for attempt in range(1, 5):
+                try:
+                    f.seek(off)
+                    req = urllib.request.Request(
+                        f"{API}/api/r2/part?file={urllib.parse.quote(name)}&n={n}", data=_Slice(f, length), method="PUT",
+                        headers={"X-Encode-Token": TOKEN, "Content-Type": "application/octet-stream",
+                                 "Content-Length": str(length), "User-Agent": "arugram-fmp4"})
+                    with urllib.request.urlopen(req, timeout=900) as r:
+                        parts.append({"n": n, "etag": json.loads(r.read())["etag"]})
+                    err = None
+                    break
+                except Exception as ex:  # noqa: BLE001
+                    err = ex
+                    time.sleep(3 * attempt)
+            if err is not None:
+                raise RuntimeError(f"bo'lak {n}: {err}")
+            off += length
+    return parts
+
+
+def upload_r2(ident: dict, path: Path, name: str, key: str) -> bool:
+    """fMP4 ni R2'ga yozadi (yuklovchi workflow Telegram'ga olib boradi). R2 yo'q bo'lsa `False` (eski usul: to'g'ridan-to'g'ri kanalga)."""
+    size = path.stat().st_size
+    waited = 0
+    for attempt in range(1, 4):
+        try:
+            while True:
+                r = api("r2put", {**ident, "file": name, "key": key, "size": size})
+                if not r.get("wait"):
+                    break
+                if not waited:
+                    log("  R2'da joy yo'q — bo'shashi kutilmoqda...")
+                waited += 30
+                if waited > 8 * 3600:
+                    raise RuntimeError("R2 8 soat bo'shamadi")
+                time.sleep(30)
+            if r.get("url"):
+                put_direct(r["url"], path)
+                parts = []
+            else:
+                parts = put_parts(path, name, int(r.get("part_size") or 94371840))
+            api("r2ready", {**ident, "file": name, "size": size, "parts": parts})
+            return True
+        except Exception as ex:  # noqa: BLE001
+            if "503" in str(ex) or "api r2put ishlamadi" in str(ex):
+                return False
+            log(f"  R2'ga yozish {attempt}/3 muvaffaqiyatsiz: {ex}")
+            time.sleep(4 * attempt)
+    return False
+
+
 def one(app, job):
     a, s, e, q = job["anime_id"], job["season_id"], job["epizod_id"], job["quality"]
     ident = {"anime_id": a, "season_id": s, "epizod_id": e, "quality": q}
@@ -111,6 +197,10 @@ def one(app, job):
         sealed = WORK / job["name"]
         ctr(frag, sealed, fk)
         frag.unlink()
+        # Avval R2'ga (yuklovchi workflow Telegram'ga olib boradi, bot bazaga yozadi); R2 bo'lmasa — to'g'ridan-to'g'ri kanalga.
+        if upload_r2(ident, sealed, job["name"], fk.hex()):
+            log(f"  fMP4 {size / 1048576:.1f} MB R2'ga yozildi — Telegram'ga yuklovchi workflow olib boradi")
+            return
         log(f"  fMP4 {size / 1048576:.1f} MB — kanalga yuklanmoqda...")
         sent = app.send_document(int(job["channel"]), str(sealed), file_name=job["name"],
                                  force_document=True, caption=job["name"], disable_notification=True)

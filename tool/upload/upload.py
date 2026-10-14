@@ -30,6 +30,7 @@ START_BUDGET = int(float(os.environ.get("START_BUDGET_MIN", "300")) * 60)
 STALL_S = int(os.environ.get("UPLOAD_STALL_SEC", "120"))
 SEND_TRIES = int(os.environ.get("UPLOAD_TRIES", "5"))
 COMMIT_WAIT = int(os.environ.get("COMMIT_WAIT_SEC", "300"))
+SIBLING_WAIT = int(os.environ.get("SIBLING_WAIT_SEC", "300"))
 T0 = time.time()
 
 
@@ -201,11 +202,24 @@ async def main():
         me = await app.get_me()
         started_bot = False
         worked = 0
+        group = ""      # `a/s/e/queued_at/sifat` — bitta sifatning MP4 va fMP4 fayllari
+        seen_kinds = set()
+        sib_wait = 0
         while time.time() - T0 < START_BUDGET:
-            job = api("claim", {"runner": RUNNER, "uid": me.id})
+            job = api("claim", {"runner": RUNNER, "uid": me.id, **({"group": group} if group else {})})
+            if group and (job.get("none") or not job.get("file")):
+                # Shu sifatning ikkinchi fayli (MP4 <-> fMP4) hali R2'ga yetib kelmagan bo'lishi mumkin — qisqa kutiladi.
+                if len(seen_kinds) < 2 and sib_wait < SIBLING_WAIT:
+                    await asyncio.sleep(20)
+                    sib_wait += 20
+                    continue
+                log(f"Sifat tugadi ({group}) — run o'chadi, keyingisi yangi run'da ochiladi.")
+                break
             if job.get("none") or not job.get("file"):
                 log("Navbat bo'sh.")
                 break
+            group = job.get("group") or group
+            seen_kinds.add(job.get("kind") or "")
             if not started_bot and job.get("bot"):
                 # Bot shu akkauntdan fayl qabul qilishi uchun akkaunt botni bir marta ochgan bo'lsin.
                 started_bot = True
@@ -222,7 +236,12 @@ async def main():
                     api("fail", {"file": job["file"], "error": str(ex)[:250]})
                 except Exception as e2:  # noqa: BLE001
                     log(f"fail yozilmadi: {e2}")
+                await asyncio.sleep(15)
         log(f"Run tugadi. Yuklandi: {worked}")
+        out = os.environ.get("GITHUB_OUTPUT")
+        if out:
+            with open(out, "a") as fh:
+                fh.write(f"worked={'1' if worked else '0'}\n")
 
 
 if __name__ == "__main__":

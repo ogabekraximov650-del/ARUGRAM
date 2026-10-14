@@ -414,13 +414,24 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
                 }
             }
             let runner: String = b["runner"].as_str().unwrap_or("").chars().take(64).collect();
-            let res = turso_exec(env,
+            // `group` (`a/s/e/queued_at/sifat`) — faqat shu sifatning fayllari (MP4 va fMP4): yuklovchi bitta sifatni tugatib o'chadi.
+            let g: Vec<&str> = b["group"].as_str().unwrap_or("").split('/').collect();
+            let (gcond, gargs): (&str, Vec<TursoArg>) = if g.len() == 5 {
+                (" AND anime_id=? AND season_id=? AND epizod_id=? AND queued_at=? AND quality=?",
+                 vec![TursoArg::int(g[0].parse().unwrap_or(-1)), TursoArg::int(g[1].parse().unwrap_or(-1)),
+                      TursoArg::int(g[2].parse().unwrap_or(-1)), TursoArg::int(g[3].parse().unwrap_or(-1)), TursoArg::text(g[4])])
+            } else {
+                ("", vec![])
+            };
+            let sql = format!(
                 "UPDATE r2_files SET state='sending', runner=?, lease_until=?, attempts=attempts+1
                   WHERE file_name = (SELECT file_name FROM r2_files
-                                      WHERE state='ready' OR (state='sending' AND lease_until<=? AND attempts<?)
+                                      WHERE (state='ready' OR (state='sending' AND lease_until<=? AND attempts<?)){gcond}
                                       ORDER BY created_at ASC LIMIT 1)
-                  RETURNING *",
-                vec![TursoArg::text(&runner), TursoArg::int(now + LEASE_MS), TursoArg::int(now), TursoArg::int(MAX_ATTEMPTS)]).await?;
+                  RETURNING *");
+            let mut args = vec![TursoArg::text(&runner), TursoArg::int(now + LEASE_MS), TursoArg::int(now), TursoArg::int(MAX_ATTEMPTS)];
+            args.extend(gargs);
+            let res = turso_exec(env, &sql, args).await?;
             let Some(r) = first_row(&res) else { return ok(json!({"none": true})) };
             let name = r["file_name"].as_str().unwrap_or("").to_string();
             let (a, s, e, qa) = (jint(&r, "anime_id"), jint(&r, "season_id"), jint(&r, "epizod_id"), jint(&r, "queued_at"));
@@ -429,6 +440,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
             return ok(json!({
                 // 1-rejimda R2'dan to'g'ridan-to'g'ri olish havolasi (2 soat); aks holda yuklovchi worker'dan oqim bilan oladi.
                 "url": signed_url(env, "GET", &name, 7200),
+                "group": format!("{a}/{s}/{e}/{qa}/{q}"), "kind": kind,
                 "file": name, "size": size, "bot": bot_username(env).await,
                 "caption": format!("ARUENC|{kind}|{a}|{s}|{e}|{qa}|{q}|{key}|{size}"),
                 "attempt": jint(&r, "attempts"),
@@ -457,6 +469,13 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
                 None
             };
             return ok(json!({"ready": true, "direct": direct(env), "binding_ok": binding, "s3_bucket_status": head}));
+        }
+        // Yuklovchi "davom ettirish" qadami uchun: Telegram'ga yetkazilishi kutilayotgan fayllar soni.
+        "/api/r2/peek" => {
+            let n = turso_exec(env,
+                "SELECT COUNT(*) AS n FROM r2_files WHERE state='ready' OR (state='sending' AND lease_until<=? AND attempts<?)",
+                vec![TursoArg::int(now), TursoArg::int(MAX_ATTEMPTS)]).await.ok().and_then(|r| first_row(&r)).map(|r| jint(&r, "n")).unwrap_or(0);
+            return ok(json!({"pending": n}));
         }
         "/api/r2/beat" => {
             let _ = turso_exec(env, "UPDATE r2_files SET lease_until=? WHERE file_name=? AND state='sending'",
