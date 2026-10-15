@@ -239,7 +239,9 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
   /** prepare() dan OLDIN chaqiriladi: effekt konveyerini quradi (Media3 talabi). */
   @UnstableApi
   protected void preparePipelineIfNeeded() {
+    // Daraja faqat SHU pleyer uchun ishlatiladi (boshqa ekranlardagi videolar — chat, kesish — effektsiz qoladi).
     final int lv = preEnhance;
+    preEnhance = 0;
     if (lv <= 0) {
       return;
     }

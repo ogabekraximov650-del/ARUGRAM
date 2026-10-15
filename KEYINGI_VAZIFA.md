@@ -6421,3 +6421,7 @@ Anibla sekinligi (diag): worker -> anibla.uz har so'rovga ~1.2-1.4 s (login 1.4 
 - **Qora ekranning asl sababi (ehtimol):** effekt konveyeri (Media3) Flutter `SurfaceProducer` yuzasiga EGL orqali o'zi chizadi; kodekdan farqli, yuza
   o'lchamini o'zi belgilamaydi. `setSize` hech qayerda chaqirilmagani uchun yuza ~1x1 qolib ekran qora chiqardi. Endi `VideoPlayer.syncSurfaceSize`
   video o'lchami ma'lum bo'lganda va effekt ulanganda `surfaceProducer.setSize(w,h)` chaqiradi. Xuddi shu daraja takror ulanmaydi (o'rtada qayta qurilmasin).
+- **TUZATISH (haqiqiy sabab):** asosiy pleyer `VideoViewType.platformView` (SurfaceView) ishlatadi, texture emas. `PlatformVideoView` ExoPlayer'ga xom `Surface`
+  berardi — yuza o'lchami noma'lum, effekt konveyeri chiqishi yuzaga mos kelmay ekran qora/kesilgan edi. Endi `setVideoSurfaceHolder(holder)` — ExoPlayer
+  yuza o'lchamini biladi va effekt chiqishini shunga moslaydi. Boshqa o'zgarishlar: `preEnhance` faqat bitta pleyer uchun ishlatiladi (keyin 0), ekrandan
+  chiqilganda Dart uni 0 qiladi (chat/kesish videolari effektsiz qoladi). `syncSurfaceSize` faqat texture rejimi uchun (platformView'da ishlamaydi).

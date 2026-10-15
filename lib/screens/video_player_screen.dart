@@ -593,6 +593,10 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
 
   @override
   void dispose() {
+    // Qolib ketgan "effekt darajasi" boshqa ekranlardagi videolarga o'tmasin.
+    try {
+      _enhanceCh.invokeMethod<bool>('preset', {'level': 0}).catchError((_) => null);
+    } catch (_) {}
     PackSoundHub.instance.removeListener(_onGifSound);
     VideoGate.leave();
     // Pleyer yopildi — oldinga yuklash chegarasi olib tashlanadi.

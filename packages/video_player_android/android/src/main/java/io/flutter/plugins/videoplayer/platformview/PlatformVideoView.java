@@ -6,7 +6,6 @@ package io.flutter.plugins.videoplayer.platformview;
 
 import android.content.Context;
 import android.os.Build;
-import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
@@ -49,7 +48,7 @@ public final class PlatformVideoView implements PlatformView {
             new SurfaceHolder.Callback() {
               @Override
               public void surfaceCreated(@NonNull SurfaceHolder holder) {
-                bindPlayerToSurface(exoPlayer, holder.getSurface());
+                bindPlayerToHolder(exoPlayer, holder);
                 forceFirstFrameForAndroid9(exoPlayer);
               }
 
@@ -61,15 +60,18 @@ public final class PlatformVideoView implements PlatformView {
               public void surfaceDestroyed(@NonNull SurfaceHolder holder) {
                 // Use clearVideoSurface to ensure we only unbind if this surface is currently
                 // active.
-                exoPlayer.clearVideoSurface(holder.getSurface());
+                exoPlayer.clearVideoSurfaceHolder(holder);
               }
             });
   }
 
-  /** Binds the ExoPlayer to the provided surface. */
-  static void bindPlayerToSurface(@NonNull ExoPlayer exoPlayer, @NonNull Surface surface) {
-    if (surface.isValid()) {
-      exoPlayer.setVideoSurface(surface);
+  /**
+   * ARUGRAM: ExoPlayer'ga Surface emas, SurfaceHolder beriladi — shunda yuza o'lchami ExoPlayer'ga ma'lum bo'ladi.
+   * GPU effektlar (tasvirni yaxshilash) chiqishni shu o'lchamga moslaydi; aks holda tasvir kesilib/qora chiqadi.
+   */
+  static void bindPlayerToHolder(@NonNull ExoPlayer exoPlayer, @NonNull SurfaceHolder holder) {
+    if (holder.getSurface().isValid()) {
+      exoPlayer.setVideoSurfaceHolder(holder);
     }
   }
 
@@ -101,7 +103,7 @@ public final class PlatformVideoView implements PlatformView {
       super.onVisibilityChanged(changedView, visibility);
       // When the view becomes visible again, re-attach the current surface.
       if (visibility == View.VISIBLE && isShown()) {
-        bindPlayerToSurface(exoPlayer, getHolder().getSurface());
+        bindPlayerToHolder(exoPlayer, getHolder());
       }
     }
   }
