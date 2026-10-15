@@ -6418,3 +6418,6 @@ Anibla sekinligi (diag): worker -> anibla.uz har so'rovga ~1.2-1.4 s (login 1.4 
 - **Qora ekran (tasvirni yaxshilash yoqilganda):** sabab — effekt konveyeri kattalashtirish (Lanczos/Presentation) bilan boshqa o'lcham chiqarardi,
   Flutter yuzasi (`SurfaceProducer`) esa asl video o'lchamida qoladi. Kattalashtirish va o'lcham o'zgarganda qayta ulash olib tashlandi:
   endi faqat shader (deband, o'tkirlik, rang), chiqish o'lchami = kirish. Kattalashtirish kerak bo'lsa — avval `surfaceProducer.setSize` ni effekt chiqishiga moslash kerak.
+- **Qora ekranning asl sababi (ehtimol):** effekt konveyeri (Media3) Flutter `SurfaceProducer` yuzasiga EGL orqali o'zi chizadi; kodekdan farqli, yuza
+  o'lchamini o'zi belgilamaydi. `setSize` hech qayerda chaqirilmagani uchun yuza ~1x1 qolib ekran qora chiqardi. Endi `VideoPlayer.syncSurfaceSize`
+  video o'lchami ma'lum bo'lganda va effekt ulanganda `surfaceProducer.setSize(w,h)` chaqiradi. Xuddi shu daraja takror ulanmaydi (o'rtada qayta qurilmasin).

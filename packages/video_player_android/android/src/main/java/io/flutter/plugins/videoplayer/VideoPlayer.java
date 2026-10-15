@@ -158,6 +158,21 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
     return AruEnhanceShaderProgram.FRAMES.get() - enhanceFramesBase;
   }
 
+  /**
+   * Effekt konveyeri (GL) Flutter yuzasiga o'zi chizadi, kodek esa emas — yuza o'lchami video o'lchamiga
+   * teng bo'lishi SHART (aks holda ~1x1 yuzaga chiziladi va ekran qora ko'rinadi).
+   */
+  private void syncSurfaceSize(@Nullable androidx.media3.common.VideoSize size) {
+    if (!enhancePipeline || surfaceProducer == null || size == null || size.width <= 0 || size.height <= 0) {
+      return;
+    }
+    try {
+      surfaceProducer.setSize(size.width, size.height);
+    } catch (Throwable t) {
+      enhanceError = t.getClass().getSimpleName() + ": " + t.getMessage();
+    }
+  }
+
   @UnstableApi
   private void ensureEnhanceListeners() {
     if (enhanceListenersAdded) {
@@ -167,6 +182,11 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
     // Effekt konveyeri (GL) ishlamasa — effektsiz qayta tiklanadi, ijro to'xtab qolmasin.
     exoPlayer.addListener(
         new androidx.media3.common.Player.Listener() {
+          @Override
+          public void onVideoSizeChanged(androidx.media3.common.VideoSize size) {
+            syncSurfaceSize(size);
+          }
+
           @Override
           public void onPlayerError(androidx.media3.common.PlaybackException error) {
             if (enhanceLevel <= 0) {
@@ -248,6 +268,11 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
       if (!enhancePipeline) {
         return 2;
       }
+      if (level == enhanceLevel) {
+        // Xuddi shu daraja allaqachon ulangan — konveyer o'rtada qayta qurilmasin (ekran uzilishi).
+        syncSurfaceSize(exoPlayer.getVideoSize());
+        return 1;
+      }
       ensureEnhanceListeners();
       enhanceDrops = 0;
       enhanceWindowMs = 0;
@@ -257,6 +282,7 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
       // video o'lchamida; effekt boshqa o'lcham chiqarsa ekran qora/kesilgan bo'ladi. Chiqish o'lchami = kirish.
       effects.add(new AruEnhanceEffect(level));
       exoPlayer.setVideoEffects(effects);
+      syncSurfaceSize(exoPlayer.getVideoSize());
       enhanceLevel = level;
       return 1;
     } catch (Throwable t) {
