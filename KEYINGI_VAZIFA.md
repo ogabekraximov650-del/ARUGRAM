@@ -6415,3 +6415,6 @@ Anibla sekinligi (diag): worker -> anibla.uz har so'rovga ~1.2-1.4 s (login 1.4 
   sifat (800p manba -> "720p" nomi, 800p o'lcham). Pastki sifatlar standart balandlikka kichraytiriladi. Sifat tanlash chegaralari (`encode_planned`) o'zgarmadi.
 - **Sifat chegarasi — teng yarmi:** asl balandlik qo'shni sifatlar o'rtasiga qarab nomlanadi: 360/480 -> 420, 480/720 -> 600, 720/1080 -> 900
   (`run.py plan()` va worker `encode_planned` bir xil). Eng yuqori sifat asl o'lchamida qoladi (899p -> "720p", 900p -> "1080p").
+- **Qora ekran (tasvirni yaxshilash yoqilganda):** sabab — effekt konveyeri kattalashtirish (Lanczos/Presentation) bilan boshqa o'lcham chiqarardi,
+  Flutter yuzasi (`SurfaceProducer`) esa asl video o'lchamida qoladi. Kattalashtirish va o'lcham o'zgarganda qayta ulash olib tashlandi:
+  endi faqat shader (deband, o'tkirlik, rang), chiqish o'lchami = kirish. Kattalashtirish kerak bo'lsa — avval `surfaceProducer.setSize` ni effekt chiqishiga moslash kerak.

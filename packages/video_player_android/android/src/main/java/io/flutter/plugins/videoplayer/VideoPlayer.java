@@ -145,7 +145,6 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
   @Nullable private EnhanceListener enhanceListener;
   private int enhanceDrops = 0;
   private long enhanceFramesBase = 0;
-  private int enhanceSizeH = 0;
   /** Oxirgi effekt xatosi (diagnostika: Dart ekranda ko'rsatadi). */
   @Nullable public String enhanceError;
   private long enhanceWindowMs = 0;
@@ -185,14 +184,6 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
                 }
                 return;
               }
-            }
-          }
-
-          @Override
-          public void onVideoSizeChanged(androidx.media3.common.VideoSize size) {
-            // O'lcham ma'lum bo'lgach (prepare()'dan oldin noma'lum edi) kattalashtirish qo'shiladi.
-            if (enhanceLevel >= 2 && size.height > 0 && enhanceSizeH == 0) {
-              setEnhance(enhanceLevel);
             }
           }
         });
@@ -242,7 +233,7 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
    * Qaytaradi: 1 — bajarildi; 0 — xato (rang filtriga qaytiladi); 2 — pleyer effekt konveyerisiz yaratilgan
    * (Dart pleyerni qayta ochishi kerak).
    *
-   * <p>Manba past o'lchamli bo'lsa avval GPU'da kattalashtiriladi (1 — 720p, 2/3 — 1080p gacha Lanczos).
+   * <p>Kattalashtirish yo'q: chiqish o'lchami kirish bilan bir xil (Flutter yuzasi asl o'lchamda).
    */
   @UnstableApi
   public int setEnhance(int level) {
@@ -262,17 +253,8 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
       enhanceWindowMs = 0;
       enhanceFramesBase = AruEnhanceShaderProgram.FRAMES.get();
       final java.util.List<androidx.media3.common.Effect> effects = new java.util.ArrayList<>();
-      final androidx.media3.common.Format f = exoPlayer.getVideoFormat();
-      final int target = level >= 2 ? 1080 : 720;
-      enhanceSizeH = f != null ? f.height : 0;
-      if (f != null && f.height > 0 && f.height < target) {
-        if (level >= 2) {
-          // Kuchli/Maksimal: Lanczos (sinc) kattalashtirish — bilinear'dan ancha aniq chiziqlar.
-          effects.add(androidx.media3.effect.LanczosResample.scaleToFit(1920, 1080));
-        } else {
-          effects.add(androidx.media3.effect.Presentation.createForHeight(target));
-        }
-      }
+      // DIQQAT: kattalashtirish (Lanczos/Presentation) QO'SHILMAYDI — Flutter yuzasi (SurfaceProducer) asl
+      // video o'lchamida; effekt boshqa o'lcham chiqarsa ekran qora/kesilgan bo'ladi. Chiqish o'lchami = kirish.
       effects.add(new AruEnhanceEffect(level));
       exoPlayer.setVideoEffects(effects);
       enhanceLevel = level;
