@@ -646,7 +646,7 @@ def src_info(path: Path) -> dict:
 
 def plan(height):
     """Upscale YO'Q: manbadan baland sifat qilinmaydi. Nostandart
-    balandlik (masalan 1070p) eng yaqin sifat sifatida o'lchamsiz."""
+    balandlik (masalan 800p) eng yaqin sifat nomi bilan, lekin o'z o'lchamida qoladi."""
     h = min(height, 1080)
     out = []
     for label, target, dcrf in LADDER:
@@ -656,6 +656,11 @@ def plan(height):
             out.append((label, h - h % 2, dcrf))
     if not out:
         out.append(("360p", h - h % 2, 3))
+    # Eng yuqori sifat asl balandligida qoladi (800p -> "720p" nomi bilan, 800p sifatida kodlanadi);
+    # undan pastlari standart balandlikka kichraytiriladi.
+    top = h - h % 2
+    if out[0][1] < top:
+        out[0] = (out[0][0], top, out[0][2])
     return out
 
 

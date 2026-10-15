@@ -6411,3 +6411,5 @@ Anibla sekinligi (diag): worker -> anibla.uz har so'rovga ~1.2-1.4 s (login 1.4 
 - **"0 kadr" xatosi sababi:** Media3 `setVideoEffects` ni `prepare()` dan OLDIN kamida bir marta chaqirishni talab qiladi, aks holda effekt konveyeri
   qurilmaydi. Yechim: `VideoPlayer.preEnhance` (Dart `preset` usuli bilan beriladi) bo'yicha konstruktorda `prepare()` dan oldin konveyer quriladi.
   `setEnhance` 1 = qo'llandi, 0 = qo'llanmadi, 2 = konveyer yo'q (Dart epizodni shu joydan qayta ochadi).
+- **Nostandart balandlik (ilova uchun kodlash):** `tool/encode/run.py` `plan()` — eng yuqori sifat asl balandligida kodlanadi, nomi esa eng yaqin standart
+  sifat (800p manba -> "720p" nomi, 800p o'lcham). Pastki sifatlar standart balandlikka kichraytiriladi. Sifat tanlash chegaralari (`encode_planned`) o'zgarmadi.
