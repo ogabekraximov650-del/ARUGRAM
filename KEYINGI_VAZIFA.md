@@ -6413,3 +6413,5 @@ Anibla sekinligi (diag): worker -> anibla.uz har so'rovga ~1.2-1.4 s (login 1.4 
   `setEnhance` 1 = qo'llandi, 0 = qo'llanmadi, 2 = konveyer yo'q (Dart epizodni shu joydan qayta ochadi).
 - **Nostandart balandlik (ilova uchun kodlash):** `tool/encode/run.py` `plan()` — eng yuqori sifat asl balandligida kodlanadi, nomi esa eng yaqin standart
   sifat (800p manba -> "720p" nomi, 800p o'lcham). Pastki sifatlar standart balandlikka kichraytiriladi. Sifat tanlash chegaralari (`encode_planned`) o'zgarmadi.
+- **Sifat chegarasi — teng yarmi:** asl balandlik qo'shni sifatlar o'rtasiga qarab nomlanadi: 360/480 -> 420, 480/720 -> 600, 720/1080 -> 900
+  (`run.py plan()` va worker `encode_planned` bir xil). Eng yuqori sifat asl o'lchamida qoladi (899p -> "720p", 900p -> "1080p").

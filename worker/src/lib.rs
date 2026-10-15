@@ -11072,13 +11072,13 @@ const ENCODE_WORKFLOWS: [(&str, &str); 4] = [
 ];
 
 /// Asl video balandligi `h` bo'lganda shu sifat tayyorlanadimi (`tool/encode/run.py` `plan()`
-/// bilan bir xil: upscale YO'Q, nostandart balandlik eng yaqin sifatga). 360p har doim.
+/// bilan bir xil: upscale YO'Q, chegara — qo'shni sifatlarning teng yarmi). 360p har doim.
 fn encode_planned(q: &str, h: i64) -> bool {
     match q {
         "360p" => true,
-        "480p" => h >= 432,
-        "720p" => h >= 648,
-        "1080p" => h >= 972,
+        "480p" => h >= 420,
+        "720p" => h >= 600,
+        "1080p" => h >= 900,
         _ => false,
     }
 }

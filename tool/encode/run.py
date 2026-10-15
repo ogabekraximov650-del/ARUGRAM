@@ -645,23 +645,19 @@ def src_info(path: Path) -> dict:
 
 
 def plan(height):
-    """Upscale YO'Q: manbadan baland sifat qilinmaydi. Nostandart
-    balandlik (masalan 800p) eng yaqin sifat nomi bilan, lekin o'z o'lchamida qoladi."""
+    """Upscale YO'Q. Asl balandlik qo'shni sifatlarning TENG YARMI bo'yicha eng yaqin sifatga
+    tegishli (360/480 -> 420, 480/720 -> 600, 720/1080 -> 900). Eng yuqori sifat asl o'lchamida
+    qoladi (800p -> "720p" nomi, 800p kodlanadi); undan pastlari standart balandlikka kichraytiriladi."""
     h = min(height, 1080)
-    out = []
-    for label, target, dcrf in LADDER:
-        if h >= target:
-            out.append((label, target, dcrf))
-        elif h >= target * 0.9 and not out:
-            out.append((label, h - h % 2, dcrf))
-    if not out:
-        out.append(("360p", h - h % 2, 3))
-    # Eng yuqori sifat asl balandligida qoladi (800p -> "720p" nomi bilan, 800p sifatida kodlanadi);
-    # undan pastlari standart balandlikka kichraytiriladi.
     top = h - h % 2
-    if out[0][1] < top:
-        out[0] = (out[0][0], top, out[0][2])
-    return out
+    out = []
+    for i, (label, target, dcrf) in enumerate(LADDER):
+        # pastki qo'shni sifat bilan chegara (teng yarmi); 1080p dan yuqorisi yo'q
+        lower = LADDER[i + 1][1] if i + 1 < len(LADDER) else 0
+        if lower and h >= (target + lower) / 2:
+            out = [(label, top, dcrf)] + [(l, t, d) for l, t, d in LADDER[i + 1:]]
+            return out
+    return [("360p", top, 3)]
 
 
 def cpu_model() -> str:
