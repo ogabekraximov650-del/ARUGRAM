@@ -94,6 +94,21 @@ class MainActivity : FlutterActivity() {
         if (hasFocus) applyEdgeToEdge()
     }
 
+    // ── PLEYER TO'LIQ EKRANDA: tizim tugmalari QO'L BILAN SURILMAGUNCHA YASHIRIN ──
+    // Dart (`NavInset.setImmersive`) yoqadi. Oyna fokusni qaytarganda (MIUI, bildirishnoma pardasi, dialog) ham qayta yashiriladi.
+    private var immersive = false
+
+    private fun applyImmersive() {
+        val c = androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
+        if (immersive) {
+            c.systemBarsBehavior =
+                androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            c.hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+        } else {
+            c.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+        }
+    }
+
     private fun applyEdgeToEdge() {
         window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION)
         window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS)
@@ -123,6 +138,7 @@ class MainActivity : FlutterActivity() {
             window.isNavigationBarContrastEnforced = false
             window.isStatusBarContrastEnforced = false
         }
+        if (immersive) applyImmersive()
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -212,6 +228,11 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "navBottom" -> result.success(navBottomPx())
+                    "immersive" -> {
+                        immersive = call.argument<Boolean>("on") == true
+                        applyImmersive()
+                        result.success(true)
+                    }
                     else -> result.notImplemented()
                 }
             }

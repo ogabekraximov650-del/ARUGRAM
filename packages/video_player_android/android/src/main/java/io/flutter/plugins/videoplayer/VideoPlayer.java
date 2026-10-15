@@ -148,6 +148,8 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
   /** Oxirgi effekt xatosi (diagnostika: Dart ekranda ko'rsatadi). */
   @Nullable public String enhanceError;
   private long enhanceWindowMs = 0;
+  private int enhanceBadWindows = 0;
+  private long enhanceQuietUntil = 0;
 
   public void setEnhanceListener(@Nullable EnhanceListener l) {
     enhanceListener = l;
@@ -188,6 +190,15 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
           }
 
           @Override
+          public void onPositionDiscontinuity(
+              androidx.media3.common.Player.PositionInfo oldPosition,
+              androidx.media3.common.Player.PositionInfo newPosition,
+              int reason) {
+            // Seek / sakrash: keyingi ~6 s kadr tashlanishi effektdan emas.
+            enhanceQuietUntil = android.os.SystemClock.elapsedRealtime() + 6000;
+          }
+
+          @Override
           public void onPlayerError(androidx.media3.common.PlaybackException error) {
             if (enhanceLevel <= 0) {
               return;
@@ -218,15 +229,29 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
             if (enhanceLevel <= 0) {
               return;
             }
+            final long now = android.os.SystemClock.elapsedRealtime();
+            // Boshlanish, seek va buferlash paytidagi tashlanishlar effektga bog'liq emas — hisobga olinmaydi.
+            if (now < enhanceQuietUntil || exoPlayer.getPlaybackState() != androidx.media3.common.Player.STATE_READY) {
+              enhanceDrops = 0;
+              enhanceWindowMs = 0;
+              enhanceBadWindows = 0;
+              return;
+            }
             enhanceDrops += droppedFrames;
             enhanceWindowMs += Math.max(elapsedMs, 1);
-            if (enhanceWindowMs >= 3000) {
+            if (enhanceWindowMs >= 2500) {
               final double perSec = enhanceDrops * 1000.0 / enhanceWindowMs;
               enhanceDrops = 0;
               enhanceWindowMs = 0;
-              if (perSec > 3.0) {
-                final int next = Math.max(0, enhanceLevel - 1);
+              // Faqat ketma-ket IKKI yomon oyna (~5 s) bo'lsa daraja tushiriladi (bir martalik uzilishda emas).
+              enhanceBadWindows = perSec > 4.0 ? enhanceBadWindows + 1 : 0;
+              if (enhanceBadWindows >= 2) {
+                enhanceBadWindows = 0;
+                // 3 -> 2 -> 1 (yengil, 5 ta o'qish). Yengilda ham tashlansa — qurilma dekoderning o'zida zo'riqyapti:
+                // shunda effekt o'chiriladi.
+                final int next = enhanceLevel - 1;
                 setEnhance(next);
+                enhanceQuietUntil = now + 4000;
                 if (enhanceListener != null) {
                   enhanceListener.onEnhanceDegraded(next);
                 }
@@ -278,6 +303,8 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
       ensureEnhanceListeners();
       enhanceDrops = 0;
       enhanceWindowMs = 0;
+      enhanceBadWindows = 0;
+      enhanceQuietUntil = android.os.SystemClock.elapsedRealtime() + 8000;
       enhanceFramesBase = AruEnhanceShaderProgram.FRAMES.get();
       final java.util.List<androidx.media3.common.Effect> effects = new java.util.ArrayList<>();
       // DIQQAT: kattalashtirish (Lanczos/Presentation) QO'SHILMAYDI — Flutter yuzasi (SurfaceProducer) asl

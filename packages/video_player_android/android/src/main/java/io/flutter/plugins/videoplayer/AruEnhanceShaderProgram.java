@@ -31,7 +31,7 @@ final class AruEnhanceShaderProgram extends BaseGlShaderProgram {
           + "}\n";
 
   // sharp, sat, con, deband, line, clarity, vib
-  private static final float[] LEVEL1 = {0.45f, 1.18f, 1.07f, 0.5f, 0.0f, 0.0f, 0.0f};
+  private static final float[] LEVEL1 = {0.45f, 1.18f, 1.07f, 0.0f, 0.0f, 0.0f, 0.0f}; // yengil: 5 ta o'qish (kuchsiz telefonlar uchun)
   private static final float[] LEVEL2 = {0.8f, 1.35f, 1.14f, 0.8f, 0.6f, 0.0f, 0.0f};
   // 3 — MAKSIMAL (faqat ilovada): kuchli o'tkirlik + ravshanlik + vibrance (GPU'da Lanczos kattalashtirish bilan birga)
   private static final float[] LEVEL3 = {1.0f, 1.32f, 1.16f, 0.9f, 0.8f, 0.35f, 0.55f};

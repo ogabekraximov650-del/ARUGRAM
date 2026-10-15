@@ -3135,12 +3135,12 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       final args = call.arguments;
       if (args is! Map || args['playerId'] != _controller?.playerId) return;
       final next = (args['level'] as num?)?.toInt() ?? 0;
-      AppSettings.instance.setVideoEnhance(next);
+      // Foydalanuvchi tanlagan daraja SAQLANADI (faqat shu ijro uchun vaqtincha tushiriladi) — keyingi qismda yana urinadi.
       if (!mounted) return;
       setState(() => _enhanceNative = next > 0);
       _showNotice(next > 0
-          ? 'Telefon sekin — yaxshilash "${_enhanceNames[next]}" ga tushirildi'
-          : 'Telefon sekin — tasvirni yaxshilash o\'chirildi');
+          ? 'Telefon sekin — shu qism uchun yaxshilash "${_enhanceNames[next]}" ga tushirildi'
+          : 'Telefon sekin — shu qism uchun tasvirni yaxshilash o\'chirildi');
     });
   }
 
@@ -3918,6 +3918,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       ]);
       NavInset.immersive.value = true;
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+      NavInset.setImmersive(true);
+      // Flutter va tizim o'z rejimini qo'yib bo'lgach yana bir marta aniq yashiriladi.
+      Future<void>.delayed(const Duration(milliseconds: 500), () {
+        if (mounted && _isFullscreen) NavInset.setImmersive(true);
+      });
     } else {
       _restoreSystemUI();
     }
@@ -3925,6 +3930,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   }
 
   void _restoreSystemUI() {
+    NavInset.setImmersive(false);
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     NavInset.immersive.value = false;
@@ -4485,49 +4491,25 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   /// boshqaruv allaqachon ixcham.
   double _ctrlScale(bool isFullscreen) {
     if (!isFullscreen) return 1.0;
+    // TALAB: video o'lchamidan qat'iy nazar tugmalar BUTUN ekranda ko'rinsin -> o'lcham ekrandan olinadi (kadrdan emas).
     final m = MediaQuery.of(context).size;
-    final ctrl = _controller;
-    final ar =
-        (ctrl != null && ctrl.value.isInitialized && ctrl.value.aspectRatio > 0)
-            ? ctrl.value.aspectRatio
-            : 16 / 9;
-    var vw = m.width;
-    var vh = m.height;
-    if (vw / vh > ar) {
-      vw = vh * ar;
-    } else {
-      vh = vw / ar;
-    }
-    final byWidth = vw / 640.0;
-    final byHeight = vh / 360.0;
-    final s = byWidth < byHeight ? byWidth : byHeight;
-    return s.clamp(0.7, 1.6).toDouble();
+    final s = (m.width / 700.0) < (m.height / 360.0) ? m.width / 700.0 : m.height / 360.0;
+    return s.clamp(0.85, 1.5).toDouble();
   }
 
+  /// Boshqaruv BUTUN ekran bo'ylab (video kadri nisbatidan mustaqil). To'liq ekranda faqat kesim (notch) va
+  /// tizim paneli chetlari hisobga olinadi — tugmalar ularning tagida qolib ketmasin.
   Widget _inVideoFrame(Widget child) {
-    return LayoutBuilder(
-      builder: (context, c) {
-        final ctrl = _controller;
-        final ar = (ctrl != null &&
-                ctrl.value.isInitialized &&
-                ctrl.value.aspectRatio > 0)
-            ? ctrl.value.aspectRatio
-            : 16 / 9;
-        var vw = c.maxWidth;
-        var vh = c.maxHeight;
-        if (vw / vh > ar) {
-          vw = vh * ar;
-        } else {
-          vh = vw / ar;
-        }
-        final padX = ((c.maxWidth - vw) / 2).clamp(0.0, 1e6).toDouble();
-        final padY = ((c.maxHeight - vh) / 2).clamp(0.0, 1e6).toDouble();
-        if (padX < 1 && padY < 1) return child;
-        return Padding(
-          padding: EdgeInsets.symmetric(horizontal: padX, vertical: padY),
-          child: child,
-        );
-      },
+    if (!_isFullscreen) return child;
+    final p = MediaQuery.of(context).viewPadding;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        p.left > 12 ? p.left : 12,
+        p.top > 4 ? p.top : 4,
+        p.right > 12 ? p.right : 12,
+        p.bottom > 4 ? p.bottom : 4,
+      ),
+      child: child,
     );
   }
 

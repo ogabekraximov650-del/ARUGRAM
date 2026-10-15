@@ -6425,3 +6425,9 @@ Anibla sekinligi (diag): worker -> anibla.uz har so'rovga ~1.2-1.4 s (login 1.4 
   berardi — yuza o'lchami noma'lum, effekt konveyeri chiqishi yuzaga mos kelmay ekran qora/kesilgan edi. Endi `setVideoSurfaceHolder(holder)` — ExoPlayer
   yuza o'lchamini biladi va effekt chiqishini shunga moslaydi. Boshqa o'zgarishlar: `preEnhance` faqat bitta pleyer uchun ishlatiladi (keyin 0), ekrandan
   chiqilganda Dart uni 0 qiladi (chat/kesish videolari effektsiz qoladi). `syncSurfaceSize` faqat texture rejimi uchun (platformView'da ishlamaydi).
+- **Pleyer: yengil/moslashuvchan effekt + to'liq ekran.**
+  * Avto-pasaytirish: boshlanish (8 s), seek (6 s) va buferlash paytidagi kadr tashlanishi hisobga olinmaydi; ketma-ket IKKI yomon oyna (~5 s, >4 kadr/s)
+    bo'lsa daraja 3->2->1->o'chiq. Pasaytirilgan daraja SAQLANMAYDI (foydalanuvchi tanlovi qoladi, keyingi qismda yana uriniladi).
+  * Shader: diagonal/uzoq o'qishlar faqat deband yoqilganda; 1-daraja deband'siz (5 ta o'qish) — kuchsiz telefonlarda ham yengil.
+  * Boshqaruv tugmalari video kadriga emas, BUTUN ekranga (to'liq ekranda faqat notch/panel chetlari hisobga olinadi); `_ctrlScale` ekrandan.
+  * To'liq ekran: `MainActivity` `aru/insets` kanalida `immersive` — tizim panellari qo'l bilan surilmaguncha yashirin, fokus qaytganda qayta yashiriladi.

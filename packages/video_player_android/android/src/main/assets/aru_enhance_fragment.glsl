@@ -43,10 +43,6 @@ void main() {
   vec3 d = texture2D(uTexSampler, uv + vec2(-t.x, 0.0)).rgb;
   vec3 f = texture2D(uTexSampler, uv + vec2(t.x, 0.0)).rgb;
   vec3 h = texture2D(uTexSampler, uv + vec2(0.0, t.y)).rgb;
-  vec3 a = texture2D(uTexSampler, uv + vec2(-t.x, -t.y)).rgb;
-  vec3 c = texture2D(uTexSampler, uv + vec2(t.x, -t.y)).rgb;
-  vec3 g = texture2D(uTexSampler, uv + vec2(-t.x, t.y)).rgb;
-  vec3 i = texture2D(uTexSampler, uv + vec2(t.x, t.y)).rgb;
 
   float le = luma(e);
   float lmin = min(min(min(luma(b), luma(d)), min(luma(f), luma(h))), le);
@@ -56,6 +52,11 @@ void main() {
   // 1) Deband / denoise: faqat tekis joyda (mahalliy kontrast kichik).
   vec3 col = e;
   if (uDeband > 0.0) {
+    // Diagonal qo'shnilar faqat deband yoqilganda o'qiladi (kuchsiz telefonlarda yengil rejim 5 ta o'qish bilan ishlaydi).
+    vec3 a = texture2D(uTexSampler, uv + vec2(-t.x, -t.y)).rgb;
+    vec3 c = texture2D(uTexSampler, uv + vec2(t.x, -t.y)).rgb;
+    vec3 g = texture2D(uTexSampler, uv + vec2(-t.x, t.y)).rgb;
+    vec3 i = texture2D(uTexSampler, uv + vec2(t.x, t.y)).rgb;
     vec3 far0 = texture2D(uTexSampler, uv + vec2(-2.0 * t.x, 0.0)).rgb;
     vec3 far1 = texture2D(uTexSampler, uv + vec2(2.0 * t.x, 0.0)).rgb;
     vec3 far2 = texture2D(uTexSampler, uv + vec2(0.0, -2.0 * t.y)).rgb;

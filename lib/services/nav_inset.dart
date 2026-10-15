@@ -29,6 +29,15 @@ class NavInset {
   /// Pleyer to'liq ekranda — tizim tugmalari yashirin, zaxira kerak emas.
   static final ValueNotifier<bool> immersive = ValueNotifier(false);
 
+  /// Pleyer to'liq ekranda: tizim tugmalari/holat paneli yashiriladi va faqat qo'l bilan
+  /// chetdan surilganda vaqtincha chiqadi (Android `onWindowFocusChanged` da qayta yashiradi).
+  static Future<void> setImmersive(bool on) async {
+    if (defaultTargetPlatform != TargetPlatform.android) return;
+    try {
+      await _ch.invokeMethod<bool>('immersive', {'on': on});
+    } catch (_) {}
+  }
+
   /// Android'dan qayta o'qiydi (ishga tushganda, ilovaga qaytganda va
   /// to'liq ekrandan chiqqanda).
   static Future<void> refresh() async {
