@@ -60,7 +60,8 @@ import uz.arumediatv.com.ui.theme.AruColors
 fun PlayerSurface(player: AruPlayer, modifier: Modifier = Modifier) {
     AndroidView(
         factory = { ctx ->
-            PlayerView(ctx).apply {
+            // TextureView: SurfaceView Compose qatlamlari ostida qolib, video qora ko'rinardi (faqat ovoz).
+            (android.view.LayoutInflater.from(ctx).inflate(uz.arumediatv.com.R.layout.aru_player_view, null) as PlayerView).apply {
                 useController = false
                 this.player = player.exo
                 setBackgroundColor(android.graphics.Color.BLACK)
