@@ -1,0 +1,25 @@
+name: Kodlashni to'xtatish / yoqish (avtoencode repo)
+
+# `tool/migrate/stop.txt` o'zgarganda: ikkinchi akkauntdagi avtoencode repo'da barcha workflow o'chiriladi va run'lar
+# bekor qilinadi (matn `stop`). Matn `start` bo'lsa — qayta yoqiladi.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tool/migrate/stop.txt'
+      - 'tool/migrate/stop_encode.py'
+      - '.github/workflows/migrate-stop.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  stop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bajarish
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+        run: python3 tool/migrate/stop_encode.py "$(tr -d '[:space:]' < tool/migrate/stop.txt)"
