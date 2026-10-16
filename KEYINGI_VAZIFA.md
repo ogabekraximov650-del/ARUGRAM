@@ -6463,3 +6463,10 @@ Anibla sekinligi (diag): worker -> anibla.uz har so'rovga ~1.2-1.4 s (login 1.4 
 - **Yig'ish:** faqat Actions (`android-native.yml`): `cargo test` -> `cargo ndk` (arm64-v8a + armeabi-v7a, 16 KB tekislash tekshiruvi) -> `gradle testDebugUnitTest`
   -> `assembleRelease` (imzo — `ci/release.keystore`, Flutter bilan bir xil) -> artifact `arumediatv-native-<run>`. R8 (`isMinifyEnabled`) hozircha o'chiq.
 - `versionCode = github.run_number` (Flutter ilovasi `1` edi; yangi APK ustiga o'rnatilishi uchun run raqami 1 dan katta bo'lishi kerak — birinchi run'lar 1 ga teng bo'lishi mumkin: o'rnatilmasa eskisini o'chiring).
+
+## Eski worker o'chirildi; Flutter admin APK alohida paket nomi bilan (2026-10)
+
+- **Sabab (404 xatosi):** ko'chirishdan keyin bot webhook'lari eski worker'da qolgan edi — u fayllarni ESKI bazaga yozib, umumiy R2'dan o'chirardi (yangi baza bilmasdi).
+  Webhook'lar yangi worker'ga o'tkazildi; `tool/migrate/reconcile.py` (`migrate-fix.yml`) farqni tuzatdi (tg_files, epizod_db, encode_jobs, post_jobs, R2 qatorlari).
+- **Eski worker** `delete-old-worker.yml` bilan o'chirildi (`tool/migrate/delete_old.txt`). Eski Flutter ilova (eski manzil) endi ulana olmaydi.
+- **Flutter APK:** faqat ADMIN yig'iladi, paket `uz.arumediatv.admin` (Kotlin ilovasi `uz.arumediatv.com` bilan yonma-yon). `pubspec.yaml` versiyasi `0.0.1+2`.

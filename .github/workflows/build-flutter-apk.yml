@@ -107,8 +107,7 @@ jobs:
           # (foydalanuvchi talabi, 2026-10: "admin va user apklar 32+64 bitli bir butun apk bo'lib yig'ilsin").
           - name: admin
             admin: 'true'
-          - name: user
-            admin: 'false'
+          # (2026-10: faqat ADMIN APK yig'iladi — foydalanuvchi APK'si vaqtincha olib tashlandi.)
 
     steps:
       - name: Checkout code
@@ -458,7 +457,8 @@ jobs:
       - name: Kadr ajratuvchini (MediaMetadataRetriever) joylashtirish
         run: |
           set -e
-          PKG="uz.arumediatv.com"
+          # Admin APK alohida paket nomi bilan (Kotlin ilovasi `uz.arumediatv.com` bilan yonma-yon o'rnatilishi uchun).
+          PKG="uz.arumediatv.admin"
           OLD=$(find android/app/src/main -name "MainActivity.kt" | head -1)
           if [ -z "$OLD" ]; then
             echo "❌ MainActivity.kt topilmadi"
