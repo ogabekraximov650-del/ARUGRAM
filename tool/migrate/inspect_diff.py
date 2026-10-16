@@ -42,3 +42,14 @@ for (a, s, e) in ((3, 1, 454), (9, 1, 599), (9, 1, 600), (9, 1, 601)):
 print("\n== ESKI post_jobs ==")
 print([short(r) for r in run(OLD, "SELECT * FROM post_jobs")])
 print("== YANGI r2_files holati ==", run(NEW, "SELECT state, COUNT(*) AS n FROM r2_files GROUP BY state"))
+
+print("\n== app_config farq (faqat kalit nomlari; qiymatlar chop etilmaydi) ==")
+old = {r["cfg_key"]: r["cfg_value"] for r in run(OLD, "SELECT cfg_key, cfg_value FROM app_config")}
+new = {r["cfg_key"]: r["cfg_value"] for r in run(NEW, "SELECT cfg_key, cfg_value FROM app_config")}
+for k in sorted(set(old) | set(new)):
+    if old.get(k) != new.get(k):
+        side = "faqat eskida" if k not in new else ("faqat yangida" if k not in old else "qiymat farq")
+        print(f"  {k}: {side} (eski {len(old.get(k) or '')} / yangi {len(new.get(k) or '')} belgi)")
+print("== ESKI post_jobs (kalit maydonlari) ==")
+for r in run(OLD, "SELECT * FROM post_jobs"):
+    print({k: (v[:30] if isinstance(v, str) else v) for k, v in r.items() if k not in ("title", "caption", "file_id")})
