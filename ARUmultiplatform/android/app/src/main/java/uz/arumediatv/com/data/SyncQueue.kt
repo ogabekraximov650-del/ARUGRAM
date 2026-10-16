@@ -44,6 +44,10 @@ class SyncQueue(
     @Volatile
     private var lastSentAt = 0L
 
+    /** `TrafficMeter` ulaydi: serverga yuboriladigan trafik (bayt) va yuborilgach ayirish. */
+    var trafficPending: () -> Long = { 0L }
+    var onTrafficReported: (Long) -> Unit = {}
+
     object Kind {
         const val HISTORY = "history"
         const val RATING = "rating"
@@ -140,7 +144,7 @@ class SyncQueue(
             }
         }
         var guard = 0
-        while (pendingCount > 0 && guard++ < 10) {
+        while ((pendingCount > 0 || trafficPending() > 0) && guard++ < 10) {
             if (!sendOnce(token)) return@withLock SyncResult.OFFLINE
         }
         SyncResult.DONE
@@ -149,7 +153,7 @@ class SyncQueue(
 
     private fun sendOnce(token: String): Boolean {
         val batch: List<JSONObject> = synchronized(rows) { load(); rows.take(MAX_ROWS_PER_BATCH).toList() }
-        if (batch.isEmpty()) return true
+        if (batch.isEmpty() && trafficPending() <= 0) return true
         val history = JSONArray()
         val ratings = JSONArray()
         val favorites = JSONArray()
@@ -163,10 +167,11 @@ class SyncQueue(
                 Kind.SETTINGS -> settings = d
             }
         }
+        val traffic = trafficPending()
         val body = JSONObject()
             .put("batch_id", "${System.currentTimeMillis()}-${UUID.randomUUID().toString().take(8)}")
             .put("history", history).put("ratings", ratings).put("favorites", favorites).put("packs", JSONArray())
-            .put("traffic_bytes", 0)
+            .put("traffic_bytes", traffic)
         settings?.let { body.put("settings", it) }
 
         val r = client.callJson("$base/api/sync", "POST", body, token)
@@ -174,6 +179,7 @@ class SyncQueue(
         return when {
             r.ok -> {
                 dropSent(batch)
+                if (traffic > 0) onTrafficReported(traffic)
                 true
             }
             r.code == 401 -> false // sessiya tugagan

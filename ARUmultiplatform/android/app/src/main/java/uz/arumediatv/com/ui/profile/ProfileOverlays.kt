@@ -254,7 +254,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                 "Kanallarga avtomatik obuna",
                 "Bepul bo'limlar uchun ilova Telegram hisobingiz bilan majburiy kanallarga qo'shiladi. O'chirsangiz, bepul bo'lim ochilganda ruxsat yana so'raladi.",
                 checked = u?.chanConsent ?: false, enabled = u != null,
-            ) { on -> auth.updateSettings(chanConsent = on) }
+            ) { on -> AppServices.gate.setConsent(on) }
             Spacer(Modifier.height(32.dp))
         }
     }

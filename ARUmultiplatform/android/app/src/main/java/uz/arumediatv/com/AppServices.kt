@@ -14,6 +14,8 @@ import uz.arumediatv.com.data.WatchProgress
 import uz.arumediatv.com.data.PublicRepository
 import uz.arumediatv.com.data.VideoCache
 import uz.arumediatv.com.data.UnreadBadge
+import uz.arumediatv.com.data.TrafficMeter
+import uz.arumediatv.com.data.ChannelGate
 import uz.arumediatv.com.data.DownloadManager
 import uz.arumediatv.com.data.DownloadsIndex
 import uz.arumediatv.com.data.SeasonsRepository
@@ -48,6 +50,12 @@ object AppServices {
         private set
     lateinit var unread: UnreadBadge
         private set
+    lateinit var traffic: TrafficMeter
+        private set
+    lateinit var gate: ChannelGate
+        private set
+
+    fun trafficOrNull(): TrafficMeter? = if (::traffic.isInitialized) traffic else null
     lateinit var downloads: DownloadManager
         private set
     lateinit var downloadsIndex: DownloadsIndex
@@ -88,6 +96,12 @@ object AppServices {
         publicData = PublicRepository(ctx, auth)
         videoCache = VideoCache(ctx)
         unread = UnreadBadge(auth)
+        traffic = TrafficMeter(ctx, auth)
+        gate = ChannelGate(ctx, auth, telegram)
+        sync.trafficPending = { traffic.pendingBytes }
+        sync.onTrafficReported = { traffic.markReported(it) }
+        traffic.onNeedFlush = { sync.flushAsync(force = true) }
+        traffic.start()
         downloads = DownloadManager(ctx, telegram, videoCache)
         downloadsIndex = DownloadsIndex(ctx, downloads)
         appContext = ctx

@@ -26,6 +26,7 @@ object Http {
     val client: OkHttpClient by lazy {
         OkHttpClient.Builder()
             .addInterceptor(SignInterceptor())
+            .addInterceptor(CountingInterceptor { uz.arumediatv.com.AppServices.trafficOrNull() })
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(15, TimeUnit.SECONDS)
             .build()

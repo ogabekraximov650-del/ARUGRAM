@@ -6513,3 +6513,9 @@ Anibla sekinligi (diag): worker -> anibla.uz har so'rovga ~1.2-1.4 s (login 1.4 
 - `TelegramService.uploadFile` (Rust `rust_tg_upload_*` + `/api/tg/claim`) — rasm/video/ovoz bot chatiga, kanalga bot ko'chiradi.
 - `data/Support.kt`: `ChatStore` (since + `/api/chat/wait?ver&mk&at` jonli), `UnreadBadge` (`/api/chat/unread` — Profil tugmasi va qator yonida nuqta), `ChatThreadsStore` (admin).
 - `ui/support/SupportChatScreen` (matn, rasm, video, ovoz yozish va ijro, tanlab o'chirish), `ui/admin/AdminHubScreen` (+ Suhbatlar). Qolgan admin bo'limlari keyingi qadamlarda.
+
+## Kotlin ilova: kirish usullari, profil rasmi, kanallar, trafik (2026-10)
+
+- Kirish: telefon, **QR** (zxing + `rust_tg_qr_token`), **bot orqali** (`BotLoginScreen`, deep link + holat so'rovi). Profil rasmi: tanlash -> 720 px JPEG -> Telegram -> `POST /api/auth/avatar`.
+- `data/ChannelGate.kt`: bepul bo'lim uchun majburiy kanallarga ruxsat bilan 5-10 soniya oraliqda qo'shilish (`rust_tg_join_channel`), pleyer ochiqligida to'xtaydi, FLOOD bo'lsa pauza. Sozlamalardagi tugma shuni boshqaradi.
+- `data/Traffic.kt`: faqat tarmoqdan kelgan baytlar (Rust video + OkHttp `CountingInterceptor`), hisob bo'yicha telefonda; `SyncQueue` paketi bilan serverga (`traffic_bytes`).

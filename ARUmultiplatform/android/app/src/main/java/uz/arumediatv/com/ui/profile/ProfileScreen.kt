@@ -139,6 +139,8 @@ fun ProfileScreen(onLogin: () -> Unit, onEdit: () -> Unit, onSessions: () -> Uni
             BillingButton(onBilling)
             Spacer(Modifier.height(12.dp))
             StatsGrid(stats, onOpenStat)
+            Spacer(Modifier.height(12.dp))
+            TrafficCard()
         }
 
         Spacer(Modifier.height(16.dp))
@@ -422,6 +424,38 @@ private fun StatsGrid(s: MyStats, onOpen: (StatKind) -> Unit) {
             StatBox("Tomosha", hoursText, Modifier.weight(1f)) {}
             StatBox("Trafik", formatBytes(s.traffic), Modifier.weight(1f)) {}
         }
+    }
+}
+
+/** Trafik taqsimoti (shu telefonda, shu hisob uchun): nimaga qancha ketgani. */
+@Composable
+private fun TrafficCard() {
+    val totals by AppServices.traffic.totals.collectAsStateWithLifecycle()
+    val video = totals["video"] ?: 0L
+    val api = totals["api"] ?: 0L
+    val sum = (video + api).coerceAtLeast(1).toFloat()
+    val shape = RoundedCornerShape(18.dp)
+    Column(Modifier.fillMaxWidth().clip(shape).background(AruColors.Card).border(1.dp, AruColors.Border, shape).padding(16.dp)) {
+        Text("Trafik taqsimoti", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(10.dp))
+        Row(Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)).background(AruColors.CardAlt)) {
+            if (video > 0) Box(Modifier.weight((video / sum).coerceAtLeast(0.02f)).height(8.dp).background(AruColors.Accent2))
+            if (api > 0) Box(Modifier.weight((api / sum).coerceAtLeast(0.02f)).height(8.dp).background(Color(0xFF60A5FA)))
+        }
+        Spacer(Modifier.height(10.dp))
+        TrafficRow("Video", video, AruColors.Accent2)
+        TrafficRow("Ma'lumotlar (API)", api, Color(0xFF60A5FA))
+        Text("Faqat internetdan kelgan baytlar sanaladi; yuklab olingan videoni ko'rish trafik qo'shmaydi.", color = AruColors.TextFaint, fontSize = 11.sp, modifier = Modifier.padding(top = 8.dp))
+    }
+}
+
+@Composable
+private fun TrafficRow(label: String, bytes: Long, color: Color) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(10.dp).clip(CircleShape).background(color))
+        Spacer(Modifier.width(8.dp))
+        Text(label, color = AruColors.TextDim, fontSize = 13.sp, modifier = Modifier.weight(1f))
+        Text(formatBytes(bytes), color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
