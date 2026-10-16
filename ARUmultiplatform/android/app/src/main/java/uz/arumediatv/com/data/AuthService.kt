@@ -77,7 +77,7 @@ data class LoginRequest(val token: String, val deepLink: String, val expiresIn: 
 
 enum class LoginStatus { PENDING, OK, EXPIRED, ERROR, BANNED }
 
-data class DeviceSession(val id: Long, val device: String, val platform: String, val lastSeen: String, val current: Boolean)
+data class DeviceSession(val id: Long, val device: String, val platform: String, val lastSeen: String, val current: Boolean, val appVersion: String = "", val createdAt: Long = 0, val lastSeenAt: Long = 0)
 
 /** Ilova hisobi (Telegram bot orqali kirish -> sessiya tokeni). Flutter `AuthService` bilan bir xil server yo'llari. */
 class AuthService(
@@ -226,6 +226,9 @@ class AuthService(
                     platform = it.optString("platform"),
                     lastSeen = it.optString("last_seen", it.optString("last_active")),
                     current = it.optBoolean("current", false),
+                    appVersion = it.optString("app_version").takeIf { v -> v != "null" }.orEmpty(),
+                    createdAt = it.optLong("created_at"),
+                    lastSeenAt = it.optLong("last_seen_at"),
                 )
             }
         }

@@ -220,10 +220,9 @@ fun PackDetailScreen(packId: Long, onBack: () -> Unit) {
     val p = info
     val mine = p != null && p.ownerId == me?.id || store.myPacks.any { it.id == packId }
 
+    var draft by remember { mutableStateOf<File?>(null) }
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
-        val pk = info
-        if (uri != null && pk != null) scope.launch {
-            progress = 0f
+        if (uri != null) scope.launch {
             val f = withContext(Dispatchers.IO) {
                 try {
                     val t = File(ctx.cacheDir, "packadd_${System.currentTimeMillis()}")
@@ -231,10 +230,14 @@ fun PackDetailScreen(packId: Long, onBack: () -> Unit) {
                     t
                 } catch (_: Exception) { null }
             }
-            val err = if (f == null) "Faylni o'qib bo'lmadi" else store.addItem(pk, f, onProgress = { progress = it })
-            f?.delete()
-            progress = null
-            toast(err ?: "Yuborildi — admin ko'rib chiqadi")
+            if (f == null) toast("Faylni o'qib bo'lmadi") else draft = f
+        }
+    }
+    draft?.let { f ->
+        val pk = info
+        if (pk != null) {
+            PackAddScreen(pk, f, onBack = { f.delete(); draft = null }, onSent = { f.delete(); draft = null; toast("Yuborildi — admin ko'rib chiqadi") })
+            return
         }
     }
 

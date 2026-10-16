@@ -23,6 +23,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
@@ -92,7 +94,7 @@ fun EditProfileScreen(onBack: () -> Unit) {
 
     OverlayScaffold("Profilni tahrirlash", onBack) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
-            TextField2(name, { name = it }, "Ism", nameProblem)
+            TextField2(name, { name = it }, "Ism", nameProblem, supporting = "Eng ko'pi 20 ta belgi. Emoji va istalgan belgi ishlatsangiz bo'ladi.")
             Spacer(Modifier.height(14.dp))
             TextField2(
                 username, { username = it.trim() }, "Username",
@@ -103,8 +105,9 @@ fun EditProfileScreen(onBack: () -> Unit) {
                 },
                 supporting = when {
                     checking -> "Tekshirilmoqda..."
-                    available == true -> "Bo'sh"
-                    else -> null
+                    username.isNotEmpty() && username == u?.username -> "Bu — hozirgi username'ingiz."
+                    available == true -> "Bu username bo'sh — olsangiz bo'ladi"
+                    else -> "3-15 ta belgi. Faqat harf, raqam va _ ishlatiladi."
                 },
             )
             Spacer(Modifier.height(20.dp))
@@ -180,26 +183,36 @@ fun SessionsScreen(onBack: () -> Unit) {
             loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = AruColors.Accent, strokeWidth = 2.dp) }
             failed -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Ro'yxatni olib bo'lmadi", color = AruColors.TextFaint) }
             items.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Qurilmalar yo'q", color = AruColors.TextFaint) }
-            else -> LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+            else -> LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp), contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 8.dp, bottom = 40.dp)) {
+                item {
+                    Text(
+                        "${items.size} / 4 qurilma. Chegara to'lganda yangi qurilma kirsa, eng oldin onlayn bo'lgani avtomatik chiqariladi.",
+                        color = Color.White.copy(alpha = 0.55f), fontSize = 13.sp, lineHeight = 19.sp, modifier = Modifier.padding(start = 4.dp, bottom = 14.dp),
+                    )
+                }
                 items(items, key = { it.id }) { s ->
-                    val shape = RoundedCornerShape(16.dp)
-                    Row(
-                        Modifier.fillMaxWidth().padding(vertical = 6.dp).clip(shape).background(AruColors.Card).border(1.dp, AruColors.Border, shape).padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(s.device.ifEmpty { "Noma'lum qurilma" }, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-                            Text(listOf(s.platform, s.lastSeen).filter { it.isNotEmpty() }.joinToString(" · "), color = AruColors.TextDim, fontSize = 12.sp)
+                    val shape = RoundedCornerShape(18.dp)
+                    val ok = Color(0xFF4ADE80)
+                    fun whenText(ms: Long) = if (ms <= 0) "—" else java.text.SimpleDateFormat("HH:mm/dd/MM/yyyy", java.util.Locale.US).format(java.util.Date(ms))
+                    Column(Modifier.fillMaxWidth().padding(bottom = 12.dp).clip(shape).background(AruColors.Card).border(1.dp, AruColors.Border, shape).padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(uz.arumediatv.com.ui.common.AruIcons.Devices, null, tint = if (s.current) ok else Color.White.copy(alpha = 0.7f), modifier = Modifier.size(20.dp))
+                            Spacer(Modifier.width(10.dp))
+                            Text(s.device.ifEmpty { "Noma'lum qurilma" }, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                            if (s.current) {
+                                Text("Shu qurilma", color = ok, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(ok.copy(alpha = 0.16f)).padding(horizontal = 9.dp, vertical = 3.dp))
+                            } else {
+                                Box(Modifier.size(40.dp).clip(CircleShape).clickable { scope.launch { if (auth.revoke(s.id)) items.remove(s) else android.widget.Toast.makeText(AppServices.appContext, "Chiqarib bo'lmadi — qaytadan urinib ko'ring", android.widget.Toast.LENGTH_SHORT).show() } }, contentAlignment = Alignment.Center) {
+                                    Icon(Icons.AutoMirrored.Filled.ExitToApp, "Hisobdan chiqarish", tint = Color.White.copy(alpha = 0.38f), modifier = Modifier.size(18.dp))
+                                }
+                            }
                         }
-                        if (s.current) {
-                            Text("Shu qurilma", color = AruColors.Gold, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                        } else {
-                            Text(
-                                "O'chirish", color = Color(0xFFF87171), fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.clickable {
-                                    scope.launch { if (auth.revoke(s.id)) items.remove(s) }
-                                },
-                            )
+                        Spacer(Modifier.height(10.dp))
+                        listOf("Tizim" to s.platform, "Ilova" to (if (s.appVersion.isEmpty()) "—" else "v${s.appVersion}"), "Kirgan" to whenText(s.createdAt), "Oxirgi faollik" to whenText(s.lastSeenAt)).forEach { (k, v) ->
+                            Row(Modifier.padding(top = 4.dp)) {
+                                Text(k, color = Color.White.copy(alpha = 0.5f), fontSize = 13.sp, modifier = Modifier.width(110.dp))
+                                Text(v.ifEmpty { "—" }, color = Color.White, fontSize = 13.sp)
+                            }
                         }
                     }
                 }

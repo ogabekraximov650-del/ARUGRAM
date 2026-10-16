@@ -26,6 +26,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import uz.arumediatv.com.ui.common.AruIcons
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
@@ -564,6 +566,7 @@ private fun NavBtn(icon: androidx.compose.ui.graphics.vector.ImageVector, enable
 /** "Obuna kerak" to'liq ekrani (Flutter `_SubRequiredScreen`). */
 @Composable
 private fun SubRequiredScreen(onBack: () -> Unit, onBilling: () -> Unit) {
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     Column(Modifier.fillMaxSize().background(AruColors.Bg).statusBarsPadding()) {
         Box(Modifier.padding(start = 12.dp, top = 8.dp).clip(CircleShape).clickable(onClick = onBack).padding(10.dp)) {
             Icon(Icons.AutoMirrored.Filled.ArrowBack, "Orqaga", tint = Color.White, modifier = Modifier.size(24.dp))
@@ -585,7 +588,7 @@ private fun SubRequiredScreen(onBack: () -> Unit, onBilling: () -> Unit) {
                 Text("Obuna olish", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
             }
             Spacer(Modifier.height(10.dp))
-            Text("Obunani yangilash", color = Color.White.copy(alpha = 0.55f), fontSize = 13.sp, modifier = Modifier.clickable { AppServices.billing.load(force = true) }.padding(10.dp))
+            Text("Obunani yangilash", color = Color.White.copy(alpha = 0.55f), fontSize = 13.sp, modifier = Modifier.clickable { scope.launch { AppServices.billing.load(force = true) } }.padding(10.dp))
         }
     }
 }

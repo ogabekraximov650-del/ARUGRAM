@@ -56,9 +56,16 @@ fun HomeScreen(onOpenSeason: (Season) -> Unit, onLogin: () -> Unit) {
     val state by store.state.collectAsStateWithLifecycle()
     val user by AppServices.auth.user.collectAsStateWithLifecycle()
 
+    // Oflaynda faqat yuklab olingan qismi bor bo'limlar (qolganlari yashiriladi, o'chmaydi).
+    val lib = AppServices.offlineLib
+    val libReady by lib.ready.collectAsStateWithLifecycle()
+    val libSeasons by lib.seasons.collectAsStateWithLifecycle()
+    LaunchedEffect(state.offline, state.items.size) { if (state.offline) lib.refresh(state.items) }
+    val visible = if (state.offline && libReady) state.items.filter { "${it.animeId}:${it.seasonId}" in libSeasons } else state.items
+
     PullToRefreshBox(isRefreshing = state.refreshing, onRefresh = store::refresh, modifier = Modifier.fillMaxSize()) {
         SeasonGrid(
-            items = state.items,
+            items = visible,
             onOpen = onOpenSeason,
             contentPadding = PaddingValues(
                 start = 16.dp, end = 16.dp,
@@ -103,7 +110,7 @@ fun HomeScreen(onOpenSeason: (Season) -> Unit, onLogin: () -> Unit) {
             emptyContent = {
                 fullSpan {
                     if (state.loading) LoadingBox()
-                    else EmptyState(text = if (state.offline) "Internet yo'q · yuqoriga torting" else "Anime topilmadi")
+                    else EmptyState(text = if (state.offline) (if (state.items.isEmpty()) "Internet yo'q · yuqoriga torting" else "Yuklab olingan qism yo'q") else "Anime topilmadi")
                 }
             },
         )

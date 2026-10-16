@@ -307,7 +307,7 @@ class PackStore(
     fun retryQueued() = flushSoon()
 
     /** Rasm/video qo'shish: fayl Telegram'ga yuklanadi (`pki_<id>_<vaqt>_<tasodif>.bin`), keyin `add` amali navbatga tushadi. `null` — tayyor. */
-    suspend fun addItem(pack: PackInfo, file: File, emoji: String = "", onProgress: ((Float) -> Unit)? = null): String? = withContext(Dispatchers.IO) {
+    suspend fun addItem(pack: PackInfo, file: File, emoji: String = "", trimStartMs: Long = 0, trimEndMs: Long = 0, sound: Boolean = true, onProgress: ((Float) -> Unit)? = null): String? = withContext(Dispatchers.IO) {
         val uid = auth.user.value?.id ?: 0L
         if (uid <= 0) return@withContext "Avval hisobga kiring"
         val waiting = myPacks.sumOf { p -> opsOf(p.id).count { it.isAdd && (it.state == "pending" || it.state == "queued") } }
@@ -319,7 +319,11 @@ class PackStore(
         val head = file.inputStream().use { i -> val buf = ByteArray(32); val n = i.read(buf); if (n <= 0) ByteArray(0) else buf.copyOf(n) }
         if (sniffImage(head).isEmpty()) return@withContext "Faqat rasm (PNG, JPG, GIF, WebP) yoki video (MP4, WebM) yuklash mumkin"
         if (!tg.state.value.authorized) return@withContext "Fayl Telegram orqali yuklanadi — avval Telegram hisobini ulang"
-        val name = "pki_${uid}_${System.currentTimeMillis()}_${java.security.SecureRandom().nextInt(0xffff).toString(16)}.bin"
+        // Video: tanlangan bo'lak `_t<boshi>-<oxiri>`, ovozsiz bo'lsa `_m` — kesishni Actions bajaradi (Flutter bilan bir xil).
+        val isVideo = sniffImage(head).let { it == "mp4" || it == "webm" }
+        val trim = if (isVideo && trimEndMs > trimStartMs) "_t$trimStartMs-$trimEndMs" else ""
+        val mute = if (isVideo && !sound) "_m" else ""
+        val name = "pki_${uid}_${System.currentTimeMillis()}_${java.security.SecureRandom().nextInt(0xffff).toString(16)}$trim$mute.bin"
         val err = tg.uploadFile(file.absolutePath, name, "application/octet-stream", onProgress = { s, t -> if (t > 0) onProgress?.invoke(s.toFloat() / t) }, waitForClaim = false)
         if (err != null) return@withContext err
         // Yuborilgan nusxa telefonda saqlanadi: admin ko'rib chiqquncha oldindan ko'rinadi.

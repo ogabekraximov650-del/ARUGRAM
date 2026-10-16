@@ -81,7 +81,12 @@ fun CatalogScreen(onOpenSeason: (Season) -> Unit) {
     var genres by rememberSaveable { mutableStateOf(setOf<String>()) }
     var years by rememberSaveable { mutableStateOf(setOf<String>()) }
     var sheet by rememberSaveable { mutableStateOf(false) }
-    val rows = remember(state.items, genres, years) { SeasonQueries.filter(state.items, genres, years) }
+    val lib = AppServices.offlineLib
+    val libReady by lib.ready.collectAsStateWithLifecycle()
+    val libSeasons by lib.seasons.collectAsStateWithLifecycle()
+    LaunchedEffect(state.offline, state.items.size) { if (state.offline) lib.refresh(state.items) }
+    val shown = if (state.offline && libReady) state.items.filter { "${it.animeId}:${it.seasonId}" in libSeasons } else state.items
+    val rows = remember(shown, genres, years) { SeasonQueries.filter(shown, genres, years) }
     val filterCount = genres.size + years.size
 
     Column(Modifier.fillMaxSize()) {

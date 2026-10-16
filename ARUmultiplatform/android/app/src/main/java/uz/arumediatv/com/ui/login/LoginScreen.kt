@@ -2,6 +2,7 @@ package uz.arumediatv.com.ui.login
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -70,12 +71,13 @@ fun LoginScreen(onDone: () -> Unit, onClose: () -> Unit, onBot: () -> Unit = {})
     var country by remember { mutableStateOf<TgCountry?>(countryByIso("UZ")) }
     var pickerOpen by remember { mutableStateOf(false) }
     var codeTouched by remember { mutableStateOf(false) }
+
+    var number by remember { mutableStateOf("") }
     LaunchedEffect(Unit) {
         // Eng yaqin davlat (Telegram aniqlaydi) — foydalanuvchi qo'l tekkizmagan bo'lsa
         val c = tg.nearestCountry()?.let { countryByIso(it) } ?: return@LaunchedEffect
         if (!codeTouched && number.isEmpty()) { country = c; prefix = "+" + c.code }
     }
-    var number by remember { mutableStateOf("") }
     var code by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var hint by remember { mutableStateOf("") }
@@ -464,7 +466,7 @@ private fun CountryPicker(onPick: (TgCountry) -> Unit, onDismiss: () -> Unit) {
         Column(Modifier.clip(RoundedCornerShape(20.dp)).background(AruColors.Surface).padding(12.dp)) {
             OutlinedTextField(q, { q = it }, placeholder = { Text("Qidirish") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             androidx.compose.foundation.lazy.LazyColumn(Modifier.height(420.dp)) {
-                androidx.compose.foundation.lazy.items(list, key = { it.iso + it.code }) { c ->
+                items(list, key = { it.iso + it.code }) { c ->
                     Row(Modifier.fillMaxWidth().clickable { onPick(c) }.padding(horizontal = 8.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(c.flag, fontSize = 24.sp)
                         Spacer(Modifier.width(12.dp))

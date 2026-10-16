@@ -34,6 +34,7 @@ object AppServices {
         private set
     lateinit var images: ImageStore
     lateinit var thumbs: uz.arumediatv.com.data.ThumbStore
+    lateinit var offlineLib: uz.arumediatv.com.data.OfflineLibrary
         private set
     lateinit var seasons: SeasonsStore
         private set
@@ -114,6 +115,7 @@ object AppServices {
         traffic.start()
         downloads = DownloadManager(ctx, telegram, videoCache)
         downloadsIndex = DownloadsIndex(ctx, downloads)
+        offlineLib = uz.arumediatv.com.data.OfflineLibrary(downloadsIndex)
         appContext = ctx
         auth.onSettings = { hidden, consent -> sync.putSettings(hidden, consent) }
         auth.hasPendingSettings = { sync.hasPendingSettings }
