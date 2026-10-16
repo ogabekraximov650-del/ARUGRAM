@@ -34,7 +34,7 @@ android {
         }
     }
 
-    // user — oddiy foydalanuvchi ilovasi; admin — alohida paket (`uz.arumediatv.admin`), ikkalasi yonma-yon o'rnatiladi.
+    // user — oddiy foydalanuvchi ilovasi; admin — bir xil paket (`uz.arumediatv.com`), faqat `BuildConfig.IS_ADMIN` farq qiladi.
     flavorDimensions += "role"
     productFlavors {
         create("user") {
@@ -43,7 +43,6 @@ android {
         }
         create("admin") {
             dimension = "role"
-            applicationId = "uz.arumediatv.admin"
             buildConfigField("boolean", "IS_ADMIN", "true")
         }
     }

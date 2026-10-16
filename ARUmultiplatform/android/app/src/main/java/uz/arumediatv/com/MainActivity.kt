@@ -43,7 +43,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.activity.SystemBarStyle
+import uz.arumediatv.com.ui.common.FloatingNav
+import uz.arumediatv.com.ui.common.FloatingNavHeight
 import uz.arumediatv.com.ui.common.LocalBarPad
+import uz.arumediatv.com.ui.common.NavItem
 import androidx.activity.compose.BackHandler
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -127,35 +130,15 @@ private fun AruApp() {
             }
         }
         // Suzuvchi menyu: chetlardan ajralgan yumaloq oyna (Flutter'dagidek), ostidan kontent ko'rinib turadi.
-        val barShape = RoundedCornerShape(30.dp)
-        NavigationBar(
-            containerColor = Color.Transparent,
-            windowInsets = WindowInsets(0, 0, 0, 0),
+        FloatingNav(
+            items = tabs.map { NavItem(it.title, it.icon) },
+            selected = tab,
+            onSelect = { tab = it },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
-                .padding(start = 16.dp, end = 16.dp, bottom = 12.dp)
-                .height(BAR_HEIGHT)
-                .clip(barShape)
-                .background(AruColors.Surface.copy(alpha = 0.94f))
-                .border(1.dp, AruColors.Border, barShape),
-        ) {
-            tabs.forEachIndexed { i, t ->
-                NavigationBarItem(
-                    selected = tab == i,
-                    onClick = { tab = i },
-                    icon = { Icon(t.icon, contentDescription = t.title) },
-                    label = { Text(t.title, maxLines = 1) },
-                    colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = AruColors.Accent2,
-                        selectedTextColor = AruColors.Accent2,
-                        indicatorColor = AruColors.AccentTint,
-                        unselectedIconColor = AruColors.TextFaint,
-                        unselectedTextColor = AruColors.TextFaint,
-                    ),
-                )
-            }
-        }
+                .padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+        )
         SnackbarHost(
             snack,
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = navBottom + BAR_HEIGHT + 20.dp),
@@ -163,7 +146,7 @@ private fun AruApp() {
     }
 }
 
-private val BAR_HEIGHT = 68.dp
+private val BAR_HEIGHT = FloatingNavHeight
 
 /** Papka belgisi (Flutter'dagi Kutubxona tugmasi). `icons-core` da yo'q, shuning uchun qo'lda chizilgan. */
 private val FolderIcon: ImageVector = materialIcon(name = "Filled.Folder") {
