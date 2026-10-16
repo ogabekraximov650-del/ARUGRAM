@@ -34,7 +34,6 @@ class AruPlayer(context: Context) {
             .build(),
     ).build().apply {
         trackSelectionParameters = trackSelectionParameters.buildUpon()
-            .setExceedRendererCapabilitiesIfNecessary(true)
             .setExceedVideoConstraintsIfNecessary(true)
             .build()
     }

@@ -99,6 +99,7 @@ class ThumbStore(context: Context, private val tg: TelegramService, private val 
 
     private suspend fun build(item: HistoryItem, key: String): Bitmap? {
         fromDisk(key)?.let { return it }
+        val f = file(key)
         // Pleyer ochiq — tarmoq faqat videoniki.
         while (uz.arumediatv.com.AppServices.gate.busy.get() > 0) delay(400)
         val src = item.thumbUrl.ifEmpty { item.videoUrl }
