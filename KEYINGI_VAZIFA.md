@@ -6451,24 +6451,3 @@ Anibla sekinligi (diag): worker -> anibla.uz har so'rovga ~1.2-1.4 s (login 1.4 
   MethodChannel `uz.arumediatv.player/enhance`, User-Agent'lar, kesh kalitlari). APK paketi allaqachon `uz.arumediatv.com` edi.
   APK yig'ishda manzil Cloudflare'dan hisoblanadi (`API_BASE` secret'idan ustun).
 - GitHub repo nomini (hozirgi nomi) kodda o'zgartirib bo'lmaydi — repo Settings'da qo'lda. avtoencode repodagi workflow'lar o'zgargan shablonlardan qayta sinxronlanadi.
-
-## ARUmultiplatform/android: Kotlin + Compose + Rust (2026-10)
-
-Foydalanuvchi talabi: ilovaning Flutter'siz, native nusxasi — `ARUmultiplatform/android/`da Kotlin + Jetpack Compose va Rust yadro; joylashuv,
-ranglar va o'lchamlar hozirgi ilovadagi bilan BIR XIL. Eski (Flutter) ilova o'zgarmadi (`lib/`, `rust/` tegilmagan), shuning uchun APK workflow
-ishga tushmaydi. Paket `uz.arugram.soft.native` — eski ilova bilan yonma-yon o'rnatiladi.
-
-Qilingan (1-bosqich — **Bosh sahifa**): `ui/home/HomeScreen.kt` (`home_screen.dart`), `ui/components/SeasonCard.kt`, `Badges.kt` (reyting, ko'rish, yosh,
-Pullik), `ui/RootScreen.kt` (suzuvchi pastki menyu, `root_screen.dart`), `ui/theme/Colors.kt` (`AppColors` qiymatlari ko'chirilgan),
-`data/SeasonsRepo.kt` (ro'yxat: Rust keshi + ETag, `GET /api/seasons`), `rust/` (nusxa + `src/jni_bridge.rs` — `rust_cache_*` ning JNI o'rami,
-Kotlin tomoni `rust/RustCore.kt`). Rust `app/build.gradle.kts` dagi `buildRust` vazifasi bilan yig'iladi (NDK kerak; yo'q bo'lsa o'tkazib yuboriladi
-va ilova keshsiz ishlaydi).
-
-Ataylab qilinmagan: statistika paneli (`kHomeStats` sukut bo'yicha o'chiq), oflayn kutubxona filtri (yuklab olish ekrani yo'q), kirish (karta bosilsa
-"hisobga kiring" oynasi — hozircha hamma "kirmagan"). Qolgan tablar (Qidiruv, Katalog, Kutubxona, Profil) "tez orada" ekrani — keyingi bosqichlar.
-
-Muhit eslatmasi: Maven Central bu muhitda 429 qaytaradi; mahalliy yig'ishda `~/.gradle/init.d` orqali Google ko'zgusi ishlatildi (repoga kirmagan).
-
-Server manzili: native ilovada SUKUT QIYMAT YO'Q (eski ilovaning serveriga tegilmasin). Manzil CI'dan `-PAPI_BASE=...` bilan beriladi —
-`.github/workflows/build-native-android.yml` uni `NATIVE_API_BASE` secret'idan oladi (YANGI worker manzili). Secret qo'yilmasa ilova so'rov yubormaydi.
-Tekshiruv GitHub Actions'da: Rust testlari, Kotlin testlari, debug APK va APK ichida `librust_core.so` borligi (APK artefakt sifatida yuklanadi).
