@@ -53,6 +53,7 @@ class SyncQueue(
         const val RATING = "rating"
         const val FAVORITE = "favorite"
         const val SETTINGS = "settings"
+        const val PACK = "pack"
     }
 
     val hasPendingSettings: Boolean get() = synchronized(rows) { load(); rows.any { it.optString("kind") == Kind.SETTINGS } }
@@ -74,6 +75,23 @@ class SyncQueue(
         rows.filter { it.optString("kind") == Kind.RATING }.associate {
             val d = it.optJSONObject("data")
             "${d?.optLong("anime_id")}:${d?.optLong("season_id")}" to (d?.optInt("stars") ?: 0)
+        }
+    }
+
+    /** Emoji/GIF/stiker to'plami amali (`p:new:<id>`, `p:add:<fayl>`, `p:rm:<to'plam>:<element>`, `p:del:<id>`, `p:sub:<id>`, `p:clear:<id>`). */
+    fun putPack(key: String, data: JSONObject) = put(Kind.PACK, key, data)
+
+    /** Hali yuborilmagan to'plam amallari. */
+    fun pendingPacks(): List<JSONObject> = synchronized(rows) {
+        load()
+        rows.filter { it.optString("kind") == Kind.PACK }.mapNotNull { it.optJSONObject("data") }
+    }
+
+    /** Navbatdan bitta yozuvni (kalit bo'yicha) olib tashlaydi. */
+    fun removeKey(key: String) {
+        synchronized(rows) {
+            load()
+            if (rows.removeAll { it.optString("key") == key }) save()
         }
     }
 
@@ -152,11 +170,22 @@ class SyncQueue(
     }
 
     private fun sendOnce(token: String): Boolean {
-        val batch: List<JSONObject> = synchronized(rows) { load(); rows.take(MAX_ROWS_PER_BATCH).toList() }
+        // Server paketga cheklov qo'yadi: tarix <= 100, baho/sevimli/to'plam amallari <= 50 (ortig'i butun paketni rad etadi).
+        val batch: List<JSONObject> = synchronized(rows) {
+            load()
+            val cnt = HashMap<String, Int>()
+            rows.filter { e ->
+                val k = e.optString("kind")
+                val n = (cnt[k] ?: 0) + 1
+                cnt[k] = n
+                n <= (if (k == Kind.HISTORY) 100 else if (k == Kind.SETTINGS) 1 else 50)
+            }.take(MAX_ROWS_PER_BATCH)
+        }
         if (batch.isEmpty() && trafficPending() <= 0) return true
         val history = JSONArray()
         val ratings = JSONArray()
         val favorites = JSONArray()
+        val packOps = JSONArray()
         var settings: JSONObject? = null
         for (e in batch) {
             val d = e.optJSONObject("data") ?: continue
@@ -164,13 +193,14 @@ class SyncQueue(
                 Kind.HISTORY -> history.put(d)
                 Kind.RATING -> ratings.put(d)
                 Kind.FAVORITE -> favorites.put(d)
+                Kind.PACK -> packOps.put(d)
                 Kind.SETTINGS -> settings = d
             }
         }
         val traffic = trafficPending()
         val body = JSONObject()
             .put("batch_id", "${System.currentTimeMillis()}-${UUID.randomUUID().toString().take(8)}")
-            .put("history", history).put("ratings", ratings).put("favorites", favorites).put("packs", JSONArray())
+            .put("history", history).put("ratings", ratings).put("favorites", favorites).put("packs", packOps)
             .put("traffic_bytes", traffic)
         settings?.let { body.put("settings", it) }
 
@@ -246,7 +276,7 @@ class SyncQueue(
     private companion object {
         const val FLUSH_DELAY_MS = 60_000L
         const val MIN_GAP_MS = 120_000L
-        const val MAX_ROWS_PER_BATCH = 50
+        const val MAX_ROWS_PER_BATCH = 150
         const val MAX_QUEUE_ROWS = 500
     }
 }

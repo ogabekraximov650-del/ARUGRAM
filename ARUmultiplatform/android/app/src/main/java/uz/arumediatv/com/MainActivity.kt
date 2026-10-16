@@ -63,6 +63,8 @@ import uz.arumediatv.com.ui.profile.StatDetailScreen
 import uz.arumediatv.com.ui.profile.StatKind
 import uz.arumediatv.com.ui.profile.StorageScreen
 import uz.arumediatv.com.ui.support.SupportChatScreen
+import uz.arumediatv.com.ui.packs.MyPacksScreen
+import uz.arumediatv.com.ui.packs.PackDetailScreen
 import uz.arumediatv.com.ui.admin.AdminHubScreen
 import uz.arumediatv.com.ui.admin.AdminSection
 import uz.arumediatv.com.ui.admin.AdminThreadsScreen
@@ -119,6 +121,8 @@ private sealed interface Page {
     data object Billing : Page
     data object Storage : Page
     data object Support : Page
+    data object Packs : Page
+    data class PackDetail(val id: Long) : Page
     data object AdminHub : Page
     data object AdminThreads : Page
     data class AdminChat(val userId: Long, val name: String) : Page
@@ -183,6 +187,7 @@ private fun AruApp() {
                     onBilling = { push(Page.Billing) },
                     onStorage = { push(Page.Storage) },
                     onSupport = { push(Page.Support) },
+                    onPacks = { push(Page.Packs) },
                     onAdmin = { push(Page.AdminHub) },
                     onOpenStat = { k -> AppServices.auth.user.value?.id?.let { push(Page.Stat(it, k, "")) } },
                 )
@@ -218,7 +223,9 @@ private fun AruApp() {
                     Page.Settings -> SettingsScreen(onBack = ::pop)
                     Page.Billing -> BillingScreen(onBack = ::pop)
                     Page.Storage -> StorageScreen(onBack = ::pop)
-                    Page.Support -> SupportChatScreen(userId = null, title = "Admin bilan bog'lanish", onBack = ::pop)
+                    Page.Support -> SupportChatScreen(userId = null, title = "Admin bilan bog'lanish", onBack = ::pop, onPacks = { push(Page.Packs) })
+                    Page.Packs -> MyPacksScreen(onBack = ::pop, onOpenPack = { p -> push(Page.PackDetail(p.id)) })
+                    is Page.PackDetail -> PackDetailScreen(page.id, onBack = ::pop)
                     Page.AdminHub -> AdminHubScreen(onBack = ::pop, onOpen = { s ->
                         when (s) {
                             AdminSection.CHATS -> push(Page.AdminThreads)
@@ -238,6 +245,7 @@ private fun AruApp() {
                         onLogin = { push(Page.Login) },
                         startEpisodeId = page.episodeId,
                         startQuality = page.quality,
+                        onPacks = { push(Page.Packs) },
                     )
                 }
             }

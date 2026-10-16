@@ -6519,3 +6519,8 @@ Anibla sekinligi (diag): worker -> anibla.uz har so'rovga ~1.2-1.4 s (login 1.4 
 - Kirish: telefon, **QR** (zxing + `rust_tg_qr_token`), **bot orqali** (`BotLoginScreen`, deep link + holat so'rovi). Profil rasmi: tanlash -> 720 px JPEG -> Telegram -> `POST /api/auth/avatar`.
 - `data/ChannelGate.kt`: bepul bo'lim uchun majburiy kanallarga ruxsat bilan 5-10 soniya oraliqda qo'shilish (`rust_tg_join_channel`), pleyer ochiqligida to'xtaydi, FLOOD bo'lsa pauza. Sozlamalardagi tugma shuni boshqaradi.
 - `data/Traffic.kt`: faqat tarmoqdan kelgan baytlar (Rust video + OkHttp `CountingInterceptor`), hisob bo'yicha telefonda; `SyncQueue` paketi bilan serverga (`traffic_bytes`).
+
+## Kotlin ilova: Emoji, GIF va stikerlar (2026-10)
+
+- `data/Packs.kt` (`PackStore`): `.arp` to'plam fayli (ARUP sarlavha + kichik rasmlar + elementlar), faqat kerakli bo'lak `Range` bilan mahalliy Telegram manbasidan; xotira (LRU) -> shifrlangan disk -> Telegram. Yozuvlar `SyncQueue` (`packs` massivi: new/add/remove/delete/sub/clear). `SyncQueue` endi turlar bo'yicha chegara qo'yadi (tarix <= 100, qolganlari <= 50).
+- UI: `ui/packs/` — `PackViews` (rasm, animatsiyali GIF/WebP Android 9+, `[pe:..]` matn ichidagi emoji), `PacksScreens` (Mening/Obunalar/Ommaviy, to'plam sahifasi, qo'shish/o'chirish), `PackPicker` (izoh va suhbatga stiker/GIF/emoji). Profil > "Emoji, GIF va stikerlar".

@@ -107,6 +107,7 @@ fun SeasonScreen(
     onLogin: () -> Unit,
     startEpisodeId: Long = 0,
     startQuality: String? = null,
+    onPacks: () -> Unit = {},
 ) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -428,7 +429,7 @@ fun SeasonScreen(
                         onSubscribe = onOpenBilling,
                     )
                     2 -> SeasonsTab(seasons = seasons, current = season, onOpen = onOpenSeason)
-                    else -> CommentsTab(season = season, onOpenProfile = onOpenProfile, onLogin = onLogin)
+                    else -> CommentsTab(season = season, onOpenProfile = onOpenProfile, onLogin = onLogin, onPacks = onPacks)
                 }
             }
         }

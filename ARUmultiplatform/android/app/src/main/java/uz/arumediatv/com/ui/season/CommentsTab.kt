@@ -83,7 +83,7 @@ fun timeAgo(ms: Long): String {
 
 /** Izohlar: tartiblash, yozish, javob, layk, o'chirish, shikoyat, jonli yangilanish. */
 @Composable
-fun CommentsTab(season: Season, onOpenProfile: (Long) -> Unit, onLogin: () -> Unit) {
+fun CommentsTab(season: Season, onOpenProfile: (Long) -> Unit, onLogin: () -> Unit, onPacks: () -> Unit = {}) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val store = remember(season.key) { CommentsStore(ctx.applicationContext, AppServices.auth, season.animeId, season.seasonId) }
@@ -96,6 +96,7 @@ fun CommentsTab(season: Season, onOpenProfile: (Long) -> Unit, onLogin: () -> Un
     var reportFor by remember { mutableStateOf<Comment?>(null) }
     var deleteFor by remember { mutableStateOf<Comment?>(null) }
     var accepted by remember { mutableStateOf(false) }
+    var picker by remember { mutableStateOf(false) }
 
     LaunchedEffect(store) {
         store.loadFromDisk()
@@ -202,6 +203,10 @@ fun CommentsTab(season: Season, onOpenProfile: (Long) -> Unit, onLogin: () -> Un
                     }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(42.dp).clip(CircleShape).background(AruColors.CardAlt).clickable { picker = true }, contentAlignment = Alignment.Center) {
+                        Text("☺", color = Color.White, fontSize = 20.sp)
+                    }
+                    Spacer(Modifier.width(6.dp))
                     OutlinedTextField(
                         value = text, onValueChange = { text = it.take(1000) }, placeholder = { Text("Izoh yozing...", color = AruColors.TextFaint) },
                         maxLines = 4, shape = RoundedCornerShape(18.dp),
@@ -225,6 +230,22 @@ fun CommentsTab(season: Season, onOpenProfile: (Long) -> Unit, onLogin: () -> Un
                 }
             }
         }
+    }
+
+    // ── Stiker / GIF / emoji tanlash ──
+    if (picker) {
+        uz.arumediatv.com.ui.packs.PackPickerSheet(
+            onDismiss = { picker = false },
+            onManage = onPacks,
+            onPick = { pick ->
+                if (pick.kind == uz.arumediatv.com.data.PackKind.EMOJI) text += uz.arumediatv.com.data.packEmojiToken(pick.pack, pick.item, pick.emoji)
+                else scope.launch {
+                    val parent = replyTo?.id.orEmpty()
+                    val err = store.add("", parentId = parent, mediaFile = pick.ref, mediaType = if (pick.kind == uz.arumediatv.com.data.PackKind.GIF) "gif" else "sticker")
+                    if (err == null) replyTo = null else toast(err)
+                }
+            },
+        )
     }
 
     // ── Menyu: shikoyat ──
@@ -298,8 +319,10 @@ private fun CommentRow(
                 Spacer(Modifier.width(8.dp))
                 Text(timeAgo(c.createdAt), color = AruColors.TextFaint, fontSize = 11.sp)
             }
-            val body = commentPreview(c)
-            if (body.isNotEmpty()) Text(if (c.body.isEmpty()) "[$body]" else body, color = Color.White.copy(alpha = 0.88f), fontSize = 14.sp, lineHeight = 20.sp, modifier = Modifier.padding(top = 2.dp))
+            if (c.mediaFile.isNotEmpty() && (c.mediaType == "sticker" || c.mediaType == "gif")) {
+                uz.arumediatv.com.ui.packs.PackRefImage(c.mediaFile, Modifier.padding(top = 4.dp).size(if (c.mediaType == "sticker") 130.dp else 180.dp))
+            }
+            if (c.body.isNotEmpty()) uz.arumediatv.com.ui.packs.RichPackText(c.body, Color.White.copy(alpha = 0.88f), 14.sp, Modifier.padding(top = 2.dp), 20.sp)
             Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 Row(Modifier.clickable(onClick = onLike), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Filled.Favorite, "Layk", tint = if (c.liked) AruColors.Accent2 else Color.White.copy(alpha = 0.35f), modifier = Modifier.size(16.dp))

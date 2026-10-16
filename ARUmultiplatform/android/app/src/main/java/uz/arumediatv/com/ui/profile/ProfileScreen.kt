@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -75,7 +76,7 @@ import uz.arumediatv.com.ui.theme.AruColors
  * hisobni o'chirish va chiqish. Chiqishda navbatdagi yozuvlar avval serverga saqlanadi (`SyncQueue`).
  */
 @Composable
-fun ProfileScreen(onLogin: () -> Unit, onEdit: () -> Unit, onSessions: () -> Unit, onSettings: () -> Unit, onBilling: () -> Unit, onOpenStat: (StatKind) -> Unit, onStorage: () -> Unit, onSupport: () -> Unit, onAdmin: () -> Unit) {
+fun ProfileScreen(onLogin: () -> Unit, onEdit: () -> Unit, onSessions: () -> Unit, onSettings: () -> Unit, onBilling: () -> Unit, onOpenStat: (StatKind) -> Unit, onStorage: () -> Unit, onSupport: () -> Unit, onAdmin: () -> Unit, onPacks: () -> Unit) {
     val auth = AppServices.auth
     val tg = AppServices.telegram
     val user by auth.user.collectAsStateWithLifecycle()
@@ -178,6 +179,8 @@ fun ProfileScreen(onLogin: () -> Unit, onEdit: () -> Unit, onSessions: () -> Uni
             )
             Divider2()
             Row2(Icons.Filled.Info, "Xotira", "Yuklab olingan videolar, kesh, hajm", onClick = onStorage)
+            Divider2()
+            Row2(Icons.Filled.Star, "Emoji, GIF va stikerlar", "O'z to'plamlaringiz va obunalar", onClick = { if (u == null) onLogin() else onPacks() })
             Divider2()
             val unread by AppServices.unread.count.collectAsStateWithLifecycle()
             Row2(

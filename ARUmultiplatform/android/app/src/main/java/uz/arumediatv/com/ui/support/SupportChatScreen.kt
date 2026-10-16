@@ -102,7 +102,7 @@ private val dmy = ThreadLocal.withInitial { SimpleDateFormat("d MMM", Locale("uz
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun SupportChatScreen(userId: Long?, title: String, onBack: () -> Unit) {
+fun SupportChatScreen(userId: Long?, title: String, onBack: () -> Unit, onPacks: () -> Unit = {}) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val store = remember(userId) { ChatStore(ctx.applicationContext, AppServices.auth, userId) }
@@ -113,6 +113,7 @@ fun SupportChatScreen(userId: Long?, title: String, onBack: () -> Unit) {
     var text by remember { mutableStateOf("") }
     var upProgress by remember { mutableStateOf<Float?>(null) }
     var viewer by remember { mutableStateOf<ChatMessage?>(null) }
+    var picker by remember { mutableStateOf(false) }
     val selected = remember { mutableStateListOf<String>() }
     val listState = rememberLazyListState()
     val adminSide = userId != null
@@ -239,6 +240,7 @@ fun SupportChatScreen(userId: Long?, title: String, onBack: () -> Unit) {
                     DropdownMenu(menu, { menu = false }, containerColor = AruColors.Surface) {
                         DropdownMenuItem(text = { Text("Rasm") }, onClick = { menu = false; pickImage.launch("image/*") })
                         DropdownMenuItem(text = { Text("Video") }, onClick = { menu = false; pickVideo.launch("video/*") })
+                        DropdownMenuItem(text = { Text("Stiker / GIF / emoji") }, onClick = { menu = false; picker = true })
                     }
                 }
                 Spacer(Modifier.width(8.dp))
@@ -272,6 +274,16 @@ fun SupportChatScreen(userId: Long?, title: String, onBack: () -> Unit) {
         }
     }
     viewer?.let { MediaViewer(it) { viewer = null } }
+    if (picker) {
+        uz.arumediatv.com.ui.packs.PackPickerSheet(
+            onDismiss = { picker = false },
+            onManage = onPacks,
+            onPick = { pick ->
+                if (pick.kind == uz.arumediatv.com.data.PackKind.EMOJI) text += uz.arumediatv.com.data.packEmojiToken(pick.pack, pick.item, pick.emoji)
+                else scope.launch { store.send("", mediaFile = pick.ref, mediaType = if (pick.kind == uz.arumediatv.com.data.PackKind.GIF) "gif" else "sticker")?.let(::toast) }
+            },
+        )
+    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -284,7 +296,7 @@ private fun Bubble(m: ChatMessage, mine: Boolean, selected: Boolean, onTap: () -
                 .combinedClickable(onClick = onTap, onLongClick = onLong).padding(horizontal = 12.dp, vertical = 8.dp),
         ) {
             if (m.hasMedia) MediaBlock(m)
-            if (m.body.isNotEmpty()) Text(m.body, color = Color.White, fontSize = 15.sp, lineHeight = 21.sp)
+            if (m.body.isNotEmpty()) uz.arumediatv.com.ui.packs.RichPackText(m.body, Color.White, 15.sp, lineHeight = 21.sp)
             Row(Modifier.align(Alignment.End).padding(top = 2.dp)) {
                 Text(
                     hm.get()!!.format(Date(m.createdAt)) + if (mine && !m.pending) (if (m.seen) "  ✓✓" else "  ✓") else if (m.pending) "  …" else "",
@@ -304,7 +316,11 @@ private fun MediaBlock(m: ChatMessage) {
             if (m.mediaMs > 0) Text(formatClock(m.mediaMs), color = Color.White, fontSize = 11.sp, modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp))
         }
         "voice" -> VoiceRow(m)
-        else -> TgImage(m.mediaUrl, Modifier.size(width = 150.dp, height = 150.dp), maxPx = 400, contentScale = androidx.compose.ui.layout.ContentScale.Fit)
+        else -> {
+            val ref = uz.arumediatv.com.data.Names.fileNameOf(m.mediaUrl)
+            if (uz.arumediatv.com.data.parsePackRef(ref) != null) uz.arumediatv.com.ui.packs.PackRefImage(ref, Modifier.size(if (m.mediaType == "gif") 190.dp else 140.dp))
+            else TgImage(m.mediaUrl, Modifier.size(width = 150.dp, height = 150.dp), maxPx = 400, contentScale = androidx.compose.ui.layout.ContentScale.Fit)
+        }
     }
 }
 
