@@ -47,9 +47,10 @@ const LEVELS = {
   1: [0.55, 1.2, 1.08, 0.0, 0.0, 0.0, 0.2, 0.45],
   2: [0.85, 1.3, 1.12, 0.8, 0.6, 0.0, 0.3, 0.55],
   3: [1.0, 1.3, 1.14, 0.9, 0.8, 0.35, 0.5, 0.7], // Maksimal
+  4: [0.8, 1.28, 1.2, 0.7, 0.9, 0.0, 0.45, 0.9], // Anime HD
 };
 // Daraja bo'yicha chiqish o'lchami chegarasi (qurilma ko'tarmasa avtomatik pasayadi).
-const CAP = { 1: [1280, 720], 2: [1920, 1080], 3: [2560, 1440] };
+const CAP = { 1: [1280, 720], 2: [1920, 1080], 3: [2560, 1440], 4: [1920, 1080] };
 const MIN_SCALE = 0.75; // bundan past o'lchamda "piksellanish" bo'ladi — shunda effekt o'chadi
 
 export function createEnhancer(video, box) {
@@ -240,7 +241,7 @@ export function createEnhancer(video, box) {
 
   function start(lv) {
     if (!init()) return false;
-    level = lv >= 3 ? 3 : lv === 2 ? 2 : 1;
+    level = lv >= 1 && lv <= 4 ? lv : 1;
     if (!active) {
       active = true;
       canvas.style.display = 'block';

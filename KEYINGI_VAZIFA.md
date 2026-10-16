@@ -6435,3 +6435,5 @@ Anibla sekinligi (diag): worker -> anibla.uz har so'rovga ~1.2-1.4 s (login 1.4 
   1-daraja endi 5 ta o'qish + ton/rang bilan ham sezilarli (kuchsiz telefon uchun). `VideoPlayer.deviceCap`: plagin ishga tushganda RAM/yadro bo'yicha
   boshlang'ich chegara (past xotira -> 1, <=4 yadro -> 2), ijro paytida kadr tashlansa chegara pasayadi va keyingi videolar ham shundan boshlanadi.
   Ilova va web parametrlari (`LEVELS`) bir xil, web ham `uTone` ishlatadi.
+- **"Anime HD" rejimi (4-daraja):** kinematografik ko'rinish — chuqur qora (ton 0.9), to'q ranglar, chiziqlarni qoraytirish; ravshanlik qo'shimcha o'qishsiz, shuning uchun narxi 2-daraja kabi
+  (`VideoPlayer.setEnhance`: 4 qurilma chegarasi bo'yicha 2 deb hisoblanadi; sekinlashsa 4 -> 2). Ilova (`videoEnhance` 0..4, tsikl % 5) va web (`LEVELS[4]`, `% 5`) da bir xil.

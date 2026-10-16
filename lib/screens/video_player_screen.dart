@@ -3104,7 +3104,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   // 0 — o'chiq; 1 — yengil (to'yinganlik + kontrast); 2 — kuchli
   // (kuchliroq rang va kontrast). Filtr videoga GPU'da qo'llanadi,
   // sozlama qurilmada saqlanadi.
-  static const _enhanceNames = ['O\'chiq', 'Yengil', 'Kuchli', 'Maksimal'];
+  static const _enhanceNames = ['O\'chiq', 'Yengil', 'Kuchli', 'Maksimal', 'Anime HD'];
 
   /// Rang matritsasi: to'yinganlik [sat], kontrast [con], yorqinlik [br] (0..1 shkala).
   static List<double> _enhanceMatrix(double sat, double con, double br) {
@@ -3237,13 +3237,15 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
         ? _enhanceMatrix(1.18, 1.07, 0.01)
         : lv == 2
             ? _enhanceMatrix(1.35, 1.14, 0.015)
-            : _enhanceMatrix(1.42, 1.18, 0.02);
+            : lv == 4
+                ? _enhanceMatrix(1.3, 1.2, 0.0)
+                : _enhanceMatrix(1.42, 1.18, 0.02);
     return ColorFiltered(colorFilter: ColorFilter.matrix(m), child: video);
   }
 
   void _cycleEnhance() {
     AppSettings.instance
-        .setVideoEnhance((AppSettings.instance.videoEnhance + 1) % 4);
+        .setVideoEnhance((AppSettings.instance.videoEnhance + 1) % 5);
     if (mounted) setState(() {});
     _syncEnhancePreset();
     _applyEnhance(announce: true);

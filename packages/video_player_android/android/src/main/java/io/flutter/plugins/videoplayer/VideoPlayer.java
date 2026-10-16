@@ -255,7 +255,7 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
                 enhanceBadWindows = 0;
                 // 3 -> 2 -> 1 (yengil, 5 ta o'qish). Yengilda ham tashlansa — qurilma dekoderning o'zida zo'riqyapti:
                 // shunda effekt o'chiriladi.
-                final int next = enhanceLevel - 1;
+                final int next = enhanceLevel == 4 ? 2 : enhanceLevel - 1;
                 // Qurilma shu darajani ko'tarmadi — keyingi videolar ham undan boshlamasin (kamida 1: u deyarli bepul).
                 deviceCap = Math.max(1, next);
                 setEnhance(next);
@@ -292,7 +292,8 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
    */
   @UnstableApi
   public int setEnhance(int requested) {
-    final int level = Math.min(requested, deviceCap);
+    // Anime HD (4) narxi jihatidan 2-daraja bilan teng; qurilma chegarasidan oshsa — chegaraga tushiriladi.
+    final int level = (requested == 4 ? 2 : requested) > deviceCap ? deviceCap : requested;
     try {
       if (level <= 0) {
         if (enhancePipeline) {

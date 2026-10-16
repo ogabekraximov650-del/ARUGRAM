@@ -96,7 +96,7 @@ class AppSettings extends ChangeNotifier {
   }
 
   void setVideoEnhance(int level) {
-    final v = level.clamp(0, 3);
+    final v = level.clamp(0, 4);
     if (videoEnhance == v) return;
     videoEnhance = v;
     _write();
@@ -110,7 +110,7 @@ class AppSettings extends ChangeNotifier {
       autoSkipIntro = rows.first['auto_skip_intro'] == true;
       autoNextEpisode = rows.first['auto_next_episode'] == true;
       final e = rows.first['video_enhance'];
-      videoEnhance = e is num ? e.toInt().clamp(0, 3) : 0;
+      videoEnhance = e is num ? e.toInt().clamp(0, 4) : 0;
     } catch (_) {
       // O'qib bo'lmadi — boshlang'ich qiymatlar qoladi.
     }

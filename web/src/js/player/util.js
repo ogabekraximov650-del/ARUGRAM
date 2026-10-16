@@ -129,10 +129,10 @@ export const playerSettings = {
     try { localStorage.setItem(SET_KEY, JSON.stringify(o)); } catch (_) { /* */ }
   },
   /** Tasvirni yaxshilash: 0 — o'chiq, 1 — yengil, 2 — kuchli, 3 — maksimal (qurilma ko'targanicha). */
-  get enhance() { const v = readSettings().video_enhance; return v === 1 || v === 2 || v === 3 ? v : 0; },
+  get enhance() { const v = readSettings().video_enhance; return v >= 1 && v <= 4 ? v : 0; },
   setEnhance(v) {
     const o = readSettings();
-    o.video_enhance = v === 1 || v === 2 || v === 3 ? v : 0;
+    o.video_enhance = v >= 1 && v <= 4 ? v : 0;
     try { localStorage.setItem(SET_KEY, JSON.stringify(o)); } catch (_) { /* */ }
   },
   setAutoSkipIntro(v) { this.set('auto_skip_intro', v); },

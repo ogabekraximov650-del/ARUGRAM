@@ -159,7 +159,7 @@ function buildPlayer(el, route, season, opts) {
 
   // ── Tasvirni yaxshilash (MX Pleyerdagi "Smart Enhance" kabi, lekin anime uchun sozlangan) ──
   // WebGL shader (ilovadagi bilan bir xil: deband/denoise, o'tkirlik, chiziqlar, rang). WebGL bo'lmasa — CSS filtri.
-  const ENH_LABEL = ["O'chiq", 'Yengil', 'Kuchli', 'Maksimal'];
+  const ENH_LABEL = ["O'chiq", 'Yengil', 'Kuchli', 'Maksimal', 'Anime HD'];
   const enhancer = createEnhancer(video, box);
   // CSS zaxirasi FAQAT rang (SVG konvolyutsiya CPU'da ishlab qotirardi — olib tashlandi).
   function cssEnhance(lv) {
@@ -906,7 +906,7 @@ function buildPlayer(el, route, season, opts) {
         playerSettings.setAutoSkipIntro(on);
         if (on) { introTries = {}; lastSkip = 0; if (introIdx >= 0) { introTries[introIdx] = 1; lastSkip = Date.now(); seekTo((ranges[introIdx][1] + 400) / 1000); $('.pl-intro').classList.remove('on'); } }
         bindSettings(p);
-      } else if (id === 'enh') { playerSettings.setEnhance((playerSettings.enhance + 1) % 4); applyEnhance(); bindSettings(p); }
+      } else if (id === 'enh') { playerSettings.setEnhance((playerSettings.enhance + 1) % 5); applyEnhance(); bindSettings(p); }
       else if (id === 'next') { playerSettings.setAutoNextEpisode(!playerSettings.autoNextEpisode); bindSettings(p); }
       else if (id === 'sleep') { closePanels(); openSleep(); }
     }));

@@ -36,6 +36,8 @@ final class AruEnhanceShaderProgram extends BaseGlShaderProgram {
   private static final float[] LEVEL2 = {0.85f, 1.3f, 1.12f, 0.8f, 0.6f, 0.0f, 0.3f, 0.55f};
   // 3 — MAKSIMAL: kuchli o'tkirlik + ravshanlik + vibrance + chuqur ton
   private static final float[] LEVEL3 = {1.0f, 1.3f, 1.14f, 0.9f, 0.8f, 0.35f, 0.5f, 0.7f};
+  // 4 — ANIME HD (kinematografik): chuqur qora, to'q va toza ranglar, aniq chiziqlar; ravshanlik (qo'shimcha o'qish) yo'q — narxi 2-daraja kabi
+  private static final float[] LEVEL4 = {0.8f, 1.28f, 1.2f, 0.7f, 0.9f, 0.0f, 0.45f, 0.9f};
 
   /** Shader orqali o'tgan kadrlar soni (diagnostika: Dart effekt haqiqatan ishlayotganini tekshiradi). */
   static final java.util.concurrent.atomic.AtomicLong FRAMES = new java.util.concurrent.atomic.AtomicLong();
@@ -56,7 +58,7 @@ final class AruEnhanceShaderProgram extends BaseGlShaderProgram {
     float[] identity = GlUtil.create4x4IdentityMatrix();
     glProgram.setFloatsUniform("uTransformationMatrix", identity);
     glProgram.setFloatsUniform("uTexTransformationMatrix", identity);
-    final float[] p = level >= 3 ? LEVEL3 : level == 2 ? LEVEL2 : LEVEL1;
+    final float[] p = level == 4 ? LEVEL4 : level == 3 ? LEVEL3 : level == 2 ? LEVEL2 : LEVEL1;
     glProgram.setFloatUniform("uSharp", p[0]);
     glProgram.setFloatUniform("uSat", p[1]);
     glProgram.setFloatUniform("uCon", p[2]);
