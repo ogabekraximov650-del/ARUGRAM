@@ -30,6 +30,9 @@ data class HistoryItem(
     val positionMs: Long,
     val durationMs: Long,
     val views: Int,
+    val watchedMs: Long = 0,
+    val quality: String = "",
+    val epizodId: Long = 0,
     /** Oxirgi ko'rilgan vaqt, millisekund (epoch). */
     val updatedAt: Long,
 ) {
@@ -95,6 +98,15 @@ class LibraryStore(
         }
     }
 
+    /** Pleyerda yurakcha bosildi: ro'yxat server javobini kutmasdan o'zgaradi (60 soniyalik "yangi" belgisi ham tushadi). */
+    fun applyFavorite(season: Season, on: Boolean) {
+        _state.update { s ->
+            val rest = s.favorites.filterNot { it.animeId == season.animeId && it.seasonId == season.seasonId }
+            s.copy(favorites = if (on) listOf(season) + rest else rest)
+        }
+        loadedAt = 0
+    }
+
     /** Hisobdan chiqilganda. */
     fun clear() {
         loadedAt = 0
@@ -129,6 +141,9 @@ class LibraryStore(
                     positionMs = o.optLong("position_ms"),
                     durationMs = o.optLong("duration_ms"),
                     views = o.optInt("view_count"),
+                    watchedMs = o.optLong("watched_ms"),
+                    quality = o.optString("last_quality"),
+                    epizodId = o.optLong("epizod_id"),
                     updatedAt = o.optLong("updated_at"),
                 )
             }

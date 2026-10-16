@@ -6487,3 +6487,12 @@ Anibla sekinligi (diag): worker -> anibla.uz har so'rovga ~1.2-1.4 s (login 1.4 
 - `data/SyncQueue.kt`: Flutter `SyncQueue` ning Kotlin nusxasi (yagona yozuv yo'li). Navbat diskda shifrlangan; 1 daqiqa kechikish, 2 daqiqa oraliq, fonga ketganda (`MainActivity.onStop`) darhol; `batch_id` bilan ikki marta sanalmaydi.
 - `AuthService`: `hiddenStats`, `chanConsent`, `updateSettings` (mahalliy darhol + navbat), `deleteAccount`. `data/MyStats.kt` — `/api/me/stats`.
 - Profil qayta ishlandi (hero karta, ID nusxalash, statistika, Sozlamalar, o'chirish, chiqishda sinxronlash). `ARUmultiplatform/FARQ.md` — Flutter bilan farqlar ro'yxati va tartib.
+
+## Kotlin ilova: bo'lim sahifasi + pleyer + obuna (2026-10)
+
+- `ui/season/`: `SeasonScreen` (tepada video, ostida Ma'lumot | Qismlar | Bo'limlar | Izohlar), `AruPlayer` (Media3 ExoPlayer o'rami), `PlayerUi` (o'z boshqaruvi: ikki bosish -/+10 s, qulf, to'liq ekran, intro o'tkazish, vaqt chizig'i), `SeasonTabs`, sozlamalar (sifat, tezlik, avto keyingi qism, avto intro, uyqu taymeri).
+- Manba: `PlaySource` — avval Telegram (`TelegramService.playUrl`: `/api/tg/deliver` -> `http://127.0.0.1:<port>/tg/0/<nom>`, Range'ni qo'llaydi), xato bo'lsa worker `/api/play/<nom>?t=<token>` (token `app_play_token`).
+- Tomosha tarixi `SyncQueue.putHistory` orqali (qism almashganda/chiqishda); davom ettirish `WatchProgress`; baho va sevimli `SeasonRepository` (avval telefonda, `SyncQueue` bilan).
+- Ruxsat: `BillingStore.active` yoki `season.free == true`. `ui/billing/BillingScreen`: tariflar, balans to'ldirish (to'lov havolasi), tekshirish, tarix.
+- Navigatsiya: `MainActivity` da ekranlar steki (`Page`), tablar ostida tirik.
+- Kanallarga majburiy obuna (`ChannelGate`) va Izohlar keyingi qadamda.

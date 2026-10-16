@@ -53,6 +53,11 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import uz.arumediatv.com.ui.billing.BillingScreen
+import uz.arumediatv.com.ui.season.SeasonScreen
 import kotlinx.coroutines.launch
 import uz.arumediatv.com.ui.catalog.CatalogScreen
 import uz.arumediatv.com.ui.home.HomeScreen
@@ -94,7 +99,15 @@ private val tabs = listOf(
     Tab("Profil", Icons.Filled.Person),
 )
 
-private enum class Overlay { NONE, LOGIN, EDIT, SESSIONS, SETTINGS }
+/** Ekranlar stegi (tab ustiga ochiladi). Tablar ostida tirik turadi — qaytganda aylantirish joyi saqlanadi. */
+private sealed interface Page {
+    data object Login : Page
+    data object Edit : Page
+    data object Sessions : Page
+    data object Settings : Page
+    data object Billing : Page
+    data class SeasonPage(val season: uz.arumediatv.com.data.Season) : Page
+}
 
 class MainActivity : ComponentActivity() {
     override fun onStop() {
@@ -116,26 +129,14 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun AruApp() {
     var tab by rememberSaveable { mutableIntStateOf(0) }
-    var overlay by remember { mutableStateOf(Overlay.NONE) }
+    val stack = remember { mutableStateListOf<Page>() }
     val snack = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
-    val openSeason: (uz.arumediatv.com.data.Season) -> Unit = {
-        scope.launch { snack.showSnackbar("Anime sahifasi keyingi bosqichda qo'shiladi") }
-    }
-    val login = { overlay = Overlay.LOGIN }
-    BackHandler(enabled = overlay != Overlay.NONE) { overlay = Overlay.NONE }
-    if (overlay != Overlay.NONE) {
-        Box(Modifier.fillMaxSize().background(AruColors.Bg).statusBarsPadding().navigationBarsPadding()) {
-            when (overlay) {
-                Overlay.LOGIN -> LoginScreen(onDone = { overlay = Overlay.NONE }, onClose = { overlay = Overlay.NONE })
-                Overlay.EDIT -> EditProfileScreen(onBack = { overlay = Overlay.NONE })
-                Overlay.SESSIONS -> SessionsScreen(onBack = { overlay = Overlay.NONE })
-                Overlay.SETTINGS -> SettingsScreen(onBack = { overlay = Overlay.NONE })
-                Overlay.NONE -> {}
-            }
-        }
-        return
-    }
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    fun push(p: Page) { stack.add(p) }
+    fun pop() { if (stack.isNotEmpty()) stack.removeAt(stack.lastIndex) }
+    val openSeason: (uz.arumediatv.com.data.Season) -> Unit = { push(Page.SeasonPage(it)) }
+    val login = { push(Page.Login) }
+    BackHandler(enabled = stack.isNotEmpty()) { pop() }
     val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     // Menyu: balandligi 68dp + pastki chekka 12dp + navigatsiya paneli. Kontent shuning ostigacha cho'ziladi.
@@ -149,9 +150,10 @@ private fun AruApp() {
                 3 -> LibraryScreen(onOpenSeason = openSeason, onLogin = login)
                 4 -> ProfileScreen(
                     onLogin = login,
-                    onEdit = { overlay = Overlay.EDIT },
-                    onSessions = { overlay = Overlay.SESSIONS },
-                    onSettings = { overlay = Overlay.SETTINGS },
+                    onEdit = { push(Page.Edit) },
+                    onSessions = { push(Page.Sessions) },
+                    onSettings = { push(Page.Settings) },
+                    onBilling = { push(Page.Billing) },
                 )
                 else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text("${tabs[tab].title} — tez orada", color = AruColors.TextFaint)
@@ -172,6 +174,26 @@ private fun AruApp() {
             snack,
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = navBottom + BAR_HEIGHT + 20.dp),
         )
+
+        // ── Ekranlar steki: eng ustkisi ko'rinadi ──
+        stack.lastOrNull()?.let { page ->
+            Box(Modifier.fillMaxSize().background(AruColors.Bg).pointerInput(Unit) { detectTapGestures { } }.statusBarsPadding().navigationBarsPadding()) {
+                when (page) {
+                    Page.Login -> LoginScreen(onDone = ::pop, onClose = ::pop)
+                    Page.Edit -> EditProfileScreen(onBack = ::pop)
+                    Page.Sessions -> SessionsScreen(onBack = ::pop)
+                    Page.Settings -> SettingsScreen(onBack = ::pop)
+                    Page.Billing -> BillingScreen(onBack = ::pop)
+                    is Page.SeasonPage -> SeasonScreen(
+                        season = page.season,
+                        onBack = ::pop,
+                        onOpenSeason = { s -> pop(); push(Page.SeasonPage(s)) },
+                        onOpenBilling = { push(Page.Billing) },
+                        onOpenProfile = { android.widget.Toast.makeText(ctx, "Foydalanuvchi profili keyingi bosqichda", android.widget.Toast.LENGTH_SHORT).show() },
+                    )
+                }
+            }
+        }
     }
 }
 

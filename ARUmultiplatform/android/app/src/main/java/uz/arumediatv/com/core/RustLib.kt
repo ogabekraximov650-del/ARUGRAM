@@ -16,6 +16,7 @@ interface RustLib : Library {
 
     // ── Imzo va versiya ──
     fun app_sign(ts: String, method: String, path: String): Pointer?
+    fun app_play_token(path: String, ttlSecs: Long): Pointer?
     fun rust_set_app_version(v: String)
 
     // ── Shifrlash va xavfsiz saqlash ──

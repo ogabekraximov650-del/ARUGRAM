@@ -14,6 +14,8 @@ class AruApplication : Application() {
         AppServices.init(this)
         scope.launch {
             AppServices.auth.restore()
+            AppServices.billing.restore()
+            AppServices.billing.load(force = true)
             AppServices.telegram.start()
         }
     }

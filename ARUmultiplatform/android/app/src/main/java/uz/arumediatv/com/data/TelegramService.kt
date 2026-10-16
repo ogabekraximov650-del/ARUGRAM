@@ -257,6 +257,34 @@ class TelegramService(
         return d.await()
     }
 
+    /**
+     * Videoni bot chatiga oldiradi va pleyer uchun mahalliy manzilni qaytaradi (Range'ni qo'llaydi).
+     * `null` — Telegram ishlatib bo'lmaydi / fayl kanalda yo'q: chaqiruvchi worker yo'liga o'tadi.
+     */
+    suspend fun playUrl(url: String): String? = withContext(Dispatchers.IO) {
+        val name = fileNameOf(url)
+        val port = _state.value.port
+        if (name.isEmpty() || !active || port == 0 || isMissing(name)) return@withContext null
+        clearing?.let { withTimeoutOrNullCompat(8000) { it.join() } }
+        delivering.incrementAndGet()
+        try {
+            if (name in deliver(listOf(name))) {
+                "http://127.0.0.1:$port/tg/0/$name"
+            } else {
+                missing[name] = System.currentTimeMillis()
+                null
+            }
+        } catch (_: Exception) {
+            null
+        } finally {
+            scope.launch {
+                delay(10_000)
+                delivering.decrementAndGet()
+                clearIfPending()
+            }
+        }
+    }
+
     private suspend fun runBatch() {
         val work: Map<String, List<CompletableDeferred<ByteArray?>>>
         synchronized(batchLock) {

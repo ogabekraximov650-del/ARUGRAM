@@ -75,7 +75,7 @@ import uz.arumediatv.com.ui.theme.AruColors
  * hisobni o'chirish va chiqish. Chiqishda navbatdagi yozuvlar avval serverga saqlanadi (`SyncQueue`).
  */
 @Composable
-fun ProfileScreen(onLogin: () -> Unit, onEdit: () -> Unit, onSessions: () -> Unit, onSettings: () -> Unit) {
+fun ProfileScreen(onLogin: () -> Unit, onEdit: () -> Unit, onSessions: () -> Unit, onSettings: () -> Unit, onBilling: () -> Unit) {
     val auth = AppServices.auth
     val tg = AppServices.telegram
     val user by auth.user.collectAsStateWithLifecycle()
@@ -103,6 +103,7 @@ fun ProfileScreen(onLogin: () -> Unit, onEdit: () -> Unit, onSessions: () -> Uni
         AppServices.library.clear()
         AppServices.myStats.clear()
         AppServices.sync.clear()
+        AppServices.billing.clear()
     }
 
     fun toast(t: String) = Toast.makeText(ctx, t, Toast.LENGTH_SHORT).show()
@@ -122,7 +123,9 @@ fun ProfileScreen(onLogin: () -> Unit, onEdit: () -> Unit, onSessions: () -> Uni
                 (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("ID", u.id.toString()))
                 toast("ID nusxalandi: ${u.id}")
             })
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(12.dp))
+            BillingButton(onBilling)
+            Spacer(Modifier.height(12.dp))
             StatsGrid(stats)
         }
 
@@ -365,6 +368,21 @@ private fun HeroCard(u: AppUser, onEdit: () -> Unit, onCopyId: () -> Unit) {
             Modifier.align(Alignment.TopEnd).padding(10.dp).size(34.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.08f)).clickable(onClick = onEdit),
             contentAlignment = Alignment.Center,
         ) { Icon(Icons.Filled.Edit, "Tahrirlash", tint = Color.White.copy(alpha = 0.8f), modifier = Modifier.size(18.dp)) }
+    }
+}
+
+@Composable
+private fun BillingButton(onClick: () -> Unit) {
+    val st by AppServices.billing.state.collectAsStateWithLifecycle()
+    val shape = RoundedCornerShape(18.dp)
+    Row(
+        Modifier.fillMaxWidth().clip(shape).background(Brush.linearGradient(listOf(AruColors.Accent, AruColors.Accent2))).clickable(onClick = onClick).padding(horizontal = 18.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("Obuna olish va balans to'ldirish", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Text(if (st.active) "Obuna faol · ${st.leftMs / 86_400_000 + 1} kun qoldi" else "Obuna yo'q", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
+        }
     }
 }
 

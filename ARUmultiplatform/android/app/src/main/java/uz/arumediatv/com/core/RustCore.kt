@@ -70,6 +70,9 @@ object RustCore {
 
     fun sign(ts: String, method: String, path: String): String = guard("") { take(it.app_sign(ts, method, path)) }
 
+    /** Pleyer manzili uchun muddatli token (`<muddat>.<hex>`); yadro imzosiz bo'lsa bo'sh. */
+    fun playToken(path: String, ttlSecs: Long = 6 * 3600): String = guard("") { take(it.app_play_token(path, ttlSecs)) }
+
     fun setAppVersion(v: String) = guard(Unit) { it.rust_set_app_version(v) }
 
     fun generateMasterKey(): String = guard("") { take(it.rust_crypto_generate_key()) }

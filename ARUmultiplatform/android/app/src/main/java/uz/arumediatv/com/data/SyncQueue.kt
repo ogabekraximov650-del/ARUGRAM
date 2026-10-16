@@ -55,6 +55,24 @@ class SyncQueue(
 
     val pendingCount: Int get() = synchronized(rows) { load(); rows.size }
 
+    /** Hali yuborilmagan sevimli holatlari (`"anime:season"` -> yoqilgan/o'chirilgan). */
+    fun pendingFavorites(): Map<String, Boolean> = synchronized(rows) {
+        load()
+        rows.filter { it.optString("kind") == Kind.FAVORITE }.associate {
+            val d = it.optJSONObject("data")
+            "${d?.optLong("anime_id")}:${d?.optLong("season_id")}" to (d?.optBoolean("on") == true)
+        }
+    }
+
+    /** Hali yuborilmagan baholar. */
+    fun pendingRatings(): Map<String, Int> = synchronized(rows) {
+        load()
+        rows.filter { it.optString("kind") == Kind.RATING }.associate {
+            val d = it.optJSONObject("data")
+            "${d?.optLong("anime_id")}:${d?.optLong("season_id")}" to (d?.optInt("stars") ?: 0)
+        }
+    }
+
     fun putSettings(hidden: List<String>, consent: Boolean) =
         put(Kind.SETTINGS, "settings", JSONObject().put("hidden_stats", JSONArray(hidden)).put("chan_consent", consent))
 
