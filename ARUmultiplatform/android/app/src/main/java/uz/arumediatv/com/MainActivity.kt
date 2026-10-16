@@ -61,6 +61,7 @@ import uz.arumediatv.com.ui.login.LoginScreen
 import uz.arumediatv.com.ui.profile.EditProfileScreen
 import uz.arumediatv.com.ui.profile.ProfileScreen
 import uz.arumediatv.com.ui.profile.SessionsScreen
+import uz.arumediatv.com.ui.profile.SettingsScreen
 import uz.arumediatv.com.ui.search.SearchScreen
 import uz.arumediatv.com.ui.theme.AruColors
 import uz.arumediatv.com.ui.theme.AruTheme
@@ -93,9 +94,15 @@ private val tabs = listOf(
     Tab("Profil", Icons.Filled.Person),
 )
 
-private enum class Overlay { NONE, LOGIN, EDIT, SESSIONS }
+private enum class Overlay { NONE, LOGIN, EDIT, SESSIONS, SETTINGS }
 
 class MainActivity : ComponentActivity() {
+    override fun onStop() {
+        super.onStop()
+        // Ilova fonga ketdi: navbatdagi yozuvlar (sozlamalar, sevimlilar...) darhol bitta paket bo'lib yuboriladi.
+        if (AppServices.ready) AppServices.sync.flushAsync(force = true)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge(
@@ -123,6 +130,7 @@ private fun AruApp() {
                 Overlay.LOGIN -> LoginScreen(onDone = { overlay = Overlay.NONE }, onClose = { overlay = Overlay.NONE })
                 Overlay.EDIT -> EditProfileScreen(onBack = { overlay = Overlay.NONE })
                 Overlay.SESSIONS -> SessionsScreen(onBack = { overlay = Overlay.NONE })
+                Overlay.SETTINGS -> SettingsScreen(onBack = { overlay = Overlay.NONE })
                 Overlay.NONE -> {}
             }
         }
@@ -143,6 +151,7 @@ private fun AruApp() {
                     onLogin = login,
                     onEdit = { overlay = Overlay.EDIT },
                     onSessions = { overlay = Overlay.SESSIONS },
+                    onSettings = { overlay = Overlay.SETTINGS },
                 )
                 else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text("${tabs[tab].title} — tez orada", color = AruColors.TextFaint)

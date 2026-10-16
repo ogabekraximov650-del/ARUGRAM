@@ -6481,3 +6481,9 @@ Anibla sekinligi (diag): worker -> anibla.uz har so'rovga ~1.2-1.4 s (login 1.4 
 
 - `ui/library/LibraryScreen.kt`, `data/LibraryStore.kt`: Tarix (`GET /api/history`), Yuklanmalar (hozircha bo'sh, pleyer bilan keladi), Sevimlilar (`GET /api/favorites`). Faqat o'qish; yozuv (tarix, sevimli qo'shish) keyin `POST /api/sync` orqali. 60 soniya ichida qayta so'rov ketmaydi.
 - Kirilmagan bo'lsa — "Telegram orqali kiring" taklifi.
+
+## Kotlin ilova: Profil, Sozlamalar, SyncQueue (2026-10)
+
+- `data/SyncQueue.kt`: Flutter `SyncQueue` ning Kotlin nusxasi (yagona yozuv yo'li). Navbat diskda shifrlangan; 1 daqiqa kechikish, 2 daqiqa oraliq, fonga ketganda (`MainActivity.onStop`) darhol; `batch_id` bilan ikki marta sanalmaydi.
+- `AuthService`: `hiddenStats`, `chanConsent`, `updateSettings` (mahalliy darhol + navbat), `deleteAccount`. `data/MyStats.kt` — `/api/me/stats`.
+- Profil qayta ishlandi (hero karta, ID nusxalash, statistika, Sozlamalar, o'chirish, chiqishda sinxronlash). `ARUmultiplatform/FARQ.md` — Flutter bilan farqlar ro'yxati va tartib.

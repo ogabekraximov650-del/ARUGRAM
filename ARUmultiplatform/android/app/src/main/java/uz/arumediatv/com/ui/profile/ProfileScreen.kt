@@ -1,5 +1,18 @@
 package uz.arumediatv.com.ui.profile
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.widget.Toast
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
+import uz.arumediatv.com.data.MyStats
+import uz.arumediatv.com.data.SyncResult
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -57,33 +70,68 @@ import uz.arumediatv.com.ui.common.PageHeader
 import uz.arumediatv.com.ui.common.TgImage
 import uz.arumediatv.com.ui.theme.AruColors
 
-/** Profil (Flutter `ProfileScreen` ga mos): hisob kartasi, Telegram holati, tahrirlash, qurilmalar, kesh, ilova haqida, chiqish. */
+/**
+ * Profil: hisob kartasi (ID nusxalanadi), shaxsiy statistika, Sozlamalar, Telegram holati, qurilmalar, kesh, ilova haqida,
+ * hisobni o'chirish va chiqish. Chiqishda navbatdagi yozuvlar avval serverga saqlanadi (`SyncQueue`).
+ */
 @Composable
-fun ProfileScreen(onLogin: () -> Unit, onEdit: () -> Unit, onSessions: () -> Unit) {
+fun ProfileScreen(onLogin: () -> Unit, onEdit: () -> Unit, onSessions: () -> Unit, onSettings: () -> Unit) {
     val auth = AppServices.auth
     val tg = AppServices.telegram
     val user by auth.user.collectAsStateWithLifecycle()
     val tgState by tg.state.collectAsStateWithLifecycle()
+    val stats by AppServices.myStats.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
+    val ctx = LocalContext.current
 
     var confirmLogout by remember { mutableStateOf(false) }
+    var unsavedWarn by remember { mutableStateOf(false) }
+    var deleteStep by remember { mutableStateOf(0) } // 0 yo'q, 1 birinchi, 2 ikkinchi tasdiq
     var showAbout by remember { mutableStateOf(false) }
     var cacheBytes by remember { mutableStateOf(0L) }
-    var busy by remember { mutableStateOf(false) }
+    var busy by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(user) {
         cacheBytes = withContext(Dispatchers.IO) { AppServices.images.diskBytes() }
+        if (user != null) AppServices.myStats.load()
     }
 
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, top = 4.dp + LocalBarPad.current.calculateTopPadding())) {
+    suspend fun wipeLocal() {
+        tg.logout()
+        AppServices.images.clearDisk()
+        AppServices.library.clear()
+        AppServices.myStats.clear()
+        AppServices.sync.clear()
+    }
+
+    fun toast(t: String) = Toast.makeText(ctx, t, Toast.LENGTH_SHORT).show()
+
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+            .padding(start = 16.dp, end = 16.dp, top = 4.dp + LocalBarPad.current.calculateTopPadding()),
+    ) {
         PageHeader("Profil", Modifier.padding(horizontal = 4.dp))
         Spacer(Modifier.height(8.dp))
 
         val u = user
-        if (u == null) GuestCard(onLogin) else UserCard(u)
+        if (u == null) {
+            GuestCard(onLogin)
+        } else {
+            HeroCard(u, onEdit = onEdit, onCopyId = {
+                (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("ID", u.id.toString()))
+                toast("ID nusxalandi: ${u.id}")
+            })
+            Spacer(Modifier.height(14.dp))
+            StatsGrid(stats)
+        }
 
         Spacer(Modifier.height(16.dp))
         Group {
+            if (u != null) {
+                Row2(Icons.Filled.Settings, "Sozlamalar", "Maxfiylik: statistikani boshqalardan yashirish", onClick = onSettings)
+                Divider2()
+            }
             Row2(
                 Icons.Filled.Phone, "Telegram",
                 when {
@@ -92,10 +140,10 @@ fun ProfileScreen(onLogin: () -> Unit, onEdit: () -> Unit, onSessions: () -> Uni
                     tgState.configUnreachable -> "Server bilan bog'lanib bo'lmadi"
                     else -> "Ulanmagan"
                 },
+                onClick = if (!tgState.authorized) onLogin else null,
+                action = if (!tgState.authorized) "Ulash" else null,
             )
             if (u != null) {
-                Divider2()
-                Row2(Icons.Filled.Edit, "Profilni tahrirlash", "Ism va username", onClick = onEdit)
                 Divider2()
                 Row2(Icons.Filled.Person, "Qurilmalar", "Hisobga kirgan qurilmalar", onClick = onSessions)
             }
@@ -112,43 +160,131 @@ fun ProfileScreen(onLogin: () -> Unit, onEdit: () -> Unit, onSessions: () -> Uni
                 action = "Tozalash",
             )
             Divider2()
-            Row2(Icons.Filled.Settings, "Hisobni yangilash", "Serverdan qayta o'qish", onClick = {
-                if (u != null) scope.launch { auth.refresh() }
+            Row2(Icons.Filled.Refresh, "Hisobni yangilash", "Serverdan qayta o'qish", onClick = {
+                if (u != null) scope.launch {
+                    auth.refresh()
+                    AppServices.myStats.load(force = true)
+                }
             })
             Divider2()
             Row2(Icons.Filled.Info, "Ilova haqida", "Versiya ${BuildConfig.VERSION_NAME}", onClick = { showAbout = true })
         }
 
+        // Admin paneli: faqat admin build'da VA server admin deb belgilagan hisobda (haqiqiy to'siq serverda).
+        if (BuildConfig.IS_ADMIN && u != null && u.isAdmin) {
+            Spacer(Modifier.height(16.dp))
+            Group {
+                Row2(Icons.Filled.Lock, "Admin paneli", "Keyingi bosqichda qo'shiladi", onClick = { toast("Admin paneli keyingi bosqichda qo'shiladi") })
+            }
+        }
+
         if (u != null) {
             Spacer(Modifier.height(16.dp))
             Group {
-                Row2(Icons.Filled.ExitToApp, "Chiqish", "Bu qurilmadagi hisobdan chiqish", onClick = { confirmLogout = true }, danger = true)
+                Row2(Icons.Filled.Delete, "Accountni o'chirish", "Hisob va barcha ma'lumotlar o'chadi", onClick = { deleteStep = 1 }, danger = true)
+                Divider2()
+                Row2(Icons.Filled.ExitToApp, "Accountdan chiqish", "Bu qurilmadagi hisobdan chiqish", onClick = { confirmLogout = true }, danger = true)
             }
         }
         Spacer(Modifier.height(32.dp + LocalBarPad.current.calculateBottomPadding()))
     }
 
+    // ── Chiqish ──
     if (confirmLogout) {
         AlertDialog(
-            onDismissRequest = { if (!busy) confirmLogout = false },
+            onDismissRequest = { if (busy == null) confirmLogout = false },
             title = { Text("Chiqish") },
-            text = { Text("Hisobdan chiqasizmi? Rasm va videolarni ko'rish uchun qayta kirish kerak bo'ladi.") },
+            text = { Text("Hisobdan chiqasizmi? Avval saqlanmagan o'zgarishlar serverga yuboriladi.") },
             confirmButton = {
                 TextButton(
-                    enabled = !busy,
+                    enabled = busy == null,
                     onClick = {
-                        busy = true
+                        busy = "Ma'lumotlar saqlanmoqda"
                         scope.launch {
-                            auth.logout()
-                            tg.logout()
-                            AppServices.images.clearDisk()
-                            busy = false
-                            confirmLogout = false
+                            val r = withContext(Dispatchers.IO) { AppServices.sync.flush(force = true) }
+                            if (r == SyncResult.OFFLINE && AppServices.sync.pendingCount > 0) {
+                                busy = null
+                                unsavedWarn = true
+                            } else {
+                                auth.logout()
+                                wipeLocal()
+                                busy = null
+                                confirmLogout = false
+                            }
                         }
                     },
-                ) { Text(if (busy) "Chiqilmoqda..." else "Chiqish", color = Color(0xFFF87171)) }
+                ) { Text("Chiqish", color = Color(0xFFF87171)) }
             },
-            dismissButton = { TextButton(enabled = !busy, onClick = { confirmLogout = false }) { Text("Bekor qilish") } },
+            dismissButton = { TextButton(enabled = busy == null, onClick = { confirmLogout = false }) { Text("Bekor qilish") } },
+            containerColor = AruColors.Surface,
+        )
+    }
+    if (unsavedWarn) {
+        AlertDialog(
+            onDismissRequest = { unsavedWarn = false },
+            title = { Text("Internet yo'q") },
+            text = { Text("Saqlanmagan o'zgarishlar serverga yuborilmadi. Hozir chiqsangiz ular yo'qoladi.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    unsavedWarn = false
+                    confirmLogout = false
+                    scope.launch {
+                        auth.logout()
+                        wipeLocal()
+                    }
+                }) { Text("Baribir chiqish", color = Color(0xFFF87171)) }
+            },
+            dismissButton = { TextButton(onClick = { unsavedWarn = false; confirmLogout = false }) { Text("Qolish") } },
+            containerColor = AruColors.Surface,
+        )
+    }
+
+    // ── Hisobni o'chirish: ikki bosqichli tasdiq ──
+    if (deleteStep == 1) {
+        AlertDialog(
+            onDismissRequest = { deleteStep = 0 },
+            title = { Text("Accountni o'chirish") },
+            text = { Text("Hisobingiz, tarix, sevimlilar, baholar va izohlaringiz o'chiriladi. Bu amalni qaytarib bo'lmaydi.") },
+            confirmButton = { TextButton(onClick = { deleteStep = 2 }) { Text("Davom etish", color = Color(0xFFF87171)) } },
+            dismissButton = { TextButton(onClick = { deleteStep = 0 }) { Text("Bekor qilish") } },
+            containerColor = AruColors.Surface,
+        )
+    }
+    if (deleteStep == 2) {
+        AlertDialog(
+            onDismissRequest = { deleteStep = 0 },
+            title = { Text("Ishonchingiz komilmi?") },
+            text = { Text("Account butunlay o'chiriladi.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    deleteStep = 0
+                    busy = "Ma'lumotlar tozalanmoqda"
+                    scope.launch {
+                        val err = auth.deleteAccount()
+                        if (err == null) wipeLocal() else error = err
+                        busy = null
+                    }
+                }) { Text("Ha, o'chirilsin", color = Color(0xFFF87171)) }
+            },
+            dismissButton = { TextButton(onClick = { deleteStep = 0 }) { Text("Yo'q, bekor qilish") } },
+            containerColor = AruColors.Surface,
+        )
+    }
+    error?.let { msg ->
+        AlertDialog(
+            onDismissRequest = { error = null },
+            title = { Text("Bajarib bo'lmadi") },
+            text = { Text(msg) },
+            confirmButton = { TextButton(onClick = { error = null }) { Text("Yopish") } },
+            containerColor = AruColors.Surface,
+        )
+    }
+    busy?.let { label ->
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text(label) },
+            text = { LinearProgressIndicator(color = AruColors.Accent2, trackColor = AruColors.CardAlt, modifier = Modifier.fillMaxWidth()) },
+            confirmButton = {},
             containerColor = AruColors.Surface,
         )
     }
@@ -193,26 +329,67 @@ private fun GuestCard(onLogin: () -> Unit) {
 }
 
 @Composable
-private fun UserCard(u: AppUser) {
-    Card2 {
-        Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Avatar(u, 64.dp)
-            Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f)) {
-                Text(u.fullName, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                if (u.username.isNotEmpty()) Text("@${u.username}", color = AruColors.TextDim, fontSize = 13.sp)
-                Spacer(Modifier.height(6.dp))
+private fun HeroCard(u: AppUser, onEdit: () -> Unit, onCopyId: () -> Unit) {
+    val shape = RoundedCornerShape(24.dp)
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(Brush.linearGradient(listOf(AruColors.AccentTint, AruColors.Card)))
+            .border(1.dp, AruColors.Accent.copy(alpha = 0.25f), shape),
+    ) {
+        Row(Modifier.fillMaxWidth().padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.clip(CircleShape).background(Brush.linearGradient(listOf(AruColors.Accent, AruColors.Accent2))).padding(3.dp)) {
+                Avatar(u, 76.dp)
+            }
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.weight(1f).padding(end = 30.dp)) {
+                Text(u.fullName, color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (u.username.isNotEmpty()) Text("@${u.username}", color = AruColors.TextDim, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Pill("ID ${u.id}")
-                    Spacer(Modifier.width(8.dp))
-                    Pill("Balans: ${u.balance}", highlight = true)
+                    Text(
+                        "ID ${u.id}", color = AruColors.TextDim, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(Color.White.copy(alpha = 0.08f)).clickable(onClick = onCopyId).padding(horizontal = 10.dp, vertical = 4.dp),
+                    )
                     if (u.isAdmin) {
                         Spacer(Modifier.width(8.dp))
                         Pill("Admin", highlight = true)
                     }
                 }
+                Spacer(Modifier.height(6.dp))
+                Text("Balans: ${u.balance}", color = AruColors.Gold, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             }
         }
+        Box(
+            Modifier.align(Alignment.TopEnd).padding(10.dp).size(34.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.08f)).clickable(onClick = onEdit),
+            contentAlignment = Alignment.Center,
+        ) { Icon(Icons.Filled.Edit, "Tahrirlash", tint = Color.White.copy(alpha = 0.8f), modifier = Modifier.size(18.dp)) }
+    }
+}
+
+@Composable
+private fun StatsGrid(s: MyStats) {
+    val hours = s.watchHours
+    val hoursText = if (hours >= 10) "${hours.toInt()} soat" else String.format(java.util.Locale.US, "%.1f soat", hours)
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            StatBox("Anime", s.animes.toString(), Modifier.weight(1f))
+            StatBox("Qism", s.episodes.toString(), Modifier.weight(1f))
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            StatBox("Tomosha", hoursText, Modifier.weight(1f))
+            StatBox("Trafik", formatBytes(s.traffic), Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun StatBox(label: String, value: String, modifier: Modifier) {
+    val shape = RoundedCornerShape(18.dp)
+    Column(modifier.clip(shape).background(AruColors.Card).border(1.dp, AruColors.Border, shape).padding(horizontal = 16.dp, vertical = 14.dp)) {
+        Text(value, color = AruColors.Accent2, fontSize = 20.sp, fontWeight = FontWeight.Black, maxLines = 1)
+        Text(label, color = AruColors.TextDim, fontSize = 12.sp)
     }
 }
 

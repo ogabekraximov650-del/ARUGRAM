@@ -1,5 +1,7 @@
 package uz.arumediatv.com.ui.profile
 
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -50,7 +52,7 @@ import uz.arumediatv.com.data.DeviceSession
 import uz.arumediatv.com.ui.theme.AruColors
 
 @Composable
-private fun OverlayScaffold(title: String, onBack: () -> Unit, content: @Composable () -> Unit) {
+fun OverlayScaffold(title: String, onBack: () -> Unit, content: @Composable () -> Unit) {
     BackHandler(onBack = onBack)
     Column(Modifier.fillMaxSize().background(AruColors.Bg).statusBarsPadding().imePadding()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -203,5 +205,81 @@ fun SessionsScreen(onBack: () -> Unit) {
                 }
             }
         }
+    }
+}
+
+private data class PrivacyRow(val key: String, val title: String, val hint: String)
+
+private val PRIVACY_ROWS = listOf(
+    PrivacyRow("anime", "Anime", "Nechta anime ko'rganingiz"),
+    PrivacyRow("episodes", "Qismlar", "Nechta qism ko'rganingiz va ularning ro'yxati"),
+    PrivacyRow("seasons", "Bo'limlar", "Ko'rgan bo'limlaringiz ro'yxati"),
+    PrivacyRow("favorites", "Sevimlilar", "Sevimlilarga saqlaganlaringiz"),
+    PrivacyRow("rated", "Baholangan", "Baho bergan bo'limlaringiz va bergan bahoyingiz"),
+    PrivacyRow("comments", "Izohlar", "Yozgan izohlaringiz, javoblari va layklari"),
+    PrivacyRow("watch", "Tomosha vaqti", "Jami necha soat tomosha qilganingiz"),
+)
+
+/**
+ * Sozlamalar: statistikani boshqalardan yashirish va kanallarga avtomatik obuna ruxsati.
+ * Tugma shu zahoti suriladi; serverga `SyncQueue` orqali bitta paket bo'lib ketadi (necha marta bosilsa ham bitta yozuv).
+ */
+@Composable
+fun SettingsScreen(onBack: () -> Unit) {
+    val auth = AppServices.auth
+    val user by auth.user.collectAsStateWithLifecycle()
+    val u = user
+    OverlayScaffold("Sozlamalar", onBack) {
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
+            SectionLabel("MAXFIYLIK")
+            Text(
+                "Statistikangiz odatda OCHIQ turadi. Yashirmoqchi bo'lganingizning tugmasini yoqing — yoqilgani boshqalarga umuman ko'rinmaydi.",
+                color = AruColors.TextFaint, fontSize = 12.sp, lineHeight = 18.sp, modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp),
+            )
+            PRIVACY_ROWS.forEach { r ->
+                SwitchRow(r.title, r.hint, checked = u?.isHidden(r.key) ?: false, enabled = u != null) { on ->
+                    val now = (u?.hiddenStats ?: emptyList()).toMutableList()
+                    if (on) { if (r.key !in now) now += r.key } else now.remove(r.key)
+                    auth.updateSettings(hiddenStats = now)
+                }
+            }
+            Text(
+                "Profil rasmi, ismingiz, username va ID raqamingiz har doim ko'rinadi. Balansingiz va sarflagan trafigingiz esa HECH QACHON boshqalarga ko'rinmaydi.",
+                color = AruColors.TextFaint, fontSize = 12.sp, lineHeight = 18.sp, modifier = Modifier.padding(horizontal = 4.dp, vertical = 10.dp),
+            )
+            Spacer(Modifier.height(10.dp))
+            SectionLabel("BEPUL KO'RISH")
+            Spacer(Modifier.height(6.dp))
+            SwitchRow(
+                "Kanallarga avtomatik obuna",
+                "Bepul bo'limlar uchun ilova Telegram hisobingiz bilan majburiy kanallarga qo'shiladi. O'chirsangiz, bepul bo'lim ochilganda ruxsat yana so'raladi.",
+                checked = u?.chanConsent ?: false, enabled = u != null,
+            ) { on -> auth.updateSettings(chanConsent = on) }
+            Spacer(Modifier.height(32.dp))
+        }
+    }
+}
+
+@Composable
+private fun SectionLabel(text: String) {
+    Text(text, color = AruColors.Accent2, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
+}
+
+@Composable
+private fun SwitchRow(title: String, hint: String, checked: Boolean, enabled: Boolean, onChange: (Boolean) -> Unit) {
+    val shape = RoundedCornerShape(16.dp)
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 5.dp).clip(shape).background(AruColors.Card).border(1.dp, AruColors.Border, shape).padding(start = 16.dp, end = 10.dp, top = 10.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Text(hint, color = AruColors.TextDim, fontSize = 12.sp, lineHeight = 16.sp, modifier = Modifier.padding(top = 2.dp))
+        }
+        Spacer(Modifier.width(8.dp))
+        androidx.compose.material3.Switch(
+            checked = checked, onCheckedChange = onChange, enabled = enabled,
+            colors = androidx.compose.material3.SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = AruColors.Accent),
+        )
     }
 }

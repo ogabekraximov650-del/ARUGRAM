@@ -6,6 +6,8 @@ import uz.arumediatv.com.core.SecureStore
 import uz.arumediatv.com.data.AuthService
 import uz.arumediatv.com.data.ImageStore
 import uz.arumediatv.com.data.LibraryStore
+import uz.arumediatv.com.data.MyStatsStore
+import uz.arumediatv.com.data.SyncQueue
 import uz.arumediatv.com.data.SeasonsRepository
 import uz.arumediatv.com.data.SeasonsStore
 import uz.arumediatv.com.data.TelegramService
@@ -23,6 +25,10 @@ object AppServices {
     lateinit var seasons: SeasonsStore
         private set
     lateinit var library: LibraryStore
+        private set
+    lateinit var sync: SyncQueue
+        private set
+    lateinit var myStats: MyStatsStore
         private set
 
     @Volatile
@@ -48,6 +54,10 @@ object AppServices {
         images = ImageStore(ctx, telegram)
         seasons = SeasonsStore(SeasonsRepository(ctx))
         library = LibraryStore(auth)
+        sync = SyncQueue(ctx, auth)
+        myStats = MyStatsStore(auth)
+        auth.onSettings = { hidden, consent -> sync.putSettings(hidden, consent) }
+        auth.hasPendingSettings = { sync.hasPendingSettings }
         ready = true
     }
 }

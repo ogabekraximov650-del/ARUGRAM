@@ -21,7 +21,13 @@ data class AppUser(
     val balance: Long = 0,
     val profileDone: Boolean = true,
     val isAdmin: Boolean = false,
+    /** Boshqalarga ko'rsatilmaydigan statistika kalitlari (Sozlamalar > Maxfiylik). */
+    val hiddenStats: List<String> = emptyList(),
+    /** Bepul bo'limlar uchun kanallarga avtomatik obuna ruxsati. */
+    val chanConsent: Boolean = false,
 ) {
+    fun isHidden(key: String): Boolean = key in hiddenStats
+
     val fullName: String
         get() {
             val n = "$firstName $lastName".trim()
@@ -48,6 +54,7 @@ data class AppUser(
         .put("id", id).put("telegram_id", telegramId).put("username", username)
         .put("first_name", firstName).put("last_name", lastName).put("photo_url", photoUrl)
         .put("balance", balance).put("profile_done", profileDone).put("is_admin", isAdmin)
+        .put("hidden_stats", JSONArray(hiddenStats)).put("chan_consent", chanConsent)
 
     companion object {
         fun fromJson(j: JSONObject) = AppUser(
@@ -60,6 +67,8 @@ data class AppUser(
             balance = j.optLong("balance"),
             profileDone = j.optBoolean("profile_done", true),
             isAdmin = j.optBoolean("is_admin", false),
+            hiddenStats = j.optJSONArray("hidden_stats")?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: emptyList(),
+            chanConsent = j.optBoolean("chan_consent", false),
         )
     }
 }
@@ -104,8 +113,47 @@ class AuthService(
         val s = sessionToken ?: return@withContext
         val r = http.callJson("$base/api/auth/me", bearer = s)
         when {
-            r.ok -> r.json?.optJSONObject("user")?.let { save(s, AppUser.fromJson(it)) }
+            r.ok -> r.json?.optJSONObject("user")?.let { save(s, keepLocalSettings(AppUser.fromJson(it))) }
             r.code == 401 -> clear()
+        }
+    }
+
+    // ── SOZLAMALAR: AVVAL TELEFONDA, KEYIN BITTA PAKETDA (`SyncQueue`) ──
+    // Tugma shu zahoti suriladi; server 60 soniya eski hisobni eslab qolishi mumkin, shuning uchun `refresh` mahalliy
+    // sozlamalarni (hali yuborilmagan yoki 5 daqiqa ichida o'zgargan bo'lsa) server javobi ustiga qo'yadi.
+    @Volatile
+    private var settingsAt = 0L
+
+    /** `SyncQueue` ulaydi. */
+    var onSettings: ((List<String>, Boolean) -> Unit)? = null
+    var hasPendingSettings: () -> Boolean = { false }
+
+    fun updateSettings(hiddenStats: List<String>? = null, chanConsent: Boolean? = null) {
+        val s = sessionToken ?: return
+        val u = _user.value ?: return
+        val nu = u.copy(hiddenStats = hiddenStats ?: u.hiddenStats, chanConsent = chanConsent ?: u.chanConsent)
+        settingsAt = System.currentTimeMillis()
+        save(s, nu)
+        onSettings?.invoke(nu.hiddenStats, nu.chanConsent)
+    }
+
+    private fun keepLocalSettings(fromServer: AppUser): AppUser {
+        val local = _user.value ?: return fromServer
+        if (local.id != fromServer.id) return fromServer
+        val fresh = System.currentTimeMillis() - settingsAt < 5 * 60_000L
+        if (!fresh && !hasPendingSettings()) return fromServer
+        return fromServer.copy(hiddenStats = local.hiddenStats, chanConsent = local.chanConsent)
+    }
+
+    /** Hisobni serverdan o'chiradi va telefondagi hisobni tozalaydi. `null` — tayyor; aks holda xato matni. */
+    suspend fun deleteAccount(): String? = withContext(Dispatchers.IO) {
+        val s = sessionToken ?: return@withContext "Avval hisobga kiring"
+        val r = http.callJson("$base/api/auth/delete-account", "POST", bearer = s)
+        if (r.ok) {
+            clear()
+            null
+        } else {
+            r.error ?: if (r.code == 0) "Tarmoq xatosi — qaytadan urinib ko'ring" else "O'chirib bo'lmadi (${r.code})"
         }
     }
 
