@@ -266,7 +266,7 @@ internal class ChartModel {
         return null
     }
 
-    fun setPressed(label: String?) {
+    fun press(label: String?) {
         if (label == target) return
         target = label
         onPress(label)
@@ -516,13 +516,13 @@ internal fun StorageChart(
             if (!interactive) return@pointerInput
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false)
-                model.setPressed(model.hit(down.position.x / density.toDouble(), down.position.y / density.toDouble(), size.width / density.toDouble()))
+                model.press(model.hit(down.position.x / density.toDouble(), down.position.y / density.toDouble(), size.width / density.toDouble()))
                 do {
                     val e = awaitPointerEvent()
                     val p = e.changes.firstOrNull() ?: break
-                    model.setPressed(model.hit(p.position.x / density.toDouble(), p.position.y / density.toDouble(), size.width / density.toDouble()))
+                    model.press(model.hit(p.position.x / density.toDouble(), p.position.y / density.toDouble(), size.width / density.toDouble()))
                 } while (e.changes.any { it.pressed })
-                model.setPressed(null)
+                model.press(null)
             }
         },
     ) {
