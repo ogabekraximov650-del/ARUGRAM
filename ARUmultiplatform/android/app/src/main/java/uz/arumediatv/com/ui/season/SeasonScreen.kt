@@ -22,6 +22,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import uz.arumediatv.com.ui.common.AruIcons
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -329,9 +332,25 @@ fun SeasonScreen(
     val ep = current
     val introActive = ep?.intro?.any { player.positionMs in it } == true
 
-    Column(Modifier.fillMaxSize().background(AruColors.Bg)) {
+    val pager = androidx.compose.foundation.pager.rememberPagerState(initialPage = tab) { 4 }
+    val pagerScope = androidx.compose.runtime.rememberCoroutineScope()
+    LaunchedEffect(pager.currentPage) { tab = pager.currentPage }
+    var showEpisodeList by remember { mutableStateOf(false) }
+
+    Column(Modifier.fillMaxSize().background(AruColors.Bg).then(if (fullscreen) Modifier else Modifier.statusBarsPadding())) {
+        if (!fullscreen) {
+            // ── Orqaga + nom (Flutter bilan bir xil) ──
+            Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                val bs = RoundedCornerShape(14.dp)
+                Box(Modifier.clip(bs).background(AruColors.Card).border(1.dp, AruColors.Border, bs).clickable(onClick = onBack).padding(8.dp)) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "Orqaga", tint = Color.White, modifier = Modifier.size(24.dp))
+                }
+                Spacer(Modifier.width(12.dp))
+                Text(season.name, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
         // ── Video ──
-        val box = if (fullscreen) Modifier.fillMaxSize() else Modifier.fillMaxWidth().aspectRatio(16f / 9f)
+        val box = if (fullscreen) Modifier.fillMaxSize() else Modifier.padding(horizontal = 16.dp).fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(16.dp))
         Box(box.background(Color.Black)) {
             if (needsConsent) {
                 ConsentRequired(gate.channels.orEmpty(), onBack = onBack, onGrant = { AppServices.gate.grant() })
@@ -339,25 +358,25 @@ fun SeasonScreen(
                 SubRequired(onBack = onBack, onBilling = onOpenBilling)
             } else {
                 PlayerSurface(player, Modifier.fillMaxSize())
+                val bolim = season.sectionNo.takeIf { it > 0 } ?: 1
                 PlayerControls(
                     player = player,
                     title = season.name,
-                    subtitle = listOfNotNull(
-                        ep?.let { "${it.number}-qism" },
-                        ep?.qualityOf(currentUrl)?.takeIf { it.isNotEmpty() }?.let { q -> ep.qualityTitle(q) },
-                        if (current != null) (if (viaLocal) "Yuklangan" else if (viaTelegram) "Telegram" else "Server") else null,
-                    ).joinToString(" · "),
+                    subtitle = ep?.let { e -> "$bolim-bo'lim · ${e.number}-qism" + if (e.name.isNotBlank()) " · ${e.name}" else "" }.orEmpty(),
                     fullscreen = fullscreen,
                     locked = locked,
                     hasPrev = idx > 0,
                     hasNext = idx >= 0 && idx + 1 < sorted.size,
                     introActive = introActive,
+                    speedLabel = if (player.speed == player.speed.toInt().toFloat()) "${player.speed.toInt()}x" else "${player.speed}x",
                     onSkipIntro = { ep?.intro?.firstOrNull { player.positionMs in it }?.let { player.seekTo(it.last) } },
                     onPrev = { if (idx > 0) play(sorted[idx - 1]) },
                     onNext = { if (idx >= 0 && idx + 1 < sorted.size) play(sorted[idx + 1]) },
                     onBack = { if (fullscreen) fullscreen = false else onBack() },
                     onToggleFullscreen = { fullscreen = !fullscreen },
                     onSettings = { showSettings = true },
+                    onQuality = { showSettings = true },
+                    onEpisodeList = { showEpisodeList = true },
                     onToggleLock = { locked = !locked },
                     onRetry = { ep?.let { e -> play(e, resumeAt = player.positionMs, preferWorker = !viaTelegram) } },
                     modifier = Modifier.fillMaxSize(),
@@ -366,48 +385,58 @@ fun SeasonScreen(
         }
 
         if (!fullscreen) {
-            // ── Sarlavha + sevimli ──
-            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(season.name, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    val sub = buildList {
-                        if (season.sectionNo > 0) add("${season.sectionNo}-bo'lim")
-                        val c = info?.long("epizod_count")?.toInt()?.takeIf { it > 0 } ?: season.episodes
-                        if (c > 0) add("$c ta qism")
-                        info?.takeIf { it.ratingCount > 0 }?.let { add("★ ${String.format(java.util.Locale.US, "%.1f", it.rating)}") }
-                    }.joinToString(" · ")
-                    if (sub.isNotEmpty()) Text(sub, color = AruColors.TextDim, fontSize = 12.sp)
+            // ── Hozir ijro: "1-bo'lim · 1-qism 👁 1 ⏱ 0:00 📅 sana" ──
+            if (ep != null) {
+                val cs = RoundedCornerShape(11.dp)
+                @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+                androidx.compose.foundation.layout.FlowRow(
+                    Modifier.padding(start = 16.dp, end = 16.dp, top = 6.dp).clip(cs).background(AruColors.Card).border(1.dp, AruColors.Border, cs).padding(horizontal = 10.dp, vertical = 5.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text("${season.sectionNo.takeIf { it > 0 } ?: 1}-bo'lim · ${ep.number}-qism", color = Color.White, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                    NowStat(AruIcons.Visibility, formatCount(ep.views))
+                    NowStat(AruIcons.Schedule, formatHours(ep.watchMs))
+                    if (ep.addedAt > 0) NowStat(AruIcons.EventAvailable, formatMomentYmd(ep.addedAt))
                 }
-                val fav = info?.isFav == true
-                Box(
-                    Modifier.size(42.dp).clip(CircleShape).background(if (fav) AruColors.AccentTint else AruColors.Card)
-                        .border(1.dp, if (fav) AruColors.Accent.copy(alpha = 0.5f) else AruColors.Border, CircleShape)
-                        .clickable {
-                            if (!AppServices.auth.isLoggedIn) toast("Sevimlilarga qo'shish uchun hisobga kiring")
-                            else info = repo.setFavorite(season, !fav, info ?: SeasonInfo(org.json.JSONObject(), 0.0, 0, false))
-                        },
-                    contentAlignment = Alignment.Center,
-                ) { Icon(Icons.Filled.Favorite, "Sevimli", tint = if (fav) AruColors.Accent2 else Color.White.copy(alpha = 0.4f), modifier = Modifier.size(22.dp)) }
-            }
+            } else Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(8.dp))
 
-            // ── Tablar ──
+            // ── Tablar (shisha qutida) ──
             val titles = listOf("Ma'lumot", "Qismlar", "Bo'limlar", "Izohlar")
-            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            val ts = RoundedCornerShape(14.dp)
+            Row(
+                Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(ts).background(AruColors.Card).border(1.dp, AruColors.Border, ts).padding(3.dp),
+            ) {
                 titles.forEachIndexed { i, t ->
-                    val active = tab == i
-                    val shape = RoundedCornerShape(14.dp)
+                    val active = pager.currentPage == i
                     Box(
-                        Modifier.weight(1f).clip(shape)
-                            .then(if (active) Modifier.background(Brush.linearGradient(listOf(AruColors.Accent, AruColors.Accent2))) else Modifier.background(AruColors.Card).border(1.dp, AruColors.Border, shape))
-                            .clickable { tab = i }.padding(vertical = 10.dp),
+                        Modifier.weight(1f).height(32.dp).clip(RoundedCornerShape(11.dp))
+                            .then(if (active) Modifier.background(AruColors.Accent) else Modifier)
+                            .clickable { pagerScope.launch { pager.animateScrollToPage(i) } },
                         contentAlignment = Alignment.Center,
-                    ) { Text(t, color = if (active) Color.White else Color.White.copy(alpha = 0.6f), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1) }
+                    ) { Text(t, color = if (active) Color.White else Color.White.copy(alpha = 0.54f), fontSize = 13.sp, fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1) }
                 }
             }
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(6.dp))
 
-            Box(Modifier.weight(1f).fillMaxWidth()) {
-                when (tab) {
+            // ── Qism almashtirish: [⏮]  N-qism  [⏭] ──
+            Row(
+                Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(AruColors.Card).border(1.dp, AruColors.Border, RoundedCornerShape(14.dp)).padding(horizontal = 6.dp, vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                NavBtn(AruIcons.SkipPrevious, idx > 0) { if (idx > 0) play(sorted[idx - 1]) }
+                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    Text(
+                        if (idx >= 0) "${sorted[idx].number}-qism" else if (sorted.isEmpty()) "—" else "Qismni tanlang",
+                        color = if (idx >= 0) Color.White else Color.White.copy(alpha = 0.54f), fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1,
+                    )
+                }
+                NavBtn(AruIcons.SkipNext, idx >= 0 && idx + 1 < sorted.size) { if (idx >= 0 && idx + 1 < sorted.size) play(sorted[idx + 1]) }
+            }
+            Spacer(Modifier.height(6.dp))
+
+            androidx.compose.foundation.pager.HorizontalPager(pager, Modifier.weight(1f).fillMaxWidth(), beyondViewportPageCount = 1) { page ->
+                when (page) {
                     0 -> InfoTab(
                         season = season, info = info,
                         onRate = { stars ->
@@ -433,6 +462,10 @@ fun SeasonScreen(
                 }
             }
         }
+    }
+
+    if (showEpisodeList) {
+        EpisodeListSheet(sorted, current?.id, onPick = { e -> play(e) }, onDismiss = { showEpisodeList = false })
     }
 
     if (showSettings) {
@@ -494,4 +527,25 @@ private fun ConsentRequired(channels: List<uz.arumediatv.com.data.GateChannel>, 
             )
         }
     }
+}
+
+@Composable
+private fun NowStat(icon: androidx.compose.ui.graphics.vector.ImageVector, text: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, tint = Color.White.copy(alpha = 0.45f), modifier = Modifier.size(11.5.dp))
+        Spacer(Modifier.width(3.dp))
+        Text(text, color = Color.White.copy(alpha = 0.62f), fontSize = 10.5.sp)
+    }
+}
+
+@Composable
+private fun NavBtn(icon: androidx.compose.ui.graphics.vector.ImageVector, enabled: Boolean, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(12.dp)
+    Box(
+        Modifier.width(68.dp).height(38.dp).clip(shape)
+            .background(Color.White.copy(alpha = if (enabled) 0.10f else 0.035f))
+            .border(1.dp, Color.White.copy(alpha = if (enabled) 0.20f else 0.06f), shape)
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) { Icon(icon, null, tint = Color.White.copy(alpha = if (enabled) 0.95f else 0.22f), modifier = Modifier.size(24.dp)) }
 }

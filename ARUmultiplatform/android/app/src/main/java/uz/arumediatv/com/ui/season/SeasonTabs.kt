@@ -59,6 +59,7 @@ import uz.arumediatv.com.AppServices
 import uz.arumediatv.com.data.Episode
 import uz.arumediatv.com.data.Season
 import uz.arumediatv.com.data.SeasonInfo
+import uz.arumediatv.com.ui.common.AruIcons
 import uz.arumediatv.com.ui.common.EmptyState
 import uz.arumediatv.com.ui.common.LoadingBox
 import uz.arumediatv.com.ui.common.TgImage
@@ -69,16 +70,32 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
-fun formatCount(n: Long): String = when {
-    n >= 1_000_000 -> String.format(Locale.US, "%.1fM", n / 1_000_000.0)
-    n >= 10_000 -> String.format(Locale.US, "%.1fK", n / 1_000.0)
-    else -> n.toString()
+/** `1.284.512` — mingliklar nuqta bilan (Flutter `formatCount`). */
+fun formatCount(n: Long): String {
+    val d = Math.abs(n).toString()
+    val sb = StringBuilder()
+    for (i in d.indices) {
+        if (i > 0 && (d.length - i) % 3 == 0) sb.append('.')
+        sb.append(d[i])
+    }
+    return if (n < 0) "-$sb" else sb.toString()
 }
 
-fun formatHours(ms: Long): String = String.format(Locale.US, "%.1f", ms / 3_600_000.0)
+/** `12:05` — soat:daqiqa (Flutter `formatHours`). */
+fun formatHours(ms: Long): String {
+    val total = ms / 1000
+    return "${formatCount(total / 3600)}:${((total % 3600) / 60).toString().padStart(2, '0')}"
+}
 
 fun formatYmd(ms: Long): String =
     SimpleDateFormat("dd.MM.yyyy", Locale.US).apply { timeZone = TimeZone.getTimeZone("GMT+5") }.format(Date(if (ms < 100_000_000_000L) ms * 1000 else ms))
+
+/** `2026/10/16/09:44` (Flutter `formatMomentYmd`), Toshkent vaqti. */
+fun formatMomentYmd(ms: Long): String =
+    if (ms <= 0) "" else SimpleDateFormat("yyyy/MM/dd/HH:mm", Locale.US).apply { timeZone = TimeZone.getTimeZone("GMT+5") }.format(Date(if (ms < 100_000_000_000L) ms * 1000 else ms))
+
+/** `10.00` (Flutter `formatRating`). */
+fun formatRating(v: Double): String = String.format(Locale.US, "%05.2f", v.coerceIn(0.0, 10.0))
 
 private val cardShape = RoundedCornerShape(18.dp)
 
@@ -100,23 +117,23 @@ fun InfoTab(season: Season, info: SeasonInfo?, onRate: (Int) -> Unit, onFavorite
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            ActionTile(Icons.Filled.Star, AruColors.Gold, if (myStars > 0) "Bahoyingiz: $myStars" else "Baholash", Modifier.weight(1f)) { rating = true }
-            ActionTile(Icons.Filled.Favorite, AruColors.Accent2, if (isFav) "Sevimlilarda" else "Sevimlilarga qo'shish", Modifier.weight(1f), onFavorite)
+            ActionTile(if (myStars > 0) Icons.Filled.Star else AruIcons.StarBorder, AruColors.Gold, if (myStars > 0) "Bahoyingiz: $myStars" else "Baholash", Modifier.weight(1f)) { rating = true }
+            ActionTile(if (isFav) Icons.Filled.Favorite else AruIcons.FavoriteBorder, AruColors.Accent2, if (isFav) "Sevimlilarda" else "Sevimlilarga qo'shish", Modifier.weight(1f), onFavorite)
         }
         Spacer(Modifier.height(12.dp))
         CardBox {
             Column(Modifier.padding(16.dp)) {
-                StatLine("Ko'rishlar", formatCount(info?.views ?: season.views))
-                StatLine("Tomosha vaqti", "${formatHours(info?.watchMs ?: 0)} soat")
-                StatLine("Sevimlilarga qo'shilgan", formatCount(info?.favCount ?: 0))
+                StatLine(AruIcons.Visibility, "Ko'rishlar", formatCount(info?.views ?: season.views))
+                StatLine(AruIcons.Schedule, "Tomosha vaqti", "${formatHours(info?.watchMs ?: 0)} soat")
+                StatLine(AruIcons.FavoriteBorder, "Sevimlilarga qo'shilgan", formatCount(info?.favCount ?: 0))
                 StatLine(
-                    "Reyting",
-                    if (ratingCount > 0) "${String.format(Locale.US, "%.1f", info?.rating ?: season.ratingAvg)}  ($ratingCount ta baho)" else "hali baholanmagan",
+                    AruIcons.StarBorder, "Reyting",
+                    if (ratingCount > 0) "${formatRating(info?.rating ?: season.ratingAvg)}  (${formatCount(ratingCount)} ta baho)" else "hali baholanmagan",
                 )
                 val bolim = (info?.long("bolim_id")?.toInt() ?: season.sectionNo).takeIf { it > 0 } ?: 1
-                StatLine("Bo'lim", "$bolim-bo'lim · ${info?.long("epizod_count") ?: season.episodes} qism")
+                StatLine(AruIcons.Movie, "Bo'lim", "$bolim-bo'lim · ${formatCount(info?.long("epizod_count") ?: season.episodes.toLong())} qism")
                 val created = info?.long("created_at") ?: 0
-                if (created > 0) StatLine("Qo'shilgan sana", formatYmd(created))
+                if (created > 0) StatLine(AruIcons.EventAvailable, "Qo'shilgan sana", formatMomentYmd(created))
             }
         }
         Spacer(Modifier.height(12.dp))
@@ -177,8 +194,10 @@ private fun ActionTile(icon: androidx.compose.ui.graphics.vector.ImageVector, ti
 }
 
 @Composable
-private fun StatLine(label: String, value: String) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
+private fun StatLine(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, value: String) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, tint = Color.White.copy(alpha = 0.45f), modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(9.dp))
         Text("$label:", color = AruColors.TextDim, fontSize = 13.sp)
         Spacer(Modifier.width(8.dp))
         Text(value, color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f), textAlign = androidx.compose.ui.text.style.TextAlign.End)
@@ -422,5 +441,26 @@ private fun ToggleRow(label: String, checked: Boolean, onChange: (Boolean) -> Un
     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(label, color = Color.White, fontSize = 14.sp, modifier = Modifier.weight(1f))
         Switch(checked = checked, onCheckedChange = onChange, colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = AruColors.Accent))
+    }
+}
+
+/** To'liq ekrandagi "qismlar ro'yxati": bossa shu qism ochiladi. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun EpisodeListSheet(episodes: List<Episode>, currentId: Long?, onPick: (Episode) -> Unit, onDismiss: () -> Unit) {
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = AruColors.Surface) {
+        LazyColumn(Modifier.fillMaxWidth(), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(episodes.sortedByDescending { it.number }, key = { it.id }) { e ->
+                val cur = e.id == currentId
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(if (cur) AruColors.AccentTint else AruColors.Card)
+                        .clickable { onPick(e); onDismiss() }.padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("${e.number}-qism", color = if (cur) AruColors.Accent2 else Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    if (e.name.isNotBlank()) Text("  ${e.name}", color = AruColors.TextDim, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
     }
 }

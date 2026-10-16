@@ -5,7 +5,13 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.matchParentSize
+import uz.arumediatv.com.ui.common.AruIcons
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -74,10 +80,8 @@ fun PlayerSurface(player: AruPlayer, modifier: Modifier = Modifier) {
 
 fun formatClock(ms: Long): String {
     val s = (ms / 1000).coerceAtLeast(0)
-    val h = s / 3600
-    val m = (s / 60) % 60
-    val sec = s % 60
-    return if (h > 0) String.format(java.util.Locale.US, "%d:%02d:%02d", h, m, sec) else String.format(java.util.Locale.US, "%02d:%02d", m, sec)
+    // Flutter bilan bir xil: soat ajratilmaydi, daqiqa 60 dan oshaveradi (`0:50`, `23:10`, `120:00`).
+    return String.format(java.util.Locale.US, "%d:%02d", s / 60, s % 60)
 }
 
 private val FullscreenIcon: ImageVector = materialIcon("Filled.Fullscreen") {
@@ -111,8 +115,12 @@ private val SkipPrevIcon: ImageVector = materialIcon("Filled.SkipPrevious") {
 }
 
 /**
- * Pleyer boshqaruvi: bir bosish — ko'rsatish/yashirish; ikki marta bosish — chap/o'ng yarmida 10 soniya orqaga/oldinga;
- * markazda oldingi/pauza/keyingi; pastda vaqt chizig'i. Qulflansa faqat qulf tugmasi qoladi.
+ * Pleyer boshqaruvi (Flutter bilan bir xil tuzilma).
+ *
+ * Kichik (sahifa ichidagi): yuqori o'ngda ⋮, markazda play/pauza (yuklanayotganda aylanuvchi halqa), pastda vaqt chizig'i,
+ * `0:50/23:10`, HQ va to'liq ekran. To'liq ekran: yuqori chapda orqaga + nom/qism, yuqori o'ngda qulf/sozlama/chiqish, pastda
+ * (o'ngda) qismlar ro'yxati, tezlik, HQ chiplari, oldingi/pauza/keyingi tugmalari va vaqt chizig'i `pos / dur`.
+ * Ikki marta bosish — chap/o'ng yarmida 10 soniya; bir bosish — ko'rsatish/yashirish.
  */
 @Composable
 fun PlayerControls(
@@ -124,12 +132,15 @@ fun PlayerControls(
     hasPrev: Boolean,
     hasNext: Boolean,
     introActive: Boolean,
+    speedLabel: String,
     onSkipIntro: () -> Unit,
     onPrev: () -> Unit,
     onNext: () -> Unit,
     onBack: () -> Unit,
     onToggleFullscreen: () -> Unit,
     onSettings: () -> Unit,
+    onQuality: () -> Unit,
+    onEpisodeList: () -> Unit,
     onToggleLock: () -> Unit,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
@@ -154,7 +165,8 @@ fun PlayerControls(
     }
     val errored = player.error != null
     val showAll = (visible || !player.playing || errored) && !locked
-    val curPlaying by rememberUpdatedState(player.playing)
+    val busy = player.buffering || (!player.ready && !player.ended) || dragMs != null
+    val s = if (fullscreen) 1.15f else 1f
 
     Box(
         modifier
@@ -172,20 +184,44 @@ fun PlayerControls(
                 )
             },
     ) {
+        // Qorayish: tepa 60% -> shaffof -> past 85% (Flutter bilan bir xil)
+        AnimatedVisibility(showAll, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.matchParentSize()) {
+            Box(
+                Modifier.fillMaxSize().background(
+                    Brush.verticalGradient(
+                        0f to Color.Black.copy(alpha = 0.60f), 0.3f to Color.Transparent, 0.68f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.85f),
+                    ),
+                ),
+            )
+        }
+
         // Yuqori qator
-        AnimatedVisibility(showAll, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.TopCenter)) {
-            Row(
-                Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.7f), Color.Transparent))).padding(horizontal = 8.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                RoundIcon(Icons.AutoMirrored.Filled.ArrowBack, "Orqaga", onBack)
-                Column(Modifier.weight(1f).padding(horizontal = 8.dp)) {
-                    Text(title, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    if (subtitle.isNotEmpty()) Text(subtitle, color = Color.White.copy(alpha = 0.65f), fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (fullscreen) {
+            AnimatedVisibility(showAll, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.TopCenter)) {
+                Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.clip(CircleShape).clickable(onClick = onBack).padding(8.dp)) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Orqaga", tint = Color.White, modifier = Modifier.size(24.dp))
+                    }
+                    Column(Modifier.weight(1f).padding(start = 4.dp)) {
+                        Text(title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        if (subtitle.isNotEmpty()) Text(subtitle, color = Color.White.copy(alpha = 0.7f), fontWeight = FontWeight.Medium, fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    Box(Modifier.padding(4.dp).clip(RoundedCornerShape(10.dp)).clickable(onClick = onToggleLock).padding(5.dp)) {
+                        Icon(AruIcons.LockOpen, "Qulflash", tint = Color.White, modifier = Modifier.size(22.dp))
+                    }
+                    Box(Modifier.clip(CircleShape).clickable(onClick = onSettings).padding(9.dp)) {
+                        Icon(Icons.Filled.Settings, "Sozlamalar", tint = Color.White, modifier = Modifier.size(22.dp))
+                    }
+                    Box(Modifier.clip(CircleShape).clickable(onClick = onToggleFullscreen).padding(9.dp)) {
+                        Icon(AruIcons.FullscreenExit, "Kichraytirish", tint = Color.White, modifier = Modifier.size(22.dp))
+                    }
                 }
-                RoundIcon(Icons.Filled.Lock, "Qulflash", onToggleLock)
-                Spacer(Modifier.width(6.dp))
-                RoundIcon(Icons.Filled.Settings, "Sozlamalar", onSettings)
+            }
+        } else {
+            AnimatedVisibility(showAll && player.error == null, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.TopEnd)) {
+                Box(Modifier.padding(end = 4.dp, top = 2.dp).clip(CircleShape).clickable(onClick = onSettings).padding(9.dp)) {
+                    Icon(AruIcons.MoreVert, "Menyu", tint = Color.White, modifier = Modifier.size(22.dp))
+                }
             }
         }
 
@@ -204,18 +240,13 @@ fun PlayerControls(
                     Text("Qayta urinish", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                 }
             }
-            player.buffering || (!player.ready && !player.ended) ->
-                CircularProgressIndicator(color = AruColors.Accent2, strokeWidth = 3.dp, modifier = Modifier.align(Alignment.Center).size(42.dp))
-            else -> AnimatedVisibility(showAll, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.Center)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(28.dp), verticalAlignment = Alignment.CenterVertically) {
-                    RoundIcon(SkipPrevIcon, "Oldingi qism", { onPrev(); bump++ }, enabled = hasPrev, size = 44)
+            else -> Box(Modifier.align(Alignment.Center).size(76.dp), contentAlignment = Alignment.Center) {
+                if (busy) CircularProgressIndicator(color = AruColors.Accent, strokeWidth = 2.6.dp, modifier = Modifier.size(76.dp))
+                if (!fullscreen && (showAll || busy)) {
                     Box(
-                        Modifier.size(64.dp).clip(CircleShape).background(Brush.linearGradient(listOf(AruColors.Accent, AruColors.Accent2))).clickable { player.toggle(); bump++ },
+                        Modifier.size(64.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.42f)).clickable { player.toggle(); bump++ },
                         contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(if (curPlaying) PauseIcon else Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(36.dp))
-                    }
-                    RoundIcon(SkipNextIcon, "Keyingi qism", { onNext(); bump++ }, enabled = hasNext, size = 44)
+                    ) { Icon(if (player.playing) AruIcons.Pause else Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(40.dp)) }
                 }
             }
         }
@@ -234,7 +265,7 @@ fun PlayerControls(
                 color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(end = 14.dp, bottom = if (showAll) 56.dp else 16.dp)
+                    .padding(end = 14.dp, bottom = if (showAll) (if (fullscreen) 120.dp else 40.dp) else 16.dp)
                     .clip(RoundedCornerShape(12.dp)).background(Color.Black.copy(alpha = 0.65f))
                     .clickable(onClick = onSkipIntro).padding(horizontal = 14.dp, vertical = 9.dp),
             )
@@ -245,28 +276,154 @@ fun PlayerControls(
             Box(Modifier.align(Alignment.CenterStart).padding(start = 14.dp)) { RoundIcon(Icons.Filled.Lock, "Qulfni ochish", onToggleLock) }
         }
 
+        val dur = player.durationMs.coerceAtLeast(1)
+        val shown = dragMs ?: player.positionMs.toFloat()
+        val ratio = (shown / dur).coerceIn(0f, 1f)
+
+        // Boshqaruv yashirin: pastda ingichka doimiy chiziq
+        if (!showAll && !locked) {
+            Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(2.dp).background(Color.White.copy(alpha = 0.2f))) {
+                Box(Modifier.fillMaxWidth(ratio).height(2.dp).background(AruColors.Accent))
+            }
+        }
+
         // Pastki qator
         AnimatedVisibility(showAll, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.BottomCenter)) {
-            Row(
-                Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.75f)))).padding(start = 12.dp, end = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                val dur = player.durationMs.coerceAtLeast(1)
-                val shown = dragMs ?: player.positionMs.toFloat()
-                Text(formatClock(shown.toLong()), color = Color.White, fontSize = 12.sp)
-                Slider(
-                    value = shown.coerceIn(0f, dur.toFloat()),
-                    onValueChange = { dragMs = it; bump++ },
-                    onValueChangeFinished = { dragMs?.let { player.seekTo(it.toLong()) }; dragMs = null },
-                    valueRange = 0f..dur.toFloat(),
-                    colors = SliderDefaults.colors(thumbColor = AruColors.Accent2, activeTrackColor = AruColors.Accent2, inactiveTrackColor = Color.White.copy(alpha = 0.25f)),
-                    modifier = Modifier.weight(1f).padding(horizontal = 6.dp),
-                )
-                Text(formatClock(player.durationMs), color = Color.White, fontSize = 12.sp)
-                RoundIcon(FullscreenIcon, "To'liq ekran", onToggleFullscreen)
+            if (!fullscreen) {
+                Row(Modifier.fillMaxWidth().padding(end = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    VideoProgressBar(
+                        ratio, player.bufferedRatio(), 3.5f, 6f,
+                        onDrag = { dragMs = it * dur; bump++ },
+                        onDone = { it?.let { r -> player.seekTo((r * dur).toLong()) }; dragMs = null },
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text("${formatClock(shown.toLong())}/${formatClock(player.durationMs)}", color = Color.White, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.width(6.dp))
+                    Chip("HQ", null, 10.5f, onQuality)
+                    Spacer(Modifier.width(3.dp))
+                    Box(Modifier.clip(CircleShape).clickable(onClick = onToggleFullscreen).padding(horizontal = 3.dp, vertical = 4.dp)) {
+                        Icon(AruIcons.Fullscreen, "To'liq ekran", tint = Color.White, modifier = Modifier.size(22.dp))
+                    }
+                }
+            } else {
+                Column(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 6.dp)) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+                        FsChip(AruIcons.PlaylistPlay, "", onEpisodeList)
+                        Spacer(Modifier.width(8.dp))
+                        FsChip(AruIcons.Speed, speedLabel, onSettings)
+                        Spacer(Modifier.width(8.dp))
+                        FsChip(null, "HQ", onQuality)
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+                        FsButton(AruIcons.SkipPrevious, hasPrev, false) { onPrev(); bump++ }
+                        Spacer(Modifier.width(10.dp))
+                        FsButton(if (player.playing) AruIcons.Pause else Icons.Filled.PlayArrow, true, true) { player.toggle(); bump++ }
+                        Spacer(Modifier.width(10.dp))
+                        FsButton(AruIcons.SkipNext, hasNext, false) { onNext(); bump++ }
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        VideoProgressBar(
+                            ratio, player.bufferedRatio(), 5f, 8f,
+                            onDrag = { dragMs = it * dur; bump++ },
+                            onDone = { it?.let { r -> player.seekTo((r * dur).toLong()) }; dragMs = null },
+                            modifier = Modifier.weight(1f),
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Text("${formatClock(shown.toLong())} / ${formatClock(player.durationMs)}", color = Color.White, fontSize = (13 * s).sp, fontWeight = FontWeight.Bold)
+                    }
+                }
             }
         }
     }
+}
+
+/** Vaqt chizig'i: yuklangan qism (xira), ko'rilgan qism (urg'u rangi), doira. Bosish va surish bilan o'tkaziladi. */
+@Composable
+fun VideoProgressBar(
+    played: Float,
+    buffered: Float,
+    trackHeight: Float,
+    thumbRadius: Float,
+    onDrag: (Float) -> Unit,
+    onDone: (Float?) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var last by remember { mutableStateOf<Float?>(null) }
+    Box(
+        modifier
+            .height((thumbRadius * 2 + 14).dp)
+            .pointerInput(Unit) {
+                detectTapGestures { off ->
+                    val r = (off.x / size.width).coerceIn(0f, 1f)
+                    onDrag(r)
+                    onDone(r)
+                }
+            }
+            .pointerInput(Unit) {
+                detectHorizontalDragGestures(
+                    onDragStart = { off -> val r = (off.x / size.width).coerceIn(0f, 1f); last = r; onDrag(r) },
+                    onHorizontalDrag = { change, _ -> val r = (change.position.x / size.width).coerceIn(0f, 1f); last = r; onDrag(r) },
+                    onDragEnd = { onDone(last); last = null },
+                    onDragCancel = { onDone(null); last = null },
+                )
+            },
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        androidx.compose.foundation.Canvas(Modifier.fillMaxWidth().height((thumbRadius * 2 + 4).dp)) {
+            val h = trackHeight.dp.toPx()
+            val y = size.height / 2
+            val r = thumbRadius.dp.toPx()
+            val left = r
+            val width = (size.width - 2 * r).coerceAtLeast(1f)
+            drawRoundRect(Color.White.copy(alpha = 0.22f), androidx.compose.ui.geometry.Offset(left, y - h / 2), androidx.compose.ui.geometry.Size(width, h), androidx.compose.ui.geometry.CornerRadius(h / 2))
+            if (buffered > 0f) drawRoundRect(Color.White.copy(alpha = 0.35f), androidx.compose.ui.geometry.Offset(left, y - h / 2), androidx.compose.ui.geometry.Size(width * buffered.coerceIn(0f, 1f), h), androidx.compose.ui.geometry.CornerRadius(h / 2))
+            val px = left + width * played.coerceIn(0f, 1f)
+            drawRoundRect(AruColors.Accent, androidx.compose.ui.geometry.Offset(left, y - h / 2), androidx.compose.ui.geometry.Size(px - left, h), androidx.compose.ui.geometry.CornerRadius(h / 2))
+            drawCircle(AruColors.Accent2, r, androidx.compose.ui.geometry.Offset(px, y))
+        }
+    }
+}
+
+@Composable
+private fun Chip(label: String, icon: ImageVector?, fontSize: Float, onClick: () -> Unit) {
+    Row(
+        Modifier.clip(RoundedCornerShape(7.dp)).background(Color.White.copy(alpha = 0.15f)).border(1.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(7.dp))
+            .clickable(onClick = onClick).padding(horizontal = 7.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (icon != null) Icon(icon, null, tint = Color.White, modifier = Modifier.size(14.dp))
+        Text(label, color = Color.White, fontSize = fontSize.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun FsChip(icon: ImageVector?, label: String, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(15.dp)
+    Row(
+        Modifier.height(30.dp).defaultMinSize(minWidth = 44.dp).clip(shape).background(Color.Black.copy(alpha = 0.45f)).border(1.dp, Color.White.copy(alpha = 0.18f), shape)
+            .clickable(onClick = onClick).padding(horizontal = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        if (icon != null) Icon(icon, null, tint = Color.White, modifier = Modifier.size(16.dp))
+        if (icon != null && label.isNotEmpty()) Spacer(Modifier.width(4.dp))
+        if (label.isNotEmpty()) Text(label, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun FsButton(icon: ImageVector, enabled: Boolean, primary: Boolean, onClick: () -> Unit) {
+    val size = if (primary) 52.dp else 42.dp
+    Box(
+        Modifier.size(size).clip(CircleShape)
+            .background(if (primary) AruColors.Accent.copy(alpha = if (enabled) 0.9f else 0.3f) else Color.Black.copy(alpha = if (enabled) 0.45f else 0.25f))
+            .border(1.dp, Color.White.copy(alpha = if (enabled) 0.18f else 0.06f), CircleShape)
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) { Icon(icon, null, tint = Color.White.copy(alpha = if (enabled) 1f else 0.3f), modifier = Modifier.size(if (primary) 30.dp else 24.dp)) }
 }
 
 @Composable

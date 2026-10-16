@@ -86,6 +86,12 @@ class AruPlayer(context: Context) {
         exo.playWhenReady = play
     }
 
+    /** Yuklangan (buferdagi) ulush 0..1. */
+    fun bufferedRatio(): Float {
+        val d = exo.duration
+        return if (d > 0) (exo.bufferedPosition.toFloat() / d).coerceIn(0f, 1f) else 0f
+    }
+
     fun tick() {
         positionMs = exo.currentPosition.coerceAtLeast(0)
         val d = exo.duration

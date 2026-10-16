@@ -24,6 +24,9 @@ data class Episode(
     val intro: List<LongRange>,
     val originVideo: String,
     val views: Long,
+    /** Qismning umumiy tomosha vaqti (ms) va joylangan vaqti (ms, 0 — noma'lum). */
+    val watchMs: Long = 0,
+    val addedAt: Long = 0,
 ) {
     val qualities: List<String> get() = QUALITIES.filter { !urls[it].isNullOrEmpty() }
 
@@ -75,6 +78,8 @@ data class Episode(
                 urls = urls, sizes = sizes, intro = intro,
                 originVideo = o.optString("origin_video"),
                 views = o.optLong("views_total"),
+                watchMs = o.optLong("watch_ms_total"),
+                addedAt = o.optLong("ready_at").takeIf { it > 0 } ?: o.optLong("created_at"),
             )
         }
     }
