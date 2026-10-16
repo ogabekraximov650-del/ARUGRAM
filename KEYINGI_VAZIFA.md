@@ -6447,7 +6447,7 @@ Anibla sekinligi (diag): worker -> anibla.uz har so'rovga ~1.2-1.4 s (login 1.4 
   Yana ko'chirish kerak bo'lsa `tool/migrate/run.txt` o'zgartiriladi.
 - **Worker** `arumediatv` nomi bilan (eski shu nomli worker ustiga). `deploy-worker.yml`: avval oddiy deploy, yiqilsa eski worker o'chiriladi va qayta deploy;
   `TURSO_URL/TOKEN` `new_turso.enc` dan o'rnatiladi (GitHub Secret'dagi eskisidan ustun). `ci/WIPE_DB_ONCE` O'CHIRILDI — aks holda yangi baza tozalanib ketardi.
-- **Nomlar:** koddagi, workflow'lardagi va hujjatlardagi `arugram/ARUGRAM` -> `arumediatv/ARUMEDIATV` (worker manzili `arumediatv.<subdomen>.workers.dev`,
+- **Nomlar:** koddagi, workflow'lardagi va hujjatlardagi eski nom -> `arumediatv/ARUMEDIATV` (worker manzili `arumediatv.<subdomen>.workers.dev`,
   MethodChannel `uz.arumediatv.player/enhance`, User-Agent'lar, kesh kalitlari). APK paketi allaqachon `uz.arumediatv.com` edi.
   APK yig'ishda manzil Cloudflare'dan hisoblanadi (`API_BASE` secret'idan ustun).
 - GitHub repo nomini (`ARUGRAM`) kodda o'zgartirib bo'lmaydi — repo Settings'da qo'lda. avtoencode repodagi workflow'lar o'zgargan shablonlardan qayta sinxronlanadi.
