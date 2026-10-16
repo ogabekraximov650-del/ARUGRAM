@@ -469,6 +469,12 @@ fun SeasonScreen(
                             play(e, quality = q)
                         },
                         onSubscribe = onOpenBilling,
+                        onDeleted = { e, q ->
+                            // Hozir ijro etilayotgan sifat o'chirilsa — oqim uziladi: shu joydan qaytadan ochamiz (Flutterdagidek).
+                            if (current?.id == e.id && currentUrl == e.urlFor(q)) {
+                                play(e, quality = q, resumeAt = player.positionMs, resumePlaying = player.exo.playWhenReady, preferWorker = true)
+                            }
+                        },
                     )
                     2 -> SeasonsTab(seasons = seasons, current = season, onOpen = onOpenSeason)
                     else -> CommentsTab(season = season, onOpenProfile = onOpenProfile, onLogin = onLogin, onPacks = onPacks, expanded = commentsExpanded, onExpandedChange = { commentsExpanded = it })

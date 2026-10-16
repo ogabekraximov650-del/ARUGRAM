@@ -257,6 +257,11 @@ class WatchProgress(context: Context) {
         prefs.edit().putString(n, "$positionMs/$durationMs").apply()
     }
 
+    fun forget(url: String) {
+        val n = Names.fileNameOf(url)
+        if (n.isNotEmpty()) prefs.edit().remove(n).apply()
+    }
+
     /** Tugab qolgan (oxirgi 5 soniya) yoki 3 soniyadan kam bo'lsa 0 — boshidan. */
     fun positionOf(url: String): Long {
         val v = prefs.getString(Names.fileNameOf(url), null) ?: return 0

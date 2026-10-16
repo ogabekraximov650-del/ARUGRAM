@@ -224,6 +224,7 @@ fun EpisodesTab(
     currentQuality: String?,
     onPlay: (Episode, String?) -> Unit,
     onSubscribe: () -> Unit,
+    onDeleted: (Episode, String) -> Unit = { _, _ -> },
 ) {
     when {
         !canWatch -> EmptyState(Icons.Filled.PlayArrow, "Qismlarni ko'rish uchun obuna kerak")
@@ -238,14 +239,14 @@ fun EpisodesTab(
                 if (i >= 0) ls.animateScrollToItem((i - 1).coerceAtLeast(0))
             }
             LazyColumn(Modifier.fillMaxSize(), state = ls, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                items(desc, key = { it.id }) { e -> EpisodeTile(e, e.id == currentId, onPlay) }
+                items(desc, key = { it.id }) { e -> EpisodeTile(e, e.id == currentId, onPlay, onDeleted) }
             }
         }
     }
 }
 
 @Composable
-private fun EpisodeTile(e: Episode, isCurrent: Boolean, onPlay: (Episode, String?) -> Unit) {
+private fun EpisodeTile(e: Episode, isCurrent: Boolean, onPlay: (Episode, String?) -> Unit, onDeleted: (Episode, String) -> Unit) {
     val shape = RoundedCornerShape(16.dp)
     val frac = AppServices.progress.fractionOf(e.urlFor(null))
     var expanded by remember { mutableStateOf(false) }
@@ -287,58 +288,92 @@ private fun EpisodeTile(e: Episode, isCurrent: Boolean, onPlay: (Episode, String
         }
         if (expanded) {
             Spacer(Modifier.height(8.dp))
-            e.qualities.forEach { q -> QualityRow(e, q) { onPlay(e, q) } }
+            e.qualities.forEach { q -> QualityRow(e, q, { onPlay(e, q) }, { onDeleted(e, q) }) }
         }
     }
 }
 
-/** Sifat qatori: hajm, yuklab olish holati va tugmalar (yuklab olish / pauza / davom / o'chirish). */
+/** Sifat qatori (Flutter `_QualityRow`): sifat, foiz, hajm, tezlik/navbat belgilari, chiziq, yuklash/pauza va o'chirish (tasdiq bilan). */
 @Composable
-private fun QualityRow(e: Episode, q: String, onPlay: () -> Unit) {
+private fun QualityRow(e: Episode, q: String, onPlay: () -> Unit, onDeleted: (String) -> Unit) {
     val dm = AppServices.downloads
     val all by dm.stats.collectAsStateWithLifecycle()
     val url = e.urls[q].orEmpty()
     val st = all[url] ?: VideoStat()
     val size = if (st.total > 0) st.total else e.sizes[q] ?: 0
-    Column(Modifier.fillMaxWidth().padding(top = 6.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                e.qualityTitle(q), color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold,
-                modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Color.White.copy(alpha = 0.1f)).clickable(onClick = onPlay).padding(horizontal = 10.dp, vertical = 5.dp),
-            )
-            Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) {
+    var confirm by remember { mutableStateOf(false) }
+    Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    when {
-                        st.complete -> "Yuklangan · ${formatBytes(st.total)}"
-                        st.downloading && st.queued -> "Navbatda"
-                        st.downloading -> "${st.percent}% · ${formatBytes(st.downloaded)} / ${formatBytes(st.total)}${if (st.speedLabel.isNotEmpty()) " · ${st.speedLabel}" else ""}"
-                        st.retrying -> "Internet yo'q — davom etadi"
-                        st.downloaded > 0 -> "To'xtatilgan · ${st.percent}%"
-                        size > 0 -> formatBytes(size)
-                        else -> ""
-                    },
-                    color = if (st.complete) Color(0xFF4ADE80) else AruColors.TextDim, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    e.qualityTitle(q), color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold,
+                    modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClick = onPlay),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("${st.percent}%", color = if (st.complete) AruColors.Accent else Color.White, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "${formatBytes(st.downloaded)} / ${if (size > 0) formatBytes(size) else "—"}",
+                    color = Color.White.copy(alpha = 0.65f), fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
                 )
             }
-            when {
-                st.complete -> MiniBtn("O'chirish", danger = true) { dm.delete(url) }
-                st.downloading -> MiniBtn("Pauza") { dm.pause(url) }
-                st.downloaded > 0 -> {
-                    MiniBtn("Davom") { dm.download(url) }
-                    Spacer(Modifier.width(6.dp))
-                    MiniBtn("O'chirish", danger = true) { dm.delete(url) }
+            val speed = if (st.downloading && !st.queued) st.speedLabel else ""
+            if (speed.isNotEmpty() || st.retrying || st.queued) {
+                Spacer(Modifier.height(3.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (st.queued) DlChip("navbatda", Color.White.copy(alpha = 0.12f), Color.White.copy(alpha = 0.7f))
+                    if (speed.isNotEmpty()) DlChip(speed, AruColors.Accent.copy(alpha = 0.18f), AruColors.Accent)
+                    if (st.retrying) DlChip("qayta urinilmoqda", Color(0x2DFF9800), Color(0xFFFF9800))
                 }
-                else -> MiniBtn("Yuklab olish") { dm.download(url) }
             }
-        }
-        if (st.downloading || (st.downloaded > 0 && !st.complete)) {
             Spacer(Modifier.height(5.dp))
-            Box(Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(2.dp)).background(Color.White.copy(alpha = 0.1f))) {
-                Box(Modifier.fillMaxWidth(st.ratio).fillMaxHeight().background(AruColors.Accent2))
+            Box(Modifier.padding(end = 12.dp).fillMaxWidth().height(4.dp).clip(RoundedCornerShape(3.dp)).background(Color.White.copy(alpha = 0.10f))) {
+                Box(Modifier.fillMaxWidth(st.ratio).fillMaxHeight().background(if (st.complete) Color.White else AruColors.Accent))
             }
         }
+        if (!st.complete) {
+            SquareBtn(
+                if (st.downloading) AruIcons.Pause else AruIcons.Download,
+                if (st.downloading) AruColors.Accent else Color.White,
+                if (st.downloading) AruColors.Accent.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.08f),
+                if (st.downloading) AruColors.Accent.copy(alpha = 0.4f) else Color.White.copy(alpha = 0.15f),
+            ) { if (st.downloading) dm.pause(url) else dm.download(url) }
+        }
+        Spacer(Modifier.width(5.dp))
+        SquareBtn(AruIcons.DeleteOutline, Color.White.copy(alpha = 0.7f), Color.White.copy(alpha = 0.08f), Color.Transparent) { confirm = true }
     }
+    if (confirm) {
+        AlertDialog(
+            onDismissRequest = { confirm = false },
+            containerColor = AruColors.Card,
+            shape = RoundedCornerShape(20.dp),
+            title = { Text("Tozalash", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold) },
+            text = { Text("Rostanham ${e.qualityTitle(q)} sifatidagi videoni tozalab tashlaysizmi?", color = Color.White.copy(alpha = 0.7f), fontSize = 14.sp) },
+            dismissButton = { TextButton(onClick = { confirm = false }) { Text("Bekor qilish", color = Color.White.copy(alpha = 0.54f)) } },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirm = false
+                    dm.delete(url)
+                    AppServices.progress.forget(url)
+                    onDeleted(q)
+                }) { Text("Ha", color = AruColors.Accent, fontWeight = FontWeight.Bold) }
+            },
+        )
+    }
+}
+
+@Composable
+private fun DlChip(text: String, bg: Color, fg: Color) {
+    Text(text, color = fg, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clip(RoundedCornerShape(5.dp)).background(bg).padding(horizontal = 6.dp, vertical = 2.dp))
+}
+
+@Composable
+private fun SquareBtn(icon: androidx.compose.ui.graphics.vector.ImageVector, tint: Color, bg: Color, border: Color, onClick: () -> Unit) {
+    val sh = RoundedCornerShape(12.dp)
+    Box(
+        Modifier.size(44.dp).clip(sh).background(bg).border(1.dp, border, sh).clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) { Icon(icon, null, tint = tint, modifier = Modifier.size(23.dp)) }
 }
 
 @Composable
