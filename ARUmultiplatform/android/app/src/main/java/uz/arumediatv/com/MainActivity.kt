@@ -120,7 +120,7 @@ private data class Tab(val title: String, val icon: ImageVector)
 private val tabs = listOf(
     Tab("Bosh sahifa", Icons.Filled.Home),
     Tab("Qidiruv", Icons.Filled.Search),
-    Tab("Katalog", Icons.AutoMirrored.Filled.List),
+    Tab("Katalog", uz.arumediatv.com.ui.common.AruIcons.GridView),
     Tab("Kutubxona", FolderIcon),
     Tab("Profil", Icons.Filled.Person),
 )
@@ -156,6 +156,7 @@ private sealed interface Page {
     data class AdminChat(val userId: Long, val name: String) : Page
     data class PublicUser(val id: Long) : Page
     data class Stat(val userId: Long, val kind: StatKind, val owner: String) : Page
+    data class AnimeDownloads(val animeId: Long, val seasonId: Long, val title: String) : Page
     data class AnimeHistory(val item: uz.arumediatv.com.data.HistoryItem) : Page
     data class SeasonPage(val season: uz.arumediatv.com.data.Season, val episodeId: Long = 0, val quality: String? = null) : Page
 }
@@ -207,7 +208,7 @@ private fun AruApp() {
                 0 -> HomeScreen(onOpenSeason = openSeason, onLogin = login)
                 1 -> SearchScreen(onOpenSeason = openSeason)
                 2 -> CatalogScreen(onOpenSeason = openSeason)
-                3 -> LibraryScreen(onOpenSeason = openSeason, onLogin = login, onOpenDownload = { s, e, q -> push(Page.SeasonPage(s, e, q)) }, onOpenAnimeHistory = { push(Page.AnimeHistory(it)) })
+                3 -> LibraryScreen(onOpenSeason = openSeason, onLogin = login, onOpenDownload = { s, e, q -> push(Page.SeasonPage(s, e, q)) }, onOpenAnimeHistory = { push(Page.AnimeHistory(it)) }, onOpenAnimeDownloads = { d -> push(Page.AnimeDownloads(d.animeId, d.seasonId, d.title)) })
                 4 -> ProfileScreen(
                     onLogin = login,
                     onEdit = { push(Page.Edit) },
@@ -287,6 +288,10 @@ private fun AruApp() {
                     is Page.AdminChat -> SupportChatScreen(userId = page.userId, title = page.name, onBack = ::pop)
                     is Page.PublicUser -> PublicProfileScreen(page.id, onBack = ::pop, onOpenStat = { u, k, o -> push(Page.Stat(u, k, o)) })
                     is Page.Stat -> StatDetailScreen(page.userId, page.kind, page.owner, onBack = ::pop, onOpenSeason = openSeason)
+                    is Page.AnimeDownloads -> uz.arumediatv.com.ui.library.DownloadsAnimeScreen(
+                        page.animeId, page.seasonId, page.title, onBack = ::pop,
+                        onOpen = { s, e, q -> push(Page.SeasonPage(s, e, q)) },
+                    )
                     is Page.AnimeHistory -> uz.arumediatv.com.ui.library.AnimeHistoryScreen(
                         page.item.animeId, page.item.seasonId, page.item.title, onBack = ::pop,
                         onOpenEpisode = { h ->

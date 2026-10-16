@@ -3,6 +3,8 @@ package uz.arumediatv.com.ui.packs
 import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -144,20 +146,40 @@ fun TgMediaPanel(
 
 private var lastTab = 0
 
+/** Qidiruv: "Qidiruv" bosilsa yozish oynasi ochiladi (Flutter kabi); yozilgan so'rov shu yerda ko'rinadi, ✕ bilan tozalanadi. */
 @Composable
-private fun SearchBar(onEmoji: (String) -> Unit) {
+private fun SearchBar(query: String, onQuery: (String) -> Unit, onEmoji: (String) -> Unit, hint: String = "Qidiruv") {
+    var dialog by remember { mutableStateOf(false) }
     Row(
         Modifier.padding(horizontal = 10.dp, vertical = 6.dp).fillMaxWidth().clip(RoundedCornerShape(26.dp)).background(Pal.search).padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(Icons.Filled.Search, null, tint = Pal.hint, modifier = Modifier.size(22.dp))
-        Spacer(Modifier.width(8.dp))
-        Text("Qidiruv", color = Pal.hint, fontSize = 17.sp)
-        LazyRow(Modifier.weight(1f).padding(start = 10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(Modifier.clickable { dialog = true }.padding(vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.Search, null, tint = Pal.hint, modifier = Modifier.size(22.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(if (query.isEmpty()) hint else query, color = if (query.isEmpty()) Pal.hint else Color.White, fontSize = 17.sp, maxLines = 1, fontFamily = TgEmojiFont)
+        }
+        if (query.isNotEmpty()) {
+            Spacer(Modifier.weight(1f))
+            Icon(Icons.Filled.Close, "Tozalash", tint = Pal.hint, modifier = Modifier.size(22.dp).clip(CircleShape).clickable { onQuery("") })
+        } else LazyRow(Modifier.weight(1f).padding(start = 10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             items(QUICK) { e ->
                 Text(e, fontSize = 26.sp, fontFamily = TgEmojiFont, modifier = Modifier.clip(CircleShape).clickable { onEmoji(e) }.padding(horizontal = 6.dp, vertical = 8.dp))
             }
         }
+    }
+    if (dialog) {
+        var t by remember { mutableStateOf(query) }
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { dialog = false },
+            title = { Text("Qidiruv") },
+            text = {
+                androidx.compose.material3.OutlinedTextField(t, { t = it.take(40) }, singleLine = true, placeholder = { Text(if (hint == "Qidiruv") "Nom yoki so'z (masalan: yurak, kulgi, 🔥)" else hint) })
+            },
+            confirmButton = { androidx.compose.material3.TextButton(onClick = { onQuery(t.trim()); dialog = false }) { Text("Qidirish") } },
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { dialog = false }) { Text("Bekor qilish") } },
+            containerColor = uz.arumediatv.com.ui.theme.AruColors.Surface,
+        )
     }
 }
 
@@ -171,6 +193,78 @@ private fun StripItem(selected: Boolean, onClick: () -> Unit, content: @Composab
 
 private val GROUP_GLYPH = mapOf("animals" to "🐱", "food" to "🍎", "activity" to "⚽", "travel" to "🚗", "objects" to "💡", "symbols" to "🔣", "flags" to "🏳️")
 
+// ── Teri rangi (ohang) ──
+private fun firstCp(e: String): Int? {
+    val cps = e.codePoints().toArray().filter { it != 0xFE0F }
+    return if (cps.size == 1) cps[0] else null
+}
+
+private fun supportsTone(e: String): Boolean = firstCp(e)?.let { android.icu.lang.UCharacter.hasBinaryProperty(it, android.icu.lang.UProperty.EMOJI_MODIFIER_BASE) } == true
+
+private fun withTone(e: String, tone: Int): String {
+    val cp = firstCp(e) ?: return e
+    return if (tone <= 0) e else String(Character.toChars(cp)) + String(Character.toChars(0x1F3FA + tone))
+}
+
+private fun toneOf(ctx: Context, e: String): Int = ctx.getSharedPreferences("aru_media_panel", Context.MODE_PRIVATE).getInt("tone_$e", 0)
+
+private fun setTone(ctx: Context, e: String, tone: Int) {
+    ctx.getSharedPreferences("aru_media_panel", Context.MODE_PRIVATE).edit().putInt("tone_$e", tone).apply()
+}
+
+// ── Saralangan GIF/stikerlar ──
+private fun favPicks(ctx: Context, kind: String): List<PackPick> =
+    ctx.getSharedPreferences("aru_media_panel", Context.MODE_PRIVATE).getString("fav_$kind", "").orEmpty().split(';').mapNotNull {
+        val p = it.split(',')
+        if (p.size < 3) null else PackPick(kind, p[0].toLongOrNull() ?: return@mapNotNull null, p[1].toLongOrNull() ?: return@mapNotNull null, p[2])
+    }
+
+private fun toggleFav(ctx: Context, p: PackPick) {
+    val cur = favPicks(ctx, p.kind)
+    val next = if (cur.any { it.pack == p.pack && it.item == p.item }) cur.filterNot { it.pack == p.pack && it.item == p.item } else listOf(p) + cur
+    ctx.getSharedPreferences("aru_media_panel", Context.MODE_PRIVATE).edit().putString("fav_${p.kind}", next.joinToString(";") { "${it.pack},${it.item},${it.emoji}" }).apply()
+}
+
+/** So'zlar bo'yicha emoji qidirish (o'zbekcha va inglizcha asosiy so'zlar). */
+private val KEYWORDS: Map<String, String> = mapOf(
+    "yurak heart love sevgi sevaman" to "❤️🧡💛💚💙💜🖤🤍🩷💕💖😍🥰😘",
+    "layk like yaxshi good ok" to "👍👌🤙💪",
+    "dislike yomon bad" to "👎",
+    "kulgi kulish kul laugh lol haha" to "😂🤣😄😁😆😹",
+    "tabassum smile xursand happy" to "😊😀😃😄🙂☺️😇",
+    "yig'la yig'lash cry sad xafa" to "😢😭🥲😿😞😔",
+    "jahl g'azab angry" to "😡😠🤬😤",
+    "olov fire olov" to "🔥",
+    "rahmat thanks tashakkur pray" to "🙏",
+    "salom hi hello qo'l" to "👋🤚✋🖐",
+    "bayram party tabrik" to "🎉🥳🎊🎂🎁",
+    "hayron wow shock" to "😮😲😱🤯",
+    "o'ylash think" to "🤔🧐",
+    "uyqu sleep" to "😴💤",
+    "kuch kuchli strong" to "💪",
+    "yulduz star" to "⭐🌟✨",
+    "mushuk cat" to "🐱😺😸😻",
+    "it dog" to "🐶🐕",
+    "ovqat food" to "🍕🍔🍟🌭🍿🍎",
+    "anime" to "🎌🍥🍜🍙",
+)
+
+private fun searchEmoji(q: String): List<String> {
+    val l = q.lowercase().trim()
+    if (l.isEmpty()) return emptyList()
+    val out = LinkedHashSet<String>()
+    // Emoji kiritilgan bo'lsa — shu emoji va unga o'xshashlari
+    TG_EMOJI_GROUPS.forEach { g -> g.emoji.forEach { if (it == q || it.contains(q)) out += it } }
+    KEYWORDS.forEach { (k, v) ->
+        if (k.split(' ').any { w -> w.startsWith(l) || l.startsWith(w) }) {
+            val it = java.text.BreakIterator.getCharacterInstance(); it.setText(v)
+            var s0 = it.first(); var e0 = it.next()
+            while (e0 != java.text.BreakIterator.DONE) { out += v.substring(s0, e0); s0 = e0; e0 = it.next() }
+        }
+    }
+    return out.toList()
+}
+
 /** Tayyor bo'limlar + (o'z) emoji to'plamlari: bitta uzun ro'yxat, tepadagi tasma bo'limga sakraydi. */
 @Composable
 private fun EmojiPage(onEmoji: (String) -> Unit, onPick: (PackPick) -> Unit) {
@@ -183,8 +277,14 @@ private fun EmojiPage(onEmoji: (String) -> Unit, onPick: (PackPick) -> Unit) {
     val headers = remember { mutableStateMapOf<Long, PackHeader?>() }
     LaunchedEffect(packs) { packs.forEach { p -> if (!headers.containsKey(p.id)) headers[p.id] = store.header(p) } }
     var recent by remember { mutableStateOf(recentEmoji(ctx)) }
+    var query by remember { mutableStateOf("") }
+    var toneFor by remember { mutableStateOf<String?>(null) }
+    var toneTick by remember { mutableStateOf(0) }
     val grid = rememberLazyGridState()
     val scope = rememberCoroutineScope()
+
+    fun shown(e: String): String = if (supportsTone(e)) withTone(e, toneOf(ctx, e)) else e
+    fun pick(e: String) { val v = shown(e); onEmoji(v); pushRecentEmoji(ctx, v); recent = recentEmoji(ctx) }
 
     // Bo'lim sarlavhalarining ro'yxatdagi o'rni
     data class Sec(val key: String, val index: Int)
@@ -200,7 +300,7 @@ private fun EmojiPage(onEmoji: (String) -> Unit, onPick: (PackPick) -> Unit) {
     fun jump(key: String) { sections.firstOrNull { it.key == key }?.let { s -> scope.launch { grid.scrollToItem(s.index) } } }
 
     Column(Modifier.fillMaxSize()) {
-        LazyRow(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (query.isEmpty()) LazyRow(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             if (recent.isNotEmpty()) item { StripItem(current == "recent", { jump("recent") }) { Icon(AruIcons.Schedule, null, tint = if (current == "recent") Color.White else Pal.icon, modifier = Modifier.size(24.dp)) } }
             items(TG_EMOJI_GROUPS, key = { it.id }) { g ->
                 StripItem(current == g.id, { jump(g.id) }) {
@@ -216,8 +316,26 @@ private fun EmojiPage(onEmoji: (String) -> Unit, onPick: (PackPick) -> Unit) {
                 }
             }
         }
-        SearchBar { onEmoji(it); pushRecentEmoji(ctx, it); recent = recentEmoji(ctx) }
-        LazyVerticalGrid(
+        SearchBar(query, { query = it }, { pick(it) })
+        if (query.isNotEmpty()) {
+            val found = remember(query) { searchEmoji(query) }
+            val packHits = remember(query, packs, headers.toMap()) {
+                packs.flatMap { p ->
+                    val its = headers[p.id]?.items.orEmpty()
+                    val byTitle = p.title.contains(query, ignoreCase = true)
+                    its.filter { byTitle || (it.emoji.isNotEmpty() && (it.emoji.contains(query) || query.contains(it.emoji))) }.map { PackPick(PackKind.EMOJI, p.id, it.id, it.emoji) }
+                }
+            }
+            if (found.isEmpty() && packHits.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) { Text("Hech narsa topilmadi", color = Pal.hint, fontSize = 15.sp, modifier = Modifier.padding(top = 40.dp)) }
+            } else LazyVerticalGrid(GridCells.Fixed(7), Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = 84.dp)) {
+                items(found.size, key = { "s${found[it]}" }) { i -> EmojiCell(shown(found[i]), onLong = null) { pick(found[i]) } }
+                items(packHits.size, key = { "sp${packHits[it].pack}:${packHits[it].item}" }) { i ->
+                    val h = packHits[i]
+                    Box(Modifier.aspectRatio(1f).clip(RoundedCornerShape(10.dp)).clickable { onPick(h) }) { PackItemImage(h.pack, h.item, Modifier.fillMaxSize().padding(8.dp), thumb = true) }
+                }
+            }
+        } else LazyVerticalGrid(
             GridCells.Fixed(7), Modifier.fillMaxSize(), state = grid,
             contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = 84.dp),
         ) {
@@ -226,11 +344,15 @@ private fun EmojiPage(onEmoji: (String) -> Unit, onPick: (PackPick) -> Unit) {
             }
             if (recent.isNotEmpty()) {
                 header("recent", "Yaqinda ishlatilgan")
-                items(recent.size, key = { "r${recent[it]}" }) { i -> EmojiCell(recent[i]) { onEmoji(recent[i]) } }
+                items(recent.size, key = { "r${recent[it]}" }) { i -> EmojiCell(recent[i], onLong = null) { onEmoji(recent[i]) } }
             }
             TG_EMOJI_GROUPS.forEach { g ->
                 header(g.id, g.title)
-                items(g.emoji.size, key = { "${g.id}:$it" }) { i -> EmojiCell(g.emoji[i]) { onEmoji(g.emoji[i]); pushRecentEmoji(ctx, g.emoji[i]); recent = recentEmoji(ctx) } }
+                items(g.emoji.size, key = { "${g.id}:$it" }) { i ->
+                    val base = g.emoji[i]
+                    val tone = if (supportsTone(base)) { toneTick; toneOf(ctx, base) } else 0
+                    EmojiCell(if (tone > 0) withTone(base, tone) else base, onLong = if (supportsTone(base)) ({ toneFor = base }) else null) { pick(base) }
+                }
             }
             packs.forEach { p ->
                 header("p${p.id}", p.title)
@@ -243,16 +365,39 @@ private fun EmojiPage(onEmoji: (String) -> Unit, onPick: (PackPick) -> Unit) {
             }
         }
     }
+
+    // Ohang tanlash: bosib turilgan emoji uchun 6 variant (standart + 5 teri rangi)
+    toneFor?.let { base ->
+        androidx.compose.ui.window.Dialog(onDismissRequest = { toneFor = null }) {
+            Row(
+                Modifier.clip(RoundedCornerShape(18.dp)).background(Pal.pill).padding(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                (0..5).forEach { t ->
+                    Box(
+                        Modifier.size(48.dp).clip(RoundedCornerShape(12.dp)).background(if (toneOf(ctx, base) == t) Pal.pillOn else Color.Transparent)
+                            .clickable { setTone(ctx, base, t); toneTick++; toneFor = null },
+                        contentAlignment = Alignment.Center,
+                    ) { Text(withTone(base, t), fontSize = 28.sp, fontFamily = TgEmojiFont, color = Color.White) }
+                }
+            }
+        }
+    }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun EmojiCell(e: String, onClick: () -> Unit) {
-    Box(Modifier.aspectRatio(1f).clip(RoundedCornerShape(10.dp)).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
+private fun EmojiCell(e: String, onLong: (() -> Unit)?, onClick: () -> Unit) {
+    Box(
+        Modifier.aspectRatio(1f).clip(RoundedCornerShape(10.dp)).combinedClickable(onClick = onClick, onLongClick = onLong),
+        contentAlignment = Alignment.Center,
+    ) {
         Text(e, style = TextStyle(fontFamily = TgEmojiFont, fontSize = 30.sp), color = Color.White)
     }
 }
 
-/** GIF yoki Stikerlar: yaqinda ishlatilganlar + har bir to'plam o'z bo'limida; tepada tasma. */
+/** GIF yoki Stikerlar: saralangan (⭐) + yaqinda ishlatilganlar + har bir to'plam o'z bo'limida; tepada tasma. Bosib turilsa — yuborish / saralash. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun PackPage(kind: String, onPick: (PackPick) -> Unit, onManage: () -> Unit) {
     val ctx = LocalContext.current
@@ -264,14 +409,20 @@ private fun PackPage(kind: String, onPick: (PackPick) -> Unit, onManage: () -> U
     val headers = remember { mutableStateMapOf<Long, PackHeader?>() }
     LaunchedEffect(packs) { packs.forEach { p -> if (!headers.containsKey(p.id)) headers[p.id] = store.header(p) } }
     var recent by remember(kind) { mutableStateOf(recentPicks(ctx, kind)) }
+    var favs by remember(kind) { mutableStateOf(favPicks(ctx, kind)) }
+    var query by remember(kind) { mutableStateOf("") }
+    var menuFor by remember { mutableStateOf<PackPick?>(null) }
     val grid: LazyGridState = rememberLazyGridState()
     val scope = rememberCoroutineScope()
     val cols = if (kind == PackKind.GIF) 3 else 4
 
+    fun send(p: PackPick) { onPick(p); pushRecentPick(ctx, p); recent = recentPicks(ctx, kind) }
+
     data class Sec(val key: String, val index: Int)
-    val sections = remember(recent, packs, headers.toMap()) {
+    val sections = remember(recent, favs, packs, headers.toMap()) {
         val out = ArrayList<Sec>()
         var i = 0
+        if (favs.isNotEmpty()) { out += Sec("fav", i); i += 1 + favs.size }
         if (recent.isNotEmpty()) { out += Sec("recent", i); i += 1 + recent.size }
         packs.forEach { p -> out += Sec("p${p.id}", i); i += 1 + (headers[p.id]?.items?.size ?: 0) }
         out
@@ -279,9 +430,17 @@ private fun PackPage(kind: String, onPick: (PackPick) -> Unit, onManage: () -> U
     val current by remember(sections) { derivedStateOf { sections.lastOrNull { it.index <= grid.firstVisibleItemIndex }?.key ?: sections.firstOrNull()?.key } }
     fun jump(key: String) { sections.firstOrNull { it.key == key }?.let { s -> scope.launch { grid.scrollToItem(s.index) } } }
 
+    @Composable
+    fun Cell(p: PackPick) {
+        Box(Modifier.aspectRatio(1f).clip(RoundedCornerShape(10.dp)).combinedClickable(onClick = { send(p) }, onLongClick = { menuFor = p })) {
+            PackItemImage(p.pack, p.item, Modifier.fillMaxSize().padding(3.dp), thumb = true)
+        }
+    }
+
     Column(Modifier.fillMaxSize()) {
-        LazyRow(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            if (recent.isNotEmpty()) item { StripItem(current == "recent", { jump("recent") }) { Icon(AruIcons.Schedule, null, tint = if (current == "recent") Color.White else Pal.icon, modifier = Modifier.size(24.dp)) } }
+        if (query.isEmpty()) LazyRow(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            item { StripItem(current == "fav", { jump("fav") }) { Icon(AruIcons.StarBorder, null, tint = if (current == "fav") Color.White else Pal.icon, modifier = Modifier.size(24.dp)) } }
+            item { StripItem(current == "recent", { jump("recent") }) { Icon(AruIcons.Schedule, null, tint = if (current == "recent") Color.White else Pal.icon, modifier = Modifier.size(24.dp)) } }
             items(packs, key = { it.id }) { p ->
                 StripItem(current == "p${p.id}", { jump("p${p.id}") }) {
                     val first = headers[p.id]?.items?.firstOrNull()
@@ -291,10 +450,21 @@ private fun PackPage(kind: String, onPick: (PackPick) -> Unit, onManage: () -> U
             }
             item { StripItem(false, onManage) { Icon(AruIcons.AddCircle, null, tint = Pal.icon, modifier = Modifier.size(22.dp)) } }
         }
-        SearchBar { }
+        SearchBar(query, { query = it }, { query = it }, hint = "To'plam nomi yoki emoji")
         if (packs.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text("Bu turda to'plam yo'q.\n⚙ orqali yarating yoki obuna bo'ling.", color = Pal.hint, fontSize = 14.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            }
+        } else if (query.isNotEmpty()) {
+            val hits = remember(query, packs, headers.toMap()) {
+                packs.flatMap { p ->
+                    val byTitle = p.title.contains(query, ignoreCase = true)
+                    headers[p.id]?.items.orEmpty().filter { byTitle || (it.emoji.isNotEmpty() && (it.emoji.contains(query) || query.contains(it.emoji))) }.map { PackPick(kind, p.id, it.id, it.emoji) }
+                }
+            }
+            if (hits.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) { Text("Hech narsa topilmadi", color = Pal.hint, fontSize = 15.sp, modifier = Modifier.padding(top = 40.dp)) }
+            else LazyVerticalGrid(GridCells.Fixed(cols), Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = 84.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                items(hits.size, key = { "q${hits[it].pack}:${hits[it].item}" }) { i -> Cell(hits[i]) }
             }
         } else LazyVerticalGrid(
             GridCells.Fixed(cols), Modifier.fillMaxSize(), state = grid,
@@ -304,25 +474,36 @@ private fun PackPage(kind: String, onPick: (PackPick) -> Unit, onManage: () -> U
             fun header(key: String, title: String) = item(key = "h$key", span = { GridItemSpan(maxLineSpan) }) {
                 Text(title, color = Pal.hint, fontSize = 17.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 8.dp, top = 12.dp, bottom = 6.dp))
             }
+            if (favs.isNotEmpty()) {
+                header("fav", "Saralangan")
+                items(favs.size, key = { "f${favs[it].pack}:${favs[it].item}" }) { i -> Cell(favs[i]) }
+            }
             if (recent.isNotEmpty()) {
                 header("recent", "Yaqinda ishlatilgan")
-                items(recent.size, key = { "r${recent[it].pack}:${recent[it].item}" }) { i ->
-                    val r = recent[i]
-                    Box(Modifier.aspectRatio(1f).clip(RoundedCornerShape(10.dp)).clickable { onPick(r); pushRecentPick(ctx, r); recent = recentPicks(ctx, kind) }) {
-                        PackItemImage(r.pack, r.item, Modifier.fillMaxSize().padding(3.dp), thumb = true)
-                    }
-                }
+                items(recent.size, key = { "r${recent[it].pack}:${recent[it].item}" }) { i -> Cell(recent[i]) }
             }
             packs.forEach { p ->
                 header("p${p.id}", p.title)
                 val its = headers[p.id]?.items.orEmpty()
-                items(its.size, key = { "pi${p.id}:${its[it].id}" }) { i ->
-                    val pick = PackPick(kind, p.id, its[i].id, its[i].emoji)
-                    Box(Modifier.aspectRatio(1f).clip(RoundedCornerShape(10.dp)).clickable { onPick(pick); pushRecentPick(ctx, pick); recent = recentPicks(ctx, kind) }) {
-                        PackItemImage(p.id, its[i].id, Modifier.fillMaxSize().padding(3.dp), thumb = true)
-                    }
-                }
+                items(its.size, key = { "pi${p.id}:${its[it].id}" }) { i -> Cell(PackPick(kind, p.id, its[i].id, its[i].emoji)) }
             }
         }
+    }
+
+    menuFor?.let { p ->
+        val isFav = favs.any { it.pack == p.pack && it.item == p.item }
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { menuFor = null },
+            title = { Text(PackKind.single(kind)) },
+            text = {
+                Column {
+                    Text("${PackKind.single(kind)} yuborish", modifier = Modifier.fillMaxWidth().clickable { send(p); menuFor = null }.padding(vertical = 12.dp))
+                    Text(if (isFav) "Saralanganlardan olib tashlash" else "Saralanganlarga qo'shish", modifier = Modifier.fillMaxWidth().clickable { toggleFav(ctx, p); favs = favPicks(ctx, kind); menuFor = null }.padding(vertical = 12.dp))
+                }
+            },
+            confirmButton = {},
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { menuFor = null }) { Text("Yopish") } },
+            containerColor = uz.arumediatv.com.ui.theme.AruColors.Surface,
+        )
     }
 }
