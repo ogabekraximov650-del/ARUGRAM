@@ -23,3 +23,4 @@ jobs:
           TURSO_URL: ${{ secrets.TURSO_URL }}
           TURSO_TOKEN: ${{ secrets.TURSO_TOKEN }}
         run: python3 tool/migrate/diff.py
+          python3 tool/migrate/inspect_diff.py
