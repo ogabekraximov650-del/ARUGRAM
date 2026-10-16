@@ -231,7 +231,13 @@ fun EpisodesTab(
         episodes.isEmpty() -> EmptyState(Icons.Filled.PlayArrow, "Qismlar topilmadi")
         else -> {
             val desc = remember(episodes) { episodes.sortedByDescending { it.number } }
-            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            val ls = androidx.compose.foundation.lazy.rememberLazyListState()
+            // Qism almashganda (⏮/⏭ yoki avto) ro'yxat shu qismga suriladi (Flutter `_centerOnEpisode`).
+            androidx.compose.runtime.LaunchedEffect(currentId, desc.size) {
+                val i = desc.indexOfFirst { it.id == currentId }
+                if (i >= 0) ls.animateScrollToItem((i - 1).coerceAtLeast(0))
+            }
+            LazyColumn(Modifier.fillMaxSize(), state = ls, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 items(desc, key = { it.id }) { e -> EpisodeTile(e, e.id == currentId, onPlay) }
             }
         }

@@ -381,8 +381,8 @@ fun SeasonScreen(
                     introActive = introActive,
                     speedLabel = if (player.speed == player.speed.toInt().toFloat()) "${player.speed.toInt()}x" else "${player.speed}x",
                     onSkipIntro = { ep?.intro?.firstOrNull { player.positionMs in it }?.let { player.seekTo(it.last) } },
-                    onPrev = { if (idx > 0) play(sorted[idx - 1]) },
-                    onNext = { if (idx >= 0 && idx + 1 < sorted.size) play(sorted[idx + 1]) },
+                    onPrev = { if (idx > 0) play(sorted[idx - 1], resumePlaying = player.exo.playWhenReady) },
+                    onNext = { if (idx >= 0 && idx + 1 < sorted.size) play(sorted[idx + 1], resumePlaying = player.exo.playWhenReady) },
                     onBack = { if (fullscreen) fullscreen = false else onBack() },
                     onToggleFullscreen = { fullscreen = !fullscreen },
                     onSettings = { showSettings = true },
@@ -436,14 +436,14 @@ fun SeasonScreen(
                 Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(AruColors.Card).border(1.dp, AruColors.Border, RoundedCornerShape(14.dp)).padding(horizontal = 6.dp, vertical = 5.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                NavBtn(AruIcons.SkipPrevious, idx > 0) { if (idx > 0) play(sorted[idx - 1]) }
+                NavBtn(AruIcons.SkipPrevious, idx > 0) { if (idx > 0) play(sorted[idx - 1], resumePlaying = player.exo.playWhenReady) }
                 Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
                     Text(
                         if (idx >= 0) "${sorted[idx].number}-qism" else if (sorted.isEmpty()) "—" else "Qismni tanlang",
                         color = if (idx >= 0) Color.White else Color.White.copy(alpha = 0.54f), fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1,
                     )
                 }
-                NavBtn(AruIcons.SkipNext, idx >= 0 && idx + 1 < sorted.size) { if (idx >= 0 && idx + 1 < sorted.size) play(sorted[idx + 1]) }
+                NavBtn(AruIcons.SkipNext, idx >= 0 && idx + 1 < sorted.size) { if (idx >= 0 && idx + 1 < sorted.size) play(sorted[idx + 1], resumePlaying = player.exo.playWhenReady) }
             }
             Spacer(Modifier.height(6.dp))
             }
