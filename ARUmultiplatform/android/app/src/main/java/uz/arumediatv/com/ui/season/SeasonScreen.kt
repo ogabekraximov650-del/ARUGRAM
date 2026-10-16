@@ -105,6 +105,8 @@ fun SeasonScreen(
     onOpenBilling: () -> Unit,
     onOpenProfile: (Long) -> Unit,
     onLogin: () -> Unit,
+    startEpisodeId: Long = 0,
+    startQuality: String? = null,
 ) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -120,6 +122,7 @@ fun SeasonScreen(
     var current by remember { mutableStateOf<Episode?>(null) }
     var currentUrl by remember { mutableStateOf("") }
     var viaTelegram by remember { mutableStateOf(false) }
+    var viaLocal by remember { mutableStateOf(false) }
     var chosenQuality by remember { mutableStateOf<String?>(null) }
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var fullscreen by rememberSaveable { mutableStateOf(false) }
@@ -174,10 +177,11 @@ fun SeasonScreen(
             val start = resumeAt ?: AppServices.progress.positionOf(url)
             val src = PlaySource.resolve(url, AppServices.telegram, preferWorker)
             if (src == null) {
-                player.error = "Videoni ochib bo'lmadi"
+                player.error = if (!uz.arumediatv.com.data.Net.isOnline(ctx)) "Bu qism yuklab olinmagan — internetga ulaning" else "Videoni ochib bo'lmadi"
                 return@launch
             }
             viaTelegram = src.viaTelegram
+            viaLocal = src.local
             player.open(src.uri, start, resumePlaying)
         }
     }
@@ -204,8 +208,14 @@ fun SeasonScreen(
         val list = episodes.sortedBy { it.number }
         val last = AppServices.library.state.value.history
             .filter { it.animeId == season.animeId && it.seasonId == season.seasonId }.maxByOrNull { it.updatedAt }
-        val start = list.firstOrNull { it.id == last?.epizodId } ?: list.firstOrNull()
-        if (start != null && current == null) play(start, resumePlaying = false)
+        val wanted = list.firstOrNull { it.id == startEpisodeId }
+        val start = wanted ?: list.firstOrNull { it.id == last?.epizodId } ?: list.firstOrNull()
+        if (start != null && current == null) {
+            if (wanted != null) {
+                startQuality?.let { chosenQuality = it }
+                play(wanted, quality = startQuality)
+            } else play(start, resumePlaying = false)
+        }
     }
 
     // ── Ijro nuqtasi: har 500 ms; 5 soniyada eslab qolish; tomosha vaqti ──
@@ -321,7 +331,7 @@ fun SeasonScreen(
                     subtitle = listOfNotNull(
                         ep?.let { "${it.number}-qism" },
                         ep?.qualityOf(currentUrl)?.takeIf { it.isNotEmpty() }?.let { q -> ep.qualityTitle(q) },
-                        if (current != null) (if (viaTelegram) "Telegram" else "Server") else null,
+                        if (current != null) (if (viaLocal) "Yuklangan" else if (viaTelegram) "Telegram" else "Server") else null,
                     ).joinToString(" · "),
                     fullscreen = fullscreen,
                     locked = locked,

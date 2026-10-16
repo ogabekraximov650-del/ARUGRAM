@@ -46,6 +46,19 @@ interface RustLib : Library {
     fun rust_tg_nearest_country(): Pointer?
     fun rust_tg_play_url(key: String): Pointer?
 
+    // ── Video kesh (yuklab olish, mahalliy server) ──
+    fun rust_video_cache_start(dir: String): Int
+    fun rust_video_cache_stats(urlsJson: String): Pointer?
+    fun rust_video_cache_ranges(url: String): Pointer?
+    fun rust_video_cache_complete(url: String): Int
+    fun rust_video_cache_download(url: String): Int
+    fun rust_video_cache_pause(url: String): Int
+    fun rust_video_cache_delete(url: String): Int
+    fun rust_video_cache_wipe(): Int
+    fun rust_video_cache_total(url: String): Long
+    fun rust_video_cache_net_bytes(): Long
+    fun rust_video_cache_served_bytes(): Long
+
     // ── Ichki hisob ──
     fun rust_set_user_id(id: Long)
 }

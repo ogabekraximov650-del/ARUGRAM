@@ -75,7 +75,7 @@ import uz.arumediatv.com.ui.theme.AruColors
  * hisobni o'chirish va chiqish. Chiqishda navbatdagi yozuvlar avval serverga saqlanadi (`SyncQueue`).
  */
 @Composable
-fun ProfileScreen(onLogin: () -> Unit, onEdit: () -> Unit, onSessions: () -> Unit, onSettings: () -> Unit, onBilling: () -> Unit, onOpenStat: (StatKind) -> Unit) {
+fun ProfileScreen(onLogin: () -> Unit, onEdit: () -> Unit, onSessions: () -> Unit, onSettings: () -> Unit, onBilling: () -> Unit, onOpenStat: (StatKind) -> Unit, onStorage: () -> Unit) {
     val auth = AppServices.auth
     val tg = AppServices.telegram
     val user by auth.user.collectAsStateWithLifecycle()
@@ -162,6 +162,8 @@ fun ProfileScreen(onLogin: () -> Unit, onEdit: () -> Unit, onSessions: () -> Uni
                 },
                 action = "Tozalash",
             )
+            Divider2()
+            Row2(Icons.Filled.Info, "Xotira", "Yuklab olingan videolar, kesh, hajm", onClick = onStorage)
             Divider2()
             Row2(Icons.Filled.Refresh, "Hisobni yangilash", "Serverdan qayta o'qish", onClick = {
                 if (u != null) scope.launch {

@@ -60,6 +60,7 @@ import uz.arumediatv.com.ui.billing.BillingScreen
 import uz.arumediatv.com.ui.profile.PublicProfileScreen
 import uz.arumediatv.com.ui.profile.StatDetailScreen
 import uz.arumediatv.com.ui.profile.StatKind
+import uz.arumediatv.com.ui.profile.StorageScreen
 import uz.arumediatv.com.ui.season.SeasonScreen
 import kotlinx.coroutines.launch
 import uz.arumediatv.com.ui.catalog.CatalogScreen
@@ -109,9 +110,10 @@ private sealed interface Page {
     data object Sessions : Page
     data object Settings : Page
     data object Billing : Page
+    data object Storage : Page
     data class PublicUser(val id: Long) : Page
     data class Stat(val userId: Long, val kind: StatKind, val owner: String) : Page
-    data class SeasonPage(val season: uz.arumediatv.com.data.Season) : Page
+    data class SeasonPage(val season: uz.arumediatv.com.data.Season, val episodeId: Long = 0, val quality: String? = null) : Page
 }
 
 class MainActivity : ComponentActivity() {
@@ -152,13 +154,14 @@ private fun AruApp() {
                 0 -> HomeScreen(onOpenSeason = openSeason, onLogin = login)
                 1 -> SearchScreen(onOpenSeason = openSeason)
                 2 -> CatalogScreen(onOpenSeason = openSeason)
-                3 -> LibraryScreen(onOpenSeason = openSeason, onLogin = login)
+                3 -> LibraryScreen(onOpenSeason = openSeason, onLogin = login, onOpenDownload = { s, e, q -> push(Page.SeasonPage(s, e, q)) })
                 4 -> ProfileScreen(
                     onLogin = login,
                     onEdit = { push(Page.Edit) },
                     onSessions = { push(Page.Sessions) },
                     onSettings = { push(Page.Settings) },
                     onBilling = { push(Page.Billing) },
+                    onStorage = { push(Page.Storage) },
                     onOpenStat = { k -> AppServices.auth.user.value?.id?.let { push(Page.Stat(it, k, "")) } },
                 )
                 else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -190,6 +193,7 @@ private fun AruApp() {
                     Page.Sessions -> SessionsScreen(onBack = ::pop)
                     Page.Settings -> SettingsScreen(onBack = ::pop)
                     Page.Billing -> BillingScreen(onBack = ::pop)
+                    Page.Storage -> StorageScreen(onBack = ::pop)
                     is Page.PublicUser -> PublicProfileScreen(page.id, onBack = ::pop, onOpenStat = { u, k, o -> push(Page.Stat(u, k, o)) })
                     is Page.Stat -> StatDetailScreen(page.userId, page.kind, page.owner, onBack = ::pop, onOpenSeason = openSeason)
                     is Page.SeasonPage -> SeasonScreen(
@@ -199,6 +203,8 @@ private fun AruApp() {
                         onOpenBilling = { push(Page.Billing) },
                         onOpenProfile = { id -> if (id > 0) push(Page.PublicUser(id)) },
                         onLogin = { push(Page.Login) },
+                        startEpisodeId = page.episodeId,
+                        startQuality = page.quality,
                     )
                 }
             }

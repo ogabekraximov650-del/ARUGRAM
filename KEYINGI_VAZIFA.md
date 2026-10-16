@@ -6501,3 +6501,9 @@ Anibla sekinligi (diag): worker -> anibla.uz har so'rovga ~1.2-1.4 s (login 1.4 
 
 - `data/Comments.kt`: `CommentsStore` (diskdagi nusxa, `mk/at` bilan "o'zgarmagan" javobi, `/wait` bilan jonli yangilanish, yozish, javob, layk, o'chirish, shikoyat `POST /api/reports`), `PublicRepository` (`/api/user/:id`, `/api/user/:id/stats/:kind`).
 - `ui/season/CommentsTab.kt`, `ui/profile/PublicProfileScreen.kt` (+ `StatDetailScreen`). Izohdagi stiker/GIF — Emoji/GIF/stiker to'plamlari bosqichida.
+
+## Kotlin ilova: yuklab olish va oflayn (2026-10)
+
+- `data/Downloads.kt`: `VideoCache` (Rust kesh serveri), `DownloadManager` (holat Rust'dan: yuklanayotganda 500 ms), `DownloadsIndex` (diskdagi `eps_*.json` dan yuklangan qismlar). `TelegramService.hold/unhold` — yuklash davomida bot chati tozalanmaydi.
+- To'liq yuklangan fayl `http://127.0.0.1:<port>/v?u=<url>` orqali ijro etiladi (`PlaySource.resolve`); internet yo'q va fayl to'liq emas — xabar.
+- UI: qism kartasidagi ▾ -> sifat qatorlari (yuklab olish/pauza/davom/o'chirish); Kutubxona > Yuklanmalar; Profil > Xotira (`StorageScreen`).

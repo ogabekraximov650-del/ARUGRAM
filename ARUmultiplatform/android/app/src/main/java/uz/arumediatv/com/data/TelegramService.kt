@@ -366,6 +366,20 @@ class TelegramService(
     @Volatile
     private var clearPending = false
 
+    /** Yuklab olish ketayotgan fayllar: shu paytda bot chati tozalanmaydi (nusxa chatda turishi kerak). */
+    private val holds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    fun hold(key: String) {
+        holds.add(key)
+    }
+
+    fun unhold(key: String) {
+        if (holds.remove(key) && holds.isEmpty()) {
+            clearPending = true
+            scheduleClear(5000)
+        }
+    }
+
     @Volatile
     private var clearing: Job? = null
     private var clearTimer: Job? = null
@@ -387,7 +401,7 @@ class TelegramService(
 
     private suspend fun clearIfPending() {
         if (!clearPending || !_state.value.authorized) return
-        if (delivering.get() > 0) {
+        if (delivering.get() > 0 || holds.isNotEmpty()) {
             scheduleClear(20_000)
             return
         }

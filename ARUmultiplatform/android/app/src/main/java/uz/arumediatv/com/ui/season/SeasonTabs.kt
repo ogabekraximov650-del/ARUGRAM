@@ -38,6 +38,9 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import uz.arumediatv.com.data.VideoStat
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -220,6 +223,12 @@ fun EpisodesTab(
 private fun EpisodeTile(e: Episode, isCurrent: Boolean, onPlay: (Episode, String?) -> Unit) {
     val shape = RoundedCornerShape(16.dp)
     val frac = AppServices.progress.fractionOf(e.urlFor(null))
+    var expanded by remember { mutableStateOf(false) }
+    val dm = AppServices.downloads
+    DisposableEffect(expanded) {
+        if (expanded) dm.watch(e, e.urls.values.toSet())
+        onDispose { dm.unwatch(e) }
+    }
     Column(
         Modifier.fillMaxWidth().clip(shape)
             .background(if (isCurrent) AruColors.AccentTint else AruColors.Card)
@@ -240,6 +249,10 @@ private fun EpisodeTile(e: Episode, isCurrent: Boolean, onPlay: (Episode, String
                 if (e.name.isNotBlank()) Text(e.name, color = AruColors.TextDim, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             if (e.views > 0) Text("${formatCount(e.views)} ko'rish", color = AruColors.TextFaint, fontSize = 11.sp)
+            Text(
+                if (expanded) "▴" else "▾", color = AruColors.TextDim, fontSize = 18.sp,
+                modifier = Modifier.clip(CircleShape).clickable { expanded = !expanded }.padding(horizontal = 10.dp, vertical = 2.dp),
+            )
         }
         if (frac > 0f) {
             Spacer(Modifier.height(8.dp))
@@ -247,18 +260,68 @@ private fun EpisodeTile(e: Episode, isCurrent: Boolean, onPlay: (Episode, String
                 Box(Modifier.fillMaxWidth(frac).fillMaxHeight().background(Brush.horizontalGradient(listOf(AruColors.Accent, AruColors.Accent2))))
             }
         }
-        if (e.qualities.size > 1 || isCurrent) {
+        if (expanded) {
             Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                e.qualities.forEach { q ->
-                    Text(
-                        e.qualityTitle(q), color = Color.White.copy(alpha = 0.8f), fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Color.White.copy(alpha = 0.08f)).clickable { onPlay(e, q) }.padding(horizontal = 9.dp, vertical = 4.dp),
-                    )
+            e.qualities.forEach { q -> QualityRow(e, q) { onPlay(e, q) } }
+        }
+    }
+}
+
+/** Sifat qatori: hajm, yuklab olish holati va tugmalar (yuklab olish / pauza / davom / o'chirish). */
+@Composable
+private fun QualityRow(e: Episode, q: String, onPlay: () -> Unit) {
+    val dm = AppServices.downloads
+    val all by dm.stats.collectAsStateWithLifecycle()
+    val url = e.urls[q].orEmpty()
+    val st = all[url] ?: VideoStat()
+    val size = if (st.total > 0) st.total else e.sizes[q] ?: 0
+    Column(Modifier.fillMaxWidth().padding(top = 6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                e.qualityTitle(q), color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Color.White.copy(alpha = 0.1f)).clickable(onClick = onPlay).padding(horizontal = 10.dp, vertical = 5.dp),
+            )
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    when {
+                        st.complete -> "Yuklangan · ${formatBytes(st.total)}"
+                        st.downloading && st.queued -> "Navbatda"
+                        st.downloading -> "${st.percent}% · ${formatBytes(st.downloaded)} / ${formatBytes(st.total)}${if (st.speedLabel.isNotEmpty()) " · ${st.speedLabel}" else ""}"
+                        st.retrying -> "Internet yo'q — davom etadi"
+                        st.downloaded > 0 -> "To'xtatilgan · ${st.percent}%"
+                        size > 0 -> formatBytes(size)
+                        else -> ""
+                    },
+                    color = if (st.complete) Color(0xFF4ADE80) else AruColors.TextDim, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+            }
+            when {
+                st.complete -> MiniBtn("O'chirish", danger = true) { dm.delete(url) }
+                st.downloading -> MiniBtn("Pauza") { dm.pause(url) }
+                st.downloaded > 0 -> {
+                    MiniBtn("Davom") { dm.download(url) }
+                    Spacer(Modifier.width(6.dp))
+                    MiniBtn("O'chirish", danger = true) { dm.delete(url) }
                 }
+                else -> MiniBtn("Yuklab olish") { dm.download(url) }
+            }
+        }
+        if (st.downloading || (st.downloaded > 0 && !st.complete)) {
+            Spacer(Modifier.height(5.dp))
+            Box(Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(2.dp)).background(Color.White.copy(alpha = 0.1f))) {
+                Box(Modifier.fillMaxWidth(st.ratio).fillMaxHeight().background(AruColors.Accent2))
             }
         }
     }
+}
+
+@Composable
+private fun MiniBtn(text: String, danger: Boolean = false, onClick: () -> Unit) {
+    Text(
+        text, color = if (danger) Color(0xFFF87171) else Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(if (danger) Color(0x22F87171) else AruColors.Accent).clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 6.dp),
+    )
 }
 
 // ══════════════════════════ BO'LIMLAR ══════════════════════════

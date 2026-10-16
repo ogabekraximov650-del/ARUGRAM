@@ -67,7 +67,7 @@ private val TITLES = listOf("Tarix", "Yuklanmalar", "Sevimlilar")
 /** Kutubxona (Flutter `LibraryScreen` ga mos): Tarix, Yuklanmalar va Sevimlilar — tugma bosilsa ham, surilsa ham almashadi. */
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
-fun LibraryScreen(onOpenSeason: (Season) -> Unit, onLogin: () -> Unit) {
+fun LibraryScreen(onOpenSeason: (Season) -> Unit, onLogin: () -> Unit, onOpenDownload: (Season, Long, String) -> Unit) {
     val user by AppServices.auth.user.collectAsStateWithLifecycle()
     val state by AppServices.library.state.collectAsStateWithLifecycle()
     val pager = rememberPagerState { TITLES.size }
@@ -103,9 +103,7 @@ fun LibraryScreen(onOpenSeason: (Season) -> Unit, onLogin: () -> Unit) {
                 0 -> PullToRefreshBox(isRefreshing = state.loading && state.loaded, onRefresh = { AppServices.library.load(force = true) }, modifier = Modifier.fillMaxSize()) {
                     HistoryList(state.history, loading = state.loading && !state.loaded, error = state.error, pad = pad)
                 }
-                1 -> Box(Modifier.fillMaxSize()) {
-                    EmptyState(Icons.Filled.PlayArrow, "Yuklab olish pleyer bilan birga keyingi bosqichda qo'shiladi")
-                }
+                1 -> DownloadsList(pad = pad, onOpen = onOpenDownload)
                 else -> PullToRefreshBox(isRefreshing = state.loading && state.loaded, onRefresh = { AppServices.library.load(force = true) }, modifier = Modifier.fillMaxSize()) {
                     SeasonGrid(
                         items = state.favorites,
@@ -206,5 +204,96 @@ private fun HistoryRow(h: HistoryItem) {
             }.joinToString(" · ")
             Text(meta, color = AruColors.TextFaint, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
         }
+    }
+}
+
+/** Yuklanmalar: yuklab olingan va yuklanayotgan qismlar (sifat bo'yicha). Bosilsa qism shu sifatda ochiladi. */
+@Composable
+private fun DownloadsList(pad: androidx.compose.ui.unit.Dp, onOpen: (Season, Long, String) -> Unit) {
+    val seasonsState by AppServices.seasons.state.collectAsStateWithLifecycle()
+    val dm = AppServices.downloads
+    val live by dm.stats.collectAsStateWithLifecycle()
+    var items by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<List<uz.arumediatv.com.data.DownloadItem>?>(null) }
+    var confirmAll by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    val owner = androidx.compose.runtime.remember { Any() }
+
+    LaunchedEffect(seasonsState.items) { items = AppServices.downloadsIndex.collect(seasonsState.items) }
+    androidx.compose.runtime.DisposableEffect(items) {
+        items?.let { list -> dm.watch(owner, list.map { it.url }.toSet()) }
+        onDispose { dm.unwatch(owner) }
+    }
+    val list = items
+    when {
+        list == null -> LoadingBox()
+        list.isEmpty() -> EmptyState(Icons.Filled.PlayArrow, "Yuklab olingan qism yo'q\nQismlar ro'yxatida ▾ ni bosib yuklab oling")
+        else -> LazyColumn(
+            Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = pad),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            item {
+                val total = list.sumOf { (live[it.url] ?: it.stat).downloaded }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("${list.size} ta fayl · ${uz.arumediatv.com.ui.profile.formatBytes(total)}", color = AruColors.TextDim, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                    Text("Hammasini o'chirish", color = Color(0xFFF87171), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickable { confirmAll = true })
+                }
+            }
+            items(list, key = { it.key }) { d ->
+                val st = live[d.url] ?: d.stat
+                val shape = RoundedCornerShape(16.dp)
+                Row(
+                    Modifier.fillMaxWidth().clip(shape).background(AruColors.Card).border(1.dp, AruColors.Border, shape)
+                        .clickable(enabled = st.downloaded > 0) {
+                            val s = seasonsState.items.firstOrNull { it.animeId == d.animeId && it.seasonId == d.seasonId }
+                                ?: Season(d.animeId, d.seasonId, d.title, d.sectionNo, 0, d.poster, 0.0, 0, 0, 0, emptyList(), "", null)
+                            onOpen(s, d.episodeId, d.quality)
+                        }.padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TgImage(d.poster, Modifier.width(56.dp).height(80.dp).clip(RoundedCornerShape(12.dp)).background(AruColors.CardAlt), maxPx = 200)
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(d.title.ifEmpty { "Anime" }, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("${d.episodeNo}-qism · ${d.qualityTitle}", color = AruColors.TextDim, fontSize = 12.sp)
+                        Text(
+                            when {
+                                st.complete -> "Yuklangan · ${uz.arumediatv.com.ui.profile.formatBytes(st.total)}"
+                                st.downloading -> "${st.percent}%${if (st.speedLabel.isNotEmpty()) " · ${st.speedLabel}" else ""}"
+                                else -> "To'xtatilgan · ${st.percent}%"
+                            },
+                            color = if (st.complete) Color(0xFF4ADE80) else AruColors.TextFaint, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp),
+                        )
+                        if (!st.complete) {
+                            Box(Modifier.padding(top = 5.dp).fillMaxWidth().height(3.dp).clip(RoundedCornerShape(2.dp)).background(Color.White.copy(alpha = 0.1f))) {
+                                Box(Modifier.fillMaxWidth(st.ratio).fillMaxHeight().background(AruColors.Accent2))
+                            }
+                        }
+                    }
+                    Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        if (!st.complete) Text(
+                            if (st.downloading) "Pauza" else "Davom", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(AruColors.Accent).clickable { if (st.downloading) dm.pause(d.url) else dm.download(d.url) }.padding(horizontal = 10.dp, vertical = 6.dp),
+                        )
+                        Text(
+                            "O'chirish", color = Color(0xFFF87171), fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Color(0x22F87171)).clickable {
+                                dm.delete(d.url)
+                                items = list.filterNot { it.key == d.key }
+                            }.padding(horizontal = 10.dp, vertical = 6.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+    if (confirmAll) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirmAll = false },
+            title = { Text("Hammasini o'chirish") },
+            text = { Text("Yuklab olingan barcha videolar telefondan o'chiriladi.") },
+            confirmButton = { androidx.compose.material3.TextButton(onClick = { confirmAll = false; dm.wipeAll(); items = emptyList() }) { Text("O'chirish", color = Color(0xFFF87171)) } },
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { confirmAll = false }) { Text("Bekor qilish") } },
+            containerColor = AruColors.Surface,
+        )
     }
 }

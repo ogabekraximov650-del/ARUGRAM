@@ -87,6 +87,22 @@ object RustCore {
 
     fun setUserId(id: Long) = guard(Unit) { it.rust_set_user_id(id) }
 
+    // ── Video kesh ──
+    /** Mahalliy kesh serverini ishga tushiradi; port (>0) yoki xato kodi. */
+    fun videoCacheStart(dir: String): Int = guard(-1) { it.rust_video_cache_start(dir) }
+
+    /** `{url: {total, downloaded, downloading, queued, retrying, speed, streams}}` — diskka chiqmaydi. */
+    fun videoStats(urls: List<String>): JSONObject =
+        guard(JSONObject()) { json(take(it.rust_video_cache_stats(org.json.JSONArray(urls).toString()))) }
+
+    fun videoComplete(url: String): Boolean = guard(false) { it.rust_video_cache_complete(url) == 1 }
+    fun videoDownload(url: String) = guard(Unit) { it.rust_video_cache_download(url); Unit }
+    fun videoPause(url: String) = guard(Unit) { it.rust_video_cache_pause(url); Unit }
+    fun videoDelete(url: String) = guard(Unit) { it.rust_video_cache_delete(url); Unit }
+    fun videoWipe() = guard(Unit) { it.rust_video_cache_wipe(); Unit }
+    fun videoTotal(url: String): Long = guard(0L) { it.rust_video_cache_total(url) }
+    fun videoNetBytes(): Long = guard(0L) { it.rust_video_cache_net_bytes() }
+
     // ── Telegram ──
     fun tgSetDevice(model: String, system: String, app: String) = guard(Unit) { it.rust_tg_set_device(model, system, app) }
 

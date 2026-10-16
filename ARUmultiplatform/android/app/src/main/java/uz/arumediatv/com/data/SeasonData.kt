@@ -271,9 +271,16 @@ class WatchProgress(context: Context) {
 
 /** Pleyer manbasi: avval Telegram (mahalliy server), bo'lmasa worker `/api/play/...` (Cloudflare keshidan oqim). */
 object PlaySource {
-    data class Source(val uri: String, val viaTelegram: Boolean)
+    data class Source(val uri: String, val viaTelegram: Boolean, val local: Boolean = false)
 
+    /**
+     * Qoida: fayl telefonda TO'LIQ bor -> mahalliy kesh serveri (internet kerak emas); aks holda internet bor bo'lsa
+     * Telegram, bo'lmasa (yoki xato) worker keshi; internet ham yo'q bo'lsa — `null`.
+     */
     suspend fun resolve(url: String, tg: TelegramService, preferWorker: Boolean = false): Source? {
+        val cache = uz.arumediatv.com.AppServices.videoCache
+        if (!preferWorker && cache.isComplete(url)) cache.proxyUri(url)?.let { return Source(it, false, local = true) }
+        if (!Net.isOnline(uz.arumediatv.com.AppServices.appContext)) return null
         if (!preferWorker) tg.playUrl(url)?.let { return Source(it, true) }
         return worker(url)?.let { Source(it, false) }
     }

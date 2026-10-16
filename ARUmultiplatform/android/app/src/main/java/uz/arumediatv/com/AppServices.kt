@@ -12,6 +12,9 @@ import uz.arumediatv.com.data.BillingStore
 import uz.arumediatv.com.data.SeasonRepository
 import uz.arumediatv.com.data.WatchProgress
 import uz.arumediatv.com.data.PublicRepository
+import uz.arumediatv.com.data.VideoCache
+import uz.arumediatv.com.data.DownloadManager
+import uz.arumediatv.com.data.DownloadsIndex
 import uz.arumediatv.com.data.SeasonsRepository
 import uz.arumediatv.com.data.SeasonsStore
 import uz.arumediatv.com.data.TelegramService
@@ -39,6 +42,12 @@ object AppServices {
     lateinit var progress: WatchProgress
         private set
     lateinit var publicData: PublicRepository
+        private set
+    lateinit var videoCache: VideoCache
+        private set
+    lateinit var downloads: DownloadManager
+        private set
+    lateinit var downloadsIndex: DownloadsIndex
         private set
     lateinit var appContext: Context
         private set
@@ -74,6 +83,9 @@ object AppServices {
         seasonData = SeasonRepository(ctx, auth, { sync }, { library })
         progress = WatchProgress(ctx)
         publicData = PublicRepository(ctx, auth)
+        videoCache = VideoCache(ctx)
+        downloads = DownloadManager(ctx, telegram, videoCache)
+        downloadsIndex = DownloadsIndex(ctx, downloads)
         appContext = ctx
         auth.onSettings = { hidden, consent -> sync.putSettings(hidden, consent) }
         auth.hasPendingSettings = { sync.hasPendingSettings }
