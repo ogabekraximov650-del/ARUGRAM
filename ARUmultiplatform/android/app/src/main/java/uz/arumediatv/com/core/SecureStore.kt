@@ -18,8 +18,13 @@ import javax.crypto.spec.GCMParameterSpec
 class SecureStore(context: Context, name: String = "aru_secure") {
     private val prefs: SharedPreferences = context.getSharedPreferences(name, Context.MODE_PRIVATE)
 
+    /** Qiymat umuman yozilganmi (o'qib bo'lmasa ham) — asosiy kalitni ustidan yozib yubormaslik uchun. */
+    fun has(key: String): Boolean = prefs.contains(key)
+
     fun getString(key: String): String? {
         val raw = prefs.getString(key, null) ?: return null
+        // Keystore ishlamagan qurilmada qiymat ochiq saqlanadi (Flutterdagidek: "shifrlashsiz davom etamiz") — sessiya yo'qolmasin.
+        if (raw.startsWith(PLAIN)) return raw.removePrefix(PLAIN)
         return try {
             open(Base64.decode(raw, Base64.NO_WRAP)).toString(Charsets.UTF_8)
         } catch (_: Exception) {
@@ -32,7 +37,8 @@ class SecureStore(context: Context, name: String = "aru_secure") {
             prefs.edit().putString(key, Base64.encodeToString(seal(value.toByteArray(Charsets.UTF_8)), Base64.NO_WRAP)).apply()
             true
         } catch (_: Exception) {
-            false
+            prefs.edit().putString(key, PLAIN + value).apply()
+            true
         }
 
     fun remove(key: String) {
@@ -40,6 +46,7 @@ class SecureStore(context: Context, name: String = "aru_secure") {
     }
 
     companion object {
+        private const val PLAIN = "plain:"
         private const val ALIAS = "aru_master_wrap_v1"
         private const val PROVIDER = "AndroidKeyStore"
 

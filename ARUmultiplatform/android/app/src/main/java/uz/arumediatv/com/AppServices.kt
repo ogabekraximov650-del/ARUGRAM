@@ -84,12 +84,14 @@ object AppServices {
         secure = SecureStore(ctx)
         if (RustCore.load()) {
             RustCore.setAppVersion(BuildConfig.APP_VERSION)
+            // Kalit HECH QACHON ustidan yozilmaydi: o'qib bo'lmasa (Keystore vaqtincha ishlamadi) yangisi yaratilmaydi —
+            // aks holda Telegram sessiyasi va boshqa shifrlangan fayllar butunlay yo'qolardi.
             var hex = secure.getString("master_key_v1")
-            if (hex == null || hex.length != 64) {
+            if ((hex == null || hex.length != 64) && !secure.has("master_key_v1")) {
                 hex = RustCore.generateMasterKey()
-                if (hex.length == 64) secure.putString("master_key_v1", hex)
+                if (hex.length == 64 && !secure.putString("master_key_v1", hex)) hex = ""
             }
-            if (hex.length == 64) RustCore.setMasterKey(hex)
+            if (hex != null && hex.length == 64) RustCore.setMasterKey(hex)
         }
         auth = AuthService(secure)
         telegram = TelegramService(ctx, auth, secure)
