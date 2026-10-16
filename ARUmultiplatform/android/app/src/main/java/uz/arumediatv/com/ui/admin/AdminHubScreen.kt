@@ -1,6 +1,13 @@
 package uz.arumediatv.com.ui.admin
 
 import androidx.compose.foundation.background
+import uz.arumediatv.com.ui.common.AruIcons
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.material3.Icon
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.Icons
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -10,7 +17,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -52,17 +61,17 @@ import uz.arumediatv.com.ui.profile.OverlayScaffold
 import uz.arumediatv.com.ui.season.timeAgo
 import uz.arumediatv.com.ui.theme.AruColors
 
-/** Admin paneli bo'limlari. */
-enum class AdminSection(val title: String, val hint: String) {
-    CHATS("Suhbatlar", "Foydalanuvchilar yozishmalari"),
-    USERS("Foydalanuvchilar", "Qidirish, obuna, balans, bloklash"),
-    REPORTS("Shikoyatlar", "Izoh va xabarlarga shikoyatlar"),
-    ANIME("Anime boshqaruvi", "Anime, bo'lim va qism qo'shish, tahrirlash"),
-    CHANNELS("Majburiy kanallar", "Bepul ko'rish uchun kanallar"),
-    PACKS("Emoji/GIF/stiker", "To'plamlarni ko'rib chiqish"),
-    STATS("Statistika", "Umumiy raqamlar va grafiklar"),
-    APP("Ilova", "Versiya va yangilanish sozlamalari"),
-    ENCODE("Kodlash", "Kodlash navbati va holati"),
+/** Admin paneli bo'limlari (tartib va yozuvlar Flutter `AdminScreen` dagidek; faqat Foydalanuvchilar va Suhbatlar alohida). */
+enum class AdminSection(val title: String, val hint: String, val icon: ImageVector) {
+    ANIME("Animelarni boshqarish", "Qo'shish, tahrirlash, o'chirish", AruIcons.Movie),
+    USERS("Foydalanuvchilar", "Balans, obuna, bloklash", AruIcons.People),
+    CHATS("Suhbatlar", "Foydalanuvchilar yozishmalari", AruIcons.Chat),
+    REPORTS("Shikoyatlar", "Izohlarga kelgan shikoyatlar", AruIcons.Flag),
+    PACKS("Emoji, GIF va stikerlar", "Yuklangan rasmlarni ko'rib chiqish", AruIcons.Emoticon),
+    CHANNELS("Majburiy obunalar", "Kanallar, limit va statistika", AruIcons.Campaign),
+    STATS("Umumiy statistika", "Kontent, foydalanuvchilar, ko'rishlar, trafik", AruIcons.Insights),
+    ENCODE("Kodlash navbati", "Kodlanayotgan va navbatdagi qismlar, log", AruIcons.Movie),
+    APP("Ilova va xavfsizlik", "Eng past versiya, ulanish kaliti", AruIcons.Security),
 }
 
 /** Admin paneli (faqat admin build'da va server admin deb belgilagan hisobda). */
@@ -70,25 +79,54 @@ enum class AdminSection(val title: String, val hint: String) {
 fun AdminHubScreen(onBack: () -> Unit, onOpen: (AdminSection) -> Unit) {
     val unread by AppServices.unread.adminCount.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { AppServices.unread.refresh(force = true) }
-    OverlayScaffold("Admin paneli", onBack) {
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
+    BackHandler(onBack = onBack)
+    Column(Modifier.fillMaxSize().background(AruColors.Bg).statusBarsPadding()) {
+        // ── Sarlavha ──
+        val hs = RoundedCornerShape(20.dp)
+        Row(
+            Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 8.dp).fillMaxWidth().clip(hs).background(AruColors.Card).border(1.dp, AruColors.Border, hs)
+                .padding(horizontal = 18.dp, vertical = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            val bs = RoundedCornerShape(14.dp)
+            Box(Modifier.clip(bs).background(AruColors.CardAlt).border(1.dp, AruColors.Border, bs).clickable(onClick = onBack).padding(8.dp)) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Orqaga", tint = Color.White, modifier = Modifier.size(24.dp))
+            }
+            Spacer(Modifier.width(14.dp))
+            Text("Admin paneli", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            Icon(AruIcons.AdminPanel, null, tint = Color.White.copy(alpha = 0.54f), modifier = Modifier.size(24.dp))
+        }
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             AdminSection.entries.forEach { s ->
-                val shape = RoundedCornerShape(16.dp)
+                val shape = RoundedCornerShape(20.dp)
+                val badge = if (s == AdminSection.CHATS) unread else 0
                 Row(
-                    Modifier.fillMaxWidth().padding(vertical = 5.dp).clip(shape).background(AruColors.Card).border(1.dp, AruColors.Border, shape).clickable { onOpen(s) }.padding(16.dp),
+                    Modifier.fillMaxWidth().clip(shape).background(AruColors.Card).border(1.dp, AruColors.Border, shape).clickable { onOpen(s) }
+                        .padding(horizontal = 20.dp, vertical = 18.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    Box(Modifier.clip(RoundedCornerShape(14.dp)).background(AruColors.Accent2.copy(alpha = 0.14f)).padding(12.dp)) {
+                        Icon(s.icon, null, tint = AruColors.Accent2, modifier = Modifier.size(26.dp))
+                    }
+                    Spacer(Modifier.width(16.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(s.title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                        Text(s.hint, color = AruColors.TextDim, fontSize = 12.sp)
+                        Text(s.title, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.height(3.dp))
+                        Text(
+                            if (s == AdminSection.CHATS && unread > 0) "$unread ta o'qilmagan xabar" else s.hint,
+                            color = Color.White.copy(alpha = 0.55f), fontSize = 12.sp,
+                        )
                     }
-                    if (s == AdminSection.CHATS && unread > 0) {
-                        Text("$unread", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clip(CircleShape).background(Color(0xFFEF4444)).padding(horizontal = 8.dp, vertical = 3.dp))
+                    if (badge > 0) {
+                        Text(
+                            "$badge", color = Color.White, fontSize = 11.5.sp, fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.Center,
+                            modifier = Modifier.defaultMinSize(minWidth = 22.dp).clip(RoundedCornerShape(11.dp)).background(AruColors.Accent2).padding(horizontal = 7.dp, vertical = 3.dp),
+                        )
+                        Spacer(Modifier.width(6.dp))
                     }
-                    Text("›", color = AruColors.TextDim, fontSize = 20.sp)
+                    Icon(AruIcons.ChevronRight, null, tint = Color.White.copy(alpha = 0.38f), modifier = Modifier.size(24.dp))
                 }
             }
-            Spacer(Modifier.height(40.dp))
         }
     }
 }

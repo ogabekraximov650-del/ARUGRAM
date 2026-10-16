@@ -57,10 +57,19 @@ import uz.arumediatv.com.ui.theme.AruColors
 fun OverlayScaffold(title: String, onBack: () -> Unit, content: @Composable () -> Unit) {
     BackHandler(onBack = onBack)
     Column(Modifier.fillMaxSize().background(AruColors.Bg).statusBarsPadding().imePadding()) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.AutoMirrored.Filled.ArrowBack, "Orqaga", tint = Color.White, modifier = Modifier.size(28.dp).clickable(onClick = onBack))
+        // Flutter bilan bir xil sarlavha: yumaloq karta ichida orqaga tugmasi va nom.
+        val hs = androidx.compose.foundation.shape.RoundedCornerShape(20.dp)
+        val bs = androidx.compose.foundation.shape.RoundedCornerShape(14.dp)
+        Row(
+            Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 8.dp).fillMaxWidth().clip(hs).background(AruColors.Card)
+                .border(1.dp, AruColors.Border, hs).padding(horizontal = 18.dp, vertical = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.clip(bs).background(AruColors.CardAlt).border(1.dp, AruColors.Border, bs).clickable(onClick = onBack).padding(8.dp)) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Orqaga", tint = Color.White, modifier = Modifier.size(24.dp))
+            }
             Spacer(Modifier.width(14.dp))
-            Text(title, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text(title, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
         }
         content()
     }
