@@ -6450,4 +6450,4 @@ Anibla sekinligi (diag): worker -> anibla.uz har so'rovga ~1.2-1.4 s (login 1.4 
 - **Nomlar:** koddagi, workflow'lardagi va hujjatlardagi eski nom -> `arumediatv/ARUMEDIATV` (worker manzili `arumediatv.<subdomen>.workers.dev`,
   MethodChannel `uz.arumediatv.player/enhance`, User-Agent'lar, kesh kalitlari). APK paketi allaqachon `uz.arumediatv.com` edi.
   APK yig'ishda manzil Cloudflare'dan hisoblanadi (`API_BASE` secret'idan ustun).
-- GitHub repo nomini (`ARUGRAM`) kodda o'zgartirib bo'lmaydi — repo Settings'da qo'lda. avtoencode repodagi workflow'lar o'zgargan shablonlardan qayta sinxronlanadi.
+- GitHub repo nomini (hozirgi nomi) kodda o'zgartirib bo'lmaydi — repo Settings'da qo'lda. avtoencode repodagi workflow'lar o'zgargan shablonlardan qayta sinxronlanadi.
