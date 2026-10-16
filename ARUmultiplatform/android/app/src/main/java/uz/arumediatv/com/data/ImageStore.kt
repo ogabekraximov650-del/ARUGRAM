@@ -33,28 +33,29 @@ class ImageStore(context: Context, private val tg: TelegramService) {
     /** Xotiradagi tayyor rasm (bo'lsa) — kompozitsiya vaqtida miltillamasligi uchun. */
     fun peek(url: String): Bitmap? = Names.fileNameOf(url).takeIf { it.isNotEmpty() }?.let { mem.get(it) }
 
-    suspend fun load(url: String, maxPx: Int = 720): Bitmap? {
+    suspend fun load(url: String, maxPx: Int = 720, network: Boolean = true): Bitmap? {
         val name = Names.fileNameOf(url)
         if (name.isEmpty()) return null
         mem.get(name)?.let { return it }
 
         val mine = CompletableDeferred<Bitmap?>()
-        val other = inflight.putIfAbsent(name, mine)
+        val key = if (network) name else "$name#disk"
+        val other = inflight.putIfAbsent(key, mine)
         if (other != null) return other.await()
         scope.launch {
             val bmp = try {
-                loadUncached(url, name, maxPx)
+                loadUncached(url, name, maxPx, network)
             } catch (_: Throwable) {
                 null
             }
             if (bmp != null) mem.put(name, bmp)
-            inflight.remove(name)
+            inflight.remove(key)
             mine.complete(bmp)
         }
         return mine.await()
     }
 
-    private suspend fun loadUncached(url: String, name: String, maxPx: Int): Bitmap? {
+    private suspend fun loadUncached(url: String, name: String, maxPx: Int, network: Boolean): Bitmap? {
         val f = File(dir, "$name.bin")
         if (f.exists()) {
             val plain = try {
@@ -65,6 +66,7 @@ class ImageStore(context: Context, private val tg: TelegramService) {
             }
             if (plain != null) decode(plain, maxPx)?.let { return it }
         }
+        if (!network) return null
         val bytes = tg.fetchBytes(url) ?: return null
         val bmp = decode(bytes, maxPx) ?: return null
         try {

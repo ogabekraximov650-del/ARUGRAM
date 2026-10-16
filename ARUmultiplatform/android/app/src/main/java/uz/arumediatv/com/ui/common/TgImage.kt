@@ -18,7 +18,7 @@ import kotlinx.coroutines.flow.map
 import uz.arumediatv.com.AppServices
 
 /**
- * Telegram orqali keladigan rasm. Hisob ulanmagan bo'lsa (`placeholder`) ko'rsatiladi; kirgach o'zi qayta urinadi.
+ * Telegram orqali keladigan rasm. Keshdagi rasm darhol (Telegram ulanishini kutmasdan) chiqadi; yo'q bo'lsa ulangach yuklanadi, bundan oldin `placeholder`.
  */
 @Composable
 fun TgImage(
@@ -33,7 +33,10 @@ fun TgImage(
     val ready by readyFlow.collectAsStateWithLifecycle(initialValue = AppServices.telegram.state.value.let { it.authorized && it.configured && it.port > 0 })
     var bmp by remember(url) { mutableStateOf(AppServices.images.peek(url)) }
     LaunchedEffect(url, ready) {
-        if (bmp == null && url.isNotEmpty() && ready) bmp = AppServices.images.load(url, maxPx)
+        if (bmp == null && url.isNotEmpty()) {
+            // Diskdagi kesh Telegram ulanishini KUTMAYDI; tarmoq faqat ulangach.
+            bmp = AppServices.images.load(url, maxPx, network = ready)
+        }
     }
     Box(modifier) {
         val b = bmp
