@@ -30,11 +30,12 @@ final class AruEnhanceShaderProgram extends BaseGlShaderProgram {
           + "  vTexSamplingCoord = (uTexTransformationMatrix * texturePosition).xy;\n"
           + "}\n";
 
-  // sharp, sat, con, deband, line, clarity, vib
-  private static final float[] LEVEL1 = {0.45f, 1.18f, 1.07f, 0.0f, 0.0f, 0.0f, 0.0f}; // yengil: 5 ta o'qish (kuchsiz telefonlar uchun)
-  private static final float[] LEVEL2 = {0.8f, 1.35f, 1.14f, 0.8f, 0.6f, 0.0f, 0.0f};
-  // 3 — MAKSIMAL (faqat ilovada): kuchli o'tkirlik + ravshanlik + vibrance (GPU'da Lanczos kattalashtirish bilan birga)
-  private static final float[] LEVEL3 = {1.0f, 1.32f, 1.16f, 0.9f, 0.8f, 0.35f, 0.55f};
+  // sharp, sat, con, deband, line, clarity, vib, tone
+  // 1 — YENGIL (kuchsiz telefon): 5 ta o'qish + ton egri chizig'i/rang (qo'shimcha o'qishsiz) — baribir sezilarli.
+  private static final float[] LEVEL1 = {0.55f, 1.2f, 1.08f, 0.0f, 0.0f, 0.0f, 0.2f, 0.45f};
+  private static final float[] LEVEL2 = {0.85f, 1.3f, 1.12f, 0.8f, 0.6f, 0.0f, 0.3f, 0.55f};
+  // 3 — MAKSIMAL: kuchli o'tkirlik + ravshanlik + vibrance + chuqur ton
+  private static final float[] LEVEL3 = {1.0f, 1.3f, 1.14f, 0.9f, 0.8f, 0.35f, 0.5f, 0.7f};
 
   /** Shader orqali o'tgan kadrlar soni (diagnostika: Dart effekt haqiqatan ishlayotganini tekshiradi). */
   static final java.util.concurrent.atomic.AtomicLong FRAMES = new java.util.concurrent.atomic.AtomicLong();
@@ -63,6 +64,7 @@ final class AruEnhanceShaderProgram extends BaseGlShaderProgram {
     glProgram.setFloatUniform("uLine", p[4]);
     glProgram.setFloatUniform("uClarity", p[5]);
     glProgram.setFloatUniform("uVib", p[6]);
+    glProgram.setFloatUniform("uTone", p[7]);
     glProgram.setFloatUniform("uSeed", 0f);
   }
 

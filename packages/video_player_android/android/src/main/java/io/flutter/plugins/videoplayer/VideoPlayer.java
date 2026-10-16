@@ -139,6 +139,12 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
    */
   public static volatile int preEnhance = 0;
 
+  /**
+   * Qurilma ko'tara oladigan eng yuqori daraja. Plagin ishga tushganda RAM/yadrolar bo'yicha belgilanadi, ijro paytida kadr
+   * tashlansa shu yerga yoziladi — keyingi videolar ham shu darajadan boshlanadi (har safar qotib o'rganmaydi).
+   */
+  public static volatile int deviceCap = 3;
+
   private int enhanceLevel = 0;
   private boolean enhancePipeline = false; // prepare() dan oldin effekt ulanganmi
   private boolean enhanceListenersAdded = false;
@@ -250,6 +256,8 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
                 // 3 -> 2 -> 1 (yengil, 5 ta o'qish). Yengilda ham tashlansa — qurilma dekoderning o'zida zo'riqyapti:
                 // shunda effekt o'chiriladi.
                 final int next = enhanceLevel - 1;
+                // Qurilma shu darajani ko'tarmadi — keyingi videolar ham undan boshlamasin (kamida 1: u deyarli bepul).
+                deviceCap = Math.max(1, next);
                 setEnhance(next);
                 enhanceQuietUntil = now + 4000;
                 if (enhanceListener != null) {
@@ -283,7 +291,8 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
    * <p>Kattalashtirish yo'q: chiqish o'lchami kirish bilan bir xil (Flutter yuzasi asl o'lchamda).
    */
   @UnstableApi
-  public int setEnhance(int level) {
+  public int setEnhance(int requested) {
+    final int level = Math.min(requested, deviceCap);
     try {
       if (level <= 0) {
         if (enhancePipeline) {

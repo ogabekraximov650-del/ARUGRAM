@@ -23,6 +23,7 @@ uniform float uLine;     // 0..1
 uniform float uSeed;     // kadrga qarab o'zgaradigan son (dither uchun)
 uniform float uClarity;  // 0..1 — keng radiusli mahalliy kontrast ("ravshanlik")
 uniform float uVib;      // 0..1 — vibrance: kam to'yingan ranglar ko'proq kuchayadi
+uniform float uTone;     // 0..1 — ton egri chizig'i (S-egri: chuqur qora, toza yorug'lik; faqat ALU, qo'shimcha o'qish yo'q)
 
 float luma(vec3 c) {
   return dot(c, vec3(0.2126, 0.7152, 0.0722));
@@ -113,6 +114,14 @@ void main() {
   }
   col = mix(vec3(l), col, uSat);
   col = (col - 0.5) * uCon + 0.5;
+
+  // 5) "Anime HD" ton egri chizig'i: yorqinlikka S-egri (smoothstep) qo'llab, ranglar nisbatini saqlaymiz — qora chuqurroq,
+  //    yorug' joylar toza, tasvir "kinematografik" ko'rinadi. Faqat hisob-kitob: kuchsiz telefonda ham deyarli bepul.
+  if (uTone > 0.0) {
+    float lt = clamp(luma(col), 0.0, 1.0);
+    float st = lt * lt * (3.0 - 2.0 * lt);
+    col *= clamp(mix(lt, st, uTone) / max(lt, 0.004), 0.0, 1.6);
+  }
 
   gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
 }

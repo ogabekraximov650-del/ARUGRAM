@@ -44,6 +44,21 @@ public class VideoPlayerPlugin implements FlutterPlugin, AndroidVideoPlayerApi {
             binding.getTextureRegistry());
     flutterState.startListening(this, binding.getBinaryMessenger());
 
+    // Qurilma sinfi bo'yicha boshlang'ich chegara: kam xotira/yadro — yengil rejimdan boshlanadi (kerak bo'lsa ijro paytida o'zi pasayadi).
+    try {
+      final android.app.ActivityManager am =
+          (android.app.ActivityManager) binding.getApplicationContext().getSystemService(android.content.Context.ACTIVITY_SERVICE);
+      final int cores = Runtime.getRuntime().availableProcessors();
+      final int memClass = am == null ? 256 : am.getMemoryClass();
+      if (am != null && (am.isLowRamDevice() || memClass <= 128)) {
+        VideoPlayer.deviceCap = 1;
+      } else if (cores <= 4 || memClass <= 192) {
+        VideoPlayer.deviceCap = 2;
+      }
+    } catch (Throwable ignored) {
+      // noma'lum — chegara qo'yilmaydi
+    }
+
     // ARUGRAM: tasvirni yaxshilash (`video_player_screen.dart`) — playerId bo'yicha effekt yoqiladi.
     enhanceChannel = new MethodChannel(binding.getBinaryMessenger(), "uz.arugram.player/enhance");
     enhanceChannel.setMethodCallHandler(

@@ -42,11 +42,11 @@ void main() {
          + tex(vec2(p3.x, p3.y)) * w3.x * w3.y;
   gl_FragColor = vec4(clamp(r.rgb, 0.0, 1.0), 1.0);
 }`;
-// sharp, sat, con, deband, line, clarity, vib — ilovadagi AruEnhanceShaderProgram bilan bir xil
+// sharp, sat, con, deband, line, clarity, vib, tone — ilovadagi AruEnhanceShaderProgram bilan bir xil
 const LEVELS = {
-  1: [0.45, 1.18, 1.07, 0.5, 0.0, 0.0, 0.0],
-  2: [0.8, 1.35, 1.14, 0.8, 0.6, 0.0, 0.0],
-  3: [1.0, 1.32, 1.16, 0.9, 0.8, 0.35, 0.55], // Maksimal
+  1: [0.55, 1.2, 1.08, 0.0, 0.0, 0.0, 0.2, 0.45],
+  2: [0.85, 1.3, 1.12, 0.8, 0.6, 0.0, 0.3, 0.55],
+  3: [1.0, 1.3, 1.14, 0.9, 0.8, 0.35, 0.5, 0.7], // Maksimal
 };
 // Daraja bo'yicha chiqish o'lchami chegarasi (qurilma ko'tarmasa avtomatik pasayadi).
 const CAP = { 1: [1280, 720], 2: [1920, 1080], 3: [2560, 1440] };
@@ -120,7 +120,7 @@ export function createEnhancer(video, box) {
       texF = mkTex();
       fbo = gl.createFramebuffer();
       const u = (p, n) => gl.getUniformLocation(p, n);
-      locE = { tex: u(progE, 'uTexSampler'), texel: u(progE, 'uTexel'), sharp: u(progE, 'uSharp'), sat: u(progE, 'uSat'), con: u(progE, 'uCon'), deband: u(progE, 'uDeband'), line: u(progE, 'uLine'), seed: u(progE, 'uSeed'), clarity: u(progE, 'uClarity'), vib: u(progE, 'uVib') };
+      locE = { tex: u(progE, 'uTexSampler'), texel: u(progE, 'uTexel'), sharp: u(progE, 'uSharp'), sat: u(progE, 'uSat'), con: u(progE, 'uCon'), deband: u(progE, 'uDeband'), line: u(progE, 'uLine'), seed: u(progE, 'uSeed'), clarity: u(progE, 'uClarity'), vib: u(progE, 'uVib'), tone: u(progE, 'uTone') };
       locU = { tex: u(progU, 'uTexSampler'), size: u(progU, 'uSrcSize') };
       gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
       video.insertAdjacentElement('afterend', canvas);
@@ -200,7 +200,7 @@ export function createEnhancer(video, box) {
       gl.uniform2f(locE.texel, 1 / W, 1 / H);
       gl.uniform1f(locE.sharp, p[0]); gl.uniform1f(locE.sat, p[1]); gl.uniform1f(locE.con, p[2]);
       gl.uniform1f(locE.deband, p[3]); gl.uniform1f(locE.line, p[4]);
-      gl.uniform1f(locE.clarity, p[5] || 0); gl.uniform1f(locE.vib, p[6] || 0);
+      gl.uniform1f(locE.clarity, p[5] || 0); gl.uniform1f(locE.vib, p[6] || 0); gl.uniform1f(locE.tone, p[7] || 0);
       seed = (seed + 0.137) % 97;
       gl.uniform1f(locE.seed, seed);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);

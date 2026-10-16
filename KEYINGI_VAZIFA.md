@@ -6431,3 +6431,7 @@ Anibla sekinligi (diag): worker -> anibla.uz har so'rovga ~1.2-1.4 s (login 1.4 
   * Shader: diagonal/uzoq o'qishlar faqat deband yoqilganda; 1-daraja deband'siz (5 ta o'qish) — kuchsiz telefonlarda ham yengil.
   * Boshqaruv tugmalari video kadriga emas, BUTUN ekranga (to'liq ekranda faqat notch/panel chetlari hisobga olinadi); `_ctrlScale` ekrandan.
   * To'liq ekran: `MainActivity` `aru/insets` kanalida `immersive` — tizim panellari qo'l bilan surilmaguncha yashirin, fokus qaytganda qayta yashiriladi.
+- **Effekt kuchaytirildi + kuchsiz telefonlarga moslandi.** Shaderga `uTone` (S-egri ton: chuqur qora, toza yorug'lik; faqat hisob, qo'shimcha o'qishsiz) qo'shildi,
+  1-daraja endi 5 ta o'qish + ton/rang bilan ham sezilarli (kuchsiz telefon uchun). `VideoPlayer.deviceCap`: plagin ishga tushganda RAM/yadro bo'yicha
+  boshlang'ich chegara (past xotira -> 1, <=4 yadro -> 2), ijro paytida kadr tashlansa chegara pasayadi va keyingi videolar ham shundan boshlanadi.
+  Ilova va web parametrlari (`LEVELS`) bir xil, web ham `uTone` ishlatadi.
