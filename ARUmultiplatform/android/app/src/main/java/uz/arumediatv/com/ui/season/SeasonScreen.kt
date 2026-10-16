@@ -336,9 +336,13 @@ fun SeasonScreen(
     val pagerScope = androidx.compose.runtime.rememberCoroutineScope()
     LaunchedEffect(pager.currentPage) { tab = pager.currentPage }
     var showEpisodeList by remember { mutableStateOf(false) }
+    var commentsExpanded by remember { mutableStateOf(false) }
+    LaunchedEffect(pager.currentPage) { if (pager.currentPage != 3) commentsExpanded = false }
+    // Izohlar to'liq ekranga yoyilganda tepadagi hamma narsa (nom, pleyer, tablar) yig'iladi.
+    val collapsed = commentsExpanded && pager.currentPage == 3 && !fullscreen
 
     Column(Modifier.fillMaxSize().background(AruColors.Bg).then(if (fullscreen) Modifier else Modifier.statusBarsPadding())) {
-        if (!fullscreen) {
+        if (!fullscreen && !collapsed) {
             // ── Orqaga + nom (Flutter bilan bir xil) ──
             Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 val bs = RoundedCornerShape(14.dp)
@@ -351,7 +355,7 @@ fun SeasonScreen(
         }
         // ── Video ──
         val box = if (fullscreen) Modifier.fillMaxSize() else Modifier.padding(horizontal = 16.dp).fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(16.dp))
-        Box(box.background(Color.Black)) {
+        if (!collapsed) Box(box.background(Color.Black)) {
             if (needsConsent) {
                 ConsentRequired(gate.channels.orEmpty(), onBack = onBack, onGrant = { AppServices.gate.grant() })
             } else if (!canWatch) {
@@ -386,6 +390,7 @@ fun SeasonScreen(
 
         if (!fullscreen) {
             // ── Hozir ijro: "1-bo'lim · 1-qism 👁 1 ⏱ 0:00 📅 sana" ──
+            if (!collapsed) {
             if (ep != null) {
                 val cs = RoundedCornerShape(11.dp)
                 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
@@ -434,6 +439,7 @@ fun SeasonScreen(
                 NavBtn(AruIcons.SkipNext, idx >= 0 && idx + 1 < sorted.size) { if (idx >= 0 && idx + 1 < sorted.size) play(sorted[idx + 1]) }
             }
             Spacer(Modifier.height(6.dp))
+            }
 
             androidx.compose.foundation.pager.HorizontalPager(pager, Modifier.weight(1f).fillMaxWidth(), beyondViewportPageCount = 1) { page ->
                 when (page) {
@@ -458,7 +464,7 @@ fun SeasonScreen(
                         onSubscribe = onOpenBilling,
                     )
                     2 -> SeasonsTab(seasons = seasons, current = season, onOpen = onOpenSeason)
-                    else -> CommentsTab(season = season, onOpenProfile = onOpenProfile, onLogin = onLogin, onPacks = onPacks)
+                    else -> CommentsTab(season = season, onOpenProfile = onOpenProfile, onLogin = onLogin, onPacks = onPacks, expanded = commentsExpanded, onExpandedChange = { commentsExpanded = it })
                 }
             }
         }

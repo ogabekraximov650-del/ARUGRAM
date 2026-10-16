@@ -6529,3 +6529,12 @@ Anibla sekinligi (diag): worker -> anibla.uz har so'rovga ~1.2-1.4 s (login 1.4 
 
 - `ui/admin/`: Suhbatlar, Foydalanuvchilar (izlash, balans, obuna, bloklash), Shikoyatlar, Majburiy kanallar (+ qo'shish: `rust_tg_channel_info`/`rust_tg_make_bot_admin`), To'plamlarni ko'rib chiqish, Statistika (+grafik `/api/stats/series`), Ilova sozlamalari, Kodlash navbati (`/api/encode/live`, `/api/encode/admin`), Anime boshqaruvi (anime -> bo'limlar -> qismlar; rasm/video Telegram'ga yuklanadi, asl video avto-kodlash navbatiga).
 - Admin ko'rinishi: faqat admin build (`BuildConfig.IS_ADMIN`) va server admin deb belgilagan hisob; har amal serverda tekshiriladi.
+
+## Kotlin ilova: Flutter bilan bir xil ko'rinish (2026-10, 2-bosqich)
+
+Foydalanuvchi skrinshotlar bilan farqlarni ko'rsatdi; Kotlin ekranlari Flutter tartibiga keltirildi (Kotlin kodi, nusxa emas).
+
+- **Tarix** (`ui/library/HistoryScreens.kt`, `data/Thumbs.kt`): anime kartalari (16:9 kadr, "Oxirgi marta N-bo'lim M-qismni ko'rdingiz", sana), bosilsa qismlar ro'yxati (progress, foiz, vaqt), uzoq bosib o'chirish. To'xtagan joydagi kadr: Rust `/thumb` + `MediaMetadataRetriever`, shifrlangan disk keshi, bitta-bitta navbat.
+- **Bo'lim sahifasi va pleyer** (`ui/season/SeasonScreen.kt`, `PlayerUi.kt`, `ui/common/AruIcons.kt`): orqaga+nom, yumaloq pleyer, ⋮ menyu, markaziy tugma, HQ, to'liq ekran boshqaruvi (chiplar, oldingi/pauza/keyingi, `pos / dur`), "hozir ijro" chipi, shisha tablar, qism almashtirish paneli, ma'lumot ikonkalari, Flutter `formatCount/formatHours/formatRating/formatMomentYmd`. Video `TextureView`da (`res/layout/aru_player_view.xml`).
+- **Izohlar** (`ui/season/CommentsTab.kt`, `ui/packs/TgMediaPanel.kt`, `TgEmojiData.kt`, `res/font/tg_emoji.ttf`): yoyish tugmasi, tartib chiplari, Telegram uslubidagi yozish maydoni va klaviatura o'rnida chiqadigan "Emoji | GIF | Stikerlar" paneli (Flutter `tg_composer.dart`).
+- Rasmlar: keshdagi rasm Telegram ulanishini kutmaydi (`TgImage`, `ImageStore`).

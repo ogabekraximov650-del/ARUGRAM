@@ -5,6 +5,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.focus.focusRequester
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -83,7 +86,7 @@ fun timeAgo(ms: Long): String {
 
 /** Izohlar: tartiblash, yozish, javob, layk, o'chirish, shikoyat, jonli yangilanish. */
 @Composable
-fun CommentsTab(season: Season, onOpenProfile: (Long) -> Unit, onLogin: () -> Unit, onPacks: () -> Unit = {}) {
+fun CommentsTab(season: Season, onOpenProfile: (Long) -> Unit, onLogin: () -> Unit, onPacks: () -> Unit = {}, expanded: Boolean = false, onExpandedChange: (Boolean) -> Unit = {}) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val store = remember(season.key) { CommentsStore(ctx.applicationContext, AppServices.auth, season.animeId, season.seasonId) }
@@ -96,7 +99,13 @@ fun CommentsTab(season: Season, onOpenProfile: (Long) -> Unit, onLogin: () -> Un
     var reportFor by remember { mutableStateOf<Comment?>(null) }
     var deleteFor by remember { mutableStateOf<Comment?>(null) }
     var accepted by remember { mutableStateOf(false) }
-    var picker by remember { mutableStateOf(false) }
+    var panelOpen by remember { mutableStateOf(false) }
+    val focus = androidx.compose.ui.platform.LocalFocusManager.current
+    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    val focusRequester = remember { androidx.compose.ui.focus.FocusRequester() }
+    var fieldFocused by remember { mutableStateOf(false) }
+    // Yozish boshlanganda (klaviatura yoki panel) izohlar butun ekranga yoyiladi (Flutter bilan bir xil).
+    LaunchedEffect(panelOpen, fieldFocused) { if (panelOpen || fieldFocused) onExpandedChange(true) }
 
     LaunchedEffect(store) {
         store.loadFromDisk()
@@ -124,17 +133,23 @@ fun CommentsTab(season: Season, onOpenProfile: (Long) -> Unit, onLogin: () -> Un
     LaunchedEffect(nearEnd) { if (nearEnd) store.loadMore() }
 
     Column(Modifier.fillMaxSize().imePadding()) {
-        // Tartib
+        // Yoyish tugmasi + tartib
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box(
+                Modifier.size(40.dp).clip(CircleShape).clickable {
+                    if (expanded) { panelOpen = false; focus.clearFocus(); keyboard?.hide() }
+                    onExpandedChange(!expanded)
+                },
+                contentAlignment = Alignment.Center,
+            ) { Icon(if (expanded) uz.arumediatv.com.ui.common.AruIcons.ExpandMore else uz.arumediatv.com.ui.common.AruIcons.ExpandLess, "Yoyish", tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(26.dp)) }
+            Spacer(Modifier.weight(1f))
             CommentSort.entries.forEach { s ->
                 val on = st.sort == s
                 Text(
-                    s.label, color = if (on) Color.White else AruColors.TextDim, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(if (on) AruColors.Accent else AruColors.Card).clickable { store.setSort(s) }.padding(horizontal = 12.dp, vertical = 6.dp),
+                    s.label, color = if (on) Color.White else Color.White.copy(alpha = 0.54f), fontSize = 14.sp, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clip(RoundedCornerShape(14.dp)).background(if (on) AruColors.Accent else AruColors.Card).clickable { store.setSort(s) }.padding(horizontal = 16.dp, vertical = 10.dp),
                 )
             }
-            Spacer(Modifier.weight(1f))
-            Text("${st.total} ta", color = AruColors.TextFaint, fontSize = 12.sp)
         }
         if (accepted) {
             Text(
@@ -202,50 +217,70 @@ fun CommentsTab(season: Season, onOpenProfile: (Long) -> Unit, onLogin: () -> Un
                         Icon(Icons.Filled.Close, "Bekor qilish", tint = AruColors.TextDim, modifier = Modifier.size(18.dp).clickable { replyTo = null })
                     }
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(42.dp).clip(CircleShape).background(AruColors.CardAlt).clickable { picker = true }, contentAlignment = Alignment.Center) {
-                        Text("☺", color = Color.White, fontSize = 20.sp)
+                fun send() {
+                    sending = true
+                    scope.launch {
+                        val parent = replyTo?.id.orEmpty()
+                        val err = store.add(text, parentId = parent)
+                        sending = false
+                        if (err == null) { text = ""; replyTo = null; if (parent.isEmpty()) listState.scrollToItem(0) } else toast(err)
                     }
-                    Spacer(Modifier.width(6.dp))
-                    OutlinedTextField(
-                        value = text, onValueChange = { text = it.take(1000) }, placeholder = { Text("Izoh yozing...", color = AruColors.TextFaint) },
-                        maxLines = 4, shape = RoundedCornerShape(18.dp),
-                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedBorderColor = AruColors.Accent, unfocusedBorderColor = AruColors.BorderBright),
-                        modifier = Modifier.weight(1f),
-                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    val pillShape = RoundedCornerShape(30.dp)
+                    Row(
+                        Modifier.weight(1f).clip(pillShape).background(Color(0xFF1B1B1E)).border(1.dp, AruColors.BorderBright, pillShape).padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(
+                            Modifier.size(42.dp).clip(CircleShape).clickable {
+                                if (panelOpen) { panelOpen = false; focusRequester.requestFocus(); keyboard?.show() }
+                                else { panelOpen = true; focus.clearFocus(); keyboard?.hide() }
+                            },
+                            contentAlignment = Alignment.Center,
+                        ) { Icon(if (panelOpen) uz.arumediatv.com.ui.common.AruIcons.Keyboard else uz.arumediatv.com.ui.common.AruIcons.Emoticon, "Emoji", tint = Color.White.copy(alpha = 0.6f), modifier = Modifier.size(28.dp)) }
+                        Spacer(Modifier.width(8.dp))
+                        androidx.compose.foundation.text.BasicTextField(
+                            value = text, onValueChange = { text = it.take(1000) },
+                            maxLines = 4, cursorBrush = androidx.compose.ui.graphics.SolidColor(AruColors.Accent2),
+                            textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 17.sp, fontFamily = uz.arumediatv.com.ui.packs.TgEmojiFont),
+                            modifier = Modifier.weight(1f).padding(vertical = 10.dp).focusRequester(focusRequester).onFocusChanged { f -> fieldFocused = f.isFocused; if (f.isFocused) panelOpen = false },
+                            decorationBox = { inner -> Box { if (text.isEmpty()) Text("Izoh yozing...", color = AruColors.TextFaint, fontSize = 17.sp); inner() } },
+                        )
+                    }
                     Spacer(Modifier.width(8.dp))
                     Box(
-                        Modifier.size(46.dp).clip(CircleShape).background(if (text.isBlank() || sending) AruColors.CardAlt else AruColors.Accent)
-                            .clickable(enabled = text.isNotBlank() && !sending) {
-                                sending = true
-                                scope.launch {
-                                    val parent = replyTo?.id.orEmpty()
-                                    val err = store.add(text, parentId = parent)
-                                    sending = false
-                                    if (err == null) { text = ""; replyTo = null; if (parent.isEmpty()) listState.scrollToItem(0) } else toast(err)
-                                }
-                            },
+                        Modifier.size(54.dp).clip(CircleShape).background(if (text.isBlank() || sending) AruColors.CardAlt else AruColors.Accent)
+                            .clickable(enabled = text.isNotBlank() && !sending, onClick = ::send),
                         contentAlignment = Alignment.Center,
-                    ) { Icon(Icons.AutoMirrored.Filled.Send, "Yuborish", tint = Color.White, modifier = Modifier.size(22.dp)) }
+                    ) { Icon(Icons.AutoMirrored.Filled.Send, "Yuborish", tint = Color.White.copy(alpha = if (text.isBlank()) 0.5f else 1f), modifier = Modifier.size(24.dp)) }
                 }
             }
+            if (panelOpen) {
+                BackHandler { panelOpen = false }
+                uz.arumediatv.com.ui.packs.TgMediaPanel(
+                    onEmoji = { text += it },
+                    onPick = { pick ->
+                        if (pick.kind == uz.arumediatv.com.data.PackKind.EMOJI) text += uz.arumediatv.com.data.packEmojiToken(pick.pack, pick.item, pick.emoji)
+                        else scope.launch {
+                            val parent = replyTo?.id.orEmpty()
+                            val err = store.add("", parentId = parent, mediaFile = pick.ref, mediaType = if (pick.kind == uz.arumediatv.com.data.PackKind.GIF) "gif" else "sticker")
+                            if (err == null) { replyTo = null; panelOpen = false } else toast(err)
+                        }
+                    },
+                    onBackspace = {
+                        val m = Regex("\\[pe:\\d{1,16}:\\d{1,9}:[^\\]]{0,16}\\]$").find(text)
+                        text = if (m != null) text.removeRange(m.range) else {
+                            val it = java.text.BreakIterator.getCharacterInstance(); it.setText(text)
+                            val last = it.preceding(text.length)
+                            if (text.isEmpty() || last < 0) "" else text.substring(0, last)
+                        }
+                    },
+                    onManage = onPacks,
+                    modifier = Modifier.fillMaxWidth().height(330.dp),
+                )
+            }
         }
-    }
-
-    // ── Stiker / GIF / emoji tanlash ──
-    if (picker) {
-        uz.arumediatv.com.ui.packs.PackPickerSheet(
-            onDismiss = { picker = false },
-            onManage = onPacks,
-            onPick = { pick ->
-                if (pick.kind == uz.arumediatv.com.data.PackKind.EMOJI) text += uz.arumediatv.com.data.packEmojiToken(pick.pack, pick.item, pick.emoji)
-                else scope.launch {
-                    val parent = replyTo?.id.orEmpty()
-                    val err = store.add("", parentId = parent, mediaFile = pick.ref, mediaType = if (pick.kind == uz.arumediatv.com.data.PackKind.GIF) "gif" else "sticker")
-                    if (err == null) replyTo = null else toast(err)
-                }
-            },
-        )
     }
 
     // ── Menyu: shikoyat ──
