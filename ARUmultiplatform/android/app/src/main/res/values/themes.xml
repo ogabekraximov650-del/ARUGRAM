@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Compose o'zi chizadi; bu yerda faqat ochilish paytidagi qora fon -->
+    <style name="Theme.ARUMEDIATV" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/aru_bg</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+    <color name="aru_bg">#0A0A0C</color>
+</resources>

@@ -1,0 +1,16 @@
+# Gradle / Android Studio
+.gradle/
+build/
+local.properties
+*.iml
+.idea/
+captures/
+
+# Rust (CI `cargo ndk` shu yerga .so qo'yadi)
+rust/target/
+rust/Cargo.lock
+app/src/main/jniLibs/
+
+# Brend rasmlari CI'da `branding/android-res` dan ko'chiriladi
+app/src/main/res/mipmap-*/
+app/src/main/res/values/ic_launcher_background.xml

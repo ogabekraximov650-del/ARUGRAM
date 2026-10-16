@@ -6451,3 +6451,15 @@ Anibla sekinligi (diag): worker -> anibla.uz har so'rovga ~1.2-1.4 s (login 1.4 
   MethodChannel `uz.arumediatv.player/enhance`, User-Agent'lar, kesh kalitlari). APK paketi allaqachon `uz.arumediatv.com` edi.
   APK yig'ishda manzil Cloudflare'dan hisoblanadi (`API_BASE` secret'idan ustun).
 - GitHub repo nomini (hozirgi nomi) kodda o'zgartirib bo'lmaydi — repo Settings'da qo'lda. avtoencode repodagi workflow'lar o'zgargan shablonlardan qayta sinxronlanadi.
+
+## ARUmultiplatform/android — Kotlin + Compose + Rust ilovasi boshlandi (2026-10)
+
+- **Qaror (foydalanuvchi):** Flutter loyihasi to'xtatildi; har platforma uchun alohida kod. Android — `ARUmultiplatform/android`.
+  Worker va nomlar hozirgilar: `arumediatv` (`https://arumediatv.uzcom.workers.dev`), paket `uz.arumediatv.com`, yangi (ko'chirilgan) baza.
+- **1-bosqich — Bosh sahifa:** `ui/home/` (`HomeScreen`, `SeasonCard`, `HomeViewModel`), `data/` (`Season`, `SeasonsRepository`: diskdagi kesh + ETag/304,
+  `Http` imzo interceptor'i), `core/AruCore.kt` (JNI), `rust/` (`libaru_core.so`: `X-App-Sig` HMAC-SHA256, worker bilan bir xil qoida; sinov vektori bor).
+  Pastki menyu: Bosh sahifa / Katalog / Kutubxona / Profil (oxirgi uchtasi "tez orada").
+- **Hali yo'q:** muqova rasmlari (Telegram/Rust orqali keladi — keyingi bosqich; hozir nomdan rangli fon), anime sahifasi, pleyer, kirish, qolgan ekranlar.
+- **Yig'ish:** faqat Actions (`android-native.yml`): `cargo test` -> `cargo ndk` (arm64-v8a + armeabi-v7a, 16 KB tekislash tekshiruvi) -> `gradle testDebugUnitTest`
+  -> `assembleRelease` (imzo — `ci/release.keystore`, Flutter bilan bir xil) -> artifact `arumediatv-native-<run>`. R8 (`isMinifyEnabled`) hozircha o'chiq.
+- `versionCode = github.run_number` (Flutter ilovasi `1` edi; yangi APK ustiga o'rnatilishi uchun run raqami 1 dan katta bo'lishi kerak — birinchi run'lar 1 ga teng bo'lishi mumkin: o'rnatilmasa eskisini o'chiring).

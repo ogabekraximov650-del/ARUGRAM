@@ -37,6 +37,10 @@ qarorning sababi: `KEYINGI_VAZIFA.md` (katta fayl, kerakli bo'limni
 
 ## Loyiha tuzilishi
 
+**YANGI (2026-10):** Flutter loyihasi (`lib/`, `pubspec.yaml`) TO'XTATILDI — unga tegilmaydi. Yangi ilovalar har platforma uchun alohida kodda:
+`ARUmultiplatform/android` (Kotlin + Compose + Rust, `.github/workflows/android-native.yml`), keyin `ARUmultiplatform/ios`. Yig'ish va testlar
+FAQAT GitHub Actions'da; mahalliy muhitga hech narsa o'rnatilmaydi; sub-agentlar ishlatilmaydi. Tafsilot: `ARUmultiplatform/README.md`.
+
 ARUMEDIATV — anime ko'rish ilovasi. Videolar va fayllar yopiq Telegram
 kanali orqali uzatiladi (xarajatni kamaytirish uchun).
 
