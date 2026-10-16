@@ -285,6 +285,85 @@ class TelegramService(
         }
     }
 
+    private val uploadedKeys = ConcurrentHashMap<String, String>()
+
+    /** Yuklangan faylning ochish kaliti (worker'ga aytiladi). */
+    fun keyFor(fileName: String): String = uploadedKeys[fileName].orEmpty()
+
+    /**
+     * Faylni Telegram'ga (bot chatiga) yuboradi — baytlar worker'dan O'TMAYDI; kanalga ko'chirishni bot o'zi qiladi.
+     * `null` — tayyor (kanalga ko'chirilgan); aks holda xato matni. Chaqiruvchi fayl nomini `<turi>_<id>_<vaqt>.<kengaytma>` qolipida beradi.
+     */
+    suspend fun uploadFile(
+        path: String,
+        fileName: String,
+        mime: String,
+        onProgress: ((sent: Long, total: Long) -> Unit)? = null,
+        waitForClaim: Boolean = true,
+    ): String? = withContext(Dispatchers.IO) {
+        if (!_state.value.authorized) return@withContext "Telegram hisobi ulanmagan"
+        if (channel == 0L) refreshConfig(force = true)
+        if (channel == 0L) return@withContext "Kanal sozlanmagan"
+        val started = RustCore.tgUploadStart(path, fileName, mime)
+        val job = started.optLong("job")
+        if (job <= 0) return@withContext started.optString("error").ifEmpty { "Yuklash boshlanmadi" }
+        var key = ""
+        var allSentAt = 0L
+        while (true) {
+            delay(400)
+            val st = RustCore.tgUploadStatus(job)
+            val sent = st.optLong("sent")
+            val total = st.optLong("total")
+            if (total > 0) onProgress?.invoke(sent, total)
+            if (total > 0 && sent >= total && !st.optBoolean("done")) {
+                if (allSentAt == 0L) allSentAt = System.currentTimeMillis()
+                if (System.currentTimeMillis() - allSentAt > 120_000) {
+                    RustCore.tgUploadCancel(job)
+                    return@withContext "Telegram javob bermadi — internetni tekshirib, qayta urinib ko'ring"
+                }
+            }
+            if (st.optBoolean("done")) {
+                st.optString("error").takeIf { it.isNotEmpty() && it != "null" }?.let { return@withContext it }
+                key = st.optString("key").takeIf { it != "null" }.orEmpty()
+                break
+            }
+        }
+        missing.remove(fileName)
+        if (key.isNotEmpty()) uploadedKeys[fileName] = key
+        val s = auth.sessionToken ?: return@withContext "Ilova hisobiga kirilmagan"
+        delivering.incrementAndGet()
+        if (waitForClaim) awaitClaim(fileName, key, s) else scope.launch { awaitClaim(fileName, key, s) }
+        null
+    }
+
+    /** Bot chatidan kanalga ko'chirilishini kutadi (odatda 1-2 s); kutish tugasa ham fayl QAYTA yuborilmaydi. */
+    private suspend fun awaitClaim(fileName: String, key: String, s: String) {
+        var ready = false
+        for (wait in listOf(1, 1, 2, 2, 3, 4, 5, 8)) {
+            delay(wait * 1000L)
+            val r = Http.client.callJson(
+                "$base/api/tg/claim?file=${java.net.URLEncoder.encode(fileName, "UTF-8")}&key=${java.net.URLEncoder.encode(key, "UTF-8")}",
+                bearer = s,
+            )
+            if (r.ok && r.json?.optBoolean("ready") == true) {
+                ready = true
+                break
+            }
+        }
+        if (ready) {
+            delivering.decrementAndGet()
+            clearPending = true
+            clearIfPending()
+        } else {
+            scope.launch {
+                delay(3 * 60_000L)
+                delivering.decrementAndGet()
+                clearPending = true
+                clearIfPending()
+            }
+        }
+    }
+
     private suspend fun runBatch() {
         val work: Map<String, List<CompletableDeferred<ByteArray?>>>
         synchronized(batchLock) {

@@ -6507,3 +6507,9 @@ Anibla sekinligi (diag): worker -> anibla.uz har so'rovga ~1.2-1.4 s (login 1.4 
 - `data/Downloads.kt`: `VideoCache` (Rust kesh serveri), `DownloadManager` (holat Rust'dan: yuklanayotganda 500 ms), `DownloadsIndex` (diskdagi `eps_*.json` dan yuklangan qismlar). `TelegramService.hold/unhold` — yuklash davomida bot chati tozalanmaydi.
 - To'liq yuklangan fayl `http://127.0.0.1:<port>/v?u=<url>` orqali ijro etiladi (`PlaySource.resolve`); internet yo'q va fayl to'liq emas — xabar.
 - UI: qism kartasidagi ▾ -> sifat qatorlari (yuklab olish/pauza/davom/o'chirish); Kutubxona > Yuklanmalar; Profil > Xotira (`StorageScreen`).
+
+## Kotlin ilova: Admin bilan yozishma, Telegram'ga yuklash, admin paneli boshlanishi (2026-10)
+
+- `TelegramService.uploadFile` (Rust `rust_tg_upload_*` + `/api/tg/claim`) — rasm/video/ovoz bot chatiga, kanalga bot ko'chiradi.
+- `data/Support.kt`: `ChatStore` (since + `/api/chat/wait?ver&mk&at` jonli), `UnreadBadge` (`/api/chat/unread` — Profil tugmasi va qator yonida nuqta), `ChatThreadsStore` (admin).
+- `ui/support/SupportChatScreen` (matn, rasm, video, ovoz yozish va ijro, tanlab o'chirish), `ui/admin/AdminHubScreen` (+ Suhbatlar). Qolgan admin bo'limlari keyingi qadamlarda.

@@ -22,6 +22,7 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -61,6 +62,10 @@ import uz.arumediatv.com.ui.profile.PublicProfileScreen
 import uz.arumediatv.com.ui.profile.StatDetailScreen
 import uz.arumediatv.com.ui.profile.StatKind
 import uz.arumediatv.com.ui.profile.StorageScreen
+import uz.arumediatv.com.ui.support.SupportChatScreen
+import uz.arumediatv.com.ui.admin.AdminHubScreen
+import uz.arumediatv.com.ui.admin.AdminSection
+import uz.arumediatv.com.ui.admin.AdminThreadsScreen
 import uz.arumediatv.com.ui.season.SeasonScreen
 import kotlinx.coroutines.launch
 import uz.arumediatv.com.ui.catalog.CatalogScreen
@@ -111,6 +116,10 @@ private sealed interface Page {
     data object Settings : Page
     data object Billing : Page
     data object Storage : Page
+    data object Support : Page
+    data object AdminHub : Page
+    data object AdminThreads : Page
+    data class AdminChat(val userId: Long, val name: String) : Page
     data class PublicUser(val id: Long) : Page
     data class Stat(val userId: Long, val kind: StatKind, val owner: String) : Page
     data class SeasonPage(val season: uz.arumediatv.com.data.Season, val episodeId: Long = 0, val quality: String? = null) : Page
@@ -144,6 +153,15 @@ private fun AruApp() {
     val openSeason: (uz.arumediatv.com.data.Season) -> Unit = { push(Page.SeasonPage(it)) }
     val login = { push(Page.Login) }
     BackHandler(enabled = stack.isNotEmpty()) { pop() }
+    // Admin xabari yozgan bo'lsa Profil tugmasida nuqta; har 30 soniyada arzon so'rov (faqat o'qilmaganlar soni).
+    val unreadUser by AppServices.unread.count.collectAsStateWithLifecycle()
+    val me by AppServices.auth.user.collectAsStateWithLifecycle()
+    androidx.compose.runtime.LaunchedEffect(me?.id) {
+        while (me != null) {
+            AppServices.unread.refresh()
+            kotlinx.coroutines.delay(30_000)
+        }
+    }
     val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     // Menyu: balandligi 68dp + pastki chekka 12dp + navigatsiya paneli. Kontent shuning ostigacha cho'ziladi.
@@ -162,6 +180,8 @@ private fun AruApp() {
                     onSettings = { push(Page.Settings) },
                     onBilling = { push(Page.Billing) },
                     onStorage = { push(Page.Storage) },
+                    onSupport = { push(Page.Support) },
+                    onAdmin = { push(Page.AdminHub) },
                     onOpenStat = { k -> AppServices.auth.user.value?.id?.let { push(Page.Stat(it, k, "")) } },
                 )
                 else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -174,6 +194,7 @@ private fun AruApp() {
             items = tabs.map { NavItem(it.title, it.icon) },
             selected = tab,
             onSelect = { tab = it },
+            badges = if (unreadUser > 0) setOf(4) else emptySet(),
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
@@ -194,6 +215,15 @@ private fun AruApp() {
                     Page.Settings -> SettingsScreen(onBack = ::pop)
                     Page.Billing -> BillingScreen(onBack = ::pop)
                     Page.Storage -> StorageScreen(onBack = ::pop)
+                    Page.Support -> SupportChatScreen(userId = null, title = "Admin bilan bog'lanish", onBack = ::pop)
+                    Page.AdminHub -> AdminHubScreen(onBack = ::pop, onOpen = { s ->
+                        when (s) {
+                            AdminSection.CHATS -> push(Page.AdminThreads)
+                            else -> android.widget.Toast.makeText(ctx, "${s.title}: keyingi qadamda", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    })
+                    Page.AdminThreads -> AdminThreadsScreen(onBack = ::pop, onOpenThread = { t -> push(Page.AdminChat(t.userId, t.name)) })
+                    is Page.AdminChat -> SupportChatScreen(userId = page.userId, title = page.name, onBack = ::pop)
                     is Page.PublicUser -> PublicProfileScreen(page.id, onBack = ::pop, onOpenStat = { u, k, o -> push(Page.Stat(u, k, o)) })
                     is Page.Stat -> StatDetailScreen(page.userId, page.kind, page.owner, onBack = ::pop, onOpenSeason = openSeason)
                     is Page.SeasonPage -> SeasonScreen(

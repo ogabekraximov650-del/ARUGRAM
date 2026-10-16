@@ -12,11 +12,14 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -58,7 +61,7 @@ private val EaseInOutSine = CubicBezierEasing(0.37f, 0f, 0.63f, 1f)
  * Bitta tugma oralig'iga 400 ms (kichik ekranda sekinroq), jami 480..1900 ms, egri chiziq — easeInOutSine.
  */
 @Composable
-fun FloatingNav(items: List<NavItem>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
+fun FloatingNav(items: List<NavItem>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier, badges: Set<Int> = emptySet()) {
     val pos = remember { Animatable(selected.toFloat()) }
     val widthDp = LocalConfiguration.current.screenWidthDp
     LaunchedEffect(selected) {
@@ -105,20 +108,27 @@ fun FloatingNav(items: List<NavItem>, selected: Int, onSelect: (Int) -> Unit, mo
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement_Center,
                 ) {
-                    Icon(
-                        item.icon,
-                        contentDescription = item.title,
-                        tint = Color.White,
-                        modifier = Modifier
+                    Box(
+                        Modifier
                             .height(22.dp)
                             .width(22.dp)
                             .graphicsLayer {
                                 val k = t()
                                 scaleX = 1f + 0.22f * k
                                 scaleY = 1f + 0.22f * k
-                                alpha = 0.40f + 0.60f * k
                             },
-                    )
+                    ) {
+                        Icon(
+                            item.icon,
+                            contentDescription = item.title,
+                            tint = Color.White,
+                            modifier = Modifier.fillMaxSize().graphicsLayer { alpha = 0.40f + 0.60f * t() },
+                        )
+                        // O'qilmagan xabar nuqtasi (ikonka o'lchamiga ta'sir qilmaydi).
+                        if (i in badges) {
+                            Box(Modifier.align(Alignment.TopEnd).offset(x = 4.dp, y = (-3).dp).size(9.dp).background(Color(0xFFEF4444), CircleShape))
+                        }
+                    }
                     Box(
                         Modifier
                             .layout { m, c ->

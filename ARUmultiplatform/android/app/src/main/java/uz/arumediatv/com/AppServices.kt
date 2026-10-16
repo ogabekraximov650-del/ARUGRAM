@@ -13,6 +13,7 @@ import uz.arumediatv.com.data.SeasonRepository
 import uz.arumediatv.com.data.WatchProgress
 import uz.arumediatv.com.data.PublicRepository
 import uz.arumediatv.com.data.VideoCache
+import uz.arumediatv.com.data.UnreadBadge
 import uz.arumediatv.com.data.DownloadManager
 import uz.arumediatv.com.data.DownloadsIndex
 import uz.arumediatv.com.data.SeasonsRepository
@@ -44,6 +45,8 @@ object AppServices {
     lateinit var publicData: PublicRepository
         private set
     lateinit var videoCache: VideoCache
+        private set
+    lateinit var unread: UnreadBadge
         private set
     lateinit var downloads: DownloadManager
         private set
@@ -84,6 +87,7 @@ object AppServices {
         progress = WatchProgress(ctx)
         publicData = PublicRepository(ctx, auth)
         videoCache = VideoCache(ctx)
+        unread = UnreadBadge(auth)
         downloads = DownloadManager(ctx, telegram, videoCache)
         downloadsIndex = DownloadsIndex(ctx, downloads)
         appContext = ctx

@@ -87,6 +87,15 @@ object RustCore {
 
     fun setUserId(id: Long) = guard(Unit) { it.rust_set_user_id(id) }
 
+    // ── Telegram: yuklash va kanallar ──
+    fun tgUploadStart(path: String, name: String, mime: String): JSONObject = guard(errJson("Yadro yuklanmagan")) { json(take(it.rust_tg_upload_start(path, name, mime, 0))) }
+    fun tgUploadStatus(job: Long): JSONObject = guard(JSONObject().put("done", true).put("error", "Yadro yuklanmagan")) { json(take(it.rust_tg_upload_status(job))) }
+    fun tgUploadCancel(job: Long) = guard(Unit) { it.rust_tg_upload_cancel(job) }
+    fun tgJoinChannel(arg: String): JSONObject = guard(errJson("Yadro yuklanmagan")) { json(take(it.rust_tg_join_channel(arg))) }
+    fun tgChannelInfo(arg: String): JSONObject = guard(errJson("Yadro yuklanmagan")) { json(take(it.rust_tg_channel_info(arg))) }
+    fun tgReadPinned(arg: String): JSONObject = guard(errJson("Yadro yuklanmagan")) { json(take(it.rust_tg_read_pinned(arg))) }
+    fun tgMakeBotAdmin(arg: String): JSONObject = guard(errJson("Yadro yuklanmagan")) { json(take(it.rust_tg_make_bot_admin(arg))) }
+
     // ── Video kesh ──
     /** Mahalliy kesh serverini ishga tushiradi; port (>0) yoki xato kodi. */
     fun videoCacheStart(dir: String): Int = guard(-1) { it.rust_video_cache_start(dir) }

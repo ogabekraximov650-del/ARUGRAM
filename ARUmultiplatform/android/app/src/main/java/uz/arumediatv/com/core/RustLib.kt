@@ -45,6 +45,13 @@ interface RustLib : Library {
     fun rust_tg_logout(): Pointer?
     fun rust_tg_nearest_country(): Pointer?
     fun rust_tg_play_url(key: String): Pointer?
+    fun rust_tg_upload_start(path: String, name: String, mime: String, channelId: Long): Pointer?
+    fun rust_tg_upload_status(job: Long): Pointer?
+    fun rust_tg_upload_cancel(job: Long)
+    fun rust_tg_join_channel(arg: String): Pointer?
+    fun rust_tg_channel_info(arg: String): Pointer?
+    fun rust_tg_read_pinned(arg: String): Pointer?
+    fun rust_tg_make_bot_admin(arg: String): Pointer?
 
     // ── Video kesh (yuklab olish, mahalliy server) ──
     fun rust_video_cache_start(dir: String): Int

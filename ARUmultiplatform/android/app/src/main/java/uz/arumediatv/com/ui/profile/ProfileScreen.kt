@@ -75,7 +75,7 @@ import uz.arumediatv.com.ui.theme.AruColors
  * hisobni o'chirish va chiqish. Chiqishda navbatdagi yozuvlar avval serverga saqlanadi (`SyncQueue`).
  */
 @Composable
-fun ProfileScreen(onLogin: () -> Unit, onEdit: () -> Unit, onSessions: () -> Unit, onSettings: () -> Unit, onBilling: () -> Unit, onOpenStat: (StatKind) -> Unit, onStorage: () -> Unit) {
+fun ProfileScreen(onLogin: () -> Unit, onEdit: () -> Unit, onSessions: () -> Unit, onSettings: () -> Unit, onBilling: () -> Unit, onOpenStat: (StatKind) -> Unit, onStorage: () -> Unit, onSupport: () -> Unit, onAdmin: () -> Unit) {
     val auth = AppServices.auth
     val tg = AppServices.telegram
     val user by auth.user.collectAsStateWithLifecycle()
@@ -104,6 +104,7 @@ fun ProfileScreen(onLogin: () -> Unit, onEdit: () -> Unit, onSessions: () -> Uni
         AppServices.myStats.clear()
         AppServices.sync.clear()
         AppServices.billing.clear()
+        AppServices.unread.clear()
     }
 
     fun toast(t: String) = Toast.makeText(ctx, t, Toast.LENGTH_SHORT).show()
@@ -165,6 +166,12 @@ fun ProfileScreen(onLogin: () -> Unit, onEdit: () -> Unit, onSessions: () -> Uni
             Divider2()
             Row2(Icons.Filled.Info, "Xotira", "Yuklab olingan videolar, kesh, hajm", onClick = onStorage)
             Divider2()
+            val unread by AppServices.unread.count.collectAsStateWithLifecycle()
+            Row2(
+                Icons.Filled.Phone, "Admin bilan bog'lanish", if (unread > 0) "Yangi xabar bor" else "Savol va takliflar",
+                onClick = { if (u == null) onLogin() else onSupport() }, action = if (unread > 0) "●" else null,
+            )
+            Divider2()
             Row2(Icons.Filled.Refresh, "Hisobni yangilash", "Serverdan qayta o'qish", onClick = {
                 if (u != null) scope.launch {
                     auth.refresh()
@@ -179,7 +186,7 @@ fun ProfileScreen(onLogin: () -> Unit, onEdit: () -> Unit, onSessions: () -> Uni
         if (BuildConfig.IS_ADMIN && u != null && u.isAdmin) {
             Spacer(Modifier.height(16.dp))
             Group {
-                Row2(Icons.Filled.Lock, "Admin paneli", "Keyingi bosqichda qo'shiladi", onClick = { toast("Admin paneli keyingi bosqichda qo'shiladi") })
+                Row2(Icons.Filled.Lock, "Admin paneli", "Foydalanuvchilar, anime, shikoyatlar, kanallar", onClick = onAdmin)
             }
         }
 
