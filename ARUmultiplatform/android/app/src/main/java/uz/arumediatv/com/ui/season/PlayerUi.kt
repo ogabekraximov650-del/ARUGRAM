@@ -168,8 +168,8 @@ fun PlayerControls(
     val s = if (fullscreen) 1.15f else 1f
 
     Box(
+        // DIQQAT: bu yerda fon BO'LMASIN — boshqaruv videoning USTIDA chiziladi, to'liq qora fon videoni yopib qo'yardi.
         modifier
-            .background(Color.Black)
             .pointerInput(locked) {
                 detectTapGestures(
                     onTap = { visible = !visible; bump++ },
