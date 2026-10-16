@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -27,6 +29,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import uz.arumediatv.com.data.Season
+import uz.arumediatv.com.ui.common.AruIcons
 import uz.arumediatv.com.ui.common.TgImage
 import uz.arumediatv.com.ui.theme.AruColors
 import java.util.Locale
@@ -69,24 +72,34 @@ fun SeasonCard(season: Season, onClick: () -> Unit, modifier: Modifier = Modifie
             },
         )
 
-        // Tepa belgilar
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(10.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.Top,
-        ) {
-            if (season.ratingCount > 0) {
-                Badge {
-                    Icon(Icons.Filled.Star, contentDescription = null, tint = AruColors.Gold, modifier = Modifier.padding(end = 3.dp).size(13.dp))
-                    Text(String.format(Locale.US, "%.1f", season.ratingAvg), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+        // Tepa belgilar: 1-qator reyting (chapda) va ko'rishlar (o'ngda); 2-qator yosh (chapda) va "Pullik" (o'ngda)
+        Column(Modifier.fillMaxWidth().padding(8.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
+                if (season.ratingCount > 0) {
+                    Badge {
+                        Icon(Icons.Filled.Star, contentDescription = null, tint = AruColors.Gold, modifier = Modifier.padding(end = 3.dp).size(12.dp))
+                        Text(String.format(Locale.US, "%.1f", season.ratingAvg), color = Color.White, fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
+                    }
+                } else Box {}
+                if (season.views > 0) {
+                    Badge {
+                        Icon(AruIcons.Visibility, contentDescription = null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.padding(end = 3.dp).size(12.dp))
+                        Text(formatCompact(season.views), color = Color.White, fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
-            } else {
-                Box {}
             }
-            if (season.age > 0) {
-                Badge { Text("${season.age}+", color = AruColors.Gold, fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+            if (season.age > 0 || season.free == false) {
+                Spacer(Modifier.height(6.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
+                    if (season.age > 0) {
+                        val c = if (season.age >= 18) Color(0xFFEF4444) else if (season.age >= 16) AruColors.Accent2 else AruColors.Gold
+                        Text(
+                            "${season.age}+", color = Color.White, fontSize = 10.5.sp, fontWeight = FontWeight.Black,
+                            modifier = Modifier.clip(RoundedCornerShape(7.dp)).background(c.copy(alpha = 0.92f)).border(1.dp, Color.White.copy(alpha = 0.28f), RoundedCornerShape(7.dp)).padding(horizontal = 7.dp, vertical = 2.5.dp),
+                        )
+                    } else Box {}
+                    if (season.free == false) PaidBadge()
+                }
             }
         }
 
@@ -122,6 +135,27 @@ fun SeasonCard(season: Season, onClick: () -> Unit, modifier: Modifier = Modifie
             )
         }
     }
+}
+
+/** Pullik bo'lim belgisi (Flutter `PaidBadge`). */
+@Composable
+fun PaidBadge(compact: Boolean = false) {
+    val shape = RoundedCornerShape(7.dp)
+    Row(
+        Modifier.clip(shape).background(Color.Black.copy(alpha = 0.62f)).border(1.dp, AruColors.Gold.copy(alpha = 0.7f), shape)
+            .padding(horizontal = if (compact) 4.dp else 7.dp, vertical = if (compact) 3.dp else 2.5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(AruIcons.WorkspacePremium, null, tint = AruColors.Gold, modifier = Modifier.size(if (compact) 13.dp else 12.dp))
+        if (!compact) Text(" Pullik", color = AruColors.Gold, fontSize = 10.5.sp, fontWeight = FontWeight.ExtraBold)
+    }
+}
+
+/** `1.284.512` -> `1,3 mln`, `12.400` -> `12,4 ming` (Flutter `formatCompact`). */
+fun formatCompact(n: Long): String {
+    if (n < 1000) return n.toString()
+    fun cut(v: Double): String = String.format(Locale.US, "%.1f", v).replace('.', ',').removeSuffix(",0")
+    return if (n < 1_000_000) "${cut(n / 1000.0)} ming" else "${cut(n / 1_000_000.0)} mln"
 }
 
 @Composable

@@ -97,6 +97,11 @@ class AuthService(
 
     val isLoggedIn: Boolean get() = _user.value != null
 
+    private val _restored = MutableStateFlow(false)
+
+    /** Saqlangan hisob o'qib bo'lindi (kirish oynasi bir zumga miltillamasligi uchun). */
+    val restored: StateFlow<Boolean> = _restored.asStateFlow()
+
     suspend fun restore() = withContext(Dispatchers.IO) {
         sessionToken = secure.getString(KEY_SESSION)?.takeIf { it.isNotEmpty() }
         secure.getString(KEY_USER)?.let { raw ->
@@ -105,6 +110,7 @@ class AuthService(
             } catch (_: Exception) {
             }
         }
+        _restored.value = true
         if (sessionToken != null) refresh()
     }
 

@@ -79,13 +79,8 @@ fun LibraryScreen(onOpenSeason: (Season) -> Unit, onLogin: () -> Unit, onOpenDow
     }
 
     Column(Modifier.fillMaxSize()) {
-        Text(
-            "Kutubxona",
-            color = Color.White,
-            fontSize = 22.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 12.dp, top = 16.dp + LocalBarPad.current.calculateTopPadding()),
-        )
+        uz.arumediatv.com.ui.common.PageHeader("Kutubxona", Modifier.padding(start = 20.dp, end = 20.dp, top = LocalBarPad.current.calculateTopPadding()))
+        Spacer(Modifier.height(8.dp))
         Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             TITLES.forEachIndexed { i, t ->
                 TabButton(t, pager.currentPage == i, Modifier.weight(1f)) { scope.launch { pager.animateScrollToPage(i) } }

@@ -103,6 +103,7 @@ fun SeasonGrid(
     contentPadding: PaddingValues = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp + LocalBarPad.current.calculateBottomPadding()),
     header: LazyGridScope.() -> Unit = {},
     emptyContent: (LazyGridScope.() -> Unit)? = null,
+    card: (@Composable (Season, () -> Unit) -> Unit)? = null,
 ) {
     LazyVerticalGrid(
         columns = GridCells.Fixed(2),
@@ -116,7 +117,8 @@ fun SeasonGrid(
             emptyContent?.invoke(this)
         } else {
             items(items, key = { it.key }) { s ->
-                SeasonCard(season = s, onClick = { onOpen(s) }, modifier = Modifier.fillMaxWidth().aspectRatio(0.65f))
+                if (card != null) card(s) { onOpen(s) }
+                else SeasonCard(season = s, onClick = { onOpen(s) }, modifier = Modifier.fillMaxWidth().aspectRatio(0.65f))
             }
         }
     }

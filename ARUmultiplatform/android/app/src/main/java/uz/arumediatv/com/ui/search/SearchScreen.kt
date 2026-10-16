@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -61,7 +63,9 @@ fun SearchScreen(onOpenSeason: (Season) -> Unit) {
     val results = remember(state.items, query) { SeasonQueries.search(state.items, query) }
     val focus = LocalFocusManager.current
 
-    Column(Modifier.fillMaxSize().padding(start = 16.dp, end = 16.dp, top = 12.dp + LocalBarPad.current.calculateTopPadding())) {
+    Column(Modifier.fillMaxSize().padding(start = 16.dp, end = 16.dp, top = LocalBarPad.current.calculateTopPadding())) {
+        uz.arumediatv.com.ui.common.PageHeader("Qidiruv", Modifier.padding(horizontal = 4.dp))
+        Spacer(Modifier.size(8.dp))
         SearchField(query, onChange = { query = it }, onClear = { query = "" }, onDone = { focus.clearFocus() })
         Spacer(Modifier.size(16.dp))
         SeasonGrid(
@@ -71,6 +75,7 @@ fun SearchScreen(onOpenSeason: (Season) -> Unit) {
                 onOpenSeason(it)
             },
             contentPadding = PaddingValues(bottom = 24.dp + LocalBarPad.current.calculateBottomPadding()),
+            card = { s, open -> SearchCard(s, open) },
             emptyContent = {
                 fullSpan {
                     when {
@@ -116,6 +121,22 @@ private fun SearchField(value: String, onChange: (String) -> Unit, onClear: () -
                 Icons.Filled.Close, "Tozalash", tint = Color.White.copy(alpha = 0.7f),
                 modifier = Modifier.size(20.dp).clickable(onClick = onClear),
             )
+        }
+    }
+}
+
+/** Qidiruv natijasi kartasi (Flutter `_SeasonSearchCard`): tepada rasm ("Pullik" belgisi bilan), pastda nom va janr. */
+@Composable
+private fun SearchCard(season: Season, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(18.dp)
+    Column(Modifier.fillMaxWidth().aspectRatio(0.68f).clip(shape).background(AruColors.Card).border(1.dp, AruColors.Border, shape).clickable(onClick = onClick)) {
+        Box(Modifier.weight(1f).fillMaxWidth().background(Color.White.copy(alpha = 0.10f))) {
+            uz.arumediatv.com.ui.common.TgImage(season.photoUrl, Modifier.fillMaxSize(), maxPx = 540)
+            if (season.free == false) Box(Modifier.align(Alignment.TopEnd).padding(8.dp)) { uz.arumediatv.com.ui.home.PaidBadge() }
+        }
+        Column(Modifier.padding(start = 10.dp, end = 10.dp, top = 8.dp, bottom = 10.dp)) {
+            Text(season.name, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            Text(season.genres.joinToString(", "), color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
         }
     }
 }

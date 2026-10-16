@@ -125,8 +125,10 @@ fun ProfileScreen(onLogin: () -> Unit, onEdit: () -> Unit, onSessions: () -> Uni
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState())
-            .padding(start = 16.dp, end = 16.dp, top = 16.dp + LocalBarPad.current.calculateTopPadding()),
+            .padding(start = 16.dp, end = 16.dp, top = LocalBarPad.current.calculateTopPadding()),
     ) {
+        uz.arumediatv.com.ui.common.PageHeader("Profil", Modifier.padding(horizontal = 4.dp))
+        Spacer(Modifier.height(8.dp))
         val u = user
         if (u == null) {
             GuestCard(onLogin)

@@ -54,6 +54,8 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
@@ -174,7 +176,30 @@ class MainActivity : ComponentActivity() {
             statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
         )
-        setContent { AruTheme { AruApp() } }
+        setContent { AruTheme { AuthGate() } }
+    }
+}
+
+/**
+ * TO'LIQ KIRMAGUNCHA ILOVA YOPIQ (Flutter `AuthGate`): ilova hisobi VA Telegram hisobi ulangan bo'lsa ilova ochiladi,
+ * aks holda butun ekran kirish oynasi. Hisobdan chiqilsa (yoki Telegram sessiyasi uzilsa) yana shu oyna chiqadi.
+ */
+@Composable
+private fun AuthGate() {
+    val restored by AppServices.auth.restored.collectAsStateWithLifecycle()
+    val user by AppServices.auth.user.collectAsStateWithLifecycle()
+    val tg by AppServices.telegram.state.collectAsStateWithLifecycle()
+    var bot by remember { mutableStateOf(false) }
+    Box(Modifier.fillMaxSize().background(AruColors.Bg)) {
+        // Saqlangan hisob va Telegram holati aniqlanmaguncha bo'sh ekran (kirish oynasi miltillamasin).
+        if (!restored || (!tg.started && tg.error == null)) return@Box
+        if (user != null && tg.authorized) {
+            AruApp()
+        } else if (bot) {
+            uz.arumediatv.com.ui.login.BotLoginScreen(onDone = { bot = false }, onBack = { bot = false })
+        } else {
+            LoginScreen(onDone = {}, onClose = {}, onBot = { bot = true })
+        }
     }
 }
 
@@ -186,9 +211,48 @@ private fun AruApp() {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     fun push(p: Page) { stack.add(p) }
     fun pop() { if (stack.isNotEmpty()) stack.removeAt(stack.lastIndex) }
-    val openSeason: (uz.arumediatv.com.data.Season) -> Unit = { push(Page.SeasonPage(it)) }
+    var askLogin by remember { mutableStateOf(false) }
+    // Oldingi safar Rust ichida halokat bo'lgan bo'lsa — sababi ko'rsatiladi (Flutter `_showLastCrash`).
+    var crashText by remember { mutableStateOf<String?>(null) }
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        val f = java.io.File(ctx.filesDir, "last_crash.txt")
+        crashText = try { if (f.exists()) f.readText().also { f.delete() }.takeIf { it.isNotBlank() } else null } catch (_: Exception) { null }
+    }
+    // Ilova oldingi planga qaytganda hisob ma'lumoti (5 daqiqada bir marta) yangilanadi.
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    val resumeScope = androidx.compose.runtime.rememberCoroutineScope()
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        var last = System.currentTimeMillis()
+        val ob = androidx.lifecycle.LifecycleEventObserver { _, e ->
+            if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME && System.currentTimeMillis() - last > 5 * 60_000L) {
+                last = System.currentTimeMillis()
+                if (AppServices.auth.isLoggedIn) resumeScope.launch { AppServices.auth.refresh() }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(ob)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(ob) }
+    }
+    val openSeason: (uz.arumediatv.com.data.Season) -> Unit = { if (!AppServices.auth.isLoggedIn) askLogin = true else push(Page.SeasonPage(it)) }
     val login = { push(Page.Login) }
     BackHandler(enabled = stack.isNotEmpty()) { pop() }
+    crashText?.let { t ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { crashText = null },
+            title = { androidx.compose.material3.Text("Ilova oldingi safar xato bilan yopilgan") },
+            text = { androidx.compose.material3.Text(t, fontSize = 12.sp, modifier = Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState())) },
+            confirmButton = { androidx.compose.material3.TextButton(onClick = { crashText = null }) { androidx.compose.material3.Text("Yopish") } },
+            containerColor = AruColors.Surface,
+        )
+    }
+    if (askLogin) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { askLogin = false },
+            icon = { androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.Filled.Lock, null, tint = AruColors.Accent) },
+            text = { androidx.compose.material3.Text("Iltimos anime ko'rish uchun avval profil sahifasiga o'tib accountingizga kiring yoki yangi accaunt oching") },
+            confirmButton = { androidx.compose.material3.TextButton(onClick = { askLogin = false }) { androidx.compose.material3.Text("Tushunarli") } },
+            containerColor = AruColors.Surface,
+        )
+    }
     // Admin xabari yozgan bo'lsa Profil tugmasida nuqta; har 30 soniyada arzon so'rov (faqat o'qilmaganlar soni).
     val unreadUser by AppServices.unread.count.collectAsStateWithLifecycle()
     val me by AppServices.auth.user.collectAsStateWithLifecycle()

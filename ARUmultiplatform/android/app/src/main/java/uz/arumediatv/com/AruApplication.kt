@@ -17,7 +17,21 @@ class AruApplication : Application() {
             AppServices.billing.restore()
             AppServices.gate.start()
             AppServices.billing.load(force = true)
+            sweepTemp()
             AppServices.telegram.start()
+        }
+    }
+
+    /** Vaqtinchasi 30 daqiqadan eski fayllar o'chadi (Flutter `StorageJanitor.sweep`); rasm keshi (`aru_img`) qoladi. */
+    private fun sweepTemp() {
+        try {
+            val now = System.currentTimeMillis()
+            cacheDir.listFiles()?.forEach { f ->
+                if (f.name == "aru_img") return@forEach
+                if (now - f.lastModified() < 30 * 60_000L) return@forEach
+                if (f.isDirectory) f.deleteRecursively() else f.delete()
+            }
+        } catch (_: Exception) {
         }
     }
 }
