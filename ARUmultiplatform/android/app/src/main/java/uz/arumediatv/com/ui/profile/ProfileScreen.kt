@@ -108,6 +108,17 @@ fun ProfileScreen(onLogin: () -> Unit, onEdit: () -> Unit, onSessions: () -> Uni
     }
 
     fun toast(t: String) = Toast.makeText(ctx, t, Toast.LENGTH_SHORT).show()
+    var avatarBusy by remember { mutableStateOf(false) }
+    val pickAvatar = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) {
+            avatarBusy = true
+            scope.launch {
+                val err = uz.arumediatv.com.data.uploadAvatar(ctx, uri, auth, tg)
+                avatarBusy = false
+                toast(err ?: "Profil rasmi yangilandi")
+            }
+        }
+    }
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState())
@@ -120,7 +131,7 @@ fun ProfileScreen(onLogin: () -> Unit, onEdit: () -> Unit, onSessions: () -> Uni
         if (u == null) {
             GuestCard(onLogin)
         } else {
-            HeroCard(u, onEdit = onEdit, onCopyId = {
+            HeroCard(u, onEdit = onEdit, avatarBusy = avatarBusy, onAvatar = { pickAvatar.launch("image/*") }, onCopyId = {
                 (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("ID", u.id.toString()))
                 toast("ID nusxalandi: ${u.id}")
             })
@@ -341,7 +352,7 @@ private fun GuestCard(onLogin: () -> Unit) {
 }
 
 @Composable
-private fun HeroCard(u: AppUser, onEdit: () -> Unit, onCopyId: () -> Unit) {
+private fun HeroCard(u: AppUser, onEdit: () -> Unit, onCopyId: () -> Unit, onAvatar: () -> Unit, avatarBusy: Boolean) {
     val shape = RoundedCornerShape(24.dp)
     Box(
         Modifier
@@ -351,8 +362,11 @@ private fun HeroCard(u: AppUser, onEdit: () -> Unit, onCopyId: () -> Unit) {
             .border(1.dp, AruColors.Accent.copy(alpha = 0.25f), shape),
     ) {
         Row(Modifier.fillMaxWidth().padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.clip(CircleShape).background(Brush.linearGradient(listOf(AruColors.Accent, AruColors.Accent2))).padding(3.dp)) {
+            Box(Modifier.clip(CircleShape).background(Brush.linearGradient(listOf(AruColors.Accent, AruColors.Accent2))).padding(3.dp).clickable(onClick = onAvatar)) {
                 Avatar(u, 76.dp)
+                if (avatarBusy) Box(Modifier.size(76.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.55f)), contentAlignment = Alignment.Center) {
+                    androidx.compose.material3.CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(26.dp))
+                }
             }
             Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f).padding(end = 30.dp)) {

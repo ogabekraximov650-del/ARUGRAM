@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -49,7 +50,7 @@ import uz.arumediatv.com.data.LoginStatus
 import uz.arumediatv.com.data.TgLoginStep
 import uz.arumediatv.com.ui.theme.AruColors
 
-private enum class Step { PHONE, CODE, PASSWORD, FINISHING }
+private enum class Step { PHONE, CODE, PASSWORD, QR, FINISHING }
 
 /**
  * Telegram orqali kirish (Flutter `PhoneLoginScreen` ga mos): telefon -> kod -> (2 bosqichli parol) -> ilova hisobi.
@@ -57,7 +58,7 @@ private enum class Step { PHONE, CODE, PASSWORD, FINISHING }
  * yuborib ilova hisobi tasdiqlanadi.
  */
 @Composable
-fun LoginScreen(onDone: () -> Unit, onClose: () -> Unit) {
+fun LoginScreen(onDone: () -> Unit, onClose: () -> Unit, onBot: () -> Unit = {}) {
     val tg = AppServices.telegram
     val auth = AppServices.auth
     val scope = rememberCoroutineScope()
@@ -72,10 +73,12 @@ fun LoginScreen(onDone: () -> Unit, onClose: () -> Unit) {
     var hint by remember { mutableStateOf("") }
     var sentInfo by remember { mutableStateOf("") }
     var waitLeft by remember { mutableStateOf(0) }
+    var qrUrl by remember { mutableStateOf("") }
+    var qrUntil by remember { mutableStateOf(0L) }
 
     BackHandler {
         when (step) {
-            Step.CODE, Step.PASSWORD -> {
+            Step.CODE, Step.PASSWORD, Step.QR -> {
                 tg.resetLogin()
                 step = Step.PHONE
                 error = null
@@ -88,6 +91,38 @@ fun LoginScreen(onDone: () -> Unit, onClose: () -> Unit) {
         if (waitLeft > 0) {
             delay(1000)
             waitLeft -= 1
+        }
+    }
+
+    // ── QR orqali kirish: boshqa qurilmadagi Telegram'da Sozlamalar -> Qurilmalar -> "Qurilmani ulash" ──
+    suspend fun qrRefresh() {
+        val j = tg.qrToken()
+        if (step != Step.QR) return
+        when {
+            j.optBoolean("ok") -> finish()
+            j.optBoolean("password") -> {
+                hint = j.optString("hint")
+                password = ""
+                step = Step.PASSWORD
+            }
+            j.optString("error").isNotEmpty() && !j.has("url") -> {
+                qrUntil = System.currentTimeMillis() + 5000
+                error = j.optString("error")
+            }
+            else -> {
+                error = null
+                qrUrl = j.optString("url")
+                qrUntil = System.currentTimeMillis() + j.optLong("expires", 30) * 1000
+            }
+        }
+    }
+    LaunchedEffect(step) {
+        if (step != Step.QR) return@LaunchedEffect
+        qrUrl = ""
+        qrUntil = 0
+        while (step == Step.QR) {
+            if (qrUrl.isEmpty() || tg.qrAccepted() || System.currentTimeMillis() > qrUntil) qrRefresh()
+            delay(1000)
         }
     }
 
@@ -203,7 +238,7 @@ fun LoginScreen(onDone: () -> Unit, onClose: () -> Unit) {
                     handle(r) { if (r.done) finish() else error = r.error ?: "Parol noto'g'ri" }
                 }
             }
-            Step.FINISHING -> {}
+            Step.FINISHING, Step.QR -> {}
         }
     }
 
@@ -228,6 +263,7 @@ fun LoginScreen(onDone: () -> Unit, onClose: () -> Unit) {
                     Step.PHONE -> "Telegram raqamingizni kiriting"
                     Step.CODE -> sentInfo.ifEmpty { "Kodni kiriting" }
                     Step.PASSWORD -> "Ikki bosqichli parol"
+                    Step.QR -> "QR kodni Telegram bilan skanerlang"
                     Step.FINISHING -> "Hisob tasdiqlanmoqda..."
                 },
                 color = AruColors.TextDim, fontSize = 15.sp,
@@ -245,6 +281,12 @@ fun LoginScreen(onDone: () -> Unit, onClose: () -> Unit) {
                     if (hint.isNotEmpty()) Text("Maslahat: $hint", color = AruColors.TextDim, fontSize = 13.sp, modifier = Modifier.padding(bottom = 8.dp))
                     Field(password, { password = it }, "Parol", KeyboardType.Password, Modifier.fillMaxWidth(), secret = true)
                 }
+                Step.QR -> Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                    if (qrUrl.isEmpty()) Box(Modifier.height(260.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = AruColors.Accent, strokeWidth = 2.dp) }
+                    else QrImage(qrUrl, Modifier.size(260.dp))
+                    Spacer(Modifier.height(12.dp))
+                    Text("Boshqa qurilmada Telegram -> Sozlamalar -> Qurilmalar -> Qurilmani ulash", color = AruColors.TextDim, fontSize = 12.sp, textAlign = TextAlign.Center)
+                }
                 Step.FINISHING -> Box(Modifier.fillMaxWidth().height(80.dp), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(color = AruColors.Accent, strokeWidth = 2.dp)
                 }
@@ -260,7 +302,7 @@ fun LoginScreen(onDone: () -> Unit, onClose: () -> Unit) {
             }
 
             Spacer(Modifier.height(24.dp))
-            if (step != Step.FINISHING) {
+            if (step != Step.FINISHING && step != Step.QR) {
                 Box(
                     Modifier
                         .fillMaxWidth()
@@ -278,11 +320,18 @@ fun LoginScreen(onDone: () -> Unit, onClose: () -> Unit) {
                                 Step.PHONE -> "Kod yuborish"
                                 Step.CODE -> "Tasdiqlash"
                                 Step.PASSWORD -> "Kirish"
-                                Step.FINISHING -> ""
+                                Step.QR, Step.FINISHING -> ""
                             },
                             color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp,
                         )
                     }
+                }
+            }
+            if (step == Step.PHONE && !busy) {
+                Spacer(Modifier.height(16.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    Text("QR orqali kirish", color = AruColors.Accent2, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickable { error = null; step = Step.QR })
+                    if (!auth.isLoggedIn) Text("Bot orqali kirish", color = AruColors.Accent2, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickable(onClick = onBot))
                 }
             }
             if (step == Step.CODE && !busy) {

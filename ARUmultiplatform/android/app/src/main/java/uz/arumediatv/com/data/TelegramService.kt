@@ -214,6 +214,16 @@ class TelegramService(
 
     fun resetLogin() = RustCore.tgLoginReset()
 
+    /** QR uchun token: `{"url","expires"}`, tasdiqlansa `{"ok":true}`, parol kerak bo'lsa `{"password":true,"hint"}`. */
+    suspend fun qrToken(): JSONObject = withContext(Dispatchers.IO) {
+        refreshConfig()
+        val j = RustCore.tgQrToken()
+        if (j.optBoolean("ok")) afterLogin()
+        j
+    }
+
+    fun qrAccepted(): Boolean = RustCore.tgQrAccepted()
+
     suspend fun logout() = withContext(Dispatchers.IO) {
         if (!_state.value.started) return@withContext
         RustCore.tgLogout()

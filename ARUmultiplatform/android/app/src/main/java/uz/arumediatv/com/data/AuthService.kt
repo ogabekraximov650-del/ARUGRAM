@@ -145,6 +145,17 @@ class AuthService(
         return fromServer.copy(hiddenStats = local.hiddenStats, chanConsent = local.chanConsent)
     }
 
+    /** Profil rasmi: fayl Telegram'ga yuklangach (`avatar_<id>_<vaqt>.jpg`) worker'ga faqat NOM aytiladi. `null` — saqlandi. */
+    suspend fun setAvatarFile(fileName: String): String? = withContext(Dispatchers.IO) {
+        val s = sessionToken ?: return@withContext "Avval hisobga kiring"
+        val r = http.callJson("$base/api/auth/avatar", "POST", JSONObject().put("file", fileName), s)
+        val u = r.json?.optJSONObject("user")
+        if (r.ok && u != null) {
+            save(s, keepLocalSettings(AppUser.fromJson(u)))
+            null
+        } else "Rasm saqlanmadi"
+    }
+
     /** Hisobni serverdan o'chiradi va telefondagi hisobni tozalaydi. `null` — tayyor; aks holda xato matni. */
     suspend fun deleteAccount(): String? = withContext(Dispatchers.IO) {
         val s = sessionToken ?: return@withContext "Avval hisobga kiring"

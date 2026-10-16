@@ -72,6 +72,7 @@ import uz.arumediatv.com.ui.catalog.CatalogScreen
 import uz.arumediatv.com.ui.home.HomeScreen
 import uz.arumediatv.com.ui.library.LibraryScreen
 import uz.arumediatv.com.ui.login.LoginScreen
+import uz.arumediatv.com.ui.login.BotLoginScreen
 import uz.arumediatv.com.ui.profile.EditProfileScreen
 import uz.arumediatv.com.ui.profile.ProfileScreen
 import uz.arumediatv.com.ui.profile.SessionsScreen
@@ -111,6 +112,7 @@ private val tabs = listOf(
 /** Ekranlar stegi (tab ustiga ochiladi). Tablar ostida tirik turadi — qaytganda aylantirish joyi saqlanadi. */
 private sealed interface Page {
     data object Login : Page
+    data object BotLogin : Page
     data object Edit : Page
     data object Sessions : Page
     data object Settings : Page
@@ -209,7 +211,8 @@ private fun AruApp() {
         stack.lastOrNull()?.let { page ->
             Box(Modifier.fillMaxSize().background(AruColors.Bg).pointerInput(Unit) { detectTapGestures { } }.statusBarsPadding().navigationBarsPadding()) {
                 when (page) {
-                    Page.Login -> LoginScreen(onDone = ::pop, onClose = ::pop)
+                    Page.Login -> LoginScreen(onDone = ::pop, onClose = ::pop, onBot = { pop(); push(Page.BotLogin) })
+                    Page.BotLogin -> BotLoginScreen(onDone = ::pop, onBack = ::pop)
                     Page.Edit -> EditProfileScreen(onBack = ::pop)
                     Page.Sessions -> SessionsScreen(onBack = ::pop)
                     Page.Settings -> SettingsScreen(onBack = ::pop)

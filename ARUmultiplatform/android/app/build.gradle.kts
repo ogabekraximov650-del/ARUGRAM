@@ -104,6 +104,8 @@ dependencies {
     // Video: Media3 ExoPlayer (Range so'rovlar Rust mahalliy serveriga yoki worker keshiga ketadi).
     implementation("androidx.media3:media3-exoplayer:1.5.1")
     implementation("androidx.media3:media3-ui:1.5.1")
+    // QR kod (Telegram QR orqali kirish)
+    implementation("com.google.zxing:core:3.5.3")
     implementation(libs.okhttp)
     // JNA: Rust yadrosining C funksiyalarini (`librust_core.so`) JNI yozmasdan to'g'ridan-to'g'ri chaqiradi.
     implementation("net.java.dev.jna:jna:5.17.0@aar")
