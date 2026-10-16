@@ -26,6 +26,10 @@ data class Season(
     val year: String,
     /** `null` — server aytmagan. */
     val free: Boolean?,
+    /** `holati`: "Davom etmoqda" / "Tugallangan" ... */
+    val status: String = "",
+    /** `turi`: "FILM" / "OVA" / "TV" ... */
+    val kind: String = "",
 ) {
     val key: String get() = "$animeId:$seasonId"
 }
@@ -66,6 +70,8 @@ fun JsonElement.toSeason(): Season? {
         genres = o.text("janri").split(',').map { it.trim() }.filter { it.isNotEmpty() },
         year = o.text("yili").trim(),
         free = o.flag("free"),
+        status = o.text("holati").trim(),
+        kind = o.text("turi").trim().uppercase(),
     )
 }
 

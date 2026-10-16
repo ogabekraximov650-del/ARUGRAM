@@ -6470,3 +6470,9 @@ Anibla sekinligi (diag): worker -> anibla.uz har so'rovga ~1.2-1.4 s (login 1.4 
   Webhook'lar yangi worker'ga o'tkazildi; `tool/migrate/reconcile.py` (`migrate-fix.yml`) farqni tuzatdi (tg_files, epizod_db, encode_jobs, post_jobs, R2 qatorlari).
 - **Eski worker** `delete-old-worker.yml` bilan o'chirildi (`tool/migrate/delete_old.txt`). Eski Flutter ilova (eski manzil) endi ulana olmaydi.
 - **Flutter APK:** faqat ADMIN yig'iladi, paket `uz.arumediatv.admin` (Kotlin ilovasi `uz.arumediatv.com` bilan yonma-yon). `pubspec.yaml` versiyasi `0.0.1+2`.
+
+## Kotlin ilova: Qidiruv/Katalog/Bosh sahifa/Profil + Telegram (2026-10)
+
+- `ARUmultiplatform/android`: pastki menyuda "Katalog" (lupa belgisi) nomi "Qidiruv" ga o'zgartirildi; haqiqiy "Katalog" alohida yorliq (7 bo'lim + janr/yil filtri).
+- Rasmlar Telegram orqali: `rust/` endi asosiy `rust/` nusxasi (`librust_core.so`), Kotlin JNA orqali (`core/RustCore.kt`). Oqim Flutter bilan bir xil: `/api/tg/config` -> MTProto login -> bot -> `/api/tg/deliver` -> mahalliy server -> `ImageStore` (shifrlangan disk keshi).
+- Login (`ui/login`), Profil (`ui/profile`), sessiyalar, tahrirlash qo'shildi. Anime sahifasi, pleyer, Kutubxona — keyingi bosqich.

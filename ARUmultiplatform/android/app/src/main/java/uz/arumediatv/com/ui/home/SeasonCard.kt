@@ -27,6 +27,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import uz.arumediatv.com.data.Season
+import uz.arumediatv.com.ui.common.TgImage
 import uz.arumediatv.com.ui.theme.AruColors
 import java.util.Locale
 import kotlin.math.abs
@@ -35,8 +36,7 @@ import kotlin.math.abs
  * Bo'lim kartasi (Flutter `SeasonCard` ga mos): yumaloq burchak, tepada reyting/yosh belgilari, pastda qoraygan gradient ustida
  * "N-bo'lim · M ta qism" va nom.
  *
- * Muqova rasmi Telegram orqali (Rust yadrosi) keladi — u keyingi bosqichda ulanadi; hozircha nomdan yasalgan rangli
- * fon va bosh harf ko'rsatiladi.
+ * Muqova rasmi Telegram orqali (Rust yadrosi) keladi; kirilmagan bo'lsa nomdan yasalgan rangli fon va bosh harf.
  */
 @Composable
 fun SeasonCard(season: Season, onClick: () -> Unit, modifier: Modifier = Modifier) {
@@ -48,20 +48,26 @@ fun SeasonCard(season: Season, onClick: () -> Unit, modifier: Modifier = Modifie
             .border(1.dp, AruColors.Border, shape)
             .clickable(onClick = onClick),
     ) {
-        // Muqova o'rni: nomga qarab barqaror rang.
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(coverBrush(season.name)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                text = season.name.trim().take(1).uppercase(Locale.getDefault()),
-                color = Color.White.copy(alpha = 0.16f),
-                fontSize = 84.sp,
-                fontWeight = FontWeight.Black,
-            )
-        }
+        // Muqova: Telegram'dan (kirgan bo'lsa), aks holda nomdan yasalgan rangli fon va bosh harf.
+        TgImage(
+            url = season.photoUrl,
+            modifier = Modifier.fillMaxSize(),
+            placeholder = {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(coverBrush(season.name)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = season.name.trim().take(1).uppercase(Locale.getDefault()),
+                        color = Color.White.copy(alpha = 0.16f),
+                        fontSize = 84.sp,
+                        fontWeight = FontWeight.Black,
+                    )
+                }
+            },
+        )
 
         // Tepa belgilar
         Row(

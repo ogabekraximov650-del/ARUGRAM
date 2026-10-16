@@ -4,7 +4,7 @@ import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Response
 import uz.arumediatv.com.BuildConfig
-import uz.arumediatv.com.core.AruCore
+import uz.arumediatv.com.core.RustCore
 import java.util.concurrent.TimeUnit
 
 /**
@@ -15,7 +15,7 @@ class SignInterceptor : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         val req = chain.request()
         val ts = (System.currentTimeMillis() / 1000).toString()
-        val sig = AruCore.sign(ts, req.method, req.url.encodedPath)
+        val sig = RustCore.sign(ts, req.method, req.url.encodedPath)
         val b = req.newBuilder().header("X-App-Version", BuildConfig.APP_VERSION)
         if (sig.isNotEmpty()) b.header("X-App-Sig", sig)
         return chain.proceed(b.build())
@@ -28,6 +28,16 @@ object Http {
             .addInterceptor(SignInterceptor())
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(15, TimeUnit.SECONDS)
+            .build()
+    }
+}
+
+/** Mahalliy Rust serveri (127.0.0.1) uchun: imzosiz oddiy mijoz. */
+object LocalHttp {
+    val client: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(5, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
             .build()
     }
 }

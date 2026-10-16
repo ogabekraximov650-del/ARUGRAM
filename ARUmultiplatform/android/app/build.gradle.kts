@@ -84,6 +84,8 @@ dependencies {
     implementation(libs.compose.material.icons.core)
 
     implementation(libs.okhttp)
+    // JNA: Rust yadrosining C funksiyalarini (`librust_core.so`) JNI yozmasdan to'g'ridan-to'g'ri chaqiradi.
+    implementation("net.java.dev.jna:jna:5.17.0@aar")
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
 
