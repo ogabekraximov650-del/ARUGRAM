@@ -56,6 +56,7 @@ import androidx.compose.runtime.mutableStateOf
 import kotlinx.coroutines.launch
 import uz.arumediatv.com.ui.catalog.CatalogScreen
 import uz.arumediatv.com.ui.home.HomeScreen
+import uz.arumediatv.com.ui.library.LibraryScreen
 import uz.arumediatv.com.ui.login.LoginScreen
 import uz.arumediatv.com.ui.profile.EditProfileScreen
 import uz.arumediatv.com.ui.profile.ProfileScreen
@@ -137,6 +138,7 @@ private fun AruApp() {
                 0 -> HomeScreen(onOpenSeason = openSeason, onLogin = login)
                 1 -> SearchScreen(onOpenSeason = openSeason)
                 2 -> CatalogScreen(onOpenSeason = openSeason)
+                3 -> LibraryScreen(onOpenSeason = openSeason, onLogin = login)
                 4 -> ProfileScreen(
                     onLogin = login,
                     onEdit = { overlay = Overlay.EDIT },

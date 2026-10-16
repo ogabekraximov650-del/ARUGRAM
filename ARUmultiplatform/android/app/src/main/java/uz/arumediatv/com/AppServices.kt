@@ -5,6 +5,7 @@ import uz.arumediatv.com.core.RustCore
 import uz.arumediatv.com.core.SecureStore
 import uz.arumediatv.com.data.AuthService
 import uz.arumediatv.com.data.ImageStore
+import uz.arumediatv.com.data.LibraryStore
 import uz.arumediatv.com.data.SeasonsRepository
 import uz.arumediatv.com.data.SeasonsStore
 import uz.arumediatv.com.data.TelegramService
@@ -20,6 +21,8 @@ object AppServices {
     lateinit var images: ImageStore
         private set
     lateinit var seasons: SeasonsStore
+        private set
+    lateinit var library: LibraryStore
         private set
 
     @Volatile
@@ -44,6 +47,7 @@ object AppServices {
         telegram = TelegramService(ctx, auth, secure)
         images = ImageStore(ctx, telegram)
         seasons = SeasonsStore(SeasonsRepository(ctx))
+        library = LibraryStore(auth)
         ready = true
     }
 }

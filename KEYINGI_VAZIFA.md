@@ -6476,3 +6476,8 @@ Anibla sekinligi (diag): worker -> anibla.uz har so'rovga ~1.2-1.4 s (login 1.4 
 - `ARUmultiplatform/android`: pastki menyuda "Katalog" (lupa belgisi) nomi "Qidiruv" ga o'zgartirildi; haqiqiy "Katalog" alohida yorliq (7 bo'lim + janr/yil filtri).
 - Rasmlar Telegram orqali: `rust/` endi asosiy `rust/` nusxasi (`librust_core.so`), Kotlin JNA orqali (`core/RustCore.kt`). Oqim Flutter bilan bir xil: `/api/tg/config` -> MTProto login -> bot -> `/api/tg/deliver` -> mahalliy server -> `ImageStore` (shifrlangan disk keshi).
 - Login (`ui/login`), Profil (`ui/profile`), sessiyalar, tahrirlash qo'shildi. Anime sahifasi, pleyer, Kutubxona — keyingi bosqich.
+
+## Kotlin ilova: Kutubxona sahifasi (2026-10)
+
+- `ui/library/LibraryScreen.kt`, `data/LibraryStore.kt`: Tarix (`GET /api/history`), Yuklanmalar (hozircha bo'sh, pleyer bilan keladi), Sevimlilar (`GET /api/favorites`). Faqat o'qish; yozuv (tarix, sevimli qo'shish) keyin `POST /api/sync` orqali. 60 soniya ichida qayta so'rov ketmaydi.
+- Kirilmagan bo'lsa — "Telegram orqali kiring" taklifi.
