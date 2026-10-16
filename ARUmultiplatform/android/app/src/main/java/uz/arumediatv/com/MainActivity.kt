@@ -156,6 +156,7 @@ private sealed interface Page {
     data class AdminChat(val userId: Long, val name: String) : Page
     data class PublicUser(val id: Long) : Page
     data class Stat(val userId: Long, val kind: StatKind, val owner: String) : Page
+    data class AnimeHistory(val item: uz.arumediatv.com.data.HistoryItem) : Page
     data class SeasonPage(val season: uz.arumediatv.com.data.Season, val episodeId: Long = 0, val quality: String? = null) : Page
 }
 
@@ -206,7 +207,7 @@ private fun AruApp() {
                 0 -> HomeScreen(onOpenSeason = openSeason, onLogin = login)
                 1 -> SearchScreen(onOpenSeason = openSeason)
                 2 -> CatalogScreen(onOpenSeason = openSeason)
-                3 -> LibraryScreen(onOpenSeason = openSeason, onLogin = login, onOpenDownload = { s, e, q -> push(Page.SeasonPage(s, e, q)) })
+                3 -> LibraryScreen(onOpenSeason = openSeason, onLogin = login, onOpenDownload = { s, e, q -> push(Page.SeasonPage(s, e, q)) }, onOpenAnimeHistory = { push(Page.AnimeHistory(it)) })
                 4 -> ProfileScreen(
                     onLogin = login,
                     onEdit = { push(Page.Edit) },
@@ -286,6 +287,13 @@ private fun AruApp() {
                     is Page.AdminChat -> SupportChatScreen(userId = page.userId, title = page.name, onBack = ::pop)
                     is Page.PublicUser -> PublicProfileScreen(page.id, onBack = ::pop, onOpenStat = { u, k, o -> push(Page.Stat(u, k, o)) })
                     is Page.Stat -> StatDetailScreen(page.userId, page.kind, page.owner, onBack = ::pop, onOpenSeason = openSeason)
+                    is Page.AnimeHistory -> uz.arumediatv.com.ui.library.AnimeHistoryScreen(
+                        page.item.animeId, page.item.seasonId, page.item.title, onBack = ::pop,
+                        onOpenEpisode = { h ->
+                            val s = uz.arumediatv.com.data.Season(h.animeId, h.seasonId, h.title, h.sectionNo, 0, h.photoUrl, 0.0, 0, 0, 0, emptyList(), "", null)
+                            push(Page.SeasonPage(s, h.epizodId, h.quality.ifEmpty { null }))
+                        },
+                    )
                     is Page.SeasonPage -> SeasonScreen(
                         season = page.season,
                         onBack = ::pop,

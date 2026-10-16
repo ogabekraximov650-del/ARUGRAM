@@ -68,7 +68,7 @@ private val TITLES = listOf("Tarix", "Yuklanmalar", "Sevimlilar")
 /** Kutubxona (Flutter `LibraryScreen` ga mos): Tarix, Yuklanmalar va Sevimlilar — tugma bosilsa ham, surilsa ham almashadi. */
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
-fun LibraryScreen(onOpenSeason: (Season) -> Unit, onLogin: () -> Unit, onOpenDownload: (Season, Long, String) -> Unit) {
+fun LibraryScreen(onOpenSeason: (Season) -> Unit, onLogin: () -> Unit, onOpenDownload: (Season, Long, String) -> Unit, onOpenAnimeHistory: (HistoryItem) -> Unit) {
     val user by AppServices.auth.user.collectAsStateWithLifecycle()
     val state by AppServices.library.state.collectAsStateWithLifecycle()
     val pager = rememberPagerState { TITLES.size }
@@ -102,7 +102,7 @@ fun LibraryScreen(onOpenSeason: (Season) -> Unit, onLogin: () -> Unit, onOpenDow
             val pad = 24.dp + LocalBarPad.current.calculateBottomPadding()
             when (page) {
                 0 -> PullToRefreshBox(isRefreshing = state.loading && state.loaded, onRefresh = { AppServices.library.load(force = true) }, modifier = Modifier.fillMaxSize()) {
-                    HistoryList(state.history, loading = state.loading && !state.loaded, error = state.error, pad = pad)
+                    HistoryList(state.history, loading = state.loading && !state.loaded, error = state.error, pad = pad, onOpenAnime = onOpenAnimeHistory)
                 }
                 1 -> DownloadsList(pad = pad, onOpen = onOpenDownload)
                 else -> PullToRefreshBox(isRefreshing = state.loading && state.loaded, onRefresh = { AppServices.library.load(force = true) }, modifier = Modifier.fillMaxSize()) {
@@ -143,7 +143,7 @@ private fun TabButton(label: String, active: Boolean, modifier: Modifier, onClic
 }
 
 @Composable
-private fun HistoryList(items: List<HistoryItem>, loading: Boolean, error: String?, pad: androidx.compose.ui.unit.Dp) {
+private fun HistoryList(items: List<HistoryItem>, loading: Boolean, error: String?, pad: androidx.compose.ui.unit.Dp, onOpenAnime: (HistoryItem) -> Unit) {
     if (items.isEmpty()) {
         LazyColumn(Modifier.fillMaxSize()) {
             item {
@@ -156,56 +156,7 @@ private fun HistoryList(items: List<HistoryItem>, loading: Boolean, error: Strin
         }
         return
     }
-    LazyColumn(
-        Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = pad),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        items(items, key = { it.key }) { h -> HistoryRow(h) }
-    }
-}
-
-private val dateFmt = ThreadLocal.withInitial {
-    SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.US).apply { timeZone = TimeZone.getTimeZone("GMT+5") } // Toshkent
-}
-
-@Composable
-private fun HistoryRow(h: HistoryItem) {
-    val shape = RoundedCornerShape(16.dp)
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clip(shape)
-            .background(AruColors.Card)
-            .border(1.dp, AruColors.Border, shape)
-            .padding(10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        TgImage(
-            url = h.photoUrl,
-            modifier = Modifier.width(64.dp).height(92.dp).clip(RoundedCornerShape(12.dp)).background(AruColors.CardAlt),
-            maxPx = 240,
-        )
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f).fillMaxHeight()) {
-            Text(h.title, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            val sub = buildList {
-                if (h.sectionNo > 0) add("${h.sectionNo}-bo'lim")
-                if (h.episodeNo > 0) add("${h.episodeNo}-qism")
-            }.joinToString(" · ")
-            if (sub.isNotEmpty()) Text(sub, color = AruColors.TextDim, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
-            Spacer(Modifier.height(8.dp))
-            Box(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(Color.White.copy(alpha = 0.1f))) {
-                Box(Modifier.fillMaxWidth(h.progress).fillMaxHeight().background(Brush.horizontalGradient(listOf(AruColors.Accent, AruColors.Accent2))))
-            }
-            val meta = buildList {
-                add("${(h.progress * 100).toInt()}% ko'rilgan")
-                if (h.views > 1) add("${h.views} marta")
-                if (h.updatedAt > 0) add(dateFmt.get()!!.format(Date(if (h.updatedAt < 100_000_000_000L) h.updatedAt * 1000 else h.updatedAt)))
-            }.joinToString(" · ")
-            Text(meta, color = AruColors.TextFaint, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
-        }
-    }
+    HistoryAnimeList(items, pad, onOpenAnime)
 }
 
 /** Yuklanmalar: yuklab olingan va yuklanayotgan qismlar (sifat bo'yicha). Bosilsa qism shu sifatda ochiladi. */

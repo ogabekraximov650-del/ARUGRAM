@@ -107,6 +107,12 @@ class LibraryStore(
         loadedAt = 0
     }
 
+    /** Tarixdan o'chirish: ro'yxatdan darhol olinadi, serverga SyncQueue orqali boradi. */
+    fun removeHistory(h: HistoryItem) {
+        _state.update { s -> s.copy(history = s.history.filterNot { it.animeId == h.animeId && it.seasonId == h.seasonId && it.epizodId == h.epizodId }) }
+        uz.arumediatv.com.AppServices.sync.hideHistory(h.animeId, h.seasonId, h.epizodId)
+    }
+
     /** Hisobdan chiqilganda. */
     fun clear() {
         loadedAt = 0
