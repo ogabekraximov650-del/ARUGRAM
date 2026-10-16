@@ -6524,3 +6524,8 @@ Anibla sekinligi (diag): worker -> anibla.uz har so'rovga ~1.2-1.4 s (login 1.4 
 
 - `data/Packs.kt` (`PackStore`): `.arp` to'plam fayli (ARUP sarlavha + kichik rasmlar + elementlar), faqat kerakli bo'lak `Range` bilan mahalliy Telegram manbasidan; xotira (LRU) -> shifrlangan disk -> Telegram. Yozuvlar `SyncQueue` (`packs` massivi: new/add/remove/delete/sub/clear). `SyncQueue` endi turlar bo'yicha chegara qo'yadi (tarix <= 100, qolganlari <= 50).
 - UI: `ui/packs/` — `PackViews` (rasm, animatsiyali GIF/WebP Android 9+, `[pe:..]` matn ichidagi emoji), `PacksScreens` (Mening/Obunalar/Ommaviy, to'plam sahifasi, qo'shish/o'chirish), `PackPicker` (izoh va suhbatga stiker/GIF/emoji). Profil > "Emoji, GIF va stikerlar".
+
+## Kotlin ilova: admin paneli (2026-10)
+
+- `ui/admin/`: Suhbatlar, Foydalanuvchilar (izlash, balans, obuna, bloklash), Shikoyatlar, Majburiy kanallar (+ qo'shish: `rust_tg_channel_info`/`rust_tg_make_bot_admin`), To'plamlarni ko'rib chiqish, Statistika (+grafik `/api/stats/series`), Ilova sozlamalari, Kodlash navbati (`/api/encode/live`, `/api/encode/admin`), Anime boshqaruvi (anime -> bo'limlar -> qismlar; rasm/video Telegram'ga yuklanadi, asl video avto-kodlash navbatiga).
+- Admin ko'rinishi: faqat admin build (`BuildConfig.IS_ADMIN`) va server admin deb belgilagan hisob; har amal serverda tekshiriladi.

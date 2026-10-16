@@ -75,6 +75,13 @@ import uz.arumediatv.com.ui.admin.AdminChannelAddScreen
 import uz.arumediatv.com.ui.admin.AdminPacksScreen
 import uz.arumediatv.com.ui.admin.AdminStatsScreen
 import uz.arumediatv.com.ui.admin.AdminAppScreen
+import uz.arumediatv.com.ui.admin.AdminEncodeScreen
+import uz.arumediatv.com.ui.admin.AdminAnimeScreen
+import uz.arumediatv.com.ui.admin.AdminAnimeEditScreen
+import uz.arumediatv.com.ui.admin.AdminSeasonsScreen
+import uz.arumediatv.com.ui.admin.AdminSeasonEditScreen
+import uz.arumediatv.com.ui.admin.AdminEpisodesScreen
+import uz.arumediatv.com.ui.admin.AdminEpisodeEditScreen
 import uz.arumediatv.com.ui.season.SeasonScreen
 import kotlinx.coroutines.launch
 import uz.arumediatv.com.ui.catalog.CatalogScreen
@@ -139,6 +146,13 @@ private sealed interface Page {
     data object AdminPacks : Page
     data object AdminStats : Page
     data object AdminApp : Page
+    data object AdminAnime : Page
+    data object AdminEncode : Page
+    data class AdminAnimeEdit(val anime: org.json.JSONObject?) : Page
+    data class AdminSeasons(val anime: org.json.JSONObject) : Page
+    data class AdminSeasonEdit(val animeId: Long, val season: org.json.JSONObject?) : Page
+    data class AdminEpisodes(val animeId: Long, val seasonId: Long, val title: String) : Page
+    data class AdminEpisodeEdit(val animeId: Long, val seasonId: Long, val episode: org.json.JSONObject?) : Page
     data class AdminChat(val userId: Long, val name: String) : Page
     data class PublicUser(val id: Long) : Page
     data class Stat(val userId: Long, val kind: StatKind, val owner: String) : Page
@@ -249,6 +263,8 @@ private fun AruApp() {
                             AdminSection.PACKS -> push(Page.AdminPacks)
                             AdminSection.STATS -> push(Page.AdminStats)
                             AdminSection.APP -> push(Page.AdminApp)
+                            AdminSection.ANIME -> push(Page.AdminAnime)
+                            AdminSection.ENCODE -> push(Page.AdminEncode)
                             else -> android.widget.Toast.makeText(ctx, "${s.title}: keyingi qadamda", android.widget.Toast.LENGTH_SHORT).show()
                         }
                     })
@@ -260,6 +276,13 @@ private fun AruApp() {
                     Page.AdminPacks -> AdminPacksScreen(onBack = ::pop)
                     Page.AdminStats -> AdminStatsScreen(onBack = ::pop)
                     Page.AdminApp -> AdminAppScreen(onBack = ::pop)
+                    Page.AdminEncode -> AdminEncodeScreen(onBack = ::pop)
+                    Page.AdminAnime -> AdminAnimeScreen(onBack = ::pop, onOpenAnime = { a -> push(Page.AdminSeasons(a)) }, onEdit = { a -> push(Page.AdminAnimeEdit(a)) })
+                    is Page.AdminAnimeEdit -> AdminAnimeEditScreen(page.anime, onBack = ::pop, onDone = ::pop)
+                    is Page.AdminSeasons -> AdminSeasonsScreen(page.anime, onBack = ::pop, onOpenSeason = { s -> push(Page.AdminEpisodes(page.anime.optLong("id"), s.optLong("season_id"), s.optString("nomi").ifEmpty { "${s.optInt("bolim_id")}-bo'lim" })) }, onEdit = { s -> push(Page.AdminSeasonEdit(page.anime.optLong("id"), s)) })
+                    is Page.AdminSeasonEdit -> AdminSeasonEditScreen(page.animeId, page.season, onBack = ::pop, onDone = ::pop)
+                    is Page.AdminEpisodes -> AdminEpisodesScreen(page.animeId, page.seasonId, page.title, onBack = ::pop, onEdit = { e -> push(Page.AdminEpisodeEdit(page.animeId, page.seasonId, e)) })
+                    is Page.AdminEpisodeEdit -> AdminEpisodeEditScreen(page.animeId, page.seasonId, page.episode, onBack = ::pop, onDone = ::pop)
                     is Page.AdminChat -> SupportChatScreen(userId = page.userId, title = page.name, onBack = ::pop)
                     is Page.PublicUser -> PublicProfileScreen(page.id, onBack = ::pop, onOpenStat = { u, k, o -> push(Page.Stat(u, k, o)) })
                     is Page.Stat -> StatDetailScreen(page.userId, page.kind, page.owner, onBack = ::pop, onOpenSeason = openSeason)
