@@ -1,0 +1,25 @@
+name: Ko'chirishdan keyingi farqni tuzatish (eski -> yangi baza)
+
+# `tool/migrate/fix.txt` o'zgarganda `tool/migrate/reconcile.py` ishlaydi (qayta ishga tushirsa ham xavfsiz).
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tool/migrate/fix.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    environment: secret
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tuzatish
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+          TURSO_URL: ${{ secrets.TURSO_URL }}
+          TURSO_TOKEN: ${{ secrets.TURSO_TOKEN }}
+        run: python3 tool/migrate/reconcile.py
