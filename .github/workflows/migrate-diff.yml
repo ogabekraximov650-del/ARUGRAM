@@ -22,5 +22,6 @@ jobs:
           ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
           TURSO_URL: ${{ secrets.TURSO_URL }}
           TURSO_TOKEN: ${{ secrets.TURSO_TOKEN }}
-        run: python3 tool/migrate/diff.py
+        run: |
+          python3 tool/migrate/diff.py
           python3 tool/migrate/inspect_diff.py
