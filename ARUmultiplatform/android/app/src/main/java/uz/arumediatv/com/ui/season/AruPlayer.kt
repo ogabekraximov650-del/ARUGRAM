@@ -32,11 +32,7 @@ class AruPlayer(context: Context) {
             .setTargetBufferBytes(24 * 1024 * 1024)
             .setPrioritizeTimeOverSizeThresholds(false)
             .build(),
-    ).build().apply {
-        trackSelectionParameters = trackSelectionParameters.buildUpon()
-            .setExceedVideoConstraintsIfNecessary(true)
-            .build()
-    }
+    )    .build()
 
     var playing by mutableStateOf(false)
         private set
