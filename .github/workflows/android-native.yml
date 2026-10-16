@@ -118,6 +118,27 @@ jobs:
           echo "out=$OUT" >> "$GITHUB_OUTPUT"
           unzip -l "$OUT" | grep -E "libaru_core|classes" || true
 
+      # ── TELEGRAM: "SAQLANGAN XABARLAR"GA YUBORISH (Flutter workflow'idagidek) ──
+      # Sessiya `tool/encode/session.enc` dan (`ENCODE_TOKEN` bilan) tiklanadi, nusxada ishlanadi. Xato bo'lsa build buzilmaydi.
+      - name: APK'ni Telegram "Saqlangan xabarlar"ga yuborish
+        continue-on-error: true
+        working-directory: ${{ github.workspace }}
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+        run: |
+          APK="${{ steps.apk.outputs.out }}"
+          S="$RUNNER_TEMP/notify_session"
+          K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K \
+            -in tool/encode/session.enc -out "$S.session"
+          head -c 16 "$S.session" | grep -q "SQLite format 3"
+          pip install --no-cache-dir -q pyrogram==2.0.106 tgcrypto==1.2.5
+          python tool/notify/send_apk.py "$S" "$APK" \
+            "ARUMEDIATV Android (Kotlin+Compose+Rust) build ${{ github.run_number }} — 0.1.0+${{ github.run_number }}"
+          rm -f "$S.session"
+
       - uses: actions/upload-artifact@v4
         with:
           name: arumediatv-native-${{ github.run_number }}
