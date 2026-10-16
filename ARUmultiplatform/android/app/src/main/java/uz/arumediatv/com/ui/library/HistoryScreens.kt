@@ -108,6 +108,7 @@ fun HistoryFrame(item: HistoryItem, modifier: Modifier = Modifier) {
 }
 
 /** Anime kartasi: 16:9 kadr, tagida nom, "Oxirgi marta N-bo'lim M-qismni ko'rdingiz" va sana. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun AnimeRow(item: HistoryItem, onClick: () -> Unit) {
     val shape = RoundedCornerShape(18.dp)
@@ -161,6 +162,7 @@ fun EpisodeRow(item: HistoryItem, onOpen: () -> Unit, onLongPress: (() -> Unit)?
 }
 
 /** Bitta animening (bo'limning) ko'rilgan qismlari, oxirgisi tepada. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun AnimeHistoryScreen(animeId: Long, seasonId: Long, title: String, onBack: () -> Unit, onOpenEpisode: (HistoryItem) -> Unit) {
     BackHandler(onBack = onBack)
