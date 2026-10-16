@@ -94,38 +94,6 @@ fun LoginScreen(onDone: () -> Unit, onClose: () -> Unit, onBot: () -> Unit = {})
         }
     }
 
-    // ── QR orqali kirish: boshqa qurilmadagi Telegram'da Sozlamalar -> Qurilmalar -> "Qurilmani ulash" ──
-    suspend fun qrRefresh() {
-        val j = tg.qrToken()
-        if (step != Step.QR) return
-        when {
-            j.optBoolean("ok") -> finish()
-            j.optBoolean("password") -> {
-                hint = j.optString("hint")
-                password = ""
-                step = Step.PASSWORD
-            }
-            j.optString("error").isNotEmpty() && !j.has("url") -> {
-                qrUntil = System.currentTimeMillis() + 5000
-                error = j.optString("error")
-            }
-            else -> {
-                error = null
-                qrUrl = j.optString("url")
-                qrUntil = System.currentTimeMillis() + j.optLong("expires", 30) * 1000
-            }
-        }
-    }
-    LaunchedEffect(step) {
-        if (step != Step.QR) return@LaunchedEffect
-        qrUrl = ""
-        qrUntil = 0
-        while (step == Step.QR) {
-            if (qrUrl.isEmpty() || tg.qrAccepted() || System.currentTimeMillis() > qrUntil) qrRefresh()
-            delay(1000)
-        }
-    }
-
     fun describeSent(s: org.json.JSONObject?) {
         sentInfo = when (s?.optString("type")) {
             "app" -> "Kod Telegram ilovasiga yuborildi"
@@ -179,6 +147,38 @@ fun LoginScreen(onDone: () -> Unit, onClose: () -> Unit, onBot: () -> Unit = {})
         busy = false
         step = Step.PHONE
         error = "Kirish tasdiqlanmadi — qayta urinib ko'ring"
+    }
+
+    // ── QR orqali kirish: boshqa qurilmadagi Telegram'da Sozlamalar -> Qurilmalar -> "Qurilmani ulash" ──
+    suspend fun qrRefresh() {
+        val j = tg.qrToken()
+        if (step != Step.QR) return
+        when {
+            j.optBoolean("ok") -> finish()
+            j.optBoolean("password") -> {
+                hint = j.optString("hint")
+                password = ""
+                step = Step.PASSWORD
+            }
+            j.optString("error").isNotEmpty() && !j.has("url") -> {
+                qrUntil = System.currentTimeMillis() + 5000
+                error = j.optString("error")
+            }
+            else -> {
+                error = null
+                qrUrl = j.optString("url")
+                qrUntil = System.currentTimeMillis() + j.optLong("expires", 30) * 1000
+            }
+        }
+    }
+    LaunchedEffect(step) {
+        if (step != Step.QR) return@LaunchedEffect
+        qrUrl = ""
+        qrUntil = 0
+        while (step == Step.QR) {
+            if (qrUrl.isEmpty() || tg.qrAccepted() || System.currentTimeMillis() > qrUntil) qrRefresh()
+            delay(1000)
+        }
     }
 
     fun handle(r: TgLoginStep, onOk: suspend () -> Unit) {
