@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Ilova foni AppColors.bg (#0A0A0C) — ochilish paytida oq chaqnamasin. -->
+    <style name="Theme.Aru" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/aru_bg</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+    <color name="aru_bg">#0A0A0C</color>
+</resources>
