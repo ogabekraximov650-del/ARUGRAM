@@ -40,3 +40,13 @@ fun OkHttpClient.callJson(
     } catch (e: Exception) {
         ApiResult(0, null, e.message ?: "Tarmoq xatosi")
     }
+
+/** Javob tanasini matn sifatida (massiv javoblar uchun). `code = 0` — tarmoq xatosi. Faqat IO oqimida. */
+fun OkHttpClient.callText(url: String, bearer: String? = null): Pair<Int, String> =
+    try {
+        val rb = Request.Builder().url(url).get()
+        if (bearer != null) rb.header("Authorization", "Bearer $bearer")
+        newCall(rb.build()).execute().use { r -> r.code to r.body?.string().orEmpty() }
+    } catch (_: Exception) {
+        0 to ""
+    }
