@@ -37,6 +37,7 @@ import uz.arumediatv.com.AppServices
 import uz.arumediatv.com.data.Season
 import uz.arumediatv.com.ui.common.EmptyState
 import uz.arumediatv.com.ui.common.LoadingBox
+import uz.arumediatv.com.ui.common.LocalBarPad
 import uz.arumediatv.com.ui.common.OfflineChip
 import uz.arumediatv.com.ui.common.PageHeader
 import uz.arumediatv.com.ui.common.SeasonGrid
@@ -59,6 +60,11 @@ fun HomeScreen(onOpenSeason: (Season) -> Unit, onLogin: () -> Unit) {
         SeasonGrid(
             items = state.items,
             onOpen = onOpenSeason,
+            contentPadding = PaddingValues(
+                start = 16.dp, end = 16.dp,
+                top = LocalBarPad.current.calculateTopPadding(),
+                bottom = 24.dp + LocalBarPad.current.calculateBottomPadding(),
+            ),
             header = {
                 fullSpan {
                     PageHeader("Anime dunyosi") {

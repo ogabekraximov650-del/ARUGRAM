@@ -10,7 +10,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
-import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.materialIcon
+import androidx.compose.material.icons.materialPath
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
@@ -18,7 +19,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -29,6 +29,21 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
+import androidx.activity.SystemBarStyle
+import uz.arumediatv.com.ui.common.LocalBarPad
 import androidx.activity.compose.BackHandler
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -52,7 +67,7 @@ private val tabs = listOf(
     Tab("Bosh sahifa", Icons.Filled.Home),
     Tab("Qidiruv", Icons.Filled.Search),
     Tab("Katalog", Icons.AutoMirrored.Filled.List),
-    Tab("Kutubxona", Icons.Filled.Favorite),
+    Tab("Kutubxona", FolderIcon),
     Tab("Profil", Icons.Filled.Person),
 )
 
@@ -61,7 +76,10 @@ private enum class Overlay { NONE, LOGIN, EDIT, SESSIONS }
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+        )
         setContent { AruTheme { AruApp() } }
     }
 }
@@ -78,7 +96,7 @@ private fun AruApp() {
     val login = { overlay = Overlay.LOGIN }
     BackHandler(enabled = overlay != Overlay.NONE) { overlay = Overlay.NONE }
     if (overlay != Overlay.NONE) {
-        Box(Modifier.fillMaxSize().background(AruColors.Bg).statusBarsPadding()) {
+        Box(Modifier.fillMaxSize().background(AruColors.Bg).statusBarsPadding().navigationBarsPadding()) {
             when (overlay) {
                 Overlay.LOGIN -> LoginScreen(onDone = { overlay = Overlay.NONE }, onClose = { overlay = Overlay.NONE })
                 Overlay.EDIT -> EditProfileScreen(onBack = { overlay = Overlay.NONE })
@@ -88,30 +106,12 @@ private fun AruApp() {
         }
         return
     }
-    Scaffold(
-        containerColor = AruColors.Bg,
-        snackbarHost = { SnackbarHost(snack) },
-        bottomBar = {
-            NavigationBar(containerColor = AruColors.Surface) {
-                tabs.forEachIndexed { i, t ->
-                    NavigationBarItem(
-                        selected = tab == i,
-                        onClick = { tab = i },
-                        icon = { Icon(t.icon, contentDescription = t.title) },
-                        label = { Text(t.title, maxLines = 1) },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = AruColors.Accent2,
-                            selectedTextColor = AruColors.Accent2,
-                            indicatorColor = AruColors.AccentTint,
-                            unselectedIconColor = AruColors.TextFaint,
-                            unselectedTextColor = AruColors.TextFaint,
-                        ),
-                    )
-                }
-            }
-        },
-    ) { inner ->
-        Box(Modifier.fillMaxSize().background(AruColors.Bg).padding(inner).statusBarsPadding()) {
+    val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    // Menyu: balandligi 68dp + pastki chekka 12dp + navigatsiya paneli. Kontent shuning ostigacha cho'ziladi.
+    val barPad = PaddingValues(top = statusTop, bottom = navBottom + BAR_HEIGHT + 12.dp)
+    Box(Modifier.fillMaxSize().background(AruColors.Bg)) {
+        CompositionLocalProvider(LocalBarPad provides barPad) {
             when (tab) {
                 0 -> HomeScreen(onOpenSeason = openSeason, onLogin = login)
                 1 -> SearchScreen(onOpenSeason = openSeason)
@@ -126,5 +126,59 @@ private fun AruApp() {
                 }
             }
         }
+        // Suzuvchi menyu: chetlardan ajralgan yumaloq oyna (Flutter'dagidek), ostidan kontent ko'rinib turadi.
+        val barShape = RoundedCornerShape(30.dp)
+        NavigationBar(
+            containerColor = Color.Transparent,
+            windowInsets = WindowInsets(0, 0, 0, 0),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(start = 16.dp, end = 16.dp, bottom = 12.dp)
+                .height(BAR_HEIGHT)
+                .clip(barShape)
+                .background(AruColors.Surface.copy(alpha = 0.94f))
+                .border(1.dp, AruColors.Border, barShape),
+        ) {
+            tabs.forEachIndexed { i, t ->
+                NavigationBarItem(
+                    selected = tab == i,
+                    onClick = { tab = i },
+                    icon = { Icon(t.icon, contentDescription = t.title) },
+                    label = { Text(t.title, maxLines = 1) },
+                    colors = NavigationBarItemDefaults.colors(
+                        selectedIconColor = AruColors.Accent2,
+                        selectedTextColor = AruColors.Accent2,
+                        indicatorColor = AruColors.AccentTint,
+                        unselectedIconColor = AruColors.TextFaint,
+                        unselectedTextColor = AruColors.TextFaint,
+                    ),
+                )
+            }
+        }
+        SnackbarHost(
+            snack,
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = navBottom + BAR_HEIGHT + 20.dp),
+        )
+    }
+}
+
+private val BAR_HEIGHT = 68.dp
+
+/** Papka belgisi (Flutter'dagi Kutubxona tugmasi). `icons-core` da yo'q, shuning uchun qo'lda chizilgan. */
+private val FolderIcon: ImageVector = materialIcon(name = "Filled.Folder") {
+    materialPath {
+        moveTo(10.0f, 4.0f)
+        horizontalLineTo(4.0f)
+        curveToRelative(-1.1f, 0.0f, -1.99f, 0.9f, -1.99f, 2.0f)
+        lineTo(2.0f, 18.0f)
+        curveToRelative(0.0f, 1.1f, 0.9f, 2.0f, 2.0f, 2.0f)
+        horizontalLineToRelative(16.0f)
+        curveToRelative(1.1f, 0.0f, 2.0f, -0.9f, 2.0f, -2.0f)
+        verticalLineTo(8.0f)
+        curveToRelative(0.0f, -1.1f, -0.9f, -2.0f, -2.0f, -2.0f)
+        horizontalLineToRelative(-8.0f)
+        lineToRelative(-2.0f, -2.0f)
+        close()
     }
 }

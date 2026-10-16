@@ -60,6 +60,7 @@ import uz.arumediatv.com.ui.common.LoadingBox
 import uz.arumediatv.com.ui.common.OfflineChip
 import uz.arumediatv.com.ui.common.PageHeader
 import uz.arumediatv.com.ui.common.SeasonGrid
+import uz.arumediatv.com.ui.common.LocalBarPad
 import uz.arumediatv.com.ui.common.fullSpan
 import uz.arumediatv.com.ui.theme.AruColors
 
@@ -84,7 +85,7 @@ fun CatalogScreen(onOpenSeason: (Season) -> Unit) {
     val filterCount = genres.size + years.size
 
     Column(Modifier.fillMaxSize()) {
-        PageHeader("Katalog", Modifier.padding(horizontal = 20.dp)) {
+        PageHeader("Katalog", Modifier.padding(start = 20.dp, end = 20.dp, top = LocalBarPad.current.calculateTopPadding())) {
             if (state.offline) {
                 OfflineChip()
                 Spacer(Modifier.width(8.dp))
@@ -119,7 +120,7 @@ fun CatalogScreen(onOpenSeason: (Season) -> Unit) {
                 SeasonGrid(
                     items = list,
                     onOpen = onOpenSeason,
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 24.dp),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 24.dp + LocalBarPad.current.calculateBottomPadding()),
                     emptyContent = {
                         fullSpan {
                             when {

@@ -88,13 +88,19 @@ fun LoadingBox(modifier: Modifier = Modifier) {
     }
 }
 
+/**
+ * To'liq ekran (edge-to-edge): tab ekranlari status paneli va suzuvchi pastki menyu ostigacha cho'ziladi.
+ * `top` — status paneli balandligi, `bottom` — menyu + navigatsiya paneli balandligi (kontent tagida qolmasligi uchun).
+ */
+val LocalBarPad = androidx.compose.runtime.compositionLocalOf { PaddingValues(0.dp) }
+
 /** 2 ustunli kartalar to'ri (Bosh sahifa, Qidiruv, Katalog uchun umumiy). `header` — to'r ustidagi to'liq kenglikdagi bloklar. */
 @Composable
 fun SeasonGrid(
     items: List<Season>,
     onOpen: (Season) -> Unit,
     modifier: Modifier = Modifier,
-    contentPadding: PaddingValues = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
+    contentPadding: PaddingValues = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp + LocalBarPad.current.calculateBottomPadding()),
     header: LazyGridScope.() -> Unit = {},
     emptyContent: (LazyGridScope.() -> Unit)? = null,
 ) {

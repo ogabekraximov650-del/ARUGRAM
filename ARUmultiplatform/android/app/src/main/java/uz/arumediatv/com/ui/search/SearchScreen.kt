@@ -47,6 +47,7 @@ import uz.arumediatv.com.data.Season
 import uz.arumediatv.com.data.SeasonQueries
 import uz.arumediatv.com.ui.common.EmptyState
 import uz.arumediatv.com.ui.common.SeasonGrid
+import uz.arumediatv.com.ui.common.LocalBarPad
 import uz.arumediatv.com.ui.common.fullSpan
 import uz.arumediatv.com.ui.theme.AruColors
 
@@ -60,7 +61,7 @@ fun SearchScreen(onOpenSeason: (Season) -> Unit) {
     val results = remember(state.items, query) { SeasonQueries.search(state.items, query) }
     val focus = LocalFocusManager.current
 
-    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp)) {
+    Column(Modifier.fillMaxSize().padding(start = 16.dp, end = 16.dp, top = 12.dp + LocalBarPad.current.calculateTopPadding())) {
         SearchField(query, onChange = { query = it }, onClear = { query = "" }, onDone = { focus.clearFocus() })
         Spacer(Modifier.size(16.dp))
         SeasonGrid(
@@ -69,7 +70,7 @@ fun SearchScreen(onOpenSeason: (Season) -> Unit) {
                 focus.clearFocus()
                 onOpenSeason(it)
             },
-            contentPadding = PaddingValues(bottom = 24.dp),
+            contentPadding = PaddingValues(bottom = 24.dp + LocalBarPad.current.calculateBottomPadding()),
             emptyContent = {
                 fullSpan {
                     when {

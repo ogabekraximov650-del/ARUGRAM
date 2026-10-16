@@ -52,6 +52,7 @@ import uz.arumediatv.com.AppServices
 import uz.arumediatv.com.BuildConfig
 import uz.arumediatv.com.core.RustCore
 import uz.arumediatv.com.data.AppUser
+import uz.arumediatv.com.ui.common.LocalBarPad
 import uz.arumediatv.com.ui.common.PageHeader
 import uz.arumediatv.com.ui.common.TgImage
 import uz.arumediatv.com.ui.theme.AruColors
@@ -74,7 +75,7 @@ fun ProfileScreen(onLogin: () -> Unit, onEdit: () -> Unit, onSessions: () -> Uni
         cacheBytes = withContext(Dispatchers.IO) { AppServices.images.diskBytes() }
     }
 
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 4.dp)) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, top = 4.dp + LocalBarPad.current.calculateTopPadding())) {
         PageHeader("Profil", Modifier.padding(horizontal = 4.dp))
         Spacer(Modifier.height(8.dp))
 
@@ -124,7 +125,7 @@ fun ProfileScreen(onLogin: () -> Unit, onEdit: () -> Unit, onSessions: () -> Uni
                 Row2(Icons.Filled.ExitToApp, "Chiqish", "Bu qurilmadagi hisobdan chiqish", onClick = { confirmLogout = true }, danger = true)
             }
         }
-        Spacer(Modifier.height(32.dp))
+        Spacer(Modifier.height(32.dp + LocalBarPad.current.calculateBottomPadding()))
     }
 
     if (confirmLogout) {

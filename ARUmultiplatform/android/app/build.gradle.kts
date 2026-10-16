@@ -10,6 +10,9 @@ val ciVersionCode = (System.getenv("VERSION_CODE") ?: "1").toIntOrNull() ?: 1
 val ciKeystore = System.getenv("KS_FILE") ?: "${rootDir}/../../ci/release.keystore"
 val ciStorePass = System.getenv("KS_PASS")?.takeIf { it.isNotBlank() } ?: "arumedia"
 
+// `-PonlyAbi=armeabi-v7a` — faqat 32 bitli APK (CI'da "Admin 32 bit" uchun); bo'lmasa 32+64 bit.
+val onlyAbi = (project.findProperty("onlyAbi") as String?)?.takeIf { it.isNotBlank() }
+
 android {
     namespace = "uz.arumediatv.com"
     compileSdk = 35
@@ -27,7 +30,21 @@ android {
         buildConfigField("String", "APP_VERSION", "\"0.1.0+${ciVersionCode % 1000}\"")
 
         ndk {
-            abiFilters += listOf("armeabi-v7a", "arm64-v8a")
+            abiFilters += if (onlyAbi != null) listOf(onlyAbi) else listOf("armeabi-v7a", "arm64-v8a")
+        }
+    }
+
+    // user — oddiy foydalanuvchi ilovasi; admin — alohida paket (`uz.arumediatv.admin`), ikkalasi yonma-yon o'rnatiladi.
+    flavorDimensions += "role"
+    productFlavors {
+        create("user") {
+            dimension = "role"
+            buildConfigField("boolean", "IS_ADMIN", "false")
+        }
+        create("admin") {
+            dimension = "role"
+            applicationId = "uz.arumediatv.admin"
+            buildConfigField("boolean", "IS_ADMIN", "true")
         }
     }
 

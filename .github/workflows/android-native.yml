@@ -90,9 +90,11 @@ jobs:
           gradle-version: '8.11.1'
 
       - name: Kotlin birlik testlari
-        run: gradle --no-daemon :app:testDebugUnitTest
+        run: gradle --no-daemon :app:testUserDebugUnitTest
 
-      - name: Imzolangan APK (release)
+      # 3 ta APK: 1) Admin 32 bit, 2) Admin 32+64 bit, 3) User 32+64 bit
+      - name: Imzolangan APK'lar (release)
+        id: apk
         env:
           KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
         run: |
@@ -101,22 +103,27 @@ jobs:
             echo "${{ secrets.ANDROID_KEYSTORE_B64 }}" | base64 -d > "$RUNNER_TEMP/release.keystore"
             export KS_FILE="$RUNNER_TEMP/release.keystore"
           fi
-          gradle --no-daemon :app:assembleRelease
-          ls -la app/build/outputs/apk/release/
-
-      - name: APK nomi va imzo tekshiruvi
-        id: apk
-        run: |
-          OUT="$RUNNER_TEMP/arumediatv-native-${{ github.run_number }}.apk"
-          cp app/build/outputs/apk/release/app-release.apk "$OUT"
+          N=${{ github.run_number }}
+          OUT="$RUNNER_TEMP/apks"; mkdir -p "$OUT"
           APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
-          "$APKSIGNER" verify --print-certs "$OUT" | head -5
-          echo "out=$OUT" >> "$GITHUB_OUTPUT"
-          unzip -l "$OUT" | grep -E "librust_core|classes" || true
+
+          gradle --no-daemon :app:assembleAdminRelease -PonlyAbi=armeabi-v7a
+          cp app/build/outputs/apk/admin/release/app-admin-release.apk "$OUT/arumediatv-admin-32bit-$N.apk"
+
+          gradle --no-daemon :app:assembleAdminRelease :app:assembleUserRelease
+          cp app/build/outputs/apk/admin/release/app-admin-release.apk "$OUT/arumediatv-admin-32+64bit-$N.apk"
+          cp app/build/outputs/apk/user/release/app-user-release.apk "$OUT/arumediatv-user-32+64bit-$N.apk"
+
+          for f in "$OUT"/*.apk; do
+            echo "== $f"; ls -la "$f"
+            "$APKSIGNER" verify --print-certs "$f" | head -3
+            unzip -l "$f" | grep -E "librust_core" || true
+          done
+          echo "dir=$OUT" >> "$GITHUB_OUTPUT"
 
       # ── TELEGRAM: "SAQLANGAN XABARLAR"GA YUBORISH (Flutter workflow'idagidek) ──
       # Sessiya `tool/encode/session.enc` dan (`ENCODE_TOKEN` bilan) tiklanadi, nusxada ishlanadi. Xato bo'lsa build buzilmaydi.
-      - name: APK'ni Telegram "Saqlangan xabarlar"ga yuborish
+      - name: APK'larni Telegram "Saqlangan xabarlar"ga yuborish
         continue-on-error: true
         working-directory: ${{ github.workspace }}
         env:
@@ -124,19 +131,20 @@ jobs:
           TG_API_ID: ${{ secrets.TG_API_ID }}
           TG_API_HASH: ${{ secrets.TG_API_HASH }}
         run: |
-          APK="${{ steps.apk.outputs.out }}"
-          S="$RUNNER_TEMP/notify_session"
           K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
-          K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K \
-            -in tool/encode/session.enc -out "$S.session"
-          head -c 16 "$S.session" | grep -q "SQLite format 3"
           pip install --no-cache-dir -q pyrogram==2.0.106 tgcrypto==1.2.5
-          python tool/notify/send_apk.py "$S" "$APK" \
-            "ARUMEDIATV Android (Kotlin+Compose+Rust) build ${{ github.run_number }} — 0.1.0+${{ github.run_number }}"
-          rm -f "$S.session"
+          for APK in "${{ steps.apk.outputs.dir }}"/*.apk; do
+            S="$RUNNER_TEMP/notify_session"
+            K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K \
+              -in tool/encode/session.enc -out "$S.session"
+            head -c 16 "$S.session" | grep -q "SQLite format 3"
+            python tool/notify/send_apk.py "$S" "$APK" \
+              "ARUMEDIATV Android (Kotlin) build ${{ github.run_number }}: $(basename "$APK")"
+            rm -f "$S.session"
+          done
 
       - uses: actions/upload-artifact@v4
         with:
           name: arumediatv-native-${{ github.run_number }}
-          path: ${{ steps.apk.outputs.out }}
+          path: ${{ steps.apk.outputs.dir }}
           retention-days: 30
