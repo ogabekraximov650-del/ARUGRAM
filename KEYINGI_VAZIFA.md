@@ -6540,3 +6540,11 @@ Foydalanuvchi skrinshotlar bilan farqlarni ko'rsatdi; Kotlin ekranlari Flutter t
 - Rasmlar: keshdagi rasm Telegram ulanishini kutmaydi (`TgImage`, `ImageStore`).
 - **Yuklanmalar** (`ui/library/DownloadsScreens.kt`): bo'lim kartalari ("N ta qism to'liq yuklangan", hajm) -> qismlar ekrani (kadr, ⬇ sifat tanlash, 🗑, sifat kataklari progress bilan). Pastki menyuda Katalog ikonkasi katak (Flutter bilan bir xil).
 - **Media paneli**: yozib qidirish (so'z/emoji/to'plam nomi), GIF/stiker saralanganlari (bosib turib ⭐), emoji teri rangi (bosib turib).
+
+## Kotlin ilova: Flutter bilan tenglashtirish (2026-10, keyingi bosqich)
+
+- Kirish majburiy (`AuthGate`), davlat tanlash (`TgCountries`), ARUMEDIATV sarlavhasi 5 tabda (`PageHeader`).
+- Kartalarda belgilar/narx (`SeasonCard`), qidiruv kartasi, Profil (Flutter uslubi), Xotira (donut), Obuna va balans (3 sahifa), yordam chati (Telegram uslubi), sessiyalar, profil maslahatlari.
+- Oflayn kutubxona (`OfflineLibrary`): oflaynda faqat yuklab olingan kontent ko'rinadi.
+- To'plamga element qo'shish va video kesish (`PackAdd.kt`, `Packs.addItem`, kesish fayl nomiga `_t<a>-<b>` / `_m` bilan kodlanadi).
+- Pleyer: TextureView, xato matnida manba va kod; Tarixda to'xtagan joydagi kadr (`/thumb`).
