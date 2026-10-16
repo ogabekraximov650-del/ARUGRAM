@@ -291,7 +291,13 @@ object PlaySource {
         val cache = uz.arumediatv.com.AppServices.videoCache
         if (!preferWorker && cache.isComplete(url)) cache.proxyUri(url)?.let { return Source(it, false, local = true) }
         if (!Net.isOnline(uz.arumediatv.com.AppServices.appContext)) return null
-        if (!preferWorker) tg.playUrl(url)?.let { return Source(it, true) }
+        // Telegram: pleyer Rust yadrosidan (AruDataSource) o'qiydi — bo'laklar shifrlanib diskka yoziladi (Flutterdagidek),
+        // shuning uchun ko'rilgan joy "Yuklanmalar" va Xotirada hisoblanadi.
+        if (!preferWorker) tg.playUrl(url)?.let {
+            val name = Names.fileNameOf(url)
+            if (cache.ensureStarted() > 0 && name.isNotEmpty()) return Source("aru://file/$name", true)
+            return Source(it, true)
+        }
         return worker(url)?.let { Source(it, false) }
     }
 

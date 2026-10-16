@@ -79,7 +79,7 @@ class AruPlayer(context: Context) {
             val root = generateSequence<Throwable>(e) { it.cause }.last()
             val http = (e.cause as? androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException)?.responseCode
             val where = when {
-                lastUri.contains("127.0.0.1") && lastUri.contains("/tg/") -> "Telegram"
+                lastUri.startsWith("aru://") || (lastUri.contains("127.0.0.1") && lastUri.contains("/tg/")) -> "Telegram"
                 lastUri.contains("127.0.0.1") -> "mahalliy kesh"
                 else -> "worker"
             }
@@ -103,7 +103,14 @@ class AruPlayer(context: Context) {
         ready = false
         positionMs = startMs
         durationMs = 0
-        exo.setMediaItem(MediaItem.fromUri(uri), startMs.coerceAtLeast(0))
+        if (uri.startsWith("aru://")) {
+            val item = MediaItem.Builder().setUri(uri).setMimeType(androidx.media3.common.MimeTypes.VIDEO_MP4).build()
+            val factory = androidx.media3.exoplayer.source.ProgressiveMediaSource.Factory(io.flutter.plugins.videoplayer.AruDataSource.Factory())
+                .setContinueLoadingCheckIntervalBytes(256 * 1024)
+            exo.setMediaSource(factory.createMediaSource(item), startMs.coerceAtLeast(0))
+        } else {
+            exo.setMediaItem(MediaItem.fromUri(uri), startMs.coerceAtLeast(0))
+        }
         exo.setPlaybackSpeed(speed)
         exo.prepare()
         exo.playWhenReady = play
