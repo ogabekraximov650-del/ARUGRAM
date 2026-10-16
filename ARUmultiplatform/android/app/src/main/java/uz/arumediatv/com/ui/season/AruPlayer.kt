@@ -11,6 +11,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
+import io.flutter.plugins.videoplayer.AruDataSource
 
 /**
  * Media3 ExoPlayer o'rami: ijro holati Compose `State` sifatida (ekran kuzatadi).
@@ -105,7 +106,7 @@ class AruPlayer(context: Context) {
         durationMs = 0
         if (uri.startsWith("aru://")) {
             val item = MediaItem.Builder().setUri(uri).setMimeType(androidx.media3.common.MimeTypes.VIDEO_MP4).build()
-            val factory = androidx.media3.exoplayer.source.ProgressiveMediaSource.Factory(io.flutter.plugins.videoplayer.AruDataSource.Factory())
+            val factory = androidx.media3.exoplayer.source.ProgressiveMediaSource.Factory(AruDataSource.Factory())
                 .setContinueLoadingCheckIntervalBytes(256 * 1024)
             exo.setMediaSource(factory.createMediaSource(item), startMs.coerceAtLeast(0))
         } else {

@@ -238,7 +238,7 @@ internal class ChartModel {
         return out
     }
 
-    fun visible(): Map<String, Sector> {
+    private fun visible(): Map<String, Sector> {
         val f = if (hadDrain) left() else 1.0
         val shares = currentShares()
         val out = LinkedHashMap<String, Sector>()
