@@ -24,7 +24,7 @@ from pyrogram import Client
 API = os.environ["API_BASE"].rstrip("/")
 TOKEN = "".join(os.environ["ENCODE_TOKEN"].split())
 SESSION = str(Path(__file__).with_name("pyro_session"))
-WORK = Path(os.environ.get("RUNNER_TEMP", "/tmp")) / "arugram_upload"
+WORK = Path(os.environ.get("RUNNER_TEMP", "/tmp")) / "arumediatv_upload"
 RUNNER = f"up-{os.environ.get('GITHUB_RUN_ID', 'local')}-{os.environ.get('GITHUB_RUN_ATTEMPT', '1')}"
 START_BUDGET = int(float(os.environ.get("START_BUDGET_MIN", "300")) * 60)
 STALL_S = int(os.environ.get("UPLOAD_STALL_SEC", "120"))
@@ -101,7 +101,7 @@ class Status:
             req = urllib.request.Request(
                 f"{API}/api/encode/push", data=body.encode(), method="POST",
                 headers={"X-Encode-Token": TOKEN, "X-Encode-Quality": "upload", "Content-Type": "text/plain; charset=utf-8",
-                         "User-Agent": "arugram-upload"})
+                         "User-Agent": "arumediatv-upload"})
             urllib.request.urlopen(req, timeout=20).read()
         except Exception as ex:  # noqa: BLE001
             print(f"holat yuborilmadi: {ex}", flush=True)
@@ -131,7 +131,7 @@ def api(path: str, body: dict | None = None) -> dict:
     for attempt in range(5):
         req = urllib.request.Request(
             f"{API}/api/r2/{path}", data=data, method="POST",
-            headers={"X-Encode-Token": TOKEN, "Content-Type": "application/json", "User-Agent": "arugram-upload"})
+            headers={"X-Encode-Token": TOKEN, "Content-Type": "application/json", "User-Agent": "arumediatv-upload"})
         try:
             with urllib.request.urlopen(req, timeout=60) as r:
                 return json.loads(r.read() or b"{}")
@@ -149,7 +149,7 @@ def is_committed(name: str) -> bool:
     try:
         req = urllib.request.Request(
             f"{API}/api/encode/committed?file={urllib.parse.quote(name)}",
-            headers={"X-Encode-Token": TOKEN, "User-Agent": "arugram-upload"})
+            headers={"X-Encode-Token": TOKEN, "User-Agent": "arumediatv-upload"})
         with urllib.request.urlopen(req, timeout=30) as r:
             return bool(json.loads(r.read() or b"{}").get("ok"))
     except Exception as ex:  # noqa: BLE001
@@ -165,11 +165,11 @@ def download(name: str, dst: Path, size: int, url: str | None = None):
         for attempt in range(1, 9):
             try:
                 if url:
-                    req = urllib.request.Request(url, headers={"Range": f"bytes={got}-", "User-Agent": "arugram-upload"})
+                    req = urllib.request.Request(url, headers={"Range": f"bytes={got}-", "User-Agent": "arumediatv-upload"})
                 else:
                     req = urllib.request.Request(
                         f"{API}/api/r2/get?file={urllib.parse.quote(name)}&offset={got}",
-                        headers={"X-Encode-Token": TOKEN, "User-Agent": "arugram-upload"})
+                        headers={"X-Encode-Token": TOKEN, "User-Agent": "arumediatv-upload"})
                 with urllib.request.urlopen(req, timeout=120) as r:
                     while True:
                         chunk = r.read(1 << 20)
@@ -446,7 +446,7 @@ def callback(cb: dict, msg_id: int):
     data = json.dumps(_subst(cb.get("body") or {}, msg_id)).encode()
     req = urllib.request.Request(
         f"{API}{cb['path']}", data=data, method="POST",
-        headers={"X-Encode-Token": TOKEN, "Content-Type": "application/json", "User-Agent": "arugram-upload"})
+        headers={"X-Encode-Token": TOKEN, "Content-Type": "application/json", "User-Agent": "arumediatv-upload"})
     for attempt in range(4):
         try:
             with urllib.request.urlopen(req, timeout=60) as r:

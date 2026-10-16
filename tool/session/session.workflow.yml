@@ -8,7 +8,7 @@ on:
   workflow_dispatch: {}
 
 concurrency:
-  group: arugram-session
+  group: arumediatv-session
   cancel-in-progress: false
 
 permissions:
@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
-      API_BASE: ${{ secrets.API_BASE || 'https://arugram.uzcom.workers.dev' }}
+      API_BASE: ${{ secrets.API_BASE || 'https://arumediatv.uzcom.workers.dev' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

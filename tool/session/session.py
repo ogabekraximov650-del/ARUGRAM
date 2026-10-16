@@ -26,7 +26,7 @@ from pyrogram.errors import (FloodWait, PasswordHashInvalid, PhoneCodeExpired, P
 
 API = os.environ["API_BASE"].rstrip("/")
 TOKEN = "".join(os.environ["ENCODE_TOKEN"].split())
-WORK = Path(os.environ.get("RUNNER_TEMP", "/tmp")) / "arugram_newsession"
+WORK = Path(os.environ.get("RUNNER_TEMP", "/tmp")) / "arumediatv_newsession"
 SESS = WORK / "new_session"
 OUT = Path("tool/encode/session.enc")  # run boshlanganda tanlangan sifatga qarab `session_<n>.enc` bo'ladi
 
@@ -46,7 +46,7 @@ def call(path, body=None):
         req = urllib.request.Request(
             f"{API}/api/session/{path}", data=data, method="POST",
             headers={"X-Encode-Token": TOKEN, "Content-Type": "application/json",
-                     "User-Agent": "arugram-session"})
+                     "User-Agent": "arumediatv-session"})
         try:
             with urllib.request.urlopen(req, timeout=40) as r:
                 return json.loads(r.read() or b"{}")
@@ -103,7 +103,7 @@ def save_session():
                           capture_output=True).stdout
     if back[:15] != b"SQLite format 3":
         raise RuntimeError("shifrlangan sessiya tekshiruvdan o'tmadi")
-    run(["git", "config", "user.name", "arugram-session"])
+    run(["git", "config", "user.name", "arumediatv-session"])
     run(["git", "config", "user.email", "session@users.noreply.github.com"])
     run(["git", "add", str(OUT)])
     run(["git", "commit", "-m", f"Yangi Telegram sessiyasi ({OUT.stem}, bot orqali)"])

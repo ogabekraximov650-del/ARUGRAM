@@ -73,7 +73,7 @@ def api(method, path, body=None, ok=(200, 201, 204)):
             "Authorization": f"Bearer {TOKEN}",
             "Accept": "application/vnd.github+json",
             "Content-Type": "application/json",
-            "User-Agent": "arugram-setup",
+            "User-Agent": "arumediatv-setup",
         },
     )
     try:

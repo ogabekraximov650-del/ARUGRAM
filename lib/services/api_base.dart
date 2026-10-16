@@ -1,7 +1,7 @@
 // lib/services/api_base.dart — SERVER MANZILI (BITTA JOYDA)
 //
-// ARUGRAM o'zining ALOHIDA worker'ida (`arugram`) ishlaydi — eski
-// `arumediatv` ga tegilmaydi (foydalanuvchi talabi).
+// ARUMEDIATV worker'i `arumediatv` nomi bilan ishlaydi (eski `arumediatv` worker ustiga
+// deploy qilingan — foydalanuvchi talabi: eski ilova endi ulana olmaydi).
 //
 // Manzil APK yig'ilayotganda `--dart-define=API_BASE=...` bilan
 // beriladi: CI uni Cloudflare hisobining workers.dev subdomenidan
@@ -9,5 +9,5 @@
 // zaxira qiymat.
 const String kApiBase = String.fromEnvironment(
   'API_BASE',
-  defaultValue: 'https://arugram.uzcom.workers.dev',
+  defaultValue: 'https://arumediatv.uzcom.workers.dev',
 );

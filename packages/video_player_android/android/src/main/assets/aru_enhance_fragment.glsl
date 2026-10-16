@@ -1,4 +1,4 @@
-// ARUGRAM "Tasvirni yaxshilash" — bitta o'tishli (single-pass) anime uchun fragment shader (GLSL ES 1.00).
+// ARUMEDIATV "Tasvirni yaxshilash" — bitta o'tishli (single-pass) anime uchun fragment shader (GLSL ES 1.00).
 // Ilova (Media3 GlShaderProgram) va web (WebGL) AYNAN SHU matndan foydalanadi (web/src/js/player/enhance-shader.js nusxasi).
 //
 // Bosqichlar:

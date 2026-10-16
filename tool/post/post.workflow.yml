@@ -7,14 +7,14 @@ name: Post kodlash (H.265)
 # dagi ID'ga video bo'lib, tagida post nomi bilan.
 # Avto-kodlash (H.265, `encode.yml`) bilan bog'liq emas.
 #
-# Bu fayl ARUGRAM repodagi `tool/post/post.workflow.yml` dan ko'chiriladi
+# Bu fayl ARUMEDIATV repodagi `tool/post/post.workflow.yml` dan ko'chiriladi
 # (`sync-packs.yml`) — shu yerda o'zgartirmang.
 
 on:
   workflow_dispatch: {}
 
 concurrency:
-  group: arugram-post
+  group: arumediatv-post
   cancel-in-progress: false
 
 permissions:
@@ -25,7 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 340
     env:
-      API_BASE: ${{ secrets.API_BASE || 'https://arugram.uzcom.workers.dev' }}
+      API_BASE: ${{ secrets.API_BASE || 'https://arumediatv.uzcom.workers.dev' }}
     steps:
       - uses: actions/checkout@v4
 

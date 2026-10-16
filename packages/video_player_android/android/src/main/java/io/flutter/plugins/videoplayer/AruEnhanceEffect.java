@@ -1,4 +1,4 @@
-// ARUGRAM: "Tasvirni yaxshilash" effekti (ExoPlayer video effekti, GPU).
+// ARUMEDIATV: "Tasvirni yaxshilash" effekti (ExoPlayer video effekti, GPU).
 package io.flutter.plugins.videoplayer;
 
 import android.content.Context;

@@ -30,7 +30,7 @@ on:
   workflow_dispatch: {}
 
 concurrency:
-  group: arugram-encode
+  group: arumediatv-encode
   cancel-in-progress: false
 
 permissions:
@@ -57,14 +57,14 @@ jobs:
             SUB=$(curl -fsS -H "Authorization: Bearer $CF_TOKEN" \
               "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/workers/subdomain" \
               | jq -r '.result.subdomain // empty' || true)
-            [ -n "$SUB" ] && API_BASE="https://arugram.$SUB.workers.dev"
+            [ -n "$SUB" ] && API_BASE="https://arumediatv.$SUB.workers.dev"
           fi
           if [ -z "$API_BASE" ]; then
             echo "::error::Worker manzili aniqlanmadi (API_BASE secret'ini qo'ying)"
             exit 1
           fi
           echo "api=$API_BASE" >> "$GITHUB_OUTPUT"
-          N=$(curl -fsS -H "X-Encode-Token: $ENCODE_TOKEN" -H "User-Agent: arugram-encoder" \
+          N=$(curl -fsS -H "X-Encode-Token: $ENCODE_TOKEN" -H "User-Agent: arumediatv-encoder" \
             "$API_BASE/api/encode/peek" | jq -r '.pending // 0')
           echo "Navbatda: $N"
           echo "pending=$N" >> "$GITHUB_OUTPUT"

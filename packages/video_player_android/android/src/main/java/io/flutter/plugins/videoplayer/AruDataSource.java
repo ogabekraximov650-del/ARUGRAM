@@ -1,4 +1,4 @@
-// ARUGRAM: pleyer videoni MAHALLIY SERVERSIZ, Rust yadrosi orqali
+// ARUMEDIATV: pleyer videoni MAHALLIY SERVERSIZ, Rust yadrosi orqali
 // diskdagi shifrlangan bo'laklardan o'qiydi (Telegram ilovasidagi
 // FileStreamLoadOperation kabi). Bo'lak diskda bo'lmasa Rust uni
 // Telegram'dan oladi, shifrlab diskka yozadi va shu yerga beradi.

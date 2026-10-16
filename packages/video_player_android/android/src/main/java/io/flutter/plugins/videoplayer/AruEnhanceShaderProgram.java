@@ -1,4 +1,4 @@
-// ARUGRAM: "Tasvirni yaxshilash" shader dasturi (Media3 BaseGlShaderProgram).
+// ARUMEDIATV: "Tasvirni yaxshilash" shader dasturi (Media3 BaseGlShaderProgram).
 package io.flutter.plugins.videoplayer;
 
 import android.content.Context;

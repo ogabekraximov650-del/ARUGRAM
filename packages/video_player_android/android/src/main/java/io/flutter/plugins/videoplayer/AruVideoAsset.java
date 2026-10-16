@@ -1,4 +1,4 @@
-// ARUGRAM: aru://file/<nom> — `AruDataSource` orqali o'qiladigan video.
+// ARUMEDIATV: aru://file/<nom> — `AruDataSource` orqali o'qiladigan video.
 
 package io.flutter.plugins.videoplayer;
 

@@ -407,7 +407,7 @@ jobs:
       # NOMI: `flutter create` nomni loyiha papkasidan oladi va
       # manifestga `android:label="soft"` deb yozadi (loyiha nomi)
       # — telefonda belgi ostida aynan shu yozuv turardi.
-      # Ilovaning nomi esa ARUGRAM.
+      # Ilovaning nomi esa ARUMEDIATV.
       #
       # YUMALOQ BELGI (`android:roundIcon`): Android 7.1 dan beri
       # qobiqlar (ayniqsa MIUI, Samsung One UI) belgini YUMALOQ
@@ -453,7 +453,7 @@ jobs:
       # bo'lishi shart).
       #
       # DIQQAT: paket nomi almashgani uchun Android buni YANGI ilova deb
-      # biladi — eski ARUGRAM ustiga yangilanmaydi, yonida alohida
+      # biladi — eski ARUMEDIATV ustiga yangilanmaydi, yonida alohida
       # o'rnatiladi (eskisini o'chirish kerak).
       - name: Kadr ajratuvchini (MediaMetadataRetriever) joylashtirish
         run: |
@@ -600,18 +600,19 @@ jobs:
           echo "APP_VERSION=$APP_VERSION" >> "$GITHUB_ENV"
           echo "BUILD_NAME_EXPECTED=$BUILD_NAME" >> "$GITHUB_ENV"
 
-          # ── SERVER MANZILI (ARUGRAM'ning o'z worker'i) ──────────
+          # ── SERVER MANZILI (ARUMEDIATV'ning o'z worker'i) ──────────
           #
-          # Worker nomi `arugram`, manzili esa Cloudflare hisobining
-          # workers.dev subdomeniga bog'liq: arugram.<subdomen>.workers.dev.
+          # Worker nomi `arumediatv`, manzili esa Cloudflare hisobining
+          # workers.dev subdomeniga bog'liq: arumediatv.<subdomen>.workers.dev.
           # Subdomen Cloudflare API'dan olinadi — qo'lda yozish
-          # shart emas. `API_BASE` secret'i qo'yilgan bo'lsa u ustun.
-          if [ -z "$API_BASE" ] && [ -n "$CF_TOKEN" ] && [ -n "$CF_ACCOUNT" ]; then
+          # shart emas. Olinmasa `API_BASE` secret'i ishlatiladi.
+          # Cloudflare'dan hisoblangan manzil `API_BASE` secret'idan USTUN (eski manzil secret'da qolib ketmasin).
+          if [ -n "$CF_TOKEN" ] && [ -n "$CF_ACCOUNT" ]; then
             SUB=$(curl -fsS -H "Authorization: Bearer $CF_TOKEN" \
               "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/workers/subdomain" \
               | jq -r '.result.subdomain // empty' || true)
             if [ -n "$SUB" ]; then
-              API_BASE="https://arugram.$SUB.workers.dev"
+              API_BASE="https://arumediatv.$SUB.workers.dev"
             fi
           fi
           if [ -z "$API_BASE" ]; then

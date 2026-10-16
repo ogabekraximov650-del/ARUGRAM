@@ -82,7 +82,7 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
     }
 
     exoPlayer.setMediaItem(mediaItem);
-    // ARUGRAM: effekt konveyeri prepare() dan OLDIN quriladi (kerak bo'lsa).
+    // ARUMEDIATV: effekt konveyeri prepare() dan OLDIN quriladi (kerak bo'lsa).
     preparePipelineIfNeeded();
     exoPlayer.prepare();
     exoPlayerEventListener = createExoPlayerEventListener(exoPlayer, surfaceProducer);
@@ -126,7 +126,7 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
     return value != Format.NO_VALUE ? value : null;
   }
 
-  // ── ARUGRAM: TASVIRNI YAXSHILASH ─────────────────────────────
+  // ── ARUMEDIATV: TASVIRNI YAXSHILASH ─────────────────────────────
   /** Qurilma effektni ko'tara olmasa (kadr tashlanadi) darajasi tushiriladi — Dart'ga xabar beriladi. */
   public interface EnhanceListener {
     void onEnhanceDegraded(int newLevel);

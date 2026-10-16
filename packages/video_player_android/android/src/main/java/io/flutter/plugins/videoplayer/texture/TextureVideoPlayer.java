@@ -56,7 +56,7 @@ public final class TextureVideoPlayer extends VideoPlayer implements SurfaceProd
         asset.getMediaItem(),
         options,
         () -> {
-          // ARUGRAM: apparat dekoderi ochilmasa (MediaCodecVideoRenderer
+          // ARUMEDIATV: apparat dekoderi ochilmasa (MediaCodecVideoRenderer
           // xatosi — masalan telefonda bir vaqtda juda ko'p dekoder yoki
           // old kamera yozgan dumaloq video profili) ExoPlayer keyingi
           // dekoderni (dasturiy `c2.android.*`) sinaydi.
@@ -65,7 +65,7 @@ public final class TextureVideoPlayer extends VideoPlayer implements SurfaceProd
                   context,
                   new androidx.media3.exoplayer.DefaultRenderersFactory(context)
                       .setEnableDecoderFallback(true));
-          // ARUGRAM: bufer doim sozlanadi (`AruLoadControl`).
+          // ARUMEDIATV: bufer doim sozlanadi (`AruLoadControl`).
           builder.setLoadControl(
               io.flutter.plugins.videoplayer.AruLoadControl.build(options.backBufferDurationMs));
           androidx.media3.exoplayer.trackselection.DefaultTrackSelector trackSelector =

@@ -15,7 +15,7 @@ const out = path.resolve(process.argv[3] || '.');
 fs.mkdirSync(out, { recursive: true });
 const mocks = (await import(mocksPath)).default;
 
-const API = 'https://arugram.uzcom.workers.dev';
+const API = 'https://arumediatv.uzcom.workers.dev';
 const user = mocks.tgUser || { id: 777, first_name: 'Test', username: 'test' };
 const b = await chromium.launch();
 const ctx = await b.newContext({ viewport: { width: 393, height: 851 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });

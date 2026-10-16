@@ -104,7 +104,7 @@ def api(path, body):
         req = urllib.request.Request(
             f"{base}/api/anibla/{path}", data=data, method="POST",
             headers={"X-Encode-Token": os.environ["ENCODE_TOKEN"],
-                     "Content-Type": "application/json", "User-Agent": "arugram-anibla"})
+                     "Content-Type": "application/json", "User-Agent": "arumediatv-anibla"})
         try:
             with urllib.request.urlopen(req, timeout=60) as r:
                 return json.loads(r.read() or b"{}")
@@ -593,7 +593,7 @@ async def process(app, job):
             if thumb.exists() and 0 < thumb.stat().st_size < 200_000:
                 dest["thumb_b64"] = base64.b64encode(thumb.read_bytes()).decode()
             ok_r2 = await asyncio.to_thread(r2client.deliver, os.environ["API_BASE"], os.environ["ENCODE_TOKEN"], out,
-                                           f"anibla_{job.id}_{int(time.time())}.mp4", dest, log, "arugram-anibla")
+                                           f"anibla_{job.id}_{int(time.time())}.mp4", dest, log, "arumediatv-anibla")
             if ok_r2:
                 live.done("R2'ga yozildi · Telegram'ga yuklovchi workflow yetkazadi")
                 live.close()

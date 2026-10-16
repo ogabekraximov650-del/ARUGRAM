@@ -220,7 +220,7 @@ fn row_to_obj(cols: &[Value], row: &[Value]) -> Value {
 // shu paytda kesh belgisi + 10 daqiqalik zaxira Turso tekshiruvi.
 
 /// Belgilar keshi (zaxira): `<MARK_CACHE_BASE><kalit>`.
-const MARK_CACHE_BASE: &str = "https://arugram-mark.internal/";
+const MARK_CACHE_BASE: &str = "https://arumediatv-mark.internal/";
 /// Belgi o'zgarmasa ham Turso shuncha vaqtda bir marta tekshiriladi —
 /// FAQAT DO ishlamayotganda (kesh har data markazda alohida).
 const CHAT_FALLBACK_MS: i64 = 10 * 60 * 1000;
@@ -725,7 +725,7 @@ fn schema_mark_url() -> String {
             h = h.wrapping_mul(0x100000001b3);
         }
     }
-    format!("https://arugram-schema.internal/{h:016x}")
+    format!("https://arumediatv-schema.internal/{h:016x}")
 }
 
 async fn init_db(env: &Env) -> bool {
@@ -3640,7 +3640,7 @@ fn epizod_fields(b: &Value) -> EpizodFields {
 
 /// Kirish botining username'i.
 ///
-/// ARUGRAM (foydalanuvchi talabi): bot nomi kodda QOTIRILMAYDI —
+/// ARUMEDIATV (foydalanuvchi talabi): bot nomi kodda QOTIRILMAYDI —
 /// `TELEGRAM_BOT_TOKEN` qaysi botniki bo'lsa, username o'sha
 /// botning `getMe` javobidan olinadi. Ilgari nom qo'lda yozilardi
 /// va bot almashganda kirish havolasi eski botga olib borardi.
@@ -4063,7 +4063,7 @@ fn user_public(origin: &str, u: &Value) -> Value {
     let id = u["id"].as_i64().unwrap_or(0);
     let avatar = u["avatar_file"].as_str().unwrap_or("");
     let photo_url = if avatar.is_empty() {
-        String::new() /* ARUGRAM: Telegram avatari worker orqali uzatilmaydi */
+        String::new() /* ARUMEDIATV: Telegram avatari worker orqali uzatilmaydi */
     } else {
         format!("{origin}/api/image/{avatar}")
     };
@@ -4580,7 +4580,7 @@ fn ok_nostore(v: Value) -> Result<Response> {
 
 // ── Avatar (Telegram → worker → ilova) ─────────────────────────
 
-#[allow(dead_code)] // ARUGRAM: Telegram avatari endi uzatilmaydi.
+#[allow(dead_code)] // ARUMEDIATV: Telegram avatari endi uzatilmaydi.
 async fn tg_avatar(env: &Env, user_id: i64) -> Result<Response> {
     let cache = Cache::default();
     let key_url = format!("https://fulutter-chunk-cache.internal/_avatar/{user_id}");
@@ -4644,7 +4644,7 @@ async fn tg_avatar(env: &Env, user_id: i64) -> Result<Response> {
 /// QILISH kerak. "Xatolik: Telegram xatosi (sendMessage)" kabi
 /// ichki matnlar hech qachon tashqariga chiqmaydi: ular
 /// foydalanuvchiga hech narsa tushuntirmaydi, faqat qo'rqitadi.
-const MSG_HELP: &str = "\u{1F44B} Salom! Men \u{2014} <b>ARUGRAM</b> ilovasining kirish yordamchisiman.\n\n\
+const MSG_HELP: &str = "\u{1F44B} Salom! Men \u{2014} <b>ARUMEDIATV</b> ilovasining kirish yordamchisiman.\n\n\
      Kirish uchun: ilovani oching \u{2192} pastdagi <b>Profil</b> bo'limi \u{2192} \u{AB}Telegram orqali kirish\u{BB} tugmasi.\n\n\
      O'sha tugma meni o'zi ochadi \u{2014} bu yerda hech narsa yozishingiz shart emas.\n\n\
      \u{1F4FA} Animelarni shu yerning o'zida ko'rish uchun pastdagi tugmani bosing.";
@@ -5911,7 +5911,7 @@ async fn desk_diagnosis(env: &Env) -> Option<String> {
 
 const FREE_SEASONS_TTL_MS: i64 = 120_000;
 const FREE_SEASONS_EDGE_SECS: u32 = 600;
-const FREE_SEASONS_EDGE_URL: &str = "https://arugram-free-seasons.internal/v1";
+const FREE_SEASONS_EDGE_URL: &str = "https://arumediatv-free-seasons.internal/v1";
 
 thread_local! {
     static FREE_SEASONS_CACHE: std::cell::RefCell<Option<(i64, std::collections::HashSet<(i64, i64)>)>> =
@@ -6003,7 +6003,7 @@ async fn free_seasons_forget() {
 // Kartadagi "N ta qism" endi faqat KO'RINADIGAN qismlardan (`free_seasons`
 // dagi shart bilan bir xil). Hisob isolyat xotirasida va Cloudflare
 // keshida 10 daqiqa turadi — har so'rovda Turso'ga borilmaydi.
-const VISIBLE_EPS_EDGE_URL: &str = "https://arugram-visible-eps.internal/v1";
+const VISIBLE_EPS_EDGE_URL: &str = "https://arumediatv-visible-eps.internal/v1";
 
 thread_local! {
     static VISIBLE_EPS_CACHE: std::cell::RefCell<Option<(i64, std::collections::HashMap<(i64, i64), i64>)>> =
@@ -6125,7 +6125,7 @@ async fn billing_create(mut req: Request, env: &Env) -> Result<Response> {
 
     let mut body = json!({
         "amount_minor": to_minor(amount),
-        "title": format!("ARUGRAM — balans to'ldirish ({amount} so'm)"),
+        "title": format!("ARUMEDIATV — balans to'ldirish ({amount} so'm)"),
         "external_reference": reference,
     });
     // Bitta to'lov usuli tanlab qo'yilgan bo'lsa — foydalanuvchi
@@ -6616,7 +6616,7 @@ fn comment_public(origin: &str, r: &Value) -> Value {
     let uid = r["user_id"].as_i64().unwrap_or(0);
     let avatar = r["avatar_file"].as_str().unwrap_or("");
     let photo = if avatar.is_empty() {
-        String::new() /* ARUGRAM: Telegram avatari worker orqali uzatilmaydi */
+        String::new() /* ARUMEDIATV: Telegram avatari worker orqali uzatilmaydi */
     } else {
         format!("{origin}/api/image/{avatar}")
     };
@@ -6893,7 +6893,7 @@ async fn comments_add(mut req: Request, env: &Env, origin: &str) -> Result<Respo
 
     let avatar = u["avatar_file"].as_str().unwrap_or("");
     let photo = if avatar.is_empty() {
-        String::new() /* ARUGRAM: Telegram avatari worker orqali uzatilmaydi */
+        String::new() /* ARUMEDIATV: Telegram avatari worker orqali uzatilmaydi */
     } else {
         format!("{origin}/api/image/{avatar}")
     };
@@ -7832,7 +7832,7 @@ async fn chat_threads(req: &Request, env: &Env, origin: &str) -> Result<Response
         let uid = o["user_id"].as_i64().unwrap_or(0);
         let avatar = o["avatar_file"].as_str().unwrap_or("");
         let photo = if avatar.is_empty() {
-            String::new() /* ARUGRAM: Telegram avatari worker orqali uzatilmaydi */
+            String::new() /* ARUMEDIATV: Telegram avatari worker orqali uzatilmaydi */
         } else {
             format!("{origin}/api/image/{avatar}")
         };
@@ -8217,7 +8217,7 @@ async fn report_add(mut req: Request, env: &Env) -> Result<Response> {
 fn report_public(origin: &str, r: &Value) -> Value {
     let photo = |_uid: i64, file: &str| -> String {
         if file.is_empty() {
-            String::new() /* ARUGRAM: Telegram avatari worker orqali uzatilmaydi */
+            String::new() /* ARUMEDIATV: Telegram avatari worker orqali uzatilmaydi */
         } else {
             format!("{origin}/api/image/{file}")
         }
@@ -8579,7 +8579,7 @@ async fn public_profile(
     };
     let avatar = u["avatar_file"].as_str().unwrap_or("");
     let photo = if avatar.is_empty() {
-        String::new() /* ARUGRAM: Telegram avatari worker orqali uzatilmaydi */
+        String::new() /* ARUMEDIATV: Telegram avatari worker orqali uzatilmaydi */
     } else {
         format!("{origin}/api/image/{avatar}")
     };
@@ -8924,7 +8924,7 @@ async fn admin_users(req: &Request, env: &Env, origin: &str) -> Result<Response>
         let uid = o["id"].as_i64().unwrap_or(0);
         let avatar = o["avatar_file"].as_str().unwrap_or("");
         let photo = if avatar.is_empty() {
-            String::new() /* ARUGRAM: Telegram avatari worker orqali uzatilmaydi */
+            String::new() /* ARUMEDIATV: Telegram avatari worker orqali uzatilmaydi */
         } else {
             format!("{origin}/api/image/{avatar}")
         };
@@ -9484,7 +9484,7 @@ async fn stats_series(req: &Request, env: &Env) -> Result<Response> {
         }
     }
     // Kesh (kanal grafigi ham — so'rov admin tekshiruvidan KEYIN).
-    let key = format!("https://arugram-series.internal/v1?m={metric}&r={range}");
+    let key = format!("https://arumediatv-series.internal/v1?m={metric}&r={range}");
     if let Ok(k) = Request::new(&key, Method::Get) {
         if let Ok(Some(mut hit)) = Cache::default().get(&k, false).await {
             if let Ok(v) = hit.json::<Value>().await {
@@ -13074,7 +13074,7 @@ async fn gh_api(env: &Env, method: Method, path: &str, body: Option<Value>) -> R
     h.set("Authorization", &format!("Bearer {token}"))?;
     h.set("Accept", "application/vnd.github+json")?;
     h.set("X-GitHub-Api-Version", "2022-11-28")?;
-    h.set("User-Agent", "arugram-worker")?;
+    h.set("User-Agent", "arumediatv-worker")?;
     let mut init = RequestInit::new();
     init.with_method(method).with_headers(h);
     if let Some(b) = body {
@@ -13191,7 +13191,7 @@ async fn encode_log_chat(env: &Env) -> String {
 // keshida 30 soniya turadi: shu orada kelgan so'rovlar (bir nechta admin,
 // bot "Holat" tugmasi, ilovaning zaxira yo'li) Telegram'ga ham, GitHub'ga
 // ham, bazaga ham bormaydi.
-const ENCODE_LIVE_CACHE_URL: &str = "https://arugram-encode-live.internal/v1";
+const ENCODE_LIVE_CACHE_URL: &str = "https://arumediatv-encode-live.internal/v1";
 // Runner endi holatni har ~5 soniyada yuboradi — kesh qisqa bo'lmasa ilova
 // eski holatni ko'rib turardi (foydalanuvchi: "log yangilanmayapti").
 const ENCODE_LIVE_CACHE_SECS: u32 = 4;
@@ -14690,7 +14690,7 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
     // chekkada 1 kun keshlanadi. Telegram fayl manzilida bot
     // tokeni bo'lgani uchun u manzil ilovaga chiqarilmaydi.
     if method == Method::Get {
-        // ARUGRAM: fayl worker orqali o'tmaydi (foydalanuvchi talabi) —
+        // ARUMEDIATV: fayl worker orqali o'tmaydi (foydalanuvchi talabi) —
         // Telegram profil rasmi endi uzatilmaydi; ilova rasm o'rnida
         // ismning bosh harfini ko'rsatadi.
         if path.starts_with("/api/avatar/") {
@@ -14734,10 +14734,10 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
         }
 
         (Method::Post, "/api/upload-token") => {
-            // ARUGRAM: kanal sozlangan bo'lsa fayllar (rasmlar va h.k.)
+            // ARUMEDIATV: kanal sozlangan bo'lsa fayllar (rasmlar va h.k.)
             // B2 o'rniga Telegram kanaliga joylanadi. Javob B2 niki
             // bilan BIR XIL shaklda — ilovadagi yuklovchilar o'zgarmaydi.
-            // ARUGRAM: kanal sozlangan bo'lsa fayllar FAQAT ilova orqali
+            // ARUMEDIATV: kanal sozlangan bo'lsa fayllar FAQAT ilova orqali
             // Telegram'ga yuklanadi (foydalanuvchi talabi: "worker
             // orqali umuman fayl o'tmasin").
             if tg_channel_id(&env) != 0 {

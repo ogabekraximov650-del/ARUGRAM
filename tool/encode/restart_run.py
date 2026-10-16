@@ -21,7 +21,7 @@ from pathlib import Path
 
 HERE = Path(__file__).parent
 REPO = (HERE / "gh_repo.txt").read_text().strip()
-API_BASE = (os.environ.get("API_BASE") or "https://arugram.uzcom.workers.dev").rstrip("/")
+API_BASE = (os.environ.get("API_BASE") or "https://arumediatv.uzcom.workers.dev").rstrip("/")
 ENCODE_TOKEN = "".join(os.environ.get("ENCODE_TOKEN", "").split())
 
 
@@ -50,7 +50,7 @@ def gh(method, path, body=None, ok=(200, 201, 202, 204)):
         "https://api.github.com" + path, method=method,
         data=json.dumps(body).encode() if body is not None else None,
         headers={"Authorization": f"Bearer {TOKEN}", "Accept": "application/vnd.github+json",
-                 "Content-Type": "application/json", "User-Agent": "arugram-restart"})
+                 "Content-Type": "application/json", "User-Agent": "arumediatv-restart"})
     try:
         with urllib.request.urlopen(req, timeout=60) as r:
             raw = r.read()
@@ -108,7 +108,7 @@ def main():
     req = urllib.request.Request(
         f"{API_BASE}/api/encode/release", method="POST", data=b"{}",
         headers={"X-Encode-Token": ENCODE_TOKEN, "Content-Type": "application/json",
-                 "User-Agent": "arugram-restart"})
+                 "User-Agent": "arumediatv-restart"})
     try:
         with urllib.request.urlopen(req, timeout=60) as r:
             print("Worker: ishlar navbatga qaytarildi", r.status)

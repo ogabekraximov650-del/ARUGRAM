@@ -1,5 +1,5 @@
 name: soft
-description: "ARUGRAM — anime kontent ko'rish ilovasi"
+description: "ARUMEDIATV — anime kontent ko'rish ilovasi"
 publish_to: 'none'
 version: 0.0.1+1
 
@@ -108,7 +108,7 @@ dependencies:
   # Chatdagi faylni ochish (mos ilova bilan).
   open_filex: ^4.6.0
 
-# ARUGRAM: video_player_android nusxasi — pleyer videoni mahalliy
+# ARUMEDIATV: video_player_android nusxasi — pleyer videoni mahalliy
 # serversiz, diskdagi shifrlangan keshdan o'qiydi (`aru://file/<nom>`,
 # packages/video_player_android/.../AruDataSource.java).
 dependency_overrides:

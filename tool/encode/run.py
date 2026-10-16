@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ARUGRAM avto-kodlash (GitHub Actions, `.github/workflows/encode.yml`).
+"""ARUMEDIATV avto-kodlash (GitHub Actions, `.github/workflows/encode.yml`).
 
 Navbat worker'da (`worker/src/lib.rs` -> `encode_route`). Bu skript:
 
@@ -94,7 +94,7 @@ STATUS_INTERVAL = max(2.0, float(os.environ.get("STATUS_INTERVAL_SEC", "5" if QU
 # Sifat-run daqiqada bir marta (worker so'rovlari va Durable Object limiti tejaladi); eski rejim ~8 s.
 WORKER_PUSH_SEC = max(3.0, float(os.environ.get("WORKER_PUSH_SEC", "60" if QUALITY else "8") or 8))
 SESSION = str(Path(__file__).with_name("pyro_session"))
-WORK = Path(os.environ.get("RUNNER_TEMP", "/tmp")) / "arugram_encode"
+WORK = Path(os.environ.get("RUNNER_TEMP", "/tmp")) / "arumediatv_encode"
 
 
 def session_api_id() -> int:
@@ -125,7 +125,7 @@ def on_cancel(signum, frame):
                 data=json.dumps({**CURRENT, "ok": False, "cancelled": True}).encode(),
                 method="POST",
                 headers={"X-Encode-Token": TOKEN, "Content-Type": "application/json",
-                         "User-Agent": "arugram-encoder"})
+                         "User-Agent": "arumediatv-encoder"})
             urllib.request.urlopen(req, timeout=10).read()
             print("Run bekor qilindi — ish navbatga qaytarildi", flush=True)
         except Exception as e:
@@ -353,7 +353,7 @@ def put_parts(path: Path, name: str, part_size: int, label: str) -> list:
                     req = urllib.request.Request(
                         f"{API}/api/r2/part?file={urllib.parse.quote(name)}&n={n}", data=_Slice(f, length, progress), method="PUT",
                         headers={"X-Encode-Token": TOKEN, "Content-Type": "application/octet-stream",
-                                 "Content-Length": str(length), "User-Agent": "arugram-encoder"})
+                                 "Content-Length": str(length), "User-Agent": "arumediatv-encoder"})
                     with urllib.request.urlopen(req, timeout=900) as r:
                         parts.append({"n": n, "etag": json.loads(r.read())["etag"]})
                     err = None
@@ -387,7 +387,7 @@ def put_direct(url: str, path: Path, label: str):
 
     with open(path, "rb") as f:
         req = urllib.request.Request(url, data=_Slice(f, size, progress), method="PUT",
-                                     headers={"Content-Length": str(size), "User-Agent": "arugram-encoder"})
+                                     headers={"Content-Length": str(size), "User-Agent": "arumediatv-encoder"})
         with urllib.request.urlopen(req, timeout=1800) as r:
             r.read()
 
@@ -447,7 +447,7 @@ def is_committed(name: str) -> bool:
     try:
         req = urllib.request.Request(
             f"{API}/api/encode/committed?file={urllib.parse.quote(name)}",
-            headers={"X-Encode-Token": TOKEN, "User-Agent": "arugram-encoder"})
+            headers={"X-Encode-Token": TOKEN, "User-Agent": "arumediatv-encoder"})
         with urllib.request.urlopen(req, timeout=30) as r:
             return bool(json.loads(r.read() or b"{}").get("ok"))
     except Exception as ex:  # noqa: BLE001
@@ -554,7 +554,7 @@ def api(path, body=None, method="POST"):
             data=data,
             method=method,
             headers={"X-Encode-Token": TOKEN, "Content-Type": "application/json",
-                     "User-Agent": "arugram-encoder"},
+                     "User-Agent": "arumediatv-encoder"},
         )
         try:
             with urllib.request.urlopen(req, timeout=60) as r:
@@ -576,7 +576,7 @@ def api_fmp4(path, body):
     req = urllib.request.Request(
         f"{API}/api/fmp4/{path}", data=json.dumps(body).encode(), method="POST",
         headers={"X-Encode-Token": TOKEN, "Content-Type": "application/json",
-                 "User-Agent": "arugram-encoder"})
+                 "User-Agent": "arumediatv-encoder"})
     for attempt in range(3):
         try:
             with urllib.request.urlopen(req, timeout=60) as r:
@@ -1042,7 +1042,7 @@ class StatusPin:
             req = urllib.request.Request(
                 f"{API}/api/encode/push", data=self.text().encode(), method="POST",
                 headers={"X-Encode-Token": TOKEN, "Content-Type": "text/plain; charset=utf-8",
-                         "User-Agent": "arugram-encoder", **({"X-Encode-Quality": QUALITY} if QUALITY else {})})
+                         "User-Agent": "arumediatv-encoder", **({"X-Encode-Quality": QUALITY} if QUALITY else {})})
             urllib.request.urlopen(req, timeout=20).read()
         except Exception as e:
             print(f"Holat worker'ga yuborilmadi: {e}", flush=True)
@@ -1373,7 +1373,7 @@ async def process(app: Client, channel: int, job: dict):
 
 async def main():
     # Sessiya qaysi ilova (api_id) bilan yaratilgan bo'lsa — o'sha bilan
-    # ulanadi: ARUGRAM'ning `TG_API_ID` si boshqa bo'lishi mumkin
+    # ulanadi: ARUMEDIATV'ning `TG_API_ID` si boshqa bo'lishi mumkin
     # (masalan sessiya `anime` repodan olingan).
     api_id = session_api_id() or int(os.environ["TG_API_ID"])
     app = Client(SESSION, api_id=api_id,

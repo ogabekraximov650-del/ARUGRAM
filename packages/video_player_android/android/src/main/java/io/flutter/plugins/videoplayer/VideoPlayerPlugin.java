@@ -59,8 +59,8 @@ public class VideoPlayerPlugin implements FlutterPlugin, AndroidVideoPlayerApi {
       // noma'lum — chegara qo'yilmaydi
     }
 
-    // ARUGRAM: tasvirni yaxshilash (`video_player_screen.dart`) — playerId bo'yicha effekt yoqiladi.
-    enhanceChannel = new MethodChannel(binding.getBinaryMessenger(), "uz.arugram.player/enhance");
+    // ARUMEDIATV: tasvirni yaxshilash (`video_player_screen.dart`) — playerId bo'yicha effekt yoqiladi.
+    enhanceChannel = new MethodChannel(binding.getBinaryMessenger(), "uz.arumediatv.player/enhance");
     enhanceChannel.setMethodCallHandler(
         (call, result) -> {
           if ("preset".equals(call.method)) {
@@ -194,7 +194,7 @@ public class VideoPlayerPlugin implements FlutterPlugin, AndroidVideoPlayerApi {
   private @NonNull VideoAsset videoAssetWithOptions(@NonNull CreationOptions options) {
     final @NonNull String uri = options.getUri();
     if (uri.startsWith("aru:")) {
-      // ARUGRAM: diskdagi shifrlangan kesh / Telegram (AruDataSource).
+      // ARUMEDIATV: diskdagi shifrlangan kesh / Telegram (AruDataSource).
       return new AruVideoAsset(uri);
     } else if (uri.startsWith("asset:")) {
       return VideoAsset.fromAssetUrl(uri);

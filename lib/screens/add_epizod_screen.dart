@@ -391,7 +391,7 @@ class _AddEpizodScreenState extends State<AddEpizodScreen> {
     final fileName =
         'ep_${widget.animeId}_${widget.seasonId}_${q.label}_${DateTime.now().millisecondsSinceEpoch}.$ext';
 
-    // ── TELEGRAM KANALIGA (ARUGRAM) ─────────────────────────────
+    // ── TELEGRAM KANALIGA (ARUMEDIATV) ─────────────────────────────
     // Admin Telegram hisobini ulagan bo'lsa video yopiq kanalga
     // yuklanadi (4 GB gacha). Bazaga B2 dagi kabi BARE fayl nomi
     // yoziladi — ko'rish tizimi shu nom bo'yicha Telegram'dan oladi.

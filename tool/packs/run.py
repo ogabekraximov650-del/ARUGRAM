@@ -52,7 +52,7 @@ import arupack
 API = os.environ.get("API_BASE", "").rstrip("/")
 TOKEN = os.environ.get("ENCODE_TOKEN", "")
 RUNNER = f"{os.environ.get('GITHUB_RUN_ID', 'local')}-{os.environ.get('GITHUB_RUN_ATTEMPT', '1')}"
-WORK = Path(os.environ.get("RUNNER_TEMP", "/tmp")) / "arugram_packs"
+WORK = Path(os.environ.get("RUNNER_TEMP", "/tmp")) / "arumediatv_packs"
 
 
 class JobLost(Exception):
@@ -66,7 +66,7 @@ def api(path: str, body: dict) -> dict:
         req = urllib.request.Request(
             f"{API}/api/packs/job/{path}", data=data, method="POST",
             headers={"X-Encode-Token": TOKEN, "Content-Type": "application/json",
-                     "User-Agent": "arugram-encoder"})
+                     "User-Agent": "arumediatv-encoder"})
         try:
             with urllib.request.urlopen(req, timeout=60) as r:
                 return json.loads(r.read() or b"{}")
@@ -225,7 +225,7 @@ async def process(app, channel: int, job: dict, log) -> None:
                 dest = {"mode": "document", "to": int(channel), "caption": name, "file_name": name,
                         "disable_notification": True, "lease": {"t": "pack_db", "id": int(pid)},
                         "callback": {"path": "/api/packs/job/finish", "api": "packs", "body": {**body, **meta, "msg_id": "$MSG_ID"}}}
-                via_r2 = await asyncio.to_thread(r2client.deliver, API, TOKEN, sealed, name, dest, log, "arugram-packs")
+                via_r2 = await asyncio.to_thread(r2client.deliver, API, TOKEN, sealed, name, dest, log, "arumediatv-packs")
             if via_r2:
                 log("  to'plam R2'ga topshirildi — Telegram'ga yuklovchi yetkazadi")
                 return

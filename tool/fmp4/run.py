@@ -23,7 +23,7 @@ from pathlib import Path
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from pyrogram import Client
 
-API = os.environ.get("API_BASE", "https://arugram.uzcom.workers.dev").rstrip("/")
+API = os.environ.get("API_BASE", "https://arumediatv.uzcom.workers.dev").rstrip("/")
 TOKEN = "".join(os.environ["ENCODE_TOKEN"].split())
 RUNNER = f"{os.environ.get('GITHUB_RUN_ID', 'local')}-{os.environ.get('GITHUB_RUN_ATTEMPT', '1')}"
 BUDGET = int(os.environ.get("START_BUDGET_MIN", "300")) * 60
@@ -44,7 +44,7 @@ def api(path, body):
         req = urllib.request.Request(
             f"{API}/api/fmp4/{path}", data=data, method="POST",
             headers={"X-Encode-Token": TOKEN, "Content-Type": "application/json",
-                     "User-Agent": "arugram-fmp4"})
+                     "User-Agent": "arumediatv-fmp4"})
         try:
             with urllib.request.urlopen(req, timeout=60) as r:
                 return json.loads(r.read() or b"{}")
@@ -106,7 +106,7 @@ def put_direct(url: str, path: Path):
     size = path.stat().st_size
     with open(path, "rb") as f:
         req = urllib.request.Request(url, data=_Slice(f, size), method="PUT",
-                                     headers={"Content-Length": str(size), "User-Agent": "arugram-fmp4"})
+                                     headers={"Content-Length": str(size), "User-Agent": "arumediatv-fmp4"})
         with urllib.request.urlopen(req, timeout=1800) as r:
             r.read()
 
@@ -126,7 +126,7 @@ def put_parts(path: Path, name: str, part_size: int) -> list:
                     req = urllib.request.Request(
                         f"{API}/api/r2/part?file={urllib.parse.quote(name)}&n={n}", data=_Slice(f, length), method="PUT",
                         headers={"X-Encode-Token": TOKEN, "Content-Type": "application/octet-stream",
-                                 "Content-Length": str(length), "User-Agent": "arugram-fmp4"})
+                                 "Content-Length": str(length), "User-Agent": "arumediatv-fmp4"})
                     with urllib.request.urlopen(req, timeout=900) as r:
                         parts.append({"n": n, "etag": json.loads(r.read())["etag"]})
                     err = None

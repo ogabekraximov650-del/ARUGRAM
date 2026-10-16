@@ -56,7 +56,7 @@ public class PlatformViewVideoPlayer extends VideoPlayer {
         asset.getMediaItem(),
         options,
         () -> {
-          // ARUGRAM: apparat dekoderi ochilmasa (MediaCodecVideoRenderer
+          // ARUMEDIATV: apparat dekoderi ochilmasa (MediaCodecVideoRenderer
           // xatosi — masalan telefonda bir vaqtda juda ko'p dekoder yoki
           // old kamera yozgan dumaloq video profili) ExoPlayer keyingi
           // dekoderni (dasturiy `c2.android.*`) sinaydi.
@@ -65,7 +65,7 @@ public class PlatformViewVideoPlayer extends VideoPlayer {
                   context,
                   new androidx.media3.exoplayer.DefaultRenderersFactory(context)
                       .setEnableDecoderFallback(true));
-          // ARUGRAM: bufer doim sozlanadi (`AruLoadControl`).
+          // ARUMEDIATV: bufer doim sozlanadi (`AruLoadControl`).
           builder.setLoadControl(
               io.flutter.plugins.videoplayer.AruLoadControl.build(options.backBufferDurationMs));
           androidx.media3.exoplayer.trackselection.DefaultTrackSelector trackSelector =

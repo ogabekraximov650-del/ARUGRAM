@@ -1434,7 +1434,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     if (ctrl == null) {
       setState(() {
         _playerLoading = false;
-        // ARUGRAM'da videolar Telegram'dan keladi — hisob ulanmagan
+        // ARUMEDIATV'da videolar Telegram'dan keladi — hisob ulanmagan
         // bo'lsa sababini aniq aytamiz.
         _playerError = TelegramService.instance.authorized
             ? 'Videoni yuklab bo\'lmadi'
@@ -3119,7 +3119,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     ];
   }
 
-  static const MethodChannel _enhanceCh = MethodChannel('uz.arugram.player/enhance');
+  static const MethodChannel _enhanceCh = MethodChannel('uz.arumediatv.player/enhance');
 
   /// `true` — effekt ExoPlayer ichida (GPU shader: deband, o'tkirlik, chiziqlar, rang) ishlayapti;
   /// `false` — native yo'q/ishlamadi, [_enhanceFallback] rang filtriga qaytadi.

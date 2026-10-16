@@ -71,7 +71,7 @@ def _put_parts(api_base, token, path: Path, name, part_size, ua):
     return parts
 
 
-def deliver(api_base: str, token: str, path, name: str, dest: dict, log=print, ua: str = "arugram-r2") -> bool:
+def deliver(api_base: str, token: str, path, name: str, dest: dict, log=print, ua: str = "arumediatv-r2") -> bool:
     """`path` faylini R2'ga yozadi va yuklovchiga `dest` (qayerga/qanday yuborish, `callback`, `lease`) bilan topshiradi.
 
     `name` — noyob, xavfsiz fayl nomi (`[A-Za-z0-9._-]`). `True` — R2'ga yozildi (yuklovchi yetkazadi); `False` — R2 yo'q/ishlamadi."""

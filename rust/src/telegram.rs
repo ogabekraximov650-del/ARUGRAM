@@ -3444,9 +3444,9 @@ mod tests {
 
     #[test]
     fn kanal_nomi_va_havola_xeshi() {
-        assert_eq!(public_name("@arugram_news").as_deref(), Some("arugram_news"));
-        assert_eq!(public_name("https://t.me/arugram_news/").as_deref(), Some("arugram_news"));
-        assert_eq!(public_name("t.me/arugram_news").as_deref(), Some("arugram_news"));
+        assert_eq!(public_name("@arumediatv_news").as_deref(), Some("arumediatv_news"));
+        assert_eq!(public_name("https://t.me/arumediatv_news/").as_deref(), Some("arumediatv_news"));
+        assert_eq!(public_name("t.me/arumediatv_news").as_deref(), Some("arumediatv_news"));
         assert!(public_name("abc").is_none());
         assert!(public_name("a b c d e f").is_none());
         assert_eq!(invite_hash("https://t.me/+AbCdEf123456").as_deref(), Some("AbCdEf123456"));

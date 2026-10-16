@@ -322,9 +322,9 @@ class TelegramService extends ChangeNotifier with WidgetsBindingObserver {
         Void Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>),
         void Function(Pointer<Utf8>, Pointer<Utf8>,
             Pointer<Utf8>)>('rust_tg_set_device');
-    final a = (model.isEmpty ? 'ARUGRAM' : model).toNativeUtf8();
+    final a = (model.isEmpty ? 'ARUMEDIATV' : model).toNativeUtf8();
     final b = system.toNativeUtf8();
-    final c = 'ARUGRAM $app'.toNativeUtf8();
+    final c = 'ARUMEDIATV $app'.toNativeUtf8();
     try {
       f(a, b, c);
     } finally {

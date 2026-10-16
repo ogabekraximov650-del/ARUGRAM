@@ -34,7 +34,7 @@
 - Commit qilishdan oldin: `rm -rf rust/target rust/Cargo.lock
   worker/target worker/Cargo.lock`.
 
-## TELEGRAM ORQALI VIDEO (ARUGRAM, 2026-09)
+## TELEGRAM ORQALI VIDEO (ARUMEDIATV, 2026-09)
 
 TALAB (foydalanuvchi): xarajatni kamaytirish uchun videolar Telegram
 serveri orqali uzatilsin. Ilova nomi **ARUmedia** (TV yo'q).
@@ -70,8 +70,8 @@ kirish" tugmasi ortida qoldi.
 
 **Push:** foydalanuvchi talabi — bundan keyin FAQAT `main` ga.
 
-**Nom va server (2026-09):** ilova nomi **ARUGRAM**, paket
-`uz.arugram.soft`, worker nomi `arugram` (eski `arumediatv` ga
+**Nom va server (2026-09):** ilova nomi **ARUMEDIATV**, paket
+`uz.arumediatv.com`, worker nomi `arumediatv` (eski `arumediatv` ga
 TEGILMAYDI). Ilovadagi server manzili `lib/services/api_base.dart`
 da — CI uni Cloudflare subdomenidan o'zi hisoblab `--dart-define`
 bilan beradi. Bot nomi kodda yo'q: `getMe` dan olinadi.
@@ -2921,7 +2921,7 @@ mahalliy ishga tushirib, natijani commit qilish kerak.
   tekshiradi, `auth_date` 5 daqiqadan eski bo'lmasin. Imzo bir martalik
   (`login_tokens` da `w:<hash>`). Keyin `create_session` chaqiriladi
   (4 qurilma chegarasi saqlanadi).
-  - Talab: BotFather → `/setdomain` → `arugram.uzcom.workers.dev`
+  - Talab: BotFather → `/setdomain` → `arumediatv.uzcom.workers.dev`
     (`https://` siz).
   - Bu yo'l ishlamasa eski bot orqali kirishga qaytiladi.
 - **Sessiyalar bog'langan.** Telegram sessiyasi uzilsa
@@ -3612,7 +3612,7 @@ Qilinganlar:
   har bir necha soniyada butun chat qayta qurilardi); izohlar
   ro'yxatida `items` nusxasi har qator uchun olinmaydi; chat foni
   `isComplex` (rasterlab keshlanadi).
-- CI: APK nomi `arugram-<admin-32|user-64>-build-<raqam>.apk`.
+- CI: APK nomi `arumediatv-<admin-32|user-64>-build-<raqam>.apk`.
 
 ## Sek kutishi olib tashlandi (2026-09)
 
@@ -3666,10 +3666,10 @@ Qilinganlar:
   hvc1, +faststart, AAC), upscale yo'q, davomiylik tekshiruvi,
   AES-128-CTR (ilova bilan bir xil) shifrlab kanalga yuklash.
 
-KERAKLI SECRETS (GitHub → ARUGRAM → Settings → Secrets):
+KERAKLI SECRETS (GitHub → ARUMEDIATV → Settings → Secrets):
   PYRO_SESSION_B64_1/2/3 (anime repodagi — kanal egasi), TG_API_ID,
   TG_API_HASH, ENCODE_TOKEN (32+ tasodifiy belgi), ENCODE_GH_TOKEN
-  (fine-grained token: faqat ARUGRAM, "Actions: Read and write"),
+  (fine-grained token: faqat ARUMEDIATV, "Actions: Read and write"),
   ixtiyoriy API_BASE. Keyin worker'ni qayta deploy qilish kerak
   (`deploy-worker.yml` ENCODE_TOKEN va GH_TOKEN ni qo'yadi).
 
@@ -3703,8 +3703,8 @@ uz.arumediatv.com ga o'zgartir".
   `MainActivity.kt` shu paketga (`kotlin/uz/arumediatv/com/`) ko'chiriladi.
 - `main.dart`: `MaterialApp.title` — ARUmediaTV.
 - DIQQAT: paket nomi almashdi — Android buni yangi ilova deb biladi,
-  eski ARUGRAM ustiga yangilanmaydi (eskisini o'chirib o'rnatish kerak).
-  APK fayl nomlari (`arugram-...-build-N.apk`) o'zgarmadi.
+  eski ARUMEDIATV ustiga yangilanmaydi (eskisini o'chirib o'rnatish kerak).
+  APK fayl nomlari (`arumediatv-...-build-N.apk`) o'zgarmadi.
 
 ## Kirish oynasi: raqam yozib bo'lmasdi (telefon va planshet) (2026-09)
 
@@ -3880,7 +3880,7 @@ yangilanadi (`encbot_purge`). Qism o'chirilsa asl video va navbat ham.
 navbatda ish (queued yoki ijarasi o'tgan running) bo'lsa, faol ijara
 bo'lmasa va GitHub'da `encode.yml` run'i kutmayotgan/ishlamayotgan
 bo'lsa — `workflow_dispatch` (`GH_ACTIONS_TOKEN`, repo `GH_REPO` yoki
-`ogabekraximov650-del/ARUGRAM`). Ishga tushirilganda adminga xabar,
+`ogabekraximov650-del/ARUMEDIATV`). Ishga tushirilganda adminga xabar,
 xato bo'lsa soatiga bir marta. Navbatga qo'yilganda ham darhol chaqiriladi.
 
 **Kodlash tugagach tozalash** (`/api/encode/finish`, foydalanuvchi talabi):
@@ -4204,7 +4204,7 @@ ular yengil WebP ga aylantiriladi va ilova ularni Telegram'siz o'zi ko'rsatadi.
    `pending` (admin ko'rmagan) va `rejected` amallar navbatda TURADI,
    lekin Actions ularni ishlamaydi. **Kodlash va to'plamlar BIR VAQTDA
    ishlaydi** (3000+ qism kodlanayotganda to'plamlar kutib qolmasin —
-   foydalanuvchi talabi): ALOHIDA `concurrency` guruhi (`arugram-packs`) va
+   foydalanuvchi talabi): ALOHIDA `concurrency` guruhi (`arumediatv-packs`) va
 bir xil Telegram sessiyasi (`tool/encode/session.enc`; u allaqachon bir
    necha joyda ishlaydi, foydalanuvchi qarori). Run: eski faylni yuklab ochadi, elementlarni
    `arunorm.py` bilan yengil WebP ga aylantiradi (stiker 512 px, emoji
@@ -5115,7 +5115,7 @@ Qanday ishlaydi:
   xabari), takror bosish himoyasi (shu url navbatda bo'lsa qo'shilmaydi).
   `anibla::kick` (qo'shilganda, "qayta"da va cron'da) — `GH_REPO` dagi
   ALOHIDA `anibla.yml` ni ishga tushiradi (`anibla_kicked_at` atomik belgi,
-  concurrency `arugram-anibla`). Run navbat bo'shaguncha `/api/anibla/claim`
+  concurrency `arumediatv-anibla`). Run navbat bo'shaguncha `/api/anibla/claim`
   bilan videolarni KETMA-KET oladi (ijara 130 daq, 3 urinish, keyin `error`).
   "📋 Yuklash navbati" — ro'yxat, olib tashlash (`zx`), qayta urinish (`zr`).
   Video baytlari worker'dan O'TMAYDI.
@@ -6016,7 +6016,7 @@ Endi web (`clearOldBotChat`) kabi: `GetHistory(100)` -> eng yangisini tashlab, q
 ## Web: "Xotiradan foydalanish" ilovadagidek + jo'ja animatsiyasi (2026-10)
 
 `web/src/js/screens/storage.js` + `web/src/css/storage.css` ilovadagi `storage_screen.dart` ko'rinishiga keltirildi:
-sarlavhasiz appbar, halqa atrofida foiz yorlig'i, markazda "49,6 / MB", sarlavha + "ARUGRAM qurilma xotirasining ..."
+sarlavhasiz appbar, halqa atrofida foiz yorlig'i, markazda "49,6 / MB", sarlavha + "ARUMEDIATV qurilma xotirasining ..."
 (brauzer kvotasiga nisbatan), ingichka chiziq, qatorlarda "Nom 90.09%" va to'q sariq hajm, toifalar ilovadagidek
 (Videolar / Posterlar / Emoji, GIF va stikerlar / Vaqtinchalik fayllar). Tozalashda pastdan parda: jo'ja
 (`chick.js`, shakllar `chick-parts.js` — `utyan_parts.dart` dan avtomatik olingan) chiqindini qutiga tashlaydi,
@@ -6373,7 +6373,7 @@ Flutter `ImageFilter.shader` faqat Impeller'da ishlaydi, bizda Impeller O'CHIRIL
 
 Bitta shader (`packages/video_player_android/android/src/main/assets/aru_enhance_fragment.glsl`, GLSL ES 1.00): deband/denoise (tekis joyda yumshatish +
 dither; past bitreyt "zinapoya"), CAS-o'tkirlik (faqat chegaralarda), chiziqlarni qoraytirish, to'yinganlik/kontrast. Darajalar: 1 Yengil, 2 Kuchli.
-- Ilova: `AruEnhanceEffect`/`AruEnhanceShaderProgram` (media3-effect 1.9.2), `VideoPlayer.setEnhance`, `MethodChannel uz.arugram.player/enhance` (`VideoPlayerPlugin`);
+- Ilova: `AruEnhanceEffect`/`AruEnhanceShaderProgram` (media3-effect 1.9.2), `VideoPlayer.setEnhance`, `MethodChannel uz.arumediatv.player/enhance` (`VideoPlayerPlugin`);
   Dart `_applyEnhance` (native false bersa — `ColorFiltered` zaxirasi). Effekt xato bersa (VideoFrameProcessingException) — effektsiz qayta tiklanadi.
 - Web: `web/src/js/player/enhance.js` (WebGL canvas, kadr `requestVideoFrameCallback` bilan, ekran o'lchamigacha 1920x1080 gacha kattalashtirib o'tkirlaydi);
   shader matni `enhance-shader.js` (AVTOMATIK: `node tool/shaders/sync-web.mjs`). WebGL bo'lmasa/CORS bo'lsa — CSS filtri.
@@ -6437,3 +6437,17 @@ Anibla sekinligi (diag): worker -> anibla.uz har so'rovga ~1.2-1.4 s (login 1.4 
   Ilova va web parametrlari (`LEVELS`) bir xil, web ham `uTone` ishlatadi.
 - **"Anime HD" rejimi (4-daraja):** kinematografik ko'rinish — chuqur qora (ton 0.9), to'q ranglar, chiziqlarni qoraytirish; ravshanlik qo'shimcha o'qishsiz, shuning uchun narxi 2-daraja kabi
   (`VideoPlayer.setEnhance`: 4 qurilma chegarasi bo'yicha 2 deb hisoblanadi; sekinlashsa 4 -> 2). Ilova (`videoEnhance` 0..4, tsikl % 5) va web (`LEVELS[4]`, `% 5`) da bir xil.
+
+## Baza va worker ko'chirildi, nom `arumediatv` ga o'zgartirildi (2026-10)
+
+- **Kodlash to'xtatildi** (`tool/migrate/stop_encode.py`, `migrate-stop.yml`): avtoencode repodagi hamma workflow o'chirildi va run'lar bekor qilindi.
+  Qayta yoqish: `tool/migrate/stop.txt` ga `start` yozib push (shu workflow `enable` qiladi).
+- **Baza ko'chirildi** (`tool/migrate/migrate.py`, `migrate-db.yml`): Actions eski (`TURSO_URL/TOKEN` secret) va yangi (`tool/migrate/new_turso.enc`,
+  kalit — `ENCODE_TOKEN`) bazaga to'g'ridan-to'g'ri ulanadi (worker ishtirok etmaydi): sxema + `INSERT OR REPLACE` + qator sonlarini solishtirish.
+  Yana ko'chirish kerak bo'lsa `tool/migrate/run.txt` o'zgartiriladi.
+- **Worker** `arumediatv` nomi bilan (eski shu nomli worker ustiga). `deploy-worker.yml`: avval oddiy deploy, yiqilsa eski worker o'chiriladi va qayta deploy;
+  `TURSO_URL/TOKEN` `new_turso.enc` dan o'rnatiladi (GitHub Secret'dagi eskisidan ustun). `ci/WIPE_DB_ONCE` O'CHIRILDI — aks holda yangi baza tozalanib ketardi.
+- **Nomlar:** koddagi, workflow'lardagi va hujjatlardagi `arugram/ARUGRAM` -> `arumediatv/ARUMEDIATV` (worker manzili `arumediatv.<subdomen>.workers.dev`,
+  MethodChannel `uz.arumediatv.player/enhance`, User-Agent'lar, kesh kalitlari). APK paketi allaqachon `uz.arumediatv.com` edi.
+  APK yig'ishda manzil Cloudflare'dan hisoblanadi (`API_BASE` secret'idan ustun).
+- GitHub repo nomini (`ARUGRAM`) kodda o'zgartirib bo'lmaydi — repo Settings'da qo'lda. avtoencode repodagi workflow'lar o'zgargan shablonlardan qayta sinxronlanadi.

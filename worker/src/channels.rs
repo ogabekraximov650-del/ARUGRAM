@@ -262,7 +262,7 @@ pub(crate) async fn add(env: &Env, kind: &str, input: &str, need: i64) -> std::r
         let l = tg_api(env, "createChatInviteLink", json!({
             "chat_id": chat_id,
             "creates_join_request": true,
-            "name": "ARUGRAM majburiy obuna",
+            "name": "ARUMEDIATV majburiy obuna",
         })).await
             .map_err(|_| "Havola yaratib bo'lmadi. Botga \"Havola orqali taklif qilish\" huquqini bering.".to_string())?;
         link = l["invite_link"].as_str().unwrap_or("").to_string();
@@ -770,8 +770,8 @@ mod tests {
 
     #[test]
     fn kanal_kiritmasi_tushuniladi() {
-        assert_eq!(chat_ref("@arugram_news"), Some(json!("@arugram_news")));
-        assert_eq!(chat_ref("https://t.me/arugram_news"), Some(json!("@arugram_news")));
+        assert_eq!(chat_ref("@arumediatv_news"), Some(json!("@arumediatv_news")));
+        assert_eq!(chat_ref("https://t.me/arumediatv_news"), Some(json!("@arumediatv_news")));
         assert_eq!(chat_ref("-1001234567890"), Some(json!(-1001234567890i64)));
         assert_eq!(chat_ref("abc"), None);
         assert!(active(&json!({"need": 0, "joined": 9})));

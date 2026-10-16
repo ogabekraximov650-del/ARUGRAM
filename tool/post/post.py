@@ -29,7 +29,7 @@ import urllib.request
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-WORK = Path(os.environ.get("RUNNER_TEMP", "/tmp")) / "arugram_post"
+WORK = Path(os.environ.get("RUNNER_TEMP", "/tmp")) / "arumediatv_post"
 
 # R2 oraliq ombori: Telegram'ga yuklanadigan fayl R2 orqali o'tadi (`tool/upload/r2client.py`, `upload.yml` yetkazadi).
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "upload"))
@@ -55,7 +55,7 @@ def api(path, body):
         req = urllib.request.Request(
             f"{base}/api/post/{path}", data=data, method="POST",
             headers={"X-Encode-Token": os.environ["ENCODE_TOKEN"],
-                     "Content-Type": "application/json", "User-Agent": "arugram-encoder"})
+                     "Content-Type": "application/json", "User-Agent": "arumediatv-encoder"})
         try:
             with urllib.request.urlopen(req, timeout=60) as r:
                 return json.loads(r.read() or b"{}")
@@ -313,7 +313,7 @@ async def process(app, r, runner, log):
                     dest["thumb_b64"] = base64.b64encode(thumb.read_bytes()).decode()
                 via_r2 = await asyncio.to_thread(
                     r2client.deliver, os.environ["API_BASE"], os.environ["ENCODE_TOKEN"], out,
-                    f"post_{pid}_{int(time.time())}.mp4", dest, log, "arugram-post")
+                    f"post_{pid}_{int(time.time())}.mp4", dest, log, "arumediatv-post")
             if not via_r2:
                 raise send_err
             live.done("Asosiy akkaunt yubora olmadi \u2014 R2'ga yozildi, panel bot yetkazadi")

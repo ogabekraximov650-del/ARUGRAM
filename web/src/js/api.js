@@ -12,7 +12,7 @@ import { cacheWipe } from './tg/chunk-cache.js';
 // Sessiya localStorage'da saqlanadi va faqat yaroqsiz bo'lib qolganda
 // (401) qayta so'raladi — har ochilishda Turso'ga yozuv ketmasin.
 
-export const API_BASE = 'https://arugram.uzcom.workers.dev';
+export const API_BASE = 'https://arumediatv.uzcom.workers.dev';
 
 const TMA_KEY = 'aru_tma_token';
 const SES_KEY = 'aru_session';

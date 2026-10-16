@@ -79,7 +79,7 @@ def api(method, path, body=None, ok=(200, 201)):
         data=json.dumps(body).encode() if body is not None else None,
         headers={"Authorization": f"Bearer {TOKEN}",
                  "Accept": "application/vnd.github+json",
-                 "Content-Type": "application/json", "User-Agent": "arugram-sync"})
+                 "Content-Type": "application/json", "User-Agent": "arumediatv-sync"})
     try:
         with urllib.request.urlopen(req, timeout=60) as r:
             raw = r.read()

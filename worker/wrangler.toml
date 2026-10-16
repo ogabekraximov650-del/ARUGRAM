@@ -1,4 +1,4 @@
-name = "arugram"
+name = "arumediatv"
 main = "build/worker/shim.mjs"
 compatibility_date = "2024-01-01"
 workers_dev = true
@@ -64,7 +64,7 @@ bindings = [
 ]
 
 [env.production]
-name = "arugram"
+name = "arumediatv"
 workers_dev = true
 
 # Durable Object bog'lanishi muhitga MEROS bo'lmaydi — shu yerda qayta.

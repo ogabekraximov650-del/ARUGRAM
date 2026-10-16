@@ -27,10 +27,10 @@ from pathlib import Path
 from pyrogram import Client
 
 # To'plamlar (emoji/GIF/stiker) workflow'i uchun ALOHIDA sessiya:
-#   SESSION_NAME=arugram_packs SECRET_PREFIX=PACKS_SESSION_B64 python3 make_session.py
+#   SESSION_NAME=arumediatv_packs SECRET_PREFIX=PACKS_SESSION_B64 python3 make_session.py
 # (o'sha hisobga qayta kiriladi — Telegram'da yangi, mustaqil sessiya
 # ochiladi, shu sabab ikkala workflow bir vaqtda ishlay oladi).
-NAME = os.environ.get("SESSION_NAME", "arugram_encode")
+NAME = os.environ.get("SESSION_NAME", "arumediatv_encode")
 PREFIX = os.environ.get("SECRET_PREFIX", "PYRO_SESSION_B64")
 
 
@@ -61,7 +61,7 @@ def main():
                 app.send_document("me", str(f), caption=f.stem)
         print("\nSaqlangan xabarlarga yuborildi. GitHub'ga qo'ygach ularni o'chiring.")
 
-    print("\nGitHub -> ARUGRAM -> Settings -> Secrets and variables -> Actions:")
+    print("\nGitHub -> ARUMEDIATV -> Settings -> Secrets and variables -> Actions:")
     print(f"  {PREFIX}_1/2/3 = fayllardagi qiymatlar.")
     print(f"Ish tugagach {NAME}.session va .txt fayllarni o'chiring.")
 

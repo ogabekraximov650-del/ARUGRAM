@@ -4,14 +4,14 @@ name: fMP4 nusxalar (Mini App)
 # (`tool/fmp4/run.py`, `worker/src/fmp4.rs`). Worker o'zi ishga tushiradi
 # (Mini App so'rovi va cron). Avto-kodlash, post va anibla'dan ALOHIDA.
 #
-# Bu fayl ARUGRAM repodagi `tool/fmp4/fmp4.workflow.yml` dan ko'chiriladi
+# Bu fayl ARUMEDIATV repodagi `tool/fmp4/fmp4.workflow.yml` dan ko'chiriladi
 # (`sync-packs.yml`) — shu yerda o'zgartirmang.
 
 on:
   workflow_dispatch: {}
 
 concurrency:
-  group: arugram-fmp4
+  group: arumediatv-fmp4
   cancel-in-progress: false
 
 permissions:
@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 340
     env:
-      API_BASE: ${{ secrets.API_BASE || 'https://arugram.uzcom.workers.dev' }}
+      API_BASE: ${{ secrets.API_BASE || 'https://arumediatv.uzcom.workers.dev' }}
     steps:
       - uses: actions/checkout@v4
 

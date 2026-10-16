@@ -9,7 +9,7 @@ on:
   workflow_dispatch: {}
 
 concurrency:
-  group: arugram-encode
+  group: arumediatv-encode
   cancel-in-progress: false
 
 permissions:
@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 300
     env:
-      API_BASE: ${{ secrets.API_BASE || 'https://arugram.uzcom.workers.dev' }}
+      API_BASE: ${{ secrets.API_BASE || 'https://arumediatv.uzcom.workers.dev' }}
     steps:
       - name: Navbat
         id: peek
@@ -32,7 +32,7 @@ jobs:
             echo "::error::ENCODE_TOKEN secret'i yo'q"
             exit 1
           fi
-          N=$(curl -fsS -H "X-Encode-Token: $ENCODE_TOKEN" -H "User-Agent: arugram-encoder" \
+          N=$(curl -fsS -H "X-Encode-Token: $ENCODE_TOKEN" -H "User-Agent: arumediatv-encoder" \
             "$API_BASE/api/encode/peek" | jq -r '.pending // 0')
           echo "Navbatda: $N"
           echo "pending=$N" >> "$GITHUB_OUTPUT"
@@ -90,7 +90,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
         run: |
-          N=$(curl -fsS -H "X-Encode-Token: $ENCODE_TOKEN" -H "User-Agent: arugram-encoder" \
+          N=$(curl -fsS -H "X-Encode-Token: $ENCODE_TOKEN" -H "User-Agent: arumediatv-encoder" \
             "$API_BASE/api/encode/peek" | jq -r '.pending // 0')
           echo "Qolgan: $N"
           if [ "$N" != "0" ]; then gh workflow run encode.yml --repo "$GITHUB_REPOSITORY"; fi

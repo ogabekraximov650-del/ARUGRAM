@@ -71,11 +71,11 @@ export function openStorage() {
       if (loading) return 'Hisoblanmoqda...';
       if (t <= 0) return "Keshdagi barcha fayllar o'chirildi. Ular kerak bo'lganda serverdan qayta yuklab olinadi.";
       const q = st?.quota || 0;
-      if (q <= 0) return `ARUGRAM keshi qurilmada ${formatBytes(t)} joy egallagan.`;
+      if (q <= 0) return `ARUMEDIATV keshi qurilmada ${formatBytes(t)} joy egallagan.`;
       const pct = t / q * 100;
-      if (pct < 1) return 'ARUGRAM qurilma xotirasining 1% dan kamroq qismini egallagan.';
+      if (pct < 1) return 'ARUMEDIATV qurilma xotirasining 1% dan kamroq qismini egallagan.';
       const v = pct < 10 ? pct.toFixed(1).replace('.', ',').replace(',0', '') : String(Math.round(pct));
-      return `ARUGRAM qurilma xotirasining ${v}% qismini egallagan.`;
+      return `ARUMEDIATV qurilma xotirasining ${v}% qismini egallagan.`;
     };
 
     function paintHead() {

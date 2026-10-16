@@ -1,4 +1,4 @@
-// ARUGRAM: pleyer buferi.
+// ARUMEDIATV: pleyer buferi.
 //
 // Ma'lumot diskdan (yoki Telegram'dan, diskka yozilib) keladi, shu
 // sabab katta xotira buferi kerak emas:

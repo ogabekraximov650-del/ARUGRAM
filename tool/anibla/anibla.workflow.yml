@@ -7,14 +7,14 @@ name: Anibla yuklash
 # yuklab, bot chatiga yuboradi (`tool/anibla/download.py`).
 # Avto-kodlash va post kodlashdan ALOHIDA.
 #
-# Bu fayl ARUGRAM repodagi `tool/anibla/anibla.workflow.yml` dan ko'chiriladi
+# Bu fayl ARUMEDIATV repodagi `tool/anibla/anibla.workflow.yml` dan ko'chiriladi
 # (`sync-packs.yml`) — shu yerda o'zgartirmang.
 
 on:
   workflow_dispatch: {}
 
 concurrency:
-  group: arugram-anibla
+  group: arumediatv-anibla
   cancel-in-progress: false
 
 permissions:
@@ -25,7 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 340
     env:
-      API_BASE: ${{ secrets.API_BASE || 'https://arugram.uzcom.workers.dev' }}
+      API_BASE: ${{ secrets.API_BASE || 'https://arumediatv.uzcom.workers.dev' }}
     steps:
       - uses: actions/checkout@v4
 

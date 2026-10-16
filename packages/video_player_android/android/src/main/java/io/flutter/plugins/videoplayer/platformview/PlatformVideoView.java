@@ -66,7 +66,7 @@ public final class PlatformVideoView implements PlatformView {
   }
 
   /**
-   * ARUGRAM: ExoPlayer'ga Surface emas, SurfaceHolder beriladi — shunda yuza o'lchami ExoPlayer'ga ma'lum bo'ladi.
+   * ARUMEDIATV: ExoPlayer'ga Surface emas, SurfaceHolder beriladi — shunda yuza o'lchami ExoPlayer'ga ma'lum bo'ladi.
    * GPU effektlar (tasvirni yaxshilash) chiqishni shu o'lchamga moslaydi; aks holda tasvir kesilib/qora chiqadi.
    */
   static void bindPlayerToHolder(@NonNull ExoPlayer exoPlayer, @NonNull SurfaceHolder holder) {

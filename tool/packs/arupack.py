@@ -1,4 +1,4 @@
-"""ARUGRAM to'plam fayli (`.arp`) — emoji, GIF va stikerlar to'plami.
+"""ARUMEDIATV to'plam fayli (`.arp`) — emoji, GIF va stikerlar to'plami.
 
 BITTA fayl = BITTA to'plam. Fayl boshida to'liq ro'yxat (sarlavha) turadi —
 xuddi MP4 dagi `moov` (faststart) kabi: ilova avval faqat sarlavhani

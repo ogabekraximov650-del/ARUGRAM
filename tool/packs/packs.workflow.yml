@@ -11,7 +11,7 @@ on:
 # ikkinchisini kutmaydi. Telegram sessiyasi kodlash bilan BIR XIL
 # (`tool/encode/session.enc`) — u allaqachon bir necha joyda ishlaydi.
 concurrency:
-  group: arugram-packs
+  group: arumediatv-packs
   cancel-in-progress: false
 
 permissions:
@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 300
     env:
-      API_BASE: ${{ secrets.API_BASE || 'https://arugram.uzcom.workers.dev' }}
+      API_BASE: ${{ secrets.API_BASE || 'https://arumediatv.uzcom.workers.dev' }}
     steps:
       - name: Navbat
         id: peek
@@ -33,7 +33,7 @@ jobs:
             echo "::error::ENCODE_TOKEN secret'i yo'q"
             exit 1
           fi
-          N=$(curl -fsS -X POST -H "X-Encode-Token: $ENCODE_TOKEN" -H "User-Agent: arugram-encoder" \
+          N=$(curl -fsS -X POST -H "X-Encode-Token: $ENCODE_TOKEN" -H "User-Agent: arumediatv-encoder" \
             "$API_BASE/api/packs/job/peek" | jq -r '.pending // 0')
           echo "Navbatda: $N"
           echo "pending=$N" >> "$GITHUB_OUTPUT"

@@ -13,7 +13,7 @@
 //     bir-biriga tegib turadi,
 //     foiz — halqa TASHQARISIDA, bo'lak rangida), o'rtada TANLANGAN
 //     hajm (raqam 32, birligi 12);
-//   * sarlavha "Xotiradan foydalanish", izoh "ARUGRAM qurilma
+//   * sarlavha "Xotiradan foydalanish", izoh "ARUMEDIATV qurilma
 //     xotirasining N% qismini egallagan" va uning ostidagi chiziq
 //     (ilova / boshqa ilovalar / bo'sh joy);
 //   * toifalar: dumaloq rangli belgilash, nomi + qalin foiz, o'ngda
@@ -1108,18 +1108,18 @@ class _ChartHeader extends StatelessWidget {
           'serverdan qayta yuklab olinadi.';
     }
     if (deviceTotal <= 0) {
-      return 'ARUGRAM keshi qurilmada ${formatBytes(cacheBytes)} joy '
+      return 'ARUMEDIATV keshi qurilmada ${formatBytes(cacheBytes)} joy '
           'egallagan.';
     }
     final pct = cacheBytes / deviceTotal * 100;
     if (pct < 1) {
-      return 'ARUGRAM qurilma xotirasining 1% dan kamroq qismini '
+      return 'ARUMEDIATV qurilma xotirasining 1% dan kamroq qismini '
           'egallagan.';
     }
     final s = pct < 10
         ? pct.toStringAsFixed(1).replaceAll('.', ',').replaceAll(',0', '')
         : pct.round().toString();
-    return 'ARUGRAM qurilma xotirasining $s% qismini egallagan.';
+    return 'ARUMEDIATV qurilma xotirasining $s% qismini egallagan.';
   }
 
   @override

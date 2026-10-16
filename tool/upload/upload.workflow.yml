@@ -4,13 +4,13 @@ name: R2 -> Telegram yuklovchi
 # (bot yopiq kanalga saqlab bazaga yozadi, keyin fayl R2'dan o'chadi). `tool/upload/upload.py`, `worker/src/r2.rs`.
 # Worker o'zi ishga tushiradi (fayl R2'da tayyor bo'lganda va cron). Bir vaqtda faqat BITTA run.
 #
-# Bu fayl ARUGRAM repodagi `tool/upload/upload.workflow.yml` dan ko'chiriladi (`sync-packs.yml`) — shu yerda o'zgartirmang.
+# Bu fayl ARUMEDIATV repodagi `tool/upload/upload.workflow.yml` dan ko'chiriladi (`sync-packs.yml`) — shu yerda o'zgartirmang.
 
 on:
   workflow_dispatch: {}
 
 concurrency:
-  group: arugram-upload
+  group: arumediatv-upload
   cancel-in-progress: false
 
 permissions:
@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
-      API_BASE: ${{ secrets.API_BASE || 'https://arugram.uzcom.workers.dev' }}
+      API_BASE: ${{ secrets.API_BASE || 'https://arumediatv.uzcom.workers.dev' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -73,6 +73,6 @@ jobs:
           ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
         run: |
           N=$(curl -fsS -X POST -H "X-Encode-Token: $ENCODE_TOKEN" -H "Content-Type: application/json" -d '{}' \
-            -H "User-Agent: arugram-upload" "$API_BASE/api/r2/peek" | jq -r '.pending // 0')
+            -H "User-Agent: arumediatv-upload" "$API_BASE/api/r2/peek" | jq -r '.pending // 0')
           echo "R2'da qolgan: $N"
           if [ "$N" != "0" ]; then gh workflow run upload.yml --repo "$GITHUB_REPOSITORY"; fi

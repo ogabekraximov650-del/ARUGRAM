@@ -1,4 +1,4 @@
-# CLAUDE.md — ARUGRAM
+# CLAUDE.md — ARUMEDIATV
 
 Bu fayl har sessiya boshida o'qiladi. Batafsil tarix va har bir
 qarorning sababi: `KEYINGI_VAZIFA.md` (katta fayl, kerakli bo'limni
@@ -37,7 +37,7 @@ qarorning sababi: `KEYINGI_VAZIFA.md` (katta fayl, kerakli bo'limni
 
 ## Loyiha tuzilishi
 
-ARUGRAM — anime ko'rish ilovasi. Videolar va fayllar yopiq Telegram
+ARUMEDIATV — anime ko'rish ilovasi. Videolar va fayllar yopiq Telegram
 kanali orqali uzatiladi (xarajatni kamaytirish uchun).
 
 | Joy | Nima |
@@ -49,7 +49,7 @@ kanali orqali uzatiladi (xarajatni kamaytirish uchun).
 | `lib/services/telegram_service.dart` | Telegram hisobi, yuklash, bot chatini tozalash |
 | `rust/src/` | Rust yadrosi: `telegram.rs` (grammers/MTProto), `video_cache.rs` (shifrlangan bo'lak-kesh), `player_source.rs` (pleyer uchun JNI manba), `crypto.rs` |
 | `packages/video_player_android` | `video_player_android` nusxasi: `AruDataSource` pleyerni mahalliy serversiz, diskdagi shifrlangan keshdan o'qitadi |
-| `worker/src/lib.rs` | Cloudflare Worker (Rust → WASM), worker nomi `arugram`. Baza — Turso |
+| `worker/src/lib.rs` | Cloudflare Worker (Rust → WASM), worker nomi `arumediatv`. Baza — Turso |
 | Kodlash boti | `worker/src/lib.rs` → `encbot_*`: ikkinchi bot (`ENCODE_BOT_TOKEN`), faqat admin; bor anime/bo'limga qism qo'shadi yoki almashtiradi va avto-kodlash navbatiga qo'yadi |
 | `tool/encode/` | H.265 avto-kodlash (Python, `encode.yml`) |
 | `tool/post/`, `worker/src/postbot.rs` | Kodlash botining "Post kodlash" bo'limi: rasm+video+nom -> H.265 (logotip, cover) -> `<ID>_logo.png` dagi ID'ga. ALOHIDA workflow `post.yml` (avtoencode repoda, shablon `tool/post/post.workflow.yml`), worker `postbot::kick` ishga tushiradi |
@@ -60,7 +60,7 @@ kanali orqali uzatiladi (xarajatni kamaytirish uchun).
 | `ci/` | Imzo kaliti (`release.keystore`), baza tozalash skripti |
 | `android-template/` | CI `flutter create` dan keyin qo'yadigan `MainActivity.kt` (`/android/` repoda yo'q) |
 
-Paket: `uz.arugram.soft`. Eski `arumediatv` worker'iga **tegilmaydi**.
+Paket: `uz.arumediatv.com`. Worker nomi `arumediatv` (eski `arumediatv` worker ustiga deploy qilingan — foydalanuvchi talabi).
 
 ## Buzilmasligi kerak bo'lgan qoidalar
 
