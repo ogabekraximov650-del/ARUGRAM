@@ -53,7 +53,16 @@ class AruPlayer(context: Context) {
         }
 
         override fun onPlayerError(e: PlaybackException) {
-            error = "Video ochilmadi (${e.errorCodeName})"
+            val root = generateSequence<Throwable>(e) { it.cause }.last()
+            val http = (e.cause as? androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException)?.responseCode
+            val where = when {
+                lastUri.contains("127.0.0.1") && lastUri.contains("/tg/") -> "Telegram"
+                lastUri.contains("127.0.0.1") -> "mahalliy kesh"
+                else -> "worker"
+            }
+            error = "Video ochilmadi [$where] ${e.errorCodeName}" +
+                (http?.let { " HTTP $it" } ?: "") +
+                (root.message?.takeIf { it.isNotBlank() }?.let { " — ${it.take(120)}" } ?: "")
             playing = false
         }
     }
@@ -62,7 +71,10 @@ class AruPlayer(context: Context) {
         exo.addListener(listener)
     }
 
+    private var lastUri = ""
+
     fun open(uri: String, startMs: Long, play: Boolean) {
+        lastUri = uri
         error = null
         ended = false
         ready = false

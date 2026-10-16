@@ -265,7 +265,7 @@ fun SeasonScreen(
     // ── Xato: Telegram bo'lsa bir marta worker yo'liga o'tamiz ──
     LaunchedEffect(player.error) {
         val ep = current
-        if (player.error != null && viaTelegram && !workerRetried && ep != null) {
+        if (player.error != null && (viaTelegram || viaLocal) && !workerRetried && ep != null) {
             workerRetried = true
             play(ep, resumeAt = player.positionMs, preferWorker = true)
         }
