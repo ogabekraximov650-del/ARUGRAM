@@ -99,7 +99,7 @@ class AruPlayer(context: Context) {
 
     fun seekBy(deltaMs: Long) = seekTo(exo.currentPosition + deltaMs)
 
-    fun setSpeed(v: Float) {
+    fun changeSpeed(v: Float) {
         speed = v
         exo.setPlaybackSpeed(v)
     }

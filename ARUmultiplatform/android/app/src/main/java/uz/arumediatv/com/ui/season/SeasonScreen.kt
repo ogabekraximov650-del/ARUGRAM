@@ -419,7 +419,7 @@ fun SeasonScreen(
                 chosenQuality = q
                 current?.let { e -> play(e, quality = q, resumeAt = player.positionMs, resumePlaying = player.playing || !player.ready) }
             },
-            onSpeed = { player.setSpeed(it) },
+            onSpeed = { player.changeSpeed(it) },
             onAutoNext = { autoNext = it; prefs.edit().putBoolean("auto_next", it).apply() },
             onAutoSkip = { autoSkipIntro = it; prefs.edit().putBoolean("auto_skip_intro", it).apply() },
             onSleep = { minutes -> sleepEndAt = if (minutes <= 0) 0 else System.currentTimeMillis() + minutes * 60_000L },
