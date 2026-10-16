@@ -18,7 +18,17 @@ import androidx.media3.exoplayer.ExoPlayer
  */
 @Stable
 class AruPlayer(context: Context) {
-    val exo: ExoPlayer = ExoPlayer.Builder(context.applicationContext).build()
+    val exo: ExoPlayer = ExoPlayer.Builder(
+        context.applicationContext,
+        androidx.media3.exoplayer.DefaultRenderersFactory(context.applicationContext)
+            .setEnableDecoderFallback(true)
+            .setExtensionRendererMode(androidx.media3.exoplayer.DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER),
+    ).build().apply {
+        trackSelectionParameters = trackSelectionParameters.buildUpon()
+            .setExceedRendererCapabilitiesIfNecessary(true)
+            .setExceedVideoConstraintsIfNecessary(true)
+            .build()
+    }
 
     var playing by mutableStateOf(false)
         private set
@@ -49,6 +59,15 @@ class AruPlayer(context: Context) {
             if (state == Player.STATE_READY) {
                 ready = true
                 tick()
+            }
+        }
+
+        override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
+            // Ovoz bor, video tanlanmagan (kodek/profil qo'llab-quvvatlanmaydi) — jim qora ekran o'rniga sababni ko'rsatamiz.
+            val v = tracks.groups.filter { it.type == androidx.media3.common.C.TRACK_TYPE_VIDEO }
+            if (v.isNotEmpty() && v.none { it.isSelected }) {
+                val f = v.first().getTrackFormat(0)
+                error = "Video kodek qo'llab-quvvatlanmaydi: ${f.sampleMimeType} ${f.width}x${f.height} ${f.codecs ?: ""}".trim()
             }
         }
 
