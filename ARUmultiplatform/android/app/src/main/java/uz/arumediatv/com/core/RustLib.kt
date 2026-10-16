@@ -6,7 +6,7 @@ import com.sun.jna.Pointer
 
 /**
  * Rust yadrosining (`ARUmultiplatform/android/rust`, `librust_core.so`) C funksiyalari — JNA orqali, JNI yozmasdan.
- * Imzolar `rust/src/*.rs` dagi `extern "C"` bilan AYNAN bir xil: `*const c_char` -> String, `*mut c_char` -> Pointer
+ * Imzolar `rust/src/` fayllari dagi `extern "C"` bilan AYNAN bir xil: `*const c_char` -> String, `*mut c_char` -> Pointer
  * (matn o'qilgach `rust_free_string` bilan bo'shatiladi), `i32` -> Int, `i64` -> Long.
  */
 @Suppress("FunctionName")
