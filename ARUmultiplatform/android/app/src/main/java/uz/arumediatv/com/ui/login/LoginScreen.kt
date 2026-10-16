@@ -67,6 +67,14 @@ fun LoginScreen(onDone: () -> Unit, onClose: () -> Unit, onBot: () -> Unit = {})
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var prefix by remember { mutableStateOf("+998") }
+    var country by remember { mutableStateOf<TgCountry?>(countryByIso("UZ")) }
+    var pickerOpen by remember { mutableStateOf(false) }
+    var codeTouched by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        // Eng yaqin davlat (Telegram aniqlaydi) — foydalanuvchi qo'l tekkizmagan bo'lsa
+        val c = tg.nearestCountry()?.let { countryByIso(it) } ?: return@LaunchedEffect
+        if (!codeTouched && number.isEmpty()) { country = c; prefix = "+" + c.code }
+    }
     var number by remember { mutableStateOf("") }
     var code by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -204,7 +212,8 @@ fun LoginScreen(onDone: () -> Unit, onClose: () -> Unit, onBot: () -> Unit = {})
             Step.PHONE -> {
                 if (waitLeft > 0) return
                 val digits = (prefix.filter { it.isDigit() } + number.filter { it.isDigit() })
-                if (digits.length < 8) {
+                val need = country?.length ?: 0
+                if (digits.length < 8 || (need > 0 && number.filter { it.isDigit() }.length < need)) {
                     error = "Raqamni to'liq kiriting"
                     return
                 }
@@ -242,6 +251,7 @@ fun LoginScreen(onDone: () -> Unit, onClose: () -> Unit, onBot: () -> Unit = {})
         }
     }
 
+    if (pickerOpen) CountryPicker(onPick = { c -> country = c; prefix = "+" + c.code; codeTouched = true; number = ""; pickerOpen = false }, onDismiss = { pickerOpen = false })
     Box(Modifier.fillMaxSize().background(AruColors.Bg).statusBarsPadding().imePadding()) {
         Column(Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -261,7 +271,7 @@ fun LoginScreen(onDone: () -> Unit, onClose: () -> Unit, onBot: () -> Unit = {})
             Text(
                 when (step) {
                     Step.PHONE -> "Telegram raqamingizni kiriting"
-                    Step.CODE -> sentInfo.ifEmpty { "Kodni kiriting" }
+                    Step.CODE -> (sentInfo.ifEmpty { "Kodni kiriting" }) + "\n" + prefix + " " + (country?.format(number.filter { it.isDigit() }) ?: number)
                     Step.PASSWORD -> "Ikki bosqichli parol"
                     Step.QR -> "QR kodni Telegram bilan skanerlang"
                     Step.FINISHING -> "Hisob tasdiqlanmoqda..."
@@ -271,10 +281,35 @@ fun LoginScreen(onDone: () -> Unit, onClose: () -> Unit, onBot: () -> Unit = {})
             Spacer(Modifier.height(28.dp))
 
             when (step) {
-                Step.PHONE -> Row(verticalAlignment = Alignment.CenterVertically) {
-                    Field(prefix, { prefix = it.filter { c -> c.isDigit() || c == '+' }.take(5) }, "Kod", KeyboardType.Phone, Modifier.width(92.dp))
-                    Spacer(Modifier.width(10.dp))
-                    Field(number, { number = it.filter { c -> c.isDigit() || c == ' ' }.take(15) }, "Telefon raqam", KeyboardType.Phone, Modifier.weight(1f))
+                Step.PHONE -> Column {
+                    Text("Davlatni tanlang va Telegram hisobingiz ulangan telefon raqamini kiriting.", color = AruColors.TextDim, fontSize = 14.sp, modifier = Modifier.padding(bottom = 14.dp))
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).border(1.dp, AruColors.BorderBright, RoundedCornerShape(14.dp)).clickable { pickerOpen = true }.padding(horizontal = 14.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(country?.flag.orEmpty(), fontSize = 22.sp)
+                        Spacer(Modifier.width(12.dp))
+                        Text(country?.name ?: (if (prefix.filter { it.isDigit() }.isEmpty()) "Davlatni tanlang" else "Noto'g'ri kod"), color = if (country == null) Color(0xFFF87171) else Color.White, fontSize = 16.sp, modifier = Modifier.weight(1f))
+                        Text("▾", color = AruColors.TextDim, fontSize = 16.sp)
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Field(
+                            prefix, {
+                                codeTouched = true
+                                val d = it.filter { c -> c.isDigit() }.take(4)
+                                prefix = "+$d"
+                                country = countryByCode(d, country)
+                            },
+                            "Kod", KeyboardType.Phone, Modifier.width(96.dp),
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Field(
+                            number, { number = it.filter { c -> c.isDigit() }.take(country?.length?.takeIf { l -> l > 0 } ?: 15) },
+                            country?.pattern?.replace('X', '0')?.takeIf { it.isNotEmpty() } ?: "Telefon raqam",
+                            KeyboardType.Phone, Modifier.weight(1f), visual = PatternTransformation(country),
+                        )
+                    }
                 }
                 Step.CODE -> Field(code, { code = it.filter { c -> c.isDigit() }.take(8) }, "Kod", KeyboardType.NumberPassword, Modifier.fillMaxWidth())
                 Step.PASSWORD -> {
@@ -334,6 +369,13 @@ fun LoginScreen(onDone: () -> Unit, onClose: () -> Unit, onBot: () -> Unit = {})
                     if (!auth.isLoggedIn) Text("Bot orqali kirish", color = AruColors.Accent2, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickable(onClick = onBot))
                 }
             }
+            if ((step == Step.CODE || step == Step.PASSWORD) && !busy) {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "Raqamni o'zgartirish", color = AruColors.Accent2, fontSize = 14.sp, textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().clickable { tg.resetLogin(); code = ""; password = ""; step = Step.PHONE; error = null },
+                )
+            }
             if (step == Step.CODE && !busy) {
                 Spacer(Modifier.height(16.dp))
                 Text(
@@ -369,6 +411,7 @@ private fun Field(
     keyboard: KeyboardType,
     modifier: Modifier,
     secret: Boolean = false,
+    visual: androidx.compose.ui.text.input.VisualTransformation? = null,
 ) {
     OutlinedTextField(
         value = value,
@@ -376,7 +419,7 @@ private fun Field(
         label = { Text(label) },
         singleLine = true,
         keyboardOptions = KeyboardOptions(keyboardType = keyboard),
-        visualTransformation = if (secret) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
+        visualTransformation = visual ?: if (secret) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
         colors = OutlinedTextFieldDefaults.colors(
             focusedTextColor = Color.White,
             unfocusedTextColor = Color.White,
@@ -389,4 +432,47 @@ private fun Field(
         shape = RoundedCornerShape(14.dp),
         modifier = modifier,
     )
+}
+
+/** Raqamni davlat shabloni bo'yicha bo'laklab ko'rsatadi (`901234567` -> `90 123 45 67`); kursor to'g'ri joyda qoladi. */
+private class PatternTransformation(private val country: TgCountry?) : androidx.compose.ui.text.input.VisualTransformation {
+    override fun filter(text: androidx.compose.ui.text.AnnotatedString): androidx.compose.ui.text.input.TransformedText {
+        val raw = text.text
+        val shown = country?.format(raw) ?: raw
+        val map = object : androidx.compose.ui.text.input.OffsetMapping {
+            override fun originalToTransformed(offset: Int): Int {
+                var seen = 0
+                for (i in shown.indices) {
+                    if (seen == offset) return i
+                    if (shown[i] != ' ') seen++
+                }
+                return shown.length
+            }
+
+            override fun transformedToOriginal(offset: Int): Int = shown.take(offset).count { it != ' ' }.coerceAtMost(raw.length)
+        }
+        return androidx.compose.ui.text.input.TransformedText(androidx.compose.ui.text.AnnotatedString(shown), map)
+    }
+}
+
+/** Davlat tanlash: qidiruv + bayroq, nom, kod. */
+@Composable
+private fun CountryPicker(onPick: (TgCountry) -> Unit, onDismiss: () -> Unit) {
+    var q by remember { mutableStateOf("") }
+    val list = remember(q) { TG_COUNTRIES.filter { q.isBlank() || it.name.contains(q, ignoreCase = true) || it.code.startsWith(q.trim().removePrefix("+")) } }
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        Column(Modifier.clip(RoundedCornerShape(20.dp)).background(AruColors.Surface).padding(12.dp)) {
+            OutlinedTextField(q, { q = it }, placeholder = { Text("Qidirish") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            androidx.compose.foundation.lazy.LazyColumn(Modifier.height(420.dp)) {
+                androidx.compose.foundation.lazy.items(list, key = { it.iso + it.code }) { c ->
+                    Row(Modifier.fillMaxWidth().clickable { onPick(c) }.padding(horizontal = 8.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(c.flag, fontSize = 24.sp)
+                        Spacer(Modifier.width(12.dp))
+                        Text(c.name, color = Color.White, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                        Text("+${c.code}", color = AruColors.TextDim, fontSize = 14.sp)
+                    }
+                }
+            }
+        }
+    }
 }
