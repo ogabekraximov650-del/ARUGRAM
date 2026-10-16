@@ -268,16 +268,20 @@ class CommentsStore(
         watching = scope.launch {
             while (isActive) {
                 if (mk < 0 || _state.value.loading) { delay(2000); continue }
+                val t0 = System.currentTimeMillis()
                 val (code, text) = try { client.callText("$api/wait?mk=$mk") } catch (_: Exception) { 0 to "" }
                 if (!isActive) return@launch
                 if (code == 200) {
                     val j = try { JSONObject(text) } catch (_: Exception) { null }
                     if (j?.optBoolean("new") == true) {
-                        load(force = true)
+                        // Belgini AVVAL yangilaymiz — aks holda bir xil o'zgarish qayta-qayta yuklanadi.
                         val m = j.optLong("mk", -1)
                         if (m > mk) mk = m
+                        load(force = true)
                     }
                 } else delay(5000)
+                // Server darhol qaytarsa (uzoq so'rov emas) — so'rovlar to'xtovsiz ketmasin.
+                if (System.currentTimeMillis() - t0 < 1500) delay(4000)
             }
         }
     }

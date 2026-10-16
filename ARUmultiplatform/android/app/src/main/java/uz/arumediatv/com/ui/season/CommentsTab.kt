@@ -136,7 +136,7 @@ fun CommentsTab(season: Season, onOpenProfile: (Long) -> Unit, onLogin: () -> Un
         // Yoyish tugmasi + tartib
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Box(
-                Modifier.size(40.dp).clip(CircleShape).clickable {
+                Modifier.size(34.dp).clip(CircleShape).clickable {
                     if (expanded) { panelOpen = false; focus.clearFocus(); keyboard?.hide() }
                     onExpandedChange(!expanded)
                 },
@@ -146,8 +146,8 @@ fun CommentsTab(season: Season, onOpenProfile: (Long) -> Unit, onLogin: () -> Un
             CommentSort.entries.forEach { s ->
                 val on = st.sort == s
                 Text(
-                    s.label, color = if (on) Color.White else Color.White.copy(alpha = 0.54f), fontSize = 14.sp, fontWeight = FontWeight.Bold,
-                    modifier = Modifier.clip(RoundedCornerShape(14.dp)).background(if (on) AruColors.Accent else AruColors.Card).clickable { store.setSort(s) }.padding(horizontal = 16.dp, vertical = 10.dp),
+                    s.label, color = if (on) Color.White else Color.White.copy(alpha = 0.54f), fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false,
+                    modifier = Modifier.clip(RoundedCornerShape(11.dp)).background(if (on) AruColors.Accent else AruColors.Card).clickable { store.setSort(s) }.padding(horizontal = 11.dp, vertical = 6.dp),
                 )
             }
         }
