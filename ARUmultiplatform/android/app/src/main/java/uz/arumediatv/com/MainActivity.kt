@@ -68,6 +68,13 @@ import uz.arumediatv.com.ui.packs.PackDetailScreen
 import uz.arumediatv.com.ui.admin.AdminHubScreen
 import uz.arumediatv.com.ui.admin.AdminSection
 import uz.arumediatv.com.ui.admin.AdminThreadsScreen
+import uz.arumediatv.com.ui.admin.AdminUsersScreen
+import uz.arumediatv.com.ui.admin.AdminReportsScreen
+import uz.arumediatv.com.ui.admin.AdminChannelsScreen
+import uz.arumediatv.com.ui.admin.AdminChannelAddScreen
+import uz.arumediatv.com.ui.admin.AdminPacksScreen
+import uz.arumediatv.com.ui.admin.AdminStatsScreen
+import uz.arumediatv.com.ui.admin.AdminAppScreen
 import uz.arumediatv.com.ui.season.SeasonScreen
 import kotlinx.coroutines.launch
 import uz.arumediatv.com.ui.catalog.CatalogScreen
@@ -125,6 +132,13 @@ private sealed interface Page {
     data class PackDetail(val id: Long) : Page
     data object AdminHub : Page
     data object AdminThreads : Page
+    data object AdminUsers : Page
+    data object AdminReports : Page
+    data object AdminChannels : Page
+    data object AdminChannelAdd : Page
+    data object AdminPacks : Page
+    data object AdminStats : Page
+    data object AdminApp : Page
     data class AdminChat(val userId: Long, val name: String) : Page
     data class PublicUser(val id: Long) : Page
     data class Stat(val userId: Long, val kind: StatKind, val owner: String) : Page
@@ -229,10 +243,23 @@ private fun AruApp() {
                     Page.AdminHub -> AdminHubScreen(onBack = ::pop, onOpen = { s ->
                         when (s) {
                             AdminSection.CHATS -> push(Page.AdminThreads)
+                            AdminSection.USERS -> push(Page.AdminUsers)
+                            AdminSection.REPORTS -> push(Page.AdminReports)
+                            AdminSection.CHANNELS -> push(Page.AdminChannels)
+                            AdminSection.PACKS -> push(Page.AdminPacks)
+                            AdminSection.STATS -> push(Page.AdminStats)
+                            AdminSection.APP -> push(Page.AdminApp)
                             else -> android.widget.Toast.makeText(ctx, "${s.title}: keyingi qadamda", android.widget.Toast.LENGTH_SHORT).show()
                         }
                     })
                     Page.AdminThreads -> AdminThreadsScreen(onBack = ::pop, onOpenThread = { t -> push(Page.AdminChat(t.userId, t.name)) })
+                    Page.AdminUsers -> AdminUsersScreen(onBack = ::pop, onOpenProfile = { id -> push(Page.PublicUser(id)) }, onOpenChat = { id, n -> push(Page.AdminChat(id, n)) })
+                    Page.AdminReports -> AdminReportsScreen(onBack = ::pop, onOpenProfile = { id -> if (id > 0) push(Page.PublicUser(id)) })
+                    Page.AdminChannels -> AdminChannelsScreen(onBack = ::pop, onAdd = { push(Page.AdminChannelAdd) })
+                    Page.AdminChannelAdd -> AdminChannelAddScreen(onBack = ::pop, onDone = ::pop)
+                    Page.AdminPacks -> AdminPacksScreen(onBack = ::pop)
+                    Page.AdminStats -> AdminStatsScreen(onBack = ::pop)
+                    Page.AdminApp -> AdminAppScreen(onBack = ::pop)
                     is Page.AdminChat -> SupportChatScreen(userId = page.userId, title = page.name, onBack = ::pop)
                     is Page.PublicUser -> PublicProfileScreen(page.id, onBack = ::pop, onOpenStat = { u, k, o -> push(Page.Stat(u, k, o)) })
                     is Page.Stat -> StatDetailScreen(page.userId, page.kind, page.owner, onBack = ::pop, onOpenSeason = openSeason)
