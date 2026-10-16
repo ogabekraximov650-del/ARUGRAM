@@ -33,6 +33,7 @@ object AppServices {
     lateinit var telegram: TelegramService
         private set
     lateinit var images: ImageStore
+    lateinit var thumbs: uz.arumediatv.com.data.ThumbStore
         private set
     lateinit var seasons: SeasonsStore
         private set
@@ -104,6 +105,7 @@ object AppServices {
         unread = UnreadBadge(auth)
         traffic = TrafficMeter(ctx, auth)
         gate = ChannelGate(ctx, auth, telegram)
+        thumbs = uz.arumediatv.com.data.ThumbStore(ctx, telegram, videoCache)
         packs = PackStore(ctx, auth, telegram, { sync })
         admin = AdminApi(auth)
         sync.trafficPending = { traffic.pendingBytes }

@@ -35,6 +35,9 @@ data class HistoryItem(
     val epizodId: Long = 0,
     /** Oxirgi ko'rilgan vaqt, millisekund (epoch). */
     val updatedAt: Long,
+    /** Qismning ijro manzili va eng baland sifatli fayli (to'xtagan joydagi kadr uchun). */
+    val videoUrl: String = "",
+    val thumbUrl: String = "",
 ) {
     val key: String get() = "$animeId:$seasonId:$episodeNo"
 
@@ -151,6 +154,8 @@ class LibraryStore(
                     quality = o.optString("last_quality"),
                     epizodId = o.optLong("epizod_id"),
                     updatedAt = o.optLong("updated_at"),
+                    videoUrl = o.optString("video_url"),
+                    thumbUrl = o.optString("thumb_url"),
                 )
             }
             return out

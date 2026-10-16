@@ -38,6 +38,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -90,6 +91,22 @@ fun HistoryAnimeList(items: List<HistoryItem>, pad: Dp, onOpenAnime: (HistoryIte
     }
 }
 
+/** To'xtagan joydagi kadr; tayyor bo'lguncha (yoki yasalmasa) bo'lim posteri turadi. */
+@Composable
+fun HistoryFrame(item: HistoryItem, modifier: Modifier = Modifier) {
+    var bmp by remember(item.videoUrl, item.positionMs) { mutableStateOf(AppServices.thumbs.peek(item)) }
+    androidx.compose.runtime.LaunchedEffect(item.videoUrl, item.positionMs) {
+        if (bmp == null) bmp = AppServices.thumbs.load(item)
+    }
+    Box(modifier) {
+        TgImage(item.photoUrl, Modifier.fillMaxSize(), maxPx = 720)
+        bmp?.let { b ->
+            val img = remember(b) { b.asImageBitmap() }
+            androidx.compose.foundation.Image(img, null, contentScale = androidx.compose.ui.layout.ContentScale.Crop, modifier = Modifier.fillMaxSize())
+        }
+    }
+}
+
 /** Anime kartasi: 16:9 kadr, tagida nom, "Oxirgi marta N-bo'lim M-qismni ko'rdingiz" va sana. */
 @Composable
 fun AnimeRow(item: HistoryItem, onClick: () -> Unit) {
@@ -98,11 +115,7 @@ fun AnimeRow(item: HistoryItem, onClick: () -> Unit) {
         Modifier.fillMaxWidth().clip(shape).background(AruColors.Card).border(1.dp, AruColors.Border, shape)
             .combinedClickable(onClick = onClick).padding(10.dp),
     ) {
-        TgImage(
-            url = item.photoUrl,
-            modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(12.dp)).background(AruColors.CardAlt),
-            maxPx = 720,
-        )
+        HistoryFrame(item, Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(12.dp)).background(AruColors.CardAlt))
         Text(item.title, color = Color.White, fontSize = 15.5.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 10.dp))
         Text(
             "Oxirgi marta ${item.sectionNo}-bo'lim ${item.episodeNo}-qismni ko'rdingiz",
@@ -131,7 +144,7 @@ fun EpisodeRow(item: HistoryItem, onOpen: () -> Unit, onLongPress: (() -> Unit)?
         Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(16.dp)).background(AruColors.CardAlt)
             .combinedClickable(onClick = onOpen, onLongClick = onLongPress),
     ) {
-        TgImage(item.photoUrl, Modifier.fillMaxSize(), maxPx = 720)
+        HistoryFrame(item, Modifier.fillMaxSize())
         Row(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(start = 8.dp, end = 8.dp, bottom = 10.dp), verticalAlignment = Alignment.Bottom) {
             Column(Modifier.weight(1f)) {
                 ShadowText(item.title, 11.5f, FontWeight.Bold)
