@@ -16,6 +16,7 @@ import androidx.media3.exoplayer.ExoPlayer
  * Media3 ExoPlayer o'rami: ijro holati Compose `State` sifatida (ekran kuzatadi).
  * Manba — Rust mahalliy serveri (Telegram, Range'ni qo'llaydi) yoki worker `/api/play/...`.
  */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Stable
 class AruPlayer(context: Context) {
     val exo: ExoPlayer = ExoPlayer.Builder(
