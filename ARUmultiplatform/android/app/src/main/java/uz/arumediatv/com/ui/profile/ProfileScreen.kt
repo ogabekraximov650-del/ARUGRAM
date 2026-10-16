@@ -67,7 +67,9 @@ import uz.arumediatv.com.BuildConfig
 import uz.arumediatv.com.core.RustCore
 import uz.arumediatv.com.data.AppUser
 import uz.arumediatv.com.ui.common.LocalBarPad
-import uz.arumediatv.com.ui.common.PageHeader
+import uz.arumediatv.com.ui.common.AruIcons
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Notifications
 import uz.arumediatv.com.ui.common.TgImage
 import uz.arumediatv.com.ui.theme.AruColors
 
@@ -94,7 +96,7 @@ fun ProfileScreen(onLogin: () -> Unit, onEdit: () -> Unit, onSessions: () -> Uni
     var error by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(user) {
-        cacheBytes = withContext(Dispatchers.IO) { AppServices.images.diskBytes() }
+        cacheBytes = withContext(Dispatchers.IO) { AppServices.images.diskBytes() + AppServices.videoCache.diskBytes() + AppServices.thumbs.diskBytes() }
         if (user != null) AppServices.myStats.load()
     }
 
@@ -123,11 +125,8 @@ fun ProfileScreen(onLogin: () -> Unit, onEdit: () -> Unit, onSessions: () -> Uni
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState())
-            .padding(start = 16.dp, end = 16.dp, top = 4.dp + LocalBarPad.current.calculateTopPadding()),
+            .padding(start = 16.dp, end = 16.dp, top = 16.dp + LocalBarPad.current.calculateTopPadding()),
     ) {
-        PageHeader("Profil", Modifier.padding(horizontal = 4.dp))
-        Spacer(Modifier.height(8.dp))
-
         val u = user
         if (u == null) {
             GuestCard(onLogin)
@@ -136,83 +135,45 @@ fun ProfileScreen(onLogin: () -> Unit, onEdit: () -> Unit, onSessions: () -> Uni
                 (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("ID", u.id.toString()))
                 toast("ID nusxalandi: ${u.id}")
             })
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(16.dp))
             BillingButton(onBilling)
             Spacer(Modifier.height(12.dp))
-            StatsGrid(stats, onOpenStat)
+            StatsGrid(stats, cacheBytes, onOpenStat, onStorage)
             Spacer(Modifier.height(12.dp))
-            TrafficCard()
+            TrafficCard(stats.traffic)
         }
 
         Spacer(Modifier.height(16.dp))
+        val unread by AppServices.unread.count.collectAsStateWithLifecycle()
         Group {
-            if (u != null) {
-                Row2(Icons.Filled.Settings, "Sozlamalar", "Maxfiylik: statistikani boshqalardan yashirish", onClick = onSettings)
+            Tile(Icons.Filled.Notifications, "Bildirishnoma", onClick = { toast("«Bildirishnoma» bo'limi tez orada qo'shiladi") })
+            Divider2()
+            Tile(Icons.Filled.Settings, "Sozlamalar", onClick = { if (u == null) onLogin() else onSettings() })
+            Divider2()
+            if (!tgState.authorized) {
+                Tile(Icons.AutoMirrored.Filled.Send, "Telegram'ni ulash", onClick = onLogin)
                 Divider2()
             }
-            Row2(
-                Icons.Filled.Phone, "Telegram",
-                when {
-                    tgState.error != null && !tgState.started -> "Ishga tushmadi"
-                    tgState.authorized -> "Ulangan — rasm va video ko'rinadi"
-                    tgState.configUnreachable -> "Server bilan bog'lanib bo'lmadi"
-                    else -> "Ulanmagan"
-                },
-                onClick = if (!tgState.authorized) onLogin else null,
-                action = if (!tgState.authorized) "Ulash" else null,
-            )
-            if (u != null) {
-                Divider2()
-                Row2(Icons.Filled.Person, "Qurilmalar", "Hisobga kirgan qurilmalar", onClick = onSessions)
-            }
-        }
-
-        Spacer(Modifier.height(16.dp))
-        Group {
-            Row2(
-                Icons.Filled.Delete, "Rasmlar keshi", formatBytes(cacheBytes),
-                onClick = {
-                    AppServices.images.clearDisk()
-                    cacheBytes = 0
-                },
-                action = "Tozalash",
-            )
+            Tile(AruIcons.Devices, "Qurilmalar", onClick = { if (u == null) onLogin() else onSessions() })
             Divider2()
-            Row2(Icons.Filled.Info, "Xotira", "Yuklab olingan videolar, kesh, hajm", onClick = onStorage)
+            Tile(AruIcons.Emoticon, "Emoji, GIF va stikerlar", onClick = { if (u == null) onLogin() else onPacks() })
             Divider2()
-            Row2(Icons.Filled.Star, "Emoji, GIF va stikerlar", "O'z to'plamlaringiz va obunalar", onClick = { if (u == null) onLogin() else onPacks() })
+            Tile(AruIcons.SupportAgent, "Admin bilan bog'lanish", dot = unread > 0, onClick = { if (u == null) onLogin() else onSupport() })
             Divider2()
-            val unread by AppServices.unread.count.collectAsStateWithLifecycle()
-            Row2(
-                Icons.Filled.Phone, "Admin bilan bog'lanish", if (unread > 0) "Yangi xabar bor" else "Savol va takliflar",
-                onClick = { if (u == null) onLogin() else onSupport() }, action = if (unread > 0) "●" else null,
-            )
-            Divider2()
-            Row2(Icons.Filled.Refresh, "Hisobni yangilash", "Serverdan qayta o'qish", onClick = {
-                if (u != null) scope.launch {
-                    auth.refresh()
-                    AppServices.myStats.load(force = true)
-                }
-            })
-            Divider2()
-            Row2(Icons.Filled.Info, "Ilova haqida", "Versiya ${BuildConfig.VERSION_NAME}", onClick = { showAbout = true })
+            Tile(Icons.Filled.Info, "Ilova haqida", onClick = { showAbout = true })
         }
 
         // Admin paneli: faqat admin build'da VA server admin deb belgilagan hisobda (haqiqiy to'siq serverda).
         if (BuildConfig.IS_ADMIN && u != null && u.isAdmin) {
             Spacer(Modifier.height(16.dp))
-            Group {
-                Row2(Icons.Filled.Lock, "Admin paneli", "Foydalanuvchilar, anime, shikoyatlar, kanallar", onClick = onAdmin)
-            }
+            Group { Tile(Icons.Filled.Lock, "Admin paneli", onClick = onAdmin) }
         }
 
         if (u != null) {
             Spacer(Modifier.height(16.dp))
-            Group {
-                Row2(Icons.Filled.Delete, "Accountni o'chirish", "Hisob va barcha ma'lumotlar o'chadi", onClick = { deleteStep = 1 }, danger = true)
-                Divider2()
-                Row2(Icons.Filled.ExitToApp, "Accountdan chiqish", "Bu qurilmadagi hisobdan chiqish", onClick = { confirmLogout = true }, danger = true)
-            }
+            DangerTile(Icons.Filled.Delete, "Accountni o'chirish") { deleteStep = 1 }
+            Spacer(Modifier.height(16.dp))
+            DangerTile(Icons.Filled.ExitToApp, "Accountdan chiqish") { confirmLogout = true }
         }
         Spacer(Modifier.height(32.dp + LocalBarPad.current.calculateBottomPadding()))
     }
@@ -358,116 +319,179 @@ private fun GuestCard(onLogin: () -> Unit) {
 
 @Composable
 private fun HeroCard(u: AppUser, onEdit: () -> Unit, onCopyId: () -> Unit, onAvatar: () -> Unit, avatarBusy: Boolean) {
-    val shape = RoundedCornerShape(24.dp)
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .clip(shape)
-            .background(Brush.linearGradient(listOf(AruColors.AccentTint, AruColors.Card)))
-            .border(1.dp, AruColors.Accent.copy(alpha = 0.25f), shape),
-    ) {
+    val shape = RoundedCornerShape(20.dp)
+    val billing by AppServices.billing.state.collectAsStateWithLifecycle()
+    Box(Modifier.fillMaxWidth().clip(shape).background(AruColors.Card).border(1.dp, AruColors.Border, shape)) {
         Row(Modifier.fillMaxWidth().padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.clip(CircleShape).background(Brush.linearGradient(listOf(AruColors.Accent, AruColors.Accent2))).padding(3.dp).clickable(onClick = onAvatar)) {
-                Avatar(u, 76.dp)
-                if (avatarBusy) Box(Modifier.size(76.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.55f)), contentAlignment = Alignment.Center) {
-                    androidx.compose.material3.CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(26.dp))
+            Box(Modifier.size(96.dp).clickable(onClick = onAvatar)) {
+                Avatar(u, 96.dp)
+                if (avatarBusy) Box(Modifier.size(96.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.55f)), contentAlignment = Alignment.Center) {
+                    androidx.compose.material3.CircularProgressIndicator(color = Color.White, strokeWidth = 2.4.dp, modifier = Modifier.size(26.dp))
                 }
+                if (billing.active) Row(
+                    Modifier.align(Alignment.TopCenter).padding(top = 3.dp).clip(RoundedCornerShape(20.dp))
+                        .background(Brush.linearGradient(listOf(AruColors.Gold, AruColors.Accent2))).padding(horizontal = 6.dp, vertical = 2.5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(AruIcons.WorkspacePremium, null, tint = AruColors.AccentTint, modifier = Modifier.size(11.dp))
+                    Spacer(Modifier.width(2.dp))
+                    Text("PREMIUM", color = AruColors.AccentTint, fontSize = 8.sp, fontWeight = FontWeight.Black, letterSpacing = 0.2.sp)
+                }
+                Box(
+                    Modifier.align(Alignment.BottomEnd).clip(CircleShape).background(AruColors.Card).padding(2.dp).clip(CircleShape).background(AruColors.Accent).padding(5.dp),
+                ) { Icon(AruIcons.PhotoCamera, null, tint = Color.White, modifier = Modifier.size(13.dp)) }
             }
-            Spacer(Modifier.width(16.dp))
-            Column(Modifier.weight(1f).padding(end = 30.dp)) {
+            Spacer(Modifier.width(30.dp))
+            Column(Modifier.weight(1f).padding(end = 34.dp)) {
                 Text(u.fullName, color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (u.username.isNotEmpty()) Text("@${u.username}", color = AruColors.TextDim, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Spacer(Modifier.height(8.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        "ID ${u.id}", color = AruColors.TextDim, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(Color.White.copy(alpha = 0.08f)).clickable(onClick = onCopyId).padding(horizontal = 10.dp, vertical = 4.dp),
-                    )
-                    if (u.isAdmin) {
-                        Spacer(Modifier.width(8.dp))
-                        Pill("Admin", highlight = true)
-                    }
+                if (u.username.isNotEmpty()) Text("@${u.username}", color = AruColors.TextDim, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
+                Row(
+                    Modifier.padding(top = 8.dp).clip(RoundedCornerShape(100.dp)).background(Color.White.copy(alpha = 0.08f))
+                        .border(1.dp, Color.White.copy(alpha = 0.20f), RoundedCornerShape(100.dp)).clickable(onClick = onCopyId).padding(horizontal = 14.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("ID: ${u.id}", color = Color.White.copy(alpha = 0.78f), fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.width(9.dp))
+                    Icon(AruIcons.Copy, null, tint = Color.White.copy(alpha = 0.6f), modifier = Modifier.size(16.dp))
                 }
-                Spacer(Modifier.height(6.dp))
-                Text("Balans: ${u.balance}", color = AruColors.Gold, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Text("Balans: ${u.balance}", color = Color.White.copy(alpha = 0.62f), fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 6.dp))
             }
         }
         Box(
-            Modifier.align(Alignment.TopEnd).padding(10.dp).size(34.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.08f)).clickable(onClick = onEdit),
-            contentAlignment = Alignment.Center,
-        ) { Icon(Icons.Filled.Edit, "Tahrirlash", tint = Color.White.copy(alpha = 0.8f), modifier = Modifier.size(18.dp)) }
+            Modifier.align(Alignment.TopEnd).padding(18.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.10f))
+                .border(1.dp, Color.White.copy(alpha = 0.18f), CircleShape).clickable(onClick = onEdit).padding(8.dp),
+        ) { Icon(Icons.Filled.Edit, "Tahrirlash", tint = Color.White.copy(alpha = 0.85f), modifier = Modifier.size(17.dp)) }
     }
 }
 
 @Composable
 private fun BillingButton(onClick: () -> Unit) {
     val st by AppServices.billing.state.collectAsStateWithLifecycle()
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(st.active) { while (st.active) { now = System.currentTimeMillis(); kotlinx.coroutines.delay(1000) } }
     val shape = RoundedCornerShape(18.dp)
+    val until = remember(st.until) { java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", java.util.Locale.US).format(java.util.Date(st.until)) }
     Row(
-        Modifier.fillMaxWidth().clip(shape).background(Brush.linearGradient(listOf(AruColors.Accent, AruColors.Accent2))).clickable(onClick = onClick).padding(horizontal = 18.dp, vertical = 14.dp),
+        Modifier.fillMaxWidth().clip(shape).background(Brush.horizontalGradient(listOf(AruColors.Accent, AruColors.Accent2))).clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        Icon(AruIcons.WorkspacePremium, null, tint = Color.White, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
-            Text("Obuna olish va balans to'ldirish", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-            Text(if (st.active) "Obuna faol · ${st.leftMs / 86_400_000 + 1} kun qoldi" else "Obuna yo'q", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
+            Text("Obuna olish va Balans to'ldirish", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(if (st.active) "Obuna $until gacha" else "Obuna yo'q", color = Color.White.copy(alpha = 0.85f), fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, modifier = Modifier.padding(top = 3.dp))
+            if (st.active) Text(uz.arumediatv.com.data.formatLeft(st.until - now), color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.Bold, maxLines = 1)
         }
+        Spacer(Modifier.width(6.dp))
+        Icon(AruIcons.ChevronRight, null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(20.dp))
     }
 }
 
 @Composable
-private fun StatsGrid(s: MyStats, onOpen: (StatKind) -> Unit) {
-    val hours = s.watchHours
-    val hoursText = if (hours >= 10) "${hours.toInt()} soat" else String.format(java.util.Locale.US, "%.1f soat", hours)
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            StatBox("Anime", s.animes.toString(), Modifier.weight(1f)) {}
-            StatBox("Qism ›", s.episodes.toString(), Modifier.weight(1f)) { onOpen(StatKind.EPISODES) }
+private fun StatsGrid(s: MyStats, storageBytes: Long, onOpen: (StatKind) -> Unit, onStorage: () -> Unit) {
+    fun fmt(n: Long) = uz.arumediatv.com.ui.season.formatCount(n)
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            StatBox(AruIcons.Movie, "Anime", fmt(s.animes), Modifier.weight(1f), null)
+            StatBox(AruIcons.PlayCircleOutline, "Qismlar", fmt(s.episodes), Modifier.weight(1f)) { onOpen(StatKind.EPISODES) }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            StatBox("Tomosha", hoursText, Modifier.weight(1f)) {}
-            StatBox("Trafik", formatBytes(s.traffic), Modifier.weight(1f)) {}
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            StatBox(AruIcons.GridView, "Bo'limlar", fmt(s.seasons), Modifier.weight(1f)) { onOpen(StatKind.SEASONS) }
+            StatBox(AruIcons.Bookmark, "Sevimlilar", fmt(s.favorites), Modifier.weight(1f)) { onOpen(StatKind.FAVORITES) }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            StatBox(Icons.Filled.Star, "Baholangan", fmt(s.rated), Modifier.weight(1f)) { onOpen(StatKind.RATED) }
+            StatBox(AruIcons.Comment, "Izohlar", fmt(s.comments), Modifier.weight(1f)) { onOpen(StatKind.COMMENTS) }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            StatBox(AruIcons.Schedule, "Tomosha vaqti", "${uz.arumediatv.com.ui.season.formatHours(s.watchMs)} soat", Modifier.weight(1f), null)
+            StatBox(AruIcons.SdStorage, "Xotira", formatBytes(storageBytes).replace('.', ','), Modifier.weight(1f), onStorage)
         }
     }
 }
 
-/** Trafik taqsimoti (shu telefonda, shu hisob uchun): nimaga qancha ketgani. */
+/** Trafik: umumiy hajm, ranglangan chiziq va toifalar (Flutter `_TrafficBox`). */
 @Composable
-private fun TrafficCard() {
+private fun TrafficCard(syncedBytes: Long) {
     val totals by AppServices.traffic.totals.collectAsStateWithLifecycle()
-    val video = totals["video"] ?: 0L
-    val api = totals["api"] ?: 0L
-    val sum = (video + api).coerceAtLeast(1).toFloat()
+    val pending = remember(totals) { AppServices.trafficOrNull()?.pendingBytes ?: 0L }
+    val rowsRaw = listOf("Videolar" to (totals["video"] ?: 0L), "Ma'lumotlar" to (totals["api"] ?: 0L)).filter { it.second > 0 }.sortedByDescending { it.second }
+    val known = rowsRaw.sumOf { it.second }
+    val total = maxOf(syncedBytes + pending, known)
+    val rows = buildList {
+        addAll(rowsRaw)
+        val rest = total - known
+        if (rest > 0 && known > 0) add("Oldingi hisob" to rest) else if (isEmpty() && total > 0) add("Oldingi hisob" to total)
+    }
+    fun colorOf(l: String) = when (l) { "Videolar" -> AruColors.Accent; "Ma'lumotlar" -> Color(0xFF4ADE80); else -> AruColors.TextFaint }
     val shape = RoundedCornerShape(18.dp)
-    Column(Modifier.fillMaxWidth().clip(shape).background(AruColors.Card).border(1.dp, AruColors.Border, shape).padding(16.dp)) {
-        Text("Trafik taqsimoti", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(10.dp))
-        Row(Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)).background(AruColors.CardAlt)) {
-            if (video > 0) Box(Modifier.weight((video / sum).coerceAtLeast(0.02f)).height(8.dp).background(AruColors.Accent2))
-            if (api > 0) Box(Modifier.weight((api / sum).coerceAtLeast(0.02f)).height(8.dp).background(Color(0xFF60A5FA)))
+    Column(Modifier.fillMaxWidth().clip(shape).background(AruColors.Card).border(1.dp, AruColors.Border, shape).padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 14.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(AruIcons.CloudDownload, null, tint = AruColors.Accent, modifier = Modifier.size(15.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Trafik", color = Color.White.copy(alpha = 0.55f), fontSize = 12.sp)
+            Spacer(Modifier.weight(1f))
+            Text(formatBytes(total).replace('.', ','), color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold)
         }
-        Spacer(Modifier.height(10.dp))
-        TrafficRow("Video", video, AruColors.Accent2)
-        TrafficRow("Ma'lumotlar (API)", api, Color(0xFF60A5FA))
-        Text("Faqat internetdan kelgan baytlar sanaladi; yuklab olingan videoni ko'rish trafik qo'shmaydi.", color = AruColors.TextFaint, fontSize = 11.sp, modifier = Modifier.padding(top = 8.dp))
+        Spacer(Modifier.height(12.dp))
+        Row(Modifier.fillMaxWidth().height(7.dp).clip(RoundedCornerShape(4.dp)).background(Color.White.copy(alpha = 0.10f))) {
+            val sum = rows.sumOf { it.second }.coerceAtLeast(1).toFloat()
+            rows.forEach { (l, b) -> Box(Modifier.weight((b / sum).coerceAtLeast(0.001f)).height(7.dp).background(colorOf(l))) }
+        }
+        Spacer(Modifier.height(12.dp))
+        if (rows.isEmpty()) Text("Hozircha trafik sarflanmagan", color = Color.White.copy(alpha = 0.4f), fontSize = 12.sp)
+        rows.forEachIndexed { i, (l, b) ->
+            if (i > 0) Spacer(Modifier.height(7.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(7.dp).clip(CircleShape).background(colorOf(l)))
+                Spacer(Modifier.width(7.dp))
+                Text(l, color = Color.White.copy(alpha = 0.72f), fontSize = 12.5.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.width(8.dp))
+                Text(formatBytes(b).replace('.', ','), color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.width(10.dp))
+                Text(String.format(java.util.Locale.US, "%.2f%%", if (total > 0) b * 100.0 / total else 0.0), color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp, textAlign = androidx.compose.ui.text.style.TextAlign.End, modifier = Modifier.width(58.dp))
+            }
+        }
     }
 }
 
 @Composable
-private fun TrafficRow(label: String, bytes: Long, color: Color) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(10.dp).clip(CircleShape).background(color))
-        Spacer(Modifier.width(8.dp))
-        Text(label, color = AruColors.TextDim, fontSize = 13.sp, modifier = Modifier.weight(1f))
-        Text(formatBytes(bytes), color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-    }
-}
-
-@Composable
-private fun StatBox(label: String, value: String, modifier: Modifier, onClick: () -> Unit) {
+private fun StatBox(icon: ImageVector, label: String, value: String, modifier: Modifier, onClick: (() -> Unit)?) {
     val shape = RoundedCornerShape(18.dp)
-    Column(modifier.clip(shape).background(AruColors.Card).border(1.dp, AruColors.Border, shape).clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 14.dp)) {
-        Text(value, color = AruColors.Accent2, fontSize = 20.sp, fontWeight = FontWeight.Black, maxLines = 1)
-        Text(label, color = AruColors.TextDim, fontSize = 12.sp)
+    Column(
+        modifier.clip(shape).background(AruColors.Card).border(1.dp, AruColors.Border, shape)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier).padding(horizontal = 14.dp, vertical = 14.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, null, tint = AruColors.Accent, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(label, color = Color.White.copy(alpha = 0.55f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Text(value, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
+    }
+}
+
+@Composable
+private fun Tile(icon: ImageVector, title: String, dot: Boolean = false, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(24.dp))
+        Spacer(Modifier.width(16.dp))
+        Text(title, color = Color.White, fontSize = 16.sp, modifier = Modifier.weight(1f))
+        if (dot) { Box(Modifier.size(9.dp).clip(CircleShape).background(AruColors.Accent)); Spacer(Modifier.width(6.dp)) }
+        Icon(AruIcons.ChevronRight, null, tint = Color.White.copy(alpha = 0.38f), modifier = Modifier.size(24.dp))
+    }
+}
+
+@Composable
+private fun DangerTile(icon: ImageVector, label: String, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(20.dp)
+    Row(
+        Modifier.fillMaxWidth().clip(shape).background(AruColors.Card).border(1.dp, AruColors.Border, shape).clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.clip(RoundedCornerShape(12.dp)).background(AruColors.Accent.copy(alpha = 0.14f)).padding(8.dp)) { Icon(icon, null, tint = AruColors.Accent, modifier = Modifier.size(22.dp)) }
+        Spacer(Modifier.width(14.dp))
+        Text(label, color = AruColors.Accent, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -510,13 +534,13 @@ private fun Card2(content: @Composable () -> Unit) {
 
 @Composable
 private fun Group(content: @Composable () -> Unit) {
-    val shape = RoundedCornerShape(18.dp)
+    val shape = RoundedCornerShape(20.dp)
     Column(Modifier.fillMaxWidth().clip(shape).background(AruColors.Card).border(1.dp, AruColors.Border, shape)) { content() }
 }
 
 @Composable
 private fun Divider2() {
-    Box(Modifier.fillMaxWidth().height(1.dp).background(AruColors.Border))
+    Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.12f)))
 }
 
 @Composable
