@@ -1,0 +1,26 @@
+name: Bazani yangi Turso'ga ko'chirish
+
+# `tool/migrate/run.txt` o'zgarganda ishlaydi (qo'lda `workflow_dispatch` ishlatilmaydi).
+# Actions to'g'ridan-to'g'ri eski (TURSO_URL/TOKEN) va yangi (`new_turso.enc`) bazaga ulanadi: sxema + barcha qatorlar + sonlarni solishtirish.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tool/migrate/run.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    environment: secret
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ko'chirish
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+          TURSO_URL: ${{ secrets.TURSO_URL }}
+          TURSO_TOKEN: ${{ secrets.TURSO_TOKEN }}
+        run: python3 tool/migrate/migrate.py
