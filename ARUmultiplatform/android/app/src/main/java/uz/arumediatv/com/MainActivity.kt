@@ -57,6 +57,9 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import uz.arumediatv.com.ui.billing.BillingScreen
+import uz.arumediatv.com.ui.profile.PublicProfileScreen
+import uz.arumediatv.com.ui.profile.StatDetailScreen
+import uz.arumediatv.com.ui.profile.StatKind
 import uz.arumediatv.com.ui.season.SeasonScreen
 import kotlinx.coroutines.launch
 import uz.arumediatv.com.ui.catalog.CatalogScreen
@@ -106,6 +109,8 @@ private sealed interface Page {
     data object Sessions : Page
     data object Settings : Page
     data object Billing : Page
+    data class PublicUser(val id: Long) : Page
+    data class Stat(val userId: Long, val kind: StatKind, val owner: String) : Page
     data class SeasonPage(val season: uz.arumediatv.com.data.Season) : Page
 }
 
@@ -154,6 +159,7 @@ private fun AruApp() {
                     onSessions = { push(Page.Sessions) },
                     onSettings = { push(Page.Settings) },
                     onBilling = { push(Page.Billing) },
+                    onOpenStat = { k -> AppServices.auth.user.value?.id?.let { push(Page.Stat(it, k, "")) } },
                 )
                 else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text("${tabs[tab].title} — tez orada", color = AruColors.TextFaint)
@@ -184,12 +190,15 @@ private fun AruApp() {
                     Page.Sessions -> SessionsScreen(onBack = ::pop)
                     Page.Settings -> SettingsScreen(onBack = ::pop)
                     Page.Billing -> BillingScreen(onBack = ::pop)
+                    is Page.PublicUser -> PublicProfileScreen(page.id, onBack = ::pop, onOpenStat = { u, k, o -> push(Page.Stat(u, k, o)) })
+                    is Page.Stat -> StatDetailScreen(page.userId, page.kind, page.owner, onBack = ::pop, onOpenSeason = openSeason)
                     is Page.SeasonPage -> SeasonScreen(
                         season = page.season,
                         onBack = ::pop,
                         onOpenSeason = { s -> pop(); push(Page.SeasonPage(s)) },
                         onOpenBilling = { push(Page.Billing) },
-                        onOpenProfile = { android.widget.Toast.makeText(ctx, "Foydalanuvchi profili keyingi bosqichda", android.widget.Toast.LENGTH_SHORT).show() },
+                        onOpenProfile = { id -> if (id > 0) push(Page.PublicUser(id)) },
+                        onLogin = { push(Page.Login) },
                     )
                 }
             }

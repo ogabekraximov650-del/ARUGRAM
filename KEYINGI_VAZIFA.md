@@ -6496,3 +6496,8 @@ Anibla sekinligi (diag): worker -> anibla.uz har so'rovga ~1.2-1.4 s (login 1.4 
 - Ruxsat: `BillingStore.active` yoki `season.free == true`. `ui/billing/BillingScreen`: tariflar, balans to'ldirish (to'lov havolasi), tekshirish, tarix.
 - Navigatsiya: `MainActivity` da ekranlar steki (`Page`), tablar ostida tirik.
 - Kanallarga majburiy obuna (`ChannelGate`) va Izohlar keyingi qadamda.
+
+## Kotlin ilova: izohlar, ommaviy profil, statistika ro'yxatlari (2026-10)
+
+- `data/Comments.kt`: `CommentsStore` (diskdagi nusxa, `mk/at` bilan "o'zgarmagan" javobi, `/wait` bilan jonli yangilanish, yozish, javob, layk, o'chirish, shikoyat `POST /api/reports`), `PublicRepository` (`/api/user/:id`, `/api/user/:id/stats/:kind`).
+- `ui/season/CommentsTab.kt`, `ui/profile/PublicProfileScreen.kt` (+ `StatDetailScreen`). Izohdagi stiker/GIF — Emoji/GIF/stiker to'plamlari bosqichida.

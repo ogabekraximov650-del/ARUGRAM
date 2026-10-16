@@ -75,7 +75,7 @@ import uz.arumediatv.com.ui.theme.AruColors
  * hisobni o'chirish va chiqish. Chiqishda navbatdagi yozuvlar avval serverga saqlanadi (`SyncQueue`).
  */
 @Composable
-fun ProfileScreen(onLogin: () -> Unit, onEdit: () -> Unit, onSessions: () -> Unit, onSettings: () -> Unit, onBilling: () -> Unit) {
+fun ProfileScreen(onLogin: () -> Unit, onEdit: () -> Unit, onSessions: () -> Unit, onSettings: () -> Unit, onBilling: () -> Unit, onOpenStat: (StatKind) -> Unit) {
     val auth = AppServices.auth
     val tg = AppServices.telegram
     val user by auth.user.collectAsStateWithLifecycle()
@@ -126,7 +126,7 @@ fun ProfileScreen(onLogin: () -> Unit, onEdit: () -> Unit, onSessions: () -> Uni
             Spacer(Modifier.height(12.dp))
             BillingButton(onBilling)
             Spacer(Modifier.height(12.dp))
-            StatsGrid(stats)
+            StatsGrid(stats, onOpenStat)
         }
 
         Spacer(Modifier.height(16.dp))
@@ -387,25 +387,25 @@ private fun BillingButton(onClick: () -> Unit) {
 }
 
 @Composable
-private fun StatsGrid(s: MyStats) {
+private fun StatsGrid(s: MyStats, onOpen: (StatKind) -> Unit) {
     val hours = s.watchHours
     val hoursText = if (hours >= 10) "${hours.toInt()} soat" else String.format(java.util.Locale.US, "%.1f soat", hours)
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            StatBox("Anime", s.animes.toString(), Modifier.weight(1f))
-            StatBox("Qism", s.episodes.toString(), Modifier.weight(1f))
+            StatBox("Anime", s.animes.toString(), Modifier.weight(1f)) {}
+            StatBox("Qism ›", s.episodes.toString(), Modifier.weight(1f)) { onOpen(StatKind.EPISODES) }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            StatBox("Tomosha", hoursText, Modifier.weight(1f))
-            StatBox("Trafik", formatBytes(s.traffic), Modifier.weight(1f))
+            StatBox("Tomosha", hoursText, Modifier.weight(1f)) {}
+            StatBox("Trafik", formatBytes(s.traffic), Modifier.weight(1f)) {}
         }
     }
 }
 
 @Composable
-private fun StatBox(label: String, value: String, modifier: Modifier) {
+private fun StatBox(label: String, value: String, modifier: Modifier, onClick: () -> Unit) {
     val shape = RoundedCornerShape(18.dp)
-    Column(modifier.clip(shape).background(AruColors.Card).border(1.dp, AruColors.Border, shape).padding(horizontal = 16.dp, vertical = 14.dp)) {
+    Column(modifier.clip(shape).background(AruColors.Card).border(1.dp, AruColors.Border, shape).clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 14.dp)) {
         Text(value, color = AruColors.Accent2, fontSize = 20.sp, fontWeight = FontWeight.Black, maxLines = 1)
         Text(label, color = AruColors.TextDim, fontSize = 12.sp)
     }
