@@ -1,4 +1,4 @@
-name: To'plam kodini avtoencode repo'siga sinxronlash
+name: To'plam kodini avtoencode repo'siga sinxronlash 
 
 # `tool/packs/**` o'zgarganda avtomatik: to'plam Actions'i (`packs.yml`) boshqa
 # akkauntdagi repoda ishlaydi va uning kodi shu yerdan o'sha yerga ko'chiriladi
