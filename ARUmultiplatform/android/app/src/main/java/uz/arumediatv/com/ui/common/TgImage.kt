@@ -13,6 +13,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import uz.arumediatv.com.AppServices
 
 /**
@@ -23,11 +25,12 @@ fun TgImage(
     url: String,
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Crop,
-    maxPx: Int = 720,
+    maxPx: Int = 480,
     placeholder: @Composable () -> Unit = {},
 ) {
-    val tg by AppServices.telegram.state.collectAsStateWithLifecycle()
-    val ready = tg.authorized && tg.configured && tg.port > 0
+    // Butun Telegram holati emas, faqat "tayyor"mi — shu o'zgargandagina kartalar qayta chiziladi.
+    val readyFlow = remember { AppServices.telegram.state.map { it.authorized && it.configured && it.port > 0 }.distinctUntilChanged() }
+    val ready by readyFlow.collectAsStateWithLifecycle(initialValue = AppServices.telegram.state.value.let { it.authorized && it.configured && it.port > 0 })
     var bmp by remember(url) { mutableStateOf(AppServices.images.peek(url)) }
     LaunchedEffect(url, ready) {
         if (bmp == null && url.isNotEmpty() && ready) bmp = AppServices.images.load(url, maxPx)

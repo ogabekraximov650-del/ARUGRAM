@@ -92,7 +92,7 @@ jobs:
       - name: Kotlin birlik testlari
         run: gradle --no-daemon :app:testUserDebugUnitTest
 
-      # 3 ta APK: 1) Admin 32 bit, 2) Admin 32+64 bit, 3) User 32+64 bit
+      # Hozircha 1 ta APK: Admin 32 bit (kerak bo'lsa Admin 32+64 va User 32+64 qaytariladi)
       - name: Imzolangan APK'lar (release)
         id: apk
         env:
@@ -107,12 +107,9 @@ jobs:
           OUT="$RUNNER_TEMP/apks"; mkdir -p "$OUT"
           APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
 
+          # HOZIRCHA faqat Admin 32 bit. (Keyin qaytariladi: Admin 32+64 va User 32+64 — `git log` da oldingi variantga qarang.)
           gradle --no-daemon :app:assembleAdminRelease -PonlyAbi=armeabi-v7a
           cp app/build/outputs/apk/admin/release/app-admin-release.apk "$OUT/arumediatv-admin-32bit-$N.apk"
-
-          gradle --no-daemon :app:assembleAdminRelease :app:assembleUserRelease
-          cp app/build/outputs/apk/admin/release/app-admin-release.apk "$OUT/arumediatv-admin-32+64bit-$N.apk"
-          cp app/build/outputs/apk/user/release/app-user-release.apk "$OUT/arumediatv-user-32+64bit-$N.apk"
 
           for f in "$OUT"/*.apk; do
             echo "== $f"; ls -la "$f"

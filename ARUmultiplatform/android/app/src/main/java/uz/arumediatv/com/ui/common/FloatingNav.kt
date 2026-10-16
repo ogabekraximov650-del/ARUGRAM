@@ -55,7 +55,7 @@ private val EaseInOutSine = CubicBezierEasing(0.37f, 0f, 0.63f, 1f)
 /**
  * Flutter `_BottomNav` ga mos: pushti "tabletka" bosilgan tugmaga SEKIN suzib boradi (oraliq tugmalarni birin-ketin
  * kattalashtirib o'tadi); tugma belgisi 1.22x kattalashib, ostidan yozuv ochiladi, tabletka ketgach — kichrayib yopiladi.
- * Bitta tugma oralig'iga 280 ms (kichik ekranda sekinroq), jami 320..1400 ms, egri chiziq — easeInOutSine.
+ * Bitta tugma oralig'iga 400 ms (kichik ekranda sekinroq), jami 480..1900 ms, egri chiziq — easeInOutSine.
  */
 @Composable
 fun FloatingNav(items: List<NavItem>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
@@ -65,7 +65,7 @@ fun FloatingNav(items: List<NavItem>, selected: Int, onSelect: (Int) -> Unit, mo
         val steps = abs(selected - pos.value)
         if (steps < 0.001f) return@LaunchedEffect
         val factor = if (widthDp <= 0) 1f else (600f / widthDp).coerceIn(0.9f, 1.2f)
-        val ms = (steps * 280f * factor).coerceIn(320f, 1400f).roundToInt()
+        val ms = (steps * 400f * factor).coerceIn(480f, 1900f).roundToInt()
         pos.animateTo(selected.toFloat(), tween(ms, easing = EaseInOutSine))
     }
 
@@ -78,25 +78,25 @@ fun FloatingNav(items: List<NavItem>, selected: Int, onSelect: (Int) -> Unit, mo
             .border(1.dp, AruColors.Border, shape)
             .padding(horizontal = 6.dp, vertical = 10.dp),
     ) {
+        // Animatsiya qiymati (`pos`) FAQAT chizish/joylashtirish bosqichida o'qiladi (lambdalar ichida) —
+        // shuning uchun suzish paytida kompozitsiya qayta ishlamaydi va qotmaydi.
+        val itemWidthPx = constraints.maxWidth / items.size.toFloat()
         val itemWidth = maxWidth / items.size
-        val page = pos.value
-        val density = LocalDensity.current
         val pillShape = RoundedCornerShape(20.dp)
 
         // Suzuvchi pushti tabletka
         Box(
             Modifier
-                .offset { IntOffset((page * itemWidth.toPx(density)).roundToInt() + with(density) { 4.dp.roundToPx() }, 0) }
                 .width(itemWidth - 8.dp)
                 .height(52.dp)
+                .graphicsLayer { translationX = pos.value * itemWidthPx + 4.dp.toPx() }
                 .shadow(8.dp, pillShape, ambientColor = AruColors.Accent, spotColor = AruColors.Accent)
                 .background(Brush.linearGradient(listOf(AruColors.Accent, AruColors.Accent2)), pillShape),
         )
 
         Row(Modifier.fillMaxWidth()) {
             items.forEachIndexed { i, item ->
-                val t = 1f - abs(page - i).coerceIn(0f, 1f)
-                val color = lerp(Color.White.copy(alpha = 0.40f), Color.White, t)
+                fun t() = 1f - abs(pos.value - i).coerceIn(0f, 1f)
                 Column(
                     Modifier
                         .weight(1f)
@@ -108,20 +108,25 @@ fun FloatingNav(items: List<NavItem>, selected: Int, onSelect: (Int) -> Unit, mo
                     Icon(
                         item.icon,
                         contentDescription = item.title,
-                        tint = color,
+                        tint = Color.White,
                         modifier = Modifier
                             .height(22.dp)
                             .width(22.dp)
-                            .graphicsLayer { scaleX = 1f + 0.22f * t; scaleY = 1f + 0.22f * t },
+                            .graphicsLayer {
+                                val k = t()
+                                scaleX = 1f + 0.22f * k
+                                scaleY = 1f + 0.22f * k
+                                alpha = 0.40f + 0.60f * k
+                            },
                     )
                     Box(
                         Modifier
                             .layout { m, c ->
                                 val p = m.measure(c)
-                                layout(p.width, (p.height * t).roundToInt()) { p.placeRelative(0, 0) }
+                                layout(p.width, (p.height * t()).roundToInt()) { p.placeRelative(0, 0) }
                             }
                             .clipToBounds()
-                            .alpha(t),
+                            .graphicsLayer { alpha = t() },
                     ) {
                         Text(
                             item.title,
@@ -129,7 +134,7 @@ fun FloatingNav(items: List<NavItem>, selected: Int, onSelect: (Int) -> Unit, mo
                             overflow = TextOverflow.Ellipsis,
                             fontSize = 9.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = color,
+                            color = Color.White,
                             modifier = Modifier.padding(top = 3.dp),
                         )
                     }
@@ -140,5 +145,3 @@ fun FloatingNav(items: List<NavItem>, selected: Int, onSelect: (Int) -> Unit, mo
 }
 
 private val Arrangement_Center = androidx.compose.foundation.layout.Arrangement.Center
-
-private fun androidx.compose.ui.unit.Dp.toPx(d: androidx.compose.ui.unit.Density): Float = with(d) { this@toPx.toPx() }

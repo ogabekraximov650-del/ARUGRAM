@@ -43,7 +43,13 @@ class SecureStore(context: Context, name: String = "aru_secure") {
         private const val ALIAS = "aru_master_wrap_v1"
         private const val PROVIDER = "AndroidKeyStore"
 
-        private fun key(): SecretKey {
+        @Volatile
+        private var cachedKey: SecretKey? = null
+
+        /** Keystore'dan kalitni har safar o'qish sekin (binder chaqiruvi) — bir marta olib, xotirada saqlaymiz. */
+        private fun key(): SecretKey = cachedKey ?: synchronized(this) { cachedKey ?: loadKey().also { cachedKey = it } }
+
+        private fun loadKey(): SecretKey {
             val ks = KeyStore.getInstance(PROVIDER).apply { load(null) }
             (ks.getKey(ALIAS, null) as? SecretKey)?.let { return it }
             val gen = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, PROVIDER)

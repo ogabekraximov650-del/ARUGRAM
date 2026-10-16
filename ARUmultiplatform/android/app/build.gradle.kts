@@ -99,6 +99,8 @@ dependencies {
     implementation(libs.compose.material3)
     implementation(libs.compose.material.icons.core)
 
+    // Compose kutubxonalarining tayyor "baseline profile"larini o'rnatadi: birinchi ochilish va aylantirish qotmaydi.
+    implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     implementation(libs.okhttp)
     // JNA: Rust yadrosining C funksiyalarini (`librust_core.so`) JNI yozmasdan to'g'ridan-to'g'ri chaqiradi.
     implementation("net.java.dev.jna:jna:5.17.0@aar")
