@@ -36,7 +36,7 @@ class ThumbStore(context: Context, private val tg: TelegramService, private val 
     private val queue = Mutex()
     private val inflight = ConcurrentHashMap<String, CompletableDeferred<Bitmap?>>()
     private val failedAt = ConcurrentHashMap<String, Long>()
-    private val mem = object : LruCache<String, Bitmap>((Runtime.getRuntime().maxMemory() / 10L).toInt().coerceAtLeast(6 shl 20)) {
+    private val mem = object : LruCache<String, Bitmap>((Runtime.getRuntime().maxMemory() / 6L).toInt().coerceAtLeast(12 shl 20)) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
     }
 
@@ -52,6 +52,8 @@ class ThumbStore(context: Context, private val tg: TelegramService, private val 
         if (item.videoUrl.isEmpty() || item.positionMs <= 0) return null
         val key = keyOf(item)
         mem.get(key)?.let { return it }
+        // Diskda tayyor kadr bor — navbatni kutmasdan darhol (aylantirganda kadr yo'qolib qolmasin).
+        withContext(Dispatchers.IO) { fromDisk(key) }?.let { mem.put(key, it); return it }
         val last = failedAt[key]
         if (last != null && System.currentTimeMillis() - last < RETRY_MS) return null
         val mine = CompletableDeferred<Bitmap?>()
@@ -76,17 +78,27 @@ class ThumbStore(context: Context, private val tg: TelegramService, private val 
 
     private fun file(key: String) = File(dir, "thumb_$key.bin")
 
-    private suspend fun build(item: HistoryItem, key: String): Bitmap? {
+    private fun decodeSmall(b: ByteArray): Bitmap? {
+        val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(b, 0, b.size, o)
+        var sample = 1
+        while (o.outWidth / (sample * 2) >= 720) sample *= 2
+        return BitmapFactory.decodeByteArray(b, 0, b.size, BitmapFactory.Options().apply { inSampleSize = sample })
+    }
+
+    private fun fromDisk(key: String): Bitmap? {
         val f = file(key)
-        if (f.exists()) {
-            val plain = try {
-                SecureStore.open(f.readBytes())
-            } catch (_: Exception) {
-                f.delete()
-                null
-            }
-            plain?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }?.let { return it }
+        if (!f.exists()) return null
+        return try {
+            decodeSmall(SecureStore.open(f.readBytes()))
+        } catch (_: Exception) {
+            f.delete()
+            null
         }
+    }
+
+    private suspend fun build(item: HistoryItem, key: String): Bitmap? {
+        fromDisk(key)?.let { return it }
         // Pleyer ochiq — tarmoq faqat videoniki.
         while (uz.arumediatv.com.AppServices.gate.busy.get() > 0) delay(400)
         val src = item.thumbUrl.ifEmpty { item.videoUrl }
@@ -100,7 +112,7 @@ class ThumbStore(context: Context, private val tg: TelegramService, private val 
         // Shu videoning eski kadrlari endi kerak emas.
         val prefix = "thumb_${videoKey(item)}_"
         dir.listFiles()?.forEach { if (it.name.startsWith(prefix) && it.name != f.name) it.delete() }
-        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        return decodeSmall(bytes)
     }
 
     /** Shu videoning diskdagi ISTALGAN kadri (yangisini yasab bo'lmasa — posterdan yaxshi). */
@@ -110,7 +122,7 @@ class ThumbStore(context: Context, private val tg: TelegramService, private val 
             if (!f.name.startsWith(prefix)) continue
             try {
                 val plain = SecureStore.open(f.readBytes())
-                BitmapFactory.decodeByteArray(plain, 0, plain.size)?.let { return it }
+                decodeSmall(plain)?.let { return it }
             } catch (_: Exception) {
             }
         }
