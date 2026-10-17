@@ -3,6 +3,11 @@ package uz.arumediatv.com.ui.season
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -433,7 +438,7 @@ fun PlayerSettingsSheet(
     onSleep: (Int) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = AruColors.Surface) {
+    PlayerSheetHost("Sozlamalar", onDismiss) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 28.dp)) {
             if (episode != null && episode.qualities.isNotEmpty()) {
                 SheetTitle("Sifat")
@@ -461,6 +466,45 @@ fun PlayerSettingsSheet(
     }
 }
 
+/**
+ * Pleyer oynalari (sozlamalar, qismlar ro'yxati) uchun qulay joylashuv: gorizontal (to'liq ekran) holatda o'ng tomondagi
+ * to'liq balandlikdagi panel (bosh barmoq yetadi, kontent siljiydi), tik holatda esa to'liq ochiladigan pastki oyna.
+ * Tashqarini bossangiz yopiladi.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PlayerSheetHost(title: String, onDismiss: () -> Unit, content: @Composable () -> Unit) {
+    val landscape = androidx.compose.ui.platform.LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+    if (landscape) {
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = onDismiss,
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+        ) {
+            Box(
+                Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.45f))
+                    .clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null, onClick = onDismiss),
+            ) {
+                Column(
+                    Modifier.align(Alignment.CenterEnd).fillMaxHeight().widthIn(max = 380.dp).fillMaxWidth(0.5f)
+                        .clip(RoundedCornerShape(topStart = 22.dp, bottomStart = 22.dp)).background(AruColors.Surface)
+                        .clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) {}
+                        .statusBarsPadding().navigationBarsPadding(),
+                ) {
+                    Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(title, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                        Box(Modifier.size(48.dp).clip(CircleShape).clickable(onClick = onDismiss), contentAlignment = Alignment.Center) {
+                            Text("✕", color = Color.White.copy(alpha = 0.8f), fontSize = 18.sp)
+                        }
+                    }
+                    content()
+                }
+            }
+        }
+    } else {
+        ModalBottomSheet(onDismissRequest = onDismiss, containerColor = AruColors.Surface, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) { content() }
+    }
+}
+
 @Composable
 private fun SheetTitle(t: String) {
     Text(t, color = AruColors.Accent2, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp, modifier = Modifier.padding(top = 16.dp, bottom = 8.dp))
@@ -470,17 +514,17 @@ private fun SheetTitle(t: String) {
 private fun Chip(text: String, selected: Boolean, onClick: () -> Unit) {
     val shape = RoundedCornerShape(12.dp)
     Text(
-        text, color = if (selected) Color.White else Color.White.copy(alpha = 0.75f), fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-        modifier = Modifier.clip(shape)
+        text, color = if (selected) Color.White else Color.White.copy(alpha = 0.75f), fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.clip(shape).defaultMinSize(minHeight = 44.dp)
             .then(if (selected) Modifier.background(Brush.linearGradient(listOf(AruColors.Accent, AruColors.Accent2))) else Modifier.background(AruColors.Card).border(1.dp, AruColors.Border, shape))
-            .clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 9.dp),
+            .clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 11.dp),
     )
 }
 
 @Composable
 private fun ToggleRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, color = Color.White, fontSize = 14.sp, modifier = Modifier.weight(1f))
+    Row(Modifier.fillMaxWidth().defaultMinSize(minHeight = 52.dp).clickable { onChange(!checked) }, verticalAlignment = Alignment.CenterVertically) {
+        Text(label, color = Color.White, fontSize = 15.sp, modifier = Modifier.weight(1f))
         Switch(checked = checked, onCheckedChange = onChange, colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = AruColors.Accent))
     }
 }
@@ -489,19 +533,25 @@ private fun ToggleRow(label: String, checked: Boolean, onChange: (Boolean) -> Un
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EpisodeListSheet(episodes: List<Episode>, currentId: Long?, onPick: (Episode) -> Unit, onDismiss: () -> Unit) {
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = AruColors.Surface) {
-        LazyColumn(Modifier.fillMaxWidth(), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(episodes.sortedByDescending { it.number }, key = { it.id }) { e ->
+    PlayerSheetHost("Qismlar", onDismiss) {
+        val desc = remember(episodes) { episodes.sortedByDescending { it.number } }
+        val ls = androidx.compose.foundation.lazy.rememberLazyListState()
+        // Ochilganda joriy qism ko'rinadigan joyga suriladi.
+        androidx.compose.runtime.LaunchedEffect(Unit) {
+            val i = desc.indexOfFirst { it.id == currentId }
+            if (i > 1) ls.scrollToItem(i - 1)
+        }
+        LazyColumn(Modifier.fillMaxWidth(), state = ls, contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(desc, key = { it.id }) { e ->
                 val cur = e.id == currentId
                 Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(if (cur) AruColors.AccentTint else AruColors.Card)
-                        .clickable { onPick(e); onDismiss() }.padding(horizontal = 14.dp, vertical = 12.dp),
+                    Modifier.fillMaxWidth().defaultMinSize(minHeight = 54.dp).clip(RoundedCornerShape(14.dp)).background(if (cur) AruColors.AccentTint else AruColors.Card)
+                        .clickable { onPick(e); onDismiss() }.padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("${e.number}-qism", color = if (cur) AruColors.Accent2 else Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    Text("${e.number}-qism", color = if (cur) AruColors.Accent2 else Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                     if (e.name.isNotBlank()) Text("  ${e.name}", color = AruColors.TextDim, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
         }
-    }
 }
