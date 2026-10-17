@@ -4,7 +4,6 @@ import android.graphics.Typeface
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -14,7 +13,6 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import uz.arumediatv.com.AppServices
 import uz.arumediatv.com.BuildConfig
-import uz.arumediatv.com.R
 import uz.arumediatv.com.data.Http
 import uz.arumediatv.com.data.callJson
 import java.io.File
@@ -23,10 +21,11 @@ import java.io.File
  * Emoji shrifti (Telegram uslubi). Shrift fayli yopiq kanalda (AES-128-CTR) turadi (`worker/src/emojifont.rs`):
  * ilova uni emoji oynasi ochilganda yuklab, qurilmada saqlaydi. Yuklab bo'lmasa — 5 urinishgacha, har bir muvaffaqiyatsiz
  * urinish workerga xabar qilinadi; 5 taga yetsa worker Actions'ni uyg'otib, faylni yangisiga almashtiradi.
- * Yuklanguncha (yoki yuklanmasa) APK ichidagi nusxa ishlatiladi.
+ * APK ichida shrift yo'q: yuklanguncha tizim shrifti ishlatiladi.
  */
 object EmojiFonts {
-    private val bundled: FontFamily = FontFamily(Font(R.font.tg_emoji))
+    // Shrift APK ichida YO'Q (u kanalda). Yuklanguncha tizim shrifti ishlatiladi.
+    private val bundled: FontFamily = FontFamily.Default
 
     private var remote by mutableStateOf<FontFamily?>(null)
 
