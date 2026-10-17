@@ -553,5 +553,5 @@ fun EpisodeListSheet(episodes: List<Episode>, currentId: Long?, onPick: (Episode
                     if (e.name.isNotBlank()) Text("  ${e.name}", color = AruColors.TextDim, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
-        }
+        }    }
 }
