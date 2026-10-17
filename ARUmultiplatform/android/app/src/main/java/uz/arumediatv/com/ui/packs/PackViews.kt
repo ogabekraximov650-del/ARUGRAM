@@ -134,7 +134,7 @@ fun PackRefImage(ref: String, modifier: Modifier = Modifier, thumb: Boolean = fa
 @Composable
 fun RichPackText(text: String, color: Color, fontSize: TextUnit = 15.sp, modifier: Modifier = Modifier, lineHeight: TextUnit = TextUnit.Unspecified) {
     if (!text.contains("[pe:")) {
-        Text(text, color = color, fontSize = fontSize, lineHeight = lineHeight, modifier = modifier)
+        Text(text, color = color, fontSize = fontSize, lineHeight = lineHeight, fontFamily = TgEmojiFont, modifier = modifier)
         return
     }
     val inline = HashMap<String, InlineTextContent>()
@@ -153,5 +153,5 @@ fun RichPackText(text: String, color: Color, fontSize: TextUnit = 15.sp, modifie
         }
         append(text.substring(last))
     }
-    Text(annotated, color = color, fontSize = fontSize, lineHeight = lineHeight, inlineContent = inline, modifier = modifier)
+    Text(annotated, color = color, fontSize = fontSize, lineHeight = lineHeight, fontFamily = TgEmojiFont, inlineContent = inline, modifier = modifier)
 }
