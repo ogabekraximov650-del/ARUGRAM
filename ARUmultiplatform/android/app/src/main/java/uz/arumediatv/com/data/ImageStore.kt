@@ -39,7 +39,7 @@ class ImageStore(context: Context, private val tg: TelegramService) {
 
     // Ekrandagi rasmlarni Compose o'zi ushlab turadi; bu kesh faqat yaqinda ko'rilganlar uchun. Kichraytirilgan nusxa diskda bo'lgani uchun
     // chiqarib yuborilgan rasm tez qaytadi.
-    private val mem = object : LruCache<String, Bitmap>((Runtime.getRuntime().maxMemory() / (if (uz.arumediatv.com.core.Perf.low) 16L else 10L)).toInt().coerceAtLeast(6 shl 20)) {
+    private val mem = object : LruCache<String, Bitmap>((Runtime.getRuntime().maxMemory() / 4L).toInt().coerceAtLeast(6 shl 20)) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
     }
 
