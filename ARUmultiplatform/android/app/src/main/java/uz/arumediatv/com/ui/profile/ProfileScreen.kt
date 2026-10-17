@@ -475,8 +475,11 @@ private fun StatBox(icon: ImageVector, label: String, value: String, modifier: M
 
 @Composable
 private fun Tile(icon: ImageVector, title: String, dot: Boolean = false, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(24.dp))
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        // Flutterdagidek: to'q apelsin yumaloq kvadrat ichida apelsin belgi.
+        Box(Modifier.size(42.dp).clip(RoundedCornerShape(14.dp)).background(AruColors.Accent.copy(alpha = 0.14f)), contentAlignment = Alignment.Center) {
+            Icon(icon, null, tint = AruColors.Accent, modifier = Modifier.size(22.dp))
+        }
         Spacer(Modifier.width(16.dp))
         Text(title, color = Color.White, fontSize = 16.sp, modifier = Modifier.weight(1f))
         if (dot) { Box(Modifier.size(9.dp).clip(CircleShape).background(AruColors.Accent)); Spacer(Modifier.width(6.dp)) }
@@ -562,8 +565,8 @@ private fun Row2(
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(AruColors.AccentTint), contentAlignment = Alignment.Center) {
-            Icon(icon, null, tint = tint, modifier = Modifier.size(20.dp))
+        Box(Modifier.size(42.dp).clip(RoundedCornerShape(14.dp)).background((if (danger) Color(0xFFF87171) else AruColors.Accent).copy(alpha = 0.14f)), contentAlignment = Alignment.Center) {
+            Icon(icon, null, tint = if (danger) tint else AruColors.Accent, modifier = Modifier.size(22.dp))
         }
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
