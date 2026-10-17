@@ -211,6 +211,9 @@ fun PlayerControls(
                     Box(Modifier.clip(CircleShape).clickable(onClick = onSettings).padding(9.dp)) {
                         Icon(Icons.Filled.Settings, "Sozlamalar", tint = Color.White, modifier = Modifier.size(22.dp))
                     }
+                    Box(Modifier.clip(CircleShape).clickable(onClick = onEpisodeList).padding(9.dp)) {
+                        Icon(AruIcons.PlaylistPlay, "Qismlar ro'yxati", tint = Color.White, modifier = Modifier.size(22.dp))
+                    }
                     Box(Modifier.clip(CircleShape).clickable(onClick = onToggleFullscreen).padding(9.dp)) {
                         Icon(AruIcons.FullscreenExit, "Kichraytirish", tint = Color.White, modifier = Modifier.size(22.dp))
                     }
@@ -305,12 +308,6 @@ fun PlayerControls(
                 }
             } else {
                 Column(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 6.dp)) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-                        FsChip(AruIcons.PlaylistPlay, "", onEpisodeList)
-                        Spacer(Modifier.width(8.dp))
-                        FsChip(AruIcons.Speed, speedLabel, onSettings)
-                    }
-                    Spacer(Modifier.height(6.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
                         FsButton(AruIcons.SkipPrevious, hasPrev, false) { onPrev(); bump++ }
                         Spacer(Modifier.width(10.dp))
