@@ -486,9 +486,9 @@ private fun PlayerSheetHost(title: String, onDismiss: () -> Unit, content: @Comp
             onDismissRequest = close,
             properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
         ) {
-            val scrim by androidx.compose.animation.core.animateFloatAsState(if (shown) 0.45f else 0f, androidx.compose.animation.core.tween(240), label = "scrim")
+            // Video usti QORAYTIRILMAYDI (xiralashtiruvchi parda yo'q); tashqarini bossangiz panel yopiladi.
             Box(
-                Modifier.fillMaxSize().background(Color.Black.copy(alpha = scrim))
+                Modifier.fillMaxSize()
                     .clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null, onClick = close),
             ) {
                 androidx.compose.animation.AnimatedVisibility(
