@@ -59,9 +59,11 @@ android {
 
     buildTypes {
         release {
-            // Birinchi bosqichda qisqartirish (R8) o'chiq: telefonda sinab ko'rilmagan JNI/serialization qoidalari
-            // sababli ilova jimgina yiqilmasligi uchun. Barqaror bo'lgach yoqiladi.
-            isMinifyEnabled = false
+            // R8: ishlatilmagan KUTUBXONA kodi olib tashlanadi (ilova kodi va JNA/JNI to'liq saqlanadi, nomlar o'zgarmaydi) —
+            // qoidalar `proguard-rules.pro` da. Resurslar ham qisqartiriladi.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.getByName("release")
         }
     }

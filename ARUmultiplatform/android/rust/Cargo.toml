@@ -59,7 +59,8 @@ ctr = "0.10"
 jni = { version = "0.21", default-features = false }
 
 [profile.release]
-opt-level = 3
+# `s` — hajm uchun (kutubxona kichikroq); `3` ga qaraganda bir oz sekinroq, lekin tarmoq/shifrlash tezligiga sezilarli ta'sir qilmaydi.
+opt-level = "s"
 lto = true
 codegen-units = 1
 # `unwind`: Telegram chaqiruvlari (`with_client`) ichidagi kutilmagan
