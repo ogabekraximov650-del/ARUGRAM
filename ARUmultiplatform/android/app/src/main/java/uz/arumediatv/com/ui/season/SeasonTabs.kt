@@ -310,13 +310,18 @@ private fun EpisodeTile(e: Episode, isCurrent: Boolean, onPlay: (Episode, String
         if (expanded) dm.watch(e, e.urls.values.toSet())
         onDispose { dm.unwatch(e) }
     }
-    // Ko'rish holati: eng ko'p ko'rilgan sifat bo'yicha.
-    val snap = remember(e.id, isCurrent) { e.urls.values.filter { it.isNotEmpty() }.mapNotNull { AppServices.progress.snapshot(it) }.maxByOrNull { it.first } }
-    val frac = snap?.let { if (it.second > 0) (it.first.toFloat() / it.second).coerceIn(0f, 1f) else 0f } ?: 0f
-    val seen = !isCurrent && snap != null && snap.first > snap.second - 5000
+    // Ko'rish holati: tomosha tarixi jadvalidan (`/api/history`) — qism raqami bo'yicha.
+    val lib by AppServices.library.state.collectAsStateWithLifecycle()
+    val hist = remember(lib.history, e.id) { lib.history.firstOrNull { it.epizodId == e.id } }
+    val pos = hist?.positionMs ?: 0L
+    val dur = hist?.durationMs ?: 0L
+    val frac = if (dur > 0) (pos.toFloat() / dur).coerceIn(0f, 1f) else 0f
+    val finished = dur > 0 && pos > dur - 5000
+    val resumable = dur > 0 && pos >= 3000 && !finished
+    val seen = !isCurrent && finished
     val status = when {
-        snap != null && snap.first >= 3000 && snap.first <= snap.second - 5000 -> "${clockMs(snap.first)} dan davom etasiz"
-        seen -> "Ko'rildi ✓"
+        resumable -> "${clockMs(pos)} dan davom etasiz"
+        finished -> "Ko'rildi ✓"
         isCurrent -> "Hozir ijro etilmoqda"
         else -> "Ko'rilmagan"
     }
@@ -373,11 +378,9 @@ private fun EpisodeTile(e: Episode, isCurrent: Boolean, onPlay: (Episode, String
                     else -> Icon(AruIcons.Download, null, tint = Color.White.copy(alpha = 0.6f), modifier = Modifier.size(24.dp))
                 }
             }
-            Box(Modifier.padding(end = 4.dp).size(48.dp).clip(CircleShape).clickable { expanded = !expanded }, contentAlignment = Alignment.Center) {
-                Text(if (expanded) "▴" else "▾", color = AruColors.TextDim, fontSize = 22.sp)
-            }
+            Spacer(Modifier.width(8.dp))
         }
-        if (frac > 0f && !seen) {
+        if (resumable) {
             Box(Modifier.padding(horizontal = 12.dp).fillMaxWidth().height(3.dp).clip(RoundedCornerShape(2.dp)).background(Color.White.copy(alpha = 0.1f))) {
                 Box(Modifier.fillMaxWidth(frac).fillMaxHeight().background(Brush.horizontalGradient(listOf(AruColors.Accent, AruColors.Accent2))))
             }
