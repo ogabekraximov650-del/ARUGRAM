@@ -102,8 +102,6 @@ dependencies {
     // Compose kutubxonalarining tayyor "baseline profile"larini o'rnatadi: birinchi ochilish va aylantirish qotmaydi.
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     // Video: Media3 ExoPlayer (Range so'rovlar Rust mahalliy serveriga yoki worker keshiga ketadi).
-    // Baseline profil (ilovaniki va Compose/Media3 kutubxonalariniki) o'rnatilgach shu orqali ART ga beriladi.
-    implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     implementation("androidx.media3:media3-exoplayer:1.5.1")
     implementation("androidx.media3:media3-ui:1.5.1")
     // QR kod (Telegram QR orqali kirish)
