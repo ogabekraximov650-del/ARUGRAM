@@ -23,6 +23,9 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import kotlin.math.max
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -686,10 +689,12 @@ private fun MediaBlock(m: ChatMessage) {
     when (m.mediaType) {
         "image" -> TgImage(m.mediaUrl, Modifier.size(width = 230.dp, height = 230.dp).clip(RoundedCornerShape(12.dp)).background(Color.Black.copy(alpha = 0.25f)), maxPx = 640)
         "video" -> Box(Modifier.size(width = 230.dp, height = 150.dp).clip(RoundedCornerShape(12.dp)).background(Color.Black), contentAlignment = Alignment.Center) {
+            ChatVideoFrame(m, Modifier.fillMaxSize())
             Box(Modifier.size(48.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.5f)), contentAlignment = Alignment.Center) { Icon(Icons.Filled.PlayArrow, "Video", tint = Color.White, modifier = Modifier.size(32.dp)) }
-            if (m.mediaMs > 0) Text(formatClock(m.mediaMs), color = Color.White, fontSize = 11.sp, modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp))
+            if (m.mediaMs > 0) Text(formatClock(m.mediaMs), color = Color.White, fontSize = 11.sp, modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp).clip(RoundedCornerShape(8.dp)).background(Color.Black.copy(alpha = 0.45f)).padding(horizontal = 6.dp, vertical = 2.dp))
         }
         "round" -> Box(Modifier.size(200.dp).clip(CircleShape).background(Color.Black), contentAlignment = Alignment.Center) {
+            ChatVideoFrame(m, Modifier.fillMaxSize())
             Icon(Icons.Filled.PlayArrow, "Video", tint = Color.White, modifier = Modifier.size(44.dp))
         }
         "voice" -> VoiceRow(m)
@@ -775,24 +780,125 @@ object VoicePlayer {
     }
 }
 
-/** Rasm yoki videoni to'liq ekranda ko'rish. */
+/** Videoning BOSHIDAGI kadr (100 ms) — Flutter `ChatVideoThumb`: kadr serverga yuklanmaydi, har kim o'zida yasaydi va shifrlab saqlaydi. */
+@Composable
+private fun ChatVideoFrame(m: ChatMessage, modifier: Modifier) {
+    val item = remember(m.mediaUrl) {
+        uz.arumediatv.com.data.HistoryItem(
+            animeId = 0, seasonId = 0, episodeNo = 0, sectionNo = 0, title = "", photoUrl = "", positionMs = 100,
+            durationMs = 0, views = 0, updatedAt = 0, videoUrl = m.mediaUrl,
+        )
+    }
+    uz.arumediatv.com.ui.library.HistoryFrame(item, modifier)
+}
+
+/** Rasm (barmoq bilan kattalashtiriladi) yoki video (faqat play/pause va pastda chiziq) — Flutter `MediaViewScreen`. */
 @Composable
 private fun MediaViewer(m: ChatMessage, onClose: () -> Unit) {
-    val ctx = LocalContext.current
+    val isImage = m.mediaType == "image" || m.mediaType == "sticker" || m.mediaType == "gif"
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Box(Modifier.fillMaxSize().background(Color.Black).clickable(onClick = onClose), contentAlignment = Alignment.Center) {
-            if (m.mediaType == "image" || m.mediaType == "sticker" || m.mediaType == "gif") {
-                TgImage(m.mediaUrl, Modifier.fillMaxSize(), maxPx = 1600, contentScale = androidx.compose.ui.layout.ContentScale.Fit)
-            } else {
-                val player = remember { AruPlayer(ctx) }
-                DisposableEffect(Unit) { onDispose { player.release() } }
-                LaunchedEffect(m.id) {
-                    val src = uz.arumediatv.com.data.PlaySource.resolve(m.mediaUrl, AppServices.telegram)
-                    if (src != null) player.open(src.uri, 0, true)
-                }
-                PlayerSurface(player, Modifier.fillMaxSize())
-            }
-            Icon(Icons.Filled.Close, "Yopish", tint = Color.White, modifier = Modifier.align(Alignment.TopEnd).padding(20.dp).size(30.dp).clickable(onClick = onClose))
+        Box(Modifier.fillMaxSize().background(Color.Black)) {
+            if (isImage) ZoomImage(m) else ViewerVideo(m)
+            Box(
+                Modifier.align(Alignment.TopStart).statusBarsPadding().padding(8.dp).size(48.dp).clip(CircleShape).clickable(onClick = onClose),
+                contentAlignment = Alignment.Center,
+            ) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Orqaga", tint = Color.White, modifier = Modifier.size(26.dp)) }
         }
     }
+}
+
+@Composable
+private fun ZoomImage(m: ChatMessage) {
+    var scale by remember { mutableStateOf(1f) }
+    var offset by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
+    Box(
+        Modifier.fillMaxSize().pointerInput(Unit) {
+            androidx.compose.foundation.gestures.detectTransformGestures { _, pan, zoom, _ ->
+                scale = (scale * zoom).coerceIn(1f, 4f)
+                offset = if (scale > 1f) offset + pan else androidx.compose.ui.geometry.Offset.Zero
+            }
+        },
+        contentAlignment = Alignment.Center,
+    ) {
+        TgImage(
+            m.mediaUrl,
+            Modifier.fillMaxSize().graphicsLayer { scaleX = scale; scaleY = scale; translationX = offset.x; translationY = offset.y },
+            maxPx = 1600, contentScale = ContentScale.Fit,
+        )
+    }
+}
+
+@Composable
+private fun ViewerVideo(m: ChatMessage) {
+    val ctx = LocalContext.current
+    val player = remember { AruPlayer(ctx) }
+    var attempt by remember { mutableStateOf(0) }
+    var drag by remember { mutableStateOf<Float?>(null) }
+    DisposableEffect(Unit) {
+        AppServices.gate.busy.incrementAndGet()
+        onDispose { player.release(); AppServices.gate.busy.decrementAndGet() }
+    }
+    LaunchedEffect(m.id, attempt) {
+        player.error = null
+        val src = uz.arumediatv.com.data.PlaySource.resolve(m.mediaUrl, AppServices.telegram)
+        if (src == null) player.error = "Videoni ochib bo'lmadi" else player.open(src.uri, 0, true)
+    }
+    LaunchedEffect(player) { while (true) { delay(250); player.tick() } }
+    val err = player.error
+    Box(Modifier.fillMaxSize()) {
+        if (err != null) {
+            Column(Modifier.align(Alignment.Center).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("Videoni ochib bo'lmadi", color = Color.White.copy(alpha = 0.54f))
+                Text(err, color = Color.White.copy(alpha = 0.38f), fontSize = 11.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 6.dp))
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "Qayta urinish", color = Color.White, fontSize = 14.sp,
+                    modifier = Modifier.clip(RoundedCornerShape(20.dp)).border(1.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(20.dp)).clickable { attempt++ }.padding(horizontal = 18.dp, vertical = 9.dp),
+                )
+            }
+            return@Box
+        }
+        Column(Modifier.fillMaxSize()) {
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                PlayerSurface(player, Modifier.fillMaxSize())
+                // Butun kadr bosiladi — faqat play/pause (chiqib ketmaydi).
+                Box(
+                    Modifier.fillMaxSize().clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) { player.toggle() },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (!player.ready) {
+                        androidx.compose.material3.CircularProgressIndicator(color = Color.White.copy(alpha = 0.54f), strokeWidth = 2.dp, modifier = Modifier.size(34.dp))
+                    } else {
+                        val a by androidx.compose.animation.core.animateFloatAsState(if (player.playing) 0f else 1f, androidx.compose.animation.core.tween(180), label = "pp")
+                        Box(
+                            Modifier.size(62.dp).graphicsLayer { alpha = a }.clip(CircleShape).background(Color.Black.copy(alpha = 0.5f)).border(1.dp, Color.White.copy(alpha = 0.25f), CircleShape),
+                            contentAlignment = Alignment.Center,
+                        ) { Icon(if (player.playing) AruIcons.Pause else Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(36.dp)) }
+                    }
+                }
+            }
+            val total = player.durationMs.coerceAtLeast(0)
+            val shown = (drag ?: player.positionMs.toFloat()).coerceIn(0f, max(total, 1L).toFloat())
+            Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(start = 16.dp, end = 16.dp, bottom = 12.dp)) {
+                androidx.compose.material3.Slider(
+                    value = if (total <= 0) 0f else shown, valueRange = 0f..max(total, 1L).toFloat(),
+                    onValueChange = { drag = it },
+                    onValueChangeFinished = { drag?.let { player.seekTo(it.toLong()) }; drag = null },
+                    colors = androidx.compose.material3.SliderDefaults.colors(
+                        thumbColor = Color.White, activeTrackColor = Color.White, inactiveTrackColor = Color.White.copy(alpha = 0.24f),
+                    ),
+                )
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(clock2(shown.toLong()), color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+                    Text(clock2(total), color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+                }
+            }
+        }
+    }
+}
+
+private fun clock2(ms: Long): String {
+    val s = (ms / 1000).coerceAtLeast(0)
+    val h = s / 3600
+    return if (h > 0) String.format(java.util.Locale.US, "%d:%02d:%02d", h, (s / 60) % 60, s % 60) else String.format(java.util.Locale.US, "%02d:%02d", s / 60, s % 60)
 }

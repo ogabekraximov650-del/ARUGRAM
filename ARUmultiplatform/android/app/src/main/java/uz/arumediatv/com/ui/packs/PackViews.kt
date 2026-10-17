@@ -58,7 +58,9 @@ fun PackItemImage(pack: Long, item: Long, modifier: Modifier = Modifier, thumb: 
     val r = ref
     Box(modifier) {
         if (b != null && r != null) {
-            if (!thumb && r.item.animated && !r.item.video && Build.VERSION.SDK_INT >= 28) {
+            if (!thumb && r.item.video) {
+                LoopingVideo(b, "${pack}_$item", Modifier.fillMaxSize())
+            } else if (!thumb && r.item.animated && Build.VERSION.SDK_INT >= 28) {
                 AnimatedBytes(b, Modifier.fillMaxSize())
             } else {
                 val bmp = remember(b) { BitmapFactory.decodeByteArray(b, 0, b.size)?.asImageBitmap() }
@@ -66,6 +68,38 @@ fun PackItemImage(pack: Long, item: Long, modifier: Modifier = Modifier, thumb: 
             }
         }
     }
+}
+
+/** Video ko'rinishidagi GIF (mp4): ovozsiz, cheksiz takrorlanadi. Baytlar vaqtinchalik faylga yoziladi. */
+@Composable
+private fun LoopingVideo(bytes: ByteArray, key: String, modifier: Modifier) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val player = remember(key) {
+        androidx.media3.exoplayer.ExoPlayer.Builder(ctx.applicationContext).build().apply {
+            repeatMode = androidx.media3.common.Player.REPEAT_MODE_ONE
+            volume = 0f
+        }
+    }
+    DisposableEffect(player) { onDispose { player.release() } }
+    LaunchedEffect(key) {
+        val f = withContext(Dispatchers.IO) {
+            val dir = java.io.File(ctx.cacheDir, "aru_gif").apply { mkdirs() }
+            java.io.File(dir, "$key.mp4").also { if (!it.exists() || it.length() != bytes.size.toLong()) it.writeBytes(bytes) }
+        }
+        player.setMediaItem(androidx.media3.common.MediaItem.fromUri(android.net.Uri.fromFile(f)))
+        player.prepare()
+        player.playWhenReady = true
+    }
+    AndroidView(
+        factory = { c ->
+            (android.view.LayoutInflater.from(c).inflate(uz.arumediatv.com.R.layout.aru_player_view, null) as androidx.media3.ui.PlayerView).apply {
+                useController = false
+                this.player = player
+            }
+        },
+        update = { it.player = player },
+        modifier = modifier,
+    )
 }
 
 @Composable
