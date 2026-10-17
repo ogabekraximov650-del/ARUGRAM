@@ -270,7 +270,10 @@ fun PlayerControls(
 
         // Qulflangan: faqat qulf tugmasi (bosilsa ochiladi)
         if (locked) {
-            Box(Modifier.align(Alignment.CenterStart).padding(start = 14.dp)) { RoundIcon(Icons.Filled.Lock, "Qulfni ochish", onToggleLock) }
+            // Qulfdan yechish tugmasi "to'liq ekrandan chiqish" tugmasi turgan joyda (yuqori o'ng burchak).
+            Box(Modifier.align(Alignment.TopEnd).padding(end = 12.dp, top = 6.dp).clip(CircleShape).clickable(onClick = onToggleLock).padding(9.dp)) {
+                Icon(Icons.Filled.Lock, "Qulfni ochish", tint = Color.White, modifier = Modifier.size(22.dp))
+            }
         }
 
         val dur = player.durationMs.coerceAtLeast(1)
