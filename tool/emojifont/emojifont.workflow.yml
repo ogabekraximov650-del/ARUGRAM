@@ -1,0 +1,80 @@
+name: Emoji shrifti
+
+# Emoji shriftini (`fonts/TgEmoji.ttf`) shifrlab yopiq kanalga yuklaydi. Faqat worker ishga tushiradi
+# (shrift kanalda yo'q bo'lsa yoki ilova 5 urinishda ocha olmasa); qo'lda ham bo'ladi (`force` — majburan yangilash).
+
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Shrift bor bo'lsa ham yangisini yuklash"
+        type: boolean
+        default: false
+
+concurrency:
+  group: arumediatv-emojifont
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  font:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      API_BASE: ${{ secrets.API_BASE || 'https://arumediatv.uzcom.workers.dev' }}
+    steps:
+      - name: Kerakmi
+        id: peek
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          if [ -z "$ENCODE_TOKEN" ]; then
+            echo "::error::ENCODE_TOKEN secret'i yo'q"
+            exit 1
+          fi
+          N=$(curl -fsS -X POST -H "X-Encode-Token: $ENCODE_TOKEN" -H "User-Agent: arumediatv-encoder" \
+            "$API_BASE/api/emojifont/job/peek" | jq -r '.need // false')
+          if [ "$FORCE" = "true" ]; then N=true; fi
+          echo "Kerak: $N"
+          echo "need=$N" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        if: steps.peek.outputs.need == 'true'
+
+      - uses: actions/setup-python@v5
+        if: steps.peek.outputs.need == 'true'
+        with:
+          python-version: '3.11'
+
+      - name: Python paketlari
+        if: steps.peek.outputs.need == 'true'
+        run: pip install --no-cache-dir -r tool/packs/requirements.txt
+
+      - name: Telegram sessiyasi
+        if: steps.peek.outputs.need == 'true'
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+        run: |
+          OUT=tool/emojifont/pyro_session.session
+          K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K \
+            -in tool/encode/session.enc -out "$OUT"
+          head -c 16 "$OUT" | grep -q "SQLite format 3" || { echo "::error::Sessiya ochilmadi (ENCODE_TOKEN noto'g'ri?)"; exit 1; }
+          echo "Sessiya tiklandi"
+
+      - name: Shriftni yuklash
+        if: steps.peek.outputs.need == 'true'
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+          FORCE: ${{ inputs.force }}
+          PYTHONUNBUFFERED: '1'
+        run: python3 tool/emojifont/run.py
+
+      - name: Sessiyani o'chirish
+        if: always()
+        run: rm -f tool/emojifont/pyro_session.session

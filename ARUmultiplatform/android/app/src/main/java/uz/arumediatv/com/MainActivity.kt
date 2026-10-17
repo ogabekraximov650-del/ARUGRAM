@@ -21,6 +21,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.mutableIntStateOf
@@ -236,6 +237,11 @@ private fun AruApp() {
     val openSeason: (uz.arumediatv.com.data.Season) -> Unit = { if (!AppServices.auth.isLoggedIn) askLogin = true else push(Page.SeasonPage(it)) }
     val login = { push(Page.Login) }
     BackHandler(enabled = stack.isNotEmpty()) { pop() }
+    // Kirilgach emoji shrifti fonda tayyorlanadi (chat va izohlarda ham Telegram emojisi ko'rinsin).
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(4000)
+        uz.arumediatv.com.ui.packs.EmojiFonts.ensure()
+    }
     crashText?.let { t ->
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { crashText = null },

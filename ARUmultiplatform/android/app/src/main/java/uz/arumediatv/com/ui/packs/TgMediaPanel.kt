@@ -66,7 +66,7 @@ import uz.arumediatv.com.data.PackPick
 import uz.arumediatv.com.ui.common.AruIcons
 
 /** Telegram uslubidagi emoji shrifti (Flutter `fonts/TgEmoji.ttf`). */
-val TgEmojiFont = FontFamily(Font(R.font.tg_emoji))
+val TgEmojiFont: FontFamily get() = EmojiFonts.family
 
 private object Pal {
     val bg = Color(0xFF201B18)
@@ -113,6 +113,8 @@ fun TgMediaPanel(
     val pager = rememberPagerState(initialPage = lastTab) { 3 }
     val scope = rememberCoroutineScope()
     LaunchedEffect(pager.currentPage) { lastTab = pager.currentPage }
+    // Emoji oynasi ochilishi bilan shrift kanaldan yuklanadi (bo'lmasa — APK ichidagi nusxa).
+    LaunchedEffect(Unit) { EmojiFonts.ensure() }
     Box(modifier.clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp)).background(Pal.bg)) {
         HorizontalPager(pager, Modifier.fillMaxSize(), beyondViewportPageCount = 0) { page ->
             when (page) {

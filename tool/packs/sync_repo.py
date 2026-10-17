@@ -9,6 +9,7 @@ o'zgarganda avtomatik). Faqat o'zgargan fayllar yuklanadi.
 Token: `tool/encode/gh_token.enc` (ENCODE_TOKEN bilan shifrlangan) yoki NEW_GH_TOKEN.
 """
 import base64
+import hashlib
 import json
 import os
 import subprocess
@@ -50,6 +51,12 @@ FILES["tool/session/session.py"] = HERE.parent / "session" / "session.py"
 FILES[".github/workflows/upload.yml"] = HERE.parent / "upload" / "upload.workflow.yml"
 FILES["tool/upload/upload.py"] = HERE.parent / "upload" / "upload.py"
 FILES["tool/upload/r2client.py"] = HERE.parent / "upload" / "r2client.py"
+
+
+# Emoji shrifti (kanalda, `emojifont.yml`) — shrift fayli ham o'sha repoga ko'chadi.
+FILES[".github/workflows/emojifont.yml"] = HERE.parent / "emojifont" / "emojifont.workflow.yml"
+FILES["tool/emojifont/run.py"] = HERE.parent / "emojifont" / "run.py"
+FILES["fonts/TgEmoji.ttf"] = HERE.parent.parent / "fonts" / "TgEmoji.ttf"
 
 
 def token() -> str:
@@ -108,8 +115,9 @@ def main():
         new = src.read_bytes()
         code, cur = api("GET", f"/repos/{REPO}/contents/{dest}?ref=main", ok=(200, 404))
         if code == 200:
-            old = base64.b64decode(cur.get("content", "").replace("\n", ""))
-            if old == new:
+            # Git blob SHA'si bilan solishtiriladi (1 MB dan katta fayllarda `content` bo'sh keladi).
+            local_sha = hashlib.sha1(b"blob %d\0" % len(new) + new).hexdigest()
+            if cur.get("sha") == local_sha:
                 print(f"O'zgarmagan: {dest}")
                 continue
         body = {"message": f"Sinxronlash: {dest}",
