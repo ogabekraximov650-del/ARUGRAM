@@ -159,6 +159,11 @@ fun LoginScreen(onDone: () -> Unit, onClose: () -> Unit, onBot: () -> Unit = {})
         error = "Kirish tasdiqlanmadi — qayta urinib ko'ring"
     }
 
+    // Telegram hisobi allaqachon ulangan (saqlangan sessiya), ilova hisobi esa yo'q — foydalanuvchi hech narsa bosmasdan avtomatik kiriladi.
+    LaunchedEffect(Unit) {
+        if (tg.state.value.authorized && !auth.isLoggedIn && step == Step.PHONE && !busy) finish()
+    }
+
     // ── QR orqali kirish: boshqa qurilmadagi Telegram'da Sozlamalar -> Qurilmalar -> "Qurilmani ulash" ──
     suspend fun qrRefresh() {
         val j = tg.qrToken()
@@ -368,7 +373,6 @@ fun LoginScreen(onDone: () -> Unit, onClose: () -> Unit, onBot: () -> Unit = {})
                 Spacer(Modifier.height(16.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                     Text("QR orqali kirish", color = AruColors.Accent2, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickable { error = null; step = Step.QR })
-                    if (!auth.isLoggedIn) Text("Bot orqali kirish", color = AruColors.Accent2, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickable(onClick = onBot))
                 }
             }
             if ((step == Step.CODE || step == Step.PASSWORD) && !busy) {
