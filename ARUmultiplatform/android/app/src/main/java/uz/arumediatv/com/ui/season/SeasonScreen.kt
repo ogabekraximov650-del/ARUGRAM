@@ -315,6 +315,13 @@ fun SeasonScreen(
         val w = act?.window
         if (fullscreen && act != null && w != null) {
             act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            // Kameraga o'yilgan joy (notch) atrofida qora chekka qolmasin: video butun ekranga sig'sin.
+            if (android.os.Build.VERSION.SDK_INT >= 28) {
+                w.attributes = w.attributes.apply {
+                    layoutInDisplayCutoutMode = if (android.os.Build.VERSION.SDK_INT >= 30) WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+                    else WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                }
+            }
             WindowCompat.getInsetsController(w, w.decorView).apply {
                 hide(WindowInsetsCompat.Type.systemBars())
                 systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
@@ -323,6 +330,9 @@ fun SeasonScreen(
         onDispose {
             if (act != null && w != null) {
                 act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                if (android.os.Build.VERSION.SDK_INT >= 28) {
+                    w.attributes = w.attributes.apply { layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT }
+                }
                 WindowCompat.getInsetsController(w, w.decorView).show(WindowInsetsCompat.Type.systemBars())
             }
         }
