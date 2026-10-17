@@ -217,11 +217,6 @@ fun PlayerControls(
                 }
             }
         } else {
-            AnimatedVisibility(showAll && player.error == null, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.TopEnd)) {
-                Box(Modifier.padding(end = 4.dp, top = 2.dp).clip(CircleShape).clickable(onClick = onSettings).padding(9.dp)) {
-                    Icon(AruIcons.MoreVert, "Menyu", tint = Color.White, modifier = Modifier.size(22.dp))
-                }
-            }
         }
 
         // Markaz
@@ -299,7 +294,10 @@ fun PlayerControls(
                     Spacer(Modifier.width(6.dp))
                     Text("${formatClock(shown.toLong())}/${formatClock(player.durationMs)}", color = Color.White, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.width(6.dp))
-                    Chip("HQ", null, 10.5f, onQuality)
+                    // HQ yozuvi o'rniga sozlamalar belgisi (sifat, tezlik va boshqalar shu yerda).
+                    Box(Modifier.clip(CircleShape).clickable(onClick = onSettings).padding(horizontal = 3.dp, vertical = 4.dp)) {
+                        Icon(Icons.Filled.Settings, "Sozlamalar", tint = Color.White, modifier = Modifier.size(22.dp))
+                    }
                     Spacer(Modifier.width(3.dp))
                     Box(Modifier.clip(CircleShape).clickable(onClick = onToggleFullscreen).padding(horizontal = 3.dp, vertical = 4.dp)) {
                         Icon(AruIcons.Fullscreen, "To'liq ekran", tint = Color.White, modifier = Modifier.size(22.dp))
@@ -311,8 +309,6 @@ fun PlayerControls(
                         FsChip(AruIcons.PlaylistPlay, "", onEpisodeList)
                         Spacer(Modifier.width(8.dp))
                         FsChip(AruIcons.Speed, speedLabel, onSettings)
-                        Spacer(Modifier.width(8.dp))
-                        FsChip(null, "HQ", onQuality)
                     }
                     Spacer(Modifier.height(6.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
