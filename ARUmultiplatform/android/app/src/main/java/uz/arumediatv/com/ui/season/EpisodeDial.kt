@@ -315,7 +315,7 @@ fun EpisodeDialTab(
                         val dy = (k - pos) * pitch
                         if (abs(dy) < rr - 14 * dp1) {
                             val sx = sqrt(rr * rr - dy * dy)
-                            val x = cxL - sgn * sx
+                            val x = cxL + sgn * sx
                             val y = cyL + dy
                             val alpha = Math.toDegrees(asin((dy / rr).toDouble())).toFloat()
                             val isSel = k == base
@@ -332,8 +332,8 @@ fun EpisodeDialTab(
                     if (abs(dyh) < rr - 6 * dp1) {
                         val sa = (dyh / rr)
                         val ca = sqrt(1f - sa * sa)
-                        val p1 = Offset(cxL - sgn * ca * (r - 3 * dp1), cyL + sa * (r - 3 * dp1))
-                        val p2 = Offset(cxL - sgn * ca * (r - 10 * dp1), cyL + sa * (r - 10 * dp1))
+                        val p1 = Offset(cxL + sgn * ca * (r - 3 * dp1), cyL + sa * (r - 3 * dp1))
+                        val p2 = Offset(cxL + sgn * ca * (r - 10 * dp1), cyL + sa * (r - 10 * dp1))
                         drawLine(Color(0xFF55555A), p1, p2, 1.2f * dp1)
                     }
                 }
@@ -355,25 +355,25 @@ fun EpisodeDialTab(
                     val sa = sin(rad); val ca = cos(rad)
                     drawLine(
                         if (long) Color(0xFFAAAAAF) else Color(0xFF55555A),
-                        Offset(cxL - sgn * ca * ra, cyL + sa * ra), Offset(cxL - sgn * ca * rb, cyL + sa * rb),
+                        Offset(cxL + sgn * ca * ra, cyL + sa * ra), Offset(cxL + sgn * ca * rb, cyL + sa * rb),
                         (if (long) 2f else 1.2f) * dp1,
                     )
                     if (long && abs(ang) > 9f) {
                         val rl = r2 - 28 * dp1
                         textPaint.color = 0xFF9A9AA0.toInt()
                         textPaint.textSize = 9.5f * dp1
-                        nc.drawText(dialClock(tm), cxL - sgn * ca * rl, cyL + sa * rl + textPaint.textSize * 0.35f, textPaint)
+                        nc.drawText(dialClock(tm), cxL + sgn * ca * rl, cyL + sa * rl + textPaint.textSize * 0.35f, textPaint)
                     }
                 }
                 // Hozirgi vaqt belgisi va yozuvi.
-                drawLine(accent2, Offset(cxL - sgn * (r2 - 3 * dp1), cyL), Offset(cxL - sgn * (r2 - 20 * dp1), cyL), 3f * dp1)
+                drawLine(accent2, Offset(cxL + sgn * (r2 - 3 * dp1), cyL), Offset(cxL + sgn * (r2 - 20 * dp1), cyL), 3f * dp1)
                 textPaint.color = accent2.toArgb()
                 textPaint.textSize = 12f * dp1
-                nc.drawText(dialClock(tNow), cxL - sgn * (r2 - 34 * dp1), cyL + textPaint.textSize * 0.35f, textPaint)
+                nc.drawText(dialClock(tNow), cxL + sgn * (r2 - 34 * dp1), cyL + textPaint.textSize * 0.35f, textPaint)
 
                 // Tanlangan qism ko'rsatkichi (aylana chetida).
-                val tipX = cxL - sgn * (r - 2 * dp1)
-                val baseX = cxL - sgn * (r + 11 * dp1)
+                val tipX = cxL + sgn * (r - 2 * dp1)
+                val baseX = cxL + sgn * (r + 11 * dp1)
                 val tri = androidx.compose.ui.graphics.Path().apply {
                     moveTo(tipX, cyL)
                     lineTo(baseX, cyL - 8 * dp1)

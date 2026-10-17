@@ -38,6 +38,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -148,8 +149,13 @@ fun PlayerControls(
 ) {
     var visible by remember { mutableStateOf(true) }
     var bump by remember { mutableLongStateOf(0L) }
-    var seekBadge by remember { mutableStateOf<String?>(null) }
+    // Ikki marta bosib sek: har bosish 5 soniya, jamlanib boradi (Flutter bilan bir xil); sek qisqa tinchlikdan keyin bir marta bajariladi.
+    var leftAccum by remember { mutableIntStateOf(0) }
+    var rightAccum by remember { mutableIntStateOf(0) }
+    var pendingSec by remember { mutableIntStateOf(0) }
+    var seekTick by remember { mutableIntStateOf(0) }
     var dragMs by remember { mutableStateOf<Float?>(null) }
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
 
     // Ko'rinib turgan boshqaruv 3.5 soniyada yashirinadi (ijro paytida).
     LaunchedEffect(visible, bump, player.playing, dragMs) {
@@ -158,11 +164,16 @@ fun PlayerControls(
             visible = false
         }
     }
-    LaunchedEffect(seekBadge) {
-        if (seekBadge != null) {
-            delay(700)
-            seekBadge = null
+    LaunchedEffect(seekTick) {
+        if (seekTick == 0) return@LaunchedEffect
+        delay(350)
+        if (pendingSec != 0) {
+            player.seekBy(pendingSec * 1000L)
+            pendingSec = 0
         }
+        delay(350)
+        leftAccum = 0
+        rightAccum = 0
     }
     val errored = player.error != null
     val showAll = (visible || !player.playing || errored) && !locked
@@ -181,8 +192,17 @@ fun PlayerControls(
                     onDoubleTap = { off ->
                         if (locked) return@detectTapGestures
                         val left = off.x < size.width / 2
-                        player.seekBy(if (left) -10_000 else 10_000)
-                        seekBadge = if (left) "−10 s" else "+10 s"
+                        // Haqiqiy chegaralar ichida: ko'rsatilgan son bilan bajariladigan sakrash bir xil bo'ladi.
+                        val eff = player.positionMs + pendingSec * 1000L
+                        val dur = player.durationMs
+                        val add = if (left) minOf(5L, (eff / 1000).coerceAtLeast(0)).toInt()
+                        else if (dur > 0) minOf(5L, ((dur - eff) / 1000).coerceAtLeast(0)).toInt() else 5
+                        if (add > 0) {
+                            if (left) { leftAccum += add; rightAccum = 0; pendingSec -= add }
+                            else { rightAccum += add; leftAccum = 0; pendingSec += add }
+                        }
+                        haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                        seekTick++
                         bump++
                     },
                 )
@@ -253,12 +273,8 @@ fun PlayerControls(
             }
         }
 
-        seekBadge?.let {
-            Text(
-                it, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp,
-                modifier = Modifier.align(Alignment.Center).clip(RoundedCornerShape(14.dp)).background(Color.Black.copy(alpha = 0.6f)).padding(horizontal = 16.dp, vertical = 8.dp),
-            )
-        }
+        if (leftAccum > 0) SeekBadge(leftAccum, true, Modifier.align(androidx.compose.ui.BiasAlignment(-0.5f, 0f)))
+        if (rightAccum > 0) SeekBadge(rightAccum, false, Modifier.align(androidx.compose.ui.BiasAlignment(0.5f, 0f)))
 
         // Intro o'tkazish
         if (introActive && !locked) {
@@ -433,5 +449,41 @@ private fun RoundIcon(icon: ImageVector, desc: String, onClick: () -> Unit, enab
         contentAlignment = Alignment.Center,
     ) {
         Icon(icon, desc, tint = Color.White.copy(alpha = if (enabled) 1f else 0.3f), modifier = Modifier.size((size * 0.55f).dp))
+    }
+}
+
+
+/** Sek ko'rsatkichi (Flutter `_SeekBadge`): qora yarim shaffof doira, uchta ketma-ket yonib-o'chuvchi uchburchak va "10s" yozuvi. */
+@Composable
+private fun SeekBadge(seconds: Int, isLeft: Boolean, modifier: Modifier = Modifier) {
+    val d = 76.dp
+    val t by androidx.compose.animation.core.rememberInfiniteTransition(label = "seek").animateFloat(
+        0f, 1f,
+        androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(900, easing = androidx.compose.animation.core.LinearEasing)),
+        label = "seekT",
+    )
+    Column(
+        modifier.size(d).clip(CircleShape).background(Color.Black.copy(alpha = 0.55f)),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            val order = if (isLeft) intArrayOf(2, 1, 0) else intArrayOf(0, 1, 2)
+            for (i in 0 until 3) {
+                val start = order[i] * 0.15f
+                val x = (((t - start) % 1f) + 1f) % 1f
+                val op = (if (x < 0.5f) 0.3f + 0.7f * (x / 0.5f) else 1f - 0.7f * ((x - 0.5f) / 0.5f)).coerceIn(0.3f, 1f)
+                androidx.compose.foundation.Canvas(Modifier.size(width = 9.dp, height = 16.dp)) {
+                    val w = size.width; val h = size.height
+                    val path = androidx.compose.ui.graphics.Path().apply {
+                        if (isLeft) { moveTo(w, 0f); lineTo(0f, h / 2f); lineTo(w, h) } else { moveTo(0f, 0f); lineTo(w, h / 2f); lineTo(0f, h) }
+                        close()
+                    }
+                    drawPath(path, Color.White.copy(alpha = op))
+                }
+            }
+        }
+        Spacer(Modifier.height(5.dp))
+        Text("${seconds}s", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
     }
 }
