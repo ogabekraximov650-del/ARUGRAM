@@ -169,6 +169,8 @@ fun PlayerControls(
     LaunchedEffect(showAll) { onControlsShown(showAll) }
     val busy = player.buffering || (!player.ready && !player.ended) || dragMs != null
     val s = if (fullscreen) 1.15f else 1f
+    // To'liq ekranda chetlar tizim tugmalari/ishora zonasiga tushmasin: tugmalar ikki tarafdan o'rtaga surilgan.
+    val edge = if (fullscreen) 56.dp else 0.dp
 
     Box(
         // DIQQAT: bu yerda fon BO'LMASIN — boshqaruv videoning USTIDA chiziladi, to'liq qora fon videoni yopib qo'yardi.
@@ -200,7 +202,7 @@ fun PlayerControls(
         // Yuqori qator
         if (fullscreen) {
             AnimatedVisibility(showAll, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.TopCenter)) {
-                Row(Modifier.fillMaxWidth().statusBarsPadding().padding(start = 12.dp, end = 12.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().statusBarsPadding().padding(start = 12.dp + edge, end = 12.dp + edge, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.clip(CircleShape).clickable(onClick = onBack).padding(8.dp)) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "Orqaga", tint = Color.White, modifier = Modifier.size(24.dp))
                     }
@@ -265,7 +267,7 @@ fun PlayerControls(
                 color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(end = 14.dp, bottom = if (showAll) (if (fullscreen) 120.dp else 40.dp) else 16.dp)
+                    .padding(end = 14.dp + edge, bottom = if (showAll) (if (fullscreen) 120.dp else 40.dp) else 16.dp)
                     .clip(RoundedCornerShape(12.dp)).background(Color.Black.copy(alpha = 0.65f))
                     .clickable(onClick = onSkipIntro).padding(horizontal = 14.dp, vertical = 9.dp),
             )
@@ -274,7 +276,7 @@ fun PlayerControls(
         // Qulflangan: faqat qulf tugmasi (bosilsa ochiladi)
         if (locked) {
             // Qulfdan yechish tugmasi "to'liq ekrandan chiqish" tugmasi turgan joyda (yuqori o'ng burchak).
-            Box(Modifier.align(Alignment.TopEnd).padding(end = 12.dp, top = 6.dp).clip(CircleShape).clickable(onClick = onToggleLock).padding(9.dp)) {
+            Box(Modifier.align(Alignment.TopEnd).padding(end = 12.dp + edge, top = 6.dp).clip(CircleShape).clickable(onClick = onToggleLock).padding(9.dp)) {
                 Icon(Icons.Filled.Lock, "Qulfni ochish", tint = Color.White, modifier = Modifier.size(22.dp))
             }
         }
@@ -313,7 +315,7 @@ fun PlayerControls(
                     }
                 }
             } else {
-                Column(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 6.dp)) {
+                Column(Modifier.fillMaxWidth().padding(start = 12.dp + edge, end = 12.dp + edge, bottom = 6.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
                         FsButton(AruIcons.SkipPrevious, hasPrev, false) { onPrev(); bump++ }
                         Spacer(Modifier.width(10.dp))
