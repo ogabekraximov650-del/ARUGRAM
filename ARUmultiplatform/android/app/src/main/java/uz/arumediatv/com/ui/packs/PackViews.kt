@@ -23,6 +23,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
@@ -62,14 +64,34 @@ fun PackItemImage(pack: Long, item: Long, modifier: Modifier = Modifier, thumb: 
     }
     val b = bytes
     val r = ref
-    Box(modifier) {
+    // Animatsiya FAQAT ekranda TO'LIQ ko'rinib turganda ishlaydi (qisman yoki umuman ko'rinmasa — qotgan kadr).
+    var fully by remember { mutableStateOf(false) }
+    var poster by remember(pack, item) { mutableStateOf<ByteArray?>(null) }
+    LaunchedEffect(r, thumb) {
+        val rr = r ?: return@LaunchedEffect
+        if (!thumb && rr.item.video && poster == null) poster = store.thumb(rr)
+    }
+    Box(
+        modifier.onGloballyPositioned { c ->
+            val bb = c.boundsInWindow()
+            val sz = c.size
+            val now = c.isAttached && sz.width > 0 && sz.height > 0 && bb.width >= sz.width - 1f && bb.height >= sz.height - 1f
+            if (now != fully) fully = now
+        },
+    ) {
         if (b != null && r != null) {
             if (!thumb && r.item.video) {
                 // Bir vaqtda faqat BITTA GIFning ovozi yoniq (boshqasini bossangiz oldingisi o'chadi) — Flutterdagidek.
                 val me = remember { Any() }
                 val sound = GifSound.owner === me
                 androidx.compose.runtime.DisposableEffect(me) { onDispose { if (GifSound.owner === me) GifSound.owner = null } }
-                LoopingVideo(b, "${pack}_$item", Modifier.fillMaxSize(), sound)
+                if (fully) {
+                    LoopingVideo(b, "${pack}_$item", Modifier.fillMaxSize(), sound)
+                } else {
+                    val pb = poster
+                    val pbmp = remember(pb) { pb?.let { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() } }
+                    if (pbmp != null) Image(pbmp, null, Modifier.fillMaxSize(), contentScale = scale)
+                }
                 if (soundToggle) {
                     // Bosilsa ovoz yoqiladi/o'chadi; karnay tugmasi pastki burchakda.
                     Box(Modifier.fillMaxSize().clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) { GifSound.owner = if (sound) null else me })
@@ -80,7 +102,7 @@ fun PackItemImage(pack: Long, item: Long, modifier: Modifier = Modifier, thumb: 
                         androidx.compose.material3.Icon(if (sound) uz.arumediatv.com.ui.common.AruIcons.VolumeUp else uz.arumediatv.com.ui.common.AruIcons.VolumeOff, null, tint = Color.White, modifier = Modifier.size(16.dp))
                     }
                 }
-            } else if (!thumb && r.item.animated && Build.VERSION.SDK_INT >= 28) {
+            } else if (!thumb && r.item.animated && Build.VERSION.SDK_INT >= 28 && fully) {
                 AnimatedBytes(b, Modifier.fillMaxSize())
             } else {
                 val bmp = remember(b) { BitmapFactory.decodeByteArray(b, 0, b.size)?.asImageBitmap() }
