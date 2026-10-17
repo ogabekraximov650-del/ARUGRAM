@@ -311,6 +311,7 @@ fun SeasonScreen(
 
     // ── To'liq ekran: gorizontal + tizim panellari yashirin ──
     DisposableEffect(fullscreen) {
+        uz.arumediatv.com.core.Immersive.on = fullscreen
         val act = ctx.findActivity()
         val w = act?.window
         if (fullscreen && act != null && w != null) {
@@ -328,6 +329,7 @@ fun SeasonScreen(
             }
         }
         onDispose {
+            uz.arumediatv.com.core.Immersive.on = false
             if (act != null && w != null) {
                 act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
                 if (android.os.Build.VERSION.SDK_INT >= 28) {

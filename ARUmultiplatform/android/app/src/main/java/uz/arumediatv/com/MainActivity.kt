@@ -315,7 +315,7 @@ private fun AruApp() {
 
         // ── Ekranlar steki: eng ustkisi ko'rinadi ──
         stack.lastOrNull()?.let { page ->
-            Box(Modifier.fillMaxSize().background(AruColors.Bg).pointerInput(Unit) { detectTapGestures { } }.statusBarsPadding().navigationBarsPadding()) {
+            Box(Modifier.fillMaxSize().background(AruColors.Bg).pointerInput(Unit) { detectTapGestures { } }.then(if (uz.arumediatv.com.core.Immersive.on) Modifier else Modifier.statusBarsPadding().navigationBarsPadding())) {
                 when (page) {
                     Page.Login -> LoginScreen(onDone = ::pop, onClose = ::pop, onBot = { pop(); push(Page.BotLogin) })
                     Page.BotLogin -> BotLoginScreen(onDone = ::pop, onBack = ::pop)
