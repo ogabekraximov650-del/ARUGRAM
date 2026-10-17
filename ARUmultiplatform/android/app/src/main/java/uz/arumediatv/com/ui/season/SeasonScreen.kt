@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -457,17 +458,18 @@ fun SeasonScreen(
 
             // ── Qism almashtirish: [⏮]  N-qism  [⏭] ──
             Row(
-                Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(AruColors.Card).border(1.dp, AruColors.Border, RoundedCornerShape(14.dp)).padding(horizontal = 6.dp, vertical = 5.dp),
+                Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(AruColors.Card).border(1.dp, AruColors.Border, RoundedCornerShape(14.dp)).padding(horizontal = 6.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                NavBtn(AruIcons.SkipPrevious, idx > 0) { if (idx > 0) play(sorted[idx - 1], resumePlaying = player.exo.playWhenReady) }
-                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                NavBtn(AruIcons.SkipPrevious, "Oldingi", true, idx > 0) { if (idx > 0) play(sorted[idx - 1], resumePlaying = player.exo.playWhenReady) }
+                Box(Modifier.weight(0.8f), contentAlignment = Alignment.Center) {
                     Text(
                         if (idx >= 0) "${sorted[idx].number}-qism" else if (sorted.isEmpty()) "—" else "Qismni tanlang",
                         color = if (idx >= 0) Color.White else Color.White.copy(alpha = 0.54f), fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1,
                     )
                 }
-                NavBtn(AruIcons.SkipNext, idx >= 0 && idx + 1 < sorted.size) { if (idx >= 0 && idx + 1 < sorted.size) play(sorted[idx + 1], resumePlaying = player.exo.playWhenReady) }
+                NavBtn(AruIcons.SkipNext, "Keyingi", false, idx >= 0 && idx + 1 < sorted.size) { if (idx >= 0 && idx + 1 < sorted.size) play(sorted[idx + 1], resumePlaying = player.exo.playWhenReady) }
             }
             Spacer(Modifier.height(6.dp))
             }
@@ -582,15 +584,21 @@ private fun NowStat(icon: androidx.compose.ui.graphics.vector.ImageVector, text:
 }
 
 @Composable
-private fun NavBtn(icon: androidx.compose.ui.graphics.vector.ImageVector, enabled: Boolean, onClick: () -> Unit) {
-    val shape = RoundedCornerShape(12.dp)
-    Box(
-        Modifier.width(68.dp).height(38.dp).clip(shape)
+private fun RowScope.NavBtn(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, iconFirst: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(14.dp)
+    val tint = Color.White.copy(alpha = if (enabled) 0.95f else 0.25f)
+    Row(
+        Modifier.weight(1f).height(52.dp).clip(shape)
             .background(Color.White.copy(alpha = if (enabled) 0.10f else 0.035f))
             .border(1.dp, Color.White.copy(alpha = if (enabled) 0.20f else 0.06f), shape)
             .clickable(enabled = enabled, onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) { Icon(icon, null, tint = Color.White.copy(alpha = if (enabled) 0.95f else 0.22f), modifier = Modifier.size(24.dp)) }
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (iconFirst) Icon(icon, null, tint = tint, modifier = Modifier.size(28.dp))
+        Text(label, color = tint, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, modifier = Modifier.padding(horizontal = 4.dp))
+        if (!iconFirst) Icon(icon, null, tint = tint, modifier = Modifier.size(28.dp))
+    }
 }
 
 /** "Obuna kerak" to'liq ekrani (Flutter `_SubRequiredScreen`). */

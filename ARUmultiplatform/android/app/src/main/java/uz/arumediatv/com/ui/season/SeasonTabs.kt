@@ -265,11 +265,11 @@ private fun EpisodeTile(e: Episode, isCurrent: Boolean, onPlay: (Episode, String
         Modifier.fillMaxWidth().clip(shape)
             .background(if (isCurrent) AruColors.AccentTint else AruColors.Card)
             .border(1.dp, if (isCurrent) AruColors.Accent.copy(alpha = 0.5f) else AruColors.Border, shape)
-            .clickable { onPlay(e, null) }.padding(12.dp),
+            .clickable { onPlay(e, null) }.padding(horizontal = 14.dp, vertical = 14.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
-                Modifier.size(42.dp).clip(RoundedCornerShape(12.dp)).background(if (isCurrent) AruColors.Accent else AruColors.CardAlt),
+                Modifier.size(48.dp).clip(RoundedCornerShape(13.dp)).background(if (isCurrent) AruColors.Accent else AruColors.CardAlt),
                 contentAlignment = Alignment.Center,
             ) {
                 if (isCurrent) Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(24.dp))
@@ -281,10 +281,10 @@ private fun EpisodeTile(e: Episode, isCurrent: Boolean, onPlay: (Episode, String
                 if (e.name.isNotBlank()) Text(e.name, color = AruColors.TextDim, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             if (e.views > 0) Text("${formatCount(e.views)} ko'rish", color = AruColors.TextFaint, fontSize = 11.sp)
-            Text(
-                if (expanded) "▴" else "▾", color = AruColors.TextDim, fontSize = 18.sp,
-                modifier = Modifier.clip(CircleShape).clickable { expanded = !expanded }.padding(horizontal = 10.dp, vertical = 2.dp),
-            )
+            Box(
+                Modifier.size(48.dp).clip(CircleShape).clickable { expanded = !expanded },
+                contentAlignment = Alignment.Center,
+            ) { Text(if (expanded) "▴" else "▾", color = AruColors.TextDim, fontSize = 22.sp) }
         }
         if (frac > 0f) {
             Spacer(Modifier.height(8.dp))
