@@ -45,7 +45,7 @@ use std::sync::{Arc, Condvar, Mutex, OnceLock};
 /// Bir vaqtda 4 ta bo'lak parallel olinganda kech kelgani orasida
 /// teshik qolardi. Avvalgi holatiga (2) qaytarildi; tezlik oshirish
 /// (`DL_CONNS`, `MAX_INFLIGHT`) yuklab olish va boshqa ishlar uchun qoladi.
-const AHEAD: u64 = 2;
+const AHEAD: u64 = 1; // Kotlin: foydalanuvchi talabi — 1 MB lab, ortiqcha oldindan yuklamasin (avval 2)
 
 // ── ONLAYN KO'RISHDA KO'PI BILAN 1 DAQIQA OLDINGA ─────────────────
 //
