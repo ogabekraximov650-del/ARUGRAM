@@ -30,7 +30,7 @@ class AruPlayer(context: Context) {
         androidx.media3.exoplayer.DefaultLoadControl.Builder()
             .setBufferDurationsMs(15_000, 30_000, 1_000, 2_000)
             .setBackBuffer(10_000, true)
-            .setTargetBufferBytes(24 * 1024 * 1024)
+            .setTargetBufferBytes(if (uz.arumediatv.com.core.Perf.low) 12 * 1024 * 1024 else 24 * 1024 * 1024)
             .setPrioritizeTimeOverSizeThresholds(false)
             .build(),
     )    .build()

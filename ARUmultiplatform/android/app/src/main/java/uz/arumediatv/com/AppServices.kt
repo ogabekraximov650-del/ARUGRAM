@@ -81,6 +81,7 @@ object AppServices {
     fun init(app: Context) {
         if (ready) return
         val ctx = app.applicationContext
+        uz.arumediatv.com.core.Perf.init(ctx)
         secure = SecureStore(ctx)
         if (RustCore.load()) {
             RustCore.setAppVersion(BuildConfig.APP_VERSION)

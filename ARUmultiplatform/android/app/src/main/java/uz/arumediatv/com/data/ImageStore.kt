@@ -23,10 +23,10 @@ import java.util.concurrent.ConcurrentHashMap
 class ImageStore(context: Context, private val tg: TelegramService) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val dir = File(context.cacheDir, "aru_img").apply { mkdirs() }
-    private val decodeGate = Semaphore(3)
+    private val decodeGate = Semaphore(if (uz.arumediatv.com.core.Perf.low) 2 else 3)
     private val inflight = ConcurrentHashMap<String, CompletableDeferred<Bitmap?>>()
 
-    private val mem = object : LruCache<String, Bitmap>((Runtime.getRuntime().maxMemory() / 8L).toInt().coerceAtLeast(8 shl 20)) {
+    private val mem = object : LruCache<String, Bitmap>((Runtime.getRuntime().maxMemory() / (if (uz.arumediatv.com.core.Perf.low) 12L else 8L)).toInt().coerceAtLeast(6 shl 20)) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
     }
 
@@ -76,13 +76,16 @@ class ImageStore(context: Context, private val tg: TelegramService) {
         return bmp
     }
 
-    private suspend fun decode(bytes: ByteArray, maxPx: Int): Bitmap? = decodeGate.withPermit {
+    private suspend fun decode(bytes: ByteArray, maxPxIn: Int): Bitmap? = decodeGate.withPermit {
         withContext(Dispatchers.Default) {
+            val low = uz.arumediatv.com.core.Perf.low
+            // Kuchsiz qurilmada rasm kichikroq va 2 baravar kam xotira oladigan formatda (RGB_565) dekodlanadi.
+            val maxPx = if (low) minOf(maxPxIn, 540) else maxPxIn
             val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size, o)
             var sample = 1
             while (o.outWidth / (sample * 2) >= maxPx && o.outHeight / (sample * 2) >= maxPx) sample *= 2
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample; if (low) inPreferredConfig = Bitmap.Config.RGB_565 })
         }
     }
 

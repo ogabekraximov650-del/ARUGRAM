@@ -76,7 +76,7 @@ fun FloatingNav(items: List<NavItem>, selected: Int, onSelect: (Int) -> Unit, mo
     BoxWithConstraints(
         modifier
             .fillMaxWidth()
-            .shadow(16.dp, shape, ambientColor = Color.Black, spotColor = Color.Black)
+            .shadow(if (uz.arumediatv.com.core.Perf.low) 6.dp else 16.dp, shape, ambientColor = Color.Black, spotColor = Color.Black)
             .background(AruColors.Surface, shape)
             .border(1.dp, AruColors.Border, shape)
             .padding(horizontal = 6.dp, vertical = 10.dp),
@@ -93,7 +93,7 @@ fun FloatingNav(items: List<NavItem>, selected: Int, onSelect: (Int) -> Unit, mo
                 .width(itemWidth - 8.dp)
                 .height(52.dp)
                 .graphicsLayer { translationX = pos.value * itemWidthPx + 4.dp.toPx() }
-                .shadow(8.dp, pillShape, ambientColor = AruColors.Accent, spotColor = AruColors.Accent)
+                .shadow(if (uz.arumediatv.com.core.Perf.low) 0.dp else 8.dp, pillShape, ambientColor = AruColors.Accent, spotColor = AruColors.Accent)
                 .background(Brush.linearGradient(listOf(AruColors.Accent, AruColors.Accent2)), pillShape),
         )
 

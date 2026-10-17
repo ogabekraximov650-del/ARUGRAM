@@ -406,7 +406,7 @@ internal class ChartModel {
         canvas.drawPath(path, paint)
         canvas.save()
         canvas.clipPath(path)
-        paintParticles(canvas, cx, cy, s, inner, outer, time)
+        if (!uz.arumediatv.com.core.Perf.low) paintParticles(canvas, cx, cy, s, inner, outer, time)
         canvas.restore()
     }
 

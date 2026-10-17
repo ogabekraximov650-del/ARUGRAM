@@ -93,7 +93,7 @@ fun LibraryScreen(onOpenSeason: (Season) -> Unit, onLogin: () -> Unit, onOpenDow
             return@Column
         }
 
-        HorizontalPager(state = pager, modifier = Modifier.fillMaxSize(), beyondViewportPageCount = 1) { page ->
+        HorizontalPager(state = pager, modifier = Modifier.fillMaxSize(), beyondViewportPageCount = if (uz.arumediatv.com.core.Perf.low) 0 else 1) { page ->
             val pad = 24.dp + LocalBarPad.current.calculateBottomPadding()
             when (page) {
                 0 -> PullToRefreshBox(isRefreshing = state.loading && state.loaded, onRefresh = { AppServices.library.load(force = true) }, modifier = Modifier.fillMaxSize()) {

@@ -458,7 +458,7 @@ fun SeasonScreen(
             Spacer(Modifier.height(6.dp))
             }
 
-            androidx.compose.foundation.pager.HorizontalPager(pager, Modifier.weight(1f).fillMaxWidth(), beyondViewportPageCount = 1) { page ->
+            androidx.compose.foundation.pager.HorizontalPager(pager, Modifier.weight(1f).fillMaxWidth(), beyondViewportPageCount = if (uz.arumediatv.com.core.Perf.low) 0 else 1) { page ->
                 when (page) {
                     0 -> InfoTab(
                         season = season, info = info,
