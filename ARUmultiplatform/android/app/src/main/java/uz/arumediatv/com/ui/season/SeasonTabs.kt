@@ -3,6 +3,7 @@ package uz.arumediatv.com.ui.season
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import kotlinx.coroutines.launch
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.widthIn
@@ -476,27 +477,40 @@ fun PlayerSettingsSheet(
 private fun PlayerSheetHost(title: String, onDismiss: () -> Unit, content: @Composable () -> Unit) {
     val landscape = androidx.compose.ui.platform.LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
     if (landscape) {
+        // O'ngdan suzib chiqadi va yopilganda o'ngga suzib ketadi.
+        var shown by remember { mutableStateOf(false) }
+        val scope = androidx.compose.runtime.rememberCoroutineScope()
+        androidx.compose.runtime.LaunchedEffect(Unit) { shown = true }
+        val close: () -> Unit = { if (shown) { shown = false; scope.launch { kotlinx.coroutines.delay(240); onDismiss() } } }
         androidx.compose.ui.window.Dialog(
-            onDismissRequest = onDismiss,
+            onDismissRequest = close,
             properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
         ) {
+            val scrim by androidx.compose.animation.core.animateFloatAsState(if (shown) 0.45f else 0f, androidx.compose.animation.core.tween(240), label = "scrim")
             Box(
-                Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.45f))
-                    .clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null, onClick = onDismiss),
+                Modifier.fillMaxSize().background(Color.Black.copy(alpha = scrim))
+                    .clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null, onClick = close),
             ) {
-                Column(
-                    Modifier.align(Alignment.CenterEnd).fillMaxHeight().widthIn(max = 380.dp).fillMaxWidth(0.5f)
-                        .clip(RoundedCornerShape(topStart = 22.dp, bottomStart = 22.dp)).background(AruColors.Surface)
-                        .clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) {}
-                        .statusBarsPadding().navigationBarsPadding(),
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = shown,
+                    modifier = Modifier.align(Alignment.CenterEnd),
+                    enter = androidx.compose.animation.slideInHorizontally(androidx.compose.animation.core.tween(280, easing = androidx.compose.animation.core.FastOutSlowInEasing)) { it } + androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(200)),
+                    exit = androidx.compose.animation.slideOutHorizontally(androidx.compose.animation.core.tween(220)) { it } + androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(200)),
                 ) {
-                    Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(title, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                        Box(Modifier.size(48.dp).clip(CircleShape).clickable(onClick = onDismiss), contentAlignment = Alignment.Center) {
-                            Text("✕", color = Color.White.copy(alpha = 0.8f), fontSize = 18.sp)
+                    Column(
+                        Modifier.fillMaxHeight().widthIn(max = 560.dp).fillMaxWidth(0.66f)
+                            .clip(RoundedCornerShape(topStart = 22.dp, bottomStart = 22.dp)).background(AruColors.Surface)
+                            .clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) {}
+                            .statusBarsPadding().navigationBarsPadding(),
+                    ) {
+                        Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(title, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                            Box(Modifier.size(48.dp).clip(CircleShape).clickable(onClick = close), contentAlignment = Alignment.Center) {
+                                Text("✕", color = Color.White.copy(alpha = 0.8f), fontSize = 18.sp)
+                            }
                         }
+                        content()
                     }
-                    content()
                 }
             }
         }
@@ -514,8 +528,8 @@ private fun SheetTitle(t: String) {
 private fun Chip(text: String, selected: Boolean, onClick: () -> Unit) {
     val shape = RoundedCornerShape(12.dp)
     Text(
-        text, color = if (selected) Color.White else Color.White.copy(alpha = 0.75f), fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
-        modifier = Modifier.clip(shape).defaultMinSize(minHeight = 44.dp)
+        text, color = if (selected) Color.White else Color.White.copy(alpha = 0.75f), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+        modifier = Modifier.clip(shape).defaultMinSize(minHeight = 40.dp)
             .then(if (selected) Modifier.background(Brush.linearGradient(listOf(AruColors.Accent, AruColors.Accent2))) else Modifier.background(AruColors.Card).border(1.dp, AruColors.Border, shape))
             .clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 11.dp),
     )
