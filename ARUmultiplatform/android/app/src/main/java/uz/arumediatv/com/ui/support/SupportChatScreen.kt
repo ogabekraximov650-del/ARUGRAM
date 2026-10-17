@@ -429,7 +429,7 @@ fun SupportChatScreen(userId: Long?, title: String, onBack: () -> Unit, onPacks:
                                         m, mine, topNear = topNear, bottomNear = !lastOfGroup, selected = m.id in selected || flash == m.id,
                                         quote = rid?.let { id -> byId[id]?.let { o -> nameOf(o) to snippet(o) } ?: ("Xabar" to "o'chirilgan") },
                                         onQuote = { rid?.let(::goTo) },
-                                        onTap = { if (selecting) { if (m.id in selected) selected.remove(m.id) else selected.add(m.id) } else if (m.hasMedia && m.mediaType != "voice") viewer = m },
+                                        onTap = { if (selecting) { if (m.id in selected) selected.remove(m.id) else selected.add(m.id) } else if (m.hasMedia && m.mediaType != "voice" && m.mediaType != "gif" && m.mediaType != "sticker") viewer = m },
                                         onLong = { if (!selecting) menuFor = m },
                                     )
                                 }
@@ -718,7 +718,7 @@ private fun MediaBlock(m: ChatMessage) {
         }
         else -> {
             val ref = uz.arumediatv.com.data.Names.fileNameOf(m.mediaUrl)
-            if (uz.arumediatv.com.data.parsePackRef(ref) != null) uz.arumediatv.com.ui.packs.PackRefImage(ref, Modifier.size(if (m.mediaType == "gif") 190.dp else 140.dp))
+            if (uz.arumediatv.com.data.parsePackRef(ref) != null) uz.arumediatv.com.ui.packs.PackRefImage(ref, Modifier.size(if (m.mediaType == "gif") 190.dp else 140.dp), soundToggle = m.mediaType == "gif")
             else TgImage(m.mediaUrl, Modifier.size(width = 150.dp, height = 150.dp), maxPx = 400, contentScale = ContentScale.Fit)
         }
     }

@@ -6,6 +6,11 @@ import android.graphics.drawable.AnimatedImageDrawable
 import android.os.Build
 import android.widget.ImageView
 import androidx.compose.foundation.Image
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -45,7 +50,7 @@ import java.nio.ByteBuffer
  * Telegram'dan faqat KERAKLI bo'lak olinadi va diskda shifrlab keshlanadi.
  */
 @Composable
-fun PackItemImage(pack: Long, item: Long, modifier: Modifier = Modifier, thumb: Boolean = false, scale: ContentScale = ContentScale.Fit) {
+fun PackItemImage(pack: Long, item: Long, modifier: Modifier = Modifier, thumb: Boolean = false, scale: ContentScale = ContentScale.Fit, soundToggle: Boolean = false) {
     val store = AppServices.packs
     var ref by remember(pack, item) { mutableStateOf<PackRef?>(null) }
     var bytes by remember(pack, item, thumb) { mutableStateOf<ByteArray?>(null) }
@@ -59,7 +64,18 @@ fun PackItemImage(pack: Long, item: Long, modifier: Modifier = Modifier, thumb: 
     Box(modifier) {
         if (b != null && r != null) {
             if (!thumb && r.item.video) {
-                LoopingVideo(b, "${pack}_$item", Modifier.fillMaxSize())
+                var sound by remember(pack, item) { mutableStateOf(false) }
+                LoopingVideo(b, "${pack}_$item", Modifier.fillMaxSize(), sound)
+                if (soundToggle) {
+                    // Bosilsa ovoz yoqiladi/o'chadi; karnay tugmasi pastki burchakda.
+                    Box(Modifier.fillMaxSize().clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) { sound = !sound })
+                    Box(
+                        Modifier.align(androidx.compose.ui.Alignment.BottomEnd).padding(6.dp).size(26.dp).clip(androidx.compose.foundation.shape.CircleShape).background(Color.Black.copy(alpha = 0.5f)),
+                        contentAlignment = androidx.compose.ui.Alignment.Center,
+                    ) {
+                        androidx.compose.material3.Icon(if (sound) uz.arumediatv.com.ui.common.AruIcons.VolumeUp else uz.arumediatv.com.ui.common.AruIcons.VolumeOff, null, tint = Color.White, modifier = Modifier.size(16.dp))
+                    }
+                }
             } else if (!thumb && r.item.animated && Build.VERSION.SDK_INT >= 28) {
                 AnimatedBytes(b, Modifier.fillMaxSize())
             } else {
@@ -72,7 +88,7 @@ fun PackItemImage(pack: Long, item: Long, modifier: Modifier = Modifier, thumb: 
 
 /** Video ko'rinishidagi GIF (mp4): ovozsiz, cheksiz takrorlanadi. Baytlar vaqtinchalik faylga yoziladi. */
 @Composable
-private fun LoopingVideo(bytes: ByteArray, key: String, modifier: Modifier) {
+private fun LoopingVideo(bytes: ByteArray, key: String, modifier: Modifier, sound: Boolean = false) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val player = remember(key) {
         androidx.media3.exoplayer.ExoPlayer.Builder(ctx.applicationContext).build().apply {
@@ -81,6 +97,7 @@ private fun LoopingVideo(bytes: ByteArray, key: String, modifier: Modifier) {
         }
     }
     DisposableEffect(player) { onDispose { player.release() } }
+    LaunchedEffect(sound) { player.volume = if (sound) 1f else 0f }
     LaunchedEffect(key) {
         val f = withContext(Dispatchers.IO) {
             val dir = java.io.File(ctx.cacheDir, "aru_gif").apply { mkdirs() }
@@ -122,9 +139,9 @@ private fun AnimatedBytes(bytes: ByteArray, modifier: Modifier) {
 
 /** `pk_<to'plam>_<element>` havolasidan rasm (stiker/GIF xabarlarda). */
 @Composable
-fun PackRefImage(ref: String, modifier: Modifier = Modifier, thumb: Boolean = false) {
+fun PackRefImage(ref: String, modifier: Modifier = Modifier, thumb: Boolean = false, soundToggle: Boolean = false) {
     val p = parsePackRef(ref) ?: return
-    PackItemImage(p.first, p.second, modifier, thumb)
+    PackItemImage(p.first, p.second, modifier, thumb, soundToggle = soundToggle)
 }
 
 /**
