@@ -96,9 +96,12 @@ class AruPlayer(context: Context) {
     }
 
     private var lastUri = ""
+    private val reporter = java.util.concurrent.Executors.newSingleThreadExecutor()
 
     fun open(uri: String, startMs: Long, play: Boolean) {
         lastUri = uri
+        report(close = true)
+        posName = if (uri.startsWith("aru://")) uri.substringAfterLast('/').substringBefore('?') else null
         error = null
         ended = false
         ready = false
@@ -123,10 +126,27 @@ class AruPlayer(context: Context) {
         return if (d > 0) (exo.bufferedPosition.toFloat() / d).coerceIn(0f, 1f) else 0f
     }
 
+    // ── Sirpanuvchi oyna: ijro joyidan ko'pi bilan 1 daqiqa oldinga yuklanadi (Rust `rust_player_position`) ──
+    private var posName: String? = null
+    private var lastReport = 0L
+
+    private fun report(force: Boolean = false, close: Boolean = false) {
+        val n = posName ?: return
+        val now = android.os.SystemClock.uptimeMillis()
+        if (!force && !close && now - lastReport < 800) return
+        lastReport = now
+        val pos = exo.currentPosition.coerceAtLeast(0)
+        val dur = if (close) 0L else (exo.duration.takeIf { it > 0 } ?: 0L)
+        if (!close && dur <= 0) return
+        val buf = exo.playbackState == Player.STATE_BUFFERING
+        try { reporter.execute { uz.arumediatv.com.core.RustCore.playerPosition(n, pos, dur, buf) } } catch (_: Exception) {}
+    }
+
     fun tick() {
         positionMs = exo.currentPosition.coerceAtLeast(0)
         val d = exo.duration
         if (d > 0) durationMs = d
+        report()
     }
 
     fun play() {
@@ -144,6 +164,7 @@ class AruPlayer(context: Context) {
         val max = if (durationMs > 0) durationMs else Long.MAX_VALUE
         exo.seekTo(ms.coerceIn(0, max))
         positionMs = exo.currentPosition
+        report(force = true)
     }
 
     fun seekBy(deltaMs: Long) = seekTo(exo.currentPosition + deltaMs)
@@ -154,6 +175,8 @@ class AruPlayer(context: Context) {
     }
 
     fun release() {
+        report(close = true)
+        reporter.shutdown()
         exo.removeListener(listener)
         exo.release()
     }

@@ -149,6 +149,9 @@ object RustCore {
 
     fun tgNearestCountry(): String = guard("") { json(take(it.rust_tg_nearest_country())).optString("country", "") }
 
+    /** Ijro joyi (sirpanuvchi 1 daqiqalik oyna uchun): `dur <= 0` — pleyer yopildi. */
+    fun playerPosition(name: String, posMs: Long, durMs: Long, buffering: Boolean) = guard(Unit) { it.rust_player_position(name, posMs, durMs, if (buffering) 1 else 0) }
+
     fun tgPlayUrl(key: String): String = guard("") { take(it.rust_tg_play_url(key)) }
 
     private fun errJson(msg: String) = JSONObject().put("error", msg)

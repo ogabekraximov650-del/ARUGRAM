@@ -45,6 +45,7 @@ interface RustLib : Library {
     fun rust_tg_logout(): Pointer?
     fun rust_tg_nearest_country(): Pointer?
     fun rust_tg_play_url(key: String): Pointer?
+    fun rust_player_position(name: String, posMs: Long, durMs: Long, buffering: Int)
     fun rust_tg_qr_token(): Pointer?
     fun rust_tg_qr_accepted(): Int
     fun rust_tg_upload_start(path: String, name: String, mime: String, channelId: Long): Pointer?
