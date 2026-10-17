@@ -23,6 +23,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectTransformGestures
 import kotlin.math.max
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.ui.graphics.graphicsLayer
@@ -813,7 +814,7 @@ private fun ZoomImage(m: ChatMessage) {
     var offset by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
     Box(
         Modifier.fillMaxSize().pointerInput(Unit) {
-            androidx.compose.foundation.gestures.detectTransformGestures { _, pan, zoom, _ ->
+            detectTransformGestures { _, pan, zoom, _ ->
                 scale = (scale * zoom).coerceIn(1f, 4f)
                 offset = if (scale > 1f) offset + pan else androidx.compose.ui.geometry.Offset.Zero
             }
