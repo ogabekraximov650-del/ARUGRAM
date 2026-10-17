@@ -352,7 +352,13 @@ private fun AruApp() {
                     is Page.AdminEpisodeEdit -> AdminEpisodeEditScreen(page.animeId, page.seasonId, page.episode, onBack = ::pop, onDone = ::pop)
                     is Page.AdminChat -> SupportChatScreen(userId = page.userId, title = page.name, onBack = ::pop)
                     is Page.PublicUser -> PublicProfileScreen(page.id, onBack = ::pop, onOpenStat = { u, k, o -> push(Page.Stat(u, k, o)) })
-                    is Page.Stat -> StatDetailScreen(page.userId, page.kind, page.owner, onBack = ::pop, onOpenSeason = openSeason)
+                    is Page.Stat -> StatDetailScreen(
+                        page.userId, page.kind, page.owner, onBack = ::pop, onOpenSeason = openSeason,
+                        onOpenEpisode = { h ->
+                            val s = uz.arumediatv.com.data.Season(h.animeId, h.seasonId, h.title, h.sectionNo, 0, h.photoUrl, 0.0, 0, 0, 0, emptyList(), "", null)
+                            push(Page.SeasonPage(s, h.epizodId, h.quality.ifEmpty { null }))
+                        },
+                    )
                     is Page.AnimeDownloads -> uz.arumediatv.com.ui.library.DownloadsAnimeScreen(
                         page.animeId, page.seasonId, page.title, onBack = ::pop,
                         onOpen = { s, e, q -> push(Page.SeasonPage(s, e, q)) },

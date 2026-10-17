@@ -202,7 +202,7 @@ private fun StatTile(label: String, value: String, muted: Boolean, modifier: Mod
 
 /** Foydalanuvchining qismlar/bo'limlar/sevimlilar/baholar/izohlar ro'yxati (40 tadan sahifalab). */
 @Composable
-fun StatDetailScreen(userId: Long, kind: StatKind, owner: String, onBack: () -> Unit, onOpenSeason: (Season) -> Unit) {
+fun StatDetailScreen(userId: Long, kind: StatKind, owner: String, onBack: () -> Unit, onOpenSeason: (Season) -> Unit, onOpenEpisode: (uz.arumediatv.com.data.HistoryItem) -> Unit = {}) {
     val repo = AppServices.publicData
     val items = remember { androidx.compose.runtime.mutableStateListOf<JSONObject>() }
     var page by remember { mutableStateOf(0) }
@@ -233,7 +233,7 @@ fun StatDetailScreen(userId: Long, kind: StatKind, owner: String, onBack: () -> 
                 val near by remember { derivedStateOf { val l = state.layoutInfo; l.totalItemsCount > 0 && (l.visibleItemsInfo.lastOrNull()?.index ?: 0) >= l.totalItemsCount - 4 } }
                 LaunchedEffect(near) { if (near) more() }
                 LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    items(items.size) { i -> if (kind == StatKind.EPISODES) EpisodeStatRow(items[i]) else CommentStatRow(items[i]) }
+                    items(items.size) { i -> if (kind == StatKind.EPISODES) EpisodeStatRow(items[i], userId, onOpenEpisode) else CommentStatRow(items[i]) }
                 }
             }
             else -> {
@@ -260,25 +260,20 @@ fun StatDetailScreen(userId: Long, kind: StatKind, owner: String, onBack: () -> 
     }
 }
 
+/** Flutterdagidek: Tomosha tarixidagi qism kartasi (to'xtagan joydagi kadr, nom, sana, progress). Boshqalarniki faqat ko'rish uchun. */
 @Composable
-private fun EpisodeStatRow(o: JSONObject) {
-    val shape = RoundedCornerShape(16.dp)
-    val dur = o.optLong("duration_ms")
-    val frac = if (dur > 0) (o.optLong("position_ms").toFloat() / dur).coerceIn(0f, 1f) else 0f
-    Row(Modifier.fillMaxWidth().clip(shape).background(AruColors.Card).border(1.dp, AruColors.Border, shape).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-        TgImage(o.optString("season_photo").ifBlank { o.optString("anime_photo") }, Modifier.width(64.dp).height(92.dp).clip(RoundedCornerShape(12.dp)).background(AruColors.CardAlt), maxPx = 240)
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text(o.optString("season_name").ifBlank { o.optString("anime_name") }, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Text("${o.optInt("bolim_id")}-bo'lim · ${o.optInt("epizod_number")}-qism", color = AruColors.TextDim, fontSize = 12.sp)
-            Spacer(Modifier.height(8.dp))
-            Box(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(Color.White.copy(alpha = 0.1f))) {
-                Box(Modifier.fillMaxWidth(frac).fillMaxHeight().background(Brush.horizontalGradient(listOf(AruColors.Accent, AruColors.Accent2))))
-            }
-            val cleared = o.optLong("deleted_at") != 0L
+private fun EpisodeStatRow(o: JSONObject, userId: Long, onOpenEpisode: (uz.arumediatv.com.data.HistoryItem) -> Unit) {
+    val item = remember(o) {
+        uz.arumediatv.com.data.LibraryStore.parseHistory(JSONObject().put("items", org.json.JSONArray().put(o))).firstOrNull()
+    } ?: return
+    val isMe = AppServices.auth.user.value?.id == userId
+    val cleared = o.optLong("deleted_at") != 0L
+    Box {
+        uz.arumediatv.com.ui.library.EpisodeRow(item, onOpen = { if (isMe) onOpenEpisode(item) })
+        if (cleared) {
             Text(
-                "${(frac * 100).toInt()}% · ${timeAgo(o.optLong("updated_at"))}${if (cleared) " · tarixdan tozalangan" else ""}",
-                color = AruColors.TextFaint, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp),
+                "Tarixdan tozalangan", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).clip(RoundedCornerShape(8.dp)).background(Color.Black.copy(alpha = 0.6f)).padding(horizontal = 8.dp, vertical = 4.dp),
             )
         }
     }
