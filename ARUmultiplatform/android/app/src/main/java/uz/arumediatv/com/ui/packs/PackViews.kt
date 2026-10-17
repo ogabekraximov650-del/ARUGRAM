@@ -65,11 +65,14 @@ fun PackItemImage(pack: Long, item: Long, modifier: Modifier = Modifier, thumb: 
     Box(modifier) {
         if (b != null && r != null) {
             if (!thumb && r.item.video) {
-                var sound by remember(pack, item) { mutableStateOf(false) }
+                // Bir vaqtda faqat BITTA GIFning ovozi yoniq (boshqasini bossangiz oldingisi o'chadi) — Flutterdagidek.
+                val me = remember { Any() }
+                val sound = GifSound.owner === me
+                androidx.compose.runtime.DisposableEffect(me) { onDispose { if (GifSound.owner === me) GifSound.owner = null } }
                 LoopingVideo(b, "${pack}_$item", Modifier.fillMaxSize(), sound)
                 if (soundToggle) {
                     // Bosilsa ovoz yoqiladi/o'chadi; karnay tugmasi pastki burchakda.
-                    Box(Modifier.fillMaxSize().clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) { sound = !sound })
+                    Box(Modifier.fillMaxSize().clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) { GifSound.owner = if (sound) null else me })
                     Box(
                         Modifier.align(androidx.compose.ui.Alignment.BottomEnd).padding(6.dp).size(26.dp).clip(androidx.compose.foundation.shape.CircleShape).background(Color.Black.copy(alpha = 0.5f)),
                         contentAlignment = androidx.compose.ui.Alignment.Center,
@@ -87,6 +90,11 @@ fun PackItemImage(pack: Long, item: Long, modifier: Modifier = Modifier, thumb: 
     }
 }
 
+/** Hozir ovozi yoniq GIF (bittasi). */
+private object GifSound {
+    var owner by mutableStateOf<Any?>(null)
+}
+
 /** Video ko'rinishidagi GIF (mp4): ovozsiz, cheksiz takrorlanadi. Baytlar vaqtinchalik faylga yoziladi. */
 @Composable
 private fun LoopingVideo(bytes: ByteArray, key: String, modifier: Modifier, sound: Boolean = false) {
@@ -95,10 +103,17 @@ private fun LoopingVideo(bytes: ByteArray, key: String, modifier: Modifier, soun
         androidx.media3.exoplayer.ExoPlayer.Builder(ctx.applicationContext).build().apply {
             repeatMode = androidx.media3.common.Player.REPEAT_MODE_ONE
             volume = 0f
+            // Ovozli GIF boshqa ovozlarni (video, ovozli xabar) to'xtatib qo'ymasin.
+            setAudioAttributes(androidx.media3.common.AudioAttributes.Builder().setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MOVIE).setUsage(androidx.media3.common.C.USAGE_MEDIA).build(), false)
+            trackSelectionParameters = trackSelectionParameters.buildUpon().setTrackTypeDisabled(androidx.media3.common.C.TRACK_TYPE_AUDIO, true).build()
         }
     }
     DisposableEffect(player) { onDispose { player.release() } }
-    LaunchedEffect(sound) { player.volume = if (sound) 1f else 0f }
+    LaunchedEffect(sound) {
+        // Ovoz yo'q GIFda audio yo'li butunlay o'chiriladi (faqat ovozni 0 qilish yetmasligi mumkin).
+        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().setTrackTypeDisabled(androidx.media3.common.C.TRACK_TYPE_AUDIO, !sound).build()
+        player.volume = if (sound) 1f else 0f
+    }
     LaunchedEffect(key) {
         val f = withContext(Dispatchers.IO) {
             val dir = java.io.File(ctx.cacheDir, "aru_gif").apply { mkdirs() }
