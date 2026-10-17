@@ -122,7 +122,6 @@ fun StorageScreen(onBack: () -> Unit) {
         val list = listOf(
             Slice(VIDEO, dirBytes(File(files, "video_byte_cache"))),
             Slice(POSTER, dirBytes(File(ctx.cacheDir, "aru_img"))),
-            Slice(FRAMES, dirBytes(File(files, "aru_thumb"))),
             Slice(PACKS, dirBytes(File(files, "aru_packs"))),
             Slice(TEMP, ctx.cacheDir.listFiles().orEmpty().filter { it.name != "aru_img" }.sumOf { dirBytes(it) }),
         ).filter { it.bytes > 0 }.sortedByDescending { it.bytes }
@@ -141,7 +140,6 @@ fun StorageScreen(onBack: () -> Unit) {
         for (l in labels) when (l) {
             VIDEO -> AppServices.downloads.wipeAll()
             POSTER -> AppServices.images.clearDisk()
-            FRAMES -> AppServices.thumbs.clear()
             PACKS -> AppServices.packs.clearCache()
             TEMP -> ctx.cacheDir.listFiles().orEmpty().filter { it.name != "aru_img" }.forEach { it.deleteRecursively() }
         }

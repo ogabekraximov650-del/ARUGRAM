@@ -94,9 +94,11 @@ fun HistoryAnimeList(items: List<HistoryItem>, pad: Dp, onOpenAnime: (HistoryIte
 /** To'xtagan joydagi kadr; tayyor bo'lguncha (yoki yasalmasa) bo'lim posteri turadi. */
 @Composable
 fun HistoryFrame(item: HistoryItem, modifier: Modifier = Modifier) {
-    var bmp by remember(item.videoUrl, item.positionMs) { mutableStateOf(AppServices.thumbs.peek(item)) }
-    androidx.compose.runtime.LaunchedEffect(item.videoUrl, item.positionMs) {
-        if (bmp == null) bmp = AppServices.thumbs.load(item)
+    // Kalit — qism shaxsi (joy yoki video manzili o'zgarganda kadr miltillamaydi/yo'qolmaydi).
+    var bmp by remember(item.animeId, item.seasonId, item.episodeNo, item.videoUrl) { mutableStateOf(AppServices.thumbs.peek(item)) }
+    androidx.compose.runtime.LaunchedEffect(item.animeId, item.seasonId, item.episodeNo, item.positionMs, item.videoUrl) {
+        if (bmp == null) bmp = AppServices.thumbs.cached(item)
+        AppServices.thumbs.load(item)?.let { bmp = it }
     }
     Box(modifier) {
         TgImage(item.photoUrl, Modifier.fillMaxSize(), maxPx = 720)

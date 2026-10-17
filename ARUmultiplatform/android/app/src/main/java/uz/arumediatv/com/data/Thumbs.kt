@@ -43,9 +43,27 @@ class ThumbStore(context: Context, private val tg: TelegramService, private val 
     private fun videoKey(item: HistoryItem): String =
         item.videoUrl.substringBefore('?').substringAfterLast('/').replace(Regex("[^A-Za-z0-9_.-]"), "_")
 
-    fun keyOf(item: HistoryItem): String = "${videoKey(item)}_${item.positionMs}"
+    /** Qism shaxsi: server `video_url` ni o'zgartirsa ham kadr yo'qolmasin. Chat videolari (anime yo'q) — fayl nomi bo'yicha. */
+    private fun identity(item: HistoryItem): String =
+        if (item.animeId == 0L && item.seasonId == 0L && item.episodeNo == 0) videoKey(item) else "${item.animeId}_${item.seasonId}_${item.episodeNo}"
 
-    fun peek(item: HistoryItem): Bitmap? = if (item.videoUrl.isEmpty()) null else mem.get(keyOf(item))
+    fun keyOf(item: HistoryItem): String = "${identity(item)}_${item.positionMs}"
+
+    /** Shu qismning diskdagi ENG YANGI kadri fayli (joyi farq qilsa ham — posterdan yaxshi). */
+    private fun latestFile(identity: String): File? {
+        val prefix = "thumb_${identity}_"
+        return dir.listFiles()?.filter { it.name.startsWith(prefix) }?.maxByOrNull { it.lastModified() }
+    }
+
+    fun peek(item: HistoryItem): Bitmap? = mem.get(keyOf(item)) ?: mem.get("latest:" + identity(item))
+
+    /** Diskdan tayyor kadr (aniq joy, bo'lmasa shu qismning eng yangisi) — tarmoq va navbatsiz, darhol. */
+    suspend fun cached(item: HistoryItem): Bitmap? = withContext(Dispatchers.IO) {
+        fromDisk(keyOf(item))?.let { return@withContext it.also { b -> mem.put(keyOf(item), b) } }
+        val f = latestFile(identity(item)) ?: return@withContext null
+        val b = try { decodeSmall(SecureStore.open(f.readBytes())) } catch (_: Exception) { null }
+        b?.also { mem.put("latest:" + identity(item), it) }
+    }
 
     /** Kadr (xotira -> disk -> yasash). `null` — yasab bo'lmadi: chaqiruvchi posterni ko'rsatadi. */
     suspend fun load(item: HistoryItem): Bitmap? {
@@ -89,10 +107,10 @@ class ThumbStore(context: Context, private val tg: TelegramService, private val 
     private fun fromDisk(key: String): Bitmap? {
         val f = file(key)
         if (!f.exists()) return null
+        // Kadr HECH QACHON o'chirilmaydi (o'qib bo'lmasa ham): yangisi yasalganda shu fayl ustidan yoziladi.
         return try {
             decodeSmall(SecureStore.open(f.readBytes()))
         } catch (_: Exception) {
-            f.delete()
             null
         }
     }
@@ -105,29 +123,16 @@ class ThumbStore(context: Context, private val tg: TelegramService, private val 
         val src = item.thumbUrl.ifEmpty { item.videoUrl }
         val source = if (cache.isComplete(src)) src else tg.playUrl(src)
         val bytes = if (source != null) grab(source, item.positionMs) else null
-        if (bytes == null) return anyOfVideo(videoKey(item))
+        if (bytes == null) return null
         try {
             f.writeBytes(SecureStore.seal(bytes))
         } catch (_: Exception) {
         }
         // Shu videoning eski kadrlari endi kerak emas.
-        val prefix = "thumb_${videoKey(item)}_"
+        val prefix = "thumb_${identity(item)}_"
         dir.listFiles()?.forEach { if (it.name.startsWith(prefix) && it.name != f.name) it.delete() }
+        mem.remove("latest:" + identity(item))
         return decodeSmall(bytes)
-    }
-
-    /** Shu videoning diskdagi ISTALGAN kadri (yangisini yasab bo'lmasa — posterdan yaxshi). */
-    private fun anyOfVideo(vk: String): Bitmap? {
-        val prefix = "thumb_${vk}_"
-        for (f in dir.listFiles().orEmpty()) {
-            if (!f.name.startsWith(prefix)) continue
-            try {
-                val plain = SecureStore.open(f.readBytes())
-                decodeSmall(plain)?.let { return it }
-            } catch (_: Exception) {
-            }
-        }
-        return null
     }
 
     private suspend fun grab(source: String, ms: Long): ByteArray? = withContext(Dispatchers.IO) {
