@@ -337,6 +337,18 @@ fun SeasonScreen(
             }
         }
     }
+    // Aylantirish tugagach tizim panellari ba'zan qaytib chiqadi: qayta yashiramiz.
+    LaunchedEffect(fullscreen) {
+        if (!fullscreen) return@LaunchedEffect
+        val w = ctx.findActivity()?.window ?: return@LaunchedEffect
+        repeat(4) {
+            delay(500)
+            WindowCompat.getInsetsController(w, w.decorView).apply {
+                hide(WindowInsetsCompat.Type.systemBars())
+                systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            }
+        }
+    }
     BackHandler(enabled = fullscreen) { fullscreen = false }
     BackHandler(enabled = !fullscreen, onBack = onBack)
 

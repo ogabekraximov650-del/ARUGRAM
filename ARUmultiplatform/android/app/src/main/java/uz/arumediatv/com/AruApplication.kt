@@ -9,6 +9,13 @@ import kotlinx.coroutines.launch
 class AruApplication : Application() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (!AppServices.ready) return
+        if (level >= TRIM_MEMORY_UI_HIDDEN) AppServices.images.trim(true)
+        else if (level >= TRIM_MEMORY_RUNNING_LOW) AppServices.images.trim(false)
+    }
+
     override fun onCreate() {
         super.onCreate()
         AppServices.init(this)
