@@ -475,7 +475,13 @@ fun SeasonScreen(
                             else info = repo.setFavorite(season, info?.isFav != true, info ?: SeasonInfo(org.json.JSONObject(), 0.0, 0, false))
                         },
                     )
-                    1 -> EpisodesTab(
+                    1 -> if (DialPrefs.mode != 0 && canWatch && episodes.isNotEmpty()) EpisodeDialTab(
+                        episodes = episodes, currentId = current?.id, player = player, left = DialPrefs.mode == 2,
+                        hasPrev = idx > 0, hasNext = idx >= 0 && idx + 1 < sorted.size,
+                        onPlay = { e -> play(e) },
+                        onPrev = { if (idx > 0) play(sorted[idx - 1], resumePlaying = player.exo.playWhenReady) },
+                        onNext = { if (idx >= 0 && idx + 1 < sorted.size) play(sorted[idx + 1], resumePlaying = player.exo.playWhenReady) },
+                    ) else EpisodesTab(
                         canWatch = canWatch, loading = loadingEps, episodes = episodes,
                         currentId = current?.id, currentQuality = chosenQuality,
                         onPlay = { e, q ->
@@ -496,7 +502,7 @@ fun SeasonScreen(
             }
 
             // ── Qism almashtirish (pastda, bosh barmoq zonasida): [⏮ 3-qism]  [5-qism ⏭] ──
-            if (pager.currentPage == 1 && !collapsed && sorted.isNotEmpty()) {
+            if (DialPrefs.mode == 0 && pager.currentPage == 1 && !collapsed && sorted.isNotEmpty()) {
                 val prev = if (idx > 0) sorted[idx - 1] else null
                 val next = if (idx >= 0 && idx + 1 < sorted.size) sorted[idx + 1] else null
                 val bs = RoundedCornerShape(20.dp)

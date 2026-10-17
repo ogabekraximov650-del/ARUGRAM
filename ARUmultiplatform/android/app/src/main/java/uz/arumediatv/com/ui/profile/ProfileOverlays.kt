@@ -31,6 +31,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import uz.arumediatv.com.ui.season.DialPrefs
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -277,8 +278,38 @@ fun SettingsScreen(onBack: () -> Unit) {
                 "Bepul bo'limlar uchun ilova Telegram hisobingiz bilan majburiy kanallarga qo'shiladi. O'chirsangiz, bepul bo'lim ochilganda ruxsat yana so'raladi.",
                 checked = u?.chanConsent ?: false, enabled = u != null,
             ) { on -> AppServices.gate.setConsent(on) }
+            Spacer(Modifier.height(10.dp))
+            SectionLabel("QISMLAR BOSHQARUVI")
+            Text(
+                "Bo'lim sahifasidagi \"Qismlar\" tabida qismlarni almashtirish usuli. Istalgan payt o'zgartirishingiz mumkin.",
+                color = AruColors.TextFaint, fontSize = 12.sp, lineHeight = 18.sp, modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp),
+            )
+            ChoiceRow("Oddiy (hozirgi)", "Pastda katta \"oldingi / keyingi qism\" tugmalari, qismlar ro'yxati.", DialPrefs.mode == 0) { DialPrefs.set(0) }
+            ChoiceRow("Yarim aylana — o'ngda", "Ekranning o'ng chetida: tashqarida qism raqamlari, o'rtada 5 soniyalik vaqt halqasi, ichida tugmalar.", DialPrefs.mode == 1) { DialPrefs.set(1) }
+            ChoiceRow("Yarim aylana — chapda", "Xuddi shu boshqaruv, chap chetda (chap qo'l uchun).", DialPrefs.mode == 2) { DialPrefs.set(2) }
             Spacer(Modifier.height(32.dp))
         }
+    }
+}
+
+@Composable
+private fun ChoiceRow(title: String, hint: String, selected: Boolean, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(16.dp)
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 5.dp).clip(shape)
+            .background(if (selected) AruColors.AccentTint else AruColors.Card)
+            .border(1.dp, if (selected) AruColors.Accent.copy(alpha = 0.6f) else AruColors.Border, shape)
+            .clickable(onClick = onClick).padding(start = 16.dp, end = 12.dp, top = 12.dp, bottom = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, color = if (selected) AruColors.Accent2 else Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Text(hint, color = AruColors.TextDim, fontSize = 12.sp, lineHeight = 16.sp, modifier = Modifier.padding(top = 2.dp))
+        }
+        androidx.compose.material3.RadioButton(
+            selected = selected, onClick = onClick,
+            colors = androidx.compose.material3.RadioButtonDefaults.colors(selectedColor = AruColors.Accent),
+        )
     }
 }
 
