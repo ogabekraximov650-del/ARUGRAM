@@ -270,6 +270,14 @@ class WatchProgress(context: Context) {
         return if (p < 3000 || p > d - 5000) 0 else p
     }
 
+    /** (pozitsiya, davomiylik) ms — saqlangan bo'lsa. */
+    fun snapshot(url: String): Pair<Long, Long>? {
+        val v = prefs.getString(Names.fileNameOf(url), null) ?: return null
+        val p = v.substringBefore('/').toLongOrNull() ?: return null
+        val d = v.substringAfter('/').toLongOrNull() ?: return null
+        return if (d <= 0) null else p to d
+    }
+
     /** 0..1 (qism ro'yxatidagi chiziq uchun). */
     fun fractionOf(url: String): Float {
         val v = prefs.getString(Names.fileNameOf(url), null) ?: return 0f

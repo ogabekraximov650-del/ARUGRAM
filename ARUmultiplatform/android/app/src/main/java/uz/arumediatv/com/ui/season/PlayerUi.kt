@@ -34,6 +34,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -142,6 +143,7 @@ fun PlayerControls(
     onEpisodeList: () -> Unit,
     onToggleLock: () -> Unit,
     onRetry: () -> Unit,
+    onControlsShown: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var visible by remember { mutableStateOf(true) }
@@ -164,6 +166,7 @@ fun PlayerControls(
     }
     val errored = player.error != null
     val showAll = (visible || !player.playing || errored) && !locked
+    LaunchedEffect(showAll) { onControlsShown(showAll) }
     val busy = player.buffering || (!player.ready && !player.ended) || dragMs != null
     val s = if (fullscreen) 1.15f else 1f
 
@@ -197,7 +200,7 @@ fun PlayerControls(
         // Yuqori qator
         if (fullscreen) {
             AnimatedVisibility(showAll, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.TopCenter)) {
-                Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().windowInsetsPadding(androidx.compose.foundation.layout.WindowInsets.statusBars).padding(start = 12.dp, end = 12.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.clip(CircleShape).clickable(onClick = onBack).padding(8.dp)) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "Orqaga", tint = Color.White, modifier = Modifier.size(24.dp))
                     }

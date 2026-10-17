@@ -25,6 +25,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.ui.draw.alpha
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -221,6 +225,16 @@ private fun InfoRow(label: String, value: String) {
 
 // ══════════════════════════ QISMLAR ══════════════════════════
 
+private const val RANGE = 50
+
+private fun clockMs(ms: Long): String {
+    val t = (ms / 1000).coerceAtLeast(0)
+    val h = t / 3600
+    val m = (t % 3600) / 60
+    val sec = t % 60
+    return if (h > 0) String.format(java.util.Locale.US, "%d:%02d:%02d", h, m, sec) else String.format(java.util.Locale.US, "%d:%02d", m, sec)
+}
+
 @Composable
 fun EpisodesTab(
     canWatch: Boolean,
@@ -237,64 +251,142 @@ fun EpisodesTab(
         loading && episodes.isEmpty() -> LoadingBox()
         episodes.isEmpty() -> EmptyState(Icons.Filled.PlayArrow, "Qismlar topilmadi")
         else -> {
-            val desc = remember(episodes) { episodes.sortedByDescending { it.number } }
+            val asc = remember(episodes) { episodes.sortedBy { it.number } }
+            var newestFirst by rememberSaveable { mutableStateOf(true) }
+            val chunks = remember(asc) { asc.chunked(RANGE) }
+            val curChunk = remember(asc, currentId) { chunks.indexOfFirst { c -> c.any { it.id == currentId } }.coerceAtLeast(0) }
+            var chunk by rememberSaveable { mutableStateOf(-1) }
+            // Qism almashganda (pastdagi tugmalar yoki avto) tegishli oraliq o'zi tanlanadi.
+            androidx.compose.runtime.LaunchedEffect(currentId, chunks.size) { chunk = curChunk }
+            val sel = if (chunks.size > 1) chunk.coerceIn(0, chunks.size - 1) else 0
+            val shown = remember(chunks, sel, newestFirst) {
+                val l = chunks.getOrElse(sel) { asc }
+                if (newestFirst) l.asReversed() else l
+            }
             val ls = androidx.compose.foundation.lazy.rememberLazyListState()
-            // Qism almashganda (⏮/⏭ yoki avto) ro'yxat shu qismga suriladi (Flutter `_centerOnEpisode`).
-            androidx.compose.runtime.LaunchedEffect(currentId, desc.size) {
-                val i = desc.indexOfFirst { it.id == currentId }
+            androidx.compose.runtime.LaunchedEffect(currentId, shown) {
+                val i = shown.indexOfFirst { it.id == currentId }
                 if (i >= 0) ls.animateScrollToItem((i - 1).coerceAtLeast(0))
             }
-            LazyColumn(Modifier.fillMaxSize(), state = ls, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                items(desc, key = { it.id }) { e -> EpisodeTile(e, e.id == currentId, onPlay, onDeleted) }
+            Column(Modifier.fillMaxSize()) {
+                androidx.compose.foundation.lazy.LazyRow(
+                    contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(bottom = 8.dp),
+                ) {
+                    if (chunks.size > 1) {
+                        items(chunks.size) { i ->
+                            val c = chunks[i]
+                            ChipBtn("${c.first().number}–${c.last().number}", i == sel) { chunk = i }
+                        }
+                    }
+                    item { ChipBtn(if (newestFirst) "⇅ Yangi" else "⇅ Eski", false) { newestFirst = !newestFirst } }
+                }
+                LazyColumn(Modifier.fillMaxSize(), state = ls, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(shown, key = { it.id }) { e -> EpisodeTile(e, e.id == currentId, onPlay, onDeleted) }
+                }
             }
         }
     }
 }
 
 @Composable
+private fun ChipBtn(text: String, on: Boolean, onClick: () -> Unit) {
+    val sh = RoundedCornerShape(20.dp)
+    Box(
+        Modifier.height(40.dp).clip(sh)
+            .background(if (on) AruColors.AccentTint else AruColors.Card)
+            .border(1.dp, if (on) AruColors.Accent else AruColors.Border, sh)
+            .clickable(onClick = onClick).padding(horizontal = 14.dp),
+        contentAlignment = Alignment.Center,
+    ) { Text(text, color = if (on) AruColors.Accent2 else Color.White.copy(alpha = 0.8f), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1) }
+}
+
+@Composable
 private fun EpisodeTile(e: Episode, isCurrent: Boolean, onPlay: (Episode, String?) -> Unit, onDeleted: (Episode, String) -> Unit) {
     val shape = RoundedCornerShape(16.dp)
-    val frac = AppServices.progress.fractionOf(e.urlFor(null))
     var expanded by remember { mutableStateOf(false) }
     val dm = AppServices.downloads
     DisposableEffect(expanded) {
         if (expanded) dm.watch(e, e.urls.values.toSet())
         onDispose { dm.unwatch(e) }
     }
-    Column(
-        Modifier.fillMaxWidth().clip(shape)
-            .background(if (isCurrent) AruColors.AccentTint else AruColors.Card)
-            .border(1.dp, if (isCurrent) AruColors.Accent.copy(alpha = 0.5f) else AruColors.Border, shape)
-            .clickable { onPlay(e, null) }.padding(horizontal = 14.dp, vertical = 14.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier.size(48.dp).clip(RoundedCornerShape(13.dp)).background(if (isCurrent) AruColors.Accent else AruColors.CardAlt),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (isCurrent) Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(24.dp))
-                else Text("${e.number}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-            }
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text("${e.number}-qism", color = if (isCurrent) AruColors.Accent2 else Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                if (e.name.isNotBlank()) Text(e.name, color = AruColors.TextDim, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            if (e.views > 0) Text("${formatCount(e.views)} ko'rish", color = AruColors.TextFaint, fontSize = 11.sp)
-            Box(
-                Modifier.size(48.dp).clip(CircleShape).clickable { expanded = !expanded },
-                contentAlignment = Alignment.Center,
-            ) { Text(if (expanded) "▴" else "▾", color = AruColors.TextDim, fontSize = 22.sp) }
+    // Ko'rish holati: eng ko'p ko'rilgan sifat bo'yicha.
+    val snap = remember(e.id, isCurrent) { e.urls.values.filter { it.isNotEmpty() }.mapNotNull { AppServices.progress.snapshot(it) }.maxByOrNull { it.first } }
+    val frac = snap?.let { if (it.second > 0) (it.first.toFloat() / it.second).coerceIn(0f, 1f) else 0f } ?: 0f
+    val seen = !isCurrent && snap != null && snap.first > snap.second - 5000
+    val status = when {
+        snap != null && snap.first >= 3000 && snap.first <= snap.second - 5000 -> "${clockMs(snap.first)} dan davom etasiz"
+        seen -> "Ko'rildi ✓"
+        isCurrent -> "Hozir ijro etilmoqda"
+        else -> "Ko'rilmagan"
+    }
+    // Yuklash holati (barcha sifatlar bo'yicha): to'liq / yuklanmoqda (foiz) / yo'q.
+    val all by dm.stats.collectAsStateWithLifecycle()
+    var done = false
+    var active = false
+    var pct = 0
+    e.urls.values.filter { it.isNotEmpty() }.forEach { u ->
+        val st = all[u]
+        if (st != null) {
+            if (st.complete) done = true
+            if (st.downloading || st.queued) { active = true; pct = maxOf(pct, st.percent) }
         }
-        if (frac > 0f) {
-            Spacer(Modifier.height(8.dp))
-            Box(Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(2.dp)).background(Color.White.copy(alpha = 0.1f))) {
+    }
+    if (!done && !active) done = e.urls.values.any { it.isNotEmpty() && AppServices.videoCache.isComplete(it) }
+    Column(
+        Modifier.fillMaxWidth().alpha(if (seen) 0.6f else 1f).clip(shape)
+            .background(if (isCurrent) AruColors.AccentTint else AruColors.Card)
+            .border(1.dp, if (isCurrent) AruColors.Accent.copy(alpha = 0.5f) else AruColors.Border, shape),
+    ) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 72.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                Modifier.weight(1f).clickable { onPlay(e, null) }.padding(start = 12.dp, top = 12.dp, bottom = 12.dp).heightIn(min = 48.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    Modifier.size(48.dp).clip(RoundedCornerShape(13.dp)).background(if (isCurrent) AruColors.Accent else AruColors.CardAlt),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (isCurrent) Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(26.dp))
+                    else Text("${e.number}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("${e.number}-qism", color = if (isCurrent) AruColors.Accent2 else Color.White, fontSize = 15.5.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                    Text(
+                        if (e.name.isNotBlank()) "$status · ${e.name}" else status,
+                        color = AruColors.TextDim, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            // Yuklash holati: bosilsa sifatlar ochiladi (adashib katta yuklash boshlanmasin).
+            Box(Modifier.size(48.dp).clip(CircleShape).clickable { expanded = !expanded }, contentAlignment = Alignment.Center) {
+                when {
+                    done -> Icon(Icons.Filled.Check, null, tint = Color(0xFF4ADE80), modifier = Modifier.size(24.dp))
+                    active -> Box(Modifier.size(38.dp), contentAlignment = Alignment.Center) {
+                        androidx.compose.material3.CircularProgressIndicator(
+                            progress = { pct / 100f }, modifier = Modifier.fillMaxSize(), color = AruColors.Accent2,
+                            trackColor = Color.White.copy(alpha = 0.12f), strokeWidth = 3.dp,
+                        )
+                        Text("$pct", color = AruColors.Accent2, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                    else -> Icon(AruIcons.Download, null, tint = Color.White.copy(alpha = 0.6f), modifier = Modifier.size(24.dp))
+                }
+            }
+            Box(Modifier.padding(end = 4.dp).size(48.dp).clip(CircleShape).clickable { expanded = !expanded }, contentAlignment = Alignment.Center) {
+                Text(if (expanded) "▴" else "▾", color = AruColors.TextDim, fontSize = 22.sp)
+            }
+        }
+        if (frac > 0f && !seen) {
+            Box(Modifier.padding(horizontal = 12.dp).fillMaxWidth().height(3.dp).clip(RoundedCornerShape(2.dp)).background(Color.White.copy(alpha = 0.1f))) {
                 Box(Modifier.fillMaxWidth(frac).fillMaxHeight().background(Brush.horizontalGradient(listOf(AruColors.Accent, AruColors.Accent2))))
             }
+            Spacer(Modifier.height(10.dp))
         }
         if (expanded) {
-            Spacer(Modifier.height(8.dp))
-            e.qualities.forEach { q -> QualityRow(e, q, { onPlay(e, q) }, { onDeleted(e, q) }) }
+            Column(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 10.dp)) {
+                e.qualities.forEach { q -> QualityRow(e, q, { onPlay(e, q) }, { onDeleted(e, q) }) }
+            }
         }
     }
 }

@@ -340,17 +340,20 @@ fun SeasonScreen(
             }
         }
     }
-    // Aylantirish tugagach tizim panellari ba'zan qaytib chiqadi: qayta yashiramiz.
-    LaunchedEffect(fullscreen) {
+    // To'liq ekranda tizim panellari (vaqt, quvvat, tugmalar) pleyer tugmalari bilan birga chiqadi va birga yashirinadi.
+    var barsShown by remember { mutableStateOf(false) }
+    LaunchedEffect(fullscreen, barsShown) {
         if (!fullscreen) return@LaunchedEffect
         val w = ctx.findActivity()?.window ?: return@LaunchedEffect
-        repeat(4) {
-            delay(500)
+        fun apply() {
             WindowCompat.getInsetsController(w, w.decorView).apply {
-                hide(WindowInsetsCompat.Type.systemBars())
                 systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                if (barsShown) show(WindowInsetsCompat.Type.systemBars()) else hide(WindowInsetsCompat.Type.systemBars())
             }
         }
+        apply()
+        // Aylantirish tugagach tizim panellari ba'zan o'zi qaytadi: yashirin bo'lsa qayta yashiramiz.
+        if (!barsShown) repeat(3) { delay(500); apply() }
     }
     BackHandler(enabled = fullscreen) { fullscreen = false }
     BackHandler(enabled = !fullscreen, onBack = onBack)
@@ -414,6 +417,7 @@ fun SeasonScreen(
                     onQuality = { showSettings = true },
                     onEpisodeList = { showEpisodeList = true },
                     onToggleLock = { locked = !locked },
+                    onControlsShown = { barsShown = it },
                     onRetry = { ep?.let { e -> play(e, resumeAt = player.positionMs, preferWorker = !viaTelegram) } },
                     modifier = Modifier.fillMaxSize(),
                 )
@@ -456,22 +460,6 @@ fun SeasonScreen(
             }
             Spacer(Modifier.height(6.dp))
 
-            // ── Qism almashtirish: [⏮]  N-qism  [⏭] ──
-            Row(
-                Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(AruColors.Card).border(1.dp, AruColors.Border, RoundedCornerShape(14.dp)).padding(horizontal = 6.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                NavBtn(AruIcons.SkipPrevious, "Oldingi", true, idx > 0) { if (idx > 0) play(sorted[idx - 1], resumePlaying = player.exo.playWhenReady) }
-                Box(Modifier.weight(0.8f), contentAlignment = Alignment.Center) {
-                    Text(
-                        if (idx >= 0) "${sorted[idx].number}-qism" else if (sorted.isEmpty()) "—" else "Qismni tanlang",
-                        color = if (idx >= 0) Color.White else Color.White.copy(alpha = 0.54f), fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1,
-                    )
-                }
-                NavBtn(AruIcons.SkipNext, "Keyingi", false, idx >= 0 && idx + 1 < sorted.size) { if (idx >= 0 && idx + 1 < sorted.size) play(sorted[idx + 1], resumePlaying = player.exo.playWhenReady) }
-            }
-            Spacer(Modifier.height(6.dp))
             }
 
             androidx.compose.foundation.pager.HorizontalPager(pager, Modifier.weight(1f).fillMaxWidth(), beyondViewportPageCount = if (uz.arumediatv.com.core.Perf.low) 0 else 1) { page ->
@@ -504,6 +492,21 @@ fun SeasonScreen(
                     )
                     2 -> SeasonsTab(seasons = seasons, current = season, onOpen = onOpenSeason)
                     else -> CommentsTab(season = season, onOpenProfile = onOpenProfile, onLogin = onLogin, onPacks = onPacks, expanded = commentsExpanded, onExpandedChange = { commentsExpanded = it })
+                }
+            }
+
+            // ── Qism almashtirish (pastda, bosh barmoq zonasida): [⏮ 3-qism]  [5-qism ⏭] ──
+            if (pager.currentPage == 1 && !collapsed && sorted.isNotEmpty()) {
+                val prev = if (idx > 0) sorted[idx - 1] else null
+                val next = if (idx >= 0 && idx + 1 < sorted.size) sorted[idx + 1] else null
+                val bs = RoundedCornerShape(20.dp)
+                Row(
+                    Modifier.padding(horizontal = 12.dp).padding(top = 6.dp, bottom = 10.dp).fillMaxWidth().clip(bs)
+                        .background(AruColors.Card).border(1.dp, AruColors.Border, bs).padding(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    NavBtn(AruIcons.SkipPrevious, prev?.let { "${it.number}-qism" } ?: "Oldingi", true, false, prev != null) { prev?.let { play(it, resumePlaying = player.exo.playWhenReady) } }
+                    NavBtn(AruIcons.SkipNext, next?.let { "${it.number}-qism" } ?: "Keyingi", false, true, next != null) { next?.let { play(it, resumePlaying = player.exo.playWhenReady) } }
                 }
             }
         }
@@ -584,20 +587,20 @@ private fun NowStat(icon: androidx.compose.ui.graphics.vector.ImageVector, text:
 }
 
 @Composable
-private fun RowScope.NavBtn(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, iconFirst: Boolean, enabled: Boolean, onClick: () -> Unit) {
+private fun RowScope.NavBtn(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, iconFirst: Boolean, primary: Boolean, enabled: Boolean, onClick: () -> Unit) {
     val shape = RoundedCornerShape(14.dp)
-    val tint = Color.White.copy(alpha = if (enabled) 0.95f else 0.25f)
+    val tint = Color.White.copy(alpha = if (enabled) 0.97f else 0.25f)
+    val bg = if (primary && enabled) AruColors.Accent else Color.White.copy(alpha = if (enabled) 0.10f else 0.035f)
+    val br = if (primary && enabled) AruColors.Accent else Color.White.copy(alpha = if (enabled) 0.20f else 0.06f)
     Row(
-        Modifier.weight(1f).height(52.dp).clip(shape)
-            .background(Color.White.copy(alpha = if (enabled) 0.10f else 0.035f))
-            .border(1.dp, Color.White.copy(alpha = if (enabled) 0.20f else 0.06f), shape)
+        Modifier.weight(1f).height(56.dp).clip(shape).background(bg).border(1.dp, br, shape)
             .clickable(enabled = enabled, onClick = onClick),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (iconFirst) Icon(icon, null, tint = tint, modifier = Modifier.size(28.dp))
-        Text(label, color = tint, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, modifier = Modifier.padding(horizontal = 4.dp))
-        if (!iconFirst) Icon(icon, null, tint = tint, modifier = Modifier.size(28.dp))
+        if (iconFirst) Icon(icon, null, tint = tint, modifier = Modifier.size(26.dp))
+        Text(label, color = tint, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, modifier = Modifier.padding(horizontal = 6.dp))
+        if (!iconFirst) Icon(icon, null, tint = tint, modifier = Modifier.size(26.dp))
     }
 }
 
