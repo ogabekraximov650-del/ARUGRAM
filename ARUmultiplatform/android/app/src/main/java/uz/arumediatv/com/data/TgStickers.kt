@@ -35,7 +35,7 @@ data class TgDoc(val id: Long, val hash: Long, val ref: String, val dc: Int, val
     val isVideo: Boolean get() = kind == "webm" || kind == "mp4" || kind == "gif"
 }
 
-data class TgSet(val id: Long, val hash: Long, val title: String, val count: Int, val thumbDoc: Long, val thumbVer: Int = 0, val thumbDc: Int = 2)
+data class TgSet(val id: Long, val hash: Long, val title: String, val count: Int, val thumbDoc: Long, val thumbVer: Int = 0, val thumbDc: Int = 2, val short: String = "")
 
 class TgStickerStore(ctx: Context) {
     init { TgPerf.init(ctx) }
@@ -148,7 +148,7 @@ class TgStickerStore(ctx: Context) {
     suspend fun sets(kind: String): List<TgSet> = sets[kind] ?: withContext(Dispatchers.IO) {
         val r = listJson("sets_$kind", "sets:$kind") ?: return@withContext emptyList()
         val a = r.optJSONArray("sets") ?: return@withContext emptyList()
-        (0 until a.length()).map { val o = a.getJSONObject(it); TgSet(o.optLong("id"), o.optLong("hash"), o.optString("title"), o.optInt("count"), o.optLong("thumb_doc"), o.optInt("thumb_ver"), o.optInt("thumb_dc", 2).let { if (it == 0) 2 else it }) }
+        (0 until a.length()).map { val o = a.getJSONObject(it); TgSet(o.optLong("id"), o.optLong("hash"), o.optString("title"), o.optInt("count"), o.optLong("thumb_doc"), o.optInt("thumb_ver"), o.optInt("thumb_dc", 2).let { if (it == 0) 2 else it }, o.optString("short")) }
             .also { if (it.isNotEmpty()) sets[kind] = it }
     }
 
@@ -164,6 +164,11 @@ class TgStickerStore(ctx: Context) {
     /** Eskirgan havola uchun ro'yxatni qayta oladi. */
     private suspend fun refresh(d: TgDoc): TgDoc {
         val key = docKeyOf[d.id] ?: return d
+        if (key.startsWith("n")) {
+            docs.remove(key)
+            File(dir, "list_name_${key.substring(1)}").delete()
+            return nameDocs(key.substring(1)).firstOrNull { it.id == d.id } ?: d
+        }
         docs.remove(key)
         File(dir, if (key == "gifs") "list_gifs" else "list_set_${key.removePrefix("s")}").delete()
         val l = if (key == "gifs") gifs() else {
@@ -245,22 +250,19 @@ class TgStickerStore(ctx: Context) {
         } finally { counter.decrementAndGet() }
     }
 
-    /**
-     * Chatga/izohga yuborish uchun fayl: animatsiyali WebP (bo'lsa/aylantirsa bo'ladi), aks holda statik rasm.
-     * Natija: (baytlar, kengaytma, mime) yoki `null`.
-     */
-    suspend fun exportForSend(d: TgDoc): Triple<ByteArray, String, String>? {
-        val b = (if (d.isTgs || d.isGifLike) anim(d) else null)
-            ?: (if (d.kind == "webp") bytes(d, false) else bytes(d, true))
-            ?: return null
-        val isJpg = b.size > 3 && b[0] == 0xFF.toByte() && b[1] == 0xD8.toByte()
-        val isPng = b.size > 3 && b[1] == 'P'.code.toByte() && b[2] == 'N'.code.toByte()
-        return when {
-            isJpg -> Triple(b, "jpg", "image/jpeg")
-            isPng -> Triple(b, "png", "image/png")
-            else -> Triple(b, "webp", "image/webp")
-        }
+    /** Hujjat qaysi (ochiq) to'plamdan ekanini bildiruvchi qisqa nom — stikerni boshqa foydalanuvchiga havola qilib yuborish uchun. */
+    fun shortOf(d: TgDoc): String? {
+        val key = docKeyOf[d.id] ?: return null
+        if (key.startsWith("n")) return key.substring(1)
+        return sets.values.flatten().firstOrNull { "s${it.id}" == key }?.short?.takeIf { it.isNotEmpty() }
     }
+
+    /** Ochiq nom bo'yicha to'plam hujjatlari (boshqa foydalanuvchi yuborgan stiker): o'z Telegram hisobimiz orqali olinadi. */
+    suspend fun nameDocs(short: String): List<TgDoc> = docs["n$short"] ?: withContext(Dispatchers.IO) {
+        docList(listJson("name_$short", "setname:$short")?.optJSONArray("docs")).also { remember("n$short", it) }
+    }
+
+    suspend fun resolveRef(short: String, docId: Long): TgDoc? = nameDocs(short).firstOrNull { it.id == docId }
 
     /** Oldindan tayyorlash: kichik rasm va (GIF/webm uchun) to'liq fayl diskka tushadi. */
     suspend fun prefetch(d: TgDoc) {

@@ -6660,6 +6660,8 @@ Hozircha: `.tgs` — faqat kichik rasm (2-bosqich: lottie-android + libwebp bila
 - GIF sahifasi `TgGifPage`: 2 ustunli staggered grid (w/h nisbati), atrofdagi 16 tasi oldindan (`prefetch`) diskka tushadi; PlayerView shutter shaffof.
 - Quvvat darajalari `data/TgPerf.kt` (0 kuchsiz / 1 o'rta / 2 kuchli: animatsiyali qatorlar 1/2/2, video slot 1/3/5, WebP o'lchami/kadr soni). GIF (mp4) ham `TgAnim.videoToWebp` bilan animatsiyali WebP'ga aylantiriladi (Android 9+; bo'lmasa video). Surilayotganda animatsiya to'xtaydi (`rememberSettled`). GIF sahifasi — Telegramdagidek qatorlar (2–3 tadan, bir xil balandlik, eni nisbatga qarab). Emoji va stikerda o'rtadagi 2 qator animatsiya qiladi.
 
-### Telegram stiker/GIF'ni chatga va izohga yuborish
-- Bosilganda `exportForSend` (animatsiyali WebP yoki statik rasm) `tgm_<hisob>_<vaqt>.<ext>` nomi bilan kanalga yuklanadi (`tgUploadForSend`), xabar `media_type=sticker|gif`, `media_file=tgm_...` bilan ketadi. Worker (`lib.rs`: `tg_user_media`, `/api/tg/claim`, `comments_add`, chat yuborish) `tgm_<o'z id>_` nomini to'plam/obunasiz qabul qiladi; fayl `/api/tg/deliver` orqali hammaga ochiq (pk_ kabi). Ko'rsatish: `TgSentMedia` (animatsiyali WebP, Android 9+; pastda statik).
-- Emoji bosilsa oddiy Unicode emoji yozish maydoniga qo'shiladi (Telegram maxsus emojisi yuborilmaydi).
+### Telegram stikerini chatga va izohga yuborish (kanalga HECH NARSA yuklanmaydi)
+- Talab: kanalga yuklash yo'q, ortiqcha xarajat yo'q — hammasi Telegram serveri orqali. Xabarga faqat havola yoziladi: `media_type=sticker`, `media_file=tgs.<to'plam_qisqa_nomi>.<hujjat_id>` (worker `valid_tg_sticker_ref`: to'plam/obuna talab qilinmaydi, fayl yo'q).
+- Qabul qiluvchi ilova stikerni o'z Telegram hisobi orqali oladi: Rust `setname:<nom>` (`GetStickerSet` ochiq nom bo'yicha) -> hujjat -> o'z sessiyasida yuklaydi -> `TgRefSticker` (`.tgs` -> animatsiyali WebP, kesh). Telegram'ga ulanmagan foydalanuvchi ko'rmaydi.
+- GIF yuborilmaydi: saqlangan GIF'ning ochiq nomi yo'q, boshqa hisob uni (fayl havolasi sender kontekstiga bog'langan) ishonchli ola olmaydi; kanalga yuklash esa taqiqlangan.
+- Emoji bosilsa oddiy Unicode emoji yozish maydoniga qo'shiladi.

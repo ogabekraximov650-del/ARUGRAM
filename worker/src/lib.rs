@@ -6801,6 +6801,14 @@ async fn needs_pack_sub(env: &Env, u: &Value, uses_pack: bool) -> bool {
     sub_until(env, u["id"].as_i64().unwrap_or(0)).await <= now_ms()
 }
 
+/// `tgs.<to'plam_nomi>.<hujjat_id>` — Telegram stikeriga havola (nom: harf/raqam/_, id: raqam).
+fn valid_tg_sticker_ref(v: &str) -> bool {
+    let Some(rest) = v.strip_prefix("tgs.") else { return false };
+    let Some((short, id)) = rest.rsplit_once('.') else { return false };
+    !short.is_empty() && short.len() <= 64 && short.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        && !id.is_empty() && id.len() <= 20 && id.chars().all(|c| c.is_ascii_digit())
+}
+
 const PACK_SUB_MSG: &str = "Foydalanuvchilar yasagan emoji, GIF va stikerlarni yuborish uchun obuna kerak";
 
 /// POST /api/comments — yangi izoh yoki javob.
@@ -6823,8 +6831,9 @@ async fn comments_add(mut req: Request, env: &Env, origin: &str) -> Result<Respo
     // stiker yoki GIF havolasi (`pk_<to'plam>_<element>`, `packs.rs`).
     let want_media = bare_name(b["media_file"].as_str().unwrap_or("")).trim().to_string();
     let want_type = b["media_type"].as_str().unwrap_or("");
-    // Telegram hisobidagi stiker/GIF (`tgm_<id>_...`, ilova yuklagan o'z fayli) — to'plam ham, obuna ham kerak emas.
-    let is_tgm = (want_type == "sticker" || want_type == "gif") && want_media.starts_with(&format!("tgm_{me}_"));
+    // Telegram stikeri (`tgs.<to'plam_nomi>.<hujjat_id>`): fayl hech qayerga yuklanmaydi — qabul qiluvchi uni
+    // o'z Telegram hisobi orqali (ochiq to'plam nomi bo'yicha) oladi. To'plam ham, obuna ham kerak emas.
+    let is_tgm = want_type == "sticker" && valid_tg_sticker_ref(&want_media);
     if needs_pack_sub(env, &u,
         (!want_media.is_empty() && !is_tgm && (want_type == "sticker" || want_type == "gif")) || body.contains("[pe:")).await
     {
@@ -7398,8 +7407,9 @@ async fn chat_send(mut req: Request, env: &Env, origin: &str) -> Result<Response
     // Stiker va GIF — ilovaning O'Z to'plamlaridan (`pk_<to'plam>_<element>`,
     // `packs.rs`): fayl yuklanmaydi, faqat mavjud to'plamga havola.
     let is_pack_media = want_type == "sticker" || want_type == "gif";
-    // Telegram hisobidagi stiker/GIF (`tgm_<id>_...`, ilova yuklagan o'z fayli) — to'plam ham, obuna ham kerak emas.
-    let is_tgm = is_pack_media && media_file.starts_with(&format!("tgm_{me}_"));
+    // Telegram stikeri (`tgs.<to'plam_nomi>.<hujjat_id>`): fayl hech qayerga yuklanmaydi — qabul qiluvchi uni
+    // o'z Telegram hisobi orqali (ochiq to'plam nomi bo'yicha) oladi. To'plam ham, obuna ham kerak emas.
+    let is_tgm = want_type == "sticker" && valid_tg_sticker_ref(&media_file);
     if needs_pack_sub(env, &u, (is_pack_media && !is_tgm) || body.contains("[pe:")).await {
         return json_resp(&json!({"error": PACK_SUB_MSG}), 402);
     }
@@ -10858,10 +10868,7 @@ async fn tg_user_media(env: &Env, msg: &Value) {
             || name.starts_with(&format!("orig_{uid}_"))
             // To'plamga qo'shiladigan element (admin ko'rib chiqquncha
             // kanalda vaqtincha turadi) — `packs.rs`.
-            || name.starts_with(&format!("pki_{uid}_"))
-            // Telegram hisobidagi stiker/GIF'ni chat yoki izohga yuborish (ilova uni
-            // yengil WebP qilib yuklaydi) — faqat O'Z nomi bilan.
-            || name.starts_with(&format!("tgm_{uid}_"));
+            || name.starts_with(&format!("pki_{uid}_"));
         if !own {
             return;
         }
@@ -14232,8 +14239,7 @@ async fn tg_route(mut req: Request, env: &Env, path: &str, method: Method) -> Re
             // (bo'sh bo'lsa). Admin — istalganiga.
             let own = name.starts_with(&format!("avatar_{me}_"))
                 || name.starts_with(&format!("chat_{me}_"))
-                || name.starts_with(&format!("pki_{me}_"))
-                || name.starts_with(&format!("tgm_{me}_"));
+                || name.starts_with(&format!("pki_{me}_"));
             let have = row["file_key"].as_str().unwrap_or("");
             if valid_file_key(&key) && (own || is_admin(&u)) && have.is_empty() {
                 turso_exec(env, "UPDATE tg_files SET file_key=? WHERE file_name=? AND file_key=''",

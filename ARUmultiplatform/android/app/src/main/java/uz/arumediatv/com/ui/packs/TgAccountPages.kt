@@ -368,37 +368,20 @@ fun tgSend(ctx: android.content.Context, d: TgDoc, kind: String, onEmoji: (Strin
 }
 
 /**
- * Telegram hujjatini yuborishga tayyorlaydi (yengil WebP) va kanalga yuklaydi. Natija: `(fayl nomi, null)` yoki `(null, xato)`.
- * Nomi `tgm_<hisob>_<vaqt>.<kengaytma>` — worker shu nomni faqat egasi uchun qabul qiladi, hamma ko'ra oladi.
+ * Yuborilgan Telegram stikeri (`tgs.<to'plam_nomi>.<hujjat_id>`): fayl hech qayerga yuklanmaydi — har kim uni
+ * o'z Telegram hisobi orqali (to'plamning ochiq nomi bo'yicha) oladi va ko'rsatadi.
  */
-suspend fun tgUploadForSend(ctx: android.content.Context, d: TgDoc, userId: Long): Pair<String?, String?> {
-    val ex = AppServices.tgStickers.exportForSend(d) ?: return null to "Stiker tayyorlanmadi — internetni tekshiring"
-    val name = "tgm_${userId}_${System.currentTimeMillis()}.${ex.second}"
-    val f = java.io.File(ctx.cacheDir, name)
-    return try {
-        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { f.writeBytes(ex.first) }
-        val err = AppServices.telegram.uploadFile(f.absolutePath, name, ex.third)
-        if (err != null) null to err else name to null
-    } finally { runCatching { f.delete() } }
-}
-
-/** Yuborilgan Telegram stiker/GIF (`tgm_...`): animatsiyali WebP o'zi harakatlanadi. */
 @Composable
-fun TgSentMedia(url: String, modifier: Modifier = Modifier) {
+fun TgRefSticker(ref: String, modifier: Modifier = Modifier) {
+    val parts = remember(ref) { ref.removePrefix("tgs.").let { it.substringBeforeLast('.') to it.substringAfterLast('.').toLongOrNull() } }
+    var doc by remember(ref) { mutableStateOf<TgDoc?>(null) }
     val ready by remember { AppServices.telegram.state.map { it.authorized && it.configured && it.port > 0 }.distinctUntilChanged() }
         .collectAsStateWithLifecycle(initialValue = AppServices.telegram.state.value.let { it.authorized && it.configured && it.port > 0 })
-    var bytes by remember(url) { mutableStateOf<ByteArray?>(null) }
-    LaunchedEffect(url, ready) { if (bytes == null && url.isNotEmpty()) bytes = AppServices.images.bytes(url, network = ready) }
-    Box(modifier) {
-        val b = bytes
-        if (b != null) {
-            if (Build.VERSION.SDK_INT >= 28) TgAnimatedWebp(b, true, false, Modifier.fillMaxSize())
-            else {
-                val bmp = remember(b) { BitmapFactory.decodeByteArray(b, 0, b.size)?.asImageBitmap() }
-                if (bmp != null) Image(bmp, null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
-            }
-        }
+    LaunchedEffect(ref, ready) {
+        val id = parts.second ?: return@LaunchedEffect
+        if (doc == null && ready) doc = AppServices.tgStickers.resolveRef(parts.first, id)
     }
+    Box(modifier) { doc?.let { TgItem(it, Modifier.fillMaxSize(), full = it.kind == "webp") } }
 }
 
 /**

@@ -68,23 +68,6 @@ class ImageStore(context: Context, private val tg: TelegramService) {
         return mine.await()
     }
 
-    /** Faylning xom baytlari (animatsiyali WebP uchun): shifrlangan disk keshi, bo'lmasa Telegram'dan olib shifrlab saqlanadi. */
-    suspend fun bytes(url: String, network: Boolean = true): ByteArray? {
-        val name = Names.fileNameOf(url)
-        if (name.isEmpty()) return null
-        return withContext(Dispatchers.IO) {
-            val f = File(dir, "$name.bin")
-            if (f.exists()) {
-                val plain = try { SecureStore.open(f.readBytes()) } catch (_: Exception) { f.delete(); null }
-                if (plain != null) return@withContext plain
-            }
-            if (!network) return@withContext null
-            val b = tg.fetchBytes(url) ?: return@withContext null
-            try { f.writeBytes(SecureStore.seal(b)) } catch (_: Exception) {}
-            b
-        }
-    }
-
     /** Tizim xotira haqida signal berganda: ilova fonda -> hammasi, xotira kam -> yarmi tozalanadi. */
     fun trim(hidden: Boolean) {
         if (hidden) mem.evictAll() else mem.trimToSize(mem.size() / 2)

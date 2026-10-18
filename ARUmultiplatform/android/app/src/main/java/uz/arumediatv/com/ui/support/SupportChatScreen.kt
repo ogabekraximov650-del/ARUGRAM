@@ -522,12 +522,9 @@ fun SupportChatScreen(userId: Long?, title: String, onBack: () -> Unit, onPacks:
                 if (panelOpen) TgMediaPanel(
                     onEmoji = { text += it },
                     onTgSend = { d, kind ->
-                        scope.launch {
-                            toast("Yuborilmoqda…")
-                            val (name, err) = uz.arumediatv.com.ui.packs.tgUploadForSend(ctx, d, me?.id ?: 0L)
-                            if (name == null) toast(err ?: "Yuborilmadi")
-                            else { store.send(withReply(replyTo?.id, ""), mediaFile = name, mediaType = if (kind == "gifs") "gif" else "sticker")?.let(::toast); replyTo = null }
-                        }
+                        val short = AppServices.tgStickers.shortOf(d)
+                        if (kind == "gifs" || short == null) toast(if (kind == "gifs") "Telegram GIF'ini yuborish hozircha yo'q" else "Stiker to'plami aniqlanmadi")
+                        else scope.launch { store.send(withReply(replyTo?.id, ""), mediaFile = "tgs.$short.${d.id}", mediaType = "sticker")?.let(::toast); replyTo = null }
                     },
                     onPick = { pick ->
                         if (pick.kind == uz.arumediatv.com.data.PackKind.EMOJI) text += uz.arumediatv.com.data.packEmojiToken(pick.pack, pick.item, pick.emoji)
@@ -726,7 +723,7 @@ private fun MediaBlock(m: ChatMessage) {
         }
         else -> {
             val ref = uz.arumediatv.com.data.Names.fileNameOf(m.mediaUrl)
-            if (ref.startsWith("tgm_")) uz.arumediatv.com.ui.packs.TgSentMedia(m.mediaUrl, Modifier.size(if (m.mediaType == "gif") 190.dp else 150.dp))
+            if (ref.startsWith("tgs.")) uz.arumediatv.com.ui.packs.TgRefSticker(ref, Modifier.size(150.dp))
             else if (uz.arumediatv.com.data.parsePackRef(ref) != null) uz.arumediatv.com.ui.packs.PackRefImage(ref, Modifier.size(if (m.mediaType == "gif") 190.dp else 140.dp), soundToggle = m.mediaType == "gif")
             else TgImage(m.mediaUrl, Modifier.size(width = 150.dp, height = 150.dp), maxPx = 400, contentScale = ContentScale.Fit)
         }

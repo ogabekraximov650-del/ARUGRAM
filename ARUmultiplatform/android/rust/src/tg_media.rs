@@ -171,15 +171,21 @@ async fn media_list(client: &Client, arg: &str) -> Result<Value, String> {
             };
             Ok(json!({"ok": true, "docs": docs}))
         }
-        _ if arg.starts_with("set:") => {
-            let mut it = arg[4..].split(':');
-            let id: i64 = it.next().and_then(|v| v.parse().ok()).ok_or("to'plam raqami noto'g'ri")?;
-            let hash: i64 = it.next().and_then(|v| v.parse().ok()).ok_or("to'plam kaliti noto'g'ri")?;
+        _ if arg.starts_with("set:") || arg.starts_with("setname:") => {
+            // `set:<id>:<hash>` — o'z to'plamimiz; `setname:<qisqa_nom>` — ochiq nom bo'yicha (boshqa foydalanuvchi yuborgan stiker uchun).
+            let stickerset = if let Some(short) = arg.strip_prefix("setname:") {
+                if short.is_empty() || short.len() > 64 || !short.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                    return Err("to'plam nomi noto'g'ri".to_string());
+                }
+                tl::enums::InputStickerSet::ShortName(tl::types::InputStickerSetShortName { short_name: short.to_string() })
+            } else {
+                let mut it = arg[4..].split(':');
+                let id: i64 = it.next().and_then(|v| v.parse().ok()).ok_or("to'plam raqami noto'g'ri")?;
+                let hash: i64 = it.next().and_then(|v| v.parse().ok()).ok_or("to'plam kaliti noto'g'ri")?;
+                tl::enums::InputStickerSet::Id(tl::types::InputStickerSetId { id, access_hash: hash })
+            };
             let r = client
-                .invoke(&tl::functions::messages::GetStickerSet {
-                    stickerset: tl::enums::InputStickerSet::Id(tl::types::InputStickerSetId { id, access_hash: hash }),
-                    hash: 0,
-                })
+                .invoke(&tl::functions::messages::GetStickerSet { stickerset, hash: 0 })
                 .await
                 .map_err(|e| inv_err(&e))?;
             match r {

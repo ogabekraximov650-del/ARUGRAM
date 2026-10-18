@@ -261,11 +261,10 @@ fun CommentsTab(season: Season, onOpenProfile: (Long) -> Unit, onLogin: () -> Un
                 uz.arumediatv.com.ui.packs.TgMediaPanel(
                     onEmoji = { text += it },
                     onTgSend = { d, kind ->
-                        scope.launch {
-                            toast("Yuborilmoqda…")
-                            val (name, err) = uz.arumediatv.com.ui.packs.tgUploadForSend(ctx, d, user?.id ?: 0L)
-                            if (name == null) { toast(err ?: "Yuborilmadi"); return@launch }
-                            val e2 = store.add("", parentId = replyTo?.id.orEmpty(), mediaFile = name, mediaType = if (kind == "gifs") "gif" else "sticker")
+                        val short = AppServices.tgStickers.shortOf(d)
+                        if (kind == "gifs" || short == null) toast(if (kind == "gifs") "Telegram GIF'ini yuborish hozircha yo'q" else "Stiker to'plami aniqlanmadi")
+                        else scope.launch {
+                            val e2 = store.add("", parentId = replyTo?.id.orEmpty(), mediaFile = "tgs.$short.${d.id}", mediaType = "sticker")
                             if (e2 == null) { replyTo = null; panelOpen = false } else toast(e2)
                         }
                     },
@@ -364,7 +363,7 @@ private fun CommentRow(
                 Text(timeAgo(c.createdAt), color = AruColors.TextFaint, fontSize = 11.sp)
             }
             if (c.mediaFile.isNotEmpty() && (c.mediaType == "sticker" || c.mediaType == "gif")) {
-                if (c.mediaFile.startsWith("tgm_")) uz.arumediatv.com.ui.packs.TgSentMedia(c.mediaFile, Modifier.padding(top = 4.dp).size(if (c.mediaType == "sticker") 130.dp else 180.dp))
+                if (c.mediaFile.startsWith("tgs.")) uz.arumediatv.com.ui.packs.TgRefSticker(c.mediaFile, Modifier.padding(top = 4.dp).size(130.dp))
                 else uz.arumediatv.com.ui.packs.PackRefImage(c.mediaFile, Modifier.padding(top = 4.dp).size(if (c.mediaType == "sticker") 130.dp else 180.dp))
             }
             if (c.body.isNotEmpty()) uz.arumediatv.com.ui.packs.RichPackText(c.body, Color.White.copy(alpha = 0.88f), 14.sp, Modifier.padding(top = 2.dp), 20.sp)
