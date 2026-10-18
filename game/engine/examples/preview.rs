@@ -34,12 +34,20 @@ fn main() {
     let mut g = Game::new(w, h, 2.5);
 
     // 0) boshlang'ich; 1) bot oldida + otish; 2) yurish va sakrash
-    for shot in 0..4 {
+    for shot in 0..5 {
         if shot == 1 {
             let (fc, _) = g.input.fire_button();
             g.touch(TouchAction::Down, 3, fc.x, fc.y);
             g.update(1.0 / 60.0);
             g.update(1.0 / 60.0);
+        }
+        if shot == 4 {
+            g = Game::new(w, h, 2.5);
+            g.camera.pos = glam::Vec3::new(0.0, 1.45, 2.4);
+            g.camera.yaw = 0.0;
+            g.camera.pitch = -0.08;
+            g.companion.pos = glam::Vec3::new(0.0, 0.0, 0.5);
+            g.companion.yaw = std::f32::consts::PI;
         }
         if shot == 3 {
             g.touch(TouchAction::Up, 1, 0.0, 0.0);
@@ -69,8 +77,8 @@ fn main() {
             }
         }
         let hud = g.hud();
-        let dynamic = g.dynamic_instances();
-        r.render(&view, &g.camera, &hud, &dynamic);
+        let (dynamic, shadow_n) = g.dynamic_instances();
+        r.render(&view, &g.camera, &hud, &dynamic, shadow_n);
         let bpr = w * 4;
         let buf = r.device().create_buffer(&wgpu::BufferDescriptor {
             label: None,

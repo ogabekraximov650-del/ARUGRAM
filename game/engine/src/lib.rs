@@ -1,5 +1,6 @@
 //! ARU o'yin dvigateli (tajriba bosqichi): 3D dunyo, kamera, sensorli boshqaruv.
 
+pub mod audio;
 pub mod camera;
 pub mod game;
 pub mod hud;

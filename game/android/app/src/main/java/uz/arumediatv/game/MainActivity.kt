@@ -14,10 +14,12 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Choreographer.FrameCall
     private var ptr = 0L
     private var running = false
     private var lastNanos = 0L
+    private val sounds = SoundBank()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        Thread { sounds.load() }.start()
         view = SurfaceView(this)
         view.holder.addCallback(this)
         setContentView(view)
@@ -79,6 +81,11 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Choreographer.FrameCall
         Choreographer.getInstance().postFrameCallback(this)
     }
 
+    override fun onDestroy() {
+        sounds.release()
+        super.onDestroy()
+    }
+
     override fun onPause() {
         running = false
         Choreographer.getInstance().removeFrameCallback(this)
@@ -89,7 +96,10 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Choreographer.FrameCall
         if (!running) return
         val dt = if (lastNanos == 0L) 0f else (frameTimeNanos - lastNanos) / 1e9f
         lastNanos = frameTimeNanos
-        if (ptr != 0L) NativeBridge.nativeFrame(ptr, dt)
+        if (ptr != 0L) {
+            NativeBridge.nativeFrame(ptr, dt)
+            NativeBridge.nativeTakeEvents(ptr)?.forEach { sounds.play(it) }
+        }
         Choreographer.getInstance().postFrameCallback(this)
     }
 

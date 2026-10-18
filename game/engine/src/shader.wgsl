@@ -25,12 +25,18 @@ struct VOut {
     @location(2) color: vec4<f32>,
 };
 
+fn rot(v: vec3<f32>, yaw: f32) -> vec3<f32> {
+    let c = cos(yaw);
+    let s = sin(yaw);
+    return vec3<f32>(v.x * c + v.z * s, v.y, -v.x * s + v.z * c);
+}
+
 @vertex
 fn vs_main(v: VIn) -> VOut {
     var o: VOut;
-    let w = v.pos * v.i_scale.xyz + v.i_pos.xyz;
+    let w = rot(v.pos * v.i_scale.xyz, v.i_pos.w) + v.i_pos.xyz;
     o.world = w;
-    o.normal = v.normal;
+    o.normal = rot(v.normal, v.i_pos.w);
     o.color = v.i_color;
     o.clip = g.view_proj * vec4<f32>(w, 1.0);
     return o;
@@ -38,7 +44,7 @@ fn vs_main(v: VIn) -> VOut {
 
 @vertex
 fn vs_shadow(v: VIn) -> @builtin(position) vec4<f32> {
-    let w = v.pos * v.i_scale.xyz + v.i_pos.xyz;
+    let w = rot(v.pos * v.i_scale.xyz, v.i_pos.w) + v.i_pos.xyz;
     return g.light_vp * vec4<f32>(w, 1.0);
 }
 
@@ -69,7 +75,7 @@ fn fs_main(i: VOut) -> @location(0) vec4<f32> {
     let p = i.world.xz / 2.0;
     let c = abs(fract(p - 0.5) - 0.5) / max(fwidth(p), vec2<f32>(0.0001));
     let line = 1.0 - min(min(c.x, c.y), 1.0);
-    let on_top = select(0.0, 1.0, n.y > 0.5) * i.color.a;
+    let on_top = select(0.0, 1.0, n.y > 0.5 && i.color.a > 0.5);
     col = mix(col, col * 0.72, line * 0.55 * on_top);
 
     let d = length(i.world - g.cam_pos.xyz);

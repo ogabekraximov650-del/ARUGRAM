@@ -436,6 +436,7 @@ impl Renderer {
         cam: &Camera,
         hud: &[HudVertex],
         dynamic: &[Instance],
+        dynamic_shadow: usize,
     ) {
         let dyn_n = dynamic.len().min(MAX_DYNAMIC);
         if dyn_n > 0 {
@@ -482,6 +483,11 @@ impl Renderer {
             sp.set_vertex_buffer(1, self.instance_buf.slice(..));
             sp.set_index_buffer(self.mesh_ib.slice(..), wgpu::IndexFormat::Uint16);
             sp.draw_indexed(0..self.index_count, 0, 0..self.instance_count);
+            let ds = dynamic_shadow.min(dyn_n);
+            if ds > 0 {
+                sp.set_vertex_buffer(1, self.dyn_buf.slice(..));
+                sp.draw_indexed(0..self.index_count, 0, 0..ds as u32);
+            }
         }
         {
             let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {

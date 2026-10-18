@@ -213,6 +213,14 @@ pub fn build(g: &Game) -> Vec<HudVertex> {
     rect(&mut v, c + Vec2::new(0.0, gap + len * 0.5), Vec2::new(t, len * 0.5), white);
     rect(&mut v, c - Vec2::new(0.0, gap + len * 0.5), Vec2::new(t, len * 0.5), white);
 
+    // otish: tracer va yorug'lik chaqnashi
+    if g.flash > 0.0 {
+        let k = g.flash / 0.07;
+        line(&mut v, Vec2::new(w * 0.70, h * 0.88), c, 3.0 * d, [1.0, 0.9, 0.5, 0.8 * k]);
+        disc(&mut v, Vec2::new(w * 0.70, h * 0.88), 16.0 * d * k, [1.0, 0.85, 0.4, 0.9 * k]);
+        rect_tl(&mut v, 0.0, 0.0, w, h, [1.0, 0.95, 0.8, 0.07 * k]);
+    }
+
     // tegish belgisi
     if g.hit_marker > 0.0 {
         let red = [1.0, 0.25, 0.2, 0.95];

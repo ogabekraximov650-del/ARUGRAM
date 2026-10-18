@@ -3,6 +3,7 @@
 use crate::camera::Camera;
 use crate::input::{Input, TouchAction, WORLD_HALF};
 use crate::world::{self, Instance};
+use crate::audio;
 use glam::{Vec2, Vec3};
 
 pub const EYE: f32 = 1.7;
@@ -218,6 +219,20 @@ impl Lcg {
     }
 }
 
+/// Yonimda yuradigan qiz (anime uslubida, kublardan yig'ilgan).
+pub struct Companion {
+    pub pos: Vec3,
+    pub yaw: f32,
+    pub phase: f32,
+    pub speed: f32,
+}
+
+impl Companion {
+    fn new(pos: Vec3) -> Self {
+        Self { pos, yaw: 0.0, phase: 0.0, speed: 0.0 }
+    }
+}
+
 pub struct Bot {
     /// Oyoq nuqtasi.
     pub pos: Vec3,
@@ -266,6 +281,12 @@ pub struct Game {
     pub pickups: Vec<Pickup>,
     pub zone: Zone,
     pub time: f32,
+    pub companion: Companion,
+    pub flash: f32,
+    impacts: Vec<(Vec3, f32)>,
+    events: Vec<u8>,
+    step_dist: f32,
+    zone_tick: f32,
     pub kills: u32,
     pub bots: Vec<Bot>,
     rng: Lcg,
@@ -326,7 +347,7 @@ impl Game {
     pub fn new(width: u32, height: u32, density: f32) -> Self {
         let colliders: Vec<Aabb> = world::build()
             .iter()
-            .filter(|i| i.color[3] < 0.5)
+            .filter(|i| i.color[3] < 0.1)
             .map(Aabb::from_instance)
             .collect();
         let mut g = Self {
@@ -346,6 +367,12 @@ impl Game {
             pickups: Vec::new(),
             zone: Zone::new(&mut Lcg(99)),
             time: 0.0,
+            companion: Companion::new(Vec3::new(1.7, 0.0, 9.3)),
+            flash: 0.0,
+            impacts: Vec::new(),
+            events: Vec::new(),
+            step_dist: 0.0,
+            zone_tick: 0.0,
             kills: 0,
             bots: Vec::new(),
             rng: Lcg(12345),
@@ -459,6 +486,48 @@ impl Game {
         }
     }
 
+    /// Shu kadrda to'plangan ovoz hodisalari (`audio::EV_*`); ro'yxat bo'shatiladi.
+    pub fn take_events(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.events)
+    }
+
+    fn emit(&mut self, ev: u8) {
+        if self.events.len() < 32 {
+            self.events.push(ev);
+        }
+    }
+
+    fn update_companion(&mut self, dt: f32) {
+        let fwd = self.camera.flat_forward();
+        let right = self.camera.right();
+        let feet = Vec3::new(self.camera.pos.x, 0.0, self.camera.pos.z);
+        let target = feet + right * 1.7 - fwd * 1.3;
+        let c = &mut self.companion;
+        let to = Vec2::new(target.x - c.pos.x, target.z - c.pos.z);
+        let dist = to.length();
+        if dist > 30.0 {
+            c.pos = Vec3::new(target.x, 0.0, target.z);
+        }
+        let speed = if dist > 0.25 { (dist * 3.0).min(8.0) } else { 0.0 };
+        if speed > 0.0 {
+            let step = to / dist * speed * dt;
+            c.pos.x += step.x;
+            c.pos.z += step.y;
+        }
+        push_out(&mut c.pos, HEIGHT, &self.colliders);
+        c.pos.y = 0.0;
+        c.speed = speed;
+        c.phase += speed * dt * 1.8;
+        let want = if speed > 0.8 { (-to.x).atan2(-to.y) } else { self.camera.yaw };
+        let mut diff = (want - c.yaw) % std::f32::consts::TAU;
+        if diff > std::f32::consts::PI {
+            diff -= std::f32::consts::TAU;
+        } else if diff < -std::f32::consts::PI {
+            diff += std::f32::consts::TAU;
+        }
+        c.yaw += diff * (1.0 - (-10.0 * dt).exp());
+    }
+
     pub fn resize(&mut self, width: u32, height: u32) {
         self.width = width;
         self.height = height;
@@ -493,6 +562,13 @@ impl Game {
 
     fn shoot(&mut self) {
         let st = self.stats();
+        self.flash = 0.07;
+        self.emit(match self.slots[self.cur].kind {
+            WeaponKind::Pistol => audio::EV_SHOT_PISTOL,
+            WeaponKind::Rifle => audio::EV_SHOT_RIFLE,
+            WeaponKind::Shotgun => audio::EV_SHOT_SHOTGUN,
+            WeaponKind::Sniper => audio::EV_SHOT_SNIPER,
+        });
         let o = self.camera.pos;
         let base = self.camera.forward();
         let right = self.camera.right();
@@ -502,6 +578,9 @@ impl Game {
             let sy = (self.rng.next() - 0.5) * 2.0 * st.spread;
             let d = (base + right * sx + up * sy).normalize();
             let tw = self.world_hit(o, d);
+            if tw < 150.0 && self.impacts.len() < 24 {
+                self.impacts.push((o + d * tw, 0.0));
+            }
             let mut best: Option<(f32, usize, f32)> = None;
             for (i, b) in self.bots.iter().enumerate() {
                 if !b.alive {
@@ -556,6 +635,11 @@ impl Game {
         self.time += dt;
         self.zone.update(dt, &mut self.rng);
         self.hit_marker = (self.hit_marker - dt).max(0.0);
+        self.flash = (self.flash - dt).max(0.0);
+        for im in self.impacts.iter_mut() {
+            im.1 += dt;
+        }
+        self.impacts.retain(|im| im.1 < 0.5);
         self.hurt = (self.hurt - dt).max(0.0);
 
         if self.dead_t > 0.0 {
@@ -571,9 +655,11 @@ impl Game {
             self.update_player(dt);
         }
         self.update_bots(dt);
+        self.update_companion(dt);
     }
 
     fn update_player(&mut self, dt: f32) {
+        let before = self.camera.pos;
         self.input.update(dt, &mut self.camera);
         let mut feet = Vec3::new(self.camera.pos.x, self.camera.pos.y - EYE, self.camera.pos.z);
         push_out(&mut feet, HEIGHT, &self.colliders);
@@ -594,12 +680,26 @@ impl Game {
         }
         self.camera.pos = Vec3::new(feet.x, feet.y + EYE, feet.z);
 
+        self.step_dist += Vec2::new(feet.x - before.x, feet.z - before.z).length();
+        if self.grounded && self.step_dist > 2.0 {
+            self.step_dist = 0.0;
+            self.emit(audio::EV_STEP);
+        }
+        let n_before = self.pickups.iter().filter(|p| p.alive).count();
         self.collect_pickups();
+        if self.pickups.iter().filter(|p| p.alive).count() < n_before {
+            self.emit(audio::EV_PICKUP);
+        }
 
         // zonadan tashqarida zarar
         if !self.zone.contains(feet.x, feet.z) {
             self.hp -= self.zone.dps() * dt;
             self.hurt = self.hurt.max(0.15);
+            self.zone_tick -= dt;
+            if self.zone_tick <= 0.0 {
+                self.zone_tick = 1.0;
+                self.emit(audio::EV_HURT);
+            }
             if self.hp <= 0.0 {
                 self.hp = 0.0;
                 self.dead_t = 2.0;
@@ -622,6 +722,7 @@ impl Game {
             }
         } else if self.slots[self.cur].mag == 0 && self.slots[self.cur].reserve > 0 {
             self.reload = st.reload;
+            self.emit(audio::EV_RELOAD);
         }
         self.fire_cd -= dt;
         if self.input.fire_held() && self.reload <= 0.0 && self.slots[self.cur].mag > 0 && self.fire_cd <= 0.0 {
@@ -702,9 +803,88 @@ impl Game {
         }
     }
 
-    /// Har kadr o'zgaradigan jismlar (botlar) — GPU'ga yoziladi.
-    pub fn dynamic_instances(&self) -> Vec<Instance> {
+    /// Qizning qismlari (kublar). Mahalliy koordinata: x — o'ng, y — yuqori, -z — oldinga; `yaw` bilan buriladi.
+    fn girl_parts(&self, out: &mut Vec<Instance>) {
+        let c = &self.companion;
+        let (s, co) = c.yaw.sin_cos();
+        let moving = (c.speed / (c.speed + 1.0)).min(1.0);
+        let swing = c.phase.sin() * 0.16 * moving;
+        let bob = (self.time * 2.2).sin() * 0.008;
+        let mut part = |x: f32, y: f32, z: f32, sx: f32, sy: f32, sz: f32, rgb: [f32; 3]| {
+            // mahalliy siljishni yaw bo'yicha buramiz (shaderdagi `rot` bilan bir xil)
+            let wx = x * co + z * s;
+            let wz = -x * s + z * co;
+            out.push(Instance {
+                pos: [c.pos.x + wx, c.pos.y + y, c.pos.z + wz, c.yaw],
+                scale: [sx, sy, sz, 0.0],
+                color: [rgb[0], rgb[1], rgb[2], 0.0],
+            });
+        };
+        let skin = [1.0, 0.86, 0.78];
+        let hair = [0.98, 0.55, 0.78];
+        let hair_dark = [0.88, 0.42, 0.68];
+        let white = [0.97, 0.97, 1.0];
+        let navy = [0.18, 0.22, 0.48];
+        let red = [0.90, 0.20, 0.30];
+        let shoe = [0.30, 0.18, 0.15];
+        // oyoqlar (paypoq bilan) va tufli
+        for (sx, sw) in [(-1.0f32, swing), (1.0, -swing)] {
+            part(sx * 0.08, 0.26, sw, 0.10, 0.34, 0.10, skin);
+            part(sx * 0.08, 0.12, sw, 0.105, 0.22, 0.105, [0.16, 0.16, 0.25]);
+            part(sx * 0.08, 0.035, sw - 0.03, 0.12, 0.07, 0.19, shoe);
+        }
+        // yubka, tana, yoqa, lenta
+        part(0.0, 0.62, 0.0, 0.40, 0.22, 0.28, navy);
+        part(0.0, 0.88, 0.0, 0.30, 0.32, 0.19, white);
+        part(0.0, 1.04 + bob, 0.0, 0.34, 0.06, 0.22, navy);
+        part(0.0, 0.98, -0.115, 0.10, 0.09, 0.03, red);
+        // qo'llar
+        for (sx, sw) in [(-1.0f32, -swing), (1.0, swing)] {
+            part(sx * 0.20, 0.90, sw * 0.8, 0.075, 0.28, 0.08, white);
+            part(sx * 0.20, 0.72, sw * 0.8, 0.07, 0.07, 0.07, skin);
+        }
+        // bosh (chibi: katta), soch, ikki dumli
+        let hy = 1.25 + bob;
+        part(0.0, hy, 0.0, 0.34, 0.34, 0.32, skin);
+        part(0.0, hy + 0.19, 0.0, 0.38, 0.10, 0.36, hair);
+        part(0.0, hy + 0.0, 0.15, 0.38, 0.40, 0.10, hair);
+        for sx in [-1.0f32, 1.0] {
+            part(sx * 0.19, hy + 0.02, 0.0, 0.06, 0.34, 0.32, hair);
+        }
+        part(0.0, hy + 0.15, -0.165, 0.34, 0.09, 0.05, hair);
+        part(-0.10, hy + 0.10, -0.17, 0.10, 0.10, 0.04, hair_dark);
+        part(0.10, hy + 0.10, -0.17, 0.10, 0.10, 0.04, hair_dark);
+        part(0.0, hy + 0.29, 0.0, 0.03, 0.12, 0.03, hair);
+        for sx in [-1.0f32, 1.0] {
+            let tail_swing = (self.time * 3.0 + sx).sin() * 0.02 + swing * 0.3;
+            part(sx * 0.27, hy - 0.05, 0.17 + tail_swing, 0.10, 0.50, 0.10, hair);
+            part(sx * 0.27, hy + 0.17, 0.17, 0.12, 0.05, 0.12, red);
+            part(sx * 0.12, hy + 0.23, 0.0, 0.08, 0.10, 0.07, hair);
+        }
+        // katta anime ko'zlar: oq, ko'k qorachiq, yaltirash; yonoq, og'iz
+        for sx in [-1.0f32, 1.0] {
+            let ex = sx * 0.085;
+            part(ex, hy - 0.02, -0.168, 0.105, 0.14, 0.012, white);
+            part(ex, hy - 0.03, -0.176, 0.075, 0.115, 0.012, [0.30, 0.45, 0.95]);
+            part(ex, hy - 0.04, -0.184, 0.04, 0.06, 0.012, [0.10, 0.12, 0.35]);
+            part(ex + sx * 0.015, hy + 0.02, -0.19, 0.03, 0.03, 0.012, white);
+            part(sx * 0.125, hy - 0.11, -0.168, 0.06, 0.03, 0.012, [1.0, 0.62, 0.66]);
+        }
+        part(0.0, hy - 0.115, -0.168, 0.04, 0.016, 0.012, [0.55, 0.20, 0.25]);
+    }
+
+    /// Har kadr o'zgaradigan jismlar. Ikkinchi qiymat: boshidagi nechta jism soya tashlaydi.
+    pub fn dynamic_instances(&self) -> (Vec<Instance>, usize) {
         let mut v = Vec::new();
+        self.girl_parts(&mut v);
+        for (p, t) in &self.impacts {
+            let k = 1.0 - t / 0.5;
+            v.push(Instance {
+                pos: [p.x, p.y, p.z, 0.0],
+                scale: [0.10 + 0.25 * k, 0.10 + 0.25 * k, 0.10 + 0.25 * k, 0.0],
+                color: [0.78, 0.74, 0.66, 0.0],
+            });
+        }
         for b in self.bots.iter().filter(|b| b.alive) {
             let flash = if b.hit_t > 0.0 { 1.0 } else { 0.0 };
             let body = [0.80 + 0.2 * flash, 0.25 + 0.75 * flash, 0.20 + 0.8 * flash, 0.0];
@@ -712,6 +892,7 @@ impl Game {
             v.push(Instance { pos: [b.pos.x, b.pos.y + 0.675, b.pos.z, 0.0], scale: [0.7, 1.35, 0.5, 0.0], color: body });
             v.push(Instance { pos: [b.pos.x, b.pos.y + 1.57, b.pos.z, 0.0], scale: [0.44, 0.44, 0.44, 0.0], color: head });
         }
+        let shadow_count = v.len();
         for p in self.pickups.iter().filter(|p| p.alive) {
             let bob = 0.65 + 0.15 * (self.time * 3.0 + p.pos.x).sin();
             let (rgb, scale) = match p.kind {
@@ -737,7 +918,7 @@ impl Game {
         if !self.zone.finished {
             ring(self.zone.next_center, self.zone.next_radius, 48, 0.5, [0.95, 0.95, 0.95], &mut v);
         }
-        v
+        (v, shadow_count)
     }
 
     pub fn hud(&self) -> Vec<crate::hud::HudVertex> {
@@ -869,6 +1050,31 @@ mod tests {
         step(&mut g, 100);
         assert_eq!(g.mag(), 12);
         assert_eq!(g.reserve(), 12);
+    }
+
+    #[test]
+    fn qiz_ergashadi_va_devordan_otmaydi() {
+        let mut g = Game::new(1280, 576, 2.0);
+        g.companion.pos = Vec3::new(40.0, 0.0, 40.0);
+        step(&mut g, 600);
+        let d = Vec2::new(g.companion.pos.x - g.camera.pos.x, g.companion.pos.z - g.camera.pos.z).length();
+        assert!(d < 4.0, "yaqinlashdi: {d}");
+        for b in &g.colliders {
+            let p = g.companion.pos;
+            assert!(!(p.x > b.min.x && p.x < b.max.x && p.z > b.min.z && p.z < b.max.z), "quti ichida");
+        }
+    }
+
+    #[test]
+    fn hodisalar_otishda_chiqadi() {
+        let mut g = Game::new(1280, 576, 2.0);
+        g.pickups.clear();
+        let (c, _) = g.input.fire_button();
+        g.touch(TouchAction::Down, 8, c.x, c.y);
+        step(&mut g, 2);
+        let ev = g.take_events();
+        assert!(ev.contains(&audio::EV_SHOT_PISTOL));
+        assert!(g.take_events().is_empty());
     }
 
     #[test]

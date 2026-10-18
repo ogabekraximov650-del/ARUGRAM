@@ -6597,3 +6597,10 @@ Nega: PUBG darajasiga bosqichma-bosqich (low-poly → realistik, keyin botlar/zo
 - Sozlamalarda endi joystik va kichik xaritani ham sudrab ko'chirish mumkin (`input.rs: Layout.stick/map`, 11 ta son saqlanadi; eski 7 talik saqlangan format ham o'qiladi). Joystik doirasi ichida bosilsa u joyida qo'zg'almas, tashqarida (chap yarim) — bosilgan joyda.
 - Botlar o'chirildi (`game.rs: BOT_COUNT = 0`; mantiq saqlangan, qayta yoqish uchun sonni oshirish kifoya).
 - Grafika: quyosh soyasi (2048² soya xaritasi, 3x3 PCF, o'yinchi atrofida ±48 m, piksel yaxlitlash), daraxtlar (`renderer.rs`, `shader.wgsl`, `world.rs`). Dinamik jismlar (ustunlar, narsalar) soya tashlamaydi.
+
+### 5-bosqich (ARUGAME): grafika (binolar), ovozlar, yonimdagi qiz
+- Binolar: tom, qavat-qavat derazalar va eshik (`world.rs: decorate`); bezak jismlar `color.a = 0.2` bilan belgilanadi — to'qnashuvga qo'shilmaydi (`game.rs` faqat `a < 0.1` ni to'qnashuv deb oladi).
+- Instansga burilish (yaw) qo'shildi: `pos.w` — Y o'qi atrofida burchak (`shader.wgsl: rot`); dinamik jismlarning bir qismi soya tashlaydi (`dynamic_instances` ikkinchi qiymati).
+- Qiz (`game.rs: Companion, girl_parts`): ~45 kubdan anime uslubida (pushti ikki dumli soch, katta ko'k ko'zlar, dengizchi forma); o'yinchining o'ng-orqasida yuradi, uzoqlashsa yetib oladi/teleport qiladi, yurganda oyoq-qo'li chayqaladi.
+- Ovoz: hammasi `audio.rs` da sintez qilinadi (fayl yo'q) — 4 xil otish, qadam, qayta o'qlash, narsa olish, zarba. JNI `nativeGetSound/nativeTakeEvents`, Kotlin `SoundBank` (AudioTrack, har ovoz 3 ta ovoz-kanal). Effektlar: otish chaqnashi + tracer, tegish joyida chang.
+- Botlar o'chiq qoldi (foydalanuvchi talabi).

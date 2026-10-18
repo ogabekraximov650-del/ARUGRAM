@@ -4,7 +4,7 @@ use crate::input::TouchAction;
 use crate::renderer::Renderer;
 use crate::{world, Game};
 use jni::objects::{JClass, JObject};
-use jni::sys::{jfloat, jfloatArray, jint, jlong};
+use jni::sys::{jfloat, jfloatArray, jint, jintArray, jlong, jshortArray};
 use jni::objects::JFloatArray;
 use jni::JNIEnv;
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -107,8 +107,8 @@ fn frame(app: &mut App, dt: f32) {
     };
     let view = tex.texture.create_view(&wgpu::TextureViewDescriptor::default());
     let hud = app.game.hud();
-    let dynamic = app.game.dynamic_instances();
-    app.renderer.render(&view, &app.game.camera, &hud, &dynamic);
+    let (dynamic, shadow_n) = app.game.dynamic_instances();
+    app.renderer.render(&view, &app.game.camera, &hud, &dynamic, shadow_n);
     tex.present();
 }
 
@@ -246,5 +246,54 @@ pub extern "system" fn Java_uz_arumediatv_game_NativeBridge_nativeSetLayout(
     }
     if let Some(l) = crate::input::Layout::from_slice(&buf) {
         app.game.input.set_layout(l);
+    }
+}
+
+/// Shu kadrdagi ovoz hodisalari (`audio::EV_*`) yoki `null` (bo'sh).
+#[no_mangle]
+pub extern "system" fn Java_uz_arumediatv_game_NativeBridge_nativeTakeEvents(
+    env: JNIEnv,
+    _c: JClass,
+    ptr: jlong,
+) -> jintArray {
+    if ptr == 0 {
+        return std::ptr::null_mut();
+    }
+    let app = unsafe { &mut *(ptr as *mut App) };
+    let Ok(ev) = catch_unwind(AssertUnwindSafe(|| app.game.take_events())) else { return std::ptr::null_mut() };
+    if ev.is_empty() {
+        return std::ptr::null_mut();
+    }
+    let vals: Vec<i32> = ev.iter().map(|e| *e as i32).collect();
+    match env.new_int_array(vals.len() as i32) {
+        Ok(arr) => {
+            if env.set_int_array_region(&arr, 0, &vals).is_err() {
+                return std::ptr::null_mut();
+            }
+            arr.into_raw()
+        }
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+/// `id` ovozining PCM (16 bit, mono, `audio::RATE` Hz) ma'lumoti; noto'g'ri `id` — `null`.
+#[no_mangle]
+pub extern "system" fn Java_uz_arumediatv_game_NativeBridge_nativeGetSound(
+    env: JNIEnv,
+    _c: JClass,
+    id: jint,
+) -> jshortArray {
+    let pcm = crate::audio::render(id.max(0) as usize);
+    if pcm.is_empty() {
+        return std::ptr::null_mut();
+    }
+    match env.new_short_array(pcm.len() as i32) {
+        Ok(arr) => {
+            if env.set_short_array_region(&arr, 0, &pcm).is_err() {
+                return std::ptr::null_mut();
+            }
+            arr.into_raw()
+        }
+        Err(_) => std::ptr::null_mut(),
     }
 }
