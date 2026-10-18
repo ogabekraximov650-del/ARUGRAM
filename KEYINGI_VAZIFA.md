@@ -6615,3 +6615,9 @@ Nega: PUBG darajasiga bosqichma-bosqich (low-poly → realistik, keyin botlar/zo
 - **Qiz xatti-harakati** (`game.rs: update_companion`): o'yinchi 5 m ichida bo'lsa turadi; 5 m dan uzoqlashsa va o'yinchi yurayotgan bo'lsa — o'yinchi yurgan tomonga (oldida-yonida, orqasida emas) yuradi; o'yinchi to'xtasa yoki 3.5 m ga yetsa — to'xtaydi. Testlar bor.
 - Zona: boshlang'ich radius 140 m, 4 bosqich; devori yorug' ustunlar; kichik xarita ±150 m.
 - Botlar butunlay olib tashlangan (foydalanuvchi talabi).
+
+### 7-bosqich (ARUGAME): qotishni tuzatish (samaradorlik)
+- Ko'rinishni tanlash: statik jismlar 30 m li katakchalarga saralangan, faqat ko'rinadigan (frustum + 240 m) katakchalar chiziladi; soya o'tishida faqat o'yinchi atrofi (±100 m). Relyef 10x10 katakli bo'laklarga bo'lingan. Yo'llar kabi katta jismlar har doim chiziladi (`renderer.rs`).
+- Osmon eng oxirida (erta chuqurlik tekshiruvi), soya 4 namunali, uzoqda (>55 m) protsedur tekstura o'chiriladi; shar/silindr poligonlari kamaytirildi; daraxtlar 140 ta.
+- Adaptiv chizish aniqligi (`MainActivity.adapt`): kadr vaqti ekran chastotasidan 1.45 baravar uzoq bo'lsa ichki ruxsat 1.0→0.85→0.72→0.6→0.5 pasayadi (`setFixedSize`); sensor koordinatalari va HUD zichligi (`nativeSetDensity`) shunga moslanadi; faqat 60 s silliq bo'lsa ehtiyotkorlik bilan qaytadi.
+- Keyingi (foydalanuvchi talabi — "PUBG darajasi"): glTF yuklovchi + teksturali PBR, CC0 tekstura/modellar (Poly Haven, Quaternius) Actions'da yuklanadi, teksturali relyef, soya/SSAO/bloom, VRM (anime qiz) yuklovchi. Avval telefonda silliqlikni tasdiqlash.

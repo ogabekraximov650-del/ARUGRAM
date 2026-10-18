@@ -304,3 +304,18 @@ pub extern "system" fn Java_uz_arumediatv_game_NativeBridge_nativeGetSound(
         Err(_) => std::ptr::null_mut(),
     }
 }
+
+/// Chizish o'lchami (adaptiv ruxsat) o'zgarganda: HUD o'lchami uchun effektiv piksel zichligi.
+#[no_mangle]
+pub extern "system" fn Java_uz_arumediatv_game_NativeBridge_nativeSetDensity(
+    _env: JNIEnv,
+    _c: JClass,
+    ptr: jlong,
+    density: jfloat,
+) {
+    if ptr == 0 || !density.is_finite() {
+        return;
+    }
+    let app = unsafe { &mut *(ptr as *mut App) };
+    let _ = catch_unwind(AssertUnwindSafe(|| app.game.set_density(density)));
+}

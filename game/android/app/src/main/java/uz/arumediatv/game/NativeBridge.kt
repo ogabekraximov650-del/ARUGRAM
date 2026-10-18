@@ -15,6 +15,7 @@ object NativeBridge {
     external fun nativeDestroy(ptr: Long)
     external fun nativeTakeLayout(ptr: Long): FloatArray?
     external fun nativeSetLayout(ptr: Long, layout: FloatArray)
+    external fun nativeSetDensity(ptr: Long, density: Float)
     external fun nativeTakeEvents(ptr: Long): IntArray?
     external fun nativeGetSound(id: Int): ShortArray?
 }

@@ -13,6 +13,14 @@ pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 pub const MAX_DYNAMIC: usize = 1024;
 pub const MAX_VIEWMODEL: usize = 160;
 pub const SHADOW_SIZE: u32 = 2048;
+/// Ko'rinishni tanlash uchun dunyo katakchalari (relyef bo'laklariga mos: 10 katak x 3 m).
+const CELL: f32 = 30.0;
+const GRID: usize = 12;
+const CULL_MARGIN: f32 = 14.0;
+/// Shundan kattaroq jismlar (yo'llar) har doim chiziladi.
+const ALWAYS_SIZE: f32 = 24.0;
+const MAIN_DISTANCE: f32 = 240.0;
+const SHADOW_RADIUS: f32 = 100.0;
 /// Quyosh yo'nalishi (yorug'lik tarqaladigan tomon).
 pub const SUN_DIR: Vec3 = Vec3::new(-0.45, -0.75, -0.40);
 
@@ -46,7 +54,8 @@ struct MeshBuf {
     ib: wgpu::Buffer,
     index_count: u32,
     static_buf: wgpu::Buffer,
-    static_count: u32,
+    /// Har katakcha uchun (boshlanish, soni); oxirgisi — har doim chiziladigan katta jismlar.
+    ranges: Vec<(u32, u32)>,
     dyn_buf: wgpu::Buffer,
     vm_buf: wgpu::Buffer,
 }
@@ -69,12 +78,93 @@ pub struct Renderer {
     meshes: Vec<MeshBuf>,
     terrain_vb: wgpu::Buffer,
     terrain_ib: wgpu::Buffer,
-    terrain_index_count: u32,
+    terrain_ranges: Vec<(u32, u32)>,
     terrain_inst: wgpu::Buffer,
     hud_buf: wgpu::Buffer,
     depth_view: wgpu::TextureView,
     width: u32,
     height: u32,
+}
+
+fn cell_of(x: f32, z: f32) -> usize {
+    let ix = (((x + crate::terrain::EXTENT) / CELL).floor() as i32).clamp(0, GRID as i32 - 1) as usize;
+    let iz = (((z + crate::terrain::EXTENT) / CELL).floor() as i32).clamp(0, GRID as i32 - 1) as usize;
+    iz * GRID + ix
+}
+
+/// Katakchaning (x0,z0)-(x1,z1) chegarasi.
+fn cell_rect(c: usize) -> (f32, f32, f32, f32) {
+    let (ix, iz) = ((c % GRID) as f32, (c / GRID) as f32);
+    let x0 = -crate::terrain::EXTENT + ix * CELL;
+    let z0 = -crate::terrain::EXTENT + iz * CELL;
+    (x0, z0, x0 + CELL, z0 + CELL)
+}
+
+/// Ko'rish piramidasi tekisliklari (ichkarisi: n·p + d >= 0), chuqurlik 0..1.
+fn frustum_planes(vp: &Mat4) -> [glam::Vec4; 6] {
+    let r = |i: usize| glam::Vec4::new(vp.x_axis[i], vp.y_axis[i], vp.z_axis[i], vp.w_axis[i]);
+    let (r0, r1, r2, r3) = (r(0), r(1), r(2), r(3));
+    let mut p = [r3 + r0, r3 - r0, r3 + r1, r3 - r1, r2, r3 - r2];
+    for pl in p.iter_mut() {
+        let l = pl.truncate().length().max(1e-6);
+        *pl /= l;
+    }
+    p
+}
+
+fn box_in_frustum(planes: &[glam::Vec4; 6], min: Vec3, max: Vec3) -> bool {
+    for pl in planes {
+        let p = Vec3::new(
+            if pl.x >= 0.0 { max.x } else { min.x },
+            if pl.y >= 0.0 { max.y } else { min.y },
+            if pl.z >= 0.0 { max.z } else { min.z },
+        );
+        if pl.truncate().dot(p) + pl.w < 0.0 {
+            return false;
+        }
+    }
+    true
+}
+
+/// Ko'rinadigan katakchalar (oxirgi element — har doim chiziladigan katta jismlar).
+fn visible_cells(cam: Vec3, planes: Option<&[glam::Vec4; 6]>, radius: f32) -> Vec<bool> {
+    let mut keep = vec![false; GRID * GRID + 1];
+    keep[GRID * GRID] = true;
+    for c in 0..GRID * GRID {
+        let (x0, z0, x1, z1) = cell_rect(c);
+        let (cx, cz) = ((x0 + x1) * 0.5, (z0 + z1) * 0.5);
+        let reach = radius + CELL * 0.75;
+        if (cx - cam.x).abs() > reach || (cz - cam.z).abs() > reach {
+            continue;
+        }
+        if let Some(pl) = planes {
+            let min = Vec3::new(x0 - CULL_MARGIN, -12.0, z0 - CULL_MARGIN);
+            let max = Vec3::new(x1 + CULL_MARGIN, 45.0, z1 + CULL_MARGIN);
+            if !box_in_frustum(pl, min, max) {
+                continue;
+            }
+        }
+        keep[c] = true;
+    }
+    keep
+}
+
+/// Ketma-ket diapazonlarni birlashtiradi (chizish chaqiruvlari kamayadi).
+fn merged(ranges: &[(u32, u32)], keep: &[bool]) -> Vec<(u32, u32)> {
+    let mut out: Vec<(u32, u32)> = Vec::new();
+    for (c, &(s, n)) in ranges.iter().enumerate() {
+        if n == 0 || !keep.get(c).copied().unwrap_or(false) {
+            continue;
+        }
+        if let Some(last) = out.last_mut() {
+            if last.0 + last.1 == s {
+                last.1 += n;
+                continue;
+            }
+        }
+        out.push((s, n));
+    }
+    out
 }
 
 fn make_depth(device: &wgpu::Device, w: u32, h: u32) -> wgpu::TextureView {
@@ -324,7 +414,7 @@ impl Renderer {
                 targets: &[Some(format.into())],
             }),
             primitive: Default::default(),
-            depth_stencil: Some(depth_state(false, wgpu::CompareFunction::Always, Default::default())),
+            depth_stencil: Some(depth_state(false, wgpu::CompareFunction::LessEqual, Default::default())),
             multisample: Default::default(),
             multiview: None,
             cache: None,
@@ -364,7 +454,23 @@ impl Renderer {
         let mut meshes = Vec::new();
         for (k, m) in ALL_MESHES.iter().enumerate() {
             let (vs, is) = mesh::build(*m);
-            let items = &statics.0[k];
+            // katakchalar bo'yicha saralash: ko'rinmaydigan katakchani chizmaslik uchun
+            let mut keyed: Vec<(usize, Instance)> = statics.0[k]
+                .iter()
+                .map(|i| {
+                    let big = i.scale[0].max(i.scale[1]).max(i.scale[2]) > ALWAYS_SIZE;
+                    (if big { GRID * GRID } else { cell_of(i.pos[0], i.pos[2]) }, *i)
+                })
+                .collect();
+            keyed.sort_by_key(|(c, _)| *c);
+            let mut ranges = vec![(0u32, 0u32); GRID * GRID + 1];
+            for (pos, (c, _)) in keyed.iter().enumerate() {
+                if ranges[*c].1 == 0 {
+                    ranges[*c].0 = pos as u32;
+                }
+                ranges[*c].1 += 1;
+            }
+            let items: Vec<Instance> = keyed.into_iter().map(|(_, i)| i).collect();
             let static_buf = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("static"),
                 size: (items.len().max(1) * inst_size) as u64,
@@ -372,7 +478,7 @@ impl Renderer {
                 mapped_at_creation: false,
             });
             if !items.is_empty() {
-                queue.write_buffer(&static_buf, 0, bytemuck::cast_slice(items));
+                queue.write_buffer(&static_buf, 0, bytemuck::cast_slice(&items));
             }
             meshes.push(MeshBuf {
                 vb: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -387,7 +493,7 @@ impl Renderer {
                 }),
                 index_count: is.len() as u32,
                 static_buf,
-                static_count: items.len() as u32,
+                ranges,
                 dyn_buf: device.create_buffer(&wgpu::BufferDescriptor {
                     label: Some("dynamic"),
                     size: (MAX_DYNAMIC * inst_size) as u64,
@@ -403,7 +509,7 @@ impl Renderer {
             });
         }
 
-        let (tv, ti) = mesh::terrain(crate::terrain::EXTENT, 3.0);
+        let (tv, ti, terrain_ranges) = mesh::terrain_chunks(crate::terrain::EXTENT, 3.0, 10);
         let terrain_vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("terrain_v"),
             contents: bytemuck::cast_slice(&tv),
@@ -445,7 +551,7 @@ impl Renderer {
             meshes,
             terrain_vb,
             terrain_ib,
-            terrain_index_count: ti.len() as u32,
+            terrain_ranges,
             terrain_inst,
             hud_buf,
             depth_view,
@@ -514,6 +620,13 @@ impl Renderer {
             self.queue.write_buffer(&self.hud_buf, 0, bytemuck::cast_slice(&frame.hud[..hud_n]));
         }
 
+        // ko'rinishni tanlash (frustum + masofa); soya uchun o'yinchi atrofi
+        let planes = frustum_planes(&vp);
+        let keep_main = visible_cells(cam.pos, Some(&planes), MAIN_DISTANCE);
+        let keep_shadow = visible_cells(cam.pos, None, SHADOW_RADIUS);
+        let terrain_main = merged(&self.terrain_ranges, &keep_main);
+        let terrain_shadow = merged(&self.terrain_ranges, &keep_shadow);
+
         let mut enc = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("frame") });
 
         // 1) soya xaritasi
@@ -534,13 +647,15 @@ impl Renderer {
             sp.set_vertex_buffer(0, self.terrain_vb.slice(..));
             sp.set_vertex_buffer(1, self.terrain_inst.slice(..));
             sp.set_index_buffer(self.terrain_ib.slice(..), wgpu::IndexFormat::Uint16);
-            sp.draw_indexed(0..self.terrain_index_count, 0, 0..1);
+            for (s, n) in &terrain_shadow {
+                sp.draw_indexed(*s..*s + *n, 0, 0..1);
+            }
             for (k, mb) in self.meshes.iter().enumerate() {
                 sp.set_vertex_buffer(0, mb.vb.slice(..));
                 sp.set_index_buffer(mb.ib.slice(..), wgpu::IndexFormat::Uint16);
-                if mb.static_count > 0 {
-                    sp.set_vertex_buffer(1, mb.static_buf.slice(..));
-                    sp.draw_indexed(0..mb.index_count, 0, 0..mb.static_count);
+                sp.set_vertex_buffer(1, mb.static_buf.slice(..));
+                for (s, n) in merged(&mb.ranges, &keep_shadow) {
+                    sp.draw_indexed(0..mb.index_count, 0, s..s + n);
                 }
                 let ds = (frame.dynamic_shadow[k] as u32).min(dyn_n[k]);
                 if ds > 0 {
@@ -568,26 +683,28 @@ impl Renderer {
                 occlusion_query_set: None,
             });
             pass.set_bind_group(0, &self.globals_bind, &[]);
-            pass.set_pipeline(&self.sky_pipeline);
-            pass.draw(0..3, 0..1);
-
             pass.set_pipeline(&self.scene_pipeline);
             pass.set_vertex_buffer(0, self.terrain_vb.slice(..));
             pass.set_vertex_buffer(1, self.terrain_inst.slice(..));
             pass.set_index_buffer(self.terrain_ib.slice(..), wgpu::IndexFormat::Uint16);
-            pass.draw_indexed(0..self.terrain_index_count, 0, 0..1);
+            for (s, n) in &terrain_main {
+                pass.draw_indexed(*s..*s + *n, 0, 0..1);
+            }
             for (k, mb) in self.meshes.iter().enumerate() {
                 pass.set_vertex_buffer(0, mb.vb.slice(..));
                 pass.set_index_buffer(mb.ib.slice(..), wgpu::IndexFormat::Uint16);
-                if mb.static_count > 0 {
-                    pass.set_vertex_buffer(1, mb.static_buf.slice(..));
-                    pass.draw_indexed(0..mb.index_count, 0, 0..mb.static_count);
+                pass.set_vertex_buffer(1, mb.static_buf.slice(..));
+                for (s, n) in merged(&mb.ranges, &keep_main) {
+                    pass.draw_indexed(0..mb.index_count, 0, s..s + n);
                 }
                 if dyn_n[k] > 0 {
                     pass.set_vertex_buffer(1, mb.dyn_buf.slice(..));
                     pass.draw_indexed(0..mb.index_count, 0, 0..dyn_n[k]);
                 }
             }
+            // osmon eng oxirida: faqat bo'sh piksellarda ishlaydi (erta chuqurlik tekshiruvi)
+            pass.set_pipeline(&self.sky_pipeline);
+            pass.draw(0..3, 0..1);
         }
 
         // 3) qurol (chuqurlik tozalanadi — devorga kirib ketmaydi) + HUD

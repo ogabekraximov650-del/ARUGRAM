@@ -117,7 +117,7 @@ fn vs_sky(@builtin(vertex_index) vi: u32) -> SkyOut {
     let x = f32((vi << 1u) & 2u);
     let y = f32(vi & 2u);
     let p = vec2<f32>(x * 2.0 - 1.0, y * 2.0 - 1.0);
-    o.clip = vec4<f32>(p, 0.9999, 1.0);
+    o.clip = vec4<f32>(p, 0.99999, 1.0);
     o.ndc = p;
     return o;
 }
@@ -138,13 +138,22 @@ struct Surf {
     emissive: f32,
 };
 
-fn surface(m: i32, c: vec3<f32>, w: vec3<f32>, n: vec3<f32>) -> Surf {
+fn surface(m: i32, c: vec3<f32>, w: vec3<f32>, n: vec3<f32>, far: bool) -> Surf {
     var s: Surf;
     s.albedo = lin(c);
     s.spec = 0.04;
     s.shin = 16.0;
     s.wrap = 0.0;
     s.emissive = 0.0;
+    if (far) {
+        // uzoqda protsedur tekstura kerak emas — arzon yo'l
+        s.albedo = lin(c * select(1.0, 0.92, m == 1));
+        if (m == 5) { s.spec = 0.9; s.shin = 90.0; }
+        if (m == 8) { s.spec = 0.7; s.shin = 50.0; }
+        if (m == 10) { s.emissive = 1.0; }
+        if (m == 9) { s.wrap = 0.5; }
+        return s;
+    }
     let wall_u = w.x * abs(n.z) + w.z * abs(n.x);
     let vert = 1.0 - abs(n.y);
     if (m == 1) {
@@ -230,7 +239,8 @@ fn surface(m: i32, c: vec3<f32>, w: vec3<f32>, n: vec3<f32>) -> Surf {
 fn fs_main(i: VOut) -> @location(0) vec4<f32> {
     let n = normalize(i.normal);
     let m = i32(round(i.mat));
-    let s = surface(m, i.color, i.world, n);
+    let dist0 = length(i.world - g.cam_pos.xyz);
+    let s = surface(m, i.color, i.world, n, dist0 > 55.0 && g.cam_pos.w < 0.5);
     if (s.emissive > 0.5) {
         let d = length(i.world - g.cam_pos.xyz);
         let f = select(1.0 - exp(-d * g.fog.a), 0.0, g.cam_pos.w > 0.5);
@@ -248,13 +258,13 @@ fn fs_main(i: VOut) -> @location(0) vec4<f32> {
         let uv = vec2<f32>(ls.x * 0.5 + 0.5, 1.0 - (ls.y * 0.5 + 0.5));
         let texel = 1.0 / SHADOW_SIZE;
         var sh = 0.0;
-        for (var ox = -1; ox <= 1; ox = ox + 1) {
-            for (var oy = -1; oy <= 1; oy = oy + 1) {
-                let o = vec2<f32>(f32(ox), f32(oy)) * texel;
+        for (var ox = 0; ox < 2; ox = ox + 1) {
+            for (var oy = 0; oy < 2; oy = oy + 1) {
+                let o = (vec2<f32>(f32(ox), f32(oy)) - vec2<f32>(0.5)) * texel * 1.5;
                 sh = sh + textureSampleCompare(shadow_map, shadow_smp, clamp(uv + o, vec2<f32>(0.001), vec2<f32>(0.999)), ls.z);
             }
         }
-        sh = sh / 9.0;
+        sh = sh / 4.0;
         let inside = select(0.0, 1.0, uv.x > 0.0 && uv.x < 1.0 && uv.y > 0.0 && uv.y < 1.0 && ls.z < 1.0);
         shadow = mix(1.0, sh, inside);
     }

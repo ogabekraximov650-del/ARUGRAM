@@ -406,6 +406,11 @@ impl Game {
         }
     }
 
+    pub fn set_density(&mut self, d: f32) {
+        self.density = d.max(0.3);
+        self.input.set_density(d);
+    }
+
     pub fn resize(&mut self, width: u32, height: u32) {
         self.width = width;
         self.height = height;

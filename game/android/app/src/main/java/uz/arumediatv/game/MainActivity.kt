@@ -16,6 +16,17 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Choreographer.FrameCall
     private var lastNanos = 0L
     private val sounds = SoundBank()
 
+    // Adaptiv chizish aniqligi: qurilma sekin bo'lsa ichki ruxsat kamayadi (ekranga kattalashtirib chiqariladi), silliqlik saqlanadi.
+    private val scales = floatArrayOf(1.0f, 0.85f, 0.72f, 0.6f, 0.5f)
+    private var scaleIdx = 0
+    private var touchScale = 1f
+    private var baseDensity = 1f
+    private var frames = 0
+    private var skipFrames = 40
+    private var accum = 0f
+    private var lastDownMs = 0L
+    private var goodWindows = 0
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -42,7 +53,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Choreographer.FrameCall
     }
 
     override fun surfaceCreated(holder: SurfaceHolder) {
-        ptr = NativeBridge.nativeInit(holder.surface, resources.displayMetrics.density)
+        baseDensity = resources.displayMetrics.density
+        ptr = NativeBridge.nativeInit(holder.surface, baseDensity)
         if (ptr != 0L) loadLayout()
         if (ptr == 0L) {
             Toast.makeText(this, "GPU ishga tushmadi (logcat: aru_game)", Toast.LENGTH_LONG).show()
@@ -64,7 +76,13 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Choreographer.FrameCall
     }
 
     override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-        if (ptr != 0L) NativeBridge.nativeResize(ptr, width, height)
+        if (ptr != 0L) {
+            NativeBridge.nativeResize(ptr, width, height)
+            // chizish o'lchami ekrandan kichik bo'lsa: sensor koordinatalari va HUD o'lchami shunga moslanadi
+            val vw = view.width
+            touchScale = if (vw > 0) width.toFloat() / vw else 1f
+            NativeBridge.nativeSetDensity(ptr, baseDensity * touchScale)
+        }
     }
 
     override fun surfaceDestroyed(holder: SurfaceHolder) {
@@ -99,8 +117,50 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Choreographer.FrameCall
         if (ptr != 0L) {
             NativeBridge.nativeFrame(ptr, dt)
             NativeBridge.nativeTakeEvents(ptr)?.forEach { sounds.play(it) }
+            adapt(dt)
         }
         Choreographer.getInstance().postFrameCallback(this)
+    }
+
+    /** Kadr vaqtiga qarab chizish aniqligini pasaytiradi (va uzoq vaqt silliq bo'lsa ehtiyotkorlik bilan qaytaradi). */
+    private fun adapt(dt: Float) {
+        if (dt <= 0f || dt > 0.5f) return
+        if (skipFrames > 0) {
+            skipFrames--
+            return
+        }
+        accum += dt
+        frames++
+        if (frames < 45) return
+        val avg = accum / frames
+        accum = 0f
+        frames = 0
+        @Suppress("DEPRECATION")
+        val interval = 1f / maxOf(30f, windowManager.defaultDisplay.refreshRate)
+        val now = System.currentTimeMillis()
+        if (avg > interval * 1.45f && scaleIdx < scales.size - 1) {
+            scaleIdx++
+            lastDownMs = now
+            goodWindows = 0
+            applyScale()
+        } else if (avg < interval * 1.12f && scaleIdx > 0 && now - lastDownMs > 60_000) {
+            if (++goodWindows >= 4) {
+                scaleIdx--
+                goodWindows = 0
+                applyScale()
+            }
+        } else {
+            goodWindows = 0
+        }
+    }
+
+    private fun applyScale() {
+        val w = view.width
+        val h = view.height
+        if (w <= 0 || h <= 0) return
+        val s = scales[scaleIdx]
+        view.holder.setFixedSize(maxOf(2, (w * s).toInt() and 1.inv()), maxOf(2, (h * s).toInt() and 1.inv()))
+        skipFrames = 20
     }
 
     override fun onTouchEvent(e: MotionEvent): Boolean {
@@ -108,14 +168,14 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Choreographer.FrameCall
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
                 val i = e.actionIndex
-                NativeBridge.nativeTouch(ptr, 0, e.getPointerId(i), e.getX(i), e.getY(i))
+                NativeBridge.nativeTouch(ptr, 0, e.getPointerId(i), e.getX(i) * touchScale, e.getY(i) * touchScale)
             }
             MotionEvent.ACTION_MOVE -> for (i in 0 until e.pointerCount) {
-                NativeBridge.nativeTouch(ptr, 1, e.getPointerId(i), e.getX(i), e.getY(i))
+                NativeBridge.nativeTouch(ptr, 1, e.getPointerId(i), e.getX(i) * touchScale, e.getY(i) * touchScale)
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP, MotionEvent.ACTION_CANCEL -> {
                 val i = e.actionIndex
-                NativeBridge.nativeTouch(ptr, 2, e.getPointerId(i), e.getX(i), e.getY(i))
+                NativeBridge.nativeTouch(ptr, 2, e.getPointerId(i), e.getX(i) * touchScale, e.getY(i) * touchScale)
                 saveLayoutIfChanged()
             }
         }

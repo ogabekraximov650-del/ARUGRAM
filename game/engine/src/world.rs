@@ -271,7 +271,7 @@ fn oak(b: &mut B, x: f32, z: f32, s: f32, shade: f32, birch: bool) {
     let trunk = if birch { [0.85, 0.85, 0.8] } else { [0.35, 0.25, 0.16] };
     b.vis(Mesh::Cylinder, v3(0.0, 1.6 * s, 0.0), v3(0.5 * s, 3.2 * s, 0.5 * s), trunk, Mat::Wood, Quat::IDENTITY);
     let g = if birch { [0.40 * shade, 0.58 * shade, 0.22 * shade] } else { [0.17 * shade, 0.40 * shade, 0.16 * shade] };
-    for (dx, dy, dz, r) in [(0.0, 4.3, 0.0, 3.4), (1.0, 3.7, 0.6, 2.4), (-0.9, 3.9, -0.7, 2.6), (0.2, 5.2, -0.3, 2.2)] {
+    for (dx, dy, dz, r) in [(0.0, 4.3, 0.0, 3.6), (1.0, 3.7, 0.6, 2.5), (-0.9, 4.6, -0.7, 2.6)] {
         b.vis(Mesh::Sphere, v3(dx * s, dy * s, dz * s), v3(r * s, r * 0.85 * s, r * s), g, Mat::Foliage, Quat::IDENTITY);
     }
     b.col(v3(0.0, 1.6 * s, 0.0), v3(0.5 * s, 3.2 * s + 0.6, 0.5 * s));
@@ -422,7 +422,7 @@ pub fn build() -> World {
     let mut placed: Vec<(f32, f32)> = Vec::new();
     let mut tries = 0;
     let mut trees = 0;
-    while trees < 190 && tries < 2500 {
+    while trees < 140 && tries < 2500 {
         tries += 1;
         let x = rng.range(-95.0, 95.0);
         let z = rng.range(-95.0, 95.0);

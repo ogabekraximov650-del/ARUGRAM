@@ -137,6 +137,11 @@ impl Input {
         }
     }
 
+    /// Ekran chizish o'lchami o'zgarganda (piksel zichligi) tugmalar o'lchami moslanadi.
+    pub fn set_density(&mut self, d: f32) {
+        self.density = d.max(0.3);
+    }
+
     pub fn resize(&mut self, width: u32, height: u32) {
         self.width = width as f32;
         self.height = height as f32;

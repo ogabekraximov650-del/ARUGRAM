@@ -45,8 +45,8 @@ fn cube() -> M {
 }
 
 fn sphere() -> M {
-    const SEG: usize = 20;
-    const RING: usize = 14;
+    const SEG: usize = 14;
+    const RING: usize = 9;
     let mut vs = Vec::new();
     let mut idx = Vec::new();
     for j in 0..=RING {
@@ -71,7 +71,7 @@ fn sphere() -> M {
 
 /// Yon sirtli aylana jism: pastki/yuqori radius (r0, r1), balandlik 1 (y -0.5..0.5), qopqoqlar bilan.
 fn lathe(r0: f32, r1: f32, top_cap: bool) -> M {
-    const SEG: usize = 20;
+    const SEG: usize = 14;
     let mut vs = Vec::new();
     let mut idx = Vec::new();
     let slope = r0 - r1; // radius pasayishi balandlik 1 da
@@ -166,8 +166,9 @@ pub fn build(mesh: Mesh) -> M {
     }
 }
 
-/// Relyef to'ri: markaz atrofida `extent` gacha, katak `cell` metr.
-pub fn terrain(extent: f32, cell: f32) -> M {
+/// Relyef to'ri: markaz atrofida `extent` gacha, katak `cell` metr. Indekslar `chunk` x `chunk` katakli
+/// bo'laklar tartibida (qator-qator): har bo'lak uchun (boshlanish, soni) — ko'rinmaydiganini chizmaslik uchun.
+pub fn terrain_chunks(extent: f32, cell: f32, chunk: usize) -> (Vec<MeshVertex>, Vec<u16>, Vec<(u32, u32)>) {
     let n = (2.0 * extent / cell) as usize;
     let mut vs = Vec::with_capacity((n + 1) * (n + 1));
     for j in 0..=n {
@@ -179,14 +180,21 @@ pub fn terrain(extent: f32, cell: f32) -> M {
     }
     let row = (n + 1) as u16;
     let mut idx = Vec::with_capacity(n * n * 6);
-    for j in 0..n as u16 {
-        for i in 0..n as u16 {
-            let a = j * row + i;
-            let (b, c, d) = (a + 1, a + row, a + row + 1);
-            idx.extend_from_slice(&[a, c, b, b, c, d]);
+    let mut ranges = Vec::new();
+    for cj in 0..n / chunk {
+        for ci in 0..n / chunk {
+            let start = idx.len() as u32;
+            for j in cj * chunk..(cj + 1) * chunk {
+                for i in ci * chunk..(ci + 1) * chunk {
+                    let a = j as u16 * row + i as u16;
+                    let (b, c, d) = (a + 1, a + row, a + row + 1);
+                    idx.extend_from_slice(&[a, c, b, b, c, d]);
+                }
+            }
+            ranges.push((start, idx.len() as u32 - start));
         }
     }
-    (vs, idx)
+    (vs, idx, ranges)
 }
 
 #[cfg(test)]
@@ -218,7 +226,8 @@ mod tests {
 
     #[test]
     fn relyef_yuzi_yuqoriga_qaraydi() {
-        let (vs, idx) = terrain(30.0, 3.0);
+        let (vs, idx, ranges) = terrain_chunks(30.0, 3.0, 5);
+        assert_eq!(ranges.len(), 16);
         for t in idx.chunks_exact(3) {
             let p: Vec<Vec3> = t.iter().map(|i| Vec3::from(vs[*i as usize].pos)).collect();
             assert!((p[1] - p[0]).cross(p[2] - p[0]).y > 0.0);
@@ -227,7 +236,7 @@ mod tests {
 
     #[test]
     fn indekslar_u16_ga_sigadi() {
-        let (vs, _) = terrain(terrain::EXTENT, 3.0);
+        let (vs, _, _) = terrain_chunks(terrain::EXTENT, 3.0, 10);
         assert!(vs.len() < 65536);
     }
 }
