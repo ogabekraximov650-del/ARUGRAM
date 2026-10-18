@@ -99,6 +99,10 @@ fun TgItem(d: TgDoc, modifier: Modifier = Modifier, full: Boolean = false, scale
             val bmp = remember(fb) { BitmapFactory.decodeByteArray(fb, 0, fb.size)?.asImageBitmap() }
             if (bmp != null) Image(bmp, null, Modifier.fillMaxSize(), contentScale = scale)
         } else if (pbmp != null) Image(pbmp, null, Modifier.fillMaxSize(), contentScale = scale)
+        else if (d.emoji.isNotEmpty() && (d.thumb.isEmpty() && d.kind != "webp")) {
+            // Rasmi yo'q (.tgs) — hozircha mos emoji belgisi ko'rinadi.
+            Text(d.emoji, fontSize = 26.sp, fontFamily = TgEmojiFont, color = Color.White, modifier = Modifier.align(Alignment.Center))
+        }
     }
 }
 

@@ -74,7 +74,10 @@ class TgStickerStore(ctx: Context) {
     }
 
     /** Hujjatning (yoki kichik rasmining) baytlari; diskda shifrlangan keshdan, bo'lmasa Telegram'dan. */
-    suspend fun bytes(d0: TgDoc, thumb: Boolean): ByteArray? {
+    suspend fun bytes(d0: TgDoc, wantThumb: Boolean): ByteArray? {
+        // Kichik rasmi yo'q hujjat: webp bo'lsa o'zi rasm; boshqasi (.tgs) hozircha ko'rsatilmaydi.
+        if (wantThumb && d0.thumb.isEmpty() && d0.kind != "webp") return null
+        val thumb = wantThumb && d0.thumb.isNotEmpty()
         val name = "${d0.id}_${if (thumb) "t" else "f"}"
         mem.get(name)?.let { return it }
         return withContext(Dispatchers.IO) {
@@ -85,7 +88,7 @@ class TgStickerStore(ctx: Context) {
                 for (attempt in 0..1) {
                     val tmp = File(dir, "$name.tmp")
                     val arg = JSONObject().put("id", d.id).put("hash", d.hash).put("ref", d.ref).put("dc", d.dc)
-                        .put("thumb", if (thumb) d.thumb.ifEmpty { "m" } else "").put("out", tmp.absolutePath).put("max", 12L * 1024 * 1024)
+                        .put("thumb", if (thumb) d.thumb else "").put("out", tmp.absolutePath).put("max", 12L * 1024 * 1024)
                     val r = RustCore.tgMediaGet(arg.toString())
                     if (r.optBoolean("ok")) {
                         val b = runCatching { tmp.readBytes() }.getOrNull()

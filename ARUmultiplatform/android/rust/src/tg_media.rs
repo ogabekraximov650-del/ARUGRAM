@@ -127,7 +127,19 @@ async fn media_list(client: &Client, arg: &str) -> Result<Value, String> {
                 client.invoke(&tl::functions::messages::GetAllStickers { hash: 0 }).await
             }
             .map_err(|e| inv_err(&e))?;
-            let sets = match r {
+            let mut extra: Vec<Value> = Vec::new();
+            if arg == "sets:emoji" {
+                // O'rnatilgan to'plam bo'lmasa ham emoji chiqishi uchun: Telegram tavsiya qilgan (featured) emoji to'plamlari.
+                if let Ok(tl::enums::messages::FeaturedStickers::Stickers(f)) =
+                    client.invoke(&tl::functions::messages::GetFeaturedEmojiStickers { hash: 0 }).await
+                {
+                    for c in &f.sets {
+                        let tl::enums::StickerSet::Set(set) = c.set();
+                        extra.push(media_set_json(&set));
+                    }
+                }
+            }
+            let mut sets = match r {
                 tl::enums::messages::AllStickers::Stickers(x) => x
                     .sets
                     .iter()
@@ -139,6 +151,11 @@ async fn media_list(client: &Client, arg: &str) -> Result<Value, String> {
                     .collect::<Vec<_>>(),
                 tl::enums::messages::AllStickers::NotModified => Vec::new(),
             };
+            for e in extra {
+                if !sets.iter().any(|x| x["id"] == e["id"]) {
+                    sets.push(e);
+                }
+            }
             Ok(json!({"ok": true, "sets": sets}))
         }
         "gifs" => {
