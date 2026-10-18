@@ -294,12 +294,14 @@ private fun EmojiPage(onEmoji: (String) -> Unit, onPick: (PackPick) -> Unit) {
 
     // Bo'lim sarlavhalarining ro'yxatdagi o'rni
     data class Sec(val key: String, val index: Int)
-    val sections = remember(recent, packs, headers.toMap()) {
+    val tgList = tgEmoji?.sets.orEmpty()
+    val sections = remember(recent, packs, headers.toMap(), tgList, tgEmoji?.docs?.toMap()) {
         val out = ArrayList<Sec>()
         var i = 0
         if (recent.isNotEmpty()) { out += Sec("recent", i); i += 1 + recent.size }
         TG_EMOJI_GROUPS.forEach { g -> out += Sec(g.id, i); i += 1 + g.emoji.size }
         packs.forEach { p -> out += Sec("p${p.id}", i); i += 1 + (headers[p.id]?.items?.size ?: 0) }
+        tgList.forEach { t -> val n = tgEmoji?.docs?.get(t.id)?.size ?: t.count; if (n > 0) { out += Sec("t${t.id}", i); i += 1 + n } }
         out
     }
     val current by remember(sections) { derivedStateOf { sections.lastOrNull { it.index <= grid.firstVisibleItemIndex }?.key ?: sections.firstOrNull()?.key } }
@@ -320,6 +322,10 @@ private fun EmojiPage(onEmoji: (String) -> Unit, onPick: (PackPick) -> Unit) {
                     if (first != null) PackItemImage(p.id, first.id, Modifier.size(26.dp), thumb = true)
                     else Box(Modifier.size(18.dp).clip(CircleShape).background(Pal.icon.copy(alpha = 0.4f)))
                 }
+            }
+            // Telegram emoji to'plamlari muqovasi; to'plam ichidagilari faqat o'sha to'plamga borilganda (ekranda ko'ringanda) yuklanadi.
+            if (tgEmoji != null) items(tgList, key = { "t${it.id}" }) { t ->
+                StripItem(current == "t${t.id}", { jump("t${t.id}") }) { TgSetIcon(tgEmoji, t, Modifier.size(28.dp)) }
             }
         }
         SearchBar(query, { query = it }, { pick(it) })
