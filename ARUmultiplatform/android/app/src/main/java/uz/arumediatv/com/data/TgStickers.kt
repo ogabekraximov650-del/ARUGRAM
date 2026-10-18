@@ -43,28 +43,42 @@ class TgStickerStore(ctx: Context) {
 
     private val docKeyOf = ConcurrentHashMap<Long, String>()
 
-    private fun remember(key: String, l: List<TgDoc>) { docs[key] = l; l.forEach { docKeyOf[it.id] = key } }
+    private fun remember(key: String, l: List<TgDoc>) { if (l.isNotEmpty()) docs[key] = l; l.forEach { docKeyOf[it.id] = key } }
+
+    /** Ro'yxat javobi: diskdagi nusxa (24 soatgacha yangi) bo'lsa o'sha; bo'lmasa Telegram'dan olib diskka yoziladi. */
+    private fun listJson(key: String, cmd: String): JSONObject? {
+        val f = File(dir, "list_$key")
+        val cached = if (f.exists()) runCatching { JSONObject(String(SecureStore.open(f.readBytes()), Charsets.UTF_8)) }.getOrNull() else null
+        if (cached != null && System.currentTimeMillis() - f.lastModified() < 24L * 3600 * 1000) return cached
+        val r = RustCore.tgMediaList(cmd)
+        if (r.optBoolean("ok")) {
+            runCatching { f.writeBytes(SecureStore.seal(r.toString().toByteArray(Charsets.UTF_8))) }
+            return r
+        }
+        return cached
+    }
 
     suspend fun sets(kind: String): List<TgSet> = sets[kind] ?: withContext(Dispatchers.IO) {
-        val r = RustCore.tgMediaList("sets:$kind")
+        val r = listJson("sets_$kind", "sets:$kind") ?: return@withContext emptyList()
         val a = r.optJSONArray("sets") ?: return@withContext emptyList()
         (0 until a.length()).map { val o = a.getJSONObject(it); TgSet(o.optLong("id"), o.optLong("hash"), o.optString("title"), o.optInt("count"), o.optLong("thumb_doc")) }
-            .also { sets[kind] = it }
+            .also { if (it.isNotEmpty()) sets[kind] = it }
     }
 
     suspend fun setDocs(s: TgSet): List<TgDoc> = docs["s${s.id}"] ?: withContext(Dispatchers.IO) {
-        val r = RustCore.tgMediaList("set:${s.id}:${s.hash}")
-        docList(r.optJSONArray("docs")).also { remember("s${s.id}", it) }
+        val r = listJson("set_${s.id}", "set:${s.id}:${s.hash}")
+        docList(r?.optJSONArray("docs")).also { remember("s${s.id}", it) }
     }
 
     suspend fun gifs(): List<TgDoc> = docs["gifs"] ?: withContext(Dispatchers.IO) {
-        docList(RustCore.tgMediaList("gifs").optJSONArray("docs")).also { remember("gifs", it) }
+        docList(listJson("gifs", "gifs")?.optJSONArray("docs")).also { remember("gifs", it) }
     }
 
     /** Eskirgan havola uchun ro'yxatni qayta oladi. */
     private suspend fun refresh(d: TgDoc): TgDoc {
         val key = docKeyOf[d.id] ?: return d
         docs.remove(key)
+        File(dir, if (key == "gifs") "list_gifs" else "list_set_${key.removePrefix("s")}").delete()
         val l = if (key == "gifs") gifs() else {
             val id = key.removePrefix("s")
             val hash = sets.values.flatten().firstOrNull { it.id.toString() == id }?.hash ?: return d

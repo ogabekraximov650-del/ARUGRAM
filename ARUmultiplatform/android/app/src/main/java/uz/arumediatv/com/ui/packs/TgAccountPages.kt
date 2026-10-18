@@ -53,7 +53,7 @@ import uz.arumediatv.com.data.TgSet
 
 /** Bir vaqtda ekranda harakatlanadigan videolar soni cheklangan (telefon qotmasligi uchun). */
 private object TgSlots {
-    const val MAX = 6
+    const val MAX = 4
     val active = mutableStateListOf<Any>()
     fun acquire(t: Any): Boolean = if (t in active) true else if (active.size < MAX) { active.add(t); true } else false
     fun release(t: Any) { active.remove(t) }
@@ -70,9 +70,10 @@ fun TgItem(d: TgDoc, modifier: Modifier = Modifier, full: Boolean = false, scale
     val token = remember { Any() }
     var fully by remember { mutableStateOf(false) }
     var active by remember { mutableStateOf(false) }
+    var rendered by remember(d.id) { mutableStateOf(false) }
     LaunchedEffect(fully, d.id) {
         if (fully && d.isVideo) active = TgSlots.acquire(token) || full
-        else { TgSlots.release(token); active = false }
+        else { TgSlots.release(token); active = false; rendered = false }
     }
     DisposableEffect(token) { onDispose { TgSlots.release(token) } }
     // Slot bo'shaganda qayta uriniladi
@@ -93,8 +94,9 @@ fun TgItem(d: TgDoc, modifier: Modifier = Modifier, full: Boolean = false, scale
         val pbmp = remember(pb) { pb?.let { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() } }
         val fb = fullBytes
         if (fb != null && active && d.isVideo) {
-            if (pbmp != null) Image(pbmp, null, Modifier.fillMaxSize(), contentScale = scale)
-            LoopingVideo(fb, "tg_${d.id}", Modifier.fillMaxSize())
+            // Video va rasm bir xil o'lchamda (ikki xil kesilib "ikki oyna" bo'lmasin); birinchi kadrdan keyin rasm yashiriladi.
+            LoopingVideo(fb, "tg_${d.id}", Modifier.fillMaxSize(), zoom = scale == ContentScale.Crop, onFirstFrame = { rendered = true })
+            if (pbmp != null && !rendered) Image(pbmp, null, Modifier.fillMaxSize(), contentScale = scale)
         } else if (fb != null && d.kind == "webp") {
             val bmp = remember(fb) { BitmapFactory.decodeByteArray(fb, 0, fb.size)?.asImageBitmap() }
             if (bmp != null) Image(bmp, null, Modifier.fillMaxSize(), contentScale = scale)

@@ -119,7 +119,7 @@ private object GifSound {
 
 /** Video ko'rinishidagi GIF (mp4): ovozsiz, cheksiz takrorlanadi. Baytlar vaqtinchalik faylga yoziladi. */
 @Composable
-internal fun LoopingVideo(bytes: ByteArray, key: String, modifier: Modifier, sound: Boolean = false) {
+internal fun LoopingVideo(bytes: ByteArray, key: String, modifier: Modifier, sound: Boolean = false, zoom: Boolean = false, onFirstFrame: (() -> Unit)? = null) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val player = remember(key) {
         androidx.media3.exoplayer.ExoPlayer.Builder(ctx.applicationContext).build().apply {
@@ -130,7 +130,11 @@ internal fun LoopingVideo(bytes: ByteArray, key: String, modifier: Modifier, sou
             trackSelectionParameters = trackSelectionParameters.buildUpon().setTrackTypeDisabled(androidx.media3.common.C.TRACK_TYPE_AUDIO, true).build()
         }
     }
-    DisposableEffect(player) { onDispose { player.release() } }
+    DisposableEffect(player) {
+        val l = object : androidx.media3.common.Player.Listener { override fun onRenderedFirstFrame() { onFirstFrame?.invoke() } }
+        player.addListener(l)
+        onDispose { player.removeListener(l); player.release() }
+    }
     LaunchedEffect(sound) {
         // Ovoz yo'q GIFda audio yo'li butunlay o'chiriladi (faqat ovozni 0 qilish yetmasligi mumkin).
         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().setTrackTypeDisabled(androidx.media3.common.C.TRACK_TYPE_AUDIO, !sound).build()
@@ -149,6 +153,7 @@ internal fun LoopingVideo(bytes: ByteArray, key: String, modifier: Modifier, sou
         factory = { c ->
             (android.view.LayoutInflater.from(c).inflate(uz.arumediatv.com.R.layout.aru_player_view, null) as androidx.media3.ui.PlayerView).apply {
                 useController = false
+                resizeMode = if (zoom) androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM else androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
                 this.player = player
             }
         },
