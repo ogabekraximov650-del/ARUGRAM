@@ -120,8 +120,8 @@ fun TgMediaPanel(
         HorizontalPager(pager, Modifier.fillMaxSize(), beyondViewportPageCount = 0) { page ->
             when (page) {
                 0 -> EmojiPage(onEmoji, onPick)
-                1 -> if (TG_STICKERS_ON) TgGifPage() else PackPage(PackKind.GIF, onPick, onManage)
-                else -> if (TG_STICKERS_ON) TgAccountPage("stickers") else PackPage(PackKind.STICKER, onPick, onManage)
+                1 -> if (TG_STICKERS_ON) TgGifPage(onEmoji) else PackPage(PackKind.GIF, onPick, onManage)
+                else -> if (TG_STICKERS_ON) TgAccountPage("stickers", onEmoji) else PackPage(PackKind.STICKER, onPick, onManage)
             }
         }
         // Tabletka
@@ -287,7 +287,7 @@ private fun EmojiPage(onEmoji: (String) -> Unit, onPick: (PackPick) -> Unit) {
     val scope = rememberCoroutineScope()
     val tgEmoji = if (TG_STICKERS_ON) rememberTgSets("emoji") else null
     var tgPreview by remember { mutableStateOf<uz.arumediatv.com.data.TgDoc?>(null) }
-    tgPreview?.let { TgPreview(it) { tgPreview = null } }
+    tgPreview?.let { p -> TgPreview(p, "emoji", { tgSend(ctx, p, "emoji", onEmoji) }) { tgPreview = null } }
     // Emoji: ekran o'rtasiga eng yaqin qatorlar animatsiya qiladi (kuchsiz telefonda 1 ta, boshqasida 2 ta); surilganda to'xtaydi.
     val settledE = rememberSettled { grid.isScrollInProgress }
     val midEmoji by remember {
@@ -374,7 +374,7 @@ private fun EmojiPage(onEmoji: (String) -> Unit, onPick: (PackPick) -> Unit) {
                     EmojiCell(if (tone > 0) withTone(base, tone) else base, onLong = if (supportsTone(base)) ({ toneFor = base }) else null) { pick(base) }
                 }
             }
-            if (tgEmoji != null) tgSetItems(tgEmoji) { tgPreview = it }
+            if (tgEmoji != null) tgSetItems(tgEmoji, { tgSend(ctx, it, "emoji", onEmoji) }, { tgPreview = it })
             packs.forEach { p ->
                 header("p${p.id}", p.title)
                 val its = headers[p.id]?.items.orEmpty()

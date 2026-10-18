@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+
 package uz.arumediatv.com.ui.packs
 
 import android.graphics.BitmapFactory
@@ -19,6 +21,8 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -238,7 +242,7 @@ fun rememberTgSets(kind: String): TgSetsState {
 }
 
 /** Emoji sahifasi uchun: Telegram emoji to'plamlari bo'limlari. */
-fun LazyGridScope.tgSetItems(st: TgSetsState, onTap: (TgDoc) -> Unit) {
+fun LazyGridScope.tgSetItems(st: TgSetsState, onTap: (TgDoc) -> Unit, onLong: (TgDoc) -> Unit) {
     st.sets.orEmpty().forEach { s ->
         val its = st.docs[s.id].orEmpty()
         val n = if (its.isEmpty()) s.count else its.size
@@ -249,14 +253,15 @@ fun LazyGridScope.tgSetItems(st: TgSetsState, onTap: (TgDoc) -> Unit) {
         items(n, key = { "ti${s.id}:${its.getOrNull(it)?.id ?: -(it + 1L)}" }) { i ->
             val d = its.getOrNull(i)
             if (d == null) TgShadow(st, s)
-            else Box(Modifier.aspectRatio(1f).clip(RoundedCornerShape(10.dp)).clickable { onTap(d) }) { TgItem(d, Modifier.fillMaxSize().padding(8.dp)) }
+            else Box(Modifier.aspectRatio(1f).clip(RoundedCornerShape(10.dp)).combinedClickable(onClick = { onTap(d) }, onLongClick = { onLong(d) })) { TgItem(d, Modifier.fillMaxSize().padding(8.dp)) }
         }
     }
 }
 
 /** GIF yoki Stikerlar sahifasi — foydalanuvchining Telegram hisobidan. */
 @Composable
-fun TgAccountPage(kind: String) {
+fun TgAccountPage(kind: String, onEmoji: (String) -> Unit) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
     val st = rememberTgSets(kind)
     val grid = rememberLazyGridState()
     val scope = rememberCoroutineScope()
@@ -313,12 +318,12 @@ fun TgAccountPage(kind: String) {
                 items(if (its.isEmpty()) s.count else its.size, key = { "si${s.id}:${its.getOrNull(it)?.id ?: -(it + 1L)}" }) { i ->
                     val d = its.getOrNull(i)
                     if (d == null) TgShadow(st, s)
-                    else Box(Modifier.aspectRatio(1f).clip(RoundedCornerShape(10.dp)).clickable { preview = d }) { TgItem(d, Modifier.fillMaxSize().padding(3.dp)) }
+                    else Box(Modifier.aspectRatio(1f).clip(RoundedCornerShape(10.dp)).combinedClickable(onClick = { tgSend(ctx, d, kind, onEmoji) }, onLongClick = { preview = d })) { TgItem(d, Modifier.fillMaxSize().padding(3.dp)) }
                 }
             }
         } }
     }
-    preview?.let { TgPreview(it) { preview = null } }
+    preview?.let { p -> TgPreview(p, kind, { tgSend(ctx, p, kind, onEmoji) }) { preview = null } }
 }
 
 /** Faqat kichik rasm (tasmadagi belgi uchun). */
@@ -347,17 +352,50 @@ fun TgSetIcon(st: TgSetsState, s: TgSet, modifier: Modifier) {
     }
 }
 
-/** Katta ko'rinish: animatsiya shu yerda to'liq ishlaydi. */
+/** Bosilganda: emoji bo'lsa oddiy emoji matni sifatida kiritiladi; Telegram stiker/GIF'ini yuborish hozircha yo'q. */
+fun tgSend(ctx: android.content.Context, d: TgDoc, kind: String, onEmoji: (String) -> Unit) {
+    if (kind == "emoji" && d.emoji.isNotBlank()) onEmoji(d.emoji)
+    else android.widget.Toast.makeText(ctx, "Telegram ${if (kind == "gifs") "GIF" else "stiker"}larini yuborish keyingi bosqichda", android.widget.Toast.LENGTH_SHORT).show()
+}
+
+/**
+ * Bosib turilganda (Telegramdagidek): qorong'i fonda katta, harakatlanuvchi element, tepasida emoji, pastida amallar.
+ * Tashqarisiga bosilsa yopiladi.
+ */
 @Composable
-fun TgPreview(d: TgDoc, onClose: () -> Unit) {
-    androidx.compose.ui.window.Dialog(onDismissRequest = onClose) {
-        Column(
-            Modifier.clip(RoundedCornerShape(20.dp)).background(Color(0xFF201B18)).clickable(onClick = onClose).padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
+fun TgPreview(d: TgDoc, kind: String, onSend: () -> Unit, onClose: () -> Unit) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onClose,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Box(
+            Modifier.fillMaxSize().background(Color(0xF0120E0C))
+                .clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null, onClick = onClose),
+            contentAlignment = Alignment.Center,
         ) {
-            TgItem(d, Modifier.fillMaxWidth().aspectRatio(1f), full = true)
-            if (d.emoji.isNotEmpty()) Text(d.emoji, fontSize = 22.sp, modifier = Modifier.padding(top = 8.dp), fontFamily = TgEmojiFont)
-            Text("Hozircha faqat ko'rish (yuborish keyingi bosqichda)", color = Color(0xFF8E8E93), fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                if (d.emoji.isNotEmpty()) Text(d.emoji, fontSize = 30.sp, fontFamily = TgEmojiFont, modifier = Modifier.padding(bottom = 18.dp))
+                val ratio = if (kind == "gifs") d.ratio else 1f
+                Box(Modifier.width(if (ratio > 1f) 320.dp else 260.dp).aspectRatio(ratio)) { TgItem(d, Modifier.fillMaxSize(), full = true) }
+                Spacer(Modifier.height(44.dp))
+                Column(Modifier.width(270.dp).clip(RoundedCornerShape(22.dp)).background(Color(0xFF352C27)).padding(vertical = 6.dp)) {
+                    @Composable
+                    fun Row2(icon: androidx.compose.ui.graphics.vector.ImageVector, text: String, onClick: () -> Unit) {
+                        Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 18.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                            androidx.compose.material3.Icon(icon, null, tint = Color.White.copy(alpha = 0.85f), modifier = Modifier.size(24.dp))
+                            Spacer(Modifier.width(18.dp))
+                            Text(text, color = Color.White.copy(alpha = 0.92f), fontSize = 17.sp)
+                        }
+                    }
+                    Row2(uz.arumediatv.com.ui.common.AruIcons.Send, when (kind) { "emoji" -> "Emoji yuborish"; "gifs" -> "GIF yuborish"; else -> "Stiker yuborish" }) { onSend(); onClose() }
+                    if (d.emoji.isNotBlank()) Row2(uz.arumediatv.com.ui.common.AruIcons.Copy, "Emojidan nusxa olish") {
+                        (ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(android.content.ClipData.newPlainText("emoji", d.emoji))
+                        android.widget.Toast.makeText(ctx, "Nusxa olindi", android.widget.Toast.LENGTH_SHORT).show()
+                        onClose()
+                    }
+                }
+            }
         }
     }
 }
@@ -387,7 +425,8 @@ private fun gifRows(g: List<TgDoc>, width: Float, gap: Float, target: Float): Li
 
 /** GIF sahifasi: o'lchamiga qarab 2–3 tadan qator, ekranda to'liq ko'ringan barcha GIF harakatlanadi (Telegramdagidek), atrofi oldindan tayyorlanadi. */
 @Composable
-fun TgGifPage() {
+fun TgGifPage(onEmoji: (String) -> Unit) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
     val st = rememberTgSets("gifs")
     val store = AppServices.tgStickers
     val list = androidx.compose.foundation.lazy.rememberLazyListState()
@@ -421,7 +460,7 @@ fun TgGifPage() {
                     val r = rows[i]
                     Row(Modifier.fillMaxWidth().height(r.h.dp), horizontalArrangement = Arrangement.spacedBy(gap.dp)) {
                         r.items.forEach { d ->
-                            Box(Modifier.width((d.ratio * r.h).dp).fillMaxHeight().clip(RoundedCornerShape(10.dp)).clickable { preview = d }) {
+                            Box(Modifier.width((d.ratio * r.h).dp).fillMaxHeight().clip(RoundedCornerShape(10.dp)).combinedClickable(onClick = { tgSend(ctx, d, "gifs", onEmoji) }, onLongClick = { preview = d })) {
                                 TgItem(d, Modifier.fillMaxSize(), scale = ContentScale.Crop)
                             }
                         }
@@ -430,5 +469,5 @@ fun TgGifPage() {
             }
         }
     }
-    preview?.let { TgPreview(it) { preview = null } }
+    preview?.let { p -> TgPreview(p, "gifs", { tgSend(ctx, p, "gifs", onEmoji) }) { preview = null } }
 }
