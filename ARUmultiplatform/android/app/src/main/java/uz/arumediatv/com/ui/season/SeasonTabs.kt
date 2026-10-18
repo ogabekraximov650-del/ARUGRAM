@@ -533,7 +533,14 @@ fun PlayerSettingsSheet(
     onAutoSkip: (Boolean) -> Unit,
     onSleep: (Int) -> Unit,
     onDismiss: () -> Unit,
+    onDeleted: (Episode, String) -> Unit = { _, _ -> },
 ) {
+    val dm = AppServices.downloads
+    val sheetOwner = remember { Any() }
+    DisposableEffect(episode?.id) {
+        if (episode != null) dm.watch(sheetOwner, episode.urls.values.toSet())
+        onDispose { dm.unwatch(sheetOwner) }
+    }
     PlayerSheetHost("Sozlamalar", onDismiss) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 28.dp)) {
             if (episode != null && episode.qualities.isNotEmpty()) {
@@ -545,6 +552,10 @@ fun PlayerSettingsSheet(
                         Chip("${episode.qualityTitle(q)}${if (size > 0) " · ${formatBytes(size)}" else ""}", q == cur) { onQuality(q); onDismiss() }
                     }
                 }
+            }
+            if (episode != null && episode.qualities.isNotEmpty()) {
+                SheetTitle("Yuklab olish")
+                episode.qualities.forEach { q -> QualityRow(episode, q, { onQuality(q); onDismiss() }, { onDeleted(episode, q) }) }
             }
             SheetTitle("Tezlik")
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {

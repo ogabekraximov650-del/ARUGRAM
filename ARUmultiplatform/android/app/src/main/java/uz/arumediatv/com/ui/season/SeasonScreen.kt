@@ -539,6 +539,11 @@ fun SeasonScreen(
             onAutoSkip = { autoSkipIntro = it; prefs.edit().putBoolean("auto_skip_intro", it).apply() },
             onSleep = { minutes -> sleepEndAt = if (minutes <= 0) 0 else System.currentTimeMillis() + minutes * 60_000L },
             onDismiss = { showSettings = false },
+            onDeleted = { e, q ->
+                if (current?.id == e.id && currentUrl == e.urlFor(q)) {
+                    play(e, quality = q, resumeAt = player.positionMs, resumePlaying = player.exo.playWhenReady, preferWorker = true)
+                }
+            },
         )
     }
 }
