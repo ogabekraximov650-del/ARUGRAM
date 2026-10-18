@@ -6633,3 +6633,12 @@ Nega: PUBG darajasiga bosqichma-bosqich (low-poly → realistik, keyin botlar/zo
 - `models.rs: girl` qayta yozildi: bo'yi ~1.62 m, bosh:tana ≈ 1:6.3, ingichka bo'yin/bel/qo'l-oyoq, uzun oyoq, kichik kaft; yubka (kesik konus) va oq hoshiya; paypoq tizza ostida.
 - Soch (to'q yashil-feruza, 1-andoza rasmga mos): tekis kesilgan peshona sochi, yuz yonida uzun yon sochlar, orqada belgacha uzun soch (yurganda tebranadi), yon tugun va oltin soch bezagi.
 - Yuz (shaderda): ko'zlar pastroqda va kattaroq, uchli iyak.
+
+## Kotlin: Anime / Bo'lim / Qism boshqarish oynalari Flutter bilan bir xil (2026-10)
+- `AdminContentScreens.kt`: `AdminAnimeScreen`, `AdminSeasonsScreen`, `AdminEpisodesScreen` Flutter `anime_management_screen.dart`, `season_management_screen.dart`, `epizod_management_screen.dart` ning nusxasi:
+  - tepada yumaloq sarlavha kartasi (orqaga + sarlavha; bo'lim/qism oynalarida 48 dp rasm + nom + "Bo'limni/Epizodlarni boshqarish");
+  - pastki o'ngda 56 dp yumaloq "+" tugmasi (eski keng "+ Qo'shish" tugmalari o'rniga);
+  - qatorlar: anime 76 dp rasm, bo'lim 64 dp rasm + `N-bo'lim — nom` + tur/holat teglari + "Epizodlarni ko'rish →", qism 44 dp raqam kvadrati + nom + sifatlar qatori ("Original — tayyorlanmoqda" mantig'i bilan); tahrirlash/o'chirish ikonka tugmalari, qismda "Kanalga" yuborish ikonkasi; qator bosilsa: anime → bo'limlar, bo'lim → qismlar, qism → tahrirlash;
+  - tasdiqlash oynalari Flutter matnlari bilan ("Animeni o'chirish?", "Yo'q" / "Ha, o'chirish"), xabarlar snackbar'da;
+  - yuklanish/xato (anime oynasida "Qayta urinish")/bo'sh holatlar; ro'yxat diskda keshlanadi (darhol chiqadi, keyin yangilanadi).
+- `Page.AdminEpisodes` endi `anime` va `season` JSON'ini olib yuradi (sarlavha uchun). Qo'shish/tahrirlash oynalari (`Admin*EditScreen`) tegilmagan.

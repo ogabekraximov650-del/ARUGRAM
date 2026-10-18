@@ -155,7 +155,7 @@ private sealed interface Page {
     data class AdminAnimeEdit(val anime: org.json.JSONObject?) : Page
     data class AdminSeasons(val anime: org.json.JSONObject) : Page
     data class AdminSeasonEdit(val animeId: Long, val season: org.json.JSONObject?) : Page
-    data class AdminEpisodes(val animeId: Long, val seasonId: Long, val title: String) : Page
+    data class AdminEpisodes(val anime: org.json.JSONObject, val season: org.json.JSONObject) : Page
     data class AdminEpisodeEdit(val animeId: Long, val seasonId: Long, val episode: org.json.JSONObject?) : Page
     data class AdminChat(val userId: Long, val name: String) : Page
     data class PublicUser(val id: Long) : Page
@@ -352,9 +352,9 @@ private fun AruApp() {
                     Page.AdminEncode -> AdminEncodeScreen(onBack = ::pop)
                     Page.AdminAnime -> AdminAnimeScreen(onBack = ::pop, onOpenAnime = { a -> push(Page.AdminSeasons(a)) }, onEdit = { a -> push(Page.AdminAnimeEdit(a)) })
                     is Page.AdminAnimeEdit -> AdminAnimeEditScreen(page.anime, onBack = ::pop, onDone = ::pop)
-                    is Page.AdminSeasons -> AdminSeasonsScreen(page.anime, onBack = ::pop, onOpenSeason = { s -> push(Page.AdminEpisodes(page.anime.optLong("id"), s.optLong("season_id"), s.optString("nomi").ifEmpty { "${s.optInt("bolim_id")}-bo'lim" })) }, onEdit = { s -> push(Page.AdminSeasonEdit(page.anime.optLong("id"), s)) })
+                    is Page.AdminSeasons -> AdminSeasonsScreen(page.anime, onBack = ::pop, onOpenSeason = { s -> push(Page.AdminEpisodes(page.anime, s)) }, onEdit = { s -> push(Page.AdminSeasonEdit(page.anime.optLong("id"), s)) })
                     is Page.AdminSeasonEdit -> AdminSeasonEditScreen(page.animeId, page.season, onBack = ::pop, onDone = ::pop)
-                    is Page.AdminEpisodes -> AdminEpisodesScreen(page.animeId, page.seasonId, page.title, onBack = ::pop, onEdit = { e -> push(Page.AdminEpisodeEdit(page.animeId, page.seasonId, e)) })
+                    is Page.AdminEpisodes -> AdminEpisodesScreen(page.anime, page.season, onBack = ::pop, onEdit = { e -> push(Page.AdminEpisodeEdit(page.anime.optLong("id"), page.season.optLong("season_id"), e)) })
                     is Page.AdminEpisodeEdit -> AdminEpisodeEditScreen(page.animeId, page.seasonId, page.episode, onBack = ::pop, onDone = ::pop)
                     is Page.AdminChat -> SupportChatScreen(userId = page.userId, title = page.name, onBack = ::pop)
                     is Page.PublicUser -> PublicProfileScreen(page.id, onBack = ::pop, onOpenStat = { u, k, o -> push(Page.Stat(u, k, o)) })
