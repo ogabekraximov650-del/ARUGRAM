@@ -69,6 +69,9 @@ val LocalTgPlay = androidx.compose.runtime.compositionLocalOf<Set<Long>?> { null
 /** `true` bo'lsa elementlar panelda harakatlanmaydi — faqat rasm (Telegramdagi stikerlar paneli kabi); katta ko'rinishda (`full`) harakatlanadi. */
 val LocalTgStatic = androidx.compose.runtime.compositionLocalOf { false }
 
+/** `true` bo'lsa element qisman ko'ringanda ham harakatlanadi (GIF'lar: surilganda ham to'xtamaydi). */
+val LocalTgPartial = androidx.compose.runtime.compositionLocalOf { false }
+
 /** Bir vaqtda ekranda harakatlanadigan videolar soni cheklangan (telefon qotmasligi uchun). */
 private object TgSlots {
     val MAX: Int get() = uz.arumediatv.com.data.TgPerf.videoSlots
@@ -97,6 +100,7 @@ fun TgItem(d: TgDoc, modifier: Modifier = Modifier, full: Boolean = false, scale
     val useVideo = !static && d.isVideo && (!d.isGifLike || !webpCapable || (animTried && animBytes == null) || (full && animBytes == null))
     val canAnim = (webpCapable && animBytes != null) || useVideo
     val token = remember { Any() }
+    val partial = LocalTgPartial.current
     var fully by remember { mutableStateOf(false) }
     var active by remember { mutableStateOf(false) }
     var rendered by remember(d.id) { mutableStateOf(false) }
@@ -119,7 +123,8 @@ fun TgItem(d: TgDoc, modifier: Modifier = Modifier, full: Boolean = false, scale
         modifier.onGloballyPositioned { c ->
             val bb = c.boundsInWindow()
             val sz = c.size
-            val now = c.isAttached && sz.width > 0 && sz.height > 0 && bb.width >= sz.width - 1f && bb.height >= sz.height - 1f
+            val now = c.isAttached && sz.width > 0 && sz.height > 0 &&
+                (if (partial) bb.width > 1f && bb.height > 1f else bb.width >= sz.width - 1f && bb.height >= sz.height - 1f)
             if (now != fully) fully = now
         },
     ) {
@@ -410,7 +415,7 @@ fun TgGifPage() {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text("Telegram hisobingizda saqlangan GIF yo'q.", color = pal, fontSize = 14.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
             }
-        } else androidx.compose.runtime.CompositionLocalProvider(LocalTgPlay provides null) {
+        } else androidx.compose.runtime.CompositionLocalProvider(LocalTgPlay provides null, LocalTgPartial provides true) {
             androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(top = 6.dp, bottom = 84.dp), verticalArrangement = Arrangement.spacedBy(gap.dp)) {
                 items(rows.size, key = { rows[it].items.first().id }) { i ->
                     val r = rows[i]
