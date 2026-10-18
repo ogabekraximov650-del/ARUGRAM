@@ -46,7 +46,6 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import uz.arumediatv.com.AppServices
 import uz.arumediatv.com.data.TgDoc
@@ -120,10 +119,16 @@ class TgSetsState(private val kind: String) {
         val l = store.sets(kind)
         sets = l
         failed = l.isEmpty()
-        for (s in l) {
-            if (!docs.containsKey(s.id)) docs[s.id] = store.setDocs(s)
-            delay(60)
-        }
+    }
+
+    private val inflight = HashSet<Long>()
+
+    /** To'plam hujjatlarini FAQAT uning katagi ekranda ko'ringanda oladi (bir marta). */
+    suspend fun ensure(s: TgSet) {
+        if (docs.containsKey(s.id) || !inflight.add(s.id)) return
+        try {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { docs[s.id] = AppServices.tgStickers.setDocs(s) }
+        } finally { inflight.remove(s.id) }
     }
 }
 
@@ -138,12 +143,15 @@ fun rememberTgSets(kind: String): TgSetsState {
 fun LazyGridScope.tgSetItems(st: TgSetsState, onTap: (TgDoc) -> Unit) {
     st.sets.orEmpty().forEach { s ->
         val its = st.docs[s.id].orEmpty()
-        if (its.isEmpty()) return@forEach
+        val n = if (its.isEmpty()) s.count else its.size
+        if (n == 0) return@forEach
         item(key = "th${s.id}", span = { GridItemSpan(maxLineSpan) }) {
             Text(s.title, color = Color(0xFF8E8E93), fontSize = 17.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 8.dp, top = 12.dp, bottom = 6.dp))
         }
-        items(its.size, key = { "ti${s.id}:${its[it].id}" }) { i ->
-            Box(Modifier.aspectRatio(1f).clip(RoundedCornerShape(10.dp)).clickable { onTap(its[i]) }) { TgItem(its[i], Modifier.fillMaxSize().padding(8.dp)) }
+        items(n, key = { "ti${s.id}:${its.getOrNull(it)?.id ?: -(it + 1L)}" }) { i ->
+            val d = its.getOrNull(i)
+            if (d == null) TgShadow(st, s)
+            else Box(Modifier.aspectRatio(1f).clip(RoundedCornerShape(10.dp)).clickable { onTap(d) }) { TgItem(d, Modifier.fillMaxSize().padding(8.dp)) }
         }
     }
 }
@@ -162,7 +170,7 @@ fun TgAccountPage(kind: String) {
     val sets = st.sets.orEmpty()
     val sections = run {
         var i = 0
-        sets.map { s -> Sec(s.id, i).also { i += 1 + (st.docs[s.id]?.size ?: 0) } }
+        sets.map { s -> Sec(s.id, i).also { i += 1 + (st.docs[s.id]?.size ?: s.count) } }
     }
     val current by remember { derivedStateOf { sections.lastOrNull { it.index <= grid.firstVisibleItemIndex }?.id } }
 
@@ -206,8 +214,10 @@ fun TgAccountPage(kind: String) {
                     Text(s.title, color = pal, fontSize = 17.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 8.dp, top = 12.dp, bottom = 6.dp))
                 }
                 val its = st.docs[s.id].orEmpty()
-                items(its.size, key = { "si${s.id}:${its[it].id}" }) { i ->
-                    Box(Modifier.aspectRatio(1f).clip(RoundedCornerShape(10.dp)).clickable { preview = its[i] }) { TgItem(its[i], Modifier.fillMaxSize().padding(3.dp)) }
+                items(if (its.isEmpty()) s.count else its.size, key = { "si${s.id}:${its.getOrNull(it)?.id ?: -(it + 1L)}" }) { i ->
+                    val d = its.getOrNull(i)
+                    if (d == null) TgShadow(st, s)
+                    else Box(Modifier.aspectRatio(1f).clip(RoundedCornerShape(10.dp)).clickable { preview = d }) { TgItem(d, Modifier.fillMaxSize().padding(3.dp)) }
                 }
             }
         }
@@ -236,4 +246,11 @@ fun TgPreview(d: TgDoc, onClose: () -> Unit) {
             Text("Hozircha faqat ko'rish (yuborish keyingi bosqichda)", color = Color(0xFF8E8E93), fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
         }
     }
+}
+
+/** Hali yuklanmagan katak: soya ko'rinadi; ekranda paydo bo'lgani uchun to'plam hujjatlari yuklanadi. */
+@Composable
+fun TgShadow(st: TgSetsState, s: TgSet) {
+    LaunchedEffect(s.id) { st.ensure(s) }
+    Box(Modifier.aspectRatio(1f).padding(6.dp).clip(RoundedCornerShape(12.dp)).background(Color.White.copy(alpha = 0.06f)))
 }
