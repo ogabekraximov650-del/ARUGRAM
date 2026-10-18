@@ -66,6 +66,9 @@ import uz.arumediatv.com.data.TgSet
 /** Animatsiya ruxsat etilgan hujjatlar (ekrandagi O'RTA ikki qator). `null` — cheklov yo'q. */
 val LocalTgPlay = androidx.compose.runtime.compositionLocalOf<Set<Long>?> { null }
 
+/** `true` bo'lsa elementlar panelda harakatlanmaydi — faqat rasm (Telegramdagi stikerlar paneli kabi); katta ko'rinishda (`full`) harakatlanadi. */
+val LocalTgStatic = androidx.compose.runtime.compositionLocalOf { false }
+
 /** Bir vaqtda ekranda harakatlanadigan videolar soni cheklangan (telefon qotmasligi uchun). */
 private object TgSlots {
     val MAX: Int get() = uz.arumediatv.com.data.TgPerf.videoSlots
@@ -82,7 +85,8 @@ private object TgSlots {
 @Composable
 fun TgItem(d: TgDoc, modifier: Modifier = Modifier, full: Boolean = false, scale: ContentScale = ContentScale.Fit) {
     val store = AppServices.tgStickers
-    val webpCapable = Build.VERSION.SDK_INT >= 28 && (d.isTgs || d.isGifLike)
+    val static = LocalTgStatic.current && !full
+    val webpCapable = !static && Build.VERSION.SDK_INT >= 28 && (d.isTgs || d.isGifLike)
     var poster by remember(d.id) { mutableStateOf(store.peekPoster(d)) }
     var animBytes by remember(d.id) { mutableStateOf(store.peekAnim(d)) }
     var animTried by remember(d.id) { mutableStateOf(animBytes != null) }
@@ -90,7 +94,7 @@ fun TgItem(d: TgDoc, modifier: Modifier = Modifier, full: Boolean = false, scale
     // `.tgs` va GIF: katak paydo bo'lishi bilan orqa fonda animatsiyali WebP tayyorlanadi (ekranga chiqmasdan oldin tayyor bo'lsin).
     if (webpCapable) LaunchedEffect(d.id) { if (animBytes == null) { animBytes = store.anim(d); animTried = true } }
     // Video dekoder: faqat .webm yoki WebP'ga aylantirib bo'lmagan GIF (yoki tayyor bo'lmagan GIFni katta ko'rinishda ochganda).
-    val useVideo = d.isVideo && (!d.isGifLike || !webpCapable || (animTried && animBytes == null) || (full && animBytes == null))
+    val useVideo = !static && d.isVideo && (!d.isGifLike || !webpCapable || (animTried && animBytes == null) || (full && animBytes == null))
     val canAnim = (webpCapable && animBytes != null) || useVideo
     val token = remember { Any() }
     var fully by remember { mutableStateOf(false) }
@@ -261,14 +265,6 @@ fun TgAccountPage(kind: String) {
         var i = 0
         sets.map { s -> Sec(s.id, i).also { i += 1 + (st.docs[s.id]?.size ?: s.count) } }
     }
-    // Ekran o'rtasidagi qatorlar animatsiya qiladi (kuchsiz telefonda 1 ta, boshqasida 2 ta); surilayotganda hammasi to'xtaydi.
-    val settled = rememberSettled { grid.isScrollInProgress }
-    val midRows by remember {
-        derivedStateOf {
-            val li = grid.layoutInfo
-            centerRowIds(li.visibleItemsInfo, (li.viewportStartOffset + li.viewportEndOffset) / 2, uz.arumediatv.com.data.TgPerf.rows, "si")
-        }
-    }
     val current by remember { derivedStateOf { sections.lastOrNull { it.index <= grid.firstVisibleItemIndex }?.id } }
 
     Column(Modifier.fillMaxSize()) {
@@ -294,7 +290,7 @@ fun TgAccountPage(kind: String) {
             }
         } else if (st.sets == null && st.gifs == null) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { androidx.compose.material3.CircularProgressIndicator(color = pal, modifier = Modifier.size(28.dp), strokeWidth = 2.dp) }
-        } else androidx.compose.runtime.CompositionLocalProvider(LocalTgPlay provides (if (settled) midRows else emptySet())) { LazyVerticalGrid(
+        } else androidx.compose.runtime.CompositionLocalProvider(LocalTgStatic provides true) { LazyVerticalGrid(
             GridCells.Fixed(cols), Modifier.fillMaxSize(), state = grid,
             contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = 84.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -384,7 +380,7 @@ private fun gifRows(g: List<TgDoc>, width: Float, gap: Float, target: Float): Li
     return rows
 }
 
-/** GIF sahifasi: o'lchamiga qarab 2–3 tadan qator, ekran o'rtasidagi qatorgina harakatlanadi, atrofi oldindan tayyorlanadi. */
+/** GIF sahifasi: o'lchamiga qarab 2–3 tadan qator, ekranda to'liq ko'ringan barcha GIF harakatlanadi (Telegramdagidek), atrofi oldindan tayyorlanadi. */
 @Composable
 fun TgGifPage() {
     val st = rememberTgSets("gifs")
@@ -397,17 +393,6 @@ fun TgGifPage() {
     androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize().padding(horizontal = 8.dp)) {
         val widthDp = maxWidth.value
         val rows = remember(g, widthDp) { if (g.isEmpty()) emptyList() else gifRows(g, widthDp, gap, 150f) }
-        val rowsNow = androidx.compose.runtime.rememberUpdatedState(rows)
-        val settled = rememberSettled { list.isScrollInProgress }
-        val play by remember {
-            derivedStateOf {
-                val li = list.layoutInfo
-                val c = (li.viewportStartOffset + li.viewportEndOffset) / 2
-                val vis = li.visibleItemsInfo
-                val hit = vis.firstOrNull { it.offset <= c && c <= it.offset + it.size } ?: vis.minByOrNull { kotlin.math.abs(it.offset + it.size / 2 - c) }
-                hit?.let { rowsNow.value.getOrNull(it.index)?.items?.map { d -> d.id }?.toSet() } ?: emptySet()
-            }
-        }
         // Oldindan tayyorlash: ko'rinib turgan qatorlar, keyin pastdagi 3 va tepadagi 2 qator (rasm + animatsiyali WebP diskka tushadi).
         LaunchedEffect(rows) {
             androidx.compose.runtime.snapshotFlow {
@@ -425,7 +410,7 @@ fun TgGifPage() {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text("Telegram hisobingizda saqlangan GIF yo'q.", color = pal, fontSize = 14.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
             }
-        } else androidx.compose.runtime.CompositionLocalProvider(LocalTgPlay provides (if (settled) play else emptySet())) {
+        } else androidx.compose.runtime.CompositionLocalProvider(LocalTgPlay provides null) {
             androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(top = 6.dp, bottom = 84.dp), verticalArrangement = Arrangement.spacedBy(gap.dp)) {
                 items(rows.size, key = { rows[it].items.first().id }) { i ->
                     val r = rows[i]
