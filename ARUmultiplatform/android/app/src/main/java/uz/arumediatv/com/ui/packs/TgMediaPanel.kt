@@ -120,7 +120,7 @@ fun TgMediaPanel(
         HorizontalPager(pager, Modifier.fillMaxSize(), beyondViewportPageCount = 0) { page ->
             when (page) {
                 0 -> EmojiPage(onEmoji, onPick)
-                1 -> if (TG_STICKERS_ON) TgAccountPage("gifs") else PackPage(PackKind.GIF, onPick, onManage)
+                1 -> if (TG_STICKERS_ON) TgGifPage() else PackPage(PackKind.GIF, onPick, onManage)
                 else -> if (TG_STICKERS_ON) TgAccountPage("stickers") else PackPage(PackKind.STICKER, onPick, onManage)
             }
         }
@@ -288,6 +288,18 @@ private fun EmojiPage(onEmoji: (String) -> Unit, onPick: (PackPick) -> Unit) {
     val tgEmoji = if (TG_STICKERS_ON) rememberTgSets("emoji") else null
     var tgPreview by remember { mutableStateOf<uz.arumediatv.com.data.TgDoc?>(null) }
     tgPreview?.let { TgPreview(it) { tgPreview = null } }
+    // Emoji: faqat ekran o'rtasiga eng yaqin BITTA qator animatsiya qiladi.
+    val midEmoji by remember {
+        derivedStateOf {
+            val li = grid.layoutInfo
+            val c = (li.viewportStartOffset + li.viewportEndOffset) / 2
+            val vis = li.visibleItemsInfo.filter { (it.key as? String)?.startsWith("ti") == true }
+            if (vis.isEmpty()) emptySet<Long>() else {
+                val best = vis.minByOrNull { kotlin.math.abs(it.offset.y + it.size.height / 2 - c) }!!
+                vis.filter { it.offset.y == best.offset.y }.mapNotNull { (it.key as String).substringAfter(':').toLongOrNull()?.takeIf { x -> x > 0 } }.toSet()
+            }
+        }
+    }
 
     fun shown(e: String): String = if (supportsTone(e)) withTone(e, toneOf(ctx, e)) else e
     fun pick(e: String) { val v = shown(e); onEmoji(v); pushRecentEmoji(ctx, v); recent = recentEmoji(ctx) }
@@ -347,7 +359,7 @@ private fun EmojiPage(onEmoji: (String) -> Unit, onPick: (PackPick) -> Unit) {
                     Box(Modifier.aspectRatio(1f).clip(RoundedCornerShape(10.dp)).clickable { onPick(h) }) { PackItemImage(h.pack, h.item, Modifier.fillMaxSize().padding(8.dp), thumb = true) }
                 }
             }
-        } else LazyVerticalGrid(
+        } else androidx.compose.runtime.CompositionLocalProvider(LocalTgPlay provides midEmoji) { LazyVerticalGrid(
             GridCells.Fixed(7), Modifier.fillMaxSize(), state = grid,
             contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = 84.dp),
         ) {
@@ -376,7 +388,7 @@ private fun EmojiPage(onEmoji: (String) -> Unit, onPick: (PackPick) -> Unit) {
                     }
                 }
             }
-        }
+        } }
     }
 
     // Ohang tanlash: bosib turilgan emoji uchun 6 variant (standart + 5 teri rangi)

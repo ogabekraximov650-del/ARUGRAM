@@ -6653,3 +6653,8 @@ Nega: PUBG darajasiga bosqichma-bosqich (low-poly → realistik, keyin botlar/zo
 Nima: media panelida o'z to'plamlarimiz o'rniga foydalanuvchining Telegram hisobidagi stikerlar, emoji to'plamlari va saqlangan GIF'lar ko'rsatiladi (`TG_STICKERS_ON` bayrog'i `data/TgStickers.kt`; o'chirilsa eski `PackPage` qaytadi, `pk_` xabarlari ko'rinishi o'zgarmagan).
 Rust: `rust/src/tg_media.rs` (`rust_tg_media_list`, `rust_tg_media_get`). Kotlin: `data/TgStickers.kt` (shifrlangan disk-kesh, havola eskirsa qayta oladi), `ui/packs/TgAccountPages.kt` (`TgItem`: kichik rasm, ekranda TO'LIQ ko'ringan webm/mp4 harakatlanadi, bir vaqtda ko'pi bilan 6 ta).
 Hozircha: `.tgs` — faqat kichik rasm (2-bosqich: lottie-android + libwebp bilan animatsiyali WebP'ga o'tkazish); webm shaffofligi yo'q; yuborish yo'q (bosilsa katta ko'rinish).
+
+### Telegram stiker/emoji/GIF — 2-bosqich (oldindan tayyorlash)
+- `.tgs` -> animatsiyali WebP: `data/TgAnim.kt` (lottie-android bilan chizish, Android WebP kodlovchisi, qo'lda VP8X/ANIM/ANMF o'rash), `TgStickerStore.anim()` (navbat: kuchsiz telefonda 1, boshqada 2; katak ekrandan ketsa o'tkazib yuboriladi; diskda `a_<id>`, xato belgisi `.x`). Android 9+ da `ImageDecoder` bilan o'ynaydi, undan pastda rasm.
+- Animatsiya ruxsati `LocalTgPlay`: stiker — o'rtadagi 2 qator, emoji — o'rtaga eng yaqin 1 qator, GIF — ekran markaz chizig'i kesgan elementlar.
+- GIF sahifasi `TgGifPage`: 2 ustunli staggered grid (w/h nisbati), atrofdagi 16 tasi oldindan (`prefetch`) diskka tushadi; PlayerView shutter shaffof.

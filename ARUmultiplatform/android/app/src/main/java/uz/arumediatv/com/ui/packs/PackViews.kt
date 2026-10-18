@@ -153,6 +153,7 @@ internal fun LoopingVideo(bytes: ByteArray, key: String, modifier: Modifier, sou
         factory = { c ->
             (android.view.LayoutInflater.from(c).inflate(uz.arumediatv.com.R.layout.aru_player_view, null) as androidx.media3.ui.PlayerView).apply {
                 useController = false
+                setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
                 resizeMode = if (zoom) androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM else androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
                 this.player = player
             }

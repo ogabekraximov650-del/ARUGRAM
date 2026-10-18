@@ -1,6 +1,12 @@
 package uz.arumediatv.com.ui.packs
 
 import android.graphics.BitmapFactory
+import android.graphics.ImageDecoder
+import android.graphics.drawable.AnimatedImageDrawable
+import android.os.Build
+import android.widget.ImageView
+import androidx.compose.ui.viewinterop.AndroidView
+import java.nio.ByteBuffer
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -47,6 +53,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import uz.arumediatv.com.AppServices
 import uz.arumediatv.com.data.TgDoc
@@ -64,14 +71,20 @@ private object TgSlots {
 }
 
 /**
- * Telegram hujjati. Katakda avval kichik rasm; ekranda TO'LIQ ko'rinib turgan animatsiyali (webm/mp4) elementlar
- * harakatlanadi. `full = true` (katta ko'rinish) — to'liq fayl, shartsiz.
+ * Telegram hujjati. Katakda avval kichik rasm. Animatsiya faqat `LocalTgPlay` ruxsat bergan (ekran o'rtasidagi) va
+ * to'liq ko'ringan elementlarda: webm/mp4 — video; `.tgs` — oldindan tayyorlangan animatsiyali WebP (Android 9+).
+ * `full = true` (katta ko'rinish) — shartsiz.
  */
 @Composable
 fun TgItem(d: TgDoc, modifier: Modifier = Modifier, full: Boolean = false, scale: ContentScale = ContentScale.Fit) {
     val store = AppServices.tgStickers
+    val webpAnim = d.isTgs && Build.VERSION.SDK_INT >= 28
+    val canAnim = d.isVideo || webpAnim
     var poster by remember(d.id) { mutableStateOf(store.peekPoster(d)) }
+    var animBytes by remember(d.id) { mutableStateOf(store.peekAnim(d)) }
     LaunchedEffect(d.id) { if (poster == null) poster = store.poster(d) }
+    // `.tgs`: katak paydo bo'lishi bilan orqa fonda animatsiyali WebP tayyorlanadi (ekranga chiqmasdan oldin tayyor bo'lsin).
+    if (webpAnim) LaunchedEffect(d.id) { if (animBytes == null) animBytes = store.anim(d) }
     val token = remember { Any() }
     var fully by remember { mutableStateOf(false) }
     var active by remember { mutableStateOf(false) }
@@ -79,12 +92,12 @@ fun TgItem(d: TgDoc, modifier: Modifier = Modifier, full: Boolean = false, scale
     val play = LocalTgPlay.current
     val go = fully && (play == null || d.id in play)
     LaunchedEffect(go, d.id) {
-        if (go && d.isVideo) active = TgSlots.acquire(token) || full
+        if (go && canAnim) active = TgSlots.acquire(token) || full
         else { TgSlots.release(token); active = false; rendered = false }
     }
     DisposableEffect(token) { onDispose { TgSlots.release(token) } }
     // Slot bo'shaganda qayta uriniladi
-    if (d.isVideo) {
+    if (canAnim) {
         val free = TgSlots.active.size
         LaunchedEffect(free, go) { if (go && !active) active = TgSlots.acquire(token) }
     }
@@ -101,7 +114,10 @@ fun TgItem(d: TgDoc, modifier: Modifier = Modifier, full: Boolean = false, scale
     ) {
         val pbmp = poster
         val fb = fullBytes
-        if (fb != null && active && d.isVideo) {
+        val ab = animBytes
+        if (webpAnim && ab != null && (active || pbmp == null)) {
+            TgAnimatedWebp(ab, active, scale == ContentScale.Crop, Modifier.fillMaxSize())
+        } else if (fb != null && active && d.isVideo) {
             // Video va rasm bir xil o'lchamda (ikki xil kesilib "ikki oyna" bo'lmasin); birinchi kadrdan keyin rasm yashiriladi.
             LoopingVideo(fb, "tg_${d.id}", Modifier.fillMaxSize(), zoom = scale == ContentScale.Crop, onFirstFrame = { rendered = true })
             if (pbmp != null && !rendered) Image(pbmp, null, Modifier.fillMaxSize(), contentScale = scale)
@@ -110,10 +126,27 @@ fun TgItem(d: TgDoc, modifier: Modifier = Modifier, full: Boolean = false, scale
             if (bmp != null) Image(bmp, null, Modifier.fillMaxSize(), contentScale = scale)
         } else if (pbmp != null) Image(pbmp, null, Modifier.fillMaxSize(), contentScale = scale)
         else if (d.emoji.isNotEmpty() && (d.thumb.isEmpty() && d.kind != "webp")) {
-            // Rasmi yo'q (.tgs) — hozircha mos emoji belgisi ko'rinadi.
+            // Rasmi ham, animatsiyasi ham hali tayyor emas — mos emoji belgisi ko'rinadi.
             Text(d.emoji, fontSize = 26.sp, fontFamily = TgEmojiFont, color = Color.White, modifier = Modifier.align(Alignment.Center))
         }
     }
+}
+
+/** Oldindan tayyorlangan animatsiyali WebP. `play = false` — birinchi kadr (to'xtatilgan). */
+@android.annotation.SuppressLint("NewApi")
+@Composable
+private fun TgAnimatedWebp(bytes: ByteArray, play: Boolean, crop: Boolean, modifier: Modifier) {
+    if (Build.VERSION.SDK_INT < 28) return
+    val drawable = remember(bytes) { runCatching { ImageDecoder.decodeDrawable(ImageDecoder.createSource(ByteBuffer.wrap(bytes))) }.getOrNull() }
+    AndroidView(
+        factory = { ctx -> ImageView(ctx) },
+        update = { iv ->
+            iv.scaleType = if (crop) ImageView.ScaleType.CENTER_CROP else ImageView.ScaleType.FIT_CENTER
+            if (iv.drawable !== drawable) iv.setImageDrawable(drawable)
+            (drawable as? AnimatedImageDrawable)?.let { if (play) { it.repeatCount = AnimatedImageDrawable.REPEAT_INFINITE; it.start() } else it.stop() }
+        },
+        modifier = modifier,
+    )
 }
 
 /** Hisobdagi to'plamlar va ularning hujjatlari (ketma-ket yuklanadi — FLOOD_WAIT'dan saqlanish uchun). */
@@ -297,4 +330,57 @@ fun TgPreview(d: TgDoc, onClose: () -> Unit) {
 fun TgShadow(st: TgSetsState, s: TgSet) {
     LaunchedEffect(s.id) { st.ensure(s) }
     Box(Modifier.aspectRatio(1f).padding(6.dp).clip(RoundedCornerShape(12.dp)).background(Color.White.copy(alpha = 0.06f)))
+}
+
+/** GIF sahifasi: o'lchamiga qarab katta-kichik joylashadi (2 ustun), ekran o'rtasidagi qatorgina harakatlanadi, atrofi oldindan tayyorlanadi. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+fun TgGifPage() {
+    val st = rememberTgSets("gifs")
+    val store = AppServices.tgStickers
+    val grid = androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState()
+    var preview by remember { mutableStateOf<TgDoc?>(null) }
+    val g = st.gifs.orEmpty()
+    val play by remember {
+        derivedStateOf {
+            val li = grid.layoutInfo
+            val c = (li.viewportStartOffset + li.viewportEndOffset) / 2
+            li.visibleItemsInfo.filter { it.offset.y <= c && c <= it.offset.y + it.size.height }
+                .mapNotNull { (it.key as? String)?.removePrefix("g")?.toLongOrNull() }.toSet()
+        }
+    }
+    // Oldindan tayyorlash: ko'rinib turganlar, keyin pastdagi 10 ta va tepadagi 6 ta (rasm + video fayli diskka tushadi).
+    LaunchedEffect(g) {
+        androidx.compose.runtime.snapshotFlow {
+            val v = grid.layoutInfo.visibleItemsInfo
+            if (v.isEmpty()) 0 to 0 else v.minOf { it.index } to v.maxOf { it.index }
+        }.collectLatest { (a, b) ->
+            if (g.isEmpty()) return@collectLatest
+            val order = (a..b) + ((b + 1)..(b + 10)) + ((a - 1) downTo (a - 6))
+            for (i in order) g.getOrNull(i)?.let { store.prefetch(it) }
+        }
+    }
+    val pal = Color(0xFF8E8E93)
+    Box(Modifier.fillMaxSize()) {
+        if (st.gifs == null && !st.failed) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { androidx.compose.material3.CircularProgressIndicator(color = pal, modifier = Modifier.size(28.dp), strokeWidth = 2.dp) }
+        } else if (g.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("Telegram hisobingizda saqlangan GIF yo'q.", color = pal, fontSize = 14.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            }
+        } else androidx.compose.runtime.CompositionLocalProvider(LocalTgPlay provides play) {
+            androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid(
+                androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells.Fixed(2), Modifier.fillMaxSize(), state = grid,
+                contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 84.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp), verticalItemSpacing = 4.dp,
+            ) {
+                items(g.size, key = { "g${g[it].id}" }) { i ->
+                    Box(Modifier.fillMaxWidth().aspectRatio(g[i].ratio).clip(RoundedCornerShape(10.dp)).clickable { preview = g[i] }) {
+                        TgItem(g[i], Modifier.fillMaxSize(), scale = ContentScale.Crop)
+                    }
+                }
+            }
+        }
+    }
+    preview?.let { TgPreview(it) { preview = null } }
 }

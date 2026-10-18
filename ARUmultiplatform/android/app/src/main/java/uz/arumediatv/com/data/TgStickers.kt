@@ -6,6 +6,7 @@ import android.util.LruCache
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
@@ -22,7 +23,11 @@ import java.util.concurrent.ConcurrentHashMap
  */
 const val TG_STICKERS_ON = true
 
-data class TgDoc(val id: Long, val hash: Long, val ref: String, val dc: Int, val kind: String, val size: Long, val emoji: String, val thumb: String, val animated: Boolean, val custom: Boolean) {
+data class TgDoc(val id: Long, val hash: Long, val ref: String, val dc: Int, val kind: String, val size: Long, val emoji: String, val thumb: String, val animated: Boolean, val custom: Boolean, val w: Int = 0, val h: Int = 0) {
+    /** Kenglik/balandlik (GIF'lar o'lchamiga qarab joylashishi uchun); noma'lum bo'lsa 1. */
+    val ratio: Float get() = if (w > 0 && h > 0) (w.toFloat() / h).coerceIn(0.6f, 2.2f) else 1f
+    /** `.tgs`: oldindan animatsiyali WebP'ga aylantiriladi. */
+    val isTgs: Boolean get() = kind == "tgs"
     /** Qurilma o'zi ko'rsata oladigan to'liq fayl: webm/mp4/gif/webp. `.tgs` — hozircha faqat kichik rasm. */
     val playable: Boolean get() = kind == "webm" || kind == "mp4" || kind == "gif" || kind == "webp"
     val isVideo: Boolean get() = kind == "webm" || kind == "mp4" || kind == "gif"
@@ -31,6 +36,13 @@ data class TgDoc(val id: Long, val hash: Long, val ref: String, val dc: Int, val
 data class TgSet(val id: Long, val hash: Long, val title: String, val count: Int, val thumbDoc: Long, val thumbVer: Int = 0, val thumbDc: Int = 2)
 
 class TgStickerStore(ctx: Context) {
+    private val lowRam = (ctx.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager).let { it.isLowRamDevice || it.memoryClass <= 128 }
+    private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.Default)
+    /** Aylantirish bir vaqtda: kuchsiz telefonda 1 ta, boshqasida 2 ta. */
+    private val convGate = Semaphore(if (lowRam) 1 else 2)
+    private val animMem = object : LruCache<Long, ByteArray>(if (lowRam) 3 * 1024 * 1024 else 8 * 1024 * 1024) { override fun sizeOf(k: Long, v: ByteArray) = v.size }
+    private val animJobs = ConcurrentHashMap<Long, kotlinx.coroutines.Deferred<ByteArray?>>()
+    private val interest = ConcurrentHashMap<Long, java.util.concurrent.atomic.AtomicInteger>()
     private val dir = File(ctx.filesDir, "aru_tg").apply { mkdirs() }
     private val mem = object : LruCache<String, ByteArray>(6 * 1024 * 1024) { override fun sizeOf(k: String, v: ByteArray) = v.size }
     private val sets = ConcurrentHashMap<String, List<TgSet>>()
@@ -108,7 +120,7 @@ class TgStickerStore(ctx: Context) {
 
     private fun parseDoc(o: JSONObject) = TgDoc(
         o.optLong("id"), o.optLong("hash"), o.optString("ref"), o.optInt("dc", 2), o.optString("kind"), o.optLong("size"),
-        o.optString("emoji"), o.optString("thumb"), o.optBoolean("animated"), o.optBoolean("custom"),
+        o.optString("emoji"), o.optString("thumb"), o.optBoolean("animated"), o.optBoolean("custom"), o.optInt("w"), o.optInt("h"),
     )
 
     private fun docList(a: JSONArray?): List<TgDoc> = a?.let { (0 until it.length()).map { i -> parseDoc(it.getJSONObject(i)) } }.orEmpty()
@@ -192,8 +204,52 @@ class TgStickerStore(ctx: Context) {
         }
     }
 
-    /** Tizim xotirani tozalashni so'raganda. */
-    fun trim() { bmps.evictAll(); mem.evictAll() }
+    fun peekAnim(d: TgDoc): ByteArray? = animMem.get(d.id)
 
-    fun clear() { dir.listFiles()?.forEach { it.delete() }; mem.evictAll(); bmps.evictAll(); sets.clear(); docs.clear() }
+    /**
+     * `.tgs` -> animatsiyali WebP (oldindan tayyorlash). Diskda shifrlab saqlanadi; navbat bilan, orqa fonda bajariladi.
+     * Hech kim kutmay qolsa (katak ekrandan ketgan) navbatdagi ish o'tkazib yuboriladi. Bo'lmasa `null`.
+     */
+    suspend fun anim(d: TgDoc): ByteArray? {
+        if (!d.isTgs) return null
+        animMem.get(d.id)?.let { return it }
+        val f = File(dir, "a_${d.id}")
+        val bad = File(dir, "a_${d.id}.x")
+        val cached = withContext(Dispatchers.IO) {
+            if (bad.exists()) return@withContext ByteArray(0)
+            if (f.exists()) runCatching { SecureStore.open(f.readBytes()) }.getOrNull() else null
+        }
+        if (cached != null) return if (cached.isEmpty()) null else cached.also { animMem.put(d.id, it) }
+        val counter = interest.getOrPut(d.id) { java.util.concurrent.atomic.AtomicInteger() }
+        counter.incrementAndGet()
+        try {
+            val job = animJobs.getOrPut(d.id) {
+                scope.async(Dispatchers.IO) {
+                    try {
+                        convGate.withPermit {
+                            if (counter.get() <= 0) return@withPermit null
+                            val src = bytes(d, false) ?: return@withPermit null
+                            val webp = TgAnim.tgsToWebp(src)
+                            if (webp == null) { runCatching { bad.writeBytes(ByteArray(1)) }; return@withPermit null }
+                            runCatching { f.writeBytes(SecureStore.seal(webp)) }
+                            animMem.put(d.id, webp)
+                            webp
+                        }
+                    } finally { animJobs.remove(d.id) }
+                }
+            }
+            return job.await()
+        } finally { counter.decrementAndGet() }
+    }
+
+    /** Oldindan tayyorlash: kichik rasm va (GIF/webm uchun) to'liq fayl diskka tushadi. */
+    suspend fun prefetch(d: TgDoc) {
+        poster(d)
+        if (d.isVideo) bytes(d, false)
+    }
+
+    /** Tizim xotirani tozalashni so'raganda. */
+    fun trim() { bmps.evictAll(); mem.evictAll(); animMem.evictAll() }
+
+    fun clear() { dir.listFiles()?.forEach { it.delete() }; mem.evictAll(); bmps.evictAll(); animMem.evictAll(); sets.clear(); docs.clear() }
 }
