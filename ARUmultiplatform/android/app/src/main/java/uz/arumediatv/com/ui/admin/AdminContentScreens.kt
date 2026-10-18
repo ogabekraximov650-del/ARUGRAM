@@ -36,6 +36,10 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -290,44 +294,138 @@ fun AdminAnimeScreen(onBack: () -> Unit, onOpenAnime: (JSONObject) -> Unit, onEd
     }
 }
 
-/** Anime qo'shish / tahrirlash (rasm Telegram'ga yuklanadi, bazaga faqat fayl nomi yoziladi). */
+// ══════════════════════ QO'SHISH / TAHRIRLASH OYNALARI (Flutter: add_anime / add_season / add_epizod_screen) ══════════════════════
+
+private val white60 = Color(0x99FFFFFF)
+
+private fun jstr(o: JSONObject?, key: String): String = o?.optString(key).orEmpty().let { if (it == "null") "" else it }
+
+/** Sarlavha kartasi (orqaga + nom) va aylantiriladigan forma (padding 16/8/16/32) — Flutter bilan bir xil. */
+@Composable
+private fun FormScaffold(title: String, titleSp: Int, onBack: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+    BackHandler(onBack = onBack)
+    val hs = RoundedCornerShape(20.dp)
+    val bs = RoundedCornerShape(14.dp)
+    Column(Modifier.fillMaxSize().background(AruColors.Bg).statusBarsPadding().imePadding()) {
+        Row(
+            Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 8.dp).fillMaxWidth().clip(hs).background(AruColors.Card).border(1.dp, AruColors.Border, hs).padding(horizontal = 18.dp, vertical = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.clip(bs).background(AruColors.CardAlt).border(1.dp, AruColors.Border, bs).clickable(onClick = onBack).padding(8.dp)) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Orqaga", tint = Color.White, modifier = Modifier.size(24.dp))
+            }
+            Spacer(Modifier.width(14.dp))
+            Text(title, color = Color.White, fontSize = titleSp.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 32.dp), content = content)
+    }
+}
+
+@Composable
+private fun GlassCard(radius: Int, padding: PaddingValues, modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    val sh = RoundedCornerShape(radius.dp)
+    Column(modifier.fillMaxWidth().clip(sh).background(AruColors.Card).border(1.dp, AruColors.Border, sh).padding(padding), content = content)
+}
+
+/** Rasm tanlash kartasi: 20 yumaloq karta, ichida 16 yumaloq oq 8% quti (balandlik 200/180). */
+@Composable
+private fun PhotoBox(height: Int, photo: String, busy: Boolean, onClick: () -> Unit) {
+    GlassCard(20, PaddingValues(16.dp), Modifier.clickable(enabled = !busy, onClick = onClick)) {
+        Box(Modifier.fillMaxWidth().height(height.dp).clip(RoundedCornerShape(16.dp)).background(Color(0x14FFFFFF)), contentAlignment = Alignment.Center) {
+            if (photo.isNotEmpty()) TgImage(photo, Modifier.fillMaxSize(), maxPx = 1080)
+            else Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(AruIcons.ImageOutline, null, tint = Color(0x8AFFFFFF), modifier = Modifier.size(if (height >= 200) 48.dp else 44.dp))
+                Spacer(Modifier.height(8.dp))
+                Text("Rasm tanlang (ixtiyoriy)", color = white60, fontSize = 14.sp)
+            }
+            if (busy) LinearProgressIndicator(color = AruColors.Accent, trackColor = Color(0x1AFFFFFF), modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth())
+        }
+    }
+}
+
+@Composable
+private fun ErrorBox(msg: String) {
+    val sh = RoundedCornerShape(12.dp)
+    Text(msg, color = Color(0xFFFF5252), fontSize = 12.sp, modifier = Modifier.fillMaxWidth().clip(sh).background(Color(0x33F44336)).border(1.dp, Color(0x80F44336), sh).padding(12.dp))
+}
+
+/** Prefiks ikonkali, hint matnli glass maydon (Flutter `_buildTextField`). */
+@Composable
+private fun GlassField(value: String, onChange: (String) -> Unit, hint: String, icon: ImageVector, number: Boolean = false, maxLines: Int = 1, trailing: (@Composable () -> Unit)? = null, modifier: Modifier = Modifier) {
+    val sh = RoundedCornerShape(14.dp)
+    Box(modifier.fillMaxWidth().clip(sh).background(AruColors.Card).border(1.dp, AruColors.Border, sh)) {
+        TextField(
+            value = value, onValueChange = onChange, modifier = Modifier.fillMaxWidth(),
+            placeholder = { Text(hint, color = Color(0x66FFFFFF)) },
+            leadingIcon = { Icon(icon, null, tint = Color(0x8AFFFFFF)) },
+            trailingIcon = trailing,
+            singleLine = maxLines == 1, minLines = maxLines, maxLines = maxLines,
+            textStyle = TextStyle(color = Color.White, fontSize = 16.sp),
+            keyboardOptions = KeyboardOptions(keyboardType = if (number) KeyboardType.Number else KeyboardType.Text),
+            colors = TextFieldDefaults.colors(
+                focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent, disabledContainerColor = Color.Transparent,
+                focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent, disabledIndicatorColor = Color.Transparent,
+                cursorColor = Color.White, focusedTextColor = Color.White, unfocusedTextColor = Color.White,
+            ),
+        )
+    }
+}
+
+@Composable
+private fun SectionLabel(text: String) {
+    Text(text, color = white60, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.fillMaxWidth())
+}
+
+/** "Bekor" va "Saqlash" tugmalari yonma-yon (har biri 14 yumaloq). */
+@Composable
+private fun FormButtons(cancel: String, ok: String, busy: Boolean, onCancel: () -> Unit, onOk: () -> Unit) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Button(
+            onClick = onCancel, enabled = !busy, modifier = Modifier.weight(1f).height(44.dp), shape = RoundedCornerShape(14.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0x1AFFFFFF), contentColor = Color.White, disabledContainerColor = Color(0x0DFFFFFF), disabledContentColor = white50),
+        ) { Text(cancel) }
+        Button(
+            onClick = onOk, enabled = !busy, modifier = Modifier.weight(1f).height(44.dp), shape = RoundedCornerShape(14.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = AruColors.Accent, contentColor = Color.White, disabledContainerColor = AruColors.Accent.copy(alpha = 0.5f), disabledContentColor = Color.White),
+        ) { if (busy) CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(20.dp)) else Text(ok) }
+    }
+}
+
+/** Anime qo'shish / tahrirlash (rasm Telegram'ga yuklanadi, bazaga faqat fayl nomi yoziladi). Hech qaysi maydon majburiy emas. */
 @Composable
 fun AdminAnimeEditScreen(initial: JSONObject?, onBack: () -> Unit, onDone: () -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val api = AppServices.admin
-    var name by remember { mutableStateOf(initial?.optString("name").orEmpty()) }
-    var davlat by remember { mutableStateOf(initial?.optString("davlat").orEmpty()) }
-    var studiya by remember { mutableStateOf(initial?.optString("studiya").orEmpty()) }
-    var janri by remember { mutableStateOf(initial?.optString("janri").orEmpty()) }
-    var tavsif by remember { mutableStateOf(initial?.optString("tavsif").orEmpty()) }
-    var photo by remember { mutableStateOf(fileNameOfUrl(initial?.optString("photo_url").orEmpty())) }
+    var name by remember { mutableStateOf(jstr(initial, "name")) }
+    var davlat by remember { mutableStateOf(jstr(initial, "davlat")) }
+    var studiya by remember { mutableStateOf(jstr(initial, "studiya")) }
+    var janri by remember { mutableStateOf(jstr(initial, "janri")) }
+    var tavsif by remember { mutableStateOf(jstr(initial, "tavsif")) }
+    var photo by remember { mutableStateOf(fileNameOfUrl(jstr(initial, "photo_url"))) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) scope.launch { busy = true; val (n, e) = uploadPhoto(ctx, uri, "anime"); busy = false; if (n != null) { photo = n; error = null } else error = "Rasm yuklashda xato: $e" }
     }
-    OverlayScaffold(if (initial == null) "Anime qo'shish" else "Animeni tahrirlash", onBack) {
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
-            Box(Modifier.fillMaxWidth().height(160.dp).clip(card).background(AruColors.Card).clickable(enabled = !busy) { pick.launch("image/*") }, contentAlignment = Alignment.Center) {
-                if (photo.isNotEmpty()) TgImage(photo, Modifier.fillMaxSize(), maxPx = 640) else Text("Rasm tanlash", color = AruColors.TextDim)
-                if (busy) LinearProgressIndicator(color = AruColors.Accent2, modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth())
+    FormScaffold(if (initial == null) "Anime qo'shish" else "Animeni tahrirlash", 20, onBack) {
+        PhotoBox(200, photo, busy) { pick.launch("image/*") }
+        Spacer(Modifier.height(16.dp))
+        error?.let { ErrorBox(it); Spacer(Modifier.height(16.dp)) }
+        GlassField(name, { name = it }, "Anime nomi (ixtiyoriy)", AruIcons.Movie); Spacer(Modifier.height(12.dp))
+        GlassField(davlat, { davlat = it }, "Davlat (ixtiyoriy)", AruIcons.LocationOn); Spacer(Modifier.height(12.dp))
+        GlassField(studiya, { studiya = it }, "Studiya (ixtiyoriy)", AruIcons.Business); Spacer(Modifier.height(12.dp))
+        GlassField(janri, { janri = it }, "Janri (ixtiyoriy)", AruIcons.LabelOutline); Spacer(Modifier.height(12.dp))
+        GlassField(tavsif, { tavsif = it }, "Tavsif (ixtiyoriy)", AruIcons.DescriptionOutline, maxLines = 4)
+        Spacer(Modifier.height(24.dp))
+        FormButtons("Bekor", "Saqlash", busy, onBack) {
+            busy = true; error = null
+            scope.launch {
+                val b = JSONObject().put("photo_url", photo).put("name", name).put("davlat", davlat).put("studiya", studiya).put("janri", janri).put("tavsif", tavsif)
+                val r = if (initial == null) api.post("/api/anime", b) else withContext(Dispatchers.IO) { uz.arumediatv.com.data.Http.client.callJson("${uz.arumediatv.com.BuildConfig.API_BASE}/api/anime/${initial.optLong("id")}", "PUT", b) }
+                busy = false
+                if (r.ok) onDone() else error = "Xato: ${api.errorOf(r, "Saqlashda xato")}"
             }
-            Spacer(Modifier.height(10.dp))
-            Field(name, { name = it }, "Nomi"); Field(davlat, { davlat = it }, "Davlat"); Field(studiya, { studiya = it }, "Studiya"); Field(janri, { janri = it }, "Janri"); Field(tavsif, { tavsif = it }, "Tavsif", minLines = 4)
-            error?.let { Text(it, color = Color(0xFFF87171), fontSize = 13.sp) }
-            Spacer(Modifier.height(10.dp))
-            Btn(if (busy) "Saqlanmoqda..." else "Saqlash", primary = true) {
-                if (busy || name.isBlank()) return@Btn
-                busy = true
-                scope.launch {
-                    val b = JSONObject().put("photo_url", photo).put("name", name).put("davlat", davlat).put("studiya", studiya).put("janri", janri).put("tavsif", tavsif)
-                    val r = if (initial == null) api.post("/api/anime", b) else withContext(Dispatchers.IO) { uz.arumediatv.com.data.Http.client.callJson("${uz.arumediatv.com.BuildConfig.API_BASE}/api/anime/${initial.optLong("id")}", "PUT", b) }
-                    busy = false
-                    if (r.ok) onDone() else error = api.errorOf(r, "Saqlashda xato")
-                }
-            }
-            Spacer(Modifier.height(40.dp))
         }
     }
 }
@@ -401,7 +499,7 @@ fun AdminSeasonsScreen(anime: JSONObject, onBack: () -> Unit, onOpenSeason: (JSO
     }
 }
 
-/** Bo'lim qo'shish / tahrirlash: raqam, nom, studio, tarjimon, yil, janrlar, tur, holat, yosh, tavsif, rasm. */
+/** Bo'lim qo'shish / tahrirlash: raqam, nom, studiya, tarjimon, davlat, rejissyor, yil, yosh, janrlar, tur, holat, tavsif, rasm. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AdminSeasonEditScreen(animeId: Long, initial: JSONObject?, onBack: () -> Unit, onDone: () -> Unit) {
@@ -409,66 +507,90 @@ fun AdminSeasonEditScreen(animeId: Long, initial: JSONObject?, onBack: () -> Uni
     val scope = rememberCoroutineScope()
     val api = AppServices.admin
     var bolim by remember { mutableStateOf(initial?.optInt("bolim_id")?.takeIf { it > 0 }?.toString().orEmpty()) }
-    var nomi by remember { mutableStateOf(initial?.optString("nomi").orEmpty()) }
-    var studio by remember { mutableStateOf(initial?.optString("studio").orEmpty()) }
-    var tarjimon by remember { mutableStateOf(initial?.optString("tarjimon").orEmpty()) }
-    var yili by remember { mutableStateOf(initial?.optString("yili").orEmpty()) }
-    var tavsif by remember { mutableStateOf(initial?.optString("tavsif").orEmpty()) }
-    var davlat by remember { mutableStateOf(initial?.optString("davlat").orEmpty()) }
-    var rejissyor by remember { mutableStateOf(initial?.optString("rejissyor").orEmpty()) }
+    var nomi by remember { mutableStateOf(jstr(initial, "nomi")) }
+    var studio by remember { mutableStateOf(jstr(initial, "studio")) }
+    var tarjimon by remember { mutableStateOf(jstr(initial, "tarjimon")) }
+    var yili by remember { mutableStateOf(jstr(initial, "yili")) }
+    var tavsif by remember { mutableStateOf(jstr(initial, "tavsif")) }
+    var davlat by remember { mutableStateOf(jstr(initial, "davlat")) }
+    var rejissyor by remember { mutableStateOf(jstr(initial, "rejissyor")) }
     var yosh by remember { mutableStateOf(initial?.optInt("yosh")?.takeIf { it > 0 }?.toString().orEmpty()) }
-    var turi by remember { mutableStateOf(initial?.optString("turi")?.takeIf { it in listOf("TV", "FILM", "OVA") } ?: "TV") }
-    var holati by remember { mutableStateOf(initial?.optString("holati")?.takeIf { it in listOf("Davom etmoqda", "Tugallangan") } ?: "Davom etmoqda") }
-    val genres = remember { mutableStateListOf<String>().also { l -> initial?.optString("janri").orEmpty().split(',').map { it.trim() }.filter { it.isNotEmpty() }.forEach(l::add) } }
-    var photo by remember { mutableStateOf(fileNameOfUrl(initial?.optString("photo_url").orEmpty())) }
+    var turi by remember { mutableStateOf(jstr(initial, "turi").takeIf { it in listOf("TV", "FILM", "OVA") } ?: "TV") }
+    var holati by remember { mutableStateOf(jstr(initial, "holati").takeIf { it in listOf("Davom etmoqda", "Tugallangan") } ?: "Davom etmoqda") }
+    val genres = remember { mutableStateListOf<String>().also { l -> jstr(initial, "janri").split(',').map { it.trim() }.filter { it.isNotEmpty() }.forEach { if (it !in l) l.add(it) } } }
+    var photo by remember { mutableStateOf(fileNameOfUrl(jstr(initial, "photo_url"))) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) scope.launch { busy = true; val (n, e) = uploadPhoto(ctx, uri, "season"); busy = false; if (n != null) { photo = n; error = null } else error = "Rasm yuklashda xato: $e" }
     }
-    OverlayScaffold(if (initial == null) "Yangi bo'lim qo'shish" else "Bo'limni tahrirlash", onBack) {
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
-            Box(Modifier.fillMaxWidth().height(160.dp).clip(card).background(AruColors.Card).clickable(enabled = !busy) { pick.launch("image/*") }, contentAlignment = Alignment.Center) {
-                if (photo.isNotEmpty()) TgImage(photo, Modifier.fillMaxSize(), maxPx = 640) else Text("Rasm tanlash", color = AruColors.TextDim)
-                if (busy) LinearProgressIndicator(color = AruColors.Accent2, modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth())
+    FormScaffold(if (initial == null) "Yangi bo'lim qo'shish" else "Bo'limni tahrirlash", 19, onBack) {
+        PhotoBox(180, photo, busy) { pick.launch("image/*") }
+        Spacer(Modifier.height(16.dp))
+        error?.let { ErrorBox(it); Spacer(Modifier.height(16.dp)) }
+        GlassField(bolim, { bolim = it.filter(Char::isDigit) }, "Bo'lim raqami (N-bo'lim)", AruIcons.Tag, number = true); Spacer(Modifier.height(12.dp))
+        GlassField(nomi, { nomi = it }, "Nomi", AruIcons.Movie); Spacer(Modifier.height(12.dp))
+        GlassField(studio, { studio = it }, "Studiya", AruIcons.Business); Spacer(Modifier.height(12.dp))
+        GlassField(tarjimon, { tarjimon = it }, "Tarjimon", AruIcons.Translate); Spacer(Modifier.height(12.dp))
+        GlassField(davlat, { davlat = it }, "Davlat", AruIcons.LocationOn); Spacer(Modifier.height(12.dp))
+        GlassField(rejissyor, { rejissyor = it }, "Rejissyor", AruIcons.VideocamOutline); Spacer(Modifier.height(12.dp))
+        GlassField(yili, { yili = it }, "Yili", AruIcons.CalendarToday, number = true); Spacer(Modifier.height(12.dp))
+        // Yosh chegarasi — butun bo'lim uchun bir marta; yozilgan raqam o'ngda "18+" ko'rinishida turadi.
+        GlassField(yosh, { yosh = it.filter(Char::isDigit).take(2) }, "Yosh chegarasi (masalan 18)", AruIcons.ShieldOutline, number = true, trailing = if (yosh.trim().isEmpty()) null else ({
+            Text("${yosh.trim()}+", color = AruColors.Accent, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(end = 4.dp))
+        }))
+        Spacer(Modifier.height(12.dp))
+        SectionLabel("Janri"); Spacer(Modifier.height(8.dp))
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            GENRES.forEach { g -> Chip(g, g in genres) { if (g in genres) genres.remove(g) else genres.add(g) } }
+        }
+        Spacer(Modifier.height(16.dp))
+        SectionLabel("Turi"); Spacer(Modifier.height(8.dp))
+        Segmented(listOf("TV", "FILM", "OVA"), turi) { turi = it }
+        Spacer(Modifier.height(16.dp))
+        SectionLabel("Holat"); Spacer(Modifier.height(8.dp))
+        Segmented(listOf("Davom etmoqda", "Tugallangan"), holati) { holati = it }
+        Spacer(Modifier.height(16.dp))
+        GlassField(tavsif, { tavsif = it }, "Tavsif", AruIcons.DescriptionOutline, maxLines = 4)
+        Spacer(Modifier.height(24.dp))
+        FormButtons("Bekor qilish", if (initial == null) "Qo'shish" else "Saqlash", busy, onBack) {
+            busy = true; error = null
+            scope.launch {
+                val g = genres.sorted()
+                val b = JSONObject().put("anime_id", animeId).put("bolim_id", bolim.toIntOrNull() ?: 0).put("photo_url", photo).put("nomi", nomi).put("studio", studio)
+                    .put("tarjimon", tarjimon).put("yili", yili).put("janrlar", JSONArray(g)).put("janri", g.joinToString(", ")).put("turi", turi).put("holati", holati)
+                    .put("tavsif", tavsif).put("davlat", davlat.trim()).put("rejissyor", rejissyor.trim()).put("yosh", yosh.trim().toIntOrNull() ?: 0)
+                val r = if (initial == null) api.post("/api/seasons", b) else withContext(Dispatchers.IO) { uz.arumediatv.com.data.Http.client.callJson("${uz.arumediatv.com.BuildConfig.API_BASE}/api/seasons/$animeId/${initial.optLong("season_id")}", "PUT", b) }
+                busy = false
+                if (r.ok) onDone() else error = "Xato: ${api.errorOf(r, "Saqlashda xato")}"
             }
-            Spacer(Modifier.height(10.dp))
-            Field(bolim, { bolim = it.filter(Char::isDigit).take(4) }, "Bo'lim raqami (N-bo'lim)", number = true)
-            Field(nomi, { nomi = it }, "Nomi"); Field(studio, { studio = it }, "Studio"); Field(tarjimon, { tarjimon = it }, "Tarjimon"); Field(yili, { yili = it.take(4) }, "Yili", number = true)
-            Field(davlat, { davlat = it }, "Davlat"); Field(rejissyor, { rejissyor = it }, "Rejissyor"); Field(yosh, { yosh = it.filter(Char::isDigit).take(2) }, "Yosh chegarasi (masalan 13)", number = true)
-            Text("Turi", color = AruColors.TextDim, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf("TV", "FILM", "OVA").forEach { t -> Chip(t, turi == t) { turi = t } } }
-            Text("Holati", color = AruColors.TextDim, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf("Davom etmoqda", "Tugallangan").forEach { t -> Chip(t, holati == t) { holati = t } } }
-            Text("Janrlar", color = AruColors.TextDim, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) { GENRES.forEach { g -> Chip(g, g in genres) { if (g in genres) genres.remove(g) else genres.add(g) } } }
-            Field(tavsif, { tavsif = it }, "Tavsif", minLines = 4)
-            error?.let { Text(it, color = Color(0xFFF87171), fontSize = 13.sp) }
-            Spacer(Modifier.height(10.dp))
-            Btn(if (busy) "Saqlanmoqda..." else "Saqlash", primary = true) {
-                if (busy) return@Btn
-                busy = true; error = null
-                scope.launch {
-                    val g = genres.sorted()
-                    val b = JSONObject().put("anime_id", animeId).put("bolim_id", bolim.toIntOrNull() ?: 0).put("photo_url", photo).put("nomi", nomi).put("studio", studio)
-                        .put("tarjimon", tarjimon).put("yili", yili).put("janrlar", JSONArray(g)).put("janri", g.joinToString(", ")).put("turi", turi).put("holati", holati)
-                        .put("tavsif", tavsif).put("davlat", davlat.trim()).put("rejissyor", rejissyor.trim()).put("yosh", yosh.trim().toIntOrNull() ?: 0)
-                    val r = if (initial == null) api.post("/api/seasons", b) else withContext(Dispatchers.IO) { uz.arumediatv.com.data.Http.client.callJson("${uz.arumediatv.com.BuildConfig.API_BASE}/api/seasons/$animeId/${initial.optLong("season_id")}", "PUT", b) }
-                    busy = false
-                    if (r.ok) onDone() else error = api.errorOf(r, "Saqlashda xato")
-                }
-            }
-            Spacer(Modifier.height(40.dp))
         }
     }
 }
 
+/** Janr tugmasi: tanlansa apelsin hoshiyali. */
 @Composable
 private fun Chip(text: String, on: Boolean, onClick: () -> Unit) {
+    val sh = RoundedCornerShape(12.dp)
     Text(
-        text, color = if (on) Color.White else AruColors.TextDim, fontSize = 12.sp,
-        modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(if (on) AruColors.Accent else AruColors.CardAlt).clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 7.dp),
+        text, color = if (on) Color.White else Color(0x99FFFFFF), fontSize = 13.sp, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium,
+        modifier = Modifier.clip(sh).background(if (on) AruColors.Accent.copy(alpha = 0.22f) else AruColors.Card).border(1.dp, if (on) AruColors.Accent else AruColors.Border, sh).clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 9.dp),
     )
+}
+
+/** Teng kenglikdagi tanlov tugmalari (Tur / Holat). */
+@Composable
+private fun Segmented(options: List<String>, selected: String, onSelect: (String) -> Unit) {
+    val sh = RoundedCornerShape(12.dp)
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        options.forEach { opt ->
+            val on = opt == selected
+            Box(
+                Modifier.weight(1f).clip(sh).background(if (on) AruColors.Accent else Color(0x0FFFFFFF)).border(1.dp, if (on) AruColors.Accent else Color(0x1FFFFFFF), sh).clickable { onSelect(opt) }.padding(vertical = 12.dp),
+                contentAlignment = Alignment.Center,
+            ) { Text(opt, color = if (on) Color.White else white60, fontWeight = if (on) FontWeight.Bold else FontWeight.Medium, fontSize = 13.sp) }
+        }
+    }
 }
 
 // ══════════════════════ QISMLAR ══════════════════════
@@ -588,138 +710,265 @@ private fun introText(raw: String?): String {
 
 private class QState(val label: String, var url: String = "", var size: Long = 0, var key: String = "")
 
+private fun mb(bytes: Long) = "%.2f MB".format(bytes / (1024.0 * 1024.0))
+
+private fun progressLine(sent: Long, total: Long) = "${"%.1f".format(if (total > 0) sent * 100.0 / total else 0.0)}% (${mb(sent)} / ${mb(total)})"
+
+/** Kodlash holati — bir qator matn (Flutter `_encodeStatusText`). */
+private fun encodeStatusText(job: JSONObject?, originNew: Boolean): String? {
+    if (job == null) return if (originNew) "Saqlangach kodlash navbatiga qo'yiladi" else null
+    val done = job.optString("done").split(',').filter { it.isNotEmpty() }.joinToString(", ")
+    return when (job.optString("state")) {
+        "queued" -> if (done.isEmpty()) "Navbatda" else "Navbatda (tayyor: $done)"
+        "running" -> if (done.isEmpty()) "Kodlanmoqda..." else "Kodlanmoqda... tayyor: $done"
+        "done" -> "Tayyor: $done"
+        "error" -> "Xato: ${job.optString("error")}"
+        else -> null
+    }
+}
+
+/** O'chirish tugmasi: 10 yumaloq glass quti ichida qizil ikonka. */
+@Composable
+private fun TrashBox(onClick: () -> Unit) {
+    val sh = RoundedCornerShape(10.dp)
+    Box(Modifier.clip(sh).background(AruColors.Card).border(1.dp, AruColors.Border, sh).clickable(onClick = onClick).padding(8.dp)) {
+        Icon(AruIcons.DeleteOutline, null, tint = Color(0xFFFF5252), modifier = Modifier.size(20.dp))
+    }
+}
+
+/** Apelsin ikonkali kengaytirilgan yuklash tugmasi (12 yumaloq). */
+@Composable
+private fun UploadButton(icon: ImageVector, text: String, onClick: () -> Unit) {
+    val sh = RoundedCornerShape(12.dp)
+    Row(Modifier.fillMaxWidth().clip(sh).background(AruColors.Card).border(1.dp, AruColors.Border, sh).clickable(onClick = onClick).padding(vertical = 14.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, tint = AruColors.Accent, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(text, color = AruColors.Accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+    }
+}
+
+@Composable
+private fun UploadProgress(progress: Float, text: String) {
+    LinearProgressIndicator(progress = { progress }, color = AruColors.Accent, trackColor = Color(0x1AFFFFFF), modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(6.dp)))
+    Spacer(Modifier.height(8.dp))
+    Text(text, color = Color(0xB3FFFFFF), fontSize = 12.sp)
+}
+
+/** Bitta sifat kartasi (Flutter `_QualityCard`). */
+@Composable
+private fun QualityCard(label: String, hasFile: Boolean, sizeText: String, uploading: Boolean, progress: Float, progressText: String, onUpload: () -> Unit, onDelete: () -> Unit) {
+    GlassCard(16, PaddingValues(14.dp)) {
+        Text("$label sifat", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+        Spacer(Modifier.height(10.dp))
+        when {
+            uploading -> UploadProgress(progress, progressText)
+            hasFile -> Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(AruIcons.CheckCircle, null, tint = Color(0xFF69F0AE), modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(sizeText, color = Color(0xCCFFFFFF), fontSize = 13.sp, modifier = Modifier.weight(1f))
+                TrashBox(onDelete)
+            }
+            else -> UploadButton(AruIcons.UploadFile, "$label fayl yuklash", onUpload)
+        }
+    }
+}
+
 /** Qism qo'shish / tahrirlash: raqam, nom, asl video (kodlash navbatiga), tayyor sifatlar (360p–1080p), intro vaqtlari (5 ta). */
 @Composable
 fun AdminEpisodeEditScreen(animeId: Long, seasonId: Long, initial: JSONObject?, onBack: () -> Unit, onDone: () -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val api = AppServices.admin
-    var number by remember { mutableStateOf(initial?.optInt("epizod_number")?.toString().orEmpty()) }
-    var name by remember { mutableStateOf(initial?.optString("epizod_name").orEmpty().takeIf { it != "null" }.orEmpty()) }
+    var number by remember { mutableStateOf(if (initial != null && initial.has("epizod_number")) initial.optInt("epizod_number").toString() else "") }
+    var name by remember { mutableStateOf(jstr(initial, "epizod_name")) }
     val intro = remember { List(10) { i -> mutableStateOf(introText(initial?.optString("intro_${i + 1}"))) } }
+    val originInit = jstr(initial, "origin_video")
     val qs = remember {
         listOf("360p", "480p", "720p", "1080p").map { q ->
-            QState(q, fileNameOfUrl(initial?.optString("url_$q").orEmpty()), initial?.optLong("size_$q") ?: 0)
+            val u = fileNameOfUrl(jstr(initial, "url_$q"))
+            // Kodlanguncha worker ASL videoni bo'sh sifat o'rnida beradi — u sifat emas, "Asl video" bo'limida ko'rinadi.
+            if (originInit.isNotEmpty() && u == originInit) QState(q) else QState(q, u, initial?.optLong("size_$q") ?: 0)
         }
     }
     var tick by remember { mutableStateOf(0) }
-    var origin by remember { mutableStateOf(initial?.optString("origin_video").orEmpty().takeIf { it != "null" }.orEmpty()) }
+    var origin by remember { mutableStateOf(originInit) }
     var originNew by remember { mutableStateOf(false) }
-    var upLabel by remember { mutableStateOf<String?>(null) }
-    var upProgress by remember { mutableStateOf(0f) }
+    var upTarget by remember { mutableStateOf<String?>(null) }
+    var upSent by remember { mutableStateOf(0L) }
+    var upTotal by remember { mutableStateOf(0L) }
     var saving by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var job by remember { mutableStateOf<JSONObject?>(null) }
-    fun toast(t: String) = Toast.makeText(ctx, t, Toast.LENGTH_SHORT).show()
+    var delQuality by remember { mutableStateOf<QState?>(null) }
+    var delOrigin by remember { mutableStateOf(false) }
+    fun toast(t: String) = Toast.makeText(ctx, t, Toast.LENGTH_LONG).show()
     val epId = initial?.optLong("epizod_id") ?: 0L
 
-    LaunchedEffect(Unit) {
+    suspend fun loadStatus() {
         if (epId > 0) {
             val r = api.get("/api/encode/status?anime_id=$animeId&season_id=$seasonId")
             val a = r.json?.optJSONArray("items")
             job = (0 until (a?.length() ?: 0)).mapNotNull { a?.optJSONObject(it) }.firstOrNull { it.optLong("epizod_id") == epId }
         }
     }
+    LaunchedEffect(Unit) { loadStatus() }
 
     var pending by remember { mutableStateOf<String?>(null) } // "origin" yoki sifat nomi
     val pickVideo = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         val target = pending
         if (uri == null || target == null) return@rememberLauncherForActivityResult
-        if (!AppServices.telegram.state.value.authorized) { toast("Video Telegram orqali yuklanadi: Profil -> Telegram'ni ulash"); return@rememberLauncherForActivityResult }
+        if (!AppServices.telegram.state.value.authorized) { toast("Asl video Telegram orqali yuklanadi: Profil → \"Telegram'ni ulash\""); return@rememberLauncherForActivityResult }
         scope.launch {
-            upLabel = if (target == "origin") "Asl video" else target; upProgress = 0f
+            upTarget = target; upSent = 0; upTotal = 0
             val uid = AppServices.auth.user.value?.id ?: 0L
             val res = withPickedFile(ctx, uri) { path, display, size ->
                 val ext = display.substringAfterLast('.', "mp4").lowercase().ifEmpty { "mp4" }
                 val mime = if (ext == "mkv") "video/x-matroska" else "video/mp4"
                 val fname = if (target == "origin") "orig_${uid}_${animeId}_${seasonId}_${System.currentTimeMillis()}.$ext" else "ep_${animeId}_${seasonId}_${target}_${System.currentTimeMillis()}.$ext"
-                val err = AppServices.telegram.uploadFile(path, fname, mime, onProgress = { s, t -> if (t > 0) upProgress = s.toFloat() / t })
+                upTotal = size
+                val err = AppServices.telegram.uploadFile(path, fname, mime, onProgress = { s, t -> upSent = s; if (t > 0) upTotal = t })
                 Triple(err, fname, size)
             }
-            upLabel = null
+            upTarget = null
             if (res == null) { toast("Faylni o'qib bo'lmadi"); return@launch }
             val (err, fname, size) = res
-            if (err != null) { toast("Yuklanmadi — $err"); return@launch }
-            if (target == "origin") { origin = fname; originNew = true; job = null; toast("Asl video yuklandi — «Saqlash»dan keyin kodlash navbatiga qo'yiladi") }
-            else { qs.first { it.label == target }.apply { url = fname; this.size = size; key = AppServices.telegram.keyFor(fname) }; tick++; toast("$target yuklandi — endi «Saqlash»ni bosing") }
+            if (target == "origin") {
+                if (err != null) { toast("Asl video yuklanmadi — $err"); return@launch }
+                origin = fname; originNew = true; job = null
+                toast("Asl video yuklandi — \"Saqlash\"dan keyin kodlash navbatiga qo'yiladi")
+            } else {
+                if (err != null) { toast("$target: Telegram'ga yuklanmadi — $err"); return@launch }
+                qs.first { it.label == target }.apply { url = fname; this.size = size; key = AppServices.telegram.keyFor(fname) }; tick++
+                toast("$target Telegram kanaliga yuklandi — endi \"Saqlash\"ni bosing")
+            }
         }
     }
 
-    OverlayScaffold(if (initial == null) "Qism qo'shish" else "Qismni tahrirlash", onBack) {
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
-            error?.let { Text(it, color = Color(0xFFF87171), fontSize = 13.sp, modifier = Modifier.padding(bottom = 8.dp)) }
-            Field(number, { number = it.filter(Char::isDigit).take(5) }, "Qism raqami (0 dan boshlash)", number = true)
-            Field(name, { name = it }, "Qism nomi (ixtiyoriy)")
-            upLabel?.let { l -> Column(Modifier.padding(vertical = 8.dp)) { Text("$l yuklanmoqda ${(upProgress * 100).toInt()}%", color = AruColors.TextDim, fontSize = 12.sp); LinearProgressIndicator(progress = { upProgress }, color = AruColors.Accent2, trackColor = AruColors.CardAlt, modifier = Modifier.fillMaxWidth()) } }
+    suspend fun queueEncode(id: Long): String? {
+        val q = api.post("/api/encode/queue", JSONObject().put("anime_id", animeId).put("season_id", seasonId).put("epizod_id", id).put("origin", origin).put("key", AppServices.telegram.keyFor(origin)))
+        return if (q.ok) null else api.errorOf(q, "xato")
+    }
 
-            Text("ASL VIDEO (avto-kodlash)", color = AruColors.Accent2, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 14.dp, bottom = 6.dp))
-            Row(Modifier.fillMaxWidth().clip(card).background(AruColors.Card).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(if (origin.isEmpty()) "Yuklanmagan" else origin, color = Color.White, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    job?.let { Text("Kodlash: ${it.optString("state")} ${it.optString("quality")}", color = AruColors.TextDim, fontSize = 11.sp) }
+    FormScaffold(if (initial == null) "Epizod qo'shish" else "Epizodni tahrirlash", 19, onBack) {
+        error?.let { ErrorBox(it); Spacer(Modifier.height(16.dp)) }
+        GlassField(number, { number = it.filter(Char::isDigit).take(5) }, "Epizod raqami (0 dan boshlash)", AruIcons.FormatListNumbered, number = true); Spacer(Modifier.height(12.dp))
+        GlassField(name, { name = it }, "Epizod nomi (ixtiyoriy)", AruIcons.TitleIcon)
+        Spacer(Modifier.height(20.dp))
+
+        // ── Asl video (avto-kodlash) ──
+        val status = encodeStatusText(job, originNew)
+        val failed = job?.optString("state") == "error"
+        GlassCard(16, PaddingValues(14.dp)) {
+            Text("Asl video (avto-kodlash)", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+            Spacer(Modifier.height(4.dp))
+            Text("Bitta asl video yuklang — 1080p/720p/480p/360p (manbadan baland emas) H.265 bilan o'zi tayyorlanadi va yoziladi.", color = Color(0x8CFFFFFF), fontSize = 12.sp)
+            Spacer(Modifier.height(10.dp))
+            if (upTarget == "origin") UploadProgress(if (upTotal > 0) upSent.toFloat() / upTotal else 0f, progressLine(upSent, upTotal))
+            else {
+                if (origin.isNotEmpty()) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(if (failed) AruIcons.ErrorOutline else AruIcons.CheckCircle, null, tint = if (failed) Color(0xFFFF5252) else Color(0xFF69F0AE), modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(status ?: "Asl video yuklangan", color = Color(0xCCFFFFFF), fontSize = 13.sp, modifier = Modifier.weight(1f))
+                        TrashBox { delOrigin = true }
+                    }
+                    Spacer(Modifier.height(10.dp))
                 }
-                Btn(if (origin.isEmpty()) "Tanlash" else "Almashtirish") { pending = "origin"; pickVideo.launch("video/*") }
-                if (origin.isNotEmpty() && epId > 0) {
-                    Spacer(Modifier.width(6.dp))
-                    Btn("O'chirish", danger = true) {
-                        scope.launch {
-                            val r = api.post("/api/encode/delete", JSONObject().put("anime_id", animeId).put("season_id", seasonId).put("epizod_id", epId).put("origin", origin))
-                            if (r.ok) { origin = ""; originNew = false; job = null; toast("Asl video o'chirildi") } else toast(api.errorOf(r, "O'chirilmadi"))
-                        }
+                UploadButton(AruIcons.MovieFilter, if (origin.isEmpty()) "Original video yuklash" else "Boshqa asl video yuklash") { pending = "origin"; pickVideo.launch("video/*") }
+                if (failed && !originNew && epId > 0) {
+                    Spacer(Modifier.height(8.dp))
+                    Row(Modifier.fillMaxWidth().clickable { scope.launch { val err = queueEncode(epId); toast(if (err == null) "Qayta navbatga qo'yildi" else "Xato: $err"); loadStatus() } }.padding(vertical = 8.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                        Icon(AruIcons.Refresh, null, tint = AruColors.Accent, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Qayta urinish", color = AruColors.Accent, fontSize = 14.sp)
                     }
                 }
             }
-
-            Text("TAYYOR SIFATLAR", color = AruColors.Accent2, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 14.dp, bottom = 6.dp))
-            qs.forEach { q ->
-                key(tick) {
-                    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(card).background(AruColors.Card).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(q.label, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                            Text(if (q.url.isEmpty()) "Yo'q" else "${q.url} · ${formatBytes(q.size)}", color = AruColors.TextDim, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                        Btn(if (q.url.isEmpty()) "Yuklash" else "Almashtirish") { pending = q.label; pickVideo.launch("video/*") }
-                        if (q.url.isNotEmpty()) {
-                            Spacer(Modifier.width(6.dp))
-                            Btn("O'chirish", danger = true) {
-                                scope.launch {
-                                    if (epId > 0) { val r = api.delete("/api/epizods/$animeId/$seasonId/$epId/${q.label}"); if (!r.ok) { toast(api.errorOf(r, "O'chirilmadi")); return@launch } }
-                                    q.url = ""; q.size = 0; q.key = ""; tick++
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            Text("INTRO VAQTLARI (masalan 1:30 yoki 130)", color = AruColors.Accent2, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 14.dp, bottom = 6.dp))
-            for (row in 0 until 5) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Field(intro[row * 2].value, { intro[row * 2].value = it.take(8) }, "${row + 1}-boshi", Modifier.weight(1f))
-                    Field(intro[row * 2 + 1].value, { intro[row * 2 + 1].value = it.take(8) }, "${row + 1}-oxiri", Modifier.weight(1f))
-                }
-            }
-            Spacer(Modifier.height(14.dp))
-            Btn(if (saving) "Saqlanmoqda..." else "Saqlash", primary = true) {
-                if (saving) return@Btn
-                saving = true; error = null
-                scope.launch {
-                    val b = JSONObject().put("anime_id", animeId).put("season_id", seasonId).put("epizod_number", number.toIntOrNull() ?: 0).put("epizod_name", name)
-                    qs.forEach { q -> b.put("url_${q.label}", q.url).put("size_${q.label}", q.size).put("key_${q.label}", q.key) }
-                    intro.forEachIndexed { i, s -> b.put("intro_${i + 1}", normalizeIntro(s.value)) }
-                    val r = if (initial != null) withContext(Dispatchers.IO) { uz.arumediatv.com.data.Http.client.callJson("${uz.arumediatv.com.BuildConfig.API_BASE}/api/epizods/$animeId/$seasonId/$epId", "PUT", b) } else api.post("/api/epizods", b)
-                    if (r.ok) {
-                        if (originNew && origin.isNotEmpty()) {
-                            val id = if (epId > 0) epId else r.json?.optLong("epizod_id") ?: 0L
-                            val q = api.post("/api/encode/queue", JSONObject().put("anime_id", animeId).put("season_id", seasonId).put("epizod_id", id).put("origin", origin).put("key", AppServices.telegram.keyFor(origin)))
-                            toast(if (q.ok) "Kodlash navbatiga qo'yildi" else "Qism saqlandi, lekin navbatga qo'yilmadi: ${api.errorOf(q, "xato")}")
-                        }
-                        saving = false
-                        onDone()
-                    } else { saving = false; error = api.errorOf(r, "Saqlashda xato") }
-                }
-            }
-            Spacer(Modifier.height(40.dp))
         }
+        Spacer(Modifier.height(12.dp))
+
+        // ── 4 ta sifat ──
+        qs.forEach { q ->
+            key(tick) {
+                val up = upTarget == q.label
+                QualityCard(q.label, q.url.isNotEmpty(), formatBytes(q.size), up, if (upTotal > 0) upSent.toFloat() / upTotal else 0f, progressLine(upSent, upTotal), onUpload = { pending = q.label; pickVideo.launch("video/*") }, onDelete = { delQuality = q })
+            }
+            Spacer(Modifier.height(12.dp))
+        }
+        Spacer(Modifier.height(8.dp))
+
+        // ── O'tkazib yuboriladigan joylar ──
+        GlassCard(16, PaddingValues(start = 16.dp, top = 14.dp, end = 16.dp, bottom = 16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(AruIcons.FastForward, null, tint = Color(0xB3FFFFFF), modifier = Modifier.size(18.dp)); Spacer(Modifier.width(8.dp))
+                Text("O'tkazib yuboriladigan joylar", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            }
+            Spacer(Modifier.height(4.dp))
+            Text("Chapga boshlanish, o'ngga tugash vaqti: 5:14 va 6:44.\nVideo 5:14 ga kelganda pleyerda \"Introni o'tkazish\" tugmasi chiqadi. Bo'sh qatorlar e'tiborga olinmaydi.", color = Color(0x73FFFFFF), fontSize = 11.5.sp, lineHeight = 15.5.sp)
+            Spacer(Modifier.height(12.dp))
+            for (row in 0 until 5) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("${row + 1}", color = Color(0x59FFFFFF), fontSize = 12.sp, modifier = Modifier.width(20.dp))
+                    IntroField(intro[row * 2].value, { intro[row * 2].value = it }, "boshi", Modifier.weight(1f))
+                    Spacer(Modifier.width(10.dp))
+                    IntroField(intro[row * 2 + 1].value, { intro[row * 2 + 1].value = it }, "oxiri", Modifier.weight(1f))
+                }
+                if (row != 4) Spacer(Modifier.height(8.dp))
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+
+        FormButtons("Bekor qilish", if (initial == null) "Qo'shish" else "Saqlash", saving, onBack) {
+            saving = true; error = null
+            scope.launch {
+                val b = JSONObject().put("anime_id", animeId).put("season_id", seasonId).put("epizod_number", number.toIntOrNull() ?: 0).put("epizod_name", name)
+                qs.forEach { q -> b.put("url_${q.label}", q.url).put("size_${q.label}", q.size).put("key_${q.label}", q.key) }
+                intro.forEachIndexed { i, s -> b.put("intro_${i + 1}", normalizeIntro(s.value)) }
+                val r = if (initial != null) withContext(Dispatchers.IO) { uz.arumediatv.com.data.Http.client.callJson("${uz.arumediatv.com.BuildConfig.API_BASE}/api/epizods/$animeId/$seasonId/$epId", "PUT", b) } else api.post("/api/epizods", b)
+                if (r.ok) {
+                    if (originNew && origin.isNotEmpty()) {
+                        val id = if (epId > 0) epId else r.json?.optLong("epizod_id") ?: 0L
+                        val err = if (id == 0L) "qism raqami olinmadi" else queueEncode(id)
+                        toast(if (err == null) "Kodlash navbatiga qo'yildi — GitHub Actions'da \"Avto-kodlash\" ni ishga tushiring" else "Qism saqlandi, lekin kodlash navbatiga qo'yilmadi: $err")
+                    }
+                    saving = false
+                    onDone()
+                } else { saving = false; error = "Xato: ${api.errorOf(r, "Saqlashda xato")}" }
+            }
+        }
+    }
+
+    delQuality?.let { q ->
+        ConfirmDialog("${q.label} faylni o'chirish?", "Fayl B2dan ham, bazadan ham o'chiriladi. Davom etasizmi?", "Ha, o'chirish", danger = true) { yes ->
+            delQuality = null
+            if (yes) scope.launch {
+                if (epId > 0) {
+                    val r = api.delete("/api/epizods/$animeId/$seasonId/$epId/${q.label}")
+                    if (!r.ok) { toast("O'chirishda xato: ${api.errorOf(r, "xato")}"); return@launch }
+                }
+                q.url = ""; q.size = 0; q.key = ""; tick++
+            }
+        }
+    }
+    if (delOrigin) {
+        ConfirmDialog("Asl videoni o'chirish?", "Asl video Telegram'dan ham, bazadan ham o'chiriladi va kodlash navbatdan olinadi. Tayyor bo'lgan sifatlar qoladi. Davom etasizmi?", "Ha, o'chirish", danger = true) { yes ->
+            delOrigin = false
+            if (yes) scope.launch {
+                val r = api.post("/api/encode/delete", JSONObject().put("anime_id", animeId).put("season_id", seasonId).put("epizod_id", epId).put("origin", origin))
+                if (r.ok) { origin = ""; originNew = false; job = null; toast("Asl video o'chirildi") } else toast("Asl video o'chirilmadi: ${api.errorOf(r, "xato")}")
+            }
+        }
+    }
+}
+
+/** Vaqt maydoni (Flutter `_introField`): oq 6% fon, 10 yumaloq, faqat raqam va ikki nuqta. */
+@Composable
+private fun IntroField(value: String, onChange: (String) -> Unit, hint: String, modifier: Modifier) {
+    val sh = RoundedCornerShape(10.dp)
+    Box(modifier.clip(sh).background(Color(0x0FFFFFFF)).border(1.dp, Color(0x1AFFFFFF), sh).padding(horizontal = 12.dp, vertical = 11.dp)) {
+        androidx.compose.foundation.text.BasicTextField(
+            value = value, onValueChange = { onChange(it.filter { c -> c.isDigit() || c == ':' }.take(8)) }, singleLine = true,
+            textStyle = TextStyle(color = Color.White, fontSize = 14.sp), cursorBrush = androidx.compose.ui.graphics.SolidColor(Color.White),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text), modifier = Modifier.fillMaxWidth(),
+            decorationBox = { inner -> if (value.isEmpty()) Text(hint, color = Color(0x4DFFFFFF), fontSize = 13.sp); inner() },
+        )
     }
 }

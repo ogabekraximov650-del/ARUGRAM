@@ -6642,3 +6642,8 @@ Nega: PUBG darajasiga bosqichma-bosqich (low-poly → realistik, keyin botlar/zo
   - tasdiqlash oynalari Flutter matnlari bilan ("Animeni o'chirish?", "Yo'q" / "Ha, o'chirish"), xabarlar snackbar'da;
   - yuklanish/xato (anime oynasida "Qayta urinish")/bo'sh holatlar; ro'yxat diskda keshlanadi (darhol chiqadi, keyin yangilanadi).
 - `Page.AdminEpisodes` endi `anime` va `season` JSON'ini olib yuradi (sarlavha uchun). Qo'shish/tahrirlash oynalari (`Admin*EditScreen`) tegilmagan.
+
+### Kotlin: qo'shish/tahrirlash oynalari ham Flutter bilan bir xil (2026-10)
+- `AdminAnimeEditScreen`, `AdminSeasonEditScreen`, `AdminEpisodeEditScreen` Flutter `add_anime_screen.dart`, `add_season_screen.dart`, `add_epizod_screen.dart` bo'yicha qayta qurildi: sarlavha kartasi, 20 yumaloq rasm kartasi (ichida 16 yumaloq quti), prefiks ikonkali glass maydonlar ("Anime nomi (ixtiyoriy)" ...), "Bekor"/"Saqlash" tugmalari yonma-yon, Tur/Holat teng kenglikdagi tugmalar, janr tugmalari, yosh maydonida "18+" ko'rsatkichi; qismda "Asl video (avto-kodlash)" kartasi (holat, o'chirish, qayta urinish), 4 ta "NNNp sifat" kartasi (yuklanish foizi `% (MB / MB)`), "O'tkazib yuboriladigan joylar" kartasi (5 qator x 2 maydon).
+- Mantiq (yuklash, saqlash, navbatga qo'yish) o'zgarmagan; anime saqlashda hech qaysi maydon majburiy emas (Flutter kabi).
+- `AruIcons` ga formalar uchun ikonkalar qo'shildi.
