@@ -385,7 +385,10 @@ fun SeasonScreen(
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, "Orqaga", tint = Color.White, modifier = Modifier.size(24.dp))
                 }
                 Spacer(Modifier.width(12.dp))
-                Text(season.name, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    "${season.sectionNo.takeIf { it > 0 } ?: 1}-bo'lim  ${season.name}", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
+                )
             }
         }
         // ── Video ──
@@ -434,12 +437,13 @@ fun SeasonScreen(
                     Modifier.padding(start = 16.dp, end = 16.dp, top = 6.dp).clip(cs).background(AruColors.Card).border(1.dp, AruColors.Border, cs).padding(horizontal = 10.dp, vertical = 5.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
-                    Text("${season.sectionNo.takeIf { it > 0 } ?: 1}-bo'lim · ${ep.number}-qism", color = Color.White, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                    Text("${ep.number}-qism", color = Color.White, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
                     NowStat(AruIcons.Visibility, formatCount(ep.views))
                     NowStat(AruIcons.Schedule, formatHours(ep.watchMs))
                     if (ep.addedAt > 0) NowStat(AruIcons.EventAvailable, formatMomentYmd(ep.addedAt))
                 }
             } else Spacer(Modifier.height(8.dp))
+            if (ep != null) CurrentDownloadStrip(ep)
             Spacer(Modifier.height(8.dp))
 
             // ── Tablar (shisha qutida) ──
@@ -672,6 +676,30 @@ private fun ConsentScreen(channels: List<uz.arumediatv.com.data.GateChannel>, lo
             }
             Spacer(Modifier.height(10.dp))
             Text("Kanalsiz — obuna olish", color = muted, fontSize = 13.sp, modifier = Modifier.clickable(onClick = onBilling).padding(10.dp))
+        }
+    }
+}
+
+
+/** Hozir ijro etilayotgan qismning yuklanishi (sozlamalardan boshlangan): "Yuklanmoqda · 720p  12.3%" va ingichka chiziq. Yuklash tugagach yo'qoladi. */
+@Composable
+private fun CurrentDownloadStrip(ep: Episode) {
+    val all by AppServices.downloads.stats.collectAsStateWithLifecycle()
+    var q = ""
+    var ratio = 0f
+    ep.qualities.forEach { name ->
+        val st = all[ep.urls[name].orEmpty()] ?: return@forEach
+        if ((st.downloading || st.queued) && !st.complete && (q.isEmpty() || st.ratio >= ratio)) { q = name; ratio = st.ratio }
+    }
+    if (q.isEmpty()) return
+    Column(Modifier.padding(start = 18.dp, end = 18.dp, top = 6.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Yuklanmoqda · ${ep.qualityTitle(q)}", color = AruColors.Accent2, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            Text(String.format(java.util.Locale.US, "%.1f%%", ratio * 100), color = AruColors.Accent2, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+        }
+        Spacer(Modifier.height(4.dp))
+        Box(Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(2.dp)).background(Color.White.copy(alpha = 0.12f))) {
+            Box(Modifier.fillMaxWidth(ratio.coerceIn(0f, 1f)).fillMaxHeight().background(Brush.horizontalGradient(listOf(AruColors.Accent, AruColors.Accent2))))
         }
     }
 }

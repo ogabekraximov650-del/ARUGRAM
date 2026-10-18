@@ -160,8 +160,8 @@ fun EpisodeDialTab(
         val wPx = with(density) { maxWidth.toPx() }
         val hPx = with(density) { maxHeight.toPx() }
         val dp1 = with(density) { 1.dp.toPx() }
-        val r = min(172 * dp1, hPx / 2f - 2 * dp1)
-        val r2 = r * 0.70f
+        val r = min(186 * dp1, hPx / 2f - 2 * dp1)
+        val r2 = r * 0.66f
         val pad = 14 * dp1
         val cy = hPx / 2f
         val pitch = PITCH * dp1
