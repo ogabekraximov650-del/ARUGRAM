@@ -1,0 +1,150 @@
+name: Ilova haqida video
+
+# `tool/video/**` o'zgarganda 5 daqiqalik animatsion videoni (MP4) tayyorlaydi. Natija — Actions sahifasidagi
+# `aru-video` artefakti. Qo'lda ishga tushirilmaydi (workflow_dispatch yo'q): o'zgarish push qilinganda o'zi ishlaydi.
+#
+# 1. `assets`  — haqiqiy poster va bitta anime qismi Telegram kanalidan olinadi (kodlash workflow'lari bilan bir xil sessiya,
+#                `tool/encode/session.enc`, kalit `ENCODE_TOKEN`). Muvaffaqiyatsiz bo'lsa, video rasmsiz tayyorlanadi.
+# 2. `frames`  — kadrlar 8 qismga bo'lib parallel yoziladi (Chromium, deterministik vaqt).
+# 3. `audio`   — musiqa va ovoz effektlari (numpy).
+# 4. `final`   — bo'laklar birlashtiriladi, ovoz qo'shiladi.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tool/video/**'
+      - '.github/workflows/video.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arumediatv-video
+  cancel-in-progress: true
+
+env:
+  SHARDS: 8
+  FRAMES: 9000
+
+jobs:
+  assets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: ffmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+      - name: Python paketlari
+        run: pip install --no-cache-dir -r tool/video/requirements.txt
+      - name: Telegram sessiyasi
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+        run: |
+          OUT=tool/video/pyro_session.session
+          K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K \
+            -in tool/encode/session.enc -out "$OUT" || true
+          if head -c 16 "$OUT" 2>/dev/null | grep -q "SQLite format 3"; then echo "Sessiya tiklandi"; else echo "::warning::Sessiya ochilmadi — video rasmsiz tayyorlanadi"; rm -f "$OUT"; fi
+      - name: Poster va qismni yuklash
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+          API_BASE: ${{ secrets.API_BASE }}
+          PYTHONUNBUFFERED: '1'
+        run: |
+          mkdir -p tool/video/assets
+          if [ -f tool/video/pyro_session.session ]; then python3 tool/video/fetch_assets.py; else echo "Sessiya yo'q"; fi
+          ls -la tool/video/assets || true
+      - name: Sessiyani o'chirish
+        if: always()
+        run: rm -f tool/video/pyro_session.session
+      - uses: actions/upload-artifact@v4
+        with:
+          name: video-assets
+          path: tool/video/assets
+          if-no-files-found: ignore
+          retention-days: 3
+
+  frames:
+    needs: assets
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: true
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: video-assets
+          path: tool/video/assets
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Shriftlar va ffmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg fonts-inter fonts-noto-color-emoji fonts-dejavu-core
+      - name: Playwright
+        run: |
+          pip install --no-cache-dir playwright
+          python3 -m playwright install --with-deps chromium
+      - name: Kadrlarni yozish
+        run: |
+          PER=$(( FRAMES / SHARDS ))
+          A=$(( ${{ matrix.shard }} * PER ))
+          Z=$(( A + PER ))
+          mkdir -p seg
+          python3 tool/video/render.py segment "$A" "$Z" "seg/seg_${{ matrix.shard }}.mp4"
+          ffprobe -v error -show_entries stream=nb_frames -of csv=p=0 "seg/seg_${{ matrix.shard }}.mp4"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: seg-${{ matrix.shard }}
+          path: seg/seg_${{ matrix.shard }}.mp4
+          retention-days: 3
+
+  audio:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install --no-cache-dir numpy
+      - run: python3 tool/video/audio.py audio.wav
+      - uses: actions/upload-artifact@v4
+        with:
+          name: video-audio
+          path: audio.wav
+          retention-days: 3
+
+  final:
+    needs: [frames, audio]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: ffmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+      - uses: actions/download-artifact@v4
+        with:
+          path: parts
+      - name: Birlashtirish
+        run: |
+          ls -R parts | head -40
+          : > list.txt
+          for i in 0 1 2 3 4 5 6 7; do echo "file 'parts/seg-$i/seg_$i.mp4'" >> list.txt; done
+          ffmpeg -v error -y -f concat -safe 0 -i list.txt -i parts/video-audio/audio.wav \
+            -c:v copy -c:a aac -b:a 192k -ar 44100 -shortest -movflags +faststart aru_video.mp4
+          ffprobe -v error -show_entries format=duration,size:stream=codec_name,width,height -of default=nw=1 aru_video.mp4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aru-video
+          path: aru_video.mp4
+          retention-days: 14

@@ -1,0 +1,276 @@
+{
+ "duration": 300,
+ "fps": 30,
+ "marks": {
+  "intro_logo": 0.6,
+  "intro_sub": 3.2,
+  "intro_feat": 5.2,
+  "intro_end": 9.6,
+  "s1": 10.0,
+  "s1_phone": 10.6,
+  "s1_dia_phone": 13.5,
+  "s1_dia_tg": 14.5,
+  "s1_ph0": 14.0,
+  "s1_ph1": 20.0,
+  "s1_btn1": 21.0,
+  "s1_code_scr": 21.8,
+  "s1_tg_msg": 22.6,
+  "s1_co0": 25.0,
+  "s1_co1": 28.0,
+  "s1_btn2": 29.0,
+  "s1_pass_scr": 29.8,
+  "s1_pw0": 32.0,
+  "s1_pw1": 35.0,
+  "s1_btn3": 36.0,
+  "s1_ok": 37.2,
+  "s1_pk1": 21.2,
+  "s1_pk2": 23.0,
+  "s1_pk3": 29.2,
+  "s1_pk4": 36.3,
+  "s1_sess": 38.5,
+  "s1_lock": 44.5,
+  "s1_token": 52.5,
+  "s1_limit": 60.5,
+  "s1_end": 69.6,
+  "s2": 70.0,
+  "s2_phone": 70.4,
+  "s2_scroll0": 73.0,
+  "s2_scroll1": 82.0,
+  "s2_search": 84.5,
+  "s2_cache": 88.0,
+  "s2_end": 94.6,
+  "s3": 95.0,
+  "s3_phone": 95.4,
+  "s3_chan": 96.5,
+  "s3_rust": 98.0,
+  "s3_play": 99.0,
+  "s3_tap": 100.0,
+  "s3_req": 101.5,
+  "s3_dec": 104.5,
+  "s3_disk": 107.0,
+  "s3_plyr": 109.0,
+  "s3_win0": 112.0,
+  "s3_win1": 124.0,
+  "s3_seek": 128.0,
+  "s3_seek1": 133.0,
+  "s3_hist": 137.0,
+  "s3_off": 148.0,
+  "s3_dial": 158.0,
+  "s3_spin": 162.0,
+  "s3_time": 170.0,
+  "s3_end": 184.6,
+  "s4": 185.0,
+  "s4_file": 185.8,
+  "s4_enc": 188.0,
+  "s4_up": 192.0,
+  "s4_disk": 197.0,
+  "s4_ks": 201.5,
+  "s4_keys": 207.0,
+  "s4_sync": 213.0,
+  "s4_nofile": 221.0,
+  "s4_sec": 229.0,
+  "s4_sum": 238.0,
+  "s4_end": 244.6,
+  "s5": 245.0,
+  "s5_phone": 245.6,
+  "s5_tog1": 250.0,
+  "s5_tog2": 253.5,
+  "s5_dev": 257.0,
+  "s5_logout": 264.0,
+  "s5_consent": 270.0,
+  "s5_end": 279.6,
+  "s6": 280.0,
+  "s6_i1": 282.0,
+  "s6_i2": 285.0,
+  "s6_i3": 288.0,
+  "s6_i4": 291.0,
+  "s6_logo": 294.0
+ },
+ "captions": [
+  [
+   0.8,
+   3.4,
+   "ARUMEDIATV — anime ko'rish ilovasi"
+  ],
+  [
+   3.4,
+   9.4,
+   "Bu videoda ilova qanday ishlashini, qanday himoyalanganini va foydalanuvchi xavfsizligini ko'rasiz."
+  ],
+  [
+   10.6,
+   13.9,
+   "Birinchi qadam — akkauntga kirish. Ilova Telegram hisobingiz bilan ishlaydi."
+  ],
+  [
+   14.0,
+   21.4,
+   "Avval Telegram raqamingizni kiritasiz."
+  ],
+  [
+   21.9,
+   29.4,
+   "Telegram sizga bir martalik kod yuboradi. Uni ilovaga kiriting."
+  ],
+  [
+   29.9,
+   37.0,
+   "Agar ikki bosqichli parol qo'ygan bo'lsangiz, uni ham kiritasiz."
+  ],
+  [
+   37.4,
+   44.2,
+   "Ilova Telegram bilan to'g'ridan-to'g'ri ulanadi: raqamingiz va kodingiz bizning serverga yuborilmaydi."
+  ],
+  [
+   44.6,
+   52.2,
+   "Telegram sessiyasi faqat sizning telefoningizda saqlanadi va Android Keystore kaliti bilan shifrlanadi."
+  ],
+  [
+   52.6,
+   60.2,
+   "Keyin ilova serverdan bir martalik token oladi va uni Telegram bot orqali avtomatik yuboradi — server hisobingizni tasdiqlab, kirish tokenini beradi."
+  ],
+  [
+   60.6,
+   69.4,
+   "Bitta hisobga ko'pi bilan 4 ta qurilma ulanadi. Sessiyani istalgan paytda uzish mumkin."
+  ],
+  [
+   70.5,
+   76.0,
+   "Bosh sahifada yangi qismlar va bo'limlar ko'rsatiladi."
+  ],
+  [
+   76.2,
+   84.0,
+   "Qidiruv va katalog orqali kerakli animeni topasiz."
+  ],
+  [
+   84.6,
+   94.4,
+   "Ro'yxatlar telefonda keshlanadi: ilova serverga kamroq murojaat qiladi va tez ochiladi."
+  ],
+  [
+   95.5,
+   100.0,
+   "Bo'lim sahifasida qismni tanlaysiz."
+  ],
+  [
+   100.2,
+   108.6,
+   "Videolar yopiq Telegram kanalida shifrlangan holda turadi. Ilova ularni bo'lak-bo'lak (1 MB) oladi."
+  ],
+  [
+   108.8,
+   117.0,
+   "Har bir bo'lak telefonda ochiladi, keyin shifrlangan holda diskka yoziladi."
+  ],
+  [
+   117.2,
+   127.6,
+   "Pleyer joriy joydan keyingi 1 daqiqani oldindan yuklab turadi — shuning uchun video qotmaydi."
+  ],
+  [
+   127.8,
+   136.6,
+   "Videoni surib o'tkazsangiz, oldindan yuklash oynasi yangi joyga ko'chadi."
+  ],
+  [
+   136.8,
+   147.6,
+   "Qayerda to'xtaganingiz tomosha tarixiga yoziladi — keyingi safar o'sha joydan davom etasiz."
+  ],
+  [
+   147.8,
+   157.6,
+   "To'liq yuklab olingan qismlar internetsiz ham ochiladi."
+  ],
+  [
+   157.8,
+   169.6,
+   "Qismlarni almashtirish uchun yarim aylana boshqaruv: tashqi halqa — qismlar."
+  ],
+  [
+   169.8,
+   184.4,
+   "Ichki halqa — vaqt: har bir chiziq 5 soniya. Bu usul Sozlamalardan yoqiladi, oddiy tugmalar ham saqlangan."
+  ],
+  [
+   185.8,
+   191.8,
+   "Fayl Telegramga yuborilishidan oldin AES-128-CTR bilan shifrlanadi."
+  ],
+  [
+   192.0,
+   200.8,
+   "Kanalda faqat shifrlangan baytlar turadi: boshqa ilovada u ma'nosiz ma'lumot."
+  ],
+  [
+   201.0,
+   206.6,
+   "Diskdagi bo'laklar AES-GCM bilan shifrlanadi, asosiy kalit Android Keystore'da turadi."
+  ],
+  [
+   207.0,
+   212.6,
+   "Kalitlar ro'yxatlarda ko'rsatilmaydi — video ochilganda alohida beriladi."
+  ],
+  [
+   213.0,
+   220.6,
+   "Bazaga yozuvlar faqat bitta yo'l — SyncQueue orqali, paket bo'lib boradi."
+  ],
+  [
+   221.0,
+   228.6,
+   "Fayl baytlari bizning serverimizdan o'tmaydi: yuklash va ko'rsatish ilovaning o'zi orqali."
+  ],
+  [
+   229.0,
+   237.6,
+   "Maxfiy kalitlar kodda emas, alohida himoyalangan saqlashda turadi."
+  ],
+  [
+   238.0,
+   244.4,
+   "Natija: fayl ham, hisob ham, sessiya ham himoyalangan."
+  ],
+  [
+   245.6,
+   250.0,
+   "Endi foydalanuvchi xavfsizligi."
+  ],
+  [
+   250.2,
+   256.8,
+   "Statistikangiz odatda ochiq. Istalgan qismini bitta tugma bilan yashirasiz."
+  ],
+  [
+   257.0,
+   263.8,
+   "Balansingiz va sarflagan trafigingiz hech qachon boshqalarga ko'rinmaydi."
+  ],
+  [
+   264.0,
+   269.8,
+   "Hisobdan chiqsangiz, Telegram sessiyasi ham uziladi."
+  ],
+  [
+   270.0,
+   279.4,
+   "Majburiy kanallarga obuna faqat sizning ruxsatingiz bilan bo'ladi."
+  ],
+  [
+   281.0,
+   293.6,
+   "Kirish, pleyer, shifrlash va maxfiylik — hammasi ARUMEDIATV ichida."
+  ],
+  [
+   294.0,
+   299.4,
+   "Tomosha qilganingiz uchun rahmat!"
+  ]
+ ]
+}
