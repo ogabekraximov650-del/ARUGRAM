@@ -35,6 +35,7 @@ use worker::*;
 // Emoji, GIF va stiker to'plamlari (`packs.rs` boshidagi izohga qarang).
 mod packs;
 mod emojifont;
+mod videoassets;
 mod channels;
 mod postbot;
 mod announce;
@@ -10374,7 +10375,7 @@ fn needs_app_check(path: &str) -> bool {
     }
     // To'plamlar navbati ham xuddi shu Actions run'ida ishlaydi va shu kalit
     // bilan himoyalangan (`packs::route`, `encode_token_ok`).
-    if path.starts_with("/api/packs/job/") || path.starts_with("/api/emojifont/job/") {
+    if path.starts_with("/api/packs/job/") || path.starts_with("/api/emojifont/job/") || path == "/api/video/assets" {
         return false;
     }
     // ── VIDEO VA RASM YO'LLARI ENDI OCHIQ EMAS ───────────────
@@ -14469,6 +14470,11 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
 
     if path.starts_with("/api/packs/") {
         return packs::route(req, &env, &path, method.clone()).await;
+    }
+
+    // "Ilova haqida video" uchun namunaviy poster va qism (faqat Actions, `ENCODE_TOKEN`): `videoassets.rs`.
+    if path == "/api/video/assets" {
+        return videoassets::route(req, &env, &path, method.clone()).await;
     }
 
     // Emoji shrifti (kanalda): `emojifont.rs`.
