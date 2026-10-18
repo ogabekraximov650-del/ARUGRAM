@@ -148,3 +148,41 @@ jobs:
           name: aru-video
           path: aru_video.mp4
           retention-days: 14
+
+  telegram:
+    # Faqat commit xabarida `[telegram]` bo'lsa ishlaydi — har push'da video yuborilmasin.
+    needs: final
+    if: contains(github.event.head_commit.message, '[telegram]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: ffmpeg va paketlar
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+          pip install --no-cache-dir -r tool/video/requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: aru-video
+          path: out
+      - name: Telegram sessiyasi
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+        run: |
+          OUT=tool/video/pyro_session.session
+          K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K \
+            -in tool/encode/session.enc -out "$OUT"
+          head -c 16 "$OUT" | grep -q "SQLite format 3" || { echo "::error::Sessiya ochilmadi"; exit 1; }
+      - name: Telegram'ga yuborish
+        env:
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+          PYTHONUNBUFFERED: '1'
+        run: python3 tool/video/send_telegram.py out/aru_video.mp4
+      - name: Sessiyani o'chirish
+        if: always()
+        run: rm -f tool/video/pyro_session.session
