@@ -161,8 +161,7 @@ fun EpisodeDialTab(
         val hPx = with(density) { maxHeight.toPx() }
         val dp1 = with(density) { 1.dp.toPx() }
         val r = min(172 * dp1, hPx / 2f - 2 * dp1)
-        val r2 = r * 0.80f
-        val r3 = r * 0.60f
+        val r2 = r * 0.70f
         val pad = 14 * dp1
         val cy = hPx / 2f
         val pitch = PITCH * dp1
@@ -246,7 +245,7 @@ fun EpisodeDialTab(
                     detectDragGestures(
                         onDragStart = { off ->
                             val d = hypot(off.x - cxL, off.y - cyL)
-                            mode = if (d >= r2) 1 else if (d >= r3) 2 else 0
+                            mode = if (d >= r2) 1 else 2
                             job?.cancel()
                             tracker.resetTracking()
                             if (mode == 2) {
@@ -302,8 +301,6 @@ fun EpisodeDialTab(
                 drawCircle(Color(0xFF3A3A3F), r, c, style = Stroke(sw))
                 drawCircle(Color(0xFF151517), r2, c)
                 drawCircle(Color(0xFF2F2F34), r2, c, style = Stroke(sw))
-                drawCircle(Color(0xFF1C1C1F), r3, c)
-                drawCircle(Color(0xFF3F3F44), r3, c, style = Stroke(1.5f * dp1))
 
                 val nc = drawContext.canvas.nativeCanvas
                 val rr = (r + r2) / 2f
@@ -320,7 +317,7 @@ fun EpisodeDialTab(
                             val alpha = Math.toDegrees(asin((dy / rr).toDouble())).toFloat()
                             val isSel = k == base
                             textPaint.color = if (isSel) accent2.toArgb() else 0xFFBBBBBB.toInt()
-                            textPaint.textSize = (if (isSel) 20 else 15) * dp1
+                            textPaint.textSize = (if (isSel) 22 else 16) * dp1
                             nc.save()
                             nc.rotate(if (left) -alpha else alpha, x, y)
                             nc.drawText("${asc[k].number}", x, y + textPaint.textSize * 0.35f, textPaint)
@@ -369,7 +366,7 @@ fun EpisodeDialTab(
                 drawLine(accent2, Offset(cxL + sgn * (r2 - 3 * dp1), cyL), Offset(cxL + sgn * (r2 - 20 * dp1), cyL), 3f * dp1)
                 textPaint.color = accent2.toArgb()
                 textPaint.textSize = 12f * dp1
-                nc.drawText(dialClock(tNow), cxL + sgn * (r2 - 34 * dp1), cyL + textPaint.textSize * 0.35f, textPaint)
+                nc.drawText(dialClock(tNow), cxL + sgn * (r2 - 30 * dp1), cyL + textPaint.textSize * 0.35f, textPaint)
 
                 // Tanlangan qism ko'rsatkichi (aylana chetida).
                 val tipX = cxL + sgn * (r - 2 * dp1)
@@ -396,18 +393,12 @@ fun EpisodeDialTab(
                 ) { content() }
             }
             val white = Color.White
-            btn(50f, 0f, 56, {
-                Icon(if (playing) AruIcons.Pause else Icons.Filled.PlayArrow, null, tint = white, modifier = Modifier.size(30.dp))
+            btn(42f, 0f, 52, {
+                Icon(if (playing) AruIcons.Pause else Icons.Filled.PlayArrow, null, tint = white, modifier = Modifier.size(28.dp))
             }, true, accent) {
                 val sel = asc[base]
                 if (sel.id != currentId) onPlay(sel) else player.toggle()
             }()
-            btn(34f, -66f, 46, {
-                Icon(AruIcons.SkipPrevious, null, tint = white.copy(alpha = if (hasPrev) 0.95f else 0.25f), modifier = Modifier.size(26.dp))
-            }, hasPrev, Color.White.copy(alpha = 0.08f), onPrev)()
-            btn(34f, 66f, 46, {
-                Icon(AruIcons.SkipNext, null, tint = white.copy(alpha = if (hasNext) 0.95f else 0.25f), modifier = Modifier.size(26.dp))
-            }, hasNext, Color.White.copy(alpha = 0.08f), onNext)()
         }
     }
 }
