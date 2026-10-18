@@ -8,6 +8,7 @@ use glam::Vec3;
 use wgpu::util::DeviceExt;
 
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+pub const MAX_DYNAMIC: usize = 256;
 pub const SKY: [f32; 3] = [0.62, 0.78, 0.93];
 
 #[repr(C)]
@@ -77,6 +78,7 @@ pub struct Renderer {
     index_count: u32,
     instance_buf: wgpu::Buffer,
     instance_count: u32,
+    dyn_buf: wgpu::Buffer,
     hud_buf: wgpu::Buffer,
     depth_view: wgpu::TextureView,
     width: u32,
@@ -265,6 +267,12 @@ impl Renderer {
             contents: bytemuck::cast_slice(instances),
             usage: wgpu::BufferUsages::VERTEX,
         });
+        let dyn_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("dynamic"),
+            size: (MAX_DYNAMIC * std::mem::size_of::<Instance>()) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         let hud_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("hud"),
             size: (MAX_HUD_VERTICES * std::mem::size_of::<HudVertex>()) as u64,
@@ -287,6 +295,7 @@ impl Renderer {
             index_count: mi.len() as u32,
             instance_buf,
             instance_count: instances.len() as u32,
+            dyn_buf,
             hud_buf,
             depth_view,
             width,
@@ -307,7 +316,17 @@ impl Renderer {
         self.depth_view = make_depth(&self.device, self.width, self.height);
     }
 
-    pub fn render(&mut self, target: &wgpu::TextureView, cam: &Camera, hud: &[HudVertex]) {
+    pub fn render(
+        &mut self,
+        target: &wgpu::TextureView,
+        cam: &Camera,
+        hud: &[HudVertex],
+        dynamic: &[Instance],
+    ) {
+        let dyn_n = dynamic.len().min(MAX_DYNAMIC);
+        if dyn_n > 0 {
+            self.queue.write_buffer(&self.dyn_buf, 0, bytemuck::cast_slice(&dynamic[..dyn_n]));
+        }
         let aspect = self.width as f32 / self.height as f32;
         let sun = Vec3::new(-0.45, -0.8, -0.35).normalize();
         let globals = Globals {
@@ -363,6 +382,10 @@ impl Renderer {
             pass.set_vertex_buffer(1, self.instance_buf.slice(..));
             pass.set_index_buffer(self.mesh_ib.slice(..), wgpu::IndexFormat::Uint16);
             pass.draw_indexed(0..self.index_count, 0, 0..self.instance_count);
+            if dyn_n > 0 {
+                pass.set_vertex_buffer(1, self.dyn_buf.slice(..));
+                pass.draw_indexed(0..self.index_count, 0, 0..dyn_n as u32);
+            }
 
             if hud_n > 0 {
                 pass.set_pipeline(&self.hud_pipeline);

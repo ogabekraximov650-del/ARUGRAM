@@ -5,7 +5,8 @@
 
     <application
         android:allowBackup="false"
-        android:label="ARU O'yin"
+        android:icon="@mipmap/ic_launcher"
+        android:label="ARUGAME"
         android:theme="@style/Theme.Game">
         <activity
             android:name=".MainActivity"

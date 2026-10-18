@@ -106,7 +106,8 @@ fn frame(app: &mut App, dt: f32) {
     };
     let view = tex.texture.create_view(&wgpu::TextureViewDescriptor::default());
     let hud = app.game.hud();
-    app.renderer.render(&view, &app.game.camera, &hud);
+    let dynamic = app.game.dynamic_instances();
+    app.renderer.render(&view, &app.game.camera, &hud, &dynamic);
     tex.present();
 }
 

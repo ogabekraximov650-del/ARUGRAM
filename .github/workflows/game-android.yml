@@ -81,7 +81,7 @@ jobs:
         run: |
           gradle --no-daemon :app:assembleDebug
           OUT="$RUNNER_TEMP/apks"; mkdir -p "$OUT"
-          cp app/build/outputs/apk/debug/app-debug.apk "$OUT/aru-game-${{ github.run_number }}.apk"
+          cp app/build/outputs/apk/debug/app-debug.apk "$OUT/ARUGAME-${{ github.run_number }}.apk"
           ls -la "$OUT"
           unzip -l "$OUT"/*.apk | grep aru_game
           echo "dir=$OUT" >> "$GITHUB_OUTPUT"
@@ -101,12 +101,12 @@ jobs:
               -in tool/encode/session.enc -out "$S.session"
             head -c 16 "$S.session" | grep -q "SQLite format 3"
             python tool/notify/send_apk.py "$S" "$APK" \
-              "ARU O'yin (tajriba) build ${{ github.run_number }}"
+              "ARUGAME build ${{ github.run_number }}"
             rm -f "$S.session"
           done
 
       - uses: actions/upload-artifact@v4
         with:
-          name: aru-game-${{ github.run_number }}
+          name: ARUGAME-${{ github.run_number }}
           path: ${{ steps.apk.outputs.dir }}
           retention-days: 30

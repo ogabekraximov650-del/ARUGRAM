@@ -6580,3 +6580,9 @@ Nega: PUBG darajasiga bosqichma-bosqich (low-poly → realistik, keyin botlar/zo
 - `engine/examples/preview.rs` — oflayn PNG kadrlar (CI'da llvmpipe bilan), artefakt `game-preview-N`.
 - `.github/workflows/game-android.yml` — testlar → cargo-ndk → debug APK → Telegram "Saqlangan xabarlar" (`game/**` o'zgarganda).
 - Keyingi: dunyo/fizika (to'qnashuv), qurol/botlar, zona, grafika (soya, PBR), tarmoq (avval Wi‑Fi UDP).
+
+### 2-bosqich (ARUGAME): fizika, otish, botlar
+- Ilova nomi va APK: **ARUGAME** (ARU logotipi `branding/android-res` dan `game/android/app/src/main/res`ga ko'chirilgan).
+- `engine/src/game.rs`: o'yin mantig'i — tortishish, sakrash, quti bilan to'qnashuv (doira–AABB), quti ustiga chiqish, hitscan otish (bosh 70 / tana 34), 30 o'qli magazin + qayta o'qlash, 6 ta bot (kezish, ko'rsa yaqinlashish/yonlama yurish/otish, o'lsa 5 s da qayta tug'ilish), o'yinchi jon/o'lim/qayta tug'ilish. 13 ta test.
+- `input.rs`: otish va sakrash tugmalari; `hud.rs`: jon, o'q-dori, o'ldirishlar, tegish belgisi, zarba pardasi; `renderer.rs`: dinamik instans buferi (botlar).
+- Keyingi: zona (siquvchi doira), qurol turlari/yig'ib olish, grafika (soya), keyin tarmoq.
