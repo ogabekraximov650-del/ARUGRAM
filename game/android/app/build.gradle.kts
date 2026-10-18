@@ -3,6 +3,10 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+// Doimiy imzo: ARUMEDIATV bilan bir xil `ci/release.keystore` (CI'da Secret bo'lsa u). Har build bir xil kalit — yangilanish ustiga o'rnatiladi.
+val ciKeystore = System.getenv("KS_FILE") ?: "${rootDir}/../../ci/release.keystore"
+val ciStorePass = System.getenv("KS_PASS")?.takeIf { it.isNotBlank() } ?: "arumedia"
+
 android {
     namespace = "uz.arumediatv.game"
     compileSdk = 35
@@ -15,9 +19,20 @@ android {
         versionName = "0.1.0"
     }
 
-    // Tajriba bosqichi: debug kalit bilan imzolanadi (telefonga to'g'ridan-to'g'ri o'rnatiladi).
+    signingConfigs {
+        create("fixed") {
+            storeFile = file(ciKeystore)
+            storePassword = ciStorePass
+            keyAlias = "arumedia"
+            keyPassword = ciStorePass
+        }
+    }
+
     buildTypes {
-        debug { isMinifyEnabled = false }
+        debug {
+            isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("fixed")
+        }
     }
 
     compileOptions {
