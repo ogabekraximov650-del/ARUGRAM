@@ -1,7 +1,10 @@
 package uz.arumediatv.com.data
 
 import android.content.Context
+import android.graphics.BitmapFactory
 import android.util.LruCache
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -25,7 +28,7 @@ data class TgDoc(val id: Long, val hash: Long, val ref: String, val dc: Int, val
     val isVideo: Boolean get() = kind == "webm" || kind == "mp4" || kind == "gif"
 }
 
-data class TgSet(val id: Long, val hash: Long, val title: String, val count: Int, val thumbDoc: Long)
+data class TgSet(val id: Long, val hash: Long, val title: String, val count: Int, val thumbDoc: Long, val thumbVer: Int = 0, val thumbDc: Int = 2)
 
 class TgStickerStore(ctx: Context) {
     private val dir = File(ctx.filesDir, "aru_tg").apply { mkdirs() }
@@ -33,6 +36,38 @@ class TgStickerStore(ctx: Context) {
     private val sets = ConcurrentHashMap<String, List<TgSet>>()
     private val docs = ConcurrentHashMap<String, List<TgDoc>>()
     private val gate = Semaphore(3)
+    /** Dekodlangan kichik rasmlar: aylantirilganda bo'sh qolmaydi, asosiy oqimda dekod qilinmaydi. */
+    private val bmps = object : LruCache<String, ImageBitmap>(24 * 1024 * 1024) { override fun sizeOf(k: String, v: ImageBitmap) = v.width * v.height * 4 }
+
+    fun peekPoster(d: TgDoc): ImageBitmap? = bmps.get("p${d.id}")
+
+    suspend fun poster(d: TgDoc): ImageBitmap? {
+        bmps.get("p${d.id}")?.let { return it }
+        val b = bytes(d, true) ?: return null
+        return withContext(Dispatchers.Default) { BitmapFactory.decodeByteArray(b, 0, b.size)?.asImageBitmap() }?.also { bmps.put("p${d.id}", it) }
+    }
+
+    fun peekCover(s: TgSet): ImageBitmap? = bmps.get("c${s.id}")
+
+    /** To'plam muqovasi (animatsiyali to'plamlarda dekod bo'lmaydi — null). */
+    suspend fun cover(s: TgSet): ImageBitmap? {
+        bmps.get("c${s.id}")?.let { return it }
+        if (s.thumbVer == 0) return null
+        val name = "c${s.id}"
+        val b = withContext(Dispatchers.IO) {
+            val f = File(dir, name)
+            if (f.exists()) runCatching { SecureStore.open(f.readBytes()) }.getOrNull()?.let { return@withContext it }
+            gate.withPermit {
+                val tmp = File(dir, "$name.tmp")
+                val arg = JSONObject().put("set_id", s.id).put("set_hash", s.hash).put("set_ver", s.thumbVer).put("dc", s.thumbDc).put("out", tmp.absolutePath).put("max", 2L * 1024 * 1024)
+                if (!RustCore.tgMediaGet(arg.toString()).optBoolean("ok")) { tmp.delete(); return@withPermit null }
+                val x = runCatching { tmp.readBytes() }.getOrNull(); tmp.delete()
+                if (x != null && x.isNotEmpty()) runCatching { File(dir, name).writeBytes(SecureStore.seal(x)) }
+                x
+            }
+        } ?: return null
+        return withContext(Dispatchers.Default) { BitmapFactory.decodeByteArray(b, 0, b.size)?.asImageBitmap() }?.also { bmps.put("c${s.id}", it) }
+    }
 
     private fun parseDoc(o: JSONObject) = TgDoc(
         o.optLong("id"), o.optLong("hash"), o.optString("ref"), o.optInt("dc", 2), o.optString("kind"), o.optLong("size"),
@@ -61,7 +96,7 @@ class TgStickerStore(ctx: Context) {
     suspend fun sets(kind: String): List<TgSet> = sets[kind] ?: withContext(Dispatchers.IO) {
         val r = listJson("sets_$kind", "sets:$kind") ?: return@withContext emptyList()
         val a = r.optJSONArray("sets") ?: return@withContext emptyList()
-        (0 until a.length()).map { val o = a.getJSONObject(it); TgSet(o.optLong("id"), o.optLong("hash"), o.optString("title"), o.optInt("count"), o.optLong("thumb_doc")) }
+        (0 until a.length()).map { val o = a.getJSONObject(it); TgSet(o.optLong("id"), o.optLong("hash"), o.optString("title"), o.optInt("count"), o.optLong("thumb_doc"), o.optInt("thumb_ver"), o.optInt("thumb_dc", 2).let { if (it == 0) 2 else it }) }
             .also { if (it.isNotEmpty()) sets[kind] = it }
     }
 
@@ -120,5 +155,5 @@ class TgStickerStore(ctx: Context) {
         }
     }
 
-    fun clear() { dir.listFiles()?.forEach { it.delete() }; mem.evictAll(); sets.clear(); docs.clear() }
+    fun clear() { dir.listFiles()?.forEach { it.delete() }; mem.evictAll(); bmps.evictAll(); sets.clear(); docs.clear() }
 }

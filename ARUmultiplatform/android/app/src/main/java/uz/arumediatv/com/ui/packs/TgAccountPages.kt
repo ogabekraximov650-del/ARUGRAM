@@ -38,6 +38,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import kotlinx.coroutines.sync.withPermit
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -66,7 +67,8 @@ private object TgSlots {
 @Composable
 fun TgItem(d: TgDoc, modifier: Modifier = Modifier, full: Boolean = false, scale: ContentScale = ContentScale.Fit) {
     val store = AppServices.tgStickers
-    val poster by produceState<ByteArray?>(null, d.id) { value = store.bytes(d, true) }
+    var poster by remember(d.id) { mutableStateOf(store.peekPoster(d)) }
+    LaunchedEffect(d.id) { if (poster == null) poster = store.poster(d) }
     val token = remember { Any() }
     var fully by remember { mutableStateOf(false) }
     var active by remember { mutableStateOf(false) }
@@ -77,8 +79,10 @@ fun TgItem(d: TgDoc, modifier: Modifier = Modifier, full: Boolean = false, scale
     }
     DisposableEffect(token) { onDispose { TgSlots.release(token) } }
     // Slot bo'shaganda qayta uriniladi
-    val free = TgSlots.active.size
-    LaunchedEffect(free, fully) { if (fully && d.isVideo && !active) active = TgSlots.acquire(token) }
+    if (d.isVideo) {
+        val free = TgSlots.active.size
+        LaunchedEffect(free, fully) { if (fully && !active) active = TgSlots.acquire(token) }
+    }
     val fullBytes by produceState<ByteArray?>(null, d.id, active, full) {
         value = if ((active && d.isVideo) || (full && d.kind == "webp")) store.bytes(d, false) else null
     }
@@ -90,8 +94,7 @@ fun TgItem(d: TgDoc, modifier: Modifier = Modifier, full: Boolean = false, scale
             if (now != fully) fully = now
         },
     ) {
-        val pb = poster
-        val pbmp = remember(pb) { pb?.let { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() } }
+        val pbmp = poster
         val fb = fullBytes
         if (fb != null && active && d.isVideo) {
             // Video va rasm bir xil o'lchamda (ikki xil kesilib "ikki oyna" bo'lmasin); birinchi kadrdan keyin rasm yashiriladi.
@@ -128,12 +131,14 @@ class TgSetsState(private val kind: String) {
     }
 
     private val inflight = HashSet<Long>()
+    private val gate = kotlinx.coroutines.sync.Semaphore(1)
 
     /** To'plam hujjatlarini FAQAT uning katagi ekranda ko'ringanda oladi (bir marta). */
     suspend fun ensure(s: TgSet) {
         if (docs.containsKey(s.id) || !inflight.add(s.id)) return
         try {
-            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { docs[s.id] = AppServices.tgStickers.setDocs(s) }
+            // Bir vaqtda faqat bitta to'plam so'raladi (Telegram'ni va telefonni bosmaslik uchun).
+            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { gate.withPermit { docs[s.id] = AppServices.tgStickers.setDocs(s) } }
         } finally { inflight.remove(s.id) }
     }
 }
@@ -189,9 +194,7 @@ fun TgAccountPage(kind: String) {
                         .clickable { sections.firstOrNull { it.id == s.id }?.let { x -> scope.launch { grid.scrollToItem(x.index) } } },
                     contentAlignment = Alignment.Center,
                 ) {
-                    val first = st.docs[s.id]?.firstOrNull()
-                    if (first != null) TgThumbOnly(first, Modifier.size(30.dp))
-                    else Box(Modifier.size(18.dp).clip(CircleShape).background(pal.copy(alpha = 0.4f)))
+                    TgSetIcon(st, s, Modifier.size(30.dp))
                 }
             }
         }
@@ -234,9 +237,27 @@ fun TgAccountPage(kind: String) {
 /** Faqat kichik rasm (tasmadagi belgi uchun). */
 @Composable
 fun TgThumbOnly(d: TgDoc, modifier: Modifier) {
-    val b by produceState<ByteArray?>(null, d.id) { value = AppServices.tgStickers.bytes(d, true) }
-    val bmp = remember(b) { b?.let { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() } }
-    if (bmp != null) Image(bmp, null, modifier)
+    var bmp by remember(d.id) { mutableStateOf(AppServices.tgStickers.peekPoster(d)) }
+    LaunchedEffect(d.id) { if (bmp == null) bmp = AppServices.tgStickers.poster(d) }
+    bmp?.let { Image(it, null, modifier) }
+}
+
+/** To'plam belgisi: muqova (bo'lsa), bo'lmasa (animatsiyali to'plam) birinchi stikerning rasmi — faqat belgi ekranda ko'ringanda yuklanadi. */
+@Composable
+fun TgSetIcon(st: TgSetsState, s: TgSet, modifier: Modifier) {
+    val store = AppServices.tgStickers
+    var cover by remember(s.id) { mutableStateOf(store.peekCover(s)) }
+    LaunchedEffect(s.id) {
+        if (cover == null) cover = store.cover(s)
+        if (cover == null) st.ensure(s)
+    }
+    val c = cover
+    if (c != null) Image(c, null, modifier)
+    else {
+        val first = st.docs[s.id]?.firstOrNull()
+        if (first != null) TgThumbOnly(first, modifier)
+        else Box(Modifier.size(18.dp).clip(CircleShape).background(Color(0xFF8E8E93).copy(alpha = 0.4f)))
+    }
 }
 
 /** Katta ko'rinish: animatsiya shu yerda to'liq ishlaydi. */

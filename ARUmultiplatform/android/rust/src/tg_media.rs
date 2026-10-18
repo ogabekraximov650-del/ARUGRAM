@@ -105,6 +105,8 @@ fn media_set_json(s: &tl::types::StickerSet) -> Value {
         "mask": s.masks,
         "official": s.official,
         "thumb_doc": s.thumb_document_id.unwrap_or(0),
+        "thumb_ver": s.thumb_version.unwrap_or(0),
+        "thumb_dc": s.thumb_dc_id.unwrap_or(0),
     })
 }
 
@@ -215,8 +217,10 @@ pub extern "C" fn rust_tg_media_list(arg_ptr: *const c_char) -> *mut c_char {
 
 /// Bitta hujjat (yoki uning kichik rasmi) baytlarini `out` fayliga yozadi.
 async fn media_get(t: &'static Tg, client: &Client, v: &Value) -> Result<Value, String> {
-    let id = v["id"].as_i64().ok_or("id yo'q")?;
-    let hash = v["hash"].as_i64().ok_or("kalit yo'q")?;
+    // To'plam muqovasi: `set_id`, `set_hash`, `set_ver` (id/hash/ref kerak emas).
+    let set_id = v["set_id"].as_i64();
+    let id = if set_id.is_some() { 0 } else { v["id"].as_i64().ok_or("id yo'q")? };
+    let hash = if set_id.is_some() { 0 } else { v["hash"].as_i64().ok_or("kalit yo'q")? };
     let fref = hex::decode(v["ref"].as_str().unwrap_or("")).map_err(|_| "havola noto'g'ri".to_string())?;
     let mut dc = v["dc"].as_i64().unwrap_or(2) as i32;
     let thumb = v["thumb"].as_str().unwrap_or("").to_string();
@@ -230,12 +234,18 @@ async fn media_get(t: &'static Tg, client: &Client, v: &Value) -> Result<Value, 
         let req = tl::functions::upload::GetFile {
             precise: false,
             cdn_supported: false,
-            location: tl::enums::InputFileLocation::InputDocumentFileLocation(tl::types::InputDocumentFileLocation {
-                id,
-                access_hash: hash,
-                file_reference: fref.clone(),
-                thumb_size: thumb.clone(),
-            }),
+            location: match set_id {
+                Some(sid) => tl::enums::InputFileLocation::InputStickerSetThumb(tl::types::InputStickerSetThumb {
+                    stickerset: tl::enums::InputStickerSet::Id(tl::types::InputStickerSetId { id: sid, access_hash: v["set_hash"].as_i64().unwrap_or(0) }),
+                    thumb_version: v["set_ver"].as_i64().unwrap_or(0) as i32,
+                }),
+                None => tl::enums::InputFileLocation::InputDocumentFileLocation(tl::types::InputDocumentFileLocation {
+                    id,
+                    access_hash: hash,
+                    file_reference: fref.clone(),
+                    thumb_size: thumb.clone(),
+                }),
+            },
             offset,
             limit: LIMIT,
         };
