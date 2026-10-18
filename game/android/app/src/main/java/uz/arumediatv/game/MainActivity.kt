@@ -41,9 +41,24 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Choreographer.FrameCall
 
     override fun surfaceCreated(holder: SurfaceHolder) {
         ptr = NativeBridge.nativeInit(holder.surface, resources.displayMetrics.density)
+        if (ptr != 0L) loadLayout()
         if (ptr == 0L) {
             Toast.makeText(this, "GPU ishga tushmadi (logcat: aru_game)", Toast.LENGTH_LONG).show()
         }
+    }
+
+    private val prefs by lazy { getSharedPreferences("aru_game", MODE_PRIVATE) }
+
+    /** Saqlangan tugma joylashuvini dvigatelga beradi (noto'g'ri bo'lsa dvigatel o'zi rad etadi). */
+    private fun loadLayout() {
+        val s = prefs.getString("layout", null) ?: return
+        val a = s.split(',').mapNotNull { it.toFloatOrNull() }
+        if (a.size == 7) NativeBridge.nativeSetLayout(ptr, a.toFloatArray())
+    }
+
+    private fun saveLayoutIfChanged() {
+        val a = NativeBridge.nativeTakeLayout(ptr) ?: return
+        prefs.edit().putString("layout", a.joinToString(",")).apply()
     }
 
     override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
@@ -91,6 +106,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Choreographer.FrameCall
             MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP, MotionEvent.ACTION_CANCEL -> {
                 val i = e.actionIndex
                 NativeBridge.nativeTouch(ptr, 2, e.getPointerId(i), e.getX(i), e.getY(i))
+                saveLayoutIfChanged()
             }
         }
         return true

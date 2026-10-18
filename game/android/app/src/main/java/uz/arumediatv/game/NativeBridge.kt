@@ -13,4 +13,6 @@ object NativeBridge {
     external fun nativeFrame(ptr: Long, dt: Float)
     external fun nativeTouch(ptr: Long, action: Int, id: Int, x: Float, y: Float)
     external fun nativeDestroy(ptr: Long)
+    external fun nativeTakeLayout(ptr: Long): FloatArray?
+    external fun nativeSetLayout(ptr: Long, layout: FloatArray)
 }

@@ -4,7 +4,8 @@ use crate::input::TouchAction;
 use crate::renderer::Renderer;
 use crate::{world, Game};
 use jni::objects::{JClass, JObject};
-use jni::sys::{jfloat, jint, jlong};
+use jni::sys::{jfloat, jfloatArray, jint, jlong};
+use jni::objects::JFloatArray;
 use jni::JNIEnv;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::ptr::NonNull;
@@ -196,5 +197,54 @@ pub extern "system" fn Java_uz_arumediatv_game_NativeBridge_nativeDestroy(
 ) {
     if ptr != 0 {
         let _ = catch_unwind(AssertUnwindSafe(|| unsafe { drop(Box::from_raw(ptr as *mut App)) }));
+    }
+}
+
+/// Joylashuv o'zgargan bo'lsa saqlash uchun `FloatArray` (7 ta son), bo'lmasa `null`.
+#[no_mangle]
+pub extern "system" fn Java_uz_arumediatv_game_NativeBridge_nativeTakeLayout(
+    env: JNIEnv,
+    _c: JClass,
+    ptr: jlong,
+) -> jfloatArray {
+    if ptr == 0 {
+        return std::ptr::null_mut();
+    }
+    let app = unsafe { &mut *(ptr as *mut App) };
+    let layout = catch_unwind(AssertUnwindSafe(|| app.game.input.take_layout())).ok().flatten();
+    let Some(vals) = layout else { return std::ptr::null_mut() };
+    match env.new_float_array(vals.len() as i32) {
+        Ok(arr) => {
+            if env.set_float_array_region(&arr, 0, &vals).is_err() {
+                return std::ptr::null_mut();
+            }
+            arr.into_raw()
+        }
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+/// Saqlangan joylashuvni tiklaydi (noto'g'ri qiymat e'tiborsiz qoldiriladi).
+#[no_mangle]
+pub extern "system" fn Java_uz_arumediatv_game_NativeBridge_nativeSetLayout(
+    env: JNIEnv,
+    _c: JClass,
+    ptr: jlong,
+    arr: JFloatArray,
+) {
+    if ptr == 0 {
+        return;
+    }
+    let app = unsafe { &mut *(ptr as *mut App) };
+    let Ok(len) = env.get_array_length(&arr) else { return };
+    if !(7..=64).contains(&len) {
+        return;
+    }
+    let mut buf = vec![0.0f32; len as usize];
+    if env.get_float_array_region(&arr, 0, &mut buf).is_err() {
+        return;
+    }
+    if let Some(l) = crate::input::Layout::from_slice(&buf) {
+        app.game.input.set_layout(l);
     }
 }

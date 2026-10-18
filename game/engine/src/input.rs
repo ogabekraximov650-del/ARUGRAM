@@ -18,6 +18,52 @@ pub enum TouchAction {
     Up,
 }
 
+/// Tugmalar joylashuvi: o'ng-pastki burchakdan dp masofa (zichlikka bog'liq emas) + umumiy o'lcham.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Layout {
+    pub fire: Vec2,
+    pub jump: Vec2,
+    pub switch: Vec2,
+    pub scale: f32,
+}
+
+impl Layout {
+    pub const DEFAULT: Layout = Layout {
+        fire: Vec2::new(100.0, 100.0),
+        jump: Vec2::new(190.0, 60.0),
+        switch: Vec2::new(100.0, 190.0),
+        scale: 1.0,
+    };
+
+    pub fn to_array(self) -> [f32; 7] {
+        [self.fire.x, self.fire.y, self.jump.x, self.jump.y, self.switch.x, self.switch.y, self.scale]
+    }
+
+    /// Saqlangan qiymatlardan tiklaydi; noto'g'ri (NaN, chegaradan tashqari) bo'lsa — `None`.
+    pub fn from_slice(a: &[f32]) -> Option<Layout> {
+        if a.len() < 7 || a.iter().take(7).any(|x| !x.is_finite()) {
+            return None;
+        }
+        if a[..6].iter().any(|x| *x < 0.0 || *x > 2000.0) || !(0.5..=2.0).contains(&a[6]) {
+            return None;
+        }
+        Some(Layout {
+            fire: Vec2::new(a[0], a[1]),
+            jump: Vec2::new(a[2], a[3]),
+            switch: Vec2::new(a[4], a[5]),
+            scale: a[6],
+        })
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SettingsAction {
+    Reset,
+    Smaller,
+    Bigger,
+    Done,
+}
+
 #[derive(Clone, Copy)]
 struct Stick {
     id: i32,
@@ -40,6 +86,12 @@ pub struct Input {
     fire_id: Option<i32>,
     jump_id: Option<i32>,
     jump_edge: bool,
+    switch_id: Option<i32>,
+    switch_edge: bool,
+    layout: Layout,
+    layout_dirty: bool,
+    settings: bool,
+    drag: Option<(i32, usize)>,
     height: f32,
     /// Shu kadrda to'plangan qarash o'zgarishi (piksel).
     look_delta: Vec2,
@@ -56,6 +108,12 @@ impl Input {
             fire_id: None,
             jump_id: None,
             jump_edge: false,
+            switch_id: None,
+            switch_edge: false,
+            layout: Layout::DEFAULT,
+            layout_dirty: false,
+            settings: false,
+            drag: None,
             look_delta: Vec2::ZERO,
         }
     }
@@ -65,20 +123,122 @@ impl Input {
         self.height = height as f32;
     }
 
+    fn corner(&self, off: Vec2) -> Vec2 {
+        Vec2::new(self.width - off.x * self.density, self.height - off.y * self.density)
+    }
+
     /// Otish tugmasi: (markaz, radius) piksellarda.
     pub fn fire_button(&self) -> (Vec2, f32) {
-        let d = self.density;
-        (Vec2::new(self.width - 100.0 * d, self.height - 100.0 * d), 44.0 * d)
+        (self.corner(self.layout.fire), 44.0 * self.density * self.layout.scale)
     }
 
     /// Sakrash tugmasi: (markaz, radius) piksellarda.
     pub fn jump_button(&self) -> (Vec2, f32) {
-        let d = self.density;
-        (Vec2::new(self.width - 190.0 * d, self.height - 60.0 * d), 32.0 * d)
+        (self.corner(self.layout.jump), 32.0 * self.density * self.layout.scale)
     }
 
-    pub fn fire_held(&self) -> bool {
-        self.fire_id.is_some()
+    /// Qurol almashtirish tugmasi: (markaz, radius) piksellarda.
+    pub fn switch_button(&self) -> (Vec2, f32) {
+        (self.corner(self.layout.switch), 30.0 * self.density * self.layout.scale)
+    }
+
+    /// Sozlamalar (tishli g'ildirak) tugmasi — kichik xaritaning chap tomonida.
+    pub fn gear_button(&self) -> (Vec2, f32) {
+        let d = self.density;
+        (Vec2::new(self.width - (120.0 + 16.0 + 34.0) * d, 36.0 * d), 20.0 * d)
+    }
+
+    /// Sozlamalar rejimidagi boshqaruv tugmalari (tepa o'rtada).
+    pub fn settings_controls(&self) -> [(SettingsAction, Vec2, f32); 4] {
+        let d = self.density;
+        let (cx, y, r) = (self.width * 0.5, 44.0 * d, 26.0 * d);
+        [
+            (SettingsAction::Reset, Vec2::new(cx - 120.0 * d, y), r),
+            (SettingsAction::Smaller, Vec2::new(cx - 40.0 * d, y), r),
+            (SettingsAction::Bigger, Vec2::new(cx + 40.0 * d, y), r),
+            (SettingsAction::Done, Vec2::new(cx + 120.0 * d, y), r),
+        ]
+    }
+
+    pub fn settings_open(&self) -> bool {
+        self.settings
+    }
+
+    pub fn layout(&self) -> Layout {
+        self.layout
+    }
+
+    pub fn set_layout(&mut self, l: Layout) {
+        self.layout = l;
+    }
+
+    /// O'zgargan bo'lsa saqlash uchun joylashuvni qaytaradi (bir marta).
+    pub fn take_layout(&mut self) -> Option<[f32; 7]> {
+        if std::mem::take(&mut self.layout_dirty) {
+            Some(self.layout.to_array())
+        } else {
+            None
+        }
+    }
+
+    fn open_settings(&mut self) {
+        self.settings = true;
+        self.stick = None;
+        self.look = None;
+        self.fire_id = None;
+        self.jump_id = None;
+        self.switch_id = None;
+        self.jump_edge = false;
+        self.switch_edge = false;
+        self.look_delta = Vec2::ZERO;
+    }
+
+    fn settings_event(&mut self, action: TouchAction, id: i32, p: Vec2) {
+        let d = self.density;
+        match action {
+            TouchAction::Down => {
+                for (act, c, r) in self.settings_controls() {
+                    if p.distance(c) <= r * 1.2 {
+                        match act {
+                            SettingsAction::Reset => self.layout = Layout::DEFAULT,
+                            SettingsAction::Smaller => self.layout.scale = (self.layout.scale - 0.1).max(0.7),
+                            SettingsAction::Bigger => self.layout.scale = (self.layout.scale + 0.1).min(1.6),
+                            SettingsAction::Done => self.settings = false,
+                        }
+                        self.layout_dirty = true;
+                        return;
+                    }
+                }
+                let btns = [self.fire_button(), self.jump_button(), self.switch_button()];
+                for (i, (c, r)) in btns.iter().enumerate() {
+                    if p.distance(*c) <= *r * 1.3 {
+                        self.drag = Some((id, i));
+                        return;
+                    }
+                }
+            }
+            TouchAction::Move => {
+                if let Some((did, i)) = self.drag {
+                    if did == id {
+                        let off = Vec2::new(
+                            ((self.width - p.x) / d).clamp(30.0, (self.width / d - 30.0).max(30.0)),
+                            ((self.height - p.y) / d).clamp(30.0, (self.height / d - 30.0).max(30.0)),
+                        );
+                        match i {
+                            0 => self.layout.fire = off,
+                            1 => self.layout.jump = off,
+                            _ => self.layout.switch = off,
+                        }
+                        self.layout_dirty = true;
+                    }
+                }
+            }
+            TouchAction::Up => {
+                if self.drag.map_or(false, |(did, _)| did == id) {
+                    self.drag = None;
+                }
+            }
+        }
     }
 
     /// Sakrash bosilgan bo'lsa bir marta `true` qaytaradi.
@@ -86,10 +246,28 @@ impl Input {
         std::mem::take(&mut self.jump_edge)
     }
 
+    /// Almashtirish bosilgan bo'lsa bir marta `true` qaytaradi.
+    pub fn take_switch(&mut self) -> bool {
+        std::mem::take(&mut self.switch_edge)
+    }
+
+    pub fn fire_held(&self) -> bool {
+        self.fire_id.is_some()
+    }
+
     pub fn touch(&mut self, action: TouchAction, id: i32, x: f32, y: f32) {
         let p = Vec2::new(x, y);
+        if self.settings {
+            self.settings_event(action, id, p);
+            return;
+        }
         match action {
             TouchAction::Down => {
+                let (gc, gr) = self.gear_button();
+                if p.distance(gc) <= gr * 1.4 {
+                    self.open_settings();
+                    return;
+                }
                 if p.x < self.width * 0.5 {
                     if self.stick.is_none() {
                         self.stick = Some(Stick { id, origin: p, pos: p });
@@ -103,6 +281,11 @@ impl Input {
                         if self.jump_id.is_none() {
                             self.jump_id = Some(id);
                             self.jump_edge = true;
+                        }
+                    } else if p.distance(self.switch_button().0) <= self.switch_button().1 * 1.4 {
+                        if self.switch_id.is_none() {
+                            self.switch_id = Some(id);
+                            self.switch_edge = true;
                         }
                     } else if self.look.is_none() {
                         self.look = Some(Look { id, last: p });
@@ -135,6 +318,9 @@ impl Input {
                 if self.jump_id == Some(id) {
                     self.jump_id = None;
                 }
+                if self.switch_id == Some(id) {
+                    self.switch_id = None;
+                }
             }
         }
     }
@@ -159,6 +345,9 @@ impl Input {
     }
 
     pub fn update(&mut self, dt: f32, cam: &mut Camera) {
+        if self.settings {
+            return;
+        }
         let d = std::mem::take(&mut self.look_delta);
         // O'ngga surish — o'ngga burilish (yaw kamayadi), yuqoriga surish — tepaga qarash.
         cam.look(-d.x * LOOK_SENS, -d.y * LOOK_SENS);
@@ -176,6 +365,35 @@ impl Input {
 mod tests {
     use super::*;
     use glam::Vec3;
+
+    #[test]
+    fn sozlamalarda_tugma_suriladi_va_saqlanadi() {
+        let mut inp = Input::new(1280, 576, 2.0);
+        let (g, _) = inp.gear_button();
+        inp.touch(TouchAction::Down, 1, g.x, g.y);
+        inp.touch(TouchAction::Up, 1, g.x, g.y);
+        assert!(inp.settings_open());
+        let (f, _) = inp.fire_button();
+        inp.touch(TouchAction::Down, 2, f.x, f.y);
+        inp.touch(TouchAction::Move, 2, 600.0, 300.0);
+        inp.touch(TouchAction::Up, 2, 600.0, 300.0);
+        let (nf, _) = inp.fire_button();
+        assert!((nf - Vec2::new(600.0, 300.0)).length() < 1.0);
+        assert!(inp.take_layout().is_some());
+        assert!(inp.take_layout().is_none());
+        // tugma bosilmaydi, sozlamalarda
+        assert!(!inp.fire_held());
+        let (c, _) = inp.settings_controls().iter().find(|x| x.0 == SettingsAction::Done).map(|x| (x.1, x.2)).unwrap();
+        inp.touch(TouchAction::Down, 3, c.x, c.y);
+        assert!(!inp.settings_open());
+    }
+
+    #[test]
+    fn layout_noto_g_ri_qiymatni_rad_etadi() {
+        assert!(Layout::from_slice(&[f32::NAN; 7]).is_none());
+        assert!(Layout::from_slice(&[1.0; 3]).is_none());
+        assert_eq!(Layout::from_slice(&Layout::DEFAULT.to_array()), Some(Layout::DEFAULT));
+    }
 
     #[test]
     fn joy_oldinga_yuradi() {

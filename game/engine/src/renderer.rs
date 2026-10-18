@@ -8,7 +8,7 @@ use glam::Vec3;
 use wgpu::util::DeviceExt;
 
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
-pub const MAX_DYNAMIC: usize = 256;
+pub const MAX_DYNAMIC: usize = 512;
 pub const SKY: [f32; 3] = [0.62, 0.78, 0.93];
 
 #[repr(C)]

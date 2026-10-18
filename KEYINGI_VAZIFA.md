@@ -6586,3 +6586,9 @@ Nega: PUBG darajasiga bosqichma-bosqich (low-poly → realistik, keyin botlar/zo
 - `engine/src/game.rs`: o'yin mantig'i — tortishish, sakrash, quti bilan to'qnashuv (doira–AABB), quti ustiga chiqish, hitscan otish (bosh 70 / tana 34), 30 o'qli magazin + qayta o'qlash, 6 ta bot (kezish, ko'rsa yaqinlashish/yonlama yurish/otish, o'lsa 5 s da qayta tug'ilish), o'yinchi jon/o'lim/qayta tug'ilish. 13 ta test.
 - `input.rs`: otish va sakrash tugmalari; `hud.rs`: jon, o'q-dori, o'ldirishlar, tegish belgisi, zarba pardasi; `renderer.rs`: dinamik instans buferi (botlar).
 - Keyingi: zona (siquvchi doira), qurol turlari/yig'ib olish, grafika (soya), keyin tarmoq.
+
+### 3-bosqich (ARUGAME): zona, qurollar, sozlamalar
+- `game.rs`: siqiladigan zona (4 bosqich: kutish → qisqarish, har bosqichda zarar kuchayadi, yangi doira eskisi ichida; tashqarida o'yinchi va botlar jon yo'qotadi, botlar markazga qaytadi); 4 qurol (to'pponcha, avtomat, miltiq/shotgun 8 ta o'q, snayper) — zarar, tezlik, magazin, qayta o'qlash, sochilish, qaytarish; xaritada yig'ib olinadigan qurol/o'q-dori/dori (nur ustuni bilan ko'rinadi); 3 ta qurol uyasi, almashtirish tugmasi.
+- `hud.rs`: kichik xarita (zona, keyingi doira, yo'nalish), zona taymeri, qurol uyalari, zaxira magazinlar, zonadan tashqarida ko'k parda.
+- **Sozlamalar** (tepada tishli g'ildirak): o'yin to'xtaydi, otish/sakrash/almashtirish tugmalarini sudrab joylashtirish, o'lchamni −/+ bilan o'zgartirish, qayta tiklash, ✓ tayyor. Joylashuv o'ng-pastki burchakdan dp masofada (`input.rs: Layout`), Kotlin `SharedPreferences("aru_game")` da saqlanadi (`MainActivity.saveLayoutIfChanged`, JNI `nativeTakeLayout/nativeSetLayout`); noto'g'ri qiymat dvigatelda rad etiladi.
+- Imzo: `ci/release.keystore` (doimiy kalit).

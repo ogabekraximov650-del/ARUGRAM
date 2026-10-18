@@ -34,7 +34,7 @@ fn main() {
     let mut g = Game::new(w, h, 2.5);
 
     // 0) boshlang'ich; 1) bot oldida + otish; 2) yurish va sakrash
-    for shot in 0..3 {
+    for shot in 0..4 {
         if shot == 1 {
             g.bots[0].pos = glam::Vec3::new(1.5, 0.0, 2.0);
             g.bots[1].pos = glam::Vec3::new(-6.0, 0.0, 0.0);
@@ -43,7 +43,21 @@ fn main() {
             g.update(1.0 / 60.0);
             g.update(1.0 / 60.0);
         }
+        if shot == 3 {
+            g.touch(TouchAction::Up, 1, 0.0, 0.0);
+            let (gc, _) = g.input.gear_button();
+            g.touch(TouchAction::Down, 7, gc.x, gc.y);
+            g.touch(TouchAction::Up, 7, gc.x, gc.y);
+            let (fc, _) = g.input.fire_button();
+            g.touch(TouchAction::Down, 8, fc.x, fc.y);
+            g.touch(TouchAction::Move, 8, 900.0, 250.0);
+            g.touch(TouchAction::Up, 8, 900.0, 250.0);
+        }
         if shot == 2 {
+            g.zone.center = glam::Vec2::new(0.0, -10.0);
+            g.zone.radius = 12.0;
+            g.zone.center = glam::Vec2::new(0.0, -10.0);
+            g.zone.radius = 12.0;
             g.touch(TouchAction::Up, 3, 0.0, 0.0);
             g.touch(TouchAction::Down, 1, 300.0, 400.0);
             g.touch(TouchAction::Move, 1, 300.0, 340.0);

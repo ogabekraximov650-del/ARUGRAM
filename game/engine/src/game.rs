@@ -10,9 +10,165 @@ const RADIUS: f32 = 0.4;
 const HEIGHT: f32 = 1.8;
 const GRAVITY: f32 = 22.0;
 const JUMP_SPEED: f32 = 7.5;
-pub const MAG_SIZE: u32 = 30;
 pub const MAX_HP: f32 = 100.0;
 const BOT_COUNT: usize = 6;
+const PICKUP_RANGE: f32 = 1.6;
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum WeaponKind {
+    Pistol,
+    Rifle,
+    Shotgun,
+    Sniper,
+}
+
+pub struct Stats {
+    pub body: f32,
+    pub head: f32,
+    pub cd: f32,
+    pub mag: u32,
+    pub reload: f32,
+    pub pellets: u32,
+    pub spread: f32,
+    pub recoil: f32,
+}
+
+impl WeaponKind {
+    pub fn stats(self) -> Stats {
+        match self {
+            WeaponKind::Pistol => Stats { body: 24.0, head: 48.0, cd: 0.30, mag: 12, reload: 1.2, pellets: 1, spread: 0.004, recoil: 0.010 },
+            WeaponKind::Rifle => Stats { body: 30.0, head: 60.0, cd: 0.10, mag: 30, reload: 1.8, pellets: 1, spread: 0.012, recoil: 0.008 },
+            WeaponKind::Shotgun => Stats { body: 12.0, head: 20.0, cd: 0.90, mag: 6, reload: 2.2, pellets: 8, spread: 0.06, recoil: 0.030 },
+            WeaponKind::Sniper => Stats { body: 90.0, head: 150.0, cd: 1.40, mag: 5, reload: 2.5, pellets: 1, spread: 0.0, recoil: 0.040 },
+        }
+    }
+    pub fn color(self) -> [f32; 3] {
+        match self {
+            WeaponKind::Pistol => [0.55, 0.65, 0.85],
+            WeaponKind::Rifle => [0.95, 0.55, 0.15],
+            WeaponKind::Shotgun => [0.85, 0.25, 0.25],
+            WeaponKind::Sniper => [0.2, 0.7, 0.3],
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct Slot {
+    pub kind: WeaponKind,
+    pub mag: u32,
+    pub reserve: u32,
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum PickupKind {
+    Weapon(WeaponKind),
+    Ammo,
+    Medkit,
+}
+
+pub struct Pickup {
+    pub pos: Vec3,
+    pub kind: PickupKind,
+    pub alive: bool,
+}
+
+/// (kutish s, qisqarish s, yangi radius, soniyasiga zarar)
+const PHASES: [(f32, f32, f32, f32); 4] = [(30.0, 30.0, 45.0, 1.0), (25.0, 25.0, 28.0, 2.0), (20.0, 25.0, 14.0, 4.0), (15.0, 20.0, 5.0, 7.0)];
+const FINAL_DPS: f32 = 10.0;
+
+pub struct Zone {
+    pub center: Vec2,
+    pub radius: f32,
+    pub next_center: Vec2,
+    pub next_radius: f32,
+    pub phase: usize,
+    pub t: f32,
+    pub shrinking: bool,
+    pub finished: bool,
+    from_center: Vec2,
+    from_radius: f32,
+}
+
+impl Zone {
+    fn new(rng: &mut Lcg) -> Self {
+        let mut z = Self {
+            center: Vec2::ZERO,
+            radius: 70.0,
+            next_center: Vec2::ZERO,
+            next_radius: PHASES[0].2,
+            phase: 0,
+            t: 0.0,
+            shrinking: false,
+            finished: false,
+            from_center: Vec2::ZERO,
+            from_radius: 70.0,
+        };
+        z.pick_next(rng);
+        z
+    }
+
+    fn pick_next(&mut self, rng: &mut Lcg) {
+        self.next_radius = PHASES[self.phase].2;
+        let room = (self.radius - self.next_radius).max(0.0);
+        let a = rng.next() * std::f32::consts::TAU;
+        self.next_center = self.center + Vec2::new(a.cos(), a.sin()) * room * rng.next().sqrt();
+    }
+
+    pub fn dps(&self) -> f32 {
+        if self.finished {
+            FINAL_DPS
+        } else {
+            PHASES[self.phase].3
+        }
+    }
+
+    pub fn contains(&self, x: f32, z: f32) -> bool {
+        Vec2::new(x, z).distance(self.center) <= self.radius
+    }
+
+    /// Joriy bosqichning to'liq davomiyligi va o'tgan ulushi (0..1) — HUD uchun.
+    pub fn progress(&self) -> f32 {
+        if self.finished {
+            return 1.0;
+        }
+        let (wait, shrink, _, _) = PHASES[self.phase];
+        if self.shrinking {
+            (self.t / shrink).clamp(0.0, 1.0)
+        } else {
+            (self.t / wait).clamp(0.0, 1.0)
+        }
+    }
+
+    fn update(&mut self, dt: f32, rng: &mut Lcg) {
+        if self.finished {
+            return;
+        }
+        let (wait, shrink, _, _) = PHASES[self.phase];
+        self.t += dt;
+        if !self.shrinking {
+            if self.t >= wait {
+                self.shrinking = true;
+                self.t = 0.0;
+                self.from_center = self.center;
+                self.from_radius = self.radius;
+            }
+        } else {
+            let k = (self.t / shrink).clamp(0.0, 1.0);
+            self.center = self.from_center.lerp(self.next_center, k);
+            self.radius = self.from_radius + (self.next_radius - self.from_radius) * k;
+            if k >= 1.0 {
+                self.phase += 1;
+                self.shrinking = false;
+                self.t = 0.0;
+                if self.phase >= PHASES.len() {
+                    self.finished = true;
+                } else {
+                    self.pick_next(rng);
+                }
+            }
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct Aabb {
@@ -102,9 +258,13 @@ pub struct Game {
     vy: f32,
     pub grounded: bool,
     pub hp: f32,
-    pub ammo: u32,
+    pub slots: Vec<Slot>,
+    pub cur: usize,
     pub reload: f32,
     fire_cd: f32,
+    pub pickups: Vec<Pickup>,
+    pub zone: Zone,
+    pub time: f32,
     pub kills: u32,
     pub bots: Vec<Bot>,
     rng: Lcg,
@@ -178,9 +338,13 @@ impl Game {
             vy: 0.0,
             grounded: true,
             hp: MAX_HP,
-            ammo: MAG_SIZE,
+            slots: vec![Slot { kind: WeaponKind::Pistol, mag: 12, reserve: 24 }],
+            cur: 0,
             reload: 0.0,
             fire_cd: 0.0,
+            pickups: Vec::new(),
+            zone: Zone::new(&mut Lcg(99)),
+            time: 0.0,
             kills: 0,
             bots: Vec::new(),
             rng: Lcg(12345),
@@ -188,11 +352,87 @@ impl Game {
             hurt: 0.0,
             dead_t: 0.0,
         };
+        g.zone = Zone::new(&mut g.rng);
         for _ in 0..BOT_COUNT {
             let b = g.new_bot();
             g.bots.push(b);
         }
+        g.spawn_pickups();
         g
+    }
+
+    pub fn stats(&self) -> Stats {
+        self.slots[self.cur].kind.stats()
+    }
+    pub fn mag(&self) -> u32 {
+        self.slots[self.cur].mag
+    }
+    pub fn reserve(&self) -> u32 {
+        self.slots[self.cur].reserve
+    }
+
+    fn spawn_pickups(&mut self) {
+        // o'yinchi yonida kafolatli to'plam
+        let fixed = [
+            (Vec3::new(3.0, 0.0, 8.0), PickupKind::Weapon(WeaponKind::Rifle)),
+            (Vec3::new(-3.0, 0.0, 8.0), PickupKind::Ammo),
+            (Vec3::new(0.0, 0.0, 4.5), PickupKind::Medkit),
+        ];
+        for (pos, kind) in fixed {
+            self.pickups.push(Pickup { pos, kind, alive: true });
+        }
+        for i in 0..24 {
+            let mut pos = Vec3::new((self.rng.next() - 0.5) * 84.0, 0.0, (self.rng.next() - 0.5) * 84.0);
+            push_out(&mut pos, HEIGHT, &self.colliders);
+            let kind = match i % 6 {
+                0 => PickupKind::Weapon(WeaponKind::Rifle),
+                1 => PickupKind::Weapon(WeaponKind::Shotgun),
+                2 => PickupKind::Weapon(WeaponKind::Sniper),
+                3 => PickupKind::Ammo,
+                4 => PickupKind::Medkit,
+                _ => PickupKind::Ammo,
+            };
+            self.pickups.push(Pickup { pos, kind, alive: true });
+        }
+    }
+
+    fn collect_pickups(&mut self) {
+        let feet = Vec3::new(self.camera.pos.x, self.camera.pos.y - EYE, self.camera.pos.z);
+        for i in 0..self.pickups.len() {
+            let p = &self.pickups[i];
+            if !p.alive || Vec2::new(p.pos.x - feet.x, p.pos.z - feet.z).length() > PICKUP_RANGE || (p.pos.y - feet.y).abs() > 2.5 {
+                continue;
+            }
+            let kind = p.kind;
+            match kind {
+                PickupKind::Medkit => {
+                    if self.hp >= MAX_HP {
+                        continue;
+                    }
+                    self.hp = (self.hp + 40.0).min(MAX_HP);
+                }
+                PickupKind::Ammo => {
+                    let mag = self.stats().mag;
+                    self.slots[self.cur].reserve += mag * 2;
+                }
+                PickupKind::Weapon(w) => {
+                    if let Some(idx) = self.slots.iter().position(|s| s.kind == w) {
+                        self.slots[idx].reserve += w.stats().mag * 2;
+                    } else {
+                        let s = Slot { kind: w, mag: w.stats().mag, reserve: w.stats().mag * 2 };
+                        if self.slots.len() < 3 {
+                            self.slots.push(s);
+                            self.cur = self.slots.len() - 1;
+                        } else {
+                            self.slots[self.cur] = s;
+                        }
+                        self.reload = 0.0;
+                        self.fire_cd = 0.3;
+                    }
+                }
+            }
+            self.pickups[i].alive = false;
+        }
     }
 
     fn new_bot(&mut self) -> Bot {
@@ -200,7 +440,7 @@ impl Game {
         let mut pos = Vec3::ZERO;
         for _ in 0..20 {
             pos = Vec3::new((self.rng.next() - 0.5) * 80.0, 0.0, (self.rng.next() - 0.5) * 80.0);
-            if pos.distance(player) > 20.0 {
+            if pos.distance(player) > 20.0 && self.zone.contains(pos.x, pos.z) {
                 break;
             }
         }
@@ -251,49 +491,69 @@ impl Game {
     }
 
     fn shoot(&mut self) {
+        let st = self.stats();
         let o = self.camera.pos;
-        let d = self.camera.forward();
-        let tw = self.world_hit(o, d);
-        let mut best: Option<(f32, usize, f32)> = None;
-        for (i, b) in self.bots.iter().enumerate() {
-            if !b.alive {
-                continue;
-            }
-            if let Some(t) = b.head().ray(o, d) {
-                if t < tw && best.map_or(true, |x| t < x.0) {
-                    best = Some((t, i, 70.0));
+        let base = self.camera.forward();
+        let right = self.camera.right();
+        let up = right.cross(base);
+        for _ in 0..st.pellets {
+            let sx = (self.rng.next() - 0.5) * 2.0 * st.spread;
+            let sy = (self.rng.next() - 0.5) * 2.0 * st.spread;
+            let d = (base + right * sx + up * sy).normalize();
+            let tw = self.world_hit(o, d);
+            let mut best: Option<(f32, usize, f32)> = None;
+            for (i, b) in self.bots.iter().enumerate() {
+                if !b.alive {
+                    continue;
+                }
+                if let Some(t) = b.head().ray(o, d) {
+                    if t < tw && best.map_or(true, |x| t < x.0) {
+                        best = Some((t, i, st.head));
+                    }
+                }
+                if let Some(t) = b.body().ray(o, d) {
+                    if t < tw && best.map_or(true, |x| t < x.0) {
+                        best = Some((t, i, st.body));
+                    }
                 }
             }
-            if let Some(t) = b.body().ray(o, d) {
-                if t < tw && best.map_or(true, |x| t < x.0) {
-                    best = Some((t, i, 34.0));
+            if let Some((_, i, dmg)) = best {
+                let b = &mut self.bots[i];
+                b.hp -= dmg;
+                b.hit_t = 0.12;
+                self.hit_marker = 0.15;
+                if b.hp <= 0.0 && b.alive {
+                    b.alive = false;
+                    b.respawn = 5.0;
+                    self.kills += 1;
                 }
             }
         }
-        if let Some((_, i, dmg)) = best {
-            let b = &mut self.bots[i];
-            b.hp -= dmg;
-            b.hit_t = 0.12;
-            self.hit_marker = 0.15;
-            if b.hp <= 0.0 {
-                b.alive = false;
-                b.respawn = 5.0;
-                self.kills += 1;
-            }
-        }
-        self.camera.look(0.0, 0.012);
+        self.camera.look(0.0, st.recoil);
     }
 
     pub fn respawn_player(&mut self) {
-        self.camera.pos = Vec3::new(0.0, EYE, 8.0);
+        let mut p = Vec2::new(0.0, 8.0);
+        if !self.zone.contains(p.x, p.y) {
+            p = self.zone.center;
+        }
+        let mut feet = Vec3::new(p.x, 0.0, p.y);
+        push_out(&mut feet, HEIGHT, &self.colliders);
+        self.camera.pos = feet + Vec3::Y * EYE;
         self.vy = 0.0;
         self.hp = MAX_HP;
-        self.ammo = MAG_SIZE;
+        self.slots = vec![Slot { kind: WeaponKind::Pistol, mag: 12, reserve: 24 }];
+        self.cur = 0;
         self.reload = 0.0;
     }
 
     pub fn update(&mut self, dt: f32) {
+        if self.input.settings_open() {
+            return;
+        }
         let dt = dt.clamp(0.0, 0.05);
+        self.time += dt;
+        self.zone.update(dt, &mut self.rng);
         self.hit_marker = (self.hit_marker - dt).max(0.0);
         self.hurt = (self.hurt - dt).max(0.0);
 
@@ -333,20 +593,40 @@ impl Game {
         }
         self.camera.pos = Vec3::new(feet.x, feet.y + EYE, feet.z);
 
+        self.collect_pickups();
+
+        // zonadan tashqarida zarar
+        if !self.zone.contains(feet.x, feet.z) {
+            self.hp -= self.zone.dps() * dt;
+            self.hurt = self.hurt.max(0.15);
+            if self.hp <= 0.0 {
+                self.hp = 0.0;
+                self.dead_t = 2.0;
+            }
+        }
+
+        if self.input.take_switch() && self.slots.len() > 1 {
+            self.cur = (self.cur + 1) % self.slots.len();
+            self.reload = 0.0;
+            self.fire_cd = 0.25;
+        }
+        let st = self.stats();
         if self.reload > 0.0 {
             self.reload -= dt;
             if self.reload <= 0.0 {
-                self.ammo = MAG_SIZE;
+                let s = &mut self.slots[self.cur];
+                let take = (st.mag - s.mag).min(s.reserve);
+                s.mag += take;
+                s.reserve -= take;
             }
+        } else if self.slots[self.cur].mag == 0 && self.slots[self.cur].reserve > 0 {
+            self.reload = st.reload;
         }
         self.fire_cd -= dt;
-        if self.input.fire_held() && self.ammo > 0 && self.reload <= 0.0 && self.fire_cd <= 0.0 {
+        if self.input.fire_held() && self.reload <= 0.0 && self.slots[self.cur].mag > 0 && self.fire_cd <= 0.0 {
             self.shoot();
-            self.ammo -= 1;
-            self.fire_cd = 0.14;
-            if self.ammo == 0 {
-                self.reload = 1.6;
-            }
+            self.slots[self.cur].mag -= 1;
+            self.fire_cd = st.cd;
         }
     }
 
@@ -371,7 +651,18 @@ impl Game {
             let dist = to.length();
             let sees = player_alive && dist < 40.0 && self.line_of_sight(b.eye(), player_eye - Vec3::new(0.0, 0.3, 0.0));
             let mut mv = Vec2::ZERO;
-            if sees {
+            let outside = !self.zone.contains(b.pos.x, b.pos.z);
+            if outside {
+                b.hp -= self.zone.dps() * dt;
+                if b.hp <= 0.0 {
+                    b.alive = false;
+                    b.respawn = 5.0;
+                    self.bots[i] = b;
+                    continue;
+                }
+                let back = self.zone.center - Vec2::new(b.pos.x, b.pos.z);
+                mv = back / back.length().max(0.01) * 3.5;
+            } else if sees {
                 let dir = to / dist.max(0.01);
                 b.timer -= dt;
                 if b.timer <= 0.0 {
@@ -419,6 +710,31 @@ impl Game {
             let head = [0.95, 0.80 + 0.2 * flash, 0.65 + 0.35 * flash, 0.0];
             v.push(Instance { pos: [b.pos.x, b.pos.y + 0.675, b.pos.z, 0.0], scale: [0.7, 1.35, 0.5, 0.0], color: body });
             v.push(Instance { pos: [b.pos.x, b.pos.y + 1.57, b.pos.z, 0.0], scale: [0.44, 0.44, 0.44, 0.0], color: head });
+        }
+        for p in self.pickups.iter().filter(|p| p.alive) {
+            let bob = 0.65 + 0.15 * (self.time * 3.0 + p.pos.x).sin();
+            let (rgb, scale) = match p.kind {
+                PickupKind::Weapon(w) => (w.color(), [0.8, 0.2, 0.25, 0.0]),
+                PickupKind::Ammo => ([1.0, 0.85, 0.2], [0.4, 0.4, 0.4, 0.0]),
+                PickupKind::Medkit => ([0.95, 0.95, 0.95], [0.5, 0.4, 0.5, 0.0]),
+            };
+            v.push(Instance { pos: [p.pos.x, bob, p.pos.z, 0.0], scale, color: [rgb[0], rgb[1], rgb[2], 0.0] });
+            let beam = if p.kind == PickupKind::Medkit { [0.3, 0.9, 0.4] } else { rgb };
+            v.push(Instance { pos: [p.pos.x, 3.0, p.pos.z, 0.0], scale: [0.12, 6.0, 0.12, 0.0], color: [beam[0], beam[1], beam[2], 0.0] });
+        }
+        let ring = |c: Vec2, r: f32, n: usize, w: f32, col: [f32; 3], v: &mut Vec<Instance>| {
+            for k in 0..n {
+                let a = k as f32 / n as f32 * std::f32::consts::TAU;
+                v.push(Instance {
+                    pos: [c.x + a.cos() * r, 15.0, c.y + a.sin() * r, 0.0],
+                    scale: [w, 30.0, w, 0.0],
+                    color: [col[0], col[1], col[2], 0.0],
+                });
+            }
+        };
+        ring(self.zone.center, self.zone.radius, 96, 1.0, [0.2, 0.45, 1.0], &mut v);
+        if !self.zone.finished {
+            ring(self.zone.next_center, self.zone.next_radius, 48, 0.5, [0.95, 0.95, 0.95], &mut v);
         }
         v
     }
@@ -496,6 +812,60 @@ mod tests {
         g.bots[0].pos = Vec3::new(0.0, 0.0, -10.0);
         g.shoot();
         assert_eq!(g.bots[0].hp, MAX_HP);
+    }
+
+    #[test]
+    fn zona_qisqaradi_va_ichida_qoladi() {
+        let mut g = Game::new(1280, 576, 2.0);
+        let r0 = g.zone.radius;
+        for _ in 0..(60 * 70) {
+            g.zone.update(1.0 / 60.0, &mut g.rng);
+            assert!(g.zone.center.length() + g.zone.radius <= r0 + 1e-3);
+        }
+        assert!(g.zone.radius < 46.0, "qisqardi");
+    }
+
+    #[test]
+    fn zona_tashqarisida_jon_kamayadi() {
+        let mut g = Game::new(1280, 576, 2.0);
+        g.zone.center = Vec2::new(30.0, 30.0);
+        g.zone.radius = 3.0;
+        for b in g.bots.iter_mut() {
+            b.alive = false;
+            b.respawn = 100.0;
+        }
+        step(&mut g, 60);
+        assert!(g.hp < MAX_HP);
+    }
+
+    #[test]
+    fn qurol_yigish_va_almashtirish() {
+        let mut g = Game::new(1280, 576, 2.0);
+        g.pickups.clear();
+        let feet = Vec3::new(g.camera.pos.x, 0.0, g.camera.pos.z);
+        g.pickups.push(Pickup { pos: feet, kind: PickupKind::Weapon(WeaponKind::Shotgun), alive: true });
+        step(&mut g, 2);
+        assert_eq!(g.slots.len(), 2);
+        assert_eq!(g.slots[g.cur].kind, WeaponKind::Shotgun);
+        let (c, _) = g.input.switch_button();
+        g.touch(TouchAction::Down, 9, c.x, c.y);
+        step(&mut g, 2);
+        assert_eq!(g.slots[g.cur].kind, WeaponKind::Pistol);
+    }
+
+    #[test]
+    fn oq_tugasa_qayta_oqlanadi() {
+        let mut g = Game::new(1280, 576, 2.0);
+        g.pickups.clear();
+        g.slots[0].mag = 1;
+        let (c, _) = g.input.fire_button();
+        g.touch(TouchAction::Down, 8, c.x, c.y);
+        step(&mut g, 3);
+        assert_eq!(g.mag(), 0);
+        g.touch(TouchAction::Up, 8, 0.0, 0.0);
+        step(&mut g, 100);
+        assert_eq!(g.mag(), 12);
+        assert_eq!(g.reserve(), 12);
     }
 
     #[test]
