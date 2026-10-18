@@ -381,7 +381,7 @@ fun TgPreview(d: TgDoc, kind: String, onSend: () -> Unit, onClose: () -> Unit) {
                 val ratio = if (gif) d.ratio else 1f
                 Box(Modifier.width(if (gif) 290.dp else if (ratio > 1f) 320.dp else 260.dp).aspectRatio(ratio).clip(RoundedCornerShape(if (gif) 14.dp else 0.dp))) { TgItem(d, Modifier.fillMaxSize(), full = true) }
                 Spacer(Modifier.height(if (gif) 30.dp else 44.dp))
-                Column(Modifier.width(if (gif) 240.dp else 270.dp).clip(RoundedCornerShape(22.dp)).background(Color(0xFF352C27)).padding(vertical = 6.dp)) {
+                Column(Modifier.width(240.dp).clip(RoundedCornerShape(22.dp)).background(Color(0xFF352C27)).padding(vertical = 6.dp)) {
                     @Composable
                     fun Row2(icon: androidx.compose.ui.graphics.vector.ImageVector, text: String, onClick: () -> Unit) {
                         Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 18.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -391,11 +391,6 @@ fun TgPreview(d: TgDoc, kind: String, onSend: () -> Unit, onClose: () -> Unit) {
                         }
                     }
                     Row2(uz.arumediatv.com.ui.common.AruIcons.Send, when (kind) { "emoji" -> "Emoji yuborish"; "gifs" -> "GIF yuborish"; else -> "Stiker yuborish" }) { onSend(); onClose() }
-                    if (!gif && d.emoji.isNotBlank()) Row2(uz.arumediatv.com.ui.common.AruIcons.Copy, "Emojidan nusxa olish") {
-                        (ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(android.content.ClipData.newPlainText("emoji", d.emoji))
-                        android.widget.Toast.makeText(ctx, "Nusxa olindi", android.widget.Toast.LENGTH_SHORT).show()
-                        onClose()
-                    }
                 }
             }
         }
