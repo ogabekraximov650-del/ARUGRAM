@@ -37,7 +37,7 @@ class TgStickerStore(ctx: Context) {
     private val docs = ConcurrentHashMap<String, List<TgDoc>>()
     private val gate = Semaphore(3)
     /** Dekodlangan kichik rasmlar: aylantirilganda bo'sh qolmaydi, asosiy oqimda dekod qilinmaydi. */
-    private val bmps = object : LruCache<String, ImageBitmap>(24 * 1024 * 1024) { override fun sizeOf(k: String, v: ImageBitmap) = v.width * v.height * 4 }
+    private val bmps = object : LruCache<String, ImageBitmap>((Runtime.getRuntime().maxMemory() / 6).toInt().coerceIn(16 shl 20, 96 shl 20)) { override fun sizeOf(k: String, v: ImageBitmap) = v.width * v.height * 4 }
 
     fun peekPoster(d: TgDoc): ImageBitmap? = bmps.get("p${d.id}")
 
@@ -154,6 +154,9 @@ class TgStickerStore(ctx: Context) {
             }
         }
     }
+
+    /** Tizim xotirani tozalashni so'raganda. */
+    fun trim() { bmps.evictAll(); mem.evictAll() }
 
     fun clear() { dir.listFiles()?.forEach { it.delete() }; mem.evictAll(); bmps.evictAll(); sets.clear(); docs.clear() }
 }

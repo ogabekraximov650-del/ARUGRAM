@@ -52,9 +52,12 @@ import uz.arumediatv.com.AppServices
 import uz.arumediatv.com.data.TgDoc
 import uz.arumediatv.com.data.TgSet
 
+/** Animatsiya ruxsat etilgan hujjatlar (ekrandagi O'RTA ikki qator). `null` — cheklov yo'q. */
+val LocalTgPlay = androidx.compose.runtime.compositionLocalOf<Set<Long>?> { null }
+
 /** Bir vaqtda ekranda harakatlanadigan videolar soni cheklangan (telefon qotmasligi uchun). */
 private object TgSlots {
-    const val MAX = 4
+    const val MAX = 6
     val active = mutableStateListOf<Any>()
     fun acquire(t: Any): Boolean = if (t in active) true else if (active.size < MAX) { active.add(t); true } else false
     fun release(t: Any) { active.remove(t) }
@@ -73,15 +76,17 @@ fun TgItem(d: TgDoc, modifier: Modifier = Modifier, full: Boolean = false, scale
     var fully by remember { mutableStateOf(false) }
     var active by remember { mutableStateOf(false) }
     var rendered by remember(d.id) { mutableStateOf(false) }
-    LaunchedEffect(fully, d.id) {
-        if (fully && d.isVideo) active = TgSlots.acquire(token) || full
+    val play = LocalTgPlay.current
+    val go = fully && (play == null || d.id in play)
+    LaunchedEffect(go, d.id) {
+        if (go && d.isVideo) active = TgSlots.acquire(token) || full
         else { TgSlots.release(token); active = false; rendered = false }
     }
     DisposableEffect(token) { onDispose { TgSlots.release(token) } }
     // Slot bo'shaganda qayta uriniladi
     if (d.isVideo) {
         val free = TgSlots.active.size
-        LaunchedEffect(free, fully) { if (fully && !active) active = TgSlots.acquire(token) }
+        LaunchedEffect(free, go) { if (go && !active) active = TgSlots.acquire(token) }
     }
     val fullBytes by produceState<ByteArray?>(null, d.id, active, full) {
         value = if ((active && d.isVideo) || (full && d.kind == "webp")) store.bytes(d, false) else null
@@ -183,6 +188,18 @@ fun TgAccountPage(kind: String) {
         var i = 0
         sets.map { s -> Sec(s.id, i).also { i += 1 + (st.docs[s.id]?.size ?: s.count) } }
     }
+    // Faqat ekrandagi O'RTA ikki qator animatsiya qiladi (qolganlari — rasm).
+    val midRows by remember {
+        derivedStateOf {
+            val vis = grid.layoutInfo.visibleItemsInfo.filter { val k = it.key as? String; k != null && (k.startsWith("si") || k.startsWith("g") && !k.startsWith("gh")) }
+            val ys = vis.map { it.offset.y }.distinct().sorted()
+            val mid = if (ys.size <= 2) ys else listOf(ys[ys.size / 2 - 1], ys[ys.size / 2])
+            vis.filter { it.offset.y in mid }.mapNotNull { v ->
+                val k = v.key as String
+                (if (k.contains(':')) k.substringAfter(':') else k.removePrefix("g")).toLongOrNull()?.takeIf { it > 0 }
+            }.toSet()
+        }
+    }
     val current by remember { derivedStateOf { sections.lastOrNull { it.index <= grid.firstVisibleItemIndex }?.id } }
 
     Column(Modifier.fillMaxSize()) {
@@ -208,7 +225,7 @@ fun TgAccountPage(kind: String) {
             }
         } else if (st.sets == null && st.gifs == null) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { androidx.compose.material3.CircularProgressIndicator(color = pal, modifier = Modifier.size(28.dp), strokeWidth = 2.dp) }
-        } else LazyVerticalGrid(
+        } else androidx.compose.runtime.CompositionLocalProvider(LocalTgPlay provides midRows) { LazyVerticalGrid(
             GridCells.Fixed(cols), Modifier.fillMaxSize(), state = grid,
             contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = 84.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -229,7 +246,7 @@ fun TgAccountPage(kind: String) {
                     else Box(Modifier.aspectRatio(1f).clip(RoundedCornerShape(10.dp)).clickable { preview = d }) { TgItem(d, Modifier.fillMaxSize().padding(3.dp)) }
                 }
             }
-        }
+        } }
     }
     preview?.let { TgPreview(it) { preview = null } }
 }
