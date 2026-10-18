@@ -41,10 +41,46 @@ class TgStickerStore(ctx: Context) {
 
     fun peekPoster(d: TgDoc): ImageBitmap? = bmps.get("p${d.id}")
 
+    /**
+     * Dekod qilingan rasm DOIMIY (diskda, shifrlangan xom piksellar) saqlanadi: qayta dekod ham, qayta yuklash ham kerak emas.
+     * Tartib: xotira -> disk (xom) -> disk (asl fayl) dekod -> Telegram.
+     */
+    private fun loadRaw(name: String): ImageBitmap? {
+        val f = File(dir, "r_$name")
+        if (!f.exists()) return null
+        return runCatching {
+            val b = SecureStore.open(f.readBytes())
+            val bb = java.nio.ByteBuffer.wrap(b)
+            val w = bb.int; val h = bb.int
+            val bmp = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
+            bmp.copyPixelsFromBuffer(bb.slice())
+            bmp.asImageBitmap()
+        }.getOrNull()
+    }
+
+    private fun saveRaw(name: String, bmp: android.graphics.Bitmap) {
+        if (bmp.width * bmp.height > 320 * 320) return
+        runCatching {
+            val bb = java.nio.ByteBuffer.allocate(8 + bmp.byteCount)
+            bb.putInt(bmp.width).putInt(bmp.height)
+            bmp.copyPixelsToBuffer(bb)
+            File(dir, "r_$name").writeBytes(SecureStore.seal(bb.array()))
+        }
+    }
+
+    private fun decode(b: ByteArray, name: String): ImageBitmap? {
+        val o = BitmapFactory.Options().apply { inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888 }
+        val bmp = BitmapFactory.decodeByteArray(b, 0, b.size, o) ?: return null
+        saveRaw(name, bmp)
+        return bmp.asImageBitmap()
+    }
+
     suspend fun poster(d: TgDoc): ImageBitmap? {
         bmps.get("p${d.id}")?.let { return it }
+        val r = withContext(Dispatchers.IO) { loadRaw("p${d.id}") }
+        if (r != null) { bmps.put("p${d.id}", r); return r }
         val b = bytes(d, true) ?: return null
-        return withContext(Dispatchers.Default) { BitmapFactory.decodeByteArray(b, 0, b.size)?.asImageBitmap() }?.also { bmps.put("p${d.id}", it) }
+        return withContext(Dispatchers.Default) { decode(b, "p${d.id}") }?.also { bmps.put("p${d.id}", it) }
     }
 
     fun peekCover(s: TgSet): ImageBitmap? = bmps.get("c${s.id}")
@@ -53,6 +89,7 @@ class TgStickerStore(ctx: Context) {
     suspend fun cover(s: TgSet): ImageBitmap? {
         bmps.get("c${s.id}")?.let { return it }
         if (s.thumbVer == 0) return null
+        withContext(Dispatchers.IO) { loadRaw("c${s.id}") }?.let { bmps.put("c${s.id}", it); return it }
         val name = "c${s.id}"
         val b = withContext(Dispatchers.IO) {
             val f = File(dir, name)
@@ -66,7 +103,7 @@ class TgStickerStore(ctx: Context) {
                 x
             }
         } ?: return null
-        return withContext(Dispatchers.Default) { BitmapFactory.decodeByteArray(b, 0, b.size)?.asImageBitmap() }?.also { bmps.put("c${s.id}", it) }
+        return withContext(Dispatchers.Default) { decode(b, "c${s.id}") }?.also { bmps.put("c${s.id}", it) }
     }
 
     private fun parseDoc(o: JSONObject) = TgDoc(
