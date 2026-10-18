@@ -288,16 +288,12 @@ private fun EmojiPage(onEmoji: (String) -> Unit, onPick: (PackPick) -> Unit) {
     val tgEmoji = if (TG_STICKERS_ON) rememberTgSets("emoji") else null
     var tgPreview by remember { mutableStateOf<uz.arumediatv.com.data.TgDoc?>(null) }
     tgPreview?.let { TgPreview(it) { tgPreview = null } }
-    // Emoji: faqat ekran o'rtasiga eng yaqin BITTA qator animatsiya qiladi.
+    // Emoji: ekran o'rtasiga eng yaqin qatorlar animatsiya qiladi (kuchsiz telefonda 1 ta, boshqasida 2 ta); surilganda to'xtaydi.
+    val settledE = rememberSettled { grid.isScrollInProgress }
     val midEmoji by remember {
         derivedStateOf {
             val li = grid.layoutInfo
-            val c = (li.viewportStartOffset + li.viewportEndOffset) / 2
-            val vis = li.visibleItemsInfo.filter { (it.key as? String)?.startsWith("ti") == true }
-            if (vis.isEmpty()) emptySet<Long>() else {
-                val best = vis.minByOrNull { kotlin.math.abs(it.offset.y + it.size.height / 2 - c) }!!
-                vis.filter { it.offset.y == best.offset.y }.mapNotNull { (it.key as String).substringAfter(':').toLongOrNull()?.takeIf { x -> x > 0 } }.toSet()
-            }
+            centerRowIds(li.visibleItemsInfo, (li.viewportStartOffset + li.viewportEndOffset) / 2, uz.arumediatv.com.data.TgPerf.rows, "ti")
         }
     }
 
@@ -359,7 +355,7 @@ private fun EmojiPage(onEmoji: (String) -> Unit, onPick: (PackPick) -> Unit) {
                     Box(Modifier.aspectRatio(1f).clip(RoundedCornerShape(10.dp)).clickable { onPick(h) }) { PackItemImage(h.pack, h.item, Modifier.fillMaxSize().padding(8.dp), thumb = true) }
                 }
             }
-        } else androidx.compose.runtime.CompositionLocalProvider(LocalTgPlay provides midEmoji) { LazyVerticalGrid(
+        } else androidx.compose.runtime.CompositionLocalProvider(LocalTgPlay provides (if (settledE) midEmoji else emptySet())) { LazyVerticalGrid(
             GridCells.Fixed(7), Modifier.fillMaxSize(), state = grid,
             contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = 84.dp),
         ) {

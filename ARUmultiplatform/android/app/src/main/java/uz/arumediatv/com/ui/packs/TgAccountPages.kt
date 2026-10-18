@@ -15,7 +15,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -64,7 +68,7 @@ val LocalTgPlay = androidx.compose.runtime.compositionLocalOf<Set<Long>?> { null
 
 /** Bir vaqtda ekranda harakatlanadigan videolar soni cheklangan (telefon qotmasligi uchun). */
 private object TgSlots {
-    const val MAX = 6
+    val MAX: Int get() = uz.arumediatv.com.data.TgPerf.videoSlots
     val active = mutableStateListOf<Any>()
     fun acquire(t: Any): Boolean = if (t in active) true else if (active.size < MAX) { active.add(t); true } else false
     fun release(t: Any) { active.remove(t) }
@@ -78,31 +82,34 @@ private object TgSlots {
 @Composable
 fun TgItem(d: TgDoc, modifier: Modifier = Modifier, full: Boolean = false, scale: ContentScale = ContentScale.Fit) {
     val store = AppServices.tgStickers
-    val webpAnim = d.isTgs && Build.VERSION.SDK_INT >= 28
-    val canAnim = d.isVideo || webpAnim
+    val webpCapable = Build.VERSION.SDK_INT >= 28 && (d.isTgs || d.isGifLike)
     var poster by remember(d.id) { mutableStateOf(store.peekPoster(d)) }
     var animBytes by remember(d.id) { mutableStateOf(store.peekAnim(d)) }
+    var animTried by remember(d.id) { mutableStateOf(animBytes != null) }
     LaunchedEffect(d.id) { if (poster == null) poster = store.poster(d) }
-    // `.tgs`: katak paydo bo'lishi bilan orqa fonda animatsiyali WebP tayyorlanadi (ekranga chiqmasdan oldin tayyor bo'lsin).
-    if (webpAnim) LaunchedEffect(d.id) { if (animBytes == null) animBytes = store.anim(d) }
+    // `.tgs` va GIF: katak paydo bo'lishi bilan orqa fonda animatsiyali WebP tayyorlanadi (ekranga chiqmasdan oldin tayyor bo'lsin).
+    if (webpCapable) LaunchedEffect(d.id) { if (animBytes == null) { animBytes = store.anim(d); animTried = true } }
+    // Video dekoder: faqat .webm yoki WebP'ga aylantirib bo'lmagan GIF (yoki tayyor bo'lmagan GIFni katta ko'rinishda ochganda).
+    val useVideo = d.isVideo && (!d.isGifLike || !webpCapable || (animTried && animBytes == null) || (full && animBytes == null))
+    val canAnim = (webpCapable && animBytes != null) || useVideo
     val token = remember { Any() }
     var fully by remember { mutableStateOf(false) }
     var active by remember { mutableStateOf(false) }
     var rendered by remember(d.id) { mutableStateOf(false) }
     val play = LocalTgPlay.current
     val go = fully && (play == null || d.id in play)
-    LaunchedEffect(go, d.id) {
-        if (go && canAnim) active = TgSlots.acquire(token) || full
+    LaunchedEffect(go, d.id, canAnim, useVideo) {
+        if (go && canAnim) active = if (useVideo) (TgSlots.acquire(token) || full) else true
         else { TgSlots.release(token); active = false; rendered = false }
     }
     DisposableEffect(token) { onDispose { TgSlots.release(token) } }
-    // Slot bo'shaganda qayta uriniladi
-    if (canAnim) {
+    // Video slot bo'shaganda qayta uriniladi
+    if (useVideo) {
         val free = TgSlots.active.size
         LaunchedEffect(free, go) { if (go && !active) active = TgSlots.acquire(token) }
     }
-    val fullBytes by produceState<ByteArray?>(null, d.id, active, full) {
-        value = if ((active && d.isVideo) || (full && d.kind == "webp")) store.bytes(d, false) else null
+    val fullBytes by produceState<ByteArray?>(null, d.id, active, full, useVideo) {
+        value = if ((active && useVideo) || (full && d.kind == "webp")) store.bytes(d, false) else null
     }
     Box(
         modifier.onGloballyPositioned { c ->
@@ -115,9 +122,9 @@ fun TgItem(d: TgDoc, modifier: Modifier = Modifier, full: Boolean = false, scale
         val pbmp = poster
         val fb = fullBytes
         val ab = animBytes
-        if (webpAnim && ab != null && (active || pbmp == null)) {
+        if (webpCapable && ab != null && (active || pbmp == null)) {
             TgAnimatedWebp(ab, active, scale == ContentScale.Crop, Modifier.fillMaxSize())
-        } else if (fb != null && active && d.isVideo) {
+        } else if (fb != null && active && useVideo) {
             // Video va rasm bir xil o'lchamda (ikki xil kesilib "ikki oyna" bo'lmasin); birinchi kadrdan keyin rasm yashiriladi.
             LoopingVideo(fb, "tg_${d.id}", Modifier.fillMaxSize(), zoom = scale == ContentScale.Crop, onFirstFrame = { rendered = true })
             if (pbmp != null && !rendered) Image(pbmp, null, Modifier.fillMaxSize(), contentScale = scale)
@@ -130,6 +137,39 @@ fun TgItem(d: TgDoc, modifier: Modifier = Modifier, full: Boolean = false, scale
             Text(d.emoji, fontSize = 26.sp, fontFamily = TgEmojiFont, color = Color.White, modifier = Modifier.align(Alignment.Center))
         }
     }
+}
+
+/**
+ * Ro'yxat surilayotganda animatsiyalar to'xtaydi, to'xtagach 0,25 s dan keyin qaytadi (kuchsiz telefon qotmasligi uchun).
+ */
+@Composable
+fun rememberSettled(scrolling: () -> Boolean): Boolean {
+    var settled by remember { mutableStateOf(true) }
+    LaunchedEffect(Unit) {
+        androidx.compose.runtime.snapshotFlow(scrolling).collectLatest { s ->
+            if (s) settled = false else { kotlinx.coroutines.delay(250); settled = true }
+        }
+    }
+    return settled
+}
+
+/**
+ * Ekran markaziga eng yaqin `rows` ta qatordagi elementlar raqamlari (kalit: `<prefix><to'plam>:<id>` yoki `<prefix><id>`).
+ */
+fun centerRowIds(vis: List<androidx.compose.foundation.lazy.grid.LazyGridItemInfo>, center: Int, rows: Int, prefix: String): Set<Long> {
+    val items = vis.filter { (it.key as? String)?.startsWith(prefix) == true }
+    if (items.isEmpty()) return emptySet()
+    val ys = items.map { it.offset.y }.distinct().sorted()
+    fun mid(y: Int) = y + (items.first { it.offset.y == y }.size.height / 2)
+    val k = ys.indices.minByOrNull { kotlin.math.abs(mid(ys[it]) - center) } ?: 0
+    val chosen = if (rows <= 1) listOf(ys[k])
+    else if (center >= mid(ys[k]) && k + 1 < ys.size) listOf(ys[k], ys[k + 1])
+    else if (k - 1 >= 0) listOf(ys[k - 1], ys[k])
+    else listOf(ys[k])
+    return items.filter { it.offset.y in chosen }.mapNotNull { v ->
+        val key = v.key as String
+        key.substringAfter(':', key.removePrefix(prefix)).toLongOrNull()?.takeIf { it > 0 }
+    }.toSet()
 }
 
 /** Oldindan tayyorlangan animatsiyali WebP. `play = false` — birinchi kadr (to'xtatilgan). */
@@ -221,16 +261,12 @@ fun TgAccountPage(kind: String) {
         var i = 0
         sets.map { s -> Sec(s.id, i).also { i += 1 + (st.docs[s.id]?.size ?: s.count) } }
     }
-    // Faqat ekrandagi O'RTA ikki qator animatsiya qiladi (qolganlari — rasm).
+    // Ekran o'rtasidagi qatorlar animatsiya qiladi (kuchsiz telefonda 1 ta, boshqasida 2 ta); surilayotganda hammasi to'xtaydi.
+    val settled = rememberSettled { grid.isScrollInProgress }
     val midRows by remember {
         derivedStateOf {
-            val vis = grid.layoutInfo.visibleItemsInfo.filter { val k = it.key as? String; k != null && (k.startsWith("si") || k.startsWith("g") && !k.startsWith("gh")) }
-            val ys = vis.map { it.offset.y }.distinct().sorted()
-            val mid = if (ys.size <= 2) ys else listOf(ys[ys.size / 2 - 1], ys[ys.size / 2])
-            vis.filter { it.offset.y in mid }.mapNotNull { v ->
-                val k = v.key as String
-                (if (k.contains(':')) k.substringAfter(':') else k.removePrefix("g")).toLongOrNull()?.takeIf { it > 0 }
-            }.toSet()
+            val li = grid.layoutInfo
+            centerRowIds(li.visibleItemsInfo, (li.viewportStartOffset + li.viewportEndOffset) / 2, uz.arumediatv.com.data.TgPerf.rows, "si")
         }
     }
     val current by remember { derivedStateOf { sections.lastOrNull { it.index <= grid.firstVisibleItemIndex }?.id } }
@@ -258,7 +294,7 @@ fun TgAccountPage(kind: String) {
             }
         } else if (st.sets == null && st.gifs == null) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { androidx.compose.material3.CircularProgressIndicator(color = pal, modifier = Modifier.size(28.dp), strokeWidth = 2.dp) }
-        } else androidx.compose.runtime.CompositionLocalProvider(LocalTgPlay provides midRows) { LazyVerticalGrid(
+        } else androidx.compose.runtime.CompositionLocalProvider(LocalTgPlay provides (if (settled) midRows else emptySet())) { LazyVerticalGrid(
             GridCells.Fixed(cols), Modifier.fillMaxSize(), state = grid,
             contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = 84.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -332,51 +368,73 @@ fun TgShadow(st: TgSetsState, s: TgSet) {
     Box(Modifier.aspectRatio(1f).padding(6.dp).clip(RoundedCornerShape(12.dp)).background(Color.White.copy(alpha = 0.06f)))
 }
 
-/** GIF sahifasi: o'lchamiga qarab katta-kichik joylashadi (2 ustun), ekran o'rtasidagi qatorgina harakatlanadi, atrofi oldindan tayyorlanadi. */
-@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+private class GifRow(val items: List<TgDoc>, val h: Float)
+
+/** Telegramdagidek: har qatorda 2–3 ta GIF, balandligi bir xil, eni o'lchamiga (nisbatiga) qarab turlicha; qator to'liq kenglikni egallaydi. */
+private fun gifRows(g: List<TgDoc>, width: Float, gap: Float, target: Float): List<GifRow> {
+    val rows = ArrayList<GifRow>()
+    var cur = ArrayList<TgDoc>()
+    var sum = 0f
+    fun h() = (width - gap * (cur.size - 1)) / sum
+    for (d in g) {
+        cur += d; sum += d.ratio
+        if (cur.size >= 3 || h() <= target) { rows += GifRow(cur, h()); cur = ArrayList(); sum = 0f }
+    }
+    if (cur.isNotEmpty()) rows += GifRow(cur, minOf(h(), target * 1.3f))
+    return rows
+}
+
+/** GIF sahifasi: o'lchamiga qarab 2–3 tadan qator, ekran o'rtasidagi qatorgina harakatlanadi, atrofi oldindan tayyorlanadi. */
 @Composable
 fun TgGifPage() {
     val st = rememberTgSets("gifs")
     val store = AppServices.tgStickers
-    val grid = androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState()
+    val list = androidx.compose.foundation.lazy.rememberLazyListState()
     var preview by remember { mutableStateOf<TgDoc?>(null) }
     val g = st.gifs.orEmpty()
-    val play by remember {
-        derivedStateOf {
-            val li = grid.layoutInfo
-            val c = (li.viewportStartOffset + li.viewportEndOffset) / 2
-            li.visibleItemsInfo.filter { it.offset.y <= c && c <= it.offset.y + it.size.height }
-                .mapNotNull { (it.key as? String)?.removePrefix("g")?.toLongOrNull() }.toSet()
-        }
-    }
-    // Oldindan tayyorlash: ko'rinib turganlar, keyin pastdagi 10 ta va tepadagi 6 ta (rasm + video fayli diskka tushadi).
-    LaunchedEffect(g) {
-        androidx.compose.runtime.snapshotFlow {
-            val v = grid.layoutInfo.visibleItemsInfo
-            if (v.isEmpty()) 0 to 0 else v.minOf { it.index } to v.maxOf { it.index }
-        }.collectLatest { (a, b) ->
-            if (g.isEmpty()) return@collectLatest
-            val order = (a..b) + ((b + 1)..(b + 10)) + ((a - 1) downTo (a - 6))
-            for (i in order) g.getOrNull(i)?.let { store.prefetch(it) }
-        }
-    }
     val pal = Color(0xFF8E8E93)
-    Box(Modifier.fillMaxSize()) {
+    val gap = 4f
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize().padding(horizontal = 8.dp)) {
+        val widthDp = maxWidth.value
+        val rows = remember(g, widthDp) { if (g.isEmpty()) emptyList() else gifRows(g, widthDp, gap, 150f) }
+        val rowsNow = androidx.compose.runtime.rememberUpdatedState(rows)
+        val settled = rememberSettled { list.isScrollInProgress }
+        val play by remember {
+            derivedStateOf {
+                val li = list.layoutInfo
+                val c = (li.viewportStartOffset + li.viewportEndOffset) / 2
+                val vis = li.visibleItemsInfo
+                val hit = vis.firstOrNull { it.offset <= c && c <= it.offset + it.size } ?: vis.minByOrNull { kotlin.math.abs(it.offset + it.size / 2 - c) }
+                hit?.let { rowsNow.value.getOrNull(it.index)?.items?.map { d -> d.id }?.toSet() } ?: emptySet()
+            }
+        }
+        // Oldindan tayyorlash: ko'rinib turgan qatorlar, keyin pastdagi 3 va tepadagi 2 qator (rasm + animatsiyali WebP diskka tushadi).
+        LaunchedEffect(rows) {
+            androidx.compose.runtime.snapshotFlow {
+                val v = list.layoutInfo.visibleItemsInfo
+                if (v.isEmpty()) 0 to 0 else v.minOf { it.index } to v.maxOf { it.index }
+            }.collectLatest { (a, b) ->
+                if (rows.isEmpty()) return@collectLatest
+                val order = (a..b) + ((b + 1)..(b + 3)) + ((a - 1) downTo (a - 2))
+                for (i in order) rows.getOrNull(i)?.items?.forEach { store.prefetch(it) }
+            }
+        }
         if (st.gifs == null && !st.failed) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { androidx.compose.material3.CircularProgressIndicator(color = pal, modifier = Modifier.size(28.dp), strokeWidth = 2.dp) }
         } else if (g.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text("Telegram hisobingizda saqlangan GIF yo'q.", color = pal, fontSize = 14.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
             }
-        } else androidx.compose.runtime.CompositionLocalProvider(LocalTgPlay provides play) {
-            androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid(
-                androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells.Fixed(2), Modifier.fillMaxSize(), state = grid,
-                contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 84.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp), verticalItemSpacing = 4.dp,
-            ) {
-                items(g.size, key = { "g${g[it].id}" }) { i ->
-                    Box(Modifier.fillMaxWidth().aspectRatio(g[i].ratio).clip(RoundedCornerShape(10.dp)).clickable { preview = g[i] }) {
-                        TgItem(g[i], Modifier.fillMaxSize(), scale = ContentScale.Crop)
+        } else androidx.compose.runtime.CompositionLocalProvider(LocalTgPlay provides (if (settled) play else emptySet())) {
+            androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(top = 6.dp, bottom = 84.dp), verticalArrangement = Arrangement.spacedBy(gap.dp)) {
+                items(rows.size, key = { rows[it].items.first().id }) { i ->
+                    val r = rows[i]
+                    Row(Modifier.fillMaxWidth().height(r.h.dp), horizontalArrangement = Arrangement.spacedBy(gap.dp)) {
+                        r.items.forEach { d ->
+                            Box(Modifier.width((d.ratio * r.h).dp).fillMaxHeight().clip(RoundedCornerShape(10.dp)).clickable { preview = d }) {
+                                TgItem(d, Modifier.fillMaxSize(), scale = ContentScale.Crop)
+                            }
+                        }
                     }
                 }
             }

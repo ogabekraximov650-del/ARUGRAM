@@ -28,6 +28,8 @@ data class TgDoc(val id: Long, val hash: Long, val ref: String, val dc: Int, val
     val ratio: Float get() = if (w > 0 && h > 0) (w.toFloat() / h).coerceIn(0.6f, 2.2f) else 1f
     /** `.tgs`: oldindan animatsiyali WebP'ga aylantiriladi. */
     val isTgs: Boolean get() = kind == "tgs"
+    /** GIF (mp4/gif): ham oldindan animatsiyali WebP'ga aylantiriladi. */
+    val isGifLike: Boolean get() = kind == "mp4" || kind == "gif"
     /** Qurilma o'zi ko'rsata oladigan to'liq fayl: webm/mp4/gif/webp. `.tgs` — hozircha faqat kichik rasm. */
     val playable: Boolean get() = kind == "webm" || kind == "mp4" || kind == "gif" || kind == "webp"
     val isVideo: Boolean get() = kind == "webm" || kind == "mp4" || kind == "gif"
@@ -36,10 +38,11 @@ data class TgDoc(val id: Long, val hash: Long, val ref: String, val dc: Int, val
 data class TgSet(val id: Long, val hash: Long, val title: String, val count: Int, val thumbDoc: Long, val thumbVer: Int = 0, val thumbDc: Int = 2)
 
 class TgStickerStore(ctx: Context) {
-    private val lowRam = (ctx.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager).let { it.isLowRamDevice || it.memoryClass <= 128 }
+    init { TgPerf.init(ctx) }
+    private val lowRam = TgPerf.tier == 0
     private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.Default)
     /** Aylantirish bir vaqtda: kuchsiz telefonda 1 ta, boshqasida 2 ta. */
-    private val convGate = Semaphore(if (lowRam) 1 else 2)
+    private val convGate = Semaphore(TgPerf.convertJobs)
     private val animMem = object : LruCache<Long, ByteArray>(if (lowRam) 3 * 1024 * 1024 else 8 * 1024 * 1024) { override fun sizeOf(k: Long, v: ByteArray) = v.size }
     private val animJobs = ConcurrentHashMap<Long, kotlinx.coroutines.Deferred<ByteArray?>>()
     private val interest = ConcurrentHashMap<Long, java.util.concurrent.atomic.AtomicInteger>()
@@ -211,7 +214,7 @@ class TgStickerStore(ctx: Context) {
      * Hech kim kutmay qolsa (katak ekrandan ketgan) navbatdagi ish o'tkazib yuboriladi. Bo'lmasa `null`.
      */
     suspend fun anim(d: TgDoc): ByteArray? {
-        if (!d.isTgs) return null
+        if (!d.isTgs && !d.isGifLike) return null
         animMem.get(d.id)?.let { return it }
         val f = File(dir, "a_${d.id}")
         val bad = File(dir, "a_${d.id}.x")
@@ -229,7 +232,7 @@ class TgStickerStore(ctx: Context) {
                         convGate.withPermit {
                             if (counter.get() <= 0) return@withPermit null
                             val src = bytes(d, false) ?: return@withPermit null
-                            val webp = TgAnim.tgsToWebp(src)
+                            val webp = if (d.isTgs) TgAnim.tgsToWebp(src) else TgAnim.videoToWebp(src, dir)
                             if (webp == null) { runCatching { bad.writeBytes(ByteArray(1)) }; return@withPermit null }
                             runCatching { f.writeBytes(SecureStore.seal(webp)) }
                             animMem.put(d.id, webp)
@@ -245,7 +248,7 @@ class TgStickerStore(ctx: Context) {
     /** Oldindan tayyorlash: kichik rasm va (GIF/webm uchun) to'liq fayl diskka tushadi. */
     suspend fun prefetch(d: TgDoc) {
         poster(d)
-        if (d.isVideo) bytes(d, false)
+        if (d.isGifLike && android.os.Build.VERSION.SDK_INT >= 28) anim(d) else if (d.isVideo) bytes(d, false)
     }
 
     /** Tizim xotirani tozalashni so'raganda. */

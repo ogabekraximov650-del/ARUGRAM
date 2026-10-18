@@ -15,11 +15,10 @@ import java.util.zip.GZIPInputStream
  * (`ImageDecoder`, Android 9+) o'ynaydi. Bir marta tayyorlanadi, diskda saqlanadi.
  */
 object TgAnim {
-    private const val SIZE = 192
-    private const val FPS = 20
-    private const val MAX_FRAMES = 72
-
     fun tgsToWebp(tgs: ByteArray): ByteArray? = runCatching {
+        val SIZE = TgPerf.tgsSize
+        val FPS = TgPerf.tgsFps
+        val MAX_FRAMES = TgPerf.tgsMaxFrames
         val json = GZIPInputStream(ByteArrayInputStream(tgs)).use { String(it.readBytes(), Charsets.UTF_8) }
         val comp = LottieCompositionFactory.fromJsonStringSync(json, null).value ?: return null
         val durMs = comp.duration.coerceAtLeast(100f)
@@ -43,6 +42,45 @@ object TgAnim {
         bmp.recycle()
         mux(frames, SIZE, SIZE, delay)
     }.getOrNull()
+
+    /**
+     * GIF (mp4) -> animatsiyali WebP: kadrlar `MediaMetadataRetriever` bilan olinadi (butun davomiylik bo'ylab tekis).
+     * Video dekoder o'rniga tayyor kadrlar o'ynaydi.
+     */
+    fun videoToWebp(src: ByteArray, tmpDir: java.io.File): ByteArray? {
+        val tmp = java.io.File(tmpDir, "v_${System.nanoTime()}.mp4")
+        val mmr = android.media.MediaMetadataRetriever()
+        return try {
+            tmp.writeBytes(src)
+            mmr.setDataSource(tmp.absolutePath)
+            val durMs = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: return null
+            if (durMs <= 0) return null
+            val n = Math.round(durMs / 1000f * 12f).coerceIn(2, TgPerf.gifMaxFrames)
+            val first = mmr.getFrameAtTime(0, android.media.MediaMetadataRetriever.OPTION_CLOSEST) ?: return null
+            val k = minOf(1f, TgPerf.gifMaxSide.toFloat() / maxOf(first.width, first.height))
+            val w = (first.width * k).toInt().coerceAtLeast(2) and 1.inv()
+            val h = (first.height * k).toInt().coerceAtLeast(2) and 1.inv()
+            val frames = ArrayList<ByteArray>(n)
+            for (i in 0 until n) {
+                val t = durMs * 1000L * i / n
+                val raw = if (i == 0) first else mmr.getFrameAtTime(t, android.media.MediaMetadataRetriever.OPTION_CLOSEST) ?: continue
+                val sc = if (raw.width == w && raw.height == h) raw else Bitmap.createScaledBitmap(raw, w, h, true)
+                val o = ByteArrayOutputStream(16 * 1024)
+                @Suppress("DEPRECATION")
+                sc.compress(if (Build.VERSION.SDK_INT >= 30) Bitmap.CompressFormat.WEBP_LOSSY else Bitmap.CompressFormat.WEBP, 70, o)
+                frames += o.toByteArray()
+                if (sc !== raw) sc.recycle()
+                if (raw !== first || i > 0) raw.recycle()
+            }
+            first.recycle()
+            if (frames.size < 2) null else mux(frames, w, h, (durMs / frames.size).toInt().coerceIn(40, 500))
+        } catch (_: Throwable) {
+            null
+        } finally {
+            runCatching { mmr.release() }
+            tmp.delete()
+        }
+    }
 
     private fun le(o: ByteArrayOutputStream, v: Int, bytes: Int) { for (k in 0 until bytes) o.write((v shr (8 * k)) and 0xFF) }
 
