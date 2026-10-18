@@ -3,8 +3,13 @@ struct Globals {
     cam_pos: vec4<f32>,
     sun_dir: vec4<f32>,
     fog: vec4<f32>,
+    light_vp: mat4x4<f32>,
 };
 @group(0) @binding(0) var<uniform> g: Globals;
+@group(0) @binding(1) var shadow_map: texture_depth_2d;
+@group(0) @binding(2) var shadow_smp: sampler_comparison;
+
+const SHADOW_SIZE: f32 = 2048.0;
 
 struct VIn {
     @location(0) pos: vec3<f32>,
@@ -31,12 +36,33 @@ fn vs_main(v: VIn) -> VOut {
     return o;
 }
 
+@vertex
+fn vs_shadow(v: VIn) -> @builtin(position) vec4<f32> {
+    let w = v.pos * v.i_scale.xyz + v.i_pos.xyz;
+    return g.light_vp * vec4<f32>(w, 1.0);
+}
+
 @fragment
 fn fs_main(i: VOut) -> @location(0) vec4<f32> {
     let n = normalize(i.normal);
     let lambert = max(dot(n, -g.sun_dir.xyz), 0.0);
+
+    // soya: 3x3 PCF
+    let ls = g.light_vp * vec4<f32>(i.world + n * 0.06, 1.0);
+    let uv = vec2<f32>(ls.x * 0.5 + 0.5, 1.0 - (ls.y * 0.5 + 0.5));
+    let texel = 1.0 / SHADOW_SIZE;
+    var sh = 0.0;
+    for (var ox = -1; ox <= 1; ox = ox + 1) {
+        for (var oy = -1; oy <= 1; oy = oy + 1) {
+            let o = vec2<f32>(f32(ox), f32(oy)) * texel;
+            sh = sh + textureSampleCompare(shadow_map, shadow_smp, clamp(uv + o, vec2<f32>(0.001), vec2<f32>(0.999)), ls.z);
+        }
+    }
+    sh = sh / 9.0;
+    let inside = select(0.0, 1.0, uv.x > 0.0 && uv.x < 1.0 && uv.y > 0.0 && uv.y < 1.0 && ls.z < 1.0);
+    let shadow = mix(1.0, sh, inside);
     let hemi = 0.5 + 0.5 * n.y;
-    let light = 0.30 + 0.25 * hemi + 0.75 * lambert;
+    let light = 0.30 + 0.25 * hemi + 0.75 * lambert * shadow;
     var col = i.color.rgb * light;
 
     // zamin to'ri: 2 m li katakchalar

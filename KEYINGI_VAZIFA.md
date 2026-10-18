@@ -6592,3 +6592,8 @@ Nega: PUBG darajasiga bosqichma-bosqich (low-poly → realistik, keyin botlar/zo
 - `hud.rs`: kichik xarita (zona, keyingi doira, yo'nalish), zona taymeri, qurol uyalari, zaxira magazinlar, zonadan tashqarida ko'k parda.
 - **Sozlamalar** (tepada tishli g'ildirak): o'yin to'xtaydi, otish/sakrash/almashtirish tugmalarini sudrab joylashtirish, o'lchamni −/+ bilan o'zgartirish, qayta tiklash, ✓ tayyor. Joylashuv o'ng-pastki burchakdan dp masofada (`input.rs: Layout`), Kotlin `SharedPreferences("aru_game")` da saqlanadi (`MainActivity.saveLayoutIfChanged`, JNI `nativeTakeLayout/nativeSetLayout`); noto'g'ri qiymat dvigatelda rad etiladi.
 - Imzo: `ci/release.keystore` (doimiy kalit).
+
+### 4-bosqich (ARUGAME): sozlamalarda xarita/joystik, soya, daraxtlar; botlar o'chirildi
+- Sozlamalarda endi joystik va kichik xaritani ham sudrab ko'chirish mumkin (`input.rs: Layout.stick/map`, 11 ta son saqlanadi; eski 7 talik saqlangan format ham o'qiladi). Joystik doirasi ichida bosilsa u joyida qo'zg'almas, tashqarida (chap yarim) — bosilgan joyda.
+- Botlar o'chirildi (`game.rs: BOT_COUNT = 0`; mantiq saqlangan, qayta yoqish uchun sonni oshirish kifoya).
+- Grafika: quyosh soyasi (2048² soya xaritasi, 3x3 PCF, o'yinchi atrofida ±48 m, piksel yaxlitlash), daraxtlar (`renderer.rs`, `shader.wgsl`, `world.rs`). Dinamik jismlar (ustunlar, narsalar) soya tashlamaydi.

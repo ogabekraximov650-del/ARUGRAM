@@ -62,6 +62,13 @@ fn line(out: &mut Vec<HudVertex>, a: Vec2, b: Vec2, w: f32, col: [f32; 4]) {
     push_tri(out, a + n, b - n, a - n, col);
 }
 
+fn ring_rect(out: &mut Vec<HudVertex>, tl: Vec2, size: f32, w: f32, col: [f32; 4]) {
+    rect_tl(out, tl.x - w, tl.y - w, size + 2.0 * w, w, col);
+    rect_tl(out, tl.x - w, tl.y + size, size + 2.0 * w, w, col);
+    rect_tl(out, tl.x - w, tl.y, w, size, col);
+    rect_tl(out, tl.x + size, tl.y, w, size, col);
+}
+
 fn rect_tl(out: &mut Vec<HudVertex>, x: f32, y: f32, w: f32, h: f32, col: [f32; 4]) {
     rect(out, Vec2::new(x + w * 0.5, y + h * 0.5), Vec2::new(w * 0.5, h * 0.5), col);
 }
@@ -106,11 +113,44 @@ fn action_buttons(v: &mut Vec<HudVertex>, g: &Game, highlight: bool) {
     }
 }
 
+
+fn minimap(v: &mut Vec<HudVertex>, g: &Game) {
+    let d = g.density;
+    // kichik xarita (yuqori o'ng): ko'rinadigan maydon ±72 m
+    let (tl, msz) = g.input.map_rect();
+    let (mx, my) = (tl.x, tl.y);
+    let k = msz / 144.0;
+    let mc = Vec2::new(mx + msz * 0.5, my + msz * 0.5);
+    rect_tl(v, mx, my, msz, msz, [0.0, 0.0, 0.0, 0.4]);
+    let wh = crate::input::WORLD_HALF * k;
+    rect(v, mc, Vec2::splat(wh), [0.35, 0.6, 0.3, 0.45]);
+    let to_map = |x: f32, z: f32| mc + Vec2::new(x, z) * k;
+    let z = &g.zone;
+    ring(v, to_map(z.center.x, z.center.y), (z.radius * k).max(2.0 * d), 1.6 * d, [0.3, 0.5, 1.0, 0.95]);
+    if !z.finished {
+        ring(v, to_map(z.next_center.x, z.next_center.y), (z.next_radius * k).max(2.0 * d), 1.2 * d, [1.0, 1.0, 1.0, 0.95]);
+    }
+    let pm = to_map(g.camera.pos.x, g.camera.pos.z);
+    let f = g.camera.forward();
+    let fd = Vec2::new(f.x, f.z).normalize_or_zero();
+    let side = Vec2::new(-fd.y, fd.x);
+    push_tri(v, pm + fd * 6.0 * d, pm - fd * 4.0 * d + side * 4.0 * d, pm - fd * 4.0 * d - side * 4.0 * d, [1.0, 0.9, 0.2, 1.0]);
+    // zona taymeri: kutish — oq, qisqarish — qizil
+    let (zx, zy) = (mx, my + msz + 6.0 * d);
+    rect_tl(v, zx, zy, msz, 6.0 * d, [0.0, 0.0, 0.0, 0.45]);
+    let zc = if z.shrinking { [1.0, 0.3, 0.25, 0.95] } else { [1.0, 1.0, 1.0, 0.95] };
+    rect_tl(v, zx, zy, msz * z.progress(), 6.0 * d, zc);
+
+}
+
 /// Sozlamalar rejimi: tugmalarni sudrab joylashtirish.
 fn settings_overlay(v: &mut Vec<HudVertex>, g: &Game) {
     let (w, h, d) = (g.width as f32, g.height as f32, g.density);
     rect_tl(v, 0.0, 0.0, w, h, [0.0, 0.0, 0.0, 0.62]);
     action_buttons(v, g, true);
+    minimap(v, g);
+    let (tl, msz) = g.input.map_rect();
+    ring_rect(v, tl, msz, 3.0 * d, [1.0, 0.85, 0.2, 0.95]);
     for (act, c, r) in g.input.settings_controls() {
         disc(v, c, r, [1.0, 1.0, 1.0, 0.18]);
         ring(v, c, r, 2.0 * d, [1.0, 1.0, 1.0, 0.7]);
@@ -132,9 +172,12 @@ fn settings_overlay(v: &mut Vec<HudVertex>, g: &Game) {
             }
         }
     }
-    // joystik uchun namuna (chap yarim ekran: istalgan joyda ishlaydi)
-    let sc = Vec2::new(w * 0.17, h * 0.72);
-    ring(v, sc, 56.0 * d, 2.0 * d, [1.0, 1.0, 1.0, 0.35]);
+    // joystik (sudrab joylashtiriladi)
+    let (sc, sr) = g.input.stick_home();
+    disc(v, sc, sr, [1.0, 1.0, 1.0, 0.10]);
+    ring(v, sc, sr, 2.0 * d, [1.0, 1.0, 1.0, 0.45]);
+    disc(v, sc, sr * 0.42, [1.0, 1.0, 1.0, 0.4]);
+    ring(v, sc, sr + 6.0 * d, 3.0 * d, [1.0, 0.85, 0.2, 0.95]);
 }
 
 /// HUD uchlarini yig'adi (piksel koordinatalarida).
@@ -155,11 +198,8 @@ pub fn build(g: &Game) -> Vec<HudVertex> {
     }
 
     // joystik
-    let (origin, knob, radius) = input.stick_visual().unwrap_or((
-        Vec2::new(w * 0.17, h * 0.72),
-        Vec2::new(w * 0.17, h * 0.72),
-        56.0 * d,
-    ));
+    let (home, hr) = input.stick_home();
+    let (origin, knob, radius) = input.stick_visual().unwrap_or((home, home, hr));
     let a = if input.stick_visual().is_some() { 1.0 } else { 0.45 };
     disc(&mut v, origin, radius, [1.0, 1.0, 1.0, 0.10 * a]);
     ring(&mut v, origin, radius, 2.0 * d, [1.0, 1.0, 1.0, 0.45 * a]);
@@ -219,30 +259,7 @@ pub fn build(g: &Game) -> Vec<HudVertex> {
         rect_tl(&mut v, 0.0, 0.0, w, h, [0.1, 0.3, 1.0, 0.22]);
     }
 
-    // kichik xarita (yuqori o'ng): ko'rinadigan maydon ±72 m
-    let msz = 120.0 * d;
-    let (mx, my) = (w - msz - 16.0 * d, 16.0 * d);
-    let k = msz / 144.0;
-    let mc = Vec2::new(mx + msz * 0.5, my + msz * 0.5);
-    rect_tl(&mut v, mx, my, msz, msz, [0.0, 0.0, 0.0, 0.4]);
-    let wh = crate::input::WORLD_HALF * k;
-    rect(&mut v, mc, Vec2::splat(wh), [0.35, 0.6, 0.3, 0.45]);
-    let to_map = |x: f32, z: f32| mc + Vec2::new(x, z) * k;
-    let z = &g.zone;
-    ring(&mut v, to_map(z.center.x, z.center.y), (z.radius * k).max(2.0 * d), 1.6 * d, [0.3, 0.5, 1.0, 0.95]);
-    if !z.finished {
-        ring(&mut v, to_map(z.next_center.x, z.next_center.y), (z.next_radius * k).max(2.0 * d), 1.2 * d, [1.0, 1.0, 1.0, 0.95]);
-    }
-    let pm = to_map(g.camera.pos.x, g.camera.pos.z);
-    let f = g.camera.forward();
-    let fd = Vec2::new(f.x, f.z).normalize_or_zero();
-    let side = Vec2::new(-fd.y, fd.x);
-    push_tri(&mut v, pm + fd * 6.0 * d, pm - fd * 4.0 * d + side * 4.0 * d, pm - fd * 4.0 * d - side * 4.0 * d, [1.0, 0.9, 0.2, 1.0]);
-    // zona taymeri: kutish — oq, qisqarish — qizil
-    let (zx, zy) = (mx, my + msz + 6.0 * d);
-    rect_tl(&mut v, zx, zy, msz, 6.0 * d, [0.0, 0.0, 0.0, 0.45]);
-    let zc = if z.shrinking { [1.0, 0.3, 0.25, 0.95] } else { [1.0, 1.0, 1.0, 0.95] };
-    rect_tl(&mut v, zx, zy, msz * z.progress(), 6.0 * d, zc);
+    minimap(&mut v, g);
 
     // o'ldirilgan botlar: sariq kvadratchalar (tepa o'rtada)
     let n = g.kills.min(20) as f32;

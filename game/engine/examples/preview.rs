@@ -36,8 +36,6 @@ fn main() {
     // 0) boshlang'ich; 1) bot oldida + otish; 2) yurish va sakrash
     for shot in 0..4 {
         if shot == 1 {
-            g.bots[0].pos = glam::Vec3::new(1.5, 0.0, 2.0);
-            g.bots[1].pos = glam::Vec3::new(-6.0, 0.0, 0.0);
             let (fc, _) = g.input.fire_button();
             g.touch(TouchAction::Down, 3, fc.x, fc.y);
             g.update(1.0 / 60.0);

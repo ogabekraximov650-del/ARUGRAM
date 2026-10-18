@@ -53,7 +53,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Choreographer.FrameCall
     private fun loadLayout() {
         val s = prefs.getString("layout", null) ?: return
         val a = s.split(',').mapNotNull { it.toFloatOrNull() }
-        if (a.size == 7) NativeBridge.nativeSetLayout(ptr, a.toFloatArray())
+        if (a.size == 7 || a.size == 11) NativeBridge.nativeSetLayout(ptr, a.toFloatArray())
     }
 
     private fun saveLayoutIfChanged() {

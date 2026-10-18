@@ -55,6 +55,19 @@ pub fn build() -> Vec<Instance> {
         let c = palette[(r.next() * palette.len() as f32) as usize % palette.len()];
         v.push(boxi(x, z, sx, sy, sz, c));
     }
+    // daraxtlar: tanasi + 2 qavat yaproq
+    for _ in 0..45 {
+        let x = (r.next() - 0.5) * 90.0;
+        let z = (r.next() - 0.5) * 90.0;
+        if x.abs() < 6.0 && z.abs() < 10.0 {
+            continue;
+        }
+        let h = 1.6 + r.next() * 1.4;
+        v.push(boxi(x, z, 0.35, h, 0.35, [0.45, 0.30, 0.18]));
+        let g = 0.45 + r.next() * 0.25;
+        v.push(Instance { pos: [x, h + 0.7, z, 0.0], scale: [2.0, 1.4, 2.0, 0.0], color: [0.2, g, 0.22, 0.0] });
+        v.push(Instance { pos: [x, h + 1.7, z, 0.0], scale: [1.2, 1.2, 1.2, 0.0], color: [0.22, g + 0.08, 0.25, 0.0] });
+    }
     // markaziy belgi: baland ustun
     v.push(boxi(0.0, -10.0, 1.5, 6.0, 1.5, [0.95, 0.35, 0.30]));
     v

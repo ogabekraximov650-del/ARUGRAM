@@ -9,6 +9,7 @@ use wgpu::util::DeviceExt;
 
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 pub const MAX_DYNAMIC: usize = 512;
+pub const SHADOW_SIZE: u32 = 2048;
 pub const SKY: [f32; 3] = [0.62, 0.78, 0.93];
 
 #[repr(C)]
@@ -18,6 +19,7 @@ struct Globals {
     cam_pos: [f32; 4],
     sun_dir: [f32; 4],
     fog: [f32; 4],
+    light_vp: [[f32; 4]; 4],
 }
 
 #[repr(C)]
@@ -68,6 +70,9 @@ pub struct Renderer {
     device: wgpu::Device,
     queue: wgpu::Queue,
     scene_pipeline: wgpu::RenderPipeline,
+    shadow_pipeline: wgpu::RenderPipeline,
+    shadow_view: wgpu::TextureView,
+    shadow_bind: wgpu::BindGroup,
     hud_pipeline: wgpu::RenderPipeline,
     globals_buf: wgpu::Buffer,
     globals_bind: wgpu::BindGroup,
@@ -83,6 +88,17 @@ pub struct Renderer {
     depth_view: wgpu::TextureView,
     width: u32,
     height: u32,
+}
+
+/// Quyosh nuri matritsasi: o'yinchi atrofidagi ±48 m, soya xaritasi pikseliga yaxlitlangan (titramaydi).
+fn light_matrix(center: Vec3, sun: Vec3) -> glam::Mat4 {
+    let ext = 48.0;
+    let texel = 2.0 * ext / SHADOW_SIZE as f32;
+    let view0 = glam::Mat4::look_to_rh(Vec3::ZERO, sun, Vec3::Y);
+    let c = view0.transform_point3(center);
+    let snapped = Vec3::new((c.x / texel).round() * texel, (c.y / texel).round() * texel, c.z);
+    let proj = glam::Mat4::orthographic_rh(-ext, ext, -ext, ext, -120.0, 120.0);
+    proj * glam::Mat4::from_translation(-snapped) * view0
 }
 
 fn make_depth(device: &wgpu::Device, w: u32, h: u32) -> wgpu::TextureView {
@@ -125,6 +141,53 @@ impl Renderer {
             })
         };
         let g_layout = uniform_layout("globals");
+        let scene_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("scene"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Depth,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
+                    count: None,
+                },
+            ],
+        });
+        let shadow_tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("shadow"),
+            size: wgpu::Extent3d { width: SHADOW_SIZE, height: SHADOW_SIZE, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: DEPTH_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let shadow_view = shadow_tex.create_view(&wgpu::TextureViewDescriptor::default());
+        let shadow_smp = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("shadow"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            compare: Some(wgpu::CompareFunction::LessEqual),
+            ..Default::default()
+        });
         let s_layout = uniform_layout("screen");
 
         let globals_buf = device.create_buffer(&wgpu::BufferDescriptor {
@@ -140,7 +203,16 @@ impl Renderer {
             mapped_at_creation: false,
         });
         let globals_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("globals"),
+            label: Some("scene"),
+            layout: &scene_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: globals_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&shadow_view) },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&shadow_smp) },
+            ],
+        });
+        let shadow_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("shadow"),
             layout: &g_layout,
             entries: &[wgpu::BindGroupEntry { binding: 0, resource: globals_buf.as_entire_binding() }],
         });
@@ -161,6 +233,11 @@ impl Renderer {
 
         let scene_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("scene"),
+            bind_group_layouts: &[&scene_layout],
+            push_constant_ranges: &[],
+        });
+        let shadow_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("shadow"),
             bind_group_layouts: &[&g_layout],
             push_constant_ranges: &[],
         });
@@ -208,6 +285,40 @@ impl Renderer {
                 depth_compare: wgpu::CompareFunction::Less,
                 stencil: Default::default(),
                 bias: Default::default(),
+            }),
+            multisample: Default::default(),
+            multiview: None,
+            cache: None,
+        });
+
+        let shadow_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("shadow"),
+            layout: Some(&shadow_pl),
+            vertex: wgpu::VertexState {
+                module: &scene_sh,
+                entry_point: Some("vs_shadow"),
+                compilation_options: Default::default(),
+                buffers: &[
+                    wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<MeshVertex>() as u64,
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &mesh_attrs,
+                    },
+                    wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<Instance>() as u64,
+                        step_mode: wgpu::VertexStepMode::Instance,
+                        attributes: &inst_attrs,
+                    },
+                ],
+            },
+            fragment: None,
+            primitive: wgpu::PrimitiveState { cull_mode: Some(wgpu::Face::Back), ..Default::default() },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: Default::default(),
+                bias: wgpu::DepthBiasState { constant: 2, slope_scale: 2.0, clamp: 0.0 },
             }),
             multisample: Default::default(),
             multiview: None,
@@ -285,6 +396,9 @@ impl Renderer {
             device,
             queue,
             scene_pipeline,
+            shadow_pipeline,
+            shadow_view,
+            shadow_bind,
             hud_pipeline,
             globals_buf,
             globals_bind,
@@ -334,6 +448,7 @@ impl Renderer {
             cam_pos: [cam.pos.x, cam.pos.y, cam.pos.z, 1.0],
             sun_dir: [sun.x, sun.y, sun.z, 0.0],
             fog: [SKY[0], SKY[1], SKY[2], 0.014],
+            light_vp: light_matrix(cam.pos, sun).to_cols_array_2d(),
         };
         self.queue.write_buffer(&self.globals_buf, 0, bytemuck::bytes_of(&globals));
         self.queue.write_buffer(
@@ -349,6 +464,25 @@ impl Renderer {
         let mut enc = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("frame") });
+        {
+            let mut sp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("shadow"),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.shadow_view,
+                    depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Store }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            sp.set_pipeline(&self.shadow_pipeline);
+            sp.set_bind_group(0, &self.shadow_bind, &[]);
+            sp.set_vertex_buffer(0, self.mesh_vb.slice(..));
+            sp.set_vertex_buffer(1, self.instance_buf.slice(..));
+            sp.set_index_buffer(self.mesh_ib.slice(..), wgpu::IndexFormat::Uint16);
+            sp.draw_indexed(0..self.index_count, 0, 0..self.instance_count);
+        }
         {
             let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("main"),

@@ -11,7 +11,8 @@ const HEIGHT: f32 = 1.8;
 const GRAVITY: f32 = 22.0;
 const JUMP_SPEED: f32 = 7.5;
 pub const MAX_HP: f32 = 100.0;
-const BOT_COUNT: usize = 6;
+/// Botlar hozircha o'chirilgan (foydalanuvchi talabi); mantiq saqlangan, qayta yoqish uchun shu sonni oshiring.
+const BOT_COUNT: usize = 0;
 const PICKUP_RANGE: f32 = 1.6;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -792,7 +793,8 @@ mod tests {
     fn otish_botni_uradi() {
         let mut g = Game::new(1280, 576, 2.0);
         g.colliders.clear();
-        g.bots.truncate(1);
+        let nb = g.new_bot();
+        g.bots = vec![nb];
         g.camera.pos = Vec3::new(0.0, EYE, 0.0);
         g.camera.yaw = 0.0;
         g.camera.pitch = 0.0;
@@ -805,7 +807,8 @@ mod tests {
     fn devor_orqasidagi_botga_tegmaydi() {
         let mut g = Game::new(1280, 576, 2.0);
         g.colliders = vec![Aabb { min: Vec3::new(-3.0, 0.0, -6.0), max: Vec3::new(3.0, 5.0, -5.0) }];
-        g.bots.truncate(1);
+        let nb = g.new_bot();
+        g.bots = vec![nb];
         g.camera.pos = Vec3::new(0.0, EYE, 0.0);
         g.camera.yaw = 0.0;
         g.camera.pitch = 0.0;

@@ -25,6 +25,10 @@ pub struct Layout {
     pub jump: Vec2,
     pub switch: Vec2,
     pub scale: f32,
+    /// Joystik markazi: chap-pastki burchakdan dp.
+    pub stick: Vec2,
+    /// Kichik xarita markazi: o'ng-yuqori burchakdan dp.
+    pub map: Vec2,
 }
 
 impl Layout {
@@ -33,26 +37,41 @@ impl Layout {
         jump: Vec2::new(190.0, 60.0),
         switch: Vec2::new(100.0, 190.0),
         scale: 1.0,
+        stick: Vec2::new(120.0, 110.0),
+        map: Vec2::new(76.0, 76.0),
     };
 
-    pub fn to_array(self) -> [f32; 7] {
-        [self.fire.x, self.fire.y, self.jump.x, self.jump.y, self.switch.x, self.switch.y, self.scale]
+    pub fn to_array(self) -> [f32; 11] {
+        [
+            self.fire.x, self.fire.y, self.jump.x, self.jump.y, self.switch.x, self.switch.y, self.scale,
+            self.stick.x, self.stick.y, self.map.x, self.map.y,
+        ]
     }
 
-    /// Saqlangan qiymatlardan tiklaydi; noto'g'ri (NaN, chegaradan tashqari) bo'lsa — `None`.
+    /// Saqlangan qiymatlardan tiklaydi. 7 ta son (eski format) — joystik/xarita standart;
+    /// noto'g'ri (NaN, chegaradan tashqari) bo'lsa — `None`.
     pub fn from_slice(a: &[f32]) -> Option<Layout> {
-        if a.len() < 7 || a.iter().take(7).any(|x| !x.is_finite()) {
+        if a.len() < 7 || a.iter().any(|x| !x.is_finite()) {
             return None;
         }
         if a[..6].iter().any(|x| *x < 0.0 || *x > 2000.0) || !(0.5..=2.0).contains(&a[6]) {
             return None;
         }
-        Some(Layout {
+        let mut l = Layout {
             fire: Vec2::new(a[0], a[1]),
             jump: Vec2::new(a[2], a[3]),
             switch: Vec2::new(a[4], a[5]),
             scale: a[6],
-        })
+            ..Layout::DEFAULT
+        };
+        if a.len() >= 11 {
+            if a[7..11].iter().any(|x| *x < 0.0 || *x > 2000.0) {
+                return None;
+            }
+            l.stick = Vec2::new(a[7], a[8]);
+            l.map = Vec2::new(a[9], a[10]);
+        }
+        Some(l)
     }
 }
 
@@ -142,10 +161,28 @@ impl Input {
         (self.corner(self.layout.switch), 30.0 * self.density * self.layout.scale)
     }
 
+    /// Joystik: (markaz, radius) piksellarda.
+    pub fn stick_home(&self) -> (Vec2, f32) {
+        let d = self.density;
+        (
+            Vec2::new(self.layout.stick.x * d, self.height - self.layout.stick.y * d),
+            STICK_RADIUS_DP * d,
+        )
+    }
+
+    /// Kichik xarita: (chap-yuqori burchak, tomon) piksellarda.
+    pub fn map_rect(&self) -> (Vec2, f32) {
+        let d = self.density;
+        let size = 120.0 * d;
+        let c = Vec2::new(self.width - self.layout.map.x * d, self.layout.map.y * d);
+        (c - Vec2::splat(size * 0.5), size)
+    }
+
     /// Sozlamalar (tishli g'ildirak) tugmasi — kichik xaritaning chap tomonida.
     pub fn gear_button(&self) -> (Vec2, f32) {
         let d = self.density;
-        (Vec2::new(self.width - (120.0 + 16.0 + 34.0) * d, 36.0 * d), 20.0 * d)
+        let (tl, _) = self.map_rect();
+        (Vec2::new(tl.x - 34.0 * d, tl.y + 20.0 * d), 20.0 * d)
     }
 
     /// Sozlamalar rejimidagi boshqaruv tugmalari (tepa o'rtada).
@@ -173,7 +210,7 @@ impl Input {
     }
 
     /// O'zgargan bo'lsa saqlash uchun joylashuvni qaytaradi (bir marta).
-    pub fn take_layout(&mut self) -> Option<[f32; 7]> {
+    pub fn take_layout(&mut self) -> Option<[f32; 11]> {
         if std::mem::take(&mut self.layout_dirty) {
             Some(self.layout.to_array())
         } else {
@@ -209,12 +246,16 @@ impl Input {
                         return;
                     }
                 }
-                let btns = [self.fire_button(), self.jump_button(), self.switch_button()];
+                let btns = [self.fire_button(), self.jump_button(), self.switch_button(), self.stick_home()];
                 for (i, (c, r)) in btns.iter().enumerate() {
                     if p.distance(*c) <= *r * 1.3 {
                         self.drag = Some((id, i));
                         return;
                     }
+                }
+                let (tl, size) = self.map_rect();
+                if p.x >= tl.x && p.x <= tl.x + size && p.y >= tl.y && p.y <= tl.y + size {
+                    self.drag = Some((id, 4));
                 }
             }
             TouchAction::Move => {
@@ -224,10 +265,25 @@ impl Input {
                             ((self.width - p.x) / d).clamp(30.0, (self.width / d - 30.0).max(30.0)),
                             ((self.height - p.y) / d).clamp(30.0, (self.height / d - 30.0).max(30.0)),
                         );
+                        let maxx = (self.width / d - 30.0).max(30.0);
+                        let maxy = (self.height / d - 30.0).max(30.0);
                         match i {
                             0 => self.layout.fire = off,
                             1 => self.layout.jump = off,
-                            _ => self.layout.switch = off,
+                            2 => self.layout.switch = off,
+                            3 => {
+                                // joystik: chap-pastki burchakdan
+                                self.layout.stick = Vec2::new(
+                                    (p.x / d).clamp(60.0, maxx),
+                                    ((self.height - p.y) / d).clamp(60.0, maxy),
+                                )
+                            }
+                            _ => {
+                                self.layout.map = Vec2::new(
+                                    ((self.width - p.x) / d).clamp(60.0, maxx),
+                                    (p.y / d).clamp(60.0, maxy),
+                                )
+                            }
                         }
                         self.layout_dirty = true;
                     }
@@ -268,9 +324,12 @@ impl Input {
                     self.open_settings();
                     return;
                 }
-                if p.x < self.width * 0.5 {
+                let (home, hr) = self.stick_home();
+                if p.x < self.width * 0.5 || p.distance(home) <= hr * 2.0 {
                     if self.stick.is_none() {
-                        self.stick = Some(Stick { id, origin: p, pos: p });
+                        // joystik doirasi ichida bosilsa — joystik joyida (qo'zg'almas), tashqarida — bosilgan joyda
+                        let origin = if p.distance(home) <= hr * 2.0 { home } else { p };
+                        self.stick = Some(Stick { id, origin, pos: p });
                     }
                 } else {
                     let (fc, fr) = self.fire_button();
