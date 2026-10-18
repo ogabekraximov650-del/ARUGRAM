@@ -2,8 +2,9 @@
 //! Ishlatish: cargo run --release --example preview -- <chiqish_papkasi>
 
 use aru_game::input::TouchAction;
-use aru_game::renderer::Renderer;
+use aru_game::renderer::{Frame, Renderer};
 use aru_game::{world, Game};
+use glam::Vec3;
 
 fn main() {
     let out = std::env::args().nth(1).unwrap_or_else(|| ".".into());
@@ -16,10 +17,9 @@ fn main() {
     }))
     .expect("adapter yo'q");
     println!("GPU: {:?}", adapter.get_info());
-    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default(), None))
-        .expect("device");
+    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default(), None)).expect("device");
     let format = wgpu::TextureFormat::Rgba8Unorm;
-    let mut r = Renderer::new(device, queue, format, w, h, &world::build());
+    let mut r = Renderer::new(device, queue, format, w, h, &world::build().statics);
     let tex = r.device().create_texture(&wgpu::TextureDescriptor {
         label: Some("out"),
         size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
@@ -31,54 +31,85 @@ fn main() {
         view_formats: &[],
     });
     let view = tex.create_view(&Default::default());
+    let wd = world::build();
+    let roof = wd.statics.0[aru_game::scene::Mesh::Prism as usize][0].pos;
     let mut g = Game::new(w, h, 2.5);
+    g.zone.t = 0.0;
 
-    // 0) boshlang'ich; 1) bot oldida + otish; 2) yurish va sakrash
-    for shot in 0..5 {
-        if shot == 1 {
-            let (fc, _) = g.input.fire_button();
-            g.touch(TouchAction::Down, 3, fc.x, fc.y);
-            g.update(1.0 / 60.0);
-            g.update(1.0 / 60.0);
-        }
-        if shot == 4 {
-            g = Game::new(w, h, 2.5);
-            g.camera.pos = glam::Vec3::new(0.0, 1.45, 2.4);
-            g.camera.yaw = 0.0;
-            g.camera.pitch = -0.08;
-            g.companion.pos = glam::Vec3::new(0.0, 0.0, 0.5);
-            g.companion.yaw = std::f32::consts::PI;
-        }
-        if shot == 3 {
-            g.touch(TouchAction::Up, 1, 0.0, 0.0);
-            let (gc, _) = g.input.gear_button();
-            g.touch(TouchAction::Down, 7, gc.x, gc.y);
-            g.touch(TouchAction::Up, 7, gc.x, gc.y);
-            let (fc, _) = g.input.fire_button();
-            g.touch(TouchAction::Down, 8, fc.x, fc.y);
-            g.touch(TouchAction::Move, 8, 900.0, 250.0);
-            g.touch(TouchAction::Up, 8, 900.0, 250.0);
-        }
-        if shot == 2 {
-            g.zone.center = glam::Vec2::new(0.0, -10.0);
-            g.zone.radius = 12.0;
-            g.zone.center = glam::Vec2::new(0.0, -10.0);
-            g.zone.radius = 12.0;
-            g.touch(TouchAction::Up, 3, 0.0, 0.0);
-            g.touch(TouchAction::Down, 1, 300.0, 400.0);
-            g.touch(TouchAction::Move, 1, 300.0, 340.0);
-            for _ in 0..90 {
-                g.update(1.0 / 30.0);
+    // (nom, kamera joyi, yaw, pitch, qo'shimcha harakat)
+    for shot in [0, 8, 2, 3, 4, 5, 6, 1, 7] {
+        match shot {
+            0 => {
+                // boshlang'ich ko'rinish (to'pponcha)
+                for _ in 0..30 {
+                    g.update(1.0 / 60.0);
+                }
             }
-            let (jc, _) = g.input.jump_button();
-            g.touch(TouchAction::Down, 4, jc.x, jc.y);
-            for _ in 0..8 {
+            1 => {
+                // otish
+                let (fc, _) = g.input.fire_button();
+                g.touch(TouchAction::Down, 3, fc.x, fc.y);
                 g.update(1.0 / 60.0);
+                g.update(1.0 / 60.0);
+            }
+            2 => {
+                // qizga yaqin
+                g.touch(TouchAction::Up, 3, 0.0, 0.0);
+                g.camera.pos = Vec3::new(0.0, 1.5, 10.0);
+                g.camera.yaw = 0.0;
+                g.camera.pitch = -0.05;
+                g.companion.pos = Vec3::new(0.4, 0.0, 8.2);
+                g.companion.yaw = std::f32::consts::PI;
+            }
+            3 => {
+                // qishloq: yuqoridan
+                g.camera.pos = Vec3::new(-34.0, 9.0, 40.0);
+                g.camera.yaw = -0.55;
+                g.camera.pitch = -0.22;
+            }
+            4 => {
+                // ombor va tepaliklar tomon
+                g.camera.pos = Vec3::new(roof[0] + 9.0, 2.2, roof[2] + 9.0);
+                g.camera.yaw = 0.78;
+                g.camera.pitch = -0.08;
+            }
+            5 => {
+                // uy ichi: birinchi uyga qarab
+                g.camera.pos = Vec3::new(roof[0], 1.9, roof[2]);
+                g.camera.yaw = 0.6;
+                g.camera.pitch = -0.1;
+            }
+            6 => {
+                // avtomat bilan
+                g.slots.push(aru_game::game::Slot { kind: aru_game::game::WeaponKind::Rifle, mag: 30, reserve: 60 });
+                g.cur = 1;
+                g.camera.pos = Vec3::new(0.0, 1.7, 14.0);
+                g.camera.yaw = 0.3;
+                g.camera.pitch = 0.0;
+                for _ in 0..40 {
+                    g.update(1.0 / 60.0);
+                }
+            }
+            8 => {
+                // yuz yaqindan
+                g.touch(TouchAction::Up, 7, 0.0, 0.0);
+                g.camera.pos = Vec3::new(0.4, 1.58, 9.2);
+                g.camera.yaw = 0.0;
+                g.camera.pitch = 0.0;
+                g.companion.pos = Vec3::new(0.4, 0.0, 8.2);
+                g.companion.yaw = std::f32::consts::PI;
+            }
+            _ => {
+                // sozlamalar
+                let (gc, _) = g.input.gear_button();
+                g.touch(TouchAction::Down, 7, gc.x, gc.y);
+                g.touch(TouchAction::Up, 7, gc.x, gc.y);
             }
         }
         let hud = g.hud();
-        let (dynamic, shadow_n) = g.dynamic_instances();
-        r.render(&view, &g.camera, &hud, &dynamic, shadow_n);
+        let fd = g.frame();
+        let frame = Frame { dynamic: &fd.dynamic, dynamic_shadow: fd.dynamic_shadow, viewmodel: &fd.viewmodel, hud: &hud, time: g.time };
+        r.render(&view, &g.camera, &frame);
         let bpr = w * 4;
         let buf = r.device().create_buffer(&wgpu::BufferDescriptor {
             label: None,

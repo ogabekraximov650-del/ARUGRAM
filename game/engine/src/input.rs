@@ -9,7 +9,7 @@ const STICK_RADIUS_DP: f32 = 56.0;
 const LOOK_SENS: f32 = 0.0045;
 const MOVE_SPEED: f32 = 6.0;
 /// Xarita yarim kengligi: shundan tashqariga chiqib bo'lmaydi.
-pub const WORLD_HALF: f32 = 46.0;
+pub use crate::terrain::WORLD_HALF;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TouchAction {

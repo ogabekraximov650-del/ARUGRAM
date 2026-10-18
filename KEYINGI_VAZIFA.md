@@ -6604,3 +6604,14 @@ Nega: PUBG darajasiga bosqichma-bosqich (low-poly → realistik, keyin botlar/zo
 - Qiz (`game.rs: Companion, girl_parts`): ~45 kubdan anime uslubida (pushti ikki dumli soch, katta ko'k ko'zlar, dengizchi forma); o'yinchining o'ng-orqasida yuradi, uzoqlashsa yetib oladi/teleport qiladi, yurganda oyoq-qo'li chayqaladi.
 - Ovoz: hammasi `audio.rs` da sintez qilinadi (fayl yo'q) — 4 xil otish, qadam, qayta o'qlash, narsa olish, zarba. JNI `nativeGetSound/nativeTakeEvents`, Kotlin `SoundBank` (AudioTrack, har ovoz 3 ta ovoz-kanal). Effektlar: otish chaqnashi + tracer, tegish joyida chang.
 - Botlar o'chiq qoldi (foydalanuvchi talabi).
+
+### 6-bosqich (ARUGAME): "haqiqiydek" dunyo — relyef, qishloq, materiallar, qurol modellari, qiz
+- **Mesh turlari** (`mesh.rs`, `scene.rs`): kub, shar, silindr, konus, prizma (tom), kesik konus + relyef to'ri. Instans endi to'liq burilish (kvaterniyon) va material raqamiga ega (`Instance.rot`, `scale.w`). Winding testlari bor.
+- **Relyef** (`terrain.rs`): markaz (r<40 m) tekis, chetlari tepaliklar; balandlik formulasi o'yinchi, qiz, daraxt va narsalar uchun bir xil. O'yinchi yurishi: zina/ostona (≤0.32 m) ustiga chiqib oladi, nishabda yerga yopishadi.
+- **Dunyo** (`world.rs`, ±98 m): 2 ta asfalt yo'l (yo'lak, chiziq), ~16 ta uy (poydevor, devor, eshik tirqishi, ochiq eshik, ichi: shift/mebel/lampa, derazalar, gable tom, mo'ri), ombor (javon, qutilar), suv minorasi, mashinalar, ko'cha chiroqlari, qutilar, bochkalar, 190 ta daraxt (qarag'ay/eman/qayin), butalar, toshlar. Hammasi deterministik. Uylarga kirsa bo'ladi.
+- **Shader** (`shader.wgsl`): chiziqli rang + ACES tonemap, 16 ta protsedur material (o'tloq, g'isht, suvoq, cherepitsa, oyna aksi, asfalt, yog'och, metall, barg, teri, soch...), osmon (gradient, quyosh, bulut), soya (±60 m, PCF), tuman, Blinn yaltirash.
+- **Qurollar** (`models.rs`): to'pponcha, avtomat, shotgun, snayper — ko'p qismli birinchi shaxs modellari, qo'l va yengli; yurishda tebranish, tepish, qayta o'qlash, almashtirish animatsiyasi, og'iz chaqnashi. Alohida o'tishda chiziladi (chuqurlik tozalanadi — devorga kirib ketmaydi).
+- **Qiz** (`models.rs: girl`): ~65 qism, silliq shakllar (shar/silindr), uzun pushti soch, katta ko'zlar (pirpiraydi), dengizchi forma; oyoq-qo'l bo'g'imli yurish animatsiyasi; to'xtaganda o'yinchiga qaraydi.
+- **Qiz xatti-harakati** (`game.rs: update_companion`): o'yinchi 5 m ichida bo'lsa turadi; 5 m dan uzoqlashsa va o'yinchi yurayotgan bo'lsa — o'yinchi yurgan tomonga (oldida-yonida, orqasida emas) yuradi; o'yinchi to'xtasa yoki 3.5 m ga yetsa — to'xtaydi. Testlar bor.
+- Zona: boshlang'ich radius 140 m, 4 bosqich; devori yorug' ustunlar; kichik xarita ±150 m.
+- Botlar butunlay olib tashlangan (foydalanuvchi talabi).

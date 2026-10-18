@@ -1,7 +1,7 @@
 //! JNI ko'prigi: Kotlin (`uz.arumediatv.game.NativeBridge`) <-> dvigatel.
 
 use crate::input::TouchAction;
-use crate::renderer::Renderer;
+use crate::renderer::{Frame, Renderer};
 use crate::{world, Game};
 use jni::objects::{JClass, JObject};
 use jni::sys::{jfloat, jfloatArray, jint, jintArray, jlong, jshortArray};
@@ -86,7 +86,7 @@ fn init_app(env: &mut JNIEnv, surface: &JObject, density: f32) -> Result<App, St
     };
     wgpu_surface.configure(&device, &config);
 
-    let renderer = Renderer::new(device, queue, format, w, h, &world::build());
+    let renderer = Renderer::new(device, queue, format, w, h, &world::build().statics);
     Ok(App {
         game: Game::new(w, h, density),
         renderer,
@@ -107,8 +107,15 @@ fn frame(app: &mut App, dt: f32) {
     };
     let view = tex.texture.create_view(&wgpu::TextureViewDescriptor::default());
     let hud = app.game.hud();
-    let (dynamic, shadow_n) = app.game.dynamic_instances();
-    app.renderer.render(&view, &app.game.camera, &hud, &dynamic, shadow_n);
+    let fd = app.game.frame();
+    let frame = Frame {
+        dynamic: &fd.dynamic,
+        dynamic_shadow: fd.dynamic_shadow,
+        viewmodel: &fd.viewmodel,
+        hud: &hud,
+        time: app.game.time,
+    };
+    app.renderer.render(&view, &app.game.camera, &frame);
     tex.present();
 }
 

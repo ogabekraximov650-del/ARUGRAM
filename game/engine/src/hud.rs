@@ -119,7 +119,7 @@ fn minimap(v: &mut Vec<HudVertex>, g: &Game) {
     // kichik xarita (yuqori o'ng): ko'rinadigan maydon ±72 m
     let (tl, msz) = g.input.map_rect();
     let (mx, my) = (tl.x, tl.y);
-    let k = msz / 144.0;
+    let k = msz / 300.0;
     let mc = Vec2::new(mx + msz * 0.5, my + msz * 0.5);
     rect_tl(v, mx, my, msz, msz, [0.0, 0.0, 0.0, 0.4]);
     let wh = crate::input::WORLD_HALF * k;
@@ -217,16 +217,7 @@ pub fn build(g: &Game) -> Vec<HudVertex> {
     if g.flash > 0.0 {
         let k = g.flash / 0.07;
         line(&mut v, Vec2::new(w * 0.70, h * 0.88), c, 3.0 * d, [1.0, 0.9, 0.5, 0.8 * k]);
-        disc(&mut v, Vec2::new(w * 0.70, h * 0.88), 16.0 * d * k, [1.0, 0.85, 0.4, 0.9 * k]);
         rect_tl(&mut v, 0.0, 0.0, w, h, [1.0, 0.95, 0.8, 0.07 * k]);
-    }
-
-    // tegish belgisi
-    if g.hit_marker > 0.0 {
-        let red = [1.0, 0.25, 0.2, 0.95];
-        for (sx, sy) in [(-1.0f32, -1.0f32), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
-            rect(&mut v, c + Vec2::new(sx, sy) * 14.0 * d, Vec2::splat(2.2 * d), red);
-        }
     }
 
     action_buttons(&mut v, g, false);
@@ -268,14 +259,6 @@ pub fn build(g: &Game) -> Vec<HudVertex> {
     }
 
     minimap(&mut v, g);
-
-    // o'ldirilgan botlar: sariq kvadratchalar (tepa o'rtada)
-    let n = g.kills.min(20) as f32;
-    let sq = 10.0 * d;
-    let x0 = w * 0.5 - n * (sq + 3.0 * d) * 0.5;
-    for k in 0..g.kills.min(20) {
-        rect_tl(&mut v, x0 + k as f32 * (sq + 3.0 * d), 18.0 * d, sq, sq, [1.0, 0.85, 0.2, 0.95]);
-    }
 
     if g.dead_t > 0.0 {
         rect_tl(&mut v, 0.0, 0.0, w, h, [0.0, 0.0, 0.0, 0.6]);

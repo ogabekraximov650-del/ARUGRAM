@@ -1,58 +1,32 @@
-//! O'yin mantig'i (GPU'dan mustaqil): fizika, to'qnashuv, otish, botlar.
+//! O'yin mantig'i (GPU'dan mustaqil): fizika, to'qnashuv, otish, zona, narsalar va yonimdagi qiz.
 
-use crate::camera::Camera;
-use crate::input::{Input, TouchAction, WORLD_HALF};
-use crate::world::{self, Instance};
 use crate::audio;
-use glam::{Vec2, Vec3};
+use crate::camera::Camera;
+use crate::input::{Input, TouchAction};
+use crate::models::{self, GirlState, VmState};
+use crate::renderer::SUN_DIR;
+use crate::scene::{Aabb, Instance, Lists, Mat, Mesh, MESH_COUNT};
+use crate::terrain::{self, WORLD_HALF};
+use crate::world;
+use glam::{Quat, Vec2, Vec3};
+
+pub use crate::weapons::{Stats, WeaponKind};
 
 pub const EYE: f32 = 1.7;
 const RADIUS: f32 = 0.4;
 const HEIGHT: f32 = 1.8;
 const GRAVITY: f32 = 22.0;
 const JUMP_SPEED: f32 = 7.5;
+/// Shu balandlikkacha bo'lgan to'siq ustiga to'g'ridan-to'g'ri chiqib olinadi (zina, ostona).
+const STEP: f32 = 0.32;
 pub const MAX_HP: f32 = 100.0;
-/// Botlar hozircha o'chirilgan (foydalanuvchi talabi); mantiq saqlangan, qayta yoqish uchun shu sonni oshiring.
-const BOT_COUNT: usize = 0;
 const PICKUP_RANGE: f32 = 1.6;
+const ZONE_START: f32 = 140.0;
+const SPAWN: Vec2 = Vec2::new(0.0, 12.0);
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum WeaponKind {
-    Pistol,
-    Rifle,
-    Shotgun,
-    Sniper,
-}
-
-pub struct Stats {
-    pub body: f32,
-    pub head: f32,
-    pub cd: f32,
-    pub mag: u32,
-    pub reload: f32,
-    pub pellets: u32,
-    pub spread: f32,
-    pub recoil: f32,
-}
-
-impl WeaponKind {
-    pub fn stats(self) -> Stats {
-        match self {
-            WeaponKind::Pistol => Stats { body: 24.0, head: 48.0, cd: 0.30, mag: 12, reload: 1.2, pellets: 1, spread: 0.004, recoil: 0.010 },
-            WeaponKind::Rifle => Stats { body: 30.0, head: 60.0, cd: 0.10, mag: 30, reload: 1.8, pellets: 1, spread: 0.012, recoil: 0.008 },
-            WeaponKind::Shotgun => Stats { body: 12.0, head: 20.0, cd: 0.90, mag: 6, reload: 2.2, pellets: 8, spread: 0.06, recoil: 0.030 },
-            WeaponKind::Sniper => Stats { body: 90.0, head: 150.0, cd: 1.40, mag: 5, reload: 2.5, pellets: 1, spread: 0.0, recoil: 0.040 },
-        }
-    }
-    pub fn color(self) -> [f32; 3] {
-        match self {
-            WeaponKind::Pistol => [0.55, 0.65, 0.85],
-            WeaponKind::Rifle => [0.95, 0.55, 0.15],
-            WeaponKind::Shotgun => [0.85, 0.25, 0.25],
-            WeaponKind::Sniper => [0.2, 0.7, 0.3],
-        }
-    }
-}
+/// Qiz: o'yinchi 5 m dan uzoqlashmaguncha turadi; uzoqlashganda o'yinchi yurgan tomonga yuradi, o'yinchi to'xtasa to'xtaydi.
+const COMPANION_RANGE: f32 = 5.0;
+const COMPANION_ARRIVE: f32 = 3.5;
 
 #[derive(Clone, Copy)]
 pub struct Slot {
@@ -75,7 +49,7 @@ pub struct Pickup {
 }
 
 /// (kutish s, qisqarish s, yangi radius, soniyasiga zarar)
-const PHASES: [(f32, f32, f32, f32); 4] = [(30.0, 30.0, 45.0, 1.0), (25.0, 25.0, 28.0, 2.0), (20.0, 25.0, 14.0, 4.0), (15.0, 20.0, 5.0, 7.0)];
+const PHASES: [(f32, f32, f32, f32); 4] = [(40.0, 40.0, 90.0, 1.0), (30.0, 30.0, 55.0, 2.0), (25.0, 30.0, 30.0, 4.0), (20.0, 25.0, 12.0, 7.0)];
 const FINAL_DPS: f32 = 10.0;
 
 pub struct Zone {
@@ -95,7 +69,7 @@ impl Zone {
     fn new(rng: &mut Lcg) -> Self {
         let mut z = Self {
             center: Vec2::ZERO,
-            radius: 70.0,
+            radius: ZONE_START,
             next_center: Vec2::ZERO,
             next_radius: PHASES[0].2,
             phase: 0,
@@ -103,7 +77,7 @@ impl Zone {
             shrinking: false,
             finished: false,
             from_center: Vec2::ZERO,
-            from_radius: 70.0,
+            from_radius: ZONE_START,
         };
         z.pick_next(rng);
         z
@@ -172,44 +146,6 @@ impl Zone {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-pub struct Aabb {
-    pub min: Vec3,
-    pub max: Vec3,
-}
-
-impl Aabb {
-    fn from_instance(i: &Instance) -> Self {
-        let c = Vec3::new(i.pos[0], i.pos[1], i.pos[2]);
-        let h = Vec3::new(i.scale[0], i.scale[1], i.scale[2]) * 0.5;
-        Self { min: c - h, max: c + h }
-    }
-
-    /// Nur kesishishi (slab usuli): masofa yoki `None`.
-    pub fn ray(&self, o: Vec3, d: Vec3) -> Option<f32> {
-        let mut t0 = 0.0f32;
-        let mut t1 = f32::MAX;
-        for a in 0..3 {
-            if d[a].abs() < 1e-8 {
-                if o[a] < self.min[a] || o[a] > self.max[a] {
-                    return None;
-                }
-            } else {
-                let inv = 1.0 / d[a];
-                let (mut a0, mut a1) = ((self.min[a] - o[a]) * inv, (self.max[a] - o[a]) * inv);
-                if a0 > a1 {
-                    std::mem::swap(&mut a0, &mut a1);
-                }
-                t0 = t0.max(a0);
-                t1 = t1.min(a1);
-                if t0 > t1 {
-                    return None;
-                }
-            }
-        }
-        Some(t0)
-    }
-}
 
 struct Lcg(u32);
 impl Lcg {
@@ -219,49 +155,28 @@ impl Lcg {
     }
 }
 
-/// Yonimda yuradigan qiz (anime uslubida, kublardan yig'ilgan).
+/// Yonimdagi qiz holati.
 pub struct Companion {
     pub pos: Vec3,
     pub yaw: f32,
     pub phase: f32,
+    /// Hozirgi tezlik (m/s).
     pub speed: f32,
+    pub look_yaw: f32,
+    walking: bool,
 }
 
 impl Companion {
     fn new(pos: Vec3) -> Self {
-        Self { pos, yaw: 0.0, phase: 0.0, speed: 0.0 }
+        Self { pos, yaw: 0.0, phase: 0.0, speed: 0.0, look_yaw: 0.0, walking: false }
     }
 }
 
-pub struct Bot {
-    /// Oyoq nuqtasi.
-    pub pos: Vec3,
-    pub hp: f32,
-    pub alive: bool,
-    wander: Vec2,
-    timer: f32,
-    cooldown: f32,
-    pub hit_t: f32,
-    respawn: f32,
-    strafe: f32,
-}
-
-impl Bot {
-    fn body(&self) -> Aabb {
-        Aabb {
-            min: self.pos + Vec3::new(-0.35, 0.0, -0.25),
-            max: self.pos + Vec3::new(0.35, 1.35, 0.25),
-        }
-    }
-    fn head(&self) -> Aabb {
-        Aabb {
-            min: self.pos + Vec3::new(-0.22, 1.35, -0.22),
-            max: self.pos + Vec3::new(0.22, 1.79, 0.22),
-        }
-    }
-    fn eye(&self) -> Vec3 {
-        self.pos + Vec3::new(0.0, 1.5, 0.0)
-    }
+/// Har kadr chiziladigan o'zgaruvchan sahna.
+pub struct FrameData {
+    pub dynamic: Lists,
+    pub dynamic_shadow: [usize; MESH_COUNT],
+    pub viewmodel: Lists,
 }
 
 pub struct Game {
@@ -283,23 +198,45 @@ pub struct Game {
     pub time: f32,
     pub companion: Companion,
     pub flash: f32,
+    pub hurt: f32,
+    pub dead_t: f32,
+    recoil: f32,
+    raise: f32,
+    walk_phase: f32,
     impacts: Vec<(Vec3, f32)>,
     events: Vec<u8>,
     step_dist: f32,
     zone_tick: f32,
-    pub kills: u32,
-    pub bots: Vec<Bot>,
     rng: Lcg,
-    pub hit_marker: f32,
-    pub hurt: f32,
-    pub dead_t: f32,
+    player_vel: Vec2,
+    last_dir: Vec2,
 }
 
-/// Doira (r) ni quti ichidan xy tekisligida itarib chiqaradi.
+fn smooth_angle(cur: f32, want: f32, rate: f32, dt: f32) -> f32 {
+    let mut diff = (want - cur) % std::f32::consts::TAU;
+    if diff > std::f32::consts::PI {
+        diff -= std::f32::consts::TAU;
+    } else if diff < -std::f32::consts::PI {
+        diff += std::f32::consts::TAU;
+    }
+    cur + diff * (1.0 - (-rate * dt).exp())
+}
+
+fn wrap_angle(a: f32) -> f32 {
+    let mut d = a % std::f32::consts::TAU;
+    if d > std::f32::consts::PI {
+        d -= std::f32::consts::TAU;
+    } else if d < -std::f32::consts::PI {
+        d += std::f32::consts::TAU;
+    }
+    d
+}
+
+/// Doirani (RADIUS) qutilar ichidan gorizontal itarib chiqaradi. `p.y` — oyoq balandligi.
 fn push_out(p: &mut Vec3, height: f32, colliders: &[Aabb]) {
     for _ in 0..2 {
         for b in colliders {
-            if p.y >= b.max.y - 0.05 || p.y + height <= b.min.y {
+            if b.max.y - p.y <= STEP || p.y + height <= b.min.y {
                 continue;
             }
             let cx = p.x.clamp(b.min.x, b.max.x);
@@ -332,8 +269,9 @@ fn push_out(p: &mut Vec3, height: f32, colliders: &[Aabb]) {
     p.z = p.z.clamp(-WORLD_HALF, WORLD_HALF);
 }
 
+/// Oyoq ostidagi tayanch balandligi: relyef yoki chiqib olsa bo'ladigan quti usti.
 fn support(p: Vec3, colliders: &[Aabb]) -> f32 {
-    let mut g = 0.0f32;
+    let mut g = terrain::height(p.x, p.z);
     for b in colliders {
         let m = RADIUS * 0.6;
         if p.x > b.min.x - m && p.x < b.max.x + m && p.z > b.min.z - m && p.z < b.max.z + m && b.max.y <= p.y + 0.35 {
@@ -345,18 +283,14 @@ fn support(p: Vec3, colliders: &[Aabb]) -> f32 {
 
 impl Game {
     pub fn new(width: u32, height: u32, density: f32) -> Self {
-        let colliders: Vec<Aabb> = world::build()
-            .iter()
-            .filter(|i| i.color[3] < 0.1)
-            .map(Aabb::from_instance)
-            .collect();
+        let w = world::build();
         let mut g = Self {
-            camera: Camera::new(Vec3::new(0.0, EYE, 8.0)),
+            camera: Camera::new(Vec3::new(SPAWN.x, EYE, SPAWN.y)),
             input: Input::new(width, height, density),
             width,
             height,
             density,
-            colliders,
+            colliders: w.colliders,
             vy: 0.0,
             grounded: true,
             hp: MAX_HP,
@@ -367,25 +301,24 @@ impl Game {
             pickups: Vec::new(),
             zone: Zone::new(&mut Lcg(99)),
             time: 0.0,
-            companion: Companion::new(Vec3::new(1.7, 0.0, 9.3)),
+            companion: Companion::new(Vec3::new(SPAWN.x + 2.0, 0.0, SPAWN.y - 1.0)),
             flash: 0.0,
+            hurt: 0.0,
+            dead_t: 0.0,
+            recoil: 0.0,
+            raise: 1.0,
+            walk_phase: 0.0,
             impacts: Vec::new(),
             events: Vec::new(),
             step_dist: 0.0,
             zone_tick: 0.0,
-            kills: 0,
-            bots: Vec::new(),
             rng: Lcg(12345),
-            hit_marker: 0.0,
-            hurt: 0.0,
-            dead_t: 0.0,
+            player_vel: Vec2::ZERO,
+            last_dir: Vec2::new(0.0, -1.0),
         };
         g.zone = Zone::new(&mut g.rng);
-        for _ in 0..BOT_COUNT {
-            let b = g.new_bot();
-            g.bots.push(b);
-        }
-        g.spawn_pickups();
+        g.spawn_pickups(&w.loot);
+        g.companion.yaw = 0.0;
         g
     }
 
@@ -399,28 +332,26 @@ impl Game {
         self.slots[self.cur].reserve
     }
 
-    fn spawn_pickups(&mut self) {
+    fn spawn_pickups(&mut self, loot: &[Vec3]) {
         // o'yinchi yonida kafolatli to'plam
         let fixed = [
-            (Vec3::new(3.0, 0.0, 8.0), PickupKind::Weapon(WeaponKind::Rifle)),
-            (Vec3::new(-3.0, 0.0, 8.0), PickupKind::Ammo),
-            (Vec3::new(0.0, 0.0, 4.5), PickupKind::Medkit),
+            (Vec3::new(3.0, 0.0, 14.0), PickupKind::Weapon(WeaponKind::Rifle)),
+            (Vec3::new(-3.0, 0.0, 14.0), PickupKind::Ammo),
+            (Vec3::new(0.0, 0.0, 9.0), PickupKind::Medkit),
         ];
         for (pos, kind) in fixed {
             self.pickups.push(Pickup { pos, kind, alive: true });
         }
-        for i in 0..24 {
-            let mut pos = Vec3::new((self.rng.next() - 0.5) * 84.0, 0.0, (self.rng.next() - 0.5) * 84.0);
-            push_out(&mut pos, HEIGHT, &self.colliders);
-            let kind = match i % 6 {
-                0 => PickupKind::Weapon(WeaponKind::Rifle),
+        for (i, p) in loot.iter().enumerate() {
+            let kind = match i % 8 {
+                0 | 4 => PickupKind::Weapon(WeaponKind::Rifle),
                 1 => PickupKind::Weapon(WeaponKind::Shotgun),
                 2 => PickupKind::Weapon(WeaponKind::Sniper),
-                3 => PickupKind::Ammo,
-                4 => PickupKind::Medkit,
-                _ => PickupKind::Ammo,
+                3 | 5 => PickupKind::Ammo,
+                6 => PickupKind::Medkit,
+                _ => PickupKind::Weapon(WeaponKind::Pistol),
             };
-            self.pickups.push(Pickup { pos, kind, alive: true });
+            self.pickups.push(Pickup { pos: *p, kind, alive: true });
         }
     }
 
@@ -456,33 +387,11 @@ impl Game {
                         }
                         self.reload = 0.0;
                         self.fire_cd = 0.3;
+                        self.raise = 0.0;
                     }
                 }
             }
             self.pickups[i].alive = false;
-        }
-    }
-
-    fn new_bot(&mut self) -> Bot {
-        let player = Vec3::new(self.camera.pos.x, 0.0, self.camera.pos.z);
-        let mut pos = Vec3::ZERO;
-        for _ in 0..20 {
-            pos = Vec3::new((self.rng.next() - 0.5) * 80.0, 0.0, (self.rng.next() - 0.5) * 80.0);
-            if pos.distance(player) > 20.0 && self.zone.contains(pos.x, pos.z) {
-                break;
-            }
-        }
-        push_out(&mut pos, HEIGHT, &self.colliders);
-        Bot {
-            pos,
-            hp: MAX_HP,
-            alive: true,
-            wander: Vec2::ZERO,
-            timer: 0.0,
-            cooldown: 1.0 + self.rng.next(),
-            hit_t: 0.0,
-            respawn: 0.0,
-            strafe: 1.0,
         }
     }
 
@@ -497,37 +406,6 @@ impl Game {
         }
     }
 
-    fn update_companion(&mut self, dt: f32) {
-        let fwd = self.camera.flat_forward();
-        let right = self.camera.right();
-        let feet = Vec3::new(self.camera.pos.x, 0.0, self.camera.pos.z);
-        let target = feet + right * 1.7 - fwd * 1.3;
-        let c = &mut self.companion;
-        let to = Vec2::new(target.x - c.pos.x, target.z - c.pos.z);
-        let dist = to.length();
-        if dist > 30.0 {
-            c.pos = Vec3::new(target.x, 0.0, target.z);
-        }
-        let speed = if dist > 0.25 { (dist * 3.0).min(8.0) } else { 0.0 };
-        if speed > 0.0 {
-            let step = to / dist * speed * dt;
-            c.pos.x += step.x;
-            c.pos.z += step.y;
-        }
-        push_out(&mut c.pos, HEIGHT, &self.colliders);
-        c.pos.y = 0.0;
-        c.speed = speed;
-        c.phase += speed * dt * 1.8;
-        let want = if speed > 0.8 { (-to.x).atan2(-to.y) } else { self.camera.yaw };
-        let mut diff = (want - c.yaw) % std::f32::consts::TAU;
-        if diff > std::f32::consts::PI {
-            diff -= std::f32::consts::TAU;
-        } else if diff < -std::f32::consts::PI {
-            diff += std::f32::consts::TAU;
-        }
-        c.yaw += diff * (1.0 - (-10.0 * dt).exp());
-    }
-
     pub fn resize(&mut self, width: u32, height: u32) {
         self.width = width;
         self.height = height;
@@ -538,11 +416,37 @@ impl Game {
         self.input.touch(action, id, x, y);
     }
 
-    fn world_hit(&self, o: Vec3, d: Vec3) -> f32 {
-        let mut t = f32::MAX;
-        if d.y < -1e-6 {
-            t = -o.y / d.y;
+    /// Nur relyefga tegadigan masofa (yo'q bo'lsa `f32::MAX`).
+    fn terrain_hit(&self, o: Vec3, d: Vec3) -> f32 {
+        let (mut t, step, max) = (0.0f32, 1.0f32, 200.0f32);
+        let above = |t: f32| {
+            let p = o + d * t;
+            p.y - terrain::height(p.x, p.z)
+        };
+        if above(0.0) < 0.0 {
+            return 0.0;
         }
+        while t < max {
+            let nt = t + step;
+            if above(nt) < 0.0 {
+                let (mut lo, mut hi) = (t, nt);
+                for _ in 0..8 {
+                    let mid = (lo + hi) * 0.5;
+                    if above(mid) < 0.0 {
+                        hi = mid;
+                    } else {
+                        lo = mid;
+                    }
+                }
+                return hi;
+            }
+            t = nt;
+        }
+        f32::MAX
+    }
+
+    fn world_hit(&self, o: Vec3, d: Vec3) -> f32 {
+        let mut t = self.terrain_hit(o, d);
         for b in &self.colliders {
             if let Some(h) = b.ray(o, d) {
                 t = t.min(h);
@@ -551,18 +455,10 @@ impl Game {
         t
     }
 
-    fn line_of_sight(&self, a: Vec3, b: Vec3) -> bool {
-        let d = b - a;
-        let len = d.length();
-        if len < 1e-4 {
-            return true;
-        }
-        self.world_hit(a, d / len) >= len
-    }
-
     fn shoot(&mut self) {
         let st = self.stats();
         self.flash = 0.07;
+        self.recoil = 1.0;
         self.emit(match self.slots[self.cur].kind {
             WeaponKind::Pistol => audio::EV_SHOT_PISTOL,
             WeaponKind::Rifle => audio::EV_SHOT_RIFLE,
@@ -581,50 +477,25 @@ impl Game {
             if tw < 150.0 && self.impacts.len() < 24 {
                 self.impacts.push((o + d * tw, 0.0));
             }
-            let mut best: Option<(f32, usize, f32)> = None;
-            for (i, b) in self.bots.iter().enumerate() {
-                if !b.alive {
-                    continue;
-                }
-                if let Some(t) = b.head().ray(o, d) {
-                    if t < tw && best.map_or(true, |x| t < x.0) {
-                        best = Some((t, i, st.head));
-                    }
-                }
-                if let Some(t) = b.body().ray(o, d) {
-                    if t < tw && best.map_or(true, |x| t < x.0) {
-                        best = Some((t, i, st.body));
-                    }
-                }
-            }
-            if let Some((_, i, dmg)) = best {
-                let b = &mut self.bots[i];
-                b.hp -= dmg;
-                b.hit_t = 0.12;
-                self.hit_marker = 0.15;
-                if b.hp <= 0.0 && b.alive {
-                    b.alive = false;
-                    b.respawn = 5.0;
-                    self.kills += 1;
-                }
-            }
         }
         self.camera.look(0.0, st.recoil);
     }
 
     pub fn respawn_player(&mut self) {
-        let mut p = Vec2::new(0.0, 8.0);
+        let mut p = SPAWN;
         if !self.zone.contains(p.x, p.y) {
             p = self.zone.center;
         }
         let mut feet = Vec3::new(p.x, 0.0, p.y);
         push_out(&mut feet, HEIGHT, &self.colliders);
+        feet.y = support(feet, &self.colliders);
         self.camera.pos = feet + Vec3::Y * EYE;
         self.vy = 0.0;
         self.hp = MAX_HP;
         self.slots = vec![Slot { kind: WeaponKind::Pistol, mag: 12, reserve: 24 }];
         self.cur = 0;
         self.reload = 0.0;
+        self.raise = 0.0;
     }
 
     pub fn update(&mut self, dt: f32) {
@@ -634,14 +505,16 @@ impl Game {
         let dt = dt.clamp(0.0, 0.05);
         self.time += dt;
         self.zone.update(dt, &mut self.rng);
-        self.hit_marker = (self.hit_marker - dt).max(0.0);
         self.flash = (self.flash - dt).max(0.0);
+        self.recoil *= (-14.0 * dt).exp();
+        self.raise = (self.raise + dt / 0.35).min(1.0);
         for im in self.impacts.iter_mut() {
             im.1 += dt;
         }
         self.impacts.retain(|im| im.1 < 0.5);
         self.hurt = (self.hurt - dt).max(0.0);
 
+        let before = Vec2::new(self.camera.pos.x, self.camera.pos.z);
         if self.dead_t > 0.0 {
             let keep = self.camera.pos;
             self.input.update(dt, &mut self.camera);
@@ -654,24 +527,38 @@ impl Game {
         } else {
             self.update_player(dt);
         }
-        self.update_bots(dt);
+        // o'yinchi tezligi (silliqlangan) — qiz shunga qarab harakatlanadi
+        if dt > 0.0 {
+            let now = Vec2::new(self.camera.pos.x, self.camera.pos.z);
+            let raw = (now - before) / dt;
+            let k = 1.0 - (-dt / 0.10).exp();
+            self.player_vel += (raw - self.player_vel) * k;
+        }
         self.update_companion(dt);
     }
 
     fn update_player(&mut self, dt: f32) {
         let before = self.camera.pos;
         self.input.update(dt, &mut self.camera);
-        let mut feet = Vec3::new(self.camera.pos.x, self.camera.pos.y - EYE, self.camera.pos.z);
+        let mut feet = Vec3::new(self.camera.pos.x, before.y - EYE, self.camera.pos.z);
         push_out(&mut feet, HEIGHT, &self.colliders);
 
-        if self.input.take_jump() && self.grounded {
+        let jump = self.input.take_jump();
+        let ground = support(feet, &self.colliders);
+        let y0 = feet.y;
+        if jump && self.grounded {
             self.vy = JUMP_SPEED;
             self.grounded = false;
         }
-        let ground = support(feet, &self.colliders);
+        let was_grounded = self.grounded;
         self.vy -= GRAVITY * dt;
         feet.y += self.vy * dt;
         if feet.y <= ground && self.vy <= 0.0 {
+            feet.y = ground;
+            self.vy = 0.0;
+            self.grounded = true;
+        } else if was_grounded && self.vy <= 0.0 && y0 - ground <= 0.4 && y0 >= ground {
+            // nishab pastga: yerga yopishib yuradi
             feet.y = ground;
             self.vy = 0.0;
             self.grounded = true;
@@ -680,7 +567,9 @@ impl Game {
         }
         self.camera.pos = Vec3::new(feet.x, feet.y + EYE, feet.z);
 
-        self.step_dist += Vec2::new(feet.x - before.x, feet.z - before.z).length();
+        let moved = Vec2::new(feet.x - before.x, feet.z - before.z).length();
+        self.step_dist += moved;
+        self.walk_phase += moved * 2.4;
         if self.grounded && self.step_dist > 2.0 {
             self.step_dist = 0.0;
             self.emit(audio::EV_STEP);
@@ -710,6 +599,7 @@ impl Game {
             self.cur = (self.cur + 1) % self.slots.len();
             self.reload = 0.0;
             self.fire_cd = 0.25;
+            self.raise = 0.0;
         }
         let st = self.stats();
         if self.reload > 0.0 {
@@ -725,200 +615,177 @@ impl Game {
             self.emit(audio::EV_RELOAD);
         }
         self.fire_cd -= dt;
-        if self.input.fire_held() && self.reload <= 0.0 && self.slots[self.cur].mag > 0 && self.fire_cd <= 0.0 {
+        if self.input.fire_held() && self.reload <= 0.0 && self.slots[self.cur].mag > 0 && self.fire_cd <= 0.0 && self.raise >= 0.7 {
             self.shoot();
             self.slots[self.cur].mag -= 1;
             self.fire_cd = st.cd;
         }
     }
 
-    fn update_bots(&mut self, dt: f32) {
-        let player_eye = self.camera.pos;
-        let player_alive = self.dead_t <= 0.0;
-        for i in 0..self.bots.len() {
-            if !self.bots[i].alive {
-                self.bots[i].respawn -= dt;
-                if self.bots[i].respawn <= 0.0 {
-                    let nb = self.new_bot();
-                    self.bots[i] = nb;
-                }
-                continue;
+    fn update_companion(&mut self, dt: f32) {
+        let feet = Vec2::new(self.camera.pos.x, self.camera.pos.z);
+        let pspeed = self.player_vel.length();
+        if pspeed > 0.3 {
+            self.last_dir = self.player_vel / pspeed;
+        }
+        let pdir = self.last_dir;
+        let side = Vec2::new(-pdir.y, pdir.x);
+        let cpos = Vec2::new(self.companion.pos.x, self.companion.pos.z);
+        let to_player = feet - cpos;
+        let dist = to_player.length();
+        let c = &mut self.companion;
+
+        if dist > 40.0 {
+            // juda uzoqda qoldi — o'yinchi yurgan tomonga o'tkazamiz
+            let p = feet + pdir * 3.0 + side * 1.6;
+            c.pos = Vec3::new(p.x, c.pos.y, p.y);
+        }
+        let dist = (feet - Vec2::new(c.pos.x, c.pos.z)).length();
+
+        // holat: o'yinchi 5 m dan uzoqlashsa va yurayotgan bo'lsa — yuradi; to'xtasa yoki yetib kelsa — to'xtaydi
+        if c.walking {
+            if pspeed < 0.3 || dist < COMPANION_ARRIVE {
+                c.walking = false;
             }
-            let mut b = std::mem::replace(
-                &mut self.bots[i],
-                Bot { pos: Vec3::ZERO, hp: 0.0, alive: false, wander: Vec2::ZERO, timer: 0.0, cooldown: 0.0, hit_t: 0.0, respawn: 0.0, strafe: 1.0 },
-            );
-            b.hit_t = (b.hit_t - dt).max(0.0);
-            let to = Vec2::new(player_eye.x - b.pos.x, player_eye.z - b.pos.z);
-            let dist = to.length();
-            let sees = player_alive && dist < 40.0 && self.line_of_sight(b.eye(), player_eye - Vec3::new(0.0, 0.3, 0.0));
-            let mut mv = Vec2::ZERO;
-            let outside = !self.zone.contains(b.pos.x, b.pos.z);
-            if outside {
-                b.hp -= self.zone.dps() * dt;
-                if b.hp <= 0.0 {
-                    b.alive = false;
-                    b.respawn = 5.0;
-                    self.bots[i] = b;
-                    continue;
-                }
-                let back = self.zone.center - Vec2::new(b.pos.x, b.pos.z);
-                mv = back / back.length().max(0.01) * 3.5;
-            } else if sees {
-                let dir = to / dist.max(0.01);
-                b.timer -= dt;
-                if b.timer <= 0.0 {
-                    b.strafe = if self.rng.next() > 0.5 { 1.0 } else { -1.0 };
-                    b.timer = 1.0 + self.rng.next() * 1.5;
-                }
-                if dist > 9.0 {
-                    mv += dir * 3.0;
-                }
-                mv += Vec2::new(-dir.y, dir.x) * b.strafe * 1.6;
-                b.cooldown -= dt;
-                if b.cooldown <= 0.0 && dist < 35.0 {
-                    b.cooldown = 0.9 + self.rng.next() * 0.8;
-                    if self.rng.next() < 0.4 {
-                        self.hp -= 8.0;
-                        self.hurt = 0.35;
-                        if self.hp <= 0.0 {
-                            self.hp = 0.0;
-                            self.dead_t = 2.0;
-                        }
-                    }
-                }
-            } else {
-                b.timer -= dt;
-                if b.timer <= 0.0 {
-                    let a = self.rng.next() * std::f32::consts::TAU;
-                    b.wander = Vec2::new(a.cos(), a.sin()) * 2.0;
-                    b.timer = 2.0 + self.rng.next() * 2.0;
-                }
-                mv = b.wander;
+        } else if dist > COMPANION_RANGE && pspeed >= 0.3 {
+            c.walking = true;
+        }
+
+        let mut want_speed = 0.0;
+        let mut move_dir = Vec2::ZERO;
+        if c.walking {
+            // o'yinchi yurgan tomonda: oldida-yonida, orqasida emas
+            let target = feet + pdir * 2.5 + side * 1.6;
+            let to = target - Vec2::new(c.pos.x, c.pos.z);
+            let d = to.length();
+            if d > 0.05 {
+                move_dir = to / d;
+                want_speed = (pspeed * 1.1 + (d - 1.0).max(0.0)).clamp(1.5, 8.0);
             }
-            b.pos.x += mv.x * dt;
-            b.pos.z += mv.y * dt;
-            push_out(&mut b.pos, HEIGHT, &self.colliders);
-            self.bots[i] = b;
+        }
+        // tezlanish/sekinlashish (to'xtaganda tez, lekin sakramasdan)
+        let accel = if want_speed > c.speed { 18.0 } else { 40.0 };
+        let dv = (want_speed - c.speed).clamp(-accel * dt, accel * dt);
+        c.speed = (c.speed + dv).max(0.0);
+        if c.speed > 0.01 && move_dir != Vec2::ZERO {
+            c.pos.x += move_dir.x * c.speed * dt;
+            c.pos.z += move_dir.y * c.speed * dt;
+        }
+        let mut p = c.pos;
+        push_out(&mut p, HEIGHT, &self.colliders);
+        c.pos = Vec3::new(p.x, support(Vec3::new(p.x, c.pos.y, p.z), &self.colliders), p.z);
+        c.phase += c.speed * dt * 1.7;
+
+        // burilish: yurganda harakat tomoniga; turganda o'yinchiga qaraydi
+        let to_pl = feet - Vec2::new(c.pos.x, c.pos.z);
+        let face_player = (-to_pl.x).atan2(-to_pl.y);
+        if c.speed > 0.8 && move_dir != Vec2::ZERO {
+            let want = (-move_dir.x).atan2(-move_dir.y);
+            c.yaw = smooth_angle(c.yaw, want, 9.0, dt);
+            c.look_yaw += (0.0 - c.look_yaw) * (1.0 - (-6.0 * dt).exp());
+        } else {
+            let rel = wrap_angle(face_player - c.yaw);
+            if rel.abs() > 1.1 {
+                c.yaw = smooth_angle(c.yaw, face_player, 3.0, dt);
+            }
+            let rel = wrap_angle(face_player - c.yaw).clamp(-1.0, 1.0);
+            c.look_yaw += (rel - c.look_yaw) * (1.0 - (-5.0 * dt).exp());
         }
     }
 
-    /// Qizning qismlari (kublar). Mahalliy koordinata: x — o'ng, y — yuqori, -z — oldinga; `yaw` bilan buriladi.
-    fn girl_parts(&self, out: &mut Vec<Instance>) {
+    /// Chiziladigan sahna: qiz, chang, narsalar, zona devori va birinchi shaxs qurol.
+    pub fn frame(&self) -> FrameData {
+        let mut d = Lists::default();
         let c = &self.companion;
-        let (s, co) = c.yaw.sin_cos();
-        let moving = (c.speed / (c.speed + 1.0)).min(1.0);
-        let swing = c.phase.sin() * 0.16 * moving;
-        let bob = (self.time * 2.2).sin() * 0.008;
-        let mut part = |x: f32, y: f32, z: f32, sx: f32, sy: f32, sz: f32, rgb: [f32; 3]| {
-            // mahalliy siljishni yaw bo'yicha buramiz (shaderdagi `rot` bilan bir xil)
-            let wx = x * co + z * s;
-            let wz = -x * s + z * co;
-            out.push(Instance {
-                pos: [c.pos.x + wx, c.pos.y + y, c.pos.z + wz, c.yaw],
-                scale: [sx, sy, sz, 0.0],
-                color: [rgb[0], rgb[1], rgb[2], 0.0],
-            });
-        };
-        let skin = [1.0, 0.86, 0.78];
-        let hair = [0.98, 0.55, 0.78];
-        let hair_dark = [0.88, 0.42, 0.68];
-        let white = [0.97, 0.97, 1.0];
-        let navy = [0.18, 0.22, 0.48];
-        let red = [0.90, 0.20, 0.30];
-        let shoe = [0.30, 0.18, 0.15];
-        // oyoqlar (paypoq bilan) va tufli
-        for (sx, sw) in [(-1.0f32, swing), (1.0, -swing)] {
-            part(sx * 0.08, 0.26, sw, 0.10, 0.34, 0.10, skin);
-            part(sx * 0.08, 0.12, sw, 0.105, 0.22, 0.105, [0.16, 0.16, 0.25]);
-            part(sx * 0.08, 0.035, sw - 0.03, 0.12, 0.07, 0.19, shoe);
-        }
-        // yubka, tana, yoqa, lenta
-        part(0.0, 0.62, 0.0, 0.40, 0.22, 0.28, navy);
-        part(0.0, 0.88, 0.0, 0.30, 0.32, 0.19, white);
-        part(0.0, 1.04 + bob, 0.0, 0.34, 0.06, 0.22, navy);
-        part(0.0, 0.98, -0.115, 0.10, 0.09, 0.03, red);
-        // qo'llar
-        for (sx, sw) in [(-1.0f32, -swing), (1.0, swing)] {
-            part(sx * 0.20, 0.90, sw * 0.8, 0.075, 0.28, 0.08, white);
-            part(sx * 0.20, 0.72, sw * 0.8, 0.07, 0.07, 0.07, skin);
-        }
-        // bosh (chibi: katta), soch, ikki dumli
-        let hy = 1.25 + bob;
-        part(0.0, hy, 0.0, 0.34, 0.34, 0.32, skin);
-        part(0.0, hy + 0.19, 0.0, 0.38, 0.10, 0.36, hair);
-        part(0.0, hy + 0.0, 0.15, 0.38, 0.40, 0.10, hair);
-        for sx in [-1.0f32, 1.0] {
-            part(sx * 0.19, hy + 0.02, 0.0, 0.06, 0.34, 0.32, hair);
-        }
-        part(0.0, hy + 0.15, -0.165, 0.34, 0.09, 0.05, hair);
-        part(-0.10, hy + 0.10, -0.17, 0.10, 0.10, 0.04, hair_dark);
-        part(0.10, hy + 0.10, -0.17, 0.10, 0.10, 0.04, hair_dark);
-        part(0.0, hy + 0.29, 0.0, 0.03, 0.12, 0.03, hair);
-        for sx in [-1.0f32, 1.0] {
-            let tail_swing = (self.time * 3.0 + sx).sin() * 0.02 + swing * 0.3;
-            part(sx * 0.27, hy - 0.05, 0.17 + tail_swing, 0.10, 0.50, 0.10, hair);
-            part(sx * 0.27, hy + 0.17, 0.17, 0.12, 0.05, 0.12, red);
-            part(sx * 0.12, hy + 0.23, 0.0, 0.08, 0.10, 0.07, hair);
-        }
-        // katta anime ko'zlar: oq, ko'k qorachiq, yaltirash; yonoq, og'iz
-        for sx in [-1.0f32, 1.0] {
-            let ex = sx * 0.085;
-            part(ex, hy - 0.02, -0.168, 0.105, 0.14, 0.012, white);
-            part(ex, hy - 0.03, -0.176, 0.075, 0.115, 0.012, [0.30, 0.45, 0.95]);
-            part(ex, hy - 0.04, -0.184, 0.04, 0.06, 0.012, [0.10, 0.12, 0.35]);
-            part(ex + sx * 0.015, hy + 0.02, -0.19, 0.03, 0.03, 0.012, white);
-            part(sx * 0.125, hy - 0.11, -0.168, 0.06, 0.03, 0.012, [1.0, 0.62, 0.66]);
-        }
-        part(0.0, hy - 0.115, -0.168, 0.04, 0.016, 0.012, [0.55, 0.20, 0.25]);
-    }
-
-    /// Har kadr o'zgaradigan jismlar. Ikkinchi qiymat: boshidagi nechta jism soya tashlaydi.
-    pub fn dynamic_instances(&self) -> (Vec<Instance>, usize) {
-        let mut v = Vec::new();
-        self.girl_parts(&mut v);
+        models::girl(
+            &mut d,
+            &GirlState {
+                pos: c.pos,
+                yaw: c.yaw,
+                phase: c.phase,
+                moving: (c.speed / 4.0).clamp(0.0, 1.0),
+                time: self.time,
+                look_yaw: c.look_yaw,
+            },
+        );
         for (p, t) in &self.impacts {
             let k = 1.0 - t / 0.5;
-            v.push(Instance {
-                pos: [p.x, p.y, p.z, 0.0],
-                scale: [0.10 + 0.25 * k, 0.10 + 0.25 * k, 0.10 + 0.25 * k, 0.0],
-                color: [0.78, 0.74, 0.66, 0.0],
-            });
+            d.push(
+                Mesh::Sphere,
+                Instance::new(*p, Vec3::splat(0.10 + 0.30 * k), [0.78, 0.74, 0.66], Mat::Flat, Quat::IDENTITY),
+            );
         }
-        for b in self.bots.iter().filter(|b| b.alive) {
-            let flash = if b.hit_t > 0.0 { 1.0 } else { 0.0 };
-            let body = [0.80 + 0.2 * flash, 0.25 + 0.75 * flash, 0.20 + 0.8 * flash, 0.0];
-            let head = [0.95, 0.80 + 0.2 * flash, 0.65 + 0.35 * flash, 0.0];
-            v.push(Instance { pos: [b.pos.x, b.pos.y + 0.675, b.pos.z, 0.0], scale: [0.7, 1.35, 0.5, 0.0], color: body });
-            v.push(Instance { pos: [b.pos.x, b.pos.y + 1.57, b.pos.z, 0.0], scale: [0.44, 0.44, 0.44, 0.0], color: head });
-        }
-        let shadow_count = v.len();
+        let dynamic_shadow = d.counts();
+
         for p in self.pickups.iter().filter(|p| p.alive) {
-            let bob = 0.65 + 0.15 * (self.time * 3.0 + p.pos.x).sin();
-            let (rgb, scale) = match p.kind {
-                PickupKind::Weapon(w) => (w.color(), [0.8, 0.2, 0.25, 0.0]),
-                PickupKind::Ammo => ([1.0, 0.85, 0.2], [0.4, 0.4, 0.4, 0.0]),
-                PickupKind::Medkit => ([0.95, 0.95, 0.95], [0.5, 0.4, 0.5, 0.0]),
+            let bob = 0.55 + 0.12 * (self.time * 3.0 + p.pos.x).sin();
+            let spin = Quat::from_rotation_y(self.time * 1.2 + p.pos.z);
+            let at = Vec3::new(p.pos.x, p.pos.y + bob, p.pos.z);
+            let (rgb, beam) = match p.kind {
+                PickupKind::Weapon(w) => {
+                    let col = w.color();
+                    let len = match w {
+                        WeaponKind::Pistol => 0.35,
+                        WeaponKind::Shotgun => 0.9,
+                        WeaponKind::Sniper => 1.0,
+                        _ => 0.8,
+                    };
+                    d.push(Mesh::Cube, Instance::new(at, Vec3::new(0.08, 0.12, len), [0.12, 0.12, 0.14], Mat::Metal, spin));
+                    d.push(Mesh::Cube, Instance::new(at + spin * Vec3::new(0.0, -0.1, len * 0.3), Vec3::new(0.06, 0.15, 0.08), [0.1, 0.1, 0.12], Mat::Cloth, spin));
+                    d.push(Mesh::Cylinder, Instance::new(at + spin * Vec3::new(0.0, 0.02, -len * 0.5), Vec3::new(0.05, 0.3, 0.05), [0.3, 0.3, 0.33], Mat::Metal, spin * Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)));
+                    (col, col)
+                }
+                PickupKind::Ammo => {
+                    d.push(Mesh::Cube, Instance::new(at, Vec3::new(0.45, 0.28, 0.3), [0.28, 0.34, 0.2], Mat::Metal, spin));
+                    d.push(Mesh::Cube, Instance::new(at + Vec3::new(0.0, 0.16, 0.0), Vec3::new(0.2, 0.03, 0.05), [0.8, 0.7, 0.2], Mat::Flat, spin));
+                    ([1.0, 0.85, 0.2], [1.0, 0.85, 0.2])
+                }
+                PickupKind::Medkit => {
+                    d.push(Mesh::Cube, Instance::new(at, Vec3::new(0.42, 0.3, 0.3), [0.95, 0.95, 0.95], Mat::Plaster, spin));
+                    d.push(Mesh::Cube, Instance::new(at + spin * Vec3::new(0.0, 0.0, -0.152), Vec3::new(0.24, 0.07, 0.01), [0.85, 0.1, 0.12], Mat::Flat, spin));
+                    d.push(Mesh::Cube, Instance::new(at + spin * Vec3::new(0.0, 0.0, -0.152), Vec3::new(0.07, 0.24, 0.01), [0.85, 0.1, 0.12], Mat::Flat, spin));
+                    ([0.95, 0.95, 0.95], [0.3, 0.9, 0.4])
+                }
             };
-            v.push(Instance { pos: [p.pos.x, bob, p.pos.z, 0.0], scale, color: [rgb[0], rgb[1], rgb[2], 0.0] });
-            let beam = if p.kind == PickupKind::Medkit { [0.3, 0.9, 0.4] } else { rgb };
-            v.push(Instance { pos: [p.pos.x, 3.0, p.pos.z, 0.0], scale: [0.12, 6.0, 0.12, 0.0], color: [beam[0], beam[1], beam[2], 0.0] });
+            let _ = rgb;
+            d.push(Mesh::Cylinder, Instance::new(Vec3::new(p.pos.x, p.pos.y + 3.0, p.pos.z), Vec3::new(0.10, 6.0, 0.10), beam, Mat::Emissive, Quat::IDENTITY));
         }
-        let ring = |c: Vec2, r: f32, n: usize, w: f32, col: [f32; 3], v: &mut Vec<Instance>| {
+
+        // zona devori: yorug' ustunlar (joriy — ko'k, keyingi — oq)
+        let ring = |d: &mut Lists, c: Vec2, r: f32, n: usize, w: f32, col: [f32; 3]| {
             for k in 0..n {
                 let a = k as f32 / n as f32 * std::f32::consts::TAU;
-                v.push(Instance {
-                    pos: [c.x + a.cos() * r, 15.0, c.y + a.sin() * r, 0.0],
-                    scale: [w, 30.0, w, 0.0],
-                    color: [col[0], col[1], col[2], 0.0],
-                });
+                let (x, z) = (c.x + a.cos() * r, c.y + a.sin() * r);
+                let y = terrain::height(x, z);
+                d.push(Mesh::Cylinder, Instance::new(Vec3::new(x, y + 20.0, z), Vec3::new(w, 40.0, w), col, Mat::Emissive, Quat::IDENTITY));
             }
         };
-        ring(self.zone.center, self.zone.radius, 96, 1.0, [0.2, 0.45, 1.0], &mut v);
+        let zr = self.zone.radius;
+        let n_cur = ((std::f32::consts::TAU * zr / 3.0).ceil() as usize).clamp(24, 320);
+        ring(&mut d, self.zone.center, zr, n_cur, 3.3, [0.15, 0.35, 1.0]);
         if !self.zone.finished {
-            ring(self.zone.next_center, self.zone.next_radius, 48, 0.5, [0.95, 0.95, 0.95], &mut v);
+            ring(&mut d, self.zone.next_center, self.zone.next_radius, 40, 0.5, [0.9, 0.9, 0.95]);
         }
-        (v, shadow_count)
+
+        let mut vm = Lists::default();
+        if self.dead_t <= 0.0 {
+            let st = self.stats();
+            models::viewmodel(
+                &mut vm,
+                &VmState {
+                    kind: self.slots[self.cur].kind,
+                    recoil: self.recoil,
+                    walk_phase: self.walk_phase,
+                    moving: (self.player_vel.length() / 5.0).clamp(0.0, 1.0),
+                    reload: if self.reload > 0.0 { 1.0 - (self.reload / st.reload).clamp(0.0, 1.0) } else { 0.0 },
+                    raise: self.raise,
+                    flash: (self.flash / 0.07).clamp(0.0, 1.0),
+                    time: self.time,
+                },
+            );
+        }
+        let _ = SUN_DIR;
+        FrameData { dynamic: d, dynamic_shadow, viewmodel: vm }
     }
 
     pub fn hud(&self) -> Vec<crate::hud::HudVertex> {
@@ -936,11 +803,22 @@ mod tests {
         }
     }
 
+    /// Joystikni oldinga bosib ushlaydi (kamera qaragan tomonga yuradi).
+    fn walk_forward(g: &mut Game) {
+        let (home, _) = g.input.stick_home();
+        g.touch(TouchAction::Down, 1, home.x, home.y);
+        g.touch(TouchAction::Move, 1, home.x, home.y - 300.0);
+    }
+
+    fn stop(g: &mut Game) {
+        g.touch(TouchAction::Up, 1, 0.0, 0.0);
+    }
+
     #[test]
     fn zaminda_turadi() {
         let mut g = Game::new(1280, 576, 2.0);
         step(&mut g, 60);
-        assert!((g.camera.pos.y - EYE).abs() < 1e-3);
+        assert!((g.camera.pos.y - EYE).abs() < 1e-3, "y = {}", g.camera.pos.y);
         assert!(g.grounded);
     }
 
@@ -957,67 +835,52 @@ mod tests {
     }
 
     #[test]
-    fn quti_ichiga_kirib_bolmaydi() {
-        let mut g = Game::new(1280, 576, 2.0);
-        let b = g.colliders[0];
-        let c = (b.min + b.max) * 0.5;
-        let mut feet = Vec3::new(c.x, 0.0, c.z);
-        push_out(&mut feet, HEIGHT, &g.colliders);
-        g.camera.pos = feet + Vec3::Y * EYE;
-        for bb in &g.colliders {
-            let inside = feet.x > bb.min.x && feet.x < bb.max.x && feet.z > bb.min.z && feet.z < bb.max.z && feet.y < bb.max.y - 0.05;
-            assert!(!inside);
+    fn qutilar_ichiga_kirib_bolmaydi() {
+        let g = Game::new(1280, 576, 2.0);
+        for b in g.colliders.iter().take(200) {
+            let c = (b.min + b.max) * 0.5;
+            let mut feet = Vec3::new(c.x, terrain::height(c.x, c.z), c.z);
+            push_out(&mut feet, HEIGHT, &g.colliders);
+            for bb in &g.colliders {
+                if bb.max.y - feet.y <= STEP {
+                    continue;
+                }
+                let inside = feet.x > bb.min.x && feet.x < bb.max.x && feet.z > bb.min.z && feet.z < bb.max.z && feet.y + HEIGHT > bb.min.y;
+                assert!(!inside, "quti ichida qoldi: {feet:?} / {bb:?}");
+            }
         }
     }
 
     #[test]
-    fn otish_botni_uradi() {
+    fn relyefda_yuradi_va_yerda_qoladi() {
         let mut g = Game::new(1280, 576, 2.0);
-        g.colliders.clear();
-        let nb = g.new_bot();
-        g.bots = vec![nb];
-        g.camera.pos = Vec3::new(0.0, EYE, 0.0);
-        g.camera.yaw = 0.0;
-        g.camera.pitch = 0.0;
-        g.bots[0].pos = Vec3::new(0.0, 0.0, -10.0);
-        g.shoot();
-        assert!(g.bots[0].hp < MAX_HP, "tanaga tegdi");
-    }
-
-    #[test]
-    fn devor_orqasidagi_botga_tegmaydi() {
-        let mut g = Game::new(1280, 576, 2.0);
-        g.colliders = vec![Aabb { min: Vec3::new(-3.0, 0.0, -6.0), max: Vec3::new(3.0, 5.0, -5.0) }];
-        let nb = g.new_bot();
-        g.bots = vec![nb];
-        g.camera.pos = Vec3::new(0.0, EYE, 0.0);
-        g.camera.yaw = 0.0;
-        g.camera.pitch = 0.0;
-        g.bots[0].pos = Vec3::new(0.0, 0.0, -10.0);
-        g.shoot();
-        assert_eq!(g.bots[0].hp, MAX_HP);
+        g.camera.pos = Vec3::new(60.0, EYE + terrain::height(60.0, 0.0), 0.0);
+        g.camera.yaw = std::f32::consts::FRAC_PI_2; // -X ga emas, +... qaysi tomon bo'lsa ham
+        walk_forward(&mut g);
+        for _ in 0..240 {
+            g.update(1.0 / 60.0);
+            let feet = g.camera.pos.y - EYE;
+            let h = support(Vec3::new(g.camera.pos.x, feet, g.camera.pos.z), &g.colliders);
+            assert!(feet >= h - 0.01 && feet - h < 0.5, "feet {feet} ground {h}");
+        }
     }
 
     #[test]
     fn zona_qisqaradi_va_ichida_qoladi() {
         let mut g = Game::new(1280, 576, 2.0);
         let r0 = g.zone.radius;
-        for _ in 0..(60 * 70) {
+        for _ in 0..(60 * 300) {
             g.zone.update(1.0 / 60.0, &mut g.rng);
             assert!(g.zone.center.length() + g.zone.radius <= r0 + 1e-3);
         }
-        assert!(g.zone.radius < 46.0, "qisqardi");
+        assert!(g.zone.radius < 20.0, "qisqardi");
     }
 
     #[test]
     fn zona_tashqarisida_jon_kamayadi() {
         let mut g = Game::new(1280, 576, 2.0);
-        g.zone.center = Vec2::new(30.0, 30.0);
+        g.zone.center = Vec2::new(60.0, 60.0);
         g.zone.radius = 3.0;
-        for b in g.bots.iter_mut() {
-            b.alive = false;
-            b.respawn = 100.0;
-        }
         step(&mut g, 60);
         assert!(g.hp < MAX_HP);
     }
@@ -1042,6 +905,7 @@ mod tests {
         let mut g = Game::new(1280, 576, 2.0);
         g.pickups.clear();
         g.slots[0].mag = 1;
+        step(&mut g, 30); // qurol ko'tarilsin
         let (c, _) = g.input.fire_button();
         g.touch(TouchAction::Down, 8, c.x, c.y);
         step(&mut g, 3);
@@ -1053,22 +917,10 @@ mod tests {
     }
 
     #[test]
-    fn qiz_ergashadi_va_devordan_otmaydi() {
-        let mut g = Game::new(1280, 576, 2.0);
-        g.companion.pos = Vec3::new(40.0, 0.0, 40.0);
-        step(&mut g, 600);
-        let d = Vec2::new(g.companion.pos.x - g.camera.pos.x, g.companion.pos.z - g.camera.pos.z).length();
-        assert!(d < 4.0, "yaqinlashdi: {d}");
-        for b in &g.colliders {
-            let p = g.companion.pos;
-            assert!(!(p.x > b.min.x && p.x < b.max.x && p.z > b.min.z && p.z < b.max.z), "quti ichida");
-        }
-    }
-
-    #[test]
     fn hodisalar_otishda_chiqadi() {
         let mut g = Game::new(1280, 576, 2.0);
         g.pickups.clear();
+        step(&mut g, 30);
         let (c, _) = g.input.fire_button();
         g.touch(TouchAction::Down, 8, c.x, c.y);
         step(&mut g, 2);
@@ -1078,10 +930,50 @@ mod tests {
     }
 
     #[test]
-    fn nur_quti_kesishishi() {
-        let b = Aabb { min: Vec3::new(-1.0, 0.0, -6.0), max: Vec3::new(1.0, 2.0, -4.0) };
-        let t = b.ray(Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, 0.0, -1.0)).unwrap();
-        assert!((t - 4.0).abs() < 1e-4);
-        assert!(b.ray(Vec3::new(5.0, 1.0, 0.0), Vec3::new(0.0, 0.0, -1.0)).is_none());
+    fn qiz_5_metr_ichida_turadi() {
+        let mut g = Game::new(1280, 576, 2.0);
+        g.companion.pos = Vec3::new(g.camera.pos.x + 2.0, 0.0, g.camera.pos.z);
+        let start = g.companion.pos;
+        // o'yinchi 2 soniya yuradi (qiz hali 5 m dan uzoqlashmagan)
+        walk_forward(&mut g);
+        for _ in 0..40 {
+            g.update(1.0 / 60.0);
+            let d = Vec2::new(g.camera.pos.x - g.companion.pos.x, g.camera.pos.z - g.companion.pos.z).length();
+            if d > COMPANION_RANGE {
+                break;
+            }
+            assert!((g.companion.pos - start).length() < 1e-3, "5 m ichida qimirladi");
+        }
+    }
+
+    #[test]
+    fn qiz_oyinchi_yurgan_tomonga_yuradi_va_toxtasa_toxtaydi() {
+        let mut g = Game::new(1280, 576, 2.0);
+        g.camera.pos = Vec3::new(0.0, EYE, 20.0);
+        g.camera.yaw = 0.0; // -Z ga qaraydi
+        g.companion.pos = Vec3::new(2.0, 0.0, 20.0);
+        g.update(1.0 / 60.0);
+        walk_forward(&mut g);
+        let z0 = g.companion.pos.z;
+        step(&mut g, 60 * 5);
+        // qiz o'yinchi bilan birga -Z tomonga siljigan va orqada qolmagan
+        assert!(g.companion.pos.z < z0 - 5.0, "qiz yurmadi: {} -> {}", z0, g.companion.pos.z);
+        let d = Vec2::new(g.camera.pos.x - g.companion.pos.x, g.camera.pos.z - g.companion.pos.z).length();
+        assert!(d < 10.0, "juda uzoqda: {d}");
+        // o'yinchi to'xtadi — qiz tez to'xtaydi
+        stop(&mut g);
+        step(&mut g, 30);
+        let p = g.companion.pos;
+        step(&mut g, 60);
+        assert!((g.companion.pos - p).length() < 0.05, "to'xtamadi");
+        assert!(g.companion.speed < 0.05);
+    }
+
+    #[test]
+    fn nur_relyefga_uradi() {
+        let g = Game::new(1280, 576, 2.0);
+        let t = g.terrain_hit(Vec3::new(0.0, 1.7, 12.0), Vec3::new(0.0, -1.0, 0.0));
+        assert!((t - 1.7).abs() < 0.05, "{t}");
+        assert_eq!(g.terrain_hit(Vec3::new(0.0, 5.0, 12.0), Vec3::new(0.0, 1.0, 0.0)), f32::MAX);
     }
 }
