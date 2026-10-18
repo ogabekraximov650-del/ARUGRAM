@@ -6647,3 +6647,9 @@ Nega: PUBG darajasiga bosqichma-bosqich (low-poly → realistik, keyin botlar/zo
 - `AdminAnimeEditScreen`, `AdminSeasonEditScreen`, `AdminEpisodeEditScreen` Flutter `add_anime_screen.dart`, `add_season_screen.dart`, `add_epizod_screen.dart` bo'yicha qayta qurildi: sarlavha kartasi, 20 yumaloq rasm kartasi (ichida 16 yumaloq quti), prefiks ikonkali glass maydonlar ("Anime nomi (ixtiyoriy)" ...), "Bekor"/"Saqlash" tugmalari yonma-yon, Tur/Holat teng kenglikdagi tugmalar, janr tugmalari, yosh maydonida "18+" ko'rsatkichi; qismda "Asl video (avto-kodlash)" kartasi (holat, o'chirish, qayta urinish), 4 ta "NNNp sifat" kartasi (yuklanish foizi `% (MB / MB)`), "O'tkazib yuboriladigan joylar" kartasi (5 qator x 2 maydon).
 - Mantiq (yuklash, saqlash, navbatga qo'yish) o'zgarmagan; anime saqlashda hech qaysi maydon majburiy emas (Flutter kabi).
 - `AruIcons` ga formalar uchun ikonkalar qo'shildi.
+
+## Telegram hisobidagi stiker/emoji/GIF (vaqtinchalik, Kotlin ilova)
+
+Nima: media panelida o'z to'plamlarimiz o'rniga foydalanuvchining Telegram hisobidagi stikerlar, emoji to'plamlari va saqlangan GIF'lar ko'rsatiladi (`TG_STICKERS_ON` bayrog'i `data/TgStickers.kt`; o'chirilsa eski `PackPage` qaytadi, `pk_` xabarlari ko'rinishi o'zgarmagan).
+Rust: `rust/src/tg_media.rs` (`rust_tg_media_list`, `rust_tg_media_get`). Kotlin: `data/TgStickers.kt` (shifrlangan disk-kesh, havola eskirsa qayta oladi), `ui/packs/TgAccountPages.kt` (`TgItem`: kichik rasm, ekranda TO'LIQ ko'ringan webm/mp4 harakatlanadi, bir vaqtda ko'pi bilan 6 ta).
+Hozircha: `.tgs` — faqat kichik rasm (2-bosqich: lottie-android + libwebp bilan animatsiyali WebP'ga o'tkazish); webm shaffofligi yo'q; yuborish yo'q (bosilsa katta ko'rinish).

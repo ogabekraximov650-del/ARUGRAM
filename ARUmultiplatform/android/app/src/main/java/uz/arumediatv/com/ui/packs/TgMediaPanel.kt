@@ -63,6 +63,7 @@ import uz.arumediatv.com.data.PackHeader
 import uz.arumediatv.com.data.PackInfo
 import uz.arumediatv.com.data.PackKind
 import uz.arumediatv.com.data.PackPick
+import uz.arumediatv.com.data.TG_STICKERS_ON
 import uz.arumediatv.com.ui.common.AruIcons
 
 /** Telegram uslubidagi emoji shrifti (Flutter `fonts/TgEmoji.ttf`). */
@@ -119,8 +120,8 @@ fun TgMediaPanel(
         HorizontalPager(pager, Modifier.fillMaxSize(), beyondViewportPageCount = 0) { page ->
             when (page) {
                 0 -> EmojiPage(onEmoji, onPick)
-                1 -> PackPage(PackKind.GIF, onPick, onManage)
-                else -> PackPage(PackKind.STICKER, onPick, onManage)
+                1 -> if (TG_STICKERS_ON) TgAccountPage("gifs") else PackPage(PackKind.GIF, onPick, onManage)
+                else -> if (TG_STICKERS_ON) TgAccountPage("stickers") else PackPage(PackKind.STICKER, onPick, onManage)
             }
         }
         // Tabletka
@@ -275,7 +276,7 @@ private fun EmojiPage(onEmoji: (String) -> Unit, onPick: (PackPick) -> Unit) {
     val lib by store.library.collectAsStateWithLifecycle()
     val changes by store.changes.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { store.load() }
-    val packs: List<PackInfo> = remember(lib, changes) { store.usable(PackKind.EMOJI) }
+    val packs: List<PackInfo> = remember(lib, changes) { if (TG_STICKERS_ON) emptyList() else store.usable(PackKind.EMOJI) }
     val headers = remember { mutableStateMapOf<Long, PackHeader?>() }
     LaunchedEffect(packs) { packs.forEach { p -> if (!headers.containsKey(p.id)) headers[p.id] = store.header(p) } }
     var recent by remember { mutableStateOf(recentEmoji(ctx)) }
@@ -284,6 +285,9 @@ private fun EmojiPage(onEmoji: (String) -> Unit, onPick: (PackPick) -> Unit) {
     var toneTick by remember { mutableStateOf(0) }
     val grid = rememberLazyGridState()
     val scope = rememberCoroutineScope()
+    val tgEmoji = if (TG_STICKERS_ON) rememberTgSets("emoji") else null
+    var tgPreview by remember { mutableStateOf<uz.arumediatv.com.data.TgDoc?>(null) }
+    tgPreview?.let { TgPreview(it) { tgPreview = null } }
 
     fun shown(e: String): String = if (supportsTone(e)) withTone(e, toneOf(ctx, e)) else e
     fun pick(e: String) { val v = shown(e); onEmoji(v); pushRecentEmoji(ctx, v); recent = recentEmoji(ctx) }
@@ -356,6 +360,7 @@ private fun EmojiPage(onEmoji: (String) -> Unit, onPick: (PackPick) -> Unit) {
                     EmojiCell(if (tone > 0) withTone(base, tone) else base, onLong = if (supportsTone(base)) ({ toneFor = base }) else null) { pick(base) }
                 }
             }
+            if (tgEmoji != null) tgSetItems(tgEmoji) { tgPreview = it }
             packs.forEach { p ->
                 header("p${p.id}", p.title)
                 val its = headers[p.id]?.items.orEmpty()

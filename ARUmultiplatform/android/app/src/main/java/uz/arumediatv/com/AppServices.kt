@@ -59,6 +59,7 @@ object AppServices {
     lateinit var gate: ChannelGate
         private set
     lateinit var packs: PackStore
+    lateinit var tgStickers: uz.arumediatv.com.data.TgStickerStore
         private set
     lateinit var admin: AdminApi
         private set
@@ -110,6 +111,7 @@ object AppServices {
         traffic = TrafficMeter(ctx, auth)
         gate = ChannelGate(ctx, auth, telegram)
         thumbs = uz.arumediatv.com.data.ThumbStore(ctx, telegram, videoCache)
+        tgStickers = uz.arumediatv.com.data.TgStickerStore(ctx)
         packs = PackStore(ctx, auth, telegram, { sync })
         admin = AdminApi(auth)
         sync.trafficPending = { traffic.pendingBytes }

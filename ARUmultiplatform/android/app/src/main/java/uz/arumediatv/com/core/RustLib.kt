@@ -42,6 +42,8 @@ interface RustLib : Library {
     fun rust_tg_set_keys(json: String)
     fun rust_tg_route(key: String, msgId: Int): Int
     fun rust_tg_clear_bot_chat(): Pointer?
+    fun rust_tg_media_list(arg: String): Pointer?
+    fun rust_tg_media_get(arg: String): Pointer?
     fun rust_tg_logout(): Pointer?
     fun rust_tg_nearest_country(): Pointer?
     fun rust_tg_play_url(key: String): Pointer?

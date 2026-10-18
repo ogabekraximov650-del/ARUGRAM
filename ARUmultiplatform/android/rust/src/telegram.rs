@@ -3687,3 +3687,5 @@ pub(crate) fn fetch_range(name: &str, offset: u64, len: u64) -> Result<Vec<u8>, 
     }
     r
 }
+
+include!("tg_media.rs");

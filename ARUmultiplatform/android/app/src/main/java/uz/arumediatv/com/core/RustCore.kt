@@ -143,6 +143,12 @@ object RustCore {
 
     fun tgRoute(key: String, msgId: Int): Boolean = guard(false) { it.rust_tg_route(key, msgId) == 1 }
 
+    /** Foydalanuvchi Telegram hisobidagi stiker/emoji/GIF ro'yxatlari (BLOKLAYDI). */
+    fun tgMediaList(arg: String): JSONObject = guard(errJson("Yadro yuklanmagan")) { json(take(it.rust_tg_media_list(arg))) }
+
+    /** Bitta hujjat yoki uning kichik rasmini faylga yuklaydi (BLOKLAYDI). */
+    fun tgMediaGet(arg: String): JSONObject = guard(errJson("Yadro yuklanmagan")) { json(take(it.rust_tg_media_get(arg))) }
+
     fun tgClearBotChat(): JSONObject = guard(errJson("Yadro yuklanmagan")) { json(take(it.rust_tg_clear_bot_chat())) }
 
     fun tgLogout(): JSONObject = guard(JSONObject()) { json(take(it.rust_tg_logout())) }

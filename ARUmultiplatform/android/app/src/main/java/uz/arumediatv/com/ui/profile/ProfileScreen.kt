@@ -101,7 +101,7 @@ fun ProfileScreen(onLogin: () -> Unit, onEdit: () -> Unit, onSessions: () -> Uni
     }
 
     suspend fun wipeLocal() {
-        tg.logout()
+        tg.logout(); runCatching { uz.arumediatv.com.AppServices.tgStickers.clear() }
         AppServices.images.clearDisk()
         AppServices.library.clear()
         AppServices.myStats.clear()

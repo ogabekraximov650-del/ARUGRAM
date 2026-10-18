@@ -119,7 +119,7 @@ private object GifSound {
 
 /** Video ko'rinishidagi GIF (mp4): ovozsiz, cheksiz takrorlanadi. Baytlar vaqtinchalik faylga yoziladi. */
 @Composable
-private fun LoopingVideo(bytes: ByteArray, key: String, modifier: Modifier, sound: Boolean = false) {
+internal fun LoopingVideo(bytes: ByteArray, key: String, modifier: Modifier, sound: Boolean = false) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val player = remember(key) {
         androidx.media3.exoplayer.ExoPlayer.Builder(ctx.applicationContext).build().apply {
