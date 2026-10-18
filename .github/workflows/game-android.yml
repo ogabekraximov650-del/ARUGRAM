@@ -1,0 +1,112 @@
+name: O'yin (Rust + wgpu + Kotlin) — build
+
+# `game/**` o'zgarganda: dvigatel testlari + oflayn kadrlar (PNG) -> Android .so -> debug APK -> Telegram "Saqlangan xabarlar".
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'game/**'
+      - '.github/workflows/game-android.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: game-android
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Rust (stable + Android targetlari)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: armv7-linux-androideabi, aarch64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "game/engine -> target"
+
+      - name: Dvigatel testlari
+        working-directory: game/engine
+        run: cargo test --release
+
+      # Dasturiy Vulkan (llvmpipe) bilan oflayn kadrlar — dvigatel chizishini tekshirish.
+      - name: Oflayn kadrlar (PNG)
+        working-directory: game/engine
+        continue-on-error: true
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq mesa-vulkan-drivers libvulkan1
+          mkdir -p "$RUNNER_TEMP/preview"
+          cargo run --release --example preview -- "$RUNNER_TEMP/preview"
+
+      - uses: actions/upload-artifact@v4
+        continue-on-error: true
+        with:
+          name: game-preview-${{ github.run_number }}
+          path: ${{ runner.temp }}/preview
+          if-no-files-found: ignore
+
+      - name: cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Dvigatelni Android uchun yig'ish
+        working-directory: game/engine
+        run: |
+          cargo ndk -t arm64-v8a -t armeabi-v7a -o ../android/app/src/main/jniLibs build --release
+          ls -la ../android/app/src/main/jniLibs/*/
+
+      - name: Android SDK litsenziyalari
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Debug APK
+        id: apk
+        working-directory: game/android
+        env:
+          VERSION_CODE: ${{ github.run_number }}
+        run: |
+          gradle --no-daemon :app:assembleDebug
+          OUT="$RUNNER_TEMP/apks"; mkdir -p "$OUT"
+          cp app/build/outputs/apk/debug/app-debug.apk "$OUT/aru-game-${{ github.run_number }}.apk"
+          ls -la "$OUT"
+          unzip -l "$OUT"/*.apk | grep aru_game
+          echo "dir=$OUT" >> "$GITHUB_OUTPUT"
+
+      - name: APK'ni Telegram "Saqlangan xabarlar"ga yuborish
+        continue-on-error: true
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+        run: |
+          K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          pip install --no-cache-dir -q pyrogram==2.0.106 tgcrypto==1.2.5
+          for APK in "${{ steps.apk.outputs.dir }}"/*.apk; do
+            S="$RUNNER_TEMP/notify_session"
+            K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K \
+              -in tool/encode/session.enc -out "$S.session"
+            head -c 16 "$S.session" | grep -q "SQLite format 3"
+            python tool/notify/send_apk.py "$S" "$APK" \
+              "ARU O'yin (tajriba) build ${{ github.run_number }}"
+            rm -f "$S.session"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aru-game-${{ github.run_number }}
+          path: ${{ steps.apk.outputs.dir }}
+          retention-days: 30

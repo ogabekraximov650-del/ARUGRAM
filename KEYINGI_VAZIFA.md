@@ -6568,3 +6568,15 @@ Foydalanuvchi skrinshotlar bilan farqlarni ko'rsatdi; Kotlin ekranlari Flutter t
 - **Haqiqiy poster va qism:** worker `GET /api/video/assets` (`worker/src/videoassets.rs`, `ENCODE_TOKEN`, faqat o'qiydi) eng ko'p ko'rilgan bo'limlar posteri va bitta kichik sifatli qism haqida ma'lumot beradi. `fetch_assets.py` ularni Telegram kanalidan oladi (kodlash bilan bir xil `tool/encode/session.enc` sessiyasi), AES-128-CTR bilan ochadi, qismdan ikki lavha kadrlarga ajratadi. Xato bo'lsa video rasmsiz tayyorlanadi.
 - **Actions:** `.github/workflows/video.yml` (`tool/video/**` push qilinganda o'zi ishlaydi): assets -> 8 parallel kadr bo'lagi -> audio -> birlashtirish. Natija — `aru-video` artefakti (MP4, 14 kun).
 - **DIQQAT:** `assets` bosqichi kodlash bilan BIR XIL Telegram sessiyasini qisqa vaqtga ishlatadi (shrift workflow'i kabi). Kodlash run'i bilan bir vaqtda ishlasa sessiya to'qnashishi mumkin — ishlamay qolsa qayta urining.
+
+## O'yin (game/) — o'z dvigatelimiz, 1-bosqich: texnik tajriba
+
+Nima: oflayn 3D o'yin uchun Rust + wgpu dvigateli (`game/engine`) va Kotlin Android qobig'i (`game/android`, paket `uz.arumediatv.game`, ARUMEDIATV ilovasidan alohida).
+Nega: PUBG darajasiga bosqichma-bosqich (low-poly → realistik, keyin botlar/zona, so'ng Wi‑Fi/Bluetooth multiplayer). Avval GPU, kamera va sensorli boshqaruv telefonda ishlashini tasdiqlash.
+
+- `engine/src/camera.rs`, `input.rs` — kamera (yaw/pitch), chap yarim ekran joystik, o'ng yarim ekran qarash; testlar bor.
+- `engine/src/renderer.rs`, `shader.wgsl`, `hud.rs`, `world.rs` — instansli kublar, Lambert+tuman+zamin to'ri, Depth32Float, HUD (joystik, nishon).
+- `engine/src/android.rs` — JNI (`NativeBridge`): init/resize/frame/touch/destroy, har biri `catch_unwind` ichida.
+- `engine/examples/preview.rs` — oflayn PNG kadrlar (CI'da llvmpipe bilan), artefakt `game-preview-N`.
+- `.github/workflows/game-android.yml` — testlar → cargo-ndk → debug APK → Telegram "Saqlangan xabarlar" (`game/**` o'zgarganda).
+- Keyingi: dunyo/fizika (to'qnashuv), qurol/botlar, zona, grafika (soya, PBR), tarmoq (avval Wi‑Fi UDP).

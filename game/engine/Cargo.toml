@@ -1,0 +1,31 @@
+[package]
+name = "aru_game"
+version = "0.1.0"
+edition = "2021"
+description = "ARU o'yin dvigateli (Rust + wgpu): Android uchun .so, kompyuterda esa oflayn tekshiruv (examples/preview.rs)."
+
+[lib]
+# cdylib — Android .so; rlib — kompyuterdagi tekshiruv va testlar.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wgpu = { version = "24", default-features = false, features = ["wgsl"] }
+glam = "0.29"
+bytemuck = { version = "1", features = ["derive"] }
+log = "0.4"
+pollster = "0.4"
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
+ndk = "0.9"
+android_logger = "0.14"
+raw-window-handle = "0.6"
+
+[dev-dependencies]
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
