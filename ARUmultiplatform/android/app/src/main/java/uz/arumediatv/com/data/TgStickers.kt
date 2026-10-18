@@ -245,6 +245,23 @@ class TgStickerStore(ctx: Context) {
         } finally { counter.decrementAndGet() }
     }
 
+    /**
+     * Chatga/izohga yuborish uchun fayl: animatsiyali WebP (bo'lsa/aylantirsa bo'ladi), aks holda statik rasm.
+     * Natija: (baytlar, kengaytma, mime) yoki `null`.
+     */
+    suspend fun exportForSend(d: TgDoc): Triple<ByteArray, String, String>? {
+        val b = (if (d.isTgs || d.isGifLike) anim(d) else null)
+            ?: (if (d.kind == "webp") bytes(d, false) else bytes(d, true))
+            ?: return null
+        val isJpg = b.size > 3 && b[0] == 0xFF.toByte() && b[1] == 0xD8.toByte()
+        val isPng = b.size > 3 && b[1] == 'P'.code.toByte() && b[2] == 'N'.code.toByte()
+        return when {
+            isJpg -> Triple(b, "jpg", "image/jpeg")
+            isPng -> Triple(b, "png", "image/png")
+            else -> Triple(b, "webp", "image/webp")
+        }
+    }
+
     /** Oldindan tayyorlash: kichik rasm va (GIF/webm uchun) to'liq fayl diskka tushadi. */
     suspend fun prefetch(d: TgDoc) {
         poster(d)

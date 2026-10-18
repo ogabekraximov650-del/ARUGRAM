@@ -260,6 +260,15 @@ fun CommentsTab(season: Season, onOpenProfile: (Long) -> Unit, onLogin: () -> Un
                 BackHandler { panelOpen = false }
                 uz.arumediatv.com.ui.packs.TgMediaPanel(
                     onEmoji = { text += it },
+                    onTgSend = { d, kind ->
+                        scope.launch {
+                            toast("Yuborilmoqda…")
+                            val (name, err) = uz.arumediatv.com.ui.packs.tgUploadForSend(ctx, d, user?.id ?: 0L)
+                            if (name == null) { toast(err ?: "Yuborilmadi"); return@launch }
+                            val e2 = store.add("", parentId = replyTo?.id.orEmpty(), mediaFile = name, mediaType = if (kind == "gifs") "gif" else "sticker")
+                            if (e2 == null) { replyTo = null; panelOpen = false } else toast(e2)
+                        }
+                    },
                     onPick = { pick ->
                         if (pick.kind == uz.arumediatv.com.data.PackKind.EMOJI) text += uz.arumediatv.com.data.packEmojiToken(pick.pack, pick.item, pick.emoji)
                         else scope.launch {
@@ -355,7 +364,8 @@ private fun CommentRow(
                 Text(timeAgo(c.createdAt), color = AruColors.TextFaint, fontSize = 11.sp)
             }
             if (c.mediaFile.isNotEmpty() && (c.mediaType == "sticker" || c.mediaType == "gif")) {
-                uz.arumediatv.com.ui.packs.PackRefImage(c.mediaFile, Modifier.padding(top = 4.dp).size(if (c.mediaType == "sticker") 130.dp else 180.dp))
+                if (c.mediaFile.startsWith("tgm_")) uz.arumediatv.com.ui.packs.TgSentMedia(c.mediaFile, Modifier.padding(top = 4.dp).size(if (c.mediaType == "sticker") 130.dp else 180.dp))
+                else uz.arumediatv.com.ui.packs.PackRefImage(c.mediaFile, Modifier.padding(top = 4.dp).size(if (c.mediaType == "sticker") 130.dp else 180.dp))
             }
             if (c.body.isNotEmpty()) uz.arumediatv.com.ui.packs.RichPackText(c.body, Color.White.copy(alpha = 0.88f), 14.sp, Modifier.padding(top = 2.dp), 20.sp)
             Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {

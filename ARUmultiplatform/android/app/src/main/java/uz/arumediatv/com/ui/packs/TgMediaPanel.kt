@@ -110,6 +110,7 @@ fun TgMediaPanel(
     onBackspace: () -> Unit,
     onManage: () -> Unit,
     modifier: Modifier = Modifier,
+    onTgSend: ((uz.arumediatv.com.data.TgDoc, String) -> Unit)? = null,
 ) {
     val pager = rememberPagerState(initialPage = lastTab) { 3 }
     val scope = rememberCoroutineScope()
@@ -120,8 +121,8 @@ fun TgMediaPanel(
         HorizontalPager(pager, Modifier.fillMaxSize(), beyondViewportPageCount = 0) { page ->
             when (page) {
                 0 -> EmojiPage(onEmoji, onPick)
-                1 -> if (TG_STICKERS_ON) TgGifPage(onEmoji) else PackPage(PackKind.GIF, onPick, onManage)
-                else -> if (TG_STICKERS_ON) TgAccountPage("stickers", onEmoji) else PackPage(PackKind.STICKER, onPick, onManage)
+                1 -> if (TG_STICKERS_ON) TgGifPage(onEmoji, onTgSend) else PackPage(PackKind.GIF, onPick, onManage)
+                else -> if (TG_STICKERS_ON) TgAccountPage("stickers", onEmoji, onTgSend) else PackPage(PackKind.STICKER, onPick, onManage)
             }
         }
         // Tabletka

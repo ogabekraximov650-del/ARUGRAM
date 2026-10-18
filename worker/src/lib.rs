@@ -6823,15 +6823,17 @@ async fn comments_add(mut req: Request, env: &Env, origin: &str) -> Result<Respo
     // stiker yoki GIF havolasi (`pk_<to'plam>_<element>`, `packs.rs`).
     let want_media = bare_name(b["media_file"].as_str().unwrap_or("")).trim().to_string();
     let want_type = b["media_type"].as_str().unwrap_or("");
+    // Telegram hisobidagi stiker/GIF (`tgm_<id>_...`, ilova yuklagan o'z fayli) — to'plam ham, obuna ham kerak emas.
+    let is_tgm = (want_type == "sticker" || want_type == "gif") && want_media.starts_with(&format!("tgm_{me}_"));
     if needs_pack_sub(env, &u,
-        (!want_media.is_empty() && (want_type == "sticker" || want_type == "gif")) || body.contains("[pe:")).await
+        (!want_media.is_empty() && !is_tgm && (want_type == "sticker" || want_type == "gif")) || body.contains("[pe:")).await
     {
         return json_resp(&json!({"error": PACK_SUB_MSG}), 402);
     }
     let (media_file, media_type): (String, &str) = if want_media.is_empty() {
         (String::new(), "")
     } else if (want_type == "sticker" || want_type == "gif")
-        && packs::valid_ref(env, &want_media, want_type).await
+        && (is_tgm || packs::valid_ref(env, &want_media, want_type).await)
     {
         (want_media, if want_type == "gif" { "gif" } else { "sticker" })
     } else {
@@ -7396,10 +7398,12 @@ async fn chat_send(mut req: Request, env: &Env, origin: &str) -> Result<Response
     // Stiker va GIF — ilovaning O'Z to'plamlaridan (`pk_<to'plam>_<element>`,
     // `packs.rs`): fayl yuklanmaydi, faqat mavjud to'plamga havola.
     let is_pack_media = want_type == "sticker" || want_type == "gif";
-    if needs_pack_sub(env, &u, is_pack_media || body.contains("[pe:")).await {
+    // Telegram hisobidagi stiker/GIF (`tgm_<id>_...`, ilova yuklagan o'z fayli) — to'plam ham, obuna ham kerak emas.
+    let is_tgm = is_pack_media && media_file.starts_with(&format!("tgm_{me}_"));
+    if needs_pack_sub(env, &u, (is_pack_media && !is_tgm) || body.contains("[pe:")).await {
         return json_resp(&json!({"error": PACK_SUB_MSG}), 402);
     }
-    if is_pack_media {
+    if is_pack_media && !is_tgm {
         if !packs::valid_ref(env, &media_file, want_type).await {
             return json_resp(&json!({"error": "To'plam elementi topilmadi"}), 400);
         }
@@ -10854,7 +10858,10 @@ async fn tg_user_media(env: &Env, msg: &Value) {
             || name.starts_with(&format!("orig_{uid}_"))
             // To'plamga qo'shiladigan element (admin ko'rib chiqquncha
             // kanalda vaqtincha turadi) — `packs.rs`.
-            || name.starts_with(&format!("pki_{uid}_"));
+            || name.starts_with(&format!("pki_{uid}_"))
+            // Telegram hisobidagi stiker/GIF'ni chat yoki izohga yuborish (ilova uni
+            // yengil WebP qilib yuklaydi) — faqat O'Z nomi bilan.
+            || name.starts_with(&format!("tgm_{uid}_"));
         if !own {
             return;
         }
@@ -14225,7 +14232,8 @@ async fn tg_route(mut req: Request, env: &Env, path: &str, method: Method) -> Re
             // (bo'sh bo'lsa). Admin — istalganiga.
             let own = name.starts_with(&format!("avatar_{me}_"))
                 || name.starts_with(&format!("chat_{me}_"))
-                || name.starts_with(&format!("pki_{me}_"));
+                || name.starts_with(&format!("pki_{me}_"))
+                || name.starts_with(&format!("tgm_{me}_"));
             let have = row["file_key"].as_str().unwrap_or("");
             if valid_file_key(&key) && (own || is_admin(&u)) && have.is_empty() {
                 turso_exec(env, "UPDATE tg_files SET file_key=? WHERE file_name=? AND file_key=''",

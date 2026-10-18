@@ -10,6 +10,9 @@ import android.widget.ImageView
 import androidx.compose.ui.viewinterop.AndroidView
 import java.nio.ByteBuffer
 import androidx.compose.foundation.Image
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -188,7 +191,7 @@ fun centerRowIds(vis: List<androidx.compose.foundation.lazy.grid.LazyGridItemInf
 /** Oldindan tayyorlangan animatsiyali WebP. `play = false` — birinchi kadr (to'xtatilgan). */
 @android.annotation.SuppressLint("NewApi")
 @Composable
-private fun TgAnimatedWebp(bytes: ByteArray, play: Boolean, crop: Boolean, modifier: Modifier) {
+internal fun TgAnimatedWebp(bytes: ByteArray, play: Boolean, crop: Boolean, modifier: Modifier) {
     if (Build.VERSION.SDK_INT < 28) return
     val drawable = remember(bytes) { runCatching { ImageDecoder.decodeDrawable(ImageDecoder.createSource(ByteBuffer.wrap(bytes))) }.getOrNull() }
     AndroidView(
@@ -260,7 +263,7 @@ fun LazyGridScope.tgSetItems(st: TgSetsState, onTap: (TgDoc) -> Unit, onLong: (T
 
 /** GIF yoki Stikerlar sahifasi — foydalanuvchining Telegram hisobidan. */
 @Composable
-fun TgAccountPage(kind: String, onEmoji: (String) -> Unit) {
+fun TgAccountPage(kind: String, onEmoji: (String) -> Unit, onTg: ((TgDoc, String) -> Unit)? = null) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val st = rememberTgSets(kind)
     val grid = rememberLazyGridState()
@@ -318,12 +321,12 @@ fun TgAccountPage(kind: String, onEmoji: (String) -> Unit) {
                 items(if (its.isEmpty()) s.count else its.size, key = { "si${s.id}:${its.getOrNull(it)?.id ?: -(it + 1L)}" }) { i ->
                     val d = its.getOrNull(i)
                     if (d == null) TgShadow(st, s)
-                    else Box(Modifier.aspectRatio(1f).clip(RoundedCornerShape(10.dp)).combinedClickable(onClick = { tgSend(ctx, d, kind, onEmoji) }, onLongClick = { preview = d })) { TgItem(d, Modifier.fillMaxSize().padding(3.dp)) }
+                    else Box(Modifier.aspectRatio(1f).clip(RoundedCornerShape(10.dp)).combinedClickable(onClick = { tgSend(ctx, d, kind, onEmoji, onTg) }, onLongClick = { preview = d })) { TgItem(d, Modifier.fillMaxSize().padding(3.dp)) }
                 }
             }
         } }
     }
-    preview?.let { p -> TgPreview(p, kind, { tgSend(ctx, p, kind, onEmoji) }) { preview = null } }
+    preview?.let { p -> TgPreview(p, kind, { tgSend(ctx, p, kind, onEmoji, onTg) }) { preview = null } }
 }
 
 /** Faqat kichik rasm (tasmadagi belgi uchun). */
@@ -352,10 +355,50 @@ fun TgSetIcon(st: TgSetsState, s: TgSet, modifier: Modifier) {
     }
 }
 
-/** Bosilganda: emoji bo'lsa oddiy emoji matni sifatida kiritiladi; Telegram stiker/GIF'ini yuborish hozircha yo'q. */
-fun tgSend(ctx: android.content.Context, d: TgDoc, kind: String, onEmoji: (String) -> Unit) {
-    if (kind == "emoji" && d.emoji.isNotBlank()) onEmoji(d.emoji)
-    else android.widget.Toast.makeText(ctx, "Telegram ${if (kind == "gifs") "GIF" else "stiker"}larini yuborish keyingi bosqichda", android.widget.Toast.LENGTH_SHORT).show()
+/**
+ * Bosilganda: emoji — oddiy emoji matni sifatida yozish maydoniga; stiker/GIF — chatga yoki izohga yuboriladi (`onTg`).
+ */
+fun tgSend(ctx: android.content.Context, d: TgDoc, kind: String, onEmoji: (String) -> Unit, onTg: ((TgDoc, String) -> Unit)? = null) {
+    if (kind == "emoji") {
+        if (d.emoji.isNotBlank()) onEmoji(d.emoji)
+        return
+    }
+    if (onTg != null) onTg(d, kind)
+    else android.widget.Toast.makeText(ctx, "Bu yerga Telegram ${if (kind == "gifs") "GIF" else "stiker"}ini yuborib bo'lmaydi", android.widget.Toast.LENGTH_SHORT).show()
+}
+
+/**
+ * Telegram hujjatini yuborishga tayyorlaydi (yengil WebP) va kanalga yuklaydi. Natija: `(fayl nomi, null)` yoki `(null, xato)`.
+ * Nomi `tgm_<hisob>_<vaqt>.<kengaytma>` — worker shu nomni faqat egasi uchun qabul qiladi, hamma ko'ra oladi.
+ */
+suspend fun tgUploadForSend(ctx: android.content.Context, d: TgDoc, userId: Long): Pair<String?, String?> {
+    val ex = AppServices.tgStickers.exportForSend(d) ?: return null to "Stiker tayyorlanmadi — internetni tekshiring"
+    val name = "tgm_${userId}_${System.currentTimeMillis()}.${ex.second}"
+    val f = java.io.File(ctx.cacheDir, name)
+    return try {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { f.writeBytes(ex.first) }
+        val err = AppServices.telegram.uploadFile(f.absolutePath, name, ex.third)
+        if (err != null) null to err else name to null
+    } finally { runCatching { f.delete() } }
+}
+
+/** Yuborilgan Telegram stiker/GIF (`tgm_...`): animatsiyali WebP o'zi harakatlanadi. */
+@Composable
+fun TgSentMedia(url: String, modifier: Modifier = Modifier) {
+    val ready by remember { AppServices.telegram.state.map { it.authorized && it.configured && it.port > 0 }.distinctUntilChanged() }
+        .collectAsStateWithLifecycle(initialValue = AppServices.telegram.state.value.let { it.authorized && it.configured && it.port > 0 })
+    var bytes by remember(url) { mutableStateOf<ByteArray?>(null) }
+    LaunchedEffect(url, ready) { if (bytes == null && url.isNotEmpty()) bytes = AppServices.images.bytes(url, network = ready) }
+    Box(modifier) {
+        val b = bytes
+        if (b != null) {
+            if (Build.VERSION.SDK_INT >= 28) TgAnimatedWebp(b, true, false, Modifier.fillMaxSize())
+            else {
+                val bmp = remember(b) { BitmapFactory.decodeByteArray(b, 0, b.size)?.asImageBitmap() }
+                if (bmp != null) Image(bmp, null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+            }
+        }
+    }
 }
 
 /**
@@ -422,7 +465,7 @@ private fun gifRows(g: List<TgDoc>, width: Float, gap: Float, target: Float): Li
 
 /** GIF sahifasi: o'lchamiga qarab 2–3 tadan qator, ekranda to'liq ko'ringan barcha GIF harakatlanadi (Telegramdagidek), atrofi oldindan tayyorlanadi. */
 @Composable
-fun TgGifPage(onEmoji: (String) -> Unit) {
+fun TgGifPage(onEmoji: (String) -> Unit, onTg: ((TgDoc, String) -> Unit)? = null) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val st = rememberTgSets("gifs")
     val store = AppServices.tgStickers
@@ -457,7 +500,7 @@ fun TgGifPage(onEmoji: (String) -> Unit) {
                     val r = rows[i]
                     Row(Modifier.fillMaxWidth().height(r.h.dp), horizontalArrangement = Arrangement.spacedBy(gap.dp)) {
                         r.items.forEach { d ->
-                            Box(Modifier.width((d.ratio * r.h).dp).fillMaxHeight().clip(RoundedCornerShape(10.dp)).combinedClickable(onClick = { tgSend(ctx, d, "gifs", onEmoji) }, onLongClick = { preview = d })) {
+                            Box(Modifier.width((d.ratio * r.h).dp).fillMaxHeight().clip(RoundedCornerShape(10.dp)).combinedClickable(onClick = { tgSend(ctx, d, "gifs", onEmoji, onTg) }, onLongClick = { preview = d })) {
                                 TgItem(d, Modifier.fillMaxSize(), scale = ContentScale.Crop)
                             }
                         }
@@ -466,5 +509,5 @@ fun TgGifPage(onEmoji: (String) -> Unit) {
             }
         }
     }
-    preview?.let { p -> TgPreview(p, "gifs", { tgSend(ctx, p, "gifs", onEmoji) }) { preview = null } }
+    preview?.let { p -> TgPreview(p, "gifs", { tgSend(ctx, p, "gifs", onEmoji, onTg) }) { preview = null } }
 }
