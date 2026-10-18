@@ -43,6 +43,8 @@ pub struct Frame<'a> {
     pub dynamic: &'a Lists,
     /// Har mesh turi uchun: dinamik ro'yxatning boshidagi nechtasi soya tashlaydi.
     pub dynamic_shadow: [usize; MESH_COUNT],
+    /// Har mesh turi uchun: dinamik ro'yxat boshidagi nechtasiga anime konturi chiziladi (qiz).
+    pub outline: [usize; MESH_COUNT],
     /// Birinchi shaxs qurol/qo'llar (kamera fazosida: x o'ng, y tepa, -z oldinga).
     pub viewmodel: &'a Lists,
     pub hud: &'a [HudVertex],
@@ -66,6 +68,7 @@ pub struct Renderer {
     scene_pipeline: wgpu::RenderPipeline,
     shadow_pipeline: wgpu::RenderPipeline,
     sky_pipeline: wgpu::RenderPipeline,
+    outline_pipeline: wgpu::RenderPipeline,
     hud_pipeline: wgpu::RenderPipeline,
     shadow_view: wgpu::TextureView,
     globals_buf: wgpu::Buffer,
@@ -419,6 +422,27 @@ impl Renderer {
             multiview: None,
             cache: None,
         });
+        let outline_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("outline"),
+            layout: Some(&scene_pl),
+            vertex: wgpu::VertexState {
+                module: &scene_sh,
+                entry_point: Some("vs_outline"),
+                compilation_options: Default::default(),
+                buffers: &vertex_layouts,
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &scene_sh,
+                entry_point: Some("fs_outline"),
+                compilation_options: Default::default(),
+                targets: &[Some(format.into())],
+            }),
+            primitive: wgpu::PrimitiveState { cull_mode: Some(wgpu::Face::Front), ..Default::default() },
+            depth_stencil: Some(depth_state(true, wgpu::CompareFunction::Less, Default::default())),
+            multisample: Default::default(),
+            multiview: None,
+            cache: None,
+        });
         let hud_attrs = wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x4];
         let hud_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("hud"),
@@ -539,6 +563,7 @@ impl Renderer {
             scene_pipeline,
             shadow_pipeline,
             sky_pipeline,
+            outline_pipeline,
             hud_pipeline,
             shadow_view,
             globals_buf,
@@ -700,6 +725,17 @@ impl Renderer {
                 if dyn_n[k] > 0 {
                     pass.set_vertex_buffer(1, mb.dyn_buf.slice(..));
                     pass.draw_indexed(0..mb.index_count, 0, 0..dyn_n[k]);
+                }
+            }
+            // anime konturi (qiz)
+            pass.set_pipeline(&self.outline_pipeline);
+            for (k, mb) in self.meshes.iter().enumerate() {
+                let n = (frame.outline[k] as u32).min(dyn_n[k]);
+                if n > 0 {
+                    pass.set_vertex_buffer(0, mb.vb.slice(..));
+                    pass.set_index_buffer(mb.ib.slice(..), wgpu::IndexFormat::Uint16);
+                    pass.set_vertex_buffer(1, mb.dyn_buf.slice(..));
+                    pass.draw_indexed(0..mb.index_count, 0, 0..n);
                 }
             }
             // osmon eng oxirida: faqat bo'sh piksellarda ishlaydi (erta chuqurlik tekshiruvi)

@@ -93,9 +93,10 @@ fn main() {
             8 => {
                 // yuz yaqindan
                 g.touch(TouchAction::Up, 7, 0.0, 0.0);
-                g.camera.pos = Vec3::new(0.4, 1.58, 9.2);
+                g.camera.pos = Vec3::new(0.4, 1.58, 8.95);
                 g.camera.yaw = 0.0;
                 g.camera.pitch = 0.0;
+                g.companion.look_yaw = 0.0;
                 g.companion.pos = Vec3::new(0.4, 0.0, 8.2);
                 g.companion.yaw = std::f32::consts::PI;
             }
@@ -108,7 +109,7 @@ fn main() {
         }
         let hud = g.hud();
         let fd = g.frame();
-        let frame = Frame { dynamic: &fd.dynamic, dynamic_shadow: fd.dynamic_shadow, viewmodel: &fd.viewmodel, hud: &hud, time: g.time };
+        let frame = Frame { dynamic: &fd.dynamic, dynamic_shadow: fd.dynamic_shadow, outline: fd.outline, viewmodel: &fd.viewmodel, hud: &hud, time: g.time };
         r.render(&view, &g.camera, &frame);
         let bpr = w * 4;
         let buf = r.device().create_buffer(&wgpu::BufferDescriptor {

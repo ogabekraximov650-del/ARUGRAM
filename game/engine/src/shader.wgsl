@@ -28,6 +28,8 @@ struct VOut {
     @location(1) normal: vec3<f32>,
     @location(2) color: vec3<f32>,
     @location(3) mat: f32,
+    @location(4) lp: vec3<f32>,
+    @location(5) ca: f32,
 };
 
 fn qrot(q: vec4<f32>, v: vec3<f32>) -> vec3<f32> {
@@ -45,6 +47,8 @@ fn vs_main(v: VIn) -> VOut {
     o.normal = normalize(qrot(v.i_rot, ns));
     o.color = v.i_color.rgb;
     o.mat = v.i_scale.w;
+    o.lp = v.pos;
+    o.ca = v.i_color.a;
     o.clip = g.view_proj * vec4<f32>(w, 1.0);
     return o;
 }
@@ -53,6 +57,36 @@ fn vs_main(v: VIn) -> VOut {
 fn vs_shadow(v: VIn) -> @builtin(position) vec4<f32> {
     let w = qrot(v.i_rot, v.pos * v.i_scale.xyz) + v.i_pos.xyz;
     return g.light_vp * vec4<f32>(w, 1.0);
+}
+
+// ---------- kontur (anime uslubi): old yuzlarni yashirib, shaklni sal kattalashtirib chizish ----------
+struct OutOut {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) color: vec3<f32>,
+    @location(1) world: vec3<f32>,
+};
+
+@vertex
+fn vs_outline(v: VIn) -> OutOut {
+    var o: OutOut;
+    var w = qrot(v.i_rot, v.pos * v.i_scale.xyz) + v.i_pos.xyz;
+    let ns = v.normal / max(v.i_scale.xyz, vec3<f32>(0.0001));
+    let n = normalize(qrot(v.i_rot, ns));
+    let d = length(w - g.cam_pos.xyz);
+    // ekranda deyarli bir xil qalinlik: masofaga qarab
+    w = w + n * (0.0035 + 0.0022 * d);
+    o.world = w;
+    o.color = v.i_color.rgb;
+    o.clip = g.view_proj * vec4<f32>(w, 1.0);
+    return o;
+}
+
+@fragment
+fn fs_outline(i: OutOut) -> @location(0) vec4<f32> {
+    let c = pow(i.color * vec3<f32>(0.30, 0.22, 0.32), vec3<f32>(2.2));
+    let d = length(i.world - g.cam_pos.xyz);
+    let f = 1.0 - exp(-d * g.fog.a);
+    return vec4<f32>(encode(mix(c, g.fog.rgb, clamp(f, 0.0, 1.0))), 1.0);
 }
 
 // ---------- shovqin ----------
@@ -235,26 +269,10 @@ fn surface(m: i32, c: vec3<f32>, w: vec3<f32>, n: vec3<f32>, far: bool) -> Surf 
     return s;
 }
 
-@fragment
-fn fs_main(i: VOut) -> @location(0) vec4<f32> {
-    let n = normalize(i.normal);
-    let m = i32(round(i.mat));
-    let dist0 = length(i.world - g.cam_pos.xyz);
-    let s = surface(m, i.color, i.world, n, dist0 > 55.0 && g.cam_pos.w < 0.5);
-    if (s.emissive > 0.5) {
-        let d = length(i.world - g.cam_pos.xyz);
-        let f = select(1.0 - exp(-d * g.fog.a), 0.0, g.cam_pos.w > 0.5);
-        return vec4<f32>(encode(mix(s.albedo * 3.0, g.fog.rgb, f)), 1.0);
-    }
-
-    let l = -g.sun_dir.xyz;
-    let ndl = dot(n, l);
-    let lambert = max((ndl + s.wrap) / (1.0 + s.wrap), 0.0);
-
-    // soya: 3x3 PCF
+fn shadow_at(world: vec3<f32>, n: vec3<f32>) -> f32 {
     var shadow = 1.0;
     if (g.cam_pos.w < 0.5) {
-        let ls = g.light_vp * vec4<f32>(i.world + n * 0.06, 1.0);
+        let ls = g.light_vp * vec4<f32>(world + n * 0.06, 1.0);
         let uv = vec2<f32>(ls.x * 0.5 + 0.5, 1.0 - (ls.y * 0.5 + 0.5));
         let texel = 1.0 / SHADOW_SIZE;
         var sh = 0.0;
@@ -268,6 +286,115 @@ fn fs_main(i: VOut) -> @location(0) vec4<f32> {
         let inside = select(0.0, 1.0, uv.x > 0.0 && uv.x < 1.0 && uv.y > 0.0 && uv.y < 1.0 && ls.z < 1.0);
         shadow = mix(1.0, sh, inside);
     }
+    return shadow;
+}
+
+fn in_ellipse(p: vec2<f32>, r: vec2<f32>) -> f32 {
+    return length(p / r);
+}
+
+/// Anime yuzi: bosh sharining mahalliy koordinatalarida (u,v in [-1,1], old tomon -z) ko'z, qosh, yonoq, og'iz.
+fn face_color(base: vec3<f32>, lp: vec3<f32>, open: f32) -> vec3<f32> {
+    var c = base;
+    if (lp.z > -0.02) {
+        return c;
+    }
+    let u = lp.x * 2.0;
+    let v = lp.y * 2.0;
+    // yonoq qizarishi
+    for (var k = 0; k < 2; k = k + 1) {
+        let sx = select(-1.0, 1.0, k == 1);
+        let b = in_ellipse(vec2<f32>(u - sx * 0.50, v + 0.34), vec2<f32>(0.17, 0.08));
+        c = mix(c, vec3<f32>(1.0, 0.55, 0.62), (1.0 - smoothstep(0.4, 1.0, b)) * 0.55);
+    }
+    for (var k = 0; k < 2; k = k + 1) {
+        let sx = select(-1.0, 1.0, k == 1);
+        let e = vec2<f32>(u - sx * 0.43, v + 0.02);
+        let ry = 0.30 * max(open, 0.08);
+        let d = in_ellipse(e, vec2<f32>(0.27, ry));
+        if (d < 1.0) {
+            // oq qismi, ko'k qorachiq (tepasi to'q, pasti och), qorachiq, yaltirashlar
+            c = vec3<f32>(0.97, 0.97, 1.0);
+            let di = in_ellipse(e - vec2<f32>(0.0, -0.01), vec2<f32>(0.20, ry * 0.95));
+            if (di < 1.0) {
+                let t = clamp(e.y / max(ry, 0.001) * 0.5 + 0.5, 0.0, 1.0);
+                var ic = mix(vec3<f32>(0.55, 0.85, 1.0), vec3<f32>(0.10, 0.18, 0.62), t);
+                ic = mix(ic, vec3<f32>(0.05, 0.08, 0.32), smoothstep(0.78, 1.0, di));
+                c = ic;
+                let dp = in_ellipse(e - vec2<f32>(0.0, -0.02), vec2<f32>(0.085, ry * 0.55));
+                if (dp < 1.0) { c = vec3<f32>(0.03, 0.04, 0.16); }
+            }
+            if (in_ellipse(e - vec2<f32>(-0.07 * sx, 0.12 * open), vec2<f32>(0.055, 0.075 * max(open, 0.2))) < 1.0) { c = vec3<f32>(1.0); }
+            if (in_ellipse(e - vec2<f32>(0.08 * sx, -0.14 * open), vec2<f32>(0.03, 0.04 * max(open, 0.2))) < 1.0) { c = vec3<f32>(0.95, 0.98, 1.0); }
+        }
+        // yuqori kiprik (qalin), pastki ingichka chiziq
+        if (d > 0.88 && d < 1.12 && e.y > -0.4 * ry) {
+            c = vec3<f32>(0.14, 0.06, 0.16);
+        }
+        if (d > 0.96 && d < 1.06 && e.y < -0.5 * ry) {
+            c = mix(c, vec3<f32>(0.55, 0.30, 0.35), 0.7);
+        }
+        // qosh
+        let b = vec2<f32>(u - sx * 0.45, v - 0.40 - 0.10 * (u * sx - 0.45));
+        if (abs(b.y) < 0.022 && abs(b.x) < 0.17) {
+            c = mix(c, vec3<f32>(0.55, 0.22, 0.42), 0.9);
+        }
+    }
+    // burun (kichik soya) va og'iz
+    if (in_ellipse(vec2<f32>(u, v + 0.28), vec2<f32>(0.035, 0.025)) < 1.0) { c = c * vec3<f32>(0.9, 0.8, 0.8); }
+    let m = vec2<f32>(u, v + 0.50);
+    if (abs(m.y + 0.7 * m.x * m.x - 0.02) < 0.017 && abs(m.x) < 0.14) {
+        c = vec3<f32>(0.62, 0.22, 0.30);
+    }
+    return c;
+}
+
+/// Anime (cel) yoritish: 2 pog'onali soya, sovuq soya rangi, qirra yorug'ligi, soch yaltirashi.
+fn toon(i: VOut, m: i32, n: vec3<f32>, shadow: f32) -> vec4<f32> {
+    var base = i.color;
+    if (m == 18) {
+        base = face_color(base, i.lp, i.ca);
+    }
+    let alb = lin(base);
+    let l = -g.sun_dir.xyz;
+    let v = normalize(g.cam_pos.xyz - i.world);
+    let h = dot(n, l) * 0.5 + 0.5;
+    let lit = smoothstep(0.46, 0.54, h) * shadow;
+    let shade = alb * vec3<f32>(0.62, 0.60, 0.80);
+    var col = mix(shade, alb * 1.08, lit);
+    col = col + alb * lin(vec3<f32>(0.40, 0.55, 0.80)) * 0.25;
+    if (m == 17) {
+        // soch: "farishta halqasi" yaltirashi
+        let ring = smoothstep(0.0, 0.05, 0.10 - abs(n.y - 0.40)) * lit;
+        col = mix(col, lin(vec3<f32>(1.0, 0.88, 0.95)), ring * 0.55);
+    }
+    let rim = pow(1.0 - max(dot(n, v), 0.0), 3.0) * 0.30;
+    col = col + SUN_COLOR * rim * lit * 0.6;
+    let d = length(i.world - g.cam_pos.xyz);
+    let f = select(1.0 - exp(-d * g.fog.a), 0.0, g.cam_pos.w > 0.5);
+    col = mix(col, g.fog.rgb, clamp(f, 0.0, 1.0));
+    return vec4<f32>(encode(col), 1.0);
+}
+
+@fragment
+fn fs_main(i: VOut) -> @location(0) vec4<f32> {
+    let n = normalize(i.normal);
+    let m = i32(round(i.mat));
+    let shadow = shadow_at(i.world, n);
+    if (m >= 16) {
+        return toon(i, m, n, shadow);
+    }
+    let dist0 = length(i.world - g.cam_pos.xyz);
+    let s = surface(m, i.color, i.world, n, dist0 > 55.0 && g.cam_pos.w < 0.5);
+    if (s.emissive > 0.5) {
+        let d = length(i.world - g.cam_pos.xyz);
+        let f = select(1.0 - exp(-d * g.fog.a), 0.0, g.cam_pos.w > 0.5);
+        return vec4<f32>(encode(mix(s.albedo * 3.0, g.fog.rgb, f)), 1.0);
+    }
+
+    let l = -g.sun_dir.xyz;
+    let ndl = dot(n, l);
+    let lambert = max((ndl + s.wrap) / (1.0 + s.wrap), 0.0);
 
     // ambient: osmon + yer aksi
     let sky_amb = lin(vec3<f32>(0.40, 0.55, 0.80)) * 0.55;

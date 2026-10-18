@@ -42,6 +42,12 @@ pub enum Mat {
     Skin = 13,
     Hair = 14,
     Rock = 15,
+    /// Anime (cel) yoritish: teri/kiyim.
+    Toon = 16,
+    /// Anime soch (yaltiroq halqa bilan).
+    ToonHair = 17,
+    /// Anime yuz: bosh shari ustiga shaderda ko'z, qosh, og'iz chiziladi (`color.a` — ko'z ochiqligi).
+    Face = 18,
 }
 
 #[repr(C)]

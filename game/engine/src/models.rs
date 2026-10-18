@@ -85,30 +85,30 @@ pub fn girl(out: &mut Lists, s: &GirlState) {
         let hip = v3(sign * 0.085, 0.93, 0.0);
         let knee = hip + dir(a) * 0.44;
         let ankle = knee + dir(a - bend) * 0.43;
-        r.limb(hip, knee, 0.105, skin, Mat::Skin);
-        r.part(Mesh::Sphere, knee, Vec3::splat(0.098), skin, Mat::Skin, Quat::IDENTITY);
-        r.limb(knee, ankle, 0.085, [0.12, 0.13, 0.22], Mat::Cloth);
+        r.limb(hip, knee, 0.105, skin, Mat::Toon);
+        r.part(Mesh::Sphere, knee, Vec3::splat(0.098), skin, Mat::Toon, Quat::IDENTITY);
+        r.limb(knee, ankle, 0.085, [0.12, 0.13, 0.22], Mat::Toon);
         // tufli
         let foot = ankle + v3(0.0, -0.045, -0.05);
-        r.part(Mesh::Sphere, foot, v3(0.095, 0.075, 0.22), shoe, Mat::Cloth, Quat::from_rotation_x((a - bend) * 0.25));
+        r.part(Mesh::Sphere, foot, v3(0.095, 0.075, 0.22), shoe, Mat::Toon, Quat::from_rotation_x((a - bend) * 0.25));
     }
     // yubka (pleyt chizig'i yo'q, kesik konus) va belbog'
-    r.part(Mesh::Frustum, v3(0.0, 0.78, 0.0), v3(0.48, 0.34, 0.36), navy, Mat::Cloth, Quat::IDENTITY);
-    r.part(Mesh::Cylinder, v3(0.0, 0.62, 0.0), v3(0.485, 0.02, 0.365), [0.9, 0.9, 0.95], Mat::Cloth, Quat::IDENTITY);
+    r.part(Mesh::Frustum, v3(0.0, 0.78, 0.0), v3(0.48, 0.34, 0.36), navy, Mat::Toon, Quat::IDENTITY);
+    r.part(Mesh::Cylinder, v3(0.0, 0.62, 0.0), v3(0.485, 0.02, 0.365), [0.9, 0.9, 0.95], Mat::Toon, Quat::IDENTITY);
     // tana
-    r.part(Mesh::Cylinder, v3(0.0, 1.0, 0.0), v3(0.245, 0.14, 0.175), white, Mat::Cloth, Quat::IDENTITY);
-    r.part(Mesh::Sphere, v3(0.0, 1.20 + breathe, 0.005), v3(0.30, 0.36, 0.21), white, Mat::Cloth, Quat::IDENTITY);
+    r.part(Mesh::Cylinder, v3(0.0, 1.0, 0.0), v3(0.245, 0.14, 0.175), white, Mat::Toon, Quat::IDENTITY);
+    r.part(Mesh::Sphere, v3(0.0, 1.20 + breathe, 0.005), v3(0.30, 0.36, 0.21), white, Mat::Toon, Quat::IDENTITY);
     // yoqa (dengizchi), lenta
-    r.part(Mesh::Cube, v3(0.0, 1.335, 0.035), v3(0.29, 0.02, 0.21), navy, Mat::Cloth, Quat::from_rotation_x(-0.15));
+    r.part(Mesh::Cube, v3(0.0, 1.335, 0.035), v3(0.29, 0.02, 0.21), navy, Mat::Toon, Quat::from_rotation_x(-0.15));
     for sg in [-1.0f32, 1.0] {
-        r.part(Mesh::Cube, v3(sg * 0.045, 1.275, -0.10), v3(0.012, 0.15, 0.03), navy, Mat::Cloth, Quat::from_rotation_z(sg * 0.5));
+        r.part(Mesh::Cube, v3(sg * 0.045, 1.275, -0.10), v3(0.012, 0.15, 0.03), navy, Mat::Toon, Quat::from_rotation_z(sg * 0.5));
     }
-    r.part(Mesh::Sphere, v3(0.0, 1.235, -0.105), v3(0.07, 0.05, 0.035), red, Mat::Cloth, Quat::IDENTITY);
+    r.part(Mesh::Sphere, v3(0.0, 1.235, -0.105), v3(0.07, 0.05, 0.035), red, Mat::Toon, Quat::IDENTITY);
     for sg in [-1.0f32, 1.0] {
-        r.part(Mesh::Cube, v3(sg * 0.03, 1.19, -0.105), v3(0.035, 0.1, 0.012), red, Mat::Cloth, Quat::from_rotation_z(sg * 0.15));
+        r.part(Mesh::Cube, v3(sg * 0.03, 1.19, -0.105), v3(0.035, 0.1, 0.012), red, Mat::Toon, Quat::from_rotation_z(sg * 0.15));
     }
     // bo'yin
-    r.part(Mesh::Cylinder, v3(0.0, 1.395, 0.0), v3(0.075, 0.10, 0.075), skin, Mat::Skin, Quat::IDENTITY);
+    r.part(Mesh::Cylinder, v3(0.0, 1.395, 0.0), v3(0.075, 0.10, 0.075), skin, Mat::Toon, Quat::IDENTITY);
     // qo'llar
     for sign in [-1.0f32, 1.0] {
         let ph = s.phase + if sign > 0.0 { PI } else { 0.0 };
@@ -116,11 +116,11 @@ pub fn girl(out: &mut Lists, s: &GirlState) {
         let sh = v3(sign * 0.19, 1.32, 0.0);
         let el = sh + dir(a) * 0.27;
         let wr = el + dir(a + 0.20 + 0.35 * m) * 0.25;
-        r.part(Mesh::Sphere, sh, Vec3::splat(0.09), white, Mat::Cloth, Quat::IDENTITY);
-        r.limb(sh, el, 0.082, white, Mat::Cloth);
-        r.part(Mesh::Sphere, el, Vec3::splat(0.07), skin, Mat::Skin, Quat::IDENTITY);
-        r.limb(el, wr, 0.060, skin, Mat::Skin);
-        r.part(Mesh::Sphere, wr + dir(a + 0.2) * 0.03, v3(0.06, 0.08, 0.05), skin, Mat::Skin, Quat::IDENTITY);
+        r.part(Mesh::Sphere, sh, Vec3::splat(0.09), white, Mat::Toon, Quat::IDENTITY);
+        r.limb(sh, el, 0.082, white, Mat::Toon);
+        r.part(Mesh::Sphere, el, Vec3::splat(0.07), skin, Mat::Toon, Quat::IDENTITY);
+        r.limb(el, wr, 0.060, skin, Mat::Toon);
+        r.part(Mesh::Sphere, wr + dir(a + 0.2) * 0.03, v3(0.06, 0.08, 0.05), skin, Mat::Toon, Quat::IDENTITY);
     }
     // uzun soch: orqada osilib turadi, yurganda tebranadi
     let sway = (s.phase * 1.0).sin() * 0.10 * m + (t * 1.3).sin() * 0.02;
@@ -129,49 +129,37 @@ pub fn girl(out: &mut Lists, s: &GirlState) {
     let hairs: [(f32, f32, f32, f32, f32); 3] = [(0.0, 0.32, 0.20, 0.64, 0.12), (-0.09, 0.27, 0.12, 0.56, 0.09), (0.09, 0.27, 0.12, 0.56, 0.09)];
     for (x, dy, wdt, len, dep) in hairs {
         let c = back_pivot + hq * v3(x, -len * 0.5 - 0.02 + dy * 0.0, 0.0);
-        r.part(Mesh::Frustum, c, v3(wdt, len, dep), hair, Mat::Hair, hq * Quat::from_rotation_x(PI));
+        r.part(Mesh::Frustum, c, v3(wdt, len, dep), hair, Mat::ToonHair, hq * Quat::from_rotation_x(PI));
     }
     // bosh
     r.pivot = v3(0.0, 1.46, 0.0);
     let hy = 1.55;
-    r.hp(Mesh::Sphere, v3(0.0, hy, 0.0), v3(0.205, 0.23, 0.21), skin, Mat::Skin, Quat::IDENTITY);
-    r.hp(Mesh::Sphere, v3(0.0, hy - 0.085, -0.012), v3(0.145, 0.12, 0.15), skin, Mat::Skin, Quat::IDENTITY);
-    // soch qalpog'i va orqa qism
-    r.hp(Mesh::Sphere, v3(0.0, hy + 0.035, 0.045), v3(0.235, 0.27, 0.245), hair, Mat::Hair, Quat::IDENTITY);
-    r.hp(Mesh::Sphere, v3(0.0, hy - 0.05, 0.075), v3(0.22, 0.30, 0.20), hair_lo, Mat::Hair, Quat::IDENTITY);
-    // taqim (bangs): peshona ustida
-    for (x, z, rz) in [(-0.065, -0.095, 0.5f32), (0.0, -0.105, 0.0), (0.065, -0.095, -0.5)] {
-        r.hp(Mesh::Cone, v3(x, hy + 0.085, z), v3(0.075, 0.115, 0.05), hair_hi, Mat::Hair, Quat::from_rotation_x(PI) * Quat::from_rotation_z(rz));
-    }
-    // yon sochlar yuz bo'ylab
-    for sg in [-1.0f32, 1.0] {
-        r.hp(Mesh::Frustum, v3(sg * 0.105, hy - 0.045, -0.045), v3(0.035, 0.20, 0.055), hair, Mat::Hair, Quat::from_rotation_x(PI));
-    }
-    // ahoge (tepada turtib turgan tola) va tasma
-    r.hp(Mesh::Cone, v3(0.0, hy + 0.185, 0.0), v3(0.025, 0.11, 0.025), hair, Mat::Hair, Quat::from_rotation_z(-0.25));
-    for sg in [-1.0f32, 1.0] {
-        r.hp(Mesh::Sphere, v3(sg * 0.10, hy + 0.10, -0.025), v3(0.075, 0.05, 0.03), red, Mat::Cloth, Quat::from_rotation_z(sg * 0.4));
-    }
-    // ko'zlar
     let blink = {
         let c = (t * 0.27).fract();
         if c < 0.035 { 1.0 - ((c / 0.035) - 0.5).abs() * 2.0 } else { 0.0 }
     };
     let open = (1.0 - 0.92 * blink).max(0.08);
-    for sg in [-1.0f32, 1.0] {
-        let ex = sg * 0.05;
-        let ey = hy - 0.005;
-        r.hp(Mesh::Sphere, v3(ex, ey, -0.087), v3(0.056, 0.074 * open, 0.024), white, Mat::Flat, Quat::IDENTITY);
-        r.hp(Mesh::Sphere, v3(ex, ey - 0.004, -0.094), v3(0.042, 0.062 * open, 0.016), [0.28, 0.46, 0.95], Mat::Flat, Quat::IDENTITY);
-        r.hp(Mesh::Sphere, v3(ex, ey - 0.008, -0.099), v3(0.022, 0.036 * open, 0.010), [0.08, 0.10, 0.30], Mat::Flat, Quat::IDENTITY);
-        r.hp(Mesh::Sphere, v3(ex + sg * 0.008, ey + 0.012, -0.103), Vec3::splat(0.011), [1.0, 1.0, 1.0], Mat::Flat, Quat::IDENTITY);
-        // kiprik va qosh
-        r.hp(Mesh::Cube, v3(ex, ey + 0.034 * open + 0.004, -0.091), v3(0.062, 0.008, 0.014), [0.25, 0.10, 0.20], Mat::Flat, Quat::from_rotation_z(-sg * 0.12));
-        r.hp(Mesh::Cube, v3(ex, ey + 0.062, -0.082), v3(0.045, 0.008, 0.012), hair_lo, Mat::Hair, Quat::from_rotation_z(-sg * 0.15));
-        r.hp(Mesh::Sphere, v3(sg * 0.072, hy - 0.052, -0.065), v3(0.032, 0.016, 0.01), [1.0, 0.6, 0.65], Mat::Flat, Quat::IDENTITY);
+    r.hp(Mesh::Sphere, v3(0.0, hy, 0.0), v3(0.235, 0.25, 0.23), skin, Mat::Face, Quat::IDENTITY);
+    if let Some(last) = r.out.0[Mesh::Sphere as usize].last_mut() {
+        last.color[3] = open;
     }
-    r.hp(Mesh::Sphere, v3(0.0, hy - 0.046, -0.099), Vec3::splat(0.012), [0.98, 0.80, 0.72], Mat::Skin, Quat::IDENTITY);
-    r.hp(Mesh::Sphere, v3(0.0, hy - 0.080, -0.084), v3(0.026, 0.009, 0.008), [0.62, 0.22, 0.28], Mat::Flat, Quat::IDENTITY);
+    r.hp(Mesh::Sphere, v3(0.0, hy - 0.105, -0.01), v3(0.135, 0.12, 0.17), skin, Mat::Toon, Quat::IDENTITY);
+    // soch qalpog'i va orqa qism
+    r.hp(Mesh::Sphere, v3(0.0, hy + 0.035, 0.045), v3(0.235, 0.27, 0.245), hair, Mat::ToonHair, Quat::IDENTITY);
+    r.hp(Mesh::Sphere, v3(0.0, hy - 0.05, 0.075), v3(0.22, 0.30, 0.20), hair_lo, Mat::ToonHair, Quat::IDENTITY);
+    // taqim (bangs): peshona ustida
+    for (x, z, rz) in [(-0.065, -0.095, 0.5f32), (0.0, -0.105, 0.0), (0.065, -0.095, -0.5)] {
+        r.hp(Mesh::Cone, v3(x, hy + 0.085, z), v3(0.075, 0.115, 0.05), hair_hi, Mat::ToonHair, Quat::from_rotation_x(PI) * Quat::from_rotation_z(rz));
+    }
+    // yon sochlar yuz bo'ylab
+    for sg in [-1.0f32, 1.0] {
+        r.hp(Mesh::Frustum, v3(sg * 0.105, hy - 0.045, -0.045), v3(0.035, 0.20, 0.055), hair, Mat::ToonHair, Quat::from_rotation_x(PI));
+    }
+    // ahoge (tepada turtib turgan tola) va tasma
+    r.hp(Mesh::Cone, v3(0.0, hy + 0.185, 0.0), v3(0.025, 0.11, 0.025), hair, Mat::ToonHair, Quat::from_rotation_z(-0.25));
+    for sg in [-1.0f32, 1.0] {
+        r.hp(Mesh::Sphere, v3(sg * 0.10, hy + 0.10, -0.025), v3(0.075, 0.05, 0.03), red, Mat::Toon, Quat::from_rotation_z(sg * 0.4));
+    }
 }
 
 // ---------------- birinchi shaxs qurollari ----------------
@@ -332,7 +320,7 @@ mod tests {
     fn qiz_qismlari_va_modelda_instans_bor() {
         let mut l = Lists::default();
         girl(&mut l, &GirlState { pos: Vec3::ZERO, yaw: 0.0, phase: 1.0, moving: 1.0, time: 2.0, look_yaw: 0.3 });
-        assert!(l.total() >= 50 && l.total() < 200, "{}", l.total());
+        assert!(l.total() >= 30 && l.total() < 200, "{}", l.total());
         for kind in [WeaponKind::Pistol, WeaponKind::Rifle, WeaponKind::Shotgun, WeaponKind::Sniper] {
             let mut v = Lists::default();
             viewmodel(&mut v, &VmState { kind, recoil: 0.5, walk_phase: 1.0, moving: 1.0, reload: 0.5, raise: 1.0, flash: 1.0, time: 1.0 });

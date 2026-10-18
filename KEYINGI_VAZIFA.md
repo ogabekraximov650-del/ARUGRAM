@@ -6621,3 +6621,10 @@ Nega: PUBG darajasiga bosqichma-bosqich (low-poly → realistik, keyin botlar/zo
 - Osmon eng oxirida (erta chuqurlik tekshiruvi), soya 4 namunali, uzoqda (>55 m) protsedur tekstura o'chiriladi; shar/silindr poligonlari kamaytirildi; daraxtlar 140 ta.
 - Adaptiv chizish aniqligi (`MainActivity.adapt`): kadr vaqti ekran chastotasidan 1.45 baravar uzoq bo'lsa ichki ruxsat 1.0→0.85→0.72→0.6→0.5 pasayadi (`setFixedSize`); sensor koordinatalari va HUD zichligi (`nativeSetDensity`) shunga moslanadi; faqat 60 s silliq bo'lsa ehtiyotkorlik bilan qaytadi.
 - Keyingi (foydalanuvchi talabi — "PUBG darajasi"): glTF yuklovchi + teksturali PBR, CC0 tekstura/modellar (Poly Haven, Quaternius) Actions'da yuklanadi, teksturali relyef, soya/SSAO/bloom, VRM (anime qiz) yuklovchi. Avval telefonda silliqlikni tasdiqlash.
+
+### 8-bosqich (ARUGAME): anime uslubidagi qiz (kodda, tayyor model fayli yo'q)
+- Tayyor modellar (Open Source Avatars, OpenGameArt) yoqmadi — anime qiz kodning o'zida yasaladi.
+- **Cel (anime) yoritish** (`shader.wgsl: toon`): 2 pog'onali soya (sovuq soya rangi), qirra yorug'ligi, soch uchun yaltiroq halqa; materiallar `Toon/ToonHair/Face`.
+- **Anime yuzi shaderda chiziladi** (`face_color`): katta ko'k ko'zlar (gradient qorachiq, yaltirashlar, qalin kiprik), qosh, yonoq qizarishi, burun, og'iz; ko'z ochiqligi `Instance.color.a` (pirpirash).
+- **Kontur** (`vs_outline/fs_outline`, `Renderer.outline_pipeline`): qiz instanslari old yuzlarni yashirib, normal bo'ylab sal kattalashtirib to'q rangda qayta chiziladi (`Frame.outline`).
+- Keyingi: foydalanuvchi ikki andoza rasm berdi (rangli yashil sochli qiz va qora-oq manga) hamda "Genshin Impact uslubi" so'radi: butun dunyoni cel yoritishga o'tkazish, bloom, bo'yoq ranglar, shamolda tebranuvchi o'simlik, soch/kiyim tafsilotlari.

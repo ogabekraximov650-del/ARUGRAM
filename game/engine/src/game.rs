@@ -176,6 +176,7 @@ impl Companion {
 pub struct FrameData {
     pub dynamic: Lists,
     pub dynamic_shadow: [usize; MESH_COUNT],
+    pub outline: [usize; MESH_COUNT],
     pub viewmodel: Lists,
 }
 
@@ -713,6 +714,7 @@ impl Game {
                 look_yaw: c.look_yaw,
             },
         );
+        let outline = d.counts();
         for (p, t) in &self.impacts {
             let k = 1.0 - t / 0.5;
             d.push(
@@ -790,7 +792,7 @@ impl Game {
             );
         }
         let _ = SUN_DIR;
-        FrameData { dynamic: d, dynamic_shadow, viewmodel: vm }
+        FrameData { dynamic: d, dynamic_shadow, outline, viewmodel: vm }
     }
 
     pub fn hud(&self) -> Vec<crate::hud::HudVertex> {

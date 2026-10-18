@@ -111,6 +111,7 @@ fn frame(app: &mut App, dt: f32) {
     let frame = Frame {
         dynamic: &fd.dynamic,
         dynamic_shadow: fd.dynamic_shadow,
+        outline: fd.outline,
         viewmodel: &fd.viewmodel,
         hud: &hud,
         time: app.game.time,
