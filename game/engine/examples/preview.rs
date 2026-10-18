@@ -35,9 +35,10 @@ fn main() {
     let roof = wd.statics.0[aru_game::scene::Mesh::Prism as usize][0].pos;
     let mut g = Game::new(w, h, 2.5);
     g.zone.t = 0.0;
+    g.pickups.clear();
 
     // (nom, kamera joyi, yaw, pitch, qo'shimcha harakat)
-    for shot in [0, 8, 2, 3, 4, 5, 6, 1, 7] {
+    for shot in [9, 8, 2, 3, 4, 5, 6, 1, 7] {
         match shot {
             0 => {
                 // boshlang'ich ko'rinish (to'pponcha)
@@ -89,6 +90,16 @@ fn main() {
                 for _ in 0..40 {
                     g.update(1.0 / 60.0);
                 }
+            }
+            9 => {
+                // butun tana, yon tomondan
+                g.camera.pos = Vec3::new(2.0, 1.0, 10.6);
+                g.camera.yaw = 0.52;
+                g.camera.pitch = 0.0;
+                g.companion.pos = Vec3::new(0.0, 0.0, 8.8);
+                g.companion.yaw = 0.7 + std::f32::consts::PI;
+                g.companion.look_yaw = 0.0;
+                g.camera.pitch = 0.05;
             }
             8 => {
                 // yuz yaqindan

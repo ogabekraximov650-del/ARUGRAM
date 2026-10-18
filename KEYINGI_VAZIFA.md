@@ -6628,3 +6628,8 @@ Nega: PUBG darajasiga bosqichma-bosqich (low-poly → realistik, keyin botlar/zo
 - **Anime yuzi shaderda chiziladi** (`face_color`): katta ko'k ko'zlar (gradient qorachiq, yaltirashlar, qalin kiprik), qosh, yonoq qizarishi, burun, og'iz; ko'z ochiqligi `Instance.color.a` (pirpirash).
 - **Kontur** (`vs_outline/fs_outline`, `Renderer.outline_pipeline`): qiz instanslari old yuzlarni yashirib, normal bo'ylab sal kattalashtirib to'q rangda qayta chiziladi (`Frame.outline`).
 - Keyingi: foydalanuvchi ikki andoza rasm berdi (rangli yashil sochli qiz va qora-oq manga) hamda "Genshin Impact uslubi" so'radi: butun dunyoni cel yoritishga o'tkazish, bloom, bo'yoq ranglar, shamolda tebranuvchi o'simlik, soch/kiyim tafsilotlari.
+
+### 9-bosqich (ARUGAME): qiz anime nisbatlari
+- `models.rs: girl` qayta yozildi: bo'yi ~1.62 m, bosh:tana ≈ 1:6.3, ingichka bo'yin/bel/qo'l-oyoq, uzun oyoq, kichik kaft; yubka (kesik konus) va oq hoshiya; paypoq tizza ostida.
+- Soch (to'q yashil-feruza, 1-andoza rasmga mos): tekis kesilgan peshona sochi, yuz yonida uzun yon sochlar, orqada belgacha uzun soch (yurganda tebranadi), yon tugun va oltin soch bezagi.
+- Yuz (shaderda): ko'zlar pastroqda va kattaroq, uchli iyak.

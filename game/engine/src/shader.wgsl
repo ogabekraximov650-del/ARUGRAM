@@ -304,12 +304,12 @@ fn face_color(base: vec3<f32>, lp: vec3<f32>, open: f32) -> vec3<f32> {
     // yonoq qizarishi
     for (var k = 0; k < 2; k = k + 1) {
         let sx = select(-1.0, 1.0, k == 1);
-        let b = in_ellipse(vec2<f32>(u - sx * 0.50, v + 0.34), vec2<f32>(0.17, 0.08));
+        let b = in_ellipse(vec2<f32>(u - sx * 0.50, v + 0.46), vec2<f32>(0.17, 0.08));
         c = mix(c, vec3<f32>(1.0, 0.55, 0.62), (1.0 - smoothstep(0.4, 1.0, b)) * 0.55);
     }
     for (var k = 0; k < 2; k = k + 1) {
         let sx = select(-1.0, 1.0, k == 1);
-        let e = vec2<f32>(u - sx * 0.43, v + 0.02);
+        let e = vec2<f32>(u - sx * 0.43, v + 0.12);
         let ry = 0.30 * max(open, 0.08);
         let d = in_ellipse(e, vec2<f32>(0.27, ry));
         if (d < 1.0) {
@@ -335,14 +335,14 @@ fn face_color(base: vec3<f32>, lp: vec3<f32>, open: f32) -> vec3<f32> {
             c = mix(c, vec3<f32>(0.55, 0.30, 0.35), 0.7);
         }
         // qosh
-        let b = vec2<f32>(u - sx * 0.45, v - 0.40 - 0.10 * (u * sx - 0.45));
+        let b = vec2<f32>(u - sx * 0.45, v - 0.30 - 0.10 * (u * sx - 0.45));
         if (abs(b.y) < 0.022 && abs(b.x) < 0.17) {
             c = mix(c, vec3<f32>(0.55, 0.22, 0.42), 0.9);
         }
     }
     // burun (kichik soya) va og'iz
-    if (in_ellipse(vec2<f32>(u, v + 0.28), vec2<f32>(0.035, 0.025)) < 1.0) { c = c * vec3<f32>(0.9, 0.8, 0.8); }
-    let m = vec2<f32>(u, v + 0.50);
+    if (in_ellipse(vec2<f32>(u, v + 0.40), vec2<f32>(0.035, 0.025)) < 1.0) { c = c * vec3<f32>(0.9, 0.8, 0.8); }
+    let m = vec2<f32>(u, v + 0.62);
     if (abs(m.y + 0.7 * m.x * m.x - 0.02) < 0.017 && abs(m.x) < 0.14) {
         c = vec3<f32>(0.62, 0.22, 0.30);
     }
@@ -366,7 +366,7 @@ fn toon(i: VOut, m: i32, n: vec3<f32>, shadow: f32) -> vec4<f32> {
     if (m == 17) {
         // soch: "farishta halqasi" yaltirashi
         let ring = smoothstep(0.0, 0.05, 0.10 - abs(n.y - 0.40)) * lit;
-        col = mix(col, lin(vec3<f32>(1.0, 0.88, 0.95)), ring * 0.55);
+        col = mix(col, lin(vec3<f32>(0.85, 1.0, 0.95)), ring * 0.30);
     }
     let rim = pow(1.0 - max(dot(n, v), 0.0), 3.0) * 0.30;
     col = col + SUN_COLOR * rim * lit * 0.6;
