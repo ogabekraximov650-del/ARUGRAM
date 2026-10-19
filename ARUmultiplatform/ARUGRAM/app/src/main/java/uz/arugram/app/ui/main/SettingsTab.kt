@@ -22,6 +22,8 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.Image
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -116,7 +118,7 @@ fun SettingsTab(
             if (searching) {
                 val all = MainItems + ExtraItems + HelpItems
                 val q = query.trim().lowercase()
-                val found = if (q.isEmpty()) emptyList() else all.filter { it.title.lowercase().contains(q) || (it.subtitle ?: "").lowercase().contains(q) }
+                val found: List<Item> = if (q.isEmpty()) emptyList<Item>() else all.filter { it.title.lowercase().contains(q) || (it.subtitle ?: "").lowercase().contains(q) }
                 Column(Modifier.padding(start = 12.dp, end = 12.dp, top = 56.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(card)) {
                     if (q.isNotEmpty() && found.isEmpty()) BasicText("Hech narsa topilmadi", Modifier.padding(18.dp), style = TextStyle(color = c.gray, fontSize = 16.sp))
                     found.forEach { it0 -> SettingRow(it0) { searching = false; query = ""; if (it0.route.startsWith("url:")) openUrl(ctx, it0.route.removePrefix("url:")) else onNavigate(it0.route) } }

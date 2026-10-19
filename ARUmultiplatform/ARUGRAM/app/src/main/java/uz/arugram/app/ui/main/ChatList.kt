@@ -1,7 +1,7 @@
 package uz.arugram.app.ui.main
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.layout.matchParentSize
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
