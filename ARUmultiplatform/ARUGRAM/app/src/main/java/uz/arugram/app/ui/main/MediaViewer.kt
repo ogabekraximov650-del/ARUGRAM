@@ -55,7 +55,9 @@ fun MediaViewer(chat: ChatRow, msg: MsgRow, onClose: () -> Unit) {
     val ctx = LocalContext.current
     var loaded by remember { mutableStateOf<LoadedFile?>(null) }
     var failed by remember { mutableStateOf(false) }
+    val streamIt = msg.kind == "video"
     LaunchedEffect(msg.id) {
+        if (streamIt) return@LaunchedEffect
         val f = MediaCache.file(ctx, chat, msg.id)
         if (f == null) failed = true else loaded = f
     }
@@ -63,6 +65,7 @@ fun MediaViewer(chat: ChatRow, msg: MsgRow, onClose: () -> Unit) {
         Box(Modifier.fillMaxSize().background(Color.Black)) {
             val f = loaded
             when {
+                streamIt -> StreamVideo(chat.spec, msg.id, Modifier.fillMaxSize())
                 f == null && !failed -> CircularProgressIndicator(Modifier.align(Alignment.Center).size(40.dp), color = Color.White, strokeWidth = 3.dp)
                 f == null -> BasicText("Yuklab bo‘lmadi", Modifier.align(Alignment.Center), style = TextStyle(color = Color.White, fontSize = 16.sp))
                 msg.kind == "video" || msg.kind == "gif" || msg.kind == "round" -> ControlledVideo(f.file, Modifier.fillMaxSize())

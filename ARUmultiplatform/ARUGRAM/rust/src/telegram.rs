@@ -6689,3 +6689,42 @@ pub extern "C" fn rust_tg_profile_photos(arg_ptr: *const c_char) -> *mut c_char 
         Ok(json!({"paths": paths}))
     })
 }
+
+// ── Video oqimi (yuklab bo'lmasdan ijro) ──
+// Pleyer faylni bo'laklab (512 KB) so'raydi: `arg` = "spec\nxabar_id\nbo'lak_raqami". Media tavsifi xotirada saqlanadi
+// (har bo'lak uchun xabarni qayta so'ramaslik uchun). Javob: `{"data":"<base64>","size":<jami bayt>}`.
+static STREAM_MEDIA: OnceLock<Mutex<HashMap<String, grammers_client::media::Media>>> = OnceLock::new();
+
+const STREAM_CHUNK: i32 = 512 * 1024;
+
+#[no_mangle]
+pub extern "C" fn rust_tg_media_read(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 60, |client, arg| async move {
+        let l = lines(&arg, 3);
+        let id = l[1].trim().parse::<i32>().map_err(|_| "Xabar ko'rsatilmagan".to_string())?;
+        let idx = l[2].trim().parse::<i32>().map_err(|_| "Bo'lak raqami noto'g'ri".to_string())?;
+        let key = format!("{}_{}", l[0].trim(), id);
+        let map = STREAM_MEDIA.get_or_init(|| Mutex::new(HashMap::new()));
+        let cached = map.lock().ok().and_then(|g| g.get(&key).cloned());
+        let md = match cached {
+            Some(m) => m,
+            None => {
+                let peer = resolve_peer(&client, &l[0]).await?;
+                let msgs = client.get_messages_by_id(peer, &[id]).await.map_err(|e| e.to_string())?;
+                let Some(Some(m)) = msgs.into_iter().next() else { return Err("Xabar topilmadi".to_string()) };
+                let Some(md) = m.media() else { return Err("Xabarda fayl yo'q".to_string()) };
+                if let Ok(mut g) = map.lock() {
+                    if g.len() > 8 {
+                        g.clear();
+                    }
+                    g.insert(key, md.clone());
+                }
+                md
+            }
+        };
+        let size = media_info(&md).size;
+        let mut it = client.iter_download(&md).chunk_size(STREAM_CHUNK).skip_chunks(idx);
+        let data = it.next().await.map_err(|e| e.to_string())?.unwrap_or_default();
+        Ok(json!({"data": b64(&data), "size": size}))
+    })
+}

@@ -137,6 +137,8 @@ object RustCore {
 
     fun tgMediaFile(spec: String, msgId: Int, dir: String) = call { it.rust_tg_media_file("$spec\n$msgId\n$dir") }
 
+    fun tgMediaRead(spec: String, msgId: Int, chunk: Int) = call { it.rust_tg_media_read("$spec\n$msgId\n$chunk") }
+
     fun tgSearch(q: String) = call { it.rust_tg_search(q) }
 
     fun tgTyping(): JSONObject = guard(JSONObject()) { json(take(it.rust_tg_typing())) }
