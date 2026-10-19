@@ -90,6 +90,23 @@ fun ChatScreen(chat: ChatRow, chats: List<ChatRow>, typing: Boolean, onBack: () 
     var deleteIds by remember { mutableStateOf<List<Int>?>(null) }
     var chatMenu by remember { mutableStateOf(false) }
     var scheduledOpen by remember { mutableStateOf(false) }
+    var muteOpen by remember { mutableStateOf(false) }
+    // Bezak tugmalari (qalin, kursiv...) ishlatilgan bo'lsa matndagi belgilar yuborishda entity'ga aylantiriladi.
+    var fmtUsed by remember { mutableStateOf(false) }
+    LaunchedEffect(draft.text.isEmpty()) { if (draft.text.isEmpty()) fmtUsed = false }
+    // Bot mini-ilovasi: (sarlavha, url, rejim). Bot menyu tugmasi suhbat ochilganda bir marta so'raladi.
+    var webApp by remember { mutableStateOf<Triple<String, String, String>?>(null) }
+    var botMenu by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var botCommands by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
+    var commandsOpen by remember { mutableStateOf(false) }
+    var translated by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(chat.id) {
+        if (chat.bot && chat.access != "0") {
+            val j = withContext(Dispatchers.IO) { RustCore.tgBotMenu("${chat.id}@${chat.access}") }
+            val u = j.optString("url")
+            if (u.isNotEmpty()) botMenu = j.optString("text").ifEmpty { "Ochish" } to u
+        }
+    }
     var confirmDeleteChat by remember { mutableStateOf(false) }
     var searching by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
@@ -104,6 +121,7 @@ fun ChatScreen(chat: ChatRow, chats: List<ChatRow>, typing: Boolean, onBack: () 
             "url" -> if (!openLink(b.data)) openUrl(ctx, b.data)
             "cb" -> model.pressButton(m, b) { if (it.isNotEmpty()) bulletin = it }
             "text" -> model.send(b.data, 0)
+            "webapp", "simple" -> if (chat.bot) webApp = Triple(b.text, b.data, if (b.kind == "simple") "simple" else "button")
         }
     }
 
@@ -116,6 +134,8 @@ fun ChatScreen(chat: ChatRow, chats: List<ChatRow>, typing: Boolean, onBack: () 
         model.loadPinned()
         val j = withContext(Dispatchers.IO) { RustCore.tgPeerInfo(chat.spec) }
         if (j.optString("error").isEmpty()) {
+            val ca = j.optJSONArray("commands")
+            if (ca != null) botCommands = List(ca.length()) { i -> ca.getJSONArray(i).let { it.optString(0) to it.optString(1) } }
             subtitle = when (j.optString("kind")) {
                 "user" -> if (chat.bot) "bot" else statusText(j.optString("status"))
                 "group" -> "${j.optInt("members")} a’zo"
@@ -173,7 +193,9 @@ fun ChatScreen(chat: ChatRow, chats: List<ChatRow>, typing: Boolean, onBack: () 
         draft = TextFieldValue("")
         editing = null
         replyTo = null
-        if (e != null) model.edit(e, text) else model.send(text, r?.id ?: 0) { draft = TextFieldValue(text) }
+        if (e != null) model.edit(e, text)
+        else if (fmtUsed) { fmtUsed = false; model.sendEx(text, r?.id ?: 0, false, 0, true) { draft = TextFieldValue(text) } }
+        else model.send(text, r?.id ?: 0) { draft = TextFieldValue(text) }
         scope.launch { listState.animateScrollToItem(0) }
     }
 
@@ -205,11 +227,11 @@ fun ChatScreen(chat: ChatRow, chats: List<ChatRow>, typing: Boolean, onBack: () 
                         else -> {
                             Box(Modifier.size(56.dp).clickable(onClick = onBack), contentAlignment = Alignment.Center) { BackArrowIcon(c.text) }
                             Row(Modifier.weight(1f).clickable(onClick = onOpenInfo), verticalAlignment = Alignment.CenterVertically) {
-                                ChatAvatar(chat, 40.dp)
+                                ChatAvatar(chat, 42.dp)
                                 Column(Modifier.padding(start = 12.dp)) {
-                                    BasicText(chat.name, style = TextStyle(color = c.text, fontSize = 17.sp, fontWeight = FontWeight.Bold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    BasicText(chat.name, style = TextStyle(color = c.text, fontSize = 18.sp, fontWeight = FontWeight.Bold), maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     val sub = if (typing) "yozmoqda..." else subtitle
-                                    if (sub.isNotEmpty()) BasicText(sub, style = TextStyle(color = if (typing || sub == "onlayn") Blue else c.gray, fontSize = 13.sp), maxLines = 1)
+                                    if (sub.isNotEmpty()) BasicText(sub, style = TextStyle(color = if (typing || sub == "onlayn") Blue else (if (c.dark) c.gray else Color(0xFF79817E)), fontSize = 14.sp), maxLines = 1)
                                 }
                             }
                             Box(Modifier.size(48.dp).clickable { searching = true }, contentAlignment = Alignment.Center) { SearchIcon(c.text) }
@@ -253,11 +275,11 @@ fun ChatScreen(chat: ChatRow, chats: List<ChatRow>, typing: Boolean, onBack: () 
                             val replied = if (m.reply > 0) list.firstOrNull { it.id == m.reply } else null
                             Column {
                                 if (older == null || dayKey(older.date) != dayKey(m.date)) DateChip(m.date)
-                                MessageBubble(
+                                if (m.service.isNotEmpty()) ServiceChip(m.service) else MessageBubble(
                                     m = m, chat = chat, replied = replied, selected = m.id in selected,
                                     onClick = {
                                         if (selected.isNotEmpty()) { if (m.id in selected) selected.remove(m.id) else selected.add(m.id) }
-                                        else if (m.kind == "photo" || m.kind == "video") viewer = m
+                                        else if (m.kind == "photo" || m.kind == "video" || m.kind == "gif") viewer = m
                                     },
                                     onLongClick = { if (selected.isEmpty()) menuFor = m else if (m.id !in selected) selected.add(m.id) },
                                     onOpenMedia = { if (selected.isEmpty()) viewer = m else if (m.id in selected) selected.remove(m.id) else selected.add(m.id) },
@@ -288,6 +310,11 @@ fun ChatScreen(chat: ChatRow, chats: List<ChatRow>, typing: Boolean, onBack: () 
             if (kbMsg != null && kb != null && !kb.inline && kbMsg.id == model.messages.firstOrNull()?.id) {
                 MarkupRows(kb, { b -> press(kbMsg, b) }, Modifier.fillMaxWidth().background(c.bar).padding(horizontal = 6.dp, vertical = 4.dp))
             }
+            botMenu?.let { (txt, url) ->
+                Box(Modifier.fillMaxWidth().background(c.bar).clickable { webApp = Triple(txt, url, "menu") }.padding(vertical = 11.dp), contentAlignment = Alignment.Center) {
+                    BasicText(txt.uppercase(), style = TextStyle(color = Blue, fontSize = 14.sp, fontWeight = FontWeight.Bold))
+                }
+            }
             // ── Yozish paneli ──
             if (chat.date == 0L && chat.kind != "user" && !joined) {
                 Box(Modifier.fillMaxWidth().background(c.bar).navigationBarsPadding().height(48.dp).clickable {
@@ -300,9 +327,11 @@ fun ChatScreen(chat: ChatRow, chats: List<ChatRow>, typing: Boolean, onBack: () 
                 draft = draft, onDraft = { if (it.text.length > draft.text.length) model.typing(); draft = it }, replyTo = replyTo, editing = editing, canWrite = canWrite,
                 onCancelContext = { editing = null; replyTo = null; draft = TextFieldValue("") },
                 onSend = ::doSend,
-                onSendFile = { f, kind, extra -> model.sendFile(f, kind, replyTo?.id ?: 0, "", extra); replyTo = null; scope.launch { listState.animateScrollToItem(0) } },
-                onSendVoice = { f, secs -> model.sendFile(f, "voice", replyTo?.id ?: 0, "", "$secs:0:0"); replyTo = null },
+                onSendFile = { f, kind, extra, caption -> model.sendFile(f, kind, replyTo?.id ?: 0, caption, extra); replyTo = null; scope.launch { listState.animateScrollToItem(0) } },
+                onSendVoice = { f, secs, wave -> model.sendFile(f, "voice", replyTo?.id ?: 0, "", "$secs:0:0:$wave"); replyTo = null },
                 onSendSticker = { st -> model.sendSticker(st.ref, replyTo?.id ?: 0); replyTo = null; scope.launch { listState.animateScrollToItem(0) } },
+                onFormat = { fmtUsed = true },
+                hasCommands = botCommands.isNotEmpty(), onCommands = { commandsOpen = true },
                 onSendEx = { silent, schedule ->
                     val text = draft.text.trim()
                     if (text.isNotEmpty()) {
@@ -310,7 +339,9 @@ fun ChatScreen(chat: ChatRow, chats: List<ChatRow>, typing: Boolean, onBack: () 
                         val backup = draft
                         draft = TextFieldValue("")
                         replyTo = null
-                        model.sendEx(text, r?.id ?: 0, silent, schedule) { draft = backup }
+                        val fm = fmtUsed
+                        fmtUsed = false
+                        model.sendEx(text, r?.id ?: 0, silent, schedule, fm) { draft = backup }
                         scope.launch { listState.animateScrollToItem(0) }
                     }
                 },
@@ -322,6 +353,16 @@ fun ChatScreen(chat: ChatRow, chats: List<ChatRow>, typing: Boolean, onBack: () 
         menuFor?.let { m ->
             val items = buildList {
                 if (canWrite) add(MenuItem(R.drawable.input_reply, "Javob") { replyTo = m; editing = null })
+                if (m.kind == "gif") add(MenuItem(R.drawable.msg_gif, "GIFga saqlash") {
+                    scope.launch { val r = withContext(Dispatchers.IO) { RustCore.tgSaveGif(chat.spec, m.id) }; bulletin = r.optString("error").ifEmpty { "GIF saqlandi" } }
+                })
+                if (m.text.isNotEmpty() && !chat.isSecret) add(MenuItem(R.drawable.msg_translate, "Tarjima qilish") {
+                    scope.launch {
+                        val r = withContext(Dispatchers.IO) { RustCore.tgTranslate(chat.spec, m.id, "uz") }
+                        val t = r.optString("text")
+                        if (t.isNotEmpty()) translated = t else bulletin = r.optString("error").ifEmpty { "Tarjima qilib bo‘lmadi" }
+                    }
+                })
                 if (m.text.isNotEmpty()) add(MenuItem(R.drawable.msg_copy, "Nusxalash") { copyText(ctx, m.text); bulletin = "Nusxalandi" })
                 if (m.out && m.text.isNotEmpty() && m.kind.isEmpty()) add(MenuItem(R.drawable.msg_edit, "Tahrirlash") { editing = m; replyTo = null; draft = TextFieldValue(m.text, TextRange(m.text.length)) })
                 add(MenuItem(if (m.pinned) R.drawable.msg_unpin else R.drawable.msg_pin, if (m.pinned) "Mahkamni olib tashlash" else "Mahkamlash") { model.pin(m, !m.pinned) })
@@ -339,7 +380,7 @@ fun ChatScreen(chat: ChatRow, chats: List<ChatRow>, typing: Boolean, onBack: () 
                 listOf(
                     MenuItem(R.drawable.msg_info, "Ma’lumot") { onOpenInfo() },
                     MenuItem(if (chat.muted) R.drawable.msg_unmute else R.drawable.msg_mute, if (chat.muted) "Bildirishnomani yoqish" else "Bildirishnomani o‘chirish") {
-                        scope.launch { withContext(Dispatchers.IO) { RustCore.tgMute(chat.spec, !chat.muted) } }
+                        if (chat.muted) scope.launch { withContext(Dispatchers.IO) { RustCore.tgMuteFor(chat.spec, 0L) } } else muteOpen = true
                     },
                     MenuItem(R.drawable.input_schedule, "Rejalashtirilgan xabarlar") { scheduledOpen = true },
                     MenuItem(R.drawable.msg_clear, "Tarixni tozalash") {
@@ -350,6 +391,15 @@ fun ChatScreen(chat: ChatRow, chats: List<ChatRow>, typing: Boolean, onBack: () 
                 onDismiss = { chatMenu = false },
             )
         }
+        webApp?.let { (t, u, mode) -> WebAppDialog(chat.spec, "${chat.id}@${chat.access}", t, u, mode, onClose = { webApp = null }) }
+        translated?.let { tr -> TgAlert("Tarjima", tr, "Nusxalash", cancel = "Yopish", onConfirm = { copyText(ctx, tr); translated = null }, onDismiss = { translated = null }) }
+        if (commandsOpen && botCommands.isNotEmpty()) {
+            PopupMenu(
+                botCommands.map { (cmd, desc) -> MenuItem(R.drawable.msg_bots, "/$cmd — $desc") { model.send("/$cmd", 0) } },
+                onDismiss = { commandsOpen = false },
+            )
+        }
+        if (muteOpen) MuteMenu(onPick = { secs -> muteOpen = false; scope.launch { withContext(Dispatchers.IO) { RustCore.tgMuteFor(chat.spec, secs) }; bulletin = "Bildirishnoma o‘chirildi" } }, onDismiss = { muteOpen = false })
         if (scheduledOpen) ScheduledDialog(chat, onDismiss = { scheduledOpen = false; model.refresh() })
         forwardIds?.let { ids ->
             ChatPicker("Uzatish", chats, onPick = { t -> model.forwardTo(t, ids); forwardIds = null; selected.clear(); bulletin = "Xabar uzatildi" }, onDismiss = { forwardIds = null })
@@ -379,13 +429,25 @@ fun ChatScreen(chat: ChatRow, chats: List<ChatRow>, typing: Boolean, onBack: () 
     }
 }
 
+/** Xizmat xabari (DrKLO `ChatActionCell`): markazda yarim shaffof "tabletka"da. */
+@Composable
+fun ServiceChip(text: String) {
+    Box(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp), contentAlignment = Alignment.Center) {
+        BasicText(
+            text,
+            Modifier.clip(RoundedCornerShape(14.dp)).background(Color(0x66000000)).padding(horizontal = 12.dp, vertical = 5.dp),
+            style = TextStyle(color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center),
+        )
+    }
+}
+
 @Composable
 fun DateChip(unix: Long) {
     Box(Modifier.fillMaxWidth().padding(vertical = 6.dp), contentAlignment = Alignment.Center) {
         BasicText(
             dateLabel(unix),
             Modifier.clip(RoundedCornerShape(12.dp)).background(Color(0x66000000)).padding(horizontal = 10.dp, vertical = 3.dp),
-            style = TextStyle(color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium),
+            style = TextStyle(color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium),
         )
     }
 }

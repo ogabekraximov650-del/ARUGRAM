@@ -82,6 +82,7 @@ fun HomeScreen(auth: AuthModel) {
     var folder by remember { androidx.compose.runtime.mutableIntStateOf(0) }
     var menuFor by remember { mutableStateOf<ChatRow?>(null) }
     var deleteFor by remember { mutableStateOf<ChatRow?>(null) }
+    var muteFor by remember { mutableStateOf<ChatRow?>(null) }
     var addContact by remember { mutableStateOf(false) }
     var toast by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(toast) { if (toast != null) { delay(3000); toast = null } }
@@ -234,7 +235,7 @@ fun HomeScreen(auth: AuthModel) {
             }
             is Dest.AddMembers -> NewGroupScreen(onBack = { stack.removeAt(stack.lastIndex) }, onDone = { stack.removeAt(stack.lastIndex) }, target = d.row)
             Dest.NewGroup -> NewGroupScreen(onBack = { stack.removeAt(stack.lastIndex) }, onDone = { stack.clear(); model.load() })
-            is Dest.Settings -> SettingsRouter(d.page, onBack = { stack.removeAt(stack.lastIndex) }, onNavigate = { stack.add(Dest.Settings(it)) }, folders = folders)
+            is Dest.Settings -> SettingsRouter(d.page, onBack = { stack.removeAt(stack.lastIndex) }, onNavigate = { stack.add(Dest.Settings(it)) }, folders = folders, onFoldersChanged = { scope.launch { folders = parseFolders(withContext(Dispatchers.IO) { RustCore.tgFolders() }) } })
             null -> {}
         }
 
@@ -256,7 +257,7 @@ fun HomeScreen(auth: AuthModel) {
             PopupMenu(
                 listOf(
                     MenuItem(if (r.pinned) R.drawable.msg_unpin else R.drawable.msg_pin, if (r.pinned) "Mahkamni olib tashlash" else "Mahkamlash") { model.pin(r) },
-                    MenuItem(if (r.muted) R.drawable.msg_unmute else R.drawable.msg_mute, if (r.muted) "Bildirishnomani yoqish" else "Bildirishnomani o‘chirish") { model.mute(r) },
+                    MenuItem(if (r.muted) R.drawable.msg_unmute else R.drawable.msg_mute, if (r.muted) "Bildirishnomani yoqish" else "Bildirishnomani o‘chirish") { if (r.muted) model.mute(r) else muteFor = r },
                     if (archived.any { it.id == r.id }) MenuItem(R.drawable.msg_unarchive, "Arxivdan chiqarish") { scope.launch { withContext(Dispatchers.IO) { RustCore.tgArchive(r.spec, false) }; model.load(); loadArchived() } }
                     else MenuItem(R.drawable.msg_archive, "Arxivlash") { scope.launch { withContext(Dispatchers.IO) { RustCore.tgArchive(r.spec, true) }; model.load(); loadArchived() } },
                     MenuItem(R.drawable.msg_markread, "O‘qilgan deb belgilash") { scope.launch { withContext(Dispatchers.IO) { RustCore.tgMarkRead(r.spec) }; model.load() } },
@@ -265,6 +266,7 @@ fun HomeScreen(auth: AuthModel) {
                 onDismiss = { menuFor = null },
             )
         }
+        muteFor?.let { r -> MuteMenu(onPick = { secs -> model.muteFor(r, secs); muteFor = null }, onDismiss = { muteFor = null }) }
         deleteFor?.let { r ->
             TgAlert("Suhbatni o‘chirish", "“${r.name}” suhbati sizdan o‘chiriladi (guruh yoki kanal bo‘lsa — undan chiqasiz).", "O‘chirish", danger = true,
                 onConfirm = { model.deleteDialog(r); deleteFor = null }, onDismiss = { deleteFor = null })

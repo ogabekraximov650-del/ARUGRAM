@@ -62,6 +62,7 @@ private val ExtraItems = listOf(
     Item(Purple, R.drawable.settings_features, "Telegram Premium", "Qo‘shimcha imkoniyatlar", "premium"),
     Item(OrangeDeep, R.drawable.settings_data, "Mening Stars’im", "Balans va amallar tarixi", "stars"),
     Item(Green, R.drawable.settings_devices, "Qo‘ng‘iroqlar", "Qo‘ng‘iroqlar tarixi", "calls"),
+    Item(Orange, R.drawable.settings_chat, "Stikerlar", "To‘plamlarni qo‘shish va olib tashlash", "stickers"),
 )
 
 private val HelpItems = listOf(

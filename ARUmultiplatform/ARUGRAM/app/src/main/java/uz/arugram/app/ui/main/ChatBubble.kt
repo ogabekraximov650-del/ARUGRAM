@@ -6,6 +6,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,7 +27,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
-import androidx.compose.foundation.text.ClickableText
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -39,6 +39,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -60,8 +61,18 @@ import uz.arugram.app.R
 import uz.arugram.app.ui.components.TgIcon
 import uz.arugram.app.ui.theme.LocalTg
 
-private val InBlue = Color(0xFF3390EC)
-private val OutGreen = Color(0xFF5DAB5D)
+// DrKLO `ThemeColors` (kunduzgi mavzu): isim/sayt nomi, javob chizig'i, yuklash tugmasi, ovoz chizig'i.
+private val InBlue = Color(0xFF298ACF)       // chat_inReplyNameText / chat_inSiteNameText
+private val OutGreen = Color(0xFF55AB4F)     // chat_outReplyNameText / chat_outSiteNameText
+private val InLine = Color(0xFF599FD8)       // chat_inReplyLine
+private val OutLine = Color(0xFF6EB969)      // chat_outReplyLine
+private val InPreviewLine = Color(0xFF70B4E8)
+private val OutPreviewLine = Color(0xFF88C97B)
+private val InLoader = Color(0xFF229AF0)     // chat_inLoader / chat_inVoiceSeekbarFill
+private val OutLoader = Color(0xFF78C272)    // chat_outLoader / chat_outVoiceSeekbarFill
+private val InSeek = Color(0xFFDEE5EB)       // chat_inVoiceSeekbar
+private val OutSeek = Color(0xFFBBE3AC)      // chat_outVoiceSeekbar
+private val LinkBlue = Color(0xFF2678B6)     // chat_messageLinkIn / Out
 
 /** DrKLO standart mavzusidagi pufakcha ranglari (`chat_inBubble`, `chat_outBubble`, kechasi — `Night`). */
 @Composable
@@ -101,100 +112,144 @@ fun MessageBubble(
     val c = LocalTg.current
     val ctx = LocalContext.current
     val openLink = LocalOpenLink.current
-    val maxW = (LocalConfiguration.current.screenWidthDp * 0.8f).dp
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    // DrKLO: matn kengligi = ekran - 80 dp, pufakcha = matn + 2×11 dp.
+    val maxW = (LocalConfiguration.current.screenWidthDp - 80 + 22).dp
     val textSize = remember { settingsPrefs(ctx).getInt("text_size", 16) }
     val bg = bubbleColor(m.out)
     val sticker = m.kind == "sticker"
     val shape = RoundedCornerShape(17.dp, 17.dp, if (m.out) 17.dp else 5.dp, if (m.out) 5.dp else 17.dp)
     val showSender = chat.kind != "user" && !m.out && m.sender.isNotEmpty() && !(chat.kind == "channel")
+    val hasMarkup = m.markup?.inline == true
+    val isMedia = m.kind == "photo" || m.kind == "video" || m.kind == "gif"
+    // Vaqt matn oxirgi qatoriga sig'sa o'sha qatorda (DrKLO `timeMore`), aks holda keyingi qatorga tushadi.
+    val inlineFooter = m.text.isNotEmpty() && (m.kind.isEmpty() || isMedia) && m.reactions.isEmpty() && !hasMarkup
+    val mediaFull = isMedia && m.text.isEmpty()
+    val measurer = androidx.compose.ui.text.rememberTextMeasurer()
+    val footerStr = (if (m.views > 0) "${compactCount(m.views)}  " else "") + (if (m.edited) "tahrirlangan  " else "") + clock(m.date)
+    val footerWidth = with(density) { measurer.measure(footerStr, TextStyle(fontSize = 12.sp)).size.width.toDp() } + (if (m.out) 21.dp else 0.dp)
 
     Box(
         Modifier.fillMaxWidth().background(if (selected) InBlue.copy(alpha = 0.18f) else Color.Transparent)
             .padding(start = 8.dp, end = 8.dp, top = 2.dp, bottom = 2.dp),
         contentAlignment = if (m.out) Alignment.CenterEnd else Alignment.CenterStart,
     ) {
-        Column(
+        Box(
             Modifier.widthIn(max = maxW)
                 .then(if (sticker) Modifier else Modifier.clip(shape).background(bg))
-                .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-                .padding(if (sticker) 0.dp else 8.dp, if (sticker) 0.dp else 6.dp),
+                .combinedClickable(onClick = onClick, onLongClick = onLongClick),
         ) {
-            if (m.fwd.isNotEmpty() && !sticker) {
-                BasicText("Uzatilgan: ${m.fwd}", style = TextStyle(color = if (m.out) OutGreen else InBlue, fontSize = 14.sp, fontWeight = FontWeight.Medium), maxLines = 1)
-            }
-            if (showSender && !sticker) {
-                BasicText(m.sender, style = TextStyle(color = senderColor(m.sender), fontSize = 14.sp, fontWeight = FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            if (m.reply > 0 && !sticker) {
-                Row(Modifier.padding(top = 2.dp, bottom = 3.dp).clip(RoundedCornerShape(4.dp)).combinedClickable(onClick = { onReplyClick(m.reply) })) {
-                    Box(Modifier.width(2.dp).height(34.dp).background(if (m.out) OutGreen else InBlue))
-                    Column(Modifier.padding(start = 6.dp)) {
-                        val who = if (replied == null) "Xabar" else replied.sender.ifEmpty { if (replied.out) "Siz" else "" }
-                        BasicText(who, style = TextStyle(color = if (m.out) OutGreen else InBlue, fontSize = 13.sp, fontWeight = FontWeight.Medium), maxLines = 1)
-                        BasicText(
-                            if (replied == null) "Xabar" else replied.text.ifEmpty { replied.media },
-                            style = TextStyle(color = textColor(c.dark, m.out), fontSize = 14.sp), maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
-            }
-            when (m.kind) {
-                "photo" -> PhotoContent(m, chat, onOpenMedia)
-                "sticker" -> StickerContent(m, chat)
-                "video" -> VideoContent(m, onOpenMedia)
-                "voice", "audio" -> VoiceContent(m, chat)
-                "file" -> FileContent(m, chat)
-                "poll" -> m.poll?.let { PollContent(m, it, onVote) }
-                else -> if (m.media.isNotEmpty()) BasicText(m.media, style = TextStyle(color = InBlue, fontSize = 15.sp, fontStyle = FontStyle.Italic))
-            }
-            if (m.text.isNotEmpty()) {
-                var revealed by remember(m.id) { mutableStateOf(false) }
-                val spoilerBg = if (c.dark) Color(0xFF3A4046) else Color(0xFFB0B8BE)
-                val styled = remember(m.text, m.ents, c.dark, revealed) {
-                    styledText(m.text, m.ents, if (m.out && !c.dark) Color(0xFF2678B6) else InBlue, if (c.dark) Color(0x33FFFFFF) else Color(0x1A000000), spoilerBg, revealed)
-                }
-                ClickableText(
-                    styled,
-                    style = TextStyle(color = textColor(c.dark, m.out), fontSize = textSize.sp, lineHeight = (textSize * 1.3f).sp),
-                    onClick = { off ->
-                        val url = styled.getStringAnnotations("url", off, off).firstOrNull()
-                        if (url != null && url.item.startsWith("tg://user")) onClick()
-                        else if (url != null) { if (!openLink(url.item)) openUrl(ctx, url.item) }
-                        else if (!revealed && m.ents.any { it.type == "sp" && off >= it.offset && off < it.offset + it.length }) revealed = true
-                        else onClick()
-                    },
-                )
-            }
-            val web = m.web
-            if (web != null && (web.title.isNotEmpty() || web.desc.isNotEmpty())) {
-                Row(Modifier.padding(top = 4.dp).height(IntrinsicSize.Min).clip(RoundedCornerShape(4.dp)).combinedClickable(onClick = { if (!openLink(web.url)) openUrl(ctx, web.url) })) {
-                    Box(Modifier.width(2.dp).fillMaxHeight().background(if (m.out) OutGreen else InBlue))
-                    Column(Modifier.padding(start = 8.dp)) {
-                        if (web.site.isNotEmpty()) BasicText(web.site, style = TextStyle(color = if (m.out) OutGreen else InBlue, fontSize = 13.sp, fontWeight = FontWeight.Medium), maxLines = 1)
-                        if (web.title.isNotEmpty()) BasicText(web.title, style = TextStyle(color = textColor(c.dark, m.out), fontSize = 14.sp, fontWeight = FontWeight.Bold), maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        if (web.desc.isNotEmpty()) BasicText(web.desc, style = TextStyle(color = textColor(c.dark, m.out), fontSize = 13.sp), maxLines = 4, overflow = TextOverflow.Ellipsis)
-                    }
-                }
-            }
-            if (m.reactions.isNotEmpty() && !sticker) {
-                FlowRow(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    m.reactions.forEach { r ->
-                        Row(
-                            Modifier.clip(RoundedCornerShape(14.dp))
-                                .background(if (r.mine) InBlue else (if (c.dark) Color(0x33FFFFFF) else Color(0x1A000000)))
-                                .combinedClickable(onClick = { onReact(r.emoji) })
-                                .padding(horizontal = 8.dp, vertical = 3.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            BasicText(r.emoji, style = TextStyle(fontSize = 15.sp))
-                            BasicText(" ${r.count}", style = TextStyle(color = if (r.mine) Color.White else textColor(c.dark, m.out), fontSize = 13.sp, fontWeight = FontWeight.Medium))
+            Column(Modifier.then(if (sticker || mediaFull) Modifier else Modifier.padding(bottom = if (inlineFooter) 8.dp else 5.dp))) {
+                val hasHeader = !sticker && (m.fwd.isNotEmpty() || showSender || m.reply > 0)
+                if (hasHeader) {
+                    Column(Modifier.padding(start = 11.dp, end = 11.dp, top = 8.dp)) {
+                        if (m.fwd.isNotEmpty()) {
+                            BasicText("Uzatilgan: ${m.fwd}", style = TextStyle(color = if (m.out) OutGreen else InBlue, fontSize = 14.sp, fontWeight = FontWeight.Medium), maxLines = 1)
+                        }
+                        if (showSender) {
+                            BasicText(m.sender, style = TextStyle(color = senderColor(m.sender), fontSize = 14.sp, fontWeight = FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        if (m.reply > 0) {
+                            Row(Modifier.padding(top = 2.dp, bottom = 3.dp).clip(RoundedCornerShape(4.dp)).combinedClickable(onClick = { onReplyClick(m.reply) })) {
+                                Box(Modifier.width(2.dp).height(34.dp).background(if (m.out) OutLine else InLine))
+                                Column(Modifier.padding(start = 6.dp)) {
+                                    val who = if (replied == null) "Xabar" else replied.sender.ifEmpty { if (replied.out) "Siz" else "" }
+                                    BasicText(who, style = TextStyle(color = if (m.out) OutGreen else InBlue, fontSize = 13.sp, fontWeight = FontWeight.Medium), maxLines = 1)
+                                    BasicText(
+                                        if (replied == null) "Xabar" else replied.text.ifEmpty { replied.media },
+                                        style = TextStyle(color = textColor(c.dark, m.out), fontSize = 14.sp), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
                         }
                     }
                 }
+                // Ilova: rasm/video pufakcha to'liq kengligida (padding'siz), qolganlari 11 dp chetdan.
+                val mediaPad = if (isMedia || sticker) Modifier else Modifier.padding(start = 11.dp, end = 11.dp, top = if (hasHeader) 0.dp else 8.dp)
+                Box(mediaPad) {
+                    when (m.kind) {
+                        "photo" -> PhotoContent(m, chat, onOpenMedia)
+                        "sticker" -> StickerContent(m, chat)
+                        "video" -> VideoContent(m, onOpenMedia)
+                        "gif" -> GifContent(m, chat, onOpenMedia)
+                        "voice", "audio" -> VoiceContent(m, chat)
+                        "file" -> FileContent(m, chat)
+                        "poll" -> m.poll?.let { PollContent(m, it, onVote) }
+                        else -> if (m.media.isNotEmpty()) BasicText(m.media, style = TextStyle(color = InBlue, fontSize = 15.sp, fontStyle = FontStyle.Italic))
+                    }
+                }
+                if (m.text.isNotEmpty()) {
+                    var revealed by remember(m.id) { mutableStateOf(false) }
+                    var layoutRes by remember { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
+                    val spoilerBg = if (c.dark) Color(0xFF3A4046) else Color(0xFFB0B8BE)
+                    val footerSp = with(density) { (footerWidth + 6.dp).toSp() }
+                    val styled = remember(m.text, m.ents, c.dark, revealed, inlineFooter, footerSp) {
+                        val base = styledText(m.text, m.ents, if (c.dark) Color(0xFF3390EC) else LinkBlue, if (c.dark) Color(0x33FFFFFF) else Color(0x1A000000), spoilerBg, revealed)
+                        if (!inlineFooter) base else androidx.compose.ui.text.buildAnnotatedString {
+                            append(base)
+                            appendInlineContent("footer", "\u00A0")
+                        }
+                    }
+                    val topPad = if (hasHeader || m.kind.isNotEmpty()) 2.dp else 8.dp
+                    BasicText(
+                        styled,
+                        Modifier.padding(start = 11.dp, end = 11.dp, top = topPad).pointerInput(styled) {
+                            detectTapGestures { pos ->
+                                val off = layoutRes?.getOffsetForPosition(pos) ?: return@detectTapGestures
+                                val url = styled.getStringAnnotations("url", off, off).firstOrNull()
+                                if (url != null && url.item.startsWith("tg://user")) onClick()
+                                else if (url != null) { if (!openLink(url.item)) openUrl(ctx, url.item) }
+                                else if (!revealed && m.ents.any { it.type == "sp" && off >= it.offset && off < it.offset + it.length }) revealed = true
+                                else onClick()
+                            }
+                        },
+                        style = TextStyle(color = textColor(c.dark, m.out), fontSize = textSize.sp, lineHeight = (textSize * 1.17f).sp),
+                        onTextLayout = { layoutRes = it },
+                        inlineContent = if (inlineFooter) mapOf("footer" to androidx.compose.foundation.text.InlineTextContent(
+                            androidx.compose.ui.text.Placeholder(footerSp, 1.sp, androidx.compose.ui.text.PlaceholderVerticalAlign.Bottom),
+                        ) {}) else emptyMap(),
+                    )
+                }
+                val web = m.web
+                if (web != null && (web.title.isNotEmpty() || web.desc.isNotEmpty())) {
+                    Row(Modifier.padding(start = 11.dp, end = 11.dp, top = 4.dp).height(IntrinsicSize.Min).clip(RoundedCornerShape(4.dp)).combinedClickable(onClick = { if (!openLink(web.url)) openUrl(ctx, web.url) })) {
+                        Box(Modifier.width(2.dp).fillMaxHeight().background(if (m.out) OutPreviewLine else InPreviewLine))
+                        Column(Modifier.padding(start = 8.dp)) {
+                            if (web.site.isNotEmpty()) BasicText(web.site, style = TextStyle(color = if (m.out) OutGreen else InBlue, fontSize = 13.sp, fontWeight = FontWeight.Medium), maxLines = 1)
+                            if (web.title.isNotEmpty()) BasicText(web.title, style = TextStyle(color = textColor(c.dark, m.out), fontSize = 14.sp, fontWeight = FontWeight.Bold), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            if (web.desc.isNotEmpty()) BasicText(web.desc, style = TextStyle(color = textColor(c.dark, m.out), fontSize = 13.sp), maxLines = 4, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                }
+                if (m.reactions.isNotEmpty() && !sticker) {
+                    FlowRow(Modifier.padding(start = 11.dp, end = 11.dp, top = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        m.reactions.forEach { r ->
+                            Row(
+                                Modifier.clip(RoundedCornerShape(14.dp))
+                                    .background(if (r.mine) InBlue else (if (c.dark) Color(0x33FFFFFF) else Color(0x1A000000)))
+                                    .combinedClickable(onClick = { onReact(r.emoji) })
+                                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                BasicText(r.emoji, style = TextStyle(fontSize = 15.sp))
+                                BasicText(" ${r.count}", style = TextStyle(color = if (r.mine) Color.White else textColor(c.dark, m.out), fontSize = 13.sp, fontWeight = FontWeight.Medium))
+                            }
+                        }
+                    }
+                }
+                val mk = m.markup
+                if (mk != null && mk.inline) Box(Modifier.padding(horizontal = 6.dp)) { MarkupRows(mk, onButton) }
+                if (!inlineFooter && !mediaFull && !sticker) {
+                    Footer(m, chat, Modifier.align(Alignment.End).padding(end = 8.dp), false)
+                }
             }
-            val mk = m.markup
-            if (mk != null && mk.inline) MarkupRows(mk, onButton)
-            Footer(m, chat, Modifier.align(Alignment.End).then(if (sticker) Modifier.clip(RoundedCornerShape(10.dp)).background(Color(0x66000000)).padding(horizontal = 6.dp) else Modifier), sticker)
+            when {
+                // Matn oxirgi qatorida (yoki ostida, joy qolgan): pastki o'ngda.
+                inlineFooter -> Footer(m, chat, Modifier.align(Alignment.BottomEnd).padding(end = 8.dp, bottom = 5.dp), false)
+                // Faqat rasm/video: vaqt rasm ustida yarim shaffof "tabletka"da.
+                mediaFull -> Footer(m, chat, Modifier.align(Alignment.BottomEnd).padding(end = 6.dp, bottom = 6.dp).clip(RoundedCornerShape(10.dp)).background(Color(0x66000000)).padding(horizontal = 6.dp, vertical = 1.dp), true)
+                sticker -> Footer(m, chat, Modifier.align(Alignment.BottomEnd).padding(end = 6.dp, bottom = 6.dp).clip(RoundedCornerShape(10.dp)).background(Color(0x66000000)).padding(horizontal = 6.dp), true)
+            }
         }
     }
 }
@@ -235,16 +290,28 @@ fun compactCount(n: Int): String = when {
     else -> n.toString()
 }
 
+/** Rasm/video o'lchami (DrKLO `ChatMessageCell`): eni ekranning ~70 %i, balandligi eniga nisbatan chegaralangan. Qaytadi: (eni, bo'yi) dp. */
+@Composable
+private fun mediaSize(ratio: Float): Pair<Float, Float> {
+    val base = LocalConfiguration.current.screenWidthDp * 0.7f
+    var w = base
+    var h = w / ratio
+    val maxH = base * 1.3f
+    val minH = base * 0.45f
+    if (h > maxH) { h = maxH; w = h * ratio }
+    if (h < minH) { h = minH; w = minOf(base, h * ratio) }
+    return maxOf(w, 120f) to h
+}
+
 @Composable
 private fun PhotoContent(m: MsgRow, chat: ChatRow, onOpen: () -> Unit) {
     val ctx = LocalContext.current
     LaunchedEffect(m.id) { MediaCache.photo(ctx, chat, m.id) }
     val img = MediaCache.photos[MediaCache.key(chat.id, m.id)]
     val ratio = if (m.pw > 0 && m.ph > 0) m.pw.toFloat() / m.ph else 1f
-    val w = minOf(260f, 320f * ratio)
+    val (w, h) = mediaSize(ratio)
     Box(
-        Modifier.padding(top = 2.dp, bottom = 4.dp).size(w.dp, (w / ratio).dp).clip(RoundedCornerShape(10.dp)).background(Color(0x22000000))
-            .combinedClickable(onClick = onOpen),
+        Modifier.size(w.dp, h.dp).background(Color(0x22000000)).combinedClickable(onClick = onOpen),
     ) {
         if (img != null) Image(img, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         else CircularProgressIndicator(Modifier.align(Alignment.Center).size(28.dp), color = Color.White, strokeWidth = 2.5.dp)
@@ -275,13 +342,28 @@ private fun StickerContent(m: MsgRow, chat: ChatRow) {
     }
 }
 
+/** GIF: yuklanib bo'lgach bubble ichida ovozsiz takrorlanadi; bosilsa to'liq ekranda ochiladi. */
+@Composable
+private fun GifContent(m: MsgRow, chat: ChatRow, onOpen: () -> Unit) {
+    val ctx = LocalContext.current
+    val ratio = if (m.pw > 0 && m.ph > 0) m.pw.toFloat() / m.ph else 1f
+    val (w, h) = mediaSize(ratio)
+    var file by remember(m.id) { mutableStateOf<java.io.File?>(null) }
+    LaunchedEffect(m.id) { file = MediaCache.file(ctx, chat, m.id)?.file }
+    Box(Modifier.size(w.dp, h.dp).background(Color(0xFF2B2B2B)).combinedClickable(onClick = onOpen), contentAlignment = Alignment.Center) {
+        val f = file
+        if (f != null) LoopingVideo(f, Modifier.fillMaxSize())
+        else CircularProgressIndicator(Modifier.size(28.dp), color = Color.White, strokeWidth = 2.5.dp)
+        BasicText("GIF", Modifier.align(Alignment.TopStart).padding(6.dp).clip(RoundedCornerShape(10.dp)).background(Color(0x66000000)).padding(horizontal = 6.dp, vertical = 2.dp), style = TextStyle(color = Color.White, fontSize = 12.sp))
+    }
+}
+
 @Composable
 private fun VideoContent(m: MsgRow, onOpen: () -> Unit) {
     val ratio = if (m.pw > 0 && m.ph > 0) m.pw.toFloat() / m.ph else 1.6f
-    val w = minOf(260f, 320f * ratio)
+    val (w, h) = mediaSize(ratio)
     Box(
-        Modifier.padding(top = 2.dp, bottom = 4.dp).size(w.dp, (w / ratio).dp).clip(RoundedCornerShape(10.dp)).background(Color(0xFF2B2B2B))
-            .combinedClickable(onClick = onOpen),
+        Modifier.size(w.dp, h.dp).background(Color(0xFF2B2B2B)).combinedClickable(onClick = onOpen),
         contentAlignment = Alignment.Center,
     ) {
         Box(Modifier.size(48.dp).clip(CircleShape).background(Color(0x99000000)), contentAlignment = Alignment.Center) {
@@ -306,7 +388,8 @@ private fun VoiceContent(m: MsgRow, chat: ChatRow) {
     LaunchedEffect(playing) { while (playing) { VoicePlayer.tick(); delay(200) } }
     val total = if (playing && VoicePlayer.duration > 0) VoicePlayer.duration / 1000.0 else m.dur
     val frac = if (playing && VoicePlayer.duration > 0) VoicePlayer.position.toFloat() / VoicePlayer.duration else 0f
-    val btn = if (m.out) OutGreen else InBlue
+    val btn = if (m.out) OutLoader else InLoader
+    val seek = if (m.out) OutSeek else InSeek
     Row(Modifier.padding(vertical = 2.dp).widthIn(min = 200.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(
             Modifier.size(42.dp).clip(CircleShape).background(btn).combinedClickable(onClick = {
@@ -322,7 +405,25 @@ private fun VoiceContent(m: MsgRow, chat: ChatRow) {
         }
         Column(Modifier.padding(start = 10.dp).weight(1f)) {
             if (m.kind == "audio" && m.name.isNotEmpty()) BasicText(m.name, style = TextStyle(color = textColor(c.dark, m.out), fontSize = 15.sp, fontWeight = FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Box(Modifier.padding(vertical = 6.dp).fillMaxWidth().height(3.dp).clip(RoundedCornerShape(2.dp)).background(btn.copy(alpha = 0.3f))) {
+            if (m.wave.isNotEmpty() && m.kind == "voice") {
+                // To'lqin shakli (DrKLO `SeekBarWaveform`): 3 dp ustunlar, 2 dp oraliq, o'ynalgan qismi to'q rangda.
+                androidx.compose.foundation.Canvas(Modifier.padding(vertical = 4.dp).fillMaxWidth().height(26.dp)) {
+                    val barW = 2.dp.toPx()
+                    val gap = 1.dp.toPx()
+                    val n = (size.width / (barW + gap)).toInt().coerceAtLeast(1)
+                    for (i in 0 until n) {
+                        val v = m.wave[(i * m.wave.size / n).coerceIn(0, m.wave.size - 1)] / 31f
+                        val h = (4.dp.toPx() + v * (size.height - 4.dp.toPx())).coerceAtMost(size.height)
+                        val x = i * (barW + gap)
+                        drawRoundRect(
+                            if (i.toFloat() / n <= frac) btn else (if (c.dark) btn.copy(alpha = 0.35f) else seek),
+                            topLeft = androidx.compose.ui.geometry.Offset(x, (size.height - h) / 2f),
+                            size = androidx.compose.ui.geometry.Size(barW, h),
+                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(barW / 2f),
+                        )
+                    }
+                }
+            } else Box(Modifier.padding(vertical = 6.dp).fillMaxWidth().height(3.dp).clip(RoundedCornerShape(2.dp)).background(btn.copy(alpha = 0.3f))) {
                 Box(Modifier.fillMaxWidth(frac.coerceIn(0f, 1f)).height(3.dp).background(btn))
             }
             BasicText(formatDuration(if (playing) VoicePlayer.position / 1000.0 else total), style = TextStyle(color = if (m.out) OutGreen else Color(0xFFA1AAB3), fontSize = 12.sp))
@@ -350,7 +451,7 @@ private fun FileContent(m: MsgRow, chat: ChatRow) {
         }),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(48.dp).clip(CircleShape).background(if (m.out) OutGreen else InBlue), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(48.dp).clip(CircleShape).background(if (m.out) OutLoader else InLoader), contentAlignment = Alignment.Center) {
             if (loading) CircularProgressIndicator(Modifier.size(26.dp), color = Color.White, strokeWidth = 2.dp)
             else TgIcon(if (done != null) R.drawable.files_internal else R.drawable.media_download, Color.White, size = 24.dp)
         }

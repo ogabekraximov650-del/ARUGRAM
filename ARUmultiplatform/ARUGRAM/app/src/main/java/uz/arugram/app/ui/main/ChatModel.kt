@@ -40,6 +40,10 @@ data class MsgRow(
     val markup: Markup? = null,
     val ents: List<Ent> = emptyList(),
     val web: WebPreview? = null,
+    /** Ovozli xabar to'lqin shakli (0..31). */
+    val wave: List<Int> = emptyList(),
+    /** Xizmat xabari matni (bo'sh bo'lmasa — markazdagi yozuv sifatida chiziladi). */
+    val service: String = "",
 )
 
 /** Matn bezagi: tur (`b`, `i`, `u`, `s`, `c`, `p`, `l`, `url`, `m`, `n`, `h`, `bc`, `e`, `ph`, `sp`, `q`), boshlanish, uzunlik, qo'shimcha (havola va h.k.). */
@@ -86,6 +90,8 @@ fun parseMsg(o: JSONObject): MsgRow {
                 add(Ent(e.optString(0), e.optInt(1), e.optInt(2), e.optString(3)))
             }
         },
+        service = o.optString("service"),
+        wave = o.optJSONArray("wave")?.let { a -> List(a.length()) { a.optInt(it) } }.orEmpty(),
         web = o.optJSONObject("web")?.let { w -> WebPreview(w.optString("url"), w.optString("site"), w.optString("title"), w.optString("desc")) },
         poll = o.optJSONObject("poll")?.let { po ->
             val a = po.optJSONArray("answers")
@@ -210,10 +216,10 @@ class ChatModel(val chat: ChatRow, private val context: Context) {
     }
 
     /** Ovozsiz yoki rejalashtirilgan matn (`schedule` — unix soniya, 0 — hozir). */
-    fun sendEx(text: String, replyTo: Int, silent: Boolean, schedule: Long, onFail: (() -> Unit)? = null) {
+    fun sendEx(text: String, replyTo: Int, silent: Boolean, schedule: Long, markers: Boolean = false, onFail: (() -> Unit)? = null) {
         sending++
         scope.launch {
-            val r = withContext(Dispatchers.IO) { RustCore.tgSendEx(chat.spec, replyTo, silent, schedule, text) }
+            val r = withContext(Dispatchers.IO) { RustCore.tgSendEx(chat.spec, replyTo, silent, schedule, text, markers) }
             sending--
             if (schedule > 0 && r.optString("error").isEmpty()) error = "Xabar rejalashtirildi"
             after(r, onFail)

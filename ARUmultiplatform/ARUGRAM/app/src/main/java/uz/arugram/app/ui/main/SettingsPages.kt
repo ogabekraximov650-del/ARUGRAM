@@ -240,7 +240,9 @@ fun PrivacyPage(onBack: () -> Unit, onDevices: () -> Unit) {
             if (enabled) TextRow("Parolni o‘zgartirish") { mode = "change" }
             TextRow("Ikki bosqichli tekshiruv", subtitle = "Kirishda qo‘shimcha parol so‘raladi", value = "Telegramda")
         }
-        Hint("Parol-qulf faqat shu qurilmadagi ilovani himoyalaydi. So‘nggi faollik, profil rasmi va guruhlarga qo‘shilish sozlamalari Telegram serverida saqlanadi va Telegram’ning rasmiy ilovasida o‘zgartiriladi.")
+        Hint("Kim sizni ko‘ra olishi")
+        PrivacyRules()
+        Hint("Parol-qulf faqat shu qurilmadagi ilovani himoyalaydi. Quyidagi sozlamalar Telegram serverida saqlanadi (istisnolar Telegram’ning rasmiy ilovasida o‘zgartiriladi).")
     }
 }
 
@@ -364,13 +366,18 @@ private fun SessionRow(s: JSONObject, onClick: (() -> Unit)?) {
 
 // ── Chat jildlari ──
 @Composable
-fun FoldersPage(onBack: () -> Unit, folders: List<Folder>) {
+fun FoldersPage(onBack: () -> Unit, folders: List<Folder>, onChanged: () -> Unit = {}) {
+    var edit by remember { mutableStateOf<Folder?>(null) }
+    var creating by remember { mutableStateOf(false) }
     Page("Chat jildlari", onBack) {
-        if (folders.isEmpty()) Hint("Hozircha jild yo‘q. Jildlarni Telegram’ning rasmiy ilovasida yaratsangiz, ular suhbatlar ro‘yxati tepasida paydo bo‘ladi.")
-        else {
-            Card { folders.forEach { TextRow(it.title, subtitle = it.summary()) } }
-            Hint("Jildlar suhbatlar ro‘yxati tepasida ko‘rinadi.")
+        Card {
+            folders.forEach { f -> TextRow(f.title, subtitle = f.summary()) { edit = f } }
+            TextRow("Yangi jild yaratish") { creating = true }
         }
+        Hint("Jildlar suhbatlar ro‘yxati tepasida ko‘rinadi. Jildni bosib tahrirlash yoki o‘chirish mumkin.")
+    }
+    if (creating || edit != null) {
+        FolderEditor(edit, onDismiss = { creating = false; edit = null }, onSaved = { creating = false; edit = null; onChanged() })
     }
 }
 
@@ -513,6 +520,104 @@ fun StarsPage(onBack: () -> Unit) {
                         o.optString("title").ifEmpty { if (amt >= 0) "Kirim" else "Chiqim" },
                         value = (if (amt > 0) "+" else "") + amt,
                         subtitle = chatTime(o.optLong("date")) + if (o.optBoolean("refund")) " · qaytarilgan" else "",
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Maxfiylik qoidalari (`account.getPrivacy` / `setPrivacy`): har biri "Hamma / Kontaktlarim / Hech kim". */
+@Composable
+private fun PrivacyRules() {
+    val scope = rememberCoroutineScope()
+    val items = listOf(
+        "Telefon raqamim" to "phone", "So‘nggi marta onlayn" to "last_seen", "Profil rasmim" to "photo", "Bio" to "about",
+        "Guruhlarga taklif qilish" to "invite", "Qo‘ng‘iroqlar" to "call", "Uzatilgan xabarlar" to "forwards", "Ovozli xabarlar" to "voice",
+    )
+    val values = remember { androidx.compose.runtime.mutableStateMapOf<String, String>() }
+    var editing by remember { mutableStateOf<Pair<String, String>?>(null) }
+    LaunchedEffect(Unit) {
+        for ((_, k) in items) {
+            val j = withContext(Dispatchers.IO) { RustCore.tgPrivacyGet(k) }
+            values[k] = j.optString("value").ifEmpty { "?" }
+        }
+    }
+    fun label(v: String?) = when (v) { "all" -> "Hamma"; "contacts" -> "Kontaktlarim"; "nobody" -> "Hech kim"; null -> "..."; else -> "—" }
+    Card { items.forEach { (title, k) -> TextRow(title, value = label(values[k])) { editing = title to k } } }
+    editing?.let { (title, k) ->
+        val c = LocalTg.current
+        androidx.compose.ui.window.Dialog(onDismissRequest = { editing = null }) {
+            Column(Modifier.clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp)).background(if (c.dark) Color(0xFF1C2229) else Color.White).padding(vertical = 12.dp)) {
+                BasicText(title, Modifier.padding(horizontal = 24.dp, vertical = 8.dp), style = TextStyle(color = c.text, fontSize = 20.sp, fontWeight = FontWeight.Bold))
+                listOf("all" to "Hamma", "contacts" to "Kontaktlarim", "nobody" to "Hech kim").forEach { (v, name) ->
+                    RadioRow(name, values[k] == v) {
+                        editing = null
+                        values[k] = v
+                        scope.launch { withContext(Dispatchers.IO) { RustCore.tgPrivacySet(k, v) } }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── Stikerlar ──
+@Composable
+fun StickersPage(onBack: () -> Unit) {
+    val c = LocalTg.current
+    val scope = rememberCoroutineScope()
+    var name by remember { mutableStateOf("") }
+    var msg by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { StickerStore.loadSets() }
+    Page("Stikerlar", onBack) {
+        Card {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f)) {
+                    if (name.isEmpty()) BasicText("To‘plam nomi yoki t.me/addstickers/... havolasi", style = TextStyle(color = c.hint, fontSize = 15.sp))
+                    androidx.compose.foundation.text.BasicTextField(
+                        name, { name = it }, singleLine = true, textStyle = TextStyle(color = c.text, fontSize = 16.sp),
+                        cursorBrush = androidx.compose.ui.graphics.SolidColor(c.inputActive), modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                BasicText(
+                    if (busy) "..." else "Qo‘shish",
+                    Modifier.clickable(enabled = !busy && name.isNotBlank()) {
+                        busy = true
+                        scope.launch {
+                            val r = withContext(Dispatchers.IO) { RustCore.tgStickerInstall(name) }
+                            busy = false
+                            msg = r.optString("error").ifEmpty { "Stiker to‘plami qo‘shildi" }
+                            if (r.optString("error").isEmpty()) { name = ""; StickerStore.loadSets(force = true) }
+                        }
+                    }.padding(start = 12.dp, top = 8.dp, bottom = 8.dp),
+                    style = TextStyle(color = Blue, fontSize = 15.sp, fontWeight = FontWeight.Bold),
+                )
+            }
+        }
+        msg?.let { Hint(it) }
+        val sets = StickerStore.sets
+        Hint("Mening stikerlarim")
+        Card {
+            if (sets == null) Box(Modifier.fillMaxWidth().padding(20.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.size(26.dp), color = c.inputActive, strokeWidth = 3.dp) }
+            else if (sets.isEmpty()) TextRow("Hozircha stiker to‘plami yo‘q")
+            else sets.forEach { s ->
+                Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        BasicText(s.title, style = TextStyle(color = c.text, fontSize = 16.sp), maxLines = 1)
+                        BasicText("${s.count} ta stiker", style = TextStyle(color = c.gray, fontSize = 13.sp))
+                    }
+                    BasicText(
+                        "O‘chirish",
+                        Modifier.clickable {
+                            scope.launch {
+                                val r = withContext(Dispatchers.IO) { RustCore.tgStickerUninstall(s.id, s.hash) }
+                                msg = r.optString("error").ifEmpty { "To‘plam olib tashlandi" }
+                                StickerStore.loadSets(force = true)
+                            }
+                        }.padding(8.dp),
+                        style = TextStyle(color = c.red, fontSize = 14.sp, fontWeight = FontWeight.Medium),
                     )
                 }
             }

@@ -58,13 +58,14 @@ import uz.arugram.app.ui.components.TgIcon
 import uz.arugram.app.ui.theme.LocalTg
 import java.io.File
 
-private val Blue = Color(0xFF3390EC)
+private val Blue = Color(0xFF229AF0)  // chat_messagePanelSend = TELEGRAM_COLOR
 
 /** Ovoz yozgich (Telegram ovozli xabari — OGG/Opus; Android 10+). */
 class VoiceRecorder(private val ctx: Context) {
     private var rec: MediaRecorder? = null
     private var file: File? = null
     private var startedAt = 0L
+    private val amps = ArrayList<Int>()
 
     val supported get() = Build.VERSION.SDK_INT >= 29
 
@@ -85,8 +86,38 @@ class VoiceRecorder(private val ctx: Context) {
             rec = r
             file = f
             startedAt = System.currentTimeMillis()
+            amps.clear()
             true
         }.getOrDefault(false)
+    }
+
+    /** Yozish paytida chaqiriladi (har ~100 ms): ovoz balandligini to'lqin shakli uchun eslab qoladi. */
+    fun sample() {
+        val a = runCatching { rec?.maxAmplitude ?: 0 }.getOrDefault(0)
+        amps.add(a)
+    }
+
+    /** 100 ta 5 bitli qiymat (little-endian) hex ko'rinishida — Telegram `DocumentAttributeAudio.waveform`. */
+    fun waveformHex(): String {
+        if (amps.isEmpty()) return ""
+        val peak = (amps.maxOrNull() ?: 1).coerceAtLeast(1)
+        val vals = IntArray(100) { i ->
+            val a = i * amps.size / 100
+            val b = ((i + 1) * amps.size / 100).coerceAtLeast(a + 1).coerceAtMost(amps.size)
+            var mx = 0
+            for (k in a until b) mx = maxOf(mx, amps[k])
+            (mx * 31 / peak).coerceIn(0, 31)
+        }
+        val out = ByteArray((vals.size * 5 + 7) / 8 + 1)
+        for ((i, x) in vals.withIndex()) {
+            val bit = i * 5
+            val byte = bit / 8
+            val shift = bit % 8
+            val w = (x and 31) shl shift
+            out[byte] = (out[byte].toInt() or (w and 0xFF)).toByte()
+            if (w shr 8 != 0) out[byte + 1] = (out[byte + 1].toInt() or (w shr 8)).toByte()
+        }
+        return out.copyOf((vals.size * 5 + 7) / 8).joinToString("") { "%02x".format(it) }
     }
 
     fun elapsed(): Double = if (rec == null) 0.0 else (System.currentTimeMillis() - startedAt) / 1000.0
@@ -140,9 +171,12 @@ fun ChatInputBar(
     canWrite: Boolean,
     onCancelContext: () -> Unit,
     onSend: () -> Unit,
-    onSendFile: (File, String, String) -> Unit,
-    onSendVoice: (File, Double) -> Unit,
+    onSendFile: (File, String, String, String) -> Unit,
+    onSendVoice: (File, Double, String) -> Unit,
     onSendSticker: (Sticker) -> Unit,
+    onFormat: () -> Unit = {},
+    hasCommands: Boolean = false,
+    onCommands: () -> Unit = {},
     onSendEx: (silent: Boolean, schedule: Long) -> Unit = { _, _ -> },
     onSendSpecial: (kind: String, payload: String) -> Unit = { _, _ -> },
 ) {
@@ -157,6 +191,7 @@ fun ChatInputBar(
     val recorder = remember { VoiceRecorder(ctx) }
     var sendMenu by remember { mutableStateOf(false) }
     var pollForm by remember { mutableStateOf(false) }
+    var pendingFile by remember { mutableStateOf<Triple<File, String, String>?>(null) }
     var toast by remember { mutableStateOf<String?>(null) }
 
     // Joylashuv: oxirgi ma'lum joy (GPS yoki tarmoq) yuboriladi.
@@ -208,32 +243,31 @@ fun ChatInputBar(
                 extra = "$dur:$w:$h"
             }
         }
-        onSendFile(f, kind, extra)
+        // Rasm/video/fayl: avval izoh so'raladi (Telegram'dagi "izoh qo'shish" qatori).
+        pendingFile = Triple(f, kind, extra)
     }
-    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { pick(it, "photo") }
-    val videoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { pick(it, "video") }
+    val galleryPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) pick(uri, if (ctx.contentResolver.getType(uri).orEmpty().startsWith("video/")) "video" else "photo")
+    }
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { pick(it, "file") }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
         if (ok && recorder.start()) recording = true
     }
 
-    LaunchedEffect(recording) { while (recording) { recSeconds = recorder.elapsed(); delay(200) } }
+    LaunchedEffect(recording) { while (recording) { recSeconds = recorder.elapsed(); recorder.sample(); delay(100) } }
 
     if (attachMenu) {
-        PopupMenu(
-            listOf(
-                MenuItem(R.drawable.msg_photos, "Rasm") { imagePicker.launch("image/*") },
-                MenuItem(R.drawable.input_video, "Video") { videoPicker.launch("video/*") },
-                MenuItem(R.drawable.files_internal, "Fayl") { filePicker.launch("*/*") },
-                MenuItem(R.drawable.msg_location, "Joylashuv") {
-                    if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) sendLocation()
-                    else locationPermission.launch(Manifest.permission.ACCESS_FINE_LOCATION)
-                },
-                MenuItem(R.drawable.msg_contacts, "Kontakt") {
-                    contactPicker.launch(android.content.Intent(android.content.Intent.ACTION_PICK, android.provider.ContactsContract.CommonDataKinds.Phone.CONTENT_URI))
-                },
-                MenuItem(R.drawable.msg_select, "So‘rovnoma") { pollForm = true },
-            ),
+        AttachSheet(
+            onPhoto = { uri -> attachMenu = false; pick(uri, "photo") },
+            onGallery = { attachMenu = false; galleryPicker.launch(arrayOf("image/*", "video/*")) },
+            onFile = { attachMenu = false; filePicker.launch("*/*") },
+            onLocation = {
+                attachMenu = false
+                if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) sendLocation()
+                else locationPermission.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+            },
+            onContact = { attachMenu = false; contactPicker.launch(android.content.Intent(android.content.Intent.ACTION_PICK, android.provider.ContactsContract.CommonDataKinds.Phone.CONTENT_URI)) },
+            onPoll = { attachMenu = false; pollForm = true },
             onDismiss = { attachMenu = false },
         )
     }
@@ -247,6 +281,14 @@ fun ChatInputBar(
             onDismiss = { sendMenu = false },
         )
     }
+    pendingFile?.let { (f, kind, extra) ->
+        TgForm(
+            when (kind) { "photo" -> "Rasm yuborish"; "video" -> "Video yuborish"; else -> "Fayl yuborish" },
+            listOf("Izoh (ixtiyoriy)"), "Yuborish",
+            onConfirm = { v -> pendingFile = null; onSendFile(f, kind, extra, v[0].trim()) },
+            onDismiss = { pendingFile = null; f.delete() },
+        )
+    }
     if (pollForm) {
         TgForm("Yangi so‘rovnoma", listOf("Savol", "Variant 1", "Variant 2", "Variant 3 (ixtiyoriy)", "Variant 4 (ixtiyoriy)"), "Yuborish", onConfirm = { v ->
             pollForm = false
@@ -257,6 +299,26 @@ fun ChatInputBar(
     }
     LaunchedEffect(toast) { if (toast != null) { delay(2500); toast = null } }
     Column(Modifier.fillMaxWidth().background(c.bar).navigationBarsPadding().imePadding()) {
+        // Matn bezaklari: belgilangan qismni belgilar bilan o'raydi (`**qalin**`, `__kursiv__`, `==tagiga chizilgan==`, `~~o'chirilgan~~`, `` `kod` ``, `||spoyler||`).
+        val sel = draft.selection
+        if (canWrite && !sel.collapsed && !recording) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                listOf("B" to "**", "I" to "__", "U" to "==", "S" to "~~", "<>" to "`", "▒" to "||").forEach { (label, mark) ->
+                    Box(
+                        Modifier.clip(CircleShape).clickable {
+                            val t = draft.text
+                            val a = sel.min
+                            val b = sel.max
+                            onFormat()
+                            onDraft(TextFieldValue(t.substring(0, a) + mark + t.substring(a, b) + mark + t.substring(b), TextRange(a + mark.length, b + mark.length)))
+                        }.padding(horizontal = 14.dp, vertical = 6.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        BasicText(label, style = TextStyle(color = Blue, fontSize = 15.sp, fontWeight = if (label == "B") FontWeight.Bold else FontWeight.Medium, fontStyle = if (label == "I") androidx.compose.ui.text.font.FontStyle.Italic else null, textDecoration = when (label) { "U" -> androidx.compose.ui.text.style.TextDecoration.Underline; "S" -> androidx.compose.ui.text.style.TextDecoration.LineThrough; else -> null }))
+                    }
+                }
+            }
+        }
         if (toast != null) BasicText(toast.orEmpty(), Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), style = TextStyle(color = c.red, fontSize = 13.sp))
         if (!canWrite) {
             Box(Modifier.fillMaxWidth().height(48.dp), contentAlignment = Alignment.Center) {
@@ -285,26 +347,31 @@ fun ChatInputBar(
                 BasicText("Bekor qilish", Modifier.clickable { recorder.cancel(); recording = false }.padding(12.dp), style = TextStyle(color = Blue, fontSize = 15.sp, fontWeight = FontWeight.Medium))
                 Box(Modifier.size(44.dp).clip(CircleShape).background(Blue).clickable {
                     recording = false
-                    recorder.stop()?.let { (f, s) -> onSendVoice(f, s) }
+                    val wave = recorder.waveformHex()
+                    recorder.stop()?.let { (f, s) -> onSendVoice(f, s, wave) }
                 }, contentAlignment = Alignment.Center) { SendIcon(Color.White) }
             }
         } else {
-            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.Bottom) {
+            Row(Modifier.fillMaxWidth().heightIn(min = 44.dp), verticalAlignment = Alignment.Bottom) {
                 Box(Modifier.size(48.dp).clickable {
                     emojiPanel = !emojiPanel
                     if (emojiPanel) kb?.hide() else kb?.show()
-                }, contentAlignment = Alignment.Center) { TgIcon(if (emojiPanel) R.drawable.input_keyboard else R.drawable.input_smile, c.gray) }
-                Box(Modifier.weight(1f).padding(vertical = 12.dp)) {
-                    if (draft.text.isEmpty()) BasicText("Xabar", style = TextStyle(color = c.hint, fontSize = 18.sp))
+                }, contentAlignment = Alignment.Center) { TgIcon(if (emojiPanel) R.drawable.input_keyboard else R.drawable.input_smile, if (c.dark) c.gray else Color(0xFF8E959B)) }
+                Box(Modifier.weight(1f).padding(top = 9.dp, bottom = 10.dp)) {
+                    // DrKLO: `chat_messagePanelHint` 0xFF858A84, kursor 0xFF54A1DB, yozuv 18 sp.
+                    if (draft.text.isEmpty()) BasicText("Xabar", style = TextStyle(color = if (c.dark) c.hint else Color(0xFF858A84), fontSize = 18.sp))
                     BasicTextField(
                         value = draft, onValueChange = onDraft, maxLines = 6,
                         textStyle = TextStyle(color = c.text, fontSize = 18.sp),
-                        cursorBrush = SolidColor(c.inputActive),
+                        cursorBrush = SolidColor(if (c.dark) c.inputActive else Color(0xFF54A1DB)),
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
                 if (draft.text.isBlank()) {
-                    Box(Modifier.size(48.dp).clickable { attachMenu = true }, contentAlignment = Alignment.Center) { TgIcon(R.drawable.input_attach, c.gray) }
+                    if (hasCommands) Box(Modifier.size(48.dp).clickable(onClick = onCommands), contentAlignment = Alignment.Center) {
+                        BasicText("/", style = TextStyle(color = if (c.dark) c.gray else Color(0xFF8E959B), fontSize = 26.sp, fontWeight = FontWeight.Medium))
+                    }
+                    Box(Modifier.size(48.dp).clickable { attachMenu = true }, contentAlignment = Alignment.Center) { TgIcon(R.drawable.input_attach, if (c.dark) c.gray else Color(0xFF8E959B)) }
                     if (recorder.supported) {
                         Box(Modifier.size(48.dp).clickable {
                             if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
@@ -312,7 +379,7 @@ fun ChatInputBar(
                             } else {
                                 permission.launch(Manifest.permission.RECORD_AUDIO)
                             }
-                        }, contentAlignment = Alignment.Center) { TgIcon(R.drawable.input_mic, c.gray) }
+                        }, contentAlignment = Alignment.Center) { TgIcon(R.drawable.input_mic, if (c.dark) c.gray else Color(0xFF8E959B)) }
                     }
                 } else {
                     Box(Modifier.size(48.dp).combinedClickable(onClick = onSend, onLongClick = { sendMenu = true }), contentAlignment = Alignment.Center) { SendIcon(Blue) }
@@ -320,7 +387,7 @@ fun ChatInputBar(
             }
             if (emojiPanel) {
                 Row(Modifier.fillMaxWidth().height(40.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                    listOf("Emoji", "Stikerlar").forEachIndexed { i, t ->
+                    listOf("Emoji", "Stikerlar", "GIF").forEachIndexed { i, t ->
                         BasicText(
                             t, Modifier.clickable { panelTab = i }.padding(horizontal = 20.dp, vertical = 8.dp),
                             style = TextStyle(color = if (panelTab == i) Blue else c.gray, fontSize = 15.sp, fontWeight = FontWeight.Medium),
@@ -338,8 +405,10 @@ fun ChatInputBar(
                             }, contentAlignment = Alignment.Center) { BasicText(e, style = TextStyle(fontSize = 26.sp)) }
                         }
                     }
-                } else {
+                } else if (panelTab == 1) {
                     StickerPanel(onPick = onSendSticker)
+                } else {
+                    GifPanel(onPick = { ref -> onSendSticker(Sticker(ref, "video/mp4", "")) })
                 }
             }
         }

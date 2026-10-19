@@ -3,6 +3,7 @@ package uz.arugram.app.ui.main
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -42,12 +43,16 @@ import uz.arugram.app.ui.theme.LocalTg
 
 /** Guruh/kanal a'zolari ro'yxati (DrKLO `ProfileActivity` a'zolar bo'limi); a'zo bosilsa shaxsiy suhbat ochiladi. */
 @Composable
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 fun MembersSection(chat: ChatRow, onOpen: (ChatRow) -> Unit) {
     val c = LocalTg.current
     var members by remember { mutableStateOf<List<ChatRow>?>(null) }
     var roles by remember { mutableStateOf<Map<Long, String>>(emptyMap()) }
     var error by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(chat.id) {
+    var actionFor by remember { mutableStateOf<ChatRow?>(null) }
+    var reload by remember { mutableStateOf(0) }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(chat.id, reload) {
         val j = withContext(Dispatchers.IO) { RustCore.tgMembers(chat.spec) }
         val err = j.optString("error")
         if (err.isNotEmpty()) { error = err; members = emptyList(); return@LaunchedEffect }
@@ -68,7 +73,7 @@ fun MembersSection(chat: ChatRow, onOpen: (ChatRow) -> Unit) {
         if (l == null) Box(Modifier.fillMaxWidth().padding(20.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.size(26.dp), color = c.inputActive, strokeWidth = 3.dp) }
         else if (l.isEmpty()) BasicText(error ?: "A’zolar ro‘yxati ko‘rinmaydi", Modifier.padding(18.dp), style = TextStyle(color = c.gray, fontSize = 14.sp))
         else l.forEach { m ->
-            Row(Modifier.fillMaxWidth().height(56.dp).clickable { onOpen(m) }.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().height(56.dp).combinedClickable(onClick = { onOpen(m) }, onLongClick = { actionFor = m }).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                 ChatAvatar(m, 40.dp)
                 BasicText(m.name, Modifier.padding(start = 12.dp).weight(1f), style = TextStyle(color = c.text, fontSize = 16.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 val role = roles[m.id].orEmpty()
@@ -76,6 +81,30 @@ fun MembersSection(chat: ChatRow, onOpen: (ChatRow) -> Unit) {
             }
         }
     }
+    val ctx = LocalContext.current
+    actionFor?.let { m ->
+        MemberActions(chat, m, onDone = { msg -> actionFor = null; reload++; android.widget.Toast.makeText(ctx, msg, android.widget.Toast.LENGTH_SHORT).show() }, onDismiss = { actionFor = null })
+    }
+}
+
+/** A'zo ustida uzoq bosganda: chiqarish / bloklash / admin qilish (huquq yetmasa server xato qaytaradi). */
+@Composable
+private fun MemberActions(chat: ChatRow, m: ChatRow, onDone: (String) -> Unit, onDismiss: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    fun act(a: String, ok: String) = scope.launch {
+        val r = withContext(Dispatchers.IO) { RustCore.tgMemberAct(chat.spec, "${m.id}@${m.access}", a) }
+        onDone(r.optString("error").ifEmpty { ok })
+    }
+    PopupMenu(
+        listOf(
+            MenuItem(R.drawable.msg_leave, "Guruhdan chiqarish", danger = true) { act("kick", "A’zo chiqarildi") },
+            MenuItem(R.drawable.msg_block, "Bloklash", danger = true) { act("ban", "A’zo bloklandi") },
+            MenuItem(R.drawable.msg_block, "Blokdan chiqarish") { act("unban", "Blok olib tashlandi") },
+            MenuItem(R.drawable.msg_addbot, "Admin qilish") { act("admin", "Admin qilindi") },
+            MenuItem(R.drawable.msg_addbot, "Adminlikdan olish") { act("demote", "Adminlik olib tashlandi") },
+        ),
+        onDismiss,
+    )
 }
 
 /** Ulashilgan media (DrKLO `SharedMediaLayout`): Media / Fayllar / Havolalar / Ovozli yorliqlari. */

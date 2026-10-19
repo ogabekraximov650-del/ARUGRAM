@@ -46,7 +46,7 @@ import uz.arugram.app.ui.theme.LocalTg
 
 /** Sozlamalar ichki sahifalarini nomi bo'yicha ochadi. */
 @Composable
-fun SettingsRouter(page: String, onBack: () -> Unit, onNavigate: (String) -> Unit, folders: List<Folder>) {
+fun SettingsRouter(page: String, onBack: () -> Unit, onNavigate: (String) -> Unit, folders: List<Folder>, onFoldersChanged: () -> Unit = {}) {
     val c = LocalTg.current
     Box(Modifier.fillMaxSize().background(c.grayBg)) {
         when (page) {
@@ -55,12 +55,13 @@ fun SettingsRouter(page: String, onBack: () -> Unit, onNavigate: (String) -> Uni
             "privacy" -> PrivacyPage(onBack) { onNavigate("devices") }
             "notifications" -> NotificationsPage(onBack)
             "data" -> DataPage(onBack)
-            "folders" -> FoldersPage(onBack, folders)
+            "folders" -> FoldersPage(onBack, folders, onFoldersChanged)
             "devices" -> DevicesPage(onBack)
             "power" -> PowerPage(onBack)
             "language" -> LanguagePage(onBack)
             "newchannel" -> NewChannelScreen(onBack)
             "calls" -> CallsPage(onBack)
+            "stickers" -> StickersPage(onBack)
             "premium" -> PremiumPage(onBack)
             "stars" -> StarsPage(onBack)
             else -> onBack()

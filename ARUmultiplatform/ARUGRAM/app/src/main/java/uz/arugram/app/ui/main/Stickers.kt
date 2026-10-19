@@ -57,8 +57,8 @@ object StickerStore {
     val stickers = mutableStateMapOf<String, List<Sticker>>()
     private val bitmaps = HashMap<String, ImageBitmap>()
 
-    suspend fun loadSets() {
-        if (sets != null) return
+    suspend fun loadSets(force: Boolean = false) {
+        if (sets != null && !force) return
         val j = withContext(Dispatchers.IO) { RustCore.tgStickerSets() }
         val a = j.optJSONArray("sets")
         sets = buildList { for (i in 0 until (a?.length() ?: 0)) { val o = a!!.getJSONObject(i); add(StickerSet(o.optString("id"), o.optString("hash"), o.optString("title"), o.optInt("count"))) } }

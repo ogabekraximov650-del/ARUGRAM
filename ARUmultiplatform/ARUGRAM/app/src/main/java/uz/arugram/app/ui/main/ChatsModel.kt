@@ -99,9 +99,12 @@ class ChatsModel(private val context: android.content.Context) {
         scope.launch { withContext(Dispatchers.IO) { RustCore.tgPinDialog(row.spec, !row.pinned) }; load() }
     }
 
-    fun mute(row: ChatRow) {
-        _ui.update { st -> st.copy(chats = st.chats.map { if (it.id == row.id) it.copy(muted = !row.muted) else it }) }
-        scope.launch { withContext(Dispatchers.IO) { RustCore.tgMute(row.spec, !row.muted) }; load() }
+    fun mute(row: ChatRow) = muteFor(row, if (row.muted) 0L else 1L)
+
+    /** `secs`: 0 — yoqish, 1 — doimiy, boshqasi — shuncha soniyaga. */
+    fun muteFor(row: ChatRow, secs: Long) {
+        _ui.update { st -> st.copy(chats = st.chats.map { if (it.id == row.id) it.copy(muted = secs > 0) else it }) }
+        scope.launch { withContext(Dispatchers.IO) { RustCore.tgMuteFor(row.spec, secs) }; load() }
     }
 
     fun deleteDialog(row: ChatRow) {

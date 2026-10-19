@@ -127,6 +127,9 @@ object RustCore {
 
     fun tgMute(spec: String, mute: Boolean) = call { it.rust_tg_mute("$spec\n${if (mute) 1 else 0}") }
 
+    /** `secs` > 1 — shuncha soniyaga, 1 — doimiy, 0 — yoqish. */
+    fun tgMuteFor(spec: String, secs: Long) = call { it.rust_tg_mute("$spec\n$secs") }
+
     fun tgDeleteDialog(spec: String) = call { it.rust_tg_delete_dialog(spec) }
 
     fun tgSendMedia(spec: String, kind: String, path: String, replyId: Int, caption: String, extra: String = "") =
@@ -198,8 +201,36 @@ object RustCore {
 
     fun tgStories() = call { it.rust_tg_stories() }
 
-    fun tgSendEx(spec: String, replyId: Int, silent: Boolean, schedule: Long, text: String) =
-        call { it.rust_tg_send_ex("$spec\n$replyId\n${if (silent) 1 else 0}\n$schedule\n$text") }
+    fun tgSaveGif(spec: String, msgId: Int) = call { it.rust_tg_save_gif("$spec\n$msgId") }
+
+    fun tgSavedGifs() = call { it.rust_tg_saved_gifs() }
+
+    fun tgDocFile(ref: String, dir: String) = call { it.rust_tg_doc_file("$ref\n$dir") }
+
+    fun tgStickerInstall(name: String) = call { it.rust_tg_sticker_install(name) }
+
+    fun tgStickerUninstall(id: String, hash: String) = call { it.rust_tg_sticker_uninstall("$id:$hash") }
+
+    fun tgPrivacyGet(key: String) = call { it.rust_tg_privacy_get(key) }
+
+    fun tgPrivacySet(key: String, value: String) = call { it.rust_tg_privacy_set("$key\n$value") }
+
+    fun tgFolderSave(id: Int, title: String, flags: List<String>, include: List<String>) =
+        call { it.rust_tg_folder_save("$id\n$title\n${flags.joinToString(",")}\n${include.joinToString(",")}") }
+
+    fun tgFolderDelete(id: Int) = call { it.rust_tg_folder_delete("$id") }
+
+    fun tgMemberAct(spec: String, user: String, act: String) = call { it.rust_tg_member_act("$spec\n$user\n$act") }
+
+    fun tgBotMenu(bot: String) = call { it.rust_tg_bot_menu(bot) }
+
+    fun tgWebView(spec: String, bot: String, url: String, mode: String, start: String, theme: String) =
+        call { it.rust_tg_webview("$spec\n$bot\n$url\n$mode\n$start\n$theme") }
+
+    fun tgTranslate(spec: String, msgId: Int, lang: String) = call { it.rust_tg_translate("$spec\n$msgId\n$lang") }
+
+    fun tgSendEx(spec: String, replyId: Int, silent: Boolean, schedule: Long, text: String, markers: Boolean = false) =
+        call { it.rust_tg_send_ex("$spec\n$replyId\n${if (silent) 1 else 0}\n$schedule\n${if (markers) 1 else 0}\n$text") }
 
     fun tgSendSpecial(spec: String, replyId: Int, silent: Boolean, schedule: Long, kind: String, payload: String) =
         call { it.rust_tg_send_special("$spec\n$replyId\n${if (silent) 1 else 0}\n$schedule\n$kind\n$payload") }

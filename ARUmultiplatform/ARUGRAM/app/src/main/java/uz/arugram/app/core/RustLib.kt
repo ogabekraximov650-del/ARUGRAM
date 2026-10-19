@@ -101,6 +101,19 @@ interface RustLib : Library {
     fun rust_tg_send_special(arg: String): Pointer?
     fun rust_tg_scheduled(arg: String): Pointer?
     fun rust_tg_scheduled_act(arg: String): Pointer?
+    fun rust_tg_bot_menu(arg: String): Pointer?
+    fun rust_tg_webview(arg: String): Pointer?
+    fun rust_tg_translate(arg: String): Pointer?
+    fun rust_tg_member_act(arg: String): Pointer?
+    fun rust_tg_folder_save(arg: String): Pointer?
+    fun rust_tg_folder_delete(arg: String): Pointer?
+    fun rust_tg_privacy_get(arg: String): Pointer?
+    fun rust_tg_privacy_set(arg: String): Pointer?
+    fun rust_tg_sticker_install(arg: String): Pointer?
+    fun rust_tg_sticker_uninstall(arg: String): Pointer?
+    fun rust_tg_saved_gifs(): Pointer?
+    fun rust_tg_doc_file(arg: String): Pointer?
+    fun rust_tg_save_gif(arg: String): Pointer?
     fun rust_tg_logout(): Pointer?
 
     // ── Kirish (intro) sahnasi: Telegram `IntroRenderer.c` ning Rust'ga o'tkazilgan nusxasi (OpenGL ES 2) ──

@@ -19,7 +19,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -103,6 +105,20 @@ fun TgPrompt(title: String, initial: String, confirm: String, onConfirm: (String
     }
 }
 
+/** Bildirishnomani o'chirish muddati tanlash (DrKLO "Mute for..."): 1 soat, 8 soat, 2 kun, doimiy. [onPick] — soniya (1 — doimiy). */
+@Composable
+fun MuteMenu(onPick: (Long) -> Unit, onDismiss: () -> Unit) {
+    PopupMenu(
+        listOf(
+            MenuItem(R.drawable.msg_mute, "1 soatga") { onPick(3600L) },
+            MenuItem(R.drawable.msg_mute, "8 soatga") { onPick(8 * 3600L) },
+            MenuItem(R.drawable.msg_mute, "2 kunga") { onPick(2 * 86400L) },
+            MenuItem(R.drawable.msg_mute, "Doimiy", danger = true) { onPick(1L) },
+        ),
+        onDismiss,
+    )
+}
+
 /** Menyu bandi: ikonka + matn (50 dp, DrKLO `ActionBarMenuSubItem`). */
 class MenuItem(val icon: Int, val label: String, val danger: Boolean = false, val action: () -> Unit)
 
@@ -129,10 +145,27 @@ fun PopupMenu(items: List<MenuItem>, onDismiss: () -> Unit, header: (@Composable
 @Composable
 fun MessageActions(items: List<MenuItem>, onReact: (String) -> Unit, onDismiss: () -> Unit) {
     PopupMenu(items, onDismiss, header = {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-            listOf("👍", "❤", "🔥", "🎉", "😁", "😢").forEach { e ->
+        var expanded by remember { androidx.compose.runtime.mutableStateOf(false) }
+        val first = listOf("👍", "❤", "🔥", "🎉", "😁", "😢")
+        val more = listOf("👎", "😍", "🤔", "🤯", "👏", "🙏", "😡", "💯", "🥰", "😱", "🤩", "🤮", "💩", "🤝", "😭", "😎", "🥳", "🤡")
+        Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            first.forEach { e ->
                 Box(Modifier.size(40.dp).clip(RoundedCornerShape(20.dp)).clickable { onDismiss(); onReact(e) }, contentAlignment = Alignment.Center) {
                     BasicText(e, style = TextStyle(fontSize = 24.sp))
+                }
+            }
+            Box(Modifier.size(32.dp).clip(RoundedCornerShape(16.dp)).clickable { expanded = !expanded }, contentAlignment = Alignment.Center) {
+                BasicText(if (expanded) "▲" else "▼", style = TextStyle(fontSize = 14.sp, color = LocalTg.current.gray))
+            }
+        }
+        if (expanded) {
+            more.chunked(6).forEach { rowItems ->
+                Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                    rowItems.forEach { e ->
+                        Box(Modifier.size(40.dp).clip(RoundedCornerShape(20.dp)).clickable { onDismiss(); onReact(e) }, contentAlignment = Alignment.Center) {
+                            BasicText(e, style = TextStyle(fontSize = 24.sp))
+                        }
+                    }
                 }
             }
         }

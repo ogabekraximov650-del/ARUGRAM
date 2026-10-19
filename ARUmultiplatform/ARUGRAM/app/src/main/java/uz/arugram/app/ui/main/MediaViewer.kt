@@ -65,7 +65,7 @@ fun MediaViewer(chat: ChatRow, msg: MsgRow, onClose: () -> Unit) {
             when {
                 f == null && !failed -> CircularProgressIndicator(Modifier.align(Alignment.Center).size(40.dp), color = Color.White, strokeWidth = 3.dp)
                 f == null -> BasicText("Yuklab bo‘lmadi", Modifier.align(Alignment.Center), style = TextStyle(color = Color.White, fontSize = 16.sp))
-                msg.kind == "video" -> VideoPlayer(f.file)
+                msg.kind == "video" || msg.kind == "gif" -> ControlledVideo(f.file, Modifier.fillMaxSize())
                 else -> ZoomImage(f.file)
             }
             Row(Modifier.fillMaxWidth().statusBarsPadding().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -73,7 +73,7 @@ fun MediaViewer(chat: ChatRow, msg: MsgRow, onClose: () -> Unit) {
                 Box(Modifier.weight(1f))
                 if (f != null) {
                     Box(Modifier.size(48.dp).clickable { shareFile(ctx, f.file, f.mime) }, contentAlignment = Alignment.Center) { TgIcon(R.drawable.msg_share, Color.White) }
-                    Box(Modifier.size(48.dp).clickable { saveToGallery(ctx, f.file, msg.kind == "video") }, contentAlignment = Alignment.Center) { TgIcon(R.drawable.media_download, Color.White) }
+                    Box(Modifier.size(48.dp).clickable { saveToGallery(ctx, f.file, msg.kind == "video" || msg.kind == "gif") }, contentAlignment = Alignment.Center) { TgIcon(R.drawable.media_download, Color.White) }
                 }
             }
         }
