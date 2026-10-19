@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # Emulyatorda ARUGRAM'ni ochib, kirish oynasining skrinshotlari va videosini oladi (Telegram bilan solishtirish uchun).
-# Ekran Telegram skrinshotlari bilan bir xil: 720x1600, 329 dpi (dp = 2.056 px), 3 tugmali navigatsiya.
+# Ekran Telegram skrinshotlari bilan bir xil: 329 dpi (dp = 2.056 px). Telegram konteyneri 1500 px balandlikda (pastda 100 px qora navigatsiya); bu yerda gesture-navigatsiya + 1549 px ekran.
 set -u
 OUT="${1:-screens}"; APK="${2:-app.apk}"
 mkdir -p "$OUT"
 adb wait-for-device
-adb shell wm size 720x1600
+adb shell wm size "${SCREEN_SIZE:-720x1549}"
 adb shell wm density 329   # Telegram skrinshotidagi qurilma: dp = 2.056 px (tugma 320 dp = 658 px)
-adb shell cmd overlay enable com.android.internal.systemui.navbar.threebutton || true
-sleep 6
+adb shell cmd overlay enable com.android.internal.systemui.navbar.gestural || true
+sleep 3
+adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS >/dev/null 2>&1 || true
 adb shell cmd uimode night no || true
 adb shell settings put global window_animation_scale 1
 adb shell settings put global transition_animation_scale 1
@@ -19,6 +20,8 @@ shot() { adb exec-out screencap -p > "$OUT/$1.png"; }
 tap() { adb shell input tap "$1" "$2"; }
 swipe_left() { adb shell input swipe 600 700 120 700 150; }
 
+adb shell input keyevent KEYCODE_HOME
+sleep 3
 adb shell am force-stop uz.arugram.app
 adb shell am start -n uz.arugram.app/.MainActivity
 sleep 6
@@ -42,4 +45,5 @@ tap 360 1312; sleep 0.12; shot 05_morph_a; sleep 0.12; shot 05_morph_b; sleep 1.
 wait $REC 2>/dev/null || true
 sleep 2
 adb pull /sdcard/intro.mp4 "$OUT/intro.mp4" || true
+adb shell dumpsys window | grep -iE "navigationBars|statusBars|mFrame=|Display" | head -40 > "$OUT/insets.txt" || true
 adb logcat -d -s AndroidRuntime:E ArugramApp:V > "$OUT/logcat.txt" || true
