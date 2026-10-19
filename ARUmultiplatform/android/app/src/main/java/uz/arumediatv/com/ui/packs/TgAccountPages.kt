@@ -360,7 +360,10 @@ fun TgSetIcon(st: TgSetsState, s: TgSet, modifier: Modifier) {
  */
 fun tgSend(ctx: android.content.Context, d: TgDoc, kind: String, onEmoji: (String) -> Unit, onTg: ((TgDoc, String) -> Unit)? = null) {
     if (kind == "emoji") {
-        if (d.emoji.isNotBlank()) onEmoji(d.emoji)
+        // Telegram emojisi bo'lsa — havola belgisi (qabul qiluvchi o'z hisobi orqali ko'radi); aks holda oddiy emoji.
+        val short = AppServices.tgStickers.shortOf(d)
+        if (short != null) onEmoji(uz.arumediatv.com.data.tgEmojiToken(short, d.id, d.emoji))
+        else if (d.emoji.isNotBlank()) onEmoji(d.emoji)
         return
     }
     if (onTg != null) onTg(d, kind)
@@ -382,6 +385,20 @@ fun TgRefSticker(ref: String, modifier: Modifier = Modifier) {
         if (doc == null && ready) doc = AppServices.tgStickers.resolveRef(parts.first, id)
     }
     Box(modifier) { doc?.let { TgItem(it, Modifier.fillMaxSize(), full = it.kind == "webp") } }
+}
+
+/** Matn ichidagi Telegram emojisi (`[ce:...]`): qabul qiluvchi uni o'z Telegram hisobi orqali oladi; olinmaguncha oddiy emoji belgisi. */
+@Composable
+fun TgRefEmoji(short: String, id: Long, fallback: String, modifier: Modifier = Modifier) {
+    var doc by remember(short, id) { mutableStateOf<TgDoc?>(null) }
+    val ready by remember { AppServices.telegram.state.map { it.authorized && it.configured && it.port > 0 }.distinctUntilChanged() }
+        .collectAsStateWithLifecycle(initialValue = AppServices.telegram.state.value.let { it.authorized && it.configured && it.port > 0 })
+    LaunchedEffect(short, id, ready) { if (doc == null && ready && id > 0) doc = AppServices.tgStickers.resolveRef(short, id) }
+    Box(modifier, contentAlignment = Alignment.Center) {
+        val d = doc
+        if (d != null) TgItem(d, Modifier.fillMaxSize(), full = d.kind == "webp")
+        else Text(fallback, fontSize = 15.sp, fontFamily = TgEmojiFont, color = Color.White)
+    }
 }
 
 /**

@@ -277,7 +277,7 @@ fun CommentsTab(season: Season, onOpenProfile: (Long) -> Unit, onLogin: () -> Un
                         }
                     },
                     onBackspace = {
-                        val m = Regex("\\[pe:\\d{1,16}:\\d{1,9}:[^\\]]{0,16}\\]$").find(text)
+                        val m = Regex("\\[(?:pe:\\d{1,16}:\\d{1,9}|ce:[A-Za-z0-9_]{1,64}:\\d{1,20}):[^\\]]{0,16}\\]$").find(text)
                         text = if (m != null) text.removeRange(m.range) else {
                             val it = java.text.BreakIterator.getCharacterInstance(); it.setText(text)
                             val last = it.preceding(text.length)
@@ -340,7 +340,7 @@ fun CommentsTab(season: Season, onOpenProfile: (Long) -> Unit, onLogin: () -> Un
     }
 }
 
-fun commentPreview(c: Comment): String = c.body.ifEmpty { when (c.mediaType) { "sticker" -> "Stiker"; "gif" -> "GIF"; else -> "" } }
+fun commentPreview(c: Comment): String = Regex("\\[(?:pe:\\d{1,16}:\\d{1,9}|ce:[A-Za-z0-9_]{1,64}:\\d{1,20}):([^\\]]{0,16})\\]").replace(c.body) { it.groupValues[1] }.ifEmpty { when (c.mediaType) { "sticker" -> "Stiker"; "gif" -> "GIF"; else -> "" } }
 
 @Composable
 private fun CommentRow(

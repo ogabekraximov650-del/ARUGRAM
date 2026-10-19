@@ -161,7 +161,7 @@ private val RE = Regex("^\\[re:([A-Za-z0-9_-]{1,40})\\]")
 private fun splitReply(body: String): Pair<String?, String> = RE.find(body)?.let { it.groupValues[1] to body.substring(it.range.last + 1) } ?: (null to body)
 private fun withReply(id: String?, text: String) = if (id.isNullOrEmpty()) text else "[re:$id]$text"
 
-private val PACK_TOKEN = Regex("\\[pe:\\d{1,16}:\\d{1,9}:([^\\]]{0,16})\\]")
+private val PACK_TOKEN = Regex("\\[(?:pe:\\d{1,16}:\\d{1,9}|ce:[A-Za-z0-9_]{1,64}:\\d{1,20}):([^\\]]{0,16})\\]")
 private fun plain(s: String) = PACK_TOKEN.replace(s) { it.groupValues[1] }
 
 private fun snippet(m: ChatMessage): String {
@@ -531,7 +531,7 @@ fun SupportChatScreen(userId: Long?, title: String, onBack: () -> Unit, onPacks:
                         else scope.launch { store.send(withReply(replyTo?.id, ""), mediaFile = pick.ref, mediaType = if (pick.kind == uz.arumediatv.com.data.PackKind.GIF) "gif" else "sticker")?.let(::toast); replyTo = null }
                     },
                     onBackspace = {
-                        val m = Regex("\\[pe:\\d{1,16}:\\d{1,9}:[^\\]]{0,16}\\]$").find(text)
+                        val m = Regex("\\[(?:pe:\\d{1,16}:\\d{1,9}|ce:[A-Za-z0-9_]{1,64}:\\d{1,20}):[^\\]]{0,16}\\]$").find(text)
                         text = if (m != null) text.removeRange(m.range) else {
                             val bi = java.text.BreakIterator.getCharacterInstance(); bi.setText(text)
                             val last = bi.preceding(text.length)

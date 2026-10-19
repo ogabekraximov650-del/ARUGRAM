@@ -132,6 +132,11 @@ fun parsePackRef(name: String): Pair<Long, Long>? {
 /** Matn ichidagi maxsus emoji: `[pe:<to'plam>:<element>:<emoji>]`. */
 val PACK_EMOJI_TOKEN = Regex("\\[pe:(\\d{1,16}):(\\d{1,9}):([^\\]]{0,16})\\]")
 
+/** Telegram hisobidagi maxsus emoji: `[ce:<to'plam_nomi>:<hujjat_id>:<emoji>]` (qabul qiluvchi uni o'z Telegram hisobi orqali oladi). */
+val TG_EMOJI_TOKEN = Regex("\\[ce:([A-Za-z0-9_]{1,64}):(\\d{1,20}):([^\\]]{0,16})\\]")
+
+fun tgEmojiToken(short: String, id: Long, emoji: String) = "[ce:$short:$id:${emoji.replace("[", "").replace("]", "")}]"
+
 fun packEmojiToken(pack: Long, item: Long, emoji: String) = "[pe:$pack:$item:${emoji.replace("[", "").replace("]", "")}]"
 
 data class PackLibrary(

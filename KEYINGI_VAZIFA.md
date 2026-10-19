@@ -6665,3 +6665,4 @@ Hozircha: `.tgs` — faqat kichik rasm (2-bosqich: lottie-android + libwebp bila
 - Qabul qiluvchi ilova stikerni o'z Telegram hisobi orqali oladi: Rust `setname:<nom>` (`GetStickerSet` ochiq nom bo'yicha) -> hujjat -> o'z sessiyasida yuklaydi -> `TgRefSticker` (`.tgs` -> animatsiyali WebP, kesh). Telegram'ga ulanmagan foydalanuvchi ko'rmaydi.
 - GIF yuborilmaydi: saqlangan GIF'ning ochiq nomi yo'q, boshqa hisob uni (fayl havolasi sender kontekstiga bog'langan) ishonchli ola olmaydi; kanalga yuklash esa taqiqlangan.
 - Emoji bosilsa oddiy Unicode emoji yozish maydoniga qo'shiladi.
+- Telegram emojisi matnda: `[ce:<to'plam_nomi>:<hujjat_id>:<emoji>]` (`TG_EMOJI_TOKEN`, `tgEmojiToken`). Worker matnni o'zgartirmaydi (faqat `[pe:` obuna talab qiladi). Ko'rsatish: `RichPackText` -> `TgRefEmoji` (qabul qiluvchi o'z Telegram hisobi orqali `setname:` bilan oladi; olinmaguncha oddiy emoji belgisi).

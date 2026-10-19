@@ -194,22 +194,35 @@ fun PackRefImage(ref: String, modifier: Modifier = Modifier, thumb: Boolean = fa
  */
 @Composable
 fun RichPackText(text: String, color: Color, fontSize: TextUnit = 15.sp, modifier: Modifier = Modifier, lineHeight: TextUnit = TextUnit.Unspecified) {
-    if (!text.contains("[pe:")) {
+    if (!text.contains("[pe:") && !text.contains("[ce:")) {
         Text(text, color = color, fontSize = fontSize, lineHeight = lineHeight, fontFamily = TgEmojiFont, modifier = modifier)
         return
     }
     val inline = HashMap<String, InlineTextContent>()
+    val both = remember { Regex(PACK_EMOJI_TOKEN.pattern + "|" + uz.arumediatv.com.data.TG_EMOJI_TOKEN.pattern) }
     val annotated: AnnotatedString = buildAnnotatedString {
         var last = 0
-        for (m in PACK_EMOJI_TOKEN.findAll(text)) {
+        for (m in both.findAll(text)) {
             append(text.substring(last, m.range.first))
-            val id = "pe_${m.groupValues[1]}_${m.groupValues[2]}_${m.range.first}"
-            val p = m.groupValues[1].toLong()
-            val i = m.groupValues[2].toLong()
-            inline[id] = InlineTextContent(Placeholder(fontSize * 1.35f, fontSize * 1.35f, PlaceholderVerticalAlign.TextCenter)) {
-                PackItemImage(p, i, Modifier.fillMaxSize(), thumb = true)
+            val g = m.groupValues
+            if (g[1].isNotEmpty()) {
+                // [pe:<to'plam>:<element>:<emoji>] — o'z to'plamimiz
+                val id = "pe_${g[1]}_${g[2]}_${m.range.first}"
+                val p = g[1].toLong()
+                val i = g[2].toLong()
+                inline[id] = InlineTextContent(Placeholder(fontSize * 1.35f, fontSize * 1.35f, PlaceholderVerticalAlign.TextCenter)) {
+                    PackItemImage(p, i, Modifier.fillMaxSize(), thumb = true)
+                }
+                appendInlineContent(id, g[3].ifEmpty { "□" })
+            } else {
+                // [ce:<to'plam_nomi>:<hujjat_id>:<emoji>] — Telegram hisobidagi emoji
+                val id = "ce_${g[4]}_${g[5]}_${m.range.first}"
+                val emo = g[6]
+                inline[id] = InlineTextContent(Placeholder(fontSize * 1.35f, fontSize * 1.35f, PlaceholderVerticalAlign.TextCenter)) {
+                    TgRefEmoji(g[4], g[5].toLongOrNull() ?: 0L, emo, Modifier.fillMaxSize())
+                }
+                appendInlineContent(id, emo.ifEmpty { "□" })
             }
-            appendInlineContent(id, m.groupValues[3].ifEmpty { "□" })
             last = m.range.last + 1
         }
         append(text.substring(last))
