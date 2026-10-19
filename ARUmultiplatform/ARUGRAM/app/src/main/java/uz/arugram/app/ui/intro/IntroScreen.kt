@@ -58,6 +58,8 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.PathMeasure
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.graphicsLayer
@@ -116,6 +118,12 @@ fun IntroScreen(
     val navB = with(d) { WindowInsets.navigationBars.getBottom(d).toDp() }
     val statusH = with(d) { WindowInsets.statusBars.getTop(d).toDp() }
     val m = morph.value
+    // Sahifa yetib kelgach 0.9 s davomida o'ziga xos animatsiya (mil yuradi, cheksizlik chiziladi, seyf burilib o'rnashadi).
+    val arrive = remember { Animatable(0f) }
+    LaunchedEffect(pager.settledPage) {
+        arrive.snapTo(0f)
+        arrive.animateTo(1f, tween(900, easing = LinearEasing))
+    }
 
     BoxWithConstraints(Modifier.fillMaxSize().navigationBarsPadding()) {
         val w = maxWidth
@@ -131,8 +139,10 @@ fun IntroScreen(
                 val lo = kotlin.math.floor(pos.toDouble()).toInt().coerceIn(0, 5)
                 val hi = (lo + 1).coerceAtMost(5)
                 val t = (pos - lo).coerceIn(0f, 1f)
-                IntroArt(lo, ph, 1f - t, Modifier.fillMaxSize().graphicsLayer { cameraDistance = 12f * density; rotationY = 70f * t; alpha = 1f - t; translationX = -t * 70.dp.toPx(); scaleX = 1f - 0.2f * t; scaleY = 1f - 0.2f * t })
-                if (hi != lo) IntroArt(hi, ph, t, Modifier.fillMaxSize().graphicsLayer { cameraDistance = 12f * density; rotationY = -70f * (1f - t); alpha = t; translationX = (1f - t) * 70.dp.toPx(); scaleX = 0.8f + 0.2f * t; scaleY = 0.8f + 0.2f * t })
+                // Telegram'da rasm joyida turadi: bir sahifa ikkinchisiga "erib" o'tadi (xira bo'lib kichrayadi / paydo bo'lib kattalashadi).
+                val settled = pager.settledPage
+                IntroArt(lo, ph, if (lo == settled) arrive.value else 1f, Modifier.fillMaxSize().graphicsLayer { alpha = 1f - t; scaleX = 1f + 0.15f * t; scaleY = 1f + 0.15f * t })
+                if (hi != lo) IntroArt(hi, ph, if (hi == settled) arrive.value else 1f, Modifier.fillMaxSize().graphicsLayer { alpha = t; scaleX = 0.75f + 0.25f * t; scaleY = 0.75f + 0.25f * t })
             }
 
             // ---- Sahifalar: sarlavha va matn
@@ -308,19 +318,20 @@ private val SafeLight = Color(0xFFCACFD5)
 private val KeyGray = Color(0xFF61666A)
 
 @Composable
-private fun IntroArt(page: Int, ph: Float, appear: Float, modifier: Modifier) {
+private fun IntroArt(page: Int, ph: Float, arr: Float, modifier: Modifier) {
     Canvas(modifier) {
         val u = 1.dp.toPx()
         val ctr = Offset(size.width / 2f, size.height / 2f)
         fun p(x: Float, y: Float) = Offset(ctr.x + (x - 360f) / 4.112f * u, ctr.y + (y - 346f) / 4.112f * u)
         fun l(v: Float) = v / 4.112f * u
+        val e = FastOutSlowInEasing.transform(arr.coerceIn(0f, 1f))
         when (page) {
-            0 -> logo(::p, ::l, ph)
+            0 -> scale(0.92f + 0.08f * e, ctr) { logo(::p, ::l, ph) }
             5 -> cloud(::p, ::l, ph)
-            1 -> speedometer(::p, ::l, ph, appear)
+            1 -> speedometer(::p, ::l, ph, arr)
             2 -> gift(::p, ::l, ph)
-            3 -> infinity(::p, ::l, ph)
-            else -> safe(::p, ::l, ph)
+            3 -> infinity(::p, ::l, ph, arr)
+            else -> rotate(-12f * (1f - e), ctr) { scale(0.9f + 0.1f * e, ctr) { safe(::p, ::l, ph) } }
         }
     }
 }
@@ -371,8 +382,8 @@ private fun DrawScope.speedometer(p: (Float, Float) -> Offset, l: (Float) -> Flo
     arc.close()
     drawPath(arc, ArcRed)
     // Mil: sahifa ko'ringanda chapdan o'ngga yuguradi, so'ng sal tebranib turadi.
-    val e = FastOutSlowInEasing.transform(appear.coerceIn(0f, 1f))
-    val ang = 29f - (1f - e) * 120f + sin(ph * 2 * PI).toFloat() * 2f * e
+    val e = overshoot(1.4f).transform((appear / 0.7f).coerceIn(0f, 1f))
+    val ang = 29f - (1f - e) * 110f + sin(ph * 2 * PI).toFloat() * 2f * appear
     val a = Math.toRadians(ang.toDouble())
     val dx = cos(a).toFloat(); val dy = sin(a).toFloat()
     val tail = l(88f); val head = l(222f)
@@ -399,12 +410,14 @@ private fun DrawScope.gift(p: (Float, Float) -> Offset, l: (Float) -> Float, ph:
         drawCircle(RedBox, l(33f), p(577f, 520f - dy), style = Stroke(l(10f)))
     }
     // Oq lentalar: vertikal (kengligi 48) va gorizontal (kengligi 46, uchlari qiyshiq).
-    drawRect(Color.White, p(336f, 38f), Size(l(48f), l(617f)))
+    // Lentalar har ~3.6 s da qisqa "chayqaladi" (Telegram'dagi tugun harakati).
+    val sway = sin(ph * 2 * PI).toFloat().coerceAtLeast(0f).let { it * it * it * it }
+    rotate(-3f * sway, p(360f, 310f)) { drawRect(Color.White, p(336f, 38f), Size(l(48f), l(617f))) }
     val hb = Path().apply {
         moveTo(p(65f, 287f).x, p(65f, 287f).y); lineTo(p(715f, 287f).x, p(715f, 287f).y)
         lineTo(p(688f, 333f).x, p(688f, 333f).y); lineTo(p(38f, 333f).x, p(38f, 333f).y); close()
     }
-    drawPath(hb, Color.White)
+    rotate(4f * sway, p(360f, 310f)) { drawPath(hb, Color.White) }
     // Kapalak: to'rtta yaproq (oq doira), ichida markazga qarab ingichkalashadigan qizil tomchi.
     for (sx in listOf(-1f, 1f)) for (sy in listOf(-1f, 1f)) {
         drawCircle(Color.White, l(75f), p(360f + sx * 83f, 310f + sy * 75f))
@@ -426,7 +439,7 @@ private fun DrawScope.gift(p: (Float, Float) -> Offset, l: (Float) -> Float, ph:
     drawRect(Color.White, p(336f, 38f), Size(l(48f), l(60f)))
 }
 
-private fun DrawScope.infinity(p: (Float, Float) -> Offset, l: (Float) -> Float, ph: Float) {
+private fun DrawScope.infinity(p: (Float, Float) -> Offset, l: (Float) -> Float, ph: Float, arr: Float) {
     // Pufak: o'ng chetida tekis kesilgan (Telegram'dagidek), pastki chapda dum.
     clipRect(right = p(685f, 0f).x) {
         drawRoundRect(BubbleBlue, p(38f, 88f), Size(l(760f), l(474f)), CornerRadius(l(85f)))
@@ -446,7 +459,13 @@ private fun DrawScope.infinity(p: (Float, Float) -> Offset, l: (Float) -> Float,
         arcTo(androidx.compose.ui.geometry.Rect(p(235f, 322f), l(100f)), 323.13f, -286.26f, false)
         close()
     }
-    drawPath(inf, Color.White, style = Stroke(l(46f), cap = StrokeCap.Round, join = StrokeJoin.Round))
+    // Cheksizlik belgisi yetib kelganda "chizilib" chiqadi.
+    val shown = Path()
+    val pm = PathMeasure()
+    pm.setPath(inf, false)
+    val prog = FastOutSlowInEasing.transform((arr / 0.8f).coerceIn(0f, 1f))
+    if (prog >= 0.999f) shown.addPath(inf) else pm.getSegment(0f, pm.length * prog, shown, true)
+    drawPath(shown, Color.White, style = Stroke(l(46f), cap = StrokeCap.Round, join = StrokeJoin.Round))
     // Mayda yulduzchalar: miltillaydi.
     val dots = listOf(93f to 188f, 147f to 153f, 251f to 187f, 342f to 198f, 424f to 168f, 480f to 115f, 516f to 178f, 623f to 458f, 468f to 473f, 306f to 496f, 280f to 578f, 230f to 252f, 457f to 265f, 520f to 383f)
     for ((k, d) in dots.withIndex()) {
