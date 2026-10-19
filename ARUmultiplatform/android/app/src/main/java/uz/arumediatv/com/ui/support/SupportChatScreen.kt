@@ -487,8 +487,8 @@ fun SupportChatScreen(userId: Long?, title: String, onBack: () -> Unit, onPacks:
                             Box(Modifier.size(48.dp).clip(CircleShape).clickable {
                                 if (panelOpen) { panelOpen = false; keyboard?.show() } else { panelOpen = true; focus.clearFocus(); keyboard?.hide() }
                             }, contentAlignment = Alignment.Center) { Icon(if (panelOpen) AruIcons.Keyboard else AruIcons.Emoticon, null, tint = Color.White.copy(alpha = 0.55f), modifier = Modifier.size(26.dp)) }
-                            BasicTextField(
-                                text, { text = it.take(2000) }, maxLines = 6, visualTransformation = uz.arumediatv.com.ui.packs.TokenVisual, cursorBrush = SolidColor(AruColors.Accent),
+                            uz.arumediatv.com.ui.packs.TokenTextField(
+                                text, { text = it.take(2000) }, maxLines = 6, cursorBrush = SolidColor(AruColors.Accent),
                                 textStyle = TextStyle(color = Color.White, fontSize = 15.sp, fontFamily = TgEmojiFont),
                                 decorationBox = { inner -> Box { if (text.isEmpty()) Text("Xabar", color = Color.White.copy(alpha = 0.38f), fontSize = 15.sp); inner() } },
                                 modifier = Modifier.weight(1f).padding(vertical = 14.dp),

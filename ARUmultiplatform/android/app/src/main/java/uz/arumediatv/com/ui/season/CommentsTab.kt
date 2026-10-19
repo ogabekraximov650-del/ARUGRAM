@@ -240,12 +240,12 @@ fun CommentsTab(season: Season, onOpenProfile: (Long) -> Unit, onLogin: () -> Un
                             contentAlignment = Alignment.Center,
                         ) { Icon(if (panelOpen) uz.arumediatv.com.ui.common.AruIcons.Keyboard else uz.arumediatv.com.ui.common.AruIcons.Emoticon, "Emoji", tint = Color.White.copy(alpha = 0.6f), modifier = Modifier.size(28.dp)) }
                         Spacer(Modifier.width(8.dp))
-                        androidx.compose.foundation.text.BasicTextField(
+                        uz.arumediatv.com.ui.packs.TokenTextField(
                             value = text, onValueChange = { text = it.take(1000) },
-                            visualTransformation = uz.arumediatv.com.ui.packs.TokenVisual,
                             maxLines = 4, cursorBrush = androidx.compose.ui.graphics.SolidColor(AruColors.Accent2),
                             textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 17.sp, fontFamily = uz.arumediatv.com.ui.packs.TgEmojiFont),
-                            modifier = Modifier.weight(1f).padding(vertical = 10.dp).focusRequester(focusRequester).onFocusChanged { f -> fieldFocused = f.isFocused; if (f.isFocused) panelOpen = false },
+                            modifier = Modifier.weight(1f).padding(vertical = 10.dp),
+                            fieldModifier = Modifier.focusRequester(focusRequester).onFocusChanged { f -> fieldFocused = f.isFocused; if (f.isFocused) panelOpen = false },
                             decorationBox = { inner -> Box { if (text.isEmpty()) Text("Izoh yozing...", color = AruColors.TextFaint, fontSize = 17.sp); inner() } },
                         )
                     }

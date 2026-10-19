@@ -8,6 +8,7 @@ import android.widget.ImageView
 import androidx.compose.foundation.Image
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -231,31 +232,50 @@ fun RichPackText(text: String, color: Color, fontSize: TextUnit = 15.sp, modifie
 }
 
 /**
- * Yozish maydonida `[pe:...]` / `[ce:...]` belgilari uzun matn bo'lib emas, bitta emoji belgisi bo'lib ko'rinadi
- * (kursor belgi oldida/orqasida turadi; o'chirish tugmasi butun belgini o'chiradi).
+ * Yozish maydonida `[pe:...]` / `[ce:...]` belgilari uzun matn bo'lib emas, bitta (shaffof) belgi bo'lib o'rin oladi;
+ * ustiga haqiqiy emoji rasmi [TokenTextField] tomonidan chiziladi (kursor belgi oldida/orqasida turadi, o'chirish tugmasi
+ * butun belgini o'chiradi).
  */
 object TokenVisual : androidx.compose.ui.text.input.VisualTransformation {
     private val re = Regex(PACK_EMOJI_TOKEN.pattern + "|" + uz.arumediatv.com.data.TG_EMOJI_TOKEN.pattern)
 
-    override fun filter(text: AnnotatedString): androidx.compose.ui.text.input.TransformedText {
-        val src = text.text
-        val segs = ArrayList<IntArray>() // [origStart, origEnd, transStart, transEnd]
+    /** Belgi: o'zgargan matndagi o'rni, turi (`ce` — Telegram emojisi), ikki qiymat (to'plam/element yoki nom/id) va emoji belgisi. */
+    class Tok(val at: Int, val ce: Boolean, val a: String, val b: String, val emoji: String)
+
+    private class Seg(val os: Int, val oe: Int, val ts: Int, val te: Int, val tok: Tok)
+
+    private fun segs(src: String): Pair<String, List<Seg>> {
+        val list = ArrayList<Seg>()
         val sb = StringBuilder()
         var o = 0
         for (m in re.findAll(src)) {
             sb.append(src, o, m.range.first)
-            val emo = (m.groupValues[3].ifEmpty { m.groupValues[6] }).ifEmpty { "□" }
+            val g = m.groupValues
+            val ce = g[1].isEmpty()
+            val emo = (if (ce) g[6] else g[3]).ifEmpty { "□" }
             val ts = sb.length
             sb.append(emo)
-            segs += intArrayOf(m.range.first, m.range.last + 1, ts, sb.length)
+            list += Seg(m.range.first, m.range.last + 1, ts, sb.length, Tok(ts, ce, if (ce) g[4] else g[1], if (ce) g[5] else g[2], emo))
             o = m.range.last + 1
         }
         sb.append(src, o, src.length)
+        return sb.toString() to list
+    }
+
+    fun tokens(src: String): List<Tok> = segs(src).second.map { it.tok }
+
+    override fun filter(text: AnnotatedString): androidx.compose.ui.text.input.TransformedText {
+        val (plain, segs) = segs(text.text)
+        val out = buildAnnotatedString {
+            append(plain)
+            // Belgi o'rni band bo'ladi, lekin o'zi ko'rinmaydi — ustiga rasm chiziladi.
+            segs.forEach { addStyle(androidx.compose.ui.text.SpanStyle(color = Color.Transparent), it.ts, it.te) }
+        }
         val mapping = object : androidx.compose.ui.text.input.OffsetMapping {
             override fun originalToTransformed(offset: Int): Int {
                 var shift = 0
                 for (g in segs) {
-                    if (offset >= g[1]) shift = g[3] - g[1] else if (offset > g[0]) return g[3] else break
+                    if (offset >= g.oe) shift = g.te - g.oe else if (offset > g.os) return g.te else break
                 }
                 return offset + shift
             }
@@ -263,11 +283,54 @@ object TokenVisual : androidx.compose.ui.text.input.VisualTransformation {
             override fun transformedToOriginal(offset: Int): Int {
                 var shift = 0
                 for (g in segs) {
-                    if (offset >= g[3]) shift = g[1] - g[3] else if (offset > g[2]) return g[1] else break
+                    if (offset >= g.te) shift = g.oe - g.te else if (offset > g.ts) return g.oe else break
                 }
                 return offset + shift
             }
         }
-        return androidx.compose.ui.text.input.TransformedText(AnnotatedString(sb.toString()), mapping)
+        return androidx.compose.ui.text.input.TransformedText(out, mapping)
+    }
+}
+
+/**
+ * Yozish maydoni: `[pe:...]` / `[ce:...]` belgilari yuborilgan xabardagidek haqiqiy emoji rasmi bo'lib ko'rinadi
+ * (matn maydoniga rasm qo'yib bo'lmagani uchun, shaffof belgi ustiga rasm chiziladi). `modifier` — tashqi quti (joylashuv,
+ * chetki bo'shliq); `fieldModifier` — maydonning o'ziga (fokus va h.k.).
+ */
+@Composable
+fun TokenTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    textStyle: TextStyle,
+    cursorBrush: androidx.compose.ui.graphics.Brush,
+    maxLines: Int,
+    modifier: Modifier = Modifier,
+    fieldModifier: Modifier = Modifier,
+    decorationBox: @Composable (@Composable () -> Unit) -> Unit = { it() },
+) {
+    var layout by remember { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
+    Box(modifier) {
+        androidx.compose.foundation.text.BasicTextField(
+            value = value, onValueChange = onValueChange, modifier = fieldModifier, textStyle = textStyle, cursorBrush = cursorBrush,
+            maxLines = maxLines, visualTransformation = TokenVisual, onTextLayout = { layout = it }, decorationBox = decorationBox,
+        )
+        val l = layout
+        if (l != null && l.lineCount <= maxLines) {
+            val density = androidx.compose.ui.platform.LocalDensity.current
+            val len = l.layoutInput.text.length
+            for (t in TokenVisual.tokens(value)) {
+                if (t.at >= len) continue
+                val r = l.getBoundingBox(t.at)
+                val side = minOf(r.width, r.height)
+                if (side <= 0f) continue
+                Box(
+                    Modifier.offset { androidx.compose.ui.unit.IntOffset((r.left + (r.width - side) / 2f).toInt(), (r.top + (r.height - side) / 2f).toInt()) }
+                        .size(with(density) { side.toDp() }),
+                ) {
+                    if (t.ce) TgRefEmoji(t.a, t.b.toLongOrNull() ?: 0L, t.emoji, Modifier.fillMaxSize())
+                    else PackItemImage(t.a.toLongOrNull() ?: 0L, t.b.toLongOrNull() ?: 0L, Modifier.fillMaxSize(), thumb = true)
+                }
+            }
+        }
     }
 }
