@@ -31,6 +31,21 @@ jobs:
         with:
           submodules: recursive
 
+      # DrKLO'ning standart API kalitlari (APP_ID=4) ochiq e'lon qilingan: Telegram ularga kod yuborishni rad etadi
+      # (API_ID_PUBLISHED_FLOOD). Shu sabab build paytida o'zimizning kalitlar (GitHub Secrets) qo'yiladi; repoga yozilmaydi.
+      - name: API kalitlarini qo'yish (BuildVars)
+        env:
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+        run: |
+          F=ARUmultiplatform/Telegram/TMessagesProj/src/main/java/org/telegram/messenger/BuildVars.java
+          if [ -n "$TG_API_ID" ] && [ -n "$TG_API_HASH" ]; then
+            sed -i "s/public static int APP_ID = .*/public static int APP_ID = ${TG_API_ID};/; s/public static String APP_HASH = .*/public static String APP_HASH = \"${TG_API_HASH}\";/" "$F"
+            grep -n "APP_ID\|APP_HASH" "$F" | sed -E 's/"[0-9a-f]{32}"/"***"/'
+          else
+            echo "⚠️ TG_API_ID / TG_API_HASH yo'q — standart kalitlar qoladi (kod yuborilmasligi mumkin)"
+          fi
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
