@@ -1,0 +1,57 @@
+[submodule "ARUmultiplatform/Telegram/TMessagesProj/jni/tlottie"]
+	path = ARUmultiplatform/Telegram/TMessagesProj/jni/tlottie
+	url = https://github.com/dkaraush/tlottie.git
+[submodule "ARUmultiplatform/Telegram/TMessagesProj/jni/third_party/libvpx"]
+	path = ARUmultiplatform/Telegram/TMessagesProj/jni/third_party/libvpx
+	url = https://github.com/webmproject/libvpx.git
+[submodule "ARUmultiplatform/Telegram/TMessagesProj/jni/third_party/dav1d"]
+	path = ARUmultiplatform/Telegram/TMessagesProj/jni/third_party/dav1d
+	url = https://github.com/videolan/dav1d.git
+[submodule "ARUmultiplatform/Telegram/TMessagesProj/jni/third_party/ffmpeg"]
+	path = ARUmultiplatform/Telegram/TMessagesProj/jni/third_party/ffmpeg
+	url = https://github.com/FFmpeg/FFmpeg.git
+[submodule "ARUmultiplatform/Telegram/TMessagesProj/lib/jlatexmath"]
+	path = ARUmultiplatform/Telegram/TMessagesProj/lib/jlatexmath
+	url = https://github.com/dkaraush/jlatexmath-android.git
+[submodule "ARUmultiplatform/Telegram/TMessagesProj/jni/third_party/xiph/ogg"]
+	path = ARUmultiplatform/Telegram/TMessagesProj/jni/third_party/xiph/ogg
+	url = https://github.com/xiph/ogg.git
+[submodule "ARUmultiplatform/Telegram/TMessagesProj/jni/third_party/xiph/opusfile"]
+	path = ARUmultiplatform/Telegram/TMessagesProj/jni/third_party/xiph/opusfile
+	url = https://github.com/xiph/opusfile.git
+[submodule "ARUmultiplatform/Telegram/TMessagesProj/jni/third_party/xiph/opus"]
+	path = ARUmultiplatform/Telegram/TMessagesProj/jni/third_party/xiph/opus
+	url = https://github.com/xiph/opus.git
+[submodule "ARUmultiplatform/Telegram/TMessagesProj/jni/third_party/libyuv"]
+	path = ARUmultiplatform/Telegram/TMessagesProj/jni/third_party/libyuv
+	url = https://chromium.googlesource.com/libyuv/libyuv
+[submodule "ARUmultiplatform/Telegram/TMessagesProj/jni/third_party/openh264"]
+	path = ARUmultiplatform/Telegram/TMessagesProj/jni/third_party/openh264
+	url = https://github.com/cisco/openh264.git
+[submodule "ARUmultiplatform/Telegram/TMessagesProj/jni/third_party/boringssl"]
+	path = ARUmultiplatform/Telegram/TMessagesProj/jni/third_party/boringssl
+	url = https://github.com/google/boringssl.git
+[submodule "ARUmultiplatform/Telegram/TMessagesProj/jni/td"]
+	path = ARUmultiplatform/Telegram/TMessagesProj/jni/td
+	url = https://github.com/tdlib/td.git
+[submodule "ARUmultiplatform/Telegram/TMessagesProj_Modules/media"]
+	path = ARUmultiplatform/Telegram/TMessagesProj_Modules/media
+	url = https://github.com/Arseny271/media.git
+[submodule "ARUmultiplatform/Telegram/TMessagesProj/jni/third_party/absl"]
+	path = ARUmultiplatform/Telegram/TMessagesProj/jni/third_party/absl
+	url = https://github.com/abseil/abseil-cpp.git
+[submodule "ARUmultiplatform/Telegram/TMessagesProj/jni/third_party/wamr"]
+	path = ARUmultiplatform/Telegram/TMessagesProj/jni/third_party/wamr
+	url = https://github.com/wasm-micro-runtime/wasm-micro-runtime.git
+[submodule "ARUmultiplatform/Telegram/TMessagesProj/jni/tgcalls"]
+	path = ARUmultiplatform/Telegram/TMessagesProj/jni/tgcalls
+	url = https://github.com/TelegramMessenger/tgcalls.git
+[submodule "ARUmultiplatform/Telegram/TMessagesProj/jni/wallet-engine"]
+	path = ARUmultiplatform/Telegram/TMessagesProj/jni/wallet-engine
+	url = https://github.com/dkaraush/wallet-engine.git
+[submodule "ARUmultiplatform/Telegram/TMessagesProj/jni/third_party/boost-regex"]
+	path = ARUmultiplatform/Telegram/TMessagesProj/jni/third_party/boost-regex
+	url = https://github.com/boostorg/regex.git
+[submodule "ARUmultiplatform/Telegram/TMessagesProj/jni/third_party/libprisma"]
+	path = ARUmultiplatform/Telegram/TMessagesProj/jni/third_party/libprisma
+	url = https://github.com/TelegramMessenger/libprisma.git

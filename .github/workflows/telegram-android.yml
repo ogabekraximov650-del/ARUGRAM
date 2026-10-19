@@ -1,0 +1,81 @@
+name: Telegram (DrKLO) — build
+
+# `ARUmultiplatform/Telegram/**` (DrKLO/Telegram manba kodi, GPLv2) o'zgarganda: submodullar bilan yig'iladi -> standalone APK
+# (arm64-v8a + armeabi-v7a) -> Telegram "Saqlangan xabarlar" + artifact. Birinchi build uzoq (native kod): ~1–2 soat.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ARUmultiplatform/Telegram/**'
+      - '.github/workflows/telegram-android.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: telegram-android
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      # Native build ko'p joy oladi — keraksiz katta paketlar o'chiriladi.
+      - name: Joy bo'shatish
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost /usr/local/lib/node_modules "$AGENT_TOOLSDIRECTORY" || true
+          df -h /
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Android SDK / NDK
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018" "cmake;3.22.1" >/dev/null
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Standalone APK
+        id: apk
+        working-directory: ARUmultiplatform/Telegram
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon --stacktrace "-Dorg.gradle.jvmargs=-Xmx5g -XX:MaxMetaspaceSize=1g" :TMessagesProj_AppStandalone:assembleAfatStandalone
+          find TMessagesProj_AppStandalone/build/outputs/apk -name '*.apk' -exec ls -la {} \;
+          OUT="$RUNNER_TEMP/apks"; mkdir -p "$OUT"
+          APK=$(find TMessagesProj_AppStandalone/build/outputs/apk -name '*.apk' | head -1)
+          cp "$APK" "$OUT/Telegram-${{ github.run_number }}.apk"
+          echo "dir=$OUT" >> "$GITHUB_OUTPUT"
+
+      - name: APK'ni Telegram "Saqlangan xabarlar"ga yuborish
+        continue-on-error: true
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+        run: |
+          K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          pip install --no-cache-dir -q pyrogram==2.0.106 tgcrypto==1.2.5
+          for APK in "${{ steps.apk.outputs.dir }}"/*.apk; do
+            S="$RUNNER_TEMP/notify_session"
+            K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K \
+              -in tool/encode/session.enc -out "$S.session"
+            head -c 16 "$S.session" | grep -q "SQLite format 3"
+            python tool/notify/send_apk.py "$S" "$APK" \
+              "Telegram (DrKLO) build ${{ github.run_number }}"
+            rm -f "$S.session"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Telegram-${{ github.run_number }}
+          path: ${{ steps.apk.outputs.dir }}
+          retention-days: 30
