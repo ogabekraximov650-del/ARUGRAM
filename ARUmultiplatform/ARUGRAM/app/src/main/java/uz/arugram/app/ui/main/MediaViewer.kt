@@ -13,6 +13,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.aspectRatio
@@ -184,7 +185,7 @@ private fun SpeedMenu(player: androidx.media3.exoplayer.ExoPlayer, onDismiss: ()
             Box(
                 Modifier.fillMaxWidth().height(48.dp).background(Color(0xFF151517)).pointerInput(Unit) {
                     detectTransformGestures { centroid, _, _, _ -> apply(0.2f + (centroid.x / size.width).coerceIn(0f, 1f) * 2.3f) }
-                }.pointerInput(Unit) { androidx.compose.foundation.gestures.detectTapGestures(onTap = { o: Offset -> apply(0.2f + (o.x / size.width) * 2.3f) }) },
+                }.pointerInput(Unit) { detectTapGestures(onTap = { o: Offset -> apply(0.2f + (o.x / size.width) * 2.3f) }) },
                 contentAlignment = Alignment.CenterStart,
             ) {
                 Box(Modifier.fillMaxHeight().fillMaxWidth(((speed - 0.2f) / 2.3f).coerceIn(0.02f, 1f)).background(Color(0xFF2F5FC4)))
@@ -291,7 +292,7 @@ private fun SeekBar(pos: Long, buffered: Long, dur: Long, modifier: Modifier, on
                 onDragEnd = { onSeek(last) },
                 onDragCancel = { onSeek(last) },
             ) { change, _ -> last = (change.position.x / w * d.toFloat()).toLong().coerceIn(0L, d); onSeeking(last) }
-        }.pointerInput(d) { androidx.compose.foundation.gestures.detectTapGestures(onTap = { o: Offset -> val t = (o.x / w * d.toFloat()).toLong().coerceIn(0L, d); onSeeking(t); onSeek(t) }) },
+        }.pointerInput(d) { detectTapGestures(onTap = { o: Offset -> val t = (o.x / w * d.toFloat()).toLong().coerceIn(0L, d); onSeeking(t); onSeek(t) }) },
     ) {
         androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
             w = size.width
