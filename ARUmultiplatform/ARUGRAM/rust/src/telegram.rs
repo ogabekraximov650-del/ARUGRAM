@@ -2792,7 +2792,7 @@ fn msg_json(m: &grammers_client::message::Message) -> Value {
                 tl::enums::User::User(x) => x.access_hash.unwrap_or(0),
                 _ => 0,
             };
-            (u.id().bot_api_dialog_id(), hash, u.photo().map(|p| p.photo_id).unwrap_or(0))
+            (u.id().bot_api_dialog_id().unwrap_or(0), hash, u.photo().map(|p| p.photo_id).unwrap_or(0))
         }
         _ => (0, 0, 0),
     };
