@@ -60,6 +60,9 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.PathMeasure
+import androidx.compose.ui.graphics.Paint
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.graphicsLayer
@@ -120,7 +123,7 @@ fun IntroScreen(
     val m = morph.value
     // Sahifa yetib kelgach 0.9 s davomida o'ziga xos animatsiya (mil yuradi, cheksizlik chiziladi, seyf burilib o'rnashadi).
     val arrive = remember { Animatable(0f) }
-    LaunchedEffect(pager.settledPage) {
+    LaunchedEffect(pager.currentPage) {
         arrive.snapTo(0f)
         arrive.animateTo(1f, tween(900, easing = LinearEasing))
     }
@@ -136,13 +139,8 @@ fun IntroScreen(
         Box(Modifier.fillMaxSize().alpha(1f - m).background(c.bg)) {
             // ---- Rasm (200x150), sahifalar almashganda yumshoq o'tadi
             Box(Modifier.offset(x = (w - 200.dp) / 2, y = y0).size(200.dp, 150.dp)) {
-                val lo = kotlin.math.floor(pos.toDouble()).toInt().coerceIn(0, 5)
-                val hi = (lo + 1).coerceAtMost(5)
-                val t = (pos - lo).coerceIn(0f, 1f)
-                // Telegram'da rasm joyida turadi: bir sahifa ikkinchisiga "erib" o'tadi (xira bo'lib kichrayadi / paydo bo'lib kattalashadi).
-                val settled = pager.settledPage
-                IntroArt(lo, ph, if (lo == settled) arrive.value else 1f, Modifier.fillMaxSize().graphicsLayer { alpha = 1f - t; scaleX = 1f + 0.15f * t; scaleY = 1f + 0.15f * t })
-                if (hi != lo) IntroArt(hi, ph, if (hi == settled) arrive.value else 1f, Modifier.fillMaxSize().graphicsLayer { alpha = t; scaleX = 0.75f + 0.25f * t; scaleY = 0.75f + 0.25f * t })
+                // Telegram'da eski rasm sahifa almashish o'rtasida birdan yo'qoladi, yangisi darhol (kichik "erish" animatsiyasi bilan) paydo bo'ladi.
+                IntroArt(pager.currentPage, ph, arrive.value, Modifier.fillMaxSize())
             }
 
             // ---- Sahifalar: sarlavha va matn
@@ -325,12 +323,23 @@ private fun IntroArt(page: Int, ph: Float, arr: Float, modifier: Modifier) {
         fun p(x: Float, y: Float) = Offset(ctr.x + (x - 360f) / 4.112f * u, ctr.y + (y - 346f) / 4.112f * u)
         fun l(v: Float) = v / 4.112f * u
         val e = FastOutSlowInEasing.transform(arr.coerceIn(0f, 1f))
+        val q = (arr * 3.6f).coerceIn(0f, 1f)   // dastlabki ~250 ms
+        val full = Rect(0f, 0f, size.width, size.height)
+        // Yarim shaffof qatlam: sahifa yetib kelganda rasm 0.25 -> 1 ga "qotadi".
+        fun ghost(a: Float, block: DrawScope.() -> Unit) {
+            val paint = Paint().apply { alpha = a }
+            drawIntoCanvas { it.saveLayer(full, paint) }
+            block()
+            drawIntoCanvas { it.restore() }
+        }
         when (page) {
-            0 -> scale(0.92f + 0.08f * e, ctr) { logo(::p, ::l, ph) }
-            5 -> cloud(::p, ::l, ph)
-            1 -> speedometer(::p, ::l, ph, arr)
-            2 -> gift(::p, ::l, ph)
-            3 -> infinity(::p, ::l, ph, arr)
+            0, 5 -> scale(0.92f + 0.08f * q, ctr) { if (page == 0) logo(::p, ::l, ph) else cloud(::p, ::l, ph) }
+            1 -> {
+                drawCircle(TgBlue.copy(alpha = 0.55f * (1f - q)), l(304f), p(360f, 346f))
+                ghost(0.25f + 0.75f * q) { speedometer(::p, ::l, ph, arr) }
+            }
+            2 -> scale(0.94f + 0.06f * q, ctr) { gift(::p, ::l, ph) }
+            3 -> rotate(-10f * (1f - q), ctr) { ghost(0.6f + 0.4f * q) { infinity(::p, ::l, ph, arr) } }
             else -> rotate(-12f * (1f - e), ctr) { scale(0.9f + 0.1f * e, ctr) { safe(::p, ::l, ph) } }
         }
     }
