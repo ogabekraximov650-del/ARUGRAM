@@ -129,6 +129,8 @@ fun HomeScreen(auth: AuthModel) {
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (tab == MainTab.Contacts.ordinal) {
                 ContactsTab(bottomPadding = 80.dp)
+            } else if (tab == MainTab.Settings.ordinal) {
+                SettingsTab(me, meContact, 80.dp) { auth.logout() }
             } else if (tab != 0) {
                 TabPlaceholder(MainTab.entries[tab], auth, me, meContact)
             } else when {

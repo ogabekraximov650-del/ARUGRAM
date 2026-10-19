@@ -10,3 +10,7 @@
 -keepclassmembers class * extends com.sun.jna.Structure { <fields>; }
 -dontwarn java.awt.**
 -dontwarn com.sun.jna.**
+
+# Lottie -> okio: `javax.annotation.Nullable` Android'da yo'q (faqat izoh), ogohlantirish xato bo'lib qolmasin.
+-dontwarn javax.annotation.**
+-dontwarn org.codehaus.mojo.animal_sniffer.**

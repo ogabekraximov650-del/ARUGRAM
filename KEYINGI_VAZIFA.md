@@ -6668,3 +6668,17 @@ Hozircha: `.tgs` — faqat kichik rasm (2-bosqich: lottie-android + libwebp bila
 - Telegram emojisi matnda: `[ce:<to'plam_nomi>:<hujjat_id>:<emoji>]` (`TG_EMOJI_TOKEN`, `tgEmojiToken`). Worker matnni o'zgartirmaydi (faqat `[pe:` obuna talab qiladi). Ko'rsatish: `RichPackText` -> `TgRefEmoji` (qabul qiluvchi o'z Telegram hisobi orqali `setname:` bilan oladi; olinmaguncha oddiy emoji belgisi).
 - GIF yuborish (Flutterdagidek, kanalga yuklamasdan): `media_type=gif`, `media_file=tgg.<id hex>.<hash hex>.<dc>.<havola hex|x>` (`tgGifRef`, worker `valid_tg_gif_ref`). Ko'ruvchi GIF'ni o'z Telegram hisobi bilan to'g'ridan-to'g'ri yuklaydi (`TgRefGif`). Cheklov: Telegram fayl havolasini vaqt o'tib eskirtirishi mumkin — juda eski GIF'lar ochilmasligi mumkin.
 - Telegram emojisi `emoji:<id>` (`GetCustomEmojiDocuments`) bo'yicha olinadi (to'plam nomi shart emas). Yozish maydonida `[pe:..]`/`[ce:..]` belgilari bitta emoji belgisi bo'lib ko'rinadi (`TokenVisual`).
+
+## ARUGRAM: Telegram (DrKLO) bilan bir xil mijoz — kirish va asosiy oyna (2026-10)
+
+- **Nima**: `ARUmultiplatform/ARUGRAM` (Kotlin + Compose + Rust, GPLv2) — Telegram'ning DrKLO nusxasiga "ikki tomchi suvdek" o'xshash mijoz.
+  Tanishtiruv (GL, Rust `intro_gl.rs`), Raqam / Kod / Parol oynalari, DrKLO'ning o'z raqam klaviaturasi (`TgNumPad`), "Raqam to'g'rimi?" oynasi,
+  davlat ro'yxati tez aylantirgichi; kirgandan keyin — suzuvchi tab paneli (`MainTabs.kt`), suhbatlar ro'yxati (`ChatList.kt`), suhbat oynasi
+  (`ChatScreen.kt`), kontaktlar (`ContactsTab.kt`).
+- **Muhim topilma**: ishlatilayotgan DrKLO versiyasida yon panel yo'q — `MainTabsActivity` (pastda "shisha" tab paneli). Shu sabab hamburger menyu qo'yilmadi.
+- **Rust yadro** (`rust/src/telegram.rs`): `rust_tg_dialogs`, `rust_tg_messages`, `rust_tg_send_text`, `rust_tg_mark_read`, `rust_tg_me`, `rust_tg_contacts`,
+  `rust_tg_avatars`, `rust_tg_user_avatars`, `rust_tg_update_seq` (kelgan updates soni — ilova ro'yxatni darhol yangilaydi).
+- **Ish tartibi**: har ~10 kod bo'lagidan keyin push; push paytida oldingi build bir marta tekshiriladi. Yangi push avvalgi build'ni bekor qiladi
+  (`concurrency`), shu sabab kompilyatsiya xatolari bir necha pushdan keyin ko'rinishi mumkin.
+- **Qoldi**: haqiqiy "suyuq shisha" (xiralashtirish), media (rasm/video/stiker) ko'rsatish, yuborish animatsiyalari, qidiruv (server), sozlamalar,
+  ro'yxatdan o'tish (sign-up), guruh/kanal ma'lumotlari, bildirishnomalar.
