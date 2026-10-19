@@ -331,8 +331,7 @@ private fun DrawScope.logo(p: (Float, Float) -> Offset, l: (Float) -> Float, ph:
         lineTo(p(414f, 486).x, p(414f, 486).y)
         lineTo(p(316f, 418).x, p(316f, 418).y)
         lineTo(p(408f, 312).x, p(408f, 312).y)
-        lineTo(p(332f, 372).x, p(332f, 372).y)
-        lineTo(p(262f, 393).x, p(262f, 393).y)
+        cubicTo(p(370f, 335f).x, p(370f, 335f).y, p(320f, 385f).x, p(320f, 385f).y, p(262f, 394f).x, p(262f, 394f).y)
         close()
     }
     drawPath(plane, Color.White)
@@ -346,11 +345,8 @@ private fun DrawScope.speedometer(p: (Float, Float) -> Offset, l: (Float) -> Flo
     drawCircle(Color(0xFFE3E5E5), l(240f), c, style = Stroke(l(14f)))
     // Qizil yoy: tashqi radiusi 241, ichki chetining radiusi burchakka qarab 172..241 (chap yuqorida uchi o'tkir).
     val outer = 241f
-    val inner = listOf(-136f to 241f, -112f to 226f, -90f to 211f, -45f to 201f, -2f to 188f, 22f to 172f)
-    fun pol(deg: Float, r: Float): Offset {
-        val a = Math.toRadians(deg.toDouble())
-        return Offset(c.x + (cos(a) * l(r)).toFloat(), c.y + (sin(a) * l(r)).toFloat())
-    }
+    // Ichki chet radiusi burchakka qarab silliq kamayadi (skrinshotdan moslangan ko'phad).
+    fun innerR(deg: Float): Float { val t = deg / 100f; return -35.83f * t * t * t - 56.44f * t * t - 50.82f * t + 186.53f }
     val arc = Path()
     var first = true
     var d = -136f
@@ -359,9 +355,11 @@ private fun DrawScope.speedometer(p: (Float, Float) -> Offset, l: (Float) -> Flo
         if (first) { arc.moveTo(o.x, o.y); first = false } else arc.lineTo(o.x, o.y)
         d += 2f
     }
-    for (k in inner.indices.reversed()) {
-        val o = pol(inner[k].first, inner[k].second)
+    var dd = 22f
+    while (dd >= -136f) {
+        val o = pol(dd, innerR(dd))
         arc.lineTo(o.x, o.y)
+        dd -= 2f
     }
     arc.close()
     drawPath(arc, ArcRed)
@@ -400,15 +398,23 @@ private fun DrawScope.gift(p: (Float, Float) -> Offset, l: (Float) -> Float, ph:
         lineTo(p(688f, 333f).x, p(688f, 333f).y); lineTo(p(38f, 333f).x, p(38f, 333f).y); close()
     }
     drawPath(hb, Color.White)
-    // Kapalak: to'rtta halqa, ichi qizil tomchi.
-    val loops = listOf(Offset(272f, 228f), Offset(448f, 228f), Offset(272f, 392f), Offset(448f, 392f))
-    for ((k, o) in loops.withIndex()) {
-        val c = p(o.x, o.y)
-        drawOval(Color.White, Offset(c.x - l(66f), c.y - l(72f)), Size(l(132f), l(144f)))
-        val hx = if (k % 2 == 0) 20f else -20f
-        val hy = if (k < 2) 10f else -10f
-        val hc = p(o.x + hx, o.y + hy)
-        drawOval(RedBox, Offset(hc.x - l(42f), hc.y - l(46f)), Size(l(84f), l(92f)))
+    // Kapalak: to'rtta yaproq (oq doira), ichida markazga qarab ingichkalashadigan qizil tomchi.
+    for (sx in listOf(-1f, 1f)) for (sy in listOf(-1f, 1f)) {
+        drawCircle(Color.White, l(75f), p(360f + sx * 83f, 310f + sy * 75f))
+    }
+    drawRect(Color.White, p(300f, 250f), Size(l(120f), l(120f)))
+    for (sx in listOf(-1f, 1f)) for (sy in listOf(-1f, 1f)) {
+        val c = p(360f + sx * 75f, 310f + sy * 78f)
+        drawCircle(RedBox, l(40f), c)
+        val tip = p(360f + sx * 22f, 310f + sy * 22f)
+        // Tomchining ingichka uchi markazga qaragan: doiraga urinma ikki nuqta va uch.
+        val dxv = tip.x - c.x; val dyv = tip.y - c.y
+        val len = kotlin.math.sqrt(dxv * dxv + dyv * dyv)
+        val nx = -dyv / len * l(40f); val ny = dxv / len * l(40f)
+        val tri = Path().apply {
+            moveTo(c.x + nx, c.y + ny); lineTo(tip.x, tip.y); lineTo(c.x - nx, c.y - ny); close()
+        }
+        drawPath(tri, RedBox)
     }
     drawRect(Color.White, p(336f, 38f), Size(l(48f), l(60f)))
 }
@@ -424,16 +430,13 @@ private fun DrawScope.infinity(p: (Float, Float) -> Offset, l: (Float) -> Float,
     }
     drawPath(tail, BubbleBlue)
     // Cheksizlik belgisi (qalinligi 46).
+    // Ikki doira (radiusi 100) va ularni markazda kesishtiruvchi to'g'ri chiziqlar.
     val inf = Path().apply {
-        moveTo(p(360f, 322f).x, p(360f, 322f).y)
-        cubicTo(p(405f, 262f).x, p(405f, 262f).y, p(455f, 223f).x, p(455f, 223f).y, p(510f, 223f).x, p(510f, 223f).y)
-        cubicTo(p(555f, 223f).x, p(555f, 223f).y, p(585f, 265f).x, p(585f, 265f).y, p(585f, 322f).x, p(585f, 322f).y)
-        cubicTo(p(585f, 379f).x, p(585f, 379f).y, p(555f, 421f).x, p(555f, 421f).y, p(510f, 421f).x, p(510f, 421f).y)
-        cubicTo(p(455f, 421f).x, p(455f, 421f).y, p(405f, 382f).x, p(405f, 382f).y, p(360f, 322f).x, p(360f, 322f).y)
-        cubicTo(p(315f, 262f).x, p(315f, 262f).y, p(265f, 223f).x, p(265f, 223f).y, p(210f, 223f).x, p(210f, 223f).y)
-        cubicTo(p(165f, 223f).x, p(165f, 223f).y, p(135f, 265f).x, p(135f, 265f).y, p(135f, 322f).x, p(135f, 322f).y)
-        cubicTo(p(135f, 379f).x, p(135f, 379f).y, p(165f, 421f).x, p(165f, 421f).y, p(210f, 421f).x, p(210f, 421f).y)
-        cubicTo(p(265f, 421f).x, p(265f, 421f).y, p(315f, 382f).x, p(315f, 382f).y, p(360f, 322f).x, p(360f, 322f).y)
+        moveTo(p(315f, 382f).x, p(315f, 382f).y)
+        lineTo(p(405f, 262f).x, p(405f, 262f).y)
+        arcTo(androidx.compose.ui.geometry.Rect(p(485f, 322f), l(100f)), 216.87f, 286.26f, false)
+        lineTo(p(315f, 262f).x, p(315f, 262f).y)
+        arcTo(androidx.compose.ui.geometry.Rect(p(235f, 322f), l(100f)), 323.13f, -286.26f, false)
         close()
     }
     drawPath(inf, Color.White, style = Stroke(l(46f), cap = StrokeCap.Round, join = StrokeJoin.Round))
