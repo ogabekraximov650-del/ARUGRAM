@@ -482,6 +482,7 @@ fun ChatScreen(chat: ChatRow, chats: List<ChatRow>, typing: Boolean, onBack: () 
             MediaViewer(
                 chat, v, onClose = { viewer = null }, media = model.messages,
                 onReply = { replyTo = it; editing = null }, onDelete = { deleteIds = listOf(it.id) }, onForward = { forwardIds = listOf(it.id) },
+                onShowAll = { onOpenInfo() },
                 onShowInChat = { m -> val i = model.messages.indexOfFirst { it.id == m.id }; if (i >= 0) scope.launch { listState.animateScrollToItem(i) } },
             )
         }

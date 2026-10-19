@@ -68,7 +68,7 @@ import java.io.File
 fun MediaViewer(
     chat: ChatRow, msg: MsgRow, onClose: () -> Unit,
     media: List<MsgRow> = emptyList(),
-    onReply: (MsgRow) -> Unit = {}, onDelete: (MsgRow) -> Unit = {}, onForward: (MsgRow) -> Unit = {}, onShowInChat: (MsgRow) -> Unit = {},
+    onReply: (MsgRow) -> Unit = {}, onDelete: (MsgRow) -> Unit = {}, onForward: (MsgRow) -> Unit = {}, onShowInChat: (MsgRow) -> Unit = {}, onShowAll: () -> Unit = {},
 ) {
     val ctx = LocalContext.current
     val scope = androidx.compose.runtime.rememberCoroutineScope()
@@ -133,6 +133,7 @@ fun MediaViewer(
                 val rows = buildList<MenuRow> {
                     add(MenuRow(R.drawable.msg_gallery, "Galereyaga saqlash", divider = true) { withFile { saveToGallery(ctx, it.file, isVideo || isAnim) } })
                     add(MenuRow(R.drawable.msg_openin, "...orqali ochish") { withFile { openExternal(ctx, it) } })
+                    add(MenuRow(R.drawable.msg_media, "Barcha media fayllar") { onShowAll(); onClose() })
                     add(MenuRow(R.drawable.msg_message, "Chatda ko‘rsatish") { onShowInChat(msg); onClose() })
                     add(MenuRow(R.drawable.menu_reply, "Javob yozish") { onReply(msg); onClose() })
                     add(MenuRow(R.drawable.msg_shareout, "Ulashish") { withFile { shareFile(ctx, it.file, it.mime) } })

@@ -401,14 +401,6 @@ fun ChatInputBar(
                 }
             }
             if (emojiPanel) {
-                Row(Modifier.fillMaxWidth().height(40.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                    listOf("Emoji", "Stikerlar", "GIF").forEachIndexed { i, t ->
-                        BasicText(
-                            t, Modifier.clickable { panelTab = i }.padding(horizontal = 20.dp, vertical = 8.dp),
-                            style = TextStyle(color = if (panelTab == i) Blue else c.gray, fontSize = 15.sp, fontWeight = FontWeight.Medium),
-                        )
-                    }
-                }
                 if (panelTab == 0) {
                     LazyVerticalGrid(GridCells.Adaptive(44.dp), Modifier.fillMaxWidth().height(260.dp).padding(horizontal = 6.dp)) {
                         items(Emojis.filter { it.isNotBlank() }) { e ->
@@ -424,6 +416,28 @@ fun ChatInputBar(
                     StickerPanel(onPick = onSendSticker)
                 } else {
                     GifPanel(onPick = { ref -> onSendSticker(Sticker(ref, "video/mp4", "")) })
+                }
+                // Pastki tab paneli (DrKLO `bottomTabContainer`, 40 dp): markazda Emoji / GIF / Stikerlar belgilari, o'ngda o'chirish tugmasi.
+                Box(Modifier.fillMaxWidth().height(40.dp)) {
+                    Row(Modifier.align(Alignment.Center), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        listOf(0 to R.drawable.smiles_tab_smiles, 2 to R.drawable.smiles_tab_gif, 1 to R.drawable.smiles_tab_stickers).forEach { (i, icon) ->
+                            Box(Modifier.size(48.dp, 40.dp).clickable { panelTab = i }, contentAlignment = Alignment.Center) {
+                                TgIcon(icon, if (panelTab == i) c.inputActive else (if (c.dark) c.gray else Color(0xFF8E959B)), size = 24.dp)
+                            }
+                        }
+                    }
+                    Box(
+                        Modifier.align(Alignment.CenterEnd).size(48.dp, 40.dp).clickable {
+                            val sel = draft.selection
+                            val t = draft.text
+                            if (!sel.collapsed) onDraft(TextFieldValue(t.removeRange(sel.start, sel.end), TextRange(sel.start)))
+                            else if (sel.start > 0) {
+                                val cut = if (sel.start >= 2 && Character.isLowSurrogate(t[sel.start - 1])) 2 else 1
+                                onDraft(TextFieldValue(t.removeRange(sel.start - cut, sel.start), TextRange(sel.start - cut)))
+                            }
+                        },
+                        contentAlignment = Alignment.Center,
+                    ) { TgIcon(R.drawable.smiles_tab_clear, if (c.dark) c.gray else Color(0xFF8E959B), size = 24.dp) }
                 }
             }
         }
