@@ -2521,6 +2521,68 @@ pub extern "C" fn rust_tg_send_text(arg_ptr: *const c_char) -> *mut c_char {
     }))
 }
 
+/// Suhbat avatarlari: `arg` = vergul bilan ajratilgan suhbat ID'lari. Javob: `{"photos":{"<id>":"<base64 jpeg>"}}`
+/// (rasmi yo'qlari kirmaydi). Bitta dialog aylanishida hammasi olinadi.
+async fn avatars_json(client: &Client, ids: &[i64]) -> Result<Value, String> {
+    use grammers_client::peer::Peer;
+    let mut want: std::collections::HashSet<i64> = ids.iter().copied().collect();
+    let mut photos = serde_json::Map::new();
+    let mut it = client.iter_dialogs();
+    while !want.is_empty() {
+        let Some(d) = it.next().await.map_err(|e| e.to_string())? else { break };
+        let Some(id) = d.peer_id().bot_api_dialog_id() else { continue };
+        if !want.remove(&id) {
+            continue;
+        }
+        let photo_id = match d.peer() {
+            Peer::User(u) => u.photo().map(|p| p.photo_id),
+            Peer::Group(g) => g.photo().map(|p| p.photo_id),
+            Peer::Channel(c) => c.photo().map(|p| p.photo_id),
+        };
+        let Some(photo_id) = photo_id else { continue };
+        let peer: tl::enums::InputPeer = d.peer_ref().into();
+        let loc = tl::enums::InputFileLocation::InputPeerPhotoFileLocation(tl::types::InputPeerPhotoFileLocation { big: false, peer, photo_id });
+        if let Some(b) = download_small(client, loc).await {
+            photos.insert(id.to_string(), json!(b64(&b)));
+        }
+    }
+    Ok(json!({ "photos": photos }))
+}
+
+#[no_mangle]
+pub extern "C" fn rust_tg_avatars(arg_ptr: *const c_char) -> *mut c_char {
+    let ids: Vec<i64> = unsafe { cstr_to_str(arg_ptr) }
+        .unwrap_or("")
+        .split(',')
+        .filter_map(|x| x.trim().parse::<i64>().ok())
+        .take(100)
+        .collect();
+    string_to_cptr(with_client(|t, client| {
+        if !t.authorized.load(Ordering::SeqCst) {
+            return Err("Telegram ulanmagan".to_string());
+        }
+        let v = run_tmo(t, 60, avatars_json(&client, &ids))?;
+        Ok(v.to_string())
+    }))
+}
+
+/// Suhbatni o'qilgan deb belgilaydi (Telegram suhbat ochilganda shunday qiladi). `arg` — suhbat ID'si.
+#[no_mangle]
+pub extern "C" fn rust_tg_mark_read(arg_ptr: *const c_char) -> *mut c_char {
+    let id = unsafe { cstr_to_str(arg_ptr) }.unwrap_or("").trim().parse::<i64>().unwrap_or(0);
+    string_to_cptr(with_client(|t, client| {
+        if !t.authorized.load(Ordering::SeqCst) {
+            return Err("Telegram ulanmagan".to_string());
+        }
+        run_tmo(t, 30, async {
+            let peer = find_channel(&client, id).await.map_err(|_| "Suhbat topilmadi".to_string())?;
+            client.mark_as_read(peer).await.map_err(|e| e.to_string())?;
+            Ok(())
+        })?;
+        Ok(json!({"ok": true}).to_string())
+    }))
+}
+
 fn b64(data: &[u8]) -> String {
     const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);

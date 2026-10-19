@@ -55,8 +55,11 @@ fun ChatAvatar(row: ChatRow, size: androidx.compose.ui.unit.Dp = 52.dp) {
     val idx = (abs(row.id) % AvatarTop.size).toInt()
     val top = if (row.self) Color(0xFF69BDF9) else Color(AvatarTop[idx])
     val bottom = if (row.self) Color(0xFF409FE1) else Color(AvatarBottom[idx])
+    val photo = AvatarCache.images[row.id]
     Box(Modifier.size(size).clip(CircleShape).background(Brush.verticalGradient(listOf(top, bottom))), contentAlignment = Alignment.Center) {
-        if (row.self) {
+        if (photo != null) {
+            androidx.compose.foundation.Image(photo, null, Modifier.size(size), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+        } else if (row.self) {
             Canvas(Modifier.size(size * 0.5f)) {
                 val s = this.size.width
                 val p = Path().apply {

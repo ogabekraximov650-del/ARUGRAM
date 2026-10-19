@@ -20,6 +20,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -41,6 +42,11 @@ fun HomeScreen(auth: AuthModel) {
     val model = remember { ChatsModel() }
     var openChat by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf<Long?>(null) }
     val ui by model.ui.collectAsStateWithLifecycle()
+    var searching by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    var query by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf("") }
+    androidx.activity.compose.BackHandler(enabled = searching) { searching = false; query = "" }
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    LaunchedEffect(ui.chats.map { it.id }) { AvatarCache.ensure(ctx, ui.chats.filter { !it.self }.map { it.id }) }
     // Haqiqiy vaqtdagi yangilanishlar (updates) keyingi bosqichda; hozircha har 20 soniyada ro'yxat yangilanadi.
     LaunchedEffect(Unit) {
         while (true) {
@@ -57,9 +63,27 @@ fun HomeScreen(auth: AuthModel) {
     Column(Modifier.fillMaxSize().background(c.bg)) {
         Column(Modifier.fillMaxWidth().background(c.bar).statusBarsPadding()) {
             Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(56.dp).clickable { auth.logout() }, contentAlignment = Alignment.Center) { MenuIcon(c.text) }
-                BasicText("ARUGRAM", Modifier.weight(1f), style = TextStyle(color = c.text, fontSize = 20.sp, fontWeight = FontWeight.Medium), maxLines = 1)
-                Box(Modifier.size(56.dp), contentAlignment = Alignment.Center) { SearchIcon(c.text) }
+                if (searching) {
+                    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+                    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+                    Box(Modifier.size(56.dp).clickable { searching = false; query = "" }, contentAlignment = Alignment.Center) { uz.arugram.app.ui.components.BackArrowIcon(c.text) }
+                    Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                        if (query.isEmpty()) BasicText("Qidirish", style = TextStyle(color = c.hint, fontSize = 18.sp))
+                        androidx.compose.foundation.text.BasicTextField(
+                            value = query,
+                            onValueChange = { query = it },
+                            singleLine = true,
+                            textStyle = TextStyle(color = c.text, fontSize = 18.sp),
+                            cursorBrush = androidx.compose.ui.graphics.SolidColor(c.inputActive),
+                            modifier = Modifier.fillMaxWidth().focusRequester(focus),
+                        )
+                    }
+                    if (query.isNotEmpty()) Box(Modifier.size(56.dp).clickable { query = "" }, contentAlignment = Alignment.Center) { uz.arugram.app.ui.components.CloseIcon(c.text) }
+                } else {
+                    Box(Modifier.size(56.dp).clickable { auth.logout() }, contentAlignment = Alignment.Center) { MenuIcon(c.text) }
+                    BasicText("ARUGRAM", Modifier.weight(1f), style = TextStyle(color = c.text, fontSize = 20.sp, fontWeight = FontWeight.Medium), maxLines = 1)
+                    Box(Modifier.size(56.dp).clickable { searching = true }, contentAlignment = Alignment.Center) { SearchIcon(c.text) }
+                }
             }
         }
         Box(Modifier.weight(1f).fillMaxWidth().navigationBarsPadding()) {
@@ -70,7 +94,11 @@ fun HomeScreen(auth: AuthModel) {
                     BasicText("Qayta urinish", Modifier.clickable { model.load() }.padding(16.dp), style = TextStyle(color = c.value, fontSize = 15.sp))
                 }
                 ui.chats.isEmpty() -> BasicText("Suhbatlar yo‘q", Modifier.align(Alignment.Center), style = TextStyle(color = c.gray, fontSize = 17.sp))
-                else -> ChatList(ui.chats, onOpen = { openChat = it.id })
+                else -> {
+                    val shown = if (query.isBlank()) ui.chats else ui.chats.filter { it.name.contains(query.trim(), ignoreCase = true) }
+                    if (shown.isEmpty()) BasicText("Hech narsa topilmadi", Modifier.align(Alignment.Center), style = TextStyle(color = c.gray, fontSize = 17.sp))
+                    else ChatList(shown, onOpen = { openChat = it.id })
+                }
             }
         }
     }

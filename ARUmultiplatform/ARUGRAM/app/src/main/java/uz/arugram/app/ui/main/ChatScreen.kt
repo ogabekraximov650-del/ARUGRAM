@@ -15,7 +15,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.material3.CircularProgressIndicator
@@ -78,6 +78,8 @@ fun ChatScreen(chat: ChatRow, onBack: () -> Unit) {
     }
     // Yangi xabarlar uchun har 5 soniyada yangilanadi (haqiqiy vaqtdagi updates keyingi bosqichda).
     LaunchedEffect(chat.id) {
+        // Suhbat ochilganda o'qilgan deb belgilanadi (faqat o'qilmagan xabar bo'lsa).
+        if (chat.unread > 0) withContext(Dispatchers.IO) { RustCore.tgMarkRead(chat.id) }
         while (true) {
             reload()
             kotlinx.coroutines.delay(5_000)
@@ -100,7 +102,13 @@ fun ChatScreen(chat: ChatRow, onBack: () -> Unit) {
                 list == null -> CircularProgressIndicator(Modifier.align(Alignment.Center).size(32.dp), color = c.inputActive, strokeWidth = 3.dp)
                 error != null && list.isEmpty() -> BasicText(error.orEmpty(), Modifier.align(Alignment.Center).padding(32.dp), style = TextStyle(color = c.gray, fontSize = 15.sp, textAlign = TextAlign.Center))
                 else -> LazyColumn(Modifier.fillMaxSize(), reverseLayout = true) {
-                    items(list, key = { it.id }) { m -> Bubble(m, chat.kind != "user") }
+                    itemsIndexed(list, key = { _, m -> m.id }) { i, m ->
+                        val older = list.getOrNull(i + 1)
+                        Column {
+                            if (older == null || dayKey(older.date) != dayKey(m.date)) DateChip(m.date)
+                            Bubble(m, chat.kind != "user")
+                        }
+                    }
                 }
             }
         }
@@ -152,5 +160,28 @@ private fun Bubble(m: MsgRow, showSender: Boolean) {
             if (body.isNotEmpty()) BasicText(body, style = TextStyle(color = if (c.dark) Color.White else Color.Black, fontSize = 16.sp))
             BasicText(chatTime(m.date), Modifier.align(Alignment.End), style = TextStyle(color = if (m.out && !c.dark) Color(0xFF70B15C) else Color(0xFFA1AAB3), fontSize = 12.sp))
         }
+    }
+}
+
+private fun dayKey(unix: Long): Long = (unix * 1000 + java.util.TimeZone.getDefault().getOffset(unix * 1000)) / 86_400_000L
+
+private val Months = arrayOf("yanvar", "fevral", "mart", "aprel", "may", "iyun", "iyul", "avgust", "sentyabr", "oktyabr", "noyabr", "dekabr")
+
+/** Kun ajratgichi (Telegram "xizmat" yorlig'i): bugun — "Bugun", aks holda "7 mart" (boshqa yilda — "7 mart 2020"). */
+@Composable
+private fun DateChip(unix: Long) {
+    val now = java.util.Calendar.getInstance()
+    val d = java.util.Calendar.getInstance().apply { timeInMillis = unix * 1000 }
+    val text = when {
+        dayKey(unix) == dayKey(now.timeInMillis / 1000) -> "Bugun"
+        now.get(java.util.Calendar.YEAR) == d.get(java.util.Calendar.YEAR) -> "${d.get(java.util.Calendar.DAY_OF_MONTH)} ${Months[d.get(java.util.Calendar.MONTH)]}"
+        else -> "${d.get(java.util.Calendar.DAY_OF_MONTH)} ${Months[d.get(java.util.Calendar.MONTH)]} ${d.get(java.util.Calendar.YEAR)}"
+    }
+    Box(Modifier.fillMaxWidth().padding(vertical = 6.dp), contentAlignment = Alignment.Center) {
+        BasicText(
+            text,
+            Modifier.clip(RoundedCornerShape(12.dp)).background(Color(0x66000000)).padding(horizontal = 10.dp, vertical = 3.dp),
+            style = TextStyle(color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium),
+        )
     }
 }
