@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -109,6 +111,17 @@ fun HomeScreen(auth: AuthModel) {
         }
     }
 
+    val setPhoto: (android.net.Uri) -> Unit = { uri ->
+                            scope.launch {
+                                val f = withContext(Dispatchers.IO) { copyUriToCache(ctx, uri) }
+                                if (f != null) {
+                                    val r = withContext(Dispatchers.IO) { RustCore.tgSetPhoto(f.absolutePath) }
+                                    f.delete()
+                                    toast = r.optString("error").ifEmpty { "Profil rasmi yangilandi" }
+                                    me?.let { AvatarCache.invalidate(ctx, it.id); AvatarCache.ensure(ctx, listOf(it.id)) }
+                                }
+                            }
+    }
     LaunchedEffect(Unit) {
         Drafts.load(ctx)
         val j = withContext(Dispatchers.IO) { RustCore.tgMe() }
@@ -179,18 +192,8 @@ fun HomeScreen(auth: AuthModel) {
                             archived = archived,
                         )
                         MainTab.Contacts -> ContactsTab(bottomPadding = 80.dp, onOpen = ::open, extra = listOf("Kontakt qo‘shish" to { addContact = true }))
-                        MainTab.Settings -> SettingsTab(me, meContact, 80.dp, onOpenChat = { r -> open(r) }, onNavigate = { stack.add(Dest.Settings(it)) }, onLogout = { auth.logout() }, savedChat = ui.chats.firstOrNull { it.self })
-                        MainTab.Profile -> ProfileTab(me, meContact, 80.dp, onPhoto = { uri ->
-                            scope.launch {
-                                val f = withContext(Dispatchers.IO) { copyUriToCache(ctx, uri) }
-                                if (f != null) {
-                                    val r = withContext(Dispatchers.IO) { RustCore.tgSetPhoto(f.absolutePath) }
-                                    f.delete()
-                                    toast = r.optString("error").ifEmpty { "Profil rasmi yangilandi" }
-                                    me?.let { AvatarCache.invalidate(ctx, it.id); AvatarCache.ensure(ctx, listOf(it.id)) }
-                                }
-                            }
-                        }, onEdit = { stack.add(Dest.Settings("account")) }, onSaved = { ui.chats.firstOrNull { it.self }?.let(::open) }, onLogout = { auth.logout() })
+                        MainTab.Settings -> SettingsTab(me, meContact, 80.dp, onOpenChat = { r -> open(r) }, onNavigate = { stack.add(Dest.Settings(it)) }, onLogout = { auth.logout() }, savedChat = ui.chats.firstOrNull { it.self }, onPhoto = setPhoto)
+                        MainTab.Profile -> ProfileTab(me, meContact, 80.dp, onPhoto = setPhoto, onEdit = { stack.add(Dest.Settings("account")) }, onSaved = { ui.chats.firstOrNull { it.self }?.let(::open) }, onLogout = { auth.logout() })
                     }
                     if (MainTab.entries[tab] == MainTab.Chats) {
                         // Yangi xabar tugmasi (DrKLO `FragmentFloatingButton`: 48 dp) va ustida hikoya (kamera) tugmasi.
@@ -425,35 +428,67 @@ private fun ArchiveRow(archived: List<ChatRow>, onClick: () -> Unit) {
     }
 }
 
-/** Profil tabi: katta avatar, ism, telefon/@nom, "Tahrirlash" va "Saqlangan xabarlar". */
+/**
+ * Profil tabi (DrKLO `ProfileActivity`, `my_profile`): tepa panelda tahrirlash (qalam) va ⋮ (chiqish); markazda avatar, ism, "onlayn";
+ * "Hisob" bo'limida telefon, foydalanuvchi nomi va bio qatorlari (qiymat 16 sp, izoh 13 sp); alohida "Saqlangan xabarlar" qatori.
+ */
 @Composable
 private fun ProfileTab(me: ChatRow?, meContact: String, bottomPadding: androidx.compose.ui.unit.Dp, onPhoto: (android.net.Uri) -> Unit, onEdit: () -> Unit, onSaved: () -> Unit, onLogout: () -> Unit) {
     val c = LocalTg.current
     val picker = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetContent()) { uri -> if (uri != null) onPhoto(uri) }
-    Column(Modifier.fillMaxSize().background(c.grayBg).statusBarsPadding(), horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(Modifier.fillMaxWidth().height(56.dp).background(c.bar), contentAlignment = Alignment.CenterStart) {
-            BasicText("Profil", Modifier.padding(start = 20.dp), style = TextStyle(color = c.text, fontSize = 20.sp, fontWeight = FontWeight.Bold))
+    var about by remember { mutableStateOf("") }
+    var username by remember { mutableStateOf("") }
+    var phone by remember { mutableStateOf("") }
+    var menu by remember { mutableStateOf(false) }
+    LaunchedEffect(me?.id) {
+        val j = withContext(Dispatchers.IO) { RustCore.tgProfile() }
+        if (j.optString("error").isEmpty()) {
+            about = j.optString("about")
+            username = j.optString("username").let { if (it.isNotEmpty()) "@$it" else "" }
+            phone = j.optString("phone").let { if (it.isNotEmpty()) "+$it" else "" }
         }
-        if (me != null) {
-            Column(Modifier.fillMaxWidth().background(c.bar).padding(vertical = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(Modifier.clickable { picker.launch("image/*") }) { ChatAvatar(me, 96.dp) }
-                BasicText("Rasmni o‘zgartirish", Modifier.padding(top = 6.dp), style = TextStyle(color = c.value, fontSize = 13.sp))
-                BasicText(me.name, Modifier.padding(top = 8.dp), style = TextStyle(color = c.text, fontSize = 22.sp, fontWeight = FontWeight.Bold))
-                if (meContact.isNotEmpty()) BasicText(meContact, Modifier.padding(top = 4.dp), style = TextStyle(color = c.gray, fontSize = 15.sp))
+    }
+    val card = if (c.dark) c.bg else c.bar
+    Box(Modifier.fillMaxSize().background(c.grayBg)) {
+        Column(Modifier.fillMaxSize().verticalScroll(androidx.compose.foundation.rememberScrollState())) {
+            Spacer(Modifier.statusBarsPadding().height(56.dp))
+            if (me != null) {
+                Column(Modifier.fillMaxWidth().padding(bottom = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(Modifier.clickable { picker.launch("image/*") }) { ChatAvatar(me, 100.dp) }
+                    BasicText(me.name, Modifier.padding(top = 12.dp, start = 16.dp, end = 16.dp), style = TextStyle(color = c.text, fontSize = 22.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center), maxLines = 1)
+                    BasicText("onlayn", Modifier.padding(top = 2.dp), style = TextStyle(color = c.gray, fontSize = 14.sp))
+                }
             }
-        }
-        Column(Modifier.padding(top = 8.dp).fillMaxWidth().background(c.bar)) {
-            Row(Modifier.fillMaxWidth().height(50.dp).clickable(onClick = onEdit).padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
-                TgIcon(R.drawable.msg_edit, c.text.copy(alpha = 0.7f))
-                BasicText("Profilni tahrirlash", Modifier.padding(start = 18.dp), style = TextStyle(color = c.text, fontSize = 16.sp))
+            Column(Modifier.padding(horizontal = 12.dp)) {
+                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(card)) {
+                    BasicText("Hisob", Modifier.padding(start = 18.dp, top = 16.dp, bottom = 4.dp), style = TextStyle(color = c.value, fontSize = 15.sp, fontWeight = FontWeight.Medium))
+                    if (phone.isNotEmpty()) DetailRow(phone, "Telefon raqami")
+                    if (username.isNotEmpty()) DetailRow(username, "Foydalanuvchi nomi")
+                    if (about.isNotEmpty()) DetailRow(about, "Bio")
+                    Spacer(Modifier.height(6.dp))
+                }
+                Spacer(Modifier.height(12.dp))
+                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(card).height(50.dp).clickable(onClick = onSaved).padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+                    TgIcon(R.drawable.msg_saved, c.text.copy(alpha = 0.7f))
+                    BasicText("Saqlangan xabarlar", Modifier.padding(start = 18.dp), style = TextStyle(color = c.text, fontSize = 16.sp))
+                }
             }
-            Row(Modifier.fillMaxWidth().height(50.dp).clickable(onClick = onSaved).padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
-                TgIcon(R.drawable.msg_saved, c.text.copy(alpha = 0.7f))
-                BasicText("Saqlangan xabarlar", Modifier.padding(start = 18.dp), style = TextStyle(color = c.text, fontSize = 16.sp))
-            }
+            Spacer(Modifier.height(bottomPadding))
         }
-        Box(Modifier.padding(top = 8.dp).fillMaxWidth().background(c.bar).clickable(onClick = onLogout).padding(vertical = 16.dp), contentAlignment = Alignment.Center) {
-            BasicText("Hisobdan chiqish", style = TextStyle(color = c.red, fontSize = 16.sp))
+        Row(Modifier.fillMaxWidth().statusBarsPadding().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f))
+            Box(Modifier.size(48.dp).clickable(onClick = onEdit), contentAlignment = Alignment.Center) { TgIcon(R.drawable.group_edit_profile, c.text) }
+            Box(Modifier.size(48.dp).clickable { menu = true }, contentAlignment = Alignment.Center) { TgIcon(R.drawable.ic_ab_other, c.text) }
         }
+        if (menu) PopupMenu(listOf(MenuItem(R.drawable.msg_leave, "Chiqish") { onLogout() }), onDismiss = { menu = false })
+    }
+}
+
+@Composable
+private fun DetailRow(value: String, label: String) {
+    val c = LocalTg.current
+    Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 8.dp)) {
+        BasicText(value, style = TextStyle(color = c.text, fontSize = 16.sp))
+        BasicText(label, Modifier.padding(top = 2.dp), style = TextStyle(color = c.gray, fontSize = 13.sp))
     }
 }

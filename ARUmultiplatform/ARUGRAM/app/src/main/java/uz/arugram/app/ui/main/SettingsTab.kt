@@ -2,7 +2,11 @@ package uz.arugram.app.ui.main
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.offset
+import androidx.compose.runtime.remember
+import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -59,8 +63,8 @@ private val MainItems = listOf(
 )
 
 private val ExtraItems = listOf(
-    Item(Purple, R.drawable.settings_features, "Telegram Premium", "Qo‘shimcha imkoniyatlar", "premium"),
-    Item(OrangeDeep, R.drawable.settings_data, "Mening Stars’im", "Balans va amallar tarixi", "stars"),
+    Item(0xFFB659FFL to 0xFF617CFFL, R.drawable.settings_premium, "Telegram Premium", null, "premium"),
+    Item(0xFFEFA612L to 0xFFE77512L, R.drawable.settings_stars, "Telegram Stars", null, "stars"),
     Item(Green, R.drawable.settings_devices, "Qo‘ng‘iroqlar", "Qo‘ng‘iroqlar tarixi", "calls"),
     Item(Orange, R.drawable.settings_chat, "Stikerlar", "To‘plamlarni qo‘shish va olib tashlash", "stickers"),
 )
@@ -73,48 +77,69 @@ private val HelpItems = listOf(
 )
 
 /**
- * Sozlamalar tabi (DrKLO `SettingsActivity.SettingCell`): qator 50 dp (izohli bo'lsa 60 dp); 28 dp li yumaloq (radius 10) vertikal gradientli
- * kvadrat ichida 24 dp li oq ikonka (chapdan 18 dp), matn chapdan 18 dp: sarlavha 16 sp, izoh 13 sp (4 dp pastda), o'ngda 20 dp.
- * Bo'limlar sarlavhasi — ko'k. Qatorlarning ichki oynalari keyingi bosqichlarda qo'shiladi.
+ * Sozlamalar tabi (DrKLO `SettingsActivity`): shaffof tepa panel (pastga surilganda "Sozlamalar" sarlavhasi paydo bo'ladi), markazda 90 dp avatar
+ * (o'ng pastda kamera tugmasi), 22 sp qalin ism, "+998… • @nom" (13 sp), so'ng 12 dp chetdan, 16 dp burchakli bo'limlar (`UniversalRecyclerView.setSections`);
+ * qator 50 dp (izohli bo'lsa 60 dp); pastda versiya yozuvi. "Chiqish" — ⋮ menyusida.
  */
 @Composable
-fun SettingsTab(me: ChatRow?, meContact: String, bottomPadding: Dp, onOpenChat: (ChatRow) -> Unit, onNavigate: (String) -> Unit, onLogout: () -> Unit, savedChat: ChatRow?) {
+fun SettingsTab(
+    me: ChatRow?, meContact: String, bottomPadding: Dp, onOpenChat: (ChatRow) -> Unit, onNavigate: (String) -> Unit, onLogout: () -> Unit, savedChat: ChatRow?,
+    onPhoto: (android.net.Uri) -> Unit = {},
+) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val c = LocalTg.current
-    Column(Modifier.fillMaxSize().background(c.grayBg).statusBarsPadding()) {
-        Box(Modifier.fillMaxWidth().height(56.dp).background(c.bar), contentAlignment = Alignment.CenterStart) {
-            BasicText("Sozlamalar", Modifier.padding(start = 20.dp), style = TextStyle(color = c.text, fontSize = 20.sp, fontWeight = FontWeight.Bold))
-        }
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-            if (me != null) {
-                Row(Modifier.fillMaxWidth().background(c.bar).padding(horizontal = 18.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                    ChatAvatar(me, 64.dp)
-                    Column(Modifier.padding(start = 16.dp)) {
-                        BasicText(me.name, style = TextStyle(color = c.text, fontSize = 18.sp, fontWeight = FontWeight.Medium), maxLines = 1)
-                        if (meContact.isNotEmpty()) BasicText(meContact, Modifier.padding(top = 2.dp), style = TextStyle(color = c.gray, fontSize = 14.sp), maxLines = 1)
+    val scroll = rememberScrollState()
+    var menu by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    val picker = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetContent()) { uri -> if (uri != null) onPhoto(uri) }
+    val card = if (c.dark) c.bg else c.bar
+    val barAlpha = (scroll.value / with(androidx.compose.ui.platform.LocalDensity.current) { 120.dp.toPx() }).coerceIn(0f, 1f)
+    Box(Modifier.fillMaxSize().background(c.grayBg)) {
+        Column(Modifier.fillMaxSize().verticalScroll(scroll)) {
+            Spacer(Modifier.statusBarsPadding().height(12.dp))
+            // Tepa qism: avatar, ism, telefon va @nom
+            Box(Modifier.fillMaxWidth().height(184.dp)) {
+                if (me != null) {
+                    Box(Modifier.align(Alignment.TopCenter).padding(top = 26.dp).size(90.dp).clickable { picker.launch("image/*") }) {
+                        ChatAvatar(me, 90.dp)
+                        Box(
+                            Modifier.align(Alignment.BottomEnd).offset(x = 6.dp, y = 6.dp).size(34.dp).clip(androidx.compose.foundation.shape.CircleShape).background(c.grayBg).padding(2.dp)
+                                .clip(androidx.compose.foundation.shape.CircleShape).background(if (c.dark) c.fab else Color(0xFF3390EC)),
+                            contentAlignment = Alignment.Center,
+                        ) { Image(painterResource(R.drawable.filled_premium_camera), null, Modifier.size(22.dp)) }
                     }
+                    BasicText(me.name, Modifier.align(Alignment.TopCenter).padding(top = 126.dp, start = 16.dp, end = 16.dp), style = TextStyle(color = c.text, fontSize = 22.sp, fontWeight = FontWeight.Bold, textAlign = androidx.compose.ui.text.style.TextAlign.Center), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                    if (meContact.isNotEmpty()) BasicText(meContact.replace("  ·  ", " • "), Modifier.align(Alignment.TopCenter).padding(top = 156.dp), style = TextStyle(color = c.gray, fontSize = 13.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center), maxLines = 1)
                 }
             }
-            Spacer(Modifier.height(8.dp))
-            Column(Modifier.fillMaxWidth().background(c.bar)) {
-                if (savedChat != null) SettingRow(Item(Blue, R.drawable.msg_saved, "Saqlangan xabarlar", null, "saved")) { onOpenChat(savedChat) }
-                MainItems.forEach { it0 -> SettingRow(it0) { onNavigate(it0.route) } }
+            Column(Modifier.padding(horizontal = 12.dp)) {
+                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(card)) {
+                    MainItems.forEach { it0 -> SettingRow(it0) { onNavigate(it0.route) } }
+                }
+                Spacer(Modifier.height(12.dp))
+                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(card)) {
+                    ExtraItems.forEach { it0 -> SettingRow(it0) { onNavigate(it0.route) } }
+                }
+                Spacer(Modifier.height(12.dp))
+                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(card)) {
+                    BasicText("Yordam", Modifier.padding(start = 18.dp, top = 16.dp, bottom = 6.dp), style = TextStyle(color = c.value, fontSize = 15.sp, fontWeight = FontWeight.Medium))
+                    HelpItems.forEach { it0 -> SettingRow(it0) { openUrl(ctx, it0.route.removePrefix("url:")) } }
+                }
             }
-            Spacer(Modifier.height(8.dp))
-            Column(Modifier.fillMaxWidth().background(c.bar)) {
-                ExtraItems.forEach { it0 -> SettingRow(it0) { onNavigate(it0.route) } }
+            val version = remember {
+                runCatching {
+                    val pi = ctx.packageManager.getPackageInfo(ctx.packageName, 0)
+                    "ARUGRAM ${pi.versionName} (${androidx.core.content.pm.PackageInfoCompat.getLongVersionCode(pi)})"
+                }.getOrDefault("ARUGRAM")
             }
-            Spacer(Modifier.height(8.dp))
-            Column(Modifier.fillMaxWidth().background(c.bar)) {
-                BasicText("Yordam", Modifier.padding(start = 18.dp, top = 16.dp, bottom = 6.dp), style = TextStyle(color = c.value, fontSize = 15.sp, fontWeight = FontWeight.Medium))
-                HelpItems.forEach { it0 -> SettingRow(it0) { openUrl(ctx, it0.route.removePrefix("url:")) } }
-            }
-            Spacer(Modifier.height(8.dp))
-            Box(Modifier.fillMaxWidth().background(c.bar).clickable(onClick = onLogout).padding(vertical = 16.dp), contentAlignment = Alignment.Center) {
-                BasicText("Hisobdan chiqish", style = TextStyle(color = c.red, fontSize = 16.sp))
-            }
+            BasicText(version, Modifier.align(Alignment.CenterHorizontally).padding(horizontal = 21.dp, vertical = 10.dp), style = TextStyle(color = c.gray.copy(alpha = 0.7f), fontSize = 14.sp))
             Spacer(Modifier.height(bottomPadding))
         }
+        // Shaffof tepa panel: surilganda fon va sarlavha paydo bo'ladi
+        Row(Modifier.fillMaxWidth().background(c.bar.copy(alpha = barAlpha)).statusBarsPadding().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
+            BasicText("Sozlamalar", Modifier.weight(1f).padding(start = 20.dp).alpha(barAlpha), style = TextStyle(color = c.text, fontSize = 20.sp, fontWeight = FontWeight.Bold))
+            Box(Modifier.size(48.dp).clickable { menu = true }, contentAlignment = Alignment.Center) { uz.arugram.app.ui.components.TgIcon(R.drawable.ic_ab_other, c.text) }
+        }
+        if (menu) PopupMenu(listOf(MenuItem(R.drawable.msg_leave, "Chiqish") { onLogout() }), onDismiss = { menu = false })
     }
 }
 
@@ -127,7 +152,8 @@ private fun SettingRow(item: Item, onClick: () -> Unit) {
     ) {
         Box(
             Modifier.padding(start = 18.dp).size(28.dp).clip(RoundedCornerShape(10.dp))
-                .background(Brush.verticalGradient(listOf(Color(item.colors.first), Color(item.colors.second)))),
+                .background(Brush.verticalGradient(listOf(Color(item.colors.first), Color(item.colors.second))))
+                .then(if (c.dark) Modifier.border(1.dp, Brush.verticalGradient(listOf(Color(0x4DFFFFFF), Color.Transparent, Color(0x1AFFFFFF))), RoundedCornerShape(10.dp)) else Modifier),
             contentAlignment = Alignment.Center,
         ) {
             Image(painterResource(item.icon), null, Modifier.size(24.dp))
