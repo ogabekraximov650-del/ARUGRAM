@@ -315,7 +315,8 @@ private fun IntroArt(page: Int, ph: Float, appear: Float, modifier: Modifier) {
         fun p(x: Float, y: Float) = Offset(ctr.x + (x - 360f) / 4.112f * u, ctr.y + (y - 346f) / 4.112f * u)
         fun l(v: Float) = v / 4.112f * u
         when (page) {
-            0, 5 -> logo(::p, ::l, ph)
+            0 -> logo(::p, ::l, ph)
+            5 -> cloud(::p, ::l, ph)
             1 -> speedometer(::p, ::l, ph, appear)
             2 -> gift(::p, ::l, ph)
             3 -> infinity(::p, ::l, ph)
@@ -465,4 +466,62 @@ private fun DrawScope.safe(p: (Float, Float) -> Offset, l: (Float) -> Float, ph:
     drawCircle(SafeLight, l(116f), c)
     drawCircle(KeyGray, l(34f), p(360f, 328f))
     drawRoundRect(KeyGray, p(345f, 335f), Size(l(31f), l(73f)), CornerRadius(l(15f)))
+}
+
+private val CloudBlue = Color(0xFF2AB3F7)
+private val CloudIcon = Color(0xFF0099E5)
+
+/** Bulut sahifasi: ochiq ko'k bulut, ichida to'qroq ko'k belgilar (joy, kamera, pufak, videokamera, tabassum, qalam); belgilar sekin suzadi. */
+private fun DrawScope.cloud(p: (Float, Float) -> Offset, l: (Float) -> Float, ph: Float) {
+    // Koordinatalar bulut skrinshotining 2x kesimida (boshlanishi ilgarigi kesimdan (60, -60) ga siljigan).
+    fun q(x: Float, y: Float) = p(x - 60f, y + 60f)
+    val shape = Path().apply {
+        addOval(androidx.compose.ui.geometry.Rect(q(490f, 237f), l(192f)))
+        addOval(androidx.compose.ui.geometry.Rect(q(237f, 220f), l(85f)))
+        addOval(androidx.compose.ui.geometry.Rect(q(170f, 395f), l(135f)))
+        addOval(androidx.compose.ui.geometry.Rect(q(678f, 400f), l(127f)))
+        addRect(androidx.compose.ui.geometry.Rect(q(170f, 0f).x, q(0f, 260f).y, q(678f, 0f).x, q(0f, 528f).y))
+    }
+    drawPath(shape, CloudBlue)
+    val sw = sin(ph * 2 * PI).toFloat()
+    val cw = cos(ph * 2 * PI).toFloat()
+    clipPath(shape) {
+        // Joy belgisi (chap chetda, qisman kesilgan)
+        drawCircle(CloudIcon, l(42f), q(78f, 305f + sw * 4f))
+        val pin = Path().apply {
+            moveTo(q(40f, 335f).x, q(40f, 335f).y); lineTo(q(92f, 400f).x, q(92f, 400f).y); lineTo(q(118f, 300f).x, q(118f, 300f).y); close()
+        }
+        drawPath(pin, CloudIcon)
+        // Kamera
+        rotate(20f + cw * 2f, q(360f, 262f)) {
+            drawRoundRect(CloudIcon, q(280f, 190f), Size(l(160f), l(140f)), CornerRadius(l(22f)))
+            drawRoundRect(CloudIcon, q(330f, 168f), Size(l(60f), l(40f)), CornerRadius(l(12f)))
+            drawCircle(CloudBlue, l(44f), q(360f, 262f))
+            drawCircle(CloudIcon, l(24f), q(360f, 262f))
+        }
+        // Suhbat pufagi (tepa o'ngda)
+        rotate(-14f, q(565f, 125f)) {
+            drawRoundRect(CloudIcon, q(490f, 75f), Size(l(150f), l(105f)), CornerRadius(l(22f)))
+            val tail = Path().apply {
+                moveTo(q(540f, 170f).x, q(540f, 170f).y); lineTo(q(556f, 208f).x, q(556f, 208f).y); lineTo(q(580f, 170f).x, q(580f, 170f).y); close()
+            }
+            drawPath(tail, CloudIcon)
+            drawCircle(CloudBlue, l(9f), q(563f, 115f))
+        }
+        // Videokamera
+        rotate(-28f, q(255f, 460f)) {
+            drawRoundRect(CloudIcon, q(185f, 415f), Size(l(140f), l(100f)), CornerRadius(l(20f)))
+            val lens = Path().apply {
+                moveTo(q(318f, 450f).x, q(318f, 450f).y); lineTo(q(385f, 410f).x, q(385f, 410f).y); lineTo(q(385f, 500f).x, q(385f, 500f).y); close()
+            }
+            drawPath(lens, CloudIcon)
+        }
+        // Tabassum
+        drawCircle(CloudIcon, l(74f), q(545f, 390f + cw * 3f), style = Stroke(l(15f)))
+        drawCircle(CloudIcon, l(9f), q(512f, 378f + cw * 3f)); drawCircle(CloudIcon, l(9f), q(578f, 378f + cw * 3f))
+        drawArc(CloudIcon, 20f, 140f, false, q(505f, 365f + cw * 3f), Size(l(80f), l(70f)), style = Stroke(l(14f), cap = StrokeCap.Round))
+        // Qalam
+        drawLine(CloudIcon, q(690f, 462f), q(764f, 388f), strokeWidth = l(30f), cap = StrokeCap.Butt)
+        drawLine(CloudIcon, q(672f, 470f), q(692f, 452f), strokeWidth = l(26f), cap = StrokeCap.Butt)
+    }
 }
