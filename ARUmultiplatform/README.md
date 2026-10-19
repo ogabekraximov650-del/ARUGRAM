@@ -19,4 +19,4 @@ o'z tilida yoziladi:
 
 ## Telegram (DrKLO manba kodi)
 
-`ARUmultiplatform/Telegram/` — [DrKLO/Telegram](https://github.com/DrKLO/Telegram) (Telegram for Android) manba kodi (13.0.2, GPLv2; `LICENSE` shu papkada). Submodullar repoda gitlink sifatida (`/.gitmodules`), CI'da `submodules: recursive` bilan olinadi. Yig'ish FAQAT GitHub Actions'da: `.github/workflows/telegram-android.yml` (`:TMessagesProj_AppStandalone:assembleAfatStandalone`, faqat arm64-v8a + armeabi-v7a). O'zgarishlar: `APP_PACKAGE=org.telegram.messenger.aru` (rasmiy Telegram bilan to'qnashmasin), ABI ro'yxati qisqartirildi.
+`ARUmultiplatform/Telegram/` — [DrKLO/Telegram](https://github.com/DrKLO/Telegram) (Telegram for Android) manba kodi (13.0.2, GPLv2; `LICENSE` shu papkada). Submodullar repoda gitlink sifatida (`/.gitmodules`), CI'da `submodules: recursive` bilan olinadi. Yig'ish FAQAT GitHub Actions'da: `.github/workflows/telegram-android.yml` (`:TMessagesProj_AppStandalone:assembleAfatStandalone`, faqat arm64-v8a + armeabi-v7a). O'zgarish: ABI ro'yxati qisqartirildi (paket nomi `org.telegram.messenger.web` — rasmiy Telegram bilan to'qnashmaydi).
