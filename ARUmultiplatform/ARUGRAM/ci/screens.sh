@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # Emulyatorda ARUGRAM'ni ochib, kirish oynasining skrinshotlari va videosini oladi (Telegram bilan solishtirish uchun).
-# Ekran Telegram skrinshotlari bilan bir xil: 720x1600, 320 dpi (360 dp), 3 tugmali navigatsiya.
+# Ekran Telegram skrinshotlari bilan bir xil: 720x1600, 329 dpi (dp = 2.056 px), 3 tugmali navigatsiya.
 set -u
 OUT="${1:-screens}"; APK="${2:-app.apk}"
 mkdir -p "$OUT"
 adb wait-for-device
 adb shell wm size 720x1600
-adb shell wm density 320
+adb shell wm density 329   # Telegram skrinshotidagi qurilma: dp = 2.056 px (tugma 320 dp = 658 px)
 adb shell cmd overlay enable com.android.internal.systemui.navbar.threebutton || true
+sleep 6
 adb shell cmd uimode night no || true
 adb shell settings put global window_animation_scale 1
 adb shell settings put global transition_animation_scale 1
