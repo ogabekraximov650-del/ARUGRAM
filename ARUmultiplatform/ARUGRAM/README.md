@@ -23,3 +23,8 @@ API kalitlari (`TG_API_ID`, `TG_API_HASH`) GitHub Secrets'dan `BuildConfig` ga b
 ## Telegram'dan olingan o'lchamlar (DrKLO)
 Sahifa: chetlari 18 dp, tepa 30 dp. Sarlavha 18 sp (qalin), izoh 14 sp. Maydon: 58 dp, burchak 8 dp, ramka 0,5 -> 1,67 dp, sarlavha 16 sp -> ×0,75.
 Tugma: 56 dp, o'ngdan 20, pastdan 14. Kod katagi: 34×42 dp, oraliq 7, ramka 1,5, burchak 4, raqam 20 sp. Sahifa almashuvi: 300 ms, tezlanib-sekinlanuvchi.
+
+## Tanishtiruv oynasi va mavzu (2026-10)
+`ui/intro/IntroScreen.kt`: 6 sahifali pager (har birida Canvas'da chizilgan harakatlanuvchi rasm), nuqtalar, yorug'lik o'tuvchi
+"Suhbatni boshlash" tugmasi, "Continue in English" (matnlar `IntroTexts.kt`), tepa o'ngda quyosh/oy tugmasi. Mavzu tanlovi
+`SharedPreferences("ui")` da saqlanadi, ranglar `lerpTg` bilan silliq almashadi (`TgTheme.kt`).
