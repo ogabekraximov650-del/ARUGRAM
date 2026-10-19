@@ -38,7 +38,15 @@ data class MsgRow(
     val reactions: List<Reaction>,
     val poll: Poll? = null,
     val markup: Markup? = null,
+    val ents: List<Ent> = emptyList(),
+    val web: WebPreview? = null,
 )
+
+/** Matn bezagi: tur (`b`, `i`, `u`, `s`, `c`, `p`, `l`, `url`, `m`, `n`, `h`, `bc`, `e`, `ph`, `sp`, `q`), boshlanish, uzunlik, qo'shimcha (havola va h.k.). */
+data class Ent(val type: String, val offset: Int, val length: Int, val extra: String)
+
+/** Havola ko'rinishi (sayt, sarlavha, tavsif). */
+data class WebPreview(val url: String, val site: String, val title: String, val desc: String)
 
 /** Bot tugmalari: inline (xabar ostida) yoki javob klaviaturasi (yozish paneli ustida). */
 data class Button(val text: String, val kind: String, val data: String)
@@ -71,6 +79,14 @@ fun parseMsg(o: JSONObject): MsgRow {
                 buildList { for (i in 0 until (rr?.length() ?: 0)) { val row = rr!!.getJSONArray(i); add(buildList { for (k in 0 until row.length()) { val b = row.getJSONObject(k); add(Button(b.optString("text"), b.optString("kind"), b.optString("data"))) } }) } },
             )
         },
+        ents = buildList {
+            val ea = o.optJSONArray("ents")
+            for (i in 0 until (ea?.length() ?: 0)) {
+                val e = ea!!.getJSONArray(i)
+                add(Ent(e.optString(0), e.optInt(1), e.optInt(2), e.optString(3)))
+            }
+        },
+        web = o.optJSONObject("web")?.let { w -> WebPreview(w.optString("url"), w.optString("site"), w.optString("title"), w.optString("desc")) },
         poll = o.optJSONObject("poll")?.let { po ->
             val a = po.optJSONArray("answers")
             Poll(

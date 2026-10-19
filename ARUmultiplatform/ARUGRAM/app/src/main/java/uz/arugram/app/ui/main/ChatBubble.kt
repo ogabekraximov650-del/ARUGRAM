@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
@@ -146,15 +148,33 @@ fun MessageBubble(
                 else -> if (m.media.isNotEmpty()) BasicText(m.media, style = TextStyle(color = InBlue, fontSize = 15.sp, fontStyle = FontStyle.Italic))
             }
             if (m.text.isNotEmpty()) {
-                val styled = remember(m.text, c.dark) { linkify(m.text, if (m.out && !c.dark) Color(0xFF2678B6) else InBlue) }
+                var revealed by remember(m.id) { mutableStateOf(false) }
+                val spoilerBg = if (c.dark) Color(0xFF3A4046) else Color(0xFFB0B8BE)
+                val styled = remember(m.text, m.ents, c.dark, revealed) {
+                    styledText(m.text, m.ents, if (m.out && !c.dark) Color(0xFF2678B6) else InBlue, if (c.dark) Color(0x33FFFFFF) else Color(0x1A000000), spoilerBg, revealed)
+                }
                 ClickableText(
                     styled,
                     style = TextStyle(color = textColor(c.dark, m.out), fontSize = textSize.sp, lineHeight = (textSize * 1.3f).sp),
                     onClick = { off ->
                         val url = styled.getStringAnnotations("url", off, off).firstOrNull()
-                        if (url != null) { if (!openLink(url.item)) openUrl(ctx, url.item) } else onClick()
+                        if (url != null && url.item.startsWith("tg://user")) onClick()
+                        else if (url != null) { if (!openLink(url.item)) openUrl(ctx, url.item) }
+                        else if (!revealed && m.ents.any { it.type == "sp" && off >= it.offset && off < it.offset + it.length }) revealed = true
+                        else onClick()
                     },
                 )
+            }
+            val web = m.web
+            if (web != null && (web.title.isNotEmpty() || web.desc.isNotEmpty())) {
+                Row(Modifier.padding(top = 4.dp).height(IntrinsicSize.Min).clip(RoundedCornerShape(4.dp)).combinedClickable(onClick = { if (!openLink(web.url)) openUrl(ctx, web.url) })) {
+                    Box(Modifier.width(2.dp).fillMaxHeight().background(if (m.out) OutGreen else InBlue))
+                    Column(Modifier.padding(start = 8.dp)) {
+                        if (web.site.isNotEmpty()) BasicText(web.site, style = TextStyle(color = if (m.out) OutGreen else InBlue, fontSize = 13.sp, fontWeight = FontWeight.Medium), maxLines = 1)
+                        if (web.title.isNotEmpty()) BasicText(web.title, style = TextStyle(color = textColor(c.dark, m.out), fontSize = 14.sp, fontWeight = FontWeight.Bold), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        if (web.desc.isNotEmpty()) BasicText(web.desc, style = TextStyle(color = textColor(c.dark, m.out), fontSize = 13.sp), maxLines = 4, overflow = TextOverflow.Ellipsis)
+                    }
+                }
             }
             if (m.reactions.isNotEmpty() && !sticker) {
                 FlowRow(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {

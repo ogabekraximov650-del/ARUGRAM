@@ -2626,6 +2626,35 @@ fn markup_json(m: &grammers_client::message::Message) -> Value {
     json!({"inline": inline, "rows": out})
 }
 
+/// Xabar bezaklari: `[tur, offset, uzunlik, qo'shimcha]`.
+fn ents_json(es: &[tl::enums::MessageEntity]) -> Vec<Value> {
+    use tl::enums::MessageEntity as E;
+    es.iter()
+        .filter_map(|e| {
+            Some(match e {
+                E::Bold(x) => json!(["b", x.offset, x.length, ""]),
+                E::Italic(x) => json!(["i", x.offset, x.length, ""]),
+                E::Underline(x) => json!(["u", x.offset, x.length, ""]),
+                E::Strike(x) => json!(["s", x.offset, x.length, ""]),
+                E::Code(x) => json!(["c", x.offset, x.length, ""]),
+                E::Pre(x) => json!(["p", x.offset, x.length, x.language]),
+                E::TextUrl(x) => json!(["l", x.offset, x.length, x.url]),
+                E::Url(x) => json!(["url", x.offset, x.length, ""]),
+                E::Mention(x) => json!(["m", x.offset, x.length, ""]),
+                E::MentionName(x) => json!(["n", x.offset, x.length, x.user_id.to_string()]),
+                E::Hashtag(x) => json!(["h", x.offset, x.length, ""]),
+                E::Cashtag(x) => json!(["h", x.offset, x.length, ""]),
+                E::BotCommand(x) => json!(["bc", x.offset, x.length, ""]),
+                E::Email(x) => json!(["e", x.offset, x.length, ""]),
+                E::Phone(x) => json!(["ph", x.offset, x.length, ""]),
+                E::Spoiler(x) => json!(["sp", x.offset, x.length, ""]),
+                E::Blockquote(x) => json!(["q", x.offset, x.length, ""]),
+                _ => return None,
+            })
+        })
+        .collect()
+}
+
 /// Bitta xabarning JSON ko'rinishi (suhbat oynasi, qidiruv, mahkamlangan xabar uchun umumiy).
 fn msg_json(m: &grammers_client::message::Message) -> Value {
     let sender = m.sender().map(|p| match p {
@@ -2649,7 +2678,27 @@ fn msg_json(m: &grammers_client::message::Message) -> Value {
             }
         }
     }
+    // Matn bezaklari (qalin, kursiv, havola, kod, spoyler...): `[[tur, offset, uzunlik, qo'shimcha]]` (offset UTF-16 birligida — Kotlin bilan bir xil).
+    let ents: Vec<Value> = match &m.raw {
+        tl::enums::Message::Message(x) => x.entities.as_deref().map(ents_json).unwrap_or_default(),
+        _ => Vec::new(),
+    };
+    // Havola ko'rinishi (sarlavha, tavsif).
+    let web = match m.media() {
+        Some(grammers_client::media::Media::WebPage(w)) => match &w.raw.webpage {
+            tl::enums::WebPage::Page(p) => json!({
+                "url": p.url,
+                "site": p.site_name.clone().unwrap_or_default(),
+                "title": p.title.clone().unwrap_or_default(),
+                "desc": p.description.clone().unwrap_or_default(),
+            }),
+            _ => Value::Null,
+        },
+        _ => Value::Null,
+    };
     json!({
+        "ents": ents,
+        "web": web,
         "id": m.id(),
         "out": m.outgoing(),
         "date": m.date().timestamp(),
@@ -5898,14 +5947,14 @@ pub extern "C" fn rust_tg_send_special(arg_ptr: *const c_char) -> *mut c_char {
                     countries_iso2: None,
                     hash: 0,
                 };
-                tl::enums::InputMedia::Poll(tl::types::InputMediaPoll {
+                tl::enums::InputMedia::Poll(Box::new(tl::types::InputMediaPoll {
                     poll: tl::enums::Poll::Poll(poll),
                     correct_answers: if quiz { correct.map(|c| vec![c as i32]) } else { None },
                     attached_media: None,
                     solution: None,
                     solution_entities: None,
                     solution_media: None,
-                })
+                }))
             }
             _ => return Err("Noma'lum tur".to_string()),
         };

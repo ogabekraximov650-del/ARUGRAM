@@ -51,6 +51,42 @@ fun linkify(text: String, linkColor: Color): AnnotatedString = buildAnnotatedStr
     }
 }
 
+/**
+ * Telegram matn bezaklari bilan: qalin, kursiv, tagiga chizilgan, o'chirilgan, kod (monospace), havolalar (`url` annotatsiyasi), @nom, #teg, spoyler.
+ * Serverdan bezak kelmasa (masalan maxfiy chat) oddiy regex bilan havolalar topiladi. [revealed] — ochilgan spoylerlar.
+ */
+fun styledText(text: String, ents: List<Ent>, linkColor: Color, codeBg: Color, spoilerBg: Color, revealed: Boolean): AnnotatedString {
+    if (ents.isEmpty()) return linkify(text, linkColor)
+    return buildAnnotatedString {
+        append(text)
+        for (e in ents) {
+            val start = e.offset.coerceIn(0, text.length)
+            val end = (e.offset + e.length).coerceIn(start, text.length)
+            if (end <= start) continue
+            val piece = text.substring(start, end)
+            when (e.type) {
+                "b" -> addStyle(SpanStyle(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), start, end)
+                "i" -> addStyle(SpanStyle(fontStyle = androidx.compose.ui.text.font.FontStyle.Italic), start, end)
+                "u" -> addStyle(SpanStyle(textDecoration = TextDecoration.Underline), start, end)
+                "s" -> addStyle(SpanStyle(textDecoration = TextDecoration.LineThrough), start, end)
+                "c", "p" -> addStyle(SpanStyle(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, background = codeBg), start, end)
+                "q" -> addStyle(SpanStyle(fontStyle = androidx.compose.ui.text.font.FontStyle.Italic, background = codeBg), start, end)
+                "sp" -> if (!revealed) addStyle(SpanStyle(color = spoilerBg, background = spoilerBg), start, end)
+                "l" -> { addStyle(SpanStyle(color = linkColor), start, end); addStringAnnotation("url", e.extra, start, end) }
+                "url" -> {
+                    addStyle(SpanStyle(color = linkColor), start, end)
+                    addStringAnnotation("url", if (piece.startsWith("http", true)) piece else "https://$piece", start, end)
+                }
+                "m" -> { addStyle(SpanStyle(color = linkColor), start, end); addStringAnnotation("url", "https://t.me/" + piece.removePrefix("@"), start, end) }
+                "n" -> { addStyle(SpanStyle(color = linkColor), start, end); addStringAnnotation("url", "tg://user?id=${e.extra}", start, end) }
+                "h", "bc" -> addStyle(SpanStyle(color = linkColor), start, end)
+                "e" -> { addStyle(SpanStyle(color = linkColor), start, end); addStringAnnotation("url", "mailto:$piece", start, end) }
+                "ph" -> { addStyle(SpanStyle(color = linkColor), start, end); addStringAnnotation("url", "tel:${piece.filter { it.isDigit() || it == '+' }}", start, end) }
+            }
+        }
+    }
+}
+
 fun openUrl(context: Context, url: String) {
     runCatching {
         context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
