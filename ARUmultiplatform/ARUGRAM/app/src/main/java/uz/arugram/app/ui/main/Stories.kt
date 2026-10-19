@@ -117,7 +117,7 @@ fun StoriesRow(peers: List<StoryPeer>, meId: Long?, onOpen: (Int) -> Unit, onAdd
     }
     val mine = peers.indexOfFirst { it.id == meId }
     LazyRow(
-        Modifier.fillMaxWidth().background(c.bar).padding(vertical = 8.dp),
+        Modifier.fillMaxWidth().background(c.bg).padding(vertical = 8.dp),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {

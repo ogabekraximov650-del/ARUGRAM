@@ -113,9 +113,11 @@ fun ChatList(
     typing: Map<Long, Long> = emptyMap(),
     onLongClick: (ChatRow) -> Unit = {},
     onOpen: (ChatRow) -> Unit = {},
+    header: (@Composable () -> Unit)? = null,
 ) {
     val c = LocalTg.current
     LazyColumn(modifier.fillMaxSize().background(c.bg), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = bottomPadding)) {
+        if (header != null) item(key = "header") { header() }
         items(chats, key = { it.id }) { row ->
             Column(Modifier.fillMaxWidth().combinedClickable(onClick = { onOpen(row) }, onLongClick = { onLongClick(row) })) {
                 Box(Modifier.fillMaxWidth().height(70.dp)) {
@@ -131,12 +133,22 @@ fun ChatList(
                         )
                         if (row.out && row.date > 0 && row.topId > 0 && typing[row.id] == null) {
                             Box(Modifier.padding(start = 6.dp, top = 5.dp).width(18.dp).height(12.dp)) {
-                                val tick = if (row.topId <= row.readOut) Color(0xFF3CA83C) else Color(0xFF3CA83C)
+                                val tick = c.counter
                                 uz.arugram.app.ui.components.TgIcon(uz.arugram.app.R.drawable.list_check, tick, Modifier.align(Alignment.CenterStart), 12.dp)
                                 if (row.topId <= row.readOut) uz.arugram.app.ui.components.TgIcon(uz.arugram.app.R.drawable.list_halfcheck, tick, Modifier.align(Alignment.CenterStart).offset(x = 5.dp), 12.dp)
                             }
                         }
-                        BasicText(chatTime(row.date), Modifier.padding(start = 4.dp, top = 3.dp), style = TextStyle(color = c.chatDate, fontSize = 13.sp), maxLines = 1)
+                        val timeColor = if (row.unread > 0 && !row.muted) c.counter else c.chatDate
+                        if (row.pinned) {
+                            Row(
+                                Modifier.padding(start = 4.dp).height(20.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(10.dp))
+                                    .background(if (c.dark) Color(0x1AFFFFFF) else Color(0x14000000)).padding(horizontal = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                uz.arugram.app.ui.components.TgIcon(uz.arugram.app.R.drawable.msg_pin_filled, c.pinned, size = 13.dp)
+                                BasicText(chatTime(row.date), Modifier.padding(start = 3.dp), style = TextStyle(color = timeColor, fontSize = 13.sp), maxLines = 1)
+                            }
+                        } else BasicText(chatTime(row.date), Modifier.padding(start = 4.dp, top = 3.dp), style = TextStyle(color = timeColor, fontSize = 13.sp), maxLines = 1)
                     }
                     // Xabar matni (pastda) va hisoblagich / mahkam belgisi
                     Row(Modifier.fillMaxWidth().padding(start = 76.dp, end = 15.666.dp, top = 36.dp), verticalAlignment = Alignment.Top) {
@@ -154,7 +166,7 @@ fun ChatList(
                         } else BasicText(
                             androidx.compose.ui.text.buildAnnotatedString {
                                 // Guruh/kanalda o'z xabaringiz oldida "Siz:" (DrKLO `chats_nameMessage`, ko'k).
-                                if (row.out && row.kind != "user" && !row.isSecret && row.text.isNotEmpty()) {
+                                if (row.out && row.kind == "group" && row.text.isNotEmpty()) {
                                     withStyle(androidx.compose.ui.text.SpanStyle(color = c.counter)) { append("Siz: ") }
                                 }
                                 append(row.text)
@@ -176,20 +188,9 @@ fun ChatList(
                             ) {
                                 BasicText(if (row.unread > 99999) "99K+" else row.unread.toString(), style = TextStyle(color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center))
                             }
-                        } else if (row.pinned) {
-                            Canvas(Modifier.padding(start = 8.dp).size(14.dp)) {
-                                val s = size.width
-                                val p = Path().apply {
-                                    moveTo(s * 0.35f, 0f); lineTo(s * 0.65f, 0f); lineTo(s * 0.62f, s * 0.45f)
-                                    lineTo(s * 0.85f, s * 0.62f); lineTo(s * 0.15f, s * 0.62f); lineTo(s * 0.38f, s * 0.45f); close()
-                                }
-                                drawPath(p, c.pinned)
-                                drawLine(c.pinned, Offset(s * 0.5f, s * 0.62f), Offset(s * 0.5f, s), strokeWidth = s * 0.08f)
-                            }
                         }
                     }
                 }
-                Box(Modifier.padding(start = 76.dp).fillMaxWidth().height(0.5.dp).background(c.divider))
             }
         }
     }

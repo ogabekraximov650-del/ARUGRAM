@@ -13,6 +13,8 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -76,24 +78,40 @@ fun parseFolders(j: JSONObject): List<Folder> {
     }
 }
 
-/** Jild yorliqlari (DrKLO `FilterTabsView`): "Barchasi" + jildlar; tanlangani ko'k, tagida chiziq; o'qilmaganlar soni belgi bilan. */
+/**
+ * Jild yorliqlari (DrKLO `FilterTabsView`, yangi uslub): yumaloq konteyner (balandligi 36 dp, chetdan 12 dp), ichida pilyul shaklidagi yorliqlar;
+ * tanlangani — ko'k rangning 14 % fonida, matni ko'k; o'qilmaganlar soni to'ldirilgan belgida.
+ */
 @Composable
 fun FolderTabs(folders: List<Folder>, selected: Int, unread: Map<Int, Int>, onSelect: (Int) -> Unit) {
     val c = LocalTg.current
-    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).height(44.dp), verticalAlignment = Alignment.CenterVertically) {
+    val primary = if (c.dark) Color(0xFF4C9CE2) else Color(0xFF3390EC)
+    Row(
+        Modifier.padding(horizontal = 12.dp, vertical = 6.dp).fillMaxWidth().height(36.dp)
+            .clip(androidx.compose.foundation.shape.RoundedCornerShape(18.dp))
+            .background(if (c.dark) Color(0x12FFFFFF) else Color(0x0D000000))
+            .horizontalScroll(rememberScrollState()).padding(horizontal = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         val all = listOf(0 to "Barchasi") + folders.map { it.id to it.title }
         all.forEach { (id, title) ->
             val sel = id == selected
-            Box(Modifier.height(44.dp).clickable { onSelect(id) }.padding(horizontal = 14.dp), contentAlignment = Alignment.Center) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    BasicText(title, style = TextStyle(color = if (sel) Color(0xFF3390EC) else c.gray, fontSize = 15.sp, fontWeight = FontWeight.Medium), maxLines = 1)
-                    val n = unread[id] ?: 0
-                    if (n > 0) BasicText(" $n", style = TextStyle(color = if (sel) Color(0xFF3390EC) else c.gray, fontSize = 13.sp))
+            Row(
+                Modifier.height(30.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(15.dp))
+                    .background(if (sel) primary.copy(alpha = 0.14f) else Color.Transparent)
+                    .clickable { onSelect(id) }.padding(horizontal = 13.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                BasicText(title, style = TextStyle(color = if (sel) primary else c.gray, fontSize = 15.sp, fontWeight = FontWeight.Medium), maxLines = 1)
+                val n = unread[id] ?: 0
+                if (n > 0) {
+                    Box(
+                        Modifier.padding(start = 6.dp).height(20.dp).widthIn(min = 20.dp)
+                            .clip(androidx.compose.foundation.shape.RoundedCornerShape(10.dp)).background(if (sel) primary else c.gray).padding(horizontal = 6.dp),
+                        contentAlignment = Alignment.Center,
+                    ) { BasicText(if (n > 999) "999+" else n.toString(), style = TextStyle(color = c.bg, fontSize = 13.sp, fontWeight = FontWeight.Medium)) }
                 }
-                if (sel) Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(3.dp).background3())
             }
         }
     }
 }
-
-private fun Modifier.background3(): Modifier = this.then(Modifier.background(Color(0xFF3390EC)))

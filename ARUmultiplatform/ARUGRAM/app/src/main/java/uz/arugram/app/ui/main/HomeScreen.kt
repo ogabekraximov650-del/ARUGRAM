@@ -13,6 +13,12 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.layout
+import kotlin.math.roundToInt
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
@@ -84,6 +90,7 @@ fun HomeScreen(auth: AuthModel) {
     var deleteFor by remember { mutableStateOf<ChatRow?>(null) }
     var muteFor by remember { mutableStateOf<ChatRow?>(null) }
     var addContact by remember { mutableStateOf(false) }
+    var topMenu by remember { mutableStateOf(false) }
     var toast by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(toast) { if (toast != null) { delay(3000); toast = null } }
     var stories by remember { mutableStateOf<List<StoryPeer>>(emptyList()) }
@@ -168,7 +175,8 @@ fun HomeScreen(auth: AuthModel) {
                         MainTab.Chats -> ChatsTab(
                             ui = ui, folders = folders, folder = folder, onFolder = { folder = it }, typing = typing,
                             onSearch = { stack.add(Dest.Search) }, onOpen = ::open, onLongClick = { menuFor = it }, onRetry = { model.load() },
-                            archivedCount = archived.size, onArchive = { stack.add(Dest.Archive) }, stories = stories, meId = me?.id, onStory = { storyStart = it }, onAddStory = { storyPicker.launch(arrayOf("image/*", "video/*")) },
+                            archivedCount = archived.size, onArchive = { stack.add(Dest.Archive) }, stories = stories, meId = me?.id, onStory = { storyStart = it }, onAddStory = { storyPicker.launch(arrayOf("image/*", "video/*")) }, onMenu = { topMenu = true },
+                            archived = archived,
                         )
                         MainTab.Contacts -> ContactsTab(bottomPadding = 80.dp, onOpen = ::open, extra = listOf("Kontakt qo‘shish" to { addContact = true }))
                         MainTab.Settings -> SettingsTab(me, meContact, 80.dp, onOpenChat = { r -> open(r) }, onNavigate = { stack.add(Dest.Settings(it)) }, onLogout = { auth.logout() }, savedChat = ui.chats.firstOrNull { it.self })
@@ -185,9 +193,14 @@ fun HomeScreen(auth: AuthModel) {
                         }, onEdit = { stack.add(Dest.Settings("account")) }, onSaved = { ui.chats.firstOrNull { it.self }?.let(::open) }, onLogout = { auth.logout() })
                     }
                     if (MainTab.entries[tab] == MainTab.Chats) {
-                        // Yangi xabar tugmasi (DrKLO `floatingButton`): pastki o'ngda, tab panelidan tepada.
+                        // Yangi xabar tugmasi (DrKLO `FragmentFloatingButton`: 48 dp) va ustida hikoya (kamera) tugmasi.
                         Box(
-                            Modifier.align(Alignment.BottomEnd).padding(end = 20.dp, bottom = 80.dp).size(56.dp).shadow(6.dp, CircleShape).clip(CircleShape).background(c.fab)
+                            Modifier.align(Alignment.BottomEnd).padding(end = 24.dp, bottom = 136.dp).size(40.dp).shadow(4.dp, CircleShape).clip(CircleShape)
+                                .background(if (c.dark) Color(0xFF1F1F1F) else Color.White).clickable { storyPicker.launch(arrayOf("image/*", "video/*")) },
+                            contentAlignment = Alignment.Center,
+                        ) { TgIcon(R.drawable.msg_camera, c.text, size = 22.dp) }
+                        Box(
+                            Modifier.align(Alignment.BottomEnd).padding(end = 20.dp, bottom = 80.dp).size(48.dp).shadow(6.dp, CircleShape).clip(CircleShape).background(c.fab)
                                 .clickable { stack.add(Dest.NewChat) },
                             contentAlignment = Alignment.Center,
                         ) { TgIcon(R.drawable.ic_ab_new, Color.White, size = 24.dp) }
@@ -266,6 +279,14 @@ fun HomeScreen(auth: AuthModel) {
                 onDismiss = { menuFor = null },
             )
         }
+        if (topMenu) PopupMenu(
+            listOf(
+                MenuItem(R.drawable.msg_groups, "Yangi guruh") { stack.add(Dest.NewGroup) },
+                MenuItem(R.drawable.msg_archive, "Arxivlangan chatlar") { stack.add(Dest.Archive) },
+                MenuItem(R.drawable.msg_markread, "Hammasini o‘qilgan deb belgilash") { scope.launch { ui.chats.filter { it.unread > 0 }.forEach { withContext(Dispatchers.IO) { RustCore.tgMarkRead(it.spec) } }; model.load() } },
+            ),
+            onDismiss = { topMenu = false },
+        )
         muteFor?.let { r -> MuteMenu(onPick = { secs -> model.muteFor(r, secs); muteFor = null }, onDismiss = { muteFor = null }) }
         deleteFor?.let { r ->
             TgAlert("Suhbatni o‘chirish", "“${r.name}” suhbati sizdan o‘chiriladi (guruh yoki kanal bo‘lsa — undan chiqasiz).", "O‘chirish", danger = true,
@@ -275,33 +296,74 @@ fun HomeScreen(auth: AuthModel) {
     }
 }
 
-/** Chatlar tabi: tepa panel, jild yorliqlari, qidiruv pilyuli, ro'yxat. */
+/**
+ * Chatlar tabi (DrKLO `DialogsActivity`): tepada sarlavha (yig'ilgan holatda — hikoyalar avatarlari to'plami va qidiruv belgisi; pastga tortilsa —
+ * hikoyalar qatori va qidiruv pilyuli ochiladi), jild yorliqlari, arxiv qatori va suhbatlar ro'yxati.
+ */
 @Composable
 private fun ChatsTab(
     ui: ChatsUi, folders: List<Folder>, folder: Int, onFolder: (Int) -> Unit, typing: Map<Long, Long>,
     onSearch: () -> Unit, onOpen: (ChatRow) -> Unit, onLongClick: (ChatRow) -> Unit, onRetry: () -> Unit,
     archivedCount: Int = 0, onArchive: () -> Unit = {},
     stories: List<StoryPeer> = emptyList(), meId: Long? = null, onStory: (Int) -> Unit = {}, onAddStory: () -> Unit = {},
+    onMenu: () -> Unit = {}, archived: List<ChatRow> = emptyList(),
 ) {
     val c = LocalTg.current
-    Column(Modifier.fillMaxSize().background(c.bg)) {
-        Column(Modifier.fillMaxWidth().background(c.bar).statusBarsPadding()) {
-            Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
-                // DrKLO (`hasMainTabs`): sarlavha "logotip" rangida (#168BDB).
-                BasicText("ARUGRAM", Modifier.weight(1f).padding(start = 20.dp), style = TextStyle(color = Color(0xFF168BDB), fontSize = 20.sp, fontWeight = FontWeight.Bold), maxLines = 1)
-                Box(Modifier.size(56.dp).clickable(onClick = onSearch), contentAlignment = Alignment.Center) { SearchIcon(c.text) }
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    var expanded by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    val p by androidx.compose.animation.core.animateFloatAsState(if (expanded) 1f else 0f, androidx.compose.animation.core.tween(250), label = "dialogsHeader")
+    val threshold = with(density) { 48.dp.toPx() }
+    val conn = remember(threshold) {
+        object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
+            var pull = 0f
+            override fun onPreScroll(available: androidx.compose.ui.geometry.Offset, source: androidx.compose.ui.input.nestedscroll.NestedScrollSource): androidx.compose.ui.geometry.Offset {
+                if (available.y < 0f) { pull = 0f; if (expanded) expanded = false }
+                return androidx.compose.ui.geometry.Offset.Zero
+            }
+            override fun onPostScroll(consumed: androidx.compose.ui.geometry.Offset, available: androidx.compose.ui.geometry.Offset, source: androidx.compose.ui.input.nestedscroll.NestedScrollSource): androidx.compose.ui.geometry.Offset {
+                if (source == androidx.compose.ui.input.nestedscroll.NestedScrollSource.UserInput && available.y > 0f) {
+                    pull += available.y
+                    if (pull > threshold && !expanded) { expanded = true; pull = 0f }
+                }
+                return androidx.compose.ui.geometry.Offset.Zero
+            }
+            override suspend fun onPostFling(consumed: androidx.compose.ui.unit.Velocity, available: androidx.compose.ui.unit.Velocity): androidx.compose.ui.unit.Velocity { pull = 0f; return androidx.compose.ui.unit.Velocity.Zero }
+        }
+    }
+    val cluster = remember(stories) { stories.sortedByDescending { it.unseen }.take(3) }
+    Column(Modifier.fillMaxSize().background(c.bg).nestedScroll(conn)) {
+        Column(Modifier.fillMaxWidth().background(c.bg).statusBarsPadding()) {
+            Box(Modifier.fillMaxWidth().height(56.dp)) {
+                if (cluster.isNotEmpty() && p < 1f) {
+                    Box(Modifier.align(Alignment.CenterStart).padding(start = 14.dp).alpha(1f - p).clickable { expanded = true }) { StoryCluster(cluster) }
+                }
+                Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
+                    val startPad = 23.dp + (if (cluster.isNotEmpty()) 65.dp * (1f - p) else 0.dp)
+                    BasicText("ARUGRAM", Modifier.weight(1f).padding(start = startPad), style = TextStyle(color = c.text, fontSize = 20.sp, fontWeight = FontWeight.Bold), maxLines = 1)
+                    if (p < 1f) Box(Modifier.size(48.dp).alpha(1f - p).clickable(onClick = onSearch), contentAlignment = Alignment.Center) { SearchIcon(c.text) }
+                    Box(Modifier.size(48.dp).clickable(onClick = onMenu), contentAlignment = Alignment.Center) { TgIcon(R.drawable.ic_ab_other, c.text) }
+                }
+            }
+            // Pastga tortilganda ochiladigan qism: hikoyalar qatori + qidiruv pilyuli.
+            Column(
+                Modifier.layout { m, cs ->
+                    val pl = m.measure(cs.copy(maxHeight = androidx.compose.ui.unit.Constraints.Infinity))
+                    layout(pl.width, (pl.height * p).roundToInt()) { pl.place(0, 0) }
+                }.clipToBounds().alpha(p),
+            ) {
+                if (stories.isNotEmpty() || meId != null) StoriesRow(stories, meId, onOpen = onStory, onAdd = onAddStory)
+                Row(
+                    Modifier.padding(horizontal = 12.dp, vertical = 4.dp).fillMaxWidth().height(40.dp).clip(RoundedCornerShape(20.dp))
+                        .background(if (c.dark) Color(0x14FFFFFF) else Color(0x0F000000)).clickable(onClick = onSearch).padding(start = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    SearchIcon(c.gray)
+                    BasicText("Chatlarni qidirish", Modifier.padding(start = 14.dp), style = TextStyle(color = c.gray, fontSize = 16.sp), maxLines = 1)
+                }
             }
             if (folders.isNotEmpty()) {
                 val unread = folders.associate { f -> f.id to ui.chats.filter { f.matches(it) }.sumOf { if (it.muted) 0 else it.unread } } + (0 to ui.chats.sumOf { if (it.muted) 0 else it.unread })
                 FolderTabs(folders, folder, unread, onFolder)
-            }
-            StoriesRow(stories, meId, onOpen = onStory, onAdd = onAddStory)
-            if (archivedCount > 0) {
-                Row(Modifier.fillMaxWidth().height(48.dp).clickable(onClick = onArchive).padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
-                    TgIcon(R.drawable.msg_archive, c.gray, size = 24.dp)
-                    BasicText("Arxivlangan chatlar", Modifier.padding(start = 18.dp).weight(1f), style = TextStyle(color = c.text, fontSize = 16.sp))
-                    BasicText(archivedCount.toString(), style = TextStyle(color = c.gray, fontSize = 14.sp))
-                }
             }
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -314,11 +376,52 @@ private fun ChatsTab(
                 else -> {
                     val sel = folders.firstOrNull { it.id == folder }
                     val shown = if (sel == null) ui.chats else ui.chats.filter { sel.matches(it) }
-                    if (shown.isEmpty()) BasicText(if (ui.chats.isEmpty()) "Suhbatlar yo‘q" else "Bu jildda suhbat yo‘q", Modifier.align(Alignment.Center), style = TextStyle(color = c.gray, fontSize = 17.sp))
-                    else ChatList(shown, bottomPadding = 150.dp, typing = typing, onLongClick = onLongClick, onOpen = onOpen)
+                    if (shown.isEmpty() && archivedCount == 0) BasicText(if (ui.chats.isEmpty()) "Suhbatlar yo‘q" else "Bu jildda suhbat yo‘q", Modifier.align(Alignment.Center), style = TextStyle(color = c.gray, fontSize = 17.sp))
+                    else ChatList(
+                        shown, bottomPadding = 150.dp, typing = typing, onLongClick = onLongClick, onOpen = onOpen,
+                        header = if (archivedCount > 0 && sel == null) ({ ArchiveRow(archived, onArchive) }) else null,
+                    )
                 }
             }
         }
+    }
+}
+
+/** Hikoyalari bor 3 ta akkauntning bir-birining ustiga chiqqan avatarlari (DrKLO `DialogStoriesCell` yig'ilgan holati). */
+@Composable
+private fun StoryCluster(peers: List<StoryPeer>) {
+    val c = LocalTg.current
+    Box(Modifier.width((40 + 12 * (peers.size - 1)).dp).height(40.dp)) {
+        peers.asReversed().forEachIndexed { rev, p ->
+            val i = peers.size - 1 - rev
+            Box(Modifier.padding(start = (12 * i).dp).size(40.dp).clip(CircleShape).background(c.bg).padding(1.dp), contentAlignment = Alignment.Center) {
+                androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
+                    val w = 2.dp.toPx()
+                    drawCircle(
+                        brush = if (p.unseen) androidx.compose.ui.graphics.Brush.sweepGradient(listOf(Color(0xFF34C76F), Color(0xFF3DA1FD), Color(0xFF34C76F))) else androidx.compose.ui.graphics.SolidColor(Color(0xFF8E9296)),
+                        radius = size.minDimension / 2f - w / 2f, style = androidx.compose.ui.graphics.drawscope.Stroke(width = w),
+                    )
+                }
+                ChatAvatar(p.row, 32.dp)
+            }
+        }
+    }
+}
+
+/** "Arxivlangan chatlar" qatori (ro'yxat boshida): avatar o'rnida arxiv belgisi, ikkinchi qatorda arxivdagi suhbatlar nomlari. */
+@Composable
+private fun ArchiveRow(archived: List<ChatRow>, onClick: () -> Unit) {
+    val c = LocalTg.current
+    Box(Modifier.fillMaxWidth().height(70.dp).clickable(onClick = onClick)) {
+        Box(
+            Modifier.padding(start = 11.dp, top = 9.dp).size(52.dp).clip(CircleShape).background(if (c.dark) Color(0xFF2C2C2E) else Color(0xFFB4B9BE)),
+            contentAlignment = Alignment.Center,
+        ) { TgIcon(R.drawable.msg_archive, Color.White, size = 28.dp) }
+        BasicText("Arxivlangan chatlar", Modifier.padding(start = 76.dp, top = 11.dp), style = TextStyle(color = c.gray, fontSize = 17.sp, fontWeight = FontWeight.Medium), maxLines = 1)
+        BasicText(
+            archived.take(6).joinToString(", ") { it.name }, Modifier.padding(start = 76.dp, end = 16.dp, top = 37.dp),
+            style = TextStyle(color = c.gray, fontSize = 16.sp), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+        )
     }
 }
 
