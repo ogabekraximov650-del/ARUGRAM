@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.ARUGRAM" parent="android:Theme.DeviceDefault.DayNight">
+        <item name="android:windowBackground">@color/arugram_bg</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+    <color name="arugram_bg">#181819</color>
+</resources>

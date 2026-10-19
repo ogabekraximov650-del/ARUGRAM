@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Compose o'zi chizadi; bu yerda faqat ochilish paytidagi fon (Telegram: oq / tungi rejimda qora) -->
+    <style name="Theme.ARUGRAM" parent="android:Theme.DeviceDefault.DayNight">
+        <item name="android:windowBackground">@color/arugram_bg</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+    <color name="arugram_bg">#FFFFFF</color>
+</resources>

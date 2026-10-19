@@ -1,0 +1,137 @@
+name: ARUGRAM (Kotlin + Rust) — build va testlar
+
+# `ARUmultiplatform/ARUGRAM/**` o'zgarganda: Rust yadrosi (arm64-v8a + armeabi-v7a) -> Kotlin testlari -> imzolangan APK -> Telegram "Saqlangan xabarlar".
+# Yig'ish va testlar FAQAT shu yerda (foydalanuvchi talabi: mahalliy muhitga hech narsa o'rnatilmaydi).
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ARUmultiplatform/ARUGRAM/**'
+      - 'branding/android-res/**'
+      - '.github/workflows/arugram-android.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arugram-android
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: ARUmultiplatform/ARUGRAM
+    env:
+      VERSION_CODE: ${{ github.run_number }}
+      # Telegram API kalitlari (GitHub Secrets) APK ichiga BuildConfig orqali beriladi.
+      TG_API_ID: ${{ secrets.TG_API_ID }}
+      TG_API_HASH: ${{ secrets.TG_API_HASH }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # ── Rust yadrosi ──────────────────────────────────────────
+      - name: Rust (stable + Android targetlari)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: armv7-linux-androideabi, aarch64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "ARUmultiplatform/ARUGRAM/rust -> target"
+
+      - name: cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Rust yadrosini Android uchun yig'ish
+        working-directory: ARUmultiplatform/ARUGRAM/rust
+        run: |
+          cargo ndk -t armeabi-v7a -t arm64-v8a -o ../app/src/main/jniLibs build --release
+          ls -la ../app/src/main/jniLibs/*/
+
+      # 16 KB sahifali qurilmalar (Android 15+): 64 bitli .so ning LOAD segmentlari 16 KB ga tekislangan bo'lishi shart.
+      - name: 16 KB tekislash tekshiruvi
+        run: |
+          SO="app/src/main/jniLibs/arm64-v8a/librust_core.so"
+          READELF=$(ls "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/*/bin/llvm-readelf 2>/dev/null | head -1)
+          [ -z "$READELF" ] && READELF=$(ls "$ANDROID_NDK_LATEST_HOME"/toolchains/llvm/prebuilt/*/bin/llvm-readelf 2>/dev/null | head -1)
+          [ -z "$READELF" ] && READELF=readelf
+          "$READELF" -lW "$SO" | grep LOAD
+          if "$READELF" -lW "$SO" | awk '$1=="LOAD" {print $NF}' | grep -qvE '0x(4000|8000|10000)'; then
+            echo "❌ librust_core.so 16 KB ga tekislanmagan"; exit 1
+          fi
+          echo "✅ 16 KB tekislangan"
+
+      # ── Brend belgilari (ilova ikonkasi) ────────────────────────
+      - name: Ikonkalarni ko'chirish
+        working-directory: ${{ github.workspace }}
+        run: |
+          RES=ARUmultiplatform/ARUGRAM/app/src/main/res
+          for d in branding/android-res/mipmap-*; do cp -r "$d" "$RES/"; done
+          cp branding/android-res/values/ic_launcher_background.xml "$RES/values/"
+          ls "$RES"
+
+      # ── Kotlin ──────────────────────────────────────────────────
+      - name: Android SDK litsenziyalari
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Kotlin birlik testlari
+        run: gradle --no-daemon :app:testDebugUnitTest
+
+      - name: Imzolangan APK (release)
+        id: apk
+        env:
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
+        run: |
+          # Imzo kaliti: GitHub Secret bo'lsa u, aks holda repodagi `ci/release.keystore` (boshqa ilovalar bilan bir xil).
+          if [ -n "${{ secrets.ANDROID_KEYSTORE_B64 }}" ]; then
+            echo "${{ secrets.ANDROID_KEYSTORE_B64 }}" | base64 -d > "$RUNNER_TEMP/release.keystore"
+            export KS_FILE="$RUNNER_TEMP/release.keystore"
+          fi
+          gradle --no-daemon :app:assembleRelease
+          OUT="$RUNNER_TEMP/apks"; mkdir -p "$OUT"
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          cp app/build/outputs/apk/release/app-release.apk "$OUT/ARUGRAM-${{ github.run_number }}.apk"
+          for f in "$OUT"/*.apk; do
+            echo "== $f"; ls -la "$f"
+            "$APKSIGNER" verify --print-certs "$f" | head -3
+            unzip -l "$f" | grep -E "librust_core" || true
+          done
+          echo "dir=$OUT" >> "$GITHUB_OUTPUT"
+
+      # ── TELEGRAM: "SAQLANGAN XABARLAR"GA YUBORISH (boshqa workflow'lardagidek) ──
+      - name: APK'ni Telegram "Saqlangan xabarlar"ga yuborish
+        continue-on-error: true
+        working-directory: ${{ github.workspace }}
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+        run: |
+          K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          pip install --no-cache-dir -q pyrogram==2.0.106 tgcrypto==1.2.5
+          for APK in "${{ steps.apk.outputs.dir }}"/*.apk; do
+            S="$RUNNER_TEMP/notify_session"
+            K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K \
+              -in tool/encode/session.enc -out "$S.session"
+            head -c 16 "$S.session" | grep -q "SQLite format 3"
+            python tool/notify/send_apk.py "$S" "$APK" \
+              "ARUGRAM build ${{ github.run_number }}"
+            rm -f "$S.session"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ARUGRAM-${{ github.run_number }}
+          path: ${{ steps.apk.outputs.dir }}
+          retention-days: 30

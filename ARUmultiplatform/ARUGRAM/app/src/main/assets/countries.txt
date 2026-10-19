@@ -1,0 +1,244 @@
+93;AF;Afgʻoniston;XX XXX XXXX;1
+358;AX;Aland orollari;XX XXXXXXX;0
+355;AL;Albaniya;XX XXX XXX;1
+1;US;Amerika Qo‘shma Shtatlari;XXX XXX XXXX;1
+1684;AS;Amerika Samoasi;XXX XXXX;1
+376;AD;Andorra;XXX XXX;1
+1264;AI;Angilya;XXX XXXX;1
+244;AO;Angola;XXX XXX XXX;1
+1268;AG;Antigua va Barbuda;XXX XXXX;1
+1340;VI;AQSH Virgin orollari;XXX XXXX;1
+54;AR;Argentina;XX XXXX XXXX;1
+374;AM;Armaniston;XX XXXXXX;1
+297;AW;Aruba;XXX XXXX;1
+61;AU;Avstraliya;X XXXX XXXX;1
+43;AT;Avstriya;X XXXXXXXXX;1
+1242;BS;Bagama orollari;XXX XXXX;1
+973;BH;Bahrayn;XXXX XXXX;1
+880;BD;Bangladesh;X XXXXXXX;1
+1246;BB;Barbados;XXX XXXX;1
+375;BY;Belarus;XXX XX XX XX;1
+32;BE;Belgiya;XX XX XX XX;1
+501;BZ;Beliz;XXX XXXX;1
+229;BJ;Benin;XX XX XX XX XX;1
+1441;BM;Bermuda orollari;XXX XXXX;1
+971;AE;Birlashgan Arab Amirliklari;X XXX XXXX;1
+359;BG;Bolgariya;X XXX XXX;1
+591;BO;Boliviya;X XXXXXXX;1
+599;BQ;Boneyr, Sint-Estatius va Saba;XXX XXXX;0
+387;BA;Bosniya va Gertsegovina;XX XXX XXX;1
+267;BW;Botsvana;XXX XXXX;1
+55;BR;Braziliya;XX XXXX XXXX;1
+1284;VG;Britaniya Virgin orollari;XXX XXXX;1
+246;IO;Britaniyaning Hind okeanidagi hududi;XXX XXXX;1
+673;BN;Bruney;XXX XXXX;1
+226;BF;Burkina-Faso;XX XX XX XX;1
+257;BI;Burundi;XX XX XX XX;1
+975;BT;Butan;X XXX XXX;1
+44;GB;Buyuk Britaniya;XXX XXX XXXX;1
+235;TD;Chad;XX XX XX XX;1
+382;ME;Chernogoriya;XX XXX XXX;1
+420;CZ;Chexiya;XXX XXX XXX;1
+56;CL;Chili;XXX XXX XXX;1
+45;DK;Daniya;XX XX XX XX;1
+1767;DM;Dominika;XXX XXXX;1
+1809;DO;Dominikan Respublikasi;XXX XXXX;1
+251;ET;Efiopiya;XX XXX XXXX;1
+593;EC;Ekvador;X XXX XXXX;1
+240;GQ;Ekvatorial Gvineya;XXX XXX XXX;1
+291;ER;Eritreya;X XXX XXX;1
+98;IR;Eron;XX XXXX XXXX;1
+372;EE;Estoniya;XXX XXXX;1
+970;PS;Falastin hududlari;X XXX XXXX;1
+298;FO;Farer orollari;XX XX XX;1
+679;FJ;Fiji;XXX XXXX;1
+63;PH;Filippin;X XXXX XXXX;1
+358;FI;Finlandiya;XX XXXXXXX;1
+500;FK;Folklend orollari;XXXXX;1
+33;FR;Fransiya;X XX XX XX XX;1
+594;GF;Fransuz Gvianasi;XXX XX XX XX;1
+689;PF;Fransuz Polineziyasi;XX XX XX XX;1
+241;GA;Gabon;XX XX XX XX;1
+509;HT;Gaiti;XX XX XXXX;1
+220;GM;Gambiya;XXX XXXX;1
+233;GH;Gana;XX XXX XXXX;1
+592;GY;Gayana;XXX XXXX;1
+49;DE;Germaniya;XX XXXXXX;1
+44;GG;Gernsi;XXXX XXXXXX;0
+350;GI;Gibraltar;XXX XXXXX;1
+504;HN;Gonduras;XXXX XXXX;1
+852;HK;Gonkong (Xitoy MMH);XXXX XXXX;1
+1473;GD;Grenada;XXX XXXX;1
+299;GL;Grenlandiya;XX XX XX;1
+30;GR;Gretsiya;XX XXXX XXXX;1
+995;GE;Gruziya;XX XXX XX XX;1
+1671;GU;Guam;XXX XXXX;1
+590;GP;Gvadelupe;XXX XX XX XX;1
+502;GT;Gvatemala;XXXX XXXX;1
+224;GN;Gvineya;XX XX XX XX;1
+245;GW;Gvineya-Bisau;XXX XXX XXX;1
+212;EH;G‘arbiy Sahroi Kabir;X XX XX XX XX;0
+91;IN;Hindiston;XXXXX XXXXX;1
+62;ID;Indoneziya;XX XXXXXXX;1
+962;JO;Iordaniya;X XXX XXXX;1
+353;IE;Irlandiya;XX XXXXX;1
+964;IQ;Iroq;X XXX XXXX;1
+354;IS;Islandiya;XXX XXXX;1
+34;ES;Ispaniya;XXX XX XX XX;1
+972;IL;Isroil;X XXX XXXX;1
+39;IT;Italiya;XX XXXX XXXX;1
+27;ZA;Janubiy Afrika Respublikasi;XX XXX XXXX;1
+82;KR;Janubiy Koreya;X XXX XXXX;1
+211;SS;Janubiy Sudan;XXX XXX XXX;1
+213;DZ;Jazoir;XX XX XX XX;1
+44;JE;Jersi;XXXX XXXXXX;0
+253;DJ;Jibuti;XX XX XX XX;1
+238;CV;Kabo-Verde;XXX XX XX;1
+855;KH;Kambodja;XX XXX XXX;1
+237;CM;Kamerun;X XX XX XX XX;1
+1;CA;Kanada;XXX XXX XXXX;0
+1345;KY;Kayman orollari;XXX XXXX;1
+254;KE;Keniya;XX XXXXXXX;1
+357;CY;Kipr;XX XXXXXX;1
+686;KI;Kiribati;XXXXX;1
+61;CC;Kokos (Kiling) orollari;X XXXX XXXX;0
+57;CO;Kolumbiya;XXX XXXXXXX;1
+269;KM;Komor orollari;XXX XX XX;1
+242;CG;Kongo – Brazzavil;XX XXX XXXX;1
+243;CD;Kongo – Kinshasa;XX XXXXX;1
+383;XK;Kosovo;XX XXX XXX;1
+506;CR;Kosta-Rika;XXXX XXXX;1
+225;CI;Kot-d’Ivuar;XX XX X XXXXX;1
+53;CU;Kuba;X XXXXXXX;1
+682;CK;Kuk orollari;XX XXX;1
+599;CW;Kyurasao;X XXX XXXX;1
+856;LA;Laos;XX XXX XXX;1
+371;LV;Latviya;XX XXX XXX;1
+266;LS;Lesoto;XXXX XXXX;1
+231;LR;Liberiya;XX XXX XXX;1
+370;LT;Litva;XXX XXXXX;1
+961;LB;Livan;X XXX XXX;1
+218;LY;Liviya;XX XXXXXXX;1
+423;LI;Lixtenshteyn;XXX XX XX;1
+352;LU;Lyuksemburg;XX XX XX XX;1
+261;MG;Madagaskar;XX XX XXX XX;1
+853;MO;Makao (Xitoy MMH);XXXX XXXX;1
+265;MW;Malavi;X XXX XXX;1
+60;MY;Malayziya;X XXXX XXXX;1
+960;MV;Maldiv orollari;XXX XXXX;1
+223;ML;Mali;XX XX XX XX;1
+356;MT;Malta;XXXX XXXX;1
+236;CF;Markaziy Afrika Respublikasi;XX XX XX XX;1
+212;MA;Marokash;X XX XX XX XX;1
+692;MH;Marshall orollari;XXX XXXX;1
+596;MQ;Martinika;XXX XX XX XX;1
+230;MU;Mavrikiy;XXXX XXXX;1
+222;MR;Mavritaniya;XX XX XX XX;1
+262;YT;Mayotta;XXX XX XX XX;0
+52;MX;Meksika;XXX XXX XXXX;1
+44;IM;Men oroli;XXXX XXXXXX;0
+691;FM;Mikroneziya;XXX XXXX;1
+20;EG;Misr;X XXXXXXXX;1
+373;MD;Moldova;XX XXX XXX;1
+377;MC;Monako;XX XX XX XX;1
+976;MN;Mongoliya;XXXX XXXX;1
+1664;MS;Montserrat;XXX XXXX;1
+258;MZ;Mozambik;XX XXX XXX;1
+290;SH;Muqaddas Yelena oroli;XXXXX;1
+95;MM;Myanma (Birma);X XXX XXX;1
+264;NA;Namibiya;XX XXX XXX;1
+674;NR;Nauru;XXX XXXX;1
+977;NP;Nepal;X XXXXXXX;1
+31;NL;Niderlandiya;XX XXX XXXX;1
+227;NE;Niger;XX XX XX XX;1
+234;NG;Nigeriya;XXXX XX XXXX;1
+505;NI;Nikaragua;XXXX XXXX;1
+683;NU;Niue;XXXX;1
+672;NF;Norfolk oroli;XX XXXX;1
+47;NO;Norvegiya;XX XX XX XX;1
+994;AZ;Ozarbayjon;XX XXX XX XX;1
+998;UZ;Oʻzbekiston;XX XXX XX XX;1
+680;PW;Palau;XXX XXXX;1
+507;PA;Panama;XXX XXXX;1
+675;PG;Papua – Yangi Gvineya;XXX XXXX;1
+595;PY;Paragvay;XX XXX XXXX;1
+51;PE;Peru;X XXXXXXX;1
+92;PK;Pokiston;XX XXXXXXXX;1
+48;PL;Polsha;XX XXX XX XX;1
+351;PT;Portugaliya;XX XXX XXXX;1
+1787;PR;Puerto-Riko;XXX XXXX;1
+974;QA;Qatar;XXXX XXXX;1
+996;KG;Qirgʻiziston;XXX XXX XXX;1
+76;KZ;Qozogʻiston;XXX XXX XX XX;1
+77;KZ;Qozogʻiston;XXX XXX XX XX;1
+965;KW;Quvayt;XXXX XXXX;1
+262;RE;Reyunion;XXX XX XX XX;1
+61;CX;Rojdestvo oroli;X XXXX XXXX;0
+7;RU;Rossiya;XXX XXX XX XX;1
+250;RW;Ruanda;XXX XXX XXX;1
+40;RO;Ruminiya;XX XXX XXXX;1
+503;SV;Salvador;XXXX XXXX;1
+685;WS;Samoa;XXXXX;1
+378;SM;San-Marino;XXXX XXXXXX;1
+239;ST;San-Tome va Prinsipi;XXX XXXX;1
+966;SA;Saudiya Arabistoni;XX XXX XXXX;1
+590;BL;Sen-Bartelemi;XXX XX XX XX;0
+508;PM;Sen-Pyer va Mikelon;XX XX XX;1
+221;SN;Senegal;XX XXX XX XX;1
+1869;KN;Sent-Kits va Nevis;XXX XXXX;1
+1758;LC;Sent-Lyusiya;XXX XXXX;1
+590;MF;Sent-Martin;XXX XX XX XX;0
+1784;VC;Sent-Vinsent va Grenadin;XXX XXXX;1
+381;RS;Serbiya;XX XXXXXX;1
+248;SC;Seyshel orollari;X XXX XXX;1
+850;KP;Shimoliy Koreya;X XXX XXXX;1
+389;MK;Shimoliy Makedoniya;X XXX XXXX;1
+1670;MP;Shimoliy Mariana orollari;XXX XXXX;1
+47;SJ;Shpitsbergen va Yan-Mayen;XX XX XX XX;0
+94;LK;Shri-Lanka;XXX XXX XXX;1
+46;SE;Shvetsiya;X XX XX XX;1
+41;CH;Shveytsariya;XX XXX XX XX;1
+65;SG;Singapur;XXXX XXXX;1
+1721;SX;Sint-Marten;XXX XXXX;1
+421;SK;Slovakiya;X XXX XXX XX;1
+386;SI;Sloveniya;X XXX XX XX;1
+677;SB;Solomon orollari;XXXXX;1
+252;SO;Somali;X XXXXXX;1
+249;SD;Sudan;XX XXX XXXX;1
+597;SR;Surinam;XXX XXX;1
+963;SY;Suriya;XX XXX XXXX;1
+268;SZ;Svazilend;XXXX XXXX;1
+232;SL;Syerra-Leone;XX XXXXXX;1
+66;TH;Tailand;X XXX XXXX;1
+255;TZ;Tanzaniya;XX XXX XXXX;1
+886;TW;Tayvan;X XXXX XXXX;1
+670;TL;Timor-Leste;XXX XXXX;1
+228;TG;Togo;XX XX XX XX;1
+992;TJ;Tojikiston;XXX XX XXXX;1
+690;TK;Tokelau;XXXX;1
+676;TO;Tonga;XX XXX;1
+1868;TT;Trinidad va Tobago;XXX XXXX;1
+216;TN;Tunis;XX XXX XXX;1
+90;TR;Turkiya;XXX XXX XX XX;1
+993;TM;Turkmaniston;XX XX XX XX;1
+1649;TC;Turks va Kaykos orollari;XXX XXXX;1
+688;TV;Tuvalu;XX XXX;1
+256;UG;Uganda;XX XXXXXXX;1
+380;UA;Ukraina;XXXX XXXXX;1
+968;OM;Ummon;XX XXXXXX;1
+681;WF;Uollis va Futuna;XX XX XX;1
+598;UY;Urugvay;XXXX XXXX;1
+678;VU;Vanuatu;XXXXX;1
+39;VA;Vatikan;XX XXXX XXXX;0
+58;VE;Venesuela;XXX XXXXXXX;1
+36;HU;Vengriya;X XXX XXXX;1
+84;VN;Vyetnam;XXX XXXX XXX;1
+86;CN;Xitoy;XX XXXX XXXX;1
+385;HR;Xorvatiya;X XXXX XXX;1
+967;YE;Yaman;X XXX XXX;1
+1876;JM;Yamayka;XXX XXXX;1
+687;NC;Yangi Kaledoniya;XXXXXX;1
+64;NZ;Yangi Zelandiya;X XXX XXXX;1
+81;JP;Yaponiya;X XXXX XXXX;1
+260;ZM;Zambiya;XXX XXX XXX;1
+263;ZW;Zimbabve;XX XXXXX;1
