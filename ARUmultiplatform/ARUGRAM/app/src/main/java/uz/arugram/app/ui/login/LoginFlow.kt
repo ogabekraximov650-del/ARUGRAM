@@ -35,6 +35,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -65,7 +66,7 @@ private val AccelDecel = Easing { t -> (cos((t + 1f) * Math.PI) / 2.0 + 0.5).toF
  */
 @OptIn(ExperimentalAnimationApi::class)
 @Composable
-fun LoginFlow(auth: AuthModel) {
+fun LoginFlow(auth: AuthModel, suppressFab: Boolean = false) {
     val ui by auth.ui.collectAsStateWithLifecycle()
     val c = LocalTg.current
     val ctx = LocalContext.current
@@ -205,7 +206,7 @@ fun LoginFlow(auth: AuthModel) {
             visible = page == Page.Phone || page == Page.Password,
             busy = ui.busy && (page == Page.Phone || page == Page.Password),
             onClick = ::onNext,
-            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 20.dp, bottom = 14.dp),
+            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 20.dp, bottom = 14.dp).alpha(if (suppressFab) 0f else 1f),
         )
 
         // Xato xabari (Telegram "bulletin"i).

@@ -4,10 +4,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -69,8 +66,8 @@ fun lerpTg(a: TgColors, b: TgColors, t: Float): TgColors = TgColors(
 /** Telegram o'lchamlari dp bilan beriladi (shrift masshtabi hisobga olinmaydi) — shu sabab fontScale = 1. */
 @Composable
 fun ArugramTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
-    val t by animateFloatAsState(if (dark) 1f else 0f, tween(400), label = "themeT")
-    val tg = if (t <= 0f) LightTg else if (t >= 1f) DarkTg else lerpTg(LightTg, DarkTg, t)
+    // Mavzu bir zumda almashadi; silliqlikni ekrandagi doiraviy "ochilish" animatsiyasi beradi (Telegram'dagidek).
+    val tg = if (dark) DarkTg else LightTg
     val d = LocalDensity.current
     val scheme = if (dark) darkColorScheme(primary = tg.inputActive, background = tg.bg, surface = tg.bg) else lightColorScheme(primary = tg.inputActive, background = tg.bg, surface = tg.bg)
     CompositionLocalProvider(LocalTg provides tg, LocalDensity provides Density(d.density, fontScale = 1f)) {

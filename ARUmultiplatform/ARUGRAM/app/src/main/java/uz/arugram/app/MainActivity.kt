@@ -16,6 +16,24 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.ClipOp
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.graphics.layer.toImageBitmap
+import androidx.compose.ui.graphics.rememberGraphicsLayer
+import androidx.compose.ui.layout.onSizeChanged
+import kotlinx.coroutines.launch
+import kotlin.math.hypot
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -68,29 +86,74 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class Screen { Loading, Fatal, Intro, Login, Home }
+private enum class Screen { Loading, Fatal, Auth, Home }
 
 @Composable
 private fun Root(auth: AuthModel, dark: Boolean, onToggleTheme: () -> Unit) {
     var introDone by rememberSaveable { mutableStateOf(false) }
+    var leaving by remember { mutableStateOf(false) }
     val ui by auth.ui.collectAsStateWithLifecycle()
     val c = LocalTg.current
+    val scope = rememberCoroutineScope()
+    val layer = rememberGraphicsLayer()
+    var oldFrame by remember { mutableStateOf<ImageBitmap?>(null) }
+    var reveal by remember { mutableStateOf<Pair<Offset, Float>?>(null) }
     val screen = when {
         !ui.ready -> Screen.Loading
         ui.fatal != null -> Screen.Fatal
         ui.stage == Stage.Done -> Screen.Home
-        ui.stage == Stage.Phone && !introDone -> Screen.Intro
-        else -> Screen.Login
+        else -> Screen.Auth
     }
-    Box(Modifier.fillMaxSize().background(c.bg)) {
+    val showIntro = !introDone && ui.stage == Stage.Phone
+
+    // Mavzu almashishi: eski kadr olinadi, yangi mavzu bir zumda qo'yiladi va eski kadr tugma markazidan doira bo'lib "teshiladi".
+    fun toggleWithReveal(center: Offset, size: androidx.compose.ui.unit.IntSize) {
+        scope.launch {
+            val bmp = runCatching { layer.toImageBitmap() }.getOrNull()
+            if (bmp == null) { onToggleTheme(); return@launch }
+            oldFrame = bmp
+            onToggleTheme()
+            val maxR = maxOf(
+                hypot(center.x, center.y), hypot(size.width - center.x, center.y),
+                hypot(center.x, size.height - center.y), hypot(size.width - center.x, size.height - center.y),
+            )
+            val a = Animatable(0f)
+            a.animateTo(maxR, tween(400, easing = FastOutSlowInEasing)) { reveal = center to value }
+            oldFrame = null; reveal = null
+        }
+    }
+
+    var rootSize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
+    Box(
+        Modifier.fillMaxSize().background(c.bg).onSizeChanged { rootSize = it }
+            .drawWithContent {
+                layer.record { this@drawWithContent.drawContent() }
+                drawLayer(layer)
+                val bmp = oldFrame
+                val rv = reveal
+                if (bmp != null) {
+                    val path = Path()
+                    if (rv != null) path.addOval(Rect(rv.first, rv.second))
+                    clipPath(path, ClipOp.Difference) { drawImage(bmp) }
+                }
+            },
+    ) {
         Crossfade(targetState = screen, animationSpec = tween(250), label = "root") { s ->
             when (s) {
                 Screen.Loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { ArugramLogo() }
                 Screen.Fatal -> Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
                     BasicText(ui.fatal.orEmpty(), style = TextStyle(color = c.red, fontSize = 15.sp, textAlign = TextAlign.Center, lineHeight = 20.sp))
                 }
-                Screen.Intro -> IntroScreen(dark, onToggleTheme) { introDone = true }
-                Screen.Login -> LoginFlow(auth)
+                Screen.Auth -> Box(Modifier.fillMaxSize()) {
+                    // Kirish oqimi tanishtiruv ostida tayyor turadi: tugma dumaloq tugmaga aylanayotganda sahifa ko'rinib keladi.
+                    if (!showIntro || leaving) LoginFlow(auth, suppressFab = showIntro)
+                    if (showIntro) IntroScreen(
+                        dark = dark,
+                        onToggleTheme = { center -> toggleWithReveal(center, rootSize) },
+                        onStartMorph = { leaving = true },
+                        onFinished = { introDone = true },
+                    )
+                }
                 Screen.Home -> HomeScreen(auth)
             }
         }
