@@ -1,0 +1,70 @@
+name: Telegram hisobi uchun grammers sessiyasi
+
+# `ci/tg-session.run` o'zgarganda: hisob raqami mavjud sessiyadan olinadi, grammers (Rust) kod so'raydi, kod Telegram xizmat chatidan
+# o'qiladi, 2 bosqichli parol `tool/secrets/tg2fa.rsa` dan ochiladi (log'ga chiqmaydi). Natija ENCODE_TOKEN bilan shifrlanib artifakt bo'ladi
+# (`grammers_session.json.enc`) — ochiq matnli sessiya hech qayerga chiqmaydi.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ci/tg-session.run'
+
+permissions:
+  contents: read
+
+jobs:
+  session:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TG_API_ID: ${{ secrets.TG_API_ID }}
+      TG_API_HASH: ${{ secrets.TG_API_HASH }}
+      ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "tool/tgsession -> target"
+
+      - name: Maxfiy ma'lumotlarni ochish (log'ga chiqmaydi)
+        run: |
+          K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          D="$RUNNER_TEMP/s"; mkdir -p "$D"
+          K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in tool/encode/session.enc -out "$D/notify.session"
+          head -c 16 "$D/notify.session" | grep -q "SQLite format 3"
+          K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in tool/secrets/tg-key.enc -out "$D/priv.pem"
+          PASS=$(openssl pkeyutl -decrypt -inkey "$D/priv.pem" -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -in tool/secrets/tg2fa.rsa)
+          echo "::add-mask::$PASS"
+          echo "TG_PASSWORD=$PASS" >> "$GITHUB_ENV"
+          shred -u "$D/priv.pem" || rm -f "$D/priv.pem"
+          echo "D=$D" >> "$GITHUB_ENV"
+
+      - name: Hisob raqami
+        run: |
+          pip install --no-cache-dir -q pyrogram==2.0.106 tgcrypto==1.2.5
+          python tool/tgsession/get_phone.py "$D/notify" "$D/phone.txt"
+          P=$(cat "$D/phone.txt"); echo "::add-mask::$P"; echo "TG_PHONE=$P" >> "$GITHUB_ENV"
+
+      - name: grammers sessiyasini yaratish
+        working-directory: tool/tgsession
+        run: |
+          cargo build --release
+          export CODE_FILE="$D/code.txt" SENT_FLAG="$D/sent.flag" OUT="$D/session.json"
+          python watch_code.py "$D/notify" "$SENT_FLAG" "$CODE_FILE" &
+          W=$!
+          ./target/release/tgsession
+          wait $W
+
+      - name: Shifrlash
+        run: |
+          K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          mkdir -p out
+          K="$K" openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in "$D/session.json" -out out/grammers_session.json.enc
+          shred -u "$D/session.json" "$D/code.txt" "$D/phone.txt" || true
+          ls -la out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: grammers-session-enc
+          path: out
+          retention-days: 2
