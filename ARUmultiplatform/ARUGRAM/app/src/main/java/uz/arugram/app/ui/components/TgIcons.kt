@@ -89,3 +89,17 @@ fun MenuIcon(color: Color, modifier: Modifier = Modifier, size: Dp = 24.dp) {
         for (y in floatArrayOf(6f, 12f, 18f)) drawLine(color, Offset(4f * s, y * s), Offset(20f * s, y * s), strokeWidth = 2f * s, cap = StrokeCap.Round)
     }
 }
+
+
+/** Yuborish tugmasi (`ic_send`): o'ngga qaragan qog'oz samolyot. */
+@Composable
+fun SendIcon(color: Color, modifier: Modifier = Modifier, size: Dp = 24.dp) {
+    Canvas(modifier.size(size)) {
+        val s = this.size.width / 24f
+        val p = Path().apply {
+            moveTo(2.5f * s, 3.5f * s); lineTo(21.5f * s, 12f * s); lineTo(2.5f * s, 20.5f * s)
+            lineTo(5f * s, 13f * s); lineTo(14f * s, 12f * s); lineTo(5f * s, 11f * s); close()
+        }
+        drawPath(p, color)
+    }
+}

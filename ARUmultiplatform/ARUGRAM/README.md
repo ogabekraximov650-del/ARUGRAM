@@ -29,3 +29,13 @@ Tugma: 56 dp, o'ngdan 20, pastdan 14. Kod katagi: 34×42 dp, oraliq 7, ramka 1,5
 `ui/intro/IntroScreen.kt`: 6 sahifali pager (har birida Canvas'da chizilgan harakatlanuvchi rasm), nuqtalar, yorug'lik o'tuvchi
 "Suhbatni boshlash" tugmasi, "Continue in English" (matnlar `IntroTexts.kt`), tepa o'ngda quyosh/oy tugmasi. Mavzu tanlovi
 `SharedPreferences("ui")` da saqlanadi, ranglar `lerpTg` bilan silliq almashadi (`TgTheme.kt`).
+
+## Kirish oynalari va suhbatlar (2026-10)
+
+- **Raqam / Kod**: tizim klaviaturasi o'rniga Telegramning o'z raqam klaviaturasi (`components/TgNumPad.kt`, DrKLO `CustomPhoneKeyboardView`):
+  230 dp, 3×4 to'r, o'chirishni ushlab turish takrori (200 ms / 50 ms), 300 ms chiqish animatsiyasi. Parol oynasida tizim klaviaturasi qoladi
+  (Telegramda ham shunday).
+- **"Raqam to'g'rimi?"** oynasi (`components/PhoneConfirm.kt`), davlat ro'yxatidagi tez aylantirgich (`components/TgFastScroll.kt`).
+- **Suhbatlar**: Rust `rust_tg_dialogs` / `rust_tg_messages` / `rust_tg_send_text` (grammers) -> `ui/main/ChatsModel.kt`, `ChatList.kt`
+  (DrKLO `DialogCell` o'lchamlari), `ChatScreen.kt` (o'qish va matn yuborish). Yangilanish hozircha davriy (20 s / 5 s); haqiqiy vaqtdagi
+  `updates`, rasm/avatar yuklash, media va yon panel keyingi bosqichlarda.

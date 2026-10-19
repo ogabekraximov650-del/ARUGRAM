@@ -92,6 +92,10 @@ object RustCore {
 
     fun tgDialogs(limit: Int = 40): JSONObject = guard(errJson("Yadro yuklanmagan")) { json(take(it.rust_tg_dialogs(limit.toString()))) }
 
+    fun tgMessages(chatId: Long, limit: Int = 40): JSONObject = guard(errJson("Yadro yuklanmagan")) { json(take(it.rust_tg_messages("$chatId:$limit"))) }
+
+    fun tgSendText(chatId: Long, text: String): JSONObject = guard(errJson("Yadro yuklanmagan")) { json(take(it.rust_tg_send_text("$chatId\n$text"))) }
+
     fun tgLoginState(): JSONObject = guard(JSONObject().put("stage", "phone")) { json(take(it.rust_tg_login_state())) }
 
     fun tgLoginReset() = guard(Unit) { it.rust_tg_login_reset() }

@@ -39,6 +39,7 @@ import uz.arugram.app.ui.theme.LocalTg
 fun HomeScreen(auth: AuthModel) {
     val c = LocalTg.current
     val model = remember { ChatsModel() }
+    var openChat by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf<Long?>(null) }
     val ui by model.ui.collectAsStateWithLifecycle()
     // Haqiqiy vaqtdagi yangilanishlar (updates) keyingi bosqichda; hozircha har 20 soniyada ro'yxat yangilanadi.
     LaunchedEffect(Unit) {
@@ -48,6 +49,11 @@ fun HomeScreen(auth: AuthModel) {
         }
     }
 
+    val opened = ui.chats.firstOrNull { it.id == openChat }
+    if (opened != null) {
+        ChatScreen(opened, onBack = { openChat = null })
+        return
+    }
     Column(Modifier.fillMaxSize().background(c.bg)) {
         Column(Modifier.fillMaxWidth().background(c.bar).statusBarsPadding()) {
             Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -64,7 +70,7 @@ fun HomeScreen(auth: AuthModel) {
                     BasicText("Qayta urinish", Modifier.clickable { model.load() }.padding(16.dp), style = TextStyle(color = c.value, fontSize = 15.sp))
                 }
                 ui.chats.isEmpty() -> BasicText("Suhbatlar yo‘q", Modifier.align(Alignment.Center), style = TextStyle(color = c.gray, fontSize = 17.sp))
-                else -> ChatList(ui.chats)
+                else -> ChatList(ui.chats, onOpen = { openChat = it.id })
             }
         }
     }

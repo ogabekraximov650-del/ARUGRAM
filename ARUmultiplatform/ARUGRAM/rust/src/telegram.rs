@@ -2457,6 +2457,70 @@ pub extern "C" fn rust_tg_dialogs(arg_ptr: *const c_char) -> *mut c_char {
     }))
 }
 
+/// Suhbat xabarlari (eng yangisi birinchi): `{"messages":[{"id","out","date","text","sender","media"}]}`.
+async fn messages_json(client: &Client, chat_id: i64, limit: usize) -> Result<Value, String> {
+    let peer = find_channel(client, chat_id).await.map_err(|_| "Suhbat topilmadi".to_string())?;
+    let mut out = Vec::new();
+    let mut it = client.iter_messages(peer).limit(limit);
+    while let Some(m) = it.next().await.map_err(|e| e.to_string())? {
+        let sender = m.sender().map(|p| match p {
+            grammers_client::peer::Peer::User(u) => u.full_name(),
+            grammers_client::peer::Peer::Group(g) => g.title().unwrap_or_default().to_string(),
+            grammers_client::peer::Peer::Channel(c) => c.title().to_string(),
+        });
+        out.push(json!({
+            "id": m.id(),
+            "out": m.outgoing(),
+            "date": m.date().timestamp(),
+            "text": m.text(),
+            "sender": sender.unwrap_or_default(),
+            "media": m.media().is_some(),
+        }));
+    }
+    Ok(json!({ "messages": out }))
+}
+
+/// `arg` = `"<suhbat_id>:<soni>"`.
+#[no_mangle]
+pub extern "C" fn rust_tg_messages(arg_ptr: *const c_char) -> *mut c_char {
+    let arg = unsafe { cstr_to_str(arg_ptr) }.unwrap_or("").trim().to_string();
+    let (id, limit) = match arg.split_once(':') {
+        Some((a, b)) => (a.parse::<i64>().unwrap_or(0), b.parse::<usize>().unwrap_or(40).clamp(1, 200)),
+        None => (arg.parse::<i64>().unwrap_or(0), 40),
+    };
+    string_to_cptr(with_client(|t, client| {
+        if !t.authorized.load(Ordering::SeqCst) {
+            return Err("Telegram ulanmagan".to_string());
+        }
+        let v = run_tmo(t, 30, messages_json(&client, id, limit))?;
+        Ok(v.to_string())
+    }))
+}
+
+/// Matnli xabar yuboradi. `arg` = `"<suhbat_id>\n<matn>"`. Javob: `{"ok":true,"id":<xabar_id>}`.
+#[no_mangle]
+pub extern "C" fn rust_tg_send_text(arg_ptr: *const c_char) -> *mut c_char {
+    let arg = unsafe { cstr_to_str(arg_ptr) }.unwrap_or("").to_string();
+    let (id, text) = match arg.split_once('\n') {
+        Some((a, b)) => (a.trim().parse::<i64>().unwrap_or(0), b.to_string()),
+        None => (0, String::new()),
+    };
+    string_to_cptr(with_client(|t, client| {
+        if !t.authorized.load(Ordering::SeqCst) {
+            return Err("Telegram ulanmagan".to_string());
+        }
+        if text.trim().is_empty() {
+            return Err("Xabar bo'sh".to_string());
+        }
+        let v = run_tmo(t, 30, async {
+            let peer = find_channel(&client, id).await.map_err(|_| "Suhbat topilmadi".to_string())?;
+            let m = client.send_message(peer, text.clone()).await.map_err(|e| e.to_string())?;
+            Ok(json!({"ok": true, "id": m.id()}))
+        })?;
+        Ok(v.to_string())
+    }))
+}
+
 fn b64(data: &[u8]) -> String {
     const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
