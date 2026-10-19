@@ -149,9 +149,9 @@ fun Bulletin(message: String?, modifier: Modifier = Modifier) {
 
 /** Bir nechta maydonli oyna (masalan, kontakt qo'shish: telefon, ism, familiya). */
 @Composable
-fun TgForm(title: String, labels: List<String>, confirm: String, onConfirm: (List<String>) -> Unit, onDismiss: () -> Unit) {
+fun TgForm(title: String, labels: List<String>, confirm: String, onConfirm: (List<String>) -> Unit, onDismiss: () -> Unit, initial: List<String> = emptyList()) {
     val c = LocalTg.current
-    val values = remember { androidx.compose.runtime.mutableStateListOf(*Array(labels.size) { "" }) }
+    val values = remember { androidx.compose.runtime.mutableStateListOf(*Array(labels.size) { initial.getOrElse(it) { "" } }) }
     Dialog(onDismissRequest = onDismiss) {
         Column(Modifier.clip(RoundedCornerShape(12.dp)).background(dialogBg()).padding(top = 20.dp, start = 24.dp, end = 24.dp, bottom = 8.dp)) {
             BasicText(title, style = TextStyle(color = c.text, fontSize = 20.sp, fontWeight = FontWeight.Bold))

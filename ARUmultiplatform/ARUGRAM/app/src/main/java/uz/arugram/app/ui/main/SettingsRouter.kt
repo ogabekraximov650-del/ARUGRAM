@@ -67,7 +67,7 @@ fun SettingsRouter(page: String, onBack: () -> Unit, onNavigate: (String) -> Uni
 
 /** Yangi guruh (DrKLO `GroupCreateActivity`): kontaktlardan a'zolarni belgilash + nom. */
 @Composable
-fun NewGroupScreen(onBack: () -> Unit, onDone: () -> Unit) {
+fun NewGroupScreen(onBack: () -> Unit, onDone: () -> Unit, target: ChatRow? = null) {
     val c = LocalTg.current
     val scope = rememberCoroutineScope()
     BackHandler(onBack = onBack)
@@ -85,14 +85,14 @@ fun NewGroupScreen(onBack: () -> Unit, onDone: () -> Unit) {
     Column(Modifier.fillMaxSize().background(c.bg).statusBarsPadding()) {
         Row(Modifier.fillMaxWidth().height(56.dp).background(c.bar), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(56.dp).clickable(onClick = onBack), contentAlignment = Alignment.Center) { BackArrowIcon(c.text) }
-            BasicText("Yangi guruh", Modifier.weight(1f), style = TextStyle(color = c.text, fontSize = 20.sp, fontWeight = FontWeight.Bold))
+            BasicText(if (target == null) "Yangi guruh" else "A’zo qo‘shish", Modifier.weight(1f), style = TextStyle(color = c.text, fontSize = 20.sp, fontWeight = FontWeight.Bold))
             BasicText(
-                if (busy) "..." else "Yaratish",
+                if (busy) "..." else if (target == null) "Yaratish" else "Qo‘shish",
                 Modifier.clickable(enabled = !busy) {
                     busy = true
                     val members = contacts.orEmpty().filter { it.first in picked }.joinToString(",") { "${it.first}@${it.third}" }
                     scope.launch {
-                        val r = withContext(Dispatchers.IO) { RustCore.tgCreateGroup(title, members) }
+                        val r = withContext(Dispatchers.IO) { if (target == null) RustCore.tgCreateGroup(title, members) else RustCore.tgAddMembers(target.spec, members) }
                         busy = false
                         val err = r.optString("error")
                         if (err.isEmpty()) onDone() else msg = err
@@ -101,7 +101,7 @@ fun NewGroupScreen(onBack: () -> Unit, onDone: () -> Unit) {
                 style = TextStyle(color = Color(0xFF3390EC), fontSize = 16.sp, fontWeight = FontWeight.Bold),
             )
         }
-        Box(Modifier.fillMaxWidth().background(c.bar).padding(horizontal = 18.dp, vertical = 12.dp)) {
+        if (target == null) Box(Modifier.fillMaxWidth().background(c.bar).padding(horizontal = 18.dp, vertical = 12.dp)) {
             if (title.isEmpty()) BasicText("Guruh nomi", style = TextStyle(color = c.hint, fontSize = 18.sp))
             BasicTextField(title, { title = it }, singleLine = true, textStyle = TextStyle(color = c.text, fontSize = 18.sp), cursorBrush = SolidColor(c.inputActive), modifier = Modifier.fillMaxWidth())
         }

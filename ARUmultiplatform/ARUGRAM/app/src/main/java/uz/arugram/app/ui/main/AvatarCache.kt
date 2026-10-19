@@ -19,6 +19,13 @@ object AvatarCache {
     val images = mutableStateMapOf<Long, ImageBitmap>()
     private val asked = HashSet<Long>()
 
+    /** Bitta avatarni qayta yuklash uchun keshdan o'chiradi (profil rasmi o'zgargach). */
+    fun invalidate(context: Context, id: Long) {
+        images.remove(id)
+        asked.remove(id)
+        File(File(context.filesDir, "avatars"), "$id.jpg").delete()
+    }
+
     /** Hisobdan chiqishda xotiradagi avatarlar tozalanadi (diskdagisi `AuthModel.logout` da o'chadi). */
     fun clear() {
         images.clear()

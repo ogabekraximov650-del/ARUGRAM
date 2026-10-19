@@ -58,6 +58,11 @@ interface RustLib : Library {
     fun rust_tg_pinned(arg: String): Pointer?
     fun rust_tg_react(arg: String): Pointer?
     fun rust_tg_folders(): Pointer?
+    fun rust_tg_edit_chat(arg: String): Pointer?
+    fun rust_tg_add_members(arg: String): Pointer?
+    fun rust_tg_set_photo(arg: String): Pointer?
+    fun rust_tg_clear_history(arg: String): Pointer?
+    fun rust_tg_invite_link(arg: String): Pointer?
     fun rust_tg_callback(arg: String): Pointer?
     fun rust_tg_vote(arg: String): Pointer?
     fun rust_tg_typing_send(arg: String): Pointer?

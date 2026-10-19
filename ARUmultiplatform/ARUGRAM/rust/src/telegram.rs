@@ -2499,7 +2499,7 @@ fn media_info(m: &grammers_client::media::Media) -> MediaInfo {
                 .answers
                 .iter()
                 .map(|a| {
-                    let tl::enums::PollAnswer::Answer(a) = a;
+                    let tl::enums::PollAnswer::Answer(a) = a else { return Value::Null };
                     let tl::enums::TextWithEntities::Entities(t) = &a.text;
                     let (n, chosen) = votes.get(&a.option).copied().unwrap_or((0, false));
                     json!({"text": t.text, "option": hex::encode(&a.option), "votes": n, "chosen": chosen})
@@ -3923,6 +3923,151 @@ pub extern "C" fn rust_tg_callback(arg_ptr: *const c_char) -> *mut c_char {
             .map_err(|e| e.to_string())?;
         let tl::enums::messages::BotCallbackAnswer::Answer(a) = res;
         Ok(json!({"message": a.message.unwrap_or_default(), "alert": a.alert, "url": a.url.unwrap_or_default()}))
+    })
+}
+
+/// Guruh/kanal nomi va tavsifini o'zgartirish: `arg` = `"<suhbat>\n<nom>\n<tavsif>"`.
+#[no_mangle]
+pub extern "C" fn rust_tg_edit_chat(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 30, |client, arg| async move {
+        let l = lines(&arg, 3);
+        let peer = resolve_peer(&client, &l[0]).await?;
+        let ip: tl::enums::InputPeer = peer.into();
+        let title = l[1].trim().to_string();
+        if !title.is_empty() {
+            match &ip {
+                tl::enums::InputPeer::Chat(c) => {
+                    client.invoke(&tl::functions::messages::EditChatTitle { chat_id: c.chat_id, title: title.clone() }).await.map_err(|e| e.to_string())?;
+                }
+                tl::enums::InputPeer::Channel(c) => {
+                    let r = client
+                        .invoke(&tl::functions::channels::EditTitle {
+                            channel: tl::enums::InputChannel::Channel(tl::types::InputChannel { channel_id: c.channel_id, access_hash: c.access_hash }),
+                            title: title.clone(),
+                        })
+                        .await;
+                    if let Err(e) = r {
+                        if !e.is("CHAT_NOT_MODIFIED") {
+                            return Err(e.to_string());
+                        }
+                    }
+                }
+                _ => return Err("Bu suhbat nomini o'zgartirib bo'lmaydi".to_string()),
+            }
+        }
+        client.invoke(&tl::functions::messages::EditChatAbout { peer: ip, about: l[2].clone() }).await.ok();
+        Ok(json!({"ok": true}))
+    })
+}
+
+/// Guruh/kanalga a'zo qo'shish: `arg` = `"<suhbat>\n<id@hash,id@hash,..>"`.
+#[no_mangle]
+pub extern "C" fn rust_tg_add_members(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 40, |client, arg| async move {
+        let l = lines(&arg, 2);
+        let peer = resolve_peer(&client, &l[0]).await?;
+        let ip: tl::enums::InputPeer = peer.into();
+        let mut users = Vec::new();
+        for part in l[1].split(',') {
+            if let Some((id, hash)) = part.trim().split_once('@') {
+                if let (Ok(user_id), Ok(access_hash)) = (id.parse::<i64>(), hash.parse::<i64>()) {
+                    users.push(tl::enums::InputUser::User(tl::types::InputUser { user_id, access_hash }));
+                }
+            }
+        }
+        if users.is_empty() {
+            return Err("A'zo tanlanmagan".to_string());
+        }
+        match ip {
+            tl::enums::InputPeer::Chat(c) => {
+                for u in users {
+                    client
+                        .invoke(&tl::functions::messages::AddChatUser { chat_id: c.chat_id, user_id: u, fwd_limit: 50 })
+                        .await
+                        .map_err(|e| e.to_string())?;
+                }
+            }
+            tl::enums::InputPeer::Channel(c) => {
+                client
+                    .invoke(&tl::functions::channels::InviteToChannel {
+                        channel: tl::enums::InputChannel::Channel(tl::types::InputChannel { channel_id: c.channel_id, access_hash: c.access_hash }),
+                        users,
+                    })
+                    .await
+                    .map_err(|e| e.to_string())?;
+            }
+            _ => return Err("Bu suhbatga a'zo qo'shib bo'lmaydi".to_string()),
+        }
+        Ok(json!({"ok": true}))
+    })
+}
+
+/// Profil rasmini o'rnatish: `arg` = rasm fayli yo'li.
+#[no_mangle]
+pub extern "C" fn rust_tg_set_photo(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 120, |client, arg| async move {
+        let path = arg.trim().to_string();
+        let mut f = tokio::fs::File::open(&path).await.map_err(|e| format!("Fayl ochilmadi: {e}"))?;
+        let size = f.metadata().await.map_err(|e| e.to_string())?.len() as usize;
+        let up = client.upload_stream(&mut f, size, "profil.jpg".to_string()).await.map_err(|e| e.to_string())?;
+        client
+            .invoke(&tl::functions::photos::UploadProfilePhoto { fallback: false, bot: None, file: Some(up.raw), video: None, video_start_ts: None, video_emoji_markup: None })
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(json!({"ok": true}))
+    })
+}
+
+/// Suhbat tarixini tozalash (suhbat qoladi): `arg` = suhbat.
+#[no_mangle]
+pub extern "C" fn rust_tg_clear_history(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 60, |client, arg| async move {
+        let peer = resolve_peer(&client, arg.trim()).await?;
+        let ip: tl::enums::InputPeer = peer.into();
+        match ip {
+            tl::enums::InputPeer::Channel(c) => {
+                client
+                    .invoke(&tl::functions::channels::DeleteHistory {
+                        for_everyone: false,
+                        channel: tl::enums::InputChannel::Channel(tl::types::InputChannel { channel_id: c.channel_id, access_hash: c.access_hash }),
+                        max_id: 0,
+                    })
+                    .await
+                    .map_err(|e| e.to_string())?;
+            }
+            other => {
+                client
+                    .invoke(&tl::functions::messages::DeleteHistory { just_clear: true, revoke: false, peer: other, max_id: 0, min_date: None, max_date: None })
+                    .await
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+        Ok(json!({"ok": true}))
+    })
+}
+
+/// Taklif havolasi: `arg` = suhbat. Javob: `{"link"}`.
+#[no_mangle]
+pub extern "C" fn rust_tg_invite_link(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 30, |client, arg| async move {
+        let peer = resolve_peer(&client, arg.trim()).await?;
+        let ip: tl::enums::InputPeer = peer.into();
+        let res = client
+            .invoke(&tl::functions::messages::ExportChatInvite {
+                legacy_revoke_permanent: false,
+                request_needed: false,
+                peer: ip,
+                expire_date: None,
+                usage_limit: None,
+                title: None,
+                subscription_pricing: None,
+            })
+            .await
+            .map_err(|e| e.to_string())?;
+        match res {
+            tl::enums::ExportedChatInvite::ChatInviteExported(x) => Ok(json!({"link": x.link})),
+            _ => Err("Havola olinmadi".to_string()),
+        }
     })
 }
 

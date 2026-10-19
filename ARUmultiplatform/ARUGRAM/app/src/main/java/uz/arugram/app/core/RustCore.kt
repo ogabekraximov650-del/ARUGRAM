@@ -184,6 +184,16 @@ object RustCore {
 
     fun tgCallback(spec: String, msgId: Int, data: String) = call { it.rust_tg_callback("$spec\n$msgId\n$data") }
 
+    fun tgEditChat(spec: String, title: String, about: String) = call { it.rust_tg_edit_chat("$spec\n$title\n$about") }
+
+    fun tgAddMembers(spec: String, members: String) = call { it.rust_tg_add_members("$spec\n$members") }
+
+    fun tgSetPhoto(path: String) = call { it.rust_tg_set_photo(path) }
+
+    fun tgClearHistory(spec: String) = call { it.rust_tg_clear_history(spec) }
+
+    fun tgInviteLink(spec: String) = call { it.rust_tg_invite_link(spec) }
+
     fun tgFolders() = call { it.rust_tg_folders() }
 
     fun tgCreateGroup(title: String, members: String) = call { it.rust_tg_create_group("$title\n$members") }

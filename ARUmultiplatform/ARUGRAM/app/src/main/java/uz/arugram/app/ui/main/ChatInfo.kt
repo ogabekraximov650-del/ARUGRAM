@@ -46,7 +46,7 @@ import uz.arugram.app.ui.theme.LocalTg
  * bildirishnoma, xabar yozish, suhbatni o'chirish.
  */
 @Composable
-fun ChatInfo(chat: ChatRow, onBack: () -> Unit, onWrite: () -> Unit, onDeleted: () -> Unit, onOpenChat: (ChatRow) -> Unit = {}) {
+fun ChatInfo(chat: ChatRow, onBack: () -> Unit, onWrite: () -> Unit, onDeleted: () -> Unit, onOpenChat: (ChatRow) -> Unit = {}, onAddMembers: () -> Unit = {}) {
     val c = LocalTg.current
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -56,6 +56,11 @@ fun ChatInfo(chat: ChatRow, onBack: () -> Unit, onWrite: () -> Unit, onDeleted: 
     var muted by remember(chat.id) { mutableStateOf(chat.muted) }
     var blocked by remember(chat.id) { mutableStateOf(false) }
     var viewer by remember { mutableStateOf<MsgRow?>(null) }
+    var editChat by remember { mutableStateOf(false) }
+    var inviteLink by remember { mutableStateOf<String?>(null) }
+    var confirmClear by remember { mutableStateOf(false) }
+    var toast by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(toast) { if (toast != null) { kotlinx.coroutines.delay(2500); toast = null } }
     LaunchedEffect(chat.id) { info = withContext(Dispatchers.IO) { RustCore.tgPeerInfo(chat.spec) } }
     val i = info
     val kind = i?.optString("kind").orEmpty().ifEmpty { chat.kind }
@@ -99,6 +104,16 @@ fun ChatInfo(chat: ChatRow, onBack: () -> Unit, onWrite: () -> Unit, onDeleted: 
                     muted = !muted
                     scope.launch { withContext(Dispatchers.IO) { RustCore.tgMute(chat.spec, muted) } }
                 }
+                if (kind == "group" || kind == "channel") {
+                    InfoAction(R.drawable.msg_edit, "Tahrirlash") { editChat = true }
+                    InfoAction(R.drawable.msg_addbot, "A’zo qo‘shish") { onAddMembers() }
+                    InfoAction(R.drawable.msg_link, "Taklif havolasi") {
+                        val un = i?.optString("username").orEmpty()
+                        if (un.isNotEmpty()) inviteLink = "https://t.me/$un"
+                        else scope.launch { val r = withContext(Dispatchers.IO) { RustCore.tgInviteLink(chat.spec) }; val l = r.optString("link"); if (l.isNotEmpty()) inviteLink = l else toast = r.optString("error").ifEmpty { "Havola olinmadi" } }
+                    }
+                }
+                InfoAction(R.drawable.msg_clear, "Tarixni tozalash") { confirmClear = true }
                 if (kind == "user" && !chat.self) InfoAction(R.drawable.msg_block, if (blocked) "Blokdan chiqarish" else "Bloklash", danger = !blocked) {
                     blocked = !blocked
                     scope.launch { withContext(Dispatchers.IO) { RustCore.tgBlock(chat.spec, blocked) } }
@@ -115,6 +130,25 @@ fun ChatInfo(chat: ChatRow, onBack: () -> Unit, onWrite: () -> Unit, onDeleted: 
         }
     }
     viewer?.let { MediaViewer(chat, it) { viewer = null } }
+    Bulletin(toast, Modifier.fillMaxWidth().padding(top = 80.dp))
+    if (editChat) {
+        TgForm("Tahrirlash", listOf("Nom", "Tavsif"), "Saqlash", initial = listOf(chat.name, i?.optString("about").orEmpty()), onConfirm = { v ->
+            editChat = false
+            scope.launch {
+                val r = withContext(Dispatchers.IO) { RustCore.tgEditChat(chat.spec, v[0], v[1]) }
+                toast = r.optString("error").ifEmpty { "Saqlandi" }
+            }
+        }, onDismiss = { editChat = false })
+    }
+    inviteLink?.let { l ->
+        TgAlert("Taklif havolasi", l, "Nusxalash", onConfirm = { copyText(ctx, l); inviteLink = null; toast = "Nusxalandi" }, onDismiss = { inviteLink = null })
+    }
+    if (confirmClear) {
+        TgAlert("Tarixni tozalash", "Suhbatdagi barcha xabarlar sizdan o‘chiriladi.", "Tozalash", danger = true, onConfirm = {
+            confirmClear = false
+            scope.launch { val r = withContext(Dispatchers.IO) { RustCore.tgClearHistory(chat.spec) }; toast = r.optString("error").ifEmpty { "Tarix tozalandi" } }
+        }, onDismiss = { confirmClear = false })
+    }
     if (confirmDelete) {
         TgAlert(
             title = "Suhbatni o‘chirish", text = "“${chat.name}” suhbati sizdan o‘chiriladi (guruh yoki kanal bo‘lsa — undan chiqasiz).",

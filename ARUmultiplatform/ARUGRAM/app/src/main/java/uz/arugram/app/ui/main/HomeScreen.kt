@@ -56,6 +56,7 @@ private sealed interface Dest {
     data object Search : Dest
     data object NewChat : Dest
     data object NewGroup : Dest
+    data class AddMembers(val row: ChatRow) : Dest
     data class Settings(val page: String) : Dest
 }
 
@@ -180,6 +181,7 @@ fun HomeScreen(auth: AuthModel) {
                 onWrite = { stack.removeAt(stack.lastIndex) },
                 onDeleted = { stack.clear(); model.load() },
                 onOpenChat = { r -> open(r) },
+                onAddMembers = { stack.add(Dest.AddMembers(d.row)) },
             )
             Dest.Search -> SearchScreen(ui.chats, onOpen = { r -> stack.removeAt(stack.lastIndex); open(r) }, onBack = { stack.removeAt(stack.lastIndex) })
             Dest.NewChat -> Box(Modifier.fillMaxSize().background(c.bg)) {
@@ -192,6 +194,7 @@ fun HomeScreen(auth: AuthModel) {
                     ),
                 )
             }
+            is Dest.AddMembers -> NewGroupScreen(onBack = { stack.removeAt(stack.lastIndex) }, onDone = { stack.removeAt(stack.lastIndex) }, target = d.row)
             Dest.NewGroup -> NewGroupScreen(onBack = { stack.removeAt(stack.lastIndex) }, onDone = { stack.clear(); model.load() })
             is Dest.Settings -> SettingsRouter(d.page, onBack = { stack.removeAt(stack.lastIndex) }, onNavigate = { stack.add(Dest.Settings(it)) }, folders = folders)
             null -> {}
