@@ -26,7 +26,7 @@ jobs:
           K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
           pip install --no-cache-dir -q pyrogram==2.0.106 tgcrypto==1.2.5
           S="$RUNNER_TEMP/n"; K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in tool/encode/session.enc -out "$S.session"
-          python tool/notify/get_file.py "$S" Telegram-emu-x86_64.apk emu
+          python tool/notify/get_file.py "$S" Telegram-emu-x86_64.apk "$PWD/emu"
           rm -f "$S.session"; ls -la emu
       - name: KVM
         run: |
