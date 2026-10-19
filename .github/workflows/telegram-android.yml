@@ -1,13 +1,12 @@
 name: Telegram (DrKLO) — build
 
-# `ARUmultiplatform/Telegram/**` (DrKLO/Telegram manba kodi, GPLv2) o'zgarganda: submodullar bilan yig'iladi -> standalone APK
+# FAQAT `ARUmultiplatform/Telegram/**` (DrKLO/Telegram manba kodi, GPLv2) o'zgarganda (workflow faylini o'zgartirish qayta yig'maydi): submodullar bilan yig'iladi -> standalone APK
 # (arm64-v8a + armeabi-v7a) -> Telegram "Saqlangan xabarlar" + artifact. Birinchi build uzoq (native kod): ~1–2 soat.
 on:
   push:
     branches: [main]
     paths:
       - 'ARUmultiplatform/Telegram/**'
-      - '.github/workflows/telegram-android.yml'
 
 permissions:
   contents: read

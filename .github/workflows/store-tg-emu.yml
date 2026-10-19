@@ -1,0 +1,45 @@
+name: DrKLO emulyator APK'sini Telegram'da saqlash
+
+# Bir martalik/kerak bo'lganda: `ci/store-tg-emu.run` ichidagi run raqamidagi `tg-emu-apk` artifakti
+# "Saqlangan xabarlar"ga `Telegram-emu-x86_64.apk` nomi bilan yuboriladi (keyin qayta yig'ilmaydi).
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ci/store-tg-emu.run'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  store:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Artifakt yuklash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RUN=$(tr -d '[:space:]' < ci/store-tg-emu.run)
+          # Run tugamaguncha kutish (emu-build artifakti shu job oxirida paydo bo'ladi)
+          for i in $(seq 1 240); do
+            S=$(gh run view "$RUN" --repo "$GITHUB_REPOSITORY" --json status -q .status)
+            if gh run download "$RUN" --repo "$GITHUB_REPOSITORY" -n tg-emu-apk -D art 2>/dev/null; then break; fi
+            echo "kutilmoqda ($S) $i"; sleep 60
+          done
+          ls -la art
+          cp art/tg.apk Telegram-emu-x86_64.apk
+      - name: Telegram "Saqlangan xabarlar"ga yuborish
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+        run: |
+          K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          pip install --no-cache-dir -q pyrogram==2.0.106 tgcrypto==1.2.5
+          S="$RUNNER_TEMP/notify_session"
+          K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in tool/encode/session.enc -out "$S.session"
+          head -c 16 "$S.session" | grep -q "SQLite format 3"
+          python tool/notify/send_apk.py "$S" Telegram-emu-x86_64.apk "DrKLO Telegram (x86_64, emulyator uchun) — ARUGRAM bilan solishtirish; qayta yig'ilmaydi"
+          rm -f "$S.session"
