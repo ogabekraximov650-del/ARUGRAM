@@ -387,13 +387,34 @@ fun TgRefSticker(ref: String, modifier: Modifier = Modifier) {
     Box(modifier) { doc?.let { TgItem(it, Modifier.fillMaxSize(), full = it.kind == "webp") } }
 }
 
+/** GIF havolasi (`tgg.<id>.<hash>.<dc>.<havola>`): ko'ruvchi GIF'ni o'z Telegram hisobi bilan to'g'ridan-to'g'ri yuklaydi. */
+fun tgGifRef(d: TgDoc): String =
+    "tgg.${java.lang.Long.toHexString(d.id)}.${java.lang.Long.toHexString(d.hash)}.${d.dc}.${d.ref.ifEmpty { "x" }}"
+
+@Composable
+fun TgRefGif(ref: String, modifier: Modifier = Modifier) {
+    val doc = remember(ref) {
+        val p = ref.removePrefix("tgg.").split('.')
+        if (p.size != 4) null
+        else runCatching {
+            TgDoc(
+                java.lang.Long.parseUnsignedLong(p[0], 16), java.lang.Long.parseUnsignedLong(p[1], 16), if (p[3] == "x") "" else p[3],
+                p[2].toInt(), "mp4", 0L, "", "m", true, false,
+            )
+        }.getOrNull()
+    }
+    val ready by remember { AppServices.telegram.state.map { it.authorized && it.configured && it.port > 0 }.distinctUntilChanged() }
+        .collectAsStateWithLifecycle(initialValue = AppServices.telegram.state.value.let { it.authorized && it.configured && it.port > 0 })
+    Box(modifier) { if (doc != null && ready) TgItem(doc, Modifier.fillMaxSize()) }
+}
+
 /** Matn ichidagi Telegram emojisi (`[ce:...]`): qabul qiluvchi uni o'z Telegram hisobi orqali oladi; olinmaguncha oddiy emoji belgisi. */
 @Composable
 fun TgRefEmoji(short: String, id: Long, fallback: String, modifier: Modifier = Modifier) {
     var doc by remember(short, id) { mutableStateOf<TgDoc?>(null) }
     val ready by remember { AppServices.telegram.state.map { it.authorized && it.configured && it.port > 0 }.distinctUntilChanged() }
         .collectAsStateWithLifecycle(initialValue = AppServices.telegram.state.value.let { it.authorized && it.configured && it.port > 0 })
-    LaunchedEffect(short, id, ready) { if (doc == null && ready && id > 0) doc = AppServices.tgStickers.resolveRef(short, id) }
+    LaunchedEffect(short, id, ready) { if (doc == null && ready && id > 0) doc = AppServices.tgStickers.emojiDoc(id) ?: AppServices.tgStickers.resolveRef(short, id) }
     Box(modifier, contentAlignment = Alignment.Center) {
         val d = doc
         if (d != null) TgItem(d, Modifier.fillMaxSize(), full = d.kind == "webp")

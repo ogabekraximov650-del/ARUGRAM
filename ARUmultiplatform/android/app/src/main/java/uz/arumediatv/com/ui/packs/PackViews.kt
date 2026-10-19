@@ -229,3 +229,45 @@ fun RichPackText(text: String, color: Color, fontSize: TextUnit = 15.sp, modifie
     }
     Text(annotated, color = color, fontSize = fontSize, lineHeight = lineHeight, fontFamily = TgEmojiFont, inlineContent = inline, modifier = modifier)
 }
+
+/**
+ * Yozish maydonida `[pe:...]` / `[ce:...]` belgilari uzun matn bo'lib emas, bitta emoji belgisi bo'lib ko'rinadi
+ * (kursor belgi oldida/orqasida turadi; o'chirish tugmasi butun belgini o'chiradi).
+ */
+object TokenVisual : androidx.compose.ui.text.input.VisualTransformation {
+    private val re = Regex(PACK_EMOJI_TOKEN.pattern + "|" + uz.arumediatv.com.data.TG_EMOJI_TOKEN.pattern)
+
+    override fun filter(text: AnnotatedString): androidx.compose.ui.text.input.TransformedText {
+        val src = text.text
+        val segs = ArrayList<IntArray>() // [origStart, origEnd, transStart, transEnd]
+        val sb = StringBuilder()
+        var o = 0
+        for (m in re.findAll(src)) {
+            sb.append(src, o, m.range.first)
+            val emo = (m.groupValues[3].ifEmpty { m.groupValues[6] }).ifEmpty { "□" }
+            val ts = sb.length
+            sb.append(emo)
+            segs += intArrayOf(m.range.first, m.range.last + 1, ts, sb.length)
+            o = m.range.last + 1
+        }
+        sb.append(src, o, src.length)
+        val mapping = object : androidx.compose.ui.text.input.OffsetMapping {
+            override fun originalToTransformed(offset: Int): Int {
+                var shift = 0
+                for (g in segs) {
+                    if (offset >= g[1]) shift = g[3] - g[1] else if (offset > g[0]) return g[3] else break
+                }
+                return offset + shift
+            }
+
+            override fun transformedToOriginal(offset: Int): Int {
+                var shift = 0
+                for (g in segs) {
+                    if (offset >= g[3]) shift = g[1] - g[3] else if (offset > g[2]) return g[1] else break
+                }
+                return offset + shift
+            }
+        }
+        return androidx.compose.ui.text.input.TransformedText(AnnotatedString(sb.toString()), mapping)
+    }
+}

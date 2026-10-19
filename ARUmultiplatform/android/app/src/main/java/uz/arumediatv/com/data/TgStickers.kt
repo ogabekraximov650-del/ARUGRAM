@@ -164,6 +164,11 @@ class TgStickerStore(ctx: Context) {
     /** Eskirgan havola uchun ro'yxatni qayta oladi. */
     private suspend fun refresh(d: TgDoc): TgDoc {
         val key = docKeyOf[d.id] ?: return d
+        if (key.startsWith("e")) {
+            docs.remove(key)
+            File(dir, "list_emoji_${key.substring(1)}").delete()
+            return emojiDoc(key.substring(1).toLong()) ?: d
+        }
         if (key.startsWith("n")) {
             docs.remove(key)
             File(dir, "list_name_${key.substring(1)}").delete()
@@ -260,6 +265,15 @@ class TgStickerStore(ctx: Context) {
     /** Ochiq nom bo'yicha to'plam hujjatlari (boshqa foydalanuvchi yuborgan stiker): o'z Telegram hisobimiz orqali olinadi. */
     suspend fun nameDocs(short: String): List<TgDoc> = docs["n$short"] ?: withContext(Dispatchers.IO) {
         docList(listJson("name_$short", "setname:$short")?.optJSONArray("docs")).also { remember("n$short", it) }
+    }
+
+    /** Maxsus emoji hujjati faqat raqami bo'yicha (Telegram o'zi beradi): boshqa foydalanuvchi yuborgan matndagi emoji uchun. */
+    suspend fun emojiDoc(id: Long): TgDoc? {
+        val key = "e$id"
+        docs[key]?.firstOrNull()?.let { return it }
+        return withContext(Dispatchers.IO) {
+            docList(listJson("emoji_$id", "emoji:$id")?.optJSONArray("docs")).also { remember(key, it) }.firstOrNull()
+        }
     }
 
     suspend fun resolveRef(short: String, docId: Long): TgDoc? = nameDocs(short).firstOrNull { it.id == docId }

@@ -488,7 +488,7 @@ fun SupportChatScreen(userId: Long?, title: String, onBack: () -> Unit, onPacks:
                                 if (panelOpen) { panelOpen = false; keyboard?.show() } else { panelOpen = true; focus.clearFocus(); keyboard?.hide() }
                             }, contentAlignment = Alignment.Center) { Icon(if (panelOpen) AruIcons.Keyboard else AruIcons.Emoticon, null, tint = Color.White.copy(alpha = 0.55f), modifier = Modifier.size(26.dp)) }
                             BasicTextField(
-                                text, { text = it.take(2000) }, maxLines = 6, cursorBrush = SolidColor(AruColors.Accent),
+                                text, { text = it.take(2000) }, maxLines = 6, visualTransformation = uz.arumediatv.com.ui.packs.TokenVisual, cursorBrush = SolidColor(AruColors.Accent),
                                 textStyle = TextStyle(color = Color.White, fontSize = 15.sp, fontFamily = TgEmojiFont),
                                 decorationBox = { inner -> Box { if (text.isEmpty()) Text("Xabar", color = Color.White.copy(alpha = 0.38f), fontSize = 15.sp); inner() } },
                                 modifier = Modifier.weight(1f).padding(vertical = 14.dp),
@@ -523,8 +523,11 @@ fun SupportChatScreen(userId: Long?, title: String, onBack: () -> Unit, onPacks:
                     onEmoji = { text += it },
                     onTgSend = { d, kind ->
                         val short = AppServices.tgStickers.shortOf(d)
-                        if (kind == "gifs" || short == null) toast(if (kind == "gifs") "Telegram GIF'ini yuborish hozircha yo'q" else "Stiker to'plami aniqlanmadi")
-                        else scope.launch { store.send(withReply(replyTo?.id, ""), mediaFile = "tgs.$short.${d.id}", mediaType = "sticker")?.let(::toast); replyTo = null }
+                        if (kind != "gifs" && short == null) toast("Stiker to'plami aniqlanmadi")
+                        else scope.launch {
+                            val ref = if (kind == "gifs") uz.arumediatv.com.ui.packs.tgGifRef(d) else "tgs.$short.${d.id}"
+                            store.send(withReply(replyTo?.id, ""), mediaFile = ref, mediaType = if (kind == "gifs") "gif" else "sticker")?.let(::toast); replyTo = null
+                        }
                     },
                     onPick = { pick ->
                         if (pick.kind == uz.arumediatv.com.data.PackKind.EMOJI) text += uz.arumediatv.com.data.packEmojiToken(pick.pack, pick.item, pick.emoji)
@@ -724,6 +727,7 @@ private fun MediaBlock(m: ChatMessage) {
         else -> {
             val ref = uz.arumediatv.com.data.Names.fileNameOf(m.mediaUrl)
             if (ref.startsWith("tgs.")) uz.arumediatv.com.ui.packs.TgRefSticker(ref, Modifier.size(150.dp))
+            else if (ref.startsWith("tgg.")) uz.arumediatv.com.ui.packs.TgRefGif(ref, Modifier.size(190.dp))
             else if (uz.arumediatv.com.data.parsePackRef(ref) != null) uz.arumediatv.com.ui.packs.PackRefImage(ref, Modifier.size(if (m.mediaType == "gif") 190.dp else 140.dp), soundToggle = m.mediaType == "gif")
             else TgImage(m.mediaUrl, Modifier.size(width = 150.dp, height = 150.dp), maxPx = 400, contentScale = ContentScale.Fit)
         }

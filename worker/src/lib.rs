@@ -6809,6 +6809,18 @@ fn valid_tg_sticker_ref(v: &str) -> bool {
         && !id.is_empty() && id.len() <= 20 && id.chars().all(|c| c.is_ascii_digit())
 }
 
+/// `tgg.<id hex>.<hash hex>.<dc>.<fayl havolasi hex yoki x>` — Telegram GIF'iga havola (ko'ruvchi uni o'z hisobi bilan yuklaydi).
+fn valid_tg_gif_ref(v: &str) -> bool {
+    let Some(rest) = v.strip_prefix("tgg.") else { return false };
+    let p: Vec<&str> = rest.split('.').collect();
+    let hex = |s: &str, lo: usize, hi: usize| s.len() >= lo && s.len() <= hi && s.chars().all(|c| c.is_ascii_hexdigit());
+    p.len() == 4
+        && hex(p[0], 1, 16)
+        && hex(p[1], 1, 16)
+        && !p[2].is_empty() && p[2].len() <= 2 && p[2].chars().all(|c| c.is_ascii_digit())
+        && (p[3] == "x" || hex(p[3], 2, 512))
+}
+
 const PACK_SUB_MSG: &str = "Foydalanuvchilar yasagan emoji, GIF va stikerlarni yuborish uchun obuna kerak";
 
 /// POST /api/comments — yangi izoh yoki javob.
@@ -6833,7 +6845,7 @@ async fn comments_add(mut req: Request, env: &Env, origin: &str) -> Result<Respo
     let want_type = b["media_type"].as_str().unwrap_or("");
     // Telegram stikeri (`tgs.<to'plam_nomi>.<hujjat_id>`): fayl hech qayerga yuklanmaydi — qabul qiluvchi uni
     // o'z Telegram hisobi orqali (ochiq to'plam nomi bo'yicha) oladi. To'plam ham, obuna ham kerak emas.
-    let is_tgm = want_type == "sticker" && valid_tg_sticker_ref(&want_media);
+    let is_tgm = (want_type == "sticker" && valid_tg_sticker_ref(&want_media)) || (want_type == "gif" && valid_tg_gif_ref(&want_media));
     if needs_pack_sub(env, &u,
         (!want_media.is_empty() && !is_tgm && (want_type == "sticker" || want_type == "gif")) || body.contains("[pe:")).await
     {
@@ -7409,7 +7421,7 @@ async fn chat_send(mut req: Request, env: &Env, origin: &str) -> Result<Response
     let is_pack_media = want_type == "sticker" || want_type == "gif";
     // Telegram stikeri (`tgs.<to'plam_nomi>.<hujjat_id>`): fayl hech qayerga yuklanmaydi — qabul qiluvchi uni
     // o'z Telegram hisobi orqali (ochiq to'plam nomi bo'yicha) oladi. To'plam ham, obuna ham kerak emas.
-    let is_tgm = want_type == "sticker" && valid_tg_sticker_ref(&media_file);
+    let is_tgm = (want_type == "sticker" && valid_tg_sticker_ref(&media_file)) || (want_type == "gif" && valid_tg_gif_ref(&media_file));
     if needs_pack_sub(env, &u, (is_pack_media && !is_tgm) || body.contains("[pe:")).await {
         return json_resp(&json!({"error": PACK_SUB_MSG}), 402);
     }

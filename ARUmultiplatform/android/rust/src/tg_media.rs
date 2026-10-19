@@ -171,6 +171,15 @@ async fn media_list(client: &Client, arg: &str) -> Result<Value, String> {
             };
             Ok(json!({"ok": true, "docs": docs}))
         }
+        _ if arg.starts_with("emoji:") => {
+            // Maxsus emoji hujjati faqat raqami bo'yicha (boshqa foydalanuvchi yuborgan matndagi emoji uchun).
+            let id: i64 = arg[6..].parse().map_err(|_| "emoji raqami noto'g'ri".to_string())?;
+            let docs = client
+                .invoke(&tl::functions::messages::GetCustomEmojiDocuments { document_id: vec![id] })
+                .await
+                .map_err(|e| inv_err(&e))?;
+            Ok(json!({"ok": true, "docs": media_docs_json(&docs, &Default::default())}))
+        }
         _ if arg.starts_with("set:") || arg.starts_with("setname:") => {
             // `set:<id>:<hash>` — o'z to'plamimiz; `setname:<qisqa_nom>` — ochiq nom bo'yicha (boshqa foydalanuvchi yuborgan stiker uchun).
             let stickerset = if let Some(short) = arg.strip_prefix("setname:") {

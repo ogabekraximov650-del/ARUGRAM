@@ -242,6 +242,7 @@ fun CommentsTab(season: Season, onOpenProfile: (Long) -> Unit, onLogin: () -> Un
                         Spacer(Modifier.width(8.dp))
                         androidx.compose.foundation.text.BasicTextField(
                             value = text, onValueChange = { text = it.take(1000) },
+                            visualTransformation = uz.arumediatv.com.ui.packs.TokenVisual,
                             maxLines = 4, cursorBrush = androidx.compose.ui.graphics.SolidColor(AruColors.Accent2),
                             textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 17.sp, fontFamily = uz.arumediatv.com.ui.packs.TgEmojiFont),
                             modifier = Modifier.weight(1f).padding(vertical = 10.dp).focusRequester(focusRequester).onFocusChanged { f -> fieldFocused = f.isFocused; if (f.isFocused) panelOpen = false },
@@ -262,9 +263,10 @@ fun CommentsTab(season: Season, onOpenProfile: (Long) -> Unit, onLogin: () -> Un
                     onEmoji = { text += it },
                     onTgSend = { d, kind ->
                         val short = AppServices.tgStickers.shortOf(d)
-                        if (kind == "gifs" || short == null) toast(if (kind == "gifs") "Telegram GIF'ini yuborish hozircha yo'q" else "Stiker to'plami aniqlanmadi")
+                        if (kind != "gifs" && short == null) toast("Stiker to'plami aniqlanmadi")
                         else scope.launch {
-                            val e2 = store.add("", parentId = replyTo?.id.orEmpty(), mediaFile = "tgs.$short.${d.id}", mediaType = "sticker")
+                            val ref = if (kind == "gifs") uz.arumediatv.com.ui.packs.tgGifRef(d) else "tgs.$short.${d.id}"
+                            val e2 = store.add("", parentId = replyTo?.id.orEmpty(), mediaFile = ref, mediaType = if (kind == "gifs") "gif" else "sticker")
                             if (e2 == null) { replyTo = null; panelOpen = false } else toast(e2)
                         }
                     },
@@ -364,6 +366,7 @@ private fun CommentRow(
             }
             if (c.mediaFile.isNotEmpty() && (c.mediaType == "sticker" || c.mediaType == "gif")) {
                 if (c.mediaFile.startsWith("tgs.")) uz.arumediatv.com.ui.packs.TgRefSticker(c.mediaFile, Modifier.padding(top = 4.dp).size(130.dp))
+                else if (c.mediaFile.startsWith("tgg.")) uz.arumediatv.com.ui.packs.TgRefGif(c.mediaFile, Modifier.padding(top = 4.dp).size(180.dp))
                 else uz.arumediatv.com.ui.packs.PackRefImage(c.mediaFile, Modifier.padding(top = 4.dp).size(if (c.mediaType == "sticker") 130.dp else 180.dp))
             }
             if (c.body.isNotEmpty()) uz.arumediatv.com.ui.packs.RichPackText(c.body, Color.White.copy(alpha = 0.88f), 14.sp, Modifier.padding(top = 2.dp), 20.sp)
