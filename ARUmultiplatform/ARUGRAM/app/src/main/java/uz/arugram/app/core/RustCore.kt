@@ -100,6 +100,8 @@ object RustCore {
 
     fun tgMarkRead(chatId: Long): JSONObject = guard(errJson("Yadro yuklanmagan")) { json(take(it.rust_tg_mark_read(chatId.toString()))) }
 
+    fun tgMe(): JSONObject = guard(errJson("Yadro yuklanmagan")) { json(take(it.rust_tg_me())) }
+
     fun tgLoginState(): JSONObject = guard(JSONObject().put("stage", "phone")) { json(take(it.rust_tg_login_state())) }
 
     fun tgLoginReset() = guard(Unit) { it.rust_tg_login_reset() }

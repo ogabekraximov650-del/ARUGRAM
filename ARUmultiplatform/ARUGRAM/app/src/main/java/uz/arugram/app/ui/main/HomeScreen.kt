@@ -18,6 +18,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.focusRequester
@@ -42,11 +43,19 @@ fun HomeScreen(auth: AuthModel) {
     val model = remember { ChatsModel() }
     var openChat by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf<Long?>(null) }
     val ui by model.ui.collectAsStateWithLifecycle()
+    var tab by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableIntStateOf(0) }
+    var me by remember { androidx.compose.runtime.mutableStateOf<ChatRow?>(null) }
+    LaunchedEffect(Unit) {
+        val j = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { uz.arugram.app.core.RustCore.tgMe() }
+        if (j.optString("error").isEmpty() && j.has("id")) {
+            me = ChatRow(j.optLong("id"), "user", j.optString("name"), false, 0, false, false, 0, "", false, false, false)
+        }
+    }
     var searching by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
     var query by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf("") }
     androidx.activity.compose.BackHandler(enabled = searching) { searching = false; query = "" }
     val ctx = androidx.compose.ui.platform.LocalContext.current
-    LaunchedEffect(ui.chats.map { it.id }) { AvatarCache.ensure(ctx, ui.chats.filter { !it.self }.map { it.id }) }
+    LaunchedEffect(ui.chats.map { it.id }, me?.id) { AvatarCache.ensure(ctx, (ui.chats.filter { !it.self }.map { it.id } + listOfNotNull(me?.id)).distinct()) }
     // Haqiqiy vaqtdagi yangilanishlar (updates) keyingi bosqichda; hozircha har 20 soniyada ro'yxat yangilanadi.
     LaunchedEffect(Unit) {
         while (true) {
@@ -60,7 +69,9 @@ fun HomeScreen(auth: AuthModel) {
         ChatScreen(opened, onBack = { openChat = null })
         return
     }
-    Column(Modifier.fillMaxSize().background(c.bg)) {
+    Box(Modifier.fillMaxSize().background(c.bg)) {
+    Column(Modifier.fillMaxSize()) {
+    if (tab == 0) {
         Column(Modifier.fillMaxWidth().background(c.bar).statusBarsPadding()) {
             Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (searching) {
@@ -80,14 +91,16 @@ fun HomeScreen(auth: AuthModel) {
                     }
                     if (query.isNotEmpty()) Box(Modifier.size(56.dp).clickable { query = "" }, contentAlignment = Alignment.Center) { uz.arugram.app.ui.components.CloseIcon(c.text) }
                 } else {
-                    Box(Modifier.size(56.dp).clickable { auth.logout() }, contentAlignment = Alignment.Center) { MenuIcon(c.text) }
-                    BasicText("ARUGRAM", Modifier.weight(1f), style = TextStyle(color = c.text, fontSize = 20.sp, fontWeight = FontWeight.Medium), maxLines = 1)
+                    BasicText("ARUGRAM", Modifier.weight(1f).padding(start = 16.dp), style = TextStyle(color = c.text, fontSize = 20.sp, fontWeight = FontWeight.Medium), maxLines = 1)
                     Box(Modifier.size(56.dp).clickable { searching = true }, contentAlignment = Alignment.Center) { SearchIcon(c.text) }
                 }
             }
         }
-        Box(Modifier.weight(1f).fillMaxWidth().navigationBarsPadding()) {
-            when {
+    }
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            if (tab != 0) {
+                TabPlaceholder(MainTab.entries[tab], auth, me)
+            } else when {
                 ui.loading -> CircularProgressIndicator(Modifier.align(Alignment.Center).size(32.dp), color = c.inputActive, strokeWidth = 3.dp)
                 ui.error != null && ui.chats.isEmpty() -> Column(Modifier.align(Alignment.Center).padding(horizontal = 32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     BasicText(ui.error.orEmpty(), style = TextStyle(color = c.gray, fontSize = 15.sp, textAlign = TextAlign.Center))
@@ -97,9 +110,36 @@ fun HomeScreen(auth: AuthModel) {
                 else -> {
                     val shown = if (query.isBlank()) ui.chats else ui.chats.filter { it.name.contains(query.trim(), ignoreCase = true) }
                     if (shown.isEmpty()) BasicText("Hech narsa topilmadi", Modifier.align(Alignment.Center), style = TextStyle(color = c.gray, fontSize = 17.sp))
-                    else ChatList(shown, onOpen = { openChat = it.id })
+                    else ChatList(shown, bottomPadding = 80.dp, onOpen = { openChat = it.id })
                 }
             }
+        }
+    }
+    MainTabsBar(MainTab.entries[tab], { tab = it.ordinal; searching = false; query = "" }, me, Modifier.align(Alignment.BottomCenter).navigationBarsPadding())
+    }
+}
+
+
+/** Kontaktlar / Sozlamalar / Profil tablari hozircha sarlavha va qisqa izoh bilan (keyingi bosqichlarda to'ldiriladi). */
+@Composable
+private fun TabPlaceholder(tab: MainTab, auth: AuthModel, me: ChatRow?) {
+    val c = LocalTg.current
+    Column(Modifier.fillMaxSize().background(c.grayBg).statusBarsPadding(), horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(Modifier.fillMaxWidth().height(56.dp).background(c.bar), contentAlignment = Alignment.CenterStart) {
+            BasicText(tab.label, Modifier.padding(start = 16.dp), style = TextStyle(color = c.text, fontSize = 20.sp, fontWeight = FontWeight.Medium))
+        }
+        if (tab == MainTab.Profile && me != null) {
+            Column(Modifier.fillMaxWidth().background(c.bar).padding(vertical = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                ChatAvatar(me, 96.dp)
+                BasicText(me.name, Modifier.padding(top = 12.dp), style = TextStyle(color = c.text, fontSize = 20.sp, fontWeight = FontWeight.Medium))
+            }
+        }
+        if (tab == MainTab.Settings || tab == MainTab.Profile) {
+            Box(Modifier.padding(top = 24.dp).fillMaxWidth().background(c.bar).clickable { auth.logout() }.padding(vertical = 16.dp), contentAlignment = Alignment.Center) {
+                BasicText("Hisobdan chiqish", style = TextStyle(color = c.red, fontSize = 16.sp))
+            }
+        } else {
+            BasicText("Tez orada qo‘shiladi", Modifier.padding(top = 48.dp), style = TextStyle(color = c.gray, fontSize = 15.sp))
         }
     }
 }

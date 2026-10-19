@@ -55,7 +55,7 @@ fun ChatAvatar(row: ChatRow, size: androidx.compose.ui.unit.Dp = 52.dp) {
     val idx = (abs(row.id) % AvatarTop.size).toInt()
     val top = if (row.self) Color(0xFF69BDF9) else Color(AvatarTop[idx])
     val bottom = if (row.self) Color(0xFF409FE1) else Color(AvatarBottom[idx])
-    val photo = AvatarCache.images[row.id]
+    val photo = if (row.self) null else AvatarCache.images[row.id]
     Box(Modifier.size(size).clip(CircleShape).background(Brush.verticalGradient(listOf(top, bottom))), contentAlignment = Alignment.Center) {
         if (photo != null) {
             androidx.compose.foundation.Image(photo, null, Modifier.size(size), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
@@ -101,9 +101,9 @@ fun chatTime(unix: Long): String {
  * sokin bo'lsa kulrang), mahkamlangan suhbatda belgi.
  */
 @Composable
-fun ChatList(chats: List<ChatRow>, modifier: Modifier = Modifier, onOpen: (ChatRow) -> Unit = {}) {
+fun ChatList(chats: List<ChatRow>, modifier: Modifier = Modifier, bottomPadding: androidx.compose.ui.unit.Dp = 0.dp, onOpen: (ChatRow) -> Unit = {}) {
     val c = LocalTg.current
-    LazyColumn(modifier.fillMaxSize().background(c.bg)) {
+    LazyColumn(modifier.fillMaxSize().background(c.bg), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = bottomPadding)) {
         items(chats, key = { it.id }) { row ->
             Column(Modifier.fillMaxWidth().clickable { onOpen(row) }) {
                 Box(Modifier.fillMaxWidth().height(70.dp)) {

@@ -32,6 +32,7 @@ interface RustLib : Library {
     fun rust_tg_send_text(arg: String): Pointer?
     fun rust_tg_avatars(arg: String): Pointer?
     fun rust_tg_mark_read(arg: String): Pointer?
+    fun rust_tg_me(): Pointer?
     fun rust_tg_logout(): Pointer?
 
     // ── Kirish (intro) sahnasi: Telegram `IntroRenderer.c` ning Rust'ga o'tkazilgan nusxasi (OpenGL ES 2) ──

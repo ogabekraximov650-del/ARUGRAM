@@ -80,6 +80,8 @@ dependencies {
     implementation(libs.compose.ui.tooling.preview)
     implementation(libs.compose.foundation)
     implementation(libs.compose.material3)
+    // Telegram tab ikonkalari (Lottie JSON) — pastki tab panelida.
+    implementation(libs.lottie.compose)
 
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     // JNA: Rust yadrosining C funksiyalarini (`librust_core.so`) to'g'ridan-to'g'ri chaqiradi.

@@ -2583,6 +2583,24 @@ pub extern "C" fn rust_tg_mark_read(arg_ptr: *const c_char) -> *mut c_char {
     }))
 }
 
+/// Joriy hisob: `{"id","name","phone","username"}` (yon panel sarlavhasi uchun).
+#[no_mangle]
+pub extern "C" fn rust_tg_me() -> *mut c_char {
+    string_to_cptr(with_client(|t, client| {
+        if !t.authorized.load(Ordering::SeqCst) {
+            return Err("Telegram ulanmagan".to_string());
+        }
+        let me = run_tmo(t, 30, async { client.get_me().await.map_err(|e| e.to_string()) })?;
+        Ok(json!({
+            "id": me.id().bot_api_dialog_id(),
+            "name": me.full_name(),
+            "phone": me.phone().unwrap_or_default(),
+            "username": me.username().unwrap_or_default(),
+        })
+        .to_string())
+    }))
+}
+
 fn b64(data: &[u8]) -> String {
     const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);

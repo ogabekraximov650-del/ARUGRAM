@@ -39,3 +39,10 @@ Tugma: 56 dp, o'ngdan 20, pastdan 14. Kod katagi: 34×42 dp, oraliq 7, ramka 1,5
 - **Suhbatlar**: Rust `rust_tg_dialogs` / `rust_tg_messages` / `rust_tg_send_text` (grammers) -> `ui/main/ChatsModel.kt`, `ChatList.kt`
   (DrKLO `DialogCell` o'lchamlari), `ChatScreen.kt` (o'qish va matn yuborish). Yangilanish hozircha davriy (20 s / 5 s); haqiqiy vaqtdagi
   `updates`, rasm/avatar yuklash, media va yon panel keyingi bosqichlarda.
+
+## Asosiy oyna — pastki tab paneli (2026-10)
+
+Ishlatilayotgan DrKLO versiyasida yon panel (hamburger) YO'Q: asosiy oyna `MainTabsActivity` — pastda suzuvchi "shisha" tab paneli
+(Chatlar, Kontaktlar, Sozlamalar, Profil). `ui/main/MainTabs.kt` shuni takrorlaydi: 56 dp balandlik, 8 dp chetlar, radius 28, tab ikonkalari —
+Telegram'ning Lottie JSON fayllari (`assets/tabs/`, `lottie-compose`). Haqiqiy "suyuq shisha" (xiralashtirish + sinish) effekti hozircha yarim
+shaffof fon bilan yaqinlashtirilgan; yuqori panel (`glass_targetMainTopPanel`) ham shisha — keyingi bosqichda `DialogsActivity` bilan solishtiriladi.
