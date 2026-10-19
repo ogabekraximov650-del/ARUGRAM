@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="Theme.ARUGRAM" parent="android:Theme.Material.NoActionBar">
+        <!-- MIUI/Android "majburiy qorong'u rejim" ilova ranglarini teskarilab yubormasin (mavzuni o'zimiz boshqaramiz) -->
+        <item name="android:forceDarkAllowed">false</item>
         <item name="android:windowBackground">@color/arugram_bg</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>

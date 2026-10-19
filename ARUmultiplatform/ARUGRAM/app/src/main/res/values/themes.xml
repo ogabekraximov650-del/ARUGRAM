@@ -2,6 +2,8 @@
 <resources>
     <!-- Compose o'zi chizadi; bu yerda faqat ochilish paytidagi fon (Telegram: oq / tungi rejimda qora) -->
     <style name="Theme.ARUGRAM" parent="android:Theme.Material.Light.NoActionBar">
+        <!-- MIUI/Android "majburiy qorong'u rejim" ilova ranglarini teskarilab yubormasin (mavzuni o'zimiz boshqaramiz) -->
+        <item name="android:forceDarkAllowed">false</item>
         <item name="android:windowBackground">@color/arugram_bg</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>

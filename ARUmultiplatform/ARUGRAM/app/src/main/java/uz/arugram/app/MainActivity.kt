@@ -61,6 +61,7 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT),
         )
         super.onCreate(savedInstanceState)
+        if (android.os.Build.VERSION.SDK_INT >= 29) window.decorView.isForceDarkAllowed = false
         val auth = (application as ArugramApp).auth
         auth.start()
         val prefs = getSharedPreferences("ui", MODE_PRIVATE)
