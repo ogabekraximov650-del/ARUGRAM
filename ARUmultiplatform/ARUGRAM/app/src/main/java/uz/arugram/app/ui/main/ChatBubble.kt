@@ -416,11 +416,17 @@ private fun VideoContent(m: MsgRow, onOpen: () -> Unit) {
         Box(Modifier.size(48.dp).clip(CircleShape).background(Color(0x99000000)), contentAlignment = Alignment.Center) {
             TgIcon(R.drawable.ic_play, Color.White, size = 24.dp)
         }
-        BasicText(
-            "${formatDuration(m.dur)}  ${formatSize(m.size)}",
-            Modifier.align(Alignment.TopStart).padding(6.dp).clip(RoundedCornerShape(10.dp)).background(Color(0x66000000)).padding(horizontal = 6.dp, vertical = 2.dp),
-            style = TextStyle(color = Color.White, fontSize = 12.sp),
-        )
+        // Yuklash belgisi + davomiylik va hajm (DrKLO video xabar: yuqori chapda to'q yumaloq to'rtburchak).
+        Row(
+            Modifier.align(Alignment.TopStart).padding(6.dp).clip(RoundedCornerShape(10.dp)).background(Color(0x99000000)).padding(horizontal = 8.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TgIcon(R.drawable.media_download, Color.White, size = 20.dp)
+            Column(Modifier.padding(start = 8.dp)) {
+                BasicText(formatDuration(m.dur), style = TextStyle(color = Color.White, fontSize = 14.sp))
+                BasicText(formatSize(m.size), style = TextStyle(color = Color.White, fontSize = 14.sp))
+            }
+        }
     }
 }
 

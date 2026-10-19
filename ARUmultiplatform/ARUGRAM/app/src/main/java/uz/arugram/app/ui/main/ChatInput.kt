@@ -164,6 +164,7 @@ private val Emojis = ("😀 😃 😄 😁 😆 😅 😂 🤣 😊 😇 🙂 �
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ChatInputBar(
+    broadcast: Boolean = false,
     draft: TextFieldValue,
     onDraft: (TextFieldValue) -> Unit,
     replyTo: MsgRow?,
@@ -298,7 +299,9 @@ fun ChatInputBar(
         }, onDismiss = { pollForm = false })
     }
     LaunchedEffect(toast) { if (toast != null) { delay(2500); toast = null } }
-    Column(Modifier.fillMaxWidth().background(c.bar).navigationBarsPadding().imePadding()) {
+    var silentMode by remember { androidx.compose.runtime.mutableStateOf(false) }
+    val needBg = emojiPanel || recording || replyTo != null || editing != null || !draft.selection.collapsed
+    Column(Modifier.fillMaxWidth().then(if (needBg) Modifier.background(c.bar) else Modifier).navigationBarsPadding().imePadding()) {
         // Matn bezaklari: belgilangan qismni belgilar bilan o'raydi (`**qalin**`, `__kursiv__`, `==tagiga chizilgan==`, `~~o'chirilgan~~`, `` `kod` ``, `||spoyler||`).
         val sel = draft.selection
         if (canWrite && !sel.collapsed && !recording) {
@@ -352,14 +355,20 @@ fun ChatInputBar(
                 }, contentAlignment = Alignment.Center) { SendIcon(Color.White) }
             }
         } else {
-            Row(Modifier.fillMaxWidth().heightIn(min = 44.dp), verticalAlignment = Alignment.Bottom) {
+            val icoCol = if (c.dark) c.gray else Color(0xFF8E959B)
+            // DrKLO yangi uslub: yozish paneli — yumaloq shaffof pilyul; o'ng chetida ko'k doira (mikrofon / yuborish).
+            Row(
+                Modifier.padding(horizontal = 8.dp, vertical = 8.dp).fillMaxWidth().heightIn(min = 48.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(24.dp))
+                    .background(if (c.dark) Color(0xFF1F1F1F) else c.bar),
+                verticalAlignment = Alignment.Bottom,
+            ) {
                 Box(Modifier.size(48.dp).clickable {
                     emojiPanel = !emojiPanel
                     if (emojiPanel) kb?.hide() else kb?.show()
-                }, contentAlignment = Alignment.Center) { TgIcon(if (emojiPanel) R.drawable.input_keyboard else R.drawable.input_smile, if (c.dark) c.gray else Color(0xFF8E959B)) }
-                Box(Modifier.weight(1f).padding(top = 9.dp, bottom = 10.dp)) {
+                }, contentAlignment = Alignment.Center) { TgIcon(if (emojiPanel) R.drawable.input_keyboard else R.drawable.input_smile, icoCol) }
+                Box(Modifier.weight(1f).padding(top = 13.dp, bottom = 12.dp)) {
                     // DrKLO: `chat_messagePanelHint` 0xFF858A84, kursor 0xFF54A1DB, yozuv 18 sp.
-                    if (draft.text.isEmpty()) BasicText("Xabar", style = TextStyle(color = if (c.dark) c.hint else Color(0xFF858A84), fontSize = 18.sp))
+                    if (draft.text.isEmpty()) BasicText(if (broadcast) "Xabar tarqatish" else "Xabar", style = TextStyle(color = if (c.dark) c.hint else Color(0xFF858A84), fontSize = 18.sp))
                     BasicTextField(
                         value = draft, onValueChange = onDraft, maxLines = 6,
                         textStyle = TextStyle(color = c.text, fontSize = 18.sp),
@@ -369,20 +378,26 @@ fun ChatInputBar(
                 }
                 if (draft.text.isBlank()) {
                     if (hasCommands) Box(Modifier.size(48.dp).clickable(onClick = onCommands), contentAlignment = Alignment.Center) {
-                        BasicText("/", style = TextStyle(color = if (c.dark) c.gray else Color(0xFF8E959B), fontSize = 26.sp, fontWeight = FontWeight.Medium))
+                        BasicText("/", style = TextStyle(color = icoCol, fontSize = 26.sp, fontWeight = FontWeight.Medium))
                     }
-                    Box(Modifier.size(48.dp).clickable { attachMenu = true }, contentAlignment = Alignment.Center) { TgIcon(R.drawable.input_attach, if (c.dark) c.gray else Color(0xFF8E959B)) }
-                    if (recorder.supported) {
-                        Box(Modifier.size(48.dp).clickable {
-                            if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-                                if (recorder.start()) recording = true
-                            } else {
-                                permission.launch(Manifest.permission.RECORD_AUDIO)
+                    if (broadcast) Box(Modifier.size(48.dp).clickable { silentMode = !silentMode }, contentAlignment = Alignment.Center) {
+                        TgIcon(if (silentMode) R.drawable.input_notify_off else R.drawable.input_notify_on, icoCol)
+                    }
+                    Box(Modifier.size(48.dp).clickable { attachMenu = true }, contentAlignment = Alignment.Center) { TgIcon(R.drawable.input_attach, icoCol) }
+                }
+                Box(Modifier.padding(4.dp).size(40.dp).clip(CircleShape).background(if (c.dark) c.fab else Blue)
+                    .combinedClickable(
+                        onClick = {
+                            if (draft.text.isNotBlank()) { if (broadcast && silentMode) onSendEx(true, 0) else onSend() }
+                            else if (recorder.supported) {
+                                if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                                    if (recorder.start()) recording = true
+                                } else permission.launch(Manifest.permission.RECORD_AUDIO)
                             }
-                        }, contentAlignment = Alignment.Center) { TgIcon(R.drawable.input_mic, if (c.dark) c.gray else Color(0xFF8E959B)) }
-                    }
-                } else {
-                    Box(Modifier.size(48.dp).combinedClickable(onClick = onSend, onLongClick = { sendMenu = true }), contentAlignment = Alignment.Center) { SendIcon(Blue) }
+                        },
+                        onLongClick = { if (draft.text.isNotBlank()) sendMenu = true },
+                    ), contentAlignment = Alignment.Center) {
+                    if (draft.text.isBlank()) TgIcon(R.drawable.input_mic, Color.White, size = 22.dp) else SendIcon(Color.White)
                 }
             }
             if (emojiPanel) {

@@ -149,7 +149,7 @@ fun ChatInfo(chat: ChatRow, onBack: () -> Unit, onWrite: () -> Unit, onDeleted: 
             Spacer(Modifier.height(24.dp))
         }
     }
-    viewer?.let { MediaViewer(chat, it) { viewer = null } }
+    viewer?.let { MediaViewer(chat, it, onClose = { viewer = null }) }
     if (photosOpen) ProfilePhotosViewer(chat, onClose = { photosOpen = false })
     if (contactForm) {
         TgForm("Kontaktlarga qo‘shish", listOf("Ism", "Familiya (ixtiyoriy)"), "Qo‘shish", initial = listOf(chat.name.substringBefore(' '), chat.name.substringAfter(' ', "")), onConfirm = { v ->

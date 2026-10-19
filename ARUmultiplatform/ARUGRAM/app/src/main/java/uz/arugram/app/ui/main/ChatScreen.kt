@@ -375,6 +375,7 @@ fun ChatScreen(chat: ChatRow, chats: List<ChatRow>, typing: Boolean, onBack: () 
                     Box(Modifier.size(48.dp).clip(CircleShape).background(glassBg).clickable { bulletin = "Sovg‘alar hozircha mavjud emas" }, contentAlignment = Alignment.Center) { TgIcon(R.drawable.msg_input_gift, c.gray) }
                 }
             } else ChatInputBar(
+                broadcast = chat.kind == "channel",
                 draft = draft, onDraft = { if (it.text.length > draft.text.length) model.typing(); draft = it }, replyTo = replyTo, editing = editing, canWrite = canWrite,
                 onCancelContext = { editing = null; replyTo = null; draft = TextFieldValue("") },
                 onSend = ::doSend,
@@ -477,7 +478,13 @@ fun ChatScreen(chat: ChatRow, chats: List<ChatRow>, typing: Boolean, onBack: () 
                 onDismiss = { confirmDeleteChat = false },
             )
         }
-        viewer?.let { MediaViewer(chat, it) { viewer = null } }
+        viewer?.let { v ->
+            MediaViewer(
+                chat, v, onClose = { viewer = null }, media = model.messages,
+                onReply = { replyTo = it; editing = null }, onDelete = { deleteIds = listOf(it.id) }, onForward = { forwardIds = listOf(it.id) },
+                onShowInChat = { m -> val i = model.messages.indexOfFirst { it.id == m.id }; if (i >= 0) scope.launch { listState.animateScrollToItem(i) } },
+            )
+        }
     }
 }
 

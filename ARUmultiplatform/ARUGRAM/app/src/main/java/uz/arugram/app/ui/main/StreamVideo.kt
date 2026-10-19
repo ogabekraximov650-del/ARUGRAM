@@ -114,3 +114,14 @@ fun StreamVideo(spec: String, msgId: Int, modifier: Modifier = Modifier) {
     DisposableEffect(player) { onDispose { player.release() } }
     AndroidView(modifier = modifier, factory = { c -> PlayerView(c).also { it.player = player; it.useController = true } })
 }
+
+/** Oqim bilan ijro etuvchi pleyer (ko'rgich o'zi boshqaruv chizadi). */
+@OptIn(UnstableApi::class)
+fun createStreamPlayer(ctx: android.content.Context, spec: String, msgId: Int): ExoPlayer {
+    val factory = DataSource.Factory { TgStreamDataSource(spec, msgId) }
+    return ExoPlayer.Builder(ctx).build().apply {
+        setMediaSource(ProgressiveMediaSource.Factory(factory).createMediaSource(MediaItem.fromUri("tg://$msgId.mp4")))
+        playWhenReady = true
+        prepare()
+    }
+}
