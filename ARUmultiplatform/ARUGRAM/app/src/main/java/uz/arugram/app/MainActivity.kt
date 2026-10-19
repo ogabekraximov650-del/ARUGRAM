@@ -22,13 +22,11 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.ClipOp
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
-import androidx.compose.ui.graphics.layer.drawLayer
-import androidx.compose.ui.graphics.toImageBitmap
-import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
 import kotlinx.coroutines.launch
 import kotlin.math.hypot
@@ -95,7 +93,7 @@ private fun Root(auth: AuthModel, dark: Boolean, onToggleTheme: () -> Unit) {
     val ui by auth.ui.collectAsStateWithLifecycle()
     val c = LocalTg.current
     val scope = rememberCoroutineScope()
-    val layer = rememberGraphicsLayer()
+    val view = androidx.compose.ui.platform.LocalView.current
     var oldFrame by remember { mutableStateOf<ImageBitmap?>(null) }
     var reveal by remember { mutableStateOf<Pair<Offset, Float>?>(null) }
     val screen = when {
@@ -109,7 +107,11 @@ private fun Root(auth: AuthModel, dark: Boolean, onToggleTheme: () -> Unit) {
     // Mavzu almashishi: eski kadr olinadi, yangi mavzu bir zumda qo'yiladi va eski kadr tugma markazidan doira bo'lib "teshiladi".
     fun toggleWithReveal(center: Offset, size: androidx.compose.ui.unit.IntSize) {
         scope.launch {
-            val bmp = runCatching { layer.toImageBitmap() }.getOrNull()
+            val bmp = runCatching {
+                val b = android.graphics.Bitmap.createBitmap(view.width, view.height, android.graphics.Bitmap.Config.ARGB_8888)
+                view.draw(android.graphics.Canvas(b))
+                b.asImageBitmap()
+            }.getOrNull()
             if (bmp == null) { onToggleTheme(); return@launch }
             oldFrame = bmp
             onToggleTheme()
@@ -127,8 +129,7 @@ private fun Root(auth: AuthModel, dark: Boolean, onToggleTheme: () -> Unit) {
     Box(
         Modifier.fillMaxSize().background(c.bg).onSizeChanged { rootSize = it }
             .drawWithContent {
-                layer.record { this@drawWithContent.drawContent() }
-                drawLayer(layer)
+                drawContent()
                 val bmp = oldFrame
                 val rv = reveal
                 if (bmp != null) {

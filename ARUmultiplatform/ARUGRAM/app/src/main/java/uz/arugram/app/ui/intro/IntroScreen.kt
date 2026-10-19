@@ -325,12 +325,12 @@ private fun IntroArt(page: Int, ph: Float, appear: Float, modifier: Modifier) {
 private fun DrawScope.logo(p: (Float, Float) -> Offset, l: (Float) -> Float, ph: Float) {
     drawCircle(Color(0xFF229AF0), l(308f), p(360f, 346f))
     val plane = Path().apply {
-        moveTo(p(178f, 366).x, p(178f, 366).y)
-        lineTo(p(484f, 245).x, p(484f, 245).y)
-        lineTo(p(446f, 490).x, p(446f, 490).y)
-        lineTo(p(414f, 486).x, p(414f, 486).y)
-        lineTo(p(316f, 418).x, p(316f, 418).y)
-        lineTo(p(408f, 312).x, p(408f, 312).y)
+        moveTo(p(178f, 366f).x, p(178f, 366f).y)
+        lineTo(p(484f, 245f).x, p(484f, 245f).y)
+        lineTo(p(446f, 490f).x, p(446f, 490f).y)
+        lineTo(p(414f, 486f).x, p(414f, 486f).y)
+        lineTo(p(316f, 418f).x, p(316f, 418f).y)
+        lineTo(p(408f, 312f).x, p(408f, 312f).y)
         cubicTo(p(370f, 335f).x, p(370f, 335f).y, p(320f, 385f).x, p(320f, 385f).y, p(262f, 394f).x, p(262f, 394f).y)
         close()
     }
@@ -347,6 +347,10 @@ private fun DrawScope.speedometer(p: (Float, Float) -> Offset, l: (Float) -> Flo
     val outer = 241f
     // Ichki chet radiusi burchakka qarab silliq kamayadi (skrinshotdan moslangan ko'phad).
     fun innerR(deg: Float): Float { val t = deg / 100f; return -35.83f * t * t * t - 56.44f * t * t - 50.82f * t + 186.53f }
+    fun pol(deg: Float, r: Float): Offset {
+        val a = Math.toRadians(deg.toDouble())
+        return Offset(c.x + (cos(a) * l(r)).toFloat(), c.y + (sin(a) * l(r)).toFloat())
+    }
     val arc = Path()
     var first = true
     var d = -136f
