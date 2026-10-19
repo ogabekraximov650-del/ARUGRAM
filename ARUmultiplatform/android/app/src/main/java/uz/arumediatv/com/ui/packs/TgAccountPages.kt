@@ -100,9 +100,22 @@ fun TgItem(d: TgDoc, modifier: Modifier = Modifier, full: Boolean = false, scale
     var poster by remember(d.id) { mutableStateOf(store.peekPoster(d)) }
     var animBytes by remember(d.id) { mutableStateOf(store.peekAnim(d)) }
     var animTried by remember(d.id) { mutableStateOf(animBytes != null) }
-    LaunchedEffect(d.id) { if (poster == null) poster = store.poster(d) }
+    LaunchedEffect(d.id) {
+        var n = 0
+        while (poster == null && n < 3) {
+            poster = store.poster(d)
+            if (poster == null) { if (d.thumb.isEmpty() && d.kind != "webp") break; kotlinx.coroutines.delay(1500L * (n + 1)); n++ }
+        }
+    }
     // `.tgs` va GIF: katak paydo bo'lishi bilan orqa fonda animatsiyali WebP tayyorlanadi (ekranga chiqmasdan oldin tayyor bo'lsin).
-    if (webpCapable) LaunchedEffect(d.id) { if (animBytes == null) { animBytes = store.anim(d); animTried = true } }
+    if (webpCapable) LaunchedEffect(d.id) {
+        var n = 0
+        while (animBytes == null && n < 3) {
+            animBytes = store.anim(d)
+            if (animBytes == null && !store.animBad(d)) { kotlinx.coroutines.delay(2000L * (n + 1)); n++ } else break
+        }
+        animTried = true
+    }
     // Video dekoder: faqat .webm yoki WebP'ga aylantirib bo'lmagan GIF (yoki tayyor bo'lmagan GIFni katta ko'rinishda ochganda).
     val useVideo = !static && d.isVideo && (!d.isGifLike || !webpCapable || (animTried && animBytes == null) || (full && animBytes == null))
     val canAnim = (webpCapable && animBytes != null) || useVideo
@@ -382,7 +395,11 @@ fun TgRefSticker(ref: String, modifier: Modifier = Modifier) {
         .collectAsStateWithLifecycle(initialValue = AppServices.telegram.state.value.let { it.authorized && it.configured && it.port > 0 })
     LaunchedEffect(ref, ready) {
         val id = parts.second ?: return@LaunchedEffect
-        if (doc == null && ready) doc = AppServices.tgStickers.resolveRef(parts.first, id)
+        var n = 0
+        while (doc == null && ready && n < 5) {
+            doc = AppServices.tgStickers.resolveRef(parts.first, id)
+            if (doc == null) { kotlinx.coroutines.delay(1200L * (n + 1)); n++ }
+        }
     }
     Box(modifier) { doc?.let { TgItem(it, Modifier.fillMaxSize(), full = it.kind == "webp") } }
 }
@@ -414,7 +431,14 @@ fun TgRefEmoji(short: String, id: Long, fallback: String, modifier: Modifier = M
     var doc by remember(short, id) { mutableStateOf<TgDoc?>(null) }
     val ready by remember { AppServices.telegram.state.map { it.authorized && it.configured && it.port > 0 }.distinctUntilChanged() }
         .collectAsStateWithLifecycle(initialValue = AppServices.telegram.state.value.let { it.authorized && it.configured && it.port > 0 })
-    LaunchedEffect(short, id, ready) { if (doc == null && ready && id > 0) doc = AppServices.tgStickers.emojiDoc(id) ?: AppServices.tgStickers.resolveRef(short, id) }
+    LaunchedEffect(short, id, ready) {
+        // Tarmoq/Telegram vaqtincha xato bersa, bir necha marta qayta uriniladi ("bir ishlab, bir ishlamay qolmasin").
+        var n = 0
+        while (doc == null && ready && id > 0 && n < 5) {
+            doc = AppServices.tgStickers.emojiDoc(id) ?: AppServices.tgStickers.resolveRef(short, id)
+            if (doc == null) { kotlinx.coroutines.delay(1200L * (n + 1)); n++ }
+        }
+    }
     Box(modifier, contentAlignment = Alignment.Center) {
         val d = doc
         if (d != null) TgItem(d, Modifier.fillMaxSize(), full = d.kind == "webp")

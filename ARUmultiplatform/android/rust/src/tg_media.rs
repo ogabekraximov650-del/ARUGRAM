@@ -172,10 +172,13 @@ async fn media_list(client: &Client, arg: &str) -> Result<Value, String> {
             Ok(json!({"ok": true, "docs": docs}))
         }
         _ if arg.starts_with("emoji:") => {
-            // Maxsus emoji hujjati faqat raqami bo'yicha (boshqa foydalanuvchi yuborgan matndagi emoji uchun).
-            let id: i64 = arg[6..].parse().map_err(|_| "emoji raqami noto'g'ri".to_string())?;
+            // Maxsus emoji hujjatlari faqat raqami bo'yicha (bir nechtasi vergul bilan) — boshqa foydalanuvchi yuborgan matndagi emoji uchun.
+            let ids: Vec<i64> = arg[6..].split(',').filter_map(|v| v.trim().parse().ok()).take(100).collect();
+            if ids.is_empty() {
+                return Err("emoji raqami noto'g'ri".to_string());
+            }
             let docs = client
-                .invoke(&tl::functions::messages::GetCustomEmojiDocuments { document_id: vec![id] })
+                .invoke(&tl::functions::messages::GetCustomEmojiDocuments { document_id: ids })
                 .await
                 .map_err(|e| inv_err(&e))?;
             Ok(json!({"ok": true, "docs": media_docs_json(&docs, &Default::default())}))

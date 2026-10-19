@@ -7,6 +7,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
@@ -267,14 +268,50 @@ class TgStickerStore(ctx: Context) {
         docList(listJson("name_$short", "setname:$short")?.optJSONArray("docs")).also { remember("n$short", it) }
     }
 
-    /** Maxsus emoji hujjati faqat raqami bo'yicha (Telegram o'zi beradi): boshqa foydalanuvchi yuborgan matndagi emoji uchun. */
+    private val emojiLock = Any()
+    private val emojiWait = HashMap<Long, MutableList<kotlinx.coroutines.CompletableDeferred<TgDoc?>>>()
+    private var emojiFlush: kotlinx.coroutines.Job? = null
+
+    /**
+     * Maxsus emoji hujjati faqat raqami bo'yicha (Telegram o'zi beradi): boshqa foydalanuvchi yuborgan matndagi emoji uchun.
+     * Bir vaqtda so'ralganlar BITTA so'rovga jamlanadi (ko'p emoji bo'lsa ham Telegram'ga bitta murojaat).
+     */
     suspend fun emojiDoc(id: Long): TgDoc? {
         val key = "e$id"
         docs[key]?.firstOrNull()?.let { return it }
-        return withContext(Dispatchers.IO) {
-            docList(listJson("emoji_$id", "emoji:$id")?.optJSONArray("docs")).also { remember(key, it) }.firstOrNull()
+        val f = File(dir, "list_emoji_$id")
+        if (f.exists() && System.currentTimeMillis() - f.lastModified() < 24L * 3600 * 1000) {
+            val cached = withContext(Dispatchers.IO) { runCatching { JSONObject(String(SecureStore.open(f.readBytes()), Charsets.UTF_8)) }.getOrNull() }
+            docList(cached?.optJSONArray("docs")).firstOrNull()?.let { remember(key, listOf(it)); return it }
+        }
+        val w = kotlinx.coroutines.CompletableDeferred<TgDoc?>()
+        synchronized(emojiLock) {
+            emojiWait.getOrPut(id) { ArrayList() }.add(w)
+            if (emojiFlush == null) emojiFlush = scope.launch { kotlinx.coroutines.delay(40); flushEmoji() }
+        }
+        return w.await()
+    }
+
+    private suspend fun flushEmoji() {
+        val batch = synchronized(emojiLock) { HashMap(emojiWait).also { emojiWait.clear(); emojiFlush = null } }
+        for (chunk in batch.keys.toList().chunked(40)) {
+            val r = withContext(Dispatchers.IO) { RustCore.tgMediaList("emoji:" + chunk.joinToString(",")) }
+            val arr = if (r.optBoolean("ok")) r.optJSONArray("docs") else null
+            val byId = HashMap<Long, JSONObject>()
+            if (arr != null) for (i in 0 until arr.length()) arr.getJSONObject(i).let { byId[it.optLong("id")] = it }
+            for (id in chunk) {
+                val o = byId[id]
+                val doc = o?.let { parseDoc(it) }
+                if (doc != null) {
+                    remember("e$id", listOf(doc))
+                    runCatching { File(dir, "list_emoji_$id").writeBytes(SecureStore.seal(JSONObject().put("ok", true).put("docs", JSONArray().put(o)).toString().toByteArray(Charsets.UTF_8))) }
+                }
+                batch[id]?.forEach { it.complete(doc) }
+            }
         }
     }
+
+    fun animBad(d: TgDoc): Boolean = File(dir, "a_${d.id}.x").exists()
 
     suspend fun resolveRef(short: String, docId: Long): TgDoc? = nameDocs(short).firstOrNull { it.id == docId }
 
