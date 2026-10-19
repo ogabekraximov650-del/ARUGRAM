@@ -155,7 +155,7 @@ fun MessageBubble(
         if (groupAvatars) Box(Modifier.width(42.dp)) {
             if (showAvatar && m.sid != 0L) ChatAvatar(ChatRow(m.sid, "user", m.sender, false, 0, false, false, 0, "", false, false, false, access = m.shash), 35.dp)
         }
-        Column(Modifier.width(androidx.compose.foundation.layout.IntrinsicSize.Max)) {
+        Column(if (hasMarkup) Modifier.width(androidx.compose.foundation.layout.IntrinsicSize.Max) else Modifier) {
         Box(
             Modifier.widthIn(max = maxW)
                 .then(if (sticker) Modifier else if (m.out && c.dark) Modifier.clip(shape).background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color(0xFF366CAF), Color(0xFF3B8CB9)))) else Modifier.clip(shape).background(bg))
