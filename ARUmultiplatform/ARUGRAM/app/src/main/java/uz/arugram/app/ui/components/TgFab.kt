@@ -32,7 +32,7 @@ import kotlin.math.sin
  * Ko'rinish — kichrayib/o'sib chiqish; band bo'lsa strelka o'rniga aylanuvchi doira.
  */
 @Composable
-fun TgFab(visible: Boolean, busy: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+fun TgFab(visible: Boolean, busy: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier, check: Float = 0f) {
     val c = LocalTg.current
     val show by animateFloatAsState(if (visible) 1f else 0f, tween(200, easing = FastOutSlowInEasing), label = "fabShow")
     val arrow by animateFloatAsState(if (busy) 0f else 1f, tween(180), label = "fabArrow")
@@ -48,7 +48,7 @@ fun TgFab(visible: Boolean, busy: Boolean, onClick: () -> Unit, modifier: Modifi
             .clickable(enabled = visible && !busy, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Canvas(Modifier.size(56.dp).alpha(arrow)) {
+        Canvas(Modifier.size(56.dp).alpha(arrow * (1f - check))) {
             val stroke = 2.dp.toPx()
             val pad = 21.dp.toPx()
             val cy = size.height / 2f
@@ -59,6 +59,17 @@ fun TgFab(visible: Boolean, busy: Boolean, onClick: () -> Unit, modifier: Modifi
             val by = (sin(Math.PI / 4) * back).toFloat()
             drawLine(c.fabIcon, Offset(endX, cy), Offset(bx, cy - by), strokeWidth = stroke, cap = StrokeCap.Round)
             drawLine(c.fabIcon, Offset(endX, cy), Offset(bx, cy + by), strokeWidth = stroke, cap = StrokeCap.Round)
+        }
+        if (check > 0.01f) {
+            // Strelka -> belgi (`TRANSFORM_ARROW_CHECK`): belgi chizilib chiqadi.
+            Canvas(Modifier.size(56.dp).alpha(check)) {
+                val st = 2.dp.toPx()
+                val a = Offset(20.dp.toPx(), 29.dp.toPx())
+                val b = Offset(25.5.dp.toPx(), 34.5.dp.toPx())
+                val cc = Offset(36.dp.toPx(), 22.dp.toPx())
+                drawLine(c.fabIcon, a, a + (b - a) * check, strokeWidth = st, cap = StrokeCap.Round)
+                drawLine(c.fabIcon, b, b + (cc - b) * check, strokeWidth = st, cap = StrokeCap.Round)
+            }
         }
         if (busy) CircularProgressIndicator(Modifier.size(24.dp), color = Color.White, strokeWidth = 2.5.dp)
     }

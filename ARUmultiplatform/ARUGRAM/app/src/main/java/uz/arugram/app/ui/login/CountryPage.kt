@@ -36,6 +36,7 @@ import uz.arugram.app.auth.CountryBook
 import uz.arugram.app.ui.components.BackArrowIcon
 import uz.arugram.app.ui.components.CloseIcon
 import uz.arugram.app.ui.components.SearchIcon
+import uz.arugram.app.ui.components.TgFastScroll
 import uz.arugram.app.ui.theme.LocalTg
 
 /**
@@ -84,7 +85,9 @@ fun CountryPage(onPick: (Country) -> Unit, onBack: () -> Unit) {
                 BasicText(S.NoResult, style = TextStyle(color = c.hint, fontSize = 17.sp, textAlign = TextAlign.Center))
             }
         } else {
-            LazyColumn(Modifier.fillMaxSize()) {
+            val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+            Box(Modifier.fillMaxSize()) {
+            LazyColumn(Modifier.fillMaxSize(), state = listState) {
                 items(list, key = { "${it.iso}-${it.code}" }) { country ->
                     val idx = list.indexOf(country)
                     val newLetter = idx > 0 && query.isEmpty() && list[idx - 1].name.firstOrNull()?.uppercaseChar() != country.name.firstOrNull()?.uppercaseChar()
@@ -105,6 +108,8 @@ fun CountryPage(onPick: (Country) -> Unit, onBack: () -> Unit) {
                         }
                     }
                 }
+            }
+            if (query.isEmpty()) TgFastScroll(listState, list.size, { list.getOrNull(it)?.name?.firstOrNull()?.uppercaseChar()?.toString() })
             }
         }
     }

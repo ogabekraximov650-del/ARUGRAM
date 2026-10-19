@@ -33,6 +33,9 @@ object S {
     const val ForgotInfo = "Parolni tiklash uchun Telegram ilovasining Sozlamalar bo‘limidan foydalaning."
     const val HintPrefix = "Maslahat: "
 
+    const val ConfirmCorrectNumber = "Bu to‘g‘ri raqammi?"            // ConfirmCorrectNumber
+    const val Edit = "Tahrirlash"                                     // Edit
+    const val Yes = "Ha"                                              // CheckPhoneNumberYes
     const val Back = "Orqaga"
     const val Next = "Keyingi"
     const val InvalidPhone = "Telefon raqami noto‘g‘ri. Raqamni tekshirib, qayta urinib ko‘ring."

@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.requiredHeight
 import androidx.compose.ui.graphics.graphicsLayer
 import uz.arugram.app.ui.components.NUMPAD_HEIGHT_DP
+import uz.arugram.app.ui.components.PhoneConfirm
 import uz.arugram.app.ui.components.TgNumPad
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.imePadding
@@ -85,6 +86,12 @@ fun LoginFlow(auth: AuthModel, suppressFab: Boolean = false) {
     var password by rememberSaveable { mutableStateOf("") }
     var phoneActive by rememberSaveable { mutableStateOf(true) }
     var codeInput by rememberSaveable { mutableStateOf("") }
+    var confirmOpen by remember { mutableStateOf(false) }
+    val confirmP by androidx.compose.animation.core.animateFloatAsState(
+        if (confirmOpen) 1f else 0f,
+        tween(250, easing = androidx.compose.animation.core.CubicBezierEasing(0.25f, 0.1f, 0.25f, 1f)),
+        label = "confirm",
+    )
     var localErrorTick by remember { mutableIntStateOf(0) }
     var toast by remember { mutableStateOf<String?>(null) }
 
@@ -133,7 +140,7 @@ fun LoginFlow(auth: AuthModel, suppressFab: Boolean = false) {
                 when {
                     country == null -> { localErrorTick++; showToast(S.WrongCountry) }
                     phoneDigits.length < 5 -> { localErrorTick++; showToast(S.InvalidPhone) }
-                    else -> auth.requestCode(codeDigits + phoneDigits)
+                    else -> confirmOpen = true
                 }
             }
             Page.Password -> if (password.isNotEmpty()) auth.checkPassword(password)
@@ -147,7 +154,8 @@ fun LoginFlow(auth: AuthModel, suppressFab: Boolean = false) {
             ui.stage != Stage.Phone -> { auth.backToPhone(); password = "" }
         }
     }
-    BackHandler(enabled = page != Page.Phone) { goBack() }
+    BackHandler(enabled = page != Page.Phone && !confirmOpen) { goBack() }
+    BackHandler(enabled = confirmOpen) { confirmOpen = false }
 
     // Telegramning o'z raqam klaviaturasi: telefon va kod sahifalarida (parolda tizim klaviaturasi).
     val sent = ui.sent
@@ -245,7 +253,7 @@ fun LoginFlow(auth: AuthModel, suppressFab: Boolean = false) {
             visible = page == Page.Phone || page == Page.Password,
             busy = ui.busy && (page == Page.Phone || page == Page.Password),
             onClick = ::onNext,
-            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 20.dp, bottom = if (keypadWanted) 10.dp else 14.dp).alpha(if (suppressFab) 0f else 1f),
+            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 20.dp, bottom = if (keypadWanted) 10.dp else 14.dp).alpha(if (suppressFab || confirmP > 0.001f) 0f else 1f),
         )
 
         // Xato xabari (Telegram "bulletin"i).
@@ -273,6 +281,25 @@ fun LoginFlow(auth: AuthModel, suppressFab: Boolean = false) {
                 },
             )
         }
+    }
+    if (confirmOpen || confirmP > 0.001f) {
+        PhoneConfirm(
+            progress = confirmP,
+            number = "+" + codeDigits + " " + PhoneFormat.format(phoneDigits, country?.mask),
+            message = S.ConfirmCorrectNumber,
+            editText = S.Edit,
+            yesText = S.Yes,
+            popupBottom = NUMPAD_HEIGHT_DP.dp + 10.dp + 56.dp + 32.dp,
+            onEdit = { confirmOpen = false },
+            onConfirm = { confirmOpen = false; auth.requestCode(codeDigits + phoneDigits) },
+        )
+        TgFab(
+            visible = true,
+            busy = false,
+            onClick = { confirmOpen = false; auth.requestCode(codeDigits + phoneDigits) },
+            check = confirmP,
+            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 20.dp, bottom = NUMPAD_HEIGHT_DP.dp + 10.dp),
+        )
     }
     }
 }
