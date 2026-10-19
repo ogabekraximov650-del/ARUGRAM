@@ -138,7 +138,13 @@ class AuthModel(private val app: Context) {
 
     fun logout() {
         scope.launch {
-            withContext(Dispatchers.IO) { RustCore.tgLogout() }
+            withContext(Dispatchers.IO) {
+                RustCore.tgLogout()
+                // Hisobdan chiqishda mahalliy kesh ham o'chadi: suhbatlar ro'yxati va avatarlar.
+                app.getSharedPreferences("chats_cache", android.content.Context.MODE_PRIVATE).edit().clear().apply()
+                File(app.filesDir, "avatars").deleteRecursively()
+            }
+            uz.arugram.app.ui.main.AvatarCache.clear()
             _ui.update { AuthUi(ready = true) }
         }
     }

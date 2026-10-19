@@ -2395,6 +2395,23 @@ pub extern "C" fn rust_tg_channel_info(arg_ptr: *const c_char) -> *mut c_char {
     }))
 }
 
+/// Xabardagi ilovaning qisqa nomi (matni bo'sh xabarlar uchun: "Rasm", "Stiker" ...). Veb-sahifa — matn bilan birga, nomsiz.
+fn media_label(m: &grammers_client::media::Media) -> &'static str {
+    use grammers_client::media::Media;
+    match m {
+        Media::Photo(_) => "Rasm",
+        Media::Document(_) => "Fayl",
+        Media::Sticker(_) => "Stiker",
+        Media::Contact(_) => "Kontakt",
+        Media::Poll(_) => "So'rovnoma",
+        Media::Geo(_) | Media::Venue(_) | Media::GeoLive(_) => "Joylashuv",
+        Media::Dice(_) => "Zar",
+        Media::WebPage(_) => "",
+        #[allow(unreachable_patterns)]
+        _ => "Ilova",
+    }
+}
+
 /// Suhbatlar ro'yxati (Telegram "Chatlar" oynasi uchun): `{"dialogs":[{"id","kind":"user|group|channel","name","pinned",
 /// "unread","muted","out","date","text","bot","self","verified","username"}]}`. `arg` — nechta suhbat kerakligi (standart 40).
 async fn dialogs_json(client: &Client, limit: usize) -> Result<Value, String> {
@@ -2419,8 +2436,10 @@ async fn dialogs_json(client: &Client, limit: usize) -> Result<Value, String> {
         let (text, date, outgoing) = match &d.last_message {
             Some(m) => {
                 let mut t = m.text().replace('\n', " ");
-                if t.is_empty() && m.media().is_some() {
-                    t = "Media".to_string();
+                if t.is_empty() {
+                    if let Some(md) = m.media() {
+                        t = media_label(&md).to_string();
+                    }
                 }
                 (t, m.date().timestamp(), m.outgoing())
             }
@@ -2474,7 +2493,7 @@ async fn messages_json(client: &Client, chat_id: i64, limit: usize) -> Result<Va
             "date": m.date().timestamp(),
             "text": m.text(),
             "sender": sender.unwrap_or_default(),
-            "media": m.media().is_some(),
+            "media": m.media().map(|md| media_label(&md)).unwrap_or(""),
         }));
     }
     Ok(json!({ "messages": out }))

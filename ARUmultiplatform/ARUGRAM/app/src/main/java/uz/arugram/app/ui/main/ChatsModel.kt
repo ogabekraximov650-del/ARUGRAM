@@ -29,10 +29,31 @@ data class ChatRow(
 data class ChatsUi(val loading: Boolean = true, val chats: List<ChatRow> = emptyList(), val error: String? = null)
 
 /** "Chatlar" ro'yxati holati: Rust yadrosidan suhbatlarni oladi (yangilash — tortib yangilash yoki qayta ochish). */
-class ChatsModel {
+class ChatsModel(private val context: android.content.Context) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val prefs = context.getSharedPreferences("chats_cache", android.content.Context.MODE_PRIVATE)
     private val _ui = MutableStateFlow(ChatsUi())
     val ui: StateFlow<ChatsUi> = _ui
+
+    init {
+        // Oxirgi ro'yxat darhol ko'rinadi (Telegram ham keshdan boshlaydi), keyin tarmoqdan yangilanadi.
+        prefs.getString("dialogs", null)?.let { raw -> runCatching { parse(org.json.JSONArray(raw)) }.getOrNull()?.let { list -> _ui.value = ChatsUi(loading = false, chats = sort(list)) } }
+    }
+
+    private fun sort(list: List<ChatRow>) = list.sortedWith(compareByDescending<ChatRow> { it.pinned }.thenByDescending { it.date })
+
+    private fun parse(arr: org.json.JSONArray?): List<ChatRow> = buildList {
+        for (i in 0 until (arr?.length() ?: 0)) {
+            val o = arr!!.getJSONObject(i)
+            add(
+                ChatRow(
+                    id = o.optLong("id"), kind = o.optString("kind"), name = o.optString("name"), pinned = o.optBoolean("pinned"),
+                    unread = o.optInt("unread"), muted = o.optBoolean("muted"), out = o.optBoolean("out"), date = o.optLong("date"),
+                    text = o.optString("text"), bot = o.optBoolean("bot"), self = o.optBoolean("self"), verified = o.optBoolean("verified"),
+                ),
+            )
+        }
+    }
 
     fun load() {
         _ui.update { it.copy(loading = it.chats.isEmpty(), error = null) }
@@ -44,20 +65,9 @@ class ChatsModel {
                 return@launch
             }
             val arr = j.optJSONArray("dialogs")
-            val list = buildList {
-                for (i in 0 until (arr?.length() ?: 0)) {
-                    val o = arr!!.getJSONObject(i)
-                    add(
-                        ChatRow(
-                            id = o.optLong("id"), kind = o.optString("kind"), name = o.optString("name"), pinned = o.optBoolean("pinned"),
-                            unread = o.optInt("unread"), muted = o.optBoolean("muted"), out = o.optBoolean("out"), date = o.optLong("date"),
-                            text = o.optString("text"), bot = o.optBoolean("bot"), self = o.optBoolean("self"), verified = o.optBoolean("verified"),
-                        ),
-                    )
-                }
-            }
-            // Mahkamlanganlar tepada (Telegram'dagi tartib), qolgani oxirgi xabar vaqti bo'yicha keladi.
-            _ui.update { ChatsUi(loading = false, chats = list.sortedWith(compareByDescending<ChatRow> { it.pinned }.thenByDescending { it.date })) }
+            val list = parse(arr)
+            if (arr != null) prefs.edit().putString("dialogs", arr.toString()).apply()
+            _ui.update { ChatsUi(loading = false, chats = sort(list)) }
         }
     }
 }

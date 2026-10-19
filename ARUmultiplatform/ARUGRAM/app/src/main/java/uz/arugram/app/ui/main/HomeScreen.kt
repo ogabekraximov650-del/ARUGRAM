@@ -21,7 +21,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -40,7 +42,7 @@ import uz.arugram.app.ui.theme.LocalTg
 @Composable
 fun HomeScreen(auth: AuthModel) {
     val c = LocalTg.current
-    val model = remember { ChatsModel() }
+    val model = remember { ChatsModel(androidx.compose.ui.platform.LocalContext.current.applicationContext) }
     var openChat by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf<Long?>(null) }
     val ui by model.ui.collectAsStateWithLifecycle()
     var tab by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableIntStateOf(0) }
@@ -91,8 +93,20 @@ fun HomeScreen(auth: AuthModel) {
                     }
                     if (query.isNotEmpty()) Box(Modifier.size(56.dp).clickable { query = "" }, contentAlignment = Alignment.Center) { uz.arugram.app.ui.components.CloseIcon(c.text) }
                 } else {
-                    BasicText("ARUGRAM", Modifier.weight(1f).padding(start = 16.dp), style = TextStyle(color = c.text, fontSize = 20.sp, fontWeight = FontWeight.Medium), maxLines = 1)
-                    Box(Modifier.size(56.dp).clickable { searching = true }, contentAlignment = Alignment.Center) { SearchIcon(c.text) }
+                    // DrKLO (`hasMainTabs`): sarlavha "logotip" rangida (#168BDB), chapga 4 dp suriladi.
+                    BasicText("ARUGRAM", Modifier.weight(1f).padding(start = 20.dp), style = TextStyle(color = androidx.compose.ui.graphics.Color(0xFF168BDB), fontSize = 20.sp, fontWeight = FontWeight.Bold), maxLines = 1)
+                }
+            }
+            if (!searching) {
+                // `FragmentSearchField`: 48 dp (3 dp ichki chet) -> 42 dp li pilyuli, radius 20, orqa fon matn rangining 5 % (tunda 7 %).
+                val fieldBg = if (c.dark) Color.White.copy(alpha = 0.07f) else Color.Black.copy(alpha = 0.05f)
+                Row(
+                    Modifier.fillMaxWidth().padding(start = 10.dp, end = 10.dp, bottom = 6.dp).height(42.dp)
+                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(20.dp)).background(fieldBg).clickable { searching = true },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) { SearchIcon(c.text.copy(alpha = 0.6f), size = 20.dp) }
+                    BasicText("Qidirish", style = TextStyle(color = c.text.copy(alpha = 0.5f), fontSize = 15.sp))
                 }
             }
         }

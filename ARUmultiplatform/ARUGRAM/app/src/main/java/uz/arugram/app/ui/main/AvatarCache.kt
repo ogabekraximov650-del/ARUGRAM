@@ -19,6 +19,12 @@ object AvatarCache {
     val images = mutableStateMapOf<Long, ImageBitmap>()
     private val asked = HashSet<Long>()
 
+    /** Hisobdan chiqishda xotiradagi avatarlar tozalanadi (diskdagisi `AuthModel.logout` da o'chadi). */
+    fun clear() {
+        images.clear()
+        asked.clear()
+    }
+
     /** Diskdagi mavjud avatarlarni xotiraga oladi, qolganlarini tarmoqdan so'raydi. */
     suspend fun ensure(context: Context, ids: List<Long>) {
         val dir = File(context.filesDir, "avatars").apply { mkdirs() }

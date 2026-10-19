@@ -48,7 +48,7 @@ import uz.arugram.app.core.RustCore
 import uz.arugram.app.ui.components.BackArrowIcon
 import uz.arugram.app.ui.theme.LocalTg
 
-data class MsgRow(val id: Int, val out: Boolean, val date: Long, val text: String, val sender: String, val media: Boolean)
+data class MsgRow(val id: Int, val out: Boolean, val date: Long, val text: String, val sender: String, val media: String)
 
 /**
  * Suhbat oynasi (DrKLO `ChatActivity`, o'qish rejimi): tepada 56 dp li panel (orqaga, avatar 42 dp, nom 17 sp qalin), o'rtada fon va
@@ -72,7 +72,7 @@ fun ChatScreen(chat: ChatRow, onBack: () -> Unit) {
         msgs = buildList {
             for (i in 0 until (arr?.length() ?: 0)) {
                 val o = arr!!.getJSONObject(i)
-                add(MsgRow(o.optInt("id"), o.optBoolean("out"), o.optLong("date"), o.optString("text"), o.optString("sender"), o.optBoolean("media")))
+                add(MsgRow(o.optInt("id"), o.optBoolean("out"), o.optLong("date"), o.optString("text"), o.optString("sender"), o.optString("media")))
             }
         }
     }
@@ -156,7 +156,7 @@ private fun Bubble(m: MsgRow, showSender: Boolean) {
             if (showSender && !m.out && m.sender.isNotEmpty()) {
                 BasicText(m.sender, style = TextStyle(color = Color(0xFF3390EC), fontSize = 14.sp, fontWeight = FontWeight.Medium), maxLines = 1)
             }
-            val body = m.text.ifEmpty { if (m.media) "Media" else "" }
+            val body = m.text.ifEmpty { m.media }
             if (body.isNotEmpty()) BasicText(body, style = TextStyle(color = if (c.dark) Color.White else Color.Black, fontSize = 16.sp))
             BasicText(chatTime(m.date), Modifier.align(Alignment.End), style = TextStyle(color = if (m.out && !c.dark) Color(0xFF70B15C) else Color(0xFFA1AAB3), fontSize = 12.sp))
         }
