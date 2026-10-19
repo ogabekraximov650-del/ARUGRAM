@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import uz.arugram.app.ui.components.TgIcon
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -454,41 +456,77 @@ fun CallsPage(onBack: () -> Unit) {
 }
 
 // ── Telegram Premium ──
+private class PremiumFeature(val icon: Int, val title: String, val text: String)
+
+private val PremiumFeatures = listOf(
+    PremiumFeature(R.drawable.msg_premium_limits, "Ikki baravar limitlar", "1000 tagacha kanal, 30 ta jild, 10 ta mahkamlangan chat, 20 ta ochiq havola va 4 ta akkaunt."),
+    PremiumFeature(R.drawable.msg_filled_stories, "Hikoyalar", "Hikoyalar uchun ustuvorlik, cheksiz yuklash, hikoya muddatini tanlash va ko‘rish tarixi."),
+    PremiumFeature(R.drawable.msg_premium_uploads, "4 GB gacha fayl yuklash", "Har biri 4 GB gacha hajmdagi hujjat, media va video yuboring."),
+    PremiumFeature(R.drawable.msg_premium_speed, "Tezroq yuklab olish", "Media va fayllarni tezlik cheklovisiz yuklab oling."),
+    PremiumFeature(R.drawable.msg_premium_voice, "Ovozni matnga aylantirish", "Ovozli va dumaloq video xabarlarni matn ko‘rinishida o‘qing."),
+    PremiumFeature(R.drawable.msg_premium_ads, "Reklamasiz", "Ommaviy kanallarda reklama ko‘rsatilmaydi."),
+    PremiumFeature(R.drawable.msg_premium_reactions, "Maxsus reaksiyalar", "Yuzlab qo‘shimcha reaksiyalar va bir xabarga bir nechta reaksiya."),
+    PremiumFeature(R.drawable.msg_premium_stickers, "Premium stikerlar", "Maxsus effektli animatsion stikerlar to‘plami."),
+    PremiumFeature(R.drawable.msg_premium_emoji, "Animatsion emojilar", "Minglab animatsion emoji va ularni xabarda ishlatish."),
+    PremiumFeature(R.drawable.menu_premium_tools, "Chatlarni boshqarish", "Chatlarni teglar va jildlar bilan tartibga solish."),
+    PremiumFeature(R.drawable.msg_premium_badge, "Profil belgisi", "Nomingiz yonida Premium yulduzcha belgisi."),
+    PremiumFeature(R.drawable.msg_premium_avatar, "Animatsion profillar", "Profil rasmi sifatida video qo‘yish."),
+    PremiumFeature(R.drawable.premium_status, "Emoji holat", "Nomingiz yonida emoji holat."),
+    PremiumFeature(R.drawable.msg_premium_translate, "Real vaqtda tarjima", "Suhbatdagi xabarlarni butun chat bo‘yicha tarjima qilish."),
+    PremiumFeature(R.drawable.premium_colors, "Ism va profil ranglari", "Ismingiz va profilingiz uchun maxsus rang va naqshlar."),
+)
+
 @Composable
 fun PremiumPage(onBack: () -> Unit) {
     val c = LocalTg.current
     val ctx = LocalContext.current
-    var text by remember { mutableStateOf<String?>(null) }
+    val open = uz.arugram.app.ui.main.LocalOpenLink.current
     var options by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
     var error by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) {
         val j = withContext(Dispatchers.IO) { RustCore.tgPremium() }
         error = j.optString("error").ifEmpty { null }
-        text = j.optString("text")
         val a = j.optJSONArray("options")
         options = buildList { for (i in 0 until (a?.length() ?: 0)) add(a!!.getJSONObject(i)) }
     }
-    Page("Telegram Premium", onBack) {
-        Column(Modifier.fillMaxWidth().background(c.bar).padding(horizontal = 24.dp, vertical = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            BasicText("★", style = TextStyle(color = Color(0xFF7C6BFF), fontSize = 56.sp))
-            BasicText("Telegram Premium", Modifier.padding(top = 8.dp), style = TextStyle(color = c.text, fontSize = 22.sp, fontWeight = FontWeight.Bold))
-            BasicText(
-                "Cheksiz imkoniyatlar: 4 GB gacha fayllar, tezroq yuklash, ovozni matnga aylantirish, qo‘shimcha reaksiyalar, maxsus stikerlar va boshqalar.",
-                Modifier.padding(top = 8.dp), style = TextStyle(color = c.gray, fontSize = 15.sp, lineHeight = 20.sp),
-            )
+    // DrKLO (`PremiumPreviewFragment.buyPremium`, invoice billing): sotib olish Telegramning rasmiy @PremiumBot botiga yo'naltiriladi.
+    fun buy() { val u = "https://t.me/PremiumBot?start=settings"; if (!open(u)) openUrl(ctx, u) }
+    val cheapest = options.minByOrNull { it.optLong("amount") / it.optInt("months").coerceAtLeast(1) }
+    Box(Modifier.fillMaxSize()) {
+        Page("Telegram Premium", onBack) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(R.drawable.settings_premium), null, Modifier.size(96.dp))
+                BasicText("Telegram Premium", Modifier.padding(top = 12.dp), style = TextStyle(color = c.text, fontSize = 22.sp, fontWeight = FontWeight.Bold))
+                BasicText("Cheksiz imkoniyatlar sizni kutmoqda: tezroq, kengroq va yanada shaxsiyroq Telegram.", Modifier.padding(top = 8.dp), style = TextStyle(color = c.gray, fontSize = 15.sp, lineHeight = 20.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center))
+            }
+            if (error != null) Hint(error.orEmpty())
+            Card {
+                PremiumFeatures.forEach { f ->
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp), verticalAlignment = Alignment.Top) {
+                        TgIcon(f.icon, Color(0xFF8E6BFF), Modifier.padding(top = 2.dp), 28.dp)
+                        Column(Modifier.padding(start = 18.dp)) {
+                            BasicText(f.title, style = TextStyle(color = c.text, fontSize = 15.sp, fontWeight = FontWeight.Bold))
+                            BasicText(f.text, Modifier.padding(top = 2.dp), style = TextStyle(color = c.gray, fontSize = 14.sp, lineHeight = 18.sp))
+                        }
+                    }
+                }
+            }
+            Hint("To‘lov Telegramning rasmiy @PremiumBot boti orqali amalga oshiriladi. Obuna faollashgach bu hisob ARUGRAM’da ham Premium imkoniyatlaridan foydalanadi.")
+            Spacer(Modifier.height(96.dp))
         }
-        if (error != null) Hint(error.orEmpty())
-        text?.takeIf { it.isNotEmpty() }?.let { Hint(it) }
-        if (options.isNotEmpty()) Card {
-            options.forEach { o ->
-                val months = o.optInt("months")
-                val title = if (months >= 12 && months % 12 == 0) "${months / 12} yil" else "$months oy"
-                val price = "%.2f %s".format(o.optLong("amount") / 100.0, o.optString("currency"))
-                TextRow(title, value = price, subtitle = if (o.optBoolean("current")) "Hozirgi obuna" else null) { openUrl(ctx, o.optString("url")) }
+        Box(
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(if (c.dark) c.bg else c.bar).navigationBarsPadding().padding(horizontal = 16.dp, vertical = 12.dp),
+        ) {
+            Box(
+                Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(12.dp))
+                    .background(androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(Color(0xFF6B93FF), Color(0xFF976FFF), Color(0xFFE46ACE))))
+                    .clickable { buy() },
+                contentAlignment = Alignment.Center,
+            ) {
+                val price = cheapest?.let { "%.2f %s / oy".format(it.optLong("amount") / 100.0 / it.optInt("months").coerceAtLeast(1), it.optString("currency")) }
+                BasicText(if (price != null) "Premium’ga obuna bo‘lish — $price" else "Premium’ga obuna bo‘lish", style = TextStyle(color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold))
             }
         }
-        Card { TextRow("Premium’ni Telegram botida olish") { openUrl(ctx, "https://t.me/PremiumBot") } }
-        Hint("To‘lov Telegram’ning rasmiy @PremiumBot orqali amalga oshiriladi. Obuna faollashgach bu hisob ARUGRAM’da ham Premium imkoniyatlaridan foydalanadi.")
     }
 }
 

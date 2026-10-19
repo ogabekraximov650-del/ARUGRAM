@@ -3929,6 +3929,7 @@ pub extern "C" fn rust_tg_resolve(arg_ptr: *const c_char) -> *mut c_char {
             "name": title,
             "hash": r.auth.hash().to_string(),
             "username": peer.username().unwrap_or_default(),
+            "bot": matches!(&peer, grammers_client::peer::Peer::User(u) if u.is_bot()),
         }))
     })
 }

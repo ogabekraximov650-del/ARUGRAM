@@ -168,9 +168,12 @@ fun HomeScreen(auth: AuthModel) {
             return@link true
         }
         val name = tmeUsername(url) ?: return@link false
+        val start = Regex("[?&]start=([^&]+)").find(url)?.groupValues?.get(1)
         scope.launch {
             val j = withContext(Dispatchers.IO) { RustCore.tgResolve(name) }
             if (j.optString("error").isEmpty()) {
+                // Bot havolasi `?start=...` bo'lsa, DrKLO kabi `/start ...` yuboriladi (masalan Premium uchun @PremiumBot).
+                if (start != null && j.optBoolean("bot")) withContext(Dispatchers.IO) { RustCore.tgSend("${j.optLong("id")}@${j.optString("hash", "0")}", 0, "/start $start") }
                 open(ChatRow(j.optLong("id"), j.optString("kind"), j.optString("name"), false, 0, false, false, 0, "@$name", false, false, false, access = j.optString("hash", "0")))
             }
         }
