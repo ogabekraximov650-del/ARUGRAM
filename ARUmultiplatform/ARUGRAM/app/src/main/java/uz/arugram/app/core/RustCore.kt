@@ -104,6 +104,11 @@ object RustCore {
 
     fun tgContacts(): JSONObject = guard(errJson("Yadro yuklanmagan")) { json(take(it.rust_tg_contacts())) }
 
+    /** Kelgan yangilanishlar soni; o'zgarsa yangi xabar/holat bor. */
+    fun tgUpdateSeq(): Long = guard(0L) { it.rust_tg_update_seq() }
+
+    fun tgUserAvatars(arg: String): JSONObject = guard(errJson("Yadro yuklanmagan")) { json(take(it.rust_tg_user_avatars(arg))) }
+
     fun tgLoginState(): JSONObject = guard(JSONObject().put("stage", "phone")) { json(take(it.rust_tg_login_state())) }
 
     fun tgLoginReset() = guard(Unit) { it.rust_tg_login_reset() }

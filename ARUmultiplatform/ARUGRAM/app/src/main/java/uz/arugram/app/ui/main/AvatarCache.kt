@@ -51,4 +51,28 @@ object AvatarCache {
             }
         }
     }
+
+    /** Kontakt avatarlari: `items` — `"<id>:<access_hash>:<photo_id>"` qatorlari (Rust `rust_tg_user_avatars`). */
+    suspend fun ensureUsers(context: Context, items: List<Triple<Long, String, String>>) {
+        val dir = File(context.filesDir, "avatars").apply { mkdirs() }
+        val missing = ArrayList<String>()
+        withContext(Dispatchers.IO) {
+            for ((id, hash, photo) in items) {
+                if (images.containsKey(id) || photo.isEmpty()) continue
+                val f = File(dir, "$id.jpg")
+                if (f.exists()) BitmapFactory.decodeFile(f.path)?.let { images[id] = it.asImageBitmap() }
+                if (!images.containsKey(id) && asked.add(id)) missing.add("$id:$hash:$photo")
+            }
+        }
+        if (missing.isEmpty()) return
+        val j = withContext(Dispatchers.IO) { RustCore.tgUserAvatars(missing.joinToString(",")) }
+        val photos = j.optJSONObject("photos") ?: return
+        withContext(Dispatchers.IO) {
+            for (key in photos.keys()) {
+                val bytes = runCatching { Base64.decode(photos.getString(key), Base64.DEFAULT) }.getOrNull() ?: continue
+                File(dir, "$key.jpg").writeBytes(bytes)
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.let { images[key.toLong()] = it.asImageBitmap() }
+            }
+        }
+    }
 }

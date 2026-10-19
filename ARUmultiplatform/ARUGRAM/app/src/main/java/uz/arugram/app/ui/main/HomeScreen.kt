@@ -22,6 +22,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
@@ -62,11 +64,20 @@ fun HomeScreen(auth: AuthModel) {
     var query by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf("") }
     androidx.activity.compose.BackHandler(enabled = searching) { searching = false; query = "" }
     LaunchedEffect(ui.chats.map { it.id }, me?.id) { AvatarCache.ensure(ctx, (ui.chats.filter { !it.self }.map { it.id } + listOfNotNull(me?.id)).distinct()) }
-    // Haqiqiy vaqtdagi yangilanishlar (updates) keyingi bosqichda; hozircha har 20 soniyada ro'yxat yangilanadi.
+    // Yangilanishlar: Rust yadrosi kelgan updates sonini hisoblaydi (`rust_tg_update_seq`); u o'zgarsa ro'yxat darhol yangilanadi.
+    // Zaxira sifatida har 60 soniyada ham yangilanadi (yangilanish yo'qolib qolgan holat uchun).
     LaunchedEffect(Unit) {
+        var last = -1L
+        var sinceLoad = 0
         while (true) {
-            model.load()
-            kotlinx.coroutines.delay(20_000)
+            val seq = withContext(Dispatchers.IO) { uz.arugram.app.core.RustCore.tgUpdateSeq() }
+            if (last == -1L || seq != last || sinceLoad >= 40) {
+                last = seq
+                sinceLoad = 0
+                model.load()
+            }
+            sinceLoad++
+            kotlinx.coroutines.delay(1_500)
         }
     }
 

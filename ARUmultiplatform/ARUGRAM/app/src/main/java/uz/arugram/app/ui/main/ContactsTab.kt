@@ -34,7 +34,7 @@ import uz.arugram.app.core.RustCore
 import uz.arugram.app.ui.theme.LocalTg
 import java.util.Calendar
 
-private data class ContactRow(val id: Long, val name: String, val status: String, val online: Boolean, val seen: Long)
+private data class ContactRow(val id: Long, val name: String, val status: String, val online: Boolean, val seen: Long, val hash: String, val photo: String)
 
 /**
  * Kontaktlar tabi (DrKLO `ContactsActivity`): tepada sarlavha, ro'yxat — nom bo'yicha tartiblangan; qator 58 dp: avatar 42 dp (chapdan 14),
@@ -53,9 +53,13 @@ fun ContactsTab(bottomPadding: androidx.compose.ui.unit.Dp) {
         contacts = buildList {
             for (i in 0 until (arr?.length() ?: 0)) {
                 val o = arr!!.getJSONObject(i)
-                add(ContactRow(o.optLong("id"), o.optString("name"), o.optString("status"), o.optBoolean("online"), o.optLong("seen")))
+                add(ContactRow(o.optLong("id"), o.optString("name"), o.optString("status"), o.optBoolean("online"), o.optLong("seen"), o.optString("hash"), o.optString("photo")))
             }
         }.sortedBy { it.name.lowercase() }
+    }
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    LaunchedEffect(contacts) {
+        contacts?.let { l -> AvatarCache.ensureUsers(ctx, l.filter { it.photo.isNotEmpty() }.take(40).map { Triple(it.id, it.hash, it.photo) }) }
     }
     Column(Modifier.fillMaxSize().background(c.bg).statusBarsPadding()) {
         Box(Modifier.fillMaxWidth().height(56.dp).background(c.bar), contentAlignment = Alignment.CenterStart) {

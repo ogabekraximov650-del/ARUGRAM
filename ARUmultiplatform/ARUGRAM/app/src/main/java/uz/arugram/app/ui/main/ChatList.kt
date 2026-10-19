@@ -28,6 +28,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -121,7 +122,13 @@ fun ChatList(chats: List<ChatRow>, modifier: Modifier = Modifier, bottomPadding:
                     // Xabar matni (pastda) va hisoblagich / mahkam belgisi
                     Row(Modifier.fillMaxWidth().padding(start = 76.dp, end = 15.666.dp, top = 36.dp), verticalAlignment = Alignment.Top) {
                         BasicText(
-                            if (row.text.isEmpty() && row.kind != "channel") "" else row.text,
+                            androidx.compose.ui.text.buildAnnotatedString {
+                                // Guruh/kanalda o'z xabaringiz oldida "Siz:" (DrKLO `chats_nameMessage`, ko'k).
+                                if (row.out && row.kind != "user" && row.text.isNotEmpty()) {
+                                    withStyle(androidx.compose.ui.text.SpanStyle(color = c.counter)) { append("Siz: ") }
+                                }
+                                append(row.text)
+                            },
                             Modifier.weight(1f).padding(top = 1.dp),
                             style = TextStyle(color = c.chatMessage, fontSize = 16.sp),
                             maxLines = 1, overflow = TextOverflow.Ellipsis,

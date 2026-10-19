@@ -76,13 +76,21 @@ fun ChatScreen(chat: ChatRow, onBack: () -> Unit) {
             }
         }
     }
-    // Yangi xabarlar uchun har 5 soniyada yangilanadi (haqiqiy vaqtdagi updates keyingi bosqichda).
+    // Yangi xabarlar: Rust yadrosining updates hisoblagichi o'zgarganda (yoki har 60 soniyada) suhbat yangilanadi.
     LaunchedEffect(chat.id) {
         // Suhbat ochilganda o'qilgan deb belgilanadi (faqat o'qilmagan xabar bo'lsa).
         if (chat.unread > 0) withContext(Dispatchers.IO) { RustCore.tgMarkRead(chat.id) }
+        var last = -1L
+        var since = 0
         while (true) {
-            reload()
-            kotlinx.coroutines.delay(5_000)
+            val seq = withContext(Dispatchers.IO) { RustCore.tgUpdateSeq() }
+            if (last == -1L || seq != last || since >= 40) {
+                last = seq
+                since = 0
+                reload()
+            }
+            since++
+            kotlinx.coroutines.delay(1_500)
         }
     }
 

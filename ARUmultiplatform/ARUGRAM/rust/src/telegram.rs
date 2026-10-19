@@ -450,6 +450,14 @@ impl Session for SealedSession {
 //  ULANISH
 // ═══════════════════════════════════════════════════════════════
 
+/// Kelgan yangilanishlar soni (`rust_tg_update_seq`): o'zgarsa — Kotlin ro'yxatni yangilaydi.
+static UPDATE_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+#[no_mangle]
+pub extern "C" fn rust_tg_update_seq() -> i64 {
+    UPDATE_SEQ.load(Ordering::SeqCst) as i64
+}
+
 fn connect(t: &Tg) -> Option<Client> {
     // Qulf butun yaratish davomida ushlanadi: ikki oqim bir vaqtda
     // kelsa ikkita ulanish (va ikkita sessiya yozuvchisi) ochilmasin.
@@ -491,6 +499,11 @@ fn connect(t: &Tg) -> Option<Client> {
             };
             if accepted {
                 QR_ACCEPTED.store(true, Ordering::SeqCst);
+            }
+            // Har qanday haqiqiy yangilanish (yangi xabar, o'qildi va h.k.) hisoblagichni oshiradi — ilova shuni tekshirib,
+            // ro'yxat/suhbatni darhol yangilaydi (tarmoqqa so'rov yubormasdan, arzon).
+            if matches!(&u, UpdatesLike::Updates(_)) && !accepted {
+                UPDATE_SEQ.fetch_add(1, Ordering::SeqCst);
             }
         }
     });
@@ -2652,9 +2665,45 @@ pub extern "C" fn rust_tg_contacts() -> *mut c_char {
                     "online": online,
                     "seen": seen,
                     "username": u.username.clone().unwrap_or_default(),
+                    "hash": u.access_hash.unwrap_or(0).to_string(),
+                    "photo": match &u.photo {
+                        Some(tl::enums::UserProfilePhoto::Photo(p)) => p.photo_id.to_string(),
+                        _ => String::new(),
+                    },
                 }));
             }
             Ok(json!({ "contacts": out }))
+        })?;
+        Ok(v.to_string())
+    }))
+}
+
+/// Kontakt avatarlari: `arg` = `"<user_id>:<access_hash>:<photo_id>,..."`. Javob: `{"photos":{"<user_id>":"<base64>"}}`.
+#[no_mangle]
+pub extern "C" fn rust_tg_user_avatars(arg_ptr: *const c_char) -> *mut c_char {
+    let items: Vec<(i64, i64, i64)> = unsafe { cstr_to_str(arg_ptr) }
+        .unwrap_or("")
+        .split(',')
+        .filter_map(|x| {
+            let mut p = x.trim().split(':');
+            Some((p.next()?.parse().ok()?, p.next()?.parse().ok()?, p.next()?.parse().ok()?))
+        })
+        .take(60)
+        .collect();
+    string_to_cptr(with_client(|t, client| {
+        if !t.authorized.load(Ordering::SeqCst) {
+            return Err("Telegram ulanmagan".to_string());
+        }
+        let v = run_tmo(t, 60, async {
+            let mut photos = serde_json::Map::new();
+            for (user_id, access_hash, photo_id) in items.iter().copied() {
+                let peer = tl::enums::InputPeer::User(tl::types::InputPeerUser { user_id, access_hash });
+                let loc = tl::enums::InputFileLocation::InputPeerPhotoFileLocation(tl::types::InputPeerPhotoFileLocation { big: false, peer, photo_id });
+                if let Some(b) = download_small(&client, loc).await {
+                    photos.insert(user_id.to_string(), json!(b64(&b)));
+                }
+            }
+            Ok(json!({ "photos": photos }))
         })?;
         Ok(v.to_string())
     }))
