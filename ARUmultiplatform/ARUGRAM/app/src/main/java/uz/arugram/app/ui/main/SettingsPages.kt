@@ -11,11 +11,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
@@ -69,20 +71,21 @@ private fun Page(title: String, onBack: () -> Unit, content: @Composable () -> U
 @Composable
 private fun Card(content: @Composable () -> Unit) {
     val c = LocalTg.current
-    Column(Modifier.padding(top = 8.dp).fillMaxWidth().background(c.bar)) { content() }
+    // DrKLO `UniversalRecyclerView.setSections`: chetdan 12 dp, 16 dp burchakli bo'lim (karta).
+    Column(Modifier.padding(start = 12.dp, end = 12.dp, top = 6.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(if (c.dark) c.bg else c.bar)) { content() }
 }
 
 @Composable
 private fun Hint(text: String) {
     val c = LocalTg.current
-    BasicText(text, Modifier.padding(horizontal = 18.dp, vertical = 10.dp), style = TextStyle(color = c.gray, fontSize = 14.sp, lineHeight = 19.sp))
+    BasicText(text, Modifier.padding(start = 30.dp, end = 30.dp, top = 10.dp, bottom = 8.dp), style = TextStyle(color = c.gray, fontSize = 14.sp, lineHeight = 19.sp))
 }
 
 @Composable
 private fun TextRow(title: String, value: String? = null, subtitle: String? = null, danger: Boolean = false, onClick: (() -> Unit)? = null) {
     val c = LocalTg.current
     Row(
-        Modifier.fillMaxWidth().then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier).padding(horizontal = 18.dp, vertical = 12.dp),
+        Modifier.fillMaxWidth().heightIn(min = 50.dp).then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier).padding(horizontal = 18.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
@@ -96,7 +99,7 @@ private fun TextRow(title: String, value: String? = null, subtitle: String? = nu
 @Composable
 private fun SwitchRow(title: String, subtitle: String? = null, checked: Boolean, onChange: (Boolean) -> Unit) {
     val c = LocalTg.current
-    Row(Modifier.fillMaxWidth().clickable { onChange(!checked) }.padding(start = 18.dp, end = 12.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 50.dp).clickable { onChange(!checked) }.padding(start = 18.dp, end = 12.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             BasicText(title, style = TextStyle(color = c.text, fontSize = 16.sp))
             if (subtitle != null) BasicText(subtitle, Modifier.padding(top = 2.dp), style = TextStyle(color = c.gray, fontSize = 13.sp))

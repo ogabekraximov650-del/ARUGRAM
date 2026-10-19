@@ -2,6 +2,7 @@ package uz.arugram.app.ui.main
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.ui.draw.shadow
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -126,19 +127,47 @@ fun MuteMenu(onPick: (Long) -> Unit, onDismiss: () -> Unit) {
 /** Menyu bandi: ikonka + matn (50 dp, DrKLO `ActionBarMenuSubItem`). */
 class MenuItem(val icon: Int, val label: String, val danger: Boolean = false, val action: () -> Unit)
 
+/** Oxirgi bosilgan nuqta (oyna koordinatalarida): menyular shu yerda ochiladi (DrKLO `ActionBarPopupWindow` bosilgan joy yonida chiqadi). */
+object LastPress { var pos = androidx.compose.ui.unit.IntOffset.Zero }
+
+/** Ildiz tuzilmaga qo'yiladi: har bosilgan nuqtani eslab qoladi (hodisani iste'mol qilmaydi). */
+fun Modifier.trackPress(): Modifier = this.pointerInput(Unit) {
+    awaitPointerEventScope {
+        while (true) {
+            val ev = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+            val ch = ev.changes.firstOrNull()
+            if (ch != null && ch.pressed) LastPress.pos = androidx.compose.ui.unit.IntOffset(ch.position.x.toInt(), ch.position.y.toInt())
+        }
+    }
+}
+
 @Composable
 fun PopupMenu(items: List<MenuItem>, onDismiss: () -> Unit, header: (@Composable () -> Unit)? = null) {
     val c = LocalTg.current
-    Dialog(onDismissRequest = onDismiss) {
-        Column(Modifier.widthIn(max = 300.dp).clip(RoundedCornerShape(20.dp)).background(dialogBg()).padding(vertical = 6.dp)) {
+    val bg = if (c.dark) Color(0xFF282829) else Color.White
+    val fg = if (c.dark) Color.White else Color(0xFF222222)
+    val provider = remember {
+        object : androidx.compose.ui.window.PopupPositionProvider {
+            override fun calculatePosition(anchorBounds: androidx.compose.ui.unit.IntRect, windowSize: androidx.compose.ui.unit.IntSize, layoutDirection: androidx.compose.ui.unit.LayoutDirection, popupContentSize: androidx.compose.ui.unit.IntSize): androidx.compose.ui.unit.IntOffset {
+                val p = LastPress.pos
+                val m = 16
+                if (p == androidx.compose.ui.unit.IntOffset.Zero) return androidx.compose.ui.unit.IntOffset((windowSize.width - popupContentSize.width) / 2, (windowSize.height - popupContentSize.height) / 2)
+                val x = (p.x - popupContentSize.width / 2).coerceIn(m, (windowSize.width - popupContentSize.width - m).coerceAtLeast(m))
+                val y = if (p.y + popupContentSize.height > windowSize.height - m) (p.y - popupContentSize.height).coerceAtLeast(m) else p.y
+                return androidx.compose.ui.unit.IntOffset(x, y)
+            }
+        }
+    }
+    androidx.compose.ui.window.Popup(popupPositionProvider = provider, onDismissRequest = onDismiss, properties = androidx.compose.ui.window.PopupProperties(focusable = true)) {
+        Column(Modifier.widthIn(min = 196.dp, max = 300.dp).shadow(8.dp, RoundedCornerShape(10.dp)).clip(RoundedCornerShape(10.dp)).background(bg).padding(vertical = 4.dp)) {
             header?.invoke()
             items.forEach { it0 ->
                 Row(
                     Modifier.fillMaxWidth().height(48.dp).clickable { onDismiss(); it0.action() }.padding(horizontal = 18.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    TgIcon(it0.icon, if (it0.danger) c.red else c.text.copy(alpha = 0.75f), size = 24.dp)
-                    BasicText(it0.label, Modifier.padding(start = 16.dp), style = TextStyle(color = if (it0.danger) c.red else c.text, fontSize = 16.sp), maxLines = 1)
+                    TgIcon(it0.icon, if (it0.danger) c.red else fg, size = 24.dp)
+                    BasicText(it0.label, Modifier.padding(start = 19.dp), style = TextStyle(color = if (it0.danger) c.red else fg, fontSize = 16.sp), maxLines = 1)
                 }
             }
         }

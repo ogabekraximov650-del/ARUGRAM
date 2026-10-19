@@ -90,6 +90,8 @@ fun SettingsTab(
     val c = LocalTg.current
     val scroll = rememberScrollState()
     var menu by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    var searching by remember { androidx.compose.runtime.mutableStateOf(false) }
+    var query by remember { androidx.compose.runtime.mutableStateOf("") }
     val picker = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetContent()) { uri -> if (uri != null) onPhoto(uri) }
     val card = if (c.dark) c.bg else c.bar
     val barAlpha = (scroll.value / with(androidx.compose.ui.platform.LocalDensity.current) { 120.dp.toPx() }).coerceIn(0f, 1f)
@@ -97,7 +99,7 @@ fun SettingsTab(
         Column(Modifier.fillMaxSize().verticalScroll(scroll)) {
             Spacer(Modifier.statusBarsPadding().height(12.dp))
             // Tepa qism: avatar, ism, telefon va @nom
-            Box(Modifier.fillMaxWidth().height(184.dp)) {
+            if (!searching) Box(Modifier.fillMaxWidth().height(184.dp)) {
                 if (me != null) {
                     Box(Modifier.align(Alignment.TopCenter).padding(top = 26.dp).size(90.dp).clickable { picker.launch("image/*") }) {
                         ChatAvatar(me, 90.dp)
@@ -111,6 +113,15 @@ fun SettingsTab(
                     if (meContact.isNotEmpty()) BasicText(meContact.replace("  ·  ", " • "), Modifier.align(Alignment.TopCenter).padding(top = 156.dp), style = TextStyle(color = c.gray, fontSize = 13.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center), maxLines = 1)
                 }
             }
+            if (searching) {
+                val all = MainItems + ExtraItems + HelpItems
+                val q = query.trim().lowercase()
+                val found = if (q.isEmpty()) emptyList() else all.filter { it.title.lowercase().contains(q) || (it.subtitle ?: "").lowercase().contains(q) }
+                Column(Modifier.padding(start = 12.dp, end = 12.dp, top = 56.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(card)) {
+                    if (q.isNotEmpty() && found.isEmpty()) BasicText("Hech narsa topilmadi", Modifier.padding(18.dp), style = TextStyle(color = c.gray, fontSize = 16.sp))
+                    found.forEach { it0 -> SettingRow(it0) { searching = false; query = ""; if (it0.route.startsWith("url:")) openUrl(ctx, it0.route.removePrefix("url:")) else onNavigate(it0.route) } }
+                }
+            } else
             Column(Modifier.padding(horizontal = 12.dp)) {
                 Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(card)) {
                     MainItems.forEach { it0 -> SettingRow(it0) { onNavigate(it0.route) } }
@@ -135,8 +146,15 @@ fun SettingsTab(
             Spacer(Modifier.height(bottomPadding))
         }
         // Shaffof tepa panel: surilganda fon va sarlavha paydo bo'ladi
-        Row(Modifier.fillMaxWidth().background(c.bar.copy(alpha = barAlpha)).statusBarsPadding().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (searching) Row(Modifier.fillMaxWidth().background(c.bar).statusBarsPadding().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(56.dp).clickable { searching = false; query = "" }, contentAlignment = Alignment.Center) { uz.arugram.app.ui.components.BackArrowIcon(c.text) }
+            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                if (query.isEmpty()) BasicText("Qidirish", style = TextStyle(color = c.hint, fontSize = 18.sp))
+                androidx.compose.foundation.text.BasicTextField(query, { query = it }, singleLine = true, textStyle = TextStyle(color = c.text, fontSize = 18.sp), cursorBrush = androidx.compose.ui.graphics.SolidColor(c.inputActive), modifier = Modifier.fillMaxWidth())
+            }
+        } else Row(Modifier.fillMaxWidth().background(c.bar.copy(alpha = barAlpha)).statusBarsPadding().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
             BasicText("Sozlamalar", Modifier.weight(1f).padding(start = 20.dp).alpha(barAlpha), style = TextStyle(color = c.text, fontSize = 20.sp, fontWeight = FontWeight.Bold))
+            Box(Modifier.size(48.dp).clickable { searching = true }, contentAlignment = Alignment.Center) { uz.arugram.app.ui.components.SearchIcon(c.text) }
             Box(Modifier.size(48.dp).clickable { menu = true }, contentAlignment = Alignment.Center) { uz.arugram.app.ui.components.TgIcon(R.drawable.ic_ab_other, c.text) }
         }
         if (menu) AnchoredMenu(listOf(MenuRow(R.drawable.msg_leave, "Chiqish") { onLogout() }), onDismiss = { menu = false })

@@ -179,7 +179,7 @@ fun HomeScreen(auth: AuthModel) {
     fun live(r: ChatRow) = ui.chats.firstOrNull { it.id == r.id } ?: r
 
     androidx.compose.runtime.CompositionLocalProvider(LocalOpenLink provides openLink) {
-    Box(Modifier.fillMaxSize().background(c.bg)) {
+    Box(Modifier.fillMaxSize().background(c.bg).trackPress()) {
         // ── Asosiy tablar ──
         Box(Modifier.fillMaxSize()) {
             Column(Modifier.fillMaxSize()) {
