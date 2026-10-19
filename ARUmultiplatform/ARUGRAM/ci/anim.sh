@@ -51,7 +51,7 @@ page() { # $1 = left|right
 adb shell am force-stop "$PKG"; adb shell pm clear "$PKG" >/dev/null 2>&1 || true
 for P in READ_PHONE_STATE READ_PHONE_NUMBERS CALL_PHONE READ_CALL_LOG RECEIVE_SMS READ_SMS POST_NOTIFICATIONS READ_CONTACTS; do adb shell pm grant "$PKG" "android.permission.$P" 2>/dev/null || true; done
 adb shell am start -n "$ACT"; sleep 10
-adb shell "screenrecord --time-limit 175 --bit-rate 12000000 /sdcard/anim.mp4" &
+adb shell "screenrecord --time-limit 175 --bit-rate 12000000 /sdcard/anim.mp4" > "$OUT/screenrecord.log" 2>&1 &
 REC=$!
 T0=$(now)
 ev "boshlandi"
@@ -69,3 +69,5 @@ ev "tugadi"
 wait $REC 2>/dev/null || true
 sleep 2
 adb pull /sdcard/anim.mp4 "$OUT/anim.mp4" || true
+adb logcat -d -t 3000 *:W | grep -E "AndroidRuntime|FATAL|$PKG|ANR|Process .* died" | tail -60 > "$OUT/logcat.txt" || true
+adb shell dumpsys activity activities | grep -E "mResumedActivity|topResumedActivity" | head -3 >> "$OUT/logcat.txt" || true
