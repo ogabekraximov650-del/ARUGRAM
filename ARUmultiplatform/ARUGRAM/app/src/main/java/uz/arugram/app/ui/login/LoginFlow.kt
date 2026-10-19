@@ -16,6 +16,13 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.requiredHeight
+import androidx.compose.ui.graphics.graphicsLayer
+import uz.arugram.app.ui.components.NUMPAD_HEIGHT_DP
+import uz.arugram.app.ui.components.TgNumPad
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -76,7 +83,8 @@ fun LoginFlow(auth: AuthModel, suppressFab: Boolean = false) {
     var phoneDigits by rememberSaveable { mutableStateOf("") }
     var showCountries by rememberSaveable { mutableStateOf(false) }
     var password by rememberSaveable { mutableStateOf("") }
-    var focusPhoneTick by remember { mutableIntStateOf(0) }
+    var phoneActive by rememberSaveable { mutableStateOf(true) }
+    var codeInput by rememberSaveable { mutableStateOf("") }
     var localErrorTick by remember { mutableIntStateOf(0) }
     var toast by remember { mutableStateOf<String?>(null) }
 
@@ -111,7 +119,7 @@ fun LoginFlow(auth: AuthModel, suppressFab: Boolean = false) {
                 if (CountryBook.forCode(pre) != null) {
                     codeDigits = pre
                     phoneDigits = d.drop(p) + phoneDigits
-                    focusPhoneTick++
+                    phoneActive = true
                     return
                 }
             }
@@ -141,7 +149,39 @@ fun LoginFlow(auth: AuthModel, suppressFab: Boolean = false) {
     }
     BackHandler(enabled = page != Page.Phone) { goBack() }
 
-    Box(Modifier.fillMaxSize().background(c.bg).statusBarsPadding().navigationBarsPadding().imePadding()) {
+    // Telegramning o'z raqam klaviaturasi: telefon va kod sahifalarida (parolda tizim klaviaturasi).
+    val sent = ui.sent
+    val keypadWanted = !showCountries && (ui.stage == Stage.Phone || (ui.stage == Stage.Code && sent?.via != "flash_call"))
+    LaunchedEffect(ui.stage) { if (ui.stage != Stage.Code) codeInput = "" }
+    fun onDigit(d: Char) {
+        when {
+            ui.stage == Stage.Phone -> if (phoneActive) phoneDigits = (phoneDigits + d).take(15) else onCodeChange(codeDigits + d)
+            ui.stage == Stage.Code -> {
+                val len = codeLength(sent)
+                if (!ui.busy && codeInput.length < len) {
+                    codeInput += d
+                    if (codeInput.length == len) auth.signIn(codeInput)
+                }
+            }
+        }
+    }
+    fun onBackspace() {
+        when {
+            ui.stage == Stage.Phone -> when {
+                phoneActive && phoneDigits.isNotEmpty() -> phoneDigits = phoneDigits.dropLast(1)
+                phoneActive -> { phoneActive = false; codeDigits = codeDigits.dropLast(1) }
+                else -> codeDigits = codeDigits.dropLast(1)
+            }
+            ui.stage == Stage.Code -> if (!ui.busy) codeInput = codeInput.dropLast(1)
+        }
+    }
+    val keypadP = remember { androidx.compose.animation.core.Animatable(if (keypadWanted) 1f else 0f) }
+    LaunchedEffect(keypadWanted) {
+        keypadP.animateTo(if (keypadWanted) 1f else 0f, tween(300, easing = if (keypadWanted) androidx.compose.animation.core.CubicBezierEasing(0.25f, 0.1f, 0.25f, 1f) else androidx.compose.animation.core.CubicBezierEasing(0.455f, 0.03f, 0.515f, 0.955f)))
+    }
+
+    Column(Modifier.fillMaxSize().background(c.bg).statusBarsPadding().navigationBarsPadding().imePadding()) {
+    Box(Modifier.weight(1f).fillMaxWidth()) {
         AnimatedContent(
             targetState = page,
             modifier = Modifier.fillMaxSize(),
@@ -159,15 +199,13 @@ fun LoginFlow(auth: AuthModel, suppressFab: Boolean = false) {
                         codeDigits = codeDigits,
                         phoneDigits = phoneDigits,
                         errorTick = ui.errorTick + localErrorTick,
-                        focusPhoneTick = focusPhoneTick,
-                        onCode = ::onCodeChange,
-                        onPhone = { phoneDigits = it },
+                        phoneActive = phoneActive,
+                        onActive = { phoneActive = it },
                         onPickCountry = { showCountries = true },
-                        onNext = ::onNext,
                     )
                 }
                 Page.Country -> CountryPage(
-                    onPick = { picked -> codeDigits = picked.code; showCountries = false; focusPhoneTick++ },
+                    onPick = { picked -> codeDigits = picked.code; showCountries = false; phoneActive = true },
                     onBack = { showCountries = false },
                 )
                 Page.Code -> Box(Modifier.fillMaxSize().padding(start = 18.dp, end = 18.dp, top = 30.dp)) {
@@ -176,7 +214,8 @@ fun LoginFlow(auth: AuthModel, suppressFab: Boolean = false) {
                         sent = ui.sent,
                         errorTick = ui.errorTick,
                         busy = ui.busy,
-                        onSubmit = { auth.signIn(it) },
+                        code = codeInput,
+                        onCode = { codeInput = it },
                         onResend = { auth.resendCode() },
                         onWrongNumber = { goBack() },
                     )
@@ -206,7 +245,7 @@ fun LoginFlow(auth: AuthModel, suppressFab: Boolean = false) {
             visible = page == Page.Phone || page == Page.Password,
             busy = ui.busy && (page == Page.Phone || page == Page.Password),
             onClick = ::onNext,
-            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 20.dp, bottom = 14.dp).alpha(if (suppressFab) 0f else 1f),
+            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 20.dp, bottom = if (keypadWanted) 10.dp else 14.dp).alpha(if (suppressFab) 0f else 1f),
         )
 
         // Xato xabari (Telegram "bulletin"i).
@@ -222,6 +261,19 @@ fun LoginFlow(auth: AuthModel, suppressFab: Boolean = false) {
                 BasicText(shown.value, style = TextStyle(color = Color.White, fontSize = 14.sp, lineHeight = 19.sp))
             }
         }
+    }
+    if (keypadWanted || keypadP.value > 0.001f) {
+        Box(Modifier.fillMaxWidth().height(if (keypadWanted) NUMPAD_HEIGHT_DP.dp else (NUMPAD_HEIGHT_DP * keypadP.value).dp)) {
+            TgNumPad(
+                onDigit = ::onDigit,
+                onBackspace = ::onBackspace,
+                modifier = Modifier.fillMaxWidth().requiredHeight(NUMPAD_HEIGHT_DP.dp).graphicsLayer {
+                    alpha = keypadP.value
+                    translationY = (1f - keypadP.value) * NUMPAD_HEIGHT_DP.dp.toPx()
+                },
+            )
+        }
+    }
     }
 }
 

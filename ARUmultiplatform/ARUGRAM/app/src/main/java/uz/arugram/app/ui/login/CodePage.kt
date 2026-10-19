@@ -1,7 +1,6 @@
 package uz.arugram.app.ui.login
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,7 +19,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -45,24 +43,21 @@ fun CodePage(
     sent: SentInfo?,
     errorTick: Int,
     busy: Boolean,
-    onSubmit: (String) -> Unit,
+    code: String,
+    onCode: (String) -> Unit,
     onResend: () -> Unit,
     onWrongNumber: () -> Unit,
 ) {
     val c = LocalTg.current
-    val length = (sent?.length ?: 0).takeIf { it in 4..8 } ?: 5
-    var code by remember { mutableStateOf("") }
+    val length = codeLength(sent)
     var errorOn by remember { mutableStateOf(false) }
-    val focus = remember { FocusRequester() }
 
-    LaunchedEffect(Unit) { delay(300); runCatching { focus.requestFocus() } }
     LaunchedEffect(errorTick) {
         if (errorTick == 0) return@LaunchedEffect
         errorOn = true
         delay(550)
-        code = ""
+        onCode("")
         errorOn = false
-        runCatching { focus.requestFocus() }
     }
 
     // Qayta yuborish hisoblagichi (Telegram yuborgan `timeout` soniya).
@@ -101,18 +96,10 @@ fun CodePage(
             value = code,
             length = length,
             error = errorOn,
-            onValueChange = { v ->
-                if (!busy && !errorOn) {
-                    code = v
-                    if (v.length == length) onSubmit(v)
-                }
-            },
-            focusRequester = focus,
             modifier = Modifier
                 .padding(top = 32.dp)
                 .height(42.dp)
-                .shakeOnChange(errorTick)
-                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { runCatching { focus.requestFocus() } },
+                .shakeOnChange(errorTick),
         )
         Box(Modifier.weight(1f))
         Column(Modifier.padding(bottom = 18.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Bottom) {
@@ -142,3 +129,6 @@ fun CodePage(
         }
     }
 }
+
+/** Kod uzunligi (Telegram yuborgan; aks holda 5). */
+fun codeLength(sent: SentInfo?): Int = (sent?.length ?: 0).takeIf { it in 4..8 } ?: 5

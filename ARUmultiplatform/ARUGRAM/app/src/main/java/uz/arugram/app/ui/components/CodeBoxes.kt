@@ -12,8 +12,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.BasicText
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -22,18 +20,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import uz.arugram.app.ui.theme.LocalTg
@@ -48,15 +41,13 @@ private val Overshoot = Easing { t ->
 /**
  * Kod maydonlari (DrKLO `CodeFieldContainer` + `CodeNumberField`): har biri 34×42 dp, oralig'i 7 dp, ramka 1,5 dp, burchak 4 dp,
  * raqam 20 sp. Fokusdagi katak ko'k, xatoda qizil (prujinali o'tish); raqam kirganda 350 ms'da "sakrab" chiqadi, o'chganda 220 ms'da so'nadi.
- * Kiritish ko'rinmas maydon orqali (raqamlar klaviaturasi), katakchalar faqat ko'rsatadi.
+ * Kiritish Telegramning o'z raqam klaviaturasi (`TgNumPad`) orqali; katakchalar faqat ko'rsatadi.
  */
 @Composable
 fun TgCodeBoxes(
     value: String,
     length: Int,
     error: Boolean,
-    onValueChange: (String) -> Unit,
-    focusRequester: FocusRequester,
     modifier: Modifier = Modifier,
 ) {
     val c = LocalTg.current
@@ -67,15 +58,6 @@ fun TgCodeBoxes(
                 CodeBox(value.getOrNull(i), focused, error)
             }
         }
-        BasicTextField(
-            value = value,
-            onValueChange = { v -> onValueChange(v.filter { it in '0'..'9' }.take(length)) },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-            singleLine = true,
-            cursorBrush = SolidColor(c.bg),
-            textStyle = TextStyle(color = c.bg),
-            modifier = Modifier.size(1.dp).alpha(0f).focusRequester(focusRequester),
-        )
     }
 }
 

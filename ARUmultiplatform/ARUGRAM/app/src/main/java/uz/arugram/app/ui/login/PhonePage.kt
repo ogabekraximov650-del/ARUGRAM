@@ -66,19 +66,13 @@ import uz.arugram.app.ui.components.TgOutlineBox
 import uz.arugram.app.ui.components.shakeOnChange
 import uz.arugram.app.ui.theme.LocalTg
 
-/** Raqamni davlat shabloniga (bo'shliqlar bilan) ko'rsatadigan o'zgartirish; kursor o'rni to'g'ri xaritalanadi. */
-private class PhoneVisual(private val mask: String?) : VisualTransformation {
-    override fun filter(text: AnnotatedString): TransformedText {
-        val digits = text.text
-        val formatted = PhoneFormat.format(digits, mask)
-        return TransformedText(
-            AnnotatedString(formatted),
-            object : OffsetMapping {
-                override fun originalToTransformed(offset: Int) = PhoneFormat.toFormatted(digits, mask, offset)
-                override fun transformedToOriginal(offset: Int) = PhoneFormat.toDigits(formatted, offset)
-            },
-        )
-    }
+/** Miltillovchi kursor (Telegram `EditTextBoldCursor`: ~1,5 dp, har 500 ms'da yonib-o'chadi). */
+@Composable
+private fun BlinkCursor() {
+    val c = LocalTg.current
+    var on by remember { mutableStateOf(true) }
+    LaunchedEffect(Unit) { while (true) { delay(500); on = !on } }
+    Box(Modifier.width(1.5.dp).height(20.dp).background(if (on) c.inputActive else androidx.compose.ui.graphics.Color.Transparent))
 }
 
 /**
@@ -92,26 +86,16 @@ fun PhonePage(
     codeDigits: String,
     phoneDigits: String,
     errorTick: Int,
-    focusPhoneTick: Int,
-    onCode: (String) -> Unit,
-    onPhone: (String) -> Unit,
+    phoneActive: Boolean,
+    onActive: (phone: Boolean) -> Unit,
     onPickCountry: () -> Unit,
-    onNext: () -> Unit,
 ) {
     val c = LocalTg.current
-    val codeFocus = remember { FocusRequester() }
-    val phoneFocus = remember { FocusRequester() }
-    var codeFocused by remember { mutableStateOf(false) }
-    var phoneFocused by remember { mutableStateOf(false) }
+    val codeFocused = !phoneActive
+    val phoneFocused = phoneActive
     val mask = country?.mask
     val selected = codeFocused || phoneFocused
     val countryInvalid = country == null && codeDigits.isNotEmpty()
-
-    // Sahifa ochilganda yoki davlat tanlanganda klaviatura raqam maydonida ochiladi.
-    LaunchedEffect(focusPhoneTick) {
-        delay(300)
-        runCatching { phoneFocus.requestFocus() }
-    }
 
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
         BasicText(
@@ -173,56 +157,28 @@ fun PhonePage(
         ) {
             Row(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                 BasicText("+", style = TextStyle(color = c.text, fontSize = 16.sp))
-                BasicTextField(
-                    value = codeDigits,
-                    onValueChange = { onCode(PhoneFormat.digitsOnly(it)) },
-                    singleLine = true,
-                    textStyle = TextStyle(color = c.text, fontSize = 16.sp),
-                    cursorBrush = SolidColor(c.inputActive),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone, imeAction = ImeAction.Next),
-                    keyboardActions = KeyboardActions(onNext = { runCatching { phoneFocus.requestFocus() } }),
-                    modifier = Modifier.width(46.dp).height(36.dp).padding(start = 1.dp).focusRequester(codeFocus).onFocusChanged { codeFocused = it.isFocused },
-                    decorationBox = { inner -> Box(Modifier.fillMaxHeight(), contentAlignment = Alignment.CenterStart) { inner() } },
-                )
+                Box(
+                    Modifier.width(46.dp).height(36.dp).padding(start = 1.dp).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onActive(false) },
+                    contentAlignment = Alignment.CenterStart,
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        BasicText(codeDigits, style = TextStyle(color = c.text, fontSize = 16.sp), maxLines = 1)
+                        if (codeFocused) BlinkCursor()
+                    }
+                }
                 Box(Modifier.padding(start = 4.dp, end = 12.dp).width(0.5.dp).fillMaxHeight().padding(vertical = 8.dp).background(c.input))
-                Box(Modifier.weight(1f).height(36.dp), contentAlignment = Alignment.CenterStart) {
-                    // Xira shablon: kiritilgan qismi ko'rinmaydi, qolgani "000 00 00" bo'lib turadi.
+                Box(
+                    Modifier.weight(1f).height(36.dp).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onActive(true) },
+                    contentAlignment = Alignment.CenterStart,
+                ) {
+                    // Xira shablon: kiritilgan qismidan keyin qolgani "000 00 00" bo'lib turadi.
                     val formatted = PhoneFormat.format(phoneDigits, mask)
                     val rest = PhoneFormat.hintRest(phoneDigits, mask)
-                    if (rest.isNotEmpty()) {
-                        BasicText(
-                            buildAnnotatedString {
-                                withStyle(SpanStyle(color = androidx.compose.ui.graphics.Color.Transparent)) { append(formatted) }
-                                withStyle(SpanStyle(color = c.hint)) { append(rest) }
-                            },
-                            style = TextStyle(fontSize = 16.sp),
-                            maxLines = 1,
-                        )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        BasicText(formatted, style = TextStyle(color = c.text, fontSize = 16.sp), maxLines = 1)
+                        if (phoneFocused) BlinkCursor()
+                        if (rest.isNotEmpty()) BasicText(rest, style = TextStyle(color = c.hint, fontSize = 16.sp), maxLines = 1)
                     }
-                    BasicTextField(
-                        value = phoneDigits,
-                        onValueChange = { onPhone(PhoneFormat.digitsOnly(it).take(15)) },
-                        singleLine = true,
-                        textStyle = TextStyle(color = c.text, fontSize = 16.sp),
-                        cursorBrush = SolidColor(c.inputActive),
-                        visualTransformation = PhoneVisual(mask),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone, imeAction = ImeAction.Next),
-                        keyboardActions = KeyboardActions(onNext = { onNext() }),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .focusRequester(phoneFocus)
-                            .onFocusChanged { phoneFocused = it.isFocused }
-                            .onPreviewKeyEvent { e ->
-                                // Raqam bo'sh bo'lganda o'chirish tugmasi kod maydoniga o'tadi (Telegram'dagidek).
-                                if (e.key == Key.Backspace && e.type == KeyEventType.KeyDown && phoneDigits.isEmpty()) {
-                                    runCatching { codeFocus.requestFocus() }
-                                    onCode(codeDigits.dropLast(1))
-                                    true
-                                } else {
-                                    false
-                                }
-                            },
-                    )
                 }
             }
         }
