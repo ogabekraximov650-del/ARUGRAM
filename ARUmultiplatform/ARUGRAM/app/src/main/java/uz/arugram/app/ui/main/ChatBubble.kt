@@ -63,33 +63,40 @@ import uz.arugram.app.R
 import uz.arugram.app.ui.components.TgIcon
 import uz.arugram.app.ui.theme.LocalTg
 
-// DrKLO `ThemeColors` (kunduzgi mavzu): isim/sayt nomi, javob chizig'i, yuklash tugmasi, ovoz chizig'i.
-private val InBlue = Color(0xFF298ACF)       // chat_inReplyNameText / chat_inSiteNameText
-private val OutGreen = Color(0xFF55AB4F)     // chat_outReplyNameText / chat_outSiteNameText
-private val InLine = Color(0xFF599FD8)       // chat_inReplyLine
-private val OutLine = Color(0xFF6EB969)      // chat_outReplyLine
-private val InPreviewLine = Color(0xFF70B4E8)
-private val OutPreviewLine = Color(0xFF88C97B)
-private val InLoader = Color(0xFF229AF0)     // chat_inLoader / chat_inVoiceSeekbarFill
-private val OutLoader = Color(0xFF78C272)    // chat_outLoader / chat_outVoiceSeekbarFill
-private val InSeek = Color(0xFFDEE5EB)       // chat_inVoiceSeekbar
-private val OutSeek = Color(0xFFBBE3AC)      // chat_outVoiceSeekbar
-private val LinkBlue = Color(0xFF2678B6)     // chat_messageLinkIn / Out
+/** Hozirgi mavzu (pufakcha ranglari kechasi / kunduzi o'zgaradi); `MessageBubble` har chizilganda yangilaydi. */
+private object ChatPalette { var dark = false }
 
-/** DrKLO standart mavzusidagi pufakcha ranglari (`chat_inBubble`, `chat_outBubble`, kechasi — `Night`). */
+// DrKLO `ThemeColors` (kunduzgi mavzu) va `night.attheme` (tungi): ism/sayt nomi, javob chizig'i, yuklash tugmasi, ovoz chizig'i.
+private val InBlue get() = if (ChatPalette.dark) Color(0xFF79C4FC) else Color(0xFF298ACF)       // chat_inReplyNameText / chat_inSiteNameText
+private val OutGreen get() = if (ChatPalette.dark) Color(0xFF9FD9FF) else Color(0xFF55AB4F)     // chat_outReplyNameText / chat_outSiteNameText
+private val InLine get() = if (ChatPalette.dark) Color(0xFF79C4FC) else Color(0xFF599FD8)       // chat_inReplyLine
+private val OutLine get() = if (ChatPalette.dark) Color(0xFF7ECEFF) else Color(0xFF6EB969)      // chat_outReplyLine
+private val InPreviewLine get() = if (ChatPalette.dark) Color(0xFF79C4FC) else Color(0xFF70B4E8)
+private val OutPreviewLine get() = if (ChatPalette.dark) Color(0xFF7ECEFF) else Color(0xFF88C97B)
+private val InLoader get() = if (ChatPalette.dark) Color(0xFF5098E9) else Color(0xFF229AF0)     // chat_inLoader / chat_inVoiceSeekbarFill
+private val OutLoader get() = if (ChatPalette.dark) Color(0xFFFFFFFF) else Color(0xFF78C272)    // chat_outLoader / chat_outVoiceSeekbarFill
+private val InSeek get() = if (ChatPalette.dark) Color(0xFF636363) else Color(0xFFDEE5EB)       // chat_inVoiceSeekbar
+private val OutSeek get() = if (ChatPalette.dark) Color(0xFF63AAE2) else Color(0xFFBBE3AC)      // chat_outVoiceSeekbar
+private val LinkBlue = Color(0xFF2678B6)     // chat_messageLinkIn / Out (kunduzi)
+
+/** DrKLO standart mavzusidagi pufakcha ranglari (`chat_inBubble`, `chat_outBubble`, kechasi — `night.attheme`). */
 @Composable
 private fun bubbleColor(out: Boolean): Color {
     val dark = LocalTg.current.dark
     return when {
-        out -> if (dark) Color(0xFF8774E1) else Color(0xFFEFFFDE)
-        else -> if (dark) Color(0xFF212121) else Color.White
+        out -> if (dark) Color(0xFF366CAF) else Color(0xFFEFFFDE)
+        else -> if (dark) Color(0xFF1F2123) else Color.White
     }
 }
 
-private fun textColor(dark: Boolean, out: Boolean) = if (dark) Color.White else Color.Black
+private fun textColor(dark: Boolean, out: Boolean) = if (dark) Color(0xFFFAFAFA) else Color.Black
 
-private val NameColors = longArrayOf(0xFFCC5049, 0xFFD67722, 0xFF955CDB, 0xFF40A920, 0xFF309EBA, 0xFF368AD1, 0xFFC7508B)
-fun senderColor(name: String): Color = Color(NameColors[Math.floorMod(name.hashCode(), NameColors.size)])
+private val NameColorsDay = longArrayOf(0xFFCC5049, 0xFFD67722, 0xFF955CDB, 0xFF40A920, 0xFF309EBA, 0xFF368AD1, 0xFFC7508B)
+private val NameColorsNight = longArrayOf(0xFFE88878, 0xFFE8AB5A, 0xFF8C8DEA, 0xFF7DD071, 0xFF53CCC6, 0xFF5CADEA, 0xFFE8749A)
+fun senderColor(name: String): Color {
+    val a = if (ChatPalette.dark) NameColorsNight else NameColorsDay
+    return Color(a[Math.floorMod(name.hashCode(), a.size)])
+}
 
 /**
  * Xabar pufakchasi (DrKLO `ChatMessageCell`): kiruvchi — oq, chiquvchi — och yashil; burchak radiusi 17 dp, "dum" tomonida 5 dp. Ichida: uzatilgan belgisi,
@@ -115,6 +122,7 @@ fun MessageBubble(
     onForward: () -> Unit = {},
 ) {
     val c = LocalTg.current
+    ChatPalette.dark = c.dark
     val ctx = LocalContext.current
     val openLink = LocalOpenLink.current
     val density = androidx.compose.ui.platform.LocalDensity.current
@@ -150,7 +158,7 @@ fun MessageBubble(
         Column(Modifier.width(androidx.compose.foundation.layout.IntrinsicSize.Max)) {
         Box(
             Modifier.widthIn(max = maxW)
-                .then(if (sticker) Modifier else Modifier.clip(shape).background(bg))
+                .then(if (sticker) Modifier else if (m.out && c.dark) Modifier.clip(shape).background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color(0xFF366CAF), Color(0xFF3B8CB9)))) else Modifier.clip(shape).background(bg))
                 .combinedClickable(onClick = onClick, onLongClick = onLongClick),
         ) {
             Column(Modifier.then(if (sticker || mediaFull) Modifier else Modifier.padding(bottom = if (inlineFooter) 8.dp else 5.dp))) {
@@ -184,7 +192,7 @@ fun MessageBubble(
                     when (m.kind) {
                         "photo" -> PhotoContent(m, chat, onOpenMedia)
                         "sticker" -> StickerContent(m, chat)
-                        "video" -> VideoContent(m, onOpenMedia)
+                        "video" -> VideoContent(m, chat, onOpenMedia)
                         "gif" -> GifContent(m, chat, onOpenMedia)
                         "round" -> RoundContent(m, chat, onOpenMedia)
                         "voice", "audio" -> VoiceContent(m, chat)
@@ -199,7 +207,7 @@ fun MessageBubble(
                     val spoilerBg = if (c.dark) Color(0xFF3A4046) else Color(0xFFB0B8BE)
                     val footerSp = with(density) { (footerWidth + 6.dp).toSp() }
                     val styled = remember(m.text, m.ents, c.dark, revealed, inlineFooter, footerSp) {
-                        val base = styledText(m.text, m.ents, if (c.dark) Color(0xFF3390EC) else LinkBlue, if (c.dark) Color(0x33FFFFFF) else Color(0x1A000000), spoilerBg, revealed)
+                        val base = styledText(m.text, m.ents, if (c.dark) (if (m.out) Color(0xFFAEDFFF) else Color(0xFF79C4FC)) else LinkBlue, if (c.dark) Color(0x33FFFFFF) else Color(0x1A000000), spoilerBg, revealed)
                         if (!inlineFooter) base else androidx.compose.ui.text.buildAnnotatedString {
                             append(base)
                             appendInlineContent("footer", "\u00A0")
@@ -285,8 +293,8 @@ private fun Footer(m: MsgRow, chat: ChatRow, modifier: Modifier, onSticker: Bool
     val c = LocalTg.current
     val col = when {
         onSticker -> Color.White
-        m.out -> if (c.dark) Color(0xCCFFFFFF) else Color(0xFF70B15C)
-        else -> Color(0xFFA1AAB3)
+        m.out -> if (c.dark) Color(0xFF94D3F6) else Color(0xFF70B15C)
+        else -> if (c.dark) Color(0xFF7D7F81) else Color(0xFFA1AAB3)
     }
     Row(modifier.padding(top = 1.dp), verticalAlignment = Alignment.CenterVertically) {
         if (m.views > 0) {
@@ -406,13 +414,17 @@ private fun RoundContent(m: MsgRow, chat: ChatRow, onOpen: () -> Unit) {
 }
 
 @Composable
-private fun VideoContent(m: MsgRow, onOpen: () -> Unit) {
+private fun VideoContent(m: MsgRow, chat: ChatRow, onOpen: () -> Unit) {
+    val ctx = LocalContext.current
+    LaunchedEffect(m.id) { MediaCache.photo(ctx, chat, m.id) }
+    val thumb = MediaCache.photos[MediaCache.key(chat.id, m.id)]
     val ratio = if (m.pw > 0 && m.ph > 0) m.pw.toFloat() / m.ph else 1.6f
     val (w, h) = mediaSize(ratio)
     Box(
         Modifier.size(w.dp, h.dp).background(Color(0xFF2B2B2B)).combinedClickable(onClick = onOpen),
         contentAlignment = Alignment.Center,
     ) {
+        if (thumb != null) Image(thumb, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         Box(Modifier.size(48.dp).clip(CircleShape).background(Color(0x99000000)), contentAlignment = Alignment.Center) {
             TgIcon(R.drawable.ic_play, Color.White, size = 24.dp)
         }

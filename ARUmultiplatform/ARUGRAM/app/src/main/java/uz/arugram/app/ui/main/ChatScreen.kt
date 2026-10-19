@@ -513,7 +513,7 @@ fun DateChip(unix: Long) {
     Box(Modifier.fillMaxWidth().padding(vertical = 6.dp), contentAlignment = Alignment.Center) {
         BasicText(
             dateLabel(unix),
-            Modifier.clip(RoundedCornerShape(12.dp)).background(Color(0x66000000)).padding(horizontal = 10.dp, vertical = 3.dp),
+            Modifier.clip(RoundedCornerShape(12.dp)).background(if (LocalTg.current.dark) Color(0x96373737) else Color(0x66000000)).padding(horizontal = 10.dp, vertical = 3.dp),
             style = TextStyle(color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium),
         )
     }

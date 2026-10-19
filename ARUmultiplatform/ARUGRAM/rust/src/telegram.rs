@@ -3045,10 +3045,14 @@ pub extern "C" fn rust_tg_photo(arg_ptr: *const c_char) -> *mut c_char {
             let peer = resolve_peer(&client, &chat).await?;
             let msgs = client.get_messages_by_id(peer, &[msg]).await.map_err(|e| e.to_string())?;
             let Some(Some(m)) = msgs.into_iter().next() else { return Err("Xabar topilmadi".to_string()) };
-            let Some(Media::Photo(p)) = m.media() else { return Err("Rasm emas".to_string()) };
+            // Rasm yoki video/hujjat eskizi.
+            let thumbs = match m.media() {
+                Some(Media::Photo(p)) => p.thumbs(),
+                Some(Media::Document(d)) => d.thumbs(),
+                _ => return Err("Rasm emas".to_string()),
+            };
             // 800 px dan oshmaydigan eng kattasi; bo'lmasa eng kichigi.
-            let mut sizes: Vec<_> = p
-                .thumbs()
+            let mut sizes: Vec<_> = thumbs
                 .into_iter()
                 .filter_map(|t| match t {
                     PhotoSize::Size(sz) => Some(sz),

@@ -42,12 +42,12 @@ import uz.arugram.app.ui.theme.TgColors
 import java.util.Calendar
 import kotlin.math.abs
 
-private val TgColors.chatName get() = if (dark) Color.White else Color(0xFF1A1D21)
-private val TgColors.chatMessage get() = if (dark) Color(0xFF8B9094) else Color(0xFF75787A)
-private val TgColors.chatDate get() = if (dark) Color(0xFF6D7075) else Color(0xFF848688)
-private val TgColors.counter get() = if (dark) Color(0xFF4C9CE2) else Color(0xFF3390EC)
-private val TgColors.counterMuted get() = if (dark) Color(0xFF4A4F54) else Color(0xFFBEC3C7)
-private val TgColors.pinned get() = if (dark) Color(0xFF6D7073) else Color(0xFF919294)
+private val TgColors.chatName get() = if (dark) Color(0xFFF1F1F1) else Color(0xFF1A1D21)
+private val TgColors.chatMessage get() = if (dark) Color(0xFF828282) else Color(0xFF75787A)
+private val TgColors.chatDate get() = if (dark) Color(0xFF787878) else Color(0xFF848688)
+private val TgColors.counter get() = if (dark) Color(0xFF399EF3) else Color(0xFF3390EC)
+private val TgColors.counterMuted get() = if (dark) Color(0xFF454545) else Color(0xFFBEC3C7)
+private val TgColors.pinned get() = if (dark) Color(0xFF646464) else Color(0xFF919294)
 
 /** Telegram avatar ranglari (`keys_avatar_background` / `background2`): qizil, to'q sariq, binafsha, yashil, firuza, ko'k, pushti. */
 private val AvatarTop = longArrayOf(0xFFFF845E, 0xFFFEBB5B, 0xFFB694F9, 0xFF9AD164, 0xFF5BCBE3, 0xFF5CAFFA, 0xFFFF8AAC)
@@ -133,7 +133,7 @@ fun ChatList(
                         )
                         if (row.out && row.date > 0 && row.topId > 0 && typing[row.id] == null) {
                             Box(Modifier.padding(start = 6.dp, top = 5.dp).width(18.dp).height(12.dp)) {
-                                val tick = c.counter
+                                val tick = if (c.dark) Color(0xFF46ADF3) else Color(0xFF3CA83C)
                                 uz.arugram.app.ui.components.TgIcon(uz.arugram.app.R.drawable.list_check, tick, Modifier.align(Alignment.CenterStart), 12.dp)
                                 if (row.topId <= row.readOut) uz.arugram.app.ui.components.TgIcon(uz.arugram.app.R.drawable.list_halfcheck, tick, Modifier.align(Alignment.CenterStart).offset(x = 5.dp), 12.dp)
                             }
@@ -167,7 +167,7 @@ fun ChatList(
                             androidx.compose.ui.text.buildAnnotatedString {
                                 // Guruh/kanalda o'z xabaringiz oldida "Siz:" (DrKLO `chats_nameMessage`, ko'k).
                                 if (row.out && row.kind == "group" && row.text.isNotEmpty()) {
-                                    withStyle(androidx.compose.ui.text.SpanStyle(color = c.counter)) { append("Siz: ") }
+                                    withStyle(androidx.compose.ui.text.SpanStyle(color = if (c.dark) Color(0xFFEBEBEB) else Color(0xFF3C7EB0))) { append("Siz: ") }
                                 }
                                 append(row.text)
                             },
