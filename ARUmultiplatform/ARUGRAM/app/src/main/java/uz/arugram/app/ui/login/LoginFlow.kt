@@ -55,6 +55,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import uz.arugram.app.auth.AuthModel
 import uz.arugram.app.auth.CountryBook
+import uz.arugram.app.auth.LoginAlert
+import uz.arugram.app.ui.main.TgAlert
 import uz.arugram.app.auth.PhoneFormat
 import uz.arugram.app.auth.Stage
 import uz.arugram.app.ui.components.BackArrowIcon
@@ -95,7 +97,9 @@ fun LoginFlow(auth: AuthModel, suppressFab: Boolean = false) {
         label = "confirm",
     )
     var localErrorTick by remember { mutableIntStateOf(0) }
-    var toast by remember { mutableStateOf<String?>(null) }
+    var localAlert by remember { mutableStateOf<LoginAlert?>(null) }
+    // Tasdiqlash oynasidagi "Ha" bosilgandan keyin tugma aylanuvchi doiraga o'tadi (DrKLO `animateProgress`).
+    var sending by remember { mutableStateOf(false) }
 
     // Boshlang'ich davlat: SIM / tarmoq / til bo'yicha (Telegram ham shunday boshlaydi).
     LaunchedEffect(Unit) {
@@ -103,14 +107,9 @@ fun LoginFlow(auth: AuthModel, suppressFab: Boolean = false) {
     }
     val country = remember(codeDigits) { CountryBook.forCode(codeDigits) }
 
-    fun showToast(msg: String) {
-        toast = msg
-        scope.launch { delay(3500); if (toast == msg) toast = null }
-    }
-    LaunchedEffect(ui.errorTick) {
-        ui.error?.let { showToast(it) }
-        if (ui.errorTick > 0 && ui.stage == Stage.Password) password = ""
-    }
+    // Kod sahifasidagi boshqa xatolarda (DrKLO) maydonlar tozalanadi va oyna chiqadi.
+    LaunchedEffect(ui.alert?.id) { if (ui.alert != null && ui.stage == Stage.Code) codeInput = "" }
+    val alert = ui.alert ?: localAlert
 
     val page = when {
         showCountries -> Page.Country
@@ -137,18 +136,30 @@ fun LoginFlow(auth: AuthModel, suppressFab: Boolean = false) {
         codeDigits = d.take(4)
     }
 
+    // DrKLO `PhoneView.onNextPressed`: maydonlar bo'sh bo'lsa faqat raqam konturi silkinadi; aks holda tasdiqlash oynasi chiqadi.
     fun onNext() {
         when (page) {
             Page.Phone -> {
-                when {
-                    country == null -> { localErrorTick++; showToast(S.WrongCountry) }
-                    phoneDigits.length < 5 -> { localErrorTick++; showToast(S.InvalidPhone) }
-                    else -> confirmOpen = true
-                }
+                if (ui.busy || sending) return
+                if (codeDigits.isEmpty() || phoneDigits.isEmpty()) localErrorTick++ else confirmOpen = true
             }
-            Page.Password -> if (password.isNotEmpty()) auth.checkPassword(password)
-            Page.Register -> if (firstName.isNotBlank()) auth.signUp(firstName, lastName) else { localErrorTick++; showToast("Ismingizni kiriting") }
+            Page.Password -> if (password.isNotEmpty()) auth.checkPassword(password) else localErrorTick++
+            Page.Register -> if (firstName.isNotBlank()) auth.signUp(firstName, lastName) else localErrorTick++
             else -> Unit
+        }
+    }
+
+    // "Ha": tugma 400 ms aylanuvchi doira bo'ladi, oyna yopiladi, 150 ms o'tib davlat tekshiriladi va kod so'raladi.
+    fun confirmPhone() {
+        if (sending) return
+        sending = true
+        scope.launch {
+            delay(400)
+            confirmOpen = false
+            delay(150)
+            if (country == null) localAlert = LoginAlert(S.Sorry, S.WrongCountry, 0)
+            else auth.requestCode(codeDigits + phoneDigits)
+            sending = false
         }
     }
 
@@ -211,7 +222,7 @@ fun LoginFlow(auth: AuthModel, suppressFab: Boolean = false) {
                         country = country,
                         codeDigits = codeDigits,
                         phoneDigits = phoneDigits,
-                        errorTick = ui.errorTick + localErrorTick,
+                        errorTick = localErrorTick,
                         phoneActive = phoneActive,
                         onActive = { phoneActive = it },
                         onPickCountry = { showCountries = true },
@@ -225,24 +236,25 @@ fun LoginFlow(auth: AuthModel, suppressFab: Boolean = false) {
                     CodePage(
                         phoneDisplay = displayPhone(ui.phone),
                         sent = ui.sent,
-                        errorTick = ui.errorTick,
+                        errorTick = ui.codeErrTick,
                         busy = ui.busy,
                         code = codeInput,
                         onCode = { codeInput = it },
                         onResend = { auth.resendCode() },
+                        codeOk = ui.codeOk,
                     )
                 }
                 Page.Register -> Box(Modifier.fillMaxSize().padding(start = 18.dp, end = 18.dp, top = 30.dp)) {
-                    RegisterPage(firstName, lastName, ui.errorTick + localErrorTick, { firstName = it }, { lastName = it }, ::onNext)
+                    RegisterPage(firstName, lastName, localErrorTick, { firstName = it }, { lastName = it }, ::onNext)
                 }
                 Page.Password -> Box(Modifier.fillMaxSize().padding(start = 18.dp, end = 18.dp, top = 30.dp)) {
                     PasswordPage(
                         hint = ui.hint,
-                        errorTick = ui.errorTick,
+                        errorTick = ui.errorTick + localErrorTick,
                         password = password,
                         onPassword = { password = it },
                         onSubmit = ::onNext,
-                        onForgot = { showToast(S.ForgotInfo) },
+                        onForgot = { localAlert = LoginAlert(S.Sorry, S.ForgotInfo, 0) },
                     )
                 }
             }
@@ -258,24 +270,11 @@ fun LoginFlow(auth: AuthModel, suppressFab: Boolean = false) {
         // Pastki o'ngdagi dumaloq tugma (telefon va parol sahifalarida).
         TgFab(
             visible = page == Page.Phone || page == Page.Password || page == Page.Register,
-            busy = ui.busy && (page == Page.Phone || page == Page.Password || page == Page.Register),
+            busy = (ui.busy || sending) && (page == Page.Phone || page == Page.Password || page == Page.Register),
             onClick = ::onNext,
             modifier = Modifier.align(Alignment.BottomEnd).padding(end = 20.dp, bottom = if (keypadWanted) 10.dp else 14.dp).alpha(if (suppressFab || confirmP > 0.001f) 0f else 1f),
         )
 
-        // Xato xabari (Telegram "bulletin"i).
-        AnimatedVisibility(
-            visible = toast != null,
-            modifier = Modifier.align(Alignment.BottomCenter).padding(start = 8.dp, end = 8.dp, bottom = 84.dp),
-            enter = fadeIn(tween(200)) + slideInVertically(tween(250)) { it / 2 },
-            exit = fadeOut(tween(200)) + slideOutVertically(tween(200)) { it / 2 },
-        ) {
-            val shown = remember { mutableStateOf("") }
-            toast?.let { shown.value = it }
-            Box(Modifier.clip(RoundedCornerShape(8.dp)).background(Color(0xE6252526)).padding(horizontal = 16.dp, vertical = 12.dp)) {
-                BasicText(shown.value, style = TextStyle(color = Color.White, fontSize = 14.sp, lineHeight = 19.sp))
-            }
-        }
     }
     if (keypadWanted || keypadP.value > 0.001f) {
         Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(keypadH)) {
@@ -297,16 +296,21 @@ fun LoginFlow(auth: AuthModel, suppressFab: Boolean = false) {
             editText = S.Edit,
             yesText = S.Yes,
             popupBottom = NUMPAD_HEIGHT_DP.dp + 10.dp + 56.dp + 32.dp,
-            onEdit = { confirmOpen = false },
-            onConfirm = { confirmOpen = false; auth.requestCode(codeDigits + phoneDigits) },
+            onEdit = { if (!sending) confirmOpen = false },
+            onConfirm = ::confirmPhone,
         )
         TgFab(
             visible = true,
-            busy = false,
-            onClick = { confirmOpen = false; auth.requestCode(codeDigits + phoneDigits) },
+            busy = sending,
+            onClick = ::confirmPhone,
             check = confirmP,
             modifier = Modifier.align(Alignment.BottomEnd).padding(end = 20.dp, bottom = NUMPAD_HEIGHT_DP.dp + 10.dp),
         )
+    }
+    // DrKLO `needShowAlert`: sarlavha + matn + bitta "OK" tugmasi.
+    alert?.let { a ->
+        val close: () -> Unit = { if (ui.alert != null) { auth.dismissAlert() } else { localAlert = null } }
+        TgAlert(a.title, a.text, S.OK, cancel = null, onConfirm = close, onDismiss = close)
     }
     }
 }

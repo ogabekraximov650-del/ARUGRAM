@@ -21,6 +21,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -30,6 +31,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import uz.arugram.app.auth.SentInfo
 import uz.arugram.app.ui.components.CodeHint
 import uz.arugram.app.ui.components.TgCodeBoxes
@@ -51,22 +53,24 @@ fun CodePage(
     code: String,
     onCode: (String) -> Unit,
     onResend: () -> Unit,
+    codeOk: Boolean = false,
 ) {
     val c = LocalTg.current
     val length = codeLength(sent)
-    var errorOn by remember { mutableStateOf(false) }
+    val compact = sent?.via == "missed_call"
+    val scope = rememberCoroutineScope()
 
-    // Xato kod (DrKLO `shakeWrongCode`): maydonlar darhol tozalanadi, katakchalar silkinish davomida qizil bo'ladi (+150 ms),
-    // pastda qizil "noto'g'ri kod" matni 5 soniya turadi, so'ng oddiy matn qaytadi.
+    // Xato kod (DrKLO `shakeWrongCode`): maydonlar darhol tozalanadi va qizil bo'ladi; katakchalar silkinadi (10 dp, qo'ng'iroq turida 3,5 dp);
+    // silkinish tugagach 150 ms o'tib qizillik va fokus qaytadi. Pastda qizil "noto'g'ri kod" matni 5 soniya turadi.
+    val baseTick = remember { errorTick }
+    var doneTick by remember { mutableIntStateOf(errorTick) }
+    val shaking = errorTick != doneTick
     var wrongShown by remember { mutableStateOf(false) }
     LaunchedEffect(errorTick) {
-        if (errorTick == 0) return@LaunchedEffect
+        if (errorTick == baseTick) return@LaunchedEffect
         onCode("")
-        errorOn = true
         wrongShown = true
-        delay(650)
-        errorOn = false
-        delay(4350)
+        delay(5000)
         wrongShown = false
     }
 
@@ -105,11 +109,17 @@ fun CodePage(
         TgCodeBoxes(
             value = code,
             length = length,
-            error = errorOn,
+            error = shaking,
+            success = codeOk,
+            focusSuppressed = shaking || codeOk || (busy && code.length == length),
+            compact = compact,
             modifier = Modifier
                 .padding(top = 32.dp)
-                .height(42.dp)
-                .shakeOnChange(errorTick),
+                .height(if (compact) 34.dp else 42.dp)
+                .shakeOnChange(errorTick - baseTick, if (compact) 3.5f else 10f) {
+                    val t = errorTick
+                    scope.launch { delay(150); doneTick = t }
+                },
         )
         Box(Modifier.weight(1f))
         // Pastki qism: bo'sh joydan 32 dp yuqorida; matnlar (14, 8, 14, 16) ichki chetli. Xato matni bilan almashadi (easeInOutQuad).

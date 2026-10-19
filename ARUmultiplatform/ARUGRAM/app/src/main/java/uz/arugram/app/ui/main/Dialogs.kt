@@ -40,19 +40,42 @@ private val Blue = Color(0xFF3390EC)
 @Composable
 private fun dialogBg(): Color = if (LocalTg.current.dark) Color(0xFF1C2229) else Color.White
 
-/** Telegram `AlertDialog` ko'rinishidagi tasdiqlash oynasi: 12 dp yumaloq, sarlavha 20 sp qalin, matn 16 sp, tugmalar o'ngda (ko'k / xavfli bo'lsa qizil). */
+/**
+ * Telegram `AlertDialog` (ALERT_TYPE_MESSAGE): kengligi min(356, ekran-48) dp, 12 dp yumaloq, sarlavha 20 sp qalin (tepadan 19, pastdan 10),
+ * matn 16 sp (yon 24, pastdan 20), tugmalar qatori 52 dp (ichki chet 8), tugma 40 dp, 16 sp qalin, ichki chet 12, eng kami 64 dp, ripple radiusi 20.
+ * `cancel == null` bo'lsa faqat bitta tugma (OK).
+ */
 @Composable
-fun TgAlert(title: String, text: String, confirm: String, danger: Boolean = false, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+fun TgAlert(
+    title: String?, text: String, confirm: String, danger: Boolean = false, cancel: String? = "Bekor qilish",
+    onConfirm: () -> Unit, onDismiss: () -> Unit,
+) {
     val c = LocalTg.current
-    Dialog(onDismissRequest = onDismiss) {
-        Column(Modifier.clip(RoundedCornerShape(12.dp)).background(dialogBg()).padding(top = 20.dp, start = 24.dp, end = 24.dp, bottom = 8.dp)) {
-            BasicText(title, style = TextStyle(color = c.text, fontSize = 20.sp, fontWeight = FontWeight.Bold))
-            BasicText(text, Modifier.padding(top = 12.dp), style = TextStyle(color = c.gray, fontSize = 16.sp, lineHeight = 22.sp))
-            Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.End) {
-                BasicText("Bekor qilish", Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClick = onDismiss).padding(horizontal = 12.dp, vertical = 10.dp), style = TextStyle(color = Blue, fontSize = 15.sp, fontWeight = FontWeight.Bold))
-                BasicText(confirm, Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClick = onConfirm).padding(horizontal = 12.dp, vertical = 10.dp), style = TextStyle(color = if (danger) c.red else Blue, fontSize = 15.sp, fontWeight = FontWeight.Bold))
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Column(Modifier.padding(horizontal = 24.dp).widthIn(max = 356.dp).clip(RoundedCornerShape(12.dp)).background(dialogBg())) {
+            if (title != null) {
+                BasicText(title, Modifier.padding(start = 24.dp, end = 24.dp, top = 19.dp, bottom = 10.dp), style = TextStyle(color = c.text, fontSize = 20.sp, fontWeight = FontWeight.Bold))
+            }
+            BasicText(
+                text,
+                Modifier.padding(start = 24.dp, end = 24.dp, top = if (title == null) 19.dp else 0.dp, bottom = 20.dp),
+                style = TextStyle(color = c.text, fontSize = 16.sp),
+            )
+            Row(Modifier.fillMaxWidth().height(52.dp).padding(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End), verticalAlignment = Alignment.Top) {
+                if (cancel != null) AlertButton(cancel, Blue, onDismiss)
+                AlertButton(confirm, if (danger) c.red else Blue, onConfirm)
             }
         }
+    }
+}
+
+@Composable
+private fun AlertButton(label: String, color: Color, onClick: () -> Unit) {
+    Box(
+        Modifier.height(40.dp).widthIn(min = 64.dp).clip(RoundedCornerShape(20.dp)).clickable(onClick = onClick).padding(horizontal = 12.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        BasicText(label, style = TextStyle(color = color, fontSize = 16.sp, fontWeight = FontWeight.Bold))
     }
 }
 

@@ -5,6 +5,7 @@ import android.os.Build
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -34,7 +35,20 @@ data class AuthUi(
     val sent: SentInfo? = null,
     val hint: String = "",
     val fatal: String? = null,
+    /** Kod to'g'ri bo'ldi: katakchalar yashil to'lqin animatsiyasini o'ynayapti (`animateSuccess`), so'ng keyingi sahifa. */
+    val codeOk: Boolean = false,
+    /** Noto'g'ri kod har gal oshadi (katakchalar silkinadi, `shakeWrongCode`). */
+    val codeErrTick: Int = 0,
+    /** Telegram `needShowAlert` oynasi (sarlavha "Kechirasiz" + matn); yopilganda [dismissAlert]. */
+    val alert: LoginAlert? = null,
 )
+
+/** [id] har yangi oyna uchun boshqa (bir xil matn qayta chiqsa ham). */
+data class LoginAlert(val title: String, val text: String, val id: Int)
+
+private const val WRONG_CODE = "Kod noto'g'ri"
+private const val CODE_EXPIRED = "Kod muddati tugadi"
+private const val ALERT_TITLE = "Kechirasiz"
 
 /**
  * Kirish holati (telefon -> kod -> parol -> tayyor). Hamma tarmoq ishi Rust yadrosida (`RustCore.tg*`), bu yerda faqat holat.
@@ -85,11 +99,30 @@ class AuthModel(private val app: Context) {
     private fun parseSent(o: JSONObject?): SentInfo? =
         o?.let { SentInfo(it.optString("via"), it.optInt("length"), it.optString("next"), it.optInt("timeout"), it.optLong("at")) }
 
-    private fun fail(msg: String) = _ui.update { it.copy(busy = false, error = msg, errorTick = it.errorTick + 1) }
+    private var alertSeq = 0
+
+    /** Xato oynasi (DrKLO `needShowAlert`): toast emas, "Kechirasiz" sarlavhali dialog. */
+    private fun fail(msg: String) = _ui.update { it.copy(busy = false, error = null, alert = LoginAlert(ALERT_TITLE, msg, ++alertSeq)) }
+
+    fun dismissAlert() = _ui.update { it.copy(alert = null) }
 
     /** Natijani holatga o'tkazadi: kod yuborildi / parol kerak / kirildi / xato. */
-    private fun apply(j: JSONObject, phone: String? = null) {
+    private fun apply(j: JSONObject, phone: String? = null, fromCode: Boolean = false) {
         val err = j.optString("error")
+        if (fromCode) {
+            when {
+                err.startsWith(WRONG_CODE) -> {
+                    _ui.update { it.copy(busy = false, codeOk = false, error = null, codeErrTick = it.codeErrTick + 1) }
+                    return
+                }
+                // Kod muddati tugadi: telefon sahifasiga qaytadi va oyna chiqadi (DrKLO PHONE_CODE_EXPIRED).
+                err.startsWith(CODE_EXPIRED) -> {
+                    _ui.update { it.copy(busy = false, codeOk = false, stage = Stage.Phone, sent = null, hint = "", error = null, alert = LoginAlert(ALERT_TITLE, err, ++alertSeq)) }
+                    return
+                }
+            }
+        }
+        if (_ui.value.codeOk) _ui.update { it.copy(codeOk = false) }
         when {
             j.optBoolean("signup") -> _ui.update { it.copy(busy = false, stage = Stage.SignUp, error = null) }
             j.optBoolean("password") -> {
@@ -120,7 +153,17 @@ class AuthModel(private val app: Context) {
     fun signIn(code: String) {
         if (_ui.value.busy) return
         _ui.update { it.copy(busy = true, error = null) }
-        scope.launch { apply(withContext(Dispatchers.IO) { RustCore.tgSignIn(code) }) }
+        scope.launch {
+            val r = withContext(Dispatchers.IO) { RustCore.tgSignIn(code) }
+            val ok = r.optString("error").isEmpty() && (r.optBoolean("ok") || r.optBoolean("password") || r.optBoolean("signup"))
+            if (ok) {
+                // `animateSuccess`: katakchalar 75 ms oralig'ida yashil bo'ladi; hammasi tugagach (+400 ms) keyingi sahifaga o'tiladi.
+                val n = (_ui.value.sent?.length ?: 0).takeIf { it in 4..8 } ?: 5
+                _ui.update { it.copy(codeOk = true) }
+                delay(n * 75L + 400L)
+            }
+            apply(r, fromCode = true)
+        }
     }
 
     fun signUp(first: String, last: String) {
@@ -156,6 +199,7 @@ class AuthModel(private val app: Context) {
             app.getSharedPreferences("notify_state", android.content.Context.MODE_PRIVATE).edit().clear().apply()
             uz.arugram.app.ui.main.AvatarCache.clear()
             uz.arugram.app.ui.main.MediaCache.clear()
+            uz.arugram.app.ui.main.Drafts.clearAll(app)
             uz.arugram.app.ui.main.StickerStore.clear(app)
             _ui.update { AuthUi(ready = true) }
         }

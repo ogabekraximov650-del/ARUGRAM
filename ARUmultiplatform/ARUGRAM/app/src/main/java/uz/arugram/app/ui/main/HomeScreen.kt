@@ -86,6 +86,7 @@ fun HomeScreen(auth: AuthModel) {
     LaunchedEffect(toast) { if (toast != null) { delay(3000); toast = null } }
 
     LaunchedEffect(Unit) {
+        Drafts.load(ctx)
         val j = withContext(Dispatchers.IO) { RustCore.tgMe() }
         if (j.optString("error").isEmpty() && j.has("id")) {
             me = ChatRow(j.optLong("id"), "user", j.optString("name"), false, 0, false, false, 0, "", false, false, false)
@@ -151,7 +152,17 @@ fun HomeScreen(auth: AuthModel) {
                         )
                         MainTab.Contacts -> ContactsTab(bottomPadding = 80.dp, onOpen = ::open, extra = listOf("Kontakt qo‘shish" to { addContact = true }))
                         MainTab.Settings -> SettingsTab(me, meContact, 80.dp, onOpenChat = { r -> open(r) }, onNavigate = { stack.add(Dest.Settings(it)) }, onLogout = { auth.logout() }, savedChat = ui.chats.firstOrNull { it.self })
-                        MainTab.Profile -> ProfileTab(me, meContact, 80.dp, onEdit = { stack.add(Dest.Settings("account")) }, onSaved = { ui.chats.firstOrNull { it.self }?.let(::open) }, onLogout = { auth.logout() })
+                        MainTab.Profile -> ProfileTab(me, meContact, 80.dp, onPhoto = { uri ->
+                            scope.launch {
+                                val f = withContext(Dispatchers.IO) { copyUriToCache(ctx, uri) }
+                                if (f != null) {
+                                    val r = withContext(Dispatchers.IO) { RustCore.tgSetPhoto(f.absolutePath) }
+                                    f.delete()
+                                    toast = r.optString("error").ifEmpty { "Profil rasmi yangilandi" }
+                                    me?.let { AvatarCache.invalidate(ctx, it.id); AvatarCache.ensure(ctx, listOf(it.id)) }
+                                }
+                            }
+                        }, onEdit = { stack.add(Dest.Settings("account")) }, onSaved = { ui.chats.firstOrNull { it.self }?.let(::open) }, onLogout = { auth.logout() })
                     }
                     if (MainTab.entries[tab] == MainTab.Chats) {
                         // Yangi xabar tugmasi (DrKLO `floatingButton`): pastki o'ngda, tab panelidan tepada.
@@ -270,16 +281,18 @@ private fun ChatsTab(
 
 /** Profil tabi: katta avatar, ism, telefon/@nom, "Tahrirlash" va "Saqlangan xabarlar". */
 @Composable
-private fun ProfileTab(me: ChatRow?, meContact: String, bottomPadding: androidx.compose.ui.unit.Dp, onEdit: () -> Unit, onSaved: () -> Unit, onLogout: () -> Unit) {
+private fun ProfileTab(me: ChatRow?, meContact: String, bottomPadding: androidx.compose.ui.unit.Dp, onPhoto: (android.net.Uri) -> Unit, onEdit: () -> Unit, onSaved: () -> Unit, onLogout: () -> Unit) {
     val c = LocalTg.current
+    val picker = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetContent()) { uri -> if (uri != null) onPhoto(uri) }
     Column(Modifier.fillMaxSize().background(c.grayBg).statusBarsPadding(), horizontalAlignment = Alignment.CenterHorizontally) {
         Box(Modifier.fillMaxWidth().height(56.dp).background(c.bar), contentAlignment = Alignment.CenterStart) {
             BasicText("Profil", Modifier.padding(start = 20.dp), style = TextStyle(color = c.text, fontSize = 20.sp, fontWeight = FontWeight.Bold))
         }
         if (me != null) {
             Column(Modifier.fillMaxWidth().background(c.bar).padding(vertical = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                ChatAvatar(me, 96.dp)
-                BasicText(me.name, Modifier.padding(top = 12.dp), style = TextStyle(color = c.text, fontSize = 22.sp, fontWeight = FontWeight.Bold))
+                Box(Modifier.clickable { picker.launch("image/*") }) { ChatAvatar(me, 96.dp) }
+                BasicText("Rasmni o‘zgartirish", Modifier.padding(top = 6.dp), style = TextStyle(color = c.value, fontSize = 13.sp))
+                BasicText(me.name, Modifier.padding(top = 8.dp), style = TextStyle(color = c.text, fontSize = 22.sp, fontWeight = FontWeight.Bold))
                 if (meContact.isNotEmpty()) BasicText(meContact, Modifier.padding(top = 4.dp), style = TextStyle(color = c.gray, fontSize = 15.sp))
             }
         }

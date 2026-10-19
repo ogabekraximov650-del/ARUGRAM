@@ -139,7 +139,16 @@ fun ChatList(
                     }
                     // Xabar matni (pastda) va hisoblagich / mahkam belgisi
                     Row(Modifier.fillMaxWidth().padding(start = 76.dp, end = 15.666.dp, top = 36.dp), verticalAlignment = Alignment.Top) {
-                        if (typing[row.id] != null) {
+                        val draftText = Drafts.map[row.id]
+                        if (draftText != null && typing[row.id] == null && row.unread == 0) {
+                            BasicText(
+                                androidx.compose.ui.text.buildAnnotatedString {
+                                    withStyle(androidx.compose.ui.text.SpanStyle(color = c.red)) { append("Qoralama: ") }
+                                    append(draftText)
+                                },
+                                Modifier.weight(1f).padding(top = 1.dp), style = TextStyle(color = c.chatMessage, fontSize = 16.sp), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            )
+                        } else if (typing[row.id] != null) {
                             BasicText("yozmoqda...", Modifier.weight(1f).padding(top = 1.dp), style = TextStyle(color = c.counter, fontSize = 16.sp), maxLines = 1)
                         } else BasicText(
                             androidx.compose.ui.text.buildAnnotatedString {

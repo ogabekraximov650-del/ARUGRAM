@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import uz.arugram.app.ui.components.ArugramLogo
 import uz.arugram.app.ui.components.TgOutlineBox
+import uz.arugram.app.ui.components.rememberFieldError
 import uz.arugram.app.ui.components.shakeOnChange
 import uz.arugram.app.ui.theme.LocalTg
 
@@ -49,6 +50,8 @@ fun RegisterPage(first: String, last: String, errorTick: Int, onFirst: (String) 
     var firstSel by remember { mutableStateOf(false) }
     var lastSel by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { delay(300); runCatching { firstFocus.requestFocus() } }
+    val baseTick = remember { errorTick }
+    val firstError = rememberFieldError(errorTick, first)
 
     Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
         Box(Modifier.padding(top = 16.dp)) { ArugramLogo(size = 100.dp) }
@@ -61,8 +64,8 @@ fun RegisterPage(first: String, last: String, errorTick: Int, onFirst: (String) 
             style = TextStyle(color = c.gray, fontSize = 14.sp, textAlign = TextAlign.Center, lineHeight = 19.sp),
         )
         TgOutlineBox(
-            label = S.FirstName, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 32.dp).shakeOnChange(errorTick),
-            selected = firstSel, floated = firstSel || first.isNotEmpty(), centerWhenEmpty = true,
+            label = S.FirstName, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 32.dp).shakeOnChange(errorTick - baseTick),
+            selected = firstSel, floated = firstSel || first.isNotEmpty(), centerWhenEmpty = true, error = firstError,
         ) {
             BasicTextField(
                 value = first, onValueChange = onFirst, singleLine = true,

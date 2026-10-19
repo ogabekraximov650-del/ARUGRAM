@@ -43,5 +43,7 @@ object S {
     const val SignUpTerms = "Davom etib, siz Telegram xizmat ko‘rsatish shartlariga rozilik bildirasiz."
     const val Back = "Orqaga"
     const val Next = "Keyingi"
-    const val InvalidPhone = "Telefon raqami noto‘g‘ri. Raqamni tekshirib, qayta urinib ko‘ring."
+    const val Sorry = "Kechirasiz"                                    // RestorePasswordNoEmailTitle
+    const val OK = "OK"                                               // OK
+    const val InvalidPhone ="Telefon raqami noto‘g‘ri. Raqamni tekshirib, qayta urinib ko‘ring."
 }

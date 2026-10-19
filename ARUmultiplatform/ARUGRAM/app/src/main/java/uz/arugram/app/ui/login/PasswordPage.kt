@@ -39,6 +39,7 @@ import kotlinx.coroutines.delay
 import uz.arugram.app.ui.components.EyeIcon
 import uz.arugram.app.ui.components.LockHint
 import uz.arugram.app.ui.components.TgOutlineBox
+import uz.arugram.app.ui.components.rememberFieldError
 import uz.arugram.app.ui.components.shakeOnChange
 import uz.arugram.app.ui.theme.LocalTg
 
@@ -60,6 +61,10 @@ fun PasswordPage(
     var focused by remember { mutableStateOf(false) }
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { delay(300); runCatching { focus.requestFocus() } }
+    // Xato (DrKLO `onPasscodeError`): maydon tozalanadi, kontur 3,5 dp silkinadi va 2 soniya (yoki matn o'zgarguncha) qizil turadi.
+    val baseTick = remember { errorTick }
+    LaunchedEffect(errorTick) { if (errorTick != baseTick) onPassword("") }
+    val fieldError = rememberFieldError(errorTick, password, textAfter = "")
 
     Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
         Spacer(Modifier.height(8.dp))
@@ -76,11 +81,11 @@ fun PasswordPage(
         )
         TgOutlineBox(
             label = if (hint.isNotEmpty()) S.HintPrefix + hint else S.Password,
-            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 32.dp).shakeOnChange(errorTick),
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 32.dp).shakeOnChange(errorTick - baseTick),
             selected = focused,
             floated = focused || password.isNotEmpty(),
             centerWhenEmpty = true,
-            error = errorTick > 0 && !focused && password.isEmpty(),
+            error = fieldError,
         ) {
             Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
                 BasicTextField(

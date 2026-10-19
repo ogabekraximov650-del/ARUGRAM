@@ -74,12 +74,17 @@ fun ChatScreen(chat: ChatRow, chats: List<ChatRow>, typing: Boolean, onBack: () 
     val scope = rememberCoroutineScope()
     val model = remember(chat.id) { ChatModel(chat, ctx.applicationContext) }
     DisposableEffect(chat.id) { onDispose { model.close(); VoicePlayer.stop() } }
+    // Qoralama: suhbatdan chiqilganda saqlanadi (ro'yxatda ko'rinadi), yuborilganda o'chadi.
+    var draftText by remember { mutableStateOf("") }
+    DisposableEffect(chat.id) { onDispose { Drafts.save(ctx, chat.id, draftText) } }
 
     val selected = remember { mutableStateListOf<Int>() }
     var menuFor by remember { mutableStateOf<MsgRow?>(null) }
     var replyTo by remember { mutableStateOf<MsgRow?>(null) }
     var editing by remember { mutableStateOf<MsgRow?>(null) }
-    var draft by remember { mutableStateOf(TextFieldValue("")) }
+    val draftPrefs = remember { ctx.getSharedPreferences("drafts", android.content.Context.MODE_PRIVATE) }
+    var draft by remember { mutableStateOf(TextFieldValue(draftPrefs.getString("d_${chat.id}", "").orEmpty())) }
+    DisposableEffect(chat.id) { onDispose { } }
     var viewer by remember { mutableStateOf<MsgRow?>(null) }
     var forwardIds by remember { mutableStateOf<List<Int>?>(null) }
     var deleteIds by remember { mutableStateOf<List<Int>?>(null) }
@@ -154,6 +159,7 @@ fun ChatScreen(chat: ChatRow, chats: List<ChatRow>, typing: Boolean, onBack: () 
         }
     }
 
+    androidx.compose.runtime.SideEffect { draftText = if (editing == null) draft.text else "" }
     fun doSend() {
         val text = draft.text.trim()
         if (text.isEmpty()) return
@@ -303,6 +309,9 @@ fun ChatScreen(chat: ChatRow, chats: List<ChatRow>, typing: Boolean, onBack: () 
                 if (m.out && m.text.isNotEmpty() && m.kind.isEmpty()) add(MenuItem(R.drawable.msg_edit, "Tahrirlash") { editing = m; replyTo = null; draft = TextFieldValue(m.text, TextRange(m.text.length)) })
                 add(MenuItem(if (m.pinned) R.drawable.msg_unpin else R.drawable.msg_pin, if (m.pinned) "Mahkamni olib tashlash" else "Mahkamlash") { model.pin(m, !m.pinned) })
                 add(MenuItem(R.drawable.input_forward, "Uzatish") { forwardIds = listOf(m.id) })
+                if (m.text.isNotEmpty()) add(MenuItem(R.drawable.msg_share, "Ulashish") {
+                    runCatching { ctx.startActivity(android.content.Intent.createChooser(android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain").putExtra(android.content.Intent.EXTRA_TEXT, m.text), null).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                })
                 add(MenuItem(R.drawable.msg_select, "Tanlash") { selected.add(m.id) })
                 add(MenuItem(R.drawable.msg_delete, "O‘chirish", danger = true) { deleteIds = listOf(m.id) })
             }
@@ -314,6 +323,9 @@ fun ChatScreen(chat: ChatRow, chats: List<ChatRow>, typing: Boolean, onBack: () 
                     MenuItem(R.drawable.msg_info, "Ma’lumot") { onOpenInfo() },
                     MenuItem(if (chat.muted) R.drawable.msg_unmute else R.drawable.msg_mute, if (chat.muted) "Bildirishnomani yoqish" else "Bildirishnomani o‘chirish") {
                         scope.launch { withContext(Dispatchers.IO) { RustCore.tgMute(chat.spec, !chat.muted) } }
+                    },
+                    MenuItem(R.drawable.msg_clear, "Tarixni tozalash") {
+                        scope.launch { withContext(Dispatchers.IO) { RustCore.tgClearHistory(chat.spec) }; model.refresh(); bulletin = "Tarix tozalandi" }
                     },
                     MenuItem(R.drawable.msg_delete, "Suhbatni o‘chirish", danger = true) { confirmDeleteChat = true },
                 ),

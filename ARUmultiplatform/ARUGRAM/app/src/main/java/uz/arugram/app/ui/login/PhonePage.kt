@@ -119,7 +119,6 @@ fun PhonePage(
             label = S.Country,
             modifier = Modifier
                 .padding(start = 16.dp, end = 16.dp, top = 24.dp, bottom = 14.dp)
-                .shakeOnChange(if (countryInvalid) errorTick else 0)
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onPickCountry),
             freezeStyle = true,
             floated = countryText.isNotEmpty(),
@@ -151,7 +150,7 @@ fun PhonePage(
             label = S.PhoneNumber,
             modifier = Modifier
                 .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 8.dp)
-                .shakeOnChange(if (!countryInvalid) errorTick else 0),
+                .shakeOnChange(errorTick),
             selected = selected,
             floated = selected,
         ) {

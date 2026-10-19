@@ -62,7 +62,7 @@ fun TgFab(visible: Boolean, busy: Boolean, onClick: () -> Unit, modifier: Modifi
         }
         if (check > 0.01f) {
             // Strelka -> belgi (`TRANSFORM_ARROW_CHECK`): belgi chizilib chiqadi.
-            Canvas(Modifier.size(56.dp).alpha(check)) {
+            Canvas(Modifier.size(56.dp).alpha(check * arrow)) {
                 val st = 2.dp.toPx()
                 val a = Offset(20.dp.toPx(), 29.dp.toPx())
                 val b = Offset(25.5.dp.toPx(), 34.5.dp.toPx())
