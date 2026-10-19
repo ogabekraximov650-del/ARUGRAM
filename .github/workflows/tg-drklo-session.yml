@@ -1,0 +1,36 @@
+name: DrKLO Telegram uchun sessiya fayllari (grammers sessiyasidan)
+
+# `ci/tg-drklo-session.run` o'zgarganda: shifrlangan grammers sessiyasi (`tool/secrets/grammers_session.json.enc`) ochilib, `to_drklo.py` bilan DrKLO
+# fayllariga (tgnet.dat + userconfing.xml) aylantiriladi va ENCODE_TOKEN bilan qayta shifrlanadi (`drklo_session.tar.enc`).
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ci/tg-drklo-session.run'
+
+permissions:
+  contents: read
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    env:
+      ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: O'tkazish va shifrlash (ochiq matn log'ga chiqmaydi)
+        run: |
+          K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          D="$RUNNER_TEMP/d"; mkdir -p "$D" out
+          K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in tool/secrets/grammers_session.json.enc -out "$D/session.json"
+          python3 -c "import json;s=json.load(open('$D/session.json'));print('dc',s['home_dc'],'dcs',[d['id'] for d in s['dcs']],'kalit turi',type([d for d in s['dcs'] if d['id']==s['home_dc']][0]['auth_key']).__name__,'ipv4 turi',type([d for d in s['dcs'] if d['id']==s['home_dc']][0].get('ipv4')).__name__)"
+          python3 tool/tgsession/to_drklo.py "$D/session.json" "$D/drklo"
+          tar -C "$D/drklo" -cf "$D/drklo.tar" tgnet.dat userconfing.xml
+          K="$K" openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in "$D/drklo.tar" -out out/drklo_session.tar.enc
+          shred -u "$D/session.json" "$D/drklo.tar" "$D"/drklo/* || true
+          ls -la out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: drklo-session-enc
+          path: out
+          retention-days: 2
