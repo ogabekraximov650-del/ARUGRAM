@@ -130,47 +130,27 @@ fun MediaViewer(
                 if (!isVideo && msg.text.isNotEmpty()) BasicText(msg.text, Modifier.align(Alignment.BottomStart).navigationBarsPadding().padding(start = 16.dp, end = 16.dp, bottom = 16.dp), style = TextStyle(color = Color.White, fontSize = 17.sp))
             }
             if (menu) {
-                val rows = buildList<ViewerItem> {
-                    add(ViewerItem(R.drawable.msg_gallery, "Galereyaga saqlash", divider = true) { withFile { saveToGallery(ctx, it.file, isVideo || isAnim) } })
-                    add(ViewerItem(R.drawable.msg_openin, "...orqali ochish") { withFile { openExternal(ctx, it) } })
-                    add(ViewerItem(R.drawable.msg_message, "Chatda ko‘rsatish") { onShowInChat(msg); onClose() })
-                    add(ViewerItem(R.drawable.menu_reply, "Javob yozish") { onReply(msg); onClose() })
-                    add(ViewerItem(R.drawable.msg_shareout, "Ulashish") { withFile { shareFile(ctx, it.file, it.mime) } })
-                    add(ViewerItem(R.drawable.msg_delete, "O‘chirish") { onDelete(msg); onClose() })
-                    if (dlJob != null) add(ViewerItem(R.drawable.msg_cancel, "Yuklab olishni to‘xtatish") { dlJob?.cancel(); dlJob = null })
+                val rows = buildList<MenuRow> {
+                    add(MenuRow(R.drawable.msg_gallery, "Galereyaga saqlash", divider = true) { withFile { saveToGallery(ctx, it.file, isVideo || isAnim) } })
+                    add(MenuRow(R.drawable.msg_openin, "...orqali ochish") { withFile { openExternal(ctx, it) } })
+                    add(MenuRow(R.drawable.msg_message, "Chatda ko‘rsatish") { onShowInChat(msg); onClose() })
+                    add(MenuRow(R.drawable.menu_reply, "Javob yozish") { onReply(msg); onClose() })
+                    add(MenuRow(R.drawable.msg_shareout, "Ulashish") { withFile { shareFile(ctx, it.file, it.mime) } })
+                    add(MenuRow(R.drawable.msg_delete, "O‘chirish") { onDelete(msg); onClose() })
+                    if (dlJob != null) add(MenuRow(R.drawable.msg_cancel, "Yuklab olishni to‘xtatish") { dlJob?.cancel(); dlJob = null })
                 }
-                ViewerMenu(rows, onDismiss = { menu = false })
+                AnchoredMenu(rows, onDismiss = { menu = false })
             }
             if (speedMenu && player != null) SpeedMenu(player, onDismiss = { speedMenu = false })
         }
     }
 }
 
-private class ViewerItem(val icon: Int, val label: String, val divider: Boolean = false, val action: () -> Unit)
-
 /** "kecha 16:47 da" / "bugun 09:10 da" / "18-oktabr 16:47 da". */
 private fun viewerDate(unix: Long): String {
     val d = dayKey(System.currentTimeMillis() / 1000) - dayKey(unix)
     val day = when (d) { 0L -> "bugun"; 1L -> "kecha"; else -> dateLabel(unix) }
     return "$day ${clock(unix)} da"
-}
-
-/** ⋮ menyusi (DrKLO `ActionBarPopupWindow`): o'ng yuqorida, to'q karta, 48 dp qatorlar. */
-@Composable
-private fun ViewerMenu(items: List<ViewerItem>, onDismiss: () -> Unit) {
-    androidx.compose.ui.window.Popup(alignment = Alignment.TopEnd, onDismissRequest = onDismiss, properties = androidx.compose.ui.window.PopupProperties(focusable = true)) {
-        Column(
-            Modifier.statusBarsPadding().padding(top = 4.dp, end = 4.dp).widthIn(min = 250.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp)).background(Color(0xFF1C1C1E)).padding(vertical = 4.dp),
-        ) {
-            items.forEach { it0 ->
-                Row(Modifier.fillMaxWidth().height(48.dp).clickable { onDismiss(); it0.action() }.padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
-                    TgIcon(it0.icon, Color(0xFFFAFAFA), size = 24.dp)
-                    BasicText(it0.label, Modifier.padding(start = 24.dp), style = TextStyle(color = Color(0xFFFAFAFA), fontSize = 17.sp), maxLines = 1)
-                }
-                if (it0.divider) Box(Modifier.fillMaxWidth().height(8.dp).background(Color(0xFF151517)))
-            }
-        }
-    }
 }
 
 /** Video sozlamalari (DrKLO tezlik menyusi): tezlik surgichi, 0.2x…2x tayyor qiymatlar va takrorlash. */

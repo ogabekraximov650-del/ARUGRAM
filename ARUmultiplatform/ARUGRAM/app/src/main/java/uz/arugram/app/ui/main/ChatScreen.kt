@@ -428,18 +428,18 @@ fun ChatScreen(chat: ChatRow, chats: List<ChatRow>, typing: Boolean, onBack: () 
             MessageActions(items, onReact = { model.react(m, it) }, onDismiss = { menuFor = null })
         }
         if (chatMenu) {
-            PopupMenu(
+            AnchoredMenu(
                 listOf(
-                    MenuItem(R.drawable.msg_search, "Qidirish") { searching = true },
-                    MenuItem(R.drawable.msg_info, "Ma’lumot") { onOpenInfo() },
-                    MenuItem(if (chat.muted) R.drawable.msg_unmute else R.drawable.msg_mute, if (chat.muted) "Bildirishnomani yoqish" else "Bildirishnomani o‘chirish") {
+                    MenuRow(R.drawable.msg_search, "Qidirish") { searching = true },
+                    MenuRow(R.drawable.msg_info, "Ma’lumot") { onOpenInfo() },
+                    MenuRow(if (chat.muted) R.drawable.msg_unmute else R.drawable.msg_mute, if (chat.muted) "Bildirishnomani yoqish" else "Bildirishnomani o‘chirish") {
                         if (chat.muted) scope.launch { withContext(Dispatchers.IO) { RustCore.tgMuteFor(chat.spec, 0L) } } else muteOpen = true
                     },
-                    MenuItem(R.drawable.input_schedule, "Rejalashtirilgan xabarlar") { scheduledOpen = true },
-                    MenuItem(R.drawable.msg_clear, "Tarixni tozalash") {
+                    MenuRow(R.drawable.input_schedule, "Rejalashtirilgan xabarlar") { scheduledOpen = true },
+                    MenuRow(R.drawable.msg_clear, "Tarixni tozalash") {
                         scope.launch { withContext(Dispatchers.IO) { RustCore.tgClearHistory(chat.spec) }; model.refresh(); bulletin = "Tarix tozalandi" }
                     },
-                    MenuItem(R.drawable.msg_delete, "Suhbatni o‘chirish", danger = true) { confirmDeleteChat = true },
+                    MenuRow(R.drawable.msg_delete, "Suhbatni o‘chirish", danger = true) { confirmDeleteChat = true },
                 ),
                 onDismiss = { chatMenu = false },
             )

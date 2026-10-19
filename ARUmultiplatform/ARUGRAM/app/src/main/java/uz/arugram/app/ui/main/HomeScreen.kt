@@ -190,6 +190,7 @@ fun HomeScreen(auth: AuthModel) {
                             onSearch = { stack.add(Dest.Search) }, onOpen = ::open, onLongClick = { menuFor = it }, onRetry = { model.load() },
                             archivedCount = archived.size, onArchive = { stack.add(Dest.Archive) }, stories = stories, meId = me?.id, onStory = { storyStart = it }, onAddStory = { storyPicker.launch(arrayOf("image/*", "video/*")) }, onMenu = { topMenu = true },
                             archived = archived,
+                            onSwipe = { r -> if (r.pinned) model.pin(r) else scope.launch { withContext(Dispatchers.IO) { RustCore.tgArchive(r.spec, true) }; model.load(); loadArchived() } },
                         )
                         MainTab.Contacts -> ContactsTab(bottomPadding = 80.dp, onOpen = ::open, extra = listOf("Kontakt qo‘shish" to { addContact = true }))
                         MainTab.Settings -> SettingsTab(me, meContact, 80.dp, onOpenChat = { r -> open(r) }, onNavigate = { stack.add(Dest.Settings(it)) }, onLogout = { auth.logout() }, savedChat = ui.chats.firstOrNull { it.self }, onPhoto = setPhoto)
@@ -236,7 +237,11 @@ fun HomeScreen(auth: AuthModel) {
                     BasicText("Arxivlangan chatlar", style = TextStyle(color = c.text, fontSize = 20.sp, fontWeight = FontWeight.Bold))
                 }
                 if (archived.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { BasicText("Arxiv bo‘sh", style = TextStyle(color = c.gray, fontSize = 17.sp)) }
-                else ChatList(archived, typing = typing, onLongClick = { menuFor = it }, onOpen = ::open)
+                else ChatList(
+                    archived, typing = typing, onLongClick = { menuFor = it }, onOpen = ::open,
+                    onSwipe = { r -> scope.launch { withContext(Dispatchers.IO) { RustCore.tgArchive(r.spec, false) }; model.load(); loadArchived() } },
+                    swipeLabel = { "Arxivdan chiqarish" },
+                )
             }
             Dest.Search -> SearchScreen(ui.chats, onOpen = { r -> stack.removeAt(stack.lastIndex); open(r) }, onBack = { stack.removeAt(stack.lastIndex) })
             Dest.NewChat -> Box(Modifier.fillMaxSize().background(c.bg)) {
@@ -282,11 +287,11 @@ fun HomeScreen(auth: AuthModel) {
                 onDismiss = { menuFor = null },
             )
         }
-        if (topMenu) PopupMenu(
+        if (topMenu) AnchoredMenu(
             listOf(
-                MenuItem(R.drawable.msg_groups, "Yangi guruh") { stack.add(Dest.NewGroup) },
-                MenuItem(R.drawable.msg_archive, "Arxivlangan chatlar") { stack.add(Dest.Archive) },
-                MenuItem(R.drawable.msg_markread, "Hammasini o‘qilgan deb belgilash") { scope.launch { ui.chats.filter { it.unread > 0 }.forEach { withContext(Dispatchers.IO) { RustCore.tgMarkRead(it.spec) } }; model.load() } },
+                MenuRow(R.drawable.msg_groups, "Yangi guruh") { stack.add(Dest.NewGroup) },
+                MenuRow(R.drawable.msg_archive, "Arxivlangan chatlar") { stack.add(Dest.Archive) },
+                MenuRow(R.drawable.msg_markread, "Hammasini o‘qilgan deb belgilash") { scope.launch { ui.chats.filter { it.unread > 0 }.forEach { withContext(Dispatchers.IO) { RustCore.tgMarkRead(it.spec) } }; model.load() } },
             ),
             onDismiss = { topMenu = false },
         )
@@ -309,7 +314,7 @@ private fun ChatsTab(
     onSearch: () -> Unit, onOpen: (ChatRow) -> Unit, onLongClick: (ChatRow) -> Unit, onRetry: () -> Unit,
     archivedCount: Int = 0, onArchive: () -> Unit = {},
     stories: List<StoryPeer> = emptyList(), meId: Long? = null, onStory: (Int) -> Unit = {}, onAddStory: () -> Unit = {},
-    onMenu: () -> Unit = {}, archived: List<ChatRow> = emptyList(),
+    onMenu: () -> Unit = {}, archived: List<ChatRow> = emptyList(), onSwipe: (ChatRow) -> Unit = {},
 ) {
     val c = LocalTg.current
     val density = androidx.compose.ui.platform.LocalDensity.current
@@ -381,7 +386,7 @@ private fun ChatsTab(
                     val shown = if (sel == null) ui.chats else ui.chats.filter { sel.matches(it) }
                     if (shown.isEmpty() && archivedCount == 0) BasicText(if (ui.chats.isEmpty()) "Suhbatlar yo‘q" else "Bu jildda suhbat yo‘q", Modifier.align(Alignment.Center), style = TextStyle(color = c.gray, fontSize = 17.sp))
                     else ChatList(
-                        shown, bottomPadding = 150.dp, typing = typing, onLongClick = onLongClick, onOpen = onOpen,
+                        shown, bottomPadding = 150.dp, typing = typing, onLongClick = onLongClick, onOpen = onOpen, onSwipe = onSwipe,
                         header = if (archivedCount > 0 && sel == null) ({ ArchiveRow(archived, onArchive) }) else null,
                     )
                 }
@@ -480,7 +485,7 @@ private fun ProfileTab(me: ChatRow?, meContact: String, bottomPadding: androidx.
             Box(Modifier.size(48.dp).clickable(onClick = onEdit), contentAlignment = Alignment.Center) { TgIcon(R.drawable.group_edit_profile, c.text) }
             Box(Modifier.size(48.dp).clickable { menu = true }, contentAlignment = Alignment.Center) { TgIcon(R.drawable.ic_ab_other, c.text) }
         }
-        if (menu) PopupMenu(listOf(MenuItem(R.drawable.msg_leave, "Chiqish") { onLogout() }), onDismiss = { menu = false })
+        if (menu) AnchoredMenu(listOf(MenuRow(R.drawable.msg_leave, "Chiqish") { onLogout() }), onDismiss = { menu = false })
     }
 }
 

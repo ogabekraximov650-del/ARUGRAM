@@ -139,7 +139,7 @@ fun SettingsTab(
             BasicText("Sozlamalar", Modifier.weight(1f).padding(start = 20.dp).alpha(barAlpha), style = TextStyle(color = c.text, fontSize = 20.sp, fontWeight = FontWeight.Bold))
             Box(Modifier.size(48.dp).clickable { menu = true }, contentAlignment = Alignment.Center) { uz.arugram.app.ui.components.TgIcon(R.drawable.ic_ab_other, c.text) }
         }
-        if (menu) PopupMenu(listOf(MenuItem(R.drawable.msg_leave, "Chiqish") { onLogout() }), onDismiss = { menu = false })
+        if (menu) AnchoredMenu(listOf(MenuRow(R.drawable.msg_leave, "Chiqish") { onLogout() }), onDismiss = { menu = false })
     }
 }
 

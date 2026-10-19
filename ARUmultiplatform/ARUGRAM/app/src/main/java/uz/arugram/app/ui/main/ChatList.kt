@@ -1,6 +1,14 @@
 package uz.arugram.app.ui.main
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.matchParentSize
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -114,12 +122,42 @@ fun ChatList(
     onLongClick: (ChatRow) -> Unit = {},
     onOpen: (ChatRow) -> Unit = {},
     header: (@Composable () -> Unit)? = null,
+    onSwipe: ((ChatRow) -> Unit)? = null,
+    swipeLabel: (ChatRow) -> String = { if (it.pinned) "Mahkamdan olish" else "Arxivlash" },
 ) {
     val c = LocalTg.current
     LazyColumn(modifier.fillMaxSize().background(c.bg), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = bottomPadding)) {
         if (header != null) item(key = "header") { header() }
         items(chats, key = { it.id }) { row ->
-            Column(Modifier.fillMaxWidth().combinedClickable(onClick = { onOpen(row) }, onLongClick = { onLongClick(row) })) {
+            val swipeScope = androidx.compose.runtime.rememberCoroutineScope()
+            val dx = remember(row.id) { androidx.compose.animation.core.Animatable(0f) }
+            var widthPx by remember { androidx.compose.runtime.mutableFloatStateOf(1f) }
+            Box(Modifier.fillMaxWidth().clipToBounds().onSizeChanged { widthPx = it.width.toFloat() }) {
+                if (onSwipe != null && dx.value < -1f) {
+                    // DrKLO: chapga surilganda fon — arxiv (#458AD2) yoki mahkamdan olish (#303030) rangida
+                    Box(Modifier.matchParentSize().background(if (row.pinned) Color(0xFF303030) else Color(0xFF458AD2)), contentAlignment = Alignment.CenterEnd) {
+                        Column(Modifier.width(80.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            uz.arugram.app.ui.components.TgIcon(if (row.pinned) uz.arugram.app.R.drawable.msg_unpin else uz.arugram.app.R.drawable.msg_archive, Color.White, size = 24.dp)
+                            BasicText(swipeLabel(row), Modifier.padding(top = 2.dp), style = TextStyle(color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium), maxLines = 1)
+                        }
+                    }
+                }
+            Column(
+                Modifier.offset { androidx.compose.ui.unit.IntOffset(dx.value.toInt(), 0) }.background(c.bg).fillMaxWidth()
+                    .then(
+                        if (onSwipe != null) Modifier.draggable(
+                            orientation = androidx.compose.foundation.gestures.Orientation.Horizontal,
+                            state = androidx.compose.foundation.gestures.rememberDraggableState { d -> swipeScope.launch { dx.snapTo((dx.value + d).coerceIn(-widthPx, 0f)) } },
+                            onDragStopped = {
+                                swipeScope.launch {
+                                    if (dx.value < -widthPx * 0.4f) { dx.animateTo(-widthPx, androidx.compose.animation.core.tween(120)); onSwipe(row); dx.snapTo(0f) }
+                                    else dx.animateTo(0f, androidx.compose.animation.core.tween(180))
+                                }
+                            },
+                        ) else Modifier,
+                    )
+                    .combinedClickable(onClick = { onOpen(row) }, onLongClick = { onLongClick(row) }),
+            ) {
                 Box(Modifier.fillMaxWidth().height(70.dp)) {
                     Box(Modifier.padding(start = 11.dp, top = 9.dp)) { ChatAvatar(row) }
                     // Nom (tepada) va vaqt (o'ngda)
@@ -191,6 +229,7 @@ fun ChatList(
                         }
                     }
                 }
+            }
             }
         }
     }

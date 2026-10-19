@@ -2,6 +2,8 @@ package uz.arugram.app.ui.main
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.ui.draw.shadow
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -37,10 +39,12 @@ import uz.arugram.app.R
 import uz.arugram.app.ui.components.TgIcon
 import uz.arugram.app.ui.theme.LocalTg
 
-private val Blue = Color(0xFF3390EC)
+/** `dialogButton` / `dialogTextBlue`: tungi mavzuda #64B5EF. */
+@Composable
+private fun dialogBlue(): Color = if (LocalTg.current.dark) Color(0xFF64B5EF) else Color(0xFF3390EC)
 
 @Composable
-private fun dialogBg(): Color = if (LocalTg.current.dark) Color(0xFF1C2229) else Color.White
+private fun dialogBg(): Color = if (LocalTg.current.dark) Color(0xFF1E1E1E) else Color.White
 
 /**
  * Telegram `AlertDialog` (ALERT_TYPE_MESSAGE): kengligi min(356, ekran-48) dp, 12 dp yumaloq, sarlavha 20 sp qalin (tepadan 19, pastdan 10),
@@ -54,7 +58,7 @@ fun TgAlert(
 ) {
     val c = LocalTg.current
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Column(Modifier.padding(horizontal = 24.dp).widthIn(max = 356.dp).clip(RoundedCornerShape(12.dp)).background(dialogBg())) {
+        Column(Modifier.padding(horizontal = 24.dp).widthIn(max = 356.dp).clip(RoundedCornerShape(20.dp)).background(dialogBg())) {
             if (title != null) {
                 BasicText(title, Modifier.padding(start = 24.dp, end = 24.dp, top = 19.dp, bottom = 10.dp), style = TextStyle(color = c.text, fontSize = 20.sp, fontWeight = FontWeight.Bold))
             }
@@ -64,8 +68,8 @@ fun TgAlert(
                 style = TextStyle(color = c.text, fontSize = 16.sp),
             )
             Row(Modifier.fillMaxWidth().height(52.dp).padding(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End), verticalAlignment = Alignment.Top) {
-                if (cancel != null) AlertButton(cancel, Blue, onDismiss)
-                AlertButton(confirm, if (danger) c.red else Blue, onConfirm)
+                if (cancel != null) AlertButton(cancel, dialogBlue(), onDismiss)
+                AlertButton(confirm, if (danger) c.red else dialogBlue(), onConfirm)
             }
         }
     }
@@ -87,7 +91,7 @@ fun TgPrompt(title: String, initial: String, confirm: String, onConfirm: (String
     val c = LocalTg.current
     var value = remember { androidx.compose.runtime.mutableStateOf(initial) }
     Dialog(onDismissRequest = onDismiss) {
-        Column(Modifier.clip(RoundedCornerShape(12.dp)).background(dialogBg()).padding(top = 20.dp, start = 24.dp, end = 24.dp, bottom = 8.dp)) {
+        Column(Modifier.clip(RoundedCornerShape(20.dp)).background(dialogBg()).padding(top = 20.dp, start = 24.dp, end = 24.dp, bottom = 8.dp)) {
             BasicText(title, style = TextStyle(color = c.text, fontSize = 20.sp, fontWeight = FontWeight.Bold))
             Box(Modifier.padding(top = 12.dp).fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(c.text.copy(alpha = 0.06f)).padding(12.dp)) {
                 androidx.compose.foundation.text.BasicTextField(
@@ -98,8 +102,8 @@ fun TgPrompt(title: String, initial: String, confirm: String, onConfirm: (String
                 )
             }
             Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.End) {
-                BasicText("Bekor qilish", Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClick = onDismiss).padding(horizontal = 12.dp, vertical = 10.dp), style = TextStyle(color = Blue, fontSize = 15.sp, fontWeight = FontWeight.Bold))
-                BasicText(confirm, Modifier.clip(RoundedCornerShape(6.dp)).clickable { onConfirm(value.value) }.padding(horizontal = 12.dp, vertical = 10.dp), style = TextStyle(color = Blue, fontSize = 15.sp, fontWeight = FontWeight.Bold))
+                BasicText("Bekor qilish", Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClick = onDismiss).padding(horizontal = 12.dp, vertical = 10.dp), style = TextStyle(color = dialogBlue(), fontSize = 15.sp, fontWeight = FontWeight.Bold))
+                BasicText(confirm, Modifier.clip(RoundedCornerShape(6.dp)).clickable { onConfirm(value.value) }.padding(horizontal = 12.dp, vertical = 10.dp), style = TextStyle(color = dialogBlue(), fontSize = 15.sp, fontWeight = FontWeight.Bold))
             }
         }
     }
@@ -126,7 +130,7 @@ class MenuItem(val icon: Int, val label: String, val danger: Boolean = false, va
 fun PopupMenu(items: List<MenuItem>, onDismiss: () -> Unit, header: (@Composable () -> Unit)? = null) {
     val c = LocalTg.current
     Dialog(onDismissRequest = onDismiss) {
-        Column(Modifier.widthIn(max = 300.dp).clip(RoundedCornerShape(14.dp)).background(dialogBg()).padding(vertical = 6.dp)) {
+        Column(Modifier.widthIn(max = 300.dp).clip(RoundedCornerShape(20.dp)).background(dialogBg()).padding(vertical = 6.dp)) {
             header?.invoke()
             items.forEach { it0 ->
                 Row(
@@ -209,7 +213,7 @@ fun TgForm(title: String, labels: List<String>, confirm: String, onConfirm: (Lis
     val c = LocalTg.current
     val values = remember { androidx.compose.runtime.mutableStateListOf(*Array(labels.size) { initial.getOrElse(it) { "" } }) }
     Dialog(onDismissRequest = onDismiss) {
-        Column(Modifier.clip(RoundedCornerShape(12.dp)).background(dialogBg()).padding(top = 20.dp, start = 24.dp, end = 24.dp, bottom = 8.dp)) {
+        Column(Modifier.clip(RoundedCornerShape(20.dp)).background(dialogBg()).padding(top = 20.dp, start = 24.dp, end = 24.dp, bottom = 8.dp)) {
             BasicText(title, style = TextStyle(color = c.text, fontSize = 20.sp, fontWeight = FontWeight.Bold))
             labels.forEachIndexed { i, label ->
                 Box(Modifier.padding(top = 12.dp).fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(c.text.copy(alpha = 0.06f)).padding(12.dp)) {
@@ -224,8 +228,34 @@ fun TgForm(title: String, labels: List<String>, confirm: String, onConfirm: (Lis
                 }
             }
             Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.End) {
-                BasicText("Bekor qilish", Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClick = onDismiss).padding(horizontal = 12.dp, vertical = 10.dp), style = TextStyle(color = Blue, fontSize = 15.sp, fontWeight = FontWeight.Bold))
-                BasicText(confirm, Modifier.clip(RoundedCornerShape(6.dp)).clickable { onConfirm(values.toList()) }.padding(horizontal = 12.dp, vertical = 10.dp), style = TextStyle(color = Blue, fontSize = 15.sp, fontWeight = FontWeight.Bold))
+                BasicText("Bekor qilish", Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClick = onDismiss).padding(horizontal = 12.dp, vertical = 10.dp), style = TextStyle(color = dialogBlue(), fontSize = 15.sp, fontWeight = FontWeight.Bold))
+                BasicText(confirm, Modifier.clip(RoundedCornerShape(6.dp)).clickable { onConfirm(values.toList()) }.padding(horizontal = 12.dp, vertical = 10.dp), style = TextStyle(color = dialogBlue(), fontSize = 15.sp, fontWeight = FontWeight.Bold))
+            }
+        }
+    }
+}
+
+/**
+ * ⋮ menyusi (DrKLO `ActionBarPopupWindow` + `ActionBarMenuSubItem`): o'ng yuqori burchakda, fon `actionBarDefaultSubmenuBackground` (#282829),
+ * qator 48 dp, chetdan 18 dp, belgi 24 dp va matn 16 sp (matn belgidan 43 dp ichkarida), ajratgich 8 dp.
+ */
+class MenuRow(val icon: Int, val label: String, val divider: Boolean = false, val danger: Boolean = false, val action: () -> Unit)
+
+@Composable
+fun AnchoredMenu(items: List<MenuRow>, onDismiss: () -> Unit) {
+    val c = LocalTg.current
+    val bg = if (c.dark) Color(0xFF282829) else Color.White
+    val fg = if (c.dark) Color.White else Color(0xFF222222)
+    androidx.compose.ui.window.Popup(alignment = Alignment.TopEnd, onDismissRequest = onDismiss, properties = androidx.compose.ui.window.PopupProperties(focusable = true)) {
+        Column(
+            Modifier.statusBarsPadding().padding(top = 4.dp, end = 4.dp).widthIn(min = 200.dp).shadow(8.dp, RoundedCornerShape(10.dp)).clip(RoundedCornerShape(10.dp)).background(bg).padding(vertical = 4.dp),
+        ) {
+            items.forEach { it0 ->
+                Row(Modifier.fillMaxWidth().height(48.dp).clickable { onDismiss(); it0.action() }.padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+                    TgIcon(it0.icon, if (it0.danger) c.red else fg, size = 24.dp)
+                    BasicText(it0.label, Modifier.padding(start = 19.dp), style = TextStyle(color = if (it0.danger) c.red else fg, fontSize = 16.sp), maxLines = 1)
+                }
+                if (it0.divider) Box(Modifier.fillMaxWidth().height(8.dp).background(if (c.dark) Color(0xFF1E1E1F) else Color(0xFFF1F1F3)))
             }
         }
     }
