@@ -154,7 +154,7 @@ private fun Bubble(m: MsgRow, showSender: Boolean) {
     Row(Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 2.dp, bottom = 2.dp), horizontalArrangement = if (m.out) androidx.compose.foundation.layout.Arrangement.End else androidx.compose.foundation.layout.Arrangement.Start) {
         Column(Modifier.widthIn(max = 300.dp).clip(shape).background(bg).padding(horizontal = 10.dp, vertical = 6.dp)) {
             if (showSender && !m.out && m.sender.isNotEmpty()) {
-                BasicText(m.sender, style = TextStyle(color = Color(0xFF3390EC), fontSize = 14.sp, fontWeight = FontWeight.Medium), maxLines = 1)
+                BasicText(m.sender, style = TextStyle(color = senderColor(m.sender), fontSize = 14.sp, fontWeight = FontWeight.Medium), maxLines = 1)
             }
             val body = m.text.ifEmpty { m.media }
             if (body.isNotEmpty()) BasicText(body, style = TextStyle(color = if (c.dark) Color.White else Color.Black, fontSize = 16.sp))
@@ -185,3 +185,8 @@ private fun DateChip(unix: Long) {
         )
     }
 }
+
+/** Guruhdagi yuboruvchi nomi rangi (`keys_avatar_nameInMessage`): qizil, to'q sariq, binafsha, yashil, firuza, ko'k, pushti. */
+private val NameColors = longArrayOf(0xFFCC5049, 0xFFD67722, 0xFF955CDB, 0xFF40A920, 0xFF309EBA, 0xFF368AD1, 0xFFC7508B)
+
+private fun senderColor(name: String): Color = Color(NameColors[Math.floorMod(name.hashCode(), NameColors.size)])

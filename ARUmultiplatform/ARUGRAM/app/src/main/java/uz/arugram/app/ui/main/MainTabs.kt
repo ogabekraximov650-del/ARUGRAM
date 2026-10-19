@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -105,7 +106,7 @@ private fun TabItem(tab: MainTab, isSelected: Boolean, me: ChatRow?, onClick: ()
             if (tab.asset != null) {
                 val composition by rememberLottieComposition(LottieCompositionSpec.Asset(tab.asset))
                 val props = rememberLottieDynamicProperties(
-                    rememberLottieDynamicProperty(property = LottieProperty.COLOR_FILTER, value = SimpleColorFilter(iconColor.toArgb()), keyPath = arrayOf("**")),
+                    rememberLottieDynamicProperty(LottieProperty.COLOR_FILTER, SimpleColorFilter(iconColor.toArgb()), "**"),
                 )
                 LottieAnimation(composition, progress = { sel.value }, modifier = Modifier.size(24.dp), dynamicProperties = props)
             } else {

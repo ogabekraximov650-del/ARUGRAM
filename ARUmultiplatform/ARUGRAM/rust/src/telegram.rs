@@ -2620,6 +2620,46 @@ pub extern "C" fn rust_tg_me() -> *mut c_char {
     }))
 }
 
+/// Kontaktlar: `{"contacts":[{"id","name","status","online","seen","username"}]}` (`status` — matn, `seen` — oxirgi marta unix).
+#[no_mangle]
+pub extern "C" fn rust_tg_contacts() -> *mut c_char {
+    string_to_cptr(with_client(|t, client| {
+        if !t.authorized.load(Ordering::SeqCst) {
+            return Err("Telegram ulanmagan".to_string());
+        }
+        let v = run_tmo(t, 30, async {
+            let res = client.invoke(&tl::functions::contacts::GetContacts { hash: 0 }).await.map_err(|e| e.to_string())?;
+            let users = match res {
+                tl::enums::contacts::Contacts::Contacts(c) => c.users,
+                _ => Vec::new(),
+            };
+            let mut out = Vec::new();
+            for u in users {
+                let tl::enums::User::User(u) = u else { continue };
+                let name = format!("{} {}", u.first_name.clone().unwrap_or_default(), u.last_name.clone().unwrap_or_default()).trim().to_string();
+                let (status, online, seen) = match &u.status {
+                    Some(tl::enums::UserStatus::Online(_)) => ("onlayn", true, 0i64),
+                    Some(tl::enums::UserStatus::Offline(o)) => ("", false, o.was_online as i64),
+                    Some(tl::enums::UserStatus::Recently(_)) => ("yaqinda onlayn edi", false, 0),
+                    Some(tl::enums::UserStatus::LastWeek(_)) => ("o'tgan hafta onlayn edi", false, 0),
+                    Some(tl::enums::UserStatus::LastMonth(_)) => ("o'tgan oy onlayn edi", false, 0),
+                    _ => ("uzoq vaqt oldin onlayn edi", false, 0),
+                };
+                out.push(json!({
+                    "id": u.id,
+                    "name": name,
+                    "status": status,
+                    "online": online,
+                    "seen": seen,
+                    "username": u.username.clone().unwrap_or_default(),
+                }));
+            }
+            Ok(json!({ "contacts": out }))
+        })?;
+        Ok(v.to_string())
+    }))
+}
+
 fn b64(data: &[u8]) -> String {
     const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);

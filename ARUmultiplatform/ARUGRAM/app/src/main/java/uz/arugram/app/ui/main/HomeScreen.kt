@@ -42,21 +42,25 @@ import uz.arugram.app.ui.theme.LocalTg
 @Composable
 fun HomeScreen(auth: AuthModel) {
     val c = LocalTg.current
-    val model = remember { ChatsModel(androidx.compose.ui.platform.LocalContext.current.applicationContext) }
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val model = remember { ChatsModel(ctx.applicationContext) }
     var openChat by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf<Long?>(null) }
     val ui by model.ui.collectAsStateWithLifecycle()
     var tab by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableIntStateOf(0) }
     var me by remember { androidx.compose.runtime.mutableStateOf<ChatRow?>(null) }
+    var meContact by remember { androidx.compose.runtime.mutableStateOf("") }
     LaunchedEffect(Unit) {
         val j = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { uz.arugram.app.core.RustCore.tgMe() }
         if (j.optString("error").isEmpty() && j.has("id")) {
             me = ChatRow(j.optLong("id"), "user", j.optString("name"), false, 0, false, false, 0, "", false, false, false)
+            val phone = j.optString("phone").let { if (it.isNotEmpty()) "+$it" else "" }
+            val user = j.optString("username").let { if (it.isNotEmpty()) "@$it" else "" }
+            meContact = listOf(phone, user).filter { it.isNotEmpty() }.joinToString("  ·  ")
         }
     }
     var searching by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
     var query by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf("") }
     androidx.activity.compose.BackHandler(enabled = searching) { searching = false; query = "" }
-    val ctx = androidx.compose.ui.platform.LocalContext.current
     LaunchedEffect(ui.chats.map { it.id }, me?.id) { AvatarCache.ensure(ctx, (ui.chats.filter { !it.self }.map { it.id } + listOfNotNull(me?.id)).distinct()) }
     // Haqiqiy vaqtdagi yangilanishlar (updates) keyingi bosqichda; hozircha har 20 soniyada ro'yxat yangilanadi.
     LaunchedEffect(Unit) {
@@ -112,8 +116,10 @@ fun HomeScreen(auth: AuthModel) {
         }
     }
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            if (tab != 0) {
-                TabPlaceholder(MainTab.entries[tab], auth, me)
+            if (tab == MainTab.Contacts.ordinal) {
+                ContactsTab(bottomPadding = 80.dp)
+            } else if (tab != 0) {
+                TabPlaceholder(MainTab.entries[tab], auth, me, meContact)
             } else when {
                 ui.loading -> CircularProgressIndicator(Modifier.align(Alignment.Center).size(32.dp), color = c.inputActive, strokeWidth = 3.dp)
                 ui.error != null && ui.chats.isEmpty() -> Column(Modifier.align(Alignment.Center).padding(horizontal = 32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -136,7 +142,7 @@ fun HomeScreen(auth: AuthModel) {
 
 /** Kontaktlar / Sozlamalar / Profil tablari hozircha sarlavha va qisqa izoh bilan (keyingi bosqichlarda to'ldiriladi). */
 @Composable
-private fun TabPlaceholder(tab: MainTab, auth: AuthModel, me: ChatRow?) {
+private fun TabPlaceholder(tab: MainTab, auth: AuthModel, me: ChatRow?, meContact: String) {
     val c = LocalTg.current
     Column(Modifier.fillMaxSize().background(c.grayBg).statusBarsPadding(), horizontalAlignment = Alignment.CenterHorizontally) {
         Box(Modifier.fillMaxWidth().height(56.dp).background(c.bar), contentAlignment = Alignment.CenterStart) {
@@ -146,6 +152,7 @@ private fun TabPlaceholder(tab: MainTab, auth: AuthModel, me: ChatRow?) {
             Column(Modifier.fillMaxWidth().background(c.bar).padding(vertical = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 ChatAvatar(me, 96.dp)
                 BasicText(me.name, Modifier.padding(top = 12.dp), style = TextStyle(color = c.text, fontSize = 20.sp, fontWeight = FontWeight.Medium))
+                if (meContact.isNotEmpty()) BasicText(meContact, Modifier.padding(top = 4.dp), style = TextStyle(color = c.gray, fontSize = 15.sp))
             }
         }
         if (tab == MainTab.Settings || tab == MainTab.Profile) {

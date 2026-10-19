@@ -102,6 +102,8 @@ object RustCore {
 
     fun tgMe(): JSONObject = guard(errJson("Yadro yuklanmagan")) { json(take(it.rust_tg_me())) }
 
+    fun tgContacts(): JSONObject = guard(errJson("Yadro yuklanmagan")) { json(take(it.rust_tg_contacts())) }
+
     fun tgLoginState(): JSONObject = guard(JSONObject().put("stage", "phone")) { json(take(it.rust_tg_login_state())) }
 
     fun tgLoginReset() = guard(Unit) { it.rust_tg_login_reset() }
