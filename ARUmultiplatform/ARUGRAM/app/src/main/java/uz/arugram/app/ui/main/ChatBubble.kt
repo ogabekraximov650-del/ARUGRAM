@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
 package uz.arugram.app.ui.main
 
 import androidx.compose.foundation.ExperimentalFoundationApi
