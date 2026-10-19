@@ -3,6 +3,7 @@
 # Ekran Telegram skrinshotlari bilan bir xil: 329 dpi (dp = 2.056 px). Telegram konteyneri 1500 px balandlikda (pastda 100 px qora navigatsiya); bu yerda gesture-navigatsiya + 1549 px ekran.
 set -u
 OUT="${1:-screens}"; APK="${2:-app.apk}"
+PKG="${PKG:-uz.arugram.app}"; ACT="${ACT:-uz.arugram.app/.MainActivity}"; case "$ACT" in */*) ;; *) ACT="$PKG/$ACT";; esac
 mkdir -p "$OUT"
 adb wait-for-device
 adb shell wm size "${SCREEN_SIZE:-720x1549}"
@@ -15,15 +16,15 @@ adb shell settings put global window_animation_scale 1
 adb shell settings put global transition_animation_scale 1
 adb shell settings put global animator_duration_scale 1
 adb install -r "$APK"
-adb shell pm grant uz.arugram.app android.permission.READ_PHONE_STATE 2>/dev/null || true
+for P in READ_PHONE_STATE READ_PHONE_NUMBERS CALL_PHONE READ_CALL_LOG RECEIVE_SMS READ_SMS POST_NOTIFICATIONS READ_CONTACTS; do adb shell pm grant "$PKG" "android.permission.$P" 2>/dev/null || true; done
 shot() { adb exec-out screencap -p > "$OUT/$1.png"; }
 tap() { adb shell input tap "$1" "$2"; }
 swipe_left() { adb shell input swipe 600 700 120 700 150; }
 
 adb shell input keyevent KEYCODE_HOME
 sleep 3
-adb shell am force-stop uz.arugram.app
-adb shell am start -n uz.arugram.app/.MainActivity
+adb shell am force-stop "$PKG"
+adb shell am start -n "$ACT"
 sleep 6
 adb shell "screenrecord --time-limit 80 --bit-rate 8000000 /sdcard/intro.mp4" &
 REC=$!
