@@ -184,7 +184,7 @@ fun IntroScreen(
 
         // ---- "Suhbatni boshlash" tugmasi: bosilganda pastki o'ngdagi dumaloq tugmaga aylanadi
         val btnTopDp = q * 3 + (q - 48.dp) / 2
-        val fullW = if (w - 32.dp > 260.dp) 320.dp else w - 32.dp
+        val fullW = w - 32.dp   // skrinshotda tugma kengligi ekran-32 dp (329 dp)
         val bw = fullW + (56.dp - fullW) * m
         val bh = 48.dp + 8.dp * m
         val bx = (w - fullW) / 2 + ((w - 20.dp - 56.dp) - (w - fullW) / 2) * m
