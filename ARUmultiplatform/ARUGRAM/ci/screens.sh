@@ -33,7 +33,7 @@ for i in 2 3 4 5 6; do
   swipe_left; sleep 1.5; shot "01_light_page$i"
 done
 # Mavzuni almashtirish: tugma (645,132); ochilish animatsiyasi o'rtasida va oxirida kadr
-tap 645 132; sleep 0.25; shot 02_theme_mid; sleep 1.5; shot 02_dark_page6
+tap 645 132; sleep 0.25; shot 02_theme_mid; sleep 3; shot 02_dark_page6
 for i in 1 2 3 4 5; do
   adb shell input swipe 120 700 600 700 150; sleep 1.5; shot "03_dark_page$((6-i))"
 done

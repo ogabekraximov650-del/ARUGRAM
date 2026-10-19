@@ -142,19 +142,19 @@ fun IntroScreen(
                         BasicText(
                             texts.titles[0],
                             style = TextStyle(color = c.text.copy(alpha = 0.9f), fontSize = 26.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, letterSpacing = 0.5.sp),
-                            modifier = Modifier.offset(x = 18.dp, y = y0 + 175.dp).width(w - 36.dp),
+                            modifier = Modifier.offset(x = 18.dp, y = y0 + 178.5.dp).width(w - 36.dp),
                         )
                     } else {
                         BasicText(
                             texts.titles[page],
                             style = TextStyle(color = c.text, fontSize = 26.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center),
-                            modifier = Modifier.offset(x = 18.dp, y = y0 + 175.dp).width(w - 36.dp),
+                            modifier = Modifier.offset(x = 18.dp, y = y0 + 178.5.dp).width(w - 36.dp),
                         )
                     }
                     BasicText(
                         boldTags(texts.bodies[page]),
                         style = TextStyle(color = c.text, fontSize = 15.sp, lineHeight = 20.sp, textAlign = TextAlign.Center),
-                        modifier = Modifier.offset(x = 16.dp, y = y0 + 175.dp + 26.dp + 18.dp).width(w - 32.dp),
+                        modifier = Modifier.offset(x = 16.dp, y = y0 + 175.dp + 26.dp + 18.dp + 2.5.dp).width(w - 32.dp),
                     )
                 }
             }
@@ -167,7 +167,7 @@ fun IntroScreen(
             BasicText(
                 texts.switchLang,
                 style = TextStyle(color = if (dark) Color(0xFF64B5EF) else Color(0xFF1C93E3), fontSize = 16.sp, textAlign = TextAlign.Center),
-                modifier = Modifier.offset(x = (w - 240.dp) / 2, y = btnTop - 60.dp).size(240.dp, 30.dp).clickable(
+                modifier = Modifier.offset(x = (w - 240.dp) / 2, y = btnTop - 58.dp).size(240.dp, 30.dp).clickable(
                     interactionSource = remember { MutableInteractionSource() }, indication = null,
                 ) { if (!started) english = !english }.padding(top = 4.dp),
             )
@@ -291,7 +291,7 @@ private fun SunMoon(dark: Boolean, modifier: Modifier) {
 
 
 // ---------------------------------------------------------------- sahifa rasmlari
-// Rasmlar Telegram kirish oynasining skrinshotidan o'lchab chizilgan (o'lchamlar 4x kattalashtirilgan kesimning pikselida, /4 = dp);
+// Rasmlar Telegram kirish oynasining skrinshotidan o'lchab chizilgan (o'lchamlar 2x kattalashtirilgan kesimning pikselida; qurilma zichligi 2.056 => /4.112 = dp);
 // markaz — 200x150 dp maydonning o'rtasi.
 
 private val RedBox = Color(0xFFF64938)
@@ -310,8 +310,8 @@ private fun IntroArt(page: Int, ph: Float, appear: Float, modifier: Modifier) {
     Canvas(modifier) {
         val u = 1.dp.toPx()
         val ctr = Offset(size.width / 2f, size.height / 2f)
-        fun p(x: Float, y: Float) = Offset(ctr.x + (x - 360f) / 4f * u, ctr.y + (y - 346f) / 4f * u)
-        fun l(v: Float) = v / 4f * u
+        fun p(x: Float, y: Float) = Offset(ctr.x + (x - 360f) / 4.112f * u, ctr.y + (y - 346f) / 4.112f * u)
+        fun l(v: Float) = v / 4.112f * u
         when (page) {
             0, 5 -> logo(::p, ::l, ph)
             1 -> speedometer(::p, ::l, ph, appear)
