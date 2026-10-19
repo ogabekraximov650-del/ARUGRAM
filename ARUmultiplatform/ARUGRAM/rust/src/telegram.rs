@@ -2395,6 +2395,68 @@ pub extern "C" fn rust_tg_channel_info(arg_ptr: *const c_char) -> *mut c_char {
     }))
 }
 
+/// Suhbatlar ro'yxati (Telegram "Chatlar" oynasi uchun): `{"dialogs":[{"id","kind":"user|group|channel","name","pinned",
+/// "unread","muted","out","date","text","bot","self","verified","username"}]}`. `arg` — nechta suhbat kerakligi (standart 40).
+async fn dialogs_json(client: &Client, limit: usize) -> Result<Value, String> {
+    use grammers_client::peer::Peer;
+    let now_secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
+    let mut out = Vec::new();
+    let mut it = client.iter_dialogs();
+    while out.len() < limit {
+        let Some(d) = it.next().await.map_err(|e| e.to_string())? else { break };
+        let (kind, name, bot, is_self, verified) = match d.peer() {
+            Peer::User(u) => ("user", u.full_name(), u.is_bot(), u.is_self(), u.verified()),
+            Peer::Group(g) => ("group", g.title().unwrap_or_default().to_string(), false, false, false),
+            Peer::Channel(c) => ("channel", c.title().to_string(), false, false, false),
+        };
+        let (pinned, unread, muted) = match &d.raw {
+            tl::enums::Dialog::Dialog(x) => {
+                let muted = matches!(&x.notify_settings, tl::enums::PeerNotifySettings::Settings(n) if n.mute_until.unwrap_or(0) as i64 > now_secs);
+                (x.pinned, x.unread_count, muted)
+            }
+            tl::enums::Dialog::Folder(_) => continue,
+        };
+        let (text, date, outgoing) = match &d.last_message {
+            Some(m) => {
+                let mut t = m.text().replace('\n', " ");
+                if t.is_empty() && m.media().is_some() {
+                    t = "Media".to_string();
+                }
+                (t, m.date().timestamp(), m.outgoing())
+            }
+            None => (String::new(), 0, false),
+        };
+        out.push(json!({
+            "id": d.peer_id().bot_api_dialog_id(),
+            "kind": kind,
+            "name": if is_self { "Saqlangan xabarlar".to_string() } else { name },
+            "pinned": pinned,
+            "unread": unread,
+            "muted": muted,
+            "out": outgoing,
+            "date": date,
+            "text": text,
+            "bot": bot,
+            "self": is_self,
+            "verified": verified,
+            "username": d.peer().username().unwrap_or_default(),
+        }));
+    }
+    Ok(json!({ "dialogs": out }))
+}
+
+#[no_mangle]
+pub extern "C" fn rust_tg_dialogs(arg_ptr: *const c_char) -> *mut c_char {
+    let limit = unsafe { cstr_to_str(arg_ptr) }.unwrap_or("").trim().parse::<usize>().unwrap_or(40).clamp(1, 200);
+    string_to_cptr(with_client(|t, client| {
+        if !t.authorized.load(Ordering::SeqCst) {
+            return Err("Telegram ulanmagan".to_string());
+        }
+        let v = run_tmo(t, 30, dialogs_json(&client, limit))?;
+        Ok(v.to_string())
+    }))
+}
+
 fn b64(data: &[u8]) -> String {
     const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);

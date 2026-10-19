@@ -27,6 +27,7 @@ interface RustLib : Library {
     fun rust_tg_check_password(password: String): Pointer?
     fun rust_tg_login_state(): Pointer?
     fun rust_tg_login_reset()
+    fun rust_tg_dialogs(limit: String): Pointer?
     fun rust_tg_logout(): Pointer?
 
     // ── Kirish (intro) sahnasi: Telegram `IntroRenderer.c` ning Rust'ga o'tkazilgan nusxasi (OpenGL ES 2) ──

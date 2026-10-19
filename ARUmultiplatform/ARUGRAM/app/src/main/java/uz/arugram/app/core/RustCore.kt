@@ -90,6 +90,8 @@ object RustCore {
 
     fun tgCheckPassword(password: String): JSONObject = guard(errJson("Yadro yuklanmagan")) { json(take(it.rust_tg_check_password(password))) }
 
+    fun tgDialogs(limit: Int = 40): JSONObject = guard(errJson("Yadro yuklanmagan")) { json(take(it.rust_tg_dialogs(limit.toString()))) }
+
     fun tgLoginState(): JSONObject = guard(JSONObject().put("stage", "phone")) { json(take(it.rust_tg_login_state())) }
 
     fun tgLoginReset() = guard(Unit) { it.rust_tg_login_reset() }

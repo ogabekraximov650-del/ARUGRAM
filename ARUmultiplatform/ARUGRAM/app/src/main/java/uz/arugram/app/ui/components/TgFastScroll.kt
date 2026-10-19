@@ -24,6 +24,7 @@ import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -90,7 +91,7 @@ fun TgFastScroll(state: LazyListState, itemCount: Int, letterAt: (Int) -> String
                 }
                 val cx = left + 2.5f * d
                 val cy = top + 30f * d + 12f * d - 12f * d
-                androidx.compose.ui.graphics.drawscope.withTransform({ scale(bubble, bubble, Offset(cx, y + 30f * d)) }) {
+                withTransform({ scale(bubble, bubble, Offset(cx, y + 30f * d)) }) {
                     drawPath(path, color.copy(alpha = bubble))
                     val layout = measurer.measure(letter, TextStyle(color = Color.White, fontSize = 45.sp))
                     drawText(layout, topLeft = Offset(10f * d + (88f * d - layout.size.width) / 2f, top + (88f * d - layout.size.height) / 2f))
