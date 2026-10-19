@@ -58,6 +58,12 @@ private val MainItems = listOf(
     Item(Purple, R.drawable.settings_language, "Til", "O‘zbekcha", "language"),
 )
 
+private val ExtraItems = listOf(
+    Item(Purple, R.drawable.settings_features, "Telegram Premium", "Qo‘shimcha imkoniyatlar", "premium"),
+    Item(OrangeDeep, R.drawable.settings_data, "Mening Stars’im", "Balans va amallar tarixi", "stars"),
+    Item(Green, R.drawable.settings_devices, "Qo‘ng‘iroqlar", "Qo‘ng‘iroqlar tarixi", "calls"),
+)
+
 private val HelpItems = listOf(
     Item(Orange, R.drawable.settings_ask, "Savol berish", null, "url:https://telegram.org/support"),
     Item(BlueLight, R.drawable.settings_faq, "Telegram FAQ", null, "url:https://telegram.org/faq"),
@@ -92,6 +98,10 @@ fun SettingsTab(me: ChatRow?, meContact: String, bottomPadding: Dp, onOpenChat: 
             Column(Modifier.fillMaxWidth().background(c.bar)) {
                 if (savedChat != null) SettingRow(Item(Blue, R.drawable.msg_saved, "Saqlangan xabarlar", null, "saved")) { onOpenChat(savedChat) }
                 MainItems.forEach { it0 -> SettingRow(it0) { onNavigate(it0.route) } }
+            }
+            Spacer(Modifier.height(8.dp))
+            Column(Modifier.fillMaxWidth().background(c.bar)) {
+                ExtraItems.forEach { it0 -> SettingRow(it0) { onNavigate(it0.route) } }
             }
             Spacer(Modifier.height(8.dp))
             Column(Modifier.fillMaxWidth().background(c.bar)) {

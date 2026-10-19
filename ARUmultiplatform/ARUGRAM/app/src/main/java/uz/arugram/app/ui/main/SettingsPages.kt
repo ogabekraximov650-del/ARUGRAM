@@ -397,3 +397,125 @@ fun LanguagePage(onBack: () -> Unit) {
         Hint("Ilova interfeysi hozircha o‘zbek tilida.")
     }
 }
+
+// ── Qo'ng'iroqlar tarixi ──
+@Composable
+fun CallsPage(onBack: () -> Unit) {
+    val c = LocalTg.current
+    var list by remember { mutableStateOf<List<JSONObject>?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        val j = withContext(Dispatchers.IO) { RustCore.tgCalls() }
+        error = j.optString("error").ifEmpty { null }
+        val a = j.optJSONArray("calls")
+        list = buildList { for (i in 0 until (a?.length() ?: 0)) add(a!!.getJSONObject(i)) }
+    }
+    Page("Qo‘ng‘iroqlar", onBack) {
+        val l = list
+        if (l == null) Box(Modifier.fillMaxWidth().padding(40.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.size(32.dp), color = c.inputActive, strokeWidth = 3.dp) }
+        else {
+            if (error != null) Hint(error.orEmpty())
+            if (l.isEmpty() && error == null) Hint("Hozircha qo‘ng‘iroqlar yo‘q.")
+            else Card {
+                l.forEach { o ->
+                    val out = o.optBoolean("out")
+                    val missed = o.optBoolean("missed")
+                    val dur = o.optInt("duration")
+                    val kind = when {
+                        missed && out -> "Bekor qilingan"
+                        missed -> "O‘tkazib yuborilgan"
+                        out -> "Chiquvchi"
+                        else -> "Kiruvchi"
+                    } + (if (o.optBoolean("video")) " video" else "") + (if (dur > 0) " (%d:%02d)".format(dur / 60, dur % 60) else "")
+                    val row = ChatRow(o.optLong("user"), "user", o.optString("name"), false, 0, false, false, 0, "", false, false, false, access = o.optString("hash", "0"))
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        ChatAvatar(row, 44.dp)
+                        Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                            BasicText(o.optString("name"), style = TextStyle(color = if (missed && !out) c.red else c.text, fontSize = 16.sp, fontWeight = FontWeight.Medium), maxLines = 1)
+                            BasicText(kind, Modifier.padding(top = 2.dp), style = TextStyle(color = c.gray, fontSize = 13.sp))
+                        }
+                        BasicText(chatTime(o.optLong("date")), style = TextStyle(color = c.gray, fontSize = 13.sp))
+                    }
+                }
+            }
+            Hint("Ovozli va video qo‘ng‘iroq qilish hozircha qo‘llab-quvvatlanmaydi — bu yerda faqat qo‘ng‘iroqlar tarixi ko‘rinadi.")
+        }
+    }
+}
+
+// ── Telegram Premium ──
+@Composable
+fun PremiumPage(onBack: () -> Unit) {
+    val c = LocalTg.current
+    val ctx = LocalContext.current
+    var text by remember { mutableStateOf<String?>(null) }
+    var options by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
+    var error by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        val j = withContext(Dispatchers.IO) { RustCore.tgPremium() }
+        error = j.optString("error").ifEmpty { null }
+        text = j.optString("text")
+        val a = j.optJSONArray("options")
+        options = buildList { for (i in 0 until (a?.length() ?: 0)) add(a!!.getJSONObject(i)) }
+    }
+    Page("Telegram Premium", onBack) {
+        Column(Modifier.fillMaxWidth().background(c.bar).padding(horizontal = 24.dp, vertical = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            BasicText("★", style = TextStyle(color = Color(0xFF7C6BFF), fontSize = 56.sp))
+            BasicText("Telegram Premium", Modifier.padding(top = 8.dp), style = TextStyle(color = c.text, fontSize = 22.sp, fontWeight = FontWeight.Bold))
+            BasicText(
+                "Cheksiz imkoniyatlar: 4 GB gacha fayllar, tezroq yuklash, ovozni matnga aylantirish, qo‘shimcha reaksiyalar, maxsus stikerlar va boshqalar.",
+                Modifier.padding(top = 8.dp), style = TextStyle(color = c.gray, fontSize = 15.sp, lineHeight = 20.sp),
+            )
+        }
+        if (error != null) Hint(error.orEmpty())
+        text?.takeIf { it.isNotEmpty() }?.let { Hint(it) }
+        if (options.isNotEmpty()) Card {
+            options.forEach { o ->
+                val months = o.optInt("months")
+                val title = if (months >= 12 && months % 12 == 0) "${months / 12} yil" else "$months oy"
+                val price = "%.2f %s".format(o.optLong("amount") / 100.0, o.optString("currency"))
+                TextRow(title, value = price, subtitle = if (o.optBoolean("current")) "Hozirgi obuna" else null) { openUrl(ctx, o.optString("url")) }
+            }
+        }
+        Card { TextRow("Premium’ni Telegram botida olish") { openUrl(ctx, "https://t.me/PremiumBot") } }
+        Hint("To‘lov Telegram’ning rasmiy @PremiumBot orqali amalga oshiriladi. Obuna faollashgach bu hisob ARUGRAM’da ham Premium imkoniyatlaridan foydalanadi.")
+    }
+}
+
+// ── Stars ──
+@Composable
+fun StarsPage(onBack: () -> Unit) {
+    val c = LocalTg.current
+    val ctx = LocalContext.current
+    var balance by remember { mutableStateOf<Long?>(null) }
+    var history by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
+    var error by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        val j = withContext(Dispatchers.IO) { RustCore.tgStars() }
+        error = j.optString("error").ifEmpty { null }
+        if (error == null) balance = j.optLong("balance")
+        val a = j.optJSONArray("history")
+        history = buildList { for (i in 0 until (a?.length() ?: 0)) add(a!!.getJSONObject(i)) }
+    }
+    Page("Mening Stars’im", onBack) {
+        Column(Modifier.fillMaxWidth().background(c.bar).padding(vertical = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            BasicText("Balans", style = TextStyle(color = c.gray, fontSize = 14.sp))
+            BasicText("★ ${balance ?: "—"}", Modifier.padding(top = 4.dp), style = TextStyle(color = Color(0xFFF2A100), fontSize = 34.sp, fontWeight = FontWeight.Bold))
+        }
+        if (error != null) Hint(error.orEmpty())
+        Card { TextRow("Stars sotib olish") { openUrl(ctx, "https://t.me/PremiumBot") } }
+        if (history.isNotEmpty()) {
+            Hint("Amallar tarixi")
+            Card {
+                history.forEach { o ->
+                    val amt = o.optLong("amount")
+                    TextRow(
+                        o.optString("title").ifEmpty { if (amt >= 0) "Kirim" else "Chiqim" },
+                        value = (if (amt > 0) "+" else "") + amt,
+                        subtitle = chatTime(o.optLong("date")) + if (o.optBoolean("refund")) " · qaytarilgan" else "",
+                    )
+                }
+            }
+        }
+    }
+}

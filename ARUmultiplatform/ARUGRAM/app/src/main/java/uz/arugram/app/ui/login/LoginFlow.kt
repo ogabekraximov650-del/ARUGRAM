@@ -43,6 +43,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -205,7 +206,7 @@ fun LoginFlow(auth: AuthModel, suppressFab: Boolean = false) {
 
     val keypadH = if (keypadWanted) NUMPAD_HEIGHT_DP.dp else (NUMPAD_HEIGHT_DP * keypadP.value).dp
     Box(Modifier.fillMaxSize().background(c.bg).statusBarsPadding().navigationBarsPadding().imePadding()) {
-    Box(Modifier.fillMaxSize().padding(bottom = keypadH)) {
+    Box(Modifier.fillMaxSize().padding(bottom = keypadH).blur((14f * confirmP).dp)) {
         AnimatedContent(
             targetState = page,
             modifier = Modifier.fillMaxSize(),

@@ -196,6 +196,21 @@ object RustCore {
 
     fun tgFolders() = call { it.rust_tg_folders() }
 
+    fun tgStories() = call { it.rust_tg_stories() }
+
+    fun tgCalls() = call { it.rust_tg_calls() }
+
+    fun tgPremium() = call { it.rust_tg_premium() }
+
+    fun tgStars() = call { it.rust_tg_stars() }
+
+    fun tgStoryFile(spec: String, id: Int, dir: String) = call { it.rust_tg_story_file("$spec\n$id\n$dir") }
+
+    fun tgStoryRead(spec: String, maxId: Int) = call { it.rust_tg_story_read("$spec\n$maxId") }
+
+    fun tgStorySend(kind: String, path: String, caption: String, audience: String, extra: String) =
+        call { it.rust_tg_story_send("$kind\n$path\n$caption\n$audience\n$extra") }
+
     fun tgCreateGroup(title: String, members: String) = call { it.rust_tg_create_group("$title\n$members") }
 
     fun tgCreateChannel(title: String, about: String) = call { it.rust_tg_create_channel("$title\n$about") }

@@ -84,6 +84,16 @@ fun HomeScreen(auth: AuthModel) {
     var addContact by remember { mutableStateOf(false) }
     var toast by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(toast) { if (toast != null) { delay(3000); toast = null } }
+    var stories by remember { mutableStateOf<List<StoryPeer>>(emptyList()) }
+    var storyStart by remember { mutableStateOf<Int?>(null) }
+    val storyPicker = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) scope.launch {
+            toast = "Hikoya joylanmoqda..."
+            val err = postStory(ctx, uri, "", "all")
+            toast = err.ifEmpty { "Hikoya joylandi" }
+            stories = parseStories(withContext(Dispatchers.IO) { RustCore.tgStories() })
+        }
+    }
 
     LaunchedEffect(Unit) {
         Drafts.load(ctx)
@@ -95,6 +105,7 @@ fun HomeScreen(auth: AuthModel) {
             meContact = listOf(phone, user).filter { it.isNotEmpty() }.joinToString("  ·  ")
         }
         folders = parseFolders(withContext(Dispatchers.IO) { RustCore.tgFolders() })
+        stories = parseStories(withContext(Dispatchers.IO) { RustCore.tgStories() })
         if (settingsPrefs(ctx).getBoolean("notify", true)) NotifyService.start(ctx)
     }
     LaunchedEffect(ui.chats.map { it.id }, me?.id) { AvatarCache.ensure(ctx, (ui.chats.filter { !it.self }.map { it.id } + listOfNotNull(me?.id)).distinct()) }
@@ -149,6 +160,7 @@ fun HomeScreen(auth: AuthModel) {
                         MainTab.Chats -> ChatsTab(
                             ui = ui, folders = folders, folder = folder, onFolder = { folder = it }, typing = typing,
                             onSearch = { stack.add(Dest.Search) }, onOpen = ::open, onLongClick = { menuFor = it }, onRetry = { model.load() },
+                            stories = stories, meId = me?.id, onStory = { storyStart = it }, onAddStory = { storyPicker.launch(arrayOf("image/*", "video/*")) },
                         )
                         MainTab.Contacts -> ContactsTab(bottomPadding = 80.dp, onOpen = ::open, extra = listOf("Kontakt qo‘shish" to { addContact = true }))
                         MainTab.Settings -> SettingsTab(me, meContact, 80.dp, onOpenChat = { r -> open(r) }, onNavigate = { stack.add(Dest.Settings(it)) }, onLogout = { auth.logout() }, savedChat = ui.chats.firstOrNull { it.self })
@@ -211,6 +223,8 @@ fun HomeScreen(auth: AuthModel) {
             null -> {}
         }
 
+        storyStart?.let { st -> StoryViewer(stories, st, onClose = { storyStart = null; scope.launch { stories = parseStories(withContext(Dispatchers.IO) { RustCore.tgStories() }) } }) }
+
         if (addContact) {
             TgForm("Yangi kontakt", listOf("Telefon raqami (+998...)", "Ism", "Familiya (ixtiyoriy)"), "Qo‘shish", onConfirm = { v ->
                 addContact = false
@@ -247,6 +261,7 @@ fun HomeScreen(auth: AuthModel) {
 private fun ChatsTab(
     ui: ChatsUi, folders: List<Folder>, folder: Int, onFolder: (Int) -> Unit, typing: Map<Long, Long>,
     onSearch: () -> Unit, onOpen: (ChatRow) -> Unit, onLongClick: (ChatRow) -> Unit, onRetry: () -> Unit,
+    stories: List<StoryPeer> = emptyList(), meId: Long? = null, onStory: (Int) -> Unit = {}, onAddStory: () -> Unit = {},
 ) {
     val c = LocalTg.current
     Column(Modifier.fillMaxSize().background(c.bg)) {
@@ -260,6 +275,7 @@ private fun ChatsTab(
                 val unread = folders.associate { f -> f.id to ui.chats.filter { f.matches(it) }.sumOf { if (it.muted) 0 else it.unread } } + (0 to ui.chats.sumOf { if (it.muted) 0 else it.unread })
                 FolderTabs(folders, folder, unread, onFolder)
             }
+            StoriesRow(stories, meId, onOpen = onStory, onAdd = onAddStory)
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when {

@@ -5365,3 +5365,340 @@ pub(crate) fn fetch_range(name: &str, offset: u64, len: u64) -> Result<Vec<u8>, 
 }
 
 include!("tg_media.rs");
+
+// ═══════════════════════════════════════════════════════════════
+//  HIKOYALAR (stories)
+// ═══════════════════════════════════════════════════════════════
+
+fn peer_bot_id(p: &tl::enums::Peer) -> i64 {
+    match p {
+        tl::enums::Peer::User(u) => u.user_id,
+        tl::enums::Peer::Chat(c) => -c.chat_id,
+        tl::enums::Peer::Channel(c) => -1_000_000_000_000i64 - c.channel_id,
+    }
+}
+
+/// Hikoya elementi JSON'i: `{"id","date","expire","kind":"photo|video","caption","out"}` (o'chirilgan/o'tkazib yuborilgan — `None`).
+fn story_json(s: &tl::enums::StoryItem) -> Option<Value> {
+    let tl::enums::StoryItem::Item(s) = s else { return None };
+    let kind = match &s.media {
+        tl::enums::MessageMedia::Photo(_) => "photo",
+        tl::enums::MessageMedia::Document(_) => "video",
+        _ => return None,
+    };
+    Some(json!({
+        "id": s.id,
+        "date": s.date,
+        "expire": s.expire_date,
+        "kind": kind,
+        "caption": s.caption.clone().unwrap_or_default(),
+        "out": s.out,
+    }))
+}
+
+/// Faol hikoyalar: javob `{"peers":[{"id","kind","name","hash","photo_id","max_read","stories":[..]}]}`.
+#[no_mangle]
+pub extern "C" fn rust_tg_stories() -> *mut c_char {
+    tg_call(std::ptr::null(), 40, |client, _| async move {
+        let res = client
+            .invoke(&tl::functions::stories::GetAllStories { next: false, hidden: false, state: None })
+            .await
+            .map_err(|e| e.to_string())?;
+        let tl::enums::stories::AllStories::Stories(all) = res else { return Ok(json!({"peers": []})) };
+        let mut info: HashMap<i64, Value> = HashMap::new();
+        for u in &all.users {
+            if let tl::enums::User::User(u) = u {
+                let name = format!("{} {}", u.first_name.clone().unwrap_or_default(), u.last_name.clone().unwrap_or_default()).trim().to_string();
+                let photo_id = match &u.photo {
+                    Some(tl::enums::UserProfilePhoto::Photo(p)) => p.photo_id,
+                    _ => 0,
+                };
+                info.insert(u.id, json!({"kind": "user", "name": name, "hash": u.access_hash.unwrap_or(0).to_string(), "photo_id": photo_id.to_string()}));
+            }
+        }
+        for c in &all.chats {
+            match c {
+                tl::enums::Chat::Chat(c) => {
+                    info.insert(-c.id, json!({"kind": "group", "name": c.title, "hash": "0", "photo_id": "0"}));
+                }
+                tl::enums::Chat::Channel(c) => {
+                    info.insert(-1_000_000_000_000i64 - c.id, json!({"kind": "channel", "name": c.title, "hash": c.access_hash.unwrap_or(0).to_string(), "photo_id": "0"}));
+                }
+                _ => {}
+            }
+        }
+        let mut peers = Vec::new();
+        for ps in &all.peer_stories {
+            let tl::enums::PeerStories::Stories(ps) = ps;
+            let id = peer_bot_id(&ps.peer);
+            let list: Vec<Value> = ps.stories.iter().filter_map(story_json).collect();
+            if list.is_empty() {
+                continue;
+            }
+            let mut o = info.get(&id).cloned().unwrap_or_else(|| json!({"kind": "user", "name": "", "hash": "0", "photo_id": "0"}));
+            o["id"] = json!(id);
+            o["max_read"] = json!(ps.max_read_id.unwrap_or(0));
+            o["stories"] = json!(list);
+            peers.push(o);
+        }
+        Ok(json!({"peers": peers}))
+    })
+}
+
+/// Hikoya faylini diskka yuklaydi: `arg` = `"<suhbat>\n<hikoya_id>\n<papka>"`. Javob: `{"path","kind"}`.
+#[no_mangle]
+pub extern "C" fn rust_tg_story_file(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 300, |client, arg| async move {
+        use grammers_client::media::{Document, Media, Photo};
+        let l = lines(&arg, 3);
+        let id = l[1].trim().parse::<i32>().map_err(|_| "Hikoya ko'rsatilmagan".to_string())?;
+        let peer = resolve_peer(&client, &l[0]).await?;
+        let ip: tl::enums::InputPeer = peer.into();
+        let res = client
+            .invoke(&tl::functions::stories::GetStoriesByid { peer: ip, id: vec![id] })
+            .await
+            .map_err(|e| e.to_string())?;
+        let tl::enums::stories::Stories::Stories(s) = res;
+        let Some(tl::enums::StoryItem::Item(item)) = s.stories.into_iter().next() else { return Err("Hikoya topilmadi".to_string()) };
+        let (md, kind, ext) = match item.media {
+            tl::enums::MessageMedia::Photo(p) => (Media::Photo(Photo::from_raw_media(p)), "photo", "jpg"),
+            tl::enums::MessageMedia::Document(d) => (Media::Document(Document::from_raw_media(d)), "video", "mp4"),
+            _ => return Err("Hikoya turi qo'llab-quvvatlanmaydi".to_string()),
+        };
+        let dir = std::path::PathBuf::from(l[2].trim());
+        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let key: String = l[0].chars().filter(|c| c.is_ascii_digit() || *c == '-').collect();
+        let path = dir.join(format!("s{key}_{id}.{ext}"));
+        if !path.exists() || fs::metadata(&path).map(|x| x.len()).unwrap_or(0) == 0 {
+            let tmp = dir.join(format!("s{key}_{id}.part"));
+            let mut out = fs::File::create(&tmp).map_err(|e| e.to_string())?;
+            let mut it = client.iter_download(&md);
+            let mut total: usize = 0;
+            while let Some(chunk) = it.next().await.map_err(|e| e.to_string())? {
+                total += chunk.len();
+                if total > 100 * 1024 * 1024 {
+                    let _ = fs::remove_file(&tmp);
+                    return Err("Hikoya juda katta".to_string());
+                }
+                std::io::Write::write_all(&mut out, &chunk).map_err(|e| e.to_string())?;
+            }
+            drop(out);
+            fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
+        }
+        Ok(json!({"path": path.to_string_lossy(), "kind": kind}))
+    })
+}
+
+/// Hikoyalar ko'rilgan deb belgilanadi: `arg` = `"<suhbat>\n<oxirgi_hikoya_id>"`.
+#[no_mangle]
+pub extern "C" fn rust_tg_story_read(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 20, |client, arg| async move {
+        let l = lines(&arg, 2);
+        let max_id = l[1].trim().parse::<i32>().map_err(|_| "Hikoya ko'rsatilmagan".to_string())?;
+        let peer = resolve_peer(&client, &l[0]).await?;
+        let ip: tl::enums::InputPeer = peer.into();
+        client.invoke(&tl::functions::stories::ReadStories { peer: ip, max_id }).await.map_err(|e| e.to_string())?;
+        Ok(json!({"ok": true}))
+    })
+}
+
+/// Hikoya joylash: `arg` = `"<photo|video>\n<yo'l>\n<izoh>\n<kimlarga: all|contacts>\n<soniya:eni:bo'yi>"`.
+#[no_mangle]
+pub extern "C" fn rust_tg_story_send(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 600, |client, arg| async move {
+        let l = lines(&arg, 5);
+        let mut f = tokio::fs::File::open(l[1].trim()).await.map_err(|e| format!("Fayl ochilmadi: {e}"))?;
+        let size = f.metadata().await.map_err(|e| e.to_string())?.len() as usize;
+        if size == 0 {
+            return Err("Fayl bo'sh".to_string());
+        }
+        let name = std::path::Path::new(l[1].trim()).file_name().and_then(|x| x.to_str()).unwrap_or("story").to_string();
+        let up = client.upload_stream(&mut f, size, name).await.map_err(|e| e.to_string())?;
+        let media = if l[0].trim() == "video" {
+            let mut ex = l[4].trim().split(':');
+            let dur = ex.next().and_then(|x| x.parse::<f64>().ok()).unwrap_or(0.0).max(0.0);
+            let w = ex.next().and_then(|x| x.parse::<i32>().ok()).unwrap_or(720);
+            let h = ex.next().and_then(|x| x.parse::<i32>().ok()).unwrap_or(1280);
+            tl::enums::InputMedia::UploadedDocument(tl::types::InputMediaUploadedDocument {
+                nosound_video: false,
+                force_file: false,
+                spoiler: false,
+                file: up.raw,
+                thumb: None,
+                mime_type: "video/mp4".to_string(),
+                attributes: vec![tl::enums::DocumentAttribute::Video(tl::types::DocumentAttributeVideo {
+                    round_message: false,
+                    supports_streaming: true,
+                    nosound: false,
+                    duration: dur,
+                    w,
+                    h,
+                    preload_prefix_size: None,
+                    video_start_ts: None,
+                    video_codec: None,
+                })],
+                stickers: None,
+                video_cover: None,
+                video_timestamp: None,
+                ttl_seconds: None,
+            })
+        } else {
+            tl::enums::InputMedia::UploadedPhoto(tl::types::InputMediaUploadedPhoto {
+                spoiler: false,
+                live_photo: false,
+                file: up.raw,
+                stickers: None,
+                ttl_seconds: None,
+                video: None,
+            })
+        };
+        let rule = if l[3].trim() == "contacts" {
+            tl::enums::InputPrivacyRule::InputPrivacyValueAllowContacts
+        } else {
+            tl::enums::InputPrivacyRule::InputPrivacyValueAllowAll
+        };
+        let caption = l[2].trim().to_string();
+        let random_id: i64 = (std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as i64).unwrap_or(1)) ^ 0x5DEECE66D;
+        client
+            .invoke(&tl::functions::stories::SendStory {
+                pinned: false,
+                noforwards: false,
+                fwd_modified: false,
+                peer: tl::enums::InputPeer::PeerSelf,
+                media,
+                media_areas: None,
+                caption: if caption.is_empty() { None } else { Some(caption) },
+                entities: None,
+                privacy_rules: vec![rule],
+                random_id,
+                period: Some(86400),
+                fwd_from_id: None,
+                fwd_from_story: None,
+                albums: None,
+                music: None,
+            })
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(json!({"ok": true}))
+    })
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  QO'NG'IROQLAR TARIXI, PREMIUM, STARS
+// ═══════════════════════════════════════════════════════════════
+
+fn stars_amount(a: &tl::enums::StarsAmount) -> i64 {
+    match a {
+        tl::enums::StarsAmount::Amount(a) => a.amount,
+        _ => 0,
+    }
+}
+
+/// Qo'ng'iroqlar tarixi (`messages.search` + `InputMessagesFilterPhoneCalls`):
+/// `{"calls":[{"id","user":<id>,"name","hash","out","video","missed","duration","date"}]}`.
+#[no_mangle]
+pub extern "C" fn rust_tg_calls() -> *mut c_char {
+    tg_call(std::ptr::null(), 40, |client, _| async move {
+        let res = client
+            .invoke(&tl::functions::messages::Search {
+                peer: tl::enums::InputPeer::Empty,
+                q: String::new(),
+                from_id: None,
+                saved_peer_id: None,
+                saved_reaction: None,
+                top_msg_id: None,
+                filter: tl::enums::MessagesFilter::InputMessagesFilterPhoneCalls(tl::types::InputMessagesFilterPhoneCalls { missed: false }),
+                min_date: 0,
+                max_date: 0,
+                offset_id: 0,
+                add_offset: 0,
+                limit: 60,
+                max_id: 0,
+                min_id: 0,
+                hash: 0,
+            })
+            .await
+            .map_err(|e| e.to_string())?;
+        let (msgs, users) = match res {
+            tl::enums::messages::Messages::Messages(m) => (m.messages, m.users),
+            tl::enums::messages::Messages::Slice(m) => (m.messages, m.users),
+            tl::enums::messages::Messages::ChannelMessages(m) => (m.messages, m.users),
+            _ => (Vec::new(), Vec::new()),
+        };
+        let mut names: HashMap<i64, (String, i64)> = HashMap::new();
+        for u in users {
+            if let tl::enums::User::User(u) = u {
+                let name = format!("{} {}", u.first_name.clone().unwrap_or_default(), u.last_name.clone().unwrap_or_default()).trim().to_string();
+                names.insert(u.id, (name, u.access_hash.unwrap_or(0)));
+            }
+        }
+        let mut out = Vec::new();
+        for m in msgs {
+            let tl::enums::Message::Service(s) = m else { continue };
+            let tl::enums::MessageAction::PhoneCall(pc) = &s.action else { continue };
+            let tl::enums::Peer::User(pu) = &s.peer_id else { continue };
+            let (name, hash) = names.get(&pu.user_id).cloned().unwrap_or_default();
+            let missed = matches!(
+                pc.reason,
+                Some(tl::enums::PhoneCallDiscardReason::Missed) | Some(tl::enums::PhoneCallDiscardReason::Busy)
+            );
+            out.push(json!({
+                "id": s.id,
+                "user": pu.user_id,
+                "name": name,
+                "hash": hash.to_string(),
+                "out": s.out,
+                "video": pc.video,
+                "missed": missed,
+                "duration": pc.duration.unwrap_or(0),
+                "date": s.date,
+            }));
+        }
+        Ok(json!({"calls": out}))
+    })
+}
+
+/// Telegram Premium haqida: `{"text","options":[{"months","currency","amount","url","current"}]}`.
+#[no_mangle]
+pub extern "C" fn rust_tg_premium() -> *mut c_char {
+    tg_call(std::ptr::null(), 30, |client, _| async move {
+        let res = client.invoke(&tl::functions::help::GetPremiumPromo {}).await.map_err(|e| e.to_string())?;
+        let tl::enums::help::PremiumPromo::Promo(p) = res;
+        let options: Vec<Value> = p
+            .period_options
+            .iter()
+            .map(|o| {
+                let tl::enums::PremiumSubscriptionOption::Option(o) = o;
+                json!({"months": o.months, "currency": o.currency, "amount": o.amount, "url": o.bot_url, "current": o.current})
+            })
+            .collect();
+        Ok(json!({"text": p.status_text, "options": options}))
+    })
+}
+
+/// Stars balansi va tarixi: `{"balance","history":[{"title","amount","date","refund"}]}`.
+#[no_mangle]
+pub extern "C" fn rust_tg_stars() -> *mut c_char {
+    tg_call(std::ptr::null(), 30, |client, _| async move {
+        let res = client
+            .invoke(&tl::functions::payments::GetStarsStatus { ton: false, peer: tl::enums::InputPeer::PeerSelf })
+            .await
+            .map_err(|e| e.to_string())?;
+        let tl::enums::payments::StarsStatus::Status(s) = res;
+        let history: Vec<Value> = s
+            .history
+            .unwrap_or_default()
+            .iter()
+            .map(|t| {
+                let tl::enums::StarsTransaction::Transaction(t) = t;
+                json!({
+                    "title": t.title.clone().unwrap_or_default(),
+                    "amount": stars_amount(&t.amount),
+                    "date": t.date,
+                    "refund": t.refund,
+                })
+            })
+            .collect();
+        Ok(json!({"balance": stars_amount(&s.balance), "history": history}))
+    })
+}

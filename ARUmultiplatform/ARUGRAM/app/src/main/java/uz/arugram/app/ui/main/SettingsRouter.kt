@@ -60,6 +60,9 @@ fun SettingsRouter(page: String, onBack: () -> Unit, onNavigate: (String) -> Uni
             "power" -> PowerPage(onBack)
             "language" -> LanguagePage(onBack)
             "newchannel" -> NewChannelScreen(onBack)
+            "calls" -> CallsPage(onBack)
+            "premium" -> PremiumPage(onBack)
+            "stars" -> StarsPage(onBack)
             else -> onBack()
         }
     }
