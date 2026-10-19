@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.paint
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -28,7 +29,18 @@ val WallpaperPresets: List<Triple<String, Color, Color>> = listOf(
 
 const val WALLPAPER_IMAGE = 7
 
-/** Tanlangan fonni qo'llaydi (sozlamadagi tanlov `settings` bo'limida saqlanadi). Tungi rejimda standart fon to'q ko'k. */
+/** DrKLO `default_pattern.svg` (1440×2960) ni ekran eniga moslab bitmapga chizadi (`SvgHelper.getBitmap`, `ScaleMode.ByWidth`). */
+private fun renderPattern(ctx: android.content.Context, widthPx: Int): androidx.compose.ui.graphics.ImageBitmap? = runCatching {
+    val svg = com.caverock.androidsvg.SVG.getFromResource(ctx, uz.arugram.app.R.raw.default_pattern)
+    val h = (widthPx * 2960f / 1440f).toInt()
+    val bmp = android.graphics.Bitmap.createBitmap(widthPx, h, android.graphics.Bitmap.Config.ARGB_8888)
+    svg.setDocumentWidth(widthPx.toFloat())
+    svg.setDocumentHeight(h.toFloat())
+    svg.renderToCanvas(android.graphics.Canvas(bmp))
+    bmp.asImageBitmap()
+}.getOrNull()
+
+/** Tanlangan fonni qo'llaydi (sozlamadagi tanlov `settings` bo'limida saqlanadi). Tungi rejimda standart fon — qora + doodle naqsh. */
 @Composable
 fun Modifier.chatWallpaper(): Modifier {
     val ctx = LocalContext.current
@@ -38,7 +50,20 @@ fun Modifier.chatWallpaper(): Modifier {
         if (idx == WALLPAPER_IMAGE) File(ctx.filesDir, "wallpaper.jpg").takeIf { it.exists() }?.let { BitmapFactory.decodeFile(it.path)?.asImageBitmap() } else null
     }
     if (img != null) return this.paint(BitmapPainter(img), contentScale = ContentScale.Crop)
-    if (dark && idx == 0) return this.background(Color.Black)
-    val p = WallpaperPresets.getOrNull(idx) ?: WallpaperPresets[0]
-    return this.background(Brush.verticalGradient(listOf(p.second, p.third)))
+    val widthPx = ctx.resources.displayMetrics.widthPixels
+    var pattern by remember { androidx.compose.runtime.mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+    androidx.compose.runtime.LaunchedEffect(widthPx) { pattern = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { renderPattern(ctx, widthPx) } }
+    val base = if (dark && idx == 0) this.background(Color.Black) else {
+        val p = WallpaperPresets.getOrNull(idx) ?: WallpaperPresets[0]
+        this.background(Brush.verticalGradient(listOf(p.second, p.third)))
+    }
+    val tint = androidx.compose.ui.graphics.ColorFilter.tint(if (dark) Color.White.copy(alpha = 0.14f) else Color.Black.copy(alpha = 0.07f))
+    return base.drawBehind {
+        val pat = pattern ?: return@drawBehind
+        var y = 0f
+        while (y < size.height) {
+            drawImage(pat, topLeft = androidx.compose.ui.geometry.Offset(0f, y), colorFilter = tint)
+            y += pat.height
+        }
+    }
 }

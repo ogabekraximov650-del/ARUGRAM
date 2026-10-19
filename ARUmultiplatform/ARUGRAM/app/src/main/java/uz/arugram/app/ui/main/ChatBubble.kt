@@ -133,6 +133,8 @@ fun MessageBubble(
     val mediaW = mediaSize(if (m.pw > 0 && m.ph > 0) m.pw.toFloat() / m.ph else 1f).first
     val maxW = if (isMediaMsg && m.text.isNotEmpty()) maxOf(mediaW, 120f).dp else (LocalConfiguration.current.screenWidthDp - 80 + 22 - (if (groupAvatars) 42 else 0)).dp
     val textSize = remember { settingsPrefs(ctx).getInt("text_size", 16) }
+    // DrKLO `smallerDp`: ism, javob va uzatilgan sarlavhalar o'lchami xabar matniga bog'liq.
+    val small = ((2 * textSize + 10) / 3f).sp
     val bg = bubbleColor(m.out)
     val sticker = m.kind == "sticker"
     val shape = RoundedCornerShape(17.dp, 17.dp, if (m.out) 17.dp else 5.dp, if (m.out) 5.dp else 17.dp)
@@ -166,20 +168,20 @@ fun MessageBubble(
                 if (hasHeader) {
                     Column(Modifier.padding(start = 11.dp, end = 11.dp, top = 8.dp)) {
                         if (m.fwd.isNotEmpty()) {
-                            BasicText("Uzatilgan: ${m.fwd}", style = TextStyle(color = if (m.out) OutGreen else InBlue, fontSize = 14.sp, fontWeight = FontWeight.Medium), maxLines = 1)
+                            BasicText("Uzatilgan: ${m.fwd}", style = TextStyle(color = if (m.out) OutGreen else InBlue, fontSize = small, fontWeight = FontWeight.Medium), maxLines = 1)
                         }
                         if (showSender) {
-                            BasicText(m.sender, style = TextStyle(color = senderColor(m.sender), fontSize = 14.sp, fontWeight = FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            BasicText(m.sender, style = TextStyle(color = senderColor(m.sender), fontSize = small, fontWeight = FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         if (m.reply > 0) {
                             Row(Modifier.padding(top = 2.dp, bottom = 3.dp).clip(RoundedCornerShape(4.dp)).combinedClickable(onClick = { onReplyClick(m.reply) })) {
                                 Box(Modifier.width(2.dp).height(34.dp).background(if (m.out) OutLine else InLine))
                                 Column(Modifier.padding(start = 6.dp)) {
                                     val who = if (replied == null) "Xabar" else replied.sender.ifEmpty { if (replied.out) "Siz" else "" }
-                                    BasicText(who, style = TextStyle(color = if (m.out) OutGreen else InBlue, fontSize = 13.sp, fontWeight = FontWeight.Medium), maxLines = 1)
+                                    BasicText(who, style = TextStyle(color = if (m.out) OutGreen else InBlue, fontSize = small, fontWeight = FontWeight.Medium), maxLines = 1)
                                     BasicText(
                                         if (replied == null) "Xabar" else replied.text.ifEmpty { replied.media },
-                                        style = TextStyle(color = textColor(c.dark, m.out), fontSize = 14.sp), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                        style = TextStyle(color = textColor(c.dark, m.out), fontSize = small), maxLines = 1, overflow = TextOverflow.Ellipsis,
                                     )
                                 }
                             }
@@ -582,7 +584,7 @@ fun MarkupRows(markup: Markup, onButton: (Button) -> Unit, modifier: Modifier = 
                                 .combinedClickable(onClick = { onButton(b) }).padding(horizontal = 8.dp),
                             contentAlignment = Alignment.Center,
                         ) {
-                            BasicText(b.text, style = TextStyle(color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium, textAlign = androidx.compose.ui.text.style.TextAlign.Center), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            BasicText(b.text, style = TextStyle(color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, textAlign = androidx.compose.ui.text.style.TextAlign.Center), maxLines = 1, overflow = TextOverflow.Ellipsis)
                             if (b.kind == "url") BasicText("↗", Modifier.align(Alignment.TopEnd).padding(top = 3.dp, end = 4.dp), style = TextStyle(color = Color(0xB3FFFFFF), fontSize = 12.sp))
                         }
                     } else Box(

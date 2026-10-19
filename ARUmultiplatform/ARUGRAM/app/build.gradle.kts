@@ -85,6 +85,8 @@ dependencies {
     // Video/GIF: ExoPlayer (DrKLO ham ExoPlayer ishlatadi) — GIF avtomatik takrorlanadi, video ko'rgichda boshqaruv paneli bor.
     implementation("androidx.media3:media3-exoplayer:1.4.1")
     implementation("androidx.media3:media3-ui:1.4.1")
+    // Suhbat foni doodle naqshi (DrKLO `default_pattern.svg`) uchun SVG chizuvchi.
+    implementation("com.caverock:androidsvg-aar:1.4")
 
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     // JNA: Rust yadrosining C funksiyalarini (`librust_core.so`) to'g'ridan-to'g'ri chaqiradi.
