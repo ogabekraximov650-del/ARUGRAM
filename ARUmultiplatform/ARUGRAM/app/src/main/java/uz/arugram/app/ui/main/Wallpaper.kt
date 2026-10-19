@@ -38,7 +38,7 @@ fun Modifier.chatWallpaper(): Modifier {
         if (idx == WALLPAPER_IMAGE) File(ctx.filesDir, "wallpaper.jpg").takeIf { it.exists() }?.let { BitmapFactory.decodeFile(it.path)?.asImageBitmap() } else null
     }
     if (img != null) return this.paint(BitmapPainter(img), contentScale = ContentScale.Crop)
-    if (dark && idx == 0) return this.background(Brush.verticalGradient(listOf(Color(0xFF0E1621), Color(0xFF17212B))))
+    if (dark && idx == 0) return this.background(Color.Black)
     val p = WallpaperPresets.getOrNull(idx) ?: WallpaperPresets[0]
     return this.background(Brush.verticalGradient(listOf(p.second, p.third)))
 }

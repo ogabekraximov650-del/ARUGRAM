@@ -3,6 +3,8 @@ package uz.arugram.app.ui.main
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -222,11 +224,53 @@ fun ChatScreen(chat: ChatRow, chats: List<ChatRow>, typing: Boolean, onBack: () 
         scope.launch { listState.animateScrollToItem(0) }
     }
 
+    var headerPx by remember { androidx.compose.runtime.mutableIntStateOf(0) }
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().chatWallpaper()) {
-            // ── Tepa panel ──
-            Column(Modifier.fillMaxWidth().background(c.bar).statusBarsPadding()) {
-                Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
+            // ── Xabarlar ──
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                val results = model.searchResults
+                val list = results ?: model.messages
+                when {
+                    !model.loaded -> CircularProgressIndicator(Modifier.align(Alignment.Center).size(32.dp), color = c.inputActive, strokeWidth = 3.dp)
+                    list.isEmpty() -> BasicText(
+                        if (results != null) "Hech narsa topilmadi" else "Xabarlar yo‘q",
+                        Modifier.align(Alignment.Center).clip(RoundedCornerShape(12.dp)).background(Color(0x66000000)).padding(horizontal = 12.dp, vertical = 6.dp),
+                        style = TextStyle(color = Color.White, fontSize = 14.sp, textAlign = TextAlign.Center),
+                    )
+                    else -> LazyColumn(Modifier.fillMaxSize(), state = listState, reverseLayout = true, contentPadding = androidx.compose.foundation.layout.PaddingValues(top = with(androidx.compose.ui.platform.LocalDensity.current) { headerPx.toDp() } + 4.dp)) {
+                        itemsIndexed(list, key = { _, m -> m.id }) { i, m ->
+                            val older = list.getOrNull(i + 1)
+                            val replied = if (m.reply > 0) list.firstOrNull { it.id == m.reply } else null
+                            Column {
+                                if (older == null || dayKey(older.date) != dayKey(m.date)) DateChip(m.date)
+                                if (firstUnreadId == m.id) UnreadDivider()
+                                if (m.service.isNotEmpty()) ServiceChip(m.service) else MessageBubble(
+                                    showAvatar = chat.kind == "group" && !m.out && (i == 0 || list[i - 1].sid != m.sid || list[i - 1].service.isNotEmpty()),
+                                    m = m, chat = chat, replied = replied, selected = m.id in selected,
+                                    onClick = {
+                                        if (selected.isNotEmpty()) { if (m.id in selected) selected.remove(m.id) else selected.add(m.id) }
+                                        else if (m.kind == "photo" || m.kind == "video" || m.kind == "gif" || m.kind == "round") viewer = m
+                                    },
+                                    onLongClick = { if (selected.isEmpty()) menuFor = m else if (m.id !in selected) selected.add(m.id) },
+                                    onOpenMedia = { if (selected.isEmpty()) viewer = m else if (m.id in selected) selected.remove(m.id) else selected.add(m.id) },
+                                    onReact = { model.react(m, it) },
+                                    onForward = { forwardIds = listOf(m.id) },
+                                    onVote = { model.vote(m, it) },
+                                    onButton = { b -> press(m, b) },
+                                    onReplyClick = { id -> val idx = list.indexOfFirst { it.id == id }; if (idx >= 0) scope.launch { listState.animateScrollToItem(idx) } },
+                                )
+                            }
+                        }
+                    }
+                }
+            // ── Tepa panel (DrKLO yangi uslub: shaffof fonda suzuvchi doira tugmalar va nom pilyuli) ──
+            val glass = selected.isEmpty() && !searching
+            Column(
+                Modifier.align(Alignment.TopCenter).fillMaxWidth().onSizeChanged { headerPx = it.height }
+                    .then(if (glass) Modifier else Modifier.background(c.bar)).statusBarsPadding(),
+            ) {
+                Row(Modifier.fillMaxWidth().height(56.dp).then(if (glass) Modifier.padding(horizontal = 7.dp) else Modifier), verticalAlignment = Alignment.CenterVertically) {
                     when {
                         selected.isNotEmpty() -> {
                             Box(Modifier.size(56.dp).clickable { selected.clear() }, contentAlignment = Alignment.Center) { CloseIcon(c.text) }
@@ -248,75 +292,42 @@ fun ChatScreen(chat: ChatRow, chats: List<ChatRow>, typing: Boolean, onBack: () 
                             if (query.isNotEmpty()) Box(Modifier.size(56.dp).clickable { query = "" }, contentAlignment = Alignment.Center) { CloseIcon(c.text) }
                         }
                         else -> {
-                            Box(Modifier.size(56.dp).clickable(onClick = onBack), contentAlignment = Alignment.Center) { BackArrowIcon(c.text) }
-                            Row(Modifier.weight(1f).clickable(onClick = onOpenInfo), verticalAlignment = Alignment.CenterVertically) {
-                                ChatAvatar(chat, 42.dp)
+                            Box(Modifier.size(48.dp).shadow(2.dp, CircleShape).clip(CircleShape).background(c.bar).clickable(onClick = onBack), contentAlignment = Alignment.Center) { BackArrowIcon(c.text) }
+                            Row(
+                                Modifier.padding(horizontal = 2.dp).weight(1f).height(48.dp).shadow(2.dp, RoundedCornerShape(24.dp)).clip(RoundedCornerShape(24.dp)).background(c.bar)
+                                    .clickable(onClick = onOpenInfo).padding(start = 6.dp, end = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                ChatAvatar(chat, 40.dp)
                                 Column(Modifier.padding(start = 12.dp)) {
                                     BasicText(chat.name, style = TextStyle(color = c.text, fontSize = 18.sp, fontWeight = FontWeight.Bold), maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     val sub = if (typing) "yozmoqda..." else subtitle
                                     if (sub.isNotEmpty()) BasicText(sub, style = TextStyle(color = if (typing || sub == "onlayn") Blue else (if (c.dark) c.gray else Color(0xFF79817E)), fontSize = 14.sp), maxLines = 1)
                                 }
                             }
-                            Box(Modifier.size(48.dp).clickable { searching = true }, contentAlignment = Alignment.Center) { SearchIcon(c.text) }
-                            Box(Modifier.size(48.dp).clickable { chatMenu = true }, contentAlignment = Alignment.Center) { TgIcon(R.drawable.ic_ab_other, c.text) }
+                            Box(Modifier.size(48.dp).shadow(2.dp, CircleShape).clip(CircleShape).background(c.bar).clickable { chatMenu = true }, contentAlignment = Alignment.Center) { TgIcon(R.drawable.ic_ab_other, c.text) }
                         }
                     }
                 }
-                // Mahkamlangan xabar paneli
+                // Qadalgan xabar paneli: suzuvchi pilyul
                 val pin = model.pinned
                 if (pin != null && !searching && selected.isEmpty()) {
                     Row(
-                        Modifier.fillMaxWidth().height(40.dp).clickable {
+                        Modifier.padding(start = 8.dp, end = 8.dp, top = 4.dp).fillMaxWidth().height(46.dp).shadow(2.dp, RoundedCornerShape(23.dp)).clip(RoundedCornerShape(23.dp)).background(c.bar).clickable {
                             val idx = model.messages.indexOfFirst { it.id == pin.id }
                             if (idx >= 0) scope.launch { listState.animateScrollToItem(idx) }
-                        }.padding(horizontal = 12.dp),
+                        }.padding(start = 12.dp, end = 14.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Box(Modifier.size(2.dp, 28.dp).background(Blue))
-                        Column(Modifier.padding(start = 8.dp)) {
-                            BasicText("Mahkamlangan xabar", style = TextStyle(color = Blue, fontSize = 13.sp, fontWeight = FontWeight.Medium))
-                            BasicText(pin.text.ifEmpty { pin.media }, style = TextStyle(color = c.text, fontSize = 14.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Box(Modifier.size(2.dp, 30.dp).background(Blue))
+                        Column(Modifier.padding(start = 8.dp).weight(1f)) {
+                            BasicText("Qadalgan xabar", style = TextStyle(color = Blue, fontSize = 14.sp, fontWeight = FontWeight.Medium), maxLines = 1)
+                            BasicText(pin.text.ifEmpty { pin.media }, style = TextStyle(color = c.gray, fontSize = 15.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
+                        TgIcon(R.drawable.msg_pinnedlist, c.gray, size = 24.dp)
                     }
                 }
             }
-
-            // ── Xabarlar ──
-            Box(Modifier.weight(1f).fillMaxWidth()) {
-                val results = model.searchResults
-                val list = results ?: model.messages
-                when {
-                    !model.loaded -> CircularProgressIndicator(Modifier.align(Alignment.Center).size(32.dp), color = c.inputActive, strokeWidth = 3.dp)
-                    list.isEmpty() -> BasicText(
-                        if (results != null) "Hech narsa topilmadi" else "Xabarlar yo‘q",
-                        Modifier.align(Alignment.Center).clip(RoundedCornerShape(12.dp)).background(Color(0x66000000)).padding(horizontal = 12.dp, vertical = 6.dp),
-                        style = TextStyle(color = Color.White, fontSize = 14.sp, textAlign = TextAlign.Center),
-                    )
-                    else -> LazyColumn(Modifier.fillMaxSize(), state = listState, reverseLayout = true) {
-                        itemsIndexed(list, key = { _, m -> m.id }) { i, m ->
-                            val older = list.getOrNull(i + 1)
-                            val replied = if (m.reply > 0) list.firstOrNull { it.id == m.reply } else null
-                            Column {
-                                if (older == null || dayKey(older.date) != dayKey(m.date)) DateChip(m.date)
-                                if (firstUnreadId == m.id) UnreadDivider()
-                                if (m.service.isNotEmpty()) ServiceChip(m.service) else MessageBubble(
-                                    showAvatar = chat.kind == "group" && !m.out && (i == 0 || list[i - 1].sid != m.sid || list[i - 1].service.isNotEmpty()),
-                                    m = m, chat = chat, replied = replied, selected = m.id in selected,
-                                    onClick = {
-                                        if (selected.isNotEmpty()) { if (m.id in selected) selected.remove(m.id) else selected.add(m.id) }
-                                        else if (m.kind == "photo" || m.kind == "video" || m.kind == "gif" || m.kind == "round") viewer = m
-                                    },
-                                    onLongClick = { if (selected.isEmpty()) menuFor = m else if (m.id !in selected) selected.add(m.id) },
-                                    onOpenMedia = { if (selected.isEmpty()) viewer = m else if (m.id in selected) selected.remove(m.id) else selected.add(m.id) },
-                                    onReact = { model.react(m, it) },
-                                    onVote = { model.vote(m, it) },
-                                    onButton = { b -> press(m, b) },
-                                    onReplyClick = { id -> val idx = list.indexOfFirst { it.id == id }; if (idx >= 0) scope.launch { listState.animateScrollToItem(idx) } },
-                                )
-                            }
-                        }
-                    }
-                }
                 // Pastga tushirish tugmasi
                 val showDown by remember { derivedStateOf { listState.firstVisibleItemIndex > 3 } }
                 if (showDown && results == null) {
@@ -348,6 +359,21 @@ fun ChatScreen(chat: ChatRow, chats: List<ChatRow>, typing: Boolean, onBack: () 
                         if (r.optString("error").isEmpty()) joined = true else bulletin = r.optString("error")
                     }
                 }, contentAlignment = Alignment.Center) { BasicText("QO‘SHILISH", style = TextStyle(color = Blue, fontSize = 15.sp, fontWeight = FontWeight.Bold)) }
+            } else if (!canWrite && chat.kind == "channel") {
+                var chMuted by remember(chat.id) { mutableStateOf(chat.muted) }
+                val glassBg = if (c.dark) Color(0xFF1F1F1F) else c.bar
+                Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 7.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(48.dp).clip(CircleShape).background(glassBg).clickable { searching = true }, contentAlignment = Alignment.Center) { SearchIcon(c.gray) }
+                    Box(
+                        Modifier.weight(1f).height(48.dp).clip(RoundedCornerShape(24.dp)).background(glassBg).clickable {
+                            val nowMuted = !chMuted
+                            chMuted = nowMuted
+                            scope.launch { withContext(Dispatchers.IO) { RustCore.tgMuteFor(chat.spec, if (nowMuted) 2_147_483_647L else 0L) } }
+                        },
+                        contentAlignment = Alignment.Center,
+                    ) { BasicText(if (chMuted) "Ovozni yoqish" else "Sukut qilish", style = TextStyle(color = c.gray, fontSize = 18.sp, fontWeight = FontWeight.Medium)) }
+                    Box(Modifier.size(48.dp).clip(CircleShape).background(glassBg).clickable { bulletin = "Sovg‘alar hozircha mavjud emas" }, contentAlignment = Alignment.Center) { TgIcon(R.drawable.msg_input_gift, c.gray) }
+                }
             } else ChatInputBar(
                 draft = draft, onDraft = { if (it.text.length > draft.text.length) model.typing(); draft = it }, replyTo = replyTo, editing = editing, canWrite = canWrite,
                 onCancelContext = { editing = null; replyTo = null; draft = TextFieldValue("") },
@@ -403,6 +429,7 @@ fun ChatScreen(chat: ChatRow, chats: List<ChatRow>, typing: Boolean, onBack: () 
         if (chatMenu) {
             PopupMenu(
                 listOf(
+                    MenuItem(R.drawable.msg_search, "Qidirish") { searching = true },
                     MenuItem(R.drawable.msg_info, "Ma’lumot") { onOpenInfo() },
                     MenuItem(if (chat.muted) R.drawable.msg_unmute else R.drawable.msg_mute, if (chat.muted) "Bildirishnomani yoqish" else "Bildirishnomani o‘chirish") {
                         if (chat.muted) scope.launch { withContext(Dispatchers.IO) { RustCore.tgMuteFor(chat.spec, 0L) } } else muteOpen = true

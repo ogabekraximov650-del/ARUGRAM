@@ -2806,7 +2806,7 @@ fn msg_json(m: &grammers_client::message::Message) -> Value {
         "id": m.id(),
         "out": m.outgoing(),
         "date": m.date().timestamp(),
-        "edited": m.edit_date().is_some(),
+        "edited": m.edit_date().is_some() && !matches!(&m.raw, tl::enums::Message::Message(x) if x.edit_hide),
         "text": m.text(),
         "sender": sender.unwrap_or_default(),
         "reply": m.reply_to_message_id().unwrap_or(0),

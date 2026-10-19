@@ -5,6 +5,7 @@ package uz.arugram.app.ui.main
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -111,6 +112,7 @@ fun MessageBubble(
     onButton: (Button) -> Unit = {},
     /** Guruhda kiruvchi xabarning chap tomonida avatar uchun joy (42 dp) qoldiriladi; [showAvatar] — shu yuboruvchining oxirgi xabari. */
     showAvatar: Boolean = false,
+    onForward: () -> Unit = {},
 ) {
     val c = LocalTg.current
     val ctx = LocalContext.current
@@ -118,7 +120,10 @@ fun MessageBubble(
     val density = androidx.compose.ui.platform.LocalDensity.current
     // DrKLO: matn kengligi = ekran - 80 dp, pufakcha = matn + 2×11 dp.
     val groupAvatars = chat.kind == "group" && !m.out && m.service.isEmpty()
-    val maxW = (LocalConfiguration.current.screenWidthDp - 80 + 22 - (if (groupAvatars) 42 else 0)).dp
+    val isMediaMsg = m.kind == "photo" || m.kind == "video" || m.kind == "gif" || m.kind == "round"
+    // Rasm/video izoh bilan: pufakcha eni = rasm eni (izoh shu enga o'raladi, DrKLO `backgroundWidth`).
+    val mediaW = mediaSize(if (m.pw > 0 && m.ph > 0) m.pw.toFloat() / m.ph else 1f).first
+    val maxW = if (isMediaMsg && m.text.isNotEmpty()) maxOf(mediaW, 120f).dp else (LocalConfiguration.current.screenWidthDp - 80 + 22 - (if (groupAvatars) 42 else 0)).dp
     val textSize = remember { settingsPrefs(ctx).getInt("text_size", 16) }
     val bg = bubbleColor(m.out)
     val sticker = m.kind == "sticker"
@@ -130,7 +135,7 @@ fun MessageBubble(
     val inlineFooter = m.text.isNotEmpty() && (m.kind.isEmpty() || isMedia) && m.reactions.isEmpty() && !hasMarkup
     val mediaFull = isMedia && m.text.isEmpty()
     val measurer = androidx.compose.ui.text.rememberTextMeasurer()
-    val footerStr = (if (m.views > 0) "${compactCount(m.views)}  " else "") + (if (m.edited) "tahrirlangan  " else "") + clock(m.date)
+    val footerStr = (if (m.views > 0) "   ${compactCount(m.views)}  " else "") + (if (m.edited) "tahrirlangan  " else "") + clock(m.date)
     val footerWidth = with(density) { measurer.measure(footerStr, TextStyle(fontSize = 12.sp)).size.width.toDp() } + (if (m.out) 21.dp else 0.dp)
 
     Box(
@@ -142,6 +147,7 @@ fun MessageBubble(
         if (groupAvatars) Box(Modifier.width(42.dp)) {
             if (showAvatar && m.sid != 0L) ChatAvatar(ChatRow(m.sid, "user", m.sender, false, 0, false, false, 0, "", false, false, false, access = m.shash), 35.dp)
         }
+        Column(Modifier.width(androidx.compose.foundation.layout.IntrinsicSize.Max)) {
         Box(
             Modifier.widthIn(max = maxW)
                 .then(if (sticker) Modifier else Modifier.clip(shape).background(bg))
@@ -246,8 +252,6 @@ fun MessageBubble(
                         }
                     }
                 }
-                val mk = m.markup
-                if (mk != null && mk.inline) Box(Modifier.padding(horizontal = 6.dp)) { MarkupRows(mk, onButton) }
                 if (!inlineFooter && !mediaFull && !sticker) {
                     Footer(m, chat, Modifier.align(Alignment.End).padding(end = 8.dp), false)
                 }
@@ -259,6 +263,18 @@ fun MessageBubble(
                 mediaFull -> Footer(m, chat, Modifier.align(Alignment.BottomEnd).padding(end = 6.dp, bottom = 6.dp).clip(RoundedCornerShape(10.dp)).background(Color(0x66000000)).padding(horizontal = 6.dp, vertical = 1.dp), true)
                 sticker -> Footer(m, chat, Modifier.align(Alignment.BottomEnd).padding(end = 6.dp, bottom = 6.dp).clip(RoundedCornerShape(10.dp)).background(Color(0x66000000)).padding(horizontal = 6.dp), true)
             }
+        }
+        // Inline tugmalar pufakchadan tashqarida, uning tagida (DrKLO `botButtons`).
+        val mk = m.markup
+        if (mk != null && mk.inline) MarkupRows(mk, onButton, Modifier.fillMaxWidth(), outside = true)
+        }
+        // Kanal postini uzatish tugmasi (DrKLO `drawSideButton`): pufakcha yonida pastda.
+        if (chat.kind == "channel" && !sticker && m.service.isEmpty()) {
+            Box(
+                Modifier.padding(start = 6.dp).size(32.dp).clip(CircleShape).background(if (c.dark) Color(0xCC1C1C1E) else Color(0x66000000))
+                    .clickable(onClick = onForward),
+                contentAlignment = Alignment.Center,
+            ) { TgIcon(R.drawable.msg_forward, Color.White, size = 18.dp) }
         }
         }
     }
@@ -273,7 +289,10 @@ private fun Footer(m: MsgRow, chat: ChatRow, modifier: Modifier, onSticker: Bool
         else -> Color(0xFFA1AAB3)
     }
     Row(modifier.padding(top = 1.dp), verticalAlignment = Alignment.CenterVertically) {
-        if (m.views > 0) BasicText("${compactCount(m.views)}  ", style = TextStyle(color = col, fontSize = 12.sp))
+        if (m.views > 0) {
+            TgIcon(R.drawable.msg_views, col, Modifier.padding(end = 3.dp), 12.dp)
+            BasicText("${compactCount(m.views)}  ", style = TextStyle(color = col, fontSize = 12.sp))
+        }
         if (m.edited) BasicText("tahrirlangan  ", style = TextStyle(color = col, fontSize = 12.sp, fontStyle = FontStyle.Italic))
         BasicText(clock(m.date), style = TextStyle(color = col, fontSize = 12.sp))
         if (m.out && m.id <= 0) {
@@ -295,8 +314,8 @@ private fun Footer(m: MsgRow, chat: ChatRow, modifier: Modifier, onSticker: Bool
 }
 
 fun compactCount(n: Int): String = when {
-    n >= 1_000_000 -> "%.1fM".format(n / 1_000_000.0).replace(".0", "")
-    n >= 1000 -> "%.1fK".format(n / 1000.0).replace(".0", "")
+    n >= 1_000_000 -> "${n / 1_000_000}M"
+    n >= 1000 -> "${n / 1000}K"
     else -> n.toString()
 }
 
@@ -532,13 +551,23 @@ private fun PollContent(m: MsgRow, poll: Poll, onVote: (List<String>) -> Unit) {
 
 /** Bot tugmalari qatorlari (inline klaviatura yoki javob klaviaturasi). */
 @Composable
-fun MarkupRows(markup: Markup, onButton: (Button) -> Unit, modifier: Modifier = Modifier) {
+fun MarkupRows(markup: Markup, onButton: (Button) -> Unit, modifier: Modifier = Modifier, outside: Boolean = false) {
     val c = LocalTg.current
     Column(modifier.padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         markup.rows.forEach { row ->
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 row.forEach { b ->
-                    Box(
+                    if (outside) {
+                        // Pufakcha ostidagi tugma: 44 dp, 17 dp burchak, ko'k fon, oq matn; havola tugmasida o'ng yuqorida ↗ belgisi.
+                        Box(
+                            Modifier.weight(1f).height(44.dp).clip(RoundedCornerShape(17.dp)).background(if (c.dark) Color(0xFF2277B2) else Color(0x66000000))
+                                .combinedClickable(onClick = { onButton(b) }).padding(horizontal = 8.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            BasicText(b.text, style = TextStyle(color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium, textAlign = androidx.compose.ui.text.style.TextAlign.Center), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            if (b.kind == "url") BasicText("↗", Modifier.align(Alignment.TopEnd).padding(top = 3.dp, end = 4.dp), style = TextStyle(color = Color(0xB3FFFFFF), fontSize = 12.sp))
+                        }
+                    } else Box(
                         Modifier.weight(1f).heightIn(min = 36.dp).clip(RoundedCornerShape(8.dp))
                             .background(if (c.dark) Color(0x33FFFFFF) else Color(0x1A3390EC))
                             .combinedClickable(onClick = { onButton(b) }).padding(horizontal = 6.dp, vertical = 6.dp),
