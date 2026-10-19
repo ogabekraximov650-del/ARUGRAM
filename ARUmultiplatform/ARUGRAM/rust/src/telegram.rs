@@ -2500,6 +2500,19 @@ async fn messages_json(client: &Client, chat_id: i64, limit: usize) -> Result<Va
             grammers_client::peer::Peer::Group(g) => g.title().unwrap_or_default().to_string(),
             grammers_client::peer::Peer::Channel(c) => c.title().to_string(),
         });
+        // Rasm o'lchami (pufak oldindan to'g'ri o'lchamda chiqishi uchun) — eng katta yuklab olinadigan o'lcham.
+        let (pw, ph) = match m.media() {
+            Some(grammers_client::media::Media::Photo(p)) => p
+                .thumbs()
+                .iter()
+                .filter_map(|t| match t {
+                    grammers_client::media::PhotoSize::Size(sz) => Some((sz.width, sz.height)),
+                    _ => None,
+                })
+                .max_by_key(|(w, h)| w * h)
+                .unwrap_or((0, 0)),
+            _ => (0, 0),
+        };
         out.push(json!({
             "id": m.id(),
             "out": m.outgoing(),
@@ -2507,6 +2520,8 @@ async fn messages_json(client: &Client, chat_id: i64, limit: usize) -> Result<Va
             "text": m.text(),
             "sender": sender.unwrap_or_default(),
             "media": m.media().map(|md| media_label(&md)).unwrap_or(""),
+            "pw": pw,
+            "ph": ph,
         }));
     }
     Ok(json!({ "messages": out }))
@@ -2704,6 +2719,43 @@ pub extern "C" fn rust_tg_user_avatars(arg_ptr: *const c_char) -> *mut c_char {
                 }
             }
             Ok(json!({ "photos": photos }))
+        })?;
+        Ok(v.to_string())
+    }))
+}
+
+/// Xabardagi rasm (o'rtacha o'lcham, eng ko'pi 800 px): `arg` = `"<suhbat_id>:<xabar_id>"`. Javob: `{"photo":"<base64>"}`.
+#[no_mangle]
+pub extern "C" fn rust_tg_photo(arg_ptr: *const c_char) -> *mut c_char {
+    let arg = unsafe { cstr_to_str(arg_ptr) }.unwrap_or("").trim().to_string();
+    let (chat, msg) = match arg.split_once(':') {
+        Some((a, b)) => (a.parse::<i64>().unwrap_or(0), b.parse::<i32>().unwrap_or(0)),
+        None => (0, 0),
+    };
+    string_to_cptr(with_client(|t, client| {
+        if !t.authorized.load(Ordering::SeqCst) {
+            return Err("Telegram ulanmagan".to_string());
+        }
+        let v = run_tmo(t, 60, async {
+            use grammers_client::media::{Media, PhotoSize};
+            let peer = find_channel(&client, chat).await.map_err(|_| "Suhbat topilmadi".to_string())?;
+            let msgs = client.get_messages_by_id(peer, &[msg]).await.map_err(|e| e.to_string())?;
+            let Some(Some(m)) = msgs.into_iter().next() else { return Err("Xabar topilmadi".to_string()) };
+            let Some(Media::Photo(p)) = m.media() else { return Err("Rasm emas".to_string()) };
+            // 800 px dan oshmaydigan eng kattasi; bo'lmasa eng kichigi.
+            let mut sizes: Vec<_> = p
+                .thumbs()
+                .into_iter()
+                .filter_map(|t| match t {
+                    PhotoSize::Size(sz) => Some(sz),
+                    _ => None,
+                })
+                .collect();
+            sizes.sort_by_key(|sz| sz.width.max(sz.height));
+            let pick = sizes.iter().rev().find(|sz| sz.width.max(sz.height) <= 800).or_else(|| sizes.first());
+            let Some(loc) = pick.and_then(|sz| sz.to_raw_input_location()) else { return Err("Rasm o'lchami yo'q".to_string()) };
+            let Some(bytes) = download_small(&client, loc).await else { return Err("Rasm yuklanmadi".to_string()) };
+            Ok(json!({ "photo": b64(&bytes) }))
         })?;
         Ok(v.to_string())
     }))

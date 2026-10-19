@@ -71,7 +71,8 @@ fun HomeScreen(auth: AuthModel) {
         var sinceLoad = 0
         while (true) {
             val seq = withContext(Dispatchers.IO) { uz.arugram.app.core.RustCore.tgUpdateSeq() }
-            if (last == -1L || seq != last || sinceLoad >= 40) {
+            // Tez-tez keluvchi updates (onlayn holat, yozmoqda...) serverni ortiqcha yuklamasin: kamida 3 soniya oraliq.
+            if (last == -1L || (seq != last && sinceLoad >= 2) || sinceLoad >= 40) {
                 last = seq
                 sinceLoad = 0
                 model.load()

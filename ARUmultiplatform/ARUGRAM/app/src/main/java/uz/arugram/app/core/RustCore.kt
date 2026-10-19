@@ -109,6 +109,8 @@ object RustCore {
 
     fun tgUserAvatars(arg: String): JSONObject = guard(errJson("Yadro yuklanmagan")) { json(take(it.rust_tg_user_avatars(arg))) }
 
+    fun tgPhoto(chatId: Long, msgId: Int): JSONObject = guard(errJson("Yadro yuklanmagan")) { json(take(it.rust_tg_photo("$chatId:$msgId"))) }
+
     fun tgLoginState(): JSONObject = guard(JSONObject().put("stage", "phone")) { json(take(it.rust_tg_login_state())) }
 
     fun tgLoginReset() = guard(Unit) { it.rust_tg_login_reset() }

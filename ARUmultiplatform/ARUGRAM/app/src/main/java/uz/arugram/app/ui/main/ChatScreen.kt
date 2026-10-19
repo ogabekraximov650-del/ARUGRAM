@@ -48,7 +48,7 @@ import uz.arugram.app.core.RustCore
 import uz.arugram.app.ui.components.BackArrowIcon
 import uz.arugram.app.ui.theme.LocalTg
 
-data class MsgRow(val id: Int, val out: Boolean, val date: Long, val text: String, val sender: String, val media: String)
+data class MsgRow(val id: Int, val out: Boolean, val date: Long, val text: String, val sender: String, val media: String, val pw: Int = 0, val ph: Int = 0)
 
 /**
  * Suhbat oynasi (DrKLO `ChatActivity`, o'qish rejimi): tepada 56 dp li panel (orqaga, avatar 42 dp, nom 17 sp qalin), o'rtada fon va
@@ -72,7 +72,7 @@ fun ChatScreen(chat: ChatRow, onBack: () -> Unit) {
         msgs = buildList {
             for (i in 0 until (arr?.length() ?: 0)) {
                 val o = arr!!.getJSONObject(i)
-                add(MsgRow(o.optInt("id"), o.optBoolean("out"), o.optLong("date"), o.optString("text"), o.optString("sender"), o.optString("media")))
+                add(MsgRow(o.optInt("id"), o.optBoolean("out"), o.optLong("date"), o.optString("text"), o.optString("sender"), o.optString("media"), o.optInt("pw"), o.optInt("ph")))
             }
         }
     }
@@ -84,7 +84,7 @@ fun ChatScreen(chat: ChatRow, onBack: () -> Unit) {
         var since = 0
         while (true) {
             val seq = withContext(Dispatchers.IO) { RustCore.tgUpdateSeq() }
-            if (last == -1L || seq != last || since >= 40) {
+            if (last == -1L || (seq != last && since >= 2) || since >= 40) {
                 last = seq
                 since = 0
                 reload()
@@ -114,7 +114,7 @@ fun ChatScreen(chat: ChatRow, onBack: () -> Unit) {
                         val older = list.getOrNull(i + 1)
                         Column {
                             if (older == null || dayKey(older.date) != dayKey(m.date)) DateChip(m.date)
-                            Bubble(m, chat.kind != "user")
+                            Bubble(m, chat.id, chat.kind != "user")
                         }
                     }
                 }
@@ -152,7 +152,7 @@ fun ChatScreen(chat: ChatRow, onBack: () -> Unit) {
 }
 
 @Composable
-private fun Bubble(m: MsgRow, showSender: Boolean) {
+private fun Bubble(m: MsgRow, chatId: Long, showSender: Boolean) {
     val c = LocalTg.current
     val bg = when {
         m.out -> if (c.dark) Color(0xFF2B5278) else Color(0xFFEFFFDE)
@@ -164,7 +164,18 @@ private fun Bubble(m: MsgRow, showSender: Boolean) {
             if (showSender && !m.out && m.sender.isNotEmpty()) {
                 BasicText(m.sender, style = TextStyle(color = senderColor(m.sender), fontSize = 14.sp, fontWeight = FontWeight.Medium), maxLines = 1)
             }
-            val body = m.text.ifEmpty { m.media }
+            if (m.media == "Rasm" && m.pw > 0 && m.ph > 0) {
+                // Rasm: kengligi eng ko'pi 260 dp, balandligi eng ko'pi 320 dp, nisbat saqlanadi; yuklanguncha kulrang joy.
+                val ctx = androidx.compose.ui.platform.LocalContext.current
+                LaunchedEffect(m.id) { MediaCache.photo(ctx, chatId, m.id) }
+                val ratio = m.pw.toFloat() / m.ph
+                val w = minOf(260f, 320f * ratio)
+                val img = MediaCache.photos[MediaCache.key(chatId, m.id)]
+                Box(Modifier.padding(top = 2.dp, bottom = 4.dp).size(w.dp, (w / ratio).dp).clip(RoundedCornerShape(10.dp)).background(Color(0x22000000))) {
+                    if (img != null) androidx.compose.foundation.Image(img, null, Modifier.fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+                }
+            }
+            val body = if (m.media == "Rasm" && m.pw > 0) m.text else m.text.ifEmpty { m.media }
             if (body.isNotEmpty()) BasicText(body, style = TextStyle(color = if (c.dark) Color.White else Color.Black, fontSize = 16.sp))
             BasicText(chatTime(m.date), Modifier.align(Alignment.End), style = TextStyle(color = if (m.out && !c.dark) Color(0xFF70B15C) else Color(0xFFA1AAB3), fontSize = 12.sp))
         }

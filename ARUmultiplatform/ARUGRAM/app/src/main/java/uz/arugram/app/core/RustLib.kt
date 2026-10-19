@@ -35,6 +35,7 @@ interface RustLib : Library {
     fun rust_tg_me(): Pointer?
     fun rust_tg_contacts(): Pointer?
     fun rust_tg_update_seq(): Long
+    fun rust_tg_photo(arg: String): Pointer?
     fun rust_tg_user_avatars(arg: String): Pointer?
     fun rust_tg_logout(): Pointer?
 

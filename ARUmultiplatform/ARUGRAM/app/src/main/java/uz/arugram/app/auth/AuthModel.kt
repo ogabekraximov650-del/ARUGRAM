@@ -143,8 +143,10 @@ class AuthModel(private val app: Context) {
                 // Hisobdan chiqishda mahalliy kesh ham o'chadi: suhbatlar ro'yxati va avatarlar.
                 app.getSharedPreferences("chats_cache", android.content.Context.MODE_PRIVATE).edit().clear().apply()
                 File(app.filesDir, "avatars").deleteRecursively()
+                File(app.filesDir, "media").deleteRecursively()
             }
             uz.arugram.app.ui.main.AvatarCache.clear()
+            uz.arugram.app.ui.main.MediaCache.clear()
             _ui.update { AuthUi(ready = true) }
         }
     }
