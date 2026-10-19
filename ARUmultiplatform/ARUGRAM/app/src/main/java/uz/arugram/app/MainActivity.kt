@@ -54,6 +54,16 @@ import uz.arugram.app.ui.theme.ArugramTheme
 import uz.arugram.app.ui.theme.LocalTg
 
 class MainActivity : ComponentActivity() {
+    override fun onStart() {
+        super.onStart()
+        uz.arugram.app.notify.AppVisible.foreground = true
+    }
+
+    override fun onStop() {
+        uz.arugram.app.notify.AppVisible.foreground = false
+        super.onStop()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // Tizim panellari shaffof: oq fonda qora belgilar, tungi rejimda — aksincha (Telegram'dagidek).
         enableEdgeToEdge(
@@ -76,9 +86,16 @@ class MainActivity : ComponentActivity() {
                 onDispose { }
             }
             ArugramTheme(dark) {
-                Root(auth, dark) {
-                    mode = if (dark) 1 else 2
-                    prefs.edit().putInt("theme", mode).apply()
+                androidx.compose.runtime.CompositionLocalProvider(
+                    uz.arugram.app.ui.theme.LocalThemeCtl provides uz.arugram.app.ui.theme.ThemeCtl(mode) { m ->
+                        mode = m
+                        prefs.edit().putInt("theme", m).apply()
+                    },
+                ) {
+                    Root(auth, dark) {
+                        mode = if (dark) 1 else 2
+                        prefs.edit().putInt("theme", mode).apply()
+                    }
                 }
             }
         }

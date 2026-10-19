@@ -1,5 +1,6 @@
 package uz.arugram.app.ui.main
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -12,169 +13,261 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import uz.arugram.app.R
 import uz.arugram.app.auth.AuthModel
-import uz.arugram.app.ui.components.MenuIcon
+import uz.arugram.app.core.RustCore
+import uz.arugram.app.notify.NotifyService
 import uz.arugram.app.ui.components.SearchIcon
+import uz.arugram.app.ui.components.TgIcon
 import uz.arugram.app.ui.theme.LocalTg
 
+/** Ekranlar stegi (orqaga tugmasi bilan qaytiladi). */
+private sealed interface Dest {
+    data class Chat(val row: ChatRow) : Dest
+    data class Info(val row: ChatRow) : Dest
+    data object Search : Dest
+    data object NewChat : Dest
+    data object NewGroup : Dest
+    data class Settings(val page: String) : Dest
+}
+
 /**
- * Kirgandan keyingi bosh oyna (DrKLO `DialogsActivity`): tepada 56 dp li panel (menyu, "ARUGRAM", qidiruv), pastida suhbatlar ro'yxati.
- * Menyu tugmasi hozircha hisobdan chiqadi (yon panel keyingi bosqichda).
+ * Kirgandan keyingi bosh oyna (DrKLO `MainTabsActivity` + `DialogsActivity`): pastda suzuvchi tab paneli (Chatlar / Kontaktlar / Sozlamalar / Profil),
+ * Chatlar tabida — jild yorliqlari, qidiruv pilyuli, suhbatlar ro'yxati (bosib turib: mahkamlash, ovozsiz, o'chirish) va yangi xabar tugmasi.
+ * Suhbat, ma'lumot, qidiruv, yangi chat/guruh va sozlamalar ichki oynalari shu yerda `Dest` steki bilan ochiladi.
  */
 @Composable
 fun HomeScreen(auth: AuthModel) {
     val c = LocalTg.current
-    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
     val model = remember { ChatsModel(ctx.applicationContext) }
-    var openChat by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf<Long?>(null) }
     val ui by model.ui.collectAsStateWithLifecycle()
+    val stack = remember { mutableStateListOf<Dest>() }
     var tab by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableIntStateOf(0) }
-    var me by remember { androidx.compose.runtime.mutableStateOf<ChatRow?>(null) }
-    var meContact by remember { androidx.compose.runtime.mutableStateOf("") }
+    var me by remember { mutableStateOf<ChatRow?>(null) }
+    var meContact by remember { mutableStateOf("") }
+    var typing by remember { mutableStateOf<Map<Long, Long>>(emptyMap()) }
+    var folders by remember { mutableStateOf<List<Folder>>(emptyList()) }
+    var folder by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    var menuFor by remember { mutableStateOf<ChatRow?>(null) }
+    var deleteFor by remember { mutableStateOf<ChatRow?>(null) }
+
     LaunchedEffect(Unit) {
-        val j = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { uz.arugram.app.core.RustCore.tgMe() }
+        val j = withContext(Dispatchers.IO) { RustCore.tgMe() }
         if (j.optString("error").isEmpty() && j.has("id")) {
             me = ChatRow(j.optLong("id"), "user", j.optString("name"), false, 0, false, false, 0, "", false, false, false)
             val phone = j.optString("phone").let { if (it.isNotEmpty()) "+$it" else "" }
             val user = j.optString("username").let { if (it.isNotEmpty()) "@$it" else "" }
             meContact = listOf(phone, user).filter { it.isNotEmpty() }.joinToString("  ·  ")
         }
+        folders = parseFolders(withContext(Dispatchers.IO) { RustCore.tgFolders() })
+        if (settingsPrefs(ctx).getBoolean("notify", true)) NotifyService.start(ctx)
     }
-    var searching by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
-    var query by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf("") }
-    androidx.activity.compose.BackHandler(enabled = searching) { searching = false; query = "" }
     LaunchedEffect(ui.chats.map { it.id }, me?.id) { AvatarCache.ensure(ctx, (ui.chats.filter { !it.self }.map { it.id } + listOfNotNull(me?.id)).distinct()) }
-    // Yangilanishlar: Rust yadrosi kelgan updates sonini hisoblaydi (`rust_tg_update_seq`); u o'zgarsa ro'yxat darhol yangilanadi.
-    // Zaxira sifatida har 60 soniyada ham yangilanadi (yangilanish yo'qolib qolgan holat uchun).
+    // Yangilanishlar: Rust yadrosi kelgan updates sonini hisoblaydi; o'zgarsa ro'yxat darhol yangilanadi (kamida 3 soniya oraliq, zaxira — 60 soniya).
     LaunchedEffect(Unit) {
         var last = -1L
         var sinceLoad = 0
         while (true) {
-            val seq = withContext(Dispatchers.IO) { uz.arugram.app.core.RustCore.tgUpdateSeq() }
-            // Tez-tez keluvchi updates (onlayn holat, yozmoqda...) serverni ortiqcha yuklamasin: kamida 3 soniya oraliq.
+            val seq = withContext(Dispatchers.IO) { RustCore.tgUpdateSeq() }
             if (last == -1L || (seq != last && sinceLoad >= 2) || sinceLoad >= 40) {
                 last = seq
                 sinceLoad = 0
                 model.load()
             }
+            val t = withContext(Dispatchers.IO) { RustCore.tgTyping() }
+            typing = buildMap { for (k in t.keys()) put(k.toLong(), t.optLong(k)) }
             sinceLoad++
-            kotlinx.coroutines.delay(1_500)
+            delay(1_500)
         }
     }
 
-    val opened = ui.chats.firstOrNull { it.id == openChat }
-    if (opened != null) {
-        ChatScreen(opened, onBack = { openChat = null })
-        return
+    BackHandler(enabled = stack.isNotEmpty()) { stack.removeAt(stack.lastIndex) }
+    fun open(r: ChatRow) { stack.add(Dest.Chat(r)) }
+    val openLink: (String) -> Boolean = link@{ url ->
+        val name = tmeUsername(url) ?: return@link false
+        scope.launch {
+            val j = withContext(Dispatchers.IO) { RustCore.tgResolve(name) }
+            if (j.optString("error").isEmpty()) {
+                open(ChatRow(j.optLong("id"), j.optString("kind"), j.optString("name"), false, 0, false, false, 0, "@$name", false, false, false, access = j.optString("hash", "0")))
+            }
+        }
+        true
     }
+    fun live(r: ChatRow) = ui.chats.firstOrNull { it.id == r.id } ?: r
+
+    androidx.compose.runtime.CompositionLocalProvider(LocalOpenLink provides openLink) {
     Box(Modifier.fillMaxSize().background(c.bg)) {
-    Column(Modifier.fillMaxSize()) {
-    if (tab == 0) {
-        Column(Modifier.fillMaxWidth().background(c.bar).statusBarsPadding()) {
-            Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (searching) {
-                    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
-                    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
-                    Box(Modifier.size(56.dp).clickable { searching = false; query = "" }, contentAlignment = Alignment.Center) { uz.arugram.app.ui.components.BackArrowIcon(c.text) }
-                    Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-                        if (query.isEmpty()) BasicText("Qidirish", style = TextStyle(color = c.hint, fontSize = 18.sp))
-                        androidx.compose.foundation.text.BasicTextField(
-                            value = query,
-                            onValueChange = { query = it },
-                            singleLine = true,
-                            textStyle = TextStyle(color = c.text, fontSize = 18.sp),
-                            cursorBrush = androidx.compose.ui.graphics.SolidColor(c.inputActive),
-                            modifier = Modifier.fillMaxWidth().focusRequester(focus),
+        // ── Asosiy tablar ──
+        Box(Modifier.fillMaxSize()) {
+            Column(Modifier.fillMaxSize()) {
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+                    when (MainTab.entries[tab]) {
+                        MainTab.Chats -> ChatsTab(
+                            ui = ui, folders = folders, folder = folder, onFolder = { folder = it }, typing = typing,
+                            onSearch = { stack.add(Dest.Search) }, onOpen = ::open, onLongClick = { menuFor = it }, onRetry = { model.load() },
                         )
+                        MainTab.Contacts -> ContactsTab(bottomPadding = 80.dp, onOpen = ::open)
+                        MainTab.Settings -> SettingsTab(me, meContact, 80.dp, onOpenChat = { r -> open(r) }, onNavigate = { stack.add(Dest.Settings(it)) }, onLogout = { auth.logout() }, savedChat = ui.chats.firstOrNull { it.self })
+                        MainTab.Profile -> ProfileTab(me, meContact, 80.dp, onEdit = { stack.add(Dest.Settings("account")) }, onSaved = { ui.chats.firstOrNull { it.self }?.let(::open) }, onLogout = { auth.logout() })
                     }
-                    if (query.isNotEmpty()) Box(Modifier.size(56.dp).clickable { query = "" }, contentAlignment = Alignment.Center) { uz.arugram.app.ui.components.CloseIcon(c.text) }
-                } else {
-                    // DrKLO (`hasMainTabs`): sarlavha "logotip" rangida (#168BDB), chapga 4 dp suriladi.
-                    BasicText("ARUGRAM", Modifier.weight(1f).padding(start = 20.dp), style = TextStyle(color = androidx.compose.ui.graphics.Color(0xFF168BDB), fontSize = 20.sp, fontWeight = FontWeight.Bold), maxLines = 1)
+                    if (MainTab.entries[tab] == MainTab.Chats) {
+                        // Yangi xabar tugmasi (DrKLO `floatingButton`): pastki o'ngda, tab panelidan tepada.
+                        Box(
+                            Modifier.align(Alignment.BottomEnd).padding(end = 20.dp, bottom = 80.dp).size(56.dp).shadow(6.dp, CircleShape).clip(CircleShape).background(c.fab)
+                                .clickable { stack.add(Dest.NewChat) },
+                            contentAlignment = Alignment.Center,
+                        ) { TgIcon(R.drawable.ic_ab_new, Color.White, size = 24.dp) }
+                    }
                 }
             }
-            if (!searching) {
-                // `FragmentSearchField`: 48 dp (3 dp ichki chet) -> 42 dp li pilyuli, radius 20, orqa fon matn rangining 5 % (tunda 7 %).
-                val fieldBg = if (c.dark) Color.White.copy(alpha = 0.07f) else Color.Black.copy(alpha = 0.05f)
-                Row(
-                    Modifier.fillMaxWidth().padding(start = 10.dp, end = 10.dp, bottom = 6.dp).height(42.dp)
-                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(20.dp)).background(fieldBg).clickable { searching = true },
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) { SearchIcon(c.text.copy(alpha = 0.6f), size = 20.dp) }
-                    BasicText("Qidirish", style = TextStyle(color = c.text.copy(alpha = 0.5f), fontSize = 15.sp))
-                }
+            MainTabsBar(MainTab.entries[tab], { tab = it.ordinal }, me, Modifier.align(Alignment.BottomCenter).navigationBarsPadding())
+        }
+
+        // ── Ichki oynalar (stekning oxirgisi ko'rinadi) ──
+        when (val d = stack.lastOrNull()) {
+            is Dest.Chat -> {
+                val row = live(d.row)
+                ChatScreen(
+                    chat = row, chats = ui.chats, typing = typing[row.id] != null,
+                    onBack = { stack.removeAt(stack.lastIndex) },
+                    onOpenInfo = { stack.add(Dest.Info(row)) },
+                )
             }
+            is Dest.Info -> ChatInfo(
+                chat = live(d.row), onBack = { stack.removeAt(stack.lastIndex) },
+                onWrite = { stack.removeAt(stack.lastIndex) },
+                onDeleted = { stack.clear(); model.load() },
+            )
+            Dest.Search -> SearchScreen(ui.chats, onOpen = { r -> stack.removeAt(stack.lastIndex); open(r) }, onBack = { stack.removeAt(stack.lastIndex) })
+            Dest.NewChat -> Box(Modifier.fillMaxSize().background(c.bg)) {
+                ContactsTab(
+                    bottomPadding = 0.dp, title = "Yangi xabar", onBack = { stack.removeAt(stack.lastIndex) },
+                    onOpen = { r -> stack.removeAt(stack.lastIndex); open(r) },
+                    extra = listOf(
+                        "Yangi guruh" to { stack.removeAt(stack.lastIndex); stack.add(Dest.NewGroup) },
+                        "Yangi kanal" to { stack.removeAt(stack.lastIndex); stack.add(Dest.Settings("newchannel")) },
+                    ),
+                )
+            }
+            Dest.NewGroup -> NewGroupScreen(onBack = { stack.removeAt(stack.lastIndex) }, onDone = { stack.clear(); model.load() })
+            is Dest.Settings -> SettingsRouter(d.page, onBack = { stack.removeAt(stack.lastIndex) }, onNavigate = { stack.add(Dest.Settings(it)) }, folders = folders)
+            null -> {}
+        }
+
+        // ── Suhbat ro'yxati menyusi ──
+        menuFor?.let { r ->
+            PopupMenu(
+                listOf(
+                    MenuItem(if (r.pinned) R.drawable.msg_unpin else R.drawable.msg_pin, if (r.pinned) "Mahkamni olib tashlash" else "Mahkamlash") { model.pin(r) },
+                    MenuItem(if (r.muted) R.drawable.msg_unmute else R.drawable.msg_mute, if (r.muted) "Bildirishnomani yoqish" else "Bildirishnomani o‘chirish") { model.mute(r) },
+                    MenuItem(R.drawable.msg_markread, "O‘qilgan deb belgilash") { scope.launch { withContext(Dispatchers.IO) { RustCore.tgMarkRead(r.spec) }; model.load() } },
+                    MenuItem(R.drawable.msg_delete, "O‘chirish", danger = true) { deleteFor = r },
+                ),
+                onDismiss = { menuFor = null },
+            )
+        }
+        deleteFor?.let { r ->
+            TgAlert("Suhbatni o‘chirish", "“${r.name}” suhbati sizdan o‘chiriladi (guruh yoki kanal bo‘lsa — undan chiqasiz).", "O‘chirish", danger = true,
+                onConfirm = { model.deleteDialog(r); deleteFor = null }, onDismiss = { deleteFor = null })
         }
     }
-        Box(Modifier.weight(1f).fillMaxWidth()) {
-            if (tab == MainTab.Contacts.ordinal) {
-                ContactsTab(bottomPadding = 80.dp)
-            } else if (tab == MainTab.Settings.ordinal) {
-                SettingsTab(me, meContact, 80.dp) { auth.logout() }
-            } else if (tab != 0) {
-                TabPlaceholder(MainTab.entries[tab], auth, me, meContact)
-            } else when {
-                ui.loading -> CircularProgressIndicator(Modifier.align(Alignment.Center).size(32.dp), color = c.inputActive, strokeWidth = 3.dp)
-                ui.error != null && ui.chats.isEmpty() -> Column(Modifier.align(Alignment.Center).padding(horizontal = 32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    BasicText(ui.error.orEmpty(), style = TextStyle(color = c.gray, fontSize = 15.sp, textAlign = TextAlign.Center))
-                    BasicText("Qayta urinish", Modifier.clickable { model.load() }.padding(16.dp), style = TextStyle(color = c.value, fontSize = 15.sp))
-                }
-                ui.chats.isEmpty() -> BasicText("Suhbatlar yo‘q", Modifier.align(Alignment.Center), style = TextStyle(color = c.gray, fontSize = 17.sp))
-                else -> {
-                    val shown = if (query.isBlank()) ui.chats else ui.chats.filter { it.name.contains(query.trim(), ignoreCase = true) }
-                    if (shown.isEmpty()) BasicText("Hech narsa topilmadi", Modifier.align(Alignment.Center), style = TextStyle(color = c.gray, fontSize = 17.sp))
-                    else ChatList(shown, bottomPadding = 80.dp, onOpen = { openChat = it.id })
-                }
-            }
-        }
-    }
-    MainTabsBar(MainTab.entries[tab], { tab = it.ordinal; searching = false; query = "" }, me, Modifier.align(Alignment.BottomCenter).navigationBarsPadding())
     }
 }
 
-
-/** Kontaktlar / Sozlamalar / Profil tablari hozircha sarlavha va qisqa izoh bilan (keyingi bosqichlarda to'ldiriladi). */
+/** Chatlar tabi: tepa panel, jild yorliqlari, qidiruv pilyuli, ro'yxat. */
 @Composable
-private fun TabPlaceholder(tab: MainTab, auth: AuthModel, me: ChatRow?, meContact: String) {
+private fun ChatsTab(
+    ui: ChatsUi, folders: List<Folder>, folder: Int, onFolder: (Int) -> Unit, typing: Map<Long, Long>,
+    onSearch: () -> Unit, onOpen: (ChatRow) -> Unit, onLongClick: (ChatRow) -> Unit, onRetry: () -> Unit,
+) {
+    val c = LocalTg.current
+    Column(Modifier.fillMaxSize().background(c.bg)) {
+        Column(Modifier.fillMaxWidth().background(c.bar).statusBarsPadding()) {
+            Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
+                // DrKLO (`hasMainTabs`): sarlavha "logotip" rangida (#168BDB).
+                BasicText("ARUGRAM", Modifier.weight(1f).padding(start = 20.dp), style = TextStyle(color = Color(0xFF168BDB), fontSize = 20.sp, fontWeight = FontWeight.Bold), maxLines = 1)
+                Box(Modifier.size(56.dp).clickable(onClick = onSearch), contentAlignment = Alignment.Center) { SearchIcon(c.text) }
+            }
+            if (folders.isNotEmpty()) {
+                val unread = folders.associate { f -> f.id to ui.chats.filter { f.matches(it) }.sumOf { if (it.muted) 0 else it.unread } } + (0 to ui.chats.sumOf { if (it.muted) 0 else it.unread })
+                FolderTabs(folders, folder, unread, onFolder)
+            }
+        }
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            when {
+                ui.loading -> CircularProgressIndicator(Modifier.align(Alignment.Center).size(32.dp), color = c.inputActive, strokeWidth = 3.dp)
+                ui.error != null && ui.chats.isEmpty() -> Column(Modifier.align(Alignment.Center).padding(horizontal = 32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    BasicText(ui.error.orEmpty(), style = TextStyle(color = c.gray, fontSize = 15.sp, textAlign = TextAlign.Center))
+                    BasicText("Qayta urinish", Modifier.clickable(onClick = onRetry).padding(16.dp), style = TextStyle(color = c.value, fontSize = 15.sp))
+                }
+                else -> {
+                    val sel = folders.firstOrNull { it.id == folder }
+                    val shown = if (sel == null) ui.chats else ui.chats.filter { sel.matches(it) }
+                    if (shown.isEmpty()) BasicText(if (ui.chats.isEmpty()) "Suhbatlar yo‘q" else "Bu jildda suhbat yo‘q", Modifier.align(Alignment.Center), style = TextStyle(color = c.gray, fontSize = 17.sp))
+                    else ChatList(shown, bottomPadding = 150.dp, typing = typing, onLongClick = onLongClick, onOpen = onOpen)
+                }
+            }
+        }
+    }
+}
+
+/** Profil tabi: katta avatar, ism, telefon/@nom, "Tahrirlash" va "Saqlangan xabarlar". */
+@Composable
+private fun ProfileTab(me: ChatRow?, meContact: String, bottomPadding: androidx.compose.ui.unit.Dp, onEdit: () -> Unit, onSaved: () -> Unit, onLogout: () -> Unit) {
     val c = LocalTg.current
     Column(Modifier.fillMaxSize().background(c.grayBg).statusBarsPadding(), horizontalAlignment = Alignment.CenterHorizontally) {
         Box(Modifier.fillMaxWidth().height(56.dp).background(c.bar), contentAlignment = Alignment.CenterStart) {
-            BasicText(tab.label, Modifier.padding(start = 16.dp), style = TextStyle(color = c.text, fontSize = 20.sp, fontWeight = FontWeight.Medium))
+            BasicText("Profil", Modifier.padding(start = 20.dp), style = TextStyle(color = c.text, fontSize = 20.sp, fontWeight = FontWeight.Bold))
         }
-        if (tab == MainTab.Profile && me != null) {
+        if (me != null) {
             Column(Modifier.fillMaxWidth().background(c.bar).padding(vertical = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 ChatAvatar(me, 96.dp)
-                BasicText(me.name, Modifier.padding(top = 12.dp), style = TextStyle(color = c.text, fontSize = 20.sp, fontWeight = FontWeight.Medium))
+                BasicText(me.name, Modifier.padding(top = 12.dp), style = TextStyle(color = c.text, fontSize = 22.sp, fontWeight = FontWeight.Bold))
                 if (meContact.isNotEmpty()) BasicText(meContact, Modifier.padding(top = 4.dp), style = TextStyle(color = c.gray, fontSize = 15.sp))
             }
         }
-        if (tab == MainTab.Settings || tab == MainTab.Profile) {
-            Box(Modifier.padding(top = 24.dp).fillMaxWidth().background(c.bar).clickable { auth.logout() }.padding(vertical = 16.dp), contentAlignment = Alignment.Center) {
-                BasicText("Hisobdan chiqish", style = TextStyle(color = c.red, fontSize = 16.sp))
+        Column(Modifier.padding(top = 8.dp).fillMaxWidth().background(c.bar)) {
+            Row(Modifier.fillMaxWidth().height(50.dp).clickable(onClick = onEdit).padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+                TgIcon(R.drawable.msg_edit, c.text.copy(alpha = 0.7f))
+                BasicText("Profilni tahrirlash", Modifier.padding(start = 18.dp), style = TextStyle(color = c.text, fontSize = 16.sp))
             }
-        } else {
-            BasicText("Tez orada qo‘shiladi", Modifier.padding(top = 48.dp), style = TextStyle(color = c.gray, fontSize = 15.sp))
+            Row(Modifier.fillMaxWidth().height(50.dp).clickable(onClick = onSaved).padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+                TgIcon(R.drawable.msg_saved, c.text.copy(alpha = 0.7f))
+                BasicText("Saqlangan xabarlar", Modifier.padding(start = 18.dp), style = TextStyle(color = c.text, fontSize = 16.sp))
+            }
+        }
+        Box(Modifier.padding(top = 8.dp).fillMaxWidth().background(c.bar).clickable(onClick = onLogout).padding(vertical = 16.dp), contentAlignment = Alignment.Center) {
+            BasicText("Hisobdan chiqish", style = TextStyle(color = c.red, fontSize = 16.sp))
         }
     }
 }

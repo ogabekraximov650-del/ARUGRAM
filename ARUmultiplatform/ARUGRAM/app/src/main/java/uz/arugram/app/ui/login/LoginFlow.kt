@@ -62,7 +62,7 @@ import uz.arugram.app.ui.components.TgFab
 import uz.arugram.app.ui.theme.LocalTg
 import kotlin.math.cos
 
-private enum class Page { Phone, Country, Code, Password }
+private enum class Page { Phone, Country, Code, Password, Register }
 
 /** `AccelerateDecelerateInterpolator` — Telegram sahifalar almashuvi (300 ms). */
 private val AccelDecel = Easing { t -> (cos((t + 1f) * Math.PI) / 2.0 + 0.5).toFloat() }
@@ -84,6 +84,8 @@ fun LoginFlow(auth: AuthModel, suppressFab: Boolean = false) {
     var phoneDigits by rememberSaveable { mutableStateOf("") }
     var showCountries by rememberSaveable { mutableStateOf(false) }
     var password by rememberSaveable { mutableStateOf("") }
+    var firstName by rememberSaveable { mutableStateOf("") }
+    var lastName by rememberSaveable { mutableStateOf("") }
     var phoneActive by rememberSaveable { mutableStateOf(true) }
     var codeInput by rememberSaveable { mutableStateOf("") }
     var confirmOpen by remember { mutableStateOf(false) }
@@ -114,6 +116,7 @@ fun LoginFlow(auth: AuthModel, suppressFab: Boolean = false) {
         showCountries -> Page.Country
         ui.stage == Stage.Code -> Page.Code
         ui.stage == Stage.Password -> Page.Password
+        ui.stage == Stage.SignUp -> Page.Register
         else -> Page.Phone
     }
 
@@ -144,6 +147,7 @@ fun LoginFlow(auth: AuthModel, suppressFab: Boolean = false) {
                 }
             }
             Page.Password -> if (password.isNotEmpty()) auth.checkPassword(password)
+            Page.Register -> if (firstName.isNotBlank()) auth.signUp(firstName, lastName) else { localErrorTick++; showToast("Ismingizni kiriting") }
             else -> Unit
         }
     }
@@ -228,6 +232,9 @@ fun LoginFlow(auth: AuthModel, suppressFab: Boolean = false) {
                         onResend = { auth.resendCode() },
                     )
                 }
+                Page.Register -> Box(Modifier.fillMaxSize().padding(start = 18.dp, end = 18.dp, top = 30.dp)) {
+                    RegisterPage(firstName, lastName, ui.errorTick + localErrorTick, { firstName = it }, { lastName = it }, ::onNext)
+                }
                 Page.Password -> Box(Modifier.fillMaxSize().padding(start = 18.dp, end = 18.dp, top = 30.dp)) {
                     PasswordPage(
                         hint = ui.hint,
@@ -242,7 +249,7 @@ fun LoginFlow(auth: AuthModel, suppressFab: Boolean = false) {
         }
 
         // Orqaga strelkasi: chapda tepada 16 dp (32 dp li tugma).
-        if (page == Page.Code || page == Page.Password) {
+        if (page == Page.Code || page == Page.Password || page == Page.Register) {
             Box(Modifier.padding(start = 16.dp, top = 16.dp).size(32.dp).clip(RoundedCornerShape(16.dp)).clickable { goBack() }.padding(4.dp), contentAlignment = Alignment.Center) {
                 BackArrowIcon(c.text)
             }
@@ -250,8 +257,8 @@ fun LoginFlow(auth: AuthModel, suppressFab: Boolean = false) {
 
         // Pastki o'ngdagi dumaloq tugma (telefon va parol sahifalarida).
         TgFab(
-            visible = page == Page.Phone || page == Page.Password,
-            busy = ui.busy && (page == Page.Phone || page == Page.Password),
+            visible = page == Page.Phone || page == Page.Password || page == Page.Register,
+            busy = ui.busy && (page == Page.Phone || page == Page.Password || page == Page.Register),
             onClick = ::onNext,
             modifier = Modifier.align(Alignment.BottomEnd).padding(end = 20.dp, bottom = if (keypadWanted) 10.dp else 14.dp).alpha(if (suppressFab || confirmP > 0.001f) 0f else 1f),
         )

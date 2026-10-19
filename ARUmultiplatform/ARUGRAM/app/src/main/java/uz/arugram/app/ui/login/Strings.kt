@@ -36,6 +36,11 @@ object S {
     const val ConfirmCorrectNumber = "Bu to‘g‘ri raqammi?"            // ConfirmCorrectNumber
     const val Edit = "Tahrirlash"                                     // Edit
     const val Yes = "Ha"                                              // CheckPhoneNumberYes
+    const val YourName = "Ismingiz"                                    // YourName
+    const val RegisterText = "Ism va familiyangizni kiriting"          // RegisterText
+    const val FirstName = "Ism (majburiy)"                             // FirstName
+    const val LastName = "Familiya (ixtiyoriy)"                        // LastName
+    const val SignUpTerms = "Davom etib, siz Telegram xizmat ko‘rsatish shartlariga rozilik bildirasiz."
     const val Back = "Orqaga"
     const val Next = "Keyingi"
     const val InvalidPhone = "Telefon raqami noto‘g‘ri. Raqamni tekshirib, qayta urinib ko‘ring."

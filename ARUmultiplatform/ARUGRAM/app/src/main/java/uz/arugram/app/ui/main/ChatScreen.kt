@@ -13,73 +13,101 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.ui.graphics.SolidColor
-import kotlinx.coroutines.launch
-import uz.arugram.app.ui.components.SendIcon
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import uz.arugram.app.R
 import uz.arugram.app.core.RustCore
 import uz.arugram.app.ui.components.BackArrowIcon
+import uz.arugram.app.ui.components.CloseIcon
+import uz.arugram.app.ui.components.SearchIcon
+import uz.arugram.app.ui.components.TgIcon
 import uz.arugram.app.ui.theme.LocalTg
 
-data class MsgRow(val id: Int, val out: Boolean, val date: Long, val text: String, val sender: String, val media: String, val pw: Int = 0, val ph: Int = 0)
+private val Blue = Color(0xFF3390EC)
 
 /**
- * Suhbat oynasi (DrKLO `ChatActivity`, o'qish rejimi): tepada 56 dp li panel (orqaga, avatar 42 dp, nom 17 sp qalin), o'rtada fon va
- * pufakchalar (kiruvchi — oq, chiquvchi — och yashil; matn 16 sp, vaqt 12 sp), pastda xabar yozish paneli (yuborish keyingi bosqichda).
+ * Suhbat oynasi (DrKLO `ChatActivity`): tepada orqaga / avatar / nom va holat ("yozmoqda...", a'zolar soni, onlayn), qidiruv va menyu; tanlash rejimida
+ * javob / nusxa / uzatish / o'chirish. Mahkamlangan xabar paneli, kun ajratgichlari, pufakchalar, pastga tushirish tugmasi, xabar yozish paneli.
  */
 @Composable
-fun ChatScreen(chat: ChatRow, onBack: () -> Unit) {
+fun ChatScreen(chat: ChatRow, chats: List<ChatRow>, typing: Boolean, onBack: () -> Unit, onOpenInfo: () -> Unit) {
     val c = LocalTg.current
-    BackHandler(onBack = onBack)
-    var msgs by remember { mutableStateOf<List<MsgRow>?>(null) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var draft by remember { mutableStateOf("") }
-    var sending by remember { mutableStateOf(false) }
+    val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    suspend fun reload() {
-        val j = withContext(Dispatchers.IO) { RustCore.tgMessages(chat.id, 60) }
-        val err = j.optString("error")
-        if (err.isNotEmpty()) { error = err; if (msgs == null) msgs = emptyList(); return }
-        error = null
-        val arr = j.optJSONArray("messages")
-        msgs = buildList {
-            for (i in 0 until (arr?.length() ?: 0)) {
-                val o = arr!!.getJSONObject(i)
-                add(MsgRow(o.optInt("id"), o.optBoolean("out"), o.optLong("date"), o.optString("text"), o.optString("sender"), o.optString("media"), o.optInt("pw"), o.optInt("ph")))
+    val model = remember(chat.id) { ChatModel(chat, ctx.applicationContext) }
+    DisposableEffect(chat.id) { onDispose { model.close(); VoicePlayer.stop() } }
+
+    val selected = remember { mutableStateListOf<Int>() }
+    var menuFor by remember { mutableStateOf<MsgRow?>(null) }
+    var replyTo by remember { mutableStateOf<MsgRow?>(null) }
+    var editing by remember { mutableStateOf<MsgRow?>(null) }
+    var draft by remember { mutableStateOf(TextFieldValue("")) }
+    var viewer by remember { mutableStateOf<MsgRow?>(null) }
+    var forwardIds by remember { mutableStateOf<List<Int>?>(null) }
+    var deleteIds by remember { mutableStateOf<List<Int>?>(null) }
+    var chatMenu by remember { mutableStateOf(false) }
+    var confirmDeleteChat by remember { mutableStateOf(false) }
+    var searching by remember { mutableStateOf(false) }
+    var query by remember { mutableStateOf("") }
+    var subtitle by remember { mutableStateOf("") }
+    var bulletin by remember { mutableStateOf<String?>(null) }
+    var joined by remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
+    val canWrite = chat.kind != "channel" || chat.self
+
+    LaunchedEffect(chat.id) {
+        model.markRead()
+        model.loadPinned()
+        val j = withContext(Dispatchers.IO) { RustCore.tgPeerInfo(chat.spec) }
+        if (j.optString("error").isEmpty()) {
+            subtitle = when (j.optString("kind")) {
+                "user" -> if (chat.bot) "bot" else statusText(j.optString("status"))
+                "group" -> "${j.optInt("members")} a’zo"
+                "channel" -> "${compactCount(j.optInt("members"))} obunachi"
+                else -> ""
             }
         }
     }
     // Yangi xabarlar: Rust yadrosining updates hisoblagichi o'zgarganda (yoki har 60 soniyada) suhbat yangilanadi.
     LaunchedEffect(chat.id) {
-        // Suhbat ochilganda o'qilgan deb belgilanadi (faqat o'qilmagan xabar bo'lsa).
-        if (chat.unread > 0) withContext(Dispatchers.IO) { RustCore.tgMarkRead(chat.id) }
         var last = -1L
         var since = 0
         while (true) {
@@ -87,125 +115,232 @@ fun ChatScreen(chat: ChatRow, onBack: () -> Unit) {
             if (last == -1L || (seq != last && since >= 2) || since >= 40) {
                 last = seq
                 since = 0
-                reload()
+                model.refresh()
             }
             since++
-            kotlinx.coroutines.delay(1_500)
+            delay(1_500)
+        }
+    }
+    LaunchedEffect(model.error) {
+        val e = model.error
+        if (e != null) {
+            bulletin = e
+            delay(3500)
+            if (bulletin == e) bulletin = null
+            model.clearError()
+        }
+    }
+    // Eski xabarlarni yuklash: ro'yxat oxiriga yaqinlashganda.
+    val nearEnd by remember { derivedStateOf { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index?.let { it >= model.messages.size - 6 } ?: false } }
+    LaunchedEffect(nearEnd, model.messages.size) { if (nearEnd) model.loadOlder() }
+    LaunchedEffect(query) { delay(350); model.search(query) }
+
+    BackHandler {
+        when {
+            menuFor != null -> menuFor = null
+            selected.isNotEmpty() -> selected.clear()
+            searching -> { searching = false; query = ""; model.clearSearch() }
+            editing != null -> { editing = null; draft = TextFieldValue("") }
+            replyTo != null -> replyTo = null
+            else -> onBack()
         }
     }
 
-    val bgTop = if (c.dark) Color(0xFF0E1621) else Color(0xFFDBE7C5)
-    val bgBottom = if (c.dark) Color(0xFF17212B) else Color(0xFFA9C9A0)
-    Column(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(bgTop, bgBottom)))) {
-        Column(Modifier.fillMaxWidth().background(c.bar).statusBarsPadding()) {
-            Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(56.dp).clickable(onClick = onBack), contentAlignment = Alignment.Center) { BackArrowIcon(c.text) }
-                ChatAvatar(chat, 42.dp)
-                BasicText(chat.name, Modifier.weight(1f).padding(start = 12.dp), style = TextStyle(color = c.text, fontSize = 17.sp, fontWeight = FontWeight.Medium), maxLines = 1)
-            }
-        }
-        Box(Modifier.weight(1f).fillMaxWidth()) {
-            val list = msgs
-            when {
-                list == null -> CircularProgressIndicator(Modifier.align(Alignment.Center).size(32.dp), color = c.inputActive, strokeWidth = 3.dp)
-                error != null && list.isEmpty() -> BasicText(error.orEmpty(), Modifier.align(Alignment.Center).padding(32.dp), style = TextStyle(color = c.gray, fontSize = 15.sp, textAlign = TextAlign.Center))
-                else -> LazyColumn(Modifier.fillMaxSize(), reverseLayout = true) {
-                    itemsIndexed(list, key = { _, m -> m.id }) { i, m ->
-                        val older = list.getOrNull(i + 1)
-                        Column {
-                            if (older == null || dayKey(older.date) != dayKey(m.date)) DateChip(m.date)
-                            Bubble(m, chat.id, chat.kind != "user")
+    fun doSend() {
+        val text = draft.text.trim()
+        if (text.isEmpty()) return
+        val e = editing
+        val r = replyTo
+        draft = TextFieldValue("")
+        editing = null
+        replyTo = null
+        if (e != null) model.edit(e, text) else model.send(text, r?.id ?: 0) { draft = TextFieldValue(text) }
+        scope.launch { listState.animateScrollToItem(0) }
+    }
+
+    Box(Modifier.fillMaxSize()) {
+        val bgTop = if (c.dark) Color(0xFF0E1621) else Color(0xFFDBE7C5)
+        val bgBottom = if (c.dark) Color(0xFF17212B) else Color(0xFFA9C9A0)
+        Column(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(bgTop, bgBottom)))) {
+            // ── Tepa panel ──
+            Column(Modifier.fillMaxWidth().background(c.bar).statusBarsPadding()) {
+                Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
+                    when {
+                        selected.isNotEmpty() -> {
+                            Box(Modifier.size(56.dp).clickable { selected.clear() }, contentAlignment = Alignment.Center) { CloseIcon(c.text) }
+                            BasicText("${selected.size}", Modifier.weight(1f), style = TextStyle(color = c.text, fontSize = 20.sp, fontWeight = FontWeight.Bold))
+                            val sel = model.messages.filter { it.id in selected }
+                            if (selected.size == 1 && canWrite) Box(Modifier.size(48.dp).clickable { replyTo = sel.firstOrNull(); selected.clear() }, contentAlignment = Alignment.Center) { TgIcon(R.drawable.input_reply, c.text) }
+                            Box(Modifier.size(48.dp).clickable { copyText(ctx, sel.sortedBy { it.id }.joinToString("\n") { it.text }); selected.clear(); bulletin = "Nusxalandi" }, contentAlignment = Alignment.Center) { TgIcon(R.drawable.msg_copy, c.text) }
+                            Box(Modifier.size(48.dp).clickable { forwardIds = selected.toList() }, contentAlignment = Alignment.Center) { TgIcon(R.drawable.input_forward, c.text) }
+                            Box(Modifier.size(48.dp).clickable { deleteIds = selected.toList() }, contentAlignment = Alignment.Center) { TgIcon(R.drawable.msg_delete, c.text) }
+                        }
+                        searching -> {
+                            val focus = remember { FocusRequester() }
+                            LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+                            Box(Modifier.size(56.dp).clickable { searching = false; query = ""; model.clearSearch() }, contentAlignment = Alignment.Center) { BackArrowIcon(c.text) }
+                            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                                if (query.isEmpty()) BasicText("Qidirish", style = TextStyle(color = c.hint, fontSize = 18.sp))
+                                BasicTextField(query, { query = it }, singleLine = true, textStyle = TextStyle(color = c.text, fontSize = 18.sp), cursorBrush = SolidColor(c.inputActive), modifier = Modifier.fillMaxWidth().focusRequester(focus))
+                            }
+                            if (query.isNotEmpty()) Box(Modifier.size(56.dp).clickable { query = "" }, contentAlignment = Alignment.Center) { CloseIcon(c.text) }
+                        }
+                        else -> {
+                            Box(Modifier.size(56.dp).clickable(onClick = onBack), contentAlignment = Alignment.Center) { BackArrowIcon(c.text) }
+                            Row(Modifier.weight(1f).clickable(onClick = onOpenInfo), verticalAlignment = Alignment.CenterVertically) {
+                                ChatAvatar(chat, 40.dp)
+                                Column(Modifier.padding(start = 12.dp)) {
+                                    BasicText(chat.name, style = TextStyle(color = c.text, fontSize = 17.sp, fontWeight = FontWeight.Bold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    val sub = if (typing) "yozmoqda..." else subtitle
+                                    if (sub.isNotEmpty()) BasicText(sub, style = TextStyle(color = if (typing || sub == "onlayn") Blue else c.gray, fontSize = 13.sp), maxLines = 1)
+                                }
+                            }
+                            Box(Modifier.size(48.dp).clickable { searching = true }, contentAlignment = Alignment.Center) { SearchIcon(c.text) }
+                            Box(Modifier.size(48.dp).clickable { chatMenu = true }, contentAlignment = Alignment.Center) { TgIcon(R.drawable.ic_ab_other, c.text) }
+                        }
+                    }
+                }
+                // Mahkamlangan xabar paneli
+                val pin = model.pinned
+                if (pin != null && !searching && selected.isEmpty()) {
+                    Row(
+                        Modifier.fillMaxWidth().height(40.dp).clickable {
+                            val idx = model.messages.indexOfFirst { it.id == pin.id }
+                            if (idx >= 0) scope.launch { listState.animateScrollToItem(idx) }
+                        }.padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(Modifier.size(2.dp, 28.dp).background(Blue))
+                        Column(Modifier.padding(start = 8.dp)) {
+                            BasicText("Mahkamlangan xabar", style = TextStyle(color = Blue, fontSize = 13.sp, fontWeight = FontWeight.Medium))
+                            BasicText(pin.text.ifEmpty { pin.media }, style = TextStyle(color = c.text, fontSize = 14.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
                 }
             }
-        }
-        Row(Modifier.fillMaxWidth().background(c.bar).navigationBarsPadding().imePadding().heightIn(min = 48.dp).padding(start = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.weight(1f).padding(vertical = 12.dp)) {
-                if (draft.isEmpty()) BasicText("Xabar", style = TextStyle(color = c.hint, fontSize = 18.sp))
-                BasicTextField(
-                    value = draft,
-                    onValueChange = { draft = it },
-                    textStyle = TextStyle(color = c.text, fontSize = 18.sp),
-                    cursorBrush = SolidColor(c.inputActive),
-                    maxLines = 6,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-            Box(
-                Modifier.size(48.dp).clickable(enabled = draft.isNotBlank() && !sending) {
-                    val text = draft
-                    draft = ""
-                    sending = true
-                    scope.launch {
-                        val r = withContext(Dispatchers.IO) { RustCore.tgSendText(chat.id, text) }
-                        sending = false
-                        if (r.optString("error").isNotEmpty()) { error = r.optString("error"); draft = text } else reload()
+
+            // ── Xabarlar ──
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                val results = model.searchResults
+                val list = results ?: model.messages
+                when {
+                    !model.loaded -> CircularProgressIndicator(Modifier.align(Alignment.Center).size(32.dp), color = c.inputActive, strokeWidth = 3.dp)
+                    list.isEmpty() -> BasicText(
+                        if (results != null) "Hech narsa topilmadi" else "Xabarlar yo‘q",
+                        Modifier.align(Alignment.Center).clip(RoundedCornerShape(12.dp)).background(Color(0x66000000)).padding(horizontal = 12.dp, vertical = 6.dp),
+                        style = TextStyle(color = Color.White, fontSize = 14.sp, textAlign = TextAlign.Center),
+                    )
+                    else -> LazyColumn(Modifier.fillMaxSize(), state = listState, reverseLayout = true) {
+                        itemsIndexed(list, key = { _, m -> m.id }) { i, m ->
+                            val older = list.getOrNull(i + 1)
+                            val replied = if (m.reply > 0) list.firstOrNull { it.id == m.reply } else null
+                            Column {
+                                if (older == null || dayKey(older.date) != dayKey(m.date)) DateChip(m.date)
+                                MessageBubble(
+                                    m = m, chat = chat, replied = replied, selected = m.id in selected,
+                                    onClick = {
+                                        if (selected.isNotEmpty()) { if (m.id in selected) selected.remove(m.id) else selected.add(m.id) }
+                                        else if (m.kind == "photo" || m.kind == "video") viewer = m
+                                    },
+                                    onLongClick = { if (selected.isEmpty()) menuFor = m else if (m.id !in selected) selected.add(m.id) },
+                                    onOpenMedia = { if (selected.isEmpty()) viewer = m else if (m.id in selected) selected.remove(m.id) else selected.add(m.id) },
+                                    onReact = { model.react(m, it) },
+                                    onReplyClick = { id -> val idx = list.indexOfFirst { it.id == id }; if (idx >= 0) scope.launch { listState.animateScrollToItem(idx) } },
+                                )
+                            }
+                        }
                     }
-                },
-                contentAlignment = Alignment.Center,
-            ) {
-                if (draft.isNotBlank()) SendIcon(c.inputActive)
-            }
-        }
-    }
-}
-
-@Composable
-private fun Bubble(m: MsgRow, chatId: Long, showSender: Boolean) {
-    val c = LocalTg.current
-    val bg = when {
-        m.out -> if (c.dark) Color(0xFF2B5278) else Color(0xFFEFFFDE)
-        else -> if (c.dark) Color(0xFF182533) else Color.White
-    }
-    val shape = RoundedCornerShape(topStart = 17.dp, topEnd = 17.dp, bottomStart = if (m.out) 17.dp else 5.dp, bottomEnd = if (m.out) 5.dp else 17.dp)
-    Row(Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 2.dp, bottom = 2.dp), horizontalArrangement = if (m.out) androidx.compose.foundation.layout.Arrangement.End else androidx.compose.foundation.layout.Arrangement.Start) {
-        Column(Modifier.widthIn(max = 300.dp).clip(shape).background(bg).padding(horizontal = 10.dp, vertical = 6.dp)) {
-            if (showSender && !m.out && m.sender.isNotEmpty()) {
-                BasicText(m.sender, style = TextStyle(color = senderColor(m.sender), fontSize = 14.sp, fontWeight = FontWeight.Medium), maxLines = 1)
-            }
-            if (m.media == "Rasm" && m.pw > 0 && m.ph > 0) {
-                // Rasm: kengligi eng ko'pi 260 dp, balandligi eng ko'pi 320 dp, nisbat saqlanadi; yuklanguncha kulrang joy.
-                val ctx = androidx.compose.ui.platform.LocalContext.current
-                LaunchedEffect(m.id) { MediaCache.photo(ctx, chatId, m.id) }
-                val ratio = m.pw.toFloat() / m.ph
-                val w = minOf(260f, 320f * ratio)
-                val img = MediaCache.photos[MediaCache.key(chatId, m.id)]
-                Box(Modifier.padding(top = 2.dp, bottom = 4.dp).size(w.dp, (w / ratio).dp).clip(RoundedCornerShape(10.dp)).background(Color(0x22000000))) {
-                    if (img != null) androidx.compose.foundation.Image(img, null, Modifier.fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
                 }
+                // Pastga tushirish tugmasi
+                val showDown by remember { derivedStateOf { listState.firstVisibleItemIndex > 3 } }
+                if (showDown && results == null) {
+                    Box(
+                        Modifier.align(Alignment.BottomEnd).padding(12.dp).size(42.dp).shadow(4.dp, CircleShape).clip(CircleShape).background(c.bar)
+                            .clickable { scope.launch { listState.animateScrollToItem(0) } },
+                        contentAlignment = Alignment.Center,
+                    ) { uz.arugram.app.ui.components.ChevronDownIcon(c.gray) }
+                }
+                Bulletin(bulletin, Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp))
             }
-            val body = if (m.media == "Rasm" && m.pw > 0) m.text else m.text.ifEmpty { m.media }
-            if (body.isNotEmpty()) BasicText(body, style = TextStyle(color = if (c.dark) Color.White else Color.Black, fontSize = 16.sp))
-            BasicText(chatTime(m.date), Modifier.align(Alignment.End), style = TextStyle(color = if (m.out && !c.dark) Color(0xFF70B15C) else Color(0xFFA1AAB3), fontSize = 12.sp))
+
+            // ── Yozish paneli ──
+            if (chat.date == 0L && chat.kind != "user" && !joined) {
+                Box(Modifier.fillMaxWidth().background(c.bar).navigationBarsPadding().height(48.dp).clickable {
+                    scope.launch {
+                        val r = withContext(Dispatchers.IO) { RustCore.tgJoin(chat.spec) }
+                        if (r.optString("error").isEmpty()) joined = true else bulletin = r.optString("error")
+                    }
+                }, contentAlignment = Alignment.Center) { BasicText("QO‘SHILISH", style = TextStyle(color = Blue, fontSize = 15.sp, fontWeight = FontWeight.Bold)) }
+            } else ChatInputBar(
+                draft = draft, onDraft = { draft = it }, replyTo = replyTo, editing = editing, canWrite = canWrite,
+                onCancelContext = { editing = null; replyTo = null; draft = TextFieldValue("") },
+                onSend = ::doSend,
+                onSendFile = { f, kind, extra -> model.sendFile(f, kind, replyTo?.id ?: 0, "", extra); replyTo = null; scope.launch { listState.animateScrollToItem(0) } },
+                onSendVoice = { f, secs -> model.sendFile(f, "voice", replyTo?.id ?: 0, "", "$secs:0:0"); replyTo = null },
+                onSendSticker = { st -> model.sendSticker(st.ref, replyTo?.id ?: 0); replyTo = null; scope.launch { listState.animateScrollToItem(0) } },
+            )
         }
+
+        // ── Oynalar ──
+        menuFor?.let { m ->
+            val items = buildList {
+                if (canWrite) add(MenuItem(R.drawable.input_reply, "Javob") { replyTo = m; editing = null })
+                if (m.text.isNotEmpty()) add(MenuItem(R.drawable.msg_copy, "Nusxalash") { copyText(ctx, m.text); bulletin = "Nusxalandi" })
+                if (m.out && m.text.isNotEmpty() && m.kind.isEmpty()) add(MenuItem(R.drawable.msg_edit, "Tahrirlash") { editing = m; replyTo = null; draft = TextFieldValue(m.text, TextRange(m.text.length)) })
+                add(MenuItem(if (m.pinned) R.drawable.msg_unpin else R.drawable.msg_pin, if (m.pinned) "Mahkamni olib tashlash" else "Mahkamlash") { model.pin(m, !m.pinned) })
+                add(MenuItem(R.drawable.input_forward, "Uzatish") { forwardIds = listOf(m.id) })
+                add(MenuItem(R.drawable.msg_select, "Tanlash") { selected.add(m.id) })
+                add(MenuItem(R.drawable.msg_delete, "O‘chirish", danger = true) { deleteIds = listOf(m.id) })
+            }
+            MessageActions(items, onReact = { model.react(m, it) }, onDismiss = { menuFor = null })
+        }
+        if (chatMenu) {
+            PopupMenu(
+                listOf(
+                    MenuItem(R.drawable.msg_info, "Ma’lumot") { onOpenInfo() },
+                    MenuItem(if (chat.muted) R.drawable.msg_unmute else R.drawable.msg_mute, if (chat.muted) "Bildirishnomani yoqish" else "Bildirishnomani o‘chirish") {
+                        scope.launch { withContext(Dispatchers.IO) { RustCore.tgMute(chat.spec, !chat.muted) } }
+                    },
+                    MenuItem(R.drawable.msg_delete, "Suhbatni o‘chirish", danger = true) { confirmDeleteChat = true },
+                ),
+                onDismiss = { chatMenu = false },
+            )
+        }
+        forwardIds?.let { ids ->
+            ChatPicker("Uzatish", chats, onPick = { t -> model.forwardTo(t, ids); forwardIds = null; selected.clear(); bulletin = "Xabar uzatildi" }, onDismiss = { forwardIds = null })
+        }
+        deleteIds?.let { ids ->
+            TgAlert(
+                title = if (ids.size == 1) "Xabarni o‘chirish" else "${ids.size} ta xabarni o‘chirish",
+                text = "Xabar suhbatdagi hamma uchun o‘chiriladi (agar imkon bo‘lsa).",
+                confirm = "O‘chirish", danger = true,
+                onConfirm = { model.delete(ids); selected.clear(); deleteIds = null },
+                onDismiss = { deleteIds = null },
+            )
+        }
+        if (confirmDeleteChat) {
+            TgAlert(
+                title = "Suhbatni o‘chirish",
+                text = "“${chat.name}” suhbati sizdan o‘chiriladi (guruh yoki kanal bo‘lsa — undan chiqasiz).",
+                confirm = "O‘chirish", danger = true,
+                onConfirm = {
+                    confirmDeleteChat = false
+                    scope.launch { withContext(Dispatchers.IO) { RustCore.tgDeleteDialog(chat.spec) }; onBack() }
+                },
+                onDismiss = { confirmDeleteChat = false },
+            )
+        }
+        viewer?.let { MediaViewer(chat, it) { viewer = null } }
     }
 }
 
-private fun dayKey(unix: Long): Long = (unix * 1000 + java.util.TimeZone.getDefault().getOffset(unix * 1000)) / 86_400_000L
-
-private val Months = arrayOf("yanvar", "fevral", "mart", "aprel", "may", "iyun", "iyul", "avgust", "sentyabr", "oktyabr", "noyabr", "dekabr")
-
-/** Kun ajratgichi (Telegram "xizmat" yorlig'i): bugun — "Bugun", aks holda "7 mart" (boshqa yilda — "7 mart 2020"). */
 @Composable
-private fun DateChip(unix: Long) {
-    val now = java.util.Calendar.getInstance()
-    val d = java.util.Calendar.getInstance().apply { timeInMillis = unix * 1000 }
-    val text = when {
-        dayKey(unix) == dayKey(now.timeInMillis / 1000) -> "Bugun"
-        now.get(java.util.Calendar.YEAR) == d.get(java.util.Calendar.YEAR) -> "${d.get(java.util.Calendar.DAY_OF_MONTH)} ${Months[d.get(java.util.Calendar.MONTH)]}"
-        else -> "${d.get(java.util.Calendar.DAY_OF_MONTH)} ${Months[d.get(java.util.Calendar.MONTH)]} ${d.get(java.util.Calendar.YEAR)}"
-    }
+fun DateChip(unix: Long) {
     Box(Modifier.fillMaxWidth().padding(vertical = 6.dp), contentAlignment = Alignment.Center) {
         BasicText(
-            text,
+            dateLabel(unix),
             Modifier.clip(RoundedCornerShape(12.dp)).background(Color(0x66000000)).padding(horizontal = 10.dp, vertical = 3.dp),
             style = TextStyle(color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium),
         )
     }
 }
-
-/** Guruhdagi yuboruvchi nomi rangi (`keys_avatar_nameInMessage`): qizil, to'q sariq, binafsha, yashil, firuza, ko'k, pushti. */
-private val NameColors = longArrayOf(0xFFCC5049, 0xFFD67722, 0xFF955CDB, 0xFF40A920, 0xFF309EBA, 0xFF368AD1, 0xFFC7508B)
-
-private fun senderColor(name: String): Color = Color(NameColors[Math.floorMod(name.hashCode(), NameColors.size)])

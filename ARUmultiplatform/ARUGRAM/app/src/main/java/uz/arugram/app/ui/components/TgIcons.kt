@@ -103,3 +103,14 @@ fun SendIcon(color: Color, modifier: Modifier = Modifier, size: Dp = 24.dp) {
         drawPath(p, color)
     }
 }
+
+/** DrKLO'ning o'z rasmli ikonkalari (`res/drawable-xxhdpi`), rangi — ustidan tint beriladi (Telegram ham `PorterDuff` bilan bo'yaydi). */
+@Composable
+fun TgIcon(@androidx.annotation.DrawableRes id: Int, tint: Color, modifier: Modifier = Modifier, size: Dp = 24.dp) {
+    androidx.compose.foundation.Image(
+        androidx.compose.ui.res.painterResource(id),
+        contentDescription = null,
+        modifier = modifier.size(size),
+        colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(tint),
+    )
+}

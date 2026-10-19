@@ -16,7 +16,7 @@ import uz.arugram.app.BuildConfig
 import uz.arugram.app.core.RustCore
 import java.io.File
 
-enum class Stage { Phone, Code, Password, Done }
+enum class Stage { Phone, Code, Password, SignUp, Done }
 
 /** Kod qayerga yuborildi (Rust `sent_info`): `via` — app/sms/call/..., `next` — qayta yuborish turi, `timeout` — soniya. */
 data class SentInfo(val via: String, val length: Int, val next: String, val timeout: Int, val at: Long)
@@ -91,6 +91,7 @@ class AuthModel(private val app: Context) {
     private fun apply(j: JSONObject, phone: String? = null) {
         val err = j.optString("error")
         when {
+            j.optBoolean("signup") -> _ui.update { it.copy(busy = false, stage = Stage.SignUp, error = null) }
             j.optBoolean("password") -> {
                 _ui.update { it.copy(busy = false, stage = Stage.Password, hint = j.optString("hint"), phone = phone ?: it.phone, error = err.ifEmpty { null }, errorTick = if (err.isEmpty()) it.errorTick else it.errorTick + 1) }
             }
@@ -122,6 +123,12 @@ class AuthModel(private val app: Context) {
         scope.launch { apply(withContext(Dispatchers.IO) { RustCore.tgSignIn(code) }) }
     }
 
+    fun signUp(first: String, last: String) {
+        if (_ui.value.busy || first.isBlank()) return
+        _ui.update { it.copy(busy = true, error = null) }
+        scope.launch { apply(withContext(Dispatchers.IO) { RustCore.tgSignUp(first.trim(), last.trim()) }) }
+    }
+
     fun checkPassword(password: String) {
         if (_ui.value.busy || password.isEmpty()) return
         _ui.update { it.copy(busy = true, error = null) }
@@ -145,8 +152,11 @@ class AuthModel(private val app: Context) {
                 File(app.filesDir, "avatars").deleteRecursively()
                 File(app.filesDir, "media").deleteRecursively()
             }
+            uz.arugram.app.notify.NotifyService.stop(app)
+            app.getSharedPreferences("notify_state", android.content.Context.MODE_PRIVATE).edit().clear().apply()
             uz.arugram.app.ui.main.AvatarCache.clear()
             uz.arugram.app.ui.main.MediaCache.clear()
+            uz.arugram.app.ui.main.StickerStore.clear(app)
             _ui.update { AuthUi(ready = true) }
         }
     }

@@ -44,25 +44,25 @@ private val Red = 0xFFF45255L to 0xFFDF3955L
 private val Cyan = 0xFF32C0CEL to 0xFF1D9CC6L
 private val Purple = 0xFFC46EF4L to 0xFF9F55DFL
 
-private class Item(val colors: Pair<Long, Long>, val icon: Int, val title: String, val subtitle: String?)
+private class Item(val colors: Pair<Long, Long>, val icon: Int, val title: String, val subtitle: String?, val route: String)
 
 private val MainItems = listOf(
-    Item(Blue, R.drawable.settings_account, "Akkaunt", "Raqam, foydalanuvchi nomi, bio"),
-    Item(Orange, R.drawable.settings_chat, "Chat sozlamalari", "Fon, tungi rejim, animatsiyalar"),
-    Item(Green, R.drawable.settings_privacy, "Maxfiylik va xavfsizlik", "So‘nggi faollik, qurilmalar, parol kalitlari"),
-    Item(Red, R.drawable.settings_sounds, "Bildirishnomalar", "Tovushlar, qo‘ng‘iroqlar, nishonlar"),
-    Item(BlueDeep, R.drawable.settings_data, "Ma’lumotlar va xotira", "Media yuklab olish sozlamalari"),
-    Item(BlueAlt, R.drawable.settings_folders, "Chat jildlari", "Chatlarni jildlarga ajrating"),
-    Item(Cyan, R.drawable.settings_devices, "Qurilmalar", "Ulangan qurilmalarni boshqarish"),
-    Item(OrangeDeep, R.drawable.settings_power, "Quvvat tejash", "Quvvat kam bo‘lganda sarfni kamaytirish"),
-    Item(Purple, R.drawable.settings_language, "Til", "O‘zbekcha"),
+    Item(Blue, R.drawable.settings_account, "Akkaunt", "Raqam, foydalanuvchi nomi, bio", "account"),
+    Item(Orange, R.drawable.settings_chat, "Chat sozlamalari", "Fon, tungi rejim, animatsiyalar", "chat"),
+    Item(Green, R.drawable.settings_privacy, "Maxfiylik va xavfsizlik", "So‘nggi faollik, qurilmalar, parol kalitlari", "privacy"),
+    Item(Red, R.drawable.settings_sounds, "Bildirishnomalar", "Tovushlar, qo‘ng‘iroqlar, nishonlar", "notifications"),
+    Item(BlueDeep, R.drawable.settings_data, "Ma’lumotlar va xotira", "Media yuklab olish sozlamalari", "data"),
+    Item(BlueAlt, R.drawable.settings_folders, "Chat jildlari", "Chatlarni jildlarga ajrating", "folders"),
+    Item(Cyan, R.drawable.settings_devices, "Qurilmalar", "Ulangan qurilmalarni boshqarish", "devices"),
+    Item(OrangeDeep, R.drawable.settings_power, "Quvvat tejash", "Quvvat kam bo‘lganda sarfni kamaytirish", "power"),
+    Item(Purple, R.drawable.settings_language, "Til", "O‘zbekcha", "language"),
 )
 
 private val HelpItems = listOf(
-    Item(Orange, R.drawable.settings_ask, "Savol berish", null),
-    Item(BlueLight, R.drawable.settings_faq, "Telegram FAQ", null),
-    Item(Purple, R.drawable.settings_features, "Telegram imkoniyatlari", null),
-    Item(Green, R.drawable.settings_policy, "Maxfiylik siyosati", null),
+    Item(Orange, R.drawable.settings_ask, "Savol berish", null, "url:https://telegram.org/support"),
+    Item(BlueLight, R.drawable.settings_faq, "Telegram FAQ", null, "url:https://telegram.org/faq"),
+    Item(Purple, R.drawable.settings_features, "Telegram imkoniyatlari", null, "url:https://telegram.org/tour"),
+    Item(Green, R.drawable.settings_policy, "Maxfiylik siyosati", null, "url:https://telegram.org/privacy"),
 )
 
 /**
@@ -71,7 +71,8 @@ private val HelpItems = listOf(
  * Bo'limlar sarlavhasi — ko'k. Qatorlarning ichki oynalari keyingi bosqichlarda qo'shiladi.
  */
 @Composable
-fun SettingsTab(me: ChatRow?, meContact: String, bottomPadding: Dp, onLogout: () -> Unit) {
+fun SettingsTab(me: ChatRow?, meContact: String, bottomPadding: Dp, onOpenChat: (ChatRow) -> Unit, onNavigate: (String) -> Unit, onLogout: () -> Unit, savedChat: ChatRow?) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
     val c = LocalTg.current
     Column(Modifier.fillMaxSize().background(c.grayBg).statusBarsPadding()) {
         Box(Modifier.fillMaxWidth().height(56.dp).background(c.bar), contentAlignment = Alignment.CenterStart) {
@@ -88,11 +89,14 @@ fun SettingsTab(me: ChatRow?, meContact: String, bottomPadding: Dp, onLogout: ()
                 }
             }
             Spacer(Modifier.height(8.dp))
-            Column(Modifier.fillMaxWidth().background(c.bar)) { MainItems.forEach { SettingRow(it) } }
+            Column(Modifier.fillMaxWidth().background(c.bar)) {
+                if (savedChat != null) SettingRow(Item(Blue, R.drawable.msg_saved, "Saqlangan xabarlar", null, "saved")) { onOpenChat(savedChat) }
+                MainItems.forEach { it0 -> SettingRow(it0) { onNavigate(it0.route) } }
+            }
             Spacer(Modifier.height(8.dp))
             Column(Modifier.fillMaxWidth().background(c.bar)) {
                 BasicText("Yordam", Modifier.padding(start = 18.dp, top = 16.dp, bottom = 6.dp), style = TextStyle(color = c.value, fontSize = 15.sp, fontWeight = FontWeight.Medium))
-                HelpItems.forEach { SettingRow(it) }
+                HelpItems.forEach { it0 -> SettingRow(it0) { openUrl(ctx, it0.route.removePrefix("url:")) } }
             }
             Spacer(Modifier.height(8.dp))
             Box(Modifier.fillMaxWidth().background(c.bar).clickable(onClick = onLogout).padding(vertical = 16.dp), contentAlignment = Alignment.Center) {
@@ -104,10 +108,10 @@ fun SettingsTab(me: ChatRow?, meContact: String, bottomPadding: Dp, onLogout: ()
 }
 
 @Composable
-private fun SettingRow(item: Item) {
+private fun SettingRow(item: Item, onClick: () -> Unit) {
     val c = LocalTg.current
     Row(
-        Modifier.fillMaxWidth().height(if (item.subtitle != null) 60.dp else 50.dp).clickable { },
+        Modifier.fillMaxWidth().height(if (item.subtitle != null) 60.dp else 50.dp).clickable(onClick = onClick),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(

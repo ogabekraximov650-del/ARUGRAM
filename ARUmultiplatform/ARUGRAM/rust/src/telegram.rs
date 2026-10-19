@@ -84,7 +84,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use grammers_client::session::types::{DcOption, PeerId, PeerInfo, UpdateState, UpdatesState};
+use grammers_client::session::types::{DcOption, PeerAuth, PeerId, PeerInfo, PeerRef, UpdateState, UpdatesState};
 use grammers_client::session::{BoxFuture, Session, SessionData};
 use grammers_client::{tl, Client, InvocationError, SenderPool};
 use serde_json::{json, Value};
@@ -502,8 +502,16 @@ fn connect(t: &Tg) -> Option<Client> {
             }
             // Har qanday haqiqiy yangilanish (yangi xabar, o'qildi va h.k.) hisoblagichni oshiradi — ilova shuni tekshirib,
             // ro'yxat/suhbatni darhol yangilaydi (tarmoqqa so'rov yubormasdan, arzon).
-            if matches!(&u, UpdatesLike::Updates(_)) && !accepted {
-                UPDATE_SEQ.fetch_add(1, Ordering::SeqCst);
+            if let UpdatesLike::Updates(up) = &u {
+                match up {
+                    tl::enums::Updates::UpdateShort(s) => note_update(&s.update),
+                    tl::enums::Updates::Updates(s) => s.updates.iter().for_each(note_update),
+                    tl::enums::Updates::Combined(s) => s.updates.iter().for_each(note_update),
+                    _ => {}
+                }
+                if !accepted {
+                    UPDATE_SEQ.fetch_add(1, Ordering::SeqCst);
+                }
             }
         }
     });
@@ -2086,8 +2094,8 @@ pub extern "C" fn rust_tg_sign_in(code_ptr: *const c_char) -> *mut c_char {
                 Ok(after_login(t))
             }
             Ok(tl::enums::auth::Authorization::SignUpRequired(_)) => {
-                clear_login(t);
-                Err("Bu raqamda Telegram hisobi yo'q — avval Telegram ilovasida ro'yxatdan o'ting".to_string())
+                // Yangi hisob: ilova ism so'raydi, keyin `rust_tg_sign_up`.
+                Ok(json!({"signup": true}).to_string())
             }
             Err(e) if e.is("SESSION_PASSWORD_NEEDED") => enter_password_stage(t, &client, &phone, &hash),
             Err(e) if e.is("PHONE_CODE_EXPIRED") => {
@@ -2408,20 +2416,79 @@ pub extern "C" fn rust_tg_channel_info(arg_ptr: *const c_char) -> *mut c_char {
     }))
 }
 
-/// Xabardagi ilovaning qisqa nomi (matni bo'sh xabarlar uchun: "Rasm", "Stiker" ...). Veb-sahifa — matn bilan birga, nomsiz.
-fn media_label(m: &grammers_client::media::Media) -> &'static str {
-    use grammers_client::media::Media;
+/// Xabardagi ilova haqida ma'lumot (suhbat oynasi uchun).
+#[derive(Default)]
+struct MediaInfo {
+    kind: &'static str,
+    label: String,
+    w: i32,
+    h: i32,
+    name: String,
+    size: i64,
+    dur: f64,
+    mime: String,
+    alt: String,
+}
+
+fn media_info(m: &grammers_client::media::Media) -> MediaInfo {
+    use grammers_client::media::{Media, PhotoSize};
     match m {
-        Media::Photo(_) => "Rasm",
-        Media::Document(_) => "Fayl",
-        Media::Sticker(_) => "Stiker",
-        Media::Contact(_) => "Kontakt",
-        Media::Poll(_) => "So'rovnoma",
-        Media::Geo(_) | Media::Venue(_) | Media::GeoLive(_) => "Joylashuv",
-        Media::Dice(_) => "Zar",
-        Media::WebPage(_) => "",
+        Media::Photo(p) => {
+            let (w, h) = p
+                .thumbs()
+                .iter()
+                .filter_map(|t| match t {
+                    PhotoSize::Size(sz) => Some((sz.width, sz.height)),
+                    _ => None,
+                })
+                .max_by_key(|(w, h)| w * h)
+                .unwrap_or((0, 0));
+            MediaInfo { kind: "photo", label: "Rasm".into(), w, h, ..Default::default() }
+        }
+        Media::Document(d) => {
+            let mime = d.mime_type().unwrap_or("").to_string();
+            let (kind, label) = if mime.starts_with("video/") {
+                ("video", "Video")
+            } else if mime == "audio/ogg" {
+                ("voice", "Ovozli xabar")
+            } else if mime.starts_with("audio/") {
+                ("audio", "Audio")
+            } else {
+                ("file", "Fayl")
+            };
+            let (w, h) = d.resolution().unwrap_or((0, 0));
+            MediaInfo {
+                kind,
+                label: label.into(),
+                w,
+                h,
+                name: d.name().unwrap_or("").to_string(),
+                size: d.size().unwrap_or(0) as i64,
+                dur: d.duration().unwrap_or(0.0),
+                mime,
+                alt: String::new(),
+            }
+        }
+        Media::Sticker(s) => {
+            let (w, h) = s.document.resolution().unwrap_or((512, 512));
+            let alt = s.raw_attrs.alt.clone();
+            MediaInfo {
+                kind: "sticker",
+                label: format!("{alt} Stiker").trim().to_string(),
+                w,
+                h,
+                mime: s.document.mime_type().unwrap_or("").to_string(),
+                alt,
+                ..Default::default()
+            }
+        }
+        Media::Contact(_) => MediaInfo { kind: "other", label: "Kontakt".into(), ..Default::default() },
+        Media::Poll(_) => MediaInfo { kind: "other", label: "So'rovnoma".into(), ..Default::default() },
+        Media::Geo(_) | Media::Venue(_) | Media::GeoLive(_) => MediaInfo { kind: "other", label: "Joylashuv".into(), ..Default::default() },
+        Media::Dice(_) => MediaInfo { kind: "other", label: "Zar".into(), ..Default::default() },
+        Media::WebPage(_) => MediaInfo::default(),
         #[allow(unreachable_patterns)]
-        _ => "Ilova",
+        _ => MediaInfo { kind: "other", label: "Ilova".into(), ..Default::default() },
     }
 }
 
@@ -2439,10 +2506,10 @@ async fn dialogs_json(client: &Client, limit: usize) -> Result<Value, String> {
             Peer::Group(g) => ("group", g.title().unwrap_or_default().to_string(), false, false, false),
             Peer::Channel(c) => ("channel", c.title().to_string(), false, false, false),
         };
-        let (pinned, unread, muted) = match &d.raw {
+        let (pinned, unread, muted, read_out, mentions, top) = match &d.raw {
             tl::enums::Dialog::Dialog(x) => {
                 let muted = matches!(&x.notify_settings, tl::enums::PeerNotifySettings::Settings(n) if n.mute_until.unwrap_or(0) as i64 > now_secs);
-                (x.pinned, x.unread_count, muted)
+                (x.pinned, x.unread_count, muted, x.read_outbox_max_id, x.unread_mentions_count, x.top_message)
             }
             tl::enums::Dialog::Folder(_) => continue,
         };
@@ -2451,7 +2518,7 @@ async fn dialogs_json(client: &Client, limit: usize) -> Result<Value, String> {
                 let mut t = m.text().replace('\n', " ");
                 if t.is_empty() {
                     if let Some(md) = m.media() {
-                        t = media_label(&md).to_string();
+                        t = media_info(&md).label;
                     }
                 }
                 (t, m.date().timestamp(), m.outgoing())
@@ -2465,6 +2532,10 @@ async fn dialogs_json(client: &Client, limit: usize) -> Result<Value, String> {
             "pinned": pinned,
             "unread": unread,
             "muted": muted,
+            "read_out": read_out,
+            "top": top,
+            "mentions": mentions,
+            "access": d.peer_ref().auth.hash().to_string(),
             "out": outgoing,
             "date": date,
             "text": text,
@@ -2489,59 +2560,77 @@ pub extern "C" fn rust_tg_dialogs(arg_ptr: *const c_char) -> *mut c_char {
     }))
 }
 
-/// Suhbat xabarlari (eng yangisi birinchi): `{"messages":[{"id","out","date","text","sender","media"}]}`.
-async fn messages_json(client: &Client, chat_id: i64, limit: usize) -> Result<Value, String> {
-    let peer = find_channel(client, chat_id).await.map_err(|_| "Suhbat topilmadi".to_string())?;
+/// Bitta xabarning JSON ko'rinishi (suhbat oynasi, qidiruv, mahkamlangan xabar uchun umumiy).
+fn msg_json(m: &grammers_client::message::Message) -> Value {
+    let sender = m.sender().map(|p| match p {
+        grammers_client::peer::Peer::User(u) => u.full_name(),
+        grammers_client::peer::Peer::Group(g) => g.title().unwrap_or_default().to_string(),
+        grammers_client::peer::Peer::Channel(c) => c.title().to_string(),
+    });
+    let mi = m.media().map(|md| media_info(&md)).unwrap_or_default();
+    let fwd = m.forward_header().and_then(|f| match f {
+        tl::enums::MessageFwdHeader::Header(h) => h.from_name.clone(),
+    });
+    // Reaksiyalar: [["👍", soni, o'zimniki], ...]
+    let mut reactions = Vec::new();
+    if let tl::enums::Message::Message(x) = &m.raw {
+        if let Some(tl::enums::MessageReactions::Reactions(r)) = &x.reactions {
+            for rc in &r.results {
+                let tl::enums::ReactionCount::Count(rc) = rc;
+                if let tl::enums::Reaction::Emoji(e) = &rc.reaction {
+                    reactions.push(json!([e.emoticon, rc.count, rc.chosen_order.is_some()]));
+                }
+            }
+        }
+    }
+    json!({
+        "id": m.id(),
+        "out": m.outgoing(),
+        "date": m.date().timestamp(),
+        "edited": m.edit_date().is_some(),
+        "text": m.text(),
+        "sender": sender.unwrap_or_default(),
+        "reply": m.reply_to_message_id().unwrap_or(0),
+        "fwd": fwd.unwrap_or_default(),
+        "media": mi.label,
+        "kind": mi.kind,
+        "pw": mi.w,
+        "ph": mi.h,
+        "name": mi.name,
+        "size": mi.size,
+        "dur": mi.dur,
+        "mime": mi.mime,
+        "alt": mi.alt,
+        "views": m.view_count().unwrap_or(0),
+        "pinned": m.pinned(),
+        "reactions": reactions,
+    })
+}
+
+/// Suhbat xabarlari (eng yangisi birinchi): `{"messages":[...]}`; `offset_id` > 0 bo'lsa undan ESKI xabarlar.
+async fn messages_json(client: &Client, spec: &str, limit: usize, offset_id: i32) -> Result<Value, String> {
+    let peer = resolve_peer(client, spec).await?;
     let mut out = Vec::new();
     let mut it = client.iter_messages(peer).limit(limit);
+    if offset_id > 0 {
+        it = it.offset_id(offset_id);
+    }
     while let Some(m) = it.next().await.map_err(|e| e.to_string())? {
-        let sender = m.sender().map(|p| match p {
-            grammers_client::peer::Peer::User(u) => u.full_name(),
-            grammers_client::peer::Peer::Group(g) => g.title().unwrap_or_default().to_string(),
-            grammers_client::peer::Peer::Channel(c) => c.title().to_string(),
-        });
-        // Rasm o'lchami (pufak oldindan to'g'ri o'lchamda chiqishi uchun) — eng katta yuklab olinadigan o'lcham.
-        let (pw, ph) = match m.media() {
-            Some(grammers_client::media::Media::Photo(p)) => p
-                .thumbs()
-                .iter()
-                .filter_map(|t| match t {
-                    grammers_client::media::PhotoSize::Size(sz) => Some((sz.width, sz.height)),
-                    _ => None,
-                })
-                .max_by_key(|(w, h)| w * h)
-                .unwrap_or((0, 0)),
-            _ => (0, 0),
-        };
-        out.push(json!({
-            "id": m.id(),
-            "out": m.outgoing(),
-            "date": m.date().timestamp(),
-            "text": m.text(),
-            "sender": sender.unwrap_or_default(),
-            "media": m.media().map(|md| media_label(&md)).unwrap_or(""),
-            "pw": pw,
-            "ph": ph,
-        }));
+        out.push(msg_json(&m));
     }
     Ok(json!({ "messages": out }))
 }
 
-/// `arg` = `"<suhbat_id>:<soni>"`.
+/// `arg` = `"<suhbat>:<soni>:<offset_id>"` (`<suhbat>` — `id` yoki `id@access_hash`).
 #[no_mangle]
 pub extern "C" fn rust_tg_messages(arg_ptr: *const c_char) -> *mut c_char {
-    let arg = unsafe { cstr_to_str(arg_ptr) }.unwrap_or("").trim().to_string();
-    let (id, limit) = match arg.split_once(':') {
-        Some((a, b)) => (a.parse::<i64>().unwrap_or(0), b.parse::<usize>().unwrap_or(40).clamp(1, 200)),
-        None => (arg.parse::<i64>().unwrap_or(0), 40),
-    };
-    string_to_cptr(with_client(|t, client| {
-        if !t.authorized.load(Ordering::SeqCst) {
-            return Err("Telegram ulanmagan".to_string());
-        }
-        let v = run_tmo(t, 30, messages_json(&client, id, limit))?;
-        Ok(v.to_string())
-    }))
+    tg_call(arg_ptr, 30, |client, arg| async move {
+        let mut p = arg.trim().split(':');
+        let spec = p.next().unwrap_or("").to_string();
+        let limit = p.next().and_then(|x| x.parse::<usize>().ok()).unwrap_or(40).clamp(1, 200);
+        let offset = p.next().and_then(|x| x.parse::<i32>().ok()).unwrap_or(0);
+        messages_json(&client, &spec, limit, offset).await
+    })
 }
 
 /// Matnli xabar yuboradi. `arg` = `"<suhbat_id>\n<matn>"`. Javob: `{"ok":true,"id":<xabar_id>}`.
@@ -2613,21 +2702,14 @@ pub extern "C" fn rust_tg_avatars(arg_ptr: *const c_char) -> *mut c_char {
     }))
 }
 
-/// Suhbatni o'qilgan deb belgilaydi (Telegram suhbat ochilganda shunday qiladi). `arg` — suhbat ID'si.
+/// Suhbatni o'qilgan deb belgilaydi (Telegram suhbat ochilganda shunday qiladi). `arg` — suhbat (`id` yoki `id@hash`).
 #[no_mangle]
 pub extern "C" fn rust_tg_mark_read(arg_ptr: *const c_char) -> *mut c_char {
-    let id = unsafe { cstr_to_str(arg_ptr) }.unwrap_or("").trim().parse::<i64>().unwrap_or(0);
-    string_to_cptr(with_client(|t, client| {
-        if !t.authorized.load(Ordering::SeqCst) {
-            return Err("Telegram ulanmagan".to_string());
-        }
-        run_tmo(t, 30, async {
-            let peer = find_channel(&client, id).await.map_err(|_| "Suhbat topilmadi".to_string())?;
-            client.mark_as_read(peer).await.map_err(|e| e.to_string())?;
-            Ok(())
-        })?;
-        Ok(json!({"ok": true}).to_string())
-    }))
+    tg_call(arg_ptr, 30, |client, arg| async move {
+        let peer = resolve_peer(&client, arg.trim()).await?;
+        client.mark_as_read(peer).await.map_err(|e| e.to_string())?;
+        Ok(json!({"ok": true}))
+    })
 }
 
 /// Joriy hisob: `{"id","name","phone","username"}` (yon panel sarlavhasi uchun).
@@ -2724,13 +2806,13 @@ pub extern "C" fn rust_tg_user_avatars(arg_ptr: *const c_char) -> *mut c_char {
     }))
 }
 
-/// Xabardagi rasm (o'rtacha o'lcham, eng ko'pi 800 px): `arg` = `"<suhbat_id>:<xabar_id>"`. Javob: `{"photo":"<base64>"}`.
+/// Xabardagi rasm (o'rtacha o'lcham, eng ko'pi 800 px): `arg` = `"<suhbat>:<xabar_id>"`. Javob: `{"photo":"<base64>"}`.
 #[no_mangle]
 pub extern "C" fn rust_tg_photo(arg_ptr: *const c_char) -> *mut c_char {
     let arg = unsafe { cstr_to_str(arg_ptr) }.unwrap_or("").trim().to_string();
     let (chat, msg) = match arg.split_once(':') {
-        Some((a, b)) => (a.parse::<i64>().unwrap_or(0), b.parse::<i32>().unwrap_or(0)),
-        None => (0, 0),
+        Some((a, b)) => (a.to_string(), b.parse::<i32>().unwrap_or(0)),
+        None => (String::new(), 0),
     };
     string_to_cptr(with_client(|t, client| {
         if !t.authorized.load(Ordering::SeqCst) {
@@ -2738,7 +2820,7 @@ pub extern "C" fn rust_tg_photo(arg_ptr: *const c_char) -> *mut c_char {
         }
         let v = run_tmo(t, 60, async {
             use grammers_client::media::{Media, PhotoSize};
-            let peer = find_channel(&client, chat).await.map_err(|_| "Suhbat topilmadi".to_string())?;
+            let peer = resolve_peer(&client, &chat).await?;
             let msgs = client.get_messages_by_id(peer, &[msg]).await.map_err(|e| e.to_string())?;
             let Some(Some(m)) = msgs.into_iter().next() else { return Err("Xabar topilmadi".to_string()) };
             let Some(Media::Photo(p)) = m.media() else { return Err("Rasm emas".to_string()) };
@@ -2759,6 +2841,862 @@ pub extern "C" fn rust_tg_photo(arg_ptr: *const c_char) -> *mut c_char {
         })?;
         Ok(v.to_string())
     }))
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  SUHBATLAR (Telegram mijozi): umumiy yordamchilar
+// ═══════════════════════════════════════════════════════════════
+
+/// Autorizatsiyani tekshirib, `f(client, arg)` ni ishga tushiradi va natijani JSON matn qilib qaytaradi.
+fn tg_call<F, Fut>(arg_ptr: *const c_char, secs: u64, f: F) -> *mut c_char
+where
+    F: FnOnce(Client, String) -> Fut,
+    Fut: std::future::Future<Output = Result<Value, String>>,
+{
+    let arg = unsafe { cstr_to_str(arg_ptr) }.unwrap_or("").to_string();
+    string_to_cptr(with_client(|t, client| {
+        if !t.authorized.load(Ordering::SeqCst) {
+            return Err("Telegram ulanmagan".to_string());
+        }
+        let v = run_tmo(t, secs, f(client, arg))?;
+        Ok(v.to_string())
+    }))
+}
+
+/// Suhbatni topadi. `spec` — `id` yoki `id@access_hash`. Hash berilsa tarmoqqa chiqmasdan yasaladi; bo'lmasa dialoglar,
+/// keyin kontaktlar ichidan qidiriladi.
+async fn resolve_peer(client: &Client, spec: &str) -> Result<PeerRef, String> {
+    let (id, hash) = match spec.split_once('@') {
+        Some((a, b)) => (a.trim().parse::<i64>().unwrap_or(0), b.trim().parse::<i64>().ok()),
+        None => (spec.trim().parse::<i64>().unwrap_or(0), None),
+    };
+    if id == 0 {
+        return Err("Suhbat ko'rsatilmagan".to_string());
+    }
+    if let (Some(h), Some(pid)) = (hash, PeerId::from_bot_api_dialog_id(id)) {
+        // Oddiy guruhda hash yo'q; foydalanuvchi va kanal uchun yetarli.
+        if h != 0 || id < 0 && id > -1_000_000_000_000 {
+            return Ok(PeerRef { id: pid, auth: PeerAuth::from_hash(h) });
+        }
+    }
+    if let Ok(p) = find_channel(client, id).await {
+        return Ok(p);
+    }
+    if id > 0 {
+        if let Ok(tl::enums::contacts::Contacts::Contacts(c)) = client.invoke(&tl::functions::contacts::GetContacts { hash: 0 }).await {
+            for u in c.users {
+                if let tl::enums::User::User(u) = u {
+                    if u.id == id {
+                        if let (Some(h), Some(pid)) = (u.access_hash, PeerId::user(id)) {
+                            return Ok(PeerRef { id: pid, auth: PeerAuth::from_hash(h) });
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Err("Suhbat topilmadi".to_string())
+}
+
+/// Argument qatorlarini `\n` bo'yicha bo'ladi.
+fn lines(arg: &str, n: usize) -> Vec<String> {
+    let mut v: Vec<String> = arg.splitn(n, '\n').map(|x| x.to_string()).collect();
+    while v.len() < n {
+        v.push(String::new());
+    }
+    v
+}
+
+fn ids_of(s: &str) -> Vec<i32> {
+    s.split(',').filter_map(|x| x.trim().parse::<i32>().ok()).collect()
+}
+
+/// Matnli xabar (javob bilan): `arg` = `"<suhbat>\n<javob_id|0>\n<matn>"`. Javob: `{"ok":true,"id":..}`.
+#[no_mangle]
+pub extern "C" fn rust_tg_send(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 30, |client, arg| async move {
+        let l = lines(&arg, 3);
+        if l[2].trim().is_empty() {
+            return Err("Xabar bo'sh".to_string());
+        }
+        let peer = resolve_peer(&client, &l[0]).await?;
+        let reply = l[1].trim().parse::<i32>().ok().filter(|x| *x > 0);
+        let msg = grammers_client::message::InputMessage::new().text(l[2].clone()).reply_to(reply);
+        let m = client.send_message(peer, msg).await.map_err(|e| e.to_string())?;
+        Ok(json!({"ok": true, "id": m.id()}))
+    })
+}
+
+/// Xabarni tahrirlash: `arg` = `"<suhbat>\n<xabar_id>\n<yangi matn>"`.
+#[no_mangle]
+pub extern "C" fn rust_tg_edit(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 30, |client, arg| async move {
+        let l = lines(&arg, 3);
+        let id = l[1].trim().parse::<i32>().map_err(|_| "Xabar ko'rsatilmagan".to_string())?;
+        if l[2].trim().is_empty() {
+            return Err("Xabar bo'sh".to_string());
+        }
+        let peer = resolve_peer(&client, &l[0]).await?;
+        client.edit_message(peer, id, l[2].clone()).await.map_err(|e| e.to_string())?;
+        Ok(json!({"ok": true}))
+    })
+}
+
+/// Xabarlarni o'chirish: `arg` = `"<suhbat>\n<id1,id2,..>"`.
+#[no_mangle]
+pub extern "C" fn rust_tg_delete(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 30, |client, arg| async move {
+        let l = lines(&arg, 2);
+        let ids = ids_of(&l[1]);
+        if ids.is_empty() {
+            return Err("Xabar tanlanmagan".to_string());
+        }
+        let peer = resolve_peer(&client, &l[0]).await?;
+        let n = client.delete_messages(peer, &ids).await.map_err(|e| e.to_string())?;
+        Ok(json!({"ok": true, "deleted": n}))
+    })
+}
+
+/// Xabarlarni uzatish: `arg` = `"<qayerdan>\n<qayerga>\n<id1,id2,..>"`.
+#[no_mangle]
+pub extern "C" fn rust_tg_forward(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 30, |client, arg| async move {
+        let l = lines(&arg, 3);
+        let ids = ids_of(&l[2]);
+        if ids.is_empty() {
+            return Err("Xabar tanlanmagan".to_string());
+        }
+        let from = resolve_peer(&client, &l[0]).await?;
+        let to = resolve_peer(&client, &l[1]).await?;
+        client.forward_messages(to, &ids, from).await.map_err(|e| e.to_string())?;
+        Ok(json!({"ok": true}))
+    })
+}
+
+/// Xabarni mahkamlash/yechish: `arg` = `"<suhbat>\n<xabar_id>\n<1|0>"`.
+#[no_mangle]
+pub extern "C" fn rust_tg_pin_message(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 30, |client, arg| async move {
+        let l = lines(&arg, 3);
+        let id = l[1].trim().parse::<i32>().map_err(|_| "Xabar ko'rsatilmagan".to_string())?;
+        let peer = resolve_peer(&client, &l[0]).await?;
+        if l[2].trim() == "1" {
+            client.pin_message(peer, id).await.map_err(|e| e.to_string())?;
+        } else {
+            client.unpin_message(peer, id).await.map_err(|e| e.to_string())?;
+        }
+        Ok(json!({"ok": true}))
+    })
+}
+
+/// Suhbatni ro'yxatda mahkamlash/yechish: `arg` = `"<suhbat>\n<1|0>"`.
+#[no_mangle]
+pub extern "C" fn rust_tg_pin_dialog(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 30, |client, arg| async move {
+        let l = lines(&arg, 2);
+        let peer = resolve_peer(&client, &l[0]).await?;
+        let ip: tl::enums::InputPeer = peer.into();
+        client
+            .invoke(&tl::functions::messages::ToggleDialogPin {
+                pinned: l[1].trim() == "1",
+                peer: tl::enums::InputDialogPeer::Peer(tl::types::InputDialogPeer { peer: ip }),
+            })
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(json!({"ok": true}))
+    })
+}
+
+/// Suhbat bildirishnomalarini o'chirish/yoqish: `arg` = `"<suhbat>\n<1|0>"` (1 — sokin).
+#[no_mangle]
+pub extern "C" fn rust_tg_mute(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 30, |client, arg| async move {
+        let l = lines(&arg, 2);
+        let peer = resolve_peer(&client, &l[0]).await?;
+        let ip: tl::enums::InputPeer = peer.into();
+        let mute_until = if l[1].trim() == "1" { i32::MAX } else { 0 };
+        client
+            .invoke(&tl::functions::account::UpdateNotifySettings {
+                peer: tl::enums::InputNotifyPeer::Peer(tl::types::InputNotifyPeer { peer: ip }),
+                settings: tl::enums::InputPeerNotifySettings::Settings(tl::types::InputPeerNotifySettings {
+                    show_previews: None,
+                    silent: None,
+                    mute_until: Some(mute_until),
+                    sound: None,
+                    stories_muted: None,
+                    stories_hide_sender: None,
+                    stories_sound: None,
+                }),
+            })
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(json!({"ok": true}))
+    })
+}
+
+/// Suhbat tarixini o'chirish/chiqish: `arg` = `"<suhbat>"` (guruh/kanaldan chiqadi, shaxsiy chatda tarix o'chadi).
+#[no_mangle]
+pub extern "C" fn rust_tg_delete_dialog(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 40, |client, arg| async move {
+        let peer = resolve_peer(&client, arg.trim()).await?;
+        client.delete_dialog(peer).await.map_err(|e| e.to_string())?;
+        Ok(json!({"ok": true}))
+    })
+}
+
+/// Rasm/video/ovoz/fayl yuborish: `arg` = `"<suhbat>\n<photo|video|voice|file>\n<yo'l>\n<javob_id|0>\n<soniya:eni:bo'yi>\n<izoh>"`.
+#[no_mangle]
+pub extern "C" fn rust_tg_send_media(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 600, |client, arg| async move {
+        let l = lines(&arg, 6);
+        let peer = resolve_peer(&client, &l[0]).await?;
+        let mut f = tokio::fs::File::open(l[2].trim()).await.map_err(|e| format!("Fayl ochilmadi: {e}"))?;
+        let size = f.metadata().await.map_err(|e| e.to_string())?.len() as usize;
+        if size == 0 {
+            return Err("Fayl bo'sh".to_string());
+        }
+        let name = std::path::Path::new(l[2].trim()).file_name().and_then(|x| x.to_str()).unwrap_or("fayl").to_string();
+        let up = client.upload_stream(&mut f, size, name).await.map_err(|e| e.to_string())?;
+        let reply = l[3].trim().parse::<i32>().ok().filter(|x| *x > 0);
+        let msg = grammers_client::message::InputMessage::new().text(l[5].clone()).reply_to(reply);
+        // Qo'shimcha: `<soniya>:<eni>:<bo'yi>` (ovoz va video uchun).
+        let mut ex = l[4].trim().split(':');
+        let dur = ex.next().and_then(|x| x.parse::<f64>().ok()).unwrap_or(0.0).max(0.0);
+        let w = ex.next().and_then(|x| x.parse::<i32>().ok()).unwrap_or(0);
+        let h = ex.next().and_then(|x| x.parse::<i32>().ok()).unwrap_or(0);
+        let duration = Duration::from_secs(dur.round() as u64);
+        let msg = match l[1].trim() {
+            "photo" => msg.photo(up),
+            "voice" => msg.document(up).mime_type("audio/ogg").attribute(grammers_client::media::Attribute::Voice { duration, waveform: None }),
+            "video" => msg.document(up).mime_type("video/mp4").attribute(grammers_client::media::Attribute::Video {
+                round_message: false,
+                supports_streaming: true,
+                duration,
+                w,
+                h,
+            }),
+            _ => msg.document(up),
+        };
+        let m = client.send_message(peer, msg).await.map_err(|e| e.to_string())?;
+        Ok(json!({"ok": true, "id": m.id()}))
+    })
+}
+
+/// Xabardagi faylni (rasm, video, ovoz, stiker, hujjat) diskka yuklaydi: `arg` = `"<suhbat>\n<xabar_id>\n<papka>"`.
+/// Javob: `{"path","kind","name","mime","size"}`. Fayl avval yuklangan bo'lsa qayta yuklanmaydi.
+#[no_mangle]
+pub extern "C" fn rust_tg_media_file(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 900, |client, arg| async move {
+        let l = lines(&arg, 3);
+        let id = l[1].trim().parse::<i32>().map_err(|_| "Xabar ko'rsatilmagan".to_string())?;
+        let peer = resolve_peer(&client, &l[0]).await?;
+        let msgs = client.get_messages_by_id(peer, &[id]).await.map_err(|e| e.to_string())?;
+        let Some(Some(m)) = msgs.into_iter().next() else { return Err("Xabar topilmadi".to_string()) };
+        let Some(md) = m.media() else { return Err("Xabarda fayl yo'q".to_string()) };
+        let mi = media_info(&md);
+        let ext = match mi.kind {
+            "photo" => "jpg".to_string(),
+            "voice" => "ogg".to_string(),
+            "video" => "mp4".to_string(),
+            "sticker" => {
+                if mi.mime == "image/webp" {
+                    "webp".to_string()
+                } else if mi.mime.contains("tgsticker") {
+                    "tgs".to_string()
+                } else {
+                    "webm".to_string()
+                }
+            }
+            _ => std::path::Path::new(&mi.name).extension().and_then(|x| x.to_str()).unwrap_or("bin").to_string(),
+        };
+        let dir = std::path::PathBuf::from(l[2].trim());
+        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let key: String = l[0].chars().filter(|c| c.is_ascii_digit() || *c == '-').collect();
+        let path = dir.join(format!("{key}_{id}.{ext}"));
+        if !path.exists() || fs::metadata(&path).map(|x| x.len()).unwrap_or(0) == 0 {
+            let tmp = dir.join(format!("{key}_{id}.part"));
+            let mut out = fs::File::create(&tmp).map_err(|e| e.to_string())?;
+            let mut it = client.iter_download(&md);
+            let mut total: usize = 0;
+            while let Some(chunk) = it.next().await.map_err(|e| e.to_string())? {
+                total += chunk.len();
+                if total > 200 * 1024 * 1024 {
+                    let _ = fs::remove_file(&tmp);
+                    return Err("Fayl juda katta (200 MB dan oshadi)".to_string());
+                }
+                std::io::Write::write_all(&mut out, &chunk).map_err(|e| e.to_string())?;
+            }
+            drop(out);
+            fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
+        }
+        Ok(json!({
+            "path": path.to_string_lossy(),
+            "kind": mi.kind,
+            "name": mi.name,
+            "mime": mi.mime,
+            "size": mi.size,
+        }))
+    })
+}
+
+/// Qidiruv (server): `arg` = so'rov. Javob: `{"results":[{"id","kind","name","username","hash"}]}`.
+#[no_mangle]
+pub extern "C" fn rust_tg_search(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 30, |client, arg| async move {
+        let q = arg.trim().to_string();
+        if q.is_empty() {
+            return Ok(json!({"results": []}));
+        }
+        let res = client.invoke(&tl::functions::contacts::Search { q, limit: 30 }).await.map_err(|e| e.to_string())?;
+        let tl::enums::contacts::Found::Found(f) = res;
+        let mut out = Vec::new();
+        for u in f.users {
+            if let tl::enums::User::User(u) = u {
+                let name = format!("{} {}", u.first_name.clone().unwrap_or_default(), u.last_name.clone().unwrap_or_default()).trim().to_string();
+                out.push(json!({
+                    "id": u.id, "kind": "user", "name": name,
+                    "username": u.username.clone().unwrap_or_default(),
+                    "hash": u.access_hash.unwrap_or(0).to_string(), "bot": u.bot,
+                }));
+            }
+        }
+        for c in f.chats {
+            match c {
+                tl::enums::Chat::Chat(c) => out.push(json!({"id": -c.id, "kind": "group", "name": c.title, "username": "", "hash": "0", "bot": false})),
+                tl::enums::Chat::Channel(c) => out.push(json!({
+                    "id": -1_000_000_000_000i64 - c.id,
+                    "kind": if c.broadcast { "channel" } else { "group" },
+                    "name": c.title,
+                    "username": c.username.clone().unwrap_or_default(),
+                    "hash": c.access_hash.unwrap_or(0).to_string(),
+                    "bot": false,
+                })),
+                _ => {}
+            }
+        }
+        Ok(json!({ "results": out }))
+    })
+}
+
+// ── "yozmoqda..." ko'rsatkichi: updates oqimidan to'planadi ──
+
+fn typing_map() -> &'static Mutex<HashMap<i64, i64>> {
+    static M: OnceLock<Mutex<HashMap<i64, i64>>> = OnceLock::new();
+    M.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn note_update(u: &tl::enums::Update) {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
+    let (chat, cancel) = match u {
+        tl::enums::Update::UserTyping(x) => (x.user_id, matches!(x.action, tl::enums::SendMessageAction::SendMessageCancelAction)),
+        tl::enums::Update::ChatUserTyping(x) => (-x.chat_id, matches!(x.action, tl::enums::SendMessageAction::SendMessageCancelAction)),
+        tl::enums::Update::ChannelUserTyping(x) => (-1_000_000_000_000i64 - x.channel_id, matches!(x.action, tl::enums::SendMessageAction::SendMessageCancelAction)),
+        _ => return,
+    };
+    if let Ok(mut m) = typing_map().lock() {
+        if cancel {
+            m.remove(&chat);
+        } else {
+            m.insert(chat, now);
+        }
+    }
+}
+
+/// Hozir yozayotganlar: `{"<suhbat_id>": <oxirgi_unix>}` (so'nggi 8 soniya ichida).
+#[no_mangle]
+pub extern "C" fn rust_tg_typing() -> *mut c_char {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
+    let mut obj = serde_json::Map::new();
+    if let Ok(mut m) = typing_map().lock() {
+        m.retain(|_, t| now - *t <= 8);
+        for (k, v) in m.iter() {
+            obj.insert(k.to_string(), json!(*v));
+        }
+    }
+    string_to_cptr(Value::Object(obj).to_string())
+}
+
+/// Faol seanslar (qurilmalar): `{"sessions":[{"hash","device","platform","app","date","ip","country","current"}]}`.
+#[no_mangle]
+pub extern "C" fn rust_tg_sessions() -> *mut c_char {
+    tg_call(std::ptr::null(), 30, |client, _| async move {
+        let res = client.invoke(&tl::functions::account::GetAuthorizations {}).await.map_err(|e| e.to_string())?;
+        let tl::enums::account::Authorizations::Authorizations(a) = res;
+        let mut out = Vec::new();
+        for x in a.authorizations {
+            let tl::enums::Authorization::Authorization(x) = x;
+            out.push(json!({
+                "hash": x.hash.to_string(),
+                "device": x.device_model,
+                "platform": format!("{} {}", x.platform, x.system_version).trim().to_string(),
+                "app": format!("{} {}", x.app_name, x.app_version).trim().to_string(),
+                "date": x.date_active,
+                "ip": x.ip,
+                "country": x.country,
+                "current": x.current,
+            }));
+        }
+        Ok(json!({ "sessions": out }))
+    })
+}
+
+/// Seansni tugatish: `arg` = hash.
+#[no_mangle]
+pub extern "C" fn rust_tg_terminate(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 30, |client, arg| async move {
+        let hash = arg.trim().parse::<i64>().map_err(|_| "Seans noto'g'ri".to_string())?;
+        client.invoke(&tl::functions::account::ResetAuthorization { hash }).await.map_err(|e| e.to_string())?;
+        Ok(json!({"ok": true}))
+    })
+}
+
+/// Profil: `{"first","last","about","username","phone","id"}`.
+#[no_mangle]
+pub extern "C" fn rust_tg_profile() -> *mut c_char {
+    tg_call(std::ptr::null(), 30, |client, _| async move {
+        let me = client.get_me().await.map_err(|e| e.to_string())?;
+        let mut about = String::new();
+        if let Ok(tl::enums::users::UserFull::Full(f)) = client.invoke(&tl::functions::users::GetFullUser { id: tl::enums::InputUser::UserSelf }).await {
+            let tl::enums::UserFull::Full(u) = f.full_user;
+            about = u.about.unwrap_or_default();
+        }
+        Ok(json!({
+            "id": me.id().bot_api_dialog_id(),
+            "first": me.first_name().unwrap_or_default(),
+            "last": me.last_name().unwrap_or_default(),
+            "about": about,
+            "username": me.username().unwrap_or_default(),
+            "phone": me.phone().unwrap_or_default(),
+        }))
+    })
+}
+
+/// Profilni yangilash: `arg` = `"<ism>\n<familiya>\n<bio>"`.
+#[no_mangle]
+pub extern "C" fn rust_tg_update_profile(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 30, |client, arg| async move {
+        let l = lines(&arg, 3);
+        if l[0].trim().is_empty() {
+            return Err("Ism bo'sh bo'lmasligi kerak".to_string());
+        }
+        client
+            .invoke(&tl::functions::account::UpdateProfile {
+                first_name: Some(l[0].trim().to_string()),
+                last_name: Some(l[1].trim().to_string()),
+                about: Some(l[2].clone()),
+            })
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(json!({"ok": true}))
+    })
+}
+
+/// Foydalanuvchi nomini o'zgartirish: `arg` = yangi nom (bo'sh — olib tashlash).
+#[no_mangle]
+pub extern "C" fn rust_tg_update_username(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 30, |client, arg| async move {
+        client
+            .invoke(&tl::functions::account::UpdateUsername { username: arg.trim().trim_start_matches('@').to_string() })
+            .await
+            .map_err(|e| match e {
+                e if e.is("USERNAME_OCCUPIED") => "Bu nom band".to_string(),
+                e if e.is("USERNAME_INVALID") => "Nom noto'g'ri (5–32 belgi: lotin harflari, raqam, _)".to_string(),
+                e if e.is("USERNAME_NOT_MODIFIED") => "Nom o'zgarmadi".to_string(),
+                e => e.to_string(),
+            })?;
+        Ok(json!({"ok": true}))
+    })
+}
+
+/// Yangi hisob ochish (ro'yxatdan o'tish): `arg` = `"<ism>\n<familiya>"`. Kod kiritilgach `signup:true` kelgan holatda chaqiriladi.
+#[no_mangle]
+pub extern "C" fn rust_tg_sign_up(arg_ptr: *const c_char) -> *mut c_char {
+    let arg = unsafe { cstr_to_str(arg_ptr) }.unwrap_or("").to_string();
+    string_to_cptr(with_client(|t, client| {
+        let l = lines(&arg, 2);
+        if l[0].trim().is_empty() {
+            return Err("Ismingizni kiriting".to_string());
+        }
+        let st = load_login(t).ok_or("Kod muddati tugadi — raqamni qayta kiriting")?;
+        let phone = st["phone"].as_str().unwrap_or("").to_string();
+        let hash = st["hash"].as_str().unwrap_or("").to_string();
+        let r = t.rt.block_on(client.invoke(&tl::functions::auth::SignUp {
+            no_joined_notifications: false,
+            phone_number: phone,
+            phone_code_hash: hash,
+            first_name: l[0].trim().to_string(),
+            last_name: l[1].trim().to_string(),
+        }));
+        match r {
+            Ok(tl::enums::auth::Authorization::Authorization(a)) => {
+                save_token(t, a.future_auth_token.as_ref());
+                clear_login(t);
+                Ok(after_login(t))
+            }
+            Ok(tl::enums::auth::Authorization::SignUpRequired(_)) => Err("Ro'yxatdan o'tib bo'lmadi — qayta urinib ko'ring".to_string()),
+            Err(e) => Err(friendly(&e)),
+        }
+    }))
+}
+
+/// Suhbat/foydalanuvchi haqida: `arg` = suhbat. Javob: `{"kind","name","about","username","phone","members","status"}`.
+#[no_mangle]
+pub extern "C" fn rust_tg_peer_info(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 30, |client, arg| async move {
+        let peer = resolve_peer(&client, arg.trim()).await?;
+        let ip: tl::enums::InputPeer = peer.into();
+        match ip {
+            tl::enums::InputPeer::User(u) => {
+                let res = client
+                    .invoke(&tl::functions::users::GetFullUser {
+                        id: tl::enums::InputUser::User(tl::types::InputUser { user_id: u.user_id, access_hash: u.access_hash }),
+                    })
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let tl::enums::users::UserFull::Full(f) = res;
+                let tl::enums::UserFull::Full(full) = f.full_user;
+                let mut name = String::new();
+                let mut username = String::new();
+                let mut phone = String::new();
+                let mut status = String::new();
+                for x in f.users {
+                    if let tl::enums::User::User(x) = x {
+                        if x.id == u.user_id {
+                            name = format!("{} {}", x.first_name.clone().unwrap_or_default(), x.last_name.clone().unwrap_or_default()).trim().to_string();
+                            username = x.username.clone().unwrap_or_default();
+                            phone = x.phone.clone().unwrap_or_default();
+                            status = match &x.status {
+                                Some(tl::enums::UserStatus::Online(_)) => "onlayn".to_string(),
+                                Some(tl::enums::UserStatus::Offline(o)) => format!("@{}", o.was_online),
+                                Some(tl::enums::UserStatus::Recently(_)) => "yaqinda onlayn edi".to_string(),
+                                Some(tl::enums::UserStatus::LastWeek(_)) => "o'tgan hafta onlayn edi".to_string(),
+                                Some(tl::enums::UserStatus::LastMonth(_)) => "o'tgan oy onlayn edi".to_string(),
+                                _ => "uzoq vaqt oldin onlayn edi".to_string(),
+                            };
+                        }
+                    }
+                }
+                Ok(json!({"kind": "user", "name": name, "about": full.about.unwrap_or_default(), "username": username, "phone": phone, "members": 0, "status": status}))
+            }
+            tl::enums::InputPeer::Chat(c) => {
+                let res = client.invoke(&tl::functions::messages::GetFullChat { chat_id: c.chat_id }).await.map_err(|e| e.to_string())?;
+                let tl::enums::messages::ChatFull::Full(f) = res;
+                let (about, members) = match f.full_chat {
+                    tl::enums::ChatFull::Full(cf) => {
+                        let n = match cf.participants {
+                            tl::enums::ChatParticipants::Participants(p) => p.participants.len() as i64,
+                            _ => 0,
+                        };
+                        (cf.about, n)
+                    }
+                    _ => (String::new(), 0),
+                };
+                Ok(json!({"kind": "group", "name": "", "about": about, "username": "", "phone": "", "members": members, "status": ""}))
+            }
+            tl::enums::InputPeer::Channel(c) => {
+                let res = client
+                    .invoke(&tl::functions::channels::GetFullChannel {
+                        channel: tl::enums::InputChannel::Channel(tl::types::InputChannel { channel_id: c.channel_id, access_hash: c.access_hash }),
+                    })
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let tl::enums::messages::ChatFull::Full(f) = res;
+                let mut username = String::new();
+                for ch in &f.chats {
+                    if let tl::enums::Chat::Channel(ch) = ch {
+                        if ch.id == c.channel_id {
+                            username = ch.username.clone().unwrap_or_default();
+                        }
+                    }
+                }
+                let (about, members) = match f.full_chat {
+                    tl::enums::ChatFull::ChannelFull(cf) => (cf.about, cf.participants_count.unwrap_or(0) as i64),
+                    _ => (String::new(), 0),
+                };
+                Ok(json!({"kind": "channel", "name": "", "about": about, "username": username, "phone": "", "members": members, "status": ""}))
+            }
+            _ => Err("Bu suhbat turi qo'llab-quvvatlanmaydi".to_string()),
+        }
+    })
+}
+
+/// Suhbat ichida qidirish: `arg` = `"<suhbat>\n<so'rov>"`. Javob: `{"messages":[..]}`.
+#[no_mangle]
+pub extern "C" fn rust_tg_search_in_chat(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 30, |client, arg| async move {
+        let l = lines(&arg, 2);
+        let peer = resolve_peer(&client, &l[0]).await?;
+        let mut it = client.search_messages(peer).query(l[1].trim()).limit(50);
+        let mut out = Vec::new();
+        while let Some(m) = it.next().await.map_err(|e| e.to_string())? {
+            out.push(msg_json(&m));
+        }
+        Ok(json!({ "messages": out }))
+    })
+}
+
+/// Mahkamlangan xabar(lar): `arg` = suhbat. Javob: `{"messages":[..]}` (eng yangisi birinchi).
+#[no_mangle]
+pub extern "C" fn rust_tg_pinned(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 30, |client, arg| async move {
+        let peer = resolve_peer(&client, arg.trim()).await?;
+        let mut it = client.search_messages(peer).filter(tl::enums::MessagesFilter::InputMessagesFilterPinned).limit(20);
+        let mut out = Vec::new();
+        while let Some(m) = it.next().await.map_err(|e| e.to_string())? {
+            out.push(msg_json(&m));
+        }
+        Ok(json!({ "messages": out }))
+    })
+}
+
+/// Reaksiya qo'yish/olish: `arg` = `"<suhbat>\n<xabar_id>\n<emoji|bo'sh>"` (bo'sh — reaksiyani olib tashlash).
+#[no_mangle]
+pub extern "C" fn rust_tg_react(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 30, |client, arg| async move {
+        let l = lines(&arg, 3);
+        let id = l[1].trim().parse::<i32>().map_err(|_| "Xabar ko'rsatilmagan".to_string())?;
+        let peer = resolve_peer(&client, &l[0]).await?;
+        let r = if l[2].trim().is_empty() {
+            grammers_client::message::InputReactions::remove()
+        } else {
+            grammers_client::message::InputReactions::emoticon(l[2].trim().to_string())
+        };
+        client.send_reactions(peer, id, r).await.map_err(|e| e.to_string())?;
+        Ok(json!({"ok": true}))
+    })
+}
+
+fn input_peer_bot_id(p: &tl::enums::InputPeer) -> Option<i64> {
+    match p {
+        tl::enums::InputPeer::User(u) => Some(u.user_id),
+        tl::enums::InputPeer::Chat(c) => Some(-c.chat_id),
+        tl::enums::InputPeer::Channel(c) => Some(-1_000_000_000_000i64 - c.channel_id),
+        _ => None,
+    }
+}
+
+/// Suhbat jildlari: `{"folders":[{"id","title","contacts","non_contacts","groups","broadcasts","bots","exclude_muted","exclude_read","include":[id..],"exclude":[id..]}]}`.
+#[no_mangle]
+pub extern "C" fn rust_tg_folders() -> *mut c_char {
+    tg_call(std::ptr::null(), 30, |client, _| async move {
+        let res = client.invoke(&tl::functions::messages::GetDialogFilters {}).await.map_err(|e| e.to_string())?;
+        let tl::enums::messages::DialogFilters::Filters(f) = res;
+        let mut out = Vec::new();
+        for x in f.filters {
+            let tl::enums::DialogFilter::Filter(x) = x else { continue };
+            let tl::enums::TextWithEntities::Entities(title) = &x.title;
+            let include: Vec<i64> = x.include_peers.iter().chain(x.pinned_peers.iter()).filter_map(input_peer_bot_id).collect();
+            let exclude: Vec<i64> = x.exclude_peers.iter().filter_map(input_peer_bot_id).collect();
+            out.push(json!({
+                "id": x.id,
+                "title": title.text,
+                "contacts": x.contacts,
+                "non_contacts": x.non_contacts,
+                "groups": x.groups,
+                "broadcasts": x.broadcasts,
+                "bots": x.bots,
+                "exclude_muted": x.exclude_muted,
+                "exclude_read": x.exclude_read,
+                "include": include,
+                "exclude": exclude,
+            }));
+        }
+        Ok(json!({ "folders": out }))
+    })
+}
+
+/// Yangi guruh: `arg` = `"<nom>\n<id@hash,id@hash,..>"` (a'zolar — kontaktlar).
+#[no_mangle]
+pub extern "C" fn rust_tg_create_group(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 40, |client, arg| async move {
+        let l = lines(&arg, 2);
+        if l[0].trim().is_empty() {
+            return Err("Guruh nomini kiriting".to_string());
+        }
+        let mut users = Vec::new();
+        for part in l[1].split(',') {
+            if let Some((id, hash)) = part.trim().split_once('@') {
+                if let (Ok(user_id), Ok(access_hash)) = (id.parse::<i64>(), hash.parse::<i64>()) {
+                    users.push(tl::enums::InputUser::User(tl::types::InputUser { user_id, access_hash }));
+                }
+            }
+        }
+        if users.is_empty() {
+            return Err("Kamida bitta a'zo tanlang".to_string());
+        }
+        client
+            .invoke(&tl::functions::messages::CreateChat { users, title: l[0].trim().to_string(), ttl_period: None })
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(json!({"ok": true}))
+    })
+}
+
+/// Yangi kanal: `arg` = `"<nom>\n<tavsif>"`.
+#[no_mangle]
+pub extern "C" fn rust_tg_create_channel(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 40, |client, arg| async move {
+        let l = lines(&arg, 2);
+        if l[0].trim().is_empty() {
+            return Err("Kanal nomini kiriting".to_string());
+        }
+        client
+            .invoke(&tl::functions::channels::CreateChannel {
+                broadcast: true,
+                megagroup: false,
+                for_import: false,
+                forum: false,
+                title: l[0].trim().to_string(),
+                about: l[1].clone(),
+                geo_point: None,
+                address: None,
+                ttl_period: None,
+            })
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(json!({"ok": true}))
+    })
+}
+
+/// Mening stiker to'plamlarim: `{"sets":[{"id","hash","title","count"}]}`.
+#[no_mangle]
+pub extern "C" fn rust_tg_sticker_sets() -> *mut c_char {
+    tg_call(std::ptr::null(), 30, |client, _| async move {
+        let res = client.invoke(&tl::functions::messages::GetAllStickers { hash: 0 }).await.map_err(|e| e.to_string())?;
+        let tl::enums::messages::AllStickers::Stickers(a) = res else { return Ok(json!({"sets": []})) };
+        let mut out = Vec::new();
+        for st in a.sets {
+            let tl::enums::StickerSet::Set(s) = st;
+            if s.masks || s.emojis {
+                continue;
+            }
+            out.push(json!({"id": s.id.to_string(), "hash": s.access_hash.to_string(), "title": s.title, "count": s.count}));
+        }
+        Ok(json!({ "sets": out }))
+    })
+}
+
+/// To'plamdagi stikerlar: `arg` = `"<id>:<hash>"`. Javob: `{"stickers":[{"ref":"<id>:<hash>:<fayl_havolasi_hex>","mime","alt"}]}`.
+#[no_mangle]
+pub extern "C" fn rust_tg_sticker_set(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 30, |client, arg| async move {
+        let mut p = arg.trim().split(':');
+        let id = p.next().and_then(|x| x.parse::<i64>().ok()).ok_or("To'plam noto'g'ri")?;
+        let hash = p.next().and_then(|x| x.parse::<i64>().ok()).ok_or("To'plam noto'g'ri")?;
+        let res = client
+            .invoke(&tl::functions::messages::GetStickerSet {
+                stickerset: tl::enums::InputStickerSet::Id(tl::types::InputStickerSetId { id, access_hash: hash }),
+                hash: 0,
+            })
+            .await
+            .map_err(|e| e.to_string())?;
+        let tl::enums::messages::StickerSet::Set(set) = res else { return Ok(json!({"stickers": []})) };
+        let mut out = Vec::new();
+        for d in set.documents {
+            let tl::enums::Document::Document(d) = d else { continue };
+            let mut alt = String::new();
+            for a in &d.attributes {
+                if let tl::enums::DocumentAttribute::Sticker(st) = a {
+                    alt = st.alt.clone();
+                }
+            }
+            out.push(json!({
+                "ref": format!("{}:{}:{}", d.id, d.access_hash, hex::encode(&d.file_reference)),
+                "mime": d.mime_type,
+                "alt": alt,
+            }));
+        }
+        Ok(json!({ "stickers": out }))
+    })
+}
+
+fn parse_doc_ref(s: &str) -> Option<(i64, i64, Vec<u8>)> {
+    let mut p = s.trim().split(':');
+    let id = p.next()?.parse::<i64>().ok()?;
+    let hash = p.next()?.parse::<i64>().ok()?;
+    let r = hex::decode(p.next()?).ok()?;
+    Some((id, hash, r))
+}
+
+/// Stiker rasmi (webp): `arg` = `ref`. Javob: `{"data":"<base64>"}`.
+#[no_mangle]
+pub extern "C" fn rust_tg_sticker_file(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 40, |client, arg| async move {
+        let (id, access_hash, file_reference) = parse_doc_ref(&arg).ok_or("Stiker noto'g'ri")?;
+        let loc = tl::enums::InputFileLocation::InputDocumentFileLocation(tl::types::InputDocumentFileLocation {
+            id,
+            access_hash,
+            file_reference,
+            thumb_size: String::new(),
+        });
+        let Some(b) = download_small(&client, loc).await else { return Err("Stiker yuklanmadi".to_string()) };
+        Ok(json!({ "data": b64(&b) }))
+    })
+}
+
+/// Stiker yuborish: `arg` = `"<suhbat>\n<javob_id|0>\n<ref>"`.
+#[no_mangle]
+pub extern "C" fn rust_tg_send_sticker(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 30, |client, arg| async move {
+        let l = lines(&arg, 3);
+        let (id, access_hash, file_reference) = parse_doc_ref(&l[2]).ok_or("Stiker noto'g'ri")?;
+        let peer = resolve_peer(&client, &l[0]).await?;
+        let reply = l[1].trim().parse::<i32>().ok().filter(|x| *x > 0);
+        let media = tl::types::InputMediaDocument {
+            spoiler: false,
+            id: tl::enums::InputDocument::Document(tl::types::InputDocument { id, access_hash, file_reference }),
+            video_cover: None,
+            video_timestamp: None,
+            ttl_seconds: None,
+            query: None,
+        };
+        let msg = grammers_client::message::InputMessage::new().reply_to(reply).media(tl::enums::InputMedia::Document(media));
+        client.send_message(peer, msg).await.map_err(|e| e.to_string())?;
+        Ok(json!({"ok": true}))
+    })
+}
+
+/// @nom yoki t.me havolasi bo'yicha suhbatni topish: `arg` = nom. Javob: `{"id","kind","name","hash","username"}`.
+#[no_mangle]
+pub extern "C" fn rust_tg_resolve(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 30, |client, arg| async move {
+        let name = arg.trim().trim_start_matches('@').to_string();
+        let peer = client.resolve_username(&name).await.map_err(|e| e.to_string())?.ok_or("Bunday foydalanuvchi yoki kanal topilmadi")?;
+        let (kind, title) = match &peer {
+            grammers_client::peer::Peer::User(u) => ("user", u.full_name()),
+            grammers_client::peer::Peer::Group(g) => ("group", g.title().unwrap_or_default().to_string()),
+            grammers_client::peer::Peer::Channel(c) => ("channel", c.title().to_string()),
+        };
+        let r = peer.to_ref().await.map_err(|e| e.to_string())?.ok_or("Suhbatga murojaat qilib bo'lmadi")?;
+        Ok(json!({
+            "id": peer.id().bot_api_dialog_id(),
+            "kind": kind,
+            "name": title,
+            "hash": r.auth.hash().to_string(),
+            "username": peer.username().unwrap_or_default(),
+        }))
+    })
+}
+
+/// Kanal/guruhga qo'shilish: `arg` = suhbat.
+#[no_mangle]
+pub extern "C" fn rust_tg_join(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 30, |client, arg| async move {
+        let peer = resolve_peer(&client, arg.trim()).await?;
+        let ip: tl::enums::InputPeer = peer.into();
+        match ip {
+            tl::enums::InputPeer::Channel(c) => {
+                client
+                    .invoke(&tl::functions::channels::JoinChannel {
+                        channel: tl::enums::InputChannel::Channel(tl::types::InputChannel { channel_id: c.channel_id, access_hash: c.access_hash }),
+                    })
+                    .await
+                    .map_err(|e| e.to_string())?;
+                Ok(json!({"ok": true}))
+            }
+            _ => Err("Bu suhbatga qo'shilib bo'lmaydi".to_string()),
+        }
+    })
 }
 
 fn b64(data: &[u8]) -> String {

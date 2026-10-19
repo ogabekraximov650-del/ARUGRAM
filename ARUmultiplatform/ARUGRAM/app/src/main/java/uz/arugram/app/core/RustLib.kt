@@ -35,6 +35,37 @@ interface RustLib : Library {
     fun rust_tg_me(): Pointer?
     fun rust_tg_contacts(): Pointer?
     fun rust_tg_update_seq(): Long
+    fun rust_tg_send(arg: String): Pointer?
+    fun rust_tg_edit(arg: String): Pointer?
+    fun rust_tg_delete(arg: String): Pointer?
+    fun rust_tg_forward(arg: String): Pointer?
+    fun rust_tg_pin_message(arg: String): Pointer?
+    fun rust_tg_pin_dialog(arg: String): Pointer?
+    fun rust_tg_mute(arg: String): Pointer?
+    fun rust_tg_delete_dialog(arg: String): Pointer?
+    fun rust_tg_send_media(arg: String): Pointer?
+    fun rust_tg_media_file(arg: String): Pointer?
+    fun rust_tg_search(arg: String): Pointer?
+    fun rust_tg_typing(): Pointer?
+    fun rust_tg_sessions(): Pointer?
+    fun rust_tg_terminate(arg: String): Pointer?
+    fun rust_tg_profile(): Pointer?
+    fun rust_tg_update_profile(arg: String): Pointer?
+    fun rust_tg_update_username(arg: String): Pointer?
+    fun rust_tg_sign_up(arg: String): Pointer?
+    fun rust_tg_peer_info(arg: String): Pointer?
+    fun rust_tg_search_in_chat(arg: String): Pointer?
+    fun rust_tg_pinned(arg: String): Pointer?
+    fun rust_tg_react(arg: String): Pointer?
+    fun rust_tg_folders(): Pointer?
+    fun rust_tg_sticker_sets(): Pointer?
+    fun rust_tg_sticker_set(arg: String): Pointer?
+    fun rust_tg_sticker_file(arg: String): Pointer?
+    fun rust_tg_send_sticker(arg: String): Pointer?
+    fun rust_tg_resolve(arg: String): Pointer?
+    fun rust_tg_join(arg: String): Pointer?
+    fun rust_tg_create_group(arg: String): Pointer?
+    fun rust_tg_create_channel(arg: String): Pointer?
     fun rust_tg_photo(arg: String): Pointer?
     fun rust_tg_user_avatars(arg: String): Pointer?
     fun rust_tg_logout(): Pointer?

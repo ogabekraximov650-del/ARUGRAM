@@ -46,3 +46,14 @@ Ishlatilayotgan DrKLO versiyasida yon panel (hamburger) YO'Q: asosiy oyna `MainT
 (Chatlar, Kontaktlar, Sozlamalar, Profil). `ui/main/MainTabs.kt` shuni takrorlaydi: 56 dp balandlik, 8 dp chetlar, radius 28, tab ikonkalari —
 Telegram'ning Lottie JSON fayllari (`assets/tabs/`, `lottie-compose`). Haqiqiy "suyuq shisha" (xiralashtirish + sinish) effekti hozircha yarim
 shaffof fon bilan yaqinlashtirilgan; yuqori panel (`glass_targetMainTopPanel`) ham shisha — keyingi bosqichda `DialogsActivity` bilan solishtiriladi.
+
+## To'liq mijoz bosqichi (2026-10)
+
+Suhbat: matn / rasm / video / ovozli xabar (OGG-Opus yozish, Android 10+) / fayl / stiker (webp) yuborish va ko'rish, javob, uzatish, tahrirlash, o'chirish,
+reaksiyalar, mahkamlash, suhbat ichida qidiruv, tanlash rejimi, "yozmoqda...", o'qilgan belgilari, t.me havolalari, kanalga qo'shilish.
+Ro'yxat: jild yorliqlari, mahkamlash / ovozsiz / o'chirish, global qidiruv, yangi xabar / guruh / kanal. Sozlamalar: akkaunt (ism, @nom, bio), mavzu,
+qurilmalar (seanslarni tugatish), bildirishnomalar (orqa fon xizmati), kesh, jildlar, til. Yangi hisob ochish (ro'yxatdan o'tish).
+Rust: `rust_tg_*` (send, edit, delete, forward, pin_*, mute, send_media, media_file, search*, typing, sessions, profile, peer_info, folders, stikerlar, resolve, join, sign_up).
+
+**Hali yo'q** (alohida yirik ishlar): ovozli/video qo'ng'iroqlar (WebRTC), maxfiy chatlar (E2E), hikoyalar, Premium/Stars, bot mini-ilovalari,
+animatsion stikerlar (TGS/Lottie, webm), so'rovnomalarda ovoz berish, joylashuv xaritasi, Chromecast/PiP.

@@ -24,7 +24,14 @@ data class ChatRow(
     val bot: Boolean,
     val self: Boolean,
     val verified: Boolean,
-)
+    val readOut: Int = 0,
+    val access: String = "0",
+    val mentions: Int = 0,
+    val topId: Int = 0,
+) {
+    /** Rust tomonidagi suhbat manzili: `id` yoki `id@access_hash` (hash bilan dialoglarni aylanib chiqmasdan to'g'ridan-to'g'ri ochiladi). */
+    val spec: String get() = if (access.isNotEmpty() && access != "0") "$id@$access" else "$id"
+}
 
 data class ChatsUi(val loading: Boolean = true, val chats: List<ChatRow> = emptyList(), val error: String? = null)
 
@@ -50,9 +57,26 @@ class ChatsModel(private val context: android.content.Context) {
                     id = o.optLong("id"), kind = o.optString("kind"), name = o.optString("name"), pinned = o.optBoolean("pinned"),
                     unread = o.optInt("unread"), muted = o.optBoolean("muted"), out = o.optBoolean("out"), date = o.optLong("date"),
                     text = o.optString("text"), bot = o.optBoolean("bot"), self = o.optBoolean("self"), verified = o.optBoolean("verified"),
+                    readOut = o.optInt("read_out"), access = o.optString("access", "0"), mentions = o.optInt("mentions"), topId = o.optInt("top"),
                 ),
             )
         }
+    }
+
+    /** Suhbatni ro'yxatda mahkamlash/yechish (darhol ko'rinadi, keyin serverdan tasdiqlanadi). */
+    fun pin(row: ChatRow) {
+        _ui.update { st -> st.copy(chats = sort(st.chats.map { if (it.id == row.id) it.copy(pinned = !row.pinned) else it })) }
+        scope.launch { withContext(Dispatchers.IO) { RustCore.tgPinDialog(row.spec, !row.pinned) }; load() }
+    }
+
+    fun mute(row: ChatRow) {
+        _ui.update { st -> st.copy(chats = st.chats.map { if (it.id == row.id) it.copy(muted = !row.muted) else it }) }
+        scope.launch { withContext(Dispatchers.IO) { RustCore.tgMute(row.spec, !row.muted) }; load() }
+    }
+
+    fun deleteDialog(row: ChatRow) {
+        _ui.update { st -> st.copy(chats = st.chats.filter { it.id != row.id }) }
+        scope.launch { withContext(Dispatchers.IO) { RustCore.tgDeleteDialog(row.spec) }; load() }
     }
 
     fun load() {
