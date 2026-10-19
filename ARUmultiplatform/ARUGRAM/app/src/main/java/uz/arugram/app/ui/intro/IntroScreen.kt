@@ -184,7 +184,8 @@ fun IntroScreen(
 
         // ---- "Suhbatni boshlash" tugmasi: bosilganda pastki o'ngdagi dumaloq tugmaga aylanadi
         val btnTopDp = q * 3 + (q - 48.dp) / 2
-        val fullW = w - 32.dp   // skrinshotda tugma kengligi ekran-32 dp (329 dp)
+        // DrKLO: bo'sh joy 260 dp dan katta bo'lsa tugma aynan 320 dp (350 dp li ekranda chetlari 15 dp).
+        val fullW = if (w - 32.dp > 260.dp) 320.dp else w - 32.dp
         val bw = fullW + (56.dp - fullW) * m
         val bh = 48.dp + 8.dp * m
         val bx = (w - fullW) / 2 + ((w - 20.dp - 56.dp) - (w - fullW) / 2) * m
@@ -269,12 +270,13 @@ private fun SunMoon(dark: Boolean, modifier: Modifier) {
         val u = 1.dp.toPx()
         // Quyosh: to'ldirilgan doira (diametri 14 dp) va atrofida 8 ta qisqa nur.
         if (t > 0.01f) {
-            drawCircle(TgBlue.copy(alpha = t), 7f * u * (0.6f + 0.4f * t), ctr)
+            drawCircle(TgBlue.copy(alpha = t), 6.6f * u * (0.6f + 0.4f * t), ctr)
+            // Nurlar — radial cho'zilgan kichik yumaloq nuqtalar (skrinshotdan: markazdan 10.7 dp, ~2.4 x 3.6 dp).
             for (i in 0 until 8) {
                 val a = i * PI / 4
-                val r1 = 10.5f * u
-                val r2 = 12.5f * u
-                drawLine(TgBlue.copy(alpha = t), Offset(ctr.x + (cos(a) * r1).toFloat(), ctr.y + (sin(a) * r1).toFloat()), Offset(ctr.x + (cos(a) * r2).toFloat(), ctr.y + (sin(a) * r2).toFloat()), strokeWidth = 1.6f * u, cap = StrokeCap.Round)
+                val r1 = 10.0f * u
+                val r2 = 11.5f * u
+                drawLine(TgBlue.copy(alpha = t), Offset(ctr.x + (cos(a) * r1).toFloat(), ctr.y + (sin(a) * r1).toFloat()), Offset(ctr.x + (cos(a) * r2).toFloat(), ctr.y + (sin(a) * r2).toFloat()), strokeWidth = 2.4f * u, cap = StrokeCap.Round)
             }
         }
         // Oy: yarim oy shakli (doiradan siljigan doira kesib olinadi).
