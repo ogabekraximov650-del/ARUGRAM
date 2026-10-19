@@ -19,7 +19,7 @@ adb install -r "$APK"
 for P in READ_PHONE_STATE READ_PHONE_NUMBERS CALL_PHONE READ_CALL_LOG RECEIVE_SMS READ_SMS POST_NOTIFICATIONS READ_CONTACTS; do adb shell pm grant "$PKG" "android.permission.$P" 2>/dev/null || true; done
 shot() { adb exec-out screencap -p > "$OUT/$1.png"; }
 tap() { adb shell input tap "$1" "$2"; }
-swipe_left() { adb shell input swipe 600 700 120 700 150; }
+swipe_left() { adb shell input swipe 600 700 120 700 180; }
 
 adb shell input keyevent KEYCODE_HOME
 sleep 3

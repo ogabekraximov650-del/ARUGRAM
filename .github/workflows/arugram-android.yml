@@ -180,7 +180,7 @@ jobs:
           profile: pixel_5
           disable-animations: false
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
-          script: bash ARUmultiplatform/ARUGRAM/ci/screens.sh screens emu/app.apk
+          script: bash ARUmultiplatform/ARUGRAM/ci/all.sh emu/app.apk screens
       - uses: actions/upload-artifact@v4
         if: always()
         with:

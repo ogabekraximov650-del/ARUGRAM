@@ -1,0 +1,54 @@
+name: DrKLO Telegram emulyatordan etalon skrinshot va video (qayta yig'ilmaydi)
+
+# `ci/tg-ref.run` o'zgarganda: oldindan yig'ilgan x86_64 APK Telegram "Saqlangan xabarlar"dan olinadi (`Telegram-emu-x86_64.apk`, yig'ish shart emas),
+# emulyatorda ishga tushirilib skrinshotlar va animatsiya videosi olinadi.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ci/tg-ref.run'
+
+permissions:
+  contents: read
+
+jobs:
+  ref:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+      TG_API_ID: ${{ secrets.TG_API_ID }}
+      TG_API_HASH: ${{ secrets.TG_API_HASH }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: APK'ni Telegram'dan olish
+        run: |
+          K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          pip install --no-cache-dir -q pyrogram==2.0.106 tgcrypto==1.2.5
+          S="$RUNNER_TEMP/n"; K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in tool/encode/session.enc -out "$S.session"
+          python tool/notify/get_file.py "$S" Telegram-emu-x86_64.apk emu
+          rm -f "$S.session"; ls -la emu
+      - name: KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Emulyator
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          PKG: org.telegram.messenger.web
+          ACT: org.telegram.ui.LaunchActivity
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_5
+          disable-animations: false
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          script: bash ARUmultiplatform/ARUGRAM/ci/all.sh emu/Telegram-emu-x86_64.apk ref
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: telegram-ref
+          path: ref
+          retention-days: 14
