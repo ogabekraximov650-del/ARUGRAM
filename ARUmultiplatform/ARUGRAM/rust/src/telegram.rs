@@ -5708,3 +5708,260 @@ pub extern "C" fn rust_tg_stars() -> *mut c_char {
         Ok(json!({"balance": stars_amount(&s.balance), "history": history}))
     })
 }
+
+// ═══════════════════════════════════════════════════════════════
+//  ARXIV (folder_id = 1)
+// ═══════════════════════════════════════════════════════════════
+
+/// Arxivlangan suhbatlar (`messages.getDialogs` + `folder_id = 1`). Javob `rust_tg_dialogs` bilan bir xil shaklda: `{"dialogs":[..]}`.
+#[no_mangle]
+pub extern "C" fn rust_tg_archived() -> *mut c_char {
+    tg_call(std::ptr::null(), 40, |client, _| async move {
+        let now_secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
+        let res = client
+            .invoke(&tl::functions::messages::GetDialogs {
+                exclude_pinned: false,
+                folder_id: Some(1),
+                offset_date: 0,
+                offset_id: 0,
+                offset_peer: tl::enums::InputPeer::Empty,
+                limit: 100,
+                hash: 0,
+            })
+            .await
+            .map_err(|e| e.to_string())?;
+        let (dialogs, messages, chats, users) = match res {
+            tl::enums::messages::Dialogs::Dialogs(d) => (d.dialogs, d.messages, d.chats, d.users),
+            tl::enums::messages::Dialogs::Slice(d) => (d.dialogs, d.messages, d.chats, d.users),
+            _ => (Vec::new(), Vec::new(), Vec::new(), Vec::new()),
+        };
+        // (id, nom, tur, hash, bot, verified)
+        let mut names: HashMap<i64, (String, &'static str, i64, bool, bool, String)> = HashMap::new();
+        for u in &users {
+            if let tl::enums::User::User(u) = u {
+                let name = format!("{} {}", u.first_name.clone().unwrap_or_default(), u.last_name.clone().unwrap_or_default()).trim().to_string();
+                names.insert(u.id, (name, "user", u.access_hash.unwrap_or(0), u.bot, u.verified, u.username.clone().unwrap_or_default()));
+            }
+        }
+        for c in &chats {
+            match c {
+                tl::enums::Chat::Chat(c) => {
+                    names.insert(-c.id, (c.title.clone(), "group", 0, false, false, String::new()));
+                }
+                tl::enums::Chat::Channel(c) => {
+                    let kind = if c.broadcast { "channel" } else { "group" };
+                    names.insert(-1_000_000_000_000i64 - c.id, (c.title.clone(), kind, c.access_hash.unwrap_or(0), false, c.verified, c.username.clone().unwrap_or_default()));
+                }
+                _ => {}
+            }
+        }
+        let mut last: HashMap<(i64, i32), (String, i64, bool)> = HashMap::new();
+        for m in &messages {
+            match m {
+                tl::enums::Message::Message(m) => {
+                    let t = if m.message.is_empty() { "Media".to_string() } else { m.message.replace('\n', " ") };
+                    last.insert((peer_bot_id(&m.peer_id), m.id), (t, m.date as i64, m.out));
+                }
+                tl::enums::Message::Service(m) => {
+                    last.insert((peer_bot_id(&m.peer_id), m.id), ("Xizmat xabari".to_string(), m.date as i64, m.out));
+                }
+                _ => {}
+            }
+        }
+        let mut out = Vec::new();
+        for d in &dialogs {
+            let tl::enums::Dialog::Dialog(x) = d else { continue };
+            let id = peer_bot_id(&x.peer);
+            let Some((name, kind, hash, bot, verified, username)) = names.get(&id).cloned() else { continue };
+            let muted = matches!(&x.notify_settings, tl::enums::PeerNotifySettings::Settings(n) if n.mute_until.unwrap_or(0) as i64 > now_secs);
+            let (text, date, outgoing) = last.get(&(id, x.top_message)).cloned().unwrap_or((String::new(), 0, false));
+            out.push(json!({
+                "id": id, "kind": kind, "name": name, "pinned": false, "unread": x.unread_count, "muted": muted,
+                "read_out": x.read_outbox_max_id, "top": x.top_message, "mentions": x.unread_mentions_count,
+                "access": hash.to_string(), "out": outgoing, "date": date, "text": text, "bot": bot, "self": false,
+                "verified": verified, "username": username,
+            }));
+        }
+        Ok(json!({"dialogs": out}))
+    })
+}
+
+/// Arxivga olish / chiqarish: `arg` = `"<suhbat>\n<1|0>"` (1 — arxivga).
+#[no_mangle]
+pub extern "C" fn rust_tg_archive(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 30, |client, arg| async move {
+        let l = lines(&arg, 2);
+        let peer = resolve_peer(&client, &l[0]).await?;
+        let ip: tl::enums::InputPeer = peer.into();
+        let folder_id = if l[1].trim() == "1" { 1 } else { 0 };
+        client
+            .invoke(&tl::functions::folders::EditPeerFolders {
+                folder_peers: vec![tl::enums::InputFolderPeer::Peer(tl::types::InputFolderPeer { peer: ip, folder_id })],
+            })
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(json!({"ok": true}))
+    })
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  OVOZSIZ / REJALASHTIRILGAN XABARLAR, JOYLASHUV, KONTAKT, SO'ROVNOMA
+// ═══════════════════════════════════════════════════════════════
+
+fn schedule_of(s: &str) -> Option<std::time::SystemTime> {
+    let secs = s.trim().parse::<u64>().ok().filter(|x| *x > 0)?;
+    Some(std::time::UNIX_EPOCH + Duration::from_secs(secs))
+}
+
+/// Matn (ovozsiz / rejalashtirilgan): `arg` = `"<suhbat>\n<javob_id|0>\n<1|0 ovozsiz>\n<unix|0 rejalashtirish>\n<matn>"`.
+#[no_mangle]
+pub extern "C" fn rust_tg_send_ex(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 40, |client, arg| async move {
+        let l = lines(&arg, 5);
+        let peer = resolve_peer(&client, &l[0]).await?;
+        let reply = l[1].trim().parse::<i32>().ok().filter(|x| *x > 0);
+        let mut msg = grammers_client::message::InputMessage::new().text(l[4].clone()).reply_to(reply).silent(l[2].trim() == "1");
+        if let Some(t) = schedule_of(&l[3]) {
+            msg = msg.schedule_date(Some(t));
+        }
+        let m = client.send_message(peer, msg).await.map_err(|e| e.to_string())?;
+        Ok(json!({"ok": true, "id": m.id()}))
+    })
+}
+
+/// Joylashuv / kontakt / so'rovnoma: `arg` = `"<suhbat>\n<javob_id|0>\n<1|0 ovozsiz>\n<unix|0>\n<geo|contact|poll>\n<ma'lumot>"`.
+/// Ma'lumot: geo — `lat,long`; contact — `telefon|ism|familiya`; poll — `savol|ko'p(0/1)|viktorina(0/1)|to'g'ri_indeks|variant1|variant2|...`.
+#[no_mangle]
+pub extern "C" fn rust_tg_send_special(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 60, |client, arg| async move {
+        let l = lines(&arg, 6);
+        let peer = resolve_peer(&client, &l[0]).await?;
+        let reply = l[1].trim().parse::<i32>().ok().filter(|x| *x > 0);
+        let media: tl::enums::InputMedia = match l[4].trim() {
+            "geo" => {
+                let (a, b) = l[5].trim().split_once(',').ok_or("Joylashuv noto'g'ri")?;
+                let lat = a.trim().parse::<f64>().map_err(|_| "Joylashuv noto'g'ri".to_string())?;
+                let long = b.trim().parse::<f64>().map_err(|_| "Joylashuv noto'g'ri".to_string())?;
+                tl::enums::InputMedia::GeoPoint(tl::types::InputMediaGeoPoint {
+                    geo_point: tl::enums::InputGeoPoint::Point(tl::types::InputGeoPoint { lat, long, accuracy_radius: None }),
+                })
+            }
+            "contact" => {
+                let p: Vec<&str> = l[5].split('|').collect();
+                if p.first().map(|x| x.trim().is_empty()).unwrap_or(true) {
+                    return Err("Telefon raqami yo'q".to_string());
+                }
+                tl::enums::InputMedia::Contact(tl::types::InputMediaContact {
+                    phone_number: p[0].trim().to_string(),
+                    first_name: p.get(1).map(|x| x.trim().to_string()).unwrap_or_default(),
+                    last_name: p.get(2).map(|x| x.trim().to_string()).unwrap_or_default(),
+                    vcard: String::new(),
+                })
+            }
+            "poll" => {
+                let p: Vec<&str> = l[5].split('|').collect();
+                if p.len() < 6 || p[0].trim().is_empty() {
+                    return Err("So'rovnoma uchun savol va kamida 2 ta variant kerak".to_string());
+                }
+                let multi = p[1].trim() == "1";
+                let quiz = p[2].trim() == "1";
+                let correct = p[3].trim().parse::<u8>().ok();
+                let answers: Vec<tl::enums::PollAnswer> = p[4..]
+                    .iter()
+                    .enumerate()
+                    .map(|(i, t)| {
+                        tl::enums::PollAnswer::Answer(tl::types::PollAnswer {
+                            text: tl::enums::TextWithEntities::Entities(tl::types::TextWithEntities { text: t.trim().to_string(), entities: Vec::new() }),
+                            option: vec![i as u8],
+                            media: None,
+                            added_by: None,
+                            date: None,
+                        })
+                    })
+                    .collect();
+                let poll = tl::types::Poll {
+                    id: 0,
+                    closed: false,
+                    public_voters: false,
+                    multiple_choice: multi && !quiz,
+                    quiz,
+                    open_answers: false,
+                    revoting_disabled: false,
+                    shuffle_answers: false,
+                    hide_results_until_close: false,
+                    creator: false,
+                    subscribers_only: false,
+                    question: tl::enums::TextWithEntities::Entities(tl::types::TextWithEntities { text: p[0].trim().to_string(), entities: Vec::new() }),
+                    answers,
+                    close_period: None,
+                    close_date: None,
+                    countries_iso2: None,
+                    hash: 0,
+                };
+                tl::enums::InputMedia::Poll(tl::types::InputMediaPoll {
+                    poll: tl::enums::Poll::Poll(poll),
+                    correct_answers: if quiz { correct.map(|c| vec![c as i32]) } else { None },
+                    attached_media: None,
+                    solution: None,
+                    solution_entities: None,
+                    solution_media: None,
+                })
+            }
+            _ => return Err("Noma'lum tur".to_string()),
+        };
+        let mut msg = grammers_client::message::InputMessage::new().reply_to(reply).silent(l[2].trim() == "1").media(media);
+        if let Some(t) = schedule_of(&l[3]) {
+            msg = msg.schedule_date(Some(t));
+        }
+        let m = client.send_message(peer, msg).await.map_err(|e| e.to_string())?;
+        Ok(json!({"ok": true, "id": m.id()}))
+    })
+}
+
+/// Rejalashtirilgan xabarlar: `arg` = `"<suhbat>"`. Javob `{"messages":[{"id","date","text"}]}`.
+#[no_mangle]
+pub extern "C" fn rust_tg_scheduled(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 30, |client, arg| async move {
+        let peer = resolve_peer(&client, arg.trim()).await?;
+        let ip: tl::enums::InputPeer = peer.into();
+        let res = client
+            .invoke(&tl::functions::messages::GetScheduledHistory { peer: ip, hash: 0 })
+            .await
+            .map_err(|e| e.to_string())?;
+        let msgs = match res {
+            tl::enums::messages::Messages::Messages(m) => m.messages,
+            tl::enums::messages::Messages::Slice(m) => m.messages,
+            tl::enums::messages::Messages::ChannelMessages(m) => m.messages,
+            _ => Vec::new(),
+        };
+        let mut out = Vec::new();
+        for m in msgs {
+            if let tl::enums::Message::Message(m) = m {
+                let text = if m.message.is_empty() { "Media".to_string() } else { m.message };
+                out.push(json!({"id": m.id, "date": m.date, "text": text}));
+            }
+        }
+        out.sort_by_key(|v| v["date"].as_i64().unwrap_or(0));
+        Ok(json!({"messages": out}))
+    })
+}
+
+/// Rejalashtirilganlar ustida amal: `arg` = `"<suhbat>\n<send|delete>\n<id,id,..>"`.
+#[no_mangle]
+pub extern "C" fn rust_tg_scheduled_act(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 30, |client, arg| async move {
+        let l = lines(&arg, 3);
+        let peer = resolve_peer(&client, &l[0]).await?;
+        let ip: tl::enums::InputPeer = peer.into();
+        let id = ids_of(&l[2]);
+        if id.is_empty() {
+            return Err("Xabar ko'rsatilmagan".to_string());
+        }
+        if l[1].trim() == "send" {
+            client.invoke(&tl::functions::messages::SendScheduledMessages { peer: ip, id }).await.map_err(|e| e.to_string())?;
+        } else {
+            client.invoke(&tl::functions::messages::DeleteScheduledMessages { peer: ip, id }).await.map_err(|e| e.to_string())?;
+        }
+        Ok(json!({"ok": true}))
+    })
+}

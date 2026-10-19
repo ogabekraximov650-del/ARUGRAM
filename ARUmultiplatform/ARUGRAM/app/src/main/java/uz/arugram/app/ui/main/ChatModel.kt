@@ -193,6 +193,27 @@ class ChatModel(val chat: ChatRow, private val context: Context) {
         }
     }
 
+    /** Ovozsiz yoki rejalashtirilgan matn (`schedule` — unix soniya, 0 — hozir). */
+    fun sendEx(text: String, replyTo: Int, silent: Boolean, schedule: Long, onFail: (() -> Unit)? = null) {
+        sending++
+        scope.launch {
+            val r = withContext(Dispatchers.IO) { RustCore.tgSendEx(chat.spec, replyTo, silent, schedule, text) }
+            sending--
+            if (schedule > 0 && r.optString("error").isEmpty()) error = "Xabar rejalashtirildi"
+            after(r, onFail)
+        }
+    }
+
+    /** Joylashuv / kontakt / so'rovnoma. */
+    fun sendSpecial(kind: String, payload: String, replyTo: Int, silent: Boolean = false, schedule: Long = 0) {
+        sending++
+        scope.launch {
+            val r = withContext(Dispatchers.IO) { RustCore.tgSendSpecial(chat.spec, replyTo, silent, schedule, kind, payload) }
+            sending--
+            after(r)
+        }
+    }
+
     fun edit(msg: MsgRow, text: String) {
         scope.launch {
             val r = withContext(Dispatchers.IO) { RustCore.tgEdit(chat.spec, msg.id, text) }

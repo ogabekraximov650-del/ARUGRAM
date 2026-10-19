@@ -62,7 +62,7 @@ class ChatsModel(private val context: android.content.Context) {
 
     private fun sort(list: List<ChatRow>) = list.sortedWith(compareByDescending<ChatRow> { it.pinned }.thenByDescending { it.date })
 
-    private fun parse(arr: org.json.JSONArray?): List<ChatRow> = buildList {
+    fun parse(arr: org.json.JSONArray?): List<ChatRow> = buildList {
         for (i in 0 until (arr?.length() ?: 0)) {
             val o = arr!!.getJSONObject(i)
             add(

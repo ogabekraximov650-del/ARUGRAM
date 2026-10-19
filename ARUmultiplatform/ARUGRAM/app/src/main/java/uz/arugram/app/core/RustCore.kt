@@ -198,6 +198,20 @@ object RustCore {
 
     fun tgStories() = call { it.rust_tg_stories() }
 
+    fun tgSendEx(spec: String, replyId: Int, silent: Boolean, schedule: Long, text: String) =
+        call { it.rust_tg_send_ex("$spec\n$replyId\n${if (silent) 1 else 0}\n$schedule\n$text") }
+
+    fun tgSendSpecial(spec: String, replyId: Int, silent: Boolean, schedule: Long, kind: String, payload: String) =
+        call { it.rust_tg_send_special("$spec\n$replyId\n${if (silent) 1 else 0}\n$schedule\n$kind\n$payload") }
+
+    fun tgScheduled(spec: String) = call { it.rust_tg_scheduled(spec) }
+
+    fun tgScheduledAct(spec: String, act: String, ids: List<Int>) = call { it.rust_tg_scheduled_act("$spec\n$act\n${ids.joinToString(",")}") }
+
+    fun tgArchived() = call { it.rust_tg_archived() }
+
+    fun tgArchive(spec: String, archive: Boolean) = call { it.rust_tg_archive("$spec\n${if (archive) 1 else 0}") }
+
     fun tgSecretList() = call { it.rust_tg_secret_list() }
 
     fun tgSecretMessages(eid: Int) = call { it.rust_tg_secret_messages("$eid") }

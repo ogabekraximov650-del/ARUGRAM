@@ -10,7 +10,9 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -128,6 +130,7 @@ private val Emojis = ("😀 😃 😄 😁 😆 😅 😂 🤣 😊 😇 🙂 �
  * Xabar yozish paneli (DrKLO `ChatActivityEnterView`): chapda emoji, o'rtada matn maydoni (6 qatorgacha), o'ngda — skrepka va mikrofon
  * (matn bo'lsa — ko'k "yuborish"). Tepada javob/tahrir paneli. Ovoz yozilayotganda — qizil nuqta, vaqt, "Bekor qilish" va yuborish.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ChatInputBar(
     draft: TextFieldValue,
@@ -140,6 +143,8 @@ fun ChatInputBar(
     onSendFile: (File, String, String) -> Unit,
     onSendVoice: (File, Double) -> Unit,
     onSendSticker: (Sticker) -> Unit,
+    onSendEx: (silent: Boolean, schedule: Long) -> Unit = { _, _ -> },
+    onSendSpecial: (kind: String, payload: String) -> Unit = { _, _ -> },
 ) {
     val c = LocalTg.current
     val ctx = LocalContext.current
@@ -150,6 +155,43 @@ fun ChatInputBar(
     var recording by remember { mutableStateOf(false) }
     var recSeconds by remember { mutableStateOf(0.0) }
     val recorder = remember { VoiceRecorder(ctx) }
+    var sendMenu by remember { mutableStateOf(false) }
+    var pollForm by remember { mutableStateOf(false) }
+    var toast by remember { mutableStateOf<String?>(null) }
+
+    // Joylashuv: oxirgi ma'lum joy (GPS yoki tarmoq) yuboriladi.
+    fun sendLocation() {
+        val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as? android.location.LocationManager
+        val loc = runCatching {
+            listOf(android.location.LocationManager.GPS_PROVIDER, android.location.LocationManager.NETWORK_PROVIDER, android.location.LocationManager.PASSIVE_PROVIDER)
+                .mapNotNull { runCatching { lm?.getLastKnownLocation(it) }.getOrNull() }.maxByOrNull { it.time }
+        }.getOrNull()
+        if (loc == null) toast = "Joylashuv aniqlanmadi — qurilmada geolokatsiyani yoqing" else onSendSpecial("geo", "${loc.latitude},${loc.longitude}")
+    }
+    val locationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok -> if (ok) sendLocation() else toast = "Joylashuvga ruxsat berilmadi" }
+    // Kontakt: telefon raqamlar ro'yxatidan tanlanadi (qo'shimcha ruxsat kerak emas).
+    val contactPicker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
+        val uri = res.data?.data ?: return@rememberLauncherForActivityResult
+        runCatching {
+            ctx.contentResolver.query(uri, arrayOf(android.provider.ContactsContract.CommonDataKinds.Phone.NUMBER, android.provider.ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME), null, null, null)?.use { cur ->
+                if (cur.moveToFirst()) {
+                    val number = cur.getString(0).orEmpty().replace("|", "")
+                    val name = cur.getString(1).orEmpty().replace("|", "")
+                    onSendSpecial("contact", "$number|$name|")
+                }
+            }
+        }
+    }
+    // Rejalashtirish: avval sana, so'ng vaqt.
+    fun pickSchedule() {
+        val now = java.util.Calendar.getInstance()
+        android.app.DatePickerDialog(ctx, { _, y, m, d ->
+            android.app.TimePickerDialog(ctx, { _, hh, mm ->
+                val t = java.util.Calendar.getInstance().apply { set(y, m, d, hh, mm, 0); set(java.util.Calendar.MILLISECOND, 0) }
+                if (t.timeInMillis <= System.currentTimeMillis() + 10_000) toast = "Kelajakdagi vaqtni tanlang" else onSendEx(false, t.timeInMillis / 1000)
+            }, now.get(java.util.Calendar.HOUR_OF_DAY), now.get(java.util.Calendar.MINUTE), true).show()
+        }, now.get(java.util.Calendar.YEAR), now.get(java.util.Calendar.MONTH), now.get(java.util.Calendar.DAY_OF_MONTH)).show()
+    }
 
     fun pick(uri: Uri?, kind: String) {
         if (uri == null) return
@@ -183,12 +225,39 @@ fun ChatInputBar(
                 MenuItem(R.drawable.msg_photos, "Rasm") { imagePicker.launch("image/*") },
                 MenuItem(R.drawable.input_video, "Video") { videoPicker.launch("video/*") },
                 MenuItem(R.drawable.files_internal, "Fayl") { filePicker.launch("*/*") },
+                MenuItem(R.drawable.msg_location, "Joylashuv") {
+                    if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) sendLocation()
+                    else locationPermission.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+                },
+                MenuItem(R.drawable.msg_contacts, "Kontakt") {
+                    contactPicker.launch(android.content.Intent(android.content.Intent.ACTION_PICK, android.provider.ContactsContract.CommonDataKinds.Phone.CONTENT_URI))
+                },
+                MenuItem(R.drawable.msg_select, "So‘rovnoma") { pollForm = true },
             ),
             onDismiss = { attachMenu = false },
         )
     }
 
+    if (sendMenu) {
+        PopupMenu(
+            listOf(
+                MenuItem(R.drawable.input_notify_off, "Ovozsiz yuborish") { onSendEx(true, 0) },
+                MenuItem(R.drawable.input_schedule, "Rejalashtirish") { pickSchedule() },
+            ),
+            onDismiss = { sendMenu = false },
+        )
+    }
+    if (pollForm) {
+        TgForm("Yangi so‘rovnoma", listOf("Savol", "Variant 1", "Variant 2", "Variant 3 (ixtiyoriy)", "Variant 4 (ixtiyoriy)"), "Yuborish", onConfirm = { v ->
+            pollForm = false
+            val opts = v.drop(1).map { it.trim().replace("|", "") }.filter { it.isNotEmpty() }
+            if (v[0].isBlank() || opts.size < 2) toast = "Savol va kamida 2 ta variant kiriting"
+            else onSendSpecial("poll", (listOf(v[0].trim().replace("|", ""), "0", "0", "0") + opts).joinToString("|"))
+        }, onDismiss = { pollForm = false })
+    }
+    LaunchedEffect(toast) { if (toast != null) { delay(2500); toast = null } }
     Column(Modifier.fillMaxWidth().background(c.bar).navigationBarsPadding().imePadding()) {
+        if (toast != null) BasicText(toast.orEmpty(), Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), style = TextStyle(color = c.red, fontSize = 13.sp))
         if (!canWrite) {
             Box(Modifier.fillMaxWidth().height(48.dp), contentAlignment = Alignment.Center) {
                 BasicText("Bu yerda xabar yozib bo‘lmaydi", style = TextStyle(color = c.gray, fontSize = 15.sp))
@@ -246,7 +315,7 @@ fun ChatInputBar(
                         }, contentAlignment = Alignment.Center) { TgIcon(R.drawable.input_mic, c.gray) }
                     }
                 } else {
-                    Box(Modifier.size(48.dp).clickable(onClick = onSend), contentAlignment = Alignment.Center) { SendIcon(Blue) }
+                    Box(Modifier.size(48.dp).combinedClickable(onClick = onSend, onLongClick = { sendMenu = true }), contentAlignment = Alignment.Center) { SendIcon(Blue) }
                 }
             }
             if (emojiPanel) {

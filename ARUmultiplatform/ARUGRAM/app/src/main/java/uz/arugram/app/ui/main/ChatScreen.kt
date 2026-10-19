@@ -89,6 +89,7 @@ fun ChatScreen(chat: ChatRow, chats: List<ChatRow>, typing: Boolean, onBack: () 
     var forwardIds by remember { mutableStateOf<List<Int>?>(null) }
     var deleteIds by remember { mutableStateOf<List<Int>?>(null) }
     var chatMenu by remember { mutableStateOf(false) }
+    var scheduledOpen by remember { mutableStateOf(false) }
     var confirmDeleteChat by remember { mutableStateOf(false) }
     var searching by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
@@ -302,6 +303,18 @@ fun ChatScreen(chat: ChatRow, chats: List<ChatRow>, typing: Boolean, onBack: () 
                 onSendFile = { f, kind, extra -> model.sendFile(f, kind, replyTo?.id ?: 0, "", extra); replyTo = null; scope.launch { listState.animateScrollToItem(0) } },
                 onSendVoice = { f, secs -> model.sendFile(f, "voice", replyTo?.id ?: 0, "", "$secs:0:0"); replyTo = null },
                 onSendSticker = { st -> model.sendSticker(st.ref, replyTo?.id ?: 0); replyTo = null; scope.launch { listState.animateScrollToItem(0) } },
+                onSendEx = { silent, schedule ->
+                    val text = draft.text.trim()
+                    if (text.isNotEmpty()) {
+                        val r = replyTo
+                        val backup = draft
+                        draft = TextFieldValue("")
+                        replyTo = null
+                        model.sendEx(text, r?.id ?: 0, silent, schedule) { draft = backup }
+                        scope.launch { listState.animateScrollToItem(0) }
+                    }
+                },
+                onSendSpecial = { kind, payload -> model.sendSpecial(kind, payload, replyTo?.id ?: 0); replyTo = null; scope.launch { listState.animateScrollToItem(0) } },
             )
         }
 
@@ -328,6 +341,7 @@ fun ChatScreen(chat: ChatRow, chats: List<ChatRow>, typing: Boolean, onBack: () 
                     MenuItem(if (chat.muted) R.drawable.msg_unmute else R.drawable.msg_mute, if (chat.muted) "Bildirishnomani yoqish" else "Bildirishnomani o‘chirish") {
                         scope.launch { withContext(Dispatchers.IO) { RustCore.tgMute(chat.spec, !chat.muted) } }
                     },
+                    MenuItem(R.drawable.input_schedule, "Rejalashtirilgan xabarlar") { scheduledOpen = true },
                     MenuItem(R.drawable.msg_clear, "Tarixni tozalash") {
                         scope.launch { withContext(Dispatchers.IO) { RustCore.tgClearHistory(chat.spec) }; model.refresh(); bulletin = "Tarix tozalandi" }
                     },
@@ -336,6 +350,7 @@ fun ChatScreen(chat: ChatRow, chats: List<ChatRow>, typing: Boolean, onBack: () 
                 onDismiss = { chatMenu = false },
             )
         }
+        if (scheduledOpen) ScheduledDialog(chat, onDismiss = { scheduledOpen = false; model.refresh() })
         forwardIds?.let { ids ->
             ChatPicker("Uzatish", chats, onPick = { t -> model.forwardTo(t, ids); forwardIds = null; selected.clear(); bulletin = "Xabar uzatildi" }, onDismiss = { forwardIds = null })
         }

@@ -55,6 +55,7 @@ private sealed interface Dest {
     data class Info(val row: ChatRow) : Dest
     data object Search : Dest
     data object NewChat : Dest
+    data object Archive : Dest
     data object NewGroup : Dest
     data class AddMembers(val row: ChatRow) : Dest
     data class Settings(val page: String) : Dest
@@ -86,6 +87,11 @@ fun HomeScreen(auth: AuthModel) {
     LaunchedEffect(toast) { if (toast != null) { delay(3000); toast = null } }
     var stories by remember { mutableStateOf<List<StoryPeer>>(emptyList()) }
     var storyStart by remember { mutableStateOf<Int?>(null) }
+    var archived by remember { mutableStateOf<List<ChatRow>>(emptyList()) }
+    suspend fun loadArchived() {
+        val j = withContext(Dispatchers.IO) { RustCore.tgArchived() }
+        if (j.optString("error").isEmpty()) archived = model.parse(j.optJSONArray("dialogs"))
+    }
     val storyPicker = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) scope.launch {
             toast = "Hikoya joylanmoqda..."
@@ -106,6 +112,7 @@ fun HomeScreen(auth: AuthModel) {
         }
         folders = parseFolders(withContext(Dispatchers.IO) { RustCore.tgFolders() })
         stories = parseStories(withContext(Dispatchers.IO) { RustCore.tgStories() })
+        loadArchived()
         if (settingsPrefs(ctx).getBoolean("notify", true)) NotifyService.start(ctx)
     }
     LaunchedEffect(ui.chats.map { it.id }, me?.id) { AvatarCache.ensure(ctx, (ui.chats.filter { !it.self }.map { if (it.peerId != 0L) it.peerId else it.id } + listOfNotNull(me?.id)).distinct()) }
@@ -160,7 +167,7 @@ fun HomeScreen(auth: AuthModel) {
                         MainTab.Chats -> ChatsTab(
                             ui = ui, folders = folders, folder = folder, onFolder = { folder = it }, typing = typing,
                             onSearch = { stack.add(Dest.Search) }, onOpen = ::open, onLongClick = { menuFor = it }, onRetry = { model.load() },
-                            stories = stories, meId = me?.id, onStory = { storyStart = it }, onAddStory = { storyPicker.launch(arrayOf("image/*", "video/*")) },
+                            archivedCount = archived.size, onArchive = { stack.add(Dest.Archive) }, stories = stories, meId = me?.id, onStory = { storyStart = it }, onAddStory = { storyPicker.launch(arrayOf("image/*", "video/*")) },
                         )
                         MainTab.Contacts -> ContactsTab(bottomPadding = 80.dp, onOpen = ::open, extra = listOf("Kontakt qo‘shish" to { addContact = true }))
                         MainTab.Settings -> SettingsTab(me, meContact, 80.dp, onOpenChat = { r -> open(r) }, onNavigate = { stack.add(Dest.Settings(it)) }, onLogout = { auth.logout() }, savedChat = ui.chats.firstOrNull { it.self })
@@ -206,6 +213,14 @@ fun HomeScreen(auth: AuthModel) {
                 onOpenChat = { r -> open(r) },
                 onAddMembers = { stack.add(Dest.AddMembers(d.row)) },
             )
+            Dest.Archive -> Column(Modifier.fillMaxSize().background(c.bg).statusBarsPadding()) {
+                Row(Modifier.fillMaxWidth().height(56.dp).background(c.bar), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(56.dp).clickable { stack.removeAt(stack.lastIndex) }, contentAlignment = Alignment.Center) { uz.arugram.app.ui.components.BackArrowIcon(c.text) }
+                    BasicText("Arxivlangan chatlar", style = TextStyle(color = c.text, fontSize = 20.sp, fontWeight = FontWeight.Bold))
+                }
+                if (archived.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { BasicText("Arxiv bo‘sh", style = TextStyle(color = c.gray, fontSize = 17.sp)) }
+                else ChatList(archived, typing = typing, onLongClick = { menuFor = it }, onOpen = ::open)
+            }
             Dest.Search -> SearchScreen(ui.chats, onOpen = { r -> stack.removeAt(stack.lastIndex); open(r) }, onBack = { stack.removeAt(stack.lastIndex) })
             Dest.NewChat -> Box(Modifier.fillMaxSize().background(c.bg)) {
                 ContactsTab(
@@ -242,6 +257,8 @@ fun HomeScreen(auth: AuthModel) {
                 listOf(
                     MenuItem(if (r.pinned) R.drawable.msg_unpin else R.drawable.msg_pin, if (r.pinned) "Mahkamni olib tashlash" else "Mahkamlash") { model.pin(r) },
                     MenuItem(if (r.muted) R.drawable.msg_unmute else R.drawable.msg_mute, if (r.muted) "Bildirishnomani yoqish" else "Bildirishnomani o‘chirish") { model.mute(r) },
+                    if (archived.any { it.id == r.id }) MenuItem(R.drawable.msg_unarchive, "Arxivdan chiqarish") { scope.launch { withContext(Dispatchers.IO) { RustCore.tgArchive(r.spec, false) }; model.load(); loadArchived() } }
+                    else MenuItem(R.drawable.msg_archive, "Arxivlash") { scope.launch { withContext(Dispatchers.IO) { RustCore.tgArchive(r.spec, true) }; model.load(); loadArchived() } },
                     MenuItem(R.drawable.msg_markread, "O‘qilgan deb belgilash") { scope.launch { withContext(Dispatchers.IO) { RustCore.tgMarkRead(r.spec) }; model.load() } },
                     MenuItem(R.drawable.msg_delete, "O‘chirish", danger = true) { deleteFor = r },
                 ),
@@ -261,6 +278,7 @@ fun HomeScreen(auth: AuthModel) {
 private fun ChatsTab(
     ui: ChatsUi, folders: List<Folder>, folder: Int, onFolder: (Int) -> Unit, typing: Map<Long, Long>,
     onSearch: () -> Unit, onOpen: (ChatRow) -> Unit, onLongClick: (ChatRow) -> Unit, onRetry: () -> Unit,
+    archivedCount: Int = 0, onArchive: () -> Unit = {},
     stories: List<StoryPeer> = emptyList(), meId: Long? = null, onStory: (Int) -> Unit = {}, onAddStory: () -> Unit = {},
 ) {
     val c = LocalTg.current
@@ -276,6 +294,13 @@ private fun ChatsTab(
                 FolderTabs(folders, folder, unread, onFolder)
             }
             StoriesRow(stories, meId, onOpen = onStory, onAdd = onAddStory)
+            if (archivedCount > 0) {
+                Row(Modifier.fillMaxWidth().height(48.dp).clickable(onClick = onArchive).padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+                    TgIcon(R.drawable.msg_archive, c.gray, size = 24.dp)
+                    BasicText("Arxivlangan chatlar", Modifier.padding(start = 18.dp).weight(1f), style = TextStyle(color = c.text, fontSize = 16.sp))
+                    BasicText(archivedCount.toString(), style = TextStyle(color = c.gray, fontSize = 14.sp))
+                }
+            }
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when {
