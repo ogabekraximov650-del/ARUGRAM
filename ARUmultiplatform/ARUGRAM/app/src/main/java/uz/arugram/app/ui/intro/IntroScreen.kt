@@ -58,6 +58,8 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -129,8 +131,8 @@ fun IntroScreen(
                 val lo = kotlin.math.floor(pos.toDouble()).toInt().coerceIn(0, 5)
                 val hi = (lo + 1).coerceAtMost(5)
                 val t = (pos - lo).coerceIn(0f, 1f)
-                IntroArt(lo, ph, Modifier.fillMaxSize().graphicsLayer { alpha = 1f - t; translationX = -t * 60.dp.toPx(); scaleX = 1f - 0.15f * t; scaleY = 1f - 0.15f * t })
-                if (hi != lo) IntroArt(hi, ph, Modifier.fillMaxSize().graphicsLayer { alpha = t; translationX = (1f - t) * 60.dp.toPx(); scaleX = 0.85f + 0.15f * t; scaleY = 0.85f + 0.15f * t })
+                IntroArt(lo, ph, 1f - t, Modifier.fillMaxSize().graphicsLayer { cameraDistance = 12f * density; rotationY = 70f * t; alpha = 1f - t; translationX = -t * 70.dp.toPx(); scaleX = 1f - 0.2f * t; scaleY = 1f - 0.2f * t })
+                if (hi != lo) IntroArt(hi, ph, t, Modifier.fillMaxSize().graphicsLayer { cameraDistance = 12f * density; rotationY = -70f * (1f - t); alpha = t; translationX = (1f - t) * 70.dp.toPx(); scaleX = 0.8f + 0.2f * t; scaleY = 0.8f + 0.2f * t })
             }
 
             // ---- Sahifalar: sarlavha va matn
@@ -257,145 +259,201 @@ private fun StartButton(label: String, enabled: Boolean, morph: Float, modifier:
     }
 }
 
-/** Quyosh <-> oy (Telegram'da Lottie `sun`); rangi — tugma ko'k rangi. */
+/** Quyosh/oy (Telegram'da Lottie `sun`): tungi mavzuda quyosh, kunduzgida oy ko'rinadi (bosilsa ikkinchisiga o'tadi). Rangi — tugma ko'k rangi. */
 @Composable
 private fun SunMoon(dark: Boolean, modifier: Modifier) {
     val t by animateFloatAsState(if (dark) 1f else 0f, tween(450, easing = FastOutSlowInEasing), label = "sunMoon")
     val bg = LocalTg.current.bg
-    Canvas(modifier.graphicsLayer { rotationZ = t * 180f }) {
+    Canvas(modifier.graphicsLayer { rotationZ = (1f - t) * -90f }) {
         val ctr = Offset(size.width / 2f, size.height / 2f)
-        val r = size.minDimension * (0.26f + 0.02f * t)
-        drawCircle(TgBlue, r, ctr)
-        if (t > 0f) drawCircle(bg, r * 0.85f, Offset(ctr.x + r * 0.7f * t, ctr.y - r * 0.55f * t))
-        val rays = 1f - t
-        if (rays > 0.01f) {
+        val u = 1.dp.toPx()
+        // Quyosh: to'ldirilgan doira (diametri 14 dp) va atrofida 8 ta qisqa nur.
+        if (t > 0.01f) {
+            drawCircle(TgBlue.copy(alpha = t), 7f * u * (0.6f + 0.4f * t), ctr)
             for (i in 0 until 8) {
                 val a = i * PI / 4
-                val r1 = r * 1.35f
-                val r2 = r * (1.35f + 0.5f * rays)
-                drawLine(TgBlue.copy(alpha = rays), Offset(ctr.x + (cos(a) * r1).toFloat(), ctr.y + (sin(a) * r1).toFloat()), Offset(ctr.x + (cos(a) * r2).toFloat(), ctr.y + (sin(a) * r2).toFloat()), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
+                val r1 = 10.5f * u
+                val r2 = 12.5f * u
+                drawLine(TgBlue.copy(alpha = t), Offset(ctr.x + (cos(a) * r1).toFloat(), ctr.y + (sin(a) * r1).toFloat()), Offset(ctr.x + (cos(a) * r2).toFloat(), ctr.y + (sin(a) * r2).toFloat()), strokeWidth = 1.6f * u, cap = StrokeCap.Round)
             }
         }
+        // Oy: yarim oy shakli (doiradan siljigan doira kesib olinadi).
+        if (t < 0.99f) {
+            val moon = Path().apply {
+                addOval(androidx.compose.ui.geometry.Rect(ctr, 9f * u))
+            }
+            val cut = Path().apply { addOval(androidx.compose.ui.geometry.Rect(Offset(ctr.x + 5f * u, ctr.y - 4f * u), 8f * u)) }
+            val crescent = Path.combine(androidx.compose.ui.graphics.PathOperation.Difference, moon, cut)
+            drawPath(crescent, TgBlue.copy(alpha = 1f - t))
+        }
     }
 }
+
 
 // ---------------------------------------------------------------- sahifa rasmlari
+// Rasmlar Telegram kirish oynasining skrinshotidan o'lchab chizilgan (o'lchamlar 4x kattalashtirilgan kesimning pikselida, /4 = dp);
+// markaz — 200x150 dp maydonning o'rtasi.
+
+private val RedBox = Color(0xFFF64938)
+private val RedDark = Color(0xFFD23929)
+private val Navy = Color(0xFF1F3447)
+private val NeedleRed = Color(0xFFE84C3D)
+private val ArcRed = Color(0xFFF84735)
+private val BubbleBlue = Color(0xFF2F5A84)
+private val SafeBody = Color(0xFFC7CED4)
+private val SafeDisc = Color(0xFFACB3BB)
+private val SafeLight = Color(0xFFCACFD5)
+private val KeyGray = Color(0xFF61666A)
 
 @Composable
-private fun IntroArt(page: Int, ph: Float, modifier: Modifier) {
-    val c = LocalTg.current
-    val blue = TgBlue
+private fun IntroArt(page: Int, ph: Float, appear: Float, modifier: Modifier) {
     Canvas(modifier) {
-        val s = size.minDimension
+        val u = 1.dp.toPx()
         val ctr = Offset(size.width / 2f, size.height / 2f)
-        // Orqa fon: yumshoq nafas oluvchi doira.
-        val breathe = 1f + 0.04f * sin(ph * 2 * PI).toFloat()
-        drawCircle(blue.copy(alpha = 0.12f), s * 0.5f * breathe, ctr)
-        drawCircle(blue.copy(alpha = 0.10f), s * 0.36f * breathe, ctr)
+        fun p(x: Float, y: Float) = Offset(ctr.x + (x - 360f) / 4f * u, ctr.y + (y - 346f) / 4f * u)
+        fun l(v: Float) = v / 4f * u
         when (page) {
-            0 -> plane(ctr, s, ph, blue)
-            1 -> bolt(ctr, s, ph, blue)
-            2 -> bubbles(ctr, s, ph, blue, c.bg)
-            3 -> stars(ctr, s, ph, blue)
-            4 -> lock(ctr, s, ph, blue, c.bg)
-            else -> cloud(ctr, s, ph, blue, c.bg)
+            0, 5 -> logo(::p, ::l, ph)
+            1 -> speedometer(::p, ::l, ph, appear)
+            2 -> gift(::p, ::l, ph)
+            3 -> infinity(::p, ::l, ph)
+            else -> safe(::p, ::l, ph)
         }
     }
 }
 
-private fun DrawScope.plane(ctr: Offset, s: Float, ph: Float, col: Color) {
-    val bob = sin(ph * 2 * PI).toFloat() * s * 0.03f
-    // Iz: orqada kichrayib boruvchi doiralar
-    for (i in 1..4) drawCircle(col.copy(alpha = 0.35f - i * 0.07f), s * (0.035f - i * 0.005f), Offset(ctr.x - s * (0.22f + i * 0.07f), ctr.y + s * 0.1f + bob + i * s * 0.02f))
-    rotate(-18f + sin(ph * 2 * PI).toFloat() * 4f, Offset(ctr.x, ctr.y + bob)) {
-        val x = ctr.x; val y = ctr.y + bob
-        val body = Path().apply {
-            moveTo(x - s * 0.26f, y + s * 0.02f); lineTo(x + s * 0.28f, y - s * 0.14f); lineTo(x + s * 0.05f, y + s * 0.2f)
-            lineTo(x - s * 0.02f, y + s * 0.06f); close()
-        }
-        drawPath(body, col)
-        val fold = Path().apply { moveTo(x - s * 0.02f, y + s * 0.06f); lineTo(x + s * 0.28f, y - s * 0.14f); lineTo(x - s * 0.06f, y + s * 0.14f); close() }
-        drawPath(fold, Color.White.copy(alpha = 0.35f))
+private fun DrawScope.logo(p: (Float, Float) -> Offset, l: (Float) -> Float, ph: Float) {
+    drawCircle(Color(0xFF229AF0), l(308f), p(360f, 346f))
+    val plane = Path().apply {
+        moveTo(p(178f, 366).x, p(178f, 366).y)
+        lineTo(p(484f, 245).x, p(484f, 245).y)
+        lineTo(p(446f, 490).x, p(446f, 490).y)
+        lineTo(p(414f, 486).x, p(414f, 486).y)
+        lineTo(p(316f, 418).x, p(316f, 418).y)
+        lineTo(p(408f, 312).x, p(408f, 312).y)
+        lineTo(p(332f, 372).x, p(332f, 372).y)
+        lineTo(p(262f, 393).x, p(262f, 393).y)
+        close()
+    }
+    drawPath(plane, Color.White)
+    drawPath(plane, Color.White, style = Stroke(l(20f), join = StrokeJoin.Round))
+}
+
+private fun DrawScope.speedometer(p: (Float, Float) -> Offset, l: (Float) -> Float, ph: Float, appear: Float) {
+    val c = p(360f, 346f)
+    drawCircle(Navy, l(304f), c)
+    drawCircle(Color.White, l(276f), c)
+    drawCircle(Color(0xFFE3E5E5), l(240f), c, style = Stroke(l(14f)))
+    // Qizil yoy: tashqi radiusi 241, ichki chetining radiusi burchakka qarab 172..241 (chap yuqorida uchi o'tkir).
+    val outer = 241f
+    val inner = listOf(-136f to 241f, -112f to 226f, -90f to 211f, -45f to 201f, -2f to 188f, 22f to 172f)
+    fun pol(deg: Float, r: Float): Offset {
+        val a = Math.toRadians(deg.toDouble())
+        return Offset(c.x + (cos(a) * l(r)).toFloat(), c.y + (sin(a) * l(r)).toFloat())
+    }
+    val arc = Path()
+    var first = true
+    var d = -136f
+    while (d <= 22f) {
+        val o = pol(d, outer)
+        if (first) { arc.moveTo(o.x, o.y); first = false } else arc.lineTo(o.x, o.y)
+        d += 2f
+    }
+    for (k in inner.indices.reversed()) {
+        val o = pol(inner[k].first, inner[k].second)
+        arc.lineTo(o.x, o.y)
+    }
+    arc.close()
+    drawPath(arc, ArcRed)
+    // Mil: sahifa ko'ringanda chapdan o'ngga yuguradi, so'ng sal tebranib turadi.
+    val e = FastOutSlowInEasing.transform(appear.coerceIn(0f, 1f))
+    val ang = 29f - (1f - e) * 120f + sin(ph * 2 * PI).toFloat() * 2f * e
+    val a = Math.toRadians(ang.toDouble())
+    val dx = cos(a).toFloat(); val dy = sin(a).toFloat()
+    val tail = l(88f); val head = l(222f)
+    drawLine(NeedleRed, Offset(c.x - dx * tail, c.y - dy * tail), Offset(c.x + dx * head, c.y + dy * head), strokeWidth = l(20f), cap = StrokeCap.Round)
+    drawCircle(Navy, l(40f), c)
+}
+
+private fun DrawScope.gift(p: (Float, Float) -> Offset, l: (Float) -> Float, ph: Float) {
+    val tl = p(72f, 58f)
+    val sq = Size(l(576f), l(577f))
+    val cr = CornerRadius(l(105f))
+    val drift = sin(ph * 2 * PI).toFloat()
+    drawRoundRect(RedBox, tl, sq, cr)
+    clipPath(Path().apply { addRoundRect(androidx.compose.ui.geometry.RoundRect(tl.x, tl.y, tl.x + sq.width, tl.y + sq.height, cr)) }) {
+        // Xira belgilar (qalam, tabassum, joy, xabar, kamera) — sekin suzib yuradi.
+        val dy = drift * l(6f)
+        rotate(40f, p(205f, 135f)) { drawRoundRect(RedDark, p(182f, 70f), Size(l(46f), l(130f)), CornerRadius(l(10f))) }
+        drawCircle(RedDark, l(80f), p(505f, 100f), style = Stroke(l(16f)))
+        drawCircle(RedDark, l(10f), p(480f, 95f)); drawCircle(RedDark, l(10f), p(535f, 90f))
+        drawCircle(RedDark, l(55f), p(105f, 365f)); drawRoundRect(RedDark, p(70f, 380f), Size(l(90f), l(90f)), CornerRadius(l(10f)))
+        drawRoundRect(RedDark, p(160f, 515f + dy), Size(l(145f), l(115f)), CornerRadius(l(22f)))
+        drawCircle(RedBox, l(11f), p(230f, 566f + dy))
+        drawRoundRect(RedDark, p(505f, 462f - dy), Size(l(145f), l(120f)), CornerRadius(l(18f)))
+        drawCircle(RedBox, l(33f), p(577f, 520f - dy), style = Stroke(l(10f)))
+    }
+    // Oq lentalar: vertikal (kengligi 48) va gorizontal (kengligi 46, uchlari qiyshiq).
+    drawRect(Color.White, p(336f, 38f), Size(l(48f), l(617f)))
+    val hb = Path().apply {
+        moveTo(p(65f, 287f).x, p(65f, 287f).y); lineTo(p(715f, 287f).x, p(715f, 287f).y)
+        lineTo(p(688f, 333f).x, p(688f, 333f).y); lineTo(p(38f, 333f).x, p(38f, 333f).y); close()
+    }
+    drawPath(hb, Color.White)
+    // Kapalak: to'rtta halqa, ichi qizil tomchi.
+    val loops = listOf(Offset(272f, 228f), Offset(448f, 228f), Offset(272f, 392f), Offset(448f, 392f))
+    for ((k, o) in loops.withIndex()) {
+        val c = p(o.x, o.y)
+        drawOval(Color.White, Offset(c.x - l(66f), c.y - l(72f)), Size(l(132f), l(144f)))
+        val hx = if (k % 2 == 0) 20f else -20f
+        val hy = if (k < 2) 10f else -10f
+        val hc = p(o.x + hx, o.y + hy)
+        drawOval(RedBox, Offset(hc.x - l(42f), hc.y - l(46f)), Size(l(84f), l(92f)))
+    }
+    drawRect(Color.White, p(336f, 38f), Size(l(48f), l(60f)))
+}
+
+private fun DrawScope.infinity(p: (Float, Float) -> Offset, l: (Float) -> Float, ph: Float) {
+    // Pufak: o'ng chetida tekis kesilgan (Telegram'dagidek), pastki chapda dum.
+    clipRect(right = p(685f, 0f).x) {
+        drawRoundRect(BubbleBlue, p(38f, 88f), Size(l(760f), l(474f)), CornerRadius(l(85f)))
+    }
+    val tail = Path().apply {
+        moveTo(p(218f, 555f).x, p(218f, 555f).y); lineTo(p(195f, 655f).x, p(195f, 655f).y)
+        lineTo(p(236f, 655f).x, p(236f, 655f).y); lineTo(p(366f, 562f).x, p(366f, 562f).y); lineTo(p(366f, 555f).x, p(366f, 555f).y); close()
+    }
+    drawPath(tail, BubbleBlue)
+    // Cheksizlik belgisi (qalinligi 46).
+    val inf = Path().apply {
+        moveTo(p(360f, 322f).x, p(360f, 322f).y)
+        cubicTo(p(405f, 262f).x, p(405f, 262f).y, p(455f, 223f).x, p(455f, 223f).y, p(510f, 223f).x, p(510f, 223f).y)
+        cubicTo(p(555f, 223f).x, p(555f, 223f).y, p(585f, 265f).x, p(585f, 265f).y, p(585f, 322f).x, p(585f, 322f).y)
+        cubicTo(p(585f, 379f).x, p(585f, 379f).y, p(555f, 421f).x, p(555f, 421f).y, p(510f, 421f).x, p(510f, 421f).y)
+        cubicTo(p(455f, 421f).x, p(455f, 421f).y, p(405f, 382f).x, p(405f, 382f).y, p(360f, 322f).x, p(360f, 322f).y)
+        cubicTo(p(315f, 262f).x, p(315f, 262f).y, p(265f, 223f).x, p(265f, 223f).y, p(210f, 223f).x, p(210f, 223f).y)
+        cubicTo(p(165f, 223f).x, p(165f, 223f).y, p(135f, 265f).x, p(135f, 265f).y, p(135f, 322f).x, p(135f, 322f).y)
+        cubicTo(p(135f, 379f).x, p(135f, 379f).y, p(165f, 421f).x, p(165f, 421f).y, p(210f, 421f).x, p(210f, 421f).y)
+        cubicTo(p(265f, 421f).x, p(265f, 421f).y, p(315f, 382f).x, p(315f, 382f).y, p(360f, 322f).x, p(360f, 322f).y)
+        close()
+    }
+    drawPath(inf, Color.White, style = Stroke(l(46f), cap = StrokeCap.Round, join = StrokeJoin.Round))
+    // Mayda yulduzchalar: miltillaydi.
+    val dots = listOf(93f to 188f, 147f to 153f, 251f to 187f, 342f to 198f, 424f to 168f, 480f to 115f, 516f to 178f, 623f to 458f, 468f to 473f, 306f to 496f, 280f to 578f, 230f to 252f, 457f to 265f, 520f to 383f)
+    for ((k, d) in dots.withIndex()) {
+        val tw = 0.5f + 0.5f * sin((ph * 2 + k * 0.23f) * 2 * PI).toFloat()
+        drawCircle(Color.White.copy(alpha = 0.35f + 0.65f * tw), l(3f + 2f * tw), p(d.first, d.second))
     }
 }
 
-private fun DrawScope.bubbles(ctr: Offset, s: Float, ph: Float, col: Color, bg: Color) {
-    fun bubble(cx: Float, cy: Float, w: Float, h: Float, color: Color, left: Boolean) {
-        drawRoundRect(color, Offset(cx - w / 2, cy - h / 2), Size(w, h), androidx.compose.ui.geometry.CornerRadius(h * 0.4f))
-        val tail = Path().apply {
-            val tx = if (left) cx - w * 0.3f else cx + w * 0.3f
-            moveTo(tx, cy + h / 2 - 2f); lineTo(tx + (if (left) -h * 0.3f else h * 0.3f), cy + h / 2 + h * 0.3f); lineTo(tx + (if (left) h * 0.35f else -h * 0.35f), cy + h / 2 - 2f); close()
-        }
-        drawPath(tail, color)
-    }
-    val a = (sin(ph * 2 * PI).toFloat() + 1f) / 2f
-    bubble(ctr.x - s * 0.08f, ctr.y - s * 0.12f + (a - .5f) * s * 0.03f, s * 0.5f, s * 0.24f, col, true)
-    bubble(ctr.x + s * 0.08f, ctr.y + s * 0.14f - (a - .5f) * s * 0.03f, s * 0.46f, s * 0.22f, col.copy(alpha = 0.55f), false)
-    // Yozilayotgan nuqtalar
-    for (i in 0 until 3) {
-        val k = ((sin((ph * 2 - i * 0.18f) * 2 * PI).toFloat() + 1f) / 2f)
-        drawCircle(bg, s * 0.016f + k * s * 0.008f, Offset(ctr.x - s * 0.16f + i * s * 0.08f, ctr.y - s * 0.12f))
-    }
-}
-
-private fun DrawScope.bolt(ctr: Offset, s: Float, ph: Float, col: Color) {
-    val k = 1f + 0.06f * sin(ph * 4 * PI).toFloat()
-    val x = ctr.x; val y = ctr.y
-    val path = Path().apply {
-        moveTo(x + s * 0.06f * k, y - s * 0.3f * k); lineTo(x - s * 0.16f * k, y + s * 0.04f * k); lineTo(x - s * 0.01f * k, y + s * 0.04f * k)
-        lineTo(x - s * 0.07f * k, y + s * 0.3f * k); lineTo(x + s * 0.17f * k, y - s * 0.06f * k); lineTo(x + s * 0.02f * k, y - s * 0.06f * k); close()
-    }
-    drawPath(path, col)
-    // Tezlik chiziqlari
-    for (i in 0 until 3) {
-        val m = ((ph + i / 3f) % 1f)
-        drawLine(col.copy(alpha = (1f - m) * 0.6f), Offset(ctr.x - s * (0.3f + m * 0.15f), ctr.y - s * 0.12f + i * s * 0.12f), Offset(ctr.x - s * (0.4f + m * 0.15f), ctr.y - s * 0.12f + i * s * 0.12f), strokeWidth = 3.dp.toPx(), cap = StrokeCap.Round)
-    }
-}
-
-private fun DrawScope.lock(ctr: Offset, s: Float, ph: Float, col: Color, bg: Color) {
-    val open = (sin(ph * 2 * PI).toFloat() + 1f) / 2f * s * 0.025f
-    val bx = ctr.x - s * 0.17f; val by = ctr.y - s * 0.02f
-    drawRoundRect(col, Offset(bx, by), Size(s * 0.34f, s * 0.28f), androidx.compose.ui.geometry.CornerRadius(s * 0.04f))
-    drawArc(col, 180f, 180f, false, Offset(ctr.x - s * 0.11f, by - s * 0.2f - open), Size(s * 0.22f, s * 0.4f), style = Stroke(s * 0.045f, cap = StrokeCap.Round))
-    drawCircle(bg, s * 0.032f, Offset(ctr.x, by + s * 0.1f))
-    drawLine(bg, Offset(ctr.x, by + s * 0.1f), Offset(ctr.x, by + s * 0.19f), strokeWidth = s * 0.03f, cap = StrokeCap.Round)
-}
-
-private fun DrawScope.cloud(ctr: Offset, s: Float, ph: Float, col: Color, bg: Color) {
-    val dy = sin(ph * 2 * PI).toFloat() * s * 0.02f
-    val y = ctr.y + dy
-    drawCircle(col, s * 0.12f, Offset(ctr.x - s * 0.12f, y + s * 0.03f))
-    drawCircle(col, s * 0.16f, Offset(ctr.x + s * 0.02f, y - s * 0.04f))
-    drawCircle(col, s * 0.11f, Offset(ctr.x + s * 0.17f, y + s * 0.05f))
-    drawRoundRect(col, Offset(ctr.x - s * 0.24f, y + s * 0.02f), Size(s * 0.5f, s * 0.14f), androidx.compose.ui.geometry.CornerRadius(s * 0.07f))
-    // Tushayotgan/ko'tarilayotgan strelka
-    val m = ph
-    val ay = y + s * 0.02f + (1f - m) * s * 0.05f
-    val a = (if (m < 0.2f) m / 0.2f else if (m > 0.8f) (1f - m) / 0.2f else 1f)
-    val ac = bg.copy(alpha = a)
-    drawLine(ac, Offset(ctr.x, ay + s * 0.09f), Offset(ctr.x, ay - s * 0.01f), strokeWidth = s * 0.025f, cap = StrokeCap.Round)
-    drawLine(ac, Offset(ctr.x, ay - s * 0.01f), Offset(ctr.x - s * 0.04f, ay + s * 0.03f), strokeWidth = s * 0.025f, cap = StrokeCap.Round)
-    drawLine(ac, Offset(ctr.x, ay - s * 0.01f), Offset(ctr.x + s * 0.04f, ay + s * 0.03f), strokeWidth = s * 0.025f, cap = StrokeCap.Round, )
-}
-
-private fun DrawScope.stars(ctr: Offset, s: Float, ph: Float, col: Color) {
-    fun star(cx: Float, cy: Float, r: Float, rot: Float, color: Color) {
-        val path = Path()
-        for (i in 0 until 10) {
-            val rr = if (i % 2 == 0) r else r * 0.45f
-            val a = rot + i * PI / 5 - PI / 2
-            val px = cx + (cos(a) * rr).toFloat(); val py = cy + (sin(a) * rr).toFloat()
-            if (i == 0) path.moveTo(px, py) else path.lineTo(px, py)
-        }
-        path.close()
-        drawPath(path, color, style = androidx.compose.ui.graphics.drawscope.Fill)
-        drawPath(path, color, style = Stroke(r * 0.18f, join = StrokeJoin.Round))
-    }
-    star(ctr.x, ctr.y, s * 0.2f, (ph * 2 * PI).toFloat() * 0.15f, col)
-    for (i in 0 until 5) {
-        val a = ph * 2 * PI + i * 2 * PI / 5
-        val tw = 0.5f + 0.5f * sin((ph * 3 + i * 0.4f) * 2 * PI).toFloat()
-        star(ctr.x + (cos(a) * s * 0.36f).toFloat(), ctr.y + (sin(a) * s * 0.36f).toFloat(), s * (0.03f + 0.02f * tw), 0f, col.copy(alpha = 0.4f + 0.5f * tw))
-    }
+private fun DrawScope.safe(p: (Float, Float) -> Offset, l: (Float) -> Float, ph: Float) {
+    val tl = p(72f, 58f)
+    drawRoundRect(SafeBody, tl, Size(l(576f), l(577f)), CornerRadius(l(105f)))
+    for (o in listOf(141f to 128f, 578f to 128f, 141f to 565f, 578f to 565f)) drawCircle(SafeDisc, l(19f), p(o.first, o.second))
+    val c = p(360f, 346f)
+    drawCircle(Color.Black.copy(alpha = 0.08f), l(262f), Offset(c.x, c.y + l(6f)))
+    drawCircle(Color.White, l(260f), c)
+    drawCircle(SafeDisc, l(222f), c)
+    drawCircle(SafeLight, l(116f), c)
+    drawCircle(KeyGray, l(34f), p(360f, 328f))
+    drawRoundRect(KeyGray, p(345f, 335f), Size(l(31f), l(73f)), CornerRadius(l(15f)))
 }
