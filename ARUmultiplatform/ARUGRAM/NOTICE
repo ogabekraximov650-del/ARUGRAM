@@ -1,0 +1,8 @@
+ARUGRAM — Telegram mijozi (Kotlin + Rust)
+
+Bu dastur Telegram for Android (https://github.com/DrKLO/Telegram) ning ko'rinishi, animatsiyalari va xatti-harakatlari asosida
+yozilgan hosila ishdir. Telegram for Android: Copyright (c) Nikolai Kudashov va hissa qo'shuvchilar, GNU GPL v2 yoki undan keyingi.
+
+Shu sababli ARUGRAM ham GNU General Public License v2 (yoki undan keyingi) ostida tarqatiladi (LICENSE fayliga qarang);
+manba kodi ochiq repoda e'lon qilinadi. "Telegram" nomi va logotipi Telegram FZ-LLC ga tegishli; ARUGRAM rasmiy Telegram ilovasi emas.
+Telegram API foydalanish shartlariga ko'ra o'zimizning api_id/api_hash ishlatiladi.

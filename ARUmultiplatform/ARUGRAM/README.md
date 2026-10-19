@@ -1,7 +1,8 @@
 # ARUGRAM — Telegram mijozi (Kotlin + Rust, noldan)
 
-DrKLO/Telegram (`../Telegram`) kodi faqat **o'rganish uchun** (joylashuv, o'lchamlar, animatsiyalar); bu yerda hech narsa undan ko'chirilmagan,
-hammasi o'zimiz yozgan (GPL majburiyati yo'q). Telegram bilan ishlash — `rust/` (grammers, MTProto), ekranlar — `app/` (Kotlin + Compose).
+**Litsenziya: GPLv2** (`LICENSE`, `NOTICE`). ARUGRAM DrKLO/Telegram (`../Telegram`) ning ko'rinishi, animatsiyalari va xatti-harakatlarini aynan
+takrorlaydi, shu sabab Telegram for Android'ning hosilasi hisoblanadi va manba kodi ochiq repoda turadi. Telegram bilan ishlash — `rust/`
+(grammers, MTProto), ekranlar — `app/` (Kotlin + Compose).
 
 ## Hozirgi holat (1-bosqich)
 - **Kirish** Telegram bilan bir xil: telefon (davlat + raqam shabloni) -> davlat tanlash -> kod (katakchalar, qayta yuborish) -> ikki bosqichli parol.
