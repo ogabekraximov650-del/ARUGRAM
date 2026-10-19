@@ -117,7 +117,7 @@ fun IntroScreen(dark: Boolean, onToggleTheme: () -> Unit, onStart: () -> Unit) {
 private fun Dots(current: Int, fraction: Float) {
     val c = LocalTg.current
     Box(Modifier.height(10.dp), contentAlignment = Alignment.Center) {
-        Canvas(Modifier.size(width = 6 * 16.dp, height = 10.dp)) {
+        Canvas(Modifier.size(width = 96.dp, height = 10.dp)) {
             val r = 3.dp.toPx()
             val step = 16.dp.toPx()
             val startX = (size.width - step * 5) / 2f
