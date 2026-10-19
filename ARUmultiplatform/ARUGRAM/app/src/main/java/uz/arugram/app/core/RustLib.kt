@@ -46,6 +46,8 @@ interface RustLib : Library {
     fun rust_tg_send_media(arg: String): Pointer?
     fun rust_tg_media_file(arg: String): Pointer?
     fun rust_tg_media_read(arg: String): Pointer?
+    fun rust_tg_discussion(arg: String): Pointer?
+    fun rust_tg_thread(arg: String): Pointer?
     fun rust_tg_search(arg: String): Pointer?
     fun rust_tg_typing(): Pointer?
     fun rust_tg_sessions(): Pointer?

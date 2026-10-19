@@ -70,11 +70,11 @@ private val Blue = Color(0xFF3390EC)
  * javob / nusxa / uzatish / o'chirish. Mahkamlangan xabar paneli, kun ajratgichlari, pufakchalar, pastga tushirish tugmasi, xabar yozish paneli.
  */
 @Composable
-fun ChatScreen(chat: ChatRow, chats: List<ChatRow>, typing: Boolean, onBack: () -> Unit, onOpenInfo: () -> Unit) {
+fun ChatScreen(chat: ChatRow, chats: List<ChatRow>, typing: Boolean, onBack: () -> Unit, onOpenInfo: () -> Unit, threadTop: Int = 0, onOpenThread: (MsgRow) -> Unit = {}) {
     val c = LocalTg.current
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    val model = remember(chat.id) { ChatModel(chat, ctx.applicationContext) }
+    val model = remember(chat.id, threadTop) { ChatModel(chat, ctx.applicationContext, threadTop) }
     DisposableEffect(chat.id) { onDispose { model.close(); VoicePlayer.stop() } }
     // Qoralama: suhbatdan chiqilganda saqlanadi (ro'yxatda ko'rinadi), yuborilganda o'chadi.
     var draftText by remember { mutableStateOf("") }
@@ -137,7 +137,7 @@ fun ChatScreen(chat: ChatRow, chats: List<ChatRow>, typing: Boolean, onBack: () 
             subtitle = if (chat.text.startsWith("Suhbatdosh")) "kalit almashinuvi kutilmoqda..." else "maxfiy chat"
             return@LaunchedEffect
         }
-        model.loadPinned()
+        if (threadTop == 0) model.loadPinned()
         val j = withContext(Dispatchers.IO) { RustCore.tgPeerInfo(chat.spec) }
         if (j.optString("error").isEmpty()) {
             val ca = j.optJSONArray("commands")
@@ -256,6 +256,7 @@ fun ChatScreen(chat: ChatRow, chats: List<ChatRow>, typing: Boolean, onBack: () 
                                     onOpenMedia = { if (selected.isEmpty()) viewer = m else if (m.id in selected) selected.remove(m.id) else selected.add(m.id) },
                                     onReact = { model.react(m, it) },
                                     onForward = { forwardIds = listOf(m.id) },
+                                    onThread = { onOpenThread(m) },
                                     onVote = { model.vote(m, it) },
                                     onButton = { b -> press(m, b) },
                                     onReplyClick = { id -> val idx = list.indexOfFirst { it.id == id }; if (idx >= 0) scope.launch { listState.animateScrollToItem(idx) } },

@@ -120,6 +120,7 @@ fun MessageBubble(
     /** Guruhda kiruvchi xabarning chap tomonida avatar uchun joy (42 dp) qoldiriladi; [showAvatar] — shu yuboruvchining oxirgi xabari. */
     showAvatar: Boolean = false,
     onForward: () -> Unit = {},
+    onThread: () -> Unit = {},
 ) {
     val c = LocalTg.current
     ChatPalette.dark = c.dark
@@ -157,7 +158,7 @@ fun MessageBubble(
         if (groupAvatars) Box(Modifier.width(42.dp)) {
             if (showAvatar && m.sid != 0L) ChatAvatar(ChatRow(m.sid, "user", m.sender, false, 0, false, false, 0, "", false, false, false, access = m.shash), 35.dp)
         }
-        Column(if (hasMarkup) Modifier.width(androidx.compose.foundation.layout.IntrinsicSize.Max) else Modifier) {
+        Column(if (hasMarkup || (m.rc >= 0 && chat.kind == "channel" && m.kind != "gif" && m.kind != "round" && m.kind != "sticker")) Modifier.width(androidx.compose.foundation.layout.IntrinsicSize.Max) else Modifier) {
         Box(
             Modifier.widthIn(max = maxW)
                 .then(if (sticker) Modifier else if (m.out && c.dark) Modifier.clip(shape).background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color(0xFF366CAF), Color(0xFF3B8CB9)))) else Modifier.clip(shape).background(bg))
@@ -272,6 +273,18 @@ fun MessageBubble(
                 // Faqat rasm/video: vaqt rasm ustida yarim shaffof "tabletka"da.
                 mediaFull -> Footer(m, chat, Modifier.align(Alignment.BottomEnd).padding(end = 6.dp, bottom = 6.dp).clip(RoundedCornerShape(10.dp)).background(Color(0x66000000)).padding(horizontal = 6.dp, vertical = 1.dp), true)
                 sticker -> Footer(m, chat, Modifier.align(Alignment.BottomEnd).padding(end = 6.dp, bottom = 6.dp).clip(RoundedCornerShape(10.dp)).background(Color(0x66000000)).padding(horizontal = 6.dp), true)
+            }
+        }
+        // Kanal posti izohlari (DrKLO: pufakcha tagida "N ta izoh" / "Izoh qoldirish" qatori).
+        if (m.rc >= 0 && chat.kind == "channel" && !sticker) {
+            Row(
+                Modifier.padding(top = 2.dp).fillMaxWidth().height(40.dp).clip(RoundedCornerShape(17.dp)).background(if (c.dark) Color(0xFF1F2123) else Color.White)
+                    .clickable(onClick = onThread).padding(horizontal = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TgIcon(R.drawable.msg_viewreplies, InBlue, size = 20.dp)
+                BasicText(if (m.rc == 0) "Izoh qoldirish" else "${compactCount(m.rc)} ta izoh", Modifier.padding(start = 10.dp).weight(1f), style = TextStyle(color = InBlue, fontSize = 15.sp, fontWeight = FontWeight.Medium))
+                BasicText("›", style = TextStyle(color = InBlue, fontSize = 20.sp))
             }
         }
         // Inline tugmalar pufakchadan tashqarida, uning tagida (DrKLO `botButtons`).

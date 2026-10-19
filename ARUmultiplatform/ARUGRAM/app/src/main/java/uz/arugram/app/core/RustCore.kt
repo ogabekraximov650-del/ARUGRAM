@@ -139,6 +139,10 @@ object RustCore {
 
     fun tgMediaRead(spec: String, msgId: Int, chunk: Int) = call { it.rust_tg_media_read("$spec\n$msgId\n$chunk") }
 
+    fun tgDiscussion(spec: String, msgId: Int) = call { it.rust_tg_discussion("$spec\n$msgId") }
+
+    fun tgThread(spec: String, top: Int, limit: Int = 40, offsetId: Int = 0): JSONObject = call { it.rust_tg_thread("$spec:$top:$limit:$offsetId") }
+
     fun tgSearch(q: String) = call { it.rust_tg_search(q) }
 
     fun tgTyping(): JSONObject = guard(JSONObject()) { json(take(it.rust_tg_typing())) }

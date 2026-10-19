@@ -2762,6 +2762,14 @@ fn msg_json(m: &grammers_client::message::Message) -> Value {
             }
         }
     }
+    // Kanal posti izohlari soni (-1 — izohlar yoqilmagan).
+    let rc: i64 = match &m.raw {
+        tl::enums::Message::Message(x) => match &x.replies {
+            Some(tl::enums::MessageReplies::Replies(r)) if r.comments => r.replies as i64,
+            _ => -1,
+        },
+        _ => -1,
+    };
     // Matn bezaklari (qalin, kursiv, havola, kod, spoyler...): `[[tur, offset, uzunlik, qo'shimcha]]` (offset UTF-16 birligida — Kotlin bilan bir xil).
     let ents: Vec<Value> = match &m.raw {
         tl::enums::Message::Message(x) => x.entities.as_deref().map(ents_json).unwrap_or_default(),
@@ -2822,6 +2830,7 @@ fn msg_json(m: &grammers_client::message::Message) -> Value {
         "alt": mi.alt,
         "wave": mi.wave,
         "views": m.view_count().unwrap_or(0),
+        "rc": rc,
         "poll": mi.poll,
         "markup": markup_json(m),
         "pinned": m.pinned(),
@@ -6730,5 +6739,72 @@ pub extern "C" fn rust_tg_media_read(arg_ptr: *const c_char) -> *mut c_char {
         let mut it = client.iter_download(&md).chunk_size(STREAM_CHUNK).skip_chunks(idx);
         let data = it.next().await.map_err(|e| e.to_string())?.unwrap_or_default();
         Ok(json!({"data": b64(&data), "size": size}))
+    })
+}
+
+
+// ── Kanal izohlari (muhokama guruhidagi xabarlar zanjiri) ──
+
+/// Kanal postining muhokama xabari: `arg` = `"<suhbat>\n<xabar_id>"`. Javob: `{"chat":"<guruh id@hash>","top":<guruhdagi xabar id>,"name":"<guruh nomi>"}`.
+#[no_mangle]
+pub extern "C" fn rust_tg_discussion(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 30, |client, arg| async move {
+        let l = lines(&arg, 2);
+        let id = l[1].trim().parse::<i32>().map_err(|_| "Xabar ko'rsatilmagan".to_string())?;
+        let peer = resolve_peer(&client, &l[0]).await?;
+        let res = client
+            .invoke(&tl::functions::messages::GetDiscussionMessage { peer: peer.into(), msg_id: id })
+            .await
+            .map_err(|e| e.to_string())?;
+        let tl::enums::messages::DiscussionMessage::Message(d) = res;
+        let Some(tl::enums::Message::Message(top)) = d.messages.first() else { return Err("Izohlar topilmadi".to_string()) };
+        let tl::enums::Peer::Channel(pc) = &top.peer_id else { return Err("Muhokama guruhi topilmadi".to_string()) };
+        let mut hash = 0i64;
+        let mut name = String::new();
+        for ch in &d.chats {
+            if let tl::enums::Chat::Channel(c) = ch {
+                if c.id == pc.channel_id {
+                    hash = c.access_hash.unwrap_or(0);
+                    name = c.title.clone();
+                }
+            }
+        }
+        Ok(json!({ "chat": format!("{}@{}", -1_000_000_000_000i64 - pc.channel_id, hash), "top": top.id, "name": name }))
+    })
+}
+
+/// Izohlar zanjiri: `arg` = `"<guruh>:<top_id>:<soni>:<offset_id>"`. Javob `rust_tg_messages` bilan bir xil.
+#[no_mangle]
+pub extern "C" fn rust_tg_thread(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 30, |client, arg| async move {
+        let mut p = arg.trim().split(':');
+        let spec = p.next().unwrap_or("").to_string();
+        let top = p.next().and_then(|x| x.parse::<i32>().ok()).unwrap_or(0);
+        let limit = p.next().and_then(|x| x.parse::<i32>().ok()).unwrap_or(40).clamp(1, 100);
+        let offset = p.next().and_then(|x| x.parse::<i32>().ok()).unwrap_or(0);
+        let peer = resolve_peer(&client, &spec).await?;
+        let res = client
+            .invoke(&tl::functions::messages::GetReplies {
+                peer: peer.into(), msg_id: top, offset_id: offset, offset_date: 0, add_offset: 0, limit, max_id: 0, min_id: 0, hash: 0,
+            })
+            .await
+            .map_err(|e| e.to_string())?;
+        let raw = match res {
+            tl::enums::messages::Messages::Messages(x) => x.messages,
+            tl::enums::messages::Messages::Slice(x) => x.messages,
+            tl::enums::messages::Messages::ChannelMessages(x) => x.messages,
+            tl::enums::messages::Messages::NotModified(_) => Vec::new(),
+        };
+        let ids: Vec<i32> = raw
+            .iter()
+            .filter_map(|m| match m {
+                tl::enums::Message::Message(x) => Some(x.id),
+                tl::enums::Message::Service(x) => Some(x.id),
+                _ => None,
+            })
+            .collect();
+        let msgs = client.get_messages_by_id(peer, &ids).await.map_err(|e| e.to_string())?;
+        let out: Vec<Value> = msgs.into_iter().flatten().map(|m| msg_json(&m)).collect();
+        Ok(json!({ "messages": out }))
     })
 }

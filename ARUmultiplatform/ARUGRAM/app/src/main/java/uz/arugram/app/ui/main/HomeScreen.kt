@@ -59,7 +59,7 @@ import uz.arugram.app.ui.theme.LocalTg
 
 /** Ekranlar stegi (orqaga tugmasi bilan qaytiladi). */
 private sealed interface Dest {
-    data class Chat(val row: ChatRow) : Dest
+    data class Chat(val row: ChatRow, val top: Int = 0) : Dest
     data class Info(val row: ChatRow) : Dest
     data object Search : Dest
     data object NewChat : Dest
@@ -222,6 +222,16 @@ fun HomeScreen(auth: AuthModel) {
                     chat = row, chats = ui.chats, typing = typing[row.id] != null,
                     onBack = { stack.removeAt(stack.lastIndex) },
                     onOpenInfo = { stack.add(Dest.Info(row)) },
+                    threadTop = d.top,
+                    onOpenThread = { m ->
+                        scope.launch {
+                            val r = withContext(Dispatchers.IO) { RustCore.tgDiscussion(row.spec, m.id) }
+                            val err = r.optString("error")
+                            if (err.isNotEmpty()) { toast = err; return@launch }
+                            val (gid, hash) = r.optString("chat").split("@").let { (it.getOrNull(0)?.toLongOrNull() ?: 0L) to (it.getOrNull(1) ?: "0") }
+                            stack.add(Dest.Chat(ChatRow(gid, "group", r.optString("name").ifEmpty { "Izohlar" }, false, 0, false, false, 0, "", false, false, false, access = hash), r.optInt("top")))
+                        }
+                    },
                 )
             }
             is Dest.Info -> ChatInfo(

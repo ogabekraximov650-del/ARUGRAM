@@ -40,6 +40,8 @@ data class MsgRow(
     val markup: Markup? = null,
     val ents: List<Ent> = emptyList(),
     val web: WebPreview? = null,
+    /** Kanal posti izohlari soni (-1 — izoh yo'q). */
+    val rc: Int = -1,
     /** Ovozli xabar to'lqin shakli (0..31). */
     val wave: List<Int> = emptyList(),
     /** Xizmat xabari matni (bo'sh bo'lmasa — markazdagi yozuv sifatida chiziladi). */
@@ -94,7 +96,7 @@ fun parseMsg(o: JSONObject): MsgRow {
                 add(Ent(e.optString(0), e.optInt(1), e.optInt(2), e.optString(3)))
             }
         },
-        service = o.optString("service"),
+        service = o.optString("service"), rc = if (o.has("rc")) o.optInt("rc", -1) else -1,
         sid = o.optLong("sid"), shash = o.optString("shash", "0"), sphoto = o.optString("sphoto", "0"),
         wave = o.optJSONArray("wave")?.let { a -> List(a.length()) { a.optInt(it) } }.orEmpty(),
         web = o.optJSONObject("web")?.let { w -> WebPreview(w.optString("url"), w.optString("site"), w.optString("title"), w.optString("desc")) },
@@ -112,7 +114,8 @@ fun parseMsg(o: JSONObject): MsgRow {
  * Bitta suhbat holati: xabarlar (eng yangisi birinchi), eskilarini yuklash, yuborish / tahrirlash / o'chirish / uzatish / reaksiya / mahkamlash.
  * Tarmoq so'rovlari Rust yadrosida (`rust_tg_*`), bu yerda faqat holat va ketma-ketlik.
  */
-class ChatModel(val chat: ChatRow, private val context: Context) {
+class ChatModel(val chat: ChatRow, private val context: Context, val threadTop: Int = 0) {
+    private fun rt(r: Int) = if (r == 0 && threadTop > 0) threadTop else r
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     var messages by mutableStateOf<List<MsgRow>>(emptyList())
@@ -133,7 +136,7 @@ class ChatModel(val chat: ChatRow, private val context: Context) {
     fun close() = scope.cancel()
 
     private suspend fun fetch(limit: Int, offset: Int): List<MsgRow>? {
-        val j = withContext(Dispatchers.IO) { if (chat.isSecret) RustCore.tgSecretMessages(chat.secretId) else RustCore.tgMessages(chat.spec, limit, offset) }
+        val j = withContext(Dispatchers.IO) { if (chat.isSecret) RustCore.tgSecretMessages(chat.secretId) else if (threadTop > 0) RustCore.tgThread(chat.spec, threadTop, limit, offset) else RustCore.tgMessages(chat.spec, limit, offset) }
         val err = j.optString("error")
         if (err.isNotEmpty()) {
             error = err
@@ -204,7 +207,8 @@ class ChatModel(val chat: ChatRow, private val context: Context) {
     private fun List<MsgRow>.ordered(): List<MsgRow> =
         sortedWith(compareBy<MsgRow> { it.id > 0 }.thenComparator { a, b -> if (a.id <= 0) a.id.compareTo(b.id) else b.id.compareTo(a.id) })
 
-    fun send(text: String, replyTo: Int, onFail: (() -> Unit)? = null) {
+    fun send(text: String, replyTo0: Int, onFail: (() -> Unit)? = null) {
+        val replyTo = rt(replyTo0)
         sending++
         // Telegram kabi: xabar darhol soat belgisi bilan ko'rinadi, server tasdiqlagach almashadi.
         val temp = MsgRow(
@@ -221,7 +225,8 @@ class ChatModel(val chat: ChatRow, private val context: Context) {
     }
 
     /** Ovozsiz yoki rejalashtirilgan matn (`schedule` — unix soniya, 0 — hozir). */
-    fun sendEx(text: String, replyTo: Int, silent: Boolean, schedule: Long, markers: Boolean = false, onFail: (() -> Unit)? = null) {
+    fun sendEx(text: String, replyTo0: Int, silent: Boolean, schedule: Long, markers: Boolean = false, onFail: (() -> Unit)? = null) {
+        val replyTo = rt(replyTo0)
         sending++
         scope.launch {
             val r = withContext(Dispatchers.IO) { RustCore.tgSendEx(chat.spec, replyTo, silent, schedule, text, markers) }
@@ -232,7 +237,8 @@ class ChatModel(val chat: ChatRow, private val context: Context) {
     }
 
     /** Joylashuv / kontakt / so'rovnoma. */
-    fun sendSpecial(kind: String, payload: String, replyTo: Int, silent: Boolean = false, schedule: Long = 0) {
+    fun sendSpecial(kind: String, payload: String, replyTo0: Int, silent: Boolean = false, schedule: Long = 0) {
+        val replyTo = rt(replyTo0)
         sending++
         scope.launch {
             val r = withContext(Dispatchers.IO) { RustCore.tgSendSpecial(chat.spec, replyTo, silent, schedule, kind, payload) }
@@ -282,7 +288,8 @@ class ChatModel(val chat: ChatRow, private val context: Context) {
     }
 
     /** Galereya/fayl tanlangach: kesh papkaga nusxalab, Rust orqali yuboradi. */
-    fun sendFile(file: File, kind: String, replyTo: Int, caption: String = "", extra: String = "") {
+    fun sendFile(file: File, kind: String, replyTo0: Int, caption: String = "", extra: String = "") {
+        val replyTo = rt(replyTo0)
         sending++
         scope.launch {
             val r = withContext(Dispatchers.IO) { RustCore.tgSendMedia(chat.spec, kind, file.absolutePath, replyTo, caption, extra) }
@@ -309,7 +316,8 @@ class ChatModel(val chat: ChatRow, private val context: Context) {
         }
     }
 
-    fun sendSticker(ref: String, replyTo: Int) {
+    fun sendSticker(ref: String, replyTo0: Int) {
+        val replyTo = rt(replyTo0)
         scope.launch {
             val r = withContext(Dispatchers.IO) { RustCore.tgSendSticker(chat.spec, replyTo, ref) }
             after(r)
