@@ -22,6 +22,9 @@ object RustCore {
 
     val available: Boolean get() = lib != null
 
+    /** Intro GL sahnasi uchun (faqat GL oqimidan chaqiriladi). */
+    internal val intro: RustLib? get() = lib
+
     @Synchronized
     fun load(): Boolean {
         if (lib != null) return true

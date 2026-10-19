@@ -28,4 +28,15 @@ interface RustLib : Library {
     fun rust_tg_login_state(): Pointer?
     fun rust_tg_login_reset()
     fun rust_tg_logout(): Pointer?
+
+    // ── Kirish (intro) sahnasi: Telegram `IntroRenderer.c` ning Rust'ga o'tkazilgan nusxasi (OpenGL ES 2) ──
+    fun rust_intro_set_textures(ids: IntArray, n: Int)
+    fun rust_intro_surface_created(): Int
+    fun rust_intro_surface_changed(w: Int, h: Int, scale: Float, a1: Int)
+    fun rust_intro_set_background(r: Float, g: Float, b: Float, a: Float)
+    fun rust_intro_set_page(page: Int)
+    fun rust_intro_set_scroll_offset(v: Float)
+    fun rust_intro_set_date(v: Float)
+    fun rust_intro_draw_frame(deltaMs: Int)
+    fun rust_intro_destroy()
 }

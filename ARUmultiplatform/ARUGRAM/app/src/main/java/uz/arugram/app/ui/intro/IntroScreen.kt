@@ -60,6 +60,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.PathMeasure
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.geometry.Rect
@@ -140,7 +142,20 @@ fun IntroScreen(
             // ---- Rasm (200x150), sahifalar almashganda yumshoq o'tadi
             Box(Modifier.offset(x = (w - 200.dp) / 2, y = y0).size(200.dp, 150.dp)) {
                 // Telegram'da eski rasm sahifa almashish o'rtasida birdan yo'qoladi, yangisi darhol (kichik "erish" animatsiyasi bilan) paydo bo'ladi.
-                IntroArt(pager.currentPage, ph, arrive.value, Modifier.fillMaxSize())
+                // Telegram'ning 3D sahnasi (OpenGL, Rust); ishlamasa — oddiy Canvas rasmi.
+                var glFailed by remember { mutableStateOf(false) }
+                val pg = pager.currentPage
+                val off = pager.currentPageOffsetFraction
+                val bgArgb = c.bg.toArgb()
+                if (!glFailed) {
+                    AndroidView(
+                        factory = { ctx -> IntroGlView(ctx).also { v -> v.onFailed = { glFailed = true } } },
+                        update = { v -> v.page = pg; v.scroll = off; v.setBackgroundArgb(bgArgb) },
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                } else {
+                    IntroArt(pg, ph, arrive.value, Modifier.fillMaxSize())
+                }
             }
 
             // ---- Sahifalar: sarlavha va matn
