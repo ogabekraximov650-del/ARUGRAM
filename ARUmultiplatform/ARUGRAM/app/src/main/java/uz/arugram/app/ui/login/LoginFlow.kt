@@ -218,7 +218,6 @@ fun LoginFlow(auth: AuthModel, suppressFab: Boolean = false) {
                         code = codeInput,
                         onCode = { codeInput = it },
                         onResend = { auth.resendCode() },
-                        onWrongNumber = { goBack() },
                     )
                 }
                 Page.Password -> Box(Modifier.fillMaxSize().padding(start = 18.dp, end = 18.dp, top = 30.dp)) {

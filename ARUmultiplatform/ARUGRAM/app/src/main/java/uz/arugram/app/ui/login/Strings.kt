@@ -18,6 +18,7 @@ object S {
     const val SentCallCode = "Telegram **%s** raqamingizga qo‘ng‘iroq qilib, kodni aytadi."
     const val SentOtherCode = "Kodni **%s** raqamingizga yubordik."
     const val WrongNumber = "Raqam xatomi?"                            // WrongNumber
+    const val WrongCode = "Noto‘g‘ri kod kiritdingiz. Qayta urinib ko‘ring."   // WrongCode
     const val ResendSms = "Kodni SMS orqali yuborish"
     const val ResendCall = "Qo‘ng‘iroq qilishni so‘rash"
     const val SendingSms = "SMS yuborilmoqda..."

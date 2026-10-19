@@ -1,5 +1,10 @@
 package uz.arugram.app.ui.login
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -46,18 +51,23 @@ fun CodePage(
     code: String,
     onCode: (String) -> Unit,
     onResend: () -> Unit,
-    onWrongNumber: () -> Unit,
 ) {
     val c = LocalTg.current
     val length = codeLength(sent)
     var errorOn by remember { mutableStateOf(false) }
 
+    // Xato kod (DrKLO `shakeWrongCode`): maydonlar darhol tozalanadi, katakchalar silkinish davomida qizil bo'ladi (+150 ms),
+    // pastda qizil "noto'g'ri kod" matni 5 soniya turadi, so'ng oddiy matn qaytadi.
+    var wrongShown by remember { mutableStateOf(false) }
     LaunchedEffect(errorTick) {
         if (errorTick == 0) return@LaunchedEffect
-        errorOn = true
-        delay(550)
         onCode("")
+        errorOn = true
+        wrongShown = true
+        delay(650)
         errorOn = false
+        delay(4350)
+        wrongShown = false
     }
 
     // Qayta yuborish hisoblagichi (Telegram yuborgan `timeout` soniya).
@@ -102,30 +112,35 @@ fun CodePage(
                 .shakeOnChange(errorTick),
         )
         Box(Modifier.weight(1f))
-        Column(Modifier.padding(bottom = 18.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Bottom) {
-            val next = sent?.next.orEmpty()
-            if (busy && code.isEmpty()) {
-                BasicText(if (next == "call") S.Calling else S.SendingSms, Modifier.padding(horizontal = 14.dp, vertical = 8.dp), style = TextStyle(color = c.gray, fontSize = 15.sp))
-            } else if (next == "sms" || next == "call") {
-                if (left > 0) {
-                    BasicText(
-                        (if (next == "call") S.CallIn else S.SmsIn).format(left / 60, left % 60),
-                        Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                        style = TextStyle(color = c.gray, fontSize = 15.sp),
-                    )
-                } else {
-                    BasicText(
-                        if (next == "call") S.ResendCall else S.ResendSms,
-                        Modifier.clickable(onClick = onResend).padding(horizontal = 14.dp, vertical = 8.dp),
-                        style = TextStyle(color = c.value, fontSize = 15.sp),
-                    )
+        // Pastki qism: bo'sh joydan 32 dp yuqorida; matnlar (14, 8, 14, 16) ichki chetli. Xato matni bilan almashadi (easeInOutQuad).
+        AnimatedContent(
+            targetState = wrongShown,
+            modifier = Modifier.padding(bottom = 32.dp),
+            transitionSpec = { fadeIn(tween(200)) togetherWith fadeOut(tween(200)) },
+            label = "codeBottom",
+        ) { wrong ->
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                val next = sent?.next.orEmpty()
+                if (wrong) {
+                    BasicText(S.WrongCode, Modifier.padding(vertical = 4.dp), style = TextStyle(color = c.red, fontSize = 15.sp, textAlign = TextAlign.Center, lineHeight = 17.sp))
+                } else if (busy && code.isEmpty()) {
+                    BasicText(if (next == "call") S.Calling else S.SendingSms, Modifier.padding(14.dp, 8.dp, 14.dp, 16.dp), style = TextStyle(color = c.gray, fontSize = 15.sp, lineHeight = 17.sp))
+                } else if (next == "sms" || next == "call") {
+                    if (left > 0) {
+                        BasicText(
+                            (if (next == "call") S.CallIn else S.SmsIn).format(left / 60, left % 60),
+                            Modifier.padding(14.dp, 8.dp, 14.dp, 16.dp),
+                            style = TextStyle(color = c.gray, fontSize = 15.sp, lineHeight = 17.sp),
+                        )
+                    } else {
+                        BasicText(
+                            if (next == "call") S.ResendCall else S.ResendSms,
+                            Modifier.clickable(onClick = onResend).padding(14.dp, 8.dp, 14.dp, 16.dp),
+                            style = TextStyle(color = c.value, fontSize = 15.sp, lineHeight = 17.sp),
+                        )
+                    }
                 }
             }
-            BasicText(
-                S.WrongNumber,
-                Modifier.clickable(onClick = onWrongNumber).padding(horizontal = 14.dp, vertical = 8.dp),
-                style = TextStyle(color = c.value, fontSize = 14.sp),
-            )
         }
     }
 }
