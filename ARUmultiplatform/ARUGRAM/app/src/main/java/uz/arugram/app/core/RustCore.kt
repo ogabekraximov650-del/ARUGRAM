@@ -198,6 +198,18 @@ object RustCore {
 
     fun tgStories() = call { it.rust_tg_stories() }
 
+    fun tgSecretList() = call { it.rust_tg_secret_list() }
+
+    fun tgSecretMessages(eid: Int) = call { it.rust_tg_secret_messages("$eid") }
+
+    fun tgSecretSend(eid: Int, replyId: Int, text: String) = call { it.rust_tg_secret_send("$eid\n$replyId\n$text") }
+
+    fun tgSecretStart(userId: Long, hash: String, name: String) = call { it.rust_tg_secret_start("$userId@$hash\n$name") }
+
+    fun tgSecretDiscard(eid: Int) = call { it.rust_tg_secret_discard("$eid") }
+
+    fun tgSecretRead(eid: Int) = call { it.rust_tg_secret_read("$eid") }
+
     fun tgCalls() = call { it.rust_tg_calls() }
 
     fun tgPremium() = call { it.rust_tg_premium() }

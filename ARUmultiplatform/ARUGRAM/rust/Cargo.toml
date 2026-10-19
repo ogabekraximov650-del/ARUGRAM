@@ -46,6 +46,8 @@ glass_pumpkin = "=2.0.0-rc0"
 # tokenini (`future_auth_token`) tashlab yuboradi, shu sabab parol
 # `telegram.rs` da shu kutubxona bilan tekshiriladi.
 grammers-crypto = "=0.10.0"
+# Maxfiy chatlar (Diffie-Hellman) — grammers-crypto bilan bir xil kutubxona, daraxtda allaqachon bor.
+num-bigint = "0.4"
 tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync", "time", "fs"] }
 # aes + ctr — Telegram'ga yuklanadigan fayllar AES-128-CTR bilan
 #              shifrlanadi (`telegram.rs` -> "SHIFRLAB YUKLASH"). CTR

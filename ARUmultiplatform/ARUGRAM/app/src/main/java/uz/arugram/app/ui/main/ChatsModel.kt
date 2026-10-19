@@ -28,10 +28,23 @@ data class ChatRow(
     val access: String = "0",
     val mentions: Int = 0,
     val topId: Int = 0,
+    /** Maxfiy chatda: suhbatdoshning foydalanuvchi id'si (avatar uchun). */
+    val peerId: Long = 0,
 ) {
+    val isSecret: Boolean get() = kind == "secret"
+
+    /** Maxfiy chatning serverdagi raqami (`id = SECRET_BASE - eid`). */
+    val secretId: Int get() = (SECRET_BASE - id).toInt()
+
     /** Rust tomonidagi suhbat manzili: `id` yoki `id@access_hash` (hash bilan dialoglarni aylanib chiqmasdan to'g'ridan-to'g'ri ochiladi). */
     val spec: String get() = if (access.isNotEmpty() && access != "0") "$id@$access" else "$id"
 }
+
+/** Maxfiy chatlar oddiy suhbatlar id'lari bilan to'qnashmasligi uchun alohida diapazonda. */
+const val SECRET_BASE = -2_000_000_000_000L
+
+/** Suhbatni tark etish / o'chirish: maxfiy chat serverga "tugatildi" deb bildiriladi. */
+fun ChatRow.deleteRemote(): org.json.JSONObject = if (isSecret) RustCore.tgSecretDiscard(secretId) else RustCore.tgDeleteDialog(spec)
 
 data class ChatsUi(val loading: Boolean = true, val chats: List<ChatRow> = emptyList(), val error: String? = null)
 
@@ -63,6 +76,23 @@ class ChatsModel(private val context: android.content.Context) {
         }
     }
 
+    /** Maxfiy chatlar (Rust `rust_tg_secret_list`) ro'yxat qatorlari. */
+    private fun secretRows(j: org.json.JSONObject): List<ChatRow> = buildList {
+        val a = j.optJSONArray("chats") ?: return@buildList
+        for (i in 0 until a.length()) {
+            val o = a.getJSONObject(i)
+            val waiting = o.optString("state") == "waiting"
+            add(
+                ChatRow(
+                    id = SECRET_BASE - o.optLong("id"), kind = "secret", name = o.optString("name").ifEmpty { "Maxfiy chat" }, pinned = false,
+                    unread = o.optInt("unread"), muted = false, out = o.optBoolean("out"), date = o.optLong("date"),
+                    text = if (waiting) "Suhbatdosh qabul qilishini kutmoqda..." else o.optString("text").ifEmpty { "Maxfiy chat boshlandi" },
+                    bot = false, self = false, verified = false, access = o.optString("hash", "0"), topId = o.optInt("top"), peerId = o.optLong("user"),
+                ),
+            )
+        }
+    }
+
     /** Suhbatni ro'yxatda mahkamlash/yechish (darhol ko'rinadi, keyin serverdan tasdiqlanadi). */
     fun pin(row: ChatRow) {
         _ui.update { st -> st.copy(chats = sort(st.chats.map { if (it.id == row.id) it.copy(pinned = !row.pinned) else it })) }
@@ -76,7 +106,7 @@ class ChatsModel(private val context: android.content.Context) {
 
     fun deleteDialog(row: ChatRow) {
         _ui.update { st -> st.copy(chats = st.chats.filter { it.id != row.id }) }
-        scope.launch { withContext(Dispatchers.IO) { RustCore.tgDeleteDialog(row.spec) }; load() }
+        scope.launch { withContext(Dispatchers.IO) { row.deleteRemote() }; load() }
     }
 
     fun load() {
@@ -89,7 +119,7 @@ class ChatsModel(private val context: android.content.Context) {
                 return@launch
             }
             val arr = j.optJSONArray("dialogs")
-            val list = parse(arr)
+            val list = parse(arr) + secretRows(withContext(Dispatchers.IO) { RustCore.tgSecretList() })
             if (arr != null) prefs.edit().putString("dialogs", arr.toString()).apply()
             _ui.update { ChatsUi(loading = false, chats = sort(list)) }
         }

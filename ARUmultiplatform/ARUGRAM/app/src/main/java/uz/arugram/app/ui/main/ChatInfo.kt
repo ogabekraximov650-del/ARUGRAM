@@ -61,13 +61,14 @@ fun ChatInfo(chat: ChatRow, onBack: () -> Unit, onWrite: () -> Unit, onDeleted: 
     var confirmClear by remember { mutableStateOf(false) }
     var toast by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(toast) { if (toast != null) { kotlinx.coroutines.delay(2500); toast = null } }
-    LaunchedEffect(chat.id) { info = withContext(Dispatchers.IO) { RustCore.tgPeerInfo(chat.spec) } }
+    LaunchedEffect(chat.id) { if (!chat.isSecret) info = withContext(Dispatchers.IO) { RustCore.tgPeerInfo(chat.spec) } }
     val i = info
     val kind = i?.optString("kind").orEmpty().ifEmpty { chat.kind }
     val status = when (kind) {
         "user" -> if (chat.bot) "bot" else statusText(i?.optString("status").orEmpty())
         "group" -> "${i?.optInt("members") ?: 0} a’zo"
         "channel" -> "${compactCount(i?.optInt("members") ?: 0)} obunachi"
+        "secret" -> "end-to-end shifrlangan maxfiy chat"
         else -> ""
     }
     Column(Modifier.fillMaxSize().background(c.grayBg).statusBarsPadding()) {
@@ -98,8 +99,17 @@ fun ChatInfo(chat: ChatRow, onBack: () -> Unit, onWrite: () -> Unit, onDeleted: 
                 }
                 Spacer(Modifier.height(8.dp))
             }
-            Column(Modifier.fillMaxWidth().background(c.bar)) {
+            if (chat.isSecret) Column(Modifier.fillMaxWidth().background(c.bar)) {
                 InfoAction(R.drawable.msg_send, "Xabar yozish") { onWrite() }
+                InfoAction(R.drawable.msg_delete, "Maxfiy chatni tugatish", danger = true) { confirmDelete = true }
+            } else Column(Modifier.fillMaxWidth().background(c.bar)) {
+                InfoAction(R.drawable.msg_send, "Xabar yozish") { onWrite() }
+                if (kind == "user" && !chat.self && !chat.bot) InfoAction(R.drawable.msg_secret, "Maxfiy chat boshlash") {
+                    scope.launch {
+                        val r = withContext(Dispatchers.IO) { RustCore.tgSecretStart(chat.id, chat.access, chat.name) }
+                        toast = r.optString("error").ifEmpty { "Maxfiy chat so‘rovi yuborildi — suhbatdosh qabul qilgach ro‘yxatda ochiladi" }
+                    }
+                }
                 InfoAction(if (muted) R.drawable.msg_unmute else R.drawable.msg_mute, if (muted) "Bildirishnomani yoqish" else "Bildirishnomani o‘chirish") {
                     muted = !muted
                     scope.launch { withContext(Dispatchers.IO) { RustCore.tgMute(chat.spec, muted) } }
@@ -125,7 +135,7 @@ fun ChatInfo(chat: ChatRow, onBack: () -> Unit, onWrite: () -> Unit, onDeleted: 
                 MembersSection(chat, onOpenChat)
             }
             Spacer(Modifier.height(8.dp))
-            SharedMediaSection(chat) { viewer = it }
+            if (!chat.isSecret) SharedMediaSection(chat) { viewer = it }
             Spacer(Modifier.height(24.dp))
         }
     }
@@ -153,7 +163,7 @@ fun ChatInfo(chat: ChatRow, onBack: () -> Unit, onWrite: () -> Unit, onDeleted: 
         TgAlert(
             title = "Suhbatni o‘chirish", text = "“${chat.name}” suhbati sizdan o‘chiriladi (guruh yoki kanal bo‘lsa — undan chiqasiz).",
             confirm = "O‘chirish", danger = true,
-            onConfirm = { confirmDelete = false; scope.launch { withContext(Dispatchers.IO) { RustCore.tgDeleteDialog(chat.spec) }; onDeleted() } },
+            onConfirm = { confirmDelete = false; scope.launch { withContext(Dispatchers.IO) { chat.deleteRemote() }; onDeleted() } },
             onDismiss = { confirmDelete = false },
         )
     }

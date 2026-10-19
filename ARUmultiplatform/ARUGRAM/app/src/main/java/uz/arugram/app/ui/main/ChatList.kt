@@ -59,7 +59,7 @@ fun ChatAvatar(row: ChatRow, size: androidx.compose.ui.unit.Dp = 52.dp) {
     val idx = (abs(row.id) % AvatarTop.size).toInt()
     val top = if (row.self) Color(0xFF69BDF9) else Color(AvatarTop[idx])
     val bottom = if (row.self) Color(0xFF409FE1) else Color(AvatarBottom[idx])
-    val photo = if (row.self) null else AvatarCache.images[row.id]
+    val photo = if (row.self) null else AvatarCache.images[if (row.peerId != 0L) row.peerId else row.id]
     Box(Modifier.size(size).clip(CircleShape).background(Brush.verticalGradient(listOf(top, bottom))), contentAlignment = Alignment.Center) {
         if (photo != null) {
             androidx.compose.foundation.Image(photo, null, Modifier.size(size), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
@@ -122,10 +122,11 @@ fun ChatList(
                     Box(Modifier.padding(start = 11.dp, top = 9.dp)) { ChatAvatar(row) }
                     // Nom (tepada) va vaqt (o'ngda)
                     Row(Modifier.fillMaxWidth().padding(start = 76.dp, end = 14.dp, top = 11.dp), verticalAlignment = Alignment.Top) {
+                        if (row.isSecret) uz.arugram.app.ui.components.TgIcon(uz.arugram.app.R.drawable.msg_secret, Color(0xFF00A60E), Modifier.padding(end = 4.dp, top = 3.dp), 16.dp)
                         BasicText(
                             row.name,
                             Modifier.weight(1f),
-                            style = TextStyle(color = c.chatName, fontSize = 17.sp, fontWeight = FontWeight.Medium),
+                            style = TextStyle(color = if (row.isSecret) Color(0xFF00A60E) else c.chatName, fontSize = 17.sp, fontWeight = FontWeight.Medium),
                             maxLines = 1, overflow = TextOverflow.Ellipsis,
                         )
                         if (row.out && row.date > 0 && row.topId > 0 && typing[row.id] == null) {
@@ -153,7 +154,7 @@ fun ChatList(
                         } else BasicText(
                             androidx.compose.ui.text.buildAnnotatedString {
                                 // Guruh/kanalda o'z xabaringiz oldida "Siz:" (DrKLO `chats_nameMessage`, ko'k).
-                                if (row.out && row.kind != "user" && row.text.isNotEmpty()) {
+                                if (row.out && row.kind != "user" && !row.isSecret && row.text.isNotEmpty()) {
                                     withStyle(androidx.compose.ui.text.SpanStyle(color = c.counter)) { append("Siz: ") }
                                 }
                                 append(row.text)

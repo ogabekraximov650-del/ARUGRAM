@@ -108,7 +108,7 @@ fun HomeScreen(auth: AuthModel) {
         stories = parseStories(withContext(Dispatchers.IO) { RustCore.tgStories() })
         if (settingsPrefs(ctx).getBoolean("notify", true)) NotifyService.start(ctx)
     }
-    LaunchedEffect(ui.chats.map { it.id }, me?.id) { AvatarCache.ensure(ctx, (ui.chats.filter { !it.self }.map { it.id } + listOfNotNull(me?.id)).distinct()) }
+    LaunchedEffect(ui.chats.map { it.id }, me?.id) { AvatarCache.ensure(ctx, (ui.chats.filter { !it.self }.map { if (it.peerId != 0L) it.peerId else it.id } + listOfNotNull(me?.id)).distinct()) }
     // Yangilanishlar: Rust yadrosi kelgan updates sonini hisoblaydi; o'zgarsa ro'yxat darhol yangilanadi (kamida 3 soniya oraliq, zaxira — 60 soniya).
     LaunchedEffect(Unit) {
         var last = -1L

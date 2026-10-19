@@ -106,7 +106,7 @@ class ChatModel(val chat: ChatRow, private val context: Context) {
     fun close() = scope.cancel()
 
     private suspend fun fetch(limit: Int, offset: Int): List<MsgRow>? {
-        val j = withContext(Dispatchers.IO) { RustCore.tgMessages(chat.spec, limit, offset) }
+        val j = withContext(Dispatchers.IO) { if (chat.isSecret) RustCore.tgSecretMessages(chat.secretId) else RustCore.tgMessages(chat.spec, limit, offset) }
         val err = j.optString("error")
         if (err.isNotEmpty()) {
             error = err
@@ -114,6 +114,7 @@ class ChatModel(val chat: ChatRow, private val context: Context) {
         }
         error = null
         val arr = j.optJSONArray("messages")
+        if (chat.isSecret) hasMore = false
         return buildList { for (i in 0 until (arr?.length() ?: 0)) add(parseMsg(arr!!.getJSONObject(i))) }
     }
 
@@ -126,8 +127,9 @@ class ChatModel(val chat: ChatRow, private val context: Context) {
                 return@launch
             }
             val oldest = fresh.minOfOrNull { it.id } ?: Int.MAX_VALUE
-            val keep = messages.filter { it.id < oldest }
-            messages = (fresh + keep).distinctBy { it.id }.sortedByDescending { it.id }
+            val keep = messages.filter { it.id in 1 until oldest }
+            val pending = messages.filter { it.id <= 0 }
+            messages = (pending + fresh + keep).distinctBy { it.id }.ordered()
             if (fresh.size < 50 && keep.isEmpty()) hasMore = false
             loaded = true
         }
@@ -137,11 +139,11 @@ class ChatModel(val chat: ChatRow, private val context: Context) {
         if (!hasMore || loadingMore || messages.isEmpty()) return
         loadingMore = true
         scope.launch {
-            val oldest = messages.minOf { it.id }
+            val oldest = messages.filter { it.id > 0 }.minOfOrNull { it.id } ?: run { loadingMore = false; return@launch }
             val older = fetch(50, oldest)
             if (older != null) {
                 if (older.size < 50) hasMore = false
-                messages = (messages + older).distinctBy { it.id }.sortedByDescending { it.id }
+                messages = (messages + older).distinctBy { it.id }.ordered()
             }
             loadingMore = false
         }
@@ -156,7 +158,7 @@ class ChatModel(val chat: ChatRow, private val context: Context) {
     }
 
     fun markRead() {
-        if (chat.unread > 0) scope.launch { withContext(Dispatchers.IO) { RustCore.tgMarkRead(chat.spec) } }
+        if (chat.unread > 0) scope.launch { withContext(Dispatchers.IO) { if (chat.isSecret) RustCore.tgSecretRead(chat.secretId) else RustCore.tgMarkRead(chat.spec) } }
     }
 
     private fun after(r: JSONObject, restore: (() -> Unit)? = null) {
@@ -169,11 +171,24 @@ class ChatModel(val chat: ChatRow, private val context: Context) {
         }
     }
 
+    private var pendingSeq = 0
+
+    /** Yuborilayotgan xabarlar (id <= 0) ro'yxat tepasida, eng yangisi birinchi; keyin serverdagilar id kamayishi bo'yicha. */
+    private fun List<MsgRow>.ordered(): List<MsgRow> =
+        sortedWith(compareBy<MsgRow> { it.id > 0 }.thenComparator { a, b -> if (a.id <= 0) a.id.compareTo(b.id) else b.id.compareTo(a.id) })
+
     fun send(text: String, replyTo: Int, onFail: (() -> Unit)? = null) {
         sending++
+        // Telegram kabi: xabar darhol soat belgisi bilan ko'rinadi, server tasdiqlagach almashadi.
+        val temp = MsgRow(
+            id = --pendingSeq, out = true, date = System.currentTimeMillis() / 1000, edited = false, text = text, sender = "", reply = replyTo,
+            fwd = "", media = "", kind = "", pw = 0, ph = 0, name = "", size = 0, dur = 0.0, mime = "", alt = "", views = 0, pinned = false, reactions = emptyList(),
+        )
+        messages = (messages + temp).ordered()
         scope.launch {
-            val r = withContext(Dispatchers.IO) { RustCore.tgSend(chat.spec, replyTo, text) }
+            val r = withContext(Dispatchers.IO) { if (chat.isSecret) RustCore.tgSecretSend(chat.secretId, replyTo, text) else RustCore.tgSend(chat.spec, replyTo, text) }
             sending--
+            messages = messages.filter { it.id != temp.id }
             after(r, onFail)
         }
     }
@@ -273,6 +288,7 @@ class ChatModel(val chat: ChatRow, private val context: Context) {
 
     /** Yozayotganingiz haqida suhbatdoshga bildiradi (4 soniyada bir martadan ko'p emas). */
     fun typing() {
+        if (chat.isSecret) return
         val now = System.currentTimeMillis()
         if (now - lastTyping < 4000) return
         lastTyping = now

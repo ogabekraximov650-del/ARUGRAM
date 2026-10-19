@@ -108,6 +108,10 @@ fun ChatScreen(chat: ChatRow, chats: List<ChatRow>, typing: Boolean, onBack: () 
 
     LaunchedEffect(chat.id) {
         model.markRead()
+        if (chat.isSecret) {
+            subtitle = if (chat.text.startsWith("Suhbatdosh")) "kalit almashinuvi kutilmoqda..." else "maxfiy chat"
+            return@LaunchedEffect
+        }
         model.loadPinned()
         val j = withContext(Dispatchers.IO) { RustCore.tgPeerInfo(chat.spec) }
         if (j.optString("error").isEmpty()) {
@@ -351,7 +355,7 @@ fun ChatScreen(chat: ChatRow, chats: List<ChatRow>, typing: Boolean, onBack: () 
                 confirm = "O‘chirish", danger = true,
                 onConfirm = {
                     confirmDeleteChat = false
-                    scope.launch { withContext(Dispatchers.IO) { RustCore.tgDeleteDialog(chat.spec) }; onBack() }
+                    scope.launch { withContext(Dispatchers.IO) { chat.deleteRemote() }; onBack() }
                 },
                 onDismiss = { confirmDeleteChat = false },
             )

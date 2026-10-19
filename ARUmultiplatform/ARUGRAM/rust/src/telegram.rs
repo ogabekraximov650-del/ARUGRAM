@@ -96,6 +96,8 @@ use tokio::sync::Semaphore;
 use crate::crypto;
 use crate::ffi_utils::{cstr_to_str, string_to_cptr};
 
+mod secret;
+
 /// Bitta `upload.getFile` so'rovi hajmi.
 ///
 /// Telegram qoidasi: `limit` 4 KiB ga karrali, 1 MiB ni qoldiqsiz
@@ -478,6 +480,7 @@ fn connect(t: &Tg) -> Option<Client> {
     };
     let SenderPool { runner, handle, mut updates } = pool;
     let client = Client::new(handle);
+    let secret_client = client.clone();
     t.rt.spawn(runner.run());
     // Yangilanishlar kanali o'qilmasa xotirada cheksiz o'sadi.
     // Faqat bittasi kerak: QR orqali kirish tasdiqlandi
@@ -509,6 +512,8 @@ fn connect(t: &Tg) -> Option<Client> {
                     tl::enums::Updates::Combined(s) => s.updates.iter().for_each(note_update),
                     _ => {}
                 }
+                // Maxfiy chatlar: kalit almashinuvi va shifrlangan xabarlar (`secret.rs`).
+                secret::on_updates(&secret_client, up).await;
                 if !accepted {
                     UPDATE_SEQ.fetch_add(1, Ordering::SeqCst);
                 }
@@ -5044,6 +5049,7 @@ pub extern "C" fn rust_tg_logout() -> *mut c_char {
         }
     }
     let _ = fs::remove_file(t.dir.join("session.bin"));
+    secret::wipe();
     disconnect(t);
     t.authorized.store(false, Ordering::SeqCst);
     forget_account_state(t);
@@ -5455,7 +5461,7 @@ pub extern "C" fn rust_tg_story_file(arg_ptr: *const c_char) -> *mut c_char {
         let peer = resolve_peer(&client, &l[0]).await?;
         let ip: tl::enums::InputPeer = peer.into();
         let res = client
-            .invoke(&tl::functions::stories::GetStoriesByid { peer: ip, id: vec![id] })
+            .invoke(&tl::functions::stories::GetStoriesById { peer: ip, id: vec![id] })
             .await
             .map_err(|e| e.to_string())?;
         let tl::enums::stories::Stories::Stories(s) = res;

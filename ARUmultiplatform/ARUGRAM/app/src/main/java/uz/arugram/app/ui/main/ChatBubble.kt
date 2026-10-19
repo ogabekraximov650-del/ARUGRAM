@@ -191,7 +191,16 @@ private fun Footer(m: MsgRow, chat: ChatRow, modifier: Modifier, onSticker: Bool
         if (m.views > 0) BasicText("${compactCount(m.views)}  ", style = TextStyle(color = col, fontSize = 12.sp))
         if (m.edited) BasicText("tahrirlangan  ", style = TextStyle(color = col, fontSize = 12.sp, fontStyle = FontStyle.Italic))
         BasicText(clock(m.date), style = TextStyle(color = col, fontSize = 12.sp))
-        if (m.out) {
+        if (m.out && m.id <= 0) {
+            // Yuborilmoqda: soat belgisi.
+            androidx.compose.foundation.Canvas(Modifier.padding(start = 3.dp).size(12.dp)) {
+                val r = size.minDimension / 2f - 0.75.dp.toPx()
+                drawCircle(col, radius = r, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.2.dp.toPx()))
+                val ctr = center
+                drawLine(col, ctr, androidx.compose.ui.geometry.Offset(ctr.x, ctr.y - r * 0.6f), strokeWidth = 1.2.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                drawLine(col, ctr, androidx.compose.ui.geometry.Offset(ctr.x + r * 0.45f, ctr.y), strokeWidth = 1.2.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
+            }
+        } else if (m.out) {
             Box(Modifier.padding(start = 3.dp).width(18.dp).height(12.dp)) {
                 TgIcon(R.drawable.list_check, col, Modifier.align(Alignment.CenterStart), 12.dp)
                 if (m.id <= chat.readOut) TgIcon(R.drawable.list_halfcheck, col, Modifier.align(Alignment.CenterStart).offset(x = 5.dp), 12.dp)
