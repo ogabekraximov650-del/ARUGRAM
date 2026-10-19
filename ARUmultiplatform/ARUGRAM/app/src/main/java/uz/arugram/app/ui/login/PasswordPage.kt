@@ -100,11 +100,10 @@ fun PasswordPage(
             }
         }
         Box(Modifier.weight(1f))
-        BasicText(
-            S.ForgotPassword,
-            Modifier.clickable(onClick = onForgot).padding(horizontal = 16.dp, vertical = 16.dp),
-            style = TextStyle(color = c.value, fontSize = 15.sp),
-        )
-        Spacer(Modifier.height(16.dp))
+        // DrKLO: 56 dp balandlikdagi, chapga tekislangan matn, pastdan 32 dp yuqorida.
+        Box(Modifier.fillMaxWidth().height(56.dp).clickable(onClick = onForgot).padding(horizontal = 16.dp), contentAlignment = Alignment.CenterStart) {
+            BasicText(S.ForgotPassword, style = TextStyle(color = c.value, fontSize = 15.sp, lineHeight = 17.sp))
+        }
+        Spacer(Modifier.height(32.dp))
     }
 }

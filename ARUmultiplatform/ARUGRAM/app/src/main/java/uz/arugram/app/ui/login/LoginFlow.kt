@@ -180,8 +180,9 @@ fun LoginFlow(auth: AuthModel, suppressFab: Boolean = false) {
         keypadP.animateTo(if (keypadWanted) 1f else 0f, tween(300, easing = if (keypadWanted) androidx.compose.animation.core.CubicBezierEasing(0.25f, 0.1f, 0.25f, 1f) else androidx.compose.animation.core.CubicBezierEasing(0.455f, 0.03f, 0.515f, 0.955f)))
     }
 
-    Column(Modifier.fillMaxSize().background(c.bg).statusBarsPadding().navigationBarsPadding().imePadding()) {
-    Box(Modifier.weight(1f).fillMaxWidth()) {
+    val keypadH = if (keypadWanted) NUMPAD_HEIGHT_DP.dp else (NUMPAD_HEIGHT_DP * keypadP.value).dp
+    Box(Modifier.fillMaxSize().background(c.bg).statusBarsPadding().navigationBarsPadding().imePadding()) {
+    Box(Modifier.fillMaxSize().padding(bottom = keypadH)) {
         AnimatedContent(
             targetState = page,
             modifier = Modifier.fillMaxSize(),
@@ -263,7 +264,7 @@ fun LoginFlow(auth: AuthModel, suppressFab: Boolean = false) {
         }
     }
     if (keypadWanted || keypadP.value > 0.001f) {
-        Box(Modifier.fillMaxWidth().height(if (keypadWanted) NUMPAD_HEIGHT_DP.dp else (NUMPAD_HEIGHT_DP * keypadP.value).dp)) {
+        Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(keypadH)) {
             TgNumPad(
                 onDigit = ::onDigit,
                 onBackspace = ::onBackspace,

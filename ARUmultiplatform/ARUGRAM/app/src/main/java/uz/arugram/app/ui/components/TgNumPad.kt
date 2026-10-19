@@ -58,7 +58,7 @@ fun TgNumPad(onDigit: (Char) -> Unit, onBackspace: () -> Unit, modifier: Modifie
         modifier = modifier,
         content = {
             for (i in 0 until 12) {
-                if (i == 9) { Box(); continue }
+                if (i == 9) { Box(Modifier); continue }
                 val num = if (i == 11) "" else (if (i == 10) "0" else (i + 1).toString())
                 NumKey(i, num, Symbols[i].orEmpty(), isBack = i == 11, onDigit = { digit.value(it) }, onBack = { back.value() })
             }
