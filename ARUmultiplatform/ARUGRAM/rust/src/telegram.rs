@@ -3147,7 +3147,7 @@ pub extern "C" fn rust_tg_search(arg_ptr: *const c_char) -> *mut c_char {
         if q.is_empty() {
             return Ok(json!({"results": []}));
         }
-        let res = client.invoke(&tl::functions::contacts::Search { q, limit: 30 }).await.map_err(|e| e.to_string())?;
+        let res = client.invoke(&tl::functions::contacts::Search { broadcasts: false, bots: false, q, limit: 30 }).await.map_err(|e| e.to_string())?;
         let tl::enums::contacts::Found::Found(f) = res;
         let mut out = Vec::new();
         for u in f.users {
