@@ -6682,3 +6682,9 @@ Hozircha: `.tgs` — faqat kichik rasm (2-bosqich: lottie-android + libwebp bila
   (`concurrency`), shu sabab kompilyatsiya xatolari bir necha pushdan keyin ko'rinishi mumkin.
 - **Qoldi**: haqiqiy "suyuq shisha" (xiralashtirish), media (rasm/video/stiker) ko'rsatish, yuborish animatsiyalari, qidiruv (server), sozlamalar,
   ro'yxatdan o'tish (sign-up), guruh/kanal ma'lumotlari, bildirishnomalar.
+
+## ARUGRAM: kirish animatsiyalari, maxfiy chat, hikoyalar va boshqa imkoniyatlar (2026-10)
+- **Nima:** kod/telefon kiritish animatsiyalari DrKLO `CodeNumberField`/`CodeFieldContainer`/`shakeViewSpring` bo'yicha qayta yozildi; maxfiy chatlar (E2E), hikoyalar, arxiv, jild yaratish, ovozsiz/rejalashtirilgan xabarlar, joylashuv/kontakt/so'rovnoma, GIF va video (ExoPlayer), bot mini-ilovalari/buyruqlari, tarjima, matn bezaklari, ovoz to'lqini, maxfiylik sozlamalari, stiker boshqaruvi, a'zolar ustida amallar, qo'ng'iroqlar tarixi, Premium/Stars sahifalari.
+- **Nega:** foydalanuvchi talabi — Telegramda bor, ilovada yo'q hamma narsani qo'shish va DrKLO bilan bir xil qilish.
+- **Fayllar:** `ARUmultiplatform/ARUGRAM/rust/src/telegram.rs` (yangi `rust_tg_*` funksiyalar), `rust/src/telegram/secret.rs` (maxfiy chat), `app/.../ui/components/{CodeBoxes,Shake,TgFab}.kt`, `ui/login/*`, `ui/main/{Stories,AttachSheet,WebApp,VideoViews,FolderEditor,Scheduled,ChatBubble,ChatInput,ChatScreen,ChatModel,SettingsPages,...}.kt`, `auth/AuthModel.kt`.
+- **Qilinmagan:** haqiqiy ovozli/video qo'ng'iroq (`tgcalls`/WebRTC kerak), Premium/Stars to'lovi, maxfiy chatda media/TTL, webm stikerlar (alfa kanal), guruh qo'ng'iroqlari.

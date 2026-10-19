@@ -120,6 +120,13 @@ fun LoginFlow(auth: AuthModel, suppressFab: Boolean = false) {
         else -> Page.Phone
     }
 
+    // DrKLO `setPage`: sahifa almashganda tugma yashiriladi va sahifa surilishi (300 ms) tugagach qayta ko'rinadi.
+    val fabWanted = page == Page.Phone || page == Page.Password || page == Page.Register
+    var fabShown by remember { mutableStateOf(fabWanted) }
+    LaunchedEffect(page) {
+        if (fabWanted) { if (!fabShown) delay(300); fabShown = true } else fabShown = false
+    }
+
     fun onCodeChange(raw: String) {
         val d = PhoneFormat.digitsOnly(raw)
         // Kod uzunroq yozilsa/qo'yilsa: ortiqcha raqamlar telefon raqamiga o'tadi (Telegram'dagidek).
@@ -270,7 +277,7 @@ fun LoginFlow(auth: AuthModel, suppressFab: Boolean = false) {
 
         // Pastki o'ngdagi dumaloq tugma (telefon va parol sahifalarida).
         TgFab(
-            visible = page == Page.Phone || page == Page.Password || page == Page.Register,
+            visible = fabShown && fabWanted,
             busy = (ui.busy || sending) && (page == Page.Phone || page == Page.Password || page == Page.Register),
             onClick = ::onNext,
             modifier = Modifier.align(Alignment.BottomEnd).padding(end = 20.dp, bottom = if (keypadWanted) 10.dp else 14.dp).alpha(if (suppressFab || confirmP > 0.001f) 0f else 1f),

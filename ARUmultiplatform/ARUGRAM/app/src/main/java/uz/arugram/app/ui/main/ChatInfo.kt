@@ -59,10 +59,14 @@ fun ChatInfo(chat: ChatRow, onBack: () -> Unit, onWrite: () -> Unit, onDeleted: 
     var editChat by remember { mutableStateOf(false) }
     var inviteLink by remember { mutableStateOf<String?>(null) }
     var confirmClear by remember { mutableStateOf(false) }
+    var contactForm by remember { mutableStateOf(false) }
+    var photosOpen by remember { mutableStateOf(false) }
+    var isContact by remember(chat.id) { mutableStateOf<Boolean?>(null) }
     var toast by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(toast) { if (toast != null) { kotlinx.coroutines.delay(2500); toast = null } }
     LaunchedEffect(chat.id) { if (!chat.isSecret) info = withContext(Dispatchers.IO) { RustCore.tgPeerInfo(chat.spec) } }
     val i = info
+    LaunchedEffect(i) { if (i != null && i.has("contact")) isContact = i.optBoolean("contact") }
     val kind = i?.optString("kind").orEmpty().ifEmpty { chat.kind }
     val status = when (kind) {
         "user" -> if (chat.bot) "bot" else statusText(i?.optString("status").orEmpty())
@@ -77,7 +81,7 @@ fun ChatInfo(chat: ChatRow, onBack: () -> Unit, onWrite: () -> Unit, onDeleted: 
         }
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             Column(Modifier.fillMaxWidth().background(c.bar).padding(bottom = 20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                ChatAvatar(chat, 96.dp)
+                Box(Modifier.clickable(enabled = !chat.isSecret) { photosOpen = true }) { ChatAvatar(chat, 96.dp) }
                 BasicText(chat.name, Modifier.padding(top = 12.dp, start = 24.dp, end = 24.dp), style = TextStyle(color = c.text, fontSize = 22.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center))
                 if (status.isNotEmpty()) BasicText(status, Modifier.padding(top = 4.dp), style = TextStyle(color = if (status == "onlayn") Color(0xFF3390EC) else c.gray, fontSize = 15.sp))
             }
@@ -104,6 +108,12 @@ fun ChatInfo(chat: ChatRow, onBack: () -> Unit, onWrite: () -> Unit, onDeleted: 
                 InfoAction(R.drawable.msg_delete, "Maxfiy chatni tugatish", danger = true) { confirmDelete = true }
             } else Column(Modifier.fillMaxWidth().background(c.bar)) {
                 InfoAction(R.drawable.msg_send, "Xabar yozish") { onWrite() }
+                if (kind == "user" && !chat.self && !chat.bot && isContact != null) InfoAction(R.drawable.msg_contacts, if (isContact == true) "Kontaktlardan o‘chirish" else "Kontaktlarga qo‘shish", danger = isContact == true) {
+                    if (isContact == true) scope.launch {
+                        val r = withContext(Dispatchers.IO) { RustCore.tgContactEdit("${chat.id}@${chat.access}", "", "", true) }
+                        toast = r.optString("error").ifEmpty { isContact = false; "Kontaktlardan o‘chirildi" }
+                    } else contactForm = true
+                }
                 if (kind == "user" && !chat.self && !chat.bot) InfoAction(R.drawable.msg_secret, "Maxfiy chat boshlash") {
                     scope.launch {
                         val r = withContext(Dispatchers.IO) { RustCore.tgSecretStart(chat.id, chat.access, chat.name) }
@@ -140,6 +150,16 @@ fun ChatInfo(chat: ChatRow, onBack: () -> Unit, onWrite: () -> Unit, onDeleted: 
         }
     }
     viewer?.let { MediaViewer(chat, it) { viewer = null } }
+    if (photosOpen) ProfilePhotosViewer(chat, onClose = { photosOpen = false })
+    if (contactForm) {
+        TgForm("Kontaktlarga qo‘shish", listOf("Ism", "Familiya (ixtiyoriy)"), "Qo‘shish", initial = listOf(chat.name.substringBefore(' '), chat.name.substringAfter(' ', "")), onConfirm = { v ->
+            contactForm = false
+            scope.launch {
+                val r = withContext(Dispatchers.IO) { RustCore.tgContactEdit("${chat.id}@${chat.access}", v[0], v[1], false) }
+                toast = r.optString("error").ifEmpty { isContact = true; "Kontaktlarga qo‘shildi" }
+            }
+        }, onDismiss = { contactForm = false })
+    }
     Bulletin(toast, Modifier.fillMaxWidth().padding(top = 80.dp))
     if (editChat) {
         TgForm("Tahrirlash", listOf("Nom", "Tavsif"), "Saqlash", initial = listOf(chat.name, i?.optString("about").orEmpty()), onConfirm = { v ->

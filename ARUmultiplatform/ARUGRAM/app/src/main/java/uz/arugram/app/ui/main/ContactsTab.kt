@@ -101,16 +101,16 @@ fun ContactsTab(bottomPadding: androidx.compose.ui.unit.Dp, onOpen: (ChatRow) ->
                     }
                     items(list.filter { filter.isBlank() || it.name.contains(filter.trim(), ignoreCase = true) }, key = { it.id }) { r ->
                         val row = ChatRow(r.id, "user", r.name, false, 0, false, false, 0, "", false, false, false, access = r.hash)
-                        Row(Modifier.fillMaxWidth().height(58.dp).clickable { onOpen(row) }.padding(start = 14.dp, end = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                            ChatAvatar(row, 42.dp)
-                            Column(Modifier.padding(start = 12.dp)) {
-                                BasicText(r.name, style = TextStyle(color = c.text, fontSize = 16.sp, fontWeight = FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                BasicText(
-                                    statusText(r),
-                                    style = TextStyle(color = if (r.online) c.value else c.gray, fontSize = 13.sp),
-                                    maxLines = 1,
-                                )
-                            }
+                        // DrKLO `UserCell(padding = 8)`: avatar 46 dp (x=15, y=6), ism 16 sp qalin (x=72, y=10), holat 15 sp (y=32), balandlik 58 dp.
+                        Box(Modifier.fillMaxWidth().height(58.dp).clickable { onOpen(row) }) {
+                            Box(Modifier.padding(start = 15.dp, top = 6.dp)) { ChatAvatar(row, 46.dp) }
+                            BasicText(r.name, Modifier.padding(start = 72.dp, top = 10.dp, end = 28.dp), style = TextStyle(color = c.text, fontSize = 16.sp, fontWeight = FontWeight.Bold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            BasicText(
+                                statusText(r),
+                                Modifier.padding(start = 72.dp, top = 32.dp, end = 28.dp),
+                                style = TextStyle(color = if (r.online) (if (c.dark) c.value else Color(0xFF2678B6)) else (if (c.dark) c.gray else Color(0xFF808384)), fontSize = 15.sp),
+                                maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            )
                         }
                     }
                 }

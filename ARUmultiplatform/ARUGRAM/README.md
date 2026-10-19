@@ -57,3 +57,9 @@ Rust: `rust_tg_*` (send, edit, delete, forward, pin_*, mute, send_media, media_f
 
 **Hali yo'q** (alohida yirik ishlar): ovozli/video qo'ng'iroqlar (WebRTC), maxfiy chatlar (E2E), hikoyalar, Premium/Stars, bot mini-ilovalari,
 animatsion stikerlar (TGS/Lottie, webm), so'rovnomalarda ovoz berish, joylashuv xaritasi, Chromecast/PiP.
+
+## Kod/telefon animatsiyalari va keyingi imkoniyatlar (2026-10)
+- **Kirish animatsiyalari DrKLO bilan bir xil:** `CodeBoxes.kt` (`CodeNumberField`/`CodeFieldContainer` porti: raqam kirishi 350 ms Overshoot, almashish/o'chish 220 ms, fokus/xato/muvaffaqiyat prujinalari 400, yashil to'lqin 75 ms), `Shake.kt` (`shakeViewSpring`: 600/0,5, kodda 10 dp), tasdiqlash oqimi (FAB 400 ms → 150 ms → davlat tekshiruvi), xatolar `AlertDialog` ko'rinishida (`TgAlert`).
+- **Maxfiy chatlar** (`rust/src/telegram/secret.rs`): DH kalit almashinuvi, MTProto 2.0 (AES-IGE + SHA-256), `decryptedMessageLayer` qo'lda (de)serializatsiya, `getDifference` bilan qolib ketgan xabarlar. Kalit va xabarlar faqat qurilmada (`secret.bin`, shifrlangan). Faqat matn; media/TTL yo'q.
+- **Hikoyalar** (qator, ko'rgich, joylash), **arxiv**, **jildlar yaratish**, **ovozsiz/rejalashtirilgan xabarlar**, **joylashuv/kontakt/so'rovnoma**, **GIF (ExoPlayer)**, **bot mini-ilovalari va buyruqlari**, **tarjima**, **matn bezaklari** (qabul qilish va belgilar orqali yuborish), **maxfiylik sozlamalari**, **stiker boshqaruvi**, **a'zolar ustida amallar**, **qo'ng'iroqlar tarixi / Premium / Stars sahifalari**.
+- **Qilinmagan:** haqiqiy ovozli/video qo'ng'iroq (WebRTC `tgcalls` kerak), Premium/Stars to'lovi, maxfiy chatda media, webm stikerlar (alfa), guruh qo'ng'iroqlari.

@@ -65,7 +65,7 @@ fun MediaViewer(chat: ChatRow, msg: MsgRow, onClose: () -> Unit) {
             when {
                 f == null && !failed -> CircularProgressIndicator(Modifier.align(Alignment.Center).size(40.dp), color = Color.White, strokeWidth = 3.dp)
                 f == null -> BasicText("Yuklab bo‘lmadi", Modifier.align(Alignment.Center), style = TextStyle(color = Color.White, fontSize = 16.sp))
-                msg.kind == "video" || msg.kind == "gif" -> ControlledVideo(f.file, Modifier.fillMaxSize())
+                msg.kind == "video" || msg.kind == "gif" || msg.kind == "round" -> ControlledVideo(f.file, Modifier.fillMaxSize())
                 else -> ZoomImage(f.file)
             }
             Row(Modifier.fillMaxWidth().statusBarsPadding().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -73,7 +73,7 @@ fun MediaViewer(chat: ChatRow, msg: MsgRow, onClose: () -> Unit) {
                 Box(Modifier.weight(1f))
                 if (f != null) {
                     Box(Modifier.size(48.dp).clickable { shareFile(ctx, f.file, f.mime) }, contentAlignment = Alignment.Center) { TgIcon(R.drawable.msg_share, Color.White) }
-                    Box(Modifier.size(48.dp).clickable { saveToGallery(ctx, f.file, msg.kind == "video" || msg.kind == "gif") }, contentAlignment = Alignment.Center) { TgIcon(R.drawable.media_download, Color.White) }
+                    Box(Modifier.size(48.dp).clickable { saveToGallery(ctx, f.file, msg.kind == "video" || msg.kind == "gif" || msg.kind == "round") }, contentAlignment = Alignment.Center) { TgIcon(R.drawable.media_download, Color.White) }
                 }
             }
         }
@@ -142,4 +142,37 @@ fun saveToGallery(ctx: android.content.Context, file: File, video: Boolean) {
             Toast.makeText(ctx, "Yuklanganlar papkasiga saqlandi", Toast.LENGTH_SHORT).show()
         }
     }.onFailure { Toast.makeText(ctx, "Saqlab bo‘lmadi", Toast.LENGTH_SHORT).show() }
+}
+
+/** Profil rasmlari (DrKLO `PhotoViewer` profil rejimi): to'liq ekran, o'ngga/chapga suriladi, "2 / 5" ko'rsatkichi bilan. */
+@Composable
+fun ProfilePhotosViewer(chat: ChatRow, onClose: () -> Unit) {
+    val ctx = LocalContext.current
+    var paths by remember { mutableStateOf<List<String>?>(null) }
+    LaunchedEffect(chat.id) {
+        val dir = File(ctx.filesDir, "profile_photos").apply { mkdirs() }
+        val j = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { uz.arugram.app.core.RustCore.tgProfilePhotos(chat.spec, dir.absolutePath) }
+        val a = j.optJSONArray("paths")
+        paths = List(a?.length() ?: 0) { a!!.getString(it) }
+    }
+    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        Box(Modifier.fillMaxSize().background(Color.Black)) {
+            val l = paths
+            when {
+                l == null -> CircularProgressIndicator(Modifier.align(Alignment.Center).size(40.dp), color = Color.White, strokeWidth = 3.dp)
+                l.isEmpty() -> BasicText("Profil rasmi yo‘q", Modifier.align(Alignment.Center), style = TextStyle(color = Color.White, fontSize = 16.sp))
+                else -> {
+                    val pager = androidx.compose.foundation.pager.rememberPagerState { l.size }
+                    androidx.compose.foundation.pager.HorizontalPager(pager, Modifier.fillMaxSize()) { page ->
+                        ZoomImage(File(l[page]))
+                    }
+                    if (l.size > 1) BasicText(
+                        "${pager.currentPage + 1} / ${l.size}",
+                        Modifier.align(Alignment.BottomCenter).padding(bottom = 32.dp), style = TextStyle(color = Color.White, fontSize = 15.sp),
+                    )
+                }
+            }
+            Box(Modifier.statusBarsPadding().padding(8.dp).size(48.dp).clickable(onClick = onClose), contentAlignment = Alignment.Center) { CloseIcon(Color.White) }
+        }
+    }
 }

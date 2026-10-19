@@ -93,6 +93,10 @@ fun ChatScreen(chat: ChatRow, chats: List<ChatRow>, typing: Boolean, onBack: () 
     var muteOpen by remember { mutableStateOf(false) }
     // Bezak tugmalari (qalin, kursiv...) ishlatilgan bo'lsa matndagi belgilar yuborishda entity'ga aylantiriladi.
     var fmtUsed by remember { mutableStateOf(false) }
+    // O'qilmagan xabarlar chizig'i: chat ochilgandagi o'qilmagan soniga ko'ra birinchi o'qilmagan xabar (bir marta aniqlanadi).
+    var firstUnreadId by remember(chat.id) { mutableStateOf<Int?>(null) }
+    val openUnread = remember(chat.id) { chat.unread }
+    var unreadHandled by remember(chat.id) { mutableStateOf(chat.unread == 0) }
     LaunchedEffect(draft.text.isEmpty()) { if (draft.text.isEmpty()) fmtUsed = false }
     // Bot mini-ilovasi: (sarlavha, url, rejim). Bot menyu tugmasi suhbat ochilganda bir marta so'raladi.
     var webApp by remember { mutableStateOf<Triple<String, String, String>?>(null) }
@@ -168,10 +172,29 @@ fun ChatScreen(chat: ChatRow, chats: List<ChatRow>, typing: Boolean, onBack: () 
             model.clearError()
         }
     }
+    LaunchedEffect(model.loaded) {
+        if (model.loaded && !unreadHandled) {
+            unreadHandled = true
+            val incoming = model.messages.filter { !it.out && it.service.isEmpty() }
+            val target = incoming.getOrNull(openUnread - 1)
+            if (target != null) {
+                firstUnreadId = target.id
+                val idx = model.messages.indexOfFirst { it.id == target.id }
+                if (idx > 2) listState.scrollToItem(idx)
+            }
+        }
+    }
     // Eski xabarlarni yuklash: ro'yxat oxiriga yaqinlashganda.
     val nearEnd by remember { derivedStateOf { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index?.let { it >= model.messages.size - 6 } ?: false } }
     LaunchedEffect(nearEnd, model.messages.size) { if (nearEnd) model.loadOlder() }
     LaunchedEffect(query) { delay(350); model.search(query) }
+    // Guruhda yuboruvchilar avatarlari.
+    LaunchedEffect(model.messages.size) {
+        if (chat.kind == "group") {
+            val senders = model.messages.filter { !it.out && it.sid != 0L && it.sphoto != "0" }.distinctBy { it.sid }.take(40)
+            if (senders.isNotEmpty()) AvatarCache.ensureUsers(ctx, senders.map { Triple(it.sid, it.shash, it.sphoto) })
+        }
+    }
 
     BackHandler {
         when {
@@ -275,11 +298,13 @@ fun ChatScreen(chat: ChatRow, chats: List<ChatRow>, typing: Boolean, onBack: () 
                             val replied = if (m.reply > 0) list.firstOrNull { it.id == m.reply } else null
                             Column {
                                 if (older == null || dayKey(older.date) != dayKey(m.date)) DateChip(m.date)
+                                if (firstUnreadId == m.id) UnreadDivider()
                                 if (m.service.isNotEmpty()) ServiceChip(m.service) else MessageBubble(
+                                    showAvatar = chat.kind == "group" && !m.out && (i == 0 || list[i - 1].sid != m.sid || list[i - 1].service.isNotEmpty()),
                                     m = m, chat = chat, replied = replied, selected = m.id in selected,
                                     onClick = {
                                         if (selected.isNotEmpty()) { if (m.id in selected) selected.remove(m.id) else selected.add(m.id) }
-                                        else if (m.kind == "photo" || m.kind == "video" || m.kind == "gif") viewer = m
+                                        else if (m.kind == "photo" || m.kind == "video" || m.kind == "gif" || m.kind == "round") viewer = m
                                     },
                                     onLongClick = { if (selected.isEmpty()) menuFor = m else if (m.id !in selected) selected.add(m.id) },
                                     onOpenMedia = { if (selected.isEmpty()) viewer = m else if (m.id in selected) selected.remove(m.id) else selected.add(m.id) },
@@ -426,6 +451,14 @@ fun ChatScreen(chat: ChatRow, chats: List<ChatRow>, typing: Boolean, onBack: () 
             )
         }
         viewer?.let { MediaViewer(chat, it) { viewer = null } }
+    }
+}
+
+/** "O'qilmagan xabarlar" chizig'i (DrKLO `ChatUnreadCell`): to'liq kenglikdagi och fon, markazda ko'k matn. */
+@Composable
+fun UnreadDivider() {
+    Box(Modifier.fillMaxWidth().padding(vertical = 4.dp).background(Color(0xCCFFFFFF)).padding(vertical = 6.dp), contentAlignment = Alignment.Center) {
+        BasicText("O‘qilmagan xabarlar", style = TextStyle(color = Color(0xFF5695CC), fontSize = 14.sp, fontWeight = FontWeight.Medium))
     }
 }
 

@@ -114,6 +114,8 @@ interface RustLib : Library {
     fun rust_tg_saved_gifs(): Pointer?
     fun rust_tg_doc_file(arg: String): Pointer?
     fun rust_tg_save_gif(arg: String): Pointer?
+    fun rust_tg_contact_edit(arg: String): Pointer?
+    fun rust_tg_profile_photos(arg: String): Pointer?
     fun rust_tg_logout(): Pointer?
 
     // ── Kirish (intro) sahnasi: Telegram `IntroRenderer.c` ning Rust'ga o'tkazilgan nusxasi (OpenGL ES 2) ──

@@ -2480,12 +2480,18 @@ fn media_info(m: &grammers_client::media::Media) -> MediaInfo {
         }
         Media::Document(d) => {
             let mime = d.mime_type().unwrap_or("").to_string();
+            let round = match &d.raw.document {
+                Some(tl::enums::Document::Document(doc)) => doc.attributes.iter().any(|a| matches!(a, tl::enums::DocumentAttribute::Video(v) if v.round_message)),
+                _ => false,
+            };
             let animated = match &d.raw.document {
                 Some(tl::enums::Document::Document(doc)) => doc.attributes.iter().any(|a| matches!(a, tl::enums::DocumentAttribute::Animated)),
                 _ => false,
             };
             let (kind, label) = if mime.starts_with("video/") && animated {
                 ("gif", "GIF")
+            } else if mime.starts_with("video/") && round {
+                ("round", "Video xabar")
             } else if mime.starts_with("video/") {
                 ("video", "Video")
             } else if mime == "audio/ogg" {
@@ -2779,7 +2785,21 @@ fn msg_json(m: &grammers_client::message::Message) -> Value {
         tl::enums::Message::Service(x) => service_text(&sender.clone().unwrap_or_default(), &x.action, x.from_id.as_ref()),
         _ => String::new(),
     };
+    // Yuboruvchi (guruhda avatar uchun): id, access_hash, profil rasmi id.
+    let (sid, shash, sphoto) = match m.sender() {
+        Some(grammers_client::peer::Peer::User(u)) => {
+            let hash = match &u.raw {
+                tl::enums::User::User(x) => x.access_hash.unwrap_or(0),
+                _ => 0,
+            };
+            (u.id().bot_api_dialog_id(), hash, u.photo().map(|p| p.photo_id).unwrap_or(0))
+        }
+        _ => (0, 0, 0),
+    };
     json!({
+        "sid": sid,
+        "shash": shash.to_string(),
+        "sphoto": sphoto.to_string(),
         "service": service,
         "ents": ents,
         "web": web,
@@ -3304,7 +3324,7 @@ pub extern "C" fn rust_tg_media_file(arg_ptr: *const c_char) -> *mut c_char {
         let ext = match mi.kind {
             "photo" => "jpg".to_string(),
             "voice" => "ogg".to_string(),
-            "video" | "gif" => "mp4".to_string(),
+            "video" | "gif" | "round" => "mp4".to_string(),
             "sticker" => {
                 if mi.mime == "image/webp" {
                     "webp".to_string()
@@ -3566,9 +3586,11 @@ pub extern "C" fn rust_tg_peer_info(arg_ptr: *const c_char) -> *mut c_char {
                 let mut username = String::new();
                 let mut phone = String::new();
                 let mut status = String::new();
+                let mut is_contact = false;
                 for x in f.users {
                     if let tl::enums::User::User(x) = x {
                         if x.id == u.user_id {
+                            is_contact = x.contact;
                             name = format!("{} {}", x.first_name.clone().unwrap_or_default(), x.last_name.clone().unwrap_or_default()).trim().to_string();
                             username = x.username.clone().unwrap_or_default();
                             phone = x.phone.clone().unwrap_or_default();
@@ -3596,7 +3618,7 @@ pub extern "C" fn rust_tg_peer_info(arg_ptr: *const c_char) -> *mut c_char {
                         .collect(),
                     _ => Vec::new(),
                 };
-                Ok(json!({"kind": "user", "name": name, "about": full.about.unwrap_or_default(), "username": username, "phone": phone, "members": 0, "status": status, "commands": commands}))
+                Ok(json!({"kind": "user", "name": name, "about": full.about.unwrap_or_default(), "username": username, "phone": phone, "members": 0, "status": status, "commands": commands, "contact": is_contact}))
             }
             tl::enums::InputPeer::Chat(c) => {
                 let res = client.invoke(&tl::functions::messages::GetFullChat { chat_id: c.chat_id }).await.map_err(|e| e.to_string())?;
@@ -6608,5 +6630,62 @@ pub extern "C" fn rust_tg_save_gif(arg_ptr: *const c_char) -> *mut c_char {
             .await
             .map_err(|e| e.to_string())?;
         Ok(json!({"ok": true}))
+    })
+}
+
+/// Foydalanuvchini kontaktga qo'shish / o'chirish: `arg` = `"<id>@<hash>\n<ism>\n<familiya>\n<add|remove>"`.
+#[no_mangle]
+pub extern "C" fn rust_tg_contact_edit(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 30, |client, arg| async move {
+        let l = lines(&arg, 4);
+        let id = input_user_of(&l[0])?;
+        if l[3].trim() == "remove" {
+            client.invoke(&tl::functions::contacts::DeleteContacts { id: vec![id] }).await.map_err(|e| e.to_string())?;
+        } else {
+            if l[1].trim().is_empty() {
+                return Err("Ismni kiriting".to_string());
+            }
+            client
+                .invoke(&tl::functions::contacts::AddContact {
+                    add_phone_privacy_exception: false,
+                    id,
+                    first_name: l[1].trim().to_string(),
+                    last_name: l[2].trim().to_string(),
+                    phone: String::new(),
+                    note: None,
+                })
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(json!({"ok": true}))
+    })
+}
+
+/// Profil rasmlari (eng ko'pi 10 ta, to'liq o'lchamda): `arg` = `"<suhbat>\n<papka>"`. Javob `{"paths":[".."]}`.
+#[no_mangle]
+pub extern "C" fn rust_tg_profile_photos(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 120, |client, arg| async move {
+        let l = lines(&arg, 2);
+        let peer = resolve_peer(&client, &l[0]).await?;
+        let dir = std::path::PathBuf::from(l[1].trim());
+        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let mut it = client.iter_profile_photos(peer);
+        let mut paths = Vec::new();
+        while paths.len() < 10 {
+            let Some(photo) = it.next().await.map_err(|e| e.to_string())? else { break };
+            let path = dir.join(format!("p{}.jpg", photo.id()));
+            if !path.exists() || fs::metadata(&path).map(|x| x.len()).unwrap_or(0) == 0 {
+                let tmp = dir.join(format!("p{}.part", photo.id()));
+                let mut out = fs::File::create(&tmp).map_err(|e| e.to_string())?;
+                let mut dl = client.iter_download(&photo);
+                while let Some(chunk) = dl.next().await.map_err(|e| e.to_string())? {
+                    std::io::Write::write_all(&mut out, &chunk).map_err(|e| e.to_string())?;
+                }
+                drop(out);
+                fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
+            }
+            paths.push(path.to_string_lossy().to_string());
+        }
+        Ok(json!({"paths": paths}))
     })
 }

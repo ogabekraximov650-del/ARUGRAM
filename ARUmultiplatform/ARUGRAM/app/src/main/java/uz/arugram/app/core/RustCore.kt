@@ -201,6 +201,11 @@ object RustCore {
 
     fun tgStories() = call { it.rust_tg_stories() }
 
+    fun tgProfilePhotos(spec: String, dir: String) = call { it.rust_tg_profile_photos("$spec\n$dir") }
+
+    fun tgContactEdit(user: String, first: String, last: String, remove: Boolean) =
+        call { it.rust_tg_contact_edit("$user\n$first\n$last\n${if (remove) "remove" else "add"}") }
+
     fun tgSaveGif(spec: String, msgId: Int) = call { it.rust_tg_save_gif("$spec\n$msgId") }
 
     fun tgSavedGifs() = call { it.rust_tg_saved_gifs() }

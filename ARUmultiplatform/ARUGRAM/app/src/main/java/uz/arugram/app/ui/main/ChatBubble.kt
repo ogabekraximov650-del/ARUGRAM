@@ -108,20 +108,23 @@ fun MessageBubble(
     onReplyClick: (Int) -> Unit,
     onVote: (List<String>) -> Unit = {},
     onButton: (Button) -> Unit = {},
+    /** Guruhda kiruvchi xabarning chap tomonida avatar uchun joy (42 dp) qoldiriladi; [showAvatar] — shu yuboruvchining oxirgi xabari. */
+    showAvatar: Boolean = false,
 ) {
     val c = LocalTg.current
     val ctx = LocalContext.current
     val openLink = LocalOpenLink.current
     val density = androidx.compose.ui.platform.LocalDensity.current
     // DrKLO: matn kengligi = ekran - 80 dp, pufakcha = matn + 2×11 dp.
-    val maxW = (LocalConfiguration.current.screenWidthDp - 80 + 22).dp
+    val groupAvatars = chat.kind == "group" && !m.out && m.service.isEmpty()
+    val maxW = (LocalConfiguration.current.screenWidthDp - 80 + 22 - (if (groupAvatars) 42 else 0)).dp
     val textSize = remember { settingsPrefs(ctx).getInt("text_size", 16) }
     val bg = bubbleColor(m.out)
     val sticker = m.kind == "sticker"
     val shape = RoundedCornerShape(17.dp, 17.dp, if (m.out) 17.dp else 5.dp, if (m.out) 5.dp else 17.dp)
     val showSender = chat.kind != "user" && !m.out && m.sender.isNotEmpty() && !(chat.kind == "channel")
     val hasMarkup = m.markup?.inline == true
-    val isMedia = m.kind == "photo" || m.kind == "video" || m.kind == "gif"
+    val isMedia = m.kind == "photo" || m.kind == "video" || m.kind == "gif" || m.kind == "round"
     // Vaqt matn oxirgi qatoriga sig'sa o'sha qatorda (DrKLO `timeMore`), aks holda keyingi qatorga tushadi.
     val inlineFooter = m.text.isNotEmpty() && (m.kind.isEmpty() || isMedia) && m.reactions.isEmpty() && !hasMarkup
     val mediaFull = isMedia && m.text.isEmpty()
@@ -134,6 +137,10 @@ fun MessageBubble(
             .padding(start = 8.dp, end = 8.dp, top = 2.dp, bottom = 2.dp),
         contentAlignment = if (m.out) Alignment.CenterEnd else Alignment.CenterStart,
     ) {
+        Row(verticalAlignment = Alignment.Bottom) {
+        if (groupAvatars) Box(Modifier.width(42.dp)) {
+            if (showAvatar && m.sid != 0L) ChatAvatar(ChatRow(m.sid, "user", m.sender, false, 0, false, false, 0, "", false, false, false, access = m.shash), 35.dp)
+        }
         Box(
             Modifier.widthIn(max = maxW)
                 .then(if (sticker) Modifier else Modifier.clip(shape).background(bg))
@@ -172,6 +179,7 @@ fun MessageBubble(
                         "sticker" -> StickerContent(m, chat)
                         "video" -> VideoContent(m, onOpenMedia)
                         "gif" -> GifContent(m, chat, onOpenMedia)
+                        "round" -> RoundContent(m, chat, onOpenMedia)
                         "voice", "audio" -> VoiceContent(m, chat)
                         "file" -> FileContent(m, chat)
                         "poll" -> m.poll?.let { PollContent(m, it, onVote) }
@@ -250,6 +258,7 @@ fun MessageBubble(
                 mediaFull -> Footer(m, chat, Modifier.align(Alignment.BottomEnd).padding(end = 6.dp, bottom = 6.dp).clip(RoundedCornerShape(10.dp)).background(Color(0x66000000)).padding(horizontal = 6.dp, vertical = 1.dp), true)
                 sticker -> Footer(m, chat, Modifier.align(Alignment.BottomEnd).padding(end = 6.dp, bottom = 6.dp).clip(RoundedCornerShape(10.dp)).background(Color(0x66000000)).padding(horizontal = 6.dp), true)
             }
+        }
         }
     }
 }
@@ -355,6 +364,24 @@ private fun GifContent(m: MsgRow, chat: ChatRow, onOpen: () -> Unit) {
         if (f != null) LoopingVideo(f, Modifier.fillMaxSize())
         else CircularProgressIndicator(Modifier.size(28.dp), color = Color.White, strokeWidth = 2.5.dp)
         BasicText("GIF", Modifier.align(Alignment.TopStart).padding(6.dp).clip(RoundedCornerShape(10.dp)).background(Color(0x66000000)).padding(horizontal = 6.dp, vertical = 2.dp), style = TextStyle(color = Color.White, fontSize = 12.sp))
+    }
+}
+
+/** Dumaloq video xabar (DrKLO "round video"): 200 dp doira, ovozsiz takrorlanadi; bosilsa ovoz bilan ochiladi. */
+@Composable
+private fun RoundContent(m: MsgRow, chat: ChatRow, onOpen: () -> Unit) {
+    val ctx = LocalContext.current
+    var file by remember(m.id) { mutableStateOf<java.io.File?>(null) }
+    LaunchedEffect(m.id) { file = MediaCache.file(ctx, chat, m.id)?.file }
+    Box(Modifier.padding(4.dp).size(200.dp).clip(CircleShape).background(Color(0xFF2B2B2B)).combinedClickable(onClick = onOpen), contentAlignment = Alignment.Center) {
+        val f = file
+        if (f != null) LoopingVideo(f, Modifier.fillMaxSize())
+        else CircularProgressIndicator(Modifier.size(28.dp), color = Color.White, strokeWidth = 2.5.dp)
+        BasicText(
+            formatDuration(m.dur),
+            Modifier.align(Alignment.BottomStart).padding(10.dp).clip(RoundedCornerShape(10.dp)).background(Color(0x66000000)).padding(horizontal = 6.dp, vertical = 2.dp),
+            style = TextStyle(color = Color.White, fontSize = 12.sp),
+        )
     }
 }
 

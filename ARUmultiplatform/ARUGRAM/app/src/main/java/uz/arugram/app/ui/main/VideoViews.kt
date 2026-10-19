@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
@@ -77,7 +78,7 @@ fun GifPanel(onPick: (String) -> Unit) {
             l == null -> androidx.compose.material3.CircularProgressIndicator(androidx.compose.ui.Modifier.align(androidx.compose.ui.Alignment.Center).size(28.dp), color = c.inputActive, strokeWidth = 3.dp)
             l.isEmpty() -> androidx.compose.foundation.text.BasicText("Saqlangan GIF yo‘q. GIFni chatda bosib ushlab, saqlab qo‘ying.", androidx.compose.ui.Modifier.align(androidx.compose.ui.Alignment.Center).padding(24.dp), style = androidx.compose.ui.text.TextStyle(color = c.gray, fontSize = 14.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center))
             else -> androidx.compose.foundation.lazy.grid.LazyVerticalGrid(androidx.compose.foundation.lazy.grid.GridCells.Fixed(2), androidx.compose.ui.Modifier.fillMaxSize().padding(2.dp)) {
-                androidx.compose.foundation.lazy.grid.items(l, key = { it.first }) { (ref, w, h) ->
+                items(l, key = { it.first }) { (ref, w, h) ->
                     var file by androidx.compose.runtime.remember(ref) { androidx.compose.runtime.mutableStateOf<File?>(null) }
                     androidx.compose.runtime.LaunchedEffect(ref) {
                         val dir = File(ctx.cacheDir, "gifs").apply { mkdirs() }

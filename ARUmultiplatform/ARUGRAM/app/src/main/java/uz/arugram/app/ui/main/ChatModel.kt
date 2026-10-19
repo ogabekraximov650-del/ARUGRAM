@@ -44,6 +44,10 @@ data class MsgRow(
     val wave: List<Int> = emptyList(),
     /** Xizmat xabari matni (bo'sh bo'lmasa — markazdagi yozuv sifatida chiziladi). */
     val service: String = "",
+    /** Yuboruvchi (guruhda avatar uchun). */
+    val sid: Long = 0,
+    val shash: String = "0",
+    val sphoto: String = "0",
 )
 
 /** Matn bezagi: tur (`b`, `i`, `u`, `s`, `c`, `p`, `l`, `url`, `m`, `n`, `h`, `bc`, `e`, `ph`, `sp`, `q`), boshlanish, uzunlik, qo'shimcha (havola va h.k.). */
@@ -91,6 +95,7 @@ fun parseMsg(o: JSONObject): MsgRow {
             }
         },
         service = o.optString("service"),
+        sid = o.optLong("sid"), shash = o.optString("shash", "0"), sphoto = o.optString("sphoto", "0"),
         wave = o.optJSONArray("wave")?.let { a -> List(a.length()) { a.optInt(it) } }.orEmpty(),
         web = o.optJSONObject("web")?.let { w -> WebPreview(w.optString("url"), w.optString("site"), w.optString("title"), w.optString("desc")) },
         poll = o.optJSONObject("poll")?.let { po ->
