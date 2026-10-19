@@ -146,3 +146,31 @@ fun Bulletin(message: String?, modifier: Modifier = Modifier) {
         BasicText(message, style = TextStyle(color = Color.White, fontSize = 14.sp, lineHeight = 19.sp))
     }
 }
+
+/** Bir nechta maydonli oyna (masalan, kontakt qo'shish: telefon, ism, familiya). */
+@Composable
+fun TgForm(title: String, labels: List<String>, confirm: String, onConfirm: (List<String>) -> Unit, onDismiss: () -> Unit) {
+    val c = LocalTg.current
+    val values = remember { androidx.compose.runtime.mutableStateListOf(*Array(labels.size) { "" }) }
+    Dialog(onDismissRequest = onDismiss) {
+        Column(Modifier.clip(RoundedCornerShape(12.dp)).background(dialogBg()).padding(top = 20.dp, start = 24.dp, end = 24.dp, bottom = 8.dp)) {
+            BasicText(title, style = TextStyle(color = c.text, fontSize = 20.sp, fontWeight = FontWeight.Bold))
+            labels.forEachIndexed { i, label ->
+                Box(Modifier.padding(top = 12.dp).fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(c.text.copy(alpha = 0.06f)).padding(12.dp)) {
+                    if (values[i].isEmpty()) BasicText(label, style = TextStyle(color = c.hint, fontSize = 16.sp))
+                    androidx.compose.foundation.text.BasicTextField(
+                        value = values[i], onValueChange = { values[i] = it }, singleLine = true,
+                        textStyle = TextStyle(color = c.text, fontSize = 16.sp),
+                        cursorBrush = androidx.compose.ui.graphics.SolidColor(c.inputActive),
+                        keyboardOptions = if (i == 0 && label.startsWith("Telefon")) androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Phone) else androidx.compose.foundation.text.KeyboardOptions.Default,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+            Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.End) {
+                BasicText("Bekor qilish", Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClick = onDismiss).padding(horizontal = 12.dp, vertical = 10.dp), style = TextStyle(color = Blue, fontSize = 15.sp, fontWeight = FontWeight.Bold))
+                BasicText(confirm, Modifier.clip(RoundedCornerShape(6.dp)).clickable { onConfirm(values.toList()) }.padding(horizontal = 12.dp, vertical = 10.dp), style = TextStyle(color = Blue, fontSize = 15.sp, fontWeight = FontWeight.Bold))
+            }
+        }
+    }
+}

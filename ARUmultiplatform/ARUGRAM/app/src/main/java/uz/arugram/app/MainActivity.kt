@@ -57,10 +57,14 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         uz.arugram.app.notify.AppVisible.foreground = true
+        uz.arugram.app.ui.main.Passcode.lockIfNeeded(this)
+        Thread { runCatching { uz.arugram.app.core.RustCore.tgSetOnline(true) } }.start()
     }
 
     override fun onStop() {
         uz.arugram.app.notify.AppVisible.foreground = false
+        uz.arugram.app.ui.main.Passcode.stoppedAt = System.currentTimeMillis()
+        Thread { runCatching { uz.arugram.app.core.RustCore.tgSetOnline(false) } }.start()
         super.onStop()
     }
 
@@ -73,6 +77,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         if (android.os.Build.VERSION.SDK_INT >= 29) window.decorView.isForceDarkAllowed = false
         val auth = (application as ArugramApp).auth
+        uz.arugram.app.ui.main.Passcode.locked = uz.arugram.app.ui.main.Passcode.enabled(this)
         auth.start()
         val prefs = getSharedPreferences("ui", MODE_PRIVATE)
         setContent {
@@ -92,9 +97,12 @@ class MainActivity : ComponentActivity() {
                         prefs.edit().putInt("theme", m).apply()
                     },
                 ) {
-                    Root(auth, dark) {
-                        mode = if (dark) 1 else 2
-                        prefs.edit().putInt("theme", mode).apply()
+                    Box(Modifier.fillMaxSize()) {
+                        Root(auth, dark) {
+                            mode = if (dark) 1 else 2
+                            prefs.edit().putInt("theme", mode).apply()
+                        }
+                        uz.arugram.app.ui.main.PasscodeGate()
                     }
                 }
             }

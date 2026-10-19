@@ -2428,6 +2428,7 @@ struct MediaInfo {
     dur: f64,
     mime: String,
     alt: String,
+    poll: Option<Value>,
 }
 
 fn media_info(m: &grammers_client::media::Media) -> MediaInfo {
@@ -2467,6 +2468,7 @@ fn media_info(m: &grammers_client::media::Media) -> MediaInfo {
                 dur: d.duration().unwrap_or(0.0),
                 mime,
                 alt: String::new(),
+                poll: None,
             }
         }
         Media::Sticker(s) => {
@@ -2483,7 +2485,36 @@ fn media_info(m: &grammers_client::media::Media) -> MediaInfo {
             }
         }
         Media::Contact(_) => MediaInfo { kind: "other", label: "Kontakt".into(), ..Default::default() },
-        Media::Poll(_) => MediaInfo { kind: "other", label: "So'rovnoma".into(), ..Default::default() },
+        Media::Poll(p) => {
+            let tl::enums::TextWithEntities::Entities(q) = &p.raw.question;
+            let mut votes: HashMap<Vec<u8>, (i32, bool)> = HashMap::new();
+            if let Some(rs) = &p.raw_results.results {
+                for v in rs {
+                    let tl::enums::PollAnswerVoters::Voters(v) = v;
+                    votes.insert(v.option.clone(), (v.voters.unwrap_or(0), v.chosen));
+                }
+            }
+            let answers: Vec<Value> = p
+                .raw
+                .answers
+                .iter()
+                .map(|a| {
+                    let tl::enums::PollAnswer::Answer(a) = a;
+                    let tl::enums::TextWithEntities::Entities(t) = &a.text;
+                    let (n, chosen) = votes.get(&a.option).copied().unwrap_or((0, false));
+                    json!({"text": t.text, "option": hex::encode(&a.option), "votes": n, "chosen": chosen})
+                })
+                .collect();
+            let poll = json!({
+                "question": q.text,
+                "closed": p.raw.closed,
+                "quiz": p.raw.quiz,
+                "multi": p.raw.multiple_choice,
+                "total": p.raw_results.total_voters.unwrap_or(0),
+                "answers": answers,
+            });
+            MediaInfo { kind: "poll", label: "So'rovnoma".into(), poll: Some(poll), ..Default::default() }
+        }
         Media::Geo(_) | Media::Venue(_) | Media::GeoLive(_) => MediaInfo { kind: "other", label: "Joylashuv".into(), ..Default::default() },
         Media::Dice(_) => MediaInfo { kind: "other", label: "Zar".into(), ..Default::default() },
         Media::WebPage(_) => MediaInfo::default(),
@@ -2560,6 +2591,36 @@ pub extern "C" fn rust_tg_dialogs(arg_ptr: *const c_char) -> *mut c_char {
     }))
 }
 
+/// Bot tugmalari: `{"inline":bool,"rows":[[{"text","kind":"url|cb|text","data"}]]}` yoki null.
+fn markup_json(m: &grammers_client::message::Message) -> Value {
+    let Some(rm) = m.reply_markup() else { return Value::Null };
+    let (inline, rows) = match rm {
+        tl::enums::ReplyMarkup::ReplyInlineMarkup(k) => (true, k.rows),
+        tl::enums::ReplyMarkup::ReplyKeyboardMarkup(k) => (false, k.rows),
+        _ => return Value::Null,
+    };
+    let mut out = Vec::new();
+    for row in rows {
+        let tl::enums::KeyboardButtonRow::Row(r) = row;
+        let mut bs = Vec::new();
+        for b in r.buttons {
+            match b {
+                tl::enums::KeyboardButton::Url(u) => bs.push(json!({"text": u.text, "kind": "url", "data": u.url})),
+                tl::enums::KeyboardButton::Callback(c) => bs.push(json!({"text": c.text, "kind": "cb", "data": hex::encode(&c.data)})),
+                tl::enums::KeyboardButton::Button(b) => bs.push(json!({"text": b.text, "kind": "text", "data": b.text})),
+                _ => {}
+            }
+        }
+        if !bs.is_empty() {
+            out.push(Value::Array(bs));
+        }
+    }
+    if out.is_empty() {
+        return Value::Null;
+    }
+    json!({"inline": inline, "rows": out})
+}
+
 /// Bitta xabarning JSON ko'rinishi (suhbat oynasi, qidiruv, mahkamlangan xabar uchun umumiy).
 fn msg_json(m: &grammers_client::message::Message) -> Value {
     let sender = m.sender().map(|p| match p {
@@ -2602,6 +2663,8 @@ fn msg_json(m: &grammers_client::message::Message) -> Value {
         "mime": mi.mime,
         "alt": mi.alt,
         "views": m.view_count().unwrap_or(0),
+        "poll": mi.poll,
+        "markup": markup_json(m),
         "pinned": m.pinned(),
         "reactions": reactions,
     })
@@ -3696,6 +3759,170 @@ pub extern "C" fn rust_tg_join(arg_ptr: *const c_char) -> *mut c_char {
             }
             _ => Err("Bu suhbatga qo'shilib bo'lmaydi".to_string()),
         }
+    })
+}
+
+/// "Yozmoqda..." belgisini yuborish: `arg` = suhbat.
+#[no_mangle]
+pub extern "C" fn rust_tg_typing_send(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 15, |client, arg| async move {
+        let peer = resolve_peer(&client, arg.trim()).await?;
+        let ip: tl::enums::InputPeer = peer.into();
+        client
+            .invoke(&tl::functions::messages::SetTyping { peer: ip, top_msg_id: None, action: tl::enums::SendMessageAction::SendMessageTypingAction })
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(json!({"ok": true}))
+    })
+}
+
+/// Onlayn/oflayn holati: `arg` = `"1"` (onlayn) yoki `"0"` (oflayn).
+#[no_mangle]
+pub extern "C" fn rust_tg_set_online(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 15, |client, arg| async move {
+        client.invoke(&tl::functions::account::UpdateStatus { offline: arg.trim() != "1" }).await.map_err(|e| e.to_string())?;
+        Ok(json!({"ok": true}))
+    })
+}
+
+/// Foydalanuvchini bloklash/ochish: `arg` = `"<suhbat>\n<1|0>"`.
+#[no_mangle]
+pub extern "C" fn rust_tg_block(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 30, |client, arg| async move {
+        let l = lines(&arg, 2);
+        let peer = resolve_peer(&client, &l[0]).await?;
+        let ip: tl::enums::InputPeer = peer.into();
+        if l[1].trim() == "1" {
+            client.invoke(&tl::functions::contacts::Block { my_stories_from: false, id: ip }).await.map_err(|e| e.to_string())?;
+        } else {
+            client.invoke(&tl::functions::contacts::Unblock { my_stories_from: false, id: ip }).await.map_err(|e| e.to_string())?;
+        }
+        Ok(json!({"ok": true}))
+    })
+}
+
+/// Kontakt qo'shish: `arg` = `"<telefon>\n<ism>\n<familiya>"`.
+#[no_mangle]
+pub extern "C" fn rust_tg_add_contact(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 30, |client, arg| async move {
+        let l = lines(&arg, 3);
+        let phone: String = l[0].chars().filter(|c| c.is_ascii_digit() || *c == '+').collect();
+        if phone.len() < 5 || l[1].trim().is_empty() {
+            return Err("Telefon raqami va ismni kiriting".to_string());
+        }
+        let res = client
+            .invoke(&tl::functions::contacts::ImportContacts {
+                contacts: vec![tl::enums::InputContact::InputPhoneContact(tl::types::InputPhoneContact {
+                    client_id: 0,
+                    phone,
+                    first_name: l[1].trim().to_string(),
+                    last_name: l[2].trim().to_string(),
+                    note: None,
+                })],
+            })
+            .await
+            .map_err(|e| e.to_string())?;
+        let tl::enums::contacts::ImportedContacts::Contacts(c) = res;
+        if c.imported.is_empty() {
+            return Err("Bu raqamda Telegram hisobi topilmadi".to_string());
+        }
+        Ok(json!({"ok": true}))
+    })
+}
+
+/// Taklif havolasi (t.me/+hash) bo'yicha qo'shilish: `arg` = hash.
+#[no_mangle]
+pub extern "C" fn rust_tg_import_invite(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 30, |client, arg| async move {
+        client
+            .invoke(&tl::functions::messages::ImportChatInvite { hash: arg.trim().trim_start_matches('+').to_string() })
+            .await
+            .map_err(|e| match e {
+                e if e.is("INVITE_HASH_EXPIRED") || e.is("INVITE_HASH_INVALID") => "Taklif havolasi eskirgan yoki noto'g'ri".to_string(),
+                e if e.is("USER_ALREADY_PARTICIPANT") => "Siz allaqachon a'zosiz".to_string(),
+                e => e.to_string(),
+            })?;
+        Ok(json!({"ok": true}))
+    })
+}
+
+/// Guruh/kanal a'zolari: `arg` = suhbat. Javob: `{"members":[{"id","name","hash","role"}]}` (200 tagacha).
+#[no_mangle]
+pub extern "C" fn rust_tg_members(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 40, |client, arg| async move {
+        let peer = resolve_peer(&client, arg.trim()).await?;
+        let mut it = client.iter_participants(peer);
+        let mut out = Vec::new();
+        while out.len() < 200 {
+            let Some(p) = it.next().await.map_err(|e| e.to_string())? else { break };
+            let role = match p.role {
+                grammers_client::peer::Role::Creator(_) => "egasi",
+                grammers_client::peer::Role::Admin(_) => "admin",
+                _ => "",
+            };
+            let hash = match p.user.to_ref().await {
+                Ok(Some(r)) => r.auth.hash().to_string(),
+                _ => "0".to_string(),
+            };
+            out.push(json!({"id": p.user.id().bot_api_dialog_id(), "name": p.user.full_name(), "hash": hash, "role": role, "bot": p.user.is_bot()}));
+        }
+        Ok(json!({ "members": out }))
+    })
+}
+
+/// Ulashilgan media: `arg` = `"<suhbat>\n<photos|video|docs|links|voice|music>"`. Javob: `{"messages":[..]}`.
+#[no_mangle]
+pub extern "C" fn rust_tg_shared(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 40, |client, arg| async move {
+        let l = lines(&arg, 2);
+        let peer = resolve_peer(&client, &l[0]).await?;
+        let filter = match l[1].trim() {
+            "photos" => tl::enums::MessagesFilter::InputMessagesFilterPhotos,
+            "video" => tl::enums::MessagesFilter::InputMessagesFilterVideo,
+            "docs" => tl::enums::MessagesFilter::InputMessagesFilterDocument,
+            "links" => tl::enums::MessagesFilter::InputMessagesFilterUrl,
+            "voice" => tl::enums::MessagesFilter::InputMessagesFilterVoice,
+            "music" => tl::enums::MessagesFilter::InputMessagesFilterMusic,
+            _ => tl::enums::MessagesFilter::InputMessagesFilterPhotoVideo,
+        };
+        let mut it = client.search_messages(peer).filter(filter).limit(60);
+        let mut out = Vec::new();
+        while let Some(m) = it.next().await.map_err(|e| e.to_string())? {
+            out.push(msg_json(&m));
+        }
+        Ok(json!({ "messages": out }))
+    })
+}
+
+/// So'rovnomada ovoz berish: `arg` = `"<suhbat>\n<xabar_id>\n<variant_hex,variant_hex>"` (bo'sh — ovozni qaytarib olish).
+#[no_mangle]
+pub extern "C" fn rust_tg_vote(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 30, |client, arg| async move {
+        let l = lines(&arg, 3);
+        let id = l[1].trim().parse::<i32>().map_err(|_| "Xabar ko'rsatilmagan".to_string())?;
+        let peer = resolve_peer(&client, &l[0]).await?;
+        let ip: tl::enums::InputPeer = peer.into();
+        let options: Vec<Vec<u8>> = l[2].split(',').filter(|x| !x.trim().is_empty()).filter_map(|x| hex::decode(x.trim()).ok()).collect();
+        client.invoke(&tl::functions::messages::SendVote { peer: ip, msg_id: id, options }).await.map_err(|e| e.to_string())?;
+        Ok(json!({"ok": true}))
+    })
+}
+
+/// Inline tugma bosish: `arg` = `"<suhbat>\n<xabar_id>\n<data_hex>"`. Javob: `{"message","alert","url"}`.
+#[no_mangle]
+pub extern "C" fn rust_tg_callback(arg_ptr: *const c_char) -> *mut c_char {
+    tg_call(arg_ptr, 30, |client, arg| async move {
+        let l = lines(&arg, 3);
+        let id = l[1].trim().parse::<i32>().map_err(|_| "Xabar ko'rsatilmagan".to_string())?;
+        let peer = resolve_peer(&client, &l[0]).await?;
+        let ip: tl::enums::InputPeer = peer.into();
+        let data = hex::decode(l[2].trim()).map_err(|_| "Tugma noto'g'ri".to_string())?;
+        let res = client
+            .invoke(&tl::functions::messages::GetBotCallbackAnswer { game: false, peer: ip, msg_id: id, data: Some(data), password: None })
+            .await
+            .map_err(|e| e.to_string())?;
+        let tl::enums::messages::BotCallbackAnswer::Answer(a) = res;
+        Ok(json!({"message": a.message.unwrap_or_default(), "alert": a.alert, "url": a.url.unwrap_or_default()}))
     })
 }
 

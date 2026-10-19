@@ -187,18 +187,60 @@ fun ChatSettingsPage(onBack: () -> Unit) {
         Card {
             SwitchRow("Animatsiyalar", "Suhbat va ro‘yxatlardagi silliq o‘tishlar", anim) { anim = it; prefs.edit().putBoolean("animations", it).apply() }
         }
+        Hint("Xabarlar matni o‘lchami")
+        Card {
+            var size by remember { mutableStateOf(prefs.getInt("text_size", 16).toFloat()) }
+            Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                androidx.compose.material3.Slider(
+                    value = size, onValueChange = { size = it; prefs.edit().putInt("text_size", it.toInt()).apply() }, valueRange = 12f..28f, modifier = Modifier.weight(1f),
+                    colors = androidx.compose.material3.SliderDefaults.colors(thumbColor = Blue, activeTrackColor = Blue),
+                )
+                BasicText("${size.toInt()}", Modifier.padding(start = 12.dp), style = TextStyle(color = LocalTg.current.text, fontSize = 16.sp))
+            }
+        }
+        Hint("Suhbat foni")
+        Card {
+            var sel by remember { mutableStateOf(prefs.getInt("wallpaper", 0)) }
+            val picker = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetContent()) { uri ->
+                if (uri != null) {
+                    val f = copyUriToCache(ctx, uri)
+                    if (f != null) {
+                        f.copyTo(File(ctx.filesDir, "wallpaper.jpg"), overwrite = true)
+                        f.delete()
+                        sel = WALLPAPER_IMAGE
+                        prefs.edit().putInt("wallpaper", WALLPAPER_IMAGE).apply()
+                    }
+                }
+            }
+            WallpaperPresets.forEachIndexed { i, p ->
+                RadioRow(p.first, sel == i) { sel = i; prefs.edit().putInt("wallpaper", i).apply() }
+            }
+            RadioRow("Galereyadan tanlash…", sel == WALLPAPER_IMAGE) { picker.launch("image/*") }
+        }
     }
 }
 
 // ── Maxfiylik ──
 @Composable
 fun PrivacyPage(onBack: () -> Unit, onDevices: () -> Unit) {
+    val ctx = LocalContext.current
+    var enabled by remember { mutableStateOf(Passcode.enabled(ctx)) }
+    var mode by remember { mutableStateOf<String?>(null) }
+    when (mode) {
+        "set" -> { PasscodeSetup(onDone = { enabled = true; mode = null }, onCancel = { mode = null }); return }
+        "off" -> { PasscodeConfirm("Parolni o‘chirish uchun joriy parolni kiriting", onOk = { Passcode.disable(ctx); enabled = false; mode = null }, onCancel = { mode = null }); return }
+        "change" -> { PasscodeConfirm("Joriy parolni kiriting", onOk = { mode = "set" }, onCancel = { mode = null }); return }
+    }
     Page("Maxfiylik va xavfsizlik", onBack) {
         Card {
             TextRow("Faol seanslar", subtitle = "Hisobingiz kirilgan qurilmalar", onClick = onDevices)
+            TextRow("Parol-qulf", subtitle = if (enabled) "Yoqilgan — ilova 1 daqiqadan keyin qulflanadi" else "Ilovani PIN bilan qulflash", value = if (enabled) "Yoqilgan" else "O‘chirilgan") {
+                mode = if (enabled) "off" else "set"
+            }
+            if (enabled) TextRow("Parolni o‘zgartirish") { mode = "change" }
             TextRow("Ikki bosqichli tekshiruv", subtitle = "Kirishda qo‘shimcha parol so‘raladi", value = "Telegramda")
         }
-        Hint("So‘nggi faollik, profil rasmi va guruhlarga qo‘shilish sozlamalari Telegram serverida saqlanadi va Telegram’ning rasmiy ilovasida o‘zgartiriladi. Ikki bosqichli parolni shu ilova bilan kirishda kiritasiz.")
+        Hint("Parol-qulf faqat shu qurilmadagi ilovani himoyalaydi. So‘nggi faollik, profil rasmi va guruhlarga qo‘shilish sozlamalari Telegram serverida saqlanadi va Telegram’ning rasmiy ilovasida o‘zgartiriladi.")
     }
 }
 

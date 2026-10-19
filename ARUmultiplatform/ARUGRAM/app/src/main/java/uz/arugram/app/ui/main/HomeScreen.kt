@@ -80,6 +80,9 @@ fun HomeScreen(auth: AuthModel) {
     var folder by remember { androidx.compose.runtime.mutableIntStateOf(0) }
     var menuFor by remember { mutableStateOf<ChatRow?>(null) }
     var deleteFor by remember { mutableStateOf<ChatRow?>(null) }
+    var addContact by remember { mutableStateOf(false) }
+    var toast by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(toast) { if (toast != null) { delay(3000); toast = null } }
 
     LaunchedEffect(Unit) {
         val j = withContext(Dispatchers.IO) { RustCore.tgMe() }
@@ -114,6 +117,15 @@ fun HomeScreen(auth: AuthModel) {
     BackHandler(enabled = stack.isNotEmpty()) { stack.removeAt(stack.lastIndex) }
     fun open(r: ChatRow) { stack.add(Dest.Chat(r)) }
     val openLink: (String) -> Boolean = link@{ url ->
+        val invite = tmeInvite(url)
+        if (invite != null) {
+            scope.launch {
+                val r = withContext(Dispatchers.IO) { RustCore.tgImportInvite(invite) }
+                toast = r.optString("error").ifEmpty { "Guruhga qo‘shildingiz" }
+                model.load()
+            }
+            return@link true
+        }
         val name = tmeUsername(url) ?: return@link false
         scope.launch {
             val j = withContext(Dispatchers.IO) { RustCore.tgResolve(name) }
@@ -136,7 +148,7 @@ fun HomeScreen(auth: AuthModel) {
                             ui = ui, folders = folders, folder = folder, onFolder = { folder = it }, typing = typing,
                             onSearch = { stack.add(Dest.Search) }, onOpen = ::open, onLongClick = { menuFor = it }, onRetry = { model.load() },
                         )
-                        MainTab.Contacts -> ContactsTab(bottomPadding = 80.dp, onOpen = ::open)
+                        MainTab.Contacts -> ContactsTab(bottomPadding = 80.dp, onOpen = ::open, extra = listOf("Kontakt qo‘shish" to { addContact = true }))
                         MainTab.Settings -> SettingsTab(me, meContact, 80.dp, onOpenChat = { r -> open(r) }, onNavigate = { stack.add(Dest.Settings(it)) }, onLogout = { auth.logout() }, savedChat = ui.chats.firstOrNull { it.self })
                         MainTab.Profile -> ProfileTab(me, meContact, 80.dp, onEdit = { stack.add(Dest.Settings("account")) }, onSaved = { ui.chats.firstOrNull { it.self }?.let(::open) }, onLogout = { auth.logout() })
                     }
@@ -167,6 +179,7 @@ fun HomeScreen(auth: AuthModel) {
                 chat = live(d.row), onBack = { stack.removeAt(stack.lastIndex) },
                 onWrite = { stack.removeAt(stack.lastIndex) },
                 onDeleted = { stack.clear(); model.load() },
+                onOpenChat = { r -> open(r) },
             )
             Dest.Search -> SearchScreen(ui.chats, onOpen = { r -> stack.removeAt(stack.lastIndex); open(r) }, onBack = { stack.removeAt(stack.lastIndex) })
             Dest.NewChat -> Box(Modifier.fillMaxSize().background(c.bg)) {
@@ -183,6 +196,17 @@ fun HomeScreen(auth: AuthModel) {
             is Dest.Settings -> SettingsRouter(d.page, onBack = { stack.removeAt(stack.lastIndex) }, onNavigate = { stack.add(Dest.Settings(it)) }, folders = folders)
             null -> {}
         }
+
+        if (addContact) {
+            TgForm("Yangi kontakt", listOf("Telefon raqami (+998...)", "Ism", "Familiya (ixtiyoriy)"), "Qo‘shish", onConfirm = { v ->
+                addContact = false
+                scope.launch {
+                    val r = withContext(Dispatchers.IO) { RustCore.tgAddContact(v[0], v[1], v[2]) }
+                    toast = r.optString("error").ifEmpty { "Kontakt qo‘shildi" }
+                }
+            }, onDismiss = { addContact = false })
+        }
+        Bulletin(toast, Modifier.align(Alignment.BottomCenter).padding(bottom = 100.dp))
 
         // ── Suhbat ro'yxati menyusi ──
         menuFor?.let { r ->

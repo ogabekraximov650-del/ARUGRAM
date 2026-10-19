@@ -146,3 +146,7 @@ fun tmeUsername(url: String): String? {
     val n = m.groupValues[1]
     return if (n.equals("joinchat", true) || n.equals("addstickers", true) || n.equals("share", true) || n.equals("c", true)) null else n
 }
+
+/** Taklif havolasi (`t.me/+hash`, `t.me/joinchat/hash`) hash'i. */
+fun tmeInvite(url: String): String? =
+    Regex("""^https?://(?:www\.)?t\.me/(?:\+|joinchat/)([A-Za-z0-9_-]{8,})/?$""").find(url)?.groupValues?.get(1)

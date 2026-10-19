@@ -92,6 +92,14 @@ fun ChatScreen(chat: ChatRow, chats: List<ChatRow>, typing: Boolean, onBack: () 
     var joined by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val canWrite = chat.kind != "channel" || chat.self
+    val openLink = LocalOpenLink.current
+    fun press(m: MsgRow, b: Button) {
+        when (b.kind) {
+            "url" -> if (!openLink(b.data)) openUrl(ctx, b.data)
+            "cb" -> model.pressButton(m, b) { if (it.isNotEmpty()) bulletin = it }
+            "text" -> model.send(b.data, 0)
+        }
+    }
 
     LaunchedEffect(chat.id) {
         model.markRead()
@@ -159,9 +167,7 @@ fun ChatScreen(chat: ChatRow, chats: List<ChatRow>, typing: Boolean, onBack: () 
     }
 
     Box(Modifier.fillMaxSize()) {
-        val bgTop = if (c.dark) Color(0xFF0E1621) else Color(0xFFDBE7C5)
-        val bgBottom = if (c.dark) Color(0xFF17212B) else Color(0xFFA9C9A0)
-        Column(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(bgTop, bgBottom)))) {
+        Column(Modifier.fillMaxSize().chatWallpaper()) {
             // ── Tepa panel ──
             Column(Modifier.fillMaxWidth().background(c.bar).statusBarsPadding()) {
                 Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -245,6 +251,8 @@ fun ChatScreen(chat: ChatRow, chats: List<ChatRow>, typing: Boolean, onBack: () 
                                     onLongClick = { if (selected.isEmpty()) menuFor = m else if (m.id !in selected) selected.add(m.id) },
                                     onOpenMedia = { if (selected.isEmpty()) viewer = m else if (m.id in selected) selected.remove(m.id) else selected.add(m.id) },
                                     onReact = { model.react(m, it) },
+                                    onVote = { model.vote(m, it) },
+                                    onButton = { b -> press(m, b) },
                                     onReplyClick = { id -> val idx = list.indexOfFirst { it.id == id }; if (idx >= 0) scope.launch { listState.animateScrollToItem(idx) } },
                                 )
                             }
@@ -263,6 +271,12 @@ fun ChatScreen(chat: ChatRow, chats: List<ChatRow>, typing: Boolean, onBack: () 
                 Bulletin(bulletin, Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp))
             }
 
+            // ── Bot javob klaviaturasi ──
+            val kbMsg = model.messages.firstOrNull { it.markup != null }
+            val kb = kbMsg?.markup
+            if (kbMsg != null && kb != null && !kb.inline && kbMsg.id == model.messages.firstOrNull()?.id) {
+                MarkupRows(kb, { b -> press(kbMsg, b) }, Modifier.fillMaxWidth().background(c.bar).padding(horizontal = 6.dp, vertical = 4.dp))
+            }
             // ── Yozish paneli ──
             if (chat.date == 0L && chat.kind != "user" && !joined) {
                 Box(Modifier.fillMaxWidth().background(c.bar).navigationBarsPadding().height(48.dp).clickable {
@@ -272,7 +286,7 @@ fun ChatScreen(chat: ChatRow, chats: List<ChatRow>, typing: Boolean, onBack: () 
                     }
                 }, contentAlignment = Alignment.Center) { BasicText("QO‘SHILISH", style = TextStyle(color = Blue, fontSize = 15.sp, fontWeight = FontWeight.Bold)) }
             } else ChatInputBar(
-                draft = draft, onDraft = { draft = it }, replyTo = replyTo, editing = editing, canWrite = canWrite,
+                draft = draft, onDraft = { if (it.text.length > draft.text.length) model.typing(); draft = it }, replyTo = replyTo, editing = editing, canWrite = canWrite,
                 onCancelContext = { editing = null; replyTo = null; draft = TextFieldValue("") },
                 onSend = ::doSend,
                 onSendFile = { f, kind, extra -> model.sendFile(f, kind, replyTo?.id ?: 0, "", extra); replyTo = null; scope.launch { listState.animateScrollToItem(0) } },

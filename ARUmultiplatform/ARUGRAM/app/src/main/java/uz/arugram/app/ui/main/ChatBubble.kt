@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -45,7 +46,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.airbnb.lottie.compose.LottieAnimation
+import com.airbnb.lottie.compose.LottieCompositionSpec
+import com.airbnb.lottie.compose.LottieConstants
+import com.airbnb.lottie.compose.rememberLottieComposition
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import uz.arugram.app.R
 import uz.arugram.app.ui.components.TgIcon
@@ -86,11 +93,14 @@ fun MessageBubble(
     onOpenMedia: () -> Unit,
     onReact: (String) -> Unit,
     onReplyClick: (Int) -> Unit,
+    onVote: (List<String>) -> Unit = {},
+    onButton: (Button) -> Unit = {},
 ) {
     val c = LocalTg.current
     val ctx = LocalContext.current
     val openLink = LocalOpenLink.current
     val maxW = (LocalConfiguration.current.screenWidthDp * 0.8f).dp
+    val textSize = remember { settingsPrefs(ctx).getInt("text_size", 16) }
     val bg = bubbleColor(m.out)
     val sticker = m.kind == "sticker"
     val shape = RoundedCornerShape(17.dp, 17.dp, if (m.out) 17.dp else 5.dp, if (m.out) 5.dp else 17.dp)
@@ -132,13 +142,14 @@ fun MessageBubble(
                 "video" -> VideoContent(m, onOpenMedia)
                 "voice", "audio" -> VoiceContent(m, chat)
                 "file" -> FileContent(m, chat)
+                "poll" -> m.poll?.let { PollContent(m, it, onVote) }
                 else -> if (m.media.isNotEmpty()) BasicText(m.media, style = TextStyle(color = InBlue, fontSize = 15.sp, fontStyle = FontStyle.Italic))
             }
             if (m.text.isNotEmpty()) {
                 val styled = remember(m.text, c.dark) { linkify(m.text, if (m.out && !c.dark) Color(0xFF2678B6) else InBlue) }
                 ClickableText(
                     styled,
-                    style = TextStyle(color = textColor(c.dark, m.out), fontSize = 16.sp, lineHeight = 21.sp),
+                    style = TextStyle(color = textColor(c.dark, m.out), fontSize = textSize.sp, lineHeight = (textSize * 1.3f).sp),
                     onClick = { off ->
                         val url = styled.getStringAnnotations("url", off, off).firstOrNull()
                         if (url != null) { if (!openLink(url.item)) openUrl(ctx, url.item) } else onClick()
@@ -161,6 +172,8 @@ fun MessageBubble(
                     }
                 }
             }
+            val mk = m.markup
+            if (mk != null && mk.inline) MarkupRows(mk, onButton)
             Footer(m, chat, Modifier.align(Alignment.End).then(if (sticker) Modifier.clip(RoundedCornerShape(10.dp)).background(Color(0x66000000)).padding(horizontal = 6.dp) else Modifier), sticker)
         }
     }
@@ -213,11 +226,23 @@ private fun PhotoContent(m: MsgRow, chat: ChatRow, onOpen: () -> Unit) {
 private fun StickerContent(m: MsgRow, chat: ChatRow) {
     val ctx = LocalContext.current
     val isWebp = m.mime == "image/webp"
+    val isTgs = m.mime.contains("tgsticker")
     LaunchedEffect(m.id) { if (isWebp) MediaCache.sticker(ctx, chat, m.id) }
     val img = MediaCache.stickers[MediaCache.key(chat.id, m.id)]
+    var lottie by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(m.id) {
+        if (isTgs) {
+            val f = MediaCache.file(ctx, chat, m.id) ?: return@LaunchedEffect
+            lottie = withContext(Dispatchers.IO) { runCatching { java.util.zip.GZIPInputStream(f.file.inputStream()).bufferedReader().use { it.readText() } }.getOrNull() }
+        }
+    }
     Box(Modifier.size(170.dp), contentAlignment = Alignment.Center) {
+        val json = lottie
         if (img != null) Image(img, null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
-        else BasicText(m.alt.ifEmpty { "🙂" }, style = TextStyle(fontSize = 72.sp))
+        else if (json != null) {
+            val comp by rememberLottieComposition(LottieCompositionSpec.JsonString(json))
+            LottieAnimation(comp, iterations = LottieConstants.IterateForever, modifier = Modifier.fillMaxSize())
+        } else BasicText(m.alt.ifEmpty { "🙂" }, style = TextStyle(fontSize = 72.sp))
     }
 }
 
@@ -303,6 +328,68 @@ private fun FileContent(m: MsgRow, chat: ChatRow) {
         Column(Modifier.padding(start = 10.dp)) {
             BasicText(m.name.ifEmpty { "Fayl" }, style = TextStyle(color = textColor(c.dark, m.out), fontSize = 16.sp, fontWeight = FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
             BasicText(formatSize(m.size), style = TextStyle(color = if (m.out) OutGreen else Color(0xFFA1AAB3), fontSize = 13.sp))
+        }
+    }
+}
+
+@Composable
+private fun PollContent(m: MsgRow, poll: Poll, onVote: (List<String>) -> Unit) {
+    val c = LocalTg.current
+    val voted = poll.answers.any { it.chosen }
+    val showResults = voted || poll.closed
+    val picked = remember { androidx.compose.runtime.mutableStateListOf<String>() }
+    val accent = if (m.out) OutGreen else InBlue
+    Column(Modifier.padding(vertical = 2.dp).widthIn(min = 220.dp)) {
+        BasicText(poll.question, style = TextStyle(color = textColor(c.dark, m.out), fontSize = 16.sp, fontWeight = FontWeight.Medium))
+        BasicText(
+            (if (poll.quiz) "Viktorina" else "So‘rovnoma") + (if (poll.closed) " · yopilgan" else if (poll.multi) " · bir nechta javob" else ""),
+            Modifier.padding(top = 2.dp, bottom = 6.dp), style = TextStyle(color = if (m.out) OutGreen else Color(0xFFA1AAB3), fontSize = 12.sp),
+        )
+        poll.answers.forEach { a ->
+            val pct = if (poll.total > 0) a.votes * 100 / poll.total else 0
+            Column(
+                Modifier.fillMaxWidth().padding(vertical = 3.dp).clip(RoundedCornerShape(8.dp))
+                    .combinedClickable(enabled = !showResults, onClick = {
+                        if (poll.multi) { if (a.option in picked) picked.remove(a.option) else picked.add(a.option) } else onVote(listOf(a.option))
+                    }),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(18.dp).clip(CircleShape).background(if (a.chosen || a.option in picked) accent else accent.copy(alpha = 0.25f)), contentAlignment = Alignment.Center) {
+                        if (showResults) BasicText(if (a.chosen) "✓" else "", style = TextStyle(color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold))
+                    }
+                    BasicText(a.text, Modifier.padding(start = 8.dp).weight(1f), style = TextStyle(color = textColor(c.dark, m.out), fontSize = 15.sp))
+                    if (showResults) BasicText("$pct%", style = TextStyle(color = textColor(c.dark, m.out), fontSize = 13.sp, fontWeight = FontWeight.Medium))
+                }
+                if (showResults) Box(Modifier.padding(start = 26.dp, top = 3.dp).fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(accent.copy(alpha = 0.2f))) {
+                    Box(Modifier.fillMaxWidth(pct / 100f).height(4.dp).background(accent))
+                }
+            }
+        }
+        if (poll.multi && !showResults && picked.isNotEmpty()) {
+            BasicText("Ovoz berish", Modifier.padding(top = 6.dp).clip(RoundedCornerShape(8.dp)).combinedClickable(onClick = { onVote(picked.toList()) }).padding(horizontal = 4.dp, vertical = 6.dp), style = TextStyle(color = accent, fontSize = 15.sp, fontWeight = FontWeight.Bold))
+        }
+        BasicText("${poll.total} ta ovoz", Modifier.padding(top = 4.dp), style = TextStyle(color = if (m.out) OutGreen else Color(0xFFA1AAB3), fontSize = 12.sp))
+    }
+}
+
+/** Bot tugmalari qatorlari (inline klaviatura yoki javob klaviaturasi). */
+@Composable
+fun MarkupRows(markup: Markup, onButton: (Button) -> Unit, modifier: Modifier = Modifier) {
+    val c = LocalTg.current
+    Column(modifier.padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        markup.rows.forEach { row ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                row.forEach { b ->
+                    Box(
+                        Modifier.weight(1f).heightIn(min = 36.dp).clip(RoundedCornerShape(8.dp))
+                            .background(if (c.dark) Color(0x33FFFFFF) else Color(0x1A3390EC))
+                            .combinedClickable(onClick = { onButton(b) }).padding(horizontal = 6.dp, vertical = 6.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        BasicText((if (b.kind == "url") "↗ " else "") + b.text, style = TextStyle(color = InBlue, fontSize = 14.sp, fontWeight = FontWeight.Medium, textAlign = androidx.compose.ui.text.style.TextAlign.Center), maxLines = 2)
+                    }
+                }
+            }
         }
     }
 }

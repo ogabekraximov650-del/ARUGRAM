@@ -36,7 +36,17 @@ data class MsgRow(
     val views: Int,
     val pinned: Boolean,
     val reactions: List<Reaction>,
+    val poll: Poll? = null,
+    val markup: Markup? = null,
 )
+
+/** Bot tugmalari: inline (xabar ostida) yoki javob klaviaturasi (yozish paneli ustida). */
+data class Button(val text: String, val kind: String, val data: String)
+data class Markup(val inline: Boolean, val rows: List<List<Button>>)
+
+/** So'rovnoma (ko'rinishi). */
+data class PollAnswer(val text: String, val option: String, val votes: Int, val chosen: Boolean)
+data class Poll(val question: String, val closed: Boolean, val quiz: Boolean, val multi: Boolean, val total: Int, val answers: List<PollAnswer>)
 
 /** Reaksiya: emoji, soni, o'zim bosganmanmi. */
 data class Reaction(val emoji: String, val count: Int, val mine: Boolean)
@@ -54,6 +64,20 @@ fun parseMsg(o: JSONObject): MsgRow {
         sender = o.optString("sender"), reply = o.optInt("reply"), fwd = o.optString("fwd"), media = o.optString("media"), kind = o.optString("kind"),
         pw = o.optInt("pw"), ph = o.optInt("ph"), name = o.optString("name"), size = o.optLong("size"), dur = o.optDouble("dur", 0.0),
         mime = o.optString("mime"), alt = o.optString("alt"), views = o.optInt("views"), pinned = o.optBoolean("pinned"), reactions = rs,
+        markup = o.optJSONObject("markup")?.let { mo ->
+            val rr = mo.optJSONArray("rows")
+            Markup(
+                mo.optBoolean("inline"),
+                buildList { for (i in 0 until (rr?.length() ?: 0)) { val row = rr!!.getJSONArray(i); add(buildList { for (k in 0 until row.length()) { val b = row.getJSONObject(k); add(Button(b.optString("text"), b.optString("kind"), b.optString("data"))) } }) } },
+            )
+        },
+        poll = o.optJSONObject("poll")?.let { po ->
+            val a = po.optJSONArray("answers")
+            Poll(
+                po.optString("question"), po.optBoolean("closed"), po.optBoolean("quiz"), po.optBoolean("multi"), po.optInt("total"),
+                buildList { for (i in 0 until (a?.length() ?: 0)) { val x = a!!.getJSONObject(i); add(PollAnswer(x.optString("text"), x.optString("option"), x.optInt("votes"), x.optBoolean("chosen"))) } },
+            )
+        },
     )
 }
 
@@ -205,6 +229,23 @@ class ChatModel(val chat: ChatRow, private val context: Context) {
         }
     }
 
+    /** Inline tugma: url — brauzer, cb — botga yuboriladi (javob matni `onAnswer` ga). */
+    fun pressButton(msg: MsgRow, b: Button, onAnswer: (String) -> Unit) {
+        scope.launch {
+            val r = withContext(Dispatchers.IO) { RustCore.tgCallback(chat.spec, msg.id, b.data) }
+            val err = r.optString("error")
+            onAnswer(if (err.isNotEmpty()) err else r.optString("message"))
+            refresh()
+        }
+    }
+
+    fun vote(msg: MsgRow, options: List<String>) {
+        scope.launch {
+            val r = withContext(Dispatchers.IO) { RustCore.tgVote(chat.spec, msg.id, options) }
+            after(r)
+        }
+    }
+
     fun sendSticker(ref: String, replyTo: Int) {
         scope.launch {
             val r = withContext(Dispatchers.IO) { RustCore.tgSendSticker(chat.spec, replyTo, ref) }
@@ -226,6 +267,16 @@ class ChatModel(val chat: ChatRow, private val context: Context) {
 
     fun clearSearch() {
         searchResults = null
+    }
+
+    private var lastTyping = 0L
+
+    /** Yozayotganingiz haqida suhbatdoshga bildiradi (4 soniyada bir martadan ko'p emas). */
+    fun typing() {
+        val now = System.currentTimeMillis()
+        if (now - lastTyping < 4000) return
+        lastTyping = now
+        scope.launch { withContext(Dispatchers.IO) { RustCore.tgTypingSend(chat.spec) } }
     }
 
     fun clearError() {

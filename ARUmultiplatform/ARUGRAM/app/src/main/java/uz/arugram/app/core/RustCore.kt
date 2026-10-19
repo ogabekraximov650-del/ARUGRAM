@@ -166,6 +166,24 @@ object RustCore {
 
     fun tgJoin(spec: String) = call { it.rust_tg_join(spec) }
 
+    fun tgTypingSend(spec: String) = call { it.rust_tg_typing_send(spec) }
+
+    fun tgSetOnline(online: Boolean) = call { it.rust_tg_set_online(if (online) "1" else "0") }
+
+    fun tgBlock(spec: String, block: Boolean) = call { it.rust_tg_block("$spec\n${if (block) 1 else 0}") }
+
+    fun tgAddContact(phone: String, first: String, last: String) = call { it.rust_tg_add_contact("$phone\n$first\n$last") }
+
+    fun tgImportInvite(hash: String) = call { it.rust_tg_import_invite(hash) }
+
+    fun tgMembers(spec: String) = call { it.rust_tg_members(spec) }
+
+    fun tgShared(spec: String, filter: String) = call { it.rust_tg_shared("$spec\n$filter") }
+
+    fun tgVote(spec: String, msgId: Int, options: List<String>) = call { it.rust_tg_vote("$spec\n$msgId\n${options.joinToString(",")}") }
+
+    fun tgCallback(spec: String, msgId: Int, data: String) = call { it.rust_tg_callback("$spec\n$msgId\n$data") }
+
     fun tgFolders() = call { it.rust_tg_folders() }
 
     fun tgCreateGroup(title: String, members: String) = call { it.rust_tg_create_group("$title\n$members") }
