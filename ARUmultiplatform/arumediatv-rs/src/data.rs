@@ -222,3 +222,73 @@ mod tests {
         assert_eq!(file_name_of("https://x/a/../"), "");
     }
 }
+
+/// Tomosha tarixi qatori (`GET /api/history`).
+#[derive(Clone)]
+pub struct HistoryItem {
+    pub anime_id: i64,
+    pub season_id: i64,
+    pub episode_no: i64,
+    pub section_no: i64,
+    pub title: String,
+    pub photo_url: String,
+    pub updated_at: i64,
+}
+
+/// Kutubxona: (sevimlilar, tarix). Tarix bo'lim bo'yicha guruhlanadi (har bir bo'lim — eng oxirgi ko'rilgani).
+pub fn fetch_library(session: &str) -> Result<(Vec<Season>, Vec<HistoryItem>), String> {
+    let fav = crate::api::get_json("/api/favorites", "", Some(session))?;
+    let hist = crate::api::get_json("/api/history", "", Some(session))?;
+    let favs = parse_seasons(&fav["items"].to_string());
+    let mut items: Vec<HistoryItem> = hist["items"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .map(|o| {
+                    let pick = |a: &str, b: &str| {
+                        let v = o[a].as_str().unwrap_or("");
+                        if v.is_empty() { o[b].as_str().unwrap_or("") } else { v }.to_string()
+                    };
+                    HistoryItem {
+                        anime_id: num(&o["anime_id"]),
+                        season_id: num(&o["season_id"]),
+                        episode_no: num(&o["epizod_number"]),
+                        section_no: num(&o["bolim_id"]),
+                        title: pick("season_name", "anime_name"),
+                        photo_url: pick("season_photo", "anime_photo"),
+                        updated_at: num(&o["updated_at"]),
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    items.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    let mut seen = std::collections::HashSet::new();
+    items.retain(|h| seen.insert((h.anime_id, h.season_id)));
+    Ok((favs, items))
+}
+
+/// Millisekund (epoch) -> "HH:mm/dd/MM/yyyy" (Toshkent, UTC+5).
+pub fn fmt_date(ms: i64) -> String {
+    let t = ms / 1000 + 5 * 3600;
+    let (days, sec) = (t.div_euclid(86400), t.rem_euclid(86400));
+    let z = days + 719468;
+    let era = z.div_euclid(146097);
+    let doe = z.rem_euclid(146097);
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!("{:02}:{:02}/{:02}/{:02}/{}", sec / 3600, sec % 3600 / 60, d, m, y)
+}
+
+#[cfg(test)]
+mod date_tests {
+    #[test]
+    fn sana() {
+        // 2026-10-20 12:00 UTC = 17:00 Toshkent
+        assert_eq!(super::fmt_date(1_792_497_600_000), "17:00/20/10/2026");
+    }
+}

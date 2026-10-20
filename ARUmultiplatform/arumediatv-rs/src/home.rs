@@ -1,6 +1,6 @@
 //! Bosh sahifa: sarlavha, "Ommabop anime" va poster kartalari to'ri, pastda haqiqiy shisha (xiralashtiruvchi) navigatsiya paneli.
 
-use crate::data::{fetch_seasons, load_posters, Season};
+use crate::data::{fetch_library, fetch_seasons, fmt_date, load_posters, HistoryItem, Season};
 use crate::theme::*;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -11,6 +11,9 @@ const BELL: &str = "M12,22c1.1,0 2,-0.9 2,-2h-4c0,1.1 0.89,2 2,2zM18,16v-5c0,-3.
 const CLOSE: &str = "M19,6.41L17.59,5 12,10.59 6.41,5 5,6.41 10.59,12 5,17.59 6.41,19 12,13.41 17.59,19 19,17.59 13.41,12z";
 const MENU: &str = "M3,18h18v-2L3,16v2zM3,13h18v-2L3,11v2zM3,6v2h18L21,6L3,6z";
 const CAT_TABS: [&str; 7] = ["Barchasi", "Reytingi baland", "Eng ko'p ko'rilgan", "Ongoing", "Tugallangan", "Filmlar", "OVA"];
+const LIB_TABS: [&str; 3] = ["Tarix", "Yuklanmalar", "Sevimlilar"];
+const PLAY: &str = "M8,5v14l11,-7z";
+const HEART: &str = "M12,21.35l-1.45,-1.32C5.4,15.36 2,12.28 2,8.5 2,5.42 4.42,3 7.5,3c1.74,0 3.41,0.81 4.5,2.09C13.09,3.81 14.76,3 16.5,3 19.58,3 22,5.42 22,8.5c0,3.78 -3.4,6.86 -8.55,11.54L12,21.35z";
 const STAR: &str = "M12,17.27L18.18,21l-1.64,-7.03L22,9.24l-7.19,-0.61L12,2 9.19,8.63 2,9.24l5.46,4.73L5.82,21z";
 const EYE: &str = "M12,4.5C7,4.5 2.73,7.61 1,12c1.73,4.39 6,7.5 11,7.5s9.27,-3.11 11,-7.5c-1.73,-4.39 -6,-7.5 -11,-7.5zM12,17c-2.76,0 -5,-2.24 -5,-5s2.24,-5 5,-5 5,2.24 5,5 -2.24,5 -5,5zM12,9c-1.66,0 -3,1.34 -3,3s1.34,3 3,3 3,-1.34 3,-3 -1.34,-3 -3,-3z";
 const NAV: [(&str, &str); 5] = [
@@ -42,6 +45,13 @@ pub struct Home {
     cat_tab: State<usize>,
     cat_scroll: ScrollState,
     cat_tabs: ScrollState,
+    lib_tab: State<usize>,
+    hist: State<Vec<HistoryItem>>,
+    favs: State<Vec<Season>>,
+    lib_state: State<u8>,
+    hist_scroll: ScrollState,
+    fav_scroll: ScrollState,
+    frames: RefCell<HashMap<String, Rc<Image>>>,
     genres: State<Vec<String>>,
     years: State<Vec<String>>,
     filter_open: State<bool>,
@@ -112,6 +122,13 @@ impl Home {
             cat_tab: State::new(0),
             cat_scroll: ScrollState::new(),
             cat_tabs: ScrollState::new(),
+            lib_tab: State::new(0),
+            hist: State::new(Vec::new()),
+            favs: State::new(Vec::new()),
+            lib_state: State::new(0),
+            hist_scroll: ScrollState::new(),
+            fav_scroll: ScrollState::new(),
+            frames: RefCell::new(HashMap::new()),
             genres: State::new(Vec::new()),
             years: State::new(Vec::new()),
             filter_open: State::new(false),
@@ -119,6 +136,7 @@ impl Home {
             poster_diag: State::new(String::new()),
         });
         h.reload();
+        h.load_library();
         h
     }
 
@@ -472,13 +490,125 @@ impl Home {
         column(vec![
             spacer(),
             column(vec![scroll_column(&self.filter_scroll, kids).grow(1.0), gap_box(0.0, 10.0), buttons])
-                .lens(Color::rgba(14, 14, 20, 170), 1.0)
+                .lens(Color::rgba(255, 255, 255, 14), 1.0)
                 .radius(32.0)
                 .padding_xy(18.0, 18.0)
                 .height(h * 0.62)
                 .margin_each(12.0, 0.0, 12.0, 12.0 + bottom_inset),
         ])
         .padding_each(0.0, top_inset, 0.0, 0.0)
+    }
+
+    /// Sevimlilar va tarix (bir marta, fonda): lib_state 0 — yuklanmoqda, 1 — tayyor, 2 — xato.
+    fn load_library(self: &Rc<Self>) {
+        let (me, session) = (self.clone(), self.session.clone());
+        spawn_bg(move || fetch_library(&session), move |r| match r {
+            Ok((favs, hist)) => {
+                {
+                    let have = me.posters.borrow();
+                    let mut q = me.queue.borrow_mut();
+                    for u in favs.iter().map(|s| &s.photo_url).chain(hist.iter().map(|h| &h.photo_url)) {
+                        if !u.is_empty() && !have.contains_key(u) && !q.contains(u) {
+                            q.push(u.clone());
+                        }
+                    }
+                }
+                me.favs.set(favs);
+                me.hist.set(hist);
+                me.lib_state.set(1);
+                me.next_posters();
+            }
+            Err(_) => me.lib_state.set(2),
+        });
+    }
+
+    /// 16:9 kadr: poster o'rtasidan kesib olinadi (bir marta, eslab qolinadi).
+    fn frame(&self, url: &str) -> Option<Rc<Image>> {
+        if let Some(f) = self.frames.borrow().get(url) {
+            return Some(f.clone());
+        }
+        let img = self.posters.borrow().get(url)?.clone();
+        let (w, h) = (img.w as usize, img.h as usize);
+        let ch = (w * 9 / 16).min(h);
+        let y0 = ((h - ch) as f32 * 0.3) as usize;
+        let rgba = img.rgba[y0 * w * 4..(y0 + ch) * w * 4].to_vec();
+        let f = Rc::new(Image { w: w as u32, h: ch as u32, rgba }.round_corners(28.0));
+        self.frames.borrow_mut().insert(url.to_string(), f.clone());
+        Some(f)
+    }
+
+    fn empty(icon_path: &'static str, msg: &str) -> Element {
+        column(vec![icon(icon_path, 48.0).color(Color::rgba(255, 255, 255, 90)), gap_box(0.0, 12.0), tx(msg, 14.0, TEXT_DIM)]).center().padding(32.0)
+    }
+
+    /// Kutubxona sarlavhasi: nom va 3 ta bo'lim — shaffof lupali shisha kapsulalarda.
+    fn library_bar(self: &Rc<Self>, top_inset: f32) -> Element {
+        let sel = self.lib_tab.get();
+        let glass = |e: Element| e.lens(Color::rgba(255, 255, 255, 5), 1.06);
+        let title = glass(column(vec![tx("Kutubxona", 24.0, Color::WHITE).black()]).padding_xy(22.0, 8.0)).radius(26.0);
+        let tabs: Vec<Element> = LIB_TABS
+            .iter()
+            .enumerate()
+            .map(|(i, name)| {
+                let t = self.lib_tab.clone();
+                let on = i == sel;
+                let e = column(vec![tx(*name, 13.0, if on { Color::WHITE } else { Color::rgba(255, 255, 255, 190) }).bold()])
+                    .center()
+                    .weight(1.0)
+                    .padding_xy(8.0, 11.0)
+                    .radius(20.0)
+                    .on_click(move || t.set(i));
+                if on {
+                    e.gradient(ACCENT, ACCENT2)
+                } else {
+                    e
+                }
+            })
+            .collect();
+        let tab_bar = glass(row(tabs).gap(4.0).padding_xy(6.0, 6.0)).radius(28.0);
+        column(vec![row(vec![title, spacer()]), gap_box(0.0, 8.0), tab_bar, spacer()]).padding_each(16.0, 8.0 + top_inset, 16.0, 0.0)
+    }
+
+    fn history_view(self: &Rc<Self>, w: f32, top: f32, bottom: f32) -> Element {
+        let items = self.hist.get();
+        if items.is_empty() {
+            return match self.lib_state.get() {
+                0 => column(vec![spinner(32.0, 3.0, ACCENT2)]).center(),
+                2 => Self::empty(PLAY, "Yuklab bo'lmadi · qayta kiring"),
+                _ => Self::empty(PLAY, "Tarix bo'sh · ko'rgan qismlaringiz shu yerda chiqadi"),
+            };
+        }
+        let img_w = w - 32.0 - 20.0;
+        let img_h = img_w * 9.0 / 16.0;
+        let card_h = img_h + 96.0;
+        let me = self.clone();
+        lazy_column(&self.hist_scroll, items.len(), card_h + 12.0, move |i| {
+            let h = &items[i];
+            let pic = match me.frame(&h.photo_url) {
+                Some(f) => image_fill(&f),
+                None => {
+                    let (a, b) = name_colors(&h.title);
+                    column(vec![]).gradient(a, b).radius(14.0)
+                }
+            };
+            let title: String = if h.title.chars().count() > 36 { h.title.chars().take(35).collect::<String>() + "…" } else { h.title.clone() };
+            column(vec![
+                stack(vec![pic]).height(img_h),
+                gap_box(0.0, 10.0),
+                tx(title, 15.5, Color::WHITE).bold(),
+                gap_box(0.0, 6.0),
+                tx(format!("Oxirgi marta {}-bo'lim {}-qismni ko'rdingiz", h.section_no, h.episode_no), 12.5, Color::rgba(255, 255, 255, 175)),
+                gap_box(0.0, 2.0),
+                tx(format!("Sana: {}", fmt_date(h.updated_at)), 12.0, Color::rgba(255, 255, 255, 130)),
+            ])
+            .glass(Color::rgba(255, 255, 255, 20))
+            .border(1.0, Color::rgba(255, 255, 255, 36))
+            .radius(22.0)
+            .padding(10.0)
+            .height(card_h)
+            .margin_each(0.0, 0.0, 0.0, 12.0)
+        })
+        .padding_each(16.0, top, 16.0, bottom)
     }
 
     /// Qidiruv paneli: sarlavha va yozish joyi — butunlay shaffof lupali shisha (pastgi panel kabi).
@@ -568,6 +698,25 @@ impl Home {
                 self.poster_grid(items, &self.cat_scroll, card_h, 8.0 + 112.0 + ins.top, 90.0 + ins.bottom)
             };
             body
+        } else if tab == 3 {
+            let top = 8.0 + 112.0 + ins.top;
+            let bottom = 90.0 + ins.bottom;
+            match self.lib_tab.get() {
+                0 => self.history_view(w, top, bottom),
+                1 => Self::empty(PLAY, "Yuklab olingan qism yo'q\nQismlar ro'yxatida yuklab oling"),
+                _ => {
+                    let favs = self.favs.get();
+                    if favs.is_empty() {
+                        match self.lib_state.get() {
+                            0 => column(vec![spinner(32.0, 3.0, ACCENT2)]).center(),
+                            2 => Self::empty(HEART, "Yuklab bo'lmadi · qayta kiring"),
+                            _ => Self::empty(HEART, "Hali sevimli bo'lim qo'shilmagan"),
+                        }
+                    } else {
+                        self.poster_grid(favs, &self.fav_scroll, card_h, top, bottom)
+                    }
+                }
+            }
         } else if tab != 0 {
             column(vec![tx("Tez orada", 16.0, TEXT_DIM)]).center()
         } else {
@@ -606,6 +755,25 @@ impl Home {
                 }
             }
         };
+        // Bo'limlar orasida gorizontal surib o'tish (Kotlin `HorizontalPager` kabi).
+        let content = match tab {
+            2 => {
+                let t = self.cat_tab.clone();
+                let sc = self.cat_scroll.clone();
+                content.on_swipe(move |d| {
+                    let n = (t.get() as i32 + d).clamp(0, CAT_TABS.len() as i32 - 1) as usize;
+                    if n != t.get() {
+                        t.set(n);
+                        sc.scroll_to_top();
+                    }
+                })
+            }
+            3 => {
+                let t = self.lib_tab.clone();
+                content.on_swipe(move |d| t.set((t.get() as i32 + d).clamp(0, LIB_TABS.len() as i32 - 1) as usize))
+            }
+            _ => content,
+        };
         let mut layers = vec![content];
         if tab == 0 {
             layers.push(self.header(ins.top));
@@ -613,6 +781,8 @@ impl Home {
             layers.push(self.search_bar(ins.top));
         } else if tab == 2 {
             layers.push(self.catalog_bar(ins.top));
+        } else if tab == 3 {
+            layers.push(self.library_bar(ins.top));
         }
         if tab == 2 && self.filter_open.get() {
             layers.push(self.filter_panel(ins.top, ins.bottom));
@@ -674,6 +844,13 @@ mod tests {
             cat_tab: State::new(0),
             cat_scroll: ScrollState::new(),
             cat_tabs: ScrollState::new(),
+            lib_tab: State::new(0),
+            hist: State::new(Vec::new()),
+            favs: State::new(Vec::new()),
+            lib_state: State::new(0),
+            hist_scroll: ScrollState::new(),
+            fav_scroll: ScrollState::new(),
+            frames: RefCell::new(HashMap::new()),
             genres: State::new(Vec::new()),
             years: State::new(Vec::new()),
             filter_open: State::new(false),
@@ -703,6 +880,17 @@ mod tests {
             c.execute(&cmds);
             std::fs::write(format!("{dir}/7_search.png"), c.to_png()).unwrap();
             home.tab.set(2);
+            home.hist.set((0..3).map(|i| HistoryItem { anime_id: i, season_id: 1, episode_no: 3 + i, section_no: 1, title: format!("Naruto {i}"), photo_url: format!("p{i}.jpg"), updated_at: 1_792_497_600_000 }).collect());
+            home.lib_state.set(1);
+            home.tab.set(3);
+            for (n, name) in [(0, "10_lib0"), (1, "10_lib1"), (2, "10_lib2")] {
+                home.lib_tab.set(n);
+                let cmds = ui.frame(size);
+                let mut c = ui.canvas(360, 640);
+                c.clear(Color::BLACK);
+                c.execute(&cmds);
+                std::fs::write(format!("{dir}/{name}.png"), c.to_png()).unwrap();
+            }
             for (n, name) in [(0, "8_catalog"), (1, "9_filter")] {
                 home.filter_open.set(n == 1);
                 let cmds = ui.frame(size);

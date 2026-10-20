@@ -94,6 +94,7 @@ pub struct Element {
     /// Yumshoq yorug'lik dog'lari: (x ulushi, y ulushi, radius dp, rang) — element qutisiga nisbatan.
     pub(crate) glows: Vec<(f32, f32, f32, Color)>,
     pub(crate) on_click: Option<Callback>,
+    pub(crate) on_swipe: Option<Rc<dyn Fn(i32)>>,
     pub(crate) scroll: Option<ScrollState>,
     pub(crate) children: Vec<Element>,
 }
@@ -111,6 +112,7 @@ impl Element {
             gradient: None,
             glows: Vec::new(),
             on_click: None,
+            on_swipe: None,
             scroll: None,
             children,
         }
@@ -234,6 +236,11 @@ impl Element {
     }
     pub fn center(self) -> Self {
         self.align(Align::Center).justify(Justify::Center)
+    }
+    /// Gorizontal surish: chapga (keyingi) `1`, o'ngga (oldingi) `-1` bilan chaqiriladi.
+    pub fn on_swipe(mut self, f: impl Fn(i32) + 'static) -> Self {
+        self.on_swipe = Some(Rc::new(f));
+        self
     }
     pub fn on_click(mut self, f: impl Fn() + 'static) -> Self {
         self.on_click = Some(Rc::new(f));

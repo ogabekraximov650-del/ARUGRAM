@@ -45,6 +45,7 @@ struct Item {
     gradient: Option<(Color, Color)>,
     glows: Vec<(f32, f32, f32, Color)>,
     hit: Option<usize>,
+    swipe: Option<Rc<dyn Fn(i32)>>,
     scroll: Option<ScrollState>,
     /// Qator `.scroll()` bilan: gorizontal scroll.
     hscroll: bool,
@@ -74,6 +75,8 @@ struct Touch {
     field: Option<usize>,
     region: Option<usize>,
     dragging: bool,
+    /// Gorizontal surish aniqlandi (`on_swipe`).
+    swiped: bool,
     /// So'nggi (vaqt ms, scroll o'qi bo'yicha koordinata) namunalari: tezlikni baholash uchun.
     samples: Vec<(u64, f32)>,
 }
@@ -86,6 +89,7 @@ pub struct Ui {
     kb_serial: u64,
     build: Box<dyn FnMut() -> Element>,
     hits: Vec<Hit>,
+    swipes: Vec<(Rect, Rc<dyn Fn(i32)>)>,
     fields: Vec<FieldInfo>,
     regions: Vec<Region>,
     scrolls: Vec<ScrollState>,
@@ -116,6 +120,7 @@ impl Ui {
             kb_serial: 0,
             build: Box::new(build),
             hits: Vec::new(),
+            swipes: Vec::new(),
             fields: Vec::new(),
             regions: Vec::new(),
             scrolls: Vec::new(),
@@ -276,6 +281,7 @@ impl Ui {
         tree.compute(root_id, size);
 
         self.hits.clear();
+        self.swipes.clear();
         self.fields.clear();
         self.regions.clear();
         self.scrolls.clear();
@@ -302,6 +308,9 @@ impl Ui {
                     rect: eff,
                     cb: cbs[h].clone(),
                 });
+            }
+            if let Some(cb) = &it.swipe {
+                self.swipes.push((eff, cb.clone()));
             }
             if visible {
                 if let Some(mut c) = it.bg {
@@ -674,6 +683,7 @@ impl Ui {
             gradient: el.gradient,
             glows: std::mem::take(&mut el.glows),
             hit,
+            swipe: el.on_swipe.take(),
             hscroll: el.scroll.is_some() && el.style.direction == Axis::Row,
             scroll: el.scroll,
         });
@@ -757,6 +767,7 @@ impl Ui {
                 gradient: None,
                 glows: Vec::new(),
                 hit: None,
+                swipe: None,
                 hscroll: false,
                 scroll: None,
             });
@@ -820,6 +831,7 @@ impl Ui {
                     field: self.field_at(p),
                     region,
                     dragging: false,
+                    swiped: false,
                     samples: vec![(
                         if e.time_ms > 0 { e.time_ms } else { self.now },
                         region.map_or(p.y, |ri| if self.regions[ri].horizontal { p.x } else { p.y }),
@@ -831,6 +843,19 @@ impl Ui {
                 let slop = SLOP_DP * self.scale;
                 let mut unpress = false;
                 if let Some(t) = &mut self.touch {
+                    let (adx, ady) = ((p.x - t.start.x).abs(), (p.y - t.start.y).abs());
+                    if !t.dragging && !t.swiped && adx > slop * 1.5 && adx > ady * 1.5 && t.region.map_or(true, |ri| !self.regions[ri].horizontal) && self.swipes.iter().any(|(r, _)| r.contains(t.start)) {
+                        t.swiped = true;
+                        unpress = true;
+                    }
+                    if t.swiped {
+                        t.last = p;
+                        if unpress {
+                            self.pressed = None;
+                            self.dirty = true;
+                        }
+                        return;
+                    }
                     if let Some(ri) = t.region {
                         let hz = self.regions[ri].horizontal;
                         let (cur, last, start) = if hz { (p.x, t.last.x, t.start.x) } else { (p.y, t.last.y, t.start.y) };
@@ -862,6 +887,16 @@ impl Ui {
                 self.pressed = None;
                 self.dirty = true;
                 let Some(t) = t else { return };
+                if t.swiped {
+                    let dx = p.x - t.start.x;
+                    if dx.abs() > 40.0 * self.scale {
+                        if let Some((_, cb)) = self.swipes.iter().rev().find(|(r, _)| r.contains(t.start)) {
+                            let cb = cb.clone();
+                            cb(if dx < 0.0 { 1 } else { -1 });
+                        }
+                    }
+                    return;
+                }
                 if t.dragging {
                     if let Some(ri) = t.region {
                         // Tezlik: oxirgi 100 ms dagi namunalar bo'yicha (VelocityTracker kabi).
