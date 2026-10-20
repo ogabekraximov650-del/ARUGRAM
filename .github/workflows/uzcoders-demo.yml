@@ -1,0 +1,93 @@
+name: uzcoders demo (Rust UI kutubxonasi) — build va APK
+
+# `ARUmultiplatform/uzcoders-demo/**` o'zgarganda: testlar -> armeabi-v7a + arm64-v8a -> aapt2 bilan APK (Gradle'siz) -> Telegram.
+# uzcoders reposi YOPIQ: yuklash uchun `UZCODERS_TOKEN` secret kerak (uzcoders reposiga o'qish huquqli token).
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ARUmultiplatform/uzcoders-demo/**'
+      - '.github/workflows/uzcoders-demo.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: uzcoders-demo
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: uzcoders kutubxonasini yuklash
+        uses: actions/checkout@v4
+        with:
+          repository: ogabekraximov650-del/uzcoders
+          token: ${{ secrets.UZCODERS_TOKEN }}
+          path: uzcoders
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: armv7-linux-androideabi, aarch64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "ARUmultiplatform/uzcoders-demo -> target"
+
+      - name: Testlar (kompyuterda, boshsiz)
+        working-directory: ARUmultiplatform/uzcoders-demo
+        run: cargo test
+
+      - name: cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Android uchun yig'ish
+        working-directory: ARUmultiplatform/uzcoders-demo
+        run: |
+          cargo ndk -t armeabi-v7a -t arm64-v8a -o jniLibs build --release
+          ls -la jniLibs/*/
+
+      - name: APK yig'ish va imzolash (aapt2 + apksigner)
+        id: apk
+        working-directory: ARUmultiplatform/uzcoders-demo
+        run: |
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          PLAT=$(ls -d "$ANDROID_HOME"/platforms/android-* | sort -V | tail -1)
+          "$BT/aapt2" link -o base.apk -I "$PLAT/android.jar" --manifest AndroidManifest.xml \
+            --min-sdk-version 21 --target-sdk-version 34 --version-code ${{ github.run_number }}
+          mkdir -p apk/lib && cp -r jniLibs/* apk/lib/
+          (cd apk && zip -q -r -0 ../base.apk lib)
+          "$BT/zipalign" -p -f 4 base.apk aligned.apk
+          OUT="$RUNNER_TEMP/apks"; mkdir -p "$OUT"
+          "$BT/apksigner" sign --ks ../../ci/release.keystore --ks-key-alias arumedia \
+            --ks-pass pass:arumedia --key-pass pass:arumedia \
+            --out "$OUT/uzcoders-demo-${{ github.run_number }}.apk" aligned.apk
+          "$BT/apksigner" verify --print-certs "$OUT"/*.apk | head -3
+          unzip -l "$OUT"/*.apk | grep -E "libuzdemo|AndroidManifest"
+          echo "dir=$OUT" >> "$GITHUB_OUTPUT"
+
+      - name: APK'ni Telegram "Saqlangan xabarlar"ga yuborish
+        continue-on-error: true
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+        run: |
+          K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          pip install --no-cache-dir -q pyrogram==2.0.106 tgcrypto==1.2.5
+          for APK in "${{ steps.apk.outputs.dir }}"/*.apk; do
+            S="$RUNNER_TEMP/notify_session"
+            K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K \
+              -in tool/encode/session.enc -out "$S.session"
+            head -c 16 "$S.session" | grep -q "SQLite format 3"
+            python tool/notify/send_apk.py "$S" "$APK" "uzcoders demo build ${{ github.run_number }}"
+            rm -f "$S.session"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uzcoders-demo-${{ github.run_number }}
+          path: ${{ steps.apk.outputs.dir }}
+          retention-days: 30

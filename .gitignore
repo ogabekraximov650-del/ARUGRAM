@@ -33,3 +33,9 @@ __pycache__/
 tool/encode/*.session*
 tool/encode/PYRO_SESSION_B64_*.txt
 arumediatv_encode.session*
+
+# uzcoders kutubxonasi (CI yuklaydi)
+/uzcoders/
+ARUmultiplatform/uzcoders-demo/target/
+ARUmultiplatform/uzcoders-demo/jniLibs/
+ARUmultiplatform/uzcoders-demo/Cargo.lock
