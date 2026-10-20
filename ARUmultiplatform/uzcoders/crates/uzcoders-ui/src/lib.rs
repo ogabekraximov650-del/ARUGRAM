@@ -65,8 +65,8 @@ struct Touch {
     field: Option<usize>,
     region: Option<usize>,
     dragging: bool,
-    vel: f32,
-    last_t: u64,
+    /// So'nggi (vaqt ms, y) namunalari: tezlikni baholash uchun.
+    samples: Vec<(u64, f32)>,
 }
 
 /// Ilova ish vaqti: elementlarni quradi, joylaydi, chizish ro'yxatini beradi va kiritishni yo'naltiradi.
@@ -473,7 +473,7 @@ impl Ui {
             s.raw_set(before + v * dt);
             let after = s.offset();
             let hit_edge = (after <= 0.0 && v < 0.0) || (after >= s.max_offset() && v > 0.0);
-            let nv = v * (-dt * 4.0).exp();
+            let nv = v * (-dt * 3.0).exp();
             s.set_velocity(if hit_edge || nv.abs() < 20.0 { 0.0 } else { nv });
         }
     }
@@ -670,8 +670,7 @@ impl Ui {
                     field: self.field_at(p),
                     region,
                     dragging: false,
-                    vel: 0.0,
-                    last_t: self.now,
+                    samples: vec![(if e.time_ms > 0 { e.time_ms } else { self.now }, p.y)],
                 });
                 self.dirty = true;
             }
@@ -688,11 +687,10 @@ impl Ui {
                         if t.dragging {
                             let st = &self.regions[ri].state;
                             st.raw_set(st.offset() - dy);
-                            let dt = self.now.saturating_sub(t.last_t);
-                            if dt > 0 {
-                                let inst = -dy / (dt as f32 / 1000.0);
-                                t.vel = 0.7 * t.vel + 0.3 * inst;
-                                t.last_t = self.now;
+                            let tm = if e.time_ms > 0 { e.time_ms } else { self.now };
+                            t.samples.push((tm, p.y));
+                            if t.samples.len() > 24 {
+                                t.samples.remove(0);
                             }
                             self.dirty = true;
                         }
@@ -711,10 +709,30 @@ impl Ui {
                 let Some(t) = t else { return };
                 if t.dragging {
                     if let Some(ri) = t.region {
-                        let v = t.vel.clamp(-8000.0, 8000.0);
+                        // Tezlik: oxirgi 100 ms dagi namunalar bo'yicha (VelocityTracker kabi).
+                        // Barmoq to'xtab turib qo'yib yuborilsa — inersiya yo'q.
+                        let up_t = if e.time_ms > 0 { e.time_ms } else { self.now };
+                        let v = match t.samples.last() {
+                            Some(&(lt, ly)) if up_t.saturating_sub(lt) <= 80 => {
+                                let first = t
+                                    .samples
+                                    .iter()
+                                    .find(|(tm, _)| lt.saturating_sub(*tm) <= 100)
+                                    .copied()
+                                    .unwrap_or((lt, ly));
+                                let dt = lt.saturating_sub(first.0) as f32 / 1000.0;
+                                if dt > 0.0 {
+                                    -(ly - first.1) / dt
+                                } else {
+                                    0.0
+                                }
+                            }
+                            _ => 0.0,
+                        };
+                        let v = v.clamp(-12000.0, 12000.0);
                         self.regions[ri]
                             .state
-                            .set_velocity(if v.abs() > 100.0 { v } else { 0.0 });
+                            .set_velocity(if v.abs() > 50.0 { v } else { 0.0 });
                     }
                     return;
                 }

@@ -90,6 +90,11 @@ extern "C" {
     fn AKeyEvent_getKeyCode(ev: *const c_void) -> i32;
     fn AKeyEvent_getMetaState(ev: *const c_void) -> i32;
     fn AMotionEvent_getX(ev: *const c_void, idx: usize) -> f32;
+    fn AMotionEvent_getEventTime(ev: *const c_void) -> i64;
+    fn AMotionEvent_getHistorySize(ev: *const c_void) -> usize;
+    fn AMotionEvent_getHistoricalX(ev: *const c_void, idx: usize, pos: usize) -> f32;
+    fn AMotionEvent_getHistoricalY(ev: *const c_void, idx: usize, pos: usize) -> f32;
+    fn AMotionEvent_getHistoricalEventTime(ev: *const c_void, pos: usize) -> i64;
     fn AMotionEvent_getY(ev: *const c_void, idx: usize) -> f32;
     fn ANativeWindow_getWidth(w: *mut c_void) -> i32;
     fn ANativeWindow_getHeight(w: *mut c_void) -> i32;
@@ -541,8 +546,20 @@ fn drain_input(queue: *mut c_void, ui: &mut Ui, back_consumed: &mut bool) {
                     _ => None,
                 };
                 if let Some(kind) = kind {
+                    // Paketlangan tarixiy namunalar ham beriladi: tezlik aniq hisoblanadi.
+                    if kind == PointerKind::Move {
+                        for h in 0..AMotionEvent_getHistorySize(ev) {
+                            ui.pointer(PointerEvent::at(
+                                PointerKind::Move,
+                                AMotionEvent_getHistoricalX(ev, 0, h),
+                                AMotionEvent_getHistoricalY(ev, 0, h),
+                                (AMotionEvent_getHistoricalEventTime(ev, h) / 1_000_000) as u64,
+                            ));
+                        }
+                    }
                     let (x, y) = (AMotionEvent_getX(ev, 0), AMotionEvent_getY(ev, 0));
-                    ui.pointer(PointerEvent::new(kind, x, y));
+                    let t = (AMotionEvent_getEventTime(ev) / 1_000_000) as u64;
+                    ui.pointer(PointerEvent::at(kind, x, y, t));
                     handled = 1;
                 }
             }
