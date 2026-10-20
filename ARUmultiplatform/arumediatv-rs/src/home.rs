@@ -33,7 +33,7 @@ enum Status {
 
 pub struct Home {
     session: String,
-    seasons: State<Vec<Season>>,
+    seasons: State<Rc<Vec<Season>>>,
     status: State<Status>,
     posters: RefCell<HashMap<String, Rc<Image>>>,
     queue: RefCell<Vec<String>>,
@@ -47,7 +47,9 @@ pub struct Home {
     cat_tabs: ScrollState,
     lib_tab: State<usize>,
     hist: State<Vec<HistoryItem>>,
-    favs: State<Vec<Season>>,
+    favs: State<Rc<Vec<Season>>>,
+    /// Filtrlangan/saralangan ro'yxat keshi (kalit -> natija): har kadrda qayta hisoblanmasin.
+    memo: RefCell<(String, Rc<Vec<Season>>)>,
     lib_state: State<u8>,
     hist_scroll: ScrollState,
     fav_scroll: ScrollState,
@@ -110,7 +112,7 @@ impl Home {
     pub fn new(session: String) -> Rc<Home> {
         let h = Rc::new(Home {
             session,
-            seasons: State::new(Vec::new()),
+            seasons: State::new(Rc::new(Vec::new())),
             status: State::new(Status::Loading),
             posters: RefCell::new(HashMap::new()),
             queue: RefCell::new(Vec::new()),
@@ -124,7 +126,8 @@ impl Home {
             cat_tabs: ScrollState::new(),
             lib_tab: State::new(0),
             hist: State::new(Vec::new()),
-            favs: State::new(Vec::new()),
+            favs: State::new(Rc::new(Vec::new())),
+            memo: RefCell::new((String::new(), Rc::new(Vec::new()))),
             lib_state: State::new(0),
             hist_scroll: ScrollState::new(),
             fav_scroll: ScrollState::new(),
@@ -179,7 +182,7 @@ impl Home {
 
     fn set_items(self: &Rc<Self>, items: Vec<Season>) {
         *self.queue.borrow_mut() = items.iter().map(|s| s.photo_url.clone()).filter(|u| !u.is_empty()).collect();
-        self.seasons.set(items);
+        self.seasons.set(Rc::new(items));
         self.status.set(Status::Ready);
         self.next_posters();
     }
@@ -314,7 +317,7 @@ impl Home {
     }
 
     /// Poster kartalari to'ri (2 ustun), faqat ko'rinadigan qatorlar quriladi.
-    fn poster_grid(self: &Rc<Self>, items: Vec<Season>, scroll: &ScrollState, card_h: f32, top: f32, bottom: f32) -> Element {
+    fn poster_grid(self: &Rc<Self>, items: Rc<Vec<Season>>, scroll: &ScrollState, card_h: f32, top: f32, bottom: f32) -> Element {
         let rows = items.len().div_ceil(2);
         let ihp = (card_h + 12.0) * density();
         let first = (scroll.offset() / ihp) as usize;
@@ -355,30 +358,46 @@ impl Home {
         BOLD.with(|f| f.text_width(label, 13.0)).ceil() + 34.0
     }
 
-    fn catalog_items(&self) -> Vec<Season> {
-        let (gs, ys) = (self.genres.get(), self.years.get());
-        let mut v: Vec<Season> = self
-            .seasons
-            .get()
-            .into_iter()
-            .filter(|s| (gs.is_empty() || s.genres.iter().any(|g| gs.contains(g))) && (ys.is_empty() || ys.contains(&s.year)))
-            .collect();
-        match self.cat_tab.get() {
-            1 => {
-                v.retain(|s| s.rating_count > 0);
-                v.sort_by(|a, b| b.rating_avg.partial_cmp(&a.rating_avg).unwrap_or(std::cmp::Ordering::Equal));
+    /// Kalit o'zgarmasa oldingi natija qaytadi (Rc nusxasi — arzon); o'zgarsa `build` qayta hisoblaydi.
+    fn memoized(&self, key: String, build: impl FnOnce(&[Season]) -> Vec<Season>) -> Rc<Vec<Season>> {
+        let all = self.seasons.get();
+        let key = format!("{key}|{:p}|{}", Rc::as_ptr(&all), all.len());
+        {
+            let m = self.memo.borrow();
+            if m.0 == key {
+                return m.1.clone();
             }
-            2 => {
-                v.retain(|s| s.views > 0);
-                v.sort_by(|a, b| b.views.cmp(&a.views));
-            }
-            3 => v.retain(|s| s.status == "Davom etmoqda"),
-            4 => v.retain(|s| s.status == "Tugallangan"),
-            5 => v.retain(|s| s.kind == "FILM"),
-            6 => v.retain(|s| s.kind == "OVA"),
-            _ => {}
         }
+        let v = Rc::new(build(&all));
+        *self.memo.borrow_mut() = (key, v.clone());
         v
+    }
+
+    fn catalog_items(&self) -> Rc<Vec<Season>> {
+        let (gs, ys, tab) = (self.genres.get(), self.years.get(), self.cat_tab.get());
+        self.memoized(format!("c{tab}|{gs:?}|{ys:?}"), |all| {
+            let mut v: Vec<Season> = all
+                .iter()
+                .filter(|s| (gs.is_empty() || s.genres.iter().any(|g| gs.contains(g))) && (ys.is_empty() || ys.contains(&s.year)))
+                .cloned()
+                .collect();
+            match tab {
+                1 => {
+                    v.retain(|s| s.rating_count > 0);
+                    v.sort_by(|a, b| b.rating_avg.partial_cmp(&a.rating_avg).unwrap_or(std::cmp::Ordering::Equal));
+                }
+                2 => {
+                    v.retain(|s| s.views > 0);
+                    v.sort_by(|a, b| b.views.cmp(&a.views));
+                }
+                3 => v.retain(|s| s.status == "Davom etmoqda"),
+                4 => v.retain(|s| s.status == "Tugallangan"),
+                5 => v.retain(|s| s.kind == "FILM"),
+                6 => v.retain(|s| s.kind == "OVA"),
+                _ => {}
+            }
+            v
+        })
     }
 
     /// Katalog sarlavhasi: nom, filtr tugmasi va bo'limlar — hammasi shaffof lupali shisha kapsulalar ichida.
@@ -513,7 +532,7 @@ impl Home {
                         }
                     }
                 }
-                me.favs.set(favs);
+                me.favs.set(Rc::new(favs));
                 me.hist.set(hist);
                 me.lib_state.set(1);
                 me.next_posters();
@@ -682,7 +701,7 @@ impl Home {
         let header_h = 8.0 + 124.0;
         let content = if tab == 1 {
             let qs = self.query.get().trim().to_lowercase();
-            let items: Vec<Season> = if qs.is_empty() { Vec::new() } else { self.seasons.get().into_iter().filter(|s| s.name.to_lowercase().contains(&qs)).collect() };
+            let items = self.memoized(format!("s{qs}"), |all| if qs.is_empty() { Vec::new() } else { all.iter().filter(|s| s.name.to_lowercase().contains(&qs)).cloned().collect() });
             if items.is_empty() {
                 let msg = if qs.is_empty() { "Anime nomini yozib qidiruv qiling" } else { "Qidiruv natijalari topilmadi" };
                 column(vec![tx(msg, 15.0, TEXT_DIM)]).center()
@@ -832,7 +851,7 @@ mod tests {
             .collect();
         let home = Rc::new(Home {
             session: String::new(),
-            seasons: State::new(seasons),
+            seasons: State::new(Rc::new(seasons)),
             status: State::new(Status::Ready),
             posters: RefCell::new((0..4).map(|i| (format!("p{i}.jpg"), Rc::new(poster(i)))).collect()),
             queue: RefCell::new(Vec::new()),
@@ -846,7 +865,8 @@ mod tests {
             cat_tabs: ScrollState::new(),
             lib_tab: State::new(0),
             hist: State::new(Vec::new()),
-            favs: State::new(Vec::new()),
+            favs: State::new(Rc::new(Vec::new())),
+            memo: RefCell::new((String::new(), Rc::new(Vec::new()))),
             lib_state: State::new(0),
             hist_scroll: ScrollState::new(),
             fav_scroll: ScrollState::new(),

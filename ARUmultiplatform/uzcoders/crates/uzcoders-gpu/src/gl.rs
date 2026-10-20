@@ -179,7 +179,9 @@ uniform vec2 u_step;
 uniform float u_down;
 varying vec2 v_uv;
 void main() {
-  if (u_down > 0.5) {
+  if (u_down < -0.5) {
+    gl_FragColor = texture2D(u_tex, v_uv);
+  } else if (u_down > 0.5) {
     vec4 c = texture2D(u_tex, v_uv + u_step * vec2(-1.0, -1.0)) + texture2D(u_tex, v_uv + u_step * vec2(1.0, -1.0))
            + texture2D(u_tex, v_uv + u_step * vec2(-1.0, 1.0)) + texture2D(u_tex, v_uv + u_step * vec2(1.0, 1.0));
     gl_FragColor = c * 0.25;
@@ -638,7 +640,7 @@ impl GlRenderer {
         glActiveTexture(0x84C0);
         glBindTexture(0x0DE1, b.tex[0]);
         glUniform1i(b.u_tex, 0);
-        glUniform1f(b.u_down, 0.0);
+        glUniform1f(b.u_down, -1.0);
         glUniform2f(b.u_step, 0.0, 0.0);
         glDrawArrays(4, 0, 6);
         self.bind_main(w, h);
@@ -662,7 +664,8 @@ impl GlRenderer {
                     );
                 }
                 Op::Blur { region, blur } => {
-                    if scene {
+                    // Lupa (blur ~ 0) uchun xiralashtirish kerak emas: bo'sh o'tkazishlar va holatni qayta bog'lash tejaladi.
+                    if scene && *blur > 0.5 {
                         self.run_blur(*region, *blur, w, h);
                         self.bind_main(w, h);
                     }
