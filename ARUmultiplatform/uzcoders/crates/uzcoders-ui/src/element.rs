@@ -201,6 +201,11 @@ impl Element {
         self.border = Some((width, c));
         self
     }
+    /// Konturni butunlay olib tashlaydi (fokusda ham chizilmaydi).
+    pub fn no_border(mut self) -> Self {
+        self.border = None;
+        self
+    }
     pub fn width(mut self, v: f32) -> Self {
         self.style.width = Dim::Px(v);
         self

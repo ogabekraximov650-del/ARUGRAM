@@ -16,6 +16,10 @@ pub struct Season {
     pub rating_count: i64,
     pub views: i64,
     pub age: i64,
+    pub genres: Vec<String>,
+    pub year: String,
+    pub status: String,
+    pub kind: String,
 }
 
 fn num(v: &Value) -> i64 {
@@ -42,6 +46,14 @@ pub fn parse_seasons(body: &str) -> Vec<Season> {
                 rating_count: rc,
                 views: num(&o["views_total"]),
                 age: num(&o["yosh"]),
+                genres: o["janri"].as_str().unwrap_or("").split(',').map(|g| g.trim().to_string()).filter(|g| !g.is_empty()).collect(),
+                year: match &o["yili"] {
+                    Value::String(y) => y.trim().to_string(),
+                    Value::Number(n) => n.to_string(),
+                    _ => String::new(),
+                },
+                status: o["holati"].as_str().unwrap_or("").trim().to_string(),
+                kind: o["turi"].as_str().unwrap_or("").trim().to_uppercase(),
             })
         })
         .collect()

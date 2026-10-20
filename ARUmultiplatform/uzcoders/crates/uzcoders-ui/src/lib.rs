@@ -427,7 +427,7 @@ impl Ui {
                     };
                     let text_x = inner_x - shift_x;
                     if visible {
-                        if let Some((w, c)) = it.border {
+                        if let Some((w, c)) = it.border.filter(|(w, _)| *w > 0.0) {
                             let c = if focused { cfg.accent } else { c };
                             let w = if focused { w * 2.0 } else { w };
                             cmds.push(DrawCmd::RoundRectStroke {

@@ -9,6 +9,8 @@ use uzcoders::prelude::*;
 
 const BELL: &str = "M12,22c1.1,0 2,-0.9 2,-2h-4c0,1.1 0.89,2 2,2zM18,16v-5c0,-3.07 -1.64,-5.64 -4.5,-6.32V4c0,-0.83 -0.67,-1.5 -1.5,-1.5s-1.5,0.67 -1.5,1.5v0.68C7.63,5.36 6,7.92 6,11v5l-2,2v1h16v-1l-2,-2z";
 const CLOSE: &str = "M19,6.41L17.59,5 12,10.59 6.41,5 5,6.41 10.59,12 5,17.59 6.41,19 12,13.41 17.59,19 19,17.59 13.41,12z";
+const MENU: &str = "M3,18h18v-2L3,16v2zM3,13h18v-2L3,11v2zM3,6v2h18L21,6L3,6z";
+const CAT_TABS: [&str; 7] = ["Barchasi", "Reytingi baland", "Eng ko'p ko'rilgan", "Ongoing", "Tugallangan", "Filmlar", "OVA"];
 const STAR: &str = "M12,17.27L18.18,21l-1.64,-7.03L22,9.24l-7.19,-0.61L12,2 9.19,8.63 2,9.24l5.46,4.73L5.82,21z";
 const EYE: &str = "M12,4.5C7,4.5 2.73,7.61 1,12c1.73,4.39 6,7.5 11,7.5s9.27,-3.11 11,-7.5c-1.73,-4.39 -6,-7.5 -11,-7.5zM12,17c-2.76,0 -5,-2.24 -5,-5s2.24,-5 5,-5 5,2.24 5,5 -2.24,5 -5,5zM12,9c-1.66,0 -3,1.34 -3,3s1.34,3 3,3 3,-1.34 3,-3 -1.34,-3 -3,-3z";
 const NAV: [(&str, &str); 5] = [
@@ -37,6 +39,12 @@ pub struct Home {
     tab: State<usize>,
     query: State<String>,
     search_scroll: ScrollState,
+    cat_tab: State<usize>,
+    cat_scroll: ScrollState,
+    genres: State<Vec<String>>,
+    years: State<Vec<String>>,
+    filter_open: State<bool>,
+    filter_scroll: ScrollState,
     /// Posterlar yuklanmasa sababi (kichik qizil matn).
     poster_diag: State<String>,
 }
@@ -100,6 +108,12 @@ impl Home {
             tab: State::new(0),
             query: State::new(String::new()),
             search_scroll: ScrollState::new(),
+            cat_tab: State::new(0),
+            cat_scroll: ScrollState::new(),
+            genres: State::new(Vec::new()),
+            years: State::new(Vec::new()),
+            filter_open: State::new(false),
+            filter_scroll: ScrollState::new(),
             poster_diag: State::new(String::new()),
         });
         h.reload();
@@ -107,6 +121,10 @@ impl Home {
     }
 
     pub fn back(&self) -> bool {
+        if self.filter_open.get() {
+            self.filter_open.set(false);
+            return true;
+        }
         if self.tab.get() != 0 {
             self.tab.set(0);
             true
@@ -275,6 +293,174 @@ impl Home {
         .padding_each(16.0, 8.0 + top_inset, 16.0, 0.0)
     }
 
+    /// Poster kartalari to'ri (2 ustun), faqat ko'rinadigan qatorlar quriladi.
+    fn poster_grid(self: &Rc<Self>, items: Vec<Season>, scroll: &ScrollState, card_h: f32, top: f32, bottom: f32) -> Element {
+        let rows = items.len().div_ceil(2);
+        let ihp = (card_h + 12.0) * density();
+        let first = (scroll.offset() / ihp) as usize;
+        let last = (((scroll.offset() + scroll.viewport().max(1200.0)) / ihp).ceil() as usize + 1).min(rows.saturating_sub(1));
+        self.prioritize_in(&items, first.min(last), last);
+        self.next_posters();
+        let me = self.clone();
+        lazy_column(scroll, rows, card_h + 12.0, move |r| {
+            let a = me.card(&items[2 * r], card_h);
+            let b = match items.get(2 * r + 1) {
+                Some(s) => me.card(s, card_h),
+                None => spacer().weight(1.0),
+            };
+            row(vec![a, b]).gap(12.0).padding_each(0.0, 0.0, 0.0, 12.0)
+        })
+        .padding_each(16.0, top, 16.0, bottom)
+    }
+
+    fn chip(&self, label: &str, on: bool, f: impl Fn() + 'static) -> Element {
+        let mut e = column(vec![tx(label, 12.0, if on { Color::WHITE } else { Color::rgba(255, 255, 255, 170) }).bold()])
+            .center()
+            .padding_xy(10.0, 8.0)
+            .radius(16.0)
+            .on_click(f);
+        if on {
+            e = e.gradient(ACCENT, ACCENT2);
+        } else {
+            e = e.bg(Color::rgba(255, 255, 255, 14));
+        }
+        e
+    }
+
+    fn catalog_items(&self) -> Vec<Season> {
+        let (gs, ys) = (self.genres.get(), self.years.get());
+        let mut v: Vec<Season> = self
+            .seasons
+            .get()
+            .into_iter()
+            .filter(|s| (gs.is_empty() || s.genres.iter().any(|g| gs.contains(g))) && (ys.is_empty() || ys.contains(&s.year)))
+            .collect();
+        match self.cat_tab.get() {
+            1 => {
+                v.retain(|s| s.rating_count > 0);
+                v.sort_by(|a, b| b.rating_avg.partial_cmp(&a.rating_avg).unwrap_or(std::cmp::Ordering::Equal));
+            }
+            2 => {
+                v.retain(|s| s.views > 0);
+                v.sort_by(|a, b| b.views.cmp(&a.views));
+            }
+            3 => v.retain(|s| s.status == "Davom etmoqda"),
+            4 => v.retain(|s| s.status == "Tugallangan"),
+            5 => v.retain(|s| s.kind == "FILM"),
+            6 => v.retain(|s| s.kind == "OVA"),
+            _ => {}
+        }
+        v
+    }
+
+    /// Katalog sarlavhasi: nom, filtr tugmasi va bo'limlar — shaffof lupali shisha ustida.
+    fn catalog_bar(self: &Rc<Self>, top_inset: f32) -> Element {
+        let sel = self.cat_tab.get();
+        let mk = |i: usize| {
+            let (t, sc) = (self.cat_tab.clone(), self.cat_scroll.clone());
+            self.chip(CAT_TABS[i], sel == i, move || {
+                t.set(i);
+                sc.scroll_to_top();
+            })
+        };
+        let n = self.genres.with(|g| g.len()) + self.years.with(|y| y.len());
+        let fo = self.filter_open.clone();
+        let filter = row(vec![icon(MENU, 16.0).color(Color::WHITE), tx(if n > 0 { format!("Filtr · {n}") } else { "Filtr".into() }, 13.0, Color::WHITE).bold()])
+            .gap(6.0)
+            .align(Align::Center)
+            .padding_xy(14.0, 9.0)
+            .radius(18.0)
+            .bg(if n > 0 { ACCENT.with_opacity(0.55) } else { Color::rgba(255, 255, 255, 18) })
+            .on_click(move || fo.set(true));
+        column(vec![
+            column(vec![
+                row(vec![tx("Katalog", 26.0, Color::WHITE).black().weight(1.0), filter]).align(Align::Center),
+                gap_box(0.0, 8.0),
+                row([0, 3, 4, 5].into_iter().map(mk).collect()).gap(6.0),
+                gap_box(0.0, 6.0),
+                row([1, 2, 6].into_iter().map(mk).collect()).gap(6.0),
+            ])
+            .lens(Color::rgba(255, 255, 255, 4), 1.04)
+            .radius(24.0)
+            .padding_xy(14.0, 12.0),
+            spacer(),
+        ])
+        .padding_each(16.0, 8.0 + top_inset, 16.0, 0.0)
+    }
+
+    /// Filtr oynasi: janr va yil tanlash (shisha panel).
+    fn filter_panel(self: &Rc<Self>, top_inset: f32, bottom_inset: f32) -> Element {
+        let seasons = self.seasons.get();
+        let mut genres: Vec<String> = seasons.iter().flat_map(|s| s.genres.clone()).collect();
+        genres.sort();
+        genres.dedup();
+        let mut years: Vec<String> = seasons.iter().map(|s| s.year.clone()).filter(|y| !y.is_empty()).collect();
+        years.sort_by(|a, b| b.cmp(a));
+        years.dedup();
+        let toggle = |st: &State<Vec<String>>, name: &str| {
+            let (st, name) = (st.clone(), name.to_string());
+            move || {
+                let mut v = st.get();
+                if let Some(i) = v.iter().position(|x| *x == name) {
+                    v.remove(i);
+                } else {
+                    v.push(name.clone());
+                }
+                st.set(v);
+            }
+        };
+        let (gs, ys) = (self.genres.get(), self.years.get());
+        let chips = |names: &[String], sel: &[String], st: &State<Vec<String>>, per: usize| -> Vec<Element> {
+            names
+                .chunks(per)
+                .map(|c| {
+                    let mut r: Vec<Element> = c.iter().map(|n| self.chip(n, sel.contains(n), toggle(st, n)).weight(1.0)).collect();
+                    while r.len() < per {
+                        r.push(spacer().weight(1.0));
+                    }
+                    row(r).gap(6.0).padding_each(0.0, 0.0, 0.0, 6.0)
+                })
+                .collect()
+        };
+        let mut kids = vec![tx("Janr", 16.0, Color::WHITE).bold(), gap_box(0.0, 8.0)];
+        kids.extend(chips(&genres, &gs, &self.genres, 3));
+        kids.push(gap_box(0.0, 14.0));
+        kids.push(tx("Yil", 16.0, Color::WHITE).bold());
+        kids.push(gap_box(0.0, 8.0));
+        kids.extend(chips(&years, &ys, &self.years, 4));
+        let (g2, y2, fo) = (self.genres.clone(), self.years.clone(), self.filter_open.clone());
+        let (fo2, sc) = (self.filter_open.clone(), self.cat_scroll.clone());
+        let buttons = row(vec![
+            self.chip("Tozalash", false, move || {
+                g2.set(Vec::new());
+                y2.set(Vec::new());
+            })
+            .weight(1.0),
+            self.chip("Qo'llash", true, move || {
+                fo.set(false);
+                sc.scroll_to_top();
+            })
+            .weight(1.0),
+        ])
+        .gap(10.0);
+        let _ = fo2;
+        column(vec![
+            spacer(),
+            column(vec![
+                scroll_column(&self.filter_scroll, kids).grow(1.0),
+                gap_box(0.0, 10.0),
+                buttons,
+            ])
+            .bg(Color::rgba(22, 22, 27, 252))
+            .border(1.0, Color::rgba(255, 255, 255, 40))
+            .radius(28.0)
+            .padding_xy(18.0, 18.0)
+            .height(window_dp().1 * 0.6)
+            .margin_each(12.0, 0.0, 12.0, 12.0 + bottom_inset),
+        ])
+        .padding_each(0.0, top_inset, 0.0, 0.0)
+    }
+
     /// Qidiruv paneli: sarlavha va yozish joyi — butunlay shaffof lupali shisha (pastgi panel kabi).
     fn search_bar(&self, top_inset: f32) -> Element {
         let q = self.query.clone();
@@ -286,9 +472,8 @@ impl Home {
                 .hint("Anime qidirish...")
                 .hint_color(Color::rgba(255, 255, 255, 140))
                 .accent(ACCENT2)
-                .padding_xy(0.0, 0.0)
-                .border(0.0, Color::TRANSPARENT)
-                .radius(0.0)
+                .padding_xy(0.0, 10.0)
+                .no_border()
                 .weight(1.0),
         ];
         if !self.query.with(|v| v.is_empty()) {
@@ -301,7 +486,7 @@ impl Home {
                 .align(Align::Center)
                 .lens(Color::rgba(255, 255, 255, 10), 1.12)
                 .radius(26.0)
-                .padding_xy(18.0, 15.0),
+                .padding_xy(18.0, 5.0),
             spacer(),
         ])
         .padding_each(16.0, 12.0 + top_inset, 16.0, 0.0)
@@ -352,22 +537,15 @@ impl Home {
                 let msg = if qs.is_empty() { "Anime nomini yozib qidiruv qiling" } else { "Qidiruv natijalari topilmadi" };
                 column(vec![tx(msg, 15.0, TEXT_DIM)]).center()
             } else {
-                let rows = items.len().div_ceil(2);
-                let ihp = (card_h + 12.0) * density();
-                let first = (self.search_scroll.offset() / ihp) as usize;
-                let last = (((self.search_scroll.offset() + self.search_scroll.viewport().max(1200.0)) / ihp).ceil() as usize + 1).min(rows.saturating_sub(1));
-                self.prioritize_in(&items, first.min(last), last);
-                self.next_posters();
-                let me = self.clone();
-                lazy_column(&self.search_scroll, rows, card_h + 12.0, move |r| {
-                    let a = me.card(&items[2 * r], card_h);
-                    let b = match items.get(2 * r + 1) {
-                        Some(s) => me.card(s, card_h),
-                        None => spacer().weight(1.0),
-                    };
-                    row(vec![a, b]).gap(12.0).padding_each(0.0, 0.0, 0.0, 12.0)
-                })
-                .padding_each(16.0, 8.0 + 90.0 + ins.top, 16.0, 90.0 + ins.bottom)
+                self.poster_grid(items, &self.search_scroll, card_h, 8.0 + 90.0 + ins.top, 90.0 + ins.bottom)
+            }
+        } else if tab == 2 {
+            let items = self.catalog_items();
+            if items.is_empty() {
+                let msg = if self.genres.with(|g| !g.is_empty()) || self.years.with(|y| !y.is_empty()) { "Filtr bo'yicha hech narsa topilmadi" } else { "Bu bo'limda hozircha anime yo'q" };
+                column(vec![tx(msg, 15.0, TEXT_DIM)]).center()
+            } else {
+                self.poster_grid(items, &self.cat_scroll, card_h, 8.0 + 150.0 + ins.top, 90.0 + ins.bottom)
             }
         } else if tab != 0 {
             column(vec![tx("Tez orada", 16.0, TEXT_DIM)]).center()
@@ -412,8 +590,15 @@ impl Home {
             layers.push(self.header(ins.top));
         } else if tab == 1 {
             layers.push(self.search_bar(ins.top));
+        } else if tab == 2 {
+            layers.push(self.catalog_bar(ins.top));
         }
-        layers.push(self.nav(ins.bottom));
+        if tab == 2 && self.filter_open.get() {
+            layers.push(self.filter_panel(ins.top, ins.bottom));
+        }
+        if !(tab == 2 && self.filter_open.get()) {
+            layers.push(self.nav(ins.bottom));
+        }
         stack(layers).bg(BG)
     }
 }
@@ -448,6 +633,10 @@ mod tests {
                 rating_count: i % 2,
                 views: i * 400,
                 age: [6, 13, 15, 15, 0, 16][i as usize],
+                genres: vec!["Action".into()],
+                year: "2020".into(),
+                status: if i % 2 == 0 { "Davom etmoqda".into() } else { "Tugallangan".into() },
+                kind: "TV".into(),
             })
             .collect();
         let home = Rc::new(Home {
@@ -461,6 +650,12 @@ mod tests {
             tab: State::new(0),
             query: State::new(String::new()),
             search_scroll: ScrollState::new(),
+            cat_tab: State::new(0),
+            cat_scroll: ScrollState::new(),
+            genres: State::new(Vec::new()),
+            years: State::new(Vec::new()),
+            filter_open: State::new(false),
+            filter_scroll: ScrollState::new(),
             poster_diag: State::new(String::new()),
         });
         let font = Rc::new(Font::parse(include_bytes!("../assets/fonts/Roboto-Regular.ttf")).unwrap());
@@ -485,6 +680,15 @@ mod tests {
             c.clear(Color::BLACK);
             c.execute(&cmds);
             std::fs::write(format!("{dir}/7_search.png"), c.to_png()).unwrap();
+            home.tab.set(2);
+            for (n, name) in [(0, "8_catalog"), (1, "9_filter")] {
+                home.filter_open.set(n == 1);
+                let cmds = ui.frame(size);
+                let mut c = ui.canvas(360, 640);
+                c.clear(Color::BLACK);
+                c.execute(&cmds);
+                std::fs::write(format!("{dir}/{name}.png"), c.to_png()).unwrap();
+            }
         }
     }
 }
