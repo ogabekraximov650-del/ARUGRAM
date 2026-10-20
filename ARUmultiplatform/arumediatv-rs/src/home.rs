@@ -41,6 +41,7 @@ pub struct Home {
     search_scroll: ScrollState,
     cat_tab: State<usize>,
     cat_scroll: ScrollState,
+    cat_tabs: ScrollState,
     genres: State<Vec<String>>,
     years: State<Vec<String>>,
     filter_open: State<bool>,
@@ -110,6 +111,7 @@ impl Home {
             search_scroll: ScrollState::new(),
             cat_tab: State::new(0),
             cat_scroll: ScrollState::new(),
+            cat_tabs: ScrollState::new(),
             genres: State::new(Vec::new()),
             years: State::new(Vec::new()),
             filter_open: State::new(false),
@@ -313,18 +315,15 @@ impl Home {
         .padding_each(16.0, top, 16.0, bottom)
     }
 
+    /// Filtr tanlov tugmasi (Kotlin `Chip`): tanlangan — ACCENT, aks holda CARD.
     fn chip(&self, label: &str, on: bool, f: impl Fn() + 'static) -> Element {
-        let mut e = column(vec![tx(label, 12.0, if on { Color::WHITE } else { Color::rgba(255, 255, 255, 170) }).bold()])
+        column(vec![tx(label, 13.0, if on { Color::WHITE } else { TEXT_DIM }).bold()])
             .center()
-            .padding_xy(10.0, 8.0)
-            .radius(16.0)
-            .on_click(f);
-        if on {
-            e = e.gradient(ACCENT, ACCENT2);
-        } else {
-            e = e.bg(Color::rgba(255, 255, 255, 14));
-        }
-        e
+            .padding_xy(14.0, 8.0)
+            .radius(12.0)
+            .bg(if on { ACCENT } else { CARD })
+            .border(1.0, if on { ACCENT2 } else { Color::rgba(255, 255, 255, 24) })
+            .on_click(f)
     }
 
     fn catalog_items(&self) -> Vec<Season> {
@@ -353,39 +352,41 @@ impl Home {
         v
     }
 
-    /// Katalog sarlavhasi: nom, filtr tugmasi va bo'limlar — shaffof lupali shisha ustida.
-    fn catalog_bar(self: &Rc<Self>, top_inset: f32) -> Element {
+    /// Katalog sarlavhasi (Kotlin `CatalogScreen`): "Katalog" + Filtr tugmasi, ostida suriladigan bo'limlar (tanlangani tagchiziqli).
+    fn catalog_bar(self: &Rc<Self>) -> Element {
         let sel = self.cat_tab.get();
-        let mk = |i: usize| {
-            let (t, sc) = (self.cat_tab.clone(), self.cat_scroll.clone());
-            self.chip(CAT_TABS[i], sel == i, move || {
-                t.set(i);
-                sc.scroll_to_top();
-            })
-        };
         let n = self.genres.with(|g| g.len()) + self.years.with(|y| y.len());
         let fo = self.filter_open.clone();
-        let filter = row(vec![icon(MENU, 16.0).color(Color::WHITE), tx(if n > 0 { format!("Filtr · {n}") } else { "Filtr".into() }, 13.0, Color::WHITE).bold()])
+        let filter = row(vec![icon(MENU, 18.0).color(if n > 0 { ACCENT2 } else { Color::rgba(255, 255, 255, 180) }), tx(if n > 0 { format!("Filtr · {n}") } else { "Filtr".into() }, 13.0, Color::WHITE).bold()])
             .gap(6.0)
             .align(Align::Center)
-            .padding_xy(14.0, 9.0)
-            .radius(18.0)
-            .bg(if n > 0 { ACCENT.with_opacity(0.55) } else { Color::rgba(255, 255, 255, 18) })
+            .padding_xy(14.0, 10.0)
+            .radius(14.0)
+            .bg(if n > 0 { ACCENT.with_opacity(0.25) } else { CARD })
+            .border(1.0, if n > 0 { ACCENT.with_opacity(0.5) } else { Color::rgba(255, 255, 255, 24) })
             .on_click(move || fo.set(true));
+        let tabs: Vec<Element> = CAT_TABS
+            .iter()
+            .enumerate()
+            .map(|(i, name)| {
+                let (t, sc) = (self.cat_tab.clone(), self.cat_scroll.clone());
+                let on = i == sel;
+                column(vec![
+                    tx(*name, 14.0, if on { ACCENT2 } else { TEXT_DIM }).bold(),
+                    gap_box(0.0, 8.0),
+                    column(vec![]).height(3.0).bg(if on { ACCENT2 } else { Color::TRANSPARENT }).radius(2.0),
+                ])
+                .padding_each(16.0, 12.0, 16.0, 0.0)
+                .on_click(move || {
+                    t.set(i);
+                    sc.scroll_to_top();
+                })
+            })
+            .collect();
         column(vec![
-            column(vec![
-                row(vec![tx("Katalog", 26.0, Color::WHITE).black().weight(1.0), filter]).align(Align::Center),
-                gap_box(0.0, 8.0),
-                row([0, 3, 4, 5].into_iter().map(mk).collect()).gap(6.0),
-                gap_box(0.0, 6.0),
-                row([1, 2, 6].into_iter().map(mk).collect()).gap(6.0),
-            ])
-            .lens(Color::rgba(255, 255, 255, 4), 1.04)
-            .radius(24.0)
-            .padding_xy(14.0, 12.0),
-            spacer(),
+            row(vec![tx("Katalog", 28.0, Color::WHITE).black().weight(1.0), filter]).align(Align::Center).padding_each(20.0, 8.0, 20.0, 0.0),
+            row(tabs).scroll(&self.cat_tabs).padding_each(0.0, 4.0, 0.0, 0.0),
         ])
-        .padding_each(16.0, 8.0 + top_inset, 16.0, 0.0)
     }
 
     /// Filtr oynasi: janr va yil tanlash (shisha panel).
@@ -451,8 +452,8 @@ impl Home {
                 gap_box(0.0, 10.0),
                 buttons,
             ])
-            .bg(Color::rgba(22, 22, 27, 252))
-            .border(1.0, Color::rgba(255, 255, 255, 40))
+            .bg(SURFACE)
+            .border(1.0, Color::rgba(255, 255, 255, 24))
             .radius(28.0)
             .padding_xy(18.0, 18.0)
             .height(window_dp().1 * 0.6)
@@ -541,12 +542,13 @@ impl Home {
             }
         } else if tab == 2 {
             let items = self.catalog_items();
-            if items.is_empty() {
+            let body = if items.is_empty() {
                 let msg = if self.genres.with(|g| !g.is_empty()) || self.years.with(|y| !y.is_empty()) { "Filtr bo'yicha hech narsa topilmadi" } else { "Bu bo'limda hozircha anime yo'q" };
                 column(vec![tx(msg, 15.0, TEXT_DIM)]).center()
             } else {
-                self.poster_grid(items, &self.cat_scroll, card_h, 8.0 + 150.0 + ins.top, 90.0 + ins.bottom)
-            }
+                self.poster_grid(items, &self.cat_scroll, card_h, 12.0, 90.0 + ins.bottom).grow(1.0)
+            };
+            column(vec![self.catalog_bar(), body.grow(1.0)]).padding_each(0.0, ins.top, 0.0, 0.0)
         } else if tab != 0 {
             column(vec![tx("Tez orada", 16.0, TEXT_DIM)]).center()
         } else {
@@ -590,8 +592,6 @@ impl Home {
             layers.push(self.header(ins.top));
         } else if tab == 1 {
             layers.push(self.search_bar(ins.top));
-        } else if tab == 2 {
-            layers.push(self.catalog_bar(ins.top));
         }
         if tab == 2 && self.filter_open.get() {
             layers.push(self.filter_panel(ins.top, ins.bottom));
@@ -652,6 +652,7 @@ mod tests {
             search_scroll: ScrollState::new(),
             cat_tab: State::new(0),
             cat_scroll: ScrollState::new(),
+            cat_tabs: ScrollState::new(),
             genres: State::new(Vec::new()),
             years: State::new(Vec::new()),
             filter_open: State::new(false),

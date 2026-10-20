@@ -9,7 +9,7 @@ use std::rc::Rc;
 use uzcoders_core::{
     global_revision, Color, EdgeInsets, Point, PointerEvent, PointerKind, Rect, Size,
 };
-use uzcoders_layout::{Dim, Tree};
+use uzcoders_layout::{Axis, Dim, Tree};
 use uzcoders_render::{Canvas, DrawCmd, Image, Path};
 use uzcoders_text::Font;
 
@@ -46,6 +46,8 @@ struct Item {
     glows: Vec<(f32, f32, f32, Color)>,
     hit: Option<usize>,
     scroll: Option<ScrollState>,
+    /// Qator `.scroll()` bilan: gorizontal scroll.
+    hscroll: bool,
 }
 
 struct Hit {
@@ -56,6 +58,7 @@ struct Hit {
 struct Region {
     rect: Rect,
     state: ScrollState,
+    horizontal: bool,
 }
 
 struct FieldInfo {
@@ -71,7 +74,7 @@ struct Touch {
     field: Option<usize>,
     region: Option<usize>,
     dragging: bool,
-    /// So'nggi (vaqt ms, y) namunalari: tezlikni baholash uchun.
+    /// So'nggi (vaqt ms, scroll o'qi bo'yicha koordinata) namunalari: tezlikni baholash uchun.
     samples: Vec<(u64, f32)>,
 }
 
@@ -278,8 +281,8 @@ impl Ui {
         self.scrolls.clear();
         self.animating = false;
         let mut cmds = Vec::new();
-        let mut shift = 0.0f32;
-        let mut shifts: Vec<f32> = Vec::new();
+        let mut shift = (0.0f32, 0.0f32);
+        let mut shifts: Vec<(f32, f32)> = Vec::new();
         let mut clips: Vec<Rect> = Vec::new();
         let caret_on = self.blink_phase() % 2 == 0;
 
@@ -287,10 +290,10 @@ impl Ui {
             if let ItemKind::ScrollEnd = it.kind {
                 cmds.push(DrawCmd::PopClip);
                 clips.pop();
-                shift = shifts.pop().unwrap_or(0.0);
+                shift = shifts.pop().unwrap_or((0.0, 0.0));
                 continue;
             }
-            let r = tree.rect(it.node).translate(0.0, shift);
+            let r = tree.rect(it.node).translate(shift.0, shift.1);
             let clip = clips.last().copied();
             let eff = clip.map_or(r, |c| r.intersect(&c));
             let visible = !eff.is_empty();
@@ -536,21 +539,30 @@ impl Ui {
             if let Some(sc) = it.scroll {
                 let pad = it_padding(&tree, it.node);
                 // Pastdagi padding ham ko'rinishi uchun: kontent uchi = padding.top + extent + padding.bottom.
-                let max = tree.content_extent(it.node) + pad.vertical() - r.h;
+                let (max, vp) = if it.hscroll {
+                    (tree.content_extent(it.node) + pad.horizontal() - r.w, r.w)
+                } else {
+                    (tree.content_extent(it.node) + pad.vertical() - r.h, r.h)
+                };
                 sc.set_max(max);
-                if sc.set_viewport(r.h) {
+                if sc.set_viewport(vp) {
                     self.dirty = true;
                 }
                 self.regions.push(Region {
                     rect: eff,
                     state: sc.clone(),
+                    horizontal: it.hscroll,
                 });
                 let off = sc.offset();
                 self.scrolls.push(sc);
                 cmds.push(DrawCmd::PushClip(r));
                 clips.push(eff);
                 shifts.push(shift);
-                shift -= off;
+                if it.hscroll {
+                    shift.0 -= off;
+                } else {
+                    shift.1 -= off;
+                }
             }
         }
         if let Some(id) = self.focus {
@@ -662,6 +674,7 @@ impl Ui {
             gradient: el.gradient,
             glows: std::mem::take(&mut el.glows),
             hit,
+            hscroll: el.scroll.is_some() && el.style.direction == Axis::Row,
             scroll: el.scroll,
         });
         let node = match el.kind {
@@ -744,6 +757,7 @@ impl Ui {
                 gradient: None,
                 glows: Vec::new(),
                 hit: None,
+                hscroll: false,
                 scroll: None,
             });
         }
@@ -806,7 +820,10 @@ impl Ui {
                     field: self.field_at(p),
                     region,
                     dragging: false,
-                    samples: vec![(if e.time_ms > 0 { e.time_ms } else { self.now }, p.y)],
+                    samples: vec![(
+                        if e.time_ms > 0 { e.time_ms } else { self.now },
+                        region.map_or(p.y, |ri| if self.regions[ri].horizontal { p.x } else { p.y }),
+                    )],
                 });
                 self.dirty = true;
             }
@@ -815,8 +832,10 @@ impl Ui {
                 let mut unpress = false;
                 if let Some(t) = &mut self.touch {
                     if let Some(ri) = t.region {
-                        let dy = p.y - t.last.y;
-                        if !t.dragging && (p.y - t.start.y).abs() > slop {
+                        let hz = self.regions[ri].horizontal;
+                        let (cur, last, start) = if hz { (p.x, t.last.x, t.start.x) } else { (p.y, t.last.y, t.start.y) };
+                        let dy = cur - last;
+                        if !t.dragging && (cur - start).abs() > slop {
                             t.dragging = true;
                             unpress = true;
                         }
@@ -824,7 +843,7 @@ impl Ui {
                             let st = &self.regions[ri].state;
                             st.raw_set(st.offset() - dy);
                             let tm = if e.time_ms > 0 { e.time_ms } else { self.now };
-                            t.samples.push((tm, p.y));
+                            t.samples.push((tm, cur));
                             if t.samples.len() > 24 {
                                 t.samples.remove(0);
                             }
