@@ -51,26 +51,31 @@ fn cache_file() -> String {
     format!("{}/seasons.json", uzcoders::android::files_dir())
 }
 
-/// Serverdan; tarmoq bo'lmasa diskdagi nusxadan.
-pub fn fetch_seasons() -> Result<Vec<Season>, String> {
-    match crate::api::request("GET", "/api/seasons", "", None, None) {
-        Ok((200, body)) => {
+/// Diskdagi oxirgi ro'yxat (tarmoqsiz, darhol).
+pub fn cached_seasons() -> Vec<Season> {
+    std::fs::read_to_string(cache_file()).map(|b| parse_seasons(&b)).unwrap_or_default()
+}
+
+/// Serverdan (ETag bilan): `Ok(None)` — o'zgarmagan, `Ok(Some)` — yangi ro'yxat (diskka yoziladi).
+pub fn fetch_seasons() -> Result<Option<Vec<Season>>, String> {
+    let etag_file = format!("{}.etag", cache_file());
+    let etag = std::fs::read_to_string(&etag_file).ok().filter(|_| std::path::Path::new(&cache_file()).exists());
+    match crate::api::get_etag("/api/seasons", etag.as_deref().map(str::trim))? {
+        None => Ok(None),
+        Some((body, tag)) => {
             let items = parse_seasons(&body);
             if !items.is_empty() {
                 let _ = std::fs::write(cache_file(), &body);
+                match tag {
+                    Some(t) => {
+                        let _ = std::fs::write(&etag_file, t);
+                    }
+                    None => {
+                        let _ = std::fs::remove_file(&etag_file);
+                    }
+                }
             }
-            Ok(items)
-        }
-        other => {
-            let cached = std::fs::read_to_string(cache_file()).map(|b| parse_seasons(&b)).unwrap_or_default();
-            if cached.is_empty() {
-                Err(match other {
-                    Err(e) => e,
-                    Ok((c, _)) => format!("Server xatosi ({c})"),
-                })
-            } else {
-                Ok(cached)
-            }
+            Ok(Some(items))
         }
     }
 }
@@ -99,46 +104,68 @@ fn call_json(p: *mut std::os::raw::c_char) -> Value {
     serde_json::from_str(&s).unwrap_or(Value::Null)
 }
 
-/// Posterlarni Telegram orqali oladi: worker `deliver` bot chatiga nusxalaydi, yadro mahalliy serverda beradi.
-/// Natija: (url, tayyor rasm). Muvaffaqiyatsiz bo'lsa `None`.
+fn poster_dir() -> String {
+    let d = format!("{}/posters", uzcoders::android::files_dir());
+    let _ = std::fs::create_dir_all(&d);
+    d
+}
+
+fn finish_image(bytes: &[u8]) -> Option<Image> {
+    // Karta uchun yetarli o'lcham; burchaklar yumaloq (karta radiusiga mos).
+    decode_image(bytes).map(|i| i.resized(480, 720).round_corners(48.0))
+}
+
+/// Posterlarni oladi: avval diskdagi nusxa (tarmoqsiz), yo'qlari Telegram orqali — worker `deliver` bot chatiga nusxalaydi,
+/// yadro mahalliy serverda beradi. Natija: (url, tayyor rasm); muvaffaqiyatsiz bo'lsa `None`.
 pub fn load_posters(session: &str, urls: &[String]) -> Vec<(String, Option<Image>)> {
-    let port = call_json(rust_core::telegram::rust_tg_status())["port"].as_i64().unwrap_or(0);
+    let dir = poster_dir();
     let names: Vec<String> = urls.iter().map(|u| file_name_of(u)).collect();
+    let mut out: Vec<(String, Option<Image>)> = Vec::new();
+    let mut missing: Vec<usize> = Vec::new();
+    for (i, (u, n)) in urls.iter().zip(&names).enumerate() {
+        let img = if n.is_empty() { None } else { std::fs::read(format!("{dir}/{n}")).ok().and_then(|b| finish_image(&b)) };
+        if img.is_none() && !n.is_empty() {
+            missing.push(i);
+        }
+        out.push((u.clone(), img));
+    }
+    if missing.is_empty() {
+        return out;
+    }
+    // Telegram yadrosi tayyor bo'lishi kerak (api_id, mahalliy server porti).
+    if crate::backend::ensure_tg_ready().is_err() {
+        return out;
+    }
+    let port = call_json(rust_core::telegram::rust_tg_status())["port"].as_i64().unwrap_or(0);
+    if port <= 0 {
+        return out;
+    }
+    let files: Vec<&String> = missing.iter().map(|&i| &names[i]).collect();
     let mut delivered: Vec<String> = Vec::new();
-    if port > 0 {
-        let files: Vec<&String> = names.iter().filter(|n| !n.is_empty()).collect();
-        if let Ok((200, body)) = crate::api::request("POST", "/api/tg/deliver", "", Some(&serde_json::json!({ "files": files })), Some(session)) {
-            if let Ok(j) = serde_json::from_str::<Value>(&body) {
-                if let Some(keys) = j["keys"].as_object().filter(|k| !k.is_empty()) {
-                    let c = CString::new(Value::Object(keys.clone()).to_string()).unwrap_or_default();
-                    unsafe { rust_tg_set_keys(c.as_ptr()) };
-                }
-                delivered = j["files"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default();
+    if let Ok((200, body)) = crate::api::request("POST", "/api/tg/deliver", "", Some(&serde_json::json!({ "files": files })), Some(session)) {
+        if let Ok(j) = serde_json::from_str::<Value>(&body) {
+            if let Some(keys) = j["keys"].as_object().filter(|k| !k.is_empty()) {
+                let c = CString::new(Value::Object(keys.clone()).to_string()).unwrap_or_default();
+                unsafe { rust_tg_set_keys(c.as_ptr()) };
             }
+            delivered = j["files"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default();
         }
     }
-    let out = urls
-        .iter()
-        .zip(&names)
-        .map(|(u, n)| {
-            let img = if port > 0 && delivered.contains(n) {
-                ureq::get(&format!("http://127.0.0.1:{port}/tg/0/{n}"))
-                    .timeout(std::time::Duration::from_secs(25))
-                    .call()
-                    .ok()
-                    .and_then(|r| {
-                        let mut buf = Vec::new();
-                        std::io::Read::read_to_end(&mut std::io::Read::take(r.into_reader(), 12 << 20), &mut buf).ok()?;
-                        decode_image(&buf)
-                    })
-                    // Karta uchun yetarli o'lcham; burchaklar yumaloq (karta radiusiga mos).
-                    .map(|i| i.resized(480, 720).round_corners(48.0))
-            } else {
-                None
-            };
-            (u.clone(), img)
-        })
-        .collect();
+    for &i in &missing {
+        let n = &names[i];
+        if !delivered.contains(n) {
+            continue;
+        }
+        let bytes = ureq::get(&format!("http://127.0.0.1:{port}/tg/0/{n}")).timeout(std::time::Duration::from_secs(25)).call().ok().and_then(|r| {
+            let mut buf = Vec::new();
+            std::io::Read::read_to_end(&mut std::io::Read::take(r.into_reader(), 12 << 20), &mut buf).ok()?;
+            Some(buf)
+        });
+        if let Some(b) = bytes {
+            let _ = std::fs::write(format!("{dir}/{n}"), &b);
+            out[i].1 = finish_image(&b);
+        }
+    }
     // Yuborilgan nusxalar bot chatida qolib ketmasin.
     let _ = call_json(rust_core::telegram::rust_tg_clear_bot_chat());
     out

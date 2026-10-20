@@ -10,8 +10,6 @@ mod login;
 mod theme;
 
 use backend::Backend;
-#[cfg(target_os = "android")]
-use backend::TgBackend;
 #[cfg(not(target_os = "android"))]
 use backend::StubBackend;
 use home::Home;
@@ -36,7 +34,7 @@ pub fn make_ui(scale: f32) -> Ui {
     let font = Rc::new(Font::parse(REGULAR).expect("Roboto Regular"));
     // Android'da haqiqiy Telegram (grammers), kompyuter testlarida tarmoqsiz sinov.
     #[cfg(target_os = "android")]
-    let backend: Arc<dyn Backend> = Arc::new(TgBackend::new(&uzcoders::android::files_dir()));
+    let backend: Arc<dyn Backend> = backend::shared();
     #[cfg(not(target_os = "android"))]
     let backend: Arc<dyn Backend> = Arc::new(StubBackend);
 

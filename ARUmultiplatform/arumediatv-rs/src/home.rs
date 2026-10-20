@@ -107,18 +107,56 @@ impl Home {
         }
     }
 
+    /// Diskdagi ro'yxat darhol ko'rsatiladi, server esa fonda yangilaydi (ETag: o'zgarmagan bo'lsa deyarli bepul).
     fn reload(self: &Rc<Self>) {
-        self.status.set(Status::Loading);
+        let cached = crate::data::cached_seasons();
+        if !cached.is_empty() {
+            self.set_items(cached);
+        } else {
+            self.status.set(Status::Loading);
+        }
         let me = self.clone();
         spawn_bg(fetch_seasons, move |r| match r {
-            Ok(items) => {
-                *me.queue.borrow_mut() = items.iter().map(|s| s.photo_url.clone()).filter(|u| !u.is_empty()).collect();
-                me.seasons.set(items);
-                me.status.set(Status::Ready);
-                me.next_posters();
+            Ok(Some(items)) if !items.is_empty() => me.set_items(items),
+            Ok(_) => {
+                if me.seasons.with(|s| s.is_empty()) {
+                    me.status.set(Status::Error("Ro'yxat bo'sh".into()));
+                }
             }
-            Err(e) => me.status.set(Status::Error(e)),
+            Err(e) => {
+                if me.seasons.with(|s| s.is_empty()) {
+                    me.status.set(Status::Error(e));
+                }
+            }
         });
+    }
+
+    fn set_items(self: &Rc<Self>, items: Vec<Season>) {
+        *self.queue.borrow_mut() = items.iter().map(|s| s.photo_url.clone()).filter(|u| !u.is_empty()).collect();
+        self.seasons.set(items);
+        self.status.set(Status::Ready);
+        self.next_posters();
+    }
+
+    /// Ekranda ko'rinadigan kartalar posterlari navbatning boshiga ko'tariladi.
+    fn prioritize(&self, first_row: usize, last_row: usize) {
+        let seasons = self.seasons.get();
+        let have = self.posters.borrow();
+        let mut front: Vec<String> = Vec::new();
+        for r in first_row..=last_row {
+            for s in seasons.iter().skip(2 * r).take(2) {
+                if !s.photo_url.is_empty() && !have.contains_key(&s.photo_url) {
+                    front.push(s.photo_url.clone());
+                }
+            }
+        }
+        if front.is_empty() {
+            return;
+        }
+        let mut q = self.queue.borrow_mut();
+        q.retain(|u| !front.contains(u));
+        front.extend(q.drain(..));
+        *q = front;
     }
 
     /// Posterlar 8 tadan navbat bilan yuklanadi (bot chatiga ko'p fayl birdaniga tushmasligi uchun).
@@ -270,6 +308,13 @@ impl Home {
                 _ => {
                     let items = self.seasons.get();
                     let rows = items.len().div_ceil(2);
+                    {
+                        let ihp = (card_h + 12.0) * density();
+                        let first = (self.scroll.offset() / ihp) as usize;
+                        let last = (((self.scroll.offset() + self.scroll.viewport().max(1200.0)) / ihp).ceil() as usize + 1).min(rows.saturating_sub(1));
+                        self.prioritize(first.min(last), last);
+                        self.next_posters();
+                    }
                     let me = self.clone();
                     lazy_column(&self.scroll, rows, card_h + 12.0, move |r| {
                         let a = me.card(&items[2 * r], card_h);

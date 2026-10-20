@@ -6,6 +6,14 @@ use std::ffi::{CStr, CString};
 pub const BASE: &str = "https://arumediatv.uzcom.workers.dev";
 pub const APP_VERSION: &str = "0.1.0";
 
+/// Ulanish 8 soniyada, butun so'rov `secs` soniyada tugashi kerak (IPv6 yoki sekin tarmoqda uzoq osilib qolmaslik uchun).
+fn agent(secs: u64) -> ureq::Agent {
+    ureq::AgentBuilder::new()
+        .timeout_connect(std::time::Duration::from_secs(8))
+        .timeout(std::time::Duration::from_secs(secs))
+        .build()
+}
+
 /// Yadro (`rust_core`) imzosi: `X-App-Sig`.
 fn sign(method: &str, path: &str) -> String {
     let ts = std::time::SystemTime::now()
@@ -42,8 +50,7 @@ pub fn request(method: &str, path: &str, query: &str, body: Option<&Value>, bear
 
 fn request_once(method: &str, path: &str, query: &str, body: Option<&Value>, bearer: Option<&str>) -> Result<(u16, String), String> {
     let url = format!("{BASE}{path}{query}");
-    let mut req = ureq::request(method, &url)
-        .timeout(std::time::Duration::from_secs(40))
+    let mut req = agent(40).request(method, &url)
         .set("X-App-Version", APP_VERSION);
     let sig = sign(method, path);
     if !sig.is_empty() {
@@ -90,4 +97,27 @@ pub fn save_session(token: &str) {
 
 pub fn clear_session() {
     let _ = std::fs::remove_file(session_file());
+}
+
+/// ETag bilan GET: `Ok(None)` — o'zgarmagan (304). Qaytadi: (matn, yangi ETag).
+pub fn get_etag(path: &str, etag: Option<&str>) -> Result<Option<(String, Option<String>)>, String> {
+    let url = format!("{BASE}{path}");
+    let mut req = agent(30).get(&url).set("X-App-Version", APP_VERSION);
+    let sig = sign("GET", path);
+    if !sig.is_empty() {
+        req = req.set("X-App-Sig", &sig);
+    }
+    if let Some(e) = etag {
+        req = req.set("If-None-Match", e);
+    }
+    match req.call() {
+        Ok(r) if r.status() == 304 => Ok(None),
+        Ok(r) => {
+            let tag = r.header("ETag").map(String::from);
+            Ok(Some((r.into_string().map_err(|e| e.to_string())?, tag)))
+        }
+        Err(ureq::Error::Status(304, _)) => Ok(None),
+        Err(ureq::Error::Status(c, _)) => Err(format!("Server xatosi ({c})")),
+        Err(e) => Err(format!("Serverga ulanib bo'lmadi: {e}")),
+    }
 }

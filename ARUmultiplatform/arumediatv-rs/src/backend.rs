@@ -142,6 +142,25 @@ pub struct TgBackend {
 }
 
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+/// Butun ilova uchun bitta Telegram yadro holati (kirish va posterlar bir xil yadrodan foydalanadi).
+#[cfg(target_os = "android")]
+pub fn shared() -> std::sync::Arc<TgBackend> {
+    static S: std::sync::OnceLock<std::sync::Arc<TgBackend>> = std::sync::OnceLock::new();
+    S.get_or_init(|| std::sync::Arc::new(TgBackend::new(&uzcoders::android::files_dir()))).clone()
+}
+
+/// Yadroni to'liq ishga tushiradi (api_id/hash, bot nomi, mahalliy server porti). Android bo'lmasa — hech narsa.
+pub fn ensure_tg_ready() -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        shared().ensure()
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        Ok(())
+    }
+}
+
 impl TgBackend {
     pub fn new(files_dir: &str) -> TgBackend {
         TgBackend { dir: format!("{files_dir}/tg"), ready: Mutex::new(false), bot: Mutex::new(String::new()) }
@@ -173,7 +192,25 @@ impl TgBackend {
         let dir = c(&self.dir);
         let empty = c("");
         call(rust_core::telegram::rust_tg_init(dir.as_ptr(), 0, empty.as_ptr()));
-        let cfg = crate::api::get_json("/api/tg/config", "", None)?;
+        // Sozlama diskdan darhol olinadi (tarmoqni kutmaymiz), fonda yangilanadi.
+        let cfg_path = format!("{}/tg_config.json", self.dir.trim_end_matches("/tg"));
+        let cached: Option<Value> = std::fs::read_to_string(&cfg_path).ok().and_then(|s| serde_json::from_str(&s).ok()).filter(|c: &Value| c["enabled"].as_bool().unwrap_or(false));
+        let cfg = match cached {
+            Some(c) => {
+                let p = cfg_path.clone();
+                std::thread::spawn(move || {
+                    if let Ok(c) = crate::api::get_json("/api/tg/config", "", None) {
+                        let _ = std::fs::write(p, c.to_string());
+                    }
+                });
+                c
+            }
+            None => {
+                let c = crate::api::get_json("/api/tg/config", "", None)?;
+                let _ = std::fs::write(&cfg_path, c.to_string());
+                c
+            }
+        };
         if !cfg["enabled"].as_bool().unwrap_or(false) {
             return Err("Telegram orqali kirish hozircha yoqilmagan".into());
         }
