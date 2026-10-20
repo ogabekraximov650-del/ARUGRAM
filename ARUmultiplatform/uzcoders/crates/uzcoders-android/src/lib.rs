@@ -38,9 +38,126 @@ pub fn blit_rows(src: &[u8], w: usize, h: usize, dst: &mut [u8], stride: usize) 
     }
 }
 
+/// Android `KEYCODE_*` va `META_*` qiymatidan ASCII belgi (klaviaturada Latin harflar, raqamlar va keng tarqalgan belgilar).
+/// Boshqa tugmalar (strelkalar, funksiya tugmalari) uchun `None`.
+pub fn keycode_to_char(code: i32, meta: i32) -> Option<char> {
+    let shift = meta & 0x1 != 0;
+    let c = match code {
+        7..=16 => {
+            let d = (code - 7) as u8;
+            if shift {
+                b")!@#$%^&*("[d as usize] as char
+            } else {
+                (b'0' + d) as char
+            }
+        }
+        29..=54 => {
+            let l = (b'a' + (code - 29) as u8) as char;
+            if shift {
+                l.to_ascii_uppercase()
+            } else {
+                l
+            }
+        }
+        144..=153 => (b'0' + (code - 144) as u8) as char,
+        62 => ' ',
+        55 => {
+            if shift {
+                '<'
+            } else {
+                ','
+            }
+        }
+        56 => {
+            if shift {
+                '>'
+            } else {
+                '.'
+            }
+        }
+        69 => {
+            if shift {
+                '_'
+            } else {
+                '-'
+            }
+        }
+        70 => {
+            if shift {
+                '+'
+            } else {
+                '='
+            }
+        }
+        71 => {
+            if shift {
+                '{'
+            } else {
+                '['
+            }
+        }
+        72 => {
+            if shift {
+                '}'
+            } else {
+                ']'
+            }
+        }
+        73 => {
+            if shift {
+                '|'
+            } else {
+                '\\'
+            }
+        }
+        74 => {
+            if shift {
+                ':'
+            } else {
+                ';'
+            }
+        }
+        75 => {
+            if shift {
+                '"'
+            } else {
+                '\''
+            }
+        }
+        76 => {
+            if shift {
+                '?'
+            } else {
+                '/'
+            }
+        }
+        77 => '@',
+        81 => '+',
+        155 => '*',
+        157 => '-',
+        158 => '.',
+        _ => return None,
+    };
+    Some(c)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tugma_kodlari() {
+        assert_eq!(keycode_to_char(7, 0), Some('0'));
+        assert_eq!(keycode_to_char(16, 0), Some('9'));
+        assert_eq!(keycode_to_char(8, 1), Some('!'));
+        assert_eq!(keycode_to_char(29, 0), Some('a'));
+        assert_eq!(keycode_to_char(54, 1), Some('Z'));
+        assert_eq!(keycode_to_char(62, 0), Some(' '));
+        assert_eq!(keycode_to_char(81, 0), Some('+'));
+        assert_eq!(keycode_to_char(152, 0), Some('8'));
+        assert_eq!(keycode_to_char(19, 0), None); // yuqoriga strelka
+        assert_eq!(keycode_to_char(4, 0), None); // orqaga
+    }
 
     #[test]
     fn qatorlar_stride_bilan() {

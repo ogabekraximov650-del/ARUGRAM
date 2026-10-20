@@ -1,158 +1,33 @@
-//! uzcoders-ui — deklarativ elementlar daraxti, joylashtirish, chizish va bosishlarni qayta ishlash.
+//! uzcoders-ui — deklarativ elementlar daraxti, joylashtirish, chizish, scroll, matn kiritish va navigatsiya.
 
+mod element;
+mod nav;
+mod scroll;
+
+use element::{Callback, FieldCfg, Kind};
 use std::rc::Rc;
-use uzcoders_core::{global_revision, Color, EdgeInsets, PointerEvent, PointerKind, Rect, Size};
-use uzcoders_layout::{Align, Axis, Dim, Justify, Style, Tree};
+use uzcoders_core::{
+    global_revision, Color, EdgeInsets, Point, PointerEvent, PointerKind, Rect, Size,
+};
+use uzcoders_layout::{Dim, Tree};
 use uzcoders_render::DrawCmd;
 use uzcoders_text::Font;
 
+pub use element::{
+    button, column, field, gap_box, grid, row, scroll_column, spacer, text, Element,
+};
+pub use nav::Navigator;
+pub use scroll::ScrollState;
 pub use uzcoders_layout::{Align as Alignment, Justify as Arrange};
 
-type Callback = Rc<dyn Fn()>;
+const BLINK_MS: u64 = 500;
+const SLOP_DP: f32 = 8.0;
 
-enum Kind {
+enum ItemKind {
     Container,
-    Text {
-        text: String,
-        size: f32,
-        color: Color,
-    },
-}
-
-/// UI daraxti elementi. Har kadrda (holat o'zgarganda) qaytadan quriladi — arzon, chunki faqat tavsif.
-pub struct Element {
-    kind: Kind,
-    style: Style,
-    bg: Option<Color>,
-    radius: f32,
-    on_click: Option<Callback>,
-    children: Vec<Element>,
-}
-
-impl Element {
-    fn container(direction: Axis, children: Vec<Element>) -> Element {
-        Element {
-            kind: Kind::Container,
-            style: Style {
-                direction,
-                ..Style::default()
-            },
-            bg: None,
-            radius: 0.0,
-            on_click: None,
-            children,
-        }
-    }
-
-    pub fn padding(mut self, v: f32) -> Self {
-        self.style.padding = EdgeInsets::all(v);
-        self
-    }
-    pub fn padding_xy(mut self, horizontal: f32, vertical: f32) -> Self {
-        self.style.padding = EdgeInsets::symmetric(horizontal, vertical);
-        self
-    }
-    pub fn margin(mut self, v: f32) -> Self {
-        self.style.margin = EdgeInsets::all(v);
-        self
-    }
-    pub fn gap(mut self, v: f32) -> Self {
-        self.style.gap = v;
-        self
-    }
-    pub fn bg(mut self, c: Color) -> Self {
-        self.bg = Some(c);
-        self
-    }
-    pub fn radius(mut self, r: f32) -> Self {
-        self.radius = r;
-        self
-    }
-    pub fn width(mut self, v: f32) -> Self {
-        self.style.width = Dim::Px(v);
-        self
-    }
-    pub fn height(mut self, v: f32) -> Self {
-        self.style.height = Dim::Px(v);
-        self
-    }
-    pub fn grow(mut self, v: f32) -> Self {
-        self.style.grow = v;
-        self
-    }
-    pub fn align(mut self, a: Align) -> Self {
-        self.style.align_items = a;
-        self
-    }
-    pub fn justify(mut self, j: Justify) -> Self {
-        self.style.justify = j;
-        self
-    }
-    pub fn center(self) -> Self {
-        self.align(Align::Center).justify(Justify::Center)
-    }
-    pub fn on_click(mut self, f: impl Fn() + 'static) -> Self {
-        self.on_click = Some(Rc::new(f));
-        self
-    }
-    /// Matn elementi uchun shrift o'lchami.
-    pub fn size(mut self, s: f32) -> Self {
-        if let Kind::Text { size, .. } = &mut self.kind {
-            *size = s;
-        }
-        self
-    }
-    /// Matn elementi uchun rang.
-    pub fn color(mut self, c: Color) -> Self {
-        if let Kind::Text { color, .. } = &mut self.color_target() {
-            *color = c;
-        }
-        self
-    }
-    fn color_target(&mut self) -> &mut Kind {
-        &mut self.kind
-    }
-}
-
-pub fn column(children: Vec<Element>) -> Element {
-    Element::container(Axis::Column, children)
-}
-
-pub fn row(children: Vec<Element>) -> Element {
-    Element::container(Axis::Row, children)
-}
-
-pub fn text(s: impl Into<String>) -> Element {
-    Element {
-        kind: Kind::Text {
-            text: s.into(),
-            size: 16.0,
-            color: Color::BLACK,
-        },
-        style: Style::default(),
-        bg: None,
-        radius: 0.0,
-        on_click: None,
-        children: Vec::new(),
-    }
-}
-
-/// Bo'sh joyni to'ldiradigan elastik element.
-pub fn spacer() -> Element {
-    Element::container(Axis::Column, Vec::new()).grow(1.0)
-}
-
-/// Tayyor tugma: yumaloq fon, o'rtada matn, bosilganda `f` chaqiriladi.
-pub fn button(label: impl Into<String>, f: impl Fn() + 'static) -> Element {
-    Element::container(
-        Axis::Column,
-        vec![text(label).color(Color::WHITE).size(18.0)],
-    )
-    .bg(Color::hex(0x2F80ED))
-    .radius(10.0)
-    .padding_xy(20.0, 12.0)
-    .center()
-    .on_click(f)
+    Text(String, f32, Color),
+    Field(Box<FieldCfg>),
+    ScrollEnd,
 }
 
 struct Item {
@@ -160,14 +35,9 @@ struct Item {
     kind: ItemKind,
     bg: Option<Color>,
     radius: f32,
+    border: Option<(f32, Color)>,
     hit: Option<usize>,
-    clip: bool,
-    end_clip: usize,
-}
-
-enum ItemKind {
-    Container,
-    Text(String, f32, Color),
+    scroll: Option<ScrollState>,
 }
 
 struct Hit {
@@ -175,15 +45,48 @@ struct Hit {
     cb: Callback,
 }
 
-/// Ilova ish vaqti: elementlarni quradi, joylaydi, chizish ro'yxatini beradi va bosishlarni yo'naltiradi.
+struct Region {
+    rect: Rect,
+    state: ScrollState,
+}
+
+struct FieldInfo {
+    rect: Rect,
+    cfg: Box<FieldCfg>,
+    shown: String,
+    text_x: f32,
+}
+
+struct Touch {
+    start: Point,
+    last: Point,
+    field: Option<usize>,
+    region: Option<usize>,
+    dragging: bool,
+    vel: f32,
+    last_t: u64,
+}
+
+/// Ilova ish vaqti: elementlarni quradi, joylaydi, chizish ro'yxatini beradi va kiritishni yo'naltiradi.
 pub struct Ui {
     font: Rc<Font>,
     build: Box<dyn FnMut() -> Element>,
     hits: Vec<Hit>,
+    fields: Vec<FieldInfo>,
+    regions: Vec<Region>,
+    scrolls: Vec<ScrollState>,
     pressed: Option<usize>,
     last_rev: Option<u64>,
     dirty: bool,
     scale: f32,
+    now: u64,
+    last_frame_now: Option<u64>,
+    touch: Option<Touch>,
+    focus: Option<usize>,
+    caret: usize,
+    caret_epoch: u64,
+    last_blink: u64,
+    back: Option<Rc<dyn Fn() -> bool>>,
 }
 
 impl Ui {
@@ -192,10 +95,21 @@ impl Ui {
             font,
             build: Box::new(build),
             hits: Vec::new(),
+            fields: Vec::new(),
+            regions: Vec::new(),
+            scrolls: Vec::new(),
             pressed: None,
             last_rev: None,
             dirty: true,
             scale: 1.0,
+            now: 0,
+            last_frame_now: None,
+            touch: None,
+            focus: None,
+            caret: 0,
+            caret_epoch: 0,
+            last_blink: 0,
+            back: None,
         }
     }
 
@@ -203,7 +117,7 @@ impl Ui {
         self.font.clone()
     }
 
-    /// Zichlik koeffitsienti (dp -> piksel). Barcha o'lchamlar (padding, shrift, radius...) shunga ko'paytiriladi.
+    /// Zichlik koeffitsienti (dp -> piksel). Barcha o'lchamlar shunga ko'paytiriladi.
     pub fn set_scale(&mut self, scale: f32) {
         if (scale - self.scale).abs() > f32::EPSILON {
             self.scale = scale.max(0.1);
@@ -211,106 +125,241 @@ impl Ui {
         }
     }
 
-    /// Holat o'zgargani yoki bosish tufayli qayta chizish kerakmi?
+    /// Joriy vaqt (millisekund, monoton). Kursor miltillashi va inersiya shunga tayanadi; qobiq har tsiklda chaqiradi.
+    pub fn set_time(&mut self, ms: u64) {
+        self.now = ms;
+    }
+
+    /// "Orqaga" bosilganda chaqiriladi; `true` — qayta ishlandi (ilova yopilmaydi).
+    pub fn set_back_handler(&mut self, f: impl Fn() -> bool + 'static) {
+        self.back = Some(Rc::new(f));
+    }
+
+    fn blink_phase(&self) -> u64 {
+        self.now.saturating_sub(self.caret_epoch) / BLINK_MS
+    }
+
+    /// Qayta chizish kerakmi (holat o'zgardi, inersiya, kursor miltillashi)?
     pub fn needs_frame(&self) -> bool {
-        self.dirty || self.last_rev != Some(global_revision())
+        self.dirty
+            || self.last_rev != Some(global_revision())
+            || self.scrolls.iter().any(|s| s.velocity() != 0.0)
+            || (self.focus.is_some() && self.blink_phase() != self.last_blink)
+    }
+
+    /// Keyingi uyg'onishgacha necha ms kutish mumkin (`None` — hodisagacha cheksiz).
+    pub fn next_wakeup_ms(&self) -> Option<u64> {
+        if self.scrolls.iter().any(|s| s.velocity() != 0.0) {
+            return Some(0);
+        }
+        self.focus
+            .map(|_| BLINK_MS - self.now.saturating_sub(self.caret_epoch) % BLINK_MS)
+    }
+
+    /// Klaviatura ko'rsatilishi kerakmi (kiritish maydoni fokusda).
+    pub fn wants_keyboard(&self) -> bool {
+        self.focus.is_some()
     }
 
     /// Kadrni quradi: `size` — oyna o'lchami (piksel). Chizish buyruqlari qaytadi.
     pub fn frame(&mut self, size: Size) -> Vec<DrawCmd> {
         self.last_rev = Some(global_revision());
         self.dirty = false;
+        let dt = match self.last_frame_now {
+            Some(t) => (self.now.saturating_sub(t) as f32 / 1000.0).min(0.05),
+            None => 0.0,
+        };
+        self.last_frame_now = Some(self.now);
+        self.step_flings(dt);
+        self.last_blink = self.blink_phase();
+
         let root = (self.build)();
         let mut tree = Tree::new();
         let mut items = Vec::new();
         let mut cbs = Vec::new();
         let root_id = self.add(root, &mut tree, &mut items, &mut cbs);
         tree.compute(root_id, size);
+
         self.hits.clear();
+        self.fields.clear();
+        self.regions.clear();
+        self.scrolls.clear();
         let mut cmds = Vec::new();
-        for it in &items {
-            let r = tree.rect(it.node);
+        let mut shift = 0.0f32;
+        let mut shifts: Vec<f32> = Vec::new();
+        let mut clips: Vec<Rect> = Vec::new();
+        let caret_on = self.blink_phase() % 2 == 0;
+
+        for it in items {
+            if let ItemKind::ScrollEnd = it.kind {
+                cmds.push(DrawCmd::PopClip);
+                clips.pop();
+                shift = shifts.pop().unwrap_or(0.0);
+                continue;
+            }
+            let r = tree.rect(it.node).translate(0.0, shift);
+            let clip = clips.last().copied();
+            let eff = clip.map_or(r, |c| r.intersect(&c));
+            let visible = !eff.is_empty();
             if let Some(h) = it.hit {
-                debug_assert_eq!(h, self.hits.len());
                 self.hits.push(Hit {
-                    rect: r,
+                    rect: eff,
                     cb: cbs[h].clone(),
                 });
             }
-            let _ = (it.clip, it.end_clip);
-            if let Some(mut c) = it.bg {
-                if it.hit.is_some() && it.hit == self.pressed {
-                    c = c.darken(0.8);
-                }
-                cmds.push(DrawCmd::RoundRect {
-                    rect: r,
-                    radius: it.radius,
-                    color: c,
-                });
-            }
-            if let ItemKind::Text(t, sz, color) = &it.kind {
-                let lines = self.font.wrap(t, *sz, Some(r.w + 0.5));
-                let lh = self.font.line_height(*sz);
-                let asc = self.font.ascent_px(*sz);
-                for (i, l) in lines.into_iter().enumerate() {
-                    cmds.push(DrawCmd::Text {
-                        x: r.x,
-                        baseline: r.y + asc + lh * i as f32,
-                        text: l,
-                        size: *sz,
-                        color: *color,
+            if visible {
+                if let Some(mut c) = it.bg {
+                    if it.hit.is_some() && it.hit == self.pressed {
+                        c = c.darken(0.2);
+                    }
+                    cmds.push(DrawCmd::RoundRect {
+                        rect: r,
+                        radius: it.radius,
+                        color: c,
                     });
                 }
+            }
+            if visible && !matches!(it.kind, ItemKind::Field(_)) {
+                if let Some((w, c)) = it.border {
+                    cmds.push(DrawCmd::RoundRectStroke {
+                        rect: r,
+                        radius: it.radius,
+                        width: w,
+                        color: c,
+                    });
+                }
+            }
+            match it.kind {
+                ItemKind::Text(t, sz, color) if visible => {
+                    let lines = self.font.wrap(&t, sz, Some(r.w + 0.5));
+                    let lh = self.font.line_height(sz);
+                    let asc = self.font.ascent_px(sz);
+                    for (i, l) in lines.into_iter().enumerate() {
+                        cmds.push(DrawCmd::Text {
+                            x: r.x,
+                            baseline: r.y + asc + lh * i as f32,
+                            text: l,
+                            size: sz,
+                            color,
+                        });
+                    }
+                }
+                ItemKind::Field(cfg) => {
+                    let pad = it_padding(&tree, it.node);
+                    let focused = self.focus == Some(cfg.state.id());
+                    let raw = cfg.state.get();
+                    let shown = if cfg.password {
+                        "\u{2022}".repeat(raw.chars().count())
+                    } else {
+                        raw
+                    };
+                    let inner_x = r.x + pad.left;
+                    let inner_w = (r.w - pad.horizontal()).max(0.0);
+                    let caret_idx = self.caret.min(shown.chars().count());
+                    let prefix: String = shown.chars().take(caret_idx).collect();
+                    let caret_x = self.font.text_width(&prefix, cfg.size);
+                    let shift_x = if focused {
+                        (caret_x - inner_w + 2.0 * self.scale).max(0.0)
+                    } else {
+                        0.0
+                    };
+                    let text_x = inner_x - shift_x;
+                    if visible {
+                        if let Some((w, c)) = it.border {
+                            let c = if focused { cfg.accent } else { c };
+                            let w = if focused { w * 2.0 } else { w };
+                            cmds.push(DrawCmd::RoundRectStroke {
+                                rect: r,
+                                radius: it.radius,
+                                width: w,
+                                color: c,
+                            });
+                        }
+                        let lh = self.font.line_height(cfg.size);
+                        let asc = self.font.ascent_px(cfg.size);
+                        let top = r.y + pad.top;
+                        cmds.push(DrawCmd::PushClip(Rect::new(inner_x, r.y, inner_w, r.h)));
+                        if shown.is_empty() {
+                            cmds.push(DrawCmd::Text {
+                                x: inner_x,
+                                baseline: top + asc,
+                                text: cfg.hint.clone(),
+                                size: cfg.size,
+                                color: cfg.hint_color,
+                            });
+                        } else {
+                            cmds.push(DrawCmd::Text {
+                                x: text_x,
+                                baseline: top + asc,
+                                text: shown.clone(),
+                                size: cfg.size,
+                                color: cfg.color,
+                            });
+                        }
+                        if focused && caret_on {
+                            cmds.push(DrawCmd::RoundRect {
+                                rect: Rect::new(
+                                    text_x + caret_x,
+                                    top,
+                                    (1.5 * self.scale).max(1.0),
+                                    lh,
+                                ),
+                                radius: 0.0,
+                                color: cfg.accent,
+                            });
+                        }
+                        cmds.push(DrawCmd::PopClip);
+                    }
+                    self.fields.push(FieldInfo {
+                        rect: eff,
+                        cfg,
+                        shown,
+                        text_x,
+                    });
+                }
+                _ => {}
+            }
+            if let Some(sc) = it.scroll {
+                let pad = it_padding(&tree, it.node);
+                // Pastdagi padding ham ko'rinishi uchun: kontent uchi = padding.top + extent + padding.bottom.
+                let max = tree.content_extent(it.node) + pad.vertical() - r.h;
+                sc.set_max(max);
+                self.regions.push(Region {
+                    rect: eff,
+                    state: sc.clone(),
+                });
+                let off = sc.offset();
+                self.scrolls.push(sc);
+                cmds.push(DrawCmd::PushClip(r));
+                clips.push(eff);
+                shifts.push(shift);
+                shift -= off;
+            }
+        }
+        if let Some(id) = self.focus {
+            if !self.fields.iter().any(|f| f.cfg.state.id() == id) {
+                self.focus = None;
             }
         }
         cmds
     }
 
-    fn add(
-        &self,
-        el: Element,
-        tree: &mut Tree,
-        items: &mut Vec<Item>,
-        cbs: &mut Vec<Callback>,
-    ) -> usize {
-        let slot = items.len();
-        let mut el = el;
-        self.scale_element(&mut el);
-        let hit = el.on_click.map(|cb| {
-            cbs.push(cb);
-            cbs.len() - 1
-        });
-        // Ota-ona oldin chizilishi uchun avval joy ajratamiz, tugun raqami keyin yoziladi.
-        items.push(Item {
-            node: 0,
-            kind: ItemKind::Container,
-            bg: el.bg,
-            radius: el.radius,
-            hit,
-            clip: false,
-            end_clip: 0,
-        });
-        let node = match el.kind {
-            Kind::Container => {
-                let ids: Vec<usize> = el
-                    .children
-                    .into_iter()
-                    .map(|c| self.add(c, tree, items, cbs))
-                    .collect();
-                tree.add(el.style, ids)
+    fn step_flings(&mut self, dt: f32) {
+        if dt <= 0.0 {
+            return;
+        }
+        for s in &self.scrolls {
+            let v = s.velocity();
+            if v == 0.0 {
+                continue;
             }
-            Kind::Text { text, size, color } => {
-                items[slot].kind = ItemKind::Text(text.clone(), size, color);
-                let font = self.font.clone();
-                tree.add_leaf(el.style, move |w| {
-                    let max = if w.is_finite() { Some(w) } else { None };
-                    let (tw, th, _) = font.measure(&text, size, max);
-                    Size::new(tw.ceil(), th.ceil())
-                })
-            }
-        };
-        items[slot].node = node;
-        node
+            let before = s.offset();
+            s.raw_set(before + v * dt);
+            let after = s.offset();
+            let hit_edge = (after <= 0.0 && v < 0.0) || (after >= s.max_offset() && v > 0.0);
+            let nv = v * (-dt * 4.0).exp();
+            s.set_velocity(if hit_edge || nv.abs() < 20.0 { 0.0 } else { nv });
+        }
     }
 
     fn scale_element(&self, el: &mut Element) {
@@ -332,121 +381,315 @@ impl Ui {
         el.style.width = dim(el.style.width);
         el.style.height = dim(el.style.height);
         el.radius *= k;
-        if let Kind::Text { size, .. } = &mut el.kind {
-            *size *= k;
+        if let Some((w, _)) = &mut el.border {
+            *w *= k;
+        }
+        match &mut el.kind {
+            Kind::Text { size, .. } => *size *= k,
+            Kind::Field(f) => f.size *= k,
+            Kind::Container => {}
         }
     }
 
-    /// Eng yuqoridagi bosiladigan element indeksi.
-    fn hit_test(&self, x: f32, y: f32) -> Option<usize> {
-        let p = uzcoders_core::Point::new(x, y);
+    fn add(
+        &self,
+        el: Element,
+        tree: &mut Tree,
+        items: &mut Vec<Item>,
+        cbs: &mut Vec<Callback>,
+    ) -> usize {
+        let mut el = el;
+        self.scale_element(&mut el);
+        let slot = items.len();
+        let hit = el.on_click.map(|cb| {
+            cbs.push(cb);
+            cbs.len() - 1
+        });
+        let has_scroll = el.scroll.is_some();
+        items.push(Item {
+            node: 0,
+            kind: ItemKind::Container,
+            bg: el.bg,
+            radius: el.radius,
+            border: el.border,
+            hit,
+            scroll: el.scroll,
+        });
+        let node = match el.kind {
+            Kind::Container => {
+                let ids: Vec<usize> = el
+                    .children
+                    .into_iter()
+                    .map(|c| self.add(c, tree, items, cbs))
+                    .collect();
+                tree.add(el.style, ids)
+            }
+            Kind::Text { text, size, color } => {
+                items[slot].kind = ItemKind::Text(text.clone(), size, color);
+                let font = self.font.clone();
+                tree.add_leaf(el.style, move |w| {
+                    let max = if w.is_finite() { Some(w) } else { None };
+                    let (tw, th, _) = font.measure(&text, size, max);
+                    Size::new(tw.ceil(), th.ceil())
+                })
+            }
+            Kind::Field(cfg) => {
+                let font = self.font.clone();
+                let (size, minw) = (cfg.size, 100.0 * self.scale);
+                let hint_w = font.text_width(&cfg.hint, size);
+                items[slot].kind = ItemKind::Field(cfg);
+                tree.add_leaf(el.style, move |_| {
+                    Size::new(hint_w.max(minw).ceil(), font.line_height(size).ceil())
+                })
+            }
+        };
+        items[slot].node = node;
+        if has_scroll {
+            items.push(Item {
+                node,
+                kind: ItemKind::ScrollEnd,
+                bg: None,
+                radius: 0.0,
+                border: None,
+                hit: None,
+                scroll: None,
+            });
+        }
+        node
+    }
+
+    fn hit_test(&self, p: Point) -> Option<usize> {
         (0..self.hits.len())
             .rev()
             .find(|&i| self.hits[i].rect.contains(p))
     }
 
+    fn field_at(&self, p: Point) -> Option<usize> {
+        (0..self.fields.len())
+            .rev()
+            .find(|&i| self.fields[i].rect.contains(p))
+    }
+
+    fn region_at(&self, p: Point) -> Option<usize> {
+        (0..self.regions.len())
+            .rev()
+            .find(|&i| self.regions[i].rect.contains(p))
+    }
+
+    fn caret_from_x(&self, fi: usize, x: f32) -> usize {
+        let f = &self.fields[fi];
+        let mut acc = f.text_x;
+        for (i, ch) in f.shown.chars().enumerate() {
+            let a = self.font.char_advance(ch, f.cfg.size);
+            if x < acc + a * 0.5 {
+                return i;
+            }
+            acc += a;
+        }
+        f.shown.chars().count()
+    }
+
+    fn focus_field(&mut self, fi: usize, x: f32) {
+        let id = self.fields[fi].cfg.state.id();
+        self.caret = self.caret_from_x(fi, x);
+        self.focus = Some(id);
+        self.caret_epoch = self.now;
+        self.dirty = true;
+    }
+
     /// Teginish/sichqoncha hodisasini qayta ishlaydi.
     pub fn pointer(&mut self, e: PointerEvent) {
+        let p = e.pos;
         match e.kind {
             PointerKind::Down => {
-                self.pressed = self.hit_test(e.pos.x, e.pos.y);
+                self.pressed = self.hit_test(p);
+                let region = self.region_at(p);
+                if let Some(ri) = region {
+                    self.regions[ri].state.set_velocity(0.0);
+                }
+                self.touch = Some(Touch {
+                    start: p,
+                    last: p,
+                    field: self.field_at(p),
+                    region,
+                    dragging: false,
+                    vel: 0.0,
+                    last_t: self.now,
+                });
                 self.dirty = true;
             }
-            PointerKind::Up => {
-                let was = self.pressed.take();
-                self.dirty = true;
-                if let Some(i) = was {
-                    if self.hit_test(e.pos.x, e.pos.y) == Some(i) {
-                        let cb = self.hits[i].cb.clone();
-                        cb();
+            PointerKind::Move => {
+                let slop = SLOP_DP * self.scale;
+                let mut unpress = false;
+                if let Some(t) = &mut self.touch {
+                    if let Some(ri) = t.region {
+                        let dy = p.y - t.last.y;
+                        if !t.dragging && (p.y - t.start.y).abs() > slop {
+                            t.dragging = true;
+                            unpress = true;
+                        }
+                        if t.dragging {
+                            let st = &self.regions[ri].state;
+                            st.raw_set(st.offset() - dy);
+                            let dt = self.now.saturating_sub(t.last_t);
+                            if dt > 0 {
+                                let inst = -dy / (dt as f32 / 1000.0);
+                                t.vel = 0.7 * t.vel + 0.3 * inst;
+                                t.last_t = self.now;
+                            }
+                            self.dirty = true;
+                        }
                     }
+                    t.last = p;
+                }
+                if unpress {
+                    self.pressed = None;
+                    self.dirty = true;
+                }
+            }
+            PointerKind::Up => {
+                let t = self.touch.take();
+                self.pressed = None;
+                self.dirty = true;
+                let Some(t) = t else { return };
+                if t.dragging {
+                    if let Some(ri) = t.region {
+                        let v = t.vel.clamp(-8000.0, 8000.0);
+                        self.regions[ri]
+                            .state
+                            .set_velocity(if v.abs() > 100.0 { v } else { 0.0 });
+                    }
+                    return;
+                }
+                if let Some(fi) = self.field_at(p).filter(|&f| Some(f) == t.field) {
+                    self.focus_field(fi, p.x);
+                    return;
+                }
+                self.focus = None;
+                if let Some(i) = self.hit_test(p) {
+                    let cb = self.hits[i].cb.clone();
+                    cb();
                 }
             }
             PointerKind::Cancel => {
+                self.touch = None;
                 self.pressed = None;
                 self.dirty = true;
             }
-            PointerKind::Move => {}
+        }
+    }
+
+    fn focused_index(&self) -> Option<usize> {
+        let id = self.focus?;
+        self.fields.iter().position(|f| f.cfg.state.id() == id)
+    }
+
+    /// Fokusdagi maydon matnini tahrirlaydi; `f` belgilar va kursor indeksini o'zgartiradi.
+    fn edit(&mut self, f: impl FnOnce(&mut Vec<char>, &mut usize, &FieldCfg) -> bool) -> bool {
+        let Some(fi) = self.focused_index() else {
+            return false;
+        };
+        let cfg = &self.fields[fi].cfg;
+        let mut chars: Vec<char> = cfg.state.get().chars().collect();
+        let mut caret = self.caret.min(chars.len());
+        if !f(&mut chars, &mut caret, cfg) {
+            return false;
+        }
+        let mut text: String = chars.iter().collect();
+        if let Some(fmt) = cfg.format {
+            let significant = chars[..caret].iter().filter(|c| **c != ' ').count();
+            text = fmt(&text);
+            let mut seen = 0;
+            caret = text.chars().count();
+            for (i, c) in text.chars().enumerate() {
+                if seen == significant {
+                    caret = i;
+                    break;
+                }
+                if c != ' ' {
+                    seen += 1;
+                }
+            }
+            if seen == significant && significant > 0 && caret == text.chars().count() {
+                caret = text.chars().count();
+            }
+        }
+        cfg.state.set(text);
+        self.caret = caret;
+        self.caret_epoch = self.now;
+        self.dirty = true;
+        true
+    }
+
+    /// Fokusdagi maydonga belgi kiritadi. Maydon bo'lmasa `false`.
+    pub fn key_char(&mut self, c: char) -> bool {
+        if c.is_control() {
+            return false;
+        }
+        self.edit(|chars, caret, cfg| {
+            if let Some(p) = cfg.filter {
+                if !p(c) {
+                    return true; // belgi rad etildi, lekin klaviatura hodisasi qayta ishlangan
+                }
+            }
+            if cfg.max_len > 0 {
+                let n = if cfg.format.is_some() {
+                    chars.iter().filter(|x| **x != ' ').count()
+                } else {
+                    chars.len()
+                };
+                if n >= cfg.max_len {
+                    return true;
+                }
+            }
+            chars.insert(*caret, c);
+            *caret += 1;
+            true
+        })
+    }
+
+    /// Kursor oldidagi belgini o'chiradi.
+    pub fn key_backspace(&mut self) -> bool {
+        self.edit(|chars, caret, _| {
+            // Formatlovchi probelni emas, undan oldingi belgini o'chiramiz.
+            while *caret > 0 && chars[*caret - 1] == ' ' {
+                *caret -= 1;
+            }
+            if *caret > 0 {
+                chars.remove(*caret - 1);
+                *caret -= 1;
+            }
+            true
+        })
+    }
+
+    /// "Enter": `on_submit` chaqiriladi.
+    pub fn key_enter(&mut self) -> bool {
+        let Some(fi) = self.focused_index() else {
+            return false;
+        };
+        if let Some(cb) = self.fields[fi].cfg.on_submit.clone() {
+            cb();
+        }
+        true
+    }
+
+    /// "Orqaga": avval fokus olinadi, keyin ilovaning `set_back_handler`i chaqiriladi.
+    pub fn key_back(&mut self) -> bool {
+        if self.focus.take().is_some() {
+            self.dirty = true;
+            return true;
+        }
+        match self.back.clone() {
+            Some(b) => b(),
+            None => false,
         }
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::cell::Cell;
-    use uzcoders_core::State;
-
-    fn font() -> Rc<Font> {
-        Rc::new(Font::parse(include_bytes!("../../../assets/fonts/DejaVuSans.ttf")).unwrap())
-    }
-
-    #[test]
-    fn bosish_hisoblagichni_oshiradi() {
-        let count = State::new(0i32);
-        let c2 = count.clone();
-        let mut ui = Ui::new(font(), move || {
-            let c = c2.clone();
-            column(vec![
-                text(format!("{}", c2.get())),
-                button("+", move || c.update(|v| *v += 1)),
-            ])
-            .padding(10.0)
-        });
-        let size = Size::new(200.0, 200.0);
-        ui.frame(size);
-        let r = ui.hits[0].rect;
-        let (x, y) = (r.x + r.w / 2.0, r.y + r.h / 2.0);
-        ui.pointer(PointerEvent::new(PointerKind::Down, x, y));
-        ui.pointer(PointerEvent::new(PointerKind::Up, x, y));
-        assert_eq!(count.get(), 1);
-        assert!(ui.needs_frame());
-        ui.frame(size);
-        assert!(!ui.needs_frame());
-    }
-
-    #[test]
-    fn tashqarida_qoyvorish_bosmaydi() {
-        let n = Rc::new(Cell::new(0));
-        let n2 = n.clone();
-        let mut ui = Ui::new(font(), move || {
-            let n = n2.clone();
-            column(vec![button("x", move || n.set(n.get() + 1))])
-        });
-        ui.frame(Size::new(200.0, 200.0));
-        let r = ui.hits[0].rect;
-        ui.pointer(PointerEvent::new(PointerKind::Down, r.x + 2.0, r.y + 2.0));
-        ui.pointer(PointerEvent::new(PointerKind::Up, 190.0, 190.0));
-        assert_eq!(n.get(), 0);
-    }
-
-    #[test]
-    fn chizish_buyruqlari() {
-        let mut ui = Ui::new(font(), || {
-            column(vec![text("Salom").size(20.0), button("OK", || {})])
-        });
-        let cmds = ui.frame(Size::new(200.0, 200.0));
-        assert!(cmds.iter().any(|c| matches!(c, DrawCmd::RoundRect { .. })));
-        assert_eq!(
-            cmds.iter()
-                .filter(|c| matches!(c, DrawCmd::Text { .. }))
-                .count(),
-            2
-        );
-    }
-
-    #[test]
-    fn zichlik_olchamlarni_oshiradi() {
-        let mut ui = Ui::new(font(), || {
-            column(vec![button("OK", || {}).width(100.0).height(40.0)])
-        });
-        ui.frame(Size::new(400.0, 400.0));
-        let r1 = ui.hits[0].rect;
-        ui.set_scale(2.0);
-        assert!(ui.needs_frame());
-        ui.frame(Size::new(400.0, 400.0));
-        let r2 = ui.hits[0].rect;
-        assert_eq!((r1.w, r1.h), (100.0, 40.0));
-        assert_eq!((r2.w, r2.h), (200.0, 80.0));
-    }
+fn it_padding(tree: &Tree, node: usize) -> EdgeInsets {
+    tree.padding(node)
 }
+
+#[cfg(test)]
+mod tests;

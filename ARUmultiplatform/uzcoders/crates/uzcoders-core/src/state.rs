@@ -45,6 +45,10 @@ impl<T> State<T> {
             }),
         }
     }
+    /// Shu holatni boshqalaridan ajratuvchi barqaror identifikator (nusxalar bir xil id beradi).
+    pub fn id(&self) -> usize {
+        Rc::as_ptr(&self.inner) as *const () as usize
+    }
     /// Shu holatning o'z versiyasi (har `set` / `update` da oshadi).
     pub fn version(&self) -> u64 {
         self.inner.version.get()

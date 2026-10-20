@@ -15,6 +15,13 @@ pub enum DrawCmd {
         radius: f32,
         color: Color,
     },
+    /// Yumaloq burchakli kontur (ichkariga qarab `width` qalinlikda).
+    RoundRectStroke {
+        rect: Rect,
+        radius: f32,
+        width: f32,
+        color: Color,
+    },
     /// Matn: `x` — chap chet, `baseline` — qator asos chizig'i.
     Text {
         x: f32,
@@ -113,6 +120,29 @@ impl Canvas {
         }
     }
 
+    pub fn stroke_round_rect(&mut self, r: Rect, radius: f32, width: f32, c: Color) {
+        let (bx0, by0, bx1, by1) = self.bounds();
+        let x0 = (r.x.floor() as i32).max(bx0);
+        let y0 = (r.y.floor() as i32).max(by0);
+        let x1 = (r.right().ceil() as i32).min(bx1);
+        let y1 = (r.bottom().ceil() as i32).min(by1);
+        let (hw, hh) = (r.w * 0.5, r.h * 0.5);
+        let rad = radius.min(hw).min(hh).max(0.0);
+        let (cx, cy) = (r.x + hw, r.y + hh);
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let (px, py) = (x as f32 + 0.5 - cx, y as f32 + 0.5 - cy);
+                let qx = px.abs() - (hw - rad);
+                let qy = py.abs() - (hh - rad);
+                let sd =
+                    (qx.max(0.0).powi(2) + qy.max(0.0).powi(2)).sqrt() + qx.max(qy).min(0.0) - rad;
+                let outer = (0.5 - sd).clamp(0.0, 1.0);
+                let inner = (0.5 - (sd + width)).clamp(0.0, 1.0);
+                self.blend(x, y, c, outer - inner);
+            }
+        }
+    }
+
     pub fn draw_text(&mut self, x: f32, baseline: f32, text: &str, size: f32, c: Color) {
         let (bx0, by0, bx1, by1) = self.bounds();
         let mut pen = x;
@@ -148,6 +178,12 @@ impl Canvas {
                     radius,
                     color,
                 } => self.fill_round_rect(*rect, *radius, *color),
+                DrawCmd::RoundRectStroke {
+                    rect,
+                    radius,
+                    width,
+                    color,
+                } => self.stroke_round_rect(*rect, *radius, *width, *color),
                 DrawCmd::Text {
                     x,
                     baseline,
@@ -229,6 +265,16 @@ mod tests {
         let dark_right = (20..80).any(|x| (0..30).any(|y| c.pixel(x, y).r < 250));
         assert!(dark_left);
         assert!(!dark_right);
+    }
+
+    #[test]
+    fn kontur_ichi_bosh() {
+        let mut c = canvas(40, 40);
+        c.clear(Color::BLACK);
+        c.stroke_round_rect(Rect::new(4.0, 4.0, 32.0, 32.0), 6.0, 2.0, Color::WHITE);
+        assert_eq!(c.pixel(20, 20), Color::BLACK);
+        assert!(c.pixel(5, 20).r > 200);
+        assert_eq!(c.pixel(1, 20), Color::BLACK);
     }
 
     #[test]

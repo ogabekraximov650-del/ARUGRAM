@@ -75,6 +75,11 @@ extern "C" {
     fn AInputQueue_finishEvent(q: *mut c_void, ev: *mut c_void, handled: i32);
     fn AInputEvent_getType(ev: *const c_void) -> i32;
     fn AMotionEvent_getAction(ev: *const c_void) -> i32;
+    fn AKeyEvent_getAction(ev: *const c_void) -> i32;
+    fn AKeyEvent_getKeyCode(ev: *const c_void) -> i32;
+    fn AKeyEvent_getMetaState(ev: *const c_void) -> i32;
+    fn ANativeActivity_showSoftInput(a: *mut ANativeActivity, flags: u32);
+    fn ANativeActivity_hideSoftInput(a: *mut ANativeActivity, flags: u32);
     fn AMotionEvent_getX(ev: *const c_void, idx: usize) -> f32;
     fn AMotionEvent_getY(ev: *const c_void, idx: usize) -> f32;
     fn ANativeWindow_getWidth(w: *mut c_void) -> i32;
@@ -248,10 +253,15 @@ pub unsafe fn on_create(activity: *mut ANativeActivity, make_ui: fn(f32) -> Ui) 
     cb.on_window_focus_changed = Some(focus_changed);
     cb.on_destroy = Some(destroy);
 
-    std::thread::spawn(move || run(s, make_ui, scale));
+    let act = activity as usize;
+    std::thread::spawn(move || run(s, make_ui, scale, act));
 }
 
-fn run(s: Arc<Sync_>, make_ui: fn(f32) -> Ui, scale: f32) {
+fn run(s: Arc<Sync_>, make_ui: fn(f32) -> Ui, scale: f32, activity: usize) {
+    let activity = activity as *mut ANativeActivity;
+    let t0 = std::time::Instant::now();
+    let mut keyboard = false;
+    let mut back_consumed = false;
     // 1 = ALOOPER_PREPARE_ALLOW_NON_CALLBACKS: kiritish navbati callback'siz ulanadi, bu bayroqsiz ulanish rad etiladi.
     let looper = unsafe { ALooper_prepare(1) };
     s.m.lock().unwrap().looper = looper;
@@ -264,6 +274,7 @@ fn run(s: Arc<Sync_>, make_ui: fn(f32) -> Ui, scale: f32) {
     let mut force = true;
 
     loop {
+        ui.set_time(t0.elapsed().as_millis() as u64);
         {
             let mut g = s.m.lock().unwrap();
             if g.quit {
@@ -313,14 +324,28 @@ fn run(s: Arc<Sync_>, make_ui: fn(f32) -> Ui, scale: f32) {
             }
         }
 
-        let timeout = if !window.is_null() && ui.needs_frame() {
+        // Klaviaturani fokusga moslaymiz (2 = FORCED: oyna fokusida ham ishonchli ochiladi).
+        if ui.wants_keyboard() != keyboard {
+            keyboard = ui.wants_keyboard();
+            unsafe {
+                if keyboard {
+                    ANativeActivity_showSoftInput(activity, 2);
+                } else {
+                    ANativeActivity_hideSoftInput(activity, 0);
+                }
+            }
+        }
+        let timeout = if window.is_null() {
+            -1
+        } else if ui.needs_frame() {
             0
         } else {
-            -1
+            ui.next_wakeup_ms().map_or(-1, |m| m.max(1) as i32)
         };
         let ident = unsafe { ALooper_pollOnce(timeout, null_mut(), null_mut(), null_mut()) };
         if ident == INPUT_IDENT && !queue.is_null() {
-            drain_input(queue, &mut ui);
+            ui.set_time(t0.elapsed().as_millis() as u64);
+            drain_input(queue, &mut ui, &mut back_consumed);
         }
     }
     if !queue.is_null() {
@@ -362,7 +387,7 @@ fn draw(ui: &mut Ui, canvas: &mut Option<Canvas>, window: *mut c_void, dims: (i3
     }
 }
 
-fn drain_input(queue: *mut c_void, ui: &mut Ui) {
+fn drain_input(queue: *mut c_void, ui: &mut Ui, back_consumed: &mut bool) {
     unsafe {
         let mut ev: *mut c_void = null_mut();
         while AInputQueue_getEvent(queue, &mut ev) >= 0 {
@@ -370,7 +395,28 @@ fn drain_input(queue: *mut c_void, ui: &mut Ui) {
                 continue;
             }
             let mut handled = 0;
-            if AInputEvent_getType(ev) == 2 {
+            if AInputEvent_getType(ev) == 1 {
+                // AINPUT_EVENT_TYPE_KEY
+                let (action, code, meta) = (
+                    AKeyEvent_getAction(ev),
+                    AKeyEvent_getKeyCode(ev),
+                    AKeyEvent_getMetaState(ev),
+                );
+                if code == 4 {
+                    // KEYCODE_BACK: bosilganda hal qilinsa, qo'yib yuborilganda ham yutiladi.
+                    if action == 0 {
+                        *back_consumed = ui.key_back();
+                    }
+                    handled = *back_consumed as i32;
+                } else if action == 0 {
+                    let done = match code {
+                        67 => ui.key_backspace(),
+                        66 | 160 => ui.key_enter(),
+                        _ => crate::keycode_to_char(code, meta).is_some_and(|c| ui.key_char(c)),
+                    };
+                    handled = done as i32;
+                }
+            } else if AInputEvent_getType(ev) == 2 {
                 // AINPUT_EVENT_TYPE_MOTION; faqat birinchi barmoq.
                 let kind = match AMotionEvent_getAction(ev) & 0xff {
                     0 => Some(PointerKind::Down),

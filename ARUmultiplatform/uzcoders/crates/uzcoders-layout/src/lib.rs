@@ -52,6 +52,10 @@ pub struct Style {
     pub gap: f32,
     pub align_items: Align,
     pub justify: Justify,
+    /// Asosiy o'q bo'yicha kontent sig'masa bolalar qisqarmaydi (tugun scroll qilinadi).
+    pub scroll: bool,
+    /// Boshlang'ich (basis) o'lcham 0 deb olinadi: `grow` bo'yicha teng bo'linadi (Compose'dagi `weight`).
+    pub basis0: bool,
 }
 
 impl Default for Style {
@@ -67,6 +71,8 @@ impl Default for Style {
             gap: 0.0,
             align_items: Align::Stretch,
             justify: Justify::Start,
+            scroll: false,
+            basis0: false,
         }
     }
 }
@@ -80,6 +86,8 @@ struct Node {
     /// Bargi tugun: berilgan kenglikda (cheksiz bo'lsa `f32::INFINITY`) kontent o'lchamini qaytaradi.
     measure: Option<MeasureFn>,
     rect: Rect,
+    /// Asosiy o'q bo'yicha bolalarning to'liq uzunligi (scroll uchun).
+    extent: f32,
 }
 
 #[derive(Default)]
@@ -98,6 +106,7 @@ impl Tree {
             children,
             measure: None,
             rect: Rect::ZERO,
+            extent: 0.0,
         });
         self.nodes.len() - 1
     }
@@ -108,6 +117,7 @@ impl Tree {
             children: Vec::new(),
             measure: Some(Box::new(measure)),
             rect: Rect::ZERO,
+            extent: 0.0,
         });
         self.nodes.len() - 1
     }
@@ -115,6 +125,16 @@ impl Tree {
     /// Hisoblangan joylashuv (ildizga nisbatan mutlaq koordinatalarda, `compute` dan keyin).
     pub fn rect(&self, id: NodeId) -> Rect {
         self.nodes[id].rect
+    }
+
+    /// Tugunning ichki chekinishi.
+    pub fn padding(&self, id: NodeId) -> EdgeInsets {
+        self.nodes[id].style.padding
+    }
+
+    /// Bolalarning asosiy o'q bo'yicha to'liq uzunligi (padding'siz).
+    pub fn content_extent(&self, id: NodeId) -> f32 {
+        self.nodes[id].extent
     }
 
     pub fn children(&self, id: NodeId) -> &[NodeId] {
@@ -133,7 +153,14 @@ impl Tree {
         let h = match s.height {
             Dim::Px(p) => p,
             Dim::Percent(p) => available.h * p / 100.0,
-            Dim::Auto => size.h.max(available.h),
+            // Ildiz oynani to'ldiradi (sig'magan kontent qisqaradi yoki scroll qilinadi).
+            Dim::Auto => {
+                if available.h.is_finite() {
+                    available.h
+                } else {
+                    size.h
+                }
+            }
         };
         self.place(root, Rect::new(s.margin.left, s.margin.top, w, h));
     }
@@ -209,17 +236,27 @@ impl Tree {
                 axis,
                 Size::new(cs.margin.horizontal(), cs.margin.vertical()),
             );
-            let basis = split(axis, sz).0;
             let fixed_main = match axis {
                 Axis::Row => matches!(cs.width, Dim::Px(_)),
                 Axis::Column => matches!(cs.height, Dim::Px(_)),
+            };
+            // Scroll tugun kontentiga qarab o'lchanmaydi: qolgan joyni egallaydi (o'lchami aniq bo'lmasa).
+            let flexible_scroll = cs.scroll && !fixed_main;
+            let basis = if cs.basis0 || flexible_scroll {
+                0.0
+            } else {
+                split(axis, sz).0
             };
             items.push(Item {
                 id: c,
                 basis,
                 margin_main: mm,
                 margin_cross: mc,
-                grow: cs.grow,
+                grow: if flexible_scroll {
+                    cs.grow.max(1.0)
+                } else {
+                    cs.grow
+                },
                 shrinkable: if fixed_main { 0.0 } else { cs.shrink },
             });
         }
@@ -228,6 +265,7 @@ impl Tree {
         let gaps = style.gap * (items.len().saturating_sub(1)) as f32;
         let used: f32 = items.iter().map(|i| i.basis + i.margin_main).sum::<f32>() + gaps;
         let free = content_main - used;
+        self.nodes[id].extent = used;
         let mut sizes: Vec<f32> = items.iter().map(|i| i.basis).collect();
         let mut leftover = 0.0f32;
         if free > 0.0 {
@@ -239,7 +277,7 @@ impl Tree {
             } else {
                 leftover = free;
             }
-        } else if free < 0.0 {
+        } else if free < 0.0 && !style.scroll {
             let total: f32 = items.iter().map(|i| i.shrinkable * i.basis).sum();
             if total > 0.0 {
                 for (k, it) in items.iter().enumerate() {
@@ -341,6 +379,30 @@ mod tests {
             height: Dim::Px(h),
             ..Style::default()
         }
+    }
+
+    #[test]
+    fn scroll_tugun_qolgan_joyni_oladi_ota_qisqarmaydi() {
+        let mut t = Tree::new();
+        let top = t.add(fixed(100.0, 60.0), vec![]);
+        let items: Vec<NodeId> = (0..50).map(|_| t.add(fixed(100.0, 40.0), vec![])).collect();
+        let list = t.add(
+            Style {
+                scroll: true,
+                ..Style::default()
+            },
+            items,
+        );
+        let root = t.add(Style::default(), vec![top, list]);
+        t.compute(root, Size::new(100.0, 500.0));
+        assert_eq!(t.rect(top).h, 60.0);
+        assert_eq!(t.rect(list).h, 440.0);
+        assert_eq!(t.content_extent(list), 2000.0);
+        assert_eq!(t.rect(t_child(&t, list, 49)).h, 40.0);
+    }
+
+    fn t_child(t: &Tree, id: NodeId, i: usize) -> NodeId {
+        t.children(id)[i]
     }
 
     #[test]
