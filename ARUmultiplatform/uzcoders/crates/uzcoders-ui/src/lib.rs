@@ -39,6 +39,8 @@ struct Item {
     bg: Option<Color>,
     radius: f32,
     border: Option<(f32, Color)>,
+    glass: Option<Color>,
+    glows: Vec<(f32, f32, f32, Color)>,
     hit: Option<usize>,
     scroll: Option<ScrollState>,
 }
@@ -301,6 +303,23 @@ impl Ui {
                     });
                 }
             }
+            if visible {
+                if let Some(t) = it.glass {
+                    cmds.push(DrawCmd::Glass {
+                        rect: r,
+                        radius: it.radius,
+                        tint: t,
+                    });
+                }
+                for &(fx, fy, rad, col) in &it.glows {
+                    cmds.push(DrawCmd::Glow {
+                        cx: r.x + fx * r.w,
+                        cy: r.y + fy * r.h,
+                        radius: rad,
+                        color: col,
+                    });
+                }
+            }
             if visible && !matches!(it.kind, ItemKind::Field(_)) {
                 if let Some((w, c)) = it.border {
                     cmds.push(DrawCmd::RoundRectStroke {
@@ -379,7 +398,20 @@ impl Ui {
                         let has_label = !cfg.label.is_empty();
                         let floated = has_label && (focused || !shown.is_empty());
                         let label_color = if focused { cfg.accent } else { cfg.hint_color };
-                        if floated {
+                        if floated && cfg.label_inside {
+                            // Maydon ichida tepada kichik sarlavha (shaffof/shisha fon uchun).
+                            let ls = cfg.size * 0.75;
+                            let (_, lbase) = line_metrics(&self.font, ls, None);
+                            cmds.push(DrawCmd::Text {
+                                x: inner_x,
+                                baseline: r.y + 8.0 * self.scale + lbase,
+                                text: cfg.label.clone(),
+                                size: ls,
+                                color: label_color,
+                                weight: 400,
+                                spacing: cfg.spacing * 0.8,
+                            });
+                        } else if floated {
                             // Chegarada turgan kichik sarlavha: ostidagi chiziq qirqiladi.
                             let ls = cfg.size * 0.75;
                             let (llh, lbase) = line_metrics(&self.font, ls, None);
@@ -522,6 +554,9 @@ impl Ui {
         el.style.width = dim(el.style.width);
         el.style.height = dim(el.style.height);
         el.radius *= k;
+        for g in &mut el.glows {
+            g.2 *= k;
+        }
         if let Some((w, _)) = &mut el.border {
             *w *= k;
         }
@@ -571,6 +606,8 @@ impl Ui {
             bg: el.bg,
             radius: el.radius,
             border: el.border,
+            glass: el.glass,
+            glows: std::mem::take(&mut el.glows),
             hit,
             scroll: el.scroll,
         });
@@ -645,6 +682,8 @@ impl Ui {
                 bg: None,
                 radius: 0.0,
                 border: None,
+                glass: None,
+                glows: Vec::new(),
                 hit: None,
                 scroll: None,
             });

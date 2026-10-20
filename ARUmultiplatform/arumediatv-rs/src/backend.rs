@@ -46,6 +46,16 @@ impl Step {
     }
 }
 
+/// Saqlangan kirish bosqichi (ilova yopilib qayta ochilganda tiklash uchun).
+#[derive(Debug, Clone, Default)]
+pub struct LoginInfo {
+    /// `phone`, `code`, `password` yoki `done` (Telegram allaqachon ulangan).
+    pub stage: String,
+    pub phone: String,
+    pub hint: String,
+    pub sent: Option<String>,
+}
+
 /// Bloklovchi chaqiruvlar: fon oqimida ishlatiladi (`uzcoders::spawn_bg`).
 pub trait Backend: Send + Sync {
     fn request_code(&self, phone: &str) -> Step;
@@ -54,6 +64,8 @@ pub trait Backend: Send + Sync {
     fn reset(&self);
     /// IP manzil bo'yicha davlat ISO kodi (`UZ`).
     fn nearest_country(&self) -> Option<String>;
+    /// Saqlangan kirish bosqichi (tarmoqsiz).
+    fn login_state(&self) -> Option<LoginInfo>;
 }
 
 /// Sinov rejimi: tarmoqsiz. Kod `12345` bo'lsa ikki bosqichli parol so'raladi.
@@ -75,6 +87,9 @@ impl Backend for StubBackend {
     }
     fn reset(&self) {}
     fn nearest_country(&self) -> Option<String> {
+        None
+    }
+    fn login_state(&self) -> Option<LoginInfo> {
         None
     }
 }
@@ -123,6 +138,17 @@ pub struct TgBackend {
 impl TgBackend {
     pub fn new(files_dir: &str) -> TgBackend {
         TgBackend { dir: format!("{files_dir}/tg"), ready: Mutex::new(false) }
+    }
+
+    /// Tarmoqsiz ishga tushirish: kalit va saqlangan sessiya/kirish holati uchun (api_id keyinroq).
+    fn ensure_offline(&self) -> Result<(), String> {
+        let _ = std::fs::create_dir_all(&self.dir);
+        let root = self.dir.trim_end_matches("/tg");
+        ensure_master_key(root)?;
+        let dir = CString::new(self.dir.as_str()).unwrap_or_default();
+        let empty = CString::new("").unwrap_or_default();
+        call(rust_core::telegram::rust_tg_init(dir.as_ptr(), 0, empty.as_ptr()));
+        Ok(())
     }
 
     /// Yadroni ishga tushiradi va serverdan `api_id/api_hash` ni oladi (bir marta).
@@ -213,6 +239,17 @@ impl Backend for TgBackend {
     fn check_password(&self, password: &str) -> Step {
         let c = CString::new(password).unwrap_or_default();
         self.run(|| rust_core::telegram::rust_tg_check_password(c.as_ptr()))
+    }
+    fn login_state(&self) -> Option<LoginInfo> {
+        self.ensure_offline().ok()?;
+        let j = call(rust_core::telegram::rust_tg_login_state());
+        let st = Step::from_json(&serde_json::json!({"sent": j["sent"]}));
+        Some(LoginInfo {
+            stage: j["stage"].as_str()?.to_string(),
+            phone: j["phone"].as_str().unwrap_or("").to_string(),
+            hint: j["hint"].as_str().unwrap_or("").to_string(),
+            sent: st.sent,
+        })
     }
     fn reset(&self) {
         if self.ensure().is_ok() {

@@ -27,6 +27,19 @@ pub enum DrawCmd {
         width: f32,
         color: Color,
     },
+    /// "Shisha" panel: shaffof tint, chetida yorug'lik chizig'i (yuqori-chapdan kuchliroq), ichki yorug'lik va yuqori yaltirash.
+    Glass {
+        rect: Rect,
+        radius: f32,
+        tint: Color,
+    },
+    /// Yumshoq radial yorug'lik dog'i (markazdan chetga so'nadi): fon uchun.
+    Glow {
+        cx: f32,
+        cy: f32,
+        radius: f32,
+        color: Color,
+    },
     /// Matn: `x` — chap chet, `baseline` — qator asos chizig'i.
     Text {
         x: f32,
@@ -230,6 +243,22 @@ impl Canvas {
         }
     }
 
+    pub fn draw_glow(&mut self, cx: f32, cy: f32, radius: f32, c: Color) {
+        let (bx0, by0, bx1, by1) = self.bounds();
+        let x0 = ((cx - radius).floor() as i32).max(bx0);
+        let y0 = ((cy - radius).floor() as i32).max(by0);
+        let x1 = ((cx + radius).ceil() as i32).min(bx1);
+        let y1 = ((cy + radius).ceil() as i32).min(by1);
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let d =
+                    ((x as f32 + 0.5 - cx).powi(2) + (y as f32 + 0.5 - cy).powi(2)).sqrt() / radius;
+                let k = (1.0 - d).clamp(0.0, 1.0);
+                self.blend(x, y, c, k * k);
+            }
+        }
+    }
+
     /// Rasmni `rect` ga (bilinear) cho'zib chizadi.
     pub fn draw_image(&mut self, img: &Image, rect: Rect, opacity: f32) {
         if rect.is_empty() || img.w == 0 || img.h == 0 {
@@ -353,6 +382,16 @@ impl Canvas {
                     rect,
                     opacity,
                 } => self.draw_image(image, *rect, *opacity),
+                DrawCmd::Glass { rect, radius, tint } => {
+                    self.fill_round_rect(*rect, *radius, *tint);
+                    self.stroke_round_rect(*rect, *radius, 1.5, Color::rgba(255, 255, 255, 90));
+                }
+                DrawCmd::Glow {
+                    cx,
+                    cy,
+                    radius,
+                    color,
+                } => self.draw_glow(*cx, *cy, *radius, *color),
                 DrawCmd::PushClip(r) => {
                     let (bx0, by0, bx1, by1) = self.bounds();
                     self.clips.push((

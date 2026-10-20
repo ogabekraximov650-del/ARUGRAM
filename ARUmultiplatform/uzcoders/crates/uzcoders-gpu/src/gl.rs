@@ -92,6 +92,24 @@ void main() {
     gl_FragColor = vec4(c.rgb, c.a * v_color.a);
   } else if (v_p.x < 0.0) {
     gl_FragColor = vec4(v_color.rgb, v_color.a * texture2D(u_tex, v_uv).a);
+  } else if (v_p.w < -2.5) {
+    float d = length(v_uv) / v_p.x;
+    float k = clamp(1.0 - d, 0.0, 1.0);
+    gl_FragColor = vec4(v_color.rgb, v_color.a * k * k);
+  } else if (v_p.w < -0.5) {
+    vec2 q = abs(v_uv) - (v_p.xy - v_p.z);
+    float sd = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - v_p.z;
+    float cov = clamp(0.5 - sd, 0.0, 1.0);
+    float rim = cov - clamp(0.5 - (sd + 1.5), 0.0, 1.0);
+    vec2 dir = normalize(v_uv + vec2(0.001));
+    float lit = 0.35 + 0.65 * max(dot(dir, vec2(-0.7071, -0.7071)), 0.0);
+    float glow = clamp(1.0 + sd / 14.0, 0.0, 1.0) * cov;
+    float sheen = clamp(0.5 - v_uv.y / (2.0 * v_p.y), 0.0, 1.0) * cov;
+    float hl = rim * lit * 0.85 + glow * 0.10 * lit + sheen * 0.07;
+    float a = v_color.a * cov;
+    float total = clamp(a + hl, 0.0, 1.0);
+    vec3 col = mix(v_color.rgb, vec3(1.0), clamp(hl / max(total, 0.001), 0.0, 1.0));
+    gl_FragColor = vec4(col, total);
   } else {
     vec2 q = abs(v_uv) - (v_p.xy - v_p.z);
     float sd = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - v_p.z;

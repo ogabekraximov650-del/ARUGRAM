@@ -186,6 +186,17 @@ impl Batcher {
                         pen += g.advance + spacing;
                     }
                 }
+                DrawCmd::Glass { rect, radius, tint } => {
+                    b.rrect(*rect, *radius, -1.0, *tint);
+                }
+                DrawCmd::Glow {
+                    cx,
+                    cy,
+                    radius,
+                    color,
+                } => {
+                    b.glow(*cx, *cy, *radius, *color);
+                }
                 DrawCmd::Image {
                     image,
                     rect,
@@ -380,6 +391,28 @@ impl Build {
             p,
         };
         self.quad([mk(x0, y0), mk(x1, y0), mk(x0, y1), mk(x1, y1)]);
+    }
+
+    fn glow(&mut self, cx: f32, cy: f32, r: f32, c: Color) {
+        if self.empty || c.a == 0 || r <= 0.0 {
+            return;
+        }
+        let col = rgba(c);
+        let p = [r, r, r, -3.0];
+        let mk = |x: f32, y: f32| Vertex {
+            x,
+            y,
+            u: x - cx,
+            v: y - cy,
+            color: col,
+            p,
+        };
+        self.quad([
+            mk(cx - r, cy - r),
+            mk(cx + r, cy - r),
+            mk(cx - r, cy + r),
+            mk(cx + r, cy + r),
+        ]);
     }
 
     fn image_quad(&mut self, r: Rect, e: Entry, opacity: f32) {
@@ -632,6 +665,32 @@ mod tests {
             0
         );
         assert_eq!(f2.verts.len(), 6);
+    }
+
+    #[test]
+    fn shisha_va_yorug_dog() {
+        let mut b = batcher();
+        let f = b.build(
+            &[
+                DrawCmd::Glow {
+                    cx: 50.0,
+                    cy: 50.0,
+                    radius: 40.0,
+                    color: Color::rgba(255, 100, 0, 90),
+                },
+                DrawCmd::Glass {
+                    rect: Rect::new(10.0, 10.0, 60.0, 30.0),
+                    radius: 8.0,
+                    tint: Color::rgba(255, 255, 255, 20),
+                },
+            ],
+            100,
+            100,
+        );
+        assert_eq!(f.verts.len(), 12);
+        assert_eq!(f.verts[0].p[3], -3.0);
+        assert_eq!(f.verts[6].p[3], -1.0);
+        assert_eq!(draws(&f).len(), 1); // bir chaqiruvda
     }
 
     #[test]

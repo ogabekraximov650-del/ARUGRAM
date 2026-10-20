@@ -1,6 +1,6 @@
 //! Telegram orqali kirish oynasi (Kotlin ilovadagi `LoginScreen` ga mos): telefon -> kod -> (2 bosqichli parol).
 
-use crate::backend::{Backend, Step as BStep};
+use crate::backend::{Backend, LoginInfo, Step as BStep};
 use crate::countries::{Country, COUNTRIES};
 use crate::theme::*;
 use std::cell::RefCell;
@@ -29,8 +29,12 @@ thread_local! {
 }
 
 fn format_number(s: &str) -> String {
+    format_with(PATTERN.with(|p| *p.borrow()), s)
+}
+
+/// Raqamni davlat shabloni bo'yicha bo'laklaydi (`901234567` -> `90 123 45 67`).
+fn format_with(pattern: &str, s: &str) -> String {
     let digits: Vec<char> = s.chars().filter(|c| c.is_ascii_digit()).collect();
-    let pattern = PATTERN.with(|p| *p.borrow());
     if pattern.is_empty() {
         return digits.into_iter().collect();
     }
@@ -100,6 +104,8 @@ fn t(s: impl Into<String>, size: f32, color: Color) -> Element {
 }
 
 const DROP_DOWN: &str = "M7,10l5,5 5,-5z";
+const GLASS: Color = Color::rgba(255, 255, 255, 22);
+
 const ARROW_BACK: &str = "M20,11H7.83l5.59,-5.59L12,4l-8,8 8,8 1.41,-1.41L7.83,13H20v-2z";
 
 fn pattern_len(c: &Country) -> usize {
@@ -147,6 +153,14 @@ impl Login {
             wait: State::new(0),
             hint: State::new(String::new()),
         });
+        // Ilova qayta ochilganda saqlangan kirish bosqichini tiklaymiz (kod kutilayotgan paytda yopilgan bo'lsa).
+        let me = login.clone();
+        let b = login.backend.clone();
+        spawn_bg(move || b.login_state(), move |info| {
+            if let Some(info) = info {
+                me.restore(info);
+            }
+        });
         // IP bo'yicha davlat (Telegram aniqlaydi): foydalanuvchi hali tegmagan bo'lsa.
         let me = login.clone();
         let b = login.backend.clone();
@@ -175,6 +189,37 @@ impl Login {
             return true;
         }
         false
+    }
+
+    /// Saqlangan bosqichni ekranga qaytaradi.
+    fn restore(&self, info: LoginInfo) {
+        if self.step.get() != Step::Phone || self.busy.get() || !self.number.get().is_empty() {
+            return; // foydalanuvchi allaqachon yozishni boshlagan
+        }
+        let digits = digits_of(&info.phone);
+        // Telefon: eng uzun mos davlat kodi.
+        if let Some((i, c)) = COUNTRIES
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| digits.starts_with(c.code))
+            .max_by_key(|(_, c)| c.code.len())
+        {
+            self.country.set(Some(i));
+            self.prefix.set(format!("+{}", c.code));
+            self.number.set(format_with(c.pattern, &digits[c.code.len()..]));
+        }
+        match info.stage.as_str() {
+            "code" => {
+                self.sent_info.set(info.sent.unwrap_or_else(|| "Kod yuborildi".into()));
+                self.step.set(Step::Code);
+            }
+            "password" => {
+                self.hint.set(info.hint);
+                self.step.set(Step::Password);
+            }
+            "done" => self.step.set(Step::Done),
+            _ => {}
+        }
     }
 
     fn reset_login(&self) {
@@ -343,7 +388,7 @@ impl Login {
                     ])
                     .gap(8.0)
                     .align(Align::Center)
-                    .border(1.0, BORDER_BRIGHT)
+                    .glass(GLASS)
                     .radius(14.0)
                     .padding_xy(14.0, 14.0)
                     .on_click(move || {
@@ -447,10 +492,10 @@ impl Login {
         if step != Step::Qr && step != Step::Done {
             body.push(
                 column(vec![t(label, 16.0, Color::WHITE).bold()])
-                    .bg(if self.busy.get() {
-                        ACCENT.with_opacity(0.5)
+                    .glass(if self.busy.get() {
+                        ACCENT.with_opacity(0.45)
                     } else {
-                        ACCENT
+                        ACCENT.with_opacity(0.8)
                     })
                     .radius(16.0)
                     .padding_xy(0.0, 16.0)
@@ -501,6 +546,12 @@ impl Login {
             .padding_each(24.0, 16.0 + ins.top, 24.0, 16.0 + ins.bottom)
             .grow(1.0)])
         .bg(BG)
+        // Fon: yumshoq rangli yorug'lik dog'lari (shisha panellar shu ustida turadi).
+        .glows(vec![
+            (0.10, 0.08, 300.0, Color::rgba(226, 98, 15, 120)),
+            (1.00, 0.45, 320.0, Color::rgba(110, 80, 230, 90)),
+            (0.20, 0.95, 300.0, Color::rgba(226, 98, 15, 70)),
+        ])
     }
 
     /// Kirish maydonlarining umumiy ko'rinishi (Kotlin `OutlinedTextField` ga mos).
@@ -509,11 +560,12 @@ impl Login {
             .size(16.0)
             .line_height(24.0)
             .letter_spacing(0.5)
-            .padding_xy(16.0, 16.0)
-            .label_bg(BG)
+            .padding_each(16.0, 26.0, 16.0, 10.0)
+            .label_inside()
+            .glass(GLASS)
             .hint_color(TEXT_DIM)
             .accent(ACCENT2)
-            .border(1.0, BORDER_BRIGHT)
+            .border(1.0, Color::TRANSPARENT)
             .radius(14.0)
     }
 

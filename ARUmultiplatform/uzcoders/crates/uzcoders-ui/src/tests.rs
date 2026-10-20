@@ -368,3 +368,16 @@ fn klaviatura_turi() {
     assert_eq!(ui.keyboard_kind(), KeyboardKind::Number);
     assert_eq!(KeyboardKind::Number.android_input_type(), 2);
 }
+
+#[test]
+fn shisha_va_dog_buyruqlari() {
+    let mut ui = Ui::new(font(), || {
+        column(vec![column(vec![text("x")])
+            .glass(Color::rgba(255, 255, 255, 20))
+            .radius(12.0)])
+        .glows(vec![(0.5, 0.2, 100.0, Color::rgba(255, 100, 0, 80))])
+    });
+    let cmds = ui.frame(SZ);
+    assert!(cmds.iter().any(|c| matches!(c, DrawCmd::Glow { .. })));
+    assert!(cmds.iter().any(|c| matches!(c, DrawCmd::Glass { .. })));
+}

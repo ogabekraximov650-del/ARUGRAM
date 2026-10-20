@@ -49,6 +49,7 @@ pub(crate) struct FieldCfg {
     pub line_height: Option<f32>,
     pub spacing: f32,
     pub keyboard: KeyboardKind,
+    pub label_inside: bool,
 }
 
 pub(crate) enum Kind {
@@ -82,6 +83,9 @@ pub struct Element {
     pub(crate) bg: Option<Color>,
     pub(crate) radius: f32,
     pub(crate) border: Option<(f32, Color)>,
+    pub(crate) glass: Option<Color>,
+    /// Yumshoq yorug'lik dog'lari: (x ulushi, y ulushi, radius dp, rang) — element qutisiga nisbatan.
+    pub(crate) glows: Vec<(f32, f32, f32, Color)>,
     pub(crate) on_click: Option<Callback>,
     pub(crate) scroll: Option<ScrollState>,
     pub(crate) children: Vec<Element>,
@@ -95,6 +99,8 @@ impl Element {
             bg: None,
             radius: 0.0,
             border: None,
+            glass: None,
+            glows: Vec::new(),
             on_click: None,
             scroll: None,
             children,
@@ -142,6 +148,23 @@ impl Element {
     }
     pub fn radius(mut self, r: f32) -> Self {
         self.radius = r;
+        self
+    }
+    /// "Shisha" fon (iOS uslubi): shaffof `tint`, yorug' chegara va ichki yaltirash.
+    pub fn glass(mut self, tint: Color) -> Self {
+        self.glass = Some(tint);
+        self
+    }
+    /// Element orqasiga yumshoq yorug'lik dog'lari: `(x ulushi, y ulushi, radius dp, rang)`.
+    pub fn glows(mut self, g: Vec<(f32, f32, f32, Color)>) -> Self {
+        self.glows = g;
+        self
+    }
+    /// Maydon sarlavhasi chegarada emas, maydon ichida tepada kichik bo'lib ko'tariladi (shaffof/shisha fon uchun).
+    pub fn label_inside(mut self) -> Self {
+        if let Some(f) = self.field_cfg() {
+            f.label_inside = true;
+        }
         self
     }
     /// Yumaloq burchakli kontur.
@@ -474,6 +497,7 @@ pub fn field(state: &State<String>) -> Element {
             line_height: None,
             spacing: 0.0,
             keyboard: KeyboardKind::Text,
+            label_inside: false,
         })),
         Style::default(),
         Vec::new(),
