@@ -34,11 +34,27 @@ public class UzActivity extends NativeActivity {
 
     @Override
     protected void onCreate(Bundle state) {
+        registerNatives();
         super.onCreate(state);
         installCrashReporter();
         imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
         view = new ImeView(this);
         addContentView(view, new FrameLayout.LayoutParams(1, 1));
+    }
+
+    /**
+     * NativeActivity kutubxonani o'zi dlopen qiladi, lekin Java `native` metodlar uchun ro'yxatdan o'tkazmaydi:
+     * shu sinf ClassLoader'i orqali ham yuklaymiz (nom manifestdagi `android.app.lib_name` dan).
+     */
+    private void registerNatives() {
+        try {
+            android.content.pm.ActivityInfo ai = getPackageManager().getActivityInfo(
+                    getComponentName(), android.content.pm.PackageManager.GET_META_DATA);
+            String lib = ai.metaData.getString("android.app.lib_name");
+            if (lib != null) System.loadLibrary(lib);
+        } catch (Throwable e) {
+            Log.e("uzcoders", "loadLibrary: " + e);
+        }
     }
 
     /** Yiqilish haqida ma'lumotni faylga yozadi; keyingi ishga tushganda dialogda ko'rsatiladi (Rust ham shu faylga yozadi). */
