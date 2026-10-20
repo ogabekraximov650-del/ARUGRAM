@@ -21,6 +21,8 @@ pub struct Vertex {
     pub v: f32,
     pub color: [u8; 4],
     pub p: [f32; 4],
+    /// Qo'shimcha parametr (backdrop uchun linza kattalashtirishi; boshqalarda 0).
+    pub q: f32,
 }
 
 #[derive(Debug)]
@@ -200,6 +202,7 @@ impl Batcher {
                     rect,
                     radius,
                     blur,
+                    zoom,
                     tint,
                 } => {
                     if !b.empty {
@@ -217,7 +220,7 @@ impl Batcher {
                             region,
                             blur: *blur,
                         });
-                        b.rrect(*rect, *radius, -2.0, *tint);
+                        b.rrect_q(*rect, *radius, -2.0, *tint, *zoom);
                     }
                 }
                 DrawCmd::Glass { rect, radius, tint } => {
@@ -417,6 +420,10 @@ impl Build {
     }
 
     fn rrect(&mut self, r: Rect, radius: f32, stroke: f32, c: Color) {
+        self.rrect_q(r, radius, stroke, c, 0.0);
+    }
+
+    fn rrect_q(&mut self, r: Rect, radius: f32, stroke: f32, c: Color, q: f32) {
         if self.empty || c.a == 0 || r.w <= 0.0 || r.h <= 0.0 {
             return;
         }
@@ -434,6 +441,7 @@ impl Build {
             v: y - cy,
             color: col,
             p,
+            q,
         };
         self.quad([mk(x0, y0), mk(x1, y0), mk(x0, y1), mk(x1, y1)]);
     }
@@ -456,6 +464,7 @@ impl Build {
             v: y - cy,
             color: c,
             p,
+            q: 0.0,
         };
         self.quad([
             mk(x0, y0, ct),
@@ -481,6 +490,7 @@ impl Build {
             v: y - cy,
             color: col,
             p,
+            q: 0.0,
         };
         self.quad([
             mk(cx - m, cy - m),
@@ -503,6 +513,7 @@ impl Build {
             v: y - cy,
             color: col,
             p,
+            q: 0.0,
         };
         self.quad([
             mk(cx - r, cy - r),
@@ -534,6 +545,7 @@ impl Build {
             v,
             color: col,
             p,
+            q: 0.0,
         };
         self.quad([
             mk(r.x, r.y, u0, v0),
@@ -560,6 +572,7 @@ impl Build {
             v,
             color: col,
             p,
+            q: 0.0,
         };
         self.quad([
             mk(x, y, u0, v0),
@@ -798,6 +811,7 @@ mod tests {
                 rect: Rect::new(10.0, 10.0, 60.0, 30.0),
                 radius: 8.0,
                 blur: 12.0,
+                zoom: 1.0,
                 tint: Color::rgba(255, 255, 255, 20),
             }],
             100,

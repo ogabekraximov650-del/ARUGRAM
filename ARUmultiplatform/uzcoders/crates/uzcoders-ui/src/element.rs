@@ -89,7 +89,7 @@ pub struct Element {
     pub(crate) radius: f32,
     pub(crate) border: Option<(f32, Color)>,
     pub(crate) glass: Option<Color>,
-    pub(crate) backdrop: Option<(Color, f32)>,
+    pub(crate) backdrop: Option<(Color, f32, f32)>,
     pub(crate) gradient: Option<(Color, Color)>,
     /// Yumshoq yorug'lik dog'lari: (x ulushi, y ulushi, radius dp, rang) — element qutisiga nisbatan.
     pub(crate) glows: Vec<(f32, f32, f32, Color)>,
@@ -166,7 +166,12 @@ impl Element {
     }
     /// HAQIQIY shisha: element ostidagi tasvir `blur` dp radiusda xiralashadi, ustiga `tint` va yorug' chegara.
     pub fn backdrop(mut self, tint: Color, blur: f32) -> Self {
-        self.backdrop = Some((tint, blur));
+        self.backdrop = Some((tint, blur, 1.0));
+        self
+    }
+    /// "Lupali" shisha (iOS Liquid Glass): deyarli shaffof, ostidagi tasvir panel markazidan `zoom` marta kattalashib ko'rinadi, chetida sinish.
+    pub fn lens(mut self, tint: Color, zoom: f32) -> Self {
+        self.backdrop = Some((tint, 0.0, zoom));
         self
     }
     /// Element orqasiga yumshoq yorug'lik dog'lari: `(x ulushi, y ulushi, radius dp, rang)`.

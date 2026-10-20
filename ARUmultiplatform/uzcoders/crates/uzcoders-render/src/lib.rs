@@ -47,6 +47,8 @@ pub enum DrawCmd {
         rect: Rect,
         radius: f32,
         blur: f32,
+        /// Linza kattalashtirishi (1 — yo'q): ostidagi tasvir panel markazidan shuncha marta kattalashadi ("lupa" effekti).
+        zoom: f32,
         tint: Color,
     },
     /// Aylana yoyi (yuklanish ko'rsatkichi): `start` va `sweep` radianda, `width` — chiziq qalinligi.
@@ -292,7 +294,7 @@ impl Canvas {
     }
 
     /// Backdrop: hududni xiralashtirib, yumaloq maska bilan qayta chizadi (CPU zaxirasi).
-    pub fn draw_backdrop(&mut self, r: Rect, radius: f32, blur: f32, tint: Color) {
+    pub fn draw_backdrop(&mut self, r: Rect, radius: f32, blur: f32, zoom: f32, tint: Color) {
         let (bx0, by0, bx1, by1) = self.bounds();
         let x0 = (r.x.floor() as i32).max(bx0);
         let y0 = (r.y.floor() as i32).max(by0);
@@ -313,9 +315,23 @@ impl Canvas {
                 ]);
             }
         }
+        // Linza: markazdan `zoom` marta kattalashtirib qayta tanlash.
+        if zoom > 1.001 {
+            let src = buf.clone();
+            let (mx, my) = (w as f32 * 0.5, h as f32 * 0.5);
+            for y in 0..h {
+                for x in 0..w {
+                    let sx =
+                        (mx + (x as f32 + 0.5 - mx) / zoom).clamp(0.0, w as f32 - 1.0) as usize;
+                    let sy =
+                        (my + (y as f32 + 0.5 - my) / zoom).clamp(0.0, h as f32 - 1.0) as usize;
+                    buf[y * w + x] = src[sy * w + sx];
+                }
+            }
+        }
         // Ikki o'tishli quti xiralashtirish (gorizontal + vertikal), ikki marta ~ Gauss.
         let rad = ((blur * 0.5) as usize).max(1);
-        for _ in 0..2 {
+        for _ in 0..(if blur > 0.5 { 2 } else { 0 }) {
             for horizontal in [true, false] {
                 let src = buf.clone();
                 let (len, lines) = if horizontal { (w, h) } else { (h, w) };
@@ -533,8 +549,9 @@ impl Canvas {
                     rect,
                     radius,
                     blur,
+                    zoom,
                     tint,
-                } => self.draw_backdrop(*rect, *radius, *blur, *tint),
+                } => self.draw_backdrop(*rect, *radius, *blur, *zoom, *tint),
                 DrawCmd::Glass { rect, radius, tint } => {
                     self.fill_round_rect(*rect, *radius, *tint);
                     self.stroke_round_rect(*rect, *radius, 1.5, Color::rgba(255, 255, 255, 90));
@@ -642,6 +659,7 @@ mod tests {
             Rect::new(8.0, 2.0, 24.0, 16.0),
             4.0,
             8.0,
+            1.0,
             Color::rgba(0, 0, 0, 0),
         );
         let mid = c.pixel(20, 10).r;

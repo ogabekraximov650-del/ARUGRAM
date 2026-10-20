@@ -403,3 +403,16 @@ fn backdrop_buyrugi() {
         .iter()
         .any(|c| matches!(c, DrawCmd::Backdrop { blur, .. } if *blur == 16.0)));
 }
+
+#[test]
+fn linza_buyrugi() {
+    let mut ui = Ui::new(font(), || {
+        column(vec![column(vec![text("x")])
+            .lens(Color::rgba(255, 255, 255, 12), 1.2)
+            .radius(12.0)])
+    });
+    let cmds = ui.frame(SZ);
+    assert!(cmds.iter().any(
+        |c| matches!(c, DrawCmd::Backdrop { zoom, blur, .. } if *zoom == 1.2 && *blur == 0.0)
+    ));
+}

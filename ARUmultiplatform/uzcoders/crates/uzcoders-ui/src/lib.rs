@@ -41,7 +41,7 @@ struct Item {
     radius: f32,
     border: Option<(f32, Color)>,
     glass: Option<Color>,
-    backdrop: Option<(Color, f32)>,
+    backdrop: Option<(Color, f32, f32)>,
     gradient: Option<(Color, Color)>,
     glows: Vec<(f32, f32, f32, Color)>,
     hit: Option<usize>,
@@ -321,11 +321,12 @@ impl Ui {
                         bottom,
                     });
                 }
-                if let Some((tint, blur)) = it.backdrop {
+                if let Some((tint, blur, zoom)) = it.backdrop {
                     cmds.push(DrawCmd::Backdrop {
                         rect: r,
                         radius: it.radius,
                         blur,
+                        zoom,
                         tint,
                     });
                 }
@@ -597,7 +598,7 @@ impl Ui {
         el.style.width = dim(el.style.width);
         el.style.height = dim(el.style.height);
         el.radius *= k;
-        if let Some((_, b)) = &mut el.backdrop {
+        if let Some((_, b, _)) = &mut el.backdrop {
             *b *= k;
         }
         for g in &mut el.glows {

@@ -34,6 +34,8 @@ pub struct Home {
     loading_posters: Cell<bool>,
     scroll: ScrollState,
     tab: State<usize>,
+    /// Posterlar yuklanmasa sababi (kichik qizil matn).
+    poster_diag: State<String>,
 }
 
 fn tx(s: impl Into<String>, size: f32, color: Color) -> Element {
@@ -93,6 +95,7 @@ impl Home {
             loading_posters: Cell::new(false),
             scroll: ScrollState::new(),
             tab: State::new(0),
+            poster_diag: State::new(String::new()),
         });
         h.reload();
         h
@@ -174,7 +177,10 @@ impl Home {
         }
         self.loading_posters.set(true);
         let (me, session) = (self.clone(), self.session.clone());
-        spawn_bg(move || load_posters(&session, &batch), move |res| {
+        spawn_bg(move || load_posters(&session, &batch), move |(res, diag)| {
+            if let Some(d) = diag {
+                me.poster_diag.set(d);
+            }
             for (url, img) in res {
                 if let Some(i) = img {
                     me.posters.borrow_mut().insert(url, Rc::new(i));
@@ -251,7 +257,11 @@ impl Home {
             .align(Align::Center),
             gap_box(0.0, 14.0),
             tx("Ommabop anime", 18.0, Color::WHITE).bold().margin_each(4.0, 0.0, 0.0, 0.0),
-            gap_box(0.0, 10.0),
+            if self.poster_diag.with(|d| d.is_empty()) || !self.posters.borrow().is_empty() {
+                gap_box(0.0, 10.0)
+            } else {
+                tx(self.poster_diag.get(), 11.0, ERROR).margin_each(4.0, 4.0, 0.0, 6.0)
+            },
         ])
         .padding_each(16.0, 12.0 + top_inset, 16.0, 0.0)
     }
@@ -277,7 +287,7 @@ impl Home {
             .collect();
         row(items)
             .gap(4.0)
-            .backdrop(Color::rgba(14, 14, 18, 110), 22.0)
+            .lens(Color::rgba(255, 255, 255, 10), 1.18)
             .radius(28.0)
             .padding_xy(6.0, 10.0)
             .margin_each(16.0, -(72.0 + 12.0 + bottom_inset), 16.0, 12.0 + bottom_inset)
@@ -374,6 +384,7 @@ mod tests {
             loading_posters: Cell::new(false),
             scroll: ScrollState::new(),
             tab: State::new(0),
+            poster_diag: State::new(String::new()),
         });
         let font = Rc::new(Font::parse(include_bytes!("../assets/fonts/Roboto-Regular.ttf")).unwrap());
         let h = home.clone();

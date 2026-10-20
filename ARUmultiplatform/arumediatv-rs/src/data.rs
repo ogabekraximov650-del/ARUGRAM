@@ -117,7 +117,8 @@ fn finish_image(bytes: &[u8]) -> Option<Image> {
 
 /// Posterlarni oladi: avval diskdagi nusxa (tarmoqsiz), yo'qlari Telegram orqali — worker `deliver` bot chatiga nusxalaydi,
 /// yadro mahalliy serverda beradi. Natija: (url, tayyor rasm); muvaffaqiyatsiz bo'lsa `None`.
-pub fn load_posters(session: &str, urls: &[String]) -> Vec<(String, Option<Image>)> {
+pub fn load_posters(session: &str, urls: &[String]) -> (Vec<(String, Option<Image>)>, Option<String>) {
+    let mut diag: Option<String> = None;
     let dir = poster_dir();
     let names: Vec<String> = urls.iter().map(|u| file_name_of(u)).collect();
     let mut out: Vec<(String, Option<Image>)> = Vec::new();
@@ -130,25 +131,34 @@ pub fn load_posters(session: &str, urls: &[String]) -> Vec<(String, Option<Image
         out.push((u.clone(), img));
     }
     if missing.is_empty() {
-        return out;
+        return (out, None);
     }
     // Telegram yadrosi tayyor bo'lishi kerak (api_id, mahalliy server porti).
-    if crate::backend::ensure_tg_ready().is_err() {
-        return out;
+    if let Err(e) = crate::backend::ensure_tg_ready() {
+        return (out, Some(format!("yadro: {e}")));
     }
     let port = call_json(rust_core::telegram::rust_tg_status())["port"].as_i64().unwrap_or(0);
     if port <= 0 {
-        return out;
+        return (out, Some("Telegram ulanmagan (port 0)".into()));
     }
     let files: Vec<&String> = missing.iter().map(|&i| &names[i]).collect();
     let mut delivered: Vec<String> = Vec::new();
-    if let Ok((200, body)) = crate::api::request("POST", "/api/tg/deliver", "", Some(&serde_json::json!({ "files": files })), Some(session)) {
+    let dres = crate::api::request("POST", "/api/tg/deliver", "", Some(&serde_json::json!({ "files": files })), Some(session));
+    match &dres {
+        Ok((200, _)) => {}
+        Ok((c, b)) => diag = Some(format!("deliver HTTP {c}: {}", b.chars().take(70).collect::<String>())),
+        Err(e) => diag = Some(format!("deliver: {e}")),
+    }
+    if let Ok((200, body)) = dres {
         if let Ok(j) = serde_json::from_str::<Value>(&body) {
             if let Some(keys) = j["keys"].as_object().filter(|k| !k.is_empty()) {
                 let c = CString::new(Value::Object(keys.clone()).to_string()).unwrap_or_default();
                 unsafe { rust_tg_set_keys(c.as_ptr()) };
             }
             delivered = j["files"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default();
+            if delivered.is_empty() {
+                diag = Some(format!("deliver: fayl topilmadi (0/{})", missing.len()));
+            }
         }
     }
     for &i in &missing {
@@ -156,19 +166,23 @@ pub fn load_posters(session: &str, urls: &[String]) -> Vec<(String, Option<Image
         if !delivered.contains(n) {
             continue;
         }
-        let bytes = ureq::get(&format!("http://127.0.0.1:{port}/tg/0/{n}")).timeout(std::time::Duration::from_secs(25)).call().ok().and_then(|r| {
-            let mut buf = Vec::new();
-            std::io::Read::read_to_end(&mut std::io::Read::take(r.into_reader(), 12 << 20), &mut buf).ok()?;
-            Some(buf)
-        });
-        if let Some(b) = bytes {
-            let _ = std::fs::write(format!("{dir}/{n}"), &b);
-            out[i].1 = finish_image(&b);
+        let got = ureq::get(&format!("http://127.0.0.1:{port}/tg/0/{n}")).timeout(std::time::Duration::from_secs(25)).call();
+        match got {
+            Ok(r) => {
+                let mut buf = Vec::new();
+                let _ = std::io::Read::read_to_end(&mut std::io::Read::take(r.into_reader(), 12 << 20), &mut buf);
+                let _ = std::fs::write(format!("{dir}/{n}"), &buf);
+                out[i].1 = finish_image(&buf);
+                if out[i].1.is_none() {
+                    diag = Some(format!("dekod xato: {} bayt, boshi {:02x?}", buf.len(), &buf[..buf.len().min(4)]));
+                }
+            }
+            Err(e) => diag = Some(format!("mahalliy server: {e}")),
         }
     }
     // Yuborilgan nusxalar bot chatida qolib ketmasin.
     let _ = call_json(rust_core::telegram::rust_tg_clear_bot_chat());
-    out
+    (out, diag)
 }
 
 #[cfg(test)]

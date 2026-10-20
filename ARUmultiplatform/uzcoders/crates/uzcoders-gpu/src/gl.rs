@@ -74,13 +74,15 @@ const VS: &[u8] = b"attribute vec2 a_pos;
 attribute vec2 a_uv;
 attribute vec4 a_color;
 attribute vec4 a_p;
+attribute float a_q;
 uniform vec2 u_scale;
 varying vec2 v_uv;
 varying vec4 v_color;
 varying vec4 v_p;
+varying float v_q;
 void main() {
   gl_Position = vec4(a_pos.x * u_scale.x - 1.0, 1.0 - a_pos.y * u_scale.y, 0.0, 1.0);
-  v_uv = a_uv; v_color = a_color; v_p = a_p;
+  v_uv = a_uv; v_color = a_color; v_p = a_p; v_q = a_q;
 }\0";
 
 const FS: &[u8] = b"#ifdef GL_FRAGMENT_PRECISION_HIGH
@@ -91,11 +93,13 @@ precision mediump float;
 uniform sampler2D u_tex;
 uniform sampler2D u_img;
 uniform sampler2D u_blur;
+uniform sampler2D u_cap;
 uniform vec2 u_view;
 uniform float u_blur_ok;
 varying vec2 v_uv;
 varying vec4 v_color;
 varying vec4 v_p;
+varying float v_q;
 void main() {
   if (v_p.x < -1.5) {
     vec4 c = texture2D(u_img, v_uv);
@@ -128,10 +132,24 @@ void main() {
       // Haqiqiy shisha: ostidagi xiralashgan tasvir + tint, to'yinganlik biroz oshiriladi.
       vec3 base = v_color.rgb;
       if (u_blur_ok > 0.5) {
-        base = texture2D(u_blur, gl_FragCoord.xy / u_view).rgb;
-        float l = dot(base, vec3(0.299, 0.587, 0.114));
-        base = mix(vec3(l), base, 1.25);
-        base = mix(base, v_color.rgb, v_color.a);
+        if (v_q > 1.001) {
+          // Lupa: ostidagi (o'tkir) tasvir panel markazidan kattalashadi, chetida kuchliroq sinadi.
+          vec2 pos = gl_FragCoord.xy;
+          vec2 local_gl = vec2(v_uv.x, -v_uv.y);
+          vec2 center_gl = pos - local_gl;
+          float edge = clamp((sd + 16.0) / 16.0, 0.0, 1.0);
+          float z = v_q + 0.55 * edge * edge;
+          vec2 src = center_gl + local_gl / z;
+          base = texture2D(u_cap, src / u_view).rgb;
+          float l = dot(base, vec3(0.299, 0.587, 0.114));
+          base = mix(vec3(l), base, 1.12);
+          base = mix(base, v_color.rgb, v_color.a);
+        } else {
+          base = texture2D(u_blur, gl_FragCoord.xy / u_view).rgb;
+          float l = dot(base, vec3(0.299, 0.587, 0.114));
+          base = mix(vec3(l), base, 1.25);
+          base = mix(base, v_color.rgb, v_color.a);
+        }
       }
       float total = clamp(cov + hl, 0.0, 1.0);
       vec3 col = mix(base, vec3(1.0), clamp(hl / max(total, 0.001), 0.0, 1.0));
@@ -194,6 +212,7 @@ pub struct GlRenderer {
     u_view: i32,
     u_blur: i32,
     u_blur_ok: i32,
+    u_cap: i32,
     program: u32,
     vbo: u32,
     tex: u32,
@@ -228,7 +247,7 @@ impl GlRenderer {
         let program = glCreateProgram();
         glAttachShader(program, vs);
         glAttachShader(program, fs);
-        for (i, n) in [&b"a_pos\0"[..], b"a_uv\0", b"a_color\0", b"a_p\0"]
+        for (i, n) in [&b"a_pos\0"[..], b"a_uv\0", b"a_color\0", b"a_p\0", b"a_q\0"]
             .iter()
             .enumerate()
         {
@@ -308,6 +327,7 @@ impl GlRenderer {
             u_view: glGetUniformLocation(program, b"u_view\0".as_ptr()),
             u_blur: glGetUniformLocation(program, b"u_blur\0".as_ptr()),
             u_blur_ok: glGetUniformLocation(program, b"u_blur_ok\0".as_ptr()),
+            u_cap: glGetUniformLocation(program, b"u_cap\0".as_ptr()),
             program,
             vbo,
             tex,
@@ -325,6 +345,9 @@ impl GlRenderer {
         glUniform2f(self.u_scale, 2.0 / w as f32, 2.0 / h as f32);
         glUniform2f(self.u_view, w as f32, h as f32);
         glUniform1i(self.u_blur, 2);
+        glUniform1i(self.u_cap, 3);
+        glActiveTexture(0x84C3);
+        glBindTexture(0x0DE1, self.blur.as_ref().map_or(self.tex, |b| b.tex[0]));
         glUniform1f(self.u_blur_ok, if self.blur.is_some() { 1.0 } else { 0.0 });
         glActiveTexture(0x84C2);
         glBindTexture(0x0DE1, self.blur.as_ref().map_or(self.tex, |b| b.tex[1]));
@@ -342,6 +365,8 @@ impl GlRenderer {
         glVertexAttribPointer(2, 4, 0x1401, 1, stride, 16 as *const c_void);
         glEnableVertexAttribArray(3);
         glVertexAttribPointer(3, 4, 0x1406, 0, stride, 20 as *const c_void);
+        glEnableVertexAttribArray(4);
+        glVertexAttribPointer(4, 1, 0x1406, 0, stride, 36 as *const c_void);
     }
 
     /// Xiralashtirish resurslarini (o'lcham o'zgarsa qaytadan) yaratadi. `false` — imkonsiz.
@@ -453,7 +478,7 @@ impl GlRenderer {
         glDisable(0x0BE2);
         glUseProgram(b.program);
         glBindBuffer(0x8892, b.quad);
-        for i in 1..4 {
+        for i in 1..5 {
             glDisableVertexAttribArray(i);
         }
         glEnableVertexAttribArray(0);
@@ -496,7 +521,9 @@ impl GlRenderer {
                 0.0,
             ),
         ];
-        for (fbo, tex, vw, vh, down, step, _) in passes {
+        for (fbo, tex, vw, vh, down, step, _) in
+            passes.into_iter().take(if blur > 0.5 { 3 } else { 0 })
+        {
             glBindFramebuffer(0x8D40, fbo);
             glViewport(0, 0, vw, vh);
             glBindTexture(0x0DE1, tex);
