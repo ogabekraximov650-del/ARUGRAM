@@ -13,3 +13,6 @@ pub const TEXT_FAINT: Color = Color::hex(0x6B6B70);
 pub const ERROR: Color = Color::hex(0xF87171);
 pub const CARD: Color = Color::hex(0x151517);
 pub const GOLD: Color = Color::hex(0xFFC93C);
+
+/// Barcha lupali shisha oynalarning kattalashtirish darajasi (orqadagi narsalar shuncha marta kattalashadi).
+pub const GLASS_ZOOM: f32 = 1.3;

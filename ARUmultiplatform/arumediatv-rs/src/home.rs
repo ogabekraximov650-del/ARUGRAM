@@ -297,14 +297,14 @@ impl Home {
                 tx(self.poster_diag.get(), 11.0, ERROR)
             },
         ])
-        .lens(Color::rgba(255, 255, 255, 4), 1.04)
+        .lens(Color::rgba(255, 255, 255, 4), GLASS_ZOOM)
         .radius(24.0)
         .padding_xy(18.0, 12.0);
         let bell = column(vec![icon(BELL, 22.0).color(Color::rgba(255, 255, 255, 220))])
             .width(48.0)
             .height(48.0)
             .center()
-            .lens(Color::rgba(255, 255, 255, 5), 1.08)
+            .lens(Color::rgba(255, 255, 255, 5), GLASS_ZOOM)
             .radius(24.0);
         column(vec![
             row(vec![panel.weight(1.0), bell]).gap(10.0).align(Align::Start),
@@ -386,7 +386,7 @@ impl Home {
         let sel = self.cat_tab.get();
         let n = self.genres.with(|g| g.len()) + self.years.with(|y| y.len());
         let fo = self.filter_open.clone();
-        let glass = |e: Element| e.lens(Color::rgba(255, 255, 255, 5), 1.06);
+        let glass = |e: Element| e.lens(Color::rgba(255, 255, 255, 5), GLASS_ZOOM);
         let filter = glass(
             row(vec![icon(MENU, 18.0).color(if n > 0 { ACCENT2 } else { Color::WHITE }), tx(if n > 0 { format!("Filtr · {n}") } else { "Filtr".into() }, 14.0, Color::WHITE).bold()])
                 .gap(6.0)
@@ -490,7 +490,7 @@ impl Home {
         column(vec![
             spacer(),
             column(vec![scroll_column(&self.filter_scroll, kids).grow(1.0), gap_box(0.0, 10.0), buttons])
-                .lens(Color::rgba(255, 255, 255, 14), 1.0)
+                .lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM)
                 .radius(32.0)
                 .padding_xy(18.0, 18.0)
                 .height(h * 0.62)
@@ -544,7 +544,7 @@ impl Home {
     /// Kutubxona sarlavhasi: nom va 3 ta bo'lim — shaffof lupali shisha kapsulalarda.
     fn library_bar(self: &Rc<Self>, top_inset: f32) -> Element {
         let sel = self.lib_tab.get();
-        let glass = |e: Element| e.lens(Color::rgba(255, 255, 255, 5), 1.06);
+        let glass = |e: Element| e.lens(Color::rgba(255, 255, 255, 5), GLASS_ZOOM);
         let title = glass(column(vec![tx("Kutubxona", 24.0, Color::WHITE).black()]).padding_xy(22.0, 8.0)).radius(26.0);
         let tabs: Vec<Element> = LIB_TABS
             .iter()
@@ -634,7 +634,7 @@ impl Home {
             row(kids)
                 .gap(10.0)
                 .align(Align::Center)
-                .lens(Color::rgba(255, 255, 255, 10), 1.12)
+                .lens(Color::rgba(255, 255, 255, 10), GLASS_ZOOM)
                 .radius(26.0)
                 .padding_xy(18.0, 5.0),
             spacer(),
@@ -665,7 +665,7 @@ impl Home {
             spacer(),
             row(items)
                 .gap(4.0)
-                .lens(Color::rgba(255, 255, 255, 10), 1.18)
+                .lens(Color::rgba(255, 255, 255, 10), GLASS_ZOOM)
                 .radius(28.0)
                 .padding_xy(6.0, 10.0)
                 .margin_each(16.0, 0.0, 16.0, 12.0 + bottom_inset),
