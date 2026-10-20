@@ -2,7 +2,13 @@ package uz.uzcoders;
 
 import android.app.NativeActivity;
 import android.content.Context;
+import android.app.AlertDialog;
 import android.os.Bundle;
+import android.util.Log;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import android.text.InputType;
 import android.view.KeyEvent;
 import android.view.View;
@@ -29,9 +35,44 @@ public class UzActivity extends NativeActivity {
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
+        installCrashReporter();
         imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
         view = new ImeView(this);
         addContentView(view, new FrameLayout.LayoutParams(1, 1));
+    }
+
+    /** Yiqilish haqida ma'lumotni faylga yozadi; keyingi ishga tushganda dialogda ko'rsatiladi (Rust ham shu faylga yozadi). */
+    private void installCrashReporter() {
+        final File f = new File(getFilesDir(), "crash.txt");
+        final Thread.UncaughtExceptionHandler prev = Thread.getDefaultUncaughtExceptionHandler();
+        Thread.setDefaultUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler() {
+            public void uncaughtException(Thread t, Throwable e) {
+                try {
+                    StringWriter sw = new StringWriter();
+                    e.printStackTrace(new PrintWriter(sw));
+                    FileOutputStream o = new FileOutputStream(f);
+                    o.write(("Java xato (" + t.getName() + "):\n" + sw).getBytes("UTF-8"));
+                    o.close();
+                } catch (Throwable ignored) {
+                }
+                if (prev != null) prev.uncaughtException(t, e);
+            }
+        });
+        if (f.exists()) {
+            try {
+                java.io.FileInputStream in = new java.io.FileInputStream(f);
+                byte[] b = new byte[(int) Math.min(f.length(), 4000)];
+                int n = in.read(b);
+                in.close();
+                f.delete();
+                new AlertDialog.Builder(this)
+                        .setTitle("Oldingi yiqilish")
+                        .setMessage(new String(b, 0, Math.max(n, 0), "UTF-8"))
+                        .setPositiveButton("OK", null)
+                        .show();
+            } catch (Throwable ignored) {
+            }
+        }
     }
 
     public void showKeyboard(final int inputType) {

@@ -37,9 +37,6 @@ arumediatv_encode.session*
 # uzcoders
 ARUmultiplatform/uzcoders/target/
 ARUmultiplatform/uzcoders/Cargo.lock
-ARUmultiplatform/uzcoders-demo/target/
-ARUmultiplatform/uzcoders-demo/jniLibs/
-ARUmultiplatform/uzcoders-demo/Cargo.lock
 ARUmultiplatform/arumediatv-rs/target/
 ARUmultiplatform/arumediatv-rs/jniLibs/
 ARUmultiplatform/arumediatv-rs/Cargo.lock

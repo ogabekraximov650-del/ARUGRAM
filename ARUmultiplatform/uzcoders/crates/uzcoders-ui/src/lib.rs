@@ -238,7 +238,7 @@ impl Ui {
         self.last_rev = Some(global_revision());
         self.dirty = false;
         let dt = match self.last_frame_now {
-            Some(t) => (self.now.saturating_sub(t) as f32 / 1000.0).min(0.05),
+            Some(t) => (self.now.saturating_sub(t) as f32 / 1000.0).min(0.1),
             None => 0.0,
         };
         self.last_frame_now = Some(self.now);
@@ -490,7 +490,7 @@ impl Ui {
             s.raw_set(before + v * dt);
             let after = s.offset();
             let hit_edge = (after <= 0.0 && v < 0.0) || (after >= s.max_offset() && v > 0.0);
-            let nv = v * (-dt * 3.0).exp();
+            let nv = v * (-dt * 1.7).exp();
             s.set_velocity(if hit_edge || nv.abs() < 20.0 { 0.0 } else { nv });
         }
     }

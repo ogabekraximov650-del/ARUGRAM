@@ -45,7 +45,7 @@ pub struct ANativeActivity {
     pub(crate) vm: *mut c_void,
     env: *mut c_void,
     pub(crate) clazz: *mut c_void,
-    internal_data_path: *const u8,
+    pub(crate) internal_data_path: *const u8,
     external_data_path: *const u8,
     sdk_version: i32,
     instance: *mut c_void,
@@ -283,7 +283,24 @@ unsafe extern "C" fn destroy(_: *mut ANativeActivity) {
 /// # Safety
 /// `activity` — Android bergan yaroqli ko'rsatkich.
 pub unsafe fn on_create(activity: *mut ANativeActivity, make_ui: fn(f32) -> Ui) {
-    std::panic::set_hook(Box::new(|i| log(&format!("PANIC: {i}"))));
+    // Rust panic: logga va `files/crash.txt` ga yoziladi (Java yelimi keyingi ishga tushganda ko'rsatadi).
+    let dir = {
+        let p = (*activity).internal_data_path;
+        if p.is_null() {
+            String::new()
+        } else {
+            std::ffi::CStr::from_ptr(p as *const std::ffi::c_char)
+                .to_string_lossy()
+                .into_owned()
+        }
+    };
+    std::panic::set_hook(Box::new(move |i| {
+        let msg = format!("Rust panic: {i}");
+        log(&msg);
+        if !dir.is_empty() {
+            let _ = std::fs::write(format!("{dir}/crash.txt"), &msg);
+        }
+    }));
     let a = &mut *activity;
     let mut density = 160;
     let cfg = AConfiguration_new();
