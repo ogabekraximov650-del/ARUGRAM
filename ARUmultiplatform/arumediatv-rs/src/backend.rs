@@ -80,6 +80,36 @@ impl Backend for StubBackend {
 }
 
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+extern "C" {
+    // Yadro (`rust_core::crypto`) ning C funksiyalari: sessiya va kirish holati shu kalit bilan shifrlanib saqlanadi.
+    fn rust_crypto_generate_key() -> *mut c_char;
+    fn rust_crypto_set_key(hex: *const c_char) -> i32;
+}
+
+/// Shifrlash kalitini tayyorlaydi: `files/master.key` da saqlanadi (ilovaning yopiq papkasi), yo'q bo'lsa yaratiladi.
+/// Kalitsiz yadro sessiyani va kirish holatini umuman saqlamaydi.
+fn ensure_master_key(dir: &str) -> Result<(), String> {
+    let path = format!("{dir}/master.key");
+    let hex = match std::fs::read_to_string(&path) {
+        Ok(h) if h.trim().len() >= 32 => h.trim().to_string(),
+        _ => {
+            let p = unsafe { rust_crypto_generate_key() };
+            if p.is_null() {
+                return Err("Shifrlash kaliti yaratilmadi".into());
+            }
+            let h = unsafe { CStr::from_ptr(p) }.to_string_lossy().into_owned();
+            rust_core::ffi_utils::rust_free_string(p);
+            std::fs::write(&path, &h).map_err(|e| format!("Kalit saqlanmadi: {e}"))?;
+            h
+        }
+    };
+    let c = CString::new(hex).map_err(|_| "Kalit noto'g'ri".to_string())?;
+    if unsafe { rust_crypto_set_key(c.as_ptr()) } != 1 {
+        return Err("Shifrlash kaliti qabul qilinmadi".into());
+    }
+    Ok(())
+}
+
 const API_BASE: &str = "https://arumediatv.uzcom.workers.dev";
 
 /// Haqiqiy Telegram: ARUMEDIATV'ning Rust yadrosi (`rust_core`, grammers/MTProto).
@@ -102,6 +132,8 @@ impl TgBackend {
             return Ok(());
         }
         let _ = std::fs::create_dir_all(&self.dir);
+        let root = self.dir.trim_end_matches("/tg");
+        ensure_master_key(root)?;
         let c = |s: &str| CString::new(s).unwrap_or_default();
         let (model, sys, app) = (c("Android"), c("Android"), c("ARUMEDIATV Rust 0.1"));
         rust_core::telegram::rust_tg_set_device(model.as_ptr(), sys.as_ptr(), app.as_ptr());
