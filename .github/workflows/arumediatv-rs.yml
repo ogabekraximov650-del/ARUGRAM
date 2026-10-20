@@ -1,6 +1,6 @@
 name: ARUMEDIATV (Rust + uzcoders) — build va APK
 
-# `ARUmultiplatform/arumediatv-rs/**` o'zgarganda: testlar -> armeabi-v7a + arm64-v8a -> aapt2 bilan APK (Gradle'siz) -> Telegram.
+# `ARUmultiplatform/arumediatv-rs/**` o'zgarganda: testlar -> faqat armeabi-v7a (32 bit) -> aapt2 bilan APK (Gradle'siz) -> Telegram.
 # Kutubxona nusxasi `ARUmultiplatform/uzcoders` da (token kerak emas).
 on:
   push:
@@ -26,7 +26,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: armv7-linux-androideabi, aarch64-linux-android
+          targets: armv7-linux-androideabi
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -42,7 +42,7 @@ jobs:
       - name: Android uchun yig'ish
         working-directory: ARUmultiplatform/arumediatv-rs
         run: |
-          cargo ndk -t armeabi-v7a -t arm64-v8a -o jniLibs build --release
+          cargo ndk -t armeabi-v7a -o jniLibs build --release
           ls -la jniLibs/*/
 
       - name: APK yig'ish va imzolash (aapt2 + apksigner)
