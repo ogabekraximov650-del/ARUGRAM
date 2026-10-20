@@ -8,6 +8,7 @@ struct Inner {
     offset: Cell<f32>,
     velocity: Cell<f32>,
     max: Cell<f32>,
+    viewport: Cell<f32>,
 }
 
 /// `scroll_column`/`.scroll(&state)` bilan ishlatiladigan scroll holati. Arzon nusxalanadi (Rc).
@@ -29,6 +30,7 @@ impl ScrollState {
                 offset: Cell::new(0.0),
                 velocity: Cell::new(0.0),
                 max: Cell::new(0.0),
+                viewport: Cell::new(0.0),
             }),
         }
     }
@@ -53,6 +55,17 @@ impl ScrollState {
     /// Oxirgi kadrda hisoblangan eng katta ofset (kontent - ko'rinish).
     pub fn max_offset(&self) -> f32 {
         self.inner.max.get()
+    }
+
+    /// Oxirgi kadrdagi ko'rinish balandligi (piksel; hali chizilmagan bo'lsa 0).
+    pub fn viewport(&self) -> f32 {
+        self.inner.viewport.get()
+    }
+
+    pub(crate) fn set_viewport(&self, v: f32) -> bool {
+        let changed = (self.inner.viewport.get() - v).abs() > 1.0;
+        self.inner.viewport.set(v);
+        changed
     }
 
     pub(crate) fn velocity(&self) -> f32 {

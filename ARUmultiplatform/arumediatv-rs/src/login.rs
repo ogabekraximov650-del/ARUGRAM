@@ -444,30 +444,34 @@ impl Login {
     fn picker_view(self: &Rc<Self>) -> Element {
         let q = self.query.get().trim().to_lowercase();
         let qcode = q.trim_start_matches('+').to_string();
-        let rows: Vec<Element> = COUNTRIES
+        let list: Vec<usize> = COUNTRIES
             .iter()
             .enumerate()
             .filter(|(_, c)| {
                 q.is_empty() || c.name.to_lowercase().contains(&q) || c.code.starts_with(&qcode)
             })
-            .map(|(i, c)| {
-                let me = self.clone();
-                row(vec![
-                    t(c.iso, 14.0, TEXT_DIM).width(30.0),
-                    t(c.name, 15.0, Color::WHITE).weight(1.0),
-                    t(format!("+{}", c.code), 14.0, TEXT_DIM),
-                ])
-                .gap(8.0)
-                .align(Align::Center)
-                .padding_xy(8.0, 12.0)
-                .on_click(move || {
-                    me.country.set(Some(i));
-                    me.prefix.set(format!("+{}", COUNTRIES[i].code));
-                    me.number.set(String::new());
-                    me.nav.pop();
-                })
-            })
+            .map(|(i, _)| i)
             .collect();
+        let this = self.clone();
+        let rows = lazy_column(&self.picker_scroll, list.len(), 48.0, move |k| {
+            let i = list[k];
+            let c = &COUNTRIES[i];
+            let me = this.clone();
+            row(vec![
+                t(c.iso, 14.0, TEXT_DIM).width(30.0),
+                t(c.name, 15.0, Color::WHITE).weight(1.0),
+                t(format!("+{}", c.code), 14.0, TEXT_DIM),
+            ])
+            .gap(8.0)
+            .align(Align::Center)
+            .padding_xy(8.0, 0.0)
+            .on_click(move || {
+                me.country.set(Some(i));
+                me.prefix.set(format!("+{}", COUNTRIES[i].code));
+                me.number.set(String::new());
+                me.nav.pop();
+            })
+        });
         let me = self.clone();
         let back = icon(ARROW_BACK, 28.0).color(Color::WHITE).on_click(move || {
             me.nav.pop();
@@ -483,9 +487,7 @@ impl Login {
             .gap(12.0)
             .align(Align::Center)
             .padding_each(16.0, 12.0 + safe_insets().top, 16.0, 12.0),
-            scroll_column(&self.picker_scroll, rows)
-                .padding_xy(16.0, 0.0)
-                .grow(1.0),
+            rows.padding_xy(16.0, 0.0).grow(1.0),
         ])
         .bg(SURFACE)
     }

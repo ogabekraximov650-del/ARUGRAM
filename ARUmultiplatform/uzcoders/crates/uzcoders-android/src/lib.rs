@@ -4,6 +4,8 @@
 //! Qobiq oynani, teginishlarni va kadr tsiklini o'zi boshqaradi: holat o'zgarsa qayta chizadi, bo'lmasa uxlaydi.
 
 #[cfg(target_os = "android")]
+pub(crate) mod egl;
+#[cfg(target_os = "android")]
 pub mod glue;
 #[cfg(target_os = "android")]
 pub(crate) mod jni;

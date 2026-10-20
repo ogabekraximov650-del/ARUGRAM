@@ -342,6 +342,37 @@ pub fn icon(d: &'static str, size: f32) -> Element {
     e
 }
 
+/// Virtual ro'yxat: `count` ta bir xil balandlikdagi (`item_height`, dp) element, lekin faqat ko'rinadiganlari quriladi.
+/// `build(i)` — i-elementni qaytaradi. Juda uzun ro'yxatlar ham tez ishlaydi.
+pub fn lazy_column(
+    state: &ScrollState,
+    count: usize,
+    item_height: f32,
+    build: impl Fn(usize) -> Element,
+) -> Element {
+    let ihp = (item_height * uzcoders_core::density()).max(1.0);
+    let vp = if state.viewport() > 0.0 {
+        state.viewport()
+    } else {
+        3000.0
+    };
+    let off = state.offset();
+    let first = (((off / ihp).floor() as isize) - 2).max(0) as usize;
+    let last = (((off + vp) / ihp).ceil() as usize + 2).min(count);
+    let first = first.min(last);
+    let mut kids = Vec::with_capacity(last - first + 2);
+    if first > 0 {
+        kids.push(gap_box(0.0, first as f32 * item_height));
+    }
+    for i in first..last {
+        kids.push(build(i).height(item_height));
+    }
+    if last < count {
+        kids.push(gap_box(0.0, (count - last) as f32 * item_height));
+    }
+    column(kids).scroll(state)
+}
+
 /// Bo'sh joyni to'ldiradigan elastik element.
 pub fn spacer() -> Element {
     Element::container(Axis::Column, Vec::new()).grow(1.0)

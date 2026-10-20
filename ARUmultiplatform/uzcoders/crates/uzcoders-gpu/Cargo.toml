@@ -1,0 +1,14 @@
+[package]
+name = "uzcoders-gpu"
+description = "uzcoders: GPU (OpenGL ES) chizish — chizish buyruqlarini paketlash, harf atlasi va GL bajaruvchi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+uzcoders-core.workspace = true
+uzcoders-text.workspace = true
+uzcoders-render.workspace = true

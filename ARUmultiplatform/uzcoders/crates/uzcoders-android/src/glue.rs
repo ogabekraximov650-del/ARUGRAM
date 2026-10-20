@@ -1,10 +1,12 @@
 //! NativeActivity bilan ishlash: oyna, kiritish navbati va chizish oqimi.
 
+use crate::egl::Egl;
 use crate::jni;
 use std::ffi::c_void;
 use std::ptr::null_mut;
 use std::sync::{Arc, Condvar, Mutex};
 use uzcoders_core::{EdgeInsets, PointerEvent, PointerKind, Size};
+use uzcoders_gpu::{gl::GlRenderer, Batcher};
 use uzcoders_render::Canvas;
 use uzcoders_ui::Ui;
 
@@ -116,6 +118,26 @@ pub fn log(msg: &str) {
     m.push(0);
     unsafe {
         __android_log_write(4, b"uzcoders\0".as_ptr(), m.as_ptr());
+    }
+}
+
+/// GPU chizish: EGL + OpenGL ES + paketlovchi.
+struct Gpu {
+    egl: Egl,
+    gl: GlRenderer,
+    batcher: Batcher,
+}
+
+impl Gpu {
+    fn new(window: *mut c_void, ui: &Ui) -> Result<Gpu, String> {
+        let mut egl = Egl::new()?;
+        egl.set_window(window)?;
+        let gl = unsafe { GlRenderer::new()? };
+        Ok(Gpu {
+            egl,
+            gl,
+            batcher: Batcher::new(ui.faces()),
+        })
     }
 }
 
@@ -294,6 +316,8 @@ fn run(s: Arc<Sync_>, make_ui: fn(f32) -> Ui, scale: f32, activity: usize) {
     let mut ui = make_ui(scale);
     ui.set_scale(scale);
     let mut canvas: Option<Canvas> = None;
+    let mut gpu: Option<Gpu> = None;
+    let mut gpu_failed = false;
     let mut window: *mut c_void = null_mut();
     let mut queue: *mut c_void = null_mut();
     let mut dims = (0i32, 0i32);
@@ -311,6 +335,14 @@ fn run(s: Arc<Sync_>, make_ui: fn(f32) -> Ui, scale: f32, activity: usize) {
             }
             if g.window != window {
                 window = g.window;
+                // GPU sirtini yangi oynaga ulaymiz (yoki eski oynadan ajratamiz).
+                if let Some(gp) = &mut gpu {
+                    if let Err(e) = gp.egl.set_window(window) {
+                        log(&format!("EGL: {e}"));
+                        gpu = None;
+                        gpu_failed = true;
+                    }
+                }
                 g.thread_window = window;
                 dims = (0, 0);
                 force = true;
@@ -341,18 +373,47 @@ fn run(s: Arc<Sync_>, make_ui: fn(f32) -> Ui, scale: f32, activity: usize) {
                     ANativeWindow_getHeight(window),
                 )
             };
+            if gpu.is_none() && !gpu_failed && w > 0 {
+                match Gpu::new(window, &ui) {
+                    Ok(g) => {
+                        log("GPU (OpenGL ES) ishga tushdi");
+                        gpu = Some(g);
+                    }
+                    Err(e) => {
+                        log(&format!("GPU yo'q, CPU: {e}"));
+                        gpu_failed = true;
+                    }
+                }
+            }
             if (w, h) != dims && w > 0 && h > 0 {
                 if w != dims.0 {
                     full_h = 0;
                 }
                 full_h = full_h.max(h);
                 dims = (w, h);
-                unsafe { ANativeWindow_setBuffersGeometry(window, w, h, WINDOW_FORMAT_RGBA_8888) };
+                if gpu.is_none() {
+                    unsafe {
+                        ANativeWindow_setBuffersGeometry(window, w, h, WINDOW_FORMAT_RGBA_8888)
+                    };
+                }
                 force = true;
             }
             if (force || ui.needs_frame()) && dims.0 > 0 {
                 force = false;
-                draw(&mut ui, &mut canvas, window, dims);
+                if let Some(gp) = &mut gpu {
+                    let cmds = ui.frame(Size::new(dims.0 as f32, dims.1 as f32));
+                    let frame = gp.batcher.build(&cmds, dims.0 as u32, dims.1 as u32);
+                    unsafe { gp.gl.render(&frame, dims.0, dims.1) };
+                    if !gp.egl.swap() {
+                        // Kontekst yo'qoldi: hammasini qaytadan yaratamiz.
+                        log("EGL kontekst yo'qoldi, qayta yaratilmoqda");
+                        gpu = None;
+                        gpu_failed = false;
+                        force = true;
+                    }
+                } else {
+                    draw(&mut ui, &mut canvas, window, dims);
+                }
             }
         }
 

@@ -13,3 +13,4 @@ uzcoders-core.workspace = true
 uzcoders-render.workspace = true
 uzcoders-text.workspace = true
 uzcoders-ui.workspace = true
+uzcoders-gpu.workspace = true

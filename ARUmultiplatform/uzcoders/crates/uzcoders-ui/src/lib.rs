@@ -14,7 +14,8 @@ use uzcoders_render::{Canvas, DrawCmd, Path};
 use uzcoders_text::Font;
 
 pub use element::{
-    button, column, field, gap_box, grid, icon, row, scroll_column, spacer, text, Element,
+    button, column, field, gap_box, grid, icon, lazy_column, row, scroll_column, spacer, text,
+    Element,
 };
 pub use nav::Navigator;
 pub use scroll::ScrollState;
@@ -124,6 +125,13 @@ impl Ui {
         self.font.clone()
     }
 
+    /// Barcha shrift yuzlari: (qalinlik, shrift); birinchisi — asosiy (400).
+    pub fn faces(&self) -> Vec<(u16, Rc<Font>)> {
+        let mut v = vec![(400, self.font.clone())];
+        v.extend(self.faces.iter().cloned());
+        v
+    }
+
     /// Qo'shimcha shrift yuzi (masalan `add_font(700, bold)`). Oddiy (400) yuz `Ui::new` da beriladi.
     pub fn add_font(&mut self, weight: u16, font: Rc<Font>) {
         self.faces.push((weight, font));
@@ -219,6 +227,7 @@ impl Ui {
         self.last_frame_now = Some(self.now);
         self.step_flings(dt);
         self.last_blink = self.blink_phase();
+        uzcoders_core::set_density(self.scale);
         let k = self.scale;
         let i = self.insets_px;
         uzcoders_core::set_safe_insets(EdgeInsets::new(
@@ -428,6 +437,9 @@ impl Ui {
                 // Pastdagi padding ham ko'rinishi uchun: kontent uchi = padding.top + extent + padding.bottom.
                 let max = tree.content_extent(it.node) + pad.vertical() - r.h;
                 sc.set_max(max);
+                if sc.set_viewport(r.h) {
+                    self.dirty = true;
+                }
                 self.regions.push(Region {
                     rect: eff,
                     state: sc.clone(),
@@ -553,11 +565,20 @@ impl Ui {
                 items[slot].kind =
                     ItemKind::Text(text.clone(), size, color, weight, line_height, spacing);
                 let font = self.face(weight);
+                // Joylashtirish bir tugunni bir necha marta o'lchaydi: oxirgi natija eslab qolinadi.
+                let memo: std::cell::Cell<Option<(f32, Size)>> = std::cell::Cell::new(None);
                 tree.add_leaf(el.style, move |w| {
+                    if let Some((mw, sz)) = memo.get() {
+                        if mw == w {
+                            return sz;
+                        }
+                    }
                     let max = if w.is_finite() { Some(w) } else { None };
                     let (tw, _, lines) = font.measure_spaced(&text, size, max, spacing);
                     let (lh, _) = line_metrics(&font, size, line_height);
-                    Size::new(tw.ceil(), (lh * lines.len() as f32).ceil())
+                    let sz = Size::new(tw.ceil(), (lh * lines.len() as f32).ceil());
+                    memo.set(Some((w, sz)));
+                    sz
                 })
             }
             Kind::Icon { path, size, color } => {

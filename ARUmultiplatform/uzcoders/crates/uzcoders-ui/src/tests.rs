@@ -298,3 +298,35 @@ fn chizish_buyruqlari() {
         2
     );
 }
+
+#[test]
+fn virtual_royxat_faqat_korinadiganni_quradi() {
+    let sc = ScrollState::new();
+    let built = Rc::new(Cell::new(0usize));
+    let (s2, b2) = (sc.clone(), built.clone());
+    let mut ui = Ui::new(font(), move || {
+        let b = b2.clone();
+        column(vec![lazy_column(&s2, 10_000, 50.0, move |i| {
+            b.set(b.get() + 1);
+            column(vec![text(format!("{i}"))])
+        })
+        .grow(1.0)])
+    });
+    ui.frame(SZ);
+    ui.frame(SZ); // ko'rinish balandligi ma'lum bo'ldi
+    built.set(0);
+    ui.frame(SZ);
+    assert!(built.get() < 20, "{}", built.get());
+    assert_eq!(sc.max_offset(), 10_000.0 * 50.0 - 300.0);
+    sc.set_offset(250_000.0);
+    built.set(0);
+    ui.frame(SZ);
+    assert!(built.get() < 20);
+    // Chiziq o'rtasida ham elementlar bor (bo'shliq yo'q).
+    let cmds = ui.frame(SZ);
+    let n = cmds
+        .iter()
+        .filter(|c| matches!(c, DrawCmd::Text { .. }))
+        .count();
+    assert!(n >= 6, "{n}");
+}
