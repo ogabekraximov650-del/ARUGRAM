@@ -11,9 +11,15 @@ crate-type = ["cdylib", "rlib"]
 # uzcoders kutubxonasining nusxasi shu repoda: ARUmultiplatform/uzcoders (VENDOR.md).
 uzcoders = { path = "../uzcoders/crates/uzcoders" }
 
+# Telegram (grammers) yadrosi: ARUMEDIATV'ning mavjud Rust yadrosi (kirish, MTProto) shu yerdan ishlatiladi.
+rust_core = { path = "../android/rust" }
+serde_json = "1"
+ureq = "2"
+
 [profile.release]
 opt-level = 3
 lto = true
 codegen-units = 1
-panic = "abort"
+# unwind: Telegram chaqiruvlaridagi kutilmagan panic ilovani yopmasligi uchun (yadro `catch_unwind` ishlatadi).
+panic = "unwind"
 strip = true

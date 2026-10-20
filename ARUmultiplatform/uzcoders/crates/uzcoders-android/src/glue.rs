@@ -146,6 +146,21 @@ impl Gpu {
     }
 }
 
+static LOOPER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static FILES_DIR: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// Ilovaning ichki fayllar papkasi (`getFilesDir`).
+pub fn files_dir() -> String {
+    FILES_DIR.get().cloned().unwrap_or_default()
+}
+
+fn wake_ui() {
+    let l = LOOPER.load(std::sync::atomic::Ordering::SeqCst);
+    if l != 0 {
+        unsafe { ALooper_wake(l as *mut c_void) };
+    }
+}
+
 const INPUT_IDENT: i32 = 1;
 const WINDOW_FORMAT_RGBA_8888: i32 = 1;
 
@@ -294,6 +309,7 @@ pub unsafe fn on_create(activity: *mut ANativeActivity, make_ui: fn(f32) -> Ui) 
                 .into_owned()
         }
     };
+    let _ = FILES_DIR.set(dir.clone());
     std::panic::set_hook(Box::new(move |i| {
         let msg = format!("Rust panic: {i}");
         log(&msg);
@@ -357,6 +373,8 @@ fn run(s: Arc<Sync_>, make_ui: fn(f32) -> Ui, scale: f32, activity: usize) {
     // 1 = ALOOPER_PREPARE_ALLOW_NON_CALLBACKS: kiritish navbati callback'siz ulanadi, bu bayroqsiz ulanish rad etiladi.
     let looper = unsafe { ALooper_prepare(1) };
     s.m.lock().unwrap().looper = looper;
+    LOOPER.store(looper as usize, std::sync::atomic::Ordering::SeqCst);
+    uzcoders_core::set_waker(wake_ui);
     let mut ui = make_ui(scale);
     ui.set_scale(scale);
     let mut canvas: Option<Canvas> = None;
@@ -371,6 +389,7 @@ fn run(s: Arc<Sync_>, make_ui: fn(f32) -> Ui, scale: f32, activity: usize) {
 
     loop {
         ui.set_time(t0.elapsed().as_millis() as u64);
+        uzcoders_core::drain_tasks();
         {
             let mut g = s.m.lock().unwrap();
             if g.quit {

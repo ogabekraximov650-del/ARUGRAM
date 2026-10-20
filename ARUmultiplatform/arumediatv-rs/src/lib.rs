@@ -5,9 +5,14 @@ mod countries;
 mod login;
 mod theme;
 
+use backend::Backend;
+#[cfg(target_os = "android")]
+use backend::TgBackend;
+#[cfg(not(target_os = "android"))]
 use backend::StubBackend;
 use login::Login;
 use std::rc::Rc;
+use std::sync::Arc;
 use uzcoders::prelude::*;
 
 static REGULAR: &[u8] = include_bytes!("../assets/fonts/Roboto-Regular.ttf");
@@ -17,7 +22,12 @@ static BLACK: &[u8] = include_bytes!("../assets/fonts/Roboto-Black.ttf");
 /// Ilovaning kirish nuqtasi: `scale` — ekran zichligi.
 pub fn make_ui(scale: f32) -> Ui {
     let font = Rc::new(Font::parse(REGULAR).expect("Roboto Regular"));
-    let login = Login::new(Rc::new(StubBackend));
+    // Android'da haqiqiy Telegram (grammers), kompyuter testlarida tarmoqsiz sinov.
+    #[cfg(target_os = "android")]
+    let backend: Arc<dyn Backend> = Arc::new(TgBackend::new(&uzcoders::android::files_dir()));
+    #[cfg(not(target_os = "android"))]
+    let backend: Arc<dyn Backend> = Arc::new(StubBackend);
+    let login = Login::new(backend);
     let l = login.clone();
     let mut ui = Ui::new(font, move || l.view());
     ui.add_font(700, Rc::new(Font::parse(BOLD).expect("Roboto Bold")));
@@ -38,6 +48,17 @@ mod tests {
     fn tap(ui: &mut Ui, x: f32, y: f32) {
         ui.pointer(PointerEvent::new(PointerKind::Down, x, y));
         ui.pointer(PointerEvent::new(PointerKind::Up, x, y));
+    }
+
+    /// Fon vazifalari tugaguncha natijalarni UI oqimida qabul qiladi.
+    fn pump() {
+        for _ in 0..400 {
+            uzcoders::core::drain_tasks();
+            if uzcoders::core::pending_tasks() == 0 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
     }
 
     fn texts(cmds: &[DrawCmd]) -> Vec<String> {
@@ -107,6 +128,7 @@ mod tests {
         let cmds = ui.frame(size);
         let (x, y) = pos(&cmds, "Kod yuborish");
         tap(&mut ui, x, y);
+        pump();
         let cmds = ui.frame(size);
         assert!(texts(&cmds).iter().any(|x| x == "Tasdiqlash"));
         snap(&mut ui, "3_kod", size);
@@ -120,6 +142,7 @@ mod tests {
         let cmds = ui.frame(size);
         let (x, y) = pos(&cmds, "Tasdiqlash");
         tap(&mut ui, x, y);
+        pump();
         let cmds = ui.frame(size);
         assert!(texts(&cmds).iter().any(|x| x == "Kirish"));
         snap(&mut ui, "4_parol", size);

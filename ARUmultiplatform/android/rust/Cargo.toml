@@ -5,7 +5,7 @@ edition = "2021"
 
 [lib]
 # cdylib — Android uchun .so, Dart FFI shu bilan ishlaydi
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

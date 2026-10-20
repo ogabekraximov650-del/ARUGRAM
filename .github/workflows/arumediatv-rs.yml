@@ -8,6 +8,7 @@ on:
     paths:
       - 'ARUmultiplatform/arumediatv-rs/**'
       - 'ARUmultiplatform/uzcoders/**'
+      - 'ARUmultiplatform/android/rust/**'
       - '.github/workflows/arumediatv-rs.yml'
 
 permissions:
@@ -20,7 +21,9 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 60
+    # `APP_SIGN_SECRET` (so'rov imzosi siri) Environment secret (android-native.yml bilan bir xil).
+    environment: secret
     steps:
       - uses: actions/checkout@v4
 
@@ -41,6 +44,8 @@ jobs:
 
       - name: Android uchun yig'ish
         working-directory: ARUmultiplatform/arumediatv-rs
+        env:
+          APP_SIGN_SECRET: ${{ secrets.APP_SIGN_SECRET }}
         run: |
           cargo ndk -t armeabi-v7a -o jniLibs build --release
           ls -la jniLibs/*/

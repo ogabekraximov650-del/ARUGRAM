@@ -1,10 +1,11 @@
 //! Telegram orqali kirish oynasi (Kotlin ilovadagi `LoginScreen` ga mos): telefon -> kod -> (2 bosqichli parol).
 
-use crate::backend::{Backend, CodeResult, SignIn};
+use crate::backend::{Backend, Step as BStep};
 use crate::countries::{Country, COUNTRIES};
 use crate::theme::*;
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 use uzcoders::prelude::*;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -13,6 +14,7 @@ pub enum Step {
     Code,
     Password,
     Qr,
+    Done,
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -119,13 +121,15 @@ pub struct Login {
     query: State<String>,
     scroll: ScrollState,
     picker_scroll: ScrollState,
-    backend: Rc<dyn Backend>,
+    backend: Arc<dyn Backend>,
+    wait: State<u32>,
+    hint: State<String>,
 }
 
 impl Login {
-    pub fn new(backend: Rc<dyn Backend>) -> Rc<Login> {
+    pub fn new(backend: Arc<dyn Backend>) -> Rc<Login> {
         let uz = COUNTRIES.iter().position(|c| c.iso == "UZ");
-        Rc::new(Login {
+        let login = Rc::new(Login {
             nav: Navigator::new(Route::Login),
             step: State::new(Step::Phone),
             busy: State::new(false),
@@ -140,7 +144,23 @@ impl Login {
             scroll: ScrollState::new(),
             picker_scroll: ScrollState::new(),
             backend,
-        })
+            wait: State::new(0),
+            hint: State::new(String::new()),
+        });
+        // IP bo'yicha davlat (Telegram aniqlaydi): foydalanuvchi hali tegmagan bo'lsa.
+        let me = login.clone();
+        let b = login.backend.clone();
+        spawn_bg(move || b.nearest_country(), move |iso| {
+            if let Some(iso) = iso {
+                if me.number.get().is_empty() {
+                    if let Some(i) = COUNTRIES.iter().position(|c| c.iso == iso) {
+                        me.country.set(Some(i));
+                        me.prefix.set(format!("+{}", COUNTRIES[i].code));
+                    }
+                }
+            }
+        });
+        login
     }
 
     /// "Orqaga": birinchi navbatda ekranlar steki, keyin kirish bosqichi.
@@ -149,6 +169,7 @@ impl Login {
             return true;
         }
         if self.step.get() != Step::Phone && !self.busy.get() {
+            self.reset_login();
             self.step.set(Step::Phone);
             self.error.set(None);
             return true;
@@ -156,11 +177,37 @@ impl Login {
         false
     }
 
+    fn reset_login(&self) {
+        let b = self.backend.clone();
+        spawn_bg(move || b.reset(), |_| {});
+    }
+
+    /// Bloklovchi backend chaqiruvini fon oqimida bajaradi, natijani UI oqimida qabul qiladi.
+    fn run_bg(self: &Rc<Self>, work: impl FnOnce(Arc<dyn Backend>) -> BStep + Send + 'static, ok: impl FnOnce(&Rc<Login>, BStep) + 'static) {
+        self.busy.set(true);
+        let (b, me) = (self.backend.clone(), self.clone());
+        spawn_bg(move || work(b), move |st| {
+            me.busy.set(false);
+            if st.wait > 0 {
+                me.wait.set(st.wait);
+            }
+            if let Some(e) = st.error.clone() {
+                me.error.set(Some(e));
+            } else if st.need_password {
+                me.hint.set(st.hint.clone());
+                me.password.set(String::new());
+                me.step.set(Step::Password);
+            } else {
+                ok(&me, st);
+            }
+        });
+    }
+
     fn phone_digits(&self) -> String {
         digits_of(&self.number.get())
     }
 
-    fn submit(&self) {
+    fn submit(self: &Rc<Self>) {
         if self.busy.get() {
             return;
         }
@@ -174,40 +221,53 @@ impl Login {
                     self.error.set(Some("Raqamni to'liq kiriting".into()));
                     return;
                 }
-                match self.backend.request_code(&format!("+{full}")) {
-                    CodeResult::Sent(info) => {
-                        self.sent_info.set(info.into());
-                        self.code.set(String::new());
-                        self.step.set(Step::Code);
-                    }
-                    CodeResult::Error(e) => self.error.set(Some(e)),
-                }
+                let phone = format!("+{full}");
+                self.run_bg(
+                    move |b| b.request_code(&phone),
+                    |me, st| {
+                        if st.logged_in {
+                            me.finish();
+                        } else {
+                            me.sent_info.set(st.sent.unwrap_or_else(|| "Kod yuborildi".into()));
+                            me.code.set(String::new());
+                            me.step.set(Step::Code);
+                        }
+                    },
+                );
             }
             Step::Code => {
-                let code = self.code.get();
-                if code.trim().is_empty() {
+                let code = self.code.get().trim().to_string();
+                if code.is_empty() {
                     return;
                 }
-                match self.backend.sign_in(code.trim()) {
-                    SignIn::NeedPassword(_) => {
-                        self.password.set(String::new());
-                        self.step.set(Step::Password);
+                self.run_bg(move |b| b.sign_in(&code), |me, st| {
+                    if st.done {
+                        me.finish();
+                    } else {
+                        me.error.set(Some("Kod noto'g'ri".into()));
                     }
-                    SignIn::Done => {}
-                    SignIn::Error(e) => self.error.set(Some(e)),
-                }
+                });
             }
             Step::Password => {
                 let p = self.password.get();
                 if p.is_empty() {
                     return;
                 }
-                if let Err(e) = self.backend.check_password(&p) {
-                    self.error.set(Some(e));
-                }
+                self.run_bg(move |b| b.check_password(&p), |me, st| {
+                    if st.done {
+                        me.finish();
+                    } else {
+                        me.error.set(Some("Parol noto'g'ri".into()));
+                    }
+                });
             }
-            Step::Qr => {}
+            Step::Qr | Step::Done => {}
         }
+    }
+
+    /// Telegram hisobi ulandi. Keyingi bosqich (ilova hisobini botga `/start` bilan tasdiqlash) hali yo'q.
+    fn finish(&self) {
+        self.step.set(Step::Done);
     }
 
     pub fn view(self: &Rc<Self>) -> Element {
@@ -231,6 +291,7 @@ impl Login {
         let step = self.step.get();
         let subtitle = match step {
             Step::Phone => "Telegram raqamingizni kiriting".to_string(),
+            Step::Done => "Telegram hisobi ulandi".to_string(),
             Step::Code => format!(
                 "{}\n{} {}",
                 self.sent_info.get(),
@@ -330,6 +391,13 @@ impl Login {
                         .on_submit(move || me.submit()),
                 );
             }
+            Step::Done => {
+                body.push(t(
+                    "Telegram hisobingiz ulandi. Ilova hisobiga kirish (bot orqali tasdiqlash) keyingi bosqichda qo'shiladi.",
+                    14.0,
+                    TEXT_DIM,
+                ));
+            }
             Step::Qr => {
                 body.push(
                     column(vec![
@@ -350,6 +418,10 @@ impl Login {
             }
             Step::Password => {
                 let me = self.clone();
+                if !self.hint.get().is_empty() {
+                    body.push(t(format!("Maslahat: {}", self.hint.get()), 13.0, TEXT_DIM));
+                    body.push(gap_box(0.0, 8.0));
+                }
                 body.push(
                     self.styled(field(&self.password))
                         .password()
@@ -370,9 +442,9 @@ impl Login {
             Step::Phone => "Kod yuborish",
             Step::Code => "Tasdiqlash",
             Step::Password => "Kirish",
-            Step::Qr => "",
+            Step::Qr | Step::Done => "",
         };
-        if step != Step::Qr {
+        if step != Step::Qr && step != Step::Done {
             body.push(
                 column(vec![t(label, 16.0, Color::WHITE).bold()])
                     .bg(if self.busy.get() {
@@ -405,6 +477,7 @@ impl Login {
                 column(vec![t("Raqamni o'zgartirish", 14.0, ACCENT2)])
                     .center()
                     .on_click(move || {
+                        me.reset_login();
                         me.code.set(String::new());
                         me.password.set(String::new());
                         me.error.set(None);

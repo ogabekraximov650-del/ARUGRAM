@@ -9,13 +9,13 @@
 // Bu fayl faqat modullarni e'lon qiladi va ilova versiyasini qaytaradi.
 
 mod cache;
-mod ffi_utils;
+pub mod ffi_utils;
 mod search;
 mod validate;
 mod crypto;
 mod mp4;
 mod video_cache;
-mod telegram;
+pub mod telegram;
 mod player_source;
 
 use ffi_utils::string_to_cptr;

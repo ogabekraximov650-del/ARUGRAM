@@ -11,7 +11,7 @@ pub mod glue;
 pub(crate) mod jni;
 
 #[cfg(target_os = "android")]
-pub use glue::{ime_event, jstring, on_create, ANativeActivity, ImeEvent};
+pub use glue::{files_dir, ime_event, jstring, on_create, ANativeActivity, ImeEvent};
 
 /// Ilova kirish nuqtasini e'lon qiladi: `uzcoders_android::android_app!(my_app);`
 /// bu yerda `fn my_app(scale: f32) -> uzcoders_ui::Ui`.
@@ -220,4 +220,10 @@ mod tests {
         assert_eq!(&dst[8..12], &[0; 4]);
         assert_eq!(&dst[12..20], &src[8..16]);
     }
+}
+
+/// Android bo'lmagan muhitda (testlar) vaqtinchalik papka.
+#[cfg(not(target_os = "android"))]
+pub fn files_dir() -> String {
+    std::env::temp_dir().to_string_lossy().into_owned()
 }
