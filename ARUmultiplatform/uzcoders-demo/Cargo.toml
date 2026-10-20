@@ -8,8 +8,8 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-# uzcoders reposi CI'da repo ildizidagi `uzcoders/` papkasiga yuklanadi (workflow'ga qarang).
-uzcoders = { path = "../../uzcoders/crates/uzcoders" }
+# Kutubxona nusxasi shu repoda: ARUmultiplatform/uzcoders (VENDOR.md).
+uzcoders = { path = "../uzcoders/crates/uzcoders" }
 
 [profile.release]
 opt-level = 3

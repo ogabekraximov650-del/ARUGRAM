@@ -1,0 +1,15 @@
+[package]
+name = "uzcoders-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "uzcoders: deklarativ UI daraxti, vidjetlar va ishga tushirish tsikli"
+
+[dependencies]
+uzcoders-core = { workspace = true }
+uzcoders-layout = { workspace = true }
+uzcoders-text = { workspace = true }
+uzcoders-render = { workspace = true }

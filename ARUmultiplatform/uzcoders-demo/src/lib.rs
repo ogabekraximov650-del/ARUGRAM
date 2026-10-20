@@ -2,7 +2,7 @@
 
 use uzcoders::prelude::*;
 
-static FONT: &[u8] = include_bytes!("../../../uzcoders/assets/fonts/DejaVuSans.ttf");
+static FONT: &[u8] = include_bytes!("../../uzcoders/assets/fonts/DejaVuSans.ttf");
 
 /// Ilovaning butun UI'si shu yerda. `scale` — ekran zichligi (dp -> piksel).
 pub fn make_ui(scale: f32) -> Ui {

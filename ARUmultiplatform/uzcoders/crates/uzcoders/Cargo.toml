@@ -1,0 +1,20 @@
+[package]
+name = "uzcoders"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "uzcoders — Rust'da mobil ilovalar uchun UI va tizim kutubxonasi (O'zbekistonlik dasturchilardan)"
+readme = "../../README.md"
+keywords = ["ui", "gui", "mobile", "android", "uzbekistan"]
+categories = ["gui", "graphics"]
+
+[dependencies]
+uzcoders-core = { workspace = true }
+uzcoders-layout = { workspace = true }
+uzcoders-text = { workspace = true }
+uzcoders-render = { workspace = true }
+uzcoders-ui = { workspace = true }
+uzcoders-android = { workspace = true }

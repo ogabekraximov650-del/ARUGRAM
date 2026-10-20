@@ -1,0 +1,13 @@
+[package]
+name = "uzcoders-render"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "uzcoders: chizish buyruqlari ro'yxati va dasturiy rasterizator (RGBA, PNG)"
+
+[dependencies]
+uzcoders-core = { workspace = true }
+uzcoders-text = { workspace = true }

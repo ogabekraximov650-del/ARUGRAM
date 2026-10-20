@@ -1,0 +1,33 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/uzcoders-core",
+    "crates/uzcoders-layout",
+    "crates/uzcoders-text",
+    "crates/uzcoders-render",
+    "crates/uzcoders-ui",
+    "crates/uzcoders-android",
+    "crates/uzcoders",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ogabekraximov650-del/uzcoders"
+authors = ["UzCoders"]
+rust-version = "1.75"
+
+[workspace.dependencies]
+uzcoders-core = { path = "crates/uzcoders-core", version = "0.1.0" }
+uzcoders-layout = { path = "crates/uzcoders-layout", version = "0.1.0" }
+uzcoders-text = { path = "crates/uzcoders-text", version = "0.1.0" }
+uzcoders-render = { path = "crates/uzcoders-render", version = "0.1.0" }
+uzcoders-android = { path = "crates/uzcoders-android", version = "0.1.0" }
+uzcoders-ui = { path = "crates/uzcoders-ui", version = "0.1.0" }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"

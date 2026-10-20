@@ -1,0 +1,15 @@
+[package]
+name = "uzcoders-android"
+description = "uzcoders: Android (NativeActivity) qobig'i — oyna, teginish va kadr tsikli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+uzcoders-core.workspace = true
+uzcoders-render.workspace = true
+uzcoders-text.workspace = true
+uzcoders-ui.workspace = true
