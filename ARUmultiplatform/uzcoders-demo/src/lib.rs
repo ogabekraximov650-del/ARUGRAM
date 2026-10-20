@@ -23,6 +23,8 @@ pub fn make_ui(scale: f32) -> Ui {
             .gap(12.0)
             .width(300.0),
             button("Nolga qaytarish", move || reset.set(0)).bg(Color::hex(0x3B4B5C)).margin(12.0),
+            // Pastdagi tizim navigatsiya paneli ostida qolmaslik uchun bo'sh joy.
+            column(vec![]).height(48.0),
         ])
         .padding(24.0)
         .gap(8.0)

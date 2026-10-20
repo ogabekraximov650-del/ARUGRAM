@@ -252,7 +252,8 @@ pub unsafe fn on_create(activity: *mut ANativeActivity, make_ui: fn(f32) -> Ui) 
 }
 
 fn run(s: Arc<Sync_>, make_ui: fn(f32) -> Ui, scale: f32) {
-    let looper = unsafe { ALooper_prepare(0) };
+    // 1 = ALOOPER_PREPARE_ALLOW_NON_CALLBACKS: kiritish navbati callback'siz ulanadi, bu bayroqsiz ulanish rad etiladi.
+    let looper = unsafe { ALooper_prepare(1) };
     s.m.lock().unwrap().looper = looper;
     let mut ui = make_ui(scale);
     ui.set_scale(scale);
