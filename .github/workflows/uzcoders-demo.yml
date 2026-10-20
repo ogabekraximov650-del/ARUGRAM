@@ -68,6 +68,8 @@ jobs:
         continue-on-error: true
         env:
           ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
         run: |
           K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
           pip install --no-cache-dir -q pyrogram==2.0.106 tgcrypto==1.2.5
