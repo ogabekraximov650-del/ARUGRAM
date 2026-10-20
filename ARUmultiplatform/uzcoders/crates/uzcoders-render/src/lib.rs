@@ -1,6 +1,9 @@
 //! uzcoders-render — chizish buyruqlari ro'yxati va dasturiy (CPU) canvas.
 
+pub mod path;
 pub mod png;
+
+pub use path::Path;
 
 use std::rc::Rc;
 use uzcoders_core::{Color, Rect};
@@ -29,6 +32,17 @@ pub enum DrawCmd {
         text: String,
         size: f32,
         color: Color,
+        /// Shrift qalinligi (400 oddiy, 700 qalin, 900 qora); eng yaqin yuz tanlanadi.
+        weight: u16,
+        /// Har belgidan keyin qo'shiladigan oraliq (piksel).
+        spacing: f32,
+    },
+    /// Vektor yo'l (ikonka): `view` — yo'l koordinatalari qutisi (masalan 24), `rect` ga cho'ziladi.
+    Path {
+        path: Rc<Path>,
+        view: f32,
+        rect: Rect,
+        color: Color,
     },
     PushClip(Rect),
     PopClip,
@@ -40,6 +54,8 @@ pub struct Canvas {
     /// RGBA8, qatorma-qator.
     pub pixels: Vec<u8>,
     glyphs: GlyphCache,
+    /// Qo'shimcha shrift yuzlari (qalinlik, kesh).
+    faces: Vec<(u16, GlyphCache)>,
     clips: Vec<(i32, i32, i32, i32)>,
 }
 
@@ -50,6 +66,7 @@ impl Canvas {
             height,
             pixels: vec![0; width * height * 4],
             glyphs: GlyphCache::new(font),
+            faces: Vec::new(),
             clips: Vec::new(),
         }
     }
@@ -62,8 +79,34 @@ impl Canvas {
         self.clips.clear();
     }
 
+    /// Qo'shimcha shrift yuzi (masalan qalin: 700). Oddiy (400) yuz `new` da beriladi.
+    pub fn add_face(&mut self, weight: u16, font: Rc<Font>) {
+        self.faces.push((weight, GlyphCache::new(font)));
+    }
+
+    fn cache_for(&mut self, weight: u16) -> &mut GlyphCache {
+        let mut best: Option<usize> = None;
+        let mut best_d = (400i32 - weight as i32).abs();
+        for (i, (w, _)) in self.faces.iter().enumerate() {
+            let d = (*w as i32 - weight as i32).abs();
+            if d < best_d {
+                best_d = d;
+                best = Some(i);
+            }
+        }
+        match best {
+            Some(i) => &mut self.faces[i].1,
+            None => &mut self.glyphs,
+        }
+    }
+
     pub fn font(&self) -> &Font {
         self.glyphs.font()
+    }
+
+    #[cfg(test)]
+    fn font_rc(&self) -> Rc<Font> {
+        self.glyphs.font_rc()
     }
 
     pub fn clear(&mut self, c: Color) {
@@ -143,11 +186,20 @@ impl Canvas {
         }
     }
 
-    pub fn draw_text(&mut self, x: f32, baseline: f32, text: &str, size: f32, c: Color) {
+    pub fn draw_text(
+        &mut self,
+        x: f32,
+        baseline: f32,
+        text: &str,
+        size: f32,
+        c: Color,
+        weight: u16,
+        spacing: f32,
+    ) {
         let (bx0, by0, bx1, by1) = self.bounds();
         let mut pen = x;
         for ch in text.chars() {
-            let g = self.glyphs.get(ch, size);
+            let g = self.cache_for(weight).get(ch, size);
             let gx = pen.round() as i32 + g.left;
             let gy = baseline.round() as i32 - g.top;
             for row in 0..g.height {
@@ -166,7 +218,45 @@ impl Canvas {
                     }
                 }
             }
-            pen += g.advance;
+            pen += g.advance + spacing;
+        }
+    }
+
+    /// Vektor yo'lni `rect` ga cho'zib to'ldiradi (`view` — yo'l koordinatalari qutisi).
+    pub fn fill_path(&mut self, path: &Path, view: f32, rect: Rect, c: Color) {
+        if view <= 0.0 || rect.is_empty() {
+            return;
+        }
+        let (bx0, by0, bx1, by1) = self.bounds();
+        let (ox, oy) = (rect.x.floor(), rect.y.floor());
+        let (w, h) = (rect.w.ceil() as usize + 2, rect.h.ceil() as usize + 2);
+        let (sx, sy) = (rect.w / view, rect.h / view);
+        let segs: uzcoders_text::raster::Segs = path
+            .segs
+            .iter()
+            .map(|&((x0, y0), (x1, y1))| {
+                (
+                    (x0 * sx + rect.x - ox, y0 * sy + rect.y - oy),
+                    (x1 * sx + rect.x - ox, y1 * sy + rect.y - oy),
+                )
+            })
+            .collect();
+        let cov = uzcoders_text::raster::fill(&segs, w, h);
+        for row in 0..h {
+            let y = oy as i32 + row as i32;
+            if y < by0 || y >= by1 {
+                continue;
+            }
+            for col in 0..w {
+                let x = ox as i32 + col as i32;
+                if x < bx0 || x >= bx1 {
+                    continue;
+                }
+                let v = cov[row * w + col];
+                if v != 0 {
+                    self.blend(x, y, c, v as f32 / 255.0);
+                }
+            }
         }
     }
 
@@ -190,7 +280,15 @@ impl Canvas {
                     text,
                     size,
                     color,
-                } => self.draw_text(*x, *baseline, text, *size, *color),
+                    weight,
+                    spacing,
+                } => self.draw_text(*x, *baseline, text, *size, *color, *weight, *spacing),
+                DrawCmd::Path {
+                    path,
+                    view,
+                    rect,
+                    color,
+                } => self.fill_path(path, *view, *rect, *color),
                 DrawCmd::PushClip(r) => {
                     let (bx0, by0, bx1, by1) = self.bounds();
                     self.clips.push((
@@ -258,6 +356,8 @@ mod tests {
                 text: "Hello".into(),
                 size: 20.0,
                 color: Color::BLACK,
+                weight: 400,
+                spacing: 0.0,
             },
             DrawCmd::PopClip,
         ]);
@@ -265,6 +365,30 @@ mod tests {
         let dark_right = (20..80).any(|x| (0..30).any(|y| c.pixel(x, y).r < 250));
         assert!(dark_left);
         assert!(!dark_right);
+    }
+
+    #[test]
+    fn yol_chiziladi() {
+        let mut c = canvas(24, 24);
+        c.clear(Color::BLACK);
+        let p = Path::parse("M4 4H20V20H4z").unwrap();
+        c.fill_path(&p, 24.0, Rect::new(0.0, 0.0, 24.0, 24.0), Color::WHITE);
+        assert_eq!(c.pixel(12, 12), Color::WHITE);
+        assert_eq!(c.pixel(1, 1), Color::BLACK);
+        // 2 baravar katta qutiga cho'ziladi.
+        let mut c = canvas(48, 48);
+        c.clear(Color::BLACK);
+        c.fill_path(&p, 24.0, Rect::new(0.0, 0.0, 48.0, 48.0), Color::WHITE);
+        assert_eq!(c.pixel(30, 30), Color::WHITE);
+        assert_eq!(c.pixel(44, 44), Color::BLACK);
+        assert_eq!(c.pixel(2, 2), Color::BLACK);
+    }
+
+    #[test]
+    fn qalin_yuz() {
+        let mut c = canvas(40, 30);
+        c.add_face(700, c.font_rc());
+        assert!(c.cache_for(700).len() == 0);
     }
 
     #[test]

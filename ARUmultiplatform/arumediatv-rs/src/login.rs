@@ -12,6 +12,7 @@ pub enum Step {
     Phone,
     Code,
     Password,
+    Qr,
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -90,6 +91,14 @@ pub fn country_by_code(code: &str, prefer: Option<usize>) -> Option<usize> {
     }
     COUNTRIES.iter().position(|c| c.code == code)
 }
+
+/// Material 3 `bodyLarge` uslubidagi matn: qator qutisi 24dp, harflar orasi 0.5.
+fn t(s: impl Into<String>, size: f32, color: Color) -> Element {
+    text(s).size(size).color(color).line_height(24.0).letter_spacing(0.5)
+}
+
+const DROP_DOWN: &str = "M7,10l5,5 5,-5z";
+const ARROW_BACK: &str = "M20,11H7.83l5.59,-5.59L12,4l-8,8 8,8 1.41,-1.41L7.83,13H20v-2z";
 
 fn pattern_len(c: &Country) -> usize {
     c.pattern.chars().filter(|x| *x != ' ').count()
@@ -197,6 +206,7 @@ impl Login {
                     self.error.set(Some(e));
                 }
             }
+            Step::Qr => {}
         }
     }
 
@@ -228,10 +238,11 @@ impl Login {
                 self.number.get()
             ),
             Step::Password => "Ikki bosqichli parol".to_string(),
+            Step::Qr => "QR kodni Telegram bilan skanerlang".to_string(),
         };
 
         let me = self.clone();
-        let back = text("\u{2190}").size(30.0).color(Color::WHITE).on_click(move || {
+        let back = icon(ARROW_BACK, 28.0).color(Color::WHITE).on_click(move || {
             me.back();
         });
 
@@ -239,20 +250,22 @@ impl Login {
             row(vec![back]),
             gap_box(0.0, 24.0),
             row(vec![
-                text("ARU").size(32.0).color(Color::WHITE),
-                text("MEDIATV").size(32.0).color(ACCENT2),
+                t("ARU", 30.0, Color::WHITE).black(),
+                t("MEDIATV", 30.0, ACCENT2).black(),
             ]),
             gap_box(0.0, 6.0),
-            text(subtitle).size(15.0).color(TEXT_DIM),
+            t(subtitle, 15.0, TEXT_DIM),
             gap_box(0.0, 28.0),
         ];
 
         match step {
             Step::Phone => {
                 body.push(
-                    text("Davlatni tanlang va Telegram hisobingiz ulangan telefon raqamini kiriting.")
-                        .size(14.0)
-                        .color(TEXT_DIM),
+                    t(
+                        "Davlatni tanlang va Telegram hisobingiz ulangan telefon raqamini kiriting.",
+                        14.0,
+                        TEXT_DIM,
+                    ),
                 );
                 body.push(gap_box(0.0, 14.0));
                 let me = self.clone();
@@ -263,9 +276,9 @@ impl Login {
                 };
                 body.push(
                     row(vec![
-                        text(iso).size(14.0).color(TEXT_DIM).width(30.0),
-                        text(name).size(16.0).color(name_color).weight(1.0),
-                        text("\u{25BE}").size(16.0).color(TEXT_DIM),
+                        t(iso, 14.0, TEXT_DIM).width(30.0),
+                        t(name, 16.0, name_color).weight(1.0),
+                        icon(DROP_DOWN, 20.0).color(TEXT_DIM),
                     ])
                     .gap(8.0)
                     .align(Align::Center)
@@ -290,13 +303,13 @@ impl Login {
                             .filter(|c| c.is_ascii_digit() || c == '+')
                             .max_len(5)
                             .format(format_prefix)
-                            .hint("Kod")
+                            .label("Kod")
                             .width(96.0),
                         self.styled(field(&self.number))
                             .filter(is_digit)
                             .max_len(country.map_or(15, |c| pattern_len(c).max(1)))
                             .format(format_number)
-                            .hint(hint)
+                            .label(hint)
                             .weight(1.0)
                             .on_submit(move || me.submit()),
                     ])
@@ -310,16 +323,34 @@ impl Login {
                     self.styled(field(&self.code))
                         .filter(is_digit)
                         .max_len(8)
-                        .hint("Kod")
+                        .label("Kod")
                         .on_submit(move || me.submit()),
                 );
+            }
+            Step::Qr => {
+                body.push(
+                    column(vec![
+                        t("QR kod Telegram yadrosi ulangach chiqadi", 13.0, TEXT_DIM),
+                    ])
+                    .center()
+                    .border(1.0, BORDER_BRIGHT)
+                    .radius(16.0)
+                    .width(260.0)
+                    .height(260.0),
+                );
+                body.push(gap_box(0.0, 12.0));
+                body.push(t(
+                    "Boshqa qurilmada Telegram -> Sozlamalar -> Qurilmalar -> Qurilmani ulash",
+                    12.0,
+                    TEXT_DIM,
+                ));
             }
             Step::Password => {
                 let me = self.clone();
                 body.push(
                     self.styled(field(&self.password))
                         .password()
-                        .hint("Parol")
+                        .label("Parol")
                         .on_submit(move || me.submit()),
                 );
             }
@@ -327,7 +358,7 @@ impl Login {
 
         if let Some(e) = self.error.get() {
             body.push(gap_box(0.0, 12.0));
-            body.push(text(e).size(13.0).color(ERROR));
+            body.push(t(e, 13.0, ERROR));
         }
 
         body.push(gap_box(0.0, 24.0));
@@ -336,20 +367,39 @@ impl Login {
             Step::Phone => "Kod yuborish",
             Step::Code => "Tasdiqlash",
             Step::Password => "Kirish",
+            Step::Qr => "",
         };
-        body.push(
-            column(vec![text(label).size(16.0).color(Color::WHITE)])
-                .bg(if self.busy.get() { ACCENT.with_opacity(0.5) } else { ACCENT })
-                .radius(16.0)
-                .padding_xy(0.0, 16.0)
-                .center()
-                .on_click(move || me.submit()),
-        );
-        if step != Step::Phone {
+        if step != Step::Qr {
+            body.push(
+                column(vec![t(label, 16.0, Color::WHITE).bold()])
+                    .bg(if self.busy.get() {
+                        ACCENT.with_opacity(0.5)
+                    } else {
+                        ACCENT
+                    })
+                    .radius(16.0)
+                    .padding_xy(0.0, 16.0)
+                    .center()
+                    .on_click(move || me.submit()),
+            );
+        }
+        if step == Step::Phone {
+            body.push(gap_box(0.0, 16.0));
+            let me = self.clone();
+            body.push(
+                column(vec![t("QR orqali kirish", 14.0, ACCENT2).bold()])
+                    .center()
+                    .on_click(move || {
+                        me.error.set(None);
+                        me.step.set(Step::Qr);
+                    }),
+            );
+        }
+        if step == Step::Code || step == Step::Password {
             body.push(gap_box(0.0, 12.0));
             let me = self.clone();
             body.push(
-                column(vec![text("Raqamni o'zgartirish").size(14.0).color(ACCENT2)])
+                column(vec![t("Raqamni o'zgartirish", 14.0, ACCENT2)])
                     .center()
                     .on_click(move || {
                         me.code.set(String::new());
@@ -361,14 +411,18 @@ impl Login {
         }
         body.push(gap_box(0.0, 24.0));
         body.push(
-            text("Telegram hisobingiz ilova ichida xavfsiz saqlanadi: u rasm va videolarni yopiq kanaldan olish uchun kerak.")
-                .size(12.0)
-                .color(TEXT_FAINT),
+            t(
+                "Telegram hisobingiz ilova ichida xavfsiz saqlanadi: u rasm va videolarni yopiq kanaldan olish uchun kerak.",
+                12.0,
+                TEXT_FAINT,
+            ),
         );
         body.push(gap_box(0.0, 24.0));
 
+        // Status bar va navigatsiya paneli ostida qolmaslik (Kotlin: `statusBarsPadding`).
+        let ins = safe_insets();
         column(vec![scroll_column(&self.scroll, body)
-            .padding_xy(24.0, 16.0)
+            .padding_each(24.0, 16.0 + ins.top, 24.0, 16.0 + ins.bottom)
             .grow(1.0)])
         .bg(BG)
     }
@@ -377,6 +431,10 @@ impl Login {
     fn styled(&self, f: Element) -> Element {
         f.color(Color::WHITE)
             .size(16.0)
+            .line_height(24.0)
+            .letter_spacing(0.5)
+            .padding_xy(16.0, 16.0)
+            .label_bg(BG)
             .hint_color(TEXT_DIM)
             .accent(ACCENT2)
             .border(1.0, BORDER_BRIGHT)
@@ -395,9 +453,9 @@ impl Login {
             .map(|(i, c)| {
                 let me = self.clone();
                 row(vec![
-                    text(c.iso).size(14.0).color(TEXT_DIM).width(30.0),
-                    text(c.name).size(15.0).color(Color::WHITE).weight(1.0),
-                    text(format!("+{}", c.code)).size(14.0).color(TEXT_DIM),
+                    t(c.iso, 14.0, TEXT_DIM).width(30.0),
+                    t(c.name, 15.0, Color::WHITE).weight(1.0),
+                    t(format!("+{}", c.code), 14.0, TEXT_DIM),
                 ])
                 .gap(8.0)
                 .align(Align::Center)
@@ -411,17 +469,20 @@ impl Login {
             })
             .collect();
         let me = self.clone();
-        let back = text("\u{2190}").size(30.0).color(Color::WHITE).on_click(move || {
+        let back = icon(ARROW_BACK, 28.0).color(Color::WHITE).on_click(move || {
             me.nav.pop();
         });
         column(vec![
             row(vec![
                 back,
-                self.styled(field(&self.query)).hint("Qidirish").weight(1.0),
+                self.styled(field(&self.query))
+                    .label_bg(SURFACE)
+                    .label("Qidirish")
+                    .weight(1.0),
             ])
             .gap(12.0)
             .align(Align::Center)
-            .padding_xy(16.0, 12.0),
+            .padding_each(16.0, 12.0 + safe_insets().top, 16.0, 12.0),
             scroll_column(&self.picker_scroll, rows)
                 .padding_xy(16.0, 0.0)
                 .grow(1.0),

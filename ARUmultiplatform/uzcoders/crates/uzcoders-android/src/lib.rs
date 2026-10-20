@@ -5,6 +5,8 @@
 
 #[cfg(target_os = "android")]
 pub mod glue;
+#[cfg(target_os = "android")]
+pub(crate) mod jni;
 
 #[cfg(target_os = "android")]
 pub use glue::{on_create, ANativeActivity};

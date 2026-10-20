@@ -10,14 +10,18 @@ use login::Login;
 use std::rc::Rc;
 use uzcoders::prelude::*;
 
-static FONT: &[u8] = include_bytes!("../../uzcoders/assets/fonts/DejaVuSans.ttf");
+static REGULAR: &[u8] = include_bytes!("../assets/fonts/Roboto-Regular.ttf");
+static BOLD: &[u8] = include_bytes!("../assets/fonts/Roboto-Bold.ttf");
+static BLACK: &[u8] = include_bytes!("../assets/fonts/Roboto-Black.ttf");
 
 /// Ilovaning kirish nuqtasi: `scale` — ekran zichligi.
 pub fn make_ui(scale: f32) -> Ui {
-    let font = Rc::new(Font::parse(FONT).expect("shrift"));
+    let font = Rc::new(Font::parse(REGULAR).expect("Roboto Regular"));
     let login = Login::new(Rc::new(StubBackend));
     let l = login.clone();
     let mut ui = Ui::new(font, move || l.view());
+    ui.add_font(700, Rc::new(Font::parse(BOLD).expect("Roboto Bold")));
+    ui.add_font(900, Rc::new(Font::parse(BLACK).expect("Roboto Black")));
     let l = login.clone();
     ui.set_back_handler(move || l.back());
     ui.set_scale(scale);
@@ -74,7 +78,7 @@ mod tests {
     fn snap(ui: &mut Ui, name: &str, size: Size) {
         if let Ok(dir) = std::env::var("ARU_SNAPSHOT_DIR") {
             let cmds = ui.frame(size);
-            let mut c = Canvas::new(size.w as usize, size.h as usize, ui.font());
+            let mut c = ui.canvas(size.w as usize, size.h as usize);
             c.clear(Color::BLACK);
             c.execute(&cmds);
             std::fs::write(format!("{dir}/{name}.png"), c.to_png()).unwrap();

@@ -10,11 +10,11 @@ use uzcoders_core::{
     global_revision, Color, EdgeInsets, Point, PointerEvent, PointerKind, Rect, Size,
 };
 use uzcoders_layout::{Dim, Tree};
-use uzcoders_render::DrawCmd;
+use uzcoders_render::{Canvas, DrawCmd, Path};
 use uzcoders_text::Font;
 
 pub use element::{
-    button, column, field, gap_box, grid, row, scroll_column, spacer, text, Element,
+    button, column, field, gap_box, grid, icon, row, scroll_column, spacer, text, Element,
 };
 pub use nav::Navigator;
 pub use scroll::ScrollState;
@@ -25,7 +25,8 @@ const SLOP_DP: f32 = 8.0;
 
 enum ItemKind {
     Container,
-    Text(String, f32, Color),
+    Text(String, f32, Color, u16, Option<f32>, f32),
+    Icon(Rc<Path>, Color),
     Field(Box<FieldCfg>),
     ScrollEnd,
 }
@@ -70,6 +71,9 @@ struct Touch {
 /// Ilova ish vaqti: elementlarni quradi, joylaydi, chizish ro'yxatini beradi va kiritishni yo'naltiradi.
 pub struct Ui {
     font: Rc<Font>,
+    faces: Vec<(u16, Rc<Font>)>,
+    insets_px: EdgeInsets,
+    kb_serial: u64,
     build: Box<dyn FnMut() -> Element>,
     hits: Vec<Hit>,
     fields: Vec<FieldInfo>,
@@ -93,6 +97,9 @@ impl Ui {
     pub fn new(font: Rc<Font>, build: impl FnMut() -> Element + 'static) -> Ui {
         Ui {
             font,
+            faces: Vec::new(),
+            insets_px: EdgeInsets::ZERO,
+            kb_serial: 0,
             build: Box::new(build),
             hits: Vec::new(),
             fields: Vec::new(),
@@ -115,6 +122,46 @@ impl Ui {
 
     pub fn font(&self) -> Rc<Font> {
         self.font.clone()
+    }
+
+    /// Qo'shimcha shrift yuzi (masalan `add_font(700, bold)`). Oddiy (400) yuz `Ui::new` da beriladi.
+    pub fn add_font(&mut self, weight: u16, font: Rc<Font>) {
+        self.faces.push((weight, font));
+        self.dirty = true;
+    }
+
+    fn face(&self, weight: u16) -> Rc<Font> {
+        let mut best = (&self.font, (400i32 - weight as i32).abs());
+        for (w, f) in &self.faces {
+            let d = (*w as i32 - weight as i32).abs();
+            if d < best.1 {
+                best = (f, d);
+            }
+        }
+        best.0.clone()
+    }
+
+    /// Shu `Ui` shriftlari bilan tayyor canvas.
+    pub fn canvas(&self, width: usize, height: usize) -> Canvas {
+        let mut c = Canvas::new(width, height, self.font.clone());
+        for (w, f) in &self.faces {
+            c.add_face(*w, f.clone());
+        }
+        c
+    }
+
+    /// Tizim panellari chekinishlari (piksel): status bar tepada, navigatsiya paneli pastda. Ilova ularni
+    /// `uzcoders_core::safe_insets()` (dp) orqali oladi.
+    pub fn set_insets(&mut self, insets_px: EdgeInsets) {
+        if insets_px != self.insets_px {
+            self.insets_px = insets_px;
+            self.dirty = true;
+        }
+    }
+
+    /// Har safar kiritish maydoniga bosilganda oshadi: qobiq klaviaturani qayta ko'rsatishi uchun.
+    pub fn keyboard_serial(&self) -> u64 {
+        self.kb_serial
     }
 
     /// Zichlik koeffitsienti (dp -> piksel). Barcha o'lchamlar shunga ko'paytiriladi.
@@ -172,6 +219,14 @@ impl Ui {
         self.last_frame_now = Some(self.now);
         self.step_flings(dt);
         self.last_blink = self.blink_phase();
+        let k = self.scale;
+        let i = self.insets_px;
+        uzcoders_core::set_safe_insets(EdgeInsets::new(
+            i.left / k,
+            i.top / k,
+            i.right / k,
+            i.bottom / k,
+        ));
 
         let root = (self.build)();
         let mut tree = Tree::new();
@@ -230,19 +285,29 @@ impl Ui {
                 }
             }
             match it.kind {
-                ItemKind::Text(t, sz, color) if visible => {
-                    let lines = self.font.wrap(&t, sz, Some(r.w + 0.5));
-                    let lh = self.font.line_height(sz);
-                    let asc = self.font.ascent_px(sz);
+                ItemKind::Text(t, sz, color, weight, lh, sp) if visible => {
+                    let font = self.face(weight);
+                    let lines = font.wrap_spaced(&t, sz, Some(r.w + 0.5), sp);
+                    let (lhp, base) = line_metrics(&font, sz, lh);
                     for (i, l) in lines.into_iter().enumerate() {
                         cmds.push(DrawCmd::Text {
                             x: r.x,
-                            baseline: r.y + asc + lh * i as f32,
+                            baseline: r.y + base + lhp * i as f32,
                             text: l,
                             size: sz,
                             color,
+                            weight,
+                            spacing: sp,
                         });
                     }
+                }
+                ItemKind::Icon(path, color) if visible => {
+                    cmds.push(DrawCmd::Path {
+                        path,
+                        view: 24.0,
+                        rect: r,
+                        color,
+                    });
                 }
                 ItemKind::Field(cfg) => {
                     let pad = it_padding(&tree, it.node);
@@ -257,7 +322,7 @@ impl Ui {
                     let inner_w = (r.w - pad.horizontal()).max(0.0);
                     let caret_idx = self.caret.min(shown.chars().count());
                     let prefix: String = shown.chars().take(caret_idx).collect();
-                    let caret_x = self.font.text_width(&prefix, cfg.size);
+                    let caret_x = self.font.text_width_spaced(&prefix, cfg.size, cfg.spacing);
                     let shift_x = if focused {
                         (caret_x - inner_w + 2.0 * self.scale).max(0.0)
                     } else {
@@ -275,25 +340,64 @@ impl Ui {
                                 color: c,
                             });
                         }
-                        let lh = self.font.line_height(cfg.size);
-                        let asc = self.font.ascent_px(cfg.size);
+                        let (lh, base) = line_metrics(&self.font, cfg.size, cfg.line_height);
                         let top = r.y + pad.top;
-                        cmds.push(DrawCmd::PushClip(Rect::new(inner_x, r.y, inner_w, r.h)));
-                        if shown.is_empty() {
+                        let has_label = !cfg.label.is_empty();
+                        let floated = has_label && (focused || !shown.is_empty());
+                        let label_color = if focused { cfg.accent } else { cfg.hint_color };
+                        if floated {
+                            // Chegarada turgan kichik sarlavha: ostidagi chiziq qirqiladi.
+                            let ls = cfg.size * 0.75;
+                            let (llh, lbase) = line_metrics(&self.font, ls, None);
+                            let lw = self
+                                .font
+                                .text_width_spaced(&cfg.label, ls, cfg.spacing * 0.8);
+                            let ltop = r.y - llh * 0.5;
+                            let pad_x = 4.0 * self.scale;
+                            cmds.push(DrawCmd::RoundRect {
+                                rect: Rect::new(inner_x - pad_x, ltop, lw + 2.0 * pad_x, llh),
+                                radius: 0.0,
+                                color: cfg.label_bg,
+                            });
                             cmds.push(DrawCmd::Text {
                                 x: inner_x,
-                                baseline: top + asc,
-                                text: cfg.hint.clone(),
-                                size: cfg.size,
-                                color: cfg.hint_color,
+                                baseline: ltop + lbase,
+                                text: cfg.label.clone(),
+                                size: ls,
+                                color: label_color,
+                                weight: 400,
+                                spacing: cfg.spacing * 0.8,
                             });
+                        }
+                        cmds.push(DrawCmd::PushClip(Rect::new(inner_x, r.y, inner_w, r.h)));
+                        if shown.is_empty() {
+                            let (t, c) = if has_label && !floated {
+                                (cfg.label.clone(), cfg.hint_color)
+                            } else if !has_label || focused {
+                                (cfg.hint.clone(), cfg.hint_color)
+                            } else {
+                                (String::new(), cfg.hint_color)
+                            };
+                            if !t.is_empty() {
+                                cmds.push(DrawCmd::Text {
+                                    x: inner_x,
+                                    baseline: top + base,
+                                    text: t,
+                                    size: cfg.size,
+                                    color: c,
+                                    weight: 400,
+                                    spacing: cfg.spacing,
+                                });
+                            }
                         } else {
                             cmds.push(DrawCmd::Text {
                                 x: text_x,
-                                baseline: top + asc,
+                                baseline: top + base,
                                 text: shown.clone(),
                                 size: cfg.size,
                                 color: cfg.color,
+                                weight: 400,
+                                spacing: cfg.spacing,
                             });
                         }
                         if focused && caret_on {
@@ -385,8 +489,22 @@ impl Ui {
             *w *= k;
         }
         match &mut el.kind {
-            Kind::Text { size, .. } => *size *= k,
-            Kind::Field(f) => f.size *= k,
+            Kind::Text {
+                size,
+                line_height,
+                spacing,
+                ..
+            } => {
+                *spacing *= k;
+                *size *= k;
+                *line_height = line_height.map(|h| h * k);
+            }
+            Kind::Icon { size, .. } => *size *= k,
+            Kind::Field(f) => {
+                f.spacing *= k;
+                f.size *= k;
+                f.line_height = f.line_height.map(|h| h * k);
+            }
             Kind::Container => {}
         }
     }
@@ -424,22 +542,39 @@ impl Ui {
                     .collect();
                 tree.add(el.style, ids)
             }
-            Kind::Text { text, size, color } => {
-                items[slot].kind = ItemKind::Text(text.clone(), size, color);
-                let font = self.font.clone();
+            Kind::Text {
+                text,
+                size,
+                color,
+                weight,
+                line_height,
+                spacing,
+            } => {
+                items[slot].kind =
+                    ItemKind::Text(text.clone(), size, color, weight, line_height, spacing);
+                let font = self.face(weight);
                 tree.add_leaf(el.style, move |w| {
                     let max = if w.is_finite() { Some(w) } else { None };
-                    let (tw, th, _) = font.measure(&text, size, max);
-                    Size::new(tw.ceil(), th.ceil())
+                    let (tw, _, lines) = font.measure_spaced(&text, size, max, spacing);
+                    let (lh, _) = line_metrics(&font, size, line_height);
+                    Size::new(tw.ceil(), (lh * lines.len() as f32).ceil())
                 })
+            }
+            Kind::Icon { path, size, color } => {
+                items[slot].kind = ItemKind::Icon(path, color);
+                tree.add_leaf(el.style, move |_| Size::new(size, size))
             }
             Kind::Field(cfg) => {
                 let font = self.font.clone();
                 let (size, minw) = (cfg.size, 100.0 * self.scale);
-                let hint_w = font.text_width(&cfg.hint, size);
+                let hint_w = font
+                    .text_width_spaced(&cfg.hint, size, cfg.spacing)
+                    .max(font.text_width_spaced(&cfg.label, size, cfg.spacing));
+                let lh = cfg.line_height;
                 items[slot].kind = ItemKind::Field(cfg);
                 tree.add_leaf(el.style, move |_| {
-                    Size::new(hint_w.max(minw).ceil(), font.line_height(size).ceil())
+                    let (h, _) = line_metrics(&font, size, lh);
+                    Size::new(hint_w.max(minw).ceil(), h.ceil())
                 })
             }
         };
@@ -480,7 +615,7 @@ impl Ui {
         let f = &self.fields[fi];
         let mut acc = f.text_x;
         for (i, ch) in f.shown.chars().enumerate() {
-            let a = self.font.char_advance(ch, f.cfg.size);
+            let a = self.font.char_advance(ch, f.cfg.size) + f.cfg.spacing;
             if x < acc + a * 0.5 {
                 return i;
             }
@@ -493,6 +628,7 @@ impl Ui {
         let id = self.fields[fi].cfg.state.id();
         self.caret = self.caret_from_x(fi, x);
         self.focus = Some(id);
+        self.kb_serial += 1;
         self.caret_epoch = self.now;
         self.dirty = true;
     }
@@ -683,6 +819,19 @@ impl Ui {
         match self.back.clone() {
             Some(b) => b(),
             None => false,
+        }
+    }
+}
+
+/// (qator balandligi, qator qutisi tepasidan asos chizig'igacha masofa). `lh` berilsa Compose kabi proporsional bo'linadi.
+fn line_metrics(font: &Font, size: f32, lh: Option<f32>) -> (f32, f32) {
+    let asc = font.ascent_px(size);
+    match lh {
+        None => (font.line_height(size), asc),
+        Some(h) => {
+            let desc = -(font.descent as f32) * size / font.units_per_em as f32;
+            let total = (asc + desc).max(0.001);
+            (h, (h - total) * asc / total + asc)
         }
     }
 }

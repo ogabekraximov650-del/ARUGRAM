@@ -1,9 +1,10 @@
 //! NativeActivity bilan ishlash: oyna, kiritish navbati va chizish oqimi.
 
+use crate::jni;
 use std::ffi::c_void;
 use std::ptr::null_mut;
 use std::sync::{Arc, Condvar, Mutex};
-use uzcoders_core::{PointerEvent, PointerKind, Size};
+use uzcoders_core::{EdgeInsets, PointerEvent, PointerKind, Size};
 use uzcoders_render::Canvas;
 use uzcoders_ui::Ui;
 
@@ -23,17 +24,25 @@ pub struct ANativeActivityCallbacks {
     on_native_window_destroyed: Option<unsafe extern "C" fn(*mut ANativeActivity, *mut c_void)>,
     on_input_queue_created: Option<unsafe extern "C" fn(*mut ANativeActivity, *mut c_void)>,
     on_input_queue_destroyed: Option<unsafe extern "C" fn(*mut ANativeActivity, *mut c_void)>,
-    on_content_rect_changed: Option<unsafe extern "C" fn(*mut ANativeActivity, *const c_void)>,
+    on_content_rect_changed: Option<unsafe extern "C" fn(*mut ANativeActivity, *const ARect)>,
     on_configuration_changed: Option<unsafe extern "C" fn(*mut ANativeActivity)>,
     on_low_memory: Option<unsafe extern "C" fn(*mut ANativeActivity)>,
 }
 
 #[repr(C)]
+pub struct ARect {
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+}
+
+#[repr(C)]
 pub struct ANativeActivity {
     callbacks: *mut ANativeActivityCallbacks,
-    vm: *mut c_void,
+    pub(crate) vm: *mut c_void,
     env: *mut c_void,
-    clazz: *mut c_void,
+    pub(crate) clazz: *mut c_void,
     internal_data_path: *const u8,
     external_data_path: *const u8,
     sdk_version: i32,
@@ -78,8 +87,6 @@ extern "C" {
     fn AKeyEvent_getAction(ev: *const c_void) -> i32;
     fn AKeyEvent_getKeyCode(ev: *const c_void) -> i32;
     fn AKeyEvent_getMetaState(ev: *const c_void) -> i32;
-    fn ANativeActivity_showSoftInput(a: *mut ANativeActivity, flags: u32);
-    fn ANativeActivity_hideSoftInput(a: *mut ANativeActivity, flags: u32);
     fn AMotionEvent_getX(ev: *const c_void, idx: usize) -> f32;
     fn AMotionEvent_getY(ev: *const c_void, idx: usize) -> f32;
     fn ANativeWindow_getWidth(w: *mut c_void) -> i32;
@@ -121,6 +128,8 @@ struct Shared {
     thread_window: *mut c_void,
     redraw: bool,
     quit: bool,
+    /// Tizim panellari bo'lmagan maydon (oyna koordinatalarida).
+    content_rect: Option<[i32; 4]>,
     looper: *mut c_void,
 }
 
@@ -169,6 +178,18 @@ unsafe extern "C" fn window_destroyed(_: *mut ANativeActivity, _: *mut c_void) {
         while !g.thread_window.is_null() && !g.quit {
             g = s.cv.wait(g).unwrap();
         }
+    }
+}
+
+unsafe extern "C" fn content_rect_changed(_: *mut ANativeActivity, r: *const ARect) {
+    if r.is_null() {
+        return;
+    }
+    if let Some(s) = shared() {
+        let mut g = s.m.lock().unwrap();
+        g.content_rect = Some([(*r).left, (*r).top, (*r).right, (*r).bottom]);
+        g.redraw = true;
+        wake(&g);
     }
 }
 
@@ -236,6 +257,7 @@ pub unsafe fn on_create(activity: *mut ANativeActivity, make_ui: fn(f32) -> Ui) 
             thread_window: null_mut(),
             redraw: true,
             quit: false,
+            content_rect: None,
             looper: null_mut(),
         }),
         cv: Condvar::new(),
@@ -252,6 +274,7 @@ pub unsafe fn on_create(activity: *mut ANativeActivity, make_ui: fn(f32) -> Ui) 
     cb.on_resume = Some(focus_or_resume);
     cb.on_window_focus_changed = Some(focus_changed);
     cb.on_destroy = Some(destroy);
+    cb.on_content_rect_changed = Some(content_rect_changed);
 
     let act = activity as usize;
     std::thread::spawn(move || run(s, make_ui, scale, act));
@@ -260,7 +283,10 @@ pub unsafe fn on_create(activity: *mut ANativeActivity, make_ui: fn(f32) -> Ui) 
 fn run(s: Arc<Sync_>, make_ui: fn(f32) -> Ui, scale: f32, activity: usize) {
     let activity = activity as *mut ANativeActivity;
     let t0 = std::time::Instant::now();
-    let mut keyboard = false;
+    let mut full_h = 0i32;
+    let mut last_serial = 0u64;
+    let mut last_show_ms = 0u64;
+    let mut shown_req = false;
     let mut back_consumed = false;
     // 1 = ALOOPER_PREPARE_ALLOW_NON_CALLBACKS: kiritish navbati callback'siz ulanadi, bu bayroqsiz ulanish rad etiladi.
     let looper = unsafe { ALooper_prepare(1) };
@@ -272,6 +298,7 @@ fn run(s: Arc<Sync_>, make_ui: fn(f32) -> Ui, scale: f32, activity: usize) {
     let mut queue: *mut c_void = null_mut();
     let mut dims = (0i32, 0i32);
     let mut force = true;
+    let mut rect: Option<[i32; 4]>;
 
     loop {
         ui.set_time(t0.elapsed().as_millis() as u64);
@@ -304,6 +331,7 @@ fn run(s: Arc<Sync_>, make_ui: fn(f32) -> Ui, scale: f32, activity: usize) {
                 g.redraw = false;
                 force = true;
             }
+            rect = g.content_rect;
         }
 
         if !window.is_null() {
@@ -314,6 +342,10 @@ fn run(s: Arc<Sync_>, make_ui: fn(f32) -> Ui, scale: f32, activity: usize) {
                 )
             };
             if (w, h) != dims && w > 0 && h > 0 {
+                if w != dims.0 {
+                    full_h = 0;
+                }
+                full_h = full_h.max(h);
                 dims = (w, h);
                 unsafe { ANativeWindow_setBuffersGeometry(window, w, h, WINDOW_FORMAT_RGBA_8888) };
                 force = true;
@@ -324,16 +356,37 @@ fn run(s: Arc<Sync_>, make_ui: fn(f32) -> Ui, scale: f32, activity: usize) {
             }
         }
 
-        // Klaviaturani fokusga moslaymiz (2 = FORCED: oyna fokusida ham ishonchli ochiladi).
-        if ui.wants_keyboard() != keyboard {
-            keyboard = ui.wants_keyboard();
-            unsafe {
-                if keyboard {
-                    ANativeActivity_showSoftInput(activity, 2);
-                } else {
-                    ANativeActivity_hideSoftInput(activity, 0);
-                }
+        // Tizim panellari chekinishlari: status bar (tepa), navigatsiya paneli (past; klaviatura ochiqligida emas).
+        let kb_visible = full_h > 0 && dims.1 + full_h / 6 < full_h;
+        if let Some(r) = rect {
+            let bottom = if kb_visible {
+                0
+            } else {
+                (dims.1 - r[3]).max(0)
+            };
+            ui.set_insets(EdgeInsets::new(
+                r[0].max(0) as f32,
+                r[1].max(0) as f32,
+                (dims.0 - r[2]).max(0) as f32,
+                bottom as f32,
+            ));
+        }
+        // Klaviatura: maydonga bosilganda (yangi `serial`) ko'rsatiladi; fokus ketsa yashiriladi.
+        let now = t0.elapsed().as_millis() as u64;
+        if ui.keyboard_serial() != last_serial {
+            last_serial = ui.keyboard_serial();
+            if ui.wants_keyboard() && !kb_visible && now.saturating_sub(last_show_ms) > 800 {
+                unsafe { jni::show_keyboard(activity) };
+                last_show_ms = now;
+                shown_req = true;
             }
+        }
+        if !ui.wants_keyboard() && (kb_visible || shown_req) {
+            unsafe { jni::hide_keyboard(activity) };
+            shown_req = false;
+        }
+        if kb_visible {
+            shown_req = true;
         }
         let timeout = if window.is_null() {
             -1
@@ -351,12 +404,13 @@ fn run(s: Arc<Sync_>, make_ui: fn(f32) -> Ui, scale: f32, activity: usize) {
     if !queue.is_null() {
         unsafe { AInputQueue_detachLooper(queue) };
     }
+    unsafe { jni::detach(activity) };
 }
 
 fn draw(ui: &mut Ui, canvas: &mut Option<Canvas>, window: *mut c_void, dims: (i32, i32)) {
     let (w, h) = (dims.0 as usize, dims.1 as usize);
     let cmds = ui.frame(Size::new(w as f32, h as f32));
-    let c = canvas.get_or_insert_with(|| Canvas::new(w, h, ui.font()));
+    let c = canvas.get_or_insert_with(|| ui.canvas(w, h));
     if c.width != w || c.height != h {
         c.resize(w, h);
     }

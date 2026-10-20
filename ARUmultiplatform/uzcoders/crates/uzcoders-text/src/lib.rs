@@ -72,12 +72,30 @@ impl Font {
     }
 
     pub fn text_width(&self, text: &str, size: f32) -> f32 {
-        text.chars().map(|c| self.char_advance(c, size)).sum()
+        self.text_width_spaced(text, size, 0.0)
+    }
+
+    /// Har belgidan keyin `extra` piksel qo'shilgan kenglik (harflar orasi).
+    pub fn text_width_spaced(&self, text: &str, size: f32, extra: f32) -> f32 {
+        text.chars()
+            .map(|c| self.char_advance(c, size) + extra)
+            .sum()
     }
 
     /// Matnni `max_width` ga sig'adigan qatorlarga bo'ladi (so'z chegarasida; juda uzun so'z belgi bo'yicha).
     /// `\n` majburiy qator uzilishi. `max_width = None` — bo'lmaydi.
     pub fn wrap(&self, text: &str, size: f32, max_width: Option<f32>) -> Vec<String> {
+        self.wrap_spaced(text, size, max_width, 0.0)
+    }
+
+    /// `wrap`, har belgi orasida `extra` piksel bilan.
+    pub fn wrap_spaced(
+        &self,
+        text: &str,
+        size: f32,
+        max_width: Option<f32>,
+        extra: f32,
+    ) -> Vec<String> {
         let mut lines = Vec::new();
         for para in text.split('\n') {
             let max = match max_width {
@@ -90,7 +108,7 @@ impl Font {
             let mut line = String::new();
             let mut w = 0.0f32;
             for word in split_words(para) {
-                let ww = self.text_width(word, size);
+                let ww = self.text_width_spaced(word, size, extra);
                 let is_space = word.starts_with(' ');
                 if w + ww <= max || line.is_empty() && is_space {
                     line.push_str(word);
@@ -110,7 +128,7 @@ impl Font {
                     w = ww;
                 } else {
                     for ch in word.chars() {
-                        let cw = self.char_advance(ch, size);
+                        let cw = self.char_advance(ch, size) + extra;
                         if w + cw > max && !line.is_empty() {
                             lines.push(std::mem::take(&mut line));
                             w = 0.0;
@@ -132,10 +150,20 @@ impl Font {
         size: f32,
         max_width: Option<f32>,
     ) -> (f32, f32, Vec<String>) {
-        let lines = self.wrap(text, size, max_width);
+        self.measure_spaced(text, size, max_width, 0.0)
+    }
+
+    pub fn measure_spaced(
+        &self,
+        text: &str,
+        size: f32,
+        max_width: Option<f32>,
+        extra: f32,
+    ) -> (f32, f32, Vec<String>) {
+        let lines = self.wrap_spaced(text, size, max_width, extra);
         let w = lines
             .iter()
-            .map(|l| self.text_width(l, size))
+            .map(|l| self.text_width_spaced(l, size, extra))
             .fold(0.0, f32::max);
         (w, lines.len() as f32 * self.line_height(size), lines)
     }
@@ -177,6 +205,10 @@ impl GlyphCache {
 
     pub fn font(&self) -> &Font {
         &self.font
+    }
+
+    pub fn font_rc(&self) -> Rc<Font> {
+        self.font.clone()
     }
 
     pub fn get(&mut self, ch: char, size: f32) -> Rc<GlyphBitmap> {

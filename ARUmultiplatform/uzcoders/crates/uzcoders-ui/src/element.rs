@@ -4,6 +4,7 @@ use crate::scroll::ScrollState;
 use std::rc::Rc;
 use uzcoders_core::{Color, EdgeInsets, State};
 use uzcoders_layout::{Align, Axis, Dim, Justify, Style};
+use uzcoders_render::Path;
 
 pub(crate) type Callback = Rc<dyn Fn()>;
 
@@ -19,12 +20,24 @@ pub(crate) struct FieldCfg {
     pub filter: Option<fn(char) -> bool>,
     pub format: Option<fn(&str) -> String>,
     pub on_submit: Option<Callback>,
+    pub label: String,
+    pub label_bg: Color,
+    pub line_height: Option<f32>,
+    pub spacing: f32,
 }
 
 pub(crate) enum Kind {
     Container,
     Text {
         text: String,
+        size: f32,
+        color: Color,
+        weight: u16,
+        line_height: Option<f32>,
+        spacing: f32,
+    },
+    Icon {
+        path: Rc<Path>,
         size: f32,
         color: Color,
     },
@@ -149,7 +162,7 @@ impl Element {
     /// Matn yoki kiritish maydoni uchun shrift o'lchami.
     pub fn size(mut self, s: f32) -> Self {
         match &mut self.kind {
-            Kind::Text { size, .. } => *size = s,
+            Kind::Text { size, .. } | Kind::Icon { size, .. } => *size = s,
             Kind::Field(f) => f.size = s,
             Kind::Container => {}
         }
@@ -158,14 +171,60 @@ impl Element {
     /// Matn yoki kiritish maydoni matn rangi.
     pub fn color(mut self, c: Color) -> Self {
         match &mut self.kind {
-            Kind::Text { color, .. } => *color = c,
+            Kind::Text { color, .. } | Kind::Icon { color, .. } => *color = c,
             Kind::Field(f) => f.color = c,
             Kind::Container => {}
         }
         self
     }
 
+    /// Shrift qalinligi (400 oddiy, 700 qalin, 900 qora); ilovada shunday yuz qo'shilgan bo'lsa.
+    pub fn font_weight(mut self, w: u16) -> Self {
+        if let Kind::Text { weight, .. } = &mut self.kind {
+            *weight = w;
+        }
+        self
+    }
+    pub fn bold(self) -> Self {
+        self.font_weight(700)
+    }
+    pub fn black(self) -> Self {
+        self.font_weight(900)
+    }
+    /// Harflar orasidagi qo'shimcha masofa (dp), Compose `letterSpacing` kabi.
+    pub fn letter_spacing(mut self, sp: f32) -> Self {
+        match &mut self.kind {
+            Kind::Text { spacing, .. } => *spacing = sp,
+            Kind::Field(f) => f.spacing = sp,
+            _ => {}
+        }
+        self
+    }
+    /// Qator qutisi balandligi (dp). Belgilar qutida Compose'dagi kabi proporsional tarqatiladi.
+    pub fn line_height(mut self, h: f32) -> Self {
+        match &mut self.kind {
+            Kind::Text { line_height, .. } => *line_height = Some(h),
+            Kind::Field(f) => f.line_height = Some(h),
+            _ => {}
+        }
+        self
+    }
+
     // ── Kiritish maydoni sozlamalari ──
+    /// Suzuvchi sarlavha (Material "outlined" uslubi): bo'sh va fokussiz maydonda ichkarida, aks holda chegarada.
+    pub fn label(mut self, l: impl Into<String>) -> Self {
+        if let Some(f) = self.field_cfg() {
+            f.label = l.into();
+        }
+        self
+    }
+    /// Suzuvchi sarlavha chegarani qirqib ko'rsatishi uchun orqa fon rangi.
+    pub fn label_bg(mut self, c: Color) -> Self {
+        if let Some(f) = self.field_cfg() {
+            f.label_bg = c;
+        }
+        self
+    }
     fn field_cfg(&mut self) -> Option<&mut FieldCfg> {
         match &mut self.kind {
             Kind::Field(f) => Some(f),
@@ -248,10 +307,39 @@ pub fn text(s: impl Into<String>) -> Element {
             text: s.into(),
             size: 16.0,
             color: Color::BLACK,
+            weight: 400,
+            line_height: None,
+            spacing: 0.0,
         },
         Style::default(),
         Vec::new(),
     )
+}
+
+thread_local! {
+    static PATHS: std::cell::RefCell<std::collections::HashMap<&'static str, Rc<Path>>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// Vektor ikonka: `d` — SVG yo'li (24x24 qutida, Material ikonkalari kabi), `size` — dp. Rang `.color()` bilan.
+pub fn icon(d: &'static str, size: f32) -> Element {
+    let path = PATHS.with(|m| {
+        m.borrow_mut()
+            .entry(d)
+            .or_insert_with(|| Rc::new(Path::parse(d).unwrap_or_default()))
+            .clone()
+    });
+    let mut e = Element::new(
+        Kind::Icon {
+            path,
+            size,
+            color: Color::BLACK,
+        },
+        Style::default(),
+        Vec::new(),
+    );
+    e.style.shrink = 0.0;
+    e
 }
 
 /// Bo'sh joyni to'ldiradigan elastik element.
@@ -294,6 +382,10 @@ pub fn field(state: &State<String>) -> Element {
             filter: None,
             format: None,
             on_submit: None,
+            label: String::new(),
+            label_bg: Color::WHITE,
+            line_height: None,
+            spacing: 0.0,
         })),
         Style::default(),
         Vec::new(),
