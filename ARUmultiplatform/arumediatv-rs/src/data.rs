@@ -121,11 +121,21 @@ pub fn load_posters(session: &str, urls: &[String]) -> (Vec<(String, Option<Imag
     let mut diag: Option<String> = None;
     let dir = poster_dir();
     let names: Vec<String> = urls.iter().map(|u| file_name_of(u)).collect();
+    // Diskdagi nusxalar parallel dekodlanadi (har biri alohida oqimda).
+    let decoded: Vec<Option<Image>> = std::thread::scope(|sc| {
+        let hs: Vec<_> = names
+            .iter()
+            .map(|n| {
+                let dir = &dir;
+                sc.spawn(move || if n.is_empty() { None } else { std::fs::read(format!("{dir}/{n}")).ok().and_then(|b| finish_image(&b)) })
+            })
+            .collect();
+        hs.into_iter().map(|h| h.join().ok().flatten()).collect()
+    });
     let mut out: Vec<(String, Option<Image>)> = Vec::new();
     let mut missing: Vec<usize> = Vec::new();
-    for (i, (u, n)) in urls.iter().zip(&names).enumerate() {
-        let img = if n.is_empty() { None } else { std::fs::read(format!("{dir}/{n}")).ok().and_then(|b| finish_image(&b)) };
-        if img.is_none() && !n.is_empty() {
+    for (i, (u, img)) in urls.iter().zip(decoded).enumerate() {
+        if img.is_none() && !names[i].is_empty() {
             missing.push(i);
         }
         out.push((u.clone(), img));

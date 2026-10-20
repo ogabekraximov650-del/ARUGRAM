@@ -47,6 +47,15 @@ pub enum Op {
     },
     /// Rasm atlasi tozalandi.
     ClearImages,
+    /// Katta rasm uchun alohida tekstura yaratish (bir marta yuklanadi).
+    NewImage {
+        id: u32,
+        w: u32,
+        h: u32,
+        data: Vec<u8>,
+    },
+    /// Alohida rasm teksturasini o'chirish (xotira chegarasi oshganda).
+    FreeImage(u32),
     /// Shu paytgacha chizilgan tasvirning `[x, y, w, h]` (yuqori-chap boshlang'ich) hududini xiralashtirib, keyingi chizishlar uchun tayyorlaydi.
     Blur { region: [i32; 4], blur: f32 },
     /// `verts[first..first+count]` ni (qirqish bilan) chizish. `scissor` — `[x, y, w, h]`, yuqori-chap boshlang'ich.
@@ -54,6 +63,8 @@ pub enum Op {
         scissor: Option<[i32; 4]>,
         first: u32,
         count: u32,
+        /// Bo'lsa — shu alohida rasm teksturasi bilan chiziladi (atlas o'rniga).
+        image: Option<u32>,
     },
 }
 
@@ -84,7 +95,24 @@ pub struct Batcher {
     img_atlas: Atlas,
     /// Atlasdagi rasmlar (Rc ushlab turiladi: ko'rsatkich o'zgarmasligi uchun).
     images: HashMap<usize, (Rc<Image>, Option<Entry>)>,
+    /// Katta rasmlar (poster): har biriga alohida tekstura, LRU bilan.
+    big: HashMap<usize, BigImg>,
+    next_id: u32,
+    frame_no: u64,
+    big_bytes: usize,
 }
+
+struct BigImg {
+    id: u32,
+    bytes: usize,
+    last_used: u64,
+    _keep: Rc<Image>,
+}
+
+/// Atlasga sig'maydigan (katta) rasmlar shu hajmdan boshlanadi (piksel).
+const BIG_PIXELS: u32 = 128 * 128;
+/// Katta rasmlar teksturalarining umumiy chegarasi (bayt).
+const BIG_BUDGET: usize = 48 << 20;
 
 fn rgba(c: Color) -> [u8; 4] {
     [c.r, c.g, c.b, c.a]
@@ -102,6 +130,10 @@ impl Batcher {
             entries: HashMap::new(),
             img_atlas: Atlas::new(ATLAS_SIZE),
             images: HashMap::new(),
+            big: HashMap::new(),
+            next_id: 1,
+            frame_no: 0,
+            big_bytes: 0,
         }
     }
 
@@ -124,9 +156,12 @@ impl Batcher {
         self.entries.clear();
         self.img_atlas.reset();
         self.images.clear();
+        self.big.clear();
+        self.big_bytes = 0;
     }
 
     pub fn build(&mut self, cmds: &[DrawCmd], width: u32, height: u32) -> Frame {
+        self.frame_no += 1;
         let mut b = Build {
             frame: Frame::default(),
             batch_start: 0,
@@ -317,6 +352,55 @@ impl Batcher {
 
     fn draw_image(&mut self, b: &mut Build, img: &Rc<Image>, rect: Rect, opacity: f32) {
         let key = Rc::as_ptr(img) as usize;
+        if img.w * img.h > BIG_PIXELS {
+            let id = match self.big.get_mut(&key) {
+                Some(e) => {
+                    e.last_used = self.frame_no;
+                    e.id
+                }
+                None => {
+                    let id = self.next_id;
+                    self.next_id += 1;
+                    let bytes = (img.w * img.h * 4) as usize;
+                    b.flush();
+                    b.frame.ops.push(Op::NewImage {
+                        id,
+                        w: img.w,
+                        h: img.h,
+                        data: img.rgba.clone(),
+                    });
+                    self.big.insert(
+                        key,
+                        BigImg {
+                            id,
+                            bytes,
+                            last_used: self.frame_no,
+                            _keep: img.clone(),
+                        },
+                    );
+                    self.big_bytes += bytes;
+                    // Chegara oshsa, shu kadrda ishlatilmagan eng eski rasmlar o'chiriladi.
+                    while self.big_bytes > BIG_BUDGET {
+                        let victim = self
+                            .big
+                            .iter()
+                            .filter(|(_, e)| e.last_used < self.frame_no)
+                            .min_by_key(|(_, e)| e.last_used)
+                            .map(|(k, _)| *k);
+                        let Some(k) = victim else { break };
+                        if let Some(e) = self.big.remove(&k) {
+                            self.big_bytes -= e.bytes;
+                            b.frame.ops.push(Op::FreeImage(e.id));
+                        }
+                    }
+                    id
+                }
+            };
+            b.flush();
+            b.image_quad_uv(rect, (0.0, 0.0, 1.0, 1.0), opacity);
+            b.flush_with(Some(id));
+            return;
+        }
         let entry = match self.images.get(&key) {
             Some((_, e)) => *e,
             None => {
@@ -401,12 +485,17 @@ impl Build {
     }
 
     fn flush(&mut self) {
+        self.flush_with(None);
+    }
+
+    fn flush_with(&mut self, image: Option<u32>) {
         let n = self.frame.verts.len();
         if n > self.batch_start {
             self.frame.ops.push(Op::Draw {
                 scissor: self.scissor,
                 first: self.batch_start as u32,
                 count: (n - self.batch_start) as u32,
+                image,
             });
             self.batch_start = n;
         }
@@ -525,12 +614,17 @@ impl Build {
 
     fn image_quad(&mut self, r: Rect, e: Entry, opacity: f32) {
         let s = ATLAS_SIZE as f32;
-        let (u0, v0, u1, v1) = (
+        let uv = (
             e.x as f32 / s,
             e.y as f32 / s,
             (e.x + e.w) as f32 / s,
             (e.y + e.h) as f32 / s,
         );
+        self.image_quad_uv(r, uv, opacity);
+    }
+
+    fn image_quad_uv(&mut self, r: Rect, uv: (f32, f32, f32, f32), opacity: f32) {
+        let (u0, v0, u1, v1) = uv;
         let col = rgba(Color::rgba(
             255,
             255,
@@ -608,6 +702,7 @@ mod tests {
                     scissor,
                     first,
                     count,
+                    ..
                 } => Some((*scissor, *first, *count)),
                 _ => None,
             })
@@ -873,6 +968,70 @@ mod tests {
             0
         );
         assert_eq!(f2.verts.len(), 6);
+    }
+
+    #[test]
+    fn katta_rasm_alohida_tekstura_va_lru() {
+        let mut b = batcher();
+        let big = |v: u8| {
+            Rc::new(Image {
+                w: 480,
+                h: 720,
+                rgba: vec![v; 480 * 720 * 4],
+            })
+        };
+        let imgs: Vec<Rc<Image>> = (0..40).map(|i| big(i as u8)).collect();
+        // Birinchi kadr: 3 ta poster — har biri alohida chaqiruv va yuklash.
+        let cmds: Vec<DrawCmd> = imgs[..3]
+            .iter()
+            .map(|i| DrawCmd::Image {
+                image: i.clone(),
+                rect: Rect::new(0.0, 0.0, 100.0, 150.0),
+                opacity: 1.0,
+            })
+            .collect();
+        let f = b.build(&cmds, 400, 400);
+        assert_eq!(
+            f.ops
+                .iter()
+                .filter(|o| matches!(o, Op::NewImage { .. }))
+                .count(),
+            3
+        );
+        assert_eq!(
+            f.ops
+                .iter()
+                .filter(|o| matches!(o, Op::Draw { image: Some(_), .. }))
+                .count(),
+            3
+        );
+        // Ikkinchi kadr: qayta yuklash yo'q.
+        let f2 = b.build(&cmds, 400, 400);
+        assert_eq!(
+            f2.ops
+                .iter()
+                .filter(|o| matches!(o, Op::NewImage { .. }))
+                .count(),
+            0
+        );
+        // Ko'p rasm: 48 MB dan oshgach eskilari o'chiriladi.
+        let all: Vec<DrawCmd> = imgs
+            .iter()
+            .map(|i| DrawCmd::Image {
+                image: i.clone(),
+                rect: Rect::new(0.0, 0.0, 100.0, 150.0),
+                opacity: 1.0,
+            })
+            .collect();
+        let _ = b.build(&all, 400, 400);
+        // Keyingi kadrda yangi rasm kelganda, shu kadrda ishlatilmagan eskilari o'chiriladi.
+        let fresh = DrawCmd::Image {
+            image: big(99),
+            rect: Rect::new(0.0, 0.0, 100.0, 150.0),
+            opacity: 1.0,
+        };
+        let f4 = b.build(&[fresh], 400, 400);
+        assert!(f4.ops.iter().any(|o| matches!(o, Op::FreeImage(_))));
     }
 
     #[test]

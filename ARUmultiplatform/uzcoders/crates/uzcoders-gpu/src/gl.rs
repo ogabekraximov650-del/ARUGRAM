@@ -65,8 +65,8 @@ extern "C" {
     fn glBindFramebuffer(t: u32, f: u32);
     fn glFramebufferTexture2D(t: u32, att: u32, tt: u32, tex: u32, lvl: i32);
     fn glCheckFramebufferStatus(t: u32) -> u32;
-    fn glCopyTexSubImage2D(t: u32, lvl: i32, xo: i32, yo: i32, x: i32, y: i32, w: i32, h: i32);
     fn glUniform1f(l: i32, v: f32);
+    fn glDeleteTextures(n: i32, t: *const u32);
     fn glDisableVertexAttribArray(i: u32);
 }
 
@@ -196,6 +196,8 @@ struct BlurRes {
     program: u32,
     quad: u32,
     fbo: [u32; 2],
+    /// Sahna (to'liq o'lcham) FBO: shisha panellar ostidagi tasvir shu teksturadan olinadi (ekranni nusxalash o'rniga).
+    scene_fbo: u32,
     tex: [u32; 3], // 0: ekran nusxasi (to'liq o'lcham), 1 va 2: chorak o'lcham
     w: i32,
     h: i32,
@@ -207,6 +209,12 @@ struct BlurRes {
 }
 
 pub struct GlRenderer {
+    /// Katta rasmlar (poster) uchun alohida teksturalar.
+    big: std::collections::HashMap<u32, u32>,
+    /// Hozir 1-birlikka bog'langan: atlas (`None`) yoki alohida rasm.
+    cur_img: Option<u32>,
+    /// Sahna teksturasiga chizilmoqda: u’ni shu paytda namuna sifatida bog'lamaymiz (qayta aloqa halqasi bo'lmasin).
+    scene_phase: bool,
     blur: Option<BlurRes>,
     blur_failed: bool,
     u_view: i32,
@@ -322,6 +330,9 @@ impl GlRenderer {
             return Err(format!("GL xato 0x{err:x}"));
         }
         Ok(GlRenderer {
+            big: std::collections::HashMap::new(),
+            cur_img: None,
+            scene_phase: false,
             blur: None,
             blur_failed: false,
             u_view: glGetUniformLocation(program, b"u_view\0".as_ptr()),
@@ -337,17 +348,29 @@ impl GlRenderer {
     }
 
     /// Asosiy dastur holatini tiklaydi (dastur, tekstura birliklari, uchlar ko'rsatkichlari).
-    unsafe fn bind_main(&self, w: i32, h: i32) {
+    unsafe fn bind_main(&mut self, w: i32, h: i32) {
         glBindFramebuffer(0x8D40, 0);
         glViewport(0, 0, w, h);
         glEnable(0x0BE2);
+        self.cur_img = None;
+        self.bind_main_inner(w, h);
+    }
+
+    unsafe fn bind_main_inner(&self, w: i32, h: i32) {
         glUseProgram(self.program);
         glUniform2f(self.u_scale, 2.0 / w as f32, 2.0 / h as f32);
         glUniform2f(self.u_view, w as f32, h as f32);
         glUniform1i(self.u_blur, 2);
         glUniform1i(self.u_cap, 3);
         glActiveTexture(0x84C3);
-        glBindTexture(0x0DE1, self.blur.as_ref().map_or(self.tex, |b| b.tex[0]));
+        glBindTexture(
+            0x0DE1,
+            if self.scene_phase {
+                self.tex
+            } else {
+                self.blur.as_ref().map_or(self.tex, |b| b.tex[0])
+            },
+        );
         glUniform1f(self.u_blur_ok, if self.blur.is_some() { 1.0 } else { 0.0 });
         glActiveTexture(0x84C2);
         glBindTexture(0x0DE1, self.blur.as_ref().map_or(self.tex, |b| b.tex[1]));
@@ -417,6 +440,15 @@ impl GlRenderer {
                 return false;
             }
         }
+        let mut scene_fbo = 0u32;
+        glGenFramebuffers(1, &mut scene_fbo);
+        glBindFramebuffer(0x8D40, scene_fbo);
+        glFramebufferTexture2D(0x8D40, 0x8CE0, 0x0DE1, tex[0], 0);
+        if glCheckFramebufferStatus(0x8D40) != 0x8CD5 {
+            glBindFramebuffer(0x8D40, 0);
+            self.blur_failed = true;
+            return false;
+        }
         glBindFramebuffer(0x8D40, 0);
         let (program, quad) = match &self.blur {
             Some(b) => (b.program, b.quad),
@@ -448,6 +480,7 @@ impl GlRenderer {
             program,
             quad,
             fbo,
+            scene_fbo,
             tex,
             w,
             h,
@@ -474,7 +507,6 @@ impl GlRenderer {
         glDisable(0x0C11);
         glActiveTexture(0x84C0);
         glBindTexture(0x0DE1, b.tex[0]);
-        glCopyTexSubImage2D(0x0DE1, 0, x, gy, x, gy, rw, rh);
         glDisable(0x0BE2);
         glUseProgram(b.program);
         glBindBuffer(0x8892, b.quad);
@@ -553,8 +585,68 @@ impl GlRenderer {
             frame.verts.as_ptr() as *const c_void,
             0x88E0,
         );
+        // Shisha (backdrop) bor kadr: birinchi `Blur` gacha bo'lgan hamma narsa sahna teksturasiga chiziladi,
+        // keyin ekranga ko'chiriladi va shisha panellar shu tekstura ustidan (nusxa olmasdan) tanlaydi.
+        let first_blur = frame.ops.iter().position(|o| matches!(o, Op::Blur { .. }));
+        let mut start = 0;
+        let mut scene = false;
+        if let Some(k) = first_blur {
+            if self.ensure_blur(w, h) {
+                if let Some(b) = &self.blur {
+                    glBindFramebuffer(0x8D40, b.scene_fbo);
+                    glViewport(0, 0, w, h);
+                    glClearColor(0.0, 0.0, 0.0, 1.0);
+                    glClear(0x4000);
+                }
+                self.scene_phase = true;
+                self.bind_main_fb(w, h);
+                self.exec(&frame.ops[..k], w, h, false);
+                self.scene_phase = false;
+                self.present_scene(w, h);
+                start = k;
+                scene = true;
+            }
+        }
+        if !scene {
+            self.bind_main(w, h);
+        }
+        self.exec(&frame.ops[start..], w, h, scene);
+    }
+
+    /// `bind_main`, lekin joriy FBO'ni o'zgartirmaydi.
+    unsafe fn bind_main_fb(&self, w: i32, h: i32) {
+        glViewport(0, 0, w, h);
+        glEnable(0x0BE2);
+        glBlendFuncSeparate(0x302, 0x303, 1, 0x303);
+        self.bind_main_inner(w, h);
+    }
+
+    /// Sahna teksturasini ekranga (asosiy framebuffer) chizadi.
+    unsafe fn present_scene(&mut self, w: i32, h: i32) {
+        let Some(b) = &self.blur else { return };
+        glBindFramebuffer(0x8D40, 0);
+        glViewport(0, 0, w, h);
+        glDisable(0x0C11);
+        glDisable(0x0BE2);
+        glUseProgram(b.program);
+        glBindBuffer(0x8892, b.quad);
+        for i in 1..5 {
+            glDisableVertexAttribArray(i);
+        }
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 2, 0x1406, 0, 8, 0 as *const c_void);
+        glActiveTexture(0x84C0);
+        glBindTexture(0x0DE1, b.tex[0]);
+        glUniform1i(b.u_tex, 0);
+        glUniform1f(b.u_down, 0.0);
+        glUniform2f(b.u_step, 0.0, 0.0);
+        glDrawArrays(4, 0, 6);
         self.bind_main(w, h);
-        for op in &frame.ops {
+    }
+
+    /// Operatsiyalarni bajaradi. `scene` — sahna teksturasi tayyor (shisha uchun xiralashtirish mumkin).
+    unsafe fn exec(&mut self, ops: &[Op], w: i32, h: i32, scene: bool) {
+        for op in ops {
             match op {
                 Op::Upload { x, y, w, h, data } => {
                     glTexSubImage2D(
@@ -570,8 +662,10 @@ impl GlRenderer {
                     );
                 }
                 Op::Blur { region, blur } => {
-                    self.run_blur(*region, *blur, w, h);
-                    self.bind_main(w, h);
+                    if scene {
+                        self.run_blur(*region, *blur, w, h);
+                        self.bind_main(w, h);
+                    }
                 }
                 Op::ClearAtlas | Op::ClearImages => {}
                 Op::UploadImage { x, y, w, h, data } => {
@@ -589,10 +683,45 @@ impl GlRenderer {
                     );
                     glActiveTexture(0x84C0);
                 }
+                Op::NewImage { id, w, h, data } => {
+                    let mut t = 0u32;
+                    glGenTextures(1, &mut t);
+                    glActiveTexture(0x84C1);
+                    glBindTexture(0x0DE1, t);
+                    glTexImage2D(
+                        0x0DE1,
+                        0,
+                        0x1908,
+                        *w as i32,
+                        *h as i32,
+                        0,
+                        0x1908,
+                        0x1401,
+                        data.as_ptr() as *const c_void,
+                    );
+                    for (p, v) in [
+                        (0x2801, 0x2601),
+                        (0x2800, 0x2601),
+                        (0x2802, 0x812F),
+                        (0x2803, 0x812F),
+                    ] {
+                        glTexParameteri(0x0DE1, p, v);
+                    }
+                    // Atlasni qayta 1-birlikka bog'laymiz.
+                    glBindTexture(0x0DE1, self.img_tex);
+                    glActiveTexture(0x84C0);
+                    self.big.insert(*id, t);
+                }
+                Op::FreeImage(id) => {
+                    if let Some(t) = self.big.remove(id) {
+                        glDeleteTextures(1, &t);
+                    }
+                }
                 Op::Draw {
                     scissor,
                     first,
                     count,
+                    image,
                 } => {
                     match scissor {
                         Some([sx, sy, sw, sh]) => {
@@ -600,6 +729,16 @@ impl GlRenderer {
                             glScissor(*sx, h - (*sy + *sh), *sw, *sh);
                         }
                         None => glDisable(0x0C11),
+                    }
+                    // Alohida rasm teksturasi (poster) yoki atlas.
+                    if *image != self.cur_img {
+                        glActiveTexture(0x84C1);
+                        let t = image
+                            .and_then(|id| self.big.get(&id).copied())
+                            .unwrap_or(self.img_tex);
+                        glBindTexture(0x0DE1, t);
+                        glActiveTexture(0x84C0);
+                        self.cur_img = *image;
                     }
                     glDrawArrays(4, *first as i32, *count as i32);
                 }

@@ -169,7 +169,7 @@ impl Home {
         }
         let batch: Vec<String> = {
             let mut q = self.queue.borrow_mut();
-            let n = q.len().min(8);
+            let n = q.len().min(6);
             q.drain(..n).collect()
         };
         if batch.is_empty() {
@@ -237,33 +237,33 @@ impl Home {
         stack(vec![base, column(top).padding(8.0), bottom]).weight(1.0).height(h).on_click(|| {})
     }
 
+    /// Sarlavha paneli: nom, tavsif va bo'lim nomi — lupali shisha ichida; qo'ng'iroq tugmasi alohida shisha doira.
     fn header(&self, top_inset: f32) -> Element {
-        let bell = column(vec![icon(BELL, 22.0).color(Color::rgba(255, 255, 255, 180))])
-            .width(42.0)
-            .height(42.0)
-            .center()
-            .bg(CARD)
-            .radius(14.0)
-            .border(1.0, Color::argb(0x0FFFFFFF));
-        column(vec![
-            row(vec![
-                column(vec![
-                    row(vec![tx("ARU", 30.0, Color::WHITE).black(), tx("MEDIATV", 30.0, ACCENT2).black()]),
-                    tx("Anime dunyosi", 14.0, TEXT_DIM),
-                ])
-                .weight(1.0),
-                bell,
-            ])
-            .align(Align::Center),
-            gap_box(0.0, 14.0),
-            tx("Ommabop anime", 18.0, Color::WHITE).bold().margin_each(4.0, 0.0, 0.0, 0.0),
+        let panel = column(vec![
+            row(vec![tx("ARU", 30.0, Color::WHITE).black(), tx("MEDIATV", 30.0, ACCENT2).black()]),
+            tx("Anime dunyosi", 14.0, Color::rgba(255, 255, 255, 190)),
+            gap_box(0.0, 6.0),
+            tx("Ommabop anime", 18.0, Color::WHITE).bold(),
             if self.poster_diag.with(|d| d.is_empty()) || !self.posters.borrow().is_empty() {
-                gap_box(0.0, 10.0)
+                gap_box(0.0, 0.0)
             } else {
-                tx(self.poster_diag.get(), 11.0, ERROR).margin_each(4.0, 4.0, 0.0, 6.0)
+                tx(self.poster_diag.get(), 11.0, ERROR)
             },
         ])
-        .padding_each(16.0, 12.0 + top_inset, 16.0, 0.0)
+        .lens(Color::rgba(255, 255, 255, 4), 1.04)
+        .radius(24.0)
+        .padding_xy(18.0, 12.0);
+        let bell = column(vec![icon(BELL, 22.0).color(Color::rgba(255, 255, 255, 220))])
+            .width(48.0)
+            .height(48.0)
+            .center()
+            .lens(Color::rgba(255, 255, 255, 5), 1.08)
+            .radius(24.0);
+        column(vec![
+            row(vec![panel.weight(1.0), bell]).gap(10.0).align(Align::Start),
+            spacer(),
+        ])
+        .padding_each(16.0, 8.0 + top_inset, 16.0, 0.0)
     }
 
     fn nav(self: &Rc<Self>, bottom_inset: f32) -> Element {
@@ -285,12 +285,15 @@ impl Home {
                 e
             })
             .collect();
-        row(items)
-            .gap(4.0)
-            .lens(Color::rgba(255, 255, 255, 10), 1.18)
-            .radius(28.0)
-            .padding_xy(6.0, 10.0)
-            .margin_each(16.0, -(72.0 + 12.0 + bottom_inset), 16.0, 12.0 + bottom_inset)
+        column(vec![
+            spacer(),
+            row(items)
+                .gap(4.0)
+                .lens(Color::rgba(255, 255, 255, 10), 1.18)
+                .radius(28.0)
+                .padding_xy(6.0, 10.0)
+                .margin_each(16.0, 0.0, 16.0, 12.0 + bottom_inset),
+        ])
     }
 
     pub fn view(self: &Rc<Self>) -> Element {
@@ -299,11 +302,13 @@ impl Home {
         let card_w = ((w - 32.0 - 12.0) / 2.0).max(80.0);
         let card_h = card_w * 1.5;
         let tab = self.tab.get();
+        // Ro'yxat BUTUN ekranni egallaydi; sarlavha va navigatsiya uning ustida (shisha) turadi, orqasidan posterlar ko'rinadi.
+        let header_h = 8.0 + 124.0;
         let content = if tab != 0 {
-            column(vec![tx("Tez orada", 16.0, TEXT_DIM)]).center().grow(1.0)
+            column(vec![tx("Tez orada", 16.0, TEXT_DIM)]).center()
         } else {
             match self.status.get() {
-                Status::Loading if self.seasons.with(|s| s.is_empty()) => column(vec![spinner(32.0, 3.0, ACCENT2)]).center().grow(1.0),
+                Status::Loading if self.seasons.with(|s| s.is_empty()) => column(vec![spinner(32.0, 3.0, ACCENT2)]).center(),
                 Status::Error(e) if self.seasons.with(|s| s.is_empty()) => {
                     let me = self.clone();
                     column(vec![
@@ -313,7 +318,6 @@ impl Home {
                     ])
                     .center()
                     .padding(24.0)
-                    .grow(1.0)
                 }
                 _ => {
                     let items = self.seasons.get();
@@ -334,12 +338,16 @@ impl Home {
                         };
                         row(vec![a, b]).gap(12.0).padding_each(0.0, 0.0, 0.0, 12.0)
                     })
-                    .padding_each(16.0, 0.0, 16.0, 90.0 + ins.bottom)
-                    .grow(1.0)
+                    .padding_each(16.0, header_h + ins.top, 16.0, 90.0 + ins.bottom)
                 }
             }
         };
-        column(vec![if tab == 0 { self.header(ins.top) } else { gap_box(0.0, ins.top) }, content, self.nav(ins.bottom)]).bg(BG)
+        let mut layers = vec![content];
+        if tab == 0 {
+            layers.push(self.header(ins.top));
+        }
+        layers.push(self.nav(ins.bottom));
+        stack(layers).bg(BG)
     }
 }
 
