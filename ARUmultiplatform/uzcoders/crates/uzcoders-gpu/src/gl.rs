@@ -92,6 +92,14 @@ void main() {
     gl_FragColor = vec4(c.rgb, c.a * v_color.a);
   } else if (v_p.x < 0.0) {
     gl_FragColor = vec4(v_color.rgb, v_color.a * texture2D(u_tex, v_uv).a);
+  } else if (v_p.w < -3.5) {
+    float d = length(v_uv);
+    float w = v_p.y;
+    float ring = clamp(0.5 - (abs(d - (v_p.x - w * 0.5)) - w * 0.5), 0.0, 1.0);
+    float sweep = -v_p.w - 4.0;
+    float rel = mod(atan(v_uv.y, v_uv.x) - v_p.z, 6.2831853);
+    float ca = clamp(min(rel * d, (sweep - rel) * d) + 0.5, 0.0, 1.0);
+    gl_FragColor = vec4(v_color.rgb, v_color.a * ring * ca);
   } else if (v_p.w < -2.5) {
     float d = length(v_uv) / v_p.x;
     float k = clamp(1.0 - d, 0.0, 1.0);

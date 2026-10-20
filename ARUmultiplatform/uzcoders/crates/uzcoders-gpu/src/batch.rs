@@ -189,6 +189,17 @@ impl Batcher {
                 DrawCmd::Glass { rect, radius, tint } => {
                     b.rrect(*rect, *radius, -1.0, *tint);
                 }
+                DrawCmd::Arc {
+                    cx,
+                    cy,
+                    radius,
+                    width,
+                    start,
+                    sweep,
+                    color,
+                } => {
+                    b.arc(*cx, *cy, *radius, *width, *start, *sweep, *color);
+                }
                 DrawCmd::Glow {
                     cx,
                     cy,
@@ -391,6 +402,31 @@ impl Build {
             p,
         };
         self.quad([mk(x0, y0), mk(x1, y0), mk(x0, y1), mk(x1, y1)]);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn arc(&mut self, cx: f32, cy: f32, r: f32, w: f32, start: f32, sweep: f32, c: Color) {
+        if self.empty || c.a == 0 || r <= 0.0 {
+            return;
+        }
+        let m = r + 1.0;
+        let col = rgba(c);
+        // p.w = -4 - sweep: rejim "yoy" va yoy uzunligi birga kodlanadi.
+        let p = [r, w, start, -4.0 - sweep];
+        let mk = |x: f32, y: f32| Vertex {
+            x,
+            y,
+            u: x - cx,
+            v: y - cy,
+            color: col,
+            p,
+        };
+        self.quad([
+            mk(cx - m, cy - m),
+            mk(cx + m, cy - m),
+            mk(cx - m, cy + m),
+            mk(cx + m, cy + m),
+        ]);
     }
 
     fn glow(&mut self, cx: f32, cy: f32, r: f32, c: Color) {
@@ -691,6 +727,26 @@ mod tests {
         assert_eq!(f.verts[0].p[3], -3.0);
         assert_eq!(f.verts[6].p[3], -1.0);
         assert_eq!(draws(&f).len(), 1); // bir chaqiruvda
+    }
+
+    #[test]
+    fn yoy_parametrlari() {
+        let mut b = batcher();
+        let f = b.build(
+            &[DrawCmd::Arc {
+                cx: 20.0,
+                cy: 20.0,
+                radius: 10.0,
+                width: 2.0,
+                start: 1.0,
+                sweep: 2.0,
+                color: Color::WHITE,
+            }],
+            100,
+            100,
+        );
+        assert_eq!(f.verts.len(), 6);
+        assert_eq!(f.verts[0].p, [10.0, 2.0, 1.0, -6.0]);
     }
 
     #[test]

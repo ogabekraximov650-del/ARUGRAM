@@ -18,6 +18,6 @@ pub mod prelude {
     pub use uzcoders_text::Font;
     pub use uzcoders_ui::{
         button, column, field, gap_box, grid, icon, image, lazy_column, row, scroll_column, spacer,
-        text, Element, KeyboardKind, Navigator, ScrollState, Ui,
+        spinner, text, Element, KeyboardKind, Navigator, ScrollState, Ui,
     };
 }

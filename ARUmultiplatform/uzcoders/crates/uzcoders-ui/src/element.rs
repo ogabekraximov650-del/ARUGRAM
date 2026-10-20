@@ -67,6 +67,11 @@ pub(crate) enum Kind {
         size: f32,
         color: Color,
     },
+    Spinner {
+        size: f32,
+        width: f32,
+        color: Color,
+    },
     Image {
         image: Rc<Image>,
         w: f32,
@@ -217,7 +222,7 @@ impl Element {
     pub fn size(mut self, s: f32) -> Self {
         match &mut self.kind {
             Kind::Text { size, .. } | Kind::Icon { size, .. } => *size = s,
-            Kind::Image { .. } => {}
+            Kind::Image { .. } | Kind::Spinner { .. } => {}
             Kind::Field(f) => f.size = s,
             Kind::Container => {}
         }
@@ -226,7 +231,9 @@ impl Element {
     /// Matn yoki kiritish maydoni matn rangi.
     pub fn color(mut self, c: Color) -> Self {
         match &mut self.kind {
-            Kind::Text { color, .. } | Kind::Icon { color, .. } => *color = c,
+            Kind::Text { color, .. } | Kind::Icon { color, .. } | Kind::Spinner { color, .. } => {
+                *color = c
+            }
             Kind::Field(f) => f.color = c,
             Kind::Container | Kind::Image { .. } => {}
         }
@@ -434,6 +441,17 @@ pub fn lazy_column(
         kids.push(gap_box(0.0, (count - last) as f32 * item_height));
     }
     column(kids).scroll(state)
+}
+
+/// Aylanuvchi yuklanish ko'rsatkichi (Material `CircularProgressIndicator` kabi): `size` dp, chiziq `width` dp.
+pub fn spinner(size: f32, width: f32, color: Color) -> Element {
+    let mut e = Element::new(
+        Kind::Spinner { size, width, color },
+        Style::default(),
+        Vec::new(),
+    );
+    e.style.shrink = 0.0;
+    e
 }
 
 /// Rasm: `w` x `h` dp o'lchamda (rasm shu qutiga cho'ziladi).

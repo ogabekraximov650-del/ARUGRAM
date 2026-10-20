@@ -15,7 +15,7 @@ use uzcoders_text::Font;
 
 pub use element::{
     button, column, field, gap_box, grid, icon, image, lazy_column, row, scroll_column, spacer,
-    text, Element, KeyboardKind,
+    spinner, text, Element, KeyboardKind,
 };
 pub use nav::Navigator;
 pub use scroll::ScrollState;
@@ -29,6 +29,7 @@ enum ItemKind {
     Text(String, f32, Color, u16, Option<f32>, f32),
     Icon(Rc<Path>, Color),
     Image(Rc<Image>, f32),
+    Spinner(f32, Color),
     Field(Box<FieldCfg>),
     ScrollEnd,
 }
@@ -97,6 +98,8 @@ pub struct Ui {
     back: Option<Rc<dyn Fn() -> bool>>,
     /// IME'dagi (tugallanmagan) matn oralig'i: (boshlanish, uzunlik) belgilarda.
     composing: Option<(usize, usize)>,
+    /// Oxirgi kadrda animatsiyali element (spinner) bor edi: uzluksiz chizish kerak.
+    animating: bool,
 }
 
 impl Ui {
@@ -124,6 +127,7 @@ impl Ui {
             last_blink: 0,
             back: None,
             composing: None,
+            animating: false,
         }
     }
 
@@ -204,13 +208,14 @@ impl Ui {
     pub fn needs_frame(&self) -> bool {
         self.dirty
             || self.last_rev != Some(global_revision())
+            || self.animating
             || self.scrolls.iter().any(|s| s.velocity() != 0.0)
             || (self.focus.is_some() && self.blink_phase() != self.last_blink)
     }
 
     /// Keyingi uyg'onishgacha necha ms kutish mumkin (`None` — hodisagacha cheksiz).
     pub fn next_wakeup_ms(&self) -> Option<u64> {
-        if self.scrolls.iter().any(|s| s.velocity() != 0.0) {
+        if self.animating || self.scrolls.iter().any(|s| s.velocity() != 0.0) {
             return Some(0);
         }
         self.focus
@@ -268,6 +273,7 @@ impl Ui {
         self.fields.clear();
         self.regions.clear();
         self.scrolls.clear();
+        self.animating = false;
         let mut cmds = Vec::new();
         let mut shift = 0.0f32;
         let mut shifts: Vec<f32> = Vec::new();
@@ -353,6 +359,24 @@ impl Ui {
                         rect: r,
                         opacity,
                     });
+                }
+                ItemKind::Spinner(width, color) if visible => {
+                    // Material indeterminate: aylanish + yoy uzunligi 10%..75% orasida o'zgaradi.
+                    let t = self.now as f32 / 1000.0;
+                    let tau = std::f32::consts::TAU;
+                    let phase = 0.5 + 0.5 * (t * tau / 1.33).sin();
+                    let sweep = tau * (0.10 + 0.65 * phase);
+                    let start = t * tau / 1.4 - tau * 0.25 + (1.0 - phase) * tau * 0.4;
+                    cmds.push(DrawCmd::Arc {
+                        cx: r.x + r.w * 0.5,
+                        cy: r.y + r.h * 0.5,
+                        radius: r.w.min(r.h) * 0.5,
+                        width,
+                        start,
+                        sweep,
+                        color,
+                    });
+                    self.animating = true;
                 }
                 ItemKind::Icon(path, color) if visible => {
                     cmds.push(DrawCmd::Path {
@@ -572,6 +596,10 @@ impl Ui {
                 *line_height = line_height.map(|h| h * k);
             }
             Kind::Icon { size, .. } => *size *= k,
+            Kind::Spinner { size, width, .. } => {
+                *size *= k;
+                *width *= k;
+            }
             Kind::Image { w, h, .. } => {
                 *w *= k;
                 *h *= k;
@@ -655,6 +683,10 @@ impl Ui {
             } => {
                 items[slot].kind = ItemKind::Image(image, opacity);
                 tree.add_leaf(el.style, move |_| Size::new(w, h))
+            }
+            Kind::Spinner { size, width, color } => {
+                items[slot].kind = ItemKind::Spinner(width, color);
+                tree.add_leaf(el.style, move |_| Size::new(size, size))
             }
             Kind::Icon { path, size, color } => {
                 items[slot].kind = ItemKind::Icon(path, color);

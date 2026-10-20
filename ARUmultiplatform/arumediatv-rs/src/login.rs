@@ -491,12 +491,13 @@ impl Login {
         };
         if step != Step::Qr && step != Step::Done {
             body.push(
-                column(vec![t(label, 16.0, Color::WHITE).bold()])
-                    .glass(if self.busy.get() {
-                        ACCENT.with_opacity(0.45)
-                    } else {
-                        ACCENT.with_opacity(0.8)
-                    })
+                column(vec![if self.busy.get() {
+                    // Kotlin'dagi kabi: bosilganda tugma ichida aylanuvchi chiziq.
+                    column(vec![spinner(20.0, 2.0, Color::WHITE)]).height(24.0).center()
+                } else {
+                    t(label, 16.0, Color::WHITE).bold()
+                }])
+                    .glass(ACCENT.with_opacity(if self.busy.get() { 0.5 } else { 0.62 }))
                     .radius(16.0)
                     .padding_xy(0.0, 16.0)
                     .center()

@@ -33,6 +33,16 @@ pub enum DrawCmd {
         radius: f32,
         tint: Color,
     },
+    /// Aylana yoyi (yuklanish ko'rsatkichi): `start` va `sweep` radianda, `width` — chiziq qalinligi.
+    Arc {
+        cx: f32,
+        cy: f32,
+        radius: f32,
+        width: f32,
+        start: f32,
+        sweep: f32,
+        color: Color,
+    },
     /// Yumshoq radial yorug'lik dog'i (markazdan chetga so'nadi): fon uchun.
     Glow {
         cx: f32,
@@ -243,6 +253,29 @@ impl Canvas {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_arc(&mut self, cx: f32, cy: f32, r: f32, w: f32, start: f32, sweep: f32, c: Color) {
+        let (bx0, by0, bx1, by1) = self.bounds();
+        let x0 = ((cx - r - 1.0).floor() as i32).max(bx0);
+        let y0 = ((cy - r - 1.0).floor() as i32).max(by0);
+        let x1 = ((cx + r + 1.0).ceil() as i32).min(bx1);
+        let y1 = ((cy + r + 1.0).ceil() as i32).min(by1);
+        let tau = std::f32::consts::TAU;
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let (dx, dy) = (x as f32 + 0.5 - cx, y as f32 + 0.5 - cy);
+                let d = (dx * dx + dy * dy).sqrt();
+                let ring = (0.5 - ((d - (r - w * 0.5)).abs() - w * 0.5)).clamp(0.0, 1.0);
+                if ring <= 0.0 {
+                    continue;
+                }
+                let rel = (dy.atan2(dx) - start).rem_euclid(tau);
+                let ca = (((rel * d).min((sweep - rel) * d)) + 0.5).clamp(0.0, 1.0);
+                self.blend(x, y, c, ring * ca);
+            }
+        }
+    }
+
     pub fn draw_glow(&mut self, cx: f32, cy: f32, radius: f32, c: Color) {
         let (bx0, by0, bx1, by1) = self.bounds();
         let x0 = ((cx - radius).floor() as i32).max(bx0);
@@ -392,6 +425,15 @@ impl Canvas {
                     radius,
                     color,
                 } => self.draw_glow(*cx, *cy, *radius, *color),
+                DrawCmd::Arc {
+                    cx,
+                    cy,
+                    radius,
+                    width,
+                    start,
+                    sweep,
+                    color,
+                } => self.draw_arc(*cx, *cy, *radius, *width, *start, *sweep, *color),
                 DrawCmd::PushClip(r) => {
                     let (bx0, by0, bx1, by1) = self.bounds();
                     self.clips.push((

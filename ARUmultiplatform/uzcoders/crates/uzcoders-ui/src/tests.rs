@@ -381,3 +381,12 @@ fn shisha_va_dog_buyruqlari() {
     assert!(cmds.iter().any(|c| matches!(c, DrawCmd::Glow { .. })));
     assert!(cmds.iter().any(|c| matches!(c, DrawCmd::Glass { .. })));
 }
+
+#[test]
+fn spinner_uzluksiz_chizadi() {
+    let mut ui = Ui::new(font(), || column(vec![spinner(20.0, 2.0, Color::WHITE)]));
+    let cmds = ui.frame(SZ);
+    assert!(cmds.iter().any(|c| matches!(c, DrawCmd::Arc { .. })));
+    assert!(ui.needs_frame()); // animatsiya: har kadr
+    assert_eq!(ui.next_wakeup_ms(), Some(0));
+}
