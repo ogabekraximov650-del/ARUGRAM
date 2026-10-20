@@ -220,7 +220,8 @@ impl Login {
                 self.hint.set(info.hint);
                 self.step.set(Step::Password);
             }
-            "done" => self.finish(),
+            // Ilova sessiyasi bor bo'lsa botga qayta /start yubormaymiz (bosh sahifa allaqachon ochilgan).
+            "done" if crate::api::load_session().is_none() => self.finish(),
             _ => {}
         }
     }
