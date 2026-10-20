@@ -14,7 +14,8 @@ pub enum Step {
     Code,
     Password,
     Qr,
-    Done,
+    /// Telegram ulandi, ilova hisobi tasdiqlanmoqda.
+    Finishing,
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -128,12 +129,13 @@ pub struct Login {
     scroll: ScrollState,
     picker_scroll: ScrollState,
     backend: Arc<dyn Backend>,
+    on_done: Rc<dyn Fn(String)>,
     wait: State<u32>,
     hint: State<String>,
 }
 
 impl Login {
-    pub fn new(backend: Arc<dyn Backend>) -> Rc<Login> {
+    pub fn new(backend: Arc<dyn Backend>, on_done: Rc<dyn Fn(String)>) -> Rc<Login> {
         let uz = COUNTRIES.iter().position(|c| c.iso == "UZ");
         let login = Rc::new(Login {
             nav: Navigator::new(Route::Login),
@@ -150,6 +152,7 @@ impl Login {
             scroll: ScrollState::new(),
             picker_scroll: ScrollState::new(),
             backend,
+            on_done,
             wait: State::new(0),
             hint: State::new(String::new()),
         });
@@ -192,7 +195,7 @@ impl Login {
     }
 
     /// Saqlangan bosqichni ekranga qaytaradi.
-    fn restore(&self, info: LoginInfo) {
+    fn restore(self: &Rc<Self>, info: LoginInfo) {
         if self.step.get() != Step::Phone || self.busy.get() || !self.number.get().is_empty() {
             return; // foydalanuvchi allaqachon yozishni boshlagan
         }
@@ -217,7 +220,7 @@ impl Login {
                 self.hint.set(info.hint);
                 self.step.set(Step::Password);
             }
-            "done" => self.step.set(Step::Done),
+            "done" => self.finish(),
             _ => {}
         }
     }
@@ -306,13 +309,25 @@ impl Login {
                     }
                 });
             }
-            Step::Qr | Step::Done => {}
+            Step::Qr | Step::Finishing => {}
         }
     }
 
-    /// Telegram hisobi ulandi. Keyingi bosqich (ilova hisobini botga `/start` bilan tasdiqlash) hali yo'q.
-    fn finish(&self) {
-        self.step.set(Step::Done);
+    /// Telegram ulandi: ilova hisobini botga `/start <token>` yuborib tasdiqlaymiz va sessiya olamiz.
+    fn finish(self: &Rc<Self>) {
+        self.step.set(Step::Finishing);
+        self.error.set(None);
+        let (b, me) = (self.backend.clone(), self.clone());
+        spawn_bg(move || b.finish_login(), move |r| match r {
+            Ok(session) => {
+                crate::api::save_session(&session);
+                (me.on_done)(session);
+            }
+            Err(e) => {
+                me.error.set(Some(e));
+                me.step.set(Step::Phone);
+            }
+        });
     }
 
     pub fn view(self: &Rc<Self>) -> Element {
@@ -336,7 +351,7 @@ impl Login {
         let step = self.step.get();
         let subtitle = match step {
             Step::Phone => "Telegram raqamingizni kiriting".to_string(),
-            Step::Done => "Telegram hisobi ulandi".to_string(),
+            Step::Finishing => "Hisob tasdiqlanmoqda...".to_string(),
             Step::Code => format!(
                 "{}\n{} {}",
                 self.sent_info.get(),
@@ -436,12 +451,8 @@ impl Login {
                         .on_submit(move || me.submit()),
                 );
             }
-            Step::Done => {
-                body.push(t(
-                    "Telegram hisobingiz ulandi. Ilova hisobiga kirish (bot orqali tasdiqlash) keyingi bosqichda qo'shiladi.",
-                    14.0,
-                    TEXT_DIM,
-                ));
+            Step::Finishing => {
+                body.push(column(vec![spinner(40.0, 3.0, ACCENT2)]).height(80.0).center());
             }
             Step::Qr => {
                 body.push(
@@ -487,9 +498,9 @@ impl Login {
             Step::Phone => "Kod yuborish",
             Step::Code => "Tasdiqlash",
             Step::Password => "Kirish",
-            Step::Qr | Step::Done => "",
+            Step::Qr | Step::Finishing => "",
         };
-        if step != Step::Qr && step != Step::Done {
+        if step != Step::Qr && step != Step::Finishing {
             body.push(
                 column(vec![if self.busy.get() {
                     // Kotlin'dagi kabi: bosilganda tugma ichida aylanuvchi chiziq.

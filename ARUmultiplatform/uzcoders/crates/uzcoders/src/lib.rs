@@ -14,10 +14,11 @@ pub mod prelude {
     pub use std::rc::Rc;
     pub use uzcoders_core::*;
     pub use uzcoders_layout::{Align, Justify};
-    pub use uzcoders_render::{decode_png, Canvas, DrawCmd, Image};
+    pub use uzcoders_render::{decode_image, decode_jpeg, decode_png, Canvas, DrawCmd, Image};
     pub use uzcoders_text::Font;
     pub use uzcoders_ui::{
-        button, column, field, gap_box, grid, icon, image, lazy_column, row, scroll_column, spacer,
-        spinner, text, Element, KeyboardKind, Navigator, ScrollState, Ui,
+        button, column, field, gap_box, grid, icon, image, image_fill, lazy_column, row,
+        scroll_column, spacer, spinner, stack, text, Element, KeyboardKind, Navigator, ScrollState,
+        Ui,
     };
 }

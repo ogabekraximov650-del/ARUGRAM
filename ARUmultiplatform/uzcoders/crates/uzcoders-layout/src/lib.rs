@@ -56,6 +56,10 @@ pub struct Style {
     pub scroll: bool,
     /// Boshlang'ich (basis) o'lcham 0 deb olinadi: `grow` bo'yicha teng bo'linadi (Compose'dagi `weight`).
     pub basis0: bool,
+    /// Bolalar bir-birining ustiga (qatlam) qo'yiladi: har biri tugun maydonini to'liq egallaydi.
+    pub stack: bool,
+    /// Balandlik = kenglik * aspect (0 — o'chiq).
+    pub aspect: f32,
 }
 
 impl Default for Style {
@@ -73,6 +77,8 @@ impl Default for Style {
             justify: Justify::Start,
             scroll: false,
             basis0: false,
+            stack: false,
+            aspect: 0.0,
         }
     }
 }
@@ -179,6 +185,10 @@ impl Tree {
             _ => None,
         };
         let inner_avail = explicit_w.unwrap_or(avail_w) - s.padding.horizontal();
+        if s.aspect > 0.0 && explicit_w.unwrap_or(avail_w).is_finite() {
+            let w = explicit_w.unwrap_or(avail_w);
+            return Size::new(w, explicit_h.unwrap_or(w * s.aspect));
+        }
 
         let content = if let Some(m) = &n.measure {
             m(inner_avail.max(0.0))
@@ -194,11 +204,42 @@ impl Tree {
     fn measure_children(&self, n: &Node, inner_avail_w: f32) -> Size {
         let s = &n.style;
         let axis = s.direction;
+        if s.stack {
+            let (mut w, mut h) = (0.0f32, 0.0f32);
+            for &c in &n.children {
+                let cm = self.nodes[c].style.margin;
+                let sz = self.measure(c, (inner_avail_w - cm.horizontal()).max(0.0));
+                w = w.max(sz.w + cm.horizontal());
+                h = h.max(sz.h + cm.vertical());
+            }
+            return Size::new(w, h);
+        }
+        // Qatorda `weight` bolalar o'z ulushidagi kenglikda o'lchanadi (aks holda ular to'liq kenglikda o'lchanib, balandlik noto'g'ri chiqadi).
+        let total_grow: f32 = if axis == Axis::Row {
+            n.children
+                .iter()
+                .filter(|&&c| self.nodes[c].style.basis0)
+                .map(|&c| self.nodes[c].style.grow)
+                .sum()
+        } else {
+            0.0
+        };
+        let gaps = s.gap * n.children.len().saturating_sub(1) as f32;
         let mut main = 0.0f32;
         let mut cross = 0.0f32;
         for (i, &c) in n.children.iter().enumerate() {
-            let cm = self.nodes[c].style.margin;
-            let sz = self.measure(c, (inner_avail_w - cm.horizontal()).max(0.0));
+            let cs = &self.nodes[c].style;
+            let cm = cs.margin;
+            let avail = if axis == Axis::Row
+                && cs.basis0
+                && total_grow > 0.0
+                && inner_avail_w.is_finite()
+            {
+                ((inner_avail_w - gaps) * cs.grow / total_grow - cm.horizontal()).max(0.0)
+            } else {
+                (inner_avail_w - cm.horizontal()).max(0.0)
+            };
+            let sz = self.measure(c, avail);
             let outer = Size::new(sz.w + cm.horizontal(), sz.h + cm.vertical());
             let (m, x) = split(axis, outer);
             main += m + if i > 0 { s.gap } else { 0.0 };
@@ -216,6 +257,21 @@ impl Tree {
             return;
         }
         let content = rect.deflate(style.padding);
+        if style.stack {
+            for &c in &children {
+                let m = self.nodes[c].style.margin;
+                self.place(
+                    c,
+                    Rect::new(
+                        content.x + m.left,
+                        content.y + m.top,
+                        (content.w - m.horizontal()).max(0.0),
+                        (content.h - m.vertical()).max(0.0),
+                    ),
+                );
+            }
+            return;
+        }
         let axis = style.direction;
         let (content_main, content_cross) = split(axis, content.size());
 
@@ -349,6 +405,7 @@ impl Tree {
                     main_size,
                 ),
             };
+            let h = if cs.aspect > 0.0 { w * cs.aspect } else { h };
             self.place(it.id, Rect::new(x, y, w, h));
             cursor += main_size + it.margin_main + style.gap + extra_gap;
         }
@@ -379,6 +436,55 @@ mod tests {
             height: Dim::Px(h),
             ..Style::default()
         }
+    }
+
+    #[test]
+    fn stack_va_aspect_va_ulushli_qator() {
+        let mut t = Tree::new();
+        let img = t.add(
+            Style {
+                aspect: 1.5,
+                ..Style::default()
+            },
+            vec![],
+        );
+        let over = t.add(Style::default(), vec![]);
+        let card = t.add(
+            Style {
+                stack: true,
+                aspect: 1.5,
+                basis0: true,
+                grow: 1.0,
+                ..Style::default()
+            },
+            vec![img, over],
+        );
+        let card2 = t.add(
+            Style {
+                aspect: 1.5,
+                basis0: true,
+                grow: 1.0,
+                ..Style::default()
+            },
+            vec![],
+        );
+        let row = t.add(
+            Style {
+                direction: Axis::Row,
+                gap: 10.0,
+                ..Style::default()
+            },
+            vec![card, card2],
+        );
+        let root = t.add(Style::default(), vec![row]);
+        t.compute(root, Size::new(210.0, 600.0));
+        assert_eq!(t.rect(card).w, 100.0);
+        assert_eq!(t.rect(card).h, 150.0);
+        assert_eq!(t.rect(row).h, 150.0);
+        // Qatlam: ikkala bola karta maydonini to'ldiradi.
+        assert_eq!(t.rect(over).w, 100.0);
+        assert_eq!(t.rect(over).h, 150.0);
+        assert_eq!(t.rect(card2).x, 110.0);
     }
 
     #[test]

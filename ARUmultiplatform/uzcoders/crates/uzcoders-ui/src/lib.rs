@@ -14,8 +14,8 @@ use uzcoders_render::{Canvas, DrawCmd, Image, Path};
 use uzcoders_text::Font;
 
 pub use element::{
-    button, column, field, gap_box, grid, icon, image, lazy_column, row, scroll_column, spacer,
-    spinner, text, Element, KeyboardKind,
+    button, column, field, gap_box, grid, icon, image, image_fill, lazy_column, row, scroll_column,
+    spacer, spinner, stack, text, Element, KeyboardKind,
 };
 pub use nav::Navigator;
 pub use scroll::ScrollState;
@@ -41,6 +41,8 @@ struct Item {
     radius: f32,
     border: Option<(f32, Color)>,
     glass: Option<Color>,
+    backdrop: Option<(Color, f32)>,
+    gradient: Option<(Color, Color)>,
     glows: Vec<(f32, f32, f32, Color)>,
     hit: Option<usize>,
     scroll: Option<ScrollState>,
@@ -253,6 +255,7 @@ impl Ui {
         self.step_flings(dt);
         self.last_blink = self.blink_phase();
         uzcoders_core::set_density(self.scale);
+        uzcoders_core::set_window_dp(size.w / self.scale, size.h / self.scale);
         let k = self.scale;
         let i = self.insets_px;
         uzcoders_core::set_safe_insets(EdgeInsets::new(
@@ -310,6 +313,22 @@ impl Ui {
                 }
             }
             if visible {
+                if let Some((top, bottom)) = it.gradient {
+                    cmds.push(DrawCmd::Gradient {
+                        rect: r,
+                        radius: it.radius,
+                        top,
+                        bottom,
+                    });
+                }
+                if let Some((tint, blur)) = it.backdrop {
+                    cmds.push(DrawCmd::Backdrop {
+                        rect: r,
+                        radius: it.radius,
+                        blur,
+                        tint,
+                    });
+                }
                 if let Some(t) = it.glass {
                     cmds.push(DrawCmd::Glass {
                         rect: r,
@@ -578,6 +597,9 @@ impl Ui {
         el.style.width = dim(el.style.width);
         el.style.height = dim(el.style.height);
         el.radius *= k;
+        if let Some((_, b)) = &mut el.backdrop {
+            *b *= k;
+        }
         for g in &mut el.glows {
             g.2 *= k;
         }
@@ -635,6 +657,8 @@ impl Ui {
             radius: el.radius,
             border: el.border,
             glass: el.glass,
+            backdrop: el.backdrop,
+            gradient: el.gradient,
             glows: std::mem::take(&mut el.glows),
             hit,
             scroll: el.scroll,
@@ -715,6 +739,8 @@ impl Ui {
                 radius: 0.0,
                 border: None,
                 glass: None,
+                backdrop: None,
+                gradient: None,
                 glows: Vec::new(),
                 hit: None,
                 scroll: None,

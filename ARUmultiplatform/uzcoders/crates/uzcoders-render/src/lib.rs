@@ -1,10 +1,12 @@
 //! uzcoders-render — chizish buyruqlari ro'yxati va dasturiy (CPU) canvas.
 
 pub mod image;
+pub mod jpeg;
 pub mod path;
 pub mod png;
 
-pub use image::{decode_png, Image};
+pub use image::{decode_image, decode_png, Image};
+pub use jpeg::decode_jpeg;
 pub use path::Path;
 
 use std::rc::Rc;
@@ -31,6 +33,20 @@ pub enum DrawCmd {
     Glass {
         rect: Rect,
         radius: f32,
+        tint: Color,
+    },
+    /// Vertikal gradient to'ldirish (yumaloq burchakli): tepa va past ranglar orasida.
+    Gradient {
+        rect: Rect,
+        radius: f32,
+        top: Color,
+        bottom: Color,
+    },
+    /// Haqiqiy shisha: ostidagi (shu paytgacha chizilgan) tasvir `blur` piksel radiusda xiralashadi, ustiga `tint` va yorug' chegara.
+    Backdrop {
+        rect: Rect,
+        radius: f32,
+        blur: f32,
         tint: Color,
     },
     /// Aylana yoyi (yuklanish ko'rsatkichi): `start` va `sweep` radianda, `width` — chiziq qalinligi.
@@ -253,6 +269,98 @@ impl Canvas {
         }
     }
 
+    pub fn fill_gradient(&mut self, r: Rect, radius: f32, top: Color, bottom: Color) {
+        let (bx0, by0, bx1, by1) = self.bounds();
+        let x0 = (r.x.floor() as i32).max(bx0);
+        let y0 = (r.y.floor() as i32).max(by0);
+        let x1 = (r.right().ceil() as i32).min(bx1);
+        let y1 = (r.bottom().ceil() as i32).min(by1);
+        let (hw, hh) = (r.w * 0.5, r.h * 0.5);
+        let rad = radius.min(hw).min(hh).max(0.0);
+        let (cx, cy) = (r.x + hw, r.y + hh);
+        for y in y0..y1 {
+            let t = ((y as f32 + 0.5 - r.y) / r.h).clamp(0.0, 1.0);
+            let c = top.lerp(bottom, t);
+            for x in x0..x1 {
+                let (px, py) = (x as f32 + 0.5 - cx, y as f32 + 0.5 - cy);
+                let (qx, qy) = (px.abs() - (hw - rad), py.abs() - (hh - rad));
+                let sd =
+                    (qx.max(0.0).powi(2) + qy.max(0.0).powi(2)).sqrt() + qx.max(qy).min(0.0) - rad;
+                self.blend(x, y, c, (0.5 - sd).clamp(0.0, 1.0));
+            }
+        }
+    }
+
+    /// Backdrop: hududni xiralashtirib, yumaloq maska bilan qayta chizadi (CPU zaxirasi).
+    pub fn draw_backdrop(&mut self, r: Rect, radius: f32, blur: f32, tint: Color) {
+        let (bx0, by0, bx1, by1) = self.bounds();
+        let x0 = (r.x.floor() as i32).max(bx0);
+        let y0 = (r.y.floor() as i32).max(by0);
+        let x1 = (r.right().ceil() as i32).min(bx1);
+        let y1 = (r.bottom().ceil() as i32).min(by1);
+        if x1 <= x0 || y1 <= y0 {
+            return;
+        }
+        let (w, h) = ((x1 - x0) as usize, (y1 - y0) as usize);
+        let mut buf: Vec<[f32; 3]> = Vec::with_capacity(w * h);
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let i = (y as usize * self.width + x as usize) * 4;
+                buf.push([
+                    self.pixels[i] as f32,
+                    self.pixels[i + 1] as f32,
+                    self.pixels[i + 2] as f32,
+                ]);
+            }
+        }
+        // Ikki o'tishli quti xiralashtirish (gorizontal + vertikal), ikki marta ~ Gauss.
+        let rad = ((blur * 0.5) as usize).max(1);
+        for _ in 0..2 {
+            for horizontal in [true, false] {
+                let src = buf.clone();
+                let (len, lines) = if horizontal { (w, h) } else { (h, w) };
+                for l in 0..lines {
+                    for i in 0..len {
+                        let (a, b) = (i.saturating_sub(rad), (i + rad).min(len - 1));
+                        let mut acc = [0f32; 3];
+                        for k in a..=b {
+                            let idx = if horizontal { l * w + k } else { k * w + l };
+                            for c in 0..3 {
+                                acc[c] += src[idx][c];
+                            }
+                        }
+                        let n = (b - a + 1) as f32;
+                        let idx = if horizontal { l * w + i } else { i * w + l };
+                        buf[idx] = [acc[0] / n, acc[1] / n, acc[2] / n];
+                    }
+                }
+            }
+        }
+        let (hw, hh) = (r.w * 0.5, r.h * 0.5);
+        let rad_c = radius.min(hw).min(hh).max(0.0);
+        let (cx, cy) = (r.x + hw, r.y + hh);
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let (px, py) = (x as f32 + 0.5 - cx, y as f32 + 0.5 - cy);
+                let (qx, qy) = (px.abs() - (hw - rad_c), py.abs() - (hh - rad_c));
+                let sd = (qx.max(0.0).powi(2) + qy.max(0.0).powi(2)).sqrt() + qx.max(qy).min(0.0)
+                    - rad_c;
+                let cov = (0.5 - sd).clamp(0.0, 1.0);
+                if cov > 0.0 {
+                    let b = buf[(y - y0) as usize * w + (x - x0) as usize];
+                    self.blend(
+                        x,
+                        y,
+                        Color::rgba(b[0] as u8, b[1] as u8, b[2] as u8, 255),
+                        cov,
+                    );
+                }
+            }
+        }
+        self.fill_round_rect(r, radius, tint);
+        self.stroke_round_rect(r, radius, 1.5, Color::rgba(255, 255, 255, 90));
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn draw_arc(&mut self, cx: f32, cy: f32, r: f32, w: f32, start: f32, sweep: f32, c: Color) {
         let (bx0, by0, bx1, by1) = self.bounds();
@@ -415,6 +523,18 @@ impl Canvas {
                     rect,
                     opacity,
                 } => self.draw_image(image, *rect, *opacity),
+                DrawCmd::Gradient {
+                    rect,
+                    radius,
+                    top,
+                    bottom,
+                } => self.fill_gradient(*rect, *radius, *top, *bottom),
+                DrawCmd::Backdrop {
+                    rect,
+                    radius,
+                    blur,
+                    tint,
+                } => self.draw_backdrop(*rect, *radius, *blur, *tint),
                 DrawCmd::Glass { rect, radius, tint } => {
                     self.fill_round_rect(*rect, *radius, *tint);
                     self.stroke_round_rect(*rect, *radius, 1.5, Color::rgba(255, 255, 255, 90));
@@ -510,6 +630,22 @@ mod tests {
         let dark_right = (20..80).any(|x| (0..30).any(|y| c.pixel(x, y).r < 250));
         assert!(dark_left);
         assert!(!dark_right);
+    }
+
+    #[test]
+    fn backdrop_xiralashtiradi() {
+        let mut c = canvas(40, 20);
+        c.clear(Color::BLACK);
+        // Chap yarmi oq, o'ng yarmi qora; panel o'rtada chegara ustida: chegara xiralashishi kerak.
+        c.fill_round_rect(Rect::new(0.0, 0.0, 20.0, 20.0), 0.0, Color::WHITE);
+        c.draw_backdrop(
+            Rect::new(8.0, 2.0, 24.0, 16.0),
+            4.0,
+            8.0,
+            Color::rgba(0, 0, 0, 0),
+        );
+        let mid = c.pixel(20, 10).r;
+        assert!(mid > 40 && mid < 215, "o'rta piksel xiralashmadi: {mid}");
     }
 
     #[test]

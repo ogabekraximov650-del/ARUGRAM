@@ -6,6 +6,7 @@ use std::cell::Cell;
 thread_local! {
     static SAFE: Cell<EdgeInsets> = const { Cell::new(EdgeInsets::ZERO) };
     static DENSITY: Cell<f32> = const { Cell::new(1.0) };
+    static WINDOW_DP: Cell<(f32, f32)> = const { Cell::new((0.0, 0.0)) };
 }
 
 /// Tizim panellari ostida qolmaslik uchun kerakli chekinishlar (dp). Qobiq o'rnatadi, UI qurilganda o'qiladi.
@@ -24,4 +25,13 @@ pub fn density() -> f32 {
 
 pub fn set_density(d: f32) {
     DENSITY.with(|c| c.set(d));
+}
+
+/// Oyna o'lchami (dp). UI qurilayotganda o'qiladi (masalan kartalar kengligini hisoblash uchun).
+pub fn window_dp() -> (f32, f32) {
+    WINDOW_DP.with(|w| w.get())
+}
+
+pub fn set_window_dp(w: f32, h: f32) {
+    WINDOW_DP.with(|c| c.set((w, h)));
 }

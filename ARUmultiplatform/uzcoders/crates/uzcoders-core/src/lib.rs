@@ -11,7 +11,7 @@ pub mod task;
 
 pub use anim::{Easing, Spring, Tween};
 pub use color::Color;
-pub use env::{density, safe_insets, set_density, set_safe_insets};
+pub use env::{density, safe_insets, set_density, set_safe_insets, set_window_dp, window_dp};
 pub use event::{PointerEvent, PointerKind};
 pub use geometry::{EdgeInsets, Point, Rect, Size};
 pub use state::{global_revision, invalidate, State};

@@ -66,6 +66,8 @@ pub trait Backend: Send + Sync {
     fn nearest_country(&self) -> Option<String>;
     /// Saqlangan kirish bosqichi (tarmoqsiz).
     fn login_state(&self) -> Option<LoginInfo>;
+    /// Telegram ulangach ilova hisobiga kirish: botga `/start <token>` yuboriladi, server sessiya beradi.
+    fn finish_login(&self) -> Result<String, String>;
 }
 
 /// Sinov rejimi: tarmoqsiz. Kod `12345` bo'lsa ikki bosqichli parol so'raladi.
@@ -91,6 +93,9 @@ impl Backend for StubBackend {
     }
     fn login_state(&self) -> Option<LoginInfo> {
         None
+    }
+    fn finish_login(&self) -> Result<String, String> {
+        Err("Sinov rejimi: server ulanmagan".into())
     }
 }
 
@@ -125,19 +130,18 @@ fn ensure_master_key(dir: &str) -> Result<(), String> {
     Ok(())
 }
 
-const API_BASE: &str = "https://arumediatv.uzcom.workers.dev";
-
 /// Haqiqiy Telegram: ARUMEDIATV'ning Rust yadrosi (`rust_core`, grammers/MTProto).
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
 pub struct TgBackend {
     dir: String,
     ready: Mutex<bool>,
+    bot: Mutex<String>,
 }
 
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
 impl TgBackend {
     pub fn new(files_dir: &str) -> TgBackend {
-        TgBackend { dir: format!("{files_dir}/tg"), ready: Mutex::new(false) }
+        TgBackend { dir: format!("{files_dir}/tg"), ready: Mutex::new(false), bot: Mutex::new(String::new()) }
     }
 
     /// Tarmoqsiz ishga tushirish: kalit va saqlangan sessiya/kirish holati uchun (api_id keyinroq).
@@ -166,10 +170,11 @@ impl TgBackend {
         let dir = c(&self.dir);
         let empty = c("");
         call(rust_core::telegram::rust_tg_init(dir.as_ptr(), 0, empty.as_ptr()));
-        let cfg = http_get("/api/tg/config")?;
+        let cfg = crate::api::get_json("/api/tg/config", "", None)?;
         if !cfg["enabled"].as_bool().unwrap_or(false) {
             return Err("Telegram orqali kirish hozircha yoqilmagan".into());
         }
+        *self.bot.lock().unwrap() = cfg["bot"].as_str().unwrap_or("").to_string();
         let bot = c(cfg["bot"].as_str().unwrap_or(""));
         rust_core::telegram::rust_tg_set_bot(bot.as_ptr());
         let id = cfg["api_id"].as_i64().unwrap_or(0) as i32;
@@ -200,33 +205,6 @@ fn call(p: *mut c_char) -> Value {
     serde_json::from_str(&s).unwrap_or(Value::Null)
 }
 
-/// Worker'ga imzolangan (`X-App-Sig`) GET so'rovi.
-fn http_get(path: &str) -> Result<Value, String> {
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-        .to_string();
-    let (t, m, p) = (CString::new(ts).unwrap_or_default(), CString::new("GET").unwrap_or_default(), CString::new(path).unwrap_or_default());
-    let sig_ptr = unsafe { rust_core::app_sign(t.as_ptr(), m.as_ptr(), p.as_ptr()) };
-    let sig = if sig_ptr.is_null() {
-        String::new()
-    } else {
-        let s = unsafe { CStr::from_ptr(sig_ptr) }.to_string_lossy().into_owned();
-        rust_core::ffi_utils::rust_free_string(sig_ptr);
-        s
-    };
-    let mut req = ureq::get(&format!("{API_BASE}{path}"))
-        .timeout(std::time::Duration::from_secs(10))
-        .set("X-App-Version", "0.1.0");
-    if !sig.is_empty() {
-        req = req.set("X-App-Sig", &sig);
-    }
-    let resp = req.call().map_err(|e| format!("Serverga ulanib bo'lmadi: {e}"))?;
-    let body = resp.into_string().map_err(|e| format!("Server javobi o'qilmadi: {e}"))?;
-    serde_json::from_str::<Value>(&body).map_err(|e| format!("Server javobi noto'g'ri: {e}"))
-}
-
 impl Backend for TgBackend {
     fn request_code(&self, phone: &str) -> Step {
         let p = CString::new(phone).unwrap_or_default();
@@ -240,6 +218,37 @@ impl Backend for TgBackend {
         let c = CString::new(password).unwrap_or_default();
         self.run(|| rust_core::telegram::rust_tg_check_password(c.as_ptr()))
     }
+    fn finish_login(&self) -> Result<String, String> {
+        self.ensure()?;
+        let dev = serde_json::json!({"device": "Android", "platform": "Android", "app_version": crate::api::APP_VERSION});
+        let (code, body) = crate::api::request("POST", "/api/auth/telegram/start", "", Some(&dev), None)?;
+        let j: Value = serde_json::from_str(&body).map_err(|_| "Server javobi noto'g'ri".to_string())?;
+        let token = j["token"].as_str().unwrap_or("").to_string();
+        if code >= 400 || token.is_empty() {
+            return Err("Server bilan bog'lanib bo'lmadi".into());
+        }
+        let bot = CString::new(self.bot.lock().unwrap().as_str()).unwrap_or_default();
+        let tok = CString::new(token.as_str()).unwrap_or_default();
+        let r = call(rust_core::telegram::rust_tg_start_bot(bot.as_ptr(), tok.as_ptr()));
+        if !r["ok"].as_bool().unwrap_or(false) {
+            return Err(r["error"].as_str().unwrap_or("Botga yuborilmadi").to_string());
+        }
+        for _ in 0..40 {
+            std::thread::sleep(std::time::Duration::from_millis(750));
+            let Ok(j) = crate::api::get_json("/api/auth/telegram/status", &format!("?token={token}"), None) else { continue };
+            match j["status"].as_str().unwrap_or("") {
+                "ok" => {
+                    let s = j["session"].as_str().unwrap_or("");
+                    return if s.is_empty() { Err("Sessiya olinmadi".into()) } else { Ok(s.to_string()) };
+                }
+                "expired" => return Err("Kirish muddati tugadi — qayta urinib ko'ring".into()),
+                "banned" => return Err(j["message"].as_str().filter(|m| !m.is_empty()).unwrap_or("Hisobingiz bloklangan.").to_string()),
+                _ => {}
+            }
+        }
+        Err("Kirish tasdiqlanmadi — qayta urinib ko'ring".into())
+    }
+
     fn login_state(&self) -> Option<LoginInfo> {
         self.ensure_offline().ok()?;
         let j = call(rust_core::telegram::rust_tg_login_state());

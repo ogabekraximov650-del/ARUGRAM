@@ -1,6 +1,9 @@
 //! ARUMEDIATV — Rust + uzcoders versiyasi. Hozir: Telegram orqali kirish oynasi.
 
+mod api;
 mod backend;
+mod data;
+mod home;
 mod countries;
 mod flags;
 mod login;
@@ -11,7 +14,9 @@ use backend::Backend;
 use backend::TgBackend;
 #[cfg(not(target_os = "android"))]
 use backend::StubBackend;
+use home::Home;
 use login::Login;
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 use uzcoders::prelude::*;
@@ -19,6 +24,12 @@ use uzcoders::prelude::*;
 static REGULAR: &[u8] = include_bytes!("../assets/fonts/Roboto-Regular.ttf");
 static BOLD: &[u8] = include_bytes!("../assets/fonts/Roboto-Bold.ttf");
 static BLACK: &[u8] = include_bytes!("../assets/fonts/Roboto-Black.ttf");
+
+#[derive(Clone, Copy, PartialEq)]
+enum Screen {
+    Login,
+    Home,
+}
 
 /// Ilovaning kirish nuqtasi: `scale` — ekran zichligi.
 pub fn make_ui(scale: f32) -> Ui {
@@ -28,13 +39,36 @@ pub fn make_ui(scale: f32) -> Ui {
     let backend: Arc<dyn Backend> = Arc::new(TgBackend::new(&uzcoders::android::files_dir()));
     #[cfg(not(target_os = "android"))]
     let backend: Arc<dyn Backend> = Arc::new(StubBackend);
-    let login = Login::new(backend);
-    let l = login.clone();
-    let mut ui = Ui::new(font, move || l.view());
+
+    let screen = State::new(Screen::Login);
+    let home: Rc<RefCell<Option<Rc<Home>>>> = Rc::new(RefCell::new(None));
+    // Kirish tugagach: sessiya saqlanadi va bosh sahifa ochiladi.
+    let (s2, h2) = (screen.clone(), home.clone());
+    let on_done: Rc<dyn Fn(String)> = Rc::new(move |session: String| {
+        *h2.borrow_mut() = Some(Home::new(session));
+        s2.set(Screen::Home);
+    });
+    let login = Login::new(backend, on_done.clone());
+    // Saqlangan sessiya bo'lsa to'g'ridan-to'g'ri bosh sahifa.
+    if let Some(session) = api::load_session() {
+        on_done(session);
+    }
+
+    let (l, h, s) = (login.clone(), home.clone(), screen.clone());
+    let mut ui = Ui::new(font, move || match s.get() {
+        Screen::Login => l.view(),
+        Screen::Home => match h.borrow().as_ref() {
+            Some(home) => home.view(),
+            None => l.view(),
+        },
+    });
     ui.add_font(700, Rc::new(Font::parse(BOLD).expect("Roboto Bold")));
     ui.add_font(900, Rc::new(Font::parse(BLACK).expect("Roboto Black")));
-    let l = login.clone();
-    ui.set_back_handler(move || l.back());
+    let (l, h, s) = (login.clone(), home.clone(), screen.clone());
+    ui.set_back_handler(move || match s.get() {
+        Screen::Login => l.back(),
+        Screen::Home => h.borrow().as_ref().is_some_and(|home| home.back()),
+    });
     ui.set_scale(scale);
     ui
 }

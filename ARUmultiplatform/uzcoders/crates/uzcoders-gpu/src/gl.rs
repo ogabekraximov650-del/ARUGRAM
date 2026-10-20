@@ -61,6 +61,13 @@ extern "C" {
     fn glBlendFuncSeparate(a: u32, b: u32, c: u32, d: u32);
     fn glDrawArrays(mode: u32, first: i32, count: i32);
     fn glGetError() -> u32;
+    fn glGenFramebuffers(n: i32, out: *mut u32);
+    fn glBindFramebuffer(t: u32, f: u32);
+    fn glFramebufferTexture2D(t: u32, att: u32, tt: u32, tex: u32, lvl: i32);
+    fn glCheckFramebufferStatus(t: u32) -> u32;
+    fn glCopyTexSubImage2D(t: u32, lvl: i32, xo: i32, yo: i32, x: i32, y: i32, w: i32, h: i32);
+    fn glUniform1f(l: i32, v: f32);
+    fn glDisableVertexAttribArray(i: u32);
 }
 
 const VS: &[u8] = b"attribute vec2 a_pos;
@@ -83,6 +90,9 @@ precision mediump float;
 #endif
 uniform sampler2D u_tex;
 uniform sampler2D u_img;
+uniform sampler2D u_blur;
+uniform vec2 u_view;
+uniform float u_blur_ok;
 varying vec2 v_uv;
 varying vec4 v_color;
 varying vec4 v_p;
@@ -114,10 +124,24 @@ void main() {
     float glow = clamp(1.0 + sd / 14.0, 0.0, 1.0) * cov;
     float sheen = clamp(0.5 - v_uv.y / (2.0 * v_p.y), 0.0, 1.0) * cov;
     float hl = rim * lit * 0.85 + glow * 0.10 * lit + sheen * 0.07;
-    float a = v_color.a * cov;
-    float total = clamp(a + hl, 0.0, 1.0);
-    vec3 col = mix(v_color.rgb, vec3(1.0), clamp(hl / max(total, 0.001), 0.0, 1.0));
-    gl_FragColor = vec4(col, total);
+    if (v_p.w < -1.5) {
+      // Haqiqiy shisha: ostidagi xiralashgan tasvir + tint, to'yinganlik biroz oshiriladi.
+      vec3 base = v_color.rgb;
+      if (u_blur_ok > 0.5) {
+        base = texture2D(u_blur, gl_FragCoord.xy / u_view).rgb;
+        float l = dot(base, vec3(0.299, 0.587, 0.114));
+        base = mix(vec3(l), base, 1.25);
+        base = mix(base, v_color.rgb, v_color.a);
+      }
+      float total = clamp(cov + hl, 0.0, 1.0);
+      vec3 col = mix(base, vec3(1.0), clamp(hl / max(total, 0.001), 0.0, 1.0));
+      gl_FragColor = vec4(col, total);
+    } else {
+      float a = v_color.a * cov;
+      float total = clamp(a + hl, 0.0, 1.0);
+      vec3 col = mix(v_color.rgb, vec3(1.0), clamp(hl / max(total, 0.001), 0.0, 1.0));
+      gl_FragColor = vec4(col, total);
+    }
   } else {
     vec2 q = abs(v_uv) - (v_p.xy - v_p.z);
     float sd = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - v_p.z;
@@ -127,7 +151,49 @@ void main() {
   }
 }\0";
 
+const BVS: &[u8] = b"attribute vec2 a_pos;
+varying vec2 v_uv;
+void main() { gl_Position = vec4(a_pos * 2.0 - 1.0, 0.0, 1.0); v_uv = a_pos; }\0";
+
+const BFS: &[u8] = b"precision mediump float;
+uniform sampler2D u_tex;
+uniform vec2 u_step;
+uniform float u_down;
+varying vec2 v_uv;
+void main() {
+  if (u_down > 0.5) {
+    vec4 c = texture2D(u_tex, v_uv + u_step * vec2(-1.0, -1.0)) + texture2D(u_tex, v_uv + u_step * vec2(1.0, -1.0))
+           + texture2D(u_tex, v_uv + u_step * vec2(-1.0, 1.0)) + texture2D(u_tex, v_uv + u_step * vec2(1.0, 1.0));
+    gl_FragColor = c * 0.25;
+  } else {
+    vec4 c = texture2D(u_tex, v_uv) * 0.2270270270;
+    c += (texture2D(u_tex, v_uv + u_step * 1.3846153846) + texture2D(u_tex, v_uv - u_step * 1.3846153846)) * 0.3162162162;
+    c += (texture2D(u_tex, v_uv + u_step * 3.2307692308) + texture2D(u_tex, v_uv - u_step * 3.2307692308)) * 0.0702702703;
+    gl_FragColor = c;
+  }
+}\0";
+
+/// Xiralashtirish (backdrop) uchun resurslar: ekran nusxasi va chorak o'lchamli ikkita tekstura.
+struct BlurRes {
+    program: u32,
+    quad: u32,
+    fbo: [u32; 2],
+    tex: [u32; 3], // 0: ekran nusxasi (to'liq o'lcham), 1 va 2: chorak o'lcham
+    w: i32,
+    h: i32,
+    qw: i32,
+    qh: i32,
+    u_tex: i32,
+    u_step: i32,
+    u_down: i32,
+}
+
 pub struct GlRenderer {
+    blur: Option<BlurRes>,
+    blur_failed: bool,
+    u_view: i32,
+    u_blur: i32,
+    u_blur_ok: i32,
     program: u32,
     vbo: u32,
     tex: u32,
@@ -237,6 +303,11 @@ impl GlRenderer {
             return Err(format!("GL xato 0x{err:x}"));
         }
         Ok(GlRenderer {
+            blur: None,
+            blur_failed: false,
+            u_view: glGetUniformLocation(program, b"u_view\0".as_ptr()),
+            u_blur: glGetUniformLocation(program, b"u_blur\0".as_ptr()),
+            u_blur_ok: glGetUniformLocation(program, b"u_blur_ok\0".as_ptr()),
             program,
             vbo,
             tex,
@@ -245,30 +316,23 @@ impl GlRenderer {
         })
     }
 
-    /// Kadrni joriy sirtga chizadi (almashtirish — chaqiruvchida).
-    ///
-    /// # Safety
-    /// `new` bilan bir xil kontekst joriy bo'lishi shart.
-    pub unsafe fn render(&mut self, frame: &Frame, w: i32, h: i32) {
+    /// Asosiy dastur holatini tiklaydi (dastur, tekstura birliklari, uchlar ko'rsatkichlari).
+    unsafe fn bind_main(&self, w: i32, h: i32) {
+        glBindFramebuffer(0x8D40, 0);
         glViewport(0, 0, w, h);
-        glDisable(0x0C11);
-        glClearColor(0.0, 0.0, 0.0, 1.0);
-        glClear(0x4000);
         glEnable(0x0BE2);
-        glBlendFuncSeparate(0x302, 0x303, 1, 0x303);
         glUseProgram(self.program);
         glUniform2f(self.u_scale, 2.0 / w as f32, 2.0 / h as f32);
+        glUniform2f(self.u_view, w as f32, h as f32);
+        glUniform1i(self.u_blur, 2);
+        glUniform1f(self.u_blur_ok, if self.blur.is_some() { 1.0 } else { 0.0 });
+        glActiveTexture(0x84C2);
+        glBindTexture(0x0DE1, self.blur.as_ref().map_or(self.tex, |b| b.tex[1]));
         glActiveTexture(0x84C1);
         glBindTexture(0x0DE1, self.img_tex);
         glActiveTexture(0x84C0);
         glBindTexture(0x0DE1, self.tex);
         glBindBuffer(0x8892, self.vbo);
-        glBufferData(
-            0x8892,
-            (frame.verts.len() * std::mem::size_of::<Vertex>()) as isize,
-            frame.verts.as_ptr() as *const c_void,
-            0x88E0,
-        );
         let stride = std::mem::size_of::<Vertex>() as i32;
         glEnableVertexAttribArray(0);
         glVertexAttribPointer(0, 2, 0x1406, 0, stride, 0 as *const c_void);
@@ -278,6 +342,191 @@ impl GlRenderer {
         glVertexAttribPointer(2, 4, 0x1401, 1, stride, 16 as *const c_void);
         glEnableVertexAttribArray(3);
         glVertexAttribPointer(3, 4, 0x1406, 0, stride, 20 as *const c_void);
+    }
+
+    /// Xiralashtirish resurslarini (o'lcham o'zgarsa qaytadan) yaratadi. `false` — imkonsiz.
+    unsafe fn ensure_blur(&mut self, w: i32, h: i32) -> bool {
+        if self.blur_failed {
+            return false;
+        }
+        if let Some(b) = &self.blur {
+            if b.w == w && b.h == h {
+                return true;
+            }
+        }
+        let (qw, qh) = ((w / 4).max(1), (h / 4).max(1));
+        let mk = |tw: i32, th: i32| -> u32 {
+            let mut t = 0u32;
+            glGenTextures(1, &mut t);
+            glBindTexture(0x0DE1, t);
+            glTexImage2D(
+                0x0DE1,
+                0,
+                0x1908,
+                tw,
+                th,
+                0,
+                0x1908,
+                0x1401,
+                std::ptr::null(),
+            );
+            for (p, v) in [
+                (0x2801, 0x2601),
+                (0x2800, 0x2601),
+                (0x2802, 0x812F),
+                (0x2803, 0x812F),
+            ] {
+                glTexParameteri(0x0DE1, p, v);
+            }
+            t
+        };
+        let tex = [mk(w, h), mk(qw, qh), mk(qw, qh)];
+        let mut fbo = [0u32; 2];
+        glGenFramebuffers(2, fbo.as_mut_ptr());
+        for i in 0..2 {
+            glBindFramebuffer(0x8D40, fbo[i]);
+            glFramebufferTexture2D(0x8D40, 0x8CE0, 0x0DE1, tex[i + 1], 0);
+            if glCheckFramebufferStatus(0x8D40) != 0x8CD5 {
+                glBindFramebuffer(0x8D40, 0);
+                self.blur_failed = true;
+                return false;
+            }
+        }
+        glBindFramebuffer(0x8D40, 0);
+        let (program, quad) = match &self.blur {
+            Some(b) => (b.program, b.quad),
+            None => {
+                let (Ok(vs), Ok(fs)) = (shader(0x8B31, BVS), shader(0x8B30, BFS)) else {
+                    self.blur_failed = true;
+                    return false;
+                };
+                let p = glCreateProgram();
+                glAttachShader(p, vs);
+                glAttachShader(p, fs);
+                glBindAttribLocation(p, 0, b"a_pos\0".as_ptr());
+                glLinkProgram(p);
+                let mut ok = 0;
+                glGetProgramiv(p, 0x8B82, &mut ok);
+                if ok == 0 {
+                    self.blur_failed = true;
+                    return false;
+                }
+                let mut q = 0u32;
+                glGenBuffers(1, &mut q);
+                glBindBuffer(0x8892, q);
+                let quad: [f32; 12] = [0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0];
+                glBufferData(0x8892, 48, quad.as_ptr() as *const c_void, 0x88E4);
+                (p, q)
+            }
+        };
+        self.blur = Some(BlurRes {
+            program,
+            quad,
+            fbo,
+            tex,
+            w,
+            h,
+            qw,
+            qh,
+            u_tex: glGetUniformLocation(program, b"u_tex\0".as_ptr()),
+            u_step: glGetUniformLocation(program, b"u_step\0".as_ptr()),
+            u_down: glGetUniformLocation(program, b"u_down\0".as_ptr()),
+        });
+        true
+    }
+
+    /// `region` (yuqori-chap boshlang'ich, piksel) ni xiralashtiradi: ekran nusxasi -> chorak o'lcham -> gorizontal -> vertikal.
+    unsafe fn run_blur(&mut self, region: [i32; 4], blur: f32, w: i32, h: i32) {
+        if !self.ensure_blur(w, h) {
+            return;
+        }
+        let Some(b) = &self.blur else { return };
+        let [x, y, rw, rh] = region;
+        if rw <= 0 || rh <= 0 {
+            return;
+        }
+        let gy = h - (y + rh);
+        glDisable(0x0C11);
+        glActiveTexture(0x84C0);
+        glBindTexture(0x0DE1, b.tex[0]);
+        glCopyTexSubImage2D(0x0DE1, 0, x, gy, x, gy, rw, rh);
+        glDisable(0x0BE2);
+        glUseProgram(b.program);
+        glBindBuffer(0x8892, b.quad);
+        for i in 1..4 {
+            glDisableVertexAttribArray(i);
+        }
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 2, 0x1406, 0, 8, 0 as *const c_void);
+        glUniform1i(b.u_tex, 0);
+        glEnable(0x0C11);
+        glScissor(
+            (x / 4 - 2).max(0),
+            (gy / 4 - 2).max(0),
+            rw / 4 + 5,
+            rh / 4 + 5,
+        );
+        let s = (blur / 16.0).clamp(0.4, 3.0);
+        let passes: [(u32, u32, i32, i32, f32, (f32, f32), f32); 3] = [
+            (
+                b.fbo[0],
+                b.tex[0],
+                b.qw,
+                b.qh,
+                1.0,
+                (1.0 / w as f32, 1.0 / h as f32),
+                1.0,
+            ),
+            (
+                b.fbo[1],
+                b.tex[1],
+                b.qw,
+                b.qh,
+                0.0,
+                (s / b.qw as f32, 0.0),
+                0.0,
+            ),
+            (
+                b.fbo[0],
+                b.tex[2],
+                b.qw,
+                b.qh,
+                0.0,
+                (0.0, s / b.qh as f32),
+                0.0,
+            ),
+        ];
+        for (fbo, tex, vw, vh, down, step, _) in passes {
+            glBindFramebuffer(0x8D40, fbo);
+            glViewport(0, 0, vw, vh);
+            glBindTexture(0x0DE1, tex);
+            glUniform1f(b.u_down, down);
+            glUniform2f(b.u_step, step.0, step.1);
+            glDrawArrays(4, 0, 6);
+        }
+        glDisable(0x0C11);
+    }
+
+    /// Kadrni joriy sirtga chizadi (almashtirish — chaqiruvchida).
+    ///
+    /// # Safety
+    /// `new` bilan bir xil kontekst joriy bo'lishi shart.
+    pub unsafe fn render(&mut self, frame: &Frame, w: i32, h: i32) {
+        glBindFramebuffer(0x8D40, 0);
+        glViewport(0, 0, w, h);
+        glDisable(0x0C11);
+        glClearColor(0.0, 0.0, 0.0, 1.0);
+        glClear(0x4000);
+        glEnable(0x0BE2);
+        glBlendFuncSeparate(0x302, 0x303, 1, 0x303);
+        glBindBuffer(0x8892, self.vbo);
+        glBufferData(
+            0x8892,
+            (frame.verts.len() * std::mem::size_of::<Vertex>()) as isize,
+            frame.verts.as_ptr() as *const c_void,
+            0x88E0,
+        );
+        self.bind_main(w, h);
         for op in &frame.ops {
             match op {
                 Op::Upload { x, y, w, h, data } => {
@@ -292,6 +541,10 @@ impl GlRenderer {
                         0x1401,
                         data.as_ptr() as *const c_void,
                     );
+                }
+                Op::Blur { region, blur } => {
+                    self.run_blur(*region, *blur, w, h);
+                    self.bind_main(w, h);
                 }
                 Op::ClearAtlas | Op::ClearImages => {}
                 Op::UploadImage { x, y, w, h, data } => {

@@ -1,0 +1,161 @@
+//! Ma'lumotlar: bo'limlar (animelar) ro'yxati va Telegram orqali keladigan posterlar.
+
+use serde_json::Value;
+use std::ffi::{CStr, CString};
+use uzcoders::prelude::{decode_image, Image};
+
+#[derive(Clone, Debug, Default)]
+pub struct Season {
+    pub anime_id: i64,
+    pub season_id: i64,
+    pub name: String,
+    pub section_no: i64,
+    pub episodes: i64,
+    pub photo_url: String,
+    pub rating_avg: f64,
+    pub rating_count: i64,
+    pub views: i64,
+    pub age: i64,
+}
+
+fn num(v: &Value) -> i64 {
+    v.as_i64().or_else(|| v.as_f64().map(|f| f as i64)).or_else(|| v.as_str().and_then(|s| s.parse().ok())).unwrap_or(0)
+}
+
+pub fn parse_seasons(body: &str) -> Vec<Season> {
+    let Ok(Value::Array(arr)) = serde_json::from_str::<Value>(body) else { return Vec::new() };
+    arr.iter()
+        .filter_map(|o| {
+            let (anime_id, season_id) = (num(&o["anime_id"]), num(&o["season_id"]));
+            if anime_id == 0 && season_id == 0 {
+                return None;
+            }
+            let (rc, rs) = (num(&o["rating_count"]), num(&o["rating_sum"]));
+            Some(Season {
+                anime_id,
+                season_id,
+                name: o["nomi"].as_str().unwrap_or("").to_string(),
+                section_no: num(&o["bolim_id"]),
+                episodes: num(&o["epizod_count"]),
+                photo_url: o["photo_url"].as_str().unwrap_or("").to_string(),
+                rating_avg: if rc > 0 { rs as f64 / rc as f64 } else { 0.0 },
+                rating_count: rc,
+                views: num(&o["views_total"]),
+                age: num(&o["yosh"]),
+            })
+        })
+        .collect()
+}
+
+fn cache_file() -> String {
+    format!("{}/seasons.json", uzcoders::android::files_dir())
+}
+
+/// Serverdan; tarmoq bo'lmasa diskdagi nusxadan.
+pub fn fetch_seasons() -> Result<Vec<Season>, String> {
+    match crate::api::request("GET", "/api/seasons", "", None, None) {
+        Ok((200, body)) => {
+            let items = parse_seasons(&body);
+            if !items.is_empty() {
+                let _ = std::fs::write(cache_file(), &body);
+            }
+            Ok(items)
+        }
+        other => {
+            let cached = std::fs::read_to_string(cache_file()).map(|b| parse_seasons(&b)).unwrap_or_default();
+            if cached.is_empty() {
+                Err(match other {
+                    Err(e) => e,
+                    Ok((c, _)) => format!("Server xatosi ({c})"),
+                })
+            } else {
+                Ok(cached)
+            }
+        }
+    }
+}
+
+/// `https://x/api/image/ep_1.jpg?t=1` -> `ep_1.jpg`; xavfli nom -> bo'sh.
+pub fn file_name_of(url: &str) -> String {
+    let last = url.split('?').next().unwrap_or("").rsplit('/').next().unwrap_or("");
+    let ok = !last.is_empty() && last != "." && last != ".." && last.chars().all(|c| c.is_ascii_alphanumeric() || "._-".contains(c));
+    if ok {
+        last.to_string()
+    } else {
+        String::new()
+    }
+}
+
+extern "C" {
+    fn rust_tg_set_keys(json: *const std::os::raw::c_char);
+}
+
+fn call_json(p: *mut std::os::raw::c_char) -> Value {
+    if p.is_null() {
+        return Value::Null;
+    }
+    let s = unsafe { CStr::from_ptr(p) }.to_string_lossy().into_owned();
+    rust_core::ffi_utils::rust_free_string(p);
+    serde_json::from_str(&s).unwrap_or(Value::Null)
+}
+
+/// Posterlarni Telegram orqali oladi: worker `deliver` bot chatiga nusxalaydi, yadro mahalliy serverda beradi.
+/// Natija: (url, tayyor rasm). Muvaffaqiyatsiz bo'lsa `None`.
+pub fn load_posters(session: &str, urls: &[String]) -> Vec<(String, Option<Image>)> {
+    let port = call_json(rust_core::telegram::rust_tg_status())["port"].as_i64().unwrap_or(0);
+    let names: Vec<String> = urls.iter().map(|u| file_name_of(u)).collect();
+    let mut delivered: Vec<String> = Vec::new();
+    if port > 0 {
+        let files: Vec<&String> = names.iter().filter(|n| !n.is_empty()).collect();
+        if let Ok((200, body)) = crate::api::request("POST", "/api/tg/deliver", "", Some(&serde_json::json!({ "files": files })), Some(session)) {
+            if let Ok(j) = serde_json::from_str::<Value>(&body) {
+                if let Some(keys) = j["keys"].as_object().filter(|k| !k.is_empty()) {
+                    let c = CString::new(Value::Object(keys.clone()).to_string()).unwrap_or_default();
+                    unsafe { rust_tg_set_keys(c.as_ptr()) };
+                }
+                delivered = j["files"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default();
+            }
+        }
+    }
+    let out = urls
+        .iter()
+        .zip(&names)
+        .map(|(u, n)| {
+            let img = if port > 0 && delivered.contains(n) {
+                ureq::get(&format!("http://127.0.0.1:{port}/tg/0/{n}"))
+                    .timeout(std::time::Duration::from_secs(25))
+                    .call()
+                    .ok()
+                    .and_then(|r| {
+                        let mut buf = Vec::new();
+                        std::io::Read::read_to_end(&mut std::io::Read::take(r.into_reader(), 12 << 20), &mut buf).ok()?;
+                        decode_image(&buf)
+                    })
+                    // Karta uchun yetarli o'lcham; burchaklar yumaloq (karta radiusiga mos).
+                    .map(|i| i.resized(480, 720).round_corners(48.0))
+            } else {
+                None
+            };
+            (u.clone(), img)
+        })
+        .collect();
+    // Yuborilgan nusxalar bot chatida qolib ketmasin.
+    let _ = call_json(rust_core::telegram::rust_tg_clear_bot_chat());
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn royxat_tahlili() {
+        let b = r#"[{"anime_id":"5","season_id":2,"nomi":"Bleach","bolim_id":1,"epizod_count":366,"photo_url":"https://x/api/image/p_1.jpg?t=3","rating_count":2,"rating_sum":20,"views_total":55,"yosh":15},{"foo":1}]"#;
+        let s = parse_seasons(b);
+        assert_eq!(s.len(), 1);
+        assert_eq!((s[0].anime_id, s[0].episodes, s[0].age), (5, 366, 15));
+        assert_eq!(s[0].rating_avg, 10.0);
+        assert_eq!(file_name_of(&s[0].photo_url), "p_1.jpg");
+        assert_eq!(file_name_of("https://x/a/../"), "");
+    }
+}

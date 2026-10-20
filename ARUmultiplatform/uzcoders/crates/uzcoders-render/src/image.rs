@@ -9,6 +9,55 @@ pub struct Image {
 }
 
 impl Image {
+    /// Aspektni saqlab `max_w x max_h` ga sig'adigan qilib kichraytiradi (maydon o'rtachasi); kichik bo'lsa o'zgarmaydi.
+    pub fn resized(self, max_w: u32, max_h: u32) -> Image {
+        let k = (max_w as f32 / self.w as f32).min(max_h as f32 / self.h as f32);
+        if k >= 1.0 {
+            return self;
+        }
+        let (nw, nh) = (
+            ((self.w as f32 * k) as u32).max(1),
+            ((self.h as f32 * k) as u32).max(1),
+        );
+        let mut out = vec![0u8; (nw * nh * 4) as usize];
+        for y in 0..nh {
+            let (y0, y1) = (
+                (y as f32 / k) as u32,
+                (((y + 1) as f32 / k).ceil() as u32)
+                    .min(self.h)
+                    .max((y as f32 / k) as u32 + 1),
+            );
+            for x in 0..nw {
+                let (x0, x1) = (
+                    (x as f32 / k) as u32,
+                    (((x + 1) as f32 / k).ceil() as u32)
+                        .min(self.w)
+                        .max((x as f32 / k) as u32 + 1),
+                );
+                let mut acc = [0u32; 4];
+                let mut n = 0u32;
+                for yy in y0..y1.min(self.h) {
+                    for xx in x0..x1.min(self.w) {
+                        let i = ((yy * self.w + xx) * 4) as usize;
+                        for c in 0..4 {
+                            acc[c] += self.rgba[i + c] as u32;
+                        }
+                        n += 1;
+                    }
+                }
+                let o = ((y * nw + x) * 4) as usize;
+                for c in 0..4 {
+                    out[o + c] = (acc[c] / n.max(1)) as u8;
+                }
+            }
+        }
+        Image {
+            w: nw,
+            h: nh,
+            rgba: out,
+        }
+    }
+
     /// Burchaklarni `r` piksel radiusda yumaloqlaydi (alfa kanali silliqlanadi).
     pub fn round_corners(mut self, r: f32) -> Image {
         let (w, h) = (self.w as f32, self.h as f32);
@@ -203,6 +252,17 @@ pub fn inflate(data: &[u8]) -> Option<Vec<u8>> {
     }
 }
 
+/// PNG yoki JPEG ni formatiga qarab ochadi.
+pub fn decode_image(d: &[u8]) -> Option<Image> {
+    if d.starts_with(&[0x89, b'P', b'N', b'G']) {
+        decode_png(d)
+    } else if d.starts_with(&[0xFF, 0xD8]) {
+        crate::jpeg::decode_jpeg(d)
+    } else {
+        None
+    }
+}
+
 // ── PNG ─────────────────────────────────────────────────────────────
 
 fn paeth(a: i32, b: i32, c: i32) -> i32 {
@@ -389,6 +449,27 @@ mod tests {
         let px = |x: usize, y: usize| &img.rgba[(y * 80 + x) * 4..(y * 80 + x) * 4 + 3];
         assert!(px(40, 2)[2] > px(40, 2)[0]);
         assert_eq!(px(40, 20), &[255, 255, 255]);
+    }
+
+    #[test]
+    fn kichraytirish() {
+        let img = Image {
+            w: 100,
+            h: 50,
+            rgba: vec![200; 100 * 50 * 4],
+        }
+        .resized(20, 20);
+        assert_eq!((img.w, img.h), (20, 10));
+        assert!(img.rgba.iter().all(|&v| v == 200));
+        let same = Image {
+            w: 4,
+            h: 4,
+            rgba: vec![1; 64],
+        }
+        .resized(10, 10);
+        assert_eq!(same.w, 4);
+        assert!(decode_image(include_bytes!("../testdata/j_prog.jpg")).is_some());
+        assert!(decode_image(b"xx").is_none());
     }
 
     #[test]

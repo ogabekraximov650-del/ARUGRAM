@@ -45,6 +45,8 @@ pub enum Op {
     },
     /// Rasm atlasi tozalandi.
     ClearImages,
+    /// Shu paytgacha chizilgan tasvirning `[x, y, w, h]` (yuqori-chap boshlang'ich) hududini xiralashtirib, keyingi chizishlar uchun tayyorlaydi.
+    Blur { region: [i32; 4], blur: f32 },
     /// `verts[first..first+count]` ni (qirqish bilan) chizish. `scissor` — `[x, y, w, h]`, yuqori-chap boshlang'ich.
     Draw {
         scissor: Option<[i32; 4]>,
@@ -184,6 +186,38 @@ impl Batcher {
                             }
                         }
                         pen += g.advance + spacing;
+                    }
+                }
+                DrawCmd::Gradient {
+                    rect,
+                    radius,
+                    top,
+                    bottom,
+                } => {
+                    b.gradient(*rect, *radius, *top, *bottom);
+                }
+                DrawCmd::Backdrop {
+                    rect,
+                    radius,
+                    blur,
+                    tint,
+                } => {
+                    if !b.empty {
+                        b.flush();
+                        let m = (*blur * 2.0).ceil() as i32 + 2;
+                        let cur = b.clips.last().copied().unwrap_or(b.full);
+                        let _ = cur;
+                        let region = [
+                            (rect.x.floor() as i32 - m).max(0),
+                            (rect.y.floor() as i32 - m).max(0),
+                            (rect.w.ceil() as i32 + 2 * m).min(width as i32),
+                            (rect.h.ceil() as i32 + 2 * m).min(height as i32),
+                        ];
+                        b.frame.ops.push(Op::Blur {
+                            region,
+                            blur: *blur,
+                        });
+                        b.rrect(*rect, *radius, -2.0, *tint);
                     }
                 }
                 DrawCmd::Glass { rect, radius, tint } => {
@@ -402,6 +436,33 @@ impl Build {
             p,
         };
         self.quad([mk(x0, y0), mk(x1, y0), mk(x0, y1), mk(x1, y1)]);
+    }
+
+    fn gradient(&mut self, r: Rect, radius: f32, top: Color, bottom: Color) {
+        if self.empty || (top.a == 0 && bottom.a == 0) || r.w <= 0.0 || r.h <= 0.0 {
+            return;
+        }
+        let (hw, hh) = (r.w * 0.5, r.h * 0.5);
+        let rad = radius.min(hw).min(hh).max(0.0);
+        let m = 1.0;
+        let (x0, y0, x1, y1) = (r.x - m, r.y - m, r.right() + m, r.bottom() + m);
+        let (cx, cy) = (r.x + hw, r.y + hh);
+        let p = [hw, hh, rad, 0.0];
+        let (ct, cb) = (rgba(top), rgba(bottom));
+        let mk = |x: f32, y: f32, c: [u8; 4]| Vertex {
+            x,
+            y,
+            u: x - cx,
+            v: y - cy,
+            color: c,
+            p,
+        };
+        self.quad([
+            mk(x0, y0, ct),
+            mk(x1, y0, ct),
+            mk(x0, y1, cb),
+            mk(x1, y1, cb),
+        ]);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -727,6 +788,24 @@ mod tests {
         assert_eq!(f.verts[0].p[3], -3.0);
         assert_eq!(f.verts[6].p[3], -1.0);
         assert_eq!(draws(&f).len(), 1); // bir chaqiruvda
+    }
+
+    #[test]
+    fn backdrop_blur_amali_va_rejim() {
+        let mut b = batcher();
+        let f = b.build(
+            &[DrawCmd::Backdrop {
+                rect: Rect::new(10.0, 10.0, 60.0, 30.0),
+                radius: 8.0,
+                blur: 12.0,
+                tint: Color::rgba(255, 255, 255, 20),
+            }],
+            100,
+            100,
+        );
+        assert!(matches!(f.ops[0], Op::Blur { .. }));
+        assert!(matches!(f.ops[1], Op::Draw { .. }));
+        assert_eq!(f.verts[0].p[3], -2.0);
     }
 
     #[test]

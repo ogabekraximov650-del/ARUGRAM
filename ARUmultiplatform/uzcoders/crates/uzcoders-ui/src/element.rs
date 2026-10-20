@@ -89,6 +89,8 @@ pub struct Element {
     pub(crate) radius: f32,
     pub(crate) border: Option<(f32, Color)>,
     pub(crate) glass: Option<Color>,
+    pub(crate) backdrop: Option<(Color, f32)>,
+    pub(crate) gradient: Option<(Color, Color)>,
     /// Yumshoq yorug'lik dog'lari: (x ulushi, y ulushi, radius dp, rang) — element qutisiga nisbatan.
     pub(crate) glows: Vec<(f32, f32, f32, Color)>,
     pub(crate) on_click: Option<Callback>,
@@ -105,6 +107,8 @@ impl Element {
             radius: 0.0,
             border: None,
             glass: None,
+            backdrop: None,
+            gradient: None,
             glows: Vec::new(),
             on_click: None,
             scroll: None,
@@ -160,6 +164,11 @@ impl Element {
         self.glass = Some(tint);
         self
     }
+    /// HAQIQIY shisha: element ostidagi tasvir `blur` dp radiusda xiralashadi, ustiga `tint` va yorug' chegara.
+    pub fn backdrop(mut self, tint: Color, blur: f32) -> Self {
+        self.backdrop = Some((tint, blur));
+        self
+    }
     /// Element orqasiga yumshoq yorug'lik dog'lari: `(x ulushi, y ulushi, radius dp, rang)`.
     pub fn glows(mut self, g: Vec<(f32, f32, f32, Color)>) -> Self {
         self.glows = g;
@@ -170,6 +179,16 @@ impl Element {
         if let Some(f) = self.field_cfg() {
             f.label_inside = true;
         }
+        self
+    }
+    /// Vertikal gradient fon: tepadan pastga `top` -> `bottom`.
+    pub fn gradient(mut self, top: Color, bottom: Color) -> Self {
+        self.gradient = Some((top, bottom));
+        self
+    }
+    /// Balandlik = kenglik x `ratio` (masalan poster kartasi uchun 1.5).
+    pub fn aspect(mut self, ratio: f32) -> Self {
+        self.style.aspect = ratio;
         self
     }
     /// Yumaloq burchakli kontur.
@@ -366,6 +385,13 @@ pub fn row(children: Vec<Element>) -> Element {
     Element::container(Axis::Row, children)
 }
 
+/// Qatlam: bolalar bir-birining ustiga qo'yiladi (oxirgisi eng yuqorida), hammasi tugun maydonini to'ldiradi.
+pub fn stack(children: Vec<Element>) -> Element {
+    let mut e = Element::container(Axis::Column, children);
+    e.style.stack = true;
+    e
+}
+
 /// Vertikal scroll qilinadigan ustun: `.grow(1.0)` bilan qolgan joyni egallaydi.
 pub fn scroll_column(state: &ScrollState, children: Vec<Element>) -> Element {
     column(children).scroll(state)
@@ -466,6 +492,13 @@ pub fn image(img: &Rc<Image>, w: f32, h: f32) -> Element {
         Style::default(),
         Vec::new(),
     );
+    e.style.shrink = 0.0;
+    e
+}
+
+/// Rasm, ota-elementning berilgan maydonini to'ldiradi (`stack` ichida yoki `.aspect()` bilan).
+pub fn image_fill(img: &Rc<Image>) -> Element {
+    let mut e = image(img, 0.0, 0.0);
     e.style.shrink = 0.0;
     e
 }

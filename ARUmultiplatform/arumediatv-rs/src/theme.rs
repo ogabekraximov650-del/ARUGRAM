@@ -11,3 +11,5 @@ pub const TEXT: Color = Color::hex(0xF2F2F3);
 pub const TEXT_DIM: Color = Color::hex(0x9A9AA0);
 pub const TEXT_FAINT: Color = Color::hex(0x6B6B70);
 pub const ERROR: Color = Color::hex(0xF87171);
+pub const CARD: Color = Color::hex(0x151517);
+pub const GOLD: Color = Color::hex(0xFFC93C);

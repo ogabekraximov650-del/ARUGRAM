@@ -390,3 +390,16 @@ fn spinner_uzluksiz_chizadi() {
     assert!(ui.needs_frame()); // animatsiya: har kadr
     assert_eq!(ui.next_wakeup_ms(), Some(0));
 }
+
+#[test]
+fn backdrop_buyrugi() {
+    let mut ui = Ui::new(font(), || {
+        column(vec![column(vec![text("x")])
+            .backdrop(Color::rgba(255, 255, 255, 30), 16.0)
+            .radius(12.0)])
+    });
+    let cmds = ui.frame(SZ);
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, DrawCmd::Backdrop { blur, .. } if *blur == 16.0)));
+}
