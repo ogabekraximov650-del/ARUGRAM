@@ -68,6 +68,8 @@ pub trait Backend: Send + Sync {
     fn login_state(&self) -> Option<LoginInfo>;
     /// Telegram ulangach ilova hisobiga kirish: botga `/start <token>` yuboriladi, server sessiya beradi.
     fn finish_login(&self) -> Result<String, String>;
+    /// Telegram hisobidan chiqish (boshqa raqam bilan kirish uchun).
+    fn logout(&self);
 }
 
 /// Sinov rejimi: tarmoqsiz. Kod `12345` bo'lsa ikki bosqichli parol so'raladi.
@@ -97,6 +99,7 @@ impl Backend for StubBackend {
     fn finish_login(&self) -> Result<String, String> {
         Err("Sinov rejimi: server ulanmagan".into())
     }
+    fn logout(&self) {}
 }
 
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
@@ -259,6 +262,11 @@ impl Backend for TgBackend {
             hint: j["hint"].as_str().unwrap_or("").to_string(),
             sent: st.sent,
         })
+    }
+    fn logout(&self) {
+        if self.ensure_offline().is_ok() {
+            call(rust_core::telegram::rust_tg_logout());
+        }
     }
     fn reset(&self) {
         if self.ensure().is_ok() {

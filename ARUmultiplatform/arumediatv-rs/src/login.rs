@@ -317,15 +317,17 @@ impl Login {
     fn finish(self: &Rc<Self>) {
         self.step.set(Step::Finishing);
         self.error.set(None);
+        self.busy.set(true);
         let (b, me) = (self.backend.clone(), self.clone());
-        spawn_bg(move || b.finish_login(), move |r| match r {
-            Ok(session) => {
-                crate::api::save_session(&session);
-                (me.on_done)(session);
-            }
-            Err(e) => {
-                me.error.set(Some(e));
-                me.step.set(Step::Phone);
+        spawn_bg(move || b.finish_login(), move |r| {
+            me.busy.set(false);
+            match r {
+                Ok(session) => {
+                    crate::api::save_session(&session);
+                    (me.on_done)(session);
+                }
+                // Telegram ulangan: telefon oynasiga QAYTMAYMIZ (hisobdan chiqib ketgandek tuyulardi), qayta urinish beramiz.
+                Err(e) => me.error.set(Some(e)),
             }
         });
     }
@@ -452,7 +454,32 @@ impl Login {
                 );
             }
             Step::Finishing => {
-                body.push(column(vec![spinner(40.0, 3.0, ACCENT2)]).height(80.0).center());
+                if self.busy.get() {
+                    body.push(column(vec![spinner(40.0, 3.0, ACCENT2)]).height(80.0).center());
+                } else {
+                    let (me, me2) = (self.clone(), self.clone());
+                    body.push(t("Telegram hisobingiz ulangan. Ilova hisobiga kirishni tasdiqlash tugamadi.", 14.0, TEXT_DIM));
+                    body.push(gap_box(0.0, 16.0));
+                    body.push(
+                        column(vec![t("Qayta urinish", 16.0, Color::WHITE).bold()])
+                            .glass(ACCENT.with_opacity(0.62))
+                            .radius(16.0)
+                            .padding_xy(0.0, 16.0)
+                            .center()
+                            .on_click(move || me.finish()),
+                    );
+                    body.push(gap_box(0.0, 14.0));
+                    body.push(
+                        column(vec![t("Boshqa raqam bilan kirish", 14.0, ACCENT2)]).center().on_click(move || {
+                            let b = me2.backend.clone();
+                            spawn_bg(move || b.logout(), |_| {});
+                            me2.code.set(String::new());
+                            me2.password.set(String::new());
+                            me2.error.set(None);
+                            me2.step.set(Step::Phone);
+                        }),
+                    );
+                }
             }
             Step::Qr => {
                 body.push(

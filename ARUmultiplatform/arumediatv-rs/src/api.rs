@@ -29,9 +29,21 @@ fn sign(method: &str, path: &str) -> String {
 
 /// Imzolangan so'rov. `path` — so'rovsiz yo'l, `query` — `?a=b` (imzolanmaydi). Qaytadi: (HTTP kodi, javob matni).
 pub fn request(method: &str, path: &str, query: &str, body: Option<&Value>, bearer: Option<&str>) -> Result<(u16, String), String> {
+    // Tarmoq xatosida (masalan server sekin uyg'onayotganda) bir marta qayta uriniladi.
+    let mut last = Err(String::new());
+    for _ in 0..2 {
+        last = request_once(method, path, query, body, bearer);
+        if last.is_ok() {
+            break;
+        }
+    }
+    last
+}
+
+fn request_once(method: &str, path: &str, query: &str, body: Option<&Value>, bearer: Option<&str>) -> Result<(u16, String), String> {
     let url = format!("{BASE}{path}{query}");
     let mut req = ureq::request(method, &url)
-        .timeout(std::time::Duration::from_secs(15))
+        .timeout(std::time::Duration::from_secs(40))
         .set("X-App-Version", APP_VERSION);
     let sig = sign(method, path);
     if !sig.is_empty() {
