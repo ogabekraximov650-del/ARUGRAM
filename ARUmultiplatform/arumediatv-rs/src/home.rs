@@ -8,6 +8,7 @@ use std::rc::Rc;
 use uzcoders::prelude::*;
 
 const BELL: &str = "M12,22c1.1,0 2,-0.9 2,-2h-4c0,1.1 0.89,2 2,2zM18,16v-5c0,-3.07 -1.64,-5.64 -4.5,-6.32V4c0,-0.83 -0.67,-1.5 -1.5,-1.5s-1.5,0.67 -1.5,1.5v0.68C7.63,5.36 6,7.92 6,11v5l-2,2v1h16v-1l-2,-2z";
+const CLOSE: &str = "M19,6.41L17.59,5 12,10.59 6.41,5 5,6.41 10.59,12 5,17.59 6.41,19 12,13.41 17.59,19 19,17.59 13.41,12z";
 const STAR: &str = "M12,17.27L18.18,21l-1.64,-7.03L22,9.24l-7.19,-0.61L12,2 9.19,8.63 2,9.24l5.46,4.73L5.82,21z";
 const EYE: &str = "M12,4.5C7,4.5 2.73,7.61 1,12c1.73,4.39 6,7.5 11,7.5s9.27,-3.11 11,-7.5c-1.73,-4.39 -6,-7.5 -11,-7.5zM12,17c-2.76,0 -5,-2.24 -5,-5s2.24,-5 5,-5 5,2.24 5,5 -2.24,5 -5,5zM12,9c-1.66,0 -3,1.34 -3,3s1.34,3 3,3 3,-1.34 3,-3 -1.34,-3 -3,-3z";
 const NAV: [(&str, &str); 5] = [
@@ -34,6 +35,8 @@ pub struct Home {
     loading_posters: Cell<bool>,
     scroll: ScrollState,
     tab: State<usize>,
+    query: State<String>,
+    search_scroll: ScrollState,
     /// Posterlar yuklanmasa sababi (kichik qizil matn).
     poster_diag: State<String>,
 }
@@ -95,6 +98,8 @@ impl Home {
             loading_posters: Cell::new(false),
             scroll: ScrollState::new(),
             tab: State::new(0),
+            query: State::new(String::new()),
+            search_scroll: ScrollState::new(),
             poster_diag: State::new(String::new()),
         });
         h.reload();
@@ -144,6 +149,10 @@ impl Home {
     /// Ekranda ko'rinadigan kartalar posterlari navbatning boshiga ko'tariladi.
     fn prioritize(&self, first_row: usize, last_row: usize) {
         let seasons = self.seasons.get();
+        self.prioritize_in(&seasons, first_row, last_row);
+    }
+
+    fn prioritize_in(&self, seasons: &[Season], first_row: usize, last_row: usize) {
         let have = self.posters.borrow();
         let mut front: Vec<String> = Vec::new();
         for r in first_row..=last_row {
@@ -266,6 +275,38 @@ impl Home {
         .padding_each(16.0, 8.0 + top_inset, 16.0, 0.0)
     }
 
+    /// Qidiruv paneli: sarlavha va yozish joyi — butunlay shaffof lupali shisha (pastgi panel kabi).
+    fn search_bar(&self, top_inset: f32) -> Element {
+        let q = self.query.clone();
+        let mut kids = vec![
+            icon(NAV[1].1, 22.0).color(Color::rgba(255, 255, 255, 190)),
+            field(&self.query)
+                .color(Color::WHITE)
+                .size(16.0)
+                .hint("Anime qidirish...")
+                .hint_color(Color::rgba(255, 255, 255, 140))
+                .accent(ACCENT2)
+                .padding_xy(0.0, 0.0)
+                .border(0.0, Color::TRANSPARENT)
+                .radius(0.0)
+                .weight(1.0),
+        ];
+        if !self.query.with(|v| v.is_empty()) {
+            kids.push(icon(CLOSE, 20.0).color(Color::rgba(255, 255, 255, 190)).on_click(move || q.set(String::new())));
+        }
+        column(vec![
+            tx("Qidiruv", 26.0, Color::WHITE).black().padding_each(6.0, 0.0, 0.0, 10.0),
+            row(kids)
+                .gap(10.0)
+                .align(Align::Center)
+                .lens(Color::rgba(255, 255, 255, 10), 1.12)
+                .radius(26.0)
+                .padding_xy(18.0, 15.0),
+            spacer(),
+        ])
+        .padding_each(16.0, 12.0 + top_inset, 16.0, 0.0)
+    }
+
     fn nav(self: &Rc<Self>, bottom_inset: f32) -> Element {
         let sel = self.tab.get();
         let items: Vec<Element> = NAV
@@ -304,7 +345,31 @@ impl Home {
         let tab = self.tab.get();
         // Ro'yxat BUTUN ekranni egallaydi; sarlavha va navigatsiya uning ustida (shisha) turadi, orqasidan posterlar ko'rinadi.
         let header_h = 8.0 + 124.0;
-        let content = if tab != 0 {
+        let content = if tab == 1 {
+            let qs = self.query.get().trim().to_lowercase();
+            let items: Vec<Season> = if qs.is_empty() { Vec::new() } else { self.seasons.get().into_iter().filter(|s| s.name.to_lowercase().contains(&qs)).collect() };
+            if items.is_empty() {
+                let msg = if qs.is_empty() { "Anime nomini yozib qidiruv qiling" } else { "Qidiruv natijalari topilmadi" };
+                column(vec![tx(msg, 15.0, TEXT_DIM)]).center()
+            } else {
+                let rows = items.len().div_ceil(2);
+                let ihp = (card_h + 12.0) * density();
+                let first = (self.search_scroll.offset() / ihp) as usize;
+                let last = (((self.search_scroll.offset() + self.search_scroll.viewport().max(1200.0)) / ihp).ceil() as usize + 1).min(rows.saturating_sub(1));
+                self.prioritize_in(&items, first.min(last), last);
+                self.next_posters();
+                let me = self.clone();
+                lazy_column(&self.search_scroll, rows, card_h + 12.0, move |r| {
+                    let a = me.card(&items[2 * r], card_h);
+                    let b = match items.get(2 * r + 1) {
+                        Some(s) => me.card(s, card_h),
+                        None => spacer().weight(1.0),
+                    };
+                    row(vec![a, b]).gap(12.0).padding_each(0.0, 0.0, 0.0, 12.0)
+                })
+                .padding_each(16.0, 8.0 + 90.0 + ins.top, 16.0, 90.0 + ins.bottom)
+            }
+        } else if tab != 0 {
             column(vec![tx("Tez orada", 16.0, TEXT_DIM)]).center()
         } else {
             match self.status.get() {
@@ -345,6 +410,8 @@ impl Home {
         let mut layers = vec![content];
         if tab == 0 {
             layers.push(self.header(ins.top));
+        } else if tab == 1 {
+            layers.push(self.search_bar(ins.top));
         }
         layers.push(self.nav(ins.bottom));
         stack(layers).bg(BG)
@@ -392,6 +459,8 @@ mod tests {
             loading_posters: Cell::new(false),
             scroll: ScrollState::new(),
             tab: State::new(0),
+            query: State::new(String::new()),
+            search_scroll: ScrollState::new(),
             poster_diag: State::new(String::new()),
         });
         let font = Rc::new(Font::parse(include_bytes!("../assets/fonts/Roboto-Regular.ttf")).unwrap());
@@ -409,6 +478,13 @@ mod tests {
             c.clear(Color::BLACK);
             c.execute(&cmds);
             std::fs::write(format!("{dir}/6_home.png"), c.to_png()).unwrap();
+            home.tab.set(1);
+            home.query.set("a".into());
+            let cmds = ui.frame(size);
+            let mut c = ui.canvas(360, 640);
+            c.clear(Color::BLACK);
+            c.execute(&cmds);
+            std::fs::write(format!("{dir}/7_search.png"), c.to_png()).unwrap();
         }
     }
 }
