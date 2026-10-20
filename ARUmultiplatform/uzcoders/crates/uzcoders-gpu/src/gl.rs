@@ -82,11 +82,15 @@ precision highp float;
 precision mediump float;
 #endif
 uniform sampler2D u_tex;
+uniform sampler2D u_img;
 varying vec2 v_uv;
 varying vec4 v_color;
 varying vec4 v_p;
 void main() {
-  if (v_p.x < 0.0) {
+  if (v_p.x < -1.5) {
+    vec4 c = texture2D(u_img, v_uv);
+    gl_FragColor = vec4(c.rgb, c.a * v_color.a);
+  } else if (v_p.x < 0.0) {
     gl_FragColor = vec4(v_color.rgb, v_color.a * texture2D(u_tex, v_uv).a);
   } else {
     vec2 q = abs(v_uv) - (v_p.xy - v_p.z);
@@ -101,6 +105,7 @@ pub struct GlRenderer {
     program: u32,
     vbo: u32,
     tex: u32,
+    img_tex: u32,
     u_scale: i32,
 }
 
@@ -148,9 +153,34 @@ impl GlRenderer {
         }
         let u_scale = glGetUniformLocation(program, b"u_scale\0".as_ptr());
         let u_tex = glGetUniformLocation(program, b"u_tex\0".as_ptr());
-        let (mut vbo, mut tex) = (0u32, 0u32);
+        let u_img = glGetUniformLocation(program, b"u_img\0".as_ptr());
+        let (mut vbo, mut tex, mut img_tex) = (0u32, 0u32, 0u32);
         glGenBuffers(1, &mut vbo);
         glGenTextures(1, &mut tex);
+        glGenTextures(1, &mut img_tex);
+        glActiveTexture(0x84C1);
+        glBindTexture(0x0DE1, img_tex);
+        glPixelStorei(0x0CF5, 1);
+        glTexImage2D(
+            0x0DE1,
+            0,
+            0x1908,
+            ATLAS_SIZE as i32,
+            ATLAS_SIZE as i32,
+            0,
+            0x1908,
+            0x1401,
+            std::ptr::null(),
+        );
+        for (p, v) in [
+            (0x2801, 0x2601),
+            (0x2800, 0x2601),
+            (0x2802, 0x812F),
+            (0x2803, 0x812F),
+        ] {
+            glTexParameteri(0x0DE1, p, v);
+        }
+        glActiveTexture(0x84C0);
         glBindTexture(0x0DE1, tex);
         glPixelStorei(0x0CF5, 1);
         let sz = ATLAS_SIZE as i32;
@@ -175,6 +205,7 @@ impl GlRenderer {
         }
         glUseProgram(program);
         glUniform1i(u_tex, 0);
+        glUniform1i(u_img, 1);
         let err = glGetError();
         if err != 0 {
             return Err(format!("GL xato 0x{err:x}"));
@@ -183,6 +214,7 @@ impl GlRenderer {
             program,
             vbo,
             tex,
+            img_tex,
             u_scale,
         })
     }
@@ -200,6 +232,8 @@ impl GlRenderer {
         glBlendFuncSeparate(0x302, 0x303, 1, 0x303);
         glUseProgram(self.program);
         glUniform2f(self.u_scale, 2.0 / w as f32, 2.0 / h as f32);
+        glActiveTexture(0x84C1);
+        glBindTexture(0x0DE1, self.img_tex);
         glActiveTexture(0x84C0);
         glBindTexture(0x0DE1, self.tex);
         glBindBuffer(0x8892, self.vbo);
@@ -233,7 +267,22 @@ impl GlRenderer {
                         data.as_ptr() as *const c_void,
                     );
                 }
-                Op::ClearAtlas => {}
+                Op::ClearAtlas | Op::ClearImages => {}
+                Op::UploadImage { x, y, w, h, data } => {
+                    glActiveTexture(0x84C1);
+                    glTexSubImage2D(
+                        0x0DE1,
+                        0,
+                        *x as i32,
+                        *y as i32,
+                        *w as i32,
+                        *h as i32,
+                        0x1908,
+                        0x1401,
+                        data.as_ptr() as *const c_void,
+                    );
+                    glActiveTexture(0x84C0);
+                }
                 Op::Draw {
                     scissor,
                     first,

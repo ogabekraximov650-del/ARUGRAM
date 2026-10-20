@@ -337,7 +337,7 @@ impl Login {
                 };
                 body.push(
                     row(vec![
-                        t(iso, 14.0, TEXT_DIM).width(30.0),
+                        crate::flags::flag_view(iso),
                         t(name, 16.0, name_color).weight(1.0),
                         icon(DROP_DOWN, 20.0).color(TEXT_DIM),
                     ])
@@ -534,7 +534,7 @@ impl Login {
             let c = &COUNTRIES[i];
             let me = this.clone();
             row(vec![
-                t(c.iso, 14.0, TEXT_DIM).width(30.0),
+                crate::flags::flag_view(c.iso),
                 t(c.name, 15.0, Color::WHITE).weight(1.0),
                 t(format!("+{}", c.code), 14.0, TEXT_DIM),
             ])

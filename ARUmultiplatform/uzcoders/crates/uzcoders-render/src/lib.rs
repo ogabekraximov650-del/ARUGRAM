@@ -1,8 +1,10 @@
 //! uzcoders-render — chizish buyruqlari ro'yxati va dasturiy (CPU) canvas.
 
+pub mod image;
 pub mod path;
 pub mod png;
 
+pub use image::{decode_png, Image};
 pub use path::Path;
 
 use std::rc::Rc;
@@ -36,6 +38,12 @@ pub enum DrawCmd {
         weight: u16,
         /// Har belgidan keyin qo'shiladigan oraliq (piksel).
         spacing: f32,
+    },
+    /// Rasm `rect` ga cho'ziladi; `opacity` 0..1.
+    Image {
+        image: Rc<Image>,
+        rect: Rect,
+        opacity: f32,
     },
     /// Vektor yo'l (ikonka): `view` — yo'l koordinatalari qutisi (masalan 24), `rect` ga cho'ziladi.
     Path {
@@ -222,6 +230,57 @@ impl Canvas {
         }
     }
 
+    /// Rasmni `rect` ga (bilinear) cho'zib chizadi.
+    pub fn draw_image(&mut self, img: &Image, rect: Rect, opacity: f32) {
+        if rect.is_empty() || img.w == 0 || img.h == 0 {
+            return;
+        }
+        let (bx0, by0, bx1, by1) = self.bounds();
+        let x0 = (rect.x.floor() as i32).max(bx0);
+        let y0 = (rect.y.floor() as i32).max(by0);
+        let x1 = (rect.right().ceil() as i32).min(bx1);
+        let y1 = (rect.bottom().ceil() as i32).min(by1);
+        let (sx, sy) = (img.w as f32 / rect.w, img.h as f32 / rect.h);
+        let at = |x: i32, y: i32| {
+            let (x, y) = (
+                x.clamp(0, img.w as i32 - 1) as usize,
+                y.clamp(0, img.h as i32 - 1) as usize,
+            );
+            let i = (y * img.w as usize + x) * 4;
+            [
+                img.rgba[i] as f32,
+                img.rgba[i + 1] as f32,
+                img.rgba[i + 2] as f32,
+                img.rgba[i + 3] as f32,
+            ]
+        };
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let u = (x as f32 + 0.5 - rect.x) * sx - 0.5;
+                let v = (y as f32 + 0.5 - rect.y) * sy - 0.5;
+                let (iu, iv) = (u.floor(), v.floor());
+                let (fu, fv) = (u - iu, v - iv);
+                let (p00, p10, p01, p11) = (
+                    at(iu as i32, iv as i32),
+                    at(iu as i32 + 1, iv as i32),
+                    at(iu as i32, iv as i32 + 1),
+                    at(iu as i32 + 1, iv as i32 + 1),
+                );
+                let mut c = [0f32; 4];
+                for k in 0..4 {
+                    c[k] = (p00[k] * (1.0 - fu) + p10[k] * fu) * (1.0 - fv)
+                        + (p01[k] * (1.0 - fu) + p11[k] * fu) * fv;
+                }
+                self.blend(
+                    x,
+                    y,
+                    Color::rgba(c[0] as u8, c[1] as u8, c[2] as u8, 255),
+                    c[3] / 255.0 * opacity,
+                );
+            }
+        }
+    }
+
     /// Vektor yo'lni `rect` ga cho'zib to'ldiradi (`view` — yo'l koordinatalari qutisi).
     pub fn fill_path(&mut self, path: &Path, view: f32, rect: Rect, c: Color) {
         if view <= 0.0 || rect.is_empty() {
@@ -289,6 +348,11 @@ impl Canvas {
                     rect,
                     color,
                 } => self.fill_path(path, *view, *rect, *color),
+                DrawCmd::Image {
+                    image,
+                    rect,
+                    opacity,
+                } => self.draw_image(image, *rect, *opacity),
                 DrawCmd::PushClip(r) => {
                     let (bx0, by0, bx1, by1) = self.bounds();
                     self.clips.push((

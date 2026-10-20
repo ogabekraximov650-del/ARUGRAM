@@ -4,7 +4,7 @@ use crate::scroll::ScrollState;
 use std::rc::Rc;
 use uzcoders_core::{Color, EdgeInsets, State};
 use uzcoders_layout::{Align, Axis, Dim, Justify, Style};
-use uzcoders_render::Path;
+use uzcoders_render::{Image, Path};
 
 /// Klaviatura turi (Android `inputType` ga aylanadi).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -65,6 +65,12 @@ pub(crate) enum Kind {
         path: Rc<Path>,
         size: f32,
         color: Color,
+    },
+    Image {
+        image: Rc<Image>,
+        w: f32,
+        h: f32,
+        opacity: f32,
     },
     Field(Box<FieldCfg>),
 }
@@ -188,6 +194,7 @@ impl Element {
     pub fn size(mut self, s: f32) -> Self {
         match &mut self.kind {
             Kind::Text { size, .. } | Kind::Icon { size, .. } => *size = s,
+            Kind::Image { .. } => {}
             Kind::Field(f) => f.size = s,
             Kind::Container => {}
         }
@@ -198,7 +205,7 @@ impl Element {
         match &mut self.kind {
             Kind::Text { color, .. } | Kind::Icon { color, .. } => *color = c,
             Kind::Field(f) => f.color = c,
-            Kind::Container => {}
+            Kind::Container | Kind::Image { .. } => {}
         }
         self
     }
@@ -404,6 +411,22 @@ pub fn lazy_column(
         kids.push(gap_box(0.0, (count - last) as f32 * item_height));
     }
     column(kids).scroll(state)
+}
+
+/// Rasm: `w` x `h` dp o'lchamda (rasm shu qutiga cho'ziladi).
+pub fn image(img: &Rc<Image>, w: f32, h: f32) -> Element {
+    let mut e = Element::new(
+        Kind::Image {
+            image: img.clone(),
+            w,
+            h,
+            opacity: 1.0,
+        },
+        Style::default(),
+        Vec::new(),
+    );
+    e.style.shrink = 0.0;
+    e
 }
 
 /// Bo'sh joyni to'ldiradigan elastik element.

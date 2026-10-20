@@ -5,7 +5,7 @@ use crate::atlas::Atlas;
 use std::collections::HashMap;
 use std::rc::Rc;
 use uzcoders_core::{Color, Rect};
-use uzcoders_render::{DrawCmd, Path};
+use uzcoders_render::{DrawCmd, Image, Path};
 use uzcoders_text::{Font, GlyphCache};
 
 pub const ATLAS_SIZE: u32 = 1024;
@@ -35,6 +35,16 @@ pub enum Op {
     },
     /// Atlas tozalandi (eski joylashuvlar yaroqsiz).
     ClearAtlas,
+    /// RGBA rasm atlasining bir qismini yangilash.
+    UploadImage {
+        x: u32,
+        y: u32,
+        w: u32,
+        h: u32,
+        data: Vec<u8>,
+    },
+    /// Rasm atlasi tozalandi.
+    ClearImages,
     /// `verts[first..first+count]` ni (qirqish bilan) chizish. `scissor` — `[x, y, w, h]`, yuqori-chap boshlang'ich.
     Draw {
         scissor: Option<[i32; 4]>,
@@ -67,6 +77,9 @@ pub struct Batcher {
     faces: Vec<(u16, GlyphCache)>,
     atlas: Atlas,
     entries: HashMap<Key, Option<Entry>>,
+    img_atlas: Atlas,
+    /// Atlasdagi rasmlar (Rc ushlab turiladi: ko'rsatkich o'zgarmasligi uchun).
+    images: HashMap<usize, (Rc<Image>, Option<Entry>)>,
 }
 
 fn rgba(c: Color) -> [u8; 4] {
@@ -83,6 +96,8 @@ impl Batcher {
                 .collect(),
             atlas: Atlas::new(ATLAS_SIZE),
             entries: HashMap::new(),
+            img_atlas: Atlas::new(ATLAS_SIZE),
+            images: HashMap::new(),
         }
     }
 
@@ -103,6 +118,8 @@ impl Batcher {
     pub fn reset(&mut self) {
         self.atlas.reset();
         self.entries.clear();
+        self.img_atlas.reset();
+        self.images.clear();
     }
 
     pub fn build(&mut self, cmds: &[DrawCmd], width: u32, height: u32) -> Frame {
@@ -169,6 +186,15 @@ impl Batcher {
                         pen += g.advance + spacing;
                     }
                 }
+                DrawCmd::Image {
+                    image,
+                    rect,
+                    opacity,
+                } => {
+                    if !b.empty {
+                        self.draw_image(&mut b, image, *rect, *opacity);
+                    }
+                }
                 DrawCmd::Path {
                     path,
                     view,
@@ -228,6 +254,45 @@ impl Batcher {
         // `alloc` atlasni tozalagan bo'lishi mumkin: kalitni shundan keyin yozamiz.
         self.entries.insert(key, e);
         e
+    }
+
+    fn draw_image(&mut self, b: &mut Build, img: &Rc<Image>, rect: Rect, opacity: f32) {
+        let key = Rc::as_ptr(img) as usize;
+        let entry = match self.images.get(&key) {
+            Some((_, e)) => *e,
+            None => {
+                let e = match self.img_atlas.alloc(img.w, img.h) {
+                    Some(p) => Some(p),
+                    None => {
+                        b.flush();
+                        b.frame.ops.push(Op::ClearImages);
+                        self.img_atlas.reset();
+                        self.images.clear();
+                        self.img_atlas.alloc(img.w, img.h)
+                    }
+                }
+                .map(|(x, y)| Entry {
+                    x,
+                    y,
+                    w: img.w,
+                    h: img.h,
+                });
+                if let Some(e) = e {
+                    b.frame.ops.push(Op::UploadImage {
+                        x: e.x,
+                        y: e.y,
+                        w: e.w,
+                        h: e.h,
+                        data: img.rgba.clone(),
+                    });
+                }
+                self.images.insert(key, (img.clone(), e));
+                e
+            }
+        };
+        if let Some(e) = entry {
+            b.image_quad(rect, e, opacity);
+        }
     }
 
     fn draw_path(&mut self, b: &mut Build, path: &Rc<Path>, view: f32, rect: Rect, color: Color) {
@@ -315,6 +380,37 @@ impl Build {
             p,
         };
         self.quad([mk(x0, y0), mk(x1, y0), mk(x0, y1), mk(x1, y1)]);
+    }
+
+    fn image_quad(&mut self, r: Rect, e: Entry, opacity: f32) {
+        let s = ATLAS_SIZE as f32;
+        let (u0, v0, u1, v1) = (
+            e.x as f32 / s,
+            e.y as f32 / s,
+            (e.x + e.w) as f32 / s,
+            (e.y + e.h) as f32 / s,
+        );
+        let col = rgba(Color::rgba(
+            255,
+            255,
+            255,
+            (opacity.clamp(0.0, 1.0) * 255.0) as u8,
+        ));
+        let p = [-2.0, 0.0, 0.0, 0.0];
+        let mk = |x: f32, y: f32, u: f32, v: f32| Vertex {
+            x,
+            y,
+            u,
+            v,
+            color: col,
+            p,
+        };
+        self.quad([
+            mk(r.x, r.y, u0, v0),
+            mk(r.right(), r.y, u1, v0),
+            mk(r.x, r.bottom(), u0, v1),
+            mk(r.right(), r.bottom(), u1, v1),
+        ]);
     }
 
     fn tex_quad(&mut self, x: f32, y: f32, w: f32, h: f32, e: Entry, c: Color) {
@@ -532,6 +628,39 @@ mod tests {
             f2.ops
                 .iter()
                 .filter(|o| matches!(o, Op::Upload { .. }))
+                .count(),
+            0
+        );
+        assert_eq!(f2.verts.len(), 6);
+    }
+
+    #[test]
+    fn rasm_atlasga_bir_marta() {
+        let mut b = batcher();
+        let img = Rc::new(Image {
+            w: 8,
+            h: 6,
+            rgba: vec![255; 8 * 6 * 4],
+        });
+        let cmd = DrawCmd::Image {
+            image: img,
+            rect: Rect::new(5.0, 5.0, 16.0, 12.0),
+            opacity: 1.0,
+        };
+        let f = b.build(&[cmd.clone()], 100, 100);
+        assert_eq!(
+            f.ops
+                .iter()
+                .filter(|o| matches!(o, Op::UploadImage { .. }))
+                .count(),
+            1
+        );
+        assert_eq!(f.verts[0].p[0], -2.0);
+        let f2 = b.build(&[cmd], 100, 100);
+        assert_eq!(
+            f2.ops
+                .iter()
+                .filter(|o| matches!(o, Op::UploadImage { .. }))
                 .count(),
             0
         );

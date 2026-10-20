@@ -2,6 +2,7 @@
 
 mod backend;
 mod countries;
+mod flags;
 mod login;
 mod theme;
 
@@ -157,7 +158,7 @@ mod tests {
         let size = Size::new(360.0, 640.0);
         let mut ui = make_ui(1.0);
         let cmds = ui.frame(size);
-        let (x, y) = pos(&cmds, "UZ");
+        let (x, y) = pos(&cmds, "O'zbekiston");
         tap(&mut ui, x, y);
         let cmds = ui.frame(size);
         assert!(texts(&cmds).iter().any(|x| x == "Qidirish" || x.contains("Qidirish")));

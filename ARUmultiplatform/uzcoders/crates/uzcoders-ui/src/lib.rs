@@ -10,12 +10,12 @@ use uzcoders_core::{
     global_revision, Color, EdgeInsets, Point, PointerEvent, PointerKind, Rect, Size,
 };
 use uzcoders_layout::{Dim, Tree};
-use uzcoders_render::{Canvas, DrawCmd, Path};
+use uzcoders_render::{Canvas, DrawCmd, Image, Path};
 use uzcoders_text::Font;
 
 pub use element::{
-    button, column, field, gap_box, grid, icon, lazy_column, row, scroll_column, spacer, text,
-    Element, KeyboardKind,
+    button, column, field, gap_box, grid, icon, image, lazy_column, row, scroll_column, spacer,
+    text, Element, KeyboardKind,
 };
 pub use nav::Navigator;
 pub use scroll::ScrollState;
@@ -28,6 +28,7 @@ enum ItemKind {
     Container,
     Text(String, f32, Color, u16, Option<f32>, f32),
     Icon(Rc<Path>, Color),
+    Image(Rc<Image>, f32),
     Field(Box<FieldCfg>),
     ScrollEnd,
 }
@@ -327,6 +328,13 @@ impl Ui {
                         });
                     }
                 }
+                ItemKind::Image(image, opacity) if visible => {
+                    cmds.push(DrawCmd::Image {
+                        image,
+                        rect: r,
+                        opacity,
+                    });
+                }
                 ItemKind::Icon(path, color) if visible => {
                     cmds.push(DrawCmd::Path {
                         path,
@@ -490,7 +498,7 @@ impl Ui {
             s.raw_set(before + v * dt);
             let after = s.offset();
             let hit_edge = (after <= 0.0 && v < 0.0) || (after >= s.max_offset() && v > 0.0);
-            let nv = v * (-dt * 1.7).exp();
+            let nv = v * (-dt * 1.1).exp();
             s.set_velocity(if hit_edge || nv.abs() < 20.0 { 0.0 } else { nv });
         }
     }
@@ -529,6 +537,10 @@ impl Ui {
                 *line_height = line_height.map(|h| h * k);
             }
             Kind::Icon { size, .. } => *size *= k,
+            Kind::Image { w, h, .. } => {
+                *w *= k;
+                *h *= k;
+            }
             Kind::Field(f) => {
                 f.spacing *= k;
                 f.size *= k;
@@ -597,6 +609,15 @@ impl Ui {
                     memo.set(Some((w, sz)));
                     sz
                 })
+            }
+            Kind::Image {
+                image,
+                w,
+                h,
+                opacity,
+            } => {
+                items[slot].kind = ItemKind::Image(image, opacity);
+                tree.add_leaf(el.style, move |_| Size::new(w, h))
             }
             Kind::Icon { path, size, color } => {
                 items[slot].kind = ItemKind::Icon(path, color);
