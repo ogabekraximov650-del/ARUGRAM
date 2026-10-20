@@ -300,12 +300,14 @@ impl Login {
                 body.push(
                     row(vec![
                         self.styled(field(&self.prefix))
+                            .keyboard(KeyboardKind::Phone)
                             .filter(|c| c.is_ascii_digit() || c == '+')
                             .max_len(5)
                             .format(format_prefix)
                             .label("Kod")
                             .width(96.0),
                         self.styled(field(&self.number))
+                            .keyboard(KeyboardKind::Phone)
                             .filter(is_digit)
                             .max_len(country.map_or(15, |c| pattern_len(c).max(1)))
                             .format(format_number)
@@ -321,6 +323,7 @@ impl Login {
                 let me = self.clone();
                 body.push(
                     self.styled(field(&self.code))
+                        .keyboard(KeyboardKind::Number)
                         .filter(is_digit)
                         .max_len(8)
                         .label("Kod")

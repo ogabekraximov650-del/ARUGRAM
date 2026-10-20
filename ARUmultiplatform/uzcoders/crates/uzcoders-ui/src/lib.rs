@@ -15,7 +15,7 @@ use uzcoders_text::Font;
 
 pub use element::{
     button, column, field, gap_box, grid, icon, lazy_column, row, scroll_column, spacer, text,
-    Element,
+    Element, KeyboardKind,
 };
 pub use nav::Navigator;
 pub use scroll::ScrollState;
@@ -92,6 +92,8 @@ pub struct Ui {
     caret_epoch: u64,
     last_blink: u64,
     back: Option<Rc<dyn Fn() -> bool>>,
+    /// IME'dagi (tugallanmagan) matn oralig'i: (boshlanish, uzunlik) belgilarda.
+    composing: Option<(usize, usize)>,
 }
 
 impl Ui {
@@ -118,6 +120,7 @@ impl Ui {
             caret_epoch: 0,
             last_blink: 0,
             back: None,
+            composing: None,
         }
     }
 
@@ -209,6 +212,20 @@ impl Ui {
         }
         self.focus
             .map(|_| BLINK_MS - self.now.saturating_sub(self.caret_epoch) % BLINK_MS)
+    }
+
+    /// Fokusdagi maydonning klaviatura turi.
+    pub fn keyboard_kind(&self) -> KeyboardKind {
+        self.focused_index()
+            .map_or(KeyboardKind::Text, |i| self.fields[i].cfg.keyboard)
+    }
+
+    /// Fokusni olib tashlaydi (masalan klaviatura tizim tomonidan yopilganda).
+    pub fn clear_focus(&mut self) {
+        if self.focus.take().is_some() {
+            self.composing = None;
+            self.dirty = true;
+        }
     }
 
     /// Klaviatura ko'rsatilishi kerakmi (kiritish maydoni fokusda).
@@ -796,29 +813,60 @@ impl Ui {
         true
     }
 
+    /// IME: tasdiqlangan matn (`commitText`).
+    pub fn ime_commit(&mut self, s: &str) -> bool {
+        self.ime_text(s, false)
+    }
+
+    /// IME: tugallanmagan matn (`setComposingText`), keyingi chaqiruv uni almashtiradi.
+    pub fn ime_composing(&mut self, s: &str) -> bool {
+        self.ime_text(s, true)
+    }
+
+    /// IME: kursor atrofidagi belgilarni o'chirish.
+    pub fn ime_delete(&mut self, before: usize, after: usize) -> bool {
+        self.composing = None;
+        self.edit(|chars, caret, _| {
+            let b = before.min(*caret);
+            chars.drain(*caret - b..*caret);
+            *caret -= b;
+            let a = after.min(chars.len() - *caret);
+            chars.drain(*caret..*caret + a);
+            true
+        })
+    }
+
+    /// IME: tugallanmagan matn tasdiqlandi.
+    pub fn ime_finish(&mut self) {
+        self.composing = None;
+    }
+
+    fn ime_text(&mut self, s: &str, composing: bool) -> bool {
+        let comp = self.composing.take();
+        let mut new_comp = None;
+        let ok = self.edit(|chars, caret, cfg| {
+            let (start, len) = comp.unwrap_or((*caret, 0));
+            let start = start.min(chars.len());
+            let end = (start + len).min(chars.len());
+            chars.drain(start..end);
+            *caret = start;
+            let n = insert_str(chars, caret, cfg, s);
+            if composing && cfg.format.is_none() && n > 0 {
+                new_comp = Some((start, n));
+            }
+            true
+        });
+        self.composing = new_comp;
+        ok
+    }
+
     /// Fokusdagi maydonga belgi kiritadi. Maydon bo'lmasa `false`.
     pub fn key_char(&mut self, c: char) -> bool {
         if c.is_control() {
             return false;
         }
         self.edit(|chars, caret, cfg| {
-            if let Some(p) = cfg.filter {
-                if !p(c) {
-                    return true; // belgi rad etildi, lekin klaviatura hodisasi qayta ishlangan
-                }
-            }
-            if cfg.max_len > 0 {
-                let n = if cfg.format.is_some() {
-                    chars.iter().filter(|x| **x != ' ').count()
-                } else {
-                    chars.len()
-                };
-                if n >= cfg.max_len {
-                    return true;
-                }
-            }
-            chars.insert(*caret, c);
-            *caret += 1;
+            insert_str(chars, caret, cfg, c.encode_utf8(&mut [0; 4]));
             true
         })
     }
@@ -873,6 +921,33 @@ fn line_metrics(font: &Font, size: f32, lh: Option<f32>) -> (f32, f32) {
             (h, (h - total) * asc / total + asc)
         }
     }
+}
+
+/// `s` ni kursor oldiga kiritadi (filtr va uzunlik chegarasi bilan); kiritilgan belgilar soni qaytadi.
+fn insert_str(chars: &mut Vec<char>, caret: &mut usize, cfg: &FieldCfg, s: &str) -> usize {
+    let mut n = 0;
+    for c in s.chars() {
+        if c.is_control() {
+            continue;
+        }
+        if cfg.filter.is_some_and(|p| !p(c)) {
+            continue;
+        }
+        if cfg.max_len > 0 {
+            let used = if cfg.format.is_some() {
+                chars.iter().filter(|x| **x != ' ').count()
+            } else {
+                chars.len()
+            };
+            if used >= cfg.max_len {
+                break;
+            }
+        }
+        chars.insert(*caret, c);
+        *caret += 1;
+        n += 1;
+    }
+    n
 }
 
 fn it_padding(tree: &Tree, node: usize) -> EdgeInsets {

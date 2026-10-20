@@ -149,6 +149,26 @@ impl Gpu {
 const INPUT_IDENT: i32 = 1;
 const WINDOW_FORMAT_RGBA_8888: i32 = 1;
 
+/// Java yelimidan (IME) kelgan hodisa.
+pub enum ImeEvent {
+    Commit(String),
+    Composing(String),
+    Delete(usize, usize),
+    Finish,
+    Enter,
+}
+
+/// Java yelimi chaqiradi (UI oqimidan): hodisani chizish oqimiga uzatadi.
+pub fn ime_event(e: ImeEvent) {
+    if let Some(s) = shared() {
+        let mut g = s.m.lock().unwrap();
+        g.ime.push(e);
+        wake(&g);
+    }
+}
+
+pub use crate::jni::jstring;
+
 struct Shared {
     window: *mut c_void,
     queue: *mut c_void,
@@ -157,6 +177,7 @@ struct Shared {
     quit: bool,
     /// Tizim panellari bo'lmagan maydon (oyna koordinatalarida).
     content_rect: Option<[i32; 4]>,
+    ime: Vec<ImeEvent>,
     looper: *mut c_void,
 }
 
@@ -285,6 +306,7 @@ pub unsafe fn on_create(activity: *mut ANativeActivity, make_ui: fn(f32) -> Ui) 
             redraw: true,
             quit: false,
             content_rect: None,
+            ime: Vec::new(),
             looper: null_mut(),
         }),
         cv: Condvar::new(),
@@ -328,6 +350,7 @@ fn run(s: Arc<Sync_>, make_ui: fn(f32) -> Ui, scale: f32, activity: usize) {
     let mut dims = (0i32, 0i32);
     let mut force = true;
     let mut rect: Option<[i32; 4]>;
+    let mut ime: Vec<ImeEvent>;
 
     loop {
         ui.set_time(t0.elapsed().as_millis() as u64);
@@ -369,6 +392,7 @@ fn run(s: Arc<Sync_>, make_ui: fn(f32) -> Ui, scale: f32, activity: usize) {
                 force = true;
             }
             rect = g.content_rect;
+            ime = std::mem::take(&mut g.ime);
         }
 
         if !window.is_null() {
@@ -422,6 +446,23 @@ fn run(s: Arc<Sync_>, make_ui: fn(f32) -> Ui, scale: f32, activity: usize) {
             }
         }
 
+        for e in ime.drain(..) {
+            match e {
+                ImeEvent::Commit(s) => {
+                    ui.ime_commit(&s);
+                }
+                ImeEvent::Composing(s) => {
+                    ui.ime_composing(&s);
+                }
+                ImeEvent::Delete(b, a) => {
+                    ui.ime_delete(b, a);
+                }
+                ImeEvent::Finish => ui.ime_finish(),
+                ImeEvent::Enter => {
+                    ui.key_enter();
+                }
+            }
+        }
         // Tizim panellari chekinishlari: status bar (tepa), navigatsiya paneli (past; klaviatura ochiqligida emas).
         let kb_visible = full_h > 0 && dims.1 + full_h / 6 < full_h;
         if let Some(r) = rect {
@@ -441,8 +482,9 @@ fn run(s: Arc<Sync_>, make_ui: fn(f32) -> Ui, scale: f32, activity: usize) {
         let now = t0.elapsed().as_millis() as u64;
         if ui.keyboard_serial() != last_serial {
             last_serial = ui.keyboard_serial();
-            if ui.wants_keyboard() && !kb_visible && now.saturating_sub(last_show_ms) > 800 {
-                unsafe { jni::show_keyboard(activity) };
+            // Har maydonga bosilganda: tur o'zgargan bo'lishi mumkin, shuning uchun qayta so'raymiz (takroriy chaqiruv zararsiz).
+            if ui.wants_keyboard() && now.saturating_sub(last_show_ms) > 150 {
+                unsafe { jni::show_keyboard(activity, ui.keyboard_kind().android_input_type()) };
                 last_show_ms = now;
                 shown_req = true;
             }

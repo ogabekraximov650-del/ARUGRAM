@@ -9,9 +9,7 @@ const I_EXCEPTION_CLEAR: usize = 17;
 const I_DELETE_LOCAL_REF: usize = 23;
 const I_GET_OBJECT_CLASS: usize = 31;
 const I_GET_METHOD_ID: usize = 33;
-const I_CALL_OBJECT_METHOD_A: usize = 36;
 const I_CALL_VOID_METHOD_A: usize = 63;
-const I_NEW_STRING_UTF: usize = 167;
 const I_EXCEPTION_CHECK: usize = 228;
 const VM_ATTACH: usize = 4;
 const VM_DETACH: usize = 5;
@@ -38,15 +36,6 @@ impl Env {
         f(self.0, cls, name.as_ptr(), sig.as_ptr())
     }
 
-    unsafe fn call_obj(&self, o: Obj, m: *mut c_void, args: &[u64]) -> Obj {
-        if m.is_null() {
-            return null_mut();
-        }
-        let f: extern "C" fn(*mut c_void, Obj, *mut c_void, *const u64) -> Obj =
-            std::mem::transmute(self.f(I_CALL_OBJECT_METHOD_A));
-        f(self.0, o, m, args.as_ptr())
-    }
-
     unsafe fn call_void(&self, o: Obj, m: *mut c_void, args: &[u64]) {
         if m.is_null() {
             return;
@@ -54,12 +43,6 @@ impl Env {
         let f: extern "C" fn(*mut c_void, Obj, *mut c_void, *const u64) =
             std::mem::transmute(self.f(I_CALL_VOID_METHOD_A));
         f(self.0, o, m, args.as_ptr())
-    }
-
-    unsafe fn string(&self, s: &[u8]) -> Obj {
-        let f: extern "C" fn(*mut c_void, *const u8) -> Obj =
-            std::mem::transmute(self.f(I_NEW_STRING_UTF));
-        f(self.0, s.as_ptr())
     }
 
     unsafe fn delete(&self, o: Obj) {
@@ -109,72 +92,53 @@ pub unsafe fn detach(activity: *mut ANativeActivity) {
     f(vm);
 }
 
-unsafe fn imm(env: &Env, activity: *mut ANativeActivity) -> Obj {
-    let clazz = (*activity).clazz;
-    let cls = env.class_of(clazz);
-    let m = env.method(
-        cls,
-        b"getSystemService\0",
-        b"(Ljava/lang/String;)Ljava/lang/Object;\0",
-    );
-    let name = env.string(b"input_method\0");
-    let imm = env.call_obj(clazz, m, &[name as usize as u64]);
-    env.delete(name);
-    env.delete(cls);
-    env.clear_exception();
-    imm
-}
-
-/// Tizim klaviaturasini ko'rsatadi (`toggleSoftInput(SHOW_FORCED, 0)`).
+/// `UzActivity.showKeyboard(inputType)` (Java yelimi) ni chaqiradi.
 ///
 /// # Safety
 /// `activity` yaroqli bo'lishi kerak; chaqiruvchi oqim JVM'ga ulanishi mumkin bo'lgan oqim.
-pub unsafe fn show_keyboard(activity: *mut ANativeActivity) {
+pub unsafe fn show_keyboard(activity: *mut ANativeActivity, input_type: i32) {
     let Some(env) = attach(activity) else { return };
-    let imm = imm(&env, activity);
-    if imm.is_null() {
-        return;
-    }
-    let cls = env.class_of(imm);
-    let m = env.method(cls, b"toggleSoftInput\0", b"(II)V\0");
-    env.call_void(imm, m, &[2, 0]);
+    let clazz = (*activity).clazz;
+    let cls = env.class_of(clazz);
+    let m = env.method(cls, b"showKeyboard\0", b"(I)V\0");
+    env.call_void(clazz, m, &[input_type as u32 as u64]);
     env.clear_exception();
     env.delete(cls);
-    env.delete(imm);
 }
 
-/// Klaviaturani yashiradi (`hideSoftInputFromWindow(decorView.getWindowToken(), 0)`).
+/// `UzActivity.hideKeyboard()` ni chaqiradi.
 ///
 /// # Safety
 /// `show_keyboard` bilan bir xil.
 pub unsafe fn hide_keyboard(activity: *mut ANativeActivity) {
     let Some(env) = attach(activity) else { return };
-    let imm = imm(&env, activity);
-    if imm.is_null() {
-        return;
-    }
     let clazz = (*activity).clazz;
-    let act_cls = env.class_of(clazz);
-    let get_window = env.method(act_cls, b"getWindow\0", b"()Landroid/view/Window;\0");
-    let window = env.call_obj(clazz, get_window, &[]);
-    let win_cls = env.class_of(window);
-    let get_decor = env.method(win_cls, b"getDecorView\0", b"()Landroid/view/View;\0");
-    let decor = env.call_obj(window, get_decor, &[]);
-    let view_cls = env.class_of(decor);
-    let get_token = env.method(view_cls, b"getWindowToken\0", b"()Landroid/os/IBinder;\0");
-    let token = env.call_obj(decor, get_token, &[]);
-    let imm_cls = env.class_of(imm);
-    let hide = env.method(
-        imm_cls,
-        b"hideSoftInputFromWindow\0",
-        b"(Landroid/os/IBinder;I)Z\0",
-    );
-    // Boolean natija kerak emas: Object chaqiruvi bilan bir xil ABI (ro'yxatdan qiymat qaytadi).
-    env.call_obj(imm, hide, &[token as usize as u64, 0]);
+    let cls = env.class_of(clazz);
+    let m = env.method(cls, b"hideKeyboard\0", b"()V\0");
+    env.call_void(clazz, m, &[]);
     env.clear_exception();
-    for o in [
-        token, view_cls, decor, win_cls, window, act_cls, imm_cls, imm,
-    ] {
-        env.delete(o);
+    env.delete(cls);
+}
+
+/// Java `String` ni Rust `String` ga o'giradi (UTF-16 -> UTF-8, emoji ham to'g'ri).
+///
+/// # Safety
+/// `env` va `s` JNI chaqiruvidan kelgan yaroqli ko'rsatkichlar.
+pub unsafe fn jstring(env: *mut c_void, s: *mut c_void) -> String {
+    if s.is_null() {
+        return String::new();
     }
+    let env = Env(env);
+    let len: extern "C" fn(*mut c_void, Obj) -> i32 = std::mem::transmute(env.f(164));
+    let chars: extern "C" fn(*mut c_void, Obj, *mut u8) -> *const u16 =
+        std::mem::transmute(env.f(165));
+    let release: extern "C" fn(*mut c_void, Obj, *const u16) = std::mem::transmute(env.f(166));
+    let n = len(env.0, s).max(0) as usize;
+    let p = chars(env.0, s, null_mut());
+    if p.is_null() {
+        return String::new();
+    }
+    let out = String::from_utf16_lossy(std::slice::from_raw_parts(p, n));
+    release(env.0, s, p);
+    out
 }

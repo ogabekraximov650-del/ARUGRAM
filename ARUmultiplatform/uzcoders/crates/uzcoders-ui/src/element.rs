@@ -6,6 +6,30 @@ use uzcoders_core::{Color, EdgeInsets, State};
 use uzcoders_layout::{Align, Axis, Dim, Justify, Style};
 use uzcoders_render::Path;
 
+/// Klaviatura turi (Android `inputType` ga aylanadi).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum KeyboardKind {
+    #[default]
+    Text,
+    Number,
+    Phone,
+    Password,
+    Email,
+}
+
+impl KeyboardKind {
+    /// Android `InputType` qiymati.
+    pub fn android_input_type(self) -> i32 {
+        match self {
+            KeyboardKind::Text => 1,
+            KeyboardKind::Number => 2,
+            KeyboardKind::Phone => 3,
+            KeyboardKind::Password => 1 | 0x80,
+            KeyboardKind::Email => 1 | 0x20,
+        }
+    }
+}
+
 pub(crate) type Callback = Rc<dyn Fn()>;
 
 pub(crate) struct FieldCfg {
@@ -24,6 +48,7 @@ pub(crate) struct FieldCfg {
     pub label_bg: Color,
     pub line_height: Option<f32>,
     pub spacing: f32,
+    pub keyboard: KeyboardKind,
 }
 
 pub(crate) enum Kind {
@@ -251,10 +276,18 @@ impl Element {
         }
         self
     }
+    /// Ochiladigan klaviatura turi (raqamli, telefon, ...).
+    pub fn keyboard(mut self, k: KeyboardKind) -> Self {
+        if let Some(f) = self.field_cfg() {
+            f.keyboard = k;
+        }
+        self
+    }
     /// Matn nuqtalar bilan yashiriladi.
     pub fn password(mut self) -> Self {
         if let Some(f) = self.field_cfg() {
             f.password = true;
+            f.keyboard = KeyboardKind::Password;
         }
         self
     }
@@ -417,6 +450,7 @@ pub fn field(state: &State<String>) -> Element {
             label_bg: Color::WHITE,
             line_height: None,
             spacing: 0.0,
+            keyboard: KeyboardKind::Text,
         })),
         Style::default(),
         Vec::new(),

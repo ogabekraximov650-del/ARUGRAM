@@ -330,3 +330,41 @@ fn virtual_royxat_faqat_korinadiganni_quradi() {
         .count();
     assert!(n >= 6, "{n}");
 }
+
+#[test]
+fn ime_tugallanmagan_va_ochirish() {
+    let val = State::new(String::new());
+    let v2 = val.clone();
+    let mut ui = Ui::new(font(), move || column(vec![field(&v2)]).padding(10.0));
+    ui.frame(SZ);
+    let r = ui.fields[0].rect;
+    tap(&mut ui, r.x + 5.0, r.y + 5.0);
+    ui.frame(SZ);
+    assert!(ui.ime_commit("sa"));
+    ui.frame(SZ);
+    ui.ime_composing("l");
+    ui.frame(SZ);
+    ui.ime_composing("lom");
+    assert_eq!(val.get(), "salom");
+    ui.ime_finish();
+    ui.ime_commit("!");
+    assert_eq!(val.get(), "salom!");
+    ui.ime_delete(2, 0);
+    assert_eq!(val.get(), "salo");
+    ui.clear_focus();
+    assert!(!ui.wants_keyboard());
+}
+
+#[test]
+fn klaviatura_turi() {
+    let val = State::new(String::new());
+    let v2 = val.clone();
+    let mut ui = Ui::new(font(), move || {
+        column(vec![field(&v2).keyboard(KeyboardKind::Number)]).padding(10.0)
+    });
+    ui.frame(SZ);
+    let r = ui.fields[0].rect;
+    tap(&mut ui, r.x + 5.0, r.y + 5.0);
+    assert_eq!(ui.keyboard_kind(), KeyboardKind::Number);
+    assert_eq!(KeyboardKind::Number.android_input_type(), 2);
+}

@@ -11,7 +11,7 @@ pub mod glue;
 pub(crate) mod jni;
 
 #[cfg(target_os = "android")]
-pub use glue::{on_create, ANativeActivity};
+pub use glue::{ime_event, jstring, on_create, ANativeActivity, ImeEvent};
 
 /// Ilova kirish nuqtasini e'lon qiladi: `uzcoders_android::android_app!(my_app);`
 /// bu yerda `fn my_app(scale: f32) -> uzcoders_ui::Ui`.
@@ -25,6 +25,54 @@ macro_rules! android_app {
             _saved_state_size: usize,
         ) {
             $crate::on_create(activity, $f);
+        }
+
+        // Java yelimi (`uz.uzcoders.UzActivity`) chaqiradigan JNI funksiyalari.
+        #[no_mangle]
+        pub unsafe extern "system" fn Java_uz_uzcoders_UzActivity_nativeCommit(
+            env: *mut ::std::ffi::c_void,
+            _cls: *mut ::std::ffi::c_void,
+            s: *mut ::std::ffi::c_void,
+        ) {
+            $crate::ime_event($crate::ImeEvent::Commit($crate::jstring(env, s)));
+        }
+
+        #[no_mangle]
+        pub unsafe extern "system" fn Java_uz_uzcoders_UzActivity_nativeComposing(
+            env: *mut ::std::ffi::c_void,
+            _cls: *mut ::std::ffi::c_void,
+            s: *mut ::std::ffi::c_void,
+        ) {
+            $crate::ime_event($crate::ImeEvent::Composing($crate::jstring(env, s)));
+        }
+
+        #[no_mangle]
+        pub unsafe extern "system" fn Java_uz_uzcoders_UzActivity_nativeDelete(
+            _env: *mut ::std::ffi::c_void,
+            _cls: *mut ::std::ffi::c_void,
+            before: i32,
+            after: i32,
+        ) {
+            $crate::ime_event($crate::ImeEvent::Delete(
+                before.max(0) as usize,
+                after.max(0) as usize,
+            ));
+        }
+
+        #[no_mangle]
+        pub unsafe extern "system" fn Java_uz_uzcoders_UzActivity_nativeFinish(
+            _env: *mut ::std::ffi::c_void,
+            _cls: *mut ::std::ffi::c_void,
+        ) {
+            $crate::ime_event($crate::ImeEvent::Finish);
+        }
+
+        #[no_mangle]
+        pub unsafe extern "system" fn Java_uz_uzcoders_UzActivity_nativeEnter(
+            _env: *mut ::std::ffi::c_void,
+            _cls: *mut ::std::ffi::c_void,
+        ) {
+            $crate::ime_event($crate::ImeEvent::Enter);
         }
     };
 }
