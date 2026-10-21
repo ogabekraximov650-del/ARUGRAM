@@ -1,5 +1,6 @@
 //! Bosh sahifa: sarlavha, "Ommabop anime" va poster kartalari to'ri, pastda haqiqiy shisha (xiralashtiruvchi) navigatsiya paneli.
 
+mod admin;
 mod billing;
 mod dl;
 mod edit;
@@ -42,6 +43,7 @@ enum Status {
 pub struct Home {
     session: String,
     profile: State<Rc<Profile>>,
+    chips_scroll2: ScrollState,
     dl: State<Rc<HashMap<String, VStat>>>,
     dl_watch: RefCell<HashSet<String>>,
     dl_active: RefCell<HashSet<String>>,
@@ -145,6 +147,7 @@ impl Home {
         let h = Rc::new(Home {
             session,
             profile: State::new(Rc::new(Profile::default())),
+            chips_scroll2: ScrollState::new(),
             dl: State::new(Rc::new(HashMap::new())),
             dl_watch: RefCell::new(HashSet::new()),
             dl_active: RefCell::new(HashSet::new()),
@@ -882,7 +885,7 @@ impl Home {
             }
             _ => content,
         };
-        let mut layers = vec![content];
+        let mut layers = vec![Self::glass_backdrop(), content];
         if tab == 0 {
             layers.push(self.header(ins.top));
         } else if tab == 1 {
@@ -903,7 +906,7 @@ impl Home {
                 layers.push(d);
             }
         }
-        stack(layers).bg(BG)
+        stack(layers)
     }
 }
 
@@ -946,6 +949,7 @@ mod tests {
         let home = Rc::new(Home {
             session: String::new(),
             profile: State::new(Rc::new(Profile::default())),
+            chips_scroll2: ScrollState::new(),
             dl: State::new(Rc::new(HashMap::new())),
             dl_watch: RefCell::new(HashSet::new()),
             dl_active: RefCell::new(HashSet::new()),

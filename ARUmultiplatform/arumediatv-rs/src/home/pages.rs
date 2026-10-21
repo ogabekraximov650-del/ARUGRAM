@@ -49,6 +49,11 @@ pub enum Page {
     Storage(Rc<super::storage::StoragePage>),
     Support(Rc<super::support::SupportPage>),
     DlAnime(Rc<super::dl::DlAnimePage>),
+    AdminHub,
+    AdminUsers(Rc<super::admin::UsersPage>),
+    AdminThreads(Rc<super::admin::ListPage>),
+    AdminReports(Rc<super::admin::ListPage>),
+    AdminStats(Rc<super::admin::StatsPage>),
 }
 
 impl Home {
@@ -144,7 +149,7 @@ impl Home {
     // ── Umumiy bo'laklar ──
 
     fn card_box(e: Element) -> Element {
-        e.bg(CARD).border(1.0, Color::rgba(255, 255, 255, 22)).radius(18.0)
+        Self::pglass(e).radius(18.0)
     }
 
     /// Profil orqali ochiladigan sahifa: rangli orqa fon, shisha sarlavha (orqaga + nom) va tana.
@@ -196,6 +201,11 @@ impl Home {
             Page::Storage(p) => self.storage_page(&p),
             Page::Support(p) => self.support_page(&p),
             Page::DlAnime(p) => self.dl_anime_page(&p),
+            Page::AdminHub => self.admin_hub_page(),
+            Page::AdminUsers(p) => self.admin_users_page(&p),
+            Page::AdminThreads(p) => self.admin_threads_page(&p),
+            Page::AdminReports(p) => self.admin_reports_page(&p),
+            Page::AdminStats(p) => self.admin_stats_page(&p),
         }
     }
 
@@ -251,7 +261,7 @@ impl Home {
         };
         let pc = p.clone();
         let body = body.on_swipe(move |d| pc.tab.set((pc.tab.get() as i32 + d).clamp(0, 3) as usize));
-        let mut layers = vec![column(vec![cover, tab_bar, body.grow(1.0)]).bg(BG)];
+        let mut layers = vec![Self::glass_backdrop(), column(vec![cover, tab_bar, body.grow(1.0)])];
         if p.rating_open.get() {
             layers.push(self.rating_dialog(p, &info));
         }
@@ -361,8 +371,7 @@ impl Home {
             gap_box(0.0, 14.0),
             row(vec![spacer(), self.chip("Bekor qilish", false, move || pc.rating_open.set(false))]),
         ])
-        .bg(SURFACE)
-        .border(1.0, Color::rgba(255, 255, 255, 30))
+        .lens(Color::rgba(18, 18, 24, 120), GLASS_ZOOM)
         .radius(28.0)
         .padding(22.0)
         .margin_each(24.0, 0.0, 24.0, 0.0);
@@ -475,7 +484,7 @@ impl Home {
             if is_cur {
                 kids.push(icon(A_PLAY, 24.0).color(ACCENT2));
             }
-            let mut e = row(kids).gap(12.0).align(Align::Center).padding(10.0).bg(if is_cur { ACCENT.with_opacity(0.18) } else { CARD }).border(1.0, if is_cur { ACCENT.with_opacity(0.5) } else { Color::rgba(255, 255, 255, 22) }).radius(16.0).height(66.0).margin_each(0.0, 0.0, 0.0, 10.0);
+            let mut e = row(kids).gap(12.0).align(Align::Center).padding(10.0).glass(if is_cur { ACCENT.with_opacity(0.3) } else { Color::rgba(255, 255, 255, 20) }).border(1.0, if is_cur { ACCENT.with_opacity(0.6) } else { Color::rgba(255, 255, 255, 40) }).radius(16.0).height(66.0).margin_each(0.0, 0.0, 0.0, 10.0);
             if !is_cur {
                 e = e.on_click(move || {
                     m2.pop();

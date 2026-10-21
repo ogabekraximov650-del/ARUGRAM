@@ -331,6 +331,7 @@ pub struct Profile {
     pub comments: i64,
     pub hidden: Vec<String>,
     pub consent: bool,
+    pub is_admin: bool,
 }
 
 pub fn fetch_profile(session: &str) -> Result<Profile, String> {
@@ -361,6 +362,7 @@ pub fn fetch_profile(session: &str) -> Result<Profile, String> {
         comments: num(&st["comments"]),
         hidden: u["hidden_stats"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default(),
         consent: u["chan_consent"].as_bool().unwrap_or(false),
+        is_admin: u["is_admin"].as_bool().unwrap_or(false),
     })
 }
 

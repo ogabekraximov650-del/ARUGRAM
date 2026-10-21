@@ -654,7 +654,7 @@ impl Login {
         let back = icon(ARROW_BACK, 28.0).color(Color::WHITE).on_click(move || {
             me.nav.pop();
         });
-        column(vec![
+        let picker = column(vec![
             row(vec![
                 back,
                 self.styled(field(&self.query))
@@ -666,7 +666,7 @@ impl Login {
             .align(Align::Center)
             .padding_each(16.0, 12.0 + safe_insets().top, 16.0, 12.0),
             rows.padding_xy(16.0, 0.0).grow(1.0),
-        ])
-        .bg(SURFACE)
+        ]);
+        stack(vec![crate::theme::glass_backdrop(), picker])
     }
 }

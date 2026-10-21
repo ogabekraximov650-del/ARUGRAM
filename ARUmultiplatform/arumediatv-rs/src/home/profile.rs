@@ -21,6 +21,7 @@ const P_EXIT: &str = "M10.09,15.59L11.5,17l5,-5 -5,-5 -1.41,1.41L12.67,11H3v2h9.
 const P_CHEVRON: &str = "M10,6L8.59,7.41 13.17,12l-4.58,4.59L10,18l6,-6z";
 const P_COPY: &str = "M16,1H4c-1.1,0 -2,0.9 -2,2v14h2V3h12V1zM19,5H8c-1.1,0 -2,0.9 -2,2v14c0,1.1 0.9,2 2,2h11c1.1,0 2,-0.9 2,-2V7c0,-1.1 -0.9,-2 -2,-2zM19,21H8V7h11v14z";
 const P_EDIT: &str = "M3,17.25V21h3.75L17.81,9.94l-3.75,-3.75L3,17.25zM20.71,7.04c0.39,-0.39 0.39,-1.02 0,-1.41l-2.34,-2.34c-0.39,-0.39 -1.02,-0.39 -1.41,0l-1.83,1.83 3.75,3.75 1.83,-1.83z";
+const P_LOCK: &str = "M18,8h-1L17,6c0,-2.76 -2.24,-5 -5,-5S7,3.24 7,6v2H6c-1.1,0 -2,0.9 -2,2v10c0,1.1 0.9,2 2,2h12c1.1,0 2,-0.9 2,-2V10c0,-1.1 -0.9,-2 -2,-2zM12,17c-1.1,0 -2,-0.9 -2,-2s0.9,-2 2,-2 2,0.9 2,2 -0.9,2 -2,2zM15.1,8H8.9V6c0,-1.71 1.39,-3.1 3.1,-3.1 1.71,0 3.1,1.39 3.1,3.1v2z";
 const P_CROWN: &str = "M5,16L3,5l5.5,5L12,4l3.5,6L21,5l-2,11H5zM19,19c0,0.6 -0.4,1 -1,1H6c-0.6,0 -1,-0.4 -1,-1v-1h14v1z";
 
 /// Dialog turlari (`dlg`): 0 — yo'q, 1 — chiqish, 2/3 — o'chirish (1- va 2-tasdiq), 4 — ilova haqida, 5 — xabar.
@@ -214,22 +215,7 @@ impl Home {
 
     /// Profil orqali ochiladigan sahifalar uchun rangli orqa fon (shisha shu ustidan sindirib ko'rsatadi).
     pub(super) fn glass_backdrop() -> Element {
-        stack(vec![
-            column(vec![]).bg(BG).glows(vec![
-                (0.15, 0.10, 280.0, Color::rgba(226, 98, 15, 170)),
-                (0.95, 0.30, 300.0, Color::rgba(110, 80, 230, 150)),
-                (0.05, 0.62, 280.0, Color::rgba(40, 170, 150, 120)),
-                (0.90, 0.88, 300.0, Color::rgba(226, 98, 15, 130)),
-            ]),
-            column(vec![
-                gap_box(0.0, 120.0),
-                row(vec![gap_box(36.0, 0.0), column(vec![]).width(120.0).height(120.0).radius(60.0).gradient(ACCENT2, Color::hex(0x7C3AED))]),
-                gap_box(0.0, 190.0),
-                row(vec![spacer(), column(vec![]).width(150.0).height(70.0).radius(35.0).gradient(Color::hex(0x14B8A6), Color::hex(0x2563EB)), gap_box(30.0, 0.0)]),
-                gap_box(0.0, 220.0),
-                row(vec![gap_box(60.0, 0.0), column(vec![]).width(100.0).height(100.0).radius(28.0).gradient(Color::hex(0xF59E0B), ACCENT)]),
-            ]),
-        ])
+        crate::theme::glass_backdrop()
     }
 
     pub(super) fn profile_view(self: &Rc<Self>) -> Element {
@@ -343,6 +329,12 @@ impl Home {
         ]))
         .radius(24.0);
 
+        let admin_tile = if p.is_admin {
+            let me = self.clone();
+            Some(Self::pglass(self.tile(P_LOCK, "Admin paneli", move || me.open_admin_hub())).radius(24.0))
+        } else {
+            None
+        };
         let (m1, m2) = (self.clone(), self.clone());
         let kids = vec![
             row(vec![Self::pglass(column(vec![tx("Profil", 24.0, Color::WHITE).black()]).padding_xy(22.0, 8.0)).radius(26.0), spacer()]).padding_each(0.0, 0.0, 0.0, 12.0),
@@ -356,6 +348,8 @@ impl Home {
             gap_box(0.0, 16.0),
             group,
             gap_box(0.0, 16.0),
+            admin_tile.unwrap_or_else(|| gap_box(0.0, 0.0)),
+            gap_box(0.0, if p.is_admin { 16.0 } else { 0.0 }),
             self.danger(P_TRASH, "Accountni o'chirish", move || m1.dlg.set(2)),
             gap_box(0.0, 16.0),
             self.danger(P_EXIT, "Accountdan chiqish", move || m2.dlg.set(1)),
