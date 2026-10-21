@@ -35,6 +35,12 @@ qarorning sababi: `KEYINGI_VAZIFA.md` (katta fayl, kerakli bo'limni
   `encode.yml` ni worker o'zi ishga tushiradi (cron har 10 daqiqa,
   `encode_kick`) — siz ishga tushirmang.
 
+## uzcoders kutubxonasi (foydalanuvchi talabi, QAT'IY)
+
+- Kutubxona o'zgarishlari AVVAL ARUGRAM ichidagi nusxada (`ARUmultiplatform/uzcoders`) qilinadi va CI (`arumediatv-rs.yml`) yashil bo'lishi kerak.
+- `ogabekraximov650-del/uzcoders` reposiga kod faqat CI xatosiz o'tib, 100% ishonch hosil bo'lgandan keyin ko'chiriladi (`crates/` va `README.md`).
+- Kutubxonadagi barcha izohlar (Rust, Java, README, Cargo tavsifi) uch tilda yoziladi: `UZ:`, `EN:`, `RU:`. Baytli qator (`b"..."`, shader) ichiga rus harflari yozilmaydi.
+
 ## Loyiha tuzilishi
 
 **YANGI (2026-10):** Flutter loyihasi (`lib/`, `pubspec.yaml`) TO'XTATILDI — unga tegilmaydi. Yangi ilovalar har platforma uchun alohida kodda:
