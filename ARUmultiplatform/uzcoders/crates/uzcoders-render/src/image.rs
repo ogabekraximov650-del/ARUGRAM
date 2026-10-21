@@ -9,6 +9,11 @@ pub struct Image {
 }
 
 impl Image {
+    /// PNG baytlariga kodlaydi (RGBA).
+    pub fn to_png(&self) -> Vec<u8> {
+        crate::png::encode_rgba(self.w, self.h, &self.rgba)
+    }
+
     /// Aspektni saqlab `max_w x max_h` ga sig'adigan qilib kichraytiradi (maydon o'rtachasi); kichik bo'lsa o'zgarmaydi.
     pub fn resized(self, max_w: u32, max_h: u32) -> Image {
         let k = (max_w as f32 / self.w as f32).min(max_h as f32 / self.h as f32);

@@ -4,6 +4,7 @@ mod billing;
 mod edit;
 mod pages;
 mod storage;
+mod support;
 mod profile;
 use crate::data::{Device, Profile, fetch_library, fetch_seasons, fmt_date, load_posters, HistoryItem, Season};
 use crate::theme::*;
@@ -39,6 +40,8 @@ enum Status {
 pub struct Home {
     session: String,
     profile: State<Rc<Profile>>,
+    unread: State<u32>,
+    picked_cb: RefCell<Option<Box<dyn Fn(String)>>>,
     pages: State<Vec<pages::Page>>,
     hidden: State<Vec<String>>,
     consent: State<bool>,
@@ -131,6 +134,8 @@ impl Home {
         let h = Rc::new(Home {
             session,
             profile: State::new(Rc::new(Profile::default())),
+            unread: State::new(0),
+            picked_cb: RefCell::new(None),
             pages: State::new(Vec::new()),
             hidden: State::new(Vec::new()),
             consent: State::new(false),
@@ -727,7 +732,18 @@ impl Home {
         ])
     }
 
+    /// Fayl tanlagichni ochadi; tanlangach `cb(yo'l)` chaqiriladi.
+    pub(super) fn pick(&self, mime: &str, cb: impl Fn(String) + 'static) {
+        *self.picked_cb.borrow_mut() = Some(Box::new(cb));
+        uzcoders::android::pick_file(mime);
+    }
+
     pub fn view(self: &Rc<Self>) -> Element {
+        for path in uzcoders::android::take_picked() {
+            if let Some(cb) = self.picked_cb.borrow_mut().take() {
+                cb(path);
+            }
+        }
         if let Some(page) = self.pages.get().last().cloned() {
             return self.page_view(page);
         }
@@ -893,6 +909,8 @@ mod tests {
         let home = Rc::new(Home {
             session: String::new(),
             profile: State::new(Rc::new(Profile::default())),
+            unread: State::new(0),
+            picked_cb: RefCell::new(None),
             pages: State::new(Vec::new()),
             hidden: State::new(Vec::new()),
             consent: State::new(false),
@@ -955,6 +973,17 @@ mod tests {
             std::fs::write(format!("{dir}/7_search.png"), c.to_png()).unwrap();
             home.tab.set(2);
             home.push(pages::Page::Sessions);
+            home.open_support(None);
+            if let Some(pages::Page::Support(p)) = home.pages.get().last().cloned() {
+                let mk = |id: &str, adm: bool, b: &str, t: i64| support::ChatMsg::test(id, adm, b, t);
+                p.items_set(vec![mk("1", false, "Salom, savolim bor edi", 1_792_497_600_000), mk("2", true, "Assalomu alaykum! Qanday yordam beray?", 1_792_497_700_000), mk("3", false, "Obuna to'lovi tushmadi", 1_792_584_000_000)]);
+                let cmds = ui.frame(size);
+                let mut c = ui.canvas(360, 640);
+                c.clear(Color::BLACK);
+                c.execute(&cmds);
+                std::fs::write(format!("{dir}/16_support.png"), c.to_png()).unwrap();
+            }
+            home.pop();
             for k in 0..3 {
                 match k {
                     0 => home.open_billing(),

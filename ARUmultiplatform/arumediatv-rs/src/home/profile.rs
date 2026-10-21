@@ -103,6 +103,44 @@ impl Home {
         .on_click(f)
     }
 
+    /// Profil rasmini almashtirish: tanlangan rasm 720 px gacha kichraytiriladi va Telegram orqali yuklanadi.
+    pub(super) fn change_avatar(self: &Rc<Self>) {
+        let me = self.clone();
+        self.pick("image/*", move |path| {
+            let uid = me.profile.get().id;
+            let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+            let name = format!("avatar_{uid}_{ts}.jpg");
+            let (m2, session, n2) = (me.clone(), me.session.clone(), name.clone());
+            me.dlg_msg.set("Rasm yuklanmoqda...".into());
+            me.dlg.set(6);
+            spawn_bg(
+                move || -> Result<(), String> {
+                    let bytes = std::fs::read(&path).map_err(|_| "Rasmni o'qib bo'lmadi".to_string())?;
+                    let img = decode_image(&bytes).ok_or("Rasm noto'g'ri yoki qo'llab-quvvatlanmaydi (JPEG/PNG)".to_string())?.resized(720, 720);
+                    let out = format!("{}/{n2}", std::path::Path::new(&path).parent().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default());
+                    std::fs::write(&out, img.to_png()).map_err(|_| "Rasm tayyorlanmadi".to_string())?;
+                    let r = crate::backend::upload_file(&out, &n2, "image/jpeg", &session, &|_, _| {});
+                    let _ = std::fs::remove_file(&out);
+                    let _ = std::fs::remove_file(&path);
+                    r?;
+                    let (code, body) = crate::api::request("POST", "/api/auth/avatar", "", Some(&serde_json::json!({"file": n2})), Some(&session)).map_err(|_| "Tarmoq xatosi".to_string())?;
+                    if code >= 400 { Err(format!("Rasm saqlanmadi ({code}): {body}")) } else { Ok(()) }
+                },
+                move |r| match r {
+                    Ok(()) => {
+                        m2.dlg.set(0);
+                        *m2.avatar.borrow_mut() = None;
+                        m2.load_profile();
+                    }
+                    Err(e) => {
+                        m2.dlg_msg.set(e);
+                        m2.dlg.set(5);
+                    }
+                },
+            );
+        });
+    }
+
     fn do_logout(&self) {
         self.dlg.set(0);
         (self.on_logout)();
@@ -207,7 +245,8 @@ impl Home {
                     column(vec![tx(letter, 38.0, ACCENT2).bold()]).center().radius(48.0).bg(ACCENT.with_opacity(0.25))
                 }
             };
-            column(vec![inner]).width(96.0).height(96.0)
+            let me_a = self.clone();
+            column(vec![inner]).width(96.0).height(96.0).on_click(move || me_a.change_avatar())
         };
         let id_pill = row(vec![tx(format!("ID: {}", p.id), 14.0, Color::rgba(255, 255, 255, 200)).bold(), icon(P_COPY, 16.0).color(Color::rgba(255, 255, 255, 150))])
             .gap(9.0)
@@ -298,7 +337,7 @@ impl Home {
             divider(),
             self.tile(P_SMILE, "Emoji, GIF va stikerlar", soon(self, "Bu bo'lim tez orada qo'shiladi")),
             divider(),
-            self.tile(P_HEADSET, "Admin bilan bog'lanish", soon(self, "Bu bo'lim tez orada qo'shiladi")),
+            self.tile(P_HEADSET, "Admin bilan bog'lanish", { let me = self.clone(); move || me.open_support(None) }),
             divider(),
             self.tile(P_INFO, "Ilova haqida", about),
         ]))

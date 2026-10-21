@@ -41,6 +41,7 @@ pub enum Page {
     Billing(Rc<super::billing::BillingPage>),
     Edit(Rc<super::edit::EditPage>),
     Storage(Rc<super::storage::StoragePage>),
+    Support(Rc<super::support::SupportPage>),
 }
 
 impl Home {
@@ -181,6 +182,7 @@ impl Home {
             Page::Billing(p) => self.billing_page(&p),
             Page::Edit(p) => self.edit_page(&p),
             Page::Storage(p) => self.storage_page(&p),
+            Page::Support(p) => self.support_page(&p),
         }
     }
 

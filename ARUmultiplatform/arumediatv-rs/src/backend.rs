@@ -334,3 +334,68 @@ mod tests {
         assert_eq!((s.error.as_deref(), s.wait), (Some("xato"), 30));
     }
 }
+
+
+/// Faylni Telegram'ga (bot chatiga) yuboradi; bot kanalga ko'chirgach (`/api/tg/claim`) tayyor bo'ladi. Baytlar worker'dan O'TMAYDI.
+/// Bloklaydi — fon oqimida chaqiring. `progress(sent, total)` ixtiyoriy.
+#[cfg(target_os = "android")]
+pub fn upload_file(path: &str, name: &str, mime: &str, session: &str, progress: &dyn Fn(u64, u64)) -> Result<(), String> {
+    shared().ensure()?;
+    let (p, n, m) = (CString::new(path).unwrap_or_default(), CString::new(name).unwrap_or_default(), CString::new(mime).unwrap_or_default());
+    let started = call(rust_core::telegram::rust_tg_upload_start(p.as_ptr(), n.as_ptr(), m.as_ptr(), 0));
+    let job = started["job"].as_u64().unwrap_or(0);
+    if job == 0 {
+        return Err(started["error"].as_str().unwrap_or("Yuklash boshlanmadi").to_string());
+    }
+    let mut key = String::new();
+    let mut all_sent_at: Option<std::time::Instant> = None;
+    loop {
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        let st = call(rust_core::telegram::rust_tg_upload_status(job));
+        let (sent, total) = (st["sent"].as_u64().unwrap_or(0), st["total"].as_u64().unwrap_or(0));
+        if total > 0 {
+            progress(sent, total);
+        }
+        if total > 0 && sent >= total && !st["done"].as_bool().unwrap_or(false) {
+            let t0 = *all_sent_at.get_or_insert_with(std::time::Instant::now);
+            if t0.elapsed().as_secs() > 120 {
+                rust_core::telegram::rust_tg_upload_cancel(job);
+                return Err("Telegram javob bermadi — internetni tekshirib, qayta urinib ko'ring".into());
+            }
+        }
+        if st["done"].as_bool().unwrap_or(false) {
+            if let Some(e) = st["error"].as_str().filter(|e| !e.is_empty()) {
+                return Err(e.to_string());
+            }
+            key = st["key"].as_str().unwrap_or("").to_string();
+            break;
+        }
+    }
+    let q = format!("?file={}&key={}", urlenc(name), urlenc(&key));
+    for wait in [1u64, 1, 2, 2, 3, 4, 5, 8] {
+        std::thread::sleep(std::time::Duration::from_secs(wait));
+        if let Ok(j) = crate::api::get_json("/api/tg/claim", &q, Some(session)) {
+            if j["ready"].as_bool().unwrap_or(false) {
+                break;
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "android"))]
+pub fn upload_file(_path: &str, _name: &str, _mime: &str, _session: &str, _progress: &dyn Fn(u64, u64)) -> Result<(), String> {
+    Err("Yuklash faqat telefonda ishlaydi".into())
+}
+
+pub fn urlenc(s: &str) -> String {
+    let mut o = String::new();
+    for b in s.bytes() {
+        if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
+            o.push(b as char);
+        } else {
+            o.push_str(&format!("%{b:02X}"));
+        }
+    }
+    o
+}
