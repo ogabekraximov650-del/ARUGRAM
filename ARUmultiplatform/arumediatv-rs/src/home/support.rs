@@ -232,7 +232,7 @@ impl Home {
         for m in items[start..].iter() {
             let day = fmt_ymd(m.created_at);
             if !day.is_empty() && day != last_day {
-                kids.push(row(vec![spacer(), tx(day.clone(), 12.0, Color::rgba(255, 255, 255, 200)).bold().bg(Color::rgba(0, 0, 0, 90)).radius(14.0).padding_xy(12.0, 4.0), spacer()]).padding_xy(0.0, 8.0));
+                kids.push(row(vec![spacer(), tx(day.clone(), 12.0, Color::WHITE).bold().bg(Color::rgba(0, 0, 0, 90)).radius(14.0).padding_xy(12.0, 4.0), spacer()]).padding_xy(0.0, 8.0));
                 last_day = day;
             }
             kids.push(self.chat_bubble(p, m, w));
@@ -261,7 +261,7 @@ impl Home {
             .weight(1.0);
         let bar = Self::pglass(
             row(vec![
-                column(vec![if p.busy.get() { spinner(20.0, 2.0, Color::WHITE) } else { icon(S_ATTACH, 22.0).color(Color::rgba(255, 255, 255, 190)) }]).center().width(40.0).height(40.0).on_click(move || {
+                column(vec![if p.busy.get() { spinner(20.0, 2.0, Color::WHITE) } else { icon(S_ATTACH, 22.0).color(Color::WHITE) }]).center().width(40.0).height(40.0).on_click(move || {
                     if !pa.busy.get() {
                         me.chat_attach(&pa);
                     }
@@ -314,7 +314,7 @@ impl Home {
                 inner.push(stack(vec![image_fill(&f)]).height((w * 0.6) * 9.0 / 16.0).width(w * 0.6));
                 inner.push(gap_box(0.0, 6.0));
             } else {
-                inner.push(tx("🖼 Rasm yuklanmoqda...", 13.0, Color::rgba(255, 255, 255, 190)));
+                inner.push(tx("🖼 Rasm yuklanmoqda...", 13.0, Color::WHITE));
             }
         } else if !m.media_type.is_empty() {
             let label = match m.media_type.as_str() {
@@ -325,18 +325,18 @@ impl Home {
                 "gif" => "GIF",
                 _ => "📎 Fayl",
             };
-            inner.push(tx(label, 13.5, Color::rgba(255, 255, 255, 220)).bold());
+            inner.push(tx(label, 13.5, Color::WHITE).bold());
         }
         if !m.body.is_empty() {
             inner.push(tx(m.body.clone(), 15.0, Color::WHITE));
         }
-        let mut meta = vec![spacer(), tx(hhmm, 10.5, Color::rgba(255, 255, 255, 150))];
+        let mut meta = vec![spacer(), tx(hhmm, 10.5, Color::WHITE)];
         if m.pending {
-            meta.push(tx("…", 10.5, Color::rgba(255, 255, 255, 150)));
+            meta.push(tx("…", 10.5, Color::WHITE));
         } else if mine {
-            meta.push(icon(S_CHECK, 12.0).color(Color::rgba(255, 255, 255, 190)));
+            meta.push(icon(S_CHECK, 12.0).color(Color::WHITE));
             if m.seen {
-                meta.push(icon(S_CHECK, 12.0).color(Color::rgba(255, 255, 255, 190)).margin_each(-8.0, 0.0, 0.0, 0.0));
+                meta.push(icon(S_CHECK, 12.0).color(Color::WHITE).margin_each(-8.0, 0.0, 0.0, 0.0));
             }
         }
         inner.push(row(meta).gap(3.0).align(Align::Center).padding_each(0.0, 2.0, 0.0, 0.0));

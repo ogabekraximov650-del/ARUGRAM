@@ -223,6 +223,7 @@ impl Ui {
     /// Qayta chizish kerakmi (holat o'zgardi, inersiya, kursor miltillashi)?
     pub fn needs_frame(&self) -> bool {
         self.dirty
+            || uzcoders_core::frame_requested()
             || self.last_rev != Some(global_revision())
             || self.animating
             || self.scrolls.iter().any(|s| s.velocity() != 0.0)
@@ -261,6 +262,7 @@ impl Ui {
     pub fn frame(&mut self, size: Size) -> Vec<DrawCmd> {
         self.last_rev = Some(global_revision());
         self.dirty = false;
+        uzcoders_core::clear_frame_request();
         let dt = match self.last_frame_now {
             Some(t) => (self.now.saturating_sub(t) as f32 / 1000.0).min(0.1),
             None => 0.0,

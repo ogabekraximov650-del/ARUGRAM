@@ -115,7 +115,7 @@ impl Home {
         let body: Element = if !p.loaded.get() {
             column(vec![spinner(32.0, 3.0, ACCENT2)]).center()
         } else if items.is_empty() {
-            column(vec![tx(if p.error.get().is_empty() { "Kanal yo'q".to_string() } else { p.error.get() }, 14.0, Color::rgba(255, 255, 255, 140))]).center()
+            column(vec![tx(if p.error.get().is_empty() { "Kanal yo'q".to_string() } else { p.error.get() }, 14.0, Color::WHITE)]).center()
         } else {
             let mut kids: Vec<Element> = Vec::new();
             for c in items.iter() {
@@ -130,7 +130,7 @@ impl Home {
                                 12.0,
                                 Color::rgba(255, 255, 255, 150),
                             ),
-                            tx(c["url"].as_str().unwrap_or("").to_string(), 11.0, Color::rgba(255, 255, 255, 110)),
+                            tx(c["url"].as_str().unwrap_or("").to_string(), 11.0, Color::WHITE),
                             row(vec![
                                 self.chip("Limit", false, move || {
                                     pl.num.set(if need > 0 { need.to_string() } else { String::new() });
@@ -153,7 +153,7 @@ impl Home {
         let mut col = vec![body.grow(1.0)];
         if !p.msg.get().is_empty() {
             let pm = p.clone();
-            col.insert(0, tx(p.msg.get(), 13.0, Color::rgba(255, 255, 255, 230)).bg(Color::rgba(0, 0, 0, 120)).radius(14.0).padding_xy(14.0, 8.0).margin_each(0.0, 0.0, 0.0, 8.0).on_click(move || pm.msg.set(String::new())));
+            col.insert(0, tx(p.msg.get(), 13.0, Color::WHITE).bg(Color::rgba(0, 0, 0, 120)).radius(14.0).padding_xy(14.0, 8.0).margin_each(0.0, 0.0, 0.0, 8.0).on_click(move || pm.msg.set(String::new())));
         }
         let pa = p.clone();
         col.push(row(vec![spacer(), column(vec![tx("+ Kanal qo'shish", 14.0, Color::WHITE).bold()]).center().padding_xy(22.0, 14.0).radius(26.0).gradient(ACCENT, ACCENT2).on_click(move || pa.add.set(true)), spacer()]).padding_each(0.0, 8.0, 0.0, 12.0));
@@ -183,7 +183,7 @@ impl Home {
                 column(vec![
                     tx("Kanalni o'chirish", 18.0, Color::WHITE).bold(),
                     gap_box(0.0, 10.0),
-                    tx(format!("«{}» ro'yxatdan olib tashlanadi.", c["title"].as_str().unwrap_or("")), 14.0, Color::rgba(255, 255, 255, 200)),
+                    tx(format!("«{}» ro'yxatdan olib tashlanadi.", c["title"].as_str().unwrap_or("")), 14.0, Color::WHITE),
                     gap_box(0.0, 14.0),
                     row(vec![spacer(), self.chip("Bekor", false, { let pc = pc.clone(); move || pc.del_for.set(None) }), self.chip("O'chirish", true, move || {
                         pd.del_for.set(None);
@@ -231,7 +231,7 @@ impl Home {
             kids.push(gap_box(0.0, 12.0));
             kids.push(tx(j["title"].as_str().unwrap_or("").to_string(), 15.0, Color::WHITE).bold());
             let un = j["username"].as_str().filter(|u| !u.is_empty() && *u != "null").map(|u| format!("@{u} · ")).unwrap_or_default();
-            kids.push(tx(format!("{un}{} a'zo", num(&j["members"])), 12.0, Color::rgba(255, 255, 255, 160)));
+            kids.push(tx(format!("{un}{} a'zo", num(&j["members"])), 12.0, Color::WHITE));
             kids.push(gap_box(0.0, 10.0));
             let kinds: Vec<Element> = [("public", "Ochiq"), ("private", "Yopiq")].iter().map(|(k, l)| { let (pk, k) = (p.kind.clone(), k.to_string()); let on = p.kind.get() == k; self.chip(l, on, move || pk.set(k.clone())) }).collect();
             kids.push(row(kinds).gap(8.0));
@@ -330,10 +330,10 @@ impl Home {
             return self.scaffold("To'plamlarni ko'rib chiqish", column(vec![spinner(32.0, 3.0, ACCENT2)]).center());
         };
         let body: Element = if list.is_empty() {
-            column(vec![tx("Kutayotgan rasm yo'q", 14.0, Color::rgba(255, 255, 255, 140))]).center()
+            column(vec![tx("Kutayotgan rasm yo'q", 14.0, Color::WHITE)]).center()
         } else {
             let pa = p.clone();
-            let mut kids: Vec<Element> = vec![row(vec![tx(format!("{} ta kutmoqda", list.len()), 12.0, Color::rgba(255, 255, 255, 160)).weight(1.0), tx("Hammasini tasdiqlash", 12.0, ACCENT2).bold().on_click(move || pa.approve_all.set(true))]).padding_each(4.0, 0.0, 4.0, 10.0)];
+            let mut kids: Vec<Element> = vec![row(vec![tx(format!("{} ta kutmoqda", list.len()), 12.0, Color::WHITE).weight(1.0), tx("Hammasini tasdiqlash", 12.0, ACCENT2).bold().on_click(move || pa.approve_all.set(true))]).padding_each(4.0, 0.0, 4.0, 10.0)];
             for o in list.iter() {
                 let file = o["file"].as_str().unwrap_or("").to_string();
                 let thumb = match self.posters.borrow().get(&file) {
@@ -349,7 +349,7 @@ impl Home {
                             thumb.width(84.0).height(84.0),
                             column(vec![
                                 tx(o["title"].as_str().unwrap_or("").to_string(), 14.0, Color::WHITE).bold(),
-                                tx(format!("{} · {} · {}", o["kind"].as_str().unwrap_or(""), o["owner"].as_str().unwrap_or(""), format_bytes(num(&o["size"]))), 12.0, Color::rgba(255, 255, 255, 150)),
+                                tx(format!("{} · {} · {}", o["kind"].as_str().unwrap_or(""), o["owner"].as_str().unwrap_or(""), format_bytes(num(&o["size"]))), 12.0, Color::WHITE),
                                 row(vec![
                                     self.chip("Tasdiqlash", true, move || me.pr_review(&pr, vec![id], true, String::new(), "Tasdiqlandi")),
                                     self.chip("Rad etish", false, move || pa2.reject_for.set(Some(o2.clone()))),
@@ -372,7 +372,7 @@ impl Home {
         let mut col = vec![body.grow(1.0)];
         if !p.msg.get().is_empty() {
             let pm = p.clone();
-            col.insert(0, tx(p.msg.get(), 13.0, Color::rgba(255, 255, 255, 230)).bg(Color::rgba(0, 0, 0, 120)).radius(14.0).padding_xy(14.0, 8.0).margin_each(0.0, 0.0, 0.0, 8.0).on_click(move || pm.msg.set(String::new())));
+            col.insert(0, tx(p.msg.get(), 13.0, Color::WHITE).bg(Color::rgba(0, 0, 0, 120)).radius(14.0).padding_xy(14.0, 8.0).margin_each(0.0, 0.0, 0.0, 8.0).on_click(move || pm.msg.set(String::new())));
         }
         let mut layers = vec![self.scaffold("To'plamlarni ko'rib chiqish", column(col).padding_each(16.0, 4.0, 16.0, 0.0))];
         if let Some(o) = p.reject_for.get() {
@@ -405,7 +405,7 @@ impl Home {
                 column(vec![
                     tx("Hammasini tasdiqlash", 18.0, Color::WHITE).bold(),
                     gap_box(0.0, 10.0),
-                    tx(format!("Hamma {} ta rasm ko'rib chiqilib, tasdiqlansinmi?", ids.len()), 14.0, Color::rgba(255, 255, 255, 200)),
+                    tx(format!("Hamma {} ta rasm ko'rib chiqilib, tasdiqlansinmi?", ids.len()), 14.0, Color::WHITE),
                     gap_box(0.0, 14.0),
                     row(vec![spacer(), self.chip("Yo'q", false, { let pc = pc.clone(); move || pc.approve_all.set(false) }), self.chip("Ha", true, move || {
                         pd.approve_all.set(false);
@@ -454,7 +454,7 @@ impl Home {
         let ver = Self::pglass(
             column(vec![
                 tx("Eng kichik versiya", 15.0, Color::WHITE).bold(),
-                tx("Bundan eski ilovalar yangilanmaguncha ishlamaydi. Masalan 0.1.0 yoki 0.1.0+9. Bo'sh — cheklov yo'q.", 12.0, Color::rgba(255, 255, 255, 150)).padding_each(0.0, 6.0, 0.0, 8.0),
+                tx("Bundan eski ilovalar yangilanmaguncha ishlamaydi. Masalan 0.1.0 yoki 0.1.0+9. Bo'sh — cheklov yo'q.", 12.0, Color::WHITE).padding_each(0.0, 6.0, 0.0, 8.0),
                 field(&p.version).color(Color::WHITE).size(15.0).accent(ACCENT2).padding_xy(14.0, 12.0).glass(Color::rgba(255, 255, 255, 22)).border(1.0, Color::TRANSPARENT).radius(14.0),
                 gap_box(0.0, 10.0),
                 row(vec![self.chip("Saqlash", true, move || {
@@ -470,8 +470,8 @@ impl Home {
         let sig = Self::pglass(
             column(vec![
                 tx("Ilova imzosi", 15.0, Color::WHITE).bold(),
-                tx(if c["gate_on"].as_bool().unwrap_or(false) { "Himoya YOQILGAN: faqat tanilgan imzoli ilovalar kiradi." } else { "Himoya o'chiq." }, 12.0, Color::rgba(255, 255, 255, 150)).padding_each(0.0, 6.0, 0.0, 6.0),
-                tx(format!("Ishonchli imzolar: {} · bu qurilma: {}", num(&c["sig_count"]), if c["my_sig_trusted"].as_bool().unwrap_or(false) { "ishonchli" } else { "ishonchsiz" }), 12.0, Color::rgba(255, 255, 255, 120)),
+                tx(if c["gate_on"].as_bool().unwrap_or(false) { "Himoya YOQILGAN: faqat tanilgan imzoli ilovalar kiradi." } else { "Himoya o'chiq." }, 12.0, Color::WHITE).padding_each(0.0, 6.0, 0.0, 6.0),
+                tx(format!("Ishonchli imzolar: {} · bu qurilma: {}", num(&c["sig_count"]), if c["my_sig_trusted"].as_bool().unwrap_or(false) { "ishonchli" } else { "ishonchsiz" }), 12.0, Color::WHITE),
                 row(vec![
                     self.chip("Shu imzoga ishonish", false, move || m1.app_post(&p1, json!({"trust_me": true}), "Qo'shildi")),
                     self.chip("Faqat shu imzo", false, move || m2.app_post(&p2, json!({"only_me": true}), "Saqlandi")),
@@ -487,7 +487,7 @@ impl Home {
         .radius(24.0);
         let mut kids = vec![ver, sig];
         if !p.msg.get().is_empty() {
-            kids.insert(0, tx(p.msg.get(), 13.0, Color::rgba(255, 255, 255, 230)).bg(Color::rgba(0, 0, 0, 120)).radius(14.0).padding_xy(14.0, 8.0).margin_each(0.0, 0.0, 0.0, 8.0));
+            kids.insert(0, tx(p.msg.get(), 13.0, Color::WHITE).bg(Color::rgba(0, 0, 0, 120)).radius(14.0).padding_xy(14.0, 8.0).margin_each(0.0, 0.0, 0.0, 8.0));
         }
         kids.push(gap_box(0.0, 32.0));
         self.scaffold("Ilova va xavfsizlik", scroll_column(&self.settings_scroll, kids).padding_each(16.0, 4.0, 16.0, 0.0))

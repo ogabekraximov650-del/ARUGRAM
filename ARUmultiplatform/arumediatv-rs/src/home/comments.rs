@@ -254,7 +254,7 @@ impl Home {
                 column(vec![
                     row(vec![tx(c.name.clone(), 14.0, Color::WHITE).bold().weight(1.0), tx(fmt_ymd(c.created_at), 11.0, TEXT_DIM)]),
                     gap_box(0.0, 3.0),
-                    tx(body, 14.0, Color::rgba(255, 255, 255, 215)),
+                    tx(body, 14.0, Color::WHITE),
                     gap_box(0.0, 4.0),
                     row(actions).gap(14.0).align(Align::Center),
                 ])

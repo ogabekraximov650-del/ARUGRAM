@@ -68,7 +68,7 @@ impl Home {
     fn stat(icon_path: &'static str, label: &str, value: String) -> Element {
         Self::pglass(
             column(vec![
-                row(vec![icon(icon_path, 16.0).color(ACCENT2), tx(label, 12.0, Color::rgba(255, 255, 255, 150))]).gap(6.0).align(Align::Center),
+                row(vec![icon(icon_path, 16.0).color(ACCENT2), tx(label, 12.0, Color::WHITE)]).gap(6.0).align(Align::Center),
                 gap_box(0.0, 8.0),
                 tx(value, 17.0, Color::WHITE).black(),
             ])
@@ -82,7 +82,7 @@ impl Home {
         row(vec![
             column(vec![icon(icon_path, 22.0).color(ACCENT2)]).center().width(42.0).height(42.0).radius(14.0).bg(ACCENT.with_opacity(0.2)),
             tx(title, 16.0, Color::WHITE).weight(1.0),
-            icon(P_CHEVRON, 24.0).color(Color::rgba(255, 255, 255, 96)),
+            icon(P_CHEVRON, 24.0).color(Color::WHITE),
         ])
         .gap(16.0)
         .align(Align::Center)
@@ -197,7 +197,7 @@ impl Home {
         let mut kids = vec![tx(title, 18.0, Color::WHITE).bold()];
         if !text.is_empty() {
             kids.push(gap_box(0.0, 10.0));
-            kids.push(tx(text, 14.0, Color::rgba(255, 255, 255, 190)));
+            kids.push(tx(text, 14.0, Color::WHITE));
         }
         if kind == 6 {
             kids.push(gap_box(0.0, 14.0));
@@ -234,7 +234,7 @@ impl Home {
             let me_a = self.clone();
             column(vec![inner]).width(96.0).height(96.0).on_click(move || me_a.change_avatar())
         };
-        let id_pill = row(vec![tx(format!("ID: {}", p.id), 14.0, Color::rgba(255, 255, 255, 200)).bold(), icon(P_COPY, 16.0).color(Color::rgba(255, 255, 255, 150))])
+        let id_pill = row(vec![tx(format!("ID: {}", p.id), 14.0, Color::WHITE).bold(), icon(P_COPY, 16.0).color(Color::WHITE)])
             .gap(9.0)
             .align(Align::Center)
             .glass(Color::rgba(255, 255, 255, 24))
@@ -246,11 +246,11 @@ impl Home {
                 avatar,
                 column(vec![
                     tx(p.name.clone(), 21.0, Color::WHITE).bold(),
-                    if p.username.is_empty() { gap_box(0.0, 0.0) } else { tx(format!("@{}", p.username), 15.0, Color::rgba(255, 255, 255, 160)) },
+                    if p.username.is_empty() { gap_box(0.0, 0.0) } else { tx(format!("@{}", p.username), 15.0, Color::WHITE) },
                     gap_box(0.0, 8.0),
                     row(vec![id_pill]),
                     gap_box(0.0, 6.0),
-                    tx(format!("Balans: {}", p.balance), 14.5, Color::rgba(255, 255, 255, 160)).bold(),
+                    tx(format!("Balans: {}", p.balance), 14.5, Color::WHITE).bold(),
                 ])
                 .weight(1.0),
             ])
@@ -261,13 +261,13 @@ impl Home {
         .radius(28.0);
 
         let me_e = self.clone();
-        let edit_btn = column(vec![icon(P_EDIT, 17.0).color(Color::rgba(255, 255, 255, 220))]).center().width(36.0).height(36.0).radius(18.0).bg(Color::rgba(255, 255, 255, 26)).on_click(move || me_e.open_edit());
+        let edit_btn = column(vec![icon(P_EDIT, 17.0).color(Color::WHITE)]).center().width(36.0).height(36.0).radius(18.0).bg(Color::rgba(255, 255, 255, 26)).on_click(move || me_e.open_edit());
         let hero = stack(vec![hero, column(vec![row(vec![spacer(), edit_btn])]).padding(14.0)]);
         let me_b = self.clone();
         let billing = column(vec![row(vec![
             icon(P_CROWN, 22.0).color(Color::WHITE),
             tx("Obuna olish va Balans to'ldirish", 14.0, Color::WHITE).bold().weight(1.0),
-            icon(P_CHEVRON, 20.0).color(Color::rgba(255, 255, 255, 180)),
+            icon(P_CHEVRON, 20.0).color(Color::WHITE),
         ])
         .gap(10.0)
         .align(Align::Center)
@@ -290,7 +290,7 @@ impl Home {
             column(vec![
                 row(vec![
                     icon(P_CLOUD, 15.0).color(ACCENT2),
-                    tx("Trafik", 12.0, Color::rgba(255, 255, 255, 150)).weight(1.0),
+                    tx("Trafik", 12.0, Color::WHITE).weight(1.0),
                     tx(format_bytes(p.traffic), 17.0, Color::WHITE).black(),
                 ])
                 .gap(6.0)
@@ -298,7 +298,7 @@ impl Home {
                 gap_box(0.0, 12.0),
                 column(vec![]).height(7.0).radius(4.0).bg(if p.traffic > 0 { ACCENT } else { Color::rgba(255, 255, 255, 26) }),
                 gap_box(0.0, 10.0),
-                tx(if p.traffic > 0 { "Oldingi hisob".to_string() } else { "Hozircha trafik sarflanmagan".to_string() }, 12.5, Color::rgba(255, 255, 255, 150)),
+                tx(if p.traffic > 0 { "Oldingi hisob".to_string() } else { "Hozircha trafik sarflanmagan".to_string() }, 12.5, Color::WHITE),
             ])
             .padding_xy(16.0, 14.0),
         )

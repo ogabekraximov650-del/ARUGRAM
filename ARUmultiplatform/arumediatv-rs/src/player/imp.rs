@@ -357,7 +357,26 @@ impl Drop for Player {
     }
 }
 
+/// Surface bitta; bir vaqtda faqat bitta pleyer ishlaydi (yangi qism eskisi to'liq yopilguncha kutadi).
+static PLAYER_LOCK: Mutex<()> = Mutex::new(());
+
 unsafe fn run(inner: Arc<Inner>, source: Source) {
+    let _guard = loop {
+        match PLAYER_LOCK.try_lock() {
+            Ok(g) => break g,
+            Err(std::sync::TryLockError::Poisoned(p)) => break p.into_inner(),
+            Err(_) => {
+                if inner.stop.load(Ordering::SeqCst) {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(30));
+            }
+        }
+    };
+    run_locked(inner, source);
+}
+
+unsafe fn run_locked(inner: Arc<Inner>, source: Source) {
     // 1) Dekoderga yozadigan Surface (GL oqimi video elementini birinchi marta chizganda yaratadi).
     let t0 = Instant::now();
     let window = loop {
@@ -592,9 +611,15 @@ unsafe fn run(inner: Arc<Inner>, source: Source) {
 unsafe fn video_out(inner: Arc<Inner>) {
     let mut my_gen = inner.generation.load(Ordering::SeqCst);
     let mut info = BufInfo::default();
+    // SurfaceTexture kadri chiqarilgandan biroz keyin tayyor bo'ladi: shunda UI'ni yana bir bor uyg'otamiz.
+    let mut kick_at: Option<Instant> = None;
     loop {
         if inner.stop.load(Ordering::SeqCst) {
             return;
+        }
+        if kick_at.is_some_and(|t| Instant::now() >= t) {
+            kick_at = None;
+            uzcoders::core::request_frame();
         }
         // To'xtab turganda: faqat seekdan keyingi birinchi kadr ko'rsatiladi.
         let preview = inner.preview.load(Ordering::SeqCst);
@@ -639,7 +664,7 @@ unsafe fn video_out(inner: Arc<Inner>) {
             release(false);
             inner.state.store(2, Ordering::SeqCst);
             inner.playing.store(false, Ordering::SeqCst);
-            uzcoders::core::invalidate();
+            uzcoders::core::request_frame();
             continue;
         }
         // Seekdan keyingi: maqsad vaqtigacha bo'lgan kadrlar (oldingi kalit kadrdan) tashlanadi.
@@ -652,7 +677,8 @@ unsafe fn video_out(inner: Arc<Inner>) {
             inner.preview.store(false, Ordering::SeqCst);
             release(true);
             inner.pos_us.store(pts, Ordering::SeqCst);
-            uzcoders::core::invalidate();
+            uzcoders::core::request_frame();
+            kick_at = Some(Instant::now() + Duration::from_millis(25));
             if !inner.has_audio.load(Ordering::SeqCst) {
                 inner.sys_clock_set(pts, inner.playing.load(Ordering::SeqCst));
             }
@@ -669,6 +695,10 @@ unsafe fn video_out(inner: Arc<Inner>) {
                 std::thread::sleep(Duration::from_millis(10));
                 continue;
             }
+            if kick_at.is_some_and(|t| Instant::now() >= t) {
+                kick_at = None;
+                uzcoders::core::request_frame();
+            }
             let now = inner.clock_us();
             if pts <= now + 15_000 {
                 render = pts >= now - 120_000;
@@ -679,7 +709,8 @@ unsafe fn video_out(inner: Arc<Inner>) {
         release(render);
         if render {
             inner.pos_us.store(pts, Ordering::SeqCst);
-            uzcoders::core::invalidate();
+            uzcoders::core::request_frame();
+            kick_at = Some(Instant::now() + Duration::from_millis(12));
         }
     }
 }

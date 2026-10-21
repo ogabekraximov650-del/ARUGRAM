@@ -214,10 +214,10 @@ impl Home {
         let active = d.until > now;
         let head = Self::pglass(
             row(vec![
-                column(vec![tx("Balans", 12.0, Color::rgba(255, 255, 255, 140)), tx(format_sum(d.balance), 19.0, Color::WHITE).black()]),
+                column(vec![tx("Balans", 12.0, Color::WHITE), tx(format_sum(d.balance), 19.0, Color::WHITE).black()]),
                 spacer(),
                 column(vec![
-                    tx("Obuna", 12.0, Color::rgba(255, 255, 255, 140)),
+                    tx("Obuna", 12.0, Color::WHITE),
                     tx(if active { format_left(d.until - now) } else { "Yo'q".to_string() }, 14.0, if active { GREEN } else { Color::rgba(255, 255, 255, 180) }).bold(),
                 ])
                 .align(Align::End),
@@ -246,7 +246,7 @@ impl Home {
         let mut content = vec![head.margin_each(0.0, 0.0, 0.0, 10.0), tab_bar.margin_each(0.0, 0.0, 0.0, 10.0), body.grow(1.0)];
         if !p.msg.get().is_empty() {
             let pm = p.clone();
-            content.insert(2, tx(p.msg.get(), 13.0, Color::rgba(255, 255, 255, 220)).bg(Color::rgba(0, 0, 0, 120)).radius(14.0).padding_xy(14.0, 8.0).margin_each(0.0, 0.0, 0.0, 8.0).on_click(move || pm.msg.set(String::new())));
+            content.insert(2, tx(p.msg.get(), 13.0, Color::WHITE).bg(Color::rgba(0, 0, 0, 120)).radius(14.0).padding_xy(14.0, 8.0).margin_each(0.0, 0.0, 0.0, 8.0).on_click(move || pm.msg.set(String::new())));
         }
         let page = self.scaffold("Obuna va balans", column(content).padding_each(16.0, 4.0, 16.0, 0.0));
         let mut layers = vec![page];
@@ -257,7 +257,7 @@ impl Home {
     }
 
     fn placeholder(loading: bool, text: &str) -> Element {
-        column(vec![if loading { spinner(28.0, 3.0, ACCENT2) } else { gap_box(0.0, 0.0) }, gap_box(0.0, 14.0), tx(text, 13.0, Color::rgba(255, 255, 255, 128))]).center()
+        column(vec![if loading { spinner(28.0, 3.0, ACCENT2) } else { gap_box(0.0, 0.0) }, gap_box(0.0, 14.0), tx(text, 13.0, Color::WHITE)]).center()
     }
 
     fn bill_topup(self: &Rc<Self>, p: &Rc<BillingPage>, d: &Rc<Billing>, now: i64) -> Element {
@@ -306,9 +306,9 @@ impl Home {
         let mut kids = vec![
             Self::pglass(
                 column(vec![
-                    tx("Summani yozing", 12.5, Color::rgba(255, 255, 255, 165)),
+                    tx("Summani yozing", 12.5, Color::WHITE),
                     gap_box(0.0, 8.0),
-                    row(vec![amount_field, tx("so'm", 14.0, Color::rgba(255, 255, 255, 128))]).gap(8.0).align(Align::Center).bg(Color::rgba(255, 255, 255, 18)).radius(14.0).padding_xy(14.0, 2.0),
+                    row(vec![amount_field, tx("so'm", 14.0, Color::WHITE)]).gap(8.0).align(Align::Center).bg(Color::rgba(255, 255, 255, 18)).radius(14.0).padding_xy(14.0, 2.0),
                     gap_box(0.0, 12.0),
                     go,
                 ])
@@ -318,7 +318,7 @@ impl Home {
         ];
         let links: Vec<PayLink> = d.links.iter().filter(|l| l.expires_at > now).cloned().collect();
         if links.is_empty() {
-            kids.push(tx("Summani yozing — to'lov sahifasi o'zi ochiladi.\nPul hisobingizga avtomatik tushadi, havola esa 1 soat faol turadi.", 12.0, Color::rgba(255, 255, 255, 115)).padding_each(4.0, 8.0, 4.0, 0.0));
+            kids.push(tx("Summani yozing — to'lov sahifasi o'zi ochiladi.\nPul hisobingizga avtomatik tushadi, havola esa 1 soat faol turadi.", 12.0, Color::WHITE).padding_each(4.0, 8.0, 4.0, 0.0));
         }
         for l in links {
             let left = ((l.expires_at - now) / 1000).max(0);
@@ -327,11 +327,11 @@ impl Home {
             kids.push(
                 Self::pglass(
                     column(vec![
-                        row(vec![tx(format_sum(l.amount), 16.0, Color::WHITE).black(), spacer(), tx(format!("Qolgan vaqt {:02}:{:02} daqiqa", left / 60, left % 60), 11.5, Color::rgba(255, 255, 255, 140))]),
+                        row(vec![tx(format_sum(l.amount), 16.0, Color::WHITE).black(), spacer(), tx(format!("Qolgan vaqt {:02}:{:02} daqiqa", left / 60, left % 60), 11.5, Color::WHITE)]),
                         gap_box(0.0, 12.0),
                         row(vec![
                             column(vec![tx("To'lov qilish", 13.0, Color::WHITE).bold()]).center().weight(1.0).padding_xy(0.0, 12.0).radius(22.0).gradient(ACCENT, ACCENT2).on_click(move || uzcoders::android::open_url(&url)),
-                            column(vec![tx("Tekshirish", 13.0, Color::WHITE).bold()]).center().weight(1.0).padding_xy(0.0, 12.0).radius(22.0).bg(Color::rgba(255, 255, 255, 20)).border(1.0, Color::rgba(255, 255, 255, 50)).on_click(move || {
+                            column(vec![tx("Tekshirish", 13.0, Color::WHITE).bold()]).center().weight(1.0).padding_xy(0.0, 12.0).radius(22.0).bg(Color::rgba(255, 255, 255, 20)).border(1.0, Color::WHITE).on_click(move || {
                                 let (oid, session, me, pc) = (oid.clone(), session.clone(), me.clone(), pc.clone());
                                 spawn_bg(move || post(&session, "/api/billing/check", json!({"order_id": oid})), move |r| match r {
                                     Ok(j) if j["status"] == "paid" => {
@@ -368,8 +368,8 @@ impl Home {
                         icon(B_PREMIUM, 22.0).color(ACCENT2),
                         column(vec![
                             tx("Obunangiz faol", 14.0, Color::WHITE).bold(),
-                            row(vec![tx("Yana ", 12.0, Color::rgba(255, 255, 255, 160)), tx(format_left(d.until - now), 12.5, GREEN).bold()]),
-                            tx("Tugagach yangi tarif tanlay olasiz.", 11.5, Color::rgba(255, 255, 255, 130)),
+                            row(vec![tx("Yana ", 12.0, Color::WHITE), tx(format_left(d.until - now), 12.5, GREEN).bold()]),
+                            tx("Tugagach yangi tarif tanlay olasiz.", 11.5, Color::WHITE),
                         ]),
                     ])
                     .gap(10.0)
@@ -390,7 +390,7 @@ impl Home {
             kids.push(
                 Self::pglass(
                     row(vec![
-                        column(vec![row(title).gap(8.0).align(Align::Center), tx(format_sum(plan.price), 13.0, Color::rgba(255, 255, 255, 165))]).weight(1.0),
+                        column(vec![row(title).gap(8.0).align(Align::Center), tx(format_sum(plan.price), 13.0, Color::WHITE)]).weight(1.0),
                         column(vec![tx("Sotib olish", 13.0, Color::WHITE).bold()]).center().padding_xy(16.0, 10.0).radius(20.0).bg(if locked { ACCENT.with_opacity(0.35) } else { ACCENT }).on_click(move || {
                             if locked {
                                 pp.msg.set("Sizda faol obuna bor — u tugagach yangisini olasiz".into());
@@ -409,7 +409,7 @@ impl Home {
                 .margin_each(0.0, 0.0, 0.0, 10.0),
             );
         }
-        kids.push(tx(if locked { "Obunangiz tugagach yangi tarif tanlay olasiz." } else { "Obuna balansdan yechiladi." }, 11.5, Color::rgba(255, 255, 255, 115)).padding_each(4.0, 4.0, 4.0, 28.0));
+        kids.push(tx(if locked { "Obunangiz tugagach yangi tarif tanlay olasiz." } else { "Obuna balansdan yechiladi." }, 11.5, Color::WHITE).padding_each(4.0, 4.0, 4.0, 28.0));
         scroll_column(&p.scrolls[1], kids)
     }
 
@@ -425,7 +425,7 @@ impl Home {
                 Self::pglass(
                     row(vec![
                         column(vec![icon(if up { B_ADD } else { B_PREMIUM }, 18.0).color(c)]).center().width(34.0).height(34.0).radius(10.0).bg(c.with_opacity(0.18)),
-                        column(vec![tx(if up { "Balans to'ldirildi".to_string() } else { format!("{} obuna", plan_label(e.days)) }, 13.5, Color::WHITE).bold(), tx(fmt_date(e.created_at), 11.5, Color::rgba(255, 255, 255, 128))]).weight(1.0),
+                        column(vec![tx(if up { "Balans to'ldirildi".to_string() } else { format!("{} obuna", plan_label(e.days)) }, 13.5, Color::WHITE).bold(), tx(fmt_date(e.created_at), 11.5, Color::WHITE)]).weight(1.0),
                         tx(format!("{}{}", if up { "+" } else { "−" }, format_sum(e.amount.abs())), 13.5, if up { GREEN } else { Color::rgba(255, 255, 255, 210) }).black(),
                     ])
                     .gap(12.0)
@@ -447,7 +447,7 @@ impl Home {
         let panel = column(vec![
             tx("Obunani tasdiqlang", 18.0, Color::WHITE).bold(),
             gap_box(0.0, 10.0),
-            tx(format!("{} obuna — {}.\nSumma balansingizdan yechiladi.", plan_label(days), format_sum(price)), 14.0, Color::rgba(255, 255, 255, 200)),
+            tx(format!("{} obuna — {}.\nSumma balansingizdan yechiladi.", plan_label(days), format_sum(price)), 14.0, Color::WHITE),
             gap_box(0.0, 18.0),
             row(vec![
                 spacer(),

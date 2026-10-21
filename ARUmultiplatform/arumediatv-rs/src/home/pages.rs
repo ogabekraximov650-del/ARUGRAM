@@ -172,7 +172,7 @@ impl Home {
 
     fn stat_line(icon_path: &'static str, label: &str, value: String) -> Element {
         row(vec![
-            icon(icon_path, 16.0).color(Color::rgba(255, 255, 255, 115)),
+            icon(icon_path, 16.0).color(Color::WHITE),
             tx(format!("{label}:"), 13.0, TEXT_DIM),
             row(vec![spacer(), tx(value, 13.5, Color::WHITE).bold()]).weight(1.0),
         ])
@@ -241,7 +241,7 @@ impl Home {
         let bolim = if s.section_no > 0 { s.section_no } else { 1 };
         let cover = stack(vec![
             cover_img,
-            column(vec![spacer(), column(vec![tx(s.name.clone(), 17.0, Color::WHITE).bold(), tx(format!("{bolim}-bo'lim · {} qism", format_count(s.episodes)), 12.5, Color::rgba(255, 255, 255, 190))]).padding_each(14.0, 26.0, 14.0, 12.0).gradient(Color::rgba(0, 0, 0, 0), Color::rgba(0, 0, 0, 200)).radius(18.0)]),
+            column(vec![spacer(), column(vec![tx(s.name.clone(), 17.0, Color::WHITE).bold(), tx(format!("{bolim}-bo'lim · {} qism", format_count(s.episodes)), 12.5, Color::WHITE)]).padding_each(14.0, 26.0, 14.0, 12.0).gradient(Color::rgba(0, 0, 0, 0), Color::rgba(0, 0, 0, 200)).radius(18.0)]),
             column(vec![row(vec![back, spacer()])]).padding(8.0),
         ]);
         if p.pl.fullscreen.get() {
@@ -346,7 +346,7 @@ impl Home {
             det.push(gap_box(0.0, 6.0));
             det.push(tx("Tavsif", 12.0, TEXT_DIM).bold());
             det.push(gap_box(0.0, 6.0));
-            det.push(tx(tavsif, 14.0, Color::rgba(255, 255, 255, 210)));
+            det.push(tx(tavsif, 14.0, Color::WHITE));
         }
         scroll_column(
             &p.scroll[0],
@@ -445,7 +445,7 @@ impl Home {
             } else if active {
                 tx(format!("{pct}"), 12.0, ACCENT2).black()
             } else {
-                icon(A_DOWNLOAD, 24.0).color(Color::rgba(255, 255, 255, 150))
+                icon(A_DOWNLOAD, 24.0).color(Color::WHITE)
             };
             let sub = if e.name.trim().is_empty() { format!("{} ko'rish", format_count(e.views)) } else { format!("{} · {} ko'rish", e.name.trim(), format_count(e.views)) };
             let mut col = vec![row(vec![
@@ -599,7 +599,7 @@ impl Home {
             Some(Err(())) => column(vec![tx("Ro'yxatni olib bo'lmadi", 14.0, TEXT_FAINT)]).center(),
             Some(Ok(list)) if list.is_empty() => column(vec![tx("Qurilmalar yo'q", 14.0, TEXT_FAINT)]).center(),
             Some(Ok(list)) => {
-                let mut kids = vec![tx(format!("{} / 4 qurilma. Chegara to'lganda yangi qurilma kirsa, eng oldin onlayn bo'lgani avtomatik chiqariladi.", list.len()), 13.0, Color::rgba(255, 255, 255, 140)).padding_each(4.0, 0.0, 0.0, 14.0)];
+                let mut kids = vec![tx(format!("{} / 4 qurilma. Chegara to'lganda yangi qurilma kirsa, eng oldin onlayn bo'lgani avtomatik chiqariladi.", list.len()), 13.0, Color::WHITE).padding_each(4.0, 0.0, 0.0, 14.0)];
                 for d in list.iter() {
                     kids.push(self.device_card(d, &list));
                 }
@@ -621,7 +621,7 @@ impl Home {
         } else {
             let (me, id, all) = (self.clone(), d.id, all.clone());
             head.push(
-                column(vec![icon(A_LOGOUT, 18.0).color(Color::rgba(255, 255, 255, 100))]).center().width(40.0).height(40.0).on_click(move || {
+                column(vec![icon(A_LOGOUT, 18.0).color(Color::WHITE)]).center().width(40.0).height(40.0).on_click(move || {
                     let (m2, session, all) = (me.clone(), me.session.clone(), all.clone());
                     spawn_bg(move || revoke_device(&session, id), move |ok| {
                         if ok {
@@ -632,7 +632,7 @@ impl Home {
                 }),
             );
         }
-        let line = |k: &str, v: String| row(vec![tx(k, 13.0, Color::rgba(255, 255, 255, 128)).width(110.0), tx(if v.is_empty() { "—".into() } else { v }, 13.0, Color::WHITE)]).padding_each(0.0, 4.0, 0.0, 0.0);
+        let line = |k: &str, v: String| row(vec![tx(k, 13.0, Color::WHITE).width(110.0), tx(if v.is_empty() { "—".into() } else { v }, 13.0, Color::WHITE)]).padding_each(0.0, 4.0, 0.0, 0.0);
         Self::pglass(
             column(vec![
                 row(head).gap(10.0).align(Align::Center),

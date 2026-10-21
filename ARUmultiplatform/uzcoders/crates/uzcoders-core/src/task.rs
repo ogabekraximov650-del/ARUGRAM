@@ -4,13 +4,33 @@
 use std::any::Any;
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Mutex;
 
 static QUEUE: Mutex<Vec<(u64, Box<dyn Any + Send>)>> = Mutex::new(Vec::new());
 static NEXT: AtomicU64 = AtomicU64::new(1);
 static PENDING: AtomicUsize = AtomicUsize::new(0);
 static WAKER: Mutex<Option<fn()>> = Mutex::new(None);
+
+static FRAME_REQ: AtomicBool = AtomicBool::new(false);
+
+/// Istalgan oqimdan: UI oqimini uyg'otib, bitta kadrni qayta chizishni so'raydi (video kadri tayyor bo'lganda).
+pub fn request_frame() {
+    FRAME_REQ.store(true, Ordering::SeqCst);
+    if let Some(w) = *WAKER.lock().unwrap() {
+        w();
+    }
+}
+
+/// Kadr so'rovi bormi (o'chirmaydi).
+pub fn frame_requested() -> bool {
+    FRAME_REQ.load(Ordering::SeqCst)
+}
+
+/// Kadr so'rovini tozalaydi (kadr chizilganda).
+pub fn clear_frame_request() {
+    FRAME_REQ.store(false, Ordering::SeqCst);
+}
 
 type Done = Box<dyn FnOnce(Box<dyn Any + Send>)>;
 

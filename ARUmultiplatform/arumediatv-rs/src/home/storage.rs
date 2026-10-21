@@ -88,7 +88,7 @@ impl Home {
             Self::pglass(
                 column(vec![
                     tx(if total == 0 { "Kesh bo'sh".to_string() } else { format_bytes(total as i64) }, 28.0, Color::WHITE).black(),
-                    tx("Ilova keshi", 13.0, Color::rgba(255, 255, 255, 150)),
+                    tx("Ilova keshi", 13.0, Color::WHITE),
                     gap_box(0.0, 14.0),
                     if bar.is_empty() { gap_box(0.0, 14.0) } else { row(bar).radius(7.0).height(14.0).bg(Color::rgba(255, 255, 255, 20)) },
                 ])
@@ -105,7 +105,7 @@ impl Home {
                     row(vec![
                         column(vec![]).width(14.0).height(14.0).radius(7.0).bg(COLORS[i % COLORS.len()]),
                         tx(s.0.clone(), 15.0, Color::WHITE).weight(1.0),
-                        tx(format_bytes(s.1 as i64), 14.0, Color::rgba(255, 255, 255, 190)).bold(),
+                        tx(format_bytes(s.1 as i64), 14.0, Color::WHITE).bold(),
                         column(vec![if on { tx("✓", 14.0, Color::WHITE).bold() } else { gap_box(0.0, 0.0) }])
                             .center()
                             .width(24.0)
@@ -145,7 +145,7 @@ impl Home {
                     }
                 }),
         );
-        kids.push(tx("Barcha videolar, rasmlar, stikerlar va emojilar serverda qoladi — kerak bo'lsa ularni qayta yuklab olishingiz mumkin.", 12.0, Color::rgba(255, 255, 255, 120)).padding_xy(6.0, 12.0));
+        kids.push(tx("Barcha videolar, rasmlar, stikerlar va emojilar serverda qoladi — kerak bo'lsa ularni qayta yuklab olishingiz mumkin.", 12.0, Color::WHITE).padding_xy(6.0, 12.0));
         kids.push(gap_box(0.0, 28.0));
         let mut layers = vec![self.scaffold("Xotiradan foydalanish", scroll_column(&p.scroll, kids).padding_each(16.0, 4.0, 16.0, 0.0))];
         if p.confirm.get() {
@@ -155,7 +155,7 @@ impl Home {
             let panel = column(vec![
                 tx("Keshni tozalash", 18.0, Color::WHITE).bold(),
                 gap_box(0.0, 10.0),
-                tx(format!("Tanlangan fayllar ({}) telefondan o'chiriladi.", format_bytes(sel_total as i64)), 14.0, Color::rgba(255, 255, 255, 200)),
+                tx(format!("Tanlangan fayllar ({}) telefondan o'chiriladi.", format_bytes(sel_total as i64)), 14.0, Color::WHITE),
                 gap_box(0.0, 18.0),
                 row(vec![
                     spacer(),

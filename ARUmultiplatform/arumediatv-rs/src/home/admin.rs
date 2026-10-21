@@ -142,8 +142,8 @@ impl Home {
                 Self::pglass(
                     row(vec![
                         column(vec![icon(ic, 26.0).color(ACCENT2)]).center().width(52.0).height(52.0).radius(16.0).bg(ACCENT.with_opacity(0.2)),
-                        column(vec![tx(*title, 16.0, Color::WHITE).bold(), tx(*hint, 12.0, Color::rgba(255, 255, 255, 140))]).weight(1.0),
-                        icon(AD_CHEVRON, 24.0).color(Color::rgba(255, 255, 255, 96)),
+                        column(vec![tx(*title, 16.0, Color::WHITE).bold(), tx(*hint, 12.0, Color::WHITE)]).weight(1.0),
+                        icon(AD_CHEVRON, 24.0).color(Color::WHITE),
                     ])
                     .gap(16.0)
                     .align(Align::Center)
@@ -293,7 +293,7 @@ impl Home {
         }
         let search = Self::pglass(
             row(vec![
-                icon(AD_SEARCH, 22.0).color(Color::rgba(255, 255, 255, 190)),
+                icon(AD_SEARCH, 22.0).color(Color::WHITE),
                 field(&p.query).color(Color::WHITE).size(16.0).hint("ID yoki username").hint_color(Color::rgba(255, 255, 255, 120)).accent(ACCENT2).padding_xy(0.0, 10.0).no_border().weight(1.0),
             ])
             .gap(10.0)
@@ -315,13 +315,13 @@ impl Home {
             })
             .collect();
         let items = p.items.get();
-        let mut head = vec![search, gap_box(0.0, 10.0), row(sorts.into_iter().chain([spacer(), tx(format!("{} ta", p.total.get()), 12.0, Color::rgba(255, 255, 255, 130))]).collect()).gap(8.0).align(Align::Center), gap_box(0.0, 10.0)];
+        let mut head = vec![search, gap_box(0.0, 10.0), row(sorts.into_iter().chain([spacer(), tx(format!("{} ta", p.total.get()), 12.0, Color::WHITE)]).collect()).gap(8.0).align(Align::Center), gap_box(0.0, 10.0)];
         if !p.msg.get().is_empty() {
             let pm = p.clone();
-            head.push(tx(p.msg.get(), 13.0, Color::rgba(255, 255, 255, 230)).bg(Color::rgba(0, 0, 0, 120)).radius(14.0).padding_xy(14.0, 8.0).margin_each(0.0, 0.0, 0.0, 8.0).on_click(move || pm.msg.set(String::new())));
+            head.push(tx(p.msg.get(), 13.0, Color::WHITE).bg(Color::rgba(0, 0, 0, 120)).radius(14.0).padding_xy(14.0, 8.0).margin_each(0.0, 0.0, 0.0, 8.0).on_click(move || pm.msg.set(String::new())));
         }
         let body: Element = if items.is_empty() {
-            if p.loading.get() { column(vec![spinner(32.0, 3.0, ACCENT2)]).center() } else { column(vec![tx(if p.error.get().is_empty() { "Hech kim topilmadi".to_string() } else { p.error.get() }, 14.0, Color::rgba(255, 255, 255, 140))]).center() }
+            if p.loading.get() { column(vec![spinner(32.0, 3.0, ACCENT2)]).center() } else { column(vec![tx(if p.error.get().is_empty() { "Hech kim topilmadi".to_string() } else { p.error.get() }, 14.0, Color::WHITE)]).center() }
         } else {
             let mut kids: Vec<Element> = Vec::new();
             for u in items.iter() {
@@ -338,8 +338,8 @@ impl Home {
                     column(vec![tx(letter, 16.0, ACCENT2).bold()]).center().width(44.0).height(44.0).radius(22.0).bg(ACCENT.with_opacity(0.22)),
                     column(vec![
                         tx(u.name.clone(), 14.0, Color::WHITE).bold(),
-                        tx(format!("ID {}{}", u.id, if u.username.is_empty() { String::new() } else { format!(" · @{}", u.username) }), 12.0, Color::rgba(255, 255, 255, 160)),
-                        tx(sub.join(" · "), 11.0, Color::rgba(255, 255, 255, 115)),
+                        tx(format!("ID {}{}", u.id, if u.username.is_empty() { String::new() } else { format!(" · @{}", u.username) }), 12.0, Color::WHITE),
+                        tx(sub.join(" · "), 11.0, Color::WHITE),
                     ])
                     .weight(1.0),
                 ];
@@ -399,7 +399,7 @@ impl Home {
             }
             Modal::Amount(u) => {
                 kids.push(tx("Balansni o'zgartirish", 18.0, Color::WHITE).bold());
-                kids.push(tx(format!("{} · hozir {}", u.name, super::billing::format_sum(u.balance)), 13.0, Color::rgba(255, 255, 255, 160)).padding_each(0.0, 6.0, 0.0, 10.0));
+                kids.push(tx(format!("{} · hozir {}", u.name, super::billing::format_sum(u.balance)), 13.0, Color::WHITE).padding_each(0.0, 6.0, 0.0, 10.0));
                 kids.push(styled_num("Masalan 10000"));
                 let n = p.num.get().parse::<i64>().unwrap_or(0);
                 let (m1, p1, u1, c1) = (self.clone(), p.clone(), u.clone(), close.clone());
@@ -416,7 +416,7 @@ impl Home {
             Modal::Days(u) => {
                 let left = u.sub_days_left();
                 kids.push(tx("Obuna muddati", 18.0, Color::WHITE).bold());
-                kids.push(tx(if left > 0 { format!("{} · hozir {left} kun qolgan", u.name) } else { format!("{} · obunasi yo'q", u.name) }, 13.0, Color::rgba(255, 255, 255, 160)).padding_each(0.0, 6.0, 0.0, 10.0));
+                kids.push(tx(if left > 0 { format!("{} · hozir {left} kun qolgan", u.name) } else { format!("{} · obunasi yo'q", u.name) }, 13.0, Color::WHITE).padding_each(0.0, 6.0, 0.0, 10.0));
                 kids.push(styled_num("Necha kun"));
                 let n = p.num.get().parse::<i64>().unwrap_or(0);
                 let (m1, p1, u1, c1) = (self.clone(), p.clone(), u.clone(), close.clone());
@@ -468,7 +468,7 @@ impl Home {
             Modal::Unban(u) => {
                 kids.push(tx(format!("{} blokdan chiqarilsinmi?", u.name), 17.0, Color::WHITE).bold());
                 if !u.ban_reason.trim().is_empty() {
-                    kids.push(tx(format!("Sabab: {}", u.ban_reason), 13.0, Color::rgba(255, 255, 255, 170)).padding_each(0.0, 8.0, 0.0, 0.0));
+                    kids.push(tx(format!("Sabab: {}", u.ban_reason), 13.0, Color::WHITE).padding_each(0.0, 8.0, 0.0, 0.0));
                 }
                 let (m1, p1, u1, c1) = (self.clone(), p.clone(), u.clone(), close.clone());
                 kids.push(row(vec![spacer(), self.chip("Yo'q", false, close.clone()), self.chip("Ochish", true, move || { c1(); m1.user_act(&p1, u1.id, "unban", 0, 0, String::new(), "Blokdan chiqarildi".into()); })]).gap(8.0).padding_each(0.0, 14.0, 0.0, 0.0));
@@ -528,7 +528,7 @@ impl Home {
         let body: Element = if !p.loaded.get() {
             column(vec![spinner(32.0, 3.0, ACCENT2)]).center()
         } else if items.is_empty() {
-            column(vec![tx(if p.error.get().is_empty() { "Suhbatlar yo'q".to_string() } else { p.error.get() }, 14.0, Color::rgba(255, 255, 255, 140))]).center()
+            column(vec![tx(if p.error.get().is_empty() { "Suhbatlar yo'q".to_string() } else { p.error.get() }, 14.0, Color::WHITE)]).center()
         } else {
             let mut kids: Vec<Element> = Vec::new();
             for t in items.iter() {
@@ -540,7 +540,7 @@ impl Home {
                 let from_admin = t["last_from_admin"].as_bool().unwrap_or(false);
                 let unread = num(&t["unread"]);
                 let letter: String = name.trim_start_matches('@').chars().take(1).flat_map(|c| c.to_uppercase()).collect();
-                let mut right = vec![tx(ago(num(&t["last_at"])), 10.0, Color::rgba(255, 255, 255, 110))];
+                let mut right = vec![tx(ago(num(&t["last_at"])), 10.0, Color::WHITE)];
                 if unread > 0 {
                     right.push(tx(unread.to_string(), 11.0, Color::WHITE).bold().bg(ACCENT).radius(10.0).padding_xy(8.0, 2.0).margin_each(0.0, 4.0, 0.0, 0.0));
                 }
@@ -549,7 +549,7 @@ impl Home {
                     Self::pglass(
                         row(vec![
                             column(vec![tx(letter, 16.0, ACCENT2).bold()]).center().width(44.0).height(44.0).radius(22.0).bg(ACCENT.with_opacity(0.22)),
-                            column(vec![tx(name, 14.0, Color::WHITE).bold(), tx(format!("{}{}", if from_admin { "Siz: " } else { "" }, if last.is_empty() { "Fayl" } else { last }), 12.0, Color::rgba(255, 255, 255, 150))]).weight(1.0),
+                            column(vec![tx(name, 14.0, Color::WHITE).bold(), tx(format!("{}{}", if from_admin { "Siz: " } else { "" }, if last.is_empty() { "Fayl" } else { last }), 12.0, Color::WHITE)]).weight(1.0),
                             column(right).align(Align::End),
                         ])
                         .gap(12.0)
@@ -575,7 +575,7 @@ impl Home {
         let body: Element = if !p.loaded.get() {
             column(vec![spinner(32.0, 3.0, ACCENT2)]).center()
         } else if items.is_empty() {
-            column(vec![tx(if p.error.get().is_empty() { "Shikoyat yo'q".to_string() } else { p.error.get() }, 14.0, Color::rgba(255, 255, 255, 140))]).center()
+            column(vec![tx(if p.error.get().is_empty() { "Shikoyat yo'q".to_string() } else { p.error.get() }, 14.0, Color::WHITE)]).center()
         } else {
             let mut kids: Vec<Element> = Vec::new();
             let person = |o: &Value| {
@@ -590,9 +590,9 @@ impl Home {
                 kids.push(
                     Self::pglass(
                         column(vec![
-                            row(vec![tx(source, 11.5, ACCENT2).bold(), spacer(), tx(fmt_ymd(num(&r["created_at"])), 11.0, Color::rgba(255, 255, 255, 115))]),
+                            row(vec![tx(source, 11.5, ACCENT2).bold(), spacer(), tx(fmt_ymd(num(&r["created_at"])), 11.0, Color::WHITE)]),
                             tx(format!("{}: {}", person(&r["target_user"]), r["target_body"].as_str().unwrap_or("")), 14.0, Color::WHITE).padding_each(0.0, 6.0, 0.0, 4.0),
-                            tx(format!("Sabab ({}): {}", person(&r["reporter"]), r["reason"].as_str().unwrap_or("—")), 12.5, Color::rgba(255, 255, 255, 165)),
+                            tx(format!("Sabab ({}): {}", person(&r["reporter"]), r["reason"].as_str().unwrap_or("—")), 12.5, Color::WHITE),
                             row(vec![spacer(), self.chip("Tozalash", false, move || pc.confirm.set(Some(r2.clone())))]).padding_each(0.0, 8.0, 0.0, 0.0),
                         ])
                         .padding(14.0),
@@ -615,7 +615,7 @@ impl Home {
             let panel = column(vec![
                 tx("Shikoyatni tozalash", 18.0, Color::WHITE).bold(),
                 gap_box(0.0, 10.0),
-                tx("Shikoyat ro'yxatdan olib tashlanadi.", 14.0, Color::rgba(255, 255, 255, 200)),
+                tx("Shikoyat ro'yxatdan olib tashlanadi.", 14.0, Color::WHITE),
                 gap_box(0.0, 18.0),
                 row(vec![
                     spacer(),
@@ -673,8 +673,8 @@ impl Home {
         let mut kids: Vec<Element> = vec![Self::pglass(
             column(vec![
                 tx("Kontent", 15.0, Color::WHITE).bold(),
-                tx(format!("Anime: {} · Bo'lim: {} · Qism: {}", num(&c["anime"]), num(&c["seasons"]), num(&c["episodes"])), 13.0, Color::rgba(255, 255, 255, 170)).padding_each(0.0, 6.0, 0.0, 0.0),
-                tx(format!("Yangi qismlar: bugun {} · hafta {} · oy {}", num(&c["episodes_daily"]), num(&c["episodes_weekly"]), num(&c["episodes_monthly"])), 12.0, Color::rgba(255, 255, 255, 130)).padding_each(0.0, 4.0, 0.0, 0.0),
+                tx(format!("Anime: {} · Bo'lim: {} · Qism: {}", num(&c["anime"]), num(&c["seasons"]), num(&c["episodes"])), 13.0, Color::WHITE).padding_each(0.0, 6.0, 0.0, 0.0),
+                tx(format!("Yangi qismlar: bugun {} · hafta {} · oy {}", num(&c["episodes_daily"]), num(&c["episodes_weekly"]), num(&c["episodes_monthly"])), 12.0, Color::WHITE).padding_each(0.0, 4.0, 0.0, 0.0),
             ])
             .padding(16.0),
         )
@@ -697,19 +697,19 @@ impl Home {
             let mut col = vec![
                 tx(title, 15.0, Color::WHITE).bold(),
                 tx(fmt(total), 24.0, ACCENT2).black(),
-                row(vec![("Bugun", day), ("Hafta", week), ("Oy", month)].into_iter().map(|(l, v)| column(vec![tx(fmt(v), 13.0, Color::WHITE).bold(), tx(l, 11.0, Color::rgba(255, 255, 255, 115))]).weight(1.0)).collect()).padding_each(0.0, 6.0, 0.0, 0.0),
+                row(vec![("Bugun", day), ("Hafta", week), ("Oy", month)].into_iter().map(|(l, v)| column(vec![tx(fmt(v), 13.0, Color::WHITE).bold(), tx(l, 11.0, Color::WHITE)]).weight(1.0)).collect()).padding_each(0.0, 6.0, 0.0, 0.0),
             ];
             if open {
                 let ranges = [("24h", "24 soat"), ("7d", "7 kun"), ("30d", "30 kun"), ("all", "Hammasi")];
                 col.push(row(ranges.iter().map(|(k, l)| { let (pr, me2) = (p.clone(), self.clone()); let k = k.to_string(); self.chip(l, p.range.get() == k, move || { pr.range.set(k.clone()); me2.stats_series(&pr); }) }).collect()).gap(6.0).padding_each(0.0, 12.0, 0.0, 0.0));
                 match p.series.get() {
                     None => col.push(column(vec![spinner(24.0, 2.0, ACCENT2)]).center().height(120.0)),
-                    Some(pts) if pts.is_empty() => col.push(column(vec![tx("Ma'lumot yo'q", 12.0, Color::rgba(255, 255, 255, 115))]).center().height(120.0)),
+                    Some(pts) if pts.is_empty() => col.push(column(vec![tx("Ma'lumot yo'q", 12.0, Color::WHITE)]).center().height(120.0)),
                     Some(pts) => {
                         let max = pts.iter().map(|x| x.1).max().unwrap_or(1).max(1) as f32;
                         let bars: Vec<Element> = pts.iter().map(|(_, v)| column(vec![spacer(), column(vec![]).height((100.0 * *v as f32 / max).max(1.0)).bg(ACCENT2).radius(2.0)]).weight(1.0).height(100.0).padding_each(1.0, 0.0, 1.0, 0.0)).collect();
                         col.push(row(bars).height(100.0).padding_each(0.0, 10.0, 0.0, 0.0));
-                        col.push(tx(format!("Eng yuqori: {}", fmt(max as i64)), 11.0, Color::rgba(255, 255, 255, 130)).padding_each(0.0, 6.0, 0.0, 0.0));
+                        col.push(tx(format!("Eng yuqori: {}", fmt(max as i64)), 11.0, Color::WHITE).padding_each(0.0, 6.0, 0.0, 0.0));
                     }
                 }
             }
@@ -724,7 +724,7 @@ impl Home {
                 }),
             );
         }
-        kids.push(tx("Vaqt mintaqasi: UTC+5 (Toshkent)", 11.0, Color::rgba(255, 255, 255, 110)).padding_each(4.0, 0.0, 0.0, 32.0));
+        kids.push(tx("Vaqt mintaqasi: UTC+5 (Toshkent)", 11.0, Color::WHITE).padding_each(4.0, 0.0, 0.0, 32.0));
         self.scaffold("Umumiy statistika", scroll_column(&p.scroll, kids).padding_each(16.0, 4.0, 16.0, 0.0))
     }
 }

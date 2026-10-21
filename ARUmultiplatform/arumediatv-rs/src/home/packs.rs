@@ -170,7 +170,7 @@ impl Home {
         }
         if !p.msg.get().is_empty() {
             let pm = p.clone();
-            head.push(tx(p.msg.get(), 13.0, Color::rgba(255, 255, 255, 230)).bg(Color::rgba(0, 0, 0, 120)).radius(14.0).padding_xy(14.0, 8.0).margin_each(0.0, 0.0, 0.0, 8.0).on_click(move || pm.msg.set(String::new())));
+            head.push(tx(p.msg.get(), 13.0, Color::WHITE).bg(Color::rgba(0, 0, 0, 120)).radius(14.0).padding_xy(14.0, 8.0).margin_each(0.0, 0.0, 0.0, 8.0).on_click(move || pm.msg.set(String::new())));
         }
         let list: Rc<Vec<PackInfo>> = match tab {
             0 => p.mine.get(),
@@ -191,7 +191,7 @@ impl Home {
                     column(vec![tx(kind_single(&pk.kind).chars().take(1).collect::<String>(), 18.0, ACCENT2).black()]).center().width(52.0).height(52.0).radius(14.0).bg(ACCENT.with_opacity(0.2)),
                     column(vec![
                         tx(pk.title.clone(), 15.0, Color::WHITE).bold(),
-                        tx(format!("{} · {} ta{}{}", kind_single(&pk.kind), pk.items, if pk.bytes > 0 { format!(" · {}", format_bytes(pk.bytes)) } else { String::new() }, if pk.owner_name.is_empty() { String::new() } else { format!(" · {}", pk.owner_name) }), 12.0, Color::rgba(255, 255, 255, 150)),
+                        tx(format!("{} · {} ta{}{}", kind_single(&pk.kind), pk.items, if pk.bytes > 0 { format!(" · {}", format_bytes(pk.bytes)) } else { String::new() }, if pk.owner_name.is_empty() { String::new() } else { format!(" · {}", pk.owner_name) }), 12.0, Color::WHITE),
                     ])
                     .weight(1.0),
                 ];
@@ -271,7 +271,7 @@ impl Home {
         let mut kids: Vec<Element> = vec![
             Self::pglass(column(vec![
                 tx(d.title.clone(), 20.0, Color::WHITE).black(),
-                tx(format!("{} · {} ta{}", kind_single(&d.kind), d.items, if d.bytes > 0 { format!(" · {}", format_bytes(d.bytes)) } else { String::new() }), 13.0, Color::rgba(255, 255, 255, 160)),
+                tx(format!("{} · {} ta{}", kind_single(&d.kind), d.items, if d.bytes > 0 { format!(" · {}", format_bytes(d.bytes)) } else { String::new() }), 13.0, Color::WHITE),
             ]).padding(18.0)).radius(24.0).margin_each(0.0, 0.0, 0.0, 12.0),
         ];
         if mine {
@@ -342,7 +342,7 @@ impl Home {
                 _ => ("Yuborilmoqda", Color::rgba(255, 255, 255, 170)),
             };
             let reason = o["reason"].as_str().filter(|r| *r != "null" && !r.is_empty()).map(|r| format!(" · {r}")).unwrap_or_default();
-            kids.push(Self::pglass(row(vec![tx(format!("{} · {}", o["op"].as_str().unwrap_or("add"), label), 13.0, c).bold(), tx(reason, 12.0, Color::rgba(255, 255, 255, 140))]).gap(6.0).padding(12.0)).radius(18.0).margin_each(0.0, 0.0, 0.0, 8.0));
+            kids.push(Self::pglass(row(vec![tx(format!("{} · {}", o["op"].as_str().unwrap_or("add"), label), 13.0, c).bold(), tx(reason, 12.0, Color::WHITE)]).gap(6.0).padding(12.0)).radius(18.0).margin_each(0.0, 0.0, 0.0, 8.0));
         }
         if mine {
             let (me, pc, dd) = (self.clone(), p.clone(), d.clone());
@@ -352,7 +352,7 @@ impl Home {
                 me.packs_flush_soon(&pc);
             }));
         }
-        kids.push(tx("Elementlarni ko'rsatish (rasm/GIF/video ko'rinishi) Rust ilovada hali yo'q.", 11.5, Color::rgba(255, 255, 255, 110)).padding_xy(6.0, 8.0));
+        kids.push(tx("Elementlarni ko'rsatish (rasm/GIF/video ko'rinishi) Rust ilovada hali yo'q.", 11.5, Color::WHITE).padding_xy(6.0, 8.0));
         kids.push(gap_box(0.0, 28.0));
         let back_p = p.clone();
         // Orqaga: ro'yxatga (sahifadan chiqmaydi).

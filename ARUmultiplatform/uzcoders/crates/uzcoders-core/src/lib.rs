@@ -15,4 +15,4 @@ pub use env::{density, safe_insets, set_density, set_safe_insets, set_window_dp,
 pub use event::{PointerEvent, PointerKind};
 pub use geometry::{EdgeInsets, Point, Rect, Size};
 pub use state::{global_revision, invalidate, State};
-pub use task::{drain_tasks, pending_tasks, set_waker, spawn_bg};
+pub use task::{clear_frame_request, drain_tasks, frame_requested, request_frame, pending_tasks, set_waker, spawn_bg};

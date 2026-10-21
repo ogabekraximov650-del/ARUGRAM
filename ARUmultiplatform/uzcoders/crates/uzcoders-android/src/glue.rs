@@ -189,7 +189,10 @@ pub fn ime_event(e: ImeEvent) {
 
 pub use crate::jni::jstring;
 
+static VIDEO_TEX: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
 fn video_create(tex: u32) {
+    VIDEO_TEX.store(tex, std::sync::atomic::Ordering::SeqCst);
     let a = ACTIVITY.load(std::sync::atomic::Ordering::SeqCst);
     if a != 0 {
         let w = unsafe { jni::video_surface(a as *mut ANativeActivity, tex) };
@@ -201,6 +204,11 @@ fn video_update() -> Option<[f32; 16]> {
     let a = ACTIVITY.load(std::sync::atomic::Ordering::SeqCst);
     if a == 0 {
         return None;
+    }
+    // Oldingi pleyer Surface'ni bo'shatgan bo'lsa (yangi qism ochilganda), shu teksturaga yangisini yaratamiz.
+    let tex = VIDEO_TEX.load(std::sync::atomic::Ordering::SeqCst);
+    if tex != 0 && VIDEO_WINDOW.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+        video_create(tex);
     }
     unsafe { jni::video_update(a as *mut ANativeActivity) }
 }

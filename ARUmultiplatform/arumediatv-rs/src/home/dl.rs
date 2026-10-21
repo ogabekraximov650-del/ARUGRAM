@@ -139,7 +139,7 @@ impl Home {
         let mut meta = vec![
             tx(label.clone(), 13.0, Color::WHITE).black(),
             tx(format!("{}%", st.percent()), 13.0, if st.complete() { ACCENT2 } else { Color::WHITE }).black(),
-            tx(format!("{} / {}", format_bytes(st.downloaded), if total > 0 { format_bytes(total) } else { "—".to_string() }), 11.5, Color::rgba(255, 255, 255, 165)).bold(),
+            tx(format!("{} / {}", format_bytes(st.downloaded), if total > 0 { format_bytes(total) } else { "—".to_string() }), 11.5, Color::WHITE).bold(),
         ];
         let speed = if st.downloading && !st.queued { st.speed_label() } else { String::new() };
         let mut chips: Vec<Element> = Vec::new();
@@ -195,7 +195,7 @@ impl Home {
         let panel = column(vec![
             tx(title, 18.0, Color::WHITE).bold(),
             gap_box(0.0, 10.0),
-            tx(text, 14.0, Color::rgba(255, 255, 255, 200)),
+            tx(text, 14.0, Color::WHITE),
             gap_box(0.0, 18.0),
             row(vec![
                 spacer(),
@@ -243,7 +243,7 @@ impl Home {
         let total: i64 = idx.iter().map(|d| live.get(&d.url).map(|s| s.downloaded).unwrap_or(d.stat.downloaded)).sum();
         let me = self.clone();
         let mut kids: Vec<Element> = vec![row(vec![
-            tx(format!("{} ta fayl · {}", idx.len(), format_bytes(total)), 12.0, Color::rgba(255, 255, 255, 170)).weight(1.0),
+            tx(format!("{} ta fayl · {}", idx.len(), format_bytes(total)), 12.0, Color::WHITE).weight(1.0),
             tx("Hammasini o'chirish", 12.0, ERROR).bold().on_click(move || me.dl_wipe_confirm.set(true)),
         ])
         .padding_each(4.0, 0.0, 4.0, 10.0)];
@@ -274,9 +274,9 @@ impl Home {
                         pic,
                         gap_box(0.0, 10.0),
                         tx(if first.title.is_empty() { "Anime".to_string() } else { first.title.clone() }, 15.5, Color::WHITE).bold(),
-                        tx(format!("{}-bo'lim", first.section_no.max(1)), 13.0, Color::rgba(255, 255, 255, 175)),
-                        tx(format!("{full} ta qism to'liq yuklangan"), 12.5, Color::rgba(255, 255, 255, 165)),
-                        tx(format!("Hajmi: {}", format_bytes(on_disk)), 12.0, Color::rgba(255, 255, 255, 130)),
+                        tx(format!("{}-bo'lim", first.section_no.max(1)), 13.0, Color::WHITE),
+                        tx(format!("{full} ta qism to'liq yuklangan"), 12.5, Color::WHITE),
+                        tx(format!("Hajmi: {}", format_bytes(on_disk)), 12.0, Color::WHITE),
                     ])
                     .padding(10.0),
                 )

@@ -42,7 +42,7 @@ impl Home {
             _ => format!("Foydalanuvchi {}", p.id),
         };
         let letter: String = name.trim_start_matches('@').chars().take(1).flat_map(|c| c.to_uppercase()).collect();
-        let mut badges = vec![tx(format!("ID {}", p.id), 12.0, Color::rgba(255, 255, 255, 170)).bg(Color::rgba(255, 255, 255, 20)).radius(10.0).padding_xy(10.0, 4.0)];
+        let mut badges = vec![tx(format!("ID {}", p.id), 12.0, Color::WHITE).bg(Color::rgba(255, 255, 255, 20)).radius(10.0).padding_xy(10.0, 4.0)];
         if d["premium"].as_bool().unwrap_or(false) {
             badges.push(tx("Premium", 11.0, GOLD).bold().bg(GOLD.with_opacity(0.18)).radius(10.0).padding_xy(10.0, 4.0));
         }
@@ -51,7 +51,7 @@ impl Home {
                 column(vec![tx(letter, 30.0, ACCENT2).bold()]).center().width(78.0).height(78.0).radius(39.0).bg(ACCENT.with_opacity(0.22)),
                 column(vec![
                     tx(name, 20.0, Color::WHITE).bold(),
-                    if username.is_empty() { gap_box(0.0, 0.0) } else { tx(format!("@{username}"), 14.0, Color::rgba(255, 255, 255, 160)) },
+                    if username.is_empty() { gap_box(0.0, 0.0) } else { tx(format!("@{username}"), 14.0, Color::WHITE) },
                     row(badges).gap(8.0).padding_each(0.0, 8.0, 0.0, 0.0),
                 ])
                 .weight(1.0),
@@ -63,7 +63,7 @@ impl Home {
         .radius(26.0);
         let mut kids: Vec<Element> = vec![header.margin_each(0.0, 0.0, 0.0, 14.0)];
         if d["admin_view"].as_bool().unwrap_or(false) {
-            let line = |l: &str, v: String| row(vec![tx(format!("{l}:"), 13.0, Color::rgba(255, 255, 255, 150)).width(130.0), tx(v, 13.0, Color::WHITE).bold()]).padding_each(0.0, 3.0, 0.0, 3.0);
+            let line = |l: &str, v: String| row(vec![tx(format!("{l}:"), 13.0, Color::WHITE).width(130.0), tx(v, 13.0, Color::WHITE).bold()]).padding_each(0.0, 3.0, 0.0, 3.0);
             let until = num(&d["subscription_until"]);
             let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|x| x.as_millis() as i64).unwrap_or(0);
             kids.push(
@@ -97,7 +97,7 @@ impl Home {
                 .iter()
                 .map(|(label, key, value)| {
                     let visible = d.get(*key).is_some();
-                    Self::pglass(column(vec![tx(if visible { value.clone() } else { "Yashirilgan".to_string() }, if visible { 20.0 } else { 14.0 }, if visible { ACCENT2 } else { Color::rgba(255, 255, 255, 110) }).black(), tx(*label, 12.0, Color::rgba(255, 255, 255, 150))]).padding_xy(16.0, 14.0)).radius(22.0).weight(1.0)
+                    Self::pglass(column(vec![tx(if visible { value.clone() } else { "Yashirilgan".to_string() }, if visible { 20.0 } else { 14.0 }, if visible { ACCENT2 } else { Color::rgba(255, 255, 255, 110) }).black(), tx(*label, 12.0, Color::WHITE)]).padding_xy(16.0, 14.0)).radius(22.0).weight(1.0)
                 })
                 .collect();
             if r.len() == 1 {

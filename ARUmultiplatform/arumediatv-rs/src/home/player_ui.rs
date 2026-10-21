@@ -460,7 +460,7 @@ impl Home {
         let ep = cur.as_ref().and_then(|c| p.eps.get().iter().find(|e| e.id == c.0).cloned());
         let mut kids: Vec<Element> = vec![tx("Sozlamalar", 18.0, Color::WHITE).bold(), gap_box(0.0, 12.0)];
         if let (Some(e), Some((_, q, _))) = (&ep, &cur) {
-            kids.push(tx("Sifat", 13.0, Color::rgba(255, 255, 255, 160)).bold());
+            kids.push(tx("Sifat", 13.0, Color::WHITE).bold());
             kids.push(gap_box(0.0, 8.0));
             let chips: Vec<Element> = e
                 .qualities
@@ -485,7 +485,7 @@ impl Home {
         };
         kids.push(toggle("Avto keyingi qism", &p.pl.auto_next));
         kids.push(toggle("Introni avto o'tkazish", &p.pl.auto_skip));
-        kids.push(tx("Uyqu taymeri", 13.0, Color::rgba(255, 255, 255, 160)).bold().padding_each(0.0, 8.0, 0.0, 8.0));
+        kids.push(tx("Uyqu taymeri", 13.0, Color::WHITE).bold().padding_each(0.0, 8.0, 0.0, 8.0));
         let timers: Vec<Element> = [(0, "O'chiq"), (15, "15 daq"), (30, "30 daq"), (60, "60 daq")]
             .iter()
             .map(|(m, l)| {

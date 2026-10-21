@@ -328,7 +328,7 @@ impl Home {
             None => {
                 let (a, b) = name_colors(&s.name);
                 let letter: String = s.name.trim().chars().take(1).flat_map(|c| c.to_uppercase()).collect();
-                column(vec![tx(letter, 84.0, Color::rgba(255, 255, 255, 40)).black()]).gradient(a, b).radius(20.0).center()
+                column(vec![tx(letter, 84.0, Color::WHITE).black()]).gradient(a, b).radius(20.0).center()
             }
         };
         let mut r1 = vec![];
@@ -339,7 +339,7 @@ impl Home {
         }
         r1.push(spacer());
         if s.views > 0 {
-            r1.push(badge(vec![icon(EYE, 12.0).color(Color::rgba(255, 255, 255, 180)), tx(compact(s.views), 10.5, Color::WHITE).bold()]));
+            r1.push(badge(vec![icon(EYE, 12.0).color(Color::WHITE), tx(compact(s.views), 10.5, Color::WHITE).bold()]));
         }
         let mut top = vec![row(r1)];
         if s.age > 0 {
@@ -359,7 +359,7 @@ impl Home {
         };
         let bottom = column(vec![
             spacer(),
-            column(vec![tx(format!("{}-bo'lim · {} ta qism", s.section_no, s.episodes), 12.0, Color::rgba(255, 255, 255, 190)), tx(name, 16.0, Color::WHITE).bold()])
+            column(vec![tx(format!("{}-bo'lim · {} ta qism", s.section_no, s.episodes), 12.0, Color::WHITE), tx(name, 16.0, Color::WHITE).bold()])
                 .padding_each(10.0, 30.0, 10.0, 12.0)
                 .gradient(Color::rgba(0, 0, 0, 0), Color::rgba(0, 0, 0, 215))
                 .radius(20.0),
@@ -372,7 +372,7 @@ impl Home {
     fn header(&self, top_inset: f32) -> Element {
         let panel = column(vec![
             row(vec![tx("ARU", 30.0, Color::WHITE).black(), tx("MEDIATV", 30.0, ACCENT2).black()]),
-            tx("Anime dunyosi", 14.0, Color::rgba(255, 255, 255, 190)),
+            tx("Anime dunyosi", 14.0, Color::WHITE),
             gap_box(0.0, 6.0),
             tx("Ommabop anime", 18.0, Color::WHITE).bold(),
             if self.poster_diag.with(|d| d.is_empty()) || !self.posters.borrow().is_empty() {
@@ -384,7 +384,7 @@ impl Home {
         .lens(Color::rgba(255, 255, 255, 4), GLASS_ZOOM)
         .radius(24.0)
         .padding_xy(18.0, 12.0);
-        let bell = column(vec![icon(BELL, 22.0).color(Color::rgba(255, 255, 255, 220))])
+        let bell = column(vec![icon(BELL, 22.0).color(Color::WHITE)])
             .width(48.0)
             .height(48.0)
             .center()
@@ -638,7 +638,7 @@ impl Home {
     }
 
     fn empty(icon_path: &'static str, msg: &str) -> Element {
-        column(vec![icon(icon_path, 48.0).color(Color::rgba(255, 255, 255, 90)), gap_box(0.0, 12.0), tx(msg, 14.0, TEXT_DIM)]).center().padding(32.0)
+        column(vec![icon(icon_path, 48.0).color(Color::WHITE), gap_box(0.0, 12.0), tx(msg, 14.0, TEXT_DIM)]).center().padding(32.0)
     }
 
     /// Kutubxona sarlavhasi: nom va 3 ta bo'lim — shaffof lupali shisha kapsulalarda.
@@ -697,9 +697,9 @@ impl Home {
                 gap_box(0.0, 10.0),
                 tx(title, 15.5, Color::WHITE).bold(),
                 gap_box(0.0, 6.0),
-                tx(format!("Oxirgi marta {}-bo'lim {}-qismni ko'rdingiz", h.section_no, h.episode_no), 12.5, Color::rgba(255, 255, 255, 175)),
+                tx(format!("Oxirgi marta {}-bo'lim {}-qismni ko'rdingiz", h.section_no, h.episode_no), 12.5, Color::WHITE),
                 gap_box(0.0, 2.0),
-                tx(format!("Sana: {}", fmt_date(h.updated_at)), 12.0, Color::rgba(255, 255, 255, 130)),
+                tx(format!("Sana: {}", fmt_date(h.updated_at)), 12.0, Color::WHITE),
             ])
             .glass(Color::rgba(255, 255, 255, 20))
             .border(1.0, Color::rgba(255, 255, 255, 36))
@@ -715,7 +715,7 @@ impl Home {
     fn search_bar(&self, top_inset: f32) -> Element {
         let q = self.query.clone();
         let mut kids = vec![
-            icon(NAV[1].1, 22.0).color(Color::rgba(255, 255, 255, 190)),
+            icon(NAV[1].1, 22.0).color(Color::WHITE),
             field(&self.query)
                 .color(Color::WHITE)
                 .size(16.0)
@@ -727,7 +727,7 @@ impl Home {
                 .weight(1.0),
         ];
         if !self.query.with(|v| v.is_empty()) {
-            kids.push(icon(CLOSE, 20.0).color(Color::rgba(255, 255, 255, 190)).on_click(move || q.set(String::new())));
+            kids.push(icon(CLOSE, 20.0).color(Color::WHITE).on_click(move || q.set(String::new())));
         }
         column(vec![
             tx("Qidiruv", 26.0, Color::WHITE).black().padding_each(6.0, 0.0, 0.0, 10.0),
