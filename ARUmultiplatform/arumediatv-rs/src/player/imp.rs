@@ -147,6 +147,8 @@ struct Inner {
     generation: AtomicU64,
     /// Seekdan keyingi birinchi kadr to'xtab turgan holatda ham ko'rsatiladi.
     preview: AtomicBool,
+    /// To'xtab turganda audio paketlari tashlandi: ijro boshlanganda joriy joydan qayta sinxronlash kerak.
+    dropped_audio: AtomicBool,
     pos_us: AtomicI64,
     dur_us: AtomicI64,
     width: AtomicI32,
@@ -273,6 +275,7 @@ impl Player {
             seek_to: AtomicI64::new(if start_ms > 1000 { start_ms * 1000 } else { -1 }),
             generation: AtomicU64::new(0),
             preview: AtomicBool::new(true),
+            dropped_audio: AtomicBool::new(false),
             pos_us: AtomicI64::new(start_ms.max(0) * 1000),
             dur_us: AtomicI64::new(0),
             width: AtomicI32::new(0),
@@ -318,6 +321,9 @@ impl Player {
         }
         if !i.has_audio.load(Ordering::SeqCst) {
             i.sys_clock_set(i.pos_us.load(Ordering::SeqCst), true);
+        }
+        if i.dropped_audio.swap(false, Ordering::SeqCst) && i.has_audio.load(Ordering::SeqCst) {
+            i.seek_to.store(i.pos_us.load(Ordering::SeqCst), Ordering::SeqCst);
         }
         i.playing.store(true, Ordering::SeqCst);
     }
@@ -527,6 +533,12 @@ unsafe fn run(inner: Arc<Inner>, source: Source) {
                     }
                     let g = codec_lock.lock().unwrap_or_else(|e| e.into_inner());
                     let idx = AMediaCodec_dequeueInputBuffer(g.0, 10_000);
+                    if idx < 0 && tr != vtrack && !inner.playing.load(Ordering::SeqCst) {
+                        // To'xtab turganda audio chiqishi bo'shatilmaydi: to'lib qolsa video kadri kelmay qotib qolmasin.
+                        inner.dropped_audio.store(true, Ordering::SeqCst);
+                        AMediaExtractor_advance(ex);
+                        break;
+                    }
                     if idx >= 0 {
                         let mut cap = 0usize;
                         let p = AMediaCodec_getInputBuffer(g.0, idx as usize, &mut cap);
