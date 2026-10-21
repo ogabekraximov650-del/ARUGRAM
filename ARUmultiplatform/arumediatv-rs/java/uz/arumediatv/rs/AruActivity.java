@@ -34,8 +34,8 @@ public class AruActivity extends UzActivity {
     private boolean everReady;
     private String err = "";
     private int gen;
-    /** state|pos|dur|playing|buffering|w|h|xato */
-    private volatile String status = "0|0|0|0|0|0|0|";
+    /** state|pos|dur|playing|buffering|w|h|buferlangan ms|xato */
+    private volatile String status = "0|0|0|0|0|0|0|0|";
 
     /** `spec` = "uri|boshlang'ich ms|play(0/1)|tezlik foizi". */
     public void exoOpen(final String spec) {
@@ -90,7 +90,7 @@ public class AruActivity extends UzActivity {
         }
         everReady = false;
         err = "";
-        status = "0|0|0|0|0|0|0|";
+        status = "0|0|0|0|0|0|0|0|";
     }
 
     private void openOnUi(String spec) {
@@ -214,6 +214,6 @@ public class AruActivity extends UzActivity {
         if (dur == C.TIME_UNSET || dur < 0) dur = 0;
         VideoSize v = e.getVideoSize();
         status = state + "|" + Math.max(0, e.getCurrentPosition()) + "|" + dur + "|" + (e.getPlayWhenReady() && st != Player.STATE_ENDED ? 1 : 0)
-                + "|" + (st == Player.STATE_BUFFERING ? 1 : 0) + "|" + v.width + "|" + v.height + "|" + err;
+                + "|" + (st == Player.STATE_BUFFERING ? 1 : 0) + "|" + v.width + "|" + v.height + "|" + Math.max(0, e.getBufferedPosition()) + "|" + err;
     }
 }

@@ -71,7 +71,19 @@ jobs:
           mkdir -p classes dex
           M3=$(ls media3/jars/*.jar | tr '\n' ':')
           javac --release 8 -nowarn -cp "$PLAT/android.jar:$M3" -d classes $(find ../uzcoders/crates/uzcoders-android/java java -name '*.java')
-          "$BT/d8" --release --min-api 28 --lib "$PLAT/android.jar" --output dex $(find classes -name '*.class') media3/jars/*.jar
+          # R8: ishlatilmaydigan Media3/Guava kodi olib tashlanadi (APK hajmi). Kirish nuqtalari saqlanadi.
+          {
+            echo '-keep class uz.uzcoders.** { *; }'
+            echo '-keep class uz.arumediatv.rs.** { *; }'
+            echo '-keep class io.flutter.plugins.videoplayer.** { *; }'
+            echo '-keepclasseswithmembernames class * { native <methods>; }'
+            echo '-dontobfuscate'
+            echo '-dontwarn **'
+            echo '-ignorewarnings'
+            for f in media3/libs/*.aar; do unzip -p "$f" proguard.txt 2>/dev/null || true; done
+          } > media3/rules.pro
+          java -cp "$BT/lib/d8.jar" com.android.tools.r8.R8 --release --min-api 28 --lib "$PLAT/android.jar" --pg-conf media3/rules.pro --output dex $(find classes -name '*.class') media3/jars/*.jar
+          ls -la dex/classes.dex
           (cd dex && zip -q ../base.apk classes.dex)
           mkdir -p apk/lib && cp -r jniLibs/* apk/lib/
           (cd apk && zip -q -r -0 ../base.apk lib)

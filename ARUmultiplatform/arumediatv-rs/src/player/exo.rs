@@ -39,6 +39,8 @@ pub struct Status {
     pub width: i32,
     pub height: i32,
     pub speed: f32,
+    /// Yuklangan (buferdagi) joy, millisekund.
+    pub buffered_ms: i64,
     /// Diagnostika matni (pleyer ostida ko'rsatiladi).
     pub dbg: String,
 }
@@ -85,9 +87,9 @@ impl Player {
 
     pub fn status(&self) -> Status {
         let raw = if self.closed.get() { String::new() } else { uzcoders::android::activity_call_ret("exoStatus", "") };
-        let mut it = raw.splitn(8, '|');
+        let mut it = raw.splitn(9, '|');
         let mut num = || it.next().and_then(|v| v.parse::<i64>().ok()).unwrap_or(0);
-        let (state, pos, dur, playing, buffering, w, h) = (num(), num(), num(), num(), num(), num(), num());
+        let (state, pos, dur, playing, buffering, w, h, buf_ms) = (num(), num(), num(), num(), num(), num(), num(), num());
         let error = it.next().unwrap_or("").to_string();
         if !self.name.is_empty() && !self.closed.get() && dur > 0 && self.last_report.get().map_or(true, |t| t.elapsed().as_millis() >= 700) {
             self.last_report.set(Some(Instant::now()));
@@ -112,6 +114,7 @@ impl Player {
             width: w as i32,
             height: h as i32,
             speed: self.speed.get(),
+            buffered_ms: buf_ms,
             dbg: format!("ExoPlayer | yuza={} tex={tex} tekstura={up} | {}x{} | {:.1}s | {}", if win { "bor" } else { "yo'q" }, w, h, self.opened_at.elapsed().as_secs_f32(), raw.chars().take(40).collect::<String>()),
         }
     }

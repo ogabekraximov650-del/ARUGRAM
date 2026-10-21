@@ -16,6 +16,8 @@ const V_NEXT: &str = "M6,18l8.5,-6L6,6v12zM16,6v12h2V6h-2z";
 const V_FULL: &str = "M7,14H5v5h5v-2H7v-3zM5,10h2V7h3V5H5v5zM17,17h-3v2h5v-5h-2v3zM14,5v2h3v3h2V5h-5z";
 const V_FULL_EXIT: &str = "M5,16h3v3h2v-5H5v2zM8,8H5v2h5V5H8v3zM14,19h2v-3h3v-2h-5v5zM16,8V5h-2v5h5V8h-3z";
 const V_GEAR: &str = "M19.14,12.94c0.04,-0.3 0.06,-0.61 0.06,-0.94 0,-0.32 -0.02,-0.64 -0.07,-0.94l2.03,-1.58c0.18,-0.14 0.23,-0.41 0.12,-0.61l-1.92,-3.32c-0.12,-0.22 -0.37,-0.29 -0.59,-0.22l-2.39,0.96c-0.5,-0.38 -1.03,-0.7 -1.62,-0.94L14.4,2.81c-0.04,-0.24 -0.24,-0.41 -0.48,-0.41h-3.84c-0.24,0 -0.43,0.17 -0.47,0.41L9.25,5.35C8.66,5.59 8.12,5.92 7.63,6.29L5.24,5.33c-0.22,-0.08 -0.47,0 -0.59,0.22L2.74,8.87C2.62,9.08 2.66,9.34 2.86,9.48l2.03,1.58C4.84,11.36 4.8,11.69 4.8,12s0.02,0.64 0.07,0.94l-2.03,1.58c-0.18,0.14 -0.23,0.41 -0.12,0.61l1.92,3.32c0.12,0.22 0.37,0.29 0.59,0.22l2.39,-0.96c0.5,0.38 1.03,0.7 1.62,0.94l0.36,2.54c0.05,0.24 0.24,0.41 0.48,0.41h3.84c0.24,0 0.44,-0.17 0.47,-0.41l0.36,-2.54c0.59,-0.24 1.13,-0.56 1.62,-0.94l2.39,0.96c0.22,0.08 0.47,0 0.59,-0.22l1.92,-3.32c0.12,-0.22 0.07,-0.47 -0.12,-0.61l-2.01,-1.58zM12,15.6c-1.98,0 -3.6,-1.62 -3.6,-3.6s1.62,-3.6 3.6,-3.6 3.6,1.62 3.6,3.6 -1.62,3.6 -3.6,3.6z";
+const V_LIST: &str = "M3,10h11v2H3V10zM3,6h11v2H3V6zM3,14h7v2H3V14zM16,6v8.18C15.69,14.07 15.35,14 15,14c-1.66,0 -3,1.34 -3,3s1.34,3 3,3 3,-1.34 3,-3V8h3V6H16z";
+const V_UNLOCK: &str = "M12,17c1.1,0 2,-0.9 2,-2s-0.9,-2 -2,-2 -2,0.9 -2,2 0.9,2 2,2zM18,8h-1V6c0,-2.76 -2.24,-5 -5,-5S7,3.24 7,6h1.9c0,-1.71 1.39,-3.1 3.1,-3.1 1.71,0 3.1,1.39 3.1,3.1v2H6c-1.1,0 -2,0.9 -2,2v10c0,1.1 0.9,2 2,2h12c1.1,0 2,-0.9 2,-2V10c0,-1.1 -0.9,-2 -2,-2zM18,20H6V10h12v10z";
 const V_BACK: &str = "M20,11H7.83l5.59,-5.59L12,4l-8,8 8,8 1.41,-1.41L7.83,13H20v-2z";
 const V_LOCK: &str = "M18,8h-1L17,6c0,-2.76 -2.24,-5 -5,-5S7,3.24 7,6v2H6c-1.1,0 -2,0.9 -2,2v10c0,1.1 0.9,2 2,2h12c1.1,0 2,-0.9 2,-2V10c0,-1.1 -0.9,-2 -2,-2zM12,17c-1.1,0 -2,-0.9 -2,-2s0.9,-2 2,-2 2,0.9 2,2 -0.9,2 -2,2zM15.1,8H8.9V6c0,-1.71 1.39,-3.1 3.1,-3.1 1.71,0 3.1,1.39 3.1,3.1v2z";
 
@@ -35,6 +37,13 @@ pub struct PlayerState {
     pub(super) perr: State<String>,
     pub(super) loading: State<bool>,
     pub(super) locked: State<bool>,
+    /// To'liq ekran: qismlar ro'yxati oynasi.
+    pub(super) ep_list: State<bool>,
+    ep_scroll: ScrollState,
+    /// Ikki marta bosib sek: oxirgi bosish (chap=true, vaqt), jamlangan soniya (chap<0 / o'ng>0), kutilayotgan sek avlodi.
+    last_tap: Cell<Option<(bool, Instant)>>,
+    pub(super) seek_acc: State<i32>,
+    seek_gen: Cell<u32>,
     sleep_at: Cell<Option<Instant>>,
     held: Cell<bool>,
     watched_ms: Cell<i64>,
@@ -52,7 +61,7 @@ impl PlayerState {
     pub(super) fn new() -> PlayerState {
         PlayerState {
             player: RefCell::new(None),
-            status: State::new(Status { state: PState::Opening, pos_ms: 0, dur_ms: 0, playing: false, buffering: false, error: String::new(), width: 0, height: 0, speed: 1.0, dbg: String::new() }),
+            status: State::new(Status { state: PState::Opening, pos_ms: 0, dur_ms: 0, playing: false, buffering: false, error: String::new(), width: 0, height: 0, speed: 1.0, buffered_ms: 0, dbg: String::new() }),
             cur: State::new(None),
             fullscreen: State::new(false),
             ctl: State::new(true),
@@ -64,6 +73,11 @@ impl PlayerState {
             perr: State::new(String::new()),
             loading: State::new(false),
             locked: State::new(false),
+            ep_list: State::new(false),
+            ep_scroll: ScrollState::new(),
+            last_tap: Cell::new(None),
+            seek_acc: State::new(0),
+            seek_gen: Cell::new(0),
             sleep_at: Cell::new(None),
             held: Cell::new(false),
             watched_ms: Cell::new(0),
@@ -371,24 +385,17 @@ impl Home {
                 (w, h)
             };
             layers.push(column(vec![column(vec![]).video().width(vw).height(vh)]).center());
-            // Diagnostika (video chiqmasa sababini ko'rsatadi).
-            layers.push(column(vec![spacer(), tx(st.dbg.clone(), 9.5, Color::hex(0x69F0AE)).bg(Color::rgba(0, 0, 0, 150)).padding_xy(6.0, 2.0)]).padding(4.0));
         } else {
             layers.push(cover);
         }
-        let me = self.clone();
-        let pc = p.clone();
-        // Bosilsa boshqaruv paneli ko'rinadi/yashiriladi.
-        let tap = column(vec![]).on_click(move || {
-            if pc.pl.ctl.get() && pc.pl.player.borrow().as_ref().map(|x| x.status().playing).unwrap_or(false) {
-                pc.pl.ctl.set(false);
-            } else {
-                me.pl_touch(&pc);
-            }
-        });
-        layers.push(tap);
+        // Bir bosish: boshqaruvni ko'rsatish/yashirish; chap/o'ng yarmida ikki marta bosish: -/+5 soniya (jamlanadi).
+        let (m1, p1, m2, p2) = (self.clone(), p.clone(), self.clone(), p.clone());
+        layers.push(row(vec![
+            column(vec![]).weight(1.0).on_click(move || m1.pl_tap(&p1, true)),
+            column(vec![]).weight(1.0).on_click(move || m2.pl_tap(&p2, false)),
+        ]));
         let err = p.pl.perr.get();
-        let busy = p.pl.loading.get() || (started && (st.state == PState::Opening || (st.buffering && st.playing) || (st.playing && st.dbg.contains("chiqdi=0 "))));
+        let busy = p.pl.loading.get() || (started && (st.state == PState::Opening || (st.buffering && st.playing) || false));
         if !err.is_empty() || st.state == PState::Error {
             let msg = if !err.is_empty() { err } else { st.error.clone() };
             let (me, pc) = (self.clone(), p.clone());
@@ -414,10 +421,10 @@ impl Home {
                 .bg(Color::rgba(0, 0, 0, 150)),
             );
         } else if busy {
-            layers.push(column(vec![spinner(36.0, 3.0, Color::WHITE)]).center());
+            layers.push(column(vec![spinner(72.0, 3.0, ACCENT2)]).center());
         }
-        if started && p.pl.ctl.get() && err_is_empty(&p.pl.perr) {
-            layers.push(self.player_controls(p, &st, fullscreen));
+        if started && err_is_empty(&p.pl.perr) {
+            layers.push(self.player_controls(p, &st, fullscreen, w));
         } else if !started && err_is_empty(&p.pl.perr) {
             // Hali ijro boshlanmagan: katta play tugmasi.
             let (me, pc) = (self.clone(), p.clone());
@@ -440,64 +447,96 @@ impl Home {
                 .center(),
             );
         }
+        if fullscreen && p.pl.ep_list.get() {
+            layers.push(self.pl_episode_list(p));
+        }
         stack(layers).height(h)
     }
 
-    fn player_controls(self: &Rc<Self>, p: &Rc<SeasonPage>, st: &Status, fullscreen: bool) -> Element {
-        let dur = st.dur_ms.max(1);
-        let frac = p.pl.seeking.get().unwrap_or((st.pos_ms as f32 / dur as f32).clamp(0.0, 1.0));
-        let pos = if let Some(f) = p.pl.seeking.get() { (f * dur as f32) as i64 } else { st.pos_ms };
-        // Sarlavha qatori.
-        let title = {
-            let cur = p.pl.cur.get();
-            let ep = cur.as_ref().and_then(|c| p.eps.get().iter().find(|e| e.id == c.0).cloned());
-            let bolim = p.season.section_no.max(1);
-            match ep {
-                Some(e) => format!("{} · {bolim}-bo'lim · {}-qism", p.season.name, e.number),
-                None => p.season.name.clone(),
-            }
-        };
-        let (me, pc) = (self.clone(), p.clone());
-        let back = Self::pl_round(V_BACK, 22.0, 42.0, Box::new(move || {
-            if pc.pl.fullscreen.get() {
-                me.pl_set_fullscreen(&pc, false);
-            } else {
-                me.pop();
-            }
-        }));
-        let pc = p.clone();
-        let gear = Self::pl_round(V_GEAR, 20.0, 42.0, Box::new(move || pc.pl.settings.set(true)));
-        let top = row(vec![back, tx(title, 14.0, Color::WHITE).bold().weight(1.0), gear]).gap(10.0).align(Align::Center).padding_xy(10.0, 8.0);
-        // Markaz: oldingi / play / keyingi.
-        let (m1, p1, m2, p2, m3, p3) = (self.clone(), p.clone(), self.clone(), p.clone(), self.clone(), p.clone());
-        let center = row(vec![
-            Self::pl_round(V_PREV, 24.0, 52.0, Box::new(move || m1.pl_step(&p1, -1))),
-            Self::pl_round(if st.playing { V_PAUSE } else { V_PLAY }, 34.0, 68.0, Box::new(move || m2.pl_toggle_play(&p2))),
-            Self::pl_round(V_NEXT, 24.0, 52.0, Box::new(move || m3.pl_step(&p3, 1))),
-        ])
-        .gap(24.0)
-        .align(Align::Center);
-        // Intro o'tkazish.
-        let mut mid: Vec<Element> = vec![center];
-        if let Some(ep) = p.pl.cur.get().and_then(|c| p.eps.get().iter().find(|e| e.id == c.0).cloned()) {
-            if let Some((_, b)) = ep.intro.iter().find(|(a, b)| st.pos_ms >= *a && st.pos_ms < *b) {
-                let (pc, b) = (p.clone(), *b);
-                mid.push(gap_box(0.0, 14.0));
-                mid.push(self.chip("Introni o'tkazish", true, move || {
-                    if let Some(pl) = pc.pl.player.borrow().as_ref() {
-                        pl.seek_ms(b);
-                    }
-                }));
-            }
+    /// Shisha doira tugma (belgi).
+    fn gbtn(icon_path: &'static str, size: f32, boxsz: f32, f: impl Fn() + 'static) -> Element {
+        Self::pl_round(icon_path, size, boxsz, Box::new(f))
+    }
+
+    /// Shisha "tabletka" ichidagi matn (vaqt, sarlavha).
+    fn gpill(e: Element) -> Element {
+        e.lens(Color::rgba(255, 255, 255, 8), GLASS_ZOOM).radius(16.0).padding_xy(12.0, 7.0)
+    }
+
+    /// Ikki marta bosib sek: ko'rsatkich (shisha doira, o'q va soniya).
+    fn pl_seek_badge(acc: i32) -> Element {
+        let left = acc < 0;
+        let secs = acc.abs();
+        column(vec![icon(if left { V_PREV } else { V_NEXT }, 22.0).color(Color::WHITE), tx(format!("{secs}s"), 12.0, Color::WHITE).bold()])
+            .center()
+            .width(76.0)
+            .height(76.0)
+            .lens(Color::rgba(255, 255, 255, 8), GLASS_ZOOM)
+            .radius(38.0)
+    }
+
+    pub(super) fn pl_tap(self: &Rc<Self>, p: &Rc<SeasonPage>, left: bool) {
+        let now = Instant::now();
+        let double = matches!(p.pl.last_tap.get(), Some((l, t)) if l == left && t.elapsed().as_millis() < 380);
+        p.pl.last_tap.set(Some((left, now)));
+        if p.pl.locked.get() {
+            return;
         }
-        // Pastki qator: vaqt, sirg'anish chizig'i, to'liq ekran.
-        let (pd, pu) = (p.clone(), p.clone());
-        let bar = {
-            let fill = (frac * 1000.0).max(0.001);
-            let track = row(vec![column(vec![]).weight(fill).height(4.0).bg(ACCENT2), column(vec![]).weight((1000.0 - fill).max(0.001)).height(4.0)]).height(4.0).radius(2.0).bg(Color::rgba(255, 255, 255, 60));
-            let thumb = row(vec![column(vec![]).weight(fill).height(1.0), column(vec![]).width(14.0).height(14.0).radius(7.0).bg(Color::WHITE), column(vec![]).weight((1000.0 - fill).max(0.001)).height(1.0)]).align(Align::Center);
-            let _ = pu;
-            stack(vec![column(vec![track]).center(), thumb]).height(30.0).weight(1.0).on_drag(move |fx, fin| {
+        if !double {
+            if p.pl.ctl.get() && p.pl.player.borrow().as_ref().map(|x| x.status().playing).unwrap_or(false) {
+                p.pl.ctl.set(false);
+            } else {
+                self.pl_touch(p);
+            }
+            return;
+        }
+        self.pl_touch(p);
+        // Haqiqiy chegaralar ichida jamlanadi (Kotlin bilan bir xil: har bosish 5 soniya).
+        let st = p.pl.player.borrow().as_ref().map(|x| x.status());
+        let (pos, dur) = st.map(|s| (s.pos_ms, s.dur_ms)).unwrap_or((0, 0));
+        let acc = p.pl.seek_acc.get();
+        let same = (acc < 0) == left || acc == 0;
+        let base = if same { acc } else { 0 };
+        let eff = pos + base as i64 * 1000;
+        let room = if left { (eff / 1000).max(0) } else if dur > 0 { ((dur - eff) / 1000).max(0) } else { 5 };
+        let add = room.min(5) as i32;
+        if add == 0 {
+            return;
+        }
+        p.pl.seek_acc.set(base + if left { -add } else { add });
+        let gen = p.pl.seek_gen.get() + 1;
+        p.pl.seek_gen.set(gen);
+        let (me, pc) = (self.clone(), p.clone());
+        spawn_bg(|| std::thread::sleep(std::time::Duration::from_millis(700)), move |_| {
+            if pc.pl.seek_gen.get() != gen {
+                return;
+            }
+            let acc = pc.pl.seek_acc.get();
+            pc.pl.seek_acc.set(0);
+            if acc != 0 {
+                if let Some(pl) = pc.pl.player.borrow().as_ref() {
+                    let s = pl.status();
+                    let target = (s.pos_ms + acc as i64 * 1000).clamp(0, if s.dur_ms > 0 { s.dur_ms } else { i64::MAX });
+                    pl.seek_ms(target);
+                }
+            }
+            me.pl_touch(&pc);
+        });
+    }
+
+    /// Vaqt chizig'i (hammasi shisha): yuklangan qism xira, ko'rilgani urg'u gradienti, doira. Bosish/surish bilan o'tkaziladi.
+    fn pl_bar(p: &Rc<SeasonPage>, frac: f32, buffered: f32, th: f32, thumb: f32) -> Element {
+        let w = |x: f32| (x.clamp(0.0, 1.0) * 1000.0).max(0.001);
+        let layer = |a: f32, b: Element| row(vec![b.weight(w(a)), column(vec![]).weight((1000.0 - w(a)).max(0.001))]);
+        let track = column(vec![]).height(th).radius(th / 2.0).lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM).radius(th / 2.0);
+        let buf = layer(buffered, column(vec![]).height(th).radius(th / 2.0).bg(Color::rgba(255, 255, 255, 60)));
+        let played = layer(frac, column(vec![]).height(th).radius(th / 2.0).gradient(ACCENT, ACCENT2));
+        let knob = row(vec![column(vec![]).weight(w(frac)).height(1.0), column(vec![]).width(thumb * 2.0).height(thumb * 2.0).radius(thumb).bg(Color::WHITE).border(2.0, ACCENT2), column(vec![]).weight((1000.0 - w(frac)).max(0.001)).height(1.0)]).align(Align::Center);
+        let pd = p.clone();
+        stack(vec![column(vec![track]).center(), column(vec![buf]).center(), column(vec![played]).center(), knob])
+            .height(thumb * 2.0 + 14.0)
+            .weight(1.0)
+            .on_drag(move |fx, fin| {
                 if fin {
                     pd.pl.seeking.set(None);
                     if let Some(pl) = pd.pl.player.borrow().as_ref() {
@@ -508,14 +547,149 @@ impl Home {
                     pd.pl.seeking.set(Some(fx));
                 }
             })
+    }
+
+    /// Boshqaruv paneli (Kotlin `PlayerControls`): kichik rejim — markazda play/pauza, pastda chiziq + vaqt + sozlama + to'liq ekran;
+    /// to'liq ekran — tepada orqaga/sarlavha/qulf/sozlama/qismlar/chiqish, pastda oldingi-pauza-keyingi va chiziq. Hammasi shisha.
+    fn player_controls(self: &Rc<Self>, p: &Rc<SeasonPage>, st: &Status, fullscreen: bool, _w: f32) -> Element {
+        let dur = st.dur_ms.max(1);
+        let locked = p.pl.locked.get();
+        let show_all = (p.pl.ctl.get() || !st.playing) && !locked;
+        let frac = p.pl.seeking.get().unwrap_or((st.pos_ms as f32 / dur as f32).clamp(0.0, 1.0));
+        let pos = if let Some(f) = p.pl.seeking.get() { (f * dur as f32) as i64 } else { st.pos_ms };
+        let buffered = (st.buffered_ms as f32 / dur as f32).clamp(0.0, 1.0);
+        let edge = if fullscreen { 36.0 } else { 0.0 };
+        let mut layers: Vec<Element> = Vec::new();
+
+        // Qulflangan: faqat qulf tugmasi (yuqori o'ng).
+        if locked {
+            let (pc, me) = (p.clone(), self.clone());
+            layers.push(column(vec![row(vec![spacer(), Self::gbtn(V_LOCK, 20.0, 42.0, move || {
+                pc.pl.locked.set(false);
+                me.pl_touch(&pc);
+            })])
+            .padding_each(12.0 + edge, 8.0, 12.0 + edge, 0.0)]));
+            return stack(layers);
+        }
+
+        // Boshqaruv yashirin: pastda ingichka doimiy chiziq.
+        if !show_all {
+            let w = |x: f32| (x.clamp(0.0, 1.0) * 1000.0).max(0.001);
+            layers.push(column(vec![
+                spacer(),
+                stack(vec![
+                    column(vec![]).height(3.0).bg(Color::rgba(255, 255, 255, 50)),
+                    row(vec![column(vec![]).weight(w(frac)).height(3.0).gradient(ACCENT, ACCENT2), column(vec![]).weight((1000.0 - w(frac)).max(0.001))]),
+                ])
+                .height(3.0),
+            ]));
+        } else {
+            // Qorayish (tepa va past) — yozuvlar o'qilishi uchun.
+            layers.push(column(vec![
+                column(vec![]).height(90.0).gradient(Color::rgba(0, 0, 0, 150), Color::rgba(0, 0, 0, 0)),
+                spacer(),
+                column(vec![]).height(if fullscreen { 130.0 } else { 80.0 }).gradient(Color::rgba(0, 0, 0, 0), Color::rgba(0, 0, 0, 200)),
+            ]));
+        }
+
+        // Ikki marta bosib sek ko'rsatkichi.
+        let acc = p.pl.seek_acc.get();
+        if acc != 0 {
+            layers.push(row(vec![
+                if acc < 0 { column(vec![Self::pl_seek_badge(acc)]).center().weight(1.0) } else { column(vec![]).weight(1.0) },
+                if acc > 0 { column(vec![Self::pl_seek_badge(acc)]).center().weight(1.0) } else { column(vec![]).weight(1.0) },
+            ]));
+        }
+
+        // Intro o'tkazish.
+        let intro = p.pl.cur.get().and_then(|c| p.eps.get().iter().find(|e| e.id == c.0).cloned()).and_then(|ep| ep.intro.iter().find(|(a, b)| st.pos_ms >= *a && st.pos_ms < *b).map(|(_, b)| *b));
+        if let Some(b) = intro {
+            let pc = p.clone();
+            let btn = Self::gpill(tx("Introni o'tkazish >", 13.0, Color::WHITE).bold()).on_click(move || {
+                if let Some(pl) = pc.pl.player.borrow().as_ref() {
+                    pl.seek_ms(b);
+                }
+            });
+            layers.push(column(vec![spacer(), row(vec![spacer(), btn]).padding_each(0.0, 0.0, 14.0 + edge, if show_all { if fullscreen { 120.0 } else { 46.0 } } else { 16.0 })]));
+        }
+        if !show_all {
+            return stack(layers);
+        }
+
+        let (title, subtitle) = {
+            let cur = p.pl.cur.get();
+            let ep = cur.as_ref().and_then(|c| p.eps.get().iter().find(|e| e.id == c.0).cloned());
+            let bolim = p.season.section_no.max(1);
+            (p.season.name.clone(), ep.map(|e| format!("{bolim}-bo'lim · {}-qism", e.number)).unwrap_or_default())
         };
         let (me, pc) = (self.clone(), p.clone());
-        let full = Self::pl_round(if fullscreen { V_FULL_EXIT } else { V_FULL }, 20.0, 40.0, Box::new(move || {
+        let back = Self::gbtn(V_BACK, 22.0, 42.0, move || {
+            if pc.pl.fullscreen.get() {
+                me.pl_set_fullscreen(&pc, false);
+            } else {
+                me.pop();
+            }
+        });
+        let (me, pc) = (self.clone(), p.clone());
+        let full = Self::gbtn(if fullscreen { V_FULL_EXIT } else { V_FULL }, 20.0, if fullscreen { 42.0 } else { 36.0 }, move || {
             let on = !pc.pl.fullscreen.get();
             me.pl_set_fullscreen(&pc, on);
-        }));
-        let bottom = row(vec![tx(mmss(pos), 12.0, Color::WHITE).bold(), bar, tx(mmss(st.dur_ms), 12.0, Color::WHITE).bold(), full]).gap(10.0).align(Align::Center).padding_xy(12.0, 6.0);
-        column(vec![top, spacer(), column(mid).align(Align::Center), spacer(), bottom]).bg(Color::rgba(0, 0, 0, 70)).radius(if fullscreen { 0.0 } else { 18.0 })
+        });
+        let pc = p.clone();
+        let gear = Self::gbtn(V_GEAR, 20.0, if fullscreen { 42.0 } else { 36.0 }, move || pc.pl.settings.set(true));
+        let time = |a: i64, b: i64, sep: &str| Self::gpill(tx(format!("{}{sep}{}", mmss(a), mmss(b)), if fullscreen { 13.0 } else { 11.5 }, Color::WHITE).bold());
+
+        if fullscreen {
+            let (pc, me) = (p.clone(), self.clone());
+            let lock = Self::gbtn(V_UNLOCK, 20.0, 42.0, move || {
+                pc.pl.locked.set(true);
+                me.pl_touch(&pc);
+            });
+            let pc = p.clone();
+            let list = Self::gbtn(V_LIST, 20.0, 42.0, move || pc.pl.ep_list.set(true));
+            let mut head = vec![Self::gpill(column(if subtitle.is_empty() { vec![tx(title, 14.0, Color::WHITE).bold()] } else { vec![tx(title, 14.0, Color::WHITE).bold(), tx(subtitle, 11.5, Color::WHITE)] })).weight(1.0)];
+            head.splice(0..0, [back]);
+            head.extend([lock, gear, list, full]);
+            layers.push(column(vec![row(head).gap(8.0).align(Align::Center).padding_each(12.0 + edge, 6.0, 12.0 + edge, 0.0), spacer()]));
+            let (m1, p1, m2, p2, m3, p3) = (self.clone(), p.clone(), self.clone(), p.clone(), self.clone(), p.clone());
+            let ctl = row(vec![
+                spacer(),
+                Self::gbtn(V_PREV, 24.0, 44.0, move || m1.pl_step(&p1, -1)),
+                Self::gbtn(if st.playing { V_PAUSE } else { V_PLAY }, 30.0, 54.0, move || m2.pl_toggle_play(&p2)),
+                Self::gbtn(V_NEXT, 24.0, 44.0, move || m3.pl_step(&p3, 1)),
+            ])
+            .gap(10.0)
+            .align(Align::Center);
+            let bar_row = row(vec![Self::pl_bar(p, frac, buffered, 6.0, 8.0), time(pos, st.dur_ms, " / ")]).gap(10.0).align(Align::Center);
+            layers.push(column(vec![spacer(), column(vec![ctl, gap_box(0.0, 6.0), bar_row]).padding_each(12.0 + edge, 0.0, 12.0 + edge, 6.0)]));
+        } else {
+            layers.push(column(vec![row(vec![back, spacer()]).padding_each(8.0, 8.0, 8.0, 0.0), spacer()]));
+            let (me, pc) = (self.clone(), p.clone());
+            layers.push(column(vec![column(vec![Self::gbtn(if st.playing { V_PAUSE } else { V_PLAY }, 36.0, 64.0, move || me.pl_toggle_play(&pc))]).center().grow(1.0)]).center());
+            let bar_row = row(vec![Self::pl_bar(p, frac, buffered, 4.0, 6.0), time(pos, st.dur_ms, "/"), gear, full]).gap(6.0).align(Align::Center);
+            layers.push(column(vec![spacer(), bar_row.padding_each(10.0, 0.0, 6.0, 4.0)]));
+        }
+        stack(layers)
+    }
+
+    /// To'liq ekran: qismlar ro'yxati (o'ngda shisha oyna).
+    fn pl_episode_list(self: &Rc<Self>, p: &Rc<SeasonPage>) -> Element {
+        let cur = p.pl.cur.get().map(|c| c.0);
+        let eps = p.eps.get();
+        let mut kids: Vec<Element> = vec![tx("Qismlar", 16.0, Color::WHITE).bold().margin_each(4.0, 0.0, 0.0, 10.0)];
+        for e in eps.iter() {
+            let (me, pc, ep) = (self.clone(), p.clone(), e.clone());
+            let on = Some(e.id) == cur;
+            let row_el = row(vec![tx(format!("{}-qism", e.number), 14.0, Color::WHITE).bold().weight(1.0), tx(if on { "ijroda" } else { "" }, 11.0, ACCENT2)]).align(Align::Center).padding_xy(14.0, 11.0);
+            let card = if on { row_el.gradient(ACCENT.with_opacity(0.55), ACCENT2.with_opacity(0.55)) } else { row_el.lens(Color::rgba(255, 255, 255, 8), GLASS_ZOOM) };
+            kids.push(card.radius(16.0).margin_each(0.0, 0.0, 0.0, 6.0).on_click(move || {
+                pc.pl.ep_list.set(false);
+                me.play_episode(&pc, &ep, None, Some(0), true);
+            }));
+        }
+        let panel = scroll_column(&p.pl.ep_scroll, kids).lens(Color::rgba(18, 18, 24, 110), GLASS_ZOOM).radius(24.0).padding(12.0).width(260.0);
+        let pc = p.clone();
+        stack(vec![column(vec![]).bg(Color::rgba(0, 0, 0, 90)).on_click(move || pc.pl.ep_list.set(false)), row(vec![spacer(), panel.margin_each(0.0, 16.0, 16.0, 16.0)])])
     }
 
     /// Pleyer sozlamalari: sifat, avto-keyingi, intro avto o'tkazish, uyqu taymeri.
