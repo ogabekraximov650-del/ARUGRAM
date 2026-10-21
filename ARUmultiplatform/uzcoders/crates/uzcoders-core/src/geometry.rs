@@ -1,4 +1,6 @@
-//! Geometriya: nuqta, o'lcham, to'rtburchak va chetlar.
+//! UZ: Geometriya: nuqta, o'lcham, to'rtburchak va chetlar (chekinishlar).
+//! EN: Geometry: point, size, rectangle and edge insets.
+//! RU: Геометрия: точка, размер, прямоугольник и отступы по краям.
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Point {
@@ -26,7 +28,9 @@ impl Size {
     }
 }
 
-/// Chetlar: ichki bo'sh joy (padding) va tashqi masofa (margin) uchun.
+/// UZ: Chetlar: ichki bo'sh joy (padding) va tashqi masofa (margin) uchun to'rt tomon qiymatlari.
+/// EN: Edge insets: four-side values used for inner padding and outer margin.
+/// RU: Отступы по краям: значения для четырёх сторон (внутренний padding и внешний margin).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct EdgeInsets {
     pub left: f32,
@@ -112,7 +116,9 @@ impl Rect {
     pub fn is_empty(&self) -> bool {
         self.w <= 0.0 || self.h <= 0.0
     }
-    /// Ikki to'rtburchakning kesishmasi (kesishmasa — bo'sh to'rtburchak).
+    /// UZ: Ikki to'rtburchakning kesishmasi; kesishmasa bo'sh to'rtburchak qaytadi.
+    /// EN: Intersection of two rectangles; an empty rectangle if they do not overlap.
+    /// RU: Пересечение двух прямоугольников; если не пересекаются — пустой прямоугольник.
     pub fn intersect(&self, o: &Rect) -> Rect {
         let x0 = self.x.max(o.x);
         let y0 = self.y.max(o.y);
@@ -124,7 +130,9 @@ impl Rect {
             Rect::new(x0, y0, x1 - x0, y1 - y0)
         }
     }
-    /// Ichkariga siqish (padding ayirish).
+    /// UZ: Ichkariga siqadi (padding ayirib tashlanadi).
+    /// EN: Shrinks inward (subtracts the padding).
+    /// RU: Сжимает внутрь (вычитает padding).
     pub fn deflate(&self, e: EdgeInsets) -> Rect {
         Rect::new(
             self.x + e.left,

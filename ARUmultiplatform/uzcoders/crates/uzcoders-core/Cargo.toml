@@ -6,7 +6,7 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
-description = "uzcoders: geometriya, rang, holat (state), animatsiya va hodisa turlari"
+description = "uzcoders-core — UZ: geometriya, rang, holat (state), animatsiya va hodisa turlari | EN: geometry, color, state, animation and event types | RU: геометрия, цвет, состояние (state), анимация и типы событий"
 
 [dependencies]
 

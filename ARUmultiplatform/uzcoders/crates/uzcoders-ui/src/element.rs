@@ -1,4 +1,6 @@
-//! Elementlar daraxti: tavsif (qiymat), har kadrda qaytadan quriladi.
+//! UZ: Elementlar daraxti: tavsif (qiymat) ko'rinishida, har kadrda qaytadan quriladi.
+//! EN: The element tree: a description (plain values) that is rebuilt on every frame.
+//! RU: Дерево элементов: описание (обычные значения), которое перестраивается на каждом кадре.
 
 use crate::scroll::ScrollState;
 use std::rc::Rc;
@@ -6,7 +8,9 @@ use uzcoders_core::{Color, EdgeInsets, State};
 use uzcoders_layout::{Align, Axis, Dim, Justify, Style};
 use uzcoders_render::{Image, Path};
 
-/// Klaviatura turi (Android `inputType` ga aylanadi).
+/// UZ: Klaviatura turi (Android `inputType` ga aylanadi).
+/// EN: Keyboard kind (converted to Android `inputType`).
+/// RU: Вид клавиатуры (преобразуется в Android `inputType`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum KeyboardKind {
     #[default]
@@ -18,7 +22,9 @@ pub enum KeyboardKind {
 }
 
 impl KeyboardKind {
-    /// Android `InputType` qiymati.
+    /// UZ: Android `InputType` qiymati.
+    /// EN: The Android `InputType` value.
+    /// RU: Значение Android `InputType`.
     pub fn android_input_type(self) -> i32 {
         match self {
             KeyboardKind::Text => 1,
@@ -81,7 +87,9 @@ pub(crate) enum Kind {
     Field(Box<FieldCfg>),
 }
 
-/// UI daraxti elementi.
+/// UZ: UI daraxti elementi: uslub, bolalar va chizish xossalari to'plami.
+/// EN: A UI tree element: a bundle of style, children and drawing properties.
+/// RU: Элемент дерева UI: набор стиля, детей и свойств рисования.
 pub struct Element {
     pub(crate) kind: Kind,
     pub(crate) style: Style,
@@ -91,7 +99,9 @@ pub struct Element {
     pub(crate) glass: Option<Color>,
     pub(crate) backdrop: Option<(Color, f32, f32)>,
     pub(crate) gradient: Option<(Color, Color)>,
-    /// Yumshoq yorug'lik dog'lari: (x ulushi, y ulushi, radius dp, rang) — element qutisiga nisbatan.
+    /// UZ: Yumshoq yorug'lik dog'lari: (x ulushi, y ulushi, radius dp, rang) — element qutisiga nisbatan.
+    /// EN: Soft glows: (x fraction, y fraction, radius in dp, color) relative to the element's box.
+    /// RU: Мягкие световые пятна: (доля x, доля y, радиус в dp, цвет) относительно рамки элемента.
     pub(crate) glows: Vec<(f32, f32, f32, Color)>,
     pub(crate) on_click: Option<Callback>,
     pub(crate) on_swipe: Option<Rc<dyn Fn(i32)>>,
@@ -165,49 +175,67 @@ impl Element {
         self.radius = r;
         self
     }
-    /// "Shisha" fon (iOS uslubi): shaffof `tint`, yorug' chegara va ichki yaltirash.
+    /// UZ: "Shisha" fon (iOS uslubi): shaffof `tint`, yorug' chegara va ichki yaltirash.
+    /// EN: A "glass" background (iOS style): translucent `tint`, a light border and an inner sheen.
+    /// RU: Фон «стекло» (в стиле iOS): полупрозрачный `tint`, светлая граница и внутренний блеск.
     pub fn glass(mut self, tint: Color) -> Self {
         self.glass = Some(tint);
         self
     }
-    /// HAQIQIY shisha: element ostidagi tasvir `blur` dp radiusda xiralashadi, ustiga `tint` va yorug' chegara.
+    /// UZ: HAQIQIY shisha: element ostidagi tasvir `blur` dp radiusda xiralashadi, ustiga `tint` va yorug' chegara qo'yiladi.
+    /// EN: REAL glass: the image under the element is blurred with radius `blur` dp, with a `tint` and a light border on top.
+    /// RU: НАСТОЯЩЕЕ стекло: изображение под элементом размывается с радиусом `blur` dp, сверху накладываются `tint` и светлая граница.
     pub fn backdrop(mut self, tint: Color, blur: f32) -> Self {
         self.backdrop = Some((tint, blur, 1.0));
         self
     }
-    /// "Lupali" shisha (iOS Liquid Glass): deyarli shaffof, ostidagi tasvir panel markazidan `zoom` marta kattalashib ko'rinadi, chetida sinish.
+    /// UZ: "Lupali" shisha (iOS Liquid Glass): deyarli shaffof; ostidagi tasvir panel markazidan `zoom` marta kattalashib ko'rinadi, chetida sinish bor.
+    /// EN: "Lens" glass (iOS Liquid Glass): almost transparent; the image underneath is magnified `zoom` times from the panel's center, with refraction at the edge.
+    /// RU: Стекло-«лупа» (iOS Liquid Glass): почти прозрачное; изображение под панелью увеличено в `zoom` раз от её центра, у края — преломление.
     pub fn lens(mut self, tint: Color, zoom: f32) -> Self {
         self.backdrop = Some((tint, 0.0, zoom));
         self
     }
-    /// Element orqasiga yumshoq yorug'lik dog'lari: `(x ulushi, y ulushi, radius dp, rang)`.
+    /// UZ: Element orqasiga yumshoq yorug'lik dog'lari qo'yadi: `(x ulushi, y ulushi, radius dp, rang)`.
+    /// EN: Adds soft glows behind the element: `(x fraction, y fraction, radius in dp, color)`.
+    /// RU: Добавляет мягкие световые пятна позади элемента: `(доля x, доля y, радиус в dp, цвет)`.
     pub fn glows(mut self, g: Vec<(f32, f32, f32, Color)>) -> Self {
         self.glows = g;
         self
     }
-    /// Maydon sarlavhasi chegarada emas, maydon ichida tepada kichik bo'lib ko'tariladi (shaffof/shisha fon uchun).
+    /// UZ: Maydon sarlavhasi chegarada emas, maydon ichida tepada kichik bo'lib turadi (shaffof / shisha fon uchun qulay).
+    /// EN: The field label sits small at the top inside the field instead of on the border (convenient for transparent / glass backgrounds).
+    /// RU: Подпись поля располагается маленькой вверху внутри поля, а не на границе (удобно для прозрачного / стеклянного фона).
     pub fn label_inside(mut self) -> Self {
         if let Some(f) = self.field_cfg() {
             f.label_inside = true;
         }
         self
     }
-    /// Vertikal gradient fon: tepadan pastga `top` -> `bottom`.
+    /// UZ: Vertikal gradient fon: tepadan pastga `top` -> `bottom` ranglari.
+    /// EN: A vertical gradient background: colors `top` -> `bottom`, from top to bottom.
+    /// RU: Вертикальный градиентный фон: цвета `top` -> `bottom` сверху вниз.
     pub fn gradient(mut self, top: Color, bottom: Color) -> Self {
         self.gradient = Some((top, bottom));
         self
     }
-    /// Balandlik = kenglik x `ratio` (masalan poster kartasi uchun 1.5).
+    /// UZ: Balandlik = kenglik x `ratio` (masalan, poster kartasi uchun 1.5).
+    /// EN: Height = width x `ratio` (for example 1.5 for a poster card).
+    /// RU: Высота = ширина x `ratio` (например, 1.5 для карточки-постера).
     pub fn aspect(mut self, ratio: f32) -> Self {
         self.style.aspect = ratio;
         self
     }
-    /// Yumaloq burchakli kontur.
+    /// UZ: Yumaloq burchakli kontur chizadi.
+    /// EN: Draws a rounded-corner border.
+    /// RU: Рисует контур со скруглёнными углами.
     pub fn border(mut self, width: f32, c: Color) -> Self {
         self.border = Some((width, c));
         self
     }
-    /// Konturni butunlay olib tashlaydi (fokusda ham chizilmaydi).
+    /// UZ: Konturni butunlay olib tashlaydi (fokus bo'lganda ham chizilmaydi).
+    /// EN: Removes the border entirely (it is not drawn even when focused).
+    /// RU: Полностью убирает контур (не рисуется даже при фокусе).
     pub fn no_border(mut self) -> Self {
         self.border = None;
         self
@@ -224,7 +252,9 @@ impl Element {
         self.style.grow = v;
         self
     }
-    /// Qolgan joyni `v` ulushda teng bo'lishadi (Compose `weight`): bolalar kontentidan qat'i nazar.
+    /// UZ: Qolgan bo'sh joyni `v` ulushda bo'lishadi (Compose'dagi `weight` kabi): bolalar kontentidan qat'i nazar.
+    /// EN: Shares the remaining free space by the fraction `v` (like `weight` in Compose), regardless of the children's content.
+    /// RU: Делит оставшееся свободное место в доле `v` (как `weight` в Compose), независимо от содержимого детей.
     pub fn weight(mut self, v: f32) -> Self {
         self.style.grow = v;
         self.style.basis0 = true;
@@ -241,18 +271,26 @@ impl Element {
     pub fn center(self) -> Self {
         self.align(Align::Center).justify(Justify::Center)
     }
-    /// Surish/bosish: barmoq elementning gorizontal qismida (0..1) qayerdaligi bilan chaqiriladi; ikkinchi argument — barmoq ko'tarildi.
-    /// Sirg'anish chiziqlari (slider) uchun; bunday touch ro'yxat scrollini yoki bosishni ishga tushirmaydi.
+    /// UZ: Surish / bosish: barmoq elementning gorizontal qismida (0..1) qayerdaligi bilan chaqiriladi; ikkinchi argument — barmoq ko'tarildi.
+    /// Sirg'anish chiziqlari (slider) uchun mo'ljallangan; bunday teginish ro'yxat scrollini yoki oddiy bosishni ishga tushirmaydi.
+    /// EN: Drag / press: called with where the finger is along the element's width (0..1); the second argument is true when the finger is lifted.
+    /// Meant for sliders; such a touch does not trigger list scrolling or a normal click.
+    /// RU: Перетаскивание / нажатие: вызывается с положением пальца по ширине элемента (0..1); второй аргумент — палец поднят.
+    /// Предназначено для слайдеров; такое касание не запускает прокрутку списка и обычный клик.
     pub fn on_drag(mut self, f: impl Fn(f32, bool) + 'static) -> Self {
         self.on_drag = Some(Rc::new(f));
         self
     }
-    /// Shu element maydoniga dekoder video kadrlarini chizadi (GPU'da).
+    /// UZ: Dekoder video kadrlarini shu element maydoniga (GPU orqali) chizadi.
+    /// EN: Draws decoder video frames into this element's area (via the GPU).
+    /// RU: Рисует кадры видео от декодера в области этого элемента (через GPU).
     pub fn video(mut self) -> Self {
         self.video = true;
         self
     }
-    /// Gorizontal surish: chapga (keyingi) `1`, o'ngga (oldingi) `-1` bilan chaqiriladi.
+    /// UZ: Gorizontal surish: chapga (keyingi) `1`, o'ngga (oldingi) `-1` bilan chaqiriladi.
+    /// EN: Horizontal swipe: called with `1` for a swipe left (next) and `-1` for right (previous).
+    /// RU: Горизонтальный свайп: вызывается с `1` при свайпе влево (следующий) и `-1` при свайпе вправо (предыдущий).
     pub fn on_swipe(mut self, f: impl Fn(i32) + 'static) -> Self {
         self.on_swipe = Some(Rc::new(f));
         self
@@ -261,15 +299,21 @@ impl Element {
         self.on_click = Some(Rc::new(f));
         self
     }
-    /// Asosiy o'q bo'yicha scroll qilinadigan qiladi. Balandlik cheklangan bo'lishi kerak
-    /// (masalan `.grow(1.0)` yoki `.height(..)`).
+    /// UZ: Asosiy o'q bo'yicha scroll qilinadigan qiladi. Balandlik cheklangan bo'lishi kerak
+    /// (masalan, `.grow(1.0)` yoki `.height(..)`).
+    /// EN: Makes the element scrollable along the main axis. Its height must be bounded
+    /// (for example `.grow(1.0)` or `.height(..)`).
+    /// RU: Делает элемент прокручиваемым по главной оси. Высота должна быть ограничена
+    /// (например, `.grow(1.0)` или `.height(..)`).
     pub fn scroll(mut self, state: &ScrollState) -> Self {
         self.style.scroll = true;
         self.scroll = Some(state.clone());
         self
     }
 
-    /// Matn yoki kiritish maydoni uchun shrift o'lchami.
+    /// UZ: Matn yoki kiritish maydoni uchun shrift o'lchami.
+    /// EN: Font size for text or an input field.
+    /// RU: Размер шрифта для текста или поля ввода.
     pub fn size(mut self, s: f32) -> Self {
         match &mut self.kind {
             Kind::Text { size, .. } | Kind::Icon { size, .. } => *size = s,
@@ -279,7 +323,9 @@ impl Element {
         }
         self
     }
-    /// Matn yoki kiritish maydoni matn rangi.
+    /// UZ: Matn yoki kiritish maydoni matn rangi.
+    /// EN: Text color for text or an input field.
+    /// RU: Цвет текста для текста или поля ввода.
     pub fn color(mut self, c: Color) -> Self {
         match &mut self.kind {
             Kind::Text { color, .. } | Kind::Icon { color, .. } | Kind::Spinner { color, .. } => {
@@ -291,7 +337,9 @@ impl Element {
         self
     }
 
-    /// Shrift qalinligi (400 oddiy, 700 qalin, 900 qora); ilovada shunday yuz qo'shilgan bo'lsa.
+    /// UZ: Shrift qalinligi (400 oddiy, 700 qalin, 900 qora); ilovada shunday yuz qo'shilgan bo'lsa ishlaydi.
+    /// EN: Font weight (400 regular, 700 bold, 900 black); works if the app has added such a face.
+    /// RU: Насыщенность шрифта (400 — обычный, 700 — жирный, 900 — чёрный); работает, если приложение добавило такое начертание.
     pub fn font_weight(mut self, w: u16) -> Self {
         if let Kind::Text { weight, .. } = &mut self.kind {
             *weight = w;
@@ -304,7 +352,9 @@ impl Element {
     pub fn black(self) -> Self {
         self.font_weight(900)
     }
-    /// Harflar orasidagi qo'shimcha masofa (dp), Compose `letterSpacing` kabi.
+    /// UZ: Harflar orasidagi qo'shimcha masofa (dp), Compose'dagi `letterSpacing` kabi.
+    /// EN: Extra spacing between letters (dp), like `letterSpacing` in Compose.
+    /// RU: Дополнительный интервал между буквами (dp), как `letterSpacing` в Compose.
     pub fn letter_spacing(mut self, sp: f32) -> Self {
         match &mut self.kind {
             Kind::Text { spacing, .. } => *spacing = sp,
@@ -313,7 +363,9 @@ impl Element {
         }
         self
     }
-    /// Qator qutisi balandligi (dp). Belgilar qutida Compose'dagi kabi proporsional tarqatiladi.
+    /// UZ: Qator qutisi balandligi (dp). Matn qutida Compose'dagi kabi proporsional taqsimlanadi.
+    /// EN: Line box height (dp). Text is distributed inside the box proportionally, as in Compose.
+    /// RU: Высота строки (dp). Текст распределяется внутри строки пропорционально, как в Compose.
     pub fn line_height(mut self, h: f32) -> Self {
         match &mut self.kind {
             Kind::Text { line_height, .. } => *line_height = Some(h),
@@ -323,15 +375,21 @@ impl Element {
         self
     }
 
-    // ── Kiritish maydoni sozlamalari ──
-    /// Suzuvchi sarlavha (Material "outlined" uslubi): bo'sh va fokussiz maydonda ichkarida, aks holda chegarada.
+    // UZ: ── Kiritish maydoni sozlamalari ──
+    // EN: ── Input field settings ──
+    // RU: ── Настройки поля ввода ──
+    /// UZ: Suzuvchi sarlavha (Material "outlined" uslubi): bo'sh va fokussiz maydonda ichkarida, aks holda chegarada turadi.
+    /// EN: A floating label (Material "outlined" style): inside the field when it is empty and unfocused, otherwise on the border.
+    /// RU: Плавающая подпись (стиль Material «outlined»): внутри поля, когда оно пусто и без фокуса, иначе — на границе.
     pub fn label(mut self, l: impl Into<String>) -> Self {
         if let Some(f) = self.field_cfg() {
             f.label = l.into();
         }
         self
     }
-    /// Suzuvchi sarlavha chegarani qirqib ko'rsatishi uchun orqa fon rangi.
+    /// UZ: Suzuvchi sarlavha chegarani qirqib ko'rsatishi uchun orqa fon rangi.
+    /// EN: Background color that lets the floating label cut through the border.
+    /// RU: Цвет фона, чтобы плавающая подпись «прорезала» границу.
     pub fn label_bg(mut self, c: Color) -> Self {
         if let Some(f) = self.field_cfg() {
             f.label_bg = c;
@@ -344,7 +402,9 @@ impl Element {
             _ => None,
         }
     }
-    /// Bo'sh maydonda ko'rinadigan maslahat matni.
+    /// UZ: Bo'sh maydonda ko'rinadigan maslahat matni (hint).
+    /// EN: Hint text shown in an empty field.
+    /// RU: Текст-подсказка (hint), видимый в пустом поле.
     pub fn hint(mut self, h: impl Into<String>) -> Self {
         if let Some(f) = self.field_cfg() {
             f.hint = h.into();
@@ -357,21 +417,27 @@ impl Element {
         }
         self
     }
-    /// Fokusdagi kontur va kursor rangi.
+    /// UZ: Fokusdagi kontur va kursor rangi.
+    /// EN: Color of the focused border and the cursor.
+    /// RU: Цвет контура в фокусе и курсора.
     pub fn accent(mut self, c: Color) -> Self {
         if let Some(f) = self.field_cfg() {
             f.accent = c;
         }
         self
     }
-    /// Ochiladigan klaviatura turi (raqamli, telefon, ...).
+    /// UZ: Ochiladigan klaviatura turi (raqamli, telefon va boshqalar).
+    /// EN: The kind of keyboard to open (numeric, phone, and so on).
+    /// RU: Вид открываемой клавиатуры (цифровая, телефонная и т. д.).
     pub fn keyboard(mut self, k: KeyboardKind) -> Self {
         if let Some(f) = self.field_cfg() {
             f.keyboard = k;
         }
         self
     }
-    /// Matn nuqtalar bilan yashiriladi.
+    /// UZ: Matn nuqtalar bilan yashiriladi (parol maydoni).
+    /// EN: The text is hidden behind dots (a password field).
+    /// RU: Текст скрывается за точками (поле пароля).
     pub fn password(mut self) -> Self {
         if let Some(f) = self.field_cfg() {
             f.password = true;
@@ -379,28 +445,36 @@ impl Element {
         }
         self
     }
-    /// Eng ko'p belgi soni (0 — cheklanmagan; `format` bo'lsa probellar sanalmaydi).
+    /// UZ: Eng ko'p belgi soni (0 — cheklanmagan; `format` bo'lsa probellar sanalmaydi).
+    /// EN: Maximum number of characters (0 means unlimited; with `format`, spaces are not counted).
+    /// RU: Максимальное число символов (0 — без ограничения; при `format` пробелы не считаются).
     pub fn max_len(mut self, n: usize) -> Self {
         if let Some(f) = self.field_cfg() {
             f.max_len = n;
         }
         self
     }
-    /// Faqat shu shartga mos belgilar kiritiladi.
+    /// UZ: Faqat shu shartga mos belgilar kiritiladi.
+    /// EN: Only characters that satisfy this predicate are accepted.
+    /// RU: Принимаются только символы, удовлетворяющие этому условию.
     pub fn filter(mut self, p: fn(char) -> bool) -> Self {
         if let Some(f) = self.field_cfg() {
             f.filter = Some(p);
         }
         self
     }
-    /// Har tahrirdan keyin matnni qayta formatlaydi (masalan `901234567` -> `90 123 45 67`).
+    /// UZ: Har tahrirdan keyin matnni qayta formatlaydi (masalan, `901234567` -> `90 123 45 67`).
+    /// EN: Reformats the text after every edit (for example `901234567` -> `90 123 45 67`).
+    /// RU: Переформатирует текст после каждой правки (например, `901234567` -> `90 123 45 67`).
     pub fn format(mut self, fm: fn(&str) -> String) -> Self {
         if let Some(f) = self.field_cfg() {
             f.format = Some(fm);
         }
         self
     }
-    /// Klaviaturada "Enter" bosilganda.
+    /// UZ: Klaviaturada "Enter" bosilganda chaqiriladi.
+    /// EN: Called when "Enter" is pressed on the keyboard.
+    /// RU: Вызывается при нажатии «Enter» на клавиатуре.
     pub fn on_submit(mut self, cb: impl Fn() + 'static) -> Self {
         if let Some(f) = self.field_cfg() {
             f.on_submit = Some(Rc::new(cb));
@@ -417,14 +491,18 @@ pub fn row(children: Vec<Element>) -> Element {
     Element::container(Axis::Row, children)
 }
 
-/// Qatlam: bolalar bir-birining ustiga qo'yiladi (oxirgisi eng yuqorida), hammasi tugun maydonini to'ldiradi.
+/// UZ: Qatlam: bolalar bir-birining ustiga qo'yiladi (oxirgisi eng yuqorida), hammasi tugun maydonini to'ldiradi.
+/// EN: A layer stack: children are placed on top of each other (the last one on top); all fill the node's area.
+/// RU: Стек слоёв: дети накладываются друг на друга (последний сверху), все заполняют область узла.
 pub fn stack(children: Vec<Element>) -> Element {
     let mut e = Element::container(Axis::Column, children);
     e.style.stack = true;
     e
 }
 
-/// Vertikal scroll qilinadigan ustun: `.grow(1.0)` bilan qolgan joyni egallaydi.
+/// UZ: Vertikal scroll qilinadigan ustun: `.grow(1.0)` bilan qolgan joyni egallaydi.
+/// EN: A vertically scrollable column: with `.grow(1.0)` it takes the remaining space.
+/// RU: Вертикально прокручиваемая колонка: с `.grow(1.0)` занимает оставшееся место.
 pub fn scroll_column(state: &ScrollState, children: Vec<Element>) -> Element {
     column(children).scroll(state)
 }
@@ -449,7 +527,9 @@ thread_local! {
         std::cell::RefCell::new(std::collections::HashMap::new());
 }
 
-/// Vektor ikonka: `d` — SVG yo'li (24x24 qutida, Material ikonkalari kabi), `size` — dp. Rang `.color()` bilan.
+/// UZ: Vektor ikonka: `d` — SVG yo'li (24x24 qutida, Material ikonkalari kabi), `size` — dp o'lchami. Rang `.color()` bilan beriladi.
+/// EN: A vector icon: `d` is an SVG path (in a 24x24 box, like Material icons), `size` is in dp. The color is set with `.color()`.
+/// RU: Векторная иконка: `d` — SVG-контур (в рамке 24x24, как иконки Material), `size` — размер в dp. Цвет задаётся через `.color()`.
 pub fn icon(d: &'static str, size: f32) -> Element {
     let path = PATHS.with(|m| {
         m.borrow_mut()
@@ -470,8 +550,12 @@ pub fn icon(d: &'static str, size: f32) -> Element {
     e
 }
 
-/// Virtual ro'yxat: `count` ta bir xil balandlikdagi (`item_height`, dp) element, lekin faqat ko'rinadiganlari quriladi.
+/// UZ: Virtual ro'yxat: `count` ta bir xil balandlikdagi (`item_height`, dp) element, lekin faqat ko'rinadiganlari quriladi.
 /// `build(i)` — i-elementni qaytaradi. Juda uzun ro'yxatlar ham tez ishlaydi.
+/// EN: A virtualized list: `count` items of equal height (`item_height`, dp), but only the visible ones are built.
+/// `build(i)` returns the i-th item. Even very long lists stay fast.
+/// RU: Виртуальный список: `count` элементов одинаковой высоты (`item_height`, dp), но строятся только видимые.
+/// `build(i)` возвращает i-й элемент. Даже очень длинные списки работают быстро.
 pub fn lazy_column(
     state: &ScrollState,
     count: usize,
@@ -501,7 +585,9 @@ pub fn lazy_column(
     column(kids).scroll(state)
 }
 
-/// Aylanuvchi yuklanish ko'rsatkichi (Material `CircularProgressIndicator` kabi): `size` dp, chiziq `width` dp.
+/// UZ: Aylanuvchi yuklanish ko'rsatkichi (Material `CircularProgressIndicator` kabi): `size` dp, chiziq qalinligi `width` dp.
+/// EN: A rotating loading spinner (like Material `CircularProgressIndicator`): `size` dp, stroke width `width` dp.
+/// RU: Вращающийся индикатор загрузки (как Material `CircularProgressIndicator`): `size` dp, толщина линии `width` dp.
 pub fn spinner(size: f32, width: f32, color: Color) -> Element {
     let mut e = Element::new(
         Kind::Spinner { size, width, color },
@@ -512,7 +598,9 @@ pub fn spinner(size: f32, width: f32, color: Color) -> Element {
     e
 }
 
-/// Rasm: `w` x `h` dp o'lchamda (rasm shu qutiga cho'ziladi).
+/// UZ: Rasm: `w` x `h` dp o'lchamida (rasm shu qutiga cho'ziladi).
+/// EN: An image of `w` x `h` dp (the image is stretched into this box).
+/// RU: Изображение размером `w` x `h` dp (изображение растягивается на эту рамку).
 pub fn image(img: &Rc<Image>, w: f32, h: f32) -> Element {
     let mut e = Element::new(
         Kind::Image {
@@ -528,26 +616,34 @@ pub fn image(img: &Rc<Image>, w: f32, h: f32) -> Element {
     e
 }
 
-/// Rasm, ota-elementning berilgan maydonini to'ldiradi (`stack` ichida yoki `.aspect()` bilan).
+/// UZ: Rasm, ota-elementning berilgan maydonini to'ldiradi (`stack` ichida yoki `.aspect()` bilan ishlatiladi).
+/// EN: An image that fills the parent's given area (used inside a `stack` or with `.aspect()`).
+/// RU: Изображение, заполняющее отведённую область родителя (используется внутри `stack` или с `.aspect()`).
 pub fn image_fill(img: &Rc<Image>) -> Element {
     let mut e = image(img, 0.0, 0.0);
     e.style.shrink = 0.0;
     e
 }
 
-/// Bo'sh joyni to'ldiradigan elastik element.
+/// UZ: Bo'sh joyni to'ldiradigan elastik element.
+/// EN: An elastic element that fills the free space.
+/// RU: Эластичный элемент, заполняющий свободное место.
 pub fn spacer() -> Element {
     Element::container(Axis::Column, Vec::new()).grow(1.0)
 }
 
-/// Qat'iy o'lchamli bo'sh joy (padding o'rniga oraliq uchun).
+/// UZ: Qat'iy o'lchamli bo'sh joy (padding o'rniga oraliq uchun).
+/// EN: A fixed-size empty gap (for spacing, instead of padding).
+/// RU: Пустой промежуток фиксированного размера (для интервалов вместо padding).
 pub fn gap_box(w: f32, h: f32) -> Element {
     Element::container(Axis::Column, Vec::new())
         .width(w)
         .height(h)
 }
 
-/// Tayyor tugma: yumaloq fon, o'rtada matn, bosilganda `f` chaqiriladi.
+/// UZ: Tayyor tugma: yumaloq fon, o'rtada matn; bosilganda `f` chaqiriladi.
+/// EN: A ready-made button: rounded background, centered text; `f` is called when pressed.
+/// RU: Готовая кнопка: скруглённый фон, текст по центру; при нажатии вызывается `f`.
 pub fn button(label: impl Into<String>, f: impl Fn() + 'static) -> Element {
     Element::container(
         Axis::Column,
@@ -560,7 +656,9 @@ pub fn button(label: impl Into<String>, f: impl Fn() + 'static) -> Element {
     .on_click(f)
 }
 
-/// Matn kiritish maydoni: qiymat `state` da saqlanadi. Bosilsa fokus oladi va klaviatura ochiladi.
+/// UZ: Matn kiritish maydoni: qiymat `state` da saqlanadi. Bosilsa fokus oladi va klaviatura ochiladi.
+/// EN: A text input field: its value is stored in `state`. When tapped it gets focus and opens the keyboard.
+/// RU: Поле ввода текста: значение хранится в `state`. При нажатии получает фокус и открывает клавиатуру.
 pub fn field(state: &State<String>) -> Element {
     let mut e = Element::new(
         Kind::Field(Box::new(FieldCfg {
@@ -591,7 +689,9 @@ pub fn field(state: &State<String>) -> Element {
     e
 }
 
-/// Teng ustunli to'r: `columns` ustun, bolalar qatorma-qator joylashadi (so'nggi qator bo'sh kataklar bilan to'ldiriladi).
+/// UZ: Teng ustunli to'r: `columns` ustun, bolalar qatorma-qator joylashadi (oxirgi qator bo'sh kataklar bilan to'ldiriladi).
+/// EN: An equal-column grid: `columns` columns, children laid out row by row (the last row is padded with empty cells).
+/// RU: Сетка с равными колонками: `columns` колонок, дети раскладываются по строкам (последняя строка добивается пустыми ячейками).
 pub fn grid(columns: usize, gap: f32, children: Vec<Element>) -> Element {
     let columns = columns.max(1);
     let mut rows = Vec::new();

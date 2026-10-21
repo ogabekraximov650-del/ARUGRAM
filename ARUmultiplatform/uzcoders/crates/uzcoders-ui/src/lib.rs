@@ -1,4 +1,6 @@
-//! uzcoders-ui — deklarativ elementlar daraxti, joylashtirish, chizish, scroll, matn kiritish va navigatsiya.
+//! UZ: uzcoders-ui — deklarativ elementlar daraxti, joylashtirish, chizish, scroll, matn kiritish va navigatsiya.
+//! EN: uzcoders-ui — a declarative element tree, layout, drawing, scrolling, text input and navigation.
+//! RU: uzcoders-ui — декларативное дерево элементов, раскладка, рисование, прокрутка, ввод текста и навигация.
 
 mod element;
 mod nav;
@@ -49,7 +51,9 @@ struct Item {
     video: bool,
     drag: Option<Rc<dyn Fn(f32, bool)>>,
     scroll: Option<ScrollState>,
-    /// Qator `.scroll()` bilan: gorizontal scroll.
+    /// UZ: Qator `.scroll()` bilan: gorizontal scroll.
+    /// EN: A row with `.scroll()`: horizontal scrolling.
+    /// RU: Строка с `.scroll()`: горизонтальная прокрутка.
     hscroll: bool,
 }
 
@@ -77,15 +81,23 @@ struct Touch {
     field: Option<usize>,
     region: Option<usize>,
     dragging: bool,
-    /// Gorizontal surish aniqlandi (`on_swipe`).
+    /// UZ: Gorizontal surish aniqlandi (`on_swipe`).
+    /// EN: A horizontal swipe was detected (`on_swipe`).
+    /// RU: Обнаружен горизонтальный свайп (`on_swipe`).
     swiped: bool,
-    /// Sirg'anish chizig'i (`on_drag`) indeksi.
+    /// UZ: Sirg'anish chizig'i (`on_drag`) indeksi.
+    /// EN: Index of the slider (`on_drag`).
+    /// RU: Индекс слайдера (`on_drag`).
     drag: Option<usize>,
-    /// So'nggi (vaqt ms, scroll o'qi bo'yicha koordinata) namunalari: tezlikni baholash uchun.
+    /// UZ: So'nggi namunalar: (vaqt ms, scroll o'qi bo'yicha koordinata) — tezlikni baholash uchun.
+    /// EN: Recent samples: (time in ms, coordinate along the scroll axis), used to estimate velocity.
+    /// RU: Последние отсчёты: (время в мс, координата по оси прокрутки) — для оценки скорости.
     samples: Vec<(u64, f32)>,
 }
 
-/// Ilova ish vaqti: elementlarni quradi, joylaydi, chizish ro'yxatini beradi va kiritishni yo'naltiradi.
+/// UZ: Ilova ish vaqti: elementlarni quradi, joylaydi, chizish ro'yxatini beradi va kiritishni yo'naltiradi.
+/// EN: The app runtime: builds and lays out elements, produces the draw list and routes input.
+/// RU: Среда выполнения приложения: строит и раскладывает элементы, выдаёт список рисования и направляет ввод.
 pub struct Ui {
     font: Rc<Font>,
     faces: Vec<(u16, Rc<Font>)>,
@@ -110,9 +122,13 @@ pub struct Ui {
     caret_epoch: u64,
     last_blink: u64,
     back: Option<Rc<dyn Fn() -> bool>>,
-    /// IME'dagi (tugallanmagan) matn oralig'i: (boshlanish, uzunlik) belgilarda.
+    /// UZ: IME (klaviatura) dagi tugallanmagan matn oralig'i: (boshlanish, uzunlik), belgilarda.
+    /// EN: The IME (keyboard) composing-text range: (start, length), in characters.
+    /// RU: Диапазон незавершённого текста IME (клавиатуры): (начало, длина) в символах.
     composing: Option<(usize, usize)>,
-    /// Oxirgi kadrda animatsiyali element (spinner) bor edi: uzluksiz chizish kerak.
+    /// UZ: Oxirgi kadrda animatsiyali element (spinner) bor edi: uzluksiz chizish kerak.
+    /// EN: The last frame had an animated element (a spinner): continuous redrawing is needed.
+    /// RU: На последнем кадре был анимированный элемент (спиннер): нужна непрерывная перерисовка.
     animating: bool,
 }
 
@@ -151,14 +167,18 @@ impl Ui {
         self.font.clone()
     }
 
-    /// Barcha shrift yuzlari: (qalinlik, shrift); birinchisi — asosiy (400).
+    /// UZ: Barcha shrift yuzlari: (qalinlik, shrift); birinchisi — asosiy (400).
+    /// EN: All font faces: (weight, font); the first is the base one (400).
+    /// RU: Все начертания шрифта: (насыщенность, шрифт); первое — основное (400).
     pub fn faces(&self) -> Vec<(u16, Rc<Font>)> {
         let mut v = vec![(400, self.font.clone())];
         v.extend(self.faces.iter().cloned());
         v
     }
 
-    /// Qo'shimcha shrift yuzi (masalan `add_font(700, bold)`). Oddiy (400) yuz `Ui::new` da beriladi.
+    /// UZ: Qo'shimcha shrift yuzini qo'shadi (masalan, `add_font(700, bold)`). Oddiy (400) yuz `Ui::new` da beriladi.
+    /// EN: Adds an extra font face (for example `add_font(700, bold)`). The regular (400) face is passed to `Ui::new`.
+    /// RU: Добавляет дополнительное начертание (например, `add_font(700, bold)`). Обычное (400) передаётся в `Ui::new`.
     pub fn add_font(&mut self, weight: u16, font: Rc<Font>) {
         self.faces.push((weight, font));
         self.dirty = true;
@@ -175,7 +195,9 @@ impl Ui {
         best.0.clone()
     }
 
-    /// Shu `Ui` shriftlari bilan tayyor canvas.
+    /// UZ: Shu `Ui` shriftlari bilan tayyorlangan canvas.
+    /// EN: A canvas prepared with this `Ui`'s fonts.
+    /// RU: Canvas, подготовленный со шрифтами этого `Ui`.
     pub fn canvas(&self, width: usize, height: usize) -> Canvas {
         let mut c = Canvas::new(width, height, self.font.clone());
         for (w, f) in &self.faces {
@@ -184,8 +206,12 @@ impl Ui {
         c
     }
 
-    /// Tizim panellari chekinishlari (piksel): status bar tepada, navigatsiya paneli pastda. Ilova ularni
+    /// UZ: Tizim panellari chekinishlari (piksel): status bar tepada, navigatsiya paneli pastda. Ilova ularni
     /// `uzcoders_core::safe_insets()` (dp) orqali oladi.
+    /// EN: System bar insets (pixels): the status bar on top, the navigation bar at the bottom. The app reads them
+    /// through `uzcoders_core::safe_insets()` (dp).
+    /// RU: Отступы системных панелей (пиксели): статус-бар сверху, навигационная панель снизу. Приложение получает их
+    /// через `uzcoders_core::safe_insets()` (dp).
     pub fn set_insets(&mut self, insets_px: EdgeInsets) {
         if insets_px != self.insets_px {
             self.insets_px = insets_px;
@@ -193,12 +219,16 @@ impl Ui {
         }
     }
 
-    /// Har safar kiritish maydoniga bosilganda oshadi: qobiq klaviaturani qayta ko'rsatishi uchun.
+    /// UZ: Kiritish maydoniga har bosilganda oshadi: qobiq klaviaturani qayta ko'rsatishi uchun.
+    /// EN: Increases every time an input field is tapped, so the shell can show the keyboard again.
+    /// RU: Увеличивается при каждом нажатии на поле ввода, чтобы оболочка снова показала клавиатуру.
     pub fn keyboard_serial(&self) -> u64 {
         self.kb_serial
     }
 
-    /// Zichlik koeffitsienti (dp -> piksel). Barcha o'lchamlar shunga ko'paytiriladi.
+    /// UZ: Zichlik koeffitsienti (dp -> piksel). Barcha o'lchamlar shunga ko'paytiriladi.
+    /// EN: Density factor (dp -> pixel). All sizes are multiplied by it.
+    /// RU: Коэффициент плотности (dp -> пиксели). На него умножаются все размеры.
     pub fn set_scale(&mut self, scale: f32) {
         if (scale - self.scale).abs() > f32::EPSILON {
             self.scale = scale.max(0.1);
@@ -206,12 +236,16 @@ impl Ui {
         }
     }
 
-    /// Joriy vaqt (millisekund, monoton). Kursor miltillashi va inersiya shunga tayanadi; qobiq har tsiklda chaqiradi.
+    /// UZ: Joriy vaqt (millisekund, monoton). Kursor miltillashi va inersiya shunga tayanadi; qobiq uni har tsiklda chaqiradi.
+    /// EN: Current time (milliseconds, monotonic). Cursor blinking and fling depend on it; the shell calls it every loop.
+    /// RU: Текущее время (миллисекунды, монотонное). От него зависят мигание курсора и инерция; оболочка вызывает его в каждом цикле.
     pub fn set_time(&mut self, ms: u64) {
         self.now = ms;
     }
 
-    /// "Orqaga" bosilganda chaqiriladi; `true` — qayta ishlandi (ilova yopilmaydi).
+    /// UZ: "Orqaga" bosilganda chaqiriladi; `true` qaytarilsa — qayta ishlandi (ilova yopilmaydi).
+    /// EN: Called when "Back" is pressed; returning `true` means it was handled (the app does not close).
+    /// RU: Вызывается при нажатии «Назад»; `true` — обработано (приложение не закрывается).
     pub fn set_back_handler(&mut self, f: impl Fn() -> bool + 'static) {
         self.back = Some(Rc::new(f));
     }
@@ -220,7 +254,9 @@ impl Ui {
         self.now.saturating_sub(self.caret_epoch) / BLINK_MS
     }
 
-    /// Qayta chizish kerakmi (holat o'zgardi, inersiya, kursor miltillashi)?
+    /// UZ: Qayta chizish kerakmi (holat o'zgardi, inersiya, kursor miltillashi)?
+    /// EN: Is a redraw needed (state changed, fling, cursor blink, a frame was requested from another thread)?
+    /// RU: Нужна ли перерисовка (изменилось состояние, инерция, мигание курсора, кадр запрошен из другого потока)?
     pub fn needs_frame(&self) -> bool {
         self.dirty
             || uzcoders_core::frame_requested()
@@ -230,7 +266,9 @@ impl Ui {
             || (self.focus.is_some() && self.blink_phase() != self.last_blink)
     }
 
-    /// Keyingi uyg'onishgacha necha ms kutish mumkin (`None` — hodisagacha cheksiz).
+    /// UZ: Keyingi uyg'onishgacha necha millisekund kutish mumkin (`None` — hodisagacha cheksiz).
+    /// EN: How many milliseconds we can sleep until the next wake-up (`None` means until an event arrives).
+    /// RU: Сколько миллисекунд можно ждать до следующего пробуждения (`None` — до события, без ограничения).
     pub fn next_wakeup_ms(&self) -> Option<u64> {
         if self.animating || self.scrolls.iter().any(|s| s.velocity() != 0.0) {
             return Some(0);
@@ -239,13 +277,17 @@ impl Ui {
             .map(|_| BLINK_MS - self.now.saturating_sub(self.caret_epoch) % BLINK_MS)
     }
 
-    /// Fokusdagi maydonning klaviatura turi.
+    /// UZ: Fokusdagi maydonning klaviatura turi.
+    /// EN: The keyboard kind of the focused field.
+    /// RU: Вид клавиатуры поля в фокусе.
     pub fn keyboard_kind(&self) -> KeyboardKind {
         self.focused_index()
             .map_or(KeyboardKind::Text, |i| self.fields[i].cfg.keyboard)
     }
 
-    /// Fokusni olib tashlaydi (masalan klaviatura tizim tomonidan yopilganda).
+    /// UZ: Fokusni olib tashlaydi (masalan, klaviatura tizim tomonidan yopilganda).
+    /// EN: Clears focus (for example, when the system closed the keyboard).
+    /// RU: Снимает фокус (например, когда система закрыла клавиатуру).
     pub fn clear_focus(&mut self) {
         if self.focus.take().is_some() {
             self.composing = None;
@@ -253,12 +295,16 @@ impl Ui {
         }
     }
 
-    /// Klaviatura ko'rsatilishi kerakmi (kiritish maydoni fokusda).
+    /// UZ: Klaviatura ko'rsatilishi kerakmi (kiritish maydoni fokusda bo'lsa).
+    /// EN: Whether the keyboard should be shown (when an input field has focus).
+    /// RU: Нужно ли показывать клавиатуру (если поле ввода в фокусе).
     pub fn wants_keyboard(&self) -> bool {
         self.focus.is_some()
     }
 
-    /// Kadrni quradi: `size` — oyna o'lchami (piksel). Chizish buyruqlari qaytadi.
+    /// UZ: Kadrni quradi: `size` — oyna o'lchami (piksel). Chizish buyruqlari ro'yxati qaytadi.
+    /// EN: Builds a frame: `size` is the window size (pixels). Returns the list of draw commands.
+    /// RU: Строит кадр: `size` — размер окна (пиксели). Возвращает список команд рисования.
     pub fn frame(&mut self, size: Size) -> Vec<DrawCmd> {
         self.last_rev = Some(global_revision());
         self.dirty = false;
@@ -408,7 +454,9 @@ impl Ui {
                     });
                 }
                 ItemKind::Spinner(width, color) if visible => {
-                    // Material indeterminate: aylanish + yoy uzunligi 10%..75% orasida o'zgaradi.
+                    // UZ: Material indeterminate: aylanish + yoy uzunligi 10%..75% oralig'ida o'zgaradi.
+                    // EN: Material indeterminate style: rotation plus an arc length that changes between 10% and 75%.
+                    // RU: Material indeterminate: вращение плюс длина дуги, меняющаяся от 10% до 75%.
                     let t = self.now as f32 / 1000.0;
                     let tau = std::f32::consts::TAU;
                     let phase = 0.5 + 0.5 * (t * tau / 1.33).sin();
@@ -470,7 +518,9 @@ impl Ui {
                         let floated = has_label && (focused || !shown.is_empty());
                         let label_color = if focused { cfg.accent } else { cfg.hint_color };
                         if floated && cfg.label_inside {
-                            // Maydon ichida tepada kichik sarlavha (shaffof/shisha fon uchun).
+                            // UZ: Maydon ichida tepada kichik sarlavha (shaffof / shisha fon uchun).
+                            // EN: A small label at the top inside the field (for transparent / glass backgrounds).
+                            // RU: Маленькая подпись вверху внутри поля (для прозрачного / стеклянного фона).
                             let ls = cfg.size * 0.75;
                             let (_, lbase) = line_metrics(&self.font, ls, None);
                             cmds.push(DrawCmd::Text {
@@ -483,7 +533,9 @@ impl Ui {
                                 spacing: cfg.spacing * 0.8,
                             });
                         } else if floated {
-                            // Chegarada turgan kichik sarlavha: ostidagi chiziq qirqiladi.
+                            // UZ: Chegarada turgan kichik sarlavha: ostidagi chiziq qirqiladi.
+                            // EN: A small label sitting on the border: the line underneath is cut out.
+                            // RU: Маленькая подпись на границе: линия под ней прорезается.
                             let ls = cfg.size * 0.75;
                             let (llh, lbase) = line_metrics(&self.font, ls, None);
                             let lw = self
@@ -562,7 +614,9 @@ impl Ui {
             }
             if let Some(sc) = it.scroll {
                 let pad = it_padding(&tree, it.node);
-                // Pastdagi padding ham ko'rinishi uchun: kontent uchi = padding.top + extent + padding.bottom.
+                // UZ: Pastdagi padding ham ko'rinishi uchun: kontent uzunligi = padding.top + extent + padding.bottom.
+                // EN: So the bottom padding is visible too: content length = padding.top + extent + padding.bottom.
+                // RU: Чтобы нижний padding тоже был виден: длина содержимого = padding.top + extent + padding.bottom.
                 let (max, vp) = if it.hscroll {
                     (tree.content_extent(it.node) + pad.horizontal() - r.w, r.w)
                 } else {
@@ -724,7 +778,9 @@ impl Ui {
                 items[slot].kind =
                     ItemKind::Text(text.clone(), size, color, weight, line_height, spacing);
                 let font = self.face(weight);
-                // Joylashtirish bir tugunni bir necha marta o'lchaydi: oxirgi natija eslab qolinadi.
+                // UZ: Joylashtirish bir tugunni bir necha marta o'lchaydi, shuning uchun oxirgi natija eslab qolinadi (memo).
+                // EN: Layout measures a node several times, so the last result is remembered (memo).
+                // RU: Раскладка измеряет один узел несколько раз, поэтому последний результат запоминается (memo).
                 let memo: std::cell::Cell<Option<(f32, Size)>> = std::cell::Cell::new(None);
                 tree.add_leaf(el.style, move |w| {
                     if let Some((mw, sz)) = memo.get() {
@@ -834,13 +890,17 @@ impl Ui {
         self.dirty = true;
     }
 
-    /// Teginish/sichqoncha hodisasini qayta ishlaydi.
+    /// UZ: Teginish / sichqoncha hodisasini qayta ishlaydi.
+    /// EN: Handles a touch / mouse event.
+    /// RU: Обрабатывает событие касания / мыши.
     pub fn pointer(&mut self, e: PointerEvent) {
         let p = e.pos;
         match e.kind {
             PointerKind::Down => {
                 if let Some(di) = self.drags.iter().rposition(|(r, _)| r.contains(p)) {
-                    // Sirg'anish chizig'i: bosish ham qiymat beradi; ro'yxat scrolli va bosish ishlamaydi.
+                    // UZ: Sirg'anish chizig'i (slider): oddiy bosish ham qiymat beradi; ro'yxat scrolli va oddiy bosish ishga tushmaydi.
+                    // EN: Slider: a plain press also gives a value; list scrolling and a normal click are not triggered.
+                    // RU: Слайдер: даже простое нажатие задаёт значение; прокрутка списка и обычный клик не срабатывают.
                     let (r, cb) = self.drags[di].clone();
                     let cb2 = cb.clone();
                     self.touch = Some(Touch {
@@ -958,8 +1018,12 @@ impl Ui {
                 }
                 if t.dragging {
                     if let Some(ri) = t.region {
-                        // Tezlik: oxirgi 100 ms dagi namunalar bo'yicha (VelocityTracker kabi).
-                        // Barmoq to'xtab turib qo'yib yuborilsa — inersiya yo'q.
+                        // UZ: Tezlik: oxirgi 100 ms dagi namunalar bo'yicha hisoblanadi (VelocityTracker kabi).
+                        //     Barmoq to'xtab turib qo'yib yuborilsa — inersiya bo'lmaydi.
+                        // EN: Velocity: computed from samples of the last 100 ms (like VelocityTracker).
+                        //     If the finger stops and is then lifted, there is no fling.
+                        // RU: Скорость: считается по отсчётам за последние 100 мс (как VelocityTracker).
+                        //     Если палец остановился и затем был отпущен — инерции нет.
                         let up_t = if e.time_ms > 0 { e.time_ms } else { self.now };
                         let v = match t.samples.last() {
                             Some(&(lt, ly)) if up_t.saturating_sub(lt) <= 80 => {
@@ -1008,7 +1072,9 @@ impl Ui {
         self.fields.iter().position(|f| f.cfg.state.id() == id)
     }
 
-    /// Fokusdagi maydon matnini tahrirlaydi; `f` belgilar va kursor indeksini o'zgartiradi.
+    /// UZ: Fokusdagi maydon matnini tahrirlaydi; `f` belgilar va kursor indeksini o'zgartiradi.
+    /// EN: Edits the text of the focused field; `f` modifies the characters and the caret index.
+    /// RU: Редактирует текст поля в фокусе; `f` изменяет символы и индекс курсора.
     fn edit(&mut self, f: impl FnOnce(&mut Vec<char>, &mut usize, &FieldCfg) -> bool) -> bool {
         let Some(fi) = self.focused_index() else {
             return false;
@@ -1045,17 +1111,23 @@ impl Ui {
         true
     }
 
-    /// IME: tasdiqlangan matn (`commitText`).
+    /// UZ: IME: tasdiqlangan matn (`commitText`).
+    /// EN: IME: committed text (`commitText`).
+    /// RU: IME: подтверждённый текст (`commitText`).
     pub fn ime_commit(&mut self, s: &str) -> bool {
         self.ime_text(s, false)
     }
 
-    /// IME: tugallanmagan matn (`setComposingText`), keyingi chaqiruv uni almashtiradi.
+    /// UZ: IME: tugallanmagan matn (`setComposingText`); keyingi chaqiruv uni almashtiradi.
+    /// EN: IME: composing text (`setComposingText`); the next call replaces it.
+    /// RU: IME: незавершённый текст (`setComposingText`); следующий вызов заменяет его.
     pub fn ime_composing(&mut self, s: &str) -> bool {
         self.ime_text(s, true)
     }
 
-    /// IME: kursor atrofidagi belgilarni o'chirish.
+    /// UZ: IME: kursor atrofidagi belgilarni o'chirish.
+    /// EN: IME: delete characters around the cursor.
+    /// RU: IME: удаление символов вокруг курсора.
     pub fn ime_delete(&mut self, before: usize, after: usize) -> bool {
         self.composing = None;
         self.edit(|chars, caret, _| {
@@ -1068,7 +1140,9 @@ impl Ui {
         })
     }
 
-    /// IME: tugallanmagan matn tasdiqlandi.
+    /// UZ: IME: tugallanmagan matn tasdiqlandi.
+    /// EN: IME: the composing text was finalized.
+    /// RU: IME: незавершённый текст подтверждён.
     pub fn ime_finish(&mut self) {
         self.composing = None;
     }
@@ -1092,7 +1166,9 @@ impl Ui {
         ok
     }
 
-    /// Fokusdagi maydonga belgi kiritadi. Maydon bo'lmasa `false`.
+    /// UZ: Fokusdagi maydonga belgi kiritadi. Maydon bo'lmasa `false` qaytadi.
+    /// EN: Types a character into the focused field. Returns `false` if there is no field.
+    /// RU: Вводит символ в поле в фокусе. Если поля нет — возвращает `false`.
     pub fn key_char(&mut self, c: char) -> bool {
         if c.is_control() {
             return false;
@@ -1103,10 +1179,14 @@ impl Ui {
         })
     }
 
-    /// Kursor oldidagi belgini o'chiradi.
+    /// UZ: Kursor oldidagi belgini o'chiradi (Backspace).
+    /// EN: Deletes the character before the cursor (Backspace).
+    /// RU: Удаляет символ перед курсором (Backspace).
     pub fn key_backspace(&mut self) -> bool {
         self.edit(|chars, caret, _| {
-            // Formatlovchi probelni emas, undan oldingi belgini o'chiramiz.
+            // UZ: Formatlovchi probelni emas, undan oldingi belgini o'chiramiz.
+            // EN: Delete the character before the formatter's space, not the space itself.
+            // RU: Удаляем символ перед пробелом форматирования, а не сам пробел.
             while *caret > 0 && chars[*caret - 1] == ' ' {
                 *caret -= 1;
             }
@@ -1118,7 +1198,9 @@ impl Ui {
         })
     }
 
-    /// "Enter": `on_submit` chaqiriladi.
+    /// UZ: "Enter": `on_submit` chaqiriladi.
+    /// EN: "Enter": `on_submit` is called.
+    /// RU: «Enter»: вызывается `on_submit`.
     pub fn key_enter(&mut self) -> bool {
         let Some(fi) = self.focused_index() else {
             return false;
@@ -1129,7 +1211,9 @@ impl Ui {
         true
     }
 
-    /// "Orqaga": avval fokus olinadi, keyin ilovaning `set_back_handler`i chaqiriladi.
+    /// UZ: "Orqaga": avval fokus olinadi, keyin ilovaning `set_back_handler` funksiyasi chaqiriladi.
+    /// EN: "Back": focus is cleared first, then the app's `set_back_handler` is called.
+    /// RU: «Назад»: сначала снимается фокус, затем вызывается обработчик приложения `set_back_handler`.
     pub fn key_back(&mut self) -> bool {
         if self.focus.take().is_some() {
             self.dirty = true;
@@ -1142,7 +1226,9 @@ impl Ui {
     }
 }
 
-/// (qator balandligi, qator qutisi tepasidan asos chizig'igacha masofa). `lh` berilsa Compose kabi proporsional bo'linadi.
+/// UZ: Qaytadi: (qator balandligi, qator qutisi tepasidan asos chizig'igacha masofa). `lh` berilsa Compose kabi proporsional bo'linadi.
+/// EN: Returns: (line height, distance from the top of the line box to the baseline). If `lh` is given, it is split proportionally like Compose.
+/// RU: Возвращает: (высота строки, расстояние от верха строки до базовой линии). Если задан `lh`, делится пропорционально, как в Compose.
 fn line_metrics(font: &Font, size: f32, lh: Option<f32>) -> (f32, f32) {
     let asc = font.ascent_px(size);
     match lh {
@@ -1155,7 +1241,9 @@ fn line_metrics(font: &Font, size: f32, lh: Option<f32>) -> (f32, f32) {
     }
 }
 
-/// `s` ni kursor oldiga kiritadi (filtr va uzunlik chegarasi bilan); kiritilgan belgilar soni qaytadi.
+/// UZ: `s` ni kursor oldiga kiritadi (filtr va uzunlik chegarasi bilan); kiritilgan belgilar soni qaytadi.
+/// EN: Inserts `s` at the cursor (applying the filter and the length limit); returns the number of characters inserted.
+/// RU: Вставляет `s` перед курсором (с учётом фильтра и ограничения длины); возвращает число вставленных символов.
 fn insert_str(chars: &mut Vec<char>, caret: &mut usize, cfg: &FieldCfg, s: &str) -> usize {
     let mut n = 0;
     for c in s.chars() {

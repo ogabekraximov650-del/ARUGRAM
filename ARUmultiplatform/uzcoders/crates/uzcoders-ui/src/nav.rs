@@ -1,8 +1,12 @@
-//! Navigatsiya steki: ekranlar (marshrutlar) ketma-ketligi. Holat o'zgarsa UI qayta quriladi.
+//! UZ: Navigatsiya steki: ekranlar (marshrutlar) ketma-ketligi. Holat o'zgarsa UI qayta quriladi.
+//! EN: Navigation stack: a sequence of screens (routes). When the state changes, the UI is rebuilt.
+//! RU: Стек навигации: последовательность экранов (маршрутов). При изменении состояния UI перестраивается.
 
 use uzcoders_core::State;
 
-/// `R` — ilovaning marshrut turi (odatda `enum`).
+/// UZ: `R` — ilovaning marshrut turi (odatda `enum`).
+/// EN: `R` is the app's route type (usually an `enum`).
+/// RU: `R` — тип маршрута приложения (обычно `enum`).
 pub struct Navigator<R: Clone> {
     stack: State<Vec<R>>,
 }
@@ -22,7 +26,9 @@ impl<R: Clone> Navigator<R> {
         }
     }
 
-    /// Hozirgi (eng yuqoridagi) ekran.
+    /// UZ: Hozirgi (eng yuqoridagi) ekran.
+    /// EN: The current (topmost) screen.
+    /// RU: Текущий (верхний) экран.
     pub fn current(&self) -> R {
         self.stack
             .with(|s| s.last().cloned().expect("stek bo'sh bo'lmaydi"))
@@ -32,7 +38,9 @@ impl<R: Clone> Navigator<R> {
         self.stack.update(|s| s.push(r));
     }
 
-    /// Joriy ekranni almashtiradi.
+    /// UZ: Joriy ekranni boshqasi bilan almashtiradi.
+    /// EN: Replaces the current screen with another one.
+    /// RU: Заменяет текущий экран другим.
     pub fn replace(&self, r: R) {
         self.stack.update(|s| {
             s.pop();
@@ -40,12 +48,16 @@ impl<R: Clone> Navigator<R> {
         });
     }
 
-    /// Stekni tozalab, `r` ni yagona ekran qiladi.
+    /// UZ: Stekni tozalab, `r` ni yagona ekran qiladi.
+    /// EN: Clears the stack and makes `r` the only screen.
+    /// RU: Очищает стек и делает `r` единственным экраном.
     pub fn reset(&self, r: R) {
         self.stack.set(vec![r]);
     }
 
-    /// Orqaga: bitta ekran qolgan bo'lsa `false` (tizim ilovani yopsin).
+    /// UZ: Orqaga qaytadi: bitta ekran qolgan bo'lsa `false` qaytadi (tizim ilovani yopsin).
+    /// EN: Goes back: returns `false` if only one screen is left (so the system can close the app).
+    /// RU: Возвращается назад: если остался один экран — возвращает `false` (система закроет приложение).
     pub fn pop(&self) -> bool {
         if self.depth() <= 1 {
             return false;

@@ -6,7 +6,7 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
-description = "uzcoders: deklarativ UI daraxti, vidjetlar va ishga tushirish tsikli"
+description = "uzcoders-ui — UZ: deklarativ UI daraxti, vidjetlar va ishga tushirish tsikli | EN: declarative UI tree, widgets and the run loop | RU: декларативное дерево UI, виджеты и цикл выполнения"
 
 [dependencies]
 uzcoders-core = { workspace = true }

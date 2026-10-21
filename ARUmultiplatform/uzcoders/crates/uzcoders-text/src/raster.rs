@@ -1,10 +1,18 @@
-//! Konturni piksel qoplamasiga (0..255) aylantiruvchi rasterizator.
-//! Usul: imzoli maydon yig'indisi (har bir kesma o'tgan piksellarga maydon hissasini qo'shadi,
-//! keyin qatorlar bo'ylab yig'ib chiqiladi). Bu "nolga teng bo'lmagan" to'ldirish qoidasiga mos.
+//! UZ: Konturni piksel qoplamasiga (0..255) aylantiruvchi rasterizator.
+//! Usul: imzoli maydon yig'indisi — har bir kesma o'zi kesib o'tgan piksellarga maydon hissasini qo'shadi,
+//! keyin qatorlar bo'ylab yig'ib chiqiladi. Bu "nolga teng bo'lmagan" (non-zero) to'ldirish qoidasiga mos keladi.
+//! EN: A rasterizer that turns an outline into pixel coverage (0..255).
+//! Method: signed-area accumulation — each segment adds its area contribution to the pixels it crosses,
+//! then the values are accumulated along each row. This matches the non-zero fill rule.
+//! RU: Растеризатор, превращающий контур в пиксельное покрытие (0..255).
+//! Метод: накопление знаковой площади — каждый отрезок добавляет вклад площади в пересекаемые пиксели,
+//! затем значения накапливаются вдоль строк. Это соответствует правилу заливки non-zero.
 
 use crate::ttf::Contour;
 
-/// Tekis kesmalar (piksel koordinatalarida, y pastga).
+/// UZ: Tekis kesmalar ro'yxati (piksel koordinatalarida, y o'qi pastga qaragan).
+/// EN: A list of straight segments (in pixel coordinates, y axis pointing down).
+/// RU: Список прямых отрезков (в пиксельных координатах, ось y направлена вниз).
 pub type Segs = Vec<((f32, f32), (f32, f32))>;
 
 fn quad(p0: (f32, f32), p1: (f32, f32), p2: (f32, f32), out: &mut Segs) {
@@ -23,7 +31,9 @@ fn quad(p0: (f32, f32), p1: (f32, f32), p2: (f32, f32), out: &mut Segs) {
     }
 }
 
-/// Konturlarni (shrift birliklari) piksel kesmalariga aylantiradi: `(x*scale - ox, oy - y*scale)`.
+/// UZ: Konturlarni (shrift birliklarida) piksel kesmalariga aylantiradi: `(x*scale - ox, oy - y*scale)`.
+/// EN: Converts outlines (in font units) into pixel segments: `(x*scale - ox, oy - y*scale)`.
+/// RU: Преобразует контуры (в единицах шрифта) в пиксельные отрезки: `(x*scale - ox, oy - y*scale)`.
 pub fn flatten(contours: &[Contour], scale: f32, ox: f32, oy: f32) -> Segs {
     let mut segs = Vec::new();
     let tf = |x: f32, y: f32| (x * scale - ox, oy - y * scale);
@@ -138,7 +148,9 @@ impl Acc {
     }
 }
 
-/// Kesmalarni `w x h` o'lchamli qoplama xaritasiga (0..255) aylantiradi.
+/// UZ: Kesmalarni `w x h` o'lchamli qoplama xaritasiga (0..255) aylantiradi.
+/// EN: Turns segments into a `w x h` coverage map (0..255).
+/// RU: Превращает отрезки в карту покрытия размером `w x h` (0..255).
 pub fn fill(segs: &Segs, w: usize, h: usize) -> Vec<u8> {
     let mut acc = Acc {
         w,

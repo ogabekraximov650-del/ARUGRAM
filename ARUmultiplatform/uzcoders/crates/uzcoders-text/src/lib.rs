@@ -1,4 +1,6 @@
-//! uzcoders-text — shrift o'qish, harflarni chizish va matnni qatorlarga bo'lish (noldan yozilgan).
+//! UZ: uzcoders-text — shrift o'qish, harflarni chizish (rasterlash) va matnni qatorlarga bo'lish. Hammasi noldan yozilgan.
+//! EN: uzcoders-text — font parsing, glyph rasterization and text wrapping. Everything is written from scratch.
+//! RU: uzcoders-text — чтение шрифтов, растеризация глифов и разбиение текста на строки. Всё написано с нуля.
 
 pub mod raster;
 pub mod ttf;
@@ -7,8 +9,12 @@ use std::collections::HashMap;
 use std::rc::Rc;
 pub use ttf::Font;
 
-/// Bitta harfning piksel qoplamasi. `left`/`top` — chizish nuqtasidan (baseline boshi) siljish:
-/// bitmap chap-yuqori burchagi `(pen_x + left, baseline - top)` da turadi.
+/// UZ: Bitta harfning piksel qoplamasi (bitmap). `left`/`top` — chizish nuqtasidan (baseline boshi) siljish:
+/// bitmapning chap-yuqori burchagi `(pen_x + left, baseline - top)` nuqtasiga qo'yiladi.
+/// EN: Pixel coverage (bitmap) of one glyph. `left`/`top` are offsets from the pen position (start of the baseline):
+/// the bitmap's top-left corner is placed at `(pen_x + left, baseline - top)`.
+/// RU: Пиксельное покрытие (bitmap) одного глифа. `left`/`top` — смещение от точки пера (начала базовой линии):
+/// левый верхний угол bitmap ставится в точку `(pen_x + left, baseline - top)`.
 #[derive(Debug, Clone, Default)]
 pub struct GlyphBitmap {
     pub width: usize,
@@ -20,7 +26,9 @@ pub struct GlyphBitmap {
 }
 
 impl Font {
-    /// Harfni `size` (piksel, em balandligi) o'lchamda rasterlaydi.
+    /// UZ: Harfni `size` (em balandligi, piksel) o'lchamda rasterlaydi, ya'ni piksel qoplamasiga aylantiradi.
+    /// EN: Rasterizes a character at `size` (em height in pixels), producing its pixel coverage.
+    /// RU: Растеризует символ размером `size` (высота em в пикселях), получая его пиксельное покрытие.
     pub fn rasterize(&self, ch: char, size: f32) -> GlyphBitmap {
         let gid = self.glyph_id(ch);
         let scale = size / self.units_per_em as f32;
@@ -57,7 +65,9 @@ impl Font {
         }
     }
 
-    /// Bitta qator balandligi (piksel).
+    /// UZ: Bitta qator balandligi (piksel).
+    /// EN: Height of one line (pixels).
+    /// RU: Высота одной строки (в пикселях).
     pub fn line_height(&self, size: f32) -> f32 {
         let s = size / self.units_per_em as f32;
         (self.ascent as f32 - self.descent as f32 + self.line_gap as f32) * s
@@ -75,20 +85,28 @@ impl Font {
         self.text_width_spaced(text, size, 0.0)
     }
 
-    /// Har belgidan keyin `extra` piksel qo'shilgan kenglik (harflar orasi).
+    /// UZ: Har bir belgidan keyin `extra` piksel qo'shilgan holdagi matn kengligi (harflar orasi kengaytirilgan).
+    /// EN: Text width with `extra` pixels added after every character (letter spacing).
+    /// RU: Ширина текста, когда после каждого символа добавлено `extra` пикселей (межбуквенный интервал).
     pub fn text_width_spaced(&self, text: &str, size: f32, extra: f32) -> f32 {
         text.chars()
             .map(|c| self.char_advance(c, size) + extra)
             .sum()
     }
 
-    /// Matnni `max_width` ga sig'adigan qatorlarga bo'ladi (so'z chegarasida; juda uzun so'z belgi bo'yicha).
-    /// `\n` majburiy qator uzilishi. `max_width = None` — bo'lmaydi.
+    /// UZ: Matnni `max_width` ga sig'adigan qatorlarga bo'ladi: so'z chegarasida, juda uzun so'z esa belgi bo'yicha.
+    /// `\n` — majburiy qator uzilishi. `max_width = None` bo'lsa qatorlar bo'linmaydi.
+    /// EN: Splits text into lines that fit `max_width`: at word boundaries, and character by character for very long words.
+    /// `\n` is a forced line break. With `max_width = None` lines are not wrapped.
+    /// RU: Разбивает текст на строки, помещающиеся в `max_width`: по границам слов, а слишком длинные слова — по символам.
+    /// `\n` — принудительный перенос строки. При `max_width = None` строки не переносятся.
     pub fn wrap(&self, text: &str, size: f32, max_width: Option<f32>) -> Vec<String> {
         self.wrap_spaced(text, size, max_width, 0.0)
     }
 
-    /// `wrap`, har belgi orasida `extra` piksel bilan.
+    /// UZ: `wrap` bilan bir xil, lekin har belgi orasida `extra` piksel oraliq bilan.
+    /// EN: Same as `wrap`, but with `extra` pixels of spacing between characters.
+    /// RU: То же, что `wrap`, но с промежутком `extra` пикселей между символами.
     pub fn wrap_spaced(
         &self,
         text: &str,
@@ -116,7 +134,10 @@ impl Font {
                     continue;
                 }
                 if is_space {
-                    continue; // qator oxiridagi probel tashlanadi
+                    // UZ: qator oxiridagi probel tashlanadi
+                    // EN: a space at the end of a line is dropped.
+                    // RU: пробел в конце строки отбрасывается.
+                    continue;
                 }
                 if !line.is_empty() {
                     lines.push(line.trim_end().to_string());
@@ -143,7 +164,9 @@ impl Font {
         lines
     }
 
-    /// Matn o'lchami: (kenglik, balandlik) va qatorlar.
+    /// UZ: Matn o'lchami: (kenglik, balandlik) va qatorlar ro'yxati.
+    /// EN: Text size: (width, height) and the list of lines.
+    /// RU: Размер текста: (ширина, высота) и список строк.
     pub fn measure(
         &self,
         text: &str,
@@ -189,7 +212,9 @@ fn split_words(s: &str) -> Vec<&str> {
     out
 }
 
-/// Harf bitmaplari keshi: bir xil (harf, o'lcham) qayta rasterlanmaydi.
+/// UZ: Harf bitmaplari keshi: bir xil (harf, o'lcham) juftligi qayta rasterlanmaydi.
+/// EN: Glyph bitmap cache: the same (character, size) pair is never rasterized twice.
+/// RU: Кэш bitmap глифов: одна и та же пара (символ, размер) не растеризуется повторно.
 pub struct GlyphCache {
     font: Rc<Font>,
     map: HashMap<(char, u32), Rc<GlyphBitmap>>,
@@ -265,7 +290,9 @@ mod tests {
 
     #[test]
     fn maydon_mosligi() {
-        // 'I' to'g'ri to'rtburchak: qoplama yig'indisi maydonga yaqin bo'lishi kerak.
+        // UZ: 'I' to'g'ri to'rtburchak shaklida: qoplama yig'indisi maydonga yaqin bo'lishi kerak.
+        // EN: 'I' is a plain rectangle: the coverage sum should be close to its area.
+        // RU: 'I' — простой прямоугольник: сумма покрытия должна быть близка к его площади.
         let f = font();
         let g = f.rasterize('I', 64.0);
         let ink: f32 = g.data.iter().map(|&v| v as f32 / 255.0).sum();
@@ -289,7 +316,9 @@ mod tests {
 
     #[test]
     fn teshik_harf() {
-        // 'O' markazi bo'sh (teshik), halqasi to'la.
+        // UZ: 'O' markazi bo'sh (teshik), halqasi esa to'la bo'lishi kerak.
+        // EN: 'O' must have an empty center (a hole) and a filled ring.
+        // RU: У 'O' центр должен быть пустым (отверстие), а кольцо — заполненным.
         let f = font();
         let g = f.rasterize('O', 64.0);
         let mid = g.data[(g.height / 2) * g.width + g.width / 2];
@@ -307,7 +336,9 @@ mod tests {
 
     #[test]
     fn murakkab_glif() {
-        // 'é' murakkab (e + urg'u) bo'lishi mumkin: kamida 2 kontur.
+        // UZ: 'é' murakkab shakl (e + urg'u belgisi) bo'lishi mumkin: kamida 2 kontur kutiladi.
+        // EN: 'é' may be a composite glyph (e + accent): at least 2 contours are expected.
+        // RU: 'é' может быть составным глифом (e + акцент): ожидается не менее 2 контуров.
         let f = font();
         assert!(f.outline(f.glyph_id('é')).len() >= 2);
     }

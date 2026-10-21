@@ -1,4 +1,6 @@
-//! OpenGL ES 2.0 bajaruvchi: `Frame` ni chizadi. Faqat Android (`libGLESv2`).
+//! UZ: OpenGL ES 2.0 bajaruvchi: `Frame` ni ekranga chizadi. Faqat Android (`libGLESv2`).
+//! EN: OpenGL ES 2.0 executor: draws a `Frame` to the screen. Android only (`libGLESv2`).
+//! RU: Исполнитель OpenGL ES 2.0: рисует `Frame` на экране. Только Android (`libGLESv2`).
 
 use crate::batch::{Frame, Op, Vertex, ATLAS_SIZE};
 use std::ffi::c_void;
@@ -86,6 +88,13 @@ void main() {
   v_uv = a_uv; v_color = a_color; v_p = a_p; v_q = a_q;
 }\0";
 
+// Fragment shader notes (kept outside the shader text because a byte string must be ASCII only).
+// UZ: Shisha tarmog'i (`v_p.w < -1.5`): ostidagi xiralashgan tasvir + tint, to'yinganlik biroz oshiriladi.
+//     Lupa tarmog'i (`v_q > 1.001`): ostidagi o'tkir tasvir panel markazidan kattalashadi, chetida kuchliroq sinadi.
+// EN: Glass branch (`v_p.w < -1.5`): the blurred image underneath plus a tint; saturation is boosted slightly.
+//     Magnifier branch (`v_q > 1.001`): the sharp image underneath is enlarged from the panel's center and refracts more strongly at the edge.
+// RU: Ветка стекла (`v_p.w < -1.5`): размытое изображение под панелью + оттенок; насыщенность немного повышается.
+//     Ветка лупы (`v_q > 1.001`): резкое изображение под панелью увеличивается от центра панели и сильнее преломляется у края.
 const FS: &[u8] = b"#ifdef GL_FRAGMENT_PRECISION_HIGH
 precision highp float;
 #else
@@ -130,11 +139,9 @@ void main() {
     float sheen = clamp(0.5 - v_uv.y / (2.0 * v_p.y), 0.0, 1.0) * cov;
     float hl = rim * lit * 0.85 + glow * 0.10 * lit + sheen * 0.07;
     if (v_p.w < -1.5) {
-      // Haqiqiy shisha: ostidagi xiralashgan tasvir + tint, to'yinganlik biroz oshiriladi.
       vec3 base = v_color.rgb;
       if (u_blur_ok > 0.5) {
         if (v_q > 1.001) {
-          // Lupa: ostidagi (o'tkir) tasvir panel markazidan kattalashadi, chetida kuchliroq sinadi.
           vec2 pos = gl_FragCoord.xy;
           vec2 local_gl = vec2(v_uv.x, -v_uv.y);
           vec2 center_gl = pos - local_gl;
@@ -213,12 +220,16 @@ void main() {
   gl_FragColor = texture2D(u_vid, t);
 }\0";
 
-/// Video (tashqi tekstura) kancalari: platforma qatlami dekoder uchun Surface yaratadi va yangi kadrni teksturaga o'tkazadi.
+/// UZ: Video (tashqi tekstura) kancalari (hook): platforma qatlami dekoder uchun Surface yaratadi va yangi kadrni teksturaga o'tkazadi.
+/// EN: Video (external texture) hooks: the platform layer creates a Surface for the decoder and moves each new frame into the texture.
+/// RU: Хуки видео (внешняя текстура): платформенный слой создаёт Surface для декодера и переносит каждый новый кадр в текстуру.
 pub type VideoCreate = fn(u32);
 pub type VideoUpdate = fn() -> Option<[f32; 16]>;
 static VIDEO_HOOKS: std::sync::Mutex<(Option<VideoCreate>, Option<VideoUpdate>)> = std::sync::Mutex::new((None, None));
 
-/// Platforma qatlami chaqiradi (Android: Java `SurfaceTexture`).
+/// UZ: Platforma qatlami chaqiradi (Android'da: Java `SurfaceTexture`).
+/// EN: Called by the platform layer (on Android: Java `SurfaceTexture`).
+/// RU: Вызывается платформенным слоем (на Android: Java `SurfaceTexture`).
 pub fn set_video_hooks(create: VideoCreate, update: VideoUpdate) {
     if let Ok(mut h) = VIDEO_HOOKS.lock() {
         *h = (Some(create), Some(update));
@@ -235,14 +246,21 @@ struct VidRes {
     matrix: [f32; 16],
 }
 
-/// Xiralashtirish (backdrop) uchun resurslar: ekran nusxasi va chorak o'lchamli ikkita tekstura.
+/// UZ: Xiralashtirish (backdrop) uchun resurslar: ekran nusxasi va chorak o'lchamli ikkita tekstura.
+/// EN: Resources for blurring (backdrop): a screen copy and two quarter-size textures.
+/// RU: Ресурсы для размытия (backdrop): копия экрана и две текстуры в четверть размера.
 struct BlurRes {
     program: u32,
     quad: u32,
     fbo: [u32; 2],
-    /// Sahna (to'liq o'lcham) FBO: shisha panellar ostidagi tasvir shu teksturadan olinadi (ekranni nusxalash o'rniga).
+    /// UZ: Sahna (to'liq o'lcham) FBO: shisha panellar ostidagi tasvir ekranni nusxalash o'rniga shu teksturadan olinadi.
+    /// EN: The scene (full-size) FBO: the image under glass panels is taken from this texture instead of copying the screen.
+    /// RU: FBO сцены (полного размера): изображение под стеклянными панелями берётся из этой текстуры вместо копирования экрана.
     scene_fbo: u32,
-    tex: [u32; 3], // 0: ekran nusxasi (to'liq o'lcham), 1 va 2: chorak o'lcham
+    // UZ: 0: ekran nusxasi (to'liq o'lcham); 1 va 2: chorak o'lcham
+    // EN: 0: screen copy (full size); 1 and 2: quarter size.
+    // RU: 0: копия экрана (полный размер); 1 и 2: четверть размера.
+    tex: [u32; 3],
     w: i32,
     h: i32,
     qw: i32,
@@ -253,11 +271,17 @@ struct BlurRes {
 }
 
 pub struct GlRenderer {
-    /// Katta rasmlar (poster) uchun alohida teksturalar.
+    /// UZ: Katta rasmlar (posterlar) uchun alohida teksturalar.
+    /// EN: Separate textures for large images (posters).
+    /// RU: Отдельные текстуры для больших изображений (постеров).
     big: std::collections::HashMap<u32, u32>,
-    /// Hozir 1-birlikka bog'langan: atlas (`None`) yoki alohida rasm.
+    /// UZ: Hozir 1-birlikka bog'langan narsa: atlas (`None`) yoki alohida rasm.
+    /// EN: What is currently bound to texture unit 1: the atlas (`None`) or a separate image.
+    /// RU: Что сейчас привязано к текстурному блоку 1: атлас (`None`) или отдельное изображение.
     cur_img: Option<u32>,
-    /// Sahna teksturasiga chizilmoqda: u’ni shu paytda namuna sifatida bog'lamaymiz (qayta aloqa halqasi bo'lmasin).
+    /// UZ: Sahna teksturasiga chizilmoqda: uni shu paytda namuna (sampler) sifatida bog'lamaymiz, shunda qayta aloqa halqasi (feedback loop) bo'lmaydi.
+    /// EN: Drawing into the scene texture: it is not bound as a sampler at the same time, so there is no feedback loop.
+    /// RU: Идёт рисование в текстуру сцены: в это время она не привязывается как сэмплер, чтобы не возникло петли обратной связи.
     scene_phase: bool,
     blur: Option<BlurRes>,
     blur_failed: bool,
@@ -291,10 +315,18 @@ unsafe fn shader(kind: u32, src: &[u8]) -> Result<u32, String> {
 }
 
 impl GlRenderer {
-    /// GL konteksti joriy bo'lgan oqimda chaqiriladi.
+    /// UZ: GL konteksti joriy bo'lgan oqimda chaqiriladi.
     ///
     /// # Safety
     /// EGL konteksti shu oqimda joriy bo'lishi shart.
+    /// EN: Called on the thread where the GL context is current.
+    ///
+    /// # Safety
+    /// The EGL context must be current on this thread.
+    /// RU: Вызывается в потоке, где GL-контекст является текущим.
+    ///
+    /// # Safety
+    /// EGL-контекст должен быть текущим в этом потоке.
     pub unsafe fn new() -> Result<GlRenderer, String> {
         let vs = shader(0x8B31, VS)?;
         let fs = shader(0x8B30, FS)?;
@@ -395,7 +427,9 @@ impl GlRenderer {
         })
     }
 
-    /// Asosiy dastur holatini tiklaydi (dastur, tekstura birliklari, uchlar ko'rsatkichlari).
+    /// UZ: Asosiy dastur holatini tiklaydi (shader dasturi, tekstura birliklari, uchlar ko'rsatkichlari).
+    /// EN: Restores the main program state (shader program, texture units, vertex pointers).
+    /// RU: Восстанавливает состояние основной программы (шейдерная программа, текстурные блоки, указатели вершин).
     unsafe fn bind_main(&mut self, w: i32, h: i32) {
         glBindFramebuffer(0x8D40, 0);
         glViewport(0, 0, w, h);
@@ -440,7 +474,9 @@ impl GlRenderer {
         glVertexAttribPointer(4, 1, 0x1406, 0, stride, 36 as *const c_void);
     }
 
-    /// Video resurslarini bir marta yaratadi (tashqi tekstura + dastur) va platformaga Surface so'raydi. `false` — imkonsiz.
+    /// UZ: Video resurslarini bir marta yaratadi (tashqi tekstura + dastur) va platformadan Surface so'raydi. `false` — imkonsiz.
+    /// EN: Creates video resources once (external texture + program) and asks the platform for a Surface. `false` means impossible.
+    /// RU: Один раз создаёт ресурсы видео (внешняя текстура + программа) и запрашивает у платформы Surface. `false` — невозможно.
     unsafe fn ensure_video(&mut self) -> bool {
         if self.vid.is_some() {
             return true;
@@ -493,7 +529,9 @@ impl GlRenderer {
         true
     }
 
-    /// Video kadrini `rect` (piksel) ga chizadi. Yangi kadr bo'lsa avval teksturaga o'tkaziladi.
+    /// UZ: Video kadrini `rect` (piksel) ga chizadi. Yangi kadr bo'lsa avval teksturaga o'tkaziladi.
+    /// EN: Draws the video frame into `rect` (pixels). If a new frame is available, it is first moved into the texture.
+    /// RU: Рисует кадр видео в `rect` (пиксели). Если есть новый кадр, он сначала переносится в текстуру.
     unsafe fn draw_video(&mut self, rect: [f32; 4], w: i32, h: i32) {
         if !self.ensure_video() {
             return;
@@ -528,12 +566,16 @@ impl GlRenderer {
         glDrawArrays(4, 0, 6);
         glActiveTexture(0x84C0);
         glEnable(0x0BE2);
-        // Asosiy dastur holatini qaytaramiz.
+        // UZ: Asosiy dastur holatini qaytaramiz.
+        // EN: Restore the main program state.
+        // RU: Возвращаем состояние основной программы.
         self.cur_img = None;
         self.bind_main_inner(w, h);
     }
 
-    /// Xiralashtirish resurslarini (o'lcham o'zgarsa qaytadan) yaratadi. `false` — imkonsiz.
+    /// UZ: Xiralashtirish resurslarini yaratadi (o'lcham o'zgarsa qaytadan). `false` — imkonsiz.
+    /// EN: Creates the blur resources (again if the size changed). `false` means impossible.
+    /// RU: Создаёт ресурсы размытия (заново, если размер изменился). `false` — невозможно.
     unsafe fn ensure_blur(&mut self, w: i32, h: i32) -> bool {
         if self.blur_failed {
             return false;
@@ -634,7 +676,9 @@ impl GlRenderer {
         true
     }
 
-    /// `region` (yuqori-chap boshlang'ich, piksel) ni xiralashtiradi: ekran nusxasi -> chorak o'lcham -> gorizontal -> vertikal.
+    /// UZ: `region` (boshlang'ich nuqta yuqori-chapda, piksel) ni xiralashtiradi: ekran nusxasi -> chorak o'lcham -> gorizontal -> vertikal.
+    /// EN: Blurs `region` (origin at top-left, pixels): screen copy -> quarter size -> horizontal -> vertical.
+    /// RU: Размывает `region` (начало в левом верхнем углу, пиксели): копия экрана -> четверть размера -> по горизонтали -> по вертикали.
     unsafe fn run_blur(&mut self, region: [i32; 4], blur: f32, w: i32, h: i32) {
         if !self.ensure_blur(w, h) {
             return;
@@ -707,10 +751,18 @@ impl GlRenderer {
         glDisable(0x0C11);
     }
 
-    /// Kadrni joriy sirtga chizadi (almashtirish — chaqiruvchida).
+    /// UZ: Kadrni joriy sirtga chizadi (buferlarni almashtirish chaqiruvchi zimmasida).
     ///
     /// # Safety
     /// `new` bilan bir xil kontekst joriy bo'lishi shart.
+    /// EN: Draws the frame to the current surface (swapping buffers is the caller's job).
+    ///
+    /// # Safety
+    /// The same context as in `new` must be current.
+    /// RU: Рисует кадр на текущей поверхности (обмен буферов — задача вызывающего).
+    ///
+    /// # Safety
+    /// Должен быть текущим тот же контекст, что и в `new`.
     pub unsafe fn render(&mut self, frame: &Frame, w: i32, h: i32) {
         glBindFramebuffer(0x8D40, 0);
         glViewport(0, 0, w, h);
@@ -726,8 +778,12 @@ impl GlRenderer {
             frame.verts.as_ptr() as *const c_void,
             0x88E0,
         );
-        // Shisha (backdrop) bor kadr: birinchi `Blur` gacha bo'lgan hamma narsa sahna teksturasiga chiziladi,
-        // keyin ekranga ko'chiriladi va shisha panellar shu tekstura ustidan (nusxa olmasdan) tanlaydi.
+        // UZ: Shisha (backdrop) bor kadr: birinchi `Blur` gacha bo'lgan hamma narsa sahna teksturasiga chiziladi,
+        //     keyin ekranga ko'chiriladi va shisha panellar shu tekstura ustidan (nusxa olmasdan) tanlaydi.
+        // EN: A frame with glass (backdrop): everything before the first `Blur` is drawn into the scene texture,
+        //     then copied to the screen, and glass panels sample from that texture (without making a copy).
+        // RU: Кадр со стеклом (backdrop): всё до первого `Blur` рисуется в текстуру сцены,
+        //     затем переносится на экран, а стеклянные панели выбирают пиксели из этой текстуры (без копирования).
         let first_blur = frame.ops.iter().position(|o| matches!(o, Op::Blur { .. }));
         let mut start = 0;
         let mut scene = false;
@@ -754,7 +810,9 @@ impl GlRenderer {
         self.exec(&frame.ops[start..], w, h, scene);
     }
 
-    /// `bind_main`, lekin joriy FBO'ni o'zgartirmaydi.
+    /// UZ: `bind_main`, lekin joriy FBO'ni o'zgartirmaydi.
+    /// EN: Like `bind_main`, but it does not change the current FBO.
+    /// RU: Как `bind_main`, но не меняет текущий FBO.
     unsafe fn bind_main_fb(&self, w: i32, h: i32) {
         glViewport(0, 0, w, h);
         glEnable(0x0BE2);
@@ -762,7 +820,9 @@ impl GlRenderer {
         self.bind_main_inner(w, h);
     }
 
-    /// Sahna teksturasini ekranga (asosiy framebuffer) chizadi.
+    /// UZ: Sahna teksturasini ekranga (asosiy framebuffer) chizadi.
+    /// EN: Draws the scene texture to the screen (the main framebuffer).
+    /// RU: Рисует текстуру сцены на экран (основной framebuffer).
     unsafe fn present_scene(&mut self, w: i32, h: i32) {
         let Some(b) = &self.blur else { return };
         glBindFramebuffer(0x8D40, 0);
@@ -785,7 +845,9 @@ impl GlRenderer {
         self.bind_main(w, h);
     }
 
-    /// Operatsiyalarni bajaradi. `scene` — sahna teksturasi tayyor (shisha uchun xiralashtirish mumkin).
+    /// UZ: Operatsiyalarni bajaradi. `scene` — sahna teksturasi tayyor (shisha uchun xiralashtirish mumkin).
+    /// EN: Executes the operations. `scene` means the scene texture is ready (blurring for glass is possible).
+    /// RU: Выполняет операции. `scene` — текстура сцены готова (для стекла возможно размытие).
     unsafe fn exec(&mut self, ops: &[Op], w: i32, h: i32, scene: bool) {
         for op in ops {
             match op {
@@ -803,7 +865,9 @@ impl GlRenderer {
                     );
                 }
                 Op::Blur { region, blur } => {
-                    // Lupa (blur ~ 0) uchun xiralashtirish kerak emas: bo'sh o'tkazishlar va holatni qayta bog'lash tejaladi.
+                    // UZ: Lupa (blur ~ 0) uchun xiralashtirish kerak emas: bo'sh o'tkazishlar va holatni qayta bog'lash tejaladi.
+                    // EN: A magnifier (blur ~ 0) needs no blur: empty passes and state re-binding are saved.
+                    // RU: Для лупы (blur ~ 0) размытие не нужно: экономятся пустые проходы и повторная привязка состояния.
                     if scene && *blur > 0.5 {
                         self.run_blur(*region, *blur, w, h);
                         self.bind_main(w, h);
@@ -850,7 +914,9 @@ impl GlRenderer {
                     ] {
                         glTexParameteri(0x0DE1, p, v);
                     }
-                    // Atlasni qayta 1-birlikka bog'laymiz.
+                    // UZ: Atlasni yana 1-birlikka bog'laymiz.
+                    // EN: Bind the atlas to unit 1 again.
+                    // RU: Снова привязываем атлас к блоку 1.
                     glBindTexture(0x0DE1, self.img_tex);
                     glActiveTexture(0x84C0);
                     self.big.insert(*id, t);
@@ -873,7 +939,9 @@ impl GlRenderer {
                         }
                         None => glDisable(0x0C11),
                     }
-                    // Alohida rasm teksturasi (poster) yoki atlas.
+                    // UZ: Alohida rasm teksturasi (poster) yoki atlas.
+                    // EN: A separate image texture (poster) or the atlas.
+                    // RU: Отдельная текстура изображения (постер) или атлас.
                     if *image != self.cur_img {
                         glActiveTexture(0x84C1);
                         let t = image

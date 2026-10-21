@@ -1,6 +1,10 @@
-//! Rasm: PNG dekoderi (noldan: inflate + filtrlar) va RGBA bitmap.
+//! UZ: Rasm: PNG dekoderi (noldan yozilgan: inflate + filtrlar) va RGBA bitmap.
+//! EN: Images: a PNG decoder (written from scratch: inflate + filters) and an RGBA bitmap.
+//! RU: Изображения: декодер PNG (написан с нуля: inflate + фильтры) и RGBA-bitmap.
 
-/// RGBA8 bitmap (alfa to'g'ri, premultiplied emas).
+/// UZ: RGBA8 bitmap (alfa to'g'ri, premultiplied emas): har piksel 4 bayt.
+/// EN: RGBA8 bitmap (straight alpha, not premultiplied): 4 bytes per pixel.
+/// RU: RGBA8-bitmap (прямая альфа, не premultiplied): 4 байта на пиксель.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Image {
     pub w: u32,
@@ -9,12 +13,16 @@ pub struct Image {
 }
 
 impl Image {
-    /// PNG baytlariga kodlaydi (RGBA).
+    /// UZ: PNG baytlariga kodlaydi (RGBA).
+    /// EN: Encodes to PNG bytes (RGBA).
+    /// RU: Кодирует в байты PNG (RGBA).
     pub fn to_png(&self) -> Vec<u8> {
         crate::png::encode_rgba(self.w, self.h, &self.rgba)
     }
 
-    /// Aspektni saqlab `max_w x max_h` ga sig'adigan qilib kichraytiradi (maydon o'rtachasi); kichik bo'lsa o'zgarmaydi.
+    /// UZ: Tomonlar nisbatini saqlab, `max_w x max_h` ga sig'adigan qilib kichraytiradi (maydon bo'yicha o'rtacha olinadi); allaqachon kichik bo'lsa o'zgarmaydi.
+    /// EN: Shrinks the image to fit `max_w x max_h` keeping the aspect ratio (area averaging); an image that is already small is left unchanged.
+    /// RU: Уменьшает изображение, чтобы оно помещалось в `max_w x max_h`, сохраняя пропорции (усреднение по площади); если оно уже мало — не меняется.
     pub fn resized(self, max_w: u32, max_h: u32) -> Image {
         let k = (max_w as f32 / self.w as f32).min(max_h as f32 / self.h as f32);
         if k >= 1.0 {
@@ -63,7 +71,9 @@ impl Image {
         }
     }
 
-    /// Burchaklarni `r` piksel radiusda yumaloqlaydi (alfa kanali silliqlanadi).
+    /// UZ: Burchaklarni `r` piksel radiusda yumaloqlaydi (alfa kanali silliqlanadi).
+    /// EN: Rounds the corners with radius `r` pixels (the alpha channel is anti-aliased).
+    /// RU: Скругляет углы с радиусом `r` пикселей (альфа-канал сглаживается).
     pub fn round_corners(mut self, r: f32) -> Image {
         let (w, h) = (self.w as f32, self.h as f32);
         let (hw, hh) = (w * 0.5, h * 0.5);
@@ -83,7 +93,9 @@ impl Image {
     }
 }
 
-// ── inflate (RFC 1951) ──────────────────────────────────────────────
+// UZ: ── inflate (RFC 1951) ── deflate siqishini ochish ──────────────────
+// EN: ── inflate (RFC 1951) ── decompressing deflate data ──────────────────
+// RU: ── inflate (RFC 1951) ── распаковка данных deflate ──────────────────
 
 struct Bits<'a> {
     d: &'a [u8],
@@ -161,7 +173,9 @@ const DEXT: [u8; 30] = [
     13,
 ];
 
-/// Xom deflate oqimini ochadi (zlib sarlavhasiz).
+/// UZ: Xom deflate oqimini ochadi (zlib sarlavhasiz).
+/// EN: Decompresses a raw deflate stream (without the zlib header).
+/// RU: Распаковывает «сырой» поток deflate (без заголовка zlib).
 pub fn inflate(data: &[u8]) -> Option<Vec<u8>> {
     let mut b = Bits {
         d: data,
@@ -257,7 +271,9 @@ pub fn inflate(data: &[u8]) -> Option<Vec<u8>> {
     }
 }
 
-/// PNG yoki JPEG ni formatiga qarab ochadi.
+/// UZ: PNG yoki JPEG ni formatiga qarab (sarlavha bo'yicha aniqlab) ochadi.
+/// EN: Decodes PNG or JPEG, detecting the format from its header.
+/// RU: Декодирует PNG или JPEG, определяя формат по заголовку.
 pub fn decode_image(d: &[u8]) -> Option<Image> {
     if d.starts_with(&[0x89, b'P', b'N', b'G']) {
         decode_png(d)
@@ -268,7 +284,9 @@ pub fn decode_image(d: &[u8]) -> Option<Image> {
     }
 }
 
-// ── PNG ─────────────────────────────────────────────────────────────
+// UZ: ── PNG ── dekodlash ─────────────────────────────────────────────────
+// EN: ── PNG ── decoding ─────────────────────────────────────────────────
+// RU: ── PNG ── декодирование ─────────────────────────────────────────────
 
 fn paeth(a: i32, b: i32, c: i32) -> i32 {
     let p = a + b - c;
@@ -282,7 +300,9 @@ fn paeth(a: i32, b: i32, c: i32) -> i32 {
     }
 }
 
-/// PNG ni RGBA8 ga ochadi. Qo'llab-quvvatlanadi: kulrang/RGB/palitra/+alfa, chuqurlik 1–16, interlace'siz.
+/// UZ: PNG ni RGBA8 ga ochadi. Qo'llab-quvvatlanadi: kulrang / RGB / palitra / +alfa, chuqurlik 1–16 bit, interlace'siz.
+/// EN: Decodes PNG into RGBA8. Supported: grayscale / RGB / palette / +alpha, bit depth 1–16, non-interlaced.
+/// RU: Декодирует PNG в RGBA8. Поддерживается: градации серого / RGB / палитра / +альфа, глубина 1–16 бит, без interlace.
 pub fn decode_png(d: &[u8]) -> Option<Image> {
     if d.get(..8)? != [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A] {
         return None;
@@ -360,7 +380,9 @@ pub fn decode_png(d: &[u8]) -> Option<Image> {
             px[y * stride + x] = (line[x] as i32 + add) as u8;
         }
     }
-    // Bir pikselning `ch` kanalini 0..255 ga keltirib oladi.
+    // UZ: Bir pikselning `ch` kanalini 0..255 oralig'iga keltirib oladi (chuqurlikdan qat'i nazar).
+    // EN: Reads channel `ch` of one pixel and normalizes it to 0..255 (whatever the bit depth).
+    // RU: Читает канал `ch` одного пикселя и приводит его к 0..255 (независимо от глубины).
     let sample = |row: &[u8], i: usize| -> u8 {
         match depth {
             8 => row[i],
@@ -426,12 +448,16 @@ mod tests {
 
     #[test]
     fn inflate_saqlangan_va_dinamik() {
-        // "stored" blok.
+        // UZ: "stored" blok (siqilmagan deflate bloki).
+        // EN: A "stored" block (uncompressed deflate block).
+        // RU: «Stored»-блок (несжатый блок deflate).
         assert_eq!(
             inflate(&[1, 3, 0, 0xFC, 0xFF, b'a', b'b', b'c']).unwrap(),
             b"abc"
         );
-        // zlib(python) "hello hello hello hello" (fixed Huffman).
+        // UZ: zlib (Python bilan yasalgan) "hello hello hello hello" matni, fixed Huffman kodlash bilan.
+        // EN: zlib data (made with Python) for "hello hello hello hello", using fixed Huffman coding.
+        // RU: Данные zlib (созданы в Python) для «hello hello hello hello» с фиксированным кодированием Хаффмана.
         let z = [203, 72, 205, 201, 201, 87, 200, 64, 39, 1];
         assert_eq!(inflate(&z).unwrap(), b"hello hello hello hello");
     }
@@ -447,10 +473,14 @@ mod tests {
 
     #[test]
     fn palitrali_4_bit_siqilgan_png() {
-        // Haqiqiy flagcdn PNG (4 bit palitra, deflate) — sinov rasmi.
+        // UZ: Haqiqiy flagcdn PNG (4 bitli palitra, deflate siqilgan) — sinov rasmi.
+        // EN: A real flagcdn PNG (4-bit palette, deflate-compressed) used as a test image.
+        // RU: Настоящий PNG с flagcdn (палитра 4 бита, сжатие deflate) — тестовое изображение.
         let img = decode_png(include_bytes!("../testdata/flag_uz.png")).unwrap();
         assert_eq!((img.w, img.h), (80, 40));
-        // Yuqori chiziq ko'k, o'rtasi oq (O'zbekiston bayrog'i).
+        // UZ: Yuqori chiziq ko'k, o'rtasi oq (O'zbekiston bayrog'i).
+        // EN: The top stripe is blue and the middle is white (the flag of Uzbekistan).
+        // RU: Верхняя полоса синяя, средняя белая (флаг Узбекистана).
         let px = |x: usize, y: usize| &img.rgba[(y * 80 + x) * 4..(y * 80 + x) * 4 + 3];
         assert!(px(40, 2)[2] > px(40, 2)[0]);
         assert_eq!(px(40, 20), &[255, 255, 255]);
@@ -485,7 +515,10 @@ mod tests {
             rgba: vec![255; 400],
         }
         .round_corners(4.0);
-        assert!(img.rgba[3] < 40); // chap-yuqori burchak shaffof
+        // UZ: chap-yuqori burchak shaffof
+        // EN: the top-left corner is transparent.
+        // RU: левый верхний угол прозрачен.
+        assert!(img.rgba[3] < 40);
         assert_eq!(img.rgba[(5 * 10 + 5) * 4 + 3], 255);
     }
 }

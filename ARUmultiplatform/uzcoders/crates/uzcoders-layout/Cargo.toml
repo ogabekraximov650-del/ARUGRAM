@@ -6,7 +6,7 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
-description = "uzcoders: flex joylashuv (layout) dvigateli"
+description = "uzcoders-layout — UZ: flex joylashuv (layout) dvigateli | EN: flex layout engine | RU: flex-движок раскладки"
 
 [dependencies]
 uzcoders-core = { workspace = true }

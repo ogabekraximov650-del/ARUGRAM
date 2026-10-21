@@ -1,6 +1,12 @@
-//! # uzcoders-layout
+//! UZ: # uzcoders-layout
 //! Flex joylashuv dvigateli (bir qatorli, o'ramasiz): `Row` / `Column`, `grow`, `gap`, `padding`, `margin`,
 //! `align_items`, `justify`. Matn kabi o'lchami kenglikka bog'liq tugunlar uchun `measure` funksiyasi beriladi.
+//! EN: # uzcoders-layout
+//! A flex layout engine (single line, no wrapping): `Row` / `Column`, `grow`, `gap`, `padding`, `margin`,
+//! `align_items`, `justify`. Nodes whose size depends on width (such as text) provide a `measure` function.
+//! RU: # uzcoders-layout
+//! Flex-движок раскладки (одна линия, без переноса): `Row` / `Column`, `grow`, `gap`, `padding`, `margin`,
+//! `align_items`, `justify`. Узлы, размер которых зависит от ширины (например, текст), задают функцию `measure`.
 
 use uzcoders_core::{EdgeInsets, Rect, Size};
 
@@ -11,7 +17,9 @@ pub enum Axis {
     Column,
 }
 
-/// O'lcham: kontentga qarab, aniq piksel, yoki ota-ona kengligining foizi.
+/// UZ: O'lcham turi: kontentga qarab (`Auto`), aniq piksel (`Px`) yoki ota-ona kengligining foizi (`Percent`).
+/// EN: Size kind: sized by content (`Auto`), exact pixels (`Px`) or a percentage of the parent's size (`Percent`).
+/// RU: Вид размера: по содержимому (`Auto`), точные пиксели (`Px`) или процент от размера родителя (`Percent`).
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub enum Dim {
     #[default]
@@ -43,22 +51,34 @@ pub struct Style {
     pub direction: Axis,
     pub width: Dim,
     pub height: Dim,
-    /// Bo'sh joyni bo'lishish ulushi (0 — kengaymaydi).
+    /// UZ: Bo'sh joyni bo'lishish ulushi (0 — kengaymaydi).
+    /// EN: Share of free space this node receives (0 means it does not grow).
+    /// RU: Доля свободного места, которую получает узел (0 — не растягивается).
     pub grow: f32,
-    /// Joy yetmaganda qisqarish ulushi (Px o'lchamli tugunlar qisqarmaydi).
+    /// UZ: Joy yetmaganda qisqarish ulushi (`Px` o'lchamli tugunlar qisqarmaydi).
+    /// EN: Share of the shortage this node absorbs when space is insufficient (`Px`-sized nodes never shrink).
+    /// RU: Доля нехватки места, которую узел «забирает» на себя (узлы с `Px`-размером не сжимаются).
     pub shrink: f32,
     pub padding: EdgeInsets,
     pub margin: EdgeInsets,
     pub gap: f32,
     pub align_items: Align,
     pub justify: Justify,
-    /// Asosiy o'q bo'yicha kontent sig'masa bolalar qisqarmaydi (tugun scroll qilinadi).
+    /// UZ: Asosiy o'q bo'yicha kontent sig'masa bolalar qisqarmaydi, tugun scroll qilinadi.
+    /// EN: If content does not fit along the main axis, children are not shrunk; the node scrolls instead.
+    /// RU: Если содержимое не помещается по главной оси, дети не сжимаются, а узел прокручивается.
     pub scroll: bool,
-    /// Boshlang'ich (basis) o'lcham 0 deb olinadi: `grow` bo'yicha teng bo'linadi (Compose'dagi `weight`).
+    /// UZ: Boshlang'ich (basis) o'lcham 0 deb olinadi: bo'sh joy `grow` bo'yicha teng bo'linadi (Compose'dagi `weight` kabi).
+    /// EN: The basis size is treated as 0: free space is divided by `grow` (like `weight` in Compose).
+    /// RU: Базовый размер (basis) считается нулевым: свободное место делится по `grow` (как `weight` в Compose).
     pub basis0: bool,
-    /// Bolalar bir-birining ustiga (qatlam) qo'yiladi: har biri tugun maydonini to'liq egallaydi.
+    /// UZ: Bolalar bir-birining ustiga (qatlam) qo'yiladi: har biri tugun maydonini to'liq egallaydi.
+    /// EN: Children are layered on top of each other: each fills the node's whole area.
+    /// RU: Дети накладываются друг на друга слоями: каждый занимает всю область узла.
     pub stack: bool,
-    /// Balandlik = kenglik * aspect (0 — o'chiq).
+    /// UZ: Balandlik = kenglik * aspect (0 — o'chiq).
+    /// EN: Height = width * aspect (0 disables it).
+    /// RU: Высота = ширина * aspect (0 — отключено).
     pub aspect: f32,
 }
 
@@ -89,10 +109,14 @@ type MeasureFn = Box<dyn Fn(f32) -> Size>;
 struct Node {
     style: Style,
     children: Vec<NodeId>,
-    /// Bargi tugun: berilgan kenglikda (cheksiz bo'lsa `f32::INFINITY`) kontent o'lchamini qaytaradi.
+    /// UZ: Barg tugun uchun o'lchash funksiyasi: berilgan kenglikda (cheksiz bo'lsa `f32::INFINITY`) kontent o'lchamini qaytaradi.
+    /// EN: Measure function for a leaf node: returns the content size for a given width (`f32::INFINITY` if unbounded).
+    /// RU: Функция измерения для листового узла: возвращает размер содержимого при заданной ширине (`f32::INFINITY`, если ширина не ограничена).
     measure: Option<MeasureFn>,
     rect: Rect,
-    /// Asosiy o'q bo'yicha bolalarning to'liq uzunligi (scroll uchun).
+    /// UZ: Asosiy o'q bo'yicha bolalarning to'liq uzunligi (scroll uchun kerak).
+    /// EN: Total length of the children along the main axis (needed for scrolling).
+    /// RU: Полная длина детей вдоль главной оси (нужна для прокрутки).
     extent: f32,
 }
 
@@ -128,17 +152,23 @@ impl Tree {
         self.nodes.len() - 1
     }
 
-    /// Hisoblangan joylashuv (ildizga nisbatan mutlaq koordinatalarda, `compute` dan keyin).
+    /// UZ: Hisoblangan joylashuv: ildizga nisbatan mutlaq koordinatalarda (`compute` dan keyin to'g'ri).
+    /// EN: The computed layout: absolute coordinates relative to the root (valid after `compute`).
+    /// RU: Вычисленное положение: абсолютные координаты относительно корня (корректно после `compute`).
     pub fn rect(&self, id: NodeId) -> Rect {
         self.nodes[id].rect
     }
 
-    /// Tugunning ichki chekinishi.
+    /// UZ: Tugunning ichki chekinishi (padding).
+    /// EN: The node's inner padding.
+    /// RU: Внутренний отступ узла (padding).
     pub fn padding(&self, id: NodeId) -> EdgeInsets {
         self.nodes[id].style.padding
     }
 
-    /// Bolalarning asosiy o'q bo'yicha to'liq uzunligi (padding'siz).
+    /// UZ: Bolalarning asosiy o'q bo'yicha to'liq uzunligi (padding'siz).
+    /// EN: Total length of the children along the main axis (without padding).
+    /// RU: Полная длина детей вдоль главной оси (без padding).
     pub fn content_extent(&self, id: NodeId) -> f32 {
         self.nodes[id].extent
     }
@@ -147,7 +177,9 @@ impl Tree {
         &self.nodes[id].children
     }
 
-    /// Ildizni `available` o'lchamdagi maydonga joylashtiradi.
+    /// UZ: Ildizni `available` o'lchamli maydonga joylashtiradi va barcha bolalarning o'rnini hisoblaydi.
+    /// EN: Lays out the root within the `available` area and computes the position of every child.
+    /// RU: Раскладывает корень в области размера `available` и вычисляет положение всех детей.
     pub fn compute(&mut self, root: NodeId, available: Size) {
         let s = self.nodes[root].style;
         let size = self.measure(root, available.w);
@@ -159,7 +191,9 @@ impl Tree {
         let h = match s.height {
             Dim::Px(p) => p,
             Dim::Percent(p) => available.h * p / 100.0,
-            // Ildiz oynani to'ldiradi (sig'magan kontent qisqaradi yoki scroll qilinadi).
+            // UZ: Ildiz oynani to'ldiradi (sig'magan kontent qisqaradi yoki scroll qilinadi).
+            // EN: The root fills the window (content that does not fit is shrunk or scrolled).
+            // RU: Корень заполняет окно (то, что не помещается, сжимается или прокручивается).
             Dim::Auto => {
                 if available.h.is_finite() {
                     available.h
@@ -171,7 +205,9 @@ impl Tree {
         self.place(root, Rect::new(s.margin.left, s.margin.top, w, h));
     }
 
-    /// Tugunning tashqi (margin'siz) kontent o'lchami `avail_w` kenglik sharoitida.
+    /// UZ: Tugunning tashqi (margin'siz) kontent o'lchami, `avail_w` kenglik sharoitida.
+    /// EN: The node's outer content size (without margin) under the available width `avail_w`.
+    /// RU: Внешний размер содержимого узла (без margin) при доступной ширине `avail_w`.
     fn measure(&self, id: NodeId, avail_w: f32) -> Size {
         let n = &self.nodes[id];
         let s = &n.style;
@@ -214,7 +250,9 @@ impl Tree {
             }
             return Size::new(w, h);
         }
-        // Qatorda `weight` bolalar o'z ulushidagi kenglikda o'lchanadi (aks holda ular to'liq kenglikda o'lchanib, balandlik noto'g'ri chiqadi).
+        // UZ: Qatorda `weight` bolalar o'z ulushidagi kenglikda o'lchanadi (aks holda ular to'liq kenglikda o'lchanib, balandlik noto'g'ri chiqadi).
+        // EN: In a row, weighted children are measured at their own share of the width (otherwise they would be measured at full width and the height would be wrong).
+        // RU: В строке дети с `weight` измеряются по своей доле ширины (иначе они измерялись бы на полной ширине и высота получилась бы неверной).
         let total_grow: f32 = if axis == Axis::Row {
             n.children
                 .iter()
@@ -225,8 +263,12 @@ impl Tree {
             0.0
         };
         let gaps = s.gap * n.children.len().saturating_sub(1) as f32;
-        // Qatorda `weight` bolalar ulushi: qat'iy (weight'siz) qo'shnilar egallagan kenglik ayirib tashlanadi, aks holda
-        // matn haqiqiyidan kengroq o'lchanadi va satrlar soni kam chiqadi (kontent kartadan chiqib ketadi).
+        // UZ: Qatorda `weight` bolalar ulushi: qat'iy (weight'siz) qo'shnilar egallagan kenglik avval ayrib tashlanadi. Aks holda
+        //     matn haqiqiyidan kengroq o'lchanadi, satrlar soni kam chiqadi va kontent kartadan chiqib ketadi.
+        // EN: Share for weighted children in a row: the width taken by fixed (non-weighted) siblings is subtracted first. Otherwise
+        //     text is measured wider than it really is, too few lines are counted and the content overflows its card.
+        // RU: Доля для детей с `weight` в строке: сначала вычитается ширина, занятая «жёсткими» соседями (без weight). Иначе
+        //     текст измеряется шире, чем на самом деле, строк получается меньше, и содержимое выходит за пределы карточки.
         let fixed_w: f32 = if axis == Axis::Row && total_grow > 0.0 && inner_avail_w.is_finite() {
             n.children
                 .iter()
@@ -262,7 +304,9 @@ impl Tree {
         join(axis, main, cross)
     }
 
-    /// `rect` — tugunga ajratilgan chegara qutisi (margin'siz). Bolalarni rekursiv joylaydi.
+    /// UZ: `rect` — tugunga ajratilgan chegara qutisi (margin'siz). Bolalarni rekursiv joylaydi.
+    /// EN: `rect` is the bounding box given to the node (without margin). Lays out the children recursively.
+    /// RU: `rect` — выделенная узлу рамка (без margin). Рекурсивно раскладывает детей.
     fn place(&mut self, id: NodeId, rect: Rect) {
         self.nodes[id].rect = rect;
         let style = self.nodes[id].style;
@@ -289,7 +333,9 @@ impl Tree {
         let axis = style.direction;
         let (content_main, content_cross) = split(axis, content.size());
 
-        // 1) Har bir bolaning asosiy o'qdagi boshlang'ich (basis) o'lchami (margin bilan).
+        // UZ: 1-qadam: har bir bolaning asosiy o'qdagi boshlang'ich (basis) o'lchamini (margin bilan) aniqlaymiz.
+        // EN: Step 1: determine each child's initial (basis) size along the main axis, including margin.
+        // RU: Шаг 1: определяем исходный (basis) размер каждого ребёнка по главной оси, включая margin.
         struct Item {
             id: NodeId,
             basis: f32,
@@ -310,7 +356,9 @@ impl Tree {
                 Axis::Row => matches!(cs.width, Dim::Px(_)),
                 Axis::Column => matches!(cs.height, Dim::Px(_)),
             };
-            // Scroll tugun kontentiga qarab o'lchanmaydi: qolgan joyni egallaydi (o'lchami aniq bo'lmasa).
+            // UZ: Scroll tugun kontentiga qarab o'lchanmaydi: qolgan joyni egallaydi (agar o'lchami aniq berilmagan bo'lsa).
+            // EN: A scroll node is not sized by its content: it takes the remaining space (unless its size is explicit).
+            // RU: Прокручиваемый узел не измеряется по содержимому: он занимает оставшееся место (если размер не задан явно).
             let flexible_scroll = cs.scroll && !fixed_main;
             let basis = if cs.basis0 || flexible_scroll {
                 0.0
@@ -331,7 +379,9 @@ impl Tree {
             });
         }
 
-        // 2) Bo'sh joyni taqsimlash yoki qisqartirish.
+        // UZ: 2-qadam: bo'sh joyni `grow` bo'yicha taqsimlaymiz yoki joy yetmasa `shrink` bo'yicha qisqartiramiz.
+        // EN: Step 2: distribute free space by `grow`, or shrink by `shrink` when space is short.
+        // RU: Шаг 2: распределяем свободное место по `grow` или, если места не хватает, сжимаем по `shrink`.
         let gaps = style.gap * (items.len().saturating_sub(1)) as f32;
         let used: f32 = items.iter().map(|i| i.basis + i.margin_main).sum::<f32>() + gaps;
         let free = content_main - used;
@@ -356,7 +406,9 @@ impl Tree {
             }
         }
 
-        // 3) Asosiy o'q bo'yicha boshlang'ich joy (justify) va oraliq.
+        // UZ: 3-qadam: asosiy o'q bo'yicha boshlang'ich joy (`justify`) va elementlar orasidagi qo'shimcha oraliqni hisoblaymiz.
+        // EN: Step 3: compute the starting offset along the main axis (`justify`) and the extra gap between items.
+        // RU: Шаг 3: вычисляем начальное смещение по главной оси (`justify`) и дополнительный промежуток между элементами.
         let (mut cursor, extra_gap) = match style.justify {
             Justify::Start => (0.0, 0.0),
             Justify::Center => (leftover * 0.5, 0.0),
@@ -370,11 +422,15 @@ impl Tree {
             }
         };
 
-        // 4) Joylash: har bir bolaning ko'ndalang o'lchami va o'rni.
+        // UZ: 4-qadam: joylash — har bir bolaning ko'ndalang o'lchami va o'rnini belgilaymiz.
+        // EN: Step 4: placement — set each child's cross-axis size and position.
+        // RU: Шаг 4: размещение — задаём поперечный размер и положение каждого ребёнка.
         for (k, it) in items.iter().enumerate() {
             let cs = self.nodes[it.id].style;
             let main_size = sizes[k];
-            // Matn kabi kenglikka bog'liq bolalar uchun balandlikni yakuniy kenglikda qayta o'lchaymiz.
+            // UZ: Matn kabi kenglikka bog'liq bolalar uchun balandlikni yakuniy kenglikda qayta o'lchaymiz.
+            // EN: For width-dependent children such as text, re-measure the height at the final width.
+            // RU: Для детей, зависящих от ширины (например, текста), заново измеряем высоту при итоговой ширине.
             let child_w_for_measure = match axis {
                 Axis::Row => main_size,
                 Axis::Column => (content.w - cs.margin.horizontal()).max(0.0),
@@ -386,7 +442,10 @@ impl Tree {
                 Axis::Row => matches!(cs.height, Dim::Px(_)),
                 Axis::Column => matches!(cs.width, Dim::Px(_)),
             };
-            let align = cs.align_items; // (bola o'z `align_items` ni ota uchun emas — quyida ota'niki)
+            // UZ: bolaning o'z `align_items` qiymati bu yerda ishlatilmaydi — ota-onaniki ishlatiladi (quyida)
+            // EN: the child's own `align_items` is not used here — the parent's one is (below).
+            // RU: собственный `align_items` ребёнка здесь не используется — берётся родительский (ниже).
+            let align = cs.align_items;
             let _ = align;
             let parent_align = style.align_items;
             let cross_size = if parent_align == Align::Stretch && !explicit_cross {
@@ -495,7 +554,9 @@ mod tests {
         assert_eq!(t.rect(card).w, 100.0);
         assert_eq!(t.rect(card).h, 150.0);
         assert_eq!(t.rect(row).h, 150.0);
-        // Qatlam: ikkala bola karta maydonini to'ldiradi.
+        // UZ: Qatlam: ikkala bola ham karta maydonini to'liq to'ldiradi.
+        // EN: Layering: both children fill the whole card area.
+        // RU: Слои: оба ребёнка заполняют всю область карточки.
         assert_eq!(t.rect(over).w, 100.0);
         assert_eq!(t.rect(over).h, 150.0);
         assert_eq!(t.rect(card2).x, 110.0);
@@ -617,7 +678,9 @@ mod tests {
 
     #[test]
     fn text_like_leaf_wraps_with_width() {
-        // 10 ta belgi, har biri 10 px: 50 px kenglikda 2 qatorga o'raladi.
+        // UZ: 10 ta belgi, har biri 10 px: 50 px kenglikda 2 qatorga o'raladi.
+        // EN: 10 characters, 10 px each: wraps into 2 lines at 50 px width.
+        // RU: 10 символов по 10 px: при ширине 50 px переносится на 2 строки.
         let mut t = Tree::new();
         let leaf = t.add_leaf(Style::default(), |w| {
             let total = 100.0f32;
@@ -677,8 +740,12 @@ mod tests {
 
     #[test]
     fn ulushli_matn_qoshni_kengligini_ayirib_oladi() {
-        // Matn: 1000 birlik uzunlik, har satr 10 balandlik. Qator kengligi 300, chapda 100 px qat'iy quti:
-        // matn 200 kenglikda -> 5 satr -> 50 balandlik (300 da o'lchansa 4 satr = 40 chiqardi).
+        // UZ: Matn: uzunligi 1000 birlik, har satr balandligi 10. Qator kengligi 300, chapda 100 px qat'iy quti bor:
+        //     matn 200 kenglikda o'lchanadi -> 5 satr -> balandlik 50 (300 kenglikda o'lchansa 4 satr = 40 chiqib, xato bo'lardi).
+        // EN: Text: 1000 units long, each line 10 high. The row is 300 wide with a fixed 100 px box on the left:
+        //     the text is measured at width 200 -> 5 lines -> height 50 (measuring at 300 would give 4 lines = 40, which is wrong).
+        // RU: Текст: длина 1000 единиц, высота строки 10. Ширина строки 300, слева фиксированный блок 100 px:
+        //     текст измеряется при ширине 200 -> 5 строк -> высота 50 (при ширине 300 вышло бы 4 строки = 40, что неверно).
         let mut t = Tree::new();
         let lead = t.add(fixed(100.0, 20.0), vec![]);
         let text = t.add_leaf(

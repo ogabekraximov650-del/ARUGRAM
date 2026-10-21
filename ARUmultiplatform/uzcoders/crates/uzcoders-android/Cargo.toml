@@ -1,6 +1,6 @@
 [package]
 name = "uzcoders-android"
-description = "uzcoders: Android (NativeActivity) qobig'i — oyna, teginish va kadr tsikli"
+description = "uzcoders-android — UZ: Android (NativeActivity) qobig'i — oyna, teginish va kadr tsikli | EN: Android (NativeActivity) shell: window, touch and the frame loop | RU: оболочка Android (NativeActivity): окно, касания и цикл кадров"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

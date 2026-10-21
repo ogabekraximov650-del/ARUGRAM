@@ -1,5 +1,9 @@
-//! # uzcoders-core
+//! UZ: # uzcoders-core
 //! Asosiy turlar: geometriya, rang, reaktiv holat, animatsiya va kiritish hodisalari. Hech qanday tashqi bog'liqlik yo'q.
+//! EN: # uzcoders-core
+//! Core types: geometry, color, reactive state, animation and input events. No external dependencies.
+//! RU: # uzcoders-core
+//! Базовые типы: геометрия, цвет, реактивное состояние, анимация и события ввода. Без внешних зависимостей.
 
 pub mod anim;
 pub mod color;

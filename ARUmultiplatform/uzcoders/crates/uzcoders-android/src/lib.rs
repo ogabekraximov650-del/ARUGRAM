@@ -1,7 +1,15 @@
-//! uzcoders-android — Android `NativeActivity` qobig'i (tashqi kutubxonasiz, faqat tizim `libandroid`/`liblog`).
+//! UZ: uzcoders-android — Android `NativeActivity` qobig'i (tashqi kutubxonasiz; faqat tizim `libandroid` / `liblog`).
 //!
 //! Ilova `cdylib` bo'lib, `android_app!(boshlash)` makrosini chaqiradi; `boshlash` — `fn(zichlik: f32) -> Ui`.
-//! Qobiq oynani, teginishlarni va kadr tsiklini o'zi boshqaradi: holat o'zgarsa qayta chizadi, bo'lmasa uxlaydi.
+//! Qobiq oyna, teginishlar va kadr tsiklini o'zi boshqaradi: holat o'zgarsa qayta chizadi, bo'lmasa uxlaydi.
+//! EN: uzcoders-android — the Android `NativeActivity` shell (no external libraries; only the system `libandroid` / `liblog`).
+//!
+//! The app is a `cdylib` that invokes the `android_app!(start)` macro; `start` is `fn(density: f32) -> Ui`.
+//! The shell manages the window, touches and the frame loop itself: it redraws when state changes and sleeps otherwise.
+//! RU: uzcoders-android — оболочка Android `NativeActivity` (без внешних библиотек; только системные `libandroid` / `liblog`).
+//!
+//! Приложение — это `cdylib`, вызывающий макрос `android_app!(start)`; `start` — `fn(density: f32) -> Ui`.
+//! Оболочка сама управляет окном, касаниями и циклом кадров: перерисовывает при изменении состояния, иначе спит.
 
 #[cfg(target_os = "android")]
 pub(crate) mod egl;
@@ -13,8 +21,12 @@ pub(crate) mod jni;
 #[cfg(target_os = "android")]
 pub use glue::{activity_call, activity_call_ret, video_stats, frame_to_file, keep_screen_on, set_fullscreen, video_release, video_window, copy_text, files_dir, ime_event, jstring, on_create, open_url, pick_file, take_picked, toast, ANativeActivity, ImeEvent};
 
-/// Ilova kirish nuqtasini e'lon qiladi: `uzcoders_android::android_app!(my_app);`
+/// UZ: Ilova kirish nuqtasini e'lon qiladi: `uzcoders_android::android_app!(my_app);`
 /// bu yerda `fn my_app(scale: f32) -> uzcoders_ui::Ui`.
+/// EN: Declares the app entry point: `uzcoders_android::android_app!(my_app);`
+/// where `fn my_app(scale: f32) -> uzcoders_ui::Ui`.
+/// RU: Объявляет точку входа приложения: `uzcoders_android::android_app!(my_app);`
+/// где `fn my_app(scale: f32) -> uzcoders_ui::Ui`.
 #[macro_export]
 macro_rules! android_app {
     ($f:path) => {
@@ -27,7 +39,9 @@ macro_rules! android_app {
             $crate::on_create(activity, $f);
         }
 
-        // Java yelimi (`uz.uzcoders.UzActivity`) chaqiradigan JNI funksiyalari.
+        // UZ: Java yelimi (`uz.uzcoders.UzActivity`) chaqiradigan JNI funksiyalari.
+        // EN: JNI functions called by the Java glue (`uz.uzcoders.UzActivity`).
+        // RU: JNI-функции, которые вызывает Java-прослойка (`uz.uzcoders.UzActivity`).
         #[no_mangle]
         pub unsafe extern "system" fn Java_uz_uzcoders_UzActivity_nativeCommit(
             env: *mut ::std::ffi::c_void,
@@ -86,8 +100,12 @@ macro_rules! android_app {
     };
 }
 
-/// Piksel buferini (RGBA8, `w*h*4`) qabul qiluvchi manzil buferga qatorma-qator nusxalaydi
-/// (`stride` — manzil qator uzunligi piksellarda). Platformadan mustaqil, shuning uchun testlanadi.
+/// UZ: Piksel buferini (RGBA8, `w*h*4`) qabul qiluvchi manzil buferga qatorma-qator nusxalaydi
+/// (`stride` — manzil qator uzunligi, piksellarda). Platformadan mustaqil, shuning uchun testlanadi.
+/// EN: Copies a pixel buffer (RGBA8, `w*h*4`) row by row into the destination buffer
+/// (`stride` is the destination row length in pixels). Platform-independent, so it is unit-tested.
+/// RU: Построчно копирует буфер пикселей (RGBA8, `w*h*4`) в буфер назначения
+/// (`stride` — длина строки назначения в пикселях). Не зависит от платформы, поэтому покрыт тестами.
 pub fn blit_rows(src: &[u8], w: usize, h: usize, dst: &mut [u8], stride: usize) {
     let row = w * 4;
     for y in 0..h {
@@ -99,8 +117,12 @@ pub fn blit_rows(src: &[u8], w: usize, h: usize, dst: &mut [u8], stride: usize) 
     }
 }
 
-/// Android `KEYCODE_*` va `META_*` qiymatidan ASCII belgi (klaviaturada Latin harflar, raqamlar va keng tarqalgan belgilar).
-/// Boshqa tugmalar (strelkalar, funksiya tugmalari) uchun `None`.
+/// UZ: Android `KEYCODE_*` va `META_*` qiymatidan ASCII belgi (Latin harflar, raqamlar va keng tarqalgan belgilar) hosil qiladi.
+/// Boshqa tugmalar (strelkalar, funksiya tugmalari) uchun `None` qaytadi.
+/// EN: Produces an ASCII character from Android `KEYCODE_*` and `META_*` values (Latin letters, digits and common symbols).
+/// Returns `None` for other keys (arrows, function keys).
+/// RU: Получает ASCII-символ из значений Android `KEYCODE_*` и `META_*` (латинские буквы, цифры и распространённые знаки).
+/// Для остальных клавиш (стрелки, функциональные) возвращает `None`.
 pub fn keycode_to_char(code: i32, meta: i32) -> Option<char> {
     let shift = meta & 0x1 != 0;
     let c = match code {
@@ -216,14 +238,26 @@ mod tests {
         assert_eq!(keycode_to_char(62, 0), Some(' '));
         assert_eq!(keycode_to_char(81, 0), Some('+'));
         assert_eq!(keycode_to_char(152, 0), Some('8'));
-        assert_eq!(keycode_to_char(19, 0), None); // yuqoriga strelka
-        assert_eq!(keycode_to_char(4, 0), None); // orqaga
+        // UZ: yuqoriga strelka
+        // EN: Up arrow key.
+        // RU: Стрелка вверх.
+        assert_eq!(keycode_to_char(19, 0), None);
+        // UZ: orqaga (Back tugmasi)
+        // EN: Back key.
+        // RU: Кнопка «Назад».
+        assert_eq!(keycode_to_char(4, 0), None);
     }
 
     #[test]
     fn qatorlar_stride_bilan() {
-        let src: Vec<u8> = (0..16).collect(); // 2x2 piksel
-        let mut dst = vec![0u8; 3 * 2 * 4]; // stride 3
+        // UZ: 2x2 piksel (16 bayt)
+        // EN: 2x2 pixels (16 bytes).
+        // RU: 2x2 пикселя (16 байт).
+        let src: Vec<u8> = (0..16).collect();
+        // UZ: stride = 3 piksel (manzil qatori kengroq)
+        // EN: stride = 3 pixels (the destination row is wider).
+        // RU: stride = 3 пикселя (строка назначения шире).
+        let mut dst = vec![0u8; 3 * 2 * 4];
         blit_rows(&src, 2, 2, &mut dst, 3);
         assert_eq!(&dst[0..8], &src[0..8]);
         assert_eq!(&dst[8..12], &[0; 4]);
@@ -231,13 +265,17 @@ mod tests {
     }
 }
 
-/// Android bo'lmagan muhitda (testlar) vaqtinchalik papka.
+/// UZ: Android bo'lmagan muhitda (testlar): vaqtinchalik papka.
+/// EN: Outside Android (tests): a temporary directory.
+/// RU: Вне Android (тесты): временная папка.
 #[cfg(not(target_os = "android"))]
 pub fn files_dir() -> String {
     std::env::temp_dir().to_string_lossy().into_owned()
 }
 
-// Android bo'lmagan muhitda (testlar): platforma xizmatlari bo'sh.
+// UZ: Android bo'lmagan muhitda (testlar): platforma xizmatlari bo'sh (hech narsa qilmaydi).
+// EN: Outside Android (tests): platform services are empty stubs (they do nothing).
+// RU: Вне Android (тесты): платформенные службы — пустые заглушки (ничего не делают).
 #[cfg(not(target_os = "android"))]
 pub fn open_url(_url: &str) {}
 #[cfg(not(target_os = "android"))]
@@ -245,7 +283,9 @@ pub fn copy_text(_t: &str) {}
 #[cfg(not(target_os = "android"))]
 pub fn toast(_t: &str) {}
 
-/// Activity metodini chaqirish (faqat Android).
+/// UZ: Activity metodini chaqirish (faqat Android; bu yerda bo'sh).
+/// EN: Calling an Activity method (Android only; an empty stub here).
+/// RU: Вызов метода Activity (только Android; здесь пустая заглушка).
 #[cfg(not(target_os = "android"))]
 pub fn activity_call(_name: &str, _arg: &str) {}
 
@@ -254,13 +294,17 @@ pub fn activity_call_ret(_name: &str, _arg: &str) -> String {
     String::new()
 }
 
-/// Video diagnostikasi (faqat Android).
+/// UZ: Video diagnostikasi (faqat Android; bu yerda bo'sh).
+/// EN: Video diagnostics (Android only; an empty stub here).
+/// RU: Диагностика видео (только Android; здесь пустая заглушка).
 #[cfg(not(target_os = "android"))]
 pub fn video_stats() -> (u32, bool, u64) {
     (0, false, 0)
 }
 
-/// Videodan bitta kadr (faqat Android).
+/// UZ: Videodan bitta kadr (faqat Android; bu yerda bo'sh).
+/// EN: Extracting one frame from a video (Android only; an empty stub here).
+/// RU: Извлечение одного кадра из видео (только Android; здесь пустая заглушка).
 #[cfg(not(target_os = "android"))]
 pub fn frame_to_file(_arg: &str) {}
 #[cfg(not(target_os = "android"))]

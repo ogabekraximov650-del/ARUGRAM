@@ -1,9 +1,15 @@
-//! TrueType (`.ttf`) shrift o'quvchisi — noldan yozilgan.
+//! UZ: TrueType (`.ttf`) shrift o'quvchisi — noldan yozilgan.
 //! Qo'llab-quvvatlanadi: head, maxp, hhea, hmtx, cmap (format 4 va 12), loca, glyf (oddiy va murakkab shakllar).
+//! EN: A TrueType (`.ttf`) font reader — written from scratch.
+//! Supported tables: head, maxp, hhea, hmtx, cmap (formats 4 and 12), loca, glyf (simple and composite glyphs).
+//! RU: Читатель шрифтов TrueType (`.ttf`) — написан с нуля.
+//! Поддерживаются таблицы: head, maxp, hhea, hmtx, cmap (форматы 4 и 12), loca, glyf (простые и составные глифы).
 
 const MAX_DEPTH: u32 = 6;
 
-/// Shakl nuqtasi: (x, y, chiziq ustidami) — shrift birliklarida.
+/// UZ: Kontur nuqtasi: (x, y, chiziq ustidami) — shrift birliklarida.
+/// EN: Contour point: (x, y, on-curve flag), in font units.
+/// RU: Точка контура: (x, y, лежит ли на кривой) — в единицах шрифта.
 #[derive(Clone, Copy, Debug)]
 pub struct Pt {
     pub x: f32,
@@ -50,7 +56,10 @@ impl Font {
         let d = data;
         let tag = u32_at(d, 0)?;
         if tag != 0x0001_0000 && tag != 0x7472_7565 {
-            return None; // faqat TrueType
+            // UZ: faqat TrueType qo'llab-quvvatlanadi
+            // EN: only TrueType is supported.
+            // RU: поддерживается только TrueType.
+            return None;
         }
         let n = u16_at(d, 4)? as usize;
         let find = |name: &[u8; 4]| -> Option<usize> {
@@ -80,7 +89,9 @@ impl Font {
         let line_gap = i16_at(d, hhea + 8)?;
         let num_hmetrics = u16_at(d, hhea + 34)?;
 
-        // cmap: format 12 (Unicode to'liq) afzal, bo'lmasa format 4 (BMP).
+        // UZ: cmap: 12-format (to'liq Unicode) afzal ko'riladi; bo'lmasa 4-format (faqat BMP) ishlatiladi.
+        // EN: cmap: format 12 (full Unicode) is preferred; otherwise format 4 (BMP only) is used.
+        // RU: cmap: предпочтителен формат 12 (полный Unicode); иначе используется формат 4 (только BMP).
         let ntab = u16_at(d, cmap + 2)? as usize;
         let mut best: Option<(usize, u16)> = None;
         for i in 0..ntab {
@@ -119,7 +130,9 @@ impl Font {
         self.num_glyphs
     }
 
-    /// Unicode belgi -> glif raqami (0 = topilmadi).
+    /// UZ: Unicode belgi -> glif raqami (0 — topilmadi).
+    /// EN: Unicode character -> glyph index (0 means not found).
+    /// RU: Символ Unicode -> номер глифа (0 — не найден).
     pub fn glyph_id(&self, ch: char) -> u16 {
         self.lookup(ch as u32).unwrap_or(0)
     }
@@ -173,7 +186,9 @@ impl Font {
         None
     }
 
-    /// Glifning gorizontal surilishi (shrift birliklarida).
+    /// UZ: Glifning gorizontal siljishi (advance), shrift birliklarida.
+    /// EN: The glyph's horizontal advance, in font units.
+    /// RU: Горизонтальный шаг глифа (advance) в единицах шрифта.
     pub fn advance_units(&self, gid: u16) -> u16 {
         if self.num_hmetrics == 0 {
             return 0;
@@ -199,12 +214,17 @@ impl Font {
             )
         };
         if b <= a {
-            return None; // bo'sh shakl (masalan, probel)
+            // UZ: bo'sh shakl (masalan, probel)
+            // EN: an empty glyph (for example, a space).
+            // RU: пустой глиф (например, пробел).
+            return None;
         }
         Some((self.glyf + a, self.glyf + b))
     }
 
-    /// Glifning kontur nuqtalari (shrift birliklarida, y yuqoriga).
+    /// UZ: Glifning kontur nuqtalari (shrift birliklarida, y o'qi yuqoriga qaragan).
+    /// EN: The glyph's outline points (in font units, y axis pointing up).
+    /// RU: Точки контура глифа (в единицах шрифта, ось y направлена вверх).
     pub fn outline(&self, gid: u16) -> Vec<Contour> {
         let mut out = Vec::new();
         self.collect(gid, [1.0, 0.0, 0.0, 1.0, 0.0, 0.0], 0, &mut out);
@@ -284,7 +304,9 @@ impl Font {
             }
             return Some(());
         }
-        // Murakkab shakl: bir nechta glifni birlashtiradi.
+        // UZ: Murakkab shakl: bir nechta glifni bitta qilib birlashtiradi (masalan, harf + urg'u belgisi).
+        // EN: Composite glyph: combines several glyphs into one (for example, a letter plus an accent).
+        // RU: Составной глиф: объединяет несколько глифов в один (например, буква + акцент).
         loop {
             let flags = u16_at(d, p)?;
             let child = u16_at(d, p + 2)?;
@@ -299,7 +321,10 @@ impl Font {
                 dy = *d.get(p + 1)? as i8 as f32;
                 p += 2;
             }
-            let (dx, dy) = if flags & 2 != 0 { (dx, dy) } else { (0.0, 0.0) }; // nuqta-moslash qo'llab-quvvatlanmaydi
+            // UZ: nuqta-moslash (point matching) qo'llab-quvvatlanmaydi
+            // EN: point matching is not supported.
+            // RU: сопоставление точек (point matching) не поддерживается.
+            let (dx, dy) = if flags & 2 != 0 { (dx, dy) } else { (0.0, 0.0) };
             let f2 = |o: usize| i16_at(d, o).map(|v| v as f32 / 16384.0);
             let (mut a, mut b, mut c, mut dd) = (1.0, 0.0, 0.0, 1.0);
             if flags & 8 != 0 {
@@ -317,7 +342,9 @@ impl Font {
                 dd = f2(p + 6)?;
                 p += 8;
             }
-            // child = [a c; b d] * (x,y) + (dx,dy), keyin ota matritsa m.
+            // UZ: Bola glif nuqtasi = [a c; b d] * (x, y) + (dx, dy); so'ng ota matritsa `m` qo'llanadi.
+            // EN: Child glyph point = [a c; b d] * (x, y) + (dx, dy); then the parent matrix `m` is applied.
+            // RU: Точка дочернего глифа = [a c; b d] * (x, y) + (dx, dy); затем применяется родительская матрица `m`.
             let cm = [a, b, c, dd, dx, dy];
             let comb = [
                 m[0] * cm[0] + m[2] * cm[1],

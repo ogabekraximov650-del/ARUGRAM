@@ -1,5 +1,9 @@
-//! Minimal JNI: faqat tizim klaviaturasini ko'rsatish/yashirish uchun (tashqi kutubxonasiz).
-//! Funksiya jadvali indekslari Android `jni.h` dan olingan.
+//! UZ: Minimal JNI: faqat kerakli Java metodlarini chaqirish uchun (tashqi kutubxonasiz). Funksiya jadvali indekslari
+//! Android `jni.h` faylidan olingan.
+//! EN: Minimal JNI: only for calling the Java methods that are needed (no external libraries). The function table indices
+//! are taken from Android's `jni.h`.
+//! RU: Минимальный JNI: только для вызова нужных методов Java (без внешних библиотек). Индексы таблицы функций
+//! взяты из Android `jni.h`.
 
 use super::ANativeActivity;
 use std::ffi::c_void;
@@ -64,7 +68,9 @@ impl Env {
     }
 }
 
-/// Chaqiruvchi oqimni JVM'ga ulaydi (bir marta).
+/// UZ: Chaqiruvchi oqimni JVM'ga ulaydi (har chaqiruvda; qayta ulanish zararsiz).
+/// EN: Attaches the calling thread to the JVM (on every call; re-attaching is harmless).
+/// RU: Подключает вызывающий поток к JVM (при каждом вызове; повторное подключение безвредно).
 unsafe fn attach(activity: *mut ANativeActivity) -> Option<Env> {
     let vm = (*activity).vm;
     if vm.is_null() {
@@ -80,10 +86,18 @@ unsafe fn attach(activity: *mut ANativeActivity) -> Option<Env> {
     Some(Env(env))
 }
 
-/// Oqim tugashidan oldin JVM'dan ajratadi.
+/// UZ: Oqim tugashidan oldin JVM'dan ajratadi.
 ///
 /// # Safety
 /// `activity` yaroqli bo'lishi kerak.
+/// EN: Detaches the thread from the JVM before it ends.
+///
+/// # Safety
+/// `activity` must be valid.
+/// RU: Отсоединяет поток от JVM перед его завершением.
+///
+/// # Safety
+/// `activity` должен быть действительным.
 pub unsafe fn detach(activity: *mut ANativeActivity) {
     let vm = (*activity).vm;
     if vm.is_null() {
@@ -94,10 +108,18 @@ pub unsafe fn detach(activity: *mut ANativeActivity) {
     f(vm);
 }
 
-/// `UzActivity.showKeyboard(inputType)` (Java yelimi) ni chaqiradi.
+/// UZ: `UzActivity.showKeyboard(inputType)` (Java yelimi) ni chaqiradi.
 ///
 /// # Safety
-/// `activity` yaroqli bo'lishi kerak; chaqiruvchi oqim JVM'ga ulanishi mumkin bo'lgan oqim.
+/// `activity` yaroqli bo'lishi kerak; chaqiruvchi oqim JVM'ga ulanishi mumkin bo'lgan oqim bo'lishi kerak.
+/// EN: Calls `UzActivity.showKeyboard(inputType)` (the Java glue).
+///
+/// # Safety
+/// `activity` must be valid; the calling thread must be one that can attach to the JVM.
+/// RU: Вызывает `UzActivity.showKeyboard(inputType)` (Java-прослойка).
+///
+/// # Safety
+/// `activity` должен быть действительным; вызывающий поток должен уметь подключаться к JVM.
 pub unsafe fn show_keyboard(activity: *mut ANativeActivity, input_type: i32) {
     let Some(env) = attach(activity) else { return };
     let clazz = (*activity).clazz;
@@ -108,10 +130,18 @@ pub unsafe fn show_keyboard(activity: *mut ANativeActivity, input_type: i32) {
     env.delete(cls);
 }
 
-/// `UzActivity.hideKeyboard()` ni chaqiradi.
+/// UZ: `UzActivity.hideKeyboard()` ni chaqiradi.
 ///
 /// # Safety
 /// `show_keyboard` bilan bir xil.
+/// EN: Calls `UzActivity.hideKeyboard()`.
+///
+/// # Safety
+/// Same as `show_keyboard`.
+/// RU: Вызывает `UzActivity.hideKeyboard()`.
+///
+/// # Safety
+/// Так же, как у `show_keyboard`.
 pub unsafe fn hide_keyboard(activity: *mut ANativeActivity) {
     let Some(env) = attach(activity) else { return };
     let clazz = (*activity).clazz;
@@ -122,10 +152,18 @@ pub unsafe fn hide_keyboard(activity: *mut ANativeActivity) {
     env.delete(cls);
 }
 
-/// `UzActivity.<name>(String)` — bitta matn argumentli void metodni chaqiradi (UTF-16, emoji ham to'g'ri).
+/// UZ: `UzActivity.<name>(String)` — bitta matn argumentli void metodni chaqiradi (UTF-16, emoji ham to'g'ri uzatiladi).
 ///
 /// # Safety
 /// `show_keyboard` bilan bir xil.
+/// EN: `UzActivity.<name>(String)` — calls a void method with one text argument (UTF-16, so emoji are passed correctly).
+///
+/// # Safety
+/// Same as `show_keyboard`.
+/// RU: `UzActivity.<name>(String)` — вызывает void-метод с одним текстовым аргументом (UTF-16, эмодзи передаются корректно).
+///
+/// # Safety
+/// Так же, как у `show_keyboard`.
 pub unsafe fn call_str(activity: *mut ANativeActivity, name: &[u8], s: &str) {
     let Some(env) = attach(activity) else { return };
     let clazz = (*activity).clazz;
@@ -140,10 +178,18 @@ pub unsafe fn call_str(activity: *mut ANativeActivity, name: &[u8], s: &str) {
     env.delete(cls);
 }
 
-/// `UzActivity.<name>(String) -> String`: bitta matn argumentli, matn qaytaradigan metod.
+/// UZ: `UzActivity.<name>(String) -> String`: bitta matn argumentli, matn qaytaradigan metodni chaqiradi.
 ///
 /// # Safety
 /// `show_keyboard` bilan bir xil.
+/// EN: `UzActivity.<name>(String) -> String`: calls a method with one text argument that returns text.
+///
+/// # Safety
+/// Same as `show_keyboard`.
+/// RU: `UzActivity.<name>(String) -> String`: вызывает метод с одним текстовым аргументом, возвращающий текст.
+///
+/// # Safety
+/// Так же, как у `show_keyboard`.
 pub unsafe fn call_str_ret(activity: *mut ANativeActivity, name: &[u8], s: &str) -> String {
     let Some(env) = attach(activity) else { return String::new() };
     let clazz = (*activity).clazz;
@@ -173,10 +219,18 @@ extern "C" {
     fn ANativeWindow_fromSurface(env: *mut c_void, surface: *mut c_void) -> *mut c_void;
 }
 
-/// `UzActivity.newVideoSurface(tex)` — Surface yaratadi va uning `ANativeWindow*` ini qaytaradi (dekoder shunga yozadi).
+/// UZ: `UzActivity.newVideoSurface(tex)` — Surface yaratadi va uning `ANativeWindow*` ini qaytaradi (dekoder shunga yozadi).
 ///
 /// # Safety
 /// `show_keyboard` bilan bir xil; GL oqimida chaqiriladi.
+/// EN: `UzActivity.newVideoSurface(tex)` — creates a Surface and returns its `ANativeWindow*` (the decoder writes into it).
+///
+/// # Safety
+/// Same as `show_keyboard`; called on the GL thread.
+/// RU: `UzActivity.newVideoSurface(tex)` — создаёт Surface и возвращает его `ANativeWindow*` (декодер пишет в него).
+///
+/// # Safety
+/// Так же, как у `show_keyboard`; вызывается в GL-потоке.
 pub unsafe fn video_surface(activity: *mut ANativeActivity, tex: u32) -> *mut c_void {
     let Some(env) = attach(activity) else { return null_mut() };
     let clazz = (*activity).clazz;
@@ -194,10 +248,18 @@ pub unsafe fn video_surface(activity: *mut ANativeActivity, tex: u32) -> *mut c_
     win
 }
 
-/// `UzActivity.videoUpdate()` — yangi kadr bo'lsa teksturaga o'tkazadi va 4x4 matritsani qaytaradi.
+/// UZ: `UzActivity.videoUpdate()` — yangi kadr bo'lsa uni teksturaga o'tkazadi va 4x4 matritsani qaytaradi.
 ///
 /// # Safety
 /// GL oqimida chaqiriladi.
+/// EN: `UzActivity.videoUpdate()` — if there is a new frame, moves it into the texture and returns the 4x4 matrix.
+///
+/// # Safety
+/// Called on the GL thread.
+/// RU: `UzActivity.videoUpdate()` — если есть новый кадр, переносит его в текстуру и возвращает матрицу 4x4.
+///
+/// # Safety
+/// Вызывается в GL-потоке.
 pub unsafe fn video_update(activity: *mut ANativeActivity) -> Option<[f32; 16]> {
     let env = attach(activity)?;
     let clazz = (*activity).clazz;
@@ -224,10 +286,18 @@ pub unsafe fn video_update(activity: *mut ANativeActivity) -> Option<[f32; 16]> 
     res
 }
 
-/// `UzActivity.<name>(boolean)` — bitta mantiqiy argumentli void metod.
+/// UZ: `UzActivity.<name>(boolean)` — bitta mantiqiy argumentli void metodni chaqiradi.
 ///
 /// # Safety
 /// `show_keyboard` bilan bir xil.
+/// EN: `UzActivity.<name>(boolean)` — calls a void method with one boolean argument.
+///
+/// # Safety
+/// Same as `show_keyboard`.
+/// RU: `UzActivity.<name>(boolean)` — вызывает void-метод с одним логическим аргументом.
+///
+/// # Safety
+/// Так же, как у `show_keyboard`.
 pub unsafe fn call_bool(activity: *mut ANativeActivity, name: &[u8], on: bool) {
     let Some(env) = attach(activity) else { return };
     let clazz = (*activity).clazz;
@@ -238,10 +308,18 @@ pub unsafe fn call_bool(activity: *mut ANativeActivity, name: &[u8], on: bool) {
     env.delete(cls);
 }
 
-/// `UzActivity.videoRelease()`.
+/// UZ: `UzActivity.videoRelease()` ni chaqiradi.
 ///
 /// # Safety
 /// `show_keyboard` bilan bir xil.
+/// EN: Calls `UzActivity.videoRelease()`.
+///
+/// # Safety
+/// Same as `show_keyboard`.
+/// RU: Вызывает `UzActivity.videoRelease()`.
+///
+/// # Safety
+/// Так же, как у `show_keyboard`.
 pub unsafe fn video_release(activity: *mut ANativeActivity) {
     let Some(env) = attach(activity) else { return };
     let clazz = (*activity).clazz;
@@ -252,10 +330,18 @@ pub unsafe fn video_release(activity: *mut ANativeActivity) {
     env.delete(cls);
 }
 
-/// Java `String` ni Rust `String` ga o'giradi (UTF-16 -> UTF-8, emoji ham to'g'ri).
+/// UZ: Java `String` ni Rust `String` ga o'giradi (UTF-16 -> UTF-8, emoji ham to'g'ri).
 ///
 /// # Safety
-/// `env` va `s` JNI chaqiruvidan kelgan yaroqli ko'rsatkichlar.
+/// `env` va `s` JNI chaqiruvidan kelgan yaroqli ko'rsatkichlar bo'lishi kerak.
+/// EN: Converts a Java `String` into a Rust `String` (UTF-16 -> UTF-8, emoji included).
+///
+/// # Safety
+/// `env` and `s` must be valid pointers obtained from a JNI call.
+/// RU: Преобразует Java `String` в Rust `String` (UTF-16 -> UTF-8, эмодзи тоже корректно).
+///
+/// # Safety
+/// `env` и `s` должны быть действительными указателями из JNI-вызова.
 pub unsafe fn jstring(env: *mut c_void, s: *mut c_void) -> String {
     if s.is_null() {
         return String::new();

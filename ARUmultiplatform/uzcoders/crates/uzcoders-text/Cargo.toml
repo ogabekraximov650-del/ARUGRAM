@@ -6,7 +6,7 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
-description = "uzcoders: TrueType shrift o'qish, harf rasterizatsiyasi va matn joylashuvi"
+description = "uzcoders-text — UZ: TrueType shrift o'qish, harf rasterizatsiyasi va matn joylashuvi | EN: TrueType font parsing, glyph rasterization and text layout | RU: чтение шрифтов TrueType, растеризация глифов и раскладка текста"
 
 [dependencies]
 uzcoders-core = { workspace = true }

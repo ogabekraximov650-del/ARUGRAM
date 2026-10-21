@@ -1,6 +1,6 @@
 [package]
 name = "uzcoders-gpu"
-description = "uzcoders: GPU (OpenGL ES) chizish — chizish buyruqlarini paketlash, harf atlasi va GL bajaruvchi"
+description = "uzcoders-gpu — UZ: GPU (OpenGL ES) chizish — chizish buyruqlarini paketlash, harf atlasi va GL bajaruvchi | EN: GPU (OpenGL ES) drawing: draw-command batching, glyph atlas and the GL executor | RU: рисование на GPU (OpenGL ES): пакетирование команд, атлас глифов и исполнитель GL"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

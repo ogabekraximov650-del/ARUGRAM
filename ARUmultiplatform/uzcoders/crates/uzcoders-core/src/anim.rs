@@ -1,13 +1,19 @@
-//! Animatsiya: easing, tween va prujina (spring).
+//! UZ: Animatsiya: easing (tezlik egri chizig'i), tween (vaqtga bog'liq o'tish) va prujina (spring).
+//! EN: Animation: easing curves, tweens (time-based transitions) and springs.
+//! RU: Анимация: кривые плавности (easing), твины (переходы по времени) и пружины (spring).
 
-/// Vaqt egri chiziqlari. `t` 0..=1 oralig'ida.
+/// UZ: Vaqt egri chiziqlari: animatsiya tezligi vaqt bo'yicha qanday o'zgarishini belgilaydi. `t` — 0..=1 oralig'idagi jarayon ulushi.
+/// EN: Time curves: define how animation speed changes over time. `t` is the progress fraction in 0..=1.
+/// RU: Кривые времени: задают, как скорость анимации меняется со временем. `t` — доля прогресса в диапазоне 0..=1.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Easing {
     Linear,
     EaseIn,
     EaseOut,
     EaseInOut,
-    /// Oxirida biroz oshib ketib qaytadi (Android `OvershootInterpolator`).
+    /// UZ: Oxirida biroz oshib ketib, so'ng qaytadi (Android `OvershootInterpolator` kabi).
+    /// EN: Overshoots the end value slightly, then settles back (like Android's `OvershootInterpolator`).
+    /// RU: Немного «перелетает» конечное значение и возвращается (как `OvershootInterpolator` в Android).
     Overshoot(f32),
 }
 
@@ -33,7 +39,9 @@ impl Easing {
     }
 }
 
-/// Ikki qiymat orasidagi vaqtga bog'liq o'tish.
+/// UZ: Ikki qiymat orasidagi vaqtga bog'liq o'tish (boshlang'ich -> oxirgi, berilgan davomiylikda).
+/// EN: A time-based transition between two values (start -> end over a given duration).
+/// RU: Переход между двумя значениями по времени (начало -> конец за заданную длительность).
 #[derive(Clone, Copy, Debug)]
 pub struct Tween {
     pub from: f32,
@@ -53,7 +61,9 @@ impl Tween {
             elapsed_ms: 0.0,
         }
     }
-    /// `dt_ms` ga oldinga siljiydi va joriy qiymatni qaytaradi.
+    /// UZ: `dt_ms` millisekundga oldinga siljiydi va joriy qiymatni qaytaradi.
+    /// EN: Advances by `dt_ms` milliseconds and returns the current value.
+    /// RU: Продвигается на `dt_ms` миллисекунд и возвращает текущее значение.
     pub fn step(&mut self, dt_ms: f32) -> f32 {
         self.elapsed_ms = (self.elapsed_ms + dt_ms).min(self.duration_ms);
         self.value()
@@ -67,7 +77,9 @@ impl Tween {
     }
 }
 
-/// Fizik prujina: `stiffness` (qattiqlik) va `damping_ratio` (1.0 — tebranishsiz).
+/// UZ: Fizik prujina: `stiffness` — qattiqlik, `damping_ratio` — so'nish nisbati (1.0 — tebranishsiz to'xtaydi).
+/// EN: A physical spring: `stiffness` is the spring stiffness, `damping_ratio` is the damping (1.0 settles without oscillation).
+/// RU: Физическая пружина: `stiffness` — жёсткость, `damping_ratio` — коэффициент затухания (1.0 — без колебаний).
 #[derive(Clone, Copy, Debug)]
 pub struct Spring {
     pub value: f32,
@@ -87,7 +99,9 @@ impl Spring {
             damping_ratio,
         }
     }
-    /// Yarim-oshkor Eyler integratsiyasi, kichik qadamlarga bo'lib (barqarorlik uchun).
+    /// UZ: Yarim-oshkor Eyler integratsiyasi; barqarorlik uchun vaqt kichik qadamlarga bo'linadi.
+    /// EN: Semi-implicit Euler integration; time is split into small sub-steps for numerical stability.
+    /// RU: Полунеявная интеграция Эйлера; время делится на малые шаги для устойчивости расчёта.
     pub fn step(&mut self, dt_ms: f32) -> f32 {
         let mut left = dt_ms / 1000.0;
         let damping = 2.0 * self.damping_ratio * self.stiffness.sqrt();

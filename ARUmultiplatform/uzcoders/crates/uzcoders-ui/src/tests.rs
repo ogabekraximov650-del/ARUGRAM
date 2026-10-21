@@ -87,7 +87,9 @@ fn scroll_surish_va_chegara() {
     let mut ui = list_ui(&sc, &clicked);
     ui.frame(SZ);
     assert_eq!(sc.max_offset(), 20.0 * 50.0 - 300.0);
-    // Yuqoriga 120 px suramiz: ofset oshadi, bosish ro'yxatdan o'tmaydi.
+    // UZ: Yuqoriga 120 px suramiz: ofset oshadi, bosish sifatida ro'yxatdan o'tmaydi.
+    // EN: Drag up by 120 px: the offset grows and it is not registered as a tap.
+    // RU: Протягиваем вверх на 120 px: смещение растёт, касание не считается нажатием.
     ui.set_time(100);
     ui.pointer(PointerEvent::new(PointerKind::Down, 100.0, 250.0));
     ui.set_time(116);
@@ -98,14 +100,18 @@ fn scroll_surish_va_chegara() {
     ui.pointer(PointerEvent::new(PointerKind::Up, 100.0, 130.0));
     assert!((sc.offset() - 120.0).abs() < 0.01, "{}", sc.offset());
     assert_eq!(clicked.get(), -1);
-    // Tezlik bor: inersiya davom etadi.
+    // UZ: Tezlik bor: inersiya davom etadi.
+    // EN: There is velocity: the fling continues.
+    // RU: Скорость есть: инерция продолжается.
     assert!(sc.velocity() > 0.0);
     assert!(ui.needs_frame());
     let before = sc.offset();
     ui.set_time(164);
     ui.frame(SZ);
     assert!(sc.offset() > before);
-    // Juda uzoq inersiya chegarada to'xtaydi.
+    // UZ: Juda uzoq inersiya chegarada to'xtashi kerak.
+    // EN: A very long fling must stop at the bound.
+    // RU: Очень долгая инерция должна остановиться на границе.
     for k in 0..400 {
         ui.set_time(180 + k * 16);
         ui.frame(SZ);
@@ -122,7 +128,9 @@ fn scroll_ichida_bosish_ofsetni_hisobga_oladi() {
     ui.frame(SZ);
     sc.set_offset(120.0);
     ui.frame(SZ);
-    // y=10 da endi 120+10=130 -> 2-element (100..150).
+    // UZ: y=10 da endi 120+10=130 -> 2-element (100..150).
+    // EN: At y=10 it is now 120+10=130 -> the 2nd item (100..150).
+    // RU: При y=10 теперь 120+10=130 -> 2-й элемент (100..150).
     tap(&mut ui, 50.0, 10.0);
     assert_eq!(clicked.get(), 2);
 }
@@ -152,7 +160,9 @@ fn scroll_klipdan_tashqari_bosilmaydi() {
     ui.frame(SZ);
     sc.set_offset(300.0);
     ui.frame(SZ);
-    // y=150 scroll oynasidan pastda (oyna 0..100): kontent elementi bo'lsa ham bosilmasligi kerak.
+    // UZ: y=150 scroll oynasidan pastda (oyna 0..100): kontent elementi bo'lsa ham bosilmasligi kerak.
+    // EN: y=150 is below the scroll window (window 0..100): even if a content item exists there, it must not be tapped.
+    // RU: y=150 ниже окна прокрутки (окно 0..100): даже если там есть элемент содержимого, он не должен нажиматься.
     tap(&mut ui, 50.0, 150.0);
     assert_eq!(clicked.get(), -1);
     tap(&mut ui, 50.0, 10.0);
@@ -179,14 +189,18 @@ fn matn_kiritish_va_kursor() {
     assert_eq!(val.get(), "salom");
     assert!(ui.key_backspace());
     assert_eq!(val.get(), "salo");
-    // Boshiga bosib, kursorni qo'yamiz va belgi qo'shamiz.
+    // UZ: Boshiga bosib, kursorni qo'yamiz va belgi qo'shamiz.
+    // EN: Tap at the start, place the cursor and insert a character.
+    // RU: Нажимаем в начало, ставим курсор и добавляем символ.
     ui.frame(SZ);
     let r = ui.fields[0].rect;
     tap(&mut ui, r.x + 14.0, r.y + r.h / 2.0);
     ui.frame(SZ);
     ui.key_char('X');
     assert_eq!(val.get(), "Xsalo");
-    // Orqaga: avval fokus olinadi.
+    // UZ: Orqaga: avval fokus olinadi.
+    // EN: Back: focus is cleared first.
+    // RU: Назад: сначала снимается фокус.
     assert!(ui.key_back());
     assert!(!ui.wants_keyboard());
     assert!(!ui.key_back());
@@ -280,7 +294,10 @@ fn grid_teng_kenglik() {
     assert_eq!(ui.hits.len(), 3);
     assert!((ui.hits[0].rect.w - 100.0).abs() < 0.5);
     assert!((ui.hits[1].rect.w - 100.0).abs() < 0.5);
-    assert!((ui.hits[2].rect.w - 100.0).abs() < 0.5); // so'nggi qator ham teng ustunda
+    // UZ: so'nggi qator ham teng ustunda
+    // EN: the last row also uses equal columns.
+    // RU: последняя строка тоже использует равные колонки.
+    assert!((ui.hits[2].rect.w - 100.0).abs() < 0.5);
     assert!(ui.hits[2].rect.y > ui.hits[0].rect.y);
 }
 
@@ -313,7 +330,10 @@ fn virtual_royxat_faqat_korinadiganni_quradi() {
         .grow(1.0)])
     });
     ui.frame(SZ);
-    ui.frame(SZ); // ko'rinish balandligi ma'lum bo'ldi
+    // UZ: ko'rinish balandligi ma'lum bo'ldi
+    // EN: the viewport height is now known.
+    // RU: высота видимой области теперь известна.
+    ui.frame(SZ);
     built.set(0);
     ui.frame(SZ);
     assert!(built.get() < 20, "{}", built.get());
@@ -322,7 +342,9 @@ fn virtual_royxat_faqat_korinadiganni_quradi() {
     built.set(0);
     ui.frame(SZ);
     assert!(built.get() < 20);
-    // Chiziq o'rtasida ham elementlar bor (bo'shliq yo'q).
+    // UZ: Chiziq o'rtasida ham elementlar bor (bo'shliq yo'q).
+    // EN: There are items in the middle of the line too (no gaps).
+    // RU: Элементы есть и в середине линии (пустот нет).
     let cmds = ui.frame(SZ);
     let n = cmds
         .iter()
@@ -387,7 +409,10 @@ fn spinner_uzluksiz_chizadi() {
     let mut ui = Ui::new(font(), || column(vec![spinner(20.0, 2.0, Color::WHITE)]));
     let cmds = ui.frame(SZ);
     assert!(cmds.iter().any(|c| matches!(c, DrawCmd::Arc { .. })));
-    assert!(ui.needs_frame()); // animatsiya: har kadr
+    // UZ: animatsiya: har kadr qayta chiziladi
+    // EN: animation: redrawn every frame.
+    // RU: анимация: перерисовывается каждый кадр.
+    assert!(ui.needs_frame());
     assert_eq!(ui.next_wakeup_ms(), Some(0));
 }
 

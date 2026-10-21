@@ -1,4 +1,6 @@
-//! Scroll holati: ofset, inersiya tezligi va oxirgi hisoblangan chegara.
+//! UZ: Scroll holati: ofset, inersiya tezligi va oxirgi hisoblangan chegara.
+//! EN: Scroll state: offset, fling (inertia) velocity and the last computed bounds.
+//! RU: Состояние прокрутки: смещение, скорость инерции и последние вычисленные границы.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -11,7 +13,9 @@ struct Inner {
     viewport: Cell<f32>,
 }
 
-/// `scroll_column`/`.scroll(&state)` bilan ishlatiladigan scroll holati. Arzon nusxalanadi (Rc).
+/// UZ: `scroll_column` / `.scroll(&state)` bilan ishlatiladigan scroll holati. Arzon nusxalanadi (Rc).
+/// EN: Scroll state used with `scroll_column` / `.scroll(&state)`. Cheap to clone (Rc).
+/// RU: Состояние прокрутки для `scroll_column` / `.scroll(&state)`. Дёшево клонируется (Rc).
 #[derive(Clone)]
 pub struct ScrollState {
     inner: Rc<Inner>,
@@ -35,7 +39,9 @@ impl ScrollState {
         }
     }
 
-    /// Hozirgi ofset (piksel, 0 = eng tepa).
+    /// UZ: Hozirgi ofset (piksel, 0 = eng tepa).
+    /// EN: The current offset (pixels, 0 = the very top).
+    /// RU: Текущее смещение (пиксели, 0 = самый верх).
     pub fn offset(&self) -> f32 {
         self.inner.offset.get()
     }
@@ -52,12 +58,16 @@ impl ScrollState {
         self.set_offset(0.0);
     }
 
-    /// Oxirgi kadrda hisoblangan eng katta ofset (kontent - ko'rinish).
+    /// UZ: Oxirgi kadrda hisoblangan eng katta ofset (kontent balandligi - ko'rinish balandligi).
+    /// EN: The largest offset computed on the last frame (content height - viewport height).
+    /// RU: Наибольшее смещение, вычисленное на последнем кадре (высота содержимого - высота видимой области).
     pub fn max_offset(&self) -> f32 {
         self.inner.max.get()
     }
 
-    /// Oxirgi kadrdagi ko'rinish balandligi (piksel; hali chizilmagan bo'lsa 0).
+    /// UZ: Oxirgi kadrdagi ko'rinish balandligi (piksel; hali chizilmagan bo'lsa 0).
+    /// EN: Viewport height on the last frame (pixels; 0 if not drawn yet).
+    /// RU: Высота видимой области на последнем кадре (пиксели; 0, если ещё не рисовалось).
     pub fn viewport(&self) -> f32 {
         self.inner.viewport.get()
     }

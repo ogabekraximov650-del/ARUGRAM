@@ -1,4 +1,6 @@
-//! Harf/ikonka atlasi uchun "javon" (shelf) joylashtirgich.
+//! UZ: Harflar va ikonkalar atlasi uchun "javon" (shelf) usulidagi joylashtirgich: elementlar qatorlarga ketma-ket terib chiqiladi.
+//! EN: A "shelf" packer for the glyph/icon atlas: items are placed one after another in rows.
+//! RU: Упаковщик «полками» (shelf) для атласа глифов и иконок: элементы укладываются подряд по строкам.
 
 pub struct Atlas {
     pub size: u32,
@@ -21,7 +23,9 @@ impl Atlas {
         }
     }
 
-    /// `w x h` joy ajratadi (atrofida 1 px bo'sh joy bilan). `None` — joy yo'q.
+    /// UZ: `w x h` o'lchamli joy ajratadi (atrofida 1 piksel bo'sh joy qoldiriladi). `None` — joy qolmagan.
+    /// EN: Reserves a `w x h` slot (with 1 pixel of padding around it). `None` means there is no room left.
+    /// RU: Выделяет место размером `w x h` (вокруг остаётся 1 пиксель отступа). `None` — места не осталось.
     pub fn alloc(&mut self, w: u32, h: u32) -> Option<(u32, u32)> {
         let (pw, ph) = (w + 2, h + 2);
         if pw > self.size || ph > self.size {
@@ -58,9 +62,14 @@ mod tests {
         let mut a = Atlas::new(64);
         let p1 = a.alloc(10, 10).unwrap();
         let p2 = a.alloc(10, 10).unwrap();
-        assert_eq!(p1.1, p2.1); // bitta javonda
+        // UZ: bitta javonda (qatorda) joylashadi
+        // EN: placed on the same shelf (row).
+        // RU: размещаются на одной полке (в одной строке).
+        assert_eq!(p1.1, p2.1);
         assert!(p2.0 > p1.0);
-        // To'lguncha ajratamiz.
+        // UZ: Test: atlas to'lguncha ajratamiz.
+        // EN: Test: keep allocating until the atlas is full.
+        // RU: Тест: выделяем места, пока атлас не заполнится.
         let mut n = 0;
         while a.alloc(10, 10).is_some() {
             n += 1;

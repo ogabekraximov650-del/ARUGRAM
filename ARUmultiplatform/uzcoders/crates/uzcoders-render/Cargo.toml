@@ -6,7 +6,7 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
-description = "uzcoders: chizish buyruqlari ro'yxati va dasturiy rasterizator (RGBA, PNG)"
+description = "uzcoders-render — UZ: chizish buyruqlari ro'yxati va dasturiy rasterizator (RGBA, PNG, JPEG) | EN: draw-command list and a software rasterizer (RGBA, PNG, JPEG) | RU: список команд рисования и программный растеризатор (RGBA, PNG, JPEG)"
 
 [dependencies]
 uzcoders-core = { workspace = true }

@@ -70,7 +70,7 @@ jobs:
           # Java yelimi (klaviatura, ExoPlayer ko'prigi): javac + d8. Media3 jar'lari oldingi qadamda Maven bilan olingan.
           mkdir -p classes dex
           M3=$(ls media3/jars/*.jar | tr '\n' ':')
-          javac --release 8 -nowarn -cp "$PLAT/android.jar:$M3" -d classes $(find ../uzcoders/crates/uzcoders-android/java java -name '*.java')
+          javac --release 8 -nowarn -encoding UTF-8 -cp "$PLAT/android.jar:$M3" -d classes $(find ../uzcoders/crates/uzcoders-android/java java -name '*.java')
           # R8: ishlatilmaydigan Media3/Guava kodi olib tashlanadi (APK hajmi). Kirish nuqtalari saqlanadi.
           {
             echo '-keep class uz.uzcoders.** { *; }'

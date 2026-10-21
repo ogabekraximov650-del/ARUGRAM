@@ -29,8 +29,12 @@ import android.graphics.Bitmap;
 import android.media.MediaMetadataRetriever;
 
 /**
- * uzcoders yelimi: tizim klaviaturasi (IME) matnini Rust'ga uzatadi. Boshqa hamma narsa Rust'da.
- * Rust `showKeyboard(inputType)` / `hideKeyboard()` ni JNI orqali chaqiradi.
+ * UZ: uzcoders yelimi (glue): tizim klaviaturasi (IME) matnini Rust'ga uzatadi. Boshqa hamma narsa Rust'da.
+ *     Rust `showKeyboard(inputType)` / `hideKeyboard()` metodlarini JNI orqali chaqiradi.
+ * EN: The uzcoders glue: forwards text from the system keyboard (IME) to Rust. Everything else lives in Rust.
+ *     Rust calls `showKeyboard(inputType)` / `hideKeyboard()` through JNI.
+ * RU: Прослойка (glue) uzcoders: передаёт текст системной клавиатуры (IME) в Rust. Всё остальное находится в Rust.
+ *     Rust вызывает `showKeyboard(inputType)` / `hideKeyboard()` через JNI.
  */
 public class UzActivity extends NativeActivity {
     static native void nativeCommit(String s);
@@ -54,8 +58,12 @@ public class UzActivity extends NativeActivity {
     }
 
     /**
-     * NativeActivity kutubxonani o'zi dlopen qiladi, lekin Java `native` metodlar uchun ro'yxatdan o'tkazmaydi:
-     * shu sinf ClassLoader'i orqali ham yuklaymiz (nom manifestdagi `android.app.lib_name` dan).
+     * UZ: NativeActivity kutubxonani o'zi dlopen qiladi, lekin Java `native` metodlar uchun ro'yxatdan o'tkazmaydi:
+     *     shuning uchun kutubxonani shu sinf ClassLoader'i orqali ham yuklaymiz (nomi manifestdagi `android.app.lib_name` dan olinadi).
+     * EN: NativeActivity dlopens the library itself but does not register it for Java `native` methods:
+     *     so we also load the library through this class's ClassLoader (the name comes from `android.app.lib_name` in the manifest).
+     * RU: NativeActivity сам делает dlopen библиотеки, но не регистрирует её для Java-методов `native`:
+     *     поэтому мы дополнительно загружаем библиотеку через ClassLoader этого класса (имя берётся из `android.app.lib_name` в манифесте).
      */
     private void registerNatives() {
         try {
@@ -68,7 +76,11 @@ public class UzActivity extends NativeActivity {
         }
     }
 
-    /** Yiqilish haqida ma'lumotni faylga yozadi; keyingi ishga tushganda dialogda ko'rsatiladi (Rust ham shu faylga yozadi). */
+    /**
+     * UZ: Yiqilish haqidagi ma'lumotni faylga yozadi; ilova keyingi ishga tushganda dialogda ko'rsatiladi (Rust ham shu faylga yozadi).
+     * EN: Writes crash information to a file; it is shown in a dialog on the next launch (Rust writes to the same file).
+     * RU: Записывает сведения о сбое в файл; при следующем запуске они показываются в диалоге (Rust пишет в тот же файл).
+     */
     private void installCrashReporter() {
         final File f = new File(getFilesDir(), "crash.txt");
         final Thread.UncaughtExceptionHandler prev = Thread.getDefaultUncaughtExceptionHandler();
@@ -113,7 +125,11 @@ public class UzActivity extends NativeActivity {
         });
     }
 
-    /** Brauzer/boshqa ilovada havolani ochadi. */
+    /**
+     * UZ: Havolani brauzerda yoki boshqa mos ilovada ochadi.
+     * EN: Opens a link in the browser or another suitable app.
+     * RU: Открывает ссылку в браузере или другом подходящем приложении.
+     */
     public void openUrl(final String url) {
         runOnUiThread(new Runnable() {
             public void run() {
@@ -142,7 +158,11 @@ public class UzActivity extends NativeActivity {
         });
     }
 
-    /** Fayl tanlagich: tanlangach fayl keshga nusxalanadi va yo'li `nativePicked` orqali Rust'ga beriladi. */
+    /**
+     * UZ: Fayl tanlagich: fayl tanlangach keshga nusxalanadi va uning yo'li `nativePicked` orqali Rust'ga beriladi.
+     * EN: File picker: the chosen file is copied into the cache and its path is passed to Rust through `nativePicked`.
+     * RU: Выбор файла: выбранный файл копируется в кэш, а его путь передаётся в Rust через `nativePicked`.
+     */
     public void pickFile(final String mime) {
         runOnUiThread(new Runnable() {
             public void run() {
@@ -183,14 +203,24 @@ public class UzActivity extends NativeActivity {
         }).start();
     }
 
-    // ── Video: GL (tashqi) teksturaga chiziladigan Surface ──
+    // UZ: ── Video: GL (tashqi) teksturaga chiziladigan Surface ──
+    // EN: ── Video: a Surface that renders into a GL (external) texture ──
+    // RU: ── Видео: Surface, рисующий в GL-текстуру (внешнюю) ──
     private SurfaceTexture vst;
-    /** Dekoder yozadigan Surface (Java pleyerlar, masalan ExoPlayer, shunga ulanadi). */
+    /**
+     * UZ: Dekoder yozadigan Surface (Java pleyerlar, masalan ExoPlayer, shunga ulanadi).
+     * EN: The Surface the decoder writes to (Java players such as ExoPlayer attach to it).
+     * RU: Surface, в который пишет декодер (Java-плееры, например ExoPlayer, подключаются к нему).
+     */
     public volatile Surface vsurface;
     private volatile boolean vframe;
     private final float[] vmat = new float[16];
 
-    /** GL oqimida chaqiriladi: `tex` — GL_TEXTURE_EXTERNAL_OES nomi. Dekoder shu Surface'ga yozadi. */
+    /**
+     * UZ: GL oqimida chaqiriladi: `tex` — GL_TEXTURE_EXTERNAL_OES tekstura nomi. Dekoder shu Surface'ga yozadi.
+     * EN: Called on the GL thread: `tex` is the GL_TEXTURE_EXTERNAL_OES texture name. The decoder writes into this Surface.
+     * RU: Вызывается в GL-потоке: `tex` — имя текстуры GL_TEXTURE_EXTERNAL_OES. Декодер пишет в этот Surface.
+     */
     public Surface newVideoSurface(int tex) {
         if (vst != null) vst.release();
         vst = new SurfaceTexture(tex);
@@ -204,7 +234,11 @@ public class UzActivity extends NativeActivity {
         return vsurface;
     }
 
-    /** GL oqimida: yangi kadr bo'lsa teksturaga o'tkazadi va 16 ta sonli matritsani vergul bilan qaytaradi; bo'lmasa bo'sh satr. */
+    /**
+     * UZ: GL oqimida chaqiriladi: yangi kadr bo'lsa uni teksturaga o'tkazadi va 16 ta sondan iborat matritsani vergul bilan ajratib qaytaradi; kadr bo'lmasa bo'sh satr qaytadi.
+     * EN: Called on the GL thread: if there is a new frame, moves it into the texture and returns a 16-number matrix separated by commas; returns an empty string if there is none.
+     * RU: Вызывается в GL-потоке: если есть новый кадр, переносит его в текстуру и возвращает матрицу из 16 чисел через запятую; если кадра нет — пустую строку.
+     */
     public String videoUpdate() {
         if (vst == null || !vframe) return "";
         vframe = false;
@@ -229,7 +263,11 @@ public class UzActivity extends NativeActivity {
         }
     }
 
-    /** To'liq ekran: gorizontal holat va tizim panellarini yashirish. */
+    /**
+     * UZ: To'liq ekran: gorizontal holatga o'tadi va tizim panellarini yashiradi.
+     * EN: Fullscreen: switches to landscape and hides the system bars.
+     * RU: Полноэкранный режим: переключает в горизонтальную ориентацию и скрывает системные панели.
+     */
     public void setFullscreen(final boolean on) {
         runOnUiThread(new Runnable() {
             public void run() {
@@ -242,7 +280,11 @@ public class UzActivity extends NativeActivity {
         });
     }
 
-    /** Ekran o'chmasin (video ijro etilayotganda). */
+    /**
+     * UZ: Ekran o'chib qolmasligini ta'minlaydi (video ijro etilayotganda).
+     * EN: Keeps the screen from turning off (while a video is playing).
+     * RU: Не даёт экрану выключаться (во время воспроизведения видео).
+     */
     public void keepScreenOn(final boolean on) {
         runOnUiThread(new Runnable() {
             public void run() {
@@ -252,7 +294,11 @@ public class UzActivity extends NativeActivity {
         });
     }
 
-    /** Video faylidan bitta kadr (oxirgisi, bo'lmasa birinchisi) JPEG qilib yoziladi. `arg` = "kirish|chiqish". Chaqiruvchi oqimda bloklaydi. */
+    /**
+     * UZ: Video faylidan bitta kadrni (oxirgisini, bo'lmasa birinchisini) JPEG qilib yozadi. `arg` = "kirish|chiqish". Chaqiruvchi oqimni bloklaydi.
+     * EN: Writes one frame of a video file (the last one, otherwise the first) as a JPEG. `arg` = "input|output". Blocks the calling thread.
+     * RU: Записывает один кадр видеофайла (последний, а при его отсутствии — первый) в JPEG. `arg` = «вход|выход». Блокирует вызывающий поток.
+     */
     public void frameToFile(String arg) {
         int i = arg.indexOf('|');
         if (i <= 0) return;
@@ -297,7 +343,11 @@ public class UzActivity extends NativeActivity {
         });
     }
 
-    /** Ko'rinmas, fokus oladigan "matn muharriri": klaviatura shunga ulanadi. */
+    /**
+     * UZ: Ko'rinmas, fokus oladigan "matn muharriri": tizim klaviaturasi shunga ulanadi.
+     * EN: An invisible, focusable "text editor": the system keyboard attaches to it.
+     * RU: Невидимый «текстовый редактор», способный получать фокус: к нему подключается системная клавиатура.
+     */
     static final class ImeView extends View {
         int inputType = InputType.TYPE_CLASS_TEXT;
 

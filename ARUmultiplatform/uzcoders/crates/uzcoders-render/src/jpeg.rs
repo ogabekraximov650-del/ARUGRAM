@@ -1,4 +1,6 @@
-//! JPEG dekoderi (noldan): baseline va progressive, 1/3 komponent, har qanday diskretlash (4:4:4, 4:2:0...), restart intervallar.
+//! UZ: JPEG dekoderi (noldan yozilgan): baseline va progressive, 1 yoki 3 komponent, har qanday diskretlash (4:4:4, 4:2:0 ...) va restart intervallari.
+//! EN: A JPEG decoder (written from scratch): baseline and progressive, 1 or 3 components, any chroma subsampling (4:4:4, 4:2:0 ...) and restart intervals.
+//! RU: Декодер JPEG (написан с нуля): baseline и progressive, 1 или 3 компонента, любое субдискретизирование цвета (4:4:4, 4:2:0 ...) и интервалы restart.
 
 use crate::image::Image;
 
@@ -63,7 +65,10 @@ impl<'a> Bits<'a> {
                             b = 0xFF;
                             self.pos += 2;
                         }
-                        _ => self.marker = true, // marker: nollar beramiz
+                        // UZ: marker: bit oqimi tugadi, nollar beramiz
+                        // EN: a marker: the bit stream ended, so we return zeros.
+                        // RU: маркер: битовый поток закончился, возвращаем нули.
+                        _ => self.marker = true,
                     },
                     Some(&v) => {
                         b = v;
@@ -111,7 +116,9 @@ impl<'a> Bits<'a> {
         0
     }
 
-    /// Restart: baytlarni tekislab, `RSTn` markerini o'tkazadi.
+    /// UZ: Restart: bit oqimini bayt chegarasiga tekislaydi va `RSTn` markerini o'tkazib yuboradi.
+    /// EN: Restart: aligns the bit stream to a byte boundary and skips the `RSTn` marker.
+    /// RU: Restart: выравнивает битовый поток по границе байта и пропускает маркер `RSTn`.
     fn restart(&mut self) {
         self.cnt = 0;
         self.marker = false;
@@ -136,7 +143,9 @@ struct Comp {
     tq: usize,
     bw: usize,
     bh: usize,
-    /// Haqiqiy (to'ldirilmagan) bloklar soni gorizontal/vertikal.
+    /// UZ: Haqiqiy (to'ldirilmagan) bloklar soni: gorizontal / vertikal.
+    /// EN: Number of real (non-padding) blocks: horizontal / vertical.
+    /// RU: Число реальных (без добивки) блоков: по горизонтали / по вертикали.
     rw: usize,
     rh: usize,
     coef: Vec<i16>,
@@ -144,7 +153,9 @@ struct Comp {
     ac: usize,
 }
 
-/// JPEG ni RGBA8 ga ochadi. Qo'llab-quvvatlanmaydi: arifmetik kodlash, 12 bit, CMYK.
+/// UZ: JPEG ni RGBA8 ga ochadi. Qo'llab-quvvatlanmaydi: arifmetik kodlash, 12 bit, CMYK.
+/// EN: Decodes JPEG into RGBA8. Not supported: arithmetic coding, 12-bit, CMYK.
+/// RU: Декодирует JPEG в RGBA8. Не поддерживается: арифметическое кодирование, 12 бит, CMYK.
 pub fn decode_jpeg(d: &[u8]) -> Option<Image> {
     if d.get(..2)? != [0xFF, 0xD8] {
         return None;
@@ -306,7 +317,9 @@ pub fn decode_jpeg(d: &[u8]) -> Option<Image> {
     if !got_scan || comps.is_empty() {
         return None;
     }
-    // Dekvantlash + IDCT -> tekisliklar.
+    // UZ: Dekvantlash + teskari kosinus almashtirish (IDCT) -> rang tekisliklari (komponentlar).
+    // EN: Dequantization + inverse DCT (IDCT) -> color planes (components).
+    // RU: Деквантование + обратное ДКП (IDCT) -> цветовые плоскости (компоненты).
     let mut planes: Vec<(Vec<u8>, usize)> = Vec::new();
     let mut cost = [[0f32; 8]; 8];
     for (x, row) in cost.iter_mut().enumerate() {
@@ -553,7 +566,9 @@ mod tests {
     use super::*;
     use crate::image::decode_png;
 
-    /// Dekoder natijasini PIL (libjpeg) natijasi bilan solishtiradi: o'rtacha farq kichik bo'lishi kerak.
+    /// UZ: Dekoder natijasini PIL (libjpeg) natijasi bilan solishtiradi: o'rtacha farq kichik bo'lishi kerak.
+    /// EN: Compares the decoder output with PIL (libjpeg) output: the mean difference must be small.
+    /// RU: Сравнивает результат декодера с результатом PIL (libjpeg): средняя разница должна быть мала.
     fn check(jpg: &[u8], png: &[u8], tol: f32) {
         let a = decode_jpeg(jpg).expect("jpeg ochilmadi");
         let b = decode_png(png).unwrap();

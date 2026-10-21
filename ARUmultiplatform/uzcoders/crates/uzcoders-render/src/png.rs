@@ -1,4 +1,6 @@
-//! Oddiy PNG yozuvchi (siqishsiz "stored" deflate bloklari bilan) — tashqi kutubxonasiz.
+//! UZ: Oddiy PNG yozuvchi (siqishsiz "stored" deflate bloklari bilan) — tashqi kutubxonasiz.
+//! EN: A simple PNG writer (using uncompressed "stored" deflate blocks) — no external libraries.
+//! RU: Простой писатель PNG (с несжатыми блоками deflate «stored») — без внешних библиотек.
 
 fn crc32(data: &[u8], mut crc: u32) -> u32 {
     crc = !crc;
@@ -32,12 +34,17 @@ fn chunk(out: &mut Vec<u8>, kind: &[u8; 4], body: &[u8]) {
     out.extend_from_slice(&c.to_be_bytes());
 }
 
-/// RGBA8 piksellarni (`w*h*4` bayt) PNG baytlariga o'giradi.
+/// UZ: RGBA8 piksellarni (`w*h*4` bayt) PNG baytlariga aylantiradi.
+/// EN: Converts RGBA8 pixels (`w*h*4` bytes) into PNG bytes.
+/// RU: Преобразует пиксели RGBA8 (`w*h*4` байт) в байты PNG.
 pub fn encode_rgba(w: u32, h: u32, rgba: &[u8]) -> Vec<u8> {
     assert_eq!(rgba.len(), (w * h * 4) as usize);
     let mut raw = Vec::with_capacity(rgba.len() + h as usize);
     for row in rgba.chunks((w * 4) as usize) {
-        raw.push(0); // filtr yo'q
+        // UZ: filtr yo'q (0-filtr)
+        // EN: no filter (filter type 0).
+        // RU: без фильтра (тип фильтра 0).
+        raw.push(0);
         raw.extend_from_slice(row);
     }
     let mut z = vec![0x78, 0x01];

@@ -1,8 +1,12 @@
-//! Vektor yo'l (SVG `d` sintaksisi): ikonkalar uchun. M, L, H, V, C, S, Q, T, A, Z va ularning nisbiy (kichik harfli) shakllari.
+//! UZ: Vektor yo'l (SVG `d` sintaksisi) ikonkalar uchun. Buyruqlar: M, L, H, V, C, S, Q, T, A, Z va ularning nisbiy (kichik harfli) shakllari.
+//! EN: Vector paths (SVG `d` syntax) for icons. Commands: M, L, H, V, C, S, Q, T, A, Z and their relative (lowercase) forms.
+//! RU: Векторные контуры (синтаксис SVG `d`) для иконок. Команды: M, L, H, V, C, S, Q, T, A, Z и их относительные (строчные) формы.
 
 pub type Seg = ((f32, f32), (f32, f32));
 
-/// Tekislangan yo'l: kesmalar ro'yxati (ko'rinish-qutisi birliklarida).
+/// UZ: Tekislangan yo'l: to'g'ri kesmalar ro'yxati (ko'rinish-qutisi birliklarida).
+/// EN: A flattened path: a list of straight segments (in view-box units).
+/// RU: Спрямлённый контур: список прямых отрезков (в единицах view-box).
 #[derive(Clone, Debug, Default)]
 pub struct Path {
     pub segs: Vec<Seg>,
@@ -71,7 +75,9 @@ impl<'a> Lexer<'a> {
         std::str::from_utf8(&self.b[s..self.i]).ok()?.parse().ok()
     }
 
-    /// Yoy bayrog'i (A buyrug'ida bitta raqam `0`/`1`, ba'zan yopishib yoziladi).
+    /// UZ: Yoy bayrog'i: A buyrug'ida bitta raqam `0`/`1`, ba'zan keyingi raqamga yopishib yoziladi.
+    /// EN: Arc flag: in the A command it is a single digit `0`/`1`, sometimes written glued to the next number.
+    /// RU: Флаг дуги: в команде A это одна цифра `0`/`1`, иногда записанная слитно со следующим числом.
     fn flag(&mut self) -> Option<bool> {
         self.skip();
         let c = *self.b.get(self.i)?;
@@ -191,7 +197,9 @@ fn arc(
 }
 
 impl Path {
-    /// SVG `d` matnini o'qiydi. Noto'g'ri sintaksis bo'lsa `None`.
+    /// UZ: SVG `d` matnini o'qiydi. Sintaksis noto'g'ri bo'lsa `None` qaytadi.
+    /// EN: Parses SVG `d` text. Returns `None` if the syntax is invalid.
+    /// RU: Разбирает текст SVG `d`. При неверном синтаксисе возвращает `None`.
     pub fn parse(d: &str) -> Option<Path> {
         let mut lx = Lexer {
             b: d.as_bytes(),
@@ -199,7 +207,10 @@ impl Path {
         };
         let mut out: Vec<Seg> = Vec::new();
         let (mut cur, mut start) = ((0.0f32, 0.0f32), (0.0f32, 0.0f32));
-        let mut last_ctrl: Option<(f32, f32)> = None; // oldingi egri chiziqning boshqaruv nuqtasi (S/T uchun)
+        // UZ: oldingi egri chiziqning boshqaruv nuqtasi (S/T buyruqlari uchun)
+        // EN: the previous curve's control point (for the S/T commands).
+        // RU: контрольная точка предыдущей кривой (для команд S/T).
+        let mut last_ctrl: Option<(f32, f32)> = None;
         let mut last_cmd = b' ';
         let mut cmd = lx.cmd()?;
         loop {
@@ -218,7 +229,9 @@ impl Path {
                     let p = (ox + lx.num()?, oy + lx.num()?);
                     cur = p;
                     start = p;
-                    // Keyingi juftliklar — yashirin L.
+                    // UZ: Buyruqdan keyingi qo'shimcha koordinata juftliklari yashirin `L` (to'g'ri chiziq) hisoblanadi.
+                    // EN: Extra coordinate pairs after a move command are treated as implicit `L` (line) commands.
+                    // RU: Дополнительные пары координат после команды перемещения считаются неявными `L` (линия).
                     cmd = if rel { b'l' } else { b'L' };
                     last_cmd = up;
                     let _ = last_cmd;
@@ -303,7 +316,9 @@ impl Path {
                 }
             }
         }
-        // Yopilmagan konturlar ham to'ldirish uchun yopiladi.
+        // UZ: Yopilmagan konturlar ham to'ldirish uchun avtomatik yopiladi.
+        // EN: Unclosed contours are closed automatically so they can be filled.
+        // RU: Незамкнутые контуры автоматически замыкаются, чтобы их можно было залить.
         if cur != start {
             out.push((cur, start));
         }

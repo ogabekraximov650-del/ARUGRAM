@@ -1,5 +1,9 @@
-//! Fon vazifalari: og'ir ishni (tarmoq, fayl) alohida oqimda bajarib, natijani UI oqimida qabul qilish.
+//! UZ: Fon vazifalari: og'ir ishni (tarmoq, fayl) alohida oqimda bajarib, natijani UI oqimida qabul qilish.
 //! `State` bir oqimli bo'lgani uchun `done` har doim UI oqimida chaqiriladi.
+//! EN: Background tasks: run heavy work (network, files) on a separate thread and receive the result on the UI thread.
+//! Because `State` is single-threaded, `done` is always called on the UI thread.
+//! RU: Фоновые задачи: тяжёлая работа (сеть, файлы) выполняется в отдельном потоке, результат принимается в UI-потоке.
+//! Поскольку `State` однопоточный, `done` всегда вызывается в UI-потоке.
 
 use std::any::Any;
 use std::cell::RefCell;
@@ -14,7 +18,9 @@ static WAKER: Mutex<Option<fn()>> = Mutex::new(None);
 
 static FRAME_REQ: AtomicBool = AtomicBool::new(false);
 
-/// Istalgan oqimdan: UI oqimini uyg'otib, bitta kadrni qayta chizishni so'raydi (video kadri tayyor bo'lganda).
+/// UZ: Istalgan oqimdan chaqiriladi: UI oqimini uyg'otib, bitta kadrni qayta chizishni so'raydi (masalan, video kadri tayyor bo'lganda).
+/// EN: Callable from any thread: wakes the UI thread and asks for one frame to be redrawn (for example, when a video frame is ready).
+/// RU: Можно вызывать из любого потока: будит UI-поток и просит перерисовать один кадр (например, когда готов кадр видео).
 pub fn request_frame() {
     FRAME_REQ.store(true, Ordering::SeqCst);
     if let Some(w) = *WAKER.lock().unwrap() {
@@ -22,12 +28,16 @@ pub fn request_frame() {
     }
 }
 
-/// Kadr so'rovi bormi (o'chirmaydi).
+/// UZ: Kadr so'rovi borligini tekshiradi (so'rovni o'chirmaydi).
+/// EN: Checks whether a frame request is pending (does not clear it).
+/// RU: Проверяет, есть ли запрос на кадр (запрос не сбрасывается).
 pub fn frame_requested() -> bool {
     FRAME_REQ.load(Ordering::SeqCst)
 }
 
-/// Kadr so'rovini tozalaydi (kadr chizilganda).
+/// UZ: Kadr so'rovini tozalaydi (kadr chizilganda chaqiriladi).
+/// EN: Clears the frame request (called when a frame has been drawn).
+/// RU: Сбрасывает запрос на кадр (вызывается после отрисовки кадра).
 pub fn clear_frame_request() {
     FRAME_REQ.store(false, Ordering::SeqCst);
 }
@@ -38,12 +48,16 @@ thread_local! {
     static DONE: RefCell<HashMap<u64, Done>> = RefCell::new(HashMap::new());
 }
 
-/// Qobiq o'rnatadi: fon vazifasi tugaganda UI oqimini uyg'otadi.
+/// UZ: Qobiqni o'rnatadi: fon vazifasi tugaganda UI oqimini uyg'otadigan funksiya.
+/// EN: Installs the shell hook: a function that wakes the UI thread when a background task finishes.
+/// RU: Устанавливает хук оболочки: функцию, которая будит UI-поток по завершении фоновой задачи.
 pub fn set_waker(f: fn()) {
     *WAKER.lock().unwrap() = Some(f);
 }
 
-/// UI oqimidan chaqiriladi: `work` yangi oqimda bajariladi, natijasi `done` ga UI oqimida beriladi.
+/// UZ: UI oqimidan chaqiriladi: `work` yangi oqimda bajariladi, natijasi UI oqimida `done` ga beriladi.
+/// EN: Call from the UI thread: `work` runs on a new thread and its result is passed to `done` on the UI thread.
+/// RU: Вызывается из UI-потока: `work` выполняется в новом потоке, а результат передаётся в `done` в UI-потоке.
 pub fn spawn_bg<R: Send + 'static>(
     work: impl FnOnce() -> R + Send + 'static,
     done: impl FnOnce(R) + 'static,
@@ -69,7 +83,9 @@ pub fn spawn_bg<R: Send + 'static>(
     });
 }
 
-/// Tugagan vazifalarning `done` larini chaqiradi (UI oqimida, har tsiklda). Biror ish bajarilsa `true`.
+/// UZ: Tugagan vazifalarning `done` funksiyalarini chaqiradi (UI oqimida, har tsiklda). Biror ish bajarilsa `true` qaytadi.
+/// EN: Calls the `done` callbacks of finished tasks (on the UI thread, every loop iteration). Returns `true` if any work was done.
+/// RU: Вызывает `done` у завершённых задач (в UI-потоке, на каждой итерации цикла). Возвращает `true`, если что-то было выполнено.
 pub fn drain_tasks() -> bool {
     let items: Vec<_> = std::mem::take(&mut *QUEUE.lock().unwrap());
     let any = !items.is_empty();
@@ -83,7 +99,9 @@ pub fn drain_tasks() -> bool {
     any
 }
 
-/// Hali tugamagan vazifalar soni (testlar uchun).
+/// UZ: Hali tugamagan vazifalar soni (asosan testlar uchun).
+/// EN: Number of tasks that have not finished yet (mainly for tests).
+/// RU: Количество ещё не завершённых задач (в основном для тестов).
 pub fn pending_tasks() -> usize {
     PENDING.load(Ordering::SeqCst)
 }
@@ -104,8 +122,14 @@ mod tests {
                 (std::thread::current().id(), 7)
             },
             move |(wid, v)| {
-                assert_ne!(wid, tid); // ish boshqa oqimda
-                assert_eq!(std::thread::current().id(), tid); // natija shu oqimda
+                // UZ: ish boshqa oqimda bajariladi
+                // EN: the work runs on another thread.
+                // RU: работа выполняется в другом потоке.
+                assert_ne!(wid, tid);
+                // UZ: natija shu (UI) oqimiga qaytadi
+                // EN: the result comes back on this (UI) thread.
+                // RU: результат возвращается в этот (UI) поток.
+                assert_eq!(std::thread::current().id(), tid);
                 s2.set(v);
             },
         );

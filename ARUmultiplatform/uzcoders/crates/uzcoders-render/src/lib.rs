@@ -1,4 +1,6 @@
-//! uzcoders-render — chizish buyruqlari ro'yxati va dasturiy (CPU) canvas.
+//! UZ: uzcoders-render — chizish buyruqlari ro'yxati va dasturiy (CPU) canvas.
+//! EN: uzcoders-render — the list of draw commands and a software (CPU) canvas.
+//! RU: uzcoders-render — список команд рисования и программный (CPU) canvas.
 
 pub mod image;
 pub mod jpeg;
@@ -13,47 +15,65 @@ use std::rc::Rc;
 use uzcoders_core::{Color, Rect};
 use uzcoders_text::{Font, GlyphCache};
 
-/// Chizish buyrug'i. UI daraxti shu ro'yxatga aylanadi, backend (CPU yoki GPU) uni bajaradi.
+/// UZ: Chizish buyrug'i. UI daraxti shu buyruqlar ro'yxatiga aylanadi; backend (CPU yoki GPU) uni bajaradi.
+/// EN: A draw command. The UI tree is turned into a list of these; a backend (CPU or GPU) executes them.
+/// RU: Команда рисования. Дерево UI превращается в список таких команд; их выполняет бэкенд (CPU или GPU).
 #[derive(Clone, Debug)]
 pub enum DrawCmd {
-    /// Yumaloq burchakli to'rtburchak.
+    /// UZ: Yumaloq burchakli to'rtburchak (to'ldirilgan).
+    /// EN: A filled rounded rectangle.
+    /// RU: Закруглённый прямоугольник (залитый).
     RoundRect {
         rect: Rect,
         radius: f32,
         color: Color,
     },
-    /// Yumaloq burchakli kontur (ichkariga qarab `width` qalinlikda).
+    /// UZ: Yumaloq burchakli kontur (ichkariga qarab `width` qalinlikda).
+    /// EN: A rounded-rectangle outline (`width` thick, drawn inward).
+    /// RU: Контур закруглённого прямоугольника (толщиной `width`, внутрь).
     RoundRectStroke {
         rect: Rect,
         radius: f32,
         width: f32,
         color: Color,
     },
-    /// "Shisha" panel: shaffof tint, chetida yorug'lik chizig'i (yuqori-chapdan kuchliroq), ichki yorug'lik va yuqori yaltirash.
+    /// UZ: "Shisha" panel: shaffof tint, chetida yorug'lik chizig'i (yuqori-chapdan kuchliroq), ichki yorug'lik va yuqori yaltirash.
+    /// EN: A "glass" panel: translucent tint, a light edge line (stronger at top-left), inner glow and a top highlight.
+    /// RU: Панель «стекло»: полупрозрачный оттенок, световая линия по краю (сильнее сверху-слева), внутреннее свечение и блик сверху.
     Glass {
         rect: Rect,
         radius: f32,
         tint: Color,
     },
-    /// Vertikal gradient to'ldirish (yumaloq burchakli): tepa va past ranglar orasida.
+    /// UZ: Vertikal gradient to'ldirish (yumaloq burchakli): tepa va past ranglar orasida.
+    /// EN: A vertical gradient fill (with rounded corners) between the top and bottom colors.
+    /// RU: Вертикальная градиентная заливка (с закруглёнными углами) между верхним и нижним цветами.
     Gradient {
         rect: Rect,
         radius: f32,
         top: Color,
         bottom: Color,
     },
-    /// Haqiqiy shisha: ostidagi (shu paytgacha chizilgan) tasvir `blur` piksel radiusda xiralashadi, ustiga `tint` va yorug' chegara.
+    /// UZ: Haqiqiy shisha: ostidagi (shu paytgacha chizilgan) tasvir `blur` piksel radiusda xiralashadi, ustiga `tint` va yorug' chegara qo'yiladi.
+    /// EN: Real glass: whatever was drawn underneath is blurred by `blur` pixels, then a `tint` and a light border are added on top.
+    /// RU: Настоящее стекло: всё, что нарисовано под панелью, размывается на `blur` пикселей, сверху добавляются оттенок `tint` и светлая граница.
     Backdrop {
         rect: Rect,
         radius: f32,
         blur: f32,
-        /// Linza kattalashtirishi (1 — yo'q): ostidagi tasvir panel markazidan shuncha marta kattalashadi ("lupa" effekti).
+        /// UZ: Linza kattalashtirishi (1 — yo'q): ostidagi tasvir panel markazidan shuncha marta kattalashadi ("lupa" effekti).
+        /// EN: Lens magnification (1 means none): the image underneath is enlarged this many times from the panel's center (a "magnifier" effect).
+        /// RU: Увеличение линзы (1 — нет): изображение под панелью увеличивается во столько раз от её центра (эффект «лупы»).
         zoom: f32,
         tint: Color,
     },
-    /// Video kadri (tashqi tekstura): GPU'da `rect` ga chiziladi; CPU zaxirasida hech narsa.
+    /// UZ: Video kadri (tashqi tekstura): GPU'da `rect` ga chiziladi; CPU zaxirasida hech narsa chizilmaydi.
+    /// EN: A video frame (external texture): drawn into `rect` on the GPU; the CPU fallback draws nothing.
+    /// RU: Кадр видео (внешняя текстура): рисуется в `rect` на GPU; CPU-запасной вариант ничего не рисует.
     Video { rect: Rect },
-    /// Aylana yoyi (yuklanish ko'rsatkichi): `start` va `sweep` radianda, `width` — chiziq qalinligi.
+    /// UZ: Aylana yoyi (yuklanish ko'rsatkichi uchun): `start` va `sweep` radianda, `width` — chiziq qalinligi.
+    /// EN: A circular arc (for loading spinners): `start` and `sweep` in radians, `width` is the stroke width.
+    /// RU: Дуга окружности (для индикатора загрузки): `start` и `sweep` в радианах, `width` — толщина линии.
     Arc {
         cx: f32,
         cy: f32,
@@ -63,32 +83,44 @@ pub enum DrawCmd {
         sweep: f32,
         color: Color,
     },
-    /// Yumshoq radial yorug'lik dog'i (markazdan chetga so'nadi): fon uchun.
+    /// UZ: Yumshoq radial yorug'lik dog'i (markazdan chetga so'nadi): fon bezagi uchun.
+    /// EN: A soft radial glow (fading from the center outward): used for background decoration.
+    /// RU: Мягкое радиальное свечение (угасает от центра к краю): для украшения фона.
     Glow {
         cx: f32,
         cy: f32,
         radius: f32,
         color: Color,
     },
-    /// Matn: `x` — chap chet, `baseline` — qator asos chizig'i.
+    /// UZ: Matn: `x` — chap chet, `baseline` — qatorning asos chizig'i.
+    /// EN: Text: `x` is the left edge, `baseline` is the line's baseline.
+    /// RU: Текст: `x` — левый край, `baseline` — базовая линия строки.
     Text {
         x: f32,
         baseline: f32,
         text: String,
         size: f32,
         color: Color,
-        /// Shrift qalinligi (400 oddiy, 700 qalin, 900 qora); eng yaqin yuz tanlanadi.
+        /// UZ: Shrift qalinligi (400 — oddiy, 700 — qalin, 900 — qora); eng yaqin mavjud yuz tanlanadi.
+        /// EN: Font weight (400 regular, 700 bold, 900 black); the closest available face is chosen.
+        /// RU: Насыщенность шрифта (400 — обычный, 700 — жирный, 900 — чёрный); выбирается ближайшее доступное начертание.
         weight: u16,
-        /// Har belgidan keyin qo'shiladigan oraliq (piksel).
+        /// UZ: Har bir belgidan keyin qo'shiladigan oraliq (piksel).
+        /// EN: Extra spacing added after each character (pixels).
+        /// RU: Дополнительный интервал после каждого символа (в пикселях).
         spacing: f32,
     },
-    /// Rasm `rect` ga cho'ziladi; `opacity` 0..1.
+    /// UZ: Rasm `rect` ga cho'ziladi; `opacity` — shaffoflik (0..1).
+    /// EN: The image is stretched into `rect`; `opacity` is the transparency (0..1).
+    /// RU: Изображение растягивается на `rect`; `opacity` — непрозрачность (0..1).
     Image {
         image: Rc<Image>,
         rect: Rect,
         opacity: f32,
     },
-    /// Vektor yo'l (ikonka): `view` — yo'l koordinatalari qutisi (masalan 24), `rect` ga cho'ziladi.
+    /// UZ: Vektor yo'l (ikonka): `view` — yo'l koordinatalari qutisi (masalan, 24), `rect` ga cho'ziladi.
+    /// EN: A vector path (icon): `view` is the path's coordinate box (e.g. 24), stretched into `rect`.
+    /// RU: Векторный контур (иконка): `view` — рамка координат контура (например, 24), растягивается на `rect`.
     Path {
         path: Rc<Path>,
         view: f32,
@@ -102,10 +134,14 @@ pub enum DrawCmd {
 pub struct Canvas {
     pub width: usize,
     pub height: usize,
-    /// RGBA8, qatorma-qator.
+    /// UZ: Piksellar: RGBA8, qatorma-qator joylashgan.
+    /// EN: Pixels: RGBA8, stored row by row.
+    /// RU: Пиксели: RGBA8, строка за строкой.
     pub pixels: Vec<u8>,
     glyphs: GlyphCache,
-    /// Qo'shimcha shrift yuzlari (qalinlik, kesh).
+    /// UZ: Qo'shimcha shrift yuzlari (qalinlik, harf keshi).
+    /// EN: Additional font faces (weight, glyph cache).
+    /// RU: Дополнительные начертания шрифта (насыщенность, кэш глифов).
     faces: Vec<(u16, GlyphCache)>,
     clips: Vec<(i32, i32, i32, i32)>,
 }
@@ -122,7 +158,9 @@ impl Canvas {
         }
     }
 
-    /// O'lchamni o'zgartiradi (harf keshi saqlanadi); piksellar tozalanadi.
+    /// UZ: O'lchamni o'zgartiradi (harf keshi saqlanadi); piksellar tozalanadi.
+    /// EN: Changes the size (the glyph cache is kept); pixels are cleared.
+    /// RU: Меняет размер (кэш глифов сохраняется); пиксели очищаются.
     pub fn resize(&mut self, width: usize, height: usize) {
         self.width = width;
         self.height = height;
@@ -130,7 +168,9 @@ impl Canvas {
         self.clips.clear();
     }
 
-    /// Qo'shimcha shrift yuzi (masalan qalin: 700). Oddiy (400) yuz `new` da beriladi.
+    /// UZ: Qo'shimcha shrift yuzi qo'shadi (masalan, qalin: 700). Oddiy (400) yuz `new` da beriladi.
+    /// EN: Adds an additional font face (for example bold: 700). The regular (400) face is passed to `new`.
+    /// RU: Добавляет дополнительное начертание шрифта (например, жирное: 700). Обычное (400) передаётся в `new`.
     pub fn add_face(&mut self, weight: u16, font: Rc<Font>) {
         self.faces.push((weight, GlyphCache::new(font)));
     }
@@ -295,7 +335,9 @@ impl Canvas {
         }
     }
 
-    /// Backdrop: hududni xiralashtirib, yumaloq maska bilan qayta chizadi (CPU zaxirasi).
+    /// UZ: Backdrop: hududni xiralashtirib, yumaloq maska bilan qayta chizadi (CPU zaxira varianti).
+    /// EN: Backdrop: blurs the region and redraws it through a rounded mask (CPU fallback).
+    /// RU: Backdrop: размывает область и перерисовывает её через скруглённую маску (CPU-вариант).
     pub fn draw_backdrop(&mut self, r: Rect, radius: f32, blur: f32, zoom: f32, tint: Color) {
         let (bx0, by0, bx1, by1) = self.bounds();
         let x0 = (r.x.floor() as i32).max(bx0);
@@ -317,7 +359,9 @@ impl Canvas {
                 ]);
             }
         }
-        // Linza: markazdan `zoom` marta kattalashtirib qayta tanlash.
+        // UZ: Linza: markazdan `zoom` marta kattalashtirib qayta tanlash (resampling).
+        // EN: Lens: resample the region magnified `zoom` times from the center.
+        // RU: Линза: пересэмплирование области с увеличением в `zoom` раз от центра.
         if zoom > 1.001 {
             let src = buf.clone();
             let (mx, my) = (w as f32 * 0.5, h as f32 * 0.5);
@@ -331,7 +375,9 @@ impl Canvas {
                 }
             }
         }
-        // Ikki o'tishli quti xiralashtirish (gorizontal + vertikal), ikki marta ~ Gauss.
+        // UZ: Ikki o'tishli quti xiralashtirish (gorizontal + vertikal); ikki marta qo'llanganda Gauss xiralashtirishiga yaqin bo'ladi.
+        // EN: Two-pass box blur (horizontal + vertical); applied twice it approximates a Gaussian blur.
+        // RU: Двухпроходное box-размытие (горизонталь + вертикаль); применённое дважды, приближается к размытию по Гауссу.
         let rad = ((blur * 0.5) as usize).max(1);
         for _ in 0..(if blur > 0.5 { 2 } else { 0 }) {
             for horizontal in [true, false] {
@@ -418,7 +464,9 @@ impl Canvas {
         }
     }
 
-    /// Rasmni `rect` ga (bilinear) cho'zib chizadi.
+    /// UZ: Rasmni `rect` ga (bilinear interpolyatsiya bilan) cho'zib chizadi.
+    /// EN: Draws the image stretched into `rect` (with bilinear interpolation).
+    /// RU: Рисует изображение, растянутое на `rect` (с билинейной интерполяцией).
     pub fn draw_image(&mut self, img: &Image, rect: Rect, opacity: f32) {
         if rect.is_empty() || img.w == 0 || img.h == 0 {
             return;
@@ -469,7 +517,9 @@ impl Canvas {
         }
     }
 
-    /// Vektor yo'lni `rect` ga cho'zib to'ldiradi (`view` — yo'l koordinatalari qutisi).
+    /// UZ: Vektor yo'lni `rect` ga cho'zib to'ldiradi (`view` — yo'l koordinatalari qutisi).
+    /// EN: Fills a vector path stretched into `rect` (`view` is the path's coordinate box).
+    /// RU: Заливает векторный контур, растянутый на `rect` (`view` — рамка координат контура).
     pub fn fill_path(&mut self, path: &Path, view: f32, rect: Rect, c: Color) {
         if view <= 0.0 || rect.is_empty() {
             return;
@@ -620,7 +670,10 @@ mod tests {
         c.clear(Color::BLACK);
         c.fill_round_rect(Rect::new(5.5, 5.0, 30.0, 30.0), 10.0, Color::WHITE);
         assert_eq!(c.pixel(20, 20), Color::WHITE);
-        assert_eq!(c.pixel(5, 5), Color::BLACK); // yumaloq burchak ichida emas
+        // UZ: yumaloq burchak ichida emas, shuning uchun qora
+        // EN: outside the rounded corner, so it stays black.
+        // RU: вне скруглённого угла, поэтому остаётся чёрным.
+        assert_eq!(c.pixel(5, 5), Color::BLACK);
         assert_eq!(c.pixel(2, 20), Color::BLACK);
         let edge = c.pixel(5, 20);
         assert!(
@@ -656,7 +709,9 @@ mod tests {
     fn backdrop_xiralashtiradi() {
         let mut c = canvas(40, 20);
         c.clear(Color::BLACK);
-        // Chap yarmi oq, o'ng yarmi qora; panel o'rtada chegara ustida: chegara xiralashishi kerak.
+        // UZ: Chap yarmi oq, o'ng yarmi qora; panel o'rtada, chegara ustida: chegara xiralashishi kerak.
+        // EN: Left half white, right half black; the panel sits in the middle over the border: the border must get blurred.
+        // RU: Левая половина белая, правая чёрная; панель посередине над границей: граница должна размыться.
         c.fill_round_rect(Rect::new(0.0, 0.0, 20.0, 20.0), 0.0, Color::WHITE);
         c.draw_backdrop(
             Rect::new(8.0, 2.0, 24.0, 16.0),
@@ -677,7 +732,9 @@ mod tests {
         c.fill_path(&p, 24.0, Rect::new(0.0, 0.0, 24.0, 24.0), Color::WHITE);
         assert_eq!(c.pixel(12, 12), Color::WHITE);
         assert_eq!(c.pixel(1, 1), Color::BLACK);
-        // 2 baravar katta qutiga cho'ziladi.
+        // UZ: 2 baravar katta qutiga cho'ziladi.
+        // EN: Stretched into a box twice as large.
+        // RU: Растягивается на коробку вдвое больше.
         let mut c = canvas(48, 48);
         c.clear(Color::BLACK);
         c.fill_path(&p, 24.0, Rect::new(0.0, 0.0, 48.0, 48.0), Color::WHITE);

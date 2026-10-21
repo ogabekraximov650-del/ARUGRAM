@@ -1,5 +1,9 @@
-//! Chizish buyruqlarini GPU uchun paketlaydi: bitta uchlar oqimi (vertex stream) + operatsiyalar ro'yxati
-//! (atlasga yuklash, qirqish bilan chizish). Platformadan mustaqil, shuning uchun kompyuterda testlanadi.
+//! UZ: Chizish buyruqlarini GPU uchun paketlaydi: bitta uchlar oqimi (vertex stream) + operatsiyalar ro'yxati
+//! (atlasga yuklash, qirqish bilan chizish). Platformadan mustaqil, shuning uchun kompyuterda sinaladi.
+//! EN: Packs draw commands for the GPU: a single vertex stream plus a list of operations
+//! (atlas uploads, scissored draws). Platform-independent, so it is tested on a desktop computer.
+//! RU: Упаковывает команды рисования для GPU: единый поток вершин и список операций
+//! (загрузка в атлас, рисование с отсечением). Не зависит от платформы, поэтому тестируется на компьютере.
 
 use crate::atlas::Atlas;
 use std::collections::HashMap;
@@ -10,8 +14,12 @@ use uzcoders_text::{Font, GlyphCache};
 
 pub const ATLAS_SIZE: u32 = 1024;
 
-/// Bitta uch: joy (piksel), uv/lokal koordinata, rang va parametrlar.
-/// `p.x < 0` — atlasdan alfa; aks holda yumaloq to'rtburchak SDF: `p = (yarim_kenglik, yarim_balandlik, radius, kontur_qalinligi)`.
+/// UZ: Bitta uch (vertex): joy (piksel), uv / lokal koordinata, rang va parametrlar.
+/// `p.x < 0` — atlasdan alfa olinadi; aks holda yumaloq to'rtburchak SDF: `p = (yarim_kenglik, yarim_balandlik, radius, kontur_qalinligi)`.
+/// EN: One vertex: position (pixels), uv / local coordinate, color and parameters.
+/// `p.x < 0` means alpha is sampled from the atlas; otherwise a rounded-rectangle SDF is used: `p = (half_width, half_height, radius, stroke_width)`.
+/// RU: Одна вершина: положение (в пикселях), uv / локальная координата, цвет и параметры.
+/// `p.x < 0` — альфа берётся из атласа; иначе используется SDF скруглённого прямоугольника: `p = (полуширина, полувысота, радиус, толщина_контура)`.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Vertex {
@@ -21,13 +29,17 @@ pub struct Vertex {
     pub v: f32,
     pub color: [u8; 4],
     pub p: [f32; 4],
-    /// Qo'shimcha parametr (backdrop uchun linza kattalashtirishi; boshqalarda 0).
+    /// UZ: Qo'shimcha parametr (backdrop uchun linza kattalashtirishi; boshqa elementlarda 0).
+    /// EN: Extra parameter (lens magnification for backdrop; 0 for other elements).
+    /// RU: Дополнительный параметр (увеличение линзы для backdrop; для остальных элементов 0).
     pub q: f32,
 }
 
 #[derive(Debug)]
 pub enum Op {
-    /// Atlasning bir qismini yangilash (A8 piksellar).
+    /// UZ: Atlasning bir qismini yangilash (A8 piksellar, ya'ni bir kanalli alfa).
+    /// EN: Update part of the atlas (A8 pixels, i.e. single-channel alpha).
+    /// RU: Обновить часть атласа (пиксели A8, то есть одноканальная альфа).
     Upload {
         x: u32,
         y: u32,
@@ -35,9 +47,13 @@ pub enum Op {
         h: u32,
         data: Vec<u8>,
     },
-    /// Atlas tozalandi (eski joylashuvlar yaroqsiz).
+    /// UZ: Atlas tozalandi: eski joylashuvlar endi yaroqsiz.
+    /// EN: The atlas was cleared: old placements are no longer valid.
+    /// RU: Атлас очищен: прежние положения больше недействительны.
     ClearAtlas,
-    /// RGBA rasm atlasining bir qismini yangilash.
+    /// UZ: RGBA rasm atlasining bir qismini yangilash.
+    /// EN: Update part of the RGBA image atlas.
+    /// RU: Обновить часть атласа RGBA-изображений.
     UploadImage {
         x: u32,
         y: u32,
@@ -45,27 +61,41 @@ pub enum Op {
         h: u32,
         data: Vec<u8>,
     },
-    /// Rasm atlasi tozalandi.
+    /// UZ: Rasm atlasi tozalandi.
+    /// EN: The image atlas was cleared.
+    /// RU: Атлас изображений очищен.
     ClearImages,
-    /// Katta rasm uchun alohida tekstura yaratish (bir marta yuklanadi).
+    /// UZ: Katta rasm uchun alohida tekstura yaratish (bir marta yuklanadi).
+    /// EN: Create a separate texture for a large image (uploaded once).
+    /// RU: Создать отдельную текстуру для большого изображения (загружается один раз).
     NewImage {
         id: u32,
         w: u32,
         h: u32,
         data: Vec<u8>,
     },
-    /// Alohida rasm teksturasini o'chirish (xotira chegarasi oshganda).
+    /// UZ: Alohida rasm teksturasini o'chirish (xotira chegarasi oshganda).
+    /// EN: Delete a separate image texture (when the memory budget is exceeded).
+    /// RU: Удалить отдельную текстуру изображения (при превышении лимита памяти).
     FreeImage(u32),
-    /// Shu paytgacha chizilgan tasvirning `[x, y, w, h]` (yuqori-chap boshlang'ich) hududini xiralashtirib, keyingi chizishlar uchun tayyorlaydi.
+    /// UZ: Shu paytgacha chizilgan tasvirning `[x, y, w, h]` (boshlang'ich nuqta yuqori-chapda) hududini xiralashtirib, keyingi chizishlar uchun tayyorlaydi.
+    /// EN: Blurs the `[x, y, w, h]` region (origin at top-left) of what has been drawn so far and prepares it for subsequent draws.
+    /// RU: Размывает область `[x, y, w, h]` (начало в левом верхнем углу) уже нарисованного и готовит её для следующих отрисовок.
     Blur { region: [i32; 4], blur: f32 },
-    /// Video kadrini (tashqi tekstura) `[x, y, w, h]` piksel to'rtburchagiga chizish.
+    /// UZ: Video kadrini (tashqi tekstura) `[x, y, w, h]` piksel to'rtburchagiga chizadi.
+    /// EN: Draws the video frame (external texture) into the `[x, y, w, h]` pixel rectangle.
+    /// RU: Рисует кадр видео (внешняя текстура) в прямоугольник `[x, y, w, h]` пикселей.
     Video { rect: [f32; 4] },
-    /// `verts[first..first+count]` ni (qirqish bilan) chizish. `scissor` — `[x, y, w, h]`, yuqori-chap boshlang'ich.
+    /// UZ: `verts[first..first+count]` uchlarini (qirqish bilan) chizadi. `scissor` — `[x, y, w, h]`, boshlang'ich nuqta yuqori-chapda.
+    /// EN: Draws vertices `verts[first..first+count]` (with scissoring). `scissor` is `[x, y, w, h]` with the origin at top-left.
+    /// RU: Рисует вершины `verts[first..first+count]` (с отсечением). `scissor` — `[x, y, w, h]`, начало в левом верхнем углу.
     Draw {
         scissor: Option<[i32; 4]>,
         first: u32,
         count: u32,
-        /// Bo'lsa — shu alohida rasm teksturasi bilan chiziladi (atlas o'rniga).
+        /// UZ: Berilgan bo'lsa — shu alohida rasm teksturasi bilan chiziladi (atlas o'rniga).
+        /// EN: If set, drawing uses this separate image texture (instead of the atlas).
+        /// RU: Если задано — рисование идёт с этой отдельной текстурой изображения (вместо атласа).
         image: Option<u32>,
     },
 }
@@ -95,9 +125,13 @@ pub struct Batcher {
     atlas: Atlas,
     entries: HashMap<Key, Option<Entry>>,
     img_atlas: Atlas,
-    /// Atlasdagi rasmlar (Rc ushlab turiladi: ko'rsatkich o'zgarmasligi uchun).
+    /// UZ: Atlasdagi rasmlar (`Rc` ushlab turiladi, shunda ko'rsatkich o'zgarmaydi).
+    /// EN: Images in the atlas (an `Rc` is kept so the pointer stays stable).
+    /// RU: Изображения в атласе (хранится `Rc`, чтобы указатель не менялся).
     images: HashMap<usize, (Rc<Image>, Option<Entry>)>,
-    /// Katta rasmlar (poster): har biriga alohida tekstura, LRU bilan.
+    /// UZ: Katta rasmlar (posterlar): har biriga alohida tekstura beriladi, LRU (eng kam ishlatilgani chiqariladi) bilan boshqariladi.
+    /// EN: Large images (posters): each gets its own texture, managed with an LRU (least recently used is evicted first).
+    /// RU: Большие изображения (постеры): у каждого своя текстура, управление по LRU (первым вытесняется наименее используемое).
     big: HashMap<usize, BigImg>,
     next_id: u32,
     frame_no: u64,
@@ -111,9 +145,13 @@ struct BigImg {
     _keep: Rc<Image>,
 }
 
-/// Atlasga sig'maydigan (katta) rasmlar shu hajmdan boshlanadi (piksel).
+/// UZ: Atlasga sig'maydigan (katta) rasmlar shu hajmdan (piksel) boshlanadi.
+/// EN: Images from this size (in pixels) up are considered large and do not go into the atlas.
+/// RU: Изображения от этого размера (в пикселях) считаются большими и в атлас не попадают.
 const BIG_PIXELS: u32 = 128 * 128;
-/// Katta rasmlar teksturalarining umumiy chegarasi (bayt).
+/// UZ: Katta rasm teksturalarining umumiy xotira chegarasi (bayt).
+/// EN: Total memory budget for large-image textures (bytes).
+/// RU: Общий лимит памяти для текстур больших изображений (в байтах).
 const BIG_BUDGET: usize = 48 << 20;
 
 fn rgba(c: Color) -> [u8; 4] {
@@ -121,7 +159,9 @@ fn rgba(c: Color) -> [u8; 4] {
 }
 
 impl Batcher {
-    /// `faces` — (qalinlik, shrift); birinchisi 400 (asosiy) bo'lishi kerak.
+    /// UZ: `faces` — (qalinlik, shrift) juftliklari; birinchisi 400 (asosiy, oddiy) bo'lishi shart.
+    /// EN: `faces` are (weight, font) pairs; the first must be 400 (the regular base face).
+    /// RU: `faces` — пары (насыщенность, шрифт); первой должна быть 400 (основное обычное начертание).
     pub fn new(faces: Vec<(u16, Rc<Font>)>) -> Batcher {
         Batcher {
             faces: faces
@@ -152,7 +192,9 @@ impl Batcher {
         best
     }
 
-    /// Atlas yo'qolgan (masalan GL kontekst qayta yaratildi): hammasini boshidan.
+    /// UZ: Atlas yo'qolgan (masalan, GL konteksti qayta yaratilgan): hammasi boshidan boshlanadi.
+    /// EN: The atlas is lost (for example, the GL context was recreated): start everything over.
+    /// RU: Атлас потерян (например, GL-контекст пересоздан): всё начинается заново.
     pub fn reset(&mut self) {
         self.atlas.reset();
         self.entries.clear();
@@ -317,7 +359,9 @@ impl Batcher {
         let pos = match self.atlas.alloc(w, h) {
             Some(p) => p,
             None => {
-                // Atlas to'ldi: shu paytgacha yig'ilganini chizib, tozalab, qayta urinamiz.
+                // UZ: Atlas to'ldi: shu paytgacha yig'ilganini chizib, atlasni tozalab, qayta urinamiz.
+                // EN: The atlas is full: flush what has been collected so far, clear the atlas and try again.
+                // RU: Атлас заполнен: отрисовываем накопленное, очищаем атлас и пробуем снова.
                 b.flush();
                 b.frame.ops.push(Op::ClearAtlas);
                 self.atlas.reset();
@@ -353,7 +397,9 @@ impl Batcher {
             return *e;
         }
         let e = self.alloc(b, g.width as u32, g.height as u32, g.data.clone());
-        // `alloc` atlasni tozalagan bo'lishi mumkin: kalitni shundan keyin yozamiz.
+        // UZ: `alloc` atlasni tozalagan bo'lishi mumkin, shuning uchun kalitni faqat shundan keyin yozamiz.
+        // EN: `alloc` may have cleared the atlas, so the key is recorded only after it.
+        // RU: `alloc` мог очистить атлас, поэтому ключ записываем только после этого.
         self.entries.insert(key, e);
         e
     }
@@ -387,7 +433,9 @@ impl Batcher {
                         },
                     );
                     self.big_bytes += bytes;
-                    // Chegara oshsa, shu kadrda ishlatilmagan eng eski rasmlar o'chiriladi.
+                    // UZ: Chegara oshsa, shu kadrda ishlatilmagan eng eski rasmlar o'chiriladi.
+                    // EN: When the budget is exceeded, the oldest images not used in this frame are deleted.
+                    // RU: При превышении лимита удаляются самые старые изображения, не использованные в этом кадре.
                     while self.big_bytes > BIG_BUDGET {
                         let victim = self
                             .big
@@ -481,7 +529,9 @@ struct Build {
     batch_start: usize,
     clips: Vec<[i32; 4]>,
     scissor: Option<[i32; 4]>,
-    /// Joriy qirqish maydoni bo'sh: hech narsa chizilmaydi.
+    /// UZ: Joriy qirqish (scissor) maydoni bo'sh: hech narsa chizilmaydi.
+    /// EN: The current scissor area is empty: nothing is drawn.
+    /// RU: Текущая область отсечения (scissor) пуста: ничего не рисуется.
     empty: bool,
     full: [i32; 4],
 }
@@ -510,7 +560,9 @@ impl Build {
     }
 
     fn quad(&mut self, v: [Vertex; 4]) {
-        // Ikki uchburchak: 0-1-2, 2-1-3 (v: chap-yuqori, o'ng-yuqori, chap-past, o'ng-past).
+        // UZ: Ikki uchburchak: 0-1-2 va 2-1-3 (uchlar: chap-yuqori, o'ng-yuqori, chap-past, o'ng-past).
+        // EN: Two triangles: 0-1-2 and 2-1-3 (vertices: top-left, top-right, bottom-left, bottom-right).
+        // RU: Два треугольника: 0-1-2 и 2-1-3 (вершины: левая-верхняя, правая-верхняя, левая-нижняя, правая-нижняя).
         for i in [0, 1, 2, 2, 1, 3] {
             self.frame.verts.push(v[i]);
         }
@@ -526,7 +578,10 @@ impl Build {
         }
         let (hw, hh) = (r.w * 0.5, r.h * 0.5);
         let rad = radius.min(hw).min(hh).max(0.0);
-        let m = 1.0; // chekkani silliqlash uchun 1 px chegara
+        // UZ: chekkani silliqlash uchun 1 piksel chegara
+        // EN: a 1 pixel margin for anti-aliasing the edge.
+        // RU: запас в 1 пиксель для сглаживания края.
+        let m = 1.0;
         let (x0, y0, x1, y1) = (r.x - m, r.y - m, r.right() + m, r.bottom() + m);
         let (cx, cy) = (r.x + hw, r.y + hh);
         let p = [hw, hh, rad, stroke];
@@ -578,7 +633,9 @@ impl Build {
         }
         let m = r + 1.0;
         let col = rgba(c);
-        // p.w = -4 - sweep: rejim "yoy" va yoy uzunligi birga kodlanadi.
+        // UZ: `p.w = -4 - sweep`: "yoy" rejimi va yoy uzunligi bitta qiymatda kodlanadi.
+        // EN: `p.w = -4 - sweep`: the "arc" mode and the arc length are encoded in one value.
+        // RU: `p.w = -4 - sweep`: режим «дуга» и длина дуги кодируются одним значением.
         let p = [r, w, start, -4.0 - sweep];
         let mk = |x: f32, y: f32| Vertex {
             x,
@@ -727,7 +784,9 @@ mod tests {
         );
         assert_eq!(f.verts.len(), 12);
         assert_eq!(draws(&f), vec![(None, 0, 12)]);
-        // SDF parametrlari: yarim o'lchamlar, radius.
+        // UZ: SDF parametrlari: yarim o'lchamlar va radius.
+        // EN: SDF parameters: half sizes and radius.
+        // RU: Параметры SDF: половинные размеры и радиус.
         assert_eq!(f.verts[0].p, [5.0, 5.0, 4.0, 0.0]);
         assert_eq!(f.verts[0].u, -(5.0 + 1.0));
     }
@@ -758,7 +817,10 @@ mod tests {
         let f = b.build(
             &[
                 DrawCmd::PushClip(Rect::new(0.0, 0.0, 10.0, 10.0)),
-                DrawCmd::PushClip(Rect::new(20.0, 20.0, 5.0, 5.0)), // kesishmaydi: bo'sh
+                // UZ: kesishmaydi: qirqish maydoni bo'sh
+                // EN: does not intersect: the clip area is empty.
+                // RU: не пересекается: область отсечения пуста.
+                DrawCmd::PushClip(Rect::new(20.0, 20.0, 5.0, 5.0)),
                 rr(0.0, 0.0, 50.0, 50.0),
                 DrawCmd::PopClip,
                 rr(1.0, 1.0, 2.0, 2.0),
@@ -790,8 +852,13 @@ mod tests {
             .count();
         assert_eq!(uploads, 1);
         assert_eq!(f.verts.len(), 18);
-        assert!(f.verts[0].p[0] < 0.0); // atlas rejimi
-                                        // Keyingi kadrda yuklash yo'q.
+        // UZ: atlas rejimi (alfa atlasdan olinadi)
+        // EN: atlas mode (alpha is taken from the atlas).
+        // RU: режим атласа (альфа берётся из атласа).
+        assert!(f.verts[0].p[0] < 0.0);
+                                        // UZ: Keyingi kadrda yuklash (upload) yo'q.
+                                        // EN: No upload on the next frame.
+                                        // RU: В следующем кадре загрузки (upload) нет.
         let f2 = b.build(&[t], 100, 100);
         assert_eq!(
             f2.ops
@@ -826,7 +893,9 @@ mod tests {
     fn atlas_toldirilsa_tozalanadi() {
         let mut b = batcher();
         let mut cmds = Vec::new();
-        // Juda ko'p turli o'lchamli harflar atlasni to'ldiradi.
+        // UZ: Juda ko'p turli o'lchamli harflar atlasni to'ldirib yuboradi.
+        // EN: Very many glyphs of different sizes fill up the atlas.
+        // RU: Очень много глифов разных размеров заполняют атлас.
         for i in 0..400 {
             cmds.push(DrawCmd::Text {
                 x: 0.0,
@@ -840,7 +909,9 @@ mod tests {
         }
         let f = b.build(&cmds, 400, 400);
         assert!(f.ops.iter().any(|o| matches!(o, Op::ClearAtlas)));
-        // Tozalashdan oldin chizish chaqiruvi bor (eski atlas bilan).
+        // UZ: Tozalashdan oldin eski atlas bilan chizish chaqiruvi bo'lishi kerak.
+        // EN: A draw call using the old atlas must come before the clear.
+        // RU: Перед очисткой должен быть вызов рисования со старым атласом.
         let first_clear = f
             .ops
             .iter()
@@ -903,7 +974,10 @@ mod tests {
         assert_eq!(f.verts.len(), 12);
         assert_eq!(f.verts[0].p[3], -3.0);
         assert_eq!(f.verts[6].p[3], -1.0);
-        assert_eq!(draws(&f).len(), 1); // bir chaqiruvda
+        // UZ: bitta chaqiruvda chiziladi
+        // EN: drawn in a single call.
+        // RU: рисуется одним вызовом.
+        assert_eq!(draws(&f).len(), 1);
     }
 
     #[test]
@@ -989,7 +1063,9 @@ mod tests {
             })
         };
         let imgs: Vec<Rc<Image>> = (0..40).map(|i| big(i as u8)).collect();
-        // Birinchi kadr: 3 ta poster — har biri alohida chaqiruv va yuklash.
+        // UZ: Birinchi kadr: 3 ta poster — har biri alohida chaqiruv va alohida yuklash.
+        // EN: First frame: 3 posters — each with its own draw call and its own upload.
+        // RU: Первый кадр: 3 постера — у каждого свой вызов рисования и своя загрузка.
         let cmds: Vec<DrawCmd> = imgs[..3]
             .iter()
             .map(|i| DrawCmd::Image {
@@ -1013,7 +1089,9 @@ mod tests {
                 .count(),
             3
         );
-        // Ikkinchi kadr: qayta yuklash yo'q.
+        // UZ: Ikkinchi kadr: qayta yuklash yo'q.
+        // EN: Second frame: no re-upload.
+        // RU: Второй кадр: повторной загрузки нет.
         let f2 = b.build(&cmds, 400, 400);
         assert_eq!(
             f2.ops
@@ -1022,7 +1100,9 @@ mod tests {
                 .count(),
             0
         );
-        // Ko'p rasm: 48 MB dan oshgach eskilari o'chiriladi.
+        // UZ: Ko'p rasm: 48 MB dan oshgach eskilari o'chiriladi.
+        // EN: Many images: once 48 MB is exceeded, the older ones are deleted.
+        // RU: Много изображений: после превышения 48 МБ старые удаляются.
         let all: Vec<DrawCmd> = imgs
             .iter()
             .map(|i| DrawCmd::Image {
@@ -1032,7 +1112,9 @@ mod tests {
             })
             .collect();
         let _ = b.build(&all, 400, 400);
-        // Keyingi kadrda yangi rasm kelganda, shu kadrda ishlatilmagan eskilari o'chiriladi.
+        // UZ: Keyingi kadrda yangi rasm kelganda, shu kadrda ishlatilmagan eskilari o'chiriladi.
+        // EN: When a new image arrives in the next frame, older ones not used in that frame are deleted.
+        // RU: Когда в следующем кадре приходит новое изображение, старые, не использованные в этом кадре, удаляются.
         let fresh = DrawCmd::Image {
             image: big(99),
             rect: Rect::new(0.0, 0.0, 100.0, 150.0),

@@ -1,4 +1,6 @@
-//! EGL: ANativeWindow ustida OpenGL ES 2.0 konteksti.
+//! UZ: EGL: ANativeWindow ustida OpenGL ES 2.0 konteksti.
+//! EN: EGL: an OpenGL ES 2.0 context on top of an ANativeWindow.
+//! RU: EGL: контекст OpenGL ES 2.0 поверх ANativeWindow.
 
 use std::ffi::c_void;
 use std::ptr::null_mut;
@@ -86,7 +88,9 @@ impl Egl {
         }
     }
 
-    /// Oynaga sirt yaratadi va kontekstni joriy qiladi (oldingi sirt yo'q qilinadi).
+    /// UZ: Oynaga sirt (surface) yaratadi va kontekstni joriy qiladi (oldingi sirt yo'q qilinadi).
+    /// EN: Creates a surface for the window and makes the context current (the previous surface is destroyed).
+    /// RU: Создаёт поверхность (surface) для окна и делает контекст текущим (прежняя поверхность уничтожается).
     pub fn set_window(&mut self, window: *mut c_void) -> Result<(), String> {
         unsafe {
             self.release_surface();
@@ -118,7 +122,9 @@ impl Egl {
         }
     }
 
-    /// Kadrni ko'rsatadi. `false` — kontekst yo'qolgan (qayta yaratish kerak).
+    /// UZ: Kadrni ko'rsatadi. `false` — kontekst yo'qolgan (qayta yaratish kerak).
+    /// EN: Presents the frame. `false` means the context was lost (it must be recreated).
+    /// RU: Показывает кадр. `false` — контекст потерян (его нужно создать заново).
     pub fn swap(&mut self) -> bool {
         unsafe { eglSwapBuffers(self.dpy, self.surf) != 0 || eglGetError() != 0x300E }
     }
