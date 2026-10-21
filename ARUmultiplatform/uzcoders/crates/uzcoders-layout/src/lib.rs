@@ -225,6 +225,20 @@ impl Tree {
             0.0
         };
         let gaps = s.gap * n.children.len().saturating_sub(1) as f32;
+        // Qatorda `weight` bolalar ulushi: qat'iy (weight'siz) qo'shnilar egallagan kenglik ayirib tashlanadi, aks holda
+        // matn haqiqiyidan kengroq o'lchanadi va satrlar soni kam chiqadi (kontent kartadan chiqib ketadi).
+        let fixed_w: f32 = if axis == Axis::Row && total_grow > 0.0 && inner_avail_w.is_finite() {
+            n.children
+                .iter()
+                .filter(|&&c| !self.nodes[c].style.basis0)
+                .map(|&c| {
+                    let cm = self.nodes[c].style.margin;
+                    self.measure(c, (inner_avail_w - cm.horizontal()).max(0.0)).w + cm.horizontal()
+                })
+                .sum()
+        } else {
+            0.0
+        };
         let mut main = 0.0f32;
         let mut cross = 0.0f32;
         for (i, &c) in n.children.iter().enumerate() {
@@ -235,7 +249,7 @@ impl Tree {
                 && total_grow > 0.0
                 && inner_avail_w.is_finite()
             {
-                ((inner_avail_w - gaps) * cs.grow / total_grow - cm.horizontal()).max(0.0)
+                ((inner_avail_w - gaps - fixed_w).max(0.0) * cs.grow / total_grow - cm.horizontal()).max(0.0)
             } else {
                 (inner_avail_w - cm.horizontal()).max(0.0)
             };
@@ -659,5 +673,23 @@ mod tests {
         t.compute(root, Size::new(100.0, 10.0));
         assert_eq!(t.rect(a).w, 80.0);
         assert!((t.rect(b).w - 20.0).abs() < 1e-3, "{:?}", t.rect(b));
+    }
+
+    #[test]
+    fn ulushli_matn_qoshni_kengligini_ayirib_oladi() {
+        // Matn: 1000 birlik uzunlik, har satr 10 balandlik. Qator kengligi 300, chapda 100 px qat'iy quti:
+        // matn 200 kenglikda -> 5 satr -> 50 balandlik (300 da o'lchansa 4 satr = 40 chiqardi).
+        let mut t = Tree::new();
+        let lead = t.add(fixed(100.0, 20.0), vec![]);
+        let text = t.add_leaf(
+            Style { grow: 1.0, basis0: true, ..Style::default() },
+            |w| {
+                let w = if w.is_finite() { w } else { 1000.0 };
+                Size::new(w.min(1000.0), (1000.0 / w).ceil() * 10.0)
+            },
+        );
+        let row = t.add(Style { direction: Axis::Row, ..Style::default() }, vec![lead, text]);
+        t.compute(row, Size::new(300.0, f32::INFINITY));
+        assert_eq!(t.rect(row).h, 50.0);
     }
 }

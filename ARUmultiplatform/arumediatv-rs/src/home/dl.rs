@@ -229,7 +229,7 @@ impl Home {
             return column(vec![spinner(32.0, 3.0, ACCENT2)]).center();
         };
         if idx.is_empty() {
-            return Self::empty(D_PLAY, "Yuklab olingan qism yo'q\nQismlar ro'yxatida ⬇ ni bosib yuklab oling");
+            return Self::empty(D_PLAY, "Yuklab olingan qism yo'q\nQismlar ro'yxatida yuklash belgisini bosib yuklab oling");
         }
         let live = self.dl.get();
         // Bo'lim bo'yicha guruhlash.

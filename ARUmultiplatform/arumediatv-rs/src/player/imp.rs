@@ -124,6 +124,8 @@ pub struct Status {
     pub width: i32,
     pub height: i32,
     pub speed: f32,
+    /// Diagnostika matni (pleyer ostida ko'rsatiladi).
+    pub dbg: String,
 }
 
 struct Clock {
@@ -154,6 +156,10 @@ struct Inner {
     dur_us: AtomicI64,
     /// Tezlik (foiz: 100 = 1x). Audio chastotasi shunga ko'paytiriladi.
     speed: AtomicI32,
+    /// Diagnostika: ekranga chiqarilgan kadrlar, dekoderdan chiqqan kadrlar, oxirgi dekoder holati.
+    rendered: AtomicU64,
+    decoded: AtomicU64,
+    stage: AtomicU8,
     width: AtomicI32,
     height: AtomicI32,
     has_audio: AtomicBool,
@@ -282,6 +288,9 @@ impl Player {
             pos_us: AtomicI64::new(start_ms.max(0) * 1000),
             dur_us: AtomicI64::new(0),
             speed: AtomicI32::new(100),
+            rendered: AtomicU64::new(0),
+            decoded: AtomicU64::new(0),
+            stage: AtomicU8::new(0),
             width: AtomicI32::new(0),
             height: AtomicI32::new(0),
             has_audio: AtomicBool::new(false),
@@ -315,6 +324,16 @@ impl Player {
             width: i.width.load(Ordering::SeqCst),
             height: i.height.load(Ordering::SeqCst),
             speed: i.speed.load(Ordering::SeqCst) as f32 / 100.0,
+            dbg: {
+                let (tex, win, up) = uzcoders::android::video_stats();
+                let stage = match i.stage.load(Ordering::SeqCst) {
+                    0 => "yuza kutilmoqda",
+                    1 => "manba ochilmoqda",
+                    2 => "dekoder tayyor",
+                    _ => "?",
+                };
+                format!("{stage} | yuza={} tex={tex} | dekod={} chiqdi={} tekstura={up} | {}x{}", if win { "bor" } else { "yo'q" }, i.decoded.load(Ordering::SeqCst), i.rendered.load(Ordering::SeqCst), i.width.load(Ordering::SeqCst), i.height.load(Ordering::SeqCst))
+            },
         }
     }
 
@@ -409,6 +428,7 @@ unsafe fn run_locked(inner: Arc<Inner>, source: Source) {
         std::thread::sleep(Duration::from_millis(30));
     };
 
+    inner.stage.store(1, Ordering::SeqCst);
     // 2) Manba.
     let ex = AMediaExtractor_new();
     let stop_flag = Arc::new(AtomicBool::new(false));
@@ -491,6 +511,7 @@ unsafe fn run_locked(inner: Arc<Inner>, source: Source) {
     *inner.vcodec.lock().unwrap_or_else(|e| e.into_inner()) = Ptr(vcodec);
     *inner.acodec.lock().unwrap_or_else(|e| e.into_inner()) = Ptr(acodec);
     inner.state.store(1, Ordering::SeqCst);
+    inner.stage.store(2, Ordering::SeqCst);
 
     // 4) Chiqish oqimlari.
     let iv = inner.clone();
@@ -664,6 +685,7 @@ unsafe fn video_out(inner: Arc<Inner>) {
             }
             continue;
         }
+        inner.decoded.fetch_add(1, Ordering::Relaxed);
         let g_now = inner.generation.load(Ordering::SeqCst);
         let release = |render: bool| {
             let g = inner.vcodec.lock().unwrap_or_else(|e| e.into_inner());
@@ -691,6 +713,7 @@ unsafe fn video_out(inner: Arc<Inner>) {
         if preview {
             inner.preview.store(false, Ordering::SeqCst);
             release(true);
+            inner.rendered.fetch_add(1, Ordering::Relaxed);
             inner.pos_us.store(pts, Ordering::SeqCst);
             uzcoders::core::request_frame();
             kick_at = Some(Instant::now() + Duration::from_millis(25));
@@ -723,6 +746,7 @@ unsafe fn video_out(inner: Arc<Inner>) {
         }
         release(render);
         if render {
+            inner.rendered.fetch_add(1, Ordering::Relaxed);
             inner.pos_us.store(pts, Ordering::SeqCst);
             uzcoders::core::request_frame();
             kick_at = Some(Instant::now() + Duration::from_millis(12));

@@ -28,6 +28,7 @@ pub struct SeasonPage {
     pub(super) info: State<Rc<SeasonInfo>>,
     pub(super) eps: State<Rc<Vec<Episode>>>,
     pub(super) eps_loading: State<bool>,
+    pub(super) eps_err: State<String>,
     pub(super) sections: State<Rc<Vec<Season>>>,
     pub(super) cm: super::comments::CommentsState,
     pub(super) rating_open: State<bool>,
@@ -64,6 +65,34 @@ pub enum Page {
 }
 
 impl Home {
+    /// Qismlar ro'yxati: xato bo'lsa 2 marta qayta uriniladi, so'ng sababi ko'rsatiladi (bosilsa qayta yuklanadi).
+    pub(super) fn load_eps(self: &Rc<Self>, p: &Rc<SeasonPage>) {
+        let (a, s) = (p.season.anime_id, p.season.season_id);
+        p.eps_loading.set(true);
+        p.eps_err.set(String::new());
+        let p2 = p.clone();
+        spawn_bg(
+            move || {
+                let mut last = Err(String::new());
+                for i in 0..3 {
+                    last = fetch_episodes(a, s);
+                    if last.is_ok() {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(600 * (i + 1)));
+                }
+                last
+            },
+            move |r| {
+                match r {
+                    Ok(e) => p2.eps.set(Rc::new(e)),
+                    Err(e) => p2.eps_err.set(e),
+                }
+                p2.eps_loading.set(false);
+            },
+        );
+    }
+
     pub(super) fn open_season(self: &Rc<Self>, season: Season) {
         let p = Rc::new(SeasonPage {
             season: season.clone(),
@@ -71,6 +100,7 @@ impl Home {
             info: State::new(Rc::new(SeasonInfo::default())),
             eps: State::new(Rc::new(Vec::new())),
             eps_loading: State::new(true),
+            eps_err: State::new(String::new()),
             sections: State::new(Rc::new(Vec::new())),
             cm: super::comments::CommentsState::new(),
             rating_open: State::new(false),
@@ -90,13 +120,7 @@ impl Home {
                 p1.info.set(Rc::new(i));
             }
         });
-        let p2 = p.clone();
-        spawn_bg(move || fetch_episodes(a, s), move |r| {
-            if let Ok(e) = r {
-                p2.eps.set(Rc::new(e));
-            }
-            p2.eps_loading.set(false);
-        });
+        self.load_eps(&p);
         let (p3, me) = (p.clone(), self.clone());
         spawn_bg(move || fetch_sections(a), move |r| {
             if let Ok(list) = r {
@@ -410,7 +434,14 @@ impl Home {
     fn season_eps_tab(self: &Rc<Self>, p: &Rc<SeasonPage>) -> Element {
         let eps = p.eps.get();
         if eps.is_empty() {
-            return if p.eps_loading.get() { column(vec![spinner(32.0, 3.0, ACCENT2)]).center() } else { Self::empty(A_PLAY, "Qismlar topilmadi") };
+            return if p.eps_loading.get() {
+                column(vec![spinner(32.0, 3.0, ACCENT2)]).center()
+            } else if !p.eps_err.get().is_empty() {
+                let (me, pc) = (self.clone(), p.clone());
+                column(vec![tx(format!("Qismlar yuklanmadi: {}", p.eps_err.get()), 13.5, Color::WHITE), gap_box(0.0, 12.0), self.chip("Qayta urinish", true, move || me.load_eps(&pc))]).center().padding(24.0)
+            } else {
+                Self::empty(A_PLAY, "Qismlar topilmadi")
+            };
         }
         const RANGE: usize = 50;
         let chunks: Vec<&[Episode]> = eps.chunks(RANGE).collect();

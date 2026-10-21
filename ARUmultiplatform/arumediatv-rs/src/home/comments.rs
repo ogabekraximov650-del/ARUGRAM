@@ -273,7 +273,7 @@ impl Home {
     fn cm_panel(self: &Rc<Self>, p: &Rc<SeasonPage>) -> Element {
         let Some(lib) = p.cm.lib.get() else { return column(vec![spinner(22.0, 2.0, ACCENT2)]).center().padding(16.0) };
         if lib.is_empty() {
-            return tx("Stiker yoki GIF to'plamingiz yo'q — Profil → To'plamlar orqali qo'shing", 12.5, Color::WHITE).padding(14.0);
+            return tx("Stiker yoki GIF to'plamingiz yo'q — Profil > To'plamlar orqali qo'shing", 12.5, Color::WHITE).padding(14.0);
         }
         let tabs: Vec<Element> = lib
             .iter()

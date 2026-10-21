@@ -25,6 +25,7 @@ pub struct Status {
     pub width: i32,
     pub height: i32,
     pub speed: f32,
+    pub dbg: String,
 }
 
 pub struct Player;
@@ -34,7 +35,7 @@ impl Player {
         Player
     }
     pub fn status(&self) -> Status {
-        Status { state: State::Error, pos_ms: 0, dur_ms: 0, playing: false, buffering: false, error: "Pleyer faqat telefonda ishlaydi".into(), width: 0, height: 0, speed: 1.0 }
+        Status { state: State::Error, pos_ms: 0, dur_ms: 0, playing: false, buffering: false, error: "Pleyer faqat telefonda ishlaydi".into(), width: 0, height: 0, speed: 1.0, dbg: String::new() }
     }
     pub fn play(&self) {}
     pub fn set_speed(&self, _x: f32) {}

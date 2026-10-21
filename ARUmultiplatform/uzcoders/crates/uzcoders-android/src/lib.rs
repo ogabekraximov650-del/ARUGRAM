@@ -11,7 +11,7 @@ pub mod glue;
 pub(crate) mod jni;
 
 #[cfg(target_os = "android")]
-pub use glue::{frame_to_file, keep_screen_on, set_fullscreen, video_release, video_window, copy_text, files_dir, ime_event, jstring, on_create, open_url, pick_file, take_picked, toast, ANativeActivity, ImeEvent};
+pub use glue::{video_stats, frame_to_file, keep_screen_on, set_fullscreen, video_release, video_window, copy_text, files_dir, ime_event, jstring, on_create, open_url, pick_file, take_picked, toast, ANativeActivity, ImeEvent};
 
 /// Ilova kirish nuqtasini e'lon qiladi: `uzcoders_android::android_app!(my_app);`
 /// bu yerda `fn my_app(scale: f32) -> uzcoders_ui::Ui`.
@@ -244,6 +244,12 @@ pub fn open_url(_url: &str) {}
 pub fn copy_text(_t: &str) {}
 #[cfg(not(target_os = "android"))]
 pub fn toast(_t: &str) {}
+
+/// Video diagnostikasi (faqat Android).
+#[cfg(not(target_os = "android"))]
+pub fn video_stats() -> (u32, bool, u64) {
+    (0, false, 0)
+}
 
 /// Videodan bitta kadr (faqat Android).
 #[cfg(not(target_os = "android"))]

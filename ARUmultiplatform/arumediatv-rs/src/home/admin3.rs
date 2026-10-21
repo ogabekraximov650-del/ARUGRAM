@@ -143,7 +143,7 @@ impl Home {
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
         let age = if updated > 0 { (now - updated) / 1000 } else { -1 };
         let mut kids: Vec<Element> = Vec::new();
-        let (txt, col) = if (0..120).contains(&age) { (format!("● Jonli · {age}s"), Color::hex(0x4ADE80)) } else if age >= 0 { (format!("● Eski holat · {age}s"), GOLD) } else { ("● Holat yo'q".to_string(), GOLD) };
+        let (txt, col) = if (0..120).contains(&age) { (format!("• Jonli · {age}s"), Color::hex(0x4ADE80)) } else if age >= 0 { (format!("• Eski holat · {age}s"), GOLD) } else { ("• Holat yo'q".to_string(), GOLD) };
         kids.push(tx(txt, 12.0, col).margin_each(0.0, 0.0, 0.0, 8.0));
 
         if cur.is_object() {
@@ -202,7 +202,7 @@ impl Home {
                     if !r["kbps"].is_null() { parts.push(format!("{} kb/s", r["kbps"])); }
                     if !r["enc_s"].is_null() { parts.push(clock(f(r, "enc_s"))); }
                     row(vec![
-                        tx(match s { "done" => "✓", "enc" | "upload" => "⟳", _ => "○" }, 14.0, if s == "done" { Color::hex(0x4ADE80) } else { ACCENT2 }).width(22.0),
+                        tx(match s { "done" => "+", "enc" | "upload" => "~", _ => "-" }, 14.0, if s == "done" { Color::hex(0x4ADE80) } else { ACCENT2 }).width(22.0),
                         tx(r["q"].as_str().unwrap_or(""), 13.0, Color::WHITE).bold().width(52.0),
                         tx(parts.join(" · "), 12.0, Color::WHITE),
                     ])

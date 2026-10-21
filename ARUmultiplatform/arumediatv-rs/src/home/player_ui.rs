@@ -52,7 +52,7 @@ impl PlayerState {
     pub(super) fn new() -> PlayerState {
         PlayerState {
             player: RefCell::new(None),
-            status: State::new(Status { state: PState::Opening, pos_ms: 0, dur_ms: 0, playing: false, buffering: false, error: String::new(), width: 0, height: 0, speed: 1.0 }),
+            status: State::new(Status { state: PState::Opening, pos_ms: 0, dur_ms: 0, playing: false, buffering: false, error: String::new(), width: 0, height: 0, speed: 1.0, dbg: String::new() }),
             cur: State::new(None),
             fullscreen: State::new(false),
             ctl: State::new(true),
@@ -170,7 +170,7 @@ impl Home {
             None => kids.push(column(vec![spinner(28.0, 3.0, ACCENT2)]).center().padding(12.0)),
             Some(c) => {
                 for ch in c {
-                    kids.push(tx(format!("{} {}", if ch.kind == "public" { "📢" } else { "🔒" }, if ch.title.is_empty() { ch.url.clone() } else { ch.title.clone() }), 14.0, Color::WHITE).padding_each(0.0, 0.0, 0.0, 8.0));
+                    kids.push(tx(format!("{} ({})", if ch.title.is_empty() { ch.url.clone() } else { ch.title.clone() }, if ch.kind == "public" { "ochiq" } else { "yopiq" }), 14.0, Color::WHITE).padding_each(0.0, 0.0, 0.0, 8.0));
                 }
             }
         }
@@ -371,6 +371,8 @@ impl Home {
                 (w, h)
             };
             layers.push(column(vec![column(vec![]).video().width(vw).height(vh)]).center());
+            // Diagnostika (video chiqmasa sababini ko'rsatadi).
+            layers.push(column(vec![spacer(), tx(st.dbg.clone(), 9.5, Color::hex(0x69F0AE)).bg(Color::rgba(0, 0, 0, 150)).padding_xy(6.0, 2.0)]).padding(4.0));
         } else {
             layers.push(cover);
         }
@@ -399,6 +401,11 @@ impl Home {
                             if let Some(e) = pc.eps.get().iter().find(|e| e.id == id) {
                                 me.play_episode(&pc, &e.clone(), Some(q), None, true);
                             }
+                        } else {
+                            pc.pl.perr.set(String::new());
+                            if pc.eps.get().is_empty() {
+                                me.load_eps(&pc);
+                            }
                         }
                     }),
                 ])
@@ -424,7 +431,10 @@ impl Home {
                         let ep = last.and_then(|id| eps.iter().find(|x| x.id == id)).unwrap_or(e);
                         me.play_episode(&pc, &ep.clone(), None, None, true);
                     } else {
-                        pc.pl.perr.set("Qismlar yuklanmoqda...".into());
+                        if !pc.eps_loading.get() {
+                            me.load_eps(&pc);
+                        }
+                        pc.pl.perr.set(if pc.eps_err.get().is_empty() { "Qismlar yuklanmoqda... qayta bosing".into() } else { format!("Qismlar yuklanmadi: {}", pc.eps_err.get()) });
                     }
                 }))])
                 .center(),

@@ -435,7 +435,7 @@ impl Home {
     /// Sarlavha paneli: nom, tavsif va bo'lim nomi — lupali shisha ichida; qo'ng'iroq tugmasi alohida shisha doira.
     fn header(self: &Rc<Self>, top_inset: f32) -> Element {
         let panel = column(vec![
-            row(vec![tx("ARU", 30.0, Color::WHITE).black(), tx("MEDIATV", 30.0, ACCENT2).black()]),
+            row(vec![tx("ARU", 24.0, Color::WHITE).black(), tx("MEDIATV", 24.0, ACCENT2).black()]),
             tx("Anime dunyosi", 14.0, Color::WHITE),
             gap_box(0.0, 6.0),
             tx("Ommabop anime", 18.0, Color::WHITE).bold(),

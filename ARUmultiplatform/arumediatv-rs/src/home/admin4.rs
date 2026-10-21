@@ -406,7 +406,7 @@ impl Home {
             0 => (sv(it, "name"), sv(it, "janri"), String::new()),
             1 => {
                 let b = Some(iv(it, "bolim_id")).filter(|b| *b > 0).unwrap_or_else(|| iv(it, "season_id"));
-                (format!("{b}-bo'lim — {}", sv(it, "nomi")), "Qismlarni ko'rish →".to_string(), [sv(it, "turi"), sv(it, "holati")].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · "))
+                (format!("{b}-bo'lim — {}", sv(it, "nomi")), "Qismlarni ko'rish >".to_string(), [sv(it, "turi"), sv(it, "holati")].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · "))
             }
             _ => {
                 let n = if it.get("epizod_number").is_some() { sv(it, "epizod_number") } else { "?".into() };
@@ -898,7 +898,7 @@ impl Home {
                 let fc = f.clone();
                 ob.push(
                     row(vec![
-                        tx(if failed { "!" } else { "✓" }, 16.0, if failed { ERROR } else { Color::hex(0x69F0AE) }).width(22.0),
+                        tx(if failed { "!" } else { "+" }, 16.0, if failed { ERROR } else { Color::hex(0x69F0AE) }).width(22.0),
                         tx(status.unwrap_or_else(|| "Asl video yuklangan".into()), 13.0, Color::WHITE).weight(1.0),
                         round_btn(AC_DEL, Color::hex(0xFF5252), move || fc.del_origin.set(true)),
                     ])
@@ -924,7 +924,7 @@ impl Home {
             } else if !quals[i].url.is_empty() {
                 let fc = f.clone();
                 c.push(
-                    row(vec![tx("✓", 16.0, Color::hex(0x69F0AE)).width(22.0), tx(if quals[i].size > 0 { mb(quals[i].size) } else { "Yuklangan".into() }, 13.0, Color::WHITE).weight(1.0), round_btn(AC_DEL, Color::hex(0xFF5252), move || fc.del_q.set(Some(i)))])
+                    row(vec![tx("+", 16.0, Color::hex(0x69F0AE)).width(22.0), tx(if quals[i].size > 0 { mb(quals[i].size) } else { "Yuklangan".into() }, 13.0, Color::WHITE).weight(1.0), round_btn(AC_DEL, Color::hex(0xFF5252), move || fc.del_q.set(Some(i)))])
                         .align(Align::Center),
                 );
             } else {

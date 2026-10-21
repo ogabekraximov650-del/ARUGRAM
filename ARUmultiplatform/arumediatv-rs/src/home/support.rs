@@ -314,16 +314,16 @@ impl Home {
                 inner.push(stack(vec![image_fill(&f)]).height((w * 0.6) * 9.0 / 16.0).width(w * 0.6));
                 inner.push(gap_box(0.0, 6.0));
             } else {
-                inner.push(tx("🖼 Rasm yuklanmoqda...", 13.0, Color::WHITE));
+                inner.push(tx("Rasm yuklanmoqda...", 13.0, Color::WHITE));
             }
         } else if !m.media_type.is_empty() {
             let label = match m.media_type.as_str() {
-                "video" => "🎬 Video",
-                "voice" => "🎤 Ovozli xabar",
-                "round" => "⭕ Video xabar",
-                "sticker" => "🏷 Stiker",
+                "video" => "Video",
+                "voice" => "Ovozli xabar",
+                "round" => "Video xabar",
+                "sticker" => "Stiker",
                 "gif" => "GIF",
-                _ => "📎 Fayl",
+                _ => "Fayl",
             };
             inner.push(tx(label, 13.5, Color::WHITE).bold());
         }

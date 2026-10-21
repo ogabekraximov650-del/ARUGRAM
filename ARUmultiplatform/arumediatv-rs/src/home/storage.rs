@@ -106,7 +106,7 @@ impl Home {
                         column(vec![]).width(14.0).height(14.0).radius(7.0).bg(COLORS[i % COLORS.len()]),
                         tx(s.0.clone(), 15.0, Color::WHITE).weight(1.0),
                         tx(format_bytes(s.1 as i64), 14.0, Color::WHITE).bold(),
-                        column(vec![if on { tx("✓", 14.0, Color::WHITE).bold() } else { gap_box(0.0, 0.0) }])
+                        column(vec![if on { icon("M9,16.17L4.83,12l-1.42,1.41L9,19 21,7l-1.41,-1.41z", 14.0).color(Color::WHITE) } else { gap_box(0.0, 0.0) }])
                             .center()
                             .width(24.0)
                             .height(24.0)

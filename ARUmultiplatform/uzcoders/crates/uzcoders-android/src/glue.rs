@@ -189,6 +189,7 @@ pub fn ime_event(e: ImeEvent) {
 
 pub use crate::jni::jstring;
 
+static VIDEO_UPLOADS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static VIDEO_TEX: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 fn video_create(tex: u32) {
@@ -210,12 +211,21 @@ fn video_update() -> Option<[f32; 16]> {
     if tex != 0 && VIDEO_WINDOW.load(std::sync::atomic::Ordering::SeqCst) == 0 {
         video_create(tex);
     }
-    unsafe { jni::video_update(a as *mut ANativeActivity) }
+    let r = unsafe { jni::video_update(a as *mut ANativeActivity) };
+    if r.is_some() {
+        VIDEO_UPLOADS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+    r
 }
 
 /// Dekoder yozadigan `ANativeWindow*` (video elementi birinchi marta chizilgach tayyor bo'ladi; tayyor bo'lmaguncha `null`).
 pub fn video_window() -> *mut c_void {
     VIDEO_WINDOW.load(std::sync::atomic::Ordering::SeqCst) as *mut c_void
+}
+
+/// Video diagnostikasi: (tekstura nomi, Surface bormi, teksturaga o'tgan kadrlar soni).
+pub fn video_stats() -> (u32, bool, u64) {
+    (VIDEO_TEX.load(std::sync::atomic::Ordering::SeqCst), VIDEO_WINDOW.load(std::sync::atomic::Ordering::SeqCst) != 0, VIDEO_UPLOADS.load(std::sync::atomic::Ordering::SeqCst))
 }
 
 /// Video Surface'ni bo'shatadi (pleyer yopilganda).
