@@ -1,6 +1,9 @@
 //! Bosh sahifa: sarlavha, "Ommabop anime" va poster kartalari to'ri, pastda haqiqiy shisha (xiralashtiruvchi) navigatsiya paneli.
 
+mod billing;
+mod edit;
 mod pages;
+mod storage;
 mod profile;
 use crate::data::{Device, Profile, fetch_library, fetch_seasons, fmt_date, load_posters, HistoryItem, Season};
 use crate::theme::*;
@@ -951,6 +954,22 @@ mod tests {
             c.execute(&cmds);
             std::fs::write(format!("{dir}/7_search.png"), c.to_png()).unwrap();
             home.tab.set(2);
+            home.push(pages::Page::Sessions);
+            for k in 0..3 {
+                match k {
+                    0 => home.open_billing(),
+                    1 => home.open_edit(),
+                    _ => home.open_storage(),
+                }
+                let cmds = ui.frame(size);
+                let mut c = ui.canvas(360, 640);
+                c.clear(Color::BLACK);
+                c.execute(&cmds);
+                std::fs::write(format!("{dir}/15_page{k}.png"), c.to_png()).unwrap();
+            }
+            for _ in 0..4 {
+                home.pop();
+            }
             home.hist.set((0..3).map(|i| HistoryItem { anime_id: i, season_id: 1, episode_no: 3 + i, section_no: 1, title: format!("Naruto {i}"), photo_url: format!("p{i}.jpg"), updated_at: 1_792_497_600_000 }).collect());
             home.lib_state.set(1);
             home.tab.set(3);

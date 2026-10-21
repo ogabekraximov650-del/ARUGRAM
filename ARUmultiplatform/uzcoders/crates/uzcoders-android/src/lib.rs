@@ -11,7 +11,7 @@ pub mod glue;
 pub(crate) mod jni;
 
 #[cfg(target_os = "android")]
-pub use glue::{files_dir, ime_event, jstring, on_create, ANativeActivity, ImeEvent};
+pub use glue::{copy_text, files_dir, ime_event, jstring, on_create, open_url, pick_file, take_picked, toast, ANativeActivity, ImeEvent};
 
 /// Ilova kirish nuqtasini e'lon qiladi: `uzcoders_android::android_app!(my_app);`
 /// bu yerda `fn my_app(scale: f32) -> uzcoders_ui::Ui`.
@@ -65,6 +65,15 @@ macro_rules! android_app {
             _cls: *mut ::std::ffi::c_void,
         ) {
             $crate::ime_event($crate::ImeEvent::Finish);
+        }
+
+        #[no_mangle]
+        pub unsafe extern "system" fn Java_uz_uzcoders_UzActivity_nativePicked(
+            env: *mut ::std::ffi::c_void,
+            _cls: *mut ::std::ffi::c_void,
+            s: *mut ::std::ffi::c_void,
+        ) {
+            $crate::ime_event($crate::ImeEvent::Picked($crate::jstring(env, s)));
         }
 
         #[no_mangle]
@@ -226,4 +235,18 @@ mod tests {
 #[cfg(not(target_os = "android"))]
 pub fn files_dir() -> String {
     std::env::temp_dir().to_string_lossy().into_owned()
+}
+
+// Android bo'lmagan muhitda (testlar): platforma xizmatlari bo'sh.
+#[cfg(not(target_os = "android"))]
+pub fn open_url(_url: &str) {}
+#[cfg(not(target_os = "android"))]
+pub fn copy_text(_t: &str) {}
+#[cfg(not(target_os = "android"))]
+pub fn toast(_t: &str) {}
+#[cfg(not(target_os = "android"))]
+pub fn pick_file(_mime: &str) {}
+#[cfg(not(target_os = "android"))]
+pub fn take_picked() -> Vec<String> {
+    Vec::new()
 }

@@ -38,6 +38,9 @@ pub enum Page {
     Season(Rc<SeasonPage>),
     Settings,
     Sessions,
+    Billing(Rc<super::billing::BillingPage>),
+    Edit(Rc<super::edit::EditPage>),
+    Storage(Rc<super::storage::StoragePage>),
 }
 
 impl Home {
@@ -131,15 +134,15 @@ impl Home {
         e.bg(CARD).border(1.0, Color::rgba(255, 255, 255, 22)).radius(18.0)
     }
 
-    /// Sarlavha: orqaga tugmasi va nom (Kotlin `OverlayScaffold`).
-    fn scaffold(self: &Rc<Self>, title: &str, body: Element) -> Element {
+    /// Profil orqali ochiladigan sahifa: rangli orqa fon, shisha sarlavha (orqaga + nom) va tana.
+    pub(super) fn scaffold(self: &Rc<Self>, title: &str, body: Element) -> Element {
         let ins = safe_insets();
         let me = self.clone();
-        let back = column(vec![icon(A_BACK, 24.0).color(Color::WHITE)]).center().width(44.0).height(44.0).radius(14.0).bg(Color::rgba(255, 255, 255, 14)).on_click(move || {
+        let back = column(vec![icon(A_BACK, 24.0).color(Color::WHITE)]).center().width(44.0).height(44.0).radius(22.0).bg(Color::rgba(255, 255, 255, 22)).on_click(move || {
             me.pop();
         });
-        let head = Self::card_box(row(vec![back, tx(title, 22.0, Color::WHITE).bold().weight(1.0)]).gap(14.0).align(Align::Center).padding_xy(18.0, 12.0)).radius(20.0);
-        column(vec![head.margin_each(16.0, 12.0 + ins.top, 16.0, 8.0), body.grow(1.0)]).bg(BG)
+        let head = Self::pglass(row(vec![back, tx(title, 22.0, Color::WHITE).bold().weight(1.0)]).gap(12.0).align(Align::Center).padding_each(10.0, 8.0, 18.0, 8.0)).radius(32.0);
+        stack(vec![Self::glass_backdrop(), column(vec![head.margin_each(16.0, 12.0 + ins.top, 16.0, 8.0), body.grow(1.0)])])
     }
 
     fn tile_btn(icon_path: &'static str, tint: Color, label: String, f: impl Fn() + 'static) -> Element {
@@ -175,6 +178,9 @@ impl Home {
             Page::Season(p) => self.season_page(&p),
             Page::Settings => self.settings_page(),
             Page::Sessions => self.sessions_page(),
+            Page::Billing(p) => self.billing_page(&p),
+            Page::Edit(p) => self.edit_page(&p),
+            Page::Storage(p) => self.storage_page(&p),
         }
     }
 
@@ -475,7 +481,7 @@ impl Home {
             let on = hidden.iter().any(|h| h == key);
             let me = self.clone();
             kids.push(
-                Self::card_box(
+                Self::pglass(
                     row(vec![column(vec![tx(title, 15.0, Color::WHITE).bold(), tx(sub, 12.0, TEXT_DIM)]).weight(1.0), Self::switch(on, move || {
                         let mut h = me.hidden.get();
                         if let Some(i) = h.iter().position(|x| x == key) {
@@ -498,7 +504,7 @@ impl Home {
         kids.push(label("BEPUL KO'RISH"));
         let me = self.clone();
         kids.push(
-            Self::card_box(
+            Self::pglass(
                 row(vec![
                     column(vec![
                         tx("Kanallarga avtomatik obuna", 15.0, Color::WHITE).bold(),
@@ -564,7 +570,7 @@ impl Home {
             );
         }
         let line = |k: &str, v: String| row(vec![tx(k, 13.0, Color::rgba(255, 255, 255, 128)).width(110.0), tx(if v.is_empty() { "—".into() } else { v }, 13.0, Color::WHITE)]).padding_each(0.0, 4.0, 0.0, 0.0);
-        Self::card_box(
+        Self::pglass(
             column(vec![
                 row(head).gap(10.0).align(Align::Center),
                 gap_box(0.0, 10.0),

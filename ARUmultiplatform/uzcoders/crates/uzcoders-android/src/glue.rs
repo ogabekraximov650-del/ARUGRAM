@@ -147,6 +147,8 @@ impl Gpu {
 }
 
 static LOOPER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static ACTIVITY: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static PICKED: Mutex<Vec<String>> = Mutex::new(Vec::new());
 static FILES_DIR: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
 /// Ilovaning ichki fayllar papkasi (`getFilesDir`).
@@ -171,6 +173,8 @@ pub enum ImeEvent {
     Delete(usize, usize),
     Finish,
     Enter,
+    /// Fayl tanlagich natijasi: keshdagi fayl yo'li.
+    Picked(String),
 }
 
 /// Java yelimi chaqiradi (UI oqimidan): hodisani chizish oqimiga uzatadi.
@@ -183,6 +187,38 @@ pub fn ime_event(e: ImeEvent) {
 }
 
 pub use crate::jni::jstring;
+
+fn call_activity(name: &[u8], s: &str) {
+    let a = ACTIVITY.load(std::sync::atomic::Ordering::SeqCst);
+    if a != 0 {
+        unsafe { jni::call_str(a as *mut ANativeActivity, name, s) };
+    }
+}
+
+/// Havolani brauzerda ochadi.
+pub fn open_url(url: &str) {
+    call_activity(b"openUrl\0", url);
+}
+
+/// Matnni almashish buferiga nusxalaydi.
+pub fn copy_text(t: &str) {
+    call_activity(b"copyText\0", t);
+}
+
+/// Qisqa xabar (Toast).
+pub fn toast(t: &str) {
+    call_activity(b"toast\0", t);
+}
+
+/// Fayl tanlagichni ochadi (`mime`: `image/*`, `*/*` ...). Natija `take_picked` bilan olinadi.
+pub fn pick_file(mime: &str) {
+    call_activity(b"pickFile\0", mime);
+}
+
+/// Tanlangan fayllar yo'llari (bir marta o'qiladi).
+pub fn take_picked() -> Vec<String> {
+    PICKED.lock().map(|mut v| std::mem::take(&mut *v)).unwrap_or_default()
+}
 
 struct Shared {
     window: *mut c_void,
@@ -310,6 +346,7 @@ pub unsafe fn on_create(activity: *mut ANativeActivity, make_ui: fn(f32) -> Ui) 
         }
     };
     let _ = FILES_DIR.set(dir.clone());
+    ACTIVITY.store(activity as usize, std::sync::atomic::Ordering::SeqCst);
     std::panic::set_hook(Box::new(move |i| {
         let msg = format!("Rust panic: {i}");
         log(&msg);
@@ -496,6 +533,12 @@ fn run(s: Arc<Sync_>, make_ui: fn(f32) -> Ui, scale: f32, activity: usize) {
                 ImeEvent::Finish => ui.ime_finish(),
                 ImeEvent::Enter => {
                     ui.key_enter();
+                }
+                ImeEvent::Picked(p) => {
+                    if let Ok(mut v) = PICKED.lock() {
+                        v.push(p);
+                    }
+                    uzcoders_core::invalidate();
                 }
             }
         }

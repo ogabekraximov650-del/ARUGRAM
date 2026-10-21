@@ -10,6 +10,7 @@ const I_DELETE_LOCAL_REF: usize = 23;
 const I_GET_OBJECT_CLASS: usize = 31;
 const I_GET_METHOD_ID: usize = 33;
 const I_CALL_VOID_METHOD_A: usize = 63;
+const I_NEW_STRING: usize = 163;
 const I_EXCEPTION_CHECK: usize = 228;
 const VM_ATTACH: usize = 4;
 const VM_DETACH: usize = 5;
@@ -117,6 +118,24 @@ pub unsafe fn hide_keyboard(activity: *mut ANativeActivity) {
     let m = env.method(cls, b"hideKeyboard\0", b"()V\0");
     env.call_void(clazz, m, &[]);
     env.clear_exception();
+    env.delete(cls);
+}
+
+/// `UzActivity.<name>(String)` — bitta matn argumentli void metodni chaqiradi (UTF-16, emoji ham to'g'ri).
+///
+/// # Safety
+/// `show_keyboard` bilan bir xil.
+pub unsafe fn call_str(activity: *mut ANativeActivity, name: &[u8], s: &str) {
+    let Some(env) = attach(activity) else { return };
+    let clazz = (*activity).clazz;
+    let cls = env.class_of(clazz);
+    let m = env.method(cls, name, b"(Ljava/lang/String;)V\0");
+    let u: Vec<u16> = s.encode_utf16().collect();
+    let f: extern "C" fn(*mut c_void, *const u16, i32) -> Obj = std::mem::transmute(env.f(I_NEW_STRING));
+    let js = f(env.0, u.as_ptr(), u.len() as i32);
+    env.call_void(clazz, m, &[js as usize as u64]);
+    env.clear_exception();
+    env.delete(js);
     env.delete(cls);
 }
 

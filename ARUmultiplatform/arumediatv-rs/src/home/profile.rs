@@ -20,6 +20,7 @@ const P_TRASH: &str = "M6,19c0,1.1 0.9,2 2,2h8c1.1,0 2,-0.9 2,-2V7H6v12zM19,4h-3
 const P_EXIT: &str = "M10.09,15.59L11.5,17l5,-5 -5,-5 -1.41,1.41L12.67,11H3v2h9.67l-2.58,2.59zM19,3H5c-1.11,0 -2,0.9 -2,2v4h2V5h14v14H5v-4H3v4c0,1.1 0.89,2 2,2h14c1.1,0 2,-0.9 2,-2V5c0,-1.1 -0.9,-2 -2,-2z";
 const P_CHEVRON: &str = "M10,6L8.59,7.41 13.17,12l-4.58,4.59L10,18l6,-6z";
 const P_COPY: &str = "M16,1H4c-1.1,0 -2,0.9 -2,2v14h2V3h12V1zM19,5H8c-1.1,0 -2,0.9 -2,2v14c0,1.1 0.9,2 2,2h11c1.1,0 2,-0.9 2,-2V7c0,-1.1 -0.9,-2 -2,-2zM19,21H8V7h11v14z";
+const P_EDIT: &str = "M3,17.25V21h3.75L17.81,9.94l-3.75,-3.75L3,17.25zM20.71,7.04c0.39,-0.39 0.39,-1.02 0,-1.41l-2.34,-2.34c-0.39,-0.39 -1.02,-0.39 -1.41,0l-1.83,1.83 3.75,3.75 1.83,-1.83z";
 const P_CROWN: &str = "M5,16L3,5l5.5,5L12,4l3.5,6L21,5l-2,11H5zM19,19c0,0.6 -0.4,1 -1,1H6c-0.6,0 -1,-0.4 -1,-1v-1h14v1z";
 
 /// Dialog turlari (`dlg`): 0 — yo'q, 1 — chiqish, 2/3 — o'chirish (1- va 2-tasdiq), 4 — ilova haqida, 5 — xabar.
@@ -59,7 +60,7 @@ impl Home {
         Some(a)
     }
 
-    fn pglass(e: Element) -> Element {
+    pub(super) fn pglass(e: Element) -> Element {
         e.lens(Color::rgba(255, 255, 255, 8), GLASS_ZOOM)
     }
 
@@ -173,11 +174,9 @@ impl Home {
         if kind == 6 { scrim } else { scrim.on_click(scrim_close) }
     }
 
-    pub(super) fn profile_view(self: &Rc<Self>) -> Element {
-        let ins = safe_insets();
-        let p = self.profile.get();
-        // Orqa fon: shisha shu rangli shakllarni sindirib/kattalashtirib ko'rsatadi.
-        let backdrop = stack(vec![
+    /// Profil orqali ochiladigan sahifalar uchun rangli orqa fon (shisha shu ustidan sindirib ko'rsatadi).
+    pub(super) fn glass_backdrop() -> Element {
+        stack(vec![
             column(vec![]).bg(BG).glows(vec![
                 (0.15, 0.10, 280.0, Color::rgba(226, 98, 15, 170)),
                 (0.95, 0.30, 300.0, Color::rgba(110, 80, 230, 150)),
@@ -192,7 +191,13 @@ impl Home {
                 gap_box(0.0, 220.0),
                 row(vec![gap_box(60.0, 0.0), column(vec![]).width(100.0).height(100.0).radius(28.0).gradient(Color::hex(0xF59E0B), ACCENT)]),
             ]),
-        ]);
+        ])
+    }
+
+    pub(super) fn profile_view(self: &Rc<Self>) -> Element {
+        let ins = safe_insets();
+        let p = self.profile.get();
+        let backdrop = Self::glass_backdrop();
 
         let avatar = {
             let inner = match self.avatar_img(&p.photo_url) {
@@ -230,6 +235,10 @@ impl Home {
         )
         .radius(28.0);
 
+        let me_e = self.clone();
+        let edit_btn = column(vec![icon(P_EDIT, 17.0).color(Color::rgba(255, 255, 255, 220))]).center().width(36.0).height(36.0).radius(18.0).bg(Color::rgba(255, 255, 255, 26)).on_click(move || me_e.open_edit());
+        let hero = stack(vec![hero, column(vec![row(vec![spacer(), edit_btn])]).padding(14.0)]);
+        let me_b = self.clone();
         let billing = column(vec![row(vec![
             icon(P_CROWN, 22.0).color(Color::WHITE),
             tx("Obuna olish va Balans to'ldirish", 14.0, Color::WHITE).bold().weight(1.0),
@@ -239,7 +248,8 @@ impl Home {
         .align(Align::Center)
         .padding_xy(16.0, 16.0)])
         .lens(ACCENT.with_opacity(0.45), GLASS_ZOOM)
-        .radius(24.0);
+        .radius(24.0)
+        .on_click(move || me_b.open_billing());
 
         let stats = column(vec![
             row(vec![Self::stat(P_MOVIE, "Anime", format_count(p.animes)), Self::stat(P_PLAY, "Qismlar", format_count(p.episodes))]).gap(12.0),
@@ -248,7 +258,7 @@ impl Home {
             gap_box(0.0, 12.0),
             row(vec![Self::stat(STAR, "Baholangan", format_count(p.rated)), Self::stat(P_COMMENT, "Izohlar", format_count(p.comments))]).gap(12.0),
             gap_box(0.0, 12.0),
-            row(vec![Self::stat(P_CLOCK, "Tomosha vaqti", format!("{} soat", format_hours(p.watch_ms))), Self::stat(P_SD, "Xotira", format_bytes(self.cache_bytes.get()))]).gap(12.0),
+            row(vec![Self::stat(P_CLOCK, "Tomosha vaqti", format!("{} soat", format_hours(p.watch_ms))), { let me = self.clone(); Self::stat(P_SD, "Xotira", format_bytes(self.cache_bytes.get())).on_click(move || me.open_storage()) }]).gap(12.0),
         ]);
 
         let traffic = Self::pglass(

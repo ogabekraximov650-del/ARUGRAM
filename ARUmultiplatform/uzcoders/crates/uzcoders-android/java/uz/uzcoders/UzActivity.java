@@ -17,6 +17,11 @@ import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.FrameLayout;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Intent;
+import android.net.Uri;
+import android.widget.Toast;
 
 /**
  * uzcoders yelimi: tizim klaviaturasi (IME) matnini Rust'ga uzatadi. Boshqa hamma narsa Rust'da.
@@ -28,6 +33,7 @@ public class UzActivity extends NativeActivity {
     static native void nativeDelete(int before, int after);
     static native void nativeFinish();
     static native void nativeEnter();
+    static native void nativePicked(String path);
 
     private ImeView view;
     private InputMethodManager imm;
@@ -100,6 +106,76 @@ public class UzActivity extends NativeActivity {
                 imm.showSoftInput(view, 0);
             }
         });
+    }
+
+    /** Brauzer/boshqa ilovada havolani ochadi. */
+    public void openUrl(final String url) {
+        runOnUiThread(new Runnable() {
+            public void run() {
+                try {
+                    startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                } catch (Throwable e) {
+                    Toast.makeText(UzActivity.this, "Ochib bo'lmadi", Toast.LENGTH_SHORT).show();
+                }
+            }
+        });
+    }
+
+    public void copyText(final String t) {
+        runOnUiThread(new Runnable() {
+            public void run() {
+                ((ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText("text", t));
+            }
+        });
+    }
+
+    public void toast(final String t) {
+        runOnUiThread(new Runnable() {
+            public void run() {
+                Toast.makeText(UzActivity.this, t, Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    /** Fayl tanlagich: tanlangach fayl keshga nusxalanadi va yo'li `nativePicked` orqali Rust'ga beriladi. */
+    public void pickFile(final String mime) {
+        runOnUiThread(new Runnable() {
+            public void run() {
+                try {
+                    Intent i = new Intent(Intent.ACTION_GET_CONTENT).setType(mime).addCategory(Intent.CATEGORY_OPENABLE);
+                    startActivityForResult(i, 7001);
+                } catch (Throwable e) {
+                    Toast.makeText(UzActivity.this, "Tanlagich ochilmadi", Toast.LENGTH_SHORT).show();
+                }
+            }
+        });
+    }
+
+    @Override
+    protected void onActivityResult(int req, int res, final Intent data) {
+        super.onActivityResult(req, res, data);
+        if (req != 7001 || res != RESULT_OK || data == null || data.getData() == null) return;
+        final Uri uri = data.getData();
+        new Thread(new Runnable() {
+            public void run() {
+                try {
+                    String name = "pick_" + System.currentTimeMillis();
+                    String type = getContentResolver().getType(uri);
+                    if (type != null && type.indexOf('/') > 0) name += "." + type.substring(type.indexOf('/') + 1).replace("jpeg", "jpg");
+                    File out = new File(getCacheDir(), name);
+                    java.io.InputStream in = getContentResolver().openInputStream(uri);
+                    FileOutputStream o = new FileOutputStream(out);
+                    byte[] b = new byte[65536];
+                    int n;
+                    while ((n = in.read(b)) > 0) o.write(b, 0, n);
+                    o.close();
+                    in.close();
+                    nativePicked(out.getAbsolutePath());
+                } catch (Throwable e) {
+                    Log.e("uzcoders", "pick: " + e);
+                }
+            }
+        }).start();
     }
 
     public void hideKeyboard() {
