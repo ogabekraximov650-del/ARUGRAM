@@ -160,6 +160,9 @@ struct Inner {
     rendered: AtomicU64,
     decoded: AtomicU64,
     stage: AtomicU8,
+    audio_dead: AtomicBool,
+    a_out: AtomicU64,
+    a_state: AtomicU8,
     /// Diagnostika: manbadan o'qilgan baytlar, hozir o'qish ichidami, dekoderga berilgan video/audio paketlar.
     read_bytes: AtomicU64,
     in_read: AtomicBool,
@@ -170,6 +173,8 @@ struct Inner {
     height: AtomicI32,
     has_audio: AtomicBool,
     clock: Mutex<Clock>,
+    /// Ovoz soati hali tayyor emas: kutish boshlangan payt (1.5 s dan keyin tizim soatiga o'tiladi).
+    audio_wait: Mutex<Option<Instant>>,
     audio_stream: Mutex<Ptr>,
     vcodec: Mutex<Ptr>,
     acodec: Mutex<Ptr>,
@@ -254,8 +259,17 @@ impl Inner {
         let c = self.clock.lock().unwrap_or_else(|e| e.into_inner());
         if self.has_audio.load(Ordering::SeqCst) {
             if !c.audio_ready {
-                return c.audio_base_pts;
+                // Ovoz boshlanmasa video qotib qolmasin: 1.5 s dan keyin tizim soati bo'yicha davom etadi.
+                if !self.playing.load(Ordering::SeqCst) {
+                    *self.audio_wait.lock().unwrap_or_else(|e| e.into_inner()) = None;
+                    return c.audio_base_pts;
+                }
+                let mut w = self.audio_wait.lock().unwrap_or_else(|e| e.into_inner());
+                let t = *w.get_or_insert_with(Instant::now);
+                let el = t.elapsed().as_micros() as i64 - 1_500_000;
+                return c.audio_base_pts + el.max(0) * self.speed.load(Ordering::SeqCst) as i64 / 100;
             }
+            *self.audio_wait.lock().unwrap_or_else(|e| e.into_inner()) = None;
             let s = self.audio_stream.lock().unwrap_or_else(|e| e.into_inner()).0;
             if s.is_null() {
                 return c.audio_base_pts;
@@ -300,6 +314,10 @@ impl Player {
             rendered: AtomicU64::new(0),
             decoded: AtomicU64::new(0),
             stage: AtomicU8::new(0),
+            audio_dead: AtomicBool::new(false),
+            a_out: AtomicU64::new(0),
+            a_state: AtomicU8::new(0),
+            audio_wait: Mutex::new(None),
             read_bytes: AtomicU64::new(0),
             in_read: AtomicBool::new(false),
             fed_v: AtomicU64::new(0),
@@ -346,7 +364,7 @@ impl Player {
                     2 => "dekoder tayyor",
                     _ => "?",
                 };
-                format!("{stage} | yuza={} tex={tex} | dekod={} chiqdi={} tekstura={up} | {}x{} | o'qildi={}KB {} | berildi v={} a={} sz={}", if win { "bor" } else { "yo'q" }, i.decoded.load(Ordering::SeqCst), i.rendered.load(Ordering::SeqCst), i.width.load(Ordering::SeqCst), i.height.load(Ordering::SeqCst), i.read_bytes.load(Ordering::Relaxed) / 1024, if i.in_read.load(Ordering::SeqCst) { "(o'qishda)" } else { "" }, i.fed_v.load(Ordering::Relaxed), i.fed_a.load(Ordering::Relaxed), i.last_sz.load(Ordering::Relaxed))
+                format!("{stage} | yuza={} tex={tex} | dekod={} chiqdi={} tekstura={up} | {}x{} | o'qildi={}KB {} | berildi v={} a={} sz={} | ovoz chiq={} oqim={}", if win { "bor" } else { "yo'q" }, i.decoded.load(Ordering::SeqCst), i.rendered.load(Ordering::SeqCst), i.width.load(Ordering::SeqCst), i.height.load(Ordering::SeqCst), i.read_bytes.load(Ordering::Relaxed) / 1024, if i.in_read.load(Ordering::SeqCst) { "(o'qishda)" } else { "" }, i.fed_v.load(Ordering::Relaxed), i.fed_a.load(Ordering::Relaxed), i.last_sz.load(Ordering::Relaxed), i.a_out.load(Ordering::Relaxed), if i.audio_dead.load(Ordering::SeqCst) { "o'lik" } else { "ok" })
             },
         }
     }
@@ -586,28 +604,40 @@ unsafe fn run_locked(inner: Arc<Inner>, source: Source) {
                             break;
                         }
                         let g = c.lock().unwrap_or_else(|e| e.into_inner());
-                        let idx = AMediaCodec_dequeueInputBuffer(g.0, 10_000);
+                        let idx = AMediaCodec_dequeueInputBuffer(g.0, 0);
                         if idx >= 0 {
                             AMediaCodec_queueInputBuffer(g.0, idx as usize, 0, 0, 0, FLAG_EOS);
                             break;
                         }
+                        drop(g);
+                        std::thread::sleep(Duration::from_millis(3));
                     }
                 }
                 eos = true;
             } else {
                 let pts = AMediaExtractor_getSampleTime(ex);
+                if tr != vtrack && inner.audio_dead.load(Ordering::SeqCst) {
+                    AMediaExtractor_advance(ex);
+                    continue;
+                }
                 let codec_lock = if tr == vtrack { &inner.vcodec } else { &inner.acodec };
                 loop {
                     if inner.stop.load(Ordering::SeqCst) || inner.seek_to.load(Ordering::SeqCst) >= 0 {
                         break;
                     }
                     let g = codec_lock.lock().unwrap_or_else(|e| e.into_inner());
-                    let idx = AMediaCodec_dequeueInputBuffer(g.0, 10_000);
+                    // Kutish qulf USTIDA bo'lmasin: aks holda chiqish oqimlari qulfni ola olmay och qoladi (std Mutex adolatli emas).
+                    let idx = AMediaCodec_dequeueInputBuffer(g.0, 0);
                     if idx < 0 && tr != vtrack && !inner.playing.load(Ordering::SeqCst) {
                         // To'xtab turganda audio chiqishi bo'shatilmaydi: to'lib qolsa video kadri kelmay qotib qolmasin.
                         inner.dropped_audio.store(true, Ordering::SeqCst);
                         AMediaExtractor_advance(ex);
                         break;
+                    }
+                    if idx < 0 {
+                        drop(g);
+                        std::thread::sleep(Duration::from_millis(3));
+                        continue;
                     }
                     if idx >= 0 {
                         let mut cap = 0usize;
@@ -681,7 +711,7 @@ unsafe fn video_out(inner: Arc<Inner>) {
         }
         let idx = {
             let g = inner.vcodec.lock().unwrap_or_else(|e| e.into_inner());
-            AMediaCodec_dequeueOutputBuffer(g.0, &mut info, 5_000)
+            AMediaCodec_dequeueOutputBuffer(g.0, &mut info, 0)
         };
         if idx == INFO_FORMAT_CHANGED {
             let g = inner.vcodec.lock().unwrap_or_else(|e| e.into_inner());
@@ -814,7 +844,7 @@ unsafe fn audio_out(inner: Arc<Inner>) {
         }
         let idx = {
             let g = inner.acodec.lock().unwrap_or_else(|e| e.into_inner());
-            AMediaCodec_dequeueOutputBuffer(g.0, &mut info, 5_000)
+            AMediaCodec_dequeueOutputBuffer(g.0, &mut info, 0)
         };
         if idx == INFO_FORMAT_CHANGED {
             let f = {
@@ -841,12 +871,15 @@ unsafe fn audio_out(inner: Arc<Inner>) {
                 AAudioStreamBuilder_setSampleRate(b, (rate as i64 * stream_speed as i64 / 100) as i32);
                 AAudioStreamBuilder_setChannelCount(b, ch);
                 AAudioStreamBuilder_setFormat(b, 1);
-                AAudioStreamBuilder_setPerformanceMode(b, 12); // POWER_SAVING (video uchun yetarli)
+                AAudioStreamBuilder_setPerformanceMode(b, 10); // NONE
                 let rc = AAudioStreamBuilder_openStream(b, &mut stream);
                 AAudioStreamBuilder_delete(b);
                 if rc != 0 {
+                    // Ovoz ochilmasa video baribir ijro etiladi (tizim soati bo'yicha), audio paketlar tashlanadi.
                     stream = std::ptr::null_mut();
-                    inner.fail("Audio ochilmadi");
+                    inner.audio_dead.store(true, Ordering::SeqCst);
+                    inner.has_audio.store(false, Ordering::SeqCst);
+                    inner.sys_clock_set(inner.clock.lock().map(|c| c.audio_base_pts).unwrap_or(0), inner.playing.load(Ordering::SeqCst));
                     return;
                 }
                 *inner.audio_stream.lock().unwrap_or_else(|e| e.into_inner()) = Ptr(stream);
@@ -862,6 +895,7 @@ unsafe fn audio_out(inner: Arc<Inner>) {
             }
             continue;
         }
+        inner.a_out.fetch_add(1, Ordering::Relaxed);
         let g_now = inner.generation.load(Ordering::SeqCst);
         if g_now != my_gen {
             my_gen = g_now;
