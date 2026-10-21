@@ -182,6 +182,16 @@ public class AruActivity extends UzActivity {
         poll.run();
     }
 
+    /** Ilova fonga o'tganda video to'xtaydi — batareya va trafik sarflanmasin. */
+    @Override
+    protected void onPause() {
+        super.onPause();
+        if (exo != null) {
+            exo.setPlayWhenReady(false);
+            publish();
+        }
+    }
+
     private void cmdOnUi(String cmd) {
         if (cmd.equals("close")) {
             closeOnUi();
