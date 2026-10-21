@@ -46,6 +46,8 @@ struct Item {
     glows: Vec<(f32, f32, f32, Color)>,
     hit: Option<usize>,
     swipe: Option<Rc<dyn Fn(i32)>>,
+    video: bool,
+    drag: Option<Rc<dyn Fn(f32, bool)>>,
     scroll: Option<ScrollState>,
     /// Qator `.scroll()` bilan: gorizontal scroll.
     hscroll: bool,
@@ -77,6 +79,8 @@ struct Touch {
     dragging: bool,
     /// Gorizontal surish aniqlandi (`on_swipe`).
     swiped: bool,
+    /// Sirg'anish chizig'i (`on_drag`) indeksi.
+    drag: Option<usize>,
     /// So'nggi (vaqt ms, scroll o'qi bo'yicha koordinata) namunalari: tezlikni baholash uchun.
     samples: Vec<(u64, f32)>,
 }
@@ -90,6 +94,7 @@ pub struct Ui {
     build: Box<dyn FnMut() -> Element>,
     hits: Vec<Hit>,
     swipes: Vec<(Rect, Rc<dyn Fn(i32)>)>,
+    drags: Vec<(Rect, Rc<dyn Fn(f32, bool)>)>,
     fields: Vec<FieldInfo>,
     regions: Vec<Region>,
     scrolls: Vec<ScrollState>,
@@ -121,6 +126,7 @@ impl Ui {
             build: Box::new(build),
             hits: Vec::new(),
             swipes: Vec::new(),
+            drags: Vec::new(),
             fields: Vec::new(),
             regions: Vec::new(),
             scrolls: Vec::new(),
@@ -282,6 +288,7 @@ impl Ui {
 
         self.hits.clear();
         self.swipes.clear();
+        self.drags.clear();
         self.fields.clear();
         self.regions.clear();
         self.scrolls.clear();
@@ -309,6 +316,9 @@ impl Ui {
                     cb: cbs[h].clone(),
                 });
             }
+            if let Some(cb) = &it.drag {
+                self.drags.push((eff, cb.clone()));
+            }
             if let Some(cb) = &it.swipe {
                 self.swipes.push((eff, cb.clone()));
             }
@@ -323,6 +333,9 @@ impl Ui {
                         color: c,
                     });
                 }
+            }
+            if visible && it.video {
+                cmds.push(DrawCmd::Video { rect: r });
             }
             if visible {
                 if let Some((top, bottom)) = it.gradient {
@@ -684,6 +697,8 @@ impl Ui {
             glows: std::mem::take(&mut el.glows),
             hit,
             swipe: el.on_swipe.take(),
+            video: el.video,
+            drag: el.on_drag.take(),
             hscroll: el.scroll.is_some() && el.style.direction == Axis::Row,
             scroll: el.scroll,
         });
@@ -768,6 +783,8 @@ impl Ui {
                 glows: Vec::new(),
                 hit: None,
                 swipe: None,
+                video: false,
+                drag: None,
                 hscroll: false,
                 scroll: None,
             });
@@ -820,6 +837,25 @@ impl Ui {
         let p = e.pos;
         match e.kind {
             PointerKind::Down => {
+                if let Some(di) = self.drags.iter().rposition(|(r, _)| r.contains(p)) {
+                    // Sirg'anish chizig'i: bosish ham qiymat beradi; ro'yxat scrolli va bosish ishlamaydi.
+                    let (r, cb) = self.drags[di].clone();
+                    let cb2 = cb.clone();
+                    self.touch = Some(Touch {
+                        start: p,
+                        last: p,
+                        field: None,
+                        region: None,
+                        dragging: false,
+                        swiped: false,
+                        drag: Some(di),
+                        samples: Vec::new(),
+                    });
+                    self.pressed = None;
+                    cb2(((p.x - r.x) / r.w.max(1.0)).clamp(0.0, 1.0), false);
+                    self.dirty = true;
+                    return;
+                }
                 self.pressed = self.hit_test(p);
                 let region = self.region_at(p);
                 if let Some(ri) = region {
@@ -832,6 +868,7 @@ impl Ui {
                     region,
                     dragging: false,
                     swiped: false,
+                    drag: self.drags.iter().rposition(|(r, _)| r.contains(p)),
                     samples: vec![(
                         if e.time_ms > 0 { e.time_ms } else { self.now },
                         region.map_or(p.y, |ri| if self.regions[ri].horizontal { p.x } else { p.y }),
@@ -840,6 +877,18 @@ impl Ui {
                 self.dirty = true;
             }
             PointerKind::Move => {
+                if let Some(t) = &mut self.touch {
+                    if let Some(di) = t.drag {
+                        if let Some((r, cb)) = self.drags.get(di) {
+                            let fx = ((p.x - r.x) / r.w.max(1.0)).clamp(0.0, 1.0);
+                            let cb = cb.clone();
+                            t.last = p;
+                            cb(fx, false);
+                            self.dirty = true;
+                        }
+                        return;
+                    }
+                }
                 let slop = SLOP_DP * self.scale;
                 let mut unpress = false;
                 if let Some(t) = &mut self.touch {
@@ -887,6 +936,14 @@ impl Ui {
                 self.pressed = None;
                 self.dirty = true;
                 let Some(t) = t else { return };
+                if let Some(di) = t.drag {
+                    if let Some((r, cb)) = self.drags.get(di) {
+                        let fx = ((p.x - r.x) / r.w.max(1.0)).clamp(0.0, 1.0);
+                        let cb = cb.clone();
+                        cb(fx, true);
+                    }
+                    return;
+                }
                 if t.swiped {
                     let dx = p.x - t.start.x;
                     if dx.abs() > 40.0 * self.scale {

@@ -5,6 +5,7 @@ mod billing;
 mod dl;
 mod edit;
 mod pages;
+mod player_ui;
 mod storage;
 mod support;
 mod profile;
@@ -204,6 +205,12 @@ impl Home {
     }
 
     pub fn back(&self) -> bool {
+        if let Some(pages::Page::Season(p)) = self.pages.get().last() {
+            if p.pl.fullscreen.get() {
+                self.pl_set_fullscreen(p, false);
+                return true;
+            }
+        }
         if self.pop() {
             return true;
         }
@@ -944,6 +951,7 @@ mod tests {
                 year: "2020".into(),
                 status: if i % 2 == 0 { "Davom etmoqda".into() } else { "Tugallangan".into() },
                 kind: "TV".into(),
+                free: Some(true),
             })
             .collect();
         let home = Rc::new(Home {
@@ -1074,7 +1082,7 @@ mod tests {
             home.open_season(home.seasons.get()[0].clone());
             if let Some(pages::Page::Season(p)) = home.pages.get().last().cloned() {
                 p.info.set(Rc::new(crate::data::SeasonInfo { season: serde_json::json!({"views_total": 1234, "fav_count": 7, "rating_count": 3, "rating_sum": 27, "turi": "TV", "yili": "2005", "janri": "Action, Fantasy", "studio": "Pierrot", "tavsif": "Uzun tavsif matni shu yerda turadi."}), rating: 9.0, my_stars: 8, is_fav: true }));
-                p.eps.set(Rc::new((1..=4).map(|i| crate::data::Episode { id: i, number: i, name: "Nom".into(), views: 100 * i, qualities: vec!["720p".into(), "480p".into()], urls: vec![("720p".into(), "https://x/api/image/a.mp4".into()), ("480p".into(), "https://x/api/image/b.mp4".into())], sizes: vec![("720p".into(), 100_000_000)], origin: String::new() }).collect()));
+                p.eps.set(Rc::new((1..=4).map(|i| crate::data::Episode { id: i, number: i, name: "Nom".into(), views: 100 * i, qualities: vec!["720p".into(), "480p".into()], urls: vec![("720p".into(), "https://x/api/image/a.mp4".into()), ("480p".into(), "https://x/api/image/b.mp4".into())], sizes: vec![("720p".into(), 100_000_000)], origin: String::new(), intro: vec![], added_at: 0 }).collect()));
                 p.sections.set(home.seasons.get());
                 p.comments.set(Rc::new(vec![crate::data::Comment { name: "Ali".into(), body: "Zo'r anime!".into(), media: String::new(), created_at: 1_792_497_600_000, likes: 3, replies: 1 }]));
                 p.comments_state.set(1);

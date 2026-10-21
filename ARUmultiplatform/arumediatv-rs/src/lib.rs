@@ -9,6 +9,7 @@ mod sync;
 mod countries;
 mod flags;
 mod login;
+mod player;
 mod theme;
 
 use backend::Backend;

@@ -20,6 +20,7 @@ pub struct Season {
     pub year: String,
     pub status: String,
     pub kind: String,
+    pub free: Option<bool>,
 }
 
 fn num(v: &Value) -> i64 {
@@ -54,6 +55,7 @@ pub fn parse_seasons(body: &str) -> Vec<Season> {
                 },
                 status: o["holati"].as_str().unwrap_or("").trim().to_string(),
                 kind: o["turi"].as_str().unwrap_or("").trim().to_uppercase(),
+                free: o["free"].as_bool(),
             })
         })
         .collect()
@@ -417,6 +419,32 @@ pub struct Episode {
     /// (sifat, hajm baytlarda)
     pub sizes: Vec<(String, i64)>,
     pub origin: String,
+    /// Intro oraliqlari (millisekund).
+    pub intro: Vec<(i64, i64)>,
+    pub added_at: i64,
+}
+
+/// `1:23`, `83` (soniya), `1:02:03` -> millisekund; xato -> 0.
+fn intro_ms(raw: &str) -> i64 {
+    let t = raw.trim();
+    if t.is_empty() {
+        return 0;
+    }
+    if !t.contains(':') {
+        return t.parse::<i64>().unwrap_or(0).max(0) * 1000;
+    }
+    let parts: Vec<&str> = t.split(':').collect();
+    if parts.len() > 3 {
+        return 0;
+    }
+    let mut total = 0i64;
+    for p in parts {
+        match p.trim().parse::<i64>() {
+            Ok(v) if v >= 0 => total = total * 60 + v,
+            _ => return 0,
+        }
+    }
+    total * 1000
 }
 
 impl Episode {
@@ -457,6 +485,12 @@ pub fn parse_episodes(v: &Value) -> Vec<Episode> {
                         sizes: QUALITIES.iter().map(|q| (q.to_string(), num(&o[format!("size_{q}")]))).collect(),
                         urls,
                         origin: o["origin_video"].as_str().unwrap_or("").to_string(),
+                        intro: (1..=9).step_by(2).filter_map(|i| {
+                            let a = intro_ms(o[format!("intro_{i}")].as_str().unwrap_or(""));
+                            let b = intro_ms(o[format!("intro_{}", i + 1)].as_str().unwrap_or(""));
+                            if a > 0 && b > a { Some((a, b)) } else { None }
+                        }).collect(),
+                        added_at: { let r = num(&o["ready_at"]); if r > 0 { r } else { num(&o["created_at"]) } },
                     }
                 })
                 .collect()

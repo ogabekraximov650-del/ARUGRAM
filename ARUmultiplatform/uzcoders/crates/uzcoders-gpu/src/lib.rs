@@ -8,3 +8,6 @@ pub mod batch;
 pub mod gl;
 
 pub use batch::{Batcher, Frame, Op, Vertex, ATLAS_SIZE};
+
+#[cfg(target_os = "android")]
+pub use gl::{set_video_hooks, GlRenderer, VideoCreate, VideoUpdate};

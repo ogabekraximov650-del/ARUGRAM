@@ -51,6 +51,8 @@ pub enum DrawCmd {
         zoom: f32,
         tint: Color,
     },
+    /// Video kadri (tashqi tekstura): GPU'da `rect` ga chiziladi; CPU zaxirasida hech narsa.
+    Video { rect: Rect },
     /// Aylana yoyi (yuklanish ko'rsatkichi): `start` va `sweep` radianda, `width` — chiziq qalinligi.
     Arc {
         cx: f32,
@@ -552,6 +554,7 @@ impl Canvas {
                     zoom,
                     tint,
                 } => self.draw_backdrop(*rect, *radius, *blur, *zoom, *tint),
+                DrawCmd::Video { .. } => {}
                 DrawCmd::Glass { rect, radius, tint } => {
                     self.fill_round_rect(*rect, *radius, *tint);
                     self.stroke_round_rect(*rect, *radius, 1.5, Color::rgba(255, 255, 255, 90));

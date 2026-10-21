@@ -11,6 +11,7 @@ const I_GET_OBJECT_CLASS: usize = 31;
 const I_GET_METHOD_ID: usize = 33;
 const I_CALL_VOID_METHOD_A: usize = 63;
 const I_NEW_STRING: usize = 163;
+const I_CALL_OBJECT_METHOD_A: usize = 36;
 const I_EXCEPTION_CHECK: usize = 228;
 const VM_ATTACH: usize = 4;
 const VM_DETACH: usize = 5;
@@ -136,6 +137,90 @@ pub unsafe fn call_str(activity: *mut ANativeActivity, name: &[u8], s: &str) {
     env.call_void(clazz, m, &[js as usize as u64]);
     env.clear_exception();
     env.delete(js);
+    env.delete(cls);
+}
+
+#[link(name = "android")]
+extern "C" {
+    fn ANativeWindow_fromSurface(env: *mut c_void, surface: *mut c_void) -> *mut c_void;
+}
+
+/// `UzActivity.newVideoSurface(tex)` — Surface yaratadi va uning `ANativeWindow*` ini qaytaradi (dekoder shunga yozadi).
+///
+/// # Safety
+/// `show_keyboard` bilan bir xil; GL oqimida chaqiriladi.
+pub unsafe fn video_surface(activity: *mut ANativeActivity, tex: u32) -> *mut c_void {
+    let Some(env) = attach(activity) else { return null_mut() };
+    let clazz = (*activity).clazz;
+    let cls = env.class_of(clazz);
+    let m = env.method(cls, b"newVideoSurface\0", b"(I)Landroid/view/Surface;\0");
+    let mut out: Obj = null_mut();
+    if !m.is_null() {
+        let f: extern "C" fn(*mut c_void, Obj, *mut c_void, *const u64) -> Obj = std::mem::transmute(env.f(I_CALL_OBJECT_METHOD_A));
+        out = f(env.0, clazz, m, [tex as u64].as_ptr());
+    }
+    env.clear_exception();
+    let win = if out.is_null() { null_mut() } else { ANativeWindow_fromSurface(env.0, out) };
+    env.delete(out);
+    env.delete(cls);
+    win
+}
+
+/// `UzActivity.videoUpdate()` — yangi kadr bo'lsa teksturaga o'tkazadi va 4x4 matritsani qaytaradi.
+///
+/// # Safety
+/// GL oqimida chaqiriladi.
+pub unsafe fn video_update(activity: *mut ANativeActivity) -> Option<[f32; 16]> {
+    let env = attach(activity)?;
+    let clazz = (*activity).clazz;
+    let cls = env.class_of(clazz);
+    let m = env.method(cls, b"videoUpdate\0", b"()Ljava/lang/String;\0");
+    let mut res = None;
+    if !m.is_null() {
+        let f: extern "C" fn(*mut c_void, Obj, *mut c_void, *const u64) -> Obj = std::mem::transmute(env.f(I_CALL_OBJECT_METHOD_A));
+        let o = f(env.0, clazz, m, [].as_ptr());
+        env.clear_exception();
+        if !o.is_null() {
+            let s = jstring(env.0, o);
+            env.delete(o);
+            let v: Vec<f32> = s.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+            if v.len() == 16 {
+                let mut a = [0f32; 16];
+                a.copy_from_slice(&v);
+                res = Some(a);
+            }
+        }
+    }
+    env.clear_exception();
+    env.delete(cls);
+    res
+}
+
+/// `UzActivity.<name>(boolean)` — bitta mantiqiy argumentli void metod.
+///
+/// # Safety
+/// `show_keyboard` bilan bir xil.
+pub unsafe fn call_bool(activity: *mut ANativeActivity, name: &[u8], on: bool) {
+    let Some(env) = attach(activity) else { return };
+    let clazz = (*activity).clazz;
+    let cls = env.class_of(clazz);
+    let m = env.method(cls, name, b"(Z)V\0");
+    env.call_void(clazz, m, &[on as u64]);
+    env.clear_exception();
+    env.delete(cls);
+}
+
+/// `UzActivity.videoRelease()`.
+///
+/// # Safety
+/// `show_keyboard` bilan bir xil.
+pub unsafe fn video_release(activity: *mut ANativeActivity) {
+    let Some(env) = attach(activity) else { return };
+    let clazz = (*activity).clazz;
+    let cls = env.class_of(clazz);
+    let m = env.method(cls, b"videoRelease\0", b"()V\0");
+    env.call_void(clazz, m, &[]);
+    env.clear_exception();
     env.delete(cls);
 }
 

@@ -713,6 +713,54 @@ pub extern "system" fn Java_io_flutter_plugins_videoplayer_AruDataSource_nativeC
     close(h);
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  Oddiy C interfeysi — Java'siz (NDK `AMediaDataSource`) pleyer uchun
+// ═══════════════════════════════════════════════════════════════
+
+/// Ochadi. Qaytadi: dastak (> 0); 0 — xato; -2 — internet yo'q (keyinroq qayta urinish).
+#[no_mangle]
+pub extern "C" fn rust_player_open(name: *const std::os::raw::c_char, size_hint: i64) -> i64 {
+    if name.is_null() {
+        return 0;
+    }
+    let Ok(name) = unsafe { std::ffi::CStr::from_ptr(name) }.to_str() else { return 0 };
+    match open(name, size_hint.max(0) as u64) {
+        Ok(h) => h,
+        Err(e) if telegram::is_net_err(&e) => RETRY,
+        Err(e) => {
+            video_cache::tg_log(format!("Pleyer: {name} ochilmadi: {e}"));
+            0
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn rust_player_size(h: i64) -> i64 {
+    size(h)
+}
+
+/// O'qiydi. Qaytadi: bayt soni; 0 — fayl oxiri; -1 — xato; -2 — internet yo'q yoki bo'lak hali tayyor emas (kutib qayta so'rang).
+#[no_mangle]
+pub extern "C" fn rust_player_read(h: i64, pos: i64, buf: *mut u8, len: i32) -> i32 {
+    if pos < 0 || len <= 0 || buf.is_null() {
+        return 0;
+    }
+    let out = unsafe { std::slice::from_raw_parts_mut(buf, len as usize) };
+    match read(h, pos as u64, out) {
+        Ok(n) => n as i32,
+        Err(e) if e == WAIT || telegram::is_net_err(&e) => RETRY as i32,
+        Err(e) => {
+            video_cache::tg_log(format!("Pleyer: o'qib bo'lmadi: {e}"));
+            -1
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn rust_player_close(h: i64) {
+    close(h);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

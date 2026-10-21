@@ -37,6 +37,7 @@ pub struct SeasonPage {
     pub(super) newest: State<bool>,
     pub(super) chips_scroll: ScrollState,
     pub(super) scroll: [ScrollState; 4],
+    pub(super) pl: super::player_ui::PlayerState,
 }
 
 #[derive(Clone)]
@@ -73,7 +74,9 @@ impl Home {
             newest: State::new(true),
             chips_scroll: ScrollState::new(),
             scroll: [ScrollState::new(), ScrollState::new(), ScrollState::new(), ScrollState::new()],
+            pl: super::player_ui::PlayerState::new(),
         });
+        self.pl_open_gate(&p);
         let (a, s) = (season.anime_id, season.season_id);
         let session = self.session.clone();
         let (p1, s1) = (p.clone(), session.clone());
@@ -124,7 +127,11 @@ impl Home {
 
     pub(super) fn pop(&self) -> bool {
         let mut v = self.pages.get();
-        let had = v.pop().is_some();
+        let popped = v.pop();
+        if let Some(Page::Season(sp)) = &popped {
+            self.pl_close(sp);
+        }
+        let had = popped.is_some();
         if had {
             self.pages.set(v);
             self.dl_unwatch_all();
@@ -185,7 +192,7 @@ impl Home {
         row(vec![tx(label, 13.0, TEXT_DIM).width(90.0), tx(value, 13.0, Color::WHITE).weight(1.0)]).padding_each(0.0, 0.0, 0.0, 8.0)
     }
 
-    fn switch(on: bool, f: impl Fn() + 'static) -> Element {
+    pub(super) fn switch(on: bool, f: impl Fn() + 'static) -> Element {
         let thumb = column(vec![]).width(20.0).height(20.0).radius(10.0).bg(Color::WHITE);
         let inner = if on { row(vec![spacer(), thumb]) } else { row(vec![thumb, spacer()]) };
         inner.width(46.0).height(26.0).padding_xy(3.0, 3.0).radius(13.0).bg(if on { ACCENT } else { Color::rgba(255, 255, 255, 40) }).on_click(f)
@@ -234,11 +241,18 @@ impl Home {
         let cover = stack(vec![
             cover_img,
             column(vec![spacer(), column(vec![tx(s.name.clone(), 17.0, Color::WHITE).bold(), tx(format!("{bolim}-bo'lim · {} qism", format_count(s.episodes)), 12.5, Color::rgba(255, 255, 255, 190))]).padding_each(14.0, 26.0, 14.0, 12.0).gradient(Color::rgba(0, 0, 0, 0), Color::rgba(0, 0, 0, 200)).radius(18.0)]),
-            column(vec![column(vec![icon(A_PLAY, 34.0).color(Color::rgba(255, 255, 255, 230))]).center().width(64.0).height(64.0).radius(32.0).bg(Color::rgba(0, 0, 0, 120))]).center(),
             column(vec![row(vec![back, spacer()])]).padding(8.0),
-        ])
-        .height(cover_h)
-        .margin_each(16.0, 8.0 + ins.top, 16.0, 0.0);
+        ]);
+        if p.pl.fullscreen.get() {
+            let (fw, fh) = window_dp();
+            let v = self.player_view(p, column(vec![]), fw, fh, true);
+            let mut layers = vec![column(vec![v]).bg(Color::BLACK)];
+            if p.pl.settings.get() {
+                layers.push(self.player_settings(p));
+            }
+            return stack(layers);
+        }
+        let cover = self.player_view(p, cover, w - 32.0, cover_h, false).margin_each(16.0, 8.0 + ins.top, 16.0, 0.0);
 
         let titles = ["Ma'lumot", "Qismlar", "Bo'limlar", "Izohlar"];
         let tabs: Vec<Element> = titles
@@ -264,6 +278,9 @@ impl Home {
         let mut layers = vec![Self::glass_backdrop(), column(vec![cover, tab_bar, body.grow(1.0)])];
         if p.rating_open.get() {
             layers.push(self.rating_dialog(p, &info));
+        }
+        if p.pl.settings.get() {
+            layers.push(self.player_settings(p));
         }
         stack(layers)
     }
@@ -441,7 +458,11 @@ impl Home {
             ])
             .gap(12.0)
             .align(Align::Center)
-            .padding_xy(12.0, 12.0)];
+            .padding_xy(12.0, 12.0)
+            .on_click({
+                let (me, pp, ee) = (self.clone(), p.clone(), e.clone());
+                move || me.play_episode(&pp, &ee, None, None, true)
+            })];
             if open {
                 let mut rows: Vec<Element> = Vec::new();
                 for q in &e.qualities {

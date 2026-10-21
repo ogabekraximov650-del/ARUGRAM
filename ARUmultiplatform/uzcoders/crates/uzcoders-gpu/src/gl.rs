@@ -68,6 +68,7 @@ extern "C" {
     fn glUniform1f(l: i32, v: f32);
     fn glDeleteTextures(n: i32, t: *const u32);
     fn glDisableVertexAttribArray(i: u32);
+    fn glUniformMatrix4fv(l: i32, n: i32, transpose: u8, v: *const f32);
 }
 
 const VS: &[u8] = b"attribute vec2 a_pos;
@@ -193,6 +194,47 @@ void main() {
   }
 }\0";
 
+const VVS: &[u8] = b"attribute vec2 a_pos;
+attribute vec2 a_uv;
+uniform vec2 u_scale;
+varying vec2 v_uv;
+void main() {
+  gl_Position = vec4(a_pos.x * u_scale.x - 1.0, 1.0 - a_pos.y * u_scale.y, 0.0, 1.0);
+  v_uv = a_uv;
+}\0";
+
+const VFS: &[u8] = b"#extension GL_OES_EGL_image_external : require
+precision mediump float;
+uniform samplerExternalOES u_vid;
+uniform mat4 u_st;
+varying vec2 v_uv;
+void main() {
+  vec2 t = (u_st * vec4(v_uv, 0.0, 1.0)).xy;
+  gl_FragColor = texture2D(u_vid, t);
+}\0";
+
+/// Video (tashqi tekstura) kancalari: platforma qatlami dekoder uchun Surface yaratadi va yangi kadrni teksturaga o'tkazadi.
+pub type VideoCreate = fn(u32);
+pub type VideoUpdate = fn() -> Option<[f32; 16]>;
+static VIDEO_HOOKS: std::sync::Mutex<(Option<VideoCreate>, Option<VideoUpdate>)> = std::sync::Mutex::new((None, None));
+
+/// Platforma qatlami chaqiradi (Android: Java `SurfaceTexture`).
+pub fn set_video_hooks(create: VideoCreate, update: VideoUpdate) {
+    if let Ok(mut h) = VIDEO_HOOKS.lock() {
+        *h = (Some(create), Some(update));
+    }
+}
+
+struct VidRes {
+    program: u32,
+    vbo: u32,
+    tex: u32,
+    u_scale: i32,
+    u_vid: i32,
+    u_st: i32,
+    matrix: [f32; 16],
+}
+
 /// Xiralashtirish (backdrop) uchun resurslar: ekran nusxasi va chorak o'lchamli ikkita tekstura.
 struct BlurRes {
     program: u32,
@@ -219,6 +261,8 @@ pub struct GlRenderer {
     scene_phase: bool,
     blur: Option<BlurRes>,
     blur_failed: bool,
+    vid: Option<VidRes>,
+    vid_failed: bool,
     u_view: i32,
     u_blur: i32,
     u_blur_ok: i32,
@@ -337,6 +381,8 @@ impl GlRenderer {
             scene_phase: false,
             blur: None,
             blur_failed: false,
+            vid: None,
+            vid_failed: false,
             u_view: glGetUniformLocation(program, b"u_view\0".as_ptr()),
             u_blur: glGetUniformLocation(program, b"u_blur\0".as_ptr()),
             u_blur_ok: glGetUniformLocation(program, b"u_blur_ok\0".as_ptr()),
@@ -392,6 +438,99 @@ impl GlRenderer {
         glVertexAttribPointer(3, 4, 0x1406, 0, stride, 20 as *const c_void);
         glEnableVertexAttribArray(4);
         glVertexAttribPointer(4, 1, 0x1406, 0, stride, 36 as *const c_void);
+    }
+
+    /// Video resurslarini bir marta yaratadi (tashqi tekstura + dastur) va platformaga Surface so'raydi. `false` — imkonsiz.
+    unsafe fn ensure_video(&mut self) -> bool {
+        if self.vid.is_some() {
+            return true;
+        }
+        if self.vid_failed {
+            return false;
+        }
+        let hooks = VIDEO_HOOKS.lock().map(|h| *h).unwrap_or((None, None));
+        let Some(create) = hooks.0 else {
+            self.vid_failed = true;
+            return false;
+        };
+        let (Ok(vs), Ok(fs)) = (shader(0x8B31, VVS), shader(0x8B30, VFS)) else {
+            self.vid_failed = true;
+            return false;
+        };
+        let p = glCreateProgram();
+        glAttachShader(p, vs);
+        glAttachShader(p, fs);
+        glBindAttribLocation(p, 0, b"a_pos\0".as_ptr());
+        glBindAttribLocation(p, 1, b"a_uv\0".as_ptr());
+        glLinkProgram(p);
+        let mut ok = 0;
+        glGetProgramiv(p, 0x8B82, &mut ok);
+        if ok == 0 {
+            self.vid_failed = true;
+            return false;
+        }
+        let mut tex = 0u32;
+        glGenTextures(1, &mut tex);
+        glActiveTexture(0x84C5);
+        glBindTexture(0x8D65, tex);
+        for (pn, v) in [(0x2801, 0x2601), (0x2800, 0x2601), (0x2802, 0x812F), (0x2803, 0x812F)] {
+            glTexParameteri(0x8D65, pn, v);
+        }
+        glActiveTexture(0x84C0);
+        let mut vbo = 0u32;
+        glGenBuffers(1, &mut vbo);
+        let id: [f32; 16] = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
+        self.vid = Some(VidRes {
+            program: p,
+            vbo,
+            tex,
+            u_scale: glGetUniformLocation(p, b"u_scale\0".as_ptr()),
+            u_vid: glGetUniformLocation(p, b"u_vid\0".as_ptr()),
+            u_st: glGetUniformLocation(p, b"u_st\0".as_ptr()),
+            matrix: id,
+        });
+        create(tex);
+        true
+    }
+
+    /// Video kadrini `rect` (piksel) ga chizadi. Yangi kadr bo'lsa avval teksturaga o'tkaziladi.
+    unsafe fn draw_video(&mut self, rect: [f32; 4], w: i32, h: i32) {
+        if !self.ensure_video() {
+            return;
+        }
+        let upd = VIDEO_HOOKS.lock().ok().and_then(|h| h.1);
+        let Some(v) = self.vid.as_mut() else { return };
+        if let Some(u) = upd {
+            glActiveTexture(0x84C5);
+            glBindTexture(0x8D65, v.tex);
+            if let Some(m) = u() {
+                v.matrix = m;
+            }
+        }
+        let [x, y, rw, rh] = rect;
+        let q: [f32; 24] = [
+            x, y, 0.0, 1.0, x + rw, y, 1.0, 1.0, x, y + rh, 0.0, 0.0, x, y + rh, 0.0, 0.0, x + rw, y, 1.0, 1.0, x + rw, y + rh, 1.0, 0.0,
+        ];
+        glDisable(0x0C11);
+        glDisable(0x0BE2);
+        glUseProgram(v.program);
+        glUniform2f(v.u_scale, 2.0 / w as f32, 2.0 / h as f32);
+        glUniform1i(v.u_vid, 5);
+        glUniformMatrix4fv(v.u_st, 1, 0, v.matrix.as_ptr());
+        glActiveTexture(0x84C5);
+        glBindTexture(0x8D65, v.tex);
+        glBindBuffer(0x8892, v.vbo);
+        glBufferData(0x8892, 96, q.as_ptr() as *const c_void, 0x88E0);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 2, 0x1406, 0, 16, 0 as *const c_void);
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(1, 2, 0x1406, 0, 16, 8 as *const c_void);
+        glDrawArrays(4, 0, 6);
+        glActiveTexture(0x84C0);
+        glEnable(0x0BE2);
+        // Asosiy dastur holatini qaytaramiz.
+        self.cur_img = None;
+        self.bind_main_inner(w, h);
     }
 
     /// Xiralashtirish resurslarini (o'lcham o'zgarsa qaytadan) yaratadi. `false` — imkonsiz.
@@ -670,6 +809,7 @@ impl GlRenderer {
                         self.bind_main(w, h);
                     }
                 }
+                Op::Video { rect } => self.draw_video(*rect, w, h),
                 Op::ClearAtlas | Op::ClearImages => {}
                 Op::UploadImage { x, y, w, h, data } => {
                     glActiveTexture(0x84C1);

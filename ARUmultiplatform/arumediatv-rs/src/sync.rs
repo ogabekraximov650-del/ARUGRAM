@@ -61,6 +61,25 @@ pub fn put_rating(anime: i64, season: i64, stars: i64) {
     }
 }
 
+/// Tomosha tarixi: qism almashganda va chiqishda yoziladi.
+#[allow(clippy::too_many_arguments)]
+pub fn put_history(anime: i64, season: i64, episode: i64, url: &str, quality: &str, position_ms: i64, duration_ms: i64, watched_ms: i64, new_view: bool) {
+    if anime <= 0 || episode <= 0 {
+        return;
+    }
+    let key = format!("h:{anime}:{season}:{episode}");
+    let prev_new = {
+        let mut rows = ROWS.lock().unwrap_or_else(|e| e.into_inner());
+        load(&mut rows);
+        rows.iter().find(|r| r.0 == key).map(|r| r.2["new_view"].as_bool().unwrap_or(false)).unwrap_or(false)
+    };
+    put(
+        "history",
+        key,
+        json!({"anime_id": anime, "season_id": season, "epizod_id": episode, "video_url": url, "last_quality": quality, "position_ms": position_ms, "duration_ms": duration_ms, "watched_ms": watched_ms, "new_view": new_view || prev_new, "updated_at": now()}),
+    );
+}
+
 pub fn put_settings(hidden: &[String], consent: bool) {
     put("settings", "settings".into(), json!({"hidden_stats": hidden, "chan_consent": consent}));
 }
@@ -91,7 +110,7 @@ pub fn flush() {
     let pick = |kind: &str| Value::Array(batch.iter().filter(|r| r.1 == kind).map(|r| r.2.clone()).collect());
     let mut body = json!({
         "batch_id": format!("{}-{:x}", now(), now() & 0xffff_ffff),
-        "history": [],
+        "history": pick("history"),
         "ratings": pick("rating"),
         "favorites": pick("favorite"),
         "packs": [],

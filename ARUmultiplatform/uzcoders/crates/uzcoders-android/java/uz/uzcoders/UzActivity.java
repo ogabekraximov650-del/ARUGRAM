@@ -22,6 +22,9 @@ import android.content.ClipboardManager;
 import android.content.Intent;
 import android.net.Uri;
 import android.widget.Toast;
+import android.graphics.SurfaceTexture;
+import android.view.Surface;
+import android.content.pm.ActivityInfo;
 
 /**
  * uzcoders yelimi: tizim klaviaturasi (IME) matnini Rust'ga uzatadi. Boshqa hamma narsa Rust'da.
@@ -176,6 +179,72 @@ public class UzActivity extends NativeActivity {
                 }
             }
         }).start();
+    }
+
+    // ── Video: GL (tashqi) teksturaga chiziladigan Surface ──
+    private SurfaceTexture vst;
+    private volatile boolean vframe;
+    private final float[] vmat = new float[16];
+
+    /** GL oqimida chaqiriladi: `tex` — GL_TEXTURE_EXTERNAL_OES nomi. Dekoder shu Surface'ga yozadi. */
+    public Surface newVideoSurface(int tex) {
+        if (vst != null) vst.release();
+        vst = new SurfaceTexture(tex);
+        vframe = false;
+        vst.setOnFrameAvailableListener(new SurfaceTexture.OnFrameAvailableListener() {
+            public void onFrameAvailable(SurfaceTexture s) {
+                vframe = true;
+            }
+        });
+        return new Surface(vst);
+    }
+
+    /** GL oqimida: yangi kadr bo'lsa teksturaga o'tkazadi va 16 ta sonli matritsani vergul bilan qaytaradi; bo'lmasa bo'sh satr. */
+    public String videoUpdate() {
+        if (vst == null || !vframe) return "";
+        vframe = false;
+        try {
+            vst.updateTexImage();
+            vst.getTransformMatrix(vmat);
+        } catch (Throwable e) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < 16; i++) {
+            if (i > 0) sb.append(',');
+            sb.append(vmat[i]);
+        }
+        return sb.toString();
+    }
+
+    public void videoRelease() {
+        if (vst != null) {
+            vst.release();
+            vst = null;
+        }
+    }
+
+    /** To'liq ekran: gorizontal holat va tizim panellarini yashirish. */
+    public void setFullscreen(final boolean on) {
+        runOnUiThread(new Runnable() {
+            public void run() {
+                setRequestedOrientation(on ? ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE : ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
+                View d = getWindow().getDecorView();
+                d.setSystemUiVisibility(on
+                        ? (View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_LAYOUT_STABLE)
+                        : View.SYSTEM_UI_FLAG_VISIBLE);
+            }
+        });
+    }
+
+    /** Ekran o'chmasin (video ijro etilayotganda). */
+    public void keepScreenOn(final boolean on) {
+        runOnUiThread(new Runnable() {
+            public void run() {
+                if (on) getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                else getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            }
+        });
     }
 
     public void hideKeyboard() {

@@ -203,3 +203,60 @@ pub fn collect(seasons: &[Season]) -> Vec<DlItem> {
     out.sort_by(|a, b| b.stat.downloading.cmp(&a.stat.downloading).then(a.title.cmp(&b.title)).then(a.episode_no.cmp(&b.episode_no)));
     out
 }
+
+/// Ijro manbasi: fayl telefonda to'liq bo'lsa — kesh (internet kerak emas); aks holda Telegram (fayl bot chatiga nusxalanadi).
+/// Qaytadi: (manba, bot chatini ushlab turish kerakmi).
+pub fn resolve(session: &str, url: &str) -> Result<(crate::player::Source, bool), String> {
+    use crate::player::Source;
+    let name = file_name_of(url);
+    if name.is_empty() {
+        return if url.starts_with("http") { Ok((Source::Http(url.to_string()), false)) } else { Err("Video manzili noto'g'ri".into()) };
+    }
+    if !ensure_cache() {
+        return Err("Video kesh ishga tushmadi".into());
+    }
+    let complete = stats(&[url.to_string()]).get(url).map(|s| s.complete()).unwrap_or(false);
+    if complete {
+        return Ok((Source::Aru(name), false));
+    }
+    HOLDS.fetch_add(1, Ordering::SeqCst);
+    match tg_deliver(session, &[name.clone()]) {
+        Ok(ok) if ok.contains(&name) => Ok((Source::Aru(name), true)),
+        Ok(_) => {
+            HOLDS.fetch_sub(1, Ordering::SeqCst);
+            Err("Fayl Telegram'da topilmadi".into())
+        }
+        Err(e) => {
+            HOLDS.fetch_sub(1, Ordering::SeqCst);
+            Err(if e.contains("Serverga ulanib") { "Bu qism yuklab olinmagan — internetga ulaning".to_string() } else { e })
+        }
+    }
+}
+
+/// Ushlab turish bo'shatiladi (pleyer yopildi).
+pub fn release_hold() {
+    let _ = HOLDS.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |v| Some(v.saturating_sub(1)));
+}
+
+/// Qayerda to'xtagani (fayl nomi bo'yicha): `files/progress.json`.
+pub fn progress_get(url: &str) -> Option<(i64, i64)> {
+    let name = file_name_of(url);
+    let s = std::fs::read_to_string(format!("{}/progress.json", uzcoders::android::files_dir())).ok()?;
+    let v: Value = serde_json::from_str(&s).ok()?;
+    let e = v.get(&name)?.as_str()?;
+    let (a, b) = e.split_once('/')?;
+    Some((a.parse().ok()?, b.parse().ok()?))
+}
+
+pub fn progress_set(url: &str, pos_ms: i64, dur_ms: i64) {
+    let name = file_name_of(url);
+    if name.is_empty() || dur_ms <= 0 {
+        return;
+    }
+    let path = format!("{}/progress.json", uzcoders::android::files_dir());
+    let mut v: Value = std::fs::read_to_string(&path).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(Value::Object(Default::default()));
+    if let Value::Object(m) = &mut v {
+        m.insert(name, Value::String(format!("{pos_ms}/{dur_ms}")));
+    }
+    let _ = std::fs::write(path, v.to_string());
+}

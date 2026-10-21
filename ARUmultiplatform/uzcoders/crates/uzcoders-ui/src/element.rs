@@ -95,6 +95,8 @@ pub struct Element {
     pub(crate) glows: Vec<(f32, f32, f32, Color)>,
     pub(crate) on_click: Option<Callback>,
     pub(crate) on_swipe: Option<Rc<dyn Fn(i32)>>,
+    pub(crate) video: bool,
+    pub(crate) on_drag: Option<Rc<dyn Fn(f32, bool)>>,
     pub(crate) scroll: Option<ScrollState>,
     pub(crate) children: Vec<Element>,
 }
@@ -113,6 +115,8 @@ impl Element {
             glows: Vec::new(),
             on_click: None,
             on_swipe: None,
+            video: false,
+            on_drag: None,
             scroll: None,
             children,
         }
@@ -236,6 +240,17 @@ impl Element {
     }
     pub fn center(self) -> Self {
         self.align(Align::Center).justify(Justify::Center)
+    }
+    /// Surish/bosish: barmoq elementning gorizontal qismida (0..1) qayerdaligi bilan chaqiriladi; ikkinchi argument — barmoq ko'tarildi.
+    /// Sirg'anish chiziqlari (slider) uchun; bunday touch ro'yxat scrollini yoki bosishni ishga tushirmaydi.
+    pub fn on_drag(mut self, f: impl Fn(f32, bool) + 'static) -> Self {
+        self.on_drag = Some(Rc::new(f));
+        self
+    }
+    /// Shu element maydoniga dekoder video kadrlarini chizadi (GPU'da).
+    pub fn video(mut self) -> Self {
+        self.video = true;
+        self
     }
     /// Gorizontal surish: chapga (keyingi) `1`, o'ngga (oldingi) `-1` bilan chaqiriladi.
     pub fn on_swipe(mut self, f: impl Fn(i32) + 'static) -> Self {

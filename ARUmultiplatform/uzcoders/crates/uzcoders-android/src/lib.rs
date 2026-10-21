@@ -11,7 +11,7 @@ pub mod glue;
 pub(crate) mod jni;
 
 #[cfg(target_os = "android")]
-pub use glue::{copy_text, files_dir, ime_event, jstring, on_create, open_url, pick_file, take_picked, toast, ANativeActivity, ImeEvent};
+pub use glue::{keep_screen_on, set_fullscreen, video_release, video_window, copy_text, files_dir, ime_event, jstring, on_create, open_url, pick_file, take_picked, toast, ANativeActivity, ImeEvent};
 
 /// Ilova kirish nuqtasini e'lon qiladi: `uzcoders_android::android_app!(my_app);`
 /// bu yerda `fn my_app(scale: f32) -> uzcoders_ui::Ui`.
@@ -250,3 +250,13 @@ pub fn pick_file(_mime: &str) {}
 pub fn take_picked() -> Vec<String> {
     Vec::new()
 }
+#[cfg(not(target_os = "android"))]
+pub fn video_window() -> *mut std::ffi::c_void {
+    std::ptr::null_mut()
+}
+#[cfg(not(target_os = "android"))]
+pub fn video_release() {}
+#[cfg(not(target_os = "android"))]
+pub fn set_fullscreen(_on: bool) {}
+#[cfg(not(target_os = "android"))]
+pub fn keep_screen_on(_on: bool) {}

@@ -148,6 +148,7 @@ impl Gpu {
 
 static LOOPER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 static ACTIVITY: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static VIDEO_WINDOW: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 static PICKED: Mutex<Vec<String>> = Mutex::new(Vec::new());
 static FILES_DIR: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
@@ -187,6 +188,52 @@ pub fn ime_event(e: ImeEvent) {
 }
 
 pub use crate::jni::jstring;
+
+fn video_create(tex: u32) {
+    let a = ACTIVITY.load(std::sync::atomic::Ordering::SeqCst);
+    if a != 0 {
+        let w = unsafe { jni::video_surface(a as *mut ANativeActivity, tex) };
+        VIDEO_WINDOW.store(w as usize, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+fn video_update() -> Option<[f32; 16]> {
+    let a = ACTIVITY.load(std::sync::atomic::Ordering::SeqCst);
+    if a == 0 {
+        return None;
+    }
+    unsafe { jni::video_update(a as *mut ANativeActivity) }
+}
+
+/// Dekoder yozadigan `ANativeWindow*` (video elementi birinchi marta chizilgach tayyor bo'ladi; tayyor bo'lmaguncha `null`).
+pub fn video_window() -> *mut c_void {
+    VIDEO_WINDOW.load(std::sync::atomic::Ordering::SeqCst) as *mut c_void
+}
+
+/// Video Surface'ni bo'shatadi (pleyer yopilganda).
+pub fn video_release() {
+    VIDEO_WINDOW.store(0, std::sync::atomic::Ordering::SeqCst);
+    let a = ACTIVITY.load(std::sync::atomic::Ordering::SeqCst);
+    if a != 0 {
+        unsafe { jni::video_release(a as *mut ANativeActivity) };
+    }
+}
+
+/// To'liq ekran (gorizontal + tizim panellari yashirin).
+pub fn set_fullscreen(on: bool) {
+    let a = ACTIVITY.load(std::sync::atomic::Ordering::SeqCst);
+    if a != 0 {
+        unsafe { jni::call_bool(a as *mut ANativeActivity, b"setFullscreen\0", on) };
+    }
+}
+
+/// Ekran o'chmasin.
+pub fn keep_screen_on(on: bool) {
+    let a = ACTIVITY.load(std::sync::atomic::Ordering::SeqCst);
+    if a != 0 {
+        unsafe { jni::call_bool(a as *mut ANativeActivity, b"keepScreenOn\0", on) };
+    }
+}
 
 fn call_activity(name: &[u8], s: &str) {
     let a = ACTIVITY.load(std::sync::atomic::Ordering::SeqCst);
@@ -347,6 +394,7 @@ pub unsafe fn on_create(activity: *mut ANativeActivity, make_ui: fn(f32) -> Ui) 
     };
     let _ = FILES_DIR.set(dir.clone());
     ACTIVITY.store(activity as usize, std::sync::atomic::Ordering::SeqCst);
+    uzcoders_gpu::set_video_hooks(video_create, video_update);
     std::panic::set_hook(Box::new(move |i| {
         let msg = format!("Rust panic: {i}");
         log(&msg);

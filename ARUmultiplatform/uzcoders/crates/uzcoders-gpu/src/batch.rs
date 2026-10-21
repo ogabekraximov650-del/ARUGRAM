@@ -58,6 +58,8 @@ pub enum Op {
     FreeImage(u32),
     /// Shu paytgacha chizilgan tasvirning `[x, y, w, h]` (yuqori-chap boshlang'ich) hududini xiralashtirib, keyingi chizishlar uchun tayyorlaydi.
     Blur { region: [i32; 4], blur: f32 },
+    /// Video kadrini (tashqi tekstura) `[x, y, w, h]` piksel to'rtburchagiga chizish.
+    Video { rect: [f32; 4] },
     /// `verts[first..first+count]` ni (qirqish bilan) chizish. `scissor` — `[x, y, w, h]`, yuqori-chap boshlang'ich.
     Draw {
         scissor: Option<[i32; 4]>,
@@ -257,6 +259,12 @@ impl Batcher {
                         });
                         b.rrect_q(*rect, *radius, -2.0, *tint, *zoom);
                     }
+                }
+                DrawCmd::Video { rect } => {
+                    b.flush();
+                    b.frame.ops.push(Op::Video {
+                        rect: [rect.x, rect.y, rect.w, rect.h],
+                    });
                 }
                 DrawCmd::Glass { rect, radius, tint } => {
                     b.rrect(*rect, *radius, -1.0, *tint);
