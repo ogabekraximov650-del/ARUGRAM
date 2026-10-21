@@ -80,6 +80,28 @@ pub fn put_history(anime: i64, season: i64, episode: i64, url: &str, quality: &s
     );
 }
 
+/// To'plam amali (`new`, `delete`, `sub`, `add`, `remove`, `clear`).
+pub fn put_pack(key: String, data: Value) {
+    put("pack", key, data);
+}
+
+/// Navbatdagi to'plam amallari (hali yuborilmagan).
+pub fn pending_packs() -> Vec<Value> {
+    let mut rows = ROWS.lock().unwrap_or_else(|e| e.into_inner());
+    load(&mut rows);
+    rows.iter().filter(|r| r.1 == "pack").map(|r| r.2.clone()).collect()
+}
+
+pub fn remove_key(key: &str) {
+    let mut rows = ROWS.lock().unwrap_or_else(|e| e.into_inner());
+    load(&mut rows);
+    let n = rows.len();
+    rows.retain(|r| r.0 != key);
+    if rows.len() != n {
+        save(&rows);
+    }
+}
+
 pub fn put_settings(hidden: &[String], consent: bool) {
     put("settings", "settings".into(), json!({"hidden_stats": hidden, "chan_consent": consent}));
 }
@@ -113,7 +135,7 @@ pub fn flush() {
         "history": pick("history"),
         "ratings": pick("rating"),
         "favorites": pick("favorite"),
-        "packs": [],
+        "packs": pick("pack"),
         "traffic_bytes": 0,
     });
     if let Some(s) = batch.iter().find(|r| r.1 == "settings") {

@@ -3,7 +3,7 @@
 use super::*;
 use serde_json::Value;
 use crate::data::{
-    fetch_comments, fetch_devices, fetch_episodes, fetch_info, fetch_sections, fmt_moment, fmt_ymd, format_count, format_hours, revoke_device, Comment, Device, Episode, SeasonInfo,
+    fetch_devices, fetch_episodes, fetch_info, fetch_sections, fmt_moment, fmt_ymd, format_count, format_hours, revoke_device, Device, Episode, SeasonInfo,
 };
 
 const A_BACK: &str = "M20,11H7.83l5.59,-5.59L12,4l-8,8 8,8 1.41,-1.41L7.83,13H20v-2z";
@@ -29,8 +29,7 @@ pub struct SeasonPage {
     pub(super) eps: State<Rc<Vec<Episode>>>,
     pub(super) eps_loading: State<bool>,
     pub(super) sections: State<Rc<Vec<Season>>>,
-    pub(super) comments: State<Rc<Vec<Comment>>>,
-    pub(super) comments_state: State<u8>,
+    pub(super) cm: super::comments::CommentsState,
     pub(super) rating_open: State<bool>,
     pub(super) exp: State<i64>,
     pub(super) chunk: State<usize>,
@@ -50,6 +49,7 @@ pub enum Page {
     Storage(Rc<super::storage::StoragePage>),
     Support(Rc<super::support::SupportPage>),
     DlAnime(Rc<super::dl::DlAnimePage>),
+    Packs(Rc<super::packs::PacksPage>),
     AdminHub,
     AdminUsers(Rc<super::admin::UsersPage>),
     AdminThreads(Rc<super::admin::ListPage>),
@@ -66,8 +66,7 @@ impl Home {
             eps: State::new(Rc::new(Vec::new())),
             eps_loading: State::new(true),
             sections: State::new(Rc::new(Vec::new())),
-            comments: State::new(Rc::new(Vec::new())),
-            comments_state: State::new(0),
+            cm: super::comments::CommentsState::new(),
             rating_open: State::new(false),
             exp: State::new(0),
             chunk: State::new(usize::MAX),
@@ -108,14 +107,7 @@ impl Home {
                 me.next_posters();
             }
         });
-        let (p4, s4) = (p.clone(), session);
-        spawn_bg(move || fetch_comments(a, s, &s4), move |r| match r {
-            Ok(c) => {
-                p4.comments.set(Rc::new(c));
-                p4.comments_state.set(1);
-            }
-            Err(_) => p4.comments_state.set(2),
-        });
+        self.cm_load(&p);
         self.push(Page::Season(p));
     }
 
@@ -208,6 +200,7 @@ impl Home {
             Page::Storage(p) => self.storage_page(&p),
             Page::Support(p) => self.support_page(&p),
             Page::DlAnime(p) => self.dl_anime_page(&p),
+            Page::Packs(p) => self.packs_page(&p),
             Page::AdminHub => self.admin_hub_page(),
             Page::AdminUsers(p) => self.admin_users_page(&p),
             Page::AdminThreads(p) => self.admin_threads_page(&p),
@@ -281,6 +274,9 @@ impl Home {
         }
         if p.pl.settings.get() {
             layers.push(self.player_settings(p));
+        }
+        if let Some(o) = self.cm_overlay(p) {
+            layers.push(o);
         }
         stack(layers)
     }
@@ -515,42 +511,6 @@ impl Home {
             e
         })
         .padding_each(16.0, 4.0, 16.0, 24.0)
-    }
-
-    fn season_comments_tab(self: &Rc<Self>, p: &Rc<SeasonPage>) -> Element {
-        let list = p.comments.get();
-        if list.is_empty() {
-            return match p.comments_state.get() {
-                0 => column(vec![spinner(32.0, 3.0, ACCENT2)]).center(),
-                2 => Self::empty(A_PLAY, "Izohlar yuklanmadi"),
-                _ => Self::empty(A_PLAY, "Hali izoh yo'q"),
-            };
-        }
-        let mut kids: Vec<Element> = vec![tx(format!("{} ta izoh · yozish tez orada", list.len()), 12.0, TEXT_DIM), gap_box(0.0, 10.0)];
-        for c in list.iter() {
-            let letter: String = c.name.trim_start_matches('@').chars().take(1).flat_map(|x| x.to_uppercase()).collect();
-            let body = if !c.body.is_empty() { c.body.clone() } else if !c.media.is_empty() { format!("[{}]", c.media) } else { String::new() };
-            kids.push(
-                Self::card_box(
-                    row(vec![
-                        column(vec![tx(letter, 16.0, ACCENT2).bold()]).center().width(40.0).height(40.0).radius(20.0).bg(ACCENT.with_opacity(0.22)),
-                        column(vec![
-                            row(vec![tx(c.name.clone(), 14.0, Color::WHITE).bold().weight(1.0), tx(fmt_ymd(c.created_at), 11.0, TEXT_DIM)]),
-                            gap_box(0.0, 4.0),
-                            tx(body, 14.0, Color::rgba(255, 255, 255, 215)),
-                            gap_box(0.0, 6.0),
-                            row(vec![icon(A_HEART_O, 14.0).color(TEXT_DIM), tx(c.likes.to_string(), 12.0, TEXT_DIM), gap_box(8.0, 0.0), tx(if c.replies > 0 { format!("{} javob", c.replies) } else { String::new() }, 12.0, TEXT_DIM)]).gap(4.0).align(Align::Center),
-                        ])
-                        .weight(1.0),
-                    ])
-                    .gap(12.0)
-                    .padding(12.0),
-                )
-                .margin_each(0.0, 0.0, 0.0, 8.0),
-            );
-        }
-        kids.push(gap_box(0.0, 24.0));
-        scroll_column(&p.scroll[3], kids).padding_each(16.0, 4.0, 16.0, 0.0)
     }
 
     // ── Sozlamalar ──

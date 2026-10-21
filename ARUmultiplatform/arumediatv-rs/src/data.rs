@@ -555,39 +555,56 @@ pub fn fetch_info(anime: i64, season: i64, session: &str) -> Result<SeasonInfo, 
     })
 }
 
-/// Izoh (faqat o'qish).
-#[derive(Clone)]
+/// Izoh.
+#[derive(Clone, Default)]
 pub struct Comment {
+    pub id: String,
+    pub parent_id: String,
+    pub user_id: i64,
     pub name: String,
     pub body: String,
     pub media: String,
     pub created_at: i64,
     pub likes: i64,
     pub replies: i64,
+    pub liked: bool,
 }
 
-pub fn fetch_comments(anime: i64, season: i64, session: &str) -> Result<Vec<Comment>, String> {
-    let j = crate::api::get_json(&format!("/api/comments/{anime}/{season}"), "?page=0&sort=yangi", Some(session))?;
-    Ok(j["items"]
-        .as_array()
-        .map(|a| {
-            a.iter()
-                .filter(|o| !o["deleted"].as_bool().unwrap_or(false))
-                .map(|o| {
-                    let first = o["first_name"].as_str().unwrap_or("").trim();
-                    let user = o["username"].as_str().unwrap_or("").trim();
-                    Comment {
-                        name: if !first.is_empty() { first.to_string() } else if !user.is_empty() { format!("@{user}") } else { "Foydalanuvchi".into() },
-                        body: o["body"].as_str().unwrap_or("").to_string(),
-                        media: o["media_type"].as_str().unwrap_or("").to_string(),
-                        created_at: num(&o["created_at"]),
-                        likes: num(&o["likes"]),
-                        replies: num(&o["reply_count"]),
-                    }
-                })
-                .collect()
-        })
-        .unwrap_or_default())
+impl Comment {
+    pub fn from_json(o: &Value) -> Comment {
+        let first = o["first_name"].as_str().unwrap_or("").trim();
+        let user = o["username"].as_str().unwrap_or("").trim();
+        let s = |k: &str| o[k].as_str().filter(|v| *v != "null").unwrap_or("").to_string();
+        Comment {
+            id: s("id"),
+            parent_id: s("parent_id"),
+            user_id: num(&o["user_id"]),
+            name: if !first.is_empty() { first.to_string() } else if !user.is_empty() { format!("@{user}") } else { "Foydalanuvchi".into() },
+            body: s("body"),
+            media: s("media_type"),
+            created_at: num(&o["created_at"]),
+            likes: num(&o["likes"]),
+            replies: num(&o["reply_count"]),
+            liked: o["liked"].as_bool().unwrap_or(false),
+        }
+    }
+}
+
+pub fn comments_from(j: &Value) -> Vec<Comment> {
+    j["items"].as_array().map(|a| a.iter().filter(|o| !o["deleted"].as_bool().unwrap_or(false)).map(Comment::from_json).collect()).unwrap_or_default()
+}
+
+/// (izohlar, mk belgisi)
+pub fn fetch_comments(anime: i64, season: i64, session: &str, sort: &str) -> Result<(Vec<Comment>, i64), String> {
+    let j = crate::api::get_json(&format!("/api/comments/{anime}/{season}"), &format!("?page=0&sort={sort}"), Some(session))?;
+    Ok((comments_from(&j), j["mk"].as_i64().unwrap_or(-1)))
+}
+
+pub fn fetch_replies(anime: i64, season: i64, id: &str, session: &str) -> Result<Vec<Comment>, String> {
+    let j = crate::api::get_json(&format!("/api/comments/{anime}/{season}/{id}"), "", Some(session))?;
+    let mut v = comments_from(&j);
+    v.reverse();
+    Ok(v)
 }
 
 /// Ilova ulangan qurilma (`GET /api/auth/sessions`).
