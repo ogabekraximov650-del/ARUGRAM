@@ -47,7 +47,7 @@ jobs:
         env:
           APP_SIGN_SECRET: ${{ secrets.APP_SIGN_SECRET }}
         run: |
-          cargo ndk -t armeabi-v7a -p 28 -o jniLibs build --release
+          cargo ndk -t armeabi-v7a --platform 28 -o jniLibs build --release
           ls -la jniLibs/*/
 
       - name: APK yig'ish va imzolash (aapt2 + apksigner)

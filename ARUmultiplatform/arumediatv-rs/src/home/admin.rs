@@ -382,6 +382,8 @@ impl Home {
             Modal::Menu(u) => {
                 kids.push(tx(u.name.clone(), 17.0, Color::WHITE).bold().padding_xy(18.0, 12.0));
                 let (me, u1) = (self.clone(), u.clone());
+                let (me0, u0, c0) = (self.clone(), u.clone(), close.clone());
+                kids.push(item("Profilini ko'rish", false, Box::new(move || { c0(); me0.open_public_profile(u0.id); })));
                 kids.push(item("Yozishma", false, { let c = close.clone(); Box::new(move || { c(); me.open_support(Some(u1.id)); }) }));
                 let (pc, u2) = (p.clone(), u.clone());
                 kids.push(item("Balansni o'zgartirish", false, Box::new(move || pc.modal.set(Modal::Amount(u2.clone())))));

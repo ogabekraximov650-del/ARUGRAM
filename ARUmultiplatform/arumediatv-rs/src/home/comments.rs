@@ -247,7 +247,10 @@ impl Home {
         let (pm, cc) = (p.clone(), c.clone());
         let card = Self::pglass(
             row(vec![
-                column(vec![tx(letter, 15.0, ACCENT2).bold()]).center().width(38.0).height(38.0).radius(19.0).bg(ACCENT.with_opacity(0.22)),
+                column(vec![tx(letter, 15.0, ACCENT2).bold()]).center().width(38.0).height(38.0).radius(19.0).bg(ACCENT.with_opacity(0.22)).on_click({
+                    let (me, uid) = (self.clone(), c.user_id);
+                    move || me.open_public_profile(uid)
+                }),
                 column(vec![
                     row(vec![tx(c.name.clone(), 14.0, Color::WHITE).bold().weight(1.0), tx(fmt_ymd(c.created_at), 11.0, TEXT_DIM)]),
                     gap_box(0.0, 3.0),

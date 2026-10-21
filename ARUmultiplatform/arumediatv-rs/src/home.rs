@@ -8,6 +8,7 @@ mod dl;
 mod edit;
 mod packs;
 mod pages;
+mod pubprofile;
 mod player_ui;
 mod storage;
 mod support;
