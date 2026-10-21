@@ -163,7 +163,10 @@ impl Home {
             1 => self.open_admin_users(),
             2 => self.open_admin_list(0),
             3 => self.open_admin_list(1),
+            4 => self.open_admin_packs(),
+            5 => self.open_admin_channels(),
             6 => self.open_admin_stats(),
+            8 => self.open_admin_app(),
             _ => {
                 self.dlg_msg.set(format!("«{}» bo'limi Rust ilovada hali tayyor emas — Kotlin ilovada mavjud.", SECTIONS[i].0));
                 self.dlg.set(5);

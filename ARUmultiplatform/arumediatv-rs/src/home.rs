@@ -1,6 +1,7 @@
 //! Bosh sahifa: sarlavha, "Ommabop anime" va poster kartalari to'ri, pastda haqiqiy shisha (xiralashtiruvchi) navigatsiya paneli.
 
 mod admin;
+mod admin2;
 mod billing;
 mod comments;
 mod dl;

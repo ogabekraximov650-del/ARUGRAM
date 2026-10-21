@@ -399,3 +399,33 @@ pub fn urlenc(s: &str) -> String {
     }
     o
 }
+
+/// Kanal ma'lumoti (admin Telegram hisobi bilan): `{ok, id, title, username, members, about, ...}`.
+#[cfg(target_os = "android")]
+pub fn channel_info(arg: &str) -> Value {
+    if let Err(e) = shared().ensure() {
+        return serde_json::json!({"error": e});
+    }
+    let a = CString::new(arg).unwrap_or_default();
+    call(rust_core::telegram::rust_tg_channel_info(a.as_ptr()))
+}
+
+/// Botni kanalga admin qilib qo'shadi.
+#[cfg(target_os = "android")]
+pub fn make_bot_admin(arg: &str) -> Value {
+    if let Err(e) = shared().ensure() {
+        return serde_json::json!({"error": e});
+    }
+    let a = CString::new(arg).unwrap_or_default();
+    call(rust_core::telegram::rust_tg_make_bot_admin(a.as_ptr()))
+}
+
+#[cfg(not(target_os = "android"))]
+pub fn channel_info(_arg: &str) -> Value {
+    serde_json::json!({"error": "Faqat telefonda ishlaydi"})
+}
+
+#[cfg(not(target_os = "android"))]
+pub fn make_bot_admin(_arg: &str) -> Value {
+    serde_json::json!({"error": "Faqat telefonda ishlaydi"})
+}
