@@ -140,6 +140,34 @@ pub unsafe fn call_str(activity: *mut ANativeActivity, name: &[u8], s: &str) {
     env.delete(cls);
 }
 
+/// `UzActivity.<name>(String) -> String`: bitta matn argumentli, matn qaytaradigan metod.
+///
+/// # Safety
+/// `show_keyboard` bilan bir xil.
+pub unsafe fn call_str_ret(activity: *mut ANativeActivity, name: &[u8], s: &str) -> String {
+    let Some(env) = attach(activity) else { return String::new() };
+    let clazz = (*activity).clazz;
+    let cls = env.class_of(clazz);
+    let m = env.method(cls, name, b"(Ljava/lang/String;)Ljava/lang/String;\0");
+    let mut out = String::new();
+    if !m.is_null() {
+        let u: Vec<u16> = s.encode_utf16().collect();
+        let nf: extern "C" fn(*mut c_void, *const u16, i32) -> Obj = std::mem::transmute(env.f(I_NEW_STRING));
+        let js = nf(env.0, u.as_ptr(), u.len() as i32);
+        let f: extern "C" fn(*mut c_void, Obj, *mut c_void, *const u64) -> Obj = std::mem::transmute(env.f(I_CALL_OBJECT_METHOD_A));
+        let o = f(env.0, clazz, m, [js as usize as u64].as_ptr());
+        env.clear_exception();
+        if !o.is_null() {
+            out = jstring(env.0, o);
+            env.delete(o);
+        }
+        env.delete(js);
+    }
+    env.clear_exception();
+    env.delete(cls);
+    out
+}
+
 #[link(name = "android")]
 extern "C" {
     fn ANativeWindow_fromSurface(env: *mut c_void, surface: *mut c_void) -> *mut c_void;

@@ -276,6 +276,27 @@ pub fn frame_to_file(arg: &str) {
     }
 }
 
+/// Activity'ning ixtiyoriy `void <nom>(String)` metodini chaqiradi (masalan ExoPlayer ko'prigi: `exoOpen`, `exoCmd`).
+pub fn activity_call(name: &str, arg: &str) {
+    let mut n = name.as_bytes().to_vec();
+    n.push(0);
+    let a = ACTIVITY.load(std::sync::atomic::Ordering::SeqCst);
+    if a != 0 {
+        unsafe { jni::call_str(a as *mut ANativeActivity, &n, arg) };
+    }
+}
+
+/// Activity'ning `String <nom>(String)` metodini chaqiradi.
+pub fn activity_call_ret(name: &str, arg: &str) -> String {
+    let mut n = name.as_bytes().to_vec();
+    n.push(0);
+    let a = ACTIVITY.load(std::sync::atomic::Ordering::SeqCst);
+    if a == 0 {
+        return String::new();
+    }
+    unsafe { jni::call_str_ret(a as *mut ANativeActivity, &n, arg) }
+}
+
 /// Havolani brauzerda ochadi.
 pub fn open_url(url: &str) {
     call_activity(b"openUrl\0", url);

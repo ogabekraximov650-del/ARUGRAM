@@ -185,6 +185,8 @@ public class UzActivity extends NativeActivity {
 
     // ── Video: GL (tashqi) teksturaga chiziladigan Surface ──
     private SurfaceTexture vst;
+    /** Dekoder yozadigan Surface (Java pleyerlar, masalan ExoPlayer, shunga ulanadi). */
+    public volatile Surface vsurface;
     private volatile boolean vframe;
     private final float[] vmat = new float[16];
 
@@ -198,7 +200,8 @@ public class UzActivity extends NativeActivity {
                 vframe = true;
             }
         });
-        return new Surface(vst);
+        vsurface = new Surface(vst);
+        return vsurface;
     }
 
     /** GL oqimida: yangi kadr bo'lsa teksturaga o'tkazadi va 16 ta sonli matritsani vergul bilan qaytaradi; bo'lmasa bo'sh satr. */

@@ -1,9 +1,9 @@
-//! Video pleyer: Android'da NDK (`imp`), boshqa muhitda (testlar) — bo'sh o'rnak.
+//! Video pleyer: Android'da NDK (Media3 ExoPlayer, `exo`), boshqa muhitda (testlar) — bo'sh o'rnak.
 
 #[cfg(target_os = "android")]
-mod imp;
+mod exo;
 #[cfg(target_os = "android")]
-pub use imp::*;
+pub use exo::*;
 
 #[cfg(not(target_os = "android"))]
 mod stub;
