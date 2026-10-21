@@ -462,19 +462,19 @@ impl Home {
         let (pt, me_t) = (p.clone(), self.clone());
         bar_kids.push(
             row(vec![
-                icon(C_STICKER, 24.0).color(Color::WHITE).padding(8.0).on_click(move || {
+                column(vec![icon(C_STICKER, 24.0).color(Color::WHITE)]).center().width(44.0).height(44.0).on_click(move || {
                     let on = !pt.cm.panel.get();
                     pt.cm.panel.set(on);
                     if on {
                         me_t.cm_panel_open(&pt);
                     }
                 }),
-                field(&p.cm.input).color(Color::WHITE).size(15.0).hint("Izoh yozing...").hint_color(Color::rgba(255, 255, 255, 120)).accent(ACCENT2).padding_xy(4.0, 10.0).no_border().weight(1.0),
+                field(&p.cm.input).color(Color::WHITE).size(15.0).hint("Izoh yozing...").hint_color(Color::rgba(255, 255, 255, 120)).accent(ACCENT2).padding_xy(4.0, 14.0).no_border().weight(1.0),
                 column(vec![if p.cm.busy.get() { spinner(18.0, 2.0, Color::WHITE) } else { icon(C_SEND, 20.0).color(Color::WHITE) }]).center().width(40.0).height(40.0).radius(20.0).bg(if can { ACCENT } else { Color::rgba(255, 255, 255, 25) }).on_click(move || me.cm_send(&ps)),
             ])
             .gap(6.0)
             .align(Align::Center)
-            .padding_each(12.0, 2.0, 6.0, 2.0),
+            .padding_each(6.0, 4.0, 8.0, 4.0),
         );
         let _ = pd;
         let mut col = vec![scroll_column(&p.cm.scroll, kids).padding_each(16.0, 4.0, 16.0, 0.0).grow(1.0)];
@@ -482,7 +482,7 @@ impl Home {
             let pm = p.clone();
             col.push(tx(p.cm.msg.get(), 12.5, ERROR).padding_xy(18.0, 2.0).on_click(move || pm.cm.msg.set(String::new())));
         }
-        col.push(Self::pglass(column(bar_kids)).radius(26.0).margin_each(12.0, 4.0, 12.0, 8.0));
+        col.push(column(bar_kids).lens(Color::rgba(18, 18, 24, 150), 1.0).radius(28.0).margin_each(12.0, 4.0, 12.0, 8.0));
         column(col)
     }
 

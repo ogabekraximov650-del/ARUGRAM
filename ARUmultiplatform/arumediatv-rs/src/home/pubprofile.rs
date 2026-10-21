@@ -50,7 +50,7 @@ impl Home {
             row(vec![
                 column(vec![tx(letter, 30.0, ACCENT2).bold()]).center().width(78.0).height(78.0).radius(39.0).bg(ACCENT.with_opacity(0.22)),
                 column(vec![
-                    tx(name, 20.0, Color::WHITE).bold(),
+                    tx(name.clone(), 20.0, Color::WHITE).bold(),
                     if username.is_empty() { gap_box(0.0, 0.0) } else { tx(format!("@{username}"), 14.0, Color::WHITE) },
                     row(badges).gap(8.0).padding_each(0.0, 8.0, 0.0, 0.0),
                 ])
@@ -97,7 +97,15 @@ impl Home {
                 .iter()
                 .map(|(label, key, value)| {
                     let visible = d.get(*key).is_some();
-                    Self::pglass(column(vec![tx(if visible { value.clone() } else { "Yashirilgan".to_string() }, if visible { 20.0 } else { 14.0 }, if visible { ACCENT2 } else { Color::rgba(255, 255, 255, 110) }).black(), tx(*label, 12.0, Color::WHITE)]).padding_xy(16.0, 14.0)).radius(22.0).weight(1.0)
+                    let openable = visible && matches!(*key, "episodes" | "seasons" | "favorites" | "rated" | "comments");
+                    let (me, uid, k, label, owner) = (self.clone(), p.id, *key, *label, name.clone());
+                    let tile = Self::pglass(column(vec![tx(if visible { value.clone() } else { "Yashirilgan".to_string() }, if visible { 20.0 } else { 14.0 }, if visible { ACCENT2 } else { Color::rgba(255, 255, 255, 110) }).black(), tx(label, 12.0, Color::WHITE)]).padding_xy(16.0, 14.0)).radius(22.0).weight(1.0);
+                    if openable {
+                        let k2: &'static str = match k { "episodes" => "episodes", "seasons" => "seasons", "favorites" => "favorites", "rated" => "rated", _ => "comments" };
+                        tile.on_click(move || me.open_stat(uid, k2, label, &owner))
+                    } else {
+                        tile
+                    }
                 })
                 .collect();
             if r.len() == 1 {

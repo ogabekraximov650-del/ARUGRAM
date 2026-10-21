@@ -51,15 +51,8 @@ impl Home {
             return Some(a.clone());
         }
         let img = self.posters.borrow().get(url)?.clone();
-        let (w, h) = (img.w as usize, img.h as usize);
-        let side = w.min(h);
-        let (x0, y0) = ((w - side) / 2, (h - side) / 3);
-        let mut rgba = Vec::with_capacity(side * side * 4);
-        for y in 0..side {
-            let o = ((y0 + y) * w + x0) * 4;
-            rgba.extend_from_slice(&img.rgba[o..o + side * 4]);
-        }
-        let a = Rc::new(Image { w: side as u32, h: side as u32, rgba }.resized(256, 256).round_corners(1000.0));
+        // Poster 480x720 ga cho'zilgan (kvadrat rasm torayib ketgan) — butun rasm kvadratga qaytariladi, kesilmaydi.
+        let a = Rc::new(Image { w: img.w, h: img.h, rgba: img.rgba.clone() }.resized(256, 256).round_corners(128.0));
         *self.avatar.borrow_mut() = Some(a.clone());
         Some(a)
     }
@@ -279,12 +272,17 @@ impl Home {
         .radius(24.0)
         .on_click(move || me_b.open_billing());
 
+        let uid = p.id;
+        let st = |ic: &'static str, label: &'static str, value: String, key: &'static str| {
+            let me = self.clone();
+            Self::stat(ic, label, value).on_click(move || me.open_stat(uid, key, label, ""))
+        };
         let stats = column(vec![
-            row(vec![Self::stat(P_MOVIE, "Anime", format_count(p.animes)), Self::stat(P_PLAY, "Qismlar", format_count(p.episodes))]).gap(12.0),
+            row(vec![Self::stat(P_MOVIE, "Anime", format_count(p.animes)), st(P_PLAY, "Qismlar", format_count(p.episodes), "episodes")]).gap(12.0),
             gap_box(0.0, 12.0),
-            row(vec![Self::stat(P_GRID, "Bo'limlar", format_count(p.seasons)), Self::stat(P_BOOKMARK, "Sevimlilar", format_count(p.favorites))]).gap(12.0),
+            row(vec![st(P_GRID, "Bo'limlar", format_count(p.seasons), "seasons"), st(P_BOOKMARK, "Sevimlilar", format_count(p.favorites), "favorites")]).gap(12.0),
             gap_box(0.0, 12.0),
-            row(vec![Self::stat(STAR, "Baholangan", format_count(p.rated)), Self::stat(P_COMMENT, "Izohlar", format_count(p.comments))]).gap(12.0),
+            row(vec![st(STAR, "Baholangan", format_count(p.rated), "rated"), st(P_COMMENT, "Izohlar", format_count(p.comments), "comments")]).gap(12.0),
             gap_box(0.0, 12.0),
             row(vec![Self::stat(P_CLOCK, "Tomosha vaqti", format!("{} soat", format_hours(p.watch_ms))), { let me = self.clone(); Self::stat(P_SD, "Xotira", format_bytes(self.cache_bytes.get())).on_click(move || me.open_storage()) }]).gap(12.0),
         ]);

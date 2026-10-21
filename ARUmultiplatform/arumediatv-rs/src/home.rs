@@ -12,6 +12,7 @@ mod packs;
 mod pages;
 mod pubprofile;
 mod player_ui;
+mod statdetail;
 mod storage;
 mod support;
 mod profile;

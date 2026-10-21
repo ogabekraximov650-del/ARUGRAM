@@ -642,7 +642,11 @@ impl Home {
         });
         let pc = p.clone();
         let gear = Self::gbtn(V_GEAR, 20.0, if fullscreen { 42.0 } else { 36.0 }, move || pc.pl.settings.set(true));
-        let time = |a: i64, b: i64, sep: &str| Self::gpill(tx(format!("{}{sep}{}", mmss(a), mmss(b)), if fullscreen { 13.0 } else { 11.5 }, Color::WHITE).bold());
+        let time = |a: i64, b: i64, sep: &str| {
+            let (txt, size) = (format!("{}{sep}{}", mmss(a), mmss(b)), if fullscreen { 13.0 } else { 11.5 });
+            let w = txt.chars().count() as f32 * size * 0.62 + 28.0;
+            column(vec![tx(txt, size, Color::WHITE).bold()]).center().width(w).height(if fullscreen { 38.0 } else { 34.0 }).lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM).radius(19.0)
+        };
 
         if fullscreen {
             let (pc, me) = (p.clone(), self.clone());
