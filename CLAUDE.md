@@ -38,7 +38,7 @@ qarorning sababi: `KEYINGI_VAZIFA.md` (katta fayl, kerakli bo'limni
 ## uzcoders kutubxonasi (foydalanuvchi talabi, QAT'IY)
 
 - Kutubxona o'zgarishlari AVVAL ARUGRAM ichidagi nusxada (`ARUmultiplatform/uzcoders`) qilinadi va CI (`arumediatv-rs.yml`) yashil bo'lishi kerak.
-- `ogabekraximov650-del/uzcoders` reposiga kod faqat CI xatosiz o'tib, 100% ishonch hosil bo'lgandan keyin ko'chiriladi (`crates/` va `README.md`).
+- `ogabekraximov650-del/uzcoders` reposiga kod FAQAT foydalanuvchi o'zi aniq tasdiqlagandan keyin ko'chiriladi (CI yashil bo'lsa ham o'zboshimcha ko'chirmang). Ko'chirish: `crates/` va `README.md`.
 - Kutubxonadagi barcha izohlar (Rust, Java, README, Cargo tavsifi) uch tilda yoziladi: `UZ:`, `EN:`, `RU:`. Baytli qator (`b"..."`, shader) ichiga rus harflari yozilmaydi.
 
 ## Loyiha tuzilishi
