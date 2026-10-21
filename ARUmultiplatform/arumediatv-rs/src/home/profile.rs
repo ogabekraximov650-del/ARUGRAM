@@ -37,6 +37,9 @@ impl Home {
                     me.queue.borrow_mut().insert(0, p.photo_url.clone());
                     me.next_posters();
                 }
+                me.consent.set(p.consent);
+                crate::gate::set_consent(p.consent);
+                crate::gate::start(me.session.clone(), p.id);
                 me.profile.set(Rc::new(p));
             }
         });

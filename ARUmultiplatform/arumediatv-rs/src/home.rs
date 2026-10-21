@@ -24,6 +24,7 @@ use std::rc::Rc;
 use uzcoders::prelude::*;
 
 const BELL: &str = "M12,22c1.1,0 2,-0.9 2,-2h-4c0,1.1 0.89,2 2,2zM18,16v-5c0,-3.07 -1.64,-5.64 -4.5,-6.32V4c0,-0.83 -0.67,-1.5 -1.5,-1.5s-1.5,0.67 -1.5,1.5v0.68C7.63,5.36 6,7.92 6,11v5l-2,2v1h16v-1l-2,-2z";
+const REFRESH: &str = "M17.65,6.35C16.2,4.9 14.21,4 12,4c-4.42,0 -7.99,3.58 -7.99,8s3.57,8 7.99,8c3.73,0 6.84,-2.55 7.73,-6h-2.08c-0.82,2.33 -3.04,4 -5.65,4 -3.31,0 -6,-2.69 -6,-6s2.69,-6 6,-6c1.66,0 3.14,0.69 4.22,1.78L13,11h7V4l-2.35,2.35z";
 const CLOSE: &str = "M19,6.41L17.59,5 12,10.59 6.41,5 5,6.41 10.59,12 5,17.59 6.41,19 12,13.41 17.59,19 19,17.59 13.41,12z";
 const MENU: &str = "M3,18h18v-2L3,16v2zM3,13h18v-2L3,11v2zM3,6v2h18L21,6L3,6z";
 const CAT_TABS: [&str; 7] = ["Barchasi", "Reytingi baland", "Eng ko'p ko'rilgan", "Ongoing", "Tugallangan", "Filmlar", "OVA"];
@@ -65,6 +66,11 @@ pub struct Home {
     pages: State<Vec<pages::Page>>,
     hidden: State<Vec<String>>,
     consent: State<bool>,
+    gate_rev: State<u32>,
+    /// Oflayn rejimda ro'yxatdan yashirilgan bo'limlarning to'liq ro'yxati (internet qaytganda tiklanadi).
+    full_seasons: RefCell<Option<Rc<Vec<Season>>>>,
+    /// Izohlardagi stiker/GIF rasmlari: (to'plam, element) -> rasm (`None` — yuklanmoqda yoki topilmadi).
+    pk_imgs: RefCell<HashMap<(i64, i64), Option<Rc<Image>>>>,
     devices: State<Option<Result<Rc<Vec<Device>>, ()>>>,
     settings_scroll: ScrollState,
     sessions_scroll: ScrollState,
@@ -169,6 +175,9 @@ impl Home {
             pages: State::new(Vec::new()),
             hidden: State::new(Vec::new()),
             consent: State::new(false),
+            gate_rev: State::new(0),
+            full_seasons: RefCell::new(None),
+            pk_imgs: RefCell::new(HashMap::new()),
             devices: State::new(None),
             settings_scroll: ScrollState::new(),
             sessions_scroll: ScrollState::new(),
@@ -248,18 +257,59 @@ impl Home {
         }
         let me = self.clone();
         spawn_bg(fetch_seasons, move |r| match r {
-            Ok(Some(items)) if !items.is_empty() => me.set_items(items),
-            Ok(_) => {
+            Ok(Some(items)) if !items.is_empty() => {
+                me.full_seasons.replace(None);
+                me.set_items(items)
+            }
+            Ok(Some(_)) => {
                 if me.seasons.with(|s| s.is_empty()) {
                     me.status.set(Status::Error("Ro'yxat bo'sh".into()));
                 }
             }
+            Ok(None) => me.restore_online(),
             Err(e) => {
                 if me.seasons.with(|s| s.is_empty()) {
                     me.status.set(Status::Error(e));
+                } else {
+                    me.apply_offline();
                 }
             }
         });
+    }
+
+    /// Internet qaytdi (server "o'zgarmagan" dedi): oflayn rejimda yashirilgan bo'limlar qaytadi.
+    fn restore_online(self: &Rc<Self>) {
+        let full = self.full_seasons.borrow_mut().take();
+        if let Some(f) = full {
+            self.set_items((*f).clone());
+        }
+    }
+
+    /// OFLAYN: faqat to'liq yuklab olingan qismi bor bo'limlar ko'rsatiladi (qolganlari yashiriladi, o'chirilmaydi).
+    fn apply_offline(self: &Rc<Self>) {
+        if self.full_seasons.borrow().is_some() {
+            return;
+        }
+        let all = self.seasons.get();
+        let list: Vec<Season> = (*all).clone();
+        let me = self.clone();
+        spawn_bg(
+            move || {
+                let done: HashSet<(i64, i64)> = crate::downloads::collect(&list).into_iter().filter(|d| d.stat.complete()).map(|d| (d.anime_id, d.season_id)).collect();
+                (list, done)
+            },
+            move |(list, done)| {
+                if done.is_empty() || me.full_seasons.borrow().is_some() {
+                    return;
+                }
+                let kept: Vec<Season> = list.iter().filter(|s| done.contains(&(s.anime_id, s.season_id))).cloned().collect();
+                if kept.is_empty() {
+                    return;
+                }
+                me.full_seasons.replace(Some(Rc::new(list)));
+                me.set_items(kept);
+            },
+        );
     }
 
     fn set_items(self: &Rc<Self>, items: Vec<Season>) {
@@ -371,7 +421,7 @@ impl Home {
     }
 
     /// Sarlavha paneli: nom, tavsif va bo'lim nomi — lupali shisha ichida; qo'ng'iroq tugmasi alohida shisha doira.
-    fn header(&self, top_inset: f32) -> Element {
+    fn header(self: &Rc<Self>, top_inset: f32) -> Element {
         let panel = column(vec![
             row(vec![tx("ARU", 30.0, Color::WHITE).black(), tx("MEDIATV", 30.0, ACCENT2).black()]),
             tx("Anime dunyosi", 14.0, Color::WHITE),
@@ -392,8 +442,23 @@ impl Home {
             .center()
             .lens(Color::rgba(255, 255, 255, 5), GLASS_ZOOM)
             .radius(24.0);
+        let me_r = self.clone();
+        let refresh = column(vec![icon(REFRESH, 22.0).color(Color::WHITE)])
+            .width(48.0)
+            .height(48.0)
+            .center()
+            .lens(Color::rgba(255, 255, 255, 5), GLASS_ZOOM)
+            .radius(24.0)
+            .on_click(move || {
+                uzcoders::android::toast("Yangilanmoqda...");
+                me_r.reload();
+                if me_r.tab.get() == 3 {
+                    me_r.load_library();
+                }
+            });
+        let bell = bell.on_click(|| uzcoders::android::toast("Bildirishnomalar tez orada"));
         column(vec![
-            row(vec![panel.weight(1.0), bell]).gap(10.0).align(Align::Start),
+            row(vec![panel.weight(1.0), refresh, bell]).gap(10.0).align(Align::Start),
             spacer(),
         ])
         .padding_each(16.0, 8.0 + top_inset, 16.0, 0.0)
@@ -984,6 +1049,9 @@ mod tests {
             pages: State::new(Vec::new()),
             hidden: State::new(Vec::new()),
             consent: State::new(false),
+            gate_rev: State::new(0),
+            full_seasons: RefCell::new(None),
+            pk_imgs: RefCell::new(HashMap::new()),
             devices: State::new(None),
             settings_scroll: ScrollState::new(),
             sessions_scroll: ScrollState::new(),

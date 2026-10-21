@@ -229,6 +229,9 @@ impl Home {
         let s = &p.season;
         let info = p.info.get();
         let tab = p.tab.get();
+        if let Some(c) = self.consent_screen(p) {
+            return c;
+        }
         // Tepada muqova (Kotlin'da pleyer turgan joy): pleyer tayyor bo'lguncha poster kadri.
         let cover_h = (w - 32.0) * 9.0 / 16.0;
         let cover_img = match self.frame(&s.photo_url) {
@@ -581,6 +584,7 @@ impl Home {
                     Self::switch(self.consent.get(), move || {
                         let on = !me.consent.get();
                         crate::sync::put_settings(&me.hidden.get(), on);
+                        crate::gate::set_consent(on);
                         me.consent.set(on);
                     }),
                 ])

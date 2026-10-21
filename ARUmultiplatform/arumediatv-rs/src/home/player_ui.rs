@@ -44,13 +44,15 @@ pub struct PlayerState {
     skipped: RefCell<Vec<i64>>,
     pub(super) closed: Cell<bool>,
     pub(super) sub_until: State<i64>,
+    /// Ijro tezligi (foiz).
+    pub(super) speed: State<u32>,
 }
 
 impl PlayerState {
     pub(super) fn new() -> PlayerState {
         PlayerState {
             player: RefCell::new(None),
-            status: State::new(Status { state: PState::Opening, pos_ms: 0, dur_ms: 0, playing: false, buffering: false, error: String::new(), width: 0, height: 0 }),
+            status: State::new(Status { state: PState::Opening, pos_ms: 0, dur_ms: 0, playing: false, buffering: false, error: String::new(), width: 0, height: 0, speed: 1.0 }),
             cur: State::new(None),
             fullscreen: State::new(false),
             ctl: State::new(true),
@@ -71,6 +73,7 @@ impl PlayerState {
             skipped: RefCell::new(Vec::new()),
             closed: Cell::new(false),
             sub_until: State::new(-1),
+            speed: State::new(100),
         }
     }
 }
@@ -120,6 +123,7 @@ impl Home {
         self.pl_flush_history(p);
         if let Some(pl) = p.pl.player.borrow_mut().take() {
             pl.close();
+            crate::gate::BUSY.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
         }
         if p.pl.held.replace(false) {
             downloads::release_hold();
@@ -138,6 +142,50 @@ impl Home {
             let until = r.ok().map(|j| j["subscription_until"].as_i64().unwrap_or(0)).unwrap_or(0);
             p2.pl.sub_until.set(until);
         });
+        // Bepul bo'lim: majburiy kanallar ro'yxati (ruxsat ekrani uchun).
+        if p.season.free == Some(true) && crate::gate::channels().is_none() {
+            let (me, session) = (self.clone(), self.session.clone());
+            spawn_bg(move || crate::gate::fetch(&session), move |_| me.gate_rev.set(me.gate_rev.get() + 1));
+        }
+    }
+
+    /// Bepul bo'lim, obuna yo'q va ruxsat berilmagan bo'lsa — ruxsat ekrani (Kotlin `ConsentScreen`).
+    pub(super) fn consent_screen(self: &Rc<Self>, p: &Rc<SeasonPage>) -> Option<Element> {
+        let until = p.pl.sub_until.get();
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
+        let _ = self.gate_rev.get();
+        if p.season.free != Some(true) || until < 0 || until > now || self.consent.get() {
+            return None;
+        }
+        let chans = crate::gate::channels();
+        if matches!(&chans, Some(c) if c.is_empty()) {
+            return None;
+        }
+        let mut kids: Vec<Element> = vec![
+            gap_box(0.0, 24.0),
+            tx("Bepul ko'rish", 22.0, Color::WHITE).black(),
+            tx("Bu bo'limni bepul ko'rish uchun quyidagi kanallarga obuna bo'lishingiz kerak. Ruxsat bersangiz, ilova Telegram hisobingiz bilan ularga o'zi qo'shiladi (yopiq kanalga so'rov yuboradi). Kanaldan istalgan vaqtda Telegram'da chiqib ketishingiz mumkin.", 13.5, Color::WHITE).line_height(21.0).padding_each(0.0, 10.0, 0.0, 16.0),
+        ];
+        match chans {
+            None => kids.push(column(vec![spinner(28.0, 3.0, ACCENT2)]).center().padding(12.0)),
+            Some(c) => {
+                for ch in c {
+                    kids.push(tx(format!("{} {}", if ch.kind == "public" { "📢" } else { "🔒" }, if ch.title.is_empty() { ch.url.clone() } else { ch.title.clone() }), 14.0, Color::WHITE).padding_each(0.0, 0.0, 0.0, 8.0));
+                }
+            }
+        }
+        kids.push(gap_box(0.0, 16.0));
+        let me = self.clone();
+        kids.push(
+            column(vec![tx("Ruxsat berish va ko'rish", 15.0, Color::WHITE).black()]).center().padding_xy(0.0, 15.0).radius(28.0).gradient(ACCENT, ACCENT2).on_click(move || {
+                crate::sync::put_settings(&me.hidden.get(), true);
+                crate::gate::set_consent(true);
+                me.consent.set(true);
+            }),
+        );
+        let me2 = self.clone();
+        kids.push(tx("Kanalsiz — obuna olish", 13.0, Color::WHITE).padding(14.0).on_click(move || me2.open_billing()));
+        Some(self.scaffold("Bepul ko'rish", scroll_column(&p.scroll[0], kids).padding_each(24.0, 0.0, 24.0, 0.0)))
     }
 
     /// Qismni ijro etadi. `quality` — tanlangan sifat; `resume` — boshlang'ich joy (bo'lmasa saqlangan joy).
@@ -157,6 +205,7 @@ impl Home {
         self.pl_flush_history(p);
         if let Some(old) = p.pl.player.borrow_mut().take() {
             old.close();
+            crate::gate::BUSY.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
         }
         if p.pl.held.replace(false) {
             downloads::release_hold();
@@ -181,7 +230,12 @@ impl Home {
             match r {
                 Ok((src, held)) => {
                     p2.pl.held.set(held);
-                    *p2.pl.player.borrow_mut() = Some(Player::open(src, start, auto_play));
+                    let np = Player::open(src, start, auto_play);
+                    if p2.pl.speed.get() != 100 {
+                        np.set_speed(p2.pl.speed.get() as f32 / 100.0);
+                    }
+                    *p2.pl.player.borrow_mut() = Some(np);
+                    crate::gate::BUSY.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                     uzcoders::android::keep_screen_on(true);
                     me.pl_tick(&p2);
                 }
@@ -483,6 +537,23 @@ impl Home {
             let s2 = st.clone();
             row(vec![tx(label, 14.0, Color::WHITE).weight(1.0), Self::switch(st.get(), move || s2.set(!s2.get()))]).align(Align::Center).padding_xy(2.0, 8.0)
         };
+        kids.push(tx("Tezlik", 13.0, Color::WHITE).bold());
+        kids.push(gap_box(0.0, 8.0));
+        let speeds: Vec<Element> = [(50u32, "0.5x"), (75, "0.75x"), (100, "1x"), (125, "1.25x"), (150, "1.5x"), (200, "2x")]
+            .iter()
+            .map(|(v, l)| {
+                let pc = p.clone();
+                let v = *v;
+                self.chip(l, pc.pl.speed.get() == v, move || {
+                    pc.pl.speed.set(v);
+                    if let Some(pl) = pc.pl.player.borrow().as_ref() {
+                        pl.set_speed(v as f32 / 100.0);
+                    }
+                })
+            })
+            .collect();
+        kids.push(row(speeds).gap(8.0).scroll(&self.chips_scroll2).height(44.0));
+        kids.push(gap_box(0.0, 12.0));
         kids.push(toggle("Avto keyingi qism", &p.pl.auto_next));
         kids.push(toggle("Introni avto o'tkazish", &p.pl.auto_skip));
         kids.push(tx("Uyqu taymeri", 13.0, Color::WHITE).bold().padding_each(0.0, 8.0, 0.0, 8.0));

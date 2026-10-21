@@ -123,6 +123,7 @@ pub struct Status {
     pub error: String,
     pub width: i32,
     pub height: i32,
+    pub speed: f32,
 }
 
 struct Clock {
@@ -151,6 +152,8 @@ struct Inner {
     dropped_audio: AtomicBool,
     pos_us: AtomicI64,
     dur_us: AtomicI64,
+    /// Tezlik (foiz: 100 = 1x). Audio chastotasi shunga ko'paytiriladi.
+    speed: AtomicI32,
     width: AtomicI32,
     height: AtomicI32,
     has_audio: AtomicBool,
@@ -246,7 +249,7 @@ impl Inner {
             return c.audio_base_pts + fr.max(0) * 1_000_000 / c.rate.max(1) as i64;
         }
         match c.base_at {
-            Some(t) if self.playing.load(Ordering::SeqCst) => c.base_pts + t.elapsed().as_micros() as i64,
+            Some(t) if self.playing.load(Ordering::SeqCst) => c.base_pts + t.elapsed().as_micros() as i64 * self.speed.load(Ordering::SeqCst) as i64 / 100,
             _ => c.base_pts,
         }
     }
@@ -278,6 +281,7 @@ impl Player {
             dropped_audio: AtomicBool::new(false),
             pos_us: AtomicI64::new(start_ms.max(0) * 1000),
             dur_us: AtomicI64::new(0),
+            speed: AtomicI32::new(100),
             width: AtomicI32::new(0),
             height: AtomicI32::new(0),
             has_audio: AtomicBool::new(false),
@@ -310,6 +314,7 @@ impl Player {
             error: i.error.lock().map(|e| e.clone()).unwrap_or_default(),
             width: i.width.load(Ordering::SeqCst),
             height: i.height.load(Ordering::SeqCst),
+            speed: i.speed.load(Ordering::SeqCst) as f32 / 100.0,
         }
     }
 
@@ -326,6 +331,16 @@ impl Player {
             i.seek_to.store(i.pos_us.load(Ordering::SeqCst), Ordering::SeqCst);
         }
         i.playing.store(true, Ordering::SeqCst);
+    }
+
+    /// Ijro tezligi (0.5..2.0). Ovoz balandligi ham shunga qarab o'zgaradi (chastota ko'paytiriladi).
+    pub fn set_speed(&self, x: f32) {
+        let i = &self.inner;
+        let v = ((x * 100.0).round() as i32).clamp(50, 200);
+        if !i.has_audio.load(Ordering::SeqCst) {
+            i.sys_clock_set(i.clock_us(), i.playing.load(Ordering::SeqCst));
+        }
+        i.speed.store(v, Ordering::SeqCst);
     }
 
     pub fn pause(&self) {
@@ -722,10 +737,27 @@ unsafe fn audio_out(inner: Arc<Inner>) {
     let (mut rate, mut ch) = (44100i32, 2i32);
     let mut started = false;
     let mut first_after_flush = true;
+    let mut stream_speed = inner.speed.load(Ordering::SeqCst);
     loop {
         if inner.stop.load(Ordering::SeqCst) {
             return;
         }
+        // Tezlik o'zgardi: oqim yangi chastota bilan qayta ochiladi, soat joriy joydan davom etadi.
+        let want_speed = inner.speed.load(Ordering::SeqCst);
+        if want_speed != stream_speed && !stream.is_null() {
+            let pos = inner.clock_us();
+            AAudioStream_requestStop(stream);
+            AAudioStream_close(stream);
+            stream = std::ptr::null_mut();
+            *inner.audio_stream.lock().unwrap_or_else(|e| e.into_inner()) = Ptr(std::ptr::null_mut());
+            started = false;
+            if let Ok(mut c) = inner.clock.lock() {
+                c.audio_ready = false;
+                c.audio_base_pts = pos;
+            }
+            first_after_flush = true;
+        }
+        stream_speed = want_speed;
         let playing = inner.playing.load(Ordering::SeqCst);
         if !stream.is_null() {
             if playing && !started {
@@ -766,7 +798,7 @@ unsafe fn audio_out(inner: Arc<Inner>) {
             let mut b: *mut c_void = std::ptr::null_mut();
             if AAudio_createStreamBuilder(&mut b) == 0 {
                 AAudioStreamBuilder_setDirection(b, 0);
-                AAudioStreamBuilder_setSampleRate(b, rate);
+                AAudioStreamBuilder_setSampleRate(b, (rate as i64 * stream_speed as i64 / 100) as i32);
                 AAudioStreamBuilder_setChannelCount(b, ch);
                 AAudioStreamBuilder_setFormat(b, 1);
                 AAudioStreamBuilder_setPerformanceMode(b, 12); // POWER_SAVING (video uchun yetarli)

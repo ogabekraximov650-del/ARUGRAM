@@ -220,15 +220,19 @@ pub fn resolve(session: &str, url: &str) -> Result<(crate::player::Source, bool)
         return Ok((Source::Aru(name), false));
     }
     HOLDS.fetch_add(1, Ordering::SeqCst);
+    // Telegram ishlamasa (fayl kanalda yo'q / hisob ulanmagan) — zaxira: server manzili (Kotlin ilovadagi kabi).
+    let fallback = |msg: String| -> Result<(crate::player::Source, bool), String> {
+        if url.starts_with("http") { Ok((Source::Http(url.to_string()), false)) } else { Err(msg) }
+    };
     match tg_deliver(session, &[name.clone()]) {
         Ok(ok) if ok.contains(&name) => Ok((Source::Aru(name), true)),
         Ok(_) => {
             HOLDS.fetch_sub(1, Ordering::SeqCst);
-            Err("Fayl Telegram'da topilmadi".into())
+            fallback("Fayl Telegram'da topilmadi".into())
         }
         Err(e) => {
             HOLDS.fetch_sub(1, Ordering::SeqCst);
-            Err(if e.contains("Serverga ulanib") { "Bu qism yuklab olinmagan — internetga ulaning".to_string() } else { e })
+            fallback(if e.contains("Serverga ulanib") { "Bu qism yuklab olinmagan — internetga ulaning".to_string() } else { e })
         }
     }
 }

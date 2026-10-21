@@ -12,19 +12,19 @@ const PK_ADD: &str = "M19,13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z";
 
 #[derive(Clone, Default)]
 pub struct PackInfo {
-    id: i64,
-    kind: String,
-    title: String,
-    version: i64,
-    items: i64,
-    bytes: i64,
-    owner_name: String,
-    sub: bool,
-    file: String,
+    pub(super) id: i64,
+    pub(super) kind: String,
+    pub(super) title: String,
+    pub(super) version: i64,
+    pub(super) items: i64,
+    pub(super) bytes: i64,
+    pub(super) owner_name: String,
+    pub(super) sub: bool,
+    pub(super) file: String,
 }
 
 impl PackInfo {
-    fn from(o: &Value) -> PackInfo {
+    pub(super) fn from(o: &Value) -> PackInfo {
         let n = |k: &str| o[k].as_i64().unwrap_or(0);
         PackInfo {
             id: n("id"),

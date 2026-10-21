@@ -232,3 +232,41 @@ pub fn data_image(session: &str, file: &str, h: &Header, item: &Item) -> Option<
     };
     crate::webp::decode_any(&bytes).map(|i| i.resized(720, 720))
 }
+
+/// Bitta elementning rasmi (izohdagi stiker/GIF): to'plam ma'lumoti -> sarlavha -> statik bo'lsa o'zi, aks holda kichik rasm.
+pub fn item_image(session: &str, pack: i64, item: i64) -> Option<Image> {
+    let d = dir();
+    let info_path = format!("{d}/info_{pack}.json");
+    let info: Value = match std::fs::read_to_string(&info_path).ok().and_then(|t| serde_json::from_str(&t).ok()) {
+        Some(v) => v,
+        None => {
+            let j = crate::api::get_json("/api/packs/info", &format!("?ids={pack}"), Some(session)).ok()?;
+            let p = j["packs"].as_array()?.iter().find(|p| p["id"].as_i64() == Some(pack))?.clone();
+            let _ = std::fs::write(&info_path, p.to_string());
+            p
+        }
+    };
+    let file = info["file"].as_str().filter(|f| !f.is_empty() && *f != "null")?.to_string();
+    let ver = info["version"].as_i64().unwrap_or(0);
+    let h = header(session, &file, pack, ver).ok()?;
+    let it = h.items.iter().find(|i| i.id == item)?.clone();
+    if it.anim == 0 {
+        if let Some(img) = data_image(session, &file, &h, &it) {
+            return Some(img);
+        }
+    }
+    thumbs_one(session, &file, &h, &it)
+}
+
+fn thumbs_one(session: &str, file: &str, h: &Header, it: &Item) -> Option<Image> {
+    let p = format!("{}/t_{}_{}", dir(), h.id, it.id);
+    let bytes = match std::fs::read(&p) {
+        Ok(b) if !b.is_empty() => b,
+        _ => {
+            let b = read_range(session, file, h.base + it.toff, it.tlen).ok()?;
+            let _ = std::fs::write(&p, &b);
+            b
+        }
+    };
+    crate::webp::decode_any(&bytes).map(|i| i.resized(256, 256))
+}

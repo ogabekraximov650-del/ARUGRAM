@@ -10,6 +10,7 @@ mod countries;
 mod flags;
 mod login;
 mod player;
+mod gate;
 mod theme;
 mod webp;
 mod packs_data;

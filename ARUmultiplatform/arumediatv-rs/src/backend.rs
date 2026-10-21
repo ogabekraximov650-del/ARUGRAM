@@ -440,3 +440,32 @@ pub fn channel_info(_arg: &str) -> Value {
 pub fn make_bot_admin(_arg: &str) -> Value {
     serde_json::json!({"error": "Faqat telefonda ishlaydi"})
 }
+
+/// Telegram hisobi ulanganmi (kirish tugagan).
+#[cfg(target_os = "android")]
+pub fn tg_authorized() -> bool {
+    if shared().ensure().is_err() {
+        return false;
+    }
+    call(rust_core::telegram::rust_tg_status())["authorized"].as_bool().unwrap_or(false)
+}
+
+#[cfg(not(target_os = "android"))]
+pub fn tg_authorized() -> bool {
+    false
+}
+
+/// Kanalga qo'shiladi (`public:<nom>` yoki `private:<havola>`): `{ok}` yoki `{error}`.
+#[cfg(target_os = "android")]
+pub fn join_channel(arg: &str) -> Value {
+    if let Err(e) = shared().ensure() {
+        return serde_json::json!({"error": e});
+    }
+    let a = CString::new(arg).unwrap_or_default();
+    call(rust_core::telegram::rust_tg_join_channel(a.as_ptr()))
+}
+
+#[cfg(not(target_os = "android"))]
+pub fn join_channel(_arg: &str) -> Value {
+    serde_json::json!({"error": "Faqat telefonda ishlaydi"})
+}
