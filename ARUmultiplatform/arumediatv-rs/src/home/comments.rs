@@ -198,7 +198,7 @@ impl Home {
     }
 
     /// Izohdagi stiker/GIF (`pk_<to'plam>_<element>`) rasmi; tayyor bo'lmasa fonda yuklanadi.
-    fn cm_media_el(self: &Rc<Self>, file: &str, kind: &str) -> Option<Element> {
+    pub(super) fn cm_media_el(self: &Rc<Self>, file: &str, kind: &str) -> Option<Element> {
         let rest = file.strip_prefix("pk_")?;
         let (a, b) = rest.split_once('_')?;
         let key = (a.parse::<i64>().ok()?, b.parse::<i64>().ok()?);

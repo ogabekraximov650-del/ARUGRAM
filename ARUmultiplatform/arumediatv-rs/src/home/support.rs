@@ -3,13 +3,20 @@
 
 use super::*;
 use crate::api;
-use crate::data::{fmt_date, fmt_ymd};
+use crate::data::{file_name_of, fmt_date};
 use serde_json::{json, Value};
 
 const S_SEND: &str = "M2.01,21L23,12 2.01,3 2,10l15,2 -15,2z";
 const S_ATTACH: &str = "M16.5,6v11.5c0,2.21 -1.79,4 -4,4s-4,-1.79 -4,-4V5c0,-1.38 1.12,-2.5 2.5,-2.5s2.5,1.12 2.5,2.5v10.5c0,0.55 -0.45,1 -1,1s-1,-0.45 -1,-1V6H10v9.5c0,1.38 1.12,2.5 2.5,2.5s2.5,-1.12 2.5,-2.5V5c0,-2.21 -1.79,-4 -4,-4S7,2.79 7,5v12.5c0,3.04 2.46,5.5 5.5,5.5s5.5,-2.46 5.5,-5.5V6h-1.5z";
 const S_COPY: &str = "M16,1H4c-1.1,0 -2,0.9 -2,2v14h2V3h12V1zM19,5H8c-1.1,0 -2,0.9 -2,2v14c0,1.1 0.9,2 2,2h11c1.1,0 2,-0.9 2,-2V7c0,-1.1 -0.9,-2 -2,-2zM19,21H8V7h11v14z";
 const S_TRASH: &str = "M6,19c0,1.1 0.9,2 2,2h8c1.1,0 2,-0.9 2,-2V7H6v12zM19,4h-3.5l-1,-1h-5l-1,1H5v2h14V4z";
+const S_PLAY: &str = "M8,5v14l11,-7z";
+const S_REPLY: &str = "M10,9V5l-7,7 7,7v-4.1c5,0 8.5,1.6 11,5.1 -1,-5 -4,-10 -11,-11z";
+const S_CLOSE: &str = "M19,6.41L17.59,5 12,10.59 6.41,5 5,6.41 10.59,12 5,17.59 6.41,19 12,13.41 17.59,19 19,17.59 13.41,12z";
+const TG_PILL: Color = Color::rgba(36, 31, 28, 240);
+const TG_IN: Color = Color::rgba(42, 36, 32, 255);
+const TG_OUT: Color = Color::rgba(122, 74, 42, 255);
+const TG_OUT_META: Color = Color::rgba(226, 190, 156, 255);
 const S_CHECK: &str = "M9,16.17L4.83,12l-1.42,1.41L9,19 21,7l-1.41,-1.41z";
 
 #[derive(Clone)]
@@ -20,6 +27,7 @@ pub struct ChatMsg {
     created_at: i64,
     media_url: String,
     media_type: String,
+    media_ms: i64,
     pending: bool,
     seen: bool,
 }
@@ -33,6 +41,8 @@ pub struct SupportPage {
     busy: State<bool>,
     /// Amallar menyusi ochilgan xabar identifikatori.
     menu: State<String>,
+    /// Javob berilayotgan xabar identifikatori.
+    reply: State<Option<String>>,
     scroll: ScrollState,
     stick: std::cell::Cell<bool>,
     ver: std::cell::Cell<i64>,
@@ -47,6 +57,7 @@ fn parse_msg(o: &Value) -> ChatMsg {
         created_at: o["created_at"].as_i64().unwrap_or(0),
         media_url: s("media_url"),
         media_type: s("media_type"),
+        media_ms: o["media_ms"].as_i64().unwrap_or(0),
         pending: false,
         seen: o["seen"].as_bool().unwrap_or(false),
     }
@@ -61,6 +72,82 @@ fn media_kind(path: &str) -> (&'static str, &'static str) {
         "mp4" | "mov" | "mkv" | "webm" => ("video", "video/mp4"),
         _ => ("file", "application/octet-stream"),
     }
+}
+
+/// Javob: xabar matni boshida `[re:<id>]`.
+fn split_reply(body: &str) -> (Option<String>, String) {
+    if let Some(rest) = body.strip_prefix("[re:") {
+        if let Some(end) = rest.find(']') {
+            let id = &rest[..end];
+            if !id.is_empty() && id.len() <= 40 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+                return (Some(id.to_string()), rest[end + 1..].to_string());
+            }
+        }
+    }
+    (None, body.to_string())
+}
+
+/// Paket tokenlari (`[pe:..:..:X]`, `[ce:..:..:X]`) o'rniga ularning zaxira belgisi `X` qo'yiladi.
+fn plain(s: &str) -> String {
+    let mut out = String::new();
+    let mut rest = s;
+    while let Some(i) = rest.find("[pe:").into_iter().chain(rest.find("[ce:")).min() {
+        out.push_str(&rest[..i]);
+        let tail = &rest[i..];
+        match tail.find(']') {
+            Some(end) => {
+                let tok = &tail[1..end];
+                out.push_str(tok.rsplit(':').next().unwrap_or(""));
+                rest = &tail[end + 1..];
+            }
+            None => {
+                out.push_str(tail);
+                rest = "";
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+fn snippet(m: &ChatMsg) -> String {
+    let body = plain(&split_reply(&m.body).1);
+    if !m.media_type.is_empty() {
+        let label = match m.media_type.as_str() {
+            "voice" => "Ovozli xabar",
+            "round" => "Video xabar",
+            "sticker" => "Stiker",
+            "gif" => "GIF",
+            "image" => "Rasm",
+            "video" => "Video",
+            _ => "Fayl",
+        };
+        return if body.is_empty() { label.to_string() } else { format!("{label} · {body}") };
+    }
+    body
+}
+
+/// "Bugun" / "Kecha" / "12-sentyabr" (UTC+5).
+fn day_label(ms: i64) -> String {
+    const MONTHS: [&str; 12] = ["yanvar", "fevral", "mart", "aprel", "may", "iyun", "iyul", "avgust", "sentyabr", "oktyabr", "noyabr", "dekabr"];
+    let day = |t: i64| (t / 1000 + 5 * 3600).div_euclid(86400);
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
+    let diff = day(now) - day(ms);
+    if diff == 0 {
+        return "Bugun".into();
+    }
+    if diff == 1 {
+        return "Kecha".into();
+    }
+    let ymd = crate::data::fmt_ymd(ms);
+    let p: Vec<&str> = ymd.split('.').collect();
+    if p.len() < 3 {
+        return ymd;
+    }
+    let (d, m) = (p[0].trim_start_matches('0'), p[1].parse::<usize>().unwrap_or(1).clamp(1, 12));
+    let cur = crate::data::fmt_ymd(now);
+    let same_year = cur.rsplit('.').next() == p.get(2).copied();
+    if same_year { format!("{d}-{}", MONTHS[m - 1]) } else { format!("{d}-{}, {}", MONTHS[m - 1], p[2]) }
 }
 
 impl Home {
@@ -80,6 +167,7 @@ impl Home {
             loaded: State::new(false),
             busy: State::new(false),
             menu: State::new(String::new()),
+            reply: State::new(None),
             scroll: ScrollState::new(),
             stick: std::cell::Cell::new(true),
             ver: std::cell::Cell::new(0),
@@ -157,9 +245,15 @@ impl Home {
         if text.is_empty() && media.is_none() {
             return;
         }
+        let shown = text.clone();
+        let text = match p.reply.get() {
+            Some(id) => format!("[re:{id}]{text}"),
+            None => text,
+        };
+        p.reply.set(None);
         if media.is_none() {
             let mut v: Vec<ChatMsg> = (*p.items.get()).clone();
-            v.push(ChatMsg { id: format!("tmp{}", v.len()), from_admin: p.user_id.is_some(), body: text.clone(), created_at: 0, media_url: String::new(), media_type: String::new(), pending: true, seen: false });
+            v.push(ChatMsg { id: format!("tmp{}", v.len()), from_admin: p.user_id.is_some(), body: shown, created_at: 0, media_url: String::new(), media_type: String::new(), media_ms: 0, pending: true, seen: false });
             p.items.set(Rc::new(v));
             p.stick.set(true);
         }
@@ -228,14 +322,18 @@ impl Home {
         }
         let mut kids: Vec<Element> = Vec::new();
         let start = items.len().saturating_sub(120);
-        let mut last_day = String::new();
-        for m in items[start..].iter() {
-            let day = fmt_ymd(m.created_at);
-            if !day.is_empty() && day != last_day {
-                kids.push(row(vec![spacer(), tx(day.clone(), 12.0, Color::WHITE).bold().bg(Color::rgba(0, 0, 0, 90)).radius(14.0).padding_xy(12.0, 4.0), spacer()]).padding_xy(0.0, 8.0));
-                last_day = day;
+        let visible = &items[start..];
+        let same_day = |a: i64, b: i64| crate::data::fmt_ymd(a) == crate::data::fmt_ymd(b);
+        for (i, m) in visible.iter().enumerate() {
+            let prev = if i > 0 { visible.get(i - 1) } else { None };
+            let next = visible.get(i + 1);
+            let new_day = prev.map_or(true, |q| !same_day(q.created_at, m.created_at));
+            let last_of_group = next.map_or(true, |q| q.from_admin != m.from_admin || !same_day(q.created_at, m.created_at));
+            let top_near = !new_day && prev.map_or(false, |q| q.from_admin == m.from_admin);
+            if new_day && m.created_at > 0 {
+                kids.push(row(vec![spacer(), tx(day_label(m.created_at), 13.0, Color::WHITE).bold().bg(Color::rgba(0, 0, 0, 90)).radius(14.0).padding_xy(12.0, 4.0), spacer()]).padding_xy(0.0, 8.0));
             }
-            kids.push(self.chat_bubble(p, m, w));
+            kids.push(self.chat_bubble(p, m, w, top_near, !last_of_group));
         }
         kids.push(gap_box(0.0, 8.0));
         let body: Element = if !p.loaded.get() {
@@ -250,43 +348,53 @@ impl Home {
         let me = self.clone();
         let me2 = self.clone();
         let can_send = !p.input.get().trim().is_empty() && !p.busy.get();
-        let input = field(&p.input)
-            .color(Color::WHITE)
-            .size(16.0)
-            .hint("Xabar yozing...")
-            .hint_color(Color::rgba(255, 255, 255, 120))
-            .accent(ACCENT2)
-            .padding_xy(0.0, 10.0)
-            .no_border()
-            .weight(1.0);
-        let bar = Self::pglass(
-            row(vec![
-                column(vec![if p.busy.get() { spinner(20.0, 2.0, Color::WHITE) } else { icon(S_ATTACH, 22.0).color(Color::WHITE) }]).center().width(40.0).height(40.0).on_click(move || {
-                    if !pa.busy.get() {
-                        me.chat_attach(&pa);
-                    }
-                }),
-                input,
-                column(vec![icon(S_SEND, 20.0).color(Color::WHITE)])
-                    .center()
-                    .width(42.0)
-                    .height(42.0)
-                    .radius(21.0)
-                    .bg(if can_send { ACCENT } else { Color::rgba(255, 255, 255, 25) })
-                    .on_click(move || {
-                        if !ps.input.get().trim().is_empty() && !ps.busy.get() {
-                            let t = ps.input.get();
-                            ps.input.set(String::new());
-                            me2.chat_send(&ps, t, None);
-                        }
-                    }),
-            ])
-            .gap(6.0)
-            .align(Align::Center)
-            .padding_each(10.0, 4.0, 6.0, 4.0),
-        )
-        .radius(30.0)
-        .margin_each(12.0, 6.0, 12.0, 10.0);
+        let input = field(&p.input).color(Color::WHITE).size(15.0).hint("Xabar").hint_color(Color::rgba(255, 255, 255, 96)).accent(ACCENT2).padding_xy(14.0, 14.0).no_border().weight(1.0);
+        let pill = row(vec![
+            input,
+            column(vec![if p.busy.get() { spinner(20.0, 2.0, Color::WHITE) } else { icon(S_ATTACH, 23.0).color(Color::rgba(255, 255, 255, 140)) }]).center().width(46.0).height(48.0).on_click(move || {
+                if !pa.busy.get() {
+                    me.chat_attach(&pa);
+                }
+            }),
+        ])
+        .align(Align::Center)
+        .padding_each(6.0, 0.0, 0.0, 0.0)
+        .bg(TG_PILL)
+        .radius(24.0)
+        .weight(1.0);
+        let send = column(vec![icon(S_SEND, 22.0).color(Color::WHITE)])
+            .center()
+            .width(48.0)
+            .height(48.0)
+            .radius(24.0)
+            .bg(if can_send { ACCENT } else { TG_PILL })
+            .on_click(move || {
+                if !ps.input.get().trim().is_empty() && !ps.busy.get() {
+                    let t = ps.input.get();
+                    ps.input.set(String::new());
+                    me2.chat_send(&ps, t, None);
+                }
+            });
+        let mut bar_col: Vec<Element> = Vec::new();
+        if let Some(rid) = p.reply.get() {
+            let quoted = p.items.get().iter().find(|m| m.id == rid).cloned();
+            let (name, snip) = quoted.map(|m| (if m.from_admin { "Admin".to_string() } else { "Siz".to_string() }, snippet(&m))).unwrap_or(("Xabar".into(), "o'chirilgan".into()));
+            let pc = p.clone();
+            bar_col.push(
+                row(vec![
+                    column(vec![]).width(3.0).height(34.0).radius(2.0).bg(ACCENT2),
+                    column(vec![tx(name, 14.0, ACCENT2).bold(), tx(snip, 14.0, Color::WHITE)]).weight(1.0).margin_each(10.0, 0.0, 10.0, 0.0),
+                    column(vec![icon(S_CLOSE, 20.0).color(Color::rgba(255, 255, 255, 150))]).center().width(40.0).height(40.0).on_click(move || pc.reply.set(None)),
+                ])
+                .align(Align::Center)
+                .padding_each(14.0, 6.0, 4.0, 6.0)
+                .bg(TG_PILL)
+                .radius(18.0)
+                .margin_each(10.0, 6.0, 10.0, 0.0),
+            );
+        }
+        bar_col.push(row(vec![pill, send]).gap(8.0).align(Align::End).margin_each(10.0, 6.0, 10.0, 8.0));
+        let bar = column(bar_col);
         let mut col = vec![body.grow(1.0)];
         if !p.err.get().is_empty() && p.loaded.get() {
             col.push(tx(p.err.get(), 12.5, ERROR).padding_xy(18.0, 4.0));
@@ -304,51 +412,75 @@ impl Home {
         stack(layers)
     }
 
-    fn chat_bubble(self: &Rc<Self>, p: &Rc<SupportPage>, m: &ChatMsg, w: f32) -> Element {
+    fn chat_bubble(self: &Rc<Self>, p: &Rc<SupportPage>, m: &ChatMsg, w: f32, top_near: bool, bottom_near: bool) -> Element {
         // Admin ko'rinishida admin xabarlari o'ngda, oddiy foydalanuvchida — o'z xabarlari o'ngda.
         let mine = if p.user_id.is_some() { m.from_admin } else { !m.from_admin };
         let hhmm: String = fmt_date(m.created_at).chars().take(5).collect();
+        let (rid, body) = split_reply(&m.body);
+        let body = plain(&body);
+        let bare = (m.media_type == "sticker" || m.media_type == "gif") && body.is_empty();
+        let meta_col = if mine { TG_OUT_META } else { Color::rgba(255, 255, 255, 140) };
         let mut inner: Vec<Element> = Vec::new();
-        if m.media_type == "image" {
-            if let Some(f) = self.frame(&m.media_url) {
-                inner.push(stack(vec![image_fill(&f)]).height((w * 0.6) * 9.0 / 16.0).width(w * 0.6));
-                inner.push(gap_box(0.0, 6.0));
-            } else {
-                inner.push(tx("Rasm yuklanmoqda...", 13.0, Color::WHITE));
+        if let Some(rid) = rid {
+            let q = p.items.get().iter().find(|x| x.id == rid).cloned();
+            let (name, snip) = q.map(|x| (if x.from_admin { "Admin".to_string() } else { "Siz".to_string() }, snippet(&x))).unwrap_or(("Xabar".into(), "o'chirilgan".into()));
+            inner.push(
+                row(vec![
+                    column(vec![]).width(3.0).height(36.0).bg(if mine { Color::WHITE } else { ACCENT2 }),
+                    column(vec![tx(name, 14.0, if mine { Color::WHITE } else { ACCENT2 }).bold(), tx(snip, 14.0, Color::WHITE)]).margin_each(8.0, 3.0, 8.0, 3.0),
+                ])
+                .bg(Color::rgba(255, 255, 255, 20))
+                .radius(6.0)
+                .margin_each(0.0, 0.0, 0.0, 4.0),
+            );
+        }
+        let ref_name = file_name_of(&m.media_url);
+        match m.media_type.as_str() {
+            "image" => match self.frame(&m.media_url) {
+                Some(f) => inner.push(stack(vec![image_fill(&f)]).height(230.0).width(230.0).radius(12.0)),
+                None => inner.push(column(vec![spinner(22.0, 2.0, Color::WHITE)]).center().width(230.0).height(230.0).radius(12.0).bg(Color::rgba(0, 0, 0, 64))),
+            },
+            "video" | "round" => {
+                let round = m.media_type == "round";
+                let (bw, bh) = if round { (200.0, 200.0) } else { (230.0, 150.0) };
+                let mut layers = vec![column(vec![column(vec![icon(S_PLAY, 30.0).color(Color::WHITE)]).center().width(48.0).height(48.0).radius(24.0).bg(Color::rgba(0, 0, 0, 128))]).center()];
+                if m.media_ms > 0 && !round {
+                    let s = m.media_ms / 1000;
+                    layers.push(column(vec![spacer(), row(vec![spacer(), tx(format!("{}:{:02}", s / 60, s % 60), 11.0, Color::WHITE).bg(Color::rgba(0, 0, 0, 115)).radius(8.0).padding_xy(6.0, 2.0)]).padding(8.0)]));
+                }
+                inner.push(stack(layers).width(bw).height(bh).radius(if round { bh / 2.0 } else { 12.0 }).bg(Color::BLACK));
             }
-        } else if !m.media_type.is_empty() {
-            let label = match m.media_type.as_str() {
-                "video" => "Video",
-                "voice" => "Ovozli xabar",
-                "round" => "Video xabar",
-                "sticker" => "Stiker",
-                "gif" => "GIF",
-                _ => "Fayl",
-            };
-            inner.push(tx(label, 13.5, Color::WHITE).bold());
+            "voice" => inner.push(row(vec![icon(S_PLAY, 24.0).color(Color::WHITE), tx(format!("Ovozli xabar · {}:{:02}", m.media_ms / 60000, (m.media_ms / 1000) % 60), 14.0, Color::WHITE)]).gap(10.0).align(Align::Center).padding_xy(0.0, 6.0)),
+            "file" => inner.push(row(vec![icon(S_ATTACH, 24.0).color(Color::WHITE), tx(if m.body.is_empty() { "Fayl".to_string() } else { m.body.clone() }, 14.0, Color::WHITE)]).gap(10.0).align(Align::Center).padding_xy(0.0, 6.0)),
+            "sticker" | "gif" => match self.cm_media_el(&ref_name, &m.media_type) {
+                Some(e) => inner.push(e),
+                None => inner.push(tx(if m.media_type == "gif" { "GIF" } else { "Stiker" }, 13.5, Color::WHITE).bold()),
+            },
+            _ => {}
         }
-        if !m.body.is_empty() {
-            inner.push(tx(m.body.clone(), 15.0, Color::WHITE));
+        if m.media_type != "file" && !body.is_empty() {
+            inner.push(tx(body, 15.0, Color::WHITE));
         }
-        let mut meta = vec![spacer(), tx(hhmm, 10.5, Color::WHITE)];
+        let mut meta = vec![spacer(), tx(hhmm, 11.0, meta_col)];
         if m.pending {
-            meta.push(tx("…", 10.5, Color::WHITE));
+            meta.push(tx("...", 11.0, TG_OUT_META));
         } else if mine {
-            meta.push(icon(S_CHECK, 12.0).color(Color::WHITE));
+            meta.push(icon(S_CHECK, 12.0).color(TG_OUT_META));
             if m.seen {
-                meta.push(icon(S_CHECK, 12.0).color(Color::WHITE).margin_each(-8.0, 0.0, 0.0, 0.0));
+                meta.push(icon(S_CHECK, 12.0).color(TG_OUT_META).margin_each(-9.0, 0.0, 0.0, 0.0));
             }
         }
         inner.push(row(meta).gap(3.0).align(Align::Center).padding_each(0.0, 2.0, 0.0, 0.0));
         let (pc, id) = (p.clone(), m.id.clone());
-        let mut bubble = column(inner).padding_xy(12.0, 8.0).radius(18.0).on_click(move || pc.menu.set(id.clone()));
-        bubble = if mine {
-            bubble.gradient(ACCENT, ACCENT2).margin_each(52.0, 0.0, 0.0, 0.0)
-        } else {
-            bubble.glass(Color::rgba(255, 255, 255, 30)).border(1.0, Color::rgba(255, 255, 255, 40)).margin_each(0.0, 0.0, 52.0, 0.0)
-        };
+        let mut bubble = column(inner);
+        if !bare {
+            bubble = bubble.padding(8.0).radius(if top_near || bottom_near { 12.0 } else { 18.0 }).bg(if mine { TG_OUT } else { TG_IN });
+        }
+        let bubble = bubble.on_click(move || pc.menu.set(id.clone()));
+        let maxw = (w - 24.0 - 40.0).min(300.0);
+        let bubble = column(vec![bubble]).width(maxw.max(120.0)).align(if mine { Align::End } else { Align::Start });
         let r = if mine { row(vec![spacer(), bubble]) } else { row(vec![bubble, spacer()]) };
-        r.padding_each(0.0, 3.0, 0.0, 3.0)
+        r.padding_each(0.0, if top_near { 2.0 } else { 6.0 }, 0.0, 0.0)
     }
 
     fn chat_menu(self: &Rc<Self>, p: &Rc<SupportPage>) -> Element {
@@ -364,11 +496,21 @@ impl Home {
         let (p1, body) = (p.clone(), m.body.clone());
         let (p2, me, id2) = (p.clone(), self.clone(), m.id.clone());
         let can_delete = !m.pending && ((p.user_id.is_some()) || !m.from_admin);
-        let mut opts = vec![item(S_COPY, "Nusxalash", false, Box::new(move || {
-            uzcoders::android::copy_text(&body);
-            uzcoders::android::toast("Nusxalandi");
-            p1.menu.set(String::new());
-        }))];
+        let (p3, id3) = (p.clone(), m.id.clone());
+        let mut opts: Vec<Element> = Vec::new();
+        if !m.pending {
+            opts.push(item(S_REPLY, "Javob berish", false, Box::new(move || {
+                p3.reply.set(Some(id3.clone()));
+                p3.menu.set(String::new());
+            })));
+        }
+        if m.media_type.is_empty() && !body.is_empty() {
+            opts.push(item(S_COPY, "Nusxa olish", false, Box::new(move || {
+                uzcoders::android::copy_text(&plain(&split_reply(&body).1));
+                uzcoders::android::toast("Nusxa olindi");
+                p1.menu.set(String::new());
+            })));
+        }
         if can_delete {
             opts.push(column(vec![]).height(1.0).bg(Color::rgba(255, 255, 255, 30)));
             opts.push(item(S_TRASH, "O'chirish", true, Box::new(move || {
@@ -388,7 +530,7 @@ impl Home {
 #[cfg(test)]
 impl ChatMsg {
     pub(super) fn test(id: &str, from_admin: bool, body: &str, created_at: i64) -> ChatMsg {
-        ChatMsg { id: id.into(), from_admin, body: body.into(), created_at, media_url: String::new(), media_type: String::new(), pending: false, seen: true }
+        ChatMsg { id: id.into(), from_admin, body: body.into(), created_at, media_url: String::new(), media_type: String::new(), media_ms: 0, pending: false, seen: true }
     }
 }
 
