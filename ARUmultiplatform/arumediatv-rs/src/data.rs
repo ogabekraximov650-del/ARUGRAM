@@ -309,6 +309,8 @@ pub struct Profile {
     pub favorites: i64,
     pub rated: i64,
     pub comments: i64,
+    pub hidden: Vec<String>,
+    pub consent: bool,
 }
 
 pub fn fetch_profile(session: &str) -> Result<Profile, String> {
@@ -337,6 +339,8 @@ pub fn fetch_profile(session: &str) -> Result<Profile, String> {
         favorites: num(&st["favorites"]),
         rated: num(&st["rated"]),
         comments: num(&st["comments"]),
+        hidden: u["hidden_stats"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default(),
+        consent: u["chan_consent"].as_bool().unwrap_or(false),
     })
 }
 
@@ -376,4 +380,166 @@ pub fn format_bytes(b: i64) -> String {
         format!("{:.2} GB", b as f64 / 1073741824.0)
     };
     s.replace('.', ",")
+}
+
+/// Bo'limning bitta qismi (`GET /api/epizods/:anime/:season`).
+#[derive(Clone)]
+pub struct Episode {
+    pub id: i64,
+    pub number: i64,
+    pub name: String,
+    pub views: i64,
+    pub qualities: Vec<String>,
+}
+
+pub fn fetch_episodes(anime: i64, season: i64) -> Result<Vec<Episode>, String> {
+    let v = crate::api::get_json(&format!("/api/epizods/{anime}/{season}"), "", None)?;
+    let mut out: Vec<Episode> = v
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .map(|o| Episode {
+                    id: num(&o["epizod_id"]),
+                    number: num(&o["epizod_number"]),
+                    name: o["epizod_name"].as_str().unwrap_or("").to_string(),
+                    views: num(&o["views_total"]),
+                    qualities: ["1080p", "720p", "480p", "360p"].iter().filter(|q| !o[format!("url_{q}")].as_str().unwrap_or("").is_empty()).map(|q| q.to_string()).collect(),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    out.sort_by_key(|e| e.number);
+    Ok(out)
+}
+
+/// Shu animening barcha bo'limlari.
+pub fn fetch_sections(anime: i64) -> Result<Vec<Season>, String> {
+    let (code, body) = crate::api::request("GET", &format!("/api/seasons/anime/{anime}"), "", None, None)?;
+    if code >= 400 {
+        return Err(format!("Server xatosi ({code})"));
+    }
+    let mut v = parse_seasons(&body);
+    v.sort_by_key(|s| s.section_no);
+    Ok(v)
+}
+
+/// Bo'lim ma'lumoti (`GET /api/season/:anime/:season`).
+#[derive(Clone, Default)]
+pub struct SeasonInfo {
+    pub season: Value,
+    pub rating: f64,
+    pub my_stars: i64,
+    pub is_fav: bool,
+}
+
+impl SeasonInfo {
+    pub fn num(&self, k: &str) -> i64 {
+        num(&self.season[k])
+    }
+    pub fn str(&self, k: &str) -> String {
+        match &self.season[k] {
+            Value::String(s) if s != "null" => s.trim().to_string(),
+            Value::Number(n) => n.to_string(),
+            _ => String::new(),
+        }
+    }
+}
+
+pub fn fetch_info(anime: i64, season: i64, session: &str) -> Result<SeasonInfo, String> {
+    let j = crate::api::get_json(&format!("/api/season/{anime}/{season}"), "", Some(session))?;
+    Ok(SeasonInfo {
+        season: j["season"].clone(),
+        rating: j["rating"].as_f64().filter(|r| !r.is_nan()).unwrap_or(0.0),
+        my_stars: num(&j["my_stars"]),
+        is_fav: j["is_fav"].as_bool().unwrap_or(false),
+    })
+}
+
+/// Izoh (faqat o'qish).
+#[derive(Clone)]
+pub struct Comment {
+    pub name: String,
+    pub body: String,
+    pub media: String,
+    pub created_at: i64,
+    pub likes: i64,
+    pub replies: i64,
+}
+
+pub fn fetch_comments(anime: i64, season: i64, session: &str) -> Result<Vec<Comment>, String> {
+    let j = crate::api::get_json(&format!("/api/comments/{anime}/{season}"), "?page=0&sort=yangi", Some(session))?;
+    Ok(j["items"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter(|o| !o["deleted"].as_bool().unwrap_or(false))
+                .map(|o| {
+                    let first = o["first_name"].as_str().unwrap_or("").trim();
+                    let user = o["username"].as_str().unwrap_or("").trim();
+                    Comment {
+                        name: if !first.is_empty() { first.to_string() } else if !user.is_empty() { format!("@{user}") } else { "Foydalanuvchi".into() },
+                        body: o["body"].as_str().unwrap_or("").to_string(),
+                        media: o["media_type"].as_str().unwrap_or("").to_string(),
+                        created_at: num(&o["created_at"]),
+                        likes: num(&o["likes"]),
+                        replies: num(&o["reply_count"]),
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default())
+}
+
+/// Ilova ulangan qurilma (`GET /api/auth/sessions`).
+#[derive(Clone)]
+pub struct Device {
+    pub id: i64,
+    pub device: String,
+    pub platform: String,
+    pub app_version: String,
+    pub current: bool,
+    pub created_at: i64,
+    pub last_seen_at: i64,
+}
+
+pub fn fetch_devices(session: &str) -> Result<Vec<Device>, String> {
+    let j = crate::api::get_json("/api/auth/sessions", "", Some(session))?;
+    Ok(j["sessions"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .map(|o| Device {
+                    id: num(&o["id"]),
+                    device: o["device"].as_str().unwrap_or("").to_string(),
+                    platform: o["platform"].as_str().unwrap_or("").to_string(),
+                    app_version: o["app_version"].as_str().filter(|v| *v != "null").unwrap_or("").to_string(),
+                    current: o["current"].as_bool().unwrap_or(false),
+                    created_at: num(&o["created_at"]),
+                    last_seen_at: num(&o["last_seen_at"]),
+                })
+                .collect()
+        })
+        .unwrap_or_default())
+}
+
+pub fn revoke_device(session: &str, id: i64) -> bool {
+    matches!(crate::api::request("DELETE", &format!("/api/auth/sessions/{id}"), "", None, Some(session)), Ok((c, _)) if c < 400)
+}
+
+/// `2026/10/16/09:44` (Toshkent).
+pub fn fmt_moment(ms: i64) -> String {
+    if ms <= 0 {
+        return String::new();
+    }
+    let ms = if ms < 100_000_000_000 { ms * 1000 } else { ms };
+    let d = fmt_date(ms); // HH:mm/dd/MM/yyyy
+    let p: Vec<&str> = d.split('/').collect();
+    format!("{}/{}/{}/{}", p[3], p[2], p[1], p[0])
+}
+
+/// `20.10.2026`
+pub fn fmt_ymd(ms: i64) -> String {
+    let m = fmt_moment(ms);
+    let p: Vec<&str> = m.split('/').collect();
+    if p.len() < 3 { String::new() } else { format!("{}.{}.{}", p[2], p[1], p[0]) }
 }

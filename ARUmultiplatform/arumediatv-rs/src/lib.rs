@@ -4,6 +4,7 @@ mod api;
 mod backend;
 mod data;
 mod home;
+mod sync;
 mod countries;
 mod flags;
 mod login;

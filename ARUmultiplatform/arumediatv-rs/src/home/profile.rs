@@ -282,9 +282,9 @@ impl Home {
         let group = Self::pglass(column(vec![
             self.tile(P_BELL, "Bildirishnoma", soon(self, "«Bildirishnoma» bo'limi tez orada qo'shiladi")),
             divider(),
-            self.tile(P_GEAR, "Sozlamalar", soon(self, "«Sozlamalar» bo'limi tez orada qo'shiladi")),
+            self.tile(P_GEAR, "Sozlamalar", { let me = self.clone(); move || me.open_settings() }),
             divider(),
-            self.tile(P_PHONE, "Qurilmalar", soon(self, "«Qurilmalar» bo'limi tez orada qo'shiladi")),
+            self.tile(P_PHONE, "Qurilmalar", { let me = self.clone(); move || me.open_sessions() }),
             divider(),
             self.tile(P_SMILE, "Emoji, GIF va stikerlar", soon(self, "Bu bo'lim tez orada qo'shiladi")),
             divider(),

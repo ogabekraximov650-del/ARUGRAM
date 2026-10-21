@@ -1,7 +1,8 @@
 //! Bosh sahifa: sarlavha, "Ommabop anime" va poster kartalari to'ri, pastda haqiqiy shisha (xiralashtiruvchi) navigatsiya paneli.
 
+mod pages;
 mod profile;
-use crate::data::{Profile, fetch_library, fetch_seasons, fmt_date, load_posters, HistoryItem, Season};
+use crate::data::{Device, Profile, fetch_library, fetch_seasons, fmt_date, load_posters, HistoryItem, Season};
 use crate::theme::*;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -35,6 +36,12 @@ enum Status {
 pub struct Home {
     session: String,
     profile: State<Rc<Profile>>,
+    pages: State<Vec<pages::Page>>,
+    hidden: State<Vec<String>>,
+    consent: State<bool>,
+    devices: State<Option<Result<Rc<Vec<Device>>, ()>>>,
+    settings_scroll: ScrollState,
+    sessions_scroll: ScrollState,
     dlg: State<u8>,
     dlg_msg: State<String>,
     on_logout: Rc<dyn Fn()>,
@@ -121,6 +128,12 @@ impl Home {
         let h = Rc::new(Home {
             session,
             profile: State::new(Rc::new(Profile::default())),
+            pages: State::new(Vec::new()),
+            hidden: State::new(Vec::new()),
+            consent: State::new(false),
+            devices: State::new(None),
+            settings_scroll: ScrollState::new(),
+            sessions_scroll: ScrollState::new(),
             dlg: State::new(0),
             dlg_msg: State::new(String::new()),
             on_logout,
@@ -160,6 +173,9 @@ impl Home {
     }
 
     pub fn back(&self) -> bool {
+        if self.pop() {
+            return true;
+        }
         if self.filter_open.get() {
             self.filter_open.set(false);
             return true;
@@ -258,7 +274,7 @@ impl Home {
         });
     }
 
-    fn card(&self, s: &Season, h: f32) -> Element {
+    fn card(self: &Rc<Self>, s: &Season, h: f32) -> Element {
         let base = match self.posters.borrow().get(&s.photo_url) {
             Some(img) => image_fill(img),
             None => {
@@ -300,7 +316,8 @@ impl Home {
                 .gradient(Color::rgba(0, 0, 0, 0), Color::rgba(0, 0, 0, 215))
                 .radius(20.0),
         ]);
-        stack(vec![base, column(top).padding(8.0), bottom]).weight(1.0).height(h).on_click(|| {})
+        let (me, s2) = (self.clone(), s.clone());
+        stack(vec![base, column(top).padding(8.0), bottom]).weight(1.0).height(h).on_click(move || me.open_season(s2.clone()))
     }
 
     /// Sarlavha paneli: nom, tavsif va bo'lim nomi — lupali shisha ichida; qo'ng'iroq tugmasi alohida shisha doira.
@@ -708,6 +725,9 @@ impl Home {
     }
 
     pub fn view(self: &Rc<Self>) -> Element {
+        if let Some(page) = self.pages.get().last().cloned() {
+            return self.page_view(page);
+        }
         let ins = safe_insets();
         let (w, _) = window_dp();
         let card_w = ((w - 32.0 - 12.0) / 2.0).max(80.0);
@@ -870,6 +890,12 @@ mod tests {
         let home = Rc::new(Home {
             session: String::new(),
             profile: State::new(Rc::new(Profile::default())),
+            pages: State::new(Vec::new()),
+            hidden: State::new(Vec::new()),
+            consent: State::new(false),
+            devices: State::new(None),
+            settings_scroll: ScrollState::new(),
+            sessions_scroll: ScrollState::new(),
             dlg: State::new(0),
             dlg_msg: State::new(String::new()),
             on_logout: Rc::new(|| {}),
@@ -947,6 +973,31 @@ mod tests {
                 std::fs::write(format!("{dir}/{name}.png"), c.to_png()).unwrap();
             }
             home.dlg.set(0);
+            home.open_season(home.seasons.get()[0].clone());
+            if let Some(pages::Page::Season(p)) = home.pages.get().last().cloned() {
+                p.info.set(Rc::new(crate::data::SeasonInfo { season: serde_json::json!({"views_total": 1234, "fav_count": 7, "rating_count": 3, "rating_sum": 27, "turi": "TV", "yili": "2005", "janri": "Action, Fantasy", "studio": "Pierrot", "tavsif": "Uzun tavsif matni shu yerda turadi."}), rating: 9.0, my_stars: 8, is_fav: true }));
+                p.eps.set(Rc::new((1..=4).map(|i| crate::data::Episode { id: i, number: i, name: "Nom".into(), views: 100 * i, qualities: vec!["720p".into(), "480p".into()] }).collect()));
+                p.sections.set(home.seasons.get());
+                p.comments.set(Rc::new(vec![crate::data::Comment { name: "Ali".into(), body: "Zo'r anime!".into(), media: String::new(), created_at: 1_792_497_600_000, likes: 3, replies: 1 }]));
+                p.comments_state.set(1);
+                for (n, name) in [(0, "13_season_info"), (1, "13_season_eps"), (2, "13_season_sec"), (3, "13_season_com")] {
+                    p.tab.set(n);
+                    let cmds = ui.frame(size);
+                    let mut c = ui.canvas(360, 640);
+                    c.clear(Color::BLACK);
+                    c.execute(&cmds);
+                    std::fs::write(format!("{dir}/{name}.png"), c.to_png()).unwrap();
+                }
+            }
+            home.pop();
+            home.hidden.set(vec!["anime".into()]);
+            home.push(pages::Page::Settings);
+            let cmds = ui.frame(size);
+            let mut c = ui.canvas(360, 640);
+            c.clear(Color::BLACK);
+            c.execute(&cmds);
+            std::fs::write(format!("{dir}/14_settings.png"), c.to_png()).unwrap();
+            home.pop();
             for (n, name) in [(0, "8_catalog"), (1, "9_filter")] {
                 home.filter_open.set(n == 1);
                 let cmds = ui.frame(size);
