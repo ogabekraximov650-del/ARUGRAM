@@ -129,6 +129,24 @@ fn finish_image(bytes: &[u8]) -> Option<Image> {
 
 /// Posterlarni oladi: avval diskdagi nusxa (tarmoqsiz), yo'qlari Telegram orqali — worker `deliver` bot chatiga nusxalaydi,
 /// yadro mahalliy serverda beradi. Natija: (url, tayyor rasm); muvaffaqiyatsiz bo'lsa `None`.
+/// Fayllarni bot chatiga nusxalatadi (`/api/tg/deliver`), kalitlarni yadroga beradi. Qaytadi: yetkazilgan nomlar.
+pub fn tg_deliver(session: &str, names: &[String]) -> Result<Vec<String>, String> {
+    crate::backend::ensure_tg_ready()?;
+    let (code, body) = crate::api::request("POST", "/api/tg/deliver", "", Some(&serde_json::json!({ "files": names })), Some(session))?;
+    if code != 200 {
+        return Err(format!("deliver HTTP {code}"));
+    }
+    let j: Value = serde_json::from_str(&body).map_err(|_| "deliver javobi noto'g'ri".to_string())?;
+    if let Some(keys) = j["keys"].as_object().filter(|k| !k.is_empty()) {
+        let c = CString::new(Value::Object(keys.clone()).to_string()).unwrap_or_default();
+        unsafe { rust_tg_set_keys(c.as_ptr()) };
+    }
+    Ok(j["files"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default())
+}
+
+/// Yuklab olish ketayotgan paytda bot chati tozalanmasin (yuklangan nusxa o'chib ketmasin).
+pub static HOLDS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 pub fn load_posters(session: &str, urls: &[String]) -> (Vec<(String, Option<Image>)>, Option<String>) {
     let mut diag: Option<String> = None;
     let dir = poster_dir();
@@ -203,7 +221,9 @@ pub fn load_posters(session: &str, urls: &[String]) -> (Vec<(String, Option<Imag
         }
     }
     // Yuborilgan nusxalar bot chatida qolib ketmasin.
-    let _ = call_json(rust_core::telegram::rust_tg_clear_bot_chat());
+    if HOLDS.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+        let _ = call_json(rust_core::telegram::rust_tg_clear_bot_chat());
+    }
     (out, diag)
 }
 
@@ -390,26 +410,70 @@ pub struct Episode {
     pub name: String,
     pub views: i64,
     pub qualities: Vec<String>,
+    /// (sifat, video manzili)
+    pub urls: Vec<(String, String)>,
+    /// (sifat, hajm baytlarda)
+    pub sizes: Vec<(String, i64)>,
+    pub origin: String,
 }
 
-pub fn fetch_episodes(anime: i64, season: i64) -> Result<Vec<Episode>, String> {
-    let v = crate::api::get_json(&format!("/api/epizods/{anime}/{season}"), "", None)?;
+impl Episode {
+    pub fn url(&self, q: &str) -> String {
+        self.urls.iter().find(|(k, _)| k == q).map(|(_, u)| u.clone()).unwrap_or_default()
+    }
+    pub fn size(&self, q: &str) -> i64 {
+        self.sizes.iter().find(|(k, _)| k == q).map(|(_, v)| *v).unwrap_or(0)
+    }
+    /// Qism kodlanayotganda worker ASL videoni sifat o'rnida beradi — ilovada "Original".
+    pub fn quality_title(&self, q: &str) -> String {
+        let u = self.url(q);
+        if !self.origin.is_empty() && (u == self.origin || u.ends_with(&format!("/{}", self.origin))) { "Original".into() } else { q.to_string() }
+    }
+}
+
+pub const QUALITIES: [&str; 4] = ["1080p", "720p", "480p", "360p"];
+
+pub fn cache_dir() -> String {
+    let d = format!("{}/cache", uzcoders::android::files_dir());
+    let _ = std::fs::create_dir_all(&d);
+    d
+}
+
+pub fn parse_episodes(v: &Value) -> Vec<Episode> {
     let mut out: Vec<Episode> = v
         .as_array()
         .map(|a| {
             a.iter()
-                .map(|o| Episode {
-                    id: num(&o["epizod_id"]),
-                    number: num(&o["epizod_number"]),
-                    name: o["epizod_name"].as_str().unwrap_or("").to_string(),
-                    views: num(&o["views_total"]),
-                    qualities: ["1080p", "720p", "480p", "360p"].iter().filter(|q| !o[format!("url_{q}")].as_str().unwrap_or("").is_empty()).map(|q| q.to_string()).collect(),
+                .map(|o| {
+                    let urls: Vec<(String, String)> = QUALITIES.iter().filter_map(|q| o[format!("url_{q}")].as_str().filter(|u| !u.is_empty()).map(|u| (q.to_string(), u.to_string()))).collect();
+                    Episode {
+                        id: num(&o["epizod_id"]),
+                        number: num(&o["epizod_number"]),
+                        name: o["epizod_name"].as_str().unwrap_or("").to_string(),
+                        views: num(&o["views_total"]),
+                        qualities: urls.iter().map(|(q, _)| q.clone()).collect(),
+                        sizes: QUALITIES.iter().map(|q| (q.to_string(), num(&o[format!("size_{q}")]))).collect(),
+                        urls,
+                        origin: o["origin_video"].as_str().unwrap_or("").to_string(),
+                    }
                 })
                 .collect()
         })
         .unwrap_or_default();
     out.sort_by_key(|e| e.number);
-    Ok(out)
+    out
+}
+
+/// Diskdagi nusxa (tarmoqsiz).
+pub fn cached_episodes(anime: i64, season: i64) -> Vec<Episode> {
+    std::fs::read_to_string(format!("{}/eps_{anime}_{season}.json", cache_dir())).ok().and_then(|s| serde_json::from_str::<Value>(&s).ok()).map(|v| parse_episodes(&v)).unwrap_or_default()
+}
+
+pub fn fetch_episodes(anime: i64, season: i64) -> Result<Vec<Episode>, String> {
+    let v = crate::api::get_json(&format!("/api/epizods/{anime}/{season}"), "", None)?;
+    // Yuklanmalar ro'yxati shu nusxadan tuziladi (Kotlin'dagi `eps_*.json` kabi).
+    let _ = std::fs::write(format!("{}/eps_{anime}_{season}.json", cache_dir()), v.to_string());
+    Ok(parse_episodes(&v))
 }
 
 /// Shu animening barcha bo'limlari.

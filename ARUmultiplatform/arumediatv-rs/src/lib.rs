@@ -3,6 +3,7 @@
 mod api;
 mod backend;
 mod data;
+mod downloads;
 mod home;
 mod sync;
 mod countries;

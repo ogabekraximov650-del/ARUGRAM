@@ -1,6 +1,7 @@
 //! Bosh sahifa: sarlavha, "Ommabop anime" va poster kartalari to'ri, pastda haqiqiy shisha (xiralashtiruvchi) navigatsiya paneli.
 
 mod billing;
+mod dl;
 mod edit;
 mod pages;
 mod storage;
@@ -9,7 +10,8 @@ mod profile;
 use crate::data::{Device, Profile, fetch_library, fetch_seasons, fmt_date, load_posters, HistoryItem, Season};
 use crate::theme::*;
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use crate::downloads::{DlItem, VStat};
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use uzcoders::prelude::*;
 
@@ -40,6 +42,15 @@ enum Status {
 pub struct Home {
     session: String,
     profile: State<Rc<Profile>>,
+    dl: State<Rc<HashMap<String, VStat>>>,
+    dl_watch: RefCell<HashSet<String>>,
+    dl_active: RefCell<HashSet<String>>,
+    dl_running: Cell<bool>,
+    dl_index: State<Option<Rc<Vec<DlItem>>>>,
+    dl_loading: Cell<bool>,
+    dl_scroll: ScrollState,
+    del_confirm: State<Option<(String, String)>>,
+    dl_wipe_confirm: State<bool>,
     unread: State<u32>,
     picked_cb: RefCell<Option<Box<dyn Fn(String)>>>,
     pages: State<Vec<pages::Page>>,
@@ -134,6 +145,15 @@ impl Home {
         let h = Rc::new(Home {
             session,
             profile: State::new(Rc::new(Profile::default())),
+            dl: State::new(Rc::new(HashMap::new())),
+            dl_watch: RefCell::new(HashSet::new()),
+            dl_active: RefCell::new(HashSet::new()),
+            dl_running: Cell::new(false),
+            dl_index: State::new(None),
+            dl_loading: Cell::new(false),
+            dl_scroll: ScrollState::new(),
+            del_confirm: State::new(None),
+            dl_wipe_confirm: State::new(false),
             unread: State::new(0),
             picked_cb: RefCell::new(None),
             pages: State::new(Vec::new()),
@@ -714,7 +734,12 @@ impl Home {
                 if on {
                     kids.push(tx(*label, 10.0, Color::WHITE).bold());
                 }
-                let mut e = column(kids).center().weight(1.0).height(52.0).radius(20.0).on_click(move || me.tab.set(i));
+                let mut e = column(kids).center().weight(1.0).height(52.0).radius(20.0).on_click(move || {
+                    if i == 3 && me.tab.get() != 3 {
+                        me.dl_index.set(None);
+                    }
+                    me.tab.set(i)
+                });
                 if on {
                     e = e.gradient(ACCENT, ACCENT2);
                 }
@@ -744,8 +769,15 @@ impl Home {
                 cb(path);
             }
         }
+        if self.pages.get().is_empty() && self.tab.get() != 3 {
+            self.dl_unwatch_all();
+        }
         if let Some(page) = self.pages.get().last().cloned() {
-            return self.page_view(page);
+            let v = self.page_view(page);
+            return match self.dl_dialogs() {
+                Some(d) => stack(vec![v, d]),
+                None => v,
+            };
         }
         let ins = safe_insets();
         let (w, _) = window_dp();
@@ -777,7 +809,7 @@ impl Home {
             let bottom = 90.0 + ins.bottom;
             match self.lib_tab.get() {
                 0 => self.history_view(w, top, bottom),
-                1 => Self::empty(PLAY, "Yuklab olingan qism yo'q\nQismlar ro'yxatida yuklab oling"),
+                1 => self.downloads_view(w, top, bottom),
                 _ => {
                     let favs = self.favs.get();
                     if favs.is_empty() {
@@ -866,6 +898,11 @@ impl Home {
         if !(tab == 2 && self.filter_open.get()) {
             layers.push(self.nav(ins.bottom));
         }
+        if tab == 3 {
+            if let Some(d) = self.dl_dialogs() {
+                layers.push(d);
+            }
+        }
         stack(layers).bg(BG)
     }
 }
@@ -909,6 +946,15 @@ mod tests {
         let home = Rc::new(Home {
             session: String::new(),
             profile: State::new(Rc::new(Profile::default())),
+            dl: State::new(Rc::new(HashMap::new())),
+            dl_watch: RefCell::new(HashSet::new()),
+            dl_active: RefCell::new(HashSet::new()),
+            dl_running: Cell::new(false),
+            dl_index: State::new(None),
+            dl_loading: Cell::new(false),
+            dl_scroll: ScrollState::new(),
+            del_confirm: State::new(None),
+            dl_wipe_confirm: State::new(false),
             unread: State::new(0),
             picked_cb: RefCell::new(None),
             pages: State::new(Vec::new()),
@@ -1024,10 +1070,12 @@ mod tests {
             home.open_season(home.seasons.get()[0].clone());
             if let Some(pages::Page::Season(p)) = home.pages.get().last().cloned() {
                 p.info.set(Rc::new(crate::data::SeasonInfo { season: serde_json::json!({"views_total": 1234, "fav_count": 7, "rating_count": 3, "rating_sum": 27, "turi": "TV", "yili": "2005", "janri": "Action, Fantasy", "studio": "Pierrot", "tavsif": "Uzun tavsif matni shu yerda turadi."}), rating: 9.0, my_stars: 8, is_fav: true }));
-                p.eps.set(Rc::new((1..=4).map(|i| crate::data::Episode { id: i, number: i, name: "Nom".into(), views: 100 * i, qualities: vec!["720p".into(), "480p".into()] }).collect()));
+                p.eps.set(Rc::new((1..=4).map(|i| crate::data::Episode { id: i, number: i, name: "Nom".into(), views: 100 * i, qualities: vec!["720p".into(), "480p".into()], urls: vec![("720p".into(), "https://x/api/image/a.mp4".into()), ("480p".into(), "https://x/api/image/b.mp4".into())], sizes: vec![("720p".into(), 100_000_000)], origin: String::new() }).collect()));
                 p.sections.set(home.seasons.get());
                 p.comments.set(Rc::new(vec![crate::data::Comment { name: "Ali".into(), body: "Zo'r anime!".into(), media: String::new(), created_at: 1_792_497_600_000, likes: 3, replies: 1 }]));
                 p.comments_state.set(1);
+                p.exp.set(2);
+                home.dl.set(Rc::new([("https://x/api/image/a.mp4".to_string(), crate::downloads::VStat { total: 100, downloaded: 40, downloading: true, speed: 2_000_000, ..Default::default() })].into_iter().collect()));
                 for (n, name) in [(0, "13_season_info"), (1, "13_season_eps"), (2, "13_season_sec"), (3, "13_season_com")] {
                     p.tab.set(n);
                     let cmds = ui.frame(size);

@@ -17,6 +17,8 @@ const A_EVENT: &str = "M16.53,11.06L15.47,10l-4.88,4.88 -2.12,-2.12 -1.06,1.06L1
 const A_PLAY: &str = "M8,5v14l11,-7z";
 const A_LOGOUT: &str = "M10.09,15.59L11.5,17l5,-5 -5,-5 -1.41,1.41L12.67,11H3v2h9.67l-2.58,2.59zM19,3H5c-1.11,0 -2,0.9 -2,2v4h2V5h14v14H5v-4H3v4c0,1.1 0.89,2 2,2h14c1.1,0 2,-0.9 2,-2V5c0,-1.1 -0.9,-2 -2,-2z";
 const A_PHONE: &str = "M17,1.01L7,1c-1.1,0 -2,0.9 -2,2v18c0,1.1 0.9,2 2,2h10c1.1,0 2,-0.9 2,-2V3c0,-1.1 -0.9,-1.99 -2,-1.99zM17,19H7V5h10v14z";
+const A_CHECK: &str = "M9,16.17L4.83,12l-1.42,1.41L9,19 21,7l-1.41,-1.41z";
+const A_DOWNLOAD: &str = "M19,9h-4V3H9v6H5l7,7 7,-7zM5,18v2h14v-2H5z";
 const OK_GREEN: Color = Color::rgb(0x4A, 0xDE, 0x80);
 
 /// Bo'lim sahifasi holati (har ochilganda yangidan quriladi).
@@ -30,6 +32,10 @@ pub struct SeasonPage {
     pub(super) comments: State<Rc<Vec<Comment>>>,
     pub(super) comments_state: State<u8>,
     pub(super) rating_open: State<bool>,
+    pub(super) exp: State<i64>,
+    pub(super) chunk: State<usize>,
+    pub(super) newest: State<bool>,
+    pub(super) chips_scroll: ScrollState,
     pub(super) scroll: [ScrollState; 4],
 }
 
@@ -42,6 +48,7 @@ pub enum Page {
     Edit(Rc<super::edit::EditPage>),
     Storage(Rc<super::storage::StoragePage>),
     Support(Rc<super::support::SupportPage>),
+    DlAnime(Rc<super::dl::DlAnimePage>),
 }
 
 impl Home {
@@ -56,6 +63,10 @@ impl Home {
             comments: State::new(Rc::new(Vec::new())),
             comments_state: State::new(0),
             rating_open: State::new(false),
+            exp: State::new(0),
+            chunk: State::new(usize::MAX),
+            newest: State::new(true),
+            chips_scroll: ScrollState::new(),
             scroll: [ScrollState::new(), ScrollState::new(), ScrollState::new(), ScrollState::new()],
         });
         let (a, s) = (season.anime_id, season.season_id);
@@ -111,6 +122,7 @@ impl Home {
         let had = v.pop().is_some();
         if had {
             self.pages.set(v);
+            self.dl_unwatch_all();
         }
         had
     }
@@ -183,6 +195,7 @@ impl Home {
             Page::Edit(p) => self.edit_page(&p),
             Page::Storage(p) => self.storage_page(&p),
             Page::Support(p) => self.support_page(&p),
+            Page::DlAnime(p) => self.dl_anime_page(&p),
         }
     }
 
@@ -362,25 +375,75 @@ impl Home {
         if eps.is_empty() {
             return if p.eps_loading.get() { column(vec![spinner(32.0, 3.0, ACCENT2)]).center() } else { Self::empty(A_PLAY, "Qismlar topilmadi") };
         }
-        let mut list: Vec<Episode> = (*eps).clone();
-        list.reverse(); // yangilari tepada (Kotlin'dagi boshlang'ich tartib)
-        lazy_column(&p.scroll[1], list.len(), 80.0, move |i| {
-            let e = &list[i];
-            let q = if e.qualities.is_empty() { String::new() } else { format!(" · {}", e.qualities.join(" "))};
-            let sub = if e.name.trim().is_empty() { format!("{} ko'rish{q}", format_count(e.views)) } else { format!("{} · {} ko'rish{q}", e.name.trim(), format_count(e.views)) };
-            Self::card_box(
-                row(vec![
-                    column(vec![tx(e.number.to_string(), 16.0, Color::WHITE).bold()]).center().width(48.0).height(48.0).radius(13.0).bg(Color::rgba(255, 255, 255, 18)),
-                    column(vec![tx(format!("{}-qism", e.number), 15.5, Color::WHITE).bold(), tx(sub, 12.0, TEXT_DIM)]).weight(1.0),
-                ])
-                .gap(12.0)
-                .align(Align::Center)
-                .padding_xy(12.0, 12.0),
-            )
-            .height(72.0)
-            .margin_each(0.0, 0.0, 0.0, 8.0)
-        })
-        .padding_each(16.0, 4.0, 16.0, 16.0)
+        const RANGE: usize = 50;
+        let chunks: Vec<&[Episode]> = eps.chunks(RANGE).collect();
+        let sel = if p.chunk.get() == usize::MAX { chunks.len().saturating_sub(1) } else { p.chunk.get().min(chunks.len().saturating_sub(1)) };
+        let mut shown: Vec<Episode> = chunks.get(sel).map(|c| c.to_vec()).unwrap_or_default();
+        if p.newest.get() {
+            shown.reverse();
+        }
+        // Oraliq chiplari va tartib tugmasi (gorizontal suriladi).
+        let mut chips: Vec<Element> = Vec::new();
+        if chunks.len() > 1 {
+            for (i, c) in chunks.iter().enumerate() {
+                let pc = p.chunk.clone();
+                chips.push(self.chip(&format!("{}–{}", c[0].number, c[c.len() - 1].number), i == sel, move || pc.set(i)));
+            }
+        }
+        let pn = p.newest.clone();
+        chips.push(self.chip(if p.newest.get() { "Yangilari tepada" } else { "Eskilari tepada" }, false, move || pn.set(!pn.get())));
+        let mut kids: Vec<Element> = vec![row(chips).gap(8.0).scroll(&p.chips_scroll).height(40.0).margin_each(0.0, 0.0, 0.0, 8.0)];
+        let live = self.dl.get();
+        let exp = p.exp.get();
+        for e in shown.iter() {
+            let open = exp == e.id;
+            // Yuklash holati (barcha sifatlar bo'yicha).
+            let (mut done, mut active, mut pct) = (false, false, 0);
+            for q in &e.qualities {
+                if let Some(st) = live.get(&e.url(q)) {
+                    done |= st.complete();
+                    if (st.downloading || st.queued) && !st.complete() {
+                        active = true;
+                        pct = pct.max(st.percent());
+                    }
+                }
+            }
+            let (pe, me, eid) = (p.exp.clone(), self.clone(), e.id);
+            let urls: Vec<String> = e.urls.iter().map(|(_, u)| u.clone()).collect();
+            let right: Element = if done {
+                icon(A_CHECK, 24.0).color(OK_GREEN)
+            } else if active {
+                tx(format!("{pct}"), 12.0, ACCENT2).black()
+            } else {
+                icon(A_DOWNLOAD, 24.0).color(Color::rgba(255, 255, 255, 150))
+            };
+            let sub = if e.name.trim().is_empty() { format!("{} ko'rish", format_count(e.views)) } else { format!("{} · {} ko'rish", e.name.trim(), format_count(e.views)) };
+            let mut col = vec![row(vec![
+                column(vec![tx(e.number.to_string(), 16.0, Color::WHITE).bold()]).center().width(48.0).height(48.0).radius(13.0).bg(Color::rgba(255, 255, 255, 18)),
+                column(vec![tx(format!("{}-qism", e.number), 15.5, Color::WHITE).bold(), tx(sub, 12.0, TEXT_DIM)]).weight(1.0),
+                column(vec![right]).center().width(48.0).height(48.0).on_click(move || {
+                    if pe.get() == eid {
+                        pe.set(0);
+                    } else {
+                        pe.set(eid);
+                        me.dl_watch(&urls);
+                    }
+                }),
+            ])
+            .gap(12.0)
+            .align(Align::Center)
+            .padding_xy(12.0, 12.0)];
+            if open {
+                let mut rows: Vec<Element> = Vec::new();
+                for q in &e.qualities {
+                    rows.push(self.quality_row(e.url(q), e.quality_title(q), e.size(q)));
+                }
+                col.push(column(rows).padding_each(12.0, 0.0, 12.0, 10.0));
+            }
+            kids.push(Self::card_box(column(col)).margin_each(0.0, 0.0, 0.0, 8.0));
+        }
+        kids.push(gap_box(0.0, 16.0));
+        scroll_column(&p.scroll[1], kids).padding_each(16.0, 4.0, 16.0, 0.0)
     }
 
     fn season_sections_tab(self: &Rc<Self>, p: &Rc<SeasonPage>) -> Element {
