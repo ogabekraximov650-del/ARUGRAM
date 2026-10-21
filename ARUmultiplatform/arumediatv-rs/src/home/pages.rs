@@ -190,7 +190,7 @@ impl Home {
             me.pop();
         });
         let head = Self::pglass(row(vec![back, tx(title, 22.0, Color::WHITE).bold().weight(1.0)]).gap(12.0).align(Align::Center).padding_each(10.0, 8.0, 18.0, 8.0)).radius(32.0);
-        stack(vec![Self::glass_backdrop(), column(vec![head.margin_each(16.0, 12.0 + ins.top, 16.0, 8.0), body.grow(1.0)])])
+        stack(vec![Self::glass_backdrop(), column(vec![head.margin_each(16.0, 12.0 + ins.top, 16.0, 8.0), body.grow(1.0)]).padding_each(0.0, 0.0, 0.0, ins.bottom)])
     }
 
     fn tile_btn(icon_path: &'static str, tint: Color, label: String, f: impl Fn() + 'static) -> Element {
@@ -309,7 +309,7 @@ impl Home {
         };
         let pc = p.clone();
         let body = body.on_swipe(move |d| pc.tab.set((pc.tab.get() as i32 + d).clamp(0, 3) as usize));
-        let mut layers = vec![Self::glass_backdrop(), column(vec![cover, tab_bar, body.grow(1.0)])];
+        let mut layers = vec![Self::glass_backdrop(), column(vec![cover, tab_bar, body.grow(1.0)]).padding_each(0.0, 0.0, 0.0, ins.bottom)];
         if p.rating_open.get() {
             layers.push(self.rating_dialog(p, &info));
         }
