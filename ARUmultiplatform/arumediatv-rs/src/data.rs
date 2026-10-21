@@ -146,6 +146,29 @@ pub fn tg_deliver(session: &str, names: &[String]) -> Result<Vec<String>, String
     Ok(j["files"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default())
 }
 
+/// Bot chatidagi faylni mahalliy Telegram serveri orqali ochiladigan manzilga aylantiradi (tashqi pleyer/brauzer uchun).
+pub fn tg_play_url(session: &str, url: &str) -> Result<String, String> {
+    let name = file_name_of(url);
+    if name.is_empty() {
+        return Err("Fayl nomi noto'g'ri".into());
+    }
+    let ok = tg_deliver(session, &[name.clone()])?;
+    if !ok.contains(&name) {
+        return Err("Fayl Telegram'da topilmadi".into());
+    }
+    let port = call_json(rust_core::telegram::rust_tg_status())["port"].as_i64().unwrap_or(0);
+    if port <= 0 {
+        return Err("Telegram ulanmagan".into());
+    }
+    // Yuborilgan nusxa bot chatidan darrov tozalanmasin.
+    HOLDS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    std::thread::spawn(|| {
+        std::thread::sleep(std::time::Duration::from_secs(900));
+        HOLDS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    });
+    Ok(format!("http://127.0.0.1:{port}/tg/0/{name}"))
+}
+
 /// Yuklab olish ketayotgan paytda bot chati tozalanmasin (yuklangan nusxa o'chib ketmasin).
 pub static HOLDS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 

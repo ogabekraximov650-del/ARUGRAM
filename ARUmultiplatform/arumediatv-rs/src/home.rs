@@ -74,6 +74,8 @@ pub struct Home {
     hframes: RefCell<HashMap<String, Option<Rc<Image>>>>,
     /// Izohlardagi stiker/GIF rasmlari: (to'plam, element) -> rasm (`None` — yuklanmoqda yoki topilmadi).
     pk_imgs: RefCell<HashMap<(i64, i64), Option<Rc<Image>>>>,
+    /// Yuklanmagan (xato bilan tugagan) to'plam rasmlari — bosilsa qayta uriniladi.
+    pk_fail: RefCell<HashSet<(i64, i64)>>,
     devices: State<Option<Result<Rc<Vec<Device>>, ()>>>,
     settings_scroll: ScrollState,
     sessions_scroll: ScrollState,
@@ -182,6 +184,7 @@ impl Home {
             full_seasons: RefCell::new(None),
             hframes: RefCell::new(HashMap::new()),
             pk_imgs: RefCell::new(HashMap::new()),
+            pk_fail: RefCell::new(HashSet::new()),
             devices: State::new(None),
             settings_scroll: ScrollState::new(),
             sessions_scroll: ScrollState::new(),
@@ -1088,6 +1091,7 @@ mod tests {
             full_seasons: RefCell::new(None),
             hframes: RefCell::new(HashMap::new()),
             pk_imgs: RefCell::new(HashMap::new()),
+            pk_fail: RefCell::new(HashSet::new()),
             devices: State::new(None),
             settings_scroll: ScrollState::new(),
             sessions_scroll: ScrollState::new(),

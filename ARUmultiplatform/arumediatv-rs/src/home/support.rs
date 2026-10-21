@@ -17,6 +17,7 @@ const TG_PILL: Color = Color::rgba(36, 31, 28, 240);
 const TG_IN: Color = Color::rgba(42, 36, 32, 255);
 const TG_OUT: Color = Color::rgba(122, 74, 42, 255);
 const TG_OUT_META: Color = Color::rgba(226, 190, 156, 255);
+const S_BACK: &str = "M20,11H7.83l5.59,-5.59L12,4l-8,8 8,8 1.41,-1.41L7.83,13H20v-2z";
 const S_CHECK: &str = "M9,16.17L4.83,12l-1.42,1.41L9,19 21,7l-1.41,-1.41z";
 
 #[derive(Clone)]
@@ -404,7 +405,24 @@ impl Home {
             None => "Admin bilan bog'lanish".to_string(),
             Some(u) => format!("Suhbat · {u}"),
         };
-        let page = self.scaffold(&title, column(col));
+        let ins = safe_insets();
+        let me_b = self.clone();
+        let round_btn = column(vec![icon(S_BACK, 24.0).color(Color::WHITE)]).center().width(56.0).height(56.0).radius(28.0).bg(TG_PILL).on_click(move || {
+            me_b.pop();
+        });
+        let admin_side = p.user_id.is_some();
+        let letter: String = title.trim_start_matches("Suhbat · ").chars().take(1).flat_map(|c| c.to_uppercase()).collect();
+        let avatar = column(vec![tx(if admin_side { letter } else { "A".to_string() }, 18.0, ACCENT2).bold()]).center().width(44.0).height(44.0).radius(22.0).bg(if admin_side { ACCENT.with_opacity(0.25) } else { Color::BLACK });
+        let capsule = row(vec![avatar, column(vec![tx(title, 19.0, Color::WHITE).bold(), tx(if admin_side { format!("ID: {}", p.user_id.unwrap_or(0)) } else { "yordam xizmati".to_string() }, 15.0, Color::rgba(255, 255, 255, 130))]).justify(Justify::Center).weight(1.0)])
+            .gap(10.0)
+            .align(Align::Center)
+            .padding_each(6.0, 0.0, 18.0, 0.0)
+            .height(56.0)
+            .bg(TG_PILL)
+            .radius(28.0)
+            .weight(1.0);
+        let header = row(vec![round_btn, capsule]).gap(8.0).align(Align::Center).margin_each(10.0, 6.0 + ins.top, 10.0, 6.0);
+        let page = stack(vec![Self::glass_backdrop(), column(vec![header, column(col).grow(1.0)]).padding_each(0.0, 0.0, 0.0, ins.bottom)]);
         let mut layers = vec![page];
         if !pm.menu.get().is_empty() {
             layers.push(self.chat_menu(&pm));
@@ -435,6 +453,10 @@ impl Home {
             );
         }
         let ref_name = file_name_of(&m.media_url);
+        let open = |e: Element| {
+            let (me, u) = (self.clone(), m.media_url.clone());
+            e.on_click(move || me.chat_open_media(&u))
+        };
         match m.media_type.as_str() {
             "image" => match self.frame(&m.media_url) {
                 Some(f) => inner.push(stack(vec![image_fill(&f)]).height(230.0).width(230.0).radius(12.0)),
@@ -448,10 +470,10 @@ impl Home {
                     let s = m.media_ms / 1000;
                     layers.push(column(vec![spacer(), row(vec![spacer(), tx(format!("{}:{:02}", s / 60, s % 60), 11.0, Color::WHITE).bg(Color::rgba(0, 0, 0, 115)).radius(8.0).padding_xy(6.0, 2.0)]).padding(8.0)]));
                 }
-                inner.push(stack(layers).width(bw).height(bh).radius(if round { bh / 2.0 } else { 12.0 }).bg(Color::BLACK));
+                inner.push(open(stack(layers).width(bw).height(bh).radius(if round { bh / 2.0 } else { 12.0 }).bg(Color::BLACK)));
             }
-            "voice" => inner.push(row(vec![icon(S_PLAY, 24.0).color(Color::WHITE), tx(format!("Ovozli xabar · {}:{:02}", m.media_ms / 60000, (m.media_ms / 1000) % 60), 14.0, Color::WHITE)]).gap(10.0).align(Align::Center).padding_xy(0.0, 6.0)),
-            "file" => inner.push(row(vec![icon(S_ATTACH, 24.0).color(Color::WHITE), tx(if m.body.is_empty() { "Fayl".to_string() } else { m.body.clone() }, 14.0, Color::WHITE)]).gap(10.0).align(Align::Center).padding_xy(0.0, 6.0)),
+            "voice" => inner.push(open(row(vec![icon(S_PLAY, 24.0).color(Color::WHITE), tx(format!("Ovozli xabar · {}:{:02}", m.media_ms / 60000, (m.media_ms / 1000) % 60), 14.0, Color::WHITE)]).gap(10.0).align(Align::Center).padding_xy(0.0, 6.0))),
+            "file" => inner.push(open(row(vec![icon(S_ATTACH, 24.0).color(Color::WHITE), tx(if m.body.is_empty() { "Fayl".to_string() } else { m.body.clone() }, 14.0, Color::WHITE)]).gap(10.0).align(Align::Center).padding_xy(0.0, 6.0))),
             "sticker" | "gif" => match self.cm_media_el(&ref_name, &m.media_type) {
                 Some(e) => inner.push(e),
                 None => inner.push(tx(if m.media_type == "gif" { "GIF" } else { "Stiker" }, 13.5, Color::WHITE).bold()),
@@ -481,6 +503,16 @@ impl Home {
         let bubble = column(vec![bubble]).width(maxw.max(120.0)).align(if mine { Align::End } else { Align::Start });
         let r = if mine { row(vec![spacer(), bubble]) } else { row(vec![bubble, spacer()]) };
         r.padding_each(0.0, if top_near { 2.0 } else { 6.0 }, 0.0, 0.0)
+    }
+
+    /// Video/ovoz/faylni mahalliy Telegram serveri manzili orqali tashqi ko'ruvchida ochadi (Kotlin `playUrl`).
+    fn chat_open_media(self: &Rc<Self>, url: &str) {
+        uzcoders::android::toast("Ochilmoqda...");
+        let (session, u) = (self.session.clone(), url.to_string());
+        spawn_bg(move || crate::data::tg_play_url(&session, &u), |r| match r {
+            Ok(link) => uzcoders::android::open_url(&link),
+            Err(e) => uzcoders::android::toast(&format!("Ochilmadi: {e}")),
+        });
     }
 
     fn chat_menu(self: &Rc<Self>, p: &Rc<SupportPage>) -> Element {

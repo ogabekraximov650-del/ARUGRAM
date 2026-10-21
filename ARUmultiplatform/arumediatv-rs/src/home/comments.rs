@@ -205,24 +205,34 @@ impl Home {
         let _ = self.gate_rev.get();
         let size = if kind == "sticker" { 130.0 } else { 180.0 };
         let cached = self.pk_imgs.borrow().get(&key).cloned();
-        match cached {
-            Some(Some(img)) => {
-                let k = (size / img.w as f32).min(size / img.h as f32);
-                Some(image(&img, img.w as f32 * k, img.h as f32 * k).margin_each(0.0, 4.0, 0.0, 4.0))
-            }
-            Some(None) => Some(tx(if kind == "gif" { "GIF" } else { "Stiker" }, 12.0, TEXT_DIM).padding_xy(0.0, 4.0)),
-            None => {
-                self.pk_imgs.borrow_mut().insert(key, None);
-                let (me, session) = (self.clone(), self.session.clone());
-                spawn_bg(move || packs_data::item_image(&session, key.0, key.1), move |r| {
-                    if let Some(img) = r {
-                        me.pk_imgs.borrow_mut().insert(key, Some(Rc::new(img)));
-                        me.gate_rev.set(me.gate_rev.get() + 1);
-                    }
-                });
-                Some(spinner(18.0, 2.0, ACCENT2).padding_xy(0.0, 8.0))
-            }
+        if let Some(Some(img)) = &cached {
+            let k = (size / img.w as f32).min(size / img.h as f32);
+            return Some(image(img, img.w as f32 * k, img.h as f32 * k).margin_each(0.0, 4.0, 0.0, 4.0));
         }
+        if cached.is_some() && self.pk_fail.borrow().contains(&key) {
+            let (me, label) = (self.clone(), if kind == "gif" { "GIF" } else { "Stiker" });
+            return Some(tx(format!("{label} yuklanmadi — bosib qayta urinish"), 12.0, TEXT_DIM).padding_xy(0.0, 6.0).on_click(move || {
+                me.pk_fail.borrow_mut().remove(&key);
+                me.pk_imgs.borrow_mut().remove(&key);
+                me.gate_rev.set(me.gate_rev.get() + 1);
+            }));
+        }
+        if cached.is_none() {
+            self.pk_imgs.borrow_mut().insert(key, None);
+            let (me, session) = (self.clone(), self.session.clone());
+            spawn_bg(move || packs_data::item_image(&session, key.0, key.1), move |r| {
+                match r {
+                    Some(img) => {
+                        me.pk_imgs.borrow_mut().insert(key, Some(Rc::new(img)));
+                    }
+                    None => {
+                        me.pk_fail.borrow_mut().insert(key);
+                    }
+                }
+                me.gate_rev.set(me.gate_rev.get() + 1);
+            });
+        }
+        Some(column(vec![spinner(18.0, 2.0, ACCENT2)]).center().width(size * 0.6).height(size * 0.6))
     }
 
     fn cm_panel_open(self: &Rc<Self>, p: &Rc<SeasonPage>) {
