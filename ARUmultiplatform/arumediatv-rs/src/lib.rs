@@ -41,12 +41,26 @@ pub fn make_ui(scale: f32) -> Ui {
     let screen = State::new(Screen::Login);
     let home: Rc<RefCell<Option<Rc<Home>>>> = Rc::new(RefCell::new(None));
     // Kirish tugagach: sessiya saqlanadi va bosh sahifa ochiladi.
+    let login_slot: Rc<RefCell<Option<Rc<Login>>>> = Rc::new(RefCell::new(None));
+    // Chiqish / hisobni o'chirish: sessiya va Telegram hisobi tozalanadi, kirish ekrani qaytadi.
+    let (s3, h3, l3, b3) = (screen.clone(), home.clone(), login_slot.clone(), backend.clone());
+    let on_logout: Rc<dyn Fn()> = Rc::new(move || {
+        api::clear_session();
+        let b = b3.clone();
+        std::thread::spawn(move || b.logout());
+        *h3.borrow_mut() = None;
+        if let Some(l) = l3.borrow().as_ref() {
+            l.restart();
+        }
+        s3.set(Screen::Login);
+    });
     let (s2, h2) = (screen.clone(), home.clone());
     let on_done: Rc<dyn Fn(String)> = Rc::new(move |session: String| {
-        *h2.borrow_mut() = Some(Home::new(session));
+        *h2.borrow_mut() = Some(Home::new(session, on_logout.clone()));
         s2.set(Screen::Home);
     });
     let login = Login::new(backend, on_done.clone());
+    *login_slot.borrow_mut() = Some(login.clone());
     // Saqlangan sessiya bo'lsa to'g'ridan-to'g'ri bosh sahifa.
     if let Some(session) = api::load_session() {
         on_done(session);

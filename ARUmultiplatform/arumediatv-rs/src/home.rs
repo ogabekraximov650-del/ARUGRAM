@@ -1,6 +1,7 @@
 //! Bosh sahifa: sarlavha, "Ommabop anime" va poster kartalari to'ri, pastda haqiqiy shisha (xiralashtiruvchi) navigatsiya paneli.
 
-use crate::data::{fetch_library, fetch_seasons, fmt_date, load_posters, HistoryItem, Season};
+mod profile;
+use crate::data::{Profile, fetch_library, fetch_seasons, fmt_date, load_posters, HistoryItem, Season};
 use crate::theme::*;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -33,6 +34,13 @@ enum Status {
 
 pub struct Home {
     session: String,
+    profile: State<Rc<Profile>>,
+    dlg: State<u8>,
+    dlg_msg: State<String>,
+    on_logout: Rc<dyn Fn()>,
+    prof_scroll: ScrollState,
+    avatar: RefCell<Option<Rc<Image>>>,
+    cache_bytes: Cell<i64>,
     seasons: State<Rc<Vec<Season>>>,
     status: State<Status>,
     posters: RefCell<HashMap<String, Rc<Image>>>,
@@ -109,9 +117,16 @@ fn badge(children: Vec<Element>) -> Element {
 }
 
 impl Home {
-    pub fn new(session: String) -> Rc<Home> {
+    pub fn new(session: String, on_logout: Rc<dyn Fn()>) -> Rc<Home> {
         let h = Rc::new(Home {
             session,
+            profile: State::new(Rc::new(Profile::default())),
+            dlg: State::new(0),
+            dlg_msg: State::new(String::new()),
+            on_logout,
+            prof_scroll: ScrollState::new(),
+            avatar: RefCell::new(None),
+            cache_bytes: Cell::new(0),
             seasons: State::new(Rc::new(Vec::new())),
             status: State::new(Status::Loading),
             posters: RefCell::new(HashMap::new()),
@@ -140,6 +155,7 @@ impl Home {
         });
         h.reload();
         h.load_library();
+        h.load_profile();
         h
     }
 
@@ -736,6 +752,8 @@ impl Home {
                     }
                 }
             }
+        } else if tab == 4 {
+            self.profile_view()
         } else if tab != 0 {
             column(vec![tx("Tez orada", 16.0, TEXT_DIM)]).center()
         } else {
@@ -851,6 +869,13 @@ mod tests {
             .collect();
         let home = Rc::new(Home {
             session: String::new(),
+            profile: State::new(Rc::new(Profile::default())),
+            dlg: State::new(0),
+            dlg_msg: State::new(String::new()),
+            on_logout: Rc::new(|| {}),
+            prof_scroll: ScrollState::new(),
+            avatar: RefCell::new(None),
+            cache_bytes: Cell::new(0),
             seasons: State::new(Rc::new(seasons)),
             status: State::new(Status::Ready),
             posters: RefCell::new((0..4).map(|i| (format!("p{i}.jpg"), Rc::new(poster(i)))).collect()),
@@ -911,6 +936,17 @@ mod tests {
                 c.execute(&cmds);
                 std::fs::write(format!("{dir}/{name}.png"), c.to_png()).unwrap();
             }
+            home.profile.set(Rc::new(Profile { id: 1234, name: "Ogabek Raximov".into(), username: "ogabek".into(), balance: 5000, animes: 12, episodes: 340, watch_ms: 90_000_000, seasons: 20, favorites: 4, rated: 3, comments: 1, traffic: 123_456_789, ..Profile::default() }));
+            home.tab.set(4);
+            for (n, name) in [(0, "11_profile"), (1, "12_dialog")] {
+                home.dlg.set(n);
+                let cmds = ui.frame(size);
+                let mut c = ui.canvas(360, 640);
+                c.clear(Color::BLACK);
+                c.execute(&cmds);
+                std::fs::write(format!("{dir}/{name}.png"), c.to_png()).unwrap();
+            }
+            home.dlg.set(0);
             for (n, name) in [(0, "8_catalog"), (1, "9_filter")] {
                 home.filter_open.set(n == 1);
                 let cmds = ui.frame(size);

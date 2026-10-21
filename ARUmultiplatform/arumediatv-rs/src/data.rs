@@ -292,3 +292,88 @@ mod date_tests {
         assert_eq!(super::fmt_date(1_792_497_600_000), "17:00/20/10/2026");
     }
 }
+
+/// Hisob va shaxsiy statistika (`/api/auth/me` + `/api/me/stats`).
+#[derive(Clone, Default)]
+pub struct Profile {
+    pub id: i64,
+    pub name: String,
+    pub username: String,
+    pub photo_url: String,
+    pub balance: i64,
+    pub animes: i64,
+    pub episodes: i64,
+    pub watch_ms: i64,
+    pub traffic: i64,
+    pub seasons: i64,
+    pub favorites: i64,
+    pub rated: i64,
+    pub comments: i64,
+}
+
+pub fn fetch_profile(session: &str) -> Result<Profile, String> {
+    let me = crate::api::get_json("/api/auth/me", "", Some(session))?;
+    let u = &me["user"];
+    let st = crate::api::get_json("/api/me/stats", "", Some(session)).unwrap_or(Value::Null);
+    let first = u["first_name"].as_str().unwrap_or("").trim();
+    let last = u["last_name"].as_str().unwrap_or("").trim();
+    let username = u["username"].as_str().unwrap_or("").to_string();
+    let name = match format!("{first} {last}").trim() {
+        n if !n.is_empty() => n.to_string(),
+        _ if !username.is_empty() => username.clone(),
+        _ => "Foydalanuvchi".to_string(),
+    };
+    Ok(Profile {
+        id: num(&u["id"]),
+        name,
+        username,
+        photo_url: u["photo_url"].as_str().unwrap_or("").to_string(),
+        balance: num(&u["balance"]),
+        animes: num(&st["animes"]),
+        episodes: num(&st["episodes"]),
+        watch_ms: num(&st["watch_ms"]),
+        traffic: num(&st["traffic"]),
+        seasons: num(&st["seasons"]),
+        favorites: num(&st["favorites"]),
+        rated: num(&st["rated"]),
+        comments: num(&st["comments"]),
+    })
+}
+
+/// Hisobni serverdan o'chiradi (`POST /api/auth/delete-account`).
+pub fn delete_account(session: &str) -> Result<(), String> {
+    let (code, _) = crate::api::request("POST", "/api/auth/delete-account", "", None, Some(session))?;
+    if code >= 400 { Err(format!("O'chirib bo'lmadi ({code})")) } else { Ok(()) }
+}
+
+/// `1234567` -> `1.234.567`
+pub fn format_count(n: i64) -> String {
+    let d = n.abs().to_string();
+    let mut out = String::new();
+    for (i, c) in d.chars().enumerate() {
+        if i > 0 && (d.len() - i) % 3 == 0 {
+            out.push('.');
+        }
+        out.push(c);
+    }
+    if n < 0 { format!("-{out}") } else { out }
+}
+
+/// Millisekund -> `soat:daqiqa`.
+pub fn format_hours(ms: i64) -> String {
+    let t = ms / 1000;
+    format!("{}:{:02}", format_count(t / 3600), t % 3600 / 60)
+}
+
+pub fn format_bytes(b: i64) -> String {
+    let s = if b < 1024 {
+        format!("{b} B")
+    } else if b < 1024 * 1024 {
+        format!("{} KB", b / 1024)
+    } else if b < 1024 * 1024 * 1024 {
+        format!("{:.1} MB", b as f64 / 1048576.0)
+    } else {
+        format!("{:.2} GB", b as f64 / 1073741824.0)
+    };
+    s.replace('.', ",")
+}

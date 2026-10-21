@@ -226,6 +226,16 @@ impl Login {
         }
     }
 
+    /// Chiqishdan keyin: boshidan (telefon raqami) boshlaydi.
+    pub fn restart(&self) {
+        self.step.set(Step::Phone);
+        self.busy.set(false);
+        self.error.set(None);
+        self.number.set(String::new());
+        self.code.set(String::new());
+        self.password.set(String::new());
+    }
+
     fn reset_login(&self) {
         let b = self.backend.clone();
         spawn_bg(move || b.reset(), |_| {});
