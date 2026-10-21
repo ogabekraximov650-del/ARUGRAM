@@ -161,6 +161,8 @@ struct Inner {
     decoded: AtomicU64,
     stage: AtomicU8,
     audio_dead: AtomicBool,
+    /// Diagnostika: manba "hali tayyor emas" (-2) deb necha marta kutdirdi.
+    waits: AtomicU64,
     a_out: AtomicU64,
     a_state: AtomicU8,
     /// Diagnostika: manbadan o'qilgan baytlar, hozir o'qish ichidami, dekoderga berilgan video/audio paketlar.
@@ -206,6 +208,7 @@ extern "C" fn ds_read(ud: *mut c_void, offset: i64, buf: *mut c_void, size: usiz
             }
             0 => return -1,
             -2 => {
+                ctx.inner.waits.fetch_add(1, Ordering::Relaxed);
                 ctx.inner.buffering.store(true, Ordering::SeqCst);
                 if ctx.stop.load(Ordering::SeqCst) || ctx.inner.stop.load(Ordering::SeqCst) {
                     return -1;
@@ -315,6 +318,7 @@ impl Player {
             decoded: AtomicU64::new(0),
             stage: AtomicU8::new(0),
             audio_dead: AtomicBool::new(false),
+            waits: AtomicU64::new(0),
             a_out: AtomicU64::new(0),
             a_state: AtomicU8::new(0),
             audio_wait: Mutex::new(None),
@@ -364,7 +368,7 @@ impl Player {
                     2 => "dekoder tayyor",
                     _ => "?",
                 };
-                format!("{stage} | yuza={} tex={tex} | dekod={} chiqdi={} tekstura={up} | {}x{} | o'qildi={}KB {} | berildi v={} a={} sz={} | ovoz chiq={} oqim={}", if win { "bor" } else { "yo'q" }, i.decoded.load(Ordering::SeqCst), i.rendered.load(Ordering::SeqCst), i.width.load(Ordering::SeqCst), i.height.load(Ordering::SeqCst), i.read_bytes.load(Ordering::Relaxed) / 1024, if i.in_read.load(Ordering::SeqCst) { "(o'qishda)" } else { "" }, i.fed_v.load(Ordering::Relaxed), i.fed_a.load(Ordering::Relaxed), i.last_sz.load(Ordering::Relaxed), i.a_out.load(Ordering::Relaxed), if i.audio_dead.load(Ordering::SeqCst) { "o'lik" } else { "ok" })
+                format!("{stage} | yuza={} tex={tex} | dekod={} chiqdi={} tekstura={up} | {}x{} | o'qildi={}KB {} | berildi v={} a={} sz={} | ovoz chiq={} oqim={} | kutish={} bufer={}", if win { "bor" } else { "yo'q" }, i.decoded.load(Ordering::SeqCst), i.rendered.load(Ordering::SeqCst), i.width.load(Ordering::SeqCst), i.height.load(Ordering::SeqCst), i.read_bytes.load(Ordering::Relaxed) / 1024, if i.in_read.load(Ordering::SeqCst) { "(o'qishda)" } else { "" }, i.fed_v.load(Ordering::Relaxed), i.fed_a.load(Ordering::Relaxed), i.last_sz.load(Ordering::Relaxed), i.a_out.load(Ordering::Relaxed), if i.audio_dead.load(Ordering::SeqCst) { "o'lik" } else { "ok" }, i.waits.load(Ordering::Relaxed), i.buffering.load(Ordering::SeqCst))
             },
         }
     }
@@ -551,10 +555,24 @@ unsafe fn run_locked(inner: Arc<Inner>, source: Source) {
     let ia = inner.clone();
     let ah = if atrack >= 0 { Some(std::thread::spawn(move || audio_out(ia))) } else { None };
 
+    // Ijro joyi yadroga alohida oqimdan bildiriladi: demux o'qishda qotib turganda ham "buferlanmoqda" xabari borishi shart
+    // (aks holda yadro oldinga chegaradan tashqari bo'lakni abadiy kutdiradi).
+    let rep = if !inner.name.is_empty() {
+        let ir = inner.clone();
+        Some(std::thread::spawn(move || {
+            let c = cstr(&ir.name);
+            while !ir.stop.load(Ordering::SeqCst) {
+                rust_player_position(c.as_ptr(), ir.pos_us.load(Ordering::SeqCst) / 1000, ir.dur_us.load(Ordering::SeqCst) / 1000, ir.buffering.load(Ordering::SeqCst) as i32);
+                std::thread::sleep(Duration::from_millis(500));
+            }
+        }))
+    } else {
+        None
+    };
+
     // 5) Tashuvchi (demux) halqasi shu oqimda.
     let mut buf = vec![0u8; 8 << 20];
     let mut eos = false;
-    let mut last_report = Instant::now();
     loop {
         if inner.stop.load(Ordering::SeqCst) {
             break;
@@ -654,17 +672,15 @@ unsafe fn run_locked(inner: Arc<Inner>, source: Source) {
                 }
             }
         }
-        // Ijro joyini yadroga bildirish (oldindan olish oynasi uchun) — taxminan har soniyada.
-        if last_report.elapsed() >= Duration::from_secs(1) && !inner.name.is_empty() {
-            last_report = Instant::now();
-            rust_player_position(cstr(&inner.name).as_ptr(), inner.pos_us.load(Ordering::SeqCst) / 1000, dur_us / 1000, inner.buffering.load(Ordering::SeqCst) as i32);
-        }
     }
 
     // 6) To'xtatish.
     inner.stop.store(true, Ordering::SeqCst);
     stop_flag.store(true, Ordering::SeqCst);
     let _ = vh.join();
+    if let Some(h) = rep {
+        let _ = h.join();
+    }
     if let Some(h) = ah {
         let _ = h.join();
     }
