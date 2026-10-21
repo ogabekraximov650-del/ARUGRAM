@@ -223,7 +223,11 @@ pub fn video_release() {
     VIDEO_WINDOW.store(0, std::sync::atomic::Ordering::SeqCst);
     let a = ACTIVITY.load(std::sync::atomic::Ordering::SeqCst);
     if a != 0 {
-        unsafe { jni::video_release(a as *mut ANativeActivity) };
+        // Pleyer oqimidan chaqiriladi: ish tugagach oqim JVM'dan ajratiladi (keyingi chaqiruvda qayta ulanadi).
+        unsafe {
+            jni::video_release(a as *mut ANativeActivity);
+            jni::detach(a as *mut ANativeActivity);
+        }
     }
 }
 
@@ -247,6 +251,18 @@ fn call_activity(name: &[u8], s: &str) {
     let a = ACTIVITY.load(std::sync::atomic::Ordering::SeqCst);
     if a != 0 {
         unsafe { jni::call_str(a as *mut ANativeActivity, name, s) };
+    }
+}
+
+/// Videoning bitta kadrini JPEG fayliga yozadi (`MediaMetadataRetriever`): `arg` = `"<kirish.mp4>|<chiqish.jpg>"`.
+/// Bloklaydi; fon oqimidan chaqiriladi (oqim keyin JVM'dan ajratiladi).
+pub fn frame_to_file(arg: &str) {
+    let a = ACTIVITY.load(std::sync::atomic::Ordering::SeqCst);
+    if a != 0 {
+        unsafe {
+            jni::call_str(a as *mut ANativeActivity, b"frameToFile\0", arg);
+            jni::detach(a as *mut ANativeActivity);
+        }
     }
 }
 

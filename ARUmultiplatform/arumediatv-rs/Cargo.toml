@@ -17,6 +17,8 @@ serde_json = "1"
 ureq = "2"
 # WebP (stiker/GIF to'plam kichik rasmlari, posterlar): sof Rust dekoder.
 image-webp = "0.2"
+# QR kod (Telegram orqali kirish): Nayuki qrcodegen, sof Rust.
+qrcodegen = "1"
 
 [profile.release]
 opt-level = 3

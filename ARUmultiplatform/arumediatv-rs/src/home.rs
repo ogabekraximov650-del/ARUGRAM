@@ -69,6 +69,8 @@ pub struct Home {
     gate_rev: State<u32>,
     /// Oflayn rejimda ro'yxatdan yashirilgan bo'limlarning to'liq ro'yxati (internet qaytganda tiklanadi).
     full_seasons: RefCell<Option<Rc<Vec<Season>>>>,
+    /// Tarix kartalaridagi to'xtagan joy kadrlari: kalit -> rasm (`None` — yuklanmoqda yoki yasab bo'lmadi).
+    hframes: RefCell<HashMap<String, Option<Rc<Image>>>>,
     /// Izohlardagi stiker/GIF rasmlari: (to'plam, element) -> rasm (`None` — yuklanmoqda yoki topilmadi).
     pk_imgs: RefCell<HashMap<(i64, i64), Option<Rc<Image>>>>,
     devices: State<Option<Result<Rc<Vec<Device>>, ()>>>,
@@ -177,6 +179,7 @@ impl Home {
             consent: State::new(false),
             gate_rev: State::new(0),
             full_seasons: RefCell::new(None),
+            hframes: RefCell::new(HashMap::new()),
             pk_imgs: RefCell::new(HashMap::new()),
             devices: State::new(None),
             settings_scroll: ScrollState::new(),
@@ -249,6 +252,15 @@ impl Home {
 
     /// Diskdagi ro'yxat darhol ko'rsatiladi, server esa fonda yangilaydi (ETag: o'zgarmagan bo'lsa deyarli bepul).
     fn reload(self: &Rc<Self>) {
+        // Rasm keshi hajmi cheklangan: eskilari tozalanadi (bir marta, fonda).
+        static GC: std::sync::Once = std::sync::Once::new();
+        GC.call_once(|| {
+            std::thread::spawn(|| {
+                let root = uzcoders::android::files_dir();
+                crate::secure::gc_dir(&format!("{root}/posters"), 300 << 20);
+                crate::secure::gc_dir(&format!("{root}/cache/packs"), 200 << 20);
+            });
+        });
         let cached = crate::data::cached_seasons();
         if !cached.is_empty() {
             self.set_items(cached);
@@ -736,6 +748,27 @@ impl Home {
         column(vec![row(vec![title, spacer()]), gap_box(0.0, 8.0), tab_bar, spacer()]).padding_each(16.0, 8.0 + top_inset, 16.0, 0.0)
     }
 
+    /// Tarix kartasi uchun to'xtagan joydagi kadr; tayyor bo'lmasa fonda yasaladi (poster ko'rsatilib turadi).
+    fn history_frame_img(self: &Rc<Self>, h: &HistoryItem) -> Option<Rc<Image>> {
+        if h.video_url.is_empty() || h.position_ms <= 0 {
+            return None;
+        }
+        let key = format!("{}_{}_{}_{}", h.anime_id, h.season_id, h.episode_no, h.position_ms);
+        let _ = self.gate_rev.get();
+        if let Some(v) = self.hframes.borrow().get(&key) {
+            return v.clone();
+        }
+        self.hframes.borrow_mut().insert(key.clone(), None);
+        let (me, session, hh) = (self.clone(), self.session.clone(), h.clone());
+        spawn_bg(move || crate::downloads::history_frame(&session, &hh.video_url, &hh.thumb_url, hh.position_ms, &key).map(|i| (key, i)), move |r| {
+            if let Some((k, img)) = r {
+                me.hframes.borrow_mut().insert(k, Some(Rc::new(img)));
+                me.gate_rev.set(me.gate_rev.get() + 1);
+            }
+        });
+        None
+    }
+
     fn history_view(self: &Rc<Self>, w: f32, top: f32, bottom: f32) -> Element {
         let items = self.hist.get();
         if items.is_empty() {
@@ -751,7 +784,8 @@ impl Home {
         let me = self.clone();
         lazy_column(&self.hist_scroll, items.len(), card_h + 12.0, move |i| {
             let h = &items[i];
-            let pic = match me.frame(&h.photo_url) {
+            let hf = me.history_frame_img(h);
+            let pic = match hf.or_else(|| me.frame(&h.photo_url)) {
                 Some(f) => image_fill(&f),
                 None => {
                     let (a, b) = name_colors(&h.title);
@@ -1051,6 +1085,7 @@ mod tests {
             consent: State::new(false),
             gate_rev: State::new(0),
             full_seasons: RefCell::new(None),
+            hframes: RefCell::new(HashMap::new()),
             pk_imgs: RefCell::new(HashMap::new()),
             devices: State::new(None),
             settings_scroll: ScrollState::new(),
@@ -1137,7 +1172,7 @@ mod tests {
             for _ in 0..4 {
                 home.pop();
             }
-            home.hist.set((0..3).map(|i| HistoryItem { anime_id: i, season_id: 1, episode_no: 3 + i, section_no: 1, title: format!("Naruto {i}"), photo_url: format!("p{i}.jpg"), updated_at: 1_792_497_600_000 }).collect());
+            home.hist.set((0..3).map(|i| HistoryItem { anime_id: i, season_id: 1, episode_no: 3 + i, section_no: 1, title: format!("Naruto {i}"), photo_url: format!("p{i}.jpg"), updated_at: 1_792_497_600_000, position_ms: 0, video_url: String::new(), thumb_url: String::new() }).collect());
             home.lib_state.set(1);
             home.tab.set(3);
             for (n, name) in [(0, "10_lib0"), (1, "10_lib1"), (2, "10_lib2")] {

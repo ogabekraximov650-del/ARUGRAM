@@ -264,3 +264,76 @@ pub fn progress_set(url: &str, pos_ms: i64, dur_ms: i64) {
     }
     let _ = std::fs::write(path, v.to_string());
 }
+
+/// Tomosha tarixi uchun to'xtagan joydagi kadr (Kotlin `ThumbStore`): yadroning `/thumb` yo'li bitta kadrlik MP4 beradi,
+/// Java `MediaMetadataRetriever` undan JPEG chiqaradi. Natija diskda shifrlangan; bir vaqtda bitta kadr, pleyer ochiq paytda kutadi.
+pub fn history_frame(session: &str, video_url: &str, thumb_url: &str, pos_ms: i64, key: &str) -> Option<uzcoders::prelude::Image> {
+    static QUEUE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let dir = format!("{}/cache/hframes", uzcoders::android::files_dir());
+    let _ = std::fs::create_dir_all(&dir);
+    let path = format!("{dir}/{key}.jpg");
+    if let Some(img) = crate::secure::read(&path, "hframe").and_then(|b| crate::webp::decode_any(&b)) {
+        return Some(img.resized(960, 540));
+    }
+    let _g = QUEUE.lock().unwrap_or_else(|e| e.into_inner());
+    // Pleyer ochiq — tarmoq faqat videoniki.
+    for _ in 0..60 {
+        if crate::gate::BUSY.load(Ordering::SeqCst) == 0 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(400));
+    }
+    let src = if thumb_url.is_empty() { video_url } else { thumb_url };
+    let name = file_name_of(src);
+    if name.is_empty() || !ensure_cache() {
+        return None;
+    }
+    let complete = stats(&[src.to_string()]).get(src).map(|s| s.complete()).unwrap_or(false);
+    let u = if complete {
+        src.to_string()
+    } else {
+        let ok = tg_deliver(session, &[name.clone()]).ok()?;
+        if !ok.contains(&name) {
+            return None;
+        }
+        let port = crate::data::tg_port();
+        if port <= 0 {
+            return None;
+        }
+        format!("http://127.0.0.1:{port}/tg/0/{name}")
+    };
+    let port = crate::data::tg_port();
+    if port <= 0 {
+        return None;
+    }
+    let url = format!("http://127.0.0.1:{port}/thumb?u={}&ms={}", crate::backend::urlenc(&u), pos_ms.max(0));
+    let r = ureq::get(&url).timeout(std::time::Duration::from_secs(60)).call().ok()?;
+    let mut mp4 = Vec::new();
+    std::io::Read::read_to_end(&mut std::io::Read::take(r.into_reader(), 16 << 20), &mut mp4).ok()?;
+    if mp4.len() < 64 {
+        return None;
+    }
+    let tmp_in = format!("{dir}/{key}.mp4");
+    let tmp_out = format!("{dir}/{key}.tmp.jpg");
+    std::fs::write(&tmp_in, &mp4).ok()?;
+    uzcoders::android::frame_to_file(&format!("{tmp_in}|{tmp_out}"));
+    let _ = std::fs::remove_file(&tmp_in);
+    let jpg = std::fs::read(&tmp_out).ok();
+    let _ = std::fs::remove_file(&tmp_out);
+    let jpg = jpg?;
+    // Shu qismning eski kadrlari kerak emas.
+    let prefix = key.rsplit_once('_').map(|(a, _)| format!("{a}_")).unwrap_or_default();
+    if !prefix.is_empty() {
+        if let Ok(rd) = std::fs::read_dir(&dir) {
+            for e in rd.flatten() {
+                let n = e.file_name().to_string_lossy().into_owned();
+                if n.starts_with(&prefix) && n.ends_with(".jpg") && n != format!("{key}.jpg") {
+                    let _ = std::fs::remove_file(e.path());
+                }
+            }
+        }
+    }
+    let img = crate::webp::decode_any(&jpg)?;
+    let _ = crate::secure::write(&path, "hframe", &jpg);
+    Some(img.resized(960, 540))
+}

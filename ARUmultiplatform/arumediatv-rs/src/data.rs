@@ -159,7 +159,7 @@ pub fn load_posters(session: &str, urls: &[String]) -> (Vec<(String, Option<Imag
             .iter()
             .map(|n| {
                 let dir = &dir;
-                sc.spawn(move || if n.is_empty() { None } else { std::fs::read(format!("{dir}/{n}")).ok().and_then(|b| finish_image(&b)) })
+                sc.spawn(move || if n.is_empty() { None } else { crate::secure::read(&format!("{dir}/{n}"), "poster").and_then(|b| finish_image(&b)) })
             })
             .collect();
         hs.into_iter().map(|h| h.join().ok().flatten()).collect()
@@ -213,7 +213,7 @@ pub fn load_posters(session: &str, urls: &[String]) -> (Vec<(String, Option<Imag
             Ok(r) => {
                 let mut buf = Vec::new();
                 let _ = std::io::Read::read_to_end(&mut std::io::Read::take(r.into_reader(), 12 << 20), &mut buf);
-                let _ = std::fs::write(format!("{dir}/{n}"), &buf);
+                let _ = crate::secure::write(&format!("{dir}/{n}"), "poster", &buf);
                 out[i].1 = finish_image(&buf);
                 if out[i].1.is_none() {
                     diag = Some(format!("dekod xato: {} bayt, boshi {:02x?}", buf.len(), &buf[..buf.len().min(4)]));
@@ -255,6 +255,18 @@ pub struct HistoryItem {
     pub title: String,
     pub photo_url: String,
     pub updated_at: i64,
+    /// To'xtagan joy (ms) va qismning ijro/eng baland sifatli fayli — tarix kartasida o'sha kadrni ko'rsatish uchun.
+    pub position_ms: i64,
+    pub video_url: String,
+    pub thumb_url: String,
+}
+
+/// Telegram yadrosining mahalliy server porti (0 — tayyor emas).
+pub fn tg_port() -> i64 {
+    if crate::backend::ensure_tg_ready().is_err() {
+        return 0;
+    }
+    call_json(rust_core::telegram::rust_tg_status())["port"].as_i64().unwrap_or(0)
 }
 
 /// Kutubxona: (sevimlilar, tarix). Tarix bo'lim bo'yicha guruhlanadi (har bir bo'lim — eng oxirgi ko'rilgani).
@@ -279,6 +291,9 @@ pub fn fetch_library(session: &str) -> Result<(Vec<Season>, Vec<HistoryItem>), S
                         title: pick("season_name", "anime_name"),
                         photo_url: pick("season_photo", "anime_photo"),
                         updated_at: num(&o["updated_at"]),
+                        position_ms: num(&o["position_ms"]),
+                        video_url: o["video_url"].as_str().unwrap_or("").to_string(),
+                        thumb_url: o["thumb_url"].as_str().unwrap_or("").to_string(),
                     }
                 })
                 .collect()

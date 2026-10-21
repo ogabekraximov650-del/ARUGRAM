@@ -12,6 +12,8 @@ mod login;
 mod player;
 mod gate;
 mod theme;
+mod qr;
+mod secure;
 mod webp;
 mod packs_data;
 

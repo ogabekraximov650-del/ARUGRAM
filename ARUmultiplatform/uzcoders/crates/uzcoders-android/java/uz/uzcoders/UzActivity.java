@@ -25,6 +25,8 @@ import android.widget.Toast;
 import android.graphics.SurfaceTexture;
 import android.view.Surface;
 import android.content.pm.ActivityInfo;
+import android.graphics.Bitmap;
+import android.media.MediaMetadataRetriever;
 
 /**
  * uzcoders yelimi: tizim klaviaturasi (IME) matnini Rust'ga uzatadi. Boshqa hamma narsa Rust'da.
@@ -245,6 +247,42 @@ public class UzActivity extends NativeActivity {
                 else getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
             }
         });
+    }
+
+    /** Video faylidan bitta kadr (oxirgisi, bo'lmasa birinchisi) JPEG qilib yoziladi. `arg` = "kirish|chiqish". Chaqiruvchi oqimda bloklaydi. */
+    public void frameToFile(String arg) {
+        int i = arg.indexOf('|');
+        if (i <= 0) return;
+        String in = arg.substring(0, i);
+        String out = arg.substring(i + 1);
+        MediaMetadataRetriever r = new MediaMetadataRetriever();
+        try {
+            r.setDataSource(in);
+            String d = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION);
+            long durMs = 0;
+            try { durMs = Long.parseLong(d); } catch (Throwable e) { }
+            Bitmap b = null;
+            if (durMs > 1) {
+                try { b = r.getFrameAtTime((durMs - 1) * 1000, MediaMetadataRetriever.OPTION_CLOSEST); } catch (Throwable e) { }
+            }
+            if (b == null) {
+                try { b = r.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC); } catch (Throwable e) { }
+            }
+            if (b == null) {
+                try { b = r.getFrameAtTime(); } catch (Throwable e) { }
+            }
+            if (b == null) return;
+            if (b.getWidth() > 1280) {
+                int h = Math.max(1, (int) ((long) b.getHeight() * 1280 / b.getWidth()));
+                b = Bitmap.createScaledBitmap(b, 1280, h, true);
+            }
+            FileOutputStream fo = new FileOutputStream(out);
+            try { b.compress(Bitmap.CompressFormat.JPEG, 88, fo); } finally { fo.close(); }
+        } catch (Throwable e) {
+            Log.e("UzActivity", "frameToFile: " + e);
+        } finally {
+            try { r.release(); } catch (Throwable e) { }
+        }
     }
 
     public void hideKeyboard() {

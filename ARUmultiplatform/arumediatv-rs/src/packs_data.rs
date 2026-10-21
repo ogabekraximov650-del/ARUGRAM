@@ -182,7 +182,7 @@ pub fn thumbs(session: &str, file: &str, h: &Header) -> Vec<(i64, Image)> {
     let mut missing: Vec<&Item> = Vec::new();
     for it in &h.items {
         let p = format!("{d}/t_{}_{}", h.id, it.id);
-        match std::fs::read(&p).ok().and_then(|b| crate::webp::decode_any(&b)) {
+        match crate::secure::read(&p, "pack").and_then(|b| crate::webp::decode_any(&b)) {
             Some(img) => out.push((it.id, img.resized(192, 192))),
             None => {
                 if it.tlen > 0 {
@@ -206,7 +206,7 @@ pub fn thumbs(session: &str, file: &str, h: &Header) -> Vec<(i64, Image)> {
             continue;
         }
         let bytes = &blob[a..b];
-        let _ = std::fs::write(format!("{d}/t_{}_{}", h.id, it.id), bytes);
+        let _ = crate::secure::write(&format!("{d}/t_{}_{}", h.id, it.id), "pack", bytes);
         if let Some(img) = crate::webp::decode_any(bytes) {
             out.push((it.id, img.resized(192, 192)));
         }
@@ -220,12 +220,12 @@ pub fn data_image(session: &str, file: &str, h: &Header, item: &Item) -> Option<
         return None;
     }
     let p = format!("{}/d_{}_{}", dir(), h.id, item.id);
-    let bytes = match std::fs::read(&p) {
-        Ok(b) if b.len() as i64 == item.len => b,
+    let bytes = match crate::secure::read(&p, "pack") {
+        Some(b) if b.len() as i64 == item.len => b,
         _ => {
             let b = read_range(session, file, h.base + item.off, item.len).ok()?;
             if b.len() as i64 == item.len {
-                let _ = std::fs::write(&p, &b);
+                let _ = crate::secure::write(&p, "pack", &b);
             }
             b
         }
@@ -260,11 +260,11 @@ pub fn item_image(session: &str, pack: i64, item: i64) -> Option<Image> {
 
 fn thumbs_one(session: &str, file: &str, h: &Header, it: &Item) -> Option<Image> {
     let p = format!("{}/t_{}_{}", dir(), h.id, it.id);
-    let bytes = match std::fs::read(&p) {
-        Ok(b) if !b.is_empty() => b,
+    let bytes = match crate::secure::read(&p, "pack") {
+        Some(b) if !b.is_empty() => b,
         _ => {
             let b = read_range(session, file, h.base + it.toff, it.tlen).ok()?;
-            let _ = std::fs::write(&p, &b);
+            let _ = crate::secure::write(&p, "pack", &b);
             b
         }
     };

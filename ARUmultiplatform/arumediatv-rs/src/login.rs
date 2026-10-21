@@ -132,6 +132,9 @@ pub struct Login {
     on_done: Rc<dyn Fn(String)>,
     wait: State<u32>,
     hint: State<String>,
+    qr_img: State<Option<Rc<Image>>>,
+    qr_gen: std::cell::Cell<u32>,
+    qr_until: std::cell::Cell<Option<std::time::Instant>>,
 }
 
 impl Login {
@@ -155,6 +158,9 @@ impl Login {
             on_done,
             wait: State::new(0),
             hint: State::new(String::new()),
+            qr_img: State::new(None),
+            qr_gen: std::cell::Cell::new(0),
+            qr_until: std::cell::Cell::new(None),
         });
         // Ilova qayta ochilganda saqlangan kirish bosqichini tiklaymiz (kod kutilayotgan paytda yopilgan bo'lsa).
         let me = login.clone();
@@ -322,6 +328,61 @@ impl Login {
             }
             Step::Qr | Step::Finishing => {}
         }
+    }
+
+    /// QR kirishni boshlaydi: kod har ~30 soniyada yangilanadi, boshqa qurilmada tasdiqlansa kirish davom etadi.
+    fn qr_start(self: &Rc<Self>) {
+        self.qr_img.set(None);
+        self.qr_until.set(None);
+        let gen = self.qr_gen.get() + 1;
+        self.qr_gen.set(gen);
+        self.qr_poll(gen);
+    }
+
+    fn qr_poll(self: &Rc<Self>, gen: u32) {
+        if self.step.get() != Step::Qr || self.qr_gen.get() != gen {
+            return;
+        }
+        let expired = self.qr_until.get().map_or(true, |t| std::time::Instant::now() >= t);
+        let (b, me) = (self.backend.clone(), self.clone());
+        spawn_bg(
+            move || {
+                let acc = b.qr_accepted();
+                let r = if expired || acc { Some(b.qr_token()) } else { None };
+                std::thread::sleep(std::time::Duration::from_millis(1000));
+                r
+            },
+            move |r| {
+                if me.step.get() != Step::Qr || me.qr_gen.get() != gen {
+                    return;
+                }
+                if let Some(st) = r {
+                    if st.done && st.url.is_none() {
+                        me.finish();
+                        return;
+                    }
+                    if st.need_password {
+                        me.hint.set(st.hint.clone());
+                        me.password.set(String::new());
+                        me.step.set(Step::Password);
+                        return;
+                    }
+                    match (st.url.as_deref(), st.error) {
+                        (Some(u), _) => {
+                            me.error.set(None);
+                            me.qr_img.set(crate::qr::qr_image(u).map(Rc::new));
+                            me.qr_until.set(Some(std::time::Instant::now() + std::time::Duration::from_secs(st.expires.max(5))));
+                        }
+                        (None, Some(e)) => {
+                            me.error.set(Some(e));
+                            me.qr_until.set(Some(std::time::Instant::now() + std::time::Duration::from_secs(5)));
+                        }
+                        _ => {}
+                    }
+                }
+                me.qr_poll(gen);
+            },
+        );
     }
 
     /// Telegram ulandi: ilova hisobini botga `/start <token>` yuborib tasdiqlaymiz va sessiya olamiz.
@@ -493,16 +554,10 @@ impl Login {
                 }
             }
             Step::Qr => {
-                body.push(
-                    column(vec![
-                        t("QR kod Telegram yadrosi ulangach chiqadi", 13.0, TEXT_DIM),
-                    ])
-                    .center()
-                    .border(1.0, BORDER_BRIGHT)
-                    .radius(16.0)
-                    .width(260.0)
-                    .height(260.0),
-                );
+                body.push(match self.qr_img.get() {
+                    Some(img) => column(vec![image(&img, 240.0, 240.0)]).center().bg(Color::WHITE).radius(16.0).width(260.0).height(260.0),
+                    None => column(vec![spinner(28.0, 3.0, ACCENT2)]).center().border(1.0, BORDER_BRIGHT).radius(16.0).width(260.0).height(260.0),
+                });
                 body.push(gap_box(0.0, 12.0));
                 body.push(t(
                     "Boshqa qurilmada Telegram -> Sozlamalar -> Qurilmalar -> Qurilmani ulash",
@@ -562,6 +617,7 @@ impl Login {
                     .on_click(move || {
                         me.error.set(None);
                         me.step.set(Step::Qr);
+                        me.qr_start();
                     }),
             );
         }

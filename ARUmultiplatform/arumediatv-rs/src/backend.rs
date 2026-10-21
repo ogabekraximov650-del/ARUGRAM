@@ -16,6 +16,9 @@ pub struct Step {
     pub sent: Option<String>,
     pub logged_in: bool,
     pub wait: u32,
+    /// QR kirish: `tg://login?token=...` va amal qilish muddati (soniya).
+    pub url: Option<String>,
+    pub expires: u64,
 }
 
 impl Step {
@@ -42,6 +45,8 @@ impl Step {
             }),
             logged_in: j["ok"].as_bool().unwrap_or(false) && sent.is_none(),
             wait: j["wait"].as_u64().unwrap_or(0) as u32,
+            url: j["url"].as_str().filter(|u| !u.is_empty()).map(String::from),
+            expires: j["expires"].as_u64().unwrap_or(30),
         }
     }
 }
@@ -61,6 +66,14 @@ pub trait Backend: Send + Sync {
     fn request_code(&self, phone: &str) -> Step;
     fn sign_in(&self, code: &str) -> Step;
     fn check_password(&self, password: &str) -> Step;
+    /// QR kirish: yangi token (yoki tasdiqlangan bo'lsa — kirish natijasi).
+    fn qr_token(&self) -> Step {
+        Step::err("QR kirish bu rejimda yo'q")
+    }
+    /// QR boshqa qurilmada tasdiqlandimi (tarmoqsiz).
+    fn qr_accepted(&self) -> bool {
+        false
+    }
     fn reset(&self);
     /// IP manzil bo'yicha davlat ISO kodi (`UZ`).
     fn nearest_country(&self) -> Option<String>;
@@ -131,6 +144,12 @@ fn ensure_master_key(dir: &str) -> Result<(), String> {
         return Err("Shifrlash kaliti qabul qilinmadi".into());
     }
     Ok(())
+}
+
+/// Shifrlash kalitini (bir marta) o'rnatadi — diskni shifrlash uchun tarmoqsiz ham kerak.
+pub fn ensure_master() -> bool {
+    static OK: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *OK.get_or_init(|| ensure_master_key(&uzcoders::android::files_dir()).is_ok())
 }
 
 /// Haqiqiy Telegram: ARUMEDIATV'ning Rust yadrosi (`rust_core`, grammers/MTProto).
@@ -253,6 +272,12 @@ impl Backend for TgBackend {
     fn sign_in(&self, code: &str) -> Step {
         let c = CString::new(code).unwrap_or_default();
         self.run(|| rust_core::telegram::rust_tg_sign_in(c.as_ptr()))
+    }
+    fn qr_token(&self) -> Step {
+        self.run(|| rust_core::telegram::rust_tg_qr_token())
+    }
+    fn qr_accepted(&self) -> bool {
+        rust_core::telegram::rust_tg_qr_accepted() == 1
     }
     fn check_password(&self, password: &str) -> Step {
         let c = CString::new(password).unwrap_or_default();

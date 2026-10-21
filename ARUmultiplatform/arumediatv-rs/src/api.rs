@@ -84,19 +84,36 @@ pub fn get_json(path: &str, query: &str, bearer: Option<&str>) -> Result<Value, 
 // ── Ilova sessiyasi (token) ──
 
 fn session_file() -> String {
+    format!("{}/session.bin", uzcoders::android::files_dir())
+}
+
+fn legacy_session_file() -> String {
     format!("{}/session.txt", uzcoders::android::files_dir())
 }
 
+/// Sessiya tokeni diskda shifrlangan (`session.bin`). Eski ochiq `session.txt` topilsa shifrlanib ko'chiriladi.
 pub fn load_session() -> Option<String> {
-    std::fs::read_to_string(session_file()).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+    if let Some(b) = crate::secure::read(&session_file(), "session") {
+        if let Some(t) = String::from_utf8(b).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()) {
+            return Some(t);
+        }
+    }
+    let old = std::fs::read_to_string(legacy_session_file()).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())?;
+    if crate::secure::write(&session_file(), "session", old.as_bytes()) {
+        let _ = std::fs::remove_file(legacy_session_file());
+    }
+    Some(old)
 }
 
 pub fn save_session(token: &str) {
-    let _ = std::fs::write(session_file(), token);
+    if crate::secure::write(&session_file(), "session", token.as_bytes()) {
+        let _ = std::fs::remove_file(legacy_session_file());
+    }
 }
 
 pub fn clear_session() {
     let _ = std::fs::remove_file(session_file());
+    let _ = std::fs::remove_file(legacy_session_file());
 }
 
 /// ETag bilan GET: `Ok(None)` — o'zgarmagan (304). Qaytadi: (matn, yangi ETag).

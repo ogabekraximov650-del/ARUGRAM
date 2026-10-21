@@ -6688,3 +6688,13 @@ Hozircha: `.tgs` — faqat kichik rasm (2-bosqich: lottie-android + libwebp bila
 - **Nega:** foydalanuvchi talabi — Telegramda bor, ilovada yo'q hamma narsani qo'shish va DrKLO bilan bir xil qilish.
 - **Fayllar:** `ARUmultiplatform/ARUGRAM/rust/src/telegram.rs` (yangi `rust_tg_*` funksiyalar), `rust/src/telegram/secret.rs` (maxfiy chat), `app/.../ui/components/{CodeBoxes,Shake,TgFab}.kt`, `ui/login/*`, `ui/main/{Stories,AttachSheet,WebApp,VideoViews,FolderEditor,Scheduled,ChatBubble,ChatInput,ChatScreen,ChatModel,SettingsPages,...}.kt`, `auth/AuthModel.kt`.
 - **Qilinmagan:** haqiqiy ovozli/video qo'ng'iroq (`tgcalls`/WebRTC kerak), Premium/Stars to'lovi, maxfiy chatda media/TTL, webm stikerlar (alfa kanal), guruh qo'ng'iroqlari.
+
+## Rust ilova (arumediatv-rs): Kotlin bilan tenglashtirish, pleyer tuzatishi (2026-10-21)
+
+- **Pleyer xatosi:** dekoder oqimi `uzcoders::core::invalidate()` ni chaqirardi, lekin u *thread-local* hisoblagich — UI oqimi uyg'onmasdi, video ~2 kadr/s chizilardi. Endi `uzcoders::core::request_frame()` (atomik bayroq + `ALooper_wake`) ishlatiladi; `Ui::needs_frame` uni hisobga oladi. Ikkinchi qism ochilganda `video_release` Surface'ni nolga tushirib qo'yardi — `glue::video_update` endi Surface'ni qayta yaratadi; pleyerlar `PLAYER_LOCK` bilan ketma-ket ishlaydi.
+- **Matn ranglari:** kulrang/shaffof matnlar oq (glass ustida o'qilishi uchun): `theme::TEXT*`, `.color(Color::WHITE)`.
+- **Admin:** `admin3.rs` (kodlash navbati, jonli), `admin4.rs` (anime → bo'lim → qism, rasm/video yuklash, asl videoni kodlash navbatiga qo'yish, intro vaqtlari). Video yuklash `backend::upload_file_key` (kalit qaytaradi), kalitlar `files/admin_tgkeys.json`.
+- **To'plamlar:** `packs_data.rs` (`.arup` fayldan sarlavha/kichik rasmlar, yadro `rust_player_*` orqali), `webp.rs` (`image-webp`, sof Rust), izohlarda stiker/GIF paneli (`pk_<to'plam>_<element>`). Animatsiya/video elementlar uchun faqat birinchi kadr.
+- **Bepul ko'rish:** `gate.rs` — ruxsat ekrani va fon oqimida kanallarga bittalab qo'shilish (FLOOD bo'lsa ≥30 daqiqa kutadi, pleyer ochiq paytda to'xtaydi).
+- **Boshqa:** video tezligi (AAudio chastotasi ko'paytiriladi — ovoz balandligi ham o'zgaradi), oflayn kutubxona (faqat yuklab olingan bo'limlar), QR orqali kirish (`qr.rs`, `qrcodegen`), tarixda to'xtagan joy kadri (`UzActivity.frameToFile`), rasm/to'plam/sessiya keshi shifrlangan (`secure.rs`, AES-256-GCM yadro orqali) va LRU tozalash, server manzili zaxirasi (`downloads::resolve`).
+- **Qilinmagan:** qism g'ildiragi (EpisodeDial), Telegram hisobidagi stiker/emoji (TGS/Lottie), bildirishnomalar (Kotlin'da ham "tez orada"), iOS.
