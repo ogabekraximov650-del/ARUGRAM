@@ -586,6 +586,7 @@ fn run(s: Arc<Sync_>, make_ui: fn(f32) -> Ui, scale: f32, activity: usize) {
     let mut queue: *mut c_void = null_mut();
     let mut dims = (0i32, 0i32);
     let mut force = true;
+    let mut last_cmds: Option<Vec<uzcoders_render::DrawCmd>> = None;
     let mut rect: Option<[i32; 4]>;
     let mut ime: Vec<ImeEvent>;
 
@@ -667,11 +668,19 @@ fn run(s: Arc<Sync_>, make_ui: fn(f32) -> Ui, scale: f32, activity: usize) {
                 }
                 force = true;
             }
-            if (force || ui.needs_frame()) && dims.0 > 0 {
+            let video_only = !force && !ui.needs_frame() && uzcoders_core::video_frame_requested() && last_cmds.is_some();
+            if (force || ui.needs_frame() || video_only) && dims.0 > 0 {
                 force = false;
                 if let Some(gp) = &mut gpu {
-                    let cmds = ui.frame(Size::new(dims.0 as f32, dims.1 as f32));
-                    let frame = gp.batcher.build(&cmds, dims.0 as u32, dims.1 as u32);
+                    // UZ: Faqat video kadri yangilangan bo'lsa interfeys qayta qurilmaydi: oxirgi chizish buyruqlari qayta ishlatiladi.
+                    // EN: If only a video frame changed, the UI is not rebuilt: the last draw commands are reused.
+                    // RU: Если обновился только кадр видео, UI не перестраивается: повторно используются последние команды рисования.
+                    if !video_only || last_cmds.is_none() {
+                        last_cmds = Some(ui.frame(Size::new(dims.0 as f32, dims.1 as f32)));
+                    }
+                    uzcoders_core::clear_video_frame_request();
+                    let cmds = last_cmds.as_deref().unwrap_or(&[]);
+                    let frame = gp.batcher.build(cmds, dims.0 as u32, dims.1 as u32);
                     unsafe { gp.gl.render(&frame, dims.0, dims.1) };
                     if !gp.egl.swap() {
                         // UZ: Kontekst yo'qoldi: hammasini qaytadan yaratamiz.
@@ -752,7 +761,7 @@ fn run(s: Arc<Sync_>, make_ui: fn(f32) -> Ui, scale: f32, activity: usize) {
         }
         let timeout = if window.is_null() {
             -1
-        } else if ui.needs_frame() {
+        } else if ui.needs_frame() || uzcoders_core::video_frame_requested() {
             0
         } else {
             ui.next_wakeup_ms().map_or(-1, |m| m.max(1) as i32)

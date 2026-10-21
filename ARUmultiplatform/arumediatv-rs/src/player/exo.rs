@@ -77,7 +77,7 @@ impl Player {
             while !t2.closed.load(Ordering::SeqCst) {
                 let now = t0.elapsed().as_millis() as u64;
                 if t2.playing.load(Ordering::SeqCst) || now < t2.boost_until.load(Ordering::SeqCst) {
-                    uzcoders::core::request_frame();
+                    uzcoders::core::request_video_frame();
                 }
                 std::thread::sleep(std::time::Duration::from_millis(33));
             }

@@ -40,6 +40,7 @@ pub struct PlayerState {
     /// To'liq ekran: qismlar ro'yxati oynasi.
     pub(super) ep_list: State<bool>,
     ep_scroll: ScrollState,
+    set_scroll: ScrollState,
     /// Ikki marta bosib sek: oxirgi bosish (chap=true, vaqt), jamlangan soniya (chap<0 / o'ng>0), kutilayotgan sek avlodi.
     last_tap: Cell<Option<(bool, Instant)>>,
     pub(super) seek_acc: State<i32>,
@@ -75,6 +76,7 @@ impl PlayerState {
             locked: State::new(false),
             ep_list: State::new(false),
             ep_scroll: ScrollState::new(),
+            set_scroll: ScrollState::new(),
             last_tap: Cell::new(None),
             seek_acc: State::new(0),
             seek_gen: Cell::new(0),
@@ -460,7 +462,7 @@ impl Home {
 
     /// Shisha "tabletka" ichidagi matn (vaqt, sarlavha).
     fn gpill(e: Element) -> Element {
-        e.lens(Color::rgba(255, 255, 255, 8), GLASS_ZOOM).radius(16.0).padding_xy(12.0, 7.0)
+        e.lens(Color::rgba(255, 255, 255, 8), GLASS_ZOOM).radius(16.0).padding_xy(14.0, 8.0)
     }
 
     /// Ikki marta bosib sek: ko'rsatkich (shisha doira, o'q va soniya).
@@ -528,12 +530,15 @@ impl Home {
     fn pl_bar(p: &Rc<SeasonPage>, frac: f32, buffered: f32, th: f32, thumb: f32) -> Element {
         let w = |x: f32| (x.clamp(0.0, 1.0) * 1000.0).max(0.001);
         let layer = |a: f32, b: Element| row(vec![b.weight(w(a)), column(vec![]).weight((1000.0 - w(a)).max(0.001))]);
-        let track = column(vec![]).height(th).radius(th / 2.0).lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM).radius(th / 2.0);
-        let buf = layer(buffered, column(vec![]).height(th).radius(th / 2.0).bg(Color::rgba(255, 255, 255, 60)));
-        let played = layer(frac, column(vec![]).height(th).radius(th / 2.0).gradient(ACCENT, ACCENT2));
-        let knob = row(vec![column(vec![]).weight(w(frac)).height(1.0), column(vec![]).width(thumb * 2.0).height(thumb * 2.0).radius(thumb).bg(Color::WHITE).border(2.0, ACCENT2), column(vec![]).weight((1000.0 - w(frac)).max(0.001)).height(1.0)]).align(Align::Center);
+        let mid = |e: Element| column(vec![e]).justify(Justify::Center);
+        // Chiziq — xira sutdek shisha, ozgina lupa.
+        let track = column(vec![]).height(th).radius(th / 2.0).lens(Color::rgba(255, 255, 255, 38), 1.25).radius(th / 2.0);
+        let buf = layer(buffered, column(vec![]).height(th).radius(th / 2.0).bg(Color::rgba(255, 255, 255, 46)));
+        let played = layer(frac, column(vec![]).height(th).radius(th / 2.0).lens(Color::rgba(255, 255, 255, 90), 1.35).radius(th / 2.0));
+        // Dumaloq — shisha, kuchliroq lupa.
+        let knob = row(vec![column(vec![]).weight(w(frac)).height(1.0), column(vec![]).width(thumb * 2.0).height(thumb * 2.0).radius(thumb).lens(Color::rgba(255, 255, 255, 60), 1.9).radius(thumb).border(1.5, Color::rgba(255, 255, 255, 170)), column(vec![]).weight((1000.0 - w(frac)).max(0.001)).height(1.0)]).align(Align::Center);
         let pd = p.clone();
-        stack(vec![column(vec![track]).center(), column(vec![buf]).center(), column(vec![played]).center(), knob])
+        stack(vec![mid(track), mid(buf), mid(played), knob])
             .height(thumb * 2.0 + 14.0)
             .weight(1.0)
             .on_drag(move |fx, fin| {
@@ -753,12 +758,12 @@ impl Home {
                 })
             })
             .collect();
-        kids.push(row(timers).gap(8.0));
+        kids.push(row(timers).gap(8.0).scroll(&self.chips_scroll2).height(44.0));
         let pc = p.clone();
         kids.push(row(vec![spacer(), self.chip("Yopish", true, move || pc.pl.settings.set(false))]).padding_each(0.0, 14.0, 0.0, 0.0));
-        let panel = column(kids).lens(Color::rgba(18, 18, 24, 120), GLASS_ZOOM).radius(28.0).padding(20.0).margin_each(20.0, 0.0, 20.0, 0.0);
+        let panel = scroll_column(&p.pl.set_scroll, kids).lens(Color::rgba(18, 18, 24, 120), GLASS_ZOOM).radius(28.0).padding(20.0).width(380.0).margin_each(0.0, 12.0, 0.0, 12.0);
         let pc = p.clone();
-        column(vec![panel]).center().bg(Color::rgba(0, 0, 0, 130)).on_click(move || pc.pl.settings.set(false))
+        stack(vec![column(vec![]).bg(Color::rgba(0, 0, 0, 130)).on_click(move || pc.pl.settings.set(false)), row(vec![spacer(), panel, spacer()])])
     }
 }
 

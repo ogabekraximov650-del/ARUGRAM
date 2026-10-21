@@ -42,6 +42,32 @@ pub fn clear_frame_request() {
     FRAME_REQ.store(false, Ordering::SeqCst);
 }
 
+static VIDEO_REQ: AtomicBool = AtomicBool::new(false);
+
+/// UZ: Istalgan oqimdan: faqat video kadrini qayta chizishni so'raydi. Interfeys qayta qurilmaydi — oxirgi chizish buyruqlari qayta ishlatiladi (arzon).
+/// EN: Callable from any thread: asks to redraw only the video frame. The UI is not rebuilt — the last draw commands are reused (cheap).
+/// RU: Можно вызывать из любого потока: просит перерисовать только кадр видео. UI не перестраивается — повторно используются последние команды рисования (дёшево).
+pub fn request_video_frame() {
+    VIDEO_REQ.store(true, Ordering::SeqCst);
+    if let Some(w) = *WAKER.lock().unwrap() {
+        w();
+    }
+}
+
+/// UZ: Faqat video kadrini qayta chizish so'rovi bormi (o'chirmaydi).
+/// EN: Whether a video-only redraw is requested (does not clear it).
+/// RU: Есть ли запрос на перерисовку только кадра видео (не сбрасывает его).
+pub fn video_frame_requested() -> bool {
+    VIDEO_REQ.load(Ordering::SeqCst)
+}
+
+/// UZ: Video kadri so'rovini tozalaydi (kadr chizilganda chaqiriladi).
+/// EN: Clears the video frame request (called when the frame has been drawn).
+/// RU: Сбрасывает запрос на кадр видео (вызывается после отрисовки кадра).
+pub fn clear_video_frame_request() {
+    VIDEO_REQ.store(false, Ordering::SeqCst);
+}
+
 type Done = Box<dyn FnOnce(Box<dyn Any + Send>)>;
 
 thread_local! {
