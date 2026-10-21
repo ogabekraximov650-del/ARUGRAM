@@ -388,7 +388,7 @@ impl Home {
         });
         layers.push(tap);
         let err = p.pl.perr.get();
-        let busy = p.pl.loading.get() || (started && (st.state == PState::Opening || (st.buffering && st.playing)));
+        let busy = p.pl.loading.get() || (started && (st.state == PState::Opening || (st.buffering && st.playing) || (st.playing && st.dbg.contains("chiqdi=0 "))));
         if !err.is_empty() || st.state == PState::Error {
             let msg = if !err.is_empty() { err } else { st.error.clone() };
             let (me, pc) = (self.clone(), p.clone());

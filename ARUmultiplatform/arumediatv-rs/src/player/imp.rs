@@ -160,6 +160,12 @@ struct Inner {
     rendered: AtomicU64,
     decoded: AtomicU64,
     stage: AtomicU8,
+    /// Diagnostika: manbadan o'qilgan baytlar, hozir o'qish ichidami, dekoderga berilgan video/audio paketlar.
+    read_bytes: AtomicU64,
+    in_read: AtomicBool,
+    fed_v: AtomicU64,
+    fed_a: AtomicU64,
+    last_sz: AtomicI64,
     width: AtomicI32,
     height: AtomicI32,
     has_audio: AtomicBool,
@@ -184,9 +190,12 @@ extern "C" fn ds_read(ud: *mut c_void, offset: i64, buf: *mut c_void, size: usiz
     let ctx = unsafe { &*(ud as *const DsCtx) };
     let want = size.min(1 << 20) as i32;
     loop {
+        ctx.inner.in_read.store(true, Ordering::SeqCst);
         let r = unsafe { rust_player_read(ctx.handle, offset, buf as *mut u8, want) };
+        ctx.inner.in_read.store(false, Ordering::SeqCst);
         match r {
             n if n > 0 => {
+                ctx.inner.read_bytes.fetch_add(n as u64, Ordering::Relaxed);
                 ctx.inner.buffering.store(false, Ordering::SeqCst);
                 return n as isize;
             }
@@ -291,6 +300,11 @@ impl Player {
             rendered: AtomicU64::new(0),
             decoded: AtomicU64::new(0),
             stage: AtomicU8::new(0),
+            read_bytes: AtomicU64::new(0),
+            in_read: AtomicBool::new(false),
+            fed_v: AtomicU64::new(0),
+            fed_a: AtomicU64::new(0),
+            last_sz: AtomicI64::new(0),
             width: AtomicI32::new(0),
             height: AtomicI32::new(0),
             has_audio: AtomicBool::new(false),
@@ -332,7 +346,7 @@ impl Player {
                     2 => "dekoder tayyor",
                     _ => "?",
                 };
-                format!("{stage} | yuza={} tex={tex} | dekod={} chiqdi={} tekstura={up} | {}x{}", if win { "bor" } else { "yo'q" }, i.decoded.load(Ordering::SeqCst), i.rendered.load(Ordering::SeqCst), i.width.load(Ordering::SeqCst), i.height.load(Ordering::SeqCst))
+                format!("{stage} | yuza={} tex={tex} | dekod={} chiqdi={} tekstura={up} | {}x{} | o'qildi={}KB {} | berildi v={} a={} sz={}", if win { "bor" } else { "yo'q" }, i.decoded.load(Ordering::SeqCst), i.rendered.load(Ordering::SeqCst), i.width.load(Ordering::SeqCst), i.height.load(Ordering::SeqCst), i.read_bytes.load(Ordering::Relaxed) / 1024, if i.in_read.load(Ordering::SeqCst) { "(o'qishda)" } else { "" }, i.fed_v.load(Ordering::Relaxed), i.fed_a.load(Ordering::Relaxed), i.last_sz.load(Ordering::Relaxed))
             },
         }
     }
@@ -560,6 +574,7 @@ unsafe fn run_locked(inner: Arc<Inner>, source: Source) {
         } else {
             let sz = AMediaExtractor_readSampleData(ex, buf.as_mut_ptr(), buf.len());
             let tr = AMediaExtractor_getSampleTrackIndex(ex);
+            inner.last_sz.store(sz as i64, Ordering::Relaxed);
             if sz < 0 || tr < 0 {
                 // Fayl oxiri: ikkala dekoderga EOS.
                 for (c, present) in [(&inner.vcodec, true), (&inner.acodec, atrack >= 0)] {
@@ -602,6 +617,7 @@ unsafe fn run_locked(inner: Arc<Inner>, source: Source) {
                             std::ptr::copy_nonoverlapping(buf.as_ptr(), p, n);
                         }
                         AMediaCodec_queueInputBuffer(g.0, idx as usize, 0, n, pts.max(0) as u64, 0);
+                        if tr == vtrack { inner.fed_v.fetch_add(1, Ordering::Relaxed); } else { inner.fed_a.fetch_add(1, Ordering::Relaxed); }
                         AMediaExtractor_advance(ex);
                         break;
                     }
