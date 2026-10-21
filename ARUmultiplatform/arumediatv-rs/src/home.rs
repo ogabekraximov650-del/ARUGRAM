@@ -2,6 +2,8 @@
 
 mod admin;
 mod admin2;
+mod admin3;
+mod admin4;
 mod billing;
 mod comments;
 mod dl;

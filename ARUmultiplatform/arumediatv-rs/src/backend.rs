@@ -340,6 +340,12 @@ mod tests {
 /// Bloklaydi — fon oqimida chaqiring. `progress(sent, total)` ixtiyoriy.
 #[cfg(target_os = "android")]
 pub fn upload_file(path: &str, name: &str, mime: &str, session: &str, progress: &dyn Fn(u64, u64)) -> Result<(), String> {
+    upload_file_key(path, name, mime, session, progress).map(|_| ())
+}
+
+/// `upload_file`, lekin fayl kalitini ham qaytaradi (qismlar uchun bazaga `key_<sifat>` yoziladi).
+#[cfg(target_os = "android")]
+pub fn upload_file_key(path: &str, name: &str, mime: &str, session: &str, progress: &dyn Fn(u64, u64)) -> Result<String, String> {
     shared().ensure()?;
     let (p, n, m) = (CString::new(path).unwrap_or_default(), CString::new(name).unwrap_or_default(), CString::new(mime).unwrap_or_default());
     let started = call(rust_core::telegram::rust_tg_upload_start(p.as_ptr(), n.as_ptr(), m.as_ptr(), 0));
@@ -380,7 +386,12 @@ pub fn upload_file(path: &str, name: &str, mime: &str, session: &str, progress: 
             }
         }
     }
-    Ok(())
+    Ok(key)
+}
+
+#[cfg(not(target_os = "android"))]
+pub fn upload_file_key(_path: &str, _name: &str, _mime: &str, _session: &str, _progress: &dyn Fn(u64, u64)) -> Result<String, String> {
+    Err("Yuklash faqat telefonda ishlaydi".into())
 }
 
 #[cfg(not(target_os = "android"))]

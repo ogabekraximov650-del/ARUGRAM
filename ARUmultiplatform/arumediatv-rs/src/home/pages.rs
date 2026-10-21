@@ -59,6 +59,8 @@ pub enum Page {
     AdminThreads(Rc<super::admin::ListPage>),
     AdminReports(Rc<super::admin::ListPage>),
     AdminStats(Rc<super::admin::StatsPage>),
+    AdminEncode(Rc<super::admin3::EncodePage>),
+    AdminContent(super::admin4::Content),
 }
 
 impl Home {
@@ -214,6 +216,8 @@ impl Home {
             Page::AdminThreads(p) => self.admin_threads_page(&p),
             Page::AdminReports(p) => self.admin_reports_page(&p),
             Page::AdminStats(p) => self.admin_stats_page(&p),
+            Page::AdminEncode(p) => self.admin_encode_page(&p),
+            Page::AdminContent(c) => self.admin_content_page(&c),
         }
     }
 

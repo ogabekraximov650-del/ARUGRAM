@@ -11,6 +11,8 @@ mod flags;
 mod login;
 mod player;
 mod theme;
+mod webp;
+mod packs_data;
 
 use backend::Backend;
 #[cfg(not(target_os = "android"))]

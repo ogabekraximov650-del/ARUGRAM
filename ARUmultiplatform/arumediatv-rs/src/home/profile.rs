@@ -117,7 +117,7 @@ impl Home {
             spawn_bg(
                 move || -> Result<(), String> {
                     let bytes = std::fs::read(&path).map_err(|_| "Rasmni o'qib bo'lmadi".to_string())?;
-                    let img = decode_image(&bytes).ok_or("Rasm noto'g'ri yoki qo'llab-quvvatlanmaydi (JPEG/PNG)".to_string())?.resized(720, 720);
+                    let img = crate::webp::decode_any(&bytes).ok_or("Rasm noto'g'ri yoki qo'llab-quvvatlanmaydi (JPEG/PNG)".to_string())?.resized(720, 720);
                     let out = format!("{}/{n2}", std::path::Path::new(&path).parent().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default());
                     std::fs::write(&out, img.to_png()).map_err(|_| "Rasm tayyorlanmadi".to_string())?;
                     let r = crate::backend::upload_file(&out, &n2, "image/jpeg", &session, &|_, _| {});

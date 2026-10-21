@@ -160,12 +160,14 @@ impl Home {
 
     fn open_admin_section(self: &Rc<Self>, i: usize) {
         match i {
+            0 => self.open_admin_content(),
             1 => self.open_admin_users(),
             2 => self.open_admin_list(0),
             3 => self.open_admin_list(1),
             4 => self.open_admin_packs(),
             5 => self.open_admin_channels(),
             6 => self.open_admin_stats(),
+            7 => self.open_admin_encode(),
             8 => self.open_admin_app(),
             _ => {
                 self.dlg_msg.set(format!("«{}» bo'limi Rust ilovada hali tayyor emas — Kotlin ilovada mavjud.", SECTIONS[i].0));

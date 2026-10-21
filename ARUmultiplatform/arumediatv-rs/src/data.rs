@@ -126,7 +126,7 @@ fn poster_dir() -> String {
 
 fn finish_image(bytes: &[u8]) -> Option<Image> {
     // Karta uchun yetarli o'lcham; burchaklar yumaloq (karta radiusiga mos).
-    decode_image(bytes).map(|i| i.resized(480, 720).round_corners(48.0))
+    crate::webp::decode_any(bytes).map(|i| i.resized(480, 720).round_corners(48.0))
 }
 
 /// Posterlarni oladi: avval diskdagi nusxa (tarmoqsiz), yo'qlari Telegram orqali — worker `deliver` bot chatiga nusxalaydi,
