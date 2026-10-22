@@ -27,6 +27,7 @@ use super::*;
 pub(crate) const APP: &str = "app";
 pub(crate) const POST: &str = "post";
 pub(crate) const ANIBLA: &str = "anibla";
+pub(crate) const TR: &str = "tr";
 
 const KEY: &str = "live_watch";
 const MEMO_MS: i64 = 4_000;

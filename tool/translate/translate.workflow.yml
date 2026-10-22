@@ -50,7 +50,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.EasyOCR
-          key: easyocr-models-v1
+          key: easyocr-models-v2
 
       - name: Telegram sessiyasi
         env:

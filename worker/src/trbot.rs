@@ -65,7 +65,8 @@ const BTN_CLEAR: &str = "\u{1F5D1} Tozalash";
 const BTN_QUEUE: &str = "\u{1F4CB} Tarjima navbati";
 
 /// (tugma, kod) — manba tili. Kod `tool/translate/translate.py` va tarjima so'rovida ishlatiladi.
-const LANGS: [(&str, &str); 5] = [
+const LANGS: [(&str, &str); 6] = [
+    ("\u{1F50E} Avto", "auto"),
     ("\u{1F1F0}\u{1F1F7} Koreyscha", "korean"),
     ("\u{1F1EF}\u{1F1F5} Yaponcha", "japanese"),
     ("\u{1F1E8}\u{1F1F3} Xitoycha", "chinese"),
@@ -85,7 +86,8 @@ fn keyboard() -> Value {
         LANGS[..3].iter().map(|l| l.0.to_string()).collect(),
         LANGS[3..].iter().map(|l| l.0.to_string()).collect(),
         FORMATS.iter().map(|f| f.0.to_string()).collect(),
-        vec![BTN_CLEAR.to_string(), BTN_QUEUE.to_string()],
+        vec![ENCBOT_BTN_STATUS.to_string(), BTN_QUEUE.to_string()],
+        vec![BTN_CLEAR.to_string()],
         vec![postbot::BTN_HOME.to_string()],
     ])
 }
@@ -95,7 +97,7 @@ fn lang_name(code: &str) -> &'static str {
 }
 
 async fn settings(env: &Env) -> (String, String, String) {
-    let src = config_get(env, "tr_src").await.filter(|v| LANGS.iter().any(|l| l.1 == v)).unwrap_or_else(|| "korean".into());
+    let src = config_get(env, "tr_src").await.filter(|v| LANGS.iter().any(|l| l.1 == v)).unwrap_or_else(|| "auto".into());
     let fmt = config_get(env, "tr_fmt").await.filter(|v| FORMATS.iter().any(|f| f.1 == v)).unwrap_or_else(|| "pdf".into());
     let title = config_get(env, "tr_title").await.unwrap_or_default();
     (src, fmt, title)
@@ -118,7 +120,7 @@ pub(crate) async fn menu(env: &Env, chat: i64) {
          Yuborganlaringiz <b>eslab qolinadi</b>: bot qayta ishga tushsa ham yo'qolmaydi.\n\
          Hammasi yuborilgach \u{00AB}{BTN_GO}\u{00BB} ni bosing \u{2014} tarjima qilingan bitta fayl qaytadi (o'zbekcha).\n\n\
          Fayl nomi uchun oddiy matn yozing.\n\n\
-         \u{1F310} Manba tili: <b>{}</b>\n\u{1F4E6} Natija: <b>{}</b>\n\u{270F}\u{FE0F} Nom: <b>{}</b>\n\u{1F4E5} Yig'ilgan: <b>{n}</b> ta fayl",
+         \u{1F310} Manba tili: <b>{}</b> (\u{00AB}Avto\u{00BB} \u{2014} bot o'zi aniqlaydi)\n\u{1F4E6} Natija: <b>{}</b>\n\u{270F}\u{FE0F} Nom: <b>{}</b>\n\u{1F4E5} Yig'ilgan: <b>{n}</b> ta fayl",
         lang_name(&src), fmt.to_uppercase(),
         if title.is_empty() { "(nomsiz)".to_string() } else { html_escape(&title) }),
         Some(keyboard())).await;
@@ -373,7 +375,38 @@ fn state_icon(job: &Value) -> &'static str {
     }
 }
 
-/// "📋 Tarjima navbati" va "📋 Holat": ishlar ro'yxati, har biriga inline tugmalar.
+/// "📋 Holat" — "Manga tarjima" bo'limida: hozirgi ish holati yangi xabarda, faqat shu xabar
+/// yangilanib turadi (`livewatch.rs`): bosqich, foiz, oxirgi log qatorlari.
+pub(crate) async fn status(env: &Env, chat: i64) {
+    let now = now_ms();
+    let run = turso_exec(env,
+        "SELECT id, title, attempts FROM tr_jobs WHERE state='running' AND lease_until>? ORDER BY queued_at ASC LIMIT 1",
+        vec![TursoArg::int(now)]).await.ok().and_then(|r| first_row(&r));
+    let waiting = turso_exec(env, "SELECT COUNT(*) AS n FROM tr_jobs WHERE state='queued'", vec![]).await
+        .ok().and_then(|r| first_row(&r)).map(|r| jint(&r, "n")).unwrap_or(0);
+    let html = match run {
+        Some(j) => format!("{}\n\n\u{2699}\u{FE0F} bajarilmoqda \u{2014} holat bir necha soniyada shu yerda yangilanadi...\n\
+                            \u{1F4CB} Navbatda yana: {waiting} ta",
+            status_head(jint(&j, "id"), j["title"].as_str().unwrap_or(""), jint(&j, "attempts"))),
+        None => format!("\u{1F310} <b>Manga tarjima</b>\n\n\u{1F4A4} Hozir bajarilayotgan tarjima yo'q.\n\
+                         \u{1F4CB} Navbatda: {waiting} ta\n\nTarjima boshlansa, shu xabar o'zi yangilanadi."),
+    };
+    livewatch::start(env, livewatch::TR, chat, &html).await;
+}
+
+/// Holat xabarini tahrirlaydi: ishning o'z xabari va (boshqasi bo'lsa) "Holat" bilan ochilgan kuzatilayotgan xabar.
+async fn edit_status(env: &Env, chat: i64, msg: i64, html: &str) {
+    if msg > 0 {
+        let _ = livewatch::edit_msg(env, chat, msg, html).await;
+    }
+    if let Some((c, m)) = livewatch::target(env, livewatch::TR).await {
+        if m != msg {
+            let _ = livewatch::edit_msg(env, c, m, html).await;
+        }
+    }
+}
+
+/// "📋 Tarjima navbati": ishlar ro'yxati, har biriga inline tugmalar.
 pub(crate) async fn queue_list(env: &Env, chat: i64) {
     let rows = turso_exec(env,
         "SELECT id, title, state, lease_until, error, pages FROM tr_jobs ORDER BY queued_at ASC LIMIT 20", vec![]).await
@@ -513,6 +546,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
             let status_msg = encbot_api(env, "sendMessage", json!({
                 "chat_id": chat, "parse_mode": "HTML", "text": format!("{head}\n\n\u{23F3} boshlanmoqda..."),
             })).await.ok().and_then(|v| v["message_id"].as_i64()).unwrap_or(0);
+            livewatch::claim(env, livewatch::TR, chat, status_msg).await;
             let pages: Value = serde_json::from_str(job["pages"].as_str().unwrap_or("[]")).unwrap_or(json!([]));
             return ok(json!({"channel": channel, "status_msg": status_msg, "job": {
                 "id": id, "chat": chat, "title": title, "src": job["src"].as_str().unwrap_or("korean"),
@@ -528,10 +562,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
         let (chat, msg) = (jint(&b, "chat"), jint(&b, "status_msg"));
         if !text.is_empty() && chat != 0 && msg > 0 {
             let head = status_head(jint(&b, "id"), b["title"].as_str().unwrap_or(""), jint(&b, "attempt"));
-            let _ = encbot_api(env, "editMessageText", json!({
-                "chat_id": chat, "message_id": msg, "parse_mode": "HTML",
-                "text": format!("{head}\n\n{}", html_escape(&text)),
-            })).await;
+            edit_status(env, chat, msg, &format!("{head}\n\n{}", html_escape(&text))).await;
         }
         return ok_nostore(json!({"ok": true}));
     }
@@ -552,13 +583,10 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
         let chat = jint(&job, "chat");
         let title = job["title"].as_str().unwrap_or("").to_string();
         let status_msg = jint(&b, "status_msg");
-        let say = |line: String| {
-            let head = status_head(id, &title, jint(&job, "attempts"));
-            json!({"chat_id": chat, "message_id": status_msg, "parse_mode": "HTML", "text": format!("{head}\n\n{line}")})
-        };
+        let say = |line: String| format!("{}\n\n{line}", status_head(id, &title, jint(&job, "attempts")));
         if b["ok"].as_bool() == Some(true) {
             if status_msg > 0 {
-                let _ = encbot_api(env, "editMessageText", say(format!(
+                edit_status(env, chat, status_msg, &say(format!(
                     "\u{2705} Tayyor va yuborildi ({:.1} MB, {} sahifa)", jint(&b, "size") as f64 / 1048576.0, jint(&b, "pages")))).await;
             }
             channel_cleanup(env, job["pages"].as_str().unwrap_or("[]")).await;
@@ -569,7 +597,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
         let err = b["error"].as_str().unwrap_or("").chars().take(300).collect::<String>();
         if b["cancelled"].as_bool() == Some(true) {
             if status_msg > 0 {
-                let _ = encbot_api(env, "editMessageText", say("\u{23F8} Run to'xtatildi \u{2014} ish navbatga qaytdi".to_string())).await;
+                edit_status(env, chat, status_msg, &say("\u{23F8} Run to'xtatildi \u{2014} ish navbatga qaytdi".to_string())).await;
             }
             turso_exec(env,
                 "UPDATE tr_jobs SET state='queued', runner='', lease_until=0, attempts=MAX(attempts-1,0) WHERE id=?",
@@ -578,7 +606,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
         }
         let fatal = b["fatal"].as_bool() == Some(true) || jint(&job, "attempts") >= TR_MAX_ATTEMPTS;
         if status_msg > 0 {
-            let _ = encbot_api(env, "editMessageText", say(format!(
+            edit_status(env, chat, status_msg, &say(format!(
                 "{} xato: {}", if fatal { "\u{274C}" } else { "\u{26A0}\u{FE0F}" }, html_escape(&err)))).await;
         }
         turso_exec(env, "UPDATE tr_jobs SET state=?, runner='', lease_until=0, error=? WHERE id=?",

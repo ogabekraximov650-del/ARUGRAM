@@ -17,6 +17,7 @@ Jarayon botdagi bitta xabarda jonli ko'rinadi (`Live`, `/api/tr/progress`).
 """
 
 import asyncio
+import collections
 import io
 import json
 import os
@@ -147,18 +148,25 @@ class Live:
         self.base = {"id": int(job["id"]), "title": str(job.get("title") or ""), "chat": int(job["chat"]),
                      "attempt": int(job.get("attempt") or 1), "status_msg": int(r.get("status_msg") or 0)}
         self.steps = []
+        self.logs = collections.deque(maxlen=5)   # oxirgi log qatorlari (botdagi holat xabarida ko'rinadi)
         self.last = 0.0
         self.t0 = time.time()
 
     def done(self, line):
         self.steps.append("✅ " + line)
 
+    def note(self, line):
+        """Holat xabaridagi oxirgi log qatori (Actions logiga ham yoziladi)."""
+        log(" ", line)
+        self.logs.append(time.strftime("%H:%M:%S ") + line)
+
     def send(self, line, force=False):
         now = time.time()
         if not self.base["status_msg"] or (not force and now - self.last < 10):
             return
         self.last = now
-        text = "\n".join(self.steps + [line, "", f"⏱ jami: {hms(now - self.t0)}"])
+        tail = ["", "📜 log:"] + list(self.logs) if self.logs else []
+        text = "\n".join(self.steps + [line] + tail + ["", f"⏱ jami: {hms(now - self.t0)}"])
         try:
             api("progress", {**self.base, "text": text})
         except Exception as e:  # noqa: BLE001
@@ -236,6 +244,62 @@ async def collect_images(app, channel, pages, live):
 
 
 # ── OCR ──────────────────────────────────────────────────────
+
+# Tilni avtomatik aniqlash: namuna sahifalarni navbat bilan ko'rsatilgan o'qigichlar bilan o'qiymiz va natijadagi
+# yozuv turi (hangul / kana / ieroglif / kirill) yetarli ulushni tashkil qilsa shu til tanlanadi. Hech biri
+# bo'lmasa — inglizcha. (kamida `need` ta belgi va umumiy belgilarning `ratio` ulushi)
+DETECT = [
+    ("korean", lambda c: "\uac00" <= c <= "\ud7a3" or "\u1100" <= c <= "\u11ff", 6, 0.5),
+    ("japanese", lambda c: "\u3040" <= c <= "\u30ff", 6, 0.25),
+    ("chinese", lambda c: "\u4e00" <= c <= "\u9fff", 6, 0.5),
+    ("russian", lambda c: "\u0400" <= c <= "\u04ff", 6, 0.5),
+]
+LANG_UZ = {"korean": "Koreyscha", "japanese": "Yaponcha", "chinese": "Xitoycha",
+           "english": "Inglizcha", "russian": "Ruscha"}
+
+
+def pick_samples(paths, k=3):
+    """Muqova va oxirgi sahifalarni chetlab, o'rtadan teng oraliqda k ta namuna."""
+    n = len(paths)
+    if n <= k:
+        return list(paths)
+    return [paths[int(n * (i + 1) / (k + 1))] for i in range(k)]
+
+
+def script_stats(text, pred):
+    chars = [c for c in text if not c.isspace()]
+    hit = sum(1 for c in chars if pred(c))
+    return hit, hit / max(1, len(chars))
+
+
+def detect_source(paths, note=lambda s: None):
+    """Namuna sahifalardan manba tilini aniqlaydi -> (til, o'qigich)."""
+    import numpy as np
+    from PIL import Image
+    samples = []
+    for p in pick_samples(paths):
+        img = np.array(Image.open(p).convert("RGB"))
+        samples.append(img if img.shape[0] <= TILE_H else img[:TILE_H])   # uzun lentaning boshi yetadi
+    for lang, pred, need, ratio in DETECT:
+        reader = make_reader(lang)
+        text = ""
+        for img in samples:
+            for _, t, conf in reader.readtext(img, detail=1, paragraph=False, canvas_size=OCR_CANVAS, batch_size=8):
+                if conf >= MIN_CONF:
+                    text += t
+        hit, r = script_stats(text, pred)
+        note(f"{LANG_UZ[lang]} sinovi: {hit} belgi ({r:.0%})")
+        if hit >= need and r >= ratio:
+            return lang, reader
+        if lang == "korean":
+            # Birinchi o'qigich (ko+en) lotin harflarini ham o'qiydi: sahifa inglizcha bo'lsa, boshqa
+            # o'qigichlarni yuklab o'tirmaymiz (eng sekin yo'l shu edi).
+            lhit, lr = script_stats(text, lambda c: c.isascii() and c.isalpha())
+            if lhit >= 15 and lr >= 0.7:
+                note(f"Inglizcha belgilar: {lhit} ({lr:.0%})")
+                return "english", reader
+    return "english", make_reader("english")
+
 
 def make_reader(source):
     import easyocr
@@ -493,12 +557,20 @@ async def process(app, r, runner):
         def work_ocr():
             import numpy as np
             from PIL import Image
-            reader = make_reader(source)
+            nonlocal source
+            if source == "auto":
+                live.send("🔎 Til aniqlanmoqda...", force=True)
+                source, reader = detect_source(paths, live.note)
+                live.note(f"Til aniqlandi: {LANG_UZ.get(source, source)}")
+                live.done(f"Til aniqlandi: {LANG_UZ.get(source, source)}")
+            else:
+                reader = make_reader(source)
             res = []
             t0 = time.time()
             for i, p in enumerate(paths, 1):
                 img = np.array(Image.open(p).convert("RGB"))
                 res.append(group_dets(ocr_image(reader, img), source))
+                live.note(f"{i}-sahifa: {len(res[-1])} blok")
                 live.send(f"\U0001F50D Matn o'qilmoqda\n{bar(i * 100 / len(paths))} {i}/{len(paths)} "
                           f"· o'tdi {hms(time.time() - t0)}")
             return res

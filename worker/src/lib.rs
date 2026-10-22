@@ -13060,7 +13060,7 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
         match config_get(env, "encbot_mode").await.as_deref() {
             Some("anibla") => anibla::status(env, chat).await,
             Some("post") => postbot::status(env, chat).await,
-            Some("tr") => trbot::queue_list(env, chat).await,
+            Some("tr") => trbot::status(env, chat).await,
             _ => {
                 encbot_queue_summary(env, chat).await;
                 livewatch::app_status(env, chat).await;
