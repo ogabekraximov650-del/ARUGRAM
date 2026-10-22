@@ -10395,7 +10395,7 @@ fn needs_app_check(path: &str) -> bool {
         | "/api/post/claim" | "/api/post/check" | "/api/post/finish" | "/api/post/progress"
         | "/api/anibla/claim" | "/api/anibla/diag" | "/api/anibla/probe" | "/api/anibla/progress" | "/api/anibla/done"
         | "/api/fmp4/claim" | "/api/fmp4/done" | "/api/fmp4/r2put" | "/api/fmp4/r2ready" | "/api/session/poll" | "/api/session/report"
-        | "/api/encode/r2put" | "/api/encode/r2ready" | "/api/encode/qdiag" | "/api/encode/cancel" | "/api/r2/claim" | "/api/r2/beat" | "/api/r2/fail" | "/api/r2/done" | "/api/r2/diag" | "/api/r2/dmsg" | "/api/r2/peek" | "/api/r2/put" | "/api/r2/ready" | "/api/r2/part" | "/api/r2/get")
+        | "/api/encode/r2put" | "/api/encode/r2ready" | "/api/encode/qdiag" | "/api/encode/cancel" | "/api/encode/translate" | "/api/r2/claim" | "/api/r2/beat" | "/api/r2/fail" | "/api/r2/done" | "/api/r2/diag" | "/api/r2/dmsg" | "/api/r2/peek" | "/api/r2/put" | "/api/r2/ready" | "/api/r2/part" | "/api/r2/get")
     {
         return false;
     }
@@ -11670,6 +11670,61 @@ async fn encode_cancel(env: &Env, b: &Value) -> Result<Response> {
     ok(json!({"ok": true, "removed": true, "epizod_id": e}))
 }
 
+/// Matnlar ro'yxatini Workers AI binding orqali LLM bilan tarjima qiladi (manga tarjimasi: OCR Actions'da, tarjima shu yerda).
+/// Kirish: {"texts": [...], "source": "korean", "target": "uzbek", "model": "...", "glossary": {"asl": "tarjima"}}.
+/// Chiqish: {"results": [...], "model": "..."}. Model javobi tushunarsiz bo'lsa — 502 va javobning boshi (`raw`).
+async fn translate_batch(env: &Env, b: &Value) -> Result<Response> {
+    let texts: Vec<String> = b["texts"].as_array().map(|a| a.iter().map(|x| x.as_str().unwrap_or("").trim().chars().take(600).collect()).collect()).unwrap_or_default();
+    if texts.is_empty() || texts.len() > 100 {
+        return json_resp(&json!({"error": "texts: 1..100 ta matn kerak"}), 400);
+    }
+    let model = b["model"].as_str().map(|m| m.trim().to_string()).filter(|m| !m.is_empty() && m.len() < 80
+        && m.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '@' | '/' | '-' | '_' | '.' | ':')))
+        .unwrap_or_else(|| "anthropic/claude-haiku-5-5".to_string());
+    let src = b["source"].as_str().unwrap_or("").chars().filter(|c| c.is_ascii_alphabetic()).take(20).collect::<String>();
+    let dst = b["target"].as_str().unwrap_or("uzbek").chars().filter(|c| c.is_ascii_alphabetic()).take(20).collect::<String>();
+    let ai = match env.ai("AI") {
+        Ok(a) => a,
+        Err(e) => return json_resp(&json!({"error": format!("AI bog'lanishi yo'q: {e}")}), 503),
+    };
+    let mut sys = format!(
+        "Sen manga va manhwa tarjimonisan. Foydalanuvchi JSON ro'yxat beradi: har element pufakchadagi matn{}. \
+         Har birini {dst} tiliga (o'zbekcha bo'lsa — lotin yozuvida) tabiiy, ma'noli va tushunarli qilib tarjima qil. \
+         Gaplar ketma-ket dialog ekanini hisobga ol. Tovush yasovchi so'zlar va undovlarni ham mos ravishda o'gir. \
+         FAQAT shu uzunlikdagi JSON ro'yxat qaytar (boshqa matnsiz): tarjimalar asl tartibda.",
+        if src.is_empty() { String::new() } else { format!(" ({src} tilida)") });
+    if let Some(g) = b["glossary"].as_object().filter(|g| !g.is_empty()) {
+        sys.push_str(" Lug'at (aynan shunday tarjima qil): ");
+        sys.push_str(&Value::Object(g.clone()).to_string());
+    }
+    let out: Value = match ai.run(&model, json!({
+        "messages": [
+            {"role": "system", "content": sys},
+            {"role": "user", "content": serde_json::to_string(&texts).unwrap_or_default()},
+        ],
+        "max_tokens": 4096,
+    })).await {
+        Ok(v) => v,
+        Err(e) => return json_resp(&json!({"error": e.to_string().chars().take(300).collect::<String>(), "model": model}), 502),
+    };
+    // Turli modellar javob shakli: `response`, OpenAI (`choices`), Anthropic (`content`).
+    let text = out["response"].as_str().map(|x| x.to_string())
+        .or_else(|| out["result"]["response"].as_str().map(|x| x.to_string()))
+        .or_else(|| out["choices"][0]["message"]["content"].as_str().map(|x| x.to_string()))
+        .or_else(|| out["content"][0]["text"].as_str().map(|x| x.to_string()))
+        .unwrap_or_default();
+    let parsed = text.find('[').zip(text.rfind(']'))
+        .and_then(|(i, j)| if j > i { serde_json::from_str::<Vec<Value>>(&text[i..=j]).ok() } else { None });
+    match parsed {
+        Some(v) if v.len() == texts.len() => {
+            let results: Vec<String> = v.iter().map(|x| x.as_str().unwrap_or("").to_string()).collect();
+            ok(json!({"results": results, "model": model}))
+        }
+        _ => json_resp(&json!({"error": "model javobi tushunarsiz yoki uzunligi mos emas", "model": model,
+            "raw": out.to_string().chars().take(600).collect::<String>()}), 502),
+    }
+}
+
 async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -> Result<Response> {
     // ── ILOVA (admin) ────────────────────────────────────────
     if path == "/api/encode/queue" && method == Method::Post {
@@ -11966,6 +12021,11 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
         return err404("topilmadi");
     }
     let b: Value = req.json().await.unwrap_or(json!({}));
+
+    // Tarjima (Actions matnni yuboradi, Workers AI orqali LLM o'giradi).
+    if path == "/api/encode/translate" {
+        return translate_batch(env, &b).await;
+    }
 
     // Navbat tashxisi (faqat o'qish): nega "navbatda" soni kamaymaydi.
     if path == "/api/encode/qdiag" {

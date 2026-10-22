@@ -57,6 +57,10 @@ new_sqlite_classes = ["EncodeLive"]
 tag = "v4"
 new_sqlite_classes = ["MarkHub"]
 
+# Workers AI — manga tarjimasi (`/api/encode/translate`).
+[ai]
+binding = "AI"
+
 [durable_objects]
 bindings = [
   { name = "ENCODE_LIVE", class_name = "EncodeLive" },
@@ -66,6 +70,10 @@ bindings = [
 [env.production]
 name = "arumediatv"
 workers_dev = true
+
+# AI bog'lanishi ham muhitga meros bo'lmaydi.
+[env.production.ai]
+binding = "AI"
 
 # Durable Object bog'lanishi muhitga MEROS bo'lmaydi — shu yerda qayta.
 [env.production.durable_objects]
