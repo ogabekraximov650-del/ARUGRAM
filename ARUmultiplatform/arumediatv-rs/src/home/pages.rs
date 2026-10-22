@@ -29,6 +29,8 @@ pub struct SeasonPage {
     pub(super) eps: State<Rc<Vec<Episode>>>,
     pub(super) eps_loading: State<bool>,
     pub(super) eps_err: State<String>,
+    /// Play bosilganda qismlar hali yuklanmagan edi: yuklangach o'zi ijro boshlaydi.
+    pub(super) want_play: State<bool>,
     pub(super) sections: State<Rc<Vec<Season>>>,
     pub(super) cm: super::comments::CommentsState,
     pub(super) rating_open: State<bool>,
@@ -71,7 +73,7 @@ impl Home {
         let (a, s) = (p.season.anime_id, p.season.season_id);
         p.eps_loading.set(true);
         p.eps_err.set(String::new());
-        let p2 = p.clone();
+        let (p2, me) = (p.clone(), self.clone());
         spawn_bg(
             move || {
                 let mut last = Err(String::new());
@@ -85,11 +87,21 @@ impl Home {
                 last
             },
             move |r| {
+                let ok = r.is_ok();
                 match r {
                     Ok(e) => p2.eps.set(Rc::new(e)),
                     Err(e) => p2.eps_err.set(e),
                 }
                 p2.eps_loading.set(false);
+                if p2.want_play.get() {
+                    p2.want_play.set(false);
+                    p2.pl.loading.set(false);
+                    if ok {
+                        me.pl_start_default(&p2);
+                    } else {
+                        p2.pl.perr.set(format!("Qismlar yuklanmadi: {}", p2.eps_err.get()));
+                    }
+                }
             },
         );
     }
@@ -102,6 +114,7 @@ impl Home {
             eps: State::new(Rc::new(Vec::new())),
             eps_loading: State::new(true),
             eps_err: State::new(String::new()),
+            want_play: State::new(false),
             sections: State::new(Rc::new(Vec::new())),
             cm: super::comments::CommentsState::new(),
             rating_open: State::new(false),

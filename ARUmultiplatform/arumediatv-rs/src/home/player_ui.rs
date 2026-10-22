@@ -204,6 +204,17 @@ impl Home {
         Some(self.scaffold("Bepul ko'rish", scroll_column(&p.scroll[0], kids).padding_each(24.0, 0.0, 24.0, 0.0)))
     }
 
+    /// Saqlangan (yoki birinchi) qismni ijro etadi.
+    pub(super) fn pl_start_default(self: &Rc<Self>, p: &Rc<SeasonPage>) {
+        let eps = p.eps.get();
+        let Some(first) = eps.first() else {
+            return;
+        };
+        let last = p.pl.cur.get().map(|c| c.0);
+        let ep = last.and_then(|id| eps.iter().find(|x| x.id == id)).unwrap_or(first);
+        self.play_episode(p, &ep.clone(), None, None, true);
+    }
+
     /// Qismni ijro etadi. `quality` — tanlangan sifat; `resume` — boshlang'ich joy (bo'lmasa saqlangan joy).
     pub(super) fn play_episode(self: &Rc<Self>, p: &Rc<SeasonPage>, ep: &Episode, quality: Option<String>, resume: Option<i64>, auto_play: bool) {
         if !self.can_watch(p) {
@@ -432,18 +443,17 @@ impl Home {
             let (me, pc) = (self.clone(), p.clone());
             layers.push(
                 column(vec![Self::pl_round(V_PLAY, 34.0, 64.0, Box::new(move || {
-                    let eps = pc.eps.get();
                     if !me.can_watch(&pc) {
                         pc.pl.perr.set("Bu bo'limni ko'rish uchun obuna kerak".into());
-                    } else if let Some(e) = eps.first().or(None) {
-                        let last = pc.pl.cur.get().map(|c| c.0);
-                        let ep = last.and_then(|id| eps.iter().find(|x| x.id == id)).unwrap_or(e);
-                        me.play_episode(&pc, &ep.clone(), None, None, true);
+                    } else if !pc.eps.get().is_empty() {
+                        me.pl_start_default(&pc);
                     } else {
+                        // Qismlar hali yuklanmagan: yuklangach ijro o'zi boshlanadi (qayta bosish shart emas).
+                        pc.want_play.set(true);
+                        pc.pl.loading.set(true);
                         if !pc.eps_loading.get() {
                             me.load_eps(&pc);
                         }
-                        pc.pl.perr.set(if pc.eps_err.get().is_empty() { "Qismlar yuklanmoqda... qayta bosing".into() } else { format!("Qismlar yuklanmadi: {}", pc.eps_err.get()) });
                     }
                 }))])
                 .center(),
