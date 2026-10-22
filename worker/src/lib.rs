@@ -10395,7 +10395,7 @@ fn needs_app_check(path: &str) -> bool {
         | "/api/post/claim" | "/api/post/check" | "/api/post/finish" | "/api/post/progress"
         | "/api/anibla/claim" | "/api/anibla/diag" | "/api/anibla/probe" | "/api/anibla/progress" | "/api/anibla/done"
         | "/api/fmp4/claim" | "/api/fmp4/done" | "/api/fmp4/r2put" | "/api/fmp4/r2ready" | "/api/session/poll" | "/api/session/report"
-        | "/api/encode/r2put" | "/api/encode/r2ready" | "/api/encode/qdiag" | "/api/r2/claim" | "/api/r2/beat" | "/api/r2/fail" | "/api/r2/done" | "/api/r2/diag" | "/api/r2/dmsg" | "/api/r2/peek" | "/api/r2/put" | "/api/r2/ready" | "/api/r2/part" | "/api/r2/get")
+        | "/api/encode/r2put" | "/api/encode/r2ready" | "/api/encode/qdiag" | "/api/encode/cancel" | "/api/r2/claim" | "/api/r2/beat" | "/api/r2/fail" | "/api/r2/done" | "/api/r2/diag" | "/api/r2/dmsg" | "/api/r2/peek" | "/api/r2/put" | "/api/r2/ready" | "/api/r2/part" | "/api/r2/get")
     {
         return false;
     }
@@ -11616,6 +11616,60 @@ async fn encode_finish_q(env: &Env, b: &Value, job: &Value, wq: &str) -> Result<
     ok(json!({"ok": true, "retry": !give_up}))
 }
 
+/// Qismni kodlash navbatidan olib tashlaydi (asl videoga TEGMAYDI).
+/// `skip` (masalan "1080p") berilsa — qism o'chirilmaydi: shu sifat "o'tkazib yuborildi" deb belgilanadi
+/// va tayyor sifatlar bilan odatdagidek yakunlanadi (asl video o'chadi, "Kodlash tugadi" xabari ketadi).
+/// Qism `epizod_id` yoki `epizod_number` bilan topiladi.
+async fn encode_cancel(env: &Env, b: &Value) -> Result<Response> {
+    let (a, s, mut e) = encode_pk(b);
+    if e == 0 {
+        let n = jint(b, "epizod_number");
+        let r = turso_exec(env,
+            "SELECT epizod_id FROM epizod_db WHERE anime_id=? AND season_id=? AND epizod_number=?",
+            vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(n)]).await?;
+        let ids: Vec<i64> = rows_of(&r).iter().map(|x| jint(x, "epizod_id")).collect();
+        if ids.len() != 1 {
+            return json_resp(&json!({"error": format!("{n}-qism topilmadi yoki bir nechta ({})", ids.len())}), 404);
+        }
+        e = ids[0];
+    }
+    let jr = turso_exec(env,
+        "SELECT * FROM encode_jobs WHERE anime_id=? AND season_id=? AND epizod_id=?",
+        vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]).await?;
+    let Some(job) = first_row(&jr) else {
+        return json_resp(&json!({"error": "navbatda yo'q"}), 404);
+    };
+    let queued_at = jint(&job, "queued_at");
+    let skip = b["skip"].as_str().unwrap_or("");
+    if !skip.is_empty() {
+        if !QUALITIES.contains(&skip) {
+            return json_resp(&json!({"error": "sifat"}), 400);
+        }
+        if done_list(job["done"].as_str().unwrap_or("")).is_empty() {
+            return json_resp(&json!({"error": "tayyor sifat yo'q — avval navbatdan olib tashlang"}), 409);
+        }
+        turso_batch(env, &[
+            ("INSERT INTO encode_q (anime_id, season_id, epizod_id, quality, queued_at, state)
+              VALUES (?, ?, ?, ?, ?, 'skip')
+              ON CONFLICT(anime_id, season_id, epizod_id, quality)
+              DO UPDATE SET queued_at=excluded.queued_at, state='skip', runner='', lease_until=0, progress='', error=''",
+             vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e), TursoArg::text(skip), TursoArg::int(queued_at)]),
+            ("UPDATE encode_jobs SET state='queued', runner='', lease_until=0, error=''
+               WHERE anime_id=? AND season_id=? AND epizod_id=? AND queued_at=?",
+             vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e), TursoArg::int(queued_at)]),
+        ]).await?;
+        encode_settle(env, a, s, e, queued_at).await;
+        return ok(json!({"ok": true, "skipped": skip, "epizod_id": e}));
+    }
+    turso_batch(env, &[
+        ("DELETE FROM encode_jobs WHERE anime_id=? AND season_id=? AND epizod_id=?",
+         vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]),
+        ("DELETE FROM encode_q WHERE anime_id=? AND season_id=? AND epizod_id=?",
+         vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]),
+    ]).await?;
+    ok(json!({"ok": true, "removed": true, "epizod_id": e}))
+}
+
 async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -> Result<Response> {
     // ── ILOVA (admin) ────────────────────────────────────────
     if path == "/api/encode/queue" && method == Method::Post {
@@ -11708,6 +11762,20 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
     // yozuvidan, navbatdan va kanaldan. Ishlayotgan run'ning keyingi
     // yozuvlari 409 bilan rad etiladi (ish yo'qoldi) — u to'xtaydi.
     // Tayyor bo'lgan sifatlarga tegilmaydi.
+    // Admin sessiyasi yoki `ENCODE_TOKEN` (`X-Encode-Token`) bilan.
+    if path == "/api/encode/cancel" && method == Method::Post {
+        if !encode_token_ok(&req, env) {
+            let Some(u) = session_user(env, &bearer(&req)).await? else {
+                return json_resp(&json!({"error": "unauthorized"}), 401);
+            };
+            if !is_admin(&u) {
+                return json_resp(&json!({"error": "forbidden"}), 403);
+            }
+        }
+        let b: Value = req.json().await.unwrap_or(json!({}));
+        return encode_cancel(env, &b).await;
+    }
+
     if path == "/api/encode/delete" && method == Method::Post {
         let Some(u) = session_user(env, &bearer(&req)).await? else {
             return json_resp(&json!({"error": "unauthorized"}), 401);
