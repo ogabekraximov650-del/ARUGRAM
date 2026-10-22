@@ -11680,7 +11680,7 @@ async fn translate_batch(env: &Env, b: &Value) -> Result<Response> {
     }
     let model = b["model"].as_str().map(|m| m.trim().to_string()).filter(|m| !m.is_empty() && m.len() < 80
         && m.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '@' | '/' | '-' | '_' | '.' | ':')))
-        .unwrap_or_else(|| "anthropic/claude-haiku-5-5".to_string());
+        .unwrap_or_else(|| "anthropic/claude-haiku-5.5".to_string());
     let src = b["source"].as_str().unwrap_or("").chars().filter(|c| c.is_ascii_alphabetic()).take(20).collect::<String>();
     let dst = b["target"].as_str().unwrap_or("uzbek").chars().filter(|c| c.is_ascii_alphabetic()).take(20).collect::<String>();
     let ai = match env.ai("AI") {
@@ -11697,13 +11697,14 @@ async fn translate_batch(env: &Env, b: &Value) -> Result<Response> {
         sys.push_str(" Lug'at (aynan shunday tarjima qil): ");
         sys.push_str(&Value::Object(g.clone()).to_string());
     }
-    let out: Value = match ai.run(&model, json!({
-        "messages": [
-            {"role": "system", "content": sys},
-            {"role": "user", "content": serde_json::to_string(&texts).unwrap_or_default()},
-        ],
-        "max_tokens": 4096,
-    })).await {
+    let user = serde_json::to_string(&texts).unwrap_or_default();
+    // Anthropic formatida `system` alohida maydon (xabarlar ichida emas); `@cf/...` modellari esa `system` rolini kutadi.
+    let input = if model.starts_with("anthropic/") {
+        json!({"system": sys, "messages": [{"role": "user", "content": user}], "max_tokens": 4096})
+    } else {
+        json!({"messages": [{"role": "system", "content": sys}, {"role": "user", "content": user}], "max_tokens": 4096})
+    };
+    let out: Value = match ai.run(&model, input).await {
         Ok(v) => v,
         Err(e) => return json_resp(&json!({"error": e.to_string().chars().take(300).collect::<String>(), "model": model}), 502),
     };
