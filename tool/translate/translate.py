@@ -688,7 +688,14 @@ async def main():
                 done += 1
             finally:
                 CURRENT = None
+            # Bitta bob (ish) uchun bitta run: tugagach o'chadi (toza mashina, bo'sh disk va xotira).
+            # Navbatda yana ish bo'lsa — workflow'ning "Davom ettirish" qadami yangi run ochadi.
+            break
     log(f"Run tugadi: {done} ta ish.")
+    out = os.environ.get("GITHUB_OUTPUT")
+    if out and done:
+        with open(out, "a") as f:
+            f.write("worked=1\n")
 
 
 if __name__ == "__main__":

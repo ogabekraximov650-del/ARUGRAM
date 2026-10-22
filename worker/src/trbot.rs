@@ -567,6 +567,14 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
         return ok_nostore(json!({"ok": true}));
     }
 
+    // Workflow oxirida: navbatda yana ish bormi (bo'lsa yangi run ochiladi).
+    if path == "/api/tr/peek" {
+        let n = turso_exec(env,
+            "SELECT COUNT(*) AS n FROM tr_jobs WHERE state='queued' OR (state='running' AND lease_until<=?)",
+            vec![TursoArg::int(now)]).await.ok().and_then(|r| first_row(&r)).map(|r| jint(&r, "n")).unwrap_or(0);
+        return ok_nostore(json!({"pending": n}));
+    }
+
     // Yuborishdan oldin: ish hali shu run'nikimi (admin o'chirmaganmi).
     if path == "/api/tr/check" {
         return match own(env, &b).await {

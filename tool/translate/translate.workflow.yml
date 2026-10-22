@@ -19,6 +19,7 @@ concurrency:
 
 permissions:
   contents: read
+  actions: write   # "Davom ettirish": navbatda ish qolsa yangi run ochish
 
 jobs:
   translate:
@@ -63,7 +64,8 @@ jobs:
           head -c 16 "$OUT" | grep -q "SQLite format 3" || { echo "::error::Sessiya ochilmadi (ENCODE_TOKEN noto'g'ri?)"; exit 1; }
           echo "Sessiya tiklandi"
 
-      - name: Navbatdagi tarjimalarni bajarish
+      - name: Navbatdagi tarjimani bajarish
+        id: tr
         env:
           ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
           TG_API_ID: ${{ secrets.TG_API_ID }}
@@ -75,3 +77,15 @@ jobs:
       - name: Sessiyani o'chirish
         if: always()
         run: rm -f tool/translate/pyro_session.session
+
+      # Bitta run — bitta bob. Navbatda yana ish qolgan bo'lsa, keyingi cron'ni kutmasdan yangi run ochiladi.
+      - name: Davom ettirish
+        if: success() && steps.tr.outputs.worked == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+        run: |
+          N=$(curl -fsS -X POST -H "X-Encode-Token: $ENCODE_TOKEN" -H "User-Agent: arumediatv-translate" \
+            -H "Content-Type: application/json" -d '{}' "$API_BASE/api/tr/peek" | jq -r '.pending // 0')
+          echo "Qolgan tarjimalar: $N"
+          if [ "$N" != "0" ]; then gh workflow run translate.yml --repo "$GITHUB_REPOSITORY"; fi
