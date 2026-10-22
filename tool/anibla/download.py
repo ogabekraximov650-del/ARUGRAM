@@ -256,11 +256,23 @@ def fetch(url, timeout=60):
         return r.read()
 
 
+def fetch_retry(url, tries=4):
+    """Playlist yuklash: vaqtinchalik xatoda (timeout) 4 martagacha qayta uriniladi."""
+    err = None
+    for i in range(tries):
+        try:
+            return fetch(url)
+        except Exception as e:  # noqa: BLE001
+            err = e
+            time.sleep(2 * (i + 1))
+    raise err
+
+
 def segments(url):
     """Variant playlist'idagi bo'laklar: [(to'liq manzil, uzunlik)].
     Shifrlangan (EXT-X-KEY), fMP4 (EXT-X-MAP) yoki bayt oralig'i bo'lsa — None
     (unda ffmpeg o'zi yuklaydi)."""
-    text = fetch(url).decode(errors="replace")
+    text = fetch_retry(url).decode(errors="replace")
     if any(t in text for t in ("#EXT-X-KEY", "#EXT-X-MAP", "#EXT-X-BYTERANGE", "#EXT-X-STREAM-INF")):
         return None
     segs, dur = [], 0.0
@@ -296,7 +308,15 @@ def download(url, out, live):
         vsegs = asegs = None
     if not vsegs or asegs is None:
         log("parallel yuklab bo'lmaydi — ffmpeg o'zi yuklaydi")
-        return download_ffmpeg(vurl, out, live, aurl)
+        # Ulanish vaqtinchalik uzilsa (timeout) 3 martagacha qayta uriniladi.
+        for i in range(3):
+            try:
+                return download_ffmpeg(vurl, out, live, aurl)
+            except RuntimeError as e:
+                if i == 2:
+                    raise
+                log(f"  ffmpeg {i + 1}/3 muvaffaqiyatsiz: {e} — qayta uriniladi")
+                time.sleep(10 * (i + 1))
     if aurl:
         log(f"  alohida ovoz yo'li: {len(asegs)} bo'lak (video ichidagi ovoz tashlanadi)")
     par = PARALLEL_EXT if "external-hls" in vurl else PARALLEL
@@ -392,7 +412,7 @@ def download_ffmpeg(url, out, live, audio=""):
     total = playlist_duration(url)
     log(f"  yuklanmoqda: {url} ({hms(total)})")
     cmd = ["ffmpeg", "-nostdin", "-y", "-hide_banner", "-loglevel", "warning", "-progress", "pipe:1",
-           "-user_agent", UA, "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "10",
+           "-user_agent", UA, "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "10", "-rw_timeout", "30000000",
            "-i", url] + (["-user_agent", UA, "-i", audio, "-map", "0:v:0", "-map", "1:a:0"] if audio
                          else ["-map", "0:v:0?", "-map", "0:a?"]) + ["-c", "copy",
            "-bsf:a", "aac_adtstoasc", "-movflags", "+faststart", str(out)]
