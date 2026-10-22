@@ -522,7 +522,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
             if path == "/api/r2/put" {
                 let dest = &b["dest"];
                 let lease_ok = dest["lease"].is_null()
-                    || (["post_jobs", "anibla_jobs", "pack_db"].contains(&dest["lease"]["t"].as_str().unwrap_or(""))
+                    || (["post_jobs", "anibla_jobs", "pack_db", "tr_jobs"].contains(&dest["lease"]["t"].as_str().unwrap_or(""))
                         && dest["lease"]["id"].as_i64().is_some());
                 if !dest.is_object() || dest["to"].as_i64().is_none() || !lease_ok {
                     return json_resp(&json!({"error": "dest"}), 400);
@@ -539,7 +539,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
                     if let Some(r) = row(env, &file).await {
                         let dest: Value = serde_json::from_str(r["dest"].as_str().unwrap_or("{}")).unwrap_or(json!({}));
                         let (t, id) = (dest["lease"]["t"].as_str().unwrap_or(""), dest["lease"]["id"].as_i64().unwrap_or(0));
-                        if ["post_jobs", "anibla_jobs", "pack_db"].contains(&t) && id > 0 {
+                        if ["post_jobs", "anibla_jobs", "pack_db", "tr_jobs"].contains(&t) && id > 0 {
                             let _ = turso_exec(env, &format!("UPDATE {t} SET lease_until=? WHERE id=?"),
                                 vec![TursoArg::int(now + 12 * 3600 * 1000), TursoArg::int(id)]).await;
                         }

@@ -1,0 +1,77 @@
+name: Manga tarjima
+
+# Kodlash botining "Manga tarjima" bo'limi (`worker/src/trbot.rs`).
+# Botga rasm / ZIP / CBZ / PDF yuborilib "Tarjima qilish" bosilganda ish bazadagi
+# navbatga (`tr_jobs`) tushadi va worker shu workflow'ni o'zi ishga tushiradi
+# (cron ham har 10 daqiqada tekshiradi). Run navbat bo'shaguncha ishlarni KETMA-KET
+# bajaradi: OCR -> tarjima (worker, Workers AI) -> rasmga yozish -> bitta fayl -> suhbatga.
+# Avto-kodlash, post va anibla'dan ALOHIDA.
+#
+# Bu fayl ARUMEDIATV repodagi `tool/translate/translate.workflow.yml` dan ko'chiriladi
+# (`sync-packs.yml`) — shu yerda o'zgartirmang.
+
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: arumediatv-translate
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  translate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    env:
+      API_BASE: ${{ secrets.API_BASE || 'https://arumediatv.uzcom.workers.dev' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Shriftlar
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq fonts-dejavu-core
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Python paketlari (Telegram)
+        run: pip install --no-cache-dir -r tool/encode/requirements.txt
+
+      # torch faqat CPU (GPU yo'q) — kichikroq va tezroq o'rnatiladi.
+      - name: Python paketlari (OCR)
+        run: |
+          pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install --no-cache-dir -r tool/translate/requirements.txt
+
+      # EasyOCR modellari (~100 MB) har run'da qayta yuklanmasin.
+      - name: OCR modellari keshi
+        uses: actions/cache@v4
+        with:
+          path: ~/.EasyOCR
+          key: easyocr-models-v1
+
+      - name: Telegram sessiyasi
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+        run: |
+          OUT=tool/translate/pyro_session.session
+          K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K \
+            -in tool/encode/session.enc -out "$OUT"
+          head -c 16 "$OUT" | grep -q "SQLite format 3" || { echo "::error::Sessiya ochilmadi (ENCODE_TOKEN noto'g'ri?)"; exit 1; }
+          echo "Sessiya tiklandi"
+
+      - name: Navbatdagi tarjimalarni bajarish
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+          START_BUDGET_MIN: '300'
+          PYTHONUNBUFFERED: '1'
+        run: python3 tool/translate/translate.py
+
+      - name: Sessiyani o'chirish
+        if: always()
+        run: rm -f tool/translate/pyro_session.session

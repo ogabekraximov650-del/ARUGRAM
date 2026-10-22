@@ -54,6 +54,7 @@ HERE = Path(__file__).parent
 PACKS = HERE.parent / "packs"
 POST = HERE.parent / "post"
 ANIBLA = HERE.parent / "anibla"
+TRANSLATE = HERE.parent / "translate"
 TOKEN = _token()
 # Repo nomi: qo'lda berilgani yoki `gh_repo.txt` (`owner/repo` yoki faqat `repo`).
 NAME = (os.environ.get("REPO_NAME", "").strip()
@@ -127,6 +128,11 @@ def main():
     for src in sorted(POST.iterdir()):
         if src.is_file() and src.suffix in (".py", ".sh", ".png"):
             files[f"tool/post/{src.name}"] = src
+    # "Manga tarjima" — ALOHIDA workflow `translate.yml`.
+    files[".github/workflows/translate.yml"] = TRANSLATE / "translate.workflow.yml"
+    for src in sorted(TRANSLATE.iterdir()):
+        if src.is_file() and src.suffix in (".py", ".txt"):
+            files[f"tool/translate/{src.name}"] = src
     # "Anibla yuklash" — ALOHIDA workflow `anibla.yml` (`creds.enc` KO'CHIRILMAYDI).
     files[".github/workflows/anibla.yml"] = ANIBLA / "anibla.workflow.yml"
     files["tool/anibla/download.py"] = ANIBLA / "download.py"

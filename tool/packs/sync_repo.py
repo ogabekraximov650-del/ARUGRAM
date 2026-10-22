@@ -38,6 +38,11 @@ FILES[".github/workflows/post.yml"] = HERE.parent / "post" / "post.workflow.yml"
 for _src in sorted((HERE.parent / "post").iterdir()):
     if _src.is_file() and _src.suffix in (".py", ".sh", ".png"):
         FILES[f"tool/post/{_src.name}"] = _src
+# "Manga tarjima" (kodlash botining "🌐 Manga tarjima" bo'limi) — ALOHIDA workflow `translate.yml`.
+FILES[".github/workflows/translate.yml"] = HERE.parent / "translate" / "translate.workflow.yml"
+for _src in sorted((HERE.parent / "translate").iterdir()):
+    if _src.is_file() and _src.suffix in (".py", ".txt"):
+        FILES[f"tool/translate/{_src.name}"] = _src
 # "Anibla yuklash" (kodlash botining uchinchi bo'limi) — ALOHIDA workflow `anibla.yml`.
 # `creds.enc` KO'CHIRILMAYDI: login/parol faqat worker'da (ANIBLA_CREDS).
 FILES[".github/workflows/anibla.yml"] = HERE.parent / "anibla" / "anibla.workflow.yml"

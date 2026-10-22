@@ -11,6 +11,7 @@ on:
       - 'tool/packs/**'
       - 'tool/encode/run.py'
       - 'tool/post/**'
+      - 'tool/translate/**'
       - 'tool/anibla/download.py'
       - 'tool/anibla/anibla.workflow.yml'
       - 'tool/fmp4/**'

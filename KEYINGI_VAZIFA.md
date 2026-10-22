@@ -6698,3 +6698,26 @@ Hozircha: `.tgs` — faqat kichik rasm (2-bosqich: lottie-android + libwebp bila
 - **Bepul ko'rish:** `gate.rs` — ruxsat ekrani va fon oqimida kanallarga bittalab qo'shilish (FLOOD bo'lsa ≥30 daqiqa kutadi, pleyer ochiq paytda to'xtaydi).
 - **Boshqa:** video tezligi (AAudio chastotasi ko'paytiriladi — ovoz balandligi ham o'zgaradi), oflayn kutubxona (faqat yuklab olingan bo'limlar), QR orqali kirish (`qr.rs`, `qrcodegen`), tarixda to'xtagan joy kadri (`UzActivity.frameToFile`), rasm/to'plam/sessiya keshi shifrlangan (`secure.rs`, AES-256-GCM yadro orqali) va LRU tozalash, server manzili zaxirasi (`downloads::resolve`).
 - **Qilinmagan:** qism g'ildiragi (EpisodeDial), Telegram hisobidagi stiker/emoji (TGS/Lottie), bildirishnomalar (Kotlin'da ham "tez orada"), iOS.
+
+## Kodlash botida "🌐 Manga tarjima" bo'limi (2026-10)
+
+TALAB (foydalanuvchi): botga rasmlarni ketma-ket (yoki ZIP/CBZ/PDF) yuborsa, ular ESDA QOLSIN; oxirida
+bitta fayl bo'lib o'zbekcha tarjima qilingan holda qaytsin; ish ikkinchi GitHub akkaunt (`GH_REPO`, avtoencode)
+orqali ketsin. Tarjimani Cloudflare Workers AI bajarsin (API kalitsiz), standart model `@cf/openai/gpt-oss-120b`.
+
+- `worker/src/trbot.rs` — bot qismi, `kick` va `/api/tr/{claim,progress,check,finish}`. Bosh menyuda "🌐 Manga tarjima".
+  Rejim `app_config.encbot_mode='tr'`; sozlamalar `tr_src` (manba tili), `tr_fmt` (pdf|cbz|zip), `tr_title`, `tr_cnt`.
+  ESDA SAQLASH: har yuborilgan rasm/fayl jadval `tr_pages` ga yoziladi (`UNIQUE(chat,msg_id)` — takror webhook e'tiborsiz);
+  bot qayta ishga tushsa ham, soatlab jim tursa ham yo'qolmaydi. Javob bitta "Qabul qilindi: N" xabarini tahrirlaydi.
+  "✅ Tarjima qilish" -> hamma fayl `copyMessages` bilan yopiq kanalga (100 tadan), `tr_jobs` ga bitta ish, `kick` -> `translate.yml`.
+  Navbat tugmalari: `td/tx/tn` (o'chirish), `ty` (qayta urinish). R2 yetkazish ruxsat ro'yxatiga `tr_jobs` qo'shildi (`r2.rs`).
+- `/api/encode/translate` (`translate_batch`, `ENCODE_TOKEN`) — matnlar ro'yxati -> o'zbekcha, `env.AI` bog'lanishi (`wrangler.toml` `[ai]`,
+  `[env.production.ai]`). MUHIM: `serde_json::Value` ni `Ai::run` ga bermang — JS'ga `Map` bo'lib ketadi (`AiGatewayError 7003`);
+  struct ishlatiladi. Anthropic (`anthropic/...`) modellari AI Gateway krediti talab qiladi (`2021: Insufficient AI Gateway credits`),
+  `@cf/...` modellari bepul kunlik 10 000 neyron ichida. `deepseek-v4-*` va `kimi-k2.7-code` bepul rejada yopiq.
+- `tool/translate/translate.py` (+ `translate.workflow.yml`, `requirements.txt`) — runner: kanaldan yuklash (ZIP/CBZ/PDF yoyiladi),
+  EasyOCR (uzun manhwa lentalari 1800 px bo'laklarda), yaqin qutilar pufakchaga birlashadi, hamma matn BIRGA tarjima qilinadi,
+  bir xil fon bo'yaladi / murakkab fon inpaint, o'zbekcha matn DejaVu Sans Bold bilan yoziladi, natija PDF/CBZ/ZIP.
+  Suhbatga asosiy akkaunt yuboradi; bo'lmasa R2 -> panel bot (`fallback_bot`). `sync-packs.yml` va `setup_repo.py` ko'chiradi.
+- Tekshirilmagan: EasyOCR haqiqiy manga sahifalarida (faqat chizish/tartiblash sintetik rasmda sinalgan), bot oqimi Telegram'da.
+  Sifat yetmasa: `translate_batch` dagi model nomini almashtirish (so'rovda `model`) yoki OCR sozlamalarini (`MIN_CONF`, `TILE_H`) tuzatish.
