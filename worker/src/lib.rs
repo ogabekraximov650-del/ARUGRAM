@@ -11699,10 +11699,20 @@ async fn translate_batch(env: &Env, b: &Value) -> Result<Response> {
     }
     let user = serde_json::to_string(&texts).unwrap_or_default();
     // Anthropic formatida `system` alohida maydon (xabarlar ichida emas); `@cf/...` modellari esa `system` rolini kutadi.
+    // DIQQAT: `serde_json::Value` JS'ga `Map` bo'lib ketadi (AI "User Input Error" beradi) — shuning uchun struct.
+    #[derive(serde::Serialize)]
+    struct AiMsg { role: &'static str, content: String }
+    #[derive(serde::Serialize)]
+    struct AiIn {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        system: Option<String>,
+        messages: Vec<AiMsg>,
+        max_tokens: u32,
+    }
     let input = if model.starts_with("anthropic/") {
-        json!({"system": sys, "messages": [{"role": "user", "content": user}], "max_tokens": 4096})
+        AiIn { system: Some(sys), messages: vec![AiMsg { role: "user", content: user }], max_tokens: 4096 }
     } else {
-        json!({"messages": [{"role": "system", "content": sys}, {"role": "user", "content": user}], "max_tokens": 4096})
+        AiIn { system: None, messages: vec![AiMsg { role: "system", content: sys }, AiMsg { role: "user", content: user }], max_tokens: 4096 }
     };
     let out: Value = match ai.run(&model, input).await {
         Ok(v) => v,
