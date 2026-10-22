@@ -42,6 +42,10 @@ TILE_H = 1800       # uzun lentalar shu balandlikdagi bo'laklarda o'qiladi
 TILE_OVERLAP = 240  # bo'laklar shuncha ustma-ust tushadi
 MIN_CONF = 0.25
 CHUNK = 40          # bitta tarjima so'rovidagi matnlar soni
+# OCR tezligi: EasyOCR standart canvas_size=2560 (rasmni kattalashtirib o'qiydi) juda sekin — manga matni katta,
+# 1280 yetadi (A4 sahifada ~4x tezroq, sinalgan). Kichik matn tushib qolsa OCR_CANVAS ni oshiring.
+OCR_CANVAS = int(os.environ.get("OCR_CANVAS", "1280"))
+PDF_DPI = int(os.environ.get("PDF_DPI", "120"))
 
 sys.path.insert(0, str(HERE.parent / "upload"))
 try:
@@ -199,7 +203,7 @@ def expand_file(path: Path, kind: str, name: str, dst: Path, start: int) -> list
         pm = _pymupdf()
         doc = pm.open(str(path))
         for k, page in enumerate(doc):
-            pix = page.get_pixmap(dpi=150)
+            pix = page.get_pixmap(dpi=PDF_DPI)
             p = dst / f"{start + k:05d}.png"
             pix.save(str(p))
             out.append(p)
@@ -235,6 +239,8 @@ async def collect_images(app, channel, pages, live):
 
 def make_reader(source):
     import easyocr
+    import torch
+    torch.set_num_threads(max(1, os.cpu_count() or 1))
     return easyocr.Reader(OCR_LANGS.get(source, ["en"]), gpu=False, verbose=False)
 
 
@@ -248,7 +254,7 @@ def ocr_image(reader, img):
     for ti, (y0, y1) in enumerate(tiles):
         lo = y0 + (TILE_OVERLAP // 2 if ti > 0 else 0)
         hi = y1 - (TILE_OVERLAP // 2 if ti < len(tiles) - 1 else 0)
-        for poly, text, conf in reader.readtext(img[y0:y1], detail=1, paragraph=False):
+        for poly, text, conf in reader.readtext(img[y0:y1], detail=1, paragraph=False, canvas_size=OCR_CANVAS, batch_size=8):
             xs, ys = [p[0] for p in poly], [p[1] for p in poly]
             box = (int(min(xs)), int(min(ys)) + y0, int(max(xs)), int(max(ys)) + y0)
             cy = (box[1] + box[3]) / 2
