@@ -565,3 +565,21 @@ fn har_xil_balandlikli_virtual_royxat_faqat_korinadiganni_quradi() {
     let b = built.borrow().clone();
     assert!(!b.is_empty() && b[0] > 50 && b.len() < 20, "{b:?}");
 }
+
+#[test]
+fn ota_qutisidan_chiqqan_element_joylashuv_xatosi_sifatida_yoziladi() {
+    uzcoders_core::clear_errors();
+    let mut ui = Ui::new(font(), || {
+        column(vec![
+            column(vec![column(vec![]).width(120.0).height(10.0)]).width(40.0).height(40.0),
+            column(vec![text("Qisqa")]).width(100.0).height(40.0),
+        ])
+    });
+    ui.frame(SZ);
+    ui.frame(SZ);
+    let t = uzcoders_core::errors_text();
+    assert!(t.contains("joylashuv: element 120x10"), "{t}");
+    assert!(!t.contains("Qisqa"));
+    assert_eq!(t.lines().count(), 1, "{t}");
+    uzcoders_core::clear_errors();
+}

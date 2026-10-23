@@ -950,5 +950,6 @@ mod tests {
         panel.scroll[2].set_offset(900.0);
         ui.frame(Size::new(400.0, 800.0));
         ui.frame(Size::new(400.0, 800.0));
+        eprintln!("JOYLASHUV:\n{}", uzcoders::prelude::errors_text());
     }
 }

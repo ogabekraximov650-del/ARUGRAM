@@ -372,6 +372,7 @@ impl Ui {
         let mut cbs = Vec::new();
         let root_id = self.add(root, &mut tree, &mut items, &mut cbs);
         tree.compute(root_id, size);
+        check_overflow(&tree, &items, self.scale);
 
         self.hits.clear();
         self.swipes.clear();
@@ -1385,3 +1386,65 @@ fn it_padding(tree: &Tree, node: usize) -> EdgeInsets {
 
 #[cfg(test)]
 mod tests;
+
+
+thread_local! {
+    static FIT_SEEN: std::cell::RefCell<std::collections::HashSet<String>> = std::cell::RefCell::new(std::collections::HashSet::new());
+}
+
+/// UZ: Joylashuv tekshiruvi: aylantirilmaydigan konteynerning bolasi ota qutisidan chiqib ketsa (masalan, matn/tugma sig'masa) xatolar jurnaliga yoziladi (har holat bir marta).
+/// EN: Layout check: when a child of a non-scrolling container sticks out of its parent box (for example text/button does not fit) it is written to the error log (once per case).
+/// RU: Проверка раскладки: если ребёнок неприкручиваемого контейнера выходит за рамку родителя (например, не помещается текст/кнопка), это записывается в журнал ошибок (по разу на случай).
+fn check_overflow(tree: &Tree, items: &[Item], scale: f32) {
+    let k = scale.max(0.1);
+    let mut scroll = std::collections::HashSet::new();
+    let mut label: std::collections::HashMap<usize, String> = std::collections::HashMap::new();
+    for it in items {
+        if matches!(it.kind, ItemKind::ScrollEnd) {
+            continue;
+        }
+        if it.scroll.is_some() {
+            scroll.insert(it.node);
+        }
+        if let ItemKind::Text(t, ..) = &it.kind {
+            label.insert(it.node, format!("matn \"{}\"", t.chars().take(30).collect::<String>()));
+        }
+    }
+    let mut stack = vec![0usize];
+    // UZ: Ildiz tugun `add` ning birinchi chaqirig'idan keladi; indekslarni bolalar orqali yuramiz.
+    // EN: The root node comes from the first `add` call; we walk indexes through the children.
+    // RU: Корневой узел приходит из первого вызова `add`; обходим индексы через детей.
+    if let Some(first) = items.iter().find(|i| !matches!(i.kind, ItemKind::ScrollEnd)) {
+        stack = vec![first.node];
+    }
+    let mut found = 0;
+    while let Some(n) = stack.pop() {
+        let r = tree.rect(n);
+        let skip = scroll.contains(&n);
+        for &c in tree.children(n) {
+            stack.push(c);
+            if skip {
+                continue;
+            }
+            let cr = tree.rect(c);
+            let (ox, oy) = ((cr.x + cr.w) - (r.x + r.w), (cr.y + cr.h) - (r.y + r.h));
+            let (nx, ny) = (r.x - cr.x, r.y - cr.y);
+            let worst = ox.max(oy).max(nx).max(ny);
+            if worst > 3.0 && cr.w > 0.0 && cr.h > 0.0 {
+                let name = label.get(&c).cloned().unwrap_or_else(|| format!("element {:.0}x{:.0}", cr.w / k, cr.h / k));
+                let key = format!("{name}|{:.0}|{:.0}|{:.0}", r.w / k, r.h / k, worst / k);
+                let fresh = FIT_SEEN.with(|s| {
+                    let mut s = s.borrow_mut();
+                    s.len() < 500 && s.insert(key)
+                });
+                if fresh && found < 5 {
+                    found += 1;
+                    uzcoders_core::report_error(
+                        "joylashuv",
+                        &format!("{name} ota qutisidan {:.0} dp chiqib ketdi (ota {:.0}x{:.0} dp, bola {:.0}x{:.0} dp)", worst / k, r.w / k, r.h / k, cr.w / k, cr.h / k),
+                    );
+                }
+            }
+        }
+    }
+}

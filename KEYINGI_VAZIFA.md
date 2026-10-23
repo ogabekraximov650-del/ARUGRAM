@@ -6794,3 +6794,7 @@ tashqi dekodersiz, sof Rustda chizilsin; server/Actions'siz, telefonning o'zida.
 - `uzcoders-core/src/errlog.rs`: `report_error(joy, sabab)` (istalgan oqimdan), oxirgi 100 ta, bir xillari ×N, `files/errors.txt` ga saqlanadi; `take_error_toast` UI oqimida (glue) 15 soniyada bir marta toast ko'rsatadi.
 - `arumediatv-rs`: tarmoq/server (api.rs), Telegram yadro/yuklash/olish (backend.rs, tgmedia.rs, data.rs), rasm va animatsiya yuklash (tgcache.rs) xatolari jurnalga tushadi. Ko'rish: Profil → "Xatolar jurnali" (nusxalash + tozalash; qurilma ma'lumoti bilan).
 - Serverga yuborilmaydi. Yangi xato joylarini `uzcoders::prelude::report_error` bilan ulang.
+
+## Joylashuv xatolarini aniqlash (2026-10-23)
+
+- `uzcoders-ui/src/lib.rs::check_overflow`: har kadrda (`compute` dan keyin) aylantirilmaydigan konteynerning bolasi ota qutisidan 3 pikseldan ko'p chiqsa, `report_error("joylashuv", ...)` (har holat bir marta, kadrda ko'pi bilan 5 ta). Aylanuvchi konteynerlar o'tkazib yuboriladi. Xatolar jurnalida ko'rinadi.
