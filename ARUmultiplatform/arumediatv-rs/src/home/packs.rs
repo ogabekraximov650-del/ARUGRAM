@@ -274,12 +274,12 @@ impl Home {
             ])
             .gap(8.0),
         ])
-        .lens(Color::rgba(18, 18, 24, 120), GLASS_ZOOM)
+        .lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM)
         .radius(28.0)
         .padding(20.0)
         .margin_each(20.0, 0.0, 20.0, 0.0);
         let pc = p.clone();
-        column(vec![panel]).center().bg(Color::rgba(0, 0, 0, 130)).on_click(move || pc.create.set(false))
+        column(vec![panel]).center().bg(Color::rgba(0, 0, 0, 45)).on_click(move || pc.create.set(false))
     }
 
     fn pack_detail(self: &Rc<Self>, p: &Rc<PacksPage>, d: &PackInfo) -> Element {
@@ -397,8 +397,8 @@ impl Home {
                 } else if it.anim == 1 {
                     col.push(tx("Animatsiyali (bu yerda birinchi kadr)", 12.0, Color::WHITE).padding_each(0.0, 8.0, 0.0, 0.0));
                 }
-                let panel = column(col).center().lens(Color::rgba(18, 18, 24, 120), GLASS_ZOOM).radius(28.0).padding(20.0);
-                stack(vec![page, column(vec![panel]).center().bg(Color::rgba(0, 0, 0, 150)).on_click(move || pc.big.set(None))])
+                let panel = column(col).center().lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM).radius(28.0).padding(20.0);
+                stack(vec![page, column(vec![panel]).center().bg(Color::rgba(0, 0, 0, 45)).on_click(move || pc.big.set(None))])
             }
             None => page,
         }

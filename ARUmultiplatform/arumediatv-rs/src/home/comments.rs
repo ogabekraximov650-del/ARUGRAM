@@ -492,7 +492,7 @@ impl Home {
             let pm = p.clone();
             col.push(tx(p.cm.msg.get(), 12.5, ERROR).padding_xy(18.0, 2.0).on_click(move || pm.cm.msg.set(String::new())));
         }
-        col.push(column(bar_kids).lens(Color::rgba(18, 18, 24, 150), 1.0).radius(28.0).margin_each(12.0, 4.0, 12.0, 8.0));
+        col.push(column(bar_kids).lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM).radius(28.0).margin_each(12.0, 4.0, 12.0, 8.0));
         column(col)
     }
 
@@ -524,12 +524,12 @@ impl Home {
                 ])
                 .gap(8.0),
             ])
-            .lens(Color::rgba(18, 18, 24, 120), GLASS_ZOOM)
+            .lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM)
             .radius(28.0)
             .padding(20.0)
             .margin_each(20.0, 0.0, 20.0, 0.0);
             let pc = p.clone();
-            return Some(column(vec![panel]).center().bg(Color::rgba(0, 0, 0, 130)).on_click(move || pc.cm.report.set(None)));
+            return Some(column(vec![panel]).center().bg(Color::rgba(0, 0, 0, 45)).on_click(move || pc.cm.report.set(None)));
         }
         let c = p.cm.menu.get()?;
         let mine = c.user_id == self.profile.get().id;
@@ -557,7 +557,7 @@ impl Home {
         }
         let pc = p.clone();
         let panel = Self::pglass(column(opts)).radius(24.0).margin_each(40.0, 0.0, 40.0, 0.0);
-        Some(column(vec![panel]).center().bg(Color::rgba(0, 0, 0, 120)).on_click(move || pc.cm.menu.set(None)))
+        Some(column(vec![panel]).center().bg(Color::rgba(0, 0, 0, 45)).on_click(move || pc.cm.menu.set(None)))
     }
 }
 

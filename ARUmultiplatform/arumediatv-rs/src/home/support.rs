@@ -706,7 +706,7 @@ impl Home {
         }
         let pc = p.clone();
         let panel = Self::pglass(column(opts)).radius(24.0).margin_each(40.0, 0.0, 40.0, 0.0);
-        column(vec![panel]).center().bg(Color::rgba(0, 0, 0, 120)).on_click(move || pc.menu.set(String::new()))
+        column(vec![panel]).center().bg(Color::rgba(0, 0, 0, 45)).on_click(move || pc.menu.set(String::new()))
     }
 }
 

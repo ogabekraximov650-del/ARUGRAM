@@ -706,7 +706,7 @@ impl Home {
                 me.play_episode(&pc, &ep, None, Some(0), true);
             }));
         }
-        let panel = scroll_column(&p.pl.ep_scroll, kids).lens(Color::rgba(18, 18, 24, 110), GLASS_ZOOM).radius(24.0).padding(12.0).width(260.0);
+        let panel = scroll_column(&p.pl.ep_scroll, kids).lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM).radius(24.0).padding(12.0).width(260.0);
         let pc = p.clone();
         stack(vec![column(vec![]).bg(Color::rgba(0, 0, 0, 90)).on_click(move || pc.pl.ep_list.set(false)), row(vec![spacer(), panel.margin_each(0.0, 16.0, 16.0, 16.0)])])
     }
@@ -775,9 +775,9 @@ impl Home {
         kids.push(row(timers).gap(8.0).scroll(&self.chips_scroll2).height(44.0));
         let pc = p.clone();
         kids.push(row(vec![spacer(), self.chip("Yopish", true, move || pc.pl.settings.set(false))]).padding_each(0.0, 14.0, 0.0, 0.0));
-        let panel = scroll_column(&p.pl.set_scroll, kids).lens(Color::rgba(18, 18, 24, 120), GLASS_ZOOM).radius(28.0).padding(20.0).width(380.0).margin_each(0.0, 12.0, 0.0, 12.0);
+        let panel = scroll_column(&p.pl.set_scroll, kids).lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM).radius(28.0).padding(20.0).width(380.0).margin_each(0.0, 12.0, 0.0, 12.0);
         let pc = p.clone();
-        stack(vec![column(vec![]).bg(Color::rgba(0, 0, 0, 130)).on_click(move || pc.pl.settings.set(false)), row(vec![spacer(), panel, spacer()])])
+        stack(vec![column(vec![]).bg(Color::rgba(0, 0, 0, 45)).on_click(move || pc.pl.settings.set(false)), row(vec![spacer(), panel, spacer()])])
     }
 }
 

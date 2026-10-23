@@ -214,8 +214,8 @@ impl Home {
             kids.push(row(std::iter::once(spacer()).chain(buttons).collect()).gap(8.0));
         }
         let scrim_close = close.clone();
-        let panel = column(kids).lens(Color::rgba(18, 18, 24, 120), GLASS_ZOOM).radius(28.0).padding(22.0).margin_each(24.0, 0.0, 24.0, 0.0);
-        let scrim = column(vec![panel]).center().bg(Color::rgba(0, 0, 0, 120));
+        let panel = column(kids).lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM).radius(28.0).padding(22.0).margin_each(24.0, 0.0, 24.0, 0.0);
+        let scrim = column(vec![panel]).center().bg(Color::rgba(0, 0, 0, 45));
         if kind == 6 { scrim } else { scrim.on_click(scrim_close) }
     }
 

@@ -178,12 +178,12 @@ impl Home {
                 ])
                 .gap(8.0),
             ])
-            .lens(Color::rgba(18, 18, 24, 120), GLASS_ZOOM)
+            .lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM)
             .radius(28.0)
             .padding(22.0)
             .margin_each(24.0, 0.0, 24.0, 0.0);
             let pc = p.clone();
-            layers.push(column(vec![panel]).center().bg(Color::rgba(0, 0, 0, 120)).on_click(move || pc.confirm.set(false)));
+            layers.push(column(vec![panel]).center().bg(Color::rgba(0, 0, 0, 45)).on_click(move || pc.confirm.set(false)));
         }
         let sn = p.snack.get();
         if !sn.is_empty() {

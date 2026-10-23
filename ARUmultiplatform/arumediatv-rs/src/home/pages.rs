@@ -456,7 +456,7 @@ impl Home {
             gap_box(0.0, 14.0),
             row(vec![spacer(), self.chip("Bekor qilish", false, move || pc.rating_open.set(false))]),
         ])
-        .lens(Color::rgba(18, 18, 24, 120), GLASS_ZOOM)
+        .lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM)
         .radius(28.0)
         .padding(22.0)
         .margin_each(24.0, 0.0, 24.0, 0.0);

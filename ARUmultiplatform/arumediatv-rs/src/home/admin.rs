@@ -476,8 +476,8 @@ impl Home {
                 kids.push(row(vec![spacer(), self.chip("Yo'q", false, close.clone()), self.chip("Ochish", true, move || { c1(); m1.user_act(&p1, u1.id, "unban", 0, 0, String::new(), "Blokdan chiqarildi".into()); })]).gap(8.0).padding_each(0.0, 14.0, 0.0, 0.0));
             }
         }
-        let panel = column(kids).lens(Color::rgba(18, 18, 24, 120), GLASS_ZOOM).radius(28.0).padding(18.0).margin_each(20.0, 0.0, 20.0, 0.0);
-        column(vec![panel]).center().bg(Color::rgba(0, 0, 0, 130)).on_click(close)
+        let panel = column(kids).lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM).radius(28.0).padding(18.0).margin_each(20.0, 0.0, 20.0, 0.0);
+        column(vec![panel]).center().bg(Color::rgba(0, 0, 0, 45)).on_click(close)
     }
 
     // ── Suhbatlar (0) va Shikoyatlar (1) ──
@@ -632,12 +632,12 @@ impl Home {
                 ])
                 .gap(8.0),
             ])
-            .lens(Color::rgba(18, 18, 24, 120), GLASS_ZOOM)
+            .lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM)
             .radius(28.0)
             .padding(22.0)
             .margin_each(24.0, 0.0, 24.0, 0.0);
             let pc = p.clone();
-            layers.push(column(vec![panel]).center().bg(Color::rgba(0, 0, 0, 130)).on_click(move || pc.confirm.set(None)));
+            layers.push(column(vec![panel]).center().bg(Color::rgba(0, 0, 0, 45)).on_click(move || pc.confirm.set(None)));
         }
         stack(layers)
     }

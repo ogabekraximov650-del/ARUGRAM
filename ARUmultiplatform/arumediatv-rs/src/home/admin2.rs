@@ -19,8 +19,8 @@ fn post(session: &str, path: &str, body: Value) -> Result<Value, String> {
 }
 
 fn modal(inner: Element, close: impl Fn() + 'static) -> Element {
-    let panel = inner.lens(Color::rgba(18, 18, 24, 120), GLASS_ZOOM).radius(28.0).padding(20.0).margin_each(20.0, 0.0, 20.0, 0.0);
-    column(vec![panel]).center().bg(Color::rgba(0, 0, 0, 130)).on_click(close)
+    let panel = inner.lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM).radius(28.0).padding(20.0).margin_each(20.0, 0.0, 20.0, 0.0);
+    column(vec![panel]).center().bg(Color::rgba(0, 0, 0, 45)).on_click(close)
 }
 
 pub struct ChannelsPage {
