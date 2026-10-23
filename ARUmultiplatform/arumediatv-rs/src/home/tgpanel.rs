@@ -171,6 +171,8 @@ pub struct TgPanel {
     rep: Rc<Cell<u32>>,
     /// UZ: Stiker/GIF yuborish (so'nggi qurilishdan). EN: The sticker/GIF send callback (from the latest build). RU: Обработчик отправки стикера/GIF (из последней сборки).
     send_cb: RefCell<Option<Rc<dyn Fn(String, &'static str)>>>,
+    /// UZ: Yuklanayotgan ro'yxatlar boshlangan vaqti (kalit -> vaqt). EN: When the lists being loaded started (key -> time). RU: Когда начата загрузка списков (ключ -> время).
+    load_start: RefCell<HashMap<String, Instant>>,
 }
 
 impl TgPanel {
@@ -181,6 +183,7 @@ impl TgPanel {
             scroll: [ScrollState::new(), ScrollState::new(), ScrollState::new()],
             strip: ScrollState::new(),
             data: RefCell::new(Data::default()),
+            load_start: RefCell::new(HashMap::new()),
             font_tried: Cell::new(false),
             last_off: Cell::new(0.0),
             last_move: Cell::new(Instant::now()),
@@ -199,6 +202,53 @@ impl TgPanel {
     fn cur(&self) -> &ScrollState {
         &self.scroll[self.tab.get().min(2) as usize]
     }
+}
+
+thread_local! {
+    static CE_REG: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+}
+
+const PUA0: u32 = 0xE000;
+const PUA_MAX: usize = 0x1800;
+
+/// UZ: Maxsus emoji tokenini (`[ce:nom:id:😀]`) yozish maydoniga bitta belgi sifatida joylaydi (maydonda uzun matn ko'rinmasin): shaxsiy belgi (PUA) qaytaradi; yuborishda `ce_expand` bilan tokenga qaytariladi.
+/// EN: Puts a custom emoji token (`[ce:name:id:😀]`) into the input field as a single character (so no long text shows in the field): returns a private-use (PUA) character; `ce_expand` turns it back into the token on send.
+/// RU: Помещает токен пользовательского эмодзи (`[ce:имя:id:😀]`) в поле ввода одним символом (чтобы в поле не было длинного текста): возвращает символ частного использования (PUA); при отправке `ce_expand` возвращает токен.
+pub(super) fn ce_compact(tok: &str) -> String {
+    CE_REG.with(|r| {
+        let mut r = r.borrow_mut();
+        let i = match r.iter().position(|t| t == tok) {
+            Some(i) => i,
+            None if r.len() < PUA_MAX => {
+                r.push(tok.to_string());
+                r.len() - 1
+            }
+            None => return tok.to_string(),
+        };
+        char::from_u32(PUA0 + i as u32).map(String::from).unwrap_or_else(|| tok.to_string())
+    })
+}
+
+fn ce_map(s: &str, f: impl Fn(&str) -> String) -> String {
+    CE_REG.with(|r| {
+        let r = r.borrow();
+        s.chars()
+            .map(|c| match (c as u32).checked_sub(PUA0).and_then(|i| r.get(i as usize)) {
+                Some(t) if (PUA0..PUA0 + PUA_MAX as u32).contains(&(c as u32)) => f(t),
+                _ => c.to_string(),
+            })
+            .collect()
+    })
+}
+
+/// UZ: Shaxsiy belgilarni to'liq tokenlarga qaytaradi (yuborish uchun). EN: Turns the private-use characters back into full tokens (for sending). RU: Возвращает символы PUA в полные токены (для отправки).
+pub(super) fn ce_expand(s: &str) -> String {
+    ce_map(s, |t| t.to_string())
+}
+
+/// UZ: Shaxsiy belgilarni zaxira emojiga almashtiradi (ko'rinish uchun). EN: Replaces the private-use characters with their fallback emoji (for display). RU: Заменяет символы PUA запасным эмодзи (для отображения).
+pub(super) fn ce_plain(s: &str) -> String {
+    ce_map(s, |t| crate::tgmedia::plain_text(t))
 }
 
 /// UZ: Matn oxiridagi bitta belgini (maxsus emoji belgisi yoki emoji ketma-ketligi) o'chiradi. EN: Removes the last character (a custom emoji token or an emoji sequence). RU: Удаляет последний символ (токен пользовательского эмодзи или последовательность эмодзи).
@@ -296,7 +346,11 @@ impl Home {
             return;
         }
         let (me, p2) = (self.clone(), p.clone());
-        spawn_bg(work, move |l| {
+        p.load_start.borrow_mut().insert(key.to_string(), Instant::now());
+        let k = key.to_string();
+        // UZ: Ro'yxat yuklash tezkor yo'lda: og'ir rasm/animatsiya ishlari navbatida kutib qolmasin.
+        spawn_bg_fast(work, move |l| {
+            p2.load_start.borrow_mut().remove(&k);
             let mut d = p2.data.borrow_mut();
             match l {
                 Loaded::EmojiSets(v) => d.emoji_sets = Some(v),
@@ -414,6 +468,34 @@ impl Home {
     fn strip_btn(inner: Element, selected: bool, f: impl Fn() + 'static) -> Element {
         let b = column(vec![inner]).center().width(40.0).height(34.0).radius(12.0);
         (if selected { b.bg(Color::rgba(255, 255, 255, 40)) } else { b }).on_click(f)
+    }
+
+    /// UZ: Ro'yxat yuklanmoqda: aylanuvchi ko'rsatkich; 20 soniyadan oshsa sabab va "Qayta urinish" tugmasi (jurnalga ham yoziladi).
+    /// EN: A list is loading: a spinner; after 20 seconds a reason and a "Retry" button (also written to the error log).
+    /// RU: Список загружается: индикатор; через 20 секунд — причина и кнопка «Повторить» (также пишется в журнал ошибок).
+    fn tgp_loading(self: &Rc<Self>, p: &Rc<TgPanel>, key: &str) -> Element {
+        let started = p.load_start.borrow().get(key).copied();
+        let late = started.is_some_and(|t| t.elapsed().as_secs() >= 20);
+        if !late {
+            if started.is_some() {
+                let me = self.clone();
+                spawn_bg(|| std::thread::sleep(std::time::Duration::from_secs(21)), move |_| me.gate_rev.set(me.gate_rev.get() + 1));
+            }
+            return column(vec![spinner(28.0, 3.0, ACCENT2)]).center();
+        }
+        thread_local! {
+            static LATE: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
+        }
+        if LATE.with(|l| l.borrow_mut().insert(format!("{key}{started:?}"))) {
+            uzcoders::prelude::report_error("panel", &format!("{key} 20 soniyada yuklanmadi (Telegram yoki tarmoq sekin)"));
+        }
+        let (me, pp, k) = (self.clone(), p.clone(), key.to_string());
+        let retry = column(vec![tx("Qayta urinish", 13.0, Color::WHITE).bold()]).center().padding_xy(18.0, 10.0).bg(ACCENT.with_opacity(0.5)).radius(12.0).on_click(move || {
+            pp.data.borrow_mut().pending.remove(&k);
+            pp.load_start.borrow_mut().remove(&k);
+            me.gate_rev.set(me.gate_rev.get() + 1);
+        });
+        column(vec![tx("Telegram javob bermayapti", 13.5, Color::rgba(255, 255, 255, 170)), gap_box(0.0, 12.0), retry]).center().padding(20.0)
     }
 
     fn tgp_empty(msg: &str) -> Element {
@@ -732,7 +814,7 @@ impl Home {
     fn tgp_sticker_page(self: &Rc<Self>, p: &Rc<TgPanel>, pw: f32, off_dp: f32, on_send: Rc<dyn Fn(String, &'static str)>) -> (Layout, Vec<(SecIcon, bool)>, Element) {
         let sets = p.data.borrow().sticker_sets.clone();
         let Some(sets) = sets else {
-            return (Layout::new(), Vec::new(), column(vec![spinner(28.0, 3.0, ACCENT2)]).center());
+            return (Layout::new(), Vec::new(), self.tgp_loading(p, "sets_s"));
         };
         if sets.is_empty() {
             return (Layout::new(), Vec::new(), Self::tgp_empty("Telegram hisobingizda stiker to'plami yo'q"));
@@ -799,7 +881,7 @@ impl Home {
     fn tgp_gif_page(self: &Rc<Self>, p: &Rc<TgPanel>, pw: f32, on_send: Rc<dyn Fn(String, &'static str)>) -> (Layout, Vec<(SecIcon, bool)>, Element) {
         let gifs = p.data.borrow().gifs.clone();
         let Some(gifs) = gifs else {
-            return (Layout::new(), Vec::new(), column(vec![spinner(28.0, 3.0, ACCENT2)]).center());
+            return (Layout::new(), Vec::new(), self.tgp_loading(p, "gifs"));
         };
         if gifs.is_empty() {
             return (Layout::new(), Vec::new(), Self::tgp_empty("Telegram'da saqlangan GIF yo'q"));
@@ -969,6 +1051,18 @@ mod tests {
     }
 
     /// UZ: Panel har uch tabda xatosiz quriladi (soxta ma'lumot bilan), uzoq bosish ko'rinishi ham. EN: The panel builds on all three tabs without errors (fake data), and so does the long-press preview. RU: Панель строится на всех трёх вкладках без ошибок (на фиктивных данных), как и просмотр при долгом нажатии.
+    #[test]
+    fn maxsus_emoji_maydonda_bitta_belgi() {
+        let tok = "[ce:pack_1:123:😀]";
+        let c = ce_compact(tok);
+        assert_eq!(c.chars().count(), 1);
+        assert_eq!(ce_compact(tok), c);
+        let s = format!("salom {c}!");
+        assert_eq!(ce_expand(&s), "salom [ce:pack_1:123:😀]!");
+        assert_eq!(ce_plain(&s), "salom 😀!");
+        assert_eq!(pop_last_char(&format!("a{c}")), "a");
+    }
+
     #[test]
     fn emoji_atlas_oryni_topiladi() {
         assert_eq!(cat_pos("😀"), Some((0, 0)));

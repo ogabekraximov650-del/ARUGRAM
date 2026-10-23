@@ -151,6 +151,24 @@ pub fn spawn_bg<R: Send + 'static>(
     work: impl FnOnce() -> R + Send + 'static,
     done: impl FnOnce(R) + 'static,
 ) {
+    spawn_lane(0, work, done);
+}
+
+/// UZ: `spawn_bg` ning tezkor varianti: alohida (4 oqimli) yo'lda bajariladi, og'ir vazifalar navbatida kutmaydi.
+/// EN: The fast variant of `spawn_bg`: runs on a separate (4-thread) lane and does not wait behind heavy tasks.
+/// RU: Быстрый вариант `spawn_bg`: выполняется на отдельной полосе (4 потока) и не ждёт за тяжёлыми задачами.
+pub fn spawn_bg_fast<R: Send + 'static>(
+    work: impl FnOnce() -> R + Send + 'static,
+    done: impl FnOnce(R) + 'static,
+) {
+    spawn_lane(1, work, done);
+}
+
+fn spawn_lane<R: Send + 'static>(
+    lane: usize,
+    work: impl FnOnce() -> R + Send + 'static,
+    done: impl FnOnce(R) + 'static,
+) {
     let id = NEXT.fetch_add(1, Ordering::Relaxed);
     DONE.with(|d| {
         d.borrow_mut().insert(
@@ -163,7 +181,7 @@ pub fn spawn_bg<R: Send + 'static>(
         )
     });
     PENDING.fetch_add(1, Ordering::SeqCst);
-    submit(Box::new(move || {
+    submit(lane, Box::new(move || {
         let r = work();
         QUEUE.lock().unwrap().push((id, Box::new(r)));
         if let Some(w) = *WAKER.lock().unwrap() {
@@ -174,29 +192,42 @@ pub fn spawn_bg<R: Send + 'static>(
 
 type Job = Box<dyn FnOnce() + Send>;
 
-/// UZ: Oqimlar puli chegarasi: ko'p vazifa bir vaqtda kelsa, yangi oqim ochilmaydi, navbatda kutadi (aks holda "failed to spawn thread").
-/// EN: Thread pool limit: when many tasks arrive at once no new threads are created, they wait in a queue (otherwise "failed to spawn thread").
-/// RU: Предел пула потоков: при множестве задач новые потоки не создаются, а ждут в очереди (иначе "failed to spawn thread").
-const MAX_WORKERS: usize = 16;
-
 struct Pool {
     jobs: std::collections::VecDeque<Job>,
     workers: usize,
     idle: usize,
 }
 
-static POOL: Mutex<Pool> = Mutex::new(Pool { jobs: std::collections::VecDeque::new(), workers: 0, idle: 0 });
-static POOL_CV: std::sync::Condvar = std::sync::Condvar::new();
+/// UZ: Oqimlar puli yo'li: o'z navbati, oqimlari va chegarasi bor.
+/// EN: A thread pool lane: its own queue, threads and limit.
+/// RU: Полоса пула потоков: своя очередь, потоки и предел.
+struct Lane {
+    pool: Mutex<Pool>,
+    cv: std::sync::Condvar,
+    max: usize,
+}
 
-fn submit(job: Job) {
-    let mut p = POOL.lock().unwrap();
+/// UZ: Oqimlar puli chegarasi: ko'p vazifa bir vaqtda kelsa, yangi oqim ochilmaydi, navbatda kutadi (aks holda "failed to spawn thread").
+/// 0-yo'l — umumiy (16 oqim); 1-yo'l — tezkor (4 oqim): ro'yxat yuklash kabi kichik muhim ishlar og'ir ishlar navbatida qolib ketmasin.
+/// EN: Thread pool limit: when many tasks arrive at once no new threads are created, they wait in a queue (otherwise "failed to spawn thread").
+/// Lane 0 is the general one (16 threads); lane 1 is the fast one (4 threads): small important jobs such as list loading must not get stuck behind heavy ones.
+/// RU: Предел пула потоков: при множестве задач новые потоки не создаются, а ждут в очереди (иначе "failed to spawn thread").
+/// Полоса 0 — общая (16 потоков); полоса 1 — быстрая (4 потока): небольшие важные задачи (например, загрузка списков) не должны застревать за тяжёлыми.
+static LANES: [Lane; 2] = [
+    Lane { pool: Mutex::new(Pool { jobs: std::collections::VecDeque::new(), workers: 0, idle: 0 }), cv: std::sync::Condvar::new(), max: 16 },
+    Lane { pool: Mutex::new(Pool { jobs: std::collections::VecDeque::new(), workers: 0, idle: 0 }), cv: std::sync::Condvar::new(), max: 4 },
+];
+
+fn submit(lane: usize, job: Job) {
+    let l = &LANES[lane];
+    let mut p = l.pool.lock().unwrap();
     p.jobs.push_back(job);
     if p.idle > 0 {
-        POOL_CV.notify_one();
+        l.cv.notify_one();
         return;
     }
     // UZ: 4 MB stek: chuqur rekursiyali chizuvchi (Lottie) uchun yetarli. EN: 4 MB stack: enough for the deeply recursive renderer (Lottie). RU: Стек 4 МБ: достаточно для глубоко рекурсивного рендера (Lottie).
-    if p.workers < MAX_WORKERS && std::thread::Builder::new().stack_size(4 << 20).spawn(worker).is_ok() {
+    if p.workers < l.max && std::thread::Builder::new().stack_size(4 << 20).spawn(move || worker(lane)).is_ok() {
         p.workers += 1;
     }
     // UZ: Oqim ochib bo'lmasa ham ish navbatda qoladi: mavjud oqimlar uni oladi.
@@ -204,16 +235,17 @@ fn submit(job: Job) {
     // RU: Даже если поток создать нельзя, задача остаётся в очереди: её заберут существующие потоки.
 }
 
-fn worker() {
+fn worker(lane: usize) {
+    let l = &LANES[lane];
     loop {
         let job = {
-            let mut p = POOL.lock().unwrap();
+            let mut p = l.pool.lock().unwrap();
             loop {
                 if let Some(j) = p.jobs.pop_front() {
                     break Some(j);
                 }
                 p.idle += 1;
-                let (g, t) = POOL_CV.wait_timeout(p, std::time::Duration::from_secs(5)).unwrap();
+                let (g, t) = l.cv.wait_timeout(p, std::time::Duration::from_secs(5)).unwrap();
                 p = g;
                 p.idle -= 1;
                 if t.timed_out() && p.jobs.is_empty() {
@@ -302,12 +334,12 @@ mod pool_tests {
         let n = std::sync::Arc::new(AtomicUsize::new(0));
         for _ in 0..500 {
             let n = n.clone();
-            submit(Box::new(move || {
+            submit(0, Box::new(move || {
                 std::thread::sleep(std::time::Duration::from_millis(2));
                 n.fetch_add(1, Ordering::SeqCst);
             }));
         }
-        assert!(POOL.lock().unwrap().workers <= MAX_WORKERS);
+        assert!(LANES[0].pool.lock().unwrap().workers <= LANES[0].max);
         for _ in 0..500 {
             if n.load(Ordering::SeqCst) == 500 {
                 break;

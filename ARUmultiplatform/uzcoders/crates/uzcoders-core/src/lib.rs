@@ -21,4 +21,4 @@ pub use geometry::{EdgeInsets, Point, Rect, Size};
 pub use state::{global_revision, invalidate, State};
 pub mod errlog;
 pub use errlog::{clear_errors, error_entries, errors_text, report_error, set_error_file, take_error_toast, ErrEntry};
-pub use task::{clear_frame_request, clear_video_frame_request, request_video_frame, video_frame_requested, drain_tasks, frame_requested, request_frame, pending_tasks, breadcrumb, crash_context, memory_mb, set_waker, spawn_bg};
+pub use task::{clear_frame_request, clear_video_frame_request, request_video_frame, video_frame_requested, drain_tasks, frame_requested, request_frame, pending_tasks, breadcrumb, crash_context, memory_mb, set_waker, spawn_bg, spawn_bg_fast};

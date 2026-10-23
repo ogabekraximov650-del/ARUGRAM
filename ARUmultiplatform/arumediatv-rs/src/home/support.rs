@@ -409,7 +409,7 @@ impl Home {
         let header_h = 12.0 + ins.top + 56.0 + 8.0;
         let bar_h = 62.0
             + if p.reply.get().is_some() { 52.0 } else { 0.0 }
-            + if super::richtext::needs_rich(&crate::tgmedia::plain_text(&p.input.get())) { 42.0 } else { 0.0 }
+            + if super::richtext::needs_rich(&crate::tgmedia::plain_text(&super::tgpanel::ce_plain(&p.input.get()))) { 42.0 } else { 0.0 }
             + if p.ep.open.get() { super::tgpanel::PANEL_H } else { 0.0 }
             + if p.err.get().is_empty() { 0.0 } else { 26.0 };
         let mut kids: Vec<Element> = Vec::new();
@@ -466,7 +466,7 @@ impl Home {
             .radius(24.0)
             .on_click(move || {
                 if !ps.input.get().trim().is_empty() && !ps.busy.get() {
-                    let t = ps.input.get();
+                    let t = super::tgpanel::ce_expand(&ps.input.get());
                     ps.input.set(String::new());
                     me2.chat_send(&ps, t, None);
                 }
@@ -491,7 +491,7 @@ impl Home {
             );
         }
         // Yozilayotgan matnda emoji/CJK bo'lsa — maydon ularni chiza olmaydi, shuning uchun ko'rinishi shu yerda.
-        let typed = crate::tgmedia::plain_text(&p.input.get());
+        let typed = crate::tgmedia::plain_text(&super::tgpanel::ce_plain(&p.input.get()));
         if super::richtext::needs_rich(&typed) {
             bar_col.push(
                 Self::pglass(self.rich_el(&typed, 15.0, w - 64.0, 0xFFFFFFFF, false).padding_xy(14.0, 8.0))
@@ -503,7 +503,10 @@ impl Home {
         if p.ep.open.get() {
             let (pi, pb, ps2, pe2) = (p.clone(), p.clone(), p.clone(), p.ep.clone());
             let me_s = self.clone();
-            let on_emoji: Rc<dyn Fn(String)> = Rc::new(move |e| pi.input.set(format!("{}{}", pi.input.get(), e)));
+            let on_emoji: Rc<dyn Fn(String)> = Rc::new(move |e| {
+                let e = if e.starts_with("[ce:") { super::tgpanel::ce_compact(&e) } else { e };
+                pi.input.set(format!("{}{}", pi.input.get(), e))
+            });
             let on_back: Rc<dyn Fn()> = Rc::new(move || pb.input.set(super::tgpanel::pop_last_char(&pb.input.get())));
             let on_sticker: Rc<dyn Fn(String, &'static str)> = Rc::new(move |r, kind| {
                 if !ps2.busy.get() {
