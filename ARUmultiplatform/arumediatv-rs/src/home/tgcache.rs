@@ -200,11 +200,13 @@ impl Home {
                     }
                     std::thread::sleep(std::time::Duration::from_millis(80));
                 }
-                uzcoders::prelude::breadcrumb("animatsiya varag'i boshlandi");
+                let (vm, rss) = uzcoders::prelude::memory_mb();
+                uzcoders::prelude::breadcrumb(&format!("animatsiya varag'i boshlandi (xotira {vm}/{rss} MB)"));
                 let r = load(&wanted);
                 BUSY.fetch_sub(1, Ordering::SeqCst);
+                let (vm, rss) = uzcoders::prelude::memory_mb();
                 uzcoders::prelude::breadcrumb(match &r {
-                    Ok(s) => format!("animatsiya varag'i tayyor {}x{}", s.w, s.h),
+                    Ok(s) => format!("animatsiya varag'i tayyor {}x{} (xotira {vm}/{rss} MB)", s.w, s.h),
                     Err(e) => format!("animatsiya varag'i xato: {e}"),
                 }.as_str());
                 Some(r)

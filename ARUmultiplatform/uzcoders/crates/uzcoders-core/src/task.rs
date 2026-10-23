@@ -88,6 +88,24 @@ pub fn breadcrumb(msg: &str) {
     }
 }
 
+/// UZ: Jarayonning virtual va haqiqiy xotirasi, MB (`/proc/self/status`); o'qib bo'lmasa (0, 0).
+/// EN: The process's virtual and resident memory in MB (`/proc/self/status`); (0, 0) when unreadable.
+/// RU: Виртуальная и физическая память процесса в МБ (`/proc/self/status`); (0, 0), если прочитать нельзя.
+pub fn memory_mb() -> (u64, u64) {
+    let (mut vm, mut rss) = (0, 0);
+    if let Ok(st) = std::fs::read_to_string("/proc/self/status") {
+        let kb = |l: &str| l.split_whitespace().nth(1).and_then(|v| v.parse::<u64>().ok()).unwrap_or(0) / 1024;
+        for l in st.lines() {
+            if l.starts_with("VmSize:") {
+                vm = kb(l);
+            } else if l.starts_with("VmRSS:") {
+                rss = kb(l);
+            }
+        }
+    }
+    (vm, rss)
+}
+
 /// UZ: Yiqilish hisoboti matni: so'nggi amallar, oqimlar va xotira (Linux/Android `/proc/self/status`).
 /// EN: Crash report text: recent actions, thread count and memory (Linux/Android `/proc/self/status`).
 /// RU: Текст отчёта о сбое: недавние действия, число потоков и память (Linux/Android `/proc/self/status`).
