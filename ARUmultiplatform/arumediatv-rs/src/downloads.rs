@@ -308,7 +308,21 @@ pub fn history_frame_r(session: &str, video_url: &str, thumb_url: &str, pos_ms: 
         if port <= 0 {
             return Err("Telegram porti yo'q".into());
         }
-        format!("http://127.0.0.1:{port}/tg/0/{name}")
+        // Kadr uchun "yumshoq" yo'l (`/tg/t/`): bu o'qish xatosi faylni 2 daqiqaga Telegram'dan chetlatmaydi (yadro `soft`).
+        let u = format!("http://127.0.0.1:{port}/tg/t/{name}");
+        // Nusxa bot chatida paydo bo'lishi bir necha soniya olishi mumkin — tayyor bo'lguncha (25 s gacha) kutiladi.
+        let mut ready = false;
+        for _ in 0..25 {
+            if ureq::get(&u).set("Range", "bytes=0-0").timeout(std::time::Duration::from_secs(10)).call().is_ok() {
+                ready = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_secs(1));
+        }
+        if !ready {
+            return Err("fayl bot chatida paydo bo'lmadi".into());
+        }
+        u
     };
     let port = crate::data::tg_port();
     if port <= 0 {
