@@ -409,7 +409,6 @@ impl Home {
         let header_h = 12.0 + ins.top + 56.0 + 8.0;
         let bar_h = 62.0
             + if p.reply.get().is_some() { 52.0 } else { 0.0 }
-            + if super::richtext::needs_rich(&crate::tgmedia::plain_text(&super::tgpanel::ce_plain(&p.input.get()))) { 42.0 } else { 0.0 }
             + if p.ep.open.get() { super::tgpanel::PANEL_H } else { 0.0 }
             + if p.err.get().is_empty() { 0.0 } else { 26.0 };
         let mut kids: Vec<Element> = Vec::new();
@@ -441,7 +440,8 @@ impl Home {
         let me = self.clone();
         let me2 = self.clone();
         let can_send = !p.input.get().trim().is_empty() && !p.busy.get();
-        let input = field(&p.input).color(Color::WHITE).size(15.0).hint("Xabar").hint_color(Color::rgba(255, 255, 255, 96)).accent(ACCENT2).padding_xy(4.0, 14.0).no_border().weight(1.0);
+        let me_img = self.clone();
+        let input = field(&p.input).inline_images(move |c| me_img.input_emoji_image(c)).color(Color::WHITE).size(15.0).hint("Xabar").hint_color(Color::rgba(255, 255, 255, 96)).accent(ACCENT2).padding_xy(4.0, 14.0).no_border().weight(1.0);
         let pe = p.ep.clone();
         let emo = column(vec![icon(if p.ep.open.get() { S_KEYBOARD } else { S_EMOJI }, 24.0).color(Color::rgba(255, 255, 255, 170))])
             .center()
@@ -488,15 +488,6 @@ impl Home {
                 )
                 .radius(18.0)
                 .margin_each(10.0, 6.0, 10.0, 0.0),
-            );
-        }
-        // Yozilayotgan matnda emoji/CJK bo'lsa — maydon ularni chiza olmaydi, shuning uchun ko'rinishi shu yerda.
-        let typed = crate::tgmedia::plain_text(&super::tgpanel::ce_plain(&p.input.get()));
-        if super::richtext::needs_rich(&typed) {
-            bar_col.push(
-                Self::pglass(self.rich_el(&typed, 15.0, w - 64.0, 0xFFFFFFFF, false).padding_xy(14.0, 8.0))
-                    .radius(18.0)
-                    .margin_each(10.0, 6.0, 10.0, 0.0),
             );
         }
         bar_col.push(row(vec![pill, send]).gap(8.0).align(Align::End).margin_each(10.0, 6.0, 10.0, 8.0));

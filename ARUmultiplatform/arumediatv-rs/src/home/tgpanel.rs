@@ -242,6 +242,16 @@ fn ce_map(s: &str, f: impl Fn(&str) -> String) -> String {
 }
 
 /// UZ: Shaxsiy belgilarni to'liq tokenlarga qaytaradi (yuborish uchun). EN: Turns the private-use characters back into full tokens (for sending). RU: Возвращает символы PUA в полные токены (для отправки).
+pub(super) fn ce_token(c: &str) -> Option<String> {
+    let mut it = c.chars();
+    let ch = it.next()?;
+    if it.next().is_some() {
+        return None;
+    }
+    CE_REG.with(|r| (ch as u32).checked_sub(PUA0).and_then(|i| r.borrow().get(i as usize).cloned()))
+}
+
+/// UZ: Shaxsiy belgilarni to'liq tokenlarga qaytaradi (yuborish uchun). EN: Turns the private-use characters back into full tokens (for sending). RU: Возвращает символы PUA в полные токены (для отправки).
 pub(super) fn ce_expand(s: &str) -> String {
     ce_map(s, |t| t.to_string())
 }
@@ -735,6 +745,14 @@ impl Home {
     /// EN: An emoji from the atlas: one cell once the atlas is ready (no extra decoding), otherwise it is prepared in the background and a blank space is shown meanwhile.
     /// RU: Эмодзи из атласа: одна ячейка, когда атлас готов (без лишнего декодирования), иначе он готовится в фоне, а пока показывается пустое место.
     fn tgp_atlas_emoji(self: &Rc<Self>, ci: usize, ix: usize) -> Element {
+        match self.tgp_atlas_image(ci, ix) {
+            Some((img, n)) => sprite_frame(&img, crate::emojifont::ATLAS_COLS, n, ix as u32, 32.0, 32.0),
+            None => column(vec![]).width(32.0).height(32.0),
+        }
+    }
+
+    /// UZ: Atlas rasmi (tayyor bo'lsa) va undagi emoji soni; tayyor bo'lmasa fonda tayyorlaydi. EN: The atlas image (when ready) and its emoji count; prepares it in the background otherwise. RU: Изображение атласа (если готово) и число эмодзи в нём; иначе готовит в фоне.
+    fn tgp_atlas_image(self: &Rc<Self>, ci: usize, _ix: usize) -> Option<(Rc<Image>, u32)> {
         let _ = self.gate_rev.get();
         let dens = density().max(0.5);
         let (cell_px, glyph_px) = ((32.0 * dens).round() as u32, 28.0 * dens);
@@ -747,7 +765,7 @@ impl Home {
             _ => None,
         });
         match st {
-            Some(Some((img, n))) => return sprite_frame(&img, crate::emojifont::ATLAS_COLS, n, ix as u32, 32.0, 32.0),
+            Some(Some((img, n))) => return Some((img, n)),
             Some(None) => {}
             None => {
                 ATLAS.with(|a| a.borrow_mut().insert(key.clone(), AtlasSt::Loading));
@@ -765,8 +783,40 @@ impl Home {
                 });
             }
         }
-        column(vec![]).width(32.0).height(32.0)
+        None
     }
+
+    /// UZ: Yozish maydonidagi emoji uchun rasm: maxsus emoji (shaxsiy belgi) -> uning rasmi; oddiy emoji -> atlasdagi katak; boshqasi -> tizim shriftidan chizilgan rasm.
+    /// EN: The image for an emoji in the input field: a custom emoji (private-use char) -> its picture; a plain emoji -> a cell of the atlas; anything else -> an image drawn with the system font.
+    /// RU: Изображение эмодзи в поле ввода: пользовательское эмодзи (символ PUA) -> его картинка; обычное эмодзи -> ячейка атласа; остальное -> картинка, нарисованная системным шрифтом.
+    pub(super) fn input_emoji_image(self: &Rc<Self>, cluster: &str) -> Option<(Rc<Image>, Option<(u32, u32, u32, u32)>)> {
+        if let Some(tok) = ce_token(cluster) {
+            // [ce:nom:id:zaxira]
+            let id = tok.trim_end_matches(']').split(':').nth(2).and_then(|s| s.parse::<i64>().ok());
+            if let Some(id) = id {
+                let img = self.tg_img(&format!("ce{id:x}"), move || {
+                    let d = tgmedia::emoji_doc(id).ok_or_else(|| "maxsus emoji hujjati topilmadi".to_string())?;
+                    tgmedia::image(&d, 96)
+                });
+                if let Some(i) = img {
+                    return Some((i, None));
+                }
+            }
+            // Rasm tayyor bo'lguncha zaxira emoji.
+            let fb = crate::tgmedia::plain_text(&tok);
+            return self.input_emoji_image(&fb);
+        }
+        let dens = density().max(0.5);
+        if let Some((ci, ix)) = cat_pos(cluster) {
+            let cell = (32.0 * dens).round() as u32;
+            let (img, _n) = self.tgp_atlas_image(ci, ix)?;
+            let cols = crate::emojifont::ATLAS_COLS;
+            return Some((img, Some(((ix as u32 % cols) * cell, (ix as u32 / cols) * cell, cell, cell))));
+        }
+        self.rich_poll(cluster, 26.0, 40.0, 0xFFFFFFFF, false).map(|(i, _, _)| (i, None))
+    }
+
+
 
     fn tgp_sets_of(&self, p: &Rc<TgPanel>, tab: u8) -> Vec<TgSet> {
         let d = p.data.borrow();

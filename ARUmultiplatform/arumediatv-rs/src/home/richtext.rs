@@ -54,6 +54,31 @@ fn render(text: &str, size_px: f32, max_w_px: i32, argb: u32, bold: bool) -> Opt
 }
 
 impl Home {
+    /// UZ: Matn rasmi tayyor bo'lsa qaytaradi, bo'lmasa fonda tayyorlaydi (`rich_el` bilan bir xil kesh). Yozish maydonidagi emoji uchun.
+    /// EN: Returns the text image if ready, otherwise prepares it in the background (the same cache as `rich_el`). For emoji in the input field.
+    /// RU: Возвращает картинку текста, если готова, иначе готовит в фоне (тот же кеш, что у `rich_el`). Для эмодзи в поле ввода.
+    pub(super) fn rich_poll(self: &Rc<Self>, text: &str, size_dp: f32, max_w_dp: f32, argb: u32, bold: bool) -> Option<(Rc<Image>, u32, u32)> {
+        let key = format!("{size_dp}|{max_w_dp}|{argb:08X}|{}|{text}", bold as u8);
+        match self.rich_imgs.borrow().get(&key) {
+            Some(RichState::Ready(img, w, h)) => return Some((img.clone(), *w, *h)),
+            Some(_) => return None,
+            None => {}
+        }
+        self.rich_imgs.borrow_mut().insert(key.clone(), RichState::Loading);
+        let dens = density().max(0.5);
+        let (me, t) = (self.clone(), text.to_string());
+        let (px, mw) = (size_dp * dens, (max_w_dp * dens) as i32);
+        spawn_bg(move || render(&t, px, mw, argb, bold), move |r| {
+            let st = match r {
+                Some((img, w, h)) => RichState::Ready(Rc::new(img), w, h),
+                None => RichState::Failed,
+            };
+            me.rich_imgs.borrow_mut().insert(key, st);
+            me.gate_rev.set(me.gate_rev.get() + 1);
+        });
+        None
+    }
+
     /// Matn rasmi (emoji/CJK bilan to'g'ri). `max_w_dp` — qatorga o'raladigan kenglik. Tayyor bo'lguncha bo'sh joy,
     /// chizib bo'lmasa — oddiy matn.
     pub(super) fn rich_el(self: &Rc<Self>, text: &str, size_dp: f32, max_w_dp: f32, argb: u32, bold: bool) -> Element {

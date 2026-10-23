@@ -600,3 +600,22 @@ fn sprite_frame_aniq_kadrni_chizadi() {
     assert_eq!(src, Some((2, 1, 2, 1)));
     assert!(!ui.needs_frame());
 }
+
+#[test]
+fn maydonda_emoji_rasm_bilan_chiziladi_va_butun_ochadi() {
+    let st = State::new("a😀".to_string());
+    let img = Rc::new(Image { w: 4, h: 4, rgba: vec![255; 64] });
+    let (s2, i2) = (st.clone(), img.clone());
+    let mut ui = Ui::new(font(), move || {
+        let i3 = i2.clone();
+        field(&s2).inline_images(move |c| if c == "😀" { Some((i3.clone(), None)) } else { None })
+    });
+    let cmds = ui.frame(SZ);
+    let imgs = cmds.iter().filter(|c| matches!(c, DrawCmd::Image { .. })).count();
+    assert_eq!(imgs, 1);
+    assert!(cmds.iter().any(|c| matches!(c, DrawCmd::Text { text, .. } if text == "a")));
+    let r = ui.fields[0].rect;
+    tap(&mut ui, r.x + r.w - 2.0, r.y + r.h / 2.0);
+    assert!(ui.key_backspace());
+    assert_eq!(st.get(), "a");
+}

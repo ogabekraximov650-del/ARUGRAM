@@ -6,6 +6,7 @@ mod element;
 mod nav;
 mod scroll;
 
+pub mod emoji;
 use element::{Callback, FieldCfg, Kind};
 use std::rc::Rc;
 use uzcoders_core::{
@@ -556,7 +557,7 @@ impl Ui {
                     let inner_w = (r.w - pad.horizontal()).max(0.0);
                     let caret_idx = self.caret.min(shown.chars().count());
                     let prefix: String = shown.chars().take(caret_idx).collect();
-                    let caret_x = self.font.text_width_spaced(&prefix, cfg.size, cfg.spacing);
+                    let caret_x = field_width(&self.font, &cfg, &prefix.chars().collect::<Vec<_>>());
                     let shift_x = if focused {
                         (caret_x - inner_w + 2.0 * self.scale).max(0.0)
                     } else {
@@ -639,6 +640,38 @@ impl Ui {
                                     weight: 400,
                                     spacing: cfg.spacing,
                                 });
+                            }
+                        } else if let Some(prov) = cfg.inline.clone() {
+                            // UZ: Emoji rasm bilan, qolgan matn shrift bilan: bo'lak-bo'lak chiziladi.
+                            // EN: Emoji as images, the rest as font text: drawn piece by piece.
+                            // RU: Эмодзи картинками, остальное шрифтом: рисуется по кускам.
+                            let chars: Vec<char> = shown.chars().collect();
+                            let ew = cfg.size * EMOJI_W;
+                            let mut x = text_x;
+                            for (a, b, is_e) in emoji::clusters(&chars) {
+                                let piece: String = chars[a..b].iter().collect();
+                                if is_e {
+                                    if let Some((image, src)) = prov(&piece) {
+                                        let rect = Rect::new(x + ew * 0.04, top + (lh - ew * 0.92) * 0.5, ew * 0.92, ew * 0.92);
+                                        cmds.push(match src {
+                                            Some(src) => DrawCmd::ImageRegion { image, src, rect, opacity: 1.0 },
+                                            None => DrawCmd::Image { image, rect, opacity: 1.0 },
+                                        });
+                                    }
+                                    x += ew;
+                                } else {
+                                    let w = self.font.text_width_spaced(&piece, cfg.size, cfg.spacing);
+                                    cmds.push(DrawCmd::Text {
+                                        x,
+                                        baseline: top + base,
+                                        text: piece,
+                                        size: cfg.size,
+                                        color: cfg.color,
+                                        weight: 400,
+                                        spacing: cfg.spacing,
+                                    });
+                                    x += w;
+                                }
                             }
                         } else {
                             cmds.push(DrawCmd::Text {
@@ -948,6 +981,27 @@ impl Ui {
     fn caret_from_x(&self, fi: usize, x: f32) -> usize {
         let f = &self.fields[fi];
         let mut acc = f.text_x;
+        if f.cfg.inline.is_some() {
+            let chars: Vec<char> = f.shown.chars().collect();
+            let ew = f.cfg.size * EMOJI_W;
+            for (a, b, is_e) in emoji::clusters(&chars) {
+                if is_e {
+                    if x < acc + ew * 0.5 {
+                        return a;
+                    }
+                    acc += ew;
+                } else {
+                    for (k, ch) in chars[a..b].iter().enumerate() {
+                        let w = self.font.char_advance(*ch, f.cfg.size) + f.cfg.spacing;
+                        if x < acc + w * 0.5 {
+                            return a + k;
+                        }
+                        acc += w;
+                    }
+                }
+            }
+            return chars.len();
+        }
         for (i, ch) in f.shown.chars().enumerate() {
             let a = self.font.char_advance(ch, f.cfg.size) + f.cfg.spacing;
             if x < acc + a * 0.5 {
@@ -1241,10 +1295,19 @@ impl Ui {
     /// RU: IME: удаление символов вокруг курсора.
     pub fn ime_delete(&mut self, before: usize, after: usize) -> bool {
         self.composing = None;
-        self.edit(|chars, caret, _| {
-            let b = before.min(*caret);
-            chars.drain(*caret - b..*caret);
-            *caret -= b;
+        self.edit(|chars, caret, cfg| {
+            if cfg.inline.is_some() {
+                // UZ: Emoji maydonida "oldingi belgi" — butun emoji. EN: In an emoji field a "previous character" is a whole emoji. RU: В поле с эмодзи «предыдущий символ» — целое эмодзи.
+                for _ in 0..before {
+                    let from = emoji::cluster_start_before(chars, *caret);
+                    chars.drain(from..*caret);
+                    *caret = from;
+                }
+            } else {
+                let b = before.min(*caret);
+                chars.drain(*caret - b..*caret);
+                *caret -= b;
+            }
             let a = after.min(chars.len() - *caret);
             chars.drain(*caret..*caret + a);
             true
@@ -1294,7 +1357,7 @@ impl Ui {
     /// EN: Deletes the character before the cursor (Backspace).
     /// RU: Удаляет символ перед курсором (Backspace).
     pub fn key_backspace(&mut self) -> bool {
-        self.edit(|chars, caret, _| {
+        self.edit(|chars, caret, cfg| {
             // UZ: Formatlovchi probelni emas, undan oldingi belgini o'chiramiz.
             // EN: Delete the character before the formatter's space, not the space itself.
             // RU: Удаляем символ перед пробелом форматирования, а не сам пробел.
@@ -1302,8 +1365,9 @@ impl Ui {
                 *caret -= 1;
             }
             if *caret > 0 {
-                chars.remove(*caret - 1);
-                *caret -= 1;
+                let from = if cfg.inline.is_some() { emoji::cluster_start_before(chars, *caret) } else { *caret - 1 };
+                chars.drain(from..*caret);
+                *caret = from;
             }
             true
         })
@@ -1455,4 +1519,30 @@ fn check_overflow(tree: &Tree, items: &[Item], scale: f32) {
             }
         }
     }
+}
+
+/// UZ: Emoji klasterining kengligi (shrift o'lchamiga nisbatan).
+/// EN: The width of an emoji cluster (relative to the font size).
+/// RU: Ширина кластера эмодзи (относительно размера шрифта).
+const EMOJI_W: f32 = 1.25;
+
+/// UZ: Maydon matnining kengligi: `inline` bo'lsa emoji klasterlari `EMOJI_W * size`, qolgani shrift bo'yicha.
+/// EN: The width of a field's text: with `inline`, emoji clusters take `EMOJI_W * size`, the rest is measured by the font.
+/// RU: Ширина текста поля: при `inline` кластеры эмодзи занимают `EMOJI_W * size`, остальное измеряется шрифтом.
+fn field_width(font: &Font, cfg: &FieldCfg, chars: &[char]) -> f32 {
+    if cfg.inline.is_none() {
+        let s: String = chars.iter().collect();
+        return font.text_width_spaced(&s, cfg.size, cfg.spacing);
+    }
+    emoji::clusters(chars)
+        .into_iter()
+        .map(|(a, b, is_e)| {
+            if is_e {
+                cfg.size * EMOJI_W
+            } else {
+                let s: String = chars[a..b].iter().collect();
+                font.text_width_spaced(&s, cfg.size, cfg.spacing)
+            }
+        })
+        .sum()
 }

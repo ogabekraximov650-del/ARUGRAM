@@ -56,7 +56,13 @@ pub(crate) struct FieldCfg {
     pub spacing: f32,
     pub keyboard: KeyboardKind,
     pub label_inside: bool,
+    pub inline: Option<InlineImg>,
 }
+
+/// UZ: Matn maydonidagi emoji uchun rasm beruvchi: emoji klasteri -> (rasm, rasmning chiziladigan qismi piksellarda yoki butun rasm). `None` — bo'sh joy chiziladi.
+/// EN: Provides images for emoji in a text field: an emoji cluster -> (image, the part to draw in pixels, or the whole image). `None` draws blank space.
+/// RU: Поставщик изображений для эмодзи в поле ввода: кластер эмодзи -> (изображение, рисуемая часть в пикселях или всё изображение). `None` — рисуется пустое место.
+pub type InlineImg = Rc<dyn Fn(&str) -> Option<(Rc<Image>, Option<(u32, u32, u32, u32)>)>>;
 
 pub(crate) enum Kind {
     Container,
@@ -463,6 +469,15 @@ impl Element {
         }
         self
     }
+    /// UZ: Matn maydonida emoji rasm bilan chiziladi (`f` — emoji klasteri uchun rasm beradi); kursor va o'chirish butun emoji bo'yicha.
+    /// EN: Emoji in the text field are drawn as images (`f` supplies the image for an emoji cluster); the cursor and deletion work on whole emoji.
+    /// RU: Эмодзи в поле ввода рисуются картинками (`f` даёт изображение для кластера эмодзи); курсор и удаление работают по целому эмодзи.
+    pub fn inline_images(mut self, f: impl Fn(&str) -> Option<(Rc<Image>, Option<(u32, u32, u32, u32)>)> + 'static) -> Self {
+        if let Some(c) = self.field_cfg() {
+            c.inline = Some(Rc::new(f));
+        }
+        self
+    }
     /// UZ: Fokusdagi kontur va kursor rangi.
     /// EN: Color of the focused border and the cursor.
     /// RU: Цвет контура в фокусе и курсора.
@@ -799,6 +814,7 @@ pub fn field(state: &State<String>) -> Element {
             spacing: 0.0,
             keyboard: KeyboardKind::Text,
             label_inside: false,
+            inline: None,
         })),
         Style::default(),
         Vec::new(),
