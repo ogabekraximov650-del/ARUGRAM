@@ -8,9 +8,12 @@ mod billing;
 mod comments;
 mod dl;
 mod edit;
+mod mediaview;
+mod packpanel;
 mod packs;
 mod pages;
 mod pubprofile;
+mod richtext;
 mod player_ui;
 mod statdetail;
 mod storage;
@@ -76,6 +79,8 @@ pub struct Home {
     pk_imgs: RefCell<HashMap<(i64, i64), Option<Rc<Image>>>>,
     /// Yuklanmagan (xato bilan tugagan) to'plam rasmlari — bosilsa qayta uriniladi.
     pk_fail: RefCell<HashSet<(i64, i64)>>,
+    /// Emoji/CJK matnlarining tizim shriftida chizilgan rasmlari (`richtext.rs`).
+    rich_imgs: RefCell<HashMap<String, richtext::RichState>>,
     devices: State<Option<Result<Rc<Vec<Device>>, ()>>>,
     settings_scroll: ScrollState,
     sessions_scroll: ScrollState,
@@ -185,6 +190,7 @@ impl Home {
             hframes: RefCell::new(HashMap::new()),
             pk_imgs: RefCell::new(HashMap::new()),
             pk_fail: RefCell::new(HashSet::new()),
+            rich_imgs: RefCell::new(HashMap::new()),
             devices: State::new(None),
             settings_scroll: ScrollState::new(),
             sessions_scroll: ScrollState::new(),
@@ -1092,6 +1098,7 @@ mod tests {
             hframes: RefCell::new(HashMap::new()),
             pk_imgs: RefCell::new(HashMap::new()),
             pk_fail: RefCell::new(HashSet::new()),
+            rich_imgs: RefCell::new(HashMap::new()),
             devices: State::new(None),
             settings_scroll: ScrollState::new(),
             sessions_scroll: ScrollState::new(),

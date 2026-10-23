@@ -226,4 +226,39 @@ public class AruActivity extends UzActivity {
         status = state + "|" + Math.max(0, e.getCurrentPosition()) + "|" + dur + "|" + (e.getPlayWhenReady() && st != Player.STATE_ENDED ? 1 : 0)
                 + "|" + (st == Player.STATE_BUFFERING ? 1 : 0) + "|" + v.width + "|" + v.height + "|" + Math.max(0, e.getBufferedPosition()) + "|" + err;
     }
+
+    /**
+     * Matnni (emoji, CJK va boshqa har qanday belgi) tizim shriftlari bilan PNG rasmga chizadi: Rust'dagi shriftda
+     * bo'lmagan belgilar (emoji, koreys, xitoy...) shu yo'l bilan to'g'ri ko'rinadi. `arg` =
+     * "o'lcham(px)|maks. kenglik(px)|rang(AARRGGBB hex)|qalin(0/1)|chiqish fayli|matn". Qaytadi: "kenglik|balandlik" (xato bo'lsa bo'sh).
+     */
+    public String textPng(String arg) {
+        try {
+            String[] p = arg.split("\\|", 6);
+            if (p.length < 6) return "";
+            float size = Float.parseFloat(p[0]);
+            int maxW = Math.max(16, Integer.parseInt(p[1]));
+            int color = (int) Long.parseLong(p[2], 16);
+            android.text.TextPaint tp = new android.text.TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+            tp.setTextSize(size);
+            tp.setColor(color);
+            if ("1".equals(p[3])) tp.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+            String text = p[5];
+            int want = (int) Math.ceil(android.text.Layout.getDesiredWidth(text, tp));
+            int w = Math.max(1, Math.min(maxW, want + 2));
+            android.text.StaticLayout l = new android.text.StaticLayout(text, tp, w, android.text.Layout.Alignment.ALIGN_NORMAL, 1.12f, 0f, false);
+            int lw = 1;
+            for (int i = 0; i < l.getLineCount(); i++) lw = Math.max(lw, (int) Math.ceil(l.getLineWidth(i)));
+            int bw = Math.min(w, lw + 2);
+            int bh = Math.max(1, l.getHeight() + 2);
+            android.graphics.Bitmap b = android.graphics.Bitmap.createBitmap(bw, bh, android.graphics.Bitmap.Config.ARGB_8888);
+            l.draw(new android.graphics.Canvas(b));
+            java.io.FileOutputStream fo = new java.io.FileOutputStream(p[4]);
+            try { b.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, fo); } finally { fo.close(); }
+            return bw + "|" + bh;
+        } catch (Throwable e) {
+            Log.e(TAG, "textPng: " + e);
+            return "";
+        }
+    }
 }

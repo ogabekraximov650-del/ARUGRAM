@@ -51,6 +51,7 @@ pub enum Page {
     Edit(Rc<super::edit::EditPage>),
     Storage(Rc<super::storage::StoragePage>),
     Support(Rc<super::support::SupportPage>),
+    Media(Rc<super::mediaview::MediaPage>),
     DlAnime(Rc<super::dl::DlAnimePage>),
     Packs(Rc<super::packs::PacksPage>),
     AdminChannels(Rc<super::admin2::ChannelsPage>),
@@ -167,6 +168,9 @@ impl Home {
         if let Some(Page::Season(sp)) = &popped {
             self.pl_close(sp);
         }
+        if let Some(Page::Media(mp)) = &popped {
+            self.media_close(mp);
+        }
         let had = popped.is_some();
         if had {
             self.pages.set(v);
@@ -243,6 +247,7 @@ impl Home {
             Page::Edit(p) => self.edit_page(&p),
             Page::Storage(p) => self.storage_page(&p),
             Page::Support(p) => self.support_page(&p),
+            Page::Media(p) => self.media_page(&p),
             Page::DlAnime(p) => self.dl_anime_page(&p),
             Page::Packs(p) => self.packs_page(&p),
             Page::AdminChannels(p) => self.admin_channels_page(&p),

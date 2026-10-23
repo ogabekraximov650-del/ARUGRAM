@@ -6721,3 +6721,23 @@ orqali ketsin. Tarjimani Cloudflare Workers AI bajarsin (API kalitsiz), standart
   Suhbatga asosiy akkaunt yuboradi; bo'lmasa R2 -> panel bot (`fallback_bot`). `sync-packs.yml` va `setup_repo.py` ko'chiradi.
 - Tekshirilmagan: EasyOCR haqiqiy manga sahifalarida (faqat chizish/tartiblash sintetik rasmda sinalgan), bot oqimi Telegram'da.
   Sifat yetmasa: `translate_batch` dagi model nomini almashtirish (so'rovda `model`) yoki OCR sozlamalarini (`MIN_CONF`, `TILE_H`) tuzatish.
+
+## Rust ilova: Admin bilan bog'lanish chati — shisha dizayn, emoji/stiker/GIF paneli, ilova ichidagi video ko'ruvchi (2026-10-23)
+
+Foydalanuvchi skrinshotlari bilan topilgan xatolar (Kotlin `SupportChatScreen` bilan solishtirilgan) va talablar: "hammasi shisha bo'lsin (tepa va past)",
+"emoji, GIF, stikerlar umuman ishlamayapti", "chatdagi video uchun Kotlin'dagidek pleyer yo'q, videolar ochilmayapti".
+
+- `home/support.rs`: sarlavha (orqaga + kapsula) va pastdagi yozish paneli (maydon, yuborish, javob satri) endi `pglass` (lupa). Sarlavha kapsulasi
+  balandligi qat'iy (56), nom bir qatorda `ellipsize` bilan (avval 3 qatorga o'tib, kapsuladan chiqib ketardi). Sarlavha ro'yxat USTIDA chiziladi
+  (stack tartibi), ro'yxatga yuqoridan sarlavha balandligicha padding — xabarlar sarlavha ustiga chiqmaydi. Rasm xabari nisbati saqlanadi
+  (avval `frame()` 16:9 ga kesardi). Video xabari endi `downloads::history_frame` bilan boshidagi kadrni ko'rsatadi (`chat_video_frame`, kesh `hframes`).
+- `home/mediaview.rs` (yangi, `Page::Media`): chatdagi rasm va video ilova ichida ochiladi (ExoPlayer, `downloads::resolve` — asosiy pleyer bilan bir xil manba),
+  play/pauza, surish chizig'i, vaqt, orqaga. Yopilganda pleyer to'xtaydi (`pop` -> `media_close`). Fayl/ovoz hamon tashqi ko'ruvchida (`chat_open_media`).
+- `home/packpanel.rs` (yangi): emoji / stiker / GIF paneli (emoji to'ri virtual ro'yxatda + `PackPanel` — o'z va obuna to'plamlari, izohlardagi bilan bir xil
+  `/api/packs/library`). Stiker/GIF `pk_<to'plam>_<element>` bo'lib darhol yuboriladi; emoji maydonga qo'shiladi.
+- `home/richtext.rs` (yangi) + Java `AruActivity.textPng`: Roboto'da yo'q belgilar (emoji, koreys, xitoy, arab...) tizim shriftida rasmga chiziladi
+  (`Home::rich_el`, kesh `rich_imgs`); xabar matni, emoji to'ri va yozilayotgan matn ko'rinishi shu orqali. Sabab: ilovada faqat Roboto, zaxira shrift yo'q ("▯▯▯▯").
+- Bilinadigan cheklovlar: (1) yozish MAYDONI o'zi emoji chiza olmaydi — emoji yozilganda maydon ustida rasmli ko'rinish chiqadi; (2) paket emoji tokenlari
+  (`[pe:..]`) zaxira belgi sifatida chiziladi, paket rasmi sifatida emas; (3) Telegram hisobidagi stiker/GIF (`tgs.`/`tgg.`), ovozli xabar yozish,
+  surib javob berish, ⋮ menyu (qidiruv/tanlash), rasmni yaqinlashtirish hali yo'q.
+- Tekshirilgan: `cargo test` (15 ta). Telefonda tekshirilmagan.
