@@ -571,7 +571,7 @@ fn ota_qutisidan_chiqqan_element_joylashuv_xatosi_sifatida_yoziladi() {
     uzcoders_core::clear_errors();
     let mut ui = Ui::new(font(), || {
         column(vec![
-            column(vec![column(vec![]).width(120.0).height(10.0)]).width(40.0).height(40.0),
+            column(vec![column(vec![]).width(120.0).height(10.0).bg(Color::WHITE)]).width(40.0).height(40.0),
             column(vec![text("Qisqa")]).width(100.0).height(40.0),
         ])
     });
@@ -581,5 +581,11 @@ fn ota_qutisidan_chiqqan_element_joylashuv_xatosi_sifatida_yoziladi() {
     assert!(t.contains("joylashuv: element 120x10"), "{t}");
     assert!(!t.contains("Qisqa"));
     assert_eq!(t.lines().count(), 1, "{t}");
+    uzcoders_core::clear_errors();
+    let mut ui = Ui::new(font(), || {
+        column(vec![column(vec![column(vec![]).width(120.0).height(10.0).gradient(Color::WHITE, Color::BLACK)]).width(40.0).height(40.0)])
+    });
+    ui.frame(SZ);
+    assert!(uzcoders_core::errors_text().is_empty(), "bezak xato bermasin");
     uzcoders_core::clear_errors();
 }

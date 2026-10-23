@@ -224,7 +224,7 @@ impl Home {
                             }
                         }
                         Some(Err(err)) => {
-                            if err != "kerak emas" {
+                            if err != "kerak emas" && err != "animatsiyasiz" {
                                 uzcoders::prelude::report_error("animatsiya", &err);
                             }
                             if let Some(e) = m.get_mut(&k) {

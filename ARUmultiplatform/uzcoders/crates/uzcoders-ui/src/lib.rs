@@ -1398,6 +1398,7 @@ thread_local! {
 fn check_overflow(tree: &Tree, items: &[Item], scale: f32) {
     let k = scale.max(0.1);
     let mut scroll = std::collections::HashSet::new();
+    let mut decor = std::collections::HashSet::new();
     let mut label: std::collections::HashMap<usize, String> = std::collections::HashMap::new();
     for it in items {
         if matches!(it.kind, ItemKind::ScrollEnd) {
@@ -1405,6 +1406,12 @@ fn check_overflow(tree: &Tree, items: &[Item], scale: f32) {
         }
         if it.scroll.is_some() {
             scroll.insert(it.node);
+        }
+        // UZ: Bolasiz gradientli shakl — bezak (fon dog'lari), ota qutisidan ataylab chiqishi mumkin.
+        // EN: A childless gradient shape is decoration (background blobs) and may stick out on purpose.
+        // RU: Фигура с градиентом без детей — декор (фоновые пятна), может выступать намеренно.
+        if it.gradient.is_some() && it.hit.is_none() && matches!(it.kind, ItemKind::Container) {
+            decor.insert(it.node);
         }
         if let ItemKind::Text(t, ..) = &it.kind {
             label.insert(it.node, format!("matn \"{}\"", t.chars().take(30).collect::<String>()));
@@ -1423,7 +1430,7 @@ fn check_overflow(tree: &Tree, items: &[Item], scale: f32) {
         let skip = scroll.contains(&n);
         for &c in tree.children(n) {
             stack.push(c);
-            if skip {
+            if skip || (decor.contains(&c) && tree.children(c).is_empty()) {
                 continue;
             }
             let cr = tree.rect(c);
