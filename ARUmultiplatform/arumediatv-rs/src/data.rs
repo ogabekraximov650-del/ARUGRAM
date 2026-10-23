@@ -161,15 +161,13 @@ pub fn tg_play_url(session: &str, url: &str) -> Result<String, String> {
         return Err("Telegram ulanmagan".into());
     }
     // Yuborilgan nusxa bot chatidan darrov tozalanmasin.
-    HOLDS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    std::thread::spawn(|| {
-        std::thread::sleep(std::time::Duration::from_secs(900));
-        HOLDS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
-    });
+    *TG_HOLD_UNTIL.lock().unwrap() = Some(std::time::Instant::now() + std::time::Duration::from_secs(900));
     Ok(format!("http://127.0.0.1:{port}/tg/0/{name}"))
 }
 
 /// Yuklab olish ketayotgan paytda bot chati tozalanmasin (yuklangan nusxa o'chib ketmasin).
+static TG_HOLD_UNTIL: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
 pub static HOLDS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 pub fn load_posters(session: &str, urls: &[String]) -> (Vec<(String, Option<Image>)>, Option<String>) {
@@ -246,7 +244,8 @@ pub fn load_posters(session: &str, urls: &[String]) -> (Vec<(String, Option<Imag
         }
     }
     // Yuborilgan nusxalar bot chatida qolib ketmasin.
-    if HOLDS.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+    let held = TG_HOLD_UNTIL.lock().unwrap().is_some_and(|t| std::time::Instant::now() < t);
+    if HOLDS.load(std::sync::atomic::Ordering::SeqCst) == 0 && !held {
         let _ = call_json(rust_core::telegram::rust_tg_clear_bot_chat());
     }
     (out, diag)

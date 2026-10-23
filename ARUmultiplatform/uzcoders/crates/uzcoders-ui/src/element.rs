@@ -630,11 +630,11 @@ pub fn lazy_column(
     column(kids).scroll(state)
 }
 
-/// UZ: Virtual ro'yxat, elementlar balandligi har xil (`heights`, dp): faqat ko'rinadiganlari (va 100 dp zaxira) quriladi.
+/// UZ: Virtual ro'yxat, elementlar balandligi har xil (`heights`, dp): faqat ko'rinadiganlari va undan tepa/past 3 tadan elementi (qator) quriladi.
 /// `build(i)` — i-elementni qaytaradi (balandligi `heights[i]` ga majburlanadi).
-/// EN: A virtualized list with items of different heights (`heights`, dp): only the visible ones (plus a 100 dp margin) are built.
+/// EN: A virtualized list with items of different heights (`heights`, dp): only the visible ones plus 3 items (rows) above and below are built.
 /// `build(i)` returns the i-th item (its height is forced to `heights[i]`).
-/// RU: Виртуальный список с элементами разной высоты (`heights`, dp): строятся только видимые (и запас 100 dp).
+/// RU: Виртуальный список с элементами разной высоты (`heights`, dp): строятся только видимые и по 3 элемента (строки) сверху и снизу.
 /// `build(i)` возвращает i-й элемент (его высота принудительно равна `heights[i]`).
 pub fn lazy_column_var(state: &ScrollState, heights: &[f32], build: impl Fn(usize) -> Element) -> Element {
     let d = uzcoders_core::density().max(0.1);
@@ -646,11 +646,13 @@ pub fn lazy_column_var(state: &ScrollState, heights: &[f32], build: impl Fn(usiz
         prefix.push(prefix.last().copied().unwrap_or(0.0) + h);
     }
     let total = prefix.last().copied().unwrap_or(0.0);
-    let lo = (off - 100.0).max(0.0);
-    let hi = off + vp + 100.0;
-    // UZ: Birinchi ko'rinadigan element: oxiri `lo` dan keyin bo'lgan eng birinchisi. EN: First visible item: the first whose end is past `lo`. RU: Первый видимый элемент: первый, чей конец за `lo`.
-    let first = prefix.partition_point(|p| *p <= lo).saturating_sub(1).min(heights.len());
-    let last = prefix.partition_point(|p| *p < hi).min(heights.len());
+    // UZ: Ko'rinadigan oraliq, keyin ikki tomonga 3 elementdan kengaytiriladi. EN: The visible range, then widened by 3 items on each side. RU: Видимый диапазон, затем расширяется на 3 элемента в обе стороны.
+    const AHEAD: usize = 3;
+    let n = heights.len();
+    let vis_first = prefix.partition_point(|p| *p <= off).saturating_sub(1).min(n);
+    let vis_last = prefix.partition_point(|p| *p < off + vp).min(n);
+    let first = vis_first.saturating_sub(AHEAD);
+    let last = (vis_last + AHEAD).min(n);
     let last = last.max(first);
     let mut kids = Vec::with_capacity(last - first + 2);
     if first > 0 {

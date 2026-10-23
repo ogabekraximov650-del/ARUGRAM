@@ -100,13 +100,71 @@ pub fn spawn_bg<R: Send + 'static>(
         )
     });
     PENDING.fetch_add(1, Ordering::SeqCst);
-    std::thread::spawn(move || {
+    submit(Box::new(move || {
         let r = work();
         QUEUE.lock().unwrap().push((id, Box::new(r)));
         if let Some(w) = *WAKER.lock().unwrap() {
             w();
         }
-    });
+    }));
+}
+
+type Job = Box<dyn FnOnce() + Send>;
+
+/// UZ: Oqimlar puli chegarasi: ko'p vazifa bir vaqtda kelsa, yangi oqim ochilmaydi, navbatda kutadi (aks holda "failed to spawn thread").
+/// EN: Thread pool limit: when many tasks arrive at once no new threads are created, they wait in a queue (otherwise "failed to spawn thread").
+/// RU: Предел пула потоков: при множестве задач новые потоки не создаются, а ждут в очереди (иначе "failed to spawn thread").
+const MAX_WORKERS: usize = 12;
+
+struct Pool {
+    jobs: std::collections::VecDeque<Job>,
+    workers: usize,
+    idle: usize,
+}
+
+static POOL: Mutex<Pool> = Mutex::new(Pool { jobs: std::collections::VecDeque::new(), workers: 0, idle: 0 });
+static POOL_CV: std::sync::Condvar = std::sync::Condvar::new();
+
+fn submit(job: Job) {
+    let mut p = POOL.lock().unwrap();
+    p.jobs.push_back(job);
+    if p.idle > 0 {
+        POOL_CV.notify_one();
+        return;
+    }
+    if p.workers < MAX_WORKERS && std::thread::Builder::new().spawn(worker).is_ok() {
+        p.workers += 1;
+    }
+    // UZ: Oqim ochib bo'lmasa ham ish navbatda qoladi: mavjud oqimlar uni oladi.
+    // EN: Even if a thread cannot be created the job stays queued: existing workers pick it up.
+    // RU: Даже если поток создать нельзя, задача остаётся в очереди: её заберут существующие потоки.
+}
+
+fn worker() {
+    loop {
+        let job = {
+            let mut p = POOL.lock().unwrap();
+            loop {
+                if let Some(j) = p.jobs.pop_front() {
+                    break Some(j);
+                }
+                p.idle += 1;
+                let (g, t) = POOL_CV.wait_timeout(p, std::time::Duration::from_secs(5)).unwrap();
+                p = g;
+                p.idle -= 1;
+                if t.timed_out() && p.jobs.is_empty() {
+                    p.workers -= 1;
+                    break None;
+                }
+            }
+        };
+        match job {
+            Some(j) => {
+                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(j));
+            }
+            None => return,
+        }
+    }
 }
 
 /// UZ: Tugagan vazifalarning `done` funksiyalarini chaqiradi (UI oqimida, har tsiklda). Biror ish bajarilsa `true` qaytadi.
@@ -168,5 +226,30 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
         assert_eq!(s.get(), 7);
+    }
+}
+
+#[cfg(test)]
+mod pool_tests {
+    use super::*;
+
+    #[test]
+    fn kop_vazifa_cheklangan_oqimlarda_bajariladi() {
+        let n = std::sync::Arc::new(AtomicUsize::new(0));
+        for _ in 0..500 {
+            let n = n.clone();
+            submit(Box::new(move || {
+                std::thread::sleep(std::time::Duration::from_millis(2));
+                n.fetch_add(1, Ordering::SeqCst);
+            }));
+        }
+        assert!(POOL.lock().unwrap().workers <= MAX_WORKERS);
+        for _ in 0..500 {
+            if n.load(Ordering::SeqCst) == 500 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert_eq!(n.load(Ordering::SeqCst), 500);
     }
 }
