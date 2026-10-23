@@ -17,6 +17,7 @@ fn num(v: &Value) -> i64 {
 
 impl Home {
     pub(super) fn open_public_profile(self: &Rc<Self>, id: i64) {
+        uzcoders::prelude::breadcrumb("open_public_profile");
         if id <= 0 {
             return;
         }

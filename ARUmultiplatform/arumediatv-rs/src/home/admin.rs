@@ -129,6 +129,7 @@ pub struct StatsPage {
 
 impl Home {
     pub(super) fn open_admin_hub(self: &Rc<Self>) {
+        uzcoders::prelude::breadcrumb("open_admin_hub");
         self.push(pages::Page::AdminHub);
     }
 
@@ -157,6 +158,7 @@ impl Home {
     }
 
     fn open_admin_section(self: &Rc<Self>, i: usize) {
+        uzcoders::prelude::breadcrumb("open_admin_section");
         match i {
             0 => self.open_admin_content(),
             1 => self.open_admin_users(),
@@ -176,6 +178,7 @@ impl Home {
     // ── Foydalanuvchilar ──
 
     fn open_admin_users(self: &Rc<Self>) {
+        uzcoders::prelude::breadcrumb("open_admin_users");
         let p = Rc::new(UsersPage {
             items: State::new(Rc::new(Vec::new())),
             query: State::new(String::new()),
@@ -480,6 +483,7 @@ impl Home {
     // ── Suhbatlar (0) va Shikoyatlar (1) ──
 
     fn open_admin_list(self: &Rc<Self>, kind: u8) {
+        uzcoders::prelude::breadcrumb("open_admin_list");
         let p = Rc::new(ListPage {
             items: State::new(Rc::new(Vec::new())),
             loaded: State::new(false),
@@ -642,6 +646,7 @@ impl Home {
     // ── Umumiy statistika ──
 
     fn open_admin_stats(self: &Rc<Self>) {
+        uzcoders::prelude::breadcrumb("open_admin_stats");
         let p = Rc::new(StatsPage { data: State::new(None), error: State::new(String::new()), open: State::new(String::new()), range: State::new("7d".into()), series: State::new(None), scroll: ScrollState::new() });
         let (p2, session) = (p.clone(), self.session.clone());
         spawn_bg(move || api::get_json("/api/stats", "", Some(&session)), move |r| match r {

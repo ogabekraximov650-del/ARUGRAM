@@ -243,10 +243,12 @@ fn thumb(name: &str, size: f32) -> Element {
 
 impl Home {
     pub(super) fn open_admin_content(self: &Rc<Self>) {
+        uzcoders::prelude::breadcrumb("open_admin_content");
         self.open_list(0, Value::Null, Value::Null);
     }
 
     fn open_list(self: &Rc<Self>, level: u8, anime: Value, season: Value) {
+        uzcoders::prelude::breadcrumb("open_list");
         let cache_key = match level {
             0 => "admin_anime".to_string(),
             1 => format!("admin_seasons_{}", iv(&anime, "id")),
@@ -527,6 +529,7 @@ impl Home {
     // ── Anime formasi ──
 
     fn open_anime_form(self: &Rc<Self>, initial: Value) {
+        uzcoders::prelude::breadcrumb("open_anime_form");
         let st = |k: &str| State::new(sv(&initial, k));
         let f = Rc::new(AnimeForm {
             name: st("name"),
@@ -584,6 +587,7 @@ impl Home {
     // ── Bo'lim formasi ──
 
     fn open_season_form(self: &Rc<Self>, anime_id: i64, initial: Value) {
+        uzcoders::prelude::breadcrumb("open_season_form");
         let st = |k: &str| State::new(sv(&initial, k));
         let num = |k: &str| State::new(Some(iv(&initial, k)).filter(|n| *n > 0).map(|n| n.to_string()).unwrap_or_default());
         let genres: Vec<String> = sv(&initial, "janri").split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
@@ -721,6 +725,7 @@ impl Home {
     // ── Qism formasi ──
 
     fn open_ep_form(self: &Rc<Self>, anime_id: i64, season_id: i64, initial: Value) {
+        uzcoders::prelude::breadcrumb("open_ep_form");
         let origin = sv(&initial, "origin_video");
         let quals: Vec<Q> = QUALS
             .iter()

@@ -511,7 +511,8 @@ pub unsafe fn on_create(activity: *mut ANativeActivity, make_ui: fn(f32) -> Ui) 
     ACTIVITY.store(activity as usize, std::sync::atomic::Ordering::SeqCst);
     uzcoders_gpu::set_video_hooks(video_create, video_update);
     std::panic::set_hook(Box::new(move |i| {
-        let msg = format!("Rust panic: {i}");
+        let t = std::thread::current();
+        let msg = format!("Rust panic ({}): {i}\n{}", t.name().unwrap_or("nomsiz"), uzcoders_core::crash_context());
         log(&msg);
         if !dir.is_empty() {
             let _ = std::fs::write(format!("{dir}/crash.txt"), &msg);

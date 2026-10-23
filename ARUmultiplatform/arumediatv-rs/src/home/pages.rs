@@ -106,6 +106,7 @@ impl Home {
     }
 
     pub(super) fn open_season(self: &Rc<Self>, season: Season) {
+        uzcoders::prelude::breadcrumb("open_season");
         let p = Rc::new(SeasonPage {
             season: season.clone(),
             tab: State::new(0),
@@ -178,6 +179,7 @@ impl Home {
     }
 
     pub(super) fn open_settings(self: &Rc<Self>) {
+        uzcoders::prelude::breadcrumb("open_settings");
         let p = self.profile.get();
         self.hidden.set(p.hidden.clone());
         self.consent.set(p.consent);
@@ -185,6 +187,7 @@ impl Home {
     }
 
     pub(super) fn open_sessions(self: &Rc<Self>) {
+        uzcoders::prelude::breadcrumb("open_sessions");
         self.devices.set(None);
         let (me, session) = (self.clone(), self.session.clone());
         spawn_bg(move || fetch_devices(&session), move |r| me.devices.set(Some(r.map(Rc::new).map_err(|_| ()))));

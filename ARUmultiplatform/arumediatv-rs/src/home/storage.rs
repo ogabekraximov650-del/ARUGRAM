@@ -54,6 +54,7 @@ fn measure() -> Vec<(String, u64, Vec<String>)> {
 
 impl Home {
     pub(super) fn open_storage(self: &Rc<Self>) {
+        uzcoders::prelude::breadcrumb("open_storage");
         let p = Rc::new(StoragePage {
             slices: RefCell::new(Vec::new()),
             loaded: State::new(false),

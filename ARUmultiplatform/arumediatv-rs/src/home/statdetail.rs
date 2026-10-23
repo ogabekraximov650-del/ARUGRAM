@@ -25,6 +25,7 @@ fn num(v: &Value) -> i64 {
 impl Home {
     /// `key`: episodes | seasons | favorites | rated | comments. `owner` — boshqa foydalanuvchi ismi (o'zingiznikida bo'sh).
     pub(super) fn open_stat(self: &Rc<Self>, user: i64, key: &'static str, label: &str, owner: &str) {
+        uzcoders::prelude::breadcrumb("open_stat");
         if user <= 0 {
             return;
         }

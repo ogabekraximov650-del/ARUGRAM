@@ -238,6 +238,7 @@ impl Home {
     }
 
     pub(super) fn open_support(self: &Rc<Self>, user_id: Option<i64>) {
+        uzcoders::prelude::breadcrumb("open_support");
         let cached = chat_cache_load(user_id);
         let have_cache = !cached.is_empty();
         let p = Rc::new(SupportPage {

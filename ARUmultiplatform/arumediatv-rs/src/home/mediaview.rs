@@ -35,6 +35,7 @@ fn clock(ms: i64) -> String {
 impl Home {
     /// Chatdagi rasm yoki videoni ilova ichida ochadi. `kind`: "video" | "round" | "image".
     pub(super) fn open_media(self: &Rc<Self>, url: &str, kind: &str) {
+        uzcoders::prelude::breadcrumb("open_media");
         let is_video = kind == "video" || kind == "round";
         let p = Rc::new(MediaPage {
             url: url.to_string(),

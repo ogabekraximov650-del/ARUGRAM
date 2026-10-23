@@ -81,6 +81,27 @@ public class UzActivity extends NativeActivity {
      * EN: Writes crash information to a file; it is shown in a dialog on the next launch (Rust writes to the same file).
      * RU: Записывает сведения о сбое в файл; при следующем запуске они показываются в диалоге (Rust пишет в тот же файл).
      */
+    private String deviceInfo() {
+        String ver = "?";
+        try {
+            ver = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (Throwable ignored) {
+        }
+        Runtime rt = Runtime.getRuntime();
+        android.app.ActivityManager.MemoryInfo mi = new android.app.ActivityManager.MemoryInfo();
+        try {
+            ((android.app.ActivityManager) getSystemService(Context.ACTIVITY_SERVICE)).getMemoryInfo(mi);
+        } catch (Throwable ignored) {
+        }
+        return "Qurilma: " + android.os.Build.MANUFACTURER + " " + android.os.Build.MODEL
+                + "\nAndroid: " + android.os.Build.VERSION.RELEASE + " (SDK " + android.os.Build.VERSION.SDK_INT + ")"
+                + "\nCPU: " + android.os.Build.SUPPORTED_ABIS[0]
+                + "\nIlova: " + getPackageName() + " " + ver
+                + "\nRAM bo'sh: " + (mi.availMem >> 20) + " / " + (mi.totalMem >> 20) + " MB"
+                + (mi.lowMemory ? " (xotira kam)" : "")
+                + "\nJava heap: " + (rt.totalMemory() >> 20) + " / " + (rt.maxMemory() >> 20) + " MB";
+    }
+
     private void installCrashReporter() {
         final File f = new File(getFilesDir(), "crash.txt");
         final Thread.UncaughtExceptionHandler prev = Thread.getDefaultUncaughtExceptionHandler();
@@ -90,7 +111,7 @@ public class UzActivity extends NativeActivity {
                     StringWriter sw = new StringWriter();
                     e.printStackTrace(new PrintWriter(sw));
                     FileOutputStream o = new FileOutputStream(f);
-                    o.write(("Java xato (" + t.getName() + "):\n" + sw).getBytes("UTF-8"));
+                    o.write(("Java xato (" + t.getName() + "), oqimlar: " + Thread.getAllStackTraces().size() + ":\n" + sw).getBytes("UTF-8"));
                     o.close();
                 } catch (Throwable ignored) {
                 }
@@ -104,10 +125,16 @@ public class UzActivity extends NativeActivity {
                 int n = in.read(b);
                 in.close();
                 f.delete();
+                final String report = deviceInfo() + "\n" + new String(b, 0, Math.max(n, 0), "UTF-8");
                 new AlertDialog.Builder(this)
                         .setTitle("Oldingi yiqilish")
-                        .setMessage(new String(b, 0, Math.max(n, 0), "UTF-8"))
+                        .setMessage(report)
                         .setPositiveButton("OK", null)
+                        .setNeutralButton("Nusxa olish", new android.content.DialogInterface.OnClickListener() {
+                            public void onClick(android.content.DialogInterface d, int w) {
+                                ((ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText("crash", report));
+                            }
+                        })
                         .show();
             } catch (Throwable ignored) {
             }

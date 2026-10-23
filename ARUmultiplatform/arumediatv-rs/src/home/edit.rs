@@ -42,6 +42,7 @@ fn username_problem(u: &str) -> Option<&'static str> {
 
 impl Home {
     pub(super) fn open_edit(self: &Rc<Self>) {
+        uzcoders::prelude::breadcrumb("open_edit");
         let pr = self.profile.get();
         let first = pr.name.split_whitespace().next().unwrap_or("").to_string();
         let p = Rc::new(EditPage {

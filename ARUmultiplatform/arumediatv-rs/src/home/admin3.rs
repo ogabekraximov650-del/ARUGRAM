@@ -35,6 +35,7 @@ fn arr(v: &Value) -> Vec<Value> {
 
 impl Home {
     pub(super) fn open_admin_encode(self: &Rc<Self>) {
+        uzcoders::prelude::breadcrumb("open_admin_encode");
         let p = Rc::new(EncodePage { live: State::new(None), queue: State::new(None), error: State::new(String::new()), ticks: std::cell::Cell::new(0), last_job: std::cell::RefCell::new(String::new()), scroll: ScrollState::new() });
         self.push(pages::Page::AdminEncode(p.clone()));
         self.encode_poll(&p);

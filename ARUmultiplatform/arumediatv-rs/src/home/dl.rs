@@ -290,6 +290,7 @@ impl Home {
     }
 
     pub(super) fn open_dl_anime(self: &Rc<Self>, anime_id: i64, season_id: i64, title: String) {
+        uzcoders::prelude::breadcrumb("open_dl_anime");
         self.push(pages::Page::DlAnime(Rc::new(DlAnimePage { anime_id, season_id, title, scroll: ScrollState::new() })));
     }
 

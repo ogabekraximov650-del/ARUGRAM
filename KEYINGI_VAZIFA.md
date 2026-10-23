@@ -6782,3 +6782,9 @@ tashqi dekodersiz, sof Rustda chizilsin; server/Actions'siz, telefonning o'zida.
   ro'yxatda, ko'pi bilan 6 ta. Chatda oxirgi 4 stiker animatsiyali.
 - Qolgan: GIF/webm animatsiyasi (Android MediaCodec orqali), qidiruv, so'nggilarni saqlash, matn ichida maxsus emoji rasmi, ba'zi Lottie imkoniyatlari (ifodalar, skew, effektlar).
 - Telefonda tekshirilmagan; panel xost testida (`panel_uch_tabda_quriladi`, `TGPANEL_PNG_DIR` bilan PNG) quriladi.
+
+## Yiqilish hisoboti: qurilma ma'lumoti va so'nggi amallar (2026-10-23)
+
+- `uzcoders-core::task`: `breadcrumb(msg)` (oxirgi 24 amal), `crash_context()` (oqimlar soni, xotira, kutilayotgan vazifalar, amallar). Rust panic hook (`glue.rs`) shularni `crash.txt` ga yozadi.
+- `UzActivity.java`: keyingi ochilishda dialog qurilma (model, Android, CPU, RAM, versiya) + sabab ko'rsatadi, "Nusxa olish" tugmasi bor. Serverga yuborilmaydi (Turso yozuvi pul turadi).
+- `arumediatv-rs`: har `open_*` ekrani `breadcrumb` yozadi. Tizim tomonidan o'ldirish (OOM) ushlanmaydi.

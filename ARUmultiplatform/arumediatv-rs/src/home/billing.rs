@@ -141,6 +141,7 @@ fn post(session: &str, path: &str, body: Value) -> Result<Value, String> {
 
 impl Home {
     pub(super) fn open_billing(self: &Rc<Self>) {
+        uzcoders::prelude::breadcrumb("open_billing");
         let p = Rc::new(BillingPage {
             data: State::new(Rc::new(Billing::default())),
             tab: State::new(0),

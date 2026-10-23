@@ -53,6 +53,7 @@ impl Home {
     // ── Majburiy kanallar ──
 
     pub(super) fn open_admin_channels(self: &Rc<Self>) {
+        uzcoders::prelude::breadcrumb("open_admin_channels");
         let p = Rc::new(ChannelsPage {
             items: State::new(Rc::new(Vec::new())),
             loaded: State::new(false),
@@ -281,6 +282,7 @@ impl Home {
     // ── Ilova va xavfsizlik ──
 
     pub(super) fn open_admin_app(self: &Rc<Self>) {
+        uzcoders::prelude::breadcrumb("open_admin_app");
         let p = Rc::new(AppPage { cfg: State::new(None), version: State::new(String::new()), error: State::new(String::new()), msg: State::new(String::new()) });
         self.app_load(&p);
         self.push(pages::Page::AdminApp(p));

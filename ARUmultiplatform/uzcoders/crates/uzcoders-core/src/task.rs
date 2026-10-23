@@ -68,6 +68,45 @@ pub fn clear_video_frame_request() {
     VIDEO_REQ.store(false, Ordering::SeqCst);
 }
 
+static CRUMBS: Mutex<std::collections::VecDeque<String>> = Mutex::new(std::collections::VecDeque::new());
+
+/// UZ: So'nggi amallar yozuvi (ko'pi bilan 24 ta): yiqilish hisobotiga kiradi ("nima qilinayotgan edi").
+/// EN: Records a recent action (at most 24 kept): included in the crash report ("what was happening").
+/// RU: Записывает недавнее действие (хранится не более 24): попадает в отчёт о сбое («что происходило»).
+pub fn breadcrumb(msg: &str) {
+    if let Ok(mut c) = CRUMBS.lock() {
+        if c.len() >= 24 {
+            c.pop_front();
+        }
+        c.push_back(msg.chars().take(120).collect());
+    }
+}
+
+/// UZ: Yiqilish hisoboti matni: so'nggi amallar, oqimlar va xotira (Linux/Android `/proc/self/status`).
+/// EN: Crash report text: recent actions, thread count and memory (Linux/Android `/proc/self/status`).
+/// RU: Текст отчёта о сбое: недавние действия, число потоков и память (Linux/Android `/proc/self/status`).
+pub fn crash_context() -> String {
+    let mut out = String::new();
+    if let Ok(st) = std::fs::read_to_string("/proc/self/status") {
+        for l in st.lines() {
+            if l.starts_with("Threads:") || l.starts_with("VmRSS:") || l.starts_with("VmSize:") {
+                out.push_str(l.split_whitespace().collect::<Vec<_>>().join(" ").as_str());
+                out.push('\n');
+            }
+        }
+    }
+    out.push_str(&format!("Fon vazifalari kutilmoqda: {}\n", pending_tasks()));
+    if let Ok(c) = CRUMBS.lock() {
+        out.push_str("So'nggi amallar:\n");
+        for m in c.iter() {
+            out.push_str("  - ");
+            out.push_str(m);
+            out.push('\n');
+        }
+    }
+    out
+}
+
 type Done = Box<dyn FnOnce(Box<dyn Any + Send>)>;
 
 thread_local! {
