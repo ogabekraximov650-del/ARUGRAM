@@ -589,3 +589,14 @@ fn ota_qutisidan_chiqqan_element_joylashuv_xatosi_sifatida_yoziladi() {
     assert!(uzcoders_core::errors_text().is_empty(), "bezak xato bermasin");
     uzcoders_core::clear_errors();
 }
+
+#[test]
+fn sprite_frame_aniq_kadrni_chizadi() {
+    let sheet = Rc::new(Image { w: 4, h: 2, rgba: vec![0; 32] });
+    let s2 = sheet.clone();
+    let mut ui = Ui::new(font(), move || sprite_frame(&s2, 2, 4, 3, 20.0, 20.0));
+    let cmds = ui.frame(SZ);
+    let src = cmds.iter().find_map(|c| if let DrawCmd::ImageRegion { src, .. } = c { Some(*src) } else { None });
+    assert_eq!(src, Some((2, 1, 2, 1)));
+    assert!(!ui.needs_frame());
+}

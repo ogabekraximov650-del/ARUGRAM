@@ -85,6 +85,7 @@ pub(crate) enum Kind {
         opacity: f32,
     },
     Sprite {
+        frame: u32,
         sheet: Rc<Image>,
         cols: u32,
         count: u32,
@@ -705,8 +706,21 @@ pub fn image(img: &Rc<Image>, w: f32, h: f32) -> Element {
 /// RU: Анимированное изображение: `sheet` — лист с кадрами рядом (`cols` столбцов, всего `count` кадров, по строкам), `fps` — скорость.
 /// При `playing = false` показывается первый кадр (без анимации и без запросов перерисовки). `w` x `h` dp.
 pub fn sprite(sheet: &Rc<Image>, cols: u32, count: u32, fps: f32, playing: bool, w: f32, h: f32) -> Element {
+    sprite_at(sheet, cols, count, 0, fps, playing, w, h)
+}
+
+/// UZ: Varaqning bitta qo'zg'almas kadri (`frame`, 0 dan): masalan, emoji atlasidagi bitta emoji. Animatsiya yo'q, qayta chizish talab qilinmaydi.
+/// EN: One still frame (`frame`, 0-based) of a sheet: for example a single emoji of an emoji atlas. No animation, no redraw requests.
+/// RU: Один неподвижный кадр (`frame`, с 0) листа: например, одно эмодзи из атласа эмодзи. Без анимации и запросов перерисовки.
+pub fn sprite_frame(sheet: &Rc<Image>, cols: u32, count: u32, frame: u32, w: f32, h: f32) -> Element {
+    sprite_at(sheet, cols, count, frame, 0.0, false, w, h)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn sprite_at(sheet: &Rc<Image>, cols: u32, count: u32, frame: u32, fps: f32, playing: bool, w: f32, h: f32) -> Element {
     let mut e = Element::new(
         Kind::Sprite {
+            frame,
             sheet: sheet.clone(),
             cols: cols.max(1),
             count: count.max(1),

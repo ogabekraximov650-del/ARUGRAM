@@ -66,6 +66,35 @@ fn with_tone(e: &str, tone: usize) -> String {
     format!("{first}{m}{rest}")
 }
 
+enum AtlasSt {
+    Loading,
+    Ready(Rc<Image>, u32),
+    Failed(Instant),
+}
+
+thread_local! {
+    /// UZ: Emoji atlaslari: (toifa, shrift yo'li, katak px) -> holat. EN: Emoji atlases: (category, font path, cell px) -> state. RU: Атласы эмодзи: (категория, путь шрифта, ячейка px) -> состояние.
+    static ATLAS: RefCell<HashMap<(usize, String, u32), AtlasSt>> = RefCell::new(HashMap::new());
+    static CAT_POS: std::cell::OnceCell<HashMap<&'static str, (usize, usize)>> = const { std::cell::OnceCell::new() };
+}
+
+/// Emojining (toifa, o'rin) i — atlasdagi katak.
+fn cat_pos(e: &str) -> Option<(usize, usize)> {
+    CAT_POS.with(|c| {
+        c.get_or_init(|| {
+            let mut m = HashMap::new();
+            for (ci, (_, _, list)) in CATS.iter().enumerate() {
+                for (ix, e) in list.split_whitespace().enumerate() {
+                    m.entry(e).or_insert((ci, ix));
+                }
+            }
+            m
+        })
+        .get(e)
+        .copied()
+    })
+}
+
 thread_local! {
     static RECENT: RefCell<Vec<String>> = RefCell::new(Vec::new());
 }
@@ -575,7 +604,11 @@ impl Home {
                         let shown = with_tone(e, tone);
                         let col = items.iter().position(|x| x == e).unwrap_or(0);
                         let base = tone_base(e);
-                        let mut c = column(vec![me.rich_el(&shown, 28.0, cell, 0xFFFFFFFF, false)]).center().width(cell).height(cell);
+                        let glyph = match cat_pos(&shown).filter(|_| tone == 0) {
+                            Some((ci, ix)) => me.tgp_atlas_emoji(ci, ix),
+                            None => me.rich_el(&shown, 28.0, cell, 0xFFFFFFFF, false),
+                        };
+                        let mut c = column(vec![glyph]).center().width(cell).height(cell);
                         let sh = shown.clone();
                         c = c.on_click(move || {
                             push_recent(&em);
@@ -614,6 +647,43 @@ impl Home {
         let body = if p.data.borrow().emoji_sets.is_none() && false { column(vec![spinner(28.0, 3.0, ACCENT2)]).center() } else { list };
         let lay2 = Layout { rows: Vec::new(), heights, tops: lay.tops, secs: lay.secs };
         (lay2, strip, body)
+    }
+
+    /// UZ: Atlasdagi emoji: atlas tayyor bo'lsa bitta katak (qo'shimcha dekodlashsiz), bo'lmasa fonda tayyorlanadi va shu orada bo'sh joy.
+    /// EN: An emoji from the atlas: one cell once the atlas is ready (no extra decoding), otherwise it is prepared in the background and a blank space is shown meanwhile.
+    /// RU: Эмодзи из атласа: одна ячейка, когда атлас готов (без лишнего декодирования), иначе он готовится в фоне, а пока показывается пустое место.
+    fn tgp_atlas_emoji(self: &Rc<Self>, ci: usize, ix: usize) -> Element {
+        let _ = self.gate_rev.get();
+        let dens = density().max(0.5);
+        let (cell_px, glyph_px) = ((32.0 * dens).round() as u32, 28.0 * dens);
+        let font = crate::emojifont::path();
+        let key = (ci, font, cell_px);
+        let st = ATLAS.with(|a| match a.borrow().get(&key) {
+            Some(AtlasSt::Ready(i, n)) => Some(Some((i.clone(), *n))),
+            Some(AtlasSt::Failed(t)) if t.elapsed().as_secs() < 30 => Some(None),
+            Some(AtlasSt::Loading) => Some(None),
+            _ => None,
+        });
+        match st {
+            Some(Some((img, n))) => return sprite_frame(&img, crate::emojifont::ATLAS_COLS, n, ix as u32, 32.0, 32.0),
+            Some(None) => {}
+            None => {
+                ATLAS.with(|a| a.borrow_mut().insert(key.clone(), AtlasSt::Loading));
+                let (me, k, list) = (self.clone(), key, CATS[ci].2);
+                spawn_bg(move || crate::emojifont::atlas(ci, list, cell_px, glyph_px), move |r| {
+                    let st = match r {
+                        Ok(img) => AtlasSt::Ready(Rc::new(img), list.split_whitespace().count() as u32),
+                        Err(e) => {
+                            uzcoders::prelude::report_error("emoji atlasi", &e);
+                            AtlasSt::Failed(Instant::now())
+                        }
+                    };
+                    ATLAS.with(|a| a.borrow_mut().insert(k, st));
+                    me.gate_rev.set(me.gate_rev.get() + 1);
+                });
+            }
+        }
+        column(vec![]).width(32.0).height(32.0)
     }
 
     fn tgp_sets_of(&self, p: &Rc<TgPanel>, tab: u8) -> Vec<TgSet> {
@@ -899,6 +969,15 @@ mod tests {
     }
 
     /// UZ: Panel har uch tabda xatosiz quriladi (soxta ma'lumot bilan), uzoq bosish ko'rinishi ham. EN: The panel builds on all three tabs without errors (fake data), and so does the long-press preview. RU: Панель строится на всех трёх вкладках без ошибок (на фиктивных данных), как и просмотр при долгом нажатии.
+    #[test]
+    fn emoji_atlas_oryni_topiladi() {
+        assert_eq!(cat_pos("😀"), Some((0, 0)));
+        let (ci, ix) = cat_pos("🐱").unwrap();
+        assert_eq!(CATS[ci].2.split_whitespace().nth(ix), Some("🐱"));
+        assert!(cat_pos("yo'q").is_none());
+        assert!(CATS.iter().all(|c| c.2.split_whitespace().count() as u32 <= 10 * 40));
+    }
+
     #[test]
     fn panel_uch_tabda_quriladi() {
         let home = Home::new("test".into(), Rc::new(|| {}));

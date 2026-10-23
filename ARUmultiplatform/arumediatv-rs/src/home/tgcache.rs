@@ -79,6 +79,37 @@ pub(super) fn load_doc(set: Option<TgSet>, gifs: bool, d: TgDoc, px: u32) -> Res
     }
 }
 
+fn sheet_path(key: &str) -> String {
+    let d = format!("{}/tgsheets", crate::data::cache_dir());
+    let _ = std::fs::create_dir_all(&d);
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    std::hash::Hash::hash(key, &mut h);
+    format!("{d}/{:016x}.bin", std::hash::Hasher::finish(&h))
+}
+
+/// Diskdagi tayyor varaq (shifrlangan): `AS1 | ustunlar | kadrlar | fps | PNG`.
+fn sheet_disk_read(key: &str) -> Option<crate::tganim::AnimSheet> {
+    let b = crate::secure::read(&sheet_path(key), "tgs")?;
+    if b.len() < 15 || &b[..3] != b"AS1" {
+        return None;
+    }
+    let u = |i: usize| u32::from_le_bytes([b[i], b[i + 1], b[i + 2], b[i + 3]]);
+    let (cols, count, fps) = (u(3), u(7), f32::from_le_bytes([b[11], b[12], b[13], b[14]]));
+    let img = uzcoders::prelude::decode_image(&b[15..])?;
+    (cols > 0 && count > 0 && fps > 0.0).then_some(crate::tganim::AnimSheet { rgba: img.rgba, w: img.w, h: img.h, cols, count, fps })
+}
+
+fn sheet_disk_write(key: &str, s: &crate::tganim::AnimSheet) {
+    let png = uzcoders::prelude::Image { w: s.w, h: s.h, rgba: s.rgba.clone() }.to_png();
+    let mut b = Vec::with_capacity(png.len() + 15);
+    b.extend_from_slice(b"AS1");
+    b.extend_from_slice(&s.cols.to_le_bytes());
+    b.extend_from_slice(&s.count.to_le_bytes());
+    b.extend_from_slice(&s.fps.to_le_bytes());
+    b.extend_from_slice(&png);
+    let _ = crate::secure::write(&sheet_path(key), "tgs", &b);
+}
+
 impl Home {
     /// Telegram rasmi: tayyor bo'lsa qaytaradi, bo'lmasa fonda yuklaydi (tayyor bo'lgach oyna qayta chiziladi).
     pub(super) fn tg_img(self: &Rc<Self>, key: &str, load: impl FnOnce() -> Result<Image, String> + Send + 'static) -> Option<Rc<Image>> {
@@ -129,7 +160,7 @@ impl Home {
         }
         let rr = r.to_string();
         let px = (size * density()).clamp(96.0, 224.0) as u32;
-        let sheet = self.tg_sheet(&format!("ar{r}"), move |wanted| {
+        let sheet = self.tg_sheet(&format!("ar{r}"), px, move |wanted| {
             let d = if sticker { tgmedia::resolve_sticker(&rr) } else { tgmedia::resolve_gif(&rr) }.ok_or_else(|| "havola hal bo'lmadi".to_string())?;
             let gif = !sticker;
             if !gif && d.kind != "tgs" {
@@ -161,7 +192,7 @@ impl Home {
 
     /// Animatsiya varag'i: tayyor bo'lsa qaytaradi; bo'lmasa fonda tayyorlaydi (bir vaqtda 2 ta; ekrandan ketgan katak uchun ish tashlab yuboriladi).
     /// `load(kerakmi)` — varaqni yasaydi; `kerakmi()` yolg'on bo'lsa, ish to'xtatiladi.
-    pub(super) fn tg_sheet(self: &Rc<Self>, key: &str, load: impl FnOnce(&dyn Fn() -> bool) -> Result<crate::tganim::AnimSheet, String> + Send + 'static) -> Option<ASheet> {
+    pub(super) fn tg_sheet(self: &Rc<Self>, key: &str, px: u32, load: impl FnOnce(&dyn Fn() -> bool) -> Result<crate::tganim::AnimSheet, String> + Send + 'static) -> Option<ASheet> {
         let _ = self.gate_rev.get();
         let now = epoch_ms();
         let state = ANIMS.with(|m| {
@@ -186,8 +217,15 @@ impl Home {
         let seen = Arc::new(AtomicU64::new(now));
         ANIMS.with(|m| m.borrow_mut().insert(key.to_string(), AEntry { st: AState::Loading, seen: seen.clone(), last_use: Instant::now() }));
         let (me, k) = (self.clone(), key.to_string());
+        let disk_key = format!("{key}_{px}");
         spawn_bg(
             move || {
+                // UZ: Tayyor varaq diskda: qayta chizilmaydi/dekodlanmaydi, faqat bitta PNG o'qiladi.
+                // EN: A ready sheet is on disk: it is not re-rendered/re-decoded, only one PNG is read.
+                // RU: Готовый лист на диске: не рисуется/не декодируется заново, читается только один PNG.
+                if let Some(s) = sheet_disk_read(&disk_key) {
+                    return Some(Ok(s));
+                }
                 static BUSY: AtomicUsize = AtomicUsize::new(0);
                 let wanted = || epoch_ms().saturating_sub(seen.load(Ordering::Relaxed)) < 4000;
                 loop {
@@ -204,6 +242,9 @@ impl Home {
                 uzcoders::prelude::breadcrumb(&format!("animatsiya varag'i boshlandi (xotira {vm}/{rss} MB)"));
                 let r = load(&wanted);
                 BUSY.fetch_sub(1, Ordering::SeqCst);
+                if let Ok(s) = &r {
+                    sheet_disk_write(&disk_key, s);
+                }
                 let (vm, rss) = uzcoders::prelude::memory_mb();
                 uzcoders::prelude::breadcrumb(match &r {
                     Ok(s) => format!("animatsiya varag'i tayyor {}x{} (xotira {vm}/{rss} MB)", s.w, s.h),
@@ -263,7 +304,7 @@ impl Home {
         }
         let max = if gif { 6 << 20 } else { 1 << 20 };
         let dd = d.clone();
-        let sheet = self.tg_sheet(&format!("a{key}"), move |wanted| {
+        let sheet = self.tg_sheet(&format!("a{key}"), px, move |wanted| {
             let bytes = match tgmedia::file_bytes(&dd, max) {
                 Err(e) if e.contains("FILE_REFERENCE") => {
                     let fresh = match &set {

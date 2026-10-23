@@ -99,6 +99,33 @@ fn ensure_inner(session: &str) -> bool {
     false
 }
 
+
+/// Atlas ustunlari soni (Java `emojiAtlas` bilan bir xil).
+pub const ATLAS_COLS: u32 = 10;
+
+/// UZ: Bitta toifa emojilarining atlasi (bitta PNG varaq): diskda saqlanadi, shuning uchun keyingi ishga tushishda Java chaqirilmaydi va bitta rasm dekodlanadi.
+/// BLOKLAYDI (fon oqimida chaqiring). Qaytadi: varaq rasmi (katak `cell_px`, `ATLAS_COLS` ustun).
+/// EN: The atlas of one category's emoji (one PNG sheet): persisted on disk, so on the next launch Java is not called and a single image is decoded.
+/// BLOCKS (call on a background thread). Returns the sheet image (cell `cell_px`, `ATLAS_COLS` columns).
+/// RU: Атлас эмодзи одной категории (один PNG-лист): хранится на диске, поэтому при следующем запуске Java не вызывается и декодируется одно изображение.
+/// БЛОКИРУЕТ (вызывайте в фоновом потоке). Возвращает изображение листа (ячейка `cell_px`, `ATLAS_COLS` столбцов).
+pub fn atlas(cat: usize, list: &str, cell_px: u32, glyph_px: f32) -> Result<uzcoders::prelude::Image, String> {
+    let font = path();
+    let stem = std::path::Path::new(&font).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "tizim".into());
+    let dir = format!("{}/emoji_atlas", uzcoders::android::files_dir());
+    let _ = std::fs::create_dir_all(&dir);
+    let file = format!("{dir}/{stem}_{cat}_{cell_px}.png");
+    if let Some(img) = std::fs::read(&file).ok().and_then(|b| uzcoders::prelude::decode_image(&b)) {
+        return Ok(img);
+    }
+    let lines = list.split_whitespace().collect::<Vec<_>>().join("\n");
+    let r = uzcoders::android::activity_call_ret("emojiAtlas", &format!("{file}|{cell_px}|{glyph_px}|{ATLAS_COLS}|{font}|{lines}"));
+    if r.starts_with("ERR") || r.is_empty() {
+        return Err(format!("emoji atlasi: {}", if r.is_empty() { "Java javobi bo'sh" } else { r.as_str() }));
+    }
+    std::fs::read(&file).ok().and_then(|b| uzcoders::prelude::decode_image(&b)).ok_or_else(|| "emoji atlasi o'qilmadi".to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

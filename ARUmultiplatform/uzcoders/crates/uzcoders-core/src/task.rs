@@ -177,7 +177,7 @@ type Job = Box<dyn FnOnce() + Send>;
 /// UZ: Oqimlar puli chegarasi: ko'p vazifa bir vaqtda kelsa, yangi oqim ochilmaydi, navbatda kutadi (aks holda "failed to spawn thread").
 /// EN: Thread pool limit: when many tasks arrive at once no new threads are created, they wait in a queue (otherwise "failed to spawn thread").
 /// RU: Предел пула потоков: при множестве задач новые потоки не создаются, а ждут в очереди (иначе "failed to spawn thread").
-const MAX_WORKERS: usize = 12;
+const MAX_WORKERS: usize = 16;
 
 struct Pool {
     jobs: std::collections::VecDeque<Job>,

@@ -193,13 +193,13 @@ pub fn resolve_gif(r: &str) -> Option<TgDoc> {
     })
 }
 
-/// Bir vaqtda ko'pi bilan 4 ta yuklash (panel o'nlab rasm so'raydi).
+/// Bir vaqtda ko'pi bilan 6 ta yuklash (panel o'nlab rasm so'raydi).
 fn slot<T>(f: impl FnOnce() -> T) -> T {
     use std::sync::atomic::{AtomicUsize, Ordering};
     static BUSY: AtomicUsize = AtomicUsize::new(0);
     loop {
         let n = BUSY.load(Ordering::SeqCst);
-        if n < 4 && BUSY.compare_exchange(n, n + 1, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
+        if n < 6 && BUSY.compare_exchange(n, n + 1, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(60));
@@ -237,8 +237,29 @@ pub fn image(d: &TgDoc, px: u32) -> Result<Image, String> {
     let full = d.kind == "webp";
     let thumb = if full { "" } else if d.thumb.is_empty() { "m" } else { d.thumb.as_str() };
     let path = format!("{}/img_{:x}_{}.bin", dir(), d.id, if full { "f" } else { thumb });
+    // UZ: Tayyor (kichraytirilgan) rasm diskda: qayta dekodlanmaydi. Format: `w(u32) h(u32) RGBA`.
+    // EN: The ready (resized) image is on disk: it is not decoded again. Format: `w(u32) h(u32) RGBA`.
+    // RU: Готовое (уменьшенное) изображение на диске: повторно не декодируется. Формат: `w(u32) h(u32) RGBA`.
+    let ready = format!("{}/rdy_{:x}_{}_{}.bin", dir(), d.id, if full { "f" } else { thumb }, px);
+    if let Some(b) = crate::secure::read(&ready, "tgm") {
+        if b.len() > 8 {
+            let (w, h) = (u32::from_le_bytes([b[0], b[1], b[2], b[3]]), u32::from_le_bytes([b[4], b[5], b[6], b[7]]));
+            if w > 0 && h > 0 && b.len() == 8 + (w as usize) * (h as usize) * 4 {
+                return Ok(Image { w, h, rgba: b[8..].to_vec() });
+            }
+        }
+    }
+    let save_ready = |img: &Image| {
+        let mut b = Vec::with_capacity(8 + img.rgba.len());
+        b.extend_from_slice(&img.w.to_le_bytes());
+        b.extend_from_slice(&img.h.to_le_bytes());
+        b.extend_from_slice(&img.rgba);
+        let _ = crate::secure::write(&ready, "tgm", &b);
+    };
     if let Some(img) = crate::secure::read(&path, "tgm").and_then(|b| crate::webp::decode_any(&b)) {
-        return Ok(img.resized(px, px));
+        let img = img.resized(px, px);
+        save_ready(&img);
+        return Ok(img);
     }
     slot(|| {
         let tmp = format!("{path}.dl");
@@ -249,7 +270,9 @@ pub fn image(d: &TgDoc, px: u32) -> Result<Image, String> {
         let bytes = bytes.ok_or_else(|| "fayl o'qilmadi".to_string())?;
         let img = crate::webp::decode_any(&bytes).ok_or_else(|| format!("rasm dekodlanmadi ({} bayt, boshi {:02x?})", bytes.len(), &bytes[..bytes.len().min(12)]))?;
         let _ = crate::secure::write(&path, "tgm", &bytes);
-        Ok(img.resized(px, px))
+        let img = img.resized(px, px);
+        save_ready(&img);
+        Ok(img)
     })
 }
 

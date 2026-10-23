@@ -24,7 +24,7 @@ pub mod prelude {
     pub use uzcoders_text::Font;
     pub use uzcoders_ui::{
         button, column, field, gap_box, grid, icon, image, image_fill, lazy_column, lazy_column_var, row,
-        scroll_column, spacer, sprite, spinner, stack, text, Element, Hold, KeyboardKind, Navigator,
+        scroll_column, spacer, sprite, sprite_frame, spinner, stack, text, Element, Hold, KeyboardKind, Navigator,
         ScrollState,
         Ui,
     };

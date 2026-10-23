@@ -16,7 +16,7 @@ use uzcoders_render::{Canvas, DrawCmd, Image, Path};
 use uzcoders_text::Font;
 
 pub use element::Hold;
-pub use element::{
+pub use element::{sprite_frame,
     button, column, field, gap_box, grid, icon, image, image_fill, lazy_column, lazy_column_var, row, scroll_column,
     spacer, sprite, spinner, stack, text, Element, KeyboardKind,
 };
@@ -32,7 +32,7 @@ enum ItemKind {
     Text(String, f32, Color, u16, Option<f32>, f32),
     Icon(Rc<Path>, Color),
     Image(Rc<Image>, f32),
-    Sprite(Rc<Image>, u32, u32, f32, bool),
+    Sprite(Rc<Image>, u32, u32, f32, bool, u32),
     Spinner(f32, Color),
     Field(Box<FieldCfg>),
     ScrollEnd,
@@ -497,13 +497,13 @@ impl Ui {
                         opacity,
                     });
                 }
-                ItemKind::Sprite(sheet, cols, count, fps, playing) if visible => {
+                ItemKind::Sprite(sheet, cols, count, fps, playing, still) if visible => {
                     let rows = count.div_ceil(cols).max(1);
                     let (cw, ch) = (sheet.w / cols, sheet.h / rows);
                     let frame = if playing && fps > 0.0 {
                         (((self.now as f32) * fps / 1000.0) as u32) % count
                     } else {
-                        0
+                        still.min(count.saturating_sub(1))
                     };
                     cmds.push(DrawCmd::ImageRegion {
                         src: ((frame % cols) * cw, (frame / cols) * ch, cw, ch),
@@ -869,6 +869,7 @@ impl Ui {
                 tree.add_leaf(el.style, move |_| Size::new(w, h))
             }
             Kind::Sprite {
+                frame,
                 sheet,
                 cols,
                 count,
@@ -877,7 +878,7 @@ impl Ui {
                 w,
                 h,
             } => {
-                items[slot].kind = ItemKind::Sprite(sheet, cols, count, fps, playing);
+                items[slot].kind = ItemKind::Sprite(sheet, cols, count, fps, playing, frame);
                 tree.add_leaf(el.style, move |_| Size::new(w, h))
             }
             Kind::Spinner { size, width, color } => {

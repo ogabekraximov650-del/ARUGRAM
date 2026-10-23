@@ -268,6 +268,50 @@ public class AruActivity extends UzActivity {
     }
 
     /**
+     * UZ: Emoji atlasi: ko'p emojini bitta PNG varaqqa (katak = `cell` px) chizadi, Telegram emoji shrifti bilan. Argument:
+     * `chiqish.png|katak_px|belgi_o'lchami_px|ustunlar|shrift_fayli (bo'sh bo'lsa tizim)|emoji1\nemoji2...`. Natija `ustunlar|qatorlar` yoki `ERR ...`.
+     * EN: Emoji atlas: draws many emoji into one PNG sheet (cell = `cell` px) with the Telegram emoji font. Argument:
+     * `out.png|cell_px|glyph_size_px|cols|font_file (empty = system)|emoji1\nemoji2...`. Result `cols|rows` or `ERR ...`.
+     * RU: Атлас эмодзи: рисует много эмодзи в один PNG-лист (ячейка = `cell` px) шрифтом эмодзи Telegram. Аргумент:
+     * `выход.png|ячейка_px|размер_глифа_px|столбцы|файл_шрифта (пусто = системный)|эмодзи1\nэмодзи2...`. Результат `столбцы|строки` или `ERR ...`.
+     */
+    public String emojiAtlas(String arg) {
+        try {
+            String[] p = arg.split("\\|", 6);
+            if (p.length < 6) return "ERR argumentlar";
+            int cell = Math.max(8, Integer.parseInt(p[1]));
+            float size = Float.parseFloat(p[2]);
+            int cols = Math.max(1, Integer.parseInt(p[3]));
+            String[] list = p[5].split("\n");
+            int rows = (list.length + cols - 1) / cols;
+            if (rows * cell > 4096 || cols * cell > 4096) return "ERR katta atlas";
+            android.text.TextPaint tp = new android.text.TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+            tp.setTextSize(size);
+            tp.setColor(0xFFFFFFFF);
+            if (!p[4].isEmpty()) {
+                try { tp.setTypeface(android.graphics.Typeface.createFromFile(p[4])); } catch (Throwable ignored) { }
+            }
+            android.graphics.Paint.FontMetrics fm = tp.getFontMetrics();
+            android.graphics.Bitmap b = android.graphics.Bitmap.createBitmap(cols * cell, rows * cell, android.graphics.Bitmap.Config.ARGB_8888);
+            android.graphics.Canvas c = new android.graphics.Canvas(b);
+            for (int i = 0; i < list.length; i++) {
+                float w = tp.measureText(list[i]);
+                float x = (i % cols) * cell + (cell - w) / 2f;
+                float y = (i / cols) * cell + (cell - (fm.descent - fm.ascent)) / 2f - fm.ascent;
+                c.drawText(list[i], x, y, tp);
+            }
+            java.io.File tmp = new java.io.File(p[0] + ".tmp");
+            java.io.FileOutputStream fo = new java.io.FileOutputStream(tmp);
+            try { b.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, fo); } finally { fo.close(); }
+            if (!tmp.renameTo(new java.io.File(p[0]))) return "ERR nomi o'zgarmadi";
+            return cols + "|" + rows;
+        } catch (Throwable e) {
+            Log.e(TAG, "emojiAtlas: " + e);
+            return "ERR " + e;
+        }
+    }
+
+    /**
      * UZ: GIF (mp4) ni kadrlar varag'iga (sprite sheet, PNG) aylantiradi: tizimning o'zidagi dekoder (`MediaMetadataRetriever`) orqali.
      * Argument: `kirish.mp4|chiqish.png|eng_ko'p_kadr|uzun_tomon_px|eng_ko'p_fps`. Natija: `kadr_kengligi|kadr_balandligi|ustunlar|kadrlar|fps` yoki bo'sh (xato).
      * EN: Turns a GIF (mp4) into a frame sheet (sprite sheet, PNG) using the system decoder (`MediaMetadataRetriever`).
