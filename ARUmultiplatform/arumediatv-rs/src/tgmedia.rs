@@ -193,13 +193,13 @@ pub fn resolve_gif(r: &str) -> Option<TgDoc> {
     })
 }
 
-/// Bir vaqtda ko'pi bilan 6 ta yuklash (panel o'nlab rasm so'raydi).
+/// Bir vaqtda ko'pi bilan 8 ta yuklash (panel o'nlab rasm so'raydi).
 fn slot<T>(f: impl FnOnce() -> T) -> T {
     use std::sync::atomic::{AtomicUsize, Ordering};
     static BUSY: AtomicUsize = AtomicUsize::new(0);
     loop {
         let n = BUSY.load(Ordering::SeqCst);
-        if n < 6 && BUSY.compare_exchange(n, n + 1, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
+        if n < 8 && BUSY.compare_exchange(n, n + 1, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(60));
@@ -233,6 +233,23 @@ fn fetch(arg: Value, path: &str) -> Result<(), String> {
 
 /// Hujjat rasmi (BLOKLAYDI): diskdagi shifrlangan nusxa yoki Telegram'dan. Statik WebP stiker — to'liq fayl,
 /// qolganlari (tgs/webm/mp4 va h.k.) — kichik rasm. `Err("FILE_REFERENCE_EXPIRED")` — ro'yxatni yangilash kerak.
+/// UZ: MP4 (GIF) baytlaridan birinchi kadr: Android tizim dekoderi (bitta kadr — tez). Telegram GIF uchun alohida kichik rasm bermasa shu ishlatiladi.
+/// EN: The first frame of MP4 (GIF) bytes: the Android system decoder (a single frame — fast). Used when Telegram gives no separate small preview for a GIF.
+/// RU: Первый кадр из байтов MP4 (GIF): системный декодер Android (один кадр — быстро). Используется, когда Telegram не даёт отдельного маленького превью для GIF.
+fn mp4_first_frame(b: &[u8]) -> Option<Image> {
+    if b.len() < 16 || &b[4..8] != b"ftyp" {
+        return None;
+    }
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let (inp, out) = (format!("{}/f{stamp}.mp4", dir()), format!("{}/f{stamp}.jpg", dir()));
+    std::fs::write(&inp, b).ok()?;
+    uzcoders::android::frame_to_file(&format!("{inp}|{out}"));
+    let jpg = std::fs::read(&out).ok();
+    let _ = std::fs::remove_file(&inp);
+    let _ = std::fs::remove_file(&out);
+    crate::webp::decode_any(&jpg?)
+}
+
 pub fn image(d: &TgDoc, px: u32) -> Result<Image, String> {
     let full = d.kind == "webp";
     let thumb = if full { "" } else if d.thumb.is_empty() { "m" } else { d.thumb.as_str() };
@@ -256,7 +273,7 @@ pub fn image(d: &TgDoc, px: u32) -> Result<Image, String> {
         b.extend_from_slice(&img.rgba);
         let _ = crate::secure::write(&ready, "tgm", &b);
     };
-    if let Some(img) = crate::secure::read(&path, "tgm").and_then(|b| crate::webp::decode_any(&b)) {
+    if let Some(img) = crate::secure::read(&path, "tgm").and_then(|b| crate::webp::decode_any(&b).or_else(|| mp4_first_frame(&b))) {
         let img = img.resized(px, px);
         save_ready(&img);
         return Ok(img);
@@ -268,7 +285,7 @@ pub fn image(d: &TgDoc, px: u32) -> Result<Image, String> {
         let _ = std::fs::remove_file(&tmp);
         r?;
         let bytes = bytes.ok_or_else(|| "fayl o'qilmadi".to_string())?;
-        let img = crate::webp::decode_any(&bytes).ok_or_else(|| format!("rasm dekodlanmadi ({} bayt, boshi {:02x?})", bytes.len(), &bytes[..bytes.len().min(12)]))?;
+        let img = crate::webp::decode_any(&bytes).or_else(|| mp4_first_frame(&bytes)).ok_or_else(|| format!("rasm dekodlanmadi ({} bayt, boshi {:02x?})", bytes.len(), &bytes[..bytes.len().min(12)]))?;
         let _ = crate::secure::write(&path, "tgm", &bytes);
         let img = img.resized(px, px);
         save_ready(&img);

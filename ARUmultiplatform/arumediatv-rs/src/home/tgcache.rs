@@ -160,7 +160,7 @@ impl Home {
         }
         let rr = r.to_string();
         let px = (size * density()).clamp(96.0, 224.0) as u32;
-        let sheet = self.tg_sheet(&format!("ar{r}"), px, move |wanted| {
+        let sheet = self.tg_sheet(&format!("ar{r}"), px, true, move |wanted| {
             let d = if sticker { tgmedia::resolve_sticker(&rr) } else { tgmedia::resolve_gif(&rr) }.ok_or_else(|| "havola hal bo'lmadi".to_string())?;
             let gif = !sticker;
             if !gif && d.kind != "tgs" {
@@ -192,7 +192,7 @@ impl Home {
 
     /// Animatsiya varag'i: tayyor bo'lsa qaytaradi; bo'lmasa fonda tayyorlaydi (bir vaqtda 2 ta; ekrandan ketgan katak uchun ish tashlab yuboriladi).
     /// `load(kerakmi)` — varaqni yasaydi; `kerakmi()` yolg'on bo'lsa, ish to'xtatiladi.
-    pub(super) fn tg_sheet(self: &Rc<Self>, key: &str, px: u32, load: impl FnOnce(&dyn Fn() -> bool) -> Result<crate::tganim::AnimSheet, String> + Send + 'static) -> Option<ASheet> {
+    pub(super) fn tg_sheet(self: &Rc<Self>, key: &str, px: u32, allow_build: bool, load: impl FnOnce(&dyn Fn() -> bool) -> Result<crate::tganim::AnimSheet, String> + Send + 'static) -> Option<ASheet> {
         let _ = self.gate_rev.get();
         let now = epoch_ms();
         let state = ANIMS.with(|m| {
@@ -214,10 +214,16 @@ impl Home {
         if ANIMS.with(|m| m.borrow().values().filter(|e| matches!(e.st, AState::Loading)).count()) >= 3 {
             return None;
         }
+        let disk_key = format!("{key}_{px}");
+        // UZ: O'ynamayotgan katak yangi varaq yasamaydi (og'ir): faqat diskdagi tayyorini oladi.
+        // EN: A cell that is not playing does not build a new sheet (heavy): it only picks up a ready one from disk.
+        // RU: Не играющая ячейка не строит новый лист (это тяжело): берёт только готовый с диска.
+        if !allow_build && !std::path::Path::new(&sheet_path(&disk_key)).exists() {
+            return None;
+        }
         let seen = Arc::new(AtomicU64::new(now));
         ANIMS.with(|m| m.borrow_mut().insert(key.to_string(), AEntry { st: AState::Loading, seen: seen.clone(), last_use: Instant::now() }));
         let (me, k) = (self.clone(), key.to_string());
-        let disk_key = format!("{key}_{px}");
         spawn_bg(
             move || {
                 // UZ: Tayyor varaq diskda: qayta chizilmaydi/dekodlanmaydi, faqat bitta PNG o'qiladi.
@@ -304,7 +310,7 @@ impl Home {
         }
         let max = if gif { 6 << 20 } else { 1 << 20 };
         let dd = d.clone();
-        let sheet = self.tg_sheet(&format!("a{key}"), px, move |wanted| {
+        let sheet = self.tg_sheet(&format!("a{key}"), px, playing, move |wanted| {
             let bytes = match tgmedia::file_bytes(&dd, max) {
                 Err(e) if e.contains("FILE_REFERENCE") => {
                     let fresh = match &set {

@@ -193,3 +193,4 @@ mod tests {
         assert!(build(b"not json", 20, 4, 30.0).is_err());
     }
 }
+

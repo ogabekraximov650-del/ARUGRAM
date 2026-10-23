@@ -148,7 +148,7 @@ struct BigImg {
 /// UZ: Atlasga sig'maydigan (katta) rasmlar shu hajmdan (piksel) boshlanadi.
 /// EN: Images from this size (in pixels) up are considered large and do not go into the atlas.
 /// RU: Изображения от этого размера (в пикселях) считаются большими и в атлас не попадают.
-const BIG_PIXELS: u32 = 128 * 128;
+const BIG_PIXELS: u32 = 64 * 64;
 /// UZ: Katta rasm teksturalarining umumiy xotira chegarasi (bayt).
 /// EN: Total memory budget for large-image textures (bytes).
 /// RU: Общий лимит памяти для текстур больших изображений (в байтах).
