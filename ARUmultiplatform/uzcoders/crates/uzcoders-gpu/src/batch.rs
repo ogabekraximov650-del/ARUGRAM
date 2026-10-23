@@ -336,7 +336,17 @@ impl Batcher {
                     opacity,
                 } => {
                     if !b.empty {
-                        self.draw_image(&mut b, image, *rect, *opacity);
+                        self.draw_image(&mut b, image, None, *rect, *opacity);
+                    }
+                }
+                DrawCmd::ImageRegion {
+                    image,
+                    src,
+                    rect,
+                    opacity,
+                } => {
+                    if !b.empty {
+                        self.draw_image(&mut b, image, Some(*src), *rect, *opacity);
                     }
                 }
                 DrawCmd::Path {
@@ -404,7 +414,8 @@ impl Batcher {
         e
     }
 
-    fn draw_image(&mut self, b: &mut Build, img: &Rc<Image>, rect: Rect, opacity: f32) {
+    /// UZ: `src` berilsa, rasmning faqat shu qismi (x, y, kenglik, balandlik; piksellarda) chiziladi. EN: With `src`, only that part of the image (x, y, width, height in pixels) is drawn. RU: С `src` рисуется только эта часть изображения (x, y, ширина, высота в пикселях).
+    fn draw_image(&mut self, b: &mut Build, img: &Rc<Image>, src: Option<(u32, u32, u32, u32)>, rect: Rect, opacity: f32) {
         let key = Rc::as_ptr(img) as usize;
         if img.w * img.h > BIG_PIXELS {
             let id = match self.big.get_mut(&key) {
@@ -453,7 +464,15 @@ impl Batcher {
                 }
             };
             b.flush();
-            b.image_quad_uv(rect, (0.0, 0.0, 1.0, 1.0), opacity);
+            let uv = match src {
+                None => (0.0, 0.0, 1.0, 1.0),
+                // UZ: Yarim teksel ichkariga: qo'shni kadr piksellari aralashib ketmasin. EN: Inset by half a texel so neighbouring frames do not bleed. RU: Отступ на полтекселя внутрь, чтобы соседние кадры не просачивались.
+                Some((x, y, w, h)) => {
+                    let (iw, ih) = (img.w as f32, img.h as f32);
+                    ((x as f32 + 0.5) / iw, (y as f32 + 0.5) / ih, ((x + w) as f32 - 0.5) / iw, ((y + h) as f32 - 0.5) / ih)
+                }
+            };
+            b.image_quad_uv(rect, uv, opacity);
             b.flush_with(Some(id));
             return;
         }
@@ -490,6 +509,15 @@ impl Batcher {
             }
         };
         if let Some(e) = entry {
+            let e = match src {
+                None => e,
+                Some((x, y, w, h)) => Entry {
+                    x: e.x + x.min(e.w),
+                    y: e.y + y.min(e.h),
+                    w: w.min(e.w.saturating_sub(x)),
+                    h: h.min(e.h.saturating_sub(y)),
+                },
+            };
             b.image_quad(rect, e, opacity);
         }
     }

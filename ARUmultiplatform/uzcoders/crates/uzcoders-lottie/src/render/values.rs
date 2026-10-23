@@ -369,7 +369,7 @@ pub(super) fn vec2_at(
 
     value
         .and_then(|value| sample_numbers(value, frame, timeline_sample_cache))
-        .and_then(|values| (values.len() >= 2).then_some([values[0], values[1]]))
+        .and_then(|values| (values.len() >= 2).then(|| [values[0], values[1]]))
         .unwrap_or(default)
 }
 

@@ -9,6 +9,7 @@ mod comments;
 mod dl;
 mod edit;
 mod mediaview;
+mod tgcache;
 mod tgpanel;
 mod pages;
 mod pubprofile;

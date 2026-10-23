@@ -84,7 +84,29 @@ pub(crate) enum Kind {
         h: f32,
         opacity: f32,
     },
+    Sprite {
+        sheet: Rc<Image>,
+        cols: u32,
+        count: u32,
+        fps: f32,
+        playing: bool,
+        w: f32,
+        h: f32,
+    },
     Field(Box<FieldCfg>),
+}
+
+/// UZ: Uzoq bosish bosqichi (`Element::on_hold`).
+/// EN: A long-press phase (`Element::on_hold`).
+/// RU: Фаза долгого нажатия (`Element::on_hold`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Hold {
+    /// UZ: Uzoq bosish boshlandi. EN: The hold started. RU: Удержание началось.
+    Start,
+    /// UZ: Barmoq harakatda; boshlang'ich nuqtadan vertikal siljish (dp, tepaga manfiy). EN: The finger moved; vertical offset from the start point (dp, negative is up). RU: Палец движется; вертикальное смещение от начальной точки (dp, вверх — отрицательное).
+    Move(f32),
+    /// UZ: Barmoq qo'yib yuborildi (yoki bekor qilindi). EN: The finger was released (or cancelled). RU: Палец отпущен (или отменено).
+    End(f32),
 }
 
 /// UZ: UI daraxti elementi: uslub, bolalar va chizish xossalari to'plami.
@@ -105,6 +127,7 @@ pub struct Element {
     pub(crate) glows: Vec<(f32, f32, f32, Color)>,
     pub(crate) on_click: Option<Callback>,
     pub(crate) on_swipe: Option<Rc<dyn Fn(i32)>>,
+    pub(crate) on_hold: Option<(u64, Rc<dyn Fn(Hold)>)>,
     pub(crate) video: bool,
     pub(crate) on_drag: Option<Rc<dyn Fn(f32, bool)>>,
     pub(crate) scroll: Option<ScrollState>,
@@ -125,6 +148,7 @@ impl Element {
             glows: Vec::new(),
             on_click: None,
             on_swipe: None,
+            on_hold: None,
             video: false,
             on_drag: None,
             scroll: None,
@@ -306,6 +330,16 @@ impl Element {
         self.on_swipe = Some(Rc::new(f));
         self
     }
+    /// UZ: Uzoq bosish: barmoq `ms` millisekund siljimay tursa `Hold::Start`; keyin barmoq harakatida `Hold::Move(dy)` (boshlang'ich nuqtadan dp), qo'yib yuborilganda `Hold::End(dy)`.
+    /// Uzoq bosish boshlangach oddiy bosish (`on_click`) va ro'yxat surilishi ishlamaydi. Barmoq `ms` dan oldin siljisa — oddiy surish/bosish.
+    /// EN: Long press: `Hold::Start` when the finger stays still for `ms` milliseconds; then `Hold::Move(dy)` as it moves (dp from the start point) and `Hold::End(dy)` on release.
+    /// Once the hold starts, the normal click (`on_click`) and list scrolling are suppressed. If the finger moves before `ms`, it is an ordinary scroll/tap.
+    /// RU: Долгое нажатие: `Hold::Start`, когда палец неподвижен `ms` миллисекунд; затем `Hold::Move(dy)` при движении (dp от начальной точки) и `Hold::End(dy)` при отпускании.
+    /// После начала удержания обычный клик (`on_click`) и прокрутка списка отключаются. Если палец сдвинулся раньше `ms` — обычная прокрутка/касание.
+    pub fn on_hold(mut self, ms: u64, f: impl Fn(Hold) + 'static) -> Self {
+        self.on_hold = Some((ms, Rc::new(f)));
+        self
+    }
     pub fn on_click(mut self, f: impl Fn() + 'static) -> Self {
         self.on_click = Some(Rc::new(f));
         self
@@ -328,7 +362,7 @@ impl Element {
     pub fn size(mut self, s: f32) -> Self {
         match &mut self.kind {
             Kind::Text { size, .. } | Kind::Icon { size, .. } => *size = s,
-            Kind::Image { .. } | Kind::Spinner { .. } => {}
+            Kind::Image { .. } | Kind::Spinner { .. } | Kind::Sprite { .. } => {}
             Kind::Field(f) => f.size = s,
             Kind::Container => {}
         }
@@ -343,7 +377,7 @@ impl Element {
                 *color = c
             }
             Kind::Field(f) => f.color = c,
-            Kind::Container | Kind::Image { .. } => {}
+            Kind::Container | Kind::Image { .. } | Kind::Sprite { .. } => {}
         }
         self
     }
@@ -596,6 +630,41 @@ pub fn lazy_column(
     column(kids).scroll(state)
 }
 
+/// UZ: Virtual ro'yxat, elementlar balandligi har xil (`heights`, dp): faqat ko'rinadiganlari (va 100 dp zaxira) quriladi.
+/// `build(i)` — i-elementni qaytaradi (balandligi `heights[i]` ga majburlanadi).
+/// EN: A virtualized list with items of different heights (`heights`, dp): only the visible ones (plus a 100 dp margin) are built.
+/// `build(i)` returns the i-th item (its height is forced to `heights[i]`).
+/// RU: Виртуальный список с элементами разной высоты (`heights`, dp): строятся только видимые (и запас 100 dp).
+/// `build(i)` возвращает i-й элемент (его высота принудительно равна `heights[i]`).
+pub fn lazy_column_var(state: &ScrollState, heights: &[f32], build: impl Fn(usize) -> Element) -> Element {
+    let d = uzcoders_core::density().max(0.1);
+    let off = state.offset() / d;
+    let vp = if state.viewport() > 0.0 { state.viewport() / d } else { 3000.0 };
+    let mut prefix: Vec<f32> = Vec::with_capacity(heights.len() + 1);
+    prefix.push(0.0);
+    for h in heights {
+        prefix.push(prefix.last().copied().unwrap_or(0.0) + h);
+    }
+    let total = prefix.last().copied().unwrap_or(0.0);
+    let lo = (off - 100.0).max(0.0);
+    let hi = off + vp + 100.0;
+    // UZ: Birinchi ko'rinadigan element: oxiri `lo` dan keyin bo'lgan eng birinchisi. EN: First visible item: the first whose end is past `lo`. RU: Первый видимый элемент: первый, чей конец за `lo`.
+    let first = prefix.partition_point(|p| *p <= lo).saturating_sub(1).min(heights.len());
+    let last = prefix.partition_point(|p| *p < hi).min(heights.len());
+    let last = last.max(first);
+    let mut kids = Vec::with_capacity(last - first + 2);
+    if first > 0 {
+        kids.push(gap_box(0.0, prefix[first]));
+    }
+    for i in first..last {
+        kids.push(build(i).height(heights[i]));
+    }
+    if last < heights.len() {
+        kids.push(gap_box(0.0, total - prefix[last]));
+    }
+    column(kids).scroll(state)
+}
+
 /// UZ: Aylanuvchi yuklanish ko'rsatkichi (Material `CircularProgressIndicator` kabi): `size` dp, chiziq qalinligi `width` dp.
 /// EN: A rotating loading spinner (like Material `CircularProgressIndicator`): `size` dp, stroke width `width` dp.
 /// RU: Вращающийся индикатор загрузки (как Material `CircularProgressIndicator`): `size` dp, толщина линии `width` dp.
@@ -619,6 +688,30 @@ pub fn image(img: &Rc<Image>, w: f32, h: f32) -> Element {
             w,
             h,
             opacity: 1.0,
+        },
+        Style::default(),
+        Vec::new(),
+    );
+    e.style.shrink = 0.0;
+    e
+}
+
+/// UZ: Animatsiyali rasm: `sheet` — kadrlar yonma-yon turgan varaq (`cols` ustun, jami `count` kadr, qatorma-qator), `fps` — tezlik.
+/// `playing = false` bo'lsa birinchi kadr turadi (animatsiya yurmaydi, qayta chizish talab qilinmaydi). `w` x `h` dp.
+/// EN: An animated image: `sheet` holds the frames side by side (`cols` columns, `count` frames in total, row by row), `fps` is the speed.
+/// With `playing = false` the first frame is shown (no animation, no redraw requests). `w` x `h` dp.
+/// RU: Анимированное изображение: `sheet` — лист с кадрами рядом (`cols` столбцов, всего `count` кадров, по строкам), `fps` — скорость.
+/// При `playing = false` показывается первый кадр (без анимации и без запросов перерисовки). `w` x `h` dp.
+pub fn sprite(sheet: &Rc<Image>, cols: u32, count: u32, fps: f32, playing: bool, w: f32, h: f32) -> Element {
+    let mut e = Element::new(
+        Kind::Sprite {
+            sheet: sheet.clone(),
+            cols: cols.max(1),
+            count: count.max(1),
+            fps,
+            playing,
+            w,
+            h,
         },
         Style::default(),
         Vec::new(),

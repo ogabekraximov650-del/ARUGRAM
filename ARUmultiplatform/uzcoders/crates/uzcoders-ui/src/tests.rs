@@ -441,3 +441,127 @@ fn linza_buyrugi() {
         |c| matches!(c, DrawCmd::Backdrop { zoom, blur, .. } if *zoom == 1.2 && *blur == 0.0)
     ));
 }
+
+#[test]
+fn sprite_kadrlari_vaqt_bilan_almashadi() {
+    // UZ: 2x2 varaq (4 kadr, har biri 4x4 piksel), 10 kadr/s. EN: A 2x2 sheet (4 frames of 4x4 px), 10 fps. RU: Лист 2x2 (4 кадра по 4x4 пикселя), 10 кадров/с.
+    let sheet = Rc::new(Image {
+        w: 8,
+        h: 8,
+        rgba: vec![255; 8 * 8 * 4],
+    });
+    let s2 = sheet.clone();
+    let mut ui = Ui::new(font(), move || column(vec![sprite(&s2, 2, 4, 10.0, true, 40.0, 40.0)]));
+    let src_at = |ui: &mut Ui, ms: u64| {
+        ui.set_time(ms);
+        ui.frame(SZ).iter().find_map(|c| match c {
+            DrawCmd::ImageRegion { src, .. } => Some(*src),
+            _ => None,
+        })
+    };
+    assert_eq!(src_at(&mut ui, 0), Some((0, 0, 4, 4)));
+    assert_eq!(src_at(&mut ui, 100), Some((4, 0, 4, 4)));
+    assert_eq!(src_at(&mut ui, 250), Some((0, 4, 4, 4)));
+    assert_eq!(src_at(&mut ui, 350), Some((4, 4, 4, 4)));
+    assert_eq!(src_at(&mut ui, 400), Some((0, 0, 4, 4)));
+    assert!(ui.needs_frame());
+}
+
+#[test]
+fn sprite_toxtagan_birinchi_kadr_va_qayta_chizmaydi() {
+    let sheet = Rc::new(Image {
+        w: 8,
+        h: 4,
+        rgba: vec![255; 8 * 4 * 4],
+    });
+    let mut ui = Ui::new(font(), move || column(vec![sprite(&sheet, 2, 2, 10.0, false, 40.0, 40.0)]));
+    ui.set_time(500);
+    let cmds = ui.frame(SZ);
+    assert!(cmds.iter().any(|c| matches!(c, DrawCmd::ImageRegion { src: (0, 0, 4, 4), .. })));
+    assert!(!ui.needs_frame());
+}
+
+#[test]
+fn uzoq_bosish_boshlanadi_va_bosishni_bekor_qiladi() {
+    let log: Rc<std::cell::RefCell<Vec<String>>> = Rc::new(std::cell::RefCell::new(Vec::new()));
+    let (l1, l2) = (log.clone(), log.clone());
+    let mut ui = Ui::new(font(), move || {
+        let (l1, l2) = (l1.clone(), l2.clone());
+        column(vec![column(vec![text("x")])
+            .width(100.0)
+            .height(100.0)
+            .on_click(move || l1.borrow_mut().push("click".into()))
+            .on_hold(300, move |h| l2.borrow_mut().push(format!("{h:?}")))])
+    });
+    ui.set_time(0);
+    ui.frame(SZ);
+    ui.pointer(PointerEvent::new(PointerKind::Down, 20.0, 20.0));
+    // UZ: Muddat tugamagan: hali boshlanmagan; uyg'onish muddati ko'rinadi. EN: Not elapsed yet: not started; the wake-up time is known. RU: Время не истекло: не началось; срок пробуждения известен.
+    ui.set_time(200);
+    assert!(log.borrow().is_empty());
+    assert_eq!(ui.next_wakeup_ms(), Some(100));
+    ui.set_time(320);
+    assert_eq!(*log.borrow(), vec!["Start".to_string()]);
+    ui.pointer(PointerEvent::new(PointerKind::Move, 20.0, 5.0));
+    ui.pointer(PointerEvent::new(PointerKind::Up, 20.0, 5.0));
+    let l = log.borrow().clone();
+    assert_eq!(l.len(), 3, "{l:?}");
+    assert!(l[1].starts_with("Move(") && l[2].starts_with("End("), "{l:?}");
+    assert!(!l.iter().any(|x| x == "click"), "{l:?}");
+}
+
+#[test]
+fn qisqa_bosish_va_erta_siljish_uzoq_bosishni_bekor_qiladi() {
+    let log: Rc<std::cell::RefCell<Vec<String>>> = Rc::new(std::cell::RefCell::new(Vec::new()));
+    let (l1, l2) = (log.clone(), log.clone());
+    let mut ui = Ui::new(font(), move || {
+        let (l1, l2) = (l1.clone(), l2.clone());
+        column(vec![column(vec![text("x")])
+            .width(100.0)
+            .height(100.0)
+            .on_click(move || l1.borrow_mut().push("click".into()))
+            .on_hold(300, move |h| l2.borrow_mut().push(format!("{h:?}")))])
+    });
+    ui.set_time(0);
+    ui.frame(SZ);
+    // UZ: Qisqa bosish: oddiy click. EN: A short press: a normal click. RU: Короткое нажатие: обычный клик.
+    tap(&mut ui, 20.0, 20.0);
+    assert_eq!(*log.borrow(), vec!["click".to_string()]);
+    log.borrow_mut().clear();
+    // UZ: Muddatdan oldin siljish: uzoq bosish bekor. EN: Moving before the time: the hold is cancelled. RU: Сдвиг до срока: удержание отменено.
+    ui.pointer(PointerEvent::new(PointerKind::Down, 20.0, 20.0));
+    ui.pointer(PointerEvent::new(PointerKind::Move, 80.0, 90.0));
+    ui.set_time(1000);
+    ui.pointer(PointerEvent::new(PointerKind::Up, 80.0, 90.0));
+    assert!(!log.borrow().iter().any(|x| x == "Start"), "{:?}", log.borrow());
+}
+
+#[test]
+fn har_xil_balandlikli_virtual_royxat_faqat_korinadiganni_quradi() {
+    let built: Rc<std::cell::RefCell<Vec<usize>>> = Rc::new(std::cell::RefCell::new(Vec::new()));
+    let sc = ScrollState::new();
+    let (b, s2) = (built.clone(), sc.clone());
+    let heights: Vec<f32> = (0..200).map(|i| if i % 5 == 0 { 30.0 } else { 50.0 }).collect();
+    let h2 = heights.clone();
+    let mut ui = Ui::new(font(), move || {
+        let b = b.clone();
+        column(vec![lazy_column_var(&s2, &h2, move |i| {
+            b.borrow_mut().push(i);
+            column(vec![text(format!("{i}"))])
+        })
+        .height(200.0)])
+    });
+    // UZ: Birinchi kadrda ko'rinish balandligi hali noma'lum (katta zaxira); ikkinchisida aniq. EN: On the first frame the viewport is unknown (a big margin); on the second it is known. RU: На первом кадре высота окна неизвестна (большой запас); на втором известна.
+    ui.frame(SZ);
+    built.borrow_mut().clear();
+    ui.frame(SZ);
+    let n0 = built.borrow().len();
+    assert!(n0 > 0 && n0 < 20, "{n0}");
+    assert_eq!(built.borrow()[0], 0);
+    // UZ: 4000 dp pastga: boshidagi elementlar qurilmaydi. EN: Scrolled 4000 dp down: the first items are not built. RU: Прокрутка на 4000 dp вниз: первые элементы не строятся.
+    built.borrow_mut().clear();
+    sc.set_offset(4000.0 * 1.0);
+    ui.frame(SZ);
+    let b = built.borrow().clone();
+    assert!(!b.is_empty() && b[0] > 50 && b.len() < 20, "{b:?}");
+}

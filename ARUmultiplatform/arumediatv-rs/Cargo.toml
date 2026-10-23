@@ -10,6 +10,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 # uzcoders kutubxonasining nusxasi shu repoda: ARUmultiplatform/uzcoders (VENDOR.md).
 uzcoders = { path = "../uzcoders/crates/uzcoders" }
+uzcoders-lottie = { path = "../uzcoders/crates/uzcoders-lottie" }
 
 # Telegram (grammers) yadrosi: ARUMEDIATV'ning mavjud Rust yadrosi (kirish, MTProto) shu yerdan ishlatiladi.
 rust_core = { path = "../android/rust" }

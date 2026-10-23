@@ -15,6 +15,7 @@ mod theme;
 mod qr;
 mod secure;
 mod tgmedia;
+mod tganim;
 mod emojifont;
 mod webp;
 

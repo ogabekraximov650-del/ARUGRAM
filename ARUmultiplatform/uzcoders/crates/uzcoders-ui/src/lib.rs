@@ -15,9 +15,10 @@ use uzcoders_layout::{Axis, Dim, Tree};
 use uzcoders_render::{Canvas, DrawCmd, Image, Path};
 use uzcoders_text::Font;
 
+pub use element::Hold;
 pub use element::{
-    button, column, field, gap_box, grid, icon, image, image_fill, lazy_column, row, scroll_column,
-    spacer, spinner, stack, text, Element, KeyboardKind,
+    button, column, field, gap_box, grid, icon, image, image_fill, lazy_column, lazy_column_var, row, scroll_column,
+    spacer, sprite, spinner, stack, text, Element, KeyboardKind,
 };
 pub use nav::Navigator;
 pub use scroll::ScrollState;
@@ -31,6 +32,7 @@ enum ItemKind {
     Text(String, f32, Color, u16, Option<f32>, f32),
     Icon(Rc<Path>, Color),
     Image(Rc<Image>, f32),
+    Sprite(Rc<Image>, u32, u32, f32, bool),
     Spinner(f32, Color),
     Field(Box<FieldCfg>),
     ScrollEnd,
@@ -48,6 +50,7 @@ struct Item {
     glows: Vec<(f32, f32, f32, Color)>,
     hit: Option<usize>,
     swipe: Option<Rc<dyn Fn(i32)>>,
+    hold: Option<(u64, Rc<dyn Fn(Hold)>)>,
     video: bool,
     drag: Option<Rc<dyn Fn(f32, bool)>>,
     scroll: Option<ScrollState>,
@@ -89,10 +92,22 @@ struct Touch {
     /// EN: Index of the slider (`on_drag`).
     /// RU: Индекс слайдера (`on_drag`).
     drag: Option<usize>,
+    /// UZ: Uzoq bosish (`on_hold`) holati; qayta chaqirish o'zi saqlanadi (daraxt qayta qurilganda ham to'g'ri ishlashi uchun).
+    /// EN: The long-press (`on_hold`) state; the callback itself is kept (so it stays correct when the tree is rebuilt).
+    /// RU: Состояние долгого нажатия (`on_hold`); сам обработчик хранится (чтобы работать верно при перестроении дерева).
+    hold: Option<HoldState>,
     /// UZ: So'nggi namunalar: (vaqt ms, scroll o'qi bo'yicha koordinata) — tezlikni baholash uchun.
     /// EN: Recent samples: (time in ms, coordinate along the scroll axis), used to estimate velocity.
     /// RU: Последние отсчёты: (время в мс, координата по оси прокрутки) — для оценки скорости.
     samples: Vec<(u64, f32)>,
+}
+
+#[derive(Clone)]
+struct HoldState {
+    cb: Rc<dyn Fn(Hold)>,
+    ms: u64,
+    start: u64,
+    fired: bool,
 }
 
 /// UZ: Ilova ish vaqti: elementlarni quradi, joylaydi, chizish ro'yxatini beradi va kiritishni yo'naltiradi.
@@ -106,6 +121,7 @@ pub struct Ui {
     build: Box<dyn FnMut() -> Element>,
     hits: Vec<Hit>,
     swipes: Vec<(Rect, Rc<dyn Fn(i32)>)>,
+    holds: Vec<(Rect, u64, Rc<dyn Fn(Hold)>)>,
     drags: Vec<(Rect, Rc<dyn Fn(f32, bool)>)>,
     fields: Vec<FieldInfo>,
     regions: Vec<Region>,
@@ -142,6 +158,7 @@ impl Ui {
             build: Box::new(build),
             hits: Vec::new(),
             swipes: Vec::new(),
+            holds: Vec::new(),
             drags: Vec::new(),
             fields: Vec::new(),
             regions: Vec::new(),
@@ -241,6 +258,22 @@ impl Ui {
     /// RU: Текущее время (миллисекунды, монотонное). От него зависят мигание курсора и инерция; оболочка вызывает его в каждом цикле.
     pub fn set_time(&mut self, ms: u64) {
         self.now = ms;
+        // UZ: Uzoq bosish muddati tugadimi. EN: Has the long-press time elapsed. RU: Истекло ли время долгого нажатия.
+        let fire = match &mut self.touch {
+            Some(t) if !t.dragging && !t.swiped && t.drag.is_none() => match &mut t.hold {
+                Some(h) if !h.fired && ms >= h.start + h.ms => {
+                    h.fired = true;
+                    Some(h.cb.clone())
+                }
+                _ => None,
+            },
+            _ => None,
+        };
+        if let Some(cb) = fire {
+            self.pressed = None;
+            self.dirty = true;
+            cb(Hold::Start);
+        }
     }
 
     /// UZ: "Orqaga" bosilganda chaqiriladi; `true` qaytarilsa — qayta ishlandi (ilova yopilmaydi).
@@ -272,6 +305,12 @@ impl Ui {
     pub fn next_wakeup_ms(&self) -> Option<u64> {
         if self.animating || self.scrolls.iter().any(|s| s.velocity() != 0.0) {
             return Some(0);
+        }
+        // UZ: Kutilayotgan uzoq bosish muddatigacha uyg'onish. EN: Wake up for a pending long press. RU: Пробуждение к сроку ожидающего долгого нажатия.
+        if let Some(Touch { hold: Some(h), .. }) = &self.touch {
+            if !h.fired {
+                return Some((h.start + h.ms).saturating_sub(self.now));
+            }
         }
         self.focus
             .map(|_| BLINK_MS - self.now.saturating_sub(self.caret_epoch) % BLINK_MS)
@@ -336,6 +375,7 @@ impl Ui {
 
         self.hits.clear();
         self.swipes.clear();
+        self.holds.clear();
         self.drags.clear();
         self.fields.clear();
         self.regions.clear();
@@ -369,6 +409,9 @@ impl Ui {
             }
             if let Some(cb) = &it.swipe {
                 self.swipes.push((eff, cb.clone()));
+            }
+            if let Some((ms, cb)) = &it.hold {
+                self.holds.push((eff, *ms, cb.clone()));
             }
             if visible {
                 if let Some(mut c) = it.bg {
@@ -452,6 +495,24 @@ impl Ui {
                         rect: r,
                         opacity,
                     });
+                }
+                ItemKind::Sprite(sheet, cols, count, fps, playing) if visible => {
+                    let rows = count.div_ceil(cols).max(1);
+                    let (cw, ch) = (sheet.w / cols, sheet.h / rows);
+                    let frame = if playing && fps > 0.0 {
+                        (((self.now as f32) * fps / 1000.0) as u32) % count
+                    } else {
+                        0
+                    };
+                    cmds.push(DrawCmd::ImageRegion {
+                        src: ((frame % cols) * cw, (frame / cols) * ch, cw, ch),
+                        image: sheet,
+                        rect: r,
+                        opacity: 1.0,
+                    });
+                    if playing {
+                        self.animating = true;
+                    }
                 }
                 ItemKind::Spinner(width, color) if visible => {
                     // UZ: Material indeterminate: aylanish + yoy uzunligi 10%..75% oralig'ida o'zgaradi.
@@ -713,7 +774,7 @@ impl Ui {
                 *size *= k;
                 *width *= k;
             }
-            Kind::Image { w, h, .. } => {
+            Kind::Image { w, h, .. } | Kind::Sprite { w, h, .. } => {
                 *w *= k;
                 *h *= k;
             }
@@ -753,6 +814,7 @@ impl Ui {
             glows: std::mem::take(&mut el.glows),
             hit,
             swipe: el.on_swipe.take(),
+            hold: el.on_hold.take(),
             video: el.video,
             drag: el.on_drag.take(),
             hscroll: el.scroll.is_some() && el.style.direction == Axis::Row,
@@ -805,6 +867,18 @@ impl Ui {
                 items[slot].kind = ItemKind::Image(image, opacity);
                 tree.add_leaf(el.style, move |_| Size::new(w, h))
             }
+            Kind::Sprite {
+                sheet,
+                cols,
+                count,
+                fps,
+                playing,
+                w,
+                h,
+            } => {
+                items[slot].kind = ItemKind::Sprite(sheet, cols, count, fps, playing);
+                tree.add_leaf(el.style, move |_| Size::new(w, h))
+            }
             Kind::Spinner { size, width, color } => {
                 items[slot].kind = ItemKind::Spinner(width, color);
                 tree.add_leaf(el.style, move |_| Size::new(size, size))
@@ -841,6 +915,7 @@ impl Ui {
                 glows: Vec::new(),
                 hit: None,
                 swipe: None,
+                hold: None,
                 video: false,
                 drag: None,
                 hscroll: false,
@@ -911,6 +986,7 @@ impl Ui {
                         dragging: false,
                         swiped: false,
                         drag: Some(di),
+                        hold: None,
                         samples: Vec::new(),
                     });
                     self.pressed = None;
@@ -931,6 +1007,12 @@ impl Ui {
                     dragging: false,
                     swiped: false,
                     drag: self.drags.iter().rposition(|(r, _)| r.contains(p)),
+                    hold: self.holds.iter().rev().find(|(r, _, _)| r.contains(p)).map(|(_, ms, cb)| HoldState {
+                        cb: cb.clone(),
+                        ms: *ms,
+                        start: if e.time_ms > 0 { e.time_ms } else { self.now },
+                        fired: false,
+                    }),
                     samples: vec![(
                         if e.time_ms > 0 { e.time_ms } else { self.now },
                         region.map_or(p.y, |ri| if self.regions[ri].horizontal { p.x } else { p.y }),
@@ -953,6 +1035,24 @@ impl Ui {
                 }
                 let slop = SLOP_DP * self.scale;
                 let mut unpress = false;
+                // UZ: Uzoq bosish: boshlangan bo'lsa barmoq harakati unga uzatiladi (surish ishlamaydi); boshlanmagan bo'lsa, siljish uni bekor qiladi.
+                // EN: Long press: once started, finger motion goes to it (no scrolling); if not started yet, moving cancels it.
+                // RU: Долгое нажатие: если началось — движение пальца передаётся ему (прокрутки нет); если ещё нет — сдвиг его отменяет.
+                if let Some(t) = &mut self.touch {
+                    if let Some(h) = &t.hold {
+                        if h.fired {
+                            let cb = h.cb.clone();
+                            t.last = p;
+                            let dy = (p.y - t.start.y) / self.scale.max(0.01);
+                            cb(Hold::Move(dy));
+                            self.dirty = true;
+                            return;
+                        }
+                        if (p.x - t.start.x).hypot(p.y - t.start.y) > slop {
+                            t.hold = None;
+                        }
+                    }
+                }
                 if let Some(t) = &mut self.touch {
                     let (adx, ady) = ((p.x - t.start.x).abs(), (p.y - t.start.y).abs());
                     if !t.dragging && !t.swiped && adx > slop * 1.5 && adx > ady * 1.5 && t.region.map_or(true, |ri| !self.regions[ri].horizontal) && self.swipes.iter().any(|(r, _)| r.contains(t.start)) {
@@ -998,6 +1098,11 @@ impl Ui {
                 self.pressed = None;
                 self.dirty = true;
                 let Some(t) = t else { return };
+                if let Some(h) = t.hold.as_ref().filter(|h| h.fired) {
+                    let cb = h.cb.clone();
+                    cb(Hold::End((p.y - t.start.y) / self.scale.max(0.01)));
+                    return;
+                }
                 if let Some(di) = t.drag {
                     if let Some((r, cb)) = self.drags.get(di) {
                         let fx = ((p.x - r.x) / r.w.max(1.0)).clamp(0.0, 1.0);
@@ -1060,6 +1165,10 @@ impl Ui {
                 }
             }
             PointerKind::Cancel => {
+                if let Some(h) = self.touch.as_ref().and_then(|t| t.hold.as_ref()).filter(|h| h.fired) {
+                    let cb = h.cb.clone();
+                    cb(Hold::End(0.0));
+                }
                 self.touch = None;
                 self.pressed = None;
                 self.dirty = true;

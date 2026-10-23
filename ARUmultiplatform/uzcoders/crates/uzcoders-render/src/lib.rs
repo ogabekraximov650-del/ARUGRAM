@@ -118,6 +118,15 @@ pub enum DrawCmd {
         rect: Rect,
         opacity: f32,
     },
+    /// UZ: Rasmning bir qismi (`src`: x, y, kenglik, balandlik — piksellarda) `rect` ga cho'zib chiziladi (sprite varaqdagi kadr uchun).
+    /// EN: A part of an image (`src`: x, y, width, height in pixels) stretched into `rect` (for a frame of a sprite sheet).
+    /// RU: Часть изображения (`src`: x, y, ширина, высота в пикселях), растянутая на `rect` (для кадра спрайт-листа).
+    ImageRegion {
+        image: Rc<Image>,
+        src: (u32, u32, u32, u32),
+        rect: Rect,
+        opacity: f32,
+    },
     /// UZ: Vektor yo'l (ikonka): `view` — yo'l koordinatalari qutisi (masalan, 24), `rect` ga cho'ziladi.
     /// EN: A vector path (icon): `view` is the path's coordinate box (e.g. 24), stretched into `rect`.
     /// RU: Векторный контур (иконка): `view` — рамка координат контура (например, 24), растягивается на `rect`.
@@ -468,7 +477,16 @@ impl Canvas {
     /// EN: Draws the image stretched into `rect` (with bilinear interpolation).
     /// RU: Рисует изображение, растянутое на `rect` (с билинейной интерполяцией).
     pub fn draw_image(&mut self, img: &Image, rect: Rect, opacity: f32) {
-        if rect.is_empty() || img.w == 0 || img.h == 0 {
+        self.draw_image_region(img, (0, 0, img.w, img.h), rect, opacity);
+    }
+
+    /// UZ: Rasmning bir qismini (`src`: x, y, kenglik, balandlik) `rect` ga cho'zib chizadi; namuna olish qism chegarasida to'xtaydi.
+    /// EN: Draws a part of an image (`src`: x, y, width, height) stretched into `rect`; sampling stops at the part's edge.
+    /// RU: Рисует часть изображения (`src`: x, y, ширина, высота), растянутую на `rect`; выборка не выходит за границу части.
+    pub fn draw_image_region(&mut self, img: &Image, src: (u32, u32, u32, u32), rect: Rect, opacity: f32) {
+        let (rx, ry) = (src.0.min(img.w), src.1.min(img.h));
+        let (rw, rh) = (src.2.min(img.w - rx), src.3.min(img.h - ry));
+        if rect.is_empty() || rw == 0 || rh == 0 {
             return;
         }
         let (bx0, by0, bx1, by1) = self.bounds();
@@ -476,11 +494,11 @@ impl Canvas {
         let y0 = (rect.y.floor() as i32).max(by0);
         let x1 = (rect.right().ceil() as i32).min(bx1);
         let y1 = (rect.bottom().ceil() as i32).min(by1);
-        let (sx, sy) = (img.w as f32 / rect.w, img.h as f32 / rect.h);
+        let (sx, sy) = (rw as f32 / rect.w, rh as f32 / rect.h);
         let at = |x: i32, y: i32| {
             let (x, y) = (
-                x.clamp(0, img.w as i32 - 1) as usize,
-                y.clamp(0, img.h as i32 - 1) as usize,
+                rx as usize + x.clamp(0, rw as i32 - 1) as usize,
+                ry as usize + y.clamp(0, rh as i32 - 1) as usize,
             );
             let i = (y * img.w as usize + x) * 4;
             [
@@ -591,6 +609,12 @@ impl Canvas {
                     rect,
                     opacity,
                 } => self.draw_image(image, *rect, *opacity),
+                DrawCmd::ImageRegion {
+                    image,
+                    src,
+                    rect,
+                    opacity,
+                } => self.draw_image_region(image, *src, *rect, *opacity),
                 DrawCmd::Gradient {
                     rect,
                     radius,
@@ -662,6 +686,29 @@ mod tests {
     fn canvas(w: usize, h: usize) -> Canvas {
         let f = Font::parse(include_bytes!("../../../assets/fonts/DejaVuSans.ttf")).unwrap();
         Canvas::new(w, h, Rc::new(f))
+    }
+
+    #[test]
+    fn rasm_qismi_faqat_shu_qismni_chizadi() {
+        // UZ: 2 ta 4x4 kadr: chap qizil, o'ng ko'k; faqat o'ng kadr chiziladi. EN: Two 4x4 frames: left red, right blue; only the right frame is drawn. RU: Два кадра 4x4: слева красный, справа синий; рисуется только правый.
+        let mut rgba = Vec::new();
+        for _y in 0..4 {
+            for x in 0..8 {
+                rgba.extend_from_slice(if x < 4 { &[255, 0, 0, 255] } else { &[0, 0, 255, 255] });
+            }
+        }
+        let img = Image { w: 8, h: 4, rgba };
+        let mut c = canvas(8, 8);
+        c.clear(Color::BLACK);
+        c.draw_image_region(&img, (4, 0, 4, 4), Rect::new(0.0, 0.0, 8.0, 8.0), 1.0);
+        assert_eq!(c.pixel(1, 1), Color::rgba(0, 0, 255, 255));
+        assert_eq!(c.pixel(6, 6), Color::rgba(0, 0, 255, 255));
+        // UZ: Qirradagi bilinear namuna qo'shni (qizil) kadrni aralashtirmasligi kerak. EN: Bilinear sampling at the edge must not mix in the neighbouring (red) frame. RU: Билинейная выборка у края не должна подмешивать соседний (красный) кадр.
+        for y in 0..8 {
+            for x in 0..8 {
+                assert_eq!(c.pixel(x, y).r, 0, "{x},{y}");
+            }
+        }
     }
 
     #[test]

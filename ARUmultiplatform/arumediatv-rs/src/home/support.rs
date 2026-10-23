@@ -414,6 +414,7 @@ impl Home {
         let mut kids: Vec<Element> = Vec::new();
         let start = items.len().saturating_sub(120);
         let visible = &items[start..];
+        super::tgcache::chat_anim_mark(visible.iter().rev().filter(|m| m.media_type == "sticker").map(|m| m.id.clone()), 4);
         let same_day = |a: i64, b: i64| crate::data::fmt_ymd(a) == crate::data::fmt_ymd(b);
         for (i, m) in visible.iter().enumerate() {
             let prev = if i > 0 { visible.get(i - 1) } else { None };
@@ -555,6 +556,10 @@ impl Home {
         if !p.menu.get().is_empty() {
             layers.push(self.chat_menu(p));
         }
+        // Stiker/GIF/maxsus emojini ushlab turganda butun oyna ustida katta ko'rinish (Telegramdagidek).
+        if let Some(ov) = self.tg_preview_view(&p.ep) {
+            layers.push(ov);
+        }
         stack(layers)
     }
 
@@ -623,7 +628,7 @@ impl Home {
             "file" => inner.push(open(row(vec![icon(S_ATTACH, 24.0).color(Color::WHITE), tx(if m.body.is_empty() { "Fayl".to_string() } else { m.body.clone() }, 14.0, Color::WHITE)]).gap(10.0).align(Align::Center).padding_xy(0.0, 6.0))),
             "sticker" | "gif" => {
                 let r = crate::data::file_name_of(&m.media_url);
-                match self.tg_ref_el(&r, if m.media_type == "gif" { 190.0 } else { 150.0 }) {
+                match self.tg_ref_el(&r, if m.media_type == "gif" { 190.0 } else { 150.0 }, super::tgcache::chat_anim_ok(&m.id)) {
                     Some(e) => inner.push(e),
                     None => inner.push(tx(if m.media_type == "gif" { "GIF" } else { "Stiker" }, 13.5, Color::WHITE).bold()),
                 }

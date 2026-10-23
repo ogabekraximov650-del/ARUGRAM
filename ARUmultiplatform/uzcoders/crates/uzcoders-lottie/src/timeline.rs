@@ -144,7 +144,7 @@ pub fn sample_numbers_from_keyframes(
 
 pub fn sample_scalar(value: &AnimatedValue, frame: f32) -> Option<f32> {
     let values = sample_numbers(value, frame)?;
-    (values.len() == 1).then_some(values[0])
+    (values.len() == 1).then(|| values[0])
 }
 
 pub fn sample_scalar_from_keyframes(keyframes: &[NumericKeyframe], frame: f32) -> Option<f32> {
@@ -179,7 +179,7 @@ pub fn sample_scalar_from_keyframes(keyframes: &[NumericKeyframe], frame: f32) -
 pub fn sample_vec2_from_keyframes(keyframes: &[NumericKeyframe], frame: f32) -> Option<[f32; 2]> {
     let first = keyframes.first()?;
     if frame <= first.time {
-        return (first.start.len() >= 2).then_some([first.start[0], first.start[1]]);
+        return (first.start.len() >= 2).then(|| [first.start[0], first.start[1]]);
     }
 
     for window in keyframes.windows(2) {
@@ -190,7 +190,7 @@ pub fn sample_vec2_from_keyframes(keyframes: &[NumericKeyframe], frame: f32) -> 
         }
 
         if current.hold || next.time <= current.time {
-            return (current.start.len() >= 2).then_some([current.start[0], current.start[1]]);
+            return (current.start.len() >= 2).then(|| [current.start[0], current.start[1]]);
         }
 
         let end = current.end.as_ref().unwrap_or(&next.start);
@@ -207,7 +207,7 @@ pub fn sample_vec2_from_keyframes(keyframes: &[NumericKeyframe], frame: f32) -> 
                 spatial,
                 eased_progress(progress, &current.out_easing, &current.in_easing, 0),
             )?;
-            return (sampled.len() >= 2).then_some([sampled[0], sampled[1]]);
+            return (sampled.len() >= 2).then(|| [sampled[0], sampled[1]]);
         }
 
         let eased_x = eased_progress(progress, &current.out_easing, &current.in_easing, 0);
@@ -219,7 +219,7 @@ pub fn sample_vec2_from_keyframes(keyframes: &[NumericKeyframe], frame: f32) -> 
     }
 
     let last = keyframes.last()?;
-    (last.start.len() >= 2).then_some([last.start[0], last.start[1]])
+    (last.start.len() >= 2).then(|| [last.start[0], last.start[1]])
 }
 
 pub fn is_supported_shape_path(value: &ShapePathValue) -> bool {
@@ -887,5 +887,16 @@ mod tests {
         .unwrap();
 
         assert!(!is_supported_shape_path(&value));
+    }
+
+    #[test]
+    fn qisqa_kalit_kadr_qiymatlari_panic_bermaydi() {
+        // UZ: 2 o'lchamli qiymat so'ralganda kalit kadrda faqat 1 son bor: `then_some` oldin hisoblanib indeks xatosi berardi. EN: A vec2 is requested but the keyframe holds one number: the eager `then_some` argument used to panic on indexing. RU: Запрошено vec2, а в ключевом кадре одно число: аргумент `then_some` вычислялся заранее и вызывал панику.
+        let value = serde_json::from_str::<AnimatedValue>(r#"{"a":1,"k":[{"t":0,"s":[5]},{"t":10,"s":[9]}]}"#).unwrap();
+        let kfs = parse_numeric_keyframes(&value).unwrap();
+        assert!(sample_vec2_from_keyframes(&kfs, 0.0).is_none());
+        assert!(sample_vec2_from_keyframes(&kfs, 5.0).is_none());
+        assert!(sample_vec2_from_keyframes(&kfs, 50.0).is_none());
+        assert_eq!(sample_scalar_from_keyframes(&kfs, 0.0), Some(5.0));
     }
 }

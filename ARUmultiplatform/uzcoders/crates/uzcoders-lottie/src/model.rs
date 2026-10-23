@@ -207,19 +207,19 @@ impl AnimatedValue {
     #[must_use]
     pub fn as_scalar(&self) -> Option<f32> {
         let values = self.as_vec()?;
-        (values.len() == 1).then_some(values[0])
+        (values.len() == 1).then(|| values[0])
     }
 
     #[must_use]
     pub fn as_vec2(&self) -> Option<[f32; 2]> {
         let values = self.as_vec()?;
-        (values.len() >= 2).then_some([values[0], values[1]])
+        (values.len() >= 2).then(|| [values[0], values[1]])
     }
 
     #[must_use]
     pub fn as_vec3(&self) -> Option<[f32; 3]> {
         let values = self.as_vec()?;
-        (values.len() >= 3).then_some([values[0], values[1], values[2]])
+        (values.len() >= 3).then(|| [values[0], values[1], values[2]])
     }
 
     #[must_use]

@@ -26,7 +26,7 @@ fn main() {
         }
         let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("x").to_string();
         let t = Instant::now();
-        let res = (|| -> Result<(), String> {
+        let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<(), String> {
             let raw = std::fs::read(&p).map_err(|e| e.to_string())?;
             let json = uzcoders_lottie::tgs::to_json(&raw).ok_or("tgs/json ochilmadi")?;
             let anim = Animation::from_json_str(&json).map_err(|e| format!("parse: {e}"))?;
@@ -48,7 +48,8 @@ fn main() {
                 std::fs::write(format!("{}/{stem}_{k}.png", a[2]), uzcoders_render::png::encode_rgba(f.width, f.height, &px)).map_err(|e| e.to_string())?;
             }
             Ok(())
-        })();
+        }))
+        .unwrap_or_else(|_| Err("PANIC".to_string()));
         let ms = t.elapsed().as_millis();
         match res {
             Ok(()) => {

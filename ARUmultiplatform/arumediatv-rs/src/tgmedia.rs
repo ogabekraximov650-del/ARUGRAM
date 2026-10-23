@@ -17,6 +17,8 @@ pub struct TgDoc {
     pub thumb: String,
     pub emoji: String,
     pub custom: bool,
+    pub w: i32,
+    pub h: i32,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -39,6 +41,8 @@ fn doc_of(v: &Value) -> Option<TgDoc> {
         thumb: v["thumb"].as_str().unwrap_or("").to_string(),
         emoji: v["emoji"].as_str().unwrap_or("").to_string(),
         custom: v["custom"].as_bool().unwrap_or(false),
+        w: v["w"].as_i64().unwrap_or(0) as i32,
+        h: v["h"].as_i64().unwrap_or(0) as i32,
     })
 }
 
@@ -67,7 +71,7 @@ fn age_secs(path: &str) -> u64 {
 fn core_list(arg: &str) -> Result<Value, String> {
     crate::backend::ensure_tg_ready()?;
     let a = CString::new(arg).map_err(|_| "noto'g'ri so'rov".to_string())?;
-    let j = crate::data::call_json(unsafe { rust_core::telegram::rust_tg_media_list(a.as_ptr()) });
+    let j = crate::data::call_json(rust_core::telegram::rust_tg_media_list(a.as_ptr()));
     if let Some(e) = j["error"].as_str() {
         return Err(e.to_string());
     }
@@ -156,6 +160,13 @@ pub fn resolve_sticker(r: &str) -> Option<TgDoc> {
     named_docs(short).into_iter().find(|d| d.id == id)
 }
 
+/// `tgs.<nom>.<id>` -> hujjat; to'plam keshi eski bo'lsa (havola eskirgan) yangilab qayta hal qiladi.
+pub fn resolve_sticker_fresh(r: &str) -> Option<TgDoc> {
+    let (short, _) = r.strip_prefix("tgs.")?.rsplit_once('.')?;
+    invalidate(&format!("name_{short}"));
+    resolve_sticker(r)
+}
+
 pub fn sticker_ref(short: &str, d: &TgDoc) -> String {
     format!("tgs.{short}.{}", d.id)
 }
@@ -201,7 +212,7 @@ fn fetch(arg: Value, path: &str) -> Result<(), String> {
     let mut v = arg;
     v["out"] = json!(path);
     let a = CString::new(v.to_string()).map_err(|_| "noto'g'ri so'rov".to_string())?;
-    let j = crate::data::call_json(unsafe { rust_core::telegram::rust_tg_media_get(a.as_ptr()) });
+    let j = crate::data::call_json(rust_core::telegram::rust_tg_media_get(a.as_ptr()));
     match j["error"].as_str() {
         Some(e) => Err(e.to_string()),
         None if j["ok"].as_bool() == Some(true) => Ok(()),
@@ -228,6 +239,24 @@ pub fn image(d: &TgDoc, px: u32) -> Result<Image, String> {
         let img = crate::webp::decode_any(&bytes).ok_or_else(|| "rasm dekodlanmadi".to_string())?;
         let _ = crate::secure::write(&path, "tgm", &bytes);
         Ok(img.resized(px, px))
+    })
+}
+
+/// Hujjatning to'liq baytlari (kichik fayllar: `.tgs` stikerlar). Diskda shifrlab saqlanadi. `Err("FILE_REFERENCE_EXPIRED")` — ro'yxatni yangilash kerak.
+pub fn file_bytes(d: &TgDoc, max: usize) -> Result<Vec<u8>, String> {
+    let path = format!("{}/file_{:x}.bin", dir(), d.id);
+    if let Some(b) = crate::secure::read(&path, "tgm") {
+        return Ok(b);
+    }
+    slot(|| {
+        let tmp = format!("{path}.dl");
+        let r = fetch(json!({"id": d.id, "hash": d.hash, "ref": d.fref, "dc": d.dc, "thumb": "", "max": max}), &tmp);
+        let bytes = std::fs::read(&tmp).ok();
+        let _ = std::fs::remove_file(&tmp);
+        r?;
+        let bytes = bytes.ok_or_else(|| "fayl o'qilmadi".to_string())?;
+        let _ = crate::secure::write(&path, "tgm", &bytes);
+        Ok(bytes)
     })
 }
 
