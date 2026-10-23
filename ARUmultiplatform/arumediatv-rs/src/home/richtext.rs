@@ -42,8 +42,9 @@ fn render(text: &str, size_px: f32, max_w_px: i32, argb: u32, bold: bool) -> Opt
     let _g = RENDER.lock().unwrap_or_else(|e| e.into_inner());
     let dir = format!("{}/rich", uzcoders::android::files_dir());
     let _ = std::fs::create_dir_all(&dir);
-    let path = format!("{dir}/{:016x}.png", hash_of(&format!("{size_px}|{max_w_px}|{argb}|{bold}|{text}")));
-    let r = uzcoders::android::activity_call_ret("textPng", &format!("{size_px}|{max_w_px}|{argb:08X}|{}|{path}|{text}", bold as u8));
+    let font = crate::emojifont::path();
+    let path = format!("{dir}/{:016x}.png", hash_of(&format!("{size_px}|{max_w_px}|{argb}|{bold}|{font}|{text}")));
+    let r = uzcoders::android::activity_call_ret("textPng", &format!("{size_px}|{max_w_px}|{argb:08X}|{}|{path}|{font}|{text}", bold as u8));
     let (w, h) = r.split_once('|')?;
     let (w, h): (u32, u32) = (w.parse().ok()?, h.parse().ok()?);
     let bytes = std::fs::read(&path).ok()?;

@@ -18,6 +18,7 @@
 | `uzcoders-layout` | flex joylashuv dvigateli |
 | `uzcoders-text` | TrueType shrift o'qish, harf rasterizatsiyasi, matn qatorlarga bo'linishi |
 | `uzcoders-render` | chizish buyruqlari, dasturiy (CPU) rasterizator, PNG / JPEG dekoderlari |
+| `uzcoders-lottie` | Lottie / Telegram `.tgs` animatsiyalarini RGBA kadrlarga chizuvchi sof Rust kutubxona |
 | `uzcoders-gpu` | GPU bilan chizish: paketlash (batcher) va OpenGL ES 2.0 bajaruvchisi |
 | `uzcoders-ui` | deklarativ UI daraxti, vidjetlar, scroll, matn kiritish, navigatsiya |
 | `uzcoders-android` | Android `NativeActivity` qobig'i va Java yelimi (`UzActivity`) |
@@ -46,6 +47,7 @@ Rust'da, Kotlin Compose kabi qulay, mobil (Android, keyin iOS) uchun to'liq ilov
 | `uzcoders-layout` | flex layout engine |
 | `uzcoders-text` | TrueType font parsing, glyph rasterization, text wrapping |
 | `uzcoders-render` | draw commands, software (CPU) rasterizer, PNG / JPEG decoders |
+| `uzcoders-lottie` | a pure Rust renderer from Lottie / Telegram `.tgs` animations to RGBA frames |
 | `uzcoders-gpu` | GPU drawing: batching and an OpenGL ES 2.0 executor |
 | `uzcoders-ui` | declarative UI tree, widgets, scrolling, text input, navigation |
 | `uzcoders-android` | the Android `NativeActivity` shell and the Java glue (`UzActivity`) |
@@ -74,6 +76,7 @@ A library that lets you write complete mobile apps (Android first, iOS later) in
 | `uzcoders-layout` | flex-движок раскладки |
 | `uzcoders-text` | чтение шрифтов TrueType, растеризация глифов, перенос текста по строкам |
 | `uzcoders-render` | команды рисования, программный (CPU) растеризатор, декодеры PNG / JPEG |
+| `uzcoders-lottie` | библиотека на чистом Rust, рисующая Lottie / Telegram `.tgs` в RGBA-кадры |
 | `uzcoders-gpu` | рисование на GPU: пакетирование (batcher) и исполнитель OpenGL ES 2.0 |
 | `uzcoders-ui` | декларативное дерево UI, виджеты, прокрутка, ввод текста, навигация |
 | `uzcoders-android` | оболочка Android `NativeActivity` и Java-прослойка (`UzActivity`) |

@@ -9,7 +9,7 @@ mod comments;
 mod dl;
 mod edit;
 mod mediaview;
-mod emojipanel;
+mod tgpanel;
 mod pages;
 mod pubprofile;
 mod richtext;

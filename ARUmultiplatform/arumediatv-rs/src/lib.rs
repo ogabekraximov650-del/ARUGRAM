@@ -14,6 +14,8 @@ mod gate;
 mod theme;
 mod qr;
 mod secure;
+mod tgmedia;
+mod emojifont;
 mod webp;
 
 use backend::Backend;

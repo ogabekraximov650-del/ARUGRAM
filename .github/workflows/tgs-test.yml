@@ -1,0 +1,135 @@
+name: Lottie/.tgs sinovi (uzcoders-lottie)
+
+# `ARUmultiplatform/uzcoders/crates/uzcoders-lottie` — sof Rust Lottie chizuvchisi. Bu workflow uni HAQIQIY Telegram stikerlarida sinaydi:
+#   1) kutubxona testlari (`cargo test`);
+#   2) Telegram hisobidagi animatsion stikerlar (.tgs) yuklab olinadi (faqat o'qish; `tool/tgs/fetch.py`) va Actions keshiga qo'yiladi —
+#      keyingi ishga tushirishlarda hisob kerak bo'lmaydi;
+#   3) har fayl 3 ta kadrda chiziladi, natija rlottie (Telegram'ning o'z chizuvchisi) bilan piksel-piksel solishtiriladi (`tool/tgs/compare.py`);
+#   4) tezlik o'lchanadi, qisqa hisobot log'ga chiqadi, taqqoslash rasmi artifakt bo'ladi.
+# Sessiya: `tool/encode/session.enc` (ENCODE_TOKEN bilan shifrlangan) yoki PYRO_SESSION_B64_* — avto-kodlash bilan bir xil. Ochiq matnli sessiya
+# log'ga chiqmaydi va ish oxirida o'chiriladi. Sessiya bir vaqtda ikki joyda ishlamasligi uchun `arumediatv-encode` guruhidan foydalaniladi.
+# Ishga tushadi: kutubxona yoki `tool/tgs/**` o'zgarganda; `ci/tgs-test.run` — qayta ishga tushirish uchun belgi (keshni yangilash: KESH_KALIT'ni oshiring).
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ci/tgs-test.run'
+      - 'tool/tgs/**'
+      - '.github/workflows/tgs-test.yml'
+      - 'ARUmultiplatform/uzcoders/crates/uzcoders-lottie/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arumediatv-encode
+  cancel-in-progress: false
+
+env:
+  KESH_KALIT: tgs-corpus-v1
+
+jobs:
+  tgs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Stikerlar keshi
+        id: corpus
+        uses: actions/cache@v4
+        with:
+          path: /tmp/tgs
+          key: ${{ env.KESH_KALIT }}
+
+      - name: Telegram sessiyasi (faqat kesh bo'lmasa)
+        if: steps.corpus.outputs.cache-hit != 'true'
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+          S1: ${{ secrets.PYRO_SESSION_B64_1 }}
+          S2: ${{ secrets.PYRO_SESSION_B64_2 }}
+          S3: ${{ secrets.PYRO_SESSION_B64_3 }}
+        run: |
+          OUT=tool/tgs/pyro_session.session
+          ok() { head -c 16 "$OUT" 2>/dev/null | grep -q "SQLite format 3"; }
+          K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          if [ -f tool/encode/session.enc ] && [ -n "$K" ]; then
+            if K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K \
+                 -in tool/encode/session.enc -out "$OUT" 2>/dev/null && ok; then
+              echo "Sessiya shifrlangan fayldan tiklandi"
+              exit 0
+            fi
+          fi
+          if [ -z "$S1" ]; then
+            echo "::error::Sessiya yo'q: session.enc ochilmadi va PYRO_SESSION_B64_* qo'yilmagan"
+            exit 1
+          fi
+          B64=$(printf '%s%s%s' "$S1" "$S2" "$S3" | tr -cd 'A-Za-z0-9+/=')
+          if ! printf '%s' "$B64" | base64 -d > "$OUT" 2>/dev/null || ! ok; then
+            echo "::error::Sessiya ochilmadi"
+            exit 1
+          fi
+          echo "Sessiya secret'lardan tiklandi"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Python paketlari
+        run: |
+          pip install --no-cache-dir -q rlottie-python pillow numpy
+          if [ "${{ steps.corpus.outputs.cache-hit }}" != "true" ]; then pip install --no-cache-dir -q -r tool/encode/requirements.txt; fi
+
+      - name: Stikerlarni yuklash (faqat kesh bo'lmasa)
+        if: steps.corpus.outputs.cache-hit != 'true'
+        env:
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+        run: |
+          mkdir -p /tmp/tgs
+          python tool/tgs/fetch.py /tmp/tgs 400 8
+          shred -u tool/tgs/pyro_session.session 2>/dev/null || rm -f tool/tgs/pyro_session.session
+          ls /tmp/tgs | wc -l
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "ARUmultiplatform/uzcoders -> target"
+
+      - name: Kutubxona testlari
+        working-directory: ARUmultiplatform/uzcoders
+        run: cargo test -p uzcoders-lottie --release
+
+      - name: Stikerlarni chizish
+        working-directory: ARUmultiplatform/uzcoders
+        run: |
+          cargo build --release -p uzcoders-lottie --examples
+          mkdir -p /tmp/mine
+          target/release/examples/render_dir /tmp/tgs /tmp/mine 160 | tee /tmp/render.log | grep -E "FAIL|SUMMARY" || true
+          echo "--- sabablar (rad etilganlar) ---"
+          grep FAIL /tmp/render.log | sed -E 's/^[^ ]+ FAIL //; s/[0-9]+ ?$//; s/\[[0-9]+\]/[N]/g; s/#[0-9]+/#N/g' | cut -c1-110 | sort | uniq -c | sort -rn | head -15 || true
+          echo "--- eng sekin 5 fayl (ms, 3 kadr) ---"
+          grep " ok " /tmp/render.log | sort -k3 -n -r | head -5 || true
+
+      - name: Tezlik (o'rtacha kadr vaqti)
+        working-directory: ARUmultiplatform/uzcoders
+        run: |
+          for f in $(ls /tmp/tgs/*.tgs | head -5); do
+            for s in 96 160 256; do echo -n "$(basename $f) "; target/release/examples/bench "$f" $s 40 || true; done
+          done
+
+      - name: rlottie bilan solishtirish
+        run: python tool/tgs/compare.py /tmp/tgs /tmp/mine 160 /tmp/report
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tgs-taqqoslash
+          path: |
+            /tmp/report
+            /tmp/render.log
+          if-no-files-found: ignore
+
+      - name: Sessiyani o'chirish
+        if: always()
+        run: shred -u tool/tgs/pyro_session.session 2>/dev/null || rm -f tool/tgs/pyro_session.session

@@ -109,7 +109,7 @@ extern "C" {
     fn rust_tg_set_keys(json: *const std::os::raw::c_char);
 }
 
-fn call_json(p: *mut std::os::raw::c_char) -> Value {
+pub(crate) fn call_json(p: *mut std::os::raw::c_char) -> Value {
     if p.is_null() {
         return Value::Null;
     }

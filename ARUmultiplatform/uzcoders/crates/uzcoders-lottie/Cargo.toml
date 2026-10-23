@@ -1,0 +1,16 @@
+[package]
+name = "uzcoders-lottie"
+version.workspace = true
+edition = "2024"
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version = "1.88"
+description = "uzcoders-lottie — UZ: Lottie/.tgs animatsiyalarini RGBA kadrlarga chizuvchi sof Rust kutubxona | EN: a pure Rust renderer from Lottie/.tgs animations to RGBA frames | RU: библиотека на чистом Rust, рисующая Lottie/.tgs-анимации в RGBA-кадры"
+
+[dependencies]
+uzcoders-render = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+rustc-hash = "2"

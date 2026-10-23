@@ -234,16 +234,21 @@ public class AruActivity extends UzActivity {
      */
     public String textPng(String arg) {
         try {
-            String[] p = arg.split("\\|", 6);
-            if (p.length < 6) return "";
+            String[] p = arg.split("\\|", 7);
+            if (p.length < 7) return "";
             float size = Float.parseFloat(p[0]);
             int maxW = Math.max(16, Integer.parseInt(p[1]));
             int color = (int) Long.parseLong(p[2], 16);
             android.text.TextPaint tp = new android.text.TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG);
             tp.setTextSize(size);
             tp.setColor(color);
-            if ("1".equals(p[3])) tp.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-            String text = p[5];
+            android.graphics.Typeface base = null;
+            if (!p[5].isEmpty()) {
+                try { base = android.graphics.Typeface.createFromFile(p[5]); } catch (Throwable ignored) { }
+            }
+            if ("1".equals(p[3])) tp.setTypeface(base != null ? android.graphics.Typeface.create(base, android.graphics.Typeface.BOLD) : android.graphics.Typeface.DEFAULT_BOLD);
+            else if (base != null) tp.setTypeface(base);
+            String text = p[6];
             int want = (int) Math.ceil(android.text.Layout.getDesiredWidth(text, tp));
             int w = Math.max(1, Math.min(maxW, want + 2));
             android.text.StaticLayout l = new android.text.StaticLayout(text, tp, w, android.text.Layout.Alignment.ALIGN_NORMAL, 1.12f, 0f, false);

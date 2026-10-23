@@ -40,3 +40,4 @@ ARUmultiplatform/uzcoders/Cargo.lock
 ARUmultiplatform/arumediatv-rs/target/
 ARUmultiplatform/arumediatv-rs/jniLibs/
 ARUmultiplatform/arumediatv-rs/Cargo.lock
+tool/tgs/*.session*

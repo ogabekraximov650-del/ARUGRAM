@@ -47,7 +47,7 @@ pub struct SupportPage {
     /// Javob berilayotgan xabar identifikatori.
     reply: State<Option<String>>,
     /// Emoji paneli.
-    ep: Rc<super::emojipanel::EmojiPanel>,
+    ep: Rc<super::tgpanel::TgPanel>,
     scroll: ScrollState,
     stick: std::cell::Cell<bool>,
     ver: std::cell::Cell<i64>,
@@ -136,7 +136,7 @@ fn plain(s: &str) -> String {
 }
 
 fn snippet(m: &ChatMsg) -> String {
-    let body = plain(&split_reply(&m.body).1);
+    let body = crate::tgmedia::plain_text(&plain(&split_reply(&m.body).1));
     if !m.media_type.is_empty() {
         let label = match m.media_type.as_str() {
             "voice" => "Ovozli xabar",
@@ -249,7 +249,7 @@ impl Home {
             busy: State::new(false),
             menu: State::new(String::new()),
             reply: State::new(None),
-            ep: Rc::new(super::emojipanel::EmojiPanel::new()),
+            ep: Rc::new(super::tgpanel::TgPanel::new()),
             scroll: ScrollState::new(),
             stick: std::cell::Cell::new(true),
             ver: std::cell::Cell::new(0),
@@ -408,8 +408,8 @@ impl Home {
         let header_h = 12.0 + ins.top + 56.0 + 8.0;
         let bar_h = 62.0
             + if p.reply.get().is_some() { 52.0 } else { 0.0 }
-            + if super::richtext::needs_rich(&p.input.get()) { 42.0 } else { 0.0 }
-            + if p.ep.open.get() { 330.0 } else { 0.0 }
+            + if super::richtext::needs_rich(&crate::tgmedia::plain_text(&p.input.get())) { 42.0 } else { 0.0 }
+            + if p.ep.open.get() { super::tgpanel::PANEL_H } else { 0.0 }
             + if p.err.get().is_empty() { 0.0 } else { 26.0 };
         let mut kids: Vec<Element> = Vec::new();
         let start = items.len().saturating_sub(120);
@@ -489,7 +489,7 @@ impl Home {
             );
         }
         // Yozilayotgan matnda emoji/CJK bo'lsa — maydon ularni chiza olmaydi, shuning uchun ko'rinishi shu yerda.
-        let typed = p.input.get();
+        let typed = crate::tgmedia::plain_text(&p.input.get());
         if super::richtext::needs_rich(&typed) {
             bar_col.push(
                 Self::pglass(self.rich_el(&typed, 15.0, w - 64.0, 0xFFFFFFFF, false).padding_xy(14.0, 8.0))
@@ -499,10 +499,17 @@ impl Home {
         }
         bar_col.push(row(vec![pill, send]).gap(8.0).align(Align::End).margin_each(10.0, 6.0, 10.0, 8.0));
         if p.ep.open.get() {
-            let (pi, pb) = (p.clone(), p.clone());
+            let (pi, pb, ps2, pe2) = (p.clone(), p.clone(), p.clone(), p.ep.clone());
+            let me_s = self.clone();
             let on_emoji: Rc<dyn Fn(String)> = Rc::new(move |e| pi.input.set(format!("{}{}", pi.input.get(), e)));
-            let on_back: Rc<dyn Fn()> = Rc::new(move || pb.input.set(super::emojipanel::pop_last_char(&pb.input.get())));
-            bar_col.push(self.emoji_view(&p.ep, on_emoji, on_back).margin_each(10.0, 0.0, 10.0, 8.0));
+            let on_back: Rc<dyn Fn()> = Rc::new(move || pb.input.set(super::tgpanel::pop_last_char(&pb.input.get())));
+            let on_sticker: Rc<dyn Fn(String, &'static str)> = Rc::new(move |r, kind| {
+                if !ps2.busy.get() {
+                    me_s.chat_send(&ps2, String::new(), Some((r, kind.to_string())));
+                }
+            });
+            let on_close: Rc<dyn Fn()> = Rc::new(move || pe2.open.set(false));
+            bar_col.push(self.tg_panel_view(&p.ep, on_emoji, on_sticker, on_back, on_close).margin_each(10.0, 0.0, 10.0, 8.0));
         }
         let bar = column(bar_col);
         let mut low = Vec::new();
@@ -556,7 +563,7 @@ impl Home {
         let mine = if p.user_id.is_some() { m.from_admin } else { !m.from_admin };
         let hhmm: String = fmt_date(m.created_at).chars().take(5).collect();
         let (rid, body) = split_reply(&m.body);
-        let body = plain(&body);
+        let body = crate::tgmedia::plain_text(&plain(&body));
         let meta_col = if mine { TG_OUT_META } else { Color::rgba(255, 255, 255, 140) };
         let mut inner: Vec<Element> = Vec::new();
         if let Some(rid) = rid {
@@ -614,7 +621,13 @@ impl Home {
             }
             "voice" => inner.push(open(row(vec![icon(S_PLAY, 24.0).color(Color::WHITE), tx(format!("Ovozli xabar · {}:{:02}", m.media_ms / 60000, (m.media_ms / 1000) % 60), 14.0, Color::WHITE)]).gap(10.0).align(Align::Center).padding_xy(0.0, 6.0))),
             "file" => inner.push(open(row(vec![icon(S_ATTACH, 24.0).color(Color::WHITE), tx(if m.body.is_empty() { "Fayl".to_string() } else { m.body.clone() }, 14.0, Color::WHITE)]).gap(10.0).align(Align::Center).padding_xy(0.0, 6.0))),
-            "sticker" | "gif" => inner.push(tx(if m.media_type == "gif" { "GIF" } else { "Stiker" }, 13.5, Color::WHITE).bold()),
+            "sticker" | "gif" => {
+                let r = crate::data::file_name_of(&m.media_url);
+                match self.tg_ref_el(&r, if m.media_type == "gif" { 190.0 } else { 150.0 }) {
+                    Some(e) => inner.push(e),
+                    None => inner.push(tx(if m.media_type == "gif" { "GIF" } else { "Stiker" }, 13.5, Color::WHITE).bold()),
+                }
+            }
             _ => {}
         }
         if m.media_type != "file" && !body.is_empty() {
