@@ -403,6 +403,14 @@ impl Home {
                 p.stick.set(false);
             }
         }
+        // Xabarlar to'liq ekranga yoyiladi: sarlavha va pastki panel ularning USTIDA shisha qatlam, xabarlar ularning ostidan o'tadi.
+        let ins = safe_insets();
+        let header_h = 12.0 + ins.top + 56.0 + 8.0;
+        let bar_h = 62.0
+            + if p.reply.get().is_some() { 52.0 } else { 0.0 }
+            + if super::richtext::needs_rich(&p.input.get()) { 42.0 } else { 0.0 }
+            + if p.pp.open.get() { 330.0 } else { 0.0 }
+            + if p.err.get().is_empty() { 0.0 } else { 26.0 };
         let mut kids: Vec<Element> = Vec::new();
         let start = items.len().saturating_sub(120);
         let visible = &items[start..];
@@ -424,7 +432,7 @@ impl Home {
         } else if items.is_empty() {
             Self::empty("M21.99,4c0,-1.1 -0.89,-2 -1.99,-2H4c-1.1,0 -2,0.9 -2,2v12c0,1.1 0.9,2 2,2h14l4,4 -0.01,-18z", "Hozircha xabar yo'q\nSavol yoki taklifingizni yozing")
         } else {
-            scroll_column(&p.scroll, kids).padding_each(12.0, 4.0, 12.0, 4.0)
+            scroll_column(&p.scroll, kids).padding_each(12.0, 4.0 + header_h, 12.0, 4.0 + bar_h + ins.bottom)
         };
         // Pastdagi yozish paneli: shisha (lupa) — tepadagi sarlavha bilan bir xil uslubda.
         let (pa, ps) = (p.clone(), p.clone());
@@ -502,16 +510,15 @@ impl Home {
             bar_col.push(self.pp_view(&p.pp, on_emoji, on_back, on_media).margin_each(10.0, 0.0, 10.0, 8.0));
         }
         let bar = column(bar_col);
-        let mut col = vec![body.grow(1.0)];
+        let mut low = Vec::new();
         if !p.err.get().is_empty() && p.loaded.get() {
-            col.push(tx(p.err.get(), 12.5, ERROR).padding_xy(18.0, 4.0));
+            low.push(tx(p.err.get(), 12.5, ERROR).padding_xy(18.0, 4.0));
         }
-        col.push(bar);
+        low.push(bar);
         let title = match p.user_id {
             None => "Admin bilan bog'lanish".to_string(),
             Some(u) => format!("Suhbat · {u}"),
         };
-        let ins = safe_insets();
         let me_b = self.clone();
         let round_btn = Self::pglass(column(vec![icon(S_BACK, 24.0).color(Color::WHITE)]).center().width(56.0).height(56.0)).radius(28.0).on_click(move || {
             me_b.pop();
@@ -536,10 +543,10 @@ impl Home {
         .weight(1.0);
         let header = row(vec![round_btn, capsule]).gap(8.0).align(Align::Center).margin_each(10.0, 12.0 + ins.top, 10.0, 8.0);
         // Sarlavha ro'yxat USTIDA chiziladi (xabarlar shisha ostida suriladi, hech qachon ustiga chiqmaydi).
-        let header_h = 12.0 + ins.top + 56.0 + 8.0;
         let page = stack(vec![
             Self::glass_backdrop(),
-            column(vec![column(col).grow(1.0)]).padding_each(0.0, header_h, 0.0, ins.bottom),
+            column(vec![body.grow(1.0)]),
+            column(vec![spacer(), column(low)]).padding_each(0.0, 0.0, 0.0, ins.bottom),
             column(vec![header]),
         ]);
         let mut layers = vec![page];

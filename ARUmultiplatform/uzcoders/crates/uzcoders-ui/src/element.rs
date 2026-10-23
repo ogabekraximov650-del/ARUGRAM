@@ -155,6 +155,17 @@ impl Element {
         self.style.padding = EdgeInsets::new(left, top, right, bottom);
         self
     }
+    /// UZ: Mavjud padding ustiga qo'shadi (almashtirmaydi). Scroll'da padding kontent bilan birga suriladi, shuning uchun
+    /// ro'yxatni to'liq ekranga yoyib, tepa/pastga sarlavha va panel balandligicha qo'shsangiz, kontent ularning ostidan o'tadi.
+    /// EN: Adds to the existing padding (does not replace it). In a scroll the padding moves with the content, so stretching a
+    /// list full-screen and adding the header/bar heights at top/bottom lets the content pass under them.
+    /// RU: Добавляет к существующему padding (не заменяет). В прокрутке padding двигается вместе с содержимым, поэтому список
+    /// на весь экран с добавкой высот шапки/панели сверху/снизу позволяет содержимому проходить под ними.
+    pub fn padding_add(mut self, left: f32, top: f32, right: f32, bottom: f32) -> Self {
+        let p = self.style.padding;
+        self.style.padding = EdgeInsets::new(p.left + left, p.top + top, p.right + right, p.bottom + bottom);
+        self
+    }
     pub fn margin(mut self, v: f32) -> Self {
         self.style.margin = EdgeInsets::all(v);
         self

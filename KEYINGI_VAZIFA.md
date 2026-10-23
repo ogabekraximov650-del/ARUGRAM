@@ -6747,3 +6747,11 @@ Foydalanuvchi skrinshotlari bilan topilgan xatolar (Kotlin `SupportChatScreen` b
 - `downloads::history_frame_r` — kadr xatosi SABABI bilan qaytadi; chat videoda sabab "Kadr: ..." deb ko'rsatiladi, 15 soniyadan keyin 3 martagacha qayta uriniladi (`hframe_fail`).
 - Profil rasmi: o'lchamli stack/harfli doira (avval o'lchamsiz kichrayib ketardi, harf to'q sariq-to'q sariq ustida ko'rinmasdi); yuklanmagan bo'lsa 10 s oraliqda 6 martagacha qayta so'raladi.
 - `secure::write_text/read_text`: ro'yxatlar keshi (`seasons`, `etag`, `eps_*`), `progress.json`, `sync` navbati, to'plam sarlavhalari/ma'lumoti, `gate` fayllari endi AES-GCM bilan shifrlanadi (eski ochiq fayllar o'qiladi, keyingi yozuvda shifrlanadi). Chat suhbati ham shifrlangan keshda (`chat_<id>.json`), chat darhol ochiladi.
+
+## Rust ilova: kontent to'liq ekranda, sarlavha/panellar shisha qatlam (2026-10-23)
+
+Talab (foydalanuvchi): video yoki boshqa narsa shisha ostidan o'tsa, ekranning eng tepasi va pastigacha ko'rinsin va shisha orqali ham ko'rinsin — hamma ekranda.
+- `uzcoders-ui`: `Element::padding_add` (mavjud paddingga QO'SHADI; scroll paddingi kontent bilan suriladi, clip esa butun element).
+- `scaffold` (hamma push qilinadigan sahifalar), `season_page` (muqova + yorliqlar ustda, ro'yxat ostidan o'tadi), admin chati (xabarlar to'liq ekran, sarlavha
+  va yozish paneli ustida): ro'yxat to'liq ekran, tepa/pastga sarlavha/panel balandligicha padding; sarlavha/panel `stack` ning oxirgi qatlamlari (shisha lupa).
+- Bosh sahifa tablari (Bosh/Qidiruv/Katalog/Kutubxona/Profil) avvaldan shunday edi.

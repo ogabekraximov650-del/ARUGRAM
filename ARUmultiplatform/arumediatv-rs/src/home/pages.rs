@@ -207,7 +207,14 @@ impl Home {
             me.pop();
         });
         let head = Self::pglass(row(vec![back, tx(title, 22.0, Color::WHITE).bold().weight(1.0)]).gap(12.0).align(Align::Center).padding_each(10.0, 8.0, 18.0, 8.0)).radius(32.0);
-        stack(vec![Self::glass_backdrop(), column(vec![head.margin_each(16.0, 12.0 + ins.top, 16.0, 8.0), body.grow(1.0)]).padding_each(0.0, 0.0, 0.0, ins.bottom)])
+        // Kontent to'liq ekranga yoyiladi (status paneli ostidan tizim tugmalari ostigacha); sarlavha ustida shisha qatlam —
+        // kontent uning ostidan o'tadi va lupa orqali ko'rinadi. Scroll paddingi kontent bilan suriladi (`padding_add`).
+        let head_h = 12.0 + ins.top + 60.0 + 8.0;
+        stack(vec![
+            Self::glass_backdrop(),
+            column(vec![body.padding_add(0.0, head_h, 0.0, ins.bottom).grow(1.0)]),
+            column(vec![head.margin_each(16.0, 12.0 + ins.top, 16.0, 8.0)]),
+        ])
     }
 
     fn tile_btn(icon_path: &'static str, tint: Color, label: String, f: impl Fn() + 'static) -> Element {
@@ -327,7 +334,13 @@ impl Home {
         };
         let pc = p.clone();
         let body = body.on_swipe(move |d| pc.tab.set((pc.tab.get() as i32 + d).clamp(0, 3) as usize));
-        let mut layers = vec![Self::glass_backdrop(), column(vec![cover, tab_bar, body.grow(1.0)]).padding_each(0.0, 0.0, 0.0, ins.bottom)];
+        // Muqova va yorliqlar tepada qoladi, ma'lumot/qism/izoh ro'yxati esa ularning OSTIDAN o'tadi (yorliq paneli shisha).
+        let top_h = 8.0 + ins.top + cover_h + 10.0 + 40.0 + 6.0;
+        let mut layers = vec![
+            Self::glass_backdrop(),
+            column(vec![body.padding_add(0.0, top_h, 0.0, ins.bottom).grow(1.0)]),
+            column(vec![cover, tab_bar]),
+        ];
         if p.rating_open.get() {
             layers.push(self.rating_dialog(p, &info));
         }
