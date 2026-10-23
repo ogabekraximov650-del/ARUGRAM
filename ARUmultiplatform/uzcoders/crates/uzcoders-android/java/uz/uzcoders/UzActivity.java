@@ -81,6 +81,11 @@ public class UzActivity extends NativeActivity {
      * EN: Writes crash information to a file; it is shown in a dialog on the next launch (Rust writes to the same file).
      * RU: Записывает сведения о сбое в файл; при следующем запуске они показываются в диалоге (Rust пишет в тот же файл).
      */
+    /** UZ: Rust uchun (`activity_call_ret`). EN: For Rust (`activity_call_ret`). RU: Для Rust (`activity_call_ret`). */
+    public String deviceInfo(String unused) {
+        return deviceInfo();
+    }
+
     private String deviceInfo() {
         String ver = "?";
         try {

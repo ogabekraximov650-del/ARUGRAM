@@ -6788,3 +6788,9 @@ tashqi dekodersiz, sof Rustda chizilsin; server/Actions'siz, telefonning o'zida.
 - `uzcoders-core::task`: `breadcrumb(msg)` (oxirgi 24 amal), `crash_context()` (oqimlar soni, xotira, kutilayotgan vazifalar, amallar). Rust panic hook (`glue.rs`) shularni `crash.txt` ga yozadi.
 - `UzActivity.java`: keyingi ochilishda dialog qurilma (model, Android, CPU, RAM, versiya) + sabab ko'rsatadi, "Nusxa olish" tugmasi bor. Serverga yuborilmaydi (Turso yozuvi pul turadi).
 - `arumediatv-rs`: har `open_*` ekrani `breadcrumb` yozadi. Tizim tomonidan o'ldirish (OOM) ushlanmaydi.
+
+## Xatolar jurnali (barcha xatolar) (2026-10-23)
+
+- `uzcoders-core/src/errlog.rs`: `report_error(joy, sabab)` (istalgan oqimdan), oxirgi 100 ta, bir xillari ×N, `files/errors.txt` ga saqlanadi; `take_error_toast` UI oqimida (glue) 15 soniyada bir marta toast ko'rsatadi.
+- `arumediatv-rs`: tarmoq/server (api.rs), Telegram yadro/yuklash/olish (backend.rs, tgmedia.rs, data.rs), rasm va animatsiya yuklash (tgcache.rs) xatolari jurnalga tushadi. Ko'rish: Profil → "Xatolar jurnali" (nusxalash + tozalash; qurilma ma'lumoti bilan).
+- Serverga yuborilmaydi. Yangi xato joylarini `uzcoders::prelude::report_error` bilan ulang.

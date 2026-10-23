@@ -136,6 +136,7 @@ pub fn tg_deliver(session: &str, names: &[String]) -> Result<Vec<String>, String
     crate::backend::ensure_tg_ready()?;
     let (code, body) = crate::api::request("POST", "/api/tg/deliver", "", Some(&serde_json::json!({ "files": names })), Some(session))?;
     if code != 200 {
+        uzcoders::prelude::report_error("Telegramdan olish", &format!("deliver HTTP {code}"));
         return Err(format!("deliver HTTP {code}"));
     }
     let j: Value = serde_json::from_str(&body).map_err(|_| "deliver javobi noto'g'ri".to_string())?;

@@ -18,6 +18,12 @@ static WAKER: Mutex<Option<fn()>> = Mutex::new(None);
 
 static FRAME_REQ: AtomicBool = AtomicBool::new(false);
 
+pub(crate) fn wake() {
+    if let Some(w) = *WAKER.lock().unwrap() {
+        w();
+    }
+}
+
 /// UZ: Istalgan oqimdan chaqiriladi: UI oqimini uyg'otib, bitta kadrni qayta chizishni so'raydi (masalan, video kadri tayyor bo'lganda).
 /// EN: Callable from any thread: wakes the UI thread and asks for one frame to be redrawn (for example, when a video frame is ready).
 /// RU: Можно вызывать из любого потока: будит UI-поток и просит перерисовать один кадр (например, когда готов кадр видео).

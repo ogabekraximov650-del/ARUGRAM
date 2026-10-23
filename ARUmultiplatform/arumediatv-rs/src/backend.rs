@@ -149,7 +149,13 @@ fn ensure_master_key(dir: &str) -> Result<(), String> {
 /// Shifrlash kalitini (bir marta) o'rnatadi — diskni shifrlash uchun tarmoqsiz ham kerak.
 pub fn ensure_master() -> bool {
     static OK: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *OK.get_or_init(|| ensure_master_key(&uzcoders::android::files_dir()).is_ok())
+    *OK.get_or_init(|| match ensure_master_key(&uzcoders::android::files_dir()) {
+        Ok(()) => true,
+        Err(e) => {
+            uzcoders::prelude::report_error("shifrlash kaliti", &e);
+            false
+        }
+    })
 }
 
 /// Haqiqiy Telegram: ARUMEDIATV'ning Rust yadrosi (`rust_core`, grammers/MTProto).
@@ -172,7 +178,11 @@ pub fn shared() -> std::sync::Arc<TgBackend> {
 pub fn ensure_tg_ready() -> Result<(), String> {
     #[cfg(target_os = "android")]
     {
-        shared().ensure()
+        let r = shared().ensure();
+        if let Err(e) = &r {
+            uzcoders::prelude::report_error("Telegram yadrosi", e);
+        }
+        r
     }
     #[cfg(not(target_os = "android"))]
     {
@@ -376,7 +386,9 @@ pub fn upload_file_key(path: &str, name: &str, mime: &str, session: &str, progre
     let started = call(rust_core::telegram::rust_tg_upload_start(p.as_ptr(), n.as_ptr(), m.as_ptr(), 0));
     let job = started["job"].as_u64().unwrap_or(0);
     if job == 0 {
-        return Err(started["error"].as_str().unwrap_or("Yuklash boshlanmadi").to_string());
+        let e = started["error"].as_str().unwrap_or("Yuklash boshlanmadi").to_string();
+        uzcoders::prelude::report_error("Telegramga yuklash", &e);
+        return Err(e);
     }
     let mut key = String::new();
     let mut all_sent_at: Option<std::time::Instant> = None;
@@ -396,6 +408,7 @@ pub fn upload_file_key(path: &str, name: &str, mime: &str, session: &str, progre
         }
         if st["done"].as_bool().unwrap_or(false) {
             if let Some(e) = st["error"].as_str().filter(|e| !e.is_empty()) {
+                uzcoders::prelude::report_error("Telegramga yuklash", e);
                 return Err(e.to_string());
             }
             key = st["key"].as_str().unwrap_or("").to_string();

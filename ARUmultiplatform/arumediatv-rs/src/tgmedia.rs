@@ -73,9 +73,11 @@ fn core_list(arg: &str) -> Result<Value, String> {
     let a = CString::new(arg).map_err(|_| "noto'g'ri so'rov".to_string())?;
     let j = crate::data::call_json(rust_core::telegram::rust_tg_media_list(a.as_ptr()));
     if let Some(e) = j["error"].as_str() {
+        uzcoders::prelude::report_error("Telegram ro'yxat", e);
         return Err(e.to_string());
     }
     if j["ok"].as_bool() != Some(true) {
+        uzcoders::prelude::report_error("Telegram ro'yxat", "javob yo'q");
         return Err("Telegram javob bermadi".into());
     }
     Ok(j)
@@ -214,9 +216,15 @@ fn fetch(arg: Value, path: &str) -> Result<(), String> {
     let a = CString::new(v.to_string()).map_err(|_| "noto'g'ri so'rov".to_string())?;
     let j = crate::data::call_json(rust_core::telegram::rust_tg_media_get(a.as_ptr()));
     match j["error"].as_str() {
-        Some(e) => Err(e.to_string()),
+        Some(e) => {
+            uzcoders::prelude::report_error("Telegram fayl", e);
+            Err(e.to_string())
+        }
         None if j["ok"].as_bool() == Some(true) => Ok(()),
-        None => Err("Telegram javob bermadi".into()),
+        None => {
+            uzcoders::prelude::report_error("Telegram fayl", "javob yo'q");
+            Err("Telegram javob bermadi".into())
+        }
     }
 }
 

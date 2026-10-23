@@ -39,9 +39,15 @@ enum Screen {
     Home,
 }
 
+/// Xatolar jurnalini nusxalashda qo'shiladigan qurilma ma'lumoti.
+pub(crate) fn device_info() -> String {
+    format!("{}\n{}", uzcoders::android::activity_call_ret("deviceInfo", ""), uzcoders::prelude::crash_context())
+}
+
 /// Ilovaning kirish nuqtasi: `scale` — ekran zichligi.
 pub fn make_ui(scale: f32) -> Ui {
     let font = Rc::new(Font::parse(REGULAR).expect("Roboto Regular"));
+    uzcoders::prelude::set_error_file(&format!("{}/errors.txt", uzcoders::android::files_dir()));
     // Android'da haqiqiy Telegram (grammers), kompyuter testlarida tarmoqsiz sinov.
     #[cfg(target_os = "android")]
     let backend: Arc<dyn Backend> = backend::shared();

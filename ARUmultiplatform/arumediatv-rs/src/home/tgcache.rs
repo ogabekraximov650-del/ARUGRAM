@@ -95,7 +95,10 @@ impl Home {
         spawn_bg(load, move |r| {
             let st = match r {
                 Ok(img) => TImg::Ready(Rc::new(img)),
-                Err(_) => TImg::Failed(Instant::now()),
+                Err(e) => {
+                    uzcoders::prelude::report_error("rasm (Telegram)", &e);
+                    TImg::Failed(Instant::now())
+                }
             };
             IMGS.with(|m| m.borrow_mut().insert(k, st));
             me.gate_rev.set(me.gate_rev.get() + 1);
@@ -209,7 +212,10 @@ impl Home {
                                 e.st = AState::Ready(ASheet { img, cols: sh.cols, count: sh.count, fps: sh.fps });
                             }
                         }
-                        Some(Err(_)) => {
+                        Some(Err(err)) => {
+                            if err != "kerak emas" {
+                                uzcoders::prelude::report_error("animatsiya", &err);
+                            }
                             if let Some(e) = m.get_mut(&k) {
                                 e.st = AState::Bad;
                             }

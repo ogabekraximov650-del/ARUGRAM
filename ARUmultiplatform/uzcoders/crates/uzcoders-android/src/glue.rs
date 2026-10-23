@@ -594,6 +594,9 @@ fn run(s: Arc<Sync_>, make_ui: fn(f32) -> Ui, scale: f32, activity: usize) {
     loop {
         ui.set_time(t0.elapsed().as_millis() as u64);
         uzcoders_core::drain_tasks();
+        if let Some(m) = uzcoders_core::take_error_toast() {
+            toast(&m);
+        }
         {
             let mut g = s.m.lock().unwrap();
             if g.quit {

@@ -45,6 +45,9 @@ pub fn request(method: &str, path: &str, query: &str, body: Option<&Value>, bear
             break;
         }
     }
+    if let Err(e) = &last {
+        uzcoders::prelude::report_error(&format!("tarmoq {method} {path}"), e);
+    }
     last
 }
 
@@ -76,9 +79,13 @@ fn request_once(method: &str, path: &str, query: &str, body: Option<&Value>, bea
 pub fn get_json(path: &str, query: &str, bearer: Option<&str>) -> Result<Value, String> {
     let (code, body) = request("GET", path, query, None, bearer)?;
     if code >= 400 {
+        uzcoders::prelude::report_error(&format!("server {path}"), &format!("HTTP {code}: {}", body.chars().take(120).collect::<String>()));
         return Err(format!("Server xatosi ({code})"));
     }
-    serde_json::from_str(&body).map_err(|e| format!("Server javobi noto'g'ri: {e}"))
+    serde_json::from_str(&body).map_err(|e| {
+        uzcoders::prelude::report_error(&format!("javob {path}"), &e.to_string());
+        format!("Server javobi noto'g'ri: {e}")
+    })
 }
 
 // ── Ilova sessiyasi (token) ──
@@ -134,7 +141,13 @@ pub fn get_etag(path: &str, etag: Option<&str>) -> Result<Option<(String, Option
             Ok(Some((r.into_string().map_err(|e| e.to_string())?, tag)))
         }
         Err(ureq::Error::Status(304, _)) => Ok(None),
-        Err(ureq::Error::Status(c, _)) => Err(format!("Server xatosi ({c})")),
-        Err(e) => Err(format!("Serverga ulanib bo'lmadi: {e}")),
+        Err(ureq::Error::Status(c, _)) => {
+            uzcoders::prelude::report_error(&format!("server {path}"), &format!("HTTP {c}"));
+            Err(format!("Server xatosi ({c})"))
+        }
+        Err(e) => {
+            uzcoders::prelude::report_error(&format!("tarmoq GET {path}"), &e.to_string());
+            Err(format!("Serverga ulanib bo'lmadi: {e}"))
+        }
     }
 }

@@ -332,6 +332,8 @@ impl Home {
             divider(),
             self.tile(P_PHONE, "Qurilmalar", { let me = self.clone(); move || me.open_sessions() }),
             divider(),
+            self.tile(P_INFO, "Xatolar jurnali", { let me = self.clone(); move || me.open_errlog() }),
+            divider(),
             divider(),
             self.tile(P_HEADSET, "Admin bilan bog'lanish", { let me = self.clone(); move || me.open_support(None) }),
             divider(),

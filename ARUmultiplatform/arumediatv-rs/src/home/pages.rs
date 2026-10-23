@@ -47,6 +47,7 @@ pub enum Page {
     Season(Rc<SeasonPage>),
     Settings,
     Sessions,
+    ErrLog,
     Billing(Rc<super::billing::BillingPage>),
     Edit(Rc<super::edit::EditPage>),
     Storage(Rc<super::storage::StoragePage>),
@@ -186,6 +187,42 @@ impl Home {
         self.push(Page::Settings);
     }
 
+    pub(super) fn open_errlog(self: &Rc<Self>) {
+        uzcoders::prelude::breadcrumb("open_errlog");
+        self.push(Page::ErrLog);
+    }
+
+    fn errlog_page(self: &Rc<Self>) -> Element {
+        let _ = self.gate_rev.get();
+        let list = uzcoders::prelude::error_entries();
+        let me = self.clone();
+        let bar = row(vec![
+            tx("Hammasini nusxalash", 13.0, Color::WHITE).bold().bg(ACCENT.with_opacity(0.5)).radius(12.0).padding_xy(14.0, 9.0).on_click(|| {
+                uzcoders::android::copy_text(&format!("{}\n{}", crate::device_info(), uzcoders::prelude::errors_text()));
+                uzcoders::android::toast("Nusxalandi");
+            }),
+            tx("Tozalash", 13.0, Color::WHITE).bold().bg(Color::rgba(255, 255, 255, 30)).radius(12.0).padding_xy(14.0, 9.0).on_click(move || {
+                uzcoders::prelude::clear_errors();
+                me.gate_rev.set(me.gate_rev.get() + 1);
+            }),
+        ])
+        .gap(10.0)
+        .padding_each(0.0, 0.0, 0.0, 12.0);
+        let mut kids = vec![bar];
+        if list.is_empty() {
+            kids.push(tx("Xatolar yo'q", 14.0, TEXT_FAINT).padding_each(0.0, 20.0, 0.0, 0.0));
+        }
+        for e in list.iter() {
+            let s = (e.ts + 5 * 3600) % 86400;
+            let head = format!("{:02}:{:02}:{:02}  {}{}", s / 3600, s % 3600 / 60, s % 60, e.place, if e.count > 1 { format!("  ×{}", e.count) } else { String::new() });
+            kids.push(
+                Self::card_box(column(vec![tx(head, 12.0, TEXT_DIM).bold(), tx(e.msg.clone(), 13.0, Color::WHITE)]).gap(4.0).padding_xy(12.0, 10.0)).padding_each(0.0, 0.0, 0.0, 8.0),
+            );
+        }
+        kids.push(gap_box(0.0, 40.0));
+        self.scaffold("Xatolar jurnali", scroll_column(&self.errlog_scroll, kids).padding_each(16.0, 8.0, 16.0, 0.0))
+    }
+
     pub(super) fn open_sessions(self: &Rc<Self>) {
         uzcoders::prelude::breadcrumb("open_sessions");
         self.devices.set(None);
@@ -251,6 +288,7 @@ impl Home {
             Page::Season(p) => self.season_page(&p),
             Page::Settings => self.settings_page(),
             Page::Sessions => self.sessions_page(),
+            Page::ErrLog => self.errlog_page(),
             Page::Billing(p) => self.billing_page(&p),
             Page::Edit(p) => self.edit_page(&p),
             Page::Storage(p) => self.storage_page(&p),
