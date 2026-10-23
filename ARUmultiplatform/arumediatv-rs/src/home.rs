@@ -9,8 +9,7 @@ mod comments;
 mod dl;
 mod edit;
 mod mediaview;
-mod packpanel;
-mod packs;
+mod emojipanel;
 mod pages;
 mod pubprofile;
 mod richtext;
@@ -75,10 +74,6 @@ pub struct Home {
     full_seasons: RefCell<Option<Rc<Vec<Season>>>>,
     /// Tarix kartalaridagi to'xtagan joy kadrlari: kalit -> rasm (`None` — yuklanmoqda yoki yasab bo'lmadi).
     hframes: RefCell<HashMap<String, Option<Rc<Image>>>>,
-    /// Izohlardagi stiker/GIF rasmlari: (to'plam, element) -> rasm (`None` — yuklanmoqda yoki topilmadi).
-    pk_imgs: RefCell<HashMap<(i64, i64), Option<Rc<Image>>>>,
-    /// Yuklanmagan (xato bilan tugagan) to'plam rasmlari — bosilsa qayta uriniladi.
-    pk_fail: RefCell<HashSet<(i64, i64)>>,
     /// Emoji/CJK matnlarining tizim shriftida chizilgan rasmlari (`richtext.rs`).
     rich_imgs: RefCell<HashMap<String, richtext::RichState>>,
     /// Chat video kadrlari xatosi: kalit -> (sabab, oxirgi urinish, urinishlar soni) — qayta uriniladi va sabab ko'rsatiladi.
@@ -193,8 +188,6 @@ impl Home {
             gate_rev: State::new(0),
             full_seasons: RefCell::new(None),
             hframes: RefCell::new(HashMap::new()),
-            pk_imgs: RefCell::new(HashMap::new()),
-            pk_fail: RefCell::new(HashSet::new()),
             rich_imgs: RefCell::new(HashMap::new()),
             hframe_fail: RefCell::new(HashMap::new()),
             avatar_try: Cell::new(None),
@@ -241,12 +234,6 @@ impl Home {
     }
 
     pub fn back(&self) -> bool {
-        if let Some(pages::Page::Packs(p)) = self.pages.get().last() {
-            if p.has_detail() {
-                p.close_detail();
-                return true;
-            }
-        }
         if let Some(pages::Page::Season(p)) = self.pages.get().last() {
             if p.pl.fullscreen.get() {
                 self.pl_set_fullscreen(p, false);
@@ -1104,8 +1091,6 @@ mod tests {
             gate_rev: State::new(0),
             full_seasons: RefCell::new(None),
             hframes: RefCell::new(HashMap::new()),
-            pk_imgs: RefCell::new(HashMap::new()),
-            pk_fail: RefCell::new(HashSet::new()),
             rich_imgs: RefCell::new(HashMap::new()),
             hframe_fail: RefCell::new(HashMap::new()),
             avatar_try: Cell::new(None),

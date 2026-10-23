@@ -2,7 +2,6 @@
 
 use super::*;
 use crate::api;
-use crate::data::format_bytes;
 use serde_json::{json, Value};
 
 fn num(v: &Value) -> i64 {
@@ -40,15 +39,6 @@ pub struct ChannelsPage {
     need: State<String>,
     busy: State<bool>,
     add_err: State<String>,
-    scroll: ScrollState,
-}
-
-pub struct PacksReviewPage {
-    ops: State<Option<Rc<Vec<Value>>>>,
-    reject_for: State<Option<Value>>,
-    reason: State<String>,
-    approve_all: State<bool>,
-    msg: State<String>,
     scroll: ScrollState,
 }
 
@@ -286,137 +276,6 @@ impl Home {
         kids.push(row(vec![spacer(), self.chip("Yopish", false, { let pc = pc.clone(); move || pc.add.set(false) })]).padding_each(0.0, 10.0, 0.0, 0.0));
         let pc2 = p.clone();
         modal(column(kids), move || pc2.add.set(false))
-    }
-
-    // ── To'plamlarni ko'rib chiqish ──
-
-    pub(super) fn open_admin_packs(self: &Rc<Self>) {
-        let p = Rc::new(PacksReviewPage { ops: State::new(None), reject_for: State::new(None), reason: State::new(String::new()), approve_all: State::new(false), msg: State::new(String::new()), scroll: ScrollState::new() });
-        self.pr_load(&p);
-        self.push(pages::Page::AdminPacks(p));
-    }
-
-    fn pr_load(self: &Rc<Self>, p: &Rc<PacksReviewPage>) {
-        let (p2, me, session) = (p.clone(), self.clone(), self.session.clone());
-        spawn_bg(move || api::get_json("/api/packs/admin/pending", "", Some(&session)), move |r| {
-            let list: Vec<Value> = r.ok().and_then(|j| j["ops"].as_array().cloned()).unwrap_or_default();
-            // Rasmlar (tasdiqlashdan oldin ko'rish uchun) Telegram orqali olinadi.
-            {
-                let have = me.posters.borrow();
-                let mut q = me.queue.borrow_mut();
-                for o in &list {
-                    if let Some(f) = o["file"].as_str() {
-                        if !f.is_empty() && !have.contains_key(f) && !q.contains(&f.to_string()) {
-                            q.push(f.to_string());
-                        }
-                    }
-                }
-            }
-            p2.ops.set(Some(Rc::new(list)));
-            me.next_posters();
-        });
-    }
-
-    fn pr_review(self: &Rc<Self>, p: &Rc<PacksReviewPage>, ids: Vec<i64>, approve: bool, reason: String, done: &'static str) {
-        let (p2, me, session) = (p.clone(), self.clone(), self.session.clone());
-        spawn_bg(move || post(&session, "/api/packs/admin/review", json!({"ids": ids, "approve": approve, "reason": reason})), move |r| {
-            p2.msg.set(match r { Ok(_) => done.to_string(), Err(e) => e });
-            me.pr_load(&p2);
-        });
-    }
-
-    pub(super) fn admin_packs_page(self: &Rc<Self>, p: &Rc<PacksReviewPage>) -> Element {
-        let Some(list) = p.ops.get() else {
-            return self.scaffold("To'plamlarni ko'rib chiqish", column(vec![spinner(32.0, 3.0, ACCENT2)]).center());
-        };
-        let body: Element = if list.is_empty() {
-            column(vec![tx("Kutayotgan rasm yo'q", 14.0, Color::WHITE)]).center()
-        } else {
-            let pa = p.clone();
-            let mut kids: Vec<Element> = vec![row(vec![tx(format!("{} ta kutmoqda", list.len()), 12.0, Color::WHITE).weight(1.0), tx("Hammasini tasdiqlash", 12.0, ACCENT2).bold().on_click(move || pa.approve_all.set(true))]).padding_each(4.0, 0.0, 4.0, 10.0)];
-            for o in list.iter() {
-                let file = o["file"].as_str().unwrap_or("").to_string();
-                let thumb = match self.posters.borrow().get(&file) {
-                    Some(img) => stack(vec![image_fill(img)]),
-                    None => column(vec![]).bg(Color::rgba(255, 255, 255, 20)).radius(12.0),
-                };
-                let id = num(&o["id"]);
-                let (pr, me, o2) = (p.clone(), self.clone(), o.clone());
-                let pa2 = p.clone();
-                kids.push(
-                    Self::pglass(
-                        row(vec![
-                            thumb.width(84.0).height(84.0),
-                            column(vec![
-                                tx(o["title"].as_str().unwrap_or("").to_string(), 14.0, Color::WHITE).bold(),
-                                tx(format!("{} · {} · {}", o["kind"].as_str().unwrap_or(""), o["owner"].as_str().unwrap_or(""), format_bytes(num(&o["size"]))), 12.0, Color::WHITE),
-                                row(vec![
-                                    self.chip("Tasdiqlash", true, move || me.pr_review(&pr, vec![id], true, String::new(), "Tasdiqlandi")),
-                                    self.chip("Rad etish", false, move || pa2.reject_for.set(Some(o2.clone()))),
-                                ])
-                                .gap(8.0)
-                                .padding_each(0.0, 6.0, 0.0, 0.0),
-                            ])
-                            .weight(1.0),
-                        ])
-                        .gap(12.0)
-                        .padding(10.0),
-                    )
-                    .radius(22.0)
-                    .margin_each(0.0, 0.0, 0.0, 10.0),
-                );
-            }
-            kids.push(gap_box(0.0, 32.0));
-            scroll_column(&p.scroll, kids)
-        };
-        let mut col = vec![body.grow(1.0)];
-        if !p.msg.get().is_empty() {
-            let pm = p.clone();
-            col.insert(0, tx(p.msg.get(), 13.0, Color::WHITE).bg(Color::rgba(0, 0, 0, 120)).radius(14.0).padding_xy(14.0, 8.0).margin_each(0.0, 0.0, 0.0, 8.0).on_click(move || pm.msg.set(String::new())));
-        }
-        let mut layers = vec![self.scaffold("To'plamlarni ko'rib chiqish", column(col).padding_each(16.0, 4.0, 16.0, 0.0))];
-        if let Some(o) = p.reject_for.get() {
-            let id = num(&o["id"]);
-            let reasons: Vec<Element> = ["Nomaqbul kontent", "Sifati past", "Mualliflik huquqi buzilgan", "Noto'g'ri to'plamga yuborilgan"].iter().map(|r| { let pr = p.reason.clone(); let r = r.to_string(); self.chip(&r.clone(), false, move || pr.set(r.clone())) }).collect();
-            let (pc, pd, me) = (p.clone(), p.clone(), self.clone());
-            layers.push(modal(
-                column(vec![
-                    tx("Nima uchun rad etiladi?", 18.0, Color::WHITE).bold(),
-                    gap_box(0.0, 10.0),
-                    column(reasons).gap(6.0),
-                    gap_box(0.0, 8.0),
-                    field(&p.reason).color(Color::WHITE).size(15.0).hint("Yoki o'zingiz yozing").hint_color(Color::rgba(255, 255, 255, 110)).accent(ACCENT2).padding_xy(14.0, 12.0).glass(Color::rgba(255, 255, 255, 22)).border(1.0, Color::TRANSPARENT).radius(14.0),
-                    gap_box(0.0, 14.0),
-                    row(vec![spacer(), self.chip("Bekor", false, { let pc = pc.clone(); move || pc.reject_for.set(None) }), self.chip("Rad etish", true, move || {
-                        pd.reject_for.set(None);
-                        let reason = pd.reason.get().trim().to_string();
-                        pd.reason.set(String::new());
-                        me.pr_review(&pd, vec![id], false, reason, "Rad etildi");
-                    })])
-                    .gap(8.0),
-                ]),
-                move || pc.reject_for.set(None),
-            ));
-        }
-        if p.approve_all.get() {
-            let ids: Vec<i64> = list.iter().map(|o| num(&o["id"])).collect();
-            let (pc, pd, me) = (p.clone(), p.clone(), self.clone());
-            layers.push(modal(
-                column(vec![
-                    tx("Hammasini tasdiqlash", 18.0, Color::WHITE).bold(),
-                    gap_box(0.0, 10.0),
-                    tx(format!("Hamma {} ta rasm ko'rib chiqilib, tasdiqlansinmi?", ids.len()), 14.0, Color::WHITE),
-                    gap_box(0.0, 14.0),
-                    row(vec![spacer(), self.chip("Yo'q", false, { let pc = pc.clone(); move || pc.approve_all.set(false) }), self.chip("Ha", true, move || {
-                        pd.approve_all.set(false);
-                        me.pr_review(&pd, ids.clone(), true, String::new(), "Tasdiqlandi");
-                    })])
-                    .gap(8.0),
-                ]),
-                move || pc.approve_all.set(false),
-            ));
-        }
-        stack(layers)
     }
 
     // ── Ilova va xavfsizlik ──

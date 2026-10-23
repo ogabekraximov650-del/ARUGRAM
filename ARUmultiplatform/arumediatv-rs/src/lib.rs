@@ -15,7 +15,6 @@ mod theme;
 mod qr;
 mod secure;
 mod webp;
-mod packs_data;
 
 use backend::Backend;
 #[cfg(not(target_os = "android"))]

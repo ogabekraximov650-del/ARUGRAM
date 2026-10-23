@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::api;
-use crate::data::{file_name_of, fmt_date};
+use crate::data::fmt_date;
 use serde_json::{json, Value};
 
 const S_SEND: &str = "M2.01,21L23,12 2.01,3 2,10l15,2 -15,2z";
@@ -46,8 +46,8 @@ pub struct SupportPage {
     menu: State<String>,
     /// Javob berilayotgan xabar identifikatori.
     reply: State<Option<String>>,
-    /// Emoji / stiker / GIF paneli.
-    pp: Rc<super::packpanel::PackPanel>,
+    /// Emoji paneli.
+    ep: Rc<super::emojipanel::EmojiPanel>,
     scroll: ScrollState,
     stick: std::cell::Cell<bool>,
     ver: std::cell::Cell<i64>,
@@ -249,7 +249,7 @@ impl Home {
             busy: State::new(false),
             menu: State::new(String::new()),
             reply: State::new(None),
-            pp: Rc::new(super::packpanel::PackPanel::new()),
+            ep: Rc::new(super::emojipanel::EmojiPanel::new()),
             scroll: ScrollState::new(),
             stick: std::cell::Cell::new(true),
             ver: std::cell::Cell::new(0),
@@ -409,7 +409,7 @@ impl Home {
         let bar_h = 62.0
             + if p.reply.get().is_some() { 52.0 } else { 0.0 }
             + if super::richtext::needs_rich(&p.input.get()) { 42.0 } else { 0.0 }
-            + if p.pp.open.get() { 330.0 } else { 0.0 }
+            + if p.ep.open.get() { 330.0 } else { 0.0 }
             + if p.err.get().is_empty() { 0.0 } else { 26.0 };
         let mut kids: Vec<Element> = Vec::new();
         let start = items.len().saturating_sub(120);
@@ -440,12 +440,12 @@ impl Home {
         let me2 = self.clone();
         let can_send = !p.input.get().trim().is_empty() && !p.busy.get();
         let input = field(&p.input).color(Color::WHITE).size(15.0).hint("Xabar").hint_color(Color::rgba(255, 255, 255, 96)).accent(ACCENT2).padding_xy(4.0, 14.0).no_border().weight(1.0);
-        let (pe, me_e) = (p.pp.clone(), self.clone());
-        let emo = column(vec![icon(if p.pp.open.get() { S_KEYBOARD } else { S_EMOJI }, 24.0).color(Color::rgba(255, 255, 255, 170))])
+        let pe = p.ep.clone();
+        let emo = column(vec![icon(if p.ep.open.get() { S_KEYBOARD } else { S_EMOJI }, 24.0).color(Color::rgba(255, 255, 255, 170))])
             .center()
             .width(46.0)
             .height(48.0)
-            .on_click(move || me_e.pp_toggle(&pe));
+            .on_click(move || pe.open.set(!pe.open.get()));
         let attach = column(vec![if p.busy.get() { spinner(20.0, 2.0, Color::WHITE) } else { icon(S_ATTACH, 23.0).color(Color::rgba(255, 255, 255, 170)) }])
             .center()
             .width(46.0)
@@ -498,16 +498,11 @@ impl Home {
             );
         }
         bar_col.push(row(vec![pill, send]).gap(8.0).align(Align::End).margin_each(10.0, 6.0, 10.0, 8.0));
-        if p.pp.open.get() {
-            let (pi, pb, pm2) = (p.clone(), p.clone(), p.clone());
-            let me3 = self.clone();
+        if p.ep.open.get() {
+            let (pi, pb) = (p.clone(), p.clone());
             let on_emoji: Rc<dyn Fn(String)> = Rc::new(move |e| pi.input.set(format!("{}{}", pi.input.get(), e)));
-            let on_back: Rc<dyn Fn()> = Rc::new(move || pb.input.set(super::packpanel::pop_last_char(&pb.input.get())));
-            let on_media: Rc<dyn Fn(String, &'static str)> = Rc::new(move |f, k| {
-                pm2.pp.open.set(false);
-                me3.chat_send(&pm2, String::new(), Some((f, k.to_string())));
-            });
-            bar_col.push(self.pp_view(&p.pp, on_emoji, on_back, on_media).margin_each(10.0, 0.0, 10.0, 8.0));
+            let on_back: Rc<dyn Fn()> = Rc::new(move || pb.input.set(super::emojipanel::pop_last_char(&pb.input.get())));
+            bar_col.push(self.emoji_view(&p.ep, on_emoji, on_back).margin_each(10.0, 0.0, 10.0, 8.0));
         }
         let bar = column(bar_col);
         let mut low = Vec::new();
@@ -562,7 +557,6 @@ impl Home {
         let hhmm: String = fmt_date(m.created_at).chars().take(5).collect();
         let (rid, body) = split_reply(&m.body);
         let body = plain(&body);
-        let bare = (m.media_type == "sticker" || m.media_type == "gif") && body.is_empty();
         let meta_col = if mine { TG_OUT_META } else { Color::rgba(255, 255, 255, 140) };
         let mut inner: Vec<Element> = Vec::new();
         if let Some(rid) = rid {
@@ -578,7 +572,6 @@ impl Home {
                 .margin_each(0.0, 0.0, 0.0, 4.0),
             );
         }
-        let ref_name = file_name_of(&m.media_url);
         let maxw = (w - 24.0 - 40.0).min(300.0);
         // Fayl / ovoz — tashqi ko'ruvchida; rasm va video — ilova ichidagi ko'ruvchida (`mediaview.rs`).
         let open = |e: Element| {
@@ -621,10 +614,7 @@ impl Home {
             }
             "voice" => inner.push(open(row(vec![icon(S_PLAY, 24.0).color(Color::WHITE), tx(format!("Ovozli xabar · {}:{:02}", m.media_ms / 60000, (m.media_ms / 1000) % 60), 14.0, Color::WHITE)]).gap(10.0).align(Align::Center).padding_xy(0.0, 6.0))),
             "file" => inner.push(open(row(vec![icon(S_ATTACH, 24.0).color(Color::WHITE), tx(if m.body.is_empty() { "Fayl".to_string() } else { m.body.clone() }, 14.0, Color::WHITE)]).gap(10.0).align(Align::Center).padding_xy(0.0, 6.0))),
-            "sticker" | "gif" => match self.cm_media_el(&ref_name, &m.media_type) {
-                Some(e) => inner.push(e),
-                None => inner.push(tx(if m.media_type == "gif" { "GIF" } else { "Stiker" }, 13.5, Color::WHITE).bold()),
-            },
+            "sticker" | "gif" => inner.push(tx(if m.media_type == "gif" { "GIF" } else { "Stiker" }, 13.5, Color::WHITE).bold()),
             _ => {}
         }
         if m.media_type != "file" && !body.is_empty() {
@@ -647,9 +637,7 @@ impl Home {
         inner.push(row(meta).gap(3.0).align(Align::Center).padding_each(0.0, 2.0, 0.0, 0.0));
         let (pc, id) = (p.clone(), m.id.clone());
         let mut bubble = column(inner);
-        if !bare {
-            bubble = bubble.padding(8.0).radius(if top_near || bottom_near { 12.0 } else { 18.0 }).bg(if mine { TG_OUT } else { TG_IN });
-        }
+        bubble = bubble.padding(8.0).radius(if top_near || bottom_near { 12.0 } else { 18.0 }).bg(if mine { TG_OUT } else { TG_IN });
         let bubble = bubble.on_click(move || pc.menu.set(id.clone()));
         let bubble = column(vec![bubble]).width(maxw.max(120.0)).align(if mine { Align::End } else { Align::Start });
         let r = if mine { row(vec![spacer(), bubble]) } else { row(vec![bubble, spacer()]) };

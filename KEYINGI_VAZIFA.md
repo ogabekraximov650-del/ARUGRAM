@@ -6755,3 +6755,10 @@ Talab (foydalanuvchi): video yoki boshqa narsa shisha ostidan o'tsa, ekranning e
 - `scaffold` (hamma push qilinadigan sahifalar), `season_page` (muqova + yorliqlar ustda, ro'yxat ostidan o'tadi), admin chati (xabarlar to'liq ekran, sarlavha
   va yozish paneli ustida): ro'yxat to'liq ekran, tepa/pastga sarlavha/panel balandligicha padding; sarlavha/panel `stack` ning oxirgi qatlamlari (shisha lupa).
 - Bosh sahifa tablari (Bosh/Qidiruv/Katalog/Kutubxona/Profil) avvaldan shunday edi.
+
+## Rust ilovadan o'z emoji/GIF/stiker tizimi olib tashlandi (2026-10-23)
+
+Foydalanuvchi talabi: Rust ilovada o'z to'plamlar tizimi bo'lmasin. O'chirildi: `home/packs.rs` (to'plamlar sahifalari, `Page::Packs`), `packs_data.rs`,
+admin "Emoji, GIF va stikerlar" bo'limi (`PacksReviewPage`), profildagi "To'plamlar" tugmasi, izohlardagi stiker/GIF paneli va rasmlari, chatdagi stiker/GIF paneli.
+Chatda faqat oddiy Unicode emoji to'ri qoldi (`home/emojipanel.rs`, matn `richtext.rs` orqali). Serverdan kelgan stiker/GIF xabarlari yorliq ("Stiker"/"GIF") bo'lib ko'rinadi.
+Server va Kotlin ilova tegilmagan.

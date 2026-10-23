@@ -11,19 +11,17 @@ const AD_CHAT: &str = "M21.99,4c0,-1.1 -0.89,-2 -1.99,-2H4c-1.1,0 -2,0.9 -2,2v12
 const AD_FLAG: &str = "M14.4,6L14,4H5v17h2v-7h5.6l0.4,2h7V6z";
 const AD_INSIGHTS: &str = "M21,8c-1.45,0 -2.26,1.44 -1.93,2.51l-3.55,3.56c-0.3,-0.09 -0.74,-0.09 -1.04,0l-2.55,-2.55C12.27,10.45 11.46,9 10,9c-1.45,0 -2.27,1.44 -1.93,2.52l-4.56,4.55C2.44,15.74 1,16.55 1,18c0,1.1 0.9,2 2,2 1.45,0 2.26,-1.44 1.93,-2.51l4.55,-4.56c0.3,0.09 0.74,0.09 1.04,0l2.55,2.55C12.73,16.55 13.54,18 15,18c1.45,0 2.27,-1.44 1.93,-2.52l3.56,-3.55c1.07,0.33 2.51,-0.48 2.51,-1.93 0,-1.1 -0.9,-2 -2,-2z";
 const AD_MOVIE: &str = "M18,4l2,4h-3l-2,-4h-2l2,4h-3l-2,-4H8l2,4H7L5,4H4c-1.1,0 -1.99,0.9 -1.99,2L2,18c0,1.1 0.9,2 2,2h16c1.1,0 2,-0.9 2,-2V4h-4z";
-const AD_SMILE: &str = "M11.99,2C6.47,2 2,6.48 2,12s4.47,10 9.99,10C17.52,22 22,17.52 22,12S17.52,2 11.99,2zM12,20c-4.42,0 -8,-3.58 -8,-8s3.58,-8 8,-8 8,3.58 8,8 -3.58,8 -8,8z";
 const AD_CAMPAIGN: &str = "M18,11v2h4v-2h-4zM16,17.61c0.96,0.71 2.21,1.65 3.2,2.39 0.4,-0.53 0.8,-1.07 1.2,-1.6 -0.99,-0.74 -2.24,-1.68 -3.2,-2.4 -0.4,0.54 -0.8,1.08 -1.2,1.61zM20.4,5.6c-0.4,-0.53 -0.8,-1.07 -1.2,-1.6 -0.99,0.74 -2.24,1.68 -3.2,2.4 0.4,0.53 0.8,1.07 1.2,1.6 0.96,-0.72 2.21,-1.65 3.2,-2.4zM4,9c-1.1,0 -2,0.9 -2,2v2c0,1.1 0.9,2 2,2h1v4h2v-4h1l5,3V6L8,9H4z";
 const AD_SECURITY: &str = "M12,1L3,5v6c0,5.55 3.84,10.74 9,12 5.16,-1.26 9,-6.45 9,-12V5l-9,-4z";
 const AD_CHEVRON: &str = "M10,6L8.59,7.41 13.17,12l-4.58,4.59L10,18l6,-6z";
 const AD_SEARCH: &str = "M15.5,14h-0.79l-0.28,-0.27C15.41,12.59 16,11.11 16,9.5 16,5.91 13.09,3 9.5,3S3,5.91 3,9.5 5.91,16 9.5,16c1.61,0 3.09,-0.59 4.23,-1.57l0.27,0.28v0.79l5,4.99L20.49,19l-4.99,-5zM9.5,14C7.01,14 5,11.99 5,9.5S7.01,5 9.5,5 14,7.01 14,9.5 11.99,14 9.5,14z";
 
 /// Admin bo'limlari: (nom, izoh, belgi).
-const SECTIONS: [(&str, &str, &str); 9] = [
+const SECTIONS: [(&str, &str, &str); 8] = [
     ("Animelarni boshqarish", "Qo'shish, tahrirlash, o'chirish", AD_MOVIE),
     ("Foydalanuvchilar", "Balans, obuna, bloklash", AD_PEOPLE),
     ("Suhbatlar", "Foydalanuvchilar yozishmalari", AD_CHAT),
     ("Shikoyatlar", "Izohlarga kelgan shikoyatlar", AD_FLAG),
-    ("Emoji, GIF va stikerlar", "Yuklangan rasmlarni ko'rib chiqish", AD_SMILE),
     ("Majburiy obunalar", "Kanallar, limit va statistika", AD_CAMPAIGN),
     ("Umumiy statistika", "Kontent, foydalanuvchilar, ko'rishlar, trafik", AD_INSIGHTS),
     ("Kodlash navbati", "Kodlanayotgan va navbatdagi qismlar, log", AD_MOVIE),
@@ -164,11 +162,10 @@ impl Home {
             1 => self.open_admin_users(),
             2 => self.open_admin_list(0),
             3 => self.open_admin_list(1),
-            4 => self.open_admin_packs(),
-            5 => self.open_admin_channels(),
-            6 => self.open_admin_stats(),
-            7 => self.open_admin_encode(),
-            8 => self.open_admin_app(),
+            4 => self.open_admin_channels(),
+            5 => self.open_admin_stats(),
+            6 => self.open_admin_encode(),
+            7 => self.open_admin_app(),
             _ => {
                 self.dlg_msg.set(format!("«{}» bo'limi Rust ilovada hali tayyor emas — Kotlin ilovada mavjud.", SECTIONS[i].0));
                 self.dlg.set(5);
