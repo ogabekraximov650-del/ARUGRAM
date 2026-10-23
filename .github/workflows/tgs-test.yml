@@ -102,6 +102,7 @@ jobs:
 
       - name: Stikerlarni chizish
         working-directory: ARUmultiplatform/uzcoders
+        timeout-minutes: 15
         run: |
           cargo build --release -p uzcoders-lottie --examples
           mkdir -p /tmp/mine

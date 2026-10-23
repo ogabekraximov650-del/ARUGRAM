@@ -885,4 +885,66 @@ mod tests {
         }
         assert_eq!(rows.iter().map(|(i, _)| i.len()).sum::<usize>(), 5);
     }
+
+    fn doc(id: i64, kind: &str) -> TgDoc {
+        TgDoc { id, hash: id, fref: "ab".into(), dc: 2, kind: kind.into(), thumb: "m".into(), emoji: "😀".into(), custom: false, w: 512, h: 512 }
+    }
+
+    fn set(id: i64, n: i64) -> TgSet {
+        TgSet { id, hash: id, title: format!("To'plam {id}"), short: format!("set{id}"), count: n, thumb_ver: 0 }
+    }
+
+    /// UZ: Panel har uch tabda xatosiz quriladi (soxta ma'lumot bilan), uzoq bosish ko'rinishi ham. EN: The panel builds on all three tabs without errors (fake data), and so does the long-press preview. RU: Панель строится на всех трёх вкладках без ошибок (на фиктивных данных), как и просмотр при долгом нажатии.
+    #[test]
+    fn panel_uch_tabda_quriladi() {
+        let home = Home::new("test".into(), Rc::new(|| {}));
+        let panel = Rc::new(TgPanel::new());
+        {
+            let mut d = panel.data.borrow_mut();
+            d.emoji_sets = Some(vec![set(1, 20), set(2, 7)]);
+            d.sticker_sets = Some(vec![set(3, 33), set(4, 5)]);
+            d.gifs = Some((10..30).map(|i| doc(i, "mp4")).collect());
+            d.docs.insert(1, (100..120).map(|i| doc(i, "tgs")).collect());
+            d.docs.insert(3, (200..233).map(|i| doc(i, "webp")).collect());
+            d.pending.insert("sets_e".into());
+            d.pending.insert("sets_s".into());
+            d.pending.insert("gifs".into());
+        }
+        let font = Rc::new(uzcoders::prelude::Font::parse(include_bytes!("../../assets/fonts/Roboto-Regular.ttf")).unwrap());
+        let (h2, p2) = (home.clone(), panel.clone());
+        let mut ui = Ui::new(font, move || {
+            let nop: Rc<dyn Fn(String)> = Rc::new(|_| {});
+            let nop2: Rc<dyn Fn(String, &'static str)> = Rc::new(|_, _| {});
+            let nop3: Rc<dyn Fn()> = Rc::new(|| {});
+            let mut layers = vec![h2.tg_panel_view(&p2, nop, nop2, nop3.clone(), nop3)];
+            if let Some(o) = h2.tg_preview_view(&p2) {
+                layers.push(o);
+            }
+            stack(layers)
+        });
+        for tab in 0..3u8 {
+            panel.tab.set(tab);
+            for _ in 0..3 {
+                ui.frame(Size::new(400.0, 800.0));
+            }
+            // UZ: Ko'z bilan tekshirish uchun: TGPANEL_PNG_DIR berilsa, har tab PNG ga chiziladi. EN: For eyeballing: with TGPANEL_PNG_DIR set, each tab is drawn to a PNG. RU: Для визуальной проверки: при заданном TGPANEL_PNG_DIR каждая вкладка рисуется в PNG.
+            if let Ok(dir) = std::env::var("TGPANEL_PNG_DIR") {
+                let f = Rc::new(uzcoders::prelude::Font::parse(include_bytes!("../../assets/fonts/Roboto-Regular.ttf")).unwrap());
+                let mut c = Canvas::new(400, 800, f);
+                c.clear(Color::rgba(40, 32, 28, 255));
+                c.execute(&ui.frame(Size::new(400.0, 800.0)));
+                let _ = std::fs::write(format!("{dir}/panel_tab{tab}.png"), c.to_png());
+            }
+        }
+        // Teri rangi oynasi va uzoq bosish ko'rinishi.
+        panel.tone_menu.set(Some(Rc::new(ToneMenu { base: "👍".into(), x: 10.0, y: 50.0 })));
+        panel.preview.set(Some(Rc::new(Preview { kind: PKind::Sticker, doc: doc(200, "webp"), set: Some(set(3, 33)), rf: "tgs.set3.200".into(), menu: true })));
+        let cmds = ui.frame(Size::new(400.0, 800.0));
+        assert!(!cmds.is_empty());
+        // Ro'yxat pastga surilganda ham xatosiz.
+        panel.tab.set(2);
+        panel.scroll[2].set_offset(900.0);
+        ui.frame(Size::new(400.0, 800.0));
+        ui.frame(Size::new(400.0, 800.0));
+    }
 }

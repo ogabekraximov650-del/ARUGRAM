@@ -26,6 +26,12 @@ fn main() {
         }
         let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("x").to_string();
         let t = Instant::now();
+        let (a1, p1, st1) = (a.clone(), p.clone(), stem.clone());
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+        let a = a1;
+        let p = p1;
+        let stem = st1;
         let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<(), String> {
             let raw = std::fs::read(&p).map_err(|e| e.to_string())?;
             let json = uzcoders_lottie::tgs::to_json(&raw).ok_or("tgs/json ochilmadi")?;
@@ -50,6 +56,10 @@ fn main() {
             Ok(())
         }))
         .unwrap_or_else(|_| Err("PANIC".to_string()));
+        let _ = tx.send(res);
+        });
+        // UZ: 20 soniyadan oshsa — osilib qolgan (cheksiz sikl) fayl deb hisoblanadi. EN: Over 20 seconds counts as a hung file (an endless loop). RU: Свыше 20 секунд — зависший файл (бесконечный цикл).
+        let res = rx.recv_timeout(std::time::Duration::from_secs(20)).unwrap_or_else(|_| Err("TIMEOUT (osilib qoldi)".to_string()));
         let ms = t.elapsed().as_millis();
         match res {
             Ok(()) => {
