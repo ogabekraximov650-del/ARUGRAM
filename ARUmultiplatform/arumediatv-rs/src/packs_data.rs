@@ -134,7 +134,7 @@ pub fn header(session: &str, file: &str, pack: i64, ver: i64) -> Result<Arc<Head
         return Ok(h);
     }
     let disk = format!("{}/hdr_{pack}.json", dir());
-    if let Some(j) = std::fs::read_to_string(&disk).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) {
+    if let Some(j) = crate::secure::read_text(&disk, "packhdr").and_then(|t| serde_json::from_str::<Value>(&t).ok()) {
         let base = j["base"].as_i64().unwrap_or(0);
         if base >= 16 {
             let h = parse_header(&j, base);
@@ -167,7 +167,7 @@ pub fn header(session: &str, file: &str, pack: i64, ver: i64) -> Result<Arc<Head
     let mut j: Value = serde_json::from_slice(&bytes[16..end]).map_err(|_| "Sarlavha o'qilmadi".to_string())?;
     let h = parse_header(&j, 16 + hlen);
     j["base"] = Value::from(16 + hlen);
-    let _ = std::fs::write(&disk, j.to_string());
+    let _ = crate::secure::write_text(&disk, "packhdr", &j.to_string());
     let h = Arc::new(h);
     if let Ok(mut m) = headers().lock() {
         m.insert(pack, h.clone());
@@ -237,12 +237,12 @@ pub fn data_image(session: &str, file: &str, h: &Header, item: &Item) -> Option<
 pub fn item_image(session: &str, pack: i64, item: i64) -> Option<Image> {
     let d = dir();
     let info_path = format!("{d}/info_{pack}.json");
-    let info: Value = match std::fs::read_to_string(&info_path).ok().and_then(|t| serde_json::from_str(&t).ok()) {
+    let info: Value = match crate::secure::read_text(&info_path, "packinfo").and_then(|t| serde_json::from_str(&t).ok()) {
         Some(v) => v,
         None => {
             let j = crate::api::get_json("/api/packs/info", &format!("?ids={pack}"), Some(session)).ok()?;
             let p = j["packs"].as_array()?.iter().find(|p| p["id"].as_i64() == Some(pack))?.clone();
-            let _ = std::fs::write(&info_path, p.to_string());
+            let _ = crate::secure::write_text(&info_path, "packinfo", &p.to_string());
             p
         }
     };

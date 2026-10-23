@@ -6741,3 +6741,9 @@ Foydalanuvchi skrinshotlari bilan topilgan xatolar (Kotlin `SupportChatScreen` b
   (`[pe:..]`) zaxira belgi sifatida chiziladi, paket rasmi sifatida emas; (3) Telegram hisobidagi stiker/GIF (`tgs.`/`tgg.`), ovozli xabar yozish,
   surib javob berish, ⋮ menyu (qidiruv/tanlash), rasmni yaqinlashtirish hali yo'q.
 - Tekshirilgan: `cargo test` (15 ta). Telefonda tekshirilmagan.
+
+## Rust ilova: video kadri/profil rasmi tuzatish, hamma kesh shifrlangan (2026-10-23)
+
+- `downloads::history_frame_r` — kadr xatosi SABABI bilan qaytadi; chat videoda sabab "Kadr: ..." deb ko'rsatiladi, 15 soniyadan keyin 3 martagacha qayta uriniladi (`hframe_fail`).
+- Profil rasmi: o'lchamli stack/harfli doira (avval o'lchamsiz kichrayib ketardi, harf to'q sariq-to'q sariq ustida ko'rinmasdi); yuklanmagan bo'lsa 10 s oraliqda 6 martagacha qayta so'raladi.
+- `secure::write_text/read_text`: ro'yxatlar keshi (`seasons`, `etag`, `eps_*`), `progress.json`, `sync` navbati, to'plam sarlavhalari/ma'lumoti, `gate` fayllari endi AES-GCM bilan shifrlanadi (eski ochiq fayllar o'qiladi, keyingi yozuvda shifrlanadi). Chat suhbati ham shifrlangan keshda (`chat_<id>.json`), chat darhol ochiladi.

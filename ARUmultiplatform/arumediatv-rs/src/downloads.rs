@@ -245,7 +245,7 @@ pub fn release_hold() {
 /// Qayerda to'xtagani (fayl nomi bo'yicha): `files/progress.json`.
 pub fn progress_get(url: &str) -> Option<(i64, i64)> {
     let name = file_name_of(url);
-    let s = std::fs::read_to_string(format!("{}/progress.json", uzcoders::android::files_dir())).ok()?;
+    let s = crate::secure::read_text(&format!("{}/progress.json", uzcoders::android::files_dir()), "progress")?;
     let v: Value = serde_json::from_str(&s).ok()?;
     let e = v.get(&name)?.as_str()?;
     let (a, b) = e.split_once('/')?;
@@ -258,22 +258,27 @@ pub fn progress_set(url: &str, pos_ms: i64, dur_ms: i64) {
         return;
     }
     let path = format!("{}/progress.json", uzcoders::android::files_dir());
-    let mut v: Value = std::fs::read_to_string(&path).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(Value::Object(Default::default()));
+    let mut v: Value = crate::secure::read_text(&path, "progress").and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(Value::Object(Default::default()));
     if let Value::Object(m) = &mut v {
         m.insert(name, Value::String(format!("{pos_ms}/{dur_ms}")));
     }
-    let _ = std::fs::write(path, v.to_string());
+    let _ = crate::secure::write_text(&path, "progress", &v.to_string());
 }
 
 /// Tomosha tarixi uchun to'xtagan joydagi kadr (Kotlin `ThumbStore`): yadroning `/thumb` yo'li bitta kadrlik MP4 beradi,
 /// Java `MediaMetadataRetriever` undan JPEG chiqaradi. Natija diskda shifrlangan; bir vaqtda bitta kadr, pleyer ochiq paytda kutadi.
 pub fn history_frame(session: &str, video_url: &str, thumb_url: &str, pos_ms: i64, key: &str) -> Option<uzcoders::prelude::Image> {
+    history_frame_r(session, video_url, thumb_url, pos_ms, key).ok()
+}
+
+/// `history_frame` — xato sababi bilan (ekranda ko'rsatiladi va qayta urinish shunga qarab).
+pub fn history_frame_r(session: &str, video_url: &str, thumb_url: &str, pos_ms: i64, key: &str) -> Result<uzcoders::prelude::Image, String> {
     static QUEUE: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let dir = format!("{}/cache/hframes", uzcoders::android::files_dir());
     let _ = std::fs::create_dir_all(&dir);
     let path = format!("{dir}/{key}.jpg");
     if let Some(img) = crate::secure::read(&path, "hframe").and_then(|b| crate::webp::decode_any(&b)) {
-        return Some(img.resized(960, 540));
+        return Ok(img.resized(960, 540));
     }
     let _g = QUEUE.lock().unwrap_or_else(|e| e.into_inner());
     // Pleyer ochiq — tarmoq faqat videoniki.
@@ -285,42 +290,45 @@ pub fn history_frame(session: &str, video_url: &str, thumb_url: &str, pos_ms: i6
     }
     let src = if thumb_url.is_empty() { video_url } else { thumb_url };
     let name = file_name_of(src);
-    if name.is_empty() || !ensure_cache() {
-        return None;
+    if name.is_empty() {
+        return Err("fayl nomi yo'q".into());
+    }
+    if !ensure_cache() {
+        return Err("video kesh ishga tushmadi".into());
     }
     let complete = stats(&[src.to_string()]).get(src).map(|s| s.complete()).unwrap_or(false);
     let u = if complete {
         src.to_string()
     } else {
-        let ok = tg_deliver(session, &[name.clone()]).ok()?;
+        let ok = tg_deliver(session, &[name.clone()]).map_err(|e| format!("deliver: {e}"))?;
         if !ok.contains(&name) {
-            return None;
+            return Err("server faylni Telegram'da topmadi".into());
         }
         let port = crate::data::tg_port();
         if port <= 0 {
-            return None;
+            return Err("Telegram porti yo'q".into());
         }
         format!("http://127.0.0.1:{port}/tg/0/{name}")
     };
     let port = crate::data::tg_port();
     if port <= 0 {
-        return None;
+        return Err("Telegram porti yo'q".into());
     }
     let url = format!("http://127.0.0.1:{port}/thumb?u={}&ms={}", crate::backend::urlenc(&u), pos_ms.max(0));
-    let r = ureq::get(&url).timeout(std::time::Duration::from_secs(60)).call().ok()?;
+    let r = ureq::get(&url).timeout(std::time::Duration::from_secs(60)).call().map_err(|e| format!("kadr so'rovi: {e}"))?;
     let mut mp4 = Vec::new();
-    std::io::Read::read_to_end(&mut std::io::Read::take(r.into_reader(), 16 << 20), &mut mp4).ok()?;
+    std::io::Read::read_to_end(&mut std::io::Read::take(r.into_reader(), 16 << 20), &mut mp4).map_err(|e| format!("kadr o'qilmadi: {e}"))?;
     if mp4.len() < 64 {
-        return None;
+        return Err("kadr bo'sh keldi".into());
     }
     let tmp_in = format!("{dir}/{key}.mp4");
     let tmp_out = format!("{dir}/{key}.tmp.jpg");
-    std::fs::write(&tmp_in, &mp4).ok()?;
+    std::fs::write(&tmp_in, &mp4).map_err(|e| format!("yozilmadi: {e}"))?;
     uzcoders::android::frame_to_file(&format!("{tmp_in}|{tmp_out}"));
     let _ = std::fs::remove_file(&tmp_in);
     let jpg = std::fs::read(&tmp_out).ok();
     let _ = std::fs::remove_file(&tmp_out);
-    let jpg = jpg?;
+    let jpg = jpg.ok_or_else(|| "Java kadr chiqarmadi".to_string())?;
     // Shu qismning eski kadrlari kerak emas.
     let prefix = key.rsplit_once('_').map(|(a, _)| format!("{a}_")).unwrap_or_default();
     if !prefix.is_empty() {
@@ -333,7 +341,7 @@ pub fn history_frame(session: &str, video_url: &str, thumb_url: &str, pos_ms: i6
             }
         }
     }
-    let img = crate::webp::decode_any(&jpg)?;
+    let img = crate::webp::decode_any(&jpg).ok_or_else(|| "kadr dekodlanmadi".to_string())?;
     let _ = crate::secure::write(&path, "hframe", &jpg);
-    Some(img.resized(960, 540))
+    Ok(img.resized(960, 540))
 }

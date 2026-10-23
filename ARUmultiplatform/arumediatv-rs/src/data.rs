@@ -67,22 +67,22 @@ fn cache_file() -> String {
 
 /// Diskdagi oxirgi ro'yxat (tarmoqsiz, darhol).
 pub fn cached_seasons() -> Vec<Season> {
-    std::fs::read_to_string(cache_file()).map(|b| parse_seasons(&b)).unwrap_or_default()
+    crate::secure::read_text(&cache_file(), "seasons").map(|b| parse_seasons(&b)).unwrap_or_default()
 }
 
 /// Serverdan (ETag bilan): `Ok(None)` — o'zgarmagan, `Ok(Some)` — yangi ro'yxat (diskka yoziladi).
 pub fn fetch_seasons() -> Result<Option<Vec<Season>>, String> {
     let etag_file = format!("{}.etag", cache_file());
-    let etag = std::fs::read_to_string(&etag_file).ok().filter(|_| std::path::Path::new(&cache_file()).exists());
+    let etag = crate::secure::read_text(&etag_file, "etag").filter(|_| std::path::Path::new(&cache_file()).exists());
     match crate::api::get_etag("/api/seasons", etag.as_deref().map(str::trim))? {
         None => Ok(None),
         Some((body, tag)) => {
             let items = parse_seasons(&body);
             if !items.is_empty() {
-                let _ = std::fs::write(cache_file(), &body);
+                let _ = crate::secure::write_text(&cache_file(), "seasons", &body);
                 match tag {
                     Some(t) => {
-                        let _ = std::fs::write(&etag_file, t);
+                        let _ = crate::secure::write_text(&etag_file, "etag", &t);
                     }
                     None => {
                         let _ = std::fs::remove_file(&etag_file);
@@ -540,13 +540,13 @@ pub fn parse_episodes(v: &Value) -> Vec<Episode> {
 
 /// Diskdagi nusxa (tarmoqsiz).
 pub fn cached_episodes(anime: i64, season: i64) -> Vec<Episode> {
-    std::fs::read_to_string(format!("{}/eps_{anime}_{season}.json", cache_dir())).ok().and_then(|s| serde_json::from_str::<Value>(&s).ok()).map(|v| parse_episodes(&v)).unwrap_or_default()
+    crate::secure::read_text(&format!("{}/eps_{anime}_{season}.json", cache_dir()), "eps").and_then(|s| serde_json::from_str::<Value>(&s).ok()).map(|v| parse_episodes(&v)).unwrap_or_default()
 }
 
 pub fn fetch_episodes(anime: i64, season: i64) -> Result<Vec<Episode>, String> {
     let v = crate::api::get_json(&format!("/api/epizods/{anime}/{season}"), "", None)?;
     // Yuklanmalar ro'yxati shu nusxadan tuziladi (Kotlin'dagi `eps_*.json` kabi).
-    let _ = std::fs::write(format!("{}/eps_{anime}_{season}.json", cache_dir()), v.to_string());
+    let _ = crate::secure::write_text(&format!("{}/eps_{anime}_{season}.json", cache_dir()), "eps", &v.to_string());
     Ok(parse_episodes(&v))
 }
 

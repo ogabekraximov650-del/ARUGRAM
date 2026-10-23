@@ -45,12 +45,22 @@ impl Home {
         });
     }
 
-    /// Dumaloq avatar (poster o'rtasidan kvadrat kesib olinadi, bir marta).
-    fn avatar_img(&self, url: &str) -> Option<Rc<Image>> {
+    /// Dumaloq avatar: poster (diskdagi shifrlangan nusxa) butun rasm kvadratga keltirilib dumaloqlanadi, bir marta.
+    /// Rasm hali yuklanmagan bo'lsa — yuklash qayta so'raladi (10 soniyada bir, 6 martagacha).
+    fn avatar_img(self: &Rc<Self>, url: &str) -> Option<Rc<Image>> {
         if let Some(a) = self.avatar.borrow().as_ref() {
             return Some(a.clone());
         }
-        let img = self.posters.borrow().get(url)?.clone();
+        let img = self.posters.borrow().get(url).cloned();
+        let Some(img) = img else {
+            if !url.is_empty() && !self.loading_posters.get() && self.avatar_tries.get() < 6 && self.avatar_try.get().map_or(true, |t| t.elapsed().as_secs() >= 10) {
+                self.avatar_try.set(Some(std::time::Instant::now()));
+                self.avatar_tries.set(self.avatar_tries.get() + 1);
+                self.queue.borrow_mut().insert(0, url.to_string());
+                self.next_posters();
+            }
+            return None;
+        };
         // Poster 480x720 ga cho'zilgan (kvadrat rasm torayib ketgan) — butun rasm kvadratga qaytariladi, kesilmaydi.
         let a = Rc::new(Image { w: img.w, h: img.h, rgba: img.rgba.clone() }.resized(256, 256).round_corners(128.0));
         *self.avatar.borrow_mut() = Some(a.clone());
@@ -220,11 +230,12 @@ impl Home {
         let backdrop = Self::glass_backdrop();
 
         let avatar = {
+            // Aniq o'lcham: o'lchamsiz stack/ustun kichrayib ketardi; rasm yo'q bo'lsa — ko'rinadigan harfli doira.
             let inner = match self.avatar_img(&p.photo_url) {
-                Some(a) => stack(vec![image_fill(&a)]),
+                Some(a) => stack(vec![image_fill(&a)]).width(96.0).height(96.0),
                 None => {
                     let letter: String = p.name.trim().chars().take(1).flat_map(|c| c.to_uppercase()).collect();
-                    column(vec![tx(letter, 38.0, ACCENT2).bold()]).center().radius(48.0).bg(ACCENT.with_opacity(0.25))
+                    column(vec![tx(letter, 38.0, Color::WHITE).bold()]).center().width(96.0).height(96.0).radius(48.0).bg(ACCENT.with_opacity(0.85))
                 }
             };
             let me_a = self.clone();

@@ -68,6 +68,26 @@ fn parse_msg(o: &Value) -> ChatMsg {
     }
 }
 
+/// Suhbat nusxasi diskda shifrlangan saqlanadi (Kotlin kabi): chat darhol ochiladi, internet kelgach yangilanadi.
+fn chat_cache_path(user_id: Option<i64>) -> String {
+    format!("{}/chat_{}.json", crate::data::cache_dir(), user_id.unwrap_or(0))
+}
+
+fn chat_cache_save(user_id: Option<i64>, rows: &[ChatMsg]) {
+    let v: Vec<Value> = rows.iter().filter(|m| !m.pending).map(|m| json!({
+        "id": m.id, "from_admin": m.from_admin, "body": m.body, "created_at": m.created_at,
+        "media_url": m.media_url, "media_type": m.media_type, "media_ms": m.media_ms, "seen": m.seen,
+    })).collect();
+    let _ = crate::secure::write_text(&chat_cache_path(user_id), "chat", &Value::Array(v).to_string());
+}
+
+fn chat_cache_load(user_id: Option<i64>) -> Vec<ChatMsg> {
+    crate::secure::read_text(&chat_cache_path(user_id), "chat")
+        .and_then(|t| serde_json::from_str::<Vec<Value>>(&t).ok())
+        .map(|a| a.iter().map(parse_msg).collect())
+        .unwrap_or_default()
+}
+
 fn media_kind(path: &str) -> (&'static str, &'static str) {
     let ext = path.rsplit('.').next().unwrap_or("").to_lowercase();
     match ext.as_str() {
@@ -174,25 +194,40 @@ fn url_hash(s: &str) -> u64 {
 }
 
 impl Home {
-    /// Chatdagi video uchun boshidagi kadr (Kotlin `ChatVideoFrame`); tayyor bo'lmasa fonda yasaladi.
-    fn chat_video_frame(self: &Rc<Self>, url: &str) -> Option<Rc<Image>> {
+    /// Chatdagi video uchun boshidagi kadr (Kotlin `ChatVideoFrame`): diskdagi shifrlangan nusxa yoki fonda yasaladi.
+    /// Xato bo'lsa sababi qaytadi va 15 soniyadan keyin (3 martagacha) qayta uriniladi.
+    fn chat_video_frame(self: &Rc<Self>, url: &str) -> (Option<Rc<Image>>, Option<String>) {
         if url.is_empty() {
-            return None;
+            return (None, None);
         }
         let key = format!("chat{:016x}_100", url_hash(url));
         let _ = self.gate_rev.get();
         if let Some(v) = self.hframes.borrow().get(&key) {
-            return v.clone();
+            return (v.clone(), None);
         }
+        let tries = match self.hframe_fail.borrow().get(&key) {
+            Some((why, at, n)) if *n >= 3 || at.elapsed().as_secs() < 15 => return (None, Some(why.clone())),
+            Some((_, _, n)) => *n,
+            None => 0,
+        };
         self.hframes.borrow_mut().insert(key.clone(), None);
         let (me, session, u) = (self.clone(), self.session.clone(), url.to_string());
-        spawn_bg(move || crate::downloads::history_frame(&session, &u, "", 100, &key).map(|i| (key, i)), move |r| {
-            if let Some((k, img)) = r {
-                me.hframes.borrow_mut().insert(k, Some(Rc::new(img)));
-                me.gate_rev.set(me.gate_rev.get() + 1);
+        spawn_bg(move || crate::downloads::history_frame_r(&session, &u, "", 100, &key).map(|i| (key.clone(), i)).map_err(|e| (key, e)), move |r| {
+            match r {
+                Ok((k, img)) => {
+                    me.hframe_fail.borrow_mut().remove(&k);
+                    me.hframes.borrow_mut().insert(k, Some(Rc::new(img)));
+                }
+                Err((k, why)) => {
+                    me.hframes.borrow_mut().remove(&k);
+                    me.hframe_fail.borrow_mut().insert(k, (why, std::time::Instant::now(), tries + 1));
+                    let me2 = me.clone();
+                    spawn_bg(|| std::thread::sleep(std::time::Duration::from_secs(16)), move |_| me2.gate_rev.set(me2.gate_rev.get() + 1));
+                }
             }
+            me.gate_rev.set(me.gate_rev.get() + 1);
         });
-        None
+        (None, None)
     }
 
     fn chat_url(user_id: Option<i64>) -> String {
@@ -203,12 +238,14 @@ impl Home {
     }
 
     pub(super) fn open_support(self: &Rc<Self>, user_id: Option<i64>) {
+        let cached = chat_cache_load(user_id);
+        let have_cache = !cached.is_empty();
         let p = Rc::new(SupportPage {
             user_id,
-            items: State::new(Rc::new(Vec::new())),
+            items: State::new(Rc::new(cached)),
             input: State::new(String::new()),
             err: State::new(String::new()),
-            loaded: State::new(false),
+            loaded: State::new(have_cache),
             busy: State::new(false),
             menu: State::new(String::new()),
             reply: State::new(None),
@@ -242,6 +279,7 @@ impl Home {
                         }
                     }
                 }
+                chat_cache_save(p2.user_id, &rows);
                 p2.items.set(Rc::new(rows));
                 p2.loaded.set(true);
                 p2.err.set(String::new());
@@ -560,8 +598,12 @@ impl Home {
                 let round = m.media_type == "round";
                 let (bw, bh) = if round { (200.0, 200.0) } else { (230.0, 150.0) };
                 let mut layers: Vec<Element> = Vec::new();
-                if let Some(f) = self.chat_video_frame(&m.media_url) {
+                let (frame, why) = self.chat_video_frame(&m.media_url);
+                if let Some(f) = frame {
                     layers.push(stack(vec![image_fill(&f)]));
+                }
+                if let Some(why) = why {
+                    layers.push(column(vec![tx(format!("Kadr: {why}"), 10.0, Color::rgba(255, 255, 255, 150))]).padding(6.0));
                 }
                 layers.push(column(vec![column(vec![icon(S_PLAY, 30.0).color(Color::WHITE)]).center().width(48.0).height(48.0).radius(24.0).bg(Color::rgba(0, 0, 0, 128))]).center());
                 if m.media_ms > 0 && !round {

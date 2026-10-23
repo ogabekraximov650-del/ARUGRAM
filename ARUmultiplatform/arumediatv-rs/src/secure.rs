@@ -49,6 +49,16 @@ pub fn write(path: &str, label: &str, plain: &[u8]) -> bool {
     true
 }
 
+/// Matnni shifrlab yozadi (kesh JSON'lari).
+pub fn write_text(path: &str, label: &str, text: &str) -> bool {
+    write(path, label, text.as_bytes())
+}
+
+/// Matn faylini o'qiydi (shifrlangan yoki eski ochiq).
+pub fn read_text(path: &str, label: &str) -> Option<String> {
+    String::from_utf8(read(path, label)?).ok()
+}
+
 /// O'qiydi: shifrlangan bo'lsa ochadi, aks holda (eski ochiq fayl) fayl baytlarini o'zini qaytaradi.
 pub fn read(path: &str, label: &str) -> Option<Vec<u8>> {
     let raw = std::fs::read(path).ok()?;

@@ -47,16 +47,16 @@ fn pause_file(uid: i64) -> String {
 }
 
 fn read_done(uid: i64) -> HashSet<String> {
-    std::fs::read_to_string(done_file(uid)).ok().and_then(|t| serde_json::from_str::<Vec<String>>(&t).ok()).unwrap_or_default().into_iter().collect()
+    crate::secure::read_text(&done_file(uid), "gate").and_then(|t| serde_json::from_str::<Vec<String>>(&t).ok()).unwrap_or_default().into_iter().collect()
 }
 
 fn write_done(uid: i64, s: &HashSet<String>) {
     let v: Vec<&String> = s.iter().collect();
-    let _ = std::fs::write(done_file(uid), serde_json::to_string(&v).unwrap_or_default());
+    let _ = crate::secure::write_text(&done_file(uid), "gate", &serde_json::to_string(&v).unwrap_or_default());
 }
 
 fn pause_until(uid: i64) -> u64 {
-    std::fs::read_to_string(pause_file(uid)).ok().and_then(|t| t.trim().parse().ok()).unwrap_or(0)
+    crate::secure::read_text(&pause_file(uid), "gate").and_then(|t| t.trim().parse().ok()).unwrap_or(0)
 }
 
 fn parse(j: &Value) -> Vec<GateCh> {
@@ -142,7 +142,7 @@ fn tick(session: &str, uid: i64, skip: &mut HashSet<String>, list_at: &mut u64) 
         if let Some(s) = secs {
             wait = wait.max(s * 1000);
         }
-        let _ = std::fs::write(pause_file(uid), (now_ms() + wait).to_string());
+        let _ = crate::secure::write_text(&pause_file(uid), "gate", &(now_ms() + wait).to_string());
         return wait;
     } else if err.contains("INVITE_HASH") || err.contains("USERNAME_") || err.contains("noto'g'ri") || err.contains("topilmadi") {
         // Havola yaroqsiz / kanal yo'q — admin tuzatmaguncha urinilmaydi.

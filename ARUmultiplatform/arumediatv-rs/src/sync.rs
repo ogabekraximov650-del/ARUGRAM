@@ -18,7 +18,7 @@ fn load(rows: &mut Vec<(String, String, Value)>) {
     if LOADED.swap(true, Ordering::SeqCst) {
         return;
     }
-    if let Ok(s) = std::fs::read_to_string(file()) {
+    if let Some(s) = crate::secure::read_text(&file(), "syncq") {
         if let Ok(Value::Array(a)) = serde_json::from_str::<Value>(&s) {
             for r in a {
                 if let (Some(k), Some(t)) = (r["key"].as_str(), r["kind"].as_str()) {
@@ -31,7 +31,7 @@ fn load(rows: &mut Vec<(String, String, Value)>) {
 
 fn save(rows: &[(String, String, Value)]) {
     let v: Vec<Value> = rows.iter().map(|(k, t, d)| json!({"key": k, "kind": t, "data": d})).collect();
-    let _ = std::fs::write(file(), Value::Array(v).to_string());
+    let _ = crate::secure::write_text(&file(), "syncq", &Value::Array(v).to_string());
 }
 
 fn now() -> i64 {
