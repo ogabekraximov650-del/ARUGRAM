@@ -36,6 +36,7 @@ pub fn build(raw: &[u8], px: u32, max_frames: u32, max_fps: f32) -> Result<AnimS
     let secs = (total / fr).max(0.1);
     let fps = fr.min(max_fps.max(1.0));
     let count = ((secs * fps).round() as u32).clamp(1, max_frames.max(1));
+    let t0 = std::time::Instant::now();
     let first = prepared.render_frame(anim.in_point, cfg).map_err(|e| format!("{e}"))?;
     let (cw, ch) = (first.width, first.height);
     if cw == 0 || ch == 0 || cw > MAX_SIDE || ch > MAX_SIDE {
@@ -50,6 +51,10 @@ pub fn build(raw: &[u8], px: u32, max_frames: u32, max_fps: f32) -> Result<AnimS
     let (w, h) = (cols * cw, rows * ch);
     let mut rgba = vec![0u8; (w * h * 4) as usize];
     for i in 0..count {
+        // Juda sekin stiker telefonni qizdirmasin: 12 soniyadan oshsa to'xtatiladi (statik rasm qoladi).
+        if t0.elapsed().as_secs() > 12 {
+            return Err("vaqt chegarasi".into());
+        }
         let f = if i == 0 { first.clone() } else { prepared.render_frame(anim.in_point + total * i as f32 / count as f32, cfg).map_err(|e| format!("{e}"))? };
         if (f.width, f.height) != (cw, ch) {
             return Err("kadr o'lchami o'zgardi".into());
