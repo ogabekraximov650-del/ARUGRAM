@@ -113,3 +113,13 @@ fn nol_ulchamli_kanvas_xato() {
     let a = Animation::from_json_str(&anim(&rect_layer("", ""))).unwrap();
     assert!(Renderer::default().render_frame(&a, 0.0, RenderConfig::new(crate::Rgba8::TRANSPARENT, 0.0)).is_err());
 }
+
+#[test]
+fn ajratilgan_pozitsiya_s_true_bilan_ishlaydi() {
+    let json = format!(
+        r#"{{{HEAD},"layers":[{{"ty":4,"ind":1,"ip":0,"op":30,"st":0,"ks":{{"o":{{"a":0,"k":100}},"r":{{"a":0,"k":0}},"p":{{"s":true,"x":{{"a":0,"k":10}},"y":{{"a":0,"k":0}}}},"a":{{"a":0,"k":[0,0,0]}},"s":{{"a":0,"k":[100,100,100]}}}},"shapes":[{{"ty":"gr","it":[{{"ty":"rc","p":{{"a":0,"k":[5,5]}},"s":{{"a":0,"k":[10,10]}},"r":{{"a":0,"k":0}}}},{{"ty":"fl","c":{{"a":0,"k":[1,0,0,1]}},"o":{{"a":0,"k":100}}}},{{"ty":"tr","p":{{"a":0,"k":[0,0]}},"a":{{"a":0,"k":[0,0]}},"s":{{"a":0,"k":[100,100]}},"r":{{"a":0,"k":0}},"o":{{"a":0,"k":100}}}}]}}]}}]}}"#
+    );
+    let f = render(&json, 0.0);
+    assert_eq!(px(&f, 17, 5)[3], 255);
+    assert_eq!(px(&f, 2, 5)[3], 0);
+}

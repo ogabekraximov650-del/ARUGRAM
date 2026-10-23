@@ -257,7 +257,7 @@ pub enum PositionValue {
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct SplitPosition {
-    #[serde(default, rename = "s")]
+    #[serde(default, rename = "s", deserialize_with = "split_flag")]
     pub split: Option<u8>,
     #[serde(default, rename = "x")]
     pub x: Option<AnimatedValue>,
@@ -265,6 +265,22 @@ pub struct SplitPosition {
     pub y: Option<AnimatedValue>,
     #[serde(default, rename = "z")]
     pub z: Option<AnimatedValue>,
+}
+
+/// UZ: `"s"` bayrog'i `true` yoki son bo'lishi mumkin.
+/// EN: The `"s"` flag may be `true` or a number.
+/// RU: Флаг `"s"` может быть `true` или числом.
+fn split_flag<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<u8>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Flag {
+        Bool(bool),
+        Num(f64),
+    }
+    Ok(Option::<Flag>::deserialize(d)?.map(|f| match f {
+        Flag::Bool(b) => u8::from(b),
+        Flag::Num(n) => u8::from(n != 0.0),
+    }))
 }
 
 #[derive(Debug, Clone, PartialEq)]
