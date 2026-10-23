@@ -48,12 +48,17 @@ impl VStat {
 }
 
 /// Yadro video-kesh serverini ishga tushiradi (bir marta). `true` — tayyor.
-pub fn ensure_cache() -> bool {
+/// Video kesh serveri porti (`/thumb`, `/v` yo'llari shu yerda; Telegram serveri porti BOSHQA). `<= 0` — ishga tushmadi.
+pub fn cache_port() -> i32 {
     static PORT: std::sync::OnceLock<i32> = std::sync::OnceLock::new();
     *PORT.get_or_init(|| {
         let c = CString::new(uzcoders::android::files_dir()).unwrap_or_default();
         unsafe { rust_video_cache_start(c.as_ptr()) }
-    }) > 0
+    })
+}
+
+pub fn ensure_cache() -> bool {
+    cache_port() > 0
 }
 
 pub fn stats(urls: &[String]) -> HashMap<String, VStat> {
@@ -324,9 +329,10 @@ pub fn history_frame_r(session: &str, video_url: &str, thumb_url: &str, pos_ms: 
         }
         u
     };
-    let port = crate::data::tg_port();
+    // `/thumb` — video KESH serverida (Kotlin `cache.ensureStarted()`), manba (`u`) esa Telegram serveri manzili.
+    let port = cache_port();
     if port <= 0 {
-        return Err("Telegram porti yo'q".into());
+        return Err("video kesh porti yo'q".into());
     }
     let url = format!("http://127.0.0.1:{port}/thumb?u={}&ms={}", crate::backend::urlenc(&u), pos_ms.max(0));
     let r = ureq::get(&url).timeout(std::time::Duration::from_secs(60)).call().map_err(|e| format!("kadr so'rovi: {e}"))?;
