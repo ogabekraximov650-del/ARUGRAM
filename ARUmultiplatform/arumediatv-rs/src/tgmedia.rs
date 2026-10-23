@@ -217,7 +217,10 @@ fn fetch(arg: Value, path: &str) -> Result<(), String> {
     let j = crate::data::call_json(rust_core::telegram::rust_tg_media_get(a.as_ptr()));
     match j["error"].as_str() {
         Some(e) => {
-            uzcoders::prelude::report_error("Telegram fayl", e);
+            // FILE_REFERENCE_EXPIRED kutilgan holat (ro'yxat yangilanib qayta uriniladi) — jurnalga yozilmaydi.
+            if !e.contains("FILE_REFERENCE") {
+                uzcoders::prelude::report_error("Telegram fayl", e);
+            }
             Err(e.to_string())
         }
         None if j["ok"].as_bool() == Some(true) => Ok(()),
@@ -244,7 +247,7 @@ pub fn image(d: &TgDoc, px: u32) -> Result<Image, String> {
         let _ = std::fs::remove_file(&tmp);
         r?;
         let bytes = bytes.ok_or_else(|| "fayl o'qilmadi".to_string())?;
-        let img = crate::webp::decode_any(&bytes).ok_or_else(|| "rasm dekodlanmadi".to_string())?;
+        let img = crate::webp::decode_any(&bytes).ok_or_else(|| format!("rasm dekodlanmadi ({} bayt, boshi {:02x?})", bytes.len(), &bytes[..bytes.len().min(12)]))?;
         let _ = crate::secure::write(&path, "tgm", &bytes);
         Ok(img.resized(px, px))
     })

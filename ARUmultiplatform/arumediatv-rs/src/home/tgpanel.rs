@@ -372,6 +372,7 @@ impl Home {
     fn tgp_switch(&self, p: &Rc<TgPanel>, tab: i32) {
         let t = tab.clamp(0, 2) as u8;
         if p.tab.get() != t {
+            uzcoders::prelude::breadcrumb(&format!("panel varag'i {t}"));
             p.tab.set(t);
             p.glide.set(None);
             p.strip.set_offset(0.0);

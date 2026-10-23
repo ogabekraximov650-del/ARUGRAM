@@ -493,6 +493,32 @@ unsafe extern "C" fn destroy(_: *mut ANativeActivity) {
 ///
 /// # Safety
 /// `activity` — действительный указатель, выданный Android.
+unsafe extern "C" {
+    fn signal(sig: i32, handler: usize) -> usize;
+    fn raise(sig: i32) -> i32;
+}
+
+fn dir_for_signals() -> &'static str {
+    FILES_DIR.get().map(String::as_str).unwrap_or("")
+}
+
+extern "C" fn native_crash(sig: i32) {
+    let name = match sig {
+        11 => "SIGSEGV (xotiraga noto'g'ri murojaat)",
+        6 => "SIGABRT (to'xtatildi: xotira tugashi yoki ichki xato)",
+        7 => "SIGBUS",
+        4 => "SIGILL",
+        _ => "SIGFPE",
+    };
+    let t = std::thread::current();
+    let msg = format!("Native yiqilish: {name} ({})\n{}", t.name().unwrap_or("nomsiz"), uzcoders_core::crash_context());
+    let _ = std::fs::write(format!("{}/crash.txt", dir_for_signals()), msg);
+    unsafe {
+        signal(sig, 0);
+        raise(sig);
+    }
+}
+
 pub unsafe fn on_create(activity: *mut ANativeActivity, make_ui: fn(f32) -> Ui) {
     // UZ: Rust panic: logga va `files/crash.txt` ga yoziladi (Java yelimi keyingi ishga tushganda ko'rsatadi).
     // EN: A Rust panic is written to the log and to `files/crash.txt` (the Java glue shows it on the next launch).
@@ -518,6 +544,14 @@ pub unsafe fn on_create(activity: *mut ANativeActivity, make_ui: fn(f32) -> Ui) 
             let _ = std::fs::write(format!("{dir}/crash.txt"), &msg);
         }
     }));
+    // UZ: Mahalliy (native) yiqilish (SIGSEGV va h.k.): sabab va so'nggi amallar `crash.txt` ga yoziladi.
+    // EN: Native crash (SIGSEGV etc.): the cause and recent actions are written to `crash.txt`.
+    // RU: Нативный сбой (SIGSEGV и т. п.): причина и последние действия записываются в `crash.txt`.
+    if !dir_for_signals().is_empty() {
+        for s in [11, 6, 7, 4, 8] {
+            signal(s, native_crash as usize);
+        }
+    }
     let a = &mut *activity;
     let mut density = 160;
     let cfg = AConfiguration_new();

@@ -177,6 +177,12 @@ impl Home {
         if let Some(r) = state {
             return r;
         }
+        // UZ: Bir vaqtda ko'pi bilan 3 ta varaq tayyorlanadi; ortiqchasi oqimlar pulini band qilmaydi, keyingi chizishda qayta so'raladi.
+        // EN: At most 3 sheets are built at once; extra ones do not occupy the thread pool and are requested again on the next draw.
+        // RU: Одновременно строится не более 3 листов; лишние не занимают пул потоков и запрашиваются снова при следующей отрисовке.
+        if ANIMS.with(|m| m.borrow().values().filter(|e| matches!(e.st, AState::Loading)).count()) >= 3 {
+            return None;
+        }
         let seen = Arc::new(AtomicU64::new(now));
         ANIMS.with(|m| m.borrow_mut().insert(key.to_string(), AEntry { st: AState::Loading, seen: seen.clone(), last_use: Instant::now() }));
         let (me, k) = (self.clone(), key.to_string());
@@ -194,8 +200,13 @@ impl Home {
                     }
                     std::thread::sleep(std::time::Duration::from_millis(80));
                 }
+                uzcoders::prelude::breadcrumb("animatsiya varag'i boshlandi");
                 let r = load(&wanted);
                 BUSY.fetch_sub(1, Ordering::SeqCst);
+                uzcoders::prelude::breadcrumb(match &r {
+                    Ok(s) => format!("animatsiya varag'i tayyor {}x{}", s.w, s.h),
+                    Err(e) => format!("animatsiya varag'i xato: {e}"),
+                }.as_str());
                 Some(r)
             },
             move |r| {

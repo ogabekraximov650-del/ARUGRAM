@@ -279,15 +279,15 @@ public class AruActivity extends UzActivity {
         android.media.MediaMetadataRetriever mmr = new android.media.MediaMetadataRetriever();
         try {
             String[] p = arg.split("\\|");
-            if (p.length < 5) return "";
+            if (p.length < 5) return "ERR argumentlar";
             mmr.setDataSource(p[0]);
             long durMs = Long.parseLong(mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION));
-            if (durMs <= 0) return "";
+            if (durMs <= 0) return "ERR davomiylik 0";
             int maxFrames = Math.max(2, Integer.parseInt(p[2]));
             int size = Math.max(32, Integer.parseInt(p[3]));
             float maxFps = Math.max(1f, Float.parseFloat(p[4]));
             android.graphics.Bitmap first = mmr.getFrameAtTime(0, android.media.MediaMetadataRetriever.OPTION_CLOSEST);
-            if (first == null) return "";
+            if (first == null) return "ERR birinchi kadr yo'q";
             float k = Math.min(1f, (float) size / Math.max(first.getWidth(), first.getHeight()));
             int cw = Math.max(2, (int) (first.getWidth() * k)), ch = Math.max(2, (int) (first.getHeight() * k));
             int n = Math.min(maxFrames, Math.max(2, Math.round(durMs / 1000f * maxFps)));
@@ -309,7 +309,7 @@ public class AruActivity extends UzActivity {
             return cw + "|" + ch + "|" + cols + "|" + n + "|" + (n * 1000f / durMs);
         } catch (Throwable e) {
             Log.e(TAG, "gifSheet: " + e);
-            return "";
+            return "ERR " + e;
         } finally {
             try { mmr.release(); } catch (Throwable ignored) { }
         }

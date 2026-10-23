@@ -80,7 +80,7 @@ static CRUMBS: Mutex<std::collections::VecDeque<String>> = Mutex::new(std::colle
 /// EN: Records a recent action (at most 24 kept): included in the crash report ("what was happening").
 /// RU: Записывает недавнее действие (хранится не более 24): попадает в отчёт о сбое («что происходило»).
 pub fn breadcrumb(msg: &str) {
-    if let Ok(mut c) = CRUMBS.lock() {
+    if let Ok(mut c) = CRUMBS.try_lock() {
         if c.len() >= 24 {
             c.pop_front();
         }
@@ -102,7 +102,7 @@ pub fn crash_context() -> String {
         }
     }
     out.push_str(&format!("Fon vazifalari kutilmoqda: {}\n", pending_tasks()));
-    if let Ok(c) = CRUMBS.lock() {
+    if let Ok(c) = CRUMBS.try_lock() {
         out.push_str("So'nggi amallar:\n");
         for m in c.iter() {
             out.push_str("  - ");
@@ -177,7 +177,8 @@ fn submit(job: Job) {
         POOL_CV.notify_one();
         return;
     }
-    if p.workers < MAX_WORKERS && std::thread::Builder::new().spawn(worker).is_ok() {
+    // UZ: 4 MB stek: chuqur rekursiyali chizuvchi (Lottie) uchun yetarli. EN: 4 MB stack: enough for the deeply recursive renderer (Lottie). RU: Стек 4 МБ: достаточно для глубоко рекурсивного рендера (Lottie).
+    if p.workers < MAX_WORKERS && std::thread::Builder::new().stack_size(4 << 20).spawn(worker).is_ok() {
         p.workers += 1;
     }
     // UZ: Oqim ochib bo'lmasa ham ish navbatda qoladi: mavjud oqimlar uni oladi.

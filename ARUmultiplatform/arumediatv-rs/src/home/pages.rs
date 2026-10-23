@@ -196,28 +196,29 @@ impl Home {
         let _ = self.gate_rev.get();
         let list = uzcoders::prelude::error_entries();
         let me = self.clone();
+        let btn = |label: &str, bg: Color, f: Box<dyn Fn()>| {
+            column(vec![tx(label, 13.0, Color::WHITE).bold()]).center().padding_xy(16.0, 10.0).bg(bg).radius(12.0).on_click(f)
+        };
         let bar = row(vec![
-            tx("Hammasini nusxalash", 13.0, Color::WHITE).bold().bg(ACCENT.with_opacity(0.5)).radius(12.0).padding_xy(14.0, 9.0).on_click(|| {
+            btn("Hammasini nusxalash", ACCENT.with_opacity(0.5), Box::new(|| {
                 uzcoders::android::copy_text(&format!("{}\n{}", crate::device_info(), uzcoders::prelude::errors_text()));
                 uzcoders::android::toast("Nusxalandi");
-            }),
-            tx("Tozalash", 13.0, Color::WHITE).bold().bg(Color::rgba(255, 255, 255, 30)).radius(12.0).padding_xy(14.0, 9.0).on_click(move || {
+            })),
+            btn("Tozalash", Color::rgba(255, 255, 255, 30), Box::new(move || {
                 uzcoders::prelude::clear_errors();
                 me.gate_rev.set(me.gate_rev.get() + 1);
-            }),
+            })),
         ])
-        .gap(10.0)
-        .padding_each(0.0, 0.0, 0.0, 12.0);
-        let mut kids = vec![bar];
+        .gap(10.0);
+        let mut kids = vec![column(vec![bar]).padding_each(0.0, 0.0, 0.0, 12.0)];
         if list.is_empty() {
             kids.push(tx("Xatolar yo'q", 14.0, TEXT_FAINT).padding_each(0.0, 20.0, 0.0, 0.0));
         }
         for e in list.iter() {
             let s = (e.ts + 5 * 3600) % 86400;
             let head = format!("{:02}:{:02}:{:02}  {}{}", s / 3600, s % 3600 / 60, s % 60, e.place, if e.count > 1 { format!("  ×{}", e.count) } else { String::new() });
-            kids.push(
-                Self::card_box(column(vec![tx(head, 12.0, TEXT_DIM).bold(), tx(e.msg.clone(), 13.0, Color::WHITE)]).gap(4.0).padding_xy(12.0, 10.0)).padding_each(0.0, 0.0, 0.0, 8.0),
-            );
+            let card = Self::pglass(column(vec![tx(head, 12.0, TEXT_DIM).bold(), tx(e.msg.clone(), 13.0, Color::WHITE)]).gap(4.0).padding_xy(14.0, 11.0)).radius(14.0);
+            kids.push(column(vec![card]).padding_each(0.0, 0.0, 0.0, 8.0));
         }
         kids.push(gap_box(0.0, 40.0));
         self.scaffold("Xatolar jurnali", scroll_column(&self.errlog_scroll, kids).padding_each(16.0, 8.0, 16.0, 0.0))

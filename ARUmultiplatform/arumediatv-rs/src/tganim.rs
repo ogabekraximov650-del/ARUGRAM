@@ -89,7 +89,7 @@ pub fn gif_sheet(raw: &[u8], px: u32, max_frames: u32, max_fps: f32) -> Result<A
 fn parse_gif_result(r: &str, png: Option<Vec<u8>>) -> Result<AnimSheet, String> {
     let p: Vec<&str> = r.split('|').collect();
     if p.len() != 5 {
-        return Err("GIF dekodlanmadi".into());
+        return Err(if r.is_empty() { "GIF dekodlanmadi (Java javobi bo'sh)".into() } else { format!("GIF dekodlanmadi: {r}") });
     }
     let (cols, count): (u32, u32) = (p[2].parse().map_err(|_| "ustunlar")?, p[3].parse().map_err(|_| "kadrlar")?);
     let fps: f32 = p[4].parse().map_err(|_| "fps")?;
