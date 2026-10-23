@@ -6762,3 +6762,23 @@ Foydalanuvchi talabi: Rust ilovada o'z to'plamlar tizimi bo'lmasin. O'chirildi: 
 admin "Emoji, GIF va stikerlar" bo'limi (`PacksReviewPage`), profildagi "To'plamlar" tugmasi, izohlardagi stiker/GIF paneli va rasmlari, chatdagi stiker/GIF paneli.
 Chatda faqat oddiy Unicode emoji to'ri qoldi (`home/emojipanel.rs`, matn `richtext.rs` orqali). Serverdan kelgan stiker/GIF xabarlari yorliq ("Stiker"/"GIF") bo'lib ko'rinadi.
 Server va Kotlin ilova tegilmagan.
+
+## Telegram hisobidagi emoji/GIF/stiker paneli (DrKLO uslubida) va sof Rust Lottie chizuvchisi (2026-10-23)
+
+Talab (foydalanuvchi): Rust ilova chatida emoji/GIF/stiker oynasi Telegramdagidek (DrKLO `EmojiView`) bo'lsin, ma'lumot Telegram hisobidan olinsin, `.tgs` animatsiya
+tashqi dekodersiz, sof Rustda chizilsin; server/Actions'siz, telefonning o'zida.
+- `uzcoders-lottie` (yangi, `ARUmultiplatform/uzcoders/crates`): Lottie/`.tgs` -> RGBA kadrlar. Mantiq `rasterlottie` (MIT/Apache, neodyland) dan olingan, `tiny-skia`
+  o'rniga o'z `raster` modulimiz (AA to'ldirish — imzolangan yuza yig'ish, chiziq/punktir/hairline, gradient, maska, aralashtirish). Izohlar UZ/EN/RU, litsenziyalar nusxalangan.
+  Telegram'ning 333 Lottie fayli rasterlottie bilan 4 kadrda piksel-piksel solishtirildi (o'rtacha farq ~0.05/255). Haqiqiy stikerlar (hisobdan, 405 ta) rlottie bilan
+  `.github/workflows/tgs-test.yml` da solishtiriladi (sessiya `tool/encode/session.enc`; korpus Actions keshida; `tool/tgs/fetch.py`, `compare.py`).
+  Haqiqiy stikerlarda topilgan xatolar: `then_some` eager hisoblanishi sabab indeks panic (tuzatildi), choker effekti `O(r^2)` (ikki o'tish), `render_dir` da 20 s chegara.
+- `uzcoders-ui`: `sprite` (kadrlar varag'i, vaqt bo'yicha almashadi, `playing=false` — qayta chizish so'ramaydi), `Element::on_hold` (uzoq bosish: Start/Move/End,
+  bosish va scrollni bekor qiladi), `lazy_column_var` (har xil balandlikli virtual ro'yxat); `uzcoders-render/gpu`: `DrawCmd::ImageRegion` (varaqdan kadr, yarim teksel ichkarida).
+- `arumediatv-rs`: `tgmedia.rs` (ro'yxatlar/rasmlar/fayllar, shifrlangan kesh, `FILE_REFERENCE` yangilash), `tganim.rs` (`.tgs` -> varaq, straight alfa + hoshiya rangi,
+  `catch_unwind`, 12 s chegara), `home/tgcache.rs` (rasm/animatsiya keshi: 2 ta bir vaqtda, ekrandan ketgan ish tashlanadi, xotira 40 MB), `home/tgpanel.rs` (panel),
+  `emojifont.rs` (Telegram emoji shrifti `/api/emojifont`).
+- Panel: 3 sahifa (yon surish/tab), uzluksiz ro'yxat+sarlavhalar, tepada bo'lim qatori (bosilsa sirpanadi, surilganda faol bo'lim), pastda suzuvchi qator, o'chirish
+  ushlansa takrorlanadi (350→250→150→50 ms), uzoq bosish: emoji — teri rangi, stiker/GIF/maxsus emoji — katta ko'rinish (+tepaga surilsa "Yuborish"). Animatsiya faqat to'xtagan
+  ro'yxatda, ko'pi bilan 6 ta. Chatda oxirgi 4 stiker animatsiyali.
+- Qolgan: GIF/webm animatsiyasi (Android MediaCodec orqali), qidiruv, so'nggilarni saqlash, matn ichida maxsus emoji rasmi, ba'zi Lottie imkoniyatlari (ifodalar, skew, effektlar).
+- Telefonda tekshirilmagan; panel xost testida (`panel_uch_tabda_quriladi`, `TGPANEL_PNG_DIR` bilan PNG) quriladi.
