@@ -414,7 +414,7 @@ impl Home {
         let mut kids: Vec<Element> = Vec::new();
         let start = items.len().saturating_sub(120);
         let visible = &items[start..];
-        super::tgcache::chat_anim_mark(visible.iter().rev().filter(|m| m.media_type == "sticker").map(|m| m.id.clone()), 4);
+        super::tgcache::chat_anim_mark(visible.iter().rev().filter(|m| m.media_type == "sticker" || m.media_type == "gif").map(|m| m.id.clone()), 4);
         let same_day = |a: i64, b: i64| crate::data::fmt_ymd(a) == crate::data::fmt_ymd(b);
         for (i, m) in visible.iter().enumerate() {
             let prev = if i > 0 { visible.get(i - 1) } else { None };

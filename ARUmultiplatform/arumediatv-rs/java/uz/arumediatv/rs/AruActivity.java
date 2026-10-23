@@ -230,7 +230,7 @@ public class AruActivity extends UzActivity {
     /**
      * Matnni (emoji, CJK va boshqa har qanday belgi) tizim shriftlari bilan PNG rasmga chizadi: Rust'dagi shriftda
      * bo'lmagan belgilar (emoji, koreys, xitoy...) shu yo'l bilan to'g'ri ko'rinadi. `arg` =
-     * "o'lcham(px)|maks. kenglik(px)|rang(AARRGGBB hex)|qalin(0/1)|chiqish fayli|matn". Qaytadi: "kenglik|balandlik" (xato bo'lsa bo'sh).
+     * "o'lcham(px)|maks. kenglik(px)|rang(AARRGGBB hex)|qalin(0/1)|chiqish fayli|shrift fayli (bo'sh bo'lsa tizim shrifti)|matn". Qaytadi: "kenglik|balandlik" (xato bo'lsa bo'sh).
      */
     public String textPng(String arg) {
         try {
@@ -264,6 +264,54 @@ public class AruActivity extends UzActivity {
         } catch (Throwable e) {
             Log.e(TAG, "textPng: " + e);
             return "";
+        }
+    }
+
+    /**
+     * UZ: GIF (mp4) ni kadrlar varag'iga (sprite sheet, PNG) aylantiradi: tizimning o'zidagi dekoder (`MediaMetadataRetriever`) orqali.
+     * Argument: `kirish.mp4|chiqish.png|eng_ko'p_kadr|uzun_tomon_px|eng_ko'p_fps`. Natija: `kadr_kengligi|kadr_balandligi|ustunlar|kadrlar|fps` yoki bo'sh (xato).
+     * EN: Turns a GIF (mp4) into a frame sheet (sprite sheet, PNG) using the system decoder (`MediaMetadataRetriever`).
+     * Argument: `in.mp4|out.png|max_frames|long_side_px|max_fps`. Result: `frame_w|frame_h|cols|frames|fps`, or empty on error.
+     * RU: Превращает GIF (mp4) в лист кадров (sprite sheet, PNG) системным декодером (`MediaMetadataRetriever`).
+     * Аргумент: `вход.mp4|выход.png|макс_кадров|длинная_сторона_px|макс_fps`. Результат: `ширина_кадра|высота_кадра|столбцы|кадры|fps` или пусто при ошибке.
+     */
+    public String gifSheet(String arg) {
+        android.media.MediaMetadataRetriever mmr = new android.media.MediaMetadataRetriever();
+        try {
+            String[] p = arg.split("\\|");
+            if (p.length < 5) return "";
+            mmr.setDataSource(p[0]);
+            long durMs = Long.parseLong(mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION));
+            if (durMs <= 0) return "";
+            int maxFrames = Math.max(2, Integer.parseInt(p[2]));
+            int size = Math.max(32, Integer.parseInt(p[3]));
+            float maxFps = Math.max(1f, Float.parseFloat(p[4]));
+            android.graphics.Bitmap first = mmr.getFrameAtTime(0, android.media.MediaMetadataRetriever.OPTION_CLOSEST);
+            if (first == null) return "";
+            float k = Math.min(1f, (float) size / Math.max(first.getWidth(), first.getHeight()));
+            int cw = Math.max(2, (int) (first.getWidth() * k)), ch = Math.max(2, (int) (first.getHeight() * k));
+            int n = Math.min(maxFrames, Math.max(2, Math.round(durMs / 1000f * maxFps)));
+            int cols = Math.max(1, Math.min((int) Math.ceil(Math.sqrt(n)), 4096 / cw));
+            while ((n + cols - 1) / cols * ch > 4096 && n > 2) n--;
+            int rows = (n + cols - 1) / cols;
+            android.graphics.Bitmap sheet = android.graphics.Bitmap.createBitmap(cols * cw, rows * ch, android.graphics.Bitmap.Config.ARGB_8888);
+            android.graphics.Canvas c = new android.graphics.Canvas(sheet);
+            android.graphics.Paint paint = new android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG);
+            for (int i = 0; i < n; i++) {
+                android.graphics.Bitmap f = i == 0 ? first : mmr.getFrameAtTime(durMs * 1000L * i / n, android.media.MediaMetadataRetriever.OPTION_CLOSEST);
+                if (f == null) f = first;
+                int x = (i % cols) * cw, y = (i / cols) * ch;
+                c.drawBitmap(f, null, new android.graphics.Rect(x, y, x + cw, y + ch), paint);
+                if (f != first) f.recycle();
+            }
+            java.io.FileOutputStream fo = new java.io.FileOutputStream(p[1]);
+            try { sheet.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, fo); } finally { fo.close(); }
+            return cw + "|" + ch + "|" + cols + "|" + n + "|" + (n * 1000f / durMs);
+        } catch (Throwable e) {
+            Log.e(TAG, "gifSheet: " + e);
+            return "";
+        } finally {
+            try { mmr.release(); } catch (Throwable ignored) { }
         }
     }
 }

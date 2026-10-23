@@ -71,6 +71,35 @@ pub fn build(raw: &[u8], px: u32, max_frames: u32, max_fps: f32) -> Result<AnimS
     Ok(AnimSheet { rgba, w, h, cols, count, fps: count as f32 / secs })
 }
 
+/// GIF (`mp4`) baytlaridan varaq: dekodlash Android tizim dekoderida (Java ko'prigi `gifSheet`), yig'ish va saqlash Rustda.
+/// Kompyuter testlarida (Androidsiz) xato qaytaradi.
+pub fn gif_sheet(raw: &[u8], px: u32, max_frames: u32, max_fps: f32) -> Result<AnimSheet, String> {
+    let dir = format!("{}/gifs", crate::data::cache_dir());
+    let _ = std::fs::create_dir_all(&dir);
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let (inp, out) = (format!("{dir}/{stamp}.mp4"), format!("{dir}/{stamp}.png"));
+    std::fs::write(&inp, raw).map_err(|e| format!("yozilmadi: {e}"))?;
+    let r = uzcoders::android::activity_call_ret("gifSheet", &format!("{inp}|{out}|{max_frames}|{px}|{max_fps}"));
+    let png = std::fs::read(&out).ok();
+    let _ = std::fs::remove_file(&inp);
+    let _ = std::fs::remove_file(&out);
+    parse_gif_result(&r, png)
+}
+
+fn parse_gif_result(r: &str, png: Option<Vec<u8>>) -> Result<AnimSheet, String> {
+    let p: Vec<&str> = r.split('|').collect();
+    if p.len() != 5 {
+        return Err("GIF dekodlanmadi".into());
+    }
+    let (cols, count): (u32, u32) = (p[2].parse().map_err(|_| "ustunlar")?, p[3].parse().map_err(|_| "kadrlar")?);
+    let fps: f32 = p[4].parse().map_err(|_| "fps")?;
+    let img = uzcoders::prelude::decode_image(&png.ok_or("varaq o'qilmadi")?).ok_or("varaq dekodlanmadi")?;
+    if cols == 0 || count == 0 || !(fps > 0.0) {
+        return Err("varaq noto'g'ri".into());
+    }
+    Ok(AnimSheet { rgba: img.rgba, w: img.w, h: img.h, cols, count, fps })
+}
+
 /// Oldindan ko'paytirilgan (premultiplied) rangni oddiy alfaga aylantiradi.
 fn unpremultiply(px: &mut [u8]) {
     for p in px.chunks_exact_mut(4) {
@@ -149,6 +178,14 @@ mod tests {
         let edge = (((10 * s.w) + 1) * 4) as usize;
         assert_eq!(s.rgba[edge + 3], 0);
         assert!(s.rgba[edge] >= 250 && s.rgba[edge + 1] == 0, "{:?}", &s.rgba[edge..edge + 4]);
+    }
+
+    #[test]
+    fn gif_javobi_tekshiriladi() {
+        assert!(parse_gif_result("", None).is_err());
+        assert!(parse_gif_result("10|10|2|4", None).is_err());
+        assert!(parse_gif_result("10|10|2|4|12.5", None).is_err());
+        assert!(parse_gif_result("10|10|2|4|12.5", Some(vec![1, 2, 3])).is_err());
     }
 
     #[test]

@@ -121,30 +121,37 @@ impl Home {
             }
             None => return Some(column(vec![spinner(22.0, 2.0, Color::WHITE)]).center().width(size).height(size)),
         };
-        if !(sticker && anim) {
+        if !anim {
             return Some(still);
         }
         let rr = r.to_string();
         let px = (size * density()).clamp(96.0, 224.0) as u32;
         let sheet = self.tg_sheet(&format!("ar{r}"), move |wanted| {
-            let d = tgmedia::resolve_sticker(&rr).ok_or_else(|| "havola hal bo'lmadi".to_string())?;
-            if d.kind != "tgs" {
+            let d = if sticker { tgmedia::resolve_sticker(&rr) } else { tgmedia::resolve_gif(&rr) }.ok_or_else(|| "havola hal bo'lmadi".to_string())?;
+            let gif = !sticker;
+            if !gif && d.kind != "tgs" {
                 return Err("animatsiyasiz".into());
             }
-            let bytes = match tgmedia::file_bytes(&d, 1 << 20) {
-                Err(e) if e.contains("FILE_REFERENCE") => {
+            let max = if gif { 6 << 20 } else { 1 << 20 };
+            let bytes = match tgmedia::file_bytes(&d, max) {
+                Err(e) if e.contains("FILE_REFERENCE") && sticker => {
                     let nd = tgmedia::resolve_sticker_fresh(&rr).ok_or(e)?;
-                    tgmedia::file_bytes(&nd, 1 << 20)?
+                    tgmedia::file_bytes(&nd, max)?
                 }
                 r => r?,
             };
             if !wanted() {
                 return Err("kerak emas".into());
             }
-            crate::tganim::build_safe(&bytes, px, 48, 24.0)
+            if gif { crate::tganim::gif_sheet(&bytes, px, 36, 15.0) } else { crate::tganim::build_safe(&bytes, px, 48, 24.0) }
         });
         Some(match sheet {
-            Some(s) => sprite(&s.img, s.cols, s.count, s.fps, true, size, size),
+            Some(s) => {
+                // UZ: GIF kadrlari asl nisbatda; stiker kvadrat. EN: GIF frames keep their aspect; a sticker is square. RU: Кадры GIF в исходной пропорции; стикер квадратный.
+                let (cw, ch) = (s.img.w / s.cols, s.img.h / s.count.div_ceil(s.cols).max(1));
+                let k = (size / cw.max(1) as f32).min(size / ch.max(1) as f32);
+                sprite(&s.img, s.cols, s.count, s.fps, true, cw as f32 * k, ch as f32 * k).radius(if sticker { 0.0 } else { 14.0 })
+            }
             None => still,
         })
     }
@@ -231,26 +238,36 @@ impl Home {
     /// `.tgs` stikerning animatsiyali ko'rinishi (tayyor bo'lsa), aks holda `still` (statik rasm). `playing` — hozir o'ynasinmi.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn tg_anim_el(self: &Rc<Self>, key: &str, d: &TgDoc, set: Option<TgSet>, px: u32, frames: u32, fps: f32, w: f32, h: f32, playing: bool, still: Element) -> Element {
-        if d.kind != "tgs" {
+        let gif = d.kind == "mp4";
+        if d.kind != "tgs" && !gif {
             return still;
         }
+        let max = if gif { 6 << 20 } else { 1 << 20 };
         let dd = d.clone();
         let sheet = self.tg_sheet(&format!("a{key}"), move |wanted| {
-            let bytes = match tgmedia::file_bytes(&dd, 1 << 20) {
+            let bytes = match tgmedia::file_bytes(&dd, max) {
                 Err(e) if e.contains("FILE_REFERENCE") => {
-                    let fresh = set.map(|s| tgmedia::set_docs(&s, true)).unwrap_or_default();
+                    let fresh = match &set {
+                        Some(s) => tgmedia::set_docs(s, true),
+                        None => tgmedia::gifs(true),
+                    };
                     let nd = fresh.into_iter().find(|x| x.id == dd.id).ok_or(e)?;
-                    tgmedia::file_bytes(&nd, 1 << 20)?
+                    tgmedia::file_bytes(&nd, max)?
                 }
                 r => r?,
             };
             if !wanted() {
                 return Err("kerak emas".into());
             }
-            crate::tganim::build_safe(&bytes, px, frames, fps)
+            if gif { crate::tganim::gif_sheet(&bytes, px, frames, fps) } else { crate::tganim::build_safe(&bytes, px, frames, fps) }
         });
         match sheet {
-            Some(s) => sprite(&s.img, s.cols, s.count, s.fps, playing, w, h),
+            Some(s) => {
+                // Kadr nisbati saqlanadi (GIF kvadrat emas): berilgan quti ichiga sig'diriladi.
+                let (cw, ch) = (s.img.w / s.cols, s.img.h / s.count.div_ceil(s.cols).max(1));
+                let k = (w / cw.max(1) as f32).min(h / ch.max(1) as f32);
+                sprite(&s.img, s.cols, s.count, s.fps, playing, cw as f32 * k, ch as f32 * k)
+            }
             None => still,
         }
     }

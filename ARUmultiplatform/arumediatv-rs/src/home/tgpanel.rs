@@ -752,6 +752,9 @@ impl Home {
                         Some(im) => stack(vec![image_fill(&im)]).width(w).height(*h).radius(8.0),
                         None => Self::tgp_placeholder(w, *h, 8.0),
                     };
+                    let play = me.tgp_may_play(&pp);
+                    let px = (w.max(*h) * density()).clamp(96.0, 256.0) as u32;
+                    let inner = me.tg_anim_el(&format!("d{:x}", d.id), d, None, px, 36, 15.0, w, *h, play, inner);
                     let rf = tgmedia::gif_ref(d);
                     let hold = me.tgp_hold(&pp, PKind::Gif, d.clone(), None, rf.clone());
                     let cb = on_send.clone();
