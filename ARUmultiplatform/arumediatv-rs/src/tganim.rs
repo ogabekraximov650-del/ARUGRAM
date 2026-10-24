@@ -80,12 +80,33 @@ pub fn build(raw: &[u8], px: u32, max_frames: u32, max_fps: f32, cancel: &dyn Fn
 /// GIF (`mp4`) baytlaridan varaq: dekodlash Android tizim dekoderida (Java ko'prigi `gifSheet`), yig'ish va saqlash Rustda.
 /// Kompyuter testlarida (Androidsiz) xato qaytaradi.
 pub fn gif_sheet(raw: &[u8], px: u32, max_frames: u32, max_fps: f32) -> Result<AnimSheet, String> {
+    java_sheet("gifSheet", "mp4", raw, px, max_frames, max_fps)
+}
+
+/// `.tgs` Android'dagi Airbnb Lottie bilan (Kotlin ilovadagidek: barcha stikerlar to'liq chiziladi); Java xato bersa — Rust chizuvchi.
+/// `.tgs` with Airbnb Lottie on Android (like the Kotlin app: every sticker is drawn fully); when Java fails — the Rust renderer.
+pub fn build_best(raw: &[u8], px: u32, max_frames: u32, max_fps: f32, cancel: &dyn Fn() -> bool) -> Result<AnimSheet, String> {
+    if cancel() {
+        return Err("kerak emas".into());
+    }
+    #[cfg(target_os = "android")]
+    match java_sheet("tgsSheet", "tgs", raw, px, max_frames, max_fps) {
+        Ok(s) => return Ok(s),
+        Err(e) => uzcoders::prelude::breadcrumb(&format!("Java Lottie xatosi, Rust chizuvchi: {e}")),
+    }
+    if cancel() {
+        return Err("kerak emas".into());
+    }
+    build_safe(raw, px, max_frames, max_fps, cancel)
+}
+
+fn java_sheet(method: &str, ext: &str, raw: &[u8], px: u32, max_frames: u32, max_fps: f32) -> Result<AnimSheet, String> {
     let dir = format!("{}/gifs", crate::data::cache_dir());
     let _ = std::fs::create_dir_all(&dir);
     let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
-    let (inp, out) = (format!("{dir}/{stamp}.mp4"), format!("{dir}/{stamp}.png"));
+    let (inp, out) = (format!("{dir}/{stamp}.{ext}"), format!("{dir}/{stamp}.png"));
     std::fs::write(&inp, raw).map_err(|e| format!("yozilmadi: {e}"))?;
-    let r = uzcoders::android::activity_call_ret("gifSheet", &format!("{inp}|{out}|{max_frames}|{px}|{max_fps}"));
+    let r = uzcoders::android::activity_call_ret(method, &format!("{inp}|{out}|{max_frames}|{px}|{max_fps}"));
     let png = std::fs::read(&out).ok();
     let _ = std::fs::remove_file(&inp);
     let _ = std::fs::remove_file(&out);

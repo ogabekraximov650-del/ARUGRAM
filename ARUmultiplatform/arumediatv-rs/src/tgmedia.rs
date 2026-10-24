@@ -263,11 +263,12 @@ fn fetch(arg: Value, path: &str) -> Result<(), String> {
 /// EN: The first frame of MP4 (GIF) bytes: the Android system decoder (a single frame — fast). Used when Telegram gives no separate small preview for a GIF.
 /// RU: Первый кадр из байтов MP4 (GIF): системный декодер Android (один кадр — быстро). Используется, когда Telegram не даёт отдельного маленького превью для GIF.
 fn mp4_first_frame(b: &[u8]) -> Option<Image> {
-    if b.len() < 16 || &b[4..8] != b"ftyp" {
+    // MP4 (`ftyp`) yoki WebM (EBML sarlavhasi `1A 45 DF A3`).
+    if b.len() < 16 || (&b[4..8] != b"ftyp" && b[..4] != [0x1A, 0x45, 0xDF, 0xA3]) {
         return None;
     }
     let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
-    let (inp, out) = (format!("{}/f{stamp}.mp4", dir()), format!("{}/f{stamp}.jpg", dir()));
+    let (inp, out) = (format!("{}/f{stamp}.vid", dir()), format!("{}/f{stamp}.jpg", dir()));
     std::fs::write(&inp, b).ok()?;
     uzcoders::android::frame_to_file(&format!("{inp}|{out}"));
     let jpg = std::fs::read(&out).ok();

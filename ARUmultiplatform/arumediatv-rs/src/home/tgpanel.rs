@@ -328,24 +328,34 @@ impl Layout {
     }
 }
 
+/// UZ: Kotlindagi `gifRows` bilan bir xil: har qatorda 2–3 ta GIF, balandligi bir xil `(kenglik − bo'shliq) / nisbatlar yig'indisi`; maqsad 150 dp, bo'shliq 4 dp; oxirgi to'lmagan qator `maqsad × 1.3` dan oshmaydi.
+/// EN: The same as Kotlin's `gifRows`: 2–3 GIFs per row, a common height of `(width − gaps) / sum of ratios`; target 150 dp, gap 4 dp; the last unfilled row is at most `target × 1.3`.
+/// RU: То же, что `gifRows` в Kotlin: 2–3 GIF в ряду, общая высота `(ширина − промежутки) / сумма пропорций`; цель 150 dp, промежуток 4 dp; последний неполный ряд не выше `цель × 1.3`.
+const GIF_TARGET: f32 = 150.0;
+const GIF_GAP: f32 = 4.0;
+
 fn gif_rows(docs: &[TgDoc], width: f32) -> Vec<(Vec<usize>, f32)> {
-    const TARGET: f32 = 96.0;
-    const GAP: f32 = 2.0;
-    let (mut rows, mut cur, mut asum) = (Vec::new(), Vec::new(), 0.0f32);
+    let (mut rows, mut cur, mut sum) = (Vec::new(), Vec::new(), 0.0f32);
+    let h = |n: usize, sum: f32| (width - GIF_GAP * (n.saturating_sub(1)) as f32) / sum;
     for (i, d) in docs.iter().enumerate() {
-        let a = if d.w > 0 && d.h > 0 { d.w as f32 / d.h as f32 } else { 1.0 }.clamp(0.4, 2.5);
         cur.push(i);
-        asum += a;
-        let gaps = (cur.len() - 1) as f32 * GAP;
-        if asum * TARGET + gaps >= width {
-            rows.push((std::mem::take(&mut cur), ((width - gaps) / asum).min(TARGET * 1.5)));
-            asum = 0.0;
+        sum += gif_ratio(d);
+        if cur.len() >= 3 || h(cur.len(), sum) <= GIF_TARGET {
+            let hh = h(cur.len(), sum);
+            rows.push((std::mem::take(&mut cur), hh));
+            sum = 0.0;
         }
     }
     if !cur.is_empty() {
-        rows.push((cur, TARGET));
+        let hh = h(cur.len(), sum).min(GIF_TARGET * 1.3);
+        rows.push((cur, hh));
     }
     rows
+}
+
+/// UZ: GIF nisbati (kenglik / balandlik), 0,6..2,2 oralig'ida (Kotlindagi `TgDoc.ratio`). EN: The GIF ratio (width / height) clamped to 0.6..2.2 (Kotlin's `TgDoc.ratio`). RU: Пропорция GIF (ширина / высота) в пределах 0,6..2,2 (`TgDoc.ratio` в Kotlin).
+fn gif_ratio(d: &TgDoc) -> f32 {
+    if d.w > 0 && d.h > 0 { d.w as f32 / d.h as f32 } else { 1.0 }.clamp(0.6, 2.2)
 }
 
 impl Home {
@@ -831,8 +841,8 @@ impl Home {
             Some(im) => image(&im, cell - 10.0, cell - 10.0),
             None => Self::tgp_placeholder(cell - 10.0, cell - 10.0, 8.0),
         };
-        let play = d.kind == "tgs" && self.tgp_may_play(p);
-        let px = ((cell - 10.0) * density()).clamp(48.0, 96.0) as u32;
+        let play = matches!(d.kind.as_str(), "tgs" | "webm" | "mp4") && self.tgp_may_play(p);
+        let px = 128u32;
         let inner = self.tg_anim_el(&format!("d{:x}", d.id), d, Some(set.clone()), px, 36, 12.0, cell - 10.0, cell - 10.0, play, inner);
         let (cb, tok) = (on_emoji, tgmedia::emoji_token(&set.short, d));
         let hold = self.tgp_hold(p, PKind::Emoji, d.clone(), Some(set.clone()), String::new());
@@ -917,8 +927,8 @@ impl Home {
             }
             None => Self::tgp_placeholder(cell - 16.0, cell - 16.0, 10.0),
         };
-        let play = d.kind == "tgs" && self.tgp_may_play(p);
-        let px = ((cell - 8.0) * density()).clamp(96.0, 200.0) as u32;
+        let play = matches!(d.kind.as_str(), "tgs" | "webm" | "mp4") && self.tgp_may_play(p);
+        let px = 128u32;
         let inner = self.tg_anim_el(&format!("d{:x}", d.id), d, Some(set.clone()), px, 36, 12.0, cell - 8.0, cell - 8.0, play, inner);
         let rf = tgmedia::sticker_ref(&set.short, d);
         let hold = self.tgp_hold(p, PKind::Sticker, d.clone(), Some(set.clone()), rf.clone());
@@ -936,41 +946,35 @@ impl Home {
         if gifs.is_empty() {
             return (Layout::new(), Vec::new(), Self::tgp_empty("Telegram'da saqlangan GIF yo'q"));
         }
-        let rows = gif_rows(&gifs, pw - 10.0);
-        let heights: Vec<f32> = rows.iter().map(|(_, h)| *h + 2.0).collect();
+        let rows = gif_rows(&gifs, pw - 16.0);
+        let heights: Vec<f32> = rows.iter().map(|(_, h)| *h + GIF_GAP).collect();
         let (me, pp) = (self.clone(), p.clone());
         let gifs2 = gifs.clone();
         let list = lazy_column_var(&p.scroll[1], &heights, move |i| {
             let (idx, h) = &rows[i];
-            let a_sum: f32 = idx.iter().map(|k| Self::gif_aspect(&gifs2[*k])).sum();
-            let gaps = (idx.len() - 1) as f32 * 2.0;
             let cells: Vec<Element> = idx
                 .iter()
                 .map(|k| {
                     let d = &gifs2[*k];
-                    let w = if idx.len() == 1 { Self::gif_aspect(d) * *h } else { (Self::gif_aspect(d) / a_sum) * (pw - 10.0 - gaps) };
+                    let w = gif_ratio(d) * *h;
                     let dd = d.clone();
                     let img = me.tg_img(&format!("d{:x}", d.id), move || load_doc(None, true, dd, 320));
                     let inner: Element = match img {
-                        Some(im) => stack(vec![image_fill(&im)]).width(w).height(*h).radius(8.0),
-                        None => Self::tgp_placeholder(w, *h, 8.0),
+                        Some(im) => stack(vec![image_fill(&im)]).width(w).height(*h).radius(10.0),
+                        None => Self::tgp_placeholder(w, *h, 10.0),
                     };
                     let play = me.tgp_may_play(&pp);
-                    let px = (w.max(*h) * density()).clamp(96.0, 256.0) as u32;
-                    let inner = me.tg_anim_el(&format!("d{:x}", d.id), d, None, px, 24, 12.0, w, *h, play, inner);
+                    let px = (w.max(*h) * density()).clamp(96.0, 200.0) as u32;
+                    let inner = me.tg_anim_el(&format!("d{:x}", d.id), d, None, px, 36, 12.0, w, *h, play, inner);
                     let rf = tgmedia::gif_ref(d);
                     let hold = me.tgp_hold(&pp, PKind::Gif, d.clone(), None, rf.clone());
                     let cb = on_send.clone();
                     inner.on_click(move || cb(rf.clone(), "gif")).on_hold(200, hold)
                 })
                 .collect();
-            column(vec![row(cells).gap(2.0)]).padding_each(0.0, 0.0, 0.0, 2.0)
+            column(vec![row(cells).gap(GIF_GAP)]).padding_each(8.0, 0.0, 0.0, GIF_GAP)
         });
         (Layout::new(), Vec::new(), list)
-    }
-
-    fn gif_aspect(d: &TgDoc) -> f32 {
-        if d.w > 0 && d.h > 0 { d.w as f32 / d.h as f32 } else { 1.0 }.clamp(0.4, 2.5)
     }
 
     // ───────────────────────── Uzoq bosish: katta ko'rinish / Long press preview ─────────────────────────
@@ -1079,17 +1083,23 @@ mod tests {
     }
 
     #[test]
-    fn gif_qatorlari_kenglikni_toldiradi() {
+    fn gif_qatorlari_kotlindagidek() {
         let d = |w, h| TgDoc { w, h, ..Default::default() };
-        let docs = vec![d(200, 100), d(100, 100), d(100, 200), d(300, 100), d(100, 100)];
+        let docs = vec![d(200, 100), d(100, 100), d(100, 200), d(300, 100), d(100, 100), d(100, 100), d(100, 100)];
         let rows = gif_rows(&docs, 300.0);
-        assert!(rows.len() >= 2);
-        for (idx, h) in &rows[..rows.len() - 1] {
-            let a: f32 = idx.iter().map(|k| docs[*k].w as f32 / docs[*k].h as f32).sum();
-            let gaps = (idx.len() - 1) as f32 * 2.0;
-            assert!((a * h + gaps - 300.0).abs() < 1.0 || *h >= 144.0, "{idx:?} {h}");
+        assert_eq!(rows.iter().map(|(i, _)| i.len()).sum::<usize>(), docs.len());
+        for (idx, h) in &rows {
+            assert!(idx.len() <= 3);
+            assert!(*h > 0.0 && *h <= GIF_TARGET * 1.3 + 0.01 || idx.len() >= 2, "{idx:?} {h}");
         }
-        assert_eq!(rows.iter().map(|(i, _)| i.len()).sum::<usize>(), 5);
+        for (idx, h) in &rows[..rows.len() - 1] {
+            let a: f32 = idx.iter().map(|k| gif_ratio(&docs[*k])).sum();
+            let gaps = (idx.len() - 1) as f32 * GIF_GAP;
+            assert!((a * h + gaps - 300.0).abs() < 0.5, "{idx:?} {h}");
+        }
+        // Nisbat 0,6..2,2 oralig'ida.
+        assert_eq!(gif_ratio(&d(100, 200)), 0.6);
+        assert_eq!(gif_ratio(&d(300, 100)), 2.2);
     }
 
     fn doc(id: i64, kind: &str) -> TgDoc {

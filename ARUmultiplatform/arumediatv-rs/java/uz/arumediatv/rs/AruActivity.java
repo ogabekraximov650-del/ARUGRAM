@@ -312,6 +312,58 @@ public class AruActivity extends UzActivity {
     }
 
     /**
+     * UZ: `.tgs` (gzip Lottie) ni kadrlar varag'iga (PNG) aylantiradi: Kotlin ilovadagi kabi Airbnb Lottie bilan (barcha stikerlar to'liq chiziladi).
+     * Argument: `kirish.tgs|chiqish.png|eng_ko'p_kadr|tomon_px|eng_ko'p_fps`. Natija: `kenglik|balandlik|ustunlar|kadrlar|fps` yoki `ERR ...`.
+     * EN: Turns a `.tgs` (gzip Lottie) into a frame sheet (PNG) with Airbnb Lottie, like the Kotlin app (so every sticker is drawn fully).
+     * Argument: `in.tgs|out.png|max_frames|side_px|max_fps`. Result: `width|height|cols|frames|fps` or `ERR ...`.
+     * RU: Превращает `.tgs` (gzip Lottie) в лист кадров (PNG) через Airbnb Lottie, как в Kotlin-приложении (все стикеры рисуются полностью).
+     * Аргумент: `вход.tgs|выход.png|макс_кадров|сторона_px|макс_fps`. Результат: `ширина|высота|столбцы|кадры|fps` или `ERR ...`.
+     */
+    public String tgsSheet(String arg) {
+        try {
+            String[] p = arg.split("\\|");
+            if (p.length < 5) return "ERR argumentlar";
+            java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
+            java.io.InputStream in = new java.util.zip.GZIPInputStream(new java.io.FileInputStream(p[0]));
+            try {
+                byte[] buf = new byte[16384];
+                int k;
+                while ((k = in.read(buf)) > 0) bo.write(buf, 0, k);
+            } finally { in.close(); }
+            com.airbnb.lottie.LottieResult<com.airbnb.lottie.LottieComposition> res =
+                    com.airbnb.lottie.LottieCompositionFactory.fromJsonStringSync(new String(bo.toByteArray(), "UTF-8"), null);
+            com.airbnb.lottie.LottieComposition comp = res.getValue();
+            if (comp == null) return "ERR lottie: " + res.getException();
+            float durMs = Math.max(100f, comp.getDuration());
+            int maxFrames = Math.max(2, Integer.parseInt(p[2]));
+            int size = Math.max(32, Integer.parseInt(p[3]));
+            float maxFps = Math.max(1f, Float.parseFloat(p[4]));
+            int n = Math.min(maxFrames, Math.max(2, Math.round(durMs / 1000f * maxFps)));
+            int cols = Math.max(1, Math.min((int) Math.ceil(Math.sqrt(n)), 4096 / size));
+            while ((n + cols - 1) / cols * size > 4096 && n > 2) n--;
+            int rows = (n + cols - 1) / cols;
+            com.airbnb.lottie.LottieDrawable dr = new com.airbnb.lottie.LottieDrawable();
+            dr.setComposition(comp);
+            dr.setBounds(0, 0, size, size);
+            android.graphics.Bitmap sheet = android.graphics.Bitmap.createBitmap(cols * size, rows * size, android.graphics.Bitmap.Config.ARGB_8888);
+            android.graphics.Bitmap cell = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888);
+            android.graphics.Canvas cc = new android.graphics.Canvas(cell), sc = new android.graphics.Canvas(sheet);
+            for (int i = 0; i < n; i++) {
+                cell.eraseColor(0);
+                dr.setProgress((float) i / n);
+                dr.draw(cc);
+                sc.drawBitmap(cell, (i % cols) * size, (i / cols) * size, null);
+            }
+            java.io.FileOutputStream fo = new java.io.FileOutputStream(p[1]);
+            try { sheet.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, fo); } finally { fo.close(); }
+            return size + "|" + size + "|" + cols + "|" + n + "|" + (n * 1000f / durMs);
+        } catch (Throwable e) {
+            Log.e(TAG, "tgsSheet: " + e);
+            return "ERR " + e;
+        }
+    }
+
+    /**
      * UZ: GIF (mp4) ni kadrlar varag'iga (sprite sheet, PNG) aylantiradi: tizimning o'zidagi dekoder (`MediaMetadataRetriever`) orqali.
      * Argument: `kirish.mp4|chiqish.png|eng_ko'p_kadr|uzun_tomon_px|eng_ko'p_fps`. Natija: `kadr_kengligi|kadr_balandligi|ustunlar|kadrlar|fps` yoki bo'sh (xato).
      * EN: Turns a GIF (mp4) into a frame sheet (sprite sheet, PNG) using the system decoder (`MediaMetadataRetriever`).

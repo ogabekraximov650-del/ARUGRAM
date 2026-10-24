@@ -195,7 +195,8 @@ impl Home {
         let px = (size * density()).clamp(96.0, 224.0) as u32;
         let sheet = self.tg_sheet(&format!("ar{r}"), px, true, move |wanted| {
             let d = if sticker { tgmedia::resolve_sticker(&rr) } else { tgmedia::resolve_gif(&rr) }.ok_or_else(|| "havola hal bo'lmadi".to_string())?;
-            let gif = !sticker;
+            // UZ: GIF (mp4) va video stikerlar (webm) — Android video dekoderi; `.tgs` — Lottie. EN: GIFs (mp4) and video stickers (webm) use the Android video decoder; `.tgs` uses Lottie. RU: GIF (mp4) и видеостикеры (webm) — видеодекодер Android; `.tgs` — Lottie.
+            let gif = matches!(d.kind.as_str(), "mp4" | "webm");
             if !gif && d.kind != "tgs" {
                 return Err("animatsiyasiz".into());
             }
@@ -210,7 +211,7 @@ impl Home {
             if !wanted() {
                 return Err("kerak emas".into());
             }
-            if gif { crate::tganim::gif_sheet(&bytes, px, 36, 15.0) } else { crate::tganim::build_safe(&bytes, px, 36, 15.0, wanted) }
+            if gif { crate::tganim::gif_sheet(&bytes, px, 36, 15.0) } else { crate::tganim::build_best(&bytes, px, 36, 15.0, wanted) }
         });
         Some(match sheet {
             Some(s) => {
@@ -340,7 +341,7 @@ impl Home {
     /// `.tgs` stikerning animatsiyali ko'rinishi (tayyor bo'lsa), aks holda `still` (statik rasm). `playing` — hozir o'ynasinmi.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn tg_anim_el(self: &Rc<Self>, key: &str, d: &TgDoc, set: Option<TgSet>, px: u32, frames: u32, fps: f32, w: f32, h: f32, playing: bool, still: Element) -> Element {
-        let gif = d.kind == "mp4";
+        let gif = matches!(d.kind.as_str(), "mp4" | "webm");
         if d.kind != "tgs" && !gif {
             return still;
         }
@@ -361,7 +362,7 @@ impl Home {
             if !wanted() {
                 return Err("kerak emas".into());
             }
-            if gif { crate::tganim::gif_sheet(&bytes, px, frames, fps) } else { crate::tganim::build_safe(&bytes, px, frames, fps, wanted) }
+            if gif { crate::tganim::gif_sheet(&bytes, px, frames, fps) } else { crate::tganim::build_best(&bytes, px, frames, fps, wanted) }
         });
         match sheet {
             Some(s) => {
