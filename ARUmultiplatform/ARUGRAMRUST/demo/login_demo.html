@@ -1,0 +1,621 @@
+<!doctype html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<title>ARUGRAM kirish animatsiyalari</title>
+<meta name="viewport" content="width=1280">
+<style>
+/* UZ: ARUGRAM kirish oynasi animatsiyalari namunasi (o'z dizaynimiz). Barcha animatsiyalar bitta virtual soat (`clock`) bilan yuradi,
+   shuning uchun video har kadrda aniq (60 fps) chiqariladi.
+   EN: A sample of the ARUGRAM login animations (our own design). Every animation runs on one virtual clock, so the video is frame-exact (60 fps).
+   RU: Образец анимаций входа ARUGRAM (наш собственный дизайн). Все анимации идут по одним виртуальным часам, поэтому видео точно покадровое (60 fps). */
+@font-face{font-family:Roboto;font-weight:400;src:url("../../arumediatv-rs/assets/fonts/Roboto-Regular.ttf")}
+@font-face{font-family:Roboto;font-weight:700;src:url("../../arumediatv-rs/assets/fonts/Roboto-Bold.ttf")}
+@font-face{font-family:Roboto;font-weight:900;src:url("../../arumediatv-rs/assets/fonts/Roboto-Black.ttf")}
+:root{
+  --bg:#0a0a10; --surface:#14141d; --surface2:#1c1c28; --line:#2c2c3c; --text:#f4f4f8; --dim:#9a9ab0;
+  --a1:#ff7a1a; --a2:#8b5cf6; --ok:#22c55e; --err:#f43f5e;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:1280px;height:720px;overflow:hidden;background:#07070c;font-family:Roboto,'Liberation Sans',sans-serif;color:var(--text)}
+#stage{position:relative;width:1280px;height:720px;overflow:hidden;
+  background:radial-gradient(900px 600px at 18% 20%,rgba(255,122,26,.16),transparent 60%),
+             radial-gradient(800px 600px at 80% 90%,rgba(139,92,246,.18),transparent 60%),#07070c}
+#phone{position:absolute;left:140px;top:14px;width:346px;height:692px;border-radius:50px;background:#000;
+  box-shadow:0 0 0 2px #2a2a38,0 0 0 9px #111119,0 30px 80px rgba(0,0,0,.65)}
+#screen{position:absolute;left:8px;top:8px;width:330px;height:676px;border-radius:42px;overflow:hidden;background:var(--bg)}
+#notch{position:absolute;left:50%;top:9px;width:92px;height:24px;margin-left:-46px;border-radius:14px;background:#000;z-index:60}
+#status{position:absolute;left:0;right:0;top:0;height:44px;z-index:55;display:flex;justify-content:space-between;align-items:center;padding:6px 26px 0;font-size:13px;font-weight:700}
+#status .ic{display:flex;gap:5px;align-items:center}
+.bar{width:3px;background:#fff;border-radius:1px;display:inline-block}
+.batt{width:22px;height:11px;border:1.5px solid #fff;border-radius:3.5px;position:relative;padding:1px}
+.batt i{display:block;height:100%;width:78%;background:#fff;border-radius:1.5px}
+.page{position:absolute;left:0;top:0;width:330px;height:676px;padding:58px 22px 0;will-change:transform}
+h1{font-size:25px;font-weight:900;letter-spacing:-.2px;line-height:1.15}
+.sub{margin-top:9px;font-size:14px;line-height:1.45;color:var(--dim)}
+.back{position:absolute;left:14px;top:50px;width:36px;height:36px;border-radius:18px;display:flex;align-items:center;justify-content:center;opacity:0}
+.field{position:relative;height:56px;border-radius:14px;border:1px solid var(--line);margin-top:16px;display:flex;align-items:center;padding:0 16px;font-size:17px;background:rgba(255,255,255,.015)}
+.field .lbl{position:absolute;left:12px;top:17px;padding:0 5px;color:var(--dim);font-size:16px;transform-origin:left center;background:transparent;pointer-events:none}
+.badge{display:inline-flex;align-items:center;justify-content:center;width:26px;height:19px;border-radius:5px;background:linear-gradient(135deg,#1e90ff,#fff 52%,#22c55e);color:#05203f;font-size:10px;font-weight:900;margin-right:10px}
+.pref{color:var(--text);margin-right:9px;font-weight:700}
+.digits{display:flex;align-items:center;height:30px;white-space:pre}
+.digits span.d{display:inline-block;will-change:transform}
+.digits span.h{color:#4b4b60}
+.caret{display:inline-block;width:2px;height:24px;margin-left:1px;background:var(--a1);border-radius:1px}
+.fab{position:absolute;right:22px;width:58px;height:58px;border-radius:29px;background:linear-gradient(135deg,var(--a1),#e11d74);display:flex;align-items:center;justify-content:center;box-shadow:0 8px 24px rgba(255,100,40,.38);z-index:30;opacity:0;transform:scale(0)}
+.fab svg{position:absolute}
+#kbd{position:absolute;left:0;bottom:0;width:330px;height:262px;background:#101018;border-top:1px solid #20202c;z-index:40;padding:10px 8px;will-change:transform}
+.kb{position:absolute;left:8px;right:8px;top:10px;display:grid;gap:7px}
+.kb.num{grid-template-columns:repeat(3,1fr);grid-auto-rows:52px;padding:0 12px}
+.kb.alpha{grid-template-rows:repeat(4,46px)}
+.krow{display:flex;gap:5px;justify-content:center}
+.key{flex:1;min-width:0;border-radius:9px;background:#23232f;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:700;color:#eee;transition:none}
+.kb.num .key{font-size:24px;border-radius:12px}
+.key.sp{flex:5}
+.key.dim{background:#181822;color:#8a8a9c}
+#touch{position:absolute;width:44px;height:44px;margin:-22px 0 0 -22px;border-radius:22px;background:rgba(255,255,255,.34);box-shadow:0 0 0 2px rgba(255,255,255,.4);z-index:70;opacity:0;pointer-events:none}
+.illus{width:132px;height:132px;margin:6px auto 4px;position:relative}
+.boxes{display:flex;gap:10px;justify-content:center;margin-top:22px}
+.box{width:50px;height:60px;border-radius:13px;border:1.5px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:27px;font-weight:700;position:relative;background:rgba(255,255,255,.015)}
+.box .v{display:inline-block;will-change:transform}
+.errtxt{height:20px;margin-top:14px;text-align:center;font-size:14px;color:var(--err);opacity:0}
+.timer{margin-top:10px;text-align:center;font-size:14px;color:var(--dim)}
+.sweep{height:3px;margin:14px 40px 0;border-radius:2px;background:#20202c;overflow:hidden;position:relative;opacity:0}
+.sweep i{position:absolute;top:0;height:100%;width:40%;border-radius:2px;background:linear-gradient(90deg,var(--a1),var(--a2))}
+#done{position:absolute;inset:0;background:linear-gradient(160deg,#1b1030,#0a0a10 55%,#2a1206);clip-path:circle(0px at 275px 470px);z-index:35;padding:70px 22px 0}
+.row{display:flex;align-items:center;gap:12px;margin-top:14px;opacity:0}
+.av{width:46px;height:46px;border-radius:23px;flex:none}
+.ln{height:11px;border-radius:6px;background:rgba(255,255,255,.1);position:relative;overflow:hidden}
+.ln i,.av i{position:absolute;top:0;bottom:0;width:50%;left:-60%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.2),transparent)}
+.av{position:relative;overflow:hidden}
+.pill{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border-radius:20px;background:rgba(255,122,26,.14);border:1px solid rgba(255,122,26,.4);color:#ffb27a;font-size:13px;font-weight:700;margin-top:16px}
+.pill b{width:8px;height:8px;border-radius:4px;background:var(--a1);display:inline-block}
+#splash{position:absolute;inset:0;background:var(--bg);z-index:50;display:flex;flex-direction:column;align-items:center;justify-content:center}
+#word{display:flex;gap:2px;font-size:30px;font-weight:900;letter-spacing:3px;margin-top:14px}
+#word span{display:inline-block;opacity:0}
+/* o'ng panel */
+#panel{position:absolute;left:560px;top:30px;width:660px;height:660px}
+#panel h2{font-size:28px;font-weight:900;letter-spacing:-.3px}
+#panel .tag{color:var(--dim);font-size:15px;margin-top:6px}
+#steps{margin-top:16px;display:flex;flex-direction:column;gap:4px}
+.st{display:flex;align-items:center;gap:14px;padding:8px 14px;border-radius:14px;border:1px solid transparent;color:#7a7a90;font-size:16px;transition:none}
+.st .n{width:26px;height:26px;border-radius:13px;background:#1b1b27;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex:none}
+.st.on{background:rgba(255,255,255,.045);border-color:rgba(255,255,255,.1);color:#fff}
+.st.on .n{background:linear-gradient(135deg,var(--a1),#e11d74);color:#fff}
+#card{margin-top:16px;height:178px;border-radius:20px;background:rgba(20,20,29,.85);border:1px solid #262636;display:flex;padding:16px;gap:18px}
+#curve{width:210px;height:146px;border-radius:12px;background:#0d0d14;flex:none}
+#info{flex:1;display:flex;flex-direction:column;min-width:0}
+#info .t{font-size:17px;font-weight:700;line-height:1.25}
+#info .d{font-size:13.5px;color:var(--dim);margin-top:6px;line-height:1.4}
+#chips{display:flex;flex-wrap:wrap;gap:7px;margin-top:auto}
+.chip{padding:5px 10px;border-radius:9px;background:#1d1d2b;border:1px solid #2c2c40;font-size:12.5px;color:#c9c9dc;font-weight:700}
+#tl{position:absolute;left:0;bottom:-2px;width:660px;height:5px;border-radius:3px;background:#1a1a26;overflow:hidden}
+#tl i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--a1),var(--a2))}
+#tm{position:absolute;right:0;bottom:6px;font-size:12px;color:#6c6c84}
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="phone"><div id="screen">
+    <div id="notch"></div>
+    <div id="status"><span>9:41</span><span class="ic"><span><i class="bar" style="height:5px"></i> <i class="bar" style="height:8px"></i> <i class="bar" style="height:11px"></i></span><span class="batt"><i></i></span></span></div>
+
+    <!-- 1-sahifa: telefon -->
+    <div class="page" id="p-phone">
+      <div class="back" id="back1"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+      <h1 id="t1">Telefon raqamingiz</h1>
+      <div class="sub" id="s1">Tasdiqlash kodini yuboramiz. Raqamingiz faqat hisobga kirish uchun ishlatiladi.</div>
+      <div class="field" id="fCountry"><span class="lbl" id="lCountry">Davlat</span><span class="badge">UZ</span><span>O'zbekiston</span>
+        <svg style="position:absolute;right:14px" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#9a9ab0" stroke-width="2.2" stroke-linecap="round"><path d="M7 10l5 5 5-5"/></svg></div>
+      <div class="field" id="fPhone"><span class="lbl" id="lPhone">Telefon raqam</span><span class="pref" id="pref" style="opacity:0">+998</span><div class="digits" id="digits"></div></div>
+      <div class="fab" id="fab1" style="bottom:278px"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" id="arr1"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        <svg width="34" height="34" viewBox="0 0 34 34" id="spin1" style="opacity:0"><circle cx="17" cy="17" r="13" fill="none" stroke="rgba(255,255,255,.28)" stroke-width="3"/><path id="arc1" d="" fill="none" stroke="#fff" stroke-width="3.4" stroke-linecap="round"/></svg></div>
+    </div>
+
+    <!-- 2-sahifa: kod -->
+    <div class="page" id="p-code" style="transform:translateX(330px)">
+      <div class="back" id="back2" style="opacity:1"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+      <div class="illus" id="ill2" style="margin-top:8px">
+        <svg width="132" height="132" viewBox="0 0 132 132">
+          <defs><linearGradient id="g2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff7a1a"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient></defs>
+          <g id="phoneBody"><rect x="38" y="14" width="56" height="104" rx="13" fill="#171722" stroke="url(#g2)" stroke-width="3"/><rect x="56" y="20" width="20" height="4" rx="2" fill="#333347"/></g>
+          <g id="bubble" style="transform-origin:66px 62px"><rect x="22" y="40" width="88" height="44" rx="14" fill="url(#g2)"/><path d="M40 84 L34 98 L56 84 Z" fill="#a06af0"/>
+            <circle id="dt1" cx="46" cy="62" r="5.2" fill="#fff"/><circle id="dt2" cx="66" cy="62" r="5.2" fill="#fff"/><circle id="dt3" cx="86" cy="62" r="5.2" fill="#fff"/></g>
+          <g id="sp1" style="transform-origin:112px 30px"><path d="M112 20 l3 8 8 3 -8 3 -3 8 -3 -8 -8 -3 8 -3z" fill="#ffd2a8"/></g>
+          <g id="sp2" style="transform-origin:20px 112px"><path d="M20 104 l2.4 6 6 2.4 -6 2.4 -2.4 6 -2.4 -6 -6 -2.4 6 -2.4z" fill="#c9b2ff"/></g>
+        </svg>
+      </div>
+      <h1 id="t2" style="text-align:center;margin-top:2px">Kodni kiriting</h1>
+      <div class="sub" id="s2" style="text-align:center">Kod <b style="color:#fff">+998 90 123 45 67</b> raqamiga yuborildi</div>
+      <div class="boxes" id="boxes"></div>
+      <div class="sweep" id="sweep"><i id="sweepI"></i></div>
+      <div style="position:relative;height:24px;margin-top:14px"><div class="errtxt" id="err2" style="position:absolute;left:0;right:0;top:0;margin:0">Kod noto'g'ri. Qayta urinib ko'ring</div>
+      <div class="timer" id="timer2" style="position:absolute;left:0;right:0;top:0;margin:0">Qayta yuborish: 0:42</div></div>
+      <div class="fab" id="fabOk2" style="right:50%;margin-right:-29px;bottom:290px"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path id="chk2" d="M5 12.5l4.5 4.5L19 7.5" stroke-dasharray="22" stroke-dashoffset="22"/></svg></div>
+    </div>
+
+    <!-- 3-sahifa: parol -->
+    <div class="page" id="p-pass" style="transform:translateX(330px)">
+      <div class="back" id="back3" style="opacity:1"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+      <div class="illus" id="ill3" style="margin-top:26px">
+        <svg width="132" height="132" viewBox="0 0 132 132">
+          <defs><linearGradient id="g3" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff7a1a"/><stop offset="1" stop-color="#e11d74"/></linearGradient></defs>
+          <circle id="ring3" cx="66" cy="72" r="30" fill="none" stroke="#22c55e" stroke-width="3" opacity="0" style="transform-origin:66px 72px"/>
+          <g id="lock3" style="transform-origin:66px 72px">
+            <g id="shackle" style="transform-origin:86px 56px"><path d="M46 62 V44 a20 20 0 0 1 40 0 V62" fill="none" stroke="url(#g3)" stroke-width="9" stroke-linecap="round"/></g>
+            <rect x="32" y="60" width="68" height="52" rx="14" fill="url(#g3)"/>
+            <circle cx="66" cy="82" r="7" fill="#1a0f1c"/><rect x="63" y="85" width="6" height="14" rx="3" fill="#1a0f1c"/>
+          </g>
+        </svg>
+      </div>
+      <h1 id="t3" style="text-align:center;margin-top:2px">Ikki bosqichli parol</h1>
+      <div class="sub" id="s3" style="text-align:center">Hisobingiz qo'shimcha parol bilan himoyalangan</div>
+      <div class="field" id="fPass" style="margin-top:20px"><span class="lbl" id="lPass">Parol</span><div class="digits" id="dots"></div>
+        <svg style="position:absolute;right:14px" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#9a9ab0" stroke-width="2" stroke-linecap="round"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></div>
+      <div class="fab" id="fab3" style="bottom:278px"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" id="arr3"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        <svg width="34" height="34" viewBox="0 0 34 34" id="spin3" style="opacity:0"><circle cx="17" cy="17" r="13" fill="none" stroke="rgba(255,255,255,.28)" stroke-width="3"/><path id="arc3" d="" fill="none" stroke="#fff" stroke-width="3.4" stroke-linecap="round"/></svg></div>
+    </div>
+
+    <!-- yakuniy -->
+    <div id="done">
+      <div id="doneIn" style="opacity:0">
+        <div style="display:flex;justify-content:center"><svg width="86" height="86" viewBox="0 0 96 96"><defs><linearGradient id="g4" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff7a1a"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient></defs>
+          <path d="M12 40 C12 24 24 14 40 14 H56 C72 14 84 26 84 42 C84 58 72 70 56 70 H34 L20 82 V66 C15 60 12 52 12 40 Z" fill="none" stroke="url(#g4)" stroke-width="5" stroke-linejoin="round"/>
+          <path d="M34 54 L48 26 L62 54 M39 45 H57" fill="none" stroke="url(#g4)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <h1 style="text-align:center;margin-top:14px;font-size:24px">Chatlar tez orada qo'shiladi</h1>
+        <div class="sub" style="text-align:center">Kirish qismi tayyor. Suhbatlar keyingi yangilanishda paydo bo'ladi.</div>
+        <div style="text-align:center"><span class="pill"><b id="pdot"></b>Tez orada</span></div>
+      </div>
+      <div id="rows" style="margin-top:6px"></div>
+    </div>
+
+    <div id="splash">
+      <svg width="104" height="104" viewBox="0 0 96 96"><defs><linearGradient id="g0" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff7a1a"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient></defs>
+        <path id="mark1" d="M12 40 C12 24 24 14 40 14 H56 C72 14 84 26 84 42 C84 58 72 70 56 70 H34 L20 82 V66 C15 60 12 52 12 40 Z" fill="none" stroke="url(#g0)" stroke-width="4.5" stroke-linejoin="round" stroke-dasharray="300" stroke-dashoffset="300"/>
+        <path id="mark2" d="M34 54 L48 26 L62 54 M39 45 H57" fill="none" stroke="url(#g0)" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="90" stroke-dashoffset="90"/></svg>
+      <div id="word"></div>
+    </div>
+
+    <div id="kbd"><div class="kb num" id="kbNum"></div><div class="kb alpha" id="kbAlpha" style="opacity:0"></div></div>
+    <div id="touch"></div>
+  </div></div>
+
+  <div id="panel">
+    <h2>ARUGRAM · kirish animatsiyalari</h2>
+    <div class="tag">Telegramga o'xshash tuyg'u, lekin o'zimizning dizayn va o'zimizning animatsiya qiymatlari</div>
+    <div id="steps"></div>
+    <div id="card"><canvas id="curve" width="420" height="328"></canvas>
+      <div id="info"><div class="t" id="it">—</div><div class="d" id="id">—</div><div id="chips"></div></div></div>
+    <div id="tl"><i id="tli"></i></div><div id="tm"></div>
+  </div>
+</div>
+<script>
+// ───────────── Virtual soat va animatsiya dvigateli ─────────────
+const clock = { t: 0, timers: [], tweens: [], frames: [] };
+const $ = (id) => document.getElementById(id);
+const TOTAL_MS = 37400;
+function wait(ms) { return new Promise((res) => clock.timers.push({ at: clock.t + ms, res })); }
+const lerp = (a, b, p) => a + (b - a) * p;
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+function bez(x1, y1, x2, y2) {
+  return (x) => {
+    if (x <= 0) return 0; if (x >= 1) return 1;
+    let t = x;
+    for (let i = 0; i < 8; i++) {
+      const cx = 3 * x1 * t * (1 - t) * (1 - t) + 3 * x2 * t * t * (1 - t) + t * t * t - x;
+      const d = 3 * x1 * (1 - t) * (1 - t) - 6 * x1 * t * (1 - t) + 6 * x2 * t * (1 - t) - 3 * x2 * t * t + 3 * t * t;
+      if (Math.abs(cx) < 1e-5 || Math.abs(d) < 1e-6) break;
+      t -= cx / d;
+    }
+    t = clamp(t);
+    return 3 * y1 * t * (1 - t) * (1 - t) + 3 * y2 * t * t * (1 - t) + t * t * t;
+  };
+}
+const E = {
+  lin: (p) => p,
+  out: bez(0.22, 1, 0.36, 1),       // sekinlashib to'xtash
+  inOut: bez(0.65, 0, 0.35, 1),     // ikki tomonlama yumshoq
+  pop: bez(0.34, 1.56, 0.64, 1),    // biroz oshib qaytish
+};
+// Prujina: zeta<1 — tebranib to'xtaydi; D — davomiylik (soniya)
+function spring(zeta, omega, D) {
+  const wd = omega * Math.sqrt(1 - zeta * zeta);
+  return (p) => { const tau = p * D; return 1 - Math.exp(-zeta * omega * tau) * (Math.cos(wd * tau) + (zeta * omega / wd) * Math.sin(wd * tau)); };
+}
+function tween(dur, ease, update) {
+  return new Promise((res) => {
+    const tw = { start: clock.t, dur, ease, update, res };
+    update(ease(0));
+    clock.tweens.push(tw);
+  });
+}
+const par = (...ps) => Promise.all(ps);
+let curEase = E.out;       // o'ng paneldagi egri chiziq uchun
+let curDur = 300;
+let curStart = 0;
+function advance(dt) {
+  clock.t += dt;
+  for (const tw of clock.tweens.slice()) {
+    const p = clamp((clock.t - tw.start) / tw.dur);
+    tw.update(tw.ease(p));
+    if (p >= 1) { tw.update(tw.ease(1)); clock.tweens.splice(clock.tweens.indexOf(tw), 1); tw.res(); }
+  }
+  const due = clock.timers.filter((x) => x.at <= clock.t);
+  clock.timers = clock.timers.filter((x) => x.at > clock.t);
+  due.forEach((x) => x.res());
+  clock.frames.forEach((f) => f(clock.t));
+}
+window.step = async (dt) => { advance(dt); await new Promise((r) => setTimeout(r, 0)); await new Promise((r) => setTimeout(r, 0)); };
+
+// ───────────── Qurilish ─────────────
+const word = $('word');
+'ARUGRAM'.split('').forEach((c) => { const s = document.createElement('span'); s.textContent = c; word.appendChild(s); });
+const kbNum = $('kbNum'), kbAlpha = $('kbAlpha');
+['1','2','3','4','5','6','7','8','9','','0','⌫'].forEach((k) => {
+  const d = document.createElement('div'); d.className = 'key' + (k === '' ? ' dim' : ''); d.textContent = k; d.dataset.k = k; kbNum.appendChild(d);
+});
+['qwertyuiop', 'asdfghjkl', 'zxcvbnm'].forEach((r) => {
+  const row = document.createElement('div'); row.className = 'krow';
+  r.split('').forEach((c) => { const d = document.createElement('div'); d.className = 'key'; d.textContent = c; d.dataset.k = c; row.appendChild(d); });
+  kbAlpha.appendChild(row);
+});
+{ const row = document.createElement('div'); row.className = 'krow';
+  ['123', '', ' '].forEach((c) => { const d = document.createElement('div'); d.className = 'key ' + (c === ' ' ? 'sp' : 'dim'); d.textContent = c === ' ' ? 'probel' : c; d.dataset.k = c; row.appendChild(d); });
+  const go = document.createElement('div'); go.className = 'key dim'; go.textContent = '→'; row.appendChild(go); kbAlpha.appendChild(row); }
+const boxes = $('boxes');
+for (let i = 0; i < 5; i++) { const b = document.createElement('div'); b.className = 'box'; b.innerHTML = '<span class="v" style="opacity:0"></span>'; boxes.appendChild(b); }
+const rowsEl = $('rows');
+for (let i = 0; i < 5; i++) {
+  const r = document.createElement('div'); r.className = 'row';
+  const hue = [24, 268, 330, 190, 40][i];
+  r.innerHTML = `<div class="av" style="background:linear-gradient(135deg,hsl(${hue},85%,58%),hsl(${hue + 40},70%,40%))"><i></i></div><div style="flex:1"><div class="ln" style="width:${[70,55,80,62,48][i]}%"><i></i></div><div class="ln" style="width:${[92,84,66,88,74][i]}%;margin-top:8px;height:9px"><i></i></div></div>`;
+  rowsEl.appendChild(r);
+}
+
+// ───────────── O'ng panel ─────────────
+const SCENES = [
+  { n: 'Boshlanish: logotip chiziladi', t: 'Logotip konturi chiziladi, harflar birin-ketin chiqadi', d: 'Kontur uzunligi bo\'yicha chizish (stroke), so\'ng yozuv harflari 60 ms oraliqda ko\'tarilib paydo bo\'ladi.', chips: ['900 ms kontur', '60 ms oraliq', 'ease-out'], ease: E.out, dur: 900 },
+  { n: 'Telefon maydoni: sarlavha konturga chiqadi', t: 'Maydon sarlavhasi yuqoriga ko\'tarilib, chiziqqa o\'tiradi', d: 'Fokus olganda sarlavha kichrayib (0.78) chiziq ustiga chiqadi, chiziq qalinlashadi va rangi o\'zgaradi. Orqa fon chiziqni "kesib" o\'tadi.', chips: ['240 ms', 'ease-out', 'masshtab 1 → 0.78', 'chiziq 1 → 2 px'], ease: E.out, dur: 240 },
+  { n: 'Raqam kiritish: har raqam sakrab kiradi', t: 'Har bir raqam kichikdan o\'sib, biroz oshib qaytadi', d: 'Format avtomatik (XX XXX XX XX), qolgan o\'rinlar xira ko\'rinadi. Tugma bosilganda barmoq izi paydo bo\'ladi.', chips: ['prujina ζ 0.55', 'ω 22', '420 ms'], ease: spring(0.55, 22, 0.42), dur: 420 },
+  { n: 'Tugma va sahifa almashish', t: 'Tugma sakrab chiqadi, aylanma yuklanish, sahifa surilib almashadi', d: 'Eski sahifa chapga (parallaks) ketadi va xiralashadi, yangisi o\'ngdan keladi. Tugma ichida o\'q aylanma halqaga o\'tadi.', chips: ['340 ms', 'cubic-bezier(.22,1,.36,1)', 'parallaks 28%'], ease: E.out, dur: 340 },
+  { n: 'Kod: katakchalar, xato, muvaffaqiyat', t: 'Xatoda silkinish va qizarish, to\'g\'ri kodda yashil to\'lqin', d: 'Noto\'g\'ri kod: konteyner prujina bilan silkinadi, kataklar qizaradi, xato matni tepadan tushadi. To\'g\'ri kod: kataklar 60 ms oraliqda yashil bo\'lib kattalashadi.', chips: ['silkinish ζ 0.28', 'ω 38', 'to\'lqin 60 ms', 'tekshirish chizig\'i'], ease: spring(0.28, 38, 0.7), dur: 700 },
+  { n: 'Parol: qulf yopiladi', t: 'Qulf havoda suzadi, muvaffaqiyatda halqa bilan yopiladi', d: 'Parol nuqtalari birin-ketin sakrab chiqadi. Tasdiqlangach qulfning halqasi pastga tushadi, yashil to\'lqin tarqaladi.', chips: ['prujina ζ 0.5', 'ω 26', 'yashil to\'lqin 600 ms'], ease: spring(0.5, 26, 0.7), dur: 700 },
+  { n: 'Yakun: "Chatlar tez orada"', t: 'Tugmadan aylana kengayib butun ekranni egallaydi', d: 'Doira tugma joyidan ochiladi (clip-path), keyin chatlar ro\'yxati skeleti birin-ketin kirib, yaltirab turadi.', chips: ['700 ms', 'ease-in-out', 'kechikish 80 ms'], ease: E.inOut, dur: 700 },
+];
+const stepsEl = $('steps');
+SCENES.forEach((s, i) => { const d = document.createElement('div'); d.className = 'st'; d.id = 'st' + i; d.innerHTML = `<span class="n">${i + 1}</span><span>${s.n}</span>`; stepsEl.appendChild(d); });
+let activeScene = -1;
+function setScene(i) {
+  if (i === activeScene) return;
+  activeScene = i;
+  SCENES.forEach((_, k) => $('st' + k).classList.toggle('on', k === i));
+  const s = SCENES[i];
+  $('it').textContent = s.t; $('id').textContent = s.d;
+  $('chips').innerHTML = s.chips.map((c) => `<span class="chip">${c}</span>`).join('');
+  curEase = s.ease; curDur = s.dur; curStart = clock.t;
+}
+const cv = $('curve'), cx = cv.getContext('2d');
+function drawCurve(t) {
+  cx.clearRect(0, 0, 420, 328);
+  cx.fillStyle = '#0d0d14'; cx.fillRect(0, 0, 420, 328);
+  const L = 36, T = 30, W = 348, H = 250;
+  cx.strokeStyle = '#1f1f2e'; cx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) { cx.beginPath(); cx.moveTo(L, T + H * i / 4); cx.lineTo(L + W, T + H * i / 4); cx.stroke(); }
+  // 1.0 chizig'i
+  const y1 = T + H * (1 - 0.8); cx.strokeStyle = '#34344a'; cx.setLineDash([6, 6]); cx.beginPath(); cx.moveTo(L, y1); cx.lineTo(L + W, y1); cx.stroke(); cx.setLineDash([]);
+  const val = (p) => curEase(p);
+  const g = cx.createLinearGradient(L, 0, L + W, 0); g.addColorStop(0, '#ff7a1a'); g.addColorStop(1, '#8b5cf6');
+  cx.strokeStyle = g; cx.lineWidth = 4; cx.lineJoin = 'round'; cx.beginPath();
+  for (let i = 0; i <= 120; i++) { const p = i / 120; const x = L + W * p, y = T + H * (1 - 0.8 * val(p)); if (i === 0) cx.moveTo(x, y); else cx.lineTo(x, y); }
+  cx.stroke();
+  const p = clamp(((t - curStart) % (curDur + 700)) / curDur);
+  const px = L + W * p, py = T + H * (1 - 0.8 * val(p));
+  cx.fillStyle = '#fff'; cx.beginPath(); cx.arc(px, py, 8, 0, 7); cx.fill();
+  cx.fillStyle = 'rgba(255,122,26,.35)'; cx.beginPath(); cx.arc(px, py, 15, 0, 7); cx.fill();
+  cx.fillStyle = '#6c6c84'; cx.font = '700 20px Roboto'; cx.fillText('vaqt →', L, 316); cx.fillText('qiymat', 4, 22);
+}
+clock.frames.push((t) => {
+  drawCurve(t);
+  $('tli').style.width = (100 * clamp(t / TOTAL_MS)) + '%';
+  const s = Math.floor(t / 1000);
+  $('tm').textContent = `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+});
+
+// ───────────── Yordamchilar ─────────────
+function press(el, ms = 150) { el.style.background = '#4a4a62'; wait(ms).then(() => { el.style.background = ''; }); }
+async function tap(x, y) { // barmoq izi
+  const tc = $('touch'); tc.style.left = x + 'px'; tc.style.top = y + 'px';
+  await tween(210, E.out, (p) => { tc.style.opacity = String(p < .6 ? p / .6 : 1 - (p - .6) / .4 * 0.9); tc.style.transform = `scale(${lerp(.35, 1.05, p)})`; });
+  tc.style.opacity = '0';
+}
+function keyEl(k) { return [...document.querySelectorAll('.key')].find((e) => e.dataset.k === k && e.offsetParent !== null); }
+async function typeKey(k, gap) {
+  const e = keyEl(k); const sc = $('screen').getBoundingClientRect(); const r = e.getBoundingClientRect();
+  press(e, 140); tap(r.left - sc.left + r.width / 2, r.top - sc.top + r.height / 2);
+  await wait(gap);
+}
+function setField(fieldEl, lblEl, f, active) { // f: 0..1 sarlavha holati
+  lblEl.style.transform = `translate(${lerp(0, 4, f)}px,${lerp(0, -27, f)}px) scale(${lerp(1, .78, f)})`;
+  lblEl.style.background = f > .5 ? '#0a0a10' : 'transparent';
+  lblEl.style.color = f > .5 ? (active ? '#ff9a52' : '#9a9ab0') : '#9a9ab0';
+  const a = active ? f : 0;
+  fieldEl.style.borderColor = `rgb(${lerp(44, 255, a) | 0},${lerp(44, 122, a) | 0},${lerp(60, 26, a) | 0})`;
+  fieldEl.style.borderWidth = (1 + a) + 'px';
+  fieldEl.style.boxShadow = `0 0 ${18 * a}px rgba(255,122,26,${.16 * a})`;
+}
+function spinArc(id, t, show) {
+  const a = t / 1000 * 4.4, sweep = 0.9 + 3.4 * (0.5 + 0.5 * Math.sin(t / 1000 * 3.2));
+  const r = 13, c = 17, x1 = c + r * Math.cos(a), y1 = c + r * Math.sin(a), x2 = c + r * Math.cos(a + sweep), y2 = c + r * Math.sin(a + sweep);
+  $(id).setAttribute('d', `M${x1.toFixed(2)} ${y1.toFixed(2)} A${r} ${r} 0 ${sweep > Math.PI ? 1 : 0} 1 ${x2.toFixed(2)} ${y2.toFixed(2)}`);
+}
+function popIn(el, from = 0.45) { // sakrab kirish
+  const sp = spring(0.55, 22, 0.42);
+  return tween(420, sp, (p) => { el.style.opacity = String(clamp(p * 3)); el.style.transform = `translateY(${(1 - p) * 10}px) scale(${lerp(from, 1, p)})`; });
+}
+function fadeUp(el, dur = 560, delay = 0) {
+  return wait(delay).then(() => tween(dur, E.out, (p) => { el.style.opacity = String(p); el.style.transform = `translateY(${(1 - p) * 16}px)`; }));
+}
+async function fabIn(fab) { fab.style.opacity = '1'; await tween(520, spring(0.5, 24, 0.52), (p) => { fab.style.transform = `scale(${p})`; }); }
+async function slideTo(from, to, dir = 1) { // dir=1: oldinga
+  const W = 330;
+  await tween(340, E.out, (p) => {
+    from.style.transform = `translateX(${-dir * W * 0.28 * p}px)`; from.style.opacity = String(1 - 0.55 * p);
+    to.style.transform = `translateX(${dir * W * (1 - p)}px)`;
+  });
+  from.style.transform = `translateX(${-dir * W}px)`; from.style.opacity = '1';
+}
+const phoneDigits = []; // DOM raqamlar
+
+// ───────────── Ssenariy ─────────────
+async function main() {
+  // 0. Boshlanish
+  setScene(0);
+  $('splash').style.opacity = '1';
+  await tween(900, E.out, (p) => { $('mark1').style.strokeDashoffset = String(300 * (1 - p)); $('mark2').style.strokeDashoffset = String(90 * (1 - clamp((p - .25) / .75))); });
+  const letters = [...word.children];
+  await Promise.all(letters.map((s, i) => wait(i * 60).then(() => tween(420, E.out, (p) => { s.style.opacity = String(p); s.style.transform = `translateY(${(1 - p) * 14}px)`; }))));
+  await wait(700);
+  // splash tepaga chiqib ketadi, 1-sahifa elementlari kirib keladi
+  const t1 = $('t1'), s1 = $('s1'), fC = $('fCountry'), fP = $('fPhone');
+  [t1, s1, fC, fP].forEach((e) => { e.style.opacity = '0'; });
+  setField(fC, $('lCountry'), 1, false); setField(fP, $('lPhone'), 0, false);
+  const kb = $('kbd'); kb.style.transform = 'translateY(270px)';
+  await Promise.all([
+    tween(520, E.inOut, (p) => { $('splash').style.opacity = String(1 - p); $('splash').style.transform = `translateY(${-30 * p}px)`; }),
+    fadeUp(t1, 560, 160), fadeUp(s1, 560, 260), fadeUp(fC, 560, 360), fadeUp(fP, 560, 440),
+  ]);
+  $('splash').style.display = 'none';
+  await wait(500);
+
+  // 1. Telefon maydoni
+  setScene(1);
+  await tap(165, 271);  // maydonni bosish
+  await par(
+    tween(240, E.out, (p) => setField(fP, $('lPhone'), p, true)),
+    tween(300, E.out, () => {}),
+  );
+  $('pref').style.opacity = '1';
+  // kursor va klaviatura
+  await tween(320, E.out, (p) => { kb.style.transform = `translateY(${270 * (1 - p)}px)`; });
+  let caretOn = true;
+  const digits = $('digits');
+  const caret = document.createElement('span'); caret.className = 'caret';
+  clock.frames.push((t) => { caret.style.opacity = (Math.floor(t / 530) % 2 === 0) ? '1' : '0'; });
+  const groups = [2, 3, 2, 2];
+  let typed = '';
+  function renderDigits(newIdx) {
+    digits.innerHTML = '';
+    let i = 0; const mask = 'XX XXX XX XX';
+    let shown = 0;
+    for (const ch of mask) {
+      if (ch === ' ') { const g = document.createElement('span'); g.style.cssText = 'display:inline-block;width:9px'; digits.appendChild(g); continue; }
+      const sp = document.createElement('span');
+      if (shown < typed.length) { sp.className = 'd'; sp.textContent = typed[shown]; sp.dataset.i = shown; phoneDigits[shown] = sp; }
+      else { sp.className = 'h'; sp.textContent = '0'; sp.style.opacity = '.5'; }
+      if (shown === typed.length) digits.appendChild(caret);
+      digits.appendChild(sp);
+      shown++;
+    }
+  }
+  setScene(2);
+  renderDigits();
+  const seq = '901234567';
+  for (let i = 0; i < seq.length; i++) {
+    const key = keyEl(seq[i]);
+    typed += seq[i];
+    renderDigits();
+    const d = phoneDigits[i];
+    const e = keyEl(seq[i]); const sc = $('screen').getBoundingClientRect(); const r = e.getBoundingClientRect();
+    press(e, 140); tap(r.left - sc.left + r.width / 2, r.top - sc.top + r.height / 2);
+    popIn(d, 0.35);
+    await wait(i === 0 ? 260 : 175);
+  }
+  await wait(120);
+  // tugma
+  setScene(3);
+  const fab1 = $('fab1');
+  await fabIn(fab1);
+  await wait(500);
+  await tap(298, 668 - 278 - 58 / 2 + 8 - 8);  // FAB markazi
+  await tween(120, E.out, (p) => { fab1.style.transform = `scale(${1 - 0.09 * p})`; });
+  await tween(260, spring(0.5, 26, 0.26), (p) => { fab1.style.transform = `scale(${0.91 + 0.09 * p})`; });
+  // aylanma
+  const spin1 = $('spin1'), arr1 = $('arr1');
+  await tween(220, E.out, (p) => { arr1.style.opacity = String(1 - p); arr1.style.transform = `scale(${1 - .3 * p})`; spin1.style.opacity = String(p); });
+  const spinStart = clock.t;
+  clock.frames.push((t) => { if (t >= spinStart && t < spinStart + 1500) spinArc('arc1', t - spinStart, true); });
+  await wait(1250);
+  // sahifa almashish
+  const pPhone = $('p-phone'), pCode = $('p-code');
+  pCode.style.transform = 'translateX(330px)';
+  $('p-code').style.opacity = '1';
+  // klaviatura raqamli bo'lib qoladi
+  await Promise.all([
+    slideTo(pPhone, pCode, 1),
+    tween(340, E.out, (p) => { fab1.style.opacity = String(1 - p); }),
+  ]);
+  await wait(200);
+
+  // 2. Kod
+  setScene(4);
+  // illyustratsiya animatsiyasi
+  const bub = $('bubble');
+  bub.style.transform = 'scale(0)'; $('phoneBody').style.opacity = '0'; $('sp1').style.opacity = '0'; $('sp2').style.opacity = '0';
+  const t2 = $('t2'), s2 = $('s2');
+  [t2, s2, boxes, $('timer2')].forEach((e) => { e.style.opacity = '0'; });
+  clock.frames.push((t) => { // nuqtalar sakrashi va yulduzchalar
+    ['dt1', 'dt2', 'dt3'].forEach((id, i) => { const el = $(id); const v = Math.max(0, Math.sin((t / 1000 * 5.2) - i * 0.9)); el.setAttribute('cy', (62 - v * 6).toFixed(2)); });
+    $('sp1').style.transform = `scale(${0.75 + 0.25 * Math.sin(t / 1000 * 3.6)}) rotate(${t / 40 % 360}deg)`;
+    $('sp2').style.transform = `scale(${0.75 + 0.25 * Math.sin(t / 1000 * 3.1 + 1.6)}) rotate(${-t / 55 % 360}deg)`;
+  });
+  await par(
+    tween(480, E.out, (p) => { $('phoneBody').style.opacity = String(p); $('phoneBody').style.transform = `translateY(${(1 - p) * 18}px)`; }),
+    wait(180).then(() => tween(520, spring(0.5, 24, 0.52), (p) => { bub.style.transform = `scale(${p})`; })),
+    wait(500).then(() => { $('sp1').style.opacity = '1'; $('sp2').style.opacity = '1'; }),
+    fadeUp(t2, 520, 240), fadeUp(s2, 520, 320), fadeUp(boxes, 520, 400), fadeUp($('timer2'), 520, 480),
+  );
+  // taymer (virtual soniya)
+  let secs = 42;
+  clock.frames.push((t) => { const s = Math.max(0, 42 - Math.floor((t - 0) / 1000) % 60); });
+  const timerStart = clock.t;
+  clock.frames.push((t) => { if (t < timerStart + 20000) { const left = Math.max(0, 42 - Math.floor((t - timerStart) / 1000)); $('timer2').textContent = `Qayta yuborish: 0:${String(left).padStart(2, '0')}`; } });
+  // aktiv katak
+  const bx = [...boxes.children];
+  let active = 0;
+  function paintBoxes(extra) {
+    bx.forEach((b, i) => {
+      const act = i === active;
+      if (!extra) { b.style.borderColor = act ? '#ff7a1a' : '#2c2c3c'; b.style.borderWidth = act ? '2px' : '1.5px'; b.style.boxShadow = act ? '0 0 18px rgba(255,122,26,.18)' : 'none'; }
+    });
+  }
+  paintBoxes();
+  const cc = document.createElement('span'); cc.className = 'caret'; cc.style.cssText = 'position:absolute;height:28px';
+  clock.frames.push((t) => { cc.style.opacity = (Math.floor(t / 530) % 2 === 0 && active < 5 && !boxes.dataset.lock) ? '1' : '0'; });
+  bx[0].appendChild(cc);
+  async function enter(code, delayFirst) {
+    for (let i = 0; i < code.length; i++) {
+      active = i; paintBoxes(); bx[i].appendChild(cc);
+      const e = keyEl(code[i]); const sc = $('screen').getBoundingClientRect(); const r = e.getBoundingClientRect();
+      press(e, 140); tap(r.left - sc.left + r.width / 2, r.top - sc.top + r.height / 2);
+      const v = bx[i].querySelector('.v'); v.textContent = code[i];
+      popIn(v, 0.3);
+      await wait(i === 0 ? delayFirst : 210);
+    }
+    active = 5; paintBoxes(); cc.style.opacity = '0';
+  }
+  await wait(300);
+  await enter('12345', 260);
+  // tekshirilmoqda
+  boxes.dataset.lock = '1';
+  const sw = $('sweep'); sw.style.opacity = '1';
+  await tween(620, E.inOut, (p) => { $('sweepI').style.left = (-40 + 140 * p) + '%'; });
+  sw.style.opacity = '0';
+  // xato: qizarish + silkinish
+  const errTxt = $('err2');
+  await par(
+    tween(180, E.out, (p) => { bx.forEach((b) => { b.style.borderColor = `rgb(${lerp(44, 244, p) | 0},${lerp(44, 63, p) | 0},${lerp(60, 94, p) | 0})`; b.style.borderWidth = '2px'; b.style.boxShadow = `0 0 ${16 * p}px rgba(244,63,94,${.2 * p})`; bx.forEach((bb) => { bb.querySelector('.v').style.color = `rgb(255,${lerp(255, 120, p) | 0},${lerp(255, 140, p) | 0})`; }); }); }),
+    tween(780, spring(0.22, 40, 0.78), (p) => { boxes.style.transform = `translateX(${(1 - p) * 16 * 1}px)`; }),
+    tween(320, E.out, (p) => { errTxt.style.opacity = String(p); errTxt.style.transform = `translateY(${(1 - p) * -8}px)`; $('timer2').style.opacity = String(1 - p); }),
+  );
+  await wait(450);
+  // tozalash: raqamlar kichrayib yo'qoladi
+  await Promise.all(bx.map((b, i) => wait(i * 40).then(() => tween(220, E.out, (p) => { const v = b.querySelector('.v'); v.style.opacity = String(1 - p); v.style.transform = `scale(${1 - .5 * p})`; }))));
+  bx.forEach((b) => { b.querySelector('.v').style.color = '#fff'; });
+  await par(
+    tween(300, E.out, (p) => { bx.forEach((b) => { b.style.borderColor = `rgb(${lerp(244, 44, p) | 0},${lerp(63, 44, p) | 0},${lerp(94, 60, p) | 0})`; b.style.borderWidth = '1.5px'; b.style.boxShadow = 'none'; }); }),
+    tween(300, E.out, (p) => { errTxt.style.opacity = String(1 - p); $('timer2').style.opacity = String(p); }),
+  );
+  boxes.dataset.lock = ''; boxes.style.transform = 'none';
+  active = 0; paintBoxes(); bx[0].appendChild(cc);
+  await wait(350);
+  await enter('48291', 160);
+  boxes.dataset.lock = '1';
+  sw.style.opacity = '1';
+  await tween(520, E.inOut, (p) => { $('sweepI').style.left = (-40 + 140 * p) + '%'; });
+  sw.style.opacity = '0';
+  // muvaffaqiyat to'lqini
+  await Promise.all(bx.map((b, i) => wait(i * 60).then(() => par(
+    tween(260, E.out, (p) => { b.style.borderColor = `rgb(${lerp(44, 34, p) | 0},${lerp(44, 197, p) | 0},${lerp(60, 94, p) | 0})`; b.style.borderWidth = '2px'; b.style.boxShadow = `0 0 ${18 * p}px rgba(34,197,94,${.22 * p})`; b.querySelector('.v').style.color = '#86efac'; }),
+    tween(520, spring(0.35, 30, 0.52), (p) => { b.style.transform = `scale(${1 + .1 * Math.sin(Math.PI * clamp(p) ) * 1 + 0 * p})`; }),
+  ))));
+  const fk = $('fabOk2'); fk.style.background = 'linear-gradient(135deg,#22c55e,#16a34a)'; fk.style.boxShadow = '0 8px 24px rgba(34,197,94,.4)'; fk.style.opacity = '1'; fk.style.bottom = '300px';
+  await fabIn(fk);
+  await tween(380, E.out, (p) => { $('chk2').style.strokeDashoffset = String(22 * (1 - p)); });
+  await wait(450);
+  // parolga o'tish; klaviatura harfli bo'ladi
+  const pPass = $('p-pass');
+  $('p-pass').style.transform = 'translateX(330px)';
+  const pst = [$('t3'), $('s3'), $('fPass')]; pst.forEach((e) => { e.style.opacity = '0'; });
+  setField($('fPass'), $('lPass'), 0, false);
+  $('lock3').style.opacity = '0'; $('shackle').style.transform = 'translateY(-14px) rotate(-18deg)';
+  await Promise.all([
+    slideTo(pCode, pPass, 1),
+    tween(340, E.out, (p) => { kbNum.style.opacity = String(1 - p); kbAlpha.style.opacity = String(p); }),
+  ]);
+  await par(tween(520, E.out, (p) => { $('lock3').style.opacity = String(p); $('lock3').style.transform = `translateY(${(1 - p) * 20}px) scale(${.8 + .2 * p})`; }),
+    fadeUp(pst[0], 520, 140), fadeUp(pst[1], 520, 220), fadeUp(pst[2], 520, 300));
+
+  // 3. Parol
+  setScene(5);
+  const lockStart = clock.t;
+  clock.frames.push((t) => { if (t >= lockStart && !window.__locked) { $('lock3').style.transform = `translateY(${Math.sin((t - lockStart) / 1000 * 2.6) * 4}px)`; } });
+  await tap(165, 475);
+  await tween(240, E.out, (p) => setField($('fPass'), $('lPass'), p, true));
+  const dots = $('dots');
+  const pw = 'arugram';
+  for (let i = 0; i < pw.length; i++) {
+    const e = keyEl(pw[i]) || keyEl(pw[i].toString());
+    if (!e) { await wait(170); continue; }
+    const sc = $('screen').getBoundingClientRect(); const r = e.getBoundingClientRect();
+    press(e, 140); tap(r.left - sc.left + r.width / 2, r.top - sc.top + r.height / 2);
+    const dsp = document.createElement('span'); dsp.className = 'd'; dsp.style.cssText = 'width:12px;height:12px;border-radius:6px;background:#fff;margin-right:8px;display:inline-block;opacity:0';
+    dots.appendChild(dsp); popIn(dsp, 0.2);
+    await wait(i === 0 ? 240 : 165);
+  }
+  // raqamli harflar topilmaganlar uchun to'ldirish
+  while (dots.children.length < 7) { const dsp = document.createElement('span'); dsp.className = 'd'; dsp.style.cssText = 'width:12px;height:12px;border-radius:6px;background:#fff;margin-right:8px;display:inline-block;opacity:0'; dots.appendChild(dsp); popIn(dsp, .2); await wait(150); }
+  await wait(250);
+  const fab3 = $('fab3');
+  await fabIn(fab3);
+  await wait(380);
+  await tap(298, 668 - 278 - 29 + 0);
+  await tween(120, E.out, (p) => { fab3.style.transform = `scale(${1 - 0.09 * p})`; });
+  await tween(260, spring(0.5, 26, 0.26), (p) => { fab3.style.transform = `scale(${0.91 + 0.09 * p})`; });
+  const arr3 = $('arr3'), spin3 = $('spin3');
+  await tween(220, E.out, (p) => { arr3.style.opacity = String(1 - p); arr3.style.transform = `scale(${1 - .3 * p})`; spin3.style.opacity = String(p); });
+  const spinStart3 = clock.t;
+  clock.frames.push((t) => { if (t >= spinStart3 && t < spinStart3 + 1500) spinArc('arc3', t - spinStart3, true); });
+  await wait(1100);
+  // qulf yopiladi
+  window.__locked = true;
+  const lk = $('lock3');
+  await par(
+    tween(700, spring(0.5, 26, 0.7), (p) => { $('shackle').style.transform = `translateY(${-14 * (1 - p)}px) rotate(${-18 * (1 - p)}deg)`; lk.style.transform = `translateY(${(1 - p) * 0}px) scale(${1 + 0.06 * Math.sin(Math.PI * clamp(p))})`; }),
+    tween(600, E.out, (p) => { const r = $('ring3'); r.style.opacity = String(.9 * (1 - p)); r.style.transform = `scale(${1 + 1.5 * p})`; r.setAttribute('stroke-width', String(3 * (1 - p) + .5)); }),
+  );
+  await wait(350);
+
+  // 4. Yakun
+  setScene(6);
+  const done = $('done');
+  const doneIn = $('doneIn');
+  await tween(720, E.inOut, (p) => { done.style.clipPath = `circle(${p * 760}px at 275px ${668 - 278 - 29 + 50}px)`; });
+  done.style.clipPath = 'none';
+  await par(
+    tween(560, E.out, (p) => { doneIn.style.opacity = String(p); doneIn.style.transform = `translateY(${(1 - p) * 18}px)`; }),
+  );
+  const rs = [...rowsEl.children];
+  const shim = [...done.querySelectorAll('.ln i, .av i')];
+  const shStart = clock.t;
+  clock.frames.push((t) => { shim.forEach((el, i) => { const ph = ((t - shStart) / 1400 + i * 0.07) % 1; el.style.left = (-60 + 160 * ph) + '%'; }); $('pdot').style.opacity = String(.45 + .55 * (0.5 + 0.5 * Math.sin(t / 1000 * 4.2))); $('pdot').style.transform = `scale(${.85 + .25 * (0.5 + 0.5 * Math.sin(t / 1000 * 4.2))})`; });
+  await Promise.all(rs.map((r, i) => wait(i * 80).then(() => tween(480, E.out, (p) => { r.style.opacity = String(p); r.style.transform = `translateY(${(1 - p) * 22}px)`; }))));
+  // klaviatura yashiriladi
+  tween(400, E.inOut, (p) => { kb.style.transform = `translateY(${270 * p}px)`; });
+  await wait(4200);
+  window.__done = true;
+}
+window.start = () => { main().then(() => { window.__finished = true; }); };
+if (!new URLSearchParams(location.search).has('manual')) window.start();
+</script>
+</body>
+</html>
