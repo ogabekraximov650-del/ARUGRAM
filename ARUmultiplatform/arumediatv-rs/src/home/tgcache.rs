@@ -282,15 +282,19 @@ impl Home {
                 tgmedia::set_seen(Some(seen2));
                 let (vm, rss) = uzcoders::prelude::memory_mb();
                 uzcoders::prelude::breadcrumb(&format!("animatsiya varag'i boshlandi (xotira {vm}/{rss} MB)"));
+                let t_build = Instant::now();
                 let r = load(&wanted);
+                let build_ms = t_build.elapsed().as_millis();
                 tgmedia::set_seen(None);
                 BUSY.fetch_sub(1, Ordering::SeqCst);
+                // UZ: Diskka yozish ko'rsatishni kechiktirmasin: alohida qisqa oqimda. EN: Writing to disk must not delay showing: done on a separate short thread. RU: Запись на диск не должна задерживать показ: в отдельном коротком потоке.
                 if let Ok(s) = &r {
-                    sheet_disk_write(&disk_key, s);
+                    let (k, sc) = (disk_key.clone(), s.clone());
+                    let _ = std::thread::Builder::new().stack_size(1 << 20).spawn(move || sheet_disk_write(&k, &sc));
                 }
                 let (vm, rss) = uzcoders::prelude::memory_mb();
                 uzcoders::prelude::breadcrumb(match &r {
-                    Ok(s) => format!("animatsiya varag'i tayyor {}x{} (xotira {vm}/{rss} MB)", s.w, s.h),
+                    Ok(s) => format!("animatsiya varag'i tayyor {}x{} {build_ms} ms (xotira {vm}/{rss} MB)", s.w, s.h),
                     Err(e) => format!("animatsiya varag'i xato: {e}"),
                 }.as_str());
                 Some(r)

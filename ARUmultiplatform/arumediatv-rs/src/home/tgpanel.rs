@@ -162,6 +162,8 @@ pub struct TgPanel {
     last_move: Cell<Instant>,
     timer: Cell<bool>,
     play_left: Cell<u32>,
+    /// UZ: Hozir qurilayotgan qator ko'rinadigan oynada turibdimi (faqat shunday qatorlar animatsiya qiladi). EN: Whether the row being built is inside the visible window (only such rows animate). RU: Находится ли строка, которая сейчас строится, в видимом окне (анимируются только такие строки).
+    row_vis: Cell<bool>,
     settled: Cell<bool>,
     /// UZ: Sirpanib scroll: (boshlang'ich, maqsad px, boshlanish vaqti). EN: A smooth scroll: (start, target px, start time). RU: Плавная прокрутка: (начало, цель px, время начала).
     glide: Cell<Option<(f32, f32, Instant)>>,
@@ -189,6 +191,7 @@ impl TgPanel {
             last_move: Cell::new(Instant::now()),
             timer: Cell::new(false),
             play_left: Cell::new(0),
+            row_vis: Cell::new(true),
             settled: Cell::new(true),
             glide: Cell::new(None),
             preview: State::new(None),
@@ -427,8 +430,18 @@ impl Home {
     // ───────────────────────── Surish / Scrolling ─────────────────────────
 
     /// UZ: Hozir animatsiya o'ynashi mumkinmi: ro'yxat to'xtagan va o'ynayotganlar soni chegaradan oshmagan (Kotlindagi `rememberSettled`). EN: May an animation play now: the list is still and the count of playing ones is within the limit (Kotlin's `rememberSettled`). RU: Можно ли сейчас анимировать: список неподвижен и число играющих в пределах лимита (`rememberSettled` в Kotlin).
+    /// UZ: Qator (balandligi `h`, tepasi `top` dp) hozir ko'rinadigan oynaga tegadimi: tepa/past zaxira qatorlari animatsiya o'rnini egallamasin.
+    /// EN: Does the row (height `h`, top `top` dp) touch the visible window: the margin rows above/below must not take the animation slots.
+    /// RU: Касается ли строка (высота `h`, верх `top` dp) видимого окна: запасные строки сверху/снизу не должны занимать места анимации.
+    fn tgp_row(&self, p: &Rc<TgPanel>, top: f32, h: f32) {
+        let d = density().max(0.1);
+        let off = p.cur().offset() / d;
+        let vp = if p.cur().viewport() > 0.0 { p.cur().viewport() / d } else { PANEL_H };
+        p.row_vis.set(top + h > off + 2.0 && top < off + vp - 2.0);
+    }
+
     fn tgp_may_play(&self, p: &Rc<TgPanel>) -> bool {
-        if !p.settled.get() || p.play_left.get() == 0 {
+        if !p.settled.get() || !p.row_vis.get() || p.play_left.get() == 0 {
             return false;
         }
         p.play_left.set(p.play_left.get() - 1);
@@ -693,7 +706,10 @@ impl Home {
         let tops = lay.tops.clone();
         let rows = Rc::new(std::mem::take(&mut lay.rows));
         let r2 = rows.clone();
-        let list = lazy_column_var(&p.scroll[0], &heights, move |i| match &r2[i] {
+        let hts = heights.clone();
+        let list = lazy_column_var(&p.scroll[0], &heights, move |i| {
+            me.tgp_row(&pp, tops[i], hts[i]);
+            match &r2[i] {
             RowKind::Header(t) => Self::tgp_header(t),
             RowKind::Std(items) => {
                 let cells: Vec<Element> = items
@@ -744,6 +760,7 @@ impl Home {
                     })
                     .collect();
                 row(cells)
+            }
             }
         });
         let body = if p.data.borrow().emoji_sets.is_none() && false { column(vec![spinner(28.0, 3.0, ACCENT2)]).center() } else { list };
@@ -896,9 +913,13 @@ impl Home {
         let active = lay.active(off_dp);
         let strip: Vec<(SecIcon, bool)> = lay.secs.iter().enumerate().map(|(i, (_, k))| (if let SecIcon::Set(s) = k { SecIcon::Set(s.clone()) } else { SecIcon::Recent }, i == active)).collect();
         let (me, pp, heights) = (self.clone(), p.clone(), lay.heights.clone());
+        let tops = lay.tops.clone();
         let rows = std::mem::take(&mut lay.rows);
         let sets2 = sets.clone();
-        let list = lazy_column_var(&p.scroll[2], &heights, move |i| match &rows[i] {
+        let hts = heights.clone();
+        let list = lazy_column_var(&p.scroll[2], &heights, move |i| {
+            me.tgp_row(&pp, tops[i], hts[i]);
+            match &rows[i] {
             RowKind::Header(t) => Self::tgp_header(t),
             RowKind::Docs(si, start, n) => {
                 let set = sets2[*si].clone();
@@ -913,6 +934,7 @@ impl Home {
                 row(cells)
             }
             _ => row(vec![]),
+            }
         });
         (Layout { rows: Vec::new(), heights, tops: lay.tops, secs: lay.secs }, strip, list)
     }
@@ -946,11 +968,20 @@ impl Home {
         if gifs.is_empty() {
             return (Layout::new(), Vec::new(), Self::tgp_empty("Telegram'da saqlangan GIF yo'q"));
         }
-        let rows = gif_rows(&gifs, pw - 16.0);
+        // UZ: Qator eni: panel eni minus chekinish (o'lchangan: ota quti 312 dp bo'lganda pw − 18). EN: The row width: the panel width minus padding (measured: pw − 18 when the parent box is 312 dp). RU: Ширина ряда: ширина панели минус отступы (измерено: pw − 18 при родительском блоке 312 dp).
+        let rows = gif_rows(&gifs, pw - 18.0);
         let heights: Vec<f32> = rows.iter().map(|(_, h)| *h + GIF_GAP).collect();
+        let mut tops: Vec<f32> = Vec::with_capacity(heights.len());
+        let mut acc = 0.0f32;
+        for h in &heights {
+            tops.push(acc);
+            acc += h;
+        }
+        let hts = heights.clone();
         let (me, pp) = (self.clone(), p.clone());
         let gifs2 = gifs.clone();
         let list = lazy_column_var(&p.scroll[1], &heights, move |i| {
+            me.tgp_row(&pp, tops[i], hts[i]);
             let (idx, h) = &rows[i];
             let cells: Vec<Element> = idx
                 .iter()

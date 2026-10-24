@@ -6,6 +6,7 @@
 use uzcoders_lottie::{Animation, RenderConfig, Renderer, Rgba8};
 
 /// Tayyor varaq: `cols` ustun, `count` kadr, har kadr `cw` x `ch` piksel, `fps` — ko'rsatish tezligi.
+#[derive(Clone)]
 pub struct AnimSheet {
     pub rgba: Vec<u8>,
     pub w: u32,

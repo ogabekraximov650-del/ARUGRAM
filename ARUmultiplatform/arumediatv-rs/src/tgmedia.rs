@@ -90,6 +90,16 @@ fn cached(key: &str, arg: &str, ttl: u64) -> Option<Value> {
     if old.is_some() && age_secs(&path) < ttl {
         return old;
     }
+    // UZ: Bir vaqtda bitta ro'yxat so'rovi: parallel so'rovlar navbat kutadi va yangilangan keshni oladi (FILE_REFERENCE bo'roni bo'lmasin).
+    // EN: One list request at a time: parallel ones wait and then pick up the refreshed cache (no FILE_REFERENCE storm).
+    // RU: Один запрос списка за раз: параллельные ждут и берут обновлённый кеш (без шторма FILE_REFERENCE).
+    static LISTING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _g = LISTING.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(v) = crate::secure::read_text(&path, "tgm").and_then(|s| serde_json::from_str::<Value>(&s).ok()) {
+        if age_secs(&path) < ttl {
+            return Some(v);
+        }
+    }
     match core_list(arg) {
         Ok(j) => {
             let _ = crate::secure::write_text(&path, "tgm", &j.to_string());
