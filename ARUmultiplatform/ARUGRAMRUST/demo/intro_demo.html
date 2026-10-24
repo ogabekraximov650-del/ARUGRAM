@@ -1,0 +1,514 @@
+<!doctype html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<title>ARUGRAM tanishtiruv (intro) animatsiyalari</title>
+<meta name="viewport" content="width=1280">
+<style>
+/* UZ: ARUGRAM tanishtiruv ekrani: 6 sahifa, har birida o'zimiz chizgan animatsiya (ko'k uslub). Barcha animatsiyalar bitta virtual soatda.
+   EN: The ARUGRAM intro screen: 6 pages, each with an animation we drew ourselves (blue style). Everything runs on one virtual clock.
+   RU: Экран знакомства ARUGRAM: 6 страниц, на каждой — анимация, нарисованная нами (синий стиль). Всё идёт по одним виртуальным часам. */
+@font-face{font-family:Roboto;font-weight:400;src:url("../../arumediatv-rs/assets/fonts/Roboto-Regular.ttf")}
+@font-face{font-family:Roboto;font-weight:700;src:url("../../arumediatv-rs/assets/fonts/Roboto-Bold.ttf")}
+@font-face{font-family:Roboto;font-weight:900;src:url("../../arumediatv-rs/assets/fonts/Roboto-Black.ttf")}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:1280px;height:720px;overflow:hidden;background:#06080c;font-family:Roboto,'Liberation Sans',sans-serif;color:#fff}
+#stage{position:relative;width:1280px;height:720px;overflow:hidden;
+  background:radial-gradient(900px 600px at 15% 15%,rgba(42,163,238,.20),transparent 60%),
+             radial-gradient(800px 600px at 85% 95%,rgba(26,119,212,.18),transparent 60%),#06080c}
+#phone{position:absolute;left:140px;top:14px;width:346px;height:692px;border-radius:50px;background:#000;
+  box-shadow:0 0 0 2px #2a2a38,0 0 0 9px #111119,0 30px 80px rgba(0,0,0,.65)}
+#screen{position:absolute;left:8px;top:8px;width:330px;height:676px;border-radius:42px;overflow:hidden;background:#111418}
+#notch{position:absolute;left:50%;top:9px;width:92px;height:24px;margin-left:-46px;border-radius:14px;background:#000;z-index:60}
+#status{position:absolute;left:0;right:0;top:0;height:44px;z-index:55;display:flex;justify-content:space-between;align-items:center;padding:6px 26px 0;font-size:13px;font-weight:700}
+#status .ic{display:flex;gap:5px;align-items:center}
+.bar{width:3px;background:currentColor;border-radius:1px;display:inline-block}
+.batt{width:22px;height:11px;border:1.5px solid currentColor;border-radius:3.5px;position:relative;padding:1px}
+.batt i{display:block;height:100%;width:78%;background:currentColor;border-radius:1.5px}
+#pages{position:absolute;left:0;top:0;width:330px;height:676px}
+.pg{position:absolute;left:0;top:0;width:330px;height:676px}
+.pg .art{position:absolute;left:55px;top:84px;width:220px;height:220px}
+.pg .txt{position:absolute;left:0;top:300px;width:330px;text-align:center;padding:0 20px}
+.pg h1{font-size:25px;font-weight:700;letter-spacing:-.1px;line-height:1.2}
+.pg p{margin-top:10px;font-size:14px;line-height:1.5}
+.pg p b{font-weight:700}
+#dots{position:absolute;left:0;top:432px;width:330px;height:8px;display:flex;justify-content:center;gap:8px}
+.dot{height:7px;border-radius:4px;background:#4a4f57;width:7px}
+#lang{position:absolute;left:0;top:520px;width:330px;text-align:center;color:#4aa3e0;font-size:16px}
+#cta{position:absolute;left:16px;top:578px;width:298px;height:46px;border-radius:23px;background:linear-gradient(90deg,#1f7fd1,#4aa3d9);display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:#e8f2fb;overflow:hidden}
+#cta span{white-space:nowrap}
+#cta svg{position:absolute;opacity:0}
+#sun{position:absolute;right:20px;top:50px;width:34px;height:34px}
+#touch{position:absolute;width:46px;height:46px;margin:-23px 0 0 -23px;border-radius:23px;background:radial-gradient(circle,rgba(255,255,255,.55),rgba(255,255,255,.18));box-shadow:0 0 0 2px rgba(255,255,255,.55),0 4px 14px rgba(0,0,0,.35);z-index:70;opacity:0;pointer-events:none}
+#login{position:absolute;inset:0;z-index:30;padding:100px 24px 0;opacity:0;pointer-events:none}
+#login h1{font-size:25px;font-weight:900}
+#login .sub{margin-top:9px;font-size:14px;line-height:1.45;opacity:.6}
+/* o'ng panel */
+#panel{position:absolute;left:560px;top:30px;width:660px;height:660px}
+#panel h2{font-size:28px;font-weight:900;letter-spacing:-.3px}
+#panel .tag{color:#9a9ab0;font-size:15px;margin-top:6px}
+#steps{margin-top:16px;display:flex;flex-direction:column;gap:3px}
+.st{display:flex;align-items:center;gap:14px;padding:7px 14px;border-radius:14px;border:1px solid transparent;color:#6f7a8a;font-size:16px}
+.st .n{width:26px;height:26px;border-radius:13px;background:#171d27;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex:none}
+.st.on{background:rgba(255,255,255,.05);border-color:rgba(255,255,255,.1);color:#fff}
+.st.on .n{background:linear-gradient(135deg,#37b6f5,#1a77d4);color:#fff}
+#card{margin-top:14px;height:176px;border-radius:20px;background:rgba(18,24,34,.85);border:1px solid #223048;display:flex;padding:16px;gap:18px}
+#curve{width:210px;height:144px;border-radius:12px;background:#0b1018;flex:none}
+#info{flex:1;display:flex;flex-direction:column;min-width:0}
+#info .t{font-size:17px;font-weight:700;line-height:1.25}
+#info .d{font-size:13.5px;color:#9aa8bd;margin-top:6px;line-height:1.4}
+#chips{display:flex;flex-wrap:wrap;gap:7px;margin-top:auto}
+.chip{padding:5px 10px;border-radius:9px;background:#15202f;border:1px solid #27405f;font-size:12.5px;color:#bcd2ea;font-weight:700}
+#tl{position:absolute;left:0;bottom:-2px;width:660px;height:5px;border-radius:3px;background:#141c28;overflow:hidden}
+#tl i{display:block;height:100%;width:0;background:linear-gradient(90deg,#37b6f5,#1a77d4)}
+#tm{position:absolute;right:0;bottom:6px;font-size:12px;color:#5f7087}
+</style>
+</head>
+<body>
+<div id="stage">
+ <svg width="0" height="0" style="position:absolute"><defs><linearGradient id="gb" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3cbcf7"/><stop offset="1" stop-color="#1673d0"/></linearGradient><clipPath id="cd"><circle r="72"/></clipPath></defs></svg>
+ <div id="phone"><div id="screen">
+  <div id="notch"></div>
+  <div id="status"><span id="clk">9:41</span><span class="ic"><span><i class="bar" style="height:5px"></i> <i class="bar" style="height:8px"></i> <i class="bar" style="height:11px"></i></span><span class="batt"><i></i></span></span></div>
+
+  <svg id="sun" viewBox="-17 -17 34 34">
+    <defs><mask id="mm"><rect x="-20" y="-20" width="40" height="40" fill="#fff"/><circle id="mmc" cx="30" cy="-30" r="8" fill="#000"/></mask></defs>
+    <g id="rays" stroke="#2a9de8" stroke-width="2.4" stroke-linecap="round"></g>
+    <circle id="core" r="6" fill="#2a9de8" mask="url(#mm)"/>
+  </svg>
+
+  <div id="pages"></div>
+  <div id="dots"></div>
+  <div id="lang">Continue in English</div>
+  <div id="cta"><span>Suhbatni boshlash</span><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" id="ctaArr"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
+  <div id="login"><h1>Telefon raqamingiz</h1><div class="sub">Tasdiqlash kodini yuboramiz. Raqamingiz faqat hisobga kirish uchun ishlatiladi.</div></div>
+  <div id="touch"></div>
+ </div></div>
+
+ <div id="panel">
+  <h2>ARUGRAM · tanishtiruv animatsiyalari</h2>
+  <div class="tag">6 sahifa, har biri o'zimiz chizgan animatsiya. Ko'k uslub, o'zimizning dizayn va qiymatlar</div>
+  <div id="steps"></div>
+  <div id="card"><canvas id="curve" width="420" height="288"></canvas>
+    <div id="info"><div class="t" id="it">—</div><div class="d" id="id">—</div><div id="chips"></div></div></div>
+  <div id="tl"><i id="tli"></i></div><div id="tm"></div>
+ </div>
+</div>
+<script>
+// ───────────── Virtual soat va animatsiya dvigateli ─────────────
+const clock = { t: 0, timers: [], tweens: [], frames: [] };
+const $ = (id) => document.getElementById(id);
+const NS = 'http://www.w3.org/2000/svg';
+const TOTAL_MS = 26600;
+const lerp = (a, b, p) => a + (b - a) * p;
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+function wait(ms) { return new Promise((res) => clock.timers.push({ at: clock.t + ms, res })); }
+function bez(x1, y1, x2, y2) {
+  return (x) => {
+    if (x <= 0) return 0; if (x >= 1) return 1;
+    let t = x;
+    for (let i = 0; i < 8; i++) {
+      const cx = 3 * x1 * t * (1 - t) * (1 - t) + 3 * x2 * t * t * (1 - t) + t * t * t - x;
+      const d = 3 * x1 * (1 - t) * (1 - t) - 6 * x1 * t * (1 - t) + 6 * x2 * t * (1 - t) - 3 * x2 * t * t + 3 * t * t;
+      if (Math.abs(cx) < 1e-5 || Math.abs(d) < 1e-6) break;
+      t -= cx / d;
+    }
+    t = clamp(t);
+    return 3 * y1 * t * (1 - t) * (1 - t) + 3 * y2 * t * t * (1 - t) + t * t * t;
+  };
+}
+const E = { lin: (p) => p, out: bez(0.22, 1, 0.36, 1), inOut: bez(0.65, 0, 0.35, 1), swipe: bez(0.3, 0.9, 0.2, 1) };
+function spring(zeta, omega, D) {
+  const wd = omega * Math.sqrt(1 - zeta * zeta);
+  return (p) => { const tau = p * D; return 1 - Math.exp(-zeta * omega * tau) * (Math.cos(wd * tau) + (zeta * omega / wd) * Math.sin(wd * tau)); };
+}
+function tween(dur, ease, update) {
+  return new Promise((res) => { const tw = { start: clock.t, dur, ease, update, res }; update(ease(0)); clock.tweens.push(tw); });
+}
+const par = (...ps) => Promise.all(ps);
+let curEase = E.out, curDur = 300, curStart = 0;
+function advance(dt) {
+  clock.t += dt;
+  for (const tw of clock.tweens.slice()) {
+    const p = clamp((clock.t - tw.start) / tw.dur);
+    tw.update(tw.ease(p));
+    if (p >= 1) { tw.update(tw.ease(1)); clock.tweens.splice(clock.tweens.indexOf(tw), 1); tw.res(); }
+  }
+  const due = clock.timers.filter((x) => x.at <= clock.t);
+  clock.timers = clock.timers.filter((x) => x.at > clock.t);
+  due.forEach((x) => x.res());
+  clock.frames.forEach((f) => f(clock.t));
+}
+window.step = async (dt) => { advance(dt); await new Promise((r) => setTimeout(r, 0)); await new Promise((r) => setTimeout(r, 0)); };
+
+// ───────────── SVG yordamchilar ─────────────
+function el(tag, attrs, parent) { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
+const GB = '';
+const ease3 = E.out;
+function pulseRing(g, t, period, r0, r1, phase = 0, w = 3) { // kengayuvchi halqa
+  const u = ((t + phase) % period) / period;
+  g.setAttribute('r', String(lerp(r0, r1, ease3(u))));
+  g.setAttribute('opacity', String(0.55 * (1 - u)));
+  g.setAttribute('stroke-width', String(w * (1 - 0.6 * u)));
+}
+function star(g, cx, cy, s, t, ph) {
+  const k = 0.5 + 0.5 * Math.sin(t / 1000 * 4 + ph);
+  g.setAttribute('transform', `translate(${cx},${cy}) scale(${s * (0.4 + 0.8 * k)}) rotate(${t / 12 + ph * 30})`);
+  g.setAttribute('opacity', String(0.35 + 0.65 * k));
+}
+const STAR = 'M0 -6 L1.6 -1.6 L6 0 L1.6 1.6 L0 6 L-1.6 1.6 L-6 0 L-1.6 -1.6Z';
+
+// ───────────── 6 sahifa ─────────────
+const PAGES = [
+  { title: null, msg: "Dunyoning <b>eng tezkor</b> muloqot ilovasi.<br>Bu <b>bepul</b> va <b>xavfsiz</b>." },
+  { title: 'Tez', msg: '<b>ARUGRAM</b> xabarlarni boshqa har qanday<br>ilovadan tezroq yetkazadi.' },
+  { title: 'Bepul', msg: '<b>ARUGRAM</b> suhbatlar va media uchun bepul<br>cheksiz bulutli xotira taqdim etadi.' },
+  { title: 'Kuchli', msg: '<b>ARUGRAM</b>da media va suhbatlar<br>hajmiga cheklov yo\'q.' },
+  { title: 'Xavfsiz', msg: '<b>ARUGRAM</b> xabarlaringizni xakerlik<br>hujumlaridan himoya qiladi.' },
+  { title: 'Bulutli', msg: '<b>ARUGRAM</b> xabarlaringizga bir nechta<br>qurilmadan kirish imkonini beradi.' },
+];
+const pagesEl = $('pages');
+const pg = PAGES.map((p, i) => {
+  const d = document.createElement('div'); d.className = 'pg';
+  d.innerHTML = `<div class="art"><svg width="220" height="220" viewBox="-110 -110 220 220" id="art${i}">${GB}</svg></div>
+    <div class="txt"><h1>${p.title === null ? '<svg id="wm" width="150" height="30" viewBox="0 0 150 30"><text x="75" y="24" text-anchor="middle" font-family="Roboto" font-weight="900" font-size="27" letter-spacing="3" fill="currentColor">ARUGRAM</text></svg>' : p.title}</h1><p>${p.msg}</p></div>`;
+  pagesEl.appendChild(d); return d;
+});
+const art = pg.map((_, i) => $('art' + i));
+// 1-sahifa: logotip
+const A1 = {}; { const s = art[0];
+  A1.r1 = el('circle', { fill: 'none', stroke: '#fff' }, s); A1.r2 = el('circle', { fill: 'none', stroke: '#fff' }, s);
+  el('circle', { r: 72, fill: 'url(#gb)' }, s);
+  A1.orbit = el('g', {}, s); for (let i = 0; i < 3; i++) el('circle', { r: 3.4 - i * 0.7, cx: 92, fill: '#fff', opacity: .7, transform: `rotate(${i * 120})` }, A1.orbit);
+  A1.mark = el('g', { transform: 'translate(-40,-42) scale(.84)' }, s);
+  A1.m1 = el('path', { d: 'M12 40 C12 24 24 14 40 14 H56 C72 14 84 26 84 42 C84 58 72 70 56 70 H34 L20 82 V66 C15 60 12 52 12 40 Z', fill: 'none', stroke: '#fff', 'stroke-width': 6, 'stroke-linejoin': 'round', 'stroke-dasharray': 300 }, A1.mark);
+  A1.m2 = el('path', { d: 'M34 54 L48 26 L62 54 M39 45 H57', fill: 'none', stroke: '#fff', 'stroke-width': 6, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-dasharray': 90 }, A1.mark);
+}
+// 2-sahifa: tez
+const A2 = {}; { const s = art[1];
+  el('circle', { r: 72, fill: 'url(#gb)' }, s);
+  const c = el('g', { 'clip-path': 'url(#cd)' }, s); A2.c = c;
+  A2.lines = [-22, 0, 22].map((y) => el('rect', { x: -60, y: y - 2, width: 40, height: 4, rx: 2, fill: '#fff', opacity: .6 }, c));
+  A2.b = el('g', {}, c);
+  el('rect', { x: -32, y: -21, width: 64, height: 40, rx: 13, fill: '#fff' }, A2.b);
+  el('path', { d: 'M-22 18 L-30 31 L-8 19 Z', fill: '#fff' }, A2.b);
+  [-18, -2, 14].forEach((x, i) => el('rect', { x: x - (i === 2 ? 4 : 0) - 1, y: -9 + i * 0, width: 24 - i * 6, height: 5, rx: 2.5, fill: '#2a8fe0', opacity: .75 }, A2.b));
+  A2.chk = el('path', { d: 'M-10 6 l7 7 l14 -14 M2 6 l7 7 l14 -14', fill: 'none', stroke: '#1a77d4', 'stroke-width': 4.5, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-dasharray': 70 }, A2.b);
+  A2.st = [[80, -78, .9, 0], [92, 60, .7, 2], [-86, 66, .8, 4]].map(([x, y, sc, ph]) => ({ g: el('path', { d: STAR, fill: '#9fd6ff' }, s), x, y, sc, ph }));
+}
+// 3-sahifa: bepul
+const A3 = {}; { const s = art[2];
+  el('circle', { r: 72, fill: 'url(#gb)' }, s);
+  A3.cloud = el('path', { d: 'M-36 22 a23 23 0 0 1 3 -45 a30 30 0 0 1 56 -5 a25 25 0 0 1 12 50 Z', fill: '#fff', transform: 'translate(0,-2)' }, s);
+  let d = ''; for (let i = 0; i <= 80; i++) { const a = i / 80 * Math.PI * 2, k = 1 + Math.sin(a) ** 2; d += (i ? 'L' : 'M') + (30 * Math.cos(a) / k).toFixed(2) + ' ' + (30 * Math.sin(a) * Math.cos(a) / k + 0).toFixed(2); }
+  A3.inf0 = el('path', { d, fill: 'none', stroke: '#d4e9fb', 'stroke-width': 6, 'stroke-linecap': 'round', transform: 'translate(0,-1)' }, s);
+  A3.inf = el('path', { d, fill: 'none', stroke: '#1a77d4', 'stroke-width': 6, 'stroke-linecap': 'round', transform: 'translate(0,-1)', pathLength: 100, 'stroke-dasharray': '34 66' }, s);
+  A3.st = [[76, -70, 1, 0], [-88, -40, .8, 1.7], [86, 54, .7, 3.1], [-70, 74, .9, 4.2]].map(([x, y, sc, ph]) => ({ g: el('path', { d: STAR, fill: '#9fd6ff' }, s), x, y, sc, ph }));
+}
+// 4-sahifa: kuchli
+const A4 = {}; { const s = art[3];
+  A4.ring = el('circle', { fill: 'none', stroke: '#fff' }, s);
+  el('circle', { r: 72, fill: 'url(#gb)' }, s);
+  A4.back = el('g', {}, s);
+  A4.bolt = el('path', { d: 'M8 -40 L-20 6 H-3 L-9 40 L22 -8 H4 Z', fill: '#fff', 'stroke-linejoin': 'round', stroke: '#fff', 'stroke-width': 3 }, s);
+  A4.front = el('g', {}, s);
+  A4.chips = [0, 1, 2].map((k) => {
+    const g = el('g', {});
+    el('rect', { x: -17, y: -17, width: 34, height: 34, rx: 9, fill: '#fff' }, g);
+    if (k === 0) { el('path', { d: 'M-10 9 l7 -9 l5 6 l4 -4 l8 7 Z', fill: '#2a8fe0' }, g); el('circle', { cx: 6, cy: -7, r: 3, fill: '#2a8fe0' }, g); }
+    if (k === 1) { el('path', { d: 'M-5 -9 L9 0 L-5 9 Z', fill: '#2a8fe0' }, g); }
+    if (k === 2) { [-9, -2, 5].forEach((y, i) => el('rect', { x: -10, y: y - 1.5, width: i === 2 ? 12 : 20, height: 3.4, rx: 1.7, fill: '#2a8fe0' }, g)); }
+    return g;
+  });
+}
+// 5-sahifa: xavfsiz
+const A5 = {}; { const s = art[4];
+  A5.ring = el('circle', { fill: 'none', stroke: '#fff' }, s);
+  el('circle', { r: 72, fill: 'url(#gb)' }, s);
+  A5.fl = [0, 1, 2, 3, 4, 5].map(() => el('circle', { fill: 'none', stroke: '#ffe0e4', 'stroke-width': 3, r: 0, opacity: 0 }, s));
+  A5.shield = el('path', { d: 'M0 -54 L42 -39 V-4 C42 25 23 44 0 55 C-23 44 -42 25 -42 -4 V-39 Z', fill: '#fff', 'stroke-linejoin': 'round' }, s);
+  A5.shine = el('path', { d: 'M0 -54 L42 -39 V-4 C42 25 23 44 0 55 C-23 44 -42 25 -42 -4 V-39 Z', fill: 'none', stroke: '#1a77d4', 'stroke-width': 3, opacity: .0, 'stroke-linejoin': 'round' }, s);
+  A5.lock = el('g', { transform: 'translate(0,4)' }, s);
+  A5.shackle = el('path', { d: 'M-9 -2 V-10 a9 9 0 0 1 18 0 V-2', fill: 'none', stroke: '#1a77d4', 'stroke-width': 5.5, 'stroke-linecap': 'round' }, A5.lock);
+  el('rect', { x: -15, y: -3, width: 30, height: 25, rx: 7, fill: '#1a77d4' }, A5.lock);
+  el('circle', { cx: 0, cy: 7, r: 3.4, fill: '#fff' }, A5.lock); el('rect', { x: -1.6, y: 8, width: 3.2, height: 8, rx: 1.6, fill: '#fff' }, A5.lock);
+  A5.p = [0, 1, 2, 3, 4, 5].map((i) => el('circle', { r: 4.6, fill: '#ff6070' }, s));
+}
+// 6-sahifa: bulutli
+const A6 = {}; { const s = art[5];
+  el('circle', { r: 72, fill: 'url(#gb)' }, s);
+  A6.line1 = el('path', { d: 'M-52 34 Q-50 -6 -10 -14', fill: 'none', stroke: '#fff', 'stroke-width': 2.4, 'stroke-dasharray': '2 6', 'stroke-linecap': 'round', opacity: .7 }, s);
+  A6.line2 = el('path', { d: 'M52 34 Q50 -6 10 -14', fill: 'none', stroke: '#fff', 'stroke-width': 2.4, 'stroke-dasharray': '2 6', 'stroke-linecap': 'round', opacity: .7 }, s);
+  A6.cloud = el('g', { transform: 'translate(0,-20)' }, s);
+  el('path', { d: 'M-28 18 a17 17 0 0 1 2 -33 a23 23 0 0 1 43 -4 a19 19 0 0 1 9 37 Z', fill: '#fff', transform: 'translate(0,2)' }, A6.cloud);
+  A6.phone = el('g', { transform: 'translate(-54,40)' }, s);
+  el('rect', { x: -10, y: -17, width: 20, height: 34, rx: 5, fill: '#fff' }, A6.phone);
+  A6.ps = el('rect', { x: -7, y: -13, width: 14, height: 24, rx: 2.5, fill: '#2a8fe0', opacity: .35 }, A6.phone);
+  A6.lap = el('g', { transform: 'translate(54,38)' }, s);
+  el('rect', { x: -22, y: -16, width: 44, height: 28, rx: 4, fill: '#fff' }, A6.lap); el('rect', { x: -28, y: 13, width: 56, height: 5, rx: 2.5, fill: '#fff' }, A6.lap);
+  A6.ls = el('rect', { x: -18, y: -12, width: 36, height: 20, rx: 2, fill: '#2a8fe0', opacity: .35 }, A6.lap);
+  A6.pk = [0, 1].map(() => el('circle', { r: 5, fill: '#fff', stroke: '#1a77d4', 'stroke-width': 2 }, s));
+  A6.st = [[78, -56, .9, 0], [-84, -52, .8, 2.2]].map(([x, y, sc, ph]) => ({ g: el('path', { d: STAR, fill: '#9fd6ff' }, s), x, y, sc, ph }));
+}
+// nuqtalar
+const dotsEl = $('dots'); const dots = PAGES.map(() => { const d = document.createElement('div'); d.className = 'dot'; dotsEl.appendChild(d); return d; });
+// quyosh nurlari
+const raysG = $('rays'); const rays = [];
+for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4; rays.push(el('line', { x1: Math.cos(a) * 9.5, y1: Math.sin(a) * 9.5, x2: Math.cos(a) * 13.5, y2: Math.sin(a) * 13.5 }, raysG)); }
+
+// ───────────── O'ng panel ─────────────
+const SCENES = [
+  { n: 'Ekran ochilishi va 1-sahifa: logotip', t: 'Aylana sakrab chiqadi, logotip konturi chiziladi', d: 'Doira prujina bilan kattalashadi, logotip konturi chiziladi, atrofda halqa to\'lqinlari va aylanuvchi nuqtalar paydo bo\'ladi.', chips: ['prujina ζ 0.5', 'kontur 900 ms', 'halqa 2.4 s'], ease: spring(0.5, 24, 0.6), dur: 600 },
+  { n: '2-sahifa: Tez', t: 'Xabar tezlik izlari bilan uchib kelib, yetkaziladi', d: 'Xabar pufagi chapdan tezlik chiziqlari bilan keladi, to\'xtaydi va qo\'sh belgi (✓✓) chiziladi, keyin o\'ngga uchib ketadi.', chips: ['2.8 s tsikl', 'ease-out', 'chiziqlar 3 ta'], ease: E.out, dur: 700 },
+  { n: '3-sahifa: Bepul', t: 'Bulut ichida cheksizlik belgisi (∞) uzluksiz chiziladi', d: 'Bulut ichidagi ∞ chizig\'i cheksiz aylanadi, atrofda yulduzchalar miltillaydi. Cheksiz bulutli xotirani bildiradi.', chips: ['∞ 2.6 s aylanish', 'yulduzcha 4 ta'], ease: E.lin, dur: 2600 },
+  { n: '4-sahifa: Kuchli', t: 'Chaqmoq atrofida fayllar aylanadi', d: 'Rasm, video va hujjat kartalari ellips bo\'ylab aylanadi, oldidan o\'tganda kattalashadi. Chaqmoqdan energiya halqasi tarqaladi.', chips: ['aylanish 5 s', 'chuqurlik effekti', 'halqa 1.6 s'], ease: E.lin, dur: 1600 },
+  { n: '5-sahifa: Xavfsiz', t: 'Qalqon hujumlarni qaytaradi, qulf yopiladi', d: 'Qizil zarrachalar qalqonga uriladi, yorqin halqa chiqadi va qaytib ketadi. Qulf halqasi yopilib turadi.', chips: ['zarracha 6 ta', 'to\'qnashuv 2.4 s', 'qulf prujina'], ease: spring(0.5, 26, 0.7), dur: 700 },
+  { n: '6-sahifa: Bulutli', t: 'Qurilmalar o\'rtasida xabar bulut orqali o\'tadi', d: 'Telefondan bulutga, bulutdan noutbukka xabar paketlari oqadi, qurilma ekrani yonib o\'chadi.', chips: ['paket 2.4 s', 'qurilma 2 ta', 'nuqtali chiziq'], ease: E.inOut, dur: 1200 },
+  { n: 'Tema (kun/tun) tugmasi', t: 'Quyosh oyga aylanadi, ekran ranglari almashadi', d: 'Nurlar yig\'iladi va oy kesimi sirpanib kiradi. Orqa fon, matn va nuqtalar bir vaqtda 520 ms ichida o\'zgaradi.', chips: ['520 ms', 'ease-in-out', 'nurlar 8 ta'], ease: E.inOut, dur: 520 },
+  { n: '"Suhbatni boshlash" tugmasi', t: 'Tugma dumaloqqa aylanib, kirish oynasi ochiladi', d: 'Tugma kengligi qisqarib doira bo\'ladi va o\'ngga siljiydi, matn o\'qqa almashadi, sahifa tepaga ketib kirish oynasi chiqadi.', chips: ['520 ms', 'ease-out', 'kengligi 298 → 58'], ease: E.out, dur: 520 },
+];
+const stepsEl = $('steps');
+SCENES.forEach((s, i) => { const d = document.createElement('div'); d.className = 'st'; d.id = 'st' + i; d.innerHTML = `<span class="n">${i + 1}</span><span>${s.n}</span>`; stepsEl.appendChild(d); });
+let activeScene = -1;
+function setScene(i) {
+  if (i === activeScene) return; activeScene = i;
+  SCENES.forEach((_, k) => $('st' + k).classList.toggle('on', k === i));
+  const s = SCENES[i];
+  $('it').textContent = s.t; $('id').textContent = s.d;
+  $('chips').innerHTML = s.chips.map((c) => `<span class="chip">${c}</span>`).join('');
+  curEase = s.ease; curDur = s.dur; curStart = clock.t;
+}
+const cv = $('curve'), cx = cv.getContext('2d');
+function drawCurve(t) {
+  cx.fillStyle = '#0b1018'; cx.fillRect(0, 0, 420, 288);
+  const L = 36, T = 26, W = 348, H = 214;
+  cx.strokeStyle = '#18222f'; cx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) { cx.beginPath(); cx.moveTo(L, T + H * i / 4); cx.lineTo(L + W, T + H * i / 4); cx.stroke(); }
+  const y1 = T + H * 0.2; cx.strokeStyle = '#2c3d52'; cx.setLineDash([6, 6]); cx.beginPath(); cx.moveTo(L, y1); cx.lineTo(L + W, y1); cx.stroke(); cx.setLineDash([]);
+  const g = cx.createLinearGradient(L, 0, L + W, 0); g.addColorStop(0, '#3cbcf7'); g.addColorStop(1, '#1673d0');
+  cx.strokeStyle = g; cx.lineWidth = 4; cx.lineJoin = 'round'; cx.beginPath();
+  const val = (p) => curEase(p);
+  for (let i = 0; i <= 120; i++) { const p = i / 120; const x = L + W * p, y = T + H * (1 - 0.8 * val(p)); if (i === 0) cx.moveTo(x, y); else cx.lineTo(x, y); }
+  cx.stroke();
+  const p = clamp(((t - curStart) % (curDur + 600)) / curDur);
+  const px = L + W * p, py = T + H * (1 - 0.8 * val(p));
+  cx.fillStyle = '#fff'; cx.beginPath(); cx.arc(px, py, 8, 0, 7); cx.fill();
+  cx.fillStyle = 'rgba(60,188,247,.35)'; cx.beginPath(); cx.arc(px, py, 15, 0, 7); cx.fill();
+  cx.fillStyle = '#5f7087'; cx.font = '700 19px Roboto'; cx.fillText('vaqt →', L, 276); cx.fillText('qiymat', 4, 20);
+}
+clock.frames.push((t) => {
+  drawCurve(t);
+  $('tli').style.width = (100 * clamp(t / TOTAL_MS)) + '%';
+  const s = Math.floor(t / 1000);
+  $('tm').textContent = `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+});
+
+// ───────────── Sahifalar holati ─────────────
+const W = 330;
+const t0 = PAGES.map(() => 0);     // sahifa ko'rina boshlagan vaqt
+let pos = 0;                       // 0..5 (kasr: swipe paytida)
+const intro = { appear: 0 };       // birinchi ochilish (0..1)
+function layout() {
+  const a = Math.floor(pos), f = pos - a;
+  pg.forEach((d, i) => {
+    const off = i - pos;                 // -1..1
+    const vis = Math.abs(off) < 1;
+    d.style.display = vis ? 'block' : 'none';
+    if (!vis) return;
+    const artEl = d.querySelector('.art'), txt = d.querySelector('.txt');
+    // parallaks: rasm sahifadan sal tezroq, matn sekinroq suriladi
+    artEl.style.transform = `translateX(${off * W * 1.12}px) scale(${1 - 0.18 * Math.abs(off)})`;
+    artEl.style.opacity = String(1 - Math.abs(off) * 1.1);
+    txt.style.transform = `translateX(${off * W * 0.72}px)`;
+    txt.style.opacity = String(1 - Math.abs(off) * 1.25);
+  });
+  dots.forEach((d, i) => {
+    const near = clamp(1 - Math.abs(i - pos));
+    d.style.width = (7 + 12 * near) + 'px';
+  });
+  dots.forEach((d, i) => { const near = clamp(1 - Math.abs(i - pos)); const light = theme.p; d.style.background = near > .5 ? '#2a9de8' : `rgb(${lerp(74, 196, light) | 0},${lerp(79, 202, light) | 0},${lerp(87, 210, light) | 0})`; });
+}
+const theme = { p: 0 };
+function applyTheme() {
+  const p = theme.p; const mix = (a, b) => `rgb(${lerp(a[0], b[0], p) | 0},${lerp(a[1], b[1], p) | 0},${lerp(a[2], b[2], p) | 0})`;
+  $('screen').style.background = mix([17, 20, 24], [244, 247, 251]);
+  $('screen').style.color = mix([255, 255, 255], [16, 24, 34]);
+  document.querySelectorAll('.pg p').forEach((e) => { e.style.color = mix([208, 214, 222], [76, 90, 108]); });
+  $('lang').style.color = mix([74, 163, 224], [30, 120, 200]);
+  $('status').style.color = mix([255, 255, 255], [16, 24, 34]);
+  $('wm').querySelector('text').setAttribute('fill', mix([255, 255, 255], [16, 24, 34]));
+}
+// quyosh -> oy
+function sunMoon(p) {
+  rays.forEach((r, i) => { const k = clamp((1 - p) * 1.4 - i * 0.02); r.setAttribute('opacity', String(k)); r.setAttribute('transform', `scale(${lerp(.5, 1, clamp((1 - p)))})`); });
+  $('core').setAttribute('r', String(lerp(6, 9.5, p)));
+  $('mmc').setAttribute('cx', String(lerp(30, 5.5, clamp(p * 1.2 - 0.1))));
+  $('mmc').setAttribute('cy', String(lerp(-30, -4.5, clamp(p * 1.2 - 0.1))));
+  $('sun').style.transform = `rotate(${p * 40}deg)`;
+}
+// ───────────── Rasm animatsiyalari (har kadr) ─────────────
+const PS = [0, 1, 2, 3, 4, 5].map(() => 0); // aniq sahifa-lokal vaqt
+function art1(lt) {
+  const ap = clamp(lt / 900);
+  A1.m1.setAttribute('stroke-dashoffset', String(300 * (1 - E.out(ap))));
+  A1.m2.setAttribute('stroke-dashoffset', String(90 * (1 - E.out(clamp((lt - 300) / 700)))));
+  const bre = 1 + 0.025 * Math.sin(lt / 1000 * 2.4);
+  A1.mark.setAttribute('transform', `translate(-40,-42) scale(${0.84 * bre})`);
+  A1.orbit.setAttribute('transform', `rotate(${lt / 1000 * 38})`);
+  pulseRing(A1.r1, lt, 2400, 72, 100, 0); pulseRing(A1.r2, lt, 2400, 72, 100, 1200);
+}
+function art2(lt) {
+  const T = 2800, u = (lt % T);
+  // 0..650 kirish, 650..2100 to'xtaydi, 2100..2700 chiqib ketadi
+  let x, fast = 0;
+  if (u < 650) { const p = u / 650; x = lerp(-130, 0, E.out(p)); fast = 1 - p; }
+  else if (u < 2100) { x = 0; }
+  else { const p = clamp((u - 2100) / 600); x = lerp(0, 140, bez(.5, 0, 1, 1)(p)); fast = p; }
+  A2.b.setAttribute('transform', `translate(${x},0)`);
+  A2.lines.forEach((l, i) => { l.setAttribute('x', String(x - 82 - i * 6 - fast * 22)); l.setAttribute('width', String(8 + fast * 52)); l.setAttribute('opacity', String(.15 + .6 * fast)); });
+  const c = clamp((u - 900) / 600); A2.chk.setAttribute('stroke-dashoffset', String(70 * (1 - E.out(c))));
+  A2.st.forEach((s) => star(s.g, s.x, s.y, s.sc, lt, s.ph));
+}
+function art3(lt) {
+  A3.inf.setAttribute('stroke-dashoffset', String(-((lt / 2600) % 1) * 100));
+  A3.cloud.setAttribute('transform', `translate(0,${-2 + Math.sin(lt / 1000 * 2.2) * 2.4})`);
+  A3.st.forEach((s) => star(s.g, s.x, s.y, s.sc, lt, s.ph));
+}
+function art4(lt) {
+  const pulse = 1 + 0.07 * Math.sin(lt / 1000 * 5);
+  A4.bolt.setAttribute('transform', `scale(${pulse})`);
+  pulseRing(A4.ring, lt, 1600, 72, 98, 0, 4);
+  const items = A4.chips.map((g, k) => { const a = lt / 5000 * Math.PI * 2 + k * Math.PI * 2 / 3; const x = Math.cos(a) * 80, y = Math.sin(a) * 30 - Math.cos(a) * 12; const depth = Math.sin(a); return { g, x, y, depth }; }).sort((p, q) => p.depth - q.depth);
+  items.forEach((it) => {
+    const sc = 0.68 + 0.3 * (0.5 + 0.5 * it.depth);
+    it.g.setAttribute('transform', `translate(${it.x.toFixed(2)},${it.y.toFixed(2)}) scale(${sc.toFixed(3)}) rotate(${(Math.cos(it.x / 40) * 8).toFixed(1)})`);
+    it.g.setAttribute('opacity', String(0.6 + 0.4 * (0.5 + 0.5 * it.depth)));
+    (it.depth < 0 ? A4.back : A4.front).appendChild(it.g);
+  });
+}
+function art5(lt) {
+  pulseRing(A5.ring, lt, 3200, 72, 98, 0, 3);
+  const dr = clamp(lt / 800); const s = lerp(.2, 1, spring(0.5, 24, .8)(dr)); A5.shield.setAttribute('transform', `scale(${s})`); A5.shield.setAttribute('opacity', String(clamp(dr * 3)));
+  // qulf halqasi: boshida ochiq, keyin yopiladi
+  const cl = spring(0.5, 26, 0.7)(clamp((lt - 500) / 700));
+  A5.shackle.setAttribute('transform', `translate(0,${-9 * (1 - cl)}) rotate(${-14 * (1 - cl)} 9 -2)`);
+  const ang = [210, 255, 300, 330, 15, 165].map((d) => d * Math.PI / 180);
+  const T = 2400;
+  A5.p.forEach((c, i) => {
+    const u = (((lt + i * 400) % T) / T);
+    let r, op = 1;
+    if (u < 0.55) { r = lerp(130, 58, E.lin(u / 0.55)); }
+    else { const p = (u - 0.55) / 0.45; r = lerp(58, 100, E.out(p)); op = 1 - p; }
+    const a = ang[i] + (u >= 0.55 ? 0.35 * (u - 0.55) * (i % 2 ? 1 : -1) : 0);
+    c.setAttribute('cx', (Math.cos(a) * r).toFixed(2)); c.setAttribute('cy', (Math.sin(a) * r).toFixed(2)); c.setAttribute('opacity', String(op * clamp(lt / 600)));
+    c.setAttribute('r', String(4.6 - 1.8 * (u >= 0.55 ? (u - 0.55) / 0.45 : 0)));
+    const f = A5.fl[i];
+    if (u >= 0.55 && u < 0.8) { const p = (u - 0.55) / 0.25; f.setAttribute('cx', (Math.cos(ang[i]) * 56).toFixed(2)); f.setAttribute('cy', (Math.sin(ang[i]) * 56).toFixed(2)); f.setAttribute('r', String(4 + 12 * E.out(p))); f.setAttribute('opacity', String(0.9 * (1 - p))); }
+    else f.setAttribute('opacity', '0');
+  });
+}
+function art6(lt) {
+  const T = 2400, u = (lt % T) / T;
+  A6.line1.setAttribute('stroke-dashoffset', String(-lt / 40)); A6.line2.setAttribute('stroke-dashoffset', String(-lt / 40));
+  // paket: telefon -> bulut (0..0.4), bulut -> noutbuk (0.5..0.9)
+  const pt = (x0, y0, cx_, cy_, x1, y1, p) => { const a = (1 - p) * (1 - p), b = 2 * (1 - p) * p, c = p * p; return [a * x0 + b * cx_ + c * x1, a * y0 + b * cy_ + c * y1]; };
+  const p1 = clamp(u / 0.4), p2 = clamp((u - 0.5) / 0.4);
+  const [x1, y1] = pt(-52, 34, -50, -6, -10, -14, E.inOut(p1));
+  const [x2, y2] = pt(10, -14, 50, -6, 52, 34, E.inOut(p2));
+  A6.pk[0].setAttribute('cx', x1.toFixed(2)); A6.pk[0].setAttribute('cy', y1.toFixed(2)); A6.pk[0].setAttribute('opacity', String(u < 0.42 ? 1 : 0));
+  A6.pk[1].setAttribute('cx', x2.toFixed(2)); A6.pk[1].setAttribute('cy', y2.toFixed(2)); A6.pk[1].setAttribute('opacity', String(u >= 0.5 && u < 0.92 ? 1 : 0));
+  const flash = (c, w) => clamp(1 - Math.abs(u - c) / w);
+  A6.ps.setAttribute('opacity', String(0.35 + 0.65 * flash(0.02, 0.1)));
+  A6.ls.setAttribute('opacity', String(0.35 + 0.65 * flash(0.92, 0.1)));
+  const cp = 1 + 0.08 * Math.max(flash(0.42, 0.08), flash(0.5, 0.08));
+  A6.cloud.setAttribute('transform', `translate(0,${-20 + Math.sin(lt / 1000 * 2.2) * 1.8}) scale(${cp})`);
+  A6.st.forEach((s) => star(s.g, s.x, s.y, s.sc, lt, s.ph));
+}
+const ARTS = [art1, art2, art3, art4, art5, art6];
+clock.frames.push((t) => {
+  pg.forEach((d, i) => { if (d.style.display !== 'none') ARTS[i](t - t0[i]); });
+  const s = Math.floor((t / 60000)); $('clk').textContent = '9:41';
+});
+
+// ───────────── Barmoq izi ─────────────
+async function tapAt(x, y) {
+  const tc = $('touch'); tc.style.left = x + 'px'; tc.style.top = y + 'px';
+  await tween(230, E.out, (p) => { tc.style.opacity = String(p < .55 ? p / .55 : 1 - (p - .55) / .45 * 0.9); tc.style.transform = `scale(${lerp(.35, 1.05, p)})`; });
+  tc.style.opacity = '0';
+}
+async function swipeTo(next) { // chapga surish
+  const tc = $('touch'); const target = next;
+  t0[next] = clock.t;
+  const from = pos, y = 250;
+  tc.style.left = '250px'; tc.style.top = y + 'px';
+  await tween(580, E.swipe, (p) => {
+    pos = lerp(from, target, p);
+    layout();
+    const fp = clamp(p / 0.78);
+    tc.style.left = lerp(250, 70, E.out(fp)) + 'px';
+    tc.style.opacity = String(p < 0.06 ? p / 0.06 : (p > 0.78 ? 1 - clamp((p - 0.78) / 0.22) : 1));
+    tc.style.transform = `scale(${p < 0.1 ? 0.85 : 1})`;
+  });
+  tc.style.opacity = '0'; pos = target; layout();
+}
+
+// ───────────── Ssenariy ─────────────
+async function main() {
+  // boshlang'ich holat
+  theme.p = 0; applyTheme(); sunMoon(0); layout();
+  $('screen').style.opacity = '1';
+  const stuff = [$('sun'), $('dots'), $('lang'), $('cta')];
+  stuff.forEach((e) => { e.style.opacity = '0'; });
+  pg[0].querySelector('.art').style.opacity = '0'; pg[0].querySelector('.txt').style.opacity = '0';
+  await wait(350);
+  setScene(0);
+  t0[0] = clock.t;
+  // 1-sahifa chiqishi
+  const art0 = pg[0].querySelector('.art'), txt0 = pg[0].querySelector('.txt');
+  const sp = spring(0.5, 22, 0.7);
+  await par(
+    tween(700, sp, (p) => { art0.style.opacity = String(clamp(p * 3)); art0.style.transform = `scale(${lerp(.4, 1, p)})`; }),
+    wait(400).then(() => tween(560, E.out, (p) => { txt0.style.opacity = String(p); txt0.style.transform = `translateY(${(1 - p) * 18}px)`; })),
+    wait(650).then(() => par(
+      tween(500, E.out, (p) => { $('dots').style.opacity = String(p); $('dots').style.transform = `translateY(${(1 - p) * 10}px)`; }),
+      tween(560, E.out, (p) => { $('sun').style.opacity = String(p); }),
+      wait(120).then(() => tween(560, E.out, (p) => { $('cta').style.opacity = String(p); $('cta').style.transform = `translateY(${(1 - p) * 26}px)`; })),
+      wait(200).then(() => tween(500, E.out, (p) => { $('lang').style.opacity = String(p); })),
+    )),
+  );
+  art0.style.transform = ''; txt0.style.transform = ''; layout();
+  await wait(2200);
+  for (let i = 1; i < 6; i++) {
+    setScene(i);
+    await swipeTo(i);
+    await wait(i === 5 ? 3100 : 2700);
+  }
+  // tema tugmasi
+  setScene(6);
+  await wait(300);
+  await tapAt(296 - 0, 56 + 0);
+  await tween(520, E.inOut, (p) => { theme.p = p; applyTheme(); sunMoon(p); layout(); });
+  await wait(1600);
+  // boshlash tugmasi
+  setScene(7);
+  await tapAt(165, 601);
+  const cta = $('cta');
+  await tween(140, E.out, (p) => { cta.style.transform = `scale(${1 - 0.04 * p})`; });
+  await tween(520, E.out, (p) => {
+    cta.style.transform = 'scale(1)';
+    const w = lerp(298, 58, p), h = lerp(46, 58, p), x = lerp(16, 330 - 22 - 58, p), y = lerp(578, 570, p);
+    cta.style.width = w + 'px'; cta.style.height = h + 'px'; cta.style.left = x + 'px'; cta.style.top = y + 'px'; cta.style.borderRadius = (h / 2) + 'px';
+    cta.querySelector('span').style.opacity = String(clamp(1 - p * 2.4));
+    $('ctaArr').style.opacity = String(clamp((p - 0.45) * 2));
+    $('pages').style.opacity = String(1 - p); $('pages').style.transform = `translateY(${-18 * p}px) scale(${1 - .04 * p})`;
+    $('dots').style.opacity = String(1 - p); $('lang').style.opacity = String(1 - p); $('sun').style.opacity = String(1 - p);
+    $('login').style.opacity = String(clamp((p - 0.35) / 0.65)); $('login').style.transform = `translateY(${(1 - p) * 24}px)`;
+  });
+  await wait(2200);
+  window.__done = true;
+}
+window.start = () => { main().then(() => { window.__finished = true; }); };
+if (!new URLSearchParams(location.search).has('manual')) window.start();
+</script>
+</body>
+</html>

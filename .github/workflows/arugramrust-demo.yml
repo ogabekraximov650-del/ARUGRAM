@@ -1,0 +1,72 @@
+name: ARUGRAMRUST — animatsiya videosi
+
+# `ARUmultiplatform/ARUGRAMRUST/**` o'zgarganda: tanishtiruv (intro) animatsiyasini 60 fps video qilib chiqaradi
+# va Telegram "Saqlangan xabarlar"ga yuboradi (foydalanuvchi talabi: video faqat Actions'da yasaladi).
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ARUmultiplatform/ARUGRAMRUST/**'
+      - 'tool/notify/send_video.py'
+      - '.github/workflows/arugramrust-demo.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arugramrust-demo
+  cancel-in-progress: true
+
+jobs:
+  video:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    # `ENCODE_TOKEN`, `TG_API_ID`, `TG_API_HASH` — Environment secret (arumediatv-rs.yml bilan bir xil).
+    environment: secret
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: ffmpeg va Playwright (Chromium)
+        working-directory: ARUmultiplatform/ARUGRAMRUST/demo
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+          npm init -y >/dev/null
+          npm i --no-save playwright@1.56.1
+          npx playwright install --with-deps chromium
+
+      - name: Video (tanishtiruv animatsiyasi)
+        id: video
+        working-directory: ARUmultiplatform/ARUGRAMRUST/demo
+        run: |
+          OUT="$RUNNER_TEMP/video"; mkdir -p "$OUT"
+          DEMO=intro_demo.html node render.mjs video "$OUT/arugram_intro_animatsiya.mp4"
+          cat "$OUT/arugram_intro_animatsiya.mp4.txt"
+          ls -la "$OUT"
+          echo "dir=$OUT" >> "$GITHUB_OUTPUT"
+
+      - name: Videoni Telegram "Saqlangan xabarlar"ga yuborish
+        continue-on-error: true
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+        run: |
+          K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          pip install --no-cache-dir -q pyrogram==2.0.106 tgcrypto==1.2.5
+          S="$RUNNER_TEMP/notify_session"
+          K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K \
+            -in tool/encode/session.enc -out "$S.session"
+          head -c 16 "$S.session" | grep -q "SQLite format 3"
+          DUR=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "${{ steps.video.outputs.dir }}/arugram_intro_animatsiya.mp4" | cut -d. -f1)
+          python tool/notify/send_video.py "$S" "${{ steps.video.outputs.dir }}/arugram_intro_animatsiya.mp4" "ARUGRAM tanishtiruv animatsiyasi (build ${{ github.run_number }})" "$DUR"
+          rm -f "$S.session"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arugram-intro-video-${{ github.run_number }}
+          path: ${{ steps.video.outputs.dir }}/*.mp4
+          retention-days: 30

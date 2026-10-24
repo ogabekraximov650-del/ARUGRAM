@@ -9,7 +9,8 @@ RU: Rust-версия (uzcoders) ARUGRAM. Пока есть только **об�
 - `login_demo.html` — UZ: kirish oqimi (telefon → kod → parol → "Chatlar tez orada qo'shiladi") animatsiyalari, o'z dizaynimiz. Barcha animatsiyalar bitta virtual soatda, shuning uchun video har kadrda aniq.
   EN: the login flow animations (phone → code → password → "Chats coming soon"), our own design. Everything runs on one virtual clock, so the video is frame-exact.
   RU: анимации потока входа (телефон → код → пароль → «Чаты скоро появятся»), наш собственный дизайн. Всё идёт по одним виртуальным часам, видео покадрово точно.
-- `render.mjs` — UZ: `node render.mjs video out.mp4` (60 fps). EN/RU: same.
+- `intro_demo.html` — UZ: tanishtiruv (intro) ekrani: 6 sahifa, har birida o'zimiz chizgan animatsiya, kun/tun tugmasi va "Suhbatni boshlash" tugmasi. EN: the intro screen: 6 pages, each with our own animation, the day/night button and the "Start" button. RU: экран знакомства: 6 страниц со своей анимацией, кнопка день/ночь и кнопка «Начать».
+- `render.mjs` — UZ: `DEMO=intro_demo.html node render.mjs video out.mp4` (60 fps). Video faqat GitHub Actions'da (`.github/workflows/arugramrust-demo.yml`) yasaladi va Telegram'ga yuboriladi. EN/RU: same.
 
 ## Litsenziya / License / Лицензия
 

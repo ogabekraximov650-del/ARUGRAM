@@ -2,9 +2,9 @@
 // EN: Renders `login_demo.html` into a 60 fps video (mp4) or check screenshots (virtual clock, frame-exact).
 // RU: Превращает `login_demo.html` в видео 60 fps (mp4) или в проверочные снимки (виртуальные часы, покадрово точно).
 //
-// Ishlatish / Usage:  node render.mjs video out.mp4
+// Ishlatish / Usage:  DEMO=intro_demo.html node render.mjs video out.mp4
 //                     node render.mjs shots outDir 1500 6000 12000
-import { chromium } from '/opt/node-tools/node_modules/playwright/index.mjs';
+const { chromium } = await import(process.env.PW_PATH || 'playwright');
 import { spawn } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -18,7 +18,7 @@ const browser = await chromium.launch({ executablePath: process.env.CHROME || un
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 });
 page.on('pageerror', (e) => console.error('PAGEERROR', e.message));
 page.on('console', (m) => { if (m.type() === 'error') console.error('CONSOLE', m.text()); });
-await page.goto('file://' + path.join(here, 'login_demo.html') + '?manual=1');
+await page.goto('file://' + path.join(here, process.env.DEMO || 'login_demo.html') + '?manual=1');
 await page.evaluate(() => document.fonts.ready);
 await page.evaluate(() => window.start());
 
