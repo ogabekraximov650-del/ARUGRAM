@@ -3,6 +3,12 @@
 <repositories><repository><id>google</id><url>https://maven.google.com</url></repository></repositories>
 <dependencies>
 <dependency><groupId>androidx.media3</groupId><artifactId>media3-exoplayer</artifactId><version>1.5.1</version><type>aar</type></dependency>
-<dependency><groupId>com.airbnb.android</groupId><artifactId>lottie</artifactId><version>6.6.2</version><type>aar</type></dependency>
+<dependency><groupId>com.airbnb.android</groupId><artifactId>lottie</artifactId><version>6.6.2</version><type>aar</type>
+<exclusions>
+<exclusion><groupId>androidx.appcompat</groupId><artifactId>*</artifactId></exclusion>
+<exclusion><groupId>androidx.core</groupId><artifactId>*</artifactId></exclusion>
+<exclusion><groupId>androidx.fragment</groupId><artifactId>*</artifactId></exclusion>
+<exclusion><groupId>androidx.lifecycle</groupId><artifactId>*</artifactId></exclusion>
+</exclusions></dependency>
 <dependency><groupId>androidx.annotation</groupId><artifactId>annotation-jvm</artifactId><version>1.6.0</version></dependency>
 </dependencies></project>
