@@ -193,7 +193,7 @@ h1{font-size:25px;font-weight:900;letter-spacing:-.2px;line-height:1.15}
 // ───────────── Virtual soat va animatsiya dvigateli ─────────────
 const clock = { t: 0, timers: [], tweens: [], frames: [] };
 const $ = (id) => document.getElementById(id);
-const TOTAL_MS = 37400;
+const TOTAL_MS = 32900;
 function wait(ms) { return new Promise((res) => clock.timers.push({ at: clock.t + ms, res })); }
 const lerp = (a, b, p) => a + (b - a) * p;
 const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
