@@ -17,7 +17,7 @@ use std::time::Instant;
 pub(super) enum TImg {
     Loading,
     Ready(Rc<Image>),
-    Failed(Instant),
+    Failed(Instant, u8),
 }
 
 /// Tayyor animatsiya varag'i (UI oqimida): rasm, ustunlar, kadrlar soni, tezlik.
@@ -52,6 +52,7 @@ thread_local! {
     /// Chatda animatsiya o'ynaydigan stikerli xabarlar (eng oxirgi bir nechtasi: ular ekranda ko'rinadi).
     static CHAT_ANIM: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
     static ANIMS: RefCell<HashMap<String, AEntry>> = RefCell::new(HashMap::new());
+    static IMG_SEEN: RefCell<HashMap<String, Arc<AtomicU64>>> = RefCell::new(HashMap::new());
     static IMGS: RefCell<HashMap<String, TImg>> = RefCell::new(HashMap::new());
     static RECENT: RefCell<Vec<String>> = RefCell::new(Vec::new());
 }
@@ -118,22 +119,54 @@ impl Home {
         match st {
             Some(TImg::Ready(i)) => return Some(i),
             Some(TImg::Loading) => return None,
-            Some(TImg::Failed(t)) if t.elapsed().as_secs() < 20 => return None,
+            // UZ: Xato bo'lsa 3, 6, 9 soniyadan keyin qayta uriniladi (jami 3 marta, Kotlindagidek).
+            // EN: After a failure it retries after 3, 6, 9 seconds (3 times in total, like Kotlin).
+            // RU: После ошибки повторяет через 3, 6, 9 секунд (всего 3 раза, как в Kotlin).
+            Some(TImg::Failed(t, n)) if n >= 4 || t.elapsed().as_secs() < 3 * n as u64 => {
+                if n < 4 {
+                    let me = self.clone();
+                    let wait = (3 * n as u64).saturating_sub(t.elapsed().as_secs()) + 1;
+                    spawn_bg(move || std::thread::sleep(std::time::Duration::from_secs(wait)), move |_| me.gate_rev.set(me.gate_rev.get() + 1));
+                }
+                return None;
+            }
             _ => {}
         }
+        // UZ: Ko'rilgan vaqt har qurilishda yangilanadi; ekrandan chiqib ketgan katakning ishi boshlanmaydi/to'xtatiladi.
+        // EN: The seen time is refreshed on every build; a job for a cell that left the screen does not start / is stopped.
+        // RU: Время показа обновляется при каждой сборке; задача ушедшей с экрана ячейки не начинается / останавливается.
+        let seen = IMG_SEEN.with(|m| m.borrow_mut().entry(key.to_string()).or_insert_with(|| Arc::new(AtomicU64::new(0))).clone());
+        seen.store(epoch_ms(), Ordering::Relaxed);
+        let tries = match st {
+            Some(TImg::Failed(_, n)) => n,
+            _ => 0,
+        };
         IMGS.with(|m| m.borrow_mut().insert(key.to_string(), TImg::Loading));
         let (me, k) = (self.clone(), key.to_string());
-        spawn_bg(load, move |r| {
-            let st = match r {
-                Ok(img) => TImg::Ready(Rc::new(img)),
-                Err(e) => {
-                    uzcoders::prelude::report_error("rasm (Telegram)", &e);
-                    TImg::Failed(Instant::now())
+        spawn_bg(
+            move || {
+                tgmedia::set_seen(Some(seen));
+                let r = if tgmedia::cancelled() { Err("kerak emas".to_string()) } else { load() };
+                tgmedia::set_seen(None);
+                r
+            },
+            move |r| {
+                match r {
+                    Ok(img) => {
+                        IMGS.with(|m| m.borrow_mut().insert(k, TImg::Ready(Rc::new(img))));
+                    }
+                    // Ekrandan chiqib ketgan: yozuv o'chiriladi, qaytib ko'ringanda qayta uriniladi.
+                    Err(e) if e == "kerak emas" => {
+                        IMGS.with(|m| m.borrow_mut().remove(&k));
+                    }
+                    Err(e) => {
+                        uzcoders::prelude::report_error("rasm (Telegram)", &e);
+                        IMGS.with(|m| m.borrow_mut().insert(k, TImg::Failed(Instant::now(), tries.saturating_add(1))));
+                    }
                 }
-            };
-            IMGS.with(|m| m.borrow_mut().insert(k, st));
-            me.gate_rev.set(me.gate_rev.get() + 1);
-        });
+                me.gate_rev.set(me.gate_rev.get() + 1);
+            },
+        );
         None
     }
 
@@ -177,7 +210,7 @@ impl Home {
             if !wanted() {
                 return Err("kerak emas".into());
             }
-            if gif { crate::tganim::gif_sheet(&bytes, px, 36, 15.0) } else { crate::tganim::build_safe(&bytes, px, 48, 24.0) }
+            if gif { crate::tganim::gif_sheet(&bytes, px, 36, 15.0) } else { crate::tganim::build_safe(&bytes, px, 36, 15.0, wanted) }
         });
         Some(match sheet {
             Some(s) => {
@@ -222,6 +255,7 @@ impl Home {
             return None;
         }
         let seen = Arc::new(AtomicU64::new(now));
+        let seen2 = seen.clone();
         ANIMS.with(|m| m.borrow_mut().insert(key.to_string(), AEntry { st: AState::Loading, seen: seen.clone(), last_use: Instant::now() }));
         let (me, k) = (self.clone(), key.to_string());
         spawn_bg(
@@ -244,9 +278,11 @@ impl Home {
                     }
                     std::thread::sleep(std::time::Duration::from_millis(80));
                 }
+                tgmedia::set_seen(Some(seen2));
                 let (vm, rss) = uzcoders::prelude::memory_mb();
                 uzcoders::prelude::breadcrumb(&format!("animatsiya varag'i boshlandi (xotira {vm}/{rss} MB)"));
                 let r = load(&wanted);
+                tgmedia::set_seen(None);
                 BUSY.fetch_sub(1, Ordering::SeqCst);
                 if let Ok(s) = &r {
                     sheet_disk_write(&disk_key, s);
@@ -325,7 +361,7 @@ impl Home {
             if !wanted() {
                 return Err("kerak emas".into());
             }
-            if gif { crate::tganim::gif_sheet(&bytes, px, frames, fps) } else { crate::tganim::build_safe(&bytes, px, frames, fps) }
+            if gif { crate::tganim::gif_sheet(&bytes, px, frames, fps) } else { crate::tganim::build_safe(&bytes, px, frames, fps, wanted) }
         });
         match sheet {
             Some(s) => {

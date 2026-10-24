@@ -833,7 +833,7 @@ impl Home {
         };
         let play = d.kind == "tgs" && self.tgp_may_play(p);
         let px = ((cell - 10.0) * density()).clamp(48.0, 96.0) as u32;
-        let inner = self.tg_anim_el(&format!("d{:x}", d.id), d, Some(set.clone()), px, 36, 24.0, cell - 10.0, cell - 10.0, play, inner);
+        let inner = self.tg_anim_el(&format!("d{:x}", d.id), d, Some(set.clone()), px, 36, 12.0, cell - 10.0, cell - 10.0, play, inner);
         let (cb, tok) = (on_emoji, tgmedia::emoji_token(&set.short, d));
         let hold = self.tgp_hold(p, PKind::Emoji, d.clone(), Some(set.clone()), String::new());
         column(vec![inner]).center().width(cell).height(cell).on_click(move || cb(tok.clone())).on_hold(200, hold)
@@ -919,7 +919,7 @@ impl Home {
         };
         let play = d.kind == "tgs" && self.tgp_may_play(p);
         let px = ((cell - 8.0) * density()).clamp(96.0, 200.0) as u32;
-        let inner = self.tg_anim_el(&format!("d{:x}", d.id), d, Some(set.clone()), px, 45, 24.0, cell - 8.0, cell - 8.0, play, inner);
+        let inner = self.tg_anim_el(&format!("d{:x}", d.id), d, Some(set.clone()), px, 36, 12.0, cell - 8.0, cell - 8.0, play, inner);
         let rf = tgmedia::sticker_ref(&set.short, d);
         let hold = self.tgp_hold(p, PKind::Sticker, d.clone(), Some(set.clone()), rf.clone());
         let cb = on_send;

@@ -342,7 +342,12 @@ public class AruActivity extends UzActivity {
             android.graphics.Canvas c = new android.graphics.Canvas(sheet);
             android.graphics.Paint paint = new android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG);
             for (int i = 0; i < n; i++) {
-                android.graphics.Bitmap f = i == 0 ? first : mmr.getFrameAtTime(durMs * 1000L * i / n, android.media.MediaMetadataRetriever.OPTION_CLOSEST);
+                // UZ: Android 8.1+: kadr dekoderning o'zida kichraytiriladi (tez va xotira kam). EN: Android 8.1+: the frame is scaled inside the decoder (fast, low memory). RU: Android 8.1+: кадр уменьшается внутри декодера (быстро, мало памяти).
+                long tUs = durMs * 1000L * i / n;
+                android.graphics.Bitmap f = i == 0 ? first
+                        : (android.os.Build.VERSION.SDK_INT >= 27
+                                ? mmr.getScaledFrameAtTime(tUs, android.media.MediaMetadataRetriever.OPTION_CLOSEST, cw, ch)
+                                : mmr.getFrameAtTime(tUs, android.media.MediaMetadataRetriever.OPTION_CLOSEST));
                 if (f == null) f = first;
                 int x = (i % cols) * cw, y = (i / cols) * ch;
                 c.drawBitmap(f, null, new android.graphics.Rect(x, y, x + cw, y + ch), paint);

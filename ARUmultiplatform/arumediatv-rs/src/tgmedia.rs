@@ -193,8 +193,31 @@ pub fn resolve_gif(r: &str) -> Option<TgDoc> {
     })
 }
 
-/// Bir vaqtda ko'pi bilan 8 ta yuklash (panel o'nlab rasm so'raydi).
-fn slot<T>(f: impl FnOnce() -> T) -> T {
+thread_local! {
+    /// UZ: Joriy fon ishi uchun "oxirgi ko'rilgan vaqt": katak ekrandan chiqib ketsa ish to'xtatiladi. EN: The "last seen" time for the current background job: when the cell leaves the screen the job stops. RU: «Время последнего показа» для текущей фоновой задачи: когда ячейка уходит с экрана, задача останавливается.
+    static SEEN: std::cell::RefCell<Option<std::sync::Arc<std::sync::atomic::AtomicU64>>> = const { std::cell::RefCell::new(None) };
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+}
+
+/// UZ: Shu oqim uchun "ko'rilgan vaqt" belgisini o'rnatadi (`None` — bekor qilinmaydi).
+/// EN: Sets the "seen time" marker for this thread (`None` — not cancellable).
+/// RU: Устанавливает метку «времени показа» для этого потока (`None` — не отменяется).
+pub fn set_seen(s: Option<std::sync::Arc<std::sync::atomic::AtomicU64>>) {
+    SEEN.with(|c| *c.borrow_mut() = s);
+}
+
+/// UZ: Ish kerak emasmi (katak 4 soniyadan beri ko'rinmagan)?
+/// EN: Is the job no longer needed (the cell has not been seen for 4 seconds)?
+/// RU: Задача больше не нужна (ячейку не видели 4 секунды)?
+pub fn cancelled() -> bool {
+    SEEN.with(|c| c.borrow().as_ref().is_some_and(|s| now_ms().saturating_sub(s.load(std::sync::atomic::Ordering::Relaxed)) > 4000))
+}
+
+/// Bir vaqtda ko'pi bilan 8 ta yuklash (panel o'nlab rasm so'raydi). Navbatda kutayotgan ish kerak bo'lmay qolsa `None`.
+fn slot<T>(f: impl FnOnce() -> T) -> Option<T> {
     use std::sync::atomic::{AtomicUsize, Ordering};
     static BUSY: AtomicUsize = AtomicUsize::new(0);
     loop {
@@ -202,11 +225,14 @@ fn slot<T>(f: impl FnOnce() -> T) -> T {
         if n < 8 && BUSY.compare_exchange(n, n + 1, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
             break;
         }
+        if cancelled() {
+            return None;
+        }
         std::thread::sleep(std::time::Duration::from_millis(60));
     }
     let r = f();
     BUSY.fetch_sub(1, Ordering::SeqCst);
-    r
+    Some(r)
 }
 
 fn fetch(arg: Value, path: &str) -> Result<(), String> {
@@ -291,6 +317,7 @@ pub fn image(d: &TgDoc, px: u32) -> Result<Image, String> {
         save_ready(&img);
         Ok(img)
     })
+    .unwrap_or_else(|| Err("kerak emas".to_string()))
 }
 
 /// Hujjatning to'liq baytlari (kichik fayllar: `.tgs` stikerlar). Diskda shifrlab saqlanadi. `Err("FILE_REFERENCE_EXPIRED")` — ro'yxatni yangilash kerak.
@@ -309,6 +336,7 @@ pub fn file_bytes(d: &TgDoc, max: usize) -> Result<Vec<u8>, String> {
         let _ = crate::secure::write(&path, "tgm", &bytes);
         Ok(bytes)
     })
+    .unwrap_or_else(|| Err("kerak emas".to_string()))
 }
 
 /// To'plam muqovasi (kichik rasm); yo'q bo'lsa — birinchi hujjatning rasmi.
@@ -323,7 +351,8 @@ pub fn set_cover(s: &TgSet, px: u32) -> Result<Image, String> {
         let b = std::fs::read(&tmp).ok();
         let _ = std::fs::remove_file(&tmp);
         r.ok().and(b)
-    });
+    })
+    .flatten();
     if let Some(img) = got.as_ref().and_then(|b| crate::webp::decode_any(b)) {
         let _ = crate::secure::write(&path, "tgm", got.as_ref().map(|b| b.as_slice()).unwrap_or(&[]));
         return Ok(img.resized(px, px));

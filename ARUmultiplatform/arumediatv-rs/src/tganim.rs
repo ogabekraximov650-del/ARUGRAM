@@ -19,12 +19,15 @@ pub struct AnimSheet {
 const MAX_SIDE: u32 = 4096;
 
 /// Xavfsiz: chizish kutubxonasidagi kutilmagan panic ilovani yopmasligi uchun (`panic = "unwind"`) xatoga aylantiriladi.
-pub fn build_safe(raw: &[u8], px: u32, max_frames: u32, max_fps: f32) -> Result<AnimSheet, String> {
-    std::panic::catch_unwind(|| build(raw, px, max_frames, max_fps)).unwrap_or_else(|_| Err("chizishda kutilmagan xato".to_string()))
+pub fn build_safe(raw: &[u8], px: u32, max_frames: u32, max_fps: f32, cancel: &dyn Fn() -> bool) -> Result<AnimSheet, String> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| build(raw, px, max_frames, max_fps, cancel))).unwrap_or_else(|_| Err("chizishda kutilmagan xato".to_string()))
 }
 
 /// `.tgs`/JSON baytlaridan varaq. `px` — kadrning uzun tomoni; `max_frames`/`max_fps` — xotira va tezlik chegarasi.
-pub fn build(raw: &[u8], px: u32, max_frames: u32, max_fps: f32) -> Result<AnimSheet, String> {
+///
+/// `cancel()` rost bo'lsa (katak ekrandan chiqib ketdi) chizish darhol to'xtaydi (`Err("kerak emas")`).
+/// `cancel()` true (the cell scrolled off screen) stops rendering immediately (`Err("kerak emas")`).
+pub fn build(raw: &[u8], px: u32, max_frames: u32, max_fps: f32, cancel: &dyn Fn() -> bool) -> Result<AnimSheet, String> {
     let json = uzcoders_lottie::tgs::to_json(raw).ok_or("tgs ochilmadi")?;
     let anim = Animation::from_json_str(&json).map_err(|e| format!("parse: {e}"))?;
     let r = Renderer::default();
@@ -52,6 +55,9 @@ pub fn build(raw: &[u8], px: u32, max_frames: u32, max_fps: f32) -> Result<AnimS
     let mut rgba = vec![0u8; (w * h * 4) as usize];
     for i in 0..count {
         // Juda sekin stiker telefonni qizdirmasin: 12 soniyadan oshsa to'xtatiladi (statik rasm qoladi).
+        if cancel() {
+            return Err("kerak emas".into());
+        }
         if t0.elapsed().as_secs() > 12 {
             return Err("vaqt chegarasi".into());
         }
@@ -148,7 +154,7 @@ mod tests {
 
     #[test]
     fn varaq_kadrlari_va_olchami() {
-        let s = build(JSON.as_bytes(), 20, 10, 30.0).unwrap();
+        let s = build(JSON.as_bytes(), 20, 10, 30.0, &|| false).unwrap();
         assert_eq!(s.count, 10);
         assert_eq!(s.cols * (s.w / s.cols), s.w);
         assert_eq!(s.rgba.len() as u32, s.w * s.h * 4);
@@ -159,7 +165,7 @@ mod tests {
 
     #[test]
     fn harakat_kadrlarda_korinadi() {
-        let s = build(JSON.as_bytes(), 20, 10, 30.0).unwrap();
+        let s = build(JSON.as_bytes(), 20, 10, 30.0, &|| false).unwrap();
         let (cw, ch) = (s.w / s.cols, s.h / s.count.div_ceil(s.cols));
         // Birinchi kadrda kvadrat chapda (x~5), oxirgisida o'ngda (x~14).
         let alpha_x = |frame: u32, x: u32| s.rgba[((((frame / s.cols) * ch + 10) * s.w + (frame % s.cols) * cw + x) * 4 + 3) as usize];
@@ -169,7 +175,7 @@ mod tests {
 
     #[test]
     fn straight_alfa_va_hoshiya_rangi() {
-        let s = build(JSON.as_bytes(), 20, 4, 30.0).unwrap();
+        let s = build(JSON.as_bytes(), 20, 4, 30.0, &|| false).unwrap();
         // Yarim shaffof qizil (o'zgarmas 50%): oddiy alfada R=255, G=B=0.
         let i = (((10 * s.w) + 5) * 4) as usize;
         let p = &s.rgba[i..i + 4];
@@ -190,7 +196,7 @@ mod tests {
 
     #[test]
     fn yaroqsiz_kirish_xato() {
-        assert!(build(b"not json", 20, 4, 30.0).is_err());
+        assert!(build(b"not json", 20, 4, 30.0, &|| false).is_err());
     }
 }
 
