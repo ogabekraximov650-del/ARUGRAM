@@ -406,6 +406,23 @@ def download(url, out, live):
     return time.time() - t0
 
 
+def probe_host(url):
+    """Xato sababini aniq ko'rsatish uchun: video serveriga (host:port) bevosita ulanib ko'riladi.
+    Qaytadi: xato matniga qo'shiladigan qisqa izoh (ulanish bo'lsa bo'sh)."""
+    import socket
+    try:
+        u = urllib.parse.urlsplit(url)
+        host, port = u.hostname, u.port or (443 if u.scheme == "https" else 80)
+        if not host:
+            return ""
+        t0 = time.time()
+        with socket.create_connection((host, port), timeout=10):
+            pass
+        return f" [server {host}:{port} ga ulanish bor ({time.time() - t0:.1f} s) — xato keyinroq]"
+    except Exception as e:  # noqa: BLE001
+        return f" [server {host}:{port} ga GitHub serveridan ulanib bo'lmadi: {e}]"
+
+
 def download_ffmpeg(url, out, live, audio=""):
     """HLS -> mp4 (qayta kodlamasdan). ffmpeg `-progress` dan foiz.
     `audio` — alohida ovoz playlisti (bo'lsa, videoning ichki ovozi o'rniga)."""
@@ -451,7 +468,7 @@ def download_ffmpeg(url, out, live, audio=""):
     code = p.wait()
     reader.join(timeout=5)
     if code != 0 or not out.exists() or out.stat().st_size == 0:
-        raise RuntimeError("ffmpeg xatosi: " + (list(errs) or ["?"])[-1][:200])
+        raise RuntimeError("ffmpeg xatosi: " + (list(errs) or ["?"])[-1][:200] + probe_host(url))
     return time.time() - t0
 
 

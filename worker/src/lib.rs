@@ -11210,7 +11210,7 @@ async fn encode_settle(env: &Env, a: i64, s: i64, e: i64, queued_at: i64) {
     }
     let done = done_list(job["done"].as_str().unwrap_or(""));
     let Ok(res) = turso_exec(env,
-        "SELECT quality, state, error FROM encode_q
+        "SELECT quality, state, error, attempts FROM encode_q
           WHERE anime_id=? AND season_id=? AND epizod_id=? AND queued_at=?", pk()).await else { return };
     let rows = rows_of(&res);
     // Sifat "hal": jurnalda tayyor (eski usulda ham) yoki tayyor/skip/xato deb belgilangan.
@@ -11240,9 +11240,16 @@ async fn encode_settle(env: &Env, a: i64, s: i64, e: i64, queued_at: i64) {
               WHERE anime_id=? AND season_id=? AND epizod_id=? AND queued_at=? AND state='queued' RETURNING epizod_id",
             { let mut v = vec![TursoArg::text(&why)]; v.extend(pk()); v }).await
             .map(|r| rows_of(&r).len()).unwrap_or(0);
-        if n > 0 {
+        // Faqat OXIRGI urinishdan keyin xabar beriladi: oraliq xatolarda qism o'zi qayta navbatga qo'yiladi
+        // (har 10 daqiqada bir xil xabar kelmasin).
+        let tries = rows.iter()
+            .filter(|r| r["state"].as_str() == Some("error"))
+            .map(|r| jint(r, "attempts"))
+            .max().unwrap_or(0)
+            .max(job["attempts"].as_i64().unwrap_or(0));
+        if n > 0 && tries >= ENCODE_MAX_ATTEMPTS {
             encode_notify(env, &format!(
-                "\u{274C} Kodlash to'xtadi: <b>{}</b>, {}, {num}-qism — {}", html_escape(&an), html_escape(&sn), html_escape(&why))).await;
+                "\u{274C} Kodlash to'xtadi: <b>{}</b>, {}, {num}-qism — {} ({tries} marta urinildi)", html_escape(&an), html_escape(&sn), html_escape(&why))).await;
         }
         return;
     }
