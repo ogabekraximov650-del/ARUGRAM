@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="uz"><head><meta charset="utf-8"><title>ARUGRAM — tanishtiruv va kirish (Telegram uslubida)</title>
+<html lang="uz"><head><meta charset="utf-8"><title>ARUGRAM — hisobga kirish (Telegram uslubida)</title>
 <!-- UZ: Telegram (DrKLO, GPL) tanishtiruv va kirish oqimining aynan nusxasi: GL kadrlar `tgintro/intro_gl` (Telegram'ning IntroRenderer.c) dan, kirish belgilari Telegram'ning Lottie fayllaridan (lottie-web), o'lchamlar va vaqtlar LoginActivity/IntroActivity dan. Litsenziya: GPL-2.0-or-later (ARUGRAMRUST/LICENSE).
 EN: An exact copy of the Telegram (DrKLO, GPL) intro and sign-in flow: GL frames from `tgintro/intro_gl` (Telegram's IntroRenderer.c), sign-in icons from Telegram's Lottie files (lottie-web), sizes and timings from LoginActivity/IntroActivity. License: GPL-2.0-or-later (ARUGRAMRUST/LICENSE).
 RU: Точная копия интро и входа Telegram (DrKLO, GPL): GL-кадры из `tgintro/intro_gl` (IntroRenderer.c Telegram), значки входа из Lottie-файлов Telegram (lottie-web), размеры и тайминги из LoginActivity/IntroActivity. Лицензия: GPL-2.0-or-later (ARUGRAMRUST/LICENSE). -->
@@ -35,13 +35,15 @@ html,body{width:1280px;height:720px;overflow:hidden;background:#0a0c0f;font-fami
 .t18{font-size:18px;font-weight:700;text-align:center;line-height:22px}
 .t14{font-size:14px;color:var(--hint);text-align:center;line-height:20px}
 .cur{display:inline-block;width:2px;height:20px;background:var(--ac);vertical-align:middle;margin-left:1px}
-.cell{overflow:hidden;width:42px;height:47px;border:1.5px solid var(--ln);border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:20px}
-#kn{position:absolute;left:0;right:0;bottom:0;height:230px;background:var(--bg);z-index:20;padding:6px 10px 0}
-#kn .r{display:flex;height:54px}
-#kn .k{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:24px;position:relative}
-#kn .k small{font-size:9px;letter-spacing:1.5px;color:var(--hint);height:10px;margin-top:-1px}
-#kn .k::before{content:"";position:absolute;width:56px;height:56px;border-radius:50%;background:rgba(255,255,255,.14);opacity:0}
-#kn .k.p::before{opacity:1}
+.cell{overflow:hidden;width:32px;height:39px;border:1.5px solid var(--ln);border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:20px}
+#kn{position:absolute;left:0;right:0;bottom:0;height:225px;background:var(--bg);z-index:20;padding:0 11px}
+#kn .r{display:flex;gap:7px;height:48px;margin-bottom:6.5px}
+#kn .k{flex:1;height:48px;border-radius:14px;background:#242424;position:relative;color:#e8e8e8}
+#kn .k b{position:absolute;left:27px;top:0;height:48px;transform:translateX(-50%);display:flex;align-items:center;font-size:24px;font-weight:400}
+#kn .k small{position:absolute;left:76px;top:0;height:48px;transform:translateX(-50%);display:flex;align-items:center;font-size:15px;color:#6e6e6e}
+#kn .k.e{background:transparent}
+#kn .k svg{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%)}
+#kn .k.p{background:#3a3a3a}
 #ka{position:absolute;left:0;right:0;bottom:0;height:260px;background:#1c1d20;z-index:20;padding:10px 4px}
 #ka .r{display:flex;gap:5px;margin-bottom:10px;justify-content:center}
 #ka .k{flex:1;height:48px;border-radius:7px;background:#2c2d31;display:flex;align-items:center;justify-content:center;font-size:20px}
@@ -76,15 +78,13 @@ html,body{width:1280px;height:720px;overflow:hidden;background:#0a0c0f;font-fami
   </div>
 
   <div class="pg" id="b">
-    <div class="abs" id="b0" style="left:16px;top:40px;width:32px;height:32px;display:flex;align-items:center;justify-content:center"><svg width="24" height="24" viewBox="0 0 24 24"><path d="M20 12H5M11 5l-7 7 7 7" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-    <div class="col" id="bcol" style="top:96px">
-      <div style="position:relative;width:64px;height:64px"><div id="smsI" class="abs" style="width:64px;height:64px"></div><div id="smsI2" class="abs" style="width:64px;height:64px"></div><div id="smsI3" class="abs" style="width:64px;height:64px"></div><div id="smsI4" class="abs" style="width:64px;height:64px"></div></div>
-      <div class="t18" id="b2" style="margin-top:18px">Kodni kiriting</div>
-      <div class="t14" id="b3" style="margin-top:17px;padding:0 24px">Telefoningizga faollashtirish kodi bilan<br>SMS yubordik: <b style="color:#fff">+998 90 123 45 67</b>.</div>
-      <div id="b4" style="display:flex;gap:10px;margin-top:32px"><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div></div>
-      <div class="t14" id="b5" style="margin-top:22px;font-size:15px;position:relative;height:20px;width:320px"><span id="tmw">ARUGRAM <span id="tm">0:59</span> da qo'ng'iroq qiladi</span>
-        <svg id="spB" width="20" height="20" viewBox="0 0 20 20" style="position:absolute;left:150px;top:0;opacity:0"><path id="arcB" fill="none" stroke="#6eb2ef" stroke-width="2.2" stroke-linecap="round"/></svg></div>
-    </div>
+    <div class="abs" id="b0" style="left:16px;top:40px;width:32px;height:32px;display:flex;align-items:center;justify-content:center"><svg width="26" height="26" viewBox="0 0 24 24"><path d="M20 12H5M11 5l-7 7 7 7" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div id="lapI" class="abs" style="left:116px;top:24px;width:128px;height:128px"></div>
+    <div class="t18" id="b2" style="position:absolute;left:0;right:0;top:167px">ARUGRAM xabarlaringizni tekshiring</div>
+    <div class="t14" id="b3" style="position:absolute;left:0;right:0;top:208px;padding:0 24px;color:#7e7e7e">Boshqa qurilmangizdagi +998 90 123 45 67<br>uchun <b style="color:#b0b0b0">ARUGRAM ilovasiga</b> kod yuborildi.</div>
+    <div id="b4" style="position:absolute;left:79px;top:282px;display:flex;gap:10px"><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div></div>
+    <div id="b5" style="position:absolute;left:0;right:0;top:460px;text-align:center;font-size:15px;color:#64b5ef">Kodni olmadingizmi?</div>
+    <svg id="rp" class="abs" width="32" height="32" viewBox="0 0 32 32" style="left:312px;top:40px;opacity:0"><path id="arcR" fill="none" stroke="#64b5ef" stroke-width="2.2" stroke-linecap="round"/></svg>
   </div>
 
   <div class="pg" id="c">
@@ -126,10 +126,10 @@ const quint = (x) => { x = clamp(x) - 1; return x * x * x * x * x + 1; }; // Vie
 
 const TS = [3500, 7000, 10500, 14000, 17500];     // sahifaga o'tish / page switch (ms)
 const SWIPE = 450;
-const L0 = 21150;                                  // kirish oynasi boshlanishi / login start
+const L0 = 0;                                  // kirish oynasi boshlanishi / login start
 const T = {}; T.kb = L0 + 100; T.ph0 = L0 + 1500; T.phS = 230; T.fab1 = T.ph0 + 8 * T.phS + 250; T.tap1 = T.fab1 + 900; T.to2 = T.tap1 + 1000;
-T.c0 = T.to2 + 1500; T.cS = 300; T.ver = T.c0 + 4 * T.cS + 450; T.to3 = T.ver + 1500;
-T.p0 = T.to3 + 1200; T.pS = 190; T.eye = T.p0 + 8 * T.pS + 500; T.tap3 = T.eye + 1300; T.to4 = T.tap3 + 1000; T.end = T.to4 + 3600;
+T.c0 = T.to2 + 1500; T.cS = 300; T.ver = T.c0 + 4 * T.cS + 450; T.to3 = T.ver + 1100;
+T.p0 = T.to3 + 1200; T.pS = 190; T.eye = T.p0 + 8 * T.pS + 500; T.tap3 = T.eye + 1300; T.to4 = T.tap3 + 1000; T.end = T.to4 + 3200;
 const TOTAL = T.end, TR = 300, WD = 360;
 const TITLES = ['ARUGRAM', 'Tez', 'Bepul', 'Kuchli', 'Xavfsiz', 'Bulutli'];
 const MSG = ["Dunyoning <b>eng tezkor</b> muloqot ilovasi.<br>Bu <b>bepul</b> va <b>xavfsiz</b>.", "<b>ARUGRAM</b> xabarlarni boshqa har qanday<br>ilovadan tezroq yetkazadi.",
@@ -149,7 +149,9 @@ const PHONE = '901234567', CODE = '12345', PASS = 'aru2024!';
   const s = document.createElement('div'); s.id = 'sel'; dots.appendChild(s);
   const kn = $('kn');
   [[1, 2, 3], [4, 5, 6], [7, 8, 9], ['', 0, '⌫']].forEach((r) => { const d = document.createElement('div'); d.className = 'r';
-    r.forEach((k) => { const e = document.createElement('div'); e.className = 'k'; e.dataset.k = 'n' + k; e.innerHTML = k === '' ? '' : k === '⌫' ? '<svg width="26" height="26" viewBox="0 0 26 26"><path d="M9 5h13a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H9L2 13z" fill="none" stroke="#fff" stroke-width="1.8"/><path d="M12 9l7 8M19 9l-7 8" stroke="#fff" stroke-width="1.8"/></svg>' : `${k}<small>${LET[k]}</small>`; d.appendChild(e); });
+    r.forEach((k) => { const e = document.createElement('div'); e.className = 'k' + (k === '' ? ' e' : ''); e.dataset.k = 'n' + k;
+      e.innerHTML = k === '' ? '' : k === '⌫' ? '<svg width="30" height="30" viewBox="0 0 30 30"><path d="M10 6h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H10L3 15z" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"/><path d="M13 11l8 8M21 11l-8 8" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>' : `<b>${k}</b><small>${LET[k]}</small>`;
+      d.appendChild(e); });
     kn.appendChild(d); });
   const ka = $('ka');
   ['qwertyuiop', 'asdfghjkl', 'zxcvbnm'].forEach((r) => { const d = document.createElement('div'); d.className = 'r'; [...r].forEach((k) => { const e = document.createElement('div'); e.className = 'k'; e.dataset.k = 'a' + k; e.textContent = k; d.appendChild(e); }); ka.appendChild(d); });
@@ -157,14 +159,12 @@ const PHONE = '901234567', CODE = '12345', PASS = 'aru2024!';
 })();
 
 const mk = (id, key, loop) => lottie.loadAnimation({ container: $(id), renderer: 'svg', loop: false, autoplay: false, animationData: window.ANIMS[key] });
-const sms = mk('smsI', 'sms'), lock = mk('lockI', 'lock'), sun = mk('sun', 'sun');
-const s2d = mk('smsI2', 's2d'), dots = mk('smsI3', 'dots'), d2s = mk('smsI4', 'd2s');
-function recolor(a, map) {   // setLayerColor("Bubble"/"Phone"/"Note") — qatlam nomi bo'yicha / by layer name
+const lap = mk('lapI', 'laptop'), lock = mk('lockI', 'lock');
+function recolor(a, map) {   // setLayerColor — qatlam nomi bo'yicha / by layer name
   (a.renderer.elements || []).forEach((el) => { const nm = el && el.data && el.data.nm; if (nm && map[nm] && el.baseElement) el.baseElement.querySelectorAll('path').forEach((p) => {
     if (p.getAttribute('fill') && p.getAttribute('fill') !== 'none') p.setAttribute('fill', map[nm]); if (p.getAttribute('stroke') && p.getAttribute('stroke') !== 'none') p.setAttribute('stroke', map[nm]); }); });
 }
 const SMSC = { Bubble: '#5ea0db', Phone: '#ffffff', Note: '#ffffff' };
-function tint() { document.querySelectorAll('#sun svg [fill]:not([fill="none"])').forEach((e) => e.setAttribute('fill', '#249af1')); document.querySelectorAll('#sun svg [stroke]:not([stroke="none"])').forEach((e) => e.setAttribute('stroke', '#249af1')); }
 const play = (a, t, t0) => a.goToAndStop(clamp((t - t0) / 1000 * a.frameRate, 0, a.totalFrames - 1), true);
 
 function pos(ms) { let p = 0, off = 0; for (let k = 0; k < TS.length; k++) if (ms >= TS[k]) { p = k + 1; off = -(1 - quint((ms - TS[k]) / SWIPE)); } return p + off; }
@@ -191,8 +191,6 @@ let lastSrc = '', pending = null;
 function frame(t) {
   // ---- tanishtiruv ----
   const P = pos(t), fi = Math.min(Math.floor(t / (1000 / 60)) + 1, 99999);
-  const src = `tgframes/f${String(Math.min(fi, 1320)).padStart(5, '0')}.png`;
-  if (src !== lastSrc) { lastSrc = src; const im = $('gl'); im.src = src; pending = im.decode().catch(() => {}); }
   for (let i = 0; i < 6; i++) $('ip' + i).style.transform = `translateX(${(i - P) * WD}px)`;
   const base = Math.floor(P + 1e-6), pr = P - base;
   const sel = $('sel'); sel.style.left = base * 11 + 'px'; sel.style.width = (5 + 11 * pr) + 'px';
@@ -201,9 +199,7 @@ function frame(t) {
   const press = Math.min(seg(t, L0 - 450, L0 - 380), 1 - seg(t, L0 - 380, L0 - 250));
   $('start').style.transform = `scale(${1 - .03 * press})`;
   $('flick').style.left = `${lerp(-100, 330, ((t / 1700) % 1))}px`;
-  sun.goToAndStop(sun.totalFrames - 1, true); tint();
-  slide($('intro'), t, null, L0); void tt;
-  $('intro').style.opacity = 1 - ead(seg(t, L0, L0 + 200));
+  $('intro').style.display = 'none';
 
   // ---- 1) telefon ----
   slide($('a'), t, L0, T.to2 - 0);  // 1-sahifa / page 1 uses fragment fade-in, then page slide out
@@ -238,17 +234,11 @@ function frame(t) {
 
   // ---- 2) kod ----
   page($('b'), t, T.to2, T.to3);
-  { const c0 = T.to2 + 100 + 300;  // SHOW_DELAY + sahifa surilishi
-    const dotsOn = t >= T.ver, toDots = seg(t, T.ver, T.ver + 167), inDots = t >= T.ver + 167 && t < T.ver + 1167, back = t >= T.ver + 1167;
-    $('smsI').style.display = dotsOn ? 'none' : 'block'; $('smsI2').style.display = dotsOn && t < T.ver + 167 ? 'block' : 'none';
-    $('smsI3').style.display = inDots ? 'block' : 'none'; $('smsI4').style.display = back ? 'block' : 'none';
-    play(sms, t, c0); play(s2d, t, T.ver); dots.goToAndStop(((t - T.ver - 167) / 1000 * dots.frameRate) % dots.totalFrames, true); play(d2s, t, T.ver + 1167);
-    [sms, s2d, dots, d2s].forEach((a) => recolor(a, SMSC)); void toDots; }
+  play(lap, t, T.to2 + 100 + 300); recolor(lap, SMSC);
   const n2 = typed(t, T.c0, T.cS, 5);
   [...$('b4').children].forEach((c, i) => { const at = T.c0 + i * T.cS; c.textContent = i < n2 ? CODE[i] : ''; c.style.paddingTop = i < n2 ? `${(1 - ead(seg(t, at, at + 220))) * 47}px` : '0'; const foc = (i === Math.min(n2, 4)) && t > T.to2 + 400 && t < T.ver + 400;
     c.style.borderWidth = foc ? '2px' : '1px'; c.style.borderColor = foc ? '#6eb2ef' : ''; });
-  $('tmw').style.opacity = 1 - seg(t, T.ver, T.ver + 150);
-  $('tm').textContent = `0:${String(Math.max(0, 59 - Math.floor((t - T.to2) / 1000))).padStart(2, '0')}`;
+  { const rp = q(seg(t, T.ver, T.ver + 150)) * (1 - q(seg(t, T.to3 - 100, T.to3 + 100))); $('rp').style.opacity = rp; $('rp').style.transform = `scale(${lerp(.1, 1, rp)})`; if (rp > 0) arc($('arcR'), t, 10, 16); }
 
   // ---- 3) parol ----
   page($('c'), t, T.to3, T.to4);

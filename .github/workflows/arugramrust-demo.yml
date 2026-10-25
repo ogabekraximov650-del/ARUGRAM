@@ -30,26 +30,15 @@ jobs:
         with:
           node-version: '22'
 
-      - name: ffmpeg, Mesa (EGL/GLES), Playwright (Chromium)
+      - name: ffmpeg, Playwright (Chromium)
         working-directory: ARUmultiplatform/ARUGRAMRUST/demo
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg libegl1-mesa-dev libgles2-mesa-dev libegl-mesa0 libgl1-mesa-dri
-          pip install --no-cache-dir -q pillow
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
           npm init -y >/dev/null
           npm i --no-save playwright@1.56.1
           npx playwright install --with-deps chromium
 
-      - name: Telegram tanishtiruv kadrlari (IntroRenderer.c, GL, kompyuterda)
-        working-directory: ARUmultiplatform/ARUGRAMRUST/demo
-        run: |
-          sh tgintro/build.sh
-          python3 tgintro/prep_textures.py ../../Telegram/TMessagesProj/src/main/res "$RUNNER_TEMP/tex"
-          mkdir -p tgframes
-          EGL_PLATFORM=surfaceless LIBGL_ALWAYS_SOFTWARE=1 ./tgintro/intro_gl "$RUNNER_TEMP/tex" 181819 22000 60 3500,7000,10500,14000,17500 \
-            | ffmpeg -loglevel error -y -f rawvideo -pix_fmt rgba -s 600x450 -r 60 -i - -vf vflip tgframes/f%05d.png
-          ls tgframes | wc -l
-
-      - name: Video (tanishtiruv + hisobga kirish, Telegram uslubida)
+      - name: Video (hisobga kirish, Telegram uslubida)
         id: video
         working-directory: ARUmultiplatform/ARUGRAMRUST/demo
         run: |
@@ -75,7 +64,7 @@ jobs:
             -in tool/encode/session.enc -out "$S.session"
           head -c 16 "$S.session" | grep -q "SQLite format 3"
           DUR=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "${{ steps.video.outputs.dir }}/arugram_kirish_animatsiya.mp4" | cut -d. -f1)
-          python tool/notify/send_video.py "$S" "${{ steps.video.outputs.dir }}/arugram_kirish_animatsiya.mp4" "ARUGRAM tanishtiruv + kirish (Telegram uslubida, build ${{ github.run_number }})" "$DUR"
+          python tool/notify/send_video.py "$S" "${{ steps.video.outputs.dir }}/arugram_kirish_animatsiya.mp4" "ARUGRAM hisobga kirish (Telegram uslubida, build ${{ github.run_number }})" "$DUR"
           rm -f "$S.session"
 
       - uses: actions/upload-artifact@v4
