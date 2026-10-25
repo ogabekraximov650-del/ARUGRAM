@@ -1,0 +1,78 @@
+name: DRKLO (Telegram Android + ARUGRAM) — build va APK
+
+# `DRKLO/**` o'zgarganda: Gradle (afat release, armeabi-v7a + arm64-v8a) -> APK -> Telegram.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'DRKLO/**'
+      - '.github/workflows/drklo-build.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: drklo
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    environment: secret
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Android SDK/NDK
+        run: |
+          yes | "$ANDROID_HOME"/cmdline-tools/latest/bin/sdkmanager --licenses >/dev/null || true
+          "$ANDROID_HOME"/cmdline-tools/latest/bin/sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018" "cmake;3.22.1" >/dev/null
+          echo "sdk.dir=$ANDROID_HOME" > DRKLO/local.properties
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
+
+      - name: Gradle build (afat release)
+        working-directory: DRKLO
+        run: |
+          chmod +x gradlew
+          ./gradlew :TMessagesProj_App:assembleAfatRelease --stacktrace -Dorg.gradle.jvmargs="-Xmx6g -XX:MaxMetaspaceSize=1g" 2>&1 | tail -n 200
+
+      - name: APK
+        id: apk
+        run: |
+          OUT="$RUNNER_TEMP/apks"; mkdir -p "$OUT"
+          F=$(find DRKLO/TMessagesProj_App/build/outputs/apk -name '*.apk' | head -1)
+          ls -la "$F"
+          cp "$F" "$OUT/drklo-${{ github.run_number }}.apk"
+          echo "dir=$OUT" >> "$GITHUB_OUTPUT"
+
+      - name: APK'ni Telegram "Saqlangan xabarlar"ga yuborish
+        continue-on-error: true
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+        run: |
+          K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          pip install --no-cache-dir -q pyrogram==2.0.106 tgcrypto==1.2.5
+          for APK in "${{ steps.apk.outputs.dir }}"/*.apk; do
+            S="$RUNNER_TEMP/notify_session"
+            K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K \
+              -in tool/encode/session.enc -out "$S.session"
+            head -c 16 "$S.session" | grep -q "SQLite format 3"
+            python tool/notify/send_apk.py "$S" "$APK" "DRKLO build ${{ github.run_number }}"
+            rm -f "$S.session"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: drklo-${{ github.run_number }}
+          path: ${{ steps.apk.outputs.dir }}
+          retention-days: 14
