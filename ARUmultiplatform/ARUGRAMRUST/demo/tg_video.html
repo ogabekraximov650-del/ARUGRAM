@@ -4,29 +4,29 @@
 EN: An exact copy of the Telegram (DrKLO, GPL) intro and sign-in flow: GL frames from `tgintro/intro_gl` (Telegram's IntroRenderer.c), sign-in icons from Telegram's Lottie files (lottie-web), sizes and timings from LoginActivity/IntroActivity. License: GPL-2.0-or-later (ARUGRAMRUST/LICENSE).
 RU: Точная копия интро и входа Telegram (DrKLO, GPL): GL-кадры из `tgintro/intro_gl` (IntroRenderer.c Telegram), значки входа из Lottie-файлов Telegram (lottie-web), размеры и тайминги из LoginActivity/IntroActivity. Лицензия: GPL-2.0-or-later (ARUGRAMRUST/LICENSE). -->
 <style>
-:root{--bg:#181819;--tx:#fff;--hint:#7d7d7d;--ln:#505050;--ac:#6eb2ef;--blue:#64b5ef;--fab:#5ea0db;--btn:#50a8eb}
+:root{--bg:#181819;--tx:#fff;--hint:#7d7d7d;--ln:#505050;--ac:#6eb2ef;--blue:#64b5ef;--fab:#5ea0db;--btn:#249af1;--btn2:#54b9f1}
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{width:1280px;height:720px;overflow:hidden;background:#0a0c0f;font-family:Roboto,"Segoe UI",Arial,sans-serif;color:var(--tx)}
 #stage{position:absolute;inset:0;background:radial-gradient(800px 600px at 50% 40%,#16222e 0%,#0b0e12 70%)}
-#phone{position:absolute;left:468px;top:20px;width:344px;height:680px;border-radius:46px;background:#000;padding:7px;box-shadow:0 0 0 2px #2a323d,0 40px 90px rgba(0,0,0,.6)}
-#clip{position:relative;width:330px;height:666px;border-radius:40px;overflow:hidden;background:var(--bg)}
-#screen{position:absolute;left:0;top:0;width:360px;height:740px;transform:scale(.9167);transform-origin:0 0;background:var(--bg);overflow:hidden}
+#phone{position:absolute;left:473px;top:20px;width:334px;height:680px;border-radius:46px;background:#000;padding:7px;box-shadow:0 0 0 2px #2a323d,0 40px 90px rgba(0,0,0,.6)}
+#clip{position:relative;width:320px;height:666px;border-radius:40px;overflow:hidden;background:var(--bg)}
+#screen{position:absolute;left:0;top:0;width:360px;height:750px;transform:scale(.888);transform-origin:0 0;background:var(--bg);overflow:hidden}
 .abs{position:absolute}
 #status{position:absolute;left:0;right:0;top:0;height:24px;padding:5px 16px 0;display:flex;justify-content:space-between;font-size:12px;font-weight:500;z-index:50}
 .pg{position:absolute;inset:0;background:var(--bg)}
 /* tanishtiruv / intro */
-#gl{position:absolute;left:80px;top:140px;width:200px;height:150px}
+#gl{position:absolute;left:80px;top:144px;width:200px;height:150px}
 .ipage{position:absolute;left:0;top:0;width:360px;height:740px}
-.ih{position:absolute;left:18px;right:18px;top:315px;text-align:center;font-size:26px;font-weight:700;line-height:30px}
-.im{position:absolute;left:16px;right:16px;top:359px;text-align:center;font-size:15px;line-height:20px}
+.ih{position:absolute;left:18px;right:18px;top:319px;text-align:center;font-size:26px;font-weight:700;line-height:30px}
+.im{position:absolute;left:16px;right:16px;top:363px;text-align:center;font-size:15px;line-height:20px}
 .im b{font-weight:700}
-#dots{position:absolute;left:147px;top:429px;width:66px;height:5px}
+#dots{position:absolute;left:147px;top:433px;width:66px;height:5px}
 #dots i{position:absolute;top:0;width:5px;height:5px;border-radius:2.5px;background:#555}
 #sel{position:absolute;top:0;height:5px;border-radius:2.5px;background:#229af0}
-#lang{position:absolute;left:0;right:0;top:563px;height:30px;text-align:center;font-size:16px;line-height:30px;color:var(--blue)}
-#start{position:absolute;left:20px;width:320px;top:623px;height:48px;border-radius:24px;background:linear-gradient(90deg,#50a8eb,#50a8eb);color:#fff;font-size:15px;font-weight:700;display:flex;align-items:center;justify-content:center;text-transform:none;overflow:hidden}
+#lang{position:absolute;left:0;right:0;top:572px;height:30px;text-align:center;font-size:16px;line-height:30px;color:var(--blue)}
+#start{position:absolute;left:16px;width:328px;top:633px;height:48px;border-radius:24px;background:linear-gradient(90deg,var(--btn),var(--btn2));color:#fff;font-size:15px;font-weight:700;display:flex;align-items:center;justify-content:center;text-transform:none;overflow:hidden}
 #flick{position:absolute;top:0;bottom:0;width:90px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.22),transparent)}
-#theme{position:absolute;right:4px;top:28px;width:48px;height:48px;display:flex;align-items:center;justify-content:center}
+#theme{position:absolute;left:298px;top:42px;width:48px;height:48px;display:flex;align-items:center;justify-content:center}
 #theme div{width:28px;height:28px}
 /* kirish / login */
 .of{position:relative;height:58px;border:1px solid var(--ln);border-radius:6px;display:flex;align-items:center;font-size:16px}
@@ -35,7 +35,7 @@ html,body{width:1280px;height:720px;overflow:hidden;background:#0a0c0f;font-fami
 .t18{font-size:18px;font-weight:700;text-align:center;line-height:22px}
 .t14{font-size:14px;color:var(--hint);text-align:center;line-height:20px}
 .cur{display:inline-block;width:2px;height:20px;background:var(--ac);vertical-align:middle;margin-left:1px}
-.cell{width:42px;height:56px;border:1px solid var(--ln);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700}
+.cell{width:42px;height:47px;border:1.5px solid var(--ln);border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:20px}
 #kn{position:absolute;left:0;right:0;bottom:0;height:230px;background:var(--bg);z-index:20;padding:6px 10px 0}
 #kn .r{display:flex;height:54px}
 #kn .k{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:24px;position:relative}
@@ -68,7 +68,7 @@ html,body{width:1280px;height:720px;overflow:hidden;background:#0a0c0f;font-fami
   <div class="pg" id="a">
     <div class="col" id="acol">
       <div class="t18" id="a1">Telefon raqamingiz</div>
-      <div class="t14" id="a2" style="margin-top:8px;padding:0 32px">Davlatni tanlang va telefon<br>raqamingizni kiriting.</div>
+      <div class="t14" id="a2" style="margin-top:8px;padding:0 32px">Iltimos, davlat kodini tasdiqlang va<br>telefon raqamingizni kiriting.</div>
       <div class="of" id="a3" style="width:328px;margin-top:24px"><label style="top:-10px;font-size:12px">Davlat</label><span style="margin-left:16px;flex:1">O'zbekiston</span><svg width="24" height="24" viewBox="0 0 24 24" style="margin-right:14px"><path d="M7 10l5 5 5-5" fill="none" stroke="#7d7d7d" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
       <div class="of" id="a4" style="width:328px;margin-top:22px"><label id="lab1" style="top:-10px;font-size:12px">Telefon raqami</label>
         <span style="margin-left:16px">+998</span><span style="width:1px;height:30px;background:var(--ln);margin:0 12px 0 12px"></span><span id="num"></span><i class="cur" id="cur1"></i><span id="hnt" style="color:var(--hint)">00 000 00 00</span></div>
@@ -76,25 +76,27 @@ html,body{width:1280px;height:720px;overflow:hidden;background:#0a0c0f;font-fami
   </div>
 
   <div class="pg" id="b">
-    <div class="col" id="bcol" style="top:40px">
-      <div id="smsI" style="width:64px;height:64px;margin-top:16px"></div>
-      <div class="t18" id="b2" style="margin-top:18px">+998 90 123 45 67</div>
-      <div class="t14" id="b3" style="margin-top:8px;padding:0 40px">Kodni SMS orqali yubordik.<br>Uni quyida kiriting.</div>
-      <div id="b4" style="display:flex;gap:7px;margin-top:32px"><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div></div>
-      <div class="t14" id="b5" style="margin-top:28px;position:relative;height:20px;width:320px">Qayta yuborish <span id="tm" style="color:#fff">0:42</span>
+    <div class="abs" id="b0" style="left:12px;top:40px;width:40px;height:40px;display:flex;align-items:center;justify-content:center"><svg width="24" height="24" viewBox="0 0 24 24"><path d="M20 12H5M11 5l-7 7 7 7" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="col" id="bcol" style="top:96px">
+      <div id="smsI" style="width:64px;height:64px"></div>
+      <div class="t18" id="b2" style="margin-top:18px">Kodni kiriting</div>
+      <div class="t14" id="b3" style="margin-top:17px;padding:0 24px">Telefoningizga faollashtirish kodi bilan<br>SMS yubordik: <b style="color:#fff">+998 90 123 45 67</b>.</div>
+      <div id="b4" style="display:flex;gap:10px;margin-top:32px"><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div></div>
+      <div class="t14" id="b5" style="margin-top:22px;font-size:15px;position:relative;height:20px;width:320px"><span id="tmw">ARUGRAM <span id="tm">0:59</span> da qo'ng'iroq qiladi</span>
         <svg id="spB" width="20" height="20" viewBox="0 0 20 20" style="position:absolute;left:150px;top:0;opacity:0"><path id="arcB" fill="none" stroke="#6eb2ef" stroke-width="2.2" stroke-linecap="round"/></svg></div>
     </div>
   </div>
 
   <div class="pg" id="c">
-    <div class="col" id="ccol" style="top:30px">
+    <div class="abs" id="c0" style="left:12px;top:40px;width:40px;height:40px;display:flex;align-items:center;justify-content:center"><svg width="24" height="24" viewBox="0 0 24 24"><path d="M20 12H5M11 5l-7 7 7 7" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="col" id="ccol" style="top:96px">
       <div id="lockI" style="width:120px;height:120px"></div>
-      <div class="t18" id="c2" style="margin-top:8px">Ikki bosqichli tasdiqlash</div>
-      <div class="t14" id="c3" style="margin-top:8px;padding:0 40px">Hisobingiz qo'shimcha parol bilan<br>himoyalangan.</div>
-      <div class="of" id="c4" style="width:328px;margin-top:26px"><label id="lab3" style="top:18px;font-size:16px">Parol</label><span id="pw" style="margin-left:16px;flex:1;letter-spacing:1px;white-space:nowrap;overflow:hidden"></span><i class="cur" id="cur3" style="margin-left:-12px"></i>
+      <div class="t18" id="c2" style="margin-top:16px">Parolingiz</div>
+      <div class="t14" id="c3" style="margin-top:8px;padding:0 12px">Ikki bosqichli tasdiqlash yoqilgan.<br>Hisobingiz qo'shimcha parol bilan himoyalangan.</div>
+      <div class="of" id="c4" style="width:328px;margin-top:32px"><label id="lab3" style="top:18px;font-size:16px">Parolni kiriting</label><span id="pw" style="margin-left:16px;flex:1;font-size:18px;letter-spacing:1px;white-space:nowrap;overflow:hidden"></span><i class="cur" id="cur3" style="margin-left:-12px"></i>
         <svg width="24" height="24" viewBox="0 0 24 24" style="margin-right:14px"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z" fill="none" stroke="#7d7d7d" stroke-width="2"/><circle cx="12" cy="12" r="3" fill="#7d7d7d"/><path id="slash" d="M4 4l16 16" stroke="#7d7d7d" stroke-width="2" stroke-linecap="round"/></svg></div>
-      <div id="c5" style="margin-top:22px;font-size:14px;color:var(--blue)">Parolni unutdingizmi?</div>
     </div>
+    <div id="c5" class="abs" style="left:16px;font-size:15px;color:var(--blue)">Parolni unutdingizmi?</div>
   </div>
 
   <div class="pg" id="d">
@@ -151,6 +153,7 @@ const PHONE = '901234567', CODE = '12345', PASS = 'aru2024!';
 
 const mk = (id, key, loop) => lottie.loadAnimation({ container: $(id), renderer: 'svg', loop: false, autoplay: false, animationData: window.ANIMS[key] });
 const sms = mk('smsI', 'sms'), lock = mk('lockI', 'lock'), sun = mk('sun', 'sun');
+function tint() { document.querySelectorAll('#sun svg [fill]:not([fill="none"])').forEach((e) => e.setAttribute('fill', '#249af1')); document.querySelectorAll('#sun svg [stroke]:not([stroke="none"])').forEach((e) => e.setAttribute('stroke', '#249af1')); }
 const play = (a, t, t0) => a.goToAndStop(clamp((t - t0) / 1000 * a.frameRate, 0, a.totalFrames - 1), true);
 
 function pos(ms) { let p = 0, off = 0; for (let k = 0; k < TS.length; k++) if (ms >= TS[k]) { p = k + 1; off = -(1 - quint((ms - TS[k]) / SWIPE)); } return p + off; }
@@ -187,7 +190,7 @@ function frame(t) {
   const press = Math.min(seg(t, L0 - 450, L0 - 380), 1 - seg(t, L0 - 380, L0 - 250));
   $('start').style.transform = `scale(${1 - .03 * press})`;
   $('flick').style.left = `${lerp(-100, 330, ((t / 1700) % 1))}px`;
-  sun.goToAndStop(sun.totalFrames - 1, true);
+  sun.goToAndStop(sun.totalFrames - 1, true); tint();
   slide($('intro'), t, null, L0); void tt;
   $('intro').style.opacity = 1 - ead(seg(t, L0, L0 + 200));
 
@@ -198,7 +201,7 @@ function frame(t) {
   $('num').textContent = fmt(PHONE.slice(0, n1)); $('hnt').textContent = n1 ? '' : '00 000 00 00';
   $('cur1').style.opacity = Math.floor(t / 500) % 2 ? 0 : 1;
   outline($('a4'), $('lab1'), dec(seg(t, T.kb, T.kb + 200)));
-  $('acol').style.top = '24px'; $('acol').style.height = `${740 - 24 - 230}px`; $('acol').style.justifyContent = 'center';
+  $('acol').style.top = '56px'; $('acol').style.height = `${750 - 56 - 230}px`; $('acol').style.justifyContent = 'center';
 
   // ---- klaviatura ----
   const kUp = dec(seg(t, T.kb, T.kb + 300));
@@ -215,7 +218,8 @@ function frame(t) {
   const show = Math.max(f1, f3);
   const pr1 = seg(t, T.tap1 + 100, T.tap1 + 260) * (1 - seg(t, T.to2 - 120, T.to2)), pr3 = seg(t, T.tap3 + 100, T.tap3 + 260) * (1 - seg(t, T.to4 - 120, T.to4));
   const prog = Math.max(pr1, pr3);
-  const kh = 230 * (1 - 0) * (t < T.to3 ? kUp : 1) * 1; const bot = (t < T.to3 ? kh : (t < T.to4 + 100 ? 260 : 0)) + 14;
+  const kh = 230 * (t < T.to3 ? kUp : 1); const bot = (t < T.to3 ? kh : (t < T.to4 + 100 ? 260 : 0)) + 16;
+  $('c5').style.bottom = `${(t < T.to3 ? 0 : 260 * aUp) + 32 + 20}px`;
   $('fab').style.bottom = `${bot}px`; $('fab').style.opacity = show > 0.01 ? 1 : 0; $('fab').style.transform = `scale(${show})`;
   $('fa').style.opacity = 1 - prog; $('fa').style.transform = `scale(${1 - .4 * prog})`; $('fp').style.opacity = prog; if (prog > 0) arc($('arcF'), t, 15, 22);
 
@@ -226,8 +230,8 @@ function frame(t) {
   [...$('b4').children].forEach((c, i) => { c.textContent = i < n2 ? CODE[i] : ''; const foc = (i === Math.min(n2, 4)) && t > T.to2 + 400 && t < T.ver + 400;
     c.style.borderWidth = foc ? '2px' : '1px'; c.style.borderColor = foc ? '#6eb2ef' : ''; });
   const spB = seg(t, T.ver, T.ver + 150) * (1 - seg(t, T.to3 - 150, T.to3));
-  $('tm').style.opacity = 1 - spB; $('spB').style.opacity = spB; if (spB > 0) arc($('arcB'), t, 8, 10);
-  $('tm').textContent = `0:${String(Math.max(0, 42 - Math.floor((t - T.to2) / 1000))).padStart(2, '0')}`;
+  $('tmw').style.opacity = 1 - spB; $('spB').style.opacity = spB; if (spB > 0) arc($('arcB'), t, 8, 10);
+  $('tm').textContent = `0:${String(Math.max(0, 59 - Math.floor((t - T.to2) / 1000))).padStart(2, '0')}`;
 
   // ---- 3) parol ----
   page($('c'), t, T.to3, T.to4);

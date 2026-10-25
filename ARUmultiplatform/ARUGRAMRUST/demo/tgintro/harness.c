@@ -78,10 +78,14 @@ int main(int argc, char **argv) {
     for (char *s = strtok(argv[5], ","); s && nt < 6; s = strtok(0, ",")) ts[nt++] = atof(s);
     const float SWIPE_MS = 450;
 
+    /* IntroActivity tartibi: updateColors -> setBackgroundColor; setSurfaceTextureSize -> onSurfaceChanged; keyin GL init (teksturalar, onSurfaceCreated) */
+    JNIEnv *E = 0; jclass C = 0;
+    Java_org_telegram_messenger_Intro_setBackgroundColor(E, C, (bg >> 16 & 255) / 255.f, (bg >> 8 & 255) / 255.f, (bg & 255) / 255.f, 1.f);
+    Java_org_telegram_messenger_Intro_onSurfaceChanged(E, C, W, H, fminf(W / 150.f, H / 150.f), 0);
     EGLDisplay dpy = eglGetPlatformDisplay(EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, 0);
     EGLint maj, min; if (!eglInitialize(dpy, &maj, &min)) { fprintf(stderr, "eglInitialize xato\n"); return 3; }
     eglBindAPI(EGL_OPENGL_ES_API);
-    EGLint ca[] = {EGL_SURFACE_TYPE, EGL_PBUFFER_BIT, EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT, EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8, EGL_ALPHA_SIZE, 8, EGL_NONE};
+    EGLint ca[] = {EGL_SURFACE_TYPE, EGL_PBUFFER_BIT, EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT, EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8, EGL_ALPHA_SIZE, 8, EGL_DEPTH_SIZE, 24, EGL_NONE};
     EGLConfig cfg; EGLint nc; eglChooseConfig(dpy, ca, &cfg, 1, &nc); if (!nc) { fprintf(stderr, "config yo'q\n"); return 3; }
     EGLint pa[] = {EGL_WIDTH, W, EGL_HEIGHT, H, EGL_NONE};
     EGLSurface sf = eglCreatePbufferSurface(dpy, cfg, pa);
@@ -93,16 +97,13 @@ int main(int argc, char **argv) {
         "ic_smile_eye", "ic_smile", "ic_videocam", "knot_down", "knot_up", "powerful_infinity_white", "powerful_infinity", "powerful_mask", "powerful_star", "private_door", "private_screw", "tg_plane"};
     for (int i = 0; i < 22; i++) load_file(i, dir, names[i], i == 17, bg);   /* 17: powerful_mask fon rangida bo'yaladi */
     make_circle(22, 0x229AF0); make_mask(23, bg);
-    JNIEnv *E = 0; jclass C = 0;
     Java_org_telegram_messenger_Intro_setPrivateTextures(E, C, tex[19], tex[20]);
     Java_org_telegram_messenger_Intro_setFreeTextures(E, C, tex[14], tex[13]);
     Java_org_telegram_messenger_Intro_setFastTextures(E, C, tex[2], tex[3], tex[1], tex[0]);
     Java_org_telegram_messenger_Intro_setIcTextures(E, C, tex[4], tex[5], tex[6], tex[7], tex[8], tex[9], tex[10], tex[11], tex[12]);
     Java_org_telegram_messenger_Intro_setTelegramTextures(E, C, tex[22], tex[21], tex[23]);
     Java_org_telegram_messenger_Intro_setPowerfulTextures(E, C, tex[17], tex[18], tex[16], tex[15]);
-    Java_org_telegram_messenger_Intro_setBackgroundColor(E, C, (bg >> 16 & 255) / 255.f, (bg >> 8 & 255) / 255.f, (bg & 255) / 255.f, 1.f);
     Java_org_telegram_messenger_Intro_onSurfaceCreated(E, C);
-    Java_org_telegram_messenger_Intro_onSurfaceChanged(E, C, W, H, fminf(W / 150.f, H / 150.f), 0);
 
     unsigned char *buf = malloc((size_t)W * H * 4);
     int frames = total * fps / 1000;
