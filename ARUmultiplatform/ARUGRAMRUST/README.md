@@ -20,7 +20,7 @@ RU: Анимации написаны **по методу clean-room**: код G
 
 ## Ilova / App / Приложение
 
-UZ: `src/lib.rs` — 6 sahifali tanishtiruv (`src/art.rs` — o'zimiz chizgan vektor animatsiyalar, varaq sifatida oldindan chiziladi) va telefon raqami ekrani. APK: `.github/workflows/arugramrust.yml` (Telegram'ga yuboriladi). Bosh sahifa keyin.
+UZ: `src/lib.rs` — 6 sahifali tanishtiruv (`src/intro_scene.rs` — Telegram tanishtiruv chizuvchisining Rust ko'chirmasi) va telefon raqami ekrani. APK: `.github/workflows/arugramrust.yml` (Telegram'ga yuboriladi). Bosh sahifa keyin.
 EN: `src/lib.rs` — the 6-page intro (`src/art.rs` — our own vector animations, pre-rendered into sprite sheets) and the phone-number screen. APK: `.github/workflows/arugramrust.yml` (sent to Telegram). Home screen comes later.
 RU: `src/lib.rs` — знакомство из 6 страниц (`src/art.rs` — собственные векторные анимации, заранее рисуются в листы) и экран номера телефона. APK: `.github/workflows/arugramrust.yml` (отправляется в Telegram). Главный экран — позже.
 

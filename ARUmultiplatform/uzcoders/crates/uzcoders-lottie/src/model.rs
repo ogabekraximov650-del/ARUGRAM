@@ -11,6 +11,15 @@ impl Animation {
     /// EN: Replaces every fill (`fl`) and stroke (`st`) color of the layer named `layer` with `rgb` (0..1), like RLottie's `setLayerColor`. Returns how many colors were replaced.
     /// RU: Заменяет все цвета заливки (`fl`) и обводки (`st`) слоя с именем `layer` на `rgb` (0..1), как `setLayerColor` в RLottie. Возвращает число заменённых цветов.
     pub fn set_layer_color(&mut self, layer: &str, rgb: [f32; 3]) -> usize {
+        self.recolor(Some(layer), rgb)
+    }
+
+    /// UZ: Barcha qatlamlardagi to'ldirish va chiziq ranglarini `rgb` ga almashtiradi. EN: Replaces the fill and stroke colors of all layers with `rgb`. RU: Заменяет цвета заливки и обводки всех слоёв на `rgb`.
+    pub fn set_all_colors(&mut self, rgb: [f32; 3]) -> usize {
+        self.recolor(None, rgb)
+    }
+
+    fn recolor(&mut self, layer: Option<&str>, rgb: [f32; 3]) -> usize {
         fn walk(items: &mut [ShapeItem], rgb: [f32; 3]) -> usize {
             let mut n = 0;
             for it in items {
@@ -26,7 +35,7 @@ impl Animation {
             }
             n
         }
-        self.layers.iter_mut().filter(|l| l.name == layer).map(|l| walk(&mut l.shapes, rgb)).sum()
+        self.layers.iter_mut().filter(|l| layer.is_none_or(|n| l.name == n)).map(|l| walk(&mut l.shapes, rgb)).sum()
     }
 
     /// UZ: JSON matnidan Lottie animatsiyasini o'qiydi. JSON yaroqsiz bo'lsa xato qaytaradi.

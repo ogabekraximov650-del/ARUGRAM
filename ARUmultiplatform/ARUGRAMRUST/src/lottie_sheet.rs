@@ -25,7 +25,11 @@ pub fn build(raw: &str, px: u32, max_fps: f32, layers: &[(&str, [f32; 3])]) -> R
 fn build_inner(raw: &str, px: u32, max_fps: f32, layers: &[(&str, [f32; 3])]) -> Result<Sheet, String> {
     let mut anim = Animation::from_json_str(raw).map_err(|e| format!("parse: {e}"))?;
     for (name, rgb) in layers {
-        anim.set_layer_color(name, *rgb);
+        if *name == "*" {
+            anim.set_all_colors(*rgb);
+        } else {
+            anim.set_layer_color(name, *rgb);
+        }
     }
     let r = Renderer::default();
     let prepared = r.prepare(&anim).map_err(|e| format!("{e}"))?;
