@@ -33,7 +33,7 @@ jobs:
       - name: ffmpeg, Playwright (Chromium)
         working-directory: ARUmultiplatform/ARUGRAMRUST/demo
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg fonts-noto-color-emoji
           npm init -y >/dev/null
           npm i --no-save playwright@1.56.1
           npx playwright install --with-deps chromium

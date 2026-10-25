@@ -53,6 +53,8 @@ html,body{width:1280px;height:720px;overflow:hidden;background:#0a0c0f;font-fami
 .sk{height:62px;display:flex;gap:12px;align-items:center;padding:0 16px}
 .sk .av{width:46px;height:46px;border-radius:50%;background:#26272b}
 .sk .l{flex:1}.sk .l i{display:block;height:10px;border-radius:5px;background:#26272b;margin-bottom:8px}
+.erow{position:absolute;left:0;right:0;height:51.5px;display:flex;align-items:center}
+.erow .f{position:absolute;left:35px;font-size:21px;width:30px}.erow .n{position:absolute;left:71px;font-size:18px}.erow .c{position:absolute;right:34px;font-size:18px;color:#64b5ef}
 </style></head>
 <body>
 <div id="stage"><div id="phone"><div id="clip"><div id="screen">
@@ -68,13 +70,23 @@ html,body{width:1280px;height:720px;overflow:hidden;background:#0a0c0f;font-fami
   </div>
 
   <div class="pg" id="a">
-    <div class="col" id="acol">
-      <div class="t18" id="a1">Telefon raqamingiz</div>
-      <div class="t14" id="a2" style="margin-top:8px;padding:0 32px">Iltimos, davlat kodini tasdiqlang va<br>telefon raqamingizni kiriting.</div>
-      <div class="of" id="a3" style="width:328px;margin-top:24px"><label style="top:-10px;font-size:12px">Davlat</label><span style="margin-left:16px;flex:1">O'zbekiston</span><svg width="24" height="24" viewBox="0 0 24 24" style="margin-right:14px"><path d="M7 10l5 5 5-5" fill="none" stroke="#7d7d7d" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-      <div class="of" id="a4" style="width:328px;margin-top:22px"><label id="lab1" style="top:-10px;font-size:12px">Telefon raqami</label>
-        <span style="margin-left:16px">+998</span><span style="width:1px;height:30px;background:var(--ln);margin:0 12px 0 12px"></span><span id="num"></span><i class="cur" id="cur1"></i><span id="hnt" style="color:var(--hint)">00 000 00 00</span></div>
-    </div>
+    <div class="t18 abs" id="a1" style="left:0;right:0;top:121px">Telefon raqamingiz</div>
+    <div class="t14 abs" id="a2" style="left:0;right:0;top:153px;line-height:19.5px;font-size:15px">Telefon raqamingizni kiriting<br>yoki <span style="color:#64b5ef">kirish kaliti yordamida kiring ›</span></div>
+    <div class="of abs" id="a3" style="left:36.5px;top:224px;width:287px;height:51.5px;border-width:1.5px">
+      <label id="labC" style="top:15px;font-size:17px">Mamlakat</label><span id="flag" style="position:absolute;left:14px;top:12px;font-size:21px;line-height:26px"></span><span id="cname" style="position:absolute;left:52px;top:0;line-height:48px;font-size:18px"></span>
+      <svg width="24" height="24" viewBox="0 0 24 24" style="position:absolute;right:12px;top:13px"><path d="M9 6l6 6-6 6" fill="none" stroke="#7d7d7d" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="of abs" id="a4" style="left:36.5px;top:307.5px;width:287px;height:50.5px;border-width:2px;border-color:#6eb2ef">
+      <label id="lab1" style="top:-11px;font-size:13px;color:#6eb2ef">Telefon raqami</label>
+      <span style="position:absolute;left:14px;top:0;line-height:46px;font-size:20px">+<span id="cc"></span></span><span style="position:absolute;left:76px;top:9px;width:1px;height:30px;background:#505050"></span>
+      <span id="num" style="position:absolute;left:90px;top:0;line-height:46px;font-size:20px"></span><i class="cur" id="cur1" style="position:absolute;top:12px;height:24px"></i><span id="hnt" style="position:absolute;left:90px;top:0;line-height:46px;font-size:20px;color:#6e6e6e"></span></div>
+  </div>
+
+  <div class="pg" id="e" style="z-index:40">
+    <div class="abs" style="left:0;right:0;top:24px;height:62.5px;background:var(--bg);border-bottom:1px solid #202020;z-index:3">
+      <svg class="abs" width="26" height="26" viewBox="0 0 24 24" style="left:16px;top:18px"><path d="M20 12H5M11 5l-7 7 7 7" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <div class="abs" style="left:75px;top:0;line-height:62px;font-size:21px;font-weight:700">Mamlakatni tanlang</div>
+      <svg class="abs" width="26" height="26" viewBox="0 0 24 24" style="left:318px;top:18px"><circle cx="10" cy="10" r="6.5" fill="none" stroke="#fff" stroke-width="2"/><path d="M15 15l6 6" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg></div>
+    <div id="elist" class="abs" style="left:0;right:0;top:86.5px;bottom:0;overflow:hidden"><div id="erows" class="abs" style="left:0;right:0;top:0"></div><div id="ethumb" class="abs" style="right:4px;top:0;width:4px;height:32px;border-radius:2px;background:#5a5a5a;opacity:0"></div></div>
   </div>
 
   <div class="pg" id="b">
@@ -108,7 +120,7 @@ html,body{width:1280px;height:720px;overflow:hidden;background:#0a0c0f;font-fami
   <div id="kn"></div><div id="ka"></div>
   <div id="fab"><svg id="fa" width="26" height="26" viewBox="0 0 26 26"><path d="M5 13h15M14 6l7 7-7 7" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg><svg id="fp" width="44" height="44" viewBox="0 0 44 44" style="opacity:0"><path id="arcF" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg></div>
 </div></div></div></div>
-<script src="tgassets/lottie.min.js"></script><script src="tgassets/anims.js"></script>
+<script src="tgassets/lottie.min.js"></script><script src="tgassets/countries.js"></script><script src="tgassets/anims.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
 const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
@@ -127,7 +139,8 @@ const quint = (x) => { x = clamp(x) - 1; return x * x * x * x * x + 1; }; // Vie
 const TS = [3500, 7000, 10500, 14000, 17500];     // sahifaga o'tish / page switch (ms)
 const SWIPE = 450;
 const L0 = 0;                                  // kirish oynasi boshlanishi / login start
-const T = {}; T.kb = L0 + 100; T.ph0 = L0 + 1500; T.phS = 230; T.fab1 = T.ph0 + 8 * T.phS + 250; T.tap1 = T.fab1 + 900; T.to2 = T.tap1 + 1000;
+const T = {}; T.kb = L0 + 100; T.tapC = 1300; T.scr0 = 1900; T.scr1 = 3500; T.pick = 4000; T.listOut = 4200;
+T.ph0 = 5200; T.phS = 230; T.fab1 = 200; T.tap1 = T.ph0 + 8 * T.phS + 900; T.to2 = T.tap1 + 1000;
 T.c0 = T.to2 + 1500; T.cS = 300; T.ver = T.c0 + 4 * T.cS + 450; T.to3 = T.ver + 1100;
 T.p0 = T.to3 + 1200; T.pS = 190; T.eye = T.p0 + 8 * T.pS + 500; T.tap3 = T.eye + 1300; T.to4 = T.tap3 + 1000; T.end = T.to4 + 3200;
 const TOTAL = T.end, TR = 300, WD = 360;
@@ -188,6 +201,7 @@ function page(el, t, a, b) {    // kirish sahifalari: to'liq kenglik, 300 ms Acc
   el.style.transform = `translateX(${x}px)`; el.style.visibility = (a !== null && t < a) || (b !== null && t > b + TR) ? 'hidden' : 'visible'; }
 
 let lastSrc = '', pending = null;
+const flagOf = (iso) => [...iso.toUpperCase()].map((c) => String.fromCodePoint(0x1f1e6 + c.charCodeAt(0) - 65)).join('');
 function frame(t) {
   // ---- tanishtiruv ----
   const P = pos(t), fi = Math.min(Math.floor(t / (1000 / 60)) + 1, 99999);
@@ -202,17 +216,29 @@ function frame(t) {
   $('intro').style.display = 'none';
 
   // ---- 1) telefon ----
-  slide($('a'), t, L0, T.to2 - 0);  // 1-sahifa / page 1 uses fragment fade-in, then page slide out
+  slide($('a'), t, L0, T.to2 - 0);
   page($('a'), t, null, T.to2); { const a = seg(t, L0, L0 + 200); $('a').style.opacity = a; }
+  const selC = t >= T.listOut - 40;
+  $('flag').textContent = selC ? flagOf('UZ') : ''; $('cname').textContent = selC ? "O'zbekiston" : '';
+  { const r = selC ? dec(seg(t, T.listOut + 100, T.listOut + 250)) : 0; $('labC').style.top = `${lerp(15, -11, r)}px`; $('labC').style.fontSize = `${lerp(17, 13, r)}px`; }
+  $('cc').textContent = selC ? '998' : '';
   const n1 = typed(t, T.ph0, T.phS, 9);
-  $('num').textContent = fmt(PHONE.slice(0, n1)); $('hnt').textContent = n1 ? '' : '00 000 00 00';
-  $('cur1').style.opacity = Math.floor(t / 500) % 2 ? 0 : 1;
-  outline($('a4'), $('lab1'), dec(seg(t, T.kb, T.kb + 200)));
-  $('acol').style.top = '56px'; $('acol').style.height = `${750 - 56 - 230}px`; $('acol').style.justifyContent = 'center';
+  $('num').textContent = fmt(PHONE.slice(0, n1)); $('hnt').textContent = selC && !n1 ? '00 000 00 00' : '';
+  { const w = n1 ? $('num').offsetWidth : 0; $('cur1').style.left = `${90 + w}px`; $('cur1').style.opacity = selC && Math.floor(t / 500) % 2 === 0 ? 1 : 0; }
+  // ---- mamlakat ro'yxati (fragment: alpha 0->1, 48dp -> 0, 200 ms; qaytishda teskari) ----
+  { const p = ead(seg(t, T.tapC, T.tapC + 200)), q2 = ead(seg(t, T.listOut, T.listOut + 200)); const e = $('e');
+    e.style.opacity = p * (1 - q2); e.style.transform = `translateX(${(1 - p) * 48 + q2 * 48}px)`; e.style.visibility = p * (1 - q2) > 0 ? 'visible' : 'hidden';
+    const rows = $('erows'), UZI = window.COUNTRIES.findIndex((r) => r[0] === 'UZ'), RH = 51.5, maxOff = (UZI - 4) * RH;
+    const off = maxOff * (1 - Math.pow(1 - seg(t, T.scr0, T.scr1), 3)); rows.style.transform = `translateY(${-off}px)`;
+    const first = Math.max(0, Math.floor(off / RH) - 1), last = Math.min(window.COUNTRIES.length - 1, first + 17);
+    if (rows.dataset.f !== String(first)) { rows.dataset.f = first; rows.innerHTML = ''; for (let i = first; i <= last; i++) { const r = window.COUNTRIES[i], d = document.createElement('div'); d.className = 'erow'; d.style.top = `${i * RH}px`;
+      d.style.background = (i === UZI && t >= T.pick && t < T.pick + 200) ? 'rgba(255,255,255,.08)' : ''; d.innerHTML = `<span class="f">${r[0] === 'XX' ? '\u{1F3F4}\u200D\u2620\uFE0F' : flagOf(r[0])}</span><span class="n">${r[1]}</span><span class="c">${r[2]}</span>`; rows.appendChild(d); } }
+    const th = $('ethumb'); const sc = seg(t, T.scr0 - 100, T.scr1), fade = 1 - seg(t, T.scr1 + 300, T.scr1 + 700); th.style.opacity = sc > 0 ? fade : 0; th.style.top = `${(off / (window.COUNTRIES.length * RH)) * 640 + 4}px`; }
 
   // ---- klaviatura ---- (CubicBezierInterpolator.DEFAULT, 300 ms; chiqishda easeInOutQuad)
   const kIn = bz(.25, .1, .25, 1)(seg(t, T.kb, T.kb + 300)), kOut = eioq(seg(t, T.to3, T.to3 + 300));
-  const kc = t < T.to3 ? kIn : 1 - kOut;
+  const kLow = eioq(seg(t, T.tapC, T.tapC + 300)), kBack = bz(.25, .1, .25, 1)(seg(t, T.listOut + 100, T.listOut + 400));
+  const kc = t < T.tapC ? kIn : t < T.listOut + 100 ? 1 - kLow : t < T.to3 ? kBack : 1 - kOut;
   $('kn').style.transform = `translateY(${(1 - kc) * 230}px)`; $('kn').style.opacity = kc;
   const aUp = bz(.25, .1, .25, 1)(seg(t, T.to3 + 150, T.to3 + 450)) * (1 - eioq(seg(t, T.to4 - 50, T.to4 + 250)));
   $('ka').style.transform = `translateY(${(1 - aUp) * 270}px)`;
@@ -222,11 +248,11 @@ function frame(t) {
   // ---- yumaloq tugma (FragmentFloatingButton: 56dp, o'ngda 20, pastda 14; EASE_OUT_QUINT 380 ms) ----
   const q = bz(.22, 1, .36, 1);
   const vis = (on, off) => q(seg(t, on, on + 380)) * (off === null ? 1 : 1 - q(seg(t, off, off + 380)));
-  const show = Math.max(vis(T.fab1, T.to2 - 100), vis(T.p0 + 80, T.to4 - 100));
+  const show = Math.max(vis(T.fab1, T.to2 - 100) * (1 - ead(seg(t, T.tapC, T.tapC + 120))) + vis(T.fab1, T.to2 - 100) * ead(seg(t, T.listOut, T.listOut + 120)) * (t > T.listOut ? 1 : 0), vis(T.p0 + 80, T.to4 - 100));
   const prog = Math.max(q(seg(t, T.tap1, T.tap1 + 380)) * (1 - q(seg(t, T.to2 - 100, T.to2 + 280))), q(seg(t, T.tap3, T.tap3 + 380)) * (1 - q(seg(t, T.to4 - 100, T.to4 + 280))));
   const fpress = Math.max(tpress(t, T.tap1), tpress(t, T.tap3));
   $('c5').style.bottom = `${260 * aUp + 32 + 20}px`;
-  $('fab').style.bottom = `${14 + Math.max(230 * kc, 260 * aUp)}px`;
+  $('fab').style.bottom = `${21.5 + Math.max(225 * kc, 260 * aUp)}px`;
   $('fab').style.opacity = show; $('fab').style.visibility = show > 0 ? 'visible' : 'hidden';
   $('fab').style.transform = `translateY(${40 * (1 - show)}px) scale(${lerp(.4, 1, show) * (1 - .05 * fpress)})`;
   $('fa').style.opacity = 1 - prog; $('fa').style.transform = `scale(${lerp(1, .4, prog)})`;
