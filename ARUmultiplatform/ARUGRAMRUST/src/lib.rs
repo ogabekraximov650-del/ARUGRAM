@@ -73,7 +73,7 @@ impl App {
             page: Cell::new(0),
             from: Cell::new(0),
             slide_t0: Cell::new(None),
-            moon: Cell::new(false),
+            moon: Cell::new(true),
             theme_from: Cell::new(0.0),
             theme_t0: Cell::new(None),
             phone_t0: Cell::new(None),

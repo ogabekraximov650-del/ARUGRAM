@@ -1,6 +1,6 @@
 name: ARUGRAMRUST — animatsiya videosi
 
-# `ARUmultiplatform/ARUGRAMRUST/**` o'zgarganda: tanishtiruv (intro) animatsiyasini 60 fps video qilib chiqaradi
+# `ARUmultiplatform/ARUGRAMRUST/demo/**` o'zgarganda: demo (hozir: kirish oqimi) animatsiyasini 60 fps video qilib chiqaradi
 # va Telegram "Saqlangan xabarlar"ga yuboradi (foydalanuvchi talabi: video faqat Actions'da yasaladi).
 on:
   push:
@@ -38,13 +38,13 @@ jobs:
           npm i --no-save playwright@1.56.1
           npx playwright install --with-deps chromium
 
-      - name: Video (tanishtiruv animatsiyasi)
+      - name: Video (hisobga kirish animatsiyasi)
         id: video
         working-directory: ARUmultiplatform/ARUGRAMRUST/demo
         run: |
           OUT="$RUNNER_TEMP/video"; mkdir -p "$OUT"
-          DEMO=intro_demo.html node render.mjs video "$OUT/arugram_intro_animatsiya.mp4"
-          cat "$OUT/arugram_intro_animatsiya.mp4.txt"
+          DEMO=login_demo.html node render.mjs video "$OUT/arugram_kirish_animatsiya.mp4"
+          cat "$OUT/arugram_kirish_animatsiya.mp4.txt"
           ls -la "$OUT"
           echo "dir=$OUT" >> "$GITHUB_OUTPUT"
 
@@ -61,12 +61,12 @@ jobs:
           K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K \
             -in tool/encode/session.enc -out "$S.session"
           head -c 16 "$S.session" | grep -q "SQLite format 3"
-          DUR=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "${{ steps.video.outputs.dir }}/arugram_intro_animatsiya.mp4" | cut -d. -f1)
-          python tool/notify/send_video.py "$S" "${{ steps.video.outputs.dir }}/arugram_intro_animatsiya.mp4" "ARUGRAM tanishtiruv animatsiyasi (build ${{ github.run_number }})" "$DUR"
+          DUR=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "${{ steps.video.outputs.dir }}/arugram_kirish_animatsiya.mp4" | cut -d. -f1)
+          python tool/notify/send_video.py "$S" "${{ steps.video.outputs.dir }}/arugram_kirish_animatsiya.mp4" "ARUGRAM hisobga kirish animatsiyasi (build ${{ github.run_number }})" "$DUR"
           rm -f "$S.session"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: arugram-intro-video-${{ github.run_number }}
+          name: arugram-login-video-${{ github.run_number }}
           path: ${{ steps.video.outputs.dir }}/*.mp4
           retention-days: 30
