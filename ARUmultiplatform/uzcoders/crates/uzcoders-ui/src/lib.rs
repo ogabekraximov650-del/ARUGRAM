@@ -349,6 +349,20 @@ impl Ui {
         self.last_rev = Some(global_revision());
         self.dirty = false;
         uzcoders_core::clear_frame_request();
+        // UZ: Dastur so'ragan fokusni qo'llaymiz (maydon oldingi kadrda qurilgan bo'lishi kerak).
+        // EN: Apply a focus requested by the app (the field must have been built in an earlier frame).
+        // RU: Применяем фокус, запрошенный приложением (поле должно быть построено в предыдущем кадре).
+        if let Some(req) = uzcoders_core::take_focus_request() {
+            if let Some(fi) = self.fields.iter().position(|f| f.cfg.state.id() == req.0) {
+                self.caret = self.fields[fi].shown.chars().count();
+                self.focus = Some(req.0);
+                self.kb_serial += 1;
+                self.caret_epoch = self.now;
+            } else {
+                uzcoders_core::retry_focus_request(req);
+                uzcoders_core::invalidate();
+            }
+        }
         let dt = match self.last_frame_now {
             Some(t) => (self.now.saturating_sub(t) as f32 / 1000.0).min(0.1),
             None => 0.0,

@@ -1,0 +1,278 @@
+//! UZ: 6 sahifali tanishtiruv. EN: The 6-page intro. RU: Знакомство из 6 страниц.
+
+use crate::art;
+use std::cell::{Cell, RefCell};
+use std::time::Instant;
+use uzcoders::prelude::*;
+
+const SLIDE_MS: f32 = 380.0;
+const THEME_MS: f32 = 520.0;
+const ART_DP: f32 = 200.0;
+const ART_PX: u32 = 256;
+
+const TITLES: [&str; 6] = ["ARUGRAM", "Tez", "Bepul", "Kuchli", "Xavfsiz", "Bulutli"];
+const MESSAGES: [&str; 6] = [
+    "Dunyoning **eng tezkor** muloqot ilovasi.\nBu **bepul** va **xavfsiz**.",
+    "**ARUGRAM** xabarlarni boshqa har qanday\nilovadan tezroq yetkazadi.",
+    "**ARUGRAM** suhbatlar va media uchun bepul\ncheksiz bulutli xotira taqdim etadi.",
+    "**ARUGRAM**da media va suhbatlar\nhajmiga cheklov yo'q.",
+    "**ARUGRAM** xabarlaringizni xakerlik\nhujumlaridan himoya qiladi.",
+    "**ARUGRAM** xabarlaringizga bir nechta\nqurilmadan kirish imkonini beradi.",
+];
+
+fn ease(x: f32) -> f32 {
+    let x = x.clamp(0.0, 1.0);
+    1.0 - (1.0 - x).powi(3)
+}
+
+pub struct Intro {
+    rev: State<u64>,
+    page: Cell<usize>,
+    from: Cell<usize>,
+    slide_t0: Cell<Option<Instant>>,
+    moon: Cell<bool>,
+    theme_from: Cell<f32>,
+    theme_t0: Cell<Option<Instant>>,
+    on_start: RefCell<Option<Rc<dyn Fn()>>>,
+    ticking: Cell<bool>,
+    sheets: RefCell<[Option<(Rc<Image>, u32, u32)>; 6]>,
+    loading: RefCell<[bool; 6]>,
+    sun: Rc<Image>,
+    moon_img: Rc<Image>,
+}
+
+impl Intro {
+    pub fn new() -> Rc<Intro> {
+        Rc::new(Intro {
+            rev: State::new(0),
+            page: Cell::new(0),
+            from: Cell::new(0),
+            slide_t0: Cell::new(None),
+            moon: Cell::new(true),
+            theme_from: Cell::new(0.0),
+            theme_t0: Cell::new(None),
+            on_start: RefCell::new(None),
+            ticking: Cell::new(false),
+            sheets: RefCell::new(Default::default()),
+            loading: RefCell::new([false; 6]),
+            sun: Rc::new(art::theme_icon(false, 64)),
+            moon_img: Rc::new(art::theme_icon(true, 64)),
+        })
+    }
+
+    fn ms(t: Option<Instant>) -> Option<f32> {
+        t.map(|t| t.elapsed().as_secs_f32() * 1000.0)
+    }
+
+    /// UZ: Kun/tun qiymati 0 (tun) .. 1 (kun). EN: Day/night value 0 (night) .. 1 (day). RU: Значение день/ночь 0 (ночь) .. 1 (день).
+    fn day(&self) -> f32 {
+        let target = if self.moon.get() { 0.0 } else { 1.0 };
+        match Self::ms(self.theme_t0.get()) {
+            Some(ms) if ms < THEME_MS => {
+                let e = ease(ms / THEME_MS);
+                self.theme_from.get() + (target - self.theme_from.get()) * e
+            }
+            _ => target,
+        }
+    }
+
+    fn goto(self: &Rc<Self>, p: usize) {
+        if p == self.page.get() || p >= 6 {
+            return;
+        }
+        self.from.set(self.page.get());
+        self.page.set(p);
+        self.slide_t0.set(Some(Instant::now()));
+        self.rev.set(self.rev.get() + 1);
+    }
+
+    fn toggle_theme(self: &Rc<Self>) {
+        self.theme_from.set(self.day());
+        self.moon.set(!self.moon.get());
+        self.theme_t0.set(Some(Instant::now()));
+        self.rev.set(self.rev.get() + 1);
+    }
+
+    /// UZ: Sahifa varag'ini fon oqimida tayyorlaydi (joriy ±1), uzoqdagilarini xotiradan chiqaradi.
+    /// EN: Builds page sheets on a background thread (current ±1) and drops far ones from memory.
+    /// RU: Готовит листы страниц в фоне (текущая ±1) и выгружает далёкие из памяти.
+    fn ensure_sheets(self: &Rc<Self>) {
+        let cur = self.page.get();
+        for p in 0..6usize {
+            let near = p.abs_diff(cur) <= 1;
+            if !near {
+                self.sheets.borrow_mut()[p] = None;
+                continue;
+            }
+            if self.sheets.borrow()[p].is_some() || self.loading.borrow()[p] {
+                continue;
+            }
+            self.loading.borrow_mut()[p] = true;
+            let me = self.clone();
+            spawn_bg(
+                move || art::sheet(p, ART_PX),
+                move |(img, cols, count)| {
+                    me.loading.borrow_mut()[p] = false;
+                    if me.page.get().abs_diff(p) <= 1 {
+                        me.sheets.borrow_mut()[p] = Some((Rc::new(img), cols, count));
+                    }
+                    me.rev.set(me.rev.get() + 1);
+                },
+            );
+        }
+    }
+
+    fn animating(&self) -> bool {
+        Self::ms(self.slide_t0.get()).is_some_and(|m| m < SLIDE_MS)
+            || Self::ms(self.theme_t0.get()).is_some_and(|m| m < THEME_MS)
+    }
+
+    fn drive(self: &Rc<Self>) {
+        if self.animating() && !self.ticking.get() {
+            self.ticking.set(true);
+            let me = self.clone();
+            spawn_bg(
+                || std::thread::sleep(std::time::Duration::from_millis(16)),
+                move |_| {
+                    me.ticking.set(false);
+                    me.rev.set(me.rev.get() + 1);
+                },
+            );
+        }
+    }
+
+    pub fn palette(&self) -> (Color, Color, Color) {
+        let d = self.day();
+        let bg = Color::hex(0x111418).lerp(Color::hex(0xF4F7FB), d);
+        let fg = Color::WHITE.lerp(Color::hex(0x101822), d);
+        let dim = Color::hex(0xD0D6DE).lerp(Color::hex(0x4C5A6C), d);
+        (bg, fg, dim)
+    }
+
+    fn message(&self, p: usize, fg: Color, dim: Color) -> Element {
+        let lines: Vec<Element> = MESSAGES[p]
+            .split('\n')
+            .map(|line| {
+                let spans: Vec<Element> = line
+                    .split("**")
+                    .enumerate()
+                    .filter(|(_, s)| !s.is_empty())
+                    .flat_map(|(i, s)| {
+                        let t = text(s.trim()).size(15.0);
+                        let t = if i % 2 == 1 { t.bold().color(fg) } else { t.color(dim) };
+                        let sp = |on: bool| if on { gap_box(4.0, 0.0) } else { gap_box(0.0, 0.0) };
+                        [sp(s.starts_with(' ')), t, sp(s.ends_with(' '))]
+                    })
+                    .collect();
+                row(spans).justify(Justify::Center)
+            })
+            .collect();
+        column(lines).gap(2.0).align(Align::Center)
+    }
+
+    fn intro_page(self: &Rc<Self>, p: usize, x: f32, w: f32, fg: Color, dim: Color) -> Element {
+        let art = match &self.sheets.borrow()[p] {
+            Some((img, cols, count)) => sprite(img, *cols, *count, art::FPS as f32, true, ART_DP, ART_DP),
+            None => gap_box(ART_DP, ART_DP),
+        };
+        column(vec![
+            art,
+            gap_box(0.0, 26.0),
+            text(TITLES[p]).size(if p == 0 { 30.0 } else { 26.0 }).bold().color(fg).letter_spacing(if p == 0 { 2.0 } else { 0.0 }),
+            gap_box(0.0, 12.0),
+            self.message(p, fg, dim),
+        ])
+        .align(Align::Center)
+        .justify(Justify::Center)
+        .width(w)
+        .grow(1.0)
+        .margin_each(x, 0.0, -x, 0.0)
+    }
+
+    fn dots(&self, dim: Color) -> Element {
+        let cur = self.page.get();
+        let blue = Color::hex(0x2A9DE8);
+        let dots: Vec<Element> = (0..6)
+            .map(|i| {
+                let on = i == cur;
+                gap_box(if on { 19.0 } else { 7.0 }, 7.0).bg(if on { blue } else { dim.with_opacity(0.4) }).radius(3.5)
+            })
+            .collect();
+        row(dots).gap(8.0).justify(Justify::Center).align(Align::Center)
+    }
+
+    fn intro(self: &Rc<Self>, w: f32, fg: Color, dim: Color) -> Element {
+        let slide = Self::ms(self.slide_t0.get()).map_or(1.0, |m| ease(m / SLIDE_MS));
+        let (cur, from) = (self.page.get(), self.from.get());
+        let dir = if cur > from { 1.0 } else { -1.0 };
+        let mut pages = Vec::new();
+        if slide < 1.0 {
+            pages.push(self.intro_page(from, -dir * slide * w, w, fg, dim));
+            pages.push(self.intro_page(cur, dir * (1.0 - slide) * w, w, fg, dim));
+        } else {
+            pages.push(self.intro_page(cur, 0.0, w, fg, dim));
+        }
+        let (me, me2) = (self.clone(), self.clone());
+        let pager = stack(pages).grow(1.0).on_swipe(move |d| {
+            let p = me.page.get() as i32 + d;
+            if (0..6).contains(&p) {
+                me.goto(p as usize);
+            }
+        });
+        let icon = if self.moon.get() { &self.moon_img } else { &self.sun };
+        let theme = image(icon, 28.0, 28.0);
+        let top = row(vec![spacer(), column(vec![theme]).padding(10.0).on_click(move || me2.toggle_theme())]).padding_xy(10.0, 6.0);
+        let ins = safe_insets();
+        let me3 = self.clone();
+        let cta = column(vec![text("Suhbatni boshlash").size(16.0).bold().color(Color::WHITE)])
+            .center()
+            .gradient(Color::hex(0x1F7FD1), Color::hex(0x4AA3D9))
+            .radius(23.0)
+            .height(46.0)
+            .width((w - 32.0).min(330.0))
+            .on_click(move || {
+                if let Some(f) = me3.on_start.borrow().clone() {
+                    f();
+                }
+            });
+        column(vec![
+            gap_box(0.0, ins.top),
+            top,
+            pager,
+            self.dots(dim),
+            gap_box(0.0, 26.0),
+            row(vec![cta]).justify(Justify::Center),
+            gap_box(0.0, 18.0),
+            row(vec![text("Continue in English").size(15.0).color(Color::hex(0x4AA3E0))]).justify(Justify::Center),
+            gap_box(0.0, 26.0 + ins.bottom),
+        ])
+        .width(w)
+        .grow(1.0)
+    }
+
+    pub fn view(self: &Rc<Self>) -> Element {
+        let _ = self.rev.get();
+        self.ensure_sheets();
+        self.drive();
+        let (w, _) = window_dp();
+        let (_, fg, dim) = self.palette();
+        self.intro(w, fg, dim)
+    }
+
+    /// UZ: "Suhbatni boshlash" bosilganda chaqiriladi. EN: Called when "Start" is tapped. RU: Вызывается при нажатии «Начать».
+    pub fn set_on_start(&self, f: impl Fn() + 'static) {
+        *self.on_start.borrow_mut() = Some(Rc::new(f));
+    }
+
+    pub fn back(self: &Rc<Self>) -> bool {
+        if self.page.get() > 0 {
+            self.goto(self.page.get() - 1);
+            return true;
+        }
+        false
+    }
+
+    pub fn theme_day(&self) -> f32 {
+        self.day()
+    }
+}

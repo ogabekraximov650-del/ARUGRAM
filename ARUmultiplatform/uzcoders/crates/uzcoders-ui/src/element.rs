@@ -201,6 +201,13 @@ impl Element {
         self.style.margin = EdgeInsets::all(v);
         self
     }
+    /// UZ: `stack` ichida bola o'z o'lchamida `margin_each(left, top, ..)` nuqtasiga qo'yiladi (mutlaq joylashuv).
+    /// EN: Inside a `stack` the child keeps its own size at the `margin_each(left, top, ..)` point (absolute placement).
+    /// RU: Внутри `stack` ребёнок сохраняет свой размер в точке `margin_each(left, top, ..)` (абсолютное размещение).
+    pub fn abs(mut self) -> Self {
+        self.style.abs = true;
+        self
+    }
     pub fn margin_each(mut self, left: f32, top: f32, right: f32, bottom: f32) -> Self {
         self.style.margin = EdgeInsets::new(left, top, right, bottom);
         self

@@ -76,6 +76,10 @@ pub struct Style {
     /// EN: Children are layered on top of each other: each fills the node's whole area.
     /// RU: Дети накладываются друг на друга слоями: каждый занимает всю область узла.
     pub stack: bool,
+    /// UZ: `stack` ichida: bola o'z o'lchamida (aniq yoki kontent bo'yicha) margin bilan berilgan nuqtaga qo'yiladi, maydonni to'ldirmaydi (CSS `position: absolute` kabi).
+    /// EN: Inside a `stack`: the child keeps its own size (explicit or by content) at the margin offset instead of filling the area (like CSS `position: absolute`).
+    /// RU: Внутри `stack`: ребёнок сохраняет свой размер (явный или по содержимому) в точке, заданной margin, а не заполняет область (как CSS `position: absolute`).
+    pub abs: bool,
     /// UZ: Balandlik = kenglik * aspect (0 — o'chiq).
     /// EN: Height = width * aspect (0 disables it).
     /// RU: Высота = ширина * aspect (0 — отключено).
@@ -98,6 +102,7 @@ impl Default for Style {
             scroll: false,
             basis0: false,
             stack: false,
+            abs: false,
             aspect: 0.0,
         }
     }
@@ -318,6 +323,11 @@ impl Tree {
         if style.stack {
             for &c in &children {
                 let m = self.nodes[c].style.margin;
+                if self.nodes[c].style.abs {
+                    let sz = self.measure(c, (content.w - m.horizontal()).max(0.0));
+                    self.place(c, Rect::new(content.x + m.left, content.y + m.top, sz.w, sz.h));
+                    continue;
+                }
                 self.place(
                     c,
                     Rect::new(

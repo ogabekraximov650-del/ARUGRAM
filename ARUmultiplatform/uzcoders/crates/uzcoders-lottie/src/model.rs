@@ -7,6 +7,28 @@ use super::{
 pub use super::{model_parse::parse_bezier_keyframe_value, model_types::*};
 
 impl Animation {
+    /// UZ: Nomi `layer` bo'lgan qatlamdagi barcha to'ldirish (`fl`) va chiziq (`st`) ranglarini `rgb` (0..1) ga almashtiradi (RLottie `setLayerColor` kabi). Almashtirilgan rang soni qaytariladi.
+    /// EN: Replaces every fill (`fl`) and stroke (`st`) color of the layer named `layer` with `rgb` (0..1), like RLottie's `setLayerColor`. Returns how many colors were replaced.
+    /// RU: Заменяет все цвета заливки (`fl`) и обводки (`st`) слоя с именем `layer` на `rgb` (0..1), как `setLayerColor` в RLottie. Возвращает число заменённых цветов.
+    pub fn set_layer_color(&mut self, layer: &str, rgb: [f32; 3]) -> usize {
+        fn walk(items: &mut [ShapeItem], rgb: [f32; 3]) -> usize {
+            let mut n = 0;
+            for it in items {
+                if it.item_type == "fl" || it.item_type == "st" {
+                    it.color = Some(AnimatedValue {
+                        animated: Some(0),
+                        keyframes: Some(serde_json::json!([rgb[0], rgb[1], rgb[2], 1.0])),
+                        expression: None,
+                    });
+                    n += 1;
+                }
+                n += walk(&mut it.items, rgb);
+            }
+            n
+        }
+        self.layers.iter_mut().filter(|l| l.name == layer).map(|l| walk(&mut l.shapes, rgb)).sum()
+    }
+
     /// UZ: JSON matnidan Lottie animatsiyasini o'qiydi. JSON yaroqsiz bo'lsa xato qaytaradi.
     /// EN: Parses a Lottie animation from a JSON string. Returns an error when `json` is not valid Lottie JSON for this model.
     /// RU: Разбирает Lottie-анимацию из JSON-строки. Возвращает ошибку, если `json` не является допустимым Lottie JSON.

@@ -9,6 +9,25 @@ thread_local! {
     static SAFE: Cell<EdgeInsets> = const { Cell::new(EdgeInsets::ZERO) };
     static DENSITY: Cell<f32> = const { Cell::new(1.0) };
     static WINDOW_DP: Cell<(f32, f32)> = const { Cell::new((0.0, 0.0)) };
+    static FOCUS_REQ: Cell<Option<(usize, u8)>> = const { Cell::new(None) };
+}
+
+/// UZ: Maydonga fokus so'rash (klaviatura ochiladi); `Ui` keyingi kadrda bajaradi. `state_id` — `State::id()`.
+/// EN: Requests focus for a field (the keyboard opens); the `Ui` applies it on the next frame. `state_id` is `State::id()`.
+/// RU: Запрашивает фокус для поля (откроется клавиатура); `Ui` применит его в следующем кадре. `state_id` — `State::id()`.
+pub fn request_focus(state_id: usize) {
+    FOCUS_REQ.with(|f| f.set(Some((state_id, 8))));
+}
+
+/// UZ: Kutayotgan fokus so'rovi (`Ui` ichki). EN: The pending focus request (internal to `Ui`). RU: Ожидающий запрос фокуса (внутреннее для `Ui`).
+pub fn take_focus_request() -> Option<(usize, u8)> {
+    FOCUS_REQ.with(|f| f.take())
+}
+
+pub fn retry_focus_request(r: (usize, u8)) {
+    if r.1 > 0 {
+        FOCUS_REQ.with(|f| f.set(Some((r.0, r.1 - 1))));
+    }
 }
 
 /// UZ: Tizim panellari ostida qolib ketmaslik uchun kerakli chekinishlar (dp). Qobiq (platforma qatlami) o'rnatadi, UI qurilganda o'qiladi.
