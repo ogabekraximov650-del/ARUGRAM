@@ -17,3 +17,9 @@ RU: Rust-версия (uzcoders) ARUGRAM. Пока есть только **об�
 UZ: Animatsiyalar **toza usulda** (clean-room) o'zimiz yozilgan: GPL manba kodi (DrKLO Telegram), uning Lottie/rasm fayllari yoki kodi ko'chirilmagan. Faqat umumiy xatti-harakat g'oyalari (sahifa surilishi, prujinali silkinish va h.k.) ishlatilgan; barcha son qiymatlari bizniki.
 EN: The animations were written **clean-room**: no GPL source (DrKLO Telegram), Lottie/image files or code was copied. Only general behaviour ideas (page slide, spring shake, etc.) are used; all numeric values are ours.
 RU: Анимации написаны **по методу clean-room**: код GPL (DrKLO Telegram), его Lottie/изображения не копировались. Использованы лишь общие идеи поведения (сдвиг страницы, пружинное дрожание и т. п.); все числовые значения наши.
+
+## Ilova / App / Приложение
+
+UZ: `src/lib.rs` — 6 sahifali tanishtiruv (`src/art.rs` — o'zimiz chizgan vektor animatsiyalar, varaq sifatida oldindan chiziladi) va telefon raqami ekrani. APK: `.github/workflows/arugramrust.yml` (Telegram'ga yuboriladi). Bosh sahifa keyin.
+EN: `src/lib.rs` — the 6-page intro (`src/art.rs` — our own vector animations, pre-rendered into sprite sheets) and the phone-number screen. APK: `.github/workflows/arugramrust.yml` (sent to Telegram). Home screen comes later.
+RU: `src/lib.rs` — знакомство из 6 страниц (`src/art.rs` — собственные векторные анимации, заранее рисуются в листы) и экран номера телефона. APK: `.github/workflows/arugramrust.yml` (отправляется в Telegram). Главный экран — позже.

@@ -6,7 +6,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'ARUmultiplatform/ARUGRAMRUST/**'
+      - 'ARUmultiplatform/ARUGRAMRUST/demo/**'
       - 'tool/notify/send_video.py'
       - '.github/workflows/arugramrust-demo.yml'
 
