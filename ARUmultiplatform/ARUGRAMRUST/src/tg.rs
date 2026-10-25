@@ -5,19 +5,67 @@
 use std::cell::Cell;
 use uzcoders::prelude::*;
 
-pub const BG: Color = Color::hex(0x181819);
-pub const TEXT: Color = Color::WHITE;
-pub const HINT: Color = Color::hex(0x7d7d7d);
-pub const LINE: Color = Color::hex(0x505050);
-pub const ACTIVE: Color = Color::hex(0x6eb2ef);
-pub const BLUE: Color = Color::hex(0x64b5ef);
-pub const BTN: Color = Color::hex(0x249af1);
-pub const KEY: Color = Color::hex(0x242424);
-pub const KEY_TEXT: Color = Color::hex(0xe8e8e8);
-pub const KEY_LETTERS: Color = Color::hex(0x6e6e6e);
-pub const KEY_PRESSED: Color = Color::hex(0x3a3a3a);
-pub const SUB: Color = Color::hex(0x7e7e7e);
-pub const SUB_BOLD: Color = Color::hex(0xb0b0b0);
+thread_local! {
+    static NIGHT_T: Cell<f32> = const { Cell::new(1.0) };
+}
+
+/// UZ: Tun darajasi 0 (kunduz) .. 1 (tun); ranglar shu qiymat bo'yicha aralashadi. EN: Night level 0 (day) .. 1 (night); colors blend by it. RU: Уровень ночи 0 (день) .. 1 (ночь); цвета смешиваются по нему.
+pub fn set_night_t(v: f32) {
+    NIGHT_T.with(|c| c.set(v.clamp(0.0, 1.0)));
+}
+pub fn night_t() -> f32 {
+    NIGHT_T.with(|c| c.get())
+}
+fn mix(day: u32, night: u32) -> Color {
+    Color::hex(day).lerp(Color::hex(night), night_t())
+}
+
+// Telegram `day.attheme` / `night.attheme` qiymatlari / values from Telegram's day/night themes.
+pub fn bg() -> Color {
+    mix(0xffffff, 0x181819)
+}
+pub fn txt() -> Color {
+    mix(0x333333, 0xffffff)
+}
+pub fn hint() -> Color {
+    mix(0x979797, 0x7d7d7d)
+}
+pub fn line() -> Color {
+    mix(0xdbdbdb, 0x505050)
+}
+pub fn active() -> Color {
+    mix(0x3e96e8, 0x6eb2ef)
+}
+pub fn blue() -> Color {
+    mix(0x3e96e8, 0x64b5ef)
+}
+pub fn btn() -> Color {
+    mix(0x4da0eb, 0x249af1)
+}
+pub fn btn2() -> Color {
+    mix(0x4da0eb, 0x54b9f1)
+}
+pub fn key() -> Color {
+    mix(0xf0f0f0, 0x242424)
+}
+pub fn key_text() -> Color {
+    txt()
+}
+pub fn key_letters() -> Color {
+    hint()
+}
+pub fn key_pressed() -> Color {
+    mix(0xe0e0e0, 0x3a3a3a)
+}
+pub fn sub() -> Color {
+    mix(0x808384, 0x7e7e7e)
+}
+pub fn sub_bold() -> Color {
+    mix(0x333333, 0xb0b0b0)
+}
+pub fn bar() -> Color {
+    mix(0xf4f4f4, 0x212123)
+}
 
 /// UZ: `t` ni [a, b] oralig'ida 0..1 ga keltiradi. EN: Maps `t` in [a, b] to 0..1. RU: Приводит `t` из [a, b] к 0..1.
 pub fn seg(t: f32, a: f32, b: f32) -> f32 {

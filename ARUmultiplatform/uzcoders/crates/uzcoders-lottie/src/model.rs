@@ -35,7 +35,12 @@ impl Animation {
             }
             n
         }
-        self.layers.iter_mut().filter(|l| layer.is_none_or(|n| l.name == n)).map(|l| walk(&mut l.shapes, rgb)).sum()
+        let mut n: usize = self.layers.iter_mut().filter(|l| layer.is_none_or(|nm| l.name == nm)).map(|l| walk(&mut l.shapes, rgb)).sum();
+        // UZ: precomp (assets) ichidagi qatlamlar ham. EN: Layers inside precomps (assets) too. RU: Слои внутри precomp (assets) тоже.
+        for a in self.assets.iter_mut() {
+            n += a.layers.iter_mut().filter(|l| layer.is_none_or(|nm| l.name == nm)).map(|l| walk(&mut l.shapes, rgb)).sum::<usize>();
+        }
+        n
     }
 
     /// UZ: JSON matnidan Lottie animatsiyasini o'qiydi. JSON yaroqsiz bo'lsa xato qaytaradi.

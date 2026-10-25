@@ -38,7 +38,7 @@ const CODE_LEN: usize = 5;
 const SLIDE_MS: f32 = 300.0;
 const SHOW_DELAY: f32 = 100.0;
 const ROW_H: f32 = 51.5;
-const KB_H: f32 = 225.0;
+const KB_H: f32 = 230.0;
 
 pub struct Login {
     rev: State<u64>,
@@ -47,6 +47,7 @@ pub struct Login {
     t_page: Cell<f32>,
     t_show: Cell<f32>,
     country: Cell<Option<usize>>,
+    code_in: RefCell<String>,
     number: State<String>,
     code: RefCell<String>,
     pass: State<String>,
@@ -98,7 +99,7 @@ fn flag_small(iso: &str) -> Element {
             let a = img.w as f32 / img.h as f32;
             image(&img, (16.0 * a).min(26.0), 16.0)
         }
-        None => t(iso, 11.0, HINT),
+        None => t(iso, 11.0, hint()),
     }
 }
 
@@ -111,6 +112,7 @@ impl Login {
             t_page: Cell::new(-1.0e6),
             t_show: Cell::new(0.0),
             country: Cell::new(None),
+            code_in: RefCell::new(String::new()),
             number: State::new(String::new()),
             code: RefCell::new(String::new()),
             pass: State::new(String::new()),
@@ -248,6 +250,7 @@ impl Login {
 
     fn pick(self: &Rc<Self>, i: usize) {
         self.country.set(Some(i));
+        self.code_in.borrow_mut().clear();
         let max = pattern_len(&COUNTRIES[i]);
         let n: String = self.number.get().chars().take(max).collect();
         self.number.set(n);
@@ -259,16 +262,39 @@ impl Login {
         self.press.set((k, now));
         let page = self.page.get();
         if page == Page::Phone {
-            let mut n = self.number.get();
-            if k == -2 {
-                n.pop();
-            } else if k >= 0 {
-                let max = self.country.get().map_or(12, |c| pattern_len(&COUNTRIES[c]));
-                if n.chars().count() < max && self.country.get().is_some() {
-                    n.push(char::from_digit(k as u32, 10).unwrap_or('0'));
+            let digit = if k >= 0 { char::from_digit(k as u32, 10) } else { None };
+            match self.country.get() {
+                Some(ci) => {
+                    let mut n = self.number.get();
+                    if k == -2 {
+                        if n.pop().is_none() {
+                            // raqam bo'sh: davlat kodiga qaytamiz / number empty: back to editing the country code
+                            let code = COUNTRIES[ci].code;
+                            *self.code_in.borrow_mut() = code[..code.len() - 1].to_string();
+                            self.country.set(None);
+                        }
+                    } else if let Some(d) = digit {
+                        if n.chars().count() < pattern_len(&COUNTRIES[ci]) {
+                            n.push(d);
+                        }
+                    }
+                    self.number.set(n);
+                }
+                None => {
+                    let mut c = self.code_in.borrow_mut();
+                    if k == -2 {
+                        c.pop();
+                    } else if let Some(d) = digit {
+                        if c.chars().count() < 4 {
+                            c.push(d);
+                        }
+                    }
+                    if let Some(i) = crate::countries::country_by_code(&c) {
+                        self.country.set(Some(i));
+                        c.clear();
+                    }
                 }
             }
-            self.number.set(n);
         } else if page == Page::Code {
             let mut c = self.code.borrow_mut();
             if k == -2 {
@@ -423,7 +449,7 @@ impl Login {
         let fabv = self.fab.borrow().val(now);
         if fabv > 0.01 {
             let sys_kb = if page == Page::Pass { 260.0 * seg(now, self.t_page.get() + 150.0, self.t_page.get() + 450.0) } else { 0.0 };
-            let bottom = 21.5 + (KB_H * kb).max(sys_kb);
+            let bottom = 14.0 + (KB_H * kb).max(sys_kb);
             layers.push(self.fab_view(w, hu, bottom, fabv, now));
         }
         // mamlakat ro'yxati / country list
@@ -433,7 +459,7 @@ impl Login {
         }
         // fragment ochilishi (alpha) / fragment presentation (alpha)
         let appear = seg(now, self.t_show.get() - 0.0, self.t_show.get() + 200.0);
-        let root = stack(layers).bg(BG).width(w).height(h);
+        let root = stack(layers).bg(bg()).width(w).height(h);
         let _ = appear;
         root
     }
@@ -451,8 +477,8 @@ impl Login {
 
     /// Konturli maydon (OutlineTextContainerView): chiziq 1,5 → 2 dp, yorliq konturda / outlined field with a label on the border.
     fn outline(&self, x: f32, y: f32, w: f32, h: f32, focus: f32, label: &str, raise: f32, inner: Vec<Element>) -> Element {
-        let line = LINE.lerp(ACTIVE, focus);
-        let lc = HINT.lerp(ACTIVE, focus);
+        let line = line().lerp(active(), focus);
+        let lc = hint().lerp(active(), focus);
         let bw = lerp(1.5, 2.0, focus);
         let boxed = column(vec![]).width(w).height(h).radius(7.0).border(bw, line);
         let ly = lerp(15.0, -11.0, raise);
@@ -460,7 +486,7 @@ impl Login {
         let mut kids = vec![boxed];
         kids.extend(inner);
         let lab = if raise > 0.01 {
-            at(12.0, ly, column(vec![t(label, lsize, lc)]).bg(BG).padding_xy(4.0, 0.0))
+            at(12.0, ly, column(vec![t(label, lsize, lc)]).bg(bg()).padding_xy(4.0, 0.0))
         } else {
             at(14.0, ly, t(label, lsize, lc))
         };
@@ -483,19 +509,20 @@ impl Login {
         let raise_c = if c.is_some() { 1.0 } else { 0.0 };
         if let Some(c) = c {
             cin.push(at(14.0, 0.0, column(vec![flag_small(c.iso)]).width(30.0).height(51.5).justify(Justify::Center)));
-            cin.push(at(52.0, 11.0, t(c.name, 18.0, TEXT).line_height(26.0)));
+            cin.push(at(52.0, 11.0, t(c.name, 18.0, txt()).line_height(26.0)));
         }
-        cin.push(at(fw - 36.0, 13.0, icon(CHEVRON_RIGHT, 24.0).color(HINT)));
+        cin.push(at(fw - 36.0, 13.0, icon(CHEVRON_RIGHT, 24.0).color(hint())));
         let country_field = self.outline(36.5, 224.0, fw, 51.5, 0.0, "Mamlakat", raise_c, cin);
 
         // telefon maydoni
         let mut pin: Vec<Element> = Vec::new();
-        pin.push(at(14.0, 0.0, t(format!("+{}", c.map_or("", |c| c.code)), 20.0, TEXT).line_height(46.0)));
-        pin.push(at(76.0, 9.0, column(vec![]).width(1.0).height(30.0).bg(LINE)));
-        let mut row_kids = vec![t(shown.clone(), 20.0, TEXT).line_height(46.0)];
+        let code_txt = c.map_or_else(|| self.code_in.borrow().clone(), |c| c.code.to_string());
+        pin.push(at(14.0, 0.0, t(format!("+{code_txt}"), 20.0, txt()).line_height(46.0)));
+        pin.push(at(76.0, 9.0, column(vec![]).width(1.0).height(30.0).bg(line())));
+        let mut row_kids = vec![t(shown.clone(), 20.0, txt()).line_height(46.0)];
         if c.is_some() && caret_on {
             row_kids.push(gap_box(1.0, 0.0));
-            row_kids.push(column(vec![]).width(2.0).height(24.0).bg(ACTIVE));
+            row_kids.push(column(vec![]).width(2.0).height(24.0).bg(active()));
         } else {
             row_kids.push(gap_box(3.0, 0.0));
         }
@@ -509,14 +536,14 @@ impl Login {
         let country_tap = at(36.5, 224.0, column(vec![]).width(fw).height(51.5).on_click(move || me2.open_picker()));
 
         stack(vec![
-            at(0.0, 121.0, centered(w, t("Telefon raqamingiz", 18.0, TEXT).bold().line_height(22.0))),
-            at(0.0, 153.0, centered(w, t("Telefon raqamingizni kiriting", 15.0, HINT).line_height(19.5))),
-            at(0.0, 172.5, centered(w, row(vec![t("yoki ", 15.0, HINT).line_height(19.5), gap_box(3.0, 0.0), t("kirish kaliti yordamida kiring ›", 15.0, BLUE).line_height(19.5)]))),
+            at(0.0, 121.0, centered(w, t("Telefon raqamingiz", 18.0, txt()).bold().line_height(22.0))),
+            at(0.0, 153.0, centered(w, t("Telefon raqamingizni kiriting", 15.0, hint()).line_height(19.5))),
+            at(0.0, 172.5, centered(w, row(vec![t("yoki ", 15.0, hint()).line_height(19.5), gap_box(3.0, 0.0), t("kirish kaliti yordamida kiring ›", 15.0, blue()).line_height(19.5)]))),
             country_field,
             phone_field,
             country_tap,
         ])
-        .bg(BG.with_opacity(t_in))
+        .bg(bg().with_opacity(t_in))
     }
 
     fn code_view(self: &Rc<Self>, w: f32, now: f32) -> Element {
@@ -531,28 +558,28 @@ impl Login {
         let mut cells = Vec::new();
         for i in 0..CODE_LEN {
             let ch = code.chars().nth(i).map(|c| c.to_string()).unwrap_or_default();
-            let active = i == n.min(CODE_LEN - 1) && n < CODE_LEN;
-            let line = if active { ACTIVE } else { LINE };
-            let cell = column(vec![t(ch, 20.0, TEXT).bold()]).width(cell_w).height(39.0).center().radius(5.0).border(1.5, line);
+            let is_act = i == n.min(CODE_LEN - 1) && n < CODE_LEN;
+            let lc = if is_act { active() } else { line() };
+            let cell = column(vec![t(ch, 20.0, txt()).bold()]).width(cell_w).height(39.0).center().radius(5.0).border(1.5, lc);
             cells.push(cell);
         }
         let radial = match ver {
             Some(v) if now >= v => {
                 let a = quint(seg(now, v, v + 150.0));
-                at(w - 48.0, 40.0, column(vec![spinner(18.0 * a.max(0.2), 2.0, BLUE)]).width(32.0).height(32.0).center())
+                at(w - 48.0, 40.0, column(vec![spinner(18.0 * a.max(0.2), 2.0, blue())]).width(32.0).height(32.0).center())
             }
             _ => gap_box(0.0, 0.0),
         };
         stack(vec![
-            at(16.0, 40.0, column(vec![icon(ARROW_BACK, 24.0).color(TEXT)]).width(32.0).height(32.0).center().on_click(move || {
+            at(16.0, 40.0, column(vec![icon(ARROW_BACK, 24.0).color(txt())]).width(32.0).height(32.0).center().on_click(move || {
                 me.goto(Page::Phone);
             })),
             at((w - 128.0) / 2.0, 24.0, self.icon_view(0, 128.0, t0 + SHOW_DELAY + SLIDE_MS, now)),
-            at(0.0, 167.0, centered(w, t("ARUGRAM xabarlaringizni tekshiring", 18.0, TEXT).bold().line_height(22.0))),
-            at(0.0, 208.0, centered(w, t("Boshqa qurilmangizdagi +998 90 123 45 67", 14.0, SUB).line_height(20.0))),
-            at(0.0, 228.0, centered(w, row(vec![t("uchun", 14.0, SUB).line_height(20.0), gap_box(4.0, 0.0), t("ARUGRAM ilovasiga", 14.0, SUB_BOLD).bold().line_height(20.0), gap_box(4.0, 0.0), t("kod yuborildi.", 14.0, SUB).line_height(20.0)]))),
+            at(0.0, 167.0, centered(w, t("ARUGRAM xabarlaringizni tekshiring", 18.0, txt()).bold().line_height(22.0))),
+            at(0.0, 208.0, centered(w, t("Boshqa qurilmangizdagi +998 90 123 45 67", 14.0, sub()).line_height(20.0))),
+            at(0.0, 228.0, centered(w, row(vec![t("uchun", 14.0, sub()).line_height(20.0), gap_box(4.0, 0.0), t("ARUGRAM ilovasiga", 14.0, sub_bold()).bold().line_height(20.0), gap_box(4.0, 0.0), t("kod yuborildi.", 14.0, sub()).line_height(20.0)]))),
             at((w - total) / 2.0, 282.0, row(cells).gap(gap)),
-            at(0.0, 460.0, centered(w, t("Kodni olmadingizmi?", 15.0, BLUE))),
+            at(0.0, 460.0, centered(w, t("Kodni olmadingizmi?", 15.0, blue()))),
             radial,
         ])
     }
@@ -567,12 +594,12 @@ impl Login {
         let fw = w - 32.0;
         let mut f = field(&self.pass)
             .size(18.0)
-            .color(TEXT)
-            .accent(ACTIVE)
-            .hint_color(HINT)
+            .color(txt())
+            .accent(active())
+            .hint_color(hint())
             .label("Parolni kiriting")
-            .label_bg(BG)
-            .border(1.5, LINE)
+            .label_bg(bg())
+            .border(1.5, line())
             .radius(7.0)
             .padding_xy(16.0, 15.0)
             .width(fw);
@@ -581,78 +608,87 @@ impl Login {
         }
         let me2 = me.clone();
         let me3 = me.clone();
-        let eye = column(vec![icon(if self.show_pass.get() { EYE } else { EYE_OFF }, 24.0).color(HINT)]).width(40.0).height(40.0).center().on_click(move || {
+        let eye = column(vec![icon(if self.show_pass.get() { EYE } else { EYE_OFF }, 24.0).color(hint())]).width(40.0).height(40.0).center().on_click(move || {
             me3.show_pass.set(!me3.show_pass.get());
             me3.bump();
         });
         let sys_kb = 260.0 * seg(now, self.t_page.get() + 150.0, self.t_page.get() + 450.0);
         stack(vec![
-            at(16.0, 40.0, column(vec![icon(ARROW_BACK, 24.0).color(TEXT)]).width(32.0).height(32.0).center().on_click(move || {
+            at(16.0, 40.0, column(vec![icon(ARROW_BACK, 24.0).color(txt())]).width(32.0).height(32.0).center().on_click(move || {
                 me.goto(Page::Phone);
             })),
             at((w - 120.0) / 2.0, 96.0, self.icon_view(1, 120.0, t0 + SHOW_DELAY + SLIDE_MS, now)),
-            at(0.0, 232.0, centered(w, t("Parolingiz", 18.0, TEXT).bold().line_height(22.0))),
-            at(0.0, 262.0, centered(w, t("Ikki bosqichli tasdiqlash yoqilgan.", 14.0, SUB).line_height(20.0))),
-            at(0.0, 282.0, centered(w, t("Hisobingiz qo'shimcha parol bilan himoyalangan.", 14.0, SUB).line_height(20.0))),
+            at(0.0, 232.0, centered(w, t("Parolingiz", 18.0, txt()).bold().line_height(22.0))),
+            at(0.0, 262.0, centered(w, t("Ikki bosqichli tasdiqlash yoqilgan.", 14.0, sub()).line_height(20.0))),
+            at(0.0, 282.0, centered(w, t("Hisobingiz qo'shimcha parol bilan himoyalangan.", 14.0, sub()).line_height(20.0))),
             at(16.0, 334.0, f),
             at(w - 16.0 - 44.0, 334.0 + 9.0, eye),
-            at(16.0, hu - sys_kb - 52.0 - 20.0, t("Parolni unutdingizmi?", 15.0, BLUE).on_click(move || me2.bump())),
+            at(16.0, hu - sys_kb - 52.0 - 20.0, t("Parolni unutdingizmi?", 15.0, blue()).on_click(move || me2.bump())),
         ])
     }
 
     fn done_view(self: &Rc<Self>, w: f32, now: f32) -> Element {
         let a = decelerate(seg(now, self.t_page.get() + SLIDE_MS + 350.0, self.t_page.get() + SLIDE_MS + 800.0));
         stack(vec![
-            at(0.0, 0.0, column(vec![at(16.0, 44.0, t("ARUGRAM", 20.0, TEXT).bold())]).width(w).height(92.0).bg(Color::hex(0x212123))),
-            at(0.0, 170.0, centered(w, t("Chatlar tez orada qo'shiladi", 20.0, TEXT.with_opacity(a)).bold())),
-            at(0.0, 202.0, centered(w, t("Hisobingiz tayyor.", 14.0, HINT.with_opacity(a)))),
+            at(0.0, 0.0, column(vec![at(16.0, 44.0, t("ARUGRAM", 20.0, txt()).bold())]).width(w).height(92.0).bg(bar())),
+            at(0.0, 170.0, centered(w, t("Chatlar tez orada qo'shiladi", 20.0, txt().with_opacity(a)).bold())),
+            at(0.0, 202.0, centered(w, t("Hisobingiz tayyor.", 14.0, hint().with_opacity(a)))),
         ])
     }
 
     // ---------------------------------------------------------------- klaviatura / keyboard
 
+    /// UZ: Telegram `CustomPhoneKeyboardView` geometriyasi: 230dp, chetlar 10, tugma oralig'i 6, burchaklar 24/12. EN: Geometry of Telegram's `CustomPhoneKeyboardView`: 230dp, 10 padding, 6 gap, corner radii 24/12. RU: Геометрия `CustomPhoneKeyboardView` Telegram: 230dp, отступ 10, зазор 6, радиусы углов 24/12.
     fn numpad(self: &Rc<Self>, w: f32, hu: f32, vis: f32) -> Element {
         let now = now_ms();
-        let kw = (w - 22.0 - 14.0) / 3.0;
+        let bw = (w - 32.0) / 3.0;
+        let bh = (KB_H - 42.0) / 4.0;
         let (pk, pt) = self.press.get();
         const LET: [&str; 10] = ["+", "", "ABC", "DEF", "GHI", "JKL", "MNO", "PQRS", "TUV", "WXYZ"];
-        let mut rows = Vec::new();
-        for r in 0..4 {
-            let mut keys = Vec::new();
-            for c in 0..3 {
-                let n = r * 3 + c; // 0..11
-                let k: i32 = match n {
-                    9 => -1,
-                    10 => 0,
-                    11 => -2,
-                    _ => n as i32 + 1,
-                };
-                let me = self.clone();
-                let pressed = pk == k && now - pt < 130.0;
-                let bg = if k == -1 {
-                    Color::TRANSPARENT
-                } else if pressed {
-                    KEY_PRESSED
-                } else {
-                    KEY
-                };
-                let mut kids: Vec<Element> = Vec::new();
-                if k >= 0 {
-                    kids.push(at(13.0, 0.0, column(vec![t(k.to_string(), 24.0, KEY_TEXT)]).width(28.0).height(48.0).center()));
-                    let l = if k == 0 { "+" } else { LET[k as usize] };
-                    if !l.is_empty() {
-                        kids.push(at(46.0, 0.0, column(vec![t(l, if k == 0 { 15.0 } else { 15.0 }, KEY_LETTERS)]).width(60.0).height(48.0).center()));
-                    }
-                } else if k == -2 {
-                    kids.push(at((kw - 28.0) / 2.0, 10.0, icon(BACKSPACE, 28.0).color(TEXT)));
-                }
-                let key = stack(kids).width(kw).height(48.0).radius(14.0).bg(bg);
-                keys.push(if k == -1 { key } else { key.on_click(move || me.press_key(k)) });
+        let mut kids: Vec<Element> = Vec::new();
+        for n in 0..12usize {
+            let (r, c) = ((n / 3) as f32, (n % 3) as f32);
+            let (x, y) = (c * (bw + 6.0) + 10.0, r * (bh + 6.0) + 10.0);
+            let k: i32 = match n {
+                9 => -1,
+                10 => 0,
+                11 => -2,
+                _ => n as i32 + 1,
+            };
+            if k == -1 {
+                continue;
             }
-            rows.push(row(keys).gap(7.0));
+            let col = if pk == k && now - pt < 130.0 { key_pressed() } else { key() };
+            // burchak: 0 = chap-yuqori, 1 = o'ng-yuqori, 3 = o'ng-past / corner: 0 = TL, 1 = TR, 3 = BR
+            let corner = match n {
+                0 => Some(0),
+                2 => Some(1),
+                11 => Some(3),
+                _ => None,
+            };
+            let me = self.clone();
+            let mut parts: Vec<Element> = Vec::new();
+            match corner {
+                None => parts.push(at(0.0, 0.0, column(vec![]).width(bw).height(bh).radius(12.0).bg(col))),
+                Some(cn) => {
+                    parts.push(at(0.0, 0.0, column(vec![]).width(bw).height(bh).radius(24.0).bg(col)));
+                    let bx = if cn == 0 { bw / 2.0 - 12.0 } else { 0.0 };
+                    let cy = if cn == 3 { 0.0 } else { bh / 2.0 - 12.0 };
+                    parts.push(at(bx, 0.0, column(vec![]).width(bw / 2.0 + 12.0).height(bh).radius(12.0).bg(col)));
+                    parts.push(at(0.0, cy, column(vec![]).width(bw).height(bh / 2.0 + 12.0).radius(12.0).bg(col)));
+                }
+            }
+            if k >= 0 {
+                parts.push(at(0.25 * bw - 20.0, 0.0, column(vec![t(k.to_string(), 24.0, key_text())]).width(40.0).height(bh).center()));
+                if !LET[k as usize].is_empty() {
+                    parts.push(at(0.7 * bw - 30.0, 0.0, column(vec![t(LET[k as usize], 14.0, key_letters())]).width(60.0).height(bh).center()));
+                }
+            } else {
+                parts.push(at((bw - bh + 22.0) / 2.0, 11.0, icon(BACKSPACE, bh - 22.0).color(txt())));
+            }
+            kids.push(at(x, y, stack(parts).width(bw).height(bh).on_click(move || me.press_key(k))));
         }
-        let pad = column(rows).gap(6.5).padding_each(11.0, 0.0, 11.0, 0.0);
-        at(0.0, hu - KB_H + (1.0 - vis) * KB_H, column(vec![pad]).width(w).height(KB_H).bg(BG))
+        at(0.0, hu - KB_H + (1.0 - vis) * KB_H, stack(kids).width(w).height(KB_H).bg(bg()))
     }
 
     fn fab_view(self: &Rc<Self>, w: f32, hu: f32, bottom: f32, vis: f32, now: f32) -> Element {
@@ -660,11 +696,11 @@ impl Login {
         let prog = self.prog.borrow().val(now);
         let size = 56.0 * lerp(0.4, 1.0, vis);
         let inner = if prog > 0.5 {
-            spinner(18.0, 2.0, TEXT)
+            spinner(18.0, 2.0, txt())
         } else {
-            icon(ARROW_FWD, 26.0 * lerp(0.4, 1.0, vis)).color(TEXT)
+            icon(ARROW_FWD, 26.0 * lerp(0.4, 1.0, vis)).color(txt())
         };
-        let btn = column(vec![inner]).width(size).height(size).radius(size / 2.0).bg(BTN.with_opacity(vis)).center().on_click(move || me.fab_tap());
+        let btn = column(vec![inner]).width(size).height(size).radius(size / 2.0).bg(btn().with_opacity(vis)).center().on_click(move || me.fab_tap());
         let y = hu - bottom - 56.0 + (1.0 - vis) * 40.0 + (56.0 - size) / 2.0;
         at(w - 20.0 - 56.0 + (56.0 - size) / 2.0, y, btn)
     }
@@ -679,23 +715,23 @@ impl Login {
             let me = me2.clone();
             stack(vec![
                 at(35.0, 0.0, column(vec![flag_small(c.iso)]).width(30.0).height(ROW_H).justify(Justify::Center)),
-                at(71.0, 0.0, column(vec![t(c.name, 18.0, TEXT)]).height(ROW_H).justify(Justify::Center)),
-                at(w - 34.0 - 70.0, 0.0, column(vec![t(format!("+{}", c.code), 18.0, BLUE)]).width(70.0).height(ROW_H).justify(Justify::Center).align(Align::End)),
+                at(71.0, 0.0, column(vec![t(c.name, 18.0, txt())]).height(ROW_H).justify(Justify::Center)),
+                at(w - 34.0 - 70.0, 0.0, column(vec![t(format!("+{}", c.code), 18.0, blue())]).width(70.0).height(ROW_H).justify(Justify::Center).align(Align::End)),
             ])
             .width(w)
             .height(ROW_H)
             .on_click(move || me.pick(i))
         });
         let bar = stack(vec![
-            at(16.0, 18.0, icon(ARROW_BACK, 26.0).color(TEXT)),
-            at(75.0, 0.0, column(vec![t("Mamlakatni tanlang", 21.0, TEXT).bold()]).height(62.5).justify(Justify::Center)),
-            at(w - 44.0, 18.0, icon(SEARCH, 26.0).color(TEXT)),
+            at(16.0, 18.0, icon(ARROW_BACK, 26.0).color(txt())),
+            at(75.0, 0.0, column(vec![t("Mamlakatni tanlang", 21.0, txt()).bold()]).height(62.5).justify(Justify::Center)),
+            at(w - 44.0, 18.0, icon(SEARCH, 26.0).color(txt())),
         ])
         .width(w)
         .height(62.5)
-        .bg(BG);
+        .bg(bg());
         let back = at(0.0, 0.0, column(vec![]).width(70.0).height(86.5).on_click(move || me.close_picker()));
-        let body = stack(vec![at(0.0, 86.5, column(vec![list]).width(w).height(hu - 86.5)), at(0.0, 24.0, bar), back]).width(w).height(hu).bg(BG);
+        let body = stack(vec![at(0.0, 86.5, column(vec![list]).width(w).height(hu - 86.5)), at(0.0, 24.0, bar), back]).width(w).height(hu).bg(bg());
         // fragment: alpha 0→1, 48dp → 0
         at((1.0 - v) * 48.0, 0.0, body)
     }

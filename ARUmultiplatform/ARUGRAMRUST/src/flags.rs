@@ -1,6 +1,6 @@
 //! Davlat bayroqlari: `assets/flags.bin` (flagcdn.com PNG'lari, 80 px kenglikda) dan, kerak bo'lganda ochiladi va keshlanadi.
 
-use crate::tg::HINT as TEXT_DIM;
+use crate::tg::hint;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -35,10 +35,29 @@ pub fn flag(iso: &str) -> Option<Rc<Image>> {
             .or_insert_with(|| {
                 find(iso)
                     .and_then(decode_png)
-                    .map(|i| Rc::new(i.round_corners(6.0)))
+                    .map(|i| Rc::new(upscale_if_small(i).round_corners(6.0)))
             })
             .clone()
     })
+}
+
+/// UZ: GPU'da kichik rasmlar umumiy atlasga tushadi va ba'zi qurilmalarda ko'rinmay qoladi; shuning uchun kichik bayroqlar 2 marta kattalashtiriladi (katta rasm yo'li).
+/// EN: Small images go to the shared GPU atlas and may not show on some devices, so small flags are doubled (the big-image path).
+/// RU: Маленькие изображения на GPU попадают в общий атлас и на некоторых устройствах не видны, поэтому маленькие флаги увеличиваются вдвое (путь больших изображений).
+fn upscale_if_small(i: Image) -> Image {
+    if i.w * i.h > 4096 {
+        return i;
+    }
+    let (w, h) = (i.w * 2, i.h * 2);
+    let mut rgba = vec![0u8; (w * h * 4) as usize];
+    for y in 0..h {
+        for x in 0..w {
+            let s = (((y / 2) * i.w + x / 2) * 4) as usize;
+            let d = ((y * w + x) * 4) as usize;
+            rgba[d..d + 4].copy_from_slice(&i.rgba[s..s + 4]);
+        }
+    }
+    Image { w, h, rgba }
 }
 
 /// Bayroq (22 dp balandlikda) yoki, topilmasa, ISO kodi; 40 dp kenglikdagi katakda.
@@ -53,7 +72,7 @@ pub fn flag_view(iso: &str) -> Element {
         }
         None => text(iso)
             .size(14.0)
-            .color(TEXT_DIM)
+            .color(hint())
             .line_height(24.0)
             .width(40.0),
     }

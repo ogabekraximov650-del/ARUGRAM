@@ -239,6 +239,11 @@ fn mat_stars(w: i32, h: i32, y_off_abs: i32, scale_factor: f32) -> Mat4 {
 }
 
 impl Scene {
+    /// UZ: Fon rangini o'zgartiradi (0..1). EN: Changes the background color (0..1). RU: Меняет цвет фона (0..1).
+    pub fn set_bg(&mut self, bg: [f32; 3]) {
+        self.bg = [bg[0], bg[1], bg[2], 1.0];
+    }
+
     /// `onSurfaceChanged` + `onSurfaceCreated` (+ `setBackgroundColor`). `bg` — fon rangi (0..1) / background (0..1).
     pub fn new(tex: Vec<Texture>, bg: [f32; 3], w_px: usize, h_px: usize, scale_factor: f32) -> Scene {
         let bgc = [bg[0], bg[1], bg[2], 1.0];

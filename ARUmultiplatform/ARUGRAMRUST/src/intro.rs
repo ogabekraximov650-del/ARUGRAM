@@ -20,7 +20,6 @@ const MESSAGES: [&str; 6] = [
     "**ARUGRAM** xabarlaringizni xakerlik\nhujumlaridan himoya qiladi.",
     "**ARUGRAM** xabarlaringizga bir nechta\nqurilmadan kirish imkonini beradi.",
 ];
-const BTN2: Color = Color::hex(0x54b9f1);
 const SETTLE_MS: f32 = 450.0;
 
 struct Frame {
@@ -47,11 +46,9 @@ pub struct Intro {
     sun_t: Cell<(f32, bool)>, // (qachon bosildi, kechaga) / (when tapped, to night)
     press: Cell<f32>,
     theme_t: Cell<f32>,
+    theme_from: Cell<f32>,
 }
 
-fn bg_of(night: bool) -> Color {
-    if night { BG } else { Color::WHITE }
-}
 
 impl Intro {
     pub fn new() -> Rc<Intro> {
@@ -75,7 +72,13 @@ impl Intro {
             sun_t: Cell::new((-1.0e6, true)),
             press: Cell::new(-1.0e6),
             theme_t: Cell::new(-1.0e6),
+            theme_from: Cell::new(1.0),
         })
+    }
+
+    #[doc(hidden)]
+    pub fn is_night(&self) -> bool {
+        self.night.get()
     }
 
     #[doc(hidden)]
@@ -150,10 +153,18 @@ impl Intro {
 
     fn toggle_theme(self: &Rc<Self>) {
         let now = now_ms();
+        self.theme_from.set(self.night_level(now));
         self.night.set(!self.night.get());
         self.sun_t.set((now, self.night.get()));
         self.theme_t.set(now);
         self.bump();
+    }
+
+    /// UZ: Tun darajasi (0..1), 300 ms da silliq o'tadi. EN: Night level (0..1), eased over 300 ms. RU: Уровень ночи (0..1), плавно за 300 мс.
+    fn night_level(&self, now: f32) -> f32 {
+        let to = if self.night.get() { 1.0 } else { 0.0 };
+        let k = seg(now, self.theme_t.get(), self.theme_t.get() + 300.0);
+        lerp(self.theme_from.get(), to, ease_in_out_quad(k))
     }
 
     fn current_pos(&self, now: f32) -> f32 {
@@ -202,7 +213,8 @@ impl Intro {
             return;
         }
         let night = self.night.get();
-        if self.scene_night.get() != night {
+        let theming = now < self.theme_t.get() + 320.0;
+        if self.scene_night.get() != night && !theming {
             self.scene.borrow_mut().take();
             self.scene_night.set(night);
         }
@@ -213,13 +225,14 @@ impl Intro {
         let dt = (now - self.last_render.get()).clamp(1.0, 16.0) as i32;
         self.last_render.set(now);
         let sf = density().min(2.0).max(1.0);
-        let bgc = bg_of(night);
+        let bgc = bg();
         let bg = [bgc.r as f32 / 255.0, bgc.g as f32 / 255.0, bgc.b as f32 / 255.0];
         let date = 1.0 + now / 1000.0;
         let me = self.clone();
         spawn_bg(
             move || {
                 let mut sc = scene.take().unwrap_or_else(|| Scene::new(intro_assets::load(bg, sf), bg, (200.0 * sf).round() as usize, (150.0 * sf).round() as usize, sf));
+                sc.set_bg(bg);
                 sc.set_page(page);
                 sc.set_scroll_offset(scroll);
                 sc.set_date(date);
@@ -243,7 +256,10 @@ impl Intro {
     }
 
     fn text_color(&self) -> Color {
-        if self.night.get() { TEXT } else { Color::BLACK }
+        fn mix_text() -> Color {
+            Color::hex(0x000000).lerp(Color::WHITE, night_t())
+        }
+        mix_text()
     }
 
     fn message(&self, p: usize, col: Color) -> Element {
@@ -279,7 +295,8 @@ impl Intro {
         if animating {
             self.wake_later(8);
         }
-        let night = self.night.get();
+        set_night_t(self.night_level(now));
+        let night = night_t() > 0.5;
         let col = self.text_color();
         let q = hu / 4.0;
         let y0 = (3.0 * q - 275.0) / 2.0;
@@ -301,23 +318,24 @@ impl Intro {
         }
         // sahifa surish maydoni (ViewPager) / the page-swipe area
         let me = self.clone();
-        layers.push(at(0.0, 0.0, column(vec![]).width(w).height(y0 + 400.0).on_drag(move |f, rel| me.on_drag(f, rel))));
+        layers.push(at(0.0, 100.0, column(vec![]).width(w).height(y0 + 300.0).on_drag(move |f, rel| me.on_drag(f, rel))));
         // nuqtalar / dots
         let dx = (w - 66.0) / 2.0;
         let base = pos.floor().clamp(0.0, 5.0);
         let pr = (pos - base).clamp(0.0, 1.0);
-        let inactive = if night { Color::hex(0x555555) } else { Color::hex(0xbbbbbb) };
+        let inactive = Color::hex(0xbbbbbb).lerp(Color::hex(0x555555), night_t());
+        let _ = night;
         for i in 0..6 {
             layers.push(at(dx + i as f32 * 11.0, y0 + 289.0, column(vec![]).width(5.0).height(5.0).radius(2.5).bg(inactive)));
         }
         layers.push(at(dx + base * 11.0, y0 + 289.0, column(vec![]).width(5.0 + 11.0 * pr).height(5.0).radius(2.5).bg(Color::hex(0x229af0))));
         // til havolasi va tugma / language link and the button
         let bty = 3.0 * q + (q - 48.0) / 2.0;
-        layers.push(at(0.0, bty - 30.0 - 30.0, column(vec![t("Continue in English", 16.0, BLUE).line_height(30.0)]).width(w).align(Align::Center)));
+        layers.push(at(0.0, bty - 30.0 - 30.0, column(vec![t("Continue in English", 16.0, blue()).line_height(30.0)]).width(w).align(Align::Center)));
         layers.push(self.start_button(w, bty, now));
         // kun/tun tugmasi / theme button
         layers.push(self.theme_button(w, now));
-        stack(layers).bg(bg_of(night)).width(w).height(h)
+        stack(layers).bg(bg()).width(w).height(h)
     }
 
     fn start_button(self: &Rc<Self>, w: f32, y: f32, now: f32) -> Element {
@@ -329,7 +347,7 @@ impl Intro {
             1.0 - 0.02 * k
         };
         // gorizontal gradient: chap/o'ng yarim doira + oraliq bo'laklar / horizontal gradient: left/right half-circles plus slices in between
-        let (c0, c1) = (BTN, BTN2);
+        let (c0, c1) = (btn(), btn2());
         let n = 28usize;
         let mid = bw - 48.0;
         let mut kids: Vec<Element> = Vec::new();

@@ -242,3 +242,17 @@ pub const COUNTRIES: &[Country] = &[
     Country { iso: "ZM", name: "Zambia", code: "260", pattern: "XX XXX XXXX" },
     Country { iso: "ZW", name: "Zimbabwe", code: "263", pattern: "XX XXX XXXX" },
 ];
+
+/// UZ: Davlat kodidan davlat (asosiy davlatlar oldin). EN: Country by dialing code (main countries first). RU: Страна по телефонному коду (основные страны первыми).
+pub fn country_by_code(code: &str) -> Option<usize> {
+    if code.is_empty() {
+        return None;
+    }
+    const MAIN: &[(&str, &str)] = &[("1", "US"), ("7", "RU"), ("44", "GB"), ("39", "IT"), ("61", "AU"), ("262", "RE"), ("358", "FI"), ("590", "GP"), ("599", "CW"), ("47", "NO"), ("212", "MA")];
+    if let Some((_, iso)) = MAIN.iter().find(|(c, _)| *c == code) {
+        if let Some(i) = COUNTRIES.iter().position(|c| c.iso == *iso) {
+            return Some(i);
+        }
+    }
+    COUNTRIES.iter().position(|c| c.code == code)
+}
