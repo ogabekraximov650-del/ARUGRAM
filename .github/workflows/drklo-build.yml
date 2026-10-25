@@ -34,6 +34,42 @@ jobs:
           "$ANDROID_HOME"/cmdline-tools/latest/bin/sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018" "cmake;3.22.1" >/dev/null
           echo "sdk.dir=$ANDROID_HOME" > DRKLO/local.properties
 
+      - name: Submodule'lar (aniq SHA, DRKLO/submodules.txt)
+        uses: actions/cache@v4
+        id: sm
+        with:
+          path: DRKLO-sm
+          key: drklo-sm-${{ hashFiles('DRKLO/submodules.txt') }}
+
+      - name: Submodule'larni yuklab olish
+        if: steps.sm.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p DRKLO-sm
+          while read -r P U S; do
+            [ -z "$P" ] && continue
+            D="DRKLO-sm/$P"
+            mkdir -p "$D"
+            git -C "$D" init -q
+            git -C "$D" remote add origin "$U"
+            for i in 1 2 3; do
+              git -C "$D" fetch -q --depth 1 origin "$S" && break || sleep 5
+            done
+            git -C "$D" checkout -q FETCH_HEAD
+            rm -rf "$D/.git"
+            echo "ok $P"
+          done < DRKLO/submodules.txt
+          du -sh DRKLO-sm
+
+      - name: Submodule'larni joyiga qo'yish
+        run: |
+          while read -r P U S; do
+            [ -z "$P" ] && continue
+            rm -rf "DRKLO/$P"
+            mkdir -p "$(dirname "DRKLO/$P")"
+            cp -a "DRKLO-sm/$P" "DRKLO/$P"
+          done < DRKLO/submodules.txt
+          ls DRKLO/TMessagesProj_Modules/media | head -5
+
       - uses: gradle/actions/setup-gradle@v4
         with:
           cache-read-only: false

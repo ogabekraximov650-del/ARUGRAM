@@ -55,8 +55,9 @@ public class LiteMode {
         FLAG_ANIMATED_EMOJI_REACTIONS_PREMIUM |
         FLAG_AUTOPLAY_GIFS |
         FLAG_CHAT_THANOS |
-        FLAG_PARTICLES
-    ); // 198684
+        FLAG_PARTICLES |
+        FLAG_LIQUID_GLASS
+    ); // ARUGRAM: +FLAG_LIQUID_GLASS (CPU variant on Android < 13)
     public static int PRESET_MEDIUM = (
         FLAGS_ANIMATED_STICKERS |
         FLAG_ANIMATED_EMOJI_KEYBOARD_PREMIUM |
@@ -67,8 +68,9 @@ public class LiteMode {
         FLAG_AUTOPLAY_VIDEOS |
         FLAG_AUTOPLAY_GIFS |
         FLAG_CHAT_THANOS |
-        FLAG_PARTICLES
-    ); // 204383
+        FLAG_PARTICLES |
+        FLAG_LIQUID_GLASS
+    ); // ARUGRAM: +FLAG_LIQUID_GLASS
     public static int PRESET_HIGH = (
         FLAGS_ANIMATED_STICKERS |
         FLAGS_ANIMATED_EMOJI |
@@ -81,8 +83,9 @@ public class LiteMode {
         FLAG_CALLS_ANIMATIONS |
         FLAG_AUTOPLAY_VIDEOS |
         FLAG_AUTOPLAY_GIFS |
-        FLAG_PARTICLES
-    ); // 262143
+        FLAG_PARTICLES |
+        FLAG_LIQUID_GLASS
+    ); // ARUGRAM: +FLAG_LIQUID_GLASS
     public static int PRESET_POWER_SAVER = 0;
 
     private static int BATTERY_LOW = 10;

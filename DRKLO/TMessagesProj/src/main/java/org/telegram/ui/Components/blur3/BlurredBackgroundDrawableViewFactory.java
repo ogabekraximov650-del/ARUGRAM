@@ -101,6 +101,9 @@ public class BlurredBackgroundDrawableViewFactory {
             if (drawable instanceof BlurredBackgroundDrawableRenderNode) {
                 ((BlurredBackgroundDrawableRenderNode) drawable).setLiquidGlassEffectAllowed();
             }
+        } else if (isLiquidGlassEffectAllowed) {
+            // ARUGRAM: Android 13 dan eski qurilmalar uchun CPU varianti / CPU variant for devices older than Android 13
+            drawable.setLiquidGlassCpuAllowed(true);
         }
 
         drawable.setColorProvider(provider);

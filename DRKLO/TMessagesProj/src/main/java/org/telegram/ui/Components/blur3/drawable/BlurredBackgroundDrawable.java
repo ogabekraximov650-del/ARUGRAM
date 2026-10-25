@@ -600,6 +600,23 @@ public abstract class BlurredBackgroundDrawable extends Drawable {
     private final Paint backgroundBitmapFill = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint shadowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Matrix bitmapShaderMatrix = new Matrix();
+    private final Matrix glassLocalMatrix = new Matrix();
+    private final float[] glassRadii = new float[4];
+    private org.telegram.ui.Components.blur3.LiquidGlassCpu liquidGlassCpu;
+
+    /**
+     * UZ: ARUGRAM: Android 13 dan eski qurilmalarda "Liquid Glass" ni protsessorda (kichik tasma) hisoblaydi.
+     * EN: ARUGRAM: computes "Liquid Glass" on the CPU (a small band) on devices older than Android 13.
+     * RU: ARUGRAM: считает «Liquid Glass» на CPU (маленькая полоса) на устройствах старше Android 13.
+     */
+    public void setLiquidGlassCpuAllowed(boolean allowed) {
+        if (allowed && liquidGlassCpu == null) {
+            liquidGlassCpu = new org.telegram.ui.Components.blur3.LiquidGlassCpu();
+        } else if (!allowed && liquidGlassCpu != null) {
+            liquidGlassCpu.release();
+            liquidGlassCpu = null;
+        }
+    }
     private final WeakReference<Bitmap> bitmapInShader = new WeakReference<>(null);
     private @Nullable BitmapShader bitmapShader;
 
@@ -708,6 +725,21 @@ public abstract class BlurredBackgroundDrawable extends Drawable {
             bitmapShader.setLocalMatrix(bitmapShaderMatrix);
             backgroundBitmapPaint.setAlpha(alpha);
             boundProps.draw(canvas, backgroundBitmapPaint);
+
+            if (liquidGlassCpu != null && alpha == 255) {
+                final Rect bp = boundProps.boundsWithPadding;
+                glassLocalMatrix.set(bitmapShaderMatrix);
+                glassLocalMatrix.postTranslate(-bp.left, -bp.top);
+                glassRadii[0] = boundProps.shaderRadii[0];
+                glassRadii[1] = boundProps.shaderRadii[2];
+                glassRadii[2] = boundProps.shaderRadii[4];
+                glassRadii[3] = boundProps.shaderRadii[6];
+                final float thickness = Math.max(Math.min(
+                    boundProps.liquidThickness <= 0 ? org.telegram.messenger.AndroidUtilities.dp(11) : boundProps.liquidThickness,
+                    Math.min(bp.width(), bp.height()) / 5), 1);
+                liquidGlassCpu.draw(canvas, bp.left, bp.top, bp.width(), bp.height(), newBitmap, glassLocalMatrix,
+                    glassRadii, thickness, boundProps.liquidIntensity, boundProps.liquidIndex);
+            }
         }
 
         final int backgroundColor = Theme.multAlpha(this.backgroundColor, alpha / 255f);
