@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="uz"><head><meta charset="utf-8"><title>ARUGRAM — tanishtiruv va kirish (Telegram uslubida)</title>
+<!-- UZ: Telegram (DrKLO, GPL) tanishtiruv va kirish oqimining aynan nusxasi: GL kadrlar `tgintro/intro_gl` (Telegram'ning IntroRenderer.c) dan, kirish belgilari Telegram'ning Lottie fayllaridan (lottie-web), o'lchamlar va vaqtlar LoginActivity/IntroActivity dan. Litsenziya: GPL-2.0-or-later (ARUGRAMRUST/LICENSE).
+EN: An exact copy of the Telegram (DrKLO, GPL) intro and sign-in flow: GL frames from `tgintro/intro_gl` (Telegram's IntroRenderer.c), sign-in icons from Telegram's Lottie files (lottie-web), sizes and timings from LoginActivity/IntroActivity. License: GPL-2.0-or-later (ARUGRAMRUST/LICENSE).
+RU: Точная копия интро и входа Telegram (DrKLO, GPL): GL-кадры из `tgintro/intro_gl` (IntroRenderer.c Telegram), значки входа из Lottie-файлов Telegram (lottie-web), размеры и тайминги из LoginActivity/IntroActivity. Лицензия: GPL-2.0-or-later (ARUGRAMRUST/LICENSE). -->
+<style>
+:root{--bg:#181819;--tx:#fff;--hint:#7d7d7d;--ln:#505050;--ac:#6eb2ef;--blue:#64b5ef;--fab:#5ea0db;--btn:#50a8eb}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:1280px;height:720px;overflow:hidden;background:#0a0c0f;font-family:Roboto,"Segoe UI",Arial,sans-serif;color:var(--tx)}
+#stage{position:absolute;inset:0;background:radial-gradient(800px 600px at 50% 40%,#16222e 0%,#0b0e12 70%)}
+#phone{position:absolute;left:468px;top:20px;width:344px;height:680px;border-radius:46px;background:#000;padding:7px;box-shadow:0 0 0 2px #2a323d,0 40px 90px rgba(0,0,0,.6)}
+#clip{position:relative;width:330px;height:666px;border-radius:40px;overflow:hidden;background:var(--bg)}
+#screen{position:absolute;left:0;top:0;width:360px;height:740px;transform:scale(.9167);transform-origin:0 0;background:var(--bg);overflow:hidden}
+.abs{position:absolute}
+#status{position:absolute;left:0;right:0;top:0;height:24px;padding:5px 16px 0;display:flex;justify-content:space-between;font-size:12px;font-weight:500;z-index:50}
+.pg{position:absolute;inset:0;background:var(--bg)}
+/* tanishtiruv / intro */
+#gl{position:absolute;left:80px;top:140px;width:200px;height:150px}
+.ipage{position:absolute;left:0;top:0;width:360px;height:740px}
+.ih{position:absolute;left:18px;right:18px;top:315px;text-align:center;font-size:26px;font-weight:700;line-height:30px}
+.im{position:absolute;left:16px;right:16px;top:359px;text-align:center;font-size:15px;line-height:20px}
+.im b{font-weight:700}
+#dots{position:absolute;left:147px;top:429px;width:66px;height:5px}
+#dots i{position:absolute;top:0;width:5px;height:5px;border-radius:2.5px;background:#555}
+#sel{position:absolute;top:0;height:5px;border-radius:2.5px;background:#229af0}
+#lang{position:absolute;left:0;right:0;top:563px;height:30px;text-align:center;font-size:16px;line-height:30px;color:var(--blue)}
+#start{position:absolute;left:20px;width:320px;top:623px;height:48px;border-radius:24px;background:linear-gradient(90deg,#50a8eb,#50a8eb);color:#fff;font-size:15px;font-weight:700;display:flex;align-items:center;justify-content:center;text-transform:none;overflow:hidden}
+#flick{position:absolute;top:0;bottom:0;width:90px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.22),transparent)}
+#theme{position:absolute;right:4px;top:28px;width:48px;height:48px;display:flex;align-items:center;justify-content:center}
+#theme div{width:28px;height:28px}
+/* kirish / login */
+.of{position:relative;height:58px;border:1px solid var(--ln);border-radius:6px;display:flex;align-items:center;font-size:16px}
+.of label{position:absolute;left:12px;padding:0 4px;background:var(--bg);color:var(--hint);transform-origin:0 50%;white-space:nowrap}
+.col{position:absolute;left:0;right:0;top:24px;display:flex;flex-direction:column;align-items:center}
+.t18{font-size:18px;font-weight:700;text-align:center;line-height:22px}
+.t14{font-size:14px;color:var(--hint);text-align:center;line-height:20px}
+.cur{display:inline-block;width:2px;height:20px;background:var(--ac);vertical-align:middle;margin-left:1px}
+.cell{width:42px;height:56px;border:1px solid var(--ln);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700}
+#kn{position:absolute;left:0;right:0;bottom:0;height:230px;background:var(--bg);z-index:20;padding:6px 10px 0}
+#kn .r{display:flex;height:54px}
+#kn .k{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:24px;position:relative}
+#kn .k small{font-size:9px;letter-spacing:1.5px;color:var(--hint);height:10px;margin-top:-1px}
+#kn .k::before{content:"";position:absolute;width:56px;height:56px;border-radius:50%;background:rgba(255,255,255,.14);opacity:0}
+#kn .k.p::before{opacity:1}
+#ka{position:absolute;left:0;right:0;bottom:0;height:260px;background:#1c1d20;z-index:20;padding:10px 4px}
+#ka .r{display:flex;gap:5px;margin-bottom:10px;justify-content:center}
+#ka .k{flex:1;height:48px;border-radius:7px;background:#2c2d31;display:flex;align-items:center;justify-content:center;font-size:20px}
+#ka .k.p{background:#52555c}
+#fab{position:absolute;right:14px;width:56px;height:56px;border-radius:50%;background:var(--fab);z-index:25;box-shadow:0 3px 10px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center}
+#fab svg{position:absolute}
+.sk{height:62px;display:flex;gap:12px;align-items:center;padding:0 16px}
+.sk .av{width:46px;height:46px;border-radius:50%;background:#26272b}
+.sk .l{flex:1}.sk .l i{display:block;height:10px;border-radius:5px;background:#26272b;margin-bottom:8px}
+</style></head>
+<body>
+<div id="stage"><div id="phone"><div id="clip"><div id="screen">
+  <div id="status"><span>9:41</span><span>▮▮▮ 100%</span></div>
+
+  <div class="pg" id="intro">
+    <img id="gl" alt="">
+    <div id="ipages"></div>
+    <div id="dots"></div>
+    <div id="lang">Continue in English</div>
+    <div id="start"><span>Suhbatni boshlash</span><div id="flick"></div></div>
+    <div id="theme"><div id="sun"></div></div>
+  </div>
+
+  <div class="pg" id="a">
+    <div class="col" id="acol">
+      <div class="t18" id="a1">Telefon raqamingiz</div>
+      <div class="t14" id="a2" style="margin-top:8px;padding:0 32px">Davlatni tanlang va telefon<br>raqamingizni kiriting.</div>
+      <div class="of" id="a3" style="width:328px;margin-top:24px"><label style="top:-10px;font-size:12px">Davlat</label><span style="margin-left:16px;flex:1">O'zbekiston</span><svg width="24" height="24" viewBox="0 0 24 24" style="margin-right:14px"><path d="M7 10l5 5 5-5" fill="none" stroke="#7d7d7d" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      <div class="of" id="a4" style="width:328px;margin-top:22px"><label id="lab1" style="top:-10px;font-size:12px">Telefon raqami</label>
+        <span style="margin-left:16px">+998</span><span style="width:1px;height:30px;background:var(--ln);margin:0 12px 0 12px"></span><span id="num"></span><i class="cur" id="cur1"></i><span id="hnt" style="color:var(--hint)">00 000 00 00</span></div>
+    </div>
+  </div>
+
+  <div class="pg" id="b">
+    <div class="col" id="bcol" style="top:40px">
+      <div id="smsI" style="width:64px;height:64px;margin-top:16px"></div>
+      <div class="t18" id="b2" style="margin-top:18px">+998 90 123 45 67</div>
+      <div class="t14" id="b3" style="margin-top:8px;padding:0 40px">Kodni SMS orqali yubordik.<br>Uni quyida kiriting.</div>
+      <div id="b4" style="display:flex;gap:7px;margin-top:32px"><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div></div>
+      <div class="t14" id="b5" style="margin-top:28px;position:relative;height:20px;width:320px">Qayta yuborish <span id="tm" style="color:#fff">0:42</span>
+        <svg id="spB" width="20" height="20" viewBox="0 0 20 20" style="position:absolute;left:150px;top:0;opacity:0"><path id="arcB" fill="none" stroke="#6eb2ef" stroke-width="2.2" stroke-linecap="round"/></svg></div>
+    </div>
+  </div>
+
+  <div class="pg" id="c">
+    <div class="col" id="ccol" style="top:30px">
+      <div id="lockI" style="width:120px;height:120px"></div>
+      <div class="t18" id="c2" style="margin-top:8px">Ikki bosqichli tasdiqlash</div>
+      <div class="t14" id="c3" style="margin-top:8px;padding:0 40px">Hisobingiz qo'shimcha parol bilan<br>himoyalangan.</div>
+      <div class="of" id="c4" style="width:328px;margin-top:26px"><label id="lab3" style="top:18px;font-size:16px">Parol</label><span id="pw" style="margin-left:16px;flex:1;letter-spacing:1px;white-space:nowrap;overflow:hidden"></span><i class="cur" id="cur3" style="margin-left:-12px"></i>
+        <svg width="24" height="24" viewBox="0 0 24 24" style="margin-right:14px"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z" fill="none" stroke="#7d7d7d" stroke-width="2"/><circle cx="12" cy="12" r="3" fill="#7d7d7d"/><path id="slash" d="M4 4l16 16" stroke="#7d7d7d" stroke-width="2" stroke-linecap="round"/></svg></div>
+      <div id="c5" style="margin-top:22px;font-size:14px;color:var(--blue)">Parolni unutdingizmi?</div>
+    </div>
+  </div>
+
+  <div class="pg" id="d">
+    <div class="abs" style="left:0;right:0;top:0;height:92px;background:#212123;padding:44px 16px 0;font-size:20px;font-weight:700">ARUGRAM</div>
+    <div id="d1" class="abs" style="left:0;right:0;top:170px;text-align:center"><div class="t18" style="font-size:20px">Chatlar tez orada qo'shiladi</div><div class="t14" style="margin-top:10px">Hisobingiz tayyor.</div></div>
+    <div id="d4" class="abs" style="left:0;right:0;top:300px"><div class="sk"><div class="av"></div><div class="l"><i style="width:50%"></i><i style="width:78%;opacity:.6"></i></div></div><div class="sk"><div class="av"></div><div class="l"><i style="width:40%"></i><i style="width:66%;opacity:.6"></i></div></div><div class="sk"><div class="av"></div><div class="l"><i style="width:58%"></i><i style="width:48%;opacity:.6"></i></div></div></div>
+  </div>
+
+  <div id="kn"></div><div id="ka"></div>
+  <div id="fab"><svg id="fa" width="26" height="26" viewBox="0 0 26 26"><path d="M5 13h15M14 6l7 7-7 7" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg><svg id="fp" width="44" height="44" viewBox="0 0 44 44"><path id="arcF" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"/></svg></div>
+</div></div></div></div>
+<script src="tgassets/lottie.min.js"></script><script src="tgassets/anims.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const lerp = (a, b, x) => a + (b - a) * x;
+const dec = (x) => 1 - (1 - x) * (1 - x);                                  // sekinlashuvchi / decelerate
+const acc = (x) => x * x;
+const ead = (x) => (Math.cos((x + 1) * Math.PI) / 2) + .5;                 // AccelerateDecelerate
+const quint = (x) => { x = clamp(x) - 1; return x * x * x * x * x + 1; }; // ViewPager sInterpolator
+
+const TS = [3500, 7000, 10500, 14000, 17500];     // sahifaga o'tish / page switch (ms)
+const SWIPE = 450;
+const L0 = 21150;                                  // kirish oynasi boshlanishi / login start
+const T = { kb: L0 + 300, ph0: L0 + 1500, phS: 230, fab1: L0 + 3400, tap1: L0 + 4300, to2: L0 + 5300,
+  c0: L0 + 6900, cS: 300, ver: L0 + 8300, to3: L0 + 9200,
+  p0: L0 + 10300, pS: 190, eye: L0 + 12000, tap3: L0 + 13000, to4: L0 + 14000, end: L0 + 17600 };
+const TOTAL = T.end, TR = 300, WD = 360;
+const TITLES = ['ARUGRAM', 'Tez', 'Bepul', 'Kuchli', 'Xavfsiz', 'Bulutli'];
+const MSG = ["Dunyoning <b>eng tezkor</b> muloqot ilovasi.<br>Bu <b>bepul</b> va <b>xavfsiz</b>.", "<b>ARUGRAM</b> xabarlarni boshqa har qanday<br>ilovadan tezroq yetkazadi.",
+  "<b>ARUGRAM</b> suhbatlar va media uchun bepul cheksiz bulutli xotira taqdim etadi.", "<b>ARUGRAM</b>da media va suhbatlar<br>hajmiga cheklov yo'q.",
+  "<b>ARUGRAM</b> xabarlaringizni xakerlik<br>hujumlaridan himoya qiladi.", "<b>ARUGRAM</b> xabarlaringizga bir nechta<br>qurilmadan kirish imkonini beradi."];
+const LET = { 1: '', 2: 'ABC', 3: 'DEF', 4: 'GHI', 5: 'JKL', 6: 'MNO', 7: 'PQRS', 8: 'TUV', 9: 'WXYZ', 0: '+' };
+const PHONE = '901234567', CODE = '12345', PASS = 'aru2024!';
+
+(function build() {
+  const ip = $('ipages');
+  for (let i = 0; i < 6; i++) {
+    const d = document.createElement('div'); d.className = 'ipage'; d.id = 'ip' + i;
+    d.innerHTML = `<div class="ih">${TITLES[i]}</div><div class="im">${MSG[i]}</div>`; ip.appendChild(d);
+  }
+  const dots = $('dots');
+  for (let i = 0; i < 6; i++) { const e = document.createElement('i'); e.style.left = i * 11 + 'px'; dots.appendChild(e); }
+  const s = document.createElement('div'); s.id = 'sel'; dots.appendChild(s);
+  const kn = $('kn');
+  [[1, 2, 3], [4, 5, 6], [7, 8, 9], ['', 0, '⌫']].forEach((r) => { const d = document.createElement('div'); d.className = 'r';
+    r.forEach((k) => { const e = document.createElement('div'); e.className = 'k'; e.dataset.k = 'n' + k; e.innerHTML = k === '' ? '' : k === '⌫' ? '<svg width="26" height="26" viewBox="0 0 26 26"><path d="M9 5h13a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H9L2 13z" fill="none" stroke="#fff" stroke-width="1.8"/><path d="M12 9l7 8M19 9l-7 8" stroke="#fff" stroke-width="1.8"/></svg>' : `${k}<small>${LET[k]}</small>`; d.appendChild(e); });
+    kn.appendChild(d); });
+  const ka = $('ka');
+  ['qwertyuiop', 'asdfghjkl', 'zxcvbnm'].forEach((r) => { const d = document.createElement('div'); d.className = 'r'; [...r].forEach((k) => { const e = document.createElement('div'); e.className = 'k'; e.dataset.k = 'a' + k; e.textContent = k; d.appendChild(e); }); ka.appendChild(d); });
+  const d = document.createElement('div'); d.className = 'r'; ['?123', 'boʼsh joy', '↵'].forEach((k, i) => { const e = document.createElement('div'); e.className = 'k'; e.textContent = k; e.style.flex = i === 1 ? '4' : '1.5'; e.style.fontSize = '15px'; d.appendChild(e); }); ka.appendChild(d);
+})();
+
+const mk = (id, key, loop) => lottie.loadAnimation({ container: $(id), renderer: 'svg', loop: false, autoplay: false, animationData: window.ANIMS[key] });
+const sms = mk('smsI', 'sms'), lock = mk('lockI', 'lock'), sun = mk('sun', 'sun');
+const play = (a, t, t0) => a.goToAndStop(clamp((t - t0) / 1000 * a.frameRate, 0, a.totalFrames - 1), true);
+
+function pos(ms) { let p = 0, off = 0; for (let k = 0; k < TS.length; k++) if (ms >= TS[k]) { p = k + 1; off = -(1 - quint((ms - TS[k]) / SWIPE)); } return p + off; }
+function arc(el, t, r, c) {
+  const a0 = (t / 650) * 2 * Math.PI, sw = 1.4 + Math.sin(t / 360);
+  const p = (a) => [c + r * Math.cos(a), c + r * Math.sin(a)]; const [x0, y0] = p(a0), [x1, y1] = p(a0 + sw);
+  el.setAttribute('d', `M${x0.toFixed(2)} ${y0.toFixed(2)} A${r} ${r} 0 ${sw > Math.PI ? 1 : 0} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`);
+}
+const fmt = (s) => { let o = ''; [...s].forEach((c, i) => { if (i === 2 || i === 5 || i === 7) o += ' '; o += c; }); return o; };
+const typed = (t, t0, st, n) => clamp(Math.floor((t - t0) / st) + 1, 0, n);
+function keys(t, list) { document.querySelectorAll('.k.p').forEach((e) => e.classList.remove('p'));
+  for (const [k, at] of list) if (t >= at && t < at + 140) { const e = document.querySelector(`[data-k="${k}"]`); if (e) e.classList.add('p'); } }
+function outline(of, lab, f, raised) {
+  of.style.borderWidth = `${lerp(1, 2, f)}px`; of.style.borderColor = f > 0 ? `rgb(${lerp(80, 110, f)},${lerp(80, 178, f)},${lerp(80, 239, f)})` : '';
+  lab.style.color = f > 0 ? '#6eb2ef' : ''; if (raised !== undefined) { lab.style.top = `${lerp(18, -10, raised)}px`; lab.style.fontSize = `${lerp(16, 12, raised)}px`; } }
+function slide(el, t, a, b) {   // yangi ekran: translateX 48dp -> 0 + alpha 0->1 (200 ms); eski: alpha 1 -> 0 / fragment push
+  const p = a === null ? 1 : ead(seg(t, a, a + 200)), q = b === null ? 0 : ead(seg(t, b, b + 200));
+  el.style.opacity = a !== null && t < a ? 0 : (1 - q) * p; el.style.transform = `translateX(${(1 - p) * 48 - q * 0}px)`; el.style.visibility = (a !== null && t < a) || (b !== null && t > b + 200) ? 'hidden' : 'visible'; }
+function page(el, t, a, b) {    // kirish sahifalari: to'liq kenglik, 300 ms AccelerateDecelerate
+  let x = 0; if (a !== null) x = (1 - ead(seg(t, a, a + TR))) * WD; if (b !== null) x = -ead(seg(t, b, b + TR)) * WD;
+  el.style.transform = `translateX(${x}px)`; el.style.visibility = (a !== null && t < a) || (b !== null && t > b + TR) ? 'hidden' : 'visible'; }
+
+let lastSrc = '', pending = null;
+function frame(t) {
+  // ---- tanishtiruv ----
+  const P = pos(t), fi = Math.min(Math.floor(t / (1000 / 60)) + 1, 99999);
+  const src = `tgframes/f${String(Math.min(fi, 1320)).padStart(5, '0')}.png`;
+  if (src !== lastSrc) { lastSrc = src; const im = $('gl'); im.src = src; pending = im.decode().catch(() => {}); }
+  for (let i = 0; i < 6; i++) $('ip' + i).style.transform = `translateX(${(i - P) * WD}px)`;
+  const base = Math.floor(P + 1e-6), pr = P - base;
+  const sel = $('sel'); sel.style.left = base * 11 + 'px'; sel.style.width = (5 + 11 * pr) + 'px';
+  document.querySelectorAll('#dots i').forEach((e) => { e.style.background = '#555'; });
+  const tt = seg(t, L0 - 450, L0 - 250);
+  const press = Math.min(seg(t, L0 - 450, L0 - 380), 1 - seg(t, L0 - 380, L0 - 250));
+  $('start').style.transform = `scale(${1 - .03 * press})`;
+  $('flick').style.left = `${lerp(-100, 330, ((t / 1700) % 1))}px`;
+  sun.goToAndStop(sun.totalFrames - 1, true);
+  slide($('intro'), t, null, L0); void tt;
+  $('intro').style.opacity = 1 - ead(seg(t, L0, L0 + 200));
+
+  // ---- 1) telefon ----
+  slide($('a'), t, L0, T.to2 - 0);  // 1-sahifa / page 1 uses fragment fade-in, then page slide out
+  page($('a'), t, null, T.to2); { const a = seg(t, L0, L0 + 200); $('a').style.opacity = a; }
+  const n1 = typed(t, T.ph0, T.phS, 9);
+  $('num').textContent = fmt(PHONE.slice(0, n1)); $('hnt').textContent = n1 ? '' : '00 000 00 00';
+  $('cur1').style.opacity = Math.floor(t / 500) % 2 ? 0 : 1;
+  outline($('a4'), $('lab1'), dec(seg(t, T.kb, T.kb + 200)));
+  $('acol').style.top = '24px'; $('acol').style.height = `${740 - 24 - 230}px`; $('acol').style.justifyContent = 'center';
+
+  // ---- klaviatura ----
+  const kUp = dec(seg(t, T.kb, T.kb + 300));
+  const nDown = t > T.to3 - 100 ? ead(seg(t, T.to3, T.to3 + 250)) : 0, kDownEnd = ead(seg(t, T.to4 - 100, T.to4 + 200));
+  $('kn').style.transform = `translateY(${(1 - kUp * (1 - nDown)) * 240}px)`;
+  const aUp = ead(seg(t, T.to3 + 100, T.to3 + 450)) * (1 - kDownEnd);
+  $('ka').style.transform = `translateY(${(1 - aUp) * 270}px)`;
+  keys(t, [...[...PHONE].map((c, i) => ['n' + c, T.ph0 + i * T.phS]), ...[...CODE].map((c, i) => ['n' + c, T.c0 + i * T.cS]),
+    ...[...PASS].filter((c) => /[a-z]/.test(c)).map((c) => ['a' + c, T.p0 + PASS.indexOf(c) * T.pS])]);
+
+  // ---- yumaloq tugma / FAB ----
+  const f1 = dec(seg(t, T.fab1, T.fab1 + 200)) * (1 - acc(seg(t, T.to2 - 150, T.to2)));
+  const f3 = dec(seg(t, T.p0 + 100, T.p0 + 300)) * (1 - acc(seg(t, T.to4 - 150, T.to4)));
+  const show = Math.max(f1, f3);
+  const pr1 = seg(t, T.tap1 + 100, T.tap1 + 260) * (1 - seg(t, T.to2 - 120, T.to2)), pr3 = seg(t, T.tap3 + 100, T.tap3 + 260) * (1 - seg(t, T.to4 - 120, T.to4));
+  const prog = Math.max(pr1, pr3);
+  const kh = 230 * (1 - 0) * (t < T.to3 ? kUp : 1) * 1; const bot = (t < T.to3 ? kh : (t < T.to4 + 100 ? 260 : 0)) + 14;
+  $('fab').style.bottom = `${bot}px`; $('fab').style.opacity = show > 0.01 ? 1 : 0; $('fab').style.transform = `scale(${show})`;
+  $('fa').style.opacity = 1 - prog; $('fa').style.transform = `scale(${1 - .4 * prog})`; $('fp').style.opacity = prog; if (prog > 0) arc($('arcF'), t, 15, 22);
+
+  // ---- 2) kod ----
+  page($('b'), t, T.to2, T.to3);
+  play(sms, t, T.to2 + 350);
+  const n2 = typed(t, T.c0, T.cS, 5);
+  [...$('b4').children].forEach((c, i) => { c.textContent = i < n2 ? CODE[i] : ''; const foc = (i === Math.min(n2, 4)) && t > T.to2 + 400 && t < T.ver + 400;
+    c.style.borderWidth = foc ? '2px' : '1px'; c.style.borderColor = foc ? '#6eb2ef' : ''; });
+  const spB = seg(t, T.ver, T.ver + 150) * (1 - seg(t, T.to3 - 150, T.to3));
+  $('tm').style.opacity = 1 - spB; $('spB').style.opacity = spB; if (spB > 0) arc($('arcB'), t, 8, 10);
+  $('tm').textContent = `0:${String(Math.max(0, 42 - Math.floor((t - T.to2) / 1000))).padStart(2, '0')}`;
+
+  // ---- 3) parol ----
+  page($('c'), t, T.to3, T.to4);
+  play(lock, t, T.to3 + 350);
+  const foc3 = dec(seg(t, T.to3 + 700, T.to3 + 850));
+  const n3 = typed(t, T.p0, T.pS, PASS.length), eyeOn = t >= T.eye && t < T.eye + 800;
+  $('pw').textContent = eyeOn ? PASS.slice(0, n3) : '•'.repeat(n3); $('slash').style.opacity = eyeOn ? 0 : 1;
+  $('cur3').style.opacity = t > T.to3 + 700 && Math.floor(t / 500) % 2 === 0 ? 1 : 0;
+  outline($('c4'), $('lab3'), foc3, Math.max(foc3, n3 ? 1 : 0));
+
+  // ---- 4) tayyor ----
+  page($('d'), t, T.to4, null);
+  const d0 = T.to4 + 350;
+  $('d1').style.opacity = dec(seg(t, d0, d0 + 450));
+  [...$('d4').children].forEach((c, i) => { const p = dec(seg(t, d0 + 500 + i * 150, d0 + 950 + i * 150)); c.style.opacity = p; c.style.transform = `translateY(${(1 - p) * 20}px)`; });
+}
+
+let now = 0; window.__finished = false;
+window.start = () => { now = 0; frame(0); };
+window.step = async (dt) => { now += dt; frame(Math.min(now, TOTAL)); if (pending) await pending; if (now >= TOTAL) window.__finished = true; };
+frame(0);
+</script>
+</body></html>

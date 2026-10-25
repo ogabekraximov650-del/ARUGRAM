@@ -23,3 +23,9 @@ RU: Анимации написаны **по методу clean-room**: код G
 UZ: `src/lib.rs` — 6 sahifali tanishtiruv (`src/art.rs` — o'zimiz chizgan vektor animatsiyalar, varaq sifatida oldindan chiziladi) va telefon raqami ekrani. APK: `.github/workflows/arugramrust.yml` (Telegram'ga yuboriladi). Bosh sahifa keyin.
 EN: `src/lib.rs` — the 6-page intro (`src/art.rs` — our own vector animations, pre-rendered into sprite sheets) and the phone-number screen. APK: `.github/workflows/arugramrust.yml` (sent to Telegram). Home screen comes later.
 RU: `src/lib.rs` — знакомство из 6 страниц (`src/art.rs` — собственные векторные анимации, заранее рисуются в листы) и экран номера телефона. APK: `.github/workflows/arugramrust.yml` (отправляется в Telegram). Главный экран — позже.
+
+## Litsenziya (yangilandi) / License (updated) / Лицензия (обновлено)
+
+UZ: Loyiha ochiq bo'lishi rejalashtirilgani uchun Telegram (GPL) kodi va resurslaridan to'g'ridan-to'g'ri foydalanilgan — **ARUGRAMRUST GPL-2.0-or-later**. Tafsilot: `NOTICE.md`, `LICENSE`. `demo/tgintro/` — Telegram'ning `IntroRenderer.c` ini kompyuterda (Mesa EGL) ishga tushirib kadr oladi; `demo/tg_video.html` — Telegram uslubidagi tanishtiruv + kirish videosi.
+EN: As the project is planned to be open source, Telegram (GPL) code and resources are used directly — **ARUGRAMRUST is GPL-2.0-or-later**. See `NOTICE.md`, `LICENSE`. `demo/tgintro/` runs Telegram's `IntroRenderer.c` on a PC (Mesa EGL) to capture frames; `demo/tg_video.html` is the Telegram-style intro + sign-in video.
+RU: Так как проект планируется открыть, код и ресурсы Telegram (GPL) используются напрямую — **ARUGRAMRUST под GPL-2.0-or-later**. См. `NOTICE.md`, `LICENSE`. `demo/tgintro/` запускает `IntroRenderer.c` Telegram на ПК (Mesa EGL) и снимает кадры; `demo/tg_video.html` — видео интро + входа в стиле Telegram.
