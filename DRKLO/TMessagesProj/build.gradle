@@ -142,6 +142,11 @@ android {
 
         multiDexEnabled true
 
+        // ARUGRAM: faqat 32-bit va 64-bit ARM (x86 prebuilt olib tashlangan) / ARM only (x86 prebuilts removed)
+        ndk {
+            abiFilters 'armeabi-v7a', 'arm64-v8a'
+        }
+
         externalNativeBuild {
             cmake {
                 version '3.22.1'
