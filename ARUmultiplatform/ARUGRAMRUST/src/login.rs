@@ -46,6 +46,11 @@ pub struct Login {
     prev: Cell<Page>,
     t_page: Cell<f32>,
     t_show: Cell<f32>,
+    ctitle: Cell<(f32, f32, f32)>,
+    code_t: Cell<[f32; CODE_LEN]>,
+    code_exit: Cell<Option<(usize, char, f32)>>,
+    cfocus: Cell<(usize, usize, f32)>,
+    cell_clip: Vec<ScrollState>,
     country: Cell<Option<usize>>,
     code_in: RefCell<String>,
     number: State<String>,
@@ -72,33 +77,34 @@ fn pattern_len(c: &Country) -> usize {
     if n == 0 { 12 } else { n }
 }
 
+/// UZ: Telegram `afterTextChanged`: probel hint (shablon) bo'yicha qo'yiladi, hint tugagach bitta probel qo'shilib to'xtaydi. EN: Telegram's `afterTextChanged`: spaces follow the hint (pattern); past its end one space is added and it stops. RU: `afterTextChanged` Telegram: пробелы по подсказке (шаблону); после её конца добавляется один пробел и всё.
 fn format_with(pattern: &str, digits: &str) -> String {
     if pattern.is_empty() {
         return digits.to_string();
     }
-    let mut out = String::new();
-    let mut it = digits.chars();
-    for p in pattern.chars() {
-        if p == 'X' {
-            match it.next() {
-                Some(c) => out.push(c),
-                None => return out.trim_end().to_string(),
+    let hint: Vec<char> = pattern.chars().map(|c| if c == 'X' { '0' } else { c }).collect();
+    let mut b: Vec<char> = digits.chars().collect();
+    let mut a = 0;
+    while a < b.len() {
+        if a < hint.len() {
+            if hint[a] == ' ' {
+                b.insert(a, ' ');
+                a += 1;
             }
-        } else if it.clone().next().is_some() {
-            out.push(p);
+        } else {
+            b.insert(a, ' ');
+            break;
         }
+        a += 1;
     }
-    out.extend(it);
-    out
+    b.into_iter().collect()
 }
 
 /// Kichik bayroq (16 dp balandlikda) / A small flag (16 dp high) / Небольшой флаг (высота 16 dp).
+/// UZ: Telegram emoji bayrog'i: 20dp kvadrat (`Emoji.drawImgSize`). EN: Telegram's emoji flag: a 20dp square (`Emoji.drawImgSize`). RU: Эмодзи-флаг Telegram: квадрат 20dp (`Emoji.drawImgSize`).
 fn flag_small(iso: &str) -> Element {
     match flags::flag(iso) {
-        Some(img) => {
-            let a = img.w as f32 / img.h as f32;
-            image(&img, (16.0 * a).min(26.0), 16.0)
-        }
+        Some(img) => image(&img, 20.0, 20.0),
         None => t(iso, 11.0, hint()),
     }
 }
@@ -111,6 +117,11 @@ impl Login {
             prev: Cell::new(Page::Phone),
             t_page: Cell::new(-1.0e6),
             t_show: Cell::new(0.0),
+            ctitle: Cell::new((0.0, 0.0, -1.0e6)),
+            code_t: Cell::new([-1.0e6; CODE_LEN]),
+            code_exit: Cell::new(None),
+            cfocus: Cell::new((0, 0, -1.0e6)),
+            cell_clip: (0..CODE_LEN).map(|_| ScrollState::new()).collect(),
             country: Cell::new(None),
             code_in: RefCell::new(String::new()),
             number: State::new(String::new()),
@@ -148,6 +159,16 @@ impl Login {
         self.kb_custom.borrow_mut().go(1.0, now + SHOW_DELAY);
         self.fab.borrow_mut().go(1.0, now + 200.0);
         self.bump();
+    }
+
+    #[doc(hidden)]
+    pub fn debug_code(&self, digits: &str, at_ms: f32) {
+        *self.code.borrow_mut() = digits.to_string();
+        let mut t = self.code_t.get();
+        for i in 0..digits.len().min(CODE_LEN) {
+            t[i] = at_ms;
+        }
+        self.code_t.set(t);
     }
 
     #[doc(hidden)]
@@ -204,6 +225,9 @@ impl Login {
                 self.fab.borrow_mut().go(0.0, now);
                 self.t_show.set(now);
                 self.code.borrow_mut().clear();
+                self.code_t.set([-1.0e6; CODE_LEN]);
+                self.code_exit.set(None);
+                self.cfocus.set((0, 0, -1.0e6));
                 self.ver_t.set(None);
             }
             Page::Pass => {
@@ -298,9 +322,15 @@ impl Login {
         } else if page == Page::Code {
             let mut c = self.code.borrow_mut();
             if k == -2 {
-                c.pop();
+                if let Some(ch) = c.pop() {
+                    self.code_exit.set(Some((c.chars().count(), ch, now)));
+                }
             } else if k >= 0 && c.chars().count() < CODE_LEN {
+                let i = c.chars().count();
                 c.push(char::from_digit(k as u32, 10).unwrap_or('0'));
+                let mut t = self.code_t.get();
+                t[i] = now;
+                self.code_t.set(t);
             }
             let full = c.chars().count() == CODE_LEN;
             drop(c);
@@ -476,27 +506,33 @@ impl Login {
     }
 
     /// Konturli maydon (OutlineTextContainerView): chiziq 1,5 → 2 dp, yorliq konturda / outlined field with a label on the border.
-    fn outline(&self, x: f32, y: f32, w: f32, h: f32, focus: f32, label: &str, raise: f32, inner: Vec<Element>) -> Element {
-        let line = line().lerp(active(), focus);
-        let lc = hint().lerp(active(), focus);
-        let bw = lerp(1.5, 2.0, focus);
-        let boxed = column(vec![]).width(w).height(h).radius(7.0).border(bw, line);
-        let ly = lerp(15.0, -11.0, raise);
-        let lsize = lerp(16.0, 12.5, raise);
+    /// UZ: `OutlineTextContainerView` (Telegram): 58dp balandlik, tepada 6dp, radius 8, chiziq qalinligi 2px..1.6667dp, sarlavha 16sp -> 12sp. EN: Telegram's `OutlineTextContainerView`: 58dp tall, 6dp top padding, radius 8, stroke 2px..1.6667dp, label 16sp -> 12sp. RU: `OutlineTextContainerView` Telegram: высота 58dp, отступ сверху 6dp, радиус 8, обводка 2px..1.6667dp, подпись 16sp -> 12sp.
+    fn outline(&self, x: f32, y: f32, w: f32, label: &str, title: f32, sel: f32, force_center: bool, inner: Vec<Element>) -> Element {
+        const H: f32 = 58.0;
+        let reg = 2.0 / density();
+        let sw = if force_center { reg } else { lerp(reg, 1.6667, sel) };
+        let sel_c = if force_center { 0.0 } else { sel };
+        let ttl_c = if force_center { 0.0 } else { title };
+        let line_c = line().lerp(active(), sel_c);
+        let label_c = hint().lerp(active(), ttl_c);
+        let boxed = at(sw / 2.0, 6.0 + sw / 2.0, column(vec![]).width(w - sw).height(H - 6.0 - sw).radius(8.0 + sw / 2.0).border(sw, line_c));
         let mut kids = vec![boxed];
         kids.extend(inner);
-        let lab = if raise > 0.01 {
-            at(10.0, ly, column(vec![t(label, lsize, lc)]).bg(bg()).padding_xy(4.0, 0.0))
-        } else {
-            at(14.0, ly, t(label, lsize, lc))
-        };
-        kids.push(lab);
-        at(x, y, stack(kids).width(w).height(h))
+        // sarlavha: markaz (16sp) -> tepa (12sp) / label: centre (16sp) -> top (12sp)
+        let size = lerp(16.0, 12.0, title);
+        let cy = lerp(31.4, 8.3, title);
+        let lx = lerp(14.0, 10.0, title);
+        let pad = lerp(0.0, 5.0, title);
+        let lab = column(vec![t(label, size, label_c).line_height(14.0)]).bg(bg().with_opacity(title)).padding_xy(pad, 0.0);
+        kids.push(at(lx + (1.0 - title) * 0.0, cy - 7.0, lab));
+        at(x, y, stack(kids).width(w).height(H))
     }
 
     fn phone_view(self: &Rc<Self>, w: f32, now: f32) -> Element {
         let me = self.clone();
-        let fw = w - 73.0;
+        let ins = safe_insets();
+        let (_, h) = window_dp();
+        let hu = h - ins.bottom;
         let c = self.country.get().map(|i| &COUNTRIES[i]);
         let digits = self.number.get();
         let pat = c.map_or("", |c| c.pattern);
@@ -504,41 +540,61 @@ impl Login {
         let caret_on = (now / 500.0) as i64 % 2 == 0;
         let t_in = seg(now, self.t_show.get(), self.t_show.get() + 200.0);
 
-        // mamlakat maydoni
-        let mut cin: Vec<Element> = Vec::new();
-        let raise_c = if c.is_some() { 1.0 } else { 0.0 };
-        if let Some(c) = c {
-            cin.push(at(14.0, 0.0, column(vec![flag_small(c.iso)]).width(18.0).height(51.0).justify(Justify::Center)));
-            cin.push(at(49.5, 12.0, t(c.name, 16.0, txt()).line_height(26.0)));
-        }
-        cin.push(at(fw - 36.0, 13.0, icon(CHEVRON_RIGHT, 24.0).color(hint())));
-        let country_field = self.outline(36.5, 267.2, fw, 51.0, 0.0, "Mamlakat", raise_c, cin);
+        // LoginActivity: slayd 30dp tepada, pastki chegarasi klaviatura tepasi + 16; mazmun markazlanadi
+        // slide view: 30dp top margin, bottom = keyboard top + 16; content is centered
+        let (title_h, sub_h) = (23.1, 36.8);
+        let content = title_h + 8.0 + sub_h + 25.5 + 58.0 + 14.0 + 8.0 + 58.0 + 8.0;
+        let center = (ins.top + 30.0 + hu - KB_H + 16.0) / 2.0;
+        let top0 = center - content / 2.0;
+        let sub_top = top0 + title_h + 8.0;
+        let country_y = sub_top + sub_h + 25.5;
+        let phone_y = country_y + 58.0 + 14.0 + 8.0;
+        let (fx, fw) = (34.0, w - 68.0);
 
-        // telefon maydoni
+        // mamlakat sarlavhasi: pружина (500, to'siqsiz) / country label spring
+        let want = if c.is_some() { 1.0 } else { 0.0 };
+        let (from, to, t0) = self.ctitle.get();
+        let (from, t0) = if (to - want).abs() > 0.5 { (spring_val(from, to, now - t0), now) } else { (from, t0) };
+        self.ctitle.set((from, want, t0));
+        let title_c = spring_val(from, want, now - t0);
+
+        // mamlakat maydoni: [bayroq 18.75 + 16 bo'shliq + nom] / country field: flag + gap + name
+        let mut cin: Vec<Element> = Vec::new();
+        if let Some(c) = c {
+            cin.push(at(16.0, 32.0 - 10.0, flag_small(c.iso)));
+            cin.push(at(16.0 + 18.75 + 16.0, 32.0 - 13.0, t(c.name, 16.0, txt()).line_height(26.0)));
+        }
+        cin.push(at(fw - 14.0 - 24.0, 32.0 - 12.0, icon(CHEVRON_RIGHT, 24.0).color(hint())));
+        let country_field = self.outline(fx, country_y, fw, "Mamlakat", title_c, 0.0, true, cin);
+
+        // telefon maydoni: "+", kod (55dp, -9 chap, 10 ichki), ajratgich, raqam / phone field
         let mut pin: Vec<Element> = Vec::new();
         let code_txt = c.map_or_else(|| self.code_in.borrow().clone(), |c| c.code.to_string());
-        pin.push(at(14.0, -3.5, t(format!("+{code_txt}"), 16.5, txt()).line_height(48.5)));
-        pin.push(at(74.0, 15.0, column(vec![]).width(1.0).height(18.0).bg(line())));
-        let mut row_kids = vec![t(shown.clone(), 17.0, txt()).line_height(48.5)];
+        let ty = 32.0 - 13.0;
+        pin.push(at(16.0, ty, t(format!("+{code_txt}"), 16.0, txt()).line_height(26.0)));
+        pin.push(at(16.0 + 9.2 - 9.0 + 55.0 + 4.0, 32.0 - 10.0, column(vec![]).width(2.0 / density()).height(20.0).bg(line())));
+        let num_x = 16.0 + 9.2 - 9.0 + 55.0 + 4.0 + 2.0 / density() + 12.0;
+        let hint_full: String = pat.chars().map(|c| if c == 'X' { '0' } else { c }).collect();
+        let rest: String = hint_full.chars().skip(shown.chars().count()).collect();
+        let mut row_kids = vec![t(shown.clone(), 16.0, txt()).line_height(26.0)];
         if c.is_some() && caret_on {
-            row_kids.push(gap_box(1.0, 0.0));
-            row_kids.push(column(vec![]).width(2.0).height(22.0).bg(active()));
+            row_kids.push(column(vec![]).width(1.5).height(20.0).bg(active()));
         } else {
-            row_kids.push(gap_box(3.0, 0.0));
+            row_kids.push(gap_box(1.5, 0.0));
         }
-        if c.is_some() && digits.is_empty() {
-            pin.push(at(86.7, -3.5, t(c.map_or("", |c| c.pattern).replace('X', "0"), 17.0, Color::hex(0x6e6e6e)).line_height(48.5)));
+        if c.is_some() && !rest.is_empty() {
+            row_kids.push(t(rest, 16.0, hint()).line_height(26.0));
         }
-        pin.push(at(86.7, -3.5, row(row_kids).align(Align::Center).height(48.5)));
-        let phone_field = self.outline(36.5, 348.5, fw, 48.5, 1.0, "Telefon raqami", 1.0, pin);
+        pin.push(at(num_x, ty, row(row_kids).align(Align::Center).height(26.0)));
+        let phone_field = self.outline(fx, phone_y, fw, "Telefon raqami", 1.0, 1.0, false, pin);
 
         let me2 = me.clone();
-        let country_tap = at(36.5, 267.2, column(vec![]).width(fw).height(51.0).on_click(move || me2.open_picker()));
+        let country_tap = at(fx, country_y + 6.0, column(vec![]).width(fw).height(52.0).on_click(move || me2.open_picker()));
 
         stack(vec![
-            at(0.0, 167.0, centered(w, t("Telefon raqamingiz", 18.0, txt()).bold().line_height(22.0))),
-            at(0.0, 198.0, centered(w, t("Telefon raqamingizni kiriting", 13.5, hint()).line_height(18.9))),
-            at(0.0, 216.9, centered(w, row(vec![t("yoki ", 13.5, hint()).line_height(18.9), gap_box(3.0, 0.0), t("kirish kaliti yordamida kiring ›", 13.5, blue()).line_height(18.9)]))),
+            at(0.0, top0, centered(w, t("Telefon raqamingiz", 18.0, txt()).font_weight(500).line_height(21.1))),
+            at(0.0, sub_top, centered(w, t("Telefon raqamingizni kiriting", 14.0, hint()).line_height(16.4))),
+            at(0.0, sub_top + 18.4, centered(w, row(vec![t("yoki ", 14.0, hint()).line_height(16.4), gap_box(3.0, 0.0), t("kirish kaliti yordamida kiring ›", 14.0, blue()).line_height(16.4)]))),
             country_field,
             phone_field,
             country_tap,
@@ -546,40 +602,88 @@ impl Login {
         .bg(bg().with_opacity(t_in))
     }
 
+    /// UZ: `LoginActivitySmsView` (ilova kodi): ikonka 128dp (-24 siljish), sarlavha 18sp, matn 14sp, 34x42 katak, oraliq 7. EN: `LoginActivitySmsView` (app code): 128dp icon (-24 shift), 18sp title, 14sp text, 34x42 cells, 7 gap. RU: `LoginActivitySmsView` (код в приложении): иконка 128dp (сдвиг -24), заголовок 18sp, текст 14sp, ячейки 34x42, зазор 7.
     fn code_view(self: &Rc<Self>, w: f32, now: f32) -> Element {
         let me = self.clone();
+        let ins = safe_insets();
+        let (_, h) = window_dp();
+        let hu = h - ins.bottom;
         let code = self.code.borrow().clone();
         let n = code.chars().count();
         let t0 = self.t_show.get();
         let ver = self.ver_t.get();
-        let cell_w = 32.0;
-        let gap = 10.0;
-        let total = CODE_LEN as f32 * cell_w + (CODE_LEN as f32 - 1.0) * gap;
-        let mut cells = Vec::new();
+        let y0 = ins.top + 30.0;
+        let (cw, ch, gap) = (34.0f32, 42.0f32, 7.0f32);
+        let total = CODE_LEN as f32 * cw + (CODE_LEN as f32 - 1.0) * gap;
+
+        // fokus: joriy katak (SpringForce 400, to'siqsiz) / focus: current cell (SpringForce 400, no bounce)
+        let cur = n.min(CODE_LEN - 1);
+        let (pf, cf, tf) = self.cfocus.get();
+        let (pf, tf) = if cf != cur { (cf, now) } else { (pf, tf) };
+        self.cfocus.set((pf, cur, tf));
+        let spr = |ms: f32| {
+            let wn = 400.0f32.sqrt();
+            let t = (ms / 1000.0).max(0.0);
+            1.0 - (1.0 + wn * t) * (-wn * t).exp()
+        };
+        let focus_of = |i: usize| -> f32 {
+            let k = spr(now - tf);
+            if i == cur && n < CODE_LEN {
+                if pf == cur { 1.0 } else { k }
+            } else if i == pf && pf != cur {
+                1.0 - k
+            } else {
+                0.0
+            }
+        };
+
+        let sw = 1.5f32;
+        let mut cells: Vec<Element> = Vec::new();
+        let times = self.code_t.get();
         for i in 0..CODE_LEN {
-            let ch = code.chars().nth(i).map(|c| c.to_string()).unwrap_or_default();
-            let is_act = i == n.min(CODE_LEN - 1) && n < CODE_LEN;
-            let lc = if is_act { active() } else { line() };
-            let cell = column(vec![t(ch, 20.0, txt()).bold()]).width(cell_w).height(39.0).center().radius(5.0).border(1.5, lc);
-            cells.push(cell);
+            let fcs = focus_of(i);
+            let lc = line().lerp(active(), fcs);
+            let boxed = at(sw / 2.0, sw / 2.0, column(vec![]).width(cw - sw).height(ch - sw).radius(4.0 + sw / 2.0).border(sw, lc));
+            let mut kids = vec![boxed];
+            // raqam: pastdan ko'tariladi (Overshoot 1.5, 350 ms) / digit rises from below (Overshoot 1.5, 350 ms)
+            if let Some(c) = code.chars().nth(i) {
+                let k = seg(now, times[i], times[i] + 350.0);
+                let x = k - 1.0;
+                let p = x * x * (2.5 * x + 1.5) + 1.0;
+                let (iw, ih) = (cw - 2.0 * sw, ch - 2.0 * sw);
+                let digit = column(vec![t(c.to_string(), 20.0, txt()).font_weight(500).line_height(24.0)]).width(iw).height(ih).center();
+                let clip = column(vec![stack(vec![at(0.0, ih * (1.0 - p), digit)]).width(iw).height(ih)]).scroll(&self.cell_clip[i]).width(iw).height(ih);
+                kids.push(at(sw, sw, clip));
+            } else if let Some((ei, ec, et)) = self.code_exit.get().filter(|(ei, _, et)| *ei == i && now < et + 220.0) {
+                let _ = ei;
+                let k = seg(now, et, et + 220.0);
+                let sc = (1.0 - k) * 0.5 + 0.5;
+                kids.push(at(0.0, 0.0, column(vec![t(ec.to_string(), 20.0 * sc, txt().with_opacity(1.0 - k)).font_weight(500)]).width(cw).height(ch).center()));
+            }
+            cells.push(stack(kids).width(cw).height(ch));
         }
+
+        // ikonka 128dp: y0 + 16 - 24 / icon 128dp: y0 + 16 - 24
+        let title_top = y0 + 16.0 + 112.0 + 18.0;
+        let conf_top = title_top + 23.1 + 17.0;
+        let code_top = conf_top + 36.8 + 32.0;
         let radial = match ver {
             Some(v) if now >= v => {
                 let a = quint(seg(now, v, v + 150.0));
-                at(w - 48.0, 40.0, column(vec![spinner(18.0 * a.max(0.2), 2.0, blue())]).width(32.0).height(32.0).center())
+                at(w - 48.0, code_top + 5.0, column(vec![spinner(18.0 * a.max(0.2), 2.0, blue())]).width(32.0).height(32.0).center())
             }
             _ => gap_box(0.0, 0.0),
         };
+        let bottom_y = hu - KB_H - 51.6;
         stack(vec![
-            at(16.0, 40.0, column(vec![icon(ARROW_BACK, 24.0).color(txt())]).width(32.0).height(32.0).center().on_click(move || {
-                me.goto(Page::Phone);
-            })),
-            at((w - 128.0) / 2.0, 24.0, self.icon_view(0, 128.0, t0 + SHOW_DELAY + SLIDE_MS, now)),
-            at(0.0, 167.0, centered(w, t("ARUGRAM xabarlaringizni tekshiring", 18.0, txt()).bold().line_height(22.0))),
-            at(0.0, 208.0, centered(w, t("Boshqa qurilmangizdagi +998 90 123 45 67", 14.0, sub()).line_height(20.0))),
-            at(0.0, 228.0, centered(w, row(vec![t("uchun", 14.0, sub()).line_height(20.0), gap_box(4.0, 0.0), t("ARUGRAM ilovasiga", 14.0, sub_bold()).bold().line_height(20.0), gap_box(4.0, 0.0), t("kod yuborildi.", 14.0, sub()).line_height(20.0)]))),
-            at((w - total) / 2.0, 282.0, row(cells).gap(gap)),
-            at(0.0, 460.0, centered(w, t("Kodni olmadingizmi?", 15.0, blue()))),
+            at(15.0, ins.top + 16.0, column(vec![icon(ARROW_BACK, 24.0).color(txt())]).width(24.0).height(24.0).center()),
+            at(0.0, ins.top, column(vec![]).width(54.0).height(56.0).on_click(move || me.goto(Page::Phone))),
+            at((w - 128.0) / 2.0, y0 + 16.0 - 24.0, self.icon_view(0, 128.0, t0 + SHOW_DELAY + SLIDE_MS, now)),
+            at(0.0, title_top, centered(w, t("ARUGRAM xabarlaringizni tekshiring", 18.0, txt()).font_weight(500).line_height(21.1))),
+            at(0.0, conf_top, centered(w, row(vec![t("Kodni boshqa qurilmangizdagi", 14.0, sub()).line_height(16.4)]))),
+            at(0.0, conf_top + 18.4, centered(w, row(vec![t("ARUGRAM", 14.0, sub_bold()).font_weight(500).line_height(16.4), gap_box(3.5, 0.0), t("ilovasiga yubordik.", 14.0, sub()).line_height(16.4)]))),
+            at((w - total) / 2.0, code_top, row(cells).gap(gap)),
+            at(0.0, bottom_y, centered(w, t("Kodni olmadingizmi?", 15.0, blue()).line_height(17.6))),
             radial,
         ])
     }
@@ -618,7 +722,7 @@ impl Login {
                 me.goto(Page::Phone);
             })),
             at((w - 120.0) / 2.0, 96.0, self.icon_view(1, 120.0, t0 + SHOW_DELAY + SLIDE_MS, now)),
-            at(0.0, 232.0, centered(w, t("Parolingiz", 18.0, txt()).bold().line_height(22.0))),
+            at(0.0, 232.0, centered(w, t("Parolingiz", 18.0, txt()).font_weight(500).line_height(22.0))),
             at(0.0, 262.0, centered(w, t("Ikki bosqichli tasdiqlash yoqilgan.", 14.0, sub()).line_height(20.0))),
             at(0.0, 282.0, centered(w, t("Hisobingiz qo'shimcha parol bilan himoyalangan.", 14.0, sub()).line_height(20.0))),
             at(16.0, 334.0, f),
@@ -630,8 +734,8 @@ impl Login {
     fn done_view(self: &Rc<Self>, w: f32, now: f32) -> Element {
         let a = decelerate(seg(now, self.t_page.get() + SLIDE_MS + 350.0, self.t_page.get() + SLIDE_MS + 800.0));
         stack(vec![
-            at(0.0, 0.0, column(vec![at(16.0, 44.0, t("ARUGRAM", 20.0, txt()).bold())]).width(w).height(92.0).bg(bar())),
-            at(0.0, 170.0, centered(w, t("Chatlar tez orada qo'shiladi", 20.0, txt().with_opacity(a)).bold())),
+            at(0.0, 0.0, column(vec![at(16.0, 44.0, t("ARUGRAM", 20.0, txt()).font_weight(500))]).width(w).height(92.0).bg(bar())),
+            at(0.0, 170.0, centered(w, t("Chatlar tez orada qo'shiladi", 20.0, txt().with_opacity(a)).font_weight(500))),
             at(0.0, 202.0, centered(w, t("Hisobingiz tayyor.", 14.0, hint().with_opacity(a)))),
         ])
     }
@@ -679,12 +783,12 @@ impl Login {
                 }
             }
             if k >= 0 {
-                parts.push(at(0.25 * bw - 20.0, 0.0, column(vec![t(k.to_string(), 24.0, key_text())]).width(40.0).height(bh).center()));
+                parts.push(at(0.25 * bw - 20.0, 1.0, column(vec![t(k.to_string(), 24.0, key_text())]).width(40.0).height(bh).center()));
                 if !LET[k as usize].is_empty() {
-                    parts.push(at(0.7 * bw - 30.0, 0.0, column(vec![t(LET[k as usize], 14.0, key_letters())]).width(60.0).height(bh).center()));
+                    parts.push(at(0.7 * bw - 30.0, if k == 0 { -0.5 } else { 1.0 }, column(vec![t(LET[k as usize], 14.0, key_letters())]).width(60.0).height(bh).center()));
                 }
             } else {
-                parts.push(at((bw - bh + 22.0) / 2.0, 11.0, icon(BACKSPACE, bh - 22.0).color(txt())));
+                parts.push(at((bw - 25.0) / 2.0, (bh - 25.0) / 2.0, icon(BACKSPACE, 25.0).color(txt())));
             }
             kids.push(at(x, y, stack(parts).width(bw).height(bh).on_click(move || me.press_key(k))));
         }
@@ -724,7 +828,7 @@ impl Login {
         });
         let bar = stack(vec![
             at(16.0, 18.0, icon(ARROW_BACK, 26.0).color(txt())),
-            at(75.0, 0.0, column(vec![t("Mamlakatni tanlang", 21.0, txt()).bold()]).height(62.5).justify(Justify::Center)),
+            at(75.0, 0.0, column(vec![t("Mamlakatni tanlang", 21.0, txt()).font_weight(500)]).height(62.5).justify(Justify::Center)),
             at(w - 44.0, 18.0, icon(SEARCH, 26.0).color(txt())),
         ])
         .width(w)

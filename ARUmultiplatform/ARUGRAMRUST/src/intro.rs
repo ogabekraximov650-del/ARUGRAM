@@ -272,7 +272,7 @@ impl Intro {
                     .filter(|(_, s)| !s.is_empty())
                     .flat_map(|(i, s)| {
                         let tx = t(s.trim(), 15.0, col).line_height(20.0);
-                        let tx = if i % 2 == 1 { tx.bold() } else { tx };
+                        let tx = if i % 2 == 1 { tx.font_weight(500) } else { tx };
                         let sp = |on: bool| gap_box(if on { 4.0 } else { 0.0 }, 0.0);
                         [sp(s.starts_with(' ')), tx, sp(s.ends_with(' '))]
                     })
@@ -312,7 +312,7 @@ impl Intro {
             if x.abs() >= w {
                 continue;
             }
-            let title = if i == 0 { t(TITLES[0], 26.0, col).bold().letter_spacing(1.0) } else { t(TITLES[i], 26.0, col).bold() };
+            let title = if i == 0 { t(TITLES[0], 26.0, col).font_weight(500).letter_spacing(1.0) } else { t(TITLES[i], 26.0, col).font_weight(500) };
             layers.push(at(x, y0 + 179.5, centered(w, title.line_height(30.0))));
             layers.push(at(x, y0 + 219.0, column(vec![self.message(i, col)]).width(w).align(Align::Center)));
         }
@@ -358,7 +358,7 @@ impl Intro {
             let cc = c0.lerp(c1, (x + mid / n as f32 / 2.0) / bw);
             kids.push(at(x, 0.0, column(vec![]).width(mid / n as f32 + 0.6).height(48.0).bg(cc)));
         }
-        kids.push(at(0.0, 0.0, column(vec![t("Suhbatni boshlash", 15.0, Color::WHITE).bold()]).width(bw).height(48.0).center()));
+        kids.push(at(0.0, 0.0, column(vec![t("Suhbatni boshlash", 15.0, Color::WHITE).font_weight(500)]).width(bw).height(48.0).center()));
         let btn = stack(kids).width(bw).height(48.0);
         let tap = column(vec![]).width(bw).height(48.0).on_click(move || {
             me.press.set(now_ms());

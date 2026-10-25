@@ -161,7 +161,7 @@ pub const COUNTRIES: &[Country] = &[
     Country { iso: "MP", name: "Northern Mariana Islands", code: "1670", pattern: "XXX XXXX" },
     Country { iso: "NO", name: "Norvegiya", code: "47", pattern: "XXXX XXXX" },
     Country { iso: "AZ", name: "Ozarbayjon", code: "994", pattern: "XX XXX XXXX" },
-    Country { iso: "UZ", name: "O'zbekiston", code: "998", pattern: "XX XXX XX XX" },
+    Country { iso: "UZ", name: "Oʻzbekiston", code: "998", pattern: "XX XXXXXXX" },
     Country { iso: "PW", name: "Palau", code: "680", pattern: "" },
     Country { iso: "PS", name: "Palestine", code: "970", pattern: "XXX XX XXXX" },
     Country { iso: "PA", name: "Panama", code: "507", pattern: "XXXX XXXX" },
