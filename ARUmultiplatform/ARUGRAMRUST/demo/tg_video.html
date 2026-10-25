@@ -35,7 +35,7 @@ html,body{width:1280px;height:720px;overflow:hidden;background:#0a0c0f;font-fami
 .t18{font-size:18px;font-weight:700;text-align:center;line-height:22px}
 .t14{font-size:14px;color:var(--hint);text-align:center;line-height:20px}
 .cur{display:inline-block;width:2px;height:20px;background:var(--ac);vertical-align:middle;margin-left:1px}
-.cell{width:42px;height:47px;border:1.5px solid var(--ln);border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:20px}
+.cell{overflow:hidden;width:42px;height:47px;border:1.5px solid var(--ln);border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:20px}
 #kn{position:absolute;left:0;right:0;bottom:0;height:230px;background:var(--bg);z-index:20;padding:6px 10px 0}
 #kn .r{display:flex;height:54px}
 #kn .k{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:24px;position:relative}
@@ -46,7 +46,7 @@ html,body{width:1280px;height:720px;overflow:hidden;background:#0a0c0f;font-fami
 #ka .r{display:flex;gap:5px;margin-bottom:10px;justify-content:center}
 #ka .k{flex:1;height:48px;border-radius:7px;background:#2c2d31;display:flex;align-items:center;justify-content:center;font-size:20px}
 #ka .k.p{background:#52555c}
-#fab{position:absolute;right:14px;width:56px;height:56px;border-radius:50%;background:var(--fab);z-index:25;box-shadow:0 3px 10px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center}
+#fab{position:absolute;right:20px;width:56px;height:56px;border-radius:50%;background:#249af1;z-index:25;box-shadow:0 3px 10px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center}
 #fab svg{position:absolute}
 .sk{height:62px;display:flex;gap:12px;align-items:center;padding:0 16px}
 .sk .av{width:46px;height:46px;border-radius:50%;background:#26272b}
@@ -76,9 +76,9 @@ html,body{width:1280px;height:720px;overflow:hidden;background:#0a0c0f;font-fami
   </div>
 
   <div class="pg" id="b">
-    <div class="abs" id="b0" style="left:12px;top:40px;width:40px;height:40px;display:flex;align-items:center;justify-content:center"><svg width="24" height="24" viewBox="0 0 24 24"><path d="M20 12H5M11 5l-7 7 7 7" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="abs" id="b0" style="left:16px;top:40px;width:32px;height:32px;display:flex;align-items:center;justify-content:center"><svg width="24" height="24" viewBox="0 0 24 24"><path d="M20 12H5M11 5l-7 7 7 7" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
     <div class="col" id="bcol" style="top:96px">
-      <div id="smsI" style="width:64px;height:64px"></div>
+      <div style="position:relative;width:64px;height:64px"><div id="smsI" class="abs" style="width:64px;height:64px"></div><div id="smsI2" class="abs" style="width:64px;height:64px"></div><div id="smsI3" class="abs" style="width:64px;height:64px"></div><div id="smsI4" class="abs" style="width:64px;height:64px"></div></div>
       <div class="t18" id="b2" style="margin-top:18px">Kodni kiriting</div>
       <div class="t14" id="b3" style="margin-top:17px;padding:0 24px">Telefoningizga faollashtirish kodi bilan<br>SMS yubordik: <b style="color:#fff">+998 90 123 45 67</b>.</div>
       <div id="b4" style="display:flex;gap:10px;margin-top:32px"><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div></div>
@@ -88,7 +88,7 @@ html,body{width:1280px;height:720px;overflow:hidden;background:#0a0c0f;font-fami
   </div>
 
   <div class="pg" id="c">
-    <div class="abs" id="c0" style="left:12px;top:40px;width:40px;height:40px;display:flex;align-items:center;justify-content:center"><svg width="24" height="24" viewBox="0 0 24 24"><path d="M20 12H5M11 5l-7 7 7 7" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="abs" id="c0" style="left:16px;top:40px;width:32px;height:32px;display:flex;align-items:center;justify-content:center"><svg width="24" height="24" viewBox="0 0 24 24"><path d="M20 12H5M11 5l-7 7 7 7" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
     <div class="col" id="ccol" style="top:96px">
       <div id="lockI" style="width:120px;height:120px"></div>
       <div class="t18" id="c2" style="margin-top:16px">Parolingiz</div>
@@ -106,7 +106,7 @@ html,body{width:1280px;height:720px;overflow:hidden;background:#0a0c0f;font-fami
   </div>
 
   <div id="kn"></div><div id="ka"></div>
-  <div id="fab"><svg id="fa" width="26" height="26" viewBox="0 0 26 26"><path d="M5 13h15M14 6l7 7-7 7" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg><svg id="fp" width="44" height="44" viewBox="0 0 44 44"><path id="arcF" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"/></svg></div>
+  <div id="fab"><svg id="fa" width="26" height="26" viewBox="0 0 26 26"><path d="M5 13h15M14 6l7 7-7 7" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg><svg id="fp" width="44" height="44" viewBox="0 0 44 44" style="opacity:0"><path id="arcF" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg></div>
 </div></div></div></div>
 <script src="tgassets/lottie.min.js"></script><script src="tgassets/anims.js"></script>
 <script>
@@ -117,14 +117,19 @@ const lerp = (a, b, x) => a + (b - a) * x;
 const dec = (x) => 1 - (1 - x) * (1 - x);                                  // sekinlashuvchi / decelerate
 const acc = (x) => x * x;
 const ead = (x) => (Math.cos((x + 1) * Math.PI) / 2) + .5;                 // AccelerateDecelerate
+const bz = (x1, y1, x2, y2) => (x) => { x = clamp(x); let lo = 0, hi = 1, u = x;
+  for (let i = 0; i < 28; i++) { u = (lo + hi) / 2; const cx = 3 * (1 - u) * (1 - u) * u * x1 + 3 * (1 - u) * u * u * x2 + u * u * u; if (cx < x) lo = u; else hi = u; }
+  return 3 * (1 - u) * (1 - u) * u * y1 + 3 * (1 - u) * u * u * y2 + u * u * u; };
+const eioq = (x) => (x < .5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2);
+const tpress = (t, a) => seg(t, a - 120, a - 20) * (1 - seg(t, a - 20, a + 100));
 const quint = (x) => { x = clamp(x) - 1; return x * x * x * x * x + 1; }; // ViewPager sInterpolator
 
 const TS = [3500, 7000, 10500, 14000, 17500];     // sahifaga o'tish / page switch (ms)
 const SWIPE = 450;
 const L0 = 21150;                                  // kirish oynasi boshlanishi / login start
-const T = { kb: L0 + 300, ph0: L0 + 1500, phS: 230, fab1: L0 + 3400, tap1: L0 + 4300, to2: L0 + 5300,
-  c0: L0 + 6900, cS: 300, ver: L0 + 8300, to3: L0 + 9200,
-  p0: L0 + 10300, pS: 190, eye: L0 + 12000, tap3: L0 + 13000, to4: L0 + 14000, end: L0 + 17600 };
+const T = {}; T.kb = L0 + 100; T.ph0 = L0 + 1500; T.phS = 230; T.fab1 = T.ph0 + 8 * T.phS + 250; T.tap1 = T.fab1 + 900; T.to2 = T.tap1 + 1000;
+T.c0 = T.to2 + 1500; T.cS = 300; T.ver = T.c0 + 4 * T.cS + 450; T.to3 = T.ver + 1500;
+T.p0 = T.to3 + 1200; T.pS = 190; T.eye = T.p0 + 8 * T.pS + 500; T.tap3 = T.eye + 1300; T.to4 = T.tap3 + 1000; T.end = T.to4 + 3600;
 const TOTAL = T.end, TR = 300, WD = 360;
 const TITLES = ['ARUGRAM', 'Tez', 'Bepul', 'Kuchli', 'Xavfsiz', 'Bulutli'];
 const MSG = ["Dunyoning <b>eng tezkor</b> muloqot ilovasi.<br>Bu <b>bepul</b> va <b>xavfsiz</b>.", "<b>ARUGRAM</b> xabarlarni boshqa har qanday<br>ilovadan tezroq yetkazadi.",
@@ -153,6 +158,12 @@ const PHONE = '901234567', CODE = '12345', PASS = 'aru2024!';
 
 const mk = (id, key, loop) => lottie.loadAnimation({ container: $(id), renderer: 'svg', loop: false, autoplay: false, animationData: window.ANIMS[key] });
 const sms = mk('smsI', 'sms'), lock = mk('lockI', 'lock'), sun = mk('sun', 'sun');
+const s2d = mk('smsI2', 's2d'), dots = mk('smsI3', 'dots'), d2s = mk('smsI4', 'd2s');
+function recolor(a, map) {   // setLayerColor("Bubble"/"Phone"/"Note") — qatlam nomi bo'yicha / by layer name
+  (a.renderer.elements || []).forEach((el) => { const nm = el && el.data && el.data.nm; if (nm && map[nm] && el.baseElement) el.baseElement.querySelectorAll('path').forEach((p) => {
+    if (p.getAttribute('fill') && p.getAttribute('fill') !== 'none') p.setAttribute('fill', map[nm]); if (p.getAttribute('stroke') && p.getAttribute('stroke') !== 'none') p.setAttribute('stroke', map[nm]); }); });
+}
+const SMSC = { Bubble: '#5ea0db', Phone: '#ffffff', Note: '#ffffff' };
 function tint() { document.querySelectorAll('#sun svg [fill]:not([fill="none"])').forEach((e) => e.setAttribute('fill', '#249af1')); document.querySelectorAll('#sun svg [stroke]:not([stroke="none"])').forEach((e) => e.setAttribute('stroke', '#249af1')); }
 const play = (a, t, t0) => a.goToAndStop(clamp((t - t0) / 1000 * a.frameRate, 0, a.totalFrames - 1), true);
 
@@ -203,34 +214,40 @@ function frame(t) {
   outline($('a4'), $('lab1'), dec(seg(t, T.kb, T.kb + 200)));
   $('acol').style.top = '56px'; $('acol').style.height = `${750 - 56 - 230}px`; $('acol').style.justifyContent = 'center';
 
-  // ---- klaviatura ----
-  const kUp = dec(seg(t, T.kb, T.kb + 300));
-  const nDown = t > T.to3 - 100 ? ead(seg(t, T.to3, T.to3 + 250)) : 0, kDownEnd = ead(seg(t, T.to4 - 100, T.to4 + 200));
-  $('kn').style.transform = `translateY(${(1 - kUp * (1 - nDown)) * 240}px)`;
-  const aUp = ead(seg(t, T.to3 + 100, T.to3 + 450)) * (1 - kDownEnd);
+  // ---- klaviatura ---- (CubicBezierInterpolator.DEFAULT, 300 ms; chiqishda easeInOutQuad)
+  const kIn = bz(.25, .1, .25, 1)(seg(t, T.kb, T.kb + 300)), kOut = eioq(seg(t, T.to3, T.to3 + 300));
+  const kc = t < T.to3 ? kIn : 1 - kOut;
+  $('kn').style.transform = `translateY(${(1 - kc) * 230}px)`; $('kn').style.opacity = kc;
+  const aUp = bz(.25, .1, .25, 1)(seg(t, T.to3 + 150, T.to3 + 450)) * (1 - eioq(seg(t, T.to4 - 50, T.to4 + 250)));
   $('ka').style.transform = `translateY(${(1 - aUp) * 270}px)`;
   keys(t, [...[...PHONE].map((c, i) => ['n' + c, T.ph0 + i * T.phS]), ...[...CODE].map((c, i) => ['n' + c, T.c0 + i * T.cS]),
     ...[...PASS].filter((c) => /[a-z]/.test(c)).map((c) => ['a' + c, T.p0 + PASS.indexOf(c) * T.pS])]);
 
-  // ---- yumaloq tugma / FAB ----
-  const f1 = dec(seg(t, T.fab1, T.fab1 + 200)) * (1 - acc(seg(t, T.to2 - 150, T.to2)));
-  const f3 = dec(seg(t, T.p0 + 100, T.p0 + 300)) * (1 - acc(seg(t, T.to4 - 150, T.to4)));
-  const show = Math.max(f1, f3);
-  const pr1 = seg(t, T.tap1 + 100, T.tap1 + 260) * (1 - seg(t, T.to2 - 120, T.to2)), pr3 = seg(t, T.tap3 + 100, T.tap3 + 260) * (1 - seg(t, T.to4 - 120, T.to4));
-  const prog = Math.max(pr1, pr3);
-  const kh = 230 * (t < T.to3 ? kUp : 1); const bot = (t < T.to3 ? kh : (t < T.to4 + 100 ? 260 : 0)) + 16;
-  $('c5').style.bottom = `${(t < T.to3 ? 0 : 260 * aUp) + 32 + 20}px`;
-  $('fab').style.bottom = `${bot}px`; $('fab').style.opacity = show > 0.01 ? 1 : 0; $('fab').style.transform = `scale(${show})`;
-  $('fa').style.opacity = 1 - prog; $('fa').style.transform = `scale(${1 - .4 * prog})`; $('fp').style.opacity = prog; if (prog > 0) arc($('arcF'), t, 15, 22);
+  // ---- yumaloq tugma (FragmentFloatingButton: 56dp, o'ngda 20, pastda 14; EASE_OUT_QUINT 380 ms) ----
+  const q = bz(.22, 1, .36, 1);
+  const vis = (on, off) => q(seg(t, on, on + 380)) * (off === null ? 1 : 1 - q(seg(t, off, off + 380)));
+  const show = Math.max(vis(T.fab1, T.to2 - 100), vis(T.p0 + 80, T.to4 - 100));
+  const prog = Math.max(q(seg(t, T.tap1, T.tap1 + 380)) * (1 - q(seg(t, T.to2 - 100, T.to2 + 280))), q(seg(t, T.tap3, T.tap3 + 380)) * (1 - q(seg(t, T.to4 - 100, T.to4 + 280))));
+  const fpress = Math.max(tpress(t, T.tap1), tpress(t, T.tap3));
+  $('c5').style.bottom = `${260 * aUp + 32 + 20}px`;
+  $('fab').style.bottom = `${14 + Math.max(230 * kc, 260 * aUp)}px`;
+  $('fab').style.opacity = show; $('fab').style.visibility = show > 0 ? 'visible' : 'hidden';
+  $('fab').style.transform = `translateY(${40 * (1 - show)}px) scale(${lerp(.4, 1, show) * (1 - .05 * fpress)})`;
+  $('fa').style.opacity = 1 - prog; $('fa').style.transform = `scale(${lerp(1, .4, prog)})`;
+  $('fp').style.opacity = prog; $('fp').style.transform = `scale(${lerp(.4, 1, prog)})`; if (prog > 0) arc($('arcF'), t, 9, 22);
 
   // ---- 2) kod ----
   page($('b'), t, T.to2, T.to3);
-  play(sms, t, T.to2 + 350);
+  { const c0 = T.to2 + 100 + 300;  // SHOW_DELAY + sahifa surilishi
+    const dotsOn = t >= T.ver, toDots = seg(t, T.ver, T.ver + 167), inDots = t >= T.ver + 167 && t < T.ver + 1167, back = t >= T.ver + 1167;
+    $('smsI').style.display = dotsOn ? 'none' : 'block'; $('smsI2').style.display = dotsOn && t < T.ver + 167 ? 'block' : 'none';
+    $('smsI3').style.display = inDots ? 'block' : 'none'; $('smsI4').style.display = back ? 'block' : 'none';
+    play(sms, t, c0); play(s2d, t, T.ver); dots.goToAndStop(((t - T.ver - 167) / 1000 * dots.frameRate) % dots.totalFrames, true); play(d2s, t, T.ver + 1167);
+    [sms, s2d, dots, d2s].forEach((a) => recolor(a, SMSC)); void toDots; }
   const n2 = typed(t, T.c0, T.cS, 5);
-  [...$('b4').children].forEach((c, i) => { c.textContent = i < n2 ? CODE[i] : ''; const foc = (i === Math.min(n2, 4)) && t > T.to2 + 400 && t < T.ver + 400;
+  [...$('b4').children].forEach((c, i) => { const at = T.c0 + i * T.cS; c.textContent = i < n2 ? CODE[i] : ''; c.style.paddingTop = i < n2 ? `${(1 - ead(seg(t, at, at + 220))) * 47}px` : '0'; const foc = (i === Math.min(n2, 4)) && t > T.to2 + 400 && t < T.ver + 400;
     c.style.borderWidth = foc ? '2px' : '1px'; c.style.borderColor = foc ? '#6eb2ef' : ''; });
-  const spB = seg(t, T.ver, T.ver + 150) * (1 - seg(t, T.to3 - 150, T.to3));
-  $('tmw').style.opacity = 1 - spB; $('spB').style.opacity = spB; if (spB > 0) arc($('arcB'), t, 8, 10);
+  $('tmw').style.opacity = 1 - seg(t, T.ver, T.ver + 150);
   $('tm').textContent = `0:${String(Math.max(0, 59 - Math.floor((t - T.to2) / 1000))).padStart(2, '0')}`;
 
   // ---- 3) parol ----
