@@ -186,9 +186,11 @@ impl App {
                     .split("**")
                     .enumerate()
                     .filter(|(_, s)| !s.is_empty())
-                    .map(|(i, s)| {
-                        let t = text(s).size(15.0);
-                        if i % 2 == 1 { t.bold().color(fg) } else { t.color(dim) }
+                    .flat_map(|(i, s)| {
+                        let t = text(s.trim()).size(15.0);
+                        let t = if i % 2 == 1 { t.bold().color(fg) } else { t.color(dim) };
+                        let sp = |on: bool| if on { gap_box(4.0, 0.0) } else { gap_box(0.0, 0.0) };
+                        [sp(s.starts_with(' ')), t, sp(s.ends_with(' '))]
                     })
                     .collect();
                 row(spans).justify(Justify::Center)
@@ -249,6 +251,7 @@ impl App {
         let icon = if self.moon.get() { &self.moon_img } else { &self.sun };
         let theme = image(icon, 28.0, 28.0);
         let top = row(vec![spacer(), column(vec![theme]).padding(10.0).on_click(move || me2.toggle_theme())]).padding_xy(10.0, 6.0);
+        let ins = safe_insets();
         let me3 = self.clone();
         let cta = column(vec![text("Suhbatni boshlash").size(16.0).bold().color(Color::WHITE)])
             .center()
@@ -262,6 +265,7 @@ impl App {
                 me3.rev.set(me3.rev.get() + 1);
             });
         column(vec![
+            gap_box(0.0, ins.top),
             top,
             pager,
             self.dots(dim),
@@ -269,9 +273,10 @@ impl App {
             row(vec![cta]).justify(Justify::Center),
             gap_box(0.0, 18.0),
             row(vec![text("Continue in English").size(15.0).color(Color::hex(0x4AA3E0))]).justify(Justify::Center),
-            gap_box(0.0, 26.0),
+            gap_box(0.0, 26.0 + ins.bottom),
         ])
         .width(w)
+        .grow(1.0)
     }
 
     fn phone(self: &Rc<Self>, w: f32, fg: Color, dim: Color) -> Element {
@@ -316,7 +321,7 @@ impl App {
         if ready {
             kids.push(row(vec![spacer(), next]));
         }
-        column(kids).padding_xy(24.0, 0.0).width(w)
+        column(kids).padding_each(24.0, safe_insets().top, 24.0, 0.0).width(w).grow(1.0)
     }
 
     fn view(self: &Rc<Self>) -> Element {
@@ -337,7 +342,7 @@ impl App {
         } else {
             self.intro(w, fg, dim)
         };
-        column(vec![body]).bg(bg).grow(1.0)
+        column(vec![body.grow(1.0)]).bg(bg).grow(1.0)
     }
 
     fn back(self: &Rc<Self>) -> bool {

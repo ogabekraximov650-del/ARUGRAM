@@ -146,22 +146,66 @@ fn page1(cv: &mut Cv, t: f32) {
         let tr = cv.tf(a.cos() * 92.0, a.sin() * 92.0, 1.0, 0.0);
         cv.fill(&circle(0.0, 0.0, 3.2), alpha(WHITE, 0.7), tr);
     }
-    let k = 0.84 * (1.0 + 0.025 * (2.0 * PI * t / 2400.0).sin());
-    let tr = b.pre_scale(k, k).pre_translate(-48.0, -48.0);
-    let mut bp = PathBuilder::new();
-    bp.move_to(12.0, 40.0);
-    bp.cubic_to(12.0, 24.0, 24.0, 14.0, 40.0, 14.0);
-    bp.line_to(56.0, 14.0);
-    bp.cubic_to(72.0, 14.0, 84.0, 26.0, 84.0, 42.0);
-    bp.cubic_to(84.0, 58.0, 72.0, 70.0, 56.0, 70.0);
-    bp.line_to(34.0, 70.0);
-    bp.line_to(20.0, 82.0);
-    bp.line_to(20.0, 66.0);
-    bp.cubic_to(15.0, 60.0, 12.0, 52.0, 12.0, 40.0);
-    bp.close();
-    cv.stroke(&bp.finish().unwrap_or_default(), WHITE, 6.0, None, tr);
-    cv.stroke(&poly(&[(34.0, 54.0), (48.0, 26.0), (62.0, 54.0)], false), WHITE, 6.0, None, tr);
-    cv.stroke(&poly(&[(39.0, 45.0), (57.0, 45.0)], false), WHITE, 6.0, None, tr);
+    let k = 0.19 * (1.0 + 0.025 * (2.0 * PI * t / 2400.0).sin());
+    let tr = b.pre_scale(k, k).pre_translate(-261.0, -152.0);
+    for part in aru_logo() {
+        cv.pm.fill_path(&part, &paint(solid(WHITE)), FillRule::EvenOdd, tr, None);
+    }
+}
+
+/// UZ: "ARU" logotipi (branding/aru-logo-square.svg dagi harflar), 522x305 birlikda. EN: the "ARU" logo letters (from branding/aru-logo-square.svg), 522x305 units. RU: буквы логотипа «ARU» (из branding/aru-logo-square.svg), 522x305 единиц.
+fn aru_logo() -> Vec<Path> {
+    const K: f32 = 0.552_284_75;
+    let mut parts = Vec::new();
+    let mut b = PathBuilder::new();
+    // A
+    b.move_to(0.0, 300.0);
+    for (x, y) in [(99.0, 0.0), (125.0, 0.0), (224.0, 300.0), (173.454, 300.0), (151.674, 234.0), (72.326, 234.0), (50.546, 300.0)] {
+        b.line_to(x, y);
+    }
+    b.close();
+    b.move_to(85.526, 194.0);
+    for (x, y) in [(112.0, 113.776), (138.474, 194.0)] {
+        b.line_to(x, y);
+    }
+    b.close();
+    parts.push(std::mem::replace(&mut b, PathBuilder::new()).finish().unwrap_or_default());
+    // R
+    b.move_to(198.0, 0.0);
+    b.line_to(264.0, 0.0);
+    b.cubic_to(264.0 + 86.0 * K, 0.0, 350.0, 86.0 - 86.0 * K, 350.0, 86.0);
+    b.cubic_to(350.0, 86.0 + 86.0 * K, 264.0 + 86.0 * K, 172.0, 264.0, 172.0);
+    for (x, y) in [(198.0, 172.0), (198.0, 300.0), (246.0, 300.0), (246.0, 0.0)] {
+        b.line_to(x, y);
+    }
+    b.close();
+    b.move_to(246.0, 40.0);
+    b.line_to(264.0, 40.0);
+    b.cubic_to(264.0 + 38.0 * K, 40.0, 302.0, 86.0 - 46.0 * K, 302.0, 86.0);
+    b.cubic_to(302.0, 86.0 + 46.0 * K, 264.0 + 38.0 * K, 132.0, 264.0, 132.0);
+    b.line_to(246.0, 132.0);
+    b.close();
+    parts.push(std::mem::replace(&mut b, PathBuilder::new()).finish().unwrap_or_default());
+    b.move_to(276.0, 132.0);
+    for (x, y) in [(324.0, 132.0), (394.0, 300.0), (346.0, 300.0)] {
+        b.line_to(x, y);
+    }
+    b.close();
+    parts.push(std::mem::replace(&mut b, PathBuilder::new()).finish().unwrap_or_default());
+    // U
+    b.move_to(350.0, 0.0);
+    b.line_to(350.0, 219.0);
+    b.cubic_to(350.0, 219.0 + 86.0 * K, 436.0 - 86.0 * K, 305.0, 436.0, 305.0);
+    b.cubic_to(436.0 + 86.0 * K, 305.0, 522.0, 219.0 + 86.0 * K, 522.0, 219.0);
+    b.line_to(522.0, 0.0);
+    b.line_to(474.0, 0.0);
+    b.line_to(474.0, 219.0);
+    b.cubic_to(474.0, 219.0 + 46.0 * K, 436.0 + 38.0 * K, 265.0, 436.0, 265.0);
+    b.cubic_to(436.0 - 38.0 * K, 265.0, 398.0, 219.0 + 46.0 * K, 398.0, 219.0);
+    b.line_to(398.0, 0.0);
+    b.close();
+    parts.push(b.finish().unwrap_or_default());
+    parts
 }
 
 fn page2(cv: &mut Cv, t: f32) {
