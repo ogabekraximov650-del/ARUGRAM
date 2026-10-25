@@ -1,134 +1,115 @@
 <!doctype html>
 <html lang="uz"><head><meta charset="utf-8"><title>ARUGRAM — hisobga kirish</title>
 <meta name="viewport" content="width=1280">
-<!-- UZ: Hisobga kirish oqimi (telefon → kod → parol → muvaffaqiyat). Hamma narsa bitta virtual soat `t` (ms) funksiyasi, shuning uchun video har kadrda aniq. Dizayn va qiymatlar o'zimizniki.
-EN: The sign-in flow (phone → code → password → success). Everything is a pure function of one virtual clock `t` (ms), so the video is frame-exact. Design and numbers are our own.
-RU: Поток входа (телефон → код → пароль → успех). Всё — чистая функция одного виртуального времени `t` (мс), поэтому видео покадрово точное. Дизайн и значения наши. -->
+<!-- UZ: Hisobga kirish oqimi (telefon → kod → parol → tayyor) — katta messenjerlarda qabul qilingan tuzilishda: tekis fon, konturli maydonlar (yorlig'i konturda), pastda o'ng burchakda yumaloq strelka tugma, 300 ms to'liq surilish. Hamma narsa bitta virtual soat `t` (ms) funksiyasi. Rasm va qiymatlar o'zimizniki (clean-room).
+EN: The sign-in flow (phone → code → password → done) in the structure common to big messengers: flat background, outlined fields (label on the outline), a round arrow button at the bottom-right, a 300 ms full-width slide. Everything is a pure function of one virtual clock `t` (ms). Art and numbers are our own (clean-room).
+RU: Поток входа (телефон → код → пароль → готово) в привычной для больших мессенджеров структуре: плоский фон, поля с контуром (подпись на контуре), круглая кнопка-стрелка справа внизу, сдвиг на всю ширину за 300 мс. Всё — чистая функция одного виртуального времени `t` (мс). Графика и значения наши (clean-room). -->
 <style>
-:root{--bg:#0e1217;--sf:#181e26;--sf2:#212934;--tx:#fff;--dim:#8794a4;--ac:#2a9de8;--ac2:#1f7fd1;--ok:#34c77b}
+:root{--bg:#111418;--tx:#fff;--dim:#8a96a5;--ln:#313b47;--ac:#3aa4ea;--ac2:#1f7fd1;--kb:#171c22;--key:#222a33}
 *{box-sizing:border-box;margin:0;padding:0}
-html,body{width:1280px;height:720px;overflow:hidden;background:#07090c;font-family:Inter,Roboto,"Segoe UI","Helvetica Neue",Arial,sans-serif;color:var(--tx)}
-#stage{position:relative;width:1280px;height:720px;background:radial-gradient(900px 600px at 72% 30%,#12263a 0%,#0a0f15 60%,#07090c 100%)}
-#side{position:absolute;left:96px;top:0;bottom:0;width:430px;display:flex;flex-direction:column;justify-content:center}
-#side h1{font-size:46px;line-height:1.1;font-weight:800;letter-spacing:-.5px}
-#side p{margin-top:14px;font-size:18px;color:var(--dim);line-height:1.45}
-#steps{margin-top:44px;display:flex;flex-direction:column;gap:22px;position:relative}
-#steps:before{content:"";position:absolute;left:15px;top:16px;bottom:16px;width:2px;background:#222c38}
-#rail{position:absolute;left:15px;top:16px;width:2px;background:var(--ac);height:0}
-.st{display:flex;align-items:center;gap:18px;font-size:20px;color:#5d6b7c;position:relative;font-weight:600}
-.st i{width:32px;height:32px;border-radius:50%;background:#161d26;border:2px solid #222c38;display:flex;align-items:center;justify-content:center;font-style:normal;font-size:14px;color:#5d6b7c;z-index:1}
-.st.on{color:#fff}.st.on i{background:var(--ac);border-color:var(--ac);color:#fff}
-.st.done{color:#a9b6c6}.st.done i{background:#143a56;border-color:var(--ac);color:var(--ac)}
-#phone{position:absolute;left:700px;top:20px;width:344px;height:680px;border-radius:48px;background:#000;padding:7px;box-shadow:0 0 0 2px #2a323d,0 40px 90px rgba(0,0,0,.65),0 0 120px rgba(42,157,232,.12)}
-#screen{position:relative;width:100%;height:100%;border-radius:42px;background:var(--bg);overflow:hidden}
-#status{position:absolute;left:0;right:0;top:0;height:40px;padding:14px 26px 0;display:flex;justify-content:space-between;font-size:13px;font-weight:700;z-index:30}
-#notch{position:absolute;left:50%;top:9px;width:92px;height:24px;margin-left:-46px;background:#000;border-radius:14px;z-index:31}
-.scr{position:absolute;inset:0;padding:50px 24px 0;will-change:transform}
-.scr .logo{width:50px;height:50px;border-radius:50%;background:linear-gradient(135deg,#3ab0f2,#1f7fd1);display:flex;align-items:center;justify-content:center;margin:4px 0 14px}
-h2{font-size:25px;font-weight:800;letter-spacing:-.3px}
-.sub{margin-top:8px;font-size:13.5px;line-height:1.45;color:var(--dim)}
-.sub b{color:#fff;font-weight:600}
-.f{position:relative;height:52px;border-radius:14px;background:var(--sf);border:1.5px solid #27313d;display:flex;align-items:center;padding:0 16px;font-size:17px;margin-top:14px}
-.f small{position:absolute;left:14px;top:-8px;padding:0 5px;background:var(--bg);font-size:11.5px;color:var(--dim)}
-.f .chev{margin-left:auto;color:var(--dim);font-size:14px}
-.cur{display:inline-block;width:2px;height:22px;background:var(--ac);margin-left:1px;vertical-align:middle}
-.cta{position:relative;height:48px;border-radius:14px;margin-top:16px;background:var(--sf2);color:#6c7a8b;display:flex;align-items:center;justify-content:center;font-size:16.5px;font-weight:700;overflow:hidden}
-.cta .g{position:absolute;inset:0;background:linear-gradient(180deg,#2c9de6,#1f7fd1);opacity:0}
-.cta span{position:relative}
-.cta svg{position:absolute;right:18px}
-.otp{display:flex;gap:10px;margin-top:26px}
-.otp div{flex:1;height:60px;border-radius:14px;background:var(--sf);border:1.5px solid #27313d;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:700}
-.kb{position:absolute;left:0;right:0;bottom:0;background:#12171d;border-top:1px solid #1e2630;padding:10px 8px 18px;z-index:20}
-.kb .r{display:flex;gap:6px;margin-bottom:8px;justify-content:center}
-.key{flex:1;height:42px;border-radius:8px;background:#232b35;display:flex;align-items:center;justify-content:center;font-size:19px;font-weight:500;max-width:100%}
-.kn .key{height:40px;font-size:22px}
-.key.p{background:#46556a}
-.pw{letter-spacing:3px;font-size:22px}
-.sk{display:flex;gap:12px;align-items:center;margin-top:12px;padding:10px 4px}
-.sk .av{width:46px;height:46px;border-radius:50%;background:#1c2530}
-.sk .l{flex:1}.sk .l i{display:block;height:10px;border-radius:5px;background:#1c2530;margin-bottom:9px}
-.shim{position:relative;overflow:hidden}
+html,body{width:1280px;height:720px;overflow:hidden;background:#0a0c0f;font-family:Roboto,Inter,"Segoe UI","Helvetica Neue",Arial,sans-serif;color:var(--tx)}
+#stage{position:relative;width:1280px;height:720px;background:radial-gradient(800px 600px at 50% 40%,#16222e 0%,#0b0e12 70%)}
+#phone{position:absolute;left:468px;top:20px;width:344px;height:680px;border-radius:46px;background:#000;padding:7px;box-shadow:0 0 0 2px #2a323d,0 40px 90px rgba(0,0,0,.6)}
+#screen{position:relative;width:100%;height:100%;border-radius:40px;background:var(--bg);overflow:hidden}
+#status{position:absolute;left:0;right:0;top:0;height:34px;padding:11px 24px 0;display:flex;justify-content:space-between;font-size:12.5px;font-weight:700;z-index:30}
+#notch{position:absolute;left:50%;top:8px;width:84px;height:22px;margin-left:-42px;background:#000;border-radius:12px;z-index:31}
+.pg{position:absolute;inset:0;padding:0 16px;will-change:transform;background:var(--bg)}
+.back{position:absolute;left:10px;top:40px;width:40px;height:40px;display:flex;align-items:center;justify-content:center}
+.ic{display:flex;justify-content:center;margin-top:82px;height:104px}
+h2{text-align:center;font-size:18px;font-weight:500;padding:0 16px}
+.sub{text-align:center;margin-top:8px;font-size:14px;line-height:1.4;color:var(--dim);padding:0 14px}
+.sub b{color:#fff;font-weight:500}
+.of{position:relative;height:58px;border:2px solid var(--ln);border-radius:10px;margin-top:14px;display:flex;align-items:center;padding:0 14px;font-size:16px}
+.of label{position:absolute;left:10px;padding:0 4px;background:var(--bg);color:var(--dim);transform-origin:0 50%;white-space:nowrap}
+.of .chev{margin-left:auto;color:var(--dim)}
+.cur{display:inline-block;width:2px;height:21px;background:var(--ac);margin-left:1px}
+.dv{width:1px;height:30px;background:var(--ln);margin:0 12px}
+.hint{color:#556070}
+.cells{display:flex;gap:8px;justify-content:center;margin-top:28px}
+.cells div{width:44px;height:54px;border:2px solid var(--ln);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:500}
+.link{text-align:center;margin-top:22px;font-size:14px;color:var(--ac)}
+.kb{position:absolute;left:0;right:0;bottom:0;height:236px;background:var(--kb);z-index:20}
+#kn{padding:8px 10px}
+#kn .r{display:flex;gap:8px;margin-bottom:8px}
+#kn .key{flex:1;height:48px;border-radius:12px;background:var(--key);display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:22px;line-height:1}
+#kn .key small{font-size:8.5px;letter-spacing:1.5px;color:#7d8a99;margin-top:2px;height:9px}
+#ka{padding:10px 4px}
+#ka .r{display:flex;gap:5px;margin-bottom:9px;justify-content:center}
+#ka .key{flex:1;height:44px;border-radius:7px;background:var(--key);display:flex;align-items:center;justify-content:center;font-size:19px}
+.key.p{background:#4a586b!important}
+#fab{position:absolute;right:16px;width:56px;height:56px;border-radius:50%;background:linear-gradient(180deg,#46aeee,#1f7fd1);box-shadow:0 4px 14px rgba(0,0,0,.45);z-index:25;display:flex;align-items:center;justify-content:center}
+#fab svg{position:absolute}
+.bar{position:absolute;left:0;right:0;top:0;height:92px;background:#17212b;padding:46px 16px 0;display:flex;align-items:center;font-size:20px;font-weight:500}
+.sk{display:flex;gap:12px;align-items:center;padding:11px 16px}
+.sk .av{width:50px;height:50px;border-radius:50%;background:#1b242e}
+.sk .l{flex:1}.sk .l i{display:block;height:10px;border-radius:5px;background:#1b242e;margin-bottom:9px}
 </style></head>
 <body>
-<div id="stage">
-  <div id="side">
-    <h1>Hisobga kirish</h1>
-    <p>Telefon raqami, tasdiqlash kodi va ikki bosqichli parol. Hammasi bir necha soniyada.</p>
-    <div id="steps"><div id="rail"></div>
-      <div class="st"><i>1</i>Telefon raqami</div>
-      <div class="st"><i>2</i>Tasdiqlash kodi</div>
-      <div class="st"><i>3</i>Parol</div>
-      <div class="st"><i>4</i>Tayyor</div>
-    </div>
+<div id="stage"><div id="phone"><div id="screen">
+  <div id="notch"></div><div id="status"><span>9:41</span><span>5G ▮▮▮</span></div>
+
+  <div class="pg" id="a">
+    <h2 style="margin-top:78px" id="a1">Telefon raqamingiz</h2>
+    <div class="sub" id="a2">Davlatni tanlang va telefon raqamingizni kiriting.</div>
+    <div class="of" id="a3" style="margin-top:22px"><label style="top:-10px;font-size:12px">Davlat</label>O'zbekiston<span class="chev">⌄</span></div>
+    <div class="of" id="a4"><label id="lab1" style="top:-10px;font-size:12px">Telefon raqami</label>
+      <span style="color:#fff">+998</span><span class="dv"></span><span id="num"></span><i class="cur" id="cur1"></i><span class="hint" id="hnt">00 000 00 00</span></div>
   </div>
-  <div id="phone"><div id="screen">
-    <div id="notch"></div>
-    <div id="status"><span>9:41</span><span>5G ▮▮▮</span></div>
 
-    <div class="scr" id="a">
-      <div class="logo" id="a0"><svg width="32" height="19" viewBox="0 0 522 305"><g fill="#fff"><path d="M0 300L99 0H125L224 300H173.454L151.674 234H72.326L50.546 300ZM85.526 194L112 113.776L138.474 194Z"/><path d="M198 0H264A86 86 0 0 1 264 172H198V300H246V0ZM246 40H264A38 46 0 0 1 264 132H246Z"/><path d="M276 132H324L394 300H346Z"/><path d="M350 0V219A86 86 0 0 0 522 219V0H474V219A38 46 0 0 1 398 219V0Z"/></g></svg></div>
-      <h2 id="a1">Telefon raqamingiz</h2>
-      <div class="sub" id="a2">Davlat kodini tanlang va telefon raqamingizni kiriting.</div>
-      <div class="f" id="a3"><small>Davlat</small>O'zbekiston<span class="chev">▾</span></div>
-      <div class="f" id="a4" style="border-color:var(--ac)"><small style="color:var(--ac)">Telefon raqami</small><span style="color:var(--dim);margin-right:12px">+998</span><span id="num"></span><i class="cur" id="cur1"></i></div>
-      <div class="cta" id="a5"><div class="g"></div><span>Davom etish</span><svg id="sp1" width="26" height="26" viewBox="0 0 26 26"><path id="arc1" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"/></svg></div>
-    </div>
+  <div class="pg" id="b">
+    <div class="back" id="b0"><svg width="22" height="22" viewBox="0 0 22 22"><path d="M14 4L7 11l7 7" fill="none" stroke="#8a96a5" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="ic" id="b1"><svg width="104" height="104" viewBox="0 0 104 104">
+      <rect x="30" y="10" width="40" height="76" rx="9" fill="#17212b" stroke="#3aa4ea" stroke-width="3.5"/><rect x="42" y="16" width="16" height="4" rx="2" fill="#3aa4ea"/>
+      <g id="bub" style="transform-origin:62px 40px"><path d="M52 24h34a8 8 0 0 1 8 8v16a8 8 0 0 1-8 8H72l-9 9v-9h-11a8 8 0 0 1-8-8V32a8 8 0 0 1 8-8z" fill="#3aa4ea"/>
+        <circle id="d1" cx="58" cy="40" r="3.2" fill="#fff"/><circle id="d2" cx="69" cy="40" r="3.2" fill="#fff"/><circle id="d3" cx="80" cy="40" r="3.2" fill="#fff"/></g></svg></div>
+    <h2 id="b2" style="margin-top:14px">+998 90 123 45 67</h2>
+    <div class="sub" id="b3">Kodni SMS orqali yubordik.</div>
+    <div class="cells" id="b4"><div></div><div></div><div></div><div></div><div></div></div>
+    <div class="sub" id="b5" style="margin-top:26px;height:20px;position:relative"><span id="tmw">Qayta yuborish <b id="tm">0:42</b></span>
+      <svg id="spB" width="22" height="22" viewBox="0 0 22 22" style="position:absolute;left:50%;top:-1px;margin-left:-11px;opacity:0"><path id="arcB" fill="none" stroke="#3aa4ea" stroke-width="2.4" stroke-linecap="round"/></svg></div>
+    <div class="link" id="b6">Telefon raqami noto'g'rimi?</div>
+  </div>
 
-    <div class="scr" id="b">
-      <div style="font-size:26px;color:var(--dim);height:34px" id="b0">‹</div>
-      <h2 id="b1" style="margin-top:14px">Kodni kiriting</h2>
-      <div class="sub" id="b2"><b>+998 90 123 45 67</b> raqamiga tasdiqlash kodini yubordik.</div>
-      <div class="otp" id="b3"><div></div><div></div><div></div><div></div><div></div></div>
-      <div style="height:3px;border-radius:2px;background:#1c2530;margin-top:22px;overflow:hidden" id="b4"><i id="bar" style="display:block;height:100%;width:0;background:linear-gradient(90deg,var(--ac2),var(--ac))"></i></div>
-      <div class="sub" id="b5" style="text-align:center;margin-top:18px">Qayta yuborish <b id="tm">0:42</b></div>
-    </div>
+  <div class="pg" id="c">
+    <div class="back" id="c0"><svg width="22" height="22" viewBox="0 0 22 22"><path d="M14 4L7 11l7 7" fill="none" stroke="#8a96a5" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="ic" id="c1"><svg width="104" height="104" viewBox="0 0 104 104">
+      <g id="shk" style="transform-origin:68px 44px"><path d="M34 46V34a18 18 0 0 1 36 0v12" fill="none" stroke="#3aa4ea" stroke-width="7" stroke-linecap="round"/></g>
+      <rect x="24" y="46" width="56" height="42" rx="10" fill="#3aa4ea"/><circle cx="52" cy="64" r="5.5" fill="#17212b"/><rect x="49.5" y="66" width="5" height="11" rx="2.5" fill="#17212b"/></svg></div>
+    <h2 id="c2" style="margin-top:14px">Parolingiz</h2>
+    <div class="sub" id="c3">Hisobingiz ikki bosqichli parol bilan himoyalangan.</div>
+    <div class="of" id="c4" style="margin-top:26px"><label id="lab3" style="top:17px;font-size:16px">Parol</label><span id="pw" style="letter-spacing:2px"></span><i class="cur" id="cur3"></i>
+      <span class="chev" id="eye"><svg width="24" height="24" viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z" fill="none" stroke="#8a96a5" stroke-width="2"/><circle cx="12" cy="12" r="3" fill="#8a96a5"/><path id="slash" d="M4 4l16 16" stroke="#8a96a5" stroke-width="2" stroke-linecap="round"/></svg></span></div>
+    <div class="link" id="c5">Parolni unutdingizmi?</div>
+  </div>
 
-    <div class="scr" id="c">
-      <div style="font-size:26px;color:var(--dim);height:34px" id="c0">‹</div>
-      <div id="c1" style="width:52px;height:52px;border-radius:16px;background:var(--sf);border:1.5px solid #27313d;display:flex;align-items:center;justify-content:center;margin:4px 0 14px">
-        <svg width="34" height="34" viewBox="0 0 34 34"><g id="shk" style="transform-origin:24px 14px"><path d="M10 15V11a7 7 0 0 1 14 0V15" fill="none" stroke="#2a9de8" stroke-width="3.2" stroke-linecap="round"/></g><rect x="6" y="15" width="22" height="16" rx="4" fill="#2a9de8"/></svg></div>
-      <h2 id="c2">Parolni kiriting</h2>
-      <div class="sub" id="c3">Hisobingiz ikki bosqichli parol bilan himoyalangan.</div>
-      <div class="f" id="c4" style="border-color:var(--ac)"><small style="color:var(--ac)">Parol</small><span class="pw" id="pw"></span><i class="cur" id="cur3"></i><span class="chev" style="font-size:18px">◉</span></div>
-      <div class="cta" id="c5"><div class="g"></div><span>Kirish</span><svg id="sp3" width="26" height="26" viewBox="0 0 26 26"><path id="arc3" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"/></svg></div>
-    </div>
+  <div class="pg" id="d">
+    <div class="bar"><span style="flex:1">ARUGRAM</span><svg width="22" height="22" viewBox="0 0 22 22"><circle cx="9" cy="9" r="6" fill="none" stroke="#fff" stroke-width="2"/><path d="M14 14l6 6" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg></div>
+    <div id="d1" style="position:absolute;left:0;right:0;top:130px;text-align:center">
+      <div id="dl" style="width:84px;height:84px;margin:0 auto 18px;border-radius:50%;background:linear-gradient(135deg,#3ab0f2,#1f7fd1);display:flex;align-items:center;justify-content:center"><svg width="52" height="31" viewBox="0 0 522 305"><g fill="#fff"><path d="M0 300L99 0H125L224 300H173.454L151.674 234H72.326L50.546 300ZM85.526 194L112 113.776L138.474 194Z"/><path d="M198 0H264A86 86 0 0 1 264 172H198V300H246V0ZM246 40H264A38 46 0 0 1 264 132H246Z"/><path d="M276 132H324L394 300H346Z"/><path d="M350 0V219A86 86 0 0 0 522 219V0H474V219A38 46 0 0 1 398 219V0Z"/></g></svg></div>
+      <h2 id="d2">Chatlar tez orada qo'shiladi</h2><div class="sub" id="d3">Hisobingiz tayyor.</div></div>
+    <div id="d4" style="position:absolute;left:0;right:0;top:330px"><div class="sk"><div class="av"></div><div class="l"><i style="width:55%"></i><i style="width:80%;opacity:.6"></i></div></div><div class="sk"><div class="av"></div><div class="l"><i style="width:44%"></i><i style="width:70%;opacity:.6"></i></div></div><div class="sk"><div class="av"></div><div class="l"><i style="width:62%"></i><i style="width:52%;opacity:.6"></i></div></div></div>
+  </div>
 
-    <div class="scr" id="d" style="text-align:center">
-      <div style="position:relative;width:120px;height:120px;margin:70px auto 26px">
-        <div id="r1" style="position:absolute;inset:0;border-radius:50%;border:2px solid var(--ok)"></div>
-        <div id="r2" style="position:absolute;inset:0;border-radius:50%;border:2px solid var(--ok)"></div>
-        <div id="dc" style="position:absolute;inset:0;border-radius:50%;background:linear-gradient(135deg,#43d98a,#27b46a);display:flex;align-items:center;justify-content:center">
-          <svg width="60" height="60" viewBox="0 0 60 60"><path id="chk" d="M14 31 L25 42 L46 19" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="52" stroke-dashoffset="52"/></svg></div>
-      </div>
-      <h2 id="d1">Xush kelibsiz!</h2>
-      <div class="sub" id="d2">Chatlar tez orada qo'shiladi.</div>
-      <div style="margin-top:26px;text-align:left" id="d3">
-        <div class="sk"><div class="av"></div><div class="l"><i style="width:60%"></i><i style="width:85%;opacity:.6"></i></div></div>
-        <div class="sk"><div class="av"></div><div class="l"><i style="width:48%"></i><i style="width:72%;opacity:.6"></i></div></div>
-        <div class="sk"><div class="av"></div><div class="l"><i style="width:66%"></i><i style="width:55%;opacity:.6"></i></div></div>
-      </div>
-    </div>
-
-    <div class="kb kn" id="kn"></div>
-    <div class="kb" id="ka"></div>
-  </div></div>
-</div>
+  <div class="kb" id="kn"></div><div class="kb" id="ka"></div>
+  <div id="fab"><svg id="fa" width="26" height="26" viewBox="0 0 26 26"><path d="M5 13h15M14 6l7 7-7 7" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <svg id="fp" width="40" height="40" viewBox="0 0 40 40"><path id="arcF" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/></svg></div>
+</div></div></div>
 <script>
-const TOTAL = 22200;
+const TOTAL = 19600;
 const $ = (id) => document.getElementById(id);
 const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
 const seg = (t, a, b) => clamp((t - a) / (b - a));
-const eo = (x) => 1 - Math.pow(1 - x, 4);                 // sekinlashuvchi / ease-out
-const eio = (x) => (x < .5 ? 8 * x * x * x * x : 1 - Math.pow(-2 * x + 2, 4) / 2);
-const spr = (x) => (x <= 0 ? 0 : x >= 1 ? 1 : 1 - Math.exp(-7 * x) * Math.cos(11 * x));  // prujina / spring
+const eo = (x) => 1 - Math.pow(1 - x, 3);
+const ead = (x) => (x < .5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2);   // tezlanib-sekinlashuvchi / accelerate-decelerate
+const spr = (x) => (x <= 0 ? 0 : x >= 1 ? 1 : 1 - Math.exp(-7 * x) * Math.cos(11 * x));
 const lerp = (a, b, x) => a + (b - a) * x;
+const LET = { 1: '', 2: 'ABC', 3: 'DEF', 4: 'GHI', 5: 'JKL', 6: 'MNO', 7: 'PQRS', 8: 'TUV', 9: 'WXYZ', 0: '+' };
 
-// klaviaturalar / keyboards
 (function () {
   const kn = $('kn'), ka = $('ka');
   [['1', '2', '3'], ['4', '5', '6'], ['7', '8', '9'], ['', '0', '⌫']].forEach((r) => {
     const d = document.createElement('div'); d.className = 'r';
-    r.forEach((k) => { const e = document.createElement('div'); e.className = 'key'; e.dataset.k = 'n' + k; e.textContent = k; if (!k) e.style.background = 'transparent'; d.appendChild(e); });
+    r.forEach((k) => { const e = document.createElement('div'); e.className = 'key'; e.dataset.k = 'n' + k; e.innerHTML = k && k !== '⌫' ? `${k}<small>${LET[k]}</small>` : k; if (!k) e.style.background = 'transparent'; d.appendChild(e); });
     kn.appendChild(d);
   });
   ['qwertyuiop', 'asdfghjkl', 'zxcvbnm'].forEach((r) => {
@@ -137,113 +118,114 @@ const lerp = (a, b, x) => a + (b - a) * x;
     ka.appendChild(d);
   });
   const d = document.createElement('div'); d.className = 'r';
-  ['123', 'boʼsh joy', 'Kirish'].forEach((k, i) => { const e = document.createElement('div'); e.className = 'key'; e.textContent = k; e.style.flex = i === 1 ? '4' : '1.4'; e.style.fontSize = '15px'; d.appendChild(e); });
+  ['123', 'boʼsh joy', '↵'].forEach((k, i) => { const e = document.createElement('div'); e.className = 'key'; e.textContent = k; e.style.flex = i === 1 ? '4' : '1.5'; e.style.fontSize = '15px'; d.appendChild(e); });
   ka.appendChild(d);
 })();
 
-// vaqt jadvali / timeline (ms)
 const PHONE = '901234567', CODE = '12345', PASS = 'aru2024!';
-const T = { kb1: 1500, ph0: 2300, phStep: 250, cta1: 4700, tap1: 5500, spin1: 5650, to2: 6700,
-  c0: 8000, cStep: 350, verify: 9900, to3: 11400,
-  p0: 12500, pStep: 230, cta3: 14700, tap3: 15500, spin3: 15650, to4: 16700, end: TOTAL };
-const TR = 480;  // sahifa almashish davomiyligi / page transition length
+const T = { kb: 600, ph0: 1500, phS: 230, fab1: 3450, tap1: 4300, to2: 5400,
+  c0: 7000, cS: 320, ver: 8500, to3: 9500,
+  focus3: 10100, p0: 10600, pS: 200, eye: 12600, tap3: 14000, to4: 15000 };
+const TR = 300, W = 332;
 
-function arc(path, t) {
-  const a0 = (t / 700) * 2 * Math.PI, sweep = 1.3 + 0.9 * Math.sin(t / 380);
-  const r = 10, cx = 13, cy = 13;
-  const p = (a) => [cx + r * Math.cos(a), cy + r * Math.sin(a)];
-  const [x0, y0] = p(a0), [x1, y1] = p(a0 + sweep);
-  path.setAttribute('d', `M${x0.toFixed(2)} ${y0.toFixed(2)} A${r} ${r} 0 ${sweep > Math.PI ? 1 : 0} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`);
-}
-function fadeUp(el, t, a, delay = 0, dist = 18) {
-  const p = eo(seg(t, a + delay, a + delay + 520));
-  el.style.opacity = p; el.style.transform = `translateY(${(1 - p) * dist}px)`;
+function arc(path, t, r, c) {
+  const a0 = (t / 650) * 2 * Math.PI, sw = 1.4 + 1.0 * Math.sin(t / 360);
+  const p = (a) => [c + r * Math.cos(a), c + r * Math.sin(a)];
+  const [x0, y0] = p(a0), [x1, y1] = p(a0 + sw);
+  path.setAttribute('d', `M${x0.toFixed(2)} ${y0.toFixed(2)} A${r} ${r} 0 ${sw > Math.PI ? 1 : 0} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`);
 }
 function fmt(s) { let o = ''; [...s].forEach((c, i) => { if (i === 2 || i === 5 || i === 7) o += ' '; o += c; }); return o; }
-function typed(t, t0, step, n) { return clamp(Math.floor((t - t0) / step) + 1, 0, n); }
-let lastKey = null;
-function pressKey(t, list) { // list: [[key, time]]
+function typed(t, t0, st, n) { return clamp(Math.floor((t - t0) / st) + 1, 0, n); }
+function pressKeys(t, list) {
   document.querySelectorAll('.key.p').forEach((e) => e.classList.remove('p'));
-  for (const [k, at] of list) if (t >= at && t < at + 150) { const e = document.querySelector(`[data-k="${k}"]`); if (e) e.classList.add('p'); }
+  for (const [k, at] of list) if (t >= at && t < at + 130) { const e = document.querySelector(`[data-k="${k}"]`); if (e) e.classList.add('p'); }
 }
-function scene(el, t, enter, exit) { // sahna siljishi / scene slide
-  const W = 330;
+function page(el, t, enter, exit) {   // to'liq kenglikka surilish / full-width slide, ikkalasi birga
   let x = 0;
-  if (enter !== null) x = (1 - eio(seg(t, enter, enter + TR))) * W;
-  if (exit !== null) x = -eio(seg(t, exit, exit + TR)) * W * 0.3;
+  if (enter !== null) x = (1 - ead(seg(t, enter, enter + TR))) * W;
+  if (exit !== null) x = -ead(seg(t, exit, exit + TR)) * W;
   el.style.transform = `translateX(${x}px)`;
-  el.style.opacity = (enter !== null && t < enter) || (exit !== null && t > exit + TR) ? 0 : 1;
+  el.style.visibility = (enter !== null && t < enter) || (exit !== null && t > exit + TR) ? 'hidden' : 'visible';
 }
-function cta(el, g, on, press, spin, t, arcEl) {
-  g.style.opacity = on;
-  el.style.color = on > .5 ? '#fff' : '#6c7a8b';
-  el.style.transform = `scale(${1 - press * .04})`;
-  el.querySelector('span').style.opacity = 1 - spin;
-  const sv = el.querySelector('svg'); sv.style.opacity = spin; sv.style.right = `${lerp(18, (el.clientWidth - 26) / 2, spin)}px`;
-  if (spin > 0) arc(arcEl, t);
+function outline(of, lab, focus, raised) { // fokus: kontur rangi; raised: yorliq konturga ko'tariladi
+  of.style.borderColor = focus > 0 ? `rgb(${lerp(49, 58, focus)},${lerp(59, 164, focus)},${lerp(71, 234, focus)})` : '';
+  lab.style.color = focus > 0 ? `rgb(${lerp(138, 58, focus)},${lerp(150, 164, focus)},${lerp(165, 234, focus)})` : '';
+  if (raised !== undefined) { lab.style.top = `${lerp(17, -10, raised)}px`; lab.style.fontSize = `${lerp(16, 12, raised)}px`; }
 }
 
 function frame(t) {
-  // yon panel / side panel
-  const step = t < T.to2 ? 0 : t < T.to3 ? 1 : t < T.to4 ? 2 : 3;
-  document.querySelectorAll('.st').forEach((e, i) => { e.className = 'st' + (i === step ? ' on' : i < step ? ' done' : ''); });
-  $('rail').style.height = `${[0, 54, 108, 162][step] + (step < 3 ? 54 * seg(t, [T.tap1, T.verify - 800, T.tap3][step], [T.to2, T.to3, T.to4][step]) : 0)}px`;
-  $('phone').style.transform = `translateY(${Math.sin(t / 1900) * 4}px)`;
-
-  scene($('a'), t, null, T.to2); scene($('b'), t, T.to2, T.to3); scene($('c'), t, T.to3, T.to4); scene($('d'), t, T.to4, null);
+  page($('a'), t, null, T.to2); page($('b'), t, T.to2, T.to3); page($('c'), t, T.to3, T.to4); page($('d'), t, T.to4, null);
+  const fade = (id, a, dl = 0) => { const p = eo(seg(t, a + dl, a + dl + 400)); $(id).style.opacity = p; };
 
   // 1) telefon
-  ['a0', 'a1', 'a2', 'a3', 'a4', 'a5'].forEach((id, i) => { if (id !== 'a0') fadeUp($(id), t, 150, i * 90); });
-  { const p = spr(seg(t, 100, 800)); $('a0').style.transform = `scale(${p})`; }
-  const n1 = typed(t, T.ph0, T.phStep, 9);
-  $('num').textContent = fmt(PHONE.slice(0, n1));
+  fade('a1', 100); fade('a2', 100, 60); fade('a3', 100, 120); fade('a4', 100, 180);
+  const n1 = typed(t, T.ph0, T.phS, 9);
+  $('num').textContent = fmt(PHONE.slice(0, n1)); $('hnt').textContent = n1 ? '' : '00 000 00 00';
   $('cur1').style.opacity = Math.floor(t / 530) % 2 ? 0 : 1;
-  const kb1 = spr(seg(t, T.kb1, T.kb1 + 650));
-  const kn = $('kn');
-  const knUp = t < T.to3 ? kb1 : 1 - eo(seg(t, T.to3 - 100, T.to3 + 250));
-  kn.style.transform = `translateY(${(1 - knUp) * 260}px)`;
-  const ph = [...PHONE].map((c, i) => ['n' + c, T.ph0 + i * T.phStep]);
-  const cd = [...CODE].map((c, i) => ['n' + c, T.c0 + i * T.cStep]);
-  const pw = [...PASS].map((c, i) => ['a' + c, T.p0 + i * T.pStep]);
-  pressKey(t, [...ph, ...cd, ...pw].filter(([k]) => k !== 'n!' && k !== 'a!' && k !== 'a2' && k !== 'a0' && k !== 'a4'));
-  const on1 = spr(seg(t, T.cta1, T.cta1 + 400));
-  cta($('a5'), $('a5').querySelector('.g'), clamp(on1), seg(t, T.tap1, T.tap1 + 110) * (1 - seg(t, T.tap1 + 110, T.tap1 + 260)), eo(seg(t, T.spin1, T.spin1 + 200)), t, $('arc1'));
+  outline($('a4'), $('lab1'), eo(seg(t, 500, 700)), undefined);
+
+  // klaviatura / keyboard
+  const kUp = t < T.to3 ? eo(seg(t, T.kb, T.kb + 300)) : 0;
+  const kDown = 1 - eo(seg(t, T.to4 - 150, T.to4 + 150));
+  $('kn').style.transform = `translateY(${(1 - (t < T.to3 ? kUp * kDown : 1 - ead(seg(t, T.to3, T.to3 + 250)))) * 240}px)`;
+  const ab = t < T.to3 ? 0 : ead(seg(t, T.to3 + 50, T.to3 + 350)) * kDown;
+  $('ka').style.transform = `translateY(${(1 - ab) * 240}px)`;
+  const ph = [...PHONE].map((c, i) => ['n' + c, T.ph0 + i * T.phS]);
+  const cd = [...CODE].map((c, i) => ['n' + c, T.c0 + i * T.cS]);
+  const pw = [...PASS].filter((c) => /[a-z]/.test(c)).map((c) => ['a' + c, T.p0 + PASS.indexOf(c) * T.pS]);
+  pressKeys(t, [...ph, ...cd, ...pw]);
+
+  // yumaloq tugma / round button: 1-sahifada 9 raqamdan keyin, 3-sahifada birinchi belgidan keyin
+  const fabShow = Math.max(
+    eo(seg(t, T.fab1, T.fab1 + 200)) * (1 - eo(seg(t, T.to2 - 150, T.to2))),
+    eo(seg(t, T.p0 + 100, T.p0 + 300)) * (1 - eo(seg(t, T.to4 - 150, T.to4))));
+  const kTop = 236 * (t < T.to3 ? kUp * kDown : (t < T.to4 ? 1 : kDown));
+  const tapA = T.tap1, tapB = T.tap3;
+  const tp = (a) => seg(t, a, a + 110) * (1 - seg(t, a + 110, a + 250));
+  const prog = Math.max(seg(t, tapA + 120, tapA + 320) * (1 - seg(t, T.to2 - 150, T.to2)), seg(t, tapB + 120, tapB + 320) * (1 - seg(t, T.to4 - 150, T.to4)));
+  const press = Math.max(tp(tapA), tp(tapB));
+  $('fab').style.bottom = `${kTop + 16}px`;
+  $('fab').style.opacity = fabShow > 0.01 ? 1 : 0;
+  $('fab').style.transform = `scale(${fabShow * (1 - press * .08)})`;
+  $('fa').style.opacity = 1 - prog; $('fa').style.transform = `scale(${1 - prog * .5})`;
+  $('fp').style.opacity = prog; if (prog > 0) arc($('arcF'), t, 14, 20);
 
   // 2) kod
-  [['b1', 0], ['b2', 1], ['b3', 2], ['b4', 3], ['b5', 4]].forEach(([id, i]) => fadeUp($(id), t, T.to2 + 120, i * 80));
-  const n2 = typed(t, T.c0, T.cStep, 5);
-  [...$('b3').children].forEach((c, i) => {
-    const at = T.c0 + i * T.cStep, k = spr(seg(t, at, at + 380));
-    const act = i === n2 && n2 < 5;
+  const b0 = T.to2 + 150;
+  $('b1').style.opacity = eo(seg(t, T.to2 + 100, T.to2 + 400));
+  { const p = spr(seg(t, b0 + 100, b0 + 700)); $('bub').style.transform = `scale(${p})`; const ph2 = (t / 260) % 3; ['d1', 'd2', 'd3'].forEach((id, i) => { $(id).style.opacity = .4 + .6 * Math.max(0, 1 - Math.abs(ph2 - i - .3)); }); }
+  const n2 = typed(t, T.c0, T.cS, 5);
+  [...$('b4').children].forEach((c, i) => {
+    const at = T.c0 + i * T.cS;
     c.textContent = i < n2 ? CODE[i] : '';
-    c.style.transform = i < n2 ? `scale(${lerp(.7, 1, k)})` : 'scale(1)';
-    const done = seg(t, T.verify + 900, T.verify + 1100);
-    c.style.borderColor = done > 0 ? `rgb(${lerp(39, 52, done)},${lerp(49, 199, done)},${lerp(61, 123, done)})` : (act || (i === n2 - 1 && n2 === 5 && t < T.verify)) ? '#2a9de8' : '#27313d';
+    c.style.transform = i < n2 ? `scale(${lerp(.75, 1, spr(seg(t, at, at + 300)))})` : 'scale(1)';
+    const act = i === n2 && n2 < 5 && t > T.to2 + 300;
+    c.style.borderColor = act ? '#3aa4ea' : '';
   });
-  $('bar').style.width = `${eio(seg(t, T.verify, T.verify + 900)) * 100}%`;
+  const spB = seg(t, T.ver, T.ver + 150) * (1 - seg(t, T.to3 - 150, T.to3));
+  $('tmw').style.opacity = 1 - spB; $('spB').style.opacity = spB; if (spB > 0) arc($('arcB'), t, 8, 11);
   $('tm').textContent = `0:${String(Math.max(0, 42 - Math.floor((t - T.to2) / 1000))).padStart(2, '0')}`;
+  $('b6').style.opacity = eo(seg(t, T.to2 + 500, T.to2 + 800));
 
   // 3) parol
-  fadeUp($('c1'), t, T.to3 + 100); ['c2', 'c3', 'c4', 'c5'].forEach((id, i) => fadeUp($(id), t, T.to3 + 100, 80 + i * 80));
-  $('shk').style.transform = `translateY(${-4 * Math.sin(Math.PI * seg(t, T.to3 + 700, T.to3 + 1200)) }px) rotate(${(seg(t, T.to3 + 700, T.to3 + 1100) - seg(t, T.to3 + 1100, T.to3 + 1500)) * -16}deg)`;
-  const n3 = typed(t, T.p0, T.pStep, PASS.length);
-  $('pw').textContent = '•'.repeat(n3);
-  $('cur3').style.opacity = Math.floor(t / 530) % 2 ? 0 : 1;
-  const abc = spr(seg(t, T.to3 + 80, T.to3 + 700)) * (1 - eo(seg(t, T.to4 - 100, T.to4 + 250)));
-  $('ka').style.transform = `translateY(${(1 - abc) * 280}px)`;
-  const on3 = spr(seg(t, T.cta3, T.cta3 + 400));
-  cta($('c5'), $('c5').querySelector('.g'), clamp(on3), seg(t, T.tap3, T.tap3 + 110) * (1 - seg(t, T.tap3 + 110, T.tap3 + 260)), eo(seg(t, T.spin3, T.spin3 + 200)), t, $('arc3'));
+  { const c0 = T.to3 + 150, k = ead(seg(t, c0, c0 + 450)), bn = spr(seg(t, c0 + 350, c0 + 800));
+    $('shk').style.transform = `translate(${-6 * (1 - bn)}px,${-9 * (1 - bn)}px) rotate(${(1 - bn) * 32}deg)`; $('c1').style.opacity = k; }
+  const foc3 = eo(seg(t, T.focus3, T.focus3 + 150));
+  const n3 = typed(t, T.p0, T.pS, PASS.length);
+  const eyeOn = t >= T.eye && t < T.eye + 900;
+  $('pw').textContent = eyeOn ? PASS.slice(0, n3) : '•'.repeat(n3);
+  $('slash').style.opacity = eyeOn ? 0 : 1;
+  $('cur3').style.opacity = t > T.focus3 && Math.floor(t / 530) % 2 === 0 ? 1 : 0;
+  outline($('c4'), $('lab3'), foc3, Math.max(foc3, n3 ? 1 : 0));
+  $('c5').style.opacity = eo(seg(t, T.to3 + 500, T.to3 + 800));
 
   // 4) tayyor
   const d0 = T.to4 + 150;
-  $('dc').style.transform = `scale(${spr(seg(t, d0, d0 + 700))})`;
-  $('chk').style.strokeDashoffset = 52 * (1 - eo(seg(t, d0 + 450, d0 + 950)));
-  [['r1', 0], ['r2', 260]].forEach(([id, dl]) => { const p = seg(t, d0 + 250 + dl, d0 + 1500 + dl); $(id).style.opacity = p > 0 && p < 1 ? .6 * (1 - p) : 0; $(id).style.transform = `scale(${1 + p * .9})`; });
-  fadeUp($('d1'), t, d0 + 900); fadeUp($('d2'), t, d0 + 1000);
-  [...$('d3').children].forEach((c, i) => fadeUp(c, t, d0 + 1700, i * 160, 22));
+  $('dl').style.transform = `scale(${spr(seg(t, d0, d0 + 700))})`;
+  fade('d2', d0 + 300); fade('d3', d0 + 300, 80);
+  [...$('d4').children].forEach((c, i) => { const p = eo(seg(t, d0 + 1000 + i * 150, d0 + 1500 + i * 150)); c.style.opacity = p; c.style.transform = `translateY(${(1 - p) * 20}px)`; });
 }
 
-// virtual soat / virtual clock
 let now = 0;
 window.__finished = false;
 window.start = () => { now = 0; frame(0); };

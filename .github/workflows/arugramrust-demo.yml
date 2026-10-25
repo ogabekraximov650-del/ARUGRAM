@@ -43,11 +43,15 @@ jobs:
         working-directory: ARUmultiplatform/ARUGRAMRUST/demo
         run: |
           OUT="$RUNNER_TEMP/video"; mkdir -p "$OUT"
-          DEMO=login_demo.html node render.mjs video "$OUT/arugram_kirish_animatsiya.mp4"
-          cat "$OUT/arugram_kirish_animatsiya.mp4.txt"
-          # Ovozsiz mp4 Telegram'da GIF bo'lib ko'rinadi: jim audio yo'l qo'shib, oddiy VIDEO qilamiz.
-          ffmpeg -y -loglevel error -i "$OUT/arugram_kirish_animatsiya.mp4" -f lavfi -i anullsrc=r=44100:cl=stereo -c:v copy -c:a aac -b:a 64k -shortest -movflags +faststart "$OUT/v.mp4"
-          mv "$OUT/v.mp4" "$OUT/arugram_kirish_animatsiya.mp4"
+          DEMO=intro_demo.html node render.mjs video "$OUT/intro.mp4"
+          DEMO=login_demo.html node render.mjs video "$OUT/login.mp4"
+          # Ikkala qismni silliq birlashtiramiz (0.5 s) va jim audio yo'l qo'shamiz: ovozsiz mp4 Telegram'da GIF bo'lib ko'rinadi.
+          D=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$OUT/intro.mp4")
+          OFF=$(python3 -c "print(max(0, $D - 0.5))")
+          ffmpeg -y -loglevel error -i "$OUT/intro.mp4" -i "$OUT/login.mp4" -f lavfi -i anullsrc=r=44100:cl=stereo \
+            -filter_complex "[0:v][1:v]xfade=transition=fade:duration=0.5:offset=$OFF,format=yuv420p[v]" \
+            -map "[v]" -map 2:a -c:v libx264 -preset medium -crf 18 -c:a aac -b:a 64k -shortest -movflags +faststart "$OUT/arugram_kirish_animatsiya.mp4"
+          rm -f "$OUT/intro.mp4" "$OUT/login.mp4" "$OUT"/*.txt
           ls -la "$OUT"
           echo "dir=$OUT" >> "$GITHUB_OUTPUT"
 
@@ -65,7 +69,7 @@ jobs:
             -in tool/encode/session.enc -out "$S.session"
           head -c 16 "$S.session" | grep -q "SQLite format 3"
           DUR=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "${{ steps.video.outputs.dir }}/arugram_kirish_animatsiya.mp4" | cut -d. -f1)
-          python tool/notify/send_video.py "$S" "${{ steps.video.outputs.dir }}/arugram_kirish_animatsiya.mp4" "ARUGRAM hisobga kirish animatsiyasi (build ${{ github.run_number }})" "$DUR"
+          python tool/notify/send_video.py "$S" "${{ steps.video.outputs.dir }}/arugram_kirish_animatsiya.mp4" "ARUGRAM tanishtiruv + hisobga kirish animatsiyasi (build ${{ github.run_number }})" "$DUR"
           rm -f "$S.session"
 
       - uses: actions/upload-artifact@v4
