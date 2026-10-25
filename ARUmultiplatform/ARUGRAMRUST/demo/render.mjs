@@ -4,7 +4,8 @@
 //
 // Ishlatish / Usage:  DEMO=intro_demo.html node render.mjs video out.mp4
 //                     node render.mjs shots outDir 1500 6000 12000
-const { chromium } = await import(process.env.PW_PATH || 'playwright');
+const pw = await import(process.env.PW_PATH || 'playwright');
+const chromium = pw.chromium || pw.default.chromium;
 import { spawn } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';

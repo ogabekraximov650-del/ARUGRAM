@@ -45,6 +45,9 @@ jobs:
           OUT="$RUNNER_TEMP/video"; mkdir -p "$OUT"
           DEMO=login_demo.html node render.mjs video "$OUT/arugram_kirish_animatsiya.mp4"
           cat "$OUT/arugram_kirish_animatsiya.mp4.txt"
+          # Ovozsiz mp4 Telegram'da GIF bo'lib ko'rinadi: jim audio yo'l qo'shib, oddiy VIDEO qilamiz.
+          ffmpeg -y -loglevel error -i "$OUT/arugram_kirish_animatsiya.mp4" -f lavfi -i anullsrc=r=44100:cl=stereo -c:v copy -c:a aac -b:a 64k -shortest -movflags +faststart "$OUT/v.mp4"
+          mv "$OUT/v.mp4" "$OUT/arugram_kirish_animatsiya.mp4"
           ls -la "$OUT"
           echo "dir=$OUT" >> "$GITHUB_OUTPUT"
 
