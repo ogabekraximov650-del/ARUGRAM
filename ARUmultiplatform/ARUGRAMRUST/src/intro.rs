@@ -313,7 +313,7 @@ impl Intro {
                 continue;
             }
             let title = if i == 0 { t(TITLES[0], 26.0, col).bold().letter_spacing(1.0) } else { t(TITLES[i], 26.0, col).bold() };
-            layers.push(at(x, y0 + 175.0, centered(w, title.line_height(30.0))));
+            layers.push(at(x, y0 + 179.5, centered(w, title.line_height(30.0))));
             layers.push(at(x, y0 + 219.0, column(vec![self.message(i, col)]).width(w).align(Align::Center)));
         }
         // sahifa surish maydoni (ViewPager) / the page-swipe area
@@ -331,7 +331,7 @@ impl Intro {
         layers.push(at(dx + base * 11.0, y0 + 289.0, column(vec![]).width(5.0 + 11.0 * pr).height(5.0).radius(2.5).bg(Color::hex(0x229af0))));
         // til havolasi va tugma / language link and the button
         let bty = 3.0 * q + (q - 48.0) / 2.0;
-        layers.push(at(0.0, bty - 30.0 - 30.0, column(vec![t("Continue in English", 16.0, blue()).line_height(30.0)]).width(w).align(Align::Center)));
+        layers.push(at(0.0, bty - 63.4, column(vec![t("Continue in English", 16.0, blue()).line_height(30.0)]).width(w).align(Align::Center)));
         layers.push(self.start_button(w, bty, now));
         // kun/tun tugmasi / theme button
         layers.push(self.theme_button(w, now));

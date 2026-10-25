@@ -449,7 +449,7 @@ impl Login {
         let fabv = self.fab.borrow().val(now);
         if fabv > 0.01 {
             let sys_kb = if page == Page::Pass { 260.0 * seg(now, self.t_page.get() + 150.0, self.t_page.get() + 450.0) } else { 0.0 };
-            let bottom = 14.0 + (KB_H * kb).max(sys_kb);
+            let bottom = 10.0 + (KB_H * kb).max(sys_kb);
             layers.push(self.fab_view(w, hu, bottom, fabv, now));
         }
         // mamlakat ro'yxati / country list
@@ -482,11 +482,11 @@ impl Login {
         let bw = lerp(1.5, 2.0, focus);
         let boxed = column(vec![]).width(w).height(h).radius(7.0).border(bw, line);
         let ly = lerp(15.0, -11.0, raise);
-        let lsize = lerp(17.0, 13.0, raise);
+        let lsize = lerp(16.0, 12.5, raise);
         let mut kids = vec![boxed];
         kids.extend(inner);
         let lab = if raise > 0.01 {
-            at(12.0, ly, column(vec![t(label, lsize, lc)]).bg(bg()).padding_xy(4.0, 0.0))
+            at(10.0, ly, column(vec![t(label, lsize, lc)]).bg(bg()).padding_xy(4.0, 0.0))
         } else {
             at(14.0, ly, t(label, lsize, lc))
         };
@@ -508,37 +508,37 @@ impl Login {
         let mut cin: Vec<Element> = Vec::new();
         let raise_c = if c.is_some() { 1.0 } else { 0.0 };
         if let Some(c) = c {
-            cin.push(at(14.0, 0.0, column(vec![flag_small(c.iso)]).width(30.0).height(51.5).justify(Justify::Center)));
-            cin.push(at(52.0, 11.0, t(c.name, 18.0, txt()).line_height(26.0)));
+            cin.push(at(14.0, 0.0, column(vec![flag_small(c.iso)]).width(18.0).height(51.0).justify(Justify::Center)));
+            cin.push(at(49.5, 12.0, t(c.name, 16.0, txt()).line_height(26.0)));
         }
         cin.push(at(fw - 36.0, 13.0, icon(CHEVRON_RIGHT, 24.0).color(hint())));
-        let country_field = self.outline(36.5, 224.0, fw, 51.5, 0.0, "Mamlakat", raise_c, cin);
+        let country_field = self.outline(36.5, 267.2, fw, 51.0, 0.0, "Mamlakat", raise_c, cin);
 
         // telefon maydoni
         let mut pin: Vec<Element> = Vec::new();
         let code_txt = c.map_or_else(|| self.code_in.borrow().clone(), |c| c.code.to_string());
-        pin.push(at(14.0, 0.0, t(format!("+{code_txt}"), 20.0, txt()).line_height(46.0)));
-        pin.push(at(76.0, 9.0, column(vec![]).width(1.0).height(30.0).bg(line())));
-        let mut row_kids = vec![t(shown.clone(), 20.0, txt()).line_height(46.0)];
+        pin.push(at(14.0, -3.5, t(format!("+{code_txt}"), 16.5, txt()).line_height(48.5)));
+        pin.push(at(74.0, 15.0, column(vec![]).width(1.0).height(18.0).bg(line())));
+        let mut row_kids = vec![t(shown.clone(), 17.0, txt()).line_height(48.5)];
         if c.is_some() && caret_on {
             row_kids.push(gap_box(1.0, 0.0));
-            row_kids.push(column(vec![]).width(2.0).height(24.0).bg(active()));
+            row_kids.push(column(vec![]).width(2.0).height(22.0).bg(active()));
         } else {
             row_kids.push(gap_box(3.0, 0.0));
         }
         if c.is_some() && digits.is_empty() {
-            pin.push(at(90.0, 0.0, t(c.map_or("", |c| c.pattern).replace('X', "0"), 20.0, Color::hex(0x6e6e6e)).line_height(46.0)));
+            pin.push(at(86.7, -3.5, t(c.map_or("", |c| c.pattern).replace('X', "0"), 17.0, Color::hex(0x6e6e6e)).line_height(48.5)));
         }
-        pin.push(at(90.0, 0.0, row(row_kids).align(Align::Center).height(46.0)));
-        let phone_field = self.outline(36.5, 307.5, fw, 50.5, 1.0, "Telefon raqami", 1.0, pin);
+        pin.push(at(86.7, -3.5, row(row_kids).align(Align::Center).height(48.5)));
+        let phone_field = self.outline(36.5, 348.5, fw, 48.5, 1.0, "Telefon raqami", 1.0, pin);
 
         let me2 = me.clone();
-        let country_tap = at(36.5, 224.0, column(vec![]).width(fw).height(51.5).on_click(move || me2.open_picker()));
+        let country_tap = at(36.5, 267.2, column(vec![]).width(fw).height(51.0).on_click(move || me2.open_picker()));
 
         stack(vec![
-            at(0.0, 121.0, centered(w, t("Telefon raqamingiz", 18.0, txt()).bold().line_height(22.0))),
-            at(0.0, 153.0, centered(w, t("Telefon raqamingizni kiriting", 15.0, hint()).line_height(19.5))),
-            at(0.0, 172.5, centered(w, row(vec![t("yoki ", 15.0, hint()).line_height(19.5), gap_box(3.0, 0.0), t("kirish kaliti yordamida kiring ›", 15.0, blue()).line_height(19.5)]))),
+            at(0.0, 167.0, centered(w, t("Telefon raqamingiz", 18.0, txt()).bold().line_height(22.0))),
+            at(0.0, 198.0, centered(w, t("Telefon raqamingizni kiriting", 13.5, hint()).line_height(18.9))),
+            at(0.0, 216.9, centered(w, row(vec![t("yoki ", 13.5, hint()).line_height(18.9), gap_box(3.0, 0.0), t("kirish kaliti yordamida kiring ›", 13.5, blue()).line_height(18.9)]))),
             country_field,
             phone_field,
             country_tap,
