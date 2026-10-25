@@ -149,7 +149,7 @@ fn page1(cv: &mut Cv, t: f32) {
     let k = 0.19 * (1.0 + 0.025 * (2.0 * PI * t / 2400.0).sin());
     let tr = b.pre_scale(k, k).pre_translate(-261.0, -152.0);
     for part in aru_logo() {
-        cv.pm.fill_path(&part, &paint(solid(WHITE)), FillRule::EvenOdd, tr, None);
+        cv.pm.fill_path(&part, &paint(solid(WHITE)), FillRule::Winding, tr, None);
     }
 }
 
