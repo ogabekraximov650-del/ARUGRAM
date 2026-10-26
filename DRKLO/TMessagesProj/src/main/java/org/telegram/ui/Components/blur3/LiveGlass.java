@@ -122,7 +122,7 @@ final class LiveGlass {
         canvas.restore();
     }
 
-    private static final int BANDS = 8;
+    private static final int BANDS = 4;
     private static final Path[] bandPath = new Path[BANDS + 1];
     private static int ringW = -1, ringH = -1;
     private static float ringT = -1;
@@ -194,14 +194,15 @@ final class LiveGlass {
             canvas.drawColor(baseColor);
             layer(canvas, n, cx, cy, zoom, hx, hy);
             canvas.restore();
-            if (rings && thickness > 4) {
+            // UZ: katta panelda (dialog/varaq) halqa kerak emas: chizishlar soni kamayadi / EN: big panels (dialogs/sheets) skip the bands: far fewer draws / RU: большим панелям кольца не нужны: меньше отрисовок
+            if (rings && thickness > 4 && bp.height() < org.telegram.messenger.AndroidUtilities.dp(220)) {
                 // UZ: silliq sinish: chetdan markazga zoom 1.35x -> 1x ketma-ket qatlamlar (har biri avvalgisi ustiga) / EN: smooth refraction: zoom falls 1.35x -> 1x edge-to-center in stacked insets / RU: плавное преломление: зум падает 1.35x -> 1x от края к центру слоями
                 buildRings(bp, radii, thickness);
                 canvas.save();
                 canvas.clipPath(panelPath);
                 for (int i = 0; i <= BANDS; i++) {
                     final float d = 1f - (float) i / BANDS;
-                    final float z = zoom * (1f + 0.35f * d * d);
+                    final float z = zoom * (1f + 0.4f * d * d);
                     if (i > 0) {
                         canvas.save();
                         canvas.clipPath(bandPath[i]);
