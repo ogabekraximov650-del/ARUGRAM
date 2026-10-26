@@ -98,6 +98,8 @@ async function tgSend(method: string, body: object, maxRetries = 4): Promise<boo
 
 /** Cron har daqiqada shu funksiyani chaqiradi */
 export async function processPostQueue(): Promise<void> {
+  // Kanalga post joylash vaqtincha o'chirilgan / posting to channels is temporarily off
+  if (!config.CHANNEL_POSTING) return;
   // Cloudflare cron triggerlar sequential — avvalgi cron o'lgan bo'lsa,
   // uning 'processing' holati qolgan itemlarini 'pending' ga qaytaramiz
   await resetAllProcessingItems().catch(e => console.error("resetAllProcessingItems error:", e));

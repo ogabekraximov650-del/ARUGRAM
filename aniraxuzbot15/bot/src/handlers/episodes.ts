@@ -640,6 +640,10 @@ export function setupEpisodeHandlers(bot: Bot<MyContext>): void {
         (b.epizod_number ?? b.film_id ?? b.ova_id ?? 0)
     );
     const episodeRowids = sortedEps.map((ep) => ep.rowid);
+    if (!config.CHANNEL_POSTING) {
+      await ctx.reply("⏸ Kanalga post joylash vaqtincha o'chirilgan.");
+      return;
+    }
     // Navbatga qo'shish — Cron trigger har daqiqada qayta ishlaydi
     const batchId = `${animeInfoId}_${Date.now()}`;
     try {

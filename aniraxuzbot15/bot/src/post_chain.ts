@@ -3,6 +3,7 @@
  * keyin keyingi invokatsiyani triggerlaiydi.
  * Bu Cloudflare Workers timeout muammosini hal qiladi.
  */
+import { config } from "./config.ts";
 import {
   getEpisode,
   getAnimeInfo,
@@ -83,6 +84,9 @@ export async function runPostChain(params: PostChainParams): Promise<void> {
     currentIndex,
     workerUrl,
   } = params;
+
+  // Kanalga post joylash vaqtincha o'chirilgan / posting to channels is temporarily off
+  if (!config.CHANNEL_POSTING) return;
 
   // Validatsiya — botToken yoki boshqa zaruriy maydonlar yo'q bo'lsa to'xta
   if (!botToken || !channelId || !episodeRowids?.length) {

@@ -5,7 +5,7 @@ export function mainMenuKeyboard(): Keyboard {
   return new Keyboard()
     .text("🔍 Anime izlash").row()
     .text("💰 Balans to'ldirish").text("💳 Hisobim").row()
-    .text("💎 Obuna olish").text("📊 Statistika")
+    .text("💎 Obuna olish")
     .resized();
 }
 

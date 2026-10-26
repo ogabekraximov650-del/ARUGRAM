@@ -5,6 +5,8 @@ export const config = {
   PORT: Number(process.env.PORT ?? "5000"),
   WEBHOOK_PATH: process.env.WEBHOOK_PATH ?? "/webhook",
   WORKER_URL: process.env.WORKER_URL ?? "https://aniraxuzbot.ogabekraximov650.workers.dev",
+  // Kanalga post joylash vaqtincha O'CHIRILGAN (yoqish: CHANNEL_POSTING=1) / posting to channels is temporarily OFF
+  CHANNEL_POSTING: process.env.CHANNEL_POSTING === "1",
   TEZCHECK_API_KEY: process.env.TEZCHECK_API_KEY ?? "",
   TEZCHECK_PAY_URL: process.env.TEZCHECK_PAY_URL ?? "https://tezcheck.uz/merchant/pay?token=",
 };

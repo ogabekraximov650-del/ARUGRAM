@@ -21,6 +21,7 @@ function applyEnv(env: CfEnv) {
   if (env.ADMIN_ID)           config.ADMIN_ID           = Number(env.ADMIN_ID);
   if (env.SAVED_CHANNEL_ID)   config.SAVED_CHANNEL_ID   = env.SAVED_CHANNEL_ID as string;
   if (env.WORKER_URL)         config.WORKER_URL         = env.WORKER_URL as string;
+  if (env.CHANNEL_POSTING)    config.CHANNEL_POSTING    = env.CHANNEL_POSTING === "1";
   if (env.TEZCHECK_API_KEY)   config.TEZCHECK_API_KEY   = env.TEZCHECK_API_KEY as string;
 
   // D1 bindinglari — modul darajasida saqlanadi
