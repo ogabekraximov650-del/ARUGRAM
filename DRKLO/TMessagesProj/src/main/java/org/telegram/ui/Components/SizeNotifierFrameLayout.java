@@ -339,6 +339,7 @@ public class SizeNotifierFrameLayout extends FrameLayout implements Theme.Colora
                     backgroundView.invalidate();
                 }
             }
+            org.telegram.ui.Components.blur3.AuroraBackgroundDrawable.drawOverlay(canvas, getMeasuredWidth(), getRootView().getMeasuredHeight() - bottomClip);
             if (themeAnimationValue != 1f) {
                 backgroundView.invalidate();
             }

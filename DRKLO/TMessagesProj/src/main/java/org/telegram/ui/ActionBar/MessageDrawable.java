@@ -34,6 +34,10 @@ public class MessageDrawable extends Drawable {
     private Shader gradientShader;
     private int currentBackgroundHeight;
     public Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private static final Paint glassRim = new Paint(Paint.ANTI_ALIAS_FLAG);
+    static {
+        glassRim.setStyle(Paint.Style.STROKE);
+    }
     private Paint selectedPaint;
     private int currentColor;
     private int currentGradientColor1;
@@ -559,7 +563,8 @@ public class MessageDrawable extends Drawable {
 
     public void draw(Canvas canvas, Paint paintToUse) {
         Rect bounds = getBounds();
-        if (paintToUse == null && paint.getStyle() == Paint.Style.FILL && gradientShader == null && overrideRoundRadius == 0 && overrideRounding <= 0) {
+        final boolean glass = paintToUse == null && org.telegram.messenger.LiteMode.isEnabled(org.telegram.messenger.LiteMode.FLAG_LIQUID_GLASS);
+        if (!glass && paintToUse == null && paint.getStyle() == Paint.Style.FILL && gradientShader == null && overrideRoundRadius == 0 && overrideRounding <= 0) {
             Drawable background = getBackgroundDrawable();
             if (background != null) {
                 background.setBounds(bounds);
@@ -617,7 +622,18 @@ public class MessageDrawable extends Drawable {
             generatePath(path, bounds, padding, rad, smallRad, nearRad, top, drawFullBottom, drawFullTop, paintToUse != null);
         }
 
-        canvas.drawPath(path, p);
+        if (glass) {
+            // ARUGRAM: shisha xabar: shaffof to'ldirish + yorug' chet chizig'i / glass message: translucent fill + a light rim line
+            final int a0 = p.getAlpha();
+            p.setAlpha((int) (a0 * 0.62f));
+            canvas.drawPath(path, p);
+            p.setAlpha(a0);
+            glassRim.setStrokeWidth(Math.max(1f, AndroidUtilities.dpf2(0.75f)));
+            glassRim.setColor(Theme.isCurrentThemeDark() ? 0x40FFFFFF : 0x99FFFFFF);
+            canvas.drawPath(path, glassRim);
+        } else {
+            canvas.drawPath(path, p);
+        }
         if (gradientShader != null && isSelected && paintToUse == null) {
             int color = getColor(Theme.key_chat_outBubbleGradientSelectedOverlay);
             selectedPaint.setColor(ColorUtils.setAlphaComponent(color, (int) (Color.alpha(color) * alpha / 255f)));

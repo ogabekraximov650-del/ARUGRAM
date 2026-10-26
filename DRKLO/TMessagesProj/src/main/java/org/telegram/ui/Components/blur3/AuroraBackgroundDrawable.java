@@ -102,4 +102,54 @@ public class AuroraBackgroundDrawable extends Drawable {
     public int getOpacity() {
         return PixelFormat.OPAQUE;
     }
+
+    private static android.graphics.Bitmap overlay;
+    private static int overlayW, overlayH;
+    private static boolean overlayDark;
+    private static final Rect overlaySrc = new Rect();
+    private static final Rect overlayDst = new Rect();
+    private static final Paint overlayPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+    /**
+     * UZ: Chat orqa fonining ustiga yumshoq rangli dog'lar (ko'zni charchatmaydi, lekin shisha aniq ko'rinadi). Kichik surat (1/6) bir marta chiziladi.
+     * EN: Soft colored blobs over the chat wallpaper (easy on the eyes, yet the glass is clearly visible). A small (1/6) bitmap drawn once.
+     * RU: Мягкие цветные пятна поверх обоев чата (не утомляют глаза, но стекло хорошо видно). Маленький bitmap (1/6) рисуется один раз.
+     */
+    public static void drawOverlay(Canvas canvas, int w, int h) {
+        if (w <= 0 || h <= 0 || !LiteMode.isEnabled(LiteMode.FLAG_LIQUID_GLASS)) {
+            return;
+        }
+        final boolean dark = Theme.isCurrentThemeDark();
+        if (overlay == null || overlayW != w || overlayH != h || overlayDark != dark) {
+            try {
+                final int cw = Math.max(1, w / 6), ch = Math.max(1, h / 6);
+                if (overlay == null || overlay.getWidth() != cw || overlay.getHeight() != ch) {
+                    overlay = android.graphics.Bitmap.createBitmap(cw, ch, android.graphics.Bitmap.Config.ARGB_8888);
+                }
+                overlay.eraseColor(0);
+                final Canvas c = new Canvas(overlay);
+                final float m = Math.max(cw, ch);
+                final int c0 = dark ? 0x584F6BED : 0x70A5D6FF;
+                final int c1 = dark ? 0x48A855F7 : 0x70FFC1E3;
+                final int c2 = dark ? 0x4000C2A8 : 0x70B8F5D8;
+                final int c3 = dark ? 0x40F59E0B : 0x60FFE2A8;
+                final float[][] spots = {{0.10f, 0.12f, 0.70f}, {0.95f, 0.38f, 0.62f}, {0.15f, 0.72f, 0.66f}, {0.90f, 0.95f, 0.60f}};
+                final int[] cols = {c0, c1, c2, c3};
+                final Paint pp = new Paint(Paint.ANTI_ALIAS_FLAG);
+                for (int i = 0; i < 4; i++) {
+                    pp.setShader(new RadialGradient(cw * spots[i][0], ch * spots[i][1], m * spots[i][2], cols[i], cols[i] & 0x00FFFFFF, Shader.TileMode.CLAMP));
+                    c.drawRect(0, 0, cw, ch, pp);
+                }
+                overlayW = w;
+                overlayH = h;
+                overlayDark = dark;
+                overlaySrc.set(0, 0, cw, ch);
+            } catch (Throwable t) {
+                overlay = null;
+                return;
+            }
+        }
+        overlayDst.set(0, 0, w, h);
+        canvas.drawBitmap(overlay, overlaySrc, overlayDst, overlayPaint);
+    }
 }

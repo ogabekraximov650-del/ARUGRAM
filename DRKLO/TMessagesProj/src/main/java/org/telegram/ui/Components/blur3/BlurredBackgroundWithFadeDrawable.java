@@ -96,6 +96,10 @@ public class BlurredBackgroundWithFadeDrawable extends Drawable {
         if (bounds.isEmpty() || alpha == 0) {
             return;
         }
+        // ARUGRAM: glass yoqilganda ekran tepasi/pastidagi qoraytirish chizilmaydi / with glass on, the dark fade at the top/bottom of the screen is not drawn / при включённом стекле затемнение сверху/снизу экрана не рисуется
+        if (org.telegram.messenger.LiteMode.isEnabled(org.telegram.messenger.LiteMode.FLAG_LIQUID_GLASS)) {
+            return;
+        }
 
         BlurredBackgroundSource source = drawable.getUnwrappedSource();
         if (!ignoreFastWay && source instanceof BlurredBackgroundSourceColor) {
