@@ -70,6 +70,8 @@ pub struct Login {
     scroll: ScrollState,
     focus_asked: Cell<bool>,
     started: Cell<bool>,
+    /// UZ: Telegram'ga so'rov ketgan (javob kutilmoqda). EN: A request to Telegram is in flight. RU: Запрос к Telegram отправлен.
+    busy: Cell<bool>,
 }
 
 fn pattern_len(c: &Country) -> usize {
@@ -141,6 +143,7 @@ impl Login {
             scroll: ScrollState::new(),
             focus_asked: Cell::new(false),
             started: Cell::new(false),
+            busy: Cell::new(false),
         })
     }
 
@@ -158,6 +161,24 @@ impl Login {
         self.t_page.set(-1.0e6);
         self.kb_custom.borrow_mut().go(1.0, now + SHOW_DELAY);
         self.fab.borrow_mut().go(1.0, now + 200.0);
+        self.bump();
+        // UZ: Saqlangan sessiya bo'lsa, qayta kirish talab qilinmaydi. EN: With a saved session there is no need to sign in again. RU: Если есть сохранённая сессия, повторный вход не нужен.
+        if crate::account::api_ready() {
+            let me = self.clone();
+            spawn_bg(crate::account::restore, move |ok| {
+                if ok && me.page.get() == Page::Phone {
+                    me.goto(Page::Done);
+                }
+            });
+        }
+    }
+
+    /// UZ: Telegram xatosini ko'rsatadi va yuklanishni to'xtatadi. EN: Shows a Telegram error and stops the spinner. RU: Показывает ошибку Telegram и останавливает индикатор.
+    fn fail(self: &Rc<Self>, msg: &str) {
+        self.busy.set(false);
+        self.pending.set(None);
+        self.prog.borrow_mut().go(0.0, now_ms());
+        uzcoders::android::toast(msg);
         self.bump();
     }
 
@@ -336,7 +357,11 @@ impl Login {
             drop(c);
             if full && self.ver_t.get().is_none() {
                 self.ver_t.set(Some(now + 450.0));
-                self.pending.set(Some((now + 450.0 + 1100.0, Pending::ToPass)));
+                if crate::account::api_ready() {
+                    self.sign_in_now();
+                } else {
+                    self.pending.set(Some((now + 450.0 + 1100.0, Pending::ToPass)));
+                }
             }
         }
         self.bump();
@@ -344,26 +369,90 @@ impl Login {
 
     fn fab_tap(self: &Rc<Self>) {
         let now = now_ms();
-        if self.pending.get().is_some() {
+        if self.pending.get().is_some() || self.busy.get() {
             return;
         }
+        let live = crate::account::api_ready();
         match self.page.get() {
             Page::Phone => {
                 let ok = self.country.get().is_some_and(|c| self.number.get().chars().count() >= pattern_len(&COUNTRIES[c]).min(7));
                 if ok {
                     self.prog.borrow_mut().go(1.0, now);
-                    self.pending.set(Some((now + 1000.0, Pending::ToCode)));
+                    if live {
+                        self.request_code_now();
+                    } else {
+                        self.pending.set(Some((now + 1000.0, Pending::ToCode)));
+                    }
                 }
             }
             Page::Pass => {
                 if !self.pass.get().is_empty() {
                     self.prog.borrow_mut().go(1.0, now);
-                    self.pending.set(Some((now + 1000.0, Pending::ToDone)));
+                    if live {
+                        self.check_password_now();
+                    } else {
+                        self.pending.set(Some((now + 1000.0, Pending::ToDone)));
+                    }
                 }
             }
             _ => {}
         }
         self.bump();
+    }
+
+    /// UZ: Telegram'dan kirish kodini so'raydi (fon oqimida). EN: Asks Telegram for the sign-in code (on a background thread). RU: Запрашивает код входа у Telegram (в фоновом потоке).
+    fn request_code_now(self: &Rc<Self>) {
+        use crate::account::{self, CodeSent};
+        let Some(ci) = self.country.get() else { return };
+        let phone = format!("+{}{}", COUNTRIES[ci].code, self.number.get());
+        self.busy.set(true);
+        let me = self.clone();
+        spawn_bg(move || account::request_code(&phone), move |r| {
+            me.busy.set(false);
+            match r {
+                Ok(CodeSent::Code { .. }) => me.goto(Page::Code),
+                Ok(CodeSent::LoggedIn) => me.goto(Page::Done),
+                Ok(CodeSent::NeedPassword { .. }) => me.goto(Page::Pass),
+                Err(e) => me.fail(&e),
+            }
+        });
+    }
+
+    /// UZ: Terilgan kod bilan kiradi. EN: Signs in with the typed code. RU: Входит по набранному коду.
+    fn sign_in_now(self: &Rc<Self>) {
+        use crate::account::{self, SignIn};
+        let code = self.code.borrow().clone();
+        self.busy.set(true);
+        let me = self.clone();
+        spawn_bg(move || account::sign_in(&code), move |r| {
+            me.busy.set(false);
+            match r {
+                Ok(SignIn::Done) => me.pending.set(Some((now_ms() + 300.0, Pending::ToDone))),
+                Ok(SignIn::NeedPassword { .. }) => me.pending.set(Some((now_ms() + 300.0, Pending::ToPass))),
+                Err(e) => {
+                    // UZ: Kod noto'g'ri: kataklar tozalanadi, qayta terish mumkin. EN: Wrong code: the cells are cleared, so it can be retyped. RU: Код неверный: ячейки очищаются, можно набрать снова.
+                    me.code.borrow_mut().clear();
+                    me.code_t.set([-1.0e6; CODE_LEN]);
+                    me.ver_t.set(None);
+                    me.fail(&e);
+                }
+            }
+        });
+    }
+
+    /// UZ: 2 bosqichli parolni tekshiradi. EN: Checks the two-step password. RU: Проверяет пароль двух шагов.
+    fn check_password_now(self: &Rc<Self>) {
+        let pw = self.pass.get();
+        self.busy.set(true);
+        let me = self.clone();
+        spawn_bg(move || crate::account::check_password(&pw), move |r| {
+            me.busy.set(false);
+            match r {
+                Ok(true) => me.pending.set(Some((now_ms() + 300.0, Pending::ToDone))),
+                Ok(false) => me.fail("Parol noto'g'ri"),
+                Err(e) => me.fail(&e),
+            }
+        });
     }
 
     fn animating(&self, now: f32) -> bool {

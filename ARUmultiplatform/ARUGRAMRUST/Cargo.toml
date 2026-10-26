@@ -14,9 +14,19 @@ uzcoders = { path = "../uzcoders/crates/uzcoders" }
 # Faqat `raster` moduli (vektor chizish): tanishtiruv animatsiyalari shu bilan chiziladi.
 uzcoders-lottie = { path = "../uzcoders/crates/uzcoders-lottie" }
 
+# Telegram (MTProto) klienti: ARUMEDIATV (`rust/Cargo.toml`) dagi bilan bir xil QOTIRILGAN versiyalar.
+grammers-client = { version = "=0.10.0", default-features = false }
+grammers-mtsender = "=0.10.0"
+grammers-session = { version = "=0.10.0", default-features = false, features = ["serde"] }
+# `glass_pumpkin` rc1 API'ni buzgan: rc0 qotirilgan.
+glass_pumpkin = "=2.0.0-rc0"
+grammers-crypto = "=0.10.0"
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync", "time", "fs"] }
+serde_json = "1"
+
 [profile.release]
 opt-level = 3
 lto = true
 codegen-units = 1
-panic = "abort"
+panic = "unwind"
 strip = true

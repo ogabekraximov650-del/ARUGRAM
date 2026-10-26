@@ -44,6 +44,10 @@ jobs:
 
       - name: Android uchun yig'ish
         working-directory: ARUmultiplatform/ARUGRAMRUST
+        # API ID/HASH Secrets'dan qurish vaqtida ilovaga ulanadi (kodga yozilmaydi, logga chiqmaydi).
+        env:
+          ARUGRAM_API_ID: ${{ secrets.TG_API_ID }}
+          ARUGRAM_API_HASH: ${{ secrets.TG_API_HASH }}
         run: |
           cargo ndk -t armeabi-v7a --platform 28 -o jniLibs build --release
           ls -la jniLibs/*/

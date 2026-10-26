@@ -2,6 +2,7 @@
 //! EN: ARUGRAM (Rust + uzcoders): the Telegram-style intro and sign-in flow. License: GPL-2.0-or-later (`LICENSE`, `NOTICE.md`).
 //! RU: ARUGRAM (Rust + uzcoders): интро и вход в стиле Telegram. Лицензия: GPL-2.0-or-later (`LICENSE`, `NOTICE.md`).
 
+pub mod account;
 pub mod countries;
 pub mod flags;
 pub mod intro_assets;
