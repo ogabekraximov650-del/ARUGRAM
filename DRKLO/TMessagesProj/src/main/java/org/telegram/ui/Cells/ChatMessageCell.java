@@ -20406,6 +20406,17 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
 
     @SuppressLint("WrongCall")
     private boolean drawBackgroundInternal(Canvas canvas, boolean fromParent, boolean internal) {
+        // ARUGRAM: 1.3x linza faqat o'z kanvasida chizilganda (xabar katagi koordinatalari) / the 1.3x lens only when drawing onto the cell's own canvas
+        final View prevGlassHost = MessageDrawable.glassHost;
+        MessageDrawable.glassHost = fromParent ? null : this;
+        try {
+            return drawBackgroundInternal0(canvas, fromParent, internal);
+        } finally {
+            MessageDrawable.glassHost = prevGlassHost;
+        }
+    }
+
+    private boolean drawBackgroundInternal0(Canvas canvas, boolean fromParent, boolean internal) {
         if (currentMessageObject == null) {
             return false;
         }

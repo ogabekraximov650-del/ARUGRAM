@@ -34,6 +34,8 @@ public class MessageDrawable extends Drawable {
     private Shader gradientShader;
     private int currentBackgroundHeight;
     public Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    /** UZ: Hozir chizilayotgan xabar katagi (faqat o'z kanvasida chizilganda). EN: The message cell being drawn (only when drawing onto its own canvas). RU: Рисуемая ячейка сообщения (только при рисовании на её собственном холсте). */
+    public static android.view.View glassHost;
     private static final Paint glassRim = new Paint(Paint.ANTI_ALIAS_FLAG);
     static {
         glassRim.setStyle(Paint.Style.STROKE);
@@ -623,9 +625,10 @@ public class MessageDrawable extends Drawable {
         }
 
         if (glass) {
-            // ARUGRAM: shisha xabar: shaffof to'ldirish + yorug' chet chizig'i / glass message: translucent fill + a light rim line
+            // ARUGRAM: shisha xabar: 1.3x linza (orqa fon) + shaffof to'ldirish + yorug' chet chizig'i / glass message: a 1.3x lens (of the background) + translucent fill + a light rim line
+            org.telegram.ui.Components.blur3.ChatLens.draw(canvas, glassHost, path, bounds.exactCenterX(), bounds.exactCenterY(), 1.3f);
             final int a0 = p.getAlpha();
-            p.setAlpha((int) (a0 * 0.62f));
+            p.setAlpha((int) (a0 * 0.55f));
             canvas.drawPath(path, p);
             p.setAlpha(a0);
             glassRim.setStrokeWidth(Math.max(1f, AndroidUtilities.dpf2(0.75f)));
