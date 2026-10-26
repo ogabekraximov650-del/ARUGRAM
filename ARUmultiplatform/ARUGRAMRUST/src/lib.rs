@@ -36,6 +36,10 @@ pub fn make_ui_parts(scale: f32) -> (Ui, Rc<Intro>, Rc<Login>) {
     let login = Login::new();
     let l = login.clone();
     intro.set_on_start(move || l.show());
+    // UZ: Saqlangan hisob bor: tanishtiruv va kirish o'tkazib yuboriladi. EN: A saved account exists: the intro and sign-in are skipped. RU: Сохранённый аккаунт есть: интро и вход пропускаются.
+    if account::is_authorized() {
+        login.resume_done();
+    }
     let (i, l) = (intro.clone(), login.clone());
     let mut ui = Ui::new(font, move || if l.started() { l.view() } else { i.view() });
     ui.add_font(700, Rc::new(Font::parse(BOLD).expect("Roboto Bold")));

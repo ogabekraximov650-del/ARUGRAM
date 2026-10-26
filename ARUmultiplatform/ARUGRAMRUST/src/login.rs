@@ -72,6 +72,8 @@ pub struct Login {
     started: Cell<bool>,
     /// UZ: Telegram'ga so'rov ketgan (javob kutilmoqda). EN: A request to Telegram is in flight. RU: Запрос к Telegram отправлен.
     busy: Cell<bool>,
+    /// UZ: Saqlangan sessiya Telegram bilan tekshirilganmi. EN: Whether the saved session was verified with Telegram. RU: Проверена ли сохранённая сессия у Telegram.
+    checked: Cell<bool>,
 }
 
 fn pattern_len(c: &Country) -> usize {
@@ -148,6 +150,7 @@ impl Login {
             focus_asked: Cell::new(false),
             started: Cell::new(false),
             busy: Cell::new(false),
+            checked: Cell::new(false),
         })
     }
 
@@ -172,16 +175,19 @@ impl Login {
             match crate::account::stage().map(|s| s.stage) {
                 Some(s) if s == "code" => self.goto(Page::Code),
                 Some(s) if s == "password" => self.goto(Page::Pass),
-                _ => {
-                    let me = self.clone();
-                    spawn_bg(crate::account::restore, move |ok| {
-                        if ok && me.page.get() == Page::Phone {
-                            me.goto(Page::Done);
-                        }
-                    });
-                }
+                _ => {}
             }
         }
+    }
+
+    /// UZ: Saqlangan hisob bor: kirish oqimi va tanishtiruv ko'rsatilmaydi, darhol "tayyor" sahifasi (Kotlin ilovasidagidek). EN: A saved account exists: no intro or sign-in, straight to the "done" page (like the Kotlin app). RU: Сохранённый аккаунт есть: без интро и входа, сразу страница «готово» (как в Kotlin-приложении).
+    pub fn resume_done(self: &Rc<Self>) {
+        self.started.set(true);
+        self.page.set(Page::Done);
+        self.prev.set(Page::Done);
+        self.t_page.set(-1.0e6);
+        self.t_show.set(now_ms() - 5000.0);
+        self.bump();
     }
 
     /// UZ: Telegram xatosini ko'rsatadi va yuklanishni to'xtatadi. EN: Shows a Telegram error and stops the spinner. RU: Показывает ошибку Telegram и останавливает индикатор.
@@ -561,6 +567,15 @@ impl Login {
         let now = now_ms();
         self.ensure_icons();
         self.drive(now);
+        if !self.checked.get() && self.page.get() == Page::Done && crate::account::is_authorized() {
+            self.checked.set(true);
+            let me = self.clone();
+            spawn_bg(crate::account::check_session, move |ok| {
+                if !ok {
+                    me.show();
+                }
+            });
+        }
         let (w, h) = window_dp();
         let ins = safe_insets();
         let hu = h - ins.bottom;

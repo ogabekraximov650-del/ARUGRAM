@@ -198,6 +198,26 @@ fn clear_stage() {
     let _ = std::fs::remove_file(stage_path());
 }
 
+/// UZ: "Hisobga kirilgan" belgisi diskda (ARUMEDIATV Kotlin ilovasidagidek `authorized`): ilova ochilishi bilan tarmoqsiz o'qiladi, so'ng Telegram bilan tekshiriladi. Tarmoq xatosi kirishni bekor QILMAYDI.
+/// EN: The "signed in" flag on disk (like `authorized` in the ARUMEDIATV Kotlin app): read at launch without the network, then verified with Telegram. A network error does NOT sign the user out.
+/// RU: Отметка «выполнен вход» на диске (как `authorized` в Kotlin-приложении ARUMEDIATV): читается при запуске без сети, затем проверяется у Telegram. Ошибка сети НЕ разлогинивает.
+fn auth_path() -> PathBuf {
+    dir().join("authorized")
+}
+
+fn mark_authorized() {
+    let _ = std::fs::write(auth_path(), b"1");
+}
+
+fn clear_authorized() {
+    let _ = std::fs::remove_file(auth_path());
+}
+
+/// UZ: Oldin kirilganmi (tarmoqsiz, darhol). EN: Whether signed in earlier (no network, instant). RU: Выполнен ли вход ранее (без сети, мгновенно).
+pub fn is_authorized() -> bool {
+    api_ready() && auth_path().exists() && FileSession::load(dir().join("session.json")).has_keys()
+}
+
 /// UZ: Saqlangan bosqich (tarmoqsiz). Muddati o'tgan bo'lsa `None`. EN: The saved stage (no network); `None` once expired. RU: Сохранённый этап (без сети); `None`, если срок истёк.
 pub fn stage() -> Option<Stage> {
     let raw = std::fs::read(stage_path()).ok()?;
@@ -404,6 +424,7 @@ pub fn request_code(phone: &str) -> Result<CodeSent, String> {
                 tl::enums::auth::Authorization::Authorization(_) => {
                     t.session.save();
                     clear_stage();
+                    mark_authorized();
                     Ok(CodeSent::LoggedIn)
                 }
                 tl::enums::auth::Authorization::SignUpRequired(_) => {
@@ -434,6 +455,7 @@ pub fn sign_in(code: &str) -> Result<SignIn, String> {
                 t.session.save();
                 t.hash.clear();
                 clear_stage();
+                mark_authorized();
                 Ok(SignIn::Done)
             }
             Ok(tl::enums::auth::Authorization::SignUpRequired(_)) => {
@@ -486,6 +508,7 @@ pub fn check_password(password: &str) -> Result<bool, String> {
             Ok(tl::enums::auth::Authorization::Authorization(_)) => {
                 t.session.save();
                 clear_stage();
+                mark_authorized();
                 Ok(true)
             }
             Ok(tl::enums::auth::Authorization::SignUpRequired(_)) => Err("Bu raqamda Telegram hisobi yo'q".to_string()),
@@ -495,25 +518,29 @@ pub fn check_password(password: &str) -> Result<bool, String> {
     })
 }
 
-/// UZ: Saqlangan sessiya bor va Telegram uni qabul qiladimi (ilova qayta ochilganda). Tarmoqqa chiqadi. EN: Whether a saved session exists and Telegram accepts it (on app restart). Uses the network. RU: Есть ли сохранённая сессия и принимает ли её Telegram (при перезапуске). Использует сеть.
-pub fn restore() -> bool {
-    if !api_ready() || !FileSession::load(dir().join("session.json")).has_keys() {
+/// UZ: Sessiyani Telegram bilan tekshiradi (fonda, ilova ochilganda). Faqat Telegram sessiyani HAQIQATAN bekor qilgan bo'lsa `false`; tarmoq xatosi yoki kutish tugashi — `true` (kirish saqlanadi). EN: Verifies the session with Telegram (in the background at launch). `false` only if Telegram truly revoked it; a network error or timeout gives `true` (the sign-in is kept). RU: Проверяет сессию у Telegram (в фоне при запуске). `false` только если Telegram действительно отозвал её; ошибка сети или таймаут — `true` (вход сохраняется).
+pub fn check_session() -> bool {
+    if !is_authorized() {
         return false;
     }
-    with(|t| {
-        let r = t.rt.block_on(t.client.invoke(&tl::functions::users::GetUsers {
-            id: vec![tl::enums::InputUser::UserSelf],
-        }));
-        match r {
-            Ok(_) => Ok(true),
-            Err(e) if e.is("AUTH_KEY_UNREGISTERED") || e.is("SESSION_REVOKED") || e.is("USER_DEACTIVATED") => {
+    let r = with(|t| {
+        let res = t.rt.block_on(async {
+            tokio::time::timeout(
+                std::time::Duration::from_secs(12),
+                t.client.invoke(&tl::functions::updates::GetState {}),
+            )
+            .await
+        });
+        match res {
+            Ok(Err(e)) if e.is("AUTH_KEY_UNREGISTERED") || e.is("SESSION_REVOKED") || e.is("USER_DEACTIVATED") || e.is("AUTH_KEY_INVALID") => {
                 t.session.wipe();
+                clear_authorized();
                 Ok(false)
             }
-            Err(_) => Ok(false),
+            _ => Ok(true),
         }
-    })
-    .unwrap_or(false)
+    });
+    r.unwrap_or(true)
 }
 
 #[cfg(test)]
