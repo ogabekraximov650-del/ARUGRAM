@@ -70,6 +70,21 @@ jobs:
           done < DRKLO/submodules.txt
           ls DRKLO/TMessagesProj_Modules/media | head -5
 
+      - name: API ID / API HASH (Secrets) ni BuildVars'ga ulash
+        env:
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+        run: |
+          ID=$(printf '%s' "$TG_API_ID" | tr -d '[:space:]')
+          HASH=$(printf '%s' "$TG_API_HASH" | tr -d '[:space:]')
+          case "$ID" in ''|*[!0-9]*) echo "TG_API_ID raqam emas / not a number"; exit 1;; esac
+          case "$HASH" in ''|*[!0-9a-fA-F]*) echo "TG_API_HASH noto'g'ri / invalid"; exit 1;; esac
+          F=DRKLO/TMessagesProj/src/main/java/org/telegram/messenger/BuildVars.java
+          sed -i -E "s/public static int APP_ID = [0-9]+;/public static int APP_ID = $ID;/; s/public static String APP_HASH = \"[0-9a-fA-F]*\";/public static String APP_HASH = \"$HASH\";/" "$F"
+          # qiymatlar jurnalga chiqmaydi / values are not printed
+          grep -c "APP_ID = $ID;" "$F"
+          grep -c "APP_HASH = \"$HASH\";" "$F"
+
       - uses: gradle/actions/setup-gradle@v4
         with:
           cache-read-only: false
