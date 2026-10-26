@@ -36,14 +36,7 @@ final class LiveGlass {
     private static final HashSet<View> excluded = new HashSet<>();
     private static final HashSet<View> ancestors = new HashSet<>();
 
-    private static final Path ringOuter = new Path();
-    private static final Path ringMid = new Path();
-    private static final Path innerPath = new Path();
-    private static final Path midPath = new Path();
     private static final RectF tmpRect = new RectF();
-    private static int ringW = -1, ringH = -1;
-    private static float ringT = -1;
-
     /** UZ: Yangi panel qo'shildi: keyingi chizishda qayta yoziladi. EN: A new panel appeared: re-record on the next draw. RU: Появилась новая панель: перезаписать при следующей отрисовке. */
     static void reset() {
         frameStamp = -1;
@@ -129,6 +122,12 @@ final class LiveGlass {
         canvas.restore();
     }
 
+    private static final int BANDS = 8;
+    private static final Path[] bandPath = new Path[BANDS + 1];
+    private static int ringW = -1, ringH = -1;
+    private static float ringT = -1;
+
+    /** UZ: chetdan ichkariga i-qatlam (qatlam yo'li) / EN: i-th inset path from the edge / RU: i-й контур от края внутрь */
     private static void buildRings(Rect bp, float[] radii, float t) {
         if (ringW == bp.width() && ringH == bp.height() && ringT == t) {
             return;
@@ -136,17 +135,13 @@ final class LiveGlass {
         ringW = bp.width();
         ringH = bp.height();
         ringT = t;
-        // tashqi halqa: chetdan 0..t*0.45, o'rta halqa: t*0.45..t / outer ring: edge..0.45t, middle ring: 0.45t..t
         final float[] rr = new float[8];
-        final float k1 = t * 0.45f;
-        outerInner(innerPath, bp, radii, k1, rr);
-        outerInner(midPath, bp, radii, t, rr);
-        ringOuter.rewind();
-        ringOuter.addRoundRect(bp.left, bp.top, bp.right, bp.bottom, expand(radii, 0, rr), Path.Direction.CW);
-        ringOuter.op(innerPath, Path.Op.DIFFERENCE);
-        ringMid.rewind();
-        ringMid.set(innerPath);
-        ringMid.op(midPath, Path.Op.DIFFERENCE);
+        for (int i = 1; i <= BANDS; i++) {
+            if (bandPath[i] == null) {
+                bandPath[i] = new Path();
+            }
+            outerInner(bandPath[i], bp, radii, t * i / BANDS, rr);
+        }
     }
 
     private static float[] expand(float[] r, float inset, float[] out) {
@@ -200,17 +195,22 @@ final class LiveGlass {
             layer(canvas, n, cx, cy, zoom, hx, hy);
             canvas.restore();
             if (rings && thickness > 4) {
+                // UZ: silliq sinish: chetdan markazga zoom 1.35x -> 1x ketma-ket qatlamlar (har biri avvalgisi ustiga) / EN: smooth refraction: zoom falls 1.35x -> 1x edge-to-center in stacked insets / RU: плавное преломление: зум падает 1.35x -> 1x от края к центру слоями
                 buildRings(bp, radii, thickness);
                 canvas.save();
                 canvas.clipPath(panelPath);
-                canvas.save();
-                canvas.clipPath(ringMid);
-                layer(canvas, n, cx, cy, zoom * 1.12f, hx, hy);
-                canvas.restore();
-                canvas.save();
-                canvas.clipPath(ringOuter);
-                layer(canvas, n, cx, cy, zoom * 1.28f, hx, hy);
-                canvas.restore();
+                for (int i = 0; i <= BANDS; i++) {
+                    final float d = 1f - (float) i / BANDS;
+                    final float z = zoom * (1f + 0.35f * d * d);
+                    if (i > 0) {
+                        canvas.save();
+                        canvas.clipPath(bandPath[i]);
+                    }
+                    layer(canvas, n, cx, cy, z, hx, hy);
+                    if (i > 0) {
+                        canvas.restore();
+                    }
+                }
                 canvas.restore();
             }
         } catch (Throwable t) {
