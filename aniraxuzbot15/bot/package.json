@@ -1,0 +1,24 @@
+{
+  "name": "aniraxuzbot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "deploy": "wrangler deploy",
+    "worker:dev": "wrangler dev src/worker.ts"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.19.14",
+    "grammy": "^1.36.3",
+    "hono": "^4.8.5"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260704.1",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "~5.9.2",
+    "wrangler": "^4.107.0"
+  }
+}

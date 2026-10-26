@@ -1,0 +1,33 @@
+name            = "aniraxuzbot"
+main            = "src/worker.ts"
+compatibility_date  = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+account_id      = "cad72210c2b1fc9b059ba2036ac54228"
+
+[triggers]
+crons = ["* * * * *"]
+
+[vars]
+ADMIN_ID          = "6805215964"
+SAVED_CHANNEL_ID  = "-1002889216626"
+WEBHOOK_PATH      = "/webhook"
+PORT              = "8787"
+WORKER_URL        = "https://aniraxuzbot.ogabekraximov650.workers.dev"
+TEZCHECK_API_KEY  = ""  # maxfiy kalit repoga yozilmaydi: `wrangler secret put TEZCHECK_API_KEY` / secret key is not stored in the repo
+# D1 Database 1 — Anime, Season, Epizod jadvallari
+[[d1_databases]]
+binding      = "DB_ANIME"
+database_name = "aniraxuzbot_anime"
+database_id  = "fda65bb9-2c4c-4d1a-afab-72cb0205b654"
+
+# D1 Database 2 — Statistika jadvallari
+[[d1_databases]]
+binding      = "DB_STAT"
+database_name = "aniraxuzbot_stat"
+database_id  = "f9179d01-874c-47b5-a420-e67719c5397f"
+
+# D1 Database 3 — Asosiy (users, sessions, settings, queue, channels ...)
+[[d1_databases]]
+binding      = "DB_MAIN"
+database_name = "aniraxuzbot_user"
+database_id  = "6a9aa9e4-efd0-4d91-b5e9-e43d0f2ca8fc"

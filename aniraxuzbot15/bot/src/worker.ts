@@ -1,0 +1,141 @@
+/**
+ * Cloudflare Workers entry point.
+ * 3 ta D1 baza: DB_ANIME, DB_STAT, DB_MAIN
+ *
+ * TUZATMALAR:
+ *  1. ensureReady() — parallel so'rovlarda xavfsiz (race-condition yo'q)
+ *  2. Bot + DB init xatolari qayta urinib ko'riladi
+ *  3. handleUpdate tezlashtirilgan — javob darhol "ok" qaytaradi
+ */
+import { Hono } from "hono";
+import { createBot } from "./bot.ts";
+import { createTable } from "./db.ts";
+import { config } from "./config.ts";
+import { processPostQueue } from "./queue_processor.ts";
+import { initD1Bindings, ensureD1Tables, type D1Env } from "./db_d1.ts";
+
+type CfEnv = D1Env & Record<string, string | undefined>;
+
+function applyEnv(env: CfEnv) {
+  if (env.BOT_TOKEN)          config.BOT_TOKEN          = env.BOT_TOKEN as string;
+  if (env.ADMIN_ID)           config.ADMIN_ID           = Number(env.ADMIN_ID);
+  if (env.SAVED_CHANNEL_ID)   config.SAVED_CHANNEL_ID   = env.SAVED_CHANNEL_ID as string;
+  if (env.WORKER_URL)         config.WORKER_URL         = env.WORKER_URL as string;
+  if (env.TEZCHECK_API_KEY)   config.TEZCHECK_API_KEY   = env.TEZCHECK_API_KEY as string;
+
+  // D1 bindinglari — modul darajasida saqlanadi
+  initD1Bindings(env);
+}
+
+const app = new Hono();
+
+let bot: ReturnType<typeof createBot> | null = null;
+let _botInitPromise: Promise<void> | null = null;
+let _dbReady = false;
+let _dbInitPromise: Promise<void> | null = null;
+
+/**
+ * Bot + DB ni ishga tushiradi.
+ * DB init BIRINCHI safar AWAIT qilinadi — jadvallar yo'q bo'lganda xavfsizlik.
+ */
+async function ensureReady(): Promise<void> {
+  // ── 1. Bot init ──────────────────────────────────────────────────────────────
+  if (!_botInitPromise) {
+    bot = createBot();
+    _botInitPromise = bot.init().catch((e) => {
+      console.error("Bot init xatosi, qayta uriniladi:", e);
+      _botInitPromise = null;
+      bot = null;
+      throw e;
+    });
+  }
+  await _botInitPromise;
+
+  // ── 2. DB init — birinchi safar await, keyin background ──────────────────────
+  if (!_dbReady) {
+    if (!_dbInitPromise) {
+      _dbInitPromise = Promise.all([
+        ensureD1Tables(),
+        createTable(),
+      ])
+        .then(() => {
+          console.log("D1 jadvallar tayyor.");
+          _dbReady = true;
+        })
+        .catch((e) => {
+          console.error("DB init xatosi:", e);
+          _dbInitPromise = null;
+          throw e;
+        });
+    }
+    await _dbInitPromise.catch((e) => {
+      console.error("DB init kutilmadi (bot ishlashda davom etadi):", e);
+    });
+  }
+}
+
+// ── Sog'liq tekshiruvi ──────────────────────────────────────────────────────
+app.get("/health", (c) => c.json({ status: "ok", bot: "@aniraxuzbot", db: "D1 x3" }));
+
+// ── Webhook o'rnatish ───────────────────────────────────────────────────────
+app.get("/setup", async (c) => {
+  try {
+    await ensureReady();
+    const url = new URL(c.req.url);
+    const webhookUrl = `${url.protocol}//${url.host}${config.WEBHOOK_PATH}`;
+    await bot!.api.setWebhook(webhookUrl, {
+      drop_pending_updates: true,
+      max_connections: 100,
+      allowed_updates: [
+        "message", "edited_message", "callback_query",
+        "chat_join_request", "chat_member", "my_chat_member",
+        "inline_query", "chosen_inline_result",
+        "pre_checkout_query",
+      ],
+    });
+    return c.json({ ok: true, webhook: webhookUrl });
+  } catch (e) {
+    return c.json({ ok: false, error: String(e) }, 500);
+  }
+});
+
+// ── Telegram webhook ─────────────────────────────────────────────────────────
+app.post(config.WEBHOOK_PATH, async (c) => {
+  let update: unknown;
+  try {
+    update = await c.req.json();
+  } catch {
+    return c.text("bad json", 400);
+  }
+
+  c.executionCtx.waitUntil(
+    ensureReady()
+      .then(() => bot!.handleUpdate(update as any))
+      .catch((e) => console.error("handleUpdate xatosi:", e))
+  );
+
+  return c.text("ok");
+});
+
+// ── Cloudflare Worker export ──────────────────────────────────────────────────
+export default {
+  fetch(request: Request, env: CfEnv, ctx: ExecutionContext) {
+    applyEnv(env);
+    return app.fetch(request, env as any, ctx);
+  },
+
+  async scheduled(
+    _event: { scheduledTime: number; cron: string },
+    env: CfEnv,
+    ctx: { waitUntil(p: Promise<unknown>): void }
+  ) {
+    applyEnv(env);
+    if (!bot) {
+      bot = createBot();
+      await bot.init().catch(() => {});
+    }
+    ctx.waitUntil(
+      processPostQueue().catch((e) => console.error("processPostQueue:", e))
+    );
+  },
+};

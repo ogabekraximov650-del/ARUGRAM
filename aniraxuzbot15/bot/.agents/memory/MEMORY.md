@@ -1,0 +1,2 @@
+- [D1 3-baza arxitekturasi](d1-three-db.md) — DB_ANIME/DB_STAT/DB_MAIN, routing db_d1.ts da, Turso butunlay olib tashlandi
+- [Duplicate post fix](duplicate-post-fix.md) — posted_at yuborishdan OLDIN yoziladi; reset faqat posted_at IS NULL bo'lganda
