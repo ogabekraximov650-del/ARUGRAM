@@ -643,15 +643,19 @@ public abstract class BlurredBackgroundDrawable extends Drawable {
         if (legacyState == null) {
             legacyState = new org.telegram.ui.Components.blur3.LegacyGlassBackdrop.State();
         }
-        final android.graphics.Bitmap bmp = org.telegram.ui.Components.blur3.LegacyGlassBackdrop.get(
-            legacyState, host, bp, Theme.getColor(Theme.key_windowBackgroundWhite));
-        if (bmp == null || bmp.isRecycled()) {
-            return false;
+        final int baseColor = Theme.getColor(Theme.key_windowBackgroundWhite);
+        final boolean live = org.telegram.ui.Components.blur3.LegacyGlassBackdrop.liveEnabled();
+        android.graphics.Bitmap bmp = null;
+        if (!live) {
+            bmp = org.telegram.ui.Components.blur3.LegacyGlassBackdrop.get(legacyState, host, bp, baseColor);
+            if (bmp == null || bmp.isRecycled()) {
+                return false;
+            }
         }
         if (!legacyPaintReady) {
             legacyPaintReady = true;
             final android.graphics.ColorMatrix cm = new android.graphics.ColorMatrix();
-            cm.setSaturation(1.55f);
+            cm.setSaturation(1.2f);
             legacyPaint.setColorFilter(new android.graphics.ColorMatrixColorFilter(cm));
         }
 
@@ -676,17 +680,32 @@ public abstract class BlurredBackgroundDrawable extends Drawable {
             Math.min(bp.width(), bp.height()) / 5), 1);
         // lupa kuchi panel o'lchamiga qarab: kichik panelda kuchli, katta oynada kuchsiz / magnifier strength by panel size: strong on small panels, weak on big sheets
         final float panelH = bp.height() / org.telegram.messenger.AndroidUtilities.density;
-        final float zoom = 1f + (panelH < 90 ? 0.22f : (panelH < 220 ? 0.09f : 0f)) * org.telegram.ui.Components.blur3.LegacyGlassBackdrop.zoomScale();
-        org.telegram.ui.Components.blur3.LegacyGlassBackdrop.ensureMesh(
-            legacyState, bp.width(), bp.height(), legacyRadii, thickness * 1.25f, Math.max(boundProps.liquidIntensity, 1.0f), boundProps.liquidIndex, zoom);
+        final float baseZoom = panelH < 90 ? 0.22f : (panelH < 220 ? 0.09f : 0f);
 
-        legacyPaint.setAlpha(alpha);
-        canvas.save();
-        canvas.clipPath(boundProps.path);
-        canvas.drawBitmap(bmp, null, bp, legacyPaint);
-        canvas.translate(bp.left, bp.top);
-        canvas.drawBitmapMesh(bmp, legacyState.cols, legacyState.rows, legacyState.verts, 0, null, 0, legacyPaint);
-        canvas.restore();
+        boolean drawn = false;
+        if (live && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            // JONLI yo'l: shu kadrning o'zida GPU bilan / LIVE path: in the same frame on the GPU
+            drawn = org.telegram.ui.Components.blur3.LegacyGlassBackdrop.drawLive(
+                canvas, host, bp, boundProps.path, legacyRadii, 1f + baseZoom, org.telegram.ui.Components.blur3.LegacyGlassBackdrop.tier() == 0, thickness, baseColor);
+        }
+        if (!drawn) {
+            if (bmp == null) {
+                bmp = org.telegram.ui.Components.blur3.LegacyGlassBackdrop.get(legacyState, host, bp, baseColor);
+                if (bmp == null || bmp.isRecycled()) {
+                    return false;
+                }
+            }
+            final float zoom = 1f + baseZoom * org.telegram.ui.Components.blur3.LegacyGlassBackdrop.zoomScale();
+            org.telegram.ui.Components.blur3.LegacyGlassBackdrop.ensureMesh(
+                legacyState, bp.width(), bp.height(), legacyRadii, thickness * 1.25f, Math.max(boundProps.liquidIntensity, 1.0f), boundProps.liquidIndex, zoom);
+            legacyPaint.setAlpha(alpha);
+            canvas.save();
+            canvas.clipPath(boundProps.path);
+            canvas.drawBitmap(bmp, null, bp, legacyPaint);
+            canvas.translate(bp.left, bp.top);
+            canvas.drawBitmapMesh(bmp, legacyState.cols, legacyState.rows, legacyState.verts, 0, null, 0, legacyPaint);
+            canvas.restore();
+        }
 
         // rang qatlami: glass ko'rinib turishi uchun shaffofligi chegaralanadi / tint layer: alpha is capped so the glass stays visible
         final int tint = Theme.multAlpha(this.backgroundColor, alpha / 255f);

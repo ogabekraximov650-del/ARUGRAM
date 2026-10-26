@@ -56,15 +56,16 @@ public final class LegacyGlassBackdrop {
 
     public static int tier() {
         if (tier < 0) {
+            final boolean q = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q;
             switch (SharedConfig.getDevicePerformanceClass()) {
                 case SharedConfig.PERFORMANCE_CLASS_HIGH:
-                    tier = 0;
+                    tier = q ? 0 : 2;
                     break;
                 case SharedConfig.PERFORMANCE_CLASS_AVERAGE:
-                    tier = 2;
+                    tier = q ? 1 : 3;
                     break;
                 default:
-                    tier = 3;
+                    tier = q ? 2 : 3;
                     break;
             }
         }
@@ -72,67 +73,29 @@ public final class LegacyGlassBackdrop {
     }
 
     private static int downscale() {
-        switch (tier()) {
-            case 0:
-                return 2;
-            case 1:
-                return 3;
-            case 2:
-                return 5;
-            default:
-                return 8;
-        }
+        // xiralashtirish yo'q: o'tkir tasvir uchun kattaroq o'lcham / no blur: a larger size for a sharp image
+        return tier() <= 2 ? 3 : 5;
     }
 
     private static int blurRadiusPx(int ds) {
-        switch (tier()) {
-            case 0:
-                return 0;
-            case 1:
-                return 1;
-            case 2:
-                return 2;
-            default:
-                return Math.max(2, dp(9) / ds);
-        }
+        return 0; // xiralashtirish olib tashlandi: faqat sinish (lupa) / blur removed: refraction (lens) only
     }
 
     /** UZ: Sinish panjarasi katagi (dp). EN: Refraction mesh cell (dp). RU: Размер ячейки сетки преломления (dp). */
     public static int meshCellDp() {
-        switch (tier()) {
-            case 0:
-                return 3;
-            case 1:
-                return 4;
-            case 2:
-                return 5;
-            default:
-                return 6;
-        }
+        return tier() <= 2 ? 5 : 6;
     }
 
     /** UZ: Lupa kuchi: o'tkir tasvirda to'liq, xira tasvirda yengilroq. EN: Lens strength: full on sharp images, lighter on blurry ones. RU: Сила линзы: полная на чётком изображении, слабее на размытом. */
     public static float zoomScale() {
-        return tier() <= 1 ? 1f : 0.8f;
+        return 1f;
     }
 
     private static long interval() {
-        long base;
-        switch (tier()) {
-            case 0:
-                base = 33;
-                break;
-            case 1:
-                base = 50;
-                break;
-            case 2:
-                base = 90;
-                break;
-            default:
-                base = 140;
-                break;
+        if (liveEnabled()) {
+            return 0; // jonli yo'l: har kadrda / live path: every frame
         }
-        return base + extraInterval;
+        return (tier() <= 2 ? 90 : 140) + extraInterval;
     }
 
     private static float budgetMs() {
@@ -194,7 +157,8 @@ public final class LegacyGlassBackdrop {
                 return;
             }
             scheduled = true;
-            decor.postOnAnimationDelayed(() -> {
+            final long iv = interval();
+            final Runnable r = () -> {
                 scheduled = false;
                 for (int i = hosts.size() - 1; i >= 0; i--) {
                     final View v = hosts.get(i).get();
@@ -203,11 +167,16 @@ public final class LegacyGlassBackdrop {
                         continue;
                     }
                     if (v.isShown() && v.getWidth() > 0) {
-                        suppress++;
+                        suppress = 1;
                         v.invalidate();
                     }
                 }
-            }, interval());
+            };
+            if (iv <= 0) {
+                decor.postOnAnimation(r);
+            } else {
+                decor.postOnAnimationDelayed(r, iv);
+            }
         }
     }
 
@@ -228,6 +197,53 @@ public final class LegacyGlassBackdrop {
             }
         }
         w.hosts.add(new WeakReference<>(host));
+    }
+
+    /** UZ: Jonli yo'l (API 29+): kadr ichida GPU bilan. EN: The live path (API 29+): inside the frame on the GPU. RU: «Живой» путь (API 29+): внутри кадра на GPU. */
+    public static boolean drawLive(android.graphics.Canvas canvas, View host, Rect bp, android.graphics.Path path, float[] radii,
+                                   float zoom, boolean rings, float thickness, int baseColor) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            return false;
+        }
+        return LiveGlass.draw(canvas, host, bp, path, radii, zoom, rings, thickness, baseColor);
+    }
+
+    static View decorOf(View host) {
+        return findDecor(host);
+    }
+
+    static ArrayList<WeakReference<View>> hostsOf(View decor) {
+        final Watcher w = watchers.get(decor);
+        return w == null ? null : w.hosts;
+    }
+
+    private static boolean liveBroken;
+    private static float liveEma;
+    private static int liveSlow, liveFail;
+
+    /** UZ: Jonli (RenderNode) yo'l yoqilganmi. EN: Whether the live (RenderNode) path is on. RU: Включён ли «живой» путь (RenderNode). */
+    public static boolean liveEnabled() {
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !liveBroken && tier() <= 1 && enabled();
+    }
+
+    static void reportLive(float ms, boolean ok) {
+        if (!ok) {
+            if (++liveFail >= 3) {
+                liveBroken = true;
+            }
+            return;
+        }
+        liveEma = liveEma == 0 ? ms : liveEma * 0.9f + ms * 0.1f;
+        final float budget = tier() == 0 ? 4.5f : 3.5f;
+        if (liveEma > budget) {
+            if (++liveSlow >= 40) {
+                liveSlow = 0;
+                liveEma = 0;
+                tier = tier() + 1; // jonli yo'ldan pastga / step down from the live path
+            }
+        } else {
+            liveSlow = 0;
+        }
     }
 
     private static View findDecor(View host) {
