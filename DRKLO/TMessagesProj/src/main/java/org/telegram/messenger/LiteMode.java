@@ -281,6 +281,11 @@ public class LiteMode {
 
         int prevValue = value;
         value = preferences.getInt("lite_mode6", defaultValue);
+        // ARUGRAM: glass (Liquid Glass + blur) bir marta hamma uchun yoqiladi; keyin foydalanuvchi o'chirishi mumkin / glass is switched on once for everyone; the user can turn it off afterwards
+        if (!preferences.getBoolean("arugram_glass_v1", false)) {
+            value |= FLAG_LIQUID_GLASS | FLAG_CHAT_BLUR;
+            preferences.edit().putInt("lite_mode6", value).putBoolean("arugram_glass_v1", true).apply();
+        }
         if (loaded) {
             onFlagsUpdate(prevValue, value);
         }

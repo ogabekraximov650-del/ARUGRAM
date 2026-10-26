@@ -16,6 +16,9 @@ public class BlurredBackgroundDrawableSource extends BlurredBackgroundDrawable {
 
     @Override
     public void draw(@NonNull Canvas canvas) {
+        if (drawLegacyGlass(canvas)) {
+            return;
+        }
         drawSource(canvas, source);
     }
 

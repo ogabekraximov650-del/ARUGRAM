@@ -604,6 +604,98 @@ public abstract class BlurredBackgroundDrawable extends Drawable {
     private final float[] glassRadii = new float[4];
     private org.telegram.ui.Components.blur3.LiquidGlassCpu liquidGlassCpu;
 
+    private java.lang.ref.WeakReference<android.view.View> hostRef;
+    private org.telegram.ui.Components.blur3.LegacyGlassBackdrop.State legacyState;
+    private final Paint legacyPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+    private final Paint legacyTint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final float[] legacyRadii = new float[4];
+    private boolean legacyPaintReady;
+
+    /**
+     * UZ: ARUGRAM: panel egasi (View) — jonli glass uchun panel ostidagi tasvir shu View orqali olinadi.
+     * EN: ARUGRAM: the panel's owner View — the live glass takes the image under the panel through it.
+     * RU: ARUGRAM: View-владелец панели — «живое» стекло берёт изображение под панелью через него.
+     */
+    public void setHostView(android.view.View view) {
+        hostRef = view == null ? null : new java.lang.ref.WeakReference<>(view);
+    }
+
+    /**
+     * UZ: ARUGRAM: Android 12 dan eski qurilmalarda jonli glass (xira tasvir + sinish panjarasi). `false` — oddiy yo'l.
+     * EN: ARUGRAM: live glass on devices older than Android 12 (blurred image + a refraction mesh). `false` means the usual path.
+     * RU: ARUGRAM: живое стекло на устройствах старше Android 12 (размытое изображение + сетка преломления). `false` — обычный путь.
+     */
+    protected boolean drawLegacyGlass(Canvas canvas) {
+        if (hostRef == null || boundProps.boundsWithPadding.isEmpty() || alpha == 0) {
+            return false;
+        }
+        if (!org.telegram.ui.Components.blur3.LegacyGlassBackdrop.enabled()) {
+            return false;
+        }
+        final android.view.View host = hostRef.get();
+        if (host == null) {
+            return false;
+        }
+        if (org.telegram.ui.Components.blur3.LegacyGlassBackdrop.capturing) {
+            return true;
+        }
+        final Rect bp = boundProps.boundsWithPadding;
+        if (legacyState == null) {
+            legacyState = new org.telegram.ui.Components.blur3.LegacyGlassBackdrop.State();
+        }
+        final android.graphics.Bitmap bmp = org.telegram.ui.Components.blur3.LegacyGlassBackdrop.get(
+            legacyState, host, bp, Theme.getColor(Theme.key_windowBackgroundWhite));
+        if (bmp == null || bmp.isRecycled()) {
+            return false;
+        }
+        if (!legacyPaintReady) {
+            legacyPaintReady = true;
+            final android.graphics.ColorMatrix cm = new android.graphics.ColorMatrix();
+            cm.setSaturation(1.3f);
+            legacyPaint.setColorFilter(new android.graphics.ColorMatrixColorFilter(cm));
+        }
+
+        if (Color.alpha(shadowColor) > 0) {
+            final NinePatchDrawable ninePatchDrawable = checkNinePatchDrawable(0, false);
+            ninePatchDrawable.setBounds(
+                bp.left - ninePatchDrawablePadding.left,
+                bp.top - ninePatchDrawablePadding.top,
+                bp.right + ninePatchDrawablePadding.right,
+                bp.bottom + ninePatchDrawablePadding.bottom
+            );
+            ninePatchDrawable.setAlpha(alpha);
+            ninePatchDrawable.draw(canvas);
+        }
+
+        legacyRadii[0] = boundProps.shaderRadii[0];
+        legacyRadii[1] = boundProps.shaderRadii[2];
+        legacyRadii[2] = boundProps.shaderRadii[4];
+        legacyRadii[3] = boundProps.shaderRadii[6];
+        final float thickness = Math.max(Math.min(
+            boundProps.liquidThickness <= 0 ? org.telegram.messenger.AndroidUtilities.dp(11) : boundProps.liquidThickness,
+            Math.min(bp.width(), bp.height()) / 5), 1);
+        org.telegram.ui.Components.blur3.LegacyGlassBackdrop.ensureMesh(
+            legacyState, bp.width(), bp.height(), legacyRadii, thickness, boundProps.liquidIntensity, boundProps.liquidIndex);
+
+        legacyPaint.setAlpha(alpha);
+        canvas.save();
+        canvas.clipPath(boundProps.path);
+        canvas.drawBitmap(bmp, null, bp, legacyPaint);
+        canvas.translate(bp.left, bp.top);
+        canvas.drawBitmapMesh(bmp, legacyState.cols, legacyState.rows, legacyState.verts, 0, null, 0, legacyPaint);
+        canvas.restore();
+
+        // rang qatlami: glass ko'rinib turishi uchun shaffofligi chegaralanadi / tint layer: alpha is capped so the glass stays visible
+        final int tint = Theme.multAlpha(this.backgroundColor, alpha / 255f);
+        if (Color.alpha(tint) > 0) {
+            final int a = Math.min(Color.alpha(tint), 120);
+            legacyTint.setColor((tint & 0x00FFFFFF) | (a << 24));
+            boundProps.draw(canvas, legacyTint);
+        }
+        drawStrokeInternalIfNeeded(canvas);
+        return true;
+    }
+
     /**
      * UZ: ARUGRAM: Android 13 dan eski qurilmalarda "Liquid Glass" ni protsessorda (kichik tasma) hisoblaydi.
      * EN: ARUGRAM: computes "Liquid Glass" on the CPU (a small band) on devices older than Android 13.
