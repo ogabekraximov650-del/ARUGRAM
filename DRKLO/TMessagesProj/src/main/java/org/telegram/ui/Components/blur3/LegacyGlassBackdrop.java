@@ -132,13 +132,37 @@ public final class LegacyGlassBackdrop {
         final ArrayList<WeakReference<View>> hosts = new ArrayList<>();
         int suppress;
         boolean scheduled;
+        long syncStamp = -1;
 
         Watcher(View decor) {
             this.decor = decor;
         }
 
+        /** UZ: Ro'yxat surilganda panellar SHU kadrning o'zida qayta chiziladi (kechikish va har ikkinchi kadrda yangilanish yo'q). EN: When a list scrolls the panels are redrawn in the SAME frame (no lag, no every-other-frame updates). RU: При прокрутке списка панели перерисовываются В ТОМ ЖЕ кадре (без задержки и обновления через кадр). */
+        final ViewTreeObserver.OnScrollChangedListener scrollListener = () -> {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || !liveEnabled()) {
+                return;
+            }
+            final long st = android.view.animation.AnimationUtils.currentAnimationTimeMillis();
+            if (st == syncStamp) {
+                return;
+            }
+            syncStamp = st;
+            for (int i = hosts.size() - 1; i >= 0; i--) {
+                final View v = hosts.get(i).get();
+                if (v == null || !v.isAttachedToWindow()) {
+                    hosts.remove(i);
+                } else if (v.isShown() && v.getWidth() > 0) {
+                    v.invalidate();
+                }
+            }
+        };
+
         @Override
         public void onDraw() {
+            if (syncStamp == android.view.animation.AnimationUtils.currentAnimationTimeMillis()) {
+                return;
+            }
             if (suppress > 0) {
                 suppress--;
                 return;
@@ -177,6 +201,7 @@ public final class LegacyGlassBackdrop {
             watchers.put(decor, w);
             try {
                 decor.getViewTreeObserver().addOnDrawListener(w);
+                decor.getViewTreeObserver().addOnScrollChangedListener(w.scrollListener);
             } catch (Throwable t) {
                 FileLog.e(t);
             }

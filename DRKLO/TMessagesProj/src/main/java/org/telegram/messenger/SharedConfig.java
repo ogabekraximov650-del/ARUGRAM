@@ -1733,7 +1733,7 @@ public class SharedConfig {
 
     public static boolean canBlurChat() {
         // ARUGRAM: Android 10 da ham o'rtacha qurilmalarga blur (SizeNotifierFrameLayout.startBlur susaytirilgan) / blur on average devices below Android 12 too (startBlur is throttled)
-        return getDevicePerformanceClass() >= PERFORMANCE_CLASS_AVERAGE || BuildVars.DEBUG_PRIVATE_VERSION;
+        return getDevicePerformanceClass() >= PERFORMANCE_CLASS_HIGH || BuildVars.DEBUG_PRIVATE_VERSION;
     }
 
     public static boolean chatBlurEnabled() {
