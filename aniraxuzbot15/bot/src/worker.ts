@@ -22,6 +22,8 @@ function applyEnv(env: CfEnv) {
   if (env.SAVED_CHANNEL_ID)   config.SAVED_CHANNEL_ID   = env.SAVED_CHANNEL_ID as string;
   if (env.WORKER_URL)         config.WORKER_URL         = env.WORKER_URL as string;
   if (env.CHANNEL_POSTING)    config.CHANNEL_POSTING    = env.CHANNEL_POSTING === "1";
+  if (env.TEZCHECK_TOKEN)     config.TEZCHECK_TOKEN     = env.TEZCHECK_TOKEN as string;
+  if (env.TEZCHECK_DESK)      config.TEZCHECK_DESK      = env.TEZCHECK_DESK as string;
   if (env.TEZCHECK_API_KEY)   config.TEZCHECK_API_KEY   = env.TEZCHECK_API_KEY as string;
 
   // D1 bindinglari — modul darajasida saqlanadi

@@ -482,6 +482,16 @@ async function _initMainTables(db: D1Database): Promise<void> {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     )`,
+    `CREATE TABLE IF NOT EXISTS bot_payments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_id TEXT NOT NULL UNIQUE,
+      user_id INTEGER NOT NULL,
+      amount INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      pay_url TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL
+    )`,
     `CREATE TABLE IF NOT EXISTS post_queue (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       batch_id TEXT NOT NULL,

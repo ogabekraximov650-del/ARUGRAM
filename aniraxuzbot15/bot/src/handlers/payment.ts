@@ -6,7 +6,8 @@
 import { Bot, InlineKeyboard } from "grammy";
 import type { MyContext } from "./admin.ts";
 import { getUser, updateUserBalance } from "../db_users.ts";
-import { config } from "../config.ts";
+import { d1Run, d1Batch, d1InsertReturningId } from "../db_d1.ts";
+import { createBill, getBill, toMinor, tezcheckReady, PAY_MIN, PAY_MAX, PAY_LINK_TTL_MS } from "../tezcheck.ts";
 
 function styleAll(kb: InlineKeyboard): InlineKeyboard {
   for (const row of kb.inline_keyboard)
@@ -14,52 +15,59 @@ function styleAll(kb: InlineKeyboard): InlineKeyboard {
   return kb;
 }
 
-// ─── TezCheck API ──────────────────────────────────────────────────────────────
+// ─── To'lovni hisobga o'tkazish (ilovadagi `credit_payment` kabi: BIR MARTA) ────
+//
+// To'lov haqiqatan bo'lganini FAQAT tezcheck.uz tasdiqlaydi (summa ham solishtiriladi). Balans va holat bitta
+// tranzaksiyada (D1 batch) o'zgaradi: avval `pending` bo'lsagina balans oshadi, keyin `paid` qilinadi — "Tekshirish"
+// tugmasi necha marta bosilsa ham pul BIR marta qo'shiladi.
 
-interface TezCheckCreateResponse {
-  ok: boolean;
-  order_id?: number;
-  pay_url?: string;
-  error?: { message: string };
-}
+type Settle =
+  | { status: "paid"; amount: number }
+  | { status: "pending" }
+  | { status: "missing" }
+  | { status: "error"; message: string };
 
-interface TezCheckStatusResponse {
-  ok: boolean;
-  payment?: { id: string; amount: string; status: "pending" | "paid" | "canceled" };
-  error?: { message: string };
-}
+async function settlePayment(id: number, userId: number): Promise<Settle> {
+  const rows = await d1Run<{ order_id: string; amount: number; status: string }>(
+    `SELECT order_id, amount, status FROM bot_payments WHERE id = ? AND user_id = ?`,
+    [id, userId]
+  );
+  const pay = rows[0];
+  if (!pay) return { status: "missing" };
+  if (pay.status === "paid") return { status: "paid", amount: pay.amount };
 
-/** PHP notice bilan kelgan javobdan JSON qismini ajratib oladi */
-function extractJson(raw: string): unknown {
-  const idx = raw.indexOf("{");
-  if (idx === -1) throw new Error("JSON topilmadi");
-  return JSON.parse(raw.slice(idx));
-}
-
-async function tezCheckCreate(amountSom: number): Promise<TezCheckCreateResponse> {
+  let bill;
   try {
-    const r = await fetch(`https://tezcheck.uz/api/create_invoice`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ api_key: config.TEZCHECK_API_KEY, amount: amountSom }),
-    });
-    return extractJson(await r.text()) as TezCheckCreateResponse;
+    bill = await getBill(pay.order_id);
   } catch (e) {
-    return { ok: false, error: { message: String(e) } };
+    return { status: "error", message: e instanceof Error ? e.message : String(e) };
   }
+  if (!bill.paid) return { status: "pending" };
+  if (bill.amountMinor !== toMinor(pay.amount)) {
+    return { status: "error", message: "To'lov summasi mos kelmadi — adminga murojaat qiling" };
+  }
+  await d1Batch([
+    {
+      sql: `UPDATE user_db SET balance = balance + ?
+             WHERE user_id = ? AND (SELECT status FROM bot_payments WHERE id = ?) = 'pending'`,
+      params: [pay.amount, userId, id],
+    },
+    {
+      sql: `UPDATE bot_payments SET status = 'paid' WHERE id = ? AND status = 'pending'`,
+      params: [id],
+    },
+  ]);
+  return { status: "paid", amount: pay.amount };
 }
 
-async function tezCheckStatus(orderId: number): Promise<TezCheckStatusResponse> {
-  try {
-    const r = await fetch(`https://tezcheck.uz/api/status_invoice`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ api_key: config.TEZCHECK_API_KEY, order_id: String(orderId) }),
-    });
-    return extractJson(await r.text()) as TezCheckStatusResponse;
-  } catch (e) {
-    return { ok: false, error: { message: String(e) } };
-  }
+async function replyPaid(ctx: MyContext, userId: number, amount: number): Promise<void> {
+  const user = await getUser(userId);
+  await ctx.reply(
+    `✅ <b>To'lov qabul qilindi!</b>\n\n` +
+    `Summa: <b>${amount.toLocaleString("uz")} so'm</b>\n` +
+    `Joriy balans: <b>${(user?.balance ?? 0).toLocaleString("uz")} so'm</b>`,
+    { parse_mode: "HTML" }
+  );
 }
 
 // ─── Admin to'lov matni ────────────────────────────────────────────────────────
@@ -129,46 +137,6 @@ async function askAutoAmount(ctx: MyContext, edit = false): Promise<void> {
   }
 }
 
-// ─── To'lov holati tekshiruvi (polling) ───────────────────────────────────────
-
-async function pollPaymentStatus(
-  ctx: MyContext,
-  orderId: number,
-  amount: number,
-  userId: number
-): Promise<void> {
-  const MAX_ATTEMPTS = 30; // 5 daqiqa
-  const INTERVAL_MS = 10_000;
-
-  for (let i = 0; i < MAX_ATTEMPTS; i++) {
-    await new Promise(r => setTimeout(r, INTERVAL_MS));
-    const res = await tezCheckStatus(orderId);
-
-    if (res.ok && res.payment?.status === "paid") {
-      await updateUserBalance(userId, amount);
-      const user = await getUser(userId);
-      await ctx.reply(
-        `✅ <b>To'lov qabul qilindi!</b>\n\n` +
-        `Qo'shildi: <b>${amount.toLocaleString("uz")} so'm</b>\n` +
-        `Joriy balans: <b>${(user?.balance ?? 0).toLocaleString("uz")} so'm</b>`,
-        { parse_mode: "HTML" }
-      ).catch(() => {});
-      return;
-    }
-
-    if (res.ok && res.payment?.status === "canceled") {
-      await ctx.reply("❌ To'lov bekor qilindi.").catch(() => {});
-      return;
-    }
-  }
-  // Timeout
-  await ctx.reply(
-    `⚠️ To'lov vaqti tugadi. Agar to'lagan bo'lsangiz adminga murojaat qiling.\n` +
-    `Buyurtma ID: <code>${orderId}</code>`,
-    { parse_mode: "HTML" }
-  ).catch(() => {});
-}
-
 // ─── setupPayment ──────────────────────────────────────────────────────────────
 
 export function setupPayment(bot: Bot<MyContext>): void {
@@ -214,30 +182,30 @@ export function setupPayment(bot: Bot<MyContext>): void {
     try { await ctx.deleteMessage(); } catch {}
   });
 
-  // ── To'lovni tekshirish tugmasi ────────────────────────────────────────────
-  bot.callbackQuery(/^pay:check:(\d+):(\d+)$/, async (ctx) => {
-    const orderId = Number(ctx.match[1]);
-    const amount  = Number(ctx.match[2]);
-    const userId  = ctx.from!.id;
-    await ctx.answerCallbackQuery("Tekshirilmoqda...");
+  // ── Eski (tezchek.uz) tugmalari: yangi tizimga o'tilgan ─────────────────────
+  bot.callbackQuery(/^pay:check:\d+:\d+$/, async (ctx) => {
+    await ctx.answerCallbackQuery({
+      text: "Bu eski to'lov tugmasi. Yangi to'lov yarating yoki adminga murojaat qiling.",
+      show_alert: true,
+    });
+  });
 
-    const res = await tezCheckStatus(orderId);
-    if (res.ok && res.payment?.status === "paid") {
-      await updateUserBalance(userId, amount);
-      const user = await getUser(userId);
+  // ── To'lovni tekshirish tugmasi ────────────────────────────────────────────
+  bot.callbackQuery(/^pay:check:(\d+)$/, async (ctx) => {
+    const id = Number(ctx.match[1]);
+    const userId = ctx.from!.id;
+    const res = await settlePayment(id, userId);
+
+    if (res.status === "paid") {
+      await ctx.answerCallbackQuery("✅ To'lov qabul qilindi");
       try { await ctx.deleteMessage(); } catch {}
-      await ctx.reply(
-        `✅ <b>To'lov qabul qilindi!</b>\n\n` +
-        `Qo'shildi: <b>${amount.toLocaleString("uz")} so'm</b>\n` +
-        `Joriy balans: <b>${(user?.balance ?? 0).toLocaleString("uz")} so'm</b>`,
-        { parse_mode: "HTML" }
-      );
-    } else if (res.ok && res.payment?.status === "canceled") {
-      try { await ctx.deleteMessage(); } catch {}
-      await ctx.reply("❌ To'lov bekor qilindi.");
+      await replyPaid(ctx, userId, res.amount);
+    } else if (res.status === "pending") {
+      await ctx.answerCallbackQuery("⏳ To'lov hali amalga oshmagan");
+    } else if (res.status === "missing") {
+      await ctx.answerCallbackQuery({ text: "To'lov topilmadi", show_alert: true });
     } else {
-      // Hali to'lanmagan
-      await ctx.answerCallbackQuery("⏳ To'lov hali amalga oshmagan").catch(() => {});
+      await ctx.answerCallbackQuery({ text: `Tekshirib bo'lmadi: ${res.message}`.slice(0, 190), show_alert: true });
     }
   });
 
@@ -269,32 +237,50 @@ export function setupPayment(bot: Bot<MyContext>): void {
     if (state === "waiting_pay_amount_auto") {
       const amount = parseInt(ctx.message.text.trim(), 10);
       ctx.session.state = "idle";
-      if (isNaN(amount) || amount < 1000) {
+      if (isNaN(amount) || amount < PAY_MIN) {
         await ctx.reply("❌ Noto'g'ri summa. Kamida 1 000 so'm kiriting.");
         return;
       }
 
-      const res = await tezCheckCreate(amount);
-      if (!res.ok || !res.pay_url || !res.order_id) {
+      if (!tezcheckReady()) {
+        await ctx.reply("❌ Avto to'lov hozircha sozlanmagan. Admin orqali to'lang.");
+        return;
+      }
+      if (amount > PAY_MAX) {
+        await ctx.reply(`❌ Summa ${PAY_MAX.toLocaleString("uz")} so'mdan oshmasligi kerak.`);
+        return;
+      }
+
+      let bill;
+      try {
+        bill = await createBill(amount, userId);
+      } catch (e) {
         await ctx.reply(
-          `❌ To'lov yaratishda xato: ${res.error?.message ?? "Noma'lum xato"}\n` +
+          `❌ To'lov yaratishda xato: ${e instanceof Error ? e.message : "Noma'lum xato"}\n` +
           `Qaytadan urinib ko'ring yoki admin orqali to'lang.`
         );
         return;
       }
 
+      const now = Date.now();
+      const payId = await d1InsertReturningId(
+        `INSERT INTO bot_payments (order_id, user_id, amount, status, pay_url, created_at, expires_at)
+         VALUES (?, ?, ?, 'pending', ?, ?, ?)`,
+        [bill.id, userId, amount, bill.url, now, now + PAY_LINK_TTL_MS]
+      );
+
       const kb = styleAll(
         new InlineKeyboard()
-          .url("💳 To'lash", res.pay_url).row()
-          .text("✅ To'lovni tekshirish", `pay:check:${res.order_id}:${amount}`)
+          .url("💳 To'lash", bill.url).row()
+          .text("✅ To'lovni tekshirish", `pay:check:${payId}`)
       );
 
       await ctx.reply(
         `⚡ <b>Avto to'lov</b>\n\n` +
         `Summa: <b>${amount.toLocaleString("uz")} so'm</b>\n` +
-        `Buyurtma ID: <code>${res.order_id}</code>\n\n` +
-        `To'lov linkini bosing va to'lovni amalga oshiring.\n` +
-        `To'lovdan so'ng <b>"To'lovni tekshirish"</b> tugmasini bosing:`,
+        `Buyurtma: <code>#${payId}</code>\n\n` +
+        `To'lov havolasi 1 soat faol. Havolani bosib to'lang, so'ng\n` +
+        `<b>"To'lovni tekshirish"</b> tugmasini bosing:`,
         { parse_mode: "HTML", reply_markup: kb }
       );
       return;

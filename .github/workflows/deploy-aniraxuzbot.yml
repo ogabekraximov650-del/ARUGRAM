@@ -41,6 +41,8 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+          TEZCHECK_TOKEN: ${{ secrets.TEZCHECK_TOKEN }}
+          TEZCHECK_DESK: ${{ secrets.TEZCHECK_DESK }}
         run: |
           K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
           BT=$(K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in bot_token.enc 2>/dev/null | tr -d '[:space:]')
@@ -56,6 +58,14 @@ jobs:
             printf '%s' "$BT" | npx wrangler secret put BOT_TOKEN >/dev/null
           fi
           echo "✅ BOT_TOKEN o'rnatildi"
+          # To'lov kalitlari: ilova bilan BIR XIL tezcheck kassasi (GitHub Secrets'dagi `TEZCHECK_TOKEN` / `TEZCHECK_DESK`).
+          if [ -n "$TEZCHECK_TOKEN" ] && [ -n "$TEZCHECK_DESK" ]; then
+            printf '%s' "$TEZCHECK_TOKEN" | npx wrangler secret put TEZCHECK_TOKEN >/dev/null
+            printf '%s' "$TEZCHECK_DESK" | npx wrangler secret put TEZCHECK_DESK >/dev/null
+            echo "✅ TEZCHECK_TOKEN / TEZCHECK_DESK o'rnatildi"
+          else
+            echo "⚠️  TEZCHECK_TOKEN/TEZCHECK_DESK secret'lari bo'sh — avto to'lov o'chiq qoladi"
+          fi
 
       - name: Deploy
         working-directory: aniraxuzbot15/bot
