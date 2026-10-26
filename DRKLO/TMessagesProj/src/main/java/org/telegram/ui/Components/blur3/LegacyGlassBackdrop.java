@@ -132,21 +132,26 @@ public final class LegacyGlassBackdrop {
                 base = 140;
                 break;
         }
-        return base;
+        return base + extraInterval;
     }
 
     private static float budgetMs() {
         switch (tier()) {
             case 0:
-                return 12f;
+                return 22f;
             case 1:
-                return 10f;
+                return 18f;
             case 2:
-                return 8f;
+                return 15f;
             default:
-                return 6f;
+                return 13f;
         }
     }
+
+    /** UZ: Eng past daraja (xira, 1/8): glass shu darajadan pastga tushmaydi, faqat yangilash siyraklashadi. EN: The lowest tier (blurry, 1/8): glass never goes below it; only refreshes get rarer. RU: Самый низкий уровень (размытый, 1/8): ниже стекло не опускается, только реже обновляется. */
+    private static final int LOWEST_TIER = 3;
+    private static long extraInterval;
+    private static int errors;
 
     /** UZ: Bitta glass drawable holati. EN: State of one glass drawable. RU: Состояние одного стеклянного drawable. */
     public static final class State {
@@ -155,6 +160,7 @@ public final class LegacyGlassBackdrop {
         long lastCapture;
         int lastHash;
         int[] px;
+        int captures;
         int calm;
         boolean pending;
         // panjara / mesh
@@ -355,23 +361,33 @@ public final class LegacyGlassBackdrop {
         } catch (Throwable t) {
             FileLog.e(t);
             capturing = false;
+            if (++errors >= 6) {
+                disabledByBudget = true; // faqat qayta-qayta xato bo'lsa o'chadi / switches off only on repeated errors
+            }
             return null;
         }
         final float ms = (System.nanoTime() - t0) / 1_000_000f;
-        emaMs = emaMs == 0 ? ms : emaMs * 0.75f + ms * 0.25f;
-        // byudjetdan oshsa sifat bir pog'ona pasayadi (juda sekin bo'lsa o'chadi) / over budget: drop one quality tier (off when far too slow)
+        // sovuq (birinchi) olishlar hisobga olinmaydi: bitmap yaratish va birinchi chizish doim sekinroq / cold (first) captures are ignored: allocation and the first draw are always slower
+        if (sizeChanged || s.captures++ < 3) {
+            return s.bitmap;
+        }
+        emaMs = emaMs == 0 ? ms : emaMs * 0.8f + ms * 0.2f;
         if (emaMs > budgetMs()) {
-            if (++slowStreak >= 4) {
+            if (++slowStreak >= 8) {
                 slowStreak = 0;
-                tier = Math.min(4, tier() + 1);
-                emaMs = 0;
-                s.meshW = -1;
-                if (tier >= 4) {
-                    disabledByBudget = true;
+                if (tier() < LOWEST_TIER) {
+                    tier = tier() + 1; // bir pog'ona pasayadi / drop one tier
+                    s.meshW = -1;
+                } else {
+                    extraInterval = Math.min(600, (long) (extraInterval * 1.5f) + 30); // pastda faqat siyraklashadi / at the bottom only slow down
                 }
+                emaMs = 0;
             }
         } else {
             slowStreak = 0;
+            if (extraInterval > 0) {
+                extraInterval = (long) (extraInterval * 0.97f);
+            }
         }
         return s.bitmap;
     }
