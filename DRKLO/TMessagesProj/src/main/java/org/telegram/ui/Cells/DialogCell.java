@@ -3796,6 +3796,14 @@ public class DialogCell extends BaseCell implements StoriesListPlaceProvider.Ava
     private GradientDrawable archiveFadeGradientDrawable;
     private int archiveFadeGradientDrawableColor;
 
+    private final android.graphics.Paint glassCardPaint = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+    private final android.graphics.Paint glassCardStroke = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+    private final android.graphics.RectF glassCardRect = new android.graphics.RectF();
+    {
+        glassCardStroke.setStyle(android.graphics.Paint.Style.STROKE);
+        glassCardStroke.setStrokeWidth(Math.max(1f, AndroidUtilities.dpf2(0.5f)));
+    }
+
     @SuppressLint("DrawAllocation")
     @Override
     protected void onDraw(Canvas canvas) {
@@ -3807,6 +3815,16 @@ public class DialogCell extends BaseCell implements StoriesListPlaceProvider.Ava
         }
 
         boolean needInvalidate = false;
+
+        // ARUGRAM: glass uslubidagi shaffof "karta" qator orqasida / ARUGRAM: a translucent glass-style "card" behind the row
+        if (LiteMode.isEnabled(LiteMode.FLAG_LIQUID_GLASS) && getMeasuredWidth() > 0) {
+            final boolean glassDark = Theme.isCurrentThemeDark();
+            glassCardPaint.setColor(glassDark ? 0x14FFFFFF : 0x66FFFFFF);
+            glassCardRect.set(dp(6), dp(1), getMeasuredWidth() - dp(6), getMeasuredHeight() - dp(1));
+            canvas.drawRoundRect(glassCardRect, dp(16), dp(16), glassCardPaint);
+            glassCardStroke.setColor(glassDark ? 0x18FFFFFF : 0x55FFFFFF);
+            canvas.drawRoundRect(glassCardRect, dp(16), dp(16), glassCardStroke);
+        }
 
         if (drawArchive && (currentDialogFolderId != 0 || isTopic && forumTopic != null && forumTopic.id == 1) && archivedChatsDrawable != null && archivedChatsDrawable.outProgress == 0.0f && translationX == 0.0f) {
             canvas.save();

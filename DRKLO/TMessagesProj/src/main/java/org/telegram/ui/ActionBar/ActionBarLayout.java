@@ -1406,7 +1406,7 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
         lastFragment.setTitleOverlayTextIfActionBarAttached(titleOverlayText, titleOverlayTextId, overlayAction);
         lastFragment.attachSheets(containerViewBack);
         if (!lastFragment.hasOwnBackground && fragmentView.getBackground() == null) {
-            fragmentView.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+            org.telegram.ui.Components.blur3.AuroraBackgroundDrawable.apply(fragmentView);
         }
         lastFragment.onResume();
         if (themeAnimatorSet != null) {
@@ -2082,7 +2082,7 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
 
         currentActionBar = fragment.actionBar;
         if (!fragment.hasOwnBackground && fragmentView.getBackground() == null) {
-            fragmentView.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+            org.telegram.ui.Components.blur3.AuroraBackgroundDrawable.apply(fragmentView);
         }
 
         LayoutContainer temp = containerView;
@@ -2410,7 +2410,7 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
             }
         }
         if (!fragment.hasOwnBackground && fragmentView.getBackground() == null) {
-            fragmentView.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+            org.telegram.ui.Components.blur3.AuroraBackgroundDrawable.apply(fragmentView);
         }
         containerView.addView(fragmentView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
         containerView.setShouldHandleBottomInsets(fragment.getEdgeToEdgeSupportMode());
@@ -2445,7 +2445,7 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
             }
         }
         if (!fragment.hasOwnBackground && fragmentView.getBackground() == null) {
-            fragmentView.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+            org.telegram.ui.Components.blur3.AuroraBackgroundDrawable.apply(fragmentView);
         }
         containerView.addView(fragmentView, Utilities.clamp(position, containerView.getChildCount(), 0), LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
         containerView.setShouldHandleBottomInsets(fragment.getEdgeToEdgeSupportMode());
@@ -2634,7 +2634,7 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
             }
             currentActionBar = previousFragment.actionBar;
             if (!previousFragment.hasOwnBackground && fragmentView.getBackground() == null) {
-                fragmentView.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+                org.telegram.ui.Components.blur3.AuroraBackgroundDrawable.apply(fragmentView);
             }
 
             if (needAnimation) {
@@ -2805,7 +2805,7 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
         previousFragment.onBecomeFullyVisible();
         currentActionBar = previousFragment.actionBar;
         if (!previousFragment.hasOwnBackground && fragmentView.getBackground() == null) {
-            fragmentView.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+            org.telegram.ui.Components.blur3.AuroraBackgroundDrawable.apply(fragmentView);
         }
     }
 

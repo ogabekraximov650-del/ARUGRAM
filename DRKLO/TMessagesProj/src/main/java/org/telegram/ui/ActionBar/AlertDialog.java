@@ -311,7 +311,7 @@ public class AlertDialog extends Dialog implements Drawable.Callback, Notificati
 
         backgroundPaddings = new Rect();
         if (progressStyle != ALERT_TYPE_SPINNER || blurredBackground) {
-            shadowDrawable = context.getResources().getDrawable(R.drawable.popup_fixed_alert4).mutate();
+            shadowDrawable = new org.telegram.ui.Components.blur3.GlassWrapDrawable(context.getResources().getDrawable(R.drawable.popup_fixed_alert4).mutate(), null, () -> backgroundColor, 14, true);
             blurOpacity = progressStyle == ALERT_TYPE_SPINNER ? 0.55f : (isDark ? 0.80f : 0.985f);
             shadowDrawable.setColorFilter(new PorterDuffColorFilter(backgroundColor, PorterDuff.Mode.MULTIPLY));
             shadowDrawable.getPadding(backgroundPaddings);
@@ -613,6 +613,9 @@ public class AlertDialog extends Dialog implements Drawable.Callback, Notificati
         @Override
         protected void dispatchDraw(Canvas canvas) {
             if (drawBackground && !blurredBackground) {
+                if (shadowDrawable instanceof org.telegram.ui.Components.blur3.GlassWrapDrawable) {
+                    ((org.telegram.ui.Components.blur3.GlassWrapDrawable) shadowDrawable).setHost(this);
+                }
                 shadowDrawable.setBounds(0, 0, getMeasuredWidth(), getMeasuredHeight());
                 if (topView != null && notDrawBackgroundOnTopView) {
                     int clipTop = topView.getBottom();

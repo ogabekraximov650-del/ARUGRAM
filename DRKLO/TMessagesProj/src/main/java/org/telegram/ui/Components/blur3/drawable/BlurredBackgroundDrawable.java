@@ -625,7 +625,7 @@ public abstract class BlurredBackgroundDrawable extends Drawable {
      * EN: ARUGRAM: live glass on devices older than Android 12 (blurred image + a refraction mesh). `false` means the usual path.
      * RU: ARUGRAM: живое стекло на устройствах старше Android 12 (размытое изображение + сетка преломления). `false` — обычный путь.
      */
-    protected boolean drawLegacyGlass(Canvas canvas) {
+    public boolean drawLegacyGlass(Canvas canvas) {
         if (hostRef == null || boundProps.boundsWithPadding.isEmpty() || alpha == 0) {
             return false;
         }

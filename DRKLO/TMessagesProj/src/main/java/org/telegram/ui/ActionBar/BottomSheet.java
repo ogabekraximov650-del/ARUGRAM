@@ -1386,7 +1386,7 @@ public class BottomSheet extends Dialog implements BaseFragment.AttachedSheet {
                     onContainerTranslationYChanged(translationY);
                 }
             };
-            containerView.setBackgroundDrawable(shadowDrawable);
+            containerView.setBackgroundDrawable(new org.telegram.ui.Components.blur3.GlassWrapDrawable(shadowDrawable, containerView, () -> getThemedColor(Theme.key_dialogBackground), 16, false));
             containerView.setPadding(backgroundPaddingLeft, (applyTopPadding ? dp(8) : 0) + backgroundPaddingTop - 1, backgroundPaddingLeft, (applyBottomPadding ? dp(8) : 0));
         }
         containerView.setVisibility(View.INVISIBLE);
