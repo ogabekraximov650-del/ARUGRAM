@@ -55,19 +55,9 @@ public final class LegacyGlassBackdrop {
     private static int slowStreak;
 
     public static int tier() {
+        // Avtomatik darajalar yo'q: Android 10+ da doim eng yuqori (jonli + halqalar), eskirida doim bitmap / No automatic tiers: always the top mode (live + rings) on Android 10+, always bitmap below
         if (tier < 0) {
-            final boolean q = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q;
-            switch (SharedConfig.getDevicePerformanceClass()) {
-                case SharedConfig.PERFORMANCE_CLASS_HIGH:
-                    tier = q ? 0 : 2;
-                    break;
-                case SharedConfig.PERFORMANCE_CLASS_AVERAGE:
-                    tier = q ? 1 : 3;
-                    break;
-                default:
-                    tier = q ? 2 : 3;
-                    break;
-            }
+            tier = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q ? 0 : 2;
         }
         return tier;
     }
@@ -227,22 +217,11 @@ public final class LegacyGlassBackdrop {
     }
 
     static void reportLive(float ms, boolean ok) {
+        // faqat qat'iy xatoda zaxira yo'liga o'tadi; sekinlik uchun daraja pasaymaydi / falls back only on hard failures; no quality drop for slowness
         if (!ok) {
             if (++liveFail >= 3) {
                 liveBroken = true;
             }
-            return;
-        }
-        liveEma = liveEma == 0 ? ms : liveEma * 0.9f + ms * 0.1f;
-        final float budget = tier() == 0 ? 4.5f : 3.5f;
-        if (liveEma > budget) {
-            if (++liveSlow >= 40) {
-                liveSlow = 0;
-                liveEma = 0;
-                tier = tier() + 1; // jonli yo'ldan pastga / step down from the live path
-            }
-        } else {
-            liveSlow = 0;
         }
     }
 
@@ -381,29 +360,6 @@ public final class LegacyGlassBackdrop {
                 disabledByBudget = true; // faqat qayta-qayta xato bo'lsa o'chadi / switches off only on repeated errors
             }
             return null;
-        }
-        final float ms = (System.nanoTime() - t0) / 1_000_000f;
-        // sovuq (birinchi) olishlar hisobga olinmaydi: bitmap yaratish va birinchi chizish doim sekinroq / cold (first) captures are ignored: allocation and the first draw are always slower
-        if (sizeChanged || s.captures++ < 3) {
-            return s.bitmap;
-        }
-        emaMs = emaMs == 0 ? ms : emaMs * 0.8f + ms * 0.2f;
-        if (emaMs > budgetMs()) {
-            if (++slowStreak >= 8) {
-                slowStreak = 0;
-                if (tier() < LOWEST_TIER) {
-                    tier = tier() + 1; // bir pog'ona pasayadi / drop one tier
-                    s.meshW = -1;
-                } else {
-                    extraInterval = Math.min(600, (long) (extraInterval * 1.5f) + 30); // pastda faqat siyraklashadi / at the bottom only slow down
-                }
-                emaMs = 0;
-            }
-        } else {
-            slowStreak = 0;
-            if (extraInterval > 0) {
-                extraInterval = (long) (extraInterval * 0.97f);
-            }
         }
         return s.bitmap;
     }
