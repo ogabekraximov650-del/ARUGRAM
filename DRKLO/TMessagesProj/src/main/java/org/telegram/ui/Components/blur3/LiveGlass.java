@@ -44,6 +44,11 @@ final class LiveGlass {
     private static int ringW = -1, ringH = -1;
     private static float ringT = -1;
 
+    /** UZ: Yangi panel qo'shildi: keyingi chizishda qayta yoziladi. EN: A new panel appeared: re-record on the next draw. RU: Появилась новая панель: перезаписать при следующей отрисовке. */
+    static void reset() {
+        frameStamp = -1;
+    }
+
     /** UZ: Bir kadrda bitta yozish: panel bilan birga tarmoqdan chiqarib tashlanadi. EN: One recording per frame; the panels are excluded from the tree. RU: Одна запись на кадр; панели исключаются из дерева. */
     private static RenderNode frameNode(View decor) {
         final long stamp = AnimationUtils.currentAnimationTimeMillis();

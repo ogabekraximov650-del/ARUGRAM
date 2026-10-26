@@ -170,7 +170,7 @@ public final class LegacyGlassBackdrop {
         }
     }
 
-    private static void register(View host, View decor) {
+    private static boolean register(View host, View decor) {
         Watcher w = watchers.get(decor);
         if (w == null) {
             w = new Watcher(decor);
@@ -183,16 +183,28 @@ public final class LegacyGlassBackdrop {
         }
         for (int i = 0; i < w.hosts.size(); i++) {
             if (w.hosts.get(i).get() == host) {
-                return;
+                return false;
             }
         }
         w.hosts.add(new WeakReference<>(host));
+        return true;
     }
 
     /** UZ: Jonli yo'l (API 29+): kadr ichida GPU bilan. EN: The live path (API 29+): inside the frame on the GPU. RU: «Живой» путь (API 29+): внутри кадра на GPU. */
     public static boolean drawLive(android.graphics.Canvas canvas, View host, Rect bp, android.graphics.Path path, float[] radii,
                                    float zoom, boolean rings, float thickness, int baseColor) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            return false;
+        }
+        final View decor = findDecor(host);
+        if (decor == null || decor.getWidth() == 0) {
+            return false;
+        }
+        // MUHIM: panel yozilgan tasvirdan chiqarib tashlanishi shart, aks holda tasvir o'zini o'z ichiga oladi (doira) / IMPORTANT: the panel must be excluded from the recording, otherwise the recording contains itself (a cycle)
+        if (register(host, decor)) {
+            LiveGlass.reset();
+        }
+        if (!liveSafe) {
             return false;
         }
         return LiveGlass.draw(canvas, host, bp, path, radii, zoom, rings, thickness, baseColor);
@@ -213,7 +225,76 @@ public final class LegacyGlassBackdrop {
 
     /** UZ: Jonli (RenderNode) yo'l yoqilganmi. EN: Whether the live (RenderNode) path is on. RU: Включён ли «живой» путь (RenderNode). */
     public static boolean liveEnabled() {
-        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !liveBroken && tier() <= 1 && enabled();
+        if (!guardInit) {
+            initGuard();
+        }
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !liveBroken && liveSafe && tier() <= 1 && enabled();
+    }
+
+    private static boolean guardInit;
+    private static boolean liveSafe = true;
+
+    /**
+     * UZ: Qulash himoyasi: jonli yo'l boshlanganda belgi qo'yiladi, 20 soniya omon qolsa olib tashlanadi. Keyingi ishga tushirishda belgi turgan bo'lsa (ilova yiqilgan) jonli yo'l o'chiriladi va zaxira yo'li ishlaydi, shuning uchun ilova qayta-qayta yiqilmaydi.
+     * EN: Crash guard: a flag is set when the live path starts and cleared after 20 seconds of survival. If the flag is still set on the next launch (the app crashed), the live path is disabled and the fallback is used, so the app does not crash in a loop.
+     * RU: Защита от падений: при старте «живого» пути ставится флаг и снимается через 20 секунд работы. Если при следующем запуске флаг остался (приложение упало), «живой» путь отключается и работает запасной, поэтому приложение не падает по кругу.
+     */
+    private static final String GUARD_V = "v3";
+
+    private static void initGuard() {
+        guardInit = true;
+        try {
+            final android.content.SharedPreferences sp = org.telegram.messenger.ApplicationLoader.applicationContext
+                .getSharedPreferences("arugram_glass", Context.MODE_PRIVATE);
+            final String pending = "live_pending_" + GUARD_V;
+            final String crashed = "live_crashed_" + GUARD_V;
+            if (sp.getBoolean(pending, false)) {
+                liveSafe = false;
+                sp.edit().putBoolean(crashed, true).putBoolean(pending, false).commit();
+                return;
+            }
+            if (sp.getBoolean(crashed, false)) {
+                liveSafe = false;
+                return;
+            }
+            sp.edit().putBoolean(pending, true).commit();
+            final Runnable clear = () -> sp.edit().putBoolean(pending, false).apply();
+            org.telegram.messenger.AndroidUtilities.runOnUIThread(clear, 20000);
+            // ilova odatdagidek yopilsa (qulamasdan) belgi olib tashlanadi / a normal close (no crash) clears the flag
+            final android.app.Application app = (android.app.Application) org.telegram.messenger.ApplicationLoader.applicationContext.getApplicationContext();
+            app.registerActivityLifecycleCallbacks(new android.app.Application.ActivityLifecycleCallbacks() {
+                @Override
+                public void onActivityCreated(android.app.Activity a, android.os.Bundle b) {
+                }
+
+                @Override
+                public void onActivityStarted(android.app.Activity a) {
+                }
+
+                @Override
+                public void onActivityResumed(android.app.Activity a) {
+                }
+
+                @Override
+                public void onActivityPaused(android.app.Activity a) {
+                }
+
+                @Override
+                public void onActivityStopped(android.app.Activity a) {
+                    clear.run();
+                }
+
+                @Override
+                public void onActivitySaveInstanceState(android.app.Activity a, android.os.Bundle b) {
+                }
+
+                @Override
+                public void onActivityDestroyed(android.app.Activity a) {
+                }
+            });
+        } catch (Throwable t) {
+            FileLog.e(t);
+        }
     }
 
     static void reportLive(float ms, boolean ok) {
