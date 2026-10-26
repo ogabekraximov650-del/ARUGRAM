@@ -106,7 +106,11 @@ fn format_with(pattern: &str, digits: &str) -> String {
 /// UZ: Telegram emoji bayrog'i: 20dp kvadrat (`Emoji.drawImgSize`). EN: Telegram's emoji flag: a 20dp square (`Emoji.drawImgSize`). RU: Эмодзи-флаг Telegram: квадрат 20dp (`Emoji.drawImgSize`).
 fn flag_small(iso: &str) -> Element {
     match flags::flag(iso) {
-        Some(img) => image(&img, 20.0, 20.0),
+        Some(img) => {
+            let aspect = img.w as f32 / img.h as f32;
+            let w = (18.0 * aspect).min(28.0);
+            image(&img, w, w / aspect)
+        }
         None => t(iso, 11.0, hint()),
     }
 }
@@ -164,12 +168,19 @@ impl Login {
         self.bump();
         // UZ: Saqlangan sessiya bo'lsa, qayta kirish talab qilinmaydi. EN: With a saved session there is no need to sign in again. RU: Если есть сохранённая сессия, повторный вход не нужен.
         if crate::account::api_ready() {
-            let me = self.clone();
-            spawn_bg(crate::account::restore, move |ok| {
-                if ok && me.page.get() == Page::Phone {
-                    me.goto(Page::Done);
+            // UZ: Kod/parol kutilayotgan paytda ilova yopilgan bo'lsa, o'sha sahifadan davom etadi. EN: If the app was closed while a code/password was awaited, resume on that page. RU: Если приложение закрыли в ожидании кода/пароля, продолжается с той же страницы.
+            match crate::account::stage().map(|s| s.stage) {
+                Some(s) if s == "code" => self.goto(Page::Code),
+                Some(s) if s == "password" => self.goto(Page::Pass),
+                _ => {
+                    let me = self.clone();
+                    spawn_bg(crate::account::restore, move |ok| {
+                        if ok && me.page.get() == Page::Phone {
+                            me.goto(Page::Done);
+                        }
+                    });
                 }
-            });
+            }
         }
     }
 
@@ -240,6 +251,9 @@ impl Login {
             Page::Phone => {
                 self.kb_custom.borrow_mut().go(1.0, now);
                 self.fab.borrow_mut().go(1.0, now);
+                if crate::account::api_ready() {
+                    crate::account::reset();
+                }
             }
             Page::Code => {
                 self.kb_custom.borrow_mut().go(1.0, now);
@@ -253,7 +267,7 @@ impl Login {
             }
             Page::Pass => {
                 self.kb_custom.borrow_mut().go(0.0, now);
-                self.fab.borrow_mut().go(0.0, now);
+                self.fab.borrow_mut().go(1.0, now + SLIDE_MS * 0.5);
                 self.t_show.set(now);
                 self.pass.set(String::new());
             }
@@ -567,8 +581,8 @@ impl Login {
         }
         let fabv = self.fab.borrow().val(now);
         if fabv > 0.01 {
-            let sys_kb = if page == Page::Pass { 260.0 * seg(now, self.t_page.get() + 150.0, self.t_page.get() + 450.0) } else { 0.0 };
-            let bottom = 10.0 + (KB_H * kb).max(sys_kb);
+            // UZ: Parol sahifasida tizim klaviaturasi oynani o'zi qisqartiradi (adjustResize): `hu` allaqachon klaviatura tepasi. EN: On the password page the system keyboard already shrinks the window (adjustResize): `hu` is the keyboard top. RU: На странице пароля системная клавиатура сама уменьшает окно (adjustResize): `hu` уже верх клавиатуры.
+            let bottom = 10.0 + KB_H * kb;
             layers.push(self.fab_view(w, hu, bottom, fabv, now));
         }
         // mamlakat ro'yxati / country list
@@ -777,7 +791,7 @@ impl Login {
         ])
     }
 
-    fn pass_view(self: &Rc<Self>, w: f32, hu: f32, now: f32) -> Element {
+    fn pass_view(self: &Rc<Self>, w: f32, _hu: f32, now: f32) -> Element {
         let me = self.clone();
         let t0 = self.t_show.get();
         if !self.focus_asked.get() && now >= t0 + SLIDE_MS + SHOW_DELAY {
@@ -795,6 +809,10 @@ impl Login {
             .border(1.5, line())
             .radius(7.0)
             .padding_xy(16.0, 15.0)
+            .on_submit({
+                let me4 = me.clone();
+                move || me4.fab_tap()
+            })
             .width(fw);
         if !self.show_pass.get() {
             f = f.password();
@@ -805,7 +823,6 @@ impl Login {
             me3.show_pass.set(!me3.show_pass.get());
             me3.bump();
         });
-        let sys_kb = 260.0 * seg(now, self.t_page.get() + 150.0, self.t_page.get() + 450.0);
         stack(vec![
             at(16.0, 40.0, column(vec![icon(ARROW_BACK, 24.0).color(txt())]).width(32.0).height(32.0).center().on_click(move || {
                 me.goto(Page::Phone);
@@ -816,7 +833,7 @@ impl Login {
             at(0.0, 282.0, centered(w, t("Hisobingiz qo'shimcha parol bilan himoyalangan.", 14.0, sub()).line_height(20.0))),
             at(16.0, 334.0, f),
             at(w - 16.0 - 44.0, 334.0 + 9.0, eye),
-            at(16.0, hu - sys_kb - 52.0 - 20.0, t("Parolni unutdingizmi?", 15.0, blue()).on_click(move || me2.bump())),
+            at(16.0, 334.0 + 58.0 + 22.0, t("Parolni unutdingizmi?", 15.0, blue()).on_click(move || me2.bump())),
         ])
     }
 

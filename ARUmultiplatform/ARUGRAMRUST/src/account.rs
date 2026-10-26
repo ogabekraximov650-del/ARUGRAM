@@ -166,6 +166,64 @@ impl Session for FileSession {
     }
 }
 
+// ── Kirish bosqichi (diskda) ─────────────────────────────────
+
+/// UZ: Kod kutilayotgan paytda ilova yopilsa ham (kodni olish uchun boshqa ilovaga o'tilganda) kirish davom etadi: bosqich, raqam va kod belgisi diskda saqlanadi.
+/// EN: The sign-in survives the app being closed while waiting for the code (when switching to another app to read it): the stage, number and code hash are kept on disk.
+/// RU: Вход продолжается, даже если приложение закрыли в ожидании кода (при переходе в другое приложение за кодом): этап, номер и хеш кода хранятся на диске.
+const STAGE_TTL_MS: i64 = 25 * 60 * 1000;
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Stage {
+    /// `code` yoki `password` / `code` or `password` / `code` или `password`.
+    pub stage: String,
+    pub phone: String,
+    pub hash: String,
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
+}
+
+fn stage_path() -> PathBuf {
+    dir().join("login.json")
+}
+
+fn save_stage(stage: &str, phone: &str, hash: &str) {
+    let body = serde_json::json!({"stage": stage, "phone": phone, "hash": hash, "at": now_ms()});
+    let _ = std::fs::write(stage_path(), body.to_string());
+}
+
+fn clear_stage() {
+    let _ = std::fs::remove_file(stage_path());
+}
+
+/// UZ: Saqlangan bosqich (tarmoqsiz). Muddati o'tgan bo'lsa `None`. EN: The saved stage (no network); `None` once expired. RU: Сохранённый этап (без сети); `None`, если срок истёк.
+pub fn stage() -> Option<Stage> {
+    let raw = std::fs::read(stage_path()).ok()?;
+    let v: serde_json::Value = serde_json::from_slice(&raw).ok()?;
+    if now_ms() - v["at"].as_i64().unwrap_or(0) > STAGE_TTL_MS {
+        clear_stage();
+        return None;
+    }
+    Some(Stage {
+        stage: v["stage"].as_str()?.to_string(),
+        phone: v["phone"].as_str().unwrap_or("").to_string(),
+        hash: v["hash"].as_str().unwrap_or("").to_string(),
+    })
+}
+
+/// UZ: Boshidan boshlash (raqam o'zgartirilganda). EN: Start over (when the number is changed). RU: Начать заново (при смене номера).
+pub fn reset() {
+    clear_stage();
+    if let Ok(mut g) = slot().lock() {
+        if let Some(t) = g.as_mut() {
+            t.hash.clear();
+            t.password = None;
+        }
+    }
+}
+
 // ── Holat ────────────────────────────────────────────────────
 
 struct Inner {
@@ -216,7 +274,8 @@ fn with<R>(f: impl FnOnce(&mut Inner) -> Result<R, String>) -> Result<R, String>
         rt.spawn(runner.run());
         // UZ: Yangilanishlar kanali o'qilmasa xotirada o'sadi. EN: An unread updates channel grows in memory. RU: Непрочитанный канал обновлений растёт в памяти.
         rt.spawn(async move { while updates.recv().await.is_some() {} });
-        *g = Some(Inner { rt, client, session, phone: String::new(), hash: String::new(), password: None });
+        let (phone, hash) = stage().map(|s| (s.phone, s.hash)).unwrap_or_default();
+        *g = Some(Inner { rt, client, session, phone, hash, password: None });
     }
     let inner = g.as_mut().ok_or("ichki xato")?;
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(inner))) {
@@ -323,6 +382,7 @@ pub fn request_code(phone: &str) -> Result<CodeSent, String> {
             Err(e) if e == "__pw" => {
                 let pw = t.rt.block_on(password_info(&t.client))?;
                 let hint = pw.hint.clone().unwrap_or_default();
+                save_stage("password", &phone, "");
                 t.phone = phone;
                 t.password = Some(pw);
                 return Ok(CodeSent::NeedPassword { hint });
@@ -335,6 +395,7 @@ pub fn request_code(phone: &str) -> Result<CodeSent, String> {
                     return Err("Telegram bu raqam uchun avval kirish emailini o'rnatishni so'rayapti".to_string());
                 }
                 let (via, length) = via_of(&c.r#type);
+                save_stage("code", &phone, &c.phone_code_hash);
                 t.phone = phone;
                 t.hash = c.phone_code_hash;
                 Ok(CodeSent::Code { via, length })
@@ -342,6 +403,7 @@ pub fn request_code(phone: &str) -> Result<CodeSent, String> {
             tl::enums::auth::SentCode::Success(x) => match x.authorization {
                 tl::enums::auth::Authorization::Authorization(_) => {
                     t.session.save();
+                    clear_stage();
                     Ok(CodeSent::LoggedIn)
                 }
                 tl::enums::auth::Authorization::SignUpRequired(_) => {
@@ -371,6 +433,7 @@ pub fn sign_in(code: &str) -> Result<SignIn, String> {
             Ok(tl::enums::auth::Authorization::Authorization(_)) => {
                 t.session.save();
                 t.hash.clear();
+                clear_stage();
                 Ok(SignIn::Done)
             }
             Ok(tl::enums::auth::Authorization::SignUpRequired(_)) => {
@@ -379,11 +442,13 @@ pub fn sign_in(code: &str) -> Result<SignIn, String> {
             Err(e) if e.is("SESSION_PASSWORD_NEEDED") => {
                 let pw = t.rt.block_on(password_info(&t.client))?;
                 let hint = pw.hint.clone().unwrap_or_default();
+                save_stage("password", &t.phone, &t.hash);
                 t.password = Some(pw);
                 Ok(SignIn::NeedPassword { hint })
             }
             Err(e) if e.is("PHONE_CODE_EXPIRED") => {
                 t.hash.clear();
+                clear_stage();
                 Err("Kod muddati tugadi — raqamni qayta kiriting".to_string())
             }
             Err(e) if e.is("PHONE_CODE_*") => Err("Kod noto'g'ri".to_string()),
@@ -420,6 +485,7 @@ pub fn check_password(password: &str) -> Result<bool, String> {
         match t.rt.block_on(t.client.invoke(&req)) {
             Ok(tl::enums::auth::Authorization::Authorization(_)) => {
                 t.session.save();
+                clear_stage();
                 Ok(true)
             }
             Ok(tl::enums::auth::Authorization::SignUpRequired(_)) => Err("Bu raqamda Telegram hisobi yo'q".to_string()),
