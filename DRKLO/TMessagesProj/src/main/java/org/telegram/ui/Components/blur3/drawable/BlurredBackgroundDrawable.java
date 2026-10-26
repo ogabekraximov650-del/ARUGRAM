@@ -680,13 +680,13 @@ public abstract class BlurredBackgroundDrawable extends Drawable {
             Math.min(bp.width(), bp.height()) / 5), 1);
         // lupa kuchi panel o'lchamiga qarab: kichik panelda kuchli, katta oynada kuchsiz / magnifier strength by panel size: strong on small panels, weak on big sheets
         final float panelH = bp.height() / org.telegram.messenger.AndroidUtilities.density;
-        final float baseZoom = panelH < 90 ? 0.22f : (panelH < 220 ? 0.09f : 0f);
+        final float baseZoom = 0.3f; // bitta 1.3x linza / a single 1.3x lens
 
         boolean drawn = false;
         if (live && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
             // JONLI yo'l: shu kadrning o'zida GPU bilan / LIVE path: in the same frame on the GPU
             drawn = org.telegram.ui.Components.blur3.LegacyGlassBackdrop.drawLive(
-                canvas, host, bp, boundProps.path, legacyRadii, 1f + baseZoom, org.telegram.ui.Components.blur3.LegacyGlassBackdrop.tier() == 0, thickness, baseColor);
+                canvas, host, bp, boundProps.path, legacyRadii, 1f + baseZoom, false, thickness, baseColor);
         }
         if (!drawn) {
             if (bmp == null) {
