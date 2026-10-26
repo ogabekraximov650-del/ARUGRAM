@@ -2512,8 +2512,9 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
             playPauseDrawable = new PlayPauseDrawable(28);
             playPauseDrawable.setDuration(200);
 
-            Drawable circleDrawable = ContextCompat.getDrawable(parentActivity, R.drawable.circle_big);
-            playDrawable = new CombinedDrawable(circleDrawable.mutate(), playPauseDrawable);
+            // ARUGRAM: markaziy ijro tugmasi shisha (orqasidagi video 1.3x linzada) / the central play button is glass (the video behind it through a 1.3x lens)
+            Drawable circleDrawable = new org.telegram.ui.Components.blur3.LensGlassDrawable(parentView, () -> aspectRatioFrameLayout, 32, true);
+            playDrawable = new CombinedDrawable(circleDrawable, playPauseDrawable);
         }
 
         private void updateAnimation(boolean withProgressAnimation) {
@@ -3541,9 +3542,20 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                     videoPlayerSeekbar.setSize((int) (getMeasuredWidth() - dp(2 + 14) - value - extraWidth), getMeasuredHeight());
                 });
 
+        // ARUGRAM: pleyer paneli shisha: orqasidagi video 1.3x linza bilan / the player bar is glass: the video behind it through a 1.3x lens
+        private final org.telegram.ui.Components.blur3.LensGlassDrawable glass =
+            new org.telegram.ui.Components.blur3.LensGlassDrawable(this, () -> aspectRatioFrameLayout, 20, false);
+
         public VideoPlayerControlFrameLayout(@NonNull Context context) {
             super(context);
             setWillNotDraw(false);
+        }
+
+        @Override
+        protected void onDraw(@NonNull Canvas canvas) {
+            glass.setBounds(dp(6), dp(4), getWidth() - dp(6), getHeight() - dp(4));
+            glass.draw(canvas);
+            super.onDraw(canvas);
         }
 
         @Override

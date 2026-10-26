@@ -47,13 +47,24 @@ public final class ChatLens {
      * RU: Заполняет контур пузыря увеличенной копией фона. `false` — ничего не нарисовано (остаётся обычная полупрозрачная заливка).
      */
     public static boolean draw(Canvas canvas, View host, Path path, float cx, float cy, float zoom) {
+        if (host == null) {
+            return false;
+        }
+        final SizeNotifierFrameLayout layout = layoutOf(host);
+        return drawWith(canvas, host, layout == null ? null : layout.backgroundView, path, cx, cy, zoom);
+    }
+
+    /**
+     * UZ: Xuddi shu, lekin orqa fon sifatida ixtiyoriy ko'rinish (masalan, video) olinadi.
+     * EN: The same, but with any view as the backdrop (for example, the video).
+     * RU: То же самое, но фоном берётся произвольный вид (например, видео).
+     */
+    public static boolean drawWith(Canvas canvas, View host, View bg, Path path, float cx, float cy, float zoom) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || failures >= 3 || host == null || path == null
             || !canvas.isHardwareAccelerated() || !LiteMode.isEnabled(LiteMode.FLAG_LIQUID_GLASS)) {
             return false;
         }
         try {
-            final SizeNotifierFrameLayout layout = layoutOf(host);
-            final View bg = layout == null ? null : layout.backgroundView;
             if (bg == null || bg.getWidth() == 0 || bg.getHeight() == 0) {
                 return false;
             }
