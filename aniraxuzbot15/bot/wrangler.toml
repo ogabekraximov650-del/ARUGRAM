@@ -12,7 +12,7 @@ ADMIN_ID          = "6805215964"
 SAVED_CHANNEL_ID  = "-1002889216626"
 WEBHOOK_PATH      = "/webhook"
 PORT              = "8787"
-WORKER_URL        = "https://aniraxuzbot.ogabekraximov650.workers.dev"
+WORKER_URL        = "https://aniraxuzbot.uzcom.workers.dev"
 # D1 Database 1 — Anime, Season, Epizod jadvallari
 [[d1_databases]]
 binding      = "DB_ANIME"
