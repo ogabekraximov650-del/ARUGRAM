@@ -3822,8 +3822,10 @@ public class DialogCell extends BaseCell implements StoriesListPlaceProvider.Ava
             glassCardPaint.setColor(glassDark ? 0x14FFFFFF : 0x66FFFFFF);
             glassCardRect.set(dp(6), dp(1), getMeasuredWidth() - dp(6), getMeasuredHeight() - dp(1));
             canvas.drawRoundRect(glassCardRect, dp(16), dp(16), glassCardPaint);
-            glassCardStroke.setColor(glassDark ? 0x18FFFFFF : 0x55FFFFFF);
-            canvas.drawRoundRect(glassCardRect, dp(16), dp(16), glassCardStroke);
+            if (SharedConfig.getDevicePerformanceClass() != SharedConfig.PERFORMANCE_CLASS_LOW) {
+                glassCardStroke.setColor(glassDark ? 0x18FFFFFF : 0x55FFFFFF);
+                canvas.drawRoundRect(glassCardRect, dp(16), dp(16), glassCardStroke);
+            }
         }
 
         if (drawArchive && (currentDialogFolderId != 0 || isTopic && forumTopic != null && forumTopic.id == 1) && archivedChatsDrawable != null && archivedChatsDrawable.outProgress == 0.0f && translationX == 0.0f) {

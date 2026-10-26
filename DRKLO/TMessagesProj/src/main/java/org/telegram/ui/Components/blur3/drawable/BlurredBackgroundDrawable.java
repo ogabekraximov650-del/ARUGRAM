@@ -676,7 +676,7 @@ public abstract class BlurredBackgroundDrawable extends Drawable {
             Math.min(bp.width(), bp.height()) / 5), 1);
         // lupa kuchi panel o'lchamiga qarab: kichik panelda kuchli, katta oynada kuchsiz / magnifier strength by panel size: strong on small panels, weak on big sheets
         final float panelH = bp.height() / org.telegram.messenger.AndroidUtilities.density;
-        final float zoom = panelH < 90 ? 1.22f : (panelH < 220 ? 1.09f : 1.0f);
+        final float zoom = 1f + (panelH < 90 ? 0.22f : (panelH < 220 ? 0.09f : 0f)) * org.telegram.ui.Components.blur3.LegacyGlassBackdrop.zoomScale();
         org.telegram.ui.Components.blur3.LegacyGlassBackdrop.ensureMesh(
             legacyState, bp.width(), bp.height(), legacyRadii, thickness * 1.25f, Math.max(boundProps.liquidIntensity, 1.0f), boundProps.liquidIndex, zoom);
 

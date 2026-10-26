@@ -46,35 +46,106 @@ public final class LegacyGlassBackdrop {
         return Build.VERSION.SDK_INT < Build.VERSION_CODES.S && !disabledByBudget && LiteMode.isEnabled(LiteMode.FLAG_LIQUID_GLASS);
     }
 
-    private static int downscale() {
-        switch (SharedConfig.getDevicePerformanceClass()) {
-            case SharedConfig.PERFORMANCE_CLASS_HIGH:
-                return 6;
-            case SharedConfig.PERFORMANCE_CLASS_AVERAGE:
-                return 8;
-            default:
-                return 10;
+    /**
+     * UZ: Sifat darajasi (0 — eng yaxshi, o'tkir lupa; 4 — o'chiq). Qurilma kuchiga qarab boshlanadi va olish sekin bo'lsa o'zi pasayadi.
+     * EN: Quality tier (0 is best, a sharp lens; 4 is off). Starts by device class and drops by itself when capture is slow.
+     * RU: Уровень качества (0 — лучший, чёткая линза; 4 — выключено). Стартует по классу устройства и сам понижается, если захват медленный.
+     */
+    private static int tier = -1;
+    private static int slowStreak;
+
+    public static int tier() {
+        if (tier < 0) {
+            switch (SharedConfig.getDevicePerformanceClass()) {
+                case SharedConfig.PERFORMANCE_CLASS_HIGH:
+                    tier = 0;
+                    break;
+                case SharedConfig.PERFORMANCE_CLASS_AVERAGE:
+                    tier = 2;
+                    break;
+                default:
+                    tier = 3;
+                    break;
+            }
         }
+        return tier;
+    }
+
+    private static int downscale() {
+        switch (tier()) {
+            case 0:
+                return 2;
+            case 1:
+                return 3;
+            case 2:
+                return 5;
+            default:
+                return 8;
+        }
+    }
+
+    private static int blurRadiusPx(int ds) {
+        switch (tier()) {
+            case 0:
+                return 0;
+            case 1:
+                return 1;
+            case 2:
+                return 2;
+            default:
+                return Math.max(2, dp(9) / ds);
+        }
+    }
+
+    /** UZ: Sinish panjarasi katagi (dp). EN: Refraction mesh cell (dp). RU: Размер ячейки сетки преломления (dp). */
+    public static int meshCellDp() {
+        switch (tier()) {
+            case 0:
+                return 3;
+            case 1:
+                return 4;
+            case 2:
+                return 5;
+            default:
+                return 6;
+        }
+    }
+
+    /** UZ: Lupa kuchi: o'tkir tasvirda to'liq, xira tasvirda yengilroq. EN: Lens strength: full on sharp images, lighter on blurry ones. RU: Сила линзы: полная на чётком изображении, слабее на размытом. */
+    public static float zoomScale() {
+        return tier() <= 1 ? 1f : 0.8f;
     }
 
     private static long interval() {
         long base;
-        switch (SharedConfig.getDevicePerformanceClass()) {
-            case SharedConfig.PERFORMANCE_CLASS_HIGH:
+        switch (tier()) {
+            case 0:
                 base = 33;
                 break;
-            case SharedConfig.PERFORMANCE_CLASS_AVERAGE:
-                base = 66;
+            case 1:
+                base = 50;
+                break;
+            case 2:
+                base = 90;
                 break;
             default:
-                base = 120;
+                base = 140;
                 break;
         }
-        // byudjet: o'rtacha olish vaqti katta bo'lsa, kamroq yangilanadi / budget: slower refresh if capture is expensive
-        if (emaMs > 8) {
-            base = (long) (base * Math.min(4f, emaMs / 8f));
-        }
         return base;
+    }
+
+    private static float budgetMs() {
+        switch (tier()) {
+            case 0:
+                return 12f;
+            case 1:
+                return 10f;
+            case 2:
+                return 8f;
+            default:
+                return 6f;
+        }
     }
 
     /** UZ: Bitta glass drawable holati. EN: State of one glass drawable. RU: Состояние одного стеклянного drawable. */
@@ -83,6 +154,7 @@ public final class LegacyGlassBackdrop {
         public int w, h;
         long lastCapture;
         int lastHash;
+        int[] px;
         int calm;
         boolean pending;
         // panjara / mesh
@@ -90,6 +162,7 @@ public final class LegacyGlassBackdrop {
         public int cols, rows;
         int meshW = -1, meshH = -1;
         float meshT, meshI, meshZ;
+        int meshCell;
         final float[] meshR = new float[4];
     }
 
@@ -123,7 +196,7 @@ public final class LegacyGlassBackdrop {
                         hosts.remove(i);
                         continue;
                     }
-                    if (v.getVisibility() == View.VISIBLE && v.getWidth() > 0) {
+                    if (v.isShown() && v.getWidth() > 0) {
                         suppress++;
                         v.invalidate();
                     }
@@ -204,7 +277,7 @@ public final class LegacyGlassBackdrop {
      * @param bounds panel chegarasi host koordinatalarida / panel bounds in host coordinates
      */
     public static Bitmap get(State s, View host, Rect bounds, int backgroundColor) {
-        if (capturing || !enabled() || bounds.width() < dp(8) || bounds.height() < dp(8)) {
+        if (capturing || !enabled() || tier() >= 4 || bounds.width() < dp(8) || bounds.height() < dp(8)) {
             return null;
         }
         final View decor = findDecor(host);
@@ -213,7 +286,11 @@ public final class LegacyGlassBackdrop {
         }
         register(host, decor);
 
-        final int ds = downscale();
+        int ds = downscale();
+        // bitmap hajmi cheklangan (xotira va yuklash uchun) / the bitmap size is capped (memory and upload)
+        while ((long) (bounds.width() / ds) * (bounds.height() / ds) > 150_000L) {
+            ds++;
+        }
         final int bw = Math.max(2, bounds.width() / ds);
         final int bh = Math.max(2, bounds.height() / ds);
         if ((long) bounds.width() * bounds.height() > 0.6f * decor.getWidth() * decor.getHeight()) {
@@ -259,12 +336,19 @@ public final class LegacyGlassBackdrop {
             // o'zgarishni aniqlash (sodda nazorat summasi) / change detection (a simple checksum)
             int hash = 17;
             final int n = bw * bh;
-            final int[] px = new int[n];
+            if (s.px == null || s.px.length < n) {
+                s.px = new int[n];
+            }
+            final int[] px = s.px;
             s.bitmap.getPixels(px, 0, bw, 0, 0, bw, bh);
-            for (int i = 0; i < n; i += 3) {
+            final int step = Math.max(3, n / 3000);
+            for (int i = 0; i < n; i += step) {
                 hash = hash * 31 + px[i];
             }
-            Utilities.stackBlurBitmap(s.bitmap, Math.max(2, dp(9) / ds));
+            final int blur = blurRadiusPx(ds);
+            if (blur > 0) {
+                Utilities.stackBlurBitmap(s.bitmap, blur);
+            }
             s.calm = hash == s.lastHash ? s.calm + 1 : 0;
             s.lastHash = hash;
             s.lastCapture = now;
@@ -274,9 +358,20 @@ public final class LegacyGlassBackdrop {
             return null;
         }
         final float ms = (System.nanoTime() - t0) / 1_000_000f;
-        emaMs = emaMs == 0 ? ms : emaMs * 0.8f + ms * 0.2f;
-        if (emaMs > 40) {
-            disabledByBudget = true; // juda sekin: o'chiramiz / far too slow: switch off
+        emaMs = emaMs == 0 ? ms : emaMs * 0.75f + ms * 0.25f;
+        // byudjetdan oshsa sifat bir pog'ona pasayadi (juda sekin bo'lsa o'chadi) / over budget: drop one quality tier (off when far too slow)
+        if (emaMs > budgetMs()) {
+            if (++slowStreak >= 4) {
+                slowStreak = 0;
+                tier = Math.min(4, tier() + 1);
+                emaMs = 0;
+                s.meshW = -1;
+                if (tier >= 4) {
+                    disabledByBudget = true;
+                }
+            }
+        } else {
+            slowStreak = 0;
         }
         return s.bitmap;
     }
@@ -287,13 +382,14 @@ public final class LegacyGlassBackdrop {
      * RU: Сетка преломления (зависит только от геометрии, считается один раз).
      */
     public static void ensureMesh(State s, int w, int h, float[] radii, float thickness, float intensity, float index, float zoom) {
-        if (s.verts != null && s.meshW == w && s.meshH == h && s.meshT == thickness && s.meshI == intensity && s.meshZ == zoom
+        final int cellKey = meshCellDp();
+        if (s.verts != null && s.meshW == w && s.meshH == h && s.meshT == thickness && s.meshI == intensity && s.meshZ == zoom && s.meshCell == cellKey
             && s.meshR[0] == radii[0] && s.meshR[1] == radii[1] && s.meshR[2] == radii[2] && s.meshR[3] == radii[3]) {
             return;
         }
-        final int cell = Math.max(dp(5), 6);
-        final int cols = Math.max(2, Math.min(64, Math.round((float) w / cell)));
-        final int rows = Math.max(2, Math.min(64, Math.round((float) h / cell)));
+        final int cell = Math.max(dp(meshCellDp()), 4);
+        final int cols = Math.max(2, Math.min(96, Math.round((float) w / cell)));
+        final int rows = Math.max(2, Math.min(96, Math.round((float) h / cell)));
         final float[] v = new float[(cols + 1) * (rows + 1) * 2];
         final float[] off = new float[2];
         final float eta = 1f / index;
@@ -317,6 +413,7 @@ public final class LegacyGlassBackdrop {
         s.meshT = thickness;
         s.meshI = intensity;
         s.meshZ = zoom;
+        s.meshCell = cellKey;
         System.arraycopy(radii, 0, s.meshR, 0, 4);
     }
 }
