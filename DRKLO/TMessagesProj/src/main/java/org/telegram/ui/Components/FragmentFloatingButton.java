@@ -93,6 +93,7 @@ public class FragmentFloatingButton extends FrameLayout implements FactorAnimato
             };
             iBlur3SourceColor = new BlurredBackgroundSourceColor();
             iBlur3Background = iBlur3SourceColor.createDrawable();
+            iBlur3Background.setHostView(this);
             iBlur3Background.setColorProvider(iBlur3ColorProviderTabs);
             iBlur3Background.setStrokeWidth(dpf2(0.4f), dpf2(0.4f));
             iBlur3Background.setRadius(dp(18));
