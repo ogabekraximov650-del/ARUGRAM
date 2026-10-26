@@ -312,19 +312,34 @@ async fn get(env: &Env, path: &str, auth: bool) -> std::result::Result<Value, St
 
 async fn get_raw(env: &Env, path: &str, auth: bool) -> std::result::Result<Value, String> {
     let url = format!("{}/{}", api_base(env), path.trim_start_matches('/'));
-    for attempt in 0..2 {
-        let cookie = if auth { Some(format!("access_token={}", token(env, attempt > 0).await?)) } else { None };
+    let mut relogin = false;
+    let mut gateway_tries = 0u32;
+    // 401 -> bir marta qayta kiradi; 502/503/504 (sayt vaqtincha javob bermayapti) -> 3 martagacha
+    // qisqa kutish bilan qayta uriniladi, shunda bot bir martalik nosozlikda xato bermaydi.
+    loop {
+        let cookie = if auth { Some(format!("access_token={}", token(env, relogin).await?)) } else { None };
         let (code, text) = http(&url, Method::Get, None, cookie.as_deref()).await?;
-        if code == 401 && auth && attempt == 0 {
+        if code == 401 && auth && !relogin {
+            relogin = true;
             continue;
         }
-        let v: Value = serde_json::from_str(&text).map_err(|_| format!("sayt javobi tushunarsiz (HTTP {code})"))?;
+        if matches!(code, 502 | 503 | 504) && gateway_tries < 3 {
+            gateway_tries += 1;
+            worker::Delay::from(core::time::Duration::from_millis(600 * gateway_tries as u64)).await;
+            continue;
+        }
+        let v: Value = match serde_json::from_str(&text) {
+            Ok(v) => v,
+            Err(_) if matches!(code, 502 | 503 | 504) => {
+                return Err(format!("sayt vaqtincha ishlamayapti (HTTP {code}) — birozdan keyin qayta urinib ko'ring"));
+            }
+            Err(_) => return Err(format!("sayt javobi tushunarsiz (HTTP {code})")),
+        };
         if code >= 400 || v["success"].as_bool() == Some(false) {
             return Err(format!("sayt: {} (HTTP {code})", v["message"].as_str().unwrap_or("xato")));
         }
         return Ok(v);
     }
-    Err("saytga kirib bo'lmadi".into())
 }
 
 fn data_list(v: &Value) -> Vec<Value> {
