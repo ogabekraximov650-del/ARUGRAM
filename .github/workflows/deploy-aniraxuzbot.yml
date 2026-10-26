@@ -1,0 +1,77 @@
+name: Deploy aniraxuzbot (Cloudflare Worker, TypeScript)
+
+# `aniraxuzbot15/bot/**` o'zgarganda yoki `bot_token.enc` yangilanganda: bot tokeni ENCODE_TOKEN bilan ochilib
+# `BOT_TOKEN` secret'iga qo'yiladi, worker `aniraxuzbot` deploy qilinadi va webhook o'rnatiladi.
+# Bu ALOHIDA bot (ARUMEDIATV workeridan mustaqil).
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'aniraxuzbot15/bot/**'
+      - '.github/workflows/deploy-aniraxuzbot.yml'
+
+concurrency:
+  group: deploy-aniraxuzbot
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # "Environment secrets" ga kirish uchun (deploy-worker.yml bilan bir xil).
+    environment: secret
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Bog'liqliklar
+        working-directory: aniraxuzbot15/bot
+        run: npm install --no-audit --no-fund --no-package-lock
+
+      - name: Tur tekshiruvi
+        working-directory: aniraxuzbot15/bot
+        continue-on-error: true
+        run: npx tsc --noEmit
+
+      - name: Bot tokenini ochib secret'ga qo'yish
+        working-directory: aniraxuzbot15/bot
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+        run: |
+          K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          BT=$(K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in bot_token.enc 2>/dev/null | tr -d '[:space:]')
+          if [ -z "$BT" ]; then
+            echo "❌ bot_token.enc ochilmadi (ENCODE_TOKEN noto'g'ri?)"
+            exit 1
+          fi
+          echo "::add-mask::$BT"
+          # Worker bir marta deploy bo'lmagan bo'lsa secret qo'yish xato berishi mumkin — shunda avval deploy, keyin secret.
+          if ! printf '%s' "$BT" | npx wrangler secret put BOT_TOKEN >/dev/null 2>&1; then
+            echo "⚠️  secret birinchi urinishda qo'yilmadi — avval deploy qilinadi"
+            npx wrangler deploy --keep-vars
+            printf '%s' "$BT" | npx wrangler secret put BOT_TOKEN >/dev/null
+          fi
+          echo "✅ BOT_TOKEN o'rnatildi"
+
+      - name: Deploy
+        working-directory: aniraxuzbot15/bot
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        # --keep-vars: Cloudflare'da avval o'rnatilgan o'zgaruvchilar (masalan TEZCHECK_API_KEY) o'chib ketmaydi.
+        run: npx wrangler deploy --keep-vars
+
+      - name: Webhook o'rnatish
+        run: |
+          sleep 5
+          for i in 1 2 3; do
+            R=$(curl -sS -m 30 "https://aniraxuzbot.ogabekraximov650.workers.dev/setup" || true)
+            echo "$R" | head -c 300; echo
+            echo "$R" | grep -q '"ok":true' && exit 0
+            sleep 8
+          done
+          echo "⚠️  webhook o'rnatilmadi — /setup ni brauzerda oching"

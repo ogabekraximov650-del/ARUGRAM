@@ -13,7 +13,6 @@ SAVED_CHANNEL_ID  = "-1002889216626"
 WEBHOOK_PATH      = "/webhook"
 PORT              = "8787"
 WORKER_URL        = "https://aniraxuzbot.ogabekraximov650.workers.dev"
-TEZCHECK_API_KEY  = ""  # maxfiy kalit repoga yozilmaydi: `wrangler secret put TEZCHECK_API_KEY` / secret key is not stored in the repo
 # D1 Database 1 — Anime, Season, Epizod jadvallari
 [[d1_databases]]
 binding      = "DB_ANIME"
