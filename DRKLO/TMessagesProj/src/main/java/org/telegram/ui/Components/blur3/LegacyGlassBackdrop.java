@@ -89,7 +89,7 @@ public final class LegacyGlassBackdrop {
         public float[] verts;
         public int cols, rows;
         int meshW = -1, meshH = -1;
-        float meshT, meshI;
+        float meshT, meshI, meshZ;
         final float[] meshR = new float[4];
     }
 
@@ -264,7 +264,7 @@ public final class LegacyGlassBackdrop {
             for (int i = 0; i < n; i += 3) {
                 hash = hash * 31 + px[i];
             }
-            Utilities.stackBlurBitmap(s.bitmap, Math.max(2, dp(14) / ds));
+            Utilities.stackBlurBitmap(s.bitmap, Math.max(2, dp(9) / ds));
             s.calm = hash == s.lastHash ? s.calm + 1 : 0;
             s.lastHash = hash;
             s.lastCapture = now;
@@ -286,8 +286,8 @@ public final class LegacyGlassBackdrop {
      * EN: The refraction mesh (depends on geometry only, computed once).
      * RU: Сетка преломления (зависит только от геометрии, считается один раз).
      */
-    public static void ensureMesh(State s, int w, int h, float[] radii, float thickness, float intensity, float index) {
-        if (s.verts != null && s.meshW == w && s.meshH == h && s.meshT == thickness && s.meshI == intensity
+    public static void ensureMesh(State s, int w, int h, float[] radii, float thickness, float intensity, float index, float zoom) {
+        if (s.verts != null && s.meshW == w && s.meshH == h && s.meshT == thickness && s.meshI == intensity && s.meshZ == zoom
             && s.meshR[0] == radii[0] && s.meshR[1] == radii[1] && s.meshR[2] == radii[2] && s.meshR[3] == radii[3]) {
             return;
         }
@@ -304,8 +304,9 @@ public final class LegacyGlassBackdrop {
             for (int i = 0; i <= cols; i++) {
                 final float x = (float) w * i / cols;
                 LiquidGlassMath.offset(x - sx, y - sy, sx, sy, radii, thickness, intensity, eta, off);
-                v[k++] = x - off[0];
-                v[k++] = y - off[1];
+                // lupa: markazdan `zoom` marta kattalashtirish + chetda sinish / magnifier: `zoom` times from the center, plus edge refraction
+                v[k++] = sx + (x - off[0] - sx) * zoom;
+                v[k++] = sy + (y - off[1] - sy) * zoom;
             }
         }
         s.verts = v;
@@ -315,6 +316,7 @@ public final class LegacyGlassBackdrop {
         s.meshH = h;
         s.meshT = thickness;
         s.meshI = intensity;
+        s.meshZ = zoom;
         System.arraycopy(radii, 0, s.meshR, 0, 4);
     }
 }

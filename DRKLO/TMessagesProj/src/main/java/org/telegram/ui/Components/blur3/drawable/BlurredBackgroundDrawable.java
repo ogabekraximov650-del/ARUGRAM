@@ -651,7 +651,7 @@ public abstract class BlurredBackgroundDrawable extends Drawable {
         if (!legacyPaintReady) {
             legacyPaintReady = true;
             final android.graphics.ColorMatrix cm = new android.graphics.ColorMatrix();
-            cm.setSaturation(1.3f);
+            cm.setSaturation(1.55f);
             legacyPaint.setColorFilter(new android.graphics.ColorMatrixColorFilter(cm));
         }
 
@@ -674,8 +674,11 @@ public abstract class BlurredBackgroundDrawable extends Drawable {
         final float thickness = Math.max(Math.min(
             boundProps.liquidThickness <= 0 ? org.telegram.messenger.AndroidUtilities.dp(11) : boundProps.liquidThickness,
             Math.min(bp.width(), bp.height()) / 5), 1);
+        // lupa kuchi panel o'lchamiga qarab: kichik panelda kuchli, katta oynada kuchsiz / magnifier strength by panel size: strong on small panels, weak on big sheets
+        final float panelH = bp.height() / org.telegram.messenger.AndroidUtilities.density;
+        final float zoom = panelH < 90 ? 1.22f : (panelH < 220 ? 1.09f : 1.0f);
         org.telegram.ui.Components.blur3.LegacyGlassBackdrop.ensureMesh(
-            legacyState, bp.width(), bp.height(), legacyRadii, thickness, boundProps.liquidIntensity, boundProps.liquidIndex);
+            legacyState, bp.width(), bp.height(), legacyRadii, thickness * 1.25f, Math.max(boundProps.liquidIntensity, 1.0f), boundProps.liquidIndex, zoom);
 
         legacyPaint.setAlpha(alpha);
         canvas.save();
@@ -688,12 +691,47 @@ public abstract class BlurredBackgroundDrawable extends Drawable {
         // rang qatlami: glass ko'rinib turishi uchun shaffofligi chegaralanadi / tint layer: alpha is capped so the glass stays visible
         final int tint = Theme.multAlpha(this.backgroundColor, alpha / 255f);
         if (Color.alpha(tint) > 0) {
-            final int a = Math.min(Color.alpha(tint), 120);
+            // katta oynalarda matn o'qilishi uchun rang kuchliroq / bigger sheets keep a stronger tint so text stays readable
+            final int a = Math.min(Color.alpha(tint), panelH < 90 ? 78 : (panelH < 220 ? 120 : 175));
             legacyTint.setColor((tint & 0x00FFFFFF) | (a << 24));
             boundProps.draw(canvas, legacyTint);
         }
+        drawLegacySpecular(canvas, bp);
         drawStrokeInternalIfNeeded(canvas);
         return true;
+    }
+
+    private final Paint legacySheen = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint legacyRim = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private android.graphics.LinearGradient sheenShader, rimShader;
+    private int sheenW, sheenH;
+
+    /**
+     * UZ: ARUGRAM: "oyna" hissi: tepada yorug' yaltirash (sheen) va chegarada gradient yorug'lik halqasi.
+     * EN: ARUGRAM: the "glass" feel: a light sheen at the top and a gradient rim light along the edge.
+     * RU: ARUGRAM: ощущение «стекла»: светлый блик сверху и градиентная кайма света по краю.
+     */
+    private void drawLegacySpecular(Canvas canvas, Rect bp) {
+        if (sheenShader == null || sheenW != bp.width() || sheenH != bp.height()) {
+            sheenW = bp.width();
+            sheenH = bp.height();
+            sheenShader = new android.graphics.LinearGradient(0, bp.top, 0, bp.top + bp.height() * 0.55f,
+                0x38FFFFFF, 0x00FFFFFF, android.graphics.Shader.TileMode.CLAMP);
+            rimShader = new android.graphics.LinearGradient(bp.left, bp.top, bp.right, bp.bottom,
+                new int[]{0xC8FFFFFF, 0x18FFFFFF, 0x10FFFFFF, 0x78FFFFFF}, new float[]{0f, 0.35f, 0.65f, 1f},
+                android.graphics.Shader.TileMode.CLAMP);
+            legacyRim.setStyle(Paint.Style.STROKE);
+            legacyRim.setStrokeWidth(org.telegram.messenger.AndroidUtilities.dpf2(1.1f));
+        }
+        legacySheen.setShader(sheenShader);
+        legacySheen.setAlpha(alpha);
+        canvas.save();
+        canvas.clipPath(boundProps.path);
+        canvas.drawRect(bp, legacySheen);
+        canvas.restore();
+        legacyRim.setShader(rimShader);
+        legacyRim.setAlpha(alpha);
+        canvas.drawPath(boundProps.path, legacyRim);
     }
 
     /**
