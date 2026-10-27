@@ -476,7 +476,7 @@ async function aniblaCleanup(): Promise<void> {
   await d1Update(`DELETE FROM anibla_jobs WHERE state IN ('error','cancelled') AND created_at < ?`, [now - 24 * 3600 * 1000]);
   await d1Update(`DELETE FROM anibla_queue_data WHERE job_id NOT IN (SELECT id FROM anibla_jobs)`);
   await d1Update(`DELETE FROM anibla_progress WHERE job_id NOT IN (SELECT id FROM anibla_jobs)`);
-  await d1Update(`DELETE FROM anibla_parts WHERE job_id NOT IN (SELECT id FROM anibla_jobs)`);
+  await d1Update(`DELETE FROM anibla_part_files WHERE job_id NOT IN (SELECT id FROM anibla_jobs)`);
 }
 
 /** Bir nechta video bir vaqtda ishlasa log qismi tashlanadi (xabar aralash bo'lib ketmasin). */
@@ -782,6 +782,100 @@ export async function aniblaRunFailed(api: Api, jobId: number, token: string, re
   return true;
 }
 
+/** Qism/sifat yozuvini bazaga yozadi (bor bo'lsa yangilaydi). Bir qismning sifatlari bir vaqtda kelsa, UNIQUE to'qnashuvida qayta uriniladi. */
+async function upsertForJob(
+  job: Job,
+  info: NonNullable<Awaited<ReturnType<typeof getAnimeInfo>>>,
+  chanelFileId: string,
+  botFileId: string
+): Promise<Awaited<ReturnType<typeof upsertEpisodeQuality>>> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await upsertEpisodeQuality({
+        seasondb_id: job.anime_info_id,
+        epizoddb_id: info.epizoddb_id,
+        id: info.id,
+        name: info.name,
+        epizod_number: info.kategoriya === "TV" ? job.ep_number : null,
+        film_id: info.kategoriya === "FILM" ? job.ep_number : null,
+        ova_id: info.kategoriya === "OVA" ? job.ep_number : null,
+        epizod_id: await getNextDownloadId(),
+        quality: job.quality,
+        chanel_id: chanelFileId,
+        bot_id: botFileId,
+      });
+    } catch (e) {
+      lastErr = e;
+      await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+    }
+  }
+  throw lastErr;
+}
+
+/**
+ * 2 GB dan katta video qismi (`ANIBLA:<ish>:<token>:<i>/<n>`) kelishi bilan: kanalga saqlanadi va bazadagi yozuvga
+ * VERGUL bilan qo'shiladi ("id1" -> "id1,id2" -> "id1,id2,id3"). Hamma qism yozilgach ish navbatdan o'chadi.
+ * Yozuv `anibla_part_files` dan qismlar tartibida qayta yig'iladi — takror kelgan qism ikki marta yozilmaydi.
+ */
+async function savePart(ctx: MyContext, job: Job, idx: number, total: number, botFileId: string): Promise<void> {
+  if (job.state !== "queued") return;
+  const ex = await d1Run<{ chanel_id: string }>(`SELECT chanel_id FROM anibla_part_files WHERE job_id = ? AND idx = ?`, [job.id, idx]);
+  if (ex[0]?.chanel_id) return; // takror yuborilgan
+  try {
+    const info = await getAnimeInfo(job.anime_info_id);
+    const anime = info ? await getAnimeById(info.id) : null;
+    if (!info || !anime) throw new Error("anime topilmadi");
+    const channelUsername = await getMainChannelUsername(ctx);
+    const caption = buildEpisodeCaptionFromInputs(info, anime.name, job.ep_number, channelUsername, undefined, job.quality);
+    const sent = await ctx.api.sendVideo(config.SAVED_CHANNEL_ID, botFileId, { caption: `${caption}\n\n📦 ${idx}/${total}-qism` });
+    const chanelId = sent.video?.file_id ?? botFileId;
+    await d1Update(
+      `INSERT INTO anibla_part_files (job_id, idx, total, bot_id, chanel_id) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(job_id, idx) DO UPDATE SET bot_id = excluded.bot_id, chanel_id = excluded.chanel_id, total = excluded.total`,
+      [job.id, idx, total, botFileId, chanelId]
+    );
+
+    // Bazaga: oldingi yozuv + vergul + yangi. Parallel kelgan qism yozuvini yo'qotmaslik uchun natija qayta tekshiriladi.
+    let written = "";
+    let count = 0;
+    for (let pass = 0; pass < 2; pass++) {
+      const rows = await d1Run<{ bot_id: string; chanel_id: string }>(
+        `SELECT bot_id, chanel_id FROM anibla_part_files WHERE job_id = ? AND chanel_id != '' ORDER BY idx ASC`,
+        [job.id]
+      );
+      const chanel = rows.map((r) => r.chanel_id).join(",");
+      if (chanel === written) break;
+      await upsertForJob(job, info, chanel, rows.map((r) => r.bot_id).join(","));
+      written = chanel;
+      count = rows.length;
+    }
+
+    if (count >= total) {
+      await d1Update(`DELETE FROM anibla_jobs WHERE id = ?`, [job.id]);
+      await d1Update(`DELETE FROM anibla_progress WHERE job_id = ?`, [job.id]);
+      await d1Update(`DELETE FROM anibla_part_files WHERE job_id = ?`, [job.id]);
+      await d1Update(`DELETE FROM anibla_queue_data WHERE job_id = ?`, [job.id]);
+      // Run o'z ishini tugatdi (oxirgi qism keldi) — shu sifat workflow'i navbatdagi keyingi qismga o'tadi.
+      await dispatchNext(job.quality).catch((e) => console.error("anibla dispatchNext:", e));
+      await ctx.api.sendMessage(
+        job.admin_chat,
+        `✅ <b>${esc(job.title)}</b> (${job.quality}) — ${total} qismli video kanalga saqlandi, <code>file_id</code> lar bazaga vergul bilan yozildi.`,
+        { parse_mode: "HTML" }
+      ).catch(() => {});
+    }
+  } catch (e) {
+    console.error("anibla savePart:", e);
+    await d1Update(`UPDATE anibla_jobs SET state = 'error', error = ? WHERE id = ?`, [`${idx}/${total}-qism: ${errText(e)}`.slice(0, 300), job.id]);
+    await dispatchNext(job.quality).catch((e2) => console.error("anibla dispatchNext:", e2));
+    await ctx.api.sendMessage(
+      job.admin_chat,
+      `❌ <b>${esc(job.title)}</b> (${job.quality}) ${idx}/${total}-qism saqlanmadi: ${esc(errText(e))}\nOldingi qismlar bazada qolgan bo'lishi mumkin — videoni qayta yuklang.`,
+      { parse_mode: "HTML" }
+    ).catch(() => {});
+  }
+}
+
 async function finishJob(ctx: MyContext, job: Job, botFileIds: string[]): Promise<void> {
   // Atomik: bir xil video ikki marta saqlanmasin.
   const claimed = await d1Update(`UPDATE anibla_jobs SET state = 'saving' WHERE id = ? AND state = 'queued'`, [job.id]);
@@ -806,31 +900,11 @@ async function finishJob(ctx: MyContext, job: Job, botFileIds: string[]): Promis
     const chanelFileId = chanelIds.join(",");
     const botFileId = botFileIds.join(",");
 
-    // 3) Bazaga yozish. Bir qismning sifatlari bir vaqtda kelsa, UNIQUE to'qnashuvida qayta uriniladi.
-    let upserted: Awaited<ReturnType<typeof upsertEpisodeQuality>> | null = null;
-    for (let attempt = 0; attempt < 3 && !upserted; attempt++) {
-      try {
-        upserted = await upsertEpisodeQuality({
-          seasondb_id: job.anime_info_id,
-          epizoddb_id: info.epizoddb_id,
-          id: info.id,
-          name: info.name,
-          epizod_number: info.kategoriya === "TV" ? job.ep_number : null,
-          film_id: info.kategoriya === "FILM" ? job.ep_number : null,
-          ova_id: info.kategoriya === "OVA" ? job.ep_number : null,
-          epizod_id: await getNextDownloadId(),
-          quality: job.quality,
-          chanel_id: chanelFileId,
-          bot_id: botFileId,
-        });
-      } catch (e) {
-        if (attempt === 2) throw e;
-        await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
-      }
-    }
+    // 3) Bazaga yozish.
+    const upserted = await upsertForJob(job, info, chanelFileId, botFileId);
 
     // Kanalga post joylash vaqtincha o'chirilgan (`CHANNEL_POSTING`).
-    if (upserted?.isNew && config.CHANNEL_POSTING) {
+    if (upserted.isNew && config.CHANNEL_POSTING) {
       try {
         const link = `https://t.me/${ctx.me.username}?start=ep_${upserted.epizod_id}`;
         const kb = new InlineKeyboard().url("• Yuklab Olish •", link);
@@ -844,11 +918,10 @@ async function finishJob(ctx: MyContext, job: Job, botFileIds: string[]): Promis
     // Tayyor ish navbatdan butunlay o'chiriladi (video allaqachon bazada).
     await d1Update(`DELETE FROM anibla_jobs WHERE id = ?`, [job.id]);
     await d1Update(`DELETE FROM anibla_progress WHERE job_id = ?`, [job.id]);
-    await d1Update(`DELETE FROM anibla_parts WHERE job_id = ?`, [job.id]);
     await d1Update(`DELETE FROM anibla_queue_data WHERE job_id = ?`, [job.id]);
     await ctx.api.sendMessage(
       job.admin_chat,
-      `✅ <b>${esc(job.title)}</b> (${job.quality}) ${upserted?.isNew ? "qo'shildi" : "yangilandi"} — kanalga saqlandi, <code>file_id</code> bazaga yozildi.`,
+      `✅ <b>${esc(job.title)}</b> (${job.quality}) ${upserted.isNew ? "qo'shildi" : "yangilandi"} — kanalga saqlandi, <code>file_id</code> bazaga yozildi.`,
       { parse_mode: "HTML" }
     ).catch(() => {});
   } catch (e) {
@@ -999,18 +1072,7 @@ export function setupAniblaAdd(bot: Bot<MyContext>): void {
     const idx = Number(m[3]);
     const total = Number(m[4]);
     if (!(idx >= 1 && idx <= total && total >= 2 && total <= 30)) return;
-    await d1Update(
-      `INSERT INTO anibla_parts (job_id, idx, total, file_id) VALUES (?, ?, ?, ?)
-       ON CONFLICT(job_id, idx) DO UPDATE SET file_id = excluded.file_id, total = excluded.total`,
-      [job.id, idx, total, fileId]
-    );
-    const got = await d1Run<{ idx: number; file_id: string }>(
-      `SELECT idx, file_id FROM anibla_parts WHERE job_id = ? ORDER BY idx ASC`,
-      [job.id]
-    );
-    if (got.length >= total && got.every((r, i) => r.idx === i + 1)) {
-      await finishJob(ctx, job, got.map((r) => r.file_id));
-    }
+    await savePart(ctx, job, idx, total, fileId);
   });
 
   bot.on("message:text", async (ctx, next) => {
