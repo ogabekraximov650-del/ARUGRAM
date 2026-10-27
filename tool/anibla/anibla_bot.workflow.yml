@@ -1,6 +1,8 @@
-name: Anibla -> aniraxuzbot (bitta sifat)
+name: Anibla -> aniraxuzbot (__Q__)
 
-# aniraxuzbot ("➕ Yangi qism qo'shish" -> "🌐 Anibla orqali") har bir sifat uchun ALOHIDA run ochadi: shu run bitta sifatni
+# aniraxuzbot ("➕ Yangi qism qo'shish" -> "🌐 Anibla orqali"): har bir sifat uchun ALOHIDA workflow fayli
+# (`anibla_bot_1080p.yml`, `anibla_bot_720p.yml`, `anibla_bot_480p.yml`, `anibla_bot_360p.yml`) — hammasi shu shablondan
+# `tool/packs/sync_repo.py` tomonidan yaratiladi (`__Q__` o'rniga sifat qo'yiladi). Shu workflow'ning run'i bitta sifatni
 # yuklaydi, 2 GB dan katta bo'lsa H.265 (CRF 30, sig'masa 31, 32, ...) bilan siqadi va botga yuboradi (`tool/anibla/bot_download.py`).
 # Bot videoni yopiq kanalga saqlab, `file_id` ni bazaga yozadi. Run tugagach o'chadi (navbat yo'q, har sifat — bitta run).
 #
@@ -40,7 +42,7 @@ on:
 run-name: "Anibla #${{ inputs.job }} · ${{ inputs.quality }}"
 
 concurrency:
-  group: aniraxuzbot-anibla-${{ inputs.job }}
+  group: aniraxuzbot-anibla-__Q__-${{ inputs.job }}
   cancel-in-progress: false
 
 permissions:

@@ -14,6 +14,8 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -47,8 +49,16 @@ for _src in sorted((HERE.parent / "translate").iterdir()):
 # `creds.enc` KO'CHIRILMAYDI: login/parol faqat worker'da (ANIBLA_CREDS).
 FILES[".github/workflows/anibla.yml"] = HERE.parent / "anibla" / "anibla.workflow.yml"
 FILES["tool/anibla/download.py"] = HERE.parent / "anibla" / "download.py"
-# aniraxuzbot: bitta sifat — bitta run (`anibla_bot.yml`).
-FILES[".github/workflows/anibla_bot.yml"] = HERE.parent / "anibla" / "anibla_bot.workflow.yml"
+# aniraxuzbot: har bir sifat uchun ALOHIDA workflow (`anibla_bot_<sifat>.yml`) — bitta shablondan yaratiladi.
+ANIBLA_QUALITIES = ("1080p", "720p", "480p", "360p")
+_gen = Path(tempfile.mkdtemp(prefix="anibla_wf_"))
+_tpl = (HERE.parent / "anibla" / "anibla_bot.workflow.yml").read_text(encoding="utf-8")
+for _q in ANIBLA_QUALITIES:
+    _f = _gen / f"anibla_bot_{_q}.yml"
+    _f.write_text(_tpl.replace("__Q__", _q), encoding="utf-8")
+    FILES[f".github/workflows/anibla_bot_{_q}.yml"] = _f
+# Eski umumiy workflow: run'lari to'xtatilib o'chiriladi, fayli olib tashlanadi (bir martalik, keyin hech narsa topilmaydi).
+OLD_WORKFLOWS = ("anibla_bot.yml",)
 FILES["tool/anibla/bot_download.py"] = HERE.parent / "anibla" / "bot_download.py"
 # Mini App pleyeri uchun eski qismlarning fMP4 nusxasi — ALOHIDA workflow `fmp4.yml`.
 FILES[".github/workflows/fmp4.yml"] = HERE.parent / "fmp4" / "fmp4.workflow.yml"
@@ -117,7 +127,39 @@ if "/" not in REPO:
 print(f"Repo: {REPO}")
 
 
+def remove_old_workflow(wf):
+    """Eski workflow: ishlayotgan/navbatdagi run'lar to'xtatiladi, hamma run o'chiriladi, fayl olib tashlanadi."""
+    code, cur = api("GET", f"/repos/{REPO}/contents/.github/workflows/{wf}?ref=main", ok=(200, 404))
+    if code != 200:
+        return
+    runs = []
+    for page in range(1, 6):
+        c, d = api("GET", f"/repos/{REPO}/actions/workflows/{wf}/runs?per_page=100&page={page}", ok=(200, 404))
+        got = d.get("workflow_runs", []) if c == 200 else []
+        runs += got
+        if len(got) < 100:
+            break
+    live = [r for r in runs if r.get("status") != "completed"]
+    for r in live:
+        api("POST", f"/repos/{REPO}/actions/runs/{r['id']}/cancel", ok=(202, 409))
+        print(f"To'xtatildi: {wf} run {r['id']}")
+    for _ in range(18):
+        if not live:
+            break
+        time.sleep(5)
+        live = [r for r in live
+                if api("GET", f"/repos/{REPO}/actions/runs/{r['id']}", ok=(200, 404))[1].get("status") not in (None, "completed")]
+    for r in runs:
+        api("DELETE", f"/repos/{REPO}/actions/runs/{r['id']}", ok=(204, 403, 404, 409))
+    print(f"O'chirildi: {wf} ({len(runs)} ta run)")
+    api("DELETE", f"/repos/{REPO}/contents/.github/workflows/{wf}",
+        {"message": f"Sinxronlash: {wf} olib tashlandi (har sifat uchun alohida workflow)",
+         "sha": cur["sha"], "branch": "main"}, ok=(200, 404, 409))
+
+
 def main():
+    for wf in OLD_WORKFLOWS:
+        remove_old_workflow(wf)
     changed = 0
     for dest, src in FILES.items():
         new = src.read_bytes()

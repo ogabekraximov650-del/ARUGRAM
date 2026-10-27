@@ -12,7 +12,8 @@ import { getSetting, setSetting } from "./db.ts";
 
 const DEFAULT_SITE = "https://anibla.uz";
 const UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
-export const WORKFLOW = "anibla_bot.yml";
+/** Har bir sifat uchun alohida workflow fayli: anibla_bot_1080p.yml, anibla_bot_720p.yml, ... */
+export const workflowOf = (q: string): string => `anibla_bot_${q}.yml`;
 
 // deno-lint-ignore no-explicit-any
 type Json = any;
@@ -454,9 +455,9 @@ export function ghReady(): boolean {
   return !!config.GH_ACTIONS_TOKEN.trim() && config.GH_REPO.includes("/");
 }
 
-/** Bitta sifat uchun bitta run: har bir sifat alohida `workflow_dispatch`. */
+/** Bitta sifat — o'z workflow'i (`workflowOf(sifat)`): har bir sifat alohida `workflow_dispatch`. */
 export async function dispatchRun(inputs: Record<string, string>): Promise<void> {
-  const r = await fetch(`https://api.github.com/repos/${config.GH_REPO.trim()}/actions/workflows/${WORKFLOW}/dispatches`, {
+  const r = await fetch(`https://api.github.com/repos/${config.GH_REPO.trim()}/actions/workflows/${workflowOf(inputs.quality)}/dispatches`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${config.GH_ACTIONS_TOKEN.trim()}`,
