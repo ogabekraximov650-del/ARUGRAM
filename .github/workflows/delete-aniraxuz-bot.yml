@@ -1,0 +1,34 @@
+name: Vaqtinchalik aniraxuz-bot workerini o'chirish (bir martalik)
+
+# `tool/aniraxuzbot/delete_aniraxuz_bot.txt` o'zgarganda: Telegram vaqtincha eski manzilni hal qila olmaganda yaratilgan
+# `aniraxuz-bot` worker'i Cloudflare'dan o'chiriladi (foydalanuvchi talabi). Asosiy worker `aniraxuzbot` TEGILMAYDI.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tool/aniraxuzbot/delete_aniraxuz_bot.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  delete:
+    runs-on: ubuntu-latest
+    environment: secret
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: wrangler
+        run: npm install -g wrangler
+      - name: O'chirish
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          NAME="aniraxuz-bot"
+          KEEP="aniraxuzbot"
+          [ "$NAME" != "$KEEP" ] || { echo "nomlar bir xil — to'xtadi"; exit 1; }
+          wrangler delete --name "$NAME" --force
+          echo "✅ $NAME o'chirildi ($KEEP qoldi)"
