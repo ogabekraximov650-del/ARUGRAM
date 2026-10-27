@@ -68,15 +68,23 @@ jobs:
       - name: Python paketlari
         run: pip install --no-cache-dir -r tool/encode/requirements.txt
 
-      - name: Telegram sessiyasi
+      - name: Telegram sessiyalari (qo'shimcha akkauntlar)
         env:
           ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
         run: |
-          OUT=tool/anibla/pyro_session.session
+          # ASOSIY akkaunt ishlatilmaydi: faqat botdagi "🗂 Yuklovchi sessiyalar" (tool/encode/pool/*.enc).
           K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
-          K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K \
-            -in tool/encode/session.enc -out "$OUT"
-          head -c 16 "$OUT" | grep -q "SQLite format 3" || { echo "::error::Sessiya ochilmadi (ENCODE_TOKEN noto'g'ri?)"; exit 1; }
+          N=0
+          for F in tool/encode/pool/*.enc; do
+            [ -f "$F" ] || continue
+            P="tool/anibla/pool_$(basename "$F" .enc).session"
+            if K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in "$F" -out "$P" && head -c 16 "$P" | grep -q "SQLite format 3"; then
+              echo "sessiya: $F"; N=$((N+1))
+            else
+              rm -f "$P"; echo "::warning::$F ochilmadi"
+            fi
+          done
+          [ "$N" -gt 0 ] || { echo "::error::Qo'shimcha sessiya yo'q — panel botda 'Yuklovchi sessiyalar' orqali qo'shing"; exit 1; }
 
       - name: Katta fayllar uchun joy (/mnt dagi katta disk)
         run: |
@@ -99,6 +107,18 @@ jobs:
           PYTHONUNBUFFERED: '1'
         run: python3 tool/anibla/bot_download.py
 
+      - name: Xatoni botga bildirish
+        if: failure()
+        env:
+          JOB: ${{ inputs.job }}
+          TOKEN: ${{ inputs.token }}
+          API: ${{ inputs.api }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          [ -n "$API" ] || exit 0
+          curl -sS -m 20 -X POST "${API%/}/anibla/fail" -H 'Content-Type: application/json' \
+            -d "{\"job\": ${JOB}, \"token\": \"${TOKEN}\", \"error\": \"Actions run yiqildi: ${RUN_URL}\"}" || true
+
       - name: Sessiyani o'chirish
         if: always()
-        run: rm -f tool/anibla/pyro_session.session
+        run: rm -f tool/anibla/pool_*.session

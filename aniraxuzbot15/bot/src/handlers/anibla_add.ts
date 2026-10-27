@@ -772,6 +772,16 @@ async function loadJob(id: number, token: string): Promise<Job | null> {
   return rows[0] ?? null;
 }
 
+/** Workflow qadami yiqilsa (akkaunt yo'q, yuklash xatosi...) `/anibla/fail` chaqiradi: ish xatoga o'tadi, navbat davom etadi. */
+export async function aniblaRunFailed(api: Api, jobId: number, token: string, reason: string): Promise<boolean> {
+  const job = await loadJob(jobId, token);
+  if (!job || job.state !== "queued") return false;
+  await d1Update(`UPDATE anibla_jobs SET state = 'error', error = ? WHERE id = ? AND state = 'queued'`, [reason.slice(0, 300), job.id]);
+  await dispatchNext(job.quality).catch((e) => console.error("anibla dispatchNext:", e));
+  await api.sendMessage(job.admin_chat, `❌ <b>${esc(job.title)}</b> (${job.quality}): ${esc(reason.slice(0, 300))}`, { parse_mode: "HTML" }).catch(() => {});
+  return true;
+}
+
 async function finishJob(ctx: MyContext, job: Job, botFileIds: string[]): Promise<void> {
   // Atomik: bir xil video ikki marta saqlanmasin.
   const claimed = await d1Update(`UPDATE anibla_jobs SET state = 'saving' WHERE id = ? AND state = 'queued'`, [job.id]);

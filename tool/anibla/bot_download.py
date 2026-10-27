@@ -10,7 +10,8 @@ qiladi (`anibla_bot_<sifat>.yml`). Bu skript:
      `ANIBLA:<ish>:<token>:<i>/<n>`). Bot uni yopiq kanalga saqlaydi, kanaldagi `file_id` ni (qismlar bo'lsa vergul bilan) bazaga yozadi.
 Xato bo'lsa botga `ANIBLA_FAIL:<ish>:<token>:<sabab>` xabari yuboriladi (admin chatida ko'rinadi).
 
-Muhit: JOB, TOKEN, BOT, QUALITY, VIDEO, AUDIO, NAME; TG_API_ID, TG_API_HASH; sessiya `tool/anibla/pyro_session.session`.
+Muhit: JOB, TOKEN, BOT, QUALITY, VIDEO, AUDIO, NAME; TG_API_ID, TG_API_HASH; sessiyalar `tool/anibla/pool_*.session`
+(qo'shimcha akkauntlar; ASOSIY akkaunt ishlatilmaydi).
 """
 import asyncio
 import json
@@ -204,7 +205,7 @@ def split_file(src, work, live=None):
     raise Fatal(f"{mb(LIMIT)} dan oshmaydigan qismlarga bo'lib bo'lmadi")
 
 
-async def run(app):
+async def run(pool):
     work = Path(os.environ.get("WORK_ROOT") or os.environ.get("RUNNER_TEMP", "/tmp")) / f"anibla_bot_{JOB}"
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir(parents=True)
@@ -236,7 +237,7 @@ async def run(app):
             job = types.SimpleNamespace(channel=BOT, caption=f"ANIBLA:{JOB}:{TOKEN}{tag}", file_name=fname[:90] or f"video_{JOB}")
             log(f"botga yuboriladi: @{BOT} ({mb(f.stat().st_size)}){f' · qism {i}/{total}' if total > 1 else ''}")
             t_up = time.time()
-            await dl.upload(app, job, f, thumb, live)
+            await pool.upload(job, f, thumb, live)
             live.done(f"Botga yuborildi{f' · qism {i}/{total}' if total > 1 else ''} · {dl.hms(time.time() - t_up)}")
             thumb.unlink(missing_ok=True)
         live.send("✅ Tayyor — bot kanalga saqlaydi", force=True)
@@ -248,23 +249,82 @@ async def run(app):
         raise
 
 
+class Pool:
+    """Qo'shimcha Telegram akkauntlari (botdagi "🗂 Yuklovchi sessiyalar", `tool/encode/pool/*.enc`). ASOSIY akkaunt ishlatilmaydi.
+    Ish raqamiga qarab boshlang'ich akkaunt tanlanadi (yuk taqsimlanadi); yuborish xato bersa (FloodWait va h.k.) — keyingisi."""
+
+    def __init__(self, clients):
+        self.clients = clients
+        self.started = []
+
+    def order(self):
+        n = len(self.clients)
+        k = int(JOB) % n if n else 0
+        return self.clients[k:] + self.clients[:k]
+
+    async def _start(self, c):
+        if c not in self.started:
+            await c.start()
+            self.started.append(c)
+
+    async def upload(self, job, f, thumb, live):
+        last = None
+        for c in self.order():
+            try:
+                await self._start(c)
+                log(f"akkaunt: {c.name}")
+                return await dl.upload(c, job, f, thumb, live)
+            except Exception as e:  # noqa: BLE001
+                last = e
+                log(f"akkaunt {c.name} yubora olmadi ({type(e).__name__}: {e}) — keyingisi")
+        raise last or RuntimeError("yuboradigan akkaunt yo'q")
+
+    async def notify(self, text):
+        for c in self.order():
+            try:
+                await self._start(c)
+                await c.send_message(BOT, text)
+                return
+            except Exception as e:  # noqa: BLE001
+                log(f"botga xabar yuborilmadi ({c.name}): {e}")
+
+    async def close(self):
+        for c in self.started:
+            try:
+                await c.stop()
+            except Exception:  # noqa: BLE001
+                pass
+
+
+def api_id_of(base):
+    try:
+        import sqlite3
+        c = sqlite3.connect(f"file:{base}.session?mode=ro", uri=True)
+        return int(c.execute("SELECT api_id FROM sessions").fetchone()[0] or 0)
+    except Exception:  # noqa: BLE001
+        return 0
+
+
 async def main():
     import pyrogram.utils
     from pyrogram import Client
     pyrogram.utils.MIN_CHANNEL_ID = -1009999999999
-    api_id = dl.session_api_id() or int(os.environ["TG_API_ID"])
-    app = Client(dl.SESSION, api_id=api_id, api_hash=os.environ["TG_API_HASH"], no_updates=True)
-    async with app:
-        try:
-            await run(app)
-        except Exception as e:  # noqa: BLE001
-            log(f"XATO: {e}")
-            try:
-                reason = str(e).replace("\n", " ")[:250]
-                await app.send_message(BOT, f"ANIBLA_FAIL:{JOB}:{TOKEN}:{reason}")
-            except Exception as e2:  # noqa: BLE001
-                log(f"botga xabar yuborilmadi: {e2}")
-            raise
+    clients = []
+    for f in sorted(HERE.glob("pool_*.session")):
+        base = str(f.with_suffix(""))
+        clients.append(Client(base, api_id=api_id_of(base) or int(os.environ["TG_API_ID"]),
+                              api_hash=os.environ["TG_API_HASH"], no_updates=True))
+    pool = Pool(clients)
+    try:
+        if not clients:
+            raise Fatal("qo'shimcha akkaunt yo'q — panel botda «🗂 Yuklovchi sessiyalar» orqali qo'shing (asosiy akkaunt ishlatilmaydi)")
+        await run(pool)
+    except Exception as e:  # noqa: BLE001
+        log(f"XATO: {e}")
+        await pool.notify(f"ANIBLA_FAIL:{JOB}:{TOKEN}:{str(e).replace(chr(10), ' ')[:250]}")
+        raise
+    finally:
+        await pool.close()
 
 
 if __name__ == "__main__":

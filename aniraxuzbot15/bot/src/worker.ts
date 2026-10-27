@@ -12,7 +12,7 @@ import { createBot } from "./bot.ts";
 import { createTable } from "./db.ts";
 import { config } from "./config.ts";
 import { processPostQueue } from "./queue_processor.ts";
-import { aniblaPush, aniblaTick } from "./handlers/anibla_add.ts";
+import { aniblaPush, aniblaRunFailed, aniblaTick } from "./handlers/anibla_add.ts";
 import { d1Run, d1Update } from "./db_d1.ts";
 import { initD1Bindings, ensureD1Tables, type D1Env } from "./db_d1.ts";
 
@@ -110,6 +110,27 @@ app.post("/anibla/progress", async (c) => {
     return c.json(retry ? { ok: false, retry_after: retry } : { ok: true });
   } catch (e) {
     console.error("anibla/progress:", e);
+    return c.json({ ok: false }, 500);
+  }
+});
+
+// ── Actions xatosi (bot_download.py / workflow): ish xatoga o'tadi, shu sifat navbati davom etadi ──
+app.post("/anibla/fail", async (c) => {
+  let b: { job?: number; token?: string; error?: string };
+  try {
+    b = await c.req.json();
+  } catch {
+    return c.json({ ok: false }, 400);
+  }
+  const job = Number(b.job);
+  const token = String(b.token ?? "");
+  if (!job || !/^[a-f0-9]{32}$/.test(token)) return c.json({ ok: false }, 400);
+  try {
+    await ensureReady();
+    const done = await aniblaRunFailed(bot!.api, job, token, String(b.error ?? "Actions xatosi").slice(0, 300));
+    return c.json({ ok: done });
+  } catch (e) {
+    console.error("anibla/fail:", e);
     return c.json({ ok: false }, 500);
   }
 });
