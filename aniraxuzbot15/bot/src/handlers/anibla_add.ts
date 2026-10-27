@@ -458,41 +458,78 @@ function fitBody(text: string, budget: number): string {
   return text.length <= budget ? text : text.slice(-budget);
 }
 
+const QRANK: Record<string, number> = { "1080p": 0, "720p": 1, "480p": 2, "360p": 3 };
+const STALE_MS = 30 * 60 * 1000;
+
+/** Navbatni tozalaydi: tayyor ishlar o'chadi; 30 daqiqa holat bermagan (run to'xtagan/boshlanmagan) ishlar xatoga o'tadi; eski xatolar o'chadi. */
+async function aniblaCleanup(): Promise<void> {
+  const now = Date.now();
+  await d1Update(`DELETE FROM anibla_jobs WHERE state = 'done'`);
+  await d1Update(
+    `UPDATE anibla_jobs SET state = 'error', error = ?
+      WHERE state = 'queued' AND created_at < ?
+        AND NOT EXISTS (SELECT 1 FROM anibla_progress p WHERE p.job_id = anibla_jobs.id AND p.updated_at > ?)`,
+    ["Actions run boshlanmadi yoki to'xtatildi (30 daqiqa holat kelmadi)", now - STALE_MS, now - STALE_MS]
+  );
+  await d1Update(`DELETE FROM anibla_jobs WHERE state = 'error' AND created_at < ?`, [now - 24 * 3600 * 1000]);
+  await d1Update(`DELETE FROM anibla_progress WHERE job_id NOT IN (SELECT id FROM anibla_jobs)`);
+}
+
+/** Bir nechta video bir vaqtda ishlasa log qismi tashlanadi (xabar aralash bo'lib ketmasin). */
+const stripLog = (t: string): string => {
+  const i = t.indexOf("\n\n📜 Log:");
+  const j = t.lastIndexOf("\n\n⏱");
+  return i >= 0 && j > i ? t.slice(0, i) + t.slice(j) : t;
+};
+
 async function statusText(): Promise<string> {
   const now = Date.now();
-  const active = await d1Run<{ id: number; title: string; quality: string; state: string; text: string | null }>(
+  const jobs = await d1Run<{ id: number; title: string; quality: string; state: string; text: string | null }>(
     `SELECT j.id, j.title, j.quality, j.state, p.text
        FROM anibla_jobs j LEFT JOIN anibla_progress p ON p.job_id = j.id
       WHERE j.state IN ('queued','saving') AND j.created_at > ?
-      ORDER BY j.id ASC LIMIT 6`,
+      ORDER BY j.id ASC LIMIT 20`,
     [now - 12 * 3600 * 1000]
   );
-  const recent = await d1Run<{ id: number; title: string; quality: string; state: string; error: string }>(
-    `SELECT id, title, quality, state, error FROM anibla_jobs WHERE state IN ('done','error') ORDER BY id DESC LIMIT 3`
+  const bad = await d1Run<{ id: number; title: string; quality: string; error: string }>(
+    `SELECT id, title, quality, error FROM anibla_jobs WHERE state = 'error' ORDER BY id DESC LIMIT 3`
   );
-  let out: string;
-  if (active.length === 0) {
-    out = "🎞 <b>Anibla yuklash</b>\n\n💤 Hozir yuklanayotgan video yo'q.\n\nYuklash boshlansa, shu xabar o'zi yangilanadi.";
-  } else {
-    const budget = Math.floor(3300 / active.length) - 160;
-    out = active
-      .map((j) => {
-        const body = j.state === "saving"
-          ? "💾 Bot kanalga saqlayapti..."
-          : j.text
-            ? esc(fitBody(j.text, budget))
-            : "⏳ Actions ishga tushmoqda (run navbatda)...";
-        return `${jobHead(j)}\n\n${body}`;
-      })
-      .join("\n\n━━━━━━━━━━\n\n");
+  const order = (a: { title: string; quality: string; id: number }, b: { title: string; quality: string; id: number }) =>
+    a.title.localeCompare(b.title) || (QRANK[a.quality] ?? 9) - (QRANK[b.quality] ?? 9) || a.id - b.id;
+  const running = jobs.filter((j) => j.state === "saving" || j.text).sort(order);
+  const waiting = jobs.filter((j) => j.state !== "saving" && !j.text).sort(order);
+
+  const parts: string[] = [];
+  if (running.length) {
+    const budget = Math.floor(3300 / running.length) - 160;
+    const multi = running.length > 1;
+    parts.push(
+      running
+        .map((j) => {
+          const body = j.state === "saving"
+            ? "💾 Bot kanalga saqlayapti..."
+            : esc(fitBody(multi ? stripLog(j.text!) : j.text!, budget));
+          return `${jobHead(j)}\n\n${body}`;
+        })
+        .join("\n\n━━━━━━━━━━\n\n")
+    );
   }
-  if (recent.length) {
-    out += "\n\n<b>Oxirgilari:</b>";
-    for (const r of recent) {
-      out += `\n${r.state === "done" ? "✅" : "❌"} #${r.id} ${esc(r.title)} · ${r.quality}${r.state === "error" && r.error ? ` — <i>${esc(r.error.slice(0, 120))}</i>` : ""}`;
-    }
+  if (waiting.length) {
+    parts.push(
+      `⏳ <b>Navbatda — Actions run ishga tushmoqda (${waiting.length} ta):</b>\n` +
+        waiting.map((j) => `• #${j.id} ${esc(j.title)} · ${j.quality}`).join("\n")
+    );
   }
-  return out.slice(0, 4000);
+  if (bad.length) {
+    parts.push(
+      "❌ <b>Xatolar:</b>\n" +
+        bad.map((r) => `• #${r.id} ${esc(r.title)} · ${r.quality}${r.error ? ` — <i>${esc(r.error.slice(0, 120))}</i>` : ""}`).join("\n")
+    );
+  }
+  if (!running.length && !waiting.length) {
+    parts.unshift("🎞 <b>Anibla yuklash</b>\n\n💤 Hozir yuklanayotgan video yo'q.\n\nYuklash boshlansa, shu xabar o'zi yangilanadi.");
+  }
+  return parts.join("\n\n━━━━━━━━━━\n\n").slice(0, 4000);
 }
 
 /** Xabarni tahrirlaydi. Telegram cheklasa ("retry after N") — N soniyani qaytaradi; xabar yo'qolgan bo'lsa kuzatuv o'chadi. */
@@ -539,6 +576,7 @@ export async function aniblaPush(api: Api, chat: number): Promise<number> {
 
 async function showStatus(ctx: MyContext): Promise<void> {
   const chat = ctx.chat!.id;
+  await aniblaCleanup().catch((e) => console.error("anibla cleanup:", e));
   const text = await statusText();
   const m = await ctx.reply(text, HTML);
   const key = `${WATCH_PREFIX}${chat}`;
@@ -550,6 +588,7 @@ async function showStatus(ctx: MyContext): Promise<void> {
 export async function aniblaTick(api: Api): Promise<void> {
   const rows = await d1Run<{ key: string; value: string }>(`SELECT key, value FROM bot_settings WHERE key LIKE ?`, [`${WATCH_PREFIX}%`]);
   if (rows.length === 0) return;
+  await aniblaCleanup().catch((e) => console.error("anibla cleanup:", e));
   const text = await statusText();
   for (const r of rows) {
     const chat = Number(r.key.slice(WATCH_PREFIX.length));
@@ -713,7 +752,9 @@ async function finishJob(ctx: MyContext, job: Job, botFileId: string): Promise<v
       }
     }
 
-    await d1Update(`UPDATE anibla_jobs SET state = 'done' WHERE id = ?`, [job.id]);
+    // Tayyor ish navbatdan butunlay o'chiriladi (video allaqachon bazada).
+    await d1Update(`DELETE FROM anibla_jobs WHERE id = ?`, [job.id]);
+    await d1Update(`DELETE FROM anibla_progress WHERE job_id = ?`, [job.id]);
     await ctx.api.sendMessage(
       job.admin_chat,
       `✅ <b>${esc(job.title)}</b> (${job.quality}) ${upserted?.isNew ? "qo'shildi" : "yangilandi"} — kanalga saqlandi, <code>file_id</code> bazaga yozildi.`,
