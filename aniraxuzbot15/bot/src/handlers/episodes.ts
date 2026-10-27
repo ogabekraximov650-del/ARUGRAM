@@ -2,6 +2,7 @@ import { Bot, InlineKeyboard, InputFile } from "grammy";
 import { config } from "../config.ts";
 import { checkIsAdmin } from "../admin_check.ts";
 import type { MyContext } from "./admin.ts";
+import { sendParts } from "./video_parts.ts";
 import {
   getAnimeById,
   getSeasonsByAnime,
@@ -1016,15 +1017,8 @@ export function setupDeepLinkDownload(bot: Bot<MyContext>): void {
       const channelUsername = await getMainChannelUsername(ctx);
       const cap = buildEpisodeCaption(freshEp, info, animeName, channelUsername, true, bestQ);
       const ids = getEpisodeFileIds(freshEp, bestQ);
-      const primaryId = ids.chanel ?? ids.bot ?? "";
-      const fallbackId = ids.bot ?? ids.chanel ?? "";
-      try {
-        await ctx.api.sendVideo(ctx.chat!.id, primaryId, { caption: cap, protect_content: true });
-      } catch {
-        if (fallbackId && fallbackId !== primaryId) {
-          await ctx.api.sendVideo(ctx.chat!.id, fallbackId, { caption: cap, protect_content: true });
-        }
-      }
+      // `file_id` vergul bilan bir nechta qism bo'lishi mumkin (2 GB dan katta video) — qismlar ketma-ket yuboriladi.
+      await sendParts(ctx, ids.chanel || ids.bot, ids.bot || ids.chanel, cap);
     } catch (e) {
       console.error("deep link error:", e);
       await ctx.reply("❌ Xato yuz berdi.");
