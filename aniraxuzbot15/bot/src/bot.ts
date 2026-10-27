@@ -15,11 +15,15 @@ import { setupStats } from "./handlers/stats.ts";
 import { setupUserManagement } from "./handlers/user_management.ts";
 import { setupDatabaseAdmin } from "./handlers/database_admin.ts";
 import { sendMainMenu } from "./handlers/main_menu.ts";
+import { setupAniblaAdd } from "./handlers/anibla_add.ts";
 
 export function createBot(): Bot<MyContext> {
   const bot = new Bot<MyContext>(config.BOT_TOKEN);
 
   bot.use(createSession());
+
+  // Anibla orqali qism qo'shish: Actions yuborgan video/xabarlarni qabul qiladi — onboarding'dan OLDIN.
+  setupAniblaAdd(bot);
 
   // Order matters — specific handlers BEFORE catch-all on("message") handlers.
   // (1) Deep link /start ep_<id>  →  to'g'ridan-to'g'ri video yuborish

@@ -57,7 +57,7 @@ function styleAll(kb: InlineKeyboard): InlineKeyboard {
   return kb;
 }
 
-async function getMainChannelUsername(ctx: MyContext): Promise<string> {
+export async function getMainChannelUsername(ctx: MyContext): Promise<string> {
   try {
     const id = await getSetting("main_channel_id");
     if (!id) return "";
@@ -93,7 +93,7 @@ export function buildEpisodeCaption(
   return out;
 }
 
-function buildEpisodeCaptionFromInputs(
+export function buildEpisodeCaptionFromInputs(
   info: AnimeInfo,
   animeName: string,
   episodeNum: number,
@@ -332,8 +332,22 @@ export function setupEpisodeHandlers(bot: Bot<MyContext>): void {
     }
   });
 
-  // Add new episode — Step 1: quality selection
+  // Add new episode — Step 0: usul tanlash (Anibla orqali / qo'lda)
   bot.callbackQuery(/^ep_add:(\d+)$/, async (ctx) => {
+    if (!isAdmin(ctx)) { await ctx.answerCallbackQuery(); return; }
+    const animeInfoId = parseInt(ctx.match[1], 10);
+    const info = await getAnimeInfo(animeInfoId);
+    if (!info) { await ctx.answerCallbackQuery("Topilmadi"); return; }
+    ctx.session.currentAnimeInfoId = animeInfoId;
+    await ctx.answerCallbackQuery();
+    const kb = styleAll(new InlineKeyboard()
+      .text("🌐 Anibla orqali", `ep_add_an:${animeInfoId}`).row()
+      .text("✍️ Qo'lda", `ep_add_man:${animeInfoId}`));
+    await ctx.reply("➕ Qismni qanday qo'shamiz?", { reply_markup: kb });
+  });
+
+  // Add new episode — Step 1 (qo'lda): quality selection
+  bot.callbackQuery(/^ep_add_man:(\d+)$/, async (ctx) => {
     if (!isAdmin(ctx)) { await ctx.answerCallbackQuery(); return; }
     const animeInfoId = parseInt(ctx.match[1], 10);
     const info = await getAnimeInfo(animeInfoId);
@@ -830,7 +844,7 @@ export function setupEpisodeHandlers(bot: Bot<MyContext>): void {
         });
 
         // 3) Post to anime's chanel_id — faqat YANGI qism uchun
-        if (upserted.isNew) {
+        if (upserted.isNew && config.CHANNEL_POSTING) {
           try {
             const link = `https://t.me/${ctx.me.username}?start=ep_${upserted.epizod_id}`;
             const kb = new InlineKeyboard().url("• Yuklab Olish •", link);

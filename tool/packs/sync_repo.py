@@ -47,6 +47,9 @@ for _src in sorted((HERE.parent / "translate").iterdir()):
 # `creds.enc` KO'CHIRILMAYDI: login/parol faqat worker'da (ANIBLA_CREDS).
 FILES[".github/workflows/anibla.yml"] = HERE.parent / "anibla" / "anibla.workflow.yml"
 FILES["tool/anibla/download.py"] = HERE.parent / "anibla" / "download.py"
+# aniraxuzbot: bitta sifat — bitta run (`anibla_bot.yml`).
+FILES[".github/workflows/anibla_bot.yml"] = HERE.parent / "anibla" / "anibla_bot.workflow.yml"
+FILES["tool/anibla/bot_download.py"] = HERE.parent / "anibla" / "bot_download.py"
 # Mini App pleyeri uchun eski qismlarning fMP4 nusxasi — ALOHIDA workflow `fmp4.yml`.
 FILES[".github/workflows/fmp4.yml"] = HERE.parent / "fmp4" / "fmp4.workflow.yml"
 FILES["tool/fmp4/run.py"] = HERE.parent / "fmp4" / "run.py"

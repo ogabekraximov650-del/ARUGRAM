@@ -7,6 +7,10 @@ export const config = {
   WORKER_URL: process.env.WORKER_URL ?? "https://aniraxuzbot.ogabekraximov650.workers.dev",
   // Kanalga post joylash vaqtincha O'CHIRILGAN (yoqish: CHANNEL_POSTING=1) / posting to channels is temporarily OFF
   CHANNEL_POSTING: process.env.CHANNEL_POSTING === "1",
+  // anibla.uz login/paroli (JSON) va Actions ishga tushirish tokeni/repo'si — deploy vaqtida Secrets'dan qo'yiladi
+  ANIBLA_CREDS: process.env.ANIBLA_CREDS ?? "",
+  GH_ACTIONS_TOKEN: process.env.GH_ACTIONS_TOKEN ?? "",
+  GH_REPO: process.env.GH_REPO ?? "",
   TEZCHECK_TOKEN: process.env.TEZCHECK_TOKEN ?? "",
   TEZCHECK_DESK: process.env.TEZCHECK_DESK ?? "",
   TEZCHECK_API_KEY: process.env.TEZCHECK_API_KEY ?? "",

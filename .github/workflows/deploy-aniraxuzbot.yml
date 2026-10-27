@@ -8,6 +8,9 @@ on:
     branches: [main]
     paths:
       - 'aniraxuzbot15/bot/**'
+      - 'tool/anibla/creds.enc'
+      - 'tool/encode/gh_token.enc'
+      - 'tool/encode/gh_repo.txt'
       - '.github/workflows/deploy-aniraxuzbot.yml'
 
 concurrency:
@@ -65,6 +68,39 @@ jobs:
             echo "✅ TEZCHECK_TOKEN / TEZCHECK_DESK o'rnatildi"
           else
             echo "⚠️  TEZCHECK_TOKEN/TEZCHECK_DESK secret'lari bo'sh — avto to'lov o'chiq qoladi"
+          fi
+          # Anibla orqali qism qo'shish: anibla.uz login/paroli (`tool/anibla/creds.enc`) va Actions ishga tushirish tokeni/repo'si
+          # (`tool/encode/gh_token.enc`, `gh_repo.txt`) — hammasi ENCODE_TOKEN bilan ochiladi (ARUMEDIATV workeri bilan bir xil manba).
+          if [ -f ../../tool/anibla/creds.enc ]; then
+            AC=$(K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in ../../tool/anibla/creds.enc 2>/dev/null || true)
+            if printf '%s' "$AC" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["login"] and d["password"]' 2>/dev/null; then
+              printf '%s' "$AC" | npx wrangler secret put ANIBLA_CREDS >/dev/null
+              echo "✅ ANIBLA_CREDS o'rnatildi"
+            else
+              echo "⚠️  creds.enc ochilmadi — Anibla orqali qo'shish ishlamaydi"
+            fi
+          fi
+          if [ -f ../../tool/encode/gh_token.enc ] && [ -f ../../tool/encode/gh_repo.txt ]; then
+            GHT=$(K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in ../../tool/encode/gh_token.enc 2>/dev/null | tr -d '[:space:]')
+            if [ -n "$GHT" ]; then
+              echo "::add-mask::$GHT"
+              GR=$(tr -d '[:space:]' < ../../tool/encode/gh_repo.txt)
+              case "$GR" in
+                */*) ;;
+                *) GO=$(curl -fsS -H "Authorization: Bearer $GHT" -H "User-Agent: aniraxuzbot-deploy" \
+                       https://api.github.com/user | python3 -c 'import json,sys; print(json.load(sys.stdin)["login"])' || true)
+                   [ -n "$GO" ] && GR="$GO/${GR:-avtoencode}" || GR="" ;;
+              esac
+              if [ -n "$GR" ]; then
+                printf '%s' "$GHT" | npx wrangler secret put GH_ACTIONS_TOKEN >/dev/null
+                printf '%s' "$GR" | npx wrangler secret put GH_REPO >/dev/null
+                echo "✅ GH_ACTIONS_TOKEN va GH_REPO o'rnatildi ($GR)"
+              else
+                echo "⚠️  token akkaunti aniqlanmadi — GH_REPO o'rnatilmadi"
+              fi
+            else
+              echo "⚠️  gh_token.enc ochilmadi — Actions ishga tushirilmaydi"
+            fi
           fi
 
       - name: Deploy

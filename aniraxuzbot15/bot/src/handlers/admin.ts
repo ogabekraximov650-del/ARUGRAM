@@ -70,6 +70,7 @@ export type AdminState =
   | "waiting_season_number"
   | "waiting_season_photo"
   | "waiting_episode_video"
+  | "waiting_anibla_query"
   | "waiting_edit_episode_video"
   | "waiting_edit_episode_name"
   | "waiting_edit_episode_number"
@@ -114,6 +115,8 @@ export interface SessionData {
     season_id?: number;
   };
   currentAnimeInfoId?: number;
+  /** Anibla orqali qism qo'shish: qaysi anime (season_db.id) ga qo'shiladi. */
+  aniblaTarget?: number;
   episodesPage?: number;
   editingEpisodeRowid?: number;
   editingSeasonRowid?: number;
