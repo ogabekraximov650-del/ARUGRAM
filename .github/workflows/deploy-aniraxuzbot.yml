@@ -115,7 +115,7 @@ jobs:
         run: |
           sleep 5
           for i in 1 2 3; do
-            R=$(curl -sS -m 30 "https://aniraxuz-bot.uzcom.workers.dev/setup" || true)
+            R=$(curl -sS -m 30 "https://aniraxuzbot.uzcom.workers.dev/setup" || true)
             echo "$R" | head -c 300; echo
             echo "$R" | grep -q '"ok":true' && exit 0
             sleep 8
