@@ -9,7 +9,7 @@
  *   2. bot videoni yopiq kanalga saqlaydi, kanaldagi `file_id` ni oladi va bazaga yozadi (qo'lda qo'shishdagi kabi).
  * Keyingi so'rovda video to'g'ridan-to'g'ri kanaldagi `file_id` dan yuboriladi.
  */
-import { Bot, InlineKeyboard } from "grammy";
+import { Api, Bot, InlineKeyboard } from "grammy";
 import { config } from "../config.ts";
 import { checkIsAdmin } from "../admin_check.ts";
 import type { MyContext } from "./admin.ts";
@@ -31,6 +31,9 @@ import {
   categories,
   describe,
   dispatchRun,
+  duration,
+  hms,
+  qualityName,
   episodes,
   ghReady,
   imgUrl,
@@ -49,7 +52,13 @@ import {
 } from "../anibla.ts";
 
 const EP_PAGE = 50;
-const MENU_TEXTS = new Set(["🔍 Anime izlash", "💰 Balans to'ldirish", "💳 Hisobim", "💎 Obuna olish"]);
+const MENU_TEXTS = new Set([
+  // Foydalanuvchi menyusi
+  "🔍 Anime izlash", "💰 Balans to'ldirish", "💳 Hisobim", "💎 Obuna olish",
+  // Admin paneli (`adminMainKeyboard`)
+  "📹 Animelarni boshqarish", "🎞 Anibla", "📢 Asosiy Kanal", "🔐 Majburiy obunalar",
+  "🔍 Foydalanuvchi boshqaruvi", "🗄 Database", "👤 Adminlar", "✉️ Xabar yuborish",
+]);
 const DUP_WINDOW_MS = 8 * 60 * 60 * 1000;
 
 const BTN_NEW = "🆕 Oxirgi yuklanganlar";
@@ -59,6 +68,7 @@ const BTN_BACK = "⬅️ Orqaga";
 const BTN_HOME = "🏠 Bosh menyu";
 const BTN_SEARCH = "🔍 Izlash";
 const BTN_QUEUE = "📋 Yuklash navbati";
+const BTN_STATUS = "📊 Holat";
 const BTN_CATS = "📂 Bo'limlar";
 const BTN_YEARS = "📅 Yil bo'yicha";
 const YEAR_PREFIX = "📅 ";
@@ -136,8 +146,8 @@ function ik(rows: Btn[][]): InlineKeyboard {
 /** Doimiy boshqaruv tugmalari TEPADA, keyin berilgan qatorlar (panel botdagi `panel()` kabi). */
 function controls(back: boolean, n: string): Btn[][] {
   return back
-    ? [[[BTN_BACK, `an:${n}:b`], [BTN_HOME, "an:home"]], [[BTN_SEARCH, "an:s"], [BTN_QUEUE, "an:q"]]]
-    : [[[BTN_CATS, "an:h"], [BTN_YEARS, "an:y"], [BTN_SEARCH, "an:s"]], [[BTN_QUEUE, "an:q"], [BTN_HOME, "an:home"]]];
+    ? [[[BTN_BACK, `an:${n}:b`], [BTN_HOME, "an:home"]], [[BTN_SEARCH, "an:s"], [BTN_QUEUE, "an:q"], [BTN_STATUS, "an:st"]]]
+    : [[[BTN_CATS, "an:h"], [BTN_YEARS, "an:y"], [BTN_SEARCH, "an:s"]], [[BTN_QUEUE, "an:q"], [BTN_STATUS, "an:st"], [BTN_HOME, "an:home"]]];
 }
 
 async function homePanel(): Promise<InlineKeyboard> {
@@ -296,7 +306,8 @@ async function showItem(ctx: MyContext, chat: number, nav: Nav): Promise<void> {
     nav.v = "movie";
     await navPut(chat, nav);
     await present(ctx, `${itemHead(it, true)}\n\n⏳ Anibla'dagi sifatlar tekshirilmoqda...`, ik(controls(true, nav.n)), it);
-    await startJobs(ctx, chat, nav, it);
+    if (nav.target === 0) await showQualities(ctx, it);
+    else await startJobs(ctx, chat, nav, it);
     return;
   }
   let ss: ASeason[];
@@ -368,7 +379,9 @@ async function showEps(ctx: MyContext, chat: number, nav: Nav): Promise<void> {
   const range = pages > 1 ? ` · ${part[0].num}–${part[part.length - 1].num}-qismlar` : "";
   const text =
     `${itemHead(it, true)}\n${esc(seasonLabel(season))} · ${eps.length} ta qism${range}\n\n` +
-    `⬇️ Qismni tanlang (eng yangisi birinchi). Anibla'dagi barcha sifatlar yuklanadi:`;
+    (nav.target === 0
+      ? `⬇️ Qismni tanlang (eng yangisi birinchi) — sifatlari ko'rsatiladi (tekshirish rejimi, hech narsa yuklanmaydi):`
+      : `⬇️ Qismni tanlang (eng yangisi birinchi). Anibla'dagi barcha sifatlar yuklanadi:`);
   await present(ctx, text, ik(rows), it);
 }
 
@@ -392,6 +405,124 @@ async function queueList(ctx: MyContext): Promise<void> {
     if (r.state === "queued" || r.state === "error") kbRows.push([[`🗑 #${r.id} ni olib tashlash`, `an:x:${r.id}`]]);
   }
   await present(ctx, text, ik(kbRows));
+}
+
+// ── Tekshirish rejimi: sifatlar ko'rsatiladi, hech narsa yuklanmaydi ──
+
+async function showQualities(ctx: MyContext, it: AItem, ep?: AEpisode, seasonSlug?: string): Promise<void> {
+  const head = `${isMovie(it) ? "🎬" : "📺"} <b>${esc(it.t)}</b>${ep ? ` · ${ep.num}-qism${ep.title && ep.title !== String(ep.num) ? `: ${esc(ep.title)}` : ""}` : ""}`;
+  const st = await ctx.reply(`${head}\n\n⏳ Sifatlar tekshirilmoqda...`, HTML);
+  const edit = (t: string) => ctx.api.editMessageText(ctx.chat!.id, st.message_id, t, HTML).catch(() => ctx.reply(t, HTML));
+  try {
+    const video = await videoOf(it, seasonSlug, ep);
+    const vs = await variants(video);
+    const secs = await duration(vs[0].url);
+    const voice = vs[0].audioName ? `🔊 Ovoz: ${esc(vs[0].audioName)}\n` : "";
+    const len = secs > 0 ? `⏱ ${hms(Math.round(secs))} · ` : "";
+    const lines = vs.map((v) => {
+      const mb = secs > 0 && v.bandwidth > 0 ? ` · ~${Math.round((v.bandwidth * secs) / 8 / 1048576)} MB` : "";
+      return `⬇️ ${qualityName(v.height)}${mb}`;
+    });
+    await edit(`${head}\n\n${voice}${len}Mavjud sifatlar (tekshirish rejimi — yuklanmaydi):\n${lines.join("\n")}`);
+  } catch (e) {
+    await edit(`${head}\n\n❌ ${esc(errText(e))}`);
+  }
+}
+
+// ── 📊 Holat: yuklanayotgan videolarning jonli holati va logi ──
+
+const WATCH_PREFIX = "anibla_watch_";
+const WATCH_TTL_MS = 20 * 60 * 1000;
+
+async function statusText(): Promise<string> {
+  const now = Date.now();
+  const active = await d1Run<{ id: number; title: string; quality: string; state: string; created_at: number; text: string | null; updated_at: number | null }>(
+    `SELECT j.id, j.title, j.quality, j.state, j.created_at, p.text, p.updated_at
+       FROM anibla_jobs j LEFT JOIN anibla_progress p ON p.job_id = j.id
+      WHERE j.state IN ('queued','saving') AND j.created_at > ?
+      ORDER BY j.id ASC LIMIT 6`,
+    [now - 12 * 3600 * 1000]
+  );
+  const recent = await d1Run<{ id: number; title: string; quality: string; state: string; error: string }>(
+    `SELECT id, title, quality, state, error FROM anibla_jobs WHERE state IN ('done','error') ORDER BY id DESC LIMIT 3`
+  );
+  let out = "🎞 <b>Anibla yuklash — holat</b>\n";
+  if (active.length === 0) {
+    out += "\n💤 Hozir yuklanayotgan video yo'q.";
+  } else {
+    out += `\n⚙️ Ishlayapti: ${active.length} ta\n`;
+    for (const j of active) {
+      out += `\n⬇️ <b>${esc(j.title)}</b> · ${j.quality} (#${j.id})\n`;
+      if (j.state === "saving") {
+        out += "💾 Bot kanalga saqlayapti...\n";
+      } else if (j.text) {
+        const age = Math.max(0, Math.round((now - (j.updated_at ?? now)) / 1000));
+        out += `<pre>${esc(j.text.slice(-700))}</pre>🕒 yangilandi ${age < 90 ? `${age} soniya` : `${Math.round(age / 60)} daqiqa`} oldin\n`;
+      } else {
+        out += "⏳ Actions ishga tushmoqda (run navbatda)...\n";
+      }
+    }
+  }
+  if (recent.length) {
+    out += "\n<b>Oxirgilari:</b>";
+    for (const r of recent) {
+      out += `\n${r.state === "done" ? "✅" : "❌"} #${r.id} ${esc(r.title)} · ${r.quality}${r.state === "error" && r.error ? ` — <i>${esc(r.error.slice(0, 120))}</i>` : ""}`;
+    }
+  }
+  return out.slice(0, 4000);
+}
+
+async function showStatus(ctx: MyContext): Promise<void> {
+  const chat = ctx.chat!.id;
+  const text = await statusText();
+  const kb = ik([[["🔄 Yangilash", "an:st"]], ...controls(false, "0")]);
+  const old = ctx.callbackQuery?.message as { message_id: number; photo?: unknown } | undefined;
+  let mid = 0;
+  if (old && !old.photo) {
+    try {
+      await ctx.editMessageText(text, { ...HTML, reply_markup: kb });
+      mid = old.message_id;
+    } catch (e) {
+      if (errText(e).includes("not modified")) mid = old.message_id;
+    }
+  }
+  if (!mid) {
+    if (old) await ctx.api.deleteMessage(chat, old.message_id).catch(() => {});
+    const m = await ctx.reply(text, { ...HTML, reply_markup: kb });
+    mid = m.message_id;
+  }
+  // Cron (har daqiqa) bu xabarni 20 daqiqa davomida o'zi yangilab turadi.
+  await setSetting(`${WATCH_PREFIX}${chat}`, JSON.stringify({ mid, until: Date.now() + WATCH_TTL_MS, last: "" }));
+}
+
+/** Cron (har daqiqa): ochiq "📊 Holat" xabarlarini yangilaydi. */
+export async function aniblaTick(api: Api): Promise<void> {
+  const rows = await d1Run<{ key: string; value: string }>(`SELECT key, value FROM bot_settings WHERE key LIKE ?`, [`${WATCH_PREFIX}%`]);
+  if (rows.length === 0) return;
+  const text = await statusText();
+  const kb = ik([[["🔄 Yangilash", "an:st"]], ...controls(false, "0")]);
+  for (const r of rows) {
+    const chat = Number(r.key.slice(WATCH_PREFIX.length));
+    let w: { mid: number; until: number; last: string };
+    try {
+      w = JSON.parse(r.value);
+    } catch {
+      await d1Update(`DELETE FROM bot_settings WHERE key = ?`, [r.key]);
+      continue;
+    }
+    if (!chat || Date.now() > w.until) {
+      await d1Update(`DELETE FROM bot_settings WHERE key = ?`, [r.key]);
+      continue;
+    }
+    if (text === w.last) continue;
+    try {
+      await api.editMessageText(chat, w.mid, text, { ...HTML, reply_markup: kb });
+      await setSetting(r.key, JSON.stringify({ ...w, last: text }));
+    } catch (e) {
+      if (errText(e).includes("not modified")) continue;
+      await d1Update(`DELETE FROM bot_settings WHERE key = ?`, [r.key]);
+    }
+  }
 }
 
 // ── Ishlarni boshlash: har bir sifat uchun alohida run ───────
@@ -456,6 +587,7 @@ async function startJobs(ctx: MyContext, chat: number, nav: Nav, it: AItem, ep?:
         video: v.url,
         audio: v.audio,
         name: `${title} ${q}`,
+        api: config.WORKER_URL,
       });
       started.push(q);
     } catch (e) {
@@ -573,6 +705,12 @@ async function handleText(ctx: MyContext, text: string, target: number): Promise
   return showListing(ctx, chat, target, [...text].slice(0, 80).join(""), "", "", 1);
 }
 
+/** Rejim: `0` — tekshirish (🎞 Anibla), `>0` — qism qo'shiladigan anime, `null` — Anibla rejimi yo'q. */
+function modeTarget(ctx: MyContext): number | null {
+  if (ctx.session.aniblaCheck) return 0;
+  return ctx.session.aniblaTarget ?? null;
+}
+
 async function goHome(ctx: MyContext): Promise<void> {
   await present(ctx, "📂 <b>Bo'limlar</b> (saytdagidek) — tanlang yoki anime nomini yozing:", await homePanel());
 }
@@ -580,10 +718,10 @@ async function goHome(ctx: MyContext): Promise<void> {
 async function onCallback(ctx: MyContext, data: string): Promise<void> {
   const chat = ctx.chat?.id ?? ctx.from!.id;
   const parts = data.split(":");
-  const target = ctx.session.aniblaTarget;
-  if (!target) {
+  const target = modeTarget(ctx);
+  if (target === null) {
     ctx.session.state = "idle";
-    await ctx.answerCallbackQuery({ text: "Seans tugagan — '➕ Yangi qism qo'shish' dan qaytadan boshlang", show_alert: true });
+    await ctx.answerCallbackQuery({ text: "Seans tugagan — '🎞 Anibla' yoki '➕ Yangi qism qo'shish' dan qaytadan boshlang", show_alert: true });
     return;
   }
   ctx.session.state = "waiting_anibla_query";
@@ -602,6 +740,8 @@ async function onCallback(ctx: MyContext, data: string): Promise<void> {
         return goHome(ctx);
       case "q":
         return queueList(ctx);
+      case "st":
+        return showStatus(ctx);
       case "y":
         return yearsPanel(ctx);
       case "s":
@@ -659,7 +799,10 @@ async function onCallback(ctx: MyContext, data: string): Promise<void> {
       const it = nav.items[nav.i];
       const ep = nav.eps?.find((e) => e.num === arg);
       const season = nav.seasons?.[nav.j];
-      if (it && ep && season) return startJobs(ctx, chat, nav, it, ep, season.slug);
+      if (it && ep && season) {
+        if (nav.target === 0) return showQualities(ctx, it, ep, season.slug);
+        return startJobs(ctx, chat, nav, it, ep, season.slug);
+      }
       await sendText(ctx, `🤷 ${arg}-qism topilmadi — ro'yxatdan qaytadan tanlang.`);
       return;
     }
@@ -705,8 +848,8 @@ export function setupAniblaAdd(bot: Bot<MyContext>): void {
       return next();
     }
     if (!isAdmin(ctx)) return next();
-    const target = ctx.session.aniblaTarget;
-    if (!target) {
+    const target = modeTarget(ctx);
+    if (target === null) {
       ctx.session.state = "idle";
       return next();
     }
@@ -726,6 +869,7 @@ export function setupAniblaAdd(bot: Bot<MyContext>): void {
     if (!info) { await ctx.answerCallbackQuery("Topilmadi"); return; }
     ctx.session.currentAnimeInfoId = animeInfoId;
     ctx.session.aniblaTarget = animeInfoId;
+    ctx.session.aniblaCheck = false;
     ctx.session.state = "waiting_anibla_query";
     await ctx.answerCallbackQuery();
     await navPut(ctx.chat?.id ?? ctx.from.id, {
@@ -737,6 +881,24 @@ export function setupAniblaAdd(bot: Bot<MyContext>): void {
         `📂 Pastdagi bo'limlardan tanlang yoki anime nomini yozing. Anime → fasl → qism: sifat so'ralmaydi — ` +
         `Anibla'dagi barcha sifatlar alohida run bilan yuklanadi, 2 GB dan katta bo'lsa H.265 bilan siqiladi.\n` +
         `↩️ Chiqish: «Bosh menyu».${warn}`,
+      { ...HTML, reply_markup: await homePanel() }
+    );
+  });
+
+  // "🎞 Anibla" (admin panelida): tekshirish rejimi — anime/qism/sifatlar ko'riladi, hech narsa yuklanmaydi.
+  bot.hears("🎞 Anibla", async (ctx) => {
+    if (!isAdmin(ctx)) return;
+    ctx.session.aniblaCheck = true;
+    ctx.session.aniblaTarget = undefined;
+    ctx.session.state = "waiting_anibla_query";
+    await navPut(ctx.chat.id, {
+      n: "0", target: 0, q: "", c: "", lt: "", p: 1, pages: 1, total: 0, items: [], v: "", i: -1, j: -1, ep: 0,
+    });
+    const warn = aniblaReady() ? "" : "\n\n⚠️ anibla.uz login/paroli sozlanmagan (<code>tool/anibla/creds.enc</code>).";
+    await ctx.reply(
+      `🎞 <b>Anibla — tekshirish</b>\n\n` +
+        `📂 Bo'limlardan tanlang yoki anime nomini yozing. Anime → fasl → qism: qismning sifatlari va taxminiy hajmi ko'rsatiladi. ` +
+        `Hech narsa yuklanmaydi.\n📊 Holat — yuklanayotgan videolarning jonli logi.\n↩️ Chiqish: «Bosh menyu».${warn}`,
       { ...HTML, reply_markup: await homePanel() }
     );
   });

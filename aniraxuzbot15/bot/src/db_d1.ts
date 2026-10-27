@@ -504,6 +504,11 @@ async function _initMainTables(db: D1Database): Promise<void> {
       error TEXT NOT NULL DEFAULT '',
       created_at INTEGER NOT NULL
     )`,
+    `CREATE TABLE IF NOT EXISTS anibla_progress (
+      job_id INTEGER PRIMARY KEY,
+      text TEXT NOT NULL DEFAULT '',
+      updated_at INTEGER NOT NULL
+    )`,
     `CREATE TABLE IF NOT EXISTS post_queue (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       batch_id TEXT NOT NULL,

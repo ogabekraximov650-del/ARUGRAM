@@ -32,6 +32,10 @@ on:
         description: "Fayl nomi"
         required: false
         default: ''
+      api:
+        description: "Bot worker manzili (jonli holat uchun)"
+        required: false
+        default: ''
 
 run-name: "Anibla #${{ inputs.job }} · ${{ inputs.quality }}"
 
@@ -81,6 +85,7 @@ jobs:
           VIDEO: ${{ inputs.video }}
           AUDIO: ${{ inputs.audio }}
           NAME: ${{ inputs.name }}
+          API: ${{ inputs.api }}
           TG_API_ID: ${{ secrets.TG_API_ID }}
           TG_API_HASH: ${{ secrets.TG_API_HASH }}
           PYTHONUNBUFFERED: '1'

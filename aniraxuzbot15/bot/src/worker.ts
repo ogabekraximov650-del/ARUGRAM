@@ -12,6 +12,8 @@ import { createBot } from "./bot.ts";
 import { createTable } from "./db.ts";
 import { config } from "./config.ts";
 import { processPostQueue } from "./queue_processor.ts";
+import { aniblaTick } from "./handlers/anibla_add.ts";
+import { d1Run, d1Update } from "./db_d1.ts";
 import { initD1Bindings, ensureD1Tables, type D1Env } from "./db_d1.ts";
 
 type CfEnv = D1Env & Record<string, string | undefined>;
@@ -83,6 +85,33 @@ async function ensureReady(): Promise<void> {
 // ── Sog'liq tekshiruvi ──────────────────────────────────────────────────────
 app.get("/health", (c) => c.json({ status: "ok", bot: "@aniraxuzbot", db: "D1 x3" }));
 
+// ── Anibla Actions jonli holati (bot_download.py → "📊 Holat") ───────────────
+app.post("/anibla/progress", async (c) => {
+  let b: { job?: number; token?: string; text?: string };
+  try {
+    b = await c.req.json();
+  } catch {
+    return c.json({ ok: false }, 400);
+  }
+  const job = Number(b.job);
+  const token = String(b.token ?? "");
+  if (!job || !/^[a-f0-9]{32}$/.test(token)) return c.json({ ok: false }, 400);
+  try {
+    await ensureReady();
+    const rows = await d1Run(`SELECT id FROM anibla_jobs WHERE id = ? AND token = ?`, [job, token]);
+    if (rows.length === 0) return c.json({ ok: false }, 403);
+    await d1Update(
+      `INSERT INTO anibla_progress (job_id, text, updated_at) VALUES (?, ?, ?)
+       ON CONFLICT(job_id) DO UPDATE SET text = excluded.text, updated_at = excluded.updated_at`,
+      [job, String(b.text ?? "").slice(0, 3500), Date.now()]
+    );
+    return c.json({ ok: true });
+  } catch (e) {
+    console.error("anibla/progress:", e);
+    return c.json({ ok: false }, 500);
+  }
+});
+
 // ── Webhook o'rnatish ───────────────────────────────────────────────────────
 app.get("/setup", async (c) => {
   try {
@@ -142,6 +171,10 @@ export default {
     }
     ctx.waitUntil(
       processPostQueue().catch((e) => console.error("processPostQueue:", e))
+    );
+    // Ochiq "📊 Holat" xabarlari (Anibla) — har daqiqada yangilanadi.
+    ctx.waitUntil(
+      aniblaTick(bot.api).catch((e) => console.error("aniblaTick:", e))
     );
   },
 };

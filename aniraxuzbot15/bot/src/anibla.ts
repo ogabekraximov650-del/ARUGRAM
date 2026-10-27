@@ -401,6 +401,30 @@ export async function variants(video: string): Promise<AVariant[]> {
   return out.filter((v, i) => out.findIndex((x) => x.height === v.height) === i);
 }
 
+/** Variant playlist'idagi bo'laklar uzunligi yig'indisi (soniya). */
+export async function duration(url: string): Promise<number> {
+  try {
+    const { code, text } = await http(url);
+    if (code !== 200) return 0;
+    let sum = 0;
+    for (const l of text.split(/\r?\n/)) {
+      const t = l.trim();
+      if (t.startsWith("#EXTINF:")) sum += parseFloat(t.slice(8).split(",")[0]) || 0;
+    }
+    return sum;
+  } catch {
+    return 0;
+  }
+}
+
+export const qualityName = (h: number): string => (h > 0 ? `${h}p` : "asl sifat");
+
+export function hms(s: number): string {
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = Math.floor(s % 60);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return h > 0 ? `${h}:${p(m)}:${p(x)}` : `${p(m)}:${p(x)}`;
+}
+
 /** Anibla balandligi -> botdagi standart sifat (1080p / 720p / 480p / 360p). */
 export type Q = "1080p" | "720p" | "480p" | "360p";
 export function bucket(height: number): Q {

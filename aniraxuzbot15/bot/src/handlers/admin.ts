@@ -32,6 +32,7 @@ import { findUserByIdentifier, getUsersByIds } from "../db_users.ts";
 export function adminMainKeyboard(): Keyboard {
   return new Keyboard()
     .text("📹 Animelarni boshqarish").row()
+    .text("🎞 Anibla").row()
     .text("📢 Asosiy Kanal").row()
     .text("🔐 Majburiy obunalar").row()
     .text("🔍 Foydalanuvchi boshqaruvi").row()
@@ -117,6 +118,8 @@ export interface SessionData {
   currentAnimeInfoId?: number;
   /** Anibla orqali qism qo'shish: qaysi anime (season_db.id) ga qo'shiladi. */
   aniblaTarget?: number;
+  /** Anibla bo'limi "tekshirish" rejimida (🎞 Anibla): hech narsa yuklanmaydi, faqat anime/qism/sifatlar ko'riladi. */
+  aniblaCheck?: boolean;
   episodesPage?: number;
   editingEpisodeRowid?: number;
   editingSeasonRowid?: number;
