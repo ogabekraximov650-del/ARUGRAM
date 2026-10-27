@@ -14,7 +14,6 @@ Muhit: JOB, TOKEN, BOT, QUALITY, VIDEO, AUDIO, NAME; TG_API_ID, TG_API_HASH; ses
 """
 import asyncio
 import json
-import math
 import os
 import shutil
 import subprocess
@@ -145,25 +144,53 @@ def mb(n):
     return f"{n / 1048576:.0f} MB"
 
 
+def keyframes(src):
+    """Videodagi kalit kadrlar: [(vaqt_matn, vaqt, fayldagi_bayt_o'rni)], bayt o'rni bo'yicha tartiblangan."""
+    out = subprocess.check_output(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "packet=pts_time,pos,flags",
+         "-of", "csv=p=0", str(src)]).decode()
+    res = []
+    for line in out.splitlines():
+        f = line.strip().split(",")
+        if len(f) >= 3 and f[2].startswith("K") and f[0] not in ("", "N/A") and f[1].isdigit():
+            res.append((f[0], float(f[0]), int(f[1])))
+    res.sort(key=lambda k: k[2])
+    return res
+
+
+def cut_points(kfs, total, limit):
+    """Ochko'z bo'lish: har qism `limit` ga imkon qadar to'lib boradi, oxirgi qism — qoldiq
+    (masalan 2.5 GB -> 2 GB + 0.5 GB). Kesish faqat kalit kadrda."""
+    cuts, base = [], 0
+    while total - base > limit:
+        cand = [k for k in kfs if base < k[2] <= base + limit]
+        if not cand:
+            raise Fatal("kalit kadrlar topilmadi — bo'lib bo'lmaydi")
+        cuts.append(cand[-1])
+        base = cand[-1][2]
+        if len(cuts) > 30:
+            raise Fatal("30 dan ortiq qism — bo'lib bo'lmaydi")
+    return cuts
+
+
 def split_file(src, work, live=None):
-    """`src` ni har biri `LIMIT` dan oshmaydigan qismlarga bo'ladi (qayta kodlamasdan, kalit kadrlardan).
-    Har qism alohida ochiladigan mp4: `moov` atomi fayl boshida (`+faststart`), vaqt 0 dan boshlanadi.
-    Hajm ANIQ o'lchanadi: biror qism `LIMIT` dan oshsa — qism soni oshirilib qayta bo'linadi."""
+    """`src` ni qayta kodlamasdan qismlarga bo'ladi: birinchi qism `LIMIT` ga imkon qadar yaqin (2.5 GB bo'lsa 2 GB + 0.5 GB),
+    qoldiq oxirgi qismga tushadi. Har qism alohida ochiladigan mp4: `moov` atomi fayl boshida (`+faststart`), vaqt 0 dan.
+    Hajm ANIQ o'lchanadi: biror qism `LIMIT` dan oshsa — zaxira kamaytirilib qayta bo'linadi."""
     size = src.stat().st_size
-    dur = dl.ffprobe(src, "duration") or 0
-    if not dur:
-        raise Fatal("video davomiyligi aniqlanmadi — bo'lib bo'lmaydi")
-    safe = LIMIT * 0.97  # kalit kadrlar tufayli qismlar hajmi biroz farq qiladi
-    n = max(2, math.ceil(size / safe))
-    for _ in range(25):
+    kfs = keyframes(src)
+    if not kfs:
+        raise Fatal("kalit kadrlar topilmadi — bo'lib bo'lmaydi")
+    for margin in (0.995, 0.985, 0.97, 0.94, 0.90, 0.85):
+        cuts = cut_points(kfs, size, int(LIMIT * margin))
         for old in work.glob("part_*.mp4"):
             old.unlink()
-        seg = dur / n
         if live:
-            live.send(f"✂️ {n} qismga bo'linmoqda (har biri ≤ {mb(LIMIT)})...", force=True)
+            live.send(f"✂️ {len(cuts) + 1} qismga bo'linmoqda (har biri ≤ {mb(LIMIT)})...", force=True)
         r = subprocess.run(
             ["ffmpeg", "-nostdin", "-y", "-hide_banner", "-loglevel", "error", "-i", str(src),
-             "-map", "0:v:0", "-map", "0:a?", "-c", "copy", "-f", "segment", "-segment_time", f"{seg:.3f}",
+             "-map", "0:v:0", "-map", "0:a?", "-c", "copy", "-f", "segment",
+             "-segment_times", ",".join(c[0] for c in cuts),
              "-reset_timestamps", "1", "-segment_format", "mp4",
              "-segment_format_options", "movflags=+faststart", str(work / "part_%03d.mp4")],
             capture_output=True, text=True)
@@ -171,11 +198,9 @@ def split_file(src, work, live=None):
         if r.returncode != 0 or not parts:
             raise RuntimeError("ffmpeg (bo'lish) xatosi: " + (r.stderr.strip().splitlines() or ["?"])[-1][:200])
         sizes = [p.stat().st_size for p in parts]
-        log(f"bo'lish: {len(parts)} qism · " + ", ".join(mb(x) for x in sizes))
-        biggest = max(sizes)
-        if biggest <= LIMIT:
+        log(f"bo'lish (zaxira {margin}): {len(parts)} qism · " + ", ".join(mb(x) for x in sizes))
+        if max(sizes) <= LIMIT:
             return parts
-        n = max(len(parts) + 1, math.ceil(len(parts) * biggest / safe))
     raise Fatal(f"{mb(LIMIT)} dan oshmaydigan qismlarga bo'lib bo'lmadi")
 
 
