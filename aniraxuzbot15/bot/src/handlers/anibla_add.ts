@@ -464,13 +464,16 @@ const STALE_MS = 30 * 60 * 1000;
 async function aniblaCleanup(): Promise<void> {
   const now = Date.now();
   await d1Update(`DELETE FROM anibla_jobs WHERE state = 'done'`);
-  // Actions'ga yuborilgan (queued) ish: yuborilgan paytdan (yo'q bo'lsa yaratilgandan) 30 daqiqa holat kelmasa — xato.
+  // Actions'ga yuborilgan (queued) ish: yuborilgandan 15 daqiqada holat umuman kelmasa (run boshlanmadi/bekor qilindi) yoki
+  // holat 30 daqiqa jim bo'lsa (run to'xtadi) — xato; shu sifat navbati davom etadi.
   await d1Update(
     `UPDATE anibla_jobs SET state = 'error', error = ?
-      WHERE state = 'queued'
-        AND COALESCE((SELECT NULLIF(d.started_at, 0) FROM anibla_queue_data d WHERE d.job_id = anibla_jobs.id), created_at) < ?
-        AND NOT EXISTS (SELECT 1 FROM anibla_progress p WHERE p.job_id = anibla_jobs.id AND p.updated_at > ?)`,
-    ["Actions run boshlanmadi yoki to'xtatildi (30 daqiqa holat kelmadi)", now - STALE_MS, now - STALE_MS]
+      WHERE state = 'queued' AND (
+        (COALESCE((SELECT MAX(p.updated_at) FROM anibla_progress p WHERE p.job_id = anibla_jobs.id), 0) = 0
+          AND COALESCE((SELECT NULLIF(d.started_at, 0) FROM anibla_queue_data d WHERE d.job_id = anibla_jobs.id), created_at) < ?)
+        OR (COALESCE((SELECT MAX(p.updated_at) FROM anibla_progress p WHERE p.job_id = anibla_jobs.id), 0) BETWEEN 1 AND ?)
+      )`,
+    ["Actions run boshlanmadi yoki to'xtadi (holat kelmadi)", now - 15 * 60 * 1000, now - STALE_MS]
   );
   await d1Update(`UPDATE anibla_jobs SET state = 'error', error = ? WHERE state = 'waiting' AND created_at < ?`, ["Navbatda 48 soatdan oshdi", now - 48 * 3600 * 1000]);
   await d1Update(`DELETE FROM anibla_jobs WHERE state IN ('error','cancelled') AND created_at < ?`, [now - 24 * 3600 * 1000]);
@@ -600,10 +603,12 @@ async function showStatus(ctx: MyContext): Promise<void> {
 /** Cron (har daqiqa): ochiq "📊 Holat" xabarlarini zaxira sifatida yangilaydi. */
 export async function aniblaTick(api: Api): Promise<void> {
   const rows = await d1Run<{ key: string; value: string }>(`SELECT key, value FROM bot_settings WHERE key LIKE ?`, [`${WATCH_PREFIX}%`]);
-  await dispatchAll().catch((e) => console.error("anibla dispatchAll:", e));  // zaxira: kutayotgan ishlar bo'lsa navbatdagisini ishga tushiradi
-  if (rows.length === 0) return;
+  const any = await d1Run(`SELECT id FROM anibla_jobs LIMIT 1`);
+  if (rows.length === 0 && any.length === 0) return;
+  // Ochiq "Holat" bo'lmasa ham: qotib qolgan ishlar xatoga o'tadi va shu sifatning navbatdagi ishi ishga tushadi.
   await aniblaCleanup().catch((e) => console.error("anibla cleanup:", e));
   await dispatchAll().catch((e) => console.error("anibla dispatchAll:", e));
+  if (rows.length === 0) return;
   const text = await statusText();
   for (const r of rows) {
     const chat = Number(r.key.slice(WATCH_PREFIX.length));
@@ -701,7 +706,17 @@ async function startJobs(ctx: MyContext, chat: number, nav: Nav, it: AItem, ep?:
     return;
   }
 
-  const epNum = ep ? ep.num : await getNextEpisodeNumber(nav.target, info.kategoriya);
+  // Film: har safar yangi raqam berilsa sifatlar turli "film"larga tarqalib ketadi (masalan 1080p alohida yozuvda qoladi).
+  // Shuning uchun bitta Anibla filmi (slug) shu bo'lim ichida DOIM bir xil raqamni oladi.
+  let epNum: number;
+  if (ep) {
+    epNum = ep.num;
+  } else {
+    const filmKey = `anibla_film_${nav.target}_${it.s}`;
+    const saved = parseInt((await getSetting(filmKey)) ?? "", 10);
+    epNum = saved > 0 ? saved : await getNextEpisodeNumber(nav.target, info.kategoriya);
+    if (!(saved > 0)) await setSetting(filmKey, String(epNum));
+  }
   const title = `${it.t} · ${ep ? `${ep.num}-qism` : "film"}`;
   const added: { id: number; q: string }[] = [];
   const skipped: string[] = [];

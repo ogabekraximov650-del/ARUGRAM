@@ -28,7 +28,7 @@ export interface AItem {
 }
 export interface ASeason { slug: string; title: string }
 export interface AEpisode { slug: string; num: number; title: string }
-export interface AVariant { height: number; bandwidth: number; url: string; audio: string; audioName: string }
+export interface AVariant { height: number; width: number; bandwidth: number; url: string; audio: string; audioName: string }
 
 export const isMovie = (it: AItem): boolean => !it.m.toLowerCase().includes("serie");
 
@@ -391,14 +391,16 @@ export async function variants(video: string): Promise<AVariant[]> {
     const attrs = l.slice("#EXT-X-STREAM-INF:".length);
     const uri = lines.slice(k + 1).find((x) => x && !x.startsWith("#"));
     if (!uri) return;
-    const height = parseInt(m3uAttr(attrs, "RESOLUTION").split("x")[1] ?? "", 10) || 0;
+    const res = m3uAttr(attrs, "RESOLUTION").split("x");
+    const width = parseInt(res[0] ?? "", 10) || 0;
+    const height = parseInt(res[1] ?? "", 10) || 0;
     const bandwidth = parseInt(m3uAttr(attrs, "BANDWIDTH"), 10) || 0;
     const gid = m3uAttr(attrs, "AUDIO");
     const au = gid ? pickAudio(gid) : undefined;
-    out.push({ height, bandwidth, url: joinUrl(master, uri), audio: au?.uri ?? "", audioName: au?.name ?? "" });
+    out.push({ height, width, bandwidth, url: joinUrl(master, uri), audio: au?.uri ?? "", audioName: au?.name ?? "" });
   });
-  if (out.length === 0) out = [{ height: 0, bandwidth: 0, url: master, audio: "", audioName: "" }];
-  out.sort((a, b) => b.height - a.height || b.bandwidth - a.bandwidth);
+  if (out.length === 0) out = [{ height: 0, width: 0, bandwidth: 0, url: master, audio: "", audioName: "" }];
+  out.sort((a, b) => Math.max(b.height, (b.width * 9) / 16) - Math.max(a.height, (a.width * 9) / 16) || b.bandwidth - a.bandwidth);
   return out.filter((v, i) => out.findIndex((x) => x.height === v.height) === i);
 }
 
@@ -428,11 +430,13 @@ export function hms(s: number): string {
 
 /** Anibla balandligi -> botdagi standart sifat (1080p / 720p / 480p / 360p). */
 export type Q = "1080p" | "720p" | "480p" | "360p";
-export function bucket(height: number): Q {
-  if (height <= 0) return "720p";
-  if (height >= 900) return "1080p";
-  if (height >= 600) return "720p";
-  if (height >= 400) return "480p";
+export function bucket(height: number, width = 0): Q {
+  // Keng ekranli (masalan 1920x816) videolarda balandlik kichik bo'ladi — sifat 16:9 ga keltirilgan balandlik bo'yicha aniqlanadi.
+  const h = Math.max(height, Math.round((width * 9) / 16));
+  if (h <= 0) return "720p";
+  if (h >= 900) return "1080p";
+  if (h >= 600) return "720p";
+  if (h >= 400) return "480p";
   return "360p";
 }
 
@@ -441,7 +445,7 @@ export function pickPerQuality(vs: AVariant[]): { q: Q; v: AVariant }[] {
   const seen = new Set<Q>();
   const out: { q: Q; v: AVariant }[] = [];
   for (const v of vs) {
-    const q = bucket(v.height);
+    const q = bucket(v.height, v.width);
     if (seen.has(q)) continue;
     seen.add(q);
     out.push({ q, v });
