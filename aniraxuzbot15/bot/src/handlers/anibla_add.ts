@@ -4,7 +4,7 @@
  * anime nomi yozib qidiriladi, anime rasm va to'liq ma'lumot bilan chiqadi, serial bo'lsa 🗂 fasl, keyin ▶️ qismlar (3 tadan, eng
  * yangisi birinchi). Qism tanlanganda sifat SO'RALMAYDI:
  *   1. Anibla'dagi BARCHA sifatlar uchun GitHub Actions'da ALOHIDA run (`tool/anibla/bot_download.py`): video yuklanadi,
- *      2 GB dan katta bo'lsa H.265 (CRF 30, sig'masa 31, 32, ...) bilan siqiladi va Telegram akkaunti orqali BOTGA yuboriladi
+ *      2 GB dan katta bo'lsa qayta kodlamasdan aniq o'lchab qismlarga bo'linadi va Telegram akkaunti orqali BOTGA yuboriladi
  *      (izoh: `ANIBLA:<ish>:<token>`; 2 GB dan katta bo'lsa aniq o'lchab qismlarga bo'linadi — `:<i>/<n>`);
  *   2. bot videoni yopiq kanalga saqlaydi, kanaldagi `file_id` ni oladi va bazaga yozadi (qo'lda qo'shishdagi kabi).
  * Keyingi so'rovda video to'g'ridan-to'g'ri kanaldagi `file_id` dan yuboriladi.
@@ -677,7 +677,7 @@ async function startJobs(ctx: MyContext, chat: number, nav: Nav, it: AItem, ep?:
   if (started.length) {
     lines.push(
       `▶️ Actions ishga tushirildi: <b>${started.join(", ")}</b> (${started.length} ta run, har sifat alohida).`,
-      "Har bir sifat tayyor bo'lgach alohida xabar keladi. 2 GB dan katta bo'lsa H.265 bilan siqiladi."
+      "Har bir sifat tayyor bo'lgach alohida xabar keladi. 2 GB dan katta bo'lsa qismlarga bo'linadi."
     );
   }
   if (skipped.length) lines.push(`⏭ Allaqachon ishlayapti: ${skipped.join(", ")}`);
@@ -987,7 +987,7 @@ export function setupAniblaAdd(bot: Bot<MyContext>): void {
     await ctx.reply(
       `📱 <b>Anibla orqali</b>\n🎯 ${esc(info.name)}\n\n` +
         `📂 Pastdagi bo'limlardan tanlang yoki anime nomini yozing. Anime → fasl → qism: sifat so'ralmaydi — ` +
-        `Anibla'dagi barcha sifatlar alohida run bilan yuklanadi, 2 GB dan katta bo'lsa H.265 bilan siqiladi.\n` +
+        `Anibla'dagi barcha sifatlar alohida run bilan yuklanadi, 2 GB dan katta bo'lsa qismlarga bo'linadi (kodlanmaydi).\n` +
         `↩️ Chiqish: «Bosh menyu».${warn}`,
       { ...HTML, reply_markup: await homePanel() }
     );

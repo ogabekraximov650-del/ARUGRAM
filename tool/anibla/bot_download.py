@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""aniraxuzbot: anibla.uz videosini (BITTA sifat — BITTA run) yuklab, kerak bo'lsa H.265 bilan siqib, botga yuboradi.
+"""aniraxuzbot: anibla.uz videosini (BITTA sifat — BITTA run) yuklab, kerak bo'lsa qismlarga bo'lib, botga yuboradi.
 
 Bot (`aniraxuzbot15/bot`, "➕ Yangi qism qo'shish" -> "🌐 Anibla orqali") har bir sifat uchun alohida `workflow_dispatch`
-qiladi (`anibla_bot.yml`). Bu skript:
+qiladi (`anibla_bot_<sifat>.yml`). Bu skript:
   1. HLS ni qayta kodlamasdan mp4 ga yig'adi (`download.py` dagi tez parallel yuklash);
-  2. fayl 2 GB dan katta bo'lsa — H.265 (libx265) CRF 30 bilan kodlaydi; sig'masa CRF 31, 32, 33, ... ketma-ket (har safar
-     ASL fayldan) — hajm chegaraga tushguncha. CRF ham, vaqt ham yetmasa — eng kichik natija ANIQ O'LCHANIB `LIMIT` dan oshmaydigan
-     qismlarga bo'linadi (`split_file`): har qism alohida ochiladigan mp4, `moov` atomi boshida (faststart), kalit kadrdan kesiladi;
+  2. fayl 2 GB dan katta bo'lsa — QAYTA KODLAMASDAN ANIQ O'LCHANIB `LIMIT` dan oshmaydigan qismlarga bo'linadi (`split_file`):
+     har qism alohida ochiladigan mp4, `moov` atomi boshida (faststart), kalit kadrdan kesiladi;
   3. Telegram akkaunti (sessiya) orqali videoni BOTGA yuboradi; izoh: `ANIBLA:<ish>:<token>` (qismlarga bo'lingan bo'lsa
      `ANIBLA:<ish>:<token>:<i>/<n>`). Bot uni yopiq kanalga saqlaydi, kanaldagi `file_id` ni (qismlar bo'lsa vergul bilan) bazaga yozadi.
 Xato bo'lsa botga `ANIBLA_FAIL:<ish>:<token>:<sabab>` xabari yuboriladi (admin chatida ko'rinadi).
@@ -33,12 +32,6 @@ import download as dl  # noqa: E402  (tez yuklash va Telegram'ga yuklash funksiy
 
 # Telegram oddiy akkaunt chegarasi 2000 MiB; zaxra bilan 2 000 000 000 bayt.
 LIMIT = int(os.environ.get("MAX_BYTES", "2000000000"))
-CRF_START = int(os.environ.get("CRF_START", "30"))
-CRF_MAX = int(os.environ.get("CRF_MAX", "45"))
-PRESET = os.environ.get("X265_PRESET", "medium")
-# Actions 6 soatlik chegarasi: shundan keyin yangi kodlash urinishi boshlanmaydi.
-BUDGET = int(os.environ.get("BUDGET_MIN", "240")) * 60  # qolgan vaqt (6 soatgacha) qismlarga bo'lish va yuklashga ketadi
-T0 = time.time()
 
 JOB = os.environ["JOB"].strip()
 TOKEN = os.environ["TOKEN"].strip()
@@ -152,60 +145,6 @@ def mb(n):
     return f"{n / 1048576:.0f} MB"
 
 
-def encode(src, dst, crf, dur, live=None):
-    """H.265 (libx265), ovoz o'zgarishsiz. Foiz har 30 soniyada logga chiqadi."""
-    cmd = ["ffmpeg", "-nostdin", "-y", "-hide_banner", "-loglevel", "error", "-progress", "pipe:1", "-stats_period", "30",
-           "-i", str(src), "-map", "0:v:0", "-map", "0:a?", "-c:v", "libx265", "-preset", PRESET, "-crf", str(crf),
-           "-pix_fmt", "yuv420p", "-tag:v", "hvc1", "-x265-params", "log-level=error", "-c:a", "copy",
-           "-movflags", "+faststart", str(dst)]
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
-    t0 = time.time()
-    for line in p.stdout:
-        k, _, v = line.strip().partition("=")
-        if k == "out_time_us" and v.isdigit() and dur:
-            pct = int(v) / 1e6 * 100 / dur
-            el = time.time() - t0
-            eta = el * (100 - pct) / pct if pct > 0.5 else 0
-            msg = f"H.265 CRF {crf}: {pct:.1f}% · o'tdi {dl.hms(el)} · qoldi ~{dl.hms(eta)}"
-            if live:
-                live.send(f"🎞 {msg}\n{dl.bar(pct)}")
-            log("  " + msg)
-    err = p.stderr.read()
-    if p.wait() != 0 or not Path(dst).exists() or Path(dst).stat().st_size == 0:
-        raise RuntimeError("ffmpeg (H.265) xatosi: " + (err.strip().splitlines() or ["?"])[-1][:200])
-
-
-def fit(src, work, live=None):
-    """Fayl `LIMIT` dan katta bo'lsa H.265 CRF 30 -> 31 -> 32 ... bilan sig'dirishga urinadi.
-    Qaytaradi: (yo'l, bo'lish_kerak). CRF ham, vaqt ham yetmasa — eng kichik natija va bo'lish_kerak=True."""
-    size = src.stat().st_size
-    if size <= LIMIT:
-        return src, False
-    dur = dl.ffprobe(src, "duration") or 0
-    log(f"fayl {mb(size)} > {mb(LIMIT)} — H.265 bilan siqiladi (CRF {CRF_START} dan boshlab, sig'masa +1)")
-    crf = CRF_START
-    best = src
-    while crf <= CRF_MAX:
-        if time.time() - T0 > BUDGET:
-            log(f"vaqt chegarasi: CRF {crf} urinilmadi — natija qismlarga bo'linadi")
-            return best, True
-        dst = work / f"enc_crf{crf}.mp4"
-        t1 = time.time()
-        if live:
-            live.send(f"🎞 H.265 CRF {crf} kodlanmoqda...", force=True)
-        encode(src, dst, crf, dur, live)
-        s = dst.stat().st_size
-        log(f"  CRF {crf}: {mb(s)} ({dl.hms(time.time() - t1)} da)")
-        if s <= LIMIT:
-            return dst, False
-        if best != src:
-            best.unlink(missing_ok=True)
-        best = dst
-        crf += 1
-    log(f"CRF {CRF_MAX} da ham {mb(LIMIT)} dan kichik bo'lmadi — natija qismlarga bo'linadi")
-    return best, True
-
-
 def split_file(src, work, live=None):
     """`src` ni har biri `LIMIT` dan oshmaydigan qismlarga bo'ladi (qayta kodlamasdan, kalit kadrlardan).
     Har qism alohida ochiladigan mp4: `moov` atomi fayl boshida (`+faststart`), vaqt 0 dan boshlanadi.
@@ -256,12 +195,10 @@ async def run(app):
         w, h, dur = dl.ffprobe(out, "width", "v:0"), dl.ffprobe(out, "height", "v:0"), dl.ffprobe(out, "duration")
         log(f"yuklab olindi: {mb(size)} · {w or '?'}x{h or '?'} · {dl.hms(dur or 0)} · {dl.hms(el)} da")
         live.done(f"Yuklab olindi: {mb(size)} · {w or '?'}x{h or '?'} · {dl.hms(dur or 0)} · {dl.hms(el)} da")
-        final, need_split = await asyncio.to_thread(fit, out, work, live)
-        files = await asyncio.to_thread(split_file, final, work, live) if need_split else [final]
+        files = await asyncio.to_thread(split_file, out, work, live) if size > LIMIT else [out]
         total = len(files)
         if total > 1:
-            for big in {out, final}:  # joy bo'shatiladi: faqat qismlar qoladi
-                big.unlink(missing_ok=True)
+            out.unlink(missing_ok=True)  # joy bo'shatiladi: faqat qismlar qoladi
             live.done(f"{total} qismga bo'lindi: " + " + ".join(mb(f.stat().st_size) for f in files))
         for i, f in enumerate(files, 1):
             subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-ss", "10", "-i", str(f), "-frames:v", "1",
