@@ -33,7 +33,7 @@ import download as dl  # noqa: E402  (tez yuklash va Telegram'ga yuklash funksiy
 LIMIT = int(os.environ.get("MAX_BYTES", "2000000000"))
 CRF_START = int(os.environ.get("CRF_START", "30"))
 CRF_MAX = int(os.environ.get("CRF_MAX", "45"))
-PRESET = os.environ.get("X265_PRESET", "fast")
+PRESET = os.environ.get("X265_PRESET", "medium")
 # Actions 6 soatlik chegarasi: shundan keyin yangi kodlash urinishi boshlanmaydi.
 BUDGET = int(os.environ.get("BUDGET_MIN", "300")) * 60
 T0 = time.time()
