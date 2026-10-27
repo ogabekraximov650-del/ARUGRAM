@@ -1,6 +1,6 @@
 /**
  * "➕ Yangi qism qo'shish" -> "🌐 Anibla orqali": ARUMEDIATV kodlash botidagi "Ilova uchun — Anibla orqali" bilan BIR XIL tizim
- * (`worker/src/anibla.rs`): pastki panel (🆕 Oxirgi yuklanganlar, 📂 Bo'limlar, 📅 Yil bo'yicha, 🔍 Izlash, 📋 Yuklash navbati),
+ * (`worker/src/anibla.rs`), faqat INLINE tugmalar ko'rinishida: panel (🆕 Oxirgi yuklanganlar, 📂 Bo'limlar, 📅 Yil bo'yicha, 🔍 Izlash, 📋 Yuklash navbati),
  * anime nomi yozib qidiriladi, anime rasm va to'liq ma'lumot bilan chiqadi, serial bo'lsa 🗂 fasl, keyin ▶️ qismlar (3 tadan, eng
  * yangisi birinchi). Qism tanlanganda sifat SO'RALMAYDI:
  *   1. Anibla'dagi BARCHA sifatlar uchun GitHub Actions'da ALOHIDA run (`tool/anibla/bot_download.py`): video yuklanadi,
@@ -9,7 +9,7 @@
  *   2. bot videoni yopiq kanalga saqlaydi, kanaldagi `file_id` ni oladi va bazaga yozadi (qo'lda qo'shishdagi kabi).
  * Keyingi so'rovda video to'g'ridan-to'g'ri kanaldagi `file_id` dan yuboriladi.
  */
-import { Bot, InlineKeyboard, Keyboard } from "grammy";
+import { Bot, InlineKeyboard } from "grammy";
 import { config } from "../config.ts";
 import { checkIsAdmin } from "../admin_check.ts";
 import type { MyContext } from "./admin.ts";
@@ -49,8 +49,6 @@ import {
 } from "../anibla.ts";
 
 const EP_PAGE = 50;
-/** Telegram paneliga sig'adigan tugmalar soni (ARUMEDIATV botida sinalgan: 150 tagacha). */
-const PANEL_MAX = 140;
 const DUP_WINDOW_MS = 8 * 60 * 60 * 1000;
 
 const BTN_NEW = "🆕 Oxirgi yuklanganlar";
@@ -65,6 +63,8 @@ const BTN_YEARS = "📅 Yil bo'yicha";
 const YEAR_PREFIX = "📅 ";
 
 interface Nav {
+  /** Ro'yxat nonce'i: eskirgan tugmalar (boshqa ro'yxatdan qolgan) rad etiladi. */
+  n: string;
   /** Botdagi anime (season_db.id), qism shunga qo'shiladi. */
   target: number;
   /** Qidiruv matni yoki bo'lim (`c`: ID, `new`, `y:2026`) va uning nomi. */
@@ -97,7 +97,7 @@ async function navGet(chat: number, target: number): Promise<Nav> {
       return n;
     }
   } catch { /* yangisi */ }
-  return { target, q: "", c: "", lt: "", p: 1, pages: 1, total: 0, items: [], v: "", i: -1, j: -1, ep: 0 };
+  return { n: "0", target, q: "", c: "", lt: "", p: 1, pages: 1, total: 0, items: [], v: "", i: -1, j: -1, ep: 0 };
 }
 const navPut = (chat: number, nav: Nav) => setSetting(navKey(chat), JSON.stringify(nav));
 
@@ -119,32 +119,39 @@ function randomHex(bytes: number): string {
   return [...a].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-// ── Pastki panel (ARUMEDIATV botidagi `panel()` bilan bir xil) ──
+// ── Inline panel (ARUMEDIATV botidagi pastki panel o'rnida) ────
 
-/** Doimiy boshqaruv tugmalari TEPADA (uzun ro'yxatda pastga aylantirmasdan ko'rinsin), keyin berilgan qatorlar. */
-function panel(rows: string[][], back: boolean): Keyboard {
-  const head = back
-    ? [[BTN_BACK, BTN_HOME], [BTN_SEARCH, BTN_QUEUE]]
-    : [[BTN_CATS, BTN_YEARS, BTN_SEARCH], [BTN_QUEUE, BTN_HOME]];
-  const kb = new Keyboard();
-  for (const r of [...head, ...rows]) {
-    for (const t of r) kb.text(t);
+type Btn = [string, string];
+
+function ik(rows: Btn[][]): InlineKeyboard {
+  const kb = new InlineKeyboard();
+  for (const r of rows) {
+    for (const [t, d] of r) kb.text(t, d);
     kb.row();
   }
-  return kb.resized();
+  return kb;
 }
 
-async function homePanel(): Promise<Keyboard> {
-  const rows: string[][] = [[BTN_NEW]];
+/** Doimiy boshqaruv tugmalari TEPADA, keyin berilgan qatorlar (panel botdagi `panel()` kabi). */
+function controls(back: boolean, n: string): Btn[][] {
+  return back
+    ? [[[BTN_BACK, `an:${n}:b`], [BTN_HOME, "an:home"]], [[BTN_SEARCH, "an:s"], [BTN_QUEUE, "an:q"]]]
+    : [[[BTN_CATS, "an:h"], [BTN_YEARS, "an:y"], [BTN_SEARCH, "an:s"]], [[BTN_QUEUE, "an:q"], [BTN_HOME, "an:home"]]];
+}
+
+async function homePanel(): Promise<InlineKeyboard> {
+  const rows: Btn[][] = [...controls(false, "0"), [[BTN_NEW, "an:new"]]];
   const cats = await categories();
-  for (let i = 0; i < cats.length; i += 2) rows.push(cats.slice(i, i + 2).map((c) => `📂 ${c.name}`));
-  return panel(rows, false);
+  for (let i = 0; i < cats.length; i += 2) {
+    rows.push(cats.slice(i, i + 2).map((c, k): Btn => [`📂 ${c.name}`.slice(0, 40), `an:c:${i + k}`]));
+  }
+  return ik(rows);
 }
 
 const HTML = { parse_mode: "HTML" as const, link_preview_options: { is_disabled: true } };
 
 /** HTML xato bersa — oddiy matn bilan qayta uriniladi. */
-async function sendText(ctx: MyContext, text: string, kb?: Keyboard): Promise<void> {
+async function sendText(ctx: MyContext, text: string, kb?: InlineKeyboard): Promise<void> {
   try {
     await ctx.reply(text, { ...HTML, reply_markup: kb });
   } catch (e) {
@@ -164,53 +171,48 @@ function itemHead(it: AItem, desc: boolean): string {
   return head;
 }
 
-/** Rasm (muqova) bilan karta: izoh 1024 belgidan oshsa — rasmga sarlavha, qolgani keyingi xabarga (panel o'sha xabarda). */
-async function sendCard(ctx: MyContext, it: AItem, text: string, kb: Keyboard): Promise<void> {
+/** Rasm (muqova) bilan karta: izoh 1024 belgidan oshsa — rasmga sarlavha, qolgani keyingi xabarga (tugmalar o'sha xabarda). */
+async function sendCard(ctx: MyContext, it: AItem, text: string, kb: InlineKeyboard): Promise<boolean> {
   const photo = imgUrl(it.img);
-  if (photo) {
-    try {
-      if (visibleLen(text) <= 1024) {
-        await ctx.replyWithPhoto(photo, { caption: text, ...HTML, reply_markup: kb });
-        return;
-      }
-      let cap = itemHead({ ...it, about: "" }, true);
-      if (!text.startsWith(cap) || visibleLen(cap) > 1024) cap = itemHead(it, false);
-      const rest = (text.startsWith(cap) ? text.slice(cap.length) : text).trimStart();
-      await ctx.replyWithPhoto(photo, { caption: cap, ...HTML });
-      await sendText(ctx, rest, kb);
-      return;
-    } catch (e) {
-      console.error("anibla: rasm yuborilmadi:", errText(e));
+  if (!photo) return false;
+  try {
+    if (visibleLen(text) <= 1024) {
+      await ctx.replyWithPhoto(photo, { caption: text, ...HTML, reply_markup: kb });
+      return true;
     }
+    let cap = itemHead({ ...it, about: "" }, true);
+    if (!text.startsWith(cap) || visibleLen(cap) > 1024) cap = itemHead(it, false);
+    const rest = (text.startsWith(cap) ? text.slice(cap.length) : text).trimStart();
+    await ctx.replyWithPhoto(photo, { caption: cap, ...HTML });
+    await sendText(ctx, rest, kb);
+    return true;
+  } catch (e) {
+    console.error("anibla: rasm yuborilmadi:", errText(e));
+    return false;
   }
-  await sendText(ctx, text, kb);
 }
 
-/** Ro'yxat + panel. Panelga sig'masa (Telegram cheklovi) qisqartirib qayta uriniladi. */
-async function sendList(ctx: MyContext, text: string, top: string[][], items: string[][], back: boolean, card?: AItem): Promise<void> {
-  const total = items.reduce((n, r) => n + r.length, 0);
-  let lastErr = "";
-  for (const cap of [PANEL_MAX, 40]) {
-    const rows = [...top];
-    let shown = 0;
-    for (const r of items) {
-      if (shown + r.length > cap) break;
-      shown += r.length;
-      rows.push(r);
-    }
-    const t = shown < total
-      ? `${text}\n\n⚠️ Telegram paneli cheklovi: ${total} tadan faqat birinchi ${shown} tasi ko'rsatildi. Qolganini nom yozib qidiring.`
-      : text;
+/**
+ * Xabarni ko'rsatadi: tugma bosilgan bo'lsa shu matn xabari TAHRIRLANADI (chat to'lib ketmasin), karta (rasm) bo'lsa yangi
+ * xabar yuboriladi va eski xabar o'chiriladi.
+ */
+async function present(ctx: MyContext, text: string, kb: InlineKeyboard, card?: AItem): Promise<void> {
+  const old = ctx.callbackQuery?.message as { message_id: number; photo?: unknown } | undefined;
+  const chat = ctx.chat!.id;
+  if (card && (await sendCard(ctx, card, text, kb))) {
+    if (old) await ctx.api.deleteMessage(chat, old.message_id).catch(() => {});
+    return;
+  }
+  if (old && !old.photo) {
     try {
-      if (card) await sendCard(ctx, card, t, panel(rows, back));
-      else await sendText(ctx, t, panel(rows, back));
+      await ctx.editMessageText(text, { ...HTML, reply_markup: kb });
       return;
     } catch (e) {
-      lastErr = errText(e);
-      if (lastErr.includes("Too Many Requests")) break;
+      if (errText(e).includes("not modified")) return;
     }
   }
-  await sendText(ctx, `❌ Ro'yxatni yuborib bo'lmadi: ${esc(lastErr)}\nNom yozib qidiring.`);
+  if (old) await ctx.api.deleteMessage(chat, old.message_id).catch(() => {});
+  await sendText(ctx, text, kb);
 }
 
 // ── Ro'yxatlar ───────────────────────────────────────────────
@@ -220,56 +222,54 @@ async function showListing(ctx: MyContext, chat: number, target: number, q: stri
   try {
     res = await listing(q, cat, page);
   } catch (e) {
-    await sendText(ctx, `❌ Ro'yxatni olib bo'lmadi: ${esc(errText(e))}`);
+    await present(ctx, `❌ Ro'yxatni olib bo'lmadi: ${esc(errText(e))}`, ik(controls(false, "0")));
     return;
   }
   if (res.items.length === 0) {
-    await sendText(
+    await present(
       ctx,
       q
         ? `🤷 <b>«${esc(q)}»</b> bo'yicha hech narsa topilmadi.\nBoshqacha yozib ko'ring (masalan, o'zbekcha nomining bir qismi).`
-        : `🤷 <b>${esc(label)}</b> bo'limida hozircha hech narsa yo'q.`
+        : `🤷 <b>${esc(label)}</b> bo'limida hozircha hech narsa yo'q.`,
+      ik(controls(false, "0"))
     );
     return;
   }
   const nav: Nav = {
-    target, q, c: cat, lt: label, p: page, pages: res.pages, total: res.total, items: res.items,
+    n: String(Date.now() % 1_000_000), target, q, c: cat, lt: label, p: page, pages: res.pages, total: res.total, items: res.items,
     v: "list", i: -1, j: -1, ep: 0,
   };
-  await navPut(chat, nav);
-  await listView(ctx, nav);
+  await listView(ctx, chat, nav);
 }
 
-async function listView(ctx: MyContext, nav: Nav): Promise<void> {
+async function listView(ctx: MyContext, chat: number, nav: Nav): Promise<void> {
   nav.v = "list";
-  const top: string[][] = [];
-  const nr: string[] = [];
-  if (nav.p > 1) nr.push(BTN_PREV);
-  if (nav.p < nav.pages) nr.push(BTN_NEXT);
-  if (nr.length) top.push(nr);
-  const items = nav.items.map((it) => [itemLabel(it)]);
+  const rows: Btn[][] = [...controls(false, nav.n)];
+  const nr: Btn[] = [];
+  if (nav.p > 1) nr.push([BTN_PREV, `an:${nav.n}:pg:${nav.p - 1}`]);
+  if (nav.p < nav.pages) nr.push([BTN_NEXT, `an:${nav.n}:pg:${nav.p + 1}`]);
+  if (nr.length) rows.push(nr);
+  nav.items.forEach((it, i) => rows.push([[itemLabel(it).slice(0, 60), `an:${nav.n}:i:${i}`]]));
   const head = nav.q
     ? `🔍 <b>«${esc(nav.q)}»</b> — ${nav.total} ta natija`
     : `📂 <b>${esc(nav.lt)}</b> — ${nav.total} ta`;
   const page = nav.pages > 1 ? ` · ${nav.p}/${nav.pages}-sahifa` : "";
-  await navPut(ctx.chat!.id, nav);
-  await sendList(ctx, `${head}${page}\n📺 serial · 🎬 film\n\n⬇️ Pastdan tanlang:`, top, items, false);
+  await navPut(chat, nav);
+  await present(ctx, `${head}${page}\n📺 serial · 🎬 film\n\n⬇️ Tanlang:`, ik(rows));
 }
 
 async function yearsPanel(ctx: MyContext): Promise<void> {
   const { list, why } = await yearCounts();
   if (list.length === 0) {
-    await sendText(ctx, `❌ Yillar ro'yxatini olib bo'lmadi, birozdan keyin qayta urinib ko'ring.\n<code>${esc(why)}</code>`);
+    await present(ctx, `❌ Yillar ro'yxatini olib bo'lmadi, birozdan keyin qayta urinib ko'ring.\n<code>${esc(why)}</code>`, ik(controls(false, "0")));
     return;
   }
   const total = list.reduce((n, x) => n + x[1], 0);
-  const rows: string[][] = [];
-  for (let i = 0; i < list.length; i += 2) rows.push(list.slice(i, i + 2).map(([y, n]) => `${YEAR_PREFIX}${y}-yil · ${n} ta anime`));
-  await sendText(
-    ctx,
-    `📅 <b>Yil bo'yicha</b> — saytda jami ${total} ta anime, ${list.length} ta yil.\n\n⬇️ Yilni tanlang:`,
-    panel(rows, false)
-  );
+  const rows: Btn[][] = [...controls(false, "0")];
+  for (let i = 0; i < list.length; i += 2) {
+    rows.push(list.slice(i, i + 2).map(([y, n]): Btn => [`📅 ${y}-yil · ${n} ta`, `an:yr:${y}`]));
+  }
+  await present(ctx, `📅 <b>Yil bo'yicha</b> — saytda jami ${total} ta anime, ${list.length} ta yil.\n\n⬇️ Yilni tanlang:`, ik(rows));
 }
 
 // ── Anime -> fasl -> qismlar ─────────────────────────────────
@@ -292,8 +292,9 @@ async function showItem(ctx: MyContext, chat: number, nav: Nav): Promise<void> {
   nav.seasons = undefined;
   nav.eps = undefined;
   if (isMovie(it)) {
+    nav.v = "movie";
     await navPut(chat, nav);
-    await sendCard(ctx, it, `${itemHead(it, true)}\n\n⏳ Anibla'dagi sifatlar tekshirilmoqda...`, panel([], true));
+    await present(ctx, `${itemHead(it, true)}\n\n⏳ Anibla'dagi sifatlar tekshirilmoqda...`, ik(controls(true, nav.n)), it);
     await startJobs(ctx, chat, nav, it);
     return;
   }
@@ -301,11 +302,11 @@ async function showItem(ctx: MyContext, chat: number, nav: Nav): Promise<void> {
   try {
     ss = await seasons(it.s);
   } catch (e) {
-    await sendText(ctx, `${itemHead(it, false)}\n\n❌ ${esc(errText(e))}`);
+    await present(ctx, `${itemHead(it, false)}\n\n❌ ${esc(errText(e))}`, ik(controls(true, nav.n)));
     return;
   }
   if (ss.length === 0) {
-    await sendText(ctx, `${itemHead(it, false)}\n\n🤷 Fasllar topilmadi.`);
+    await present(ctx, `${itemHead(it, false)}\n\n🤷 Fasllar topilmadi.`, ik(controls(true, nav.n)));
     return;
   }
   nav.seasons = ss;
@@ -324,12 +325,14 @@ async function showSeasons(ctx: MyContext, chat: number, nav: Nav): Promise<void
   await ensureInfo(nav);
   nav.v = "seasons";
   await navPut(chat, nav);
-  const rows: string[][] = [];
-  for (let i = 0; i < ss.length; i += 2) rows.push(ss.slice(i, i + 2).map((s) => `🗂 ${seasonLabel(s)}`));
-  await sendCard(ctx, it, `${itemHead(it, true)}\n\n${ss.length} ta fasl — pastdan tanlang:`, panel(rows, true));
+  const rows: Btn[][] = [...controls(true, nav.n)];
+  for (let i = 0; i < ss.length; i += 2) {
+    rows.push(ss.slice(i, i + 2).map((s, k): Btn => [`🗂 ${seasonLabel(s)}`.slice(0, 40), `an:${nav.n}:z:${i + k}`]));
+  }
+  await present(ctx, `${itemHead(it, true)}\n\n${ss.length} ta fasl — tanlang:`, ik(rows), it);
 }
 
-/** Qismlar pastki panelda: qatorga 3 tadan, 50 tadan sahifa, muqova bilan; eng yangisi birinchi. */
+/** Qismlar: qatorga 3 tadan, 45 tadan sahifa, muqova bilan; eng yangisi birinchi. */
 async function showEps(ctx: MyContext, chat: number, nav: Nav): Promise<void> {
   const it = nav.items[nav.i];
   const season = nav.seasons?.[nav.j];
@@ -338,13 +341,13 @@ async function showEps(ctx: MyContext, chat: number, nav: Nav): Promise<void> {
     try {
       nav.eps = (await episodes(it.s, season.slug)).reverse();
     } catch (e) {
-      await sendText(ctx, `❌ ${esc(errText(e))}`);
+      await present(ctx, `❌ ${esc(errText(e))}`, ik(controls(true, nav.n)));
       return;
     }
   }
   const eps = nav.eps;
   if (eps.length === 0) {
-    await sendText(ctx, "❌ Bu faslda qismlar topilmadi.");
+    await present(ctx, "❌ Bu faslda qismlar topilmadi.", ik(controls(true, nav.n)));
     return;
   }
   await ensureInfo(nav);
@@ -353,18 +356,19 @@ async function showEps(ctx: MyContext, chat: number, nav: Nav): Promise<void> {
   nav.v = "eps";
   await navPut(chat, nav);
   const part = eps.slice(nav.ep * EP_PAGE, (nav.ep + 1) * EP_PAGE);
-  const top: string[][] = [];
-  const nr: string[] = [];
-  if (nav.ep > 0) nr.push(BTN_PREV);
-  if (nav.ep + 1 < pages) nr.push(BTN_NEXT);
-  if (nr.length) top.push(nr);
-  const rows: string[][] = [];
-  for (let i = 0; i < part.length; i += 3) rows.push(part.slice(i, i + 3).map((e) => `▶️ ${e.num}-qism`));
+  const rows: Btn[][] = [...controls(true, nav.n)];
+  const nr: Btn[] = [];
+  if (nav.ep > 0) nr.push([BTN_PREV, `an:${nav.n}:ep:${nav.ep - 1}`]);
+  if (nav.ep + 1 < pages) nr.push([BTN_NEXT, `an:${nav.n}:ep:${nav.ep + 1}`]);
+  if (nr.length) rows.push(nr);
+  for (let i = 0; i < part.length; i += 3) {
+    rows.push(part.slice(i, i + 3).map((e): Btn => [`▶️ ${e.num}-qism`, `an:${nav.n}:e:${e.num}`]));
+  }
   const range = pages > 1 ? ` · ${part[0].num}–${part[part.length - 1].num}-qismlar` : "";
   const text =
     `${itemHead(it, true)}\n${esc(seasonLabel(season))} · ${eps.length} ta qism${range}\n\n` +
-    `⬇️ Qismni pastdagi paneldan tanlang (eng yangisi birinchi). Anibla'dagi barcha sifatlar yuklanadi:`;
-  await sendList(ctx, text, top, rows, true, it);
+    `⬇️ Qismni tanlang (eng yangisi birinchi). Anibla'dagi barcha sifatlar yuklanadi:`;
+  await present(ctx, text, ik(rows), it);
 }
 
 // ── Yuklash navbati ──────────────────────────────────────────
@@ -374,18 +378,19 @@ async function queueList(ctx: MyContext): Promise<void> {
     `SELECT id, title, quality, state, error FROM anibla_jobs ORDER BY id DESC LIMIT 20`
   );
   if (rows.length === 0) {
-    await sendText(ctx, "📋 Yuklash navbati bo'sh.");
+    await present(ctx, "📋 Yuklash navbati bo'sh.", ik(controls(false, "0")));
     return;
   }
-  const icon = (st: string) => (st === "done" ? "✅ tayyor" : st === "error" ? "❌ xato" : st === "saving" ? "💾 saqlanmoqda" : "⏳ navbatda / yuklanmoqda");
+  const icon = (st: string) =>
+    st === "done" ? "✅ tayyor" : st === "error" ? "❌ xato" : st === "saving" ? "💾 saqlanmoqda" : st === "cancelled" ? "🗑 bekor" : "⏳ navbatda / yuklanmoqda";
   let text = `📋 <b>Yuklash navbati</b> — oxirgi ${rows.length} ta\n`;
-  const kb = new InlineKeyboard();
+  const kbRows: Btn[][] = [...controls(false, "0")];
   for (const r of rows) {
     text += `\n#${r.id} ${esc(r.title)} · ${r.quality} — ${icon(r.state)}`;
     if (r.state === "error" && r.error) text += `\n   <i>${esc(r.error)}</i>`;
-    if (r.state === "queued" || r.state === "error") kb.text(`🗑 #${r.id} ni olib tashlash`, `anq:${r.id}`).row();
+    if (r.state === "queued" || r.state === "error") kbRows.push([[`🗑 #${r.id} ni olib tashlash`, `an:x:${r.id}`]]);
   }
-  await ctx.reply(text, { ...HTML, reply_markup: kb.inline_keyboard.length ? kb : undefined });
+  await present(ctx, text, ik(kbRows));
 }
 
 // ── Ishlarni boshlash: har bir sifat uchun alohida run ───────
@@ -555,92 +560,109 @@ async function finishJob(ctx: MyContext, job: Job, botFileId: string): Promise<v
   }
 }
 
-// ── Pastki panel matnlarini yo'naltirish (ARUMEDIATV `anibla::on_message` kabi) ──
+// ── Tugmalar va matn ─────────────────────────────────────────
 
+/** Anibla rejimida yozilgan matn: nom bo'yicha qidiruv (tugmalar inline — `an:` callback'lari). */
 async function handleText(ctx: MyContext, text: string, target: number): Promise<void> {
   const chat = ctx.chat!.id;
-  if (text === BTN_HOME) {
-    ctx.session.state = "idle";
-    await sendMainMenu(ctx);
-    return;
-  }
-  if (text === BTN_QUEUE) return queueList(ctx);
-  if (text === BTN_CATS) {
-    await sendText(ctx, "📂 <b>Bo'limlar</b> (saytdagidek) — pastdan tanlang:", await homePanel());
-    return;
-  }
-  if (!text || text === BTN_SEARCH) {
-    await sendText(ctx, "✍️ Anime yoki film nomini yozing:");
-    return;
-  }
-  if (text === BTN_NEW) return showListing(ctx, chat, target, "", "new", "Oxirgi yuklanganlar", 1);
-  if (text === BTN_YEARS) return yearsPanel(ctx);
-
-  // "📅 2026-yil · 53 ta anime" — shu yilning animelari.
-  if (text.startsWith(YEAR_PREFIX)) {
-    const rest = text.slice(YEAR_PREFIX.length);
-    const y = parseInt(rest.split("-yil")[0], 10);
-    if (rest.includes("-yil") && y >= 1900 && y <= 2200) {
-      return showListing(ctx, chat, target, "", `y:${y}`, `${y}-yil`, 1);
-    }
-  }
-  // "📂 Bo'lim nomi".
-  if (text.startsWith("📂 ")) {
-    const name = text.slice(3).trim();
-    const c = (await categories()).find((x) => x.name === name);
-    if (c) return showListing(ctx, chat, target, "", c.id, c.name, 1);
-  }
-
-  const nav = await navGet(chat, target);
-  if (text === BTN_PREV || text === BTN_NEXT) {
-    const d = text === BTN_NEXT ? 1 : -1;
-    if (nav.v === "eps") {
-      nav.ep = Math.max(0, nav.ep + d);
-      return showEps(ctx, chat, nav);
-    }
-    if (nav.items.length) {
-      const page = Math.min(Math.max(nav.p + d, 1), Math.max(nav.pages, 1));
-      return showListing(ctx, chat, target, nav.q, nav.c, nav.lt, page);
-    }
-    return;
-  }
-  if (text === BTN_BACK) {
-    if (nav.v === "eps" && (nav.seasons?.length ?? 0) > 1) return showSeasons(ctx, chat, nav);
-    if ((nav.v === "eps" || nav.v === "seasons") && nav.items.length) return listView(ctx, nav);
-    await sendText(ctx, "📂 Bo'limlar:", await homePanel());
-    return;
-  }
-  // Ro'yxatdagi anime/film.
-  const idx = nav.items.findIndex((it) => itemLabel(it) === text);
-  if (idx >= 0) {
-    nav.i = idx;
-    return showItem(ctx, chat, nav);
-  }
-  // Fasl: "🗂 2-fasl".
-  if (text.startsWith("🗂 ") && nav.seasons) {
-    const k = nav.seasons.findIndex((s) => seasonLabel(s) === text.slice(3).trim());
-    if (k >= 0) {
-      nav.j = k;
-      nav.ep = 0;
-      nav.eps = undefined;
-      return showEps(ctx, chat, nav);
-    }
-  }
-  // Qism: "▶️ 12-qism" — sifat so'ralmaydi, hamma sifatlar yuklanadi.
-  if (text.startsWith("▶️ ") && text.endsWith("-qism")) {
-    const num = parseInt(text.slice(3), 10);
-    const it = nav.items[nav.i];
-    const ep = nav.eps?.find((e) => e.num === num);
-    const season = nav.seasons?.[nav.j];
-    if (it && ep && season) return startJobs(ctx, chat, nav, it, ep, season.slug);
-    await sendText(ctx, `🤷 ${num}-qism topilmadi — ro'yxatdan qaytadan tanlang.`);
-    return;
-  }
   if ([...text].length < 3) {
     await sendText(ctx, "Kamida 3 ta harf yozing.");
     return;
   }
   return showListing(ctx, chat, target, [...text].slice(0, 80).join(""), "", "", 1);
+}
+
+async function goHome(ctx: MyContext): Promise<void> {
+  await present(ctx, "📂 <b>Bo'limlar</b> (saytdagidek) — tanlang yoki anime nomini yozing:", await homePanel());
+}
+
+async function onCallback(ctx: MyContext, data: string): Promise<void> {
+  const chat = ctx.chat?.id ?? ctx.from!.id;
+  const parts = data.split(":");
+  const target = ctx.session.aniblaTarget;
+  if (!target) {
+    ctx.session.state = "idle";
+    await ctx.answerCallbackQuery({ text: "Seans tugagan — '➕ Yangi qism qo'shish' dan qaytadan boshlang", show_alert: true });
+    return;
+  }
+  ctx.session.state = "waiting_anibla_query";
+  const act = parts[1];
+
+  // Nonce'siz amallar.
+  if (!/^\d+$/.test(act)) {
+    await ctx.answerCallbackQuery();
+    switch (act) {
+      case "home":
+        ctx.session.state = "idle";
+        try { await ctx.deleteMessage(); } catch { /* eski */ }
+        await sendMainMenu(ctx);
+        return;
+      case "h":
+        return goHome(ctx);
+      case "q":
+        return queueList(ctx);
+      case "y":
+        return yearsPanel(ctx);
+      case "s":
+        await sendText(ctx, "✍️ Anime yoki film nomini yozing (kamida 3 harf):");
+        return;
+      case "new":
+        return showListing(ctx, chat, target, "", "new", "Oxirgi yuklanganlar", 1);
+      case "yr": {
+        const y = parseInt(parts[2], 10);
+        if (y >= 1900 && y <= 2200) return showListing(ctx, chat, target, "", `y:${y}`, `${y}-yil`, 1);
+        return;
+      }
+      case "c": {
+        const c = (await categories())[parseInt(parts[2], 10)];
+        if (c) return showListing(ctx, chat, target, "", c.id, c.name, 1);
+        return goHome(ctx);
+      }
+      case "x": {
+        const n = await d1Update(`UPDATE anibla_jobs SET state = 'cancelled' WHERE id = ? AND state IN ('queued','error')`, [parseInt(parts[2], 10)]);
+        await ctx.api.sendMessage(chat, n === 1 ? "🗑 Navbatdan olib tashlandi (video kelsa ham saqlanmaydi)." : "Allaqachon tugagan.").catch(() => {});
+        return;
+      }
+    }
+    return;
+  }
+
+  // Ro'yxatga bog'liq amallar: nonce mos kelishi shart.
+  const nav = await navGet(chat, target);
+  if (nav.n !== act) {
+    await ctx.answerCallbackQuery({ text: "Ro'yxat eskirgan — qaytadan tanlang", show_alert: true });
+    return;
+  }
+  await ctx.answerCallbackQuery();
+  const kind = parts[2];
+  const arg = parseInt(parts[3] ?? "", 10);
+  switch (kind) {
+    case "pg":
+      return showListing(ctx, chat, target, nav.q, nav.c, nav.lt, Math.min(Math.max(arg, 1), Math.max(nav.pages, 1)));
+    case "i":
+      nav.i = arg;
+      return showItem(ctx, chat, nav);
+    case "z":
+      nav.j = arg;
+      nav.ep = 0;
+      nav.eps = undefined;
+      return showEps(ctx, chat, nav);
+    case "ep":
+      nav.ep = Math.max(0, arg);
+      return showEps(ctx, chat, nav);
+    case "b":
+      if (nav.v === "eps" && (nav.seasons?.length ?? 0) > 1) return showSeasons(ctx, chat, nav);
+      if ((nav.v === "eps" || nav.v === "seasons" || nav.v === "movie") && nav.items.length) return listView(ctx, chat, nav);
+      return goHome(ctx);
+    case "e": {
+      const it = nav.items[nav.i];
+      const ep = nav.eps?.find((e) => e.num === arg);
+      const season = nav.seasons?.[nav.j];
+      if (it && ep && season) return startJobs(ctx, chat, nav, it, ep, season.slug);
+      await sendText(ctx, `🤷 ${arg}-qism topilmadi — ro'yxatdan qaytadan tanlang.`);
+      return;
+    }
+  }
 }
 
 // ── Ulash ────────────────────────────────────────────────────
@@ -674,7 +696,7 @@ export function setupAniblaAdd(bot: Bot<MyContext>): void {
       return;
     }
 
-    // Anibla rejimida (ARUMEDIATV botidagi `encbot_mode='anibla'` kabi) hamma matn shu yerga: tugmalar ham, qidiruv ham.
+    // Anibla rejimida yozilgan matn — qidiruv.
     if (ctx.session.state !== "waiting_anibla_query") return next();
     if (text.startsWith("/")) return next();
     if (!isAdmin(ctx)) return next();
@@ -701,7 +723,9 @@ export function setupAniblaAdd(bot: Bot<MyContext>): void {
     ctx.session.aniblaTarget = animeInfoId;
     ctx.session.state = "waiting_anibla_query";
     await ctx.answerCallbackQuery();
-    await navPut(ctx.chat?.id ?? ctx.from.id, { target: animeInfoId, q: "", c: "", lt: "", p: 1, pages: 1, total: 0, items: [], v: "", i: -1, j: -1, ep: 0 });
+    await navPut(ctx.chat?.id ?? ctx.from.id, {
+      n: "0", target: animeInfoId, q: "", c: "", lt: "", p: 1, pages: 1, total: 0, items: [], v: "", i: -1, j: -1, ep: 0,
+    });
     const warn = aniblaReady() ? "" : "\n\n⚠️ anibla.uz login/paroli sozlanmagan (<code>tool/anibla/creds.enc</code>).";
     await ctx.reply(
       `📱 <b>Anibla orqali</b>\n🎯 ${esc(info.name)}\n\n` +
@@ -712,11 +736,15 @@ export function setupAniblaAdd(bot: Bot<MyContext>): void {
     );
   });
 
-  // Yuklash navbatidan olib tashlash (video kelsa ham saqlanmaydi).
-  bot.callbackQuery(/^anq:(\d+)$/, async (ctx) => {
+  // Barcha Anibla tugmalari: `an:...` (qo'lda tugmalar — admin uchun).
+  bot.callbackQuery(/^an:(.+)$/, async (ctx) => {
     if (!isAdmin(ctx)) { await ctx.answerCallbackQuery(); return; }
-    const id = parseInt(ctx.match[1], 10);
-    const n = await d1Update(`UPDATE anibla_jobs SET state = 'cancelled' WHERE id = ? AND state IN ('queued','error')`, [id]);
-    await ctx.answerCallbackQuery(n === 1 ? "🗑 Olib tashlandi" : "Allaqachon tugagan");
+    try {
+      await onCallback(ctx, ctx.match[0]);
+    } catch (e) {
+      console.error("anibla onCallback:", e);
+      await ctx.answerCallbackQuery().catch(() => {});
+      await sendText(ctx, `❌ Xato: ${esc(errText(e))}`).catch(() => {});
+    }
   });
 }

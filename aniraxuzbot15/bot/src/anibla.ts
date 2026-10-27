@@ -147,9 +147,9 @@ export function imgUrl(img: string): string {
 
 export interface Listing { items: AItem[]; pages: number; total: number }
 
-/** Ro'yxat sahifasi: qidiruv (`q`) yoki bo'lim (`cat`: ID yoki `new`) yoki yil (`y:2026`). Sahifada 100 tadan. */
+/** Ro'yxat sahifasi: qidiruv (`q`) yoki bo'lim (`cat`: ID yoki `new`) yoki yil (`y:2026`). Sahifada 40 tadan (inline tugmalar chegarasi: 100 ta). */
 export async function listing(q: string, cat: string, page: number): Promise<Listing> {
-  let path = `media/mobile?limit=100&page=${page}`;
+  let path = `media/mobile?limit=40&page=${page}`;
   if (q) path += `&search=${enc(q)}`;
   else if (cat.startsWith("y:")) path += `&years=${enc(cat.slice(2))}`;
   else if (cat && cat !== "new") path += `&categories=${enc(cat)}`;
