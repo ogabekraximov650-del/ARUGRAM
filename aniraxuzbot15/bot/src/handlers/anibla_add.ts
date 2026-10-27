@@ -429,15 +429,39 @@ async function showQualities(ctx: MyContext, it: AItem, ep?: AEpisode, seasonSlu
   }
 }
 
-// ── 📊 Holat: yuklanayotgan videolarning jonli holati va logi ──
+// ── 📊 Holat: panel botdagi "Holat" bilan bir xil ko'rinish ──
+// Har bir ishlayotgan video: qalin sarlavha ("⬇️ Yuklash #4: Anime"), ostida "qism · sifat", keyin runner yuborgan bosqichlar
+// va log (oddiy matn). Holat — chat OXIRIGA yangi xabar; Actions har ~5 soniyada `/anibla/progress` ga yuboradi va shu xabar
+// darhol tahrirlanadi (`aniblaPush`); cron har daqiqada zaxira sifatida yangilaydi. Tugmasiz, panel botdagidek.
 
 const WATCH_PREFIX = "anibla_watch_";
-const WATCH_TTL_MS = 20 * 60 * 1000;
+const WATCH_TTL_MS = 8 * 3600 * 1000;
+const EDIT_GAP_MS = 3000;
+let lastEditAt = 0;
+const lastText = new Map<string, string>();
+
+interface Watch { mid: number; until: number }
+
+function jobHead(j: { id: number; title: string; quality: string }): string {
+  const i = j.title.lastIndexOf(" · ");
+  const name = i > 0 ? j.title.slice(0, i) : j.title;
+  const rest = i > 0 ? `${j.title.slice(i + 3)} · ${j.quality}` : j.quality;
+  return `⬇️ <b>Yuklash #${j.id}: ${esc(name)}</b>\n${esc(rest)}`;
+}
+
+/** Matn `budget` belgiga sig'masa avval log qismi tashlanadi, keyin oxiri qoladi. */
+function fitBody(text: string, budget: number): string {
+  if (text.length <= budget) return text;
+  const i = text.indexOf("\n\n📜 Log:");
+  const j = text.lastIndexOf("\n\n⏱");
+  if (i >= 0 && j > i) text = text.slice(0, i) + text.slice(j);
+  return text.length <= budget ? text : text.slice(-budget);
+}
 
 async function statusText(): Promise<string> {
   const now = Date.now();
-  const active = await d1Run<{ id: number; title: string; quality: string; state: string; created_at: number; text: string | null; updated_at: number | null }>(
-    `SELECT j.id, j.title, j.quality, j.state, j.created_at, p.text, p.updated_at
+  const active = await d1Run<{ id: number; title: string; quality: string; state: string; text: string | null }>(
+    `SELECT j.id, j.title, j.quality, j.state, p.text
        FROM anibla_jobs j LEFT JOIN anibla_progress p ON p.job_id = j.id
       WHERE j.state IN ('queued','saving') AND j.created_at > ?
       ORDER BY j.id ASC LIMIT 6`,
@@ -446,25 +470,24 @@ async function statusText(): Promise<string> {
   const recent = await d1Run<{ id: number; title: string; quality: string; state: string; error: string }>(
     `SELECT id, title, quality, state, error FROM anibla_jobs WHERE state IN ('done','error') ORDER BY id DESC LIMIT 3`
   );
-  let out = "🎞 <b>Anibla yuklash — holat</b>\n";
+  let out: string;
   if (active.length === 0) {
-    out += "\n💤 Hozir yuklanayotgan video yo'q.";
+    out = "🎞 <b>Anibla yuklash</b>\n\n💤 Hozir yuklanayotgan video yo'q.\n\nYuklash boshlansa, shu xabar o'zi yangilanadi.";
   } else {
-    out += `\n⚙️ Ishlayapti: ${active.length} ta\n`;
-    for (const j of active) {
-      out += `\n⬇️ <b>${esc(j.title)}</b> · ${j.quality} (#${j.id})\n`;
-      if (j.state === "saving") {
-        out += "💾 Bot kanalga saqlayapti...\n";
-      } else if (j.text) {
-        const age = Math.max(0, Math.round((now - (j.updated_at ?? now)) / 1000));
-        out += `<pre>${esc(j.text.slice(-700))}</pre>🕒 yangilandi ${age < 90 ? `${age} soniya` : `${Math.round(age / 60)} daqiqa`} oldin\n`;
-      } else {
-        out += "⏳ Actions ishga tushmoqda (run navbatda)...\n";
-      }
-    }
+    const budget = Math.floor(3300 / active.length) - 160;
+    out = active
+      .map((j) => {
+        const body = j.state === "saving"
+          ? "💾 Bot kanalga saqlayapti..."
+          : j.text
+            ? esc(fitBody(j.text, budget))
+            : "⏳ Actions ishga tushmoqda (run navbatda)...";
+        return `${jobHead(j)}\n\n${body}`;
+      })
+      .join("\n\n━━━━━━━━━━\n\n");
   }
   if (recent.length) {
-    out += "\n<b>Oxirgilari:</b>";
+    out += "\n\n<b>Oxirgilari:</b>";
     for (const r of recent) {
       out += `\n${r.state === "done" ? "✅" : "❌"} #${r.id} ${esc(r.title)} · ${r.quality}${r.state === "error" && r.error ? ` — <i>${esc(r.error.slice(0, 120))}</i>` : ""}`;
     }
@@ -472,56 +495,70 @@ async function statusText(): Promise<string> {
   return out.slice(0, 4000);
 }
 
+/** Xabarni tahrirlaydi. Telegram cheklasa ("retry after N") — N soniyani qaytaradi; xabar yo'qolgan bo'lsa kuzatuv o'chadi. */
+async function editWatch(api: Api, key: string, chat: number, w: Watch, text: string): Promise<number> {
+  if (lastText.get(key) === text) return 0;
+  try {
+    await api.editMessageText(chat, w.mid, text, HTML);
+    lastText.set(key, text);
+    return 0;
+  } catch (e) {
+    const m = errText(e);
+    if (m.includes("not modified")) {
+      lastText.set(key, text);
+      return 0;
+    }
+    const r = /retry after (\d+)/i.exec(m);
+    if (r) return Number(r[1]);
+    await d1Update(`DELETE FROM bot_settings WHERE key = ?`, [key]);
+    lastText.delete(key);
+    return 0;
+  }
+}
+
+function parseWatch(raw: string | null): Watch | null {
+  if (!raw) return null;
+  try {
+    const w = JSON.parse(raw) as Watch;
+    return w && w.mid && Date.now() <= w.until ? w : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Actions yangi holat yuborganda (`/anibla/progress`): ochiq "Holat" xabari darhol yangilanadi. `retry_after` runner'ga qaytadi. */
+export async function aniblaPush(api: Api, chat: number): Promise<number> {
+  const key = `${WATCH_PREFIX}${chat}`;
+  const w = parseWatch(await getSetting(key));
+  if (!w) return 0;
+  const now = Date.now();
+  if (now - lastEditAt < EDIT_GAP_MS) return 0;
+  lastEditAt = now;
+  return editWatch(api, key, chat, w, await statusText());
+}
+
 async function showStatus(ctx: MyContext): Promise<void> {
   const chat = ctx.chat!.id;
   const text = await statusText();
-  const kb = ik([[["🔄 Yangilash", "an:st"]], ...controls(false, "0")]);
-  const old = ctx.callbackQuery?.message as { message_id: number; photo?: unknown } | undefined;
-  let mid = 0;
-  if (old && !old.photo) {
-    try {
-      await ctx.editMessageText(text, { ...HTML, reply_markup: kb });
-      mid = old.message_id;
-    } catch (e) {
-      if (errText(e).includes("not modified")) mid = old.message_id;
-    }
-  }
-  if (!mid) {
-    if (old) await ctx.api.deleteMessage(chat, old.message_id).catch(() => {});
-    const m = await ctx.reply(text, { ...HTML, reply_markup: kb });
-    mid = m.message_id;
-  }
-  // Cron (har daqiqa) bu xabarni 20 daqiqa davomida o'zi yangilab turadi.
-  await setSetting(`${WATCH_PREFIX}${chat}`, JSON.stringify({ mid, until: Date.now() + WATCH_TTL_MS, last: "" }));
+  const m = await ctx.reply(text, HTML);
+  const key = `${WATCH_PREFIX}${chat}`;
+  lastText.set(key, text);
+  await setSetting(key, JSON.stringify({ mid: m.message_id, until: Date.now() + WATCH_TTL_MS }));
 }
 
-/** Cron (har daqiqa): ochiq "📊 Holat" xabarlarini yangilaydi. */
+/** Cron (har daqiqa): ochiq "📊 Holat" xabarlarini zaxira sifatida yangilaydi. */
 export async function aniblaTick(api: Api): Promise<void> {
   const rows = await d1Run<{ key: string; value: string }>(`SELECT key, value FROM bot_settings WHERE key LIKE ?`, [`${WATCH_PREFIX}%`]);
   if (rows.length === 0) return;
   const text = await statusText();
-  const kb = ik([[["🔄 Yangilash", "an:st"]], ...controls(false, "0")]);
   for (const r of rows) {
     const chat = Number(r.key.slice(WATCH_PREFIX.length));
-    let w: { mid: number; until: number; last: string };
-    try {
-      w = JSON.parse(r.value);
-    } catch {
+    const w = parseWatch(r.value);
+    if (!chat || !w) {
       await d1Update(`DELETE FROM bot_settings WHERE key = ?`, [r.key]);
       continue;
     }
-    if (!chat || Date.now() > w.until) {
-      await d1Update(`DELETE FROM bot_settings WHERE key = ?`, [r.key]);
-      continue;
-    }
-    if (text === w.last) continue;
-    try {
-      await api.editMessageText(chat, w.mid, text, { ...HTML, reply_markup: kb });
-      await setSetting(r.key, JSON.stringify({ ...w, last: text }));
-    } catch (e) {
-      if (errText(e).includes("not modified")) continue;
-      await d1Update(`DELETE FROM bot_settings WHERE key = ?`, [r.key]);
-    }
+    await editWatch(api, r.key, chat, w, text);
   }
 }
 

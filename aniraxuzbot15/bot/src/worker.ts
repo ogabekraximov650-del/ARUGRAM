@@ -12,7 +12,7 @@ import { createBot } from "./bot.ts";
 import { createTable } from "./db.ts";
 import { config } from "./config.ts";
 import { processPostQueue } from "./queue_processor.ts";
-import { aniblaTick } from "./handlers/anibla_add.ts";
+import { aniblaPush, aniblaTick } from "./handlers/anibla_add.ts";
 import { d1Run, d1Update } from "./db_d1.ts";
 import { initD1Bindings, ensureD1Tables, type D1Env } from "./db_d1.ts";
 
@@ -98,14 +98,16 @@ app.post("/anibla/progress", async (c) => {
   if (!job || !/^[a-f0-9]{32}$/.test(token)) return c.json({ ok: false }, 400);
   try {
     await ensureReady();
-    const rows = await d1Run(`SELECT id FROM anibla_jobs WHERE id = ? AND token = ?`, [job, token]);
+    const rows = await d1Run<{ admin_chat: number }>(`SELECT admin_chat FROM anibla_jobs WHERE id = ? AND token = ?`, [job, token]);
     if (rows.length === 0) return c.json({ ok: false }, 403);
     await d1Update(
       `INSERT INTO anibla_progress (job_id, text, updated_at) VALUES (?, ?, ?)
        ON CONFLICT(job_id) DO UPDATE SET text = excluded.text, updated_at = excluded.updated_at`,
       [job, String(b.text ?? "").slice(0, 3500), Date.now()]
     );
-    return c.json({ ok: true });
+    // Ochiq "📊 Holat" xabari darhol yangilanadi; Telegram cheklasa runner `retry_after` soniya kutadi.
+    const retry = await aniblaPush(bot!.api, Number(rows[0].admin_chat)).catch(() => 0);
+    return c.json(retry ? { ok: false, retry_after: retry } : { ok: true });
   } catch (e) {
     console.error("anibla/progress:", e);
     return c.json({ ok: false }, 500);

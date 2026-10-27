@@ -67,6 +67,7 @@ class BotLive:
         self.line = "⏳ boshlanmoqda..."
         self.t0 = time.time()
         self.sent = ""
+        self.pause_until = 0.0
         self.lock = threading.Lock()
         self.stop = threading.Event()
         dl.LIVE = self  # `download.py` log() shu yerga ham yozadi (add_log)
@@ -99,7 +100,7 @@ class BotLive:
         self.add_log(line)
 
     def _push(self):
-        if not API:
+        if not API or time.time() < self.pause_until:
             return
         text = self.text()
         if text == self.sent:
@@ -109,8 +110,12 @@ class BotLive:
                 f"{API}/anibla/progress", method="POST",
                 data=json.dumps({"job": int(JOB), "token": TOKEN, "text": text}).encode(),
                 headers={"Content-Type": "application/json", "User-Agent": "aniraxuzbot-anibla"})
-            urllib.request.urlopen(req, timeout=20).read()
-            self.sent = text
+            r = json.loads(urllib.request.urlopen(req, timeout=20).read() or b"{}")
+            wait = int(r.get("retry_after") or 0)  # Telegram cheklasa — bot aytgan soniya kutiladi (panel botdagidek)
+            if wait:
+                self.pause_until = time.time() + wait
+            else:
+                self.sent = text
         except Exception as e:  # noqa: BLE001
             print("progress:", e, flush=True)
 
