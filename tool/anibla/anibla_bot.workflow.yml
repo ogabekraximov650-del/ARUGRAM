@@ -85,6 +85,14 @@ jobs:
             fi
           done
           [ "$N" -gt 0 ] || { echo "::error::Qo'shimcha sessiya yo'q — panel botda 'Yuklovchi sessiyalar' orqali qo'shing"; exit 1; }
+          # ASOSIY akkaunt (session.enc) ID'si: u pool ichida bo'lsa ham ishlatilmasin (bot_download.py o'tkazib yuboradi).
+          MAIN_UID=""
+          if K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in tool/encode/session.enc -out /tmp/main_probe.session 2>/dev/null; then
+            MAIN_UID=$(python3 -c "import sqlite3;c=sqlite3.connect('file:/tmp/main_probe.session?mode=ro',uri=True);print(int(c.execute('SELECT user_id FROM sessions').fetchone()[0] or 0))" 2>/dev/null || true)
+          fi
+          rm -f /tmp/main_probe.session
+          echo "MAIN_UID=${MAIN_UID:-0}" >> "$GITHUB_ENV"
+          echo "asosiy akkaunt ID: ${MAIN_UID:-aniqlanmadi}"
 
       - name: Katta fayllar uchun joy (/mnt dagi katta disk)
         run: |

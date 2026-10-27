@@ -265,6 +265,11 @@ class Pool:
     async def _start(self, c):
         if c not in self.started:
             await c.start()
+            me = await c.get_me()
+            if MAIN_UID and me.id == MAIN_UID:  # ASOSIY akkaunt hech qachon ishlatilmaydi
+                await c.stop()
+                self.clients = [x for x in self.clients if x is not c]
+                raise RuntimeError("bu ASOSIY akkaunt — ishlatilmaydi")
             self.started.append(c)
 
     async def upload(self, job, f, thumb, live):
@@ -296,6 +301,18 @@ class Pool:
                 pass
 
 
+MAIN_UID = int(os.environ.get("MAIN_UID", "0") or 0)
+
+
+def user_id_of(base):
+    try:
+        import sqlite3
+        c = sqlite3.connect(f"file:{base}.session?mode=ro", uri=True)
+        return int(c.execute("SELECT user_id FROM sessions").fetchone()[0] or 0)
+    except Exception:  # noqa: BLE001
+        return 0
+
+
 def api_id_of(base):
     try:
         import sqlite3
@@ -312,12 +329,15 @@ async def main():
     clients = []
     for f in sorted(HERE.glob("pool_*.session")):
         base = str(f.with_suffix(""))
+        if MAIN_UID and user_id_of(base) == MAIN_UID:
+            log(f"{f.name}: ASOSIY akkaunt — o'tkazib yuborildi")
+            continue
         clients.append(Client(base, api_id=api_id_of(base) or int(os.environ["TG_API_ID"]),
                               api_hash=os.environ["TG_API_HASH"], no_updates=True))
     pool = Pool(clients)
     try:
         if not clients:
-            raise Fatal("qo'shimcha akkaunt yo'q — panel botda «🗂 Yuklovchi sessiyalar» orqali qo'shing (asosiy akkaunt ishlatilmaydi)")
+            raise Fatal("qo'shimcha akkaunt yo'q (asosiy akkaunt ishlatilmaydi) — panel botda «🗂 Yuklovchi sessiyalar» orqali boshqa akkaunt qo'shing")
         await run(pool)
     except Exception as e:  # noqa: BLE001
         log(f"XATO: {e}")
