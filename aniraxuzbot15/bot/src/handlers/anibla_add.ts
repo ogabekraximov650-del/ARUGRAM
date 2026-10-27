@@ -59,7 +59,6 @@ const MENU_TEXTS = new Set([
   "📹 Animelarni boshqarish", "🎞 Anibla", "📢 Asosiy Kanal", "🔐 Majburiy obunalar",
   "🔍 Foydalanuvchi boshqaruvi", "🗄 Database", "👤 Adminlar", "✉️ Xabar yuborish",
 ]);
-const DUP_WINDOW_MS = 8 * 60 * 60 * 1000;
 
 const BTN_NEW = "🆕 Oxirgi yuklanganlar";
 const BTN_PREV = "◀️ Oldingi";
@@ -396,13 +395,13 @@ async function queueList(ctx: MyContext): Promise<void> {
     return;
   }
   const icon = (st: string) =>
-    st === "done" ? "✅ tayyor" : st === "error" ? "❌ xato" : st === "saving" ? "💾 saqlanmoqda" : st === "cancelled" ? "🗑 bekor" : "⏳ navbatda / yuklanmoqda";
+    st === "done" ? "✅ tayyor" : st === "error" ? "❌ xato" : st === "saving" ? "💾 saqlanmoqda" : st === "cancelled" ? "🗑 bekor" : st === "waiting" ? "🕓 navbatda (oldingi qism tugashini kutmoqda)" : "⚙️ Actions'da ishlayapti";
   let text = `📋 <b>Yuklash navbati</b> — oxirgi ${rows.length} ta\n`;
   const kbRows: Btn[][] = [...controls(false, "0")];
   for (const r of rows) {
     text += `\n#${r.id} ${esc(r.title)} · ${r.quality} — ${icon(r.state)}`;
     if (r.state === "error" && r.error) text += `\n   <i>${esc(r.error)}</i>`;
-    if (r.state === "queued" || r.state === "error") kbRows.push([[`🗑 #${r.id} ni olib tashlash`, `an:x:${r.id}`]]);
+    if (r.state === "waiting" || r.state === "queued" || r.state === "error") kbRows.push([[`🗑 #${r.id} ni olib tashlash`, `an:x:${r.id}`]]);
   }
   await present(ctx, text, ik(kbRows));
 }
@@ -465,13 +464,17 @@ const STALE_MS = 30 * 60 * 1000;
 async function aniblaCleanup(): Promise<void> {
   const now = Date.now();
   await d1Update(`DELETE FROM anibla_jobs WHERE state = 'done'`);
+  // Actions'ga yuborilgan (queued) ish: yuborilgan paytdan (yo'q bo'lsa yaratilgandan) 30 daqiqa holat kelmasa — xato.
   await d1Update(
     `UPDATE anibla_jobs SET state = 'error', error = ?
-      WHERE state = 'queued' AND created_at < ?
+      WHERE state = 'queued'
+        AND COALESCE((SELECT NULLIF(d.started_at, 0) FROM anibla_queue_data d WHERE d.job_id = anibla_jobs.id), created_at) < ?
         AND NOT EXISTS (SELECT 1 FROM anibla_progress p WHERE p.job_id = anibla_jobs.id AND p.updated_at > ?)`,
     ["Actions run boshlanmadi yoki to'xtatildi (30 daqiqa holat kelmadi)", now - STALE_MS, now - STALE_MS]
   );
-  await d1Update(`DELETE FROM anibla_jobs WHERE state = 'error' AND created_at < ?`, [now - 24 * 3600 * 1000]);
+  await d1Update(`UPDATE anibla_jobs SET state = 'error', error = ? WHERE state = 'waiting' AND created_at < ?`, ["Navbatda 48 soatdan oshdi", now - 48 * 3600 * 1000]);
+  await d1Update(`DELETE FROM anibla_jobs WHERE state IN ('error','cancelled') AND created_at < ?`, [now - 24 * 3600 * 1000]);
+  await d1Update(`DELETE FROM anibla_queue_data WHERE job_id NOT IN (SELECT id FROM anibla_jobs)`);
   await d1Update(`DELETE FROM anibla_progress WHERE job_id NOT IN (SELECT id FROM anibla_jobs)`);
   await d1Update(`DELETE FROM anibla_parts WHERE job_id NOT IN (SELECT id FROM anibla_jobs)`);
 }
@@ -488,17 +491,18 @@ async function statusText(): Promise<string> {
   const jobs = await d1Run<{ id: number; title: string; quality: string; state: string; text: string | null }>(
     `SELECT j.id, j.title, j.quality, j.state, p.text
        FROM anibla_jobs j LEFT JOIN anibla_progress p ON p.job_id = j.id
-      WHERE j.state IN ('queued','saving') AND j.created_at > ?
-      ORDER BY j.id ASC LIMIT 20`,
-    [now - 12 * 3600 * 1000]
+      WHERE j.state IN ('waiting','queued','saving') AND j.created_at > ?
+      ORDER BY j.id ASC LIMIT 40`,
+    [now - 48 * 3600 * 1000]
   );
   const bad = await d1Run<{ id: number; title: string; quality: string; error: string }>(
     `SELECT id, title, quality, error FROM anibla_jobs WHERE state = 'error' ORDER BY id DESC LIMIT 3`
   );
   const order = (a: { title: string; quality: string; id: number }, b: { title: string; quality: string; id: number }) =>
     a.title.localeCompare(b.title) || (QRANK[a.quality] ?? 9) - (QRANK[b.quality] ?? 9) || a.id - b.id;
-  const running = jobs.filter((j) => j.state === "saving" || j.text).sort(order);
-  const waiting = jobs.filter((j) => j.state !== "saving" && !j.text).sort(order);
+  const running = jobs.filter((j) => j.state === "saving" || (j.state === "queued" && j.text)).sort(order);
+  const starting = jobs.filter((j) => j.state === "queued" && !j.text).sort(order);
+  const waiting = jobs.filter((j) => j.state === "waiting");  // id bo'yicha: avval navbatga qo'yilgan qism birinchi
 
   const parts: string[] = [];
   if (running.length) {
@@ -515,10 +519,17 @@ async function statusText(): Promise<string> {
         .join("\n\n━━━━━━━━━━\n\n")
     );
   }
+  if (starting.length) {
+    parts.push(
+      `🚀 <b>Actions run ishga tushmoqda (${starting.length} ta):</b>\n` +
+        starting.map((j) => `• #${j.id} ${esc(j.title)} · ${j.quality}`).join("\n")
+    );
+  }
   if (waiting.length) {
     parts.push(
-      `⏳ <b>Navbatda — Actions run ishga tushmoqda (${waiting.length} ta):</b>\n` +
-        waiting.map((j) => `• #${j.id} ${esc(j.title)} · ${j.quality}`).join("\n")
+      `🕓 <b>Navbatda — o'sha sifatdagi oldingi qism tugashini kutmoqda (${waiting.length} ta):</b>\n` +
+        waiting.slice(0, 15).map((j) => `• #${j.id} ${esc(j.title)} · ${j.quality}`).join("\n") +
+        (waiting.length > 15 ? `\n… va yana ${waiting.length - 15} ta` : "")
     );
   }
   if (bad.length) {
@@ -527,7 +538,7 @@ async function statusText(): Promise<string> {
         bad.map((r) => `• #${r.id} ${esc(r.title)} · ${r.quality}${r.error ? ` — <i>${esc(r.error.slice(0, 120))}</i>` : ""}`).join("\n")
     );
   }
-  if (!running.length && !waiting.length) {
+  if (!running.length && !starting.length && !waiting.length) {
     parts.unshift("🎞 <b>Anibla yuklash</b>\n\n💤 Hozir yuklanayotgan video yo'q.\n\nYuklash boshlansa, shu xabar o'zi yangilanadi.");
   }
   return parts.join("\n\n━━━━━━━━━━\n\n").slice(0, 4000);
@@ -578,6 +589,7 @@ export async function aniblaPush(api: Api, chat: number): Promise<number> {
 async function showStatus(ctx: MyContext): Promise<void> {
   const chat = ctx.chat!.id;
   await aniblaCleanup().catch((e) => console.error("anibla cleanup:", e));
+  await dispatchAll().catch((e) => console.error("anibla dispatchAll:", e));
   const text = await statusText();
   const m = await ctx.reply(text, HTML);
   const key = `${WATCH_PREFIX}${chat}`;
@@ -588,8 +600,10 @@ async function showStatus(ctx: MyContext): Promise<void> {
 /** Cron (har daqiqa): ochiq "📊 Holat" xabarlarini zaxira sifatida yangilaydi. */
 export async function aniblaTick(api: Api): Promise<void> {
   const rows = await d1Run<{ key: string; value: string }>(`SELECT key, value FROM bot_settings WHERE key LIKE ?`, [`${WATCH_PREFIX}%`]);
+  await dispatchAll().catch((e) => console.error("anibla dispatchAll:", e));  // zaxira: kutayotgan ishlar bo'lsa navbatdagisini ishga tushiradi
   if (rows.length === 0) return;
   await aniblaCleanup().catch((e) => console.error("anibla cleanup:", e));
+  await dispatchAll().catch((e) => console.error("anibla dispatchAll:", e));
   const text = await statusText();
   for (const r of rows) {
     const chat = Number(r.key.slice(WATCH_PREFIX.length));
@@ -602,7 +616,60 @@ export async function aniblaTick(api: Api): Promise<void> {
   }
 }
 
-// ── Ishlarni boshlash: har bir sifat uchun alohida run ───────
+// ── Navbat: har bir sifat uchun alohida workflow, qismlar ketma-ket ──
+// Qism navbatga qo'yilganda uning hamma sifatlari 'waiting' bo'lib yoziladi. Har bir sifat (1080p/720p/480p/360p) o'z workflow'ida
+// ALOHIDA va bir vaqtda faqat BITTA ish bajaradi: qaysi qism birinchi navbatga qo'yilgan bo'lsa, uning sifatlari birinchi
+// tayyorlanadi; biror sifat tugagach (yoki xato bo'lsa) o'sha sifat workflow'i navbatdagi keyingi qismga o'tadi.
+
+/** Shu sifat bo'sh bo'lsa, navbatdagi eng eski ('waiting') ishni Actions'ga yuboradi. */
+async function dispatchNext(quality: string): Promise<void> {
+  for (let guard = 0; guard < 20; guard++) {
+    const next = await d1Run<{ id: number; token: string; video: string; name: string; bot: string }>(
+      `SELECT j.id, j.token, d.video, d.name, d.bot
+         FROM anibla_jobs j JOIN anibla_queue_data d ON d.job_id = j.id
+        WHERE j.state = 'waiting' AND j.quality = ?
+        ORDER BY j.id ASC LIMIT 1`,
+      [quality]
+    );
+    if (next.length === 0) return;
+    const j = next[0];
+    // Atomik: shu sifatda boshqa ish Actions'da ishlayotgan bo'lsa yoki boshqa chaqiruv oldi — hech narsa o'zgarmaydi.
+    const claimed = await d1Update(
+      `UPDATE anibla_jobs SET state = 'queued'
+        WHERE id = ? AND state = 'waiting'
+          AND NOT EXISTS (SELECT 1 FROM anibla_jobs x WHERE x.quality = ? AND x.state = 'queued')`,
+      [j.id, quality]
+    );
+    if (claimed !== 1) return;
+    await d1Update(`UPDATE anibla_queue_data SET started_at = ? WHERE job_id = ?`, [Date.now(), j.id]);
+    try {
+      // Havola vaqt o'tib eskirgan bo'lishi mumkin — ishga tushirish paytida qayta aniqlanadi.
+      const pick = pickPerQuality(await variants(j.video)).find((p) => p.q === quality);
+      if (!pick) throw new Error(`${quality} sifati endi topilmadi`);
+      await dispatchRun({
+        job: String(j.id),
+        token: j.token,
+        bot: j.bot,
+        quality,
+        video: pick.v.url,
+        audio: pick.v.audio,
+        name: j.name,
+        api: config.WORKER_URL,
+      });
+      return;
+    } catch (e) {
+      await d1Update(`UPDATE anibla_jobs SET state = 'error', error = ? WHERE id = ?`, [errText(e).slice(0, 300), j.id]);
+      // keyingi ishga o'tamiz
+    }
+  }
+}
+
+async function dispatchAll(): Promise<void> {
+  const qs = await d1Run<{ quality: string }>(`SELECT DISTINCT quality FROM anibla_jobs WHERE state = 'waiting'`);
+  for (const r of qs) await dispatchNext(r.quality);
+}
+
+// ── Ishlarni boshlash: qism sifatlari navbatga qo'yiladi ─────
 
 async function startJobs(ctx: MyContext, chat: number, nav: Nav, it: AItem, ep?: AEpisode, seasonSlug?: string): Promise<void> {
   const info = await getAnimeInfo(nav.target);
@@ -621,8 +688,9 @@ async function startJobs(ctx: MyContext, chat: number, nav: Nav, it: AItem, ep?:
     ctx.api.editMessageText(chat, status.message_id, t, HTML).catch(() => ctx.reply(t, HTML));
 
   let picks;
+  let video = "";
   try {
-    const video = await videoOf(it, seasonSlug, ep);
+    video = await videoOf(it, seasonSlug, ep);
     picks = pickPerQuality(await variants(video));
   } catch (e) {
     await edit(`${head}\n\n❌ ${esc(errText(e))}`);
@@ -635,15 +703,15 @@ async function startJobs(ctx: MyContext, chat: number, nav: Nav, it: AItem, ep?:
 
   const epNum = ep ? ep.num : await getNextEpisodeNumber(nav.target, info.kategoriya);
   const title = `${it.t} · ${ep ? `${ep.num}-qism` : "film"}`;
-  const started: string[] = [];
+  const added: { id: number; q: string }[] = [];
   const skipped: string[] = [];
-  const failed: string[] = [];
 
-  for (const { q, v } of picks) {
+  // Tartib muhim: id o'sish bo'yicha — avval navbatga qo'yilgan qismning sifatlari birinchi tayyorlanadi.
+  for (const { q } of picks) {
     const dup = await d1Run(
       `SELECT id FROM anibla_jobs WHERE anime_info_id = ? AND ep_number = ? AND quality = ?
-         AND state IN ('queued','saving') AND created_at > ?`,
-      [nav.target, epNum, q, Date.now() - DUP_WINDOW_MS]
+         AND state IN ('waiting','queued','saving')`,
+      [nav.target, epNum, q]
     );
     if (dup.length > 0) {
       skipped.push(q);
@@ -652,35 +720,36 @@ async function startJobs(ctx: MyContext, chat: number, nav: Nav, it: AItem, ep?:
     const token = randomHex(16);
     const id = await d1InsertReturningId(
       `INSERT INTO anibla_jobs (token, admin_chat, anime_info_id, ep_number, quality, title, state, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, 'queued', ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?)`,
       [token, chat, nav.target, epNum, q, title, Date.now()]
     );
-    try {
-      await dispatchRun({
-        job: String(id),
-        token,
-        bot: ctx.me.username ?? "",
-        quality: q,
-        video: v.url,
-        audio: v.audio,
-        name: `${title} ${q}`,
-        api: config.WORKER_URL,
-      });
-      started.push(q);
-    } catch (e) {
-      await d1Update(`UPDATE anibla_jobs SET state = 'error', error = ? WHERE id = ?`, [errText(e).slice(0, 300), id]);
-      failed.push(`${q}: ${errText(e)}`);
-    }
+    await d1Update(
+      `INSERT INTO anibla_queue_data (job_id, video, name, bot) VALUES (?, ?, ?, ?)`,
+      [id, video, `${title} ${q}`, ctx.me.username ?? ""]
+    );
+    added.push({ id, q });
+  }
+  for (const a of added) await dispatchNext(a.q);
+
+  const started: string[] = [];
+  const waiting: string[] = [];
+  const failed: string[] = [];
+  for (const a of added) {
+    const st = (await d1Run<{ state: string; error: string }>(`SELECT state, error FROM anibla_jobs WHERE id = ?`, [a.id]))[0];
+    if (!st || st.state === "queued") started.push(a.q);
+    else if (st.state === "waiting") waiting.push(a.q);
+    else failed.push(`${a.q}: ${st.error}`);
   }
 
   const lines = [head, ""];
-  if (started.length) {
-    lines.push(
-      `▶️ Actions ishga tushirildi: <b>${started.join(", ")}</b> (${started.length} ta run, har sifat alohida).`,
-      "Har bir sifat tayyor bo'lgach alohida xabar keladi. 2 GB dan katta bo'lsa qismlarga bo'linadi."
-    );
+  if (started.length) lines.push(`▶️ Actions ishga tushirildi: <b>${started.join(", ")}</b> (har sifat o'z workflow'ida).`);
+  if (waiting.length) {
+    lines.push(`🕓 Navbatda: <b>${waiting.join(", ")}</b> — shu sifatdagi oldingi qism tugagach avtomatik boshlanadi.`);
   }
-  if (skipped.length) lines.push(`⏭ Allaqachon ishlayapti: ${skipped.join(", ")}`);
+  if (started.length || waiting.length) {
+    lines.push("Har bir sifat tayyor bo'lgach alohida xabar keladi. 2 GB dan katta bo'lsa qismlarga bo'linadi.");
+  }
+  if (skipped.length) lines.push(`⏭ Allaqachon navbatda/ishlayapti: ${skipped.join(", ")}`);
   if (failed.length) lines.push(`⚠️ Ishga tushmadi:\n${failed.map((f) => esc(f)).join("\n")}`);
   await edit(lines.join("\n"));
 }
@@ -707,6 +776,8 @@ async function finishJob(ctx: MyContext, job: Job, botFileIds: string[]): Promis
   // Atomik: bir xil video ikki marta saqlanmasin.
   const claimed = await d1Update(`UPDATE anibla_jobs SET state = 'saving' WHERE id = ? AND state = 'queued'`, [job.id]);
   if (claimed !== 1) return;
+  // Run o'z ishini tugatdi (video botga keldi) — shu sifat workflow'i navbatdagi keyingi qismga o'tadi.
+  await dispatchNext(job.quality).catch((e) => console.error("anibla dispatchNext:", e));
   try {
     const info = await getAnimeInfo(job.anime_info_id);
     const anime = info ? await getAnimeById(info.id) : null;
@@ -764,6 +835,7 @@ async function finishJob(ctx: MyContext, job: Job, botFileIds: string[]): Promis
     await d1Update(`DELETE FROM anibla_jobs WHERE id = ?`, [job.id]);
     await d1Update(`DELETE FROM anibla_progress WHERE job_id = ?`, [job.id]);
     await d1Update(`DELETE FROM anibla_parts WHERE job_id = ?`, [job.id]);
+    await d1Update(`DELETE FROM anibla_queue_data WHERE job_id = ?`, [job.id]);
     await ctx.api.sendMessage(
       job.admin_chat,
       `✅ <b>${esc(job.title)}</b> (${job.quality}) ${upserted?.isNew ? "qo'shildi" : "yangilandi"} — kanalga saqlandi, <code>file_id</code> bazaga yozildi.`,
@@ -847,7 +919,8 @@ async function onCallback(ctx: MyContext, data: string): Promise<void> {
         return goHome(ctx);
       }
       case "x": {
-        const n = await d1Update(`UPDATE anibla_jobs SET state = 'cancelled' WHERE id = ? AND state IN ('queued','error')`, [parseInt(parts[2], 10)]);
+        const n = await d1Update(`UPDATE anibla_jobs SET state = 'cancelled' WHERE id = ? AND state IN ('waiting','queued','error')`, [parseInt(parts[2], 10)]);
+        await dispatchAll().catch((e) => console.error("anibla dispatchAll:", e));
         await ctx.api.sendMessage(chat, n === 1 ? "🗑 Navbatdan olib tashlandi (video kelsa ham saqlanmaydi)." : "Allaqachon tugagan.").catch(() => {});
         return;
       }
@@ -939,6 +1012,7 @@ export function setupAniblaAdd(bot: Bot<MyContext>): void {
       const job = await loadJob(Number(f[1]), f[2]);
       if (job && job.state === "queued") {
         await d1Update(`UPDATE anibla_jobs SET state = 'error', error = ? WHERE id = ? AND state = 'queued'`, [f[3].slice(0, 300), job.id]);
+        await dispatchNext(job.quality).catch((e) => console.error("anibla dispatchNext:", e));
         await ctx.api.sendMessage(
           job.admin_chat,
           `❌ <b>${esc(job.title)}</b> (${job.quality}): ${esc(f[3].slice(0, 300))}`,

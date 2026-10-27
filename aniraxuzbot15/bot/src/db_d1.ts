@@ -504,6 +504,13 @@ async function _initMainTables(db: D1Database): Promise<void> {
       error TEXT NOT NULL DEFAULT '',
       created_at INTEGER NOT NULL
     )`,
+    `CREATE TABLE IF NOT EXISTS anibla_queue_data (
+      job_id INTEGER PRIMARY KEY,
+      video TEXT NOT NULL DEFAULT '',
+      name TEXT NOT NULL DEFAULT '',
+      bot TEXT NOT NULL DEFAULT '',
+      started_at INTEGER NOT NULL DEFAULT 0
+    )`,
     `CREATE TABLE IF NOT EXISTS anibla_parts (
       job_id INTEGER NOT NULL,
       idx INTEGER NOT NULL,
