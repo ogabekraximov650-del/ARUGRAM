@@ -324,6 +324,11 @@ export function getAvailableQualities(ep: Episode): Quality[] {
   });
 }
 
+/** Bazadagi `file_id` maydoni: bitta id yoki 2 GB dan katta video qismlari — vergul bilan ("id1,id2,id3"). */
+export function splitFileIds(v: string | null | undefined): string[] {
+  return (v ?? "").split(",").map((x) => x.trim()).filter(Boolean);
+}
+
 export function getEpisodeFileIds(ep: Episode, quality: Quality): { chanel: string | null; bot: string | null } {
   return {
     chanel: ep[`q${quality}_file_chanel_id` as keyof Episode] as string | null,

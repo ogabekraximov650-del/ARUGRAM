@@ -5,7 +5,7 @@
  * yangisi birinchi). Qism tanlanganda sifat SO'RALMAYDI:
  *   1. Anibla'dagi BARCHA sifatlar uchun GitHub Actions'da ALOHIDA run (`tool/anibla/bot_download.py`): video yuklanadi,
  *      2 GB dan katta bo'lsa H.265 (CRF 30, sig'masa 31, 32, ...) bilan siqiladi va Telegram akkaunti orqali BOTGA yuboriladi
- *      (izoh: `ANIBLA:<ish>:<token>`);
+ *      (izoh: `ANIBLA:<ish>:<token>`; 2 GB dan katta bo'lsa aniq o'lchab qismlarga bo'linadi — `:<i>/<n>`);
  *   2. bot videoni yopiq kanalga saqlaydi, kanaldagi `file_id` ni oladi va bazaga yozadi (qo'lda qo'shishdagi kabi).
  * Keyingi so'rovda video to'g'ridan-to'g'ri kanaldagi `file_id` dan yuboriladi.
  */
@@ -473,6 +473,7 @@ async function aniblaCleanup(): Promise<void> {
   );
   await d1Update(`DELETE FROM anibla_jobs WHERE state = 'error' AND created_at < ?`, [now - 24 * 3600 * 1000]);
   await d1Update(`DELETE FROM anibla_progress WHERE job_id NOT IN (SELECT id FROM anibla_jobs)`);
+  await d1Update(`DELETE FROM anibla_parts WHERE job_id NOT IN (SELECT id FROM anibla_jobs)`);
 }
 
 /** Bir nechta video bir vaqtda ishlasa log qismi tashlanadi (xabar aralash bo'lib ketmasin). */
@@ -702,7 +703,7 @@ async function loadJob(id: number, token: string): Promise<Job | null> {
   return rows[0] ?? null;
 }
 
-async function finishJob(ctx: MyContext, job: Job, botFileId: string): Promise<void> {
+async function finishJob(ctx: MyContext, job: Job, botFileIds: string[]): Promise<void> {
   // Atomik: bir xil video ikki marta saqlanmasin.
   const claimed = await d1Update(`UPDATE anibla_jobs SET state = 'saving' WHERE id = ? AND state = 'queued'`, [job.id]);
   if (claimed !== 1) return;
@@ -714,8 +715,15 @@ async function finishJob(ctx: MyContext, job: Job, botFileId: string): Promise<v
     const channelUsername = await getMainChannelUsername(ctx);
     const caption = buildEpisodeCaptionFromInputs(info, anime.name, job.ep_number, channelUsername, undefined, job.quality);
     // 1) Yopiq kanalga saqlash; 2) kanaldagi file_id ni olish.
-    const sent = await ctx.api.sendVideo(config.SAVED_CHANNEL_ID, botFileId, { caption });
-    const chanelFileId = sent.video?.file_id ?? botFileId;
+    // 2 GB dan katta video bir nechta qism bo'lsa — har biri kanalga saqlanadi; bazaga vergul bilan yoziladi ("id1,id2,id3").
+    const chanelIds: string[] = [];
+    for (let i = 0; i < botFileIds.length; i++) {
+      const cap = botFileIds.length > 1 ? `${caption}\n\n📦 ${i + 1}/${botFileIds.length}-qism` : caption;
+      const sent = await ctx.api.sendVideo(config.SAVED_CHANNEL_ID, botFileIds[i], { caption: cap });
+      chanelIds.push(sent.video?.file_id ?? botFileIds[i]);
+    }
+    const chanelFileId = chanelIds.join(",");
+    const botFileId = botFileIds.join(",");
 
     // 3) Bazaga yozish. Bir qismning sifatlari bir vaqtda kelsa, UNIQUE to'qnashuvida qayta uriniladi.
     let upserted: Awaited<ReturnType<typeof upsertEpisodeQuality>> | null = null;
@@ -755,6 +763,7 @@ async function finishJob(ctx: MyContext, job: Job, botFileId: string): Promise<v
     // Tayyor ish navbatdan butunlay o'chiriladi (video allaqachon bazada).
     await d1Update(`DELETE FROM anibla_jobs WHERE id = ?`, [job.id]);
     await d1Update(`DELETE FROM anibla_progress WHERE job_id = ?`, [job.id]);
+    await d1Update(`DELETE FROM anibla_parts WHERE job_id = ?`, [job.id]);
     await ctx.api.sendMessage(
       job.admin_chat,
       `✅ <b>${esc(job.title)}</b> (${job.quality}) ${upserted?.isNew ? "qo'shildi" : "yangilandi"} — kanalga saqlandi, <code>file_id</code> bazaga yozildi.`,
@@ -893,11 +902,32 @@ export function setupAniblaAdd(bot: Bot<MyContext>): void {
   const isAdmin = (ctx: MyContext) => checkIsAdmin(ctx.from?.id);
 
   // Actions (Telegram akkaunti) yuborgan video: izoh `ANIBLA:<ish>:<token>`. Onboarding'dan OLDIN ishlaydi.
+  // 2 GB dan katta video qismlarga bo'lingan bo'lsa izoh: `ANIBLA:<ish>:<token>:<i>/<n>` — hamma qism kelgach saqlanadi.
   bot.on("message:video", async (ctx, next) => {
-    const m = (ctx.message.caption ?? "").match(/^ANIBLA:(\d+):([a-f0-9]{32})$/);
+    const m = (ctx.message.caption ?? "").match(/^ANIBLA:(\d+):([a-f0-9]{32})(?::(\d+)\/(\d+))?$/);
     if (!m || ctx.chat.type !== "private") return next();
     const job = await loadJob(Number(m[1]), m[2]);
-    if (job) await finishJob(ctx, job, ctx.message.video.file_id);
+    if (!job) return;
+    const fileId = ctx.message.video.file_id;
+    if (!m[3]) {
+      await finishJob(ctx, job, [fileId]);
+      return;
+    }
+    const idx = Number(m[3]);
+    const total = Number(m[4]);
+    if (!(idx >= 1 && idx <= total && total >= 2 && total <= 30)) return;
+    await d1Update(
+      `INSERT INTO anibla_parts (job_id, idx, total, file_id) VALUES (?, ?, ?, ?)
+       ON CONFLICT(job_id, idx) DO UPDATE SET file_id = excluded.file_id, total = excluded.total`,
+      [job.id, idx, total, fileId]
+    );
+    const got = await d1Run<{ idx: number; file_id: string }>(
+      `SELECT idx, file_id FROM anibla_parts WHERE job_id = ? ORDER BY idx ASC`,
+      [job.id]
+    );
+    if (got.length >= total && got.every((r, i) => r.idx === i + 1)) {
+      await finishJob(ctx, job, got.map((r) => r.file_id));
+    }
   });
 
   bot.on("message:text", async (ctx, next) => {

@@ -25,6 +25,7 @@ import {
   getSetting,
   getAvailableQualities,
   getEpisodeFileIds,
+  splitFileIds,
   setEpisodeQualityFiles,
   clearEpisodeQuality,
   QUALITIES,
@@ -261,11 +262,12 @@ async function showEpisodeDetail(ctx: MyContext, episodeRowid: number, preferred
     const ids = getEpisodeFileIds(ep, displayQ);
     let msg;
     try {
-      msg = await ctx.api.sendVideo(ctx.chat!.id, ids.chanel ?? ids.bot ?? "", {
+      // Bir nechta qismli (vergul bilan) bo'lsa — admin ko'rinishida 1-qism ko'rsatiladi.
+      msg = await ctx.api.sendVideo(ctx.chat!.id, splitFileIds(ids.chanel ?? ids.bot)[0] ?? "", {
         caption, reply_markup: kb,
       });
     } catch {
-      msg = await ctx.api.sendVideo(ctx.chat!.id, ids.bot ?? ids.chanel ?? "", {
+      msg = await ctx.api.sendVideo(ctx.chat!.id, splitFileIds(ids.bot ?? ids.chanel)[0] ?? "", {
         caption, reply_markup: kb,
       });
     }

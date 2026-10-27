@@ -5,15 +5,17 @@ Bot (`aniraxuzbot15/bot`, "➕ Yangi qism qo'shish" -> "🌐 Anibla orqali") har
 qiladi (`anibla_bot.yml`). Bu skript:
   1. HLS ni qayta kodlamasdan mp4 ga yig'adi (`download.py` dagi tez parallel yuklash);
   2. fayl 2 GB dan katta bo'lsa — H.265 (libx265) CRF 30 bilan kodlaydi; sig'masa CRF 31, 32, 33, ... ketma-ket (har safar
-     ASL fayldan) — hajm chegaraga tushguncha;
-  3. Telegram akkaunti (sessiya) orqali videoni BOTGA yuboradi; izoh: `ANIBLA:<ish>:<token>`. Bot uni yopiq kanalga saqlaydi,
-     kanaldagi `file_id` ni olib bazaga yozadi.
+     ASL fayldan) — hajm chegaraga tushguncha. CRF ham, vaqt ham yetmasa — eng kichik natija ANIQ O'LCHANIB `LIMIT` dan oshmaydigan
+     qismlarga bo'linadi (`split_file`): har qism alohida ochiladigan mp4, `moov` atomi boshida (faststart), kalit kadrdan kesiladi;
+  3. Telegram akkaunti (sessiya) orqali videoni BOTGA yuboradi; izoh: `ANIBLA:<ish>:<token>` (qismlarga bo'lingan bo'lsa
+     `ANIBLA:<ish>:<token>:<i>/<n>`). Bot uni yopiq kanalga saqlaydi, kanaldagi `file_id` ni (qismlar bo'lsa vergul bilan) bazaga yozadi.
 Xato bo'lsa botga `ANIBLA_FAIL:<ish>:<token>:<sabab>` xabari yuboriladi (admin chatida ko'rinadi).
 
 Muhit: JOB, TOKEN, BOT, QUALITY, VIDEO, AUDIO, NAME; TG_API_ID, TG_API_HASH; sessiya `tool/anibla/pyro_session.session`.
 """
 import asyncio
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -35,7 +37,7 @@ CRF_START = int(os.environ.get("CRF_START", "30"))
 CRF_MAX = int(os.environ.get("CRF_MAX", "45"))
 PRESET = os.environ.get("X265_PRESET", "medium")
 # Actions 6 soatlik chegarasi: shundan keyin yangi kodlash urinishi boshlanmaydi.
-BUDGET = int(os.environ.get("BUDGET_MIN", "300")) * 60
+BUDGET = int(os.environ.get("BUDGET_MIN", "240")) * 60  # qolgan vaqt (6 soatgacha) qismlarga bo'lish va yuklashga ketadi
 T0 = time.time()
 
 JOB = os.environ["JOB"].strip()
@@ -174,16 +176,19 @@ def encode(src, dst, crf, dur, live=None):
 
 
 def fit(src, work, live=None):
-    """Fayl `LIMIT` dan katta bo'lsa H.265 CRF 30 -> 31 -> 32 ... bilan sig'dirib, yangi yo'lni qaytaradi."""
+    """Fayl `LIMIT` dan katta bo'lsa H.265 CRF 30 -> 31 -> 32 ... bilan sig'dirishga urinadi.
+    Qaytaradi: (yo'l, bo'lish_kerak). CRF ham, vaqt ham yetmasa — eng kichik natija va bo'lish_kerak=True."""
     size = src.stat().st_size
     if size <= LIMIT:
-        return src
+        return src, False
     dur = dl.ffprobe(src, "duration") or 0
     log(f"fayl {mb(size)} > {mb(LIMIT)} — H.265 bilan siqiladi (CRF {CRF_START} dan boshlab, sig'masa +1)")
     crf = CRF_START
+    best = src
     while crf <= CRF_MAX:
         if time.time() - T0 > BUDGET:
-            raise Fatal(f"vaqt tugadi (Actions chegarasi): CRF {crf} urinilmadi")
+            log(f"vaqt chegarasi: CRF {crf} urinilmadi — natija qismlarga bo'linadi")
+            return best, True
         dst = work / f"enc_crf{crf}.mp4"
         t1 = time.time()
         if live:
@@ -192,14 +197,51 @@ def fit(src, work, live=None):
         s = dst.stat().st_size
         log(f"  CRF {crf}: {mb(s)} ({dl.hms(time.time() - t1)} da)")
         if s <= LIMIT:
-            return dst
-        dst.unlink(missing_ok=True)
+            return dst, False
+        if best != src:
+            best.unlink(missing_ok=True)
+        best = dst
         crf += 1
-    raise Fatal(f"CRF {CRF_MAX} da ham {mb(LIMIT)} dan kichik bo'lmadi")
+    log(f"CRF {CRF_MAX} da ham {mb(LIMIT)} dan kichik bo'lmadi — natija qismlarga bo'linadi")
+    return best, True
+
+
+def split_file(src, work, live=None):
+    """`src` ni har biri `LIMIT` dan oshmaydigan qismlarga bo'ladi (qayta kodlamasdan, kalit kadrlardan).
+    Har qism alohida ochiladigan mp4: `moov` atomi fayl boshida (`+faststart`), vaqt 0 dan boshlanadi.
+    Hajm ANIQ o'lchanadi: biror qism `LIMIT` dan oshsa — qism soni oshirilib qayta bo'linadi."""
+    size = src.stat().st_size
+    dur = dl.ffprobe(src, "duration") or 0
+    if not dur:
+        raise Fatal("video davomiyligi aniqlanmadi — bo'lib bo'lmaydi")
+    safe = LIMIT * 0.97  # kalit kadrlar tufayli qismlar hajmi biroz farq qiladi
+    n = max(2, math.ceil(size / safe))
+    for _ in range(25):
+        for old in work.glob("part_*.mp4"):
+            old.unlink()
+        seg = dur / n
+        if live:
+            live.send(f"✂️ {n} qismga bo'linmoqda (har biri ≤ {mb(LIMIT)})...", force=True)
+        r = subprocess.run(
+            ["ffmpeg", "-nostdin", "-y", "-hide_banner", "-loglevel", "error", "-i", str(src),
+             "-map", "0:v:0", "-map", "0:a?", "-c", "copy", "-f", "segment", "-segment_time", f"{seg:.3f}",
+             "-reset_timestamps", "1", "-segment_format", "mp4",
+             "-segment_format_options", "movflags=+faststart", str(work / "part_%03d.mp4")],
+            capture_output=True, text=True)
+        parts = sorted(work.glob("part_*.mp4"))
+        if r.returncode != 0 or not parts:
+            raise RuntimeError("ffmpeg (bo'lish) xatosi: " + (r.stderr.strip().splitlines() or ["?"])[-1][:200])
+        sizes = [p.stat().st_size for p in parts]
+        log(f"bo'lish: {len(parts)} qism · " + ", ".join(mb(x) for x in sizes))
+        biggest = max(sizes)
+        if biggest <= LIMIT:
+            return parts
+        n = max(len(parts) + 1, math.ceil(len(parts) * biggest / safe))
+    raise Fatal(f"{mb(LIMIT)} dan oshmaydigan qismlarga bo'lib bo'lmadi")
 
 
 async def run(app):
-    work = Path(os.environ.get("RUNNER_TEMP", "/tmp")) / f"anibla_bot_{JOB}"
+    work = Path(os.environ.get("WORK_ROOT") or os.environ.get("RUNNER_TEMP", "/tmp")) / f"anibla_bot_{JOB}"
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir(parents=True)
     dl.WORK = work
@@ -214,14 +256,27 @@ async def run(app):
         w, h, dur = dl.ffprobe(out, "width", "v:0"), dl.ffprobe(out, "height", "v:0"), dl.ffprobe(out, "duration")
         log(f"yuklab olindi: {mb(size)} · {w or '?'}x{h or '?'} · {dl.hms(dur or 0)} · {dl.hms(el)} da")
         live.done(f"Yuklab olindi: {mb(size)} · {w or '?'}x{h or '?'} · {dl.hms(dur or 0)} · {dl.hms(el)} da")
-        final = await asyncio.to_thread(fit, out, work, live)
-        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-ss", "10", "-i", str(final), "-frames:v", "1",
-                        "-vf", "scale='min(320,iw)':-2", "-q:v", "5", str(thumb)])
-        job = types.SimpleNamespace(channel=BOT, caption=f"ANIBLA:{JOB}:{TOKEN}", file_name=NAME[:90] or f"video_{JOB}")
-        log(f"botga yuboriladi: @{BOT} ({mb(final.stat().st_size)})")
-        t_up = time.time()
-        await dl.upload(app, job, final, thumb, live)
-        live.done(f"Botga yuborildi · {dl.hms(time.time() - t_up)}")
+        final, need_split = await asyncio.to_thread(fit, out, work, live)
+        files = await asyncio.to_thread(split_file, final, work, live) if need_split else [final]
+        total = len(files)
+        if total > 1:
+            for big in {out, final}:  # joy bo'shatiladi: faqat qismlar qoladi
+                big.unlink(missing_ok=True)
+            live.done(f"{total} qismga bo'lindi: " + " + ".join(mb(f.stat().st_size) for f in files))
+        for i, f in enumerate(files, 1):
+            subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-ss", "10", "-i", str(f), "-frames:v", "1",
+                            "-vf", "scale='min(320,iw)':-2", "-q:v", "5", str(thumb)])
+            if not thumb.exists() or thumb.stat().st_size == 0:  # qism 10 soniyadan qisqa bo'lsa
+                subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(f), "-frames:v", "1",
+                                "-vf", "scale='min(320,iw)':-2", "-q:v", "5", str(thumb)])
+            tag = f":{i}/{total}" if total > 1 else ""
+            fname = f"{NAME} ({i}-{total})" if total > 1 else NAME
+            job = types.SimpleNamespace(channel=BOT, caption=f"ANIBLA:{JOB}:{TOKEN}{tag}", file_name=fname[:90] or f"video_{JOB}")
+            log(f"botga yuboriladi: @{BOT} ({mb(f.stat().st_size)}){f' · qism {i}/{total}' if total > 1 else ''}")
+            t_up = time.time()
+            await dl.upload(app, job, f, thumb, live)
+            live.done(f"Botga yuborildi{f' · qism {i}/{total}' if total > 1 else ''} · {dl.hms(time.time() - t_up)}")
+            thumb.unlink(missing_ok=True)
         live.send("✅ Tayyor — bot kanalga saqlaydi", force=True)
         live.close()
         shutil.rmtree(work, ignore_errors=True)

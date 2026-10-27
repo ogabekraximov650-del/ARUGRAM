@@ -78,8 +78,14 @@ jobs:
             -in tool/encode/session.enc -out "$OUT"
           head -c 16 "$OUT" | grep -q "SQLite format 3" || { echo "::error::Sessiya ochilmadi (ENCODE_TOKEN noto'g'ri?)"; exit 1; }
 
-      - name: Yuklash, kerak bo'lsa siqish va botga yuborish
+      - name: Katta fayllar uchun joy (/mnt dagi katta disk)
+        run: |
+          sudo mkdir -p /mnt/anibla && sudo chown "$USER" /mnt/anibla
+          df -h /mnt/anibla | tail -1
+
+      - name: Yuklash, kerak bo'lsa siqish/bo'lish va botga yuborish
         env:
+          WORK_ROOT: /mnt/anibla
           JOB: ${{ inputs.job }}
           TOKEN: ${{ inputs.token }}
           BOT: ${{ inputs.bot }}

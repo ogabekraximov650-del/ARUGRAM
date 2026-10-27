@@ -7,6 +7,7 @@ import {
   getEpisodesByAnimeInfo,
   getEpisode,
   getEpisodeFileIds,
+  splitFileIds,
   getAvailableQualities,
   checkAndRecordDownload,
   getSetting,
@@ -222,6 +223,40 @@ function buildPlayerKeyboard(
 
 // ─── Video yuborish ───────────────────────────────────────────────────────────
 
+/**
+ * `file_id` maydoni vergul bilan bir nechta qism bo'lishi mumkin (2 GB dan katta video aniq o'lchab bo'lingan).
+ * Qismlar ketma-ket yuboriladi: oxirgisi izoh va klaviatura bilan, oldingilari "📦 i/n-qism" izohi bilan.
+ * Har qism uchun avval `primary`, bo'lmasa `fallback` id. Oxirgi xabar id qaytadi.
+ */
+async function sendParts(
+  ctx: MyContext,
+  primaryRaw: string | null,
+  fallbackRaw: string | null,
+  caption: string,
+  kb?: InlineKeyboard
+): Promise<number> {
+  const prim = splitFileIds(primaryRaw);
+  const fall = splitFileIds(fallbackRaw);
+  const n = Math.max(prim.length, fall.length);
+  let last = 0;
+  for (let i = 0; i < n; i++) {
+    const isLast = i === n - 1;
+    const opts = isLast
+      ? { caption, reply_markup: kb, protect_content: true }
+      : { caption: `📦 ${i + 1}/${n}-qism`, protect_content: true };
+    const a = (prim[i] ?? fall[i])!;
+    const b = (fall[i] ?? prim[i])!;
+    try {
+      last = (await ctx.api.sendVideo(ctx.chat!.id, a, opts)).message_id;
+    } catch (e1) {
+      console.error(`sendParts primary failed (qism ${i + 1}/${n}):`, String(e1));
+      if (b && b !== a) last = (await ctx.api.sendVideo(ctx.chat!.id, b, opts)).message_id;
+      else throw e1;
+    }
+  }
+  return last;
+}
+
 /** Arxiv ko'rinishda yuborish (keyboard yo'q) */
 async function sendArchivedEpisode(
   ctx: MyContext,
@@ -233,22 +268,11 @@ async function sendArchivedEpisode(
 ): Promise<void> {
   const caption = buildSimpleCaption(ep, info, animeName, channelUsername, quality);
   const ids = getEpisodeFileIds(ep, quality);
-  const primary = ids.chanel || ids.bot;
-  const fallback = ids.bot || ids.chanel;
-  if (!primary && !fallback) return;
-
+  if (!ids.chanel && !ids.bot) return;
   try {
-    await ctx.api.sendVideo(ctx.chat!.id, primary!, { caption, protect_content: true });
-    return;
-  } catch (e1) {
-    console.error(`sendArchivedEpisode primary failed (ep=${ep.rowid} q=${quality}):`, String(e1));
-  }
-  if (fallback && fallback !== primary) {
-    try {
-      await ctx.api.sendVideo(ctx.chat!.id, fallback, { caption, protect_content: true });
-    } catch (e2) {
-      console.error(`sendArchivedEpisode fallback failed (ep=${ep.rowid} q=${quality}):`, String(e2));
-    }
+    await sendParts(ctx, ids.chanel || ids.bot, ids.bot || ids.chanel, caption);
+  } catch (e) {
+    console.error(`sendArchivedEpisode failed (ep=${ep.rowid} q=${quality}):`, String(e));
   }
 }
 
@@ -269,27 +293,16 @@ async function sendPlayerEpisode(
   const caption = buildPlayerCaption(ep, info, animeName, channelUsername, stats, quality);
   const kb = buildPlayerKeyboard(ep, info, eps, page, section, stats, quality, allSeasons);
   const ids = getEpisodeFileIds(ep, quality);
-  const primary = ids.chanel || ids.bot;
-  const fallback = ids.bot || ids.chanel;
 
-  if (!primary && !fallback) {
+  if (!ids.chanel && !ids.bot) {
     await ctx.reply("❌ Bu qism uchun video topilmadi.").catch(() => {});
     return null;
   }
 
   try {
-    const msg = await ctx.api.sendVideo(ctx.chat!.id, primary!, { caption, reply_markup: kb, protect_content: true });
-    return msg.message_id;
+    return await sendParts(ctx, ids.chanel || ids.bot, ids.bot || ids.chanel, caption, kb);
   } catch (e1) {
-    console.error(`sendPlayerEpisode primary failed (ep=${ep.rowid} q=${quality} fileId=${primary}):`, String(e1));
-    if (fallback && fallback !== primary) {
-      try {
-        const msg = await ctx.api.sendVideo(ctx.chat!.id, fallback, { caption, reply_markup: kb, protect_content: true });
-        return msg.message_id;
-      } catch (e2) {
-        console.error(`sendPlayerEpisode fallback failed (ep=${ep.rowid} q=${quality} fileId=${fallback}):`, String(e2));
-      }
-    }
+    console.error(`sendPlayerEpisode failed (ep=${ep.rowid} q=${quality}):`, String(e1));
     await ctx.reply(
       `❌ Video yuborishda xato yuz berdi.\n\nXato: ${String(e1).slice(0, 200)}`
     ).catch(() => {});
@@ -745,6 +758,19 @@ export function setupPlayer(bot: Bot<MyContext>): void {
     const kb = buildPlayerKeyboard(ep, info, eps, page, section, stats, newQuality, allSeasons);
 
     await ctx.answerCallbackQuery(`✅ ${newQuality}`);
+
+    // Bir nechta qismli video (2 GB dan katta): joyida almashtirib bo'lmaydi — eski xabar o'chadi, qismlar qayta yuboriladi.
+    if (splitFileIds(fileId).length > 1 || splitFileIds(ids.bot).length > 1) {
+      try {
+        const newId = await sendParts(ctx, ids.chanel || ids.bot, ids.bot || ids.chanel, caption, kb);
+        await ctx.api.deleteMessage(ctx.chat!.id, msgId).catch(() => {});
+        ctx.session.playerMsgId = newId;
+        ctx.session.playerQuality = newQuality;
+      } catch (e) {
+        console.error("player:quality parts failed:", String(e));
+      }
+      return;
+    }
 
     // Video va captionni bir vaqtda almashtiramiz
     try {
