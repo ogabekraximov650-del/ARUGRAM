@@ -17,7 +17,14 @@ export const WORKFLOW = "anibla_bot.yml";
 // deno-lint-ignore no-explicit-any
 type Json = any;
 
-export interface AItem { s: string; t: string; m: string; y: number; e: number }
+export interface AItem {
+  s: string; t: string; m: string; y: number; e: number;
+  /** Muqova (poster) yo'li — `imgUrl()` bilan to'liq manzilga aylanadi. */
+  img: string;
+  /** Tanlanganda `describe()` to'ldiradi (tayyor HTML): ma'lumot va tavsif. */
+  info?: string;
+  about?: string;
+}
 export interface ASeason { slug: string; title: string }
 export interface AEpisode { slug: string; num: number; title: string }
 export interface AVariant { height: number; bandwidth: number; url: string; audio: string; audioName: string }
@@ -130,18 +137,157 @@ const jint = (v: Json, k: string): number => {
   return Number.isFinite(n) ? Math.trunc(n) : 0;
 };
 
-/** Nom bo'yicha qidiruv (loginsiz). */
-export async function search(q: string, limit = 30): Promise<AItem[]> {
-  const v = await get(`media/mobile?limit=${limit}&page=1&search=${enc(q)}`, false);
-  return dataList(v)
+/** Rasmlar (poster) anibla.uz'da EMAS, ortidagi serverda turadi (sayt JS: `NEXT_PUBLIC_API_BASE_URL`). */
+const IMG_BASE = "https://amediatv.up-it.uz";
+export function imgUrl(img: string): string {
+  const i = (img ?? "").trim();
+  if (!i) return "";
+  return /^https?:\/\//.test(i) ? i : `${IMG_BASE}/${i.replace(/^\/+/, "")}`;
+}
+
+export interface Listing { items: AItem[]; pages: number; total: number }
+
+/** Ro'yxat sahifasi: qidiruv (`q`) yoki bo'lim (`cat`: ID yoki `new`) yoki yil (`y:2026`). Sahifada 100 tadan. */
+export async function listing(q: string, cat: string, page: number): Promise<Listing> {
+  let path = `media/mobile?limit=100&page=${page}`;
+  if (q) path += `&search=${enc(q)}`;
+  else if (cat.startsWith("y:")) path += `&years=${enc(cat.slice(2))}`;
+  else if (cat && cat !== "new") path += `&categories=${enc(cat)}`;
+  const v = await get(path, false);
+  const items: AItem[] = dataList(v)
     .map((x) => ({
       s: String(x.slug ?? ""),
       t: titleOf(x),
       m: String(x.mediaType ?? ""),
       y: jint(x, "published_year"),
       e: jint(x, "available_episodes"),
+      img: String(x.thumbnail ?? "").replace(/^\/+/, ""),
     }))
     .filter((i) => i.s);
+  const pages = Math.max(1, jint(v?.pagination, "pages"));
+  const total = Math.max(jint(v?.pagination, "total"), items.length);
+  return { items, pages, total };
+}
+
+export interface Category { id: string; name: string }
+
+/** Saytdagi bo'limlar (`GET categories`): Ongoing, Hamma animelar, Anime filmlar, ... — saytdan olinadi. */
+export async function categories(): Promise<Category[]> {
+  try {
+    const v = await get("categories?sortBy=name.uz&sortDirection=-1", false);
+    const list: Json[] = Array.isArray(v?.data?.categories) ? v.data.categories : Array.isArray(v?.data) ? v.data : [];
+    return list
+      .filter((c) => c?.status !== false)
+      .map((c) => ({ id: String(c?._id ?? ""), name: String(c?.name?.uz ?? (typeof c?.name === "string" ? c.name : "")).trim() }))
+      .filter((c) => c.id && c.name);
+  } catch {
+    return [];
+  }
+}
+
+/** Saytdagi animelar yillar bo'yicha: [yil, soni], yangi yil tepada; 24 soat saqlanadi (xatoda eskisi ko'rsatiladi). */
+export async function yearCounts(): Promise<{ list: [number, number][]; why: string }> {
+  const TTL = 24 * 3600 * 1000;
+  const readCache = async (): Promise<{ at: number; l: [number, number][] } | null> => {
+    try {
+      const raw = await getSetting("anibla_years");
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  };
+  const c = await readCache();
+  if (c && Date.now() - (c.at ?? 0) < TTL && c.l?.length) return { list: c.l, why: "" };
+  let why = "";
+  const counts = new Map<number, number>();
+  for (let page = 1; page <= 4; page++) {
+    let v: Json;
+    try {
+      v = await get(`media/mobile?limit=500&page=${page}`, false);
+    } catch (e) {
+      why = e instanceof Error ? e.message : String(e);
+      break;
+    }
+    for (const x of dataList(v)) {
+      const y = jint(x, "published_year");
+      if (y > 0) counts.set(y, (counts.get(y) ?? 0) + 1);
+    }
+    if (page >= Math.max(1, jint(v?.pagination, "pages"))) break;
+  }
+  const list = [...counts.entries()].sort((a, b) => b[0] - a[0]);
+  if (list.length) {
+    await setSetting("anibla_years", JSON.stringify({ at: Date.now(), l: list })).catch(() => {});
+    return { list, why: "" };
+  }
+  if (c?.l?.length) return { list: c.l, why: "" };
+  return { list: [], why: why || "sayt ro'yxati bo'sh qaytdi" };
+}
+
+const escH = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const namesOf = (v: Json): string[] =>
+  Array.isArray(v)
+    ? v.map((x) => {
+        const n = x?.name;
+        return String(n?.uz ?? n?.ru ?? (typeof n === "string" ? n : "")).trim();
+      }).filter(Boolean)
+    : [];
+const numOf = (v: Json): number => {
+  const n = typeof v === "number" ? v : parseInt(String(v ?? "").trim(), 10);
+  return Number.isFinite(n) ? Math.trunc(n) : 0;
+};
+const DESC_MAX = 2600;
+
+/** Tanlangan anime/film haqida saytdagi TO'LIQ ma'lumot (tayyor HTML): `{info, about}`. */
+export async function describe(it: AItem): Promise<{ info: string; about: string }> {
+  let v: Json;
+  try {
+    v = await get(`${isMovie(it) ? "movies" : "series"}/${enc(it.s)}`, false);
+  } catch {
+    return { info: "", about: "" };
+  }
+  const d: Json = Array.isArray(v?.data) ? v.data[0] : v?.data;
+  const lines: string[] = [];
+  const add = (icon: string, key: string, val: string) => {
+    if (val.trim()) lines.push(`${icon} <b>${key}:</b> ${escH(val.trim())}`);
+  };
+  const alt = String(d?.ru?.title ?? "").trim();
+  if (alt && alt !== it.t) add("🔤", "Boshqa nomi", alt);
+  add("🌍", "Davlat", String(d?.country?.name?.uz ?? d?.country?.name?.ru ?? ""));
+  const year = numOf(d?.published_year);
+  if (year > 0) add("📅", "Yili", String(year));
+  add("🎭", "Janrlar", namesOf(d?.genres).join(", "));
+  add("🏢", "Studiya", String(d?.studio?.name ?? ""));
+  add("🎬", "Rejissyor", String(d?.director?.name ?? ""));
+  add("🎙", "Ovoz berganlar", namesOf(d?.creators).join(", "));
+  const age = numOf(d?.age);
+  if (age > 0) add("🔞", "Yosh chegarasi", `${age}+`);
+  if (isMovie(it)) {
+    const dur = numOf(d?.duration);
+    if (dur > 0) add("⏱", "Davomiyligi", `${dur} daqiqa`);
+  } else {
+    const total = numOf(d?.total_episodes);
+    let eps = "";
+    if (it.e > 0 && total > 0 && it.e !== total) eps = `${it.e} ta chiqqan / jami ${total} ta`;
+    else if (it.e > 0) eps = `${it.e} ta`;
+    else if (total > 0) eps = `${total} ta`;
+    add("📺", "Qismlar", eps);
+  }
+  if (d?.type === "paid") add("💰", "Turi", "Pullik");
+  else if (d?.type === "free") add("🆓", "Turi", "Bepul");
+  add("📂", "Bo'limlar", namesOf(d?.categories).filter((n) => !n.toLowerCase().startsWith("hamma")).join(", "));
+  let info = lines.join("\n");
+  const tr = String(d?.trailer ?? "").trim();
+  if (tr.startsWith("http")) {
+    const t = tr.replace("youtube.com/embed/", "youtu.be/").replace("www.youtu.be/", "youtu.be/");
+    info += `\n▶️ <a href="${escH(t)}">Treyler</a>`;
+  }
+  let about = "";
+  const desc = String(d?.uz?.description ?? "").trim() || String(d?.ru?.description ?? "").trim();
+  if (desc) {
+    const t = [...desc].slice(0, DESC_MAX).join("") + ([...desc].length > DESC_MAX ? "…" : "");
+    about = `📝 <b>Tavsif:</b>\n${escH(t)}`;
+  }
+  return { info, about };
 }
 
 export async function seasons(slug: string): Promise<ASeason[]> {
