@@ -49,6 +49,7 @@ import {
 } from "../anibla.ts";
 
 const EP_PAGE = 50;
+const MENU_TEXTS = new Set(["🔍 Anime izlash", "💰 Balans to'ldirish", "💳 Hisobim", "💎 Obuna olish"]);
 const DUP_WINDOW_MS = 8 * 60 * 60 * 1000;
 
 const BTN_NEW = "🆕 Oxirgi yuklanganlar";
@@ -698,7 +699,11 @@ export function setupAniblaAdd(bot: Bot<MyContext>): void {
 
     // Anibla rejimida yozilgan matn — qidiruv.
     if (ctx.session.state !== "waiting_anibla_query") return next();
-    if (text.startsWith("/")) return next();
+    // Buyruq (/start, /admin ...) yoki asosiy menyu tugmasi — Anibla rejimidan chiqiladi, odatdagidek ishlaydi.
+    if (text.startsWith("/") || MENU_TEXTS.has(text)) {
+      ctx.session.state = "idle";
+      return next();
+    }
     if (!isAdmin(ctx)) return next();
     const target = ctx.session.aniblaTarget;
     if (!target) {
