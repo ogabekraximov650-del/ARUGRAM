@@ -1,48 +1,20 @@
-name: Anibla -> aniraxuzbot (__Q__)
+name: Anibla -> aniraxuzbot (bitta qism)
 
-# aniraxuzbot ("➕ Yangi qism qo'shish" -> "🌐 Anibla orqali"): har bir sifat uchun ALOHIDA workflow fayli
-# (`anibla_bot_1080p.yml`, `anibla_bot_720p.yml`, `anibla_bot_480p.yml`, `anibla_bot_360p.yml`) — hammasi shu shablondan
-# `tool/packs/sync_repo.py` tomonidan yaratiladi (`__Q__` o'rniga sifat qo'yiladi). Shu workflow'ning run'i bitta sifatni
-# yuklaydi, 2 GB dan katta bo'lsa qayta kodlamasdan aniq o'lchab qismlarga bo'ladi va botga yuboradi (`tool/anibla/bot_download.py`).
-# Bot videoni yopiq kanalga saqlab, `file_id` ni bazaga yozadi. Run tugagach o'chadi (navbat yo'q, har sifat — bitta run).
+# aniraxuzbot ("➕ Yangi qism qo'shish" -> "🌐 Anibla orqali"): BITTA Actions run = BITTA to'liq qism. Bir vaqtda faqat bitta run ishlaydi.
+# Run ishga tushgach botdan navbatdagi ENG ESKI qismning hamma sifatini oladi va 360p dan boshlab birin-ketin tayyorlaydi
+# (`tool/anibla/bot_download.py`): yuklaydi, 2 GB dan kattasini aniq o'lchab qismlarga bo'ladi, har tayyor faylni R2'ga yozadi.
+# R2 yuklovchisi (`upload.yml`, qo'shimcha akkauntlar) R2'dan olib BOTGA yuboradi; bot kanalga saqlab bazaga yozadi.
+# Run'ni bot o'zi ishga tushiradi (`workflow_dispatch`, kirish parametrlarisiz).
 #
 # Bu fayl ARUMEDIATV repodagi `tool/anibla/anibla_bot.workflow.yml` dan ko'chiriladi (`sync-packs.yml`) — shu yerda o'zgartirmang.
 
 on:
   workflow_dispatch:
-    inputs:
-      job:
-        description: "Bot ish raqami"
-        required: true
-      token:
-        description: "Bot ish tokeni"
-        required: true
-      bot:
-        description: "Bot username (@siz)"
-        required: true
-      quality:
-        description: "Sifat (1080p/720p/480p/360p)"
-        required: true
-      video:
-        description: "HLS video playlist manzili"
-        required: true
-      audio:
-        description: "Alohida ovoz playlisti (ixtiyoriy)"
-        required: false
-        default: ''
-      name:
-        description: "Fayl nomi"
-        required: false
-        default: ''
-      api:
-        description: "Bot worker manzili (jonli holat uchun)"
-        required: false
-        default: ''
 
-run-name: "Anibla #${{ inputs.job }} · ${{ inputs.quality }}"
+run-name: "Anibla · bitta qism (navbat)"
 
 concurrency:
-  group: aniraxuzbot-anibla-__Q__-${{ inputs.job }}
+  group: aniraxuzbot-anibla
   cancel-in-progress: false
 
 permissions:
@@ -53,9 +25,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 355
     steps:
-      - name: Maxfiylarni yashirish
-        run: echo "::add-mask::${{ inputs.token }}"
-
       - uses: actions/checkout@v4
 
       - name: ffmpeg
@@ -68,65 +37,17 @@ jobs:
       - name: Python paketlari
         run: pip install --no-cache-dir -r tool/encode/requirements.txt
 
-      - name: Telegram sessiyalari (qo'shimcha akkauntlar)
-        env:
-          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
-        run: |
-          # ASOSIY akkaunt ishlatilmaydi: faqat botdagi "🗂 Yuklovchi sessiyalar" (tool/encode/pool/*.enc).
-          K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
-          N=0
-          for F in tool/encode/pool/*.enc; do
-            [ -f "$F" ] || continue
-            P="tool/anibla/pool_$(basename "$F" .enc).session"
-            if K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in "$F" -out "$P" && head -c 16 "$P" | grep -q "SQLite format 3"; then
-              echo "sessiya: $F"; N=$((N+1))
-            else
-              rm -f "$P"; echo "::warning::$F ochilmadi"
-            fi
-          done
-          [ "$N" -gt 0 ] || { echo "::error::Qo'shimcha sessiya yo'q — panel botda 'Yuklovchi sessiyalar' orqali qo'shing"; exit 1; }
-          # ASOSIY akkaunt (session.enc) ID'si: u pool ichida bo'lsa ham ishlatilmasin (bot_download.py o'tkazib yuboradi).
-          MAIN_UID=""
-          if K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in tool/encode/session.enc -out /tmp/main_probe.session 2>/dev/null; then
-            MAIN_UID=$(python3 -c "import sqlite3;c=sqlite3.connect('file:/tmp/main_probe.session?mode=ro',uri=True);print(int(c.execute('SELECT user_id FROM sessions').fetchone()[0] or 0))" 2>/dev/null || true)
-          fi
-          rm -f /tmp/main_probe.session
-          echo "MAIN_UID=${MAIN_UID:-0}" >> "$GITHUB_ENV"
-          echo "asosiy akkaunt ID: ${MAIN_UID:-aniqlanmadi}"
-
       - name: Katta fayllar uchun joy (/mnt dagi katta disk)
         run: |
           sudo mkdir -p /mnt/anibla && sudo chown "$USER" /mnt/anibla
           df -h /mnt/anibla | tail -1
 
-      - name: Yuklash, kerak bo'lsa bo'lish va botga yuborish
+      - name: Qismni tayyorlash va R2'ga yozish
         env:
+          API: https://aniraxuzbot.uzcom.workers.dev
+          RUN_KEY: ${{ secrets.ENCODE_TOKEN }}
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+          API_BASE: ${{ secrets.API_BASE || 'https://arumediatv.uzcom.workers.dev' }}
           WORK_ROOT: /mnt/anibla
-          JOB: ${{ inputs.job }}
-          TOKEN: ${{ inputs.token }}
-          BOT: ${{ inputs.bot }}
-          QUALITY: ${{ inputs.quality }}
-          VIDEO: ${{ inputs.video }}
-          AUDIO: ${{ inputs.audio }}
-          NAME: ${{ inputs.name }}
-          API: ${{ inputs.api }}
-          TG_API_ID: ${{ secrets.TG_API_ID }}
-          TG_API_HASH: ${{ secrets.TG_API_HASH }}
           PYTHONUNBUFFERED: '1'
         run: python3 tool/anibla/bot_download.py
-
-      - name: Xatoni botga bildirish
-        if: failure()
-        env:
-          JOB: ${{ inputs.job }}
-          TOKEN: ${{ inputs.token }}
-          API: ${{ inputs.api }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          [ -n "$API" ] || exit 0
-          curl -sS -m 20 -X POST "${API%/}/anibla/fail" -H 'Content-Type: application/json' \
-            -d "{\"job\": ${JOB}, \"token\": \"${TOKEN}\", \"error\": \"Actions run yiqildi: ${RUN_URL}\"}" || true
-
-      - name: Sessiyani o'chirish
-        if: always()
-        run: rm -f tool/anibla/pool_*.session

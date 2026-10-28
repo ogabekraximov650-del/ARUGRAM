@@ -12,7 +12,7 @@ import { createBot } from "./bot.ts";
 import { createTable } from "./db.ts";
 import { config } from "./config.ts";
 import { processPostQueue } from "./queue_processor.ts";
-import { aniblaPush, aniblaRunFailed, aniblaTick } from "./handlers/anibla_add.ts";
+import { aniblaClaim, aniblaPush, aniblaR2Done, aniblaRunFailed, aniblaTick } from "./handlers/anibla_add.ts";
 import { d1Run, d1Update } from "./db_d1.ts";
 import { initD1Bindings, ensureD1Tables, pingD1, type D1Env } from "./db_d1.ts";
 import { createSessionTable } from "./db_sessions.ts";
@@ -28,6 +28,7 @@ function applyEnv(env: CfEnv) {
   if (env.ANIBLA_CREDS)       config.ANIBLA_CREDS       = env.ANIBLA_CREDS as string;
   if (env.GH_ACTIONS_TOKEN)   config.GH_ACTIONS_TOKEN   = env.GH_ACTIONS_TOKEN as string;
   if (env.GH_REPO)            config.GH_REPO            = env.GH_REPO as string;
+  if (env.RUN_KEY)            config.RUN_KEY            = env.RUN_KEY as string;
   if (env.TEZCHECK_TOKEN)     config.TEZCHECK_TOKEN     = env.TEZCHECK_TOKEN as string;
   if (env.TEZCHECK_DESK)      config.TEZCHECK_DESK      = env.TEZCHECK_DESK as string;
   if (env.TEZCHECK_API_KEY)   config.TEZCHECK_API_KEY   = env.TEZCHECK_API_KEY as string;
@@ -114,6 +115,40 @@ app.post("/anibla/progress", async (c) => {
     return c.json(retry ? { ok: false, retry_after: retry } : { ok: true });
   } catch (e) {
     console.error("anibla/progress:", e);
+    return c.json({ ok: false }, 500);
+  }
+});
+
+// ── Actions run'i navbatdagi ENG ESKI qismning hamma sifatini oladi (RUN_KEY bilan) ──
+app.post("/anibla/claim", async (c) => {
+  const key = c.req.header("x-run-key") ?? "";
+  if (!config.RUN_KEY || key !== config.RUN_KEY) return c.json({ ok: false }, 403);
+  try {
+    await ensureReady();
+    const r = await aniblaClaim();
+    return c.json(r ? { ok: true, jobs: r.jobs, bot: r.bot } : { ok: true, jobs: [] });
+  } catch (e) {
+    console.error("anibla/claim:", e);
+    return c.json({ ok: false }, 500);
+  }
+});
+
+// ── Sifat R2'ga to'liq yozildi: ish 'sending' bo'ladi, keyingi run ochilishi mumkin ──
+app.post("/anibla/r2done", async (c) => {
+  let b: { job?: number; token?: string };
+  try {
+    b = await c.req.json();
+  } catch {
+    return c.json({ ok: false }, 400);
+  }
+  const job = Number(b.job);
+  const token = String(b.token ?? "");
+  if (!job || !/^[a-f0-9]{32}$/.test(token)) return c.json({ ok: false }, 400);
+  try {
+    await ensureReady();
+    return c.json({ ok: await aniblaR2Done(job, token) });
+  } catch (e) {
+    console.error("anibla/r2done:", e);
     return c.json({ ok: false }, 500);
   }
 });

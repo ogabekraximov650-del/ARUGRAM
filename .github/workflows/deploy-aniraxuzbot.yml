@@ -73,6 +73,9 @@ jobs:
           printf '%s' "$TURSO_URL" | npx wrangler secret put TURSO_URL >/dev/null
           printf '%s' "$TURSO_TOKEN" | npx wrangler secret put TURSO_TOKEN >/dev/null
           echo "✅ TURSO_URL / TURSO_TOKEN o'rnatildi"
+          # Actions run'i `/anibla/claim` da shu kalit bilan tasdiqlanadi (= ENCODE_TOKEN).
+          printf '%s' "$K" | npx wrangler secret put RUN_KEY >/dev/null
+          echo "✅ RUN_KEY o'rnatildi"
           # To'lov kalitlari: ilova bilan BIR XIL tezcheck kassasi (GitHub Secrets'dagi `TEZCHECK_TOKEN` / `TEZCHECK_DESK`).
           if [ -n "$TEZCHECK_TOKEN" ] && [ -n "$TEZCHECK_DESK" ]; then
             printf '%s' "$TEZCHECK_TOKEN" | npx wrangler secret put TEZCHECK_TOKEN >/dev/null

@@ -11,6 +11,8 @@ export const config = {
   ANIBLA_CREDS: process.env.ANIBLA_CREDS ?? "",
   GH_ACTIONS_TOKEN: process.env.GH_ACTIONS_TOKEN ?? "",
   GH_REPO: process.env.GH_REPO ?? "",
+  /** Actions run'i `/anibla/claim` da shu kalit bilan tasdiqlanadi (= ENCODE_TOKEN; deploy secret qo'yadi). */
+  RUN_KEY: process.env.RUN_KEY ?? "",
   TEZCHECK_TOKEN: process.env.TEZCHECK_TOKEN ?? "",
   TEZCHECK_DESK: process.env.TEZCHECK_DESK ?? "",
   TEZCHECK_API_KEY: process.env.TEZCHECK_API_KEY ?? "",

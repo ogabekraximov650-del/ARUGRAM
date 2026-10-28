@@ -494,6 +494,21 @@ async def one(app, job: dict):
         shutil.rmtree(WORK, ignore_errors=True)
 
 
+RAW_STARTED: set = set()
+
+
+async def start_raw_bot(bot_user: str):
+    """Bot shu akkauntlardan fayl qabul qilishi uchun har akkaunt botni bir marta ochadi (/start) — har run'da bir marta."""
+    if bot_user in RAW_STARTED:
+        return
+    RAW_STARTED.add(bot_user)
+    for c in POOL:
+        try:
+            await c.send_message(bot_user, "/start")
+        except Exception as ex:  # noqa: BLE001
+            log(f"  {bot_user} ga /start yuborilmadi ({getattr(c, 'my_uid', '?')}): {ex}")
+
+
 async def one_deliver(app, job: dict):
     """Post/Anibla/To'plam fayli: R2'dan olinadi, `dest` bo'yicha yuboriladi, qaytarish yo'li chaqiriladi, R2'dan o'chadi."""
     name, size, dest = job["file"], int(job["size"]), job.get("dest") or {}
@@ -525,6 +540,12 @@ async def one_deliver(app, job: dict):
             if not mid:
                 raise RuntimeError(f"bot {COMMIT_WAIT} soniyada faylni kanalga ko'chirmadi (bot kanalda adminmi?)")
             msg = SimpleNamespace(id=mid)
+        elif dest.get("raw_bot"):
+            # aniraxuzbot (Anibla): fayl to'g'ridan-to'g'ri o'sha botga yuboriladi (izoh `ANIBLA:<ish>:<token>[:i/n]`), qo'shimcha
+            # akkauntlar bilan (asosiy akkaunt ishlatilmaydi). Bot o'zi kanalga saqlaydi — qaytarish yo'li/`dmsg` kerak emas.
+            bot_user = str(dest["raw_bot"]).lstrip("@")
+            await start_raw_bot(bot_user)
+            msg = await send_dest(app, dest, path, name, to_override=bot_user)
         elif dest.get("fallback_bot"):
             # Post: asosiy akkaunt yubora olmagan. Avval panel bot (userga va adminga), u ham bo'lmasa qo'shimcha sessiyalar.
             try:

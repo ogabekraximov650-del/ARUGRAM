@@ -14,7 +14,6 @@ import json
 import os
 import subprocess
 import sys
-import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -49,16 +48,10 @@ for _src in sorted((HERE.parent / "translate").iterdir()):
 # `creds.enc` KO'CHIRILMAYDI: login/parol faqat worker'da (ANIBLA_CREDS).
 FILES[".github/workflows/anibla.yml"] = HERE.parent / "anibla" / "anibla.workflow.yml"
 FILES["tool/anibla/download.py"] = HERE.parent / "anibla" / "download.py"
-# aniraxuzbot: har bir sifat uchun ALOHIDA workflow (`anibla_bot_<sifat>.yml`) — bitta shablondan yaratiladi.
-ANIBLA_QUALITIES = ("1080p", "720p", "480p", "360p")
-_gen = Path(tempfile.mkdtemp(prefix="anibla_wf_"))
-_tpl = (HERE.parent / "anibla" / "anibla_bot.workflow.yml").read_text(encoding="utf-8")
-for _q in ANIBLA_QUALITIES:
-    _f = _gen / f"anibla_bot_{_q}.yml"
-    _f.write_text(_tpl.replace("__Q__", _q), encoding="utf-8")
-    FILES[f".github/workflows/anibla_bot_{_q}.yml"] = _f
-# Eski umumiy workflow: run'lari to'xtatilib o'chiriladi, fayli olib tashlanadi (bir martalik, keyin hech narsa topilmaydi).
-OLD_WORKFLOWS = ("anibla_bot.yml",)
+# aniraxuzbot: BITTA workflow (`anibla_bot.yml`) — bitta run = bitta to'liq qism (sifatlar 360p dan ketma-ket), R2 orqali.
+FILES[".github/workflows/anibla_bot.yml"] = HERE.parent / "anibla" / "anibla_bot.workflow.yml"
+# Eski per-sifat workflow'lar: run'lari to'xtatilib o'chiriladi, fayllari olib tashlanadi (bir martalik, keyin hech narsa topilmaydi).
+OLD_WORKFLOWS = tuple(f"anibla_bot_{_q}.yml" for _q in ("1080p", "720p", "480p", "360p"))
 FILES["tool/anibla/bot_download.py"] = HERE.parent / "anibla" / "bot_download.py"
 # Mini App pleyeri uchun eski qismlarning fMP4 nusxasi — ALOHIDA workflow `fmp4.yml`.
 FILES[".github/workflows/fmp4.yml"] = HERE.parent / "fmp4" / "fmp4.workflow.yml"

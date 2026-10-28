@@ -6814,3 +6814,16 @@ tashqi dekodersiz, sof Rustda chizilsin; server/Actions'siz, telefonning o'zida.
 - **Sessiya:** o'zgarmagan sessiya bazaga qayta yozilmaydi (Turso yozuvlari pul turadi); 30 kundan eskilari soatda bir marta tozalanadi.
 - **Kesh:** kontent jadvallari (anime/fasl/qism, kanal, havola) o'qishi 10 daqiqa keshlanadi; yozuvda tozalanadi; isolate'lar orasida `bot_settings.content_ver`.
 - **Eslatma:** Turso Tokiyoda — har so'rov D1'dan sekinroq (~150 ms); shu sabab batch/kesh muhim.
+
+## aniraxuzbot: Anibla — bitta run = bitta qism, sifatlar 360p dan, R2 orqali (2026-10-28)
+
+- **Tartib:** bir vaqtda faqat BITTA Actions run (`anibla_bot.yml`, concurrency `aniraxuzbot-anibla`). Run ishga tushganda botdan `POST /anibla/claim`
+  (`X-Run-Key` = ENCODE_TOKEN, worker secret `RUN_KEY`) bilan navbatdagi ENG ESKI qismning hamma sifatini oladi va 360p -> 480p -> 720p -> 1080p
+  tartibida birin-ketin tayyorlaydi. Run hamma sifatdan keyin tugaydi; keyingi run'ni bot (`dispatchAll`, cron har daqiqa + hodisalar) ochadi.
+- **Yetkazish:** run telegramga yubormaydi — har tayyor fayl (yoki 2 GB dan kattasining har qismi) R2'ga yoziladi (`tool/upload/r2client.py`, ARUMEDIATV worker'ining
+  R2 API'si — worker kodi o'zgarmadi). R2 yuklovchisi (`upload.yml`, qo'shimcha akkauntlar, asosiy akkauntsiz) `dest.raw_bot` bo'yicha faylni to'g'ridan-to'g'ri
+  @aniraxuzbot'ga yuboradi (izoh `ANIBLA:<ish>:<token>[:i/n]`); bot kanalga saqlab Turso'ga yozadi (oldingi mantiq).
+- **Ish holatlari:** `waiting` (navbat) -> `queued` (run oldi) -> `sending` (R2'ga to'liq yozildi, `POST /anibla/r2done`) -> `saving` -> o'chadi. Run tugamagan
+  (15/30 daqiqa jim) bo'lsa `queued` ishlar xatoga o'tadi; `sending` 12 soatda botga yetmasa xato.
+- **Fayllar:** `tool/anibla/bot_download.py` (qayta yozildi, Telegram sessiyasiz), `tool/anibla/anibla_bot.workflow.yml` (bitta workflow),
+  `tool/upload/upload.py` (`raw_bot`), `tool/packs/sync_repo.py` (eski per-sifat workflow'lar o'chiriladi), `aniraxuzbot15/bot/src/handlers/anibla_add.ts`, `worker.ts`.

@@ -1,19 +1,18 @@
 #!/usr/bin/env python3
-"""aniraxuzbot: anibla.uz videosini (BITTA sifat — BITTA run) yuklab, kerak bo'lsa qismlarga bo'lib, botga yuboradi.
+"""aniraxuzbot: Anibla — BITTA run = BITTA to'liq qism (hamma sifat), sifatlar 360p dan boshlab ketma-ket.
 
-Bot (`aniraxuzbot15/bot`, "➕ Yangi qism qo'shish" -> "🌐 Anibla orqali") har bir sifat uchun alohida `workflow_dispatch`
-qiladi (`anibla_bot_<sifat>.yml`). Bu skript:
-  1. HLS ni qayta kodlamasdan mp4 ga yig'adi (`download.py` dagi tez parallel yuklash);
-  2. fayl 2 GB dan katta bo'lsa — QAYTA KODLAMASDAN ANIQ O'LCHANIB `LIMIT` dan oshmaydigan qismlarga bo'linadi (`split_file`):
-     har qism alohida ochiladigan mp4, `moov` atomi boshida (faststart), kalit kadrdan kesiladi;
-  3. Telegram akkaunti (sessiya) orqali videoni BOTGA yuboradi; izoh: `ANIBLA:<ish>:<token>` (qismlarga bo'lingan bo'lsa
-     `ANIBLA:<ish>:<token>:<i>/<n>`). Bot uni yopiq kanalga saqlaydi, kanaldagi `file_id` ni (qismlar bo'lsa vergul bilan) bazaga yozadi.
-Xato bo'lsa botga `ANIBLA_FAIL:<ish>:<token>:<sabab>` xabari yuboriladi (admin chatida ko'rinadi).
+Bot (`aniraxuzbot15/bot`) navbatga qo'yilgan ishlarni saqlaydi. Bu run (`anibla_bot.yml`, bir vaqtda faqat bitta) ishga tushganda:
+  1. botdan `POST /anibla/claim` bilan navbatdagi ENG ESKI qismning barcha sifatlarini oladi (360p, 480p, 720p, 1080p tartibida);
+  2. har sifatni birin-ketin: HLS ni qayta kodlamasdan mp4 ga yig'adi (`download.py`); 2 GB dan katta bo'lsa — QAYTA KODLAMASDAN aniq o'lchab
+     qismlarga bo'ladi (`split_file`: har qism alohida ochiladi, `moov` boshida);
+  3. tayyor faylni (qismni) R2'ga yozadi (`tool/upload/r2client.py`); R2 yuklovchisi (`upload.yml`, qo'shimcha akkauntlar, asosiy akkauntsiz)
+     uni R2'dan olib BOTGA yuboradi (izoh: `ANIBLA:<ish>:<token>` yoki `ANIBLA:<ish>:<token>:<i>/<n>`); bot kanalga saqlab bazaga yozadi;
+  4. sifat R2'ga to'liq yozilgach botga `POST /anibla/r2done` — keyingi sifatga o'tadi. Run hamma sifatdan keyin tugaydi.
+Xato bo'lgan sifat `POST /anibla/fail` bilan botga xabar qilinadi va run keyingi sifatga o'tadi.
 
-Muhit: JOB, TOKEN, BOT, QUALITY, VIDEO, AUDIO, NAME; TG_API_ID, TG_API_HASH; sessiyalar `tool/anibla/pool_*.session`
-(qo'shimcha akkauntlar; ASOSIY akkaunt ishlatilmaydi).
+Muhit: API (bot worker manzili), RUN_KEY (= ENCODE_TOKEN), API_BASE (R2 worker), ENCODE_TOKEN.
 """
-import asyncio
+import base64
 import json
 import os
 import shutil
@@ -21,29 +20,25 @@ import subprocess
 import sys
 import threading
 import time
-import types
 import urllib.request
 from collections import deque
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-import download as dl  # noqa: E402  (tez yuklash va Telegram'ga yuklash funksiyalari)
+sys.path.insert(0, str(HERE.parent / "upload"))
+import download as dl  # noqa: E402  (tez yuklash)
+import r2client  # noqa: E402  (R2'ga yozish)
 
 # Telegram oddiy akkaunt chegarasi 2000 MiB; zaxra bilan 2 000 000 000 bayt.
 LIMIT = int(os.environ.get("MAX_BYTES", "2000000000"))
-
-JOB = os.environ["JOB"].strip()
-TOKEN = os.environ["TOKEN"].strip()
-BOT = os.environ["BOT"].strip().lstrip("@")
-QUALITY = os.environ.get("QUALITY", "").strip()
-VIDEO = os.environ["VIDEO"].strip()
-AUDIO = os.environ.get("AUDIO", "").strip()
-NAME = os.environ.get("NAME", "").strip() or f"video_{JOB}"
-# Botdagi "📊 Holat" tugmasi uchun jonli holat shu manzilga yuboriladi (`/anibla/progress`).
 API = os.environ.get("API", "").strip().rstrip("/")
+RUN_KEY = os.environ.get("RUN_KEY", "").strip()
+API_BASE = os.environ.get("API_BASE", "").strip().rstrip("/")
+ENCODE_TOKEN = "".join(os.environ.get("ENCODE_TOKEN", "").split())
 LIVE_SEC = float(os.environ.get("LIVE_SEC", "5"))
 LOG_LINES = int(os.environ.get("LOG_LINES", "5"))
+RUNNER = f"anibla-{os.environ.get('GITHUB_RUN_ID', 'local')}"
 
 log = dl.log
 
@@ -52,11 +47,22 @@ class Fatal(Exception):
     """Qayta urinishdan foyda yo'q."""
 
 
-class BotLive:
-    """Botdagi "📊 Holat" uchun jonli holat: bosqich, foiz, tezlik, oxirgi log qatorlari. Alohida oqim har `LIVE_SEC` soniyada
-    `/anibla/progress` ga yuboradi (`download.py` dagi `Live` kabi, lekin ARUMEDIATV workeriga emas, botga). Xatosi ishga tegmaydi."""
+def bot_api(path, body, key=False):
+    """Bot workeriga POST (JSON). `key` — claim uchun RUN_KEY sarlavhasi."""
+    h = {"Content-Type": "application/json", "User-Agent": "aniraxuzbot-anibla"}
+    if key:
+        h["X-Run-Key"] = RUN_KEY
+    req = urllib.request.Request(f"{API}{path}", method="POST", data=json.dumps(body).encode(), headers=h)
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.loads(r.read() or b"{}")
 
-    def __init__(self):
+
+class BotLive:
+    """Botdagi "📊 Holat" uchun jonli holat (bitta sifat): bosqich, foiz, tezlik, oxirgi log qatorlari. Alohida oqim har `LIVE_SEC`
+    soniyada `/anibla/progress` ga yuboradi (Telegram cheklasa — `retry_after`). Xatosi ishga tegmaydi."""
+
+    def __init__(self, job, token):
+        self.job, self.token = int(job), token
         self.steps = []
         self.logs = deque(maxlen=LOG_LINES)
         self.line = "⏳ boshlanmoqda..."
@@ -101,12 +107,8 @@ class BotLive:
         if text == self.sent:
             return
         try:
-            req = urllib.request.Request(
-                f"{API}/anibla/progress", method="POST",
-                data=json.dumps({"job": int(JOB), "token": TOKEN, "text": text}).encode(),
-                headers={"Content-Type": "application/json", "User-Agent": "aniraxuzbot-anibla"})
-            r = json.loads(urllib.request.urlopen(req, timeout=20).read() or b"{}")
-            wait = int(r.get("retry_after") or 0)  # Telegram cheklasa — bot aytgan soniya kutiladi (panel botdagidek)
+            r = bot_api("/anibla/progress", {"job": self.job, "token": self.token, "text": text})
+            wait = int(r.get("retry_after") or 0)  # Telegram cheklasa — bot aytgan soniya kutiladi
             if wait:
                 self.pause_until = time.time() + wait
             else:
@@ -123,22 +125,6 @@ class BotLive:
         self._push()
         if dl.LIVE is self:
             dl.LIVE = None
-
-    def transfer(self, kind):
-        t0 = time.time()
-        state = {"log": 0.0}
-
-        def cb(cur, total):
-            now = time.time()
-            pct = cur * 100 / total if total else 0
-            sp = cur / max(now - t0, 0.1) / 1048576
-            eta = (total - cur) / 1048576 / sp if sp > 0 and total else 0
-            self.send(f"{kind}\n{dl.bar(pct)} {pct:.1f}%\ntezlik {sp:.2f} MB/s\n"
-                      f"hajm {cur / 1048576:.0f} / {total / 1048576:.0f} MB · qoldi ~{dl.hms(eta)}")
-            if now - state["log"] >= 15 or cur >= total:
-                state["log"] = now
-                log(f"Telegram'ga {pct:.1f}% · {cur / 1048576:.0f}/{total / 1048576:.0f} MB · {sp:.2f} MB/s")
-        return cb
 
 
 def mb(n):
@@ -205,150 +191,97 @@ def split_file(src, work, live=None):
     raise Fatal(f"{mb(LIMIT)} dan oshmaydigan qismlarga bo'lib bo'lmadi")
 
 
-async def run(pool):
-    work = Path(os.environ.get("WORK_ROOT") or os.environ.get("RUNNER_TEMP", "/tmp")) / f"anibla_bot_{JOB}"
+def safe_name(job, token, i, n):
+    """R2 fayl nomi: faqat [A-Za-z0-9._-], noyob."""
+    return f"anibla_{job}_{token[:8]}_{i}of{n}_{int(time.time())}.mp4"
+
+
+def make_thumb(f, thumb):
+    for ss in ("10", "0"):  # qism 10 soniyadan qisqa bo'lsa
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-ss", ss, "-i", str(f), "-frames:v", "1",
+                        "-vf", "scale='min(320,iw)':-2", "-q:v", "5", str(thumb)])
+        if thumb.exists() and thumb.stat().st_size > 0:
+            return
+
+
+def process_job(j, bot, root):
+    """Bitta sifat: yuklash -> (kerak bo'lsa) bo'lish -> har qismni R2'ga yozish -> botga `r2done`."""
+    job, token, quality, name = int(j["job"]), j["token"], j["quality"], j["name"]
+    live = BotLive(job, token)
+    work = root / f"job_{job}"
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir(parents=True)
     dl.WORK = work
-    out = work / "video.mp4"
-    thumb = work / "thumb.jpg"
-    live = BotLive()
+    out, thumb = work / "video.mp4", work / "thumb.jpg"
     try:
-        log(f"#{JOB}: {NAME} ({QUALITY})")
-        url = VIDEO + (("\n" + AUDIO) if AUDIO else "")
-        el = await asyncio.to_thread(dl.download, url, out, live)
+        log(f"#{job}: {name} ({quality})")
+        url = j["video"] + (("\n" + j["audio"]) if j.get("audio") else "")
+        el = dl.download(url, out, live)
         size = out.stat().st_size
         w, h, dur = dl.ffprobe(out, "width", "v:0"), dl.ffprobe(out, "height", "v:0"), dl.ffprobe(out, "duration")
         log(f"yuklab olindi: {mb(size)} · {w or '?'}x{h or '?'} · {dl.hms(dur or 0)} · {dl.hms(el)} da")
         live.done(f"Yuklab olindi: {mb(size)} · {w or '?'}x{h or '?'} · {dl.hms(dur or 0)} · {dl.hms(el)} da")
-        files = await asyncio.to_thread(split_file, out, work, live) if size > LIMIT else [out]
+        files = split_file(out, work, live) if size > LIMIT else [out]
         total = len(files)
         if total > 1:
             out.unlink(missing_ok=True)  # joy bo'shatiladi: faqat qismlar qoladi
             live.done(f"{total} qismga bo'lindi: " + " + ".join(mb(f.stat().st_size) for f in files))
         for i, f in enumerate(files, 1):
-            subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-ss", "10", "-i", str(f), "-frames:v", "1",
-                            "-vf", "scale='min(320,iw)':-2", "-q:v", "5", str(thumb)])
-            if not thumb.exists() or thumb.stat().st_size == 0:  # qism 10 soniyadan qisqa bo'lsa
-                subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(f), "-frames:v", "1",
-                                "-vf", "scale='min(320,iw)':-2", "-q:v", "5", str(thumb)])
             tag = f":{i}/{total}" if total > 1 else ""
-            fname = f"{NAME} ({i}-{total})" if total > 1 else NAME
-            job = types.SimpleNamespace(channel=BOT, caption=f"ANIBLA:{JOB}:{TOKEN}{tag}", file_name=fname[:90] or f"video_{JOB}")
-            log(f"botga yuboriladi: @{BOT} ({mb(f.stat().st_size)}){f' · qism {i}/{total}' if total > 1 else ''}")
+            make_thumb(f, thumb)
+            fw, fh, fd = dl.ffprobe(f, "width", "v:0"), dl.ffprobe(f, "height", "v:0"), dl.ffprobe(f, "duration")
+            fname = f"{name} ({i}-{total})" if total > 1 else name
+            # `to` — R2 worker talabi (butun son); haqiqiy qabul qiluvchi `raw_bot` (yuklovchi qo'shimcha akkauntlar bilan yuboradi).
+            dest = {"mode": "video", "to": 1, "raw_bot": bot, "caption": f"ANIBLA:{job}:{token}{tag}",
+                    "file_name": f"{fname[:90]}.mp4", "supports_streaming": True, "disable_notification": True,
+                    **{k: v for k, v in (("duration", fd), ("width", fw), ("height", fh)) if v}}
+            if thumb.exists() and 0 < thumb.stat().st_size < 200_000:
+                dest["thumb_b64"] = base64.b64encode(thumb.read_bytes()).decode()
+            live.send(f"📦 R2'ga yozilmoqda{f' (qism {i}/{total})' if total > 1 else ''}: {mb(f.stat().st_size)}", force=True)
             t_up = time.time()
-            await pool.upload(job, f, thumb, live)
-            live.done(f"Botga yuborildi{f' · qism {i}/{total}' if total > 1 else ''} · {dl.hms(time.time() - t_up)}")
+            ok = r2client.deliver(API_BASE, ENCODE_TOKEN, f, safe_name(job, token, i, total), dest, log, "aniraxuzbot-anibla")
+            if not ok:
+                raise RuntimeError("R2 ishlamadi (R2'ga yozib bo'lmadi)")
+            live.done(f"R2'ga yozildi{f' · qism {i}/{total}' if total > 1 else ''} · {dl.hms(time.time() - t_up)}")
+            f.unlink(missing_ok=True)
             thumb.unlink(missing_ok=True)
-        live.send("✅ Tayyor — bot kanalga saqlaydi", force=True)
+        bot_api("/anibla/r2done", {"job": job, "token": token, "parts": total})
+        live.send("📤 R2'da — yuklovchi botga yuboradi", force=True)
         live.close()
-        shutil.rmtree(work, ignore_errors=True)
     except Exception as e:  # noqa: BLE001
+        log(f"#{job} XATO: {e}")
         live.send(f"❌ Xato: {str(e)[:200]}", force=True)
         live.close()
-        raise
-
-
-class Pool:
-    """Qo'shimcha Telegram akkauntlari (botdagi "🗂 Yuklovchi sessiyalar", `tool/encode/pool/*.enc`). ASOSIY akkaunt ishlatilmaydi.
-    Ish raqamiga qarab boshlang'ich akkaunt tanlanadi (yuk taqsimlanadi); yuborish xato bersa (FloodWait va h.k.) — keyingisi."""
-
-    def __init__(self, clients):
-        self.clients = clients
-        self.started = []
-
-    def order(self):
-        n = len(self.clients)
-        k = int(JOB) % n if n else 0
-        return self.clients[k:] + self.clients[:k]
-
-    async def _start(self, c):
-        if c not in self.started:
-            await c.start()
-            me = await c.get_me()
-            if MAIN_UID and me.id == MAIN_UID:  # ASOSIY akkaunt hech qachon ishlatilmaydi
-                await c.stop()
-                self.clients = [x for x in self.clients if x is not c]
-                raise RuntimeError("bu ASOSIY akkaunt — ishlatilmaydi")
-            self.started.append(c)
-
-    async def upload(self, job, f, thumb, live):
-        last = None
-        for c in self.order():
-            try:
-                await self._start(c)
-                log(f"akkaunt: {c.name}")
-                return await dl.upload(c, job, f, thumb, live)
-            except Exception as e:  # noqa: BLE001
-                last = e
-                log(f"akkaunt {c.name} yubora olmadi ({type(e).__name__}: {e}) — keyingisi")
-        raise last or RuntimeError("yuboradigan akkaunt yo'q")
-
-    async def notify(self, text):
-        for c in self.order():
-            try:
-                await self._start(c)
-                await c.send_message(BOT, text)
-                return
-            except Exception as e:  # noqa: BLE001
-                log(f"botga xabar yuborilmadi ({c.name}): {e}")
-
-    async def close(self):
-        for c in self.started:
-            try:
-                await c.stop()
-            except Exception:  # noqa: BLE001
-                pass
-
-
-MAIN_UID = int(os.environ.get("MAIN_UID", "0") or 0)
-
-
-def user_id_of(base):
-    try:
-        import sqlite3
-        c = sqlite3.connect(f"file:{base}.session?mode=ro", uri=True)
-        return int(c.execute("SELECT user_id FROM sessions").fetchone()[0] or 0)
-    except Exception:  # noqa: BLE001
-        return 0
-
-
-def api_id_of(base):
-    try:
-        import sqlite3
-        c = sqlite3.connect(f"file:{base}.session?mode=ro", uri=True)
-        return int(c.execute("SELECT api_id FROM sessions").fetchone()[0] or 0)
-    except Exception:  # noqa: BLE001
-        return 0
-
-
-async def main():
-    import pyrogram.utils
-    from pyrogram import Client
-    pyrogram.utils.MIN_CHANNEL_ID = -1009999999999
-    clients = []
-    for f in sorted(HERE.glob("pool_*.session")):
-        base = str(f.with_suffix(""))
-        if MAIN_UID and user_id_of(base) == MAIN_UID:
-            log(f"{f.name}: ASOSIY akkaunt — o'tkazib yuborildi")
-            continue
-        clients.append(Client(base, api_id=api_id_of(base) or int(os.environ["TG_API_ID"]),
-                              api_hash=os.environ["TG_API_HASH"], no_updates=True))
-    pool = Pool(clients)
-    try:
-        if not clients:
-            raise Fatal("qo'shimcha akkaunt yo'q (asosiy akkaunt ishlatilmaydi) — panel botda «🗂 Yuklovchi sessiyalar» orqali boshqa akkaunt qo'shing")
-        await run(pool)
-    except Exception as e:  # noqa: BLE001
-        log(f"XATO: {e}")
-        await pool.notify(f"ANIBLA_FAIL:{JOB}:{TOKEN}:{str(e).replace(chr(10), ' ')[:250]}")
-        raise
+        try:
+            bot_api("/anibla/fail", {"job": job, "token": token, "error": str(e).replace("\n", " ")[:250]})
+        except Exception as e2:  # noqa: BLE001
+            log(f"botga xato yuborilmadi: {e2}")
     finally:
-        await pool.close()
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def main():
+    if not (API and RUN_KEY and API_BASE and ENCODE_TOKEN):
+        sys.exit("API, RUN_KEY, API_BASE, ENCODE_TOKEN muhit o'zgaruvchilari kerak")
+    r = bot_api("/anibla/claim", {"runner": RUNNER}, key=True)
+    jobs = r.get("jobs") or []
+    if not jobs:
+        log("Navbat bo'sh (yoki boshqa run ishlayapti) — run tugadi.")
+        return
+    bot = str(r.get("bot") or "").lstrip("@")
+    log(f"Qism: {jobs[0].get('name')} · sifatlar: " + ", ".join(x["quality"] for x in jobs))
+    root = Path(os.environ.get("WORK_ROOT") or os.environ.get("RUNNER_TEMP", "/tmp")) / f"anibla_run_{os.environ.get('GITHUB_RUN_ID', 'x')}"
+    shutil.rmtree(root, ignore_errors=True)
+    root.mkdir(parents=True)
+    for j in jobs:  # bot tartibi: 360p, 480p, 720p, 1080p
+        process_job(j, bot, root)
+    shutil.rmtree(root, ignore_errors=True)
+    log("Run tugadi.")
 
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
-    except Exception:
+        main()
+    except Exception as e:  # noqa: BLE001
+        log(f"XATO: {e}")
         sys.exit(1)
