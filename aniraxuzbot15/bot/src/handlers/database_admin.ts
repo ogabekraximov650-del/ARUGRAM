@@ -1,5 +1,5 @@
 /**
- * Admin: Database statistikasi — Cloudflare D1 × 3 baza.
+ * Admin: Database statistikasi — Turso (bitta baza).
  *
  * "🗄 Database" tugmasi bosilganda statistika HAR SAFAR jonli (live) qayta
  * hisoblanadi. D1 da SQL dbstat yo'q — hajm qator soniga ko'ra taxminiy (~500 B/row).
@@ -10,8 +10,8 @@ import { checkIsAdmin } from "../admin_check.ts";
 import { getD1Stats, pingD1, getAllD1TablesData } from "../db_d1.ts";
 import { formatTashkent } from "../date_utils.ts";
 
-// D1 bepul cheklov: har bir baza 10 GB
-const D1_LIMIT_BYTES = 10 * 1024 * 1024 * 1024;
+// Turso (Free/Developer) taxminiy xotira chegarasi
+const TURSO_LIMIT_BYTES = 9 * 1024 * 1024 * 1024;
 
 function isAdmin(ctx: MyContext): boolean {
   return checkIsAdmin(ctx.from?.id);
@@ -37,46 +37,19 @@ function progressBar(fraction: number): string {
   return "█".repeat(n) + "░".repeat(10 - n);
 }
 
-/** Har bosilganda QAYTA hisoblangan D1 statistikasi. */
+/** Har bosilganda QAYTA hisoblangan Turso statistikasi. */
 async function buildStatsText(): Promise<string> {
-  const [ping, stats] = await Promise.all([pingD1(), getD1Stats()]);
+  const [ok, stats] = await Promise.all([pingD1(), getD1Stats()]);
+  const estBytes = estimateBytes(stats.totalRows);
+  const pct = estBytes / TURSO_LIMIT_BYTES;
 
-  const allDbs = [
-    { label: "🎬 DB_ANIME", ok: ping.anime, data: stats.anime },
-    { label: "📊 DB_STAT",  ok: ping.stat,  data: stats.stat  },
-    { label: "🗄 DB_MAIN",  ok: ping.main,  data: stats.main  },
-  ];
-
-  let text = `📊 <b>Database statistikasi (Cloudflare D1 × 3)</b>\n🕒 ${formatTashkent()}\n\n`;
-
-  // ── Jami 3 baza birlashgan statistika ─────────────────────────────────────
-  const grandTotalRows  = stats.anime.totalRows + stats.stat.totalRows + stats.main.totalRows;
-  const grandTotalBytes = estimateBytes(grandTotalRows);
-  const grandLimit      = 3 * D1_LIMIT_BYTES; // 30 GB jami
-  const grandPct        = grandTotalBytes / grandLimit;
-
-  text += `<b>📦 Jami 3 baza birlashgan:</b>\n`;
-  text += `📝 Jami: <b>${grandTotalRows.toLocaleString()}</b> qator\n`;
-  text += `📦 ~${fmtSize(grandTotalBytes)} / 30 GB\n`;
-  text += `<code>${progressBar(grandPct)}</code> ${(grandPct * 100).toFixed(3)}%\n\n`;
-
-  // ── Har bir baza alohida ───────────────────────────────────────────────────
-  for (const db of allDbs) {
-    const totalRows = db.data.totalRows;
-    const estBytes  = estimateBytes(totalRows);
-    const pct       = estBytes / D1_LIMIT_BYTES;
-
-    text += `${db.label} ${db.ok ? "✅" : "🔴"}\n`;
-    text += `📝 Jami: <b>${totalRows.toLocaleString()}</b> qator\n`;
-    text += `📦 ~${fmtSize(estBytes)} / 10 GB\n`;
-    text += `<code>${progressBar(pct)}</code> ${(pct * 100).toFixed(3)}%\n`;
-
-    for (const t of db.data.tables) {
-      if (t.rows > 0) {
-        text += `  <code>${t.table}</code>: ${t.rows.toLocaleString()} qator\n`;
-      }
-    }
-    text += "\n";
+  let text = `📊 <b>Database statistikasi (Turso)</b>\n🕒 ${formatTashkent()}\n\n`;
+  text += `🗄 aniraxuzbot-arumedia ${ok ? "✅" : "🔴"}\n`;
+  text += `📝 Jami: <b>${stats.totalRows.toLocaleString()}</b> qator\n`;
+  text += `📦 ~${fmtSize(estBytes)} / 9 GB\n`;
+  text += `<code>${progressBar(pct)}</code> ${(pct * 100).toFixed(3)}%\n\n`;
+  for (const t of stats.tables) {
+    if (t.rows > 0) text += `  <code>${t.table}</code>: ${t.rows.toLocaleString()} qator\n`;
   }
 
   return text.length > 4000 ? text.slice(0, 3990) + "\n<i>...qisqartirildi</i>" : text;
@@ -101,7 +74,7 @@ function sqlLiteral(v: unknown): string {
 /** Barcha jadvallar ma'lumotlarini .sql (INSERT statements) ko'rinishida quradi. */
 function buildSqlDump(data: Record<string, Record<string, unknown>[]>): string {
   const lines: string[] = [
-    `-- D1 ma'lumotlar bazasi eksporti`,
+    `-- Turso ma'lumotlar bazasi eksporti`,
     `-- Yaratilgan: ${formatTashkent()}`,
     ``,
   ];

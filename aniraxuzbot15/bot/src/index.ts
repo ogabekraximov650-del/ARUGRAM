@@ -1,3 +1,4 @@
+import { initD1Bindings } from "./db_d1.ts";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { webhookCallback } from "grammy";
@@ -28,6 +29,8 @@ app.get("/health", (c) => {
 app.post(config.WEBHOOK_PATH, webhookCallback(bot, "hono"));
 
 async function main() {
+  // Turso kalitlari (Node rejimi): TURSO_URL / TURSO_TOKEN muhit o'zgaruvchilaridan.
+  initD1Bindings(process.env as { TURSO_URL?: string; TURSO_TOKEN?: string });
   // D1 jadvallarini yaratish (ensureD1Tables createTable ichida chaqiriladi)
   await createTable();
   await createSessionTable();

@@ -141,25 +141,28 @@ export async function findUserByIdentifier(identifier: string): Promise<UserReco
 
 /**
  * Foydalanuvchi faollik statistikasi.
- * 6 ta COUNT so'rovi — BITTA batch round-trip (avval 6 ta parallel HTTP so'rov edi).
+ * 3 ta so'rov — BITTA batch round-trip.
  */
 export async function getUserActivityStats(userId: number): Promise<UserStats> {
-  const [likes, dislikes, saves, comments, shares, downloads] =
-    await d1BatchRead<{ cnt: number }>([
-      { sql: `SELECT COUNT(*) as cnt FROM stat_like     WHERE user_id = ?`, params: [userId] },
-      { sql: `SELECT COUNT(*) as cnt FROM stat_dislike  WHERE user_id = ?`, params: [userId] },
-      { sql: `SELECT COUNT(*) as cnt FROM stat_save     WHERE user_id = ?`, params: [userId] },
-      { sql: `SELECT COUNT(*) as cnt FROM stat_coment   WHERE user_id = ?`, params: [userId] },
-      { sql: `SELECT COUNT(*) as cnt FROM stat_share    WHERE user_id = ?`, params: [userId] },
-      { sql: `SELECT COUNT(*) as cnt FROM stat_downloads WHERE user_id = ?`, params: [userId] },
-    ]);
+  // 3 ta so'rov — BITTA HTTP safari (oldin 6 ta).
+  const [react, comments, downloads] = await d1BatchRead<Record<string, number>>([
+    {
+      sql: `SELECT COALESCE(SUM(reaction = 1), 0) AS likes, COALESCE(SUM(reaction = -1), 0) AS dislikes,
+                   COALESCE(SUM(saved), 0) AS saves, COALESCE(SUM(shared), 0) AS shares
+            FROM stat_user_season WHERE user_id = ?`,
+      params: [userId],
+    },
+    { sql: `SELECT COUNT(*) AS cnt FROM stat_coment WHERE user_id = ?`, params: [userId] },
+    { sql: `SELECT COUNT(*) AS cnt FROM stat_downloads WHERE user_id = ?`, params: [userId] },
+  ]);
+  const r = react[0] ?? {};
   return {
-    likes:     likes[0]?.cnt    ?? 0,
-    dislikes:  dislikes[0]?.cnt ?? 0,
-    saves:     saves[0]?.cnt    ?? 0,
-    comments:  comments[0]?.cnt ?? 0,
-    shares:    shares[0]?.cnt   ?? 0,
-    downloads: downloads[0]?.cnt ?? 0,
+    likes:     Number(r.likes ?? 0),
+    dislikes:  Number(r.dislikes ?? 0),
+    saves:     Number(r.saves ?? 0),
+    comments:  Number(comments[0]?.cnt ?? 0),
+    shares:    Number(r.shares ?? 0),
+    downloads: Number(downloads[0]?.cnt ?? 0),
   };
 }
 

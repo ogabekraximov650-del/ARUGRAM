@@ -61,6 +61,18 @@ jobs:
             printf '%s' "$BT" | npx wrangler secret put BOT_TOKEN >/dev/null
           fi
           echo "✅ BOT_TOKEN o'rnatildi"
+          # Turso bazasi: URL va token `turso.enc` da (ENCODE_TOKEN bilan shifrlangan JSON {"url","token"}).
+          TJ=$(K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in turso.enc 2>/dev/null || true)
+          TURSO_URL=$(printf '%s' "$TJ" | python3 -c 'import json,sys; print(json.load(sys.stdin)["url"])' 2>/dev/null || true)
+          TURSO_TOKEN=$(printf '%s' "$TJ" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])' 2>/dev/null || true)
+          if [ -z "$TURSO_URL" ] || [ -z "$TURSO_TOKEN" ]; then
+            echo "❌ turso.enc ochilmadi (ENCODE_TOKEN noto'g'ri?)"
+            exit 1
+          fi
+          echo "::add-mask::$TURSO_TOKEN"
+          printf '%s' "$TURSO_URL" | npx wrangler secret put TURSO_URL >/dev/null
+          printf '%s' "$TURSO_TOKEN" | npx wrangler secret put TURSO_TOKEN >/dev/null
+          echo "✅ TURSO_URL / TURSO_TOKEN o'rnatildi"
           # To'lov kalitlari: ilova bilan BIR XIL tezcheck kassasi (GitHub Secrets'dagi `TEZCHECK_TOKEN` / `TEZCHECK_DESK`).
           if [ -n "$TEZCHECK_TOKEN" ] && [ -n "$TEZCHECK_DESK" ]; then
             printf '%s' "$TEZCHECK_TOKEN" | npx wrangler secret put TEZCHECK_TOKEN >/dev/null

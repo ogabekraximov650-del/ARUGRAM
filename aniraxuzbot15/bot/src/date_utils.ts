@@ -24,3 +24,8 @@ export function formatTashkent(date: Date = new Date()): string {
 
 /** SQL DEFAULT ifodasi — jadval yaratishda created_at/updated_at ustunlari uchun. */
 export const SQL_TASHKENT_NOW = `(strftime('%Y-%m-%d %H:%M:%S','now','+5 hours'))`;
+
+/** Jurnal jadvallari uchun vaqt: UTC unix soniya (`created_at INTEGER`). Ko'rsatishda `formatTashkent(new Date(sec * 1000))`. */
+export function nowSec(): number {
+  return Math.floor(Date.now() / 1000);
+}

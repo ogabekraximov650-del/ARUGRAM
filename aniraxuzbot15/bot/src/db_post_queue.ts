@@ -3,6 +3,7 @@
  */
 import { d1Query } from "./db.ts";
 import { d1Update } from "./db_d1.ts";
+import { nowSec } from "./date_utils.ts";
 
 export interface QueueItem {
   id: number;
@@ -15,7 +16,7 @@ export interface QueueItem {
   channel_username: string;
   status: "pending" | "processing" | "done" | "error";
   /** NULL bo'lsa — hali yuborilmagan. Agar to'ldirilgan bo'lsa — qayta yuborilmaydi. */
-  posted_at: string | null;
+  posted_at: number | null;
 }
 
 /** Jadval D1 (db_d1.ts:ensureD1Tables) orqali yaratiladi. Bu no-op. */
@@ -60,7 +61,7 @@ export async function getPendingQueueItems(limit = 10): Promise<QueueItem[]> {
  * rowsAffected=0 bo'ladi va false qaytadi. Caller itemni o'tkazib yuborishi shart.
  */
 export async function markQueueItemProcessing(id: number): Promise<boolean> {
-  const now = new Date().toISOString();
+  const now = nowSec();
   const affected = await d1Update(
     `UPDATE post_queue SET status = 'processing', processing_started_at = ? WHERE id = ? AND status = 'pending'`,
     [now, id]
@@ -74,7 +75,7 @@ export async function markQueueItemProcessing(id: number): Promise<boolean> {
  * item reset qilinganda posted_at bor bo'ladi → qayta yuborilmaydi (duplicate prevention).
  */
 export async function markQueueItemSending(id: number): Promise<void> {
-  const now = new Date().toISOString();
+  const now = nowSec();
   await d1Query(
     `UPDATE post_queue SET posted_at = ? WHERE id = ? AND posted_at IS NULL`,
     [now, id]
@@ -82,7 +83,7 @@ export async function markQueueItemSending(id: number): Promise<void> {
 }
 
 export async function markQueueItemDone(id: number): Promise<void> {
-  const now = new Date().toISOString();
+  const now = nowSec();
   await d1Query(
     `UPDATE post_queue SET status = 'done', posted_at = COALESCE(posted_at, ?) WHERE id = ?`,
     [now, id]
@@ -105,7 +106,7 @@ export async function markQueueItemError(id: number): Promise<void> {
  * 3 daqiqa = 180 sekund — bu cron o'lib qolgan degan ma'no.
  */
 export async function resetAllProcessingItems(): Promise<void> {
-  const threeMinutesAgo = new Date(Date.now() - 3 * 60 * 1000).toISOString();
+  const threeMinutesAgo = nowSec() - 3 * 60;
 
   // MUHIM: faqat posted_at IS NULL (hali yuborilmagan) itemlarni reset qilamiz.
   // Agar posted_at to'ldirilgan bo'lsa — xabar yuborilgan, lekin 'done' yozilmagan;
@@ -129,7 +130,7 @@ export async function resetAllProcessingItems(): Promise<void> {
   await d1Query(`
     UPDATE post_queue SET status = 'pending'
     WHERE status = 'error'
-      AND created_at > strftime('%Y-%m-%d %H:%M:%S', 'now', '+5 hours', '-24 hours')
+      AND created_at > unixepoch() - 86400
   `).catch(() => {});
 }
 

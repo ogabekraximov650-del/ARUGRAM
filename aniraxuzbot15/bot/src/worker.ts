@@ -1,6 +1,6 @@
 /**
  * Cloudflare Workers entry point.
- * 3 ta D1 baza: DB_ANIME, DB_STAT, DB_MAIN
+ * Ma'lumotlar bazasi: Turso (bitta baza); db_d1.ts ga qarang
  *
  * TUZATMALAR:
  *  1. ensureReady() — parallel so'rovlarda xavfsiz (race-condition yo'q)
@@ -15,6 +15,7 @@ import { processPostQueue } from "./queue_processor.ts";
 import { aniblaPush, aniblaRunFailed, aniblaTick } from "./handlers/anibla_add.ts";
 import { d1Run, d1Update } from "./db_d1.ts";
 import { initD1Bindings, ensureD1Tables, type D1Env } from "./db_d1.ts";
+import { createSessionTable } from "./db_sessions.ts";
 
 type CfEnv = D1Env & Record<string, string | undefined>;
 
@@ -195,6 +196,10 @@ export default {
     ctx.waitUntil(
       processPostQueue().catch((e) => console.error("processPostQueue:", e))
     );
+    // Soatda bir marta: 30 kundan eski sessiyalar tozalanadi.
+    if (new Date().getUTCMinutes() === 0) {
+      ctx.waitUntil(createSessionTable().catch((e) => console.error("createSessionTable:", e)));
+    }
     // Ochiq "📊 Holat" xabarlari (Anibla) — har daqiqada yangilanadi.
     ctx.waitUntil(
       aniblaTick(bot.api).catch((e) => console.error("aniblaTick:", e))

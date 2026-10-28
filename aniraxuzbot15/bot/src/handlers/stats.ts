@@ -4,7 +4,7 @@
  */
 import { Bot, InlineKeyboard } from "grammy";
 import type { MyContext } from "./admin.ts";
-import { d1Query } from "../db.ts";
+import { d1Query, d1QueryBatchRead } from "../db.ts";
 import { getActiveVip } from "./vip.ts";
 
 // ─── Parallel barcha bazalardan ma'lumot olish ────────────────────────────────
@@ -15,92 +15,71 @@ interface StatsResult {
   monthlyUsers: number;
   weeklyUsers: number;
   dailyUsers: number;
-  // Animelar (DB_ANIME)
+  // Animelar
   totalAnimes: number;
   totalEpisodes: number;
-  // Yuklamalar (DB_STAT)
+  // Yuklamalar
   totalDownloads: number;
   monthlyDownloads: number;
   weeklyDownloads: number;
   dailyDownloads: number;
-  // Boshqa (DB_STAT)
+  // Reaksiyalar
   totalLikes: number;
   totalDislikes: number;
   totalShares: number;
   totalSaves: number;
-  // DB hajmi (MB → GB)
-  dbMainBytes: number;
-  dbAnimeBytes: number;
-  dbStatBytes: number;
+  // Baza hajmi (bayt)
+  dbBytes: number;
 }
 
 async function fetchStats(): Promise<StatsResult> {
-  // Barcha so'rovlarni parallel bajartirish
-  const [
-    totalUsersR,
-    monthlyUsersR,
-    weeklyUsersR,
-    dailyUsersR,
-    totalAnimesR,
-    totalEpisodesR,
-    totalDownloadsR,
-    monthlyDownloadsR,
-    weeklyDownloadsR,
-    dailyDownloadsR,
-    totalLikesR,
-    totalDislikesR,
-    totalSharesR,
-    totalSavesR,
-    dbMainSizeR,
-    dbAnimeSizeR,
-    dbStatSizeR,
-  ] = await Promise.all([
-    // user_db → DB_MAIN
-    d1Query<{ n: number }>("SELECT COUNT(*) AS n FROM user_db"),
-    d1Query<{ n: number }>("SELECT COUNT(*) AS n FROM user_db WHERE last_active >= strftime('%Y-%m-%d %H:%M:%S', datetime('now', '-30 days', '+5 hours'))"),
-    d1Query<{ n: number }>("SELECT COUNT(*) AS n FROM user_db WHERE last_active >= strftime('%Y-%m-%d %H:%M:%S', datetime('now', '-7 days', '+5 hours'))"),
-    d1Query<{ n: number }>("SELECT COUNT(*) AS n FROM user_db WHERE last_active >= strftime('%Y-%m-%d %H:%M:%S', datetime('now', '-1 day', '+5 hours'))"),
-    // anime_db → DB_ANIME
-    d1Query<{ n: number }>("SELECT COUNT(*) AS n FROM anime_db"),
-    d1Query<{ n: number }>("SELECT COUNT(*) AS n FROM epizod_db"),
-    // stat_downloads → DB_STAT
-    d1Query<{ n: number }>("SELECT COUNT(*) AS n FROM stat_downloads"),
-    d1Query<{ n: number }>("SELECT COUNT(*) AS n FROM stat_downloads WHERE downloaded_at >= strftime('%Y-%m-%d %H:%M:%S', datetime('now', '-30 days', '+5 hours'))"),
-    d1Query<{ n: number }>("SELECT COUNT(*) AS n FROM stat_downloads WHERE downloaded_at >= strftime('%Y-%m-%d %H:%M:%S', datetime('now', '-7 days', '+5 hours'))"),
-    d1Query<{ n: number }>("SELECT COUNT(*) AS n FROM stat_downloads WHERE downloaded_at >= strftime('%Y-%m-%d %H:%M:%S', datetime('now', '-1 day', '+5 hours'))"),
-    // Boshqa stat jadvallar → DB_STAT
-    d1Query<{ n: number }>("SELECT COUNT(*) AS n FROM stat_like"),
-    d1Query<{ n: number }>("SELECT COUNT(*) AS n FROM stat_dislike"),
-    d1Query<{ n: number }>("SELECT COUNT(*) AS n FROM stat_share"),
-    d1Query<{ n: number }>("SELECT COUNT(*) AS n FROM stat_save"),
-    // DB hajmlari (SQLite page_count * page_size)
-    d1Query<{ bytes: number }>("SELECT (SELECT page_count FROM pragma_page_count()) * (SELECT page_size FROM pragma_page_size()) AS bytes FROM user_db LIMIT 1").catch(() => [{ bytes: 0 }]),
-    d1Query<{ bytes: number }>("SELECT (SELECT page_count FROM pragma_page_count()) * (SELECT page_size FROM pragma_page_size()) AS bytes FROM anime_db LIMIT 1").catch(() => [{ bytes: 0 }]),
-    d1Query<{ bytes: number }>("SELECT (SELECT page_count FROM pragma_page_count()) * (SELECT page_size FROM pragma_page_size()) AS bytes FROM stat_downloads LIMIT 1").catch(() => [{ bytes: 0 }]),
+  // Hamma sanash BITTA so'rovda (bitta HTTP safari, bitta tranzaksiyasiz o'qish).
+  const one = (sql: string) => ({ sql });
+  const [users, animes, episodes, downloads, reactions] = await d1QueryBatchRead<Record<string, number>>([
+    one(`SELECT COUNT(*) AS total,
+                COALESCE(SUM(last_active >= strftime('%Y-%m-%d %H:%M:%S', datetime('now', '-30 days', '+5 hours'))), 0) AS monthly,
+                COALESCE(SUM(last_active >= strftime('%Y-%m-%d %H:%M:%S', datetime('now', '-7 days', '+5 hours'))), 0) AS weekly,
+                COALESCE(SUM(last_active >= strftime('%Y-%m-%d %H:%M:%S', datetime('now', '-1 day', '+5 hours'))), 0) AS daily
+           FROM user_db`),
+    one(`SELECT COUNT(*) AS n FROM anime_db`),
+    one(`SELECT COUNT(*) AS n FROM epizod_db`),
+    one(`SELECT COUNT(*) AS total,
+                COALESCE(SUM(created_at >= unixepoch() - 2592000), 0) AS monthly,
+                COALESCE(SUM(created_at >= unixepoch() - 604800), 0) AS weekly,
+                COALESCE(SUM(created_at >= unixepoch() - 86400), 0) AS daily
+           FROM stat_downloads`),
+    one(`SELECT COALESCE(SUM(reaction = 1), 0) AS likes, COALESCE(SUM(reaction = -1), 0) AS dislikes,
+                COALESCE(SUM(shared), 0) AS shares, COALESCE(SUM(saved), 0) AS saves
+           FROM stat_user_season`),
   ]);
+  // Baza hajmi (SQLite page_count * page_size); xato bo'lsa 0.
+  const size = await d1Query<{ bytes: number }>(
+    "SELECT (SELECT page_count FROM pragma_page_count()) * (SELECT page_size FROM pragma_page_size()) AS bytes"
+  ).catch(() => [{ bytes: 0 }]);
 
+  const u = users[0] ?? {};
+  const d = downloads[0] ?? {};
+  const r = reactions[0] ?? {};
   return {
-    totalUsers:    totalUsersR[0]?.n ?? 0,
-    monthlyUsers:  monthlyUsersR[0]?.n ?? 0,
-    weeklyUsers:   weeklyUsersR[0]?.n ?? 0,
-    dailyUsers:    dailyUsersR[0]?.n ?? 0,
+    totalUsers:   u.total ?? 0,
+    monthlyUsers: u.monthly ?? 0,
+    weeklyUsers:  u.weekly ?? 0,
+    dailyUsers:   u.daily ?? 0,
 
-    totalAnimes:   totalAnimesR[0]?.n ?? 0,
-    totalEpisodes: totalEpisodesR[0]?.n ?? 0,
+    totalAnimes:   animes[0]?.n ?? 0,
+    totalEpisodes: episodes[0]?.n ?? 0,
 
-    totalDownloads:   totalDownloadsR[0]?.n ?? 0,
-    monthlyDownloads: monthlyDownloadsR[0]?.n ?? 0,
-    weeklyDownloads:  weeklyDownloadsR[0]?.n ?? 0,
-    dailyDownloads:   dailyDownloadsR[0]?.n ?? 0,
+    totalDownloads:   d.total ?? 0,
+    monthlyDownloads: d.monthly ?? 0,
+    weeklyDownloads:  d.weekly ?? 0,
+    dailyDownloads:   d.daily ?? 0,
 
-    totalLikes:    totalLikesR[0]?.n ?? 0,
-    totalDislikes: totalDislikesR[0]?.n ?? 0,
-    totalShares:   totalSharesR[0]?.n ?? 0,
-    totalSaves:    totalSavesR[0]?.n ?? 0,
+    totalLikes:    r.likes ?? 0,
+    totalDislikes: r.dislikes ?? 0,
+    totalShares:   r.shares ?? 0,
+    totalSaves:    r.saves ?? 0,
 
-    dbMainBytes:  dbMainSizeR[0]?.bytes ?? 0,
-    dbAnimeBytes: dbAnimeSizeR[0]?.bytes ?? 0,
-    dbStatBytes:  dbStatSizeR[0]?.bytes ?? 0,
+    dbBytes: size[0]?.bytes ?? 0,
   };
 }
 
@@ -113,8 +92,6 @@ function bytesToGb(bytes: number): string {
 }
 
 function buildStatsText(s: StatsResult): string {
-  const totalDb = s.dbMainBytes + s.dbAnimeBytes + s.dbStatBytes;
-
   return (
     `📊 <b>@aniraxuzbot statistikasi:</b>\n\n` +
 
@@ -141,10 +118,7 @@ function buildStatsText(s: StatsResult): string {
     `🔖 Saqlaganlar: <b>${n(s.totalSaves)} ta</b>\n\n` +
 
     `🗄 <b>Ma'lumotlar bazasi hajmi:</b>\n` +
-    `💾 Asosiy baza: <b>${bytesToGb(s.dbMainBytes)} GB</b>\n` +
-    `💾 Anime baza: <b>${bytesToGb(s.dbAnimeBytes)} GB</b>\n` +
-    `💾 Stat baza: <b>${bytesToGb(s.dbStatBytes)} GB</b>\n` +
-    `📊 Jami: <b>${bytesToGb(totalDb)} GB</b>`
+    `💾 Baza: <b>${bytesToGb(s.dbBytes)} GB</b>`
   );
 }
 

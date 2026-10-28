@@ -6798,3 +6798,19 @@ tashqi dekodersiz, sof Rustda chizilsin; server/Actions'siz, telefonning o'zida.
 ## Joylashuv xatolarini aniqlash (2026-10-23)
 
 - `uzcoders-ui/src/lib.rs::check_overflow`: har kadrda (`compute` dan keyin) aylantirilmaydigan konteynerning bolasi ota qutisidan 3 pikseldan ko'p chiqsa, `report_error("joylashuv", ...)` (har holat bir marta, kadrda ko'pi bilan 5 ta). Aylanuvchi konteynerlar o'tkazib yuboriladi. Xatolar jurnalida ko'rinadi.
+
+## aniraxuzbot: Cloudflare D1 (3 baza) -> Turso (bitta toza baza) (2026-10-28)
+
+- **Nima:** bot (`aniraxuzbot15/bot`) endi `aniraxuzbot-arumedia` Turso bazasida ishlaydi (HTTP/Hrana, `src/db_d1.ts`). Baza BO'SH boshlandi — hech narsa ko'chirilmadi.
+  Eski 3 ta D1 baza tegilmagan (id'lar `wrangler.toml` oxirida izohda) — keyinroq kerak bo'lsa o'sha yerda turadi.
+- **Kalitlar:** `aniraxuzbot15/bot/turso.enc` (ENCODE_TOKEN bilan shifrlangan JSON `{url, token}`); deploy workflow ochib `TURSO_URL` / `TURSO_TOKEN`
+  Cloudflare secret'lariga qo'yadi. Token suhbatda ochiq yozilgani uchun Turso'da yangilab, `turso.enc` ni qayta shifrlash tavsiya etiladi.
+- **API o'zgarmadi:** `d1Run / d1Update / d1InsertReturningId / d1Batch / d1BatchRead / ensureD1Tables` nomlari saqlangan. `d1Batch` — bitta HTTP safari va
+  bitta tranzaksiya; `d1BatchRead` — bitta safar. Sxema versiyasi `bot_settings.schema_ver` da (versiya o'zgarsa `SCHEMA` qayta qo'llanadi).
+- **Jurnallar tartibga solindi:** vaqt — `created_at INTEGER` (unix soniya, `unixepoch()`), nomlar bir xil (`create_at`/`downloaded_at`/`data` o'rniga `created_at`),
+  kompozit kalitli jadvallar `WITHOUT ROWID`, ortiqcha indekslar olib tashlandi. `stat_like/dislike/save/share` -> bitta `stat_user_season`
+  (foydalanuvchi+bo'lim = bitta qator: `reaction`, `saved`, `shared`): har amal bitta UPSERT, bo'lim statistikasi 8 o'rniga 3 so'rov (bitta safar).
+  `stat_downloads`: noyoblik bitta `INSERT OR IGNORE` bilan (oldin SELECT + yozuvlar); hisoblagichlar bitta tranzaksiyada.
+- **Sessiya:** o'zgarmagan sessiya bazaga qayta yozilmaydi (Turso yozuvlari pul turadi); 30 kundan eskilari soatda bir marta tozalanadi.
+- **Kesh:** kontent jadvallari (anime/fasl/qism, kanal, havola) o'qishi 10 daqiqa keshlanadi; yozuvda tozalanadi; isolate'lar orasida `bot_settings.content_ver`.
+- **Eslatma:** Turso Tokiyoda — har so'rov D1'dan sekinroq (~150 ms); shu sabab batch/kesh muhim.

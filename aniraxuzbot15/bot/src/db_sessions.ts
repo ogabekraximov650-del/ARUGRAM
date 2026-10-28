@@ -1,5 +1,5 @@
 /**
- * Grammy sessiya adapteri — Cloudflare D1 (DB_MAIN), in-memory cache bilan tezlashtirilgan.
+ * Grammy sessiya adapteri — Turso, in-memory cache bilan tezlashtirilgan.
  *
  * - In-memory LRU cache (per Worker isolate) → D1 ga so'rov kamayadi
  * - Sessiya o'qish: cache hit → 0ms, cache miss → D1 (~1-3ms)
@@ -7,7 +7,7 @@
  */
 import type { StorageAdapter } from "grammy";
 import { d1Query } from "./db.ts";
-import { formatTashkent } from "./date_utils.ts";
+import { nowSec } from "./date_utils.ts";
 
 // ─── In-memory sessiya keshi (Worker isolate doirasida) ──────────────────────
 // CF Workers: har bir isolate o'z keshiga ega (shared memory yo'q)
@@ -19,6 +19,8 @@ interface CacheEntry {
 }
 
 const _cache = new Map<string, CacheEntry>();
+// Oxirgi o'qilgan/yozilgan sessiya JSON'i: o'zgarmagan sessiya bazaga qayta yozilmaydi (Turso yozuvlari pul turadi).
+const _persisted = new Map<string, string>();
 const SESSION_TTL_MS = 10 * 60 * 1000; // 10 daqiqa
 const MAX_CACHE_SIZE = 500; // maksimal kesh o'lchami
 
@@ -53,9 +55,7 @@ function cacheDel(key: string): void {
  */
 export async function createSessionTable(): Promise<void> {
   // 30 kundan eski sessiyalarni tozalash — TEXT formatdagi sana bilan taqqoslash
-  await d1Query(
-    `DELETE FROM sessions WHERE updated_at < strftime('%Y-%m-%d %H:%M:%S', 'now', '+5 hours', '-30 days')`
-  ).catch(() => {});
+  await d1Query(`DELETE FROM sessions WHERE updated_at < unixepoch() - 2592000`).catch(() => {});
 }
 
 // ─── Sessiya adapteri ─────────────────────────────────────────────────────────
@@ -75,6 +75,7 @@ export class D1SessionAdapter<T> implements StorageAdapter<T> {
       if (!rows[0]) return undefined;
       const val = JSON.parse(rows[0].value) as T;
       cacheSet(key, val);
+      _persisted.set(key, rows[0].value);
       return val;
     } catch {
       return undefined;
@@ -85,21 +86,24 @@ export class D1SessionAdapter<T> implements StorageAdapter<T> {
     // 1. Keshni DARHOL yangilash — keyingi read(key) 0ms da keshdan keladi
     cacheSet(key, value);
 
-    // 2. D1 ga yozish — AWAIT bilan (xavfsiz).
-    //    CF Workers da waitUntil ichida ishlaydi, shuning uchun await zarur.
-    const now = formatTashkent();
+    // 2. O'zgarmagan sessiya bazaga yozilmaydi.
+    const json = JSON.stringify(value);
+    if (_persisted.get(key) === json) return;
+
+    // 3. D1/Turso ga yozish — AWAIT bilan (Workers'da waitUntil ichida ishlaydi).
     await d1Query(
       `INSERT INTO sessions (key, value, updated_at)
        VALUES (?, ?, ?)
        ON CONFLICT(key) DO UPDATE
          SET value      = excluded.value,
              updated_at = excluded.updated_at`,
-      [key, JSON.stringify(value), now]
-    ).catch(() => {/* D1 xatosi — kesh saqlanib qoladi */});
+      [key, json, nowSec()]
+    ).then(() => { _persisted.set(key, json); }).catch(() => {/* xato — kesh saqlanib qoladi */});
   }
 
   async delete(key: string): Promise<void> {
     cacheDel(key);
+    _persisted.delete(key);
     await d1Query(`DELETE FROM sessions WHERE key = ?`, [key]).catch(() => {});
   }
 }

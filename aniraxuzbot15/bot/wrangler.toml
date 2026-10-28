@@ -13,20 +13,10 @@ SAVED_CHANNEL_ID  = "-1002889216626"
 WEBHOOK_PATH      = "/webhook"
 PORT              = "8787"
 WORKER_URL        = "https://aniraxuzbot.uzcom.workers.dev"
-# D1 Database 1 — Anime, Season, Epizod jadvallari
-[[d1_databases]]
-binding      = "DB_ANIME"
-database_name = "aniraxuzbot_anime"
-database_id  = "fda65bb9-2c4c-4d1a-afab-72cb0205b654"
-
-# D1 Database 2 — Statistika jadvallari
-[[d1_databases]]
-binding      = "DB_STAT"
-database_name = "aniraxuzbot_stat"
-database_id  = "f9179d01-874c-47b5-a420-e67719c5397f"
-
-# D1 Database 3 — Asosiy (users, sessions, settings, queue, channels ...)
-[[d1_databases]]
-binding      = "DB_MAIN"
-database_name = "aniraxuzbot_user"
-database_id  = "6a9aa9e4-efd0-4d91-b5e9-e43d0f2ca8fc"
+# Ma'lumotlar bazasi: Turso (bitta baza `aniraxuzbot-arumedia`). `TURSO_URL` va `TURSO_TOKEN` — Cloudflare secret'lar
+# (deploy workflow `turso.enc` dan, ENCODE_TOKEN bilan ochib, o'rnatadi).
+#
+# ESKI Cloudflare D1 bazalar (tegilmagan, bot ularni endi ishlatmaydi — ma'lumotlar keyinroq kerak bo'lsa shu yerda turadi):
+#   DB_ANIME : aniraxuzbot_anime  fda65bb9-2c4c-4d1a-afab-72cb0205b654  (anime_db, season_db, epizod_db)
+#   DB_STAT  : aniraxuzbot_stat   f9179d01-874c-47b5-a420-e67719c5397f  (stat_* jadvallari)
+#   DB_MAIN  : aniraxuzbot_user   6a9aa9e4-efd0-4d91-b5e9-e43d0f2ca8fc  (user_db, sessions, bot_settings, queue, kanallar ...)

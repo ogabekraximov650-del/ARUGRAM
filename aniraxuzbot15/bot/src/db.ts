@@ -1,13 +1,11 @@
 /**
  * Ma'lumotlar bazasi qatlami — 3 ta Cloudflare D1 baza.
  *
- * DB_ANIME : anime_db, season_db, epizod_db
- * DB_STAT  : stat_downloads, stat_like, stat_dislike, stat_save, stat_coment, stat_share
- * DB_MAIN  : user_db, sessions, bot_settings, post_queue, chanel_info_db, ...
+ * Hamma jadval bitta Turso bazasida (db_d1.ts).
  */
 import { d1Run, d1Update, d1InsertReturningId, d1Batch, d1BatchRead, ensureD1Tables } from "./db_d1.ts";
 export { d1Update };
-import { formatTashkent } from "./date_utils.ts";
+import { formatTashkent, nowSec } from "./date_utils.ts";
 
 // ─── Asosiy so'rov funksiyalari ───────────────────────────────────────────────
 
@@ -17,6 +15,13 @@ export async function d1Query<T = Record<string, unknown>>(
   params: unknown[] = []
 ): Promise<T[]> {
   return d1Run<T>(sql, params);
+}
+
+/** Bir nechta SELECT — BITTA so'rov. */
+export async function d1QueryBatchRead<T = Record<string, unknown>>(
+  queries: { sql: string; params?: unknown[] }[]
+): Promise<T[][]> {
+  return d1BatchRead<T>(queries);
 }
 
 /** Batch DML — bitta network safari, turli bazalarga guruhlangan. */
@@ -72,46 +77,27 @@ export async function checkAndRecordDownload(
   episodeRowid: number,
   episodeId: number
 ): Promise<boolean> {
-  const now = formatTashkent();
-  const existing = await d1Query<{ user_id: number }>(
-    `SELECT user_id FROM stat_downloads WHERE user_id = ? AND episode_id = ?`,
-    [userId, episodeId]
+  const now = nowSec();
+  // Bitta yozuv: allaqachon bor bo'lsa (IGNORE) o'zgargan qator 0 — faqat ko'rish tarixi yangilanadi.
+  const added = await d1Update(
+    `INSERT OR IGNORE INTO stat_downloads (user_id, episode_id, anime_id, created_at) VALUES (?, ?, ?, ?)`,
+    [userId, episodeId, animeId, now]
   );
-  if (existing.length > 0) {
-    // Allaqachon yuklab olingan — faqat ko'rish tarixini yangilaymiz
+  if (added === 0) {
     await upsertWatchHistory(userId, animeId, episodeId);
     return false;
   }
 
-  // Cross-DB: STAT (stat_downloads + watch_history) + ANIME (epizod/season/anime) + MAIN (user_db) — parallel
-  await Promise.all([
-    // DB_STAT — yuklab olish yozuvi
-    d1Query(
-      `INSERT OR IGNORE INTO stat_downloads (user_id, anime_id, episode_id, downloaded_at) VALUES (?, ?, ?, ?)`,
-      [userId, animeId, episodeId, now]
-    ),
-    // DB_STAT — ko'rish tarixi (UPSERT: bir foydalanuvchi + bir anime = bitta qator)
-    upsertWatchHistory(userId, animeId, episodeId),
-    // DB_ANIME — bitta batch (3 ta UPDATE)
-    d1QueryBatch([
-      {
-        sql: `UPDATE epizod_db SET downloads = downloads + 1 WHERE rowid = ?`,
-        params: [episodeRowid],
-      },
-      {
-        sql: `UPDATE season_db SET downloads = downloads + 1 WHERE rowid = (SELECT seasondb_id FROM epizod_db WHERE rowid = ?)`,
-        params: [episodeRowid],
-      },
-      {
-        sql: `UPDATE anime_db SET downloads = downloads + 1 WHERE id = ?`,
-        params: [animeId],
-      },
-    ]),
-    // DB_MAIN — foydalanuvchi yuklamalar hisoblagichi
-    d1Query(
-      `UPDATE user_db SET downloads = downloads + 1 WHERE user_id = ?`,
-      [userId]
-    ),
+  // Birinchi yuklash: ko'rish tarixi va hamma hisoblagichlar — BITTA tranzaksiya, BITTA so'rov.
+  await d1QueryBatch([
+    watchHistoryQuery(userId, animeId, episodeId, now),
+    { sql: `UPDATE epizod_db SET downloads = downloads + 1 WHERE rowid = ?`, params: [episodeRowid] },
+    {
+      sql: `UPDATE season_db SET downloads = downloads + 1 WHERE rowid = (SELECT seasondb_id FROM epizod_db WHERE rowid = ?)`,
+      params: [episodeRowid],
+    },
+    { sql: `UPDATE anime_db SET downloads = downloads + 1 WHERE id = ?`, params: [animeId] },
+    { sql: `UPDATE user_db SET downloads = downloads + 1 WHERE user_id = ?`, params: [userId] },
   ]);
   return true;
 }
@@ -122,28 +108,32 @@ export interface WatchHistoryRecord {
   user_id: number;
   anime_id: number;
   epizod_id: number;
-  create_at: string;
+  created_at: number;
 }
 
 /**
  * Foydalanuvchi ko'rish tarixini UPSERT qiladi.
  * Har bir (user_id, anime_id) juftligi uchun faqat bitta qator saqlanadi —
- * keyingi marta yuklasa, epizod_id va create_at yangilanadi.
+ * keyingi marta yuklasa, epizod_id va created_at yangilanadi.
  */
 export async function upsertWatchHistory(
   userId: number,
   animeId: number,
   epizodId: number
 ): Promise<void> {
-  const now = formatTashkent();
-  await d1Query(
-    `INSERT INTO stat_watch_history (user_id, anime_id, epizod_id, create_at)
-     VALUES (?, ?, ?, ?)
-     ON CONFLICT(user_id, anime_id) DO UPDATE SET
-       epizod_id = excluded.epizod_id,
-       create_at = excluded.create_at`,
-    [userId, animeId, epizodId, now]
-  );
+  const q = watchHistoryQuery(userId, animeId, epizodId, nowSec());
+  await d1Query(q.sql, q.params);
+}
+
+function watchHistoryQuery(userId: number, animeId: number, epizodId: number, now: number) {
+  return {
+    sql: `INSERT INTO stat_watch_history (user_id, anime_id, epizod_id, created_at)
+          VALUES (?, ?, ?, ?)
+          ON CONFLICT(user_id, anime_id) DO UPDATE SET
+            epizod_id = excluded.epizod_id,
+            created_at = excluded.created_at`,
+    params: [userId, animeId, epizodId, now],
+  };
 }
 
 /**
@@ -155,7 +145,7 @@ export async function getWatchHistory(
   animeId: number
 ): Promise<WatchHistoryRecord | null> {
   const rows = await d1Query<WatchHistoryRecord>(
-    `SELECT user_id, anime_id, epizod_id, create_at
+    `SELECT user_id, anime_id, epizod_id, created_at
      FROM stat_watch_history
      WHERE user_id = ? AND anime_id = ?`,
     [userId, animeId]
@@ -522,22 +512,20 @@ export async function insertEpisode(data: InsertEpisodeData): Promise<number> {
 /** Barcha ma'lumotlarni tozalash — turli bazalar, parallel */
 export async function clearAllData(): Promise<void> {
   await Promise.all([
-    // DB_STAT
+    // Statistika
     d1QueryBatch([
-      { sql: "DELETE FROM stat_like" },
-      { sql: "DELETE FROM stat_dislike" },
-      { sql: "DELETE FROM stat_save" },
+      { sql: "DELETE FROM stat_user_season" },
       { sql: "DELETE FROM stat_downloads" },
+      { sql: "DELETE FROM stat_watch_history" },
       { sql: "DELETE FROM stat_coment" },
-      { sql: "DELETE FROM stat_share" },
     ]),
-    // DB_ANIME
+    // Kontent
     d1QueryBatch([
       { sql: "DELETE FROM epizod_db" },
       { sql: "DELETE FROM season_db" },
       { sql: "DELETE FROM anime_db" },
     ]),
-    // DB_MAIN
+    // Tizim
     d1QueryBatch([
       { sql: "DELETE FROM sessions" },
       { sql: "DELETE FROM user_db" },
@@ -841,32 +829,22 @@ export async function getRecentEpisodesPerAnime(
 
 // ─── stat_like / stat_dislike / stat_save ────────────────────────────────────
 
+/**
+ * Yoqtirish / yoqtirmaslik / saqlash — BITTA jadval (`stat_user_season`): foydalanuvchi + bo'lim = bitta qator.
+ * Har amal BITTA so'rov (UPSERT ... RETURNING): oldin SELECT + DELETE + INSERT + qarama-qarshisini DELETE edi.
+ */
 export async function toggleLike(
   userId: number,
   animeId: number,
   animeinfoId: number
 ): Promise<"added" | "removed"> {
-  const now = formatTashkent();
-  const existing = await d1Query<{ user_id: number }>(
-    `SELECT user_id FROM stat_like WHERE user_id = ? AND seasondb_id = ?`,
-    [userId, animeinfoId]
+  const r = await d1Query<{ reaction: number }>(
+    `INSERT INTO stat_user_season (user_id, seasondb_id, anime_id, reaction, created_at) VALUES (?, ?, ?, 1, ?)
+     ON CONFLICT(user_id, seasondb_id) DO UPDATE SET reaction = CASE reaction WHEN 1 THEN 0 ELSE 1 END
+     RETURNING reaction`,
+    [userId, animeinfoId, animeId, nowSec()]
   );
-  if (existing.length > 0) {
-    await d1Query(`DELETE FROM stat_like WHERE user_id = ? AND seasondb_id = ?`, [userId, animeinfoId]);
-    return "removed";
-  }
-  // Ikkala jadval ham DB_STAT — batch mumkin
-  await d1QueryBatch([
-    {
-      sql: `INSERT OR IGNORE INTO stat_like (user_id, anime_id, seasondb_id, created_at) VALUES (?, ?, ?, ?)`,
-      params: [userId, animeId, animeinfoId, now],
-    },
-    {
-      sql: `DELETE FROM stat_dislike WHERE user_id = ? AND seasondb_id = ?`,
-      params: [userId, animeinfoId],
-    },
-  ]);
-  return "added";
+  return Number(r[0]?.reaction) === 1 ? "added" : "removed";
 }
 
 export async function toggleDislike(
@@ -874,26 +852,13 @@ export async function toggleDislike(
   animeId: number,
   animeinfoId: number
 ): Promise<"added" | "removed"> {
-  const now = formatTashkent();
-  const existing = await d1Query<{ user_id: number }>(
-    `SELECT user_id FROM stat_dislike WHERE user_id = ? AND seasondb_id = ?`,
-    [userId, animeinfoId]
+  const r = await d1Query<{ reaction: number }>(
+    `INSERT INTO stat_user_season (user_id, seasondb_id, anime_id, reaction, created_at) VALUES (?, ?, ?, -1, ?)
+     ON CONFLICT(user_id, seasondb_id) DO UPDATE SET reaction = CASE reaction WHEN -1 THEN 0 ELSE -1 END
+     RETURNING reaction`,
+    [userId, animeinfoId, animeId, nowSec()]
   );
-  if (existing.length > 0) {
-    await d1Query(`DELETE FROM stat_dislike WHERE user_id = ? AND seasondb_id = ?`, [userId, animeinfoId]);
-    return "removed";
-  }
-  await d1QueryBatch([
-    {
-      sql: `INSERT OR IGNORE INTO stat_dislike (user_id, anime_id, seasondb_id, created_at) VALUES (?, ?, ?, ?)`,
-      params: [userId, animeId, animeinfoId, now],
-    },
-    {
-      sql: `DELETE FROM stat_like WHERE user_id = ? AND seasondb_id = ?`,
-      params: [userId, animeinfoId],
-    },
-  ]);
-  return "added";
+  return Number(r[0]?.reaction) === -1 ? "added" : "removed";
 }
 
 export async function toggleSave(
@@ -901,20 +866,13 @@ export async function toggleSave(
   animeId: number,
   animeinfoId: number
 ): Promise<"added" | "removed"> {
-  const now = formatTashkent();
-  const existing = await d1Query<{ user_id: number }>(
-    `SELECT user_id FROM stat_save WHERE user_id = ? AND seasondb_id = ?`,
-    [userId, animeinfoId]
+  const r = await d1Query<{ saved: number }>(
+    `INSERT INTO stat_user_season (user_id, seasondb_id, anime_id, saved, created_at) VALUES (?, ?, ?, 1, ?)
+     ON CONFLICT(user_id, seasondb_id) DO UPDATE SET saved = 1 - saved
+     RETURNING saved`,
+    [userId, animeinfoId, animeId, nowSec()]
   );
-  if (existing.length > 0) {
-    await d1Query(`DELETE FROM stat_save WHERE user_id = ? AND seasondb_id = ?`, [userId, animeinfoId]);
-    return "removed";
-  }
-  await d1Query(
-    `INSERT OR IGNORE INTO stat_save (user_id, anime_id, seasondb_id, created_at) VALUES (?, ?, ?, ?)`,
-    [userId, animeId, animeinfoId, now]
-  );
-  return "added";
+  return Number(r[0]?.saved) === 1 ? "added" : "removed";
 }
 
 // ─── Animeinfo uchun statistika ───────────────────────────────────────────────
@@ -934,27 +892,28 @@ export async function getAnimeInfoStats(
   animeinfoId: number,
   userId: number
 ): Promise<AnimeInfoStats> {
-  // Barcha 8 so'rov DB_STAT — bitta batch
-  const results = await d1BatchRead<{ cnt?: number; user_id?: number }>([
-    { sql: `SELECT COUNT(*) AS cnt FROM stat_like WHERE seasondb_id = ?`,    params: [animeinfoId] },
-    { sql: `SELECT COUNT(*) AS cnt FROM stat_dislike WHERE seasondb_id = ?`, params: [animeinfoId] },
-    { sql: `SELECT COUNT(*) AS cnt FROM stat_save WHERE seasondb_id = ?`,    params: [animeinfoId] },
-    { sql: `SELECT COUNT(*) AS cnt FROM stat_coment WHERE seasondb_id = ?`,  params: [animeinfoId] },
-    { sql: `SELECT COUNT(*) AS cnt FROM stat_share WHERE seasondb_id = ?`,   params: [animeinfoId] },
-    { sql: `SELECT user_id FROM stat_like WHERE user_id = ? AND seasondb_id = ?`,    params: [userId, animeinfoId] },
-    { sql: `SELECT user_id FROM stat_dislike WHERE user_id = ? AND seasondb_id = ?`, params: [userId, animeinfoId] },
-    { sql: `SELECT user_id FROM stat_save WHERE user_id = ? AND seasondb_id = ?`,    params: [userId, animeinfoId] },
+  // 3 ta so'rov — BITTA HTTP safari (oldin 8 ta so'rov edi).
+  const [agg, mine, comments] = await d1BatchRead<Record<string, number>>([
+    {
+      sql: `SELECT COALESCE(SUM(reaction = 1), 0) AS likes, COALESCE(SUM(reaction = -1), 0) AS dislikes,
+                   COALESCE(SUM(saved), 0) AS saves, COALESCE(SUM(shared), 0) AS shares
+            FROM stat_user_season WHERE seasondb_id = ?`,
+      params: [animeinfoId],
+    },
+    { sql: `SELECT reaction, saved FROM stat_user_season WHERE user_id = ? AND seasondb_id = ?`, params: [userId, animeinfoId] },
+    { sql: `SELECT COUNT(*) AS cnt FROM stat_coment WHERE seasondb_id = ?`, params: [animeinfoId] },
   ]);
-  const [likes, dislikes, saves, comments, shares, userLike, userDislike, userSave] = results;
+  const a = agg[0] ?? {};
+  const m = mine[0] ?? {};
   return {
-    likes:        Number((likes[0] as any)?.cnt ?? 0),
-    dislikes:     Number((dislikes[0] as any)?.cnt ?? 0),
-    saves:        Number((saves[0] as any)?.cnt ?? 0),
-    comments:     Number((comments[0] as any)?.cnt ?? 0),
-    shares:       Number((shares[0] as any)?.cnt ?? 0),
-    userLiked:    userLike.length > 0,
-    userDisliked: userDislike.length > 0,
-    userSaved:    userSave.length > 0,
+    likes:        Number(a.likes ?? 0),
+    dislikes:     Number(a.dislikes ?? 0),
+    saves:        Number(a.saves ?? 0),
+    comments:     Number(comments[0]?.cnt ?? 0),
+    shares:       Number(a.shares ?? 0),
+    userLiked:    Number(m.reaction ?? 0) === 1,
+    userDisliked: Number(m.reaction ?? 0) === -1,
+    userSaved:    Number(m.saved ?? 0) === 1,
   };
 }
 
@@ -964,39 +923,25 @@ export async function insertShare(
   userId: number,
   animeId: number,
   seasondbId: number,
-  epizodId: number
+  _epizodId: number
 ): Promise<void> {
-  const data = formatTashkent();
+  // Ulashish — foydalanuvchi + bo'lim uchun bir marta belgilanadi (qayta ulashish sonni oshirmaydi).
   await d1Query(
-    `INSERT INTO stat_share (user_id, anime_id, seasondb_id, epizod_id, data) VALUES (?, ?, ?, ?, ?)`,
-    [userId, animeId, seasondbId, epizodId, data]
+    `INSERT INTO stat_user_season (user_id, seasondb_id, anime_id, shared, created_at) VALUES (?, ?, ?, 1, ?)
+     ON CONFLICT(user_id, seasondb_id) DO UPDATE SET shared = 1`,
+    [userId, seasondbId, animeId, nowSec()]
   );
 }
 
 export async function getShareCount(seasondbId: number): Promise<number> {
   const rows = await d1Query<{ cnt: number }>(
-    `SELECT COUNT(*) AS cnt FROM stat_share WHERE seasondb_id = ?`,
+    `SELECT COALESCE(SUM(shared), 0) AS cnt FROM stat_user_season WHERE seasondb_id = ?`,
     [seasondbId]
   );
-  return rows[0]?.cnt ?? 0;
+  return Number(rows[0]?.cnt ?? 0);
 }
 
-export async function insertShareIfNew(
-  userId: number,
-  animeId: number,
-  seasondbId: number,
-  epizodId: number
-): Promise<void> {
-  const data = formatTashkent();
-  await d1Query(
-    `INSERT INTO stat_share (user_id, anime_id, seasondb_id, epizod_id, data)
-     SELECT ?, ?, ?, ?, ?
-     WHERE NOT EXISTS (
-       SELECT 1 FROM stat_share WHERE user_id = ? AND anime_id = ? AND seasondb_id = ?
-     )`,
-    [userId, animeId, seasondbId, epizodId, data, userId, animeId, seasondbId]
-  );
-}
+export const insertShareIfNew = insertShare;
 
 // ─── stat_coment ──────────────────────────────────────────────────────────────
 
@@ -1007,7 +952,7 @@ export interface CommentRecord {
   anime_id: number;
   seasondb_id: number;
   comment: string;
-  data: string;
+  created_at: number;
 }
 
 export async function countComments(seasondbId: number): Promise<number> {
@@ -1026,7 +971,7 @@ export async function getCommentsPaginated(
   const offset = (page - 1) * pageSize;
   const [rows, cnt] = await d1BatchRead<any>([
     {
-      sql: `SELECT rowid, user_id, username, anime_id, seasondb_id, comment, data FROM stat_coment WHERE seasondb_id = ? ORDER BY rowid DESC LIMIT ? OFFSET ?`,
+      sql: `SELECT rowid, user_id, username, anime_id, seasondb_id, comment, created_at FROM stat_coment WHERE seasondb_id = ? ORDER BY rowid DESC LIMIT ? OFFSET ?`,
       params: [seasondbId, pageSize, offset],
     },
     { sql: `SELECT COUNT(*) AS cnt FROM stat_coment WHERE seasondb_id = ?`, params: [seasondbId] },
@@ -1043,7 +988,7 @@ export async function getUserCommentsPaginated(
   const offset = (page - 1) * pageSize;
   const [rows, cnt] = await d1BatchRead<any>([
     {
-      sql: `SELECT rowid, user_id, username, anime_id, seasondb_id, comment, data FROM stat_coment WHERE user_id = ? AND seasondb_id = ? ORDER BY rowid DESC LIMIT ? OFFSET ?`,
+      sql: `SELECT rowid, user_id, username, anime_id, seasondb_id, comment, created_at FROM stat_coment WHERE user_id = ? AND seasondb_id = ? ORDER BY rowid DESC LIMIT ? OFFSET ?`,
       params: [userId, seasondbId, pageSize, offset],
     },
     {
@@ -1056,7 +1001,7 @@ export async function getUserCommentsPaginated(
 
 export async function getComment(rowid: number): Promise<CommentRecord | null> {
   const rows = await d1Query<CommentRecord>(
-    `SELECT rowid, user_id, username, anime_id, seasondb_id, comment, data FROM stat_coment WHERE rowid = ?`,
+    `SELECT rowid, user_id, username, anime_id, seasondb_id, comment, created_at FROM stat_coment WHERE rowid = ?`,
     [rowid]
   );
   return rows[0] ?? null;
@@ -1069,10 +1014,9 @@ export async function insertComment(
   seasondbId: number,
   comment: string
 ): Promise<void> {
-  const data = formatTashkent();
   await d1Query(
-    `INSERT INTO stat_coment (user_id, username, anime_id, seasondb_id, comment, data) VALUES (?, ?, ?, ?, ?, ?)`,
-    [userId, username, animeId, seasondbId, comment, data]
+    `INSERT INTO stat_coment (user_id, username, anime_id, seasondb_id, comment, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+    [userId, username, animeId, seasondbId, comment, nowSec()]
   );
 }
 

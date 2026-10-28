@@ -1,100 +1,154 @@
 /**
- * Cloudflare D1 — uch bazali arxitektura.
+ * Turso (libSQL) — BITTA baza (`aniraxuzbot-arumedia`), HTTP (Hrana) orqali.
  *
- * DB_ANIME : anime_db, season_db, epizod_db
- * DB_STAT  : stat_downloads, stat_like, stat_dislike, stat_save, stat_coment, stat_share
- * DB_MAIN  : user_db, sessions, bot_settings, post_queue,
- *            chanel_info_db, request_chanel_db, tashqi_link_db, kanstruktor_info_db
+ * Oldin: 3 ta Cloudflare D1 (anime / stat / main). Endi hamma jadval bitta bazada. Eski D1 bazalar tegilmagan holda turadi
+ * (`wrangler.toml` oxiridagi izohga qarang) — bot ularni ishlatmaydi.
  *
- * Har bir so'rov SQL dagi jadval nomiga qarab avtomatik yo'naltiriladi.
- * Jadvallar mavjud bo'lmasa — avtomatik qayta yaratiladi (no-op IF NOT EXISTS).
+ * Funksiya nomlari (d1Run, d1Update, d1InsertReturningId, d1Batch, d1BatchRead, ensureD1Tables) saqlangan — ularga bog'liq
+ * kod o'zgarmadi. Kalitlar: `TURSO_URL` va `TURSO_TOKEN` (Cloudflare secret; manba — `turso.enc`, ENCODE_TOKEN bilan shifrlangan).
+ *
+ * Jadval tuzilmasi qoidalari (jurnal/statistika jadvallari):
+ *  - vaqt — `created_at INTEGER` (UTC unix soniya, `unixepoch()`); matn sanadan ~4 baravar ixcham va indeksga qulay;
+ *  - ustun nomlari bir xil: `user_id`, `anime_id`, `seasondb_id`, `episode_id`/`epizod_id`, `created_at`;
+ *  - kompozit kalitli jadvallar `WITHOUT ROWID` (kalit — yagona B-daraxt, ortiqcha indeks kerak emas);
+ *  - indeks faqat haqiqiy so'rovlar uchun (kalit prefiksi yetarli bo'lsa — alohida indeks yo'q).
  */
 
 import { SQL_TASHKENT_NOW } from "./date_utils.ts";
 
-// ─── D1Database minimal type (CF Workers global) ─────────────────────────────
-interface D1PreparedStatement {
-  bind(...values: unknown[]): D1PreparedStatement;
-  all<T = Record<string, unknown>>(): Promise<{ results: T[]; success: boolean; error?: string; meta: { changes: number; last_row_id: number } }>;
-  run(): Promise<{ success: boolean; error?: string; meta: { changes: number; last_row_id: number } }>;
-}
-interface D1Database {
-  prepare(query: string): D1PreparedStatement;
-  batch(statements: D1PreparedStatement[]): Promise<Array<{ results: unknown[]; success: boolean; error?: string; meta: { changes: number; last_row_id: number } }>>;
-}
-
-// ─── Binding holatlari ────────────────────────────────────────────────────────
-let _dbAnime: D1Database | null = null;
-let _dbStat: D1Database | null = null;
-let _dbMain: D1Database | null = null;
-
-// Jadvallar bir marta yaratildi
-let _tablesReady = false;
-let _initPromise: Promise<void> | null = null;
+// ─── Ulanish ──────────────────────────────────────────────────────────────────
 
 export interface D1Env {
-  DB_ANIME?: D1Database;
-  DB_STAT?: D1Database;
-  DB_MAIN?: D1Database;
+  TURSO_URL?: string;
+  TURSO_TOKEN?: string;
 }
 
-/** worker.ts da env dan D1 bindinglari o'rnatiladi. */
+let _url = "";
+let _token = "";
+
+/** worker.ts da env dan Turso kalitlari o'rnatiladi. */
 export function initD1Bindings(env: D1Env): void {
-  if (env.DB_ANIME) _dbAnime = env.DB_ANIME;
-  if (env.DB_STAT)  _dbStat  = env.DB_STAT;
-  if (env.DB_MAIN)  _dbMain  = env.DB_MAIN;
+  if (env.TURSO_URL) _url = String(env.TURSO_URL).trim().replace(/\/+$/, "");
+  if (env.TURSO_TOKEN) _token = String(env.TURSO_TOKEN).trim();
 }
 
-// ─── Jadval → DB xaritasi ─────────────────────────────────────────────────────
-const ANIME_TABLES = new Set([
-  "anime_db", "season_db", "epizod_db",
-]);
-const STAT_TABLES = new Set([
-  "stat_downloads", "stat_like", "stat_dislike",
-  "stat_save", "stat_coment", "stat_share",
-  "stat_watch_history",
-]);
+type HranaValue =
+  | { type: "null" }
+  | { type: "integer"; value: string }
+  | { type: "float"; value: number }
+  | { type: "text"; value: string }
+  | { type: "blob"; base64: string };
 
-type DbKey = "ANIME" | "STAT" | "MAIN";
-
-function detectDbKey(sql: string): DbKey {
-  // FROM, INTO, UPDATE, JOIN, TABLE, DELETE FROM — birinchi jadval nomi
-  const m = sql.match(/(?:FROM|INTO|UPDATE|JOIN|TABLE)\s+"?(\w+)"?/i);
-  const table = m?.[1] ?? "";
-  if (ANIME_TABLES.has(table)) return "ANIME";
-  if (STAT_TABLES.has(table))  return "STAT";
-  return "MAIN";
+function encodeArg(v: unknown): HranaValue {
+  if (v === null || v === undefined) return { type: "null" };
+  if (typeof v === "boolean") return { type: "integer", value: v ? "1" : "0" };
+  if (typeof v === "bigint") return { type: "integer", value: v.toString() };
+  if (typeof v === "number") {
+    return Number.isInteger(v) ? { type: "integer", value: String(v) } : { type: "float", value: v };
+  }
+  return { type: "text", value: String(v) };
 }
 
-function getDb(key: DbKey): D1Database {
-  switch (key) {
-    case "ANIME": return _dbAnime ?? (() => { throw new Error("DB_ANIME bind qilinmagan"); })();
-    case "STAT":  return _dbStat  ?? (() => { throw new Error("DB_STAT bind qilinmagan"); })();
-    case "MAIN":  return _dbMain  ?? (() => { throw new Error("DB_MAIN bind qilinmagan"); })();
+function decodeValue(v: { type: string; value?: string | number; base64?: string }): unknown {
+  switch (v.type) {
+    case "null": return null;
+    case "integer": return Number(v.value);
+    case "float": return Number(v.value);
+    case "blob": return v.base64 ?? "";
+    default: return v.value ?? "";
   }
 }
 
-function getDbForSql(sql: string): D1Database {
-  return getDb(detectDbKey(sql));
+interface HranaResult {
+  cols: { name: string }[];
+  rows: { type: string; value?: string | number; base64?: string }[][];
+  affected_row_count?: number;
+  last_insert_rowid?: string | null;
+}
+
+function toObjects<T>(r: HranaResult): T[] {
+  const names = r.cols.map((c) => c.name);
+  return r.rows.map((row) => {
+    const o: Record<string, unknown> = {};
+    row.forEach((cell, i) => { o[names[i]] = decodeValue(cell); });
+    return o as T;
+  });
+}
+
+const stmtOf = (sql: string, params: unknown[] = []) => ({ sql, args: params.map(encodeArg) });
+
+/** Bitta HTTP so'rovi (pipeline). Tarmoq/5xx/429 xatolarida 2 marta qayta uriniladi. */
+async function pipeline(requests: unknown[]): Promise<any[]> {
+  if (!_url || !_token) throw new Error("Turso kalitlari yo'q — TURSO_URL / TURSO_TOKEN (initD1Bindings)");
+  const body = JSON.stringify({ requests: [...requests, { type: "close" }] });
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const r = await fetch(`${_url}/v2/pipeline`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${_token}`, "Content-Type": "application/json" },
+        body,
+      });
+      if (r.status === 429 || r.status >= 500) throw new Error(`Turso HTTP ${r.status}`);
+      const j = (await r.json()) as { results?: any[]; error?: string };
+      if (!r.ok || !j.results) throw Object.assign(new Error(`Turso xato (${r.status}): ${j.error ?? JSON.stringify(j).slice(0, 200)}`), { fatal: true });
+      return j.results;
+    } catch (e) {
+      lastErr = e;
+      if ((e as { fatal?: boolean }).fatal) throw e;
+      await new Promise((res) => setTimeout(res, 150 * (attempt + 1)));
+    }
+  }
+  throw lastErr;
+}
+
+function failIfError(r: any): void {
+  if (r?.type === "error") throw new Error(`Turso SQL xato: ${r.error?.message ?? "?"}`);
+}
+
+/** Bitta so'rovni bajaradi. */
+async function execute(sql: string, params: unknown[] = []): Promise<HranaResult> {
+  const res = await pipeline([{ type: "execute", stmt: stmtOf(sql, params) }]);
+  failIfError(res[0]);
+  return res[0].response.result as HranaResult;
+}
+
+/**
+ * Bir nechta so'rov — BITTA HTTP safari. `atomic` bo'lsa tranzaksiya (birortasi xato bersa — hammasi bekor), aks holda
+ * ketma-ket mustaqil. Har so'rov natijasi qaytadi.
+ */
+async function batch(queries: { sql: string; params?: unknown[] }[], atomic: boolean): Promise<HranaResult[]> {
+  if (queries.length === 0) return [];
+  const steps: any[] = [];
+  if (atomic) {
+    steps.push({ stmt: { sql: "BEGIN" } });
+    queries.forEach((q, i) => {
+      steps.push({ stmt: stmtOf(q.sql, q.params), condition: { type: "ok", step: i } });
+    });
+    const last = queries.length; // oxirgi so'rov bosqichi
+    steps.push({ stmt: { sql: "COMMIT" }, condition: { type: "ok", step: last } });
+    steps.push({ stmt: { sql: "ROLLBACK" }, condition: { type: "not", cond: { type: "ok", step: last + 1 } } });
+  } else {
+    queries.forEach((q) => steps.push({ stmt: stmtOf(q.sql, q.params) }));
+  }
+  const res = await pipeline([{ type: "batch", batch: { steps } }]);
+  failIfError(res[0]);
+  const { step_results, step_errors } = res[0].response.result as {
+    step_results: (HranaResult | null)[];
+    step_errors: ({ message: string } | null)[];
+  };
+  const off = atomic ? 1 : 0;
+  for (let i = 0; i < step_errors.length; i++) {
+    if (step_errors[i]) throw new Error(`Turso batch xato: ${step_errors[i]!.message}`);
+  }
+  return queries.map((_, i) => step_results[i + off] as HranaResult);
 }
 
 /** "no such table" xatosimi? */
 function isMissingTableError(e: unknown): boolean {
   const msg = String(e).toLowerCase();
-  return (
-    msg.includes("no such table") ||
-    msg.includes("table not found") ||
-    msg.includes("does not exist")
-  );
+  return msg.includes("no such table") || msg.includes("no such column");
 }
-
-/** D1 natijasini tekshiradi va xato bo'lsa throw qiladi */
-function checkError<T extends { success: boolean; error?: string }>(r: T): T {
-  if (!r.success && r.error) throw new Error(`D1 xato: ${r.error}`);
-  return r;
-}
-
-// ─── Asosiy so'rov funksiyalari ───────────────────────────────────────────────
 
 // ─── O'qish keshi (10 daqiqa) ─────────────────────────────────────────────────
 // So'rovlar sonini kamaytirish uchun kam o'zgaradigan kontent jadvallaridan o'qish natijalari 10 daqiqagacha keshlanadi.
@@ -106,7 +160,7 @@ function checkError<T extends { success: boolean; error?: string }>(r: T): T {
 const READ_CACHE_TTL_MS = 10 * 60 * 1000;
 const READ_CACHE_MAX = 2000;
 const VERSION_CHECK_MS = 30 * 1000;
-const CACHED_TABLES = new Set([...ANIME_TABLES, "chanel_info_db", "tashqi_link_db"]);
+const CACHED_TABLES = new Set(["anime_db", "season_db", "epizod_db", "chanel_info_db", "tashqi_link_db"]);
 const _readCache = new Map<string, { rows: unknown[]; expires: number }>();
 let _verCheckedAt = 0;
 let _ver: string | null = null;
@@ -131,8 +185,8 @@ async function syncContentVersion(): Promise<void> {
   if (now - _verCheckedAt < VERSION_CHECK_MS) return;
   _verCheckedAt = now;
   try {
-    const r = await getDb("MAIN").prepare(`SELECT value FROM bot_settings WHERE key = 'content_ver'`).all<{ value: string }>();
-    const v = r.results[0]?.value ?? "0";
+    const r = await execute(`SELECT value FROM bot_settings WHERE key = 'content_ver'`);
+    const v = String(r.rows[0] ? decodeValue(r.rows[0][0]) : "0");
     if (_ver !== null && v !== _ver) _readCache.clear();
     _ver = v;
   } catch {
@@ -146,32 +200,44 @@ async function onWrite(sql: string): Promise<void> {
   if (!tablesOf(sql, true).some((x) => CACHED_TABLES.has(x))) return;
   _readCache.clear();
   try {
-    await getDb("MAIN")
-      .prepare(`INSERT INTO bot_settings (key, value) VALUES ('content_ver', '1')
-                ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT)`)
-      .run();
+    await execute(
+      `INSERT INTO bot_settings (key, value) VALUES ('content_ver', '1')
+       ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT)`
+    );
     _verCheckedAt = 0;
   } catch {
     /* versiya yozilmasa ham mahalliy kesh tozalangan; boshqa isolate'larda kesh TTL bilan tugaydi */
   }
 }
 
-export async function d1Run<T = Record<string, unknown>>(
-  sql: string,
-  params: unknown[] = []
-): Promise<T[]> {
+// ─── Asosiy so'rov funksiyalari ───────────────────────────────────────────────
+
+async function withTables<R>(run: () => Promise<R>): Promise<R> {
+  try {
+    return await run();
+  } catch (e) {
+    if (isMissingTableError(e) && !_tablesReady) {
+      await ensureD1Tables();
+      return await run();
+    }
+    throw e;
+  }
+}
+
+/** SELECT (yoki natija qaytaradigan so'rov). Kontent jadvallari bo'lsa 10 daqiqa keshlanadi. */
+export async function d1Run<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T[]> {
   if (isWriteSql(sql)) {
-    const rows = await d1RunRaw<T>(sql, params);
+    const rows = toObjects<T>(await withTables(() => execute(sql, params)));
     await onWrite(sql);
     return rows;
   }
-  if (!isCacheableRead(sql)) return d1RunRaw<T>(sql, params);
+  if (!isCacheableRead(sql)) return toObjects<T>(await withTables(() => execute(sql, params)));
 
   await syncContentVersion();
   const key = sql + "\u0000" + JSON.stringify(params);
   const hit = _readCache.get(key);
   if (hit && hit.expires > Date.now()) return structuredClone(hit.rows) as T[];
-  const rows = await d1RunRaw<T>(sql, params);
+  const rows = toObjects<T>(await withTables(() => execute(sql, params)));
   if (_readCache.size >= READ_CACHE_MAX) {
     const first = _readCache.keys().next().value;
     if (first !== undefined) _readCache.delete(first);
@@ -180,100 +246,23 @@ export async function d1Run<T = Record<string, unknown>>(
   return rows;
 }
 
-/**
- * SELECT so'rovi — jadval nomiga qarab avtomatik DB tanlanadi.
- * "no such table" → jadvallar qayta yaratiladi va bir marta qayta uriniladi.
- */
-async function d1RunRaw<T = Record<string, unknown>>(
-  sql: string,
-  params: unknown[] = []
-): Promise<T[]> {
-  const db = getDbForSql(sql);
-  const run = async () => {
-    const stmt = params.length > 0 ? db.prepare(sql).bind(...params) : db.prepare(sql);
-    const r = await stmt.all<T>();
-    checkError(r);
-    return r.results;
-  };
-
-  try {
-    return await run();
-  } catch (e) {
-    if (isMissingTableError(e)) {
-      console.warn(`d1Run: "no such table" — jadvallar qayta yaratilmoqda (${sql.slice(0, 50)})`);
-      await ensureD1Tables();
-      return await run();
-    }
-    throw e;
-  }
-}
-
-/**
- * DML (INSERT/UPDATE/DELETE) — rowsAffected qaytaradi.
- * Lock tekshirish uchun: agar rowsAffected=0 bo'lsa, boshqa worker olgan.
- */
+/** DML (INSERT/UPDATE/DELETE) — o'zgargan qatorlar sonini qaytaradi (lock tekshirish uchun). */
 export async function d1Update(sql: string, params: unknown[] = []): Promise<number> {
-  const n = await d1UpdateRaw(sql, params);
+  const r = await withTables(() => execute(sql, params));
   await onWrite(sql);
-  return n;
+  return r.affected_row_count ?? 0;
 }
 
-async function d1UpdateRaw(sql: string, params: unknown[] = []): Promise<number> {
-  const db = getDbForSql(sql);
-  const run = async () => {
-    const stmt = params.length > 0 ? db.prepare(sql).bind(...params) : db.prepare(sql);
-    const r = await stmt.run();
-    checkError(r);
-    return r.meta.changes ?? 0;
-  };
-
-  try {
-    return await run();
-  } catch (e) {
-    if (isMissingTableError(e)) {
-      await ensureD1Tables();
-      return await run();
-    }
-    throw e;
-  }
-}
-
-/**
- * INSERT RETURNING rowid/id — yangi qator primary keyini qaytaradi.
- */
+/** INSERT ... RETURNING — yangi qator primary keyini qaytaradi. */
 export async function d1InsertReturningId(
   sql: string,
   params: unknown[],
   pkColumn: string = "id"
 ): Promise<number> {
-  const id = await d1InsertReturningIdRaw(sql, params, pkColumn);
+  const r = await withTables(() => execute(`${sql} RETURNING ${pkColumn}`, params));
   await onWrite(sql);
-  return id;
-}
-
-async function d1InsertReturningIdRaw(
-  sql: string,
-  params: unknown[],
-  pkColumn: string = "id"
-): Promise<number> {
-  const db = getDbForSql(sql);
-  const run = async () => {
-    const fullSql = `${sql} RETURNING ${pkColumn}`;
-    const stmt = params.length > 0 ? db.prepare(fullSql).bind(...params) : db.prepare(fullSql);
-    const r = await stmt.all<Record<string, number>>();
-    checkError(r);
-    return Number(r.results[0]?.[pkColumn] ?? 0);
-  };
-
-  try {
-    return await run();
-  } catch (e) {
-    if (isMissingTableError(e)) {
-      await ensureD1Tables();
-      return await run();
-    }
-    throw e;
-  }
+  const row = toObjects<Record<string, number>>(r)[0];
+  return Number(row?.[pkColumn] ?? 0);
 }
 
 export interface BatchQuery {
@@ -281,107 +270,48 @@ export interface BatchQuery {
   params?: unknown[];
 }
 
-/**
- * Bir nechta DML so'rovni BITTA network safari bilan yuboradi.
- * Agar so'rovlar turli bazalarga tegishli bo'lsa — guruhlab parallel yuboriladi.
- */
+/** Bir nechta DML so'rov — BITTA HTTP safari va BITTA tranzaksiya (hammasi yoki hech biri). */
 export async function d1Batch(queries: BatchQuery[]): Promise<void> {
   if (queries.length === 0) return;
-  await d1BatchRaw(queries);
+  await withTables(() => batch(queries, true));
   for (const q of queries) await onWrite(q.sql);
 }
 
-async function d1BatchRaw(queries: BatchQuery[]): Promise<void> {
-
-  // Bazalar bo'yicha guruhlash
-  const groups = new Map<DbKey, BatchQuery[]>();
-  for (const q of queries) {
-    const key = detectDbKey(q.sql);
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key)!.push(q);
-  }
-
-  // Har guruhni parallel yuborish
-  await Promise.all(
-    [...groups.entries()].map(async ([key, qs]) => {
-      const db = getDb(key);
-      const run = async () => {
-        const stmts = qs.map(q =>
-          q.params && q.params.length > 0
-            ? db.prepare(q.sql).bind(...q.params)
-            : db.prepare(q.sql)
-        );
-        const results = await db.batch(stmts);
-        for (const r of results) {
-          if (!r.success && r.error) throw new Error(`D1 batch xato: ${r.error}`);
-        }
-      };
-      try {
-        await run();
-      } catch (e) {
-        if (isMissingTableError(e)) {
-          await ensureD1Tables();
-          await run();
-        } else {
-          throw e;
-        }
-      }
-    })
-  );
-}
-
-/**
- * Bir nechta SELECT so'rovini BITTA batch bilan yuboradi.
- * MUHIM: barcha so'rovlar BIR XIL bazaga tegishli bo'lishi kerak!
- * Aks holda har biri alohida d1Run orqali chaqiriladi.
- */
+/** Bir nechta SELECT — BITTA HTTP safari. Natijalar so'rovlar tartibida. */
 export async function d1BatchRead<T = Record<string, unknown>>(
   queries: { sql: string; params?: unknown[] }[]
 ): Promise<T[][]> {
   if (queries.length === 0) return [];
-
-  // Bir xil bazaga tegishli so'rovlar guruhlanadi
-  const firstKey = detectDbKey(queries[0].sql);
-  const allSameDb = queries.every(q => detectDbKey(q.sql) === firstKey);
-
-  if (allSameDb) {
-    const db = getDb(firstKey);
-    const run = async () => {
-      const stmts = queries.map(q =>
-        q.params && q.params.length > 0
-          ? db.prepare(q.sql).bind(...q.params)
-          : db.prepare(q.sql)
-      );
-      const results = await db.batch(stmts);
-      return results.map(r => {
-        if (!r.success && (r as any).error) throw new Error(`D1 batchRead xato: ${(r as any).error}`);
-        return r.results as T[];
-      });
-    };
-    try {
-      return await run();
-    } catch (e) {
-      if (isMissingTableError(e)) {
-        await ensureD1Tables();
-        return await run();
-      }
-      throw e;
-    }
-  }
-
-  // Turli bazalar — parallel alohida so'rovlar
-  return Promise.all(queries.map(q => d1Run<T>(q.sql, q.params)));
+  const res = await withTables(() => batch(queries, false));
+  return res.map((r) => toObjects<T>(r));
 }
 
-// ─── Jadval yaratish (schema) ─────────────────────────────────────────────────
+// ─── Jadvallar (sxema) ────────────────────────────────────────────────────────
 
-/** Jadvallar mavjud bo'lmasa yaratadi — faqat birinchi marta (yoki xatoda). */
+const SCHEMA_VERSION = "2";
+let _tablesReady = false;
+let _initPromise: Promise<void> | null = null;
+
+/** Jadvallar bir marta tekshiriladi (isolate boshiga 1 ta kichik so'rov); sxema versiyasi mos bo'lmasa yaratiladi. */
 export async function ensureD1Tables(): Promise<void> {
   if (_tablesReady) return;
   if (_initPromise) return _initPromise;
-  _initPromise = _initAllD1Tables()
+  _initPromise = (async () => {
+    try {
+      const r = await execute(`SELECT value FROM bot_settings WHERE key = 'schema_ver'`);
+      if (r.rows[0] && String(decodeValue(r.rows[0][0])) === SCHEMA_VERSION) return;
+    } catch {
+      /* jadval yo'q — yaratiladi */
+    }
+    await batch(SCHEMA.map((sql) => ({ sql })), false);
+    await execute(
+      `INSERT INTO bot_settings (key, value) VALUES ('schema_ver', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+      [SCHEMA_VERSION]
+    );
+    console.log("Turso — jadvallar tayyor.");
+  })()
     .then(() => { _tablesReady = true; })
-    .catch(e => { _initPromise = null; throw e; });
+    .catch((e) => { _initPromise = null; throw e; });
   return _initPromise;
 }
 
@@ -390,348 +320,281 @@ export function resetD1TablesFlag(): void {
   _initPromise = null;
 }
 
-async function batchDdl(db: D1Database, sqls: string[]): Promise<void> {
-  // D1 batch faqat prepared statement qabul qiladi
-  const stmts = sqls.map(sql => db.prepare(sql));
-  const results = await db.batch(stmts);
-  for (const r of results) {
-    if (!r.success && (r as any).error) {
-      const err = String((r as any).error);
-      // "already exists" — OK
-      if (!err.includes("already exists") && !err.includes("duplicate")) {
-        console.warn("DDL warning:", err);
-      }
-    }
-  }
-}
+const TS = `INTEGER NOT NULL DEFAULT (unixepoch())`;
 
-async function _initAllD1Tables(): Promise<void> {
-  if (!_dbAnime || !_dbStat || !_dbMain) {
-    throw new Error("D1 bindings hali o'rnatilmagan — initD1Bindings(env) chaqiring");
-  }
+const SCHEMA: string[] = [
+  // Eski (birlashtirilgan) jadvallar — bo'sh bazada qolgan bo'lishi mumkin.
+  `DROP TABLE IF EXISTS stat_like`,
+  `DROP TABLE IF EXISTS stat_dislike`,
+  `DROP TABLE IF EXISTS stat_save`,
+  `DROP TABLE IF EXISTS stat_share`,
+  // ── Kontent: anime → fasl/bo'lim → qism ──────────────────────────────────────
+  `CREATE TABLE IF NOT EXISTS anime_db (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    info TEXT NOT NULL,
+    chanel_id TEXT NOT NULL,
+    file_id TEXT NOT NULL,
+    downloads INTEGER NOT NULL DEFAULT 0,
+    data TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT ${SQL_TASHKENT_NOW},
+    created_at TEXT NOT NULL DEFAULT ${SQL_TASHKENT_NOW}
+  )`,
+  `CREATE TABLE IF NOT EXISTS season_db (
+    rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+    id INTEGER NOT NULL,
+    epizoddb_id INTEGER,
+    name TEXT NOT NULL,
+    info TEXT NOT NULL,
+    kategoriya TEXT NOT NULL,
+    season_id INTEGER,
+    file_id TEXT NOT NULL DEFAULT '',
+    downloads INTEGER NOT NULL DEFAULT 0,
+    data TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT ${SQL_TASHKENT_NOW}
+  )`,
+  `CREATE TABLE IF NOT EXISTS epizod_db (
+    rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+    seasondb_id INTEGER NOT NULL,
+    epizoddb_id INTEGER,
+    id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    epizod_number INTEGER,
+    film_id INTEGER,
+    ova_id INTEGER,
+    epizod_id INTEGER UNIQUE,
+    q1080p_file_chanel_id TEXT,
+    q1080p_file_bot_id TEXT,
+    q720p_file_chanel_id TEXT,
+    q720p_file_bot_id TEXT,
+    q480p_file_chanel_id TEXT,
+    q480p_file_bot_id TEXT,
+    q360p_file_chanel_id TEXT,
+    q360p_file_bot_id TEXT,
+    downloads INTEGER NOT NULL DEFAULT 0,
+    data TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT ${SQL_TASHKENT_NOW}
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_anime_updated      ON anime_db (updated_at DESC, id DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_anime_downloads    ON anime_db (downloads DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_season_anime       ON season_db (id)`,
+  `CREATE INDEX IF NOT EXISTS idx_season_epizoddb    ON season_db (epizoddb_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_epizod_season      ON epizod_db (seasondb_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_epizod_data        ON epizod_db (data DESC)`,
 
-  await Promise.all([
-    _initAnimeTables(_dbAnime),
-    _initStatTables(_dbStat),
-    _initMainTables(_dbMain),
-  ]);
-  console.log("D1 — barcha 3 ta baza jadvallar tayyor.");
-}
+  // ── Jurnallar / statistika (vaqt — INTEGER unix soniya) ──────────────────────
+  // Yuklash: bir foydalanuvchi + bir qism = bitta qator (noyob hisoblagich). So'rovlar: foydalanuvchi bo'yicha (kalit prefiksi),
+  // umumiy son va vaqt oynalari (created_at indeksi).
+  `CREATE TABLE IF NOT EXISTS stat_downloads (
+    user_id INTEGER NOT NULL,
+    episode_id INTEGER NOT NULL,
+    anime_id INTEGER NOT NULL,
+    created_at ${TS},
+    PRIMARY KEY (user_id, episode_id)
+  ) WITHOUT ROWID`,
+  `CREATE INDEX IF NOT EXISTS idx_dl_created ON stat_downloads (created_at)`,
+  // Foydalanuvchi + bo'lim bo'yicha BITTA qator: reaksiya (1 yoqdi / -1 yoqmadi / 0), saqlagan, ulashgan. Avval stat_like,
+  // stat_dislike, stat_save, stat_share alohida jadval edi — endi har amal bitta UPSERT, statistika bitta so'rov.
+  `CREATE TABLE IF NOT EXISTS stat_user_season (
+    user_id INTEGER NOT NULL,
+    seasondb_id INTEGER NOT NULL,
+    anime_id INTEGER NOT NULL,
+    reaction INTEGER NOT NULL DEFAULT 0,
+    saved INTEGER NOT NULL DEFAULT 0,
+    shared INTEGER NOT NULL DEFAULT 0,
+    created_at ${TS},
+    PRIMARY KEY (user_id, seasondb_id)
+  ) WITHOUT ROWID`,
+  `CREATE INDEX IF NOT EXISTS idx_us_season ON stat_user_season (seasondb_id)`,
+  `CREATE TABLE IF NOT EXISTS stat_coment (
+    rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    anime_id INTEGER NOT NULL,
+    seasondb_id INTEGER NOT NULL,
+    username TEXT NOT NULL DEFAULT '',
+    comment TEXT NOT NULL,
+    created_at ${TS}
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_coment_season ON stat_coment (seasondb_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_coment_user   ON stat_coment (user_id, seasondb_id)`,
+  // Ko'rish tarixi: bir foydalanuvchi + bir anime = bitta qator (oxirgi ko'rilgan qism). Kalit so'rovlarni qoplaydi.
+  `CREATE TABLE IF NOT EXISTS stat_watch_history (
+    user_id INTEGER NOT NULL,
+    anime_id INTEGER NOT NULL,
+    epizod_id INTEGER NOT NULL,
+    created_at ${TS},
+    PRIMARY KEY (user_id, anime_id)
+  ) WITHOUT ROWID`,
 
-async function _initAnimeTables(db: D1Database): Promise<void> {
-  const ddl = [
-    `CREATE TABLE IF NOT EXISTS anime_db (
-      id INTEGER PRIMARY KEY,
-      name TEXT NOT NULL,
-      info TEXT NOT NULL,
-      chanel_id TEXT NOT NULL,
-      file_id TEXT NOT NULL,
-      downloads INTEGER NOT NULL DEFAULT 0,
-      data TEXT NOT NULL DEFAULT '',
-      updated_at TEXT NOT NULL DEFAULT (${SQL_TASHKENT_NOW}),
-      created_at TEXT NOT NULL DEFAULT (${SQL_TASHKENT_NOW})
-    )`,
-    `CREATE TABLE IF NOT EXISTS season_db (
-      rowid INTEGER PRIMARY KEY AUTOINCREMENT,
-      id INTEGER NOT NULL,
-      epizoddb_id INTEGER,
-      name TEXT NOT NULL,
-      info TEXT NOT NULL,
-      kategoriya TEXT NOT NULL,
-      season_id INTEGER,
-      file_id TEXT NOT NULL DEFAULT '',
-      downloads INTEGER NOT NULL DEFAULT 0,
-      data TEXT NOT NULL DEFAULT '',
-      created_at TEXT NOT NULL DEFAULT (${SQL_TASHKENT_NOW})
-    )`,
-    `CREATE TABLE IF NOT EXISTS epizod_db (
-      rowid INTEGER PRIMARY KEY AUTOINCREMENT,
-      seasondb_id INTEGER NOT NULL,
-      epizoddb_id INTEGER,
-      id INTEGER NOT NULL,
-      name TEXT NOT NULL,
-      epizod_number INTEGER,
-      film_id INTEGER,
-      ova_id INTEGER,
-      epizod_id INTEGER UNIQUE,
-      q1080p_file_chanel_id TEXT,
-      q1080p_file_bot_id TEXT,
-      q720p_file_chanel_id TEXT,
-      q720p_file_bot_id TEXT,
-      q480p_file_chanel_id TEXT,
-      q480p_file_bot_id TEXT,
-      q360p_file_chanel_id TEXT,
-      q360p_file_bot_id TEXT,
-      downloads INTEGER NOT NULL DEFAULT 0,
-      data TEXT NOT NULL DEFAULT '',
-      created_at TEXT NOT NULL DEFAULT (${SQL_TASHKENT_NOW})
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_anime_updated     ON anime_db (updated_at DESC, id DESC)`,
-    `CREATE INDEX IF NOT EXISTS idx_anime_downloads   ON anime_db (downloads DESC)`,
-    `CREATE INDEX IF NOT EXISTS idx_seasondb_id       ON season_db (id)`,
-    `CREATE INDEX IF NOT EXISTS idx_anime_info_epizoddb ON season_db (epizoddb_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_epizod_anime_info ON epizod_db (seasondb_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_epizod_data       ON epizod_db (data DESC)`,
-  ];
-  await batchDdl(db, ddl);
-}
+  // ── Foydalanuvchilar ─────────────────────────────────────────────────────────
+  `CREATE TABLE IF NOT EXISTS user_db (
+    user_id INTEGER PRIMARY KEY,
+    bot_user_id INTEGER,
+    username TEXT NOT NULL DEFAULT '',
+    user_phone TEXT NOT NULL DEFAULT '',
+    friends_phone TEXT NOT NULL DEFAULT '',
+    balance INTEGER NOT NULL DEFAULT 0,
+    anime_balance INTEGER NOT NULL DEFAULT 0,
+    last_bot_id INTEGER,
+    last_bot_data TEXT NOT NULL DEFAULT '',
+    downloads INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT ${SQL_TASHKENT_NOW},
+    last_active TEXT NOT NULL DEFAULT ${SQL_TASHKENT_NOW}
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_user_last_bot    ON user_db (last_bot_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_user_bot_user_id ON user_db (bot_user_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_user_created     ON user_db (created_at DESC)`,
+  `CREATE TABLE IF NOT EXISTS vip_user (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    duration_days INTEGER NOT NULL,
+    purchased_at TEXT NOT NULL DEFAULT ${SQL_TASHKENT_NOW},
+    expires_at TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TEXT NOT NULL DEFAULT ${SQL_TASHKENT_NOW}
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_vip_user   ON vip_user (user_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_vip_status ON vip_user (status, expires_at)`,
 
-async function _initStatTables(db: D1Database): Promise<void> {
-  const ddl = [
-    `CREATE TABLE IF NOT EXISTS stat_downloads (
-      user_id INTEGER NOT NULL,
-      anime_id INTEGER NOT NULL,
-      episode_id INTEGER NOT NULL,
-      downloaded_at TEXT NOT NULL DEFAULT (${SQL_TASHKENT_NOW}),
-      PRIMARY KEY (user_id, episode_id)
-    )`,
-    `CREATE TABLE IF NOT EXISTS stat_like (
-      user_id INTEGER NOT NULL,
-      anime_id INTEGER NOT NULL,
-      seasondb_id INTEGER NOT NULL,
-      created_at TEXT NOT NULL DEFAULT (${SQL_TASHKENT_NOW}),
-      PRIMARY KEY (user_id, seasondb_id)
-    )`,
-    `CREATE TABLE IF NOT EXISTS stat_dislike (
-      user_id INTEGER NOT NULL,
-      anime_id INTEGER NOT NULL,
-      seasondb_id INTEGER NOT NULL,
-      created_at TEXT NOT NULL DEFAULT (${SQL_TASHKENT_NOW}),
-      PRIMARY KEY (user_id, seasondb_id)
-    )`,
-    `CREATE TABLE IF NOT EXISTS stat_save (
-      user_id INTEGER NOT NULL,
-      anime_id INTEGER NOT NULL,
-      seasondb_id INTEGER NOT NULL,
-      created_at TEXT NOT NULL DEFAULT (${SQL_TASHKENT_NOW}),
-      PRIMARY KEY (user_id, seasondb_id)
-    )`,
-    `CREATE TABLE IF NOT EXISTS stat_coment (
-      rowid INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      username TEXT NOT NULL DEFAULT '',
-      anime_id INTEGER NOT NULL,
-      seasondb_id INTEGER NOT NULL,
-      comment TEXT NOT NULL,
-      data TEXT NOT NULL DEFAULT (${SQL_TASHKENT_NOW})
-    )`,
-    `CREATE TABLE IF NOT EXISTS stat_share (
-      rowid INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      anime_id INTEGER NOT NULL,
-      seasondb_id INTEGER NOT NULL,
-      epizod_id INTEGER NOT NULL,
-      data TEXT NOT NULL DEFAULT (${SQL_TASHKENT_NOW})
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_dl_episode        ON stat_downloads (episode_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_dl_anime          ON stat_downloads (anime_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_dl_user           ON stat_downloads (user_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_like_animeinfo    ON stat_like (seasondb_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_like_anime        ON stat_like (anime_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_dislike_animeinfo ON stat_dislike (seasondb_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_dislike_anime     ON stat_dislike (anime_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_save_animeinfo    ON stat_save (seasondb_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_save_user         ON stat_save (user_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_coment_seasondb   ON stat_coment (seasondb_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_coment_user       ON stat_coment (user_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_coment_anime      ON stat_coment (anime_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_share_seasondb    ON stat_share (seasondb_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_share_user        ON stat_share (user_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_share_epizod      ON stat_share (epizod_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_share_anime       ON stat_share (anime_id)`,
-    // Ko'rish tarixi — foydalanuvchi qaysi anime, qaysi qismda qolganini saqlaydi
-    `CREATE TABLE IF NOT EXISTS stat_watch_history (
-      user_id  INTEGER NOT NULL,
-      anime_id INTEGER NOT NULL,
-      epizod_id INTEGER NOT NULL,
-      create_at TEXT NOT NULL DEFAULT (${SQL_TASHKENT_NOW}),
-      PRIMARY KEY (user_id, anime_id)
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_watch_history_user  ON stat_watch_history (user_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_watch_history_anime ON stat_watch_history (anime_id)`,
-  ];
-  await batchDdl(db, ddl);
-}
+  // ── Tizim: sessiya, sozlamalar, to'lovlar ────────────────────────────────────
+  `CREATE TABLE IF NOT EXISTS sessions (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at ${TS}
+  ) WITHOUT ROWID`,
+  `CREATE INDEX IF NOT EXISTS idx_sessions_updated ON sessions (updated_at)`,
+  `CREATE TABLE IF NOT EXISTS bot_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  ) WITHOUT ROWID`,
+  `CREATE TABLE IF NOT EXISTS bot_payments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id TEXT NOT NULL UNIQUE,
+    user_id INTEGER NOT NULL,
+    amount INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    pay_url TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_pay_user ON bot_payments (user_id, status)`,
 
-async function _initMainTables(db: D1Database): Promise<void> {
-  const ddl = [
-    `CREATE TABLE IF NOT EXISTS user_db (
-      user_id INTEGER PRIMARY KEY,
-      bot_user_id INTEGER,
-      username TEXT NOT NULL DEFAULT '',
-      user_phone TEXT NOT NULL DEFAULT '',
-      friends_phone TEXT NOT NULL DEFAULT '',
-      balance INTEGER NOT NULL DEFAULT 0,
-      anime_balance INTEGER NOT NULL DEFAULT 0,
-      last_bot_id INTEGER,
-      last_bot_data TEXT NOT NULL DEFAULT '',
-      downloads INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL DEFAULT (${SQL_TASHKENT_NOW}),
-      last_active TEXT NOT NULL DEFAULT (${SQL_TASHKENT_NOW})
-    )`,
-    `CREATE TABLE IF NOT EXISTS vip_user (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      duration_days INTEGER NOT NULL,
-      purchased_at TEXT NOT NULL DEFAULT (${SQL_TASHKENT_NOW}),
-      expires_at TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'active',
-      created_at TEXT NOT NULL DEFAULT (${SQL_TASHKENT_NOW})
-    )`,
-    `CREATE TABLE IF NOT EXISTS sessions (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL,
-      updated_at TEXT NOT NULL DEFAULT (${SQL_TASHKENT_NOW})
-    )`,
-    `CREATE TABLE IF NOT EXISTS bot_settings (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    )`,
-    `CREATE TABLE IF NOT EXISTS bot_payments (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      order_id TEXT NOT NULL UNIQUE,
-      user_id INTEGER NOT NULL,
-      amount INTEGER NOT NULL,
-      status TEXT NOT NULL DEFAULT 'pending',
-      pay_url TEXT NOT NULL DEFAULT '',
-      created_at INTEGER NOT NULL,
-      expires_at INTEGER NOT NULL
-    )`,
-    `CREATE TABLE IF NOT EXISTS anibla_jobs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      token TEXT NOT NULL,
-      admin_chat INTEGER NOT NULL,
-      anime_info_id INTEGER NOT NULL,
-      ep_number INTEGER NOT NULL,
-      quality TEXT NOT NULL,
-      title TEXT NOT NULL DEFAULT '',
-      state TEXT NOT NULL DEFAULT 'queued',
-      error TEXT NOT NULL DEFAULT '',
-      created_at INTEGER NOT NULL
-    )`,
-    `CREATE TABLE IF NOT EXISTS anibla_queue_data (
-      job_id INTEGER PRIMARY KEY,
-      video TEXT NOT NULL DEFAULT '',
-      name TEXT NOT NULL DEFAULT '',
-      bot TEXT NOT NULL DEFAULT '',
-      started_at INTEGER NOT NULL DEFAULT 0
-    )`,
-    `CREATE TABLE IF NOT EXISTS player_parts (
-      chat_id INTEGER NOT NULL,
-      msg_id INTEGER NOT NULL,
-      parts TEXT NOT NULL DEFAULT '',
-      created_at INTEGER NOT NULL,
-      PRIMARY KEY (chat_id, msg_id)
-    )`,
-    `CREATE TABLE IF NOT EXISTS anibla_part_files (
-      job_id INTEGER NOT NULL,
-      idx INTEGER NOT NULL,
-      total INTEGER NOT NULL,
-      bot_id TEXT NOT NULL DEFAULT '',
-      chanel_id TEXT NOT NULL DEFAULT '',
-      PRIMARY KEY (job_id, idx)
-    )`,
-    `CREATE TABLE IF NOT EXISTS anibla_parts (
-      job_id INTEGER NOT NULL,
-      idx INTEGER NOT NULL,
-      total INTEGER NOT NULL,
-      file_id TEXT NOT NULL,
-      PRIMARY KEY (job_id, idx)
-    )`,
-    `CREATE TABLE IF NOT EXISTS anibla_progress (
-      job_id INTEGER PRIMARY KEY,
-      text TEXT NOT NULL DEFAULT '',
-      updated_at INTEGER NOT NULL
-    )`,
-    `CREATE TABLE IF NOT EXISTS post_queue (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      batch_id TEXT NOT NULL,
-      admin_chat_id INTEGER NOT NULL,
-      anime_info_id INTEGER NOT NULL,
-      episode_rowid INTEGER NOT NULL,
-      channel_id TEXT NOT NULL,
-      bot_username TEXT NOT NULL DEFAULT '',
-      channel_username TEXT NOT NULL DEFAULT '',
-      status TEXT NOT NULL DEFAULT 'pending',
-      processing_started_at TEXT,
-      posted_at TEXT,
-      created_at TEXT NOT NULL DEFAULT (${SQL_TASHKENT_NOW})
-    )`,
-    `CREATE TABLE IF NOT EXISTS chanel_info_db (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      bot_id INTEGER NOT NULL,
-      chanel_type TEXT NOT NULL,
-      chanel_id TEXT NOT NULL,
-      chanel_username TEXT NOT NULL DEFAULT '',
-      chanel_link TEXT NOT NULL DEFAULT '',
-      chanel_title TEXT NOT NULL DEFAULT '',
-      jami_qoshish_kerak INTEGER NOT NULL DEFAULT 0,
-      jami_qoshilgan INTEGER NOT NULL DEFAULT 0,
-      data TEXT NOT NULL DEFAULT '',
-      created_at TEXT NOT NULL DEFAULT (${SQL_TASHKENT_NOW})
-    )`,
-    `CREATE TABLE IF NOT EXISTS request_chanel_db (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      bot_id INTEGER NOT NULL,
-      chanel_id TEXT NOT NULL,
-      request_user_id INTEGER NOT NULL,
-      chanel_link TEXT NOT NULL DEFAULT '',
-      data TEXT NOT NULL DEFAULT '',
-      created_at TEXT NOT NULL DEFAULT (${SQL_TASHKENT_NOW})
-    )`,
-    `CREATE TABLE IF NOT EXISTS tashqi_link_db (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      bot_id INTEGER NOT NULL,
-      link_name TEXT NOT NULL,
-      link TEXT NOT NULL,
-      data TEXT NOT NULL DEFAULT '',
-      created_at TEXT NOT NULL DEFAULT (${SQL_TASHKENT_NOW})
-    )`,
-    `CREATE TABLE IF NOT EXISTS kanstruktor_info_db (
-      user_id INTEGER PRIMARY KEY,
-      user_phone TEXT NOT NULL DEFAULT '',
-      user_name TEXT NOT NULL DEFAULT '',
-      bot_id INTEGER,
-      bot_token TEXT,
-      create_data TEXT NOT NULL DEFAULT (${SQL_TASHKENT_NOW}),
-      user_status TEXT NOT NULL DEFAULT '',
-      sorov_status TEXT NOT NULL DEFAULT '',
-      admin_1 TEXT,
-      admin_2 TEXT,
-      admin_3 TEXT,
-      admin_4 TEXT,
-      admin_5 TEXT
-    )`,
-    // Indexlar
-    `CREATE INDEX IF NOT EXISTS idx_vip_user_id ON vip_user (user_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_vip_status ON vip_user (status, expires_at)`,
-    `CREATE UNIQUE INDEX IF NOT EXISTS idx_chanel_bot_chanel ON chanel_info_db (bot_id, chanel_id)`,
-    `CREATE UNIQUE INDEX IF NOT EXISTS idx_req_unique ON request_chanel_db (bot_id, chanel_id, request_user_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_link_bot ON tashqi_link_db (bot_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_pq_status ON post_queue (status, id ASC)`,
-    `CREATE INDEX IF NOT EXISTS idx_pq_batch ON post_queue (batch_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_sessions_updated ON sessions (updated_at)`,
-    `CREATE INDEX IF NOT EXISTS idx_user_last_bot ON user_db (last_bot_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_user_bot_user_id ON user_db (bot_user_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_user_created ON user_db (created_at DESC)`,
-    `CREATE INDEX IF NOT EXISTS idx_kanstruktor_bot_id ON kanstruktor_info_db (bot_id)`,
-  ];
-  await batchDdl(db, ddl);
+  // ── Anibla navbati (vaqt — millisekund; qisqa muddatli ishlar) ───────────────
+  `CREATE TABLE IF NOT EXISTS anibla_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    token TEXT NOT NULL,
+    admin_chat INTEGER NOT NULL,
+    anime_info_id INTEGER NOT NULL,
+    ep_number INTEGER NOT NULL,
+    quality TEXT NOT NULL,
+    title TEXT NOT NULL DEFAULT '',
+    state TEXT NOT NULL DEFAULT 'waiting',
+    error TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_aj_queue ON anibla_jobs (quality, state, id)`,
+  `CREATE INDEX IF NOT EXISTS idx_aj_dup   ON anibla_jobs (anime_info_id, ep_number, quality)`,
+  `CREATE TABLE IF NOT EXISTS anibla_queue_data (
+    job_id INTEGER PRIMARY KEY,
+    video TEXT NOT NULL DEFAULT '',
+    name TEXT NOT NULL DEFAULT '',
+    bot TEXT NOT NULL DEFAULT '',
+    started_at INTEGER NOT NULL DEFAULT 0
+  )`,
+  `CREATE TABLE IF NOT EXISTS anibla_progress (
+    job_id INTEGER PRIMARY KEY,
+    text TEXT NOT NULL DEFAULT '',
+    updated_at INTEGER NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS anibla_part_files (
+    job_id INTEGER NOT NULL,
+    idx INTEGER NOT NULL,
+    total INTEGER NOT NULL,
+    bot_id TEXT NOT NULL DEFAULT '',
+    chanel_id TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (job_id, idx)
+  ) WITHOUT ROWID`,
+  `CREATE TABLE IF NOT EXISTS player_parts (
+    chat_id INTEGER NOT NULL,
+    msg_id INTEGER NOT NULL,
+    parts TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (chat_id, msg_id)
+  ) WITHOUT ROWID`,
 
-  // ALTER TABLE — mavjud bazada yangi ustunlar (xato bo'lsa — allaqachon bor)
-  for (const sql of [
-    `ALTER TABLE post_queue ADD COLUMN processing_started_at TEXT`,
-    `ALTER TABLE post_queue ADD COLUMN posted_at TEXT`,
-    `ALTER TABLE user_db DROP COLUMN creat_at`,
-    `ALTER TABLE user_db ADD COLUMN last_active TEXT NOT NULL DEFAULT '1970-01-01 00:00:00'`,
-  ]) {
-    await db.prepare(sql).run().catch(() => {});
-  }
-}
+  // ── Post navbati (vaqt — unix soniya) ────────────────────────────────────────
+  `CREATE TABLE IF NOT EXISTS post_queue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    batch_id TEXT NOT NULL,
+    admin_chat_id INTEGER NOT NULL,
+    anime_info_id INTEGER NOT NULL,
+    episode_rowid INTEGER NOT NULL,
+    channel_id TEXT NOT NULL,
+    bot_username TEXT NOT NULL DEFAULT '',
+    channel_username TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending',
+    processing_started_at INTEGER,
+    posted_at INTEGER,
+    created_at ${TS}
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_pq_status ON post_queue (status, id)`,
+  `CREATE INDEX IF NOT EXISTS idx_pq_batch  ON post_queue (batch_id)`,
 
-// ─── D1 statistika ───────────────────────────────────────────────────────────
+  // ── Kanallar, havolalar, konstruktor ─────────────────────────────────────────
+  `CREATE TABLE IF NOT EXISTS chanel_info_db (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    bot_id INTEGER NOT NULL,
+    chanel_type TEXT NOT NULL,
+    chanel_id TEXT NOT NULL,
+    chanel_username TEXT NOT NULL DEFAULT '',
+    chanel_link TEXT NOT NULL DEFAULT '',
+    chanel_title TEXT NOT NULL DEFAULT '',
+    jami_qoshish_kerak INTEGER NOT NULL DEFAULT 0,
+    jami_qoshilgan INTEGER NOT NULL DEFAULT 0,
+    data TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT ${SQL_TASHKENT_NOW}
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_chanel_bot_chanel ON chanel_info_db (bot_id, chanel_id)`,
+  `CREATE TABLE IF NOT EXISTS request_chanel_db (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    bot_id INTEGER NOT NULL,
+    chanel_id TEXT NOT NULL,
+    request_user_id INTEGER NOT NULL,
+    chanel_link TEXT NOT NULL DEFAULT '',
+    data TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT ${SQL_TASHKENT_NOW}
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_req_unique ON request_chanel_db (bot_id, chanel_id, request_user_id)`,
+  `CREATE TABLE IF NOT EXISTS tashqi_link_db (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    bot_id INTEGER NOT NULL,
+    link_name TEXT NOT NULL,
+    link TEXT NOT NULL,
+    data TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT ${SQL_TASHKENT_NOW}
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_link_bot ON tashqi_link_db (bot_id)`,
+  `CREATE TABLE IF NOT EXISTS kanstruktor_info_db (
+    user_id INTEGER PRIMARY KEY,
+    user_phone TEXT NOT NULL DEFAULT '',
+    user_name TEXT NOT NULL DEFAULT '',
+    bot_id INTEGER,
+    bot_token TEXT,
+    create_data TEXT NOT NULL DEFAULT ${SQL_TASHKENT_NOW},
+    user_status TEXT NOT NULL DEFAULT '',
+    sorov_status TEXT NOT NULL DEFAULT '',
+    admin_1 TEXT,
+    admin_2 TEXT,
+    admin_3 TEXT,
+    admin_4 TEXT,
+    admin_5 TEXT
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_kanstruktor_bot ON kanstruktor_info_db (bot_id)`,
+];
+
+// ─── Statistika (admin "🗄 Database") ─────────────────────────────────────────
 
 export interface D1DbStats {
   name: string;
@@ -739,85 +602,39 @@ export interface D1DbStats {
   totalRows: number;
 }
 
-/** Har uch bazaning jadval statistikasi — bitta chaqiruv. */
-export async function getD1Stats(): Promise<{
-  anime: D1DbStats;
-  stat: D1DbStats;
-  main: D1DbStats;
-}> {
-  const [anime, stat, main] = await Promise.all([
-    _getDbStats("anime", _dbAnime!),
-    _getDbStats("stat",  _dbStat!),
-    _getDbStats("main",  _dbMain!),
-  ]);
-  return { anime, stat, main };
-}
-
-async function _getDbStats(name: string, db: D1Database): Promise<D1DbStats> {
-  if (!db) return { name, tables: [], totalRows: 0 };
+/** Jadvallar va qatorlar soni. */
+export async function getD1Stats(): Promise<D1DbStats> {
   try {
-    // Jadval ro'yxati
-    const tablesRes = await db.prepare(
-      `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' ORDER BY name`
-    ).all<{ name: string }>();
-    const tableNames = tablesRes.results.map(r => r.name);
-    if (tableNames.length === 0) return { name, tables: [], totalRows: 0 };
-
-    // Har jadval uchun COUNT — bitta batch
-    const countStmts = tableNames.map(t => db.prepare(`SELECT COUNT(*) as cnt FROM "${t}"`));
-    const countResults = await db.batch(countStmts);
-
-    const tables = tableNames.map((t, i) => ({
-      table: t,
-      rows: Number((countResults[i].results as any[])[0]?.cnt ?? 0),
-    }));
-    const totalRows = tables.reduce((s, t) => s + t.rows, 0);
-    return { name, tables, totalRows };
+    const t = await execute(
+      `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_litestream%' ORDER BY name`
+    );
+    const names = toObjects<{ name: string }>(t).map((r) => r.name);
+    if (names.length === 0) return { name: "turso", tables: [], totalRows: 0 };
+    const res = await batch(names.map((n) => ({ sql: `SELECT COUNT(*) AS cnt FROM "${n}"` })), false);
+    const tables = names.map((n, i) => ({ table: n, rows: Number(toObjects<{ cnt: number }>(res[i])[0]?.cnt ?? 0) }));
+    return { name: "turso", tables, totalRows: tables.reduce((s, x) => s + x.rows, 0) };
   } catch (e) {
-    console.error(`_getDbStats(${name}) xato:`, e);
-    return { name, tables: [], totalRows: 0 };
+    console.error("getD1Stats xato:", e);
+    return { name: "turso", tables: [], totalRows: 0 };
   }
 }
 
-/** D1 ga ulanishni tekshiradi */
-export async function pingD1(): Promise<{ anime: boolean; stat: boolean; main: boolean }> {
-  const check = async (db: D1Database | null) => {
-    if (!db) return false;
-    try {
-      await db.prepare("SELECT 1").all();
-      return true;
-    } catch { return false; }
-  };
-  const [anime, stat, main] = await Promise.all([
-    check(_dbAnime), check(_dbStat), check(_dbMain),
-  ]);
-  return { anime, stat, main };
+export async function pingD1(): Promise<boolean> {
+  try {
+    await execute("SELECT 1");
+    return true;
+  } catch {
+    return false;
+  }
 }
 
-/** Barcha jadvallardagi ma'lumotlarni eksport qiladi */
+/** Barcha jadvallardagi ma'lumotlarni eksport qiladi. */
 export async function getAllD1TablesData(): Promise<Record<string, Record<string, unknown>[]>> {
-  const [animeStats, statStats, mainStats] = await Promise.all([
-    _getDbStats("anime", _dbAnime!),
-    _getDbStats("stat",  _dbStat!),
-    _getDbStats("main",  _dbMain!),
-  ]);
-
+  const stats = await getD1Stats();
+  const names = stats.tables.map((t) => t.table);
   const result: Record<string, Record<string, unknown>[]> = {};
-
-  const fetchDb = async (db: D1Database, tableNames: string[]) => {
-    if (tableNames.length === 0) return;
-    const stmts = tableNames.map(t => db.prepare(`SELECT * FROM "${t}"`));
-    const results = await db.batch(stmts);
-    tableNames.forEach((t, i) => {
-      result[t] = results[i].results as Record<string, unknown>[];
-    });
-  };
-
-  await Promise.all([
-    fetchDb(_dbAnime!, animeStats.tables.map(t => t.table)),
-    fetchDb(_dbStat!,  statStats.tables.map(t => t.table)),
-    fetchDb(_dbMain!,  mainStats.tables.map(t => t.table)),
-  ]);
-
+  if (names.length === 0) return result;
+  const res = await batch(names.map((n) => ({ sql: `SELECT * FROM "${n}"` })), false);
+  names.forEach((n, i) => { result[n] = toObjects<Record<string, unknown>>(res[i]); });
   return result;
 }
