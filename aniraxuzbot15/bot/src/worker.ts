@@ -14,7 +14,7 @@ import { config } from "./config.ts";
 import { processPostQueue } from "./queue_processor.ts";
 import { aniblaPush, aniblaRunFailed, aniblaTick } from "./handlers/anibla_add.ts";
 import { d1Run, d1Update } from "./db_d1.ts";
-import { initD1Bindings, ensureD1Tables, type D1Env } from "./db_d1.ts";
+import { initD1Bindings, ensureD1Tables, pingD1, type D1Env } from "./db_d1.ts";
 import { createSessionTable } from "./db_sessions.ts";
 
 type CfEnv = D1Env & Record<string, string | undefined>;
@@ -84,7 +84,10 @@ async function ensureReady(): Promise<void> {
 }
 
 // ── Sog'liq tekshiruvi ──────────────────────────────────────────────────────
-app.get("/health", (c) => c.json({ status: "ok", bot: "@aniraxuzbot", db: "D1 x3" }));
+app.get("/health", async (c) => {
+  const db = await pingD1();
+  return c.json({ status: db ? "ok" : "db_error", bot: "@aniraxuzbot", db: db ? "turso ok" : "turso ulanmadi" }, db ? 200 : 503);
+});
 
 // ── Anibla Actions jonli holati (bot_download.py → "📊 Holat") ───────────────
 app.post("/anibla/progress", async (c) => {
