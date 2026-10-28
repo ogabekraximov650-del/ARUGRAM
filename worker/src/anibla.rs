@@ -310,23 +310,47 @@ async fn get(env: &Env, path: &str, auth: bool) -> std::result::Result<Value, St
     get_raw(env, path, auth).await
 }
 
+/// Sayt javob bermayotgan paytda ("backend_unavailable" har so'rovga ~12 s) tugmalar navbatda qotib qolmasin:
+/// shu muddat ichida sayt so'ralmaydi, darhol aniq xabar qaytadi (Telegram webhook yangilanishlarni bittalab yuboradi).
+const SITE_DOWN_MS: i64 = 45 * 1000;
+/// 502/503/504 shundan sekin kelsa — sayt serveri o'zi ham kutib charchagan, qayta urinish foydasiz.
+const SLOW_GATEWAY_MS: i64 = 4000;
+
+thread_local! {
+    static SITE_DOWN_UNTIL: std::cell::Cell<i64> = std::cell::Cell::new(0);
+}
+
+fn site_down_msg(code: i64) -> String {
+    format!("sayt vaqtincha ishlamayapti (HTTP {code}) \u{2014} birozdan keyin qayta urinib ko'ring")
+}
+
 async fn get_raw(env: &Env, path: &str, auth: bool) -> std::result::Result<Value, String> {
+    if now_ms() < SITE_DOWN_UNTIL.with(|c| c.get()) {
+        return Err(site_down_msg(502));
+    }
     let url = format!("{}/{}", api_base(env), path.trim_start_matches('/'));
     let mut relogin = false;
     let mut gateway_tries = 0u32;
-    // 401 -> bir marta qayta kiradi; 502/503/504 (sayt vaqtincha javob bermayapti) -> 3 martagacha
-    // qisqa kutish bilan qayta uriniladi, shunda bot bir martalik nosozlikda xato bermaydi.
+    // 401 -> bir marta qayta kiradi; 502/503/504 (sayt vaqtincha javob bermayapti) -> TEZ kelgan bo'lsa 2 martagacha
+    // qisqa kutish bilan qayta uriniladi; sekin kelgan (sayt kutib charchagan) bo'lsa qayta urinilmaydi va
+    // `SITE_DOWN_MS` davomida sayt so'ralmaydi.
     loop {
         let cookie = if auth { Some(format!("access_token={}", token(env, relogin).await?)) } else { None };
+        let t0 = now_ms();
         let (code, text) = http(&url, Method::Get, None, cookie.as_deref()).await?;
         if code == 401 && auth && !relogin {
             relogin = true;
             continue;
         }
-        if matches!(code, 502 | 503 | 504) && gateway_tries < 3 {
-            gateway_tries += 1;
-            worker::Delay::from(core::time::Duration::from_millis(600 * gateway_tries as u64)).await;
-            continue;
+        if matches!(code, 502 | 503 | 504) {
+            let slow = now_ms() - t0 > SLOW_GATEWAY_MS;
+            if !slow && gateway_tries < 2 {
+                gateway_tries += 1;
+                worker::Delay::from(core::time::Duration::from_millis(600 * gateway_tries as u64)).await;
+                continue;
+            }
+            SITE_DOWN_UNTIL.with(|c| c.set(now_ms() + SITE_DOWN_MS));
+            return Err(site_down_msg(code as i64));
         }
         let v: Value = match serde_json::from_str(&text) {
             Ok(v) => v,

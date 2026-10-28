@@ -61,18 +61,27 @@ const enc = (s: string): string => encodeURIComponent(s);
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Sayt 502/503/504 bersa 3 martagacha qayta uriniladi. */
+// Sayt javob bermayotgan paytda ("backend_unavailable" har so'rovga ~12 s) tugmalar qotib qolmasin: 502/503/504 TEZ kelsa 2 martagacha
+// qayta uriniladi; sekin kelsa (sayt kutib charchagan) qayta urinilmaydi va SITE_DOWN_MS davomida sayt so'ralmaydi.
+const SITE_DOWN_MS = 45 * 1000;
+const SLOW_GATEWAY_MS = 4000;
+let siteDownUntil = 0;
+
 async function http(url: string, init: RequestInit = {}): Promise<{ code: number; text: string }> {
+  if (Date.now() < siteDownUntil) return { code: 502, text: "" };
   let last = { code: 0, text: "" };
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 3; i++) {
+    const t0 = Date.now();
     const r = await fetch(url, {
       ...init,
       headers: { "User-Agent": UA, Accept: "application/json, text/plain, */*", ...(init.headers ?? {}) },
     });
     last = { code: r.status, text: await r.text() };
     if (![502, 503, 504].includes(last.code)) return last;
+    if (Date.now() - t0 > SLOW_GATEWAY_MS) break;
     await sleep(600 * (i + 1));
   }
+  siteDownUntil = Date.now() + SITE_DOWN_MS;
   return last;
 }
 
