@@ -96,11 +96,95 @@ function checkError<T extends { success: boolean; error?: string }>(r: T): T {
 
 // ─── Asosiy so'rov funksiyalari ───────────────────────────────────────────────
 
+// ─── O'qish keshi (10 daqiqa) ─────────────────────────────────────────────────
+// So'rovlar sonini kamaytirish uchun kam o'zgaradigan kontent jadvallaridan o'qish natijalari 10 daqiqagacha keshlanadi.
+// Keshlanadigan jadvallar: anime/fasl/qism va kanal/tashqi havola ro'yxatlari. Foydalanuvchi, to'lov, sessiya, navbat (anibla_*),
+// statistika va sozlamalar KESHLANMAYDI — ularning to'g'riligi muhim.
+//  • Shu jadvallarga yozuv bo'lsa kesh darhol tozalanadi (yuklash hisoblagichi `downloads = downloads + 1` bundan mustasno).
+//  • Worker isolate'lari orasida muvofiqlik: kontent yozilganda `bot_settings.content_ver` oshiriladi; har isolate uni
+//    ≤ 30 soniyada bir marta tekshiradi va o'zgargan bo'lsa keshni tozalaydi. Ya'ni boshqa isolate'da eskirish ≤ 30 soniya.
+const READ_CACHE_TTL_MS = 10 * 60 * 1000;
+const READ_CACHE_MAX = 2000;
+const VERSION_CHECK_MS = 30 * 1000;
+const CACHED_TABLES = new Set([...ANIME_TABLES, "chanel_info_db", "tashqi_link_db"]);
+const _readCache = new Map<string, { rows: unknown[]; expires: number }>();
+let _verCheckedAt = 0;
+let _ver: string | null = null;
+
+const isWriteSql = (sql: string) => /^\s*(INSERT|UPDATE|DELETE|REPLACE)\b/i.test(sql);
+const isCounterOnly = (sql: string) => /^\s*UPDATE\b[^;]*\bdownloads\s*=\s*downloads\s*\+\s*1\b/i.test(sql);
+
+function tablesOf(sql: string, write: boolean): string[] {
+  const re = write ? /(?:UPDATE|INTO|FROM)\s+"?(\w+)"?/gi : /(?:FROM|JOIN)\s+"?(\w+)"?/gi;
+  return [...sql.matchAll(re)].map((m) => m[1]);
+}
+
+/** Barcha jadvallari keshlanadigan SELECT'mi? */
+function isCacheableRead(sql: string): boolean {
+  if (!/^\s*(SELECT|WITH)\b/i.test(sql)) return false;
+  const t = tablesOf(sql, false);
+  return t.length > 0 && t.every((x) => CACHED_TABLES.has(x));
+}
+
+async function syncContentVersion(): Promise<void> {
+  const now = Date.now();
+  if (now - _verCheckedAt < VERSION_CHECK_MS) return;
+  _verCheckedAt = now;
+  try {
+    const r = await getDb("MAIN").prepare(`SELECT value FROM bot_settings WHERE key = 'content_ver'`).all<{ value: string }>();
+    const v = r.results[0]?.value ?? "0";
+    if (_ver !== null && v !== _ver) _readCache.clear();
+    _ver = v;
+  } catch {
+    /* jadval hali yo'q yoki xato — kesh qisqa muddatli, davom etamiz */
+  }
+}
+
+/** Kontent jadvaliga yozuv: mahalliy kesh tozalanadi va boshqa isolate'lar uchun versiya oshiriladi. */
+async function onWrite(sql: string): Promise<void> {
+  if (isCounterOnly(sql)) return;
+  if (!tablesOf(sql, true).some((x) => CACHED_TABLES.has(x))) return;
+  _readCache.clear();
+  try {
+    await getDb("MAIN")
+      .prepare(`INSERT INTO bot_settings (key, value) VALUES ('content_ver', '1')
+                ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT)`)
+      .run();
+    _verCheckedAt = 0;
+  } catch {
+    /* versiya yozilmasa ham mahalliy kesh tozalangan; boshqa isolate'larda kesh TTL bilan tugaydi */
+  }
+}
+
+export async function d1Run<T = Record<string, unknown>>(
+  sql: string,
+  params: unknown[] = []
+): Promise<T[]> {
+  if (isWriteSql(sql)) {
+    const rows = await d1RunRaw<T>(sql, params);
+    await onWrite(sql);
+    return rows;
+  }
+  if (!isCacheableRead(sql)) return d1RunRaw<T>(sql, params);
+
+  await syncContentVersion();
+  const key = sql + "\u0000" + JSON.stringify(params);
+  const hit = _readCache.get(key);
+  if (hit && hit.expires > Date.now()) return structuredClone(hit.rows) as T[];
+  const rows = await d1RunRaw<T>(sql, params);
+  if (_readCache.size >= READ_CACHE_MAX) {
+    const first = _readCache.keys().next().value;
+    if (first !== undefined) _readCache.delete(first);
+  }
+  _readCache.set(key, { rows: structuredClone(rows), expires: Date.now() + READ_CACHE_TTL_MS });
+  return rows;
+}
+
 /**
  * SELECT so'rovi — jadval nomiga qarab avtomatik DB tanlanadi.
  * "no such table" → jadvallar qayta yaratiladi va bir marta qayta uriniladi.
  */
-export async function d1Run<T = Record<string, unknown>>(
+async function d1RunRaw<T = Record<string, unknown>>(
   sql: string,
   params: unknown[] = []
 ): Promise<T[]> {
@@ -129,6 +213,12 @@ export async function d1Run<T = Record<string, unknown>>(
  * Lock tekshirish uchun: agar rowsAffected=0 bo'lsa, boshqa worker olgan.
  */
 export async function d1Update(sql: string, params: unknown[] = []): Promise<number> {
+  const n = await d1UpdateRaw(sql, params);
+  await onWrite(sql);
+  return n;
+}
+
+async function d1UpdateRaw(sql: string, params: unknown[] = []): Promise<number> {
   const db = getDbForSql(sql);
   const run = async () => {
     const stmt = params.length > 0 ? db.prepare(sql).bind(...params) : db.prepare(sql);
@@ -152,6 +242,16 @@ export async function d1Update(sql: string, params: unknown[] = []): Promise<num
  * INSERT RETURNING rowid/id — yangi qator primary keyini qaytaradi.
  */
 export async function d1InsertReturningId(
+  sql: string,
+  params: unknown[],
+  pkColumn: string = "id"
+): Promise<number> {
+  const id = await d1InsertReturningIdRaw(sql, params, pkColumn);
+  await onWrite(sql);
+  return id;
+}
+
+async function d1InsertReturningIdRaw(
   sql: string,
   params: unknown[],
   pkColumn: string = "id"
@@ -187,6 +287,11 @@ export interface BatchQuery {
  */
 export async function d1Batch(queries: BatchQuery[]): Promise<void> {
   if (queries.length === 0) return;
+  await d1BatchRaw(queries);
+  for (const q of queries) await onWrite(q.sql);
+}
+
+async function d1BatchRaw(queries: BatchQuery[]): Promise<void> {
 
   // Bazalar bo'yicha guruhlash
   const groups = new Map<DbKey, BatchQuery[]>();
