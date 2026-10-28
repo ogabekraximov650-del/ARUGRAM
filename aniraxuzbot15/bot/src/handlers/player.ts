@@ -267,7 +267,10 @@ async function sendPlayerEpisode(
   }
 
   try {
-    return await sendParts(ctx, ids.chanel || ids.bot, ids.bot || ids.chanel, caption, kb);
+    const sent: number[] = [];
+    const last = await sendParts(ctx, ids.chanel || ids.bot, ids.bot || ids.chanel, caption, kb, sent);
+    ctx.session.playerPartIds = sent.slice(0, -1);
+    return last;
   } catch (e1) {
     console.error(`sendPlayerEpisode failed (ep=${ep.rowid} q=${quality}):`, String(e1));
     await ctx.reply(
@@ -726,11 +729,21 @@ export function setupPlayer(bot: Bot<MyContext>): void {
 
     await ctx.answerCallbackQuery(`✅ ${newQuality}`);
 
+    // Oldingi sifatning (2 GB dan katta bo'lsa) oldin yuborilgan barcha qism xabarlari o'chiriladi.
+    const oldParts = ctx.session.playerPartIds ?? [];
+    const dropOldParts = async () => {
+      for (const id of oldParts) await ctx.api.deleteMessage(ctx.chat!.id, id).catch(() => {});
+      ctx.session.playerPartIds = [];
+    };
+
     // Bir nechta qismli video (2 GB dan katta): joyida almashtirib bo'lmaydi — eski xabar o'chadi, qismlar qayta yuboriladi.
     if (splitFileIds(fileId).length > 1 || splitFileIds(ids.bot).length > 1) {
       try {
-        const newId = await sendParts(ctx, ids.chanel || ids.bot, ids.bot || ids.chanel, caption, kb);
+        const sent: number[] = [];
+        const newId = await sendParts(ctx, ids.chanel || ids.bot, ids.bot || ids.chanel, caption, kb, sent);
         await ctx.api.deleteMessage(ctx.chat!.id, msgId).catch(() => {});
+        await dropOldParts();
+        ctx.session.playerPartIds = sent.slice(0, -1);
         ctx.session.playerMsgId = newId;
         ctx.session.playerQuality = newQuality;
       } catch (e) {
@@ -738,6 +751,9 @@ export function setupPlayer(bot: Bot<MyContext>): void {
       }
       return;
     }
+
+    // Bitta fayllik sifatga o'tilganda ham oldingi qismlar o'chadi.
+    await dropOldParts();
 
     // Video va captionni bir vaqtda almashtiramiz
     try {
