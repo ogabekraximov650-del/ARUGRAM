@@ -9,6 +9,8 @@ import {
   getEpisode,
   getEpisodeFileIds,
   splitFileIds,
+  savePlayerParts,
+  takePlayerParts,
   getAvailableQualities,
   checkAndRecordDownload,
   getSetting,
@@ -269,7 +271,7 @@ async function sendPlayerEpisode(
   try {
     const sent: number[] = [];
     const last = await sendParts(ctx, ids.chanel || ids.bot, ids.bot || ids.chanel, caption, kb, sent);
-    ctx.session.playerPartIds = sent.slice(0, -1);
+    await savePlayerParts(ctx.chat!.id, last, sent.slice(0, -1)).catch((e) => console.error("savePlayerParts:", e));
     return last;
   } catch (e1) {
     console.error(`sendPlayerEpisode failed (ep=${ep.rowid} q=${quality}):`, String(e1));
@@ -677,7 +679,8 @@ export function setupPlayer(bot: Bot<MyContext>): void {
   bot.callbackQuery(/^player:q:(\d+):(1080p|720p|480p|360p)$/, async (ctx) => {
     const epRowid = Number(ctx.match[1]);
     const newQuality = ctx.match[2] as Quality;
-    const msgId = ctx.session.playerMsgId;
+    // Tugma bosilgan xabarning o'zi (sessiya keshi eskirgan bo'lishi mumkin).
+    const msgId = ctx.callbackQuery.message?.message_id ?? ctx.session.playerMsgId;
     const userId = ctx.from!.id;
     const animeinfoId = ctx.session.playerAnimeInfoId;
     const page = ctx.session.playerPage ?? 1;
@@ -730,10 +733,9 @@ export function setupPlayer(bot: Bot<MyContext>): void {
     await ctx.answerCallbackQuery(`✅ ${newQuality}`);
 
     // Oldingi sifatning (2 GB dan katta bo'lsa) oldin yuborilgan barcha qism xabarlari o'chiriladi.
-    const oldParts = ctx.session.playerPartIds ?? [];
+    const oldParts = await takePlayerParts(ctx.chat!.id, msgId).catch(() => [] as number[]);
     const dropOldParts = async () => {
       for (const id of oldParts) await ctx.api.deleteMessage(ctx.chat!.id, id).catch(() => {});
-      ctx.session.playerPartIds = [];
     };
 
     // Bir nechta qismli video (2 GB dan katta): joyida almashtirib bo'lmaydi — eski xabar o'chadi, qismlar qayta yuboriladi.
@@ -743,7 +745,7 @@ export function setupPlayer(bot: Bot<MyContext>): void {
         const newId = await sendParts(ctx, ids.chanel || ids.bot, ids.bot || ids.chanel, caption, kb, sent);
         await ctx.api.deleteMessage(ctx.chat!.id, msgId).catch(() => {});
         await dropOldParts();
-        ctx.session.playerPartIds = sent.slice(0, -1);
+        await savePlayerParts(ctx.chat!.id, newId, sent.slice(0, -1)).catch((e) => console.error("savePlayerParts:", e));
         ctx.session.playerMsgId = newId;
         ctx.session.playerQuality = newQuality;
       } catch (e) {

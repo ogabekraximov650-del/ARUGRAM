@@ -329,6 +329,28 @@ export function splitFileIds(v: string | null | undefined): string[] {
   return (v ?? "").split(",").map((x) => x.trim()).filter(Boolean);
 }
 
+/**
+ * Pleyerda ko'p qismli (2 GB dan katta) video yuborilganda: oxirgi (tugmali) xabar id'si -> oldingi qism xabarlari id'lari.
+ * Sessiya keshiga (isolate'lar orasida eskirishi mumkin) tayanmaslik uchun D1'da saqlanadi; kalit — tugma bosilgan xabarning o'zi.
+ */
+export async function savePlayerParts(chatId: number, lastMsgId: number, partIds: number[]): Promise<void> {
+  if (partIds.length === 0) return;
+  await d1Query(`DELETE FROM player_parts WHERE created_at < ?`, [Date.now() - 3 * 24 * 3600 * 1000]).catch(() => {});
+  await d1Query(
+    `INSERT INTO player_parts (chat_id, msg_id, parts, created_at) VALUES (?, ?, ?, ?)
+     ON CONFLICT(chat_id, msg_id) DO UPDATE SET parts = excluded.parts, created_at = excluded.created_at`,
+    [chatId, lastMsgId, partIds.join(","), Date.now()]
+  );
+}
+
+/** Oldingi qism xabarlari id'larini qaytaradi va yozuvni o'chiradi. */
+export async function takePlayerParts(chatId: number, lastMsgId: number): Promise<number[]> {
+  const rows = await d1Query<{ parts: string }>(`SELECT parts FROM player_parts WHERE chat_id = ? AND msg_id = ?`, [chatId, lastMsgId]);
+  if (rows.length === 0) return [];
+  await d1Query(`DELETE FROM player_parts WHERE chat_id = ? AND msg_id = ?`, [chatId, lastMsgId]).catch(() => {});
+  return rows[0].parts.split(",").map((x) => Number(x)).filter((x) => x > 0);
+}
+
 export function getEpisodeFileIds(ep: Episode, quality: Quality): { chanel: string | null; bot: string | null } {
   return {
     chanel: ep[`q${quality}_file_chanel_id` as keyof Episode] as string | null,

@@ -511,6 +511,13 @@ async function _initMainTables(db: D1Database): Promise<void> {
       bot TEXT NOT NULL DEFAULT '',
       started_at INTEGER NOT NULL DEFAULT 0
     )`,
+    `CREATE TABLE IF NOT EXISTS player_parts (
+      chat_id INTEGER NOT NULL,
+      msg_id INTEGER NOT NULL,
+      parts TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (chat_id, msg_id)
+    )`,
     `CREATE TABLE IF NOT EXISTS anibla_part_files (
       job_id INTEGER NOT NULL,
       idx INTEGER NOT NULL,

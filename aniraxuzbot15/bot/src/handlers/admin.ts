@@ -141,8 +141,6 @@ export interface SessionData {
   playerEpRowid?: number;
   playerEpNumber?: number;
   playerMsgId?: number;
-  /** 2 GB dan katta (qismlarga bo'lingan) video: pleyer xabaridan OLDIN yuborilgan qism xabarlari — sifat almashganda o'chiriladi. */
-  playerPartIds?: number[];
   playerQuality?: string;
   playerPage?: number;
   playerSection?: number;
