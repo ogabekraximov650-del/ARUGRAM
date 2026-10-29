@@ -33,29 +33,58 @@ jobs:
           sudo mkswap /mnt/albot/swap >/dev/null && sudo swapon /mnt/albot/swap
           free -h | head -2; df -h /mnt/albot | tail -1
 
-      - name: llama.cpp (tayyor CPU build)
+      - name: llama.cpp (tayyor CPU build, bo'lmasa manbadan yig'iladi)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          set -e
-          gh api repos/ggml-org/llama.cpp/releases/latest --jq '.assets[].browser_download_url' > /tmp/assets.txt
-          URL=$(grep -E 'ubuntu-x64\.(zip|tar\.gz)$' /tmp/assets.txt | grep -viE 'vulkan|rocm|openvino|sycl|cuda|arm' | head -1)
-          [ -n "$URL" ] || URL=$(grep -iE 'linux-x64|ubuntu.*x64' /tmp/assets.txt | grep -viE 'vulkan|rocm|openvino|sycl|cuda|arm' | head -1)
-          echo "build: $URL"
-          if [ -z "$URL" ]; then echo "llama.cpp CPU build topilmadi. Bor fayllar:"; grep -i linux /tmp/assets.txt | head; exit 1; fi
+          exec > >(tee -a /tmp/albot_setup.log) 2>&1
+          sudo apt-get update -qq && sudo apt-get install -y -qq libgomp1 unzip >/dev/null || true
           mkdir -p /mnt/albot/llama && cd /mnt/albot/llama
-          curl -fsSL --retry 4 -o pkg "$URL"
-          case "$URL" in
-            *.zip) unzip -q pkg ;;
-            *) tar xzf pkg ;;
-          esac
-          BIN=$(find /mnt/albot/llama -name llama-server -type f | head -1)
-          test -n "$BIN" && chmod +x "$BIN"
+          BIN=""
+          # 1) Tayyor CPU build (release fayllari ro'yxatidan nomi bo'yicha tanlanadi).
+          if curl -fsSL --retry 3 -H "Authorization: Bearer $GH_TOKEN" -o /tmp/rel.json \
+               https://api.github.com/repos/ggml-org/llama.cpp/releases/latest; then
+            URL=$(python3 - <<'PY'
+          import json, re
+          d = json.load(open('/tmp/rel.json'))
+          names = [(a['name'], a['browser_download_url']) for a in d.get('assets', [])]
+          print('tag:', d.get('tag_name'), '| fayllar:', ', '.join(n for n, _ in names if 'ubuntu' in n or 'linux' in n)[:600], file=__import__('sys').stderr)
+          bad = re.compile(r'vulkan|rocm|openvino|sycl|cuda|arm|aarch|s390|riscv|ppc', re.I)
+          ok = [u for n, u in names if re.search(r'(ubuntu|linux).*x64', n, re.I) and re.search(r'\.(zip|tar\.gz)$', n) and not bad.search(n)]
+          print(ok[0] if ok else '')
+          PY
+            )
+            echo "build: ${URL:-yoq}"
+            if [ -n "$URL" ]; then
+              curl -fsSL --retry 4 -o pkg "$URL"
+              case "$URL" in *.zip) unzip -q -o pkg ;; *) tar xzf pkg ;; esac
+              BIN=$(find /mnt/albot/llama -name llama-server -type f | head -1)
+              if [ -n "$BIN" ]; then
+                chmod +x "$BIN"
+                if ! LD_LIBRARY_PATH="$(dirname "$BIN")" "$BIN" --version >/dev/null 2>&1; then
+                  echo "tayyor build ishga tushmadi:"; LD_LIBRARY_PATH="$(dirname "$BIN")" "$BIN" --version 2>&1 | tail -3
+                  BIN=""
+                fi
+              fi
+            fi
+          fi
+          # 2) Zaxira: manbadan yig'ish (~6-10 daqiqa).
+          if [ -z "$BIN" ]; then
+            echo "manbadan yig'ilmoqda..."
+            sudo apt-get install -y -qq cmake build-essential git >/dev/null
+            git clone --depth 1 https://github.com/ggml-org/llama.cpp /mnt/albot/llama-src
+            cmake -S /mnt/albot/llama-src -B /mnt/albot/llama-src/build -DCMAKE_BUILD_TYPE=Release -DLLAMA_CURL=OFF >/dev/null
+            cmake --build /mnt/albot/llama-src/build --target llama-server -j"$(nproc)" 2>&1 | tail -5
+            BIN=/mnt/albot/llama-src/build/bin/llama-server
+          fi
+          test -x "$BIN" || { echo "llama-server topilmadi"; exit 1; }
           echo "LLAMA_SERVER=$BIN" >> "$GITHUB_ENV"
           echo "LD_LIBRARY_PATH=$(dirname "$BIN")" >> "$GITHUB_ENV"
+          echo "llama-server: $BIN"
 
       - name: Model (gpt-oss-20b MXFP4, ~12 GB)
         run: |
+          exec > >(tee -a /tmp/albot_setup.log) 2>&1
           set -e
           curl -fL --retry 5 --retry-delay 5 -C - -o /mnt/albot/model.gguf \
             https://huggingface.co/ggml-org/gpt-oss-20b-GGUF/resolve/main/gpt-oss-20b-MXFP4.gguf
@@ -81,10 +110,12 @@ jobs:
           STEP=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs" \
                  --jq '[.jobs[].steps[] | select(.conclusion=="failure" or .conclusion=="cancelled") | .name] | join(", ")' 2>/dev/null || true)
           TAIL=$(tail -c 700 /tmp/albot_run.log 2>/dev/null || true)
-          LL=$(tail -c 500 /tmp/llama.log 2>/dev/null || true)
+          LL=$(tail -c 1000 /tmp/albot_setup.log 2>/dev/null || true)
+          LL="$LL
+          $(tail -c 500 /tmp/llama.log 2>/dev/null || true)"
           STEP="$STEP" TAIL="$TAIL" LL="$LL" python3 - <<'PY' | curl -sS -m 30 -X POST \
             -H "X-Run-Key: $(printf '%s' "$RUN_KEY" | tr -d '[:space:]')" -H 'Content-Type: application/json' -d @- \
             https://albot.uzcom.workers.dev/ai/done || true
           import json, os
-          print(json.dumps({"ok": False, "err": f"Qadam: {os.environ['STEP']}\n{os.environ['TAIL']}\n{os.environ['LL']}"[:1500]}))
+          print(json.dumps({"ok": False, "err": f"Qadam: {os.environ['STEP']}\n{os.environ['TAIL']}\n{os.environ['LL']}"[-1500:]}))
           PY
