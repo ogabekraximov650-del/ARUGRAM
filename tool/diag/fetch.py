@@ -13,7 +13,7 @@ from pathlib import Path
 
 ENC = Path("tool/encode/gh_token.enc")
 REPO = Path("tool/encode/gh_repo.txt").read_text().strip().split("/")[-1]
-RUNS = int(os.environ.get("DIAG_RUNS", "14"))
+RUNS = int(os.environ.get("DIAG_RUNS", "4"))
 TAIL = int(os.environ.get("DIAG_TAIL", "60"))
 
 k = "".join(os.environ.get("ENCODE_TOKEN", "").split())
@@ -49,9 +49,14 @@ def get(path, raw=False):
     return b if raw else json.loads(b)
 
 
+# `tool/diag/filter.txt`: vergul bilan ajratilgan run nomi bo'laklari (bo'sh — hammasi). Faqat mos run'lar ko'rsatiladi.
+_flt = Path("tool/diag/filter.txt")
+FILTER = [x.strip().lower() for x in (_flt.read_text().split(",") if _flt.exists() else []) if x.strip()]
 login = get("/user")["login"]
 print(f"akkaunt: {login}, repo: {REPO}")
-runs = get(f"/repos/{login}/{REPO}/actions/runs?per_page={RUNS}")["workflow_runs"]
+runs = get(f"/repos/{login}/{REPO}/actions/runs?per_page={'60' if FILTER else RUNS}")["workflow_runs"]
+if FILTER:
+    runs = [r_ for r_ in runs if any(f in r_["name"].lower() for f in FILTER)][:RUNS]
 print("== Run ro'yxati ==")
 for run in runs:
     print(f"#{run['run_number']} {run['name']} | {run['status']}/{run['conclusion']} | {run['created_at']} | id={run['id']}")
@@ -92,8 +97,8 @@ for run in runs:
             continue
         lines = [l for l in z.read(n).decode("utf-8", "replace").splitlines()
                  if "##[" not in l and "[36;1m" not in l and "Node.js" not in l and "ENCODE_TOKEN" not in l]
-        up = "R2" in run["name"] or "ukl" in run["name"].lower() or "upload" in run["name"].lower() or "anibla" in run["name"].lower()
-        tail = 400 if up else 6
+        up = "R2" in run["name"] or "ukl" in run["name"].lower() or "upload" in run["name"].lower() or "anibla" in run["name"].lower() or bool(FILTER)
+        tail = 160 if FILTER else (400 if up else 6)
         print(f"  >>> {n} ({len(lines)} qator), oxirgi {tail}:")
         for ln in lines[-tail:]:
             print("    " + ln[:300])
