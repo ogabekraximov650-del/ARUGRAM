@@ -6871,3 +6871,17 @@ TALAB (foydalanuvchi): panel botga "siqish" tugmasi; bosilganda bot videoni so'r
   (ovozsiz, 4% zaxira); chiqish chegaradan oshsa cheklov kamaytirilib 3 martagacha qayta kodlanadi. Foydalanuvchi: CRF 30 da 15 MB chiqdi, 5 MB kerak — CRF bilan hajmni
   oldindan bilib bo'lmaydi (taxminan CRF +6 = bitrate yarmi), shuning uchun hajm bo'yicha cheklov. Uzun video (>~10 daqiqa) 5 MB ga sig'sa sifat juda past (<60 kbit/s) — botda ogohlantiriladi.
   Tekshirilgan: 20 s harakatli test (CRF 30 yolg'iz 4.95 MB, 2 MB chegara bilan 1.97 MB). Tekshirilmagan: Telegram mijozida GIF ko'rinishi (katta fayl avto-yuklanmasa video kabi ko'rinishi mumkin).
+
+## albot modeliga "qo'llar" (vositalar) berildi — sinov (2026-10-29)
+
+Foydalanuvchi: "hozirgi actions modeliga qo'llarni ber, ishlay oladigan qilib test qilib ko'ray".
+- `tool/albot/run.py`: agent sikli (`agent_answer`) — model vositani chaqiradi (llama-server `--jinja`, OpenAI `tools`), natija qaytariladi, ko'pi bilan 12 qadam / 25 daqiqa /
+  ~42 000 belgi kontekst; keyin vositasiz yakuniy javob. Vositalar: `shell`, `read_file`, `write_file`, `get_attachment(id)`, `send_file(path, caption)`.
+  Har qadam foydalanuvchiga "🔧 vosita: argument" xabari bo'lib boradi (`/ai/say`). Kontekst 24 576 token, tarix siqish chegarasi 16 000 belgi.
+- XAVFSIZLIK: model buyruqlari ALOHIDA foydalanuvchi `albot` sifatida (`sudo -u albot env -i ...`), ish papkasi `/mnt/albot/work`; RUN_KEY/tokenlar faqat run.py muhitida
+  (boshqa foydalanuvchi `/proc/<pid>/environ` ni o'qiy olmaydi); `actions/checkout` `persist-credentials: false` (repo tokeni diskda yo'q). Run har safar yangi mashina.
+  Yo'llar ish papkasidan tashqariga chiqmaydi (`_safe_path`). sudo yo'q — `pip install --user`.
+- `albot/src/worker.ts`: yangi `/ai/say`, `/ai/file` (run -> foydalanuvchi, xom bayt, 49 MB), `/ai/getfile` (foydalanuvchi fayli -> run, Bot API 20 MB); webhook endi hujjat/rasm/video/audio
+  qabul qiladi (`ai_file` jadvali, xabarga `[Biriktirilgan fayl #N ...]` yoziladi). Tavsiya: katta fayl yuborilsa model `get_attachment` bilan oladi.
+- Tekshirilgan: vositalar mantiqi lokal (yozish/o'qish/shell/vaqt chegarasi/yo'l himoyasi), `tsc`. TEKSHIRILMAGAN: gpt-oss-20b ning haqiqiy tool-call sifati va tezligi (kichik model
+  adashishi mumkin), 24 576 kontekst RAM'ga sig'ishi, `sudo -u albot` Actions'da.

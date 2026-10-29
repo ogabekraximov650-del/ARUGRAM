@@ -103,6 +103,8 @@ async function ensureSchema(env: Env): Promise<void> {
     ["CREATE INDEX IF NOT EXISTS idx_ai_open ON ai_msg(id) WHERE role = 0 AND state < 2"],
     ["CREATE TABLE IF NOT EXISTS ai_sum(chat_id INTEGER PRIMARY KEY, summary TEXT NOT NULL, upto_id INTEGER NOT NULL) WITHOUT ROWID"],
     ["CREATE TABLE IF NOT EXISTS ai_state(k TEXT PRIMARY KEY, v INTEGER NOT NULL) WITHOUT ROWID"],
+    // Foydalanuvchi yuborgan fayllar (Telegram file_id); model `get_attachment` vositasi bilan oladi.
+    ["CREATE TABLE IF NOT EXISTS ai_file(id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id INTEGER NOT NULL, tg_file_id TEXT NOT NULL, name TEXT NOT NULL, size INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL DEFAULT (unixepoch()))"],
   ]);
   schemaReady = true;
 }
@@ -241,11 +243,21 @@ const json = (o: unknown, status = 200) =>
 
 async function handleUpdate(env: Env, u: any, ctx: ExecutionContext): Promise<void> {
   const m = u?.message;
-  if (!m?.text || !m.chat) return;
+  if (!m?.chat) return;
   // Botdan faqat egasi foydalanadi.
   if (String(m.from?.id) !== String(env.ADMIN_ID)) return;
   const chat = Number(m.chat.id);
-  const text: string = m.text;
+  let text: string = m.text ?? m.caption ?? "";
+
+  // Biriktirilgan fayl (hujjat, rasm, video, audio): file_id saqlanadi, xabarga uning raqami yoziladi.
+  const att = m.document ?? m.video ?? m.audio ?? m.voice ?? m.animation
+    ?? (Array.isArray(m.photo) && m.photo.length ? { ...m.photo[m.photo.length - 1], file_name: `photo_${m.message_id}.jpg` } : null);
+  if (att?.file_id) {
+    const name = String(att.file_name ?? `${m.video ? "video" : m.audio || m.voice ? "audio" : "file"}_${m.message_id}`).slice(0, 120);
+    const [[r]] = await db(env, [["INSERT INTO ai_file(chat_id, tg_file_id, name, size) VALUES(?, ?, ?, ?) RETURNING id", [chat, String(att.file_id), name, Number(att.file_size ?? 0)]]]);
+    text = `${text}\n[Biriktirilgan fayl #${r.id}: ${name}, ${Number(att.file_size ?? 0)} bayt — get_attachment(${r.id}) bilan olinadi]`.trim();
+  }
+  if (!text) return;
 
   if (text.startsWith("/start")) {
     await say(env, chat, "Salom! Yozing — model Actions'da (gpt-oss-20b) javob beradi.\n/new — yangi suhbat\n/status — holat");
@@ -368,6 +380,40 @@ export default {
         ]]);
         await cacheDrop(env, chat);
         return json({ ok: true });
+      }
+
+      // Javobni yopmasdan foydalanuvchiga oraliq xabar (agent qadamlari haqida).
+      if (p === "/ai/say") {
+        await say(env, Number(b.chat), String(b.text ?? "").slice(0, 3500));
+        return json({ ok: true });
+      }
+
+      // Run -> foydalanuvchi: fayl yuborish (xom bayt; sarlavhalarda chat, nom, izoh). Telegram chegarasi 50 MB.
+      if (p === "/ai/file") {
+        const chat = Number(req.headers.get("X-Chat"));
+        const name = decodeURIComponent(req.headers.get("X-Name") ?? "file");
+        const caption = decodeURIComponent(req.headers.get("X-Caption") ?? "").slice(0, 1000);
+        const buf = await req.arrayBuffer();
+        if (!chat || !buf.byteLength) return json({ ok: false, error: "bo'sh fayl yoki chat" }, 400);
+        if (buf.byteLength > 49 * 1024 * 1024) return json({ ok: false, error: "fayl 49 MB dan katta (Telegram bot chegarasi 50 MB)" }, 413);
+        const fd = new FormData();
+        fd.append("chat_id", String(chat));
+        if (caption) fd.append("caption", caption);
+        fd.append("document", new Blob([buf]), name);
+        const r = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN.trim()}/sendDocument`, { method: "POST", body: fd });
+        const j: any = await r.json().catch(() => ({}));
+        return json({ ok: !!j.ok, error: j.ok ? undefined : String(j.description ?? r.status) }, j.ok ? 200 : 502);
+      }
+
+      // Foydalanuvchi yuborgan faylni olish (Bot API chegarasi 20 MB): javob — xom bayt.
+      if (p === "/ai/getfile") {
+        const [[f]] = await db(env, [["SELECT tg_file_id, name, size FROM ai_file WHERE id = ?", [Number(b.id)]]]);
+        if (!f) return json({ ok: false, error: "bunday fayl yo'q" }, 404);
+        const info: any = await tg(env, "getFile", { file_id: String(f.tg_file_id) });
+        if (!info.ok) return json({ ok: false, error: String(info.description ?? "getFile xato") + " (Bot API 20 MB dan kattani bermaydi)" }, 413);
+        const r = await fetch(`https://api.telegram.org/file/bot${env.BOT_TOKEN.trim()}/${info.result.file_path}`);
+        if (!r.ok) return json({ ok: false, error: `Telegram ${r.status}` }, 502);
+        return new Response(r.body, { headers: { "Content-Type": "application/octet-stream", "X-Name": encodeURIComponent(String(f.name)) } });
       }
 
       if (p === "/ai/fail") {
