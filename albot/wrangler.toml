@@ -1,0 +1,13 @@
+name            = "albot"
+main            = "src/worker.ts"
+compatibility_date = "2024-09-23"
+account_id      = "cad72210c2b1fc9b059ba2036ac54228"
+
+# Har daqiqada: bazada modelga o'qilmagan/javobsiz xabar bo'lsa va Actions run'i yo'q bo'lsa, run'ni uyg'otadi.
+[triggers]
+crons = ["* * * * *"]
+
+[vars]
+ADMIN_ID = "6805215964"
+# Kalitlar (Cloudflare secret): BOT_TOKEN, TURSO_URL, TURSO_TOKEN, RUN_KEY, GH_ACTIONS_TOKEN, GH_REPO — deploy workflow o'rnatadi.
+# `CACHE` (KV, 1 kunlik kesh) — deploy workflow namespace yaratib shu faylga qo'shadi (bo'lmasa kod keshsiz ishlaydi).

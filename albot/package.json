@@ -1,0 +1,15 @@
+{
+  "name": "albot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260704.1",
+    "typescript": "~5.9.2",
+    "wrangler": "^4.107.0"
+  }
+}

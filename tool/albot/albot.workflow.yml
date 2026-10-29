@@ -1,0 +1,70 @@
+name: albot (mahalliy AI modeli)
+
+# albot boti: botga javob beradigan mahalliy model (llama.cpp + gpt-oss-20b, CPU) shu run'da ishlaydi.
+# Run'ni FAQAT albot worker'i ishga tushiradi (`workflow_dispatch`): bazada modelga o'qilmagan/javobsiz xabar bo'lsa.
+# Run ko'pi bilan 1 soat ishlaydi; 12 daqiqa xabar bo'lmasa o'zi to'xtaydi.
+#
+# Bu fayl ARUMEDIATV repodagi `tool/albot/albot.workflow.yml` dan ko'chiriladi (`sync-packs.yml`) — shu yerda o'zgartirmang.
+
+on:
+  workflow_dispatch:
+
+run-name: "albot · model"
+
+concurrency:
+  group: albot-model
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Joy va swap (/mnt)
+        run: |
+          sudo mkdir -p /mnt/albot && sudo chown "$USER" /mnt/albot
+          sudo fallocate -l 8G /mnt/albot/swap && sudo chmod 600 /mnt/albot/swap
+          sudo mkswap /mnt/albot/swap >/dev/null && sudo swapon /mnt/albot/swap
+          free -h | head -2; df -h /mnt/albot | tail -1
+
+      - name: llama.cpp (tayyor CPU build)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          URL=$(gh api repos/ggml-org/llama.cpp/releases/latest --jq '.assets[].browser_download_url' \
+                | grep -E 'bin-ubuntu-x64\.(zip|tar\.gz)$' | head -1)
+          echo "build: $URL"
+          test -n "$URL"
+          mkdir -p /mnt/albot/llama && cd /mnt/albot/llama
+          curl -fsSL --retry 4 -o pkg "$URL"
+          case "$URL" in
+            *.zip) unzip -q pkg ;;
+            *) tar xzf pkg ;;
+          esac
+          BIN=$(find /mnt/albot/llama -name llama-server -type f | head -1)
+          test -n "$BIN" && chmod +x "$BIN"
+          echo "LLAMA_SERVER=$BIN" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$(dirname "$BIN")" >> "$GITHUB_ENV"
+
+      - name: Model (gpt-oss-20b MXFP4, ~12 GB)
+        run: |
+          set -e
+          curl -fL --retry 5 --retry-delay 5 -C - -o /mnt/albot/model.gguf \
+            https://huggingface.co/ggml-org/gpt-oss-20b-GGUF/resolve/main/gpt-oss-20b-MXFP4.gguf
+          ls -la /mnt/albot/model.gguf
+
+      - name: Model ishlaydi (xabarlarni kutadi)
+        env:
+          API: https://albot.uzcom.workers.dev
+          RUN_KEY: ${{ secrets.ENCODE_TOKEN }}
+          MODEL_PATH: /mnt/albot/model.gguf
+          MAX_MIN: '42'
+          IDLE_MIN: '12'
+          PYTHONUNBUFFERED: '1'
+        run: python3 tool/albot/run.py

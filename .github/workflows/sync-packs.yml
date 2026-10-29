@@ -19,6 +19,7 @@ on:
       - 'tool/fmp4/**'
       - 'tool/session/**'
       - 'tool/upload/**'
+      - 'tool/albot/**'
       - 'tool/emojifont/**'
       - 'fonts/TgEmoji.ttf'
       - '.github/workflows/sync-packs.yml'

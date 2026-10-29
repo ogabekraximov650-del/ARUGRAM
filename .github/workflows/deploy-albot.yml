@@ -1,0 +1,117 @@
+name: Deploy albot (Cloudflare Worker, TypeScript)
+
+# `albot/**` o'zgarganda: bot tokeni va Turso kalitlari (ENCODE_TOKEN bilan shifrlangan `.enc` fayllar) Cloudflare secret'ga
+# qo'yiladi, KV (1 kunlik tarix keshi) yaratiladi, worker `albot` deploy qilinadi va webhook o'rnatiladi.
+# Model ikkinchi akkauntdagi repoda ishlaydi (`tool/albot/` -> `sync-packs.yml`); worker uni faqat javobsiz xabar bo'lsa uyg'otadi.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'albot/**'
+      - 'tool/encode/gh_token.enc'
+      - 'tool/encode/gh_repo.txt'
+      - '.github/workflows/deploy-albot.yml'
+
+concurrency:
+  group: deploy-albot
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: secret
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Bog'liqliklar
+        working-directory: albot
+        run: npm install --no-audit --no-fund --no-package-lock
+
+      - name: Tur tekshiruvi
+        working-directory: albot
+        run: npx tsc --noEmit
+
+      - name: Kalitlar, KV va deploy
+        working-directory: albot
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+        run: |
+          K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          BT=$(K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in bot_token.enc 2>/dev/null | tr -d '[:space:]')
+          TJ=$(K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in turso.enc 2>/dev/null || true)
+          TURSO_URL=$(printf '%s' "$TJ" | python3 -c 'import json,sys; print(json.load(sys.stdin)["url"])' 2>/dev/null || true)
+          TURSO_TOKEN=$(printf '%s' "$TJ" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])' 2>/dev/null || true)
+          if [ -z "$BT" ] || [ -z "$TURSO_URL" ] || [ -z "$TURSO_TOKEN" ]; then
+            echo "❌ .enc fayllar ochilmadi (ENCODE_TOKEN noto'g'ri?)"; exit 1
+          fi
+          echo "::add-mask::$BT"; echo "::add-mask::$TURSO_TOKEN"
+
+          # KV (tarix keshi, 1 kun). Bo'lmasa yaratiladi; ruxsat yetmasa worker keshsiz ishlaydi.
+          kvid() { npx wrangler kv namespace list 2>/dev/null | python3 -c '
+          import json,sys
+          try: d=json.load(sys.stdin)
+          except Exception: d=[]
+          print(next((x["id"] for x in d if x.get("title") in ("albot-cache","albot-albot-cache")), ""))'; }
+          KV=$(kvid)
+          if [ -z "$KV" ]; then npx wrangler kv namespace create albot-cache >/dev/null 2>&1 || true; KV=$(kvid); fi
+          if [ -n "$KV" ]; then
+            printf '\n[[kv_namespaces]]\nbinding = "CACHE"\nid = "%s"\n' "$KV" >> wrangler.toml
+            echo "✅ KV: $KV"
+          else
+            echo "⚠️  KV yaratilmadi (API token'da Workers KV ruxsati yo'qmi?) — kesh worker xotirasida bo'ladi"
+          fi
+
+          # Birinchi deploy (secret qo'yish uchun worker mavjud bo'lishi kerak).
+          npx wrangler deploy --keep-vars
+          printf '%s' "$BT" | npx wrangler secret put BOT_TOKEN >/dev/null
+          printf '%s' "$TURSO_URL" | npx wrangler secret put TURSO_URL >/dev/null
+          printf '%s' "$TURSO_TOKEN" | npx wrangler secret put TURSO_TOKEN >/dev/null
+          printf '%s' "$K" | npx wrangler secret put RUN_KEY >/dev/null
+          echo "✅ BOT_TOKEN, TURSO_*, RUN_KEY o'rnatildi"
+
+          # Actions'ni uyg'otish: token va repo (ikkinchi akkaunt) — ARUMEDIATV workeri bilan bir xil manba.
+          if [ -f ../tool/encode/gh_token.enc ] && [ -f ../tool/encode/gh_repo.txt ]; then
+            GHT=$(K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in ../tool/encode/gh_token.enc 2>/dev/null | tr -d '[:space:]')
+            if [ -n "$GHT" ]; then
+              echo "::add-mask::$GHT"
+              GR=$(tr -d '[:space:]' < ../tool/encode/gh_repo.txt)
+              case "$GR" in
+                */*) ;;
+                *) GO=$(curl -fsS -H "Authorization: Bearer $GHT" -H "User-Agent: albot-deploy" \
+                       https://api.github.com/user | python3 -c 'import json,sys; print(json.load(sys.stdin)["login"])' || true)
+                   [ -n "$GO" ] && GR="$GO/${GR:-avtoencode}" || GR="" ;;
+              esac
+              if [ -n "$GR" ]; then
+                printf '%s' "$GHT" | npx wrangler secret put GH_ACTIONS_TOKEN >/dev/null
+                printf '%s' "$GR" | npx wrangler secret put GH_REPO >/dev/null
+                echo "✅ GH_ACTIONS_TOKEN va GH_REPO o'rnatildi ($GR)"
+              else
+                echo "::error::token akkaunti aniqlanmadi — GH_REPO o'rnatilmadi"; exit 1
+              fi
+            else
+              echo "::error::gh_token.enc ochilmadi"; exit 1
+            fi
+          fi
+          # Secret'lar o'rnatilgach yana deploy (o'zgaruvchilar yangi versiyaga o'tishi uchun).
+          npx wrangler deploy --keep-vars
+
+      - name: Webhook o'rnatish va tekshirish
+        run: |
+          sleep 5
+          for i in 1 2 3 4 5 6; do
+            R=$(curl -sS -m 30 "https://albot.uzcom.workers.dev/setup" || true)
+            echo "$R" | head -c 300; echo
+            if echo "$R" | grep -q '"ok":true'; then
+              curl -sS -m 30 "https://albot.uzcom.workers.dev/health"; echo
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::webhook o'rnatilmadi"
+          exit 1

@@ -6827,3 +6827,21 @@ tashqi dekodersiz, sof Rustda chizilsin; server/Actions'siz, telefonning o'zida.
   (15/30 daqiqa jim) bo'lsa `queued` ishlar xatoga o'tadi; `sending` 12 soatda botga yetmasa xato.
 - **Fayllar:** `tool/anibla/bot_download.py` (qayta yozildi, Telegram sessiyasiz), `tool/anibla/anibla_bot.workflow.yml` (bitta workflow),
   `tool/upload/upload.py` (`raw_bot`), `tool/packs/sync_repo.py` (eski per-sifat workflow'lar o'chiriladi), `aniraxuzbot15/bot/src/handlers/anibla_add.ts`, `worker.ts`.
+
+## albot — Actions'dagi mahalliy AI modeli (2026-10-29)
+
+Yangi bot (`albot/`, alohida worker `albot`, https://albot.uzcom.workers.dev) — botdan faqat egasi (`ADMIN_ID`) foydalanadi.
+Javobni **ikkinchi akkauntdagi repoda** (`avtoencode`, `albot.yml`) ishlaydigan model beradi: llama.cpp (tayyor CPU build) +
+`gpt-oss-20b-MXFP4.gguf` (~12 GB, MoE: 3.6B faol — 16 GB RAM / 4 CPU da eng yaxshi tezlik/sifat muvozanati). GPU yo'q, taxminan 5–10 token/s (o'lchanmagan).
+
+- **Oqim:** bot webhook (worker) -> xabar Turso `ai_msg` (`albot-arumedia` bazasi) -> **faqat bazada o'qilmagan/javobsiz xabar bo'lsa** va run tirik bo'lmasa
+  worker `albot.yml` ni uyg'otadi (webhook'da va har daqiqa cron'da; ikki uyg'otish orasida >=5 daqiqa; `ai_state.beat` — run signali, `wake` — oxirgi uyg'otish).
+  Polling: run `/ai/poll` (X-Run-Key = ENCODE_TOKEN) bilan xabarni atomik oladi, `/ai/reply` botga yuboradi. Botga token run'da KERAK EMAS.
+- **Run umri:** ko'pi bilan 1 soat (`timeout-minutes: 60`, python 42 daqiqa), 12 daqiqa xabarsiz bo'lsa o'zi to'xtaydi. Javobsiz xabar qolsa cron yangi run ochadi.
+- **Tarix:** Turso'da. Model konteksti 16 384 token — 800 000 token SIG'MAYDI; tarix ~24 000 belgidan oshsa eski qismi model tomonidan xulosaga siqiladi
+  (`ai_sum`), modelga xulosa + yangi xabarlar beriladi. `/new` — suhbatni tozalash.
+- **Kesh (1 kun):** o'qilgan tarix Cloudflare KV'da (`CACHE`, deploy workflow namespace yaratadi; Cache API workers.dev'da ishlamaydi). Bazadan faqat keshda yo'q
+  yangi qatorlar o'qiladi; xulosa yangilansa yoki `/new` bo'lsa kesh o'chadi. KV yaratilmasa — isolate xotirasida.
+- **Kalitlar:** `albot/bot_token.enc`, `albot/turso.enc` (ENCODE_TOKEN bilan shifrlangan); `GH_ACTIONS_TOKEN`/`GH_REPO` `tool/encode/gh_token.enc` dan.
+- **Fayllar:** `albot/` (worker), `tool/albot/run.py` + `albot.workflow.yml` (sync_repo.py orqali ikkinchi repoga), `.github/workflows/deploy-albot.yml`.
+- **Tekshirilmagan:** modelning haqiqiy tezligi va 16 GB RAM'ga sig'ishi (swap 8 GB qo'shilgan) — birinchi run'da loglardan ko'riladi.
