@@ -2,7 +2,7 @@ name: albot (mahalliy AI modeli)
 
 # albot boti: botga javob beradigan mahalliy model (llama.cpp + gpt-oss-20b, CPU) shu run'da ishlaydi.
 # Run'ni FAQAT albot worker'i ishga tushiradi (`workflow_dispatch`): bazada modelga o'qilmagan/javobsiz xabar bo'lsa.
-# Run ko'pi bilan 1 soat ishlaydi; 12 daqiqa xabar bo'lmasa o'zi to'xtaydi.
+# Run kutib turmaydi (polling yo'q): navbatdagi xabarlarga javob berib bo'lgach o'zi to'xtaydi; ko'pi bilan 1 soat.
 #
 # Bu fayl ARUMEDIATV repodagi `tool/albot/albot.workflow.yml` dan ko'chiriladi (`sync-packs.yml`) — shu yerda o'zgartirmang.
 
@@ -65,6 +65,14 @@ jobs:
           RUN_KEY: ${{ secrets.ENCODE_TOKEN }}
           MODEL_PATH: /mnt/albot/model.gguf
           MAX_MIN: '42'
-          IDLE_MIN: '12'
           PYTHONUNBUFFERED: '1'
         run: python3 tool/albot/run.py
+
+      # Run yiqilsa/bekor bo'lsa worker'ga aytiladi ("run bor" belgisi o'chadi; urinishlar hisobi yuritiladi).
+      - name: Worker'ga xabar (xatoda)
+        if: failure() || cancelled()
+        env:
+          RUN_KEY: ${{ secrets.ENCODE_TOKEN }}
+        run: |
+          curl -sS -m 30 -X POST -H "X-Run-Key: $(printf '%s' "$RUN_KEY" | tr -d '[:space:]')" -H 'Content-Type: application/json' \
+            -d '{"ok":false}' https://albot.uzcom.workers.dev/ai/done || true

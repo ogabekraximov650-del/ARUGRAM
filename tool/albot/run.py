@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """albot: Actions'da mahalliy AI modeli (llama.cpp + gpt-oss-20b) — botga javob beradi.
 
-Run ishlashi: llama-server ishga tushadi, so'ng worker'dan (`/ai/poll`) o'qilmagan xabar olinadi, model javob yozadi,
-javob `/ai/reply` orqali botga yuboriladi. Chat tarixi Turso'da (worker orqali); uzun bo'lsa eski qism xulosaga siqiladi.
-Run MAX_MIN daqiqadan keyin yoki IDLE_MIN daqiqa xabarsiz turgach to'xtaydi; bazada javobsiz xabar qolsa worker (cron)
-yangi run ochadi.
+Run'ni FAQAT worker ishga tushiradi (polling/kutish yo'q): llama-server yuklanadi, worker'dan (`/ai/poll`) javobsiz xabarlar
+birin-ketin olinadi, model javob yozadi, javob `/ai/reply` orqali botga yuboriladi. Navbat bo'shagach `/ai/done` deyiladi va run
+tugaydi; navbatda xabar qolgan bo'lsa (MAX_MIN tugadi yoki yangi xabar kelgan) worker yangi run ochadi. Chat tarixi Turso'da
+(worker orqali); uzun bo'lsa eski qism xulosaga siqiladi.
 
 UZ: Model konteksti 16 384 token — 800 000 token sig'maydi, shuning uchun tarix ~24 000 belgidan oshsa siqiladi.
 EN: Context is 16,384 tokens; history over ~24,000 chars is summarised into a short note.
@@ -24,7 +24,6 @@ MODEL = os.environ["MODEL_PATH"]
 LLAMA = os.environ["LLAMA_SERVER"]
 PORT = 8080
 MAX_MIN = float(os.environ.get("MAX_MIN", "45"))
-IDLE_MIN = float(os.environ.get("IDLE_MIN", "12"))
 CTX = 16384
 HIST_CHARS = 24000   # shundan oshsa tarix siqiladi
 TAIL_CHARS = 6000    # siqishdan keyin shuncha yangi xabar qoladi
@@ -36,7 +35,6 @@ SYSTEM = (
 )
 
 T0 = time.time()
-stop_beat = threading.Event()
 
 
 def log(*a):
@@ -62,15 +60,6 @@ def call(path, body=None, timeout=60):
             last = e
         time.sleep(2 * (i + 1))
     raise RuntimeError(f"{path}: {last}")
-
-
-def beat_loop():
-    while not stop_beat.is_set():
-        try:
-            call("/ai/beat", {})
-        except Exception as e:
-            log("beat xato:", e)
-        stop_beat.wait(60)
 
 
 def llm(messages, max_tokens=MAX_TOKENS, effort="low"):
@@ -169,7 +158,6 @@ def handle(msg, summary, history):
 
 
 def main():
-    threading.Thread(target=beat_loop, daemon=True).start()
     srv = subprocess.Popen(
         [LLAMA, "-m", MODEL, "--host", "127.0.0.1", "--port", str(PORT), "-c", str(CTX), "-t", str(os.cpu_count() or 4),
          "--jinja", "--no-webui"],
@@ -189,13 +177,9 @@ def main():
         else:
             raise SystemExit("model 10 daqiqada yuklanmadi")
         log("model tayyor")
-        last_work = time.time()
         while True:
             if time.time() - T0 > MAX_MIN * 60:
                 log("vaqt chegarasi — tugatilmoqda")
-                break
-            if time.time() - last_work > IDLE_MIN * 60:
-                log("xabar yo'q — tugatilmoqda")
                 break
             try:
                 r = call("/ai/poll", {}, timeout=30)
@@ -205,17 +189,12 @@ def main():
                 continue
             msg = r.get("msg")
             if not msg:
-                time.sleep(3)
-                continue
+                log("navbat bo'sh — tugatilmoqda")
+                break
             log(f"xabar #{msg['id']}: {msg['text'][:60]!r}")
             handle(msg, r.get("summary", ""), r.get("history", []))
-            last_work = time.time()
+        call("/ai/done", {"ok": True}, timeout=30)
     finally:
-        stop_beat.set()
-        try:
-            call("/ai/beat", {"final": True}, timeout=15)
-        except Exception:
-            pass
         srv.terminate()
 
 

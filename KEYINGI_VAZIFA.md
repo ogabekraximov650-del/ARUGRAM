@@ -6834,10 +6834,13 @@ Yangi bot (`albot/`, alohida worker `albot`, https://albot.uzcom.workers.dev) �
 Javobni **ikkinchi akkauntdagi repoda** (`avtoencode`, `albot.yml`) ishlaydigan model beradi: llama.cpp (tayyor CPU build) +
 `gpt-oss-20b-MXFP4.gguf` (~12 GB, MoE: 3.6B faol — 16 GB RAM / 4 CPU da eng yaxshi tezlik/sifat muvozanati). GPU yo'q, taxminan 5–10 token/s (o'lchanmagan).
 
-- **Oqim:** bot webhook (worker) -> xabar Turso `ai_msg` (`albot-arumedia` bazasi) -> **faqat bazada o'qilmagan/javobsiz xabar bo'lsa** va run tirik bo'lmasa
-  worker `albot.yml` ni uyg'otadi (webhook'da va har daqiqa cron'da; ikki uyg'otish orasida >=5 daqiqa; `ai_state.beat` — run signali, `wake` — oxirgi uyg'otish).
-  Polling: run `/ai/poll` (X-Run-Key = ENCODE_TOKEN) bilan xabarni atomik oladi, `/ai/reply` botga yuboradi. Botga token run'da KERAK EMAS.
-- **Run umri:** ko'pi bilan 1 soat (`timeout-minutes: 60`, python 42 daqiqa), 12 daqiqa xabarsiz bo'lsa o'zi to'xtaydi. Javobsiz xabar qolsa cron yangi run ochadi.
+- **Oqim:** bot webhook (worker) -> xabar Turso `ai_msg` (`albot-arumedia` bazasi) -> **faqat bazada o'qilmagan/javobsiz xabar bo'lsa** va run yo'q bo'lsa
+  worker `albot.yml` ni ishga tushiradi (webhook'da va har daqiqa cron'da). **Actions faqat worker orqali ishlaydi, polling/kutish YO'Q:** run modelni yuklaydi,
+  `/ai/poll` bilan javobsiz xabarlarni birin-ketin oladi (X-Run-Key = ENCODE_TOKEN), `/ai/reply` botga yuboradi, navbat bo'shagach `/ai/done` deydi va tugaydi.
+  Navbatda xabar qolsa (yangi xabar kelgan yoki vaqt tugagan) worker `/ai/done` ichida o'zi yangi run ochadi. `ai_state`: `until` (run bor, ko'pi bilan 65 daqiqa),
+  `wake`, `tries` (xabar olmay tugagan run'lar; 3 tadan keyin xabarlar yopilib foydalanuvchiga aytiladi, yangi xabar hisobni nolga qaytaradi).
+  Run yiqilsa workflow `/ai/done {ok:false}` yuboradi. Botga token run'da KERAK EMAS.
+- **Run umri:** ko'pi bilan 1 soat (`timeout-minutes: 60`, navbatni olish 42 daqiqagacha). Har uyg'otishda model qayta yuklanadi (~3–8 daqiqa).
 - **Tarix:** Turso'da. Model konteksti 16 384 token — 800 000 token SIG'MAYDI; tarix ~24 000 belgidan oshsa eski qismi model tomonidan xulosaga siqiladi
   (`ai_sum`), modelga xulosa + yangi xabarlar beriladi. `/new` — suhbatni tozalash.
 - **Kesh (1 kun):** o'qilgan tarix Cloudflare KV'da (`CACHE`, deploy workflow namespace yaratadi; Cache API workers.dev'da ishlamaydi). Bazadan faqat keshda yo'q

@@ -104,14 +104,14 @@ jobs:
       - name: Webhook o'rnatish va tekshirish
         run: |
           sleep 5
-          for i in 1 2 3 4 5 6; do
+          for i in $(seq 1 45); do
             R=$(curl -sS -m 30 "https://albot.uzcom.workers.dev/setup" || true)
             echo "$R" | head -c 300; echo
             if echo "$R" | grep -q '"ok":true'; then
               curl -sS -m 30 "https://albot.uzcom.workers.dev/health"; echo
               exit 0
             fi
-            sleep 10
+            sleep 20
           done
           echo "::error::webhook o'rnatilmadi"
           exit 1

@@ -2,8 +2,10 @@
  * albot — Telegram bot (webhook) + Actions'dagi mahalliy AI model (gpt-oss-20b) o'rtasidagi ko'prik.
  *
  * Oqim: foydalanuvchi botga yozadi -> worker xabarni Turso'ga yozadi -> bazada modelga O'QILMAGAN yoki JAVOBSIZ xabar bo'lsa
- * (va Actions run'i yo'q bo'lsa) worker ikkinchi akkauntdagi repoda `albot.yml` ni ishga tushiradi -> run `/ai/poll` bilan xabarni
- * oladi, model javob yozadi, `/ai/reply` botga yuboradi. Yozishmalar Turso'da; o'qilgan tarix Cloudflare KV keshida 1 kun.
+ * (va Actions run'i yo'q bo'lsa) worker ikkinchi akkauntdagi repoda `albot.yml` ni ishga tushiradi. Actions FAQAT worker orqali
+ * ishlaydi, kutib turmaydi (polling yo'q): run modelni yuklaydi, navbatdagi javobsiz xabarlarni birin-ketin oladi (`/ai/poll` — bitta
+ * olish), javoblarni `/ai/reply` bilan botga yuboradi, navbat bo'shagach `/ai/done` deydi va to'xtaydi. Navbatda yana xabar qolgan
+ * bo'lsa, worker o'zi yangi run ochadi. Yozishmalar Turso'da; o'qilgan tarix Cloudflare KV keshida 1 kun.
  *
  * Tarix keshi: KV'da {xulosa, oxirgi id, xabarlar}; har so'rovda bazadan FAQAT yangi (id > oxirgi) qatorlar o'qiladi.
  * (Cache API workers.dev manzilida ishlamaydi, shuning uchun KV; KV bo'lmasa kesh isolate xotirasida.)
@@ -24,8 +26,9 @@ const WORKFLOW = "albot.yml";
 const CACHE_TTL = 86400;          // 1 kun
 const HIST_MAX = 400;             // keshdagi xabarlar soni chegarasi
 const STALE_CLAIM = 900;          // modelda 15 daqiqa tursa — qaytadan olinadi
-const WAKE_GAP = 300;             // ikki uyg'otish orasida kamida 5 daqiqa
-const BEAT_FRESH = 150;           // run "tirik" deb hisoblanadi: oxirgi signaldan 150 s ichida
+const RUN_SPAN = 3900;            // run ko'pi bilan 1 soat (+5 daqiqa zaxira): shu vaqt ichida "run bor" deb hisoblanadi
+const WAKE_GAP = 60;              // uyg'otish xatosidan keyin qayta urinish oralig'i
+const MAX_TRIES = 3;              // javobsiz xabar uchun ketma-ket muvaffaqiyatsiz run'lar soni
 
 // ─── Turso (Hrana HTTP) ───────────────────────────────────────────────────────
 
@@ -130,21 +133,33 @@ async function secretToken(env: Env): Promise<string> {
 // ─── Actions'ni uyg'otish ─────────────────────────────────────────────────────
 
 /**
- * Faqat bazada o'qilmagan/javobsiz xabar bo'lsa, run tirik bo'lmasa va oxirgi uyg'otishdan 5 daqiqa o'tgan bo'lsa run ochiladi.
- * Natija: none | alive | recent | dispatched | error:<sabab>
+ * Faqat bazada o'qilmagan/javobsiz xabar bo'lsa va run yo'q bo'lsa run ochiladi (`until` — run ishlashi mumkin bo'lgan oxirgi vaqt).
+ * Run xabar olmasdan 3 marta ketma-ket tugasa (model yuklanmayapti) — xabarlar yopiladi va foydalanuvchiga aytiladi.
+ * Natija: none | alive | recent | stuck | dispatched | error:<sabab>
  */
 async function wakeIfNeeded(env: Env): Promise<string> {
   const [[s]] = await db(env, [[
     `SELECT (SELECT COUNT(*) FROM ai_msg WHERE role = 0 AND state < 2) AS open,
-            COALESCE((SELECT v FROM ai_state WHERE k = 'beat'), 0) AS beat,
-            COALESCE((SELECT v FROM ai_state WHERE k = 'wake'), 0) AS wake`,
+            COALESCE((SELECT v FROM ai_state WHERE k = 'until'), 0) AS until,
+            COALESCE((SELECT v FROM ai_state WHERE k = 'wake'), 0) AS wake,
+            COALESCE((SELECT v FROM ai_state WHERE k = 'tries'), 0) AS tries`,
   ]]);
   const now = nowSec();
   if (!Number(s.open)) return "none";
-  if (Number(s.beat) > now - BEAT_FRESH) return "alive";
+  if (Number(s.until) > now) return "alive";
   if (Number(s.wake) > now - WAKE_GAP) return "recent";
+  if (Number(s.tries) >= MAX_TRIES) {
+    const [rows] = await db(env, [["SELECT DISTINCT chat_id FROM ai_msg WHERE role = 0 AND state < 2"]]);
+    await db(env, [["UPDATE ai_msg SET state = 2 WHERE role = 0 AND state < 2"], ["DELETE FROM ai_state WHERE k = 'tries'"]]);
+    for (const r of rows) await say(env, Number(r.chat_id), "⚠️ Model 3 marta ishga tushmadi — xabaringiz javobsiz qoldi. Birozdan keyin qayta yozing.");
+    return "stuck";
+  }
   if (!env.GH_ACTIONS_TOKEN || !env.GH_REPO) return "error:GH_ACTIONS_TOKEN/GH_REPO yo'q";
-  await db(env, [["INSERT INTO ai_state(k, v) VALUES('wake', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v", [now]]]);
+  await db(env, [
+    ["INSERT INTO ai_state(k, v) VALUES('until', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v", [now + RUN_SPAN]],
+    ["INSERT INTO ai_state(k, v) VALUES('wake', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v", [now]],
+    ["INSERT INTO ai_state(k, v) VALUES('tries', 1) ON CONFLICT(k) DO UPDATE SET v = v + 1"],
+  ]);
   const r = await fetch(`https://api.github.com/repos/${env.GH_REPO.trim()}/actions/workflows/${WORKFLOW}/dispatches`, {
     method: "POST",
     headers: {
@@ -157,8 +172,8 @@ async function wakeIfNeeded(env: Env): Promise<string> {
     body: JSON.stringify({ ref: "main" }),
   });
   if (r.status === 204) return "dispatched";
-  // Xatoda qayta urinish ~1 daqiqadan keyin (cron).
-  await db(env, [["UPDATE ai_state SET v = ? WHERE k = 'wake'", [now - WAKE_GAP + 60]]]);
+  // Xatoda run ochilmagan: "run bor" belgisi olib tashlanadi, urinish hisobi qaytariladi, ~1 daqiqadan keyin cron qayta uriniladi.
+  await db(env, [["UPDATE ai_state SET v = 0 WHERE k = 'until'"], ["UPDATE ai_state SET v = MAX(v - 1, 0) WHERE k = 'tries'"]]);
   const t = await r.text().catch(() => "");
   return `error:GitHub ${r.status} ${t.slice(0, 120)}`;
 }
@@ -245,18 +260,21 @@ async function handleUpdate(env: Env, u: any, ctx: ExecutionContext): Promise<vo
   if (text.startsWith("/status")) {
     const [[s]] = await db(env, [[
       `SELECT (SELECT COUNT(*) FROM ai_msg WHERE role = 0 AND state < 2) AS open,
-              COALESCE((SELECT v FROM ai_state WHERE k = 'beat'), 0) AS beat`,
+              COALESCE((SELECT v FROM ai_state WHERE k = 'until'), 0) AS until`,
     ]]);
-    const alive = Number(s.beat) > nowSec() - BEAT_FRESH;
+    const alive = Number(s.until) > nowSec();
     await say(env, chat, `Model run'i: ${alive ? "ishlayapti" : "o'chiq"}\nJavobsiz xabarlar: ${s.open}`);
     return;
   }
 
-  await db(env, [["INSERT INTO ai_msg(chat_id, role, text) VALUES(?, 0, ?)", [chat, text]]]);
+  await db(env, [
+    ["INSERT INTO ai_msg(chat_id, role, text) VALUES(?, 0, ?)", [chat, text]],
+    ["DELETE FROM ai_state WHERE k = 'tries'"],  // yangi xabar — yangi urinishlar
+  ]);
   const w = await wakeIfNeeded(env);
   if (w === "dispatched") await say(env, chat, "🧠 Model uyg'onyapti — birinchi javobgacha taxminan 3–8 daqiqa.");
   else if (w.startsWith("error:")) await say(env, chat, `⚠️ Actions ishga tushmadi (${w.slice(6)}). Bir daqiqadan keyin yana uriniladi.`);
-  else if (w === "alive") ctx.waitUntil(tg(env, "sendChatAction", { chat_id: chat, action: "typing" }));
+  else if (w === "alive" || w === "recent") ctx.waitUntil(tg(env, "sendChatAction", { chat_id: chat, action: "typing" }));
 }
 
 export default {
@@ -295,9 +313,11 @@ export default {
       await ensureSchema(env);
       const b: any = req.method === "POST" ? await req.json().catch(() => ({})) : {};
 
-      if (p === "/ai/beat") {
-        await db(env, [["INSERT INTO ai_state(k, v) VALUES('beat', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v", [b.final ? 0 : nowSec()]]]);
-        return json({ ok: true });
+      // Run navbatni bo'shatib tugadi (yoki yiqildi): "run bor" belgisi o'chadi, navbatda xabar qolgan bo'lsa worker yangi run ochadi.
+      if (p === "/ai/done") {
+        await db(env, [["INSERT INTO ai_state(k, v) VALUES('until', 0) ON CONFLICT(k) DO UPDATE SET v = 0"]]);
+        if (b.ok === false) await db(env, [["INSERT INTO ai_state(k, v) VALUES('wake', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v", [nowSec()]]]);
+        return json({ ok: true, next: await wakeIfNeeded(env) });
       }
 
       if (p === "/ai/typing") {
@@ -315,6 +335,7 @@ export default {
         if (!rows.length) return json({ ok: true, msg: null });
         const id = Number(rows[0].id);
         const chat = Number(rows[0].chat_id);
+        ctx.waitUntil(db(env, [["DELETE FROM ai_state WHERE k = 'tries'"]]));  // run ishlayapti — urinish hisobi nolga
         ctx.waitUntil(tg(env, "sendChatAction", { chat_id: chat, action: "typing" }));
         const h = await loadHistory(env, chat, id);
         return json({ ok: true, msg: { id, chat, text: String(rows[0].text) }, summary: h.sum, history: h.msgs });
