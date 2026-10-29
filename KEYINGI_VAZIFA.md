@@ -6863,3 +6863,5 @@ TALAB (foydalanuvchi): panel botga "siqish" tugmasi; bosilganda bot videoni so'r
 - Tekshirilgan: `cargo check --target wasm32-unknown-unknown`; ffmpeg buyrug'i haqiqiy 720x1280 videoda (hevc/hvc1, ovozsiz). Tekshirilmagan: Telegram'da to'liq oqim
   (kanalga ko'chirish, yuklash, Saqlangan xabarlarga yuborish), HEVC GIF'ning eski Android mijozlarida ijrosi.
 - Eslatma: GIF ovozsiz bo'ladi (Telegram animatsiyasi shunday). Ovoz kerak bo'lsa `send_video` va `-c:a aac` ga qaytariladi.
+- MUHIM (topilgan xato): worker APK imzosi yo'q so'rovlarni rad etadi; Actions chaqiradigan yo'llar `lib.rs` dagi ruxsat ro'yxatiga (`/api/tr/claim ...` qatori)
+  qo'shilishi KERAK. `/api/cmp/*` avval unda yo'q edi — run `claim` da 403 olib, ishsiz tugardi (GIF yuborilmadi). Yangi Actions yo'li qo'shilsa shu ro'yxatni ham yangilang.
