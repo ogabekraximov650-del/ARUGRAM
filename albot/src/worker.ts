@@ -316,7 +316,11 @@ export default {
       // Run navbatni bo'shatib tugadi (yoki yiqildi): "run bor" belgisi o'chadi, navbatda xabar qolgan bo'lsa worker yangi run ochadi.
       if (p === "/ai/done") {
         await db(env, [["INSERT INTO ai_state(k, v) VALUES('until', 0) ON CONFLICT(k) DO UPDATE SET v = 0"]]);
-        if (b.ok === false) await db(env, [["INSERT INTO ai_state(k, v) VALUES('wake', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v", [nowSec()]]]);
+        if (b.ok === false) {
+          await db(env, [["INSERT INTO ai_state(k, v) VALUES('wake', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v", [nowSec()]]]);
+          // Run yiqilgan sabab egasiga ko'rsatiladi (3 urinishgacha har safar).
+          if (b.err) ctx.waitUntil(say(env, Number(env.ADMIN_ID), `⚠️ Actions run'i yiqildi:\n${String(b.err).slice(0, 1500)}`));
+        }
         return json({ ok: true, next: await wakeIfNeeded(env) });
       }
 

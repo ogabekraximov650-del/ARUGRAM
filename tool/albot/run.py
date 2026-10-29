@@ -160,7 +160,7 @@ def handle(msg, summary, history):
 def main():
     srv = subprocess.Popen(
         [LLAMA, "-m", MODEL, "--host", "127.0.0.1", "--port", str(PORT), "-c", str(CTX), "-t", str(os.cpu_count() or 4),
-         "--jinja", "--no-webui"],
+         "--jinja"],
         stdout=open("/tmp/llama.log", "w"), stderr=subprocess.STDOUT,
     )
     try:

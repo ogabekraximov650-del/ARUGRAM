@@ -17,6 +17,7 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   run:
@@ -37,10 +38,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -e
-          URL=$(gh api repos/ggml-org/llama.cpp/releases/latest --jq '.assets[].browser_download_url' \
-                | grep -E 'bin-ubuntu-x64\.(zip|tar\.gz)$' | head -1)
+          gh api repos/ggml-org/llama.cpp/releases/latest --jq '.assets[].browser_download_url' > /tmp/assets.txt
+          URL=$(grep -E 'ubuntu-x64\.(zip|tar\.gz)$' /tmp/assets.txt | grep -viE 'vulkan|rocm|openvino|sycl|cuda|arm' | head -1)
+          [ -n "$URL" ] || URL=$(grep -iE 'linux-x64|ubuntu.*x64' /tmp/assets.txt | grep -viE 'vulkan|rocm|openvino|sycl|cuda|arm' | head -1)
           echo "build: $URL"
-          test -n "$URL"
+          if [ -z "$URL" ]; then echo "llama.cpp CPU build topilmadi. Bor fayllar:"; grep -i linux /tmp/assets.txt | head; exit 1; fi
           mkdir -p /mnt/albot/llama && cd /mnt/albot/llama
           curl -fsSL --retry 4 -o pkg "$URL"
           case "$URL" in
@@ -66,13 +68,23 @@ jobs:
           MODEL_PATH: /mnt/albot/model.gguf
           MAX_MIN: '42'
           PYTHONUNBUFFERED: '1'
-        run: python3 tool/albot/run.py
+        shell: bash
+        run: python3 tool/albot/run.py 2>&1 | tee /tmp/albot_run.log
 
-      # Run yiqilsa/bekor bo'lsa worker'ga aytiladi ("run bor" belgisi o'chadi; urinishlar hisobi yuritiladi).
+      # Run yiqilsa/bekor bo'lsa worker'ga sabab bilan aytiladi ("run bor" belgisi o'chadi; sabab botda ko'rinadi).
       - name: Worker'ga xabar (xatoda)
         if: failure() || cancelled()
         env:
+          GH_TOKEN: ${{ github.token }}
           RUN_KEY: ${{ secrets.ENCODE_TOKEN }}
         run: |
-          curl -sS -m 30 -X POST -H "X-Run-Key: $(printf '%s' "$RUN_KEY" | tr -d '[:space:]')" -H 'Content-Type: application/json' \
-            -d '{"ok":false}' https://albot.uzcom.workers.dev/ai/done || true
+          STEP=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs" \
+                 --jq '[.jobs[].steps[] | select(.conclusion=="failure" or .conclusion=="cancelled") | .name] | join(", ")' 2>/dev/null || true)
+          TAIL=$(tail -c 700 /tmp/albot_run.log 2>/dev/null || true)
+          LL=$(tail -c 500 /tmp/llama.log 2>/dev/null || true)
+          STEP="$STEP" TAIL="$TAIL" LL="$LL" python3 - <<'PY' | curl -sS -m 30 -X POST \
+            -H "X-Run-Key: $(printf '%s' "$RUN_KEY" | tr -d '[:space:]')" -H 'Content-Type: application/json' -d @- \
+            https://albot.uzcom.workers.dev/ai/done || true
+          import json, os
+          print(json.dumps({"ok": False, "err": f"Qadam: {os.environ['STEP']}\n{os.environ['TAIL']}\n{os.environ['LL']}"[:1500]}))
+          PY
