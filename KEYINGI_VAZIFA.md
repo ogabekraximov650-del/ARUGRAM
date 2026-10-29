@@ -6898,3 +6898,6 @@ Foydalanuvchi: oldingi usul (bitrate cheklovi/VBV) GIF'ni juda xira qildi ("bir 
 - Oxirgi kodlash sifati yoziladi: GIF izohida ("1920×1080 → 1918×1078 · CRF 30 · 4.9 MB · 6 marta kodlandi"), botdagi holat xabarida (hamma urinishlar: "1080px→5.9MB, ..."),
   va `app_config.cmp_last` da (Siqish bo'limida "📋 Holat" -> "Oxirgi kodlash").
 - Tekshirilgan: sintetik 1080p 8 s klipda (chegara 3 MB): 5 urinishda 1078px topildi; `cargo check`. Tekshirilmagan: Telegram'dagi to'liq oqim va haqiqiy 5 MB / 1080p video.
+- Topilgan xato (diag-logs orqali ikkinchi akkaunt logidan): `tool/albot/run.py` da `import re` yo'q edi — `get_attachment` har safar `NameError` berib, model bir xil chaqiruvni 4 marta takrorlagan
+  (har urinish ~1 daqiqa). Tuzatildi; bir xil vosita chaqiruvi 2 marta xato bersa 3-sida bajarilmaydi (model boshqa yo'l tutadi). Ikkinchi akkaunt loglarini ko'rish: `tool/diag/filter.txt` (run nomi bo'laklari)
+  va `tool/diag/run.txt` ni o'zgartirib push qiling — `diag-logs.yml` oxirgi mos run logini shu repo job logiga chiqaradi.

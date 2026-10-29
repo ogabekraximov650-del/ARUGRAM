@@ -11,6 +11,7 @@ EN: Context is 16,384 tokens; history over ~24,000 chars is summarised into a sh
 """
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -230,6 +231,7 @@ def agent_answer(msg, summary, history):
     msgs = build_messages(summary, history)
     t_end = min(time.time() + AGENT_MAX_MIN * 60, T0 + MAX_MIN * 60 - 120)
     steps = 0
+    failed = {}
     while True:
         use_tools = steps < MAX_STEPS and time.time() < t_end and sum(len(str(m.get("content", ""))) for m in msgs) < 42000
         resp = llm_raw(msgs, tools=TOOLS if use_tools else None)
@@ -250,7 +252,13 @@ def agent_answer(msg, summary, history):
                 call("/ai/say", {"chat": msg["chat"], "text": f"🔧 {fn.get('name')}: {shown[:300]}"}, timeout=20)
             except Exception:  # noqa: BLE001
                 pass
-            res = run_tool(c, msg)
+            key = (fn.get("name"), shown)
+            if failed.get(key, 0) >= 2:
+                res = "xato: bu chaqiruv 2 marta xato bergan — qayta urinma; boshqa yo'l tut yoki foydalanuvchiga sababini ayt"
+            else:
+                res = run_tool(c, msg)
+                if res.startswith("xato"):
+                    failed[key] = failed.get(key, 0) + 1
             log(f"   → {res[:200]!r}")
             msgs.append({"role": "tool", "tool_call_id": c.get("id", ""), "content": res})
         steps += 1
