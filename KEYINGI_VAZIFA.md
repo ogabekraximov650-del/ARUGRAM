@@ -6865,3 +6865,5 @@ TALAB (foydalanuvchi): panel botga "siqish" tugmasi; bosilganda bot videoni so'r
 - Eslatma: GIF ovozsiz bo'ladi (Telegram animatsiyasi shunday). Ovoz kerak bo'lsa `send_video` va `-c:a aac` ga qaytariladi.
 - MUHIM (topilgan xato): worker APK imzosi yo'q so'rovlarni rad etadi; Actions chaqiradigan yo'llar `lib.rs` dagi ruxsat ro'yxatiga (`/api/tr/claim ...` qatori)
   qo'shilishi KERAK. `/api/cmp/*` avval unda yo'q edi — run `claim` da 403 olib, ishsiz tugardi (GIF yuborilmadi). Yangi Actions yo'li qo'shilsa shu ro'yxatni ham yangilang.
+- albot run vaqti (birinchi muvaffaqiyatli run, 2026-10-29): jami ~8 daqiqa — llama.cpp ~4m40s (tayyor build topilmay, manbadan yig'ilgan), model yuklash ~1m20s, model yuklanishi+javob ~1m40s.
+  Tezlashtirish: yig'ilgan `llama-server` `actions/cache` da (`llama-server-ubuntu-x64-v1`, /mnt/albot/llama-cache) — keyingi run'lar ~4.5 daqiqa tezroq. Model (12 GB) keshga sig'maydi (limit 10 GB), har run'da yuklanadi.

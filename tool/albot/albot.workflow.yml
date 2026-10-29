@@ -33,11 +33,30 @@ jobs:
           sudo mkswap /mnt/albot/swap >/dev/null && sudo swapon /mnt/albot/swap
           free -h | head -2; df -h /mnt/albot | tail -1
 
-      - name: llama.cpp (tayyor CPU build, bo'lmasa manbadan yig'iladi)
+      # llama-server (~4-5 daqiqa yig'iladi) keshlanadi: keyingi run'larda tayyor binar olinadi. Model (12 GB) keshga sig'maydi (limit 10 GB).
+      - name: llama-server keshi
+        id: llcache
+        uses: actions/cache@v4
+        with:
+          path: /mnt/albot/llama-cache
+          key: llama-server-ubuntu-x64-v1
+
+      - name: llama.cpp (kesh, tayyor CPU build, bo'lmasa manbadan yig'iladi)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           exec > >(tee -a /tmp/albot_setup.log) 2>&1
+          if [ -x /mnt/albot/llama-cache/llama-server ]; then
+            BIN=/mnt/albot/llama-cache/llama-server
+            if LD_LIBRARY_PATH=/mnt/albot/llama-cache "$BIN" --version >/dev/null 2>&1; then
+              echo "llama-server keshdan olindi"
+              echo "LLAMA_SERVER=$BIN" >> "$GITHUB_ENV"
+              echo "LD_LIBRARY_PATH=/mnt/albot/llama-cache" >> "$GITHUB_ENV"
+              exit 0
+            fi
+            echo "kesh binari ishlamadi — qayta yig'iladi"
+            rm -rf /mnt/albot/llama-cache
+          fi
           sudo apt-get update -qq && sudo apt-get install -y -qq libgomp1 unzip >/dev/null || true
           mkdir -p /mnt/albot/llama && cd /mnt/albot/llama
           BIN=""
@@ -78,6 +97,10 @@ jobs:
             BIN=/mnt/albot/llama-src/build/bin/llama-server
           fi
           test -x "$BIN" || { echo "llama-server topilmadi"; exit 1; }
+          # Keyingi run'lar uchun: binar va uning kutubxonalari kesh papkasiga (run muvaffaqiyatli tugasa saqlanadi).
+          mkdir -p /mnt/albot/llama-cache && cp -a "$(dirname "$BIN")"/. /mnt/albot/llama-cache/ 2>/dev/null || true
+          rm -rf /mnt/albot/llama-cache/test-* /mnt/albot/llama-cache/llama-bench /mnt/albot/llama-cache/llama-cli 2>/dev/null || true
+          du -sh /mnt/albot/llama-cache | tail -1
           echo "LLAMA_SERVER=$BIN" >> "$GITHUB_ENV"
           echo "LD_LIBRARY_PATH=$(dirname "$BIN")" >> "$GITHUB_ENV"
           echo "llama-server: $BIN"
