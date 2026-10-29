@@ -30,8 +30,8 @@ CTX = 24576
 HIST_CHARS = 16000   # shundan oshsa tarix siqiladi (qolgan joy vosita natijalariga)
 TAIL_CHARS = 5000    # siqishdan keyin shuncha yangi xabar qoladi
 MAX_TOKENS = 2500
-WORKDIR = os.environ.get("AGENT_WORKDIR", "/mnt/albot/work")   # model buyruqlari shu papkada, alohida (maxfiy kalitlarsiz) foydalanuvchi sifatida ishlaydi
-AGENT_USER = os.environ.get("AGENT_USER", "albot")
+WORKDIR = os.environ.get("AGENT_WORKDIR", "/mnt/albot/work")   # xost papkasi; konteynerda /work sifatida ulangan
+SANDBOX = os.environ.get("AGENT_SANDBOX", "albot-sandbox")   # docker konteyner: model buyruqlari shu yerda, root sifatida, maxfiy kalitlarsiz
 MAX_STEPS = int(os.environ.get("AGENT_MAX_STEPS", "12"))
 AGENT_MAX_MIN = float(os.environ.get("AGENT_MAX_MIN", "25"))
 TOOL_OUT = 2500      # vosita natijasidan kontekstga ko'pi bilan shuncha belgi
@@ -39,15 +39,19 @@ TOOL_OUT = 2500      # vosita natijasidan kontekstga ko'pi bilan shuncha belgi
 SYSTEM = (
     "Sen foydalanuvchining shaxsiy yordamchisisan. O'zbek tilida (agar foydalanuvchi boshqa tilda yozmasa) aniq, qisqa va "
     "to'g'ri javob ber. Bilmasang, bilmasligingni ayt.\n\n"
-    "MUHIT: sen GitHub Actions'dagi vaqtinchalik Ubuntu mashinasida ishlayapsan (4 CPU, ~4 GB bo'sh RAM, GPU yo'q, internet bor, "
-    "python3, pip, ffmpeg, curl, git bor). Mashina har safar yangi: faqat ish papkasidagi fayllar shu suhbat davomida saqlanadi.\n"
+    "MUHIT: sen GitHub Actions'dagi vaqtinchalik mashinada, alohida Docker konteynerida (Ubuntu 24.04) ishlayapsan: sen konteynerda ROOT'san, "
+    "internet bor, GPU yo'q, ~3 GB RAM. Kerakli dasturlarni o'zing o'rnat: `apt-get install -y ...` yoki `pip install --break-system-packages ...` "
+    "(sudo kerak emas). Oldindan o'rnatilgan: python3, pip, ffmpeg, poppler-utils (pdftotext, pdftoppm), tesseract-ocr (eng, rus, kor, jpn), "
+    "imagemagick, curl, git. Konteyner har run'da yangi: faqat /work papkasidagi fayllar shu suhbat davomida saqlanadi.\n"
     "VOSITALAR (kerak bo'lsa ishlat, oddiy savolga ishlatma):\n"
-    "- shell(cmd, timeout): bash buyrug'i, ish papkasida, oddiy foydalanuvchi sifatida (sudo yo'q; pip uchun `pip install --user`).\n"
-    "- read_file(path) / write_file(path, content): ish papkasidagi fayllar.\n"
-    "- get_attachment(id): foydalanuvchi yuborgan faylni ish papkasiga yuklaydi (xabarda `[Biriktirilgan fayl #N ...]` ko'rinadi, 20 MB gacha).\n"
-    "- send_file(path, caption): ish papkasidagi faylni foydalanuvchiga yuboradi (49 MB gacha).\n"
-    "QOIDALAR: natijani ko'rmasdan 'tayyor' dema — buyruq natijasini tekshir; xato bo'lsa sababini o'qib tuzat; bir xil xatoni 2 martadan ko'p "
-    "takrorlama; uzun ishlarni kichik qadamlarga bo'l; tayyor fayllarni send_file bilan yubor; oxirida nima qilganingni 1–3 jumlada ayt. "
+    "- shell(cmd, timeout): bash buyrug'i, /work papkasida (konteyner ichida, root).\n"
+    "- read_file(path) / write_file(path, content): /work dagi fayllar.\n"
+    "- get_attachment(id): foydalanuvchi yuborgan faylni /work ga yuklaydi (xabarda `[Biriktirilgan fayl #N ...]` ko'rinadi, 20 MB gacha). "
+    "Fayl ishlatishdan OLDIN har doim get_attachment ni chaqir (har run'da /work bo'sh boshlanadi).\n"
+    "- send_file(path, caption): /work dagi faylni foydalanuvchiga yuboradi (49 MB gacha).\n"
+    "QOIDALAR: natijani ko'rmasdan 'tayyor' dema — buyruq natijasini tekshir; vosita yo'q bo'lsa o'zing o'rnat (o'rnatib bo'lmaydi dema, avval urinib ko'r); "
+    "xato bo'lsa sababini o'qib tuzat; bir xil xatoni 2 martadan ko'p takrorlama; uzun ishlarni kichik qadamlarga bo'l; tayyor fayllarni send_file bilan yubor; "
+    "oxirida nima qilganingni 1–3 jumlada ayt. Skanerlangan PDF: `pdftoppm -r 150 -png f.pdf p` -> `tesseract p-1.png out -l eng` -> tarjima. "
     "Maxfiy ma'lumot (token, parol) so'ralsa yoki mashinadan tashqariga zarar yetkazadigan ish so'ralsa, rad et."
 )
 
@@ -105,7 +109,7 @@ def llm(messages, max_tokens=MAX_TOKENS, effort="low"):
 
 TOOLS = [
     {"type": "function", "function": {
-        "name": "shell", "description": "Bash buyrug'ini ish papkasida ishga tushiradi; stdout+stderr va chiqish kodi qaytadi.",
+        "name": "shell", "description": "Bash buyrug'ini konteynerda (root, /work papkasida) ishga tushiradi; stdout+stderr va chiqish kodi qaytadi. Dastur kerak bo'lsa apt-get/pip bilan o'zing o'rnat.",
         "parameters": {"type": "object", "properties": {
             "cmd": {"type": "string", "description": "bash buyrug'i"},
             "timeout": {"type": "integer", "description": "soniya (standart 120, ko'pi 900)"}}, "required": ["cmd"]}}},
@@ -127,19 +131,31 @@ TOOLS = [
 
 
 def _safe_path(path):
-    """Ish papkasidan tashqariga chiqmaydigan to'liq yo'l."""
-    full = os.path.realpath(os.path.join(WORKDIR, str(path)))
+    """Ish papkasidan tashqariga chiqmaydigan to'liq yo'l (symlink ham tekshiriladi — realpath)."""
+    p = str(path)
+    if p.startswith("/work/") or p == "/work":
+        p = p[len("/work/"):] if p != "/work" else "."
+    full = os.path.realpath(os.path.join(WORKDIR, p))
     if full != WORKDIR and not full.startswith(WORKDIR + os.sep):
-        raise ValueError("yo'l ish papkasidan tashqarida")
+        raise ValueError("yo'l /work papkasidan tashqarida")
     return full
 
 
-def _as_agent(argv, stdin=None, timeout=120):
-    """Buyruq maxfiy kalitlarsiz, alohida foydalanuvchi sifatida (RUN_KEY va tokenlar unga ko'rinmaydi)."""
-    return subprocess.run(
-        ["sudo", "-n", "-u", AGENT_USER, "-H", "env", "-i", f"HOME=/home/{AGENT_USER}", "LANG=C.UTF-8",
-         f"PATH=/home/{AGENT_USER}/.local/bin:/usr/local/bin:/usr/bin:/bin", *argv],
-        input=stdin, capture_output=True, timeout=timeout)
+_ready = False
+
+
+def sandbox_wait(max_s=420):
+    """Konteynerdagi oldindan o'rnatish (fonda ketadi) tugashini kutadi."""
+    global _ready
+    if _ready:
+        return
+    t0 = time.time()
+    while time.time() - t0 < max_s:
+        r = subprocess.run(["docker", "exec", SANDBOX, "test", "-f", "/tmp/ready"], capture_output=True)
+        if r.returncode == 0:
+            _ready = True
+            return
+        time.sleep(5)
 
 
 def _clip(text, n=TOOL_OUT):
@@ -151,31 +167,29 @@ def _clip(text, n=TOOL_OUT):
 
 def tool_shell(a, msg):
     t = max(5, min(int(a.get("timeout") or 120), 900))
-    r = _as_agent(["timeout", "-k", "5", str(t), "bash", "-c", f"cd {WORKDIR} && {a['cmd']}"], timeout=t + 20)
+    sandbox_wait()
+    r = subprocess.run(["docker", "exec", "-w", "/work", SANDBOX, "timeout", "-k", "5", str(t), "bash", "-c", a["cmd"]],
+                       capture_output=True, timeout=t + 30)
     out = (r.stdout + r.stderr).decode(errors="replace")
     return _clip(out) + f"\n[chiqish kodi: {r.returncode}]" + (" (vaqt tugadi)" if r.returncode == 124 else "")
 
 
 def tool_read_file(a, msg):
     full = _safe_path(a["path"])
-    r = _as_agent(["head", "-c", "6000", full])
-    if r.returncode:
-        return "xato: " + r.stderr.decode(errors="replace")[:300]
-    return r.stdout.decode(errors="replace")
+    with open(full, "rb") as f:
+        return f.read(6000).decode(errors="replace")
 
 
 def tool_write_file(a, msg):
     full = _safe_path(a["path"])
-    _as_agent(["mkdir", "-p", os.path.dirname(full)])
-    r = _as_agent(["tee", full], stdin=str(a.get("content", "")).encode())
-    if r.returncode:
-        return "xato: " + r.stderr.decode(errors="replace")[:300]
+    os.makedirs(os.path.dirname(full), exist_ok=True)
+    with open(full, "w") as f:
+        f.write(str(a.get("content", "")))
     return f"yozildi: {a['path']} ({len(str(a.get('content', '')))} belgi)"
 
 
 def tool_get_attachment(a, msg):
-    base = API
-    req = urllib.request.Request(base + "/ai/getfile", data=json.dumps({"id": int(a["id"])}).encode(), method="POST",
+    req = urllib.request.Request(API + "/ai/getfile", data=json.dumps({"id": int(a["id"])}).encode(), method="POST",
                                  headers={"X-Run-Key": RUN_KEY, "Content-Type": "application/json", "User-Agent": "albot-run"})
     try:
         with urllib.request.urlopen(req, timeout=120) as r:
@@ -184,18 +198,20 @@ def tool_get_attachment(a, msg):
             data = r.read()
     except urllib.error.HTTPError as e:
         return "xato: " + e.read().decode(errors="replace")[:300]
-    dst = os.path.join(WORKDIR, name)
-    _as_agent(["tee", dst], stdin=data, timeout=120)
-    return f"yuklandi: {name} ({len(data)} bayt) — ish papkasida"
+    os.makedirs(WORKDIR, exist_ok=True)
+    with open(os.path.join(WORKDIR, name), "wb") as f:
+        f.write(data)
+    return f"yuklandi: /work/{name} ({len(data)} bayt)"
 
 
 def tool_send_file(a, msg):
     full = _safe_path(a["path"])
-    r = _as_agent(["cat", full], timeout=120)
-    if r.returncode or not r.stdout:
-        return "xato: fayl topilmadi yoki bo'sh"
+    with open(full, "rb") as f:
+        data = f.read()
+    if not data:
+        return "xato: fayl bo'sh"
     req = urllib.request.Request(
-        API + "/ai/file", data=r.stdout, method="POST",
+        API + "/ai/file", data=data, method="POST",
         headers={"X-Run-Key": RUN_KEY, "X-Chat": str(msg["chat"]), "X-Name": urllib.parse.quote(os.path.basename(full)),
                  "X-Caption": urllib.parse.quote(str(a.get("caption") or "")), "Content-Type": "application/octet-stream",
                  "User-Agent": "albot-run"})

@@ -29,14 +29,16 @@ jobs:
         with:
           persist-credentials: false
 
-      # Model buyruqlari ALOHIDA oddiy foydalanuvchi (`albot`) sifatida, maxfiy kalitlarsiz ishlaydi: RUN_KEY va tokenlar
-      # run.py jarayonining muhitida, `albot` ularni (boshqa foydalanuvchi bo'lgani uchun) ko'ra olmaydi.
-      - name: Vositalar uchun muhit (foydalanuvchi, ffmpeg)
+      # Model buyruqlari ALOHIDA Docker konteynerida (root, lekin maxfiy kalitlarsiz va xost fayllarisiz) ishlaydi: RUN_KEY va tokenlar
+      # faqat xostdagi run.py muhitida; konteynerga faqat /work (ish papkasi) ulanadi. Model kerakli dasturlarni o'zi o'rnata oladi.
+      # Oldindan o'rnatish FONDA ketadi (llama.cpp yig'ish va model yuklash bilan bir vaqtda), tugagach /tmp/ready paydo bo'ladi.
+      - name: Vositalar konteyneri (Ubuntu, fonda o'rnatiladi)
         run: |
-          sudo useradd -m -s /bin/bash albot
-          sudo mkdir -p /mnt/albot/work && sudo chown albot:albot /mnt/albot/work && sudo chmod 755 /mnt/albot /mnt/albot/work
-          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg poppler-utils >/dev/null
-          python3 -m pip --version
+          sudo mkdir -p /mnt/albot/work && sudo chown "$USER" /mnt/albot/work && sudo chmod 777 /mnt/albot/work
+          docker pull -q ubuntu:24.04 || docker pull -q mirror.gcr.io/library/ubuntu:24.04
+          docker run -d --name albot-sandbox --memory=3g --memory-swap=6g -v /mnt/albot/work:/work -w /work ubuntu:24.04 sleep infinity
+          docker exec -d albot-sandbox bash -c 'export DEBIAN_FRONTEND=noninteractive; apt-get update -qq && apt-get install -y -qq python3 python3-pip ffmpeg poppler-utils tesseract-ocr tesseract-ocr-eng tesseract-ocr-rus tesseract-ocr-kor tesseract-ocr-jpn imagemagick curl git ca-certificates img2pdf >/tmp/install.log 2>&1; touch /tmp/ready'
+          docker ps --format '{{.Names}} {{.Status}}'
 
       - name: Joy va swap (/mnt)
         run: |

@@ -6905,3 +6905,15 @@ Foydalanuvchi: oldingi usul (bitrate cheklovi/VBV) GIF'ni juda xira qildi ("bir 
   bir CPU'da (AVX512) yig'ilgan, keyingi run boshqa CPU'li mashinaga tushgan -> SIGILL. Tuzatish: manbadan yig'ishda `-DGGML_NATIVE=OFF -DGGML_AVX2=ON -DGGML_FMA=ON -DGGML_F16C=ON -DGGML_AVX512=OFF`,
   kesh kaliti `llama-server-ubuntu-x64-v2` (eski binar ishlatilmaydi). Endi yiqilishda chiqish kodi (SIGILL/SIGKILL/SIGSEGV), `dmesg` (OOM) va CPU modeli xabarga qo'shiladi.
   Agar yana yiqilsa sabab shu xabardan ma'lum bo'ladi (OOM bo'lsa — `CTX` ni 16384 ga qaytarish).
+
+## albot: model buyruqlari Docker konteynerida, o'zi dastur o'rnata oladi (2026-10-29)
+
+Foydalanuvchi: model "sudo yo'q, o'rnatib bo'lmaydi" deb to'xtab qoldi ("Modelni o'zi kerakli narsalarni o'rnatsin"). Oldin buyruqlar xostda `albot` foydalanuvchisi sifatida (sudo'siz) ishlardi.
+- Endi `shell` — `docker exec albot-sandbox` (Ubuntu 24.04, **root**, `--memory=3g --memory-swap=6g`, `/mnt/albot/work` -> `/work`). Model `apt-get install` / `pip install --break-system-packages` ni o'zi qiladi.
+  Konteynerga FAQAT `/work` ulanadi; RUN_KEY, tokenlar va xost fayllari ko'rinmaydi (xavfsizlik chegarasi — konteyner; prompt injection (masalan PDF ichidagi buyruq) bo'lsa ham asosiy kalit chiqmaydi).
+  Docker soketi ulanmagan, `--privileged` yo'q. Tarmoq ochiq.
+- Oldindan o'rnatish FONDA (`docker exec -d`, llama.cpp yig'ish/model yuklash bilan parallel): python3, pip, ffmpeg, poppler-utils, tesseract (eng/rus/kor/jpn), imagemagick, curl, git, img2pdf;
+  tugagach `/tmp/ready`; `shell` birinchi chaqiruvda 7 daqiqagacha shuni kutadi.
+- `read_file/write_file/get_attachment/send_file` xostda `/work` (=`WORKDIR`) bilan ishlaydi; `_safe_path` realpath bilan symlink orqali chiqishni rad etadi (tekshirildi).
+- Tizim ko'rsatmasi yangilandi: model konteynerda root ekanini, nimalar o'rnatilganini, "avval get_attachment" qoidasini (har run yangi) va skaner PDF oqimini (pdftoppm -> tesseract) biladi.
+- Tekshirilgan: vositalar soxta docker bilan lokal (shell, vaqt chegarasi, fayl o'qish/yozish, symlink rad etish, get_attachment). TEKSHIRILMAGAN: Actions'da `docker run`/`exec`, o'rnatish vaqti, modelning haqiqiy xatti-harakati.
