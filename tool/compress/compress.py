@@ -6,8 +6,9 @@ Worker navbatda ish bo'lsa uni o'zi ishga tushiradi. Bitta run — bitta video.
 
 Bitta ish:
   1. video yopiq kanaldan yuklab olinadi (bot ko'chirgan nusxa), asosiy akkaunt (pyrogram sessiyasi) bilan;
-  2. ffmpeg: H.265 (libx265), CRF 30, qisqa tomoni 720 dan katta bo'lsa 720 gacha kichraytiriladi
-     (kichik video kattalashtirilmaydi), OVOZSIZ (GIF), `hvc1` belgisi, faststart;
+  2. ffmpeg: H.265 (libx265), CRF HAR DOIM 30 (bitrate cheklanmaydi). Hajm TARGET_MB (5 MB) dan oshsa, faqat o'lcham
+     kamaytiriladi: 1080p -> 1080, ... juft o'lchamlar bo'yicha hajm sig'guncha qayta-qayta kodlanadi (taxmin + qisqartirish);
+     eng katta sig'adigan o'lcham topiladi. OVOZSIZ (GIF), `hvc1`. Butun ish ko'pi bilan JOB_MAX_MIN (60) daqiqa;
   3. tayyor fayl GIF (animatsiya, `send_animation`) qilib asosiy akkauntning "Saqlangan xabarlar"iga (Saved Messages, `me`) yuboriladi;
   4. `/api/cmp/finish` — worker kanal nusxasini va ish yozuvini o'chiradi.
 Jarayon botdagi bitta xabarda jonli ko'rinadi (`/api/cmp/progress`).
@@ -31,9 +32,13 @@ HERE = Path(__file__).resolve().parent
 WORK = Path(os.environ.get("WORK_ROOT", os.environ.get("RUNNER_TEMP", "/tmp"))) / "arumediatv_compress"
 CRF = os.environ.get("H265_CRF", "30")
 PRESET = os.environ.get("H265_PRESET", "medium")
-MAX_SHORT_SIDE = int(os.environ.get("MAX_SHORT_SIDE", "720"))
-# GIF hajmi chegarasi (MB): CRF sifatni belgilaydi, bitrate shu hajmga sig'adigan darajada cheklanadi (VBV). 0 — chegarasiz.
+MAX_SHORT_SIDE = int(os.environ.get("MAX_SHORT_SIDE", "1080"))   # qidiruv shu (yoki video o'zining) qisqa tomonidan boshlanadi
+MIN_SHORT_SIDE = int(os.environ.get("MIN_SHORT_SIDE", "144"))
+# GIF hajmi chegarasi (MB): CRF HAR DOIM bir xil (30), bitrate cheklanmaydi — faqat o'lcham (qisqa tomon) kamaytiriladi.
 TARGET_MB = float(os.environ.get("TARGET_MB", "5"))
+# Butun ish (yuklash + qayta-qayta kodlash + yuborish) uchun maksimal vaqt.
+JOB_MAX_MIN = float(os.environ.get("JOB_MAX_MIN", "60"))
+SEND_RESERVE = 150   # yuborish uchun zaxira soniya
 
 
 class Lost(Exception):
@@ -144,51 +149,108 @@ def probe(path):
         raise Fatal(f"fayl video emas yoki o'qib bo'lmadi: {out.stderr.strip()[:150] or e}")
 
 
-# Qisqa tomon MAX_SHORT_SIDE dan katta bo'lsa shunga tushiriladi (gorizontal -> balandlik 720, vertikal -> kenglik 720);
-# kichik video kattalashtirilmaydi; o'lchamlar juft (x265 uchun).
-VF = (f"scale=w='if(lt(iw,ih),min({MAX_SHORT_SIDE},iw),-2)':h='if(lt(iw,ih),-2,min({MAX_SHORT_SIDE},ih))',"
-      "scale=trunc(iw/2)*2:trunc(ih/2)*2")
+def even(n):
+    return max(2, int(n) // 2 * 2)
 
 
-def encode(src: Path, dst: Path, duration: float, live: Live):
-    """H.265, CRF 30; TARGET_MB berilsa bitrate hajmga sig'adigan qiymat bilan cheklanadi (CRF — sifat chegarasi)."""
-    cap_kbps = 0
-    if TARGET_MB > 0 and duration > 0:
-        # Ovozsiz: faqat video oqimi; konteyner uchun ~4% zaxira.
-        cap_kbps = int(TARGET_MB * 1024 * 1024 * 8 * 0.96 / duration / 1000)
-        if cap_kbps < 60:
-            live.send(f"⚠️ Video uzun ({hms(duration)}): {TARGET_MB:g} MB ga sig'sa sifat juda past bo'ladi (~{cap_kbps} kbit/s)", force=True)
-    limit = TARGET_MB * 1024 * 1024 * 1.03 if TARGET_MB > 0 else 0
-    for attempt in range(3):
-        cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-nostats", "-progress", "pipe:1",
-               "-i", str(src), "-map", "0:v:0", "-vf", VF,
-               "-c:v", "libx265", "-preset", PRESET, "-crf", CRF, "-tag:v", "hvc1", "-pix_fmt", "yuv420p",
-               "-x265-params", "log-level=error"]
-        if cap_kbps:
-            cmd += ["-maxrate", f"{max(cap_kbps, 30)}k", "-bufsize", f"{max(cap_kbps, 30) * 2}k"]
-        cmd += ["-an", "-sn", "-dn",   # GIF (animatsiya) ovozsiz bo'ladi
-                "-movflags", "+faststart", str(dst)]
-        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
-        t0 = time.time()
-        for line in p.stdout:
-            m = re.match(r"out_time_(?:us|ms)=(\d+)", line)
-            if m:
-                # out_time_us (mikrosoniya); ba'zi versiyalarda out_time_ms ham mikrosoniya.
-                done_s = int(m.group(1)) / 1_000_000
-                pct = done_s * 100 / duration if duration else 0
-                el = time.time() - t0
-                eta = (el * (duration - done_s) / done_s) if done_s > 1 else 0
-                live.send(f"🎞 Siqilmoqda" + (f" (urinish {attempt + 1})" if attempt else "") +
-                          f"\n{bar(pct)} {pct:.0f}%\no'tdi {hms(el)}" + (f" · qoldi ~{hms(eta)}" if eta else ""))
-        err = p.stderr.read()
-        if p.wait() != 0 or not dst.exists() or dst.stat().st_size == 0:
-            raise RuntimeError(f"ffmpeg xato: {err.strip()[-300:]}")
-        size = dst.stat().st_size
-        if not limit or size <= limit or not cap_kbps:
-            return
-        # Hajm chegaradan oshdi — bitrate cheklovi kamaytirilib qayta kodlanadi.
-        cap_kbps = int(cap_kbps * max(0.5, min(0.9, limit / size * 0.92)))
-        log(f"  {mb(size)} > {TARGET_MB:g} MB — qayta kodlanadi (chegara {cap_kbps} kbit/s)")
+def encode_once(src: Path, dst: Path, duration: float, short: int, portrait: bool, live: Live, label: str):
+    """H.265, CRF o'zgarmas; faqat qisqa tomon `short` px (juft), ikkinchi tomon nisbat bo'yicha (-2). Ovozsiz (GIF)."""
+    vf = f"scale={short}:-2" if portrait else f"scale=-2:{short}"
+    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-nostats", "-progress", "pipe:1",
+           "-i", str(src), "-map", "0:v:0", "-vf", vf,
+           "-c:v", "libx265", "-preset", PRESET, "-crf", CRF, "-tag:v", "hvc1", "-pix_fmt", "yuv420p",
+           "-x265-params", "log-level=error", "-an", "-sn", "-dn", "-movflags", "+faststart", str(dst)]
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
+    t0 = time.time()
+    for line in p.stdout:
+        m = re.match(r"out_time_us=(\d+)", line)
+        if m:
+            done_s = int(m.group(1)) / 1_000_000
+            pct = done_s * 100 / duration if duration else 0
+            el = time.time() - t0
+            eta = (el * (duration - done_s) / done_s) if done_s > 1 else 0
+            live.send(f"🎞 {label}\n{bar(pct)} {pct:.0f}%\no'tdi {hms(el)}" + (f" · qoldi ~{hms(eta)}" if eta else ""))
+    err = p.stderr.read()
+    if p.wait() != 0 or not dst.exists() or dst.stat().st_size == 0:
+        raise RuntimeError(f"ffmpeg xato: {err.strip()[-300:]}")
+    return dst.stat().st_size, time.time() - t0
+
+
+def search_size(src: Path, workdir: Path, w: int, h: int, duration: float, live: Live, deadline: float):
+    """CRF doim bir xil; hajm TARGET_MB dan kichik bo'lguncha qisqa tomon kamaytirib qayta kodlanadi.
+
+    1080p -> 1080, so'ng kichikroq... (x265 uchun o'lcham juft bo'lishi kerak, shuning uchun qadam kamida 2 px).
+    Har urinishdan keyin keyingi o'lcham hajm ~ o'lcham^n qonuni bo'yicha taxmin qilinadi (n o'lchangan natijalardan),
+    oxirida sig'adigan eng katta o'lcham topiladi (qo'shni 2 px gacha). Natija: dict.
+    """
+    import math
+    limit = TARGET_MB * 1024 * 1024 * 0.995 if TARGET_MB > 0 else 0
+    portrait = h > w
+    s0 = even(min(min(w, h), MAX_SHORT_SIDE))
+    tries = []          # (short, size, sec)
+    best = None         # sig'gan eng katta o'lchamli natija: (short, size, path)
+    hi = None           # sig'magan eng kichik o'lcham: (short, size)
+    s = s0
+    t_last = None       # oxirgi kodlash vaqti va o'lchami (vaqt bashorati uchun)
+    while True:
+        # Vaqt bashorati: kodlash vaqti ~ o'lcham^2.
+        if t_last:
+            est = t_last[1] * (s / t_last[0]) ** 2
+            if time.time() + est > deadline:
+                live.send(f"⏱ Vaqt chegarasi: keyingi urinish ({s}px, ~{hms(est)}) sig'maydi — to'xtatildi", force=True)
+                break
+        out = workdir / f"enc_{s}.mp4"
+        n = len(tries) + 1
+        label = f"Siqilmoqda — {n}-urinish: qisqa tomon {s}px, CRF {CRF}"
+        live.send(label, force=True)
+        size, sec = encode_once(src, out, duration, s, portrait, live, label)
+        tries.append((s, size, round(sec)))
+        t_last = (s, sec)
+        log(f"  urinish {n}: {s}px → {mb(size)} ({hms(sec)})" + ("" if not limit else f" [chegara {mb(limit)}]"))
+        fits = (not limit) or size <= limit
+        if fits:
+            if best is None or s > best[0]:
+                if best:
+                    best[2].unlink(missing_ok=True)
+                best = (s, size, out)
+            else:
+                out.unlink(missing_ok=True)
+            if hi is None:
+                break                      # birinchi urinishdayoq sig'di — to'liq o'lcham
+        else:
+            if hi is None or s < hi[0]:
+                hi = (s, size)
+            out.unlink(missing_ok=True)
+        lo_s = best[0] if best else None
+        hi_s = hi[0]
+        if lo_s is not None and hi_s - lo_s <= 2:
+            break                          # eng katta sig'adigan o'lcham topildi
+        # Keyingi o'lcham.
+        if lo_s is not None:
+            lo_size = best[1]
+            # Ikki chegara ma'lum: hajm bo'yicha chiziqli interpolyatsiya (regula falsi), oraliqning o'rta qismida cheklanadi —
+            # hajm o'lchamga silliq bog'liq emas (x265 bloklari), shuning uchun himoya: oraliq har urinishda ~yarmiga qisqaradi.
+            span = hi_s - lo_s
+            frac = (limit * 0.99 - lo_size) / (hi[1] - lo_size) if hi[1] > lo_size else 0.5
+            frac = max(0.3, min(frac, 0.7))
+            nxt = even(lo_s + frac * span)
+            nxt = max(lo_s + 2, min(nxt, hi_s - 2))
+            if nxt <= lo_s or nxt >= hi_s:
+                break
+        else:
+            n_exp = 2.0
+            if len(tries) >= 2:
+                a_, b_ = sorted([(t[0], t[1]) for t in tries], key=lambda x: x[0])[:2]
+                if b_[1] > a_[1] and b_[0] > a_[0]:
+                    n_exp = max(1.0, min(math.log(b_[1] / a_[1]) / math.log(b_[0] / a_[0]), 4.0))
+            guess = hi_s * (limit * 0.97 / hi[1]) ** (1 / n_exp)
+            nxt = even(min(guess, hi_s - 2))
+            if nxt < MIN_SHORT_SIDE:
+                if hi_s <= MIN_SHORT_SIDE:
+                    break                  # eng kichik o'lchamda ham sig'madi
+                nxt = even(MIN_SHORT_SIDE)
+        s = nxt
+    return {"best": best, "tries": tries, "hi": hi, "short0": s0, "portrait": portrait}
 
 
 def thumb(src: Path, dst: Path, at: float):
@@ -214,6 +276,7 @@ async def process(app, r, runner):
         if not msg or msg.empty or not (msg.video or msg.document):
             raise Fatal("video kanalda topilmadi")
         t0 = time.time()
+        t_job0 = t0
 
         def dl_cb(cur, total):
             live.send(f"⬇️ Video yuklab olinmoqda\n{bar(cur * 100 / max(total, 1))} {mb(cur)} / {mb(total)}")
@@ -228,17 +291,27 @@ async def process(app, r, runner):
         log(f"  manba: {mb(src_size)} {w}x{h} {dur:.0f}s")
 
         stem = re.sub(r'[\\/:*?"<>|]+', "_", Path(name).stem).strip() or f"video_{jid}"
-        out = WORK / f"{stem[:80]}_720p_h265.mp4"
         t1 = time.time()
-        live.send("🎞 Siqilmoqda...", force=True)
-        await asyncio.to_thread(encode, src, out, dur, live)
-        size = out.stat().st_size
+        deadline = t_job0 + JOB_MAX_MIN * 60 - SEND_RESERVE
+        res = await asyncio.to_thread(search_size, src, WORK, w, h, dur, live, deadline)
+        tries = res["tries"]
+        if not res["best"]:
+            if res["hi"]:
+                raise Fatal(f"{TARGET_MB:g} MB ga sig'madi: eng kichik natija {mb(res['hi'][1])} ({res['hi'][0]}px, CRF {CRF}); "
+                            f"{len(tries)} urinish, {hms(time.time() - t1)}. Video juda uzun yoki vaqt (1 soat) tugadi")
+            raise Fatal("kodlab bo'lmadi (urinish bo'lmadi)")
+        short, size, enc_path = res["best"]
+        out = WORK / f"{stem[:80]}_{short}p_h265.mp4"
+        enc_path.rename(out)
         ow, oh, _ = probe(out)
-        live.done(f"Siqildi: {mb(size)} · {ow}×{oh} ({hms(time.time() - t1)})")
-        log(f"  tayyor: {mb(size)} {ow}x{oh} (manbaning {size * 100 / max(src_size, 1):.0f}%)")
+        secs = int(time.time() - t1)
+        tries_txt = ", ".join(f"{t[0]}px→{t[1] / 1048576:.1f}MB" for t in tries)
+        summary = (f"{w}×{h} → {ow}×{oh} · CRF {CRF} · {mb(size)} · {len(tries)} marta kodlandi ({hms(secs)})")
+        live.done(f"Siqildi: {summary}")
+        log(f"  tayyor: {summary}\n  urinishlar: {tries_txt}")
         src.unlink(missing_ok=True)
         if size > 2_000_000_000:
-            raise Fatal(f"siqilgan fayl {mb(size)} — Telegram 2 GB dan kattani yubormaydi (CRF ni oshirish kerak)")
+            raise Fatal(f"siqilgan fayl {mb(size)} — Telegram 2 GB dan kattani yubormaydi")
 
         api("check", ident)   # admin shu orada o'chirgan bo'lsa — yuborilmaydi
         live.send("⬆️ GIF qilib Saqlangan xabarlarga yuborilmoqda...", force=True)
@@ -247,9 +320,9 @@ async def process(app, r, runner):
         def up_cb(cur, total):
             live.send(f"⬆️ Saqlangan xabarlarga yuborilmoqda\n{bar(cur * 100 / max(total, 1))} {mb(cur)} / {mb(total)}")
 
-        await app.send_animation("me", str(out), caption=f"🗜 {name}"[:1024], duration=int(dur), width=ow, height=oh,
+        await app.send_animation("me", str(out), caption=f"🗜 {name}\n{summary}"[:1024], duration=int(dur), width=ow, height=oh,
                                  thumb=str(th) if th else None, file_name=out.name, progress=up_cb)
-        api("finish", {**ident, "ok": True, "size": size, "src_size": src_size})
+        api("finish", {**ident, "ok": True, "size": size, "src_size": src_size, "summary": summary, "tries": tries_txt})
         log(f"  ✅ siqish #{jid} yuborildi")
     except Lost:
         log(f"  siqish #{jid} o'chirildi yoki boshqa run'ga o'tdi — yuborilmadi")

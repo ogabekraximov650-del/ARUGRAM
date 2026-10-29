@@ -1,8 +1,8 @@
-name: Siqish (H.265 720p)
+name: Siqish (H.265, 5 MB gacha)
 
 # Kodlash botining "Siqish" bo'limi (`worker/src/cmpbot.rs`).
 # Botga video yuborilsa ish bazadagi navbatga (`cmp_jobs`) tushadi va worker shu workflow'ni o'zi ishga tushiradi
-# (cron ham har 10 daqiqada tekshiradi). Bitta run — bitta video: yuklaydi, H.265 / 720p / CRF 30 bilan siqadi,
+# (cron ham har 10 daqiqada tekshiradi). Bitta run — bitta video: yuklaydi, H.265 / CRF 30 bilan 5 MB gacha (o'lchamni kamaytirib) siqadi,
 # asosiy akkauntning "Saqlangan xabarlar"iga yuboradi. Navbatda yana ish qolsa yangi run ochiladi.
 # Avto-kodlash, post, tarjima va anibla'dan ALOHIDA.
 #
@@ -23,7 +23,7 @@ permissions:
 jobs:
   compress:
     runs-on: ubuntu-latest
-    timeout-minutes: 340
+    timeout-minutes: 75
     env:
       API_BASE: ${{ secrets.API_BASE || 'https://arumediatv.uzcom.workers.dev' }}
     steps:
@@ -64,8 +64,10 @@ jobs:
           WORK_ROOT: /mnt/compress
           H265_CRF: '30'
           H265_PRESET: medium
-          # GIF hajmi chegarasi (MB): CRF 30 sifat chegarasi, bitrate shu hajmga sig'adigan qiymat bilan cheklanadi.
+          # CRF doim 30, bitrate cheklanmaydi: hajm 5 MB dan oshsa faqat o'lcham (qisqa tomon) kamayib qayta kodlanadi.
           TARGET_MB: '5'
+          # Butun ish (yuklash + qayta kodlash + yuborish) ko'pi bilan 1 soat.
+          JOB_MAX_MIN: '60'
           PYTHONUNBUFFERED: '1'
         run: python3 tool/compress/compress.py
 

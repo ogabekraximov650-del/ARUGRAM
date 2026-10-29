@@ -118,7 +118,7 @@ pub(crate) async fn main_menu(env: &Env, chat: i64) {
          \u{1F4F1} <b>Ilova uchun</b> \u{2014} ilovadagi anime bo'limiga qism qo'shish.\n\
          \u{1F3AC} <b>Post kodlash</b> \u{2014} rasm + video + nom: kodlab, tayyor videoni yuboradi.\n\
          \u{1F310} <b>Manga tarjima</b> \u{2014} rasmlar yoki ZIP/CBZ/PDF yuborilsa, o'zbekchaga tarjima qilib bitta fayl qaytaradi.\n\
-         \u{1F5DC} <b>Siqish</b> \u{2014} video yuborilsa H.265, 720p, CRF 30 bilan siqib, GIF (ovozsiz) qilib asosiy akkauntning Saqlangan xabarlariga yuboradi.\n\
+         \u{1F5DC} <b>Siqish</b> \u{2014} video yuborilsa H.265, CRF 30 bilan 5 MB gacha (o'lchamni kamaytirib) siqib, GIF (ovozsiz) qilib asosiy akkauntning Saqlangan xabarlariga yuboradi.\n\
          \u{1F39E} <b>Anibla yuklash</b> \u{2014} anibla.uz dan qidirib, tanlangan sifatda yuklab beradi.\n\
          \u{1F510} <b>Majburiy obunalar</b> \u{2014} ilova foydalanuvchilari qo'shiladigan kanallar.\n\
          \u{1F511} <b>Yangi sessiya</b> \u{2014} telefon raqami va kod orqali yangi Telegram sessiyasini yaratib saqlaydi.\n\

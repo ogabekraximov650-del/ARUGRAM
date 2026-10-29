@@ -6885,3 +6885,16 @@ Foydalanuvchi: "hozirgi actions modeliga qo'llarni ber, ishlay oladigan qilib te
   qabul qiladi (`ai_file` jadvali, xabarga `[Biriktirilgan fayl #N ...]` yoziladi). Tavsiya: katta fayl yuborilsa model `get_attachment` bilan oladi.
 - Tekshirilgan: vositalar mantiqi lokal (yozish/o'qish/shell/vaqt chegarasi/yo'l himoyasi), `tsc`. TEKSHIRILMAGAN: gpt-oss-20b ning haqiqiy tool-call sifati va tezligi (kichik model
   adashishi mumkin), 24 576 kontekst RAM'ga sig'ishi, `sudo -u albot` Actions'da.
+
+## Siqish: hajm 5 MB gacha faqat O'LCHAM kamaytirilib (2026-10-29)
+
+Foydalanuvchi: oldingi usul (bitrate cheklovi/VBV) GIF'ni juda xira qildi ("bir joyi tiniq, bir joyi 144p"). Yangi qoida (`tool/compress/compress.py`, `search_size`):
+- CRF HAR DOIM 30, bitrate cheklanmaydi. Boshlanish — videoning o'z qisqa tomoni (1080p bo'lsa 1080; 1080 dan kattasi 1080 ga tushiriladi), hajm `TARGET_MB` (5) dan katta bo'lsa
+  qisqa tomon kamaytirilib qayta-qayta kodlanadi, sig'adigan ENG KATTA o'lcham topiladi. x265 uchun o'lcham juft bo'lishi kerak, shuning uchun qadam kamida 2 px (1080, 1078, ...).
+  1 pikselli 1080→1079→... ketma-ket kodlash 1 soatga sig'maydi (har urinish daqiqalar oladi), shuning uchun qidiruv: taxmin (hajm ~ o'lcham^n), keyin ikki chegara orasida
+  regula falsi (oraliq har urinishda ~yarmiga qisqaradi), oxirida qo'shni juft o'lcham (±2 px). Hajm o'lchamga silliq bog'liq emas (x265 bloklari) — shuning uchun himoya.
+- Butun ish `JOB_MAX_MIN` (60) daqiqa (yuklash + kodlash + yuborish; yuborish uchun 150 s zaxira); keyingi urinish (vaqti ~ o'lcham^2 bashorati) sig'masa to'xtaydi va shu paytgacha
+  sig'gan eng yaxshi natija yuboriladi; hech narsa sig'masa — aniq xato (eng kichik natija ko'rsatiladi). Workflow `timeout-minutes: 75`.
+- Oxirgi kodlash sifati yoziladi: GIF izohida ("1920×1080 → 1918×1078 · CRF 30 · 4.9 MB · 6 marta kodlandi"), botdagi holat xabarida (hamma urinishlar: "1080px→5.9MB, ..."),
+  va `app_config.cmp_last` da (Siqish bo'limida "📋 Holat" -> "Oxirgi kodlash").
+- Tekshirilgan: sintetik 1080p 8 s klipda (chegara 3 MB): 5 urinishda 1078px topildi; `cargo check`. Tekshirilmagan: Telegram'dagi to'liq oqim va haqiqiy 5 MB / 1080p video.

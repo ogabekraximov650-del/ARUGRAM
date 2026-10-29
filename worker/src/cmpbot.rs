@@ -55,7 +55,7 @@ pub(crate) async fn menu(env: &Env, chat: i64) {
     encbot_send(env, chat,
         "\u{1F5DC} <b>Siqish</b>\n\n\
          Videoni yuboring (oddiy video yoki fayl sifatida, hajmi cheklanmagan) \u{2014} men uni \
-         <b>H.265, 720p, CRF 30</b> bilan siqib, <b>GIF</b> (ovozsiz) qilib asosiy akkauntingizning <b>Saqlangan xabarlar</b>iga yuboraman.\n\
+         <b>H.265, CRF 30</b> bilan (hajm 5 MB dan oshsa o'lchamini kamaytirib, sifatini emas), <b>GIF</b> (ovozsiz) qilib asosiy akkauntingizning <b>Saqlangan xabarlar</b>iga yuboraman.\n\
          Bir nechta video ketma-ket yuborsangiz, navbat bilan siqiladi. Video izohiga (caption) yozsangiz, nom shu bo'ladi.",
         Some(keyboard())).await;
 }
@@ -199,8 +199,10 @@ pub(crate) async fn status(env: &Env, chat: i64) {
     let rows = turso_exec(env,
         "SELECT id, name, state, lease_until FROM cmp_jobs ORDER BY queued_at ASC LIMIT 10", vec![]).await
         .map(|r| rows_of(&r)).unwrap_or_default();
+    let last = config_get(env, "cmp_last").await.unwrap_or_default();
+    let last_txt = if last.is_empty() { String::new() } else { format!("\n\n\u{1F550} <b>Oxirgi kodlash:</b>\n{}", html_escape(&last)) };
     if rows.is_empty() {
-        encbot_send(env, chat, "\u{1F5DC} <b>Siqish</b>\n\n\u{1F4A4} Hozir siqilayotgan yoki navbatdagi video yo'q.", Some(keyboard())).await;
+        encbot_send(env, chat, &format!("\u{1F5DC} <b>Siqish</b>\n\n\u{1F4A4} Hozir siqilayotgan yoki navbatdagi video yo'q.{last_txt}"), Some(keyboard())).await;
         return;
     }
     let mut text = String::from("\u{1F5DC} <b>Siqish</b>\n\n");
@@ -208,6 +210,7 @@ pub(crate) async fn status(env: &Env, chat: i64) {
         text.push_str(&format!("{} <b>#{} {}</b>\n", state_icon(r), jint(r, "id"), html_escape(&short(r["name"].as_str().unwrap_or("")))));
     }
     text.push_str("\n\u{2699}\u{FE0F} \u{2014} siqilmoqda; jarayon shu video uchun yuborilgan holat xabarida ko'rinadi.");
+    text.push_str(&last_txt);
     encbot_send(env, chat, &text, Some(keyboard())).await;
 }
 
@@ -397,10 +400,17 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
         let status_msg = jint(&b, "status_msg");
         let say = |line: String| format!("{}\n\n{line}", status_head(id, &name, jint(&job, "attempts")));
         if b["ok"].as_bool() == Some(true) {
+            // Oxirgi kodlash sifati saqlanadi (Holat va "oxirgi" ko'rinishi uchun): o'lcham, CRF, hajm, urinishlar.
+            let summary: String = b["summary"].as_str().unwrap_or("").chars().take(300).collect();
+            let tries: String = b["tries"].as_str().unwrap_or("").chars().take(600).collect();
+            if !summary.is_empty() {
+                config_put(env, "cmp_last", &format!("#{id} {} \u{2014} {summary}\n{tries}", short(&name))).await;
+            }
             if status_msg > 0 {
                 edit_status(env, chat, status_msg, &say(format!(
-                    "\u{2705} Tayyor, GIF qilib Saqlangan xabarlarga yuborildi\n\u{1F4E6} {:.1} MB \u{2192} {:.1} MB",
-                    jint(&b, "src_size") as f64 / 1048576.0, jint(&b, "size") as f64 / 1048576.0))).await;
+                    "\u{2705} Tayyor, GIF qilib Saqlangan xabarlarga yuborildi\n\u{1F4E6} {:.1} MB \u{2192} {:.1} MB\n\u{1F4D0} {}\n\u{1F501} {}",
+                    jint(&b, "src_size") as f64 / 1048576.0, jint(&b, "size") as f64 / 1048576.0,
+                    html_escape(&summary), html_escape(&tries)))).await;
             }
             channel_cleanup(env, jint(&job, "ch_msg")).await;
             turso_exec(env, "DELETE FROM cmp_jobs WHERE id=?", vec![TursoArg::int(id)]).await?;
