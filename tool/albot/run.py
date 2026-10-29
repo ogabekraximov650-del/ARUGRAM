@@ -49,7 +49,7 @@ SYSTEM = (
     "- get_attachment(id): foydalanuvchi yuborgan faylni /work ga yuklaydi (xabarda `[Biriktirilgan fayl #N ...]` ko'rinadi, 20 MB gacha). "
     "Fayl ishlatishdan OLDIN har doim get_attachment ni chaqir (har run'da /work bo'sh boshlanadi).\n"
     "- send_file(path, caption): /work dagi faylni foydalanuvchiga yuboradi (49 MB gacha).\n"
-    "QOIDALAR: natijani ko'rmasdan 'tayyor' dema — buyruq natijasini tekshir; vosita yo'q bo'lsa o'zing o'rnat (o'rnatib bo'lmaydi dema, avval urinib ko'r); "
+    "HAR vosita chaqiruvida `nima` maydoniga nima qilayotganingni o'zbekcha 1 qisqa jumlada yoz (foydalanuvchi shuni ko'radi). QOIDALAR: natijani ko'rmasdan 'tayyor' dema — buyruq natijasini tekshir; vosita yo'q bo'lsa o'zing o'rnat (o'rnatib bo'lmaydi dema, avval urinib ko'r); "
     "xato bo'lsa sababini o'qib tuzat; bir xil xatoni 2 martadan ko'p takrorlama; uzun ishlarni kichik qadamlarga bo'l; tayyor fayllarni send_file bilan yubor; "
     "oxirida nima qilganingni 1–3 jumlada ayt. Skanerlangan PDF: `pdftoppm -r 150 -png f.pdf p` -> `tesseract p-1.png out -l eng` -> tarjima. "
     "Maxfiy ma'lumot (token, parol) so'ralsa yoki mashinadan tashqariga zarar yetkazadigan ish so'ralsa, rad et."
@@ -112,21 +112,22 @@ TOOLS = [
         "name": "shell", "description": "Bash buyrug'ini konteynerda (root, /work papkasida) ishga tushiradi; stdout+stderr va chiqish kodi qaytadi. Dastur kerak bo'lsa apt-get/pip bilan o'zing o'rnat.",
         "parameters": {"type": "object", "properties": {
             "cmd": {"type": "string", "description": "bash buyrug'i"},
-            "timeout": {"type": "integer", "description": "soniya (standart 120, ko'pi 900)"}}, "required": ["cmd"]}}},
+            "nima": {"type": "string", "description": "Nima qilayotganing va nega — o'zbekcha 1 qisqa jumla (foydalanuvchiga ko'rsatiladi)"},
+            "timeout": {"type": "integer", "description": "soniya (standart 120, ko'pi 900)"}}, "required": ["cmd", "nima"]}}},
     {"type": "function", "function": {
         "name": "read_file", "description": "Ish papkasidagi matnli faylni o'qiydi (boshidan ~6000 belgi).",
-        "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}},
+        "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "nima": {"type": "string", "description": "Nima qilayotganing va nega — o'zbekcha 1 qisqa jumla (foydalanuvchiga ko'rsatiladi)"}}, "required": ["path", "nima"]}}},
     {"type": "function", "function": {
         "name": "write_file", "description": "Ish papkasida faylni yozadi (mavjud bo'lsa ustiga).",
-        "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
-                       "required": ["path", "content"]}}},
+        "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}, "nima": {"type": "string", "description": "Nima qilayotganing va nega — o'zbekcha 1 qisqa jumla (foydalanuvchiga ko'rsatiladi)"}},
+                       "required": ["path", "content", "nima"]}}},
     {"type": "function", "function": {
         "name": "get_attachment", "description": "Foydalanuvchi yuborgan faylni (xabardagi #N raqami) ish papkasiga yuklaydi; yo'li qaytadi.",
-        "parameters": {"type": "object", "properties": {"id": {"type": "integer"}}, "required": ["id"]}}},
+        "parameters": {"type": "object", "properties": {"id": {"type": "integer"}, "nima": {"type": "string", "description": "Nima qilayotganing va nega — o'zbekcha 1 qisqa jumla (foydalanuvchiga ko'rsatiladi)"}}, "required": ["id", "nima"]}}},
     {"type": "function", "function": {
         "name": "send_file", "description": "Ish papkasidagi faylni foydalanuvchiga Telegram'da yuboradi.",
-        "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "caption": {"type": "string"}},
-                       "required": ["path"]}}},
+        "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "caption": {"type": "string"}, "nima": {"type": "string", "description": "Nima qilayotganing va nega — o'zbekcha 1 qisqa jumla (foydalanuvchiga ko'rsatiladi)"}},
+                       "required": ["path", "nima"]}}},
 ]
 
 
@@ -226,6 +227,23 @@ TOOL_FUNCS = {"shell": tool_shell, "read_file": tool_read_file, "write_file": to
               "get_attachment": tool_get_attachment, "send_file": tool_send_file}
 
 
+def describe(name, args):
+    """Foydalanuvchiga ko'rsatiladigan o'zbekcha qator: modelning `nima` izohi (bo'lmasa shablon) + buyruq."""
+    nima = str(args.get("nima") or "").strip()
+    if not nima:
+        nima = {
+            "shell": "Buyruq ishga tushiryapman",
+            "read_file": f"Faylni o'qiyapman: {args.get('path', '')}",
+            "write_file": f"Fayl yozyapman: {args.get('path', '')}",
+            "get_attachment": f"Siz yuborgan faylni yuklab olyapman (#{args.get('id', '?')})",
+            "send_file": f"Faylni sizga yuboryapman: {args.get('path', '')}",
+        }.get(name, f"{name} vositasini ishlatyapman")
+    line = f"🔧 {nima[:300]}"
+    if name == "shell" and args.get("cmd"):
+        line += f"\n⌨️ {str(args['cmd'])[:300]}"
+    return line
+
+
 def run_tool(call, msg):
     fn = call.get("function", {})
     name = fn.get("name", "")
@@ -262,10 +280,14 @@ def agent_answer(msg, summary, history):
         for c in calls:
             fn = c.get("function", {})
             raw = fn.get("arguments")
+            try:
+                targs = json.loads(raw) if isinstance(raw, str) else dict(raw or {})
+            except Exception:  # noqa: BLE001
+                targs = {}
             shown = raw if isinstance(raw, str) else json.dumps(raw or {}, ensure_ascii=False)
             log(f"🔧 {fn.get('name')} {shown[:200]}")
             try:
-                call("/ai/say", {"chat": msg["chat"], "text": f"🔧 {fn.get('name')}: {shown[:300]}"}, timeout=20)
+                call("/ai/say", {"chat": msg["chat"], "text": describe(fn.get("name", ""), targs)}, timeout=20)
             except Exception:  # noqa: BLE001
                 pass
             key = (fn.get("name"), shown)
@@ -276,6 +298,13 @@ def agent_answer(msg, summary, history):
                 if res.startswith("xato"):
                     failed[key] = failed.get(key, 0) + 1
             log(f"   → {res[:200]!r}")
+            # Xato bo'lsa foydalanuvchi ham ko'radi (buyruq kodi 0 emas yoki "xato").
+            m_code = re.search(r"\[chiqish kodi: (-?\d+)\]", res)
+            if res.startswith("xato") or (m_code and m_code.group(1) not in ("0",)):
+                try:
+                    call("/ai/say", {"chat": msg["chat"], "text": "⚠️ " + _clip(res, 220).replace("\n", " ")}, timeout=20)
+                except Exception:  # noqa: BLE001
+                    pass
             msgs.append({"role": "tool", "tool_call_id": c.get("id", ""), "content": res})
         steps += 1
 

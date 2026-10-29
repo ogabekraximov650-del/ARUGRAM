@@ -6917,3 +6917,5 @@ Foydalanuvchi: model "sudo yo'q, o'rnatib bo'lmaydi" deb to'xtab qoldi ("Modelni
 - `read_file/write_file/get_attachment/send_file` xostda `/work` (=`WORKDIR`) bilan ishlaydi; `_safe_path` realpath bilan symlink orqali chiqishni rad etadi (tekshirildi).
 - Tizim ko'rsatmasi yangilandi: model konteynerda root ekanini, nimalar o'rnatilganini, "avval get_attachment" qoidasini (har run yangi) va skaner PDF oqimini (pdftoppm -> tesseract) biladi.
 - Tekshirilgan: vositalar soxta docker bilan lokal (shell, vaqt chegarasi, fayl o'qish/yozish, symlink rad etish, get_attachment). TEKSHIRILMAGAN: Actions'da `docker run`/`exec`, o'rnatish vaqti, modelning haqiqiy xatti-harakati.
+- albot qadamlari o'zbekcha tushuntiriladi: har vosita sxemasida majburiy `nima` maydoni (modelning o'zbekcha 1 jumlasi), foydalanuvchiga "🔧 <nima>" (+ shell uchun "⌨️ <buyruq>") yuboriladi;
+  model `nima` bermasa shablon ishlaydi ("Siz yuborgan faylni yuklab olyapman (#1)", ...). Buyruq kodi 0 emas yoki "xato" bo'lsa "⚠️ <sabab>" ham yuboriladi. Tekshirilgan: soxta llm bilan agent sikli.
