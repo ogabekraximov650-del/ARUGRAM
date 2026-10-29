@@ -64,6 +64,8 @@ jobs:
           WORK_ROOT: /mnt/compress
           H265_CRF: '30'
           H265_PRESET: medium
+          # GIF hajmi chegarasi (MB): CRF 30 sifat chegarasi, bitrate shu hajmga sig'adigan qiymat bilan cheklanadi.
+          TARGET_MB: '5'
           PYTHONUNBUFFERED: '1'
         run: python3 tool/compress/compress.py
 

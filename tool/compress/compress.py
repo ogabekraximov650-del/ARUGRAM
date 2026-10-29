@@ -32,6 +32,8 @@ WORK = Path(os.environ.get("WORK_ROOT", os.environ.get("RUNNER_TEMP", "/tmp"))) 
 CRF = os.environ.get("H265_CRF", "30")
 PRESET = os.environ.get("H265_PRESET", "medium")
 MAX_SHORT_SIDE = int(os.environ.get("MAX_SHORT_SIDE", "720"))
+# GIF hajmi chegarasi (MB): CRF sifatni belgilaydi, bitrate shu hajmga sig'adigan darajada cheklanadi (VBV). 0 — chegarasiz.
+TARGET_MB = float(os.environ.get("TARGET_MB", "5"))
 
 
 class Lost(Exception):
@@ -149,27 +151,44 @@ VF = (f"scale=w='if(lt(iw,ih),min({MAX_SHORT_SIDE},iw),-2)':h='if(lt(iw,ih),-2,m
 
 
 def encode(src: Path, dst: Path, duration: float, live: Live):
-    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-nostats", "-progress", "pipe:1",
-           "-i", str(src), "-map", "0:v:0", "-vf", VF,
-           "-c:v", "libx265", "-preset", PRESET, "-crf", CRF, "-tag:v", "hvc1", "-pix_fmt", "yuv420p",
-           "-x265-params", "log-level=error",
-           "-an", "-sn", "-dn",   # GIF (animatsiya) ovozsiz bo'ladi
-           "-movflags", "+faststart", str(dst)]
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
-    t0 = time.time()
-    done_s = 0.0
-    for line in p.stdout:
-        m = re.match(r"out_time_(?:us|ms)=(\d+)", line)
-        if m:
-            # out_time_us (mikrosoniya); ba'zi versiyalarda out_time_ms ham mikrosoniya.
-            done_s = int(m.group(1)) / 1_000_000
-            pct = done_s * 100 / duration if duration else 0
-            el = time.time() - t0
-            eta = (el * (duration - done_s) / done_s) if done_s > 1 else 0
-            live.send(f"🎞 Siqilmoqda\n{bar(pct)} {pct:.0f}%\no'tdi {hms(el)}" + (f" · qoldi ~{hms(eta)}" if eta else ""))
-    err = p.stderr.read()
-    if p.wait() != 0 or not dst.exists() or dst.stat().st_size == 0:
-        raise RuntimeError(f"ffmpeg xato: {err.strip()[-300:]}")
+    """H.265, CRF 30; TARGET_MB berilsa bitrate hajmga sig'adigan qiymat bilan cheklanadi (CRF — sifat chegarasi)."""
+    cap_kbps = 0
+    if TARGET_MB > 0 and duration > 0:
+        # Ovozsiz: faqat video oqimi; konteyner uchun ~4% zaxira.
+        cap_kbps = int(TARGET_MB * 1024 * 1024 * 8 * 0.96 / duration / 1000)
+        if cap_kbps < 60:
+            live.send(f"⚠️ Video uzun ({hms(duration)}): {TARGET_MB:g} MB ga sig'sa sifat juda past bo'ladi (~{cap_kbps} kbit/s)", force=True)
+    limit = TARGET_MB * 1024 * 1024 * 1.03 if TARGET_MB > 0 else 0
+    for attempt in range(3):
+        cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-nostats", "-progress", "pipe:1",
+               "-i", str(src), "-map", "0:v:0", "-vf", VF,
+               "-c:v", "libx265", "-preset", PRESET, "-crf", CRF, "-tag:v", "hvc1", "-pix_fmt", "yuv420p",
+               "-x265-params", "log-level=error"]
+        if cap_kbps:
+            cmd += ["-maxrate", f"{max(cap_kbps, 30)}k", "-bufsize", f"{max(cap_kbps, 30) * 2}k"]
+        cmd += ["-an", "-sn", "-dn",   # GIF (animatsiya) ovozsiz bo'ladi
+                "-movflags", "+faststart", str(dst)]
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
+        t0 = time.time()
+        for line in p.stdout:
+            m = re.match(r"out_time_(?:us|ms)=(\d+)", line)
+            if m:
+                # out_time_us (mikrosoniya); ba'zi versiyalarda out_time_ms ham mikrosoniya.
+                done_s = int(m.group(1)) / 1_000_000
+                pct = done_s * 100 / duration if duration else 0
+                el = time.time() - t0
+                eta = (el * (duration - done_s) / done_s) if done_s > 1 else 0
+                live.send(f"🎞 Siqilmoqda" + (f" (urinish {attempt + 1})" if attempt else "") +
+                          f"\n{bar(pct)} {pct:.0f}%\no'tdi {hms(el)}" + (f" · qoldi ~{hms(eta)}" if eta else ""))
+        err = p.stderr.read()
+        if p.wait() != 0 or not dst.exists() or dst.stat().st_size == 0:
+            raise RuntimeError(f"ffmpeg xato: {err.strip()[-300:]}")
+        size = dst.stat().st_size
+        if not limit or size <= limit or not cap_kbps:
+            return
+        # Hajm chegaradan oshdi — bitrate cheklovi kamaytirilib qayta kodlanadi.
+        cap_kbps = int(cap_kbps * max(0.5, min(0.9, limit / size * 0.92)))
+        log(f"  {mb(size)} > {TARGET_MB:g} MB — qayta kodlanadi (chegara {cap_kbps} kbit/s)")
 
 
 def thumb(src: Path, dst: Path, at: float):

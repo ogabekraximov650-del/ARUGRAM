@@ -6867,3 +6867,7 @@ TALAB (foydalanuvchi): panel botga "siqish" tugmasi; bosilganda bot videoni so'r
   qo'shilishi KERAK. `/api/cmp/*` avval unda yo'q edi — run `claim` da 403 olib, ishsiz tugardi (GIF yuborilmadi). Yangi Actions yo'li qo'shilsa shu ro'yxatni ham yangilang.
 - albot run vaqti (birinchi muvaffaqiyatli run, 2026-10-29): jami ~8 daqiqa — llama.cpp ~4m40s (tayyor build topilmay, manbadan yig'ilgan), model yuklash ~1m20s, model yuklanishi+javob ~1m40s.
   Tezlashtirish: yig'ilgan `llama-server` `actions/cache` da (`llama-server-ubuntu-x64-v1`, /mnt/albot/llama-cache) — keyingi run'lar ~4.5 daqiqa tezroq. Model (12 GB) keshga sig'maydi (limit 10 GB), har run'da yuklanadi.
+- Siqish: GIF hajmi chegarasi `TARGET_MB` (workflow'da 5): CRF 30 sifat chegarasi bo'lib qoladi, `-maxrate/-bufsize` (VBV) bitrateni shu hajmga sig'adigan qiymat bilan cheklaydi
+  (ovozsiz, 4% zaxira); chiqish chegaradan oshsa cheklov kamaytirilib 3 martagacha qayta kodlanadi. Foydalanuvchi: CRF 30 da 15 MB chiqdi, 5 MB kerak — CRF bilan hajmni
+  oldindan bilib bo'lmaydi (taxminan CRF +6 = bitrate yarmi), shuning uchun hajm bo'yicha cheklov. Uzun video (>~10 daqiqa) 5 MB ga sig'sa sifat juda past (<60 kbit/s) — botda ogohlantiriladi.
+  Tekshirilgan: 20 s harakatli test (CRF 30 yolg'iz 4.95 MB, 2 MB chegara bilan 1.97 MB). Tekshirilmagan: Telegram mijozida GIF ko'rinishi (katta fayl avto-yuklanmasa video kabi ko'rinishi mumkin).
