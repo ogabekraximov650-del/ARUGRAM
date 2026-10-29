@@ -1,0 +1,84 @@
+name: Siqish (H.265 720p)
+
+# Kodlash botining "Siqish" bo'limi (`worker/src/cmpbot.rs`).
+# Botga video yuborilsa ish bazadagi navbatga (`cmp_jobs`) tushadi va worker shu workflow'ni o'zi ishga tushiradi
+# (cron ham har 10 daqiqada tekshiradi). Bitta run — bitta video: yuklaydi, H.265 / 720p / CRF 30 bilan siqadi,
+# asosiy akkauntning "Saqlangan xabarlar"iga yuboradi. Navbatda yana ish qolsa yangi run ochiladi.
+# Avto-kodlash, post, tarjima va anibla'dan ALOHIDA.
+#
+# Bu fayl ARUMEDIATV repodagi `tool/compress/compress.workflow.yml` dan ko'chiriladi
+# (`sync-packs.yml`) — shu yerda o'zgartirmang.
+
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: arumediatv-compress
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: write   # "Davom ettirish": navbatda ish qolsa yangi run ochish
+
+jobs:
+  compress:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    env:
+      API_BASE: ${{ secrets.API_BASE || 'https://arumediatv.uzcom.workers.dev' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: ffmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Python paketlari
+        run: pip install --no-cache-dir -r tool/encode/requirements.txt
+
+      - name: Katta fayllar uchun joy (/mnt dagi katta disk)
+        run: |
+          sudo mkdir -p /mnt/compress && sudo chown "$USER" /mnt/compress
+          df -h /mnt/compress | tail -1
+
+      - name: Telegram sessiyasi (asosiy akkaunt)
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+        run: |
+          OUT=tool/compress/pyro_session.session
+          K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K \
+            -in tool/encode/session.enc -out "$OUT"
+          head -c 16 "$OUT" | grep -q "SQLite format 3" || { echo "::error::Sessiya ochilmadi (ENCODE_TOKEN noto'g'ri?)"; exit 1; }
+          echo "Sessiya tiklandi"
+
+      - name: Navbatdagi videoni siqish
+        id: cmp
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+          WORK_ROOT: /mnt/compress
+          H265_CRF: '30'
+          H265_PRESET: medium
+          PYTHONUNBUFFERED: '1'
+        run: python3 tool/compress/compress.py
+
+      - name: Sessiyani o'chirish
+        if: always()
+        run: rm -f tool/compress/pyro_session.session
+
+      # Bitta run — bitta video. Navbatda yana ish qolgan bo'lsa, keyingi cron'ni kutmasdan yangi run ochiladi.
+      - name: Davom ettirish
+        if: success() && steps.cmp.outputs.worked == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+        run: |
+          N=$(curl -fsS -X POST -H "X-Encode-Token: $ENCODE_TOKEN" -H "User-Agent: arumediatv-compress" \
+            -H "Content-Type: application/json" -d '{}' "$API_BASE/api/cmp/peek" | jq -r '.pending // 0')
+          echo "Qolgan videolar: $N"
+          if [ "$N" != "0" ]; then gh workflow run compress.yml --repo "$GITHUB_REPOSITORY"; fi

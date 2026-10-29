@@ -6848,3 +6848,18 @@ Javobni **ikkinchi akkauntdagi repoda** (`avtoencode`, `albot.yml`) ishlaydigan 
 - **Kalitlar:** `albot/bot_token.enc`, `albot/turso.enc` (ENCODE_TOKEN bilan shifrlangan); `GH_ACTIONS_TOKEN`/`GH_REPO` `tool/encode/gh_token.enc` dan.
 - **Fayllar:** `albot/` (worker), `tool/albot/run.py` + `albot.workflow.yml` (sync_repo.py orqali ikkinchi repoga), `.github/workflows/deploy-albot.yml`.
 - **Tekshirilmagan:** modelning haqiqiy tezligi va 16 GB RAM'ga sig'ishi (swap 8 GB qo'shilgan) — birinchi run'da loglardan ko'riladi.
+
+## Kodlash botida "🗜 Siqish" bo'limi (2026-10-29)
+
+TALAB (foydalanuvchi): panel botga "siqish" tugmasi; bosilganda bot videoni so'raydi; berilgan video **H.265, 720p, CRF 30** bilan kodlanib,
+**GIF qilib** asosiy akkauntning **Saqlangan xabarlar**iga (Saved Messages) yuboriladi.
+
+- `worker/src/cmpbot.rs` — bot qismi (`trbot.rs` kabi): bosh menyuda "🗜 Siqish" (`postbot::main_menu`), rejim `app_config.encbot_mode='cmp'`. Yuborilgan video
+  (oddiy yoki video fayl) `copyMessage` bilan yopiq kanalga ko'chadi (hajm chegarasi yo'q, fayl worker'dan o'tmaydi), `cmp_jobs` ga ish yoziladi, `kick` -> `compress.yml`.
+  Har video — alohida ish. "📋 Siqish navbati" (o'chirish `cd/cx/cn`, qayta urinish `cy`), `/api/cmp/{claim,progress,peek,check,finish}` (ENCODE_TOKEN), 3 urinish, ijara 340 daq.
+- `tool/compress/compress.py` + `compress.workflow.yml` — ikkinchi akkauntdagi repoda (`sync_repo.py` ko'chiradi): kanaldan asosiy akkaunt sessiyasi (`session.enc`) bilan yuklaydi,
+  ffmpeg `libx265 -crf 30 -preset medium -tag:v hvc1`, qisqa tomon 720 dan katta bo'lsa 720 gacha (kichik video kattalashtirilmaydi), **ovozsiz** (GIF), faststart;
+  `send_animation("me", ...)`. Bitta run — bitta video, navbatda qolsa yangi run (`/api/cmp/peek`). Jarayon botdagi bitta xabarda jonli.
+- Tekshirilgan: `cargo check --target wasm32-unknown-unknown`; ffmpeg buyrug'i haqiqiy 720x1280 videoda (hevc/hvc1, ovozsiz). Tekshirilmagan: Telegram'da to'liq oqim
+  (kanalga ko'chirish, yuklash, Saqlangan xabarlarga yuborish), HEVC GIF'ning eski Android mijozlarida ijrosi.
+- Eslatma: GIF ovozsiz bo'ladi (Telegram animatsiyasi shunday). Ovoz kerak bo'lsa `send_video` va `-c:a aac` ga qaytariladi.

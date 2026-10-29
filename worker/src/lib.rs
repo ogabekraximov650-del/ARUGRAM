@@ -39,6 +39,7 @@ mod videoassets;
 mod channels;
 mod postbot;
 mod trbot;
+mod cmpbot;
 mod announce;
 mod sessionbot;
 mod encupload;
@@ -1351,6 +1352,8 @@ async fn init_db(env: &Env) -> bool {
         (trbot::DDL[1], vec![]),
         (trbot::DDL[2], vec![]),
         (trbot::DDL[3], vec![]),
+        (cmpbot::DDL[0], vec![]),
+        (cmpbot::DDL[1], vec![]),
         // ── ANIBLA YUKLASH NAVBATI (kodlash botining uchinchi bo'limi, `anibla.rs`) ──
         (anibla::DDL[0], vec![]),
         (anibla::DDL[1], vec![]),
@@ -12959,7 +12962,10 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
         if postbot::on_callback(env, chat, data).await {
             return ok(json!({"ok": true}));
         }
-        // "Manga tarjima" navbati tugmalari (`trbot.rs`).
+        // "Siqish" (`cmpbot.rs`) va "Manga tarjima" (`trbot.rs`) navbati tugmalari.
+        if cmpbot::on_callback(env, chat, data).await {
+            return ok(json!({"ok": true}));
+        }
         if trbot::on_callback(env, chat, data).await {
             return ok(json!({"ok": true}));
         }
@@ -13008,6 +13014,10 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
     }
     if text == trbot::BTN {
         trbot::menu(env, chat).await;
+        return ok(json!({"ok": true}));
+    }
+    if text == cmpbot::BTN {
+        cmpbot::menu(env, chat).await;
         return ok(json!({"ok": true}));
     }
     if text == postbot::BTN_ANIBLA {
@@ -13068,6 +13078,7 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
             Some("anibla") => anibla::status(env, chat).await,
             Some("post") => postbot::status(env, chat).await,
             Some("tr") => trbot::status(env, chat).await,
+            Some("cmp") => cmpbot::status(env, chat).await,
             _ => {
                 encbot_queue_summary(env, chat).await;
                 livewatch::app_status(env, chat).await;
@@ -13092,6 +13103,10 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
     }
     if !is_status && config_get(env, "encbot_mode").await.as_deref() == Some("tr") {
         trbot::on_message(env, msg, chat).await;
+        return ok(json!({"ok": true}));
+    }
+    if !is_status && config_get(env, "encbot_mode").await.as_deref() == Some("cmp") {
+        cmpbot::on_message(env, msg, chat).await;
         return ok(json!({"ok": true}));
     }
     if !is_status && config_get(env, "encbot_mode").await.as_deref() == Some("post") {
@@ -14154,6 +14169,8 @@ async fn scheduled(_ev: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
     let _ = anibla::kick(&env).await;
     // "Manga tarjima" navbati — ALOHIDA workflow (`trbot::kick`).
     let _ = trbot::kick(&env).await;
+    // "Siqish" navbati — ALOHIDA workflow (`cmpbot::kick`).
+    let _ = cmpbot::kick(&env).await;
     // Mini App so'ragan eski qismlarning fMP4 nusxasi (`fmp4::kick`).
     let _ = fmp4::kick(&env).await;
     // R2 oraliq ombori: Telegram'ga yuklanmagan fayllar bo'lsa yuklovchi workflow ishga tushadi; eskirganlar tozalanadi.
@@ -14655,6 +14672,10 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
 
     if path.starts_with("/api/tr/") {
         return trbot::route(req, &env, path, method.clone()).await;
+    }
+
+    if path.starts_with("/api/cmp/") {
+        return cmpbot::route(req, &env, path, method.clone()).await;
     }
 
     if path.starts_with("/api/anibla/") {

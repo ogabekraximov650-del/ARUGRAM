@@ -58,6 +58,9 @@ FILES[".github/workflows/fmp4.yml"] = HERE.parent / "fmp4" / "fmp4.workflow.yml"
 FILES["tool/fmp4/run.py"] = HERE.parent / "fmp4" / "run.py"
 FILES[".github/workflows/session.yml"] = HERE.parent / "session" / "session.workflow.yml"
 FILES["tool/session/session.py"] = HERE.parent / "session" / "session.py"
+# "Siqish" (kodlash botining "🗜 Siqish" bo'limi) — ALOHIDA workflow `compress.yml`.
+FILES[".github/workflows/compress.yml"] = HERE.parent / "compress" / "compress.workflow.yml"
+FILES["tool/compress/compress.py"] = HERE.parent / "compress" / "compress.py"
 # albot: Actions'dagi mahalliy AI modeli (bot javoblari).
 FILES[".github/workflows/albot.yml"] = HERE.parent / "albot" / "albot.workflow.yml"
 FILES["tool/albot/run.py"] = HERE.parent / "albot" / "run.py"
