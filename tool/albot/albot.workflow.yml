@@ -51,7 +51,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /mnt/albot/llama-cache
-          key: llama-server-ubuntu-x64-v1
+          key: llama-server-ubuntu-x64-v2
 
       - name: llama.cpp (kesh, tayyor CPU build, bo'lmasa manbadan yig'iladi)
         env:
@@ -104,7 +104,9 @@ jobs:
             echo "manbadan yig'ilmoqda..."
             sudo apt-get install -y -qq cmake build-essential git >/dev/null
             git clone --depth 1 https://github.com/ggml-org/llama.cpp /mnt/albot/llama-src
-            cmake -S /mnt/albot/llama-src -B /mnt/albot/llama-src/build -DCMAKE_BUILD_TYPE=Release -DLLAMA_CURL=OFF >/dev/null
+            # -march=native EMAS: keshlangan binar boshqa CPU'li mashinada (AVX512 yo'q) SIGILL bilan yiqilardi. AVX2 hamma runner'da bor.
+            cmake -S /mnt/albot/llama-src -B /mnt/albot/llama-src/build -DCMAKE_BUILD_TYPE=Release -DLLAMA_CURL=OFF \
+              -DGGML_NATIVE=OFF -DGGML_AVX2=ON -DGGML_FMA=ON -DGGML_F16C=ON -DGGML_AVX512=OFF >/dev/null
             cmake --build /mnt/albot/llama-src/build --target llama-server -j"$(nproc)" 2>&1 | tail -5
             BIN=/mnt/albot/llama-src/build/bin/llama-server
           fi
@@ -148,7 +150,9 @@ jobs:
           TAIL=$(tail -c 700 /tmp/albot_run.log 2>/dev/null || true)
           LL=$(tail -c 1000 /tmp/albot_setup.log 2>/dev/null || true)
           LL="$LL
-          $(tail -c 500 /tmp/llama.log 2>/dev/null || true)"
+          $(tail -c 500 /tmp/llama.log 2>/dev/null || true)
+          dmesg: $(sudo dmesg 2>/dev/null | grep -iE 'oom|killed process|invalid opcode|segfault|trap' | tail -3 || true)
+          cpu: $(grep -m1 'model name' /proc/cpuinfo 2>/dev/null || true) | $(free -m | awk 'NR==2{print "RAM "$2" MB, bo\x27sh "$7}')"
           STEP="$STEP" TAIL="$TAIL" LL="$LL" python3 - <<'PY' | curl -sS -m 30 -X POST \
             -H "X-Run-Key: $(printf '%s' "$RUN_KEY" | tr -d '[:space:]')" -H 'Content-Type: application/json' -d @- \
             https://albot.uzcom.workers.dev/ai/done || true

@@ -6901,3 +6901,7 @@ Foydalanuvchi: oldingi usul (bitrate cheklovi/VBV) GIF'ni juda xira qildi ("bir 
 - Topilgan xato (diag-logs orqali ikkinchi akkaunt logidan): `tool/albot/run.py` da `import re` yo'q edi — `get_attachment` har safar `NameError` berib, model bir xil chaqiruvni 4 marta takrorlagan
   (har urinish ~1 daqiqa). Tuzatildi; bir xil vosita chaqiruvi 2 marta xato bersa 3-sida bajarilmaydi (model boshqa yo'l tutadi). Ikkinchi akkaunt loglarini ko'rish: `tool/diag/filter.txt` (run nomi bo'laklari)
   va `tool/diag/run.txt` ni o'zgartirib push qiling — `diag-logs.yml` oxirgi mos run logini shu repo job logiga chiqaradi.
+- albot run yiqildi: `llama-server to'xtadi` ("srv llama_server: initializing ..." dan keyin darrov). Taxmin (loglardan to'liq tasdiqlanmagan): keshlangan binar `-march=native` (GGML_NATIVE ON, standart) bilan
+  bir CPU'da (AVX512) yig'ilgan, keyingi run boshqa CPU'li mashinaga tushgan -> SIGILL. Tuzatish: manbadan yig'ishda `-DGGML_NATIVE=OFF -DGGML_AVX2=ON -DGGML_FMA=ON -DGGML_F16C=ON -DGGML_AVX512=OFF`,
+  kesh kaliti `llama-server-ubuntu-x64-v2` (eski binar ishlatilmaydi). Endi yiqilishda chiqish kodi (SIGILL/SIGKILL/SIGSEGV), `dmesg` (OOM) va CPU modeli xabarga qo'shiladi.
+  Agar yana yiqilsa sabab shu xabardan ma'lum bo'ladi (OOM bo'lsa — `CTX` ni 16384 ga qaytarish).

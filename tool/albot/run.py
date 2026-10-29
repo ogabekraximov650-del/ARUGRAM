@@ -353,7 +353,10 @@ def main():
         for _ in range(120):
             if srv.poll() is not None:
                 print(open("/tmp/llama.log").read()[-3000:])
-                raise SystemExit("llama-server to'xtadi")
+                rc = srv.returncode
+                why = {-4: "SIGILL (CPU buyrug'i yo'q — binar boshqa CPU uchun yig'ilgan)", -9: "SIGKILL (xotira yetmadi?)",
+                       -11: "SIGSEGV"}.get(rc, "")
+                raise SystemExit(f"llama-server to'xtadi: chiqish kodi {rc} {why}".strip())
             try:
                 urllib.request.urlopen(f"http://127.0.0.1:{PORT}/health", timeout=3).read()
                 break
