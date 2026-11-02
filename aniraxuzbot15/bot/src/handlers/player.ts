@@ -148,7 +148,6 @@ function buildPlayerKeyboard(
   // ── Qator 1: Reaktsiya tugmalari (✈️ = 4-chi, season share) ──────────────
   kb.text(stats.userLiked ? "✓👍" : "👍",     `player:like:${animeinfoId}`)
     .text(stats.userDisliked ? "✓👎" : "👎",  `player:dislike:${animeinfoId}`)
-    .switchInline("↗️",                          `${info.id}_${info.rowid}`)
     .text(stats.userSaved ? "✓🗂" : "🗂",     `player:save:${animeinfoId}`)
     .row();
 
