@@ -339,7 +339,6 @@ public class SizeNotifierFrameLayout extends FrameLayout implements Theme.Colora
                     backgroundView.invalidate();
                 }
             }
-            org.telegram.ui.Components.blur3.AuroraBackgroundDrawable.drawOverlay(canvas, getMeasuredWidth(), getRootView().getMeasuredHeight() - bottomClip);
             if (themeAnimationValue != 1f) {
                 backgroundView.invalidate();
             }
@@ -608,8 +607,6 @@ public class SizeNotifierFrameLayout extends FrameLayout implements Theme.Colora
 
     final BlurBackgroundTask blurBackgroundTask = new BlurBackgroundTask();
 
-    private long lastBlurStartMs;
-
     public void startBlur() {
         if (!blurIsRunning || blurGeneratingTuskIsRunning || !invalidateBlur || !SharedConfig.chatBlurEnabled() || DRAW_USING_RENDERNODE()) {
             return;
@@ -619,15 +616,6 @@ public class SizeNotifierFrameLayout extends FrameLayout implements Theme.Colora
         if (blurAlpha == 255) {
             return;
         }
-        // ARUGRAM: kuchsiz qurilmalarda blur kamroq yangilanadi (CPU tejash) / weaker devices refresh the blur less often (saves CPU)
-        final int perfClass = SharedConfig.getDevicePerformanceClass();
-        final long minBlurInterval = perfClass == SharedConfig.PERFORMANCE_CLASS_HIGH ? 0 : (perfClass == SharedConfig.PERFORMANCE_CLASS_AVERAGE ? 80 : 160);
-        final long nowMs = android.os.SystemClock.uptimeMillis();
-        if (minBlurInterval > 0 && nowMs - lastBlurStartMs < minBlurInterval) {
-            postInvalidateDelayed(minBlurInterval - (nowMs - lastBlurStartMs) + 1);
-            return;
-        }
-        lastBlurStartMs = nowMs;
         int lastW = getMeasuredWidth();
         int lastH = ActionBar.getCurrentActionBarHeight() + AndroidUtilities.statusBarHeight + dp(100);
         if (lastW == 0 || lastH == 0) {

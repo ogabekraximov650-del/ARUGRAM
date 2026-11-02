@@ -55,9 +55,8 @@ public class LiteMode {
         FLAG_ANIMATED_EMOJI_REACTIONS_PREMIUM |
         FLAG_AUTOPLAY_GIFS |
         FLAG_CHAT_THANOS |
-        FLAG_PARTICLES |
-        FLAG_LIQUID_GLASS
-    ); // ARUGRAM: +FLAG_LIQUID_GLASS (CPU variant on Android < 13)
+        FLAG_PARTICLES
+    ); // 198684
     public static int PRESET_MEDIUM = (
         FLAGS_ANIMATED_STICKERS |
         FLAG_ANIMATED_EMOJI_KEYBOARD_PREMIUM |
@@ -68,9 +67,8 @@ public class LiteMode {
         FLAG_AUTOPLAY_VIDEOS |
         FLAG_AUTOPLAY_GIFS |
         FLAG_CHAT_THANOS |
-        FLAG_PARTICLES |
-        FLAG_LIQUID_GLASS
-    ); // ARUGRAM: +FLAG_LIQUID_GLASS
+        FLAG_PARTICLES
+    ); // 204383
     public static int PRESET_HIGH = (
         FLAGS_ANIMATED_STICKERS |
         FLAGS_ANIMATED_EMOJI |
@@ -83,9 +81,8 @@ public class LiteMode {
         FLAG_CALLS_ANIMATIONS |
         FLAG_AUTOPLAY_VIDEOS |
         FLAG_AUTOPLAY_GIFS |
-        FLAG_PARTICLES |
-        FLAG_LIQUID_GLASS
-    ); // ARUGRAM: +FLAG_LIQUID_GLASS
+        FLAG_PARTICLES
+    ); // 262143
     public static int PRESET_POWER_SAVER = 0;
 
     private static int BATTERY_LOW = 10;
@@ -281,13 +278,6 @@ public class LiteMode {
 
         int prevValue = value;
         value = preferences.getInt("lite_mode6", defaultValue);
-        // ARUGRAM: glass (Liquid Glass + blur) bir marta hamma uchun yoqiladi; keyin foydalanuvchi o'chirishi mumkin / glass is switched on once for everyone; the user can turn it off afterwards
-        // v2: chat blur (protsessorda xiralashtirish) o'chiriladi: kuchsiz telefonda qotadi, glass uni almashtiradi / v2: chat blur (CPU blur) is switched off: it stalls weak phones, glass replaces it
-        if (!preferences.getBoolean("arugram_glass_v2", false)) {
-            value |= FLAG_LIQUID_GLASS;
-            value &= ~FLAG_CHAT_BLUR;
-            preferences.edit().putInt("lite_mode6", value).putBoolean("arugram_glass_v1", true).putBoolean("arugram_glass_v2", true).apply();
-        }
         if (loaded) {
             onFlagsUpdate(prevValue, value);
         }

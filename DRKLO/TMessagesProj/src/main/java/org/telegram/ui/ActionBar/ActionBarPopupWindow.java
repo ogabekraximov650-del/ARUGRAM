@@ -162,7 +162,7 @@ public class ActionBarPopupWindow extends PopupWindow {
             this.resourcesProvider = resourcesProvider;
 
             if (resId != 0) {
-                backgroundDrawable = new org.telegram.ui.Components.blur3.GlassWrapDrawable(getResources().getDrawable(resId).mutate(), this, () -> getThemedColor(Theme.key_actionBarDefaultSubmenuBackground), 10, true);
+                backgroundDrawable = getResources().getDrawable(resId).mutate();
                 setPadding(dp(8), dp(8), dp(8), dp(8));
             }
             if (backgroundDrawable != null) {

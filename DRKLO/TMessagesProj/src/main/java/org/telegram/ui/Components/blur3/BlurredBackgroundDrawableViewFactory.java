@@ -102,8 +102,6 @@ public class BlurredBackgroundDrawableViewFactory {
                 ((BlurredBackgroundDrawableRenderNode) drawable).setLiquidGlassEffectAllowed();
             }
         }
-        // ARUGRAM: Android 12 dan eski qurilmalar uchun jonli glass (panel egasi orqali) / live glass for devices older than Android 12 (via the panel owner)
-        drawable.setHostView(view);
 
         drawable.setColorProvider(provider);
         drawable.setOutset(outsetX, outsetY);
