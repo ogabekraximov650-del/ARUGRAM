@@ -1,6 +1,6 @@
 """yt-dlp Telegram boti (webhook, Ample Computer). Fayl cloud Bot API orqali <=48 MB bo'laklarda yuboriladi.
 UZ: faqat webhook; sessiya/api_id kerak emas. EN: webhook-only, no sessions. RU: только webhook, без сессий."""
-import asyncio, glob, hmac, json, logging, os, re, shutil, subprocess, sys, tempfile
+import asyncio, glob, hmac, json, logging, math, os, re, shutil, subprocess, sys, tempfile
 from aiohttp import web
 from tg import Tg, TgError
 
@@ -49,11 +49,102 @@ def split(path, outdir):
     return parts
 
 
+YTDLP = os.path.join(os.path.dirname(sys.executable), "yt-dlp")
+STREAM_FMT = "bv*[vcodec^=avc1][height<=720]+ba[ext=m4a]/b[ext=mp4][height<=720]"
+TARGET = 34 * 1024 * 1024  # bir bo'lak taxminiy hajmi (<48 MB, bitreyt sakrashiga zaxira bilan)
+
+
+class Fallback(Exception):
+    pass
+
+
+def cookie_args():
+    ck = os.environ.get("COOKIES", "/srv/ytbot/cookies.txt")
+    return ["--cookies", ck] if os.path.isfile(ck) else []
+
+
+async def stream_job(chat, url, mid, tmp):
+    """Oqim: ffmpeg manbadan o'qiydi va bo'laklarni to'g'ridan-to'g'ri yozadi; tayyor bo'lak darhol yuboriladi va o'chiriladi."""
+    r = await asyncio.to_thread(run, [YTDLP, "-J", "--no-playlist", "--no-warnings", "-f", STREAM_FMT] + cookie_args() + [url], 180)
+    if r.returncode or not r.stdout.strip():
+        raise Fallback((r.stderr.strip().splitlines() or ["probe"])[-1][:200])
+    info = json.loads(r.stdout)
+    fm = info.get("requested_formats") or [info]
+    if len(fm) > 2 or any(f.get("protocol") not in ("https", "http") or not f.get("url") for f in fm):
+        raise Fallback("oqim uchun mos emas")
+    dur = float(info.get("duration") or 0)
+    size = sum(float(f.get("filesize") or f.get("filesize_approx") or 0) for f in fm)
+    if not size:
+        size = sum(float(f.get("tbr") or 0) * 125 * dur for f in fm)
+    if dur <= 0 or size <= 0:
+        raise Fallback("hajm/davomiylik noma'lum")
+    seg = max(10, int(TARGET / (size / dur)))
+    total = max(1, math.ceil(dur / seg))
+    title = (info.get("title") or "video")[:80]
+    sub = os.path.join(tmp, "s")
+    os.makedirs(sub)
+    args = [FFMPEG, "-hide_banner", "-loglevel", "error"]
+    for f in fm:
+        hdr = "".join(f"{k}: {v}\r\n" for k, v in (f.get("http_headers") or info.get("http_headers") or {}).items())
+        args += ["-headers", hdr, "-i", f["url"]]
+    args += ["-map", "0:v:0"] + (["-map", "1:a:0"] if len(fm) == 2 else ["-map", "0:a?"])
+    args += ["-sn", "-dn", "-c", "copy", "-f", "segment", "-segment_format", "mp4", "-segment_time", str(seg),
+             "-reset_timestamps", "1", os.path.join(sub, "p%03d.mp4")]
+    if AWAKE:
+        args = [AWAKE, "--"] + args
+    proc = await asyncio.create_subprocess_exec(*args, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
+    errt = asyncio.create_task(proc.stderr.read())
+    sent = 0
+
+    async def drain(final):
+        nonlocal sent
+        while True:
+            files = sorted(glob.glob(os.path.join(sub, "p*.mp4")))
+            ready = files if final else files[:-1]
+            if not ready:
+                return
+            pth = ready[0]
+            await tg.edit_message(chat, mid, f"📤 Yuborilmoqda {sent + 1}/{total}…")
+            fields = {"chat_id": chat, "caption": f"{title} ({sent + 1}/{total})"[:1000], "supports_streaming": "true",
+                      "width": info.get("width") or None, "height": info.get("height") or None}
+            await tg.upload("sendVideo", fields, {"video": (pth, "video.mp4")})
+            os.remove(pth)
+            sent += 1
+
+    try:
+        while proc.returncode is None:
+            if shutil.disk_usage(sub).free < 60 * 1024 * 1024:
+                proc.kill()
+                raise RuntimeError("serverda joy qolmadi")
+            await drain(False)
+            try:
+                await asyncio.wait_for(proc.wait(), 3)
+            except asyncio.TimeoutError:
+                pass
+        await drain(True)
+    except BaseException:
+        if proc.returncode is None:
+            proc.kill()
+        raise
+    err = (await errt).decode(errors="replace")
+    if proc.returncode and sent == 0:
+        raise RuntimeError("oqim xatosi: " + " | ".join(err.splitlines()[:3])[:400])
+    if proc.returncode:
+        await tg.send_message(chat, "⚠️ Video oxirigacha yuklanmadi: " + " | ".join(err.splitlines()[:2])[:300])
+
+
 async def job(chat, url, audio):
     st = await tg.send_message(chat, "⏳ Yuklanmoqda…")
     mid = st["message_id"]
     tmp = tempfile.mkdtemp(prefix="yt")
     try:
+        if not audio:
+            try:
+                await stream_job(chat, url, mid, tmp)
+                await tg.delete_message(chat, mid)
+                return
+            except Fallback as e:
+                log.info("oqim yo'li o'tmadi, oddiy yuklash: %s", e)
         out = os.path.join(tmp, "%(title).60B.%(ext)s")
         cmd = [os.path.join(os.path.dirname(sys.executable), "yt-dlp"), "--no-playlist", "--no-warnings", "-o", out, "--ffmpeg-location", FFMPEG,
                "--print", "after_move:filepath"]
