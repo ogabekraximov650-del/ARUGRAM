@@ -119,6 +119,25 @@ async def handle_update(u):
         except Exception as e:
             await tg.send_message(chat, f"❌ {e}")
         return
+    if text.startswith("/cookies"):
+        rows = []
+        for ln in text.splitlines()[1:]:
+            ln = ln.strip()
+            k, sep, v = ln.partition("=")
+            if not sep:
+                k, _, v = ln.partition(" ")
+            k, v = k.strip(), v.strip()
+            if k and v:
+                for dom in (".youtube.com", ".google.com"):
+                    rows.append("\t".join([dom, "TRUE", "/", "TRUE", "2000000000", k, v]))
+        if not rows:
+            await tg.send_message(chat, "Format:\n<code>/cookies\nSID=...\nHSID=...\nSSID=...</code>")
+        else:
+            with open("/srv/ytbot/cookies.txt", "w") as f:
+                f.write("# Netscape HTTP Cookie File\n" + "\n".join(rows) + "\n")
+            await tg.delete_message(chat, m.get("message_id"))
+            await tg.send_message(chat, f"✅ {len(rows) // 2} ta cookie saqlandi (xabaringiz o'chirildi). YouTube havolasini yuboring.")
+        return
     mt = URL_RE.search(text)
     if mt:
         audio = text.lower().startswith(("/a ", "/audio", "a "))
