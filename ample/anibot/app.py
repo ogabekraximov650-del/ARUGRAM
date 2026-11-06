@@ -63,7 +63,7 @@ async def job(chat, url, audio):
         if audio:
             cmd += ["-x", "--audio-format", "mp3", "-f", "ba/b"]
         else:
-            cmd += ["-S", "res:720,ext:mp4:m4a", "--merge-output-format", "mp4"]
+            cmd += ["-f", "(bv*+ba/b)[filesize_approx<130M]/(bv*+ba/b)[filesize<130M]/wv*+wa/w", "-S", "res:720,ext:mp4:m4a", "--merge-output-format", "mp4"]
         r = await asyncio.to_thread(run, cmd + [url])
         files = [l for l in r.stdout.splitlines() if os.path.isfile(l.strip())]
         if r.returncode or not files:
@@ -73,6 +73,8 @@ async def job(chat, url, audio):
         sub = os.path.join(tmp, "p")
         os.makedirs(sub)
         parts = await asyncio.to_thread(split, f, sub)
+        if parts != [f]:
+            os.remove(f)
         for i, p in enumerate(parts, 1):
             await tg.edit_message(chat, mid, f"📤 Yuborilmoqda {i}/{len(parts)}…")
             cap = title + (f" ({i}/{len(parts)})" if len(parts) > 1 else "")
