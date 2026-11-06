@@ -6919,3 +6919,7 @@ Foydalanuvchi: model "sudo yo'q, o'rnatib bo'lmaydi" deb to'xtab qoldi ("Modelni
 - Tekshirilgan: vositalar soxta docker bilan lokal (shell, vaqt chegarasi, fayl o'qish/yozish, symlink rad etish, get_attachment). TEKSHIRILMAGAN: Actions'da `docker run`/`exec`, o'rnatish vaqti, modelning haqiqiy xatti-harakati.
 - albot qadamlari o'zbekcha tushuntiriladi: har vosita sxemasida majburiy `nima` maydoni (modelning o'zbekcha 1 jumlasi), foydalanuvchiga "🔧 <nima>" (+ shell uchun "⌨️ <buyruq>") yuboriladi;
   model `nima` bermasa shablon ishlaydi ("Siz yuborgan faylni yuklab olyapman (#1)", ...). Buyruq kodi 0 emas yoki "xato" bo'lsa "⚠️ <sabab>" ham yuboriladi. Tekshirilgan: soxta llm bilan agent sikli.
+
+## Ample yt-dlp boti (2026-11)
+
+`ample/anibot/` — Ample Computer serverida (`anibot`, servis `ytbot`) ishlaydigan webhook-only yt-dlp Telegram boti. Havola -> yt-dlp (<=720p) -> cloud Bot API orqali yuboriladi; 48 MB dan katta fayl ffmpeg bilan bo'laklanadi (sessiya/api_id kerak emas). Faqat admin. Maxfiy qiymatlar (BOT_TOKEN, WEBHOOK_SECRET) Ample servisida shifrlangan env, kodda yo'q. Anibla qismi tashlandi (foydalanuvchi qarori).
