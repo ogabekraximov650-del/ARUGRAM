@@ -104,6 +104,21 @@ async def handle_update(u):
     if not chat or (m.get("from") or {}).get("id") != ADMIN:
         return
     text = m.get("text") or ""
+    d = m.get("document")
+    if d and (d.get("file_name") or "").lower().endswith(".txt"):
+        try:
+            fi = await tg.call("getFile", file_id=d["file_id"])
+            ses = await tg.session()
+            async with ses.get(f"https://api.telegram.org/file/bot{TOKEN}/{fi['file_path']}") as r:
+                data = await r.read()
+            if b"youtube.com" not in data and b".google.com" not in data:
+                await tg.send_message(chat, "❌ Bu youtube cookies.txt emas")
+            else:
+                open("/srv/ytbot/cookies.txt", "wb").write(data)
+                await tg.send_message(chat, "✅ cookies.txt saqlandi. Endi YouTube havolasini yuboring.")
+        except Exception as e:
+            await tg.send_message(chat, f"❌ {e}")
+        return
     mt = URL_RE.search(text)
     if mt:
         audio = text.lower().startswith(("/a ", "/audio", "a "))
