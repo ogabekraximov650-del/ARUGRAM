@@ -57,6 +57,9 @@ async def job(chat, url, audio):
         out = os.path.join(tmp, "%(title).60B.%(ext)s")
         cmd = [os.path.join(os.path.dirname(sys.executable), "yt-dlp"), "--no-playlist", "--no-warnings", "-o", out, "--ffmpeg-location", FFMPEG,
                "--print", "after_move:filepath"]
+        ck = os.environ.get("COOKIES", "/srv/ytbot/cookies.txt")
+        if os.path.isfile(ck):
+            cmd += ["--cookies", ck]
         if audio:
             cmd += ["-x", "--audio-format", "mp3", "-f", "ba/b"]
         else:
