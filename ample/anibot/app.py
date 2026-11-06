@@ -55,7 +55,7 @@ async def job(chat, url, audio):
     tmp = tempfile.mkdtemp(prefix="yt")
     try:
         out = os.path.join(tmp, "%(title).60B.%(ext)s")
-        cmd = ["yt-dlp", "--no-playlist", "--no-warnings", "-o", out, "--ffmpeg-location", FFMPEG,
+        cmd = [os.path.join(os.path.dirname(sys.executable), "yt-dlp"), "--no-playlist", "--no-warnings", "-o", out, "--ffmpeg-location", FFMPEG,
                "--print", "after_move:filepath"]
         if audio:
             cmd += ["-x", "--audio-format", "mp3", "-f", "ba/b"]
