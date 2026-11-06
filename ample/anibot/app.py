@@ -41,11 +41,11 @@ def split(path, outdir):
     seg = max(10, int(dur * LIMIT / size * 0.85))
     ext = os.path.splitext(path)[1]
     pat = os.path.join(outdir, f"part%03d{ext}")
-    p = subprocess.run([FFMPEG, "-y", "-i", path, "-c", "copy", "-map", "0", "-f", "segment",
+    p = subprocess.run([FFMPEG, "-y", "-i", path, "-map", "0:v:0", "-map", "0:a?", "-sn", "-dn", "-c", "copy", "-f", "segment", "-segment_format", "mp4",
                         "-segment_time", str(seg), "-reset_timestamps", "1", pat], capture_output=True, text=True)
     parts = sorted(glob.glob(os.path.join(outdir, "part*" + ext)))
     if p.returncode or not parts:
-        raise RuntimeError("bo'lishda xato: " + p.stderr[-200:])
+        raise RuntimeError("bo'lishda xato: " + " | ".join([l for l in p.stderr.splitlines() if "rror" in l or "nvalid" in l or "annot" in l][:3])[:400] or p.stderr[:300])
     return parts
 
 
