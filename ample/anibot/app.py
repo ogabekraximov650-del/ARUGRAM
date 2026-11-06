@@ -133,8 +133,17 @@ async def handle_update(u):
         if not rows:
             await tg.send_message(chat, "Format:\n<code>/cookies\nSID=...\nHSID=...\nSSID=...</code>")
         else:
+            names = {r.split("\t")[5] for r in rows}
+            keep = []
+            try:
+                for l in open("/srv/ytbot/cookies.txt").read().splitlines():
+                    c = l.split("\t")
+                    if not l.startswith("#") and len(c) == 7 and c[5] not in names:
+                        keep.append(l)
+            except OSError:
+                pass
             with open("/srv/ytbot/cookies.txt", "w") as f:
-                f.write("# Netscape HTTP Cookie File\n" + "\n".join(rows) + "\n")
+                f.write("# Netscape HTTP Cookie File\n" + "\n".join(keep + rows) + "\n")
             await tg.delete_message(chat, m.get("message_id"))
             await tg.send_message(chat, f"✅ {len(rows) // 2} ta cookie saqlandi (xabaringiz o'chirildi). YouTube havolasini yuboring.")
         return
