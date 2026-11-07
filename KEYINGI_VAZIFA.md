@@ -6935,3 +6935,4 @@ Foydalanuvchi: model "sudo yo'q, o'rnatib bo'lmaydi" deb to'xtab qoldi ("Modelni
 - Ko'rish: bo'laklar Telegram -> Cloudflare keshga TO'G'RIDAN-TO'G'RI (R2'siz), kesh oynasi 26x18 MiB (bo'lak chegarasiga mos), TTL 1000 kun, tizim arumediatv worker'idagidek. Video kesh tayyor bo'lmaguncha ochilmaydi (ilova `/api/warm/bd~<id>` ni kutadi; keyingi oynalar `ResolvingDataSource` orqali).
 - Auth: ilova `X-App-Sig` / `?t=` (APP_SIGN_SECRET CI'da BuildConfig'ga yoziladi), Actions `X-Encode-Token`. Bot tokeni ilovada YO'Q.
 - CI: `drive-worker.yml`, `drive-android.yml`. Yuklab olish (fayl turi) hozircha yo'q — faqat video ijrosi.
+- Turso: Telegram `file_id` lar `bd_files.chunk_ids` ustunida vergul bilan (`chunk0_fileid,chunk1_fileid,...`, indeks = bo'lak raqami); `bd_chunks` jadvali olib tashlandi. Bo'laklar tartib bilan yoziladi (`chunkdone` oldinga sakrashni rad etadi).

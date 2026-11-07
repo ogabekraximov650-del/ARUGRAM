@@ -84,11 +84,17 @@ async fn ensure(env: &Env) -> Result<()> {
           size INTEGER NOT NULL, w INTEGER NOT NULL DEFAULT 0, h INTEGER NOT NULL DEFAULT 0, dur INTEGER NOT NULL DEFAULT 0, \
           state TEXT NOT NULL, upload_id TEXT NOT NULL DEFAULT '', chunks INTEGER NOT NULL DEFAULT 0, lease INTEGER NOT NULL DEFAULT 0, \
           tries INTEGER NOT NULL DEFAULT 0, created INTEGER NOT NULL)", vec![]),
-        ("CREATE TABLE IF NOT EXISTS bd_chunks (file_id TEXT NOT NULL, n INTEGER NOT NULL, tg_file_id TEXT NOT NULL, size INTEGER NOT NULL, \
-          msg_id INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (file_id, n))", vec![]),
     ]).await?;
+    // Telegram file_id lar bitta ustunda, vergul bilan: `chunk0_fileid,chunk1_fileid,...` (indeks = bo'lak raqami).
+    // Eski jadvalda ustun yo'q bo'lsa qo'shiladi (bor bo'lsa xato e'tiborsiz).
+    let _ = sql(env, "ALTER TABLE bd_files ADD COLUMN chunk_ids TEXT NOT NULL DEFAULT ''", vec![]).await;
     SCHEMA_OK.store(true, Ordering::Relaxed);
     Ok(())
+}
+
+/// `a,b,c` -> ["a","b","c"] (bo'sh matn — bo'sh ro'yxat).
+pub(crate) fn split_ids(s: &str) -> Vec<&str> {
+    if s.is_empty() { Vec::new() } else { s.split(',').collect() }
 }
 
 fn first(res: &Value) -> Option<Value> {
@@ -256,8 +262,8 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
             if first(&got).is_none() {
                 return ok(json!({"none": true}));
             }
-            let done = sql(env, "SELECT n FROM bd_chunks WHERE file_id=?", vec![TursoArg::text(&id)]).await?;
-            let done: Vec<i64> = rows_of(&done).iter().filter_map(|r| r["n"].as_i64()).collect();
+            let ids = sql(env, "SELECT chunk_ids FROM bd_files WHERE id=?", vec![TursoArg::text(&id)]).await?;
+            let done: Vec<i64> = (0..split_ids(first(&ids).and_then(|r| r["chunk_ids"].as_str().map(String::from)).unwrap_or_default().as_str()).len() as i64).collect();
             ok(json!({
                 "id": id, "name": f["name"], "size": f["size"], "chunks": f["chunks"], "chunk": CHUNK, "done": done,
                 "bot_token": tg_secret(env, "BD_BOT_TOKEN"), "channel": tg_channel_id(env),
@@ -293,11 +299,20 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
             if !id_ok(&id) || tg.is_empty() || tg.len() > 300 {
                 return json_resp(&json!({"error": "so'rov"}), 400);
             }
-            sql_many(env, &[
-                ("INSERT OR REPLACE INTO bd_chunks (file_id,n,tg_file_id,size,msg_id) VALUES (?,?,?,?,?)",
-                 vec![TursoArg::text(&id), TursoArg::int(jint(&b, "n")), TursoArg::text(&tg), TursoArg::int(jint(&b, "size")), TursoArg::int(jint(&b, "msg_id"))]),
-                ("UPDATE bd_files SET lease=? WHERE id=? AND state='storing'", vec![TursoArg::int(now_ms() + LEASE_MS), TursoArg::text(&id)]),
-            ]).await?;
+            let n = jint(&b, "n");
+            if n < 0 || !tg.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+                return json_resp(&json!({"error": "so'rov"}), 400);
+            }
+            let cur = sql(env, "SELECT chunk_ids FROM bd_files WHERE id=?", vec![TursoArg::text(&id)]).await?;
+            let Some(row) = first(&cur) else { return err404("fayl yo'q") };
+            let mut list: Vec<String> = split_ids(row["chunk_ids"].as_str().unwrap_or("")).into_iter().map(String::from).collect();
+            let n = n as usize;
+            if n > list.len() {
+                return json_resp(&json!({"error": "bo'laklar tartib bilan kelishi shart"}), 409);
+            }
+            if n == list.len() { list.push(tg) } else { list[n] = tg }
+            sql(env, "UPDATE bd_files SET chunk_ids=?, lease=? WHERE id=? AND state='storing'",
+                vec![TursoArg::text(&list.join(",")), TursoArg::int(now_ms() + LEASE_MS), TursoArg::text(&id)]).await?;
             ok(json!({"ok": true}))
         }
         (Method::Post, "/api/bd/done") => {
@@ -306,12 +321,10 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
             if !id_ok(&id) {
                 return json_resp(&json!({"error": "so'rov"}), 400);
             }
-            let r = sql_many(env, &[
-                ("SELECT chunks FROM bd_files WHERE id=?", vec![TursoArg::text(&id)]),
-                ("SELECT COUNT(*) AS c FROM bd_chunks WHERE file_id=?", vec![TursoArg::text(&id)]),
-            ]).await?;
-            let want = first(&r[0]).and_then(|x| x["chunks"].as_i64()).unwrap_or(-1);
-            let have = first(&r[1]).and_then(|x| x["c"].as_i64()).unwrap_or(0);
+            let r = sql(env, "SELECT chunks,chunk_ids FROM bd_files WHERE id=?", vec![TursoArg::text(&id)]).await?;
+            let row = first(&r);
+            let want = row.as_ref().and_then(|x| x["chunks"].as_i64()).unwrap_or(-1);
+            let have = row.as_ref().map(|x| split_ids(x["chunk_ids"].as_str().unwrap_or("")).len() as i64).unwrap_or(0);
             if want <= 0 || have != want {
                 return json_resp(&json!({"error": format!("bo'laklar yetarli emas ({have}/{want})")}), 409);
             }
@@ -421,14 +434,11 @@ pub(crate) async fn warm(env: &Env, id: &str, widx: u64, force: bool) -> Result<
     let _ = cache.put(&marker_key, marker).await;
 
     ensure(env).await?;
-    let r = sql_many(env, &[
-        ("SELECT size,mime FROM bd_files WHERE id=? AND state='ready'", vec![TursoArg::text(id)]),
-        ("SELECT n,tg_file_id FROM bd_chunks WHERE file_id=? ORDER BY n", vec![TursoArg::text(id)]),
-    ]).await?;
-    let Some(f) = first(&r[0]) else { return reply("error fayl tayyor emas", 0) };
+    let r = sql(env, "SELECT size,mime,chunk_ids FROM bd_files WHERE id=? AND state='ready'", vec![TursoArg::text(id)]).await?;
+    let Some(f) = first(&r) else { return reply("error fayl tayyor emas", 0) };
     let total = f["size"].as_i64().unwrap_or(0).max(0) as u64;
     let mime = f["mime"].as_str().filter(|m| !m.is_empty()).unwrap_or("application/octet-stream").to_string();
-    let chunks: Vec<(i64, String)> = rows_of(&r[1]).iter().filter_map(|c| Some((c["n"].as_i64()?, c["tg_file_id"].as_str()?.to_string()))).collect();
+    let chunks: Vec<(i64, String)> = split_ids(f["chunk_ids"].as_str().unwrap_or("")).into_iter().enumerate().map(|(i, s)| (i as i64, s.to_string())).collect();
     if total == 0 || chunks.len() as i64 != chunks_of(total as i64) {
         return reply("error bo'laklar to'liq emas", total);
     }
@@ -509,6 +519,12 @@ mod tests {
         assert_eq!(chunks_of(CHUNK as i64), 1);
         assert_eq!(chunks_of(CHUNK as i64 + 1), 2);
         assert_eq!(chunks_of(0), 0);
+    }
+
+    #[test]
+    fn vergulli_royxat() {
+        assert!(split_ids("").is_empty());
+        assert_eq!(split_ids("a_1,b-2"), vec!["a_1", "b-2"]);
     }
 
     #[test]
