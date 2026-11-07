@@ -22,6 +22,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -41,7 +42,7 @@ fun ShortsScreen(list: List<Video>, start: Int, onBack: () -> Unit) {
     val pager = rememberPagerState(initialPage = start.coerceIn(0, (list.size - 1).coerceAtLeast(0)), pageCount = { list.size })
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         VerticalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->
-            ShortPage(list[page], active = pager.currentPage == page)
+            ShortPage(list[page], next = list.getOrNull(page + 1), active = pager.currentPage == page)
         }
         Icon(
             Icons.AutoMirrored.Filled.ArrowBack,
@@ -53,8 +54,9 @@ fun ShortsScreen(list: List<Video>, start: Int, onBack: () -> Unit) {
 }
 
 @Composable
-private fun ShortPage(v: Video, active: Boolean) {
+private fun ShortPage(v: Video, next: Video?, active: Boolean) {
     val act = LocalContext.current as Activity
+    val scope = rememberCoroutineScope()
     var direct by remember(v.code) { mutableStateOf<Direct?>(null) }
     var failed by remember(v.code) { mutableStateOf(false) }
     var paused by remember(v.code) { mutableStateOf(false) }
@@ -62,9 +64,11 @@ private fun ShortPage(v: Video, active: Boolean) {
     // Faqat ko'rinib turgan sahifa uchun reklamasiz havola olinadi.
     LaunchedEffect(v.code, active) {
         if (active && direct == null && !failed) {
-            val d = DirectLink.resolve(act, v.embed)
+            val d = LinkCache.resolve(scope, act, v)
             if (d != null) direct = d else failed = true
         }
+        // Keyingi Short uchun havola oldindan tayyorlanadi: surilganda darhol ochiladi.
+        if (active && next != null) LinkCache.prefetch(scope, act, listOf(next), 1)
     }
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {

@@ -1,5 +1,6 @@
 package uz.arutube.app
 
+import android.app.Activity
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -50,6 +51,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -207,6 +209,15 @@ fun HomeScreen(refreshKey: Int, onOpen: (Video) -> Unit, onOpenShort: (List<Vide
     }
 
     LaunchedEffect(refreshKey) { load(1) }
+
+    // Reklamasiz havolalar oldindan tayyorlanadi: avval davom ettirilayotgan, keyin birinchi uzun videolar va Shorts.
+    val act = LocalContext.current as Activity
+    LaunchedEffect(videos.firstOrNull()?.code) {
+        if (videos.isNotEmpty()) {
+            val cont = LocalStore.history.filter { it.inProgress }.map { it.video }
+            LinkCache.prefetch(scope, act, cont + videos.filter { !it.isShort } + videos.filter { it.isShort }, 4)
+        }
+    }
 
     val byQuery = if (query.isBlank()) videos else videos.filter { it.title.contains(query, ignoreCase = true) }
     val shown = chip.apply(byQuery)

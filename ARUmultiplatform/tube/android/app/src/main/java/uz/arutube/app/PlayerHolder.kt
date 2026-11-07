@@ -25,20 +25,24 @@ class PlayerHolder(private val ctx: Context, private val scope: CoroutineScope) 
     var playing by mutableStateOf(false)
         private set
     private var job: Job? = null
+    private var act: Activity? = null
+    private var retriedFor: String? = null
 
     /** Shu video allaqachon ochiq (yoki ochilayotgan) bo'lsa, hech narsa qilmaydi — mini pleyerdan qaytganda ijro uzilmaydi. */
     fun open(v: Video, act: Activity) {
         if (video?.code == v.code && (exo != null || status == "loading")) return
         close()
+        this.act = act
         video = v
         status = "loading"
         job = scope.launch {
-            val d = DirectLink.resolve(act, v.embed)
+            // Havola oldindan tayyorlangan bo'lsa (LinkCache) darhol olinadi.
+            val d = LinkCache.resolve(scope, act, v)
             if (d == null) {
                 status = "failed"
                 return@launch
             }
-            val p = buildPlayer(ctx, d, false) { status = "failed" }
+            val p = buildPlayer(ctx, d, false) { onPlayerFailed(v) }
             LocalStore.progress(v.code)?.let { s ->
                 if (s.posMs > 5_000 && (s.durMs == 0L || s.posMs < s.durMs - 10_000)) p.seekTo(s.posMs)
             }
@@ -50,6 +54,19 @@ class PlayerHolder(private val ctx: Context, private val scope: CoroutineScope) 
             exo = p
             status = ""
             LocalStore.record(v, p.currentPosition, v.duration * 1000)
+        }
+    }
+
+    /** Havola eskirgan bo'lishi mumkin: keshdan o'chirilib, bir marta yangisi olinadi; yana xato bo'lsa — "failed". */
+    private fun onPlayerFailed(v: Video) {
+        val a = act
+        if (a != null && retriedFor != v.code) {
+            retriedFor = v.code
+            LinkCache.invalidate(v.code)
+            close()
+            open(v, a)
+        } else {
+            status = "failed"
         }
     }
 

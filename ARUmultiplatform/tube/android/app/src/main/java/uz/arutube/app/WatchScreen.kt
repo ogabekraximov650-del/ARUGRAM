@@ -162,6 +162,7 @@ fun WatchScreen(video: Video, holder: PlayerHolder, onMinimize: () -> Unit, onOp
     val ctx = LocalContext.current
     val act = ctx as Activity
     val clip = LocalClipboardManager.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     var others by remember { mutableStateOf(listOf<Video>()) }
     var copied by remember(video.code) { mutableStateOf(false) }
     var mode by remember(video.code) { mutableStateOf(PlayerMode.NATIVE) }
@@ -174,6 +175,8 @@ fun WatchScreen(video: Video, holder: PlayerHolder, onMinimize: () -> Unit, onOp
         if (r.error == null) {
             others = r.videos.filter { it.code != video.code }
             Repo.merge(r.videos)
+            // Joriy video ochilgach, "keyingi videolar"ning birinchi ikkitasi uchun havola tayyorlanadi.
+            LinkCache.prefetch(scope, act, others, 2)
         }
     }
     // Reklamasiz rejim: pleyer holder'da (mini pleyer bilan umumiy); topilmasa iframe'ga o'tiladi.
