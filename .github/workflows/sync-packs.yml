@@ -19,7 +19,6 @@ on:
       - 'tool/fmp4/**'
       - 'tool/session/**'
       - 'tool/upload/**'
-      - 'tool/bdrive/**'
       - 'tool/albot/**'
       - 'tool/compress/**'
       - 'tool/emojifont/**'

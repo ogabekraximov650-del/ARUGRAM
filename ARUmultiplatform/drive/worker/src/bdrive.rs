@@ -17,23 +17,13 @@
 use crate::cache::*;
 use crate::*;
 use core::sync::atomic::{AtomicBool, Ordering};
-use worker::{Bucket, FixedLengthStream, Range, UploadedPart};
 
 /// Bitta Telegram bo'lagi: bot 20 MB gacha yuklab oladi, 50 MB gacha yuklaydi.
 pub(crate) const CHUNK: u64 = 18 * 1024 * 1024;
-const UP: &str = "bd/up/";
-const THUMB: &str = "bd/thumb/";
 /// Fayl hajmining yuqori chegarasi (R2 multipart: 10 000 bo'lak x 18 MiB ≈ 175 GB; amalda 4 GB).
 const MAX_SIZE: i64 = 4 * 1024 * 1024 * 1024;
-const LEASE_MS: i64 = 30 * 60 * 1000;
-const MAX_TRIES: i64 = 3;
-const WORKFLOW: &str = "bdrive.yml";
 
 static SCHEMA_OK: AtomicBool = AtomicBool::new(false);
-
-fn bucket(env: &Env) -> Option<Bucket> {
-    env.bucket("R2").ok()
-}
 
 // ── Baza (alohida Turso) ─────────────────────────────────────
 
@@ -88,6 +78,7 @@ async fn ensure(env: &Env) -> Result<()> {
     // Telegram file_id lar bitta ustunda, vergul bilan: `chunk0_fileid,chunk1_fileid,...` (indeks = bo'lak raqami).
     // Eski jadvalda ustun yo'q bo'lsa qo'shiladi (bor bo'lsa xato e'tiborsiz).
     let _ = sql(env, "ALTER TABLE bd_files ADD COLUMN chunk_ids TEXT NOT NULL DEFAULT ''", vec![]).await;
+    let _ = sql(env, "ALTER TABLE bd_files ADD COLUMN thumb_id TEXT NOT NULL DEFAULT ''", vec![]).await;
     SCHEMA_OK.store(true, Ordering::Relaxed);
     Ok(())
 }
@@ -130,6 +121,15 @@ async fn tg_send_document(token: &str, channel: i64, name: &str, data: &[u8], ex
     Ok((fid, d["result"]["message_id"].as_i64().unwrap_or(0)))
 }
 
+fn thumb_resp(bytes: Vec<u8>) -> Result<Response> {
+    let mut resp = Response::from_bytes(bytes)?;
+    set_cors(&mut resp);
+    let h = resp.headers_mut();
+    h.set("Content-Type", "image/jpeg")?;
+    h.set("Cache-Control", &format!("public, max-age={CHUNK_CACHE_SECONDS}, immutable"))?;
+    Ok(resp)
+}
+
 /// `a,b,c` -> ["a","b","c"] (bo'sh matn — bo'sh ro'yxat).
 pub(crate) fn split_ids(s: &str) -> Vec<&str> {
     if s.is_empty() { Vec::new() } else { s.split(',').collect() }
@@ -168,83 +168,11 @@ pub(crate) fn chunks_of(size: i64) -> i64 {
 
 pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Response> {
     let method = req.method();
-    let actions = matches!(path, "/api/bd/claim" | "/api/bd/read" | "/api/bd/chunkdone" | "/api/bd/done" | "/api/bd/fail");
-    if actions && !encode_token_ok(&req, env) {
-        return json_resp(&json!({"error": "forbidden"}), 403);
-    }
     if let Err(e) = ensure(env).await {
         return json_resp(&json!({"error": e.to_string()}), 503);
     }
     let url = req.url()?;
     match (method, path) {
-        // ── Ilova: yuklash ──
-        (Method::Post, "/api/bd/init") => {
-            let b: Value = req.json().await.unwrap_or(json!({}));
-            let name = clean_name(b["name"].as_str().unwrap_or(""));
-            let size = jint(&b, "size");
-            if size <= 0 || size > MAX_SIZE {
-                return json_resp(&json!({"error": "hajm"}), 400);
-            }
-            let kind = if b["kind"].as_str() == Some("video") { "video" } else { "file" };
-            let mime: String = b["mime"].as_str().unwrap_or("").chars().filter(|c| c.is_ascii_graphic()).take(60).collect();
-            let Some(bk) = bucket(env) else { return json_resp(&json!({"error": "r2"}), 503) };
-            let id = new_id();
-            let up = bk.create_multipart_upload(format!("{UP}{id}")).execute().await?;
-            let upload_id = up.upload_id().await;
-            sql(env, "INSERT INTO bd_files (id,name,kind,mime,size,w,h,dur,state,upload_id,chunks,created) VALUES (?,?,?,?,?,?,?,?,'uploading',?,?,?)",
-                vec![TursoArg::text(&id), TursoArg::text(&name), TursoArg::text(kind), TursoArg::text(&mime), TursoArg::int(size),
-                     TursoArg::int(jint(&b, "w")), TursoArg::int(jint(&b, "h")), TursoArg::int(jint(&b, "dur")),
-                     TursoArg::text(&upload_id), TursoArg::int(chunks_of(size)), TursoArg::int(now_ms())]).await?;
-            ok(json!({"id": id, "upload_id": upload_id, "part_size": CHUNK}))
-        }
-        (Method::Put, "/api/bd/part") => {
-            let (id, uid, n) = (qs(&url, "id"), qs(&url, "uid"), qs(&url, "n").parse::<u16>().unwrap_or(0));
-            let Some(bk) = bucket(env) else { return json_resp(&json!({"error": "r2"}), 503) };
-            if !id_ok(&id) || uid.is_empty() || n == 0 {
-                return json_resp(&json!({"error": "so'rov"}), 400);
-            }
-            let len = req.headers().get("Content-Length").ok().flatten().and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
-            if len == 0 || len > CHUNK {
-                return json_resp(&json!({"error": "hajm"}), 400);
-            }
-            // OQIM: tana xotiraga yig'ilmaydi, R2'ga to'g'ridan-to'g'ri uzatiladi.
-            let stream = FixedLengthStream::wrap(req.stream()?, len);
-            let part = bk.resume_multipart_upload(format!("{UP}{id}"), uid)?.upload_part(n, stream).await?;
-            ok(json!({"n": part.part_number(), "etag": part.etag()}))
-        }
-        (Method::Post, "/api/bd/finish") => {
-            let b: Value = req.json().await.unwrap_or(json!({}));
-            let id = b["id"].as_str().unwrap_or("").to_string();
-            let uid = b["upload_id"].as_str().unwrap_or("").to_string();
-            let Some(bk) = bucket(env) else { return json_resp(&json!({"error": "r2"}), 503) };
-            if !id_ok(&id) || uid.is_empty() {
-                return json_resp(&json!({"error": "so'rov"}), 400);
-            }
-            let Some(row) = first(&sql(env, "SELECT size,state FROM bd_files WHERE id=?", vec![TursoArg::text(&id)]).await?) else {
-                return err404("fayl yo'q");
-            };
-            if row["state"].as_str() != Some("uploading") {
-                return json_resp(&json!({"error": "holat"}), 409);
-            }
-            let size = row["size"].as_i64().unwrap_or(0);
-            let parts: Vec<UploadedPart> = b["parts"].as_array().map(|a| a.iter().filter_map(|p| {
-                Some(UploadedPart::new(p["n"].as_u64()? as u16, p["etag"].as_str()?.to_string()))
-            }).collect()).unwrap_or_default();
-            if parts.is_empty() {
-                return json_resp(&json!({"error": "bo'laklar"}), 400);
-            }
-            let key = format!("{UP}{id}");
-            bk.resume_multipart_upload(key.clone(), uid)?.complete(parts).await.map_err(|e| Error::RustError(format!("yig'ish: {e}")))?;
-            let got = bk.head(&key).await.ok().flatten().map(|o| o.size() as i64);
-            if got != Some(size) {
-                let _ = bk.delete(&key).await;
-                let _ = sql(env, "UPDATE bd_files SET state='failed' WHERE id=?", vec![TursoArg::text(&id)]).await;
-                return json_resp(&json!({"error": format!("hajm mos emas ({got:?} != {size})")}), 422);
-            }
-            sql(env, "UPDATE bd_files SET state='uploaded' WHERE id=? AND state='uploading'", vec![TursoArg::text(&id)]).await?;
-            let kick_msg = kick(env).await;
-            ok(json!({"ok": true, "kick": kick_msg}))
-        }
         // ── Ilova: to'g'ridan-to'g'ri (R2 va Actions'siz): bo'lak worker orqali Bot API'ga ketadi, token faqat shu yerda ──
         (Method::Post, "/api/bd/new") => {
             let b: Value = req.json().await.unwrap_or(json!({}));
@@ -307,9 +235,9 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
             sql(env, "UPDATE bd_files SET state='ready' WHERE id=? AND state='direct'", vec![TursoArg::text(&id)]).await?;
             ok(json!({"ok": true}))
         }
+        // Kichik rasm ham Telegram'ga (kanalga) saqlanadi; file_id `thumb_id` ustunida.
         (Method::Post, "/api/bd/thumb") => {
             let id = qs(&url, "id");
-            let Some(bk) = bucket(env) else { return json_resp(&json!({"error": "r2"}), 503) };
             if !id_ok(&id) {
                 return json_resp(&json!({"error": "so'rov"}), 400);
             }
@@ -317,153 +245,47 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
             if bytes.is_empty() || bytes.len() > 1024 * 1024 {
                 return json_resp(&json!({"error": "hajm"}), 400);
             }
-            bk.put(format!("{THUMB}{id}.jpg"), bytes).execute().await?;
+            let (fid, _) = tg_send_document(&tg_secret(env, "BD_BOT_TOKEN"), tg_channel_id(env), &format!("{id}.thumb.jpg"), &bytes, bytes.len() as u64).await?;
+            sql(env, "UPDATE bd_files SET thumb_id=? WHERE id=? AND state='direct'", vec![TursoArg::text(&fid), TursoArg::text(&id)]).await?;
             ok(json!({"ok": true}))
         }
         (Method::Get, "/api/bd/list") => {
             let res = sql(env,
-                "SELECT id,name,kind,mime,size,w,h,dur,state,created FROM bd_files WHERE state IN ('ready','uploaded','storing') ORDER BY created DESC LIMIT 200",
+                "SELECT id,name,kind,mime,size,w,h,dur,state,created FROM bd_files WHERE state='ready' ORDER BY created DESC LIMIT 200",
                 vec![]).await?;
             let mut r = ok(json!({"files": rows_of(&res)}))?;
             let _ = r.headers_mut().set("Cache-Control", "no-store");
             Ok(r)
         }
+        // Kichik rasm: Telegram'dan olinib Cloudflare keshiga (1000 kun) saqlanadi.
         (Method::Get, p) if p.starts_with("/api/bd/thumb/") => {
             let id = p["/api/bd/thumb/".len()..].trim_end_matches(".jpg").to_string();
-            let Some(bk) = bucket(env) else { return json_resp(&json!({"error": "r2"}), 503) };
             if !id_ok(&id) {
                 return err404("yo'q");
             }
-            let Some(obj) = bk.get(format!("{THUMB}{id}.jpg")).execute().await? else { return err404("yo'q") };
-            let size = obj.size();
-            let Some(body) = obj.body() else { return err404("yo'q") };
-            let mut resp = Response::from_body(body.response_body()?)?;
-            set_cors(&mut resp);
-            let h = resp.headers_mut();
-            h.set("Content-Type", "image/jpeg")?;
-            h.set("Content-Length", &size.to_string())?;
-            h.set("Cache-Control", "public, max-age=86400000, immutable")?;
-            Ok(resp)
-        }
-
-        // ── Actions (ENCODE_TOKEN) ──
-        (Method::Post, "/api/bd/claim") => {
-            let now = now_ms();
-            let r = sql_many(env, &[
-                // Ijarasi tugagan (run o'lgan) ishlar qayta navbatga qaytadi.
-                ("UPDATE bd_files SET state='uploaded' WHERE state='storing' AND lease<? AND tries<?", vec![TursoArg::int(now), TursoArg::int(MAX_TRIES)]),
-                ("UPDATE bd_files SET state='failed' WHERE state='storing' AND lease<? AND tries>=?", vec![TursoArg::int(now), TursoArg::int(MAX_TRIES)]),
-                ("SELECT id,name,size,chunks FROM bd_files WHERE state='uploaded' ORDER BY created LIMIT 1", vec![]),
-            ]).await?;
-            let Some(f) = first(&r[2]) else { return ok(json!({"none": true})) };
-            let id = f["id"].as_str().unwrap_or("").to_string();
-            let got = sql(env, "UPDATE bd_files SET state='storing', lease=?, tries=tries+1 WHERE id=? AND state='uploaded' RETURNING id",
-                vec![TursoArg::int(now + LEASE_MS), TursoArg::text(&id)]).await?;
-            if first(&got).is_none() {
-                return ok(json!({"none": true}));
+            let cache = Cache::default();
+            let key = Request::new(&format!("https://arudrive.cache/thumb/{id}"), Method::Get)?;
+            if let Some(mut hit) = cache.get(&key, false).await? {
+                let bytes = hit.bytes().await?;
+                return thumb_resp(bytes);
             }
-            let ids = sql(env, "SELECT chunk_ids FROM bd_files WHERE id=?", vec![TursoArg::text(&id)]).await?;
-            let done: Vec<i64> = (0..split_ids(first(&ids).and_then(|r| r["chunk_ids"].as_str().map(String::from)).unwrap_or_default().as_str()).len() as i64).collect();
-            ok(json!({
-                "id": id, "name": f["name"], "size": f["size"], "chunks": f["chunks"], "chunk": CHUNK, "done": done,
-                "bot_token": tg_secret(env, "BD_BOT_TOKEN"), "channel": tg_channel_id(env),
-            }))
-        }
-        (Method::Get, "/api/bd/read") => {
-            let (id, n) = (qs(&url, "id"), qs(&url, "n").parse::<u64>().unwrap_or(0));
-            let Some(bk) = bucket(env) else { return json_resp(&json!({"error": "r2"}), 503) };
-            if !id_ok(&id) {
-                return err404("yo'q");
+            let Some(row) = first(&sql(env, "SELECT thumb_id FROM bd_files WHERE id=?", vec![TursoArg::text(&id)]).await?) else { return err404("yo'q") };
+            let fid = row["thumb_id"].as_str().unwrap_or("").to_string();
+            if fid.is_empty() {
+                return err404("rasm yo'q");
             }
-            let key = format!("{UP}{id}");
-            let Some(head) = bk.head(&key).await.ok().flatten() else { return err404("yo'q") };
-            let total = head.size();
-            let offset = n * CHUNK;
-            if offset >= total {
-                return json_resp(&json!({"error": "oraliq"}), 416);
+            let token = tg_secret(env, "BD_BOT_TOKEN");
+            let f = tg_api_tok(&token, "getFile", json!({"file_id": fid})).await?;
+            let path = f["file_path"].as_str().unwrap_or("").to_string();
+            let mut r = Fetch::Request(Request::new(&format!("https://api.telegram.org/file/bot{token}/{path}"), Method::Get)?).send().await?;
+            if r.status_code() != 200 {
+                return err404("rasm yo'q");
             }
-            let length = CHUNK.min(total - offset);
-            let Some(obj) = bk.get(&key).range(Range::OffsetWithLength { offset, length }).execute().await? else { return err404("yo'q") };
-            let Some(body) = obj.body() else { return err404("tana") };
-            let resp = Response::from_body(body.response_body()?)?;
-            let h = Headers::new();
-            h.set("Content-Length", &length.to_string())?;
-            h.set("Content-Type", "application/octet-stream")?;
-            h.set("Cache-Control", "no-store")?;
-            Ok(resp.with_headers(h))
-        }
-        (Method::Post, "/api/bd/chunkdone") => {
-            let b: Value = req.json().await.unwrap_or(json!({}));
-            let id = b["id"].as_str().unwrap_or("").to_string();
-            let tg = b["tg_file_id"].as_str().unwrap_or("").to_string();
-            if !id_ok(&id) || tg.is_empty() || tg.len() > 300 {
-                return json_resp(&json!({"error": "so'rov"}), 400);
-            }
-            let n = jint(&b, "n");
-            if n < 0 || !tg.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
-                return json_resp(&json!({"error": "so'rov"}), 400);
-            }
-            let cur = sql(env, "SELECT chunk_ids FROM bd_files WHERE id=?", vec![TursoArg::text(&id)]).await?;
-            let Some(row) = first(&cur) else { return err404("fayl yo'q") };
-            let mut list: Vec<String> = split_ids(row["chunk_ids"].as_str().unwrap_or("")).into_iter().map(String::from).collect();
-            let n = n as usize;
-            if n > list.len() {
-                return json_resp(&json!({"error": "bo'laklar tartib bilan kelishi shart"}), 409);
-            }
-            if n == list.len() { list.push(tg) } else { list[n] = tg }
-            sql(env, "UPDATE bd_files SET chunk_ids=?, lease=? WHERE id=? AND state='storing'",
-                vec![TursoArg::text(&list.join(",")), TursoArg::int(now_ms() + LEASE_MS), TursoArg::text(&id)]).await?;
-            ok(json!({"ok": true}))
-        }
-        (Method::Post, "/api/bd/done") => {
-            let b: Value = req.json().await.unwrap_or(json!({}));
-            let id = b["id"].as_str().unwrap_or("").to_string();
-            if !id_ok(&id) {
-                return json_resp(&json!({"error": "so'rov"}), 400);
-            }
-            let r = sql(env, "SELECT chunks,chunk_ids FROM bd_files WHERE id=?", vec![TursoArg::text(&id)]).await?;
-            let row = first(&r);
-            let want = row.as_ref().and_then(|x| x["chunks"].as_i64()).unwrap_or(-1);
-            let have = row.as_ref().map(|x| split_ids(x["chunk_ids"].as_str().unwrap_or("")).len() as i64).unwrap_or(0);
-            if want <= 0 || have != want {
-                return json_resp(&json!({"error": format!("bo'laklar yetarli emas ({have}/{want})")}), 409);
-            }
-            sql(env, "UPDATE bd_files SET state='ready' WHERE id=? AND state='storing'", vec![TursoArg::text(&id)]).await?;
-            // Asl fayl R2'dan o'chadi (bo'laklar Telegram'da).
-            if let Some(bk) = bucket(env) {
-                let _ = bk.delete(format!("{UP}{id}")).await;
-            }
-            ok(json!({"ok": true}))
-        }
-        (Method::Post, "/api/bd/fail") => {
-            let b: Value = req.json().await.unwrap_or(json!({}));
-            let id = b["id"].as_str().unwrap_or("").to_string();
-            if !id_ok(&id) {
-                return json_resp(&json!({"error": "so'rov"}), 400);
-            }
-            sql(env, "UPDATE bd_files SET state=CASE WHEN tries>=? THEN 'failed' ELSE 'uploaded' END, lease=0 WHERE id=? AND state='storing'",
-                vec![TursoArg::int(MAX_TRIES), TursoArg::text(&id)]).await?;
-            ok(json!({"ok": true}))
+            let bytes = r.bytes().await?;
+            let _ = cache.put(&key, thumb_resp(bytes.clone())?).await;
+            thumb_resp(bytes)
         }
         _ => err404("topilmadi"),
-    }
-}
-
-/// Yuklangan fayl tayyor bo'lgach (yoki cron) ikkinchi akkauntdagi `bdrive.yml` ni ishga tushiradi.
-pub(crate) async fn kick(env: &Env) -> String {
-    let repo = tg_secret(env, "GH_REPO");
-    if !repo.contains('/') {
-        return "GH_REPO yo'q".into();
-    }
-    match gh_workflow_busy(env, &repo, WORKFLOW).await {
-        Ok(true) => return String::new(),
-        Ok(false) => {}
-        Err(e) => return e,
-    }
-    match gh_api(env, Method::Post, &format!("/repos/{repo}/actions/workflows/{WORKFLOW}/dispatches"), Some(json!({"ref": "main"}))).await {
-        Ok((204, _)) => "bdrive.yml ishga tushirildi".into(),
-        Ok((code, v)) => format!("bdrive.yml ishga tushmadi (GitHub {code}): {}", v["message"].as_str().unwrap_or("")),
-        Err(e) => format!("bdrive.yml ishga tushmadi: {e}"),
     }
 }
 

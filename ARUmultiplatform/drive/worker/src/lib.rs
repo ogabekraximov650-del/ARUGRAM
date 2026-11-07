@@ -1,6 +1,6 @@
 //! ARUDRIVE worker (Rust → WASM): Bot API orqali fayl/video ombori. ARUMEDIATV workeridan ALOHIDA.
-//! Oqim: ilova -> R2 -> (ikkinchi akkauntdagi Actions) 18 MB bo'laklar -> Telegram kanali (Bot API);
-//! ko'rish: Telegram -> R2 -> Cloudflare keshi -> ilova (keshga tushmaguncha video ochilmaydi). Tafsilot: `bdrive.rs`, `cache.rs`.
+//! Oqim: ilova -> (worker) aniq 18 MiB bo'laklar -> Telegram kanali (Bot API); kichik rasm ham Telegram'da. R2 va Actions YO'Q.
+//! Ko'rish: Telegram -> Cloudflare keshi -> ilova (keshga tushmaguncha video ochilmaydi). Tafsilot: `bdrive.rs`, `cache.rs`.
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -18,7 +18,7 @@ pub(crate) fn set_cors(resp: &mut Response) {
     let h = resp.headers_mut();
     let _ = h.set("Access-Control-Allow-Origin", "*");
     let _ = h.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-    let _ = h.set("Access-Control-Allow-Headers", "Content-Type, Range, X-App-Sig, X-Encode-Token");
+    let _ = h.set("Access-Control-Allow-Headers", "Content-Type, Range, X-App-Sig");
     let _ = h.set("Access-Control-Expose-Headers", "Content-Range, Content-Length, Accept-Ranges");
 }
 
@@ -42,10 +42,6 @@ pub(crate) fn now_ms() -> i64 {
 
 pub(crate) fn hex_of(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
-}
-
-pub(crate) fn ct_eq(a: &str, b: &str) -> bool {
-    a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
 pub(crate) fn tg_secret(env: &Env, name: &str) -> String {
@@ -137,48 +133,7 @@ pub(crate) async fn tg_api_tok(token: &str, method: &str, body: Value) -> Result
     Ok(d["result"].clone())
 }
 
-pub(crate) async fn gh_api(env: &Env, method: Method, path: &str, body: Option<Value>) -> Result<(u16, Value)> {
-    let token = tg_secret(env, "GH_ACTIONS_TOKEN");
-    if token.is_empty() {
-        return Err(Error::RustError("GH_ACTIONS_TOKEN yo'q".into()));
-    }
-    let h = Headers::new();
-    h.set("Authorization", &format!("Bearer {token}"))?;
-    h.set("Accept", "application/vnd.github+json")?;
-    h.set("X-GitHub-Api-Version", "2022-11-28")?;
-    h.set("User-Agent", "arudrive-worker")?;
-    let mut init = RequestInit::new();
-    init.with_method(method).with_headers(h);
-    if let Some(b) = body {
-        init.with_body(Some(b.to_string().into()));
-    }
-    let req = Request::new_with_init(&format!("https://api.github.com{path}"), &init)?;
-    let mut r = Fetch::Request(req).send().await?;
-    let status = r.status_code();
-    let v: Value = r.json().await.unwrap_or(json!({}));
-    Ok((status, v))
-}
-
-/// Workflow'ning biror run'i hali tugamagan bo'lsa `Ok(true)`.
-pub(crate) async fn gh_workflow_busy(env: &Env, repo: &str, workflow: &str) -> std::result::Result<bool, String> {
-    match gh_api(env, Method::Get, &format!("/repos/{repo}/actions/workflows/{workflow}/runs?per_page=10"), None).await {
-        Ok((200, v)) => Ok(v["workflow_runs"].as_array().map(|a| a.iter().any(|r| r["status"].as_str().map(|s| s != "completed").unwrap_or(false))).unwrap_or(false)),
-        Ok((code, v)) => Err(format!("GitHub javobi {code}: {}", v["message"].as_str().unwrap_or(""))),
-        Err(e) => Err(format!("Actions ishga tushmadi: {e}")),
-    }
-}
-
 // ── Himoya ───────────────────────────────────────────────────
-
-/// Actions (`X-Encode-Token`) — ARUMEDIATV'dagi bilan bir xil sir.
-pub(crate) fn encode_token_ok(req: &Request, env: &Env) -> bool {
-    let want = tg_secret(env, "ENCODE_TOKEN");
-    if want.len() < 16 {
-        return false;
-    }
-    let got = req.headers().get("X-Encode-Token").ok().flatten().unwrap_or_default();
-    ct_eq(got.trim(), &want)
-}
 
 fn mac_hex(secret: &str, data: &str) -> Option<String> {
     let mut h = <Hmac<Sha256> as Mac>::new_from_slice(secret.as_bytes()).ok()?;
@@ -219,13 +174,8 @@ fn verify_play_token(secret: &str, token: &str, path: &str) -> bool {
     }
 }
 
-const ACTION_PATHS: &[&str] = &["/api/bd/claim", "/api/bd/read", "/api/bd/chunkdone", "/api/bd/done", "/api/bd/fail"];
-
 /// So'rovni o'tkazamizmi. Actions yo'llari o'z kaliti (`ENCODE_TOKEN`) bilan; qolgani — ilova imzosi (yoki pleyer tokeni).
 fn gate(req: &Request, env: &Env, path: &str) -> bool {
-    if ACTION_PATHS.contains(&path) {
-        return true; // `bdrive::route` ichida `encode_token_ok` tekshiriladi
-    }
     let secret = tg_secret(env, "APP_SIGN_SECRET");
     if secret.is_empty() {
         return false; // sir qo'yilmagan bo'lsa HAMMA narsa yopiq

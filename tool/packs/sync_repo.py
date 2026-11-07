@@ -68,9 +68,6 @@ FILES["tool/albot/run.py"] = HERE.parent / "albot" / "run.py"
 FILES[".github/workflows/upload.yml"] = HERE.parent / "upload" / "upload.workflow.yml"
 FILES["tool/upload/upload.py"] = HERE.parent / "upload" / "upload.py"
 FILES["tool/upload/r2client.py"] = HERE.parent / "upload" / "r2client.py"
-# ARUDRIVE: R2 -> Telegram bo'laklari (Bot API) — ALOHIDA workflow `bdrive.yml`.
-FILES[".github/workflows/bdrive.yml"] = HERE.parent / "bdrive" / "bdrive.workflow.yml"
-FILES["tool/bdrive/chunk.py"] = HERE.parent / "bdrive" / "chunk.py"
 
 
 # Emoji shrifti (kanalda, `emojifont.yml`) — shrift fayli ham o'sha repoga ko'chadi.
