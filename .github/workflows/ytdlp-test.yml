@@ -76,4 +76,4 @@ jobs:
 
       - name: Xulosa
         if: always()
-        run: echo "WARP o'rnatish natijasi: ${{ steps.warp.outcome }}"
+        run: echo "WARP o'rnatish natijasi - ${{ steps.warp.outcome }}"
