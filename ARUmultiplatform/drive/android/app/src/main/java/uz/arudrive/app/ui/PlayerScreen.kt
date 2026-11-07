@@ -75,17 +75,42 @@ fun PlayerScreen(file: DriveFile, onBack: () -> Unit) {
         onDispose { player.release(); Busy.count.decrementAndGet() }
     }
 
+    var recoveries by remember(file.id) { mutableIntStateOf(0) }
     LaunchedEffect(file.id, attempt) {
         cacheReady = false
         cacheFailed = false
         player.error = null
         waited = 0
-        if (Api.warm(file.id, 0) { note = it }) {
+        if (Warm.fresh(ctx, file.id)) {
+            // Belgi yangi: pleyer DARHOL ochiladi (isitish so'rovi kutilmaydi). Kesh o'chgan bo'lsa pleyer 503 oladi va
+            // quyidagi tiklash oynani majburan qayta isitadi (ARUMEDIATV `_handleFatalError` kabi).
             Warm.markWarm(file.id, 0)
+            player.open(Api.playUrl(file.id), 0, true)
+            cacheReady = true
+        } else if (Api.warm(file.id, 0, { note = it })) {
+            Warm.remember(ctx, file.id)
             player.open(Api.playUrl(file.id), 0, true)
             cacheReady = true
         } else {
             cacheFailed = true
+        }
+    }
+    // 503 (kesh oynasi yo'q): belgi o'chiriladi, oyna MAJBURAN isitiladi va ijro shu joydan davom etadi (ko'pi bilan 2 marta).
+    LaunchedEffect(player.error) {
+        if (player.error != null && player.httpCode == 503 && recoveries < 2) {
+            recoveries++
+            val pos = player.positionMs
+            Warm.forget(ctx, file.id)
+            cacheReady = false
+            waited = 0
+            note = "Kesh qayta isitilmoqda…"
+            if (Api.warm(file.id, 0, { note = it }, forceFirst = true)) {
+                Warm.remember(ctx, file.id)
+                player.open(Api.playUrl(file.id), pos, true)
+                cacheReady = true
+            } else {
+                cacheFailed = true
+            }
         }
     }
     LaunchedEffect(player) { while (true) { delay(250); player.tick() } }

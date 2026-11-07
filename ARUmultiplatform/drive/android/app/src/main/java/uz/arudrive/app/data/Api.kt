@@ -143,8 +143,8 @@ object Api {
     class WarmResult(val ok: Boolean, val text: String)
 
     /** Bitta isitish so'rovi: natija va tashxis matni (HTTP kodi, worker holati, vaqt, Cloudflare markazi). */
-    fun warmDetailed(id: String, window: Long): WarmResult {
-        val req = Request.Builder().url(url("/api/warm/bd~$id?w=$window")).build()
+    fun warmDetailed(id: String, window: Long, force: Boolean = false): WarmResult {
+        val req = Request.Builder().url(url("/api/warm/bd~$id?w=$window" + if (force) "&force=1" else "")).build()
         val t0 = System.currentTimeMillis()
         return try {
             client.newBuilder().readTimeout(15, TimeUnit.MINUTES).callTimeout(0, TimeUnit.SECONDS).build().newCall(req).execute().use { r ->
@@ -168,10 +168,11 @@ object Api {
      */
     fun warmBlocking(id: String, window: Long): Boolean = warmDetailed(id, window).ok
 
-    suspend fun warm(id: String, window: Long = 0, note: (String) -> Unit = {}): Boolean = withContext(Dispatchers.IO) {
+    /** ARUMEDIATV kabi: birinchi urinish oddiy, muvaffaqiyatsiz bo'lsa MAJBURAN (`force=1`) qayta isitiladi. */
+    suspend fun warm(id: String, window: Long = 0, note: (String) -> Unit = {}, forceFirst: Boolean = false): Boolean = withContext(Dispatchers.IO) {
         repeat(3) { n ->
             note("Worker'ga so'rov (${n + 1}/3)…")
-            val r = warmDetailed(id, window)
+            val r = warmDetailed(id, window, force = forceFirst || n > 0)
             note(r.text)
             if (r.ok) return@withContext true
             kotlinx.coroutines.delay(1500)

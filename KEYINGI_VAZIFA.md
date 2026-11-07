@@ -6941,3 +6941,4 @@ Foydalanuvchi: model "sudo yo'q, o'rnatib bo'lmaydi" deb to'xtab qoldi ("Modelni
 - Ilova doimiy xotirasi: ro'yxat `filesDir/list.json` (`data/Store.kt`), kichik rasmlar Coil disk keshi `filesDir/thumbs` (200 MB) — tarmoqsiz ham ko'rinadi.
 - Diagnostika: `X-Encode-Token` sarlavhasi (ENCODE_TOKEN) worker'da ilova imzosisiz hamma yo'lni ochadi.
 - Isitish so'rovi ochiq ushlab turiladi (ARUMEDIATV `rust/src/video_cache.rs` "OYNANI KESHGA ISITISH" kabi): `Api.warmBlocking` o'qish chegarasi 15 daqiqa; Cloudflare `waitUntil` faqat 30 soniya beradi, mijoz ulanib turganda chegara yo'q. Pleyer ochiq paytda `Busy` fon so'rovlarini to'xtatadi (ARUMEDIATV `gate.busy`).
+- Pleyer tiklanishi (ARUMEDIATV `video_cache.rs` kabi): isitish belgisi doimiy xotirada (`Warm.fresh`, 7 kun) — yangi bo'lsa pleyer darhol ochiladi; muvaffaqiyatsiz isitishdan keyin `force=1` bilan qayta uriniladi; pleyer 503 olsa (kesh o'chgan) oyna majburan qayta isitiladi va ijro shu joydan davom etadi.

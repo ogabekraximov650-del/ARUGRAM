@@ -49,6 +49,9 @@ class AruPlayer(context: Context, mediaSourceFactory: androidx.media3.exoplayer.
     var speed by mutableFloatStateOf(1f)
         private set
 
+    /** Oxirgi xatodagi HTTP kodi (0 — HTTP xatosi emas). 503 = kesh oynasi isitilmagan/o'chgan. */
+    var httpCode by mutableStateOf(0)
+
     /** Xato matni (`null` — yo'q). */
     var error by mutableStateOf<String?>(null)
 
@@ -81,6 +84,7 @@ class AruPlayer(context: Context, mediaSourceFactory: androidx.media3.exoplayer.
             val where = when {
                 else -> "worker"
             }
+            httpCode = http ?: 0
             error = "Video ochilmadi [$where] ${e.errorCodeName}" +
                 (http?.let { " HTTP $it" } ?: "") +
                 (root.message?.takeIf { it.isNotBlank() }?.let { " — ${it.take(120)}" } ?: "")
@@ -97,6 +101,7 @@ class AruPlayer(context: Context, mediaSourceFactory: androidx.media3.exoplayer.
     fun open(uri: String, startMs: Long, play: Boolean) {
         lastUri = uri
         error = null
+        httpCode = 0
         ended = false
         ready = false
         positionMs = startMs
