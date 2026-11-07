@@ -1,6 +1,13 @@
 package uz.arutube.app
 
 import android.app.Activity
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.ThumbUp
+import androidx.compose.foundation.layout.size
 import androidx.core.view.WindowCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
@@ -146,6 +153,18 @@ fun EmbedPlayer(embed: String, mode: PlayerMode, modifier: Modifier = Modifier, 
     }
 }
 
+/** YouTube'dagi doira shaklidagi harakat tugmasi: belgi + yozuv. */
+@Composable
+private fun ActionPill(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, active: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier.clip(RoundedCornerShape(20.dp)).background(if (active) Color(0xFF3F3F3F) else TubeChip).clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        androidx.compose.material3.Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+        Text(label, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(start = 8.dp))
+    }
+}
+
 @Composable
 private fun ActionChip(label: String, onClick: () -> Unit) {
     Text(
@@ -239,9 +258,20 @@ fun WatchScreen(video: Video, holder: PlayerHolder, onMinimize: () -> Unit, onOp
                         modifier = Modifier.padding(top = 4.dp),
                     )
                     if (note.isNotEmpty()) Text(note, fontSize = 12.sp, color = Color(0xFFFFB74D), modifier = Modifier.padding(top = 6.dp))
+                    // Asosiy harakatlar (YouTube'dagidek): yoqdi, saqlash, ulashish, yuklab olish.
                     Row(Modifier.padding(top = 12.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        val liked = LocalStore.isLiked(video.code)
+                        ActionPill(Icons.Filled.ThumbUp, if (liked) "Yoqdi ✓" else "Yoqdi", liked) { LocalStore.toggleLike(video.code) }
+                        val saved = LocalStore.isLater(video.code)
+                        ActionPill(if (saved) Icons.Filled.Check else Icons.Filled.Add, if (saved) "Saqlandi" else "Saqlash", saved) { LocalStore.toggleLater(video) }
+                        ActionPill(Icons.Filled.Share, "Ulashish", false) { shareVideo(ctx, video) }
+                        ActionPill(Icons.Filled.KeyboardArrowDown, "Yuklab olish", false) {
+                            ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(video.downloadUrl)))
+                        }
+                    }
+                    // Qo'shimcha sozlamalar.
+                    Row(Modifier.padding(top = 8.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         ActionChip("⌄ Kichraytirish", onMinimize)
-                        ActionChip(if (LocalStore.isLater(video.code)) "✓ Keyin ko'rish" else "+ Keyin ko'rish") { LocalStore.toggleLater(video) }
                         ActionChip(mode.label) {
                             val all = PlayerMode.values()
                             mode = all[(mode.ordinal + 1) % all.size]
@@ -250,13 +280,6 @@ fun WatchScreen(video: Video, holder: PlayerHolder, onMinimize: () -> Unit, onOp
                         ActionChip(if (copied) "✓ Nusxalandi" else "Havolani nusxalash") {
                             clip.setText(AnnotatedString(video.embed))
                             copied = true
-                        }
-                        ActionChip("Ulashish") {
-                            val send = Intent(Intent.ACTION_SEND).apply {
-                                type = "text/plain"
-                                putExtra(Intent.EXTRA_TEXT, video.embed)
-                            }
-                            ctx.startActivity(Intent.createChooser(send, null))
                         }
                         ActionChip("Brauzerda ochish") { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(video.embed))) }
                     }

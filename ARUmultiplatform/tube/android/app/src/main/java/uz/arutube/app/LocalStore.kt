@@ -28,6 +28,8 @@ object LocalStore {
         private set
     var queries by mutableStateOf<List<String>>(emptyList())
         private set
+    var liked by mutableStateOf<List<String>>(emptyList())
+        private set
 
     fun init(ctx: Context) {
         if (sp != null) return
@@ -35,6 +37,7 @@ object LocalStore {
         history = read("history", ListSerializer(Saved.serializer()))
         later = read("later", ListSerializer(Video.serializer()))
         queries = read("queries", ListSerializer(String.serializer()))
+        liked = read("liked", ListSerializer(String.serializer()))
     }
 
     private fun <T> read(key: String, ser: kotlinx.serialization.KSerializer<List<T>>): List<T> =
@@ -76,6 +79,23 @@ object LocalStore {
         if (t.isEmpty()) return
         queries = (listOf(t) + queries.filter { !it.equals(t, ignoreCase = true) }).take(12)
         write("queries", ListSerializer(String.serializer()), queries)
+    }
+
+    fun isLiked(code: String): Boolean = code in liked
+
+    /** Qurilmadagi "yoqdi" belgisi (server yo'q — faqat shu telefonda). `force` berilsa shu holatga o'tkaziladi. */
+    fun toggleLike(code: String, force: Boolean? = null) {
+        if (force == null) {
+            liked = if (isLiked(code)) liked - code else listOf(code) + liked
+        } else if (force != isLiked(code)) {
+            liked = if (force) listOf(code) + liked else liked - code
+        }
+        write("liked", ListSerializer(String.serializer()), liked)
+    }
+
+    fun removeFromHistory(code: String) {
+        history = history.filter { it.video.code != code }
+        write("history", ListSerializer(Saved.serializer()), history)
     }
 
     fun clearQueries() {

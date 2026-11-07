@@ -15,6 +15,11 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -84,11 +89,35 @@ private fun ShortPage(v: Video, next: Video?, active: Boolean) {
             failed -> EmbedPlayer(v.embed, PlayerMode.IFRAME, Modifier.fillMaxSize())
             else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = TubeRed) }
         }
+        // O'ng tomondagi harakatlar (Shorts'dagidek): yoqdi, saqlash, ulashish, ko'proq.
+        val ctx2 = LocalContext.current
+        val quick = LocalQuickActions.current
+        Column(Modifier.align(Alignment.CenterEnd).padding(end = 8.dp, bottom = 80.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            val liked = LocalStore.isLiked(v.code)
+            SideButton(Icons.Filled.ThumbUp, if (liked) "Yoqdi ✓" else "Yoqdi", liked) { LocalStore.toggleLike(v.code) }
+            val saved = LocalStore.isLater(v.code)
+            SideButton(if (saved) Icons.Filled.Check else Icons.Filled.Add, if (saved) "Saqlandi" else "Saqlash", saved) { LocalStore.toggleLater(v) }
+            SideButton(Icons.Filled.Share, "Ulashish", false) { shareVideo(ctx2, v) }
+            SideButton(Icons.Filled.MoreVert, "Yana", false) { quick(v) }
+        }
         Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xAA000000))))) {
             Column(Modifier.padding(16.dp)) {
                 Text(v.title.ifBlank { v.code }, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text("${Format.count(v.views)} ko'rish · ARUTUBE", color = Color(0xFFDDDDDD), fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
             }
         }
+    }
+}
+
+@Composable
+private fun SideButton(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, active: Boolean, onClick: () -> Unit) {
+    Column(Modifier.padding(vertical = 10.dp).clickable(onClick = onClick), horizontalAlignment = Alignment.CenterHorizontally) {
+        Icon(
+            icon,
+            contentDescription = label,
+            tint = if (active) TubeRed else Color.White,
+            modifier = Modifier.size(46.dp).clip(CircleShape).background(Color(0x66000000)).padding(11.dp),
+        )
+        Text(label, color = Color.White, fontSize = 11.sp, modifier = Modifier.padding(top = 3.dp))
     }
 }

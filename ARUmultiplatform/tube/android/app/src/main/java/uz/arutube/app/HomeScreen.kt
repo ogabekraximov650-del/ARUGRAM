@@ -8,6 +8,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -30,6 +31,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -74,7 +76,8 @@ fun Avatar(seed: String, size: Int = 36) {
 /** YouTube'dagidek karta: to'liq kenglikdagi 16:9 muqova, davomiylik belgisi, kanal belgisi, nom, "ko'rish · vaqt". */
 @Composable
 fun VideoCard(v: Video, progress: Float = 0f, onClick: () -> Unit) {
-    Column(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(bottom = 20.dp)) {
+    val quick = LocalQuickActions.current
+    Column(Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = { quick(v) }).padding(bottom = 20.dp)) {
         Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(Color(0xFF222222))) {
             if (v.thumb.isNotBlank()) {
                 AsyncImage(
@@ -103,7 +106,7 @@ fun VideoCard(v: Video, progress: Float = 0f, onClick: () -> Unit) {
         Row(Modifier.padding(start = 12.dp, end = 12.dp, top = 12.dp), verticalAlignment = Alignment.Top) {
             Avatar("ARUTUBE")
             Spacer(Modifier.width(12.dp))
-            Column {
+            Column(Modifier.weight(1f)) {
                 Text(v.title.ifBlank { v.code }, fontSize = 15.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 val ago = Format.ago(v.uploaded)
                 Text(
@@ -113,6 +116,12 @@ fun VideoCard(v: Video, progress: Float = 0f, onClick: () -> Unit) {
                     modifier = Modifier.padding(top = 2.dp),
                 )
             }
+            Icon(
+                Icons.Filled.MoreVert,
+                contentDescription = "Amallar",
+                tint = TubeGray,
+                modifier = Modifier.size(36.dp).clip(CircleShape).clickable { quick(v) }.padding(6.dp),
+            )
         }
     }
 }
@@ -134,7 +143,8 @@ fun ContinueCard(sv: Saved, onClick: () -> Unit) {
 /** Shorts kartasi: vertikal 9:16, pastda nom (YouTube Shorts javonidagidek). */
 @Composable
 fun ShortCard(v: Video, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    Box(modifier.aspectRatio(9f / 16f).clip(RoundedCornerShape(12.dp)).background(Color(0xFF222222)).clickable(onClick = onClick)) {
+    val quick = LocalQuickActions.current
+    Box(modifier.aspectRatio(9f / 16f).clip(RoundedCornerShape(12.dp)).background(Color(0xFF222222)).combinedClickable(onClick = onClick, onLongClick = { quick(v) })) {
         if (v.thumb.isNotBlank()) {
             AsyncImage(model = v.thumb, contentDescription = v.title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         }
@@ -182,7 +192,7 @@ private enum class Chip(val label: String) {
 }
 
 @Composable
-fun HomeScreen(refreshKey: Int, onOpen: (Video) -> Unit, onOpenShort: (List<Video>, Int) -> Unit) {
+fun HomeScreen(refreshKey: Int, onOpen: (Video) -> Unit, onOpenShort: (List<Video>, Int) -> Unit, onSearch: () -> Unit) {
     val scope = rememberCoroutineScope()
     var videos by remember { mutableStateOf(listOf<Video>()) }
     var page by remember { mutableIntStateOf(1) }
@@ -260,7 +270,7 @@ fun HomeScreen(refreshKey: Int, onOpen: (Video) -> Unit, onOpenShort: (List<Vide
                     Icons.Filled.Search,
                     contentDescription = "Qidirish",
                     tint = Color.White,
-                    modifier = Modifier.size(40.dp).clip(CircleShape).clickable { searching = true }.padding(8.dp),
+                    modifier = Modifier.size(40.dp).clip(CircleShape).clickable { onSearch() }.padding(8.dp),
                 )
             }
         }

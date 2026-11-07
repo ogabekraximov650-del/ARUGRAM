@@ -14,7 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -24,6 +24,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -36,6 +37,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 sealed interface Screen {
     data object Home : Screen
@@ -81,6 +83,7 @@ fun TubeApp() {
     val scope = rememberCoroutineScope()
     val holder = remember { PlayerHolder(ctx.applicationContext, scope) }
     var screen by remember { mutableStateOf<Screen>(Screen.Home) }
+    var sheet by remember { mutableStateOf<Video?>(null) }
     // Yuklashdan qaytganda ro'yxat yangilansin.
     var refresh by remember { mutableIntStateOf(0) }
 
@@ -96,6 +99,20 @@ fun TubeApp() {
 
     val open: (Video) -> Unit = { screen = Screen.Watch(it) }
 
+    // Shorts tugmasi: barcha qisqa videolar yig'ilib, vertikal pleyer ochiladi.
+    val openShorts: () -> Unit = {
+        scope.launch {
+            Repo.ensureLoaded(2)
+            val list = Repo.all.filter { it.isShort }
+            if (list.isNotEmpty()) {
+                holder.close()
+                screen = Screen.Shorts(list, 0)
+            }
+        }
+    }
+
+    CompositionLocalProvider(LocalQuickActions provides { sheet = it }) {
+    sheet?.let { QuickActionsSheet(it) { sheet = null } }
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Box(Modifier.weight(1f)) {
             when (val s = screen) {
@@ -106,6 +123,7 @@ fun TubeApp() {
                         holder.close()
                         screen = Screen.Shorts(list, i)
                     },
+                    onSearch = { screen = Screen.Search },
                 )
                 is Screen.Search -> SearchScreen(onOpen = open)
                 is Screen.Library -> LibraryScreen(onOpen = open)
@@ -133,10 +151,10 @@ fun TubeApp() {
                     colors = colors,
                 )
                 NavigationBarItem(
-                    selected = screen is Screen.Search,
-                    onClick = { screen = Screen.Search },
-                    icon = { Icon(Icons.Filled.Search, contentDescription = null) },
-                    label = { Text("Qidirish") },
+                    selected = false,
+                    onClick = openShorts,
+                    icon = { Icon(Icons.Filled.PlayArrow, contentDescription = null) },
+                    label = { Text("Shorts") },
                     colors = colors,
                 )
                 NavigationBarItem(
@@ -155,5 +173,6 @@ fun TubeApp() {
                 )
             }
         }
+    }
     }
 }
