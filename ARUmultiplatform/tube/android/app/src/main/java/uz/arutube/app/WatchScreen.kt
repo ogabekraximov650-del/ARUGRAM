@@ -299,9 +299,9 @@ fun WatchScreen(video: Video, holder: PlayerHolder, onMinimize: () -> Unit, onOp
                         ActionChip(mode.label) {
                             val all = PlayerMode.values()
                             mode = all[(mode.ordinal + 1) % all.size]
-                            LocalStore.setPlayerMode(mode.name)
+                            LocalStore.savePlayerMode(mode.name)
                         }
-                        ActionChip(if (adBlock) "Reklama bloki: yoqilgan" else "Reklama bloki: o'chiq") { LocalStore.setAdBlock(!adBlock) }
+                        ActionChip(if (adBlock) "Reklama bloki: yoqilgan" else "Reklama bloki: o'chiq") { LocalStore.saveAdBlock(!adBlock) }
                         ActionChip(if (copied) "✓ Nusxalandi" else "Havolani nusxalash") {
                             clip.setText(AnnotatedString(video.embed))
                             copied = true

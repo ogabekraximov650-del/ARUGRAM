@@ -92,12 +92,12 @@ object LocalStore {
         write("queries", ListSerializer(String.serializer()), queries)
     }
 
-    fun setPlayerMode(m: String) {
+    fun savePlayerMode(m: String) {
         playerMode = m
         sp?.edit()?.putString("player_mode", m)?.apply()
     }
 
-    fun setAdBlock(on: Boolean) {
+    fun saveAdBlock(on: Boolean) {
         adBlock = on
         sp?.edit()?.putBoolean("ad_block", on)?.apply()
     }
