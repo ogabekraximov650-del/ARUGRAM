@@ -12,10 +12,12 @@ import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.serialization.Serializable
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 
 /** Pleyerga beriladigan to'g'ridan-to'g'ri video havolasi (IP va sarlavhalarga bog'liq — shu qurilmada ishlatiladi). */
+@Serializable
 data class Direct(val url: String, val userAgent: String, val referer: String)
 
 /**

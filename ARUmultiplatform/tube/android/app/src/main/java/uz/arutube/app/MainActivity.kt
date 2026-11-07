@@ -63,6 +63,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         TubeCore.load()
         LocalStore.init(applicationContext)
+        LinkCache.init(applicationContext)
         setContent {
             MaterialTheme(colorScheme = TubeColors) {
                 // Surface: matn rangi (contentColor) oq bo'lishi uchun; usiz Text qora chiqadi.
