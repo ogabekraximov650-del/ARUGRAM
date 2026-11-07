@@ -141,7 +141,7 @@ object Api {
         var last: Exception? = null
         repeat(8) { attempt ->
             try {
-                note("Yuborilmoqda (${attempt + 1}/8)…")
+                note(if (attempt == 0) "Yuborilmoqda…" else "Qayta urinish: ${attempt + 1}-marta (xato bo'lsa 8 martagacha)")
                 val u = url("/api/bd/part").toHttpUrl().newBuilder().addQueryParameter("id", id).addQueryParameter("uid", uploadId).addQueryParameter("n", n.toString()).build()
                 val etag = call(Request.Builder().url(u).put(body).build())["etag"]!!.jsonPrimitive.content
                 note("Qism qabul qilindi")
@@ -194,7 +194,7 @@ object Api {
         var last: Exception? = null
         repeat(8) { attempt ->
             try {
-                note("R2 ga yuborilmoqda (${attempt + 1}/8)…")
+                note(if (attempt == 0) "Fayl R2 ga bitta butun so'rov bilan yuborilmoqda…" else "Qayta urinish: ${attempt + 1}-marta (xato bo'lsa 8 martagacha)")
                 directClient.newCall(Request.Builder().url(url).put(body).build()).execute().use { r ->
                     if (!r.isSuccessful) throw java.io.IOException("R2 HTTP ${r.code} ${r.body?.string().orEmpty().take(120)}")
                     return@withContext r.header("ETag").orEmpty()
