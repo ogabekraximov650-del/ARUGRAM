@@ -58,6 +58,7 @@ object DirectLink {
 
                         override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
                             // `<video>` so'rovlari `Range` sarlavhasi bilan boradi; statik fayllar (css/js/rasm) hisobga olinmaydi.
+                            if (AdBlock.isAd(request.url)) return AdBlock.empty()
                             val u = request.url.toString()
                             if (request.requestHeaders.keys.any { it.equals("Range", true) } && !staticAsset.containsMatchIn(u) && request.url.host != host) {
                                 done(u)

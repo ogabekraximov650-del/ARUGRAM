@@ -2,6 +2,8 @@ package uz.arutube.app
 
 import android.app.Activity
 import androidx.core.view.WindowCompat
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.activity.compose.BackHandler
@@ -14,6 +16,7 @@ import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
@@ -87,11 +90,11 @@ enum class PlayerMode(val label: String) { NATIVE("Pleyer: reklamasiz"), IFRAME(
  * Boshqa saytga o'tishga urinish (reklama) bloklanadi.
  */
 @Composable
-fun EmbedPlayer(embed: String, mode: PlayerMode, modifier: Modifier = Modifier) {
+fun EmbedPlayer(embed: String, mode: PlayerMode, modifier: Modifier = Modifier, adBlock: Boolean = true) {
     val ctx = LocalContext.current
-    var loading by remember(embed, mode) { mutableStateOf(true) }
+    var loading by remember(embed, mode, adBlock) { mutableStateOf(true) }
     Box(modifier.background(Color.Black).aspectRatio(16f / 9f)) {
-        androidx.compose.runtime.key(embed, mode) {
+        androidx.compose.runtime.key(embed, mode, adBlock) {
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
                 factory = {
@@ -115,6 +118,12 @@ fun EmbedPlayer(embed: String, mode: PlayerMode, modifier: Modifier = Modifier) 
                             override fun onPageFinished(view: WebView, url: String) {
                                 loading = false
                             }
+
+                            override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
+                                if (adBlock && AdBlock.isAd(request.url)) AdBlock.empty() else null
+                        }
+                        if (adBlock && WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+                            WebViewCompat.addDocumentStartJavaScript(this, AdBlock.SCRIPT, setOf("*"))
                         }
                         if (mode == PlayerMode.IFRAME) {
                             val html = """<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -159,6 +168,7 @@ fun WatchScreen(video: Video, onBack: () -> Unit, onOpen: (Video) -> Unit) {
     var direct by remember(video.code) { mutableStateOf<Direct?>(null) }
     var note by remember(video.code) { mutableStateOf("") }
     var fs by remember { mutableStateOf(false) }
+    var adBlock by remember { mutableStateOf(true) }
 
     LaunchedEffect(video.code) {
         val r = Api.videos(1)
@@ -213,7 +223,7 @@ fun WatchScreen(video: Video, onBack: () -> Unit, onOpen: (Video) -> Unit) {
                 )
             }
         } else {
-            EmbedPlayer(video.embed, mode, Modifier.fillMaxWidth())
+            EmbedPlayer(video.embed, mode, Modifier.fillMaxWidth(), adBlock)
         }
         LazyColumn(Modifier.fillMaxWidth()) {
             item {
@@ -234,6 +244,7 @@ fun WatchScreen(video: Video, onBack: () -> Unit, onOpen: (Video) -> Unit) {
                             mode = all[(mode.ordinal + 1) % all.size]
                             if (mode == PlayerMode.NATIVE) direct = null
                         }
+                        ActionChip(if (adBlock) "Reklama bloki: yoqiq" else "Reklama bloki: o'chiq") { adBlock = !adBlock }
                         ActionChip(if (copied) "✓ Nusxalandi" else "Havolani nusxalash") {
                             clip.setText(AnnotatedString(video.embed))
                             copied = true

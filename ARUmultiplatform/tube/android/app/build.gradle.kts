@@ -84,6 +84,8 @@ dependencies {
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     // Muqova (thumbnail) rasmlari
     implementation("io.coil-kt:coil-compose:2.7.0")
+    // Reklama bloklovchi: sahifa va iframe yuklanishidan oldin skript qo'shish (DOCUMENT_START_SCRIPT).
+    implementation("androidx.webkit:webkit:1.12.1")
     // Reklamasiz pleyer: yashirin WebView topgan to'g'ridan-to'g'ri havolani o'z pleyerimizda (Media3) ijro etadi.
     implementation("androidx.media3:media3-exoplayer:1.5.1")
     implementation("androidx.media3:media3-exoplayer-hls:1.5.1")
