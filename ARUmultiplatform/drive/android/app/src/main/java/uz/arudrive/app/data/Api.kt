@@ -142,12 +142,16 @@ object Api {
 
     /**
      * `window` oynasini Telegramdan Cloudflare keshiga isitadi (worker `warm`). Qaytadi: true — kesh tayyor.
-     * Bloklaydi (bir necha soniya), shu sabab IO oqimida chaqiriladi.
+     * Bloklaydi, shu sabab IO oqimida chaqiriladi.
+     *
+     * ULANISH USHLAB TURILADI (ARUMEDIATV `video_cache.rs` dagi `warm_agent` kabi): worker isitishni shu so'rov ochiq turgan
+     * paytda bajaradi. Cloudflare fon vazifasiga (`waitUntil`) javobdan keyin atigi 30 soniya beradi, mijoz ulanib turganda esa
+     * davomiylikka chegara yo'q — shuning uchun o'qish chegarasi 15 daqiqa (katta oyna ~468 MiB 180 soniyada ko'chmasligi mumkin).
      */
     fun warmBlocking(id: String, window: Long): Boolean {
         val req = Request.Builder().url(url("/api/warm/bd~$id?w=$window")).build()
         return try {
-            client.newBuilder().readTimeout(180, TimeUnit.SECONDS).build().newCall(req).execute().use { r ->
+            client.newBuilder().readTimeout(15, TimeUnit.MINUTES).callTimeout(0, TimeUnit.SECONDS).build().newCall(req).execute().use { r ->
                 val st = runCatching { json.parseToJsonElement(r.body?.string().orEmpty()).jsonObject["status"]?.jsonPrimitive?.contentOrNull }.getOrNull().orEmpty()
                 r.isSuccessful && (st == "cached" || st == "warmed")
             }
