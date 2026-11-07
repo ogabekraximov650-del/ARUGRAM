@@ -10,3 +10,5 @@
 -keepclassmembers class uz.arutube.app.** { *** Companion; }
 -keepclasseswithmembers class uz.arutube.app.** { kotlinx.serialization.KSerializer serializer(...); }
 -dontwarn okhttp3.internal.platform.**
+-keep class androidx.media3.** { *; }
+-dontwarn androidx.media3.**

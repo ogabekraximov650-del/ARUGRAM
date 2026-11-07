@@ -84,6 +84,10 @@ dependencies {
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     // Muqova (thumbnail) rasmlari
     implementation("io.coil-kt:coil-compose:2.7.0")
+    // Reklamasiz pleyer: yashirin WebView topgan to'g'ridan-to'g'ri havolani o'z pleyerimizda (Media3) ijro etadi.
+    implementation("androidx.media3:media3-exoplayer:1.5.1")
+    implementation("androidx.media3:media3-exoplayer-hls:1.5.1")
+    implementation("androidx.media3:media3-ui:1.5.1")
     // JNA: Rust yadrosining C funksiyalarini (`libtube_core.so`) chaqiradi.
     implementation("net.java.dev.jna:jna:5.17.0@aar")
     implementation(libs.kotlinx.serialization.json)

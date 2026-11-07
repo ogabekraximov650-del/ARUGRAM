@@ -1,6 +1,10 @@
 package uz.arutube.app
 
 import android.app.Activity
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import androidx.activity.compose.BackHandler
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.graphics.Color as AColor
@@ -75,7 +79,7 @@ private class FsChrome(private val act: Activity) : WebChromeClient() {
 }
 
 /** Pleyer rejimi: IFRAME — `<iframe src=embed>` (so'ralgan usul); DIRECT — embed sahifasi WebView'ning o'zida. Biri ishlamasa ikkinchisiga o'tish mumkin. */
-enum class PlayerMode(val label: String) { IFRAME("Pleyer: iframe"), DIRECT("Pleyer: to'g'ridan") }
+enum class PlayerMode(val label: String) { NATIVE("Pleyer: reklamasiz"), IFRAME("Pleyer: iframe"), DIRECT("Pleyer: to'g'ridan") }
 
 /**
  * DoodStream pleyeri. IFRAME rejimida sahifa bazaviy manzili embed domeni (Referer/origin to'g'ri), uchinchi tomon cookie'lari yoqilgan
@@ -147,17 +151,70 @@ private fun ActionChip(label: String, onClick: () -> Unit) {
 @Composable
 fun WatchScreen(video: Video, onBack: () -> Unit, onOpen: (Video) -> Unit) {
     val ctx = LocalContext.current
+    val act = ctx as Activity
     val clip = LocalClipboardManager.current
     var others by remember { mutableStateOf(listOf<Video>()) }
     var copied by remember(video.code) { mutableStateOf(false) }
-    var mode by remember { mutableStateOf(PlayerMode.IFRAME) }
+    var mode by remember { mutableStateOf(PlayerMode.NATIVE) }
+    var direct by remember(video.code) { mutableStateOf<Direct?>(null) }
+    var note by remember(video.code) { mutableStateOf("") }
+    var fs by remember { mutableStateOf(false) }
+
     LaunchedEffect(video.code) {
         val r = Api.videos(1)
         if (r.error == null) others = r.videos.filter { it.code != video.code }
     }
+    // Reklamasiz rejim: yashirin WebView to'g'ridan-to'g'ri havolani topadi; topilmasa iframe'ga o'tiladi.
+    LaunchedEffect(video.code, mode) {
+        if (mode == PlayerMode.NATIVE && direct == null) {
+            note = "Reklamasiz havola tayyorlanmoqda…"
+            val d = DirectLink.resolve(act, video.embed)
+            if (d != null) {
+                direct = d
+                note = ""
+            } else {
+                note = "Reklamasiz havola topilmadi (captcha yoki tarmoq) — iframe ochildi."
+                mode = PlayerMode.IFRAME
+            }
+        }
+    }
+    // To'liq ekran: gorizontal + tizim panellari yashirin.
+    LaunchedEffect(fs) {
+        val c = WindowCompat.getInsetsController(act.window, act.window.decorView)
+        if (fs) {
+            act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            c.hide(WindowInsetsCompat.Type.systemBars())
+            c.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        } else {
+            act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            c.show(WindowInsetsCompat.Type.systemBars())
+        }
+    }
+    BackHandler(enabled = fs) { fs = false }
+
+    val d = direct
+    if (fs && mode == PlayerMode.NATIVE && d != null) {
+        NativePlayer(d, true, { fs = it }, { note = "Pleyer xatosi: $it"; mode = PlayerMode.IFRAME; direct = null; fs = false }, Modifier.fillMaxSize().background(Color.Black))
+        return
+    }
+
     // Pleyer tepada qotib turadi, pastda ma'lumot va keyingi videolar aylanadi.
     Column(Modifier.statusBarsPadding()) {
-        EmbedPlayer(video.embed, mode, Modifier.fillMaxWidth())
+        if (mode == PlayerMode.NATIVE) {
+            if (d == null) {
+                Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(Color.Black), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = TubeRed)
+                }
+            } else {
+                NativePlayer(
+                    d, false, { fs = it },
+                    { err -> note = "Pleyer xatosi ($err) — iframe ochildi."; mode = PlayerMode.IFRAME; direct = null },
+                    Modifier.fillMaxWidth().aspectRatio(16f / 9f),
+                )
+            }
+        } else {
+            EmbedPlayer(video.embed, mode, Modifier.fillMaxWidth())
+        }
         LazyColumn(Modifier.fillMaxWidth()) {
             item {
                 Column(Modifier.padding(12.dp)) {
@@ -169,9 +226,14 @@ fun WatchScreen(video: Video, onBack: () -> Unit, onOpen: (Video) -> Unit) {
                         color = TubeGray,
                         modifier = Modifier.padding(top = 4.dp),
                     )
+                    if (note.isNotEmpty()) Text(note, fontSize = 12.sp, color = Color(0xFFFFB74D), modifier = Modifier.padding(top = 6.dp))
                     Row(Modifier.padding(top = 12.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         ActionChip("← Orqaga", onBack)
-                        ActionChip(mode.label) { mode = if (mode == PlayerMode.IFRAME) PlayerMode.DIRECT else PlayerMode.IFRAME }
+                        ActionChip(mode.label) {
+                            val all = PlayerMode.values()
+                            mode = all[(mode.ordinal + 1) % all.size]
+                            if (mode == PlayerMode.NATIVE) direct = null
+                        }
                         ActionChip(if (copied) "✓ Nusxalandi" else "Havolani nusxalash") {
                             clip.setText(AnnotatedString(video.embed))
                             copied = true
