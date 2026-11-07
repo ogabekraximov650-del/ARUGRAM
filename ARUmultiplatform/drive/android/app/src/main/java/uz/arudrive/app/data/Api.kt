@@ -140,28 +140,42 @@ object Api {
         call(Request.Builder().url(url("/api/bd/finish")).post(body).build())
     }
 
+    class WarmResult(val ok: Boolean, val text: String)
+
+    /** Bitta isitish so'rovi: natija va tashxis matni (HTTP kodi, worker holati, vaqt, Cloudflare markazi). */
+    fun warmDetailed(id: String, window: Long): WarmResult {
+        val req = Request.Builder().url(url("/api/warm/bd~$id?w=$window")).build()
+        val t0 = System.currentTimeMillis()
+        return try {
+            client.newBuilder().readTimeout(15, TimeUnit.MINUTES).callTimeout(0, TimeUnit.SECONDS).build().newCall(req).execute().use { r ->
+                val body = r.body?.string().orEmpty()
+                val st = runCatching { json.parseToJsonElement(body).jsonObject["status"]?.jsonPrimitive?.contentOrNull }.getOrNull().orEmpty()
+                val ray = r.header("cf-ray")?.substringAfterLast('-').orEmpty()
+                val ms = System.currentTimeMillis() - t0
+                WarmResult(r.isSuccessful && (st == "cached" || st == "warmed"), "HTTP ${r.code} ${st.ifEmpty { body.take(60) }} · ${ms / 1000.0}s · $ray")
+            }
+        } catch (e: Exception) {
+            WarmResult(false, "Xato: ${e.javaClass.simpleName} ${e.message.orEmpty().take(80)} · ${(System.currentTimeMillis() - t0) / 1000.0}s")
+        }
+    }
+
     /**
      * `window` oynasini Telegramdan Cloudflare keshiga isitadi (worker `warm`). Qaytadi: true — kesh tayyor.
-     * Bloklaydi, shu sabab IO oqimida chaqiriladi.
      *
      * ULANISH USHLAB TURILADI (ARUMEDIATV `video_cache.rs` dagi `warm_agent` kabi): worker isitishni shu so'rov ochiq turgan
      * paytda bajaradi. Cloudflare fon vazifasiga (`waitUntil`) javobdan keyin atigi 30 soniya beradi, mijoz ulanib turganda esa
      * davomiylikka chegara yo'q — shuning uchun o'qish chegarasi 15 daqiqa (katta oyna ~468 MiB 180 soniyada ko'chmasligi mumkin).
      */
-    fun warmBlocking(id: String, window: Long): Boolean {
-        val req = Request.Builder().url(url("/api/warm/bd~$id?w=$window")).build()
-        return try {
-            client.newBuilder().readTimeout(15, TimeUnit.MINUTES).callTimeout(0, TimeUnit.SECONDS).build().newCall(req).execute().use { r ->
-                val st = runCatching { json.parseToJsonElement(r.body?.string().orEmpty()).jsonObject["status"]?.jsonPrimitive?.contentOrNull }.getOrNull().orEmpty()
-                r.isSuccessful && (st == "cached" || st == "warmed")
-            }
-        } catch (_: Exception) {
-            false
-        }
-    }
+    fun warmBlocking(id: String, window: Long): Boolean = warmDetailed(id, window).ok
 
-    suspend fun warm(id: String, window: Long = 0): Boolean = withContext(Dispatchers.IO) {
-        repeat(3) { if (warmBlocking(id, window)) return@withContext true else kotlinx.coroutines.delay(1500) }
+    suspend fun warm(id: String, window: Long = 0, note: (String) -> Unit = {}): Boolean = withContext(Dispatchers.IO) {
+        repeat(3) { n ->
+            note("Worker'ga so'rov (${n + 1}/3)…")
+            val r = warmDetailed(id, window)
+            note(r.text)
+            if (r.ok) return@withContext true
+            kotlinx.coroutines.delay(1500)
+        }
         false
     }
 

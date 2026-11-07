@@ -67,6 +67,8 @@ fun PlayerScreen(file: DriveFile, onBack: () -> Unit) {
     var cacheFailed by remember(file.id) { mutableStateOf(false) }
     var attempt by remember(file.id) { mutableIntStateOf(0) }
     var drag by remember { mutableStateOf<Float?>(null) }
+    var note by remember(file.id) { mutableStateOf("") }
+    var waited by remember(file.id) { mutableIntStateOf(0) }
 
     DisposableEffect(player) {
         Busy.count.incrementAndGet()
@@ -77,7 +79,8 @@ fun PlayerScreen(file: DriveFile, onBack: () -> Unit) {
         cacheReady = false
         cacheFailed = false
         player.error = null
-        if (Api.warm(file.id, 0)) {
+        waited = 0
+        if (Api.warm(file.id, 0) { note = it }) {
             Warm.markWarm(file.id, 0)
             player.open(Api.playUrl(file.id), 0, true)
             cacheReady = true
@@ -86,8 +89,10 @@ fun PlayerScreen(file: DriveFile, onBack: () -> Unit) {
         }
     }
     LaunchedEffect(player) { while (true) { delay(250); player.tick() } }
+    // Kutish vaqti (tashxis): worker javobi qancha vaqt kelmayotganini ko'rsatadi.
+    LaunchedEffect(file.id, attempt, cacheReady) { while (!cacheReady) { delay(1000); waited++ } }
 
-    val err = player.error ?: if (cacheFailed) "Kesh tayyorlanmadi" else null
+    val err = player.error ?: if (cacheFailed) "Kesh tayyorlanmadi: $note" else null
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         if (err != null) {
             Column(Modifier.align(Alignment.Center).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -110,7 +115,10 @@ fun PlayerScreen(file: DriveFile, onBack: () -> Unit) {
                         if (!cacheReady || !player.ready) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 CircularProgressIndicator(color = Color.White.copy(alpha = 0.54f), strokeWidth = 2.dp, modifier = Modifier.size(34.dp))
-                                if (!cacheReady) Text("Video keshga tayyorlanmoqda…", color = Color.White.copy(alpha = 0.54f), fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
+                                if (!cacheReady) {
+                                    Text("Video keshga tayyorlanmoqda… ${waited}s", color = Color.White.copy(alpha = 0.54f), fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
+                                    if (note.isNotEmpty()) Text(note, color = Color.White.copy(alpha = 0.38f), fontSize = 11.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 6.dp, start = 24.dp, end = 24.dp))
+                                }
                             }
                         } else {
                             val a by animateFloatAsState(if (player.playing) 0f else 1f, tween(180), label = "pp")
