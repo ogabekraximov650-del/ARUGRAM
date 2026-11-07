@@ -185,10 +185,10 @@ fun WatchScreen(video: Video, holder: PlayerHolder, onMinimize: () -> Unit, onOp
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     var others by remember { mutableStateOf(listOf<Video>()) }
     var copied by remember(video.code) { mutableStateOf(false) }
-    var mode by remember(video.code) { mutableStateOf(PlayerMode.NATIVE) }
+    var mode by remember(video.code) { mutableStateOf(runCatching { PlayerMode.valueOf(LocalStore.playerMode) }.getOrDefault(PlayerMode.IFRAME)) }
     var note by remember(video.code) { mutableStateOf("") }
     var fs by remember { mutableStateOf(false) }
-    var adBlock by remember { mutableStateOf(true) }
+    val adBlock = LocalStore.adBlock
     var more by remember(video.code) { mutableStateOf(false) }
 
     LaunchedEffect(video.code) {
@@ -197,7 +197,7 @@ fun WatchScreen(video: Video, holder: PlayerHolder, onMinimize: () -> Unit, onOp
             others = r.videos.filter { it.code != video.code }
             Repo.merge(r.videos)
             // Joriy video ochilgach, "keyingi videolar"ning birinchi ikkitasi uchun havola tayyorlanadi.
-            LinkCache.prefetch(scope, act, others, 2)
+            if (mode == PlayerMode.NATIVE) LinkCache.prefetch(scope, act, others, 2)
         }
     }
     // Reklamasiz rejim: pleyer holder'da (mini pleyer bilan umumiy); topilmasa iframe'ga o'tiladi.
@@ -299,8 +299,9 @@ fun WatchScreen(video: Video, holder: PlayerHolder, onMinimize: () -> Unit, onOp
                         ActionChip(mode.label) {
                             val all = PlayerMode.values()
                             mode = all[(mode.ordinal + 1) % all.size]
+                            LocalStore.setPlayerMode(mode.name)
                         }
-                        ActionChip(if (adBlock) "Reklama bloki: yoqilgan" else "Reklama bloki: o'chiq") { adBlock = !adBlock }
+                        ActionChip(if (adBlock) "Reklama bloki: yoqilgan" else "Reklama bloki: o'chiq") { LocalStore.setAdBlock(!adBlock) }
                         ActionChip(if (copied) "✓ Nusxalandi" else "Havolani nusxalash") {
                             clip.setText(AnnotatedString(video.embed))
                             copied = true

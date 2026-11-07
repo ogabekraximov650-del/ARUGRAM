@@ -30,6 +30,12 @@ object LocalStore {
         private set
     var liked by mutableStateOf<List<String>>(emptyList())
         private set
+
+    /** Standart pleyer: "IFRAME" (DoodStream pleyeri, reklama bilan), "NATIVE" (reklamasiz, o'z pleyerimiz), "DIRECT". */
+    var playerMode by mutableStateOf("IFRAME")
+        private set
+    var adBlock by mutableStateOf(false)
+        private set
     var disliked by mutableStateOf<List<String>>(emptyList())
         private set
 
@@ -40,6 +46,8 @@ object LocalStore {
         later = read("later", ListSerializer(Video.serializer()))
         queries = read("queries", ListSerializer(String.serializer()))
         liked = read("liked", ListSerializer(String.serializer()))
+        playerMode = sp?.getString("player_mode", "IFRAME") ?: "IFRAME"
+        adBlock = sp?.getBoolean("ad_block", false) ?: false
         disliked = read("disliked", ListSerializer(String.serializer()))
     }
 
@@ -82,6 +90,16 @@ object LocalStore {
         if (t.isEmpty()) return
         queries = (listOf(t) + queries.filter { !it.equals(t, ignoreCase = true) }).take(12)
         write("queries", ListSerializer(String.serializer()), queries)
+    }
+
+    fun setPlayerMode(m: String) {
+        playerMode = m
+        sp?.edit()?.putString("player_mode", m)?.apply()
+    }
+
+    fun setAdBlock(on: Boolean) {
+        adBlock = on
+        sp?.edit()?.putBoolean("ad_block", on)?.apply()
     }
 
     fun isLiked(code: String): Boolean = code in liked

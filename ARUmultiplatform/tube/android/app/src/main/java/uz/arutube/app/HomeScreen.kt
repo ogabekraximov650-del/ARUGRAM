@@ -226,7 +226,7 @@ fun HomeScreen(refreshKey: Int, onOpen: (Video) -> Unit, onOpenShort: (List<Vide
     // Reklamasiz havolalar oldindan tayyorlanadi: avval davom ettirilayotgan, keyin birinchi uzun videolar va Shorts.
     val act = LocalContext.current as Activity
     LaunchedEffect(videos.firstOrNull()?.code) {
-        if (videos.isNotEmpty()) {
+        if (videos.isNotEmpty() && LocalStore.playerMode == "NATIVE") {
             val cont = LocalStore.history.filter { it.inProgress }.map { it.video }
             LinkCache.prefetch(scope, act, cont + videos.filter { !it.isShort } + videos.filter { it.isShort }, 4)
         }
