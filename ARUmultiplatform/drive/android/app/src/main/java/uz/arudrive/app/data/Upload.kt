@@ -66,10 +66,6 @@ object Upload {
         val info = if (p.isVideo) videoInfo(ctx, p.uri) else VideoInfo(0, 0, 0, null)
         note("Yozuv ochilmoqda…")
         val init = Api.init(p.name, p.size, if (p.isVideo) "video" else "file", p.mime, info.w, info.h, info.durMs)
-        info.jpeg?.let {
-            note("Kichik rasm yuborilmoqda…")
-            runCatching { Api.thumb(init.id, it) }.onFailure { e -> note("Rasm yuborilmadi: ${e.message}") }
-        }
         // PARALLEL: bir vaqtda 4 tagacha qism R2 ga ketadi (har biri alohida ulanishda) — sekin/uzoq tarmoqda ancha tez.
         // Xotira: 4 ta 18 MiB bufer qayta ishlatiladi (havza), o'qish faqat bo'sh bufer chiqqanda davom etadi.
         val pool = kotlinx.coroutines.channels.Channel<ByteArray>(PARALLEL)
@@ -109,6 +105,11 @@ object Upload {
             jobs.forEach { it.await() }
         }
         if (sent != p.size) throw java.io.IOException("Fayl to'liq o'qilmadi ($sent / ${p.size})")
+        // Kichik rasm fayl TO'LIQ yuklangandan KEYIN qo'shiladi (butun fayl R2 da, saqlash boshlanishidan oldin).
+        info.jpeg?.let {
+            note("Kichik rasm yuborilmoqda…")
+            runCatching { Api.thumb(init.id, it) }.onFailure { e -> note("Rasm yuborilmadi: ${e.message}") }
+        }
         note("Yakunlanmoqda…")
         Api.finish(init.id, init.uploadId, parts.sortedBy { it.first })
         init.id

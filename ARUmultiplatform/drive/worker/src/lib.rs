@@ -247,7 +247,7 @@ fn gate(req: &Request, env: &Env, path: &str) -> bool {
 /// Har 10 daqiqada (cron): R2 dagi yuklangan fayllarni Telegram'ga bo'laklab saqlaydi (Actions kerak emas), so'ng tashlab ketilgan yuklashlarni tozalaydi.
 #[event(scheduled)]
 async fn scheduled(_e: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
-    let _ = bdrive::process(&env, 25_000).await;
+    bdrive::process_and_chain(&env).await;
     let _ = bdrive::cleanup(&env).await;
 }
 

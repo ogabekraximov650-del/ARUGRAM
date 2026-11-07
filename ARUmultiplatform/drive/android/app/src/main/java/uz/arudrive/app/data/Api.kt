@@ -109,12 +109,12 @@ object Api {
         }
     }
 
-    /** R2 ga `n`-qismni (1 dan) yuboradi; 3 marta urinadi; qaytadi: ETag. */
+    /** R2 ga `n`-qismni (1 dan) yuboradi; katta fayl (GB) soatlab yuklanadi, shu sabab 8 marta urinadi (kutish 15 s gacha); qaytadi: ETag. */
     suspend fun part(id: String, uploadId: String, n: Int, bytes: ByteArray, len: Int, onBytes: (Long) -> Unit, note: (String) -> Unit): String = withContext(Dispatchers.IO) {
         var last: Exception? = null
-        repeat(3) { attempt ->
+        repeat(8) { attempt ->
             try {
-                note("Yuborilmoqda (${attempt + 1}/3)…")
+                note("Yuborilmoqda (${attempt + 1}/8)…")
                 val u = url("/api/bd/part").toHttpUrl().newBuilder().addQueryParameter("id", id).addQueryParameter("uid", uploadId).addQueryParameter("n", n.toString()).build()
                 val etag = call(Request.Builder().url(u).put(ProgressBody(bytes, len, onBytes)).build())["etag"]!!.jsonPrimitive.content
                 note("Qism qabul qilindi")
@@ -122,7 +122,7 @@ object Api {
             } catch (e: Exception) {
                 last = e
                 note("Urinish ${attempt + 1} xato: ${e.message ?: e.javaClass.simpleName}")
-                kotlinx.coroutines.delay(2000L * (attempt + 1))
+                kotlinx.coroutines.delay(minOf(2000L * (attempt + 1), 15_000L))
             }
         }
         throw last ?: java.io.IOException("qism yuborilmadi")

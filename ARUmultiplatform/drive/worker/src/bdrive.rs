@@ -23,7 +23,10 @@ use worker::{Bucket, FixedLengthStream, Range, UploadedPart};
 pub(crate) const CHUNK: u64 = 18 * 1024 * 1024;
 const UP: &str = "bd/up/";
 /// Fayl hajmining yuqori chegarasi (R2 multipart: 10 000 bo'lak x 18 MiB ≈ 175 GB; amalda 4 GB).
-const MAX_SIZE: i64 = 4 * 1024 * 1024 * 1024;
+/// Eng katta fayl: 50 GiB (R2 ko'p qismli yuklash 10 000 qismgacha: 18 MiB × 10 000 ≈ 175 GiB, zaxira bilan).
+const MAX_SIZE: i64 = 50 * 1024 * 1024 * 1024;
+/// Worker o'z manzili (zanjirli davom ettirish uchun).
+const ORIGIN: &str = "https://arudrive.uzcom.workers.dev";
 const LEASE_MS: i64 = 30 * 60 * 1000;
 /// Worker o'zi saqlayotganda ijara qisqa: har bo'lakdan keyin yangilanadi, worker o'lsa 2 daqiqada qayta navbatga qaytadi.
 const WORKER_LEASE_MS: i64 = 2 * 60 * 1000;
@@ -147,8 +150,33 @@ fn thumb_resp(bytes: Vec<u8>) -> Result<Response> {
 /// yuboradi va `file_id` ni `chunk_ids` ga qo'shadi. Vaqt byudjeti (`budget_ms`) tugasa ijara qaytariladi va davomini keyingi
 /// chaqiruv (cron yoki yangi yuklash) oladi — tayyor bo'laklar QAYTA yuborilmaydi. Hammasi saqlansa fayl `ready`, R2 nusxasi o'chadi.
 pub(crate) async fn process(env: &Env, budget_ms: i64) -> Result<String> {
+    Ok(process_ex(env, budget_ms).await?.0)
+}
+
+/// Katta fayl (GB'lab) bitta chaqiruvda tugamaydi, shu sabab `process_ex` ish qolgan bo'lsa shuni (`more`) bildiradi va
+/// worker O'ZINI qayta chaqiradi (zanjir): har bo'g'in ~20 soniya ishlaydi. Zanjir faqat PROGRESS bo'lganda davom etadi
+/// (xato bo'lsa to'xtaydi — cron keyinroq oladi), shu sabab cheksiz aylanib qolmaydi.
+pub(crate) async fn process_and_chain(env: &Env) {
+    if let Ok((_, progressed, more)) = process_ex(env, 21_000).await {
+        if more && progressed {
+            let h = Headers::new();
+            let _ = h.set("X-Encode-Token", &tg_secret(env, "ENCODE_TOKEN"));
+            if let Ok(req) = Request::new_with_init(
+                &format!("{ORIGIN}/api/bd/process?bg=1"),
+                RequestInit::new().with_method(Method::Post).with_headers(h),
+            ) {
+                let _ = Fetch::Request(req).send().await;
+            }
+        }
+    }
+}
+
+/// (jurnal, progress bo'ldimi, ish qoldimi)
+pub(crate) async fn process_ex(env: &Env, budget_ms: i64) -> Result<(String, bool, bool)> {
     ensure(env).await?;
-    let Some(bk) = bucket(env) else { return Ok("r2 yo'q".into()) };
+    let Some(bk) = bucket(env) else { return Ok(("r2 yo'q".into(), false, false)) };
+    let mut progressed = false;
+    let mut drained = false;
     let t0 = now_ms();
     let mut out = String::new();
     while now_ms() - t0 < budget_ms - 6_000 {
@@ -158,7 +186,10 @@ pub(crate) async fn process(env: &Env, budget_ms: i64) -> Result<String> {
             ("UPDATE bd_files SET state='failed' WHERE state='storing' AND lease<? AND tries>=?", vec![TursoArg::int(now), TursoArg::int(MAX_TRIES)]),
             ("SELECT id,name,size,chunks,chunk_ids FROM bd_files WHERE state='uploaded' ORDER BY created LIMIT 1", vec![]),
         ]).await?;
-        let Some(f) = first(&r[2]) else { break };
+        let Some(f) = first(&r[2]) else {
+            drained = true;
+            break;
+        };
         let id = f["id"].as_str().unwrap_or("").to_string();
         let got = sql(env, "UPDATE bd_files SET state='storing', lease=?, tries=tries+1 WHERE id=? AND state='uploaded' RETURNING id",
             vec![TursoArg::int(now + WORKER_LEASE_MS), TursoArg::text(&id)]).await?;
@@ -195,6 +226,7 @@ pub(crate) async fn process(env: &Env, budget_ms: i64) -> Result<String> {
             match res {
                 Ok(fid) => {
                     list.push(fid);
+                    progressed = true;
                     // Bo'lak saqlandi: urinishlar hisobi nollanadi (katta fayl bir necha chaqiruvda tugashi mumkin), ijara yangilanadi.
                     sql(env, "UPDATE bd_files SET chunk_ids=?, lease=?, tries=0 WHERE id=? AND state='storing'",
                         vec![TursoArg::text(&list.join(",")), TursoArg::int(now_ms() + WORKER_LEASE_MS), TursoArg::text(&id)]).await?;
@@ -209,6 +241,7 @@ pub(crate) async fn process(env: &Env, budget_ms: i64) -> Result<String> {
             let _ = sql(env, "UPDATE bd_files SET state=CASE WHEN tries>=? THEN 'failed' ELSE 'uploaded' END, lease=0 WHERE id=? AND state='storing'",
                 vec![TursoArg::int(MAX_TRIES), TursoArg::text(&id)]).await;
             out.push_str(&format!("{id}: xato: {e}\n"));
+            drained = true; // xatoda zanjir to'xtaydi (cron keyin oladi)
             break;
         }
         if stopped {
@@ -220,7 +253,7 @@ pub(crate) async fn process(env: &Env, budget_ms: i64) -> Result<String> {
         let _ = bk.delete(&key).await;
         out.push_str(&format!("{id}: tayyor\n"));
     }
-    Ok(out)
+    Ok((out, progressed, !drained))
 }
 
 /// ── TOZALASH: tashlab ketilgan yuklashlar ───────────────────────
@@ -368,7 +401,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, ctx: &Context, path: &str
             // Telegramga saqlashni WORKER O'ZI boshlaydi (javobdan keyin fonda, ~30 soniya); davomini har daqiqadagi cron oladi.
             let e2 = env.clone();
             ctx.wait_until(async move {
-                let _ = process(&e2, 22_000).await;
+                process_and_chain(&e2).await;
             });
             ok(json!({"ok": true}))
         }
@@ -387,6 +420,22 @@ pub(crate) async fn route(mut req: Request, env: &Env, ctx: &Context, path: &str
             ok(json!({"ok": true}))
         }
         // Qo'lda: R2 -> Telegram saqlashni HOZIR ishga tushiradi va natijani (yoki xatoni) qaytaradi (tashxis).
+        (Method::Post, "/api/bd/process") if qs(&url, "bg") == "1" => {
+            // Zanjir bo'g'ini: ish fonda, javob darhol (chaqiruvchi kutib qolmaydi).
+            let e2 = env.clone();
+            ctx.wait_until(async move {
+                process_and_chain(&e2).await;
+            });
+            json_resp(&json!({"started": true}), 202)
+        }
+        // Zanjir ishlashini tekshirish: worker o'z manziliga so'rov yubora oladimi.
+        (Method::Get, "/api/bd/chain-test") => {
+            let st = match Fetch::Request(Request::new(&format!("{ORIGIN}/health"), Method::Get)?).send().await {
+                Ok(r) => r.status_code() as i64,
+                Err(e) => { return json_resp(&json!({"ok": false, "error": e.to_string()}), 200); }
+            };
+            ok(json!({"ok": st == 200, "status": st}))
+        }
         (Method::Post, "/api/bd/process") => match process(env, 22_000).await {
             Ok(log) => ok(json!({"ok": true, "log": log})),
             Err(e) => json_resp(&json!({"ok": false, "error": e.to_string()}), 500),
