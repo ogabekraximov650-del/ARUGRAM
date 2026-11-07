@@ -6923,3 +6923,7 @@ Foydalanuvchi: model "sudo yo'q, o'rnatib bo'lmaydi" deb to'xtab qoldi ("Modelni
 ## Ample yt-dlp boti (2026-11)
 
 `ample/anibot/` — Ample Computer serverida (`anibot`, servis `ytbot`) ishlaydigan webhook-only yt-dlp Telegram boti. Havola -> yt-dlp (<=720p) -> cloud Bot API orqali yuboriladi; 48 MB dan katta fayl ffmpeg bilan bo'laklanadi (sessiya/api_id kerak emas). Faqat admin. Maxfiy qiymatlar (BOT_TOKEN, WEBHOOK_SECRET) Ample servisida shifrlangan env, kodda yo'q. Anibla qismi tashlandi (foydalanuvchi qarori).
+
+## ARUTUBE — DoodStream ilovasi (2026-11)
+
+`ARUmultiplatform/tube/` — YouTube'ga o'xshash ilova (Kotlin+Compose+Rust) va alohida worker `arutube-api` (Rust/WASM). Bazasiz: ro'yxat DoodStream `file/list` dan, muqova `single_img`, pleyer — iframe `<host>/e/<kod>`. Yuklash: fayl (Rust oqim, `upload/server` + `api_key`+`file` multipart) va havola (`upload/url`, worker orqali). Kalit `DOOD_KEY` — GitHub Environment secret, worker deploy uni Cloudflare secret qiladi. Workflow'lar: `tube-android.yml`, `tube-worker.yml`. Tafsilot: `ARUmultiplatform/tube/README.md`.

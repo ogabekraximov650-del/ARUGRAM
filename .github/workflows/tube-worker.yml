@@ -1,0 +1,74 @@
+name: ARUTUBE worker (Rust WASM) — deploy
+
+# `ARUmultiplatform/tube/worker/**` o'zgarganda: tekshiruv + Cloudflare'ga deploy (worker nomi `arutube-api`).
+# DoodStream kaliti — GitHub Environment secret `DOOD_KEY` (kodga yozilmaydi); ilova tokeni — `APP_SIGN_SECRET` (APK bilan bir xil).
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ARUmultiplatform/tube/worker/**'
+      - '.github/workflows/tube-worker.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tube-worker
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: secret
+    defaults:
+      run:
+        working-directory: ARUmultiplatform/tube/worker
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "ARUmultiplatform/tube/worker -> target"
+
+      - name: Testlar (xost) va wasm tekshiruvi
+        run: |
+          cargo test --lib
+          cargo check --target wasm32-unknown-unknown
+
+      - name: worker-build
+        run: cargo install worker-build --locked
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: wrangler
+        run: npm install -g wrangler
+
+      - name: Build (WASM)
+        run: worker-build --release
+
+      - name: Deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: wrangler deploy
+
+      - name: Sirlar
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          put() {
+            if [ -n "$2" ]; then
+              printf '%s' "$2" | wrangler secret put "$1"
+            else
+              echo "⚠️  $1 — GitHub'da yo'q, o'tkazib yuborildi (Cloudflare'dagi qiymat saqlanadi)"
+            fi
+          }
+          put DOOD_KEY "${{ secrets.DOOD_KEY }}"
+          put APP_TOKEN "${{ secrets.APP_SIGN_SECRET }}"

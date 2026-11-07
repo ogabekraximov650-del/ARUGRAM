@@ -1,0 +1,12 @@
+-dontobfuscate
+-keepattributes *Annotation*, InnerClasses, EnclosingMethod, Signature, Exceptions
+-keep class uz.arutube.app.** { *; }
+-keep class com.sun.jna.** { *; }
+-keep class * extends com.sun.jna.** { *; }
+-keepclassmembers class * extends com.sun.jna.Structure { <fields>; }
+-dontwarn java.awt.**
+-dontwarn com.sun.jna.**
+-keep,includedescriptorclasses class uz.arutube.app.**$$serializer { *; }
+-keepclassmembers class uz.arutube.app.** { *** Companion; }
+-keepclasseswithmembers class uz.arutube.app.** { kotlinx.serialization.KSerializer serializer(...); }
+-dontwarn okhttp3.internal.platform.**
