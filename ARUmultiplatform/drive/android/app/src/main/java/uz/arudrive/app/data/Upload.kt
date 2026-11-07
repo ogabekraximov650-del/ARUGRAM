@@ -65,6 +65,56 @@ object Upload {
         note("Video tahlil qilinmoqda…")
         val info = if (p.isVideo) videoInfo(ctx, p.uri) else VideoInfo(0, 0, 0, null)
         note("Yozuv ochilmoqda…")
+        val kind = if (p.isVideo) "video" else "file"
+        val pre = Api.presign(p.name, p.size, kind, p.mime, info.w, info.h, info.durMs)
+        if (pre != null) return@withContext direct(ctx, p, pre, info, note, onProgress)
+        viaWorker(ctx, p, info, note, onProgress)
+    }
+
+    /**
+     * R2 ga TO'G'RIDAN-TO'G'RI (worker faqat vaqtinchalik imzolangan havola beradi): fayl BUTUN holda, BITTA so'rovda yuboriladi
+     * (5 GiB gacha); undan kattasi — 1 GiB qismlar (S3 bitta so'rov chegarasi 5 GiB). Baytlar fayldan oqim bilan, xotirada bufer yo'q.
+     */
+    private suspend fun direct(ctx: Context, p: Picked, pre: Api.Presign, info: VideoInfo, note: (String) -> Unit, onProgress: (Long) -> Unit): String {
+        val total = p.size
+        val partBytes = java.util.concurrent.ConcurrentHashMap<Int, Long>()
+        val parts = java.util.concurrent.ConcurrentLinkedQueue<Pair<Int, String>>()
+        if (pre.mode == "single") {
+            Api.putDirect(pre.urls[0], Api.FileSliceBody(ctx, p.uri, 0, total) { b -> onProgress(b) }, note)
+        } else {
+            val gate = kotlinx.coroutines.sync.Semaphore(2)
+            kotlinx.coroutines.coroutineScope {
+                pre.urls.mapIndexed { i, url ->
+                    val n = i + 1
+                    async {
+                        gate.acquire()
+                        try {
+                            val off = (n - 1) * pre.partSize
+                            val len = minOf(pre.partSize, total - off)
+                            val etag = Api.putDirect(url, Api.FileSliceBody(ctx, p.uri, off, len) { b -> partBytes[n] = b; onProgress(partBytes.values.sum()) }, note)
+                            parts.add(n to etag)
+                            partBytes[n] = len
+                            onProgress(partBytes.values.sum())
+                        } finally {
+                            gate.release()
+                        }
+                    }
+                }.forEach { it.await() }
+            }
+        }
+        onProgress(total)
+        // Kichik rasm fayl TO'LIQ yuklangandan KEYIN qo'shiladi.
+        info.jpeg?.let {
+            note("Kichik rasm yuborilmoqda…")
+            runCatching { Api.thumb(pre.id, it) }.onFailure { e -> note("Rasm yuborilmadi: ${e.message}") }
+        }
+        note("Yakunlanmoqda…")
+        if (pre.mode == "single") Api.complete(pre.id) else Api.finish(pre.id, pre.uploadId, parts.sortedBy { it.first })
+        return pre.id
+    }
+
+    /** Zaxira yo'l (worker R2 kalitlarini bilmasa): 64 MiB qismlar worker orqali (worker faqat uzatadi, 100 MB so'rov chegarasi). */
+    private suspend fun viaWorker(ctx: Context, p: Picked, info: VideoInfo, note: (String) -> Unit, onProgress: (Long) -> Unit): String {
         val init = Api.init(p.name, p.size, if (p.isVideo) "video" else "file", p.mime, info.w, info.h, info.durMs)
         // Fayl R2 ga BITTA butun obyekt sifatida yig'iladi; ilova uni 64 MiB qismlarga (Cloudflare so'rov chegarasi 100 MB) OQIM bilan
         // yuboradi — xotirada bufer yo'q. Parallel: 4 ta qism bir vaqtda. Telegram bo'laklarini (18 MiB) worker o'zi `Range` bilan oladi.
@@ -101,6 +151,6 @@ object Upload {
         }
         note("Yakunlanmoqda…")
         Api.finish(init.id, init.uploadId, parts.sortedBy { it.first })
-        init.id
+        return init.id
     }
 }

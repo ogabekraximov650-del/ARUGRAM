@@ -155,6 +155,64 @@ object Api {
         throw last ?: java.io.IOException("qism yuborilmadi")
     }
 
+    class Presign(val id: String, val mode: String, val uploadId: String, val partSize: Long, val urls: List<String>)
+
+    /**
+     * R2 ga TO'G'RIDAN-TO'G'RI yuklash uchun vaqtincha havola(lar). `null` — worker R2 kalitlarini bilmaydi (501): u holda eski yo'l
+     * (worker orqali qismlab) ishlatiladi. `mode`: "single" — butun fayl BITTA so'rovda (5 GiB gacha), "multi" — 1 GiB qismlar.
+     */
+    suspend fun presign(name: String, size: Long, kind: String, mime: String, w: Int, h: Int, dur: Long): Presign? = withContext(Dispatchers.IO) {
+        val body = buildJsonObject {
+            put("name", JsonPrimitive(name)); put("size", JsonPrimitive(size)); put("kind", JsonPrimitive(kind))
+            put("mime", JsonPrimitive(mime)); put("w", JsonPrimitive(w)); put("h", JsonPrimitive(h)); put("dur", JsonPrimitive(dur))
+        }.toString().toRequestBody(JSON)
+        client.newCall(Request.Builder().url(url("/api/bd/presign")).post(body).build()).execute().use { r ->
+            if (r.code == 501) return@use null
+            val text = r.body?.string().orEmpty()
+            if (!r.isSuccessful) throw java.io.IOException("HTTP ${r.code} ${text.take(120)}")
+            val o = json.parseToJsonElement(text).jsonObject
+            Presign(
+                o["id"]!!.jsonPrimitive.content, o["mode"]!!.jsonPrimitive.content, o["upload_id"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+                o["part_size"]?.jsonPrimitive?.longOrNull ?: 0L,
+                (o["urls"] as kotlinx.serialization.json.JsonArray).map { it.jsonPrimitive.content },
+            )
+        }
+    }
+
+    /** R2 bilan bevosita aloqa: imzosiz mijoz (havolaning o'zi imzolangan), cheksiz uzun yuklash uchun uzun kutish. */
+    private val directClient: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(15, TimeUnit.MINUTES)
+            .writeTimeout(15, TimeUnit.MINUTES)
+            .callTimeout(0, TimeUnit.SECONDS)
+            .build()
+    }
+
+    /** Imzolangan R2 havolasiga PUT (worker'siz). 8 marta urinadi; qaytadi: ETag. */
+    suspend fun putDirect(url: String, body: okhttp3.RequestBody, note: (String) -> Unit): String = withContext(Dispatchers.IO) {
+        var last: Exception? = null
+        repeat(8) { attempt ->
+            try {
+                note("R2 ga yuborilmoqda (${attempt + 1}/8)…")
+                directClient.newCall(Request.Builder().url(url).put(body).build()).execute().use { r ->
+                    if (!r.isSuccessful) throw java.io.IOException("R2 HTTP ${r.code} ${r.body?.string().orEmpty().take(120)}")
+                    return@withContext r.header("ETag").orEmpty()
+                }
+            } catch (e: Exception) {
+                last = e
+                note("Urinish ${attempt + 1} xato: ${e.message ?: e.javaClass.simpleName}")
+                kotlinx.coroutines.delay(minOf(2000L * (attempt + 1), 15_000L))
+            }
+        }
+        throw last ?: java.io.IOException("R2 ga yuborilmadi")
+    }
+
+    suspend fun complete(id: String) = withContext(Dispatchers.IO) {
+        val body = buildJsonObject { put("id", JsonPrimitive(id)) }.toString().toRequestBody(JSON)
+        call(Request.Builder().url(url("/api/bd/complete")).post(body).build())
+    }
+
     suspend fun thumb(id: String, jpeg: ByteArray) = withContext(Dispatchers.IO) {
         val u = url("/api/bd/thumb").toHttpUrl().newBuilder().addQueryParameter("id", id).build()
         call(Request.Builder().url(u).post(jpeg.toRequestBody("image/jpeg".toMediaType())).build())

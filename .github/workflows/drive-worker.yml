@@ -81,6 +81,21 @@ jobs:
             put "$N" "$V"
           done
           put ENCODE_TOKEN "$K"
+          # R2 S3 kalitlari (ilova fayl baytlarini worker'siz to'g'ridan-to'g'ri R2 ga yuboradi; worker faqat imzolangan havola beradi).
+          # ARUMEDIATV deploy-worker.yml dagidek: `tool/r2/r2_keys.enc` (`ACCESS_KEY_ID:SECRET`, ENCODE_TOKEN bilan shifrlangan) yoki
+          # GitHub secret'lar `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY`. Hisob raqami — `CLOUDFLARE_ACCOUNT_ID`.
+          put R2_ACCOUNT_ID "$(printf '%s' "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" | tr -d '[:space:]')"
+          R2K=""
+          if [ -f ../../../tool/r2/r2_keys.enc ]; then
+            R2K=$(K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in ../../../tool/r2/r2_keys.enc 2>/dev/null | tr -d '[:space:]')
+          fi
+          if [ -z "$R2K" ] && [ -n "${{ secrets.R2_ACCESS_KEY_ID }}" ] && [ -n "${{ secrets.R2_SECRET_ACCESS_KEY }}" ]; then
+            R2K="${{ secrets.R2_ACCESS_KEY_ID }}:${{ secrets.R2_SECRET_ACCESS_KEY }}"
+          fi
+          case "$R2K" in
+            *:*) put R2_ACCESS_KEY_ID "${R2K%%:*}"; put R2_SECRET_ACCESS_KEY "${R2K#*:}"; echo "✅ R2 kalitlari o'rnatildi" ;;
+            *) echo "⚠️  R2 kalitlari yo'q — to'g'ridan-to'g'ri yuklash o'chiq (ilova worker orqali qismlab yuboradi)" ;;
+          esac
           put APP_SIGN_SECRET "${{ secrets.APP_SIGN_SECRET }}"
           put TG_CHANNEL_ID "${{ secrets.TG_CHANNEL_ID }}"
           # Ikkinchi akkauntdagi repo (Actions): token `gh_token.enc` da, repo nomi `gh_repo.txt` da (deploy-worker.yml dagidek).

@@ -9,6 +9,7 @@ use worker::*;
 
 mod bdrive;
 mod cache;
+mod s3sign;
 
 const APP_SIG_SKEW_SECS: i64 = 120;
 

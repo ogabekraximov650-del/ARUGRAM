@@ -293,6 +293,37 @@ pub(crate) async fn cleanup(env: &Env) -> Result<String> {
     Ok(format!("tozalandi: {n}"))
 }
 
+/// `YYYYMMDDTHHMMSSZ` (UTC) — S3 imzosi uchun.
+fn amz_now() -> String {
+    let secs = now_ms() / 1000;
+    let (days, rem) = (secs.div_euclid(86400), secs.rem_euclid(86400));
+    // fuqarolik sanasi (Howard Hinnant algoritmi)
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    format!("{y:04}{m:02}{d:02}T{:02}{:02}{:02}Z", rem / 3600, (rem % 3600) / 60, rem % 60)
+}
+
+/// Bitta so'rovda (S3 PUT) yuboriladigan eng katta hajm: 5 GiB dan kichikroq (zaxira bilan).
+const SINGLE_MAX: i64 = 5 * 1024 * 1024 * 1024 - 16 * 1024 * 1024;
+/// 5 GiB dan katta fayl: har qism 1 GiB (S3 qism chegarasi 5 GiB), qismlar kam bo'ladi.
+const BIG_PART: i64 = 1024 * 1024 * 1024;
+const R2_BUCKET: &str = "arumediatv";
+const URL_TTL: u64 = 24 * 3600;
+
+/// `/api/bd/presign` va `/api/bd/complete` uchun R2 S3 kalitlari (worker sirlari).
+fn r2_creds(env: &Env) -> Option<(String, String, String)> {
+    let (a, k, s) = (tg_secret(env, "R2_ACCOUNT_ID"), tg_secret(env, "R2_ACCESS_KEY_ID"), tg_secret(env, "R2_SECRET_ACCESS_KEY"));
+    if a.is_empty() || k.is_empty() || s.is_empty() { None } else { Some((a, k, s)) }
+}
+
 /// `a,b,c` -> ["a","b","c"] (bo'sh matn — bo'sh ro'yxat).
 pub(crate) fn split_ids(s: &str) -> Vec<&str> {
     if s.is_empty() { Vec::new() } else { s.split(',').collect() }
@@ -406,6 +437,67 @@ pub(crate) async fn route(mut req: Request, env: &Env, ctx: &Context, path: &str
             }
             sql(env, "UPDATE bd_files SET state='uploaded' WHERE id=? AND state='uploading'", vec![TursoArg::text(&id)]).await?;
             // Telegramga saqlashni WORKER O'ZI boshlaydi (javobdan keyin fonda, ~30 soniya); davomini har daqiqadagi cron oladi.
+            let e2 = env.clone();
+            ctx.wait_until(async move {
+                process_and_chain(&e2).await;
+            });
+            ok(json!({"ok": true}))
+        }
+        // ── Ilova -> R2 TO'G'RIDAN-TO'G'RI: worker faqat vaqtinchalik imzolangan havola yasaydi (baytlar worker'dan o'tmaydi) ──
+        (Method::Post, "/api/bd/presign") => {
+            let Some((acct, ak, sk)) = r2_creds(env) else {
+                return json_resp(&json!({"error": "r2 kalitlari yo'q"}), 501);
+            };
+            let b: Value = req.json().await.unwrap_or(json!({}));
+            let name = clean_name(b["name"].as_str().unwrap_or(""));
+            let size = jint(&b, "size");
+            if size <= 0 || size > MAX_SIZE {
+                return json_resp(&json!({"error": "hajm"}), 400);
+            }
+            let kind = if b["kind"].as_str() == Some("video") { "video" } else { "file" };
+            let mime: String = b["mime"].as_str().unwrap_or("").chars().filter(|c| c.is_ascii_graphic()).take(60).collect();
+            let Some(bk) = bucket(env) else { return json_resp(&json!({"error": "r2"}), 503) };
+            let id = new_id();
+            let key = format!("{UP}{id}");
+            let host = format!("{acct}.r2.cloudflarestorage.com");
+            let path = format!("/{R2_BUCKET}/{key}");
+            let now = amz_now();
+            let (mode, upload_id, part_size, urls): (&str, String, i64, Vec<String>) = if size <= SINGLE_MAX {
+                ("single", String::new(), size, vec![crate::s3sign::presign("PUT", &host, &path, &[], &ak, &sk, "auto", &now, URL_TTL)])
+            } else {
+                let up = bk.create_multipart_upload(key.clone()).execute().await?;
+                let uid = up.upload_id().await;
+                let n = (size + BIG_PART - 1) / BIG_PART;
+                let urls = (1..=n).map(|i| crate::s3sign::presign("PUT", &host, &path, &[("partNumber", &i.to_string()), ("uploadId", &uid)], &ak, &sk, "auto", &now, URL_TTL)).collect();
+                ("multi", uid, BIG_PART, urls)
+            };
+            sql(env, "INSERT INTO bd_files (id,name,kind,mime,size,w,h,dur,state,upload_id,chunks,created) VALUES (?,?,?,?,?,?,?,?,'uploading',?,?,?)",
+                vec![TursoArg::text(&id), TursoArg::text(&name), TursoArg::text(kind), TursoArg::text(&mime), TursoArg::int(size),
+                     TursoArg::int(jint(&b, "w")), TursoArg::int(jint(&b, "h")), TursoArg::int(jint(&b, "dur")),
+                     TursoArg::text(&upload_id), TursoArg::int(chunks_of(size)), TursoArg::int(now_ms())]).await?;
+            ok(json!({"id": id, "mode": mode, "upload_id": upload_id, "part_size": part_size, "urls": urls}))
+        }
+        // Bitta so'rovda yuklangan fayl: R2 dagi hajm tekshiriladi va saqlash navbatiga qo'yiladi (ko'p qismli yuklash uchun `finish`).
+        (Method::Post, "/api/bd/complete") => {
+            let b: Value = req.json().await.unwrap_or(json!({}));
+            let id = b["id"].as_str().unwrap_or("").to_string();
+            let Some(bk) = bucket(env) else { return json_resp(&json!({"error": "r2"}), 503) };
+            if !id_ok(&id) {
+                return json_resp(&json!({"error": "so'rov"}), 400);
+            }
+            let Some(row) = first(&sql(env, "SELECT size,state FROM bd_files WHERE id=?", vec![TursoArg::text(&id)]).await?) else {
+                return err404("fayl yo'q");
+            };
+            if row["state"].as_str() != Some("uploading") {
+                return json_resp(&json!({"error": "holat"}), 409);
+            }
+            let size = row["size"].as_i64().unwrap_or(0);
+            let got = bk.head(&format!("{UP}{id}")).await.ok().flatten().map(|o| o.size() as i64);
+            if got != Some(size) {
+                let _ = sql(env, "UPDATE bd_files SET state='failed' WHERE id=?", vec![TursoArg::text(&id)]).await;
+                return json_resp(&json!({"error": format!("hajm mos emas ({got:?} != {size})")}), 422);
+            }
+            sql(env, "UPDATE bd_files SET state='uploaded' WHERE id=? AND state='uploading'", vec![TursoArg::text(&id)]).await?;
             let e2 = env.clone();
             ctx.wait_until(async move {
                 process_and_chain(&e2).await;
