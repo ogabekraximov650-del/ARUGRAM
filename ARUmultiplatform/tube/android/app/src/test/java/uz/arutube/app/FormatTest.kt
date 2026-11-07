@@ -47,10 +47,12 @@ class FormatTest {
     }
 
     @Test fun shortsAniqlash() {
-        assertEquals(true, Video(w = 720, h = 900).isShort)
-        assertEquals(false, Video(w = 720, h = 409, duration = 10).isShort)
-        assertEquals(true, Video(duration = 14).isShort)
-        assertEquals(false, Video(duration = 6001).isShort)
+        assertEquals(true, Video(w = 720, h = 900, duration = 600).isShort) // vertikal
+        assertEquals(true, Video(w = 720, h = 409, duration = 10).isShort) // 90 s gacha — gorizontal bo'lsa ham
+        assertEquals(true, Video(duration = 90).isShort)
+        assertEquals(false, Video(duration = 91).isShort)
+        assertEquals(false, Video(w = 720, h = 409, duration = 6001).isShort)
+        assertEquals(false, Video(duration = 0).isShort)
     }
 
     @Test fun davomEttirish() {

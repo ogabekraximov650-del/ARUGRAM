@@ -19,8 +19,12 @@ data class Video(
     val w: Int = 0,
     val h: Int = 0,
 ) {
-    /** Vertikal video — Shorts. O'lcham noma'lum bo'lsa: 60 soniyagacha bo'lsa qisqa deb olinadi. */
-    val isShort: Boolean get() = if (w > 0 && h > 0) h > w else duration in 1..60
+    /** Shorts: 90 soniyagacha BARCHA videolar (o'lchamidan qat'i nazar) va vertikal videolar. */
+    val isShort: Boolean get() = duration in 1..SHORT_MAX_SEC || (w > 0 && h > w)
+
+    companion object {
+        const val SHORT_MAX_SEC = 90L
+    }
 }
 
 @Serializable
