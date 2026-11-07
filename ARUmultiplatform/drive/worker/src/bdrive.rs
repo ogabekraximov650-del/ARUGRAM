@@ -223,6 +223,36 @@ pub(crate) async fn process(env: &Env, budget_ms: i64) -> Result<String> {
     Ok(out)
 }
 
+/// ── TOZALASH: tashlab ketilgan yuklashlar ───────────────────────
+///
+/// 24 soatdan eski `uploading` (yuklash yarmida uzilgan), `failed` (saqlab bo'lmadi) va `direct` (eski sinov yo'li) yozuvlari:
+/// R2'dagi yarim ko'p qismli yuklash bekor qilinadi, R2 nusxasi o'chadi, yozuv bazadan olib tashlanadi. `ready` fayllarga TEGILMAYDI.
+pub(crate) async fn cleanup(env: &Env) -> Result<String> {
+    ensure(env).await?;
+    let Some(bk) = bucket(env) else { return Ok("r2 yo'q".into()) };
+    let cutoff = now_ms() - 24 * 3600 * 1000;
+    let r = sql(env, "SELECT id,state,upload_id FROM bd_files WHERE state IN ('uploading','failed','direct') AND created<? LIMIT 50",
+        vec![TursoArg::int(cutoff)]).await?;
+    let mut n = 0;
+    for row in rows_of(&r) {
+        let id = row["id"].as_str().unwrap_or("").to_string();
+        if !id_ok(&id) {
+            continue;
+        }
+        let state = row["state"].as_str().unwrap_or("").to_string();
+        let uid = row["upload_id"].as_str().unwrap_or("").to_string();
+        if state == "uploading" && !uid.is_empty() {
+            if let Ok(m) = bk.resume_multipart_upload(format!("{UP}{id}"), uid) {
+                let _ = m.abort().await;
+            }
+        }
+        let _ = bk.delete(format!("{UP}{id}")).await;
+        sql(env, "DELETE FROM bd_files WHERE id=? AND state IN ('uploading','failed','direct')", vec![TursoArg::text(&id)]).await?;
+        n += 1;
+    }
+    Ok(format!("tozalandi: {n}"))
+}
+
 /// `a,b,c` -> ["a","b","c"] (bo'sh matn — bo'sh ro'yxat).
 pub(crate) fn split_ids(s: &str) -> Vec<&str> {
     if s.is_empty() { Vec::new() } else { s.split(',').collect() }
@@ -358,6 +388,11 @@ pub(crate) async fn route(mut req: Request, env: &Env, ctx: &Context, path: &str
         }
         // Qo'lda: R2 -> Telegram saqlashni HOZIR ishga tushiradi va natijani (yoki xatoni) qaytaradi (tashxis).
         (Method::Post, "/api/bd/process") => match process(env, 22_000).await {
+            Ok(log) => ok(json!({"ok": true, "log": log})),
+            Err(e) => json_resp(&json!({"ok": false, "error": e.to_string()}), 500),
+        },
+        // Qo'lda: tashlab ketilgan (24 soatdan eski) yuklashlarni tozalash.
+        (Method::Post, "/api/bd/cleanup") => match cleanup(env).await {
             Ok(log) => ok(json!({"ok": true, "log": log})),
             Err(e) => json_resp(&json!({"ok": false, "error": e.to_string()}), 500),
         },
