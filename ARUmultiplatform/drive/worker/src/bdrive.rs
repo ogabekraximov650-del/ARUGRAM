@@ -356,6 +356,11 @@ pub(crate) async fn route(mut req: Request, env: &Env, ctx: &Context, path: &str
             sql(env, "UPDATE bd_files SET thumb_id=? WHERE id=?", vec![TursoArg::text(&fid), TursoArg::text(&id)]).await?;
             ok(json!({"ok": true}))
         }
+        // Qo'lda: R2 -> Telegram saqlashni HOZIR ishga tushiradi va natijani (yoki xatoni) qaytaradi (tashxis).
+        (Method::Post, "/api/bd/process") => match process(env, 22_000).await {
+            Ok(log) => ok(json!({"ok": true, "log": log})),
+            Err(e) => json_resp(&json!({"ok": false, "error": e.to_string()}), 500),
+        },
         // Qo'lda: ikkinchi akkauntdagi Actions'ni ishga tushirish (zaxira yo'l).
         (Method::Post, "/api/bd/kick") => ok(json!({"kick": kick(env).await})),
         (Method::Get, "/api/bd/list") => {
