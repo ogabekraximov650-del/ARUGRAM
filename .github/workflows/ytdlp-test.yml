@@ -31,7 +31,8 @@ jobs:
         continue-on-error: true
         run: |
           mkdir -p out0 && rm -f out0/*
-          if yt-dlp --no-playlist --js-runtimes node -f "b" -o "out0/%(id)s.%(ext)s" "$URL"; then ls -l out0; echo "RESULT node-runtime: OK"; else echo "RESULT node-runtime: XATO"; fi
+          if yt-dlp --no-playlist --js-runtimes node -f "b" -o "out0/%(id)s.%(ext)s" "$URL" 2>&1 | tail -4; then :; fi
+          if ls out0/* >/dev/null 2>&1; then echo "RESULT node-runtime: OK" | tee /tmp/r1.txt; else echo "RESULT node-runtime: XATO" | tee /tmp/r1.txt; fi
 
       - name: WARP o'rnatish (Cloudflare rasmiy paketi)
         id: warp
@@ -42,14 +43,18 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -y -q cloudflare-warp
           warp-cli --accept-tos registration new
+          warp-cli --accept-tos mode warp || true
+          warp-cli --accept-tos tunnel protocol set MASQUE || true
           warp-cli --accept-tos connect
-          for i in $(seq 1 20); do
-            if warp-cli --accept-tos status | grep -qi "Connected"; then break; fi
-            sleep 2
+          for i in $(seq 1 12); do
+            st=$(warp-cli --accept-tos status 2>&1 | head -3 | tr '\n' ' ')
+            echo "[$i] $st"
+            if echo "$st" | grep -q "Status update: Connected"; then break; fi
+            sleep 5
           done
-          warp-cli --accept-tos status
-          echo "WARP trace:"; curl -s https://www.cloudflare.com/cdn-cgi/trace | grep -E "^(ip|warp|loc)="
-          echo "IP (WARP bilan): $(curl -s https://api.ipify.org)"
+          echo "WARP trace:"
+          curl -s -m 15 https://www.cloudflare.com/cdn-cgi/trace | grep -E "^(ip|warp|loc)=" || { echo "trace yo'q — WARP ulanmadi"; exit 1; }
+          echo "IP (WARP bilan): $(curl -s -m 15 https://api.ipify.org)"
 
       - name: Sinov 2 — WARP bilan yt-dlp
         if: steps.warp.outcome == 'success'
@@ -76,4 +81,6 @@ jobs:
 
       - name: Xulosa
         if: always()
-        run: echo "WARP o'rnatish natijasi - ${{ steps.warp.outcome }}"
+        run: |
+          cat /tmp/r1.txt 2>/dev/null || true
+          echo "WARP o'rnatish natijasi - ${{ steps.warp.outcome }}"
