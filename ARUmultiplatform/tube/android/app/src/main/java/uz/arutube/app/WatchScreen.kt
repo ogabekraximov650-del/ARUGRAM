@@ -1,6 +1,7 @@
 package uz.arutube.app
 
 import android.app.Activity
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
@@ -188,6 +189,7 @@ fun WatchScreen(video: Video, holder: PlayerHolder, onMinimize: () -> Unit, onOp
     var note by remember(video.code) { mutableStateOf("") }
     var fs by remember { mutableStateOf(false) }
     var adBlock by remember { mutableStateOf(true) }
+    var more by remember(video.code) { mutableStateOf(false) }
 
     LaunchedEffect(video.code) {
         val r = Api.videos(1)
@@ -252,16 +254,38 @@ fun WatchScreen(video: Video, holder: PlayerHolder, onMinimize: () -> Unit, onOp
                     Text(video.title.ifBlank { video.code }, fontSize = 18.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold)
                     val ago = Format.ago(video.uploaded)
                     Text(
-                        "${Format.count(video.views)} ko'rish" + (if (ago.isNotEmpty()) " · $ago" else "") + " · ${Format.duration(video.duration)}",
+                        "${Format.count(video.views)} ko'rish" + (if (ago.isNotEmpty()) " · $ago" else "") + (if (more) "" else "  …yana"),
                         fontSize = 13.sp,
                         color = TubeGray,
-                        modifier = Modifier.padding(top = 4.dp),
+                        modifier = Modifier.padding(top = 4.dp).clickable { more = !more },
                     )
+                    if (more) {
+                        Text(
+                            "Yuklangan: ${Format.date(video.uploaded)}\nDavomiyligi: ${Format.duration(video.duration)}\nKod: ${video.code}",
+                            fontSize = 13.sp,
+                            color = Color(0xFFDDDDDD),
+                            modifier = Modifier.padding(top = 6.dp).clickable { more = false },
+                        )
+                    }
                     if (note.isNotEmpty()) Text(note, fontSize = 12.sp, color = Color(0xFFFFB74D), modifier = Modifier.padding(top = 6.dp))
                     // Asosiy harakatlar (YouTube'dagidek): yoqdi, saqlash, ulashish, yuklab olish.
                     Row(Modifier.padding(top = 12.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        // Yoqdi | Yoqmadi: bitta doira ichida (Flow/YouTube dagidek).
                         val liked = LocalStore.isLiked(video.code)
-                        ActionPill(Icons.Filled.ThumbUp, if (liked) "Yoqdi ✓" else "Yoqdi", liked) { LocalStore.toggleLike(video.code) }
+                        val disliked = LocalStore.isDisliked(video.code)
+                        Row(Modifier.clip(RoundedCornerShape(20.dp)).background(TubeChip), verticalAlignment = Alignment.CenterVertically) {
+                            Row(Modifier.clickable { LocalStore.toggleLike(video.code) }.padding(start = 14.dp, end = 12.dp, top = 9.dp, bottom = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+                                androidx.compose.material3.Icon(Icons.Filled.ThumbUp, contentDescription = null, tint = if (liked) TubeRed else Color.White, modifier = Modifier.size(18.dp))
+                                Text(if (liked) "Yoqdi" else "Yoqdi", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(start = 8.dp))
+                            }
+                            Box(Modifier.width(1.dp).height(20.dp).background(Color(0xFF555555)))
+                            androidx.compose.material3.Icon(
+                                Icons.Filled.ThumbUp,
+                                contentDescription = "Yoqmadi",
+                                tint = if (disliked) TubeRed else Color.White,
+                                modifier = Modifier.clickable { LocalStore.toggleDislike(video.code) }.padding(horizontal = 14.dp, vertical = 9.dp).size(18.dp).graphicsLayer { rotationZ = 180f },
+                            )
+                        }
                         val saved = LocalStore.isLater(video.code)
                         ActionPill(if (saved) Icons.Filled.Check else Icons.Filled.Add, if (saved) "Saqlandi" else "Saqlash", saved) { LocalStore.toggleLater(video) }
                         ActionPill(Icons.Filled.Share, "Ulashish", false) { shareVideo(ctx, video) }
@@ -286,7 +310,7 @@ fun WatchScreen(video: Video, holder: PlayerHolder, onMinimize: () -> Unit, onOp
                 }
                 Spacer(Modifier.height(4.dp))
             }
-            items(others, key = { it.code }) { v -> VideoCard(v, progress = LocalStore.progress(v.code)?.fraction ?: 0f) { onOpen(v) } }
+            items(others, key = { it.code }) { v -> VideoRow(v, progress = LocalStore.progress(v.code)?.fraction ?: 0f) { onOpen(v) } }
         }
     }
 }

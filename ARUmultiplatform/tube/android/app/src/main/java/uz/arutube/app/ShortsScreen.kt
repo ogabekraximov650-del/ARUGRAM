@@ -49,12 +49,15 @@ fun ShortsScreen(list: List<Video>, start: Int, onBack: () -> Unit) {
         VerticalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->
             ShortPage(list[page], next = list.getOrNull(page + 1), active = pager.currentPage == page)
         }
-        Icon(
-            Icons.AutoMirrored.Filled.ArrowBack,
-            contentDescription = "Orqaga",
-            tint = Color.White,
-            modifier = Modifier.statusBarsPadding().padding(8.dp).size(44.dp).clip(CircleShape).clickable(onClick = onBack).padding(10.dp),
-        )
+        androidx.compose.foundation.layout.Row(Modifier.statusBarsPadding().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = "Orqaga",
+                tint = Color.White,
+                modifier = Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onBack).padding(10.dp),
+            )
+            Text("Shorts", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 6.dp))
+        }
     }
 }
 
