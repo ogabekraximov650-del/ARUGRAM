@@ -11,6 +11,6 @@ command = "cargo install -q worker-build && worker-build --release"
 binding = "R2"
 bucket_name = "arumediatv"
 
-# Har daqiqada: R2 -> Telegram saqlash navbatini davom ettiradi.
+# Har 10 daqiqada: R2 -> Telegram saqlash navbatini davom ettiradi (yuklash tugagan zahoti saqlash baribir darhol boshlanadi).
 [triggers]
-crons = ["* * * * *"]
+crons = ["*/10 * * * *"]
