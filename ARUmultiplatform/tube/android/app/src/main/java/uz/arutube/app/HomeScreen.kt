@@ -111,6 +111,22 @@ fun VideoCard(v: Video, onClick: () -> Unit) {
     }
 }
 
+/** Shorts kartasi: vertikal 9:16, pastda nom (YouTube Shorts javonidagidek). */
+@Composable
+fun ShortCard(v: Video, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Box(modifier.aspectRatio(9f / 16f).clip(RoundedCornerShape(12.dp)).background(Color(0xFF222222)).clickable(onClick = onClick)) {
+        if (v.thumb.isNotBlank()) {
+            AsyncImage(model = v.thumb, contentDescription = v.title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+        }
+        Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color.Transparent, Color(0xCC000000))))) {
+            Column(Modifier.padding(10.dp)) {
+                Text(v.title.ifBlank { v.code }, fontSize = 14.sp, lineHeight = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis, color = Color.White)
+                Text("${Format.count(v.views)} ko'rish", fontSize = 11.sp, color = Color(0xFFDDDDDD), modifier = Modifier.padding(top = 2.dp))
+            }
+        }
+    }
+}
+
 /** Yuklanish paytida kartalar o'rnida miltillovchi joy. */
 @Composable
 fun SkeletonCard() {
@@ -136,19 +152,17 @@ fun SkeletonCard() {
 }
 
 private enum class Chip(val label: String) {
-    ALL("Hammasi"), NEW("Yangi"), POPULAR("Mashhur"), LONG("Uzun"), SHORT("Qisqa");
+    ALL("Hammasi"), NEW("Yangi"), POPULAR("Mashhur");
 
     fun apply(list: List<Video>): List<Video> = when (this) {
         ALL -> list
         NEW -> list.sortedByDescending { it.uploaded }
         POPULAR -> list.sortedByDescending { it.views }
-        LONG -> list.filter { it.duration >= 20 * 60 }
-        SHORT -> list.filter { it.duration < 20 * 60 }
     }
 }
 
 @Composable
-fun HomeScreen(refreshKey: Int, onOpen: (Video) -> Unit) {
+fun HomeScreen(refreshKey: Int, onOpen: (Video) -> Unit, onOpenShort: (List<Video>, Int) -> Unit) {
     val scope = rememberCoroutineScope()
     var videos by remember { mutableStateOf(listOf<Video>()) }
     var page by remember { mutableIntStateOf(1) }
@@ -177,6 +191,8 @@ fun HomeScreen(refreshKey: Int, onOpen: (Video) -> Unit) {
 
     val byQuery = if (query.isBlank()) videos else videos.filter { it.title.contains(query, ignoreCase = true) }
     val shown = chip.apply(byQuery)
+    val shorts = shown.filter { it.isShort }
+    val longs = shown.filter { !it.isShort }
 
     Column(Modifier.statusBarsPadding()) {
         // Yuqori panel: logotip (qizil "play" belgisi + nom), qidiruv va yangilash.
@@ -235,7 +251,27 @@ fun HomeScreen(refreshKey: Int, onOpen: (Video) -> Unit) {
             if (loading && videos.isEmpty()) {
                 items(3) { SkeletonCard() }
             }
-            items(shown, key = { it.code }) { v -> VideoCard(v) { onOpen(v) } }
+            if (shorts.isNotEmpty()) {
+                item(key = "shorts-header") {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(28.dp).clip(RoundedCornerShape(8.dp)).background(TubeRed), contentAlignment = Alignment.Center) {
+                            Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                        }
+                        Text("Shorts", fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 10.dp))
+                    }
+                }
+                // Ikki ustunli to'r (YouTube Shorts javoni kabi): har qatorda 2 ta vertikal karta.
+                items(shorts.chunked(2), key = { row -> "s" + row.first().code }) { row ->
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp).padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        row.forEach { v ->
+                            ShortCard(v, Modifier.weight(1f)) { onOpenShort(shorts, shorts.indexOf(v)) }
+                        }
+                        if (row.size == 1) Spacer(Modifier.weight(1f))
+                    }
+                }
+                item(key = "shorts-gap") { Spacer(Modifier.height(12.dp)) }
+            }
+            items(longs, key = { it.code }) { v -> VideoCard(v) { onOpen(v) } }
             item {
                 Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     when {
@@ -244,7 +280,7 @@ fun HomeScreen(refreshKey: Int, onOpen: (Video) -> Unit) {
                             Text("❌ $error", color = Color(0xFFFF8080))
                             TextButton(onClick = { scope.launch { load(if (videos.isEmpty()) 1 else page + 1) } }) { Text("Qayta urinish") }
                         }
-                        !loading && shown.isEmpty() -> Text("Video yo'q", color = TubeGray)
+                        !loading && shorts.isEmpty() && longs.isEmpty() -> Text("Video yo'q", color = TubeGray)
                         page < pages && query.isBlank() -> TextButton(onClick = { scope.launch { load(page + 1) } }) { Text("Yana yuklash") }
                     }
                 }

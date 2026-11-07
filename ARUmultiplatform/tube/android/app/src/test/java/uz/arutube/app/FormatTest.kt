@@ -46,6 +46,13 @@ class FormatTest {
         assertNull(j.error)
     }
 
+    @Test fun shortsAniqlash() {
+        assertEquals(true, Video(w = 720, h = 900).isShort)
+        assertEquals(false, Video(w = 720, h = 409, duration = 10).isShort)
+        assertEquals(true, Video(duration = 14).isShort)
+        assertEquals(false, Video(duration = 6001).isShort)
+    }
+
     @Test fun yuklashJavobi() {
         val r = Api.parseUpload("""{"msg":"OK","status":200,"result":[{"filecode":"x1","download_url":"https://d/d/x1"}]}""")
         assertEquals("x1", r.result[0].filecode)

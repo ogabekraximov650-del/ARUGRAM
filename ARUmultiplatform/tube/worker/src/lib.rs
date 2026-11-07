@@ -7,6 +7,7 @@
 //! POST /api/remote {"url","title"}     — havoladan yuklash (DoodStream o'zi oladi)
 //! Himoya: `APP_TOKEN` secret qo'yilgan bo'lsa, `X-App-Token` sarlavhasi unga teng bo'lishi shart.
 use serde_json::{json, Value};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use worker::*;
 
@@ -54,6 +55,68 @@ pub fn map_file(f: &Value) -> Value {
         "embed": format!("{host}/e/{code}"),
         "canplay": num(&f["canplay"]),
     })
+}
+
+/// JPEG boshidagi (SOF) sarlavhadan (kenglik, balandlik); topilmasa `None`.
+pub fn jpeg_size(b: &[u8]) -> Option<(u32, u32)> {
+    if b.len() < 4 || b[0] != 0xFF || b[1] != 0xD8 {
+        return None;
+    }
+    let mut i = 2;
+    while i + 9 < b.len() {
+        if b[i] != 0xFF {
+            i += 1;
+            continue;
+        }
+        let m = b[i + 1];
+        if m == 0xFF {
+            i += 1;
+            continue;
+        }
+        if (0xC0..=0xCF).contains(&m) && m != 0xC4 && m != 0xC8 && m != 0xCC {
+            let h = u16::from_be_bytes([b[i + 5], b[i + 6]]) as u32;
+            let w = u16::from_be_bytes([b[i + 7], b[i + 8]]) as u32;
+            return Some((w, h));
+        }
+        if (0xD0..=0xD9).contains(&m) || m == 0x01 {
+            i += 2;
+            continue;
+        }
+        let len = u16::from_be_bytes([b[i + 2], b[i + 3]]) as usize;
+        i += 2 + len;
+    }
+    None
+}
+
+thread_local! {
+    // Muqova o'lchamlari izolyat xotirasida saqlanadi (har so'rovda qayta olinmasin).
+    static DIMS: RefCell<HashMap<String, (u32, u32)>> = RefCell::new(HashMap::new());
+}
+
+/// Muqova (thumbnail) o'lchami: u video nisbatini saqlaydi, shu bilan vertikal video (Shorts) aniqlanadi. Xato bo'lsa (0, 0).
+async fn thumb_size(url: String) -> (u32, u32) {
+    if url.is_empty() {
+        return (0, 0);
+    }
+    if let Some(d) = DIMS.with(|m| m.borrow().get(&url).copied()) {
+        return d;
+    }
+    let res: Result<(u32, u32)> = async {
+        let mut h = Headers::new();
+        h.set("Range", "bytes=0-65535")?;
+        h.set("User-Agent", "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 Chrome/126 Mobile Safari/537.36")?;
+        let mut init = RequestInit::new();
+        init.with_headers(h);
+        let mut r = Fetch::Request(Request::new_with_init(&url, &init)?).send().await?;
+        let bytes = r.bytes().await?;
+        Ok(jpeg_size(&bytes).unwrap_or((0, 0)))
+    }
+    .await;
+    let d = res.unwrap_or((0, 0));
+    if d.0 > 0 {
+        DIMS.with(|m| m.borrow_mut().insert(url, d));
+    }
+    d
 }
 
 fn rerr(m: impl Into<String>) -> Error {
@@ -105,7 +168,12 @@ async fn route(mut req: Request, env: &Env, url: &Url, path: &str) -> Result<Res
             let v = dood(env, "file/list", &[("page", page), ("per_page", per)]).await?;
             check_ok(&v)?;
             let files = v["result"]["files"].as_array().cloned().unwrap_or_default();
-            let videos: Vec<Value> = files.iter().map(map_file).collect();
+            let mut videos: Vec<Value> = files.iter().map(map_file).collect();
+            let dims = futures_util::future::join_all(videos.iter().map(|v| thumb_size(st(&v["thumb"])))).await;
+            for (v, (w, h)) in videos.iter_mut().zip(dims) {
+                v["w"] = json!(w);
+                v["h"] = json!(h);
+            }
             let mut r = reply(
                 &json!({
                     "videos": videos,
@@ -187,6 +255,14 @@ mod tests {
         assert_eq!(m["duration"], 6001);
         assert_eq!(m["views"], 5);
         assert_eq!(m["embed"], "https://playmogo.com/e/abc");
+    }
+
+    #[test]
+    fn jpeg_o_lchami() {
+        // SOI + APP0 (uzunlik 4) + SOF0: balandlik 0x0384=900, kenglik 0x02D0=720
+        let b = [0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x04, 0x00, 0x00, 0xFF, 0xC0, 0x00, 0x0B, 0x08, 0x03, 0x84, 0x02, 0xD0, 0x03, 0x01, 0x22, 0x00];
+        assert_eq!(jpeg_size(&b), Some((720, 900)));
+        assert_eq!(jpeg_size(&[0x00, 0x01]), None);
     }
 
     #[test]

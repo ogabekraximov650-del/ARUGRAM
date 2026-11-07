@@ -15,7 +15,13 @@ data class Video(
     val thumb: String = "",
     val embed: String = "",
     val canplay: Int = 1,
-)
+    /** Muqova o'lchami (u video nisbatini saqlaydi); 0 — noma'lum. */
+    val w: Int = 0,
+    val h: Int = 0,
+) {
+    /** Vertikal video — Shorts. O'lcham noma'lum bo'lsa: 60 soniyagacha bo'lsa qisqa deb olinadi. */
+    val isShort: Boolean get() = if (w > 0 && h > 0) h > w else duration in 1..60
+}
 
 @Serializable
 data class VideoPage(

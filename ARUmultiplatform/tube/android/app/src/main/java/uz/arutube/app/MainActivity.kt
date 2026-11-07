@@ -33,6 +33,7 @@ sealed interface Screen {
     data object Home : Screen
     data class Watch(val video: Video) : Screen
     data object Upload : Screen
+    data class Shorts(val list: List<Video>, val start: Int) : Screen
 }
 
 val TubeRed = Color(0xFFFF0000)
@@ -72,12 +73,17 @@ fun TubeApp() {
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Box(Modifier.weight(1f)) {
             when (val s = screen) {
-                is Screen.Home -> HomeScreen(refreshKey = refresh, onOpen = { screen = Screen.Watch(it) })
+                is Screen.Home -> HomeScreen(
+                    refreshKey = refresh,
+                    onOpen = { screen = Screen.Watch(it) },
+                    onOpenShort = { list, i -> screen = Screen.Shorts(list, i) },
+                )
                 is Screen.Watch -> WatchScreen(video = s.video, onBack = { screen = Screen.Home }, onOpen = { screen = Screen.Watch(it) })
+                is Screen.Shorts -> ShortsScreen(list = s.list, start = s.start, onBack = { screen = Screen.Home })
                 is Screen.Upload -> UploadScreen(onBack = { screen = Screen.Home }, onUploaded = { refresh++ })
             }
         }
-        if (screen !is Screen.Watch) {
+        if (screen !is Screen.Watch && screen !is Screen.Shorts) {
             NavigationBar(containerColor = Color(0xFF0F0F0F), modifier = Modifier.navigationBarsPadding()) {
                 val colors = NavigationBarItemDefaults.colors(
                     selectedIconColor = Color.White,

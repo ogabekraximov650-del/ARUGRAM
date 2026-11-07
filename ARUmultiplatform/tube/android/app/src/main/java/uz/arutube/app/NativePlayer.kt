@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.annotation.OptIn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -19,7 +20,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 
 @OptIn(UnstableApi::class)
-private fun buildPlayer(ctx: Context, d: Direct, onError: (String) -> Unit): ExoPlayer {
+private fun buildPlayer(ctx: Context, d: Direct, loop: Boolean, onError: (String) -> Unit): ExoPlayer {
     val http = DefaultHttpDataSource.Factory()
         .setUserAgent(d.userAgent)
         .setAllowCrossProtocolRedirects(true)
@@ -32,6 +33,7 @@ private fun buildPlayer(ctx: Context, d: Direct, onError: (String) -> Unit): Exo
             onError(error.errorCodeName)
         }
     })
+    if (loop) p.repeatMode = Player.REPEAT_MODE_ONE
     p.playWhenReady = true
     p.prepare()
     return p
@@ -39,16 +41,26 @@ private fun buildPlayer(ctx: Context, d: Direct, onError: (String) -> Unit): Exo
 
 /** Reklamasiz pleyer: Media3 ExoPlayer + standart boshqaruv paneli. */
 @Composable
-fun NativePlayer(direct: Direct, fullscreen: Boolean, onFullscreen: (Boolean) -> Unit, onError: (String) -> Unit, modifier: Modifier = Modifier) {
+fun NativePlayer(
+    direct: Direct,
+    fullscreen: Boolean,
+    onFullscreen: (Boolean) -> Unit,
+    onError: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    controls: Boolean = true,
+    loop: Boolean = false,
+    playing: Boolean = true,
+) {
     val ctx = LocalContext.current
-    val exo = remember(direct.url) { buildPlayer(ctx, direct, onError) }
+    val exo = remember(direct.url) { buildPlayer(ctx, direct, loop, onError) }
+    LaunchedEffect(playing, exo) { exo.playWhenReady = playing }
     DisposableEffect(exo) { onDispose { exo.release() } }
     AndroidView(
         modifier = modifier,
         factory = {
             PlayerView(ctx).apply {
                 player = exo
-                useController = true
+                useController = controls
                 setShowBuffering(PlayerView.SHOW_BUFFERING_ALWAYS)
                 setFullscreenButtonClickListener { onFullscreen(it) }
             }
