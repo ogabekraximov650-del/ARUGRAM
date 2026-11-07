@@ -108,6 +108,11 @@ jobs:
           path: ${{ steps.apk.outputs.dir }}
           retention-days: 30
 
+      # pyrogram 2.0.106 Python 3.14 da ishlamaydi ("no current event loop") — runner'ning standart Python'i 3.14, shuning uchun 3.12.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       # APK ni Telegram "Saqlangan xabarlar"ga yuborish (android-native.yml'dagidek). Xato bo'lsa build buzilmaydi.
       - name: APK ni Telegram "Saqlangan xabarlar"ga yuborish
         continue-on-error: true
