@@ -147,6 +147,16 @@ def api_id_of(session: str) -> int:
         return 0
 
 
+GREETING = ("👋 ARUDRIVE qabul boti ishlayapti.\n"
+            "Video yoki faylni shu chatga forward qiling — yuklab olib R2 ga yuboraman, so'ng Telegram kanaliga saqlanadi.\n"
+            "Holat: /holat")
+
+
+def is_cmd(m, *names):
+    t = (m.text or "").strip().lower().split("@")[0]
+    return bool(m.outgoing and t in names)
+
+
 def media_of(m):
     return m.video or m.animation or m.video_note or m.document or m.audio
 
@@ -240,14 +250,21 @@ async def main():
 
     # Run yangidan boshlangan: bo'sh vaqtda forward qilinib hali ishlanmaganlar (oxirgi xabarda `⟦id⟧` belgisi yo'q).
     done, pending = set(), []
+    last_bot_ts = last_start_ts = 0.0
     cutoff = time.time() - HISTORY_HOURS * 3600
     async for m in app.get_chat_history(bot_id, limit=200):
-        if m.date and m.date.timestamp() < cutoff:
+        ts = m.date.timestamp() if m.date else 0.0
+        if ts < cutoff:
             break
         if m.outgoing is False and m.text:
             done.update(int(x) for x in MARK_RE.findall(m.text))
+            last_bot_ts = max(last_bot_ts, ts)
+        elif is_cmd(m, "/start", "/holat"):
+            last_start_ts = max(last_start_ts, ts)
         elif want(m):
             pending.append(m)
+    if last_start_ts > last_bot_ts:  # bot o'chiq paytda yozilgan /start javobsiz qolgan
+        notify(GREETING)
     for m in reversed(pending):
         if m.id not in done:
             queued.add(m.id)
@@ -255,7 +272,12 @@ async def main():
     log(f"Navbatda (o'tgan vaqtdan): {queue.qsize()}")
 
     async def on_message(_, m):
-        if want(m):
+        if is_cmd(m, "/start"):
+            notify(GREETING)
+        elif is_cmd(m, "/holat"):
+            left = max(0, int((DEADLINE - time.time()) / 60))
+            notify(f"✅ Bot ishlayapti. Navbatda: {queue.qsize()} ta fayl. Bu run yana ~{left} daqiqa ishlaydi.")
+        elif want(m):
             queued.add(m.id)
             await queue.put(m)
             log("Yangi fayl:", m.id)
