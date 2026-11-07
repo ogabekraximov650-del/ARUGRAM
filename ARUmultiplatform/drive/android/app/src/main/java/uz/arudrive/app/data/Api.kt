@@ -3,7 +3,6 @@ package uz.arudrive.app.data
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -12,6 +11,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -80,37 +80,42 @@ object Api {
 
     fun thumbUrl(id: String) = url("/api/bd/thumb/$id.jpg")
 
-    class Init(val id: String, val uploadId: String, val partSize: Int)
+    class Init(val id: String, val partSize: Int)
 
-    suspend fun init(name: String, size: Long, kind: String, mime: String, w: Int, h: Int, dur: Long): Init = withContext(Dispatchers.IO) {
+    /** Yangi fayl yozuvi (R2'siz): bo'laklar `chunk` bilan to'g'ridan-to'g'ri worker orqali Telegram'ga ketadi. */
+    suspend fun newFile(name: String, size: Long, kind: String, mime: String, w: Int, h: Int, dur: Long): Init = withContext(Dispatchers.IO) {
         val body = buildJsonObject {
             put("name", JsonPrimitive(name)); put("size", JsonPrimitive(size)); put("kind", JsonPrimitive(kind))
             put("mime", JsonPrimitive(mime)); put("w", JsonPrimitive(w)); put("h", JsonPrimitive(h)); put("dur", JsonPrimitive(dur))
         }.toString().toRequestBody(JSON)
-        val o = call(Request.Builder().url(url("/api/bd/init")).post(body).build())
-        Init(o["id"]!!.jsonPrimitive.content, o["upload_id"]!!.jsonPrimitive.content, o["part_size"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: PART_FALLBACK)
+        val o = call(Request.Builder().url(url("/api/bd/new")).post(body).build())
+        Init(o["id"]!!.jsonPrimitive.content, o["part_size"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: PART_FALLBACK)
     }
 
-    /** Bitta bo'lakni yuboradi (3 marta urinadi); qaytadi: ETag. */
-    suspend fun part(id: String, uploadId: String, n: Int, bytes: ByteArray, len: Int): String = withContext(Dispatchers.IO) {
+    /** `n`-bo'lak (0 dan) — aniq `part_size` bayt (oxirgisi qisqa). 3 marta urinadi. */
+    suspend fun chunk(id: String, n: Int, bytes: ByteArray, len: Int) = withContext(Dispatchers.IO) {
         var last: Exception? = null
         repeat(3) { attempt ->
             try {
                 val body = bytes.toRequestBody("application/octet-stream".toMediaType(), 0, len)
-                val u = okhttp3.HttpUrl.Builder().scheme("https").host(java.net.URI(BuildConfig.API_BASE).host)
-                    .addPathSegments("api/bd/part").addQueryParameter("id", id).addQueryParameter("uid", uploadId).addQueryParameter("n", n.toString()).build()
-                return@withContext call(Request.Builder().url(u).put(body).build())["etag"]!!.jsonPrimitive.content
+                val u = url("/api/bd/chunk").toHttpUrl().newBuilder().addQueryParameter("id", id).addQueryParameter("n", n.toString()).build()
+                call(Request.Builder().url(u).put(body).build())
+                return@withContext
             } catch (e: Exception) {
                 last = e
-                kotlinx.coroutines.delay(1500L * (attempt + 1))
+                kotlinx.coroutines.delay(2000L * (attempt + 1))
             }
         }
         throw last ?: java.io.IOException("bo'lak yuborilmadi")
     }
 
+    suspend fun seal(id: String) = withContext(Dispatchers.IO) {
+        val body = buildJsonObject { put("id", JsonPrimitive(id)) }.toString().toRequestBody(JSON)
+        call(Request.Builder().url(url("/api/bd/seal")).post(body).build())
+    }
+
     suspend fun thumb(id: String, jpeg: ByteArray) = withContext(Dispatchers.IO) {
-        val u = okhttp3.HttpUrl.Builder().scheme("https").host(java.net.URI(BuildConfig.API_BASE).host)
-            .addPathSegments("api/bd/thumb").addQueryParameter("id", id).build()
+        val u = url("/api/bd/thumb").toHttpUrl().newBuilder().addQueryParameter("id", id).build()
         call(Request.Builder().url(u).post(jpeg.toRequestBody("image/jpeg".toMediaType())).build())
     }
 

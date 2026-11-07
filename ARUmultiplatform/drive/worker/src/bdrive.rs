@@ -92,6 +92,44 @@ async fn ensure(env: &Env) -> Result<()> {
     Ok(())
 }
 
+/// Bot API `sendDocument` (qo'lda yig'ilgan multipart): (file_id, message_id). Hajm Telegram javobi bilan solishtiriladi.
+async fn tg_send_document(token: &str, channel: i64, name: &str, data: &[u8], expect: u64) -> Result<(String, i64)> {
+    if token.is_empty() {
+        return Err(Error::RustError("BD_BOT_TOKEN yo'q".into()));
+    }
+    let boundary = format!("----arudrive{}", now_ms());
+    let safe: String = name.chars().map(|c| if c.is_ascii_graphic() && c != '"' && c != '\\' { c } else { '_' }).collect();
+    let mut body: Vec<u8> = Vec::with_capacity(data.len() + 512);
+    for (k, v) in [("chat_id", channel.to_string()), ("disable_notification", "true".to_string())] {
+        body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n").as_bytes());
+    }
+    body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"document\"; filename=\"{safe}\"\r\nContent-Type: application/octet-stream\r\n\r\n").as_bytes());
+    body.extend_from_slice(data);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    let h = Headers::new();
+    h.set("Content-Type", &format!("multipart/form-data; boundary={boundary}"))?;
+    let arr = worker::js_sys::Uint8Array::from(&body[..]);
+    drop(body);
+    let treq = Request::new_with_init(
+        &format!("https://api.telegram.org/bot{token}/sendDocument"),
+        RequestInit::new().with_method(Method::Post).with_headers(h).with_body(Some(arr.into())),
+    )?;
+    let mut r = Fetch::Request(treq).send().await?;
+    let d: Value = r.json().await?;
+    if d["ok"] != json!(true) {
+        return Err(Error::RustError(format!("Telegram rad etdi: {} (retry_after {})", d["description"].as_str().unwrap_or("noma'lum"), d["parameters"]["retry_after"])));
+    }
+    let doc = &d["result"]["document"];
+    if doc["file_size"].as_u64().unwrap_or(expect) != expect {
+        return Err(Error::RustError("Telegram hajmi mos emas".into()));
+    }
+    let fid = doc["file_id"].as_str().unwrap_or("").to_string();
+    if fid.is_empty() {
+        return Err(Error::RustError("Telegram file_id bermadi".into()));
+    }
+    Ok((fid, d["result"]["message_id"].as_i64().unwrap_or(0)))
+}
+
 /// `a,b,c` -> ["a","b","c"] (bo'sh matn — bo'sh ro'yxat).
 pub(crate) fn split_ids(s: &str) -> Vec<&str> {
     if s.is_empty() { Vec::new() } else { s.split(',').collect() }
@@ -206,6 +244,68 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
             sql(env, "UPDATE bd_files SET state='uploaded' WHERE id=? AND state='uploading'", vec![TursoArg::text(&id)]).await?;
             let kick_msg = kick(env).await;
             ok(json!({"ok": true, "kick": kick_msg}))
+        }
+        // ── Ilova: to'g'ridan-to'g'ri (R2 va Actions'siz): bo'lak worker orqali Bot API'ga ketadi, token faqat shu yerda ──
+        (Method::Post, "/api/bd/new") => {
+            let b: Value = req.json().await.unwrap_or(json!({}));
+            let name = clean_name(b["name"].as_str().unwrap_or(""));
+            let size = jint(&b, "size");
+            if size <= 0 || size > MAX_SIZE {
+                return json_resp(&json!({"error": "hajm"}), 400);
+            }
+            let kind = if b["kind"].as_str() == Some("video") { "video" } else { "file" };
+            let mime: String = b["mime"].as_str().unwrap_or("").chars().filter(|c| c.is_ascii_graphic()).take(60).collect();
+            let id = new_id();
+            sql(env, "INSERT INTO bd_files (id,name,kind,mime,size,w,h,dur,state,chunks,created) VALUES (?,?,?,?,?,?,?,?,'direct',?,?)",
+                vec![TursoArg::text(&id), TursoArg::text(&name), TursoArg::text(kind), TursoArg::text(&mime), TursoArg::int(size),
+                     TursoArg::int(jint(&b, "w")), TursoArg::int(jint(&b, "h")), TursoArg::int(jint(&b, "dur")),
+                     TursoArg::int(chunks_of(size)), TursoArg::int(now_ms())]).await?;
+            ok(json!({"id": id, "part_size": CHUNK}))
+        }
+        (Method::Put, "/api/bd/chunk") => {
+            let (id, n) = (qs(&url, "id"), qs(&url, "n").parse::<usize>().ok());
+            let Some(n) = n else { return json_resp(&json!({"error": "so'rov"}), 400) };
+            if !id_ok(&id) {
+                return json_resp(&json!({"error": "so'rov"}), 400);
+            }
+            let Some(row) = first(&sql(env, "SELECT name,size,chunks,state,chunk_ids FROM bd_files WHERE id=?", vec![TursoArg::text(&id)]).await?) else {
+                return err404("fayl yo'q");
+            };
+            if row["state"].as_str() != Some("direct") {
+                return json_resp(&json!({"error": "holat"}), 409);
+            }
+            let size = row["size"].as_i64().unwrap_or(0) as u64;
+            let mut list: Vec<String> = split_ids(row["chunk_ids"].as_str().unwrap_or("")).into_iter().map(String::from).collect();
+            if n as i64 >= row["chunks"].as_i64().unwrap_or(0) || n > list.len() {
+                return json_resp(&json!({"error": "bo'lak raqami"}), 409);
+            }
+            let expect = CHUNK.min(size - n as u64 * CHUNK);
+            let bytes = req.bytes().await?;
+            if bytes.len() as u64 != expect {
+                return json_resp(&json!({"error": format!("hajm mos emas ({} != {expect})", bytes.len())}), 400);
+            }
+            let fname = format!("{}.part{:04}", row["name"].as_str().unwrap_or("fayl"), n);
+            let (fid, _mid) = tg_send_document(&tg_secret(env, "BD_BOT_TOKEN"), tg_channel_id(env), &fname, &bytes, expect).await?;
+            if n == list.len() { list.push(fid.clone()) } else { list[n] = fid.clone() }
+            sql(env, "UPDATE bd_files SET chunk_ids=? WHERE id=? AND state='direct'", vec![TursoArg::text(&list.join(",")), TursoArg::text(&id)]).await?;
+            ok(json!({"ok": true, "n": n}))
+        }
+        (Method::Post, "/api/bd/seal") => {
+            let b: Value = req.json().await.unwrap_or(json!({}));
+            let id = b["id"].as_str().unwrap_or("").to_string();
+            if !id_ok(&id) {
+                return json_resp(&json!({"error": "so'rov"}), 400);
+            }
+            let Some(row) = first(&sql(env, "SELECT chunks,chunk_ids FROM bd_files WHERE id=? AND state='direct'", vec![TursoArg::text(&id)]).await?) else {
+                return err404("fayl yo'q");
+            };
+            let want = row["chunks"].as_i64().unwrap_or(-1);
+            let have = split_ids(row["chunk_ids"].as_str().unwrap_or("")).len() as i64;
+            if want <= 0 || have != want {
+                return json_resp(&json!({"error": format!("bo'laklar yetarli emas ({have}/{want})")}), 409);
+            }
+            sql(env, "UPDATE bd_files SET state='ready' WHERE id=? AND state='direct'", vec![TursoArg::text(&id)]).await?;
+            ok(json!({"ok": true}))
         }
         (Method::Post, "/api/bd/thumb") => {
             let id = qs(&url, "id");

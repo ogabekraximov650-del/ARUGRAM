@@ -52,7 +52,7 @@ fun UploadScreen(onUploaded: () -> Unit) {
 
     Column(Modifier.fillMaxSize().background(AruColors.Bg).padding(20.dp)) {
         Text("Yuklash", color = AruColors.Text, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-        Text("Fayl avval R2 ga, keyin 18 MB bo'laklar bilan Telegram kanaliga saqlanadi.", color = AruColors.TextDim, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp, bottom = 20.dp))
+        Text("Fayl 18 MB bo'laklarga bo'linib, worker orqali Telegram kanaliga saqlanadi.", color = AruColors.TextDim, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp, bottom = 20.dp))
 
         Box(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(AruColors.Card)
@@ -79,7 +79,7 @@ fun UploadScreen(onUploaded: () -> Unit) {
                         busy = true; failed = false; message = null; sent = 0
                         scope.launch {
                             runCatching { Upload.run(ctx, p) { sent = it } }
-                                .onSuccess { message = "Yuklandi. Telegramga saqlanishi bir necha daqiqa olishi mumkin — bosh sahifada ko'rinadi."; picked = null; sent = 0; onUploaded() }
+                                .onSuccess { message = "Yuklandi — bosh sahifada ko'rinadi."; picked = null; sent = 0; onUploaded() }
                                 .onFailure { message = it.message ?: "Xato"; failed = true }
                             busy = false
                         }

@@ -55,18 +55,17 @@ object Upload {
     }
 
     /**
-     * Faylni 18 MiB bo'laklab worker orqali R2 ga yuboradi. [onProgress] — yuborilgan bayt.
-     * Xotira: bir vaqtda faqat bitta bo'lak (18 MiB).
+     * Faylni aniq 18 MiB bo'laklarga bo'lib (oxirgisi qisqa) worker orqali Telegram'ga yuboradi — R2 va Actions'siz.
+     * Bo'laklar tartib bilan birlashtirilsa asl fayl baytma-bayt tiklanadi. [onProgress] — yuborilgan bayt.
      */
     suspend fun run(ctx: Context, p: Picked, onProgress: (Long) -> Unit): String = withContext(Dispatchers.IO) {
         val info = if (p.isVideo) videoInfo(ctx, p.uri) else VideoInfo(0, 0, 0, null)
-        val init = Api.init(p.name, p.size, if (p.isVideo) "video" else "file", p.mime, info.w, info.h, info.durMs)
-        val parts = ArrayList<Pair<Int, String>>()
+        val init = Api.newFile(p.name, p.size, if (p.isVideo) "video" else "file", p.mime, info.w, info.h, info.durMs)
         val buf = ByteArray(init.partSize)
         var sent = 0L
         ctx.contentResolver.openInputStream(p.uri)!!.use { input ->
-            var n = 1
-            while (true) {
+            var n = 0
+            while (sent < p.size) {
                 var len = 0
                 while (len < buf.size) {
                     val r = input.read(buf, len, buf.size - len)
@@ -74,16 +73,15 @@ object Upload {
                     len += r
                 }
                 if (len == 0) break
-                val etag = Api.part(init.id, init.uploadId, n, buf, len)
-                parts.add(n to etag)
+                Api.chunk(init.id, n, buf, len)
                 sent += len
                 onProgress(sent)
                 n++
-                if (len < buf.size) break
             }
         }
+        if (sent != p.size) throw java.io.IOException("Fayl to'liq o'qilmadi ($sent / ${p.size})")
         info.jpeg?.let { runCatching { Api.thumb(init.id, it) } }
-        Api.finish(init.id, init.uploadId, parts)
+        Api.seal(init.id)
         init.id
     }
 }
