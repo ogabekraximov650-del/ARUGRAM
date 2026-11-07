@@ -119,14 +119,6 @@ object Api {
         call(Request.Builder().url(u).post(jpeg.toRequestBody("image/jpeg".toMediaType())).build())
     }
 
-    suspend fun finish(id: String, uploadId: String, parts: List<Pair<Int, String>>) = withContext(Dispatchers.IO) {
-        val body = buildJsonObject {
-            put("id", JsonPrimitive(id)); put("upload_id", JsonPrimitive(uploadId))
-            put("parts", JsonArray(parts.map { (n, e) -> buildJsonObject { put("n", JsonPrimitive(n)); put("etag", JsonPrimitive(e)) } }))
-        }.toString().toRequestBody(JSON)
-        call(Request.Builder().url(url("/api/bd/finish")).post(body).build())
-    }
-
     /**
      * `window` oynasini Telegramdan Cloudflare keshiga isitadi (worker `warm`). Qaytadi: true — kesh tayyor.
      * Bloklaydi (bir necha soniya), shu sabab IO oqimida chaqiriladi.
