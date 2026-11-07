@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -73,44 +74,61 @@ private class FsChrome(private val act: Activity) : WebChromeClient() {
     }
 }
 
+/** Pleyer rejimi: IFRAME — `<iframe src=embed>` (so'ralgan usul); DIRECT — embed sahifasi WebView'ning o'zida. Biri ishlamasa ikkinchisiga o'tish mumkin. */
+enum class PlayerMode(val label: String) { IFRAME("Pleyer: iframe"), DIRECT("Pleyer: to'g'ridan") }
+
 /**
- * DoodStream pleyeri: embed sahifasi (`<host>/e/<kod>`) WebView'ning O'ZIDA ochiladi (Cloudflare tekshiruvi va `X-Frame-Options`
- * tufayli boshqa sahifa ichidagi iframe qora qolardi). Boshqa saytga o'tishga urinish (reklama) bloklanadi.
+ * DoodStream pleyeri. IFRAME rejimida sahifa bazaviy manzili embed domeni (Referer/origin to'g'ri), uchinchi tomon cookie'lari yoqilgan
+ * (Cloudflare Turnstile iframe ichida shuni talab qiladi — avvalgi versiyada qora ekranning sababi shu bo'lishi mumkin).
+ * Boshqa saytga o'tishga urinish (reklama) bloklanadi.
  */
 @Composable
-fun EmbedPlayer(embed: String, modifier: Modifier = Modifier) {
+fun EmbedPlayer(embed: String, mode: PlayerMode, modifier: Modifier = Modifier) {
     val ctx = LocalContext.current
-    var loading by remember(embed) { mutableStateOf(true) }
-    Box(modifier.background(Color.Black)) {
-        AndroidView(
-            modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f),
-            factory = {
-                WebView(ctx).apply {
-                    settings.javaScriptEnabled = true
-                    settings.domStorageEnabled = true
-                    settings.mediaPlaybackRequiresUserGesture = false
-                    settings.javaScriptCanOpenWindowsAutomatically = false
-                    // "wv" belgisi olib tashlanadi: sayt oddiy Chrome deb biladi.
-                    settings.userAgentString = settings.userAgentString.replace("; wv", "")
-                    CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
-                    setBackgroundColor(AColor.BLACK)
-                    webChromeClient = FsChrome(ctx as Activity)
-                    val host = Uri.parse(embed).host.orEmpty()
-                    webViewClient = object : WebViewClient() {
-                        override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
-                            request.isForMainFrame && request.url.host != host
+    var loading by remember(embed, mode) { mutableStateOf(true) }
+    Box(modifier.background(Color.Black).aspectRatio(16f / 9f)) {
+        androidx.compose.runtime.key(embed, mode) {
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = {
+                    WebView(ctx).apply {
+                        settings.javaScriptEnabled = true
+                        settings.domStorageEnabled = true
+                        settings.mediaPlaybackRequiresUserGesture = false
+                        settings.javaScriptCanOpenWindowsAutomatically = false
+                        settings.setSupportMultipleWindows(false)
+                        // "wv" belgisi olib tashlanadi: sayt oddiy Chrome deb biladi.
+                        settings.userAgentString = settings.userAgentString.replace("; wv", "")
+                        CookieManager.getInstance().apply {
+                            setAcceptCookie(true)
+                            setAcceptThirdPartyCookies(this@apply, true)
+                        }
+                        setBackgroundColor(AColor.BLACK)
+                        webChromeClient = FsChrome(ctx as Activity)
+                        val host = Uri.parse(embed).host.orEmpty()
+                        webViewClient = object : WebViewClient() {
+                            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
+                                request.isForMainFrame && (mode == PlayerMode.IFRAME || request.url.host != host)
 
-                        override fun onPageFinished(view: WebView, url: String) {
-                            loading = false
+                            override fun onPageFinished(view: WebView, url: String) {
+                                loading = false
+                            }
+                        }
+                        if (mode == PlayerMode.IFRAME) {
+                            val html = """<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1">
+<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}iframe{position:fixed;left:0;top:0;width:100%;height:100%;border:0}</style></head>
+<body><iframe src="$embed" referrerpolicy="origin" allowfullscreen allow="autoplay; fullscreen; encrypted-media; picture-in-picture"></iframe></body></html>"""
+                            loadDataWithBaseURL("https://$host/", html, "text/html", "utf-8", null)
+                        } else {
+                            loadUrl(embed, mapOf("Referer" to "https://$host/"))
                         }
                     }
-                    loadUrl(embed, mapOf("Referer" to "https://$host/"))
-                }
-            },
-            onRelease = { it.destroy() },
-        )
+                },
+                onRelease = { it.destroy() },
+            )
+        }
         if (loading) {
-            Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f), contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = TubeRed)
             }
         }
@@ -134,13 +152,14 @@ fun WatchScreen(video: Video, onBack: () -> Unit, onOpen: (Video) -> Unit) {
     val clip = LocalClipboardManager.current
     var others by remember { mutableStateOf(listOf<Video>()) }
     var copied by remember(video.code) { mutableStateOf(false) }
+    var mode by remember { mutableStateOf(PlayerMode.IFRAME) }
     LaunchedEffect(video.code) {
         val r = Api.videos(1)
         if (r.error == null) others = r.videos.filter { it.code != video.code }
     }
     // Pleyer tepada qotib turadi, pastda ma'lumot va keyingi videolar aylanadi.
     Column(Modifier.statusBarsPadding()) {
-        EmbedPlayer(video.embed, Modifier.fillMaxWidth())
+        EmbedPlayer(video.embed, mode, Modifier.fillMaxWidth())
         LazyColumn(Modifier.fillMaxWidth()) {
             item {
                 Column(Modifier.padding(12.dp)) {
@@ -154,6 +173,7 @@ fun WatchScreen(video: Video, onBack: () -> Unit, onOpen: (Video) -> Unit) {
                     )
                     Row(Modifier.padding(top = 12.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         ActionChip("← Orqaga", onBack)
+                        ActionChip(mode.label) { mode = if (mode == PlayerMode.IFRAME) PlayerMode.DIRECT else PlayerMode.IFRAME }
                         ActionChip(if (copied) "✓ Nusxalandi" else "Havolani nusxalash") {
                             clip.setText(AnnotatedString(video.embed))
                             copied = true

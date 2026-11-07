@@ -17,6 +17,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
@@ -52,7 +53,10 @@ class MainActivity : ComponentActivity() {
         TubeCore.load()
         setContent {
             MaterialTheme(colorScheme = TubeColors) {
-                TubeApp()
+                // Surface: matn rangi (contentColor) oq bo'lishi uchun; usiz Text qora chiqadi.
+                Surface(color = MaterialTheme.colorScheme.background, contentColor = Color.White) {
+                    TubeApp()
+                }
             }
         }
     }
