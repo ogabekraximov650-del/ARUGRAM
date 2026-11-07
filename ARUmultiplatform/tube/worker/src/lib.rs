@@ -169,8 +169,10 @@ async fn route(mut req: Request, env: &Env, url: &Url, path: &str) -> Result<Res
             check_ok(&v)?;
             let files = v["result"]["files"].as_array().cloned().unwrap_or_default();
             let mut videos: Vec<Value> = files.iter().map(map_file).collect();
-            let dims = futures_util::future::join_all(videos.iter().map(|v| thumb_size(st(&v["thumb"])))).await;
-            for (v, (w, h)) in videos.iter_mut().zip(dims) {
+            // Bepul rejada bitta so'rovda 50 ta subrequest cheklovi bor: muqova o'lchami faqat birinchi 40 ta uchun olinadi.
+            let dims = futures_util::future::join_all(videos.iter().take(40).map(|v| thumb_size(st(&v["thumb"])))).await;
+            for (i, v) in videos.iter_mut().enumerate() {
+                let (w, h) = dims.get(i).copied().unwrap_or((0, 0));
                 v["w"] = json!(w);
                 v["h"] = json!(h);
             }

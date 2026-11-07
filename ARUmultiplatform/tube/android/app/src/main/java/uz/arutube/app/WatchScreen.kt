@@ -158,34 +158,37 @@ private fun ActionChip(label: String, onClick: () -> Unit) {
 }
 
 @Composable
-fun WatchScreen(video: Video, onBack: () -> Unit, onOpen: (Video) -> Unit) {
+fun WatchScreen(video: Video, holder: PlayerHolder, onMinimize: () -> Unit, onOpen: (Video) -> Unit) {
     val ctx = LocalContext.current
     val act = ctx as Activity
     val clip = LocalClipboardManager.current
     var others by remember { mutableStateOf(listOf<Video>()) }
     var copied by remember(video.code) { mutableStateOf(false) }
-    var mode by remember { mutableStateOf(PlayerMode.NATIVE) }
-    var direct by remember(video.code) { mutableStateOf<Direct?>(null) }
+    var mode by remember(video.code) { mutableStateOf(PlayerMode.NATIVE) }
     var note by remember(video.code) { mutableStateOf("") }
     var fs by remember { mutableStateOf(false) }
     var adBlock by remember { mutableStateOf(true) }
 
     LaunchedEffect(video.code) {
         val r = Api.videos(1)
-        if (r.error == null) others = r.videos.filter { it.code != video.code }
+        if (r.error == null) {
+            others = r.videos.filter { it.code != video.code }
+            Repo.merge(r.videos)
+        }
     }
-    // Reklamasiz rejim: yashirin WebView to'g'ridan-to'g'ri havolani topadi; topilmasa iframe'ga o'tiladi.
+    // Reklamasiz rejim: pleyer holder'da (mini pleyer bilan umumiy); topilmasa iframe'ga o'tiladi.
     LaunchedEffect(video.code, mode) {
-        if (mode == PlayerMode.NATIVE && direct == null) {
-            note = "Reklamasiz havola tayyorlanmoqda…"
-            val d = DirectLink.resolve(act, video.embed)
-            if (d != null) {
-                direct = d
-                note = ""
-            } else {
-                note = "Reklamasiz havola topilmadi (captcha yoki tarmoq) — iframe ochildi."
-                mode = PlayerMode.IFRAME
-            }
+        if (mode == PlayerMode.NATIVE) {
+            note = ""
+            holder.open(video, act)
+        } else {
+            holder.close()
+        }
+    }
+    LaunchedEffect(holder.status) {
+        if (holder.status == "failed" && mode == PlayerMode.NATIVE && holder.video?.code == video.code) {
+            note = "Reklamasiz havola topilmadi (captcha yoki tarmoq) — iframe ochildi."
+            mode = PlayerMode.IFRAME
         }
     }
     // To'liq ekran: gorizontal + tizim panellari yashirin.
@@ -202,25 +205,21 @@ fun WatchScreen(video: Video, onBack: () -> Unit, onOpen: (Video) -> Unit) {
     }
     BackHandler(enabled = fs) { fs = false }
 
-    val d = direct
-    if (fs && mode == PlayerMode.NATIVE && d != null) {
-        NativePlayer(d, true, { fs = it }, { note = "Pleyer xatosi: $it"; mode = PlayerMode.IFRAME; direct = null; fs = false }, Modifier.fillMaxSize().background(Color.Black))
+    val exo = if (holder.video?.code == video.code) holder.exo else null
+    if (fs && mode == PlayerMode.NATIVE && exo != null) {
+        PlayerSurface(exo, { fs = it }, Modifier.fillMaxSize())
         return
     }
 
     // Pleyer tepada qotib turadi, pastda ma'lumot va keyingi videolar aylanadi.
     Column(Modifier.statusBarsPadding()) {
         if (mode == PlayerMode.NATIVE) {
-            if (d == null) {
+            if (exo == null) {
                 Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(Color.Black), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(color = TubeRed)
                 }
             } else {
-                NativePlayer(
-                    d, false, { fs = it },
-                    { err -> note = "Pleyer xatosi ($err) — iframe ochildi."; mode = PlayerMode.IFRAME; direct = null },
-                    Modifier.fillMaxWidth().aspectRatio(16f / 9f),
-                )
+                PlayerSurface(exo, { fs = it }, Modifier.fillMaxWidth().aspectRatio(16f / 9f))
             }
         } else {
             EmbedPlayer(video.embed, mode, Modifier.fillMaxWidth(), adBlock)
@@ -238,11 +237,11 @@ fun WatchScreen(video: Video, onBack: () -> Unit, onOpen: (Video) -> Unit) {
                     )
                     if (note.isNotEmpty()) Text(note, fontSize = 12.sp, color = Color(0xFFFFB74D), modifier = Modifier.padding(top = 6.dp))
                     Row(Modifier.padding(top = 12.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        ActionChip("← Orqaga", onBack)
+                        ActionChip("⌄ Kichraytirish", onMinimize)
+                        ActionChip(if (LocalStore.isLater(video.code)) "✓ Keyin ko'rish" else "+ Keyin ko'rish") { LocalStore.toggleLater(video) }
                         ActionChip(mode.label) {
                             val all = PlayerMode.values()
                             mode = all[(mode.ordinal + 1) % all.size]
-                            if (mode == PlayerMode.NATIVE) direct = null
                         }
                         ActionChip(if (adBlock) "Reklama bloki: yoqilgan" else "Reklama bloki: o'chiq") { adBlock = !adBlock }
                         ActionChip(if (copied) "✓ Nusxalandi" else "Havolani nusxalash") {
@@ -261,7 +260,7 @@ fun WatchScreen(video: Video, onBack: () -> Unit, onOpen: (Video) -> Unit) {
                 }
                 Spacer(Modifier.height(4.dp))
             }
-            items(others, key = { it.code }) { v -> VideoCard(v) { onOpen(v) } }
+            items(others, key = { it.code }) { v -> VideoCard(v, progress = LocalStore.progress(v.code)?.fraction ?: 0f) { onOpen(v) } }
         }
     }
 }

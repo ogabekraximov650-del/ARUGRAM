@@ -20,7 +20,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 
 @OptIn(UnstableApi::class)
-private fun buildPlayer(ctx: Context, d: Direct, loop: Boolean, onError: (String) -> Unit): ExoPlayer {
+fun buildPlayer(ctx: Context, d: Direct, loop: Boolean, onError: (String) -> Unit): ExoPlayer {
     val http = DefaultHttpDataSource.Factory()
         .setUserAgent(d.userAgent)
         .setAllowCrossProtocolRedirects(true)

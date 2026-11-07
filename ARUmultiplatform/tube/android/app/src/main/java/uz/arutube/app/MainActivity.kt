@@ -1,5 +1,6 @@
 package uz.arutube.app
 
+import android.app.Activity
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -11,7 +12,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -21,16 +24,23 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.delay
 
 sealed interface Screen {
     data object Home : Screen
+    data object Search : Screen
+    data object Library : Screen
     data class Watch(val video: Video) : Screen
     data object Upload : Screen
     data class Shorts(val list: List<Video>, val start: Int) : Screen
@@ -52,6 +62,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         TubeCore.load()
+        LocalStore.init(applicationContext)
         setContent {
             MaterialTheme(colorScheme = TubeColors) {
                 // Surface: matn rangi (contentColor) oq bo'lishi uchun; usiz Text qora chiqadi.
@@ -65,25 +76,46 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun TubeApp() {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val holder = remember { PlayerHolder(ctx.applicationContext, scope) }
     var screen by remember { mutableStateOf<Screen>(Screen.Home) }
     // Yuklashdan qaytganda ro'yxat yangilansin.
     var refresh by remember { mutableIntStateOf(0) }
+
+    // Ijro o'rni har 5 soniyada tarixga yoziladi ("davom ettirish" uchun).
+    LaunchedEffect(holder.exo) {
+        while (holder.exo != null) {
+            delay(5_000)
+            holder.save()
+        }
+    }
+    DisposableEffect(Unit) { onDispose { holder.close() } }
     BackHandler(enabled = screen !is Screen.Home) { screen = Screen.Home }
+
+    val open: (Video) -> Unit = { screen = Screen.Watch(it) }
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Box(Modifier.weight(1f)) {
             when (val s = screen) {
                 is Screen.Home -> HomeScreen(
                     refreshKey = refresh,
-                    onOpen = { screen = Screen.Watch(it) },
-                    onOpenShort = { list, i -> screen = Screen.Shorts(list, i) },
+                    onOpen = open,
+                    onOpenShort = { list, i ->
+                        holder.close()
+                        screen = Screen.Shorts(list, i)
+                    },
                 )
-                is Screen.Watch -> WatchScreen(video = s.video, onBack = { screen = Screen.Home }, onOpen = { screen = Screen.Watch(it) })
+                is Screen.Search -> SearchScreen(onOpen = open)
+                is Screen.Library -> LibraryScreen(onOpen = open)
+                is Screen.Watch -> WatchScreen(video = s.video, holder = holder, onMinimize = { screen = Screen.Home }, onOpen = open)
                 is Screen.Shorts -> ShortsScreen(list = s.list, start = s.start, onBack = { screen = Screen.Home })
                 is Screen.Upload -> UploadScreen(onBack = { screen = Screen.Home }, onUploaded = { refresh++ })
             }
         }
-        if (screen !is Screen.Watch && screen !is Screen.Shorts) {
+        val full = screen is Screen.Watch || screen is Screen.Shorts
+        if (!full) {
+            MiniPlayer(holder, onOpen = open)
             NavigationBar(containerColor = Color(0xFF0F0F0F), modifier = Modifier.navigationBarsPadding()) {
                 val colors = NavigationBarItemDefaults.colors(
                     selectedIconColor = Color.White,
@@ -100,10 +132,24 @@ fun TubeApp() {
                     colors = colors,
                 )
                 NavigationBarItem(
+                    selected = screen is Screen.Search,
+                    onClick = { screen = Screen.Search },
+                    icon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                    label = { Text("Qidirish") },
+                    colors = colors,
+                )
+                NavigationBarItem(
                     selected = screen is Screen.Upload,
                     onClick = { screen = Screen.Upload },
                     icon = { Icon(Icons.Filled.Add, contentDescription = null) },
                     label = { Text("Yuklash") },
+                    colors = colors,
+                )
+                NavigationBarItem(
+                    selected = screen is Screen.Library,
+                    onClick = { screen = Screen.Library },
+                    icon = { Icon(Icons.Filled.Favorite, contentDescription = null) },
+                    label = { Text("Kutubxona") },
                     colors = colors,
                 )
             }

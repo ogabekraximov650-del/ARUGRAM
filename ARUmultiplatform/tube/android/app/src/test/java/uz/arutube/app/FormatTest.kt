@@ -53,6 +53,15 @@ class FormatTest {
         assertEquals(false, Video(duration = 6001).isShort)
     }
 
+    @Test fun davomEttirish() {
+        val v = Video(code = "a")
+        assertEquals(true, Saved(v, posMs = 60_000, durMs = 6_000_000).inProgress)
+        assertEquals(false, Saved(v, posMs = 2_000, durMs = 6_000_000).inProgress)
+        assertEquals(false, Saved(v, posMs = 5_990_000, durMs = 6_000_000).inProgress)
+        assertEquals(0.5f, Saved(v, posMs = 50, durMs = 100).fraction, 0.001f)
+        assertEquals(0f, Saved(v).fraction, 0f)
+    }
+
     @Test fun yuklashJavobi() {
         val r = Api.parseUpload("""{"msg":"OK","status":200,"result":[{"filecode":"x1","download_url":"https://d/d/x1"}]}""")
         assertEquals("x1", r.result[0].filecode)

@@ -71,7 +71,7 @@ fun Avatar(seed: String, size: Int = 36) {
 
 /** YouTube'dagidek karta: to'liq kenglikdagi 16:9 muqova, davomiylik belgisi, kanal belgisi, nom, "ko'rish · vaqt". */
 @Composable
-fun VideoCard(v: Video, onClick: () -> Unit) {
+fun VideoCard(v: Video, progress: Float = 0f, onClick: () -> Unit) {
     Column(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(bottom = 20.dp)) {
         Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(Color(0xFF222222))) {
             if (v.thumb.isNotBlank()) {
@@ -94,6 +94,9 @@ fun VideoCard(v: Video, onClick: () -> Unit) {
                     .background(Color(0xCC000000))
                     .padding(horizontal = 5.dp, vertical = 2.dp),
             )
+            if (progress > 0f) {
+                Box(Modifier.align(Alignment.BottomStart).fillMaxWidth(progress.coerceIn(0f, 1f)).height(3.dp).background(TubeRed))
+            }
         }
         Row(Modifier.padding(start = 12.dp, end = 12.dp, top = 12.dp), verticalAlignment = Alignment.Top) {
             Avatar("ARUTUBE")
@@ -109,6 +112,20 @@ fun VideoCard(v: Video, onClick: () -> Unit) {
                 )
             }
         }
+    }
+}
+
+/** "Davom ettirish" qatoridagi karta: gorizontal ro'yxatda, ostida ko'rish chizig'i. */
+@Composable
+fun ContinueCard(sv: Saved, onClick: () -> Unit) {
+    Column(Modifier.width(220.dp).clickable(onClick = onClick)) {
+        Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(10.dp)).background(Color(0xFF222222))) {
+            if (sv.video.thumb.isNotBlank()) {
+                AsyncImage(model = sv.video.thumb, contentDescription = sv.video.title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            }
+            Box(Modifier.align(Alignment.BottomStart).fillMaxWidth(sv.fraction).height(3.dp).background(TubeRed))
+        }
+        Text(sv.video.title.ifBlank { sv.video.code }, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
     }
 }
 
@@ -182,6 +199,7 @@ fun HomeScreen(refreshKey: Int, onOpen: (Video) -> Unit, onOpenShort: (List<Vide
         } else {
             error = null
             videos = if (p == 1) r.videos else videos + r.videos
+            Repo.merge(r.videos)
             page = p
             pages = r.pages
         }
@@ -251,6 +269,17 @@ fun HomeScreen(refreshKey: Int, onOpen: (Video) -> Unit, onOpenShort: (List<Vide
         LazyColumn(Modifier.fillMaxWidth().padding(top = 8.dp)) {
             if (loading && videos.isEmpty()) {
                 items(3) { SkeletonCard() }
+            }
+            val cont = LocalStore.history.filter { it.inProgress }
+            if (cont.isNotEmpty() && query.isBlank()) {
+                item(key = "continue") {
+                    Column(Modifier.padding(bottom = 16.dp)) {
+                        Text("Davom ettirish", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+                        androidx.compose.foundation.lazy.LazyRow(contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            items(cont, key = { it.video.code }) { sv -> ContinueCard(sv) { onOpen(sv.video) } }
+                        }
+                    }
+                }
             }
             if (shorts.isNotEmpty()) {
                 item(key = "shorts-header") {
