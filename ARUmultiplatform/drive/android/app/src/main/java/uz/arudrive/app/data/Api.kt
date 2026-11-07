@@ -127,6 +127,11 @@ object Api {
         throw last ?: java.io.IOException("qism yuborilmadi")
     }
 
+    suspend fun thumb(id: String, jpeg: ByteArray) = withContext(Dispatchers.IO) {
+        val u = url("/api/bd/thumb").toHttpUrl().newBuilder().addQueryParameter("id", id).build()
+        call(Request.Builder().url(u).post(jpeg.toRequestBody("image/jpeg".toMediaType())).build())
+    }
+
     suspend fun finish(id: String, uploadId: String, parts: List<Pair<Int, String>>) = withContext(Dispatchers.IO) {
         val body = buildJsonObject {
             put("id", JsonPrimitive(id)); put("upload_id", JsonPrimitive(uploadId))
