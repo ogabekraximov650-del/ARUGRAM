@@ -21,12 +21,15 @@ use worker::{Bucket, FixedLengthStream, Range, UploadedPart};
 
 /// Bitta Telegram bo'lagi: bot 20 MB gacha yuklab oladi, 50 MB gacha yuklaydi.
 pub(crate) const CHUNK: u64 = 18 * 1024 * 1024;
+/// Ilovadan R2 ga yuklash qismi (ko'p qismli yuklash): 64 MiB. Cloudflare so'rov tanasi 100 MB bilan cheklangan, shu sabab bitta so'rovda
+/// butun faylni yuborib bo'lmaydi; R2 da baribir BITTA butun obyekt bo'ladi, Telegram bo'laklari (18 MiB) esa worker tomonida `Range` bilan olinadi.
+pub(crate) const PART: u64 = 64 * 1024 * 1024;
+/// Bitta qism uchun qat'iy chegara (100 MB so'rov chegarasidan past).
+const PART_MAX: u64 = 96 * 1024 * 1024;
 const UP: &str = "bd/up/";
 /// Fayl hajmining yuqori chegarasi (R2 multipart: 10 000 bo'lak x 18 MiB ≈ 175 GB; amalda 4 GB).
 /// Eng katta fayl: 50 GiB (R2 ko'p qismli yuklash 10 000 qismgacha: 18 MiB × 10 000 ≈ 175 GiB, zaxira bilan).
 const MAX_SIZE: i64 = 50 * 1024 * 1024 * 1024;
-/// Worker o'z manzili (zanjirli davom ettirish uchun).
-const ORIGIN: &str = "https://arudrive.uzcom.workers.dev";
 const LEASE_MS: i64 = 30 * 60 * 1000;
 /// Worker o'zi saqlayotganda ijara qisqa: har bo'lakdan keyin yangilanadi, worker o'lsa 2 daqiqada qayta navbatga qaytadi.
 const WORKER_LEASE_MS: i64 = 2 * 60 * 1000;
@@ -159,13 +162,17 @@ pub(crate) async fn process(env: &Env, budget_ms: i64) -> Result<String> {
 pub(crate) async fn process_and_chain(env: &Env) {
     if let Ok((_, progressed, more)) = process_ex(env, 21_000).await {
         if more && progressed {
+            // O'ZIGA xizmat ulanishi (`SELF`): worker o'z `workers.dev` manziliga so'rov yubora olmaydi (Cloudflare sikl deb to'sadi).
             let h = Headers::new();
             let _ = h.set("X-Encode-Token", &tg_secret(env, "ENCODE_TOKEN"));
-            if let Ok(req) = Request::new_with_init(
-                &format!("{ORIGIN}/api/bd/process?bg=1"),
-                RequestInit::new().with_method(Method::Post).with_headers(h),
+            if let (Ok(svc), Ok(req)) = (
+                env.service("SELF"),
+                Request::new_with_init(
+                    "https://self/api/bd/process?bg=1",
+                    RequestInit::new().with_method(Method::Post).with_headers(h),
+                ),
             ) {
-                let _ = Fetch::Request(req).send().await;
+                let _ = svc.fetch_request(req).await;
             }
         }
     }
@@ -351,7 +358,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, ctx: &Context, path: &str
                 vec![TursoArg::text(&id), TursoArg::text(&name), TursoArg::text(kind), TursoArg::text(&mime), TursoArg::int(size),
                      TursoArg::int(jint(&b, "w")), TursoArg::int(jint(&b, "h")), TursoArg::int(jint(&b, "dur")),
                      TursoArg::text(&upload_id), TursoArg::int(chunks_of(size)), TursoArg::int(now_ms())]).await?;
-            ok(json!({"id": id, "upload_id": upload_id, "part_size": CHUNK}))
+            ok(json!({"id": id, "upload_id": upload_id, "part_size": PART}))
         }
         (Method::Put, "/api/bd/part") => {
             let (id, uid, n) = (qs(&url, "id"), qs(&url, "uid"), qs(&url, "n").parse::<u16>().unwrap_or(0));
@@ -360,7 +367,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, ctx: &Context, path: &str
                 return json_resp(&json!({"error": "so'rov"}), 400);
             }
             let len = req.headers().get("Content-Length").ok().flatten().and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
-            if len == 0 || len > CHUNK {
+            if len == 0 || len > PART_MAX {
                 return json_resp(&json!({"error": "hajm"}), 400);
             }
             // OQIM: tana xotiraga yig'ilmaydi, R2'ga to'g'ridan-to'g'ri uzatiladi.
@@ -430,9 +437,13 @@ pub(crate) async fn route(mut req: Request, env: &Env, ctx: &Context, path: &str
         }
         // Zanjir ishlashini tekshirish: worker o'z manziliga so'rov yubora oladimi.
         (Method::Get, "/api/bd/chain-test") => {
-            let st = match Fetch::Request(Request::new(&format!("{ORIGIN}/health"), Method::Get)?).send().await {
+            let svc = match env.service("SELF") {
+                Ok(s) => s,
+                Err(e) => return json_resp(&json!({"ok": false, "error": format!("SELF ulanishi yo'q: {e}")}), 200),
+            };
+            let st = match svc.fetch_request(Request::new("https://self/health", Method::Get)?).await {
                 Ok(r) => r.status_code() as i64,
-                Err(e) => { return json_resp(&json!({"ok": false, "error": e.to_string()}), 200); }
+                Err(e) => return json_resp(&json!({"ok": false, "error": e.to_string()}), 200),
             };
             ok(json!({"ok": st == 200, "status": st}))
         }

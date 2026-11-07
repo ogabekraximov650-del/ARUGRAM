@@ -14,3 +14,8 @@ bucket_name = "arumediatv"
 # Har 10 daqiqada: R2 -> Telegram saqlash navbatini davom ettiradi (yuklash tugagan zahoti saqlash baribir darhol boshlanadi).
 [triggers]
 crons = ["*/10 * * * *"]
+
+# O'ziga xizmat ulanishi: katta fayl saqlashda worker o'zini zanjir bilan qayta chaqiradi (workers.dev manziliga o'zi so'rov yubora olmaydi).
+[[services]]
+binding = "SELF"
+service = "arudrive"

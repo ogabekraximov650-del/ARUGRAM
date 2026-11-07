@@ -66,44 +66,33 @@ object Upload {
         val info = if (p.isVideo) videoInfo(ctx, p.uri) else VideoInfo(0, 0, 0, null)
         note("Yozuv ochilmoqda…")
         val init = Api.init(p.name, p.size, if (p.isVideo) "video" else "file", p.mime, info.w, info.h, info.durMs)
-        // PARALLEL: bir vaqtda 4 tagacha qism R2 ga ketadi (har biri alohida ulanishda) — sekin/uzoq tarmoqda ancha tez.
-        // Xotira: 4 ta 18 MiB bufer qayta ishlatiladi (havza), o'qish faqat bo'sh bufer chiqqanda davom etadi.
-        val pool = kotlinx.coroutines.channels.Channel<ByteArray>(PARALLEL)
-        repeat(PARALLEL) { pool.trySend(ByteArray(init.partSize)) }
+        // Fayl R2 ga BITTA butun obyekt sifatida yig'iladi; ilova uni 64 MiB qismlarga (Cloudflare so'rov chegarasi 100 MB) OQIM bilan
+        // yuboradi — xotirada bufer yo'q. Parallel: 4 ta qism bir vaqtda. Telegram bo'laklarini (18 MiB) worker o'zi `Range` bilan oladi.
+        val partSize = init.partSize
+        val total = p.size
+        val partCount = ((total + partSize - 1) / partSize).toInt()
         val parts = java.util.concurrent.ConcurrentLinkedQueue<Pair<Int, String>>()
         val partBytes = java.util.concurrent.ConcurrentHashMap<Int, Long>()
-        var sent = 0L
+        val gate = kotlinx.coroutines.sync.Semaphore(PARALLEL)
         kotlinx.coroutines.coroutineScope {
-            val jobs = ArrayList<kotlinx.coroutines.Deferred<Unit>>()
-            ctx.contentResolver.openInputStream(p.uri)!!.use { input ->
-                var n = 1
-                while (sent < p.size) {
-                    val buf = pool.receive()
-                    var len = 0
-                    while (len < buf.size) {
-                        val r = input.read(buf, len, buf.size - len)
-                        if (r < 0) break
-                        len += r
+            (1..partCount).map { n ->
+                async {
+                    gate.acquire()
+                    try {
+                        val off = (n - 1) * partSize
+                        val len = minOf(partSize, total - off)
+                        val body = Api.FileSliceBody(ctx, p.uri, off, len) { b -> partBytes[n] = b; onProgress(partBytes.values.sum()) }
+                        val etag = Api.part(init.id, init.uploadId, n, body, note)
+                        parts.add(n to etag)
+                        partBytes[n] = len
+                        onProgress(partBytes.values.sum())
+                    } finally {
+                        gate.release()
                     }
-                    if (len == 0) { pool.send(buf); break }
-                    sent += len
-                    val partN = n
-                    val l = len
-                    jobs += async {
-                        try {
-                            val etag = Api.part(init.id, init.uploadId, partN, buf, l, { b -> partBytes[partN] = b; onProgress(partBytes.values.sum()) }, note)
-                            parts.add(partN to etag)
-                            partBytes[partN] = l.toLong()
-                            onProgress(partBytes.values.sum())
-                        } finally {
-                            pool.send(buf)
-                        }
-                    }
-                    n++
                 }
-            }
-            jobs.forEach { it.await() }
+            }.forEach { it.await() }
         }
+        val sent = partBytes.values.sum()
         if (sent != p.size) throw java.io.IOException("Fayl to'liq o'qilmadi ($sent / ${p.size})")
         // Kichik rasm fayl TO'LIQ yuklangandan KEYIN qo'shiladi (butun fayl R2 da, saqlash boshlanishidan oldin).
         info.jpeg?.let {

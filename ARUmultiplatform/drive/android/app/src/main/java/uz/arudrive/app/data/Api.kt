@@ -46,7 +46,7 @@ private class SignInterceptor : Interceptor {
 }
 
 object Api {
-    const val PART_FALLBACK = 18 * 1024 * 1024
+    const val PART_FALLBACK = 64L * 1024 * 1024
     /** Worker bilan bir xil: kesh oynasi = BITTA bo'lak (18 MiB). */
     const val WARM_WINDOW = 18L * 1024 * 1024
     private val json = Json { ignoreUnknownKeys = true }
@@ -81,7 +81,7 @@ object Api {
 
     fun thumbUrl(id: String) = url("/api/bd/thumb/$id.jpg")
 
-    class Init(val id: String, val uploadId: String, val partSize: Int)
+    class Init(val id: String, val uploadId: String, val partSize: Long)
 
     /** Butun fayl R2 ga yuklanadi (ko'p qismli): yozuv + R2 yuklash identifikatori. */
     suspend fun init(name: String, size: Long, kind: String, mime: String, w: Int, h: Int, dur: Long): Init = withContext(Dispatchers.IO) {
@@ -90,33 +90,60 @@ object Api {
             put("mime", JsonPrimitive(mime)); put("w", JsonPrimitive(w)); put("h", JsonPrimitive(h)); put("dur", JsonPrimitive(dur))
         }.toString().toRequestBody(JSON)
         val o = call(Request.Builder().url(url("/api/bd/init")).post(body).build())
-        Init(o["id"]!!.jsonPrimitive.content, o["upload_id"]!!.jsonPrimitive.content, o["part_size"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: PART_FALLBACK)
+        Init(o["id"]!!.jsonPrimitive.content, o["upload_id"]!!.jsonPrimitive.content, o["part_size"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: PART_FALLBACK)
     }
 
-    /** Tanani 64 KB lik bo'laklab yozadi va yozilgan baytni xabar qiladi (yuborish jarayoni ko'rinadi). */
-    private class ProgressBody(val bytes: ByteArray, val len: Int, val onBytes: (Long) -> Unit) : okhttp3.RequestBody() {
+    /**
+     * Fayldan BIR QISM (offset..offset+len) OQIM bilan yuboriladi: xotirada bufer YO'Q (64 MiB qismlar parallel ketsa ham xotira
+     * o'smaydi). Qayta urinishda tana qayta ochiladi. [onBytes] — shu qismdan yuborilgan bayt.
+     */
+    class FileSliceBody(
+        private val ctx: android.content.Context,
+        private val uri: android.net.Uri,
+        private val offset: Long,
+        private val len: Long,
+        private val onBytes: (Long) -> Unit,
+    ) : okhttp3.RequestBody() {
         override fun contentType() = "application/octet-stream".toMediaType()
-        override fun contentLength() = len.toLong()
+        override fun contentLength() = len
+        override fun isOneShot() = false
         override fun writeTo(sink: okio.BufferedSink) {
-            var off = 0
-            while (off < len) {
-                val n = minOf(65536, len - off)
-                sink.write(bytes, off, n)
-                sink.flush()
-                off += n
-                onBytes(off.toLong())
+            val pfd = ctx.contentResolver.openFileDescriptor(uri, "r")
+            val fis = if (pfd != null) java.io.FileInputStream(pfd.fileDescriptor) else null
+            val input: java.io.InputStream = try {
+                if (fis != null) { fis.channel.position(offset); fis } else throw java.io.IOException("fd yo'q")
+            } catch (_: Exception) {
+                // Qidirib bo'lmaydigan manba: boshidan o'tkazib yuboriladi.
+                val st = ctx.contentResolver.openInputStream(uri)!!
+                var left = offset
+                while (left > 0) { val k = st.skip(left); if (k <= 0) break; left -= k }
+                st
+            }
+            try {
+                val buf = ByteArray(64 * 1024)
+                var done = 0L
+                while (done < len) {
+                    val r = input.read(buf, 0, minOf(buf.size.toLong(), len - done).toInt())
+                    if (r < 0) throw java.io.IOException("fayl kutilganidan qisqa")
+                    sink.write(buf, 0, r)
+                    done += r
+                    onBytes(done)
+                }
+            } finally {
+                runCatching { input.close() }
+                runCatching { pfd?.close() }
             }
         }
     }
 
-    /** R2 ga `n`-qismni (1 dan) yuboradi; katta fayl (GB) soatlab yuklanadi, shu sabab 8 marta urinadi (kutish 15 s gacha); qaytadi: ETag. */
-    suspend fun part(id: String, uploadId: String, n: Int, bytes: ByteArray, len: Int, onBytes: (Long) -> Unit, note: (String) -> Unit): String = withContext(Dispatchers.IO) {
+    /** R2 ga `n`-qismni (1 dan) yuboradi; katta fayl soatlab yuklanadi, shu sabab 8 marta urinadi (kutish 15 s gacha); qaytadi: ETag. */
+    suspend fun part(id: String, uploadId: String, n: Int, body: okhttp3.RequestBody, note: (String) -> Unit): String = withContext(Dispatchers.IO) {
         var last: Exception? = null
         repeat(8) { attempt ->
             try {
                 note("Yuborilmoqda (${attempt + 1}/8)…")
                 val u = url("/api/bd/part").toHttpUrl().newBuilder().addQueryParameter("id", id).addQueryParameter("uid", uploadId).addQueryParameter("n", n.toString()).build()
-                val etag = call(Request.Builder().url(u).put(ProgressBody(bytes, len, onBytes)).build())["etag"]!!.jsonPrimitive.content
+                val etag = call(Request.Builder().url(u).put(body).build())["etag"]!!.jsonPrimitive.content
                 note("Qism qabul qilindi")
                 return@withContext etag
             } catch (e: Exception) {
