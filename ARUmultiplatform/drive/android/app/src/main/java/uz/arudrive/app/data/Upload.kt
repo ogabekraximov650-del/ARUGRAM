@@ -55,18 +55,23 @@ object Upload {
     }
 
     /**
-     * Faylni aniq 18 MiB bo'laklarga bo'lib (oxirgisi qisqa) worker orqali Telegram'ga yuboradi — R2 va Actions'siz.
-     * Bo'laklar tartib bilan birlashtirilsa asl fayl baytma-bayt tiklanadi. [onProgress] — yuborilgan bayt.
+     * Faylni BUTUN holda R2 ga yuboradi (18 MiB qismlar bilan, ko'p qismli yuklash); keyin ikkinchi akkauntdagi Actions
+     * uni 18 MiB bo'laklab Telegram'ga saqlaydi (worker `finish` da ishga tushiradi). [onProgress] — yuborilgan bayt.
      */
     suspend fun run(ctx: Context, p: Picked, note: (String) -> Unit = {}, onProgress: (Long) -> Unit): String = withContext(Dispatchers.IO) {
         note("Video tahlil qilinmoqda…")
         val info = if (p.isVideo) videoInfo(ctx, p.uri) else VideoInfo(0, 0, 0, null)
         note("Yozuv ochilmoqda…")
-        val init = Api.newFile(p.name, p.size, if (p.isVideo) "video" else "file", p.mime, info.w, info.h, info.durMs)
+        val init = Api.init(p.name, p.size, if (p.isVideo) "video" else "file", p.mime, info.w, info.h, info.durMs)
+        info.jpeg?.let {
+            note("Kichik rasm yuborilmoqda…")
+            runCatching { Api.thumb(init.id, it) }.onFailure { e -> note("Rasm yuborilmadi: ${e.message}") }
+        }
+        val parts = ArrayList<Pair<Int, String>>()
         val buf = ByteArray(init.partSize)
         var sent = 0L
         ctx.contentResolver.openInputStream(p.uri)!!.use { input ->
-            var n = 0
+            var n = 1
             while (sent < p.size) {
                 var len = 0
                 while (len < buf.size) {
@@ -76,17 +81,16 @@ object Upload {
                 }
                 if (len == 0) break
                 val base = sent
-                Api.chunk(init.id, n, buf, len, { onProgress(base + it) }, note)
+                val etag = Api.part(init.id, init.uploadId, n, buf, len, { onProgress(base + it) }, note)
+                parts.add(n to etag)
                 sent += len
                 onProgress(sent)
                 n++
             }
         }
         if (sent != p.size) throw java.io.IOException("Fayl to'liq o'qilmadi ($sent / ${p.size})")
-        note("Kichik rasm yuborilmoqda…")
-        info.jpeg?.let { runCatching { Api.thumb(init.id, it) }.onFailure { e -> note("Rasm yuborilmadi: ${e.message}") } }
         note("Yakunlanmoqda…")
-        Api.seal(init.id)
+        Api.finish(init.id, init.uploadId, parts)
         init.id
     }
 }

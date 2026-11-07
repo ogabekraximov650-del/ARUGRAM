@@ -5,3 +5,8 @@ workers_dev = true
 
 [build]
 command = "cargo install -q worker-build && worker-build --release"
+
+# Issiq bo'laklar va yuklash uchun R2 (ARUMEDIATV bilan umumiy `arumediatv` bucket, kalitlar `bd/` bilan boshlanadi).
+[[r2_buckets]]
+binding = "R2"
+bucket_name = "arumediatv"

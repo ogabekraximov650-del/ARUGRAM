@@ -80,16 +80,16 @@ object Api {
 
     fun thumbUrl(id: String) = url("/api/bd/thumb/$id.jpg")
 
-    class Init(val id: String, val partSize: Int)
+    class Init(val id: String, val uploadId: String, val partSize: Int)
 
-    /** Yangi fayl yozuvi (R2'siz): bo'laklar `chunk` bilan to'g'ridan-to'g'ri worker orqali Telegram'ga ketadi. */
-    suspend fun newFile(name: String, size: Long, kind: String, mime: String, w: Int, h: Int, dur: Long): Init = withContext(Dispatchers.IO) {
+    /** Butun fayl R2 ga yuklanadi (ko'p qismli): yozuv + R2 yuklash identifikatori. */
+    suspend fun init(name: String, size: Long, kind: String, mime: String, w: Int, h: Int, dur: Long): Init = withContext(Dispatchers.IO) {
         val body = buildJsonObject {
             put("name", JsonPrimitive(name)); put("size", JsonPrimitive(size)); put("kind", JsonPrimitive(kind))
             put("mime", JsonPrimitive(mime)); put("w", JsonPrimitive(w)); put("h", JsonPrimitive(h)); put("dur", JsonPrimitive(dur))
         }.toString().toRequestBody(JSON)
-        val o = call(Request.Builder().url(url("/api/bd/new")).post(body).build())
-        Init(o["id"]!!.jsonPrimitive.content, o["part_size"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: PART_FALLBACK)
+        val o = call(Request.Builder().url(url("/api/bd/init")).post(body).build())
+        Init(o["id"]!!.jsonPrimitive.content, o["upload_id"]!!.jsonPrimitive.content, o["part_size"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: PART_FALLBACK)
     }
 
     /** Tanani 64 KB lik bo'laklab yozadi va yozilgan baytni xabar qiladi (yuborish jarayoni ko'rinadi). */
@@ -108,33 +108,31 @@ object Api {
         }
     }
 
-    /** `n`-bo'lak (0 dan) — aniq `part_size` bayt (oxirgisi qisqa). 3 marta urinadi; [note] — holat/xato matni. */
-    suspend fun chunk(id: String, n: Int, bytes: ByteArray, len: Int, onBytes: (Long) -> Unit, note: (String) -> Unit) = withContext(Dispatchers.IO) {
+    /** R2 ga `n`-qismni (1 dan) yuboradi; 3 marta urinadi; qaytadi: ETag. */
+    suspend fun part(id: String, uploadId: String, n: Int, bytes: ByteArray, len: Int, onBytes: (Long) -> Unit, note: (String) -> Unit): String = withContext(Dispatchers.IO) {
         var last: Exception? = null
         repeat(3) { attempt ->
             try {
                 note("Yuborilmoqda (${attempt + 1}/3)…")
-                val u = url("/api/bd/chunk").toHttpUrl().newBuilder().addQueryParameter("id", id).addQueryParameter("n", n.toString()).build()
-                call(Request.Builder().url(u).put(ProgressBody(bytes, len, onBytes)).build())
-                note("Telegram qabul qildi")
-                return@withContext
+                val u = url("/api/bd/part").toHttpUrl().newBuilder().addQueryParameter("id", id).addQueryParameter("uid", uploadId).addQueryParameter("n", n.toString()).build()
+                val etag = call(Request.Builder().url(u).put(ProgressBody(bytes, len, onBytes)).build())["etag"]!!.jsonPrimitive.content
+                note("Qism qabul qilindi")
+                return@withContext etag
             } catch (e: Exception) {
                 last = e
                 note("Urinish ${attempt + 1} xato: ${e.message ?: e.javaClass.simpleName}")
                 kotlinx.coroutines.delay(2000L * (attempt + 1))
             }
         }
-        throw last ?: java.io.IOException("bo'lak yuborilmadi")
+        throw last ?: java.io.IOException("qism yuborilmadi")
     }
 
-    suspend fun seal(id: String) = withContext(Dispatchers.IO) {
-        val body = buildJsonObject { put("id", JsonPrimitive(id)) }.toString().toRequestBody(JSON)
-        call(Request.Builder().url(url("/api/bd/seal")).post(body).build())
-    }
-
-    suspend fun thumb(id: String, jpeg: ByteArray) = withContext(Dispatchers.IO) {
-        val u = url("/api/bd/thumb").toHttpUrl().newBuilder().addQueryParameter("id", id).build()
-        call(Request.Builder().url(u).post(jpeg.toRequestBody("image/jpeg".toMediaType())).build())
+    suspend fun finish(id: String, uploadId: String, parts: List<Pair<Int, String>>) = withContext(Dispatchers.IO) {
+        val body = buildJsonObject {
+            put("id", JsonPrimitive(id)); put("upload_id", JsonPrimitive(uploadId))
+            put("parts", kotlinx.serialization.json.JsonArray(parts.map { (n, e) -> buildJsonObject { put("n", JsonPrimitive(n)); put("etag", JsonPrimitive(e)) } }))
+        }.toString().toRequestBody(JSON)
+        call(Request.Builder().url(url("/api/bd/finish")).post(body).build())
     }
 
     /**

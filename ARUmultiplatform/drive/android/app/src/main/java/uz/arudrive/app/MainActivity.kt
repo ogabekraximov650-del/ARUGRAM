@@ -42,7 +42,12 @@ private var loader: ImageLoader? = null
 
 /** Kichik rasmlar: imzolangan OkHttp mijozi (worker imzosiz so'rovni rad etadi). */
 fun imageLoader(ctx: Context): ImageLoader =
-    loader ?: ImageLoader.Builder(ctx.applicationContext).okHttpClient { Api.client }.build().also { loader = it }
+    loader ?: ImageLoader.Builder(ctx.applicationContext)
+        .okHttpClient { Api.client }
+        // Kichik rasmlar doimiy xotirada (filesDir): tizim keshni tozalasa ham qoladi, tarmoqsiz ham ko'rinadi.
+        .diskCache { coil.disk.DiskCache.Builder().directory(java.io.File(ctx.applicationContext.filesDir, "thumbs")).maxSizeBytes(200L * 1024 * 1024).build() }
+        .respectCacheHeaders(false)
+        .build().also { loader = it }
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {

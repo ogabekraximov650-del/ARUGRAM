@@ -46,7 +46,9 @@ import uz.arudrive.app.player.formatClock
 /** Bosh sahifa: YouTube kabi, har qatorda bitta fayl; kichik rasm video o'lchamiga qarab yotiq yoki tik. */
 @Composable
 fun HomeScreen(refreshKey: Int, onPlay: (DriveFile) -> Unit) {
-    var files by remember { mutableStateOf<List<DriveFile>>(emptyList()) }
+    val ctx0 = androidx.compose.ui.platform.LocalContext.current
+    // Oxirgi ro'yxat telefon xotirasidan darhol olinadi; yangisi tarmoqdan kelgach almashadi va qayta saqlanadi.
+    var files by remember { mutableStateOf(uz.arudrive.app.data.Store.load(ctx0)) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var reload by remember { mutableStateOf(0) }
@@ -55,7 +57,7 @@ fun HomeScreen(refreshKey: Int, onPlay: (DriveFile) -> Unit) {
         loading = true
         error = null
         runCatching { Api.list() }
-            .onSuccess { files = it }
+            .onSuccess { files = it; uz.arudrive.app.data.Store.save(ctx0, it) }
             .onFailure { error = it.message ?: "Xato" }
         loading = false
     }
