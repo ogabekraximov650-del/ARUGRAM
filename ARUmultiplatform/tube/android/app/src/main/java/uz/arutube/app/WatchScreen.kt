@@ -244,7 +244,7 @@ fun WatchScreen(video: Video, onBack: () -> Unit, onOpen: (Video) -> Unit) {
                             mode = all[(mode.ordinal + 1) % all.size]
                             if (mode == PlayerMode.NATIVE) direct = null
                         }
-                        ActionChip(if (adBlock) "Reklama bloki: yoqiq" else "Reklama bloki: o'chiq") { adBlock = !adBlock }
+                        ActionChip(if (adBlock) "Reklama bloki: yoqilgan" else "Reklama bloki: o'chiq") { adBlock = !adBlock }
                         ActionChip(if (copied) "✓ Nusxalandi" else "Havolani nusxalash") {
                             clip.setText(AnnotatedString(video.embed))
                             copied = true
