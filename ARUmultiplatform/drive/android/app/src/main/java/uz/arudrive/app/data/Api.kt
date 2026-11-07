@@ -47,8 +47,8 @@ private class SignInterceptor : Interceptor {
 
 object Api {
     const val PART_FALLBACK = 18 * 1024 * 1024
-    /** Worker bilan bir xil: kesh oynasi 4 ta 18 MiB bo'lak (72 MiB) — kichik oyna tez isiydi. */
-    const val WARM_WINDOW = 4L * 18 * 1024 * 1024
+    /** Worker bilan bir xil: kesh oynasi = BITTA bo'lak (18 MiB). */
+    const val WARM_WINDOW = 18L * 1024 * 1024
     private val json = Json { ignoreUnknownKeys = true }
     private val JSON = "application/json".toMediaType()
 

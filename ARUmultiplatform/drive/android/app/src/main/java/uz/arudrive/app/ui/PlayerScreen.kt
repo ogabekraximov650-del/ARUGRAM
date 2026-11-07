@@ -87,6 +87,8 @@ fun PlayerScreen(file: DriveFile, onBack: () -> Unit) {
             Warm.markWarm(file.id, 0)
             player.open(Api.playUrl(file.id), 0, true)
             cacheReady = true
+            // Fonda tekshiradi (ARUMEDIATV kabi): faylning hajmi ham shu javobdan keladi (keyingi bo'lakni oldindan isitish uchun).
+            Api.warm(file.id, 0)
         } else if (Api.warm(file.id, 0, { note = it })) {
             Warm.remember(ctx, file.id)
             player.open(Api.playUrl(file.id), 0, true)
@@ -113,13 +115,7 @@ fun PlayerScreen(file: DriveFile, onBack: () -> Unit) {
             }
         }
     }
-    LaunchedEffect(player) {
-        var n = 0
-        while (true) {
-            delay(250); player.tick()
-            if (++n % 8 == 0) Warm.maybePrefetch(file.id, player.positionMs, player.durationMs)
-        }
-    }
+    LaunchedEffect(player) { while (true) { delay(250); player.tick() } }
     // Kutish vaqti (tashxis): worker javobi qancha vaqt kelmayotganini ko'rsatadi.
     LaunchedEffect(file.id, attempt, cacheReady) { while (!cacheReady) { delay(1000); waited++ } }
 

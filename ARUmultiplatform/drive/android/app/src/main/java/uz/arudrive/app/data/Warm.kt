@@ -19,16 +19,17 @@ object Warm {
     /** Fayl hajmi (isitish javobidan) — keyingi oynani oldindan isitish uchun. */
     val totals = ConcurrentHashMap<String, Long>()
 
+    /** Keyingi bo'lak shu joyda keshga isitiladi: joriy bo'lakning 15-MB'i o'qilganda (foydalanuvchi talabi). */
+    private const val PREFETCH_AT = 15L * 1024 * 1024
+
     /**
-     * TANBAL OLDINDAN ISITISH (ARUMEDIATV "tanbal keshlash" kabi): ijro joriy oynaning yarmidan o'tganda KEYINGI oyna fonda
-     * isitiladi — oyna chegarasida pleyer kutib qolmaydi, ko'rilmagan oyna esa isitilmaydi (Telegram trafigi behuda ketmaydi).
+     * TANBAL OLDINDAN ISITISH (ARUMEDIATV "tanbal keshlash" kabi): pleyer joriy bo'lakning 15-MB'ini o'qiganda KEYINGI bo'lak
+     * fonda keshga isitiladi — chegarada pleyer kutib qolmaydi, ko'rilmagan bo'lak esa isitilmaydi. [pos] — fayldagi MUTLAQ bayt joyi.
      */
-    fun maybePrefetch(id: String, positionMs: Long, durationMs: Long) {
+    fun onRead(id: String, pos: Long) {
         val total = totals[id] ?: return
-        if (durationMs <= 0 || total <= 0) return
-        val bytePos = (positionMs.toDouble() / durationMs * total).toLong()
-        val w = bytePos / Api.WARM_WINDOW
-        if (bytePos - w * Api.WARM_WINDOW < Api.WARM_WINDOW / 2) return
+        val w = pos / Api.WARM_WINDOW
+        if (pos - w * Api.WARM_WINDOW < PREFETCH_AT) return
         val next = w + 1
         if (next * Api.WARM_WINDOW >= total) return
         val key = "$id:$next"
@@ -36,6 +37,21 @@ object Warm {
         Thread {
             try { if (Api.warmBlocking(id, next)) done.add(key) } finally { inflight.remove(key) }
         }.start()
+    }
+
+    /** ExoPlayer qaysi baytni o'qiyotganini kuzatadi (har so'rov uchun boshlanish joyi + o'qilgan bayt). */
+    private class Tracker(val id: String) : androidx.media3.datasource.TransferListener {
+        private val reads = java.util.Collections.synchronizedMap(java.util.IdentityHashMap<DataSpec, LongArray>())
+        override fun onTransferInitializing(source: androidx.media3.datasource.DataSource, dataSpec: DataSpec, isNetwork: Boolean) {}
+        override fun onTransferStart(source: androidx.media3.datasource.DataSource, dataSpec: DataSpec, isNetwork: Boolean) {
+            reads[dataSpec] = longArrayOf(dataSpec.position, 0)
+        }
+        override fun onBytesTransferred(source: androidx.media3.datasource.DataSource, dataSpec: DataSpec, isNetwork: Boolean, bytesTransferred: Int) {
+            val r = reads[dataSpec] ?: return
+            r[1] += bytesTransferred
+            onRead(id, r[0] + r[1])
+        }
+        override fun onTransferEnd(source: androidx.media3.datasource.DataSource, dataSpec: DataSpec, isNetwork: Boolean) { reads.remove(dataSpec) }
     }
 
     fun mediaSourceFactory(id: String, context: android.content.Context): DefaultMediaSourceFactory {
@@ -49,7 +65,7 @@ object Warm {
             spec
         }
         return DefaultMediaSourceFactory(context).setDataSourceFactory(
-            ResolvingDataSource.Factory(DefaultHttpDataSource.Factory().setConnectTimeoutMs(15_000).setReadTimeoutMs(60_000), resolver),
+            ResolvingDataSource.Factory(DefaultHttpDataSource.Factory().setConnectTimeoutMs(15_000).setReadTimeoutMs(60_000).setTransferListener(Tracker(id)), resolver),
         )
     }
 
