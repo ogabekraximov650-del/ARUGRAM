@@ -92,17 +92,35 @@ object Api {
         Init(o["id"]!!.jsonPrimitive.content, o["part_size"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: PART_FALLBACK)
     }
 
-    /** `n`-bo'lak (0 dan) — aniq `part_size` bayt (oxirgisi qisqa). 3 marta urinadi. */
-    suspend fun chunk(id: String, n: Int, bytes: ByteArray, len: Int) = withContext(Dispatchers.IO) {
+    /** Tanani 64 KB lik bo'laklab yozadi va yozilgan baytni xabar qiladi (yuborish jarayoni ko'rinadi). */
+    private class ProgressBody(val bytes: ByteArray, val len: Int, val onBytes: (Long) -> Unit) : okhttp3.RequestBody() {
+        override fun contentType() = "application/octet-stream".toMediaType()
+        override fun contentLength() = len.toLong()
+        override fun writeTo(sink: okio.BufferedSink) {
+            var off = 0
+            while (off < len) {
+                val n = minOf(65536, len - off)
+                sink.write(bytes, off, n)
+                sink.flush()
+                off += n
+                onBytes(off.toLong())
+            }
+        }
+    }
+
+    /** `n`-bo'lak (0 dan) — aniq `part_size` bayt (oxirgisi qisqa). 3 marta urinadi; [note] — holat/xato matni. */
+    suspend fun chunk(id: String, n: Int, bytes: ByteArray, len: Int, onBytes: (Long) -> Unit, note: (String) -> Unit) = withContext(Dispatchers.IO) {
         var last: Exception? = null
         repeat(3) { attempt ->
             try {
-                val body = bytes.toRequestBody("application/octet-stream".toMediaType(), 0, len)
+                note("Yuborilmoqda (${attempt + 1}/3)…")
                 val u = url("/api/bd/chunk").toHttpUrl().newBuilder().addQueryParameter("id", id).addQueryParameter("n", n.toString()).build()
-                call(Request.Builder().url(u).put(body).build())
+                call(Request.Builder().url(u).put(ProgressBody(bytes, len, onBytes)).build())
+                note("Telegram qabul qildi")
                 return@withContext
             } catch (e: Exception) {
                 last = e
+                note("Urinish ${attempt + 1} xato: ${e.message ?: e.javaClass.simpleName}")
                 kotlinx.coroutines.delay(2000L * (attempt + 1))
             }
         }

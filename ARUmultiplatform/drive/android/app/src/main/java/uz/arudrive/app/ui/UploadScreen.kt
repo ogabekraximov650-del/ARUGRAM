@@ -42,6 +42,7 @@ fun UploadScreen(onUploaded: () -> Unit) {
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     var failed by remember { mutableStateOf(false) }
+    var note by remember { mutableStateOf("") }
 
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) {
@@ -78,7 +79,7 @@ fun UploadScreen(onUploaded: () -> Unit) {
                     .clickable(enabled = !busy) {
                         busy = true; failed = false; message = null; sent = 0
                         scope.launch {
-                            runCatching { Upload.run(ctx, p) { sent = it } }
+                            runCatching { Upload.run(ctx, p, { note = it }) { sent = it } }
                                 .onSuccess { message = "Yuklandi — bosh sahifada ko'rinadi."; picked = null; sent = 0; onUploaded() }
                                 .onFailure { message = it.message ?: "Xato"; failed = true }
                             busy = false
@@ -86,6 +87,7 @@ fun UploadScreen(onUploaded: () -> Unit) {
                     }.padding(horizontal = 26.dp, vertical = 12.dp),
             )
         }
+        if (busy && note.isNotEmpty()) Text(note, color = AruColors.TextDim, fontSize = 12.sp, modifier = Modifier.padding(top = 10.dp))
         message?.let { Text(it, color = if (failed) Color(0xFFFF6B6B) else AruColors.TextDim, fontSize = 13.sp, modifier = Modifier.padding(top = 16.dp)) }
     }
 }
