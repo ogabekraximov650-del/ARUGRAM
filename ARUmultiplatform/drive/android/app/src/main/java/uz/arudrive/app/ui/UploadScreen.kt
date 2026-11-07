@@ -43,6 +43,19 @@ fun UploadScreen(onUploaded: () -> Unit) {
     var message by remember { mutableStateOf<String?>(null) }
     var failed by remember { mutableStateOf(false) }
     var note by remember { mutableStateOf("") }
+    // Telegramga saqlash navbati: "uploaded" — navbatda, "storing" — hozir saqlanmoqda (har 8 soniyada yangilanadi).
+    var waiting by remember { mutableStateOf(0) }
+    var storing by remember { mutableStateOf(0) }
+    var queueTick by remember { mutableStateOf(0) }
+    androidx.compose.runtime.LaunchedEffect(queueTick) {
+        while (true) {
+            runCatching { uz.arudrive.app.data.Api.list() }.onSuccess { l ->
+                waiting = l.count { it.state == "uploaded" }
+                storing = l.count { it.state == "storing" }
+            }
+            kotlinx.coroutines.delay(8000)
+        }
+    }
 
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) {
@@ -55,6 +68,12 @@ fun UploadScreen(onUploaded: () -> Unit) {
         Text("Yuklash", color = AruColors.Text, fontSize = 22.sp, fontWeight = FontWeight.Bold)
         Text("Fayl avval R2 ga yuklanadi, keyin Actions uni 18 MB bo'laklab Telegram kanaliga saqlaydi.", color = AruColors.TextDim, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp, bottom = 20.dp))
 
+        Text(
+            if (waiting + storing == 0) "Telegramga saqlash navbati bo'sh"
+            else "Telegramga saqlash navbati: ${waiting + storing} ta video" + (if (storing > 0) " (shundan $storing tasi hozir saqlanmoqda)" else ""),
+            color = if (waiting + storing == 0) AruColors.TextFaint else AruColors.Accent2, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(bottom = 14.dp),
+        )
         Box(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(AruColors.Card)
                 .clickable(enabled = !busy) { launcher.launch(arrayOf("video/*", "*/*")) }.padding(22.dp),
@@ -80,7 +99,7 @@ fun UploadScreen(onUploaded: () -> Unit) {
                         busy = true; failed = false; message = null; sent = 0
                         scope.launch {
                             runCatching { Upload.run(ctx, p, { note = it }) { sent = it } }
-                                .onSuccess { message = "Yuklandi. Telegramga saqlanishi bir necha daqiqa olishi mumkin — bosh sahifada ko'rinadi."; picked = null; sent = 0; onUploaded() }
+                                .onSuccess { queueTick++; message = "Yuklandi. Telegramga saqlanishi bir necha daqiqa olishi mumkin — bosh sahifada ko'rinadi."; picked = null; sent = 0; onUploaded() }
                                 .onFailure { message = it.message ?: "Xato"; failed = true }
                             busy = false
                         }
