@@ -20,6 +20,7 @@ on:
       - 'tool/session/**'
       - 'tool/upload/**'
       - 'tool/bdrive/**'
+      - 'tool/tgbot/**'
       - 'tool/albot/**'
       - 'tool/compress/**'
       - 'tool/emojifont/**'

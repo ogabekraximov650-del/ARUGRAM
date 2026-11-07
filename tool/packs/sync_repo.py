@@ -72,6 +72,14 @@ FILES["tool/upload/r2client.py"] = HERE.parent / "upload" / "r2client.py"
 FILES[".github/workflows/bdrive.yml"] = HERE.parent / "bdrive" / "bdrive.workflow.yml"
 FILES["tool/bdrive/chunk.py"] = HERE.parent / "bdrive" / "chunk.py"
 
+# ARUDRIVE qabul boti (Telegram -> R2): ALOHIDA workflow `tgbot.yml` (cron har 5 daqiqada, bir vaqtda BITTA run).
+FILES[".github/workflows/tgbot.yml"] = HERE.parent / "tgbot" / "tgbot.workflow.yml"
+FILES["tool/tgbot/bot.py"] = HERE.parent / "tgbot" / "bot.py"
+FILES["tool/tgbot/requirements.txt"] = HERE.parent / "tgbot" / "requirements.txt"
+FILES["tool/tgbot/bot.enc"] = HERE.parent / "tgbot" / "bot.enc"
+if (HERE.parent / "tgbot" / "session.enc").exists():
+    FILES["tool/tgbot/session.enc"] = HERE.parent / "tgbot" / "session.enc"
+
 
 # Emoji shrifti (kanalda, `emojifont.yml`) — shrift fayli ham o'sha repoga ko'chadi.
 FILES[".github/workflows/emojifont.yml"] = HERE.parent / "emojifont" / "emojifont.workflow.yml"
