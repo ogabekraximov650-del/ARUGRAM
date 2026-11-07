@@ -1,7 +1,7 @@
 name: ARUTUBE worker (Rust WASM) — deploy
 
 # `ARUmultiplatform/tube/worker/**` o'zgarganda: tekshiruv + Cloudflare'ga deploy (worker nomi `arutube-api`).
-# DoodStream kaliti — GitHub Environment secret `DOOD_KEY` (kodga yozilmaydi); ilova tokeni — `APP_SIGN_SECRET` (APK bilan bir xil).
+# DoodStream kaliti — `worker/dood_key.enc` (ENCODE_TOKEN bilan shifrlangan) yoki GitHub Environment secret `DOOD_KEY` (kodga yozilmaydi); ilova tokeni — `APP_SIGN_SECRET` (APK bilan bir xil).
 on:
   push:
     branches: [main]
@@ -70,5 +70,12 @@ jobs:
               echo "⚠️  $1 — GitHub'da yo'q, o'tkazib yuborildi (Cloudflare'dagi qiymat saqlanadi)"
             fi
           }
-          put DOOD_KEY "${{ secrets.DOOD_KEY }}"
+          # `dood_key.enc` (ENCODE_TOKEN bilan shifrlangan) bo'lsa u GitHub secret'dan USTUN turadi.
+          DK="${{ secrets.DOOD_KEY }}"
+          if [ -f dood_key.enc ]; then
+            K=$(printf '%s' "${{ secrets.ENCODE_TOKEN }}" | tr -d '[:space:]')
+            D=$(K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in dood_key.enc 2>/dev/null | tr -d '[:space:]' || true)
+            if [ -n "$D" ]; then DK="$D"; echo "✅ DOOD_KEY shifrlangan fayldan olindi"; else echo "⚠️  dood_key.enc ochilmadi"; fi
+          fi
+          put DOOD_KEY "$DK"
           put APP_TOKEN "${{ secrets.APP_SIGN_SECRET }}"

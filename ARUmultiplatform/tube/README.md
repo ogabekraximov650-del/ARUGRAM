@@ -9,7 +9,7 @@ Kotlin + Jetpack Compose (ilova) + Rust (yadro) + alohida Rust Cloudflare Worker
 | `android/rust/` | `libtube_core.so`: HTTP (ureq/rustls) va faylni DoodStream'ga oqim bilan yuklash (xotiraga to'liq o'qilmaydi, jarayon foizi) |
 
 ## Sozlash (bir marta, qo'lda)
-GitHub → Settings → Environments → `secret` ichiga **`DOOD_KEY`** (DoodStream API kaliti) qo'shing. Worker deploy shu kalitni Cloudflare secret qilib qo'yadi.
+Variant A: `ENCODE_TOKEN=... bash ARUmultiplatform/tube/worker/set_key.sh` -> `dood_key.enc` ni push qiling. Variant B: GitHub → Settings → Environments → `secret` ichiga **`DOOD_KEY`** qo'shing. Worker deploy shu kalitni Cloudflare secret qilib qo'yadi.
 `APP_SIGN_SECRET` (bor) — ilova tokeni: APK ichiga va worker `APP_TOKEN` ga bir xil qiymat qo'yiladi.
 
 ## Yig'ish
