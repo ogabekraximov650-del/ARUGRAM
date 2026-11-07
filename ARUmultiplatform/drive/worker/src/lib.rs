@@ -244,6 +244,12 @@ fn gate(req: &Request, env: &Env, path: &str) -> bool {
     verify_app_sig(&secret, &got, req.method().to_string().as_str(), path)
 }
 
+/// Har daqiqada (cron): R2 dagi yuklangan fayllarni Telegram'ga bo'laklab saqlaydi (Actions kerak emas).
+#[event(scheduled)]
+async fn scheduled(_e: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
+    let _ = bdrive::process(&env, 25_000).await;
+}
+
 #[event(fetch)]
 async fn main(req: Request, env: Env, ctx: Context) -> Result<Response> {
     let _ = &ctx;
@@ -276,7 +282,7 @@ async fn main(req: Request, env: Env, ctx: Context) -> Result<Response> {
             None => err404("topilmadi"),
         }
     } else if path.starts_with("/api/bd/") {
-        bdrive::route(req, &env, &path).await
+        bdrive::route(req, &env, &ctx, &path).await
     } else {
         err404("topilmadi")
     };

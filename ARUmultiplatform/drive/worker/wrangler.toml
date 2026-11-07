@@ -10,3 +10,7 @@ command = "cargo install -q worker-build && worker-build --release"
 [[r2_buckets]]
 binding = "R2"
 bucket_name = "arumediatv"
+
+# Har daqiqada: R2 -> Telegram saqlash navbatini davom ettiradi.
+[triggers]
+crons = ["* * * * *"]

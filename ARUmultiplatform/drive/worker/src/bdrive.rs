@@ -25,6 +25,8 @@ const UP: &str = "bd/up/";
 /// Fayl hajmining yuqori chegarasi (R2 multipart: 10 000 bo'lak x 18 MiB ≈ 175 GB; amalda 4 GB).
 const MAX_SIZE: i64 = 4 * 1024 * 1024 * 1024;
 const LEASE_MS: i64 = 30 * 60 * 1000;
+/// Worker o'zi saqlayotganda ijara qisqa: har bo'lakdan keyin yangilanadi, worker o'lsa 2 daqiqada qayta navbatga qaytadi.
+const WORKER_LEASE_MS: i64 = 2 * 60 * 1000;
 const MAX_TRIES: i64 = 3;
 const WORKFLOW: &str = "bdrive.yml";
 
@@ -139,6 +141,88 @@ fn thumb_resp(bytes: Vec<u8>) -> Result<Response> {
     Ok(resp)
 }
 
+/// ── WORKER O'ZI: R2 -> Telegram ────────────────────────────────
+///
+/// `uploaded` holatidagi fayllarni birma-bir oladi (ijara bilan), har 18 MiB bo'lakni R2'dan `Range` bilan o'qib Bot API'ga
+/// yuboradi va `file_id` ni `chunk_ids` ga qo'shadi. Vaqt byudjeti (`budget_ms`) tugasa ijara qaytariladi va davomini keyingi
+/// chaqiruv (cron yoki yangi yuklash) oladi — tayyor bo'laklar QAYTA yuborilmaydi. Hammasi saqlansa fayl `ready`, R2 nusxasi o'chadi.
+pub(crate) async fn process(env: &Env, budget_ms: i64) -> Result<String> {
+    ensure(env).await?;
+    let Some(bk) = bucket(env) else { return Ok("r2 yo'q".into()) };
+    let t0 = now_ms();
+    let mut out = String::new();
+    while now_ms() - t0 < budget_ms - 6_000 {
+        let now = now_ms();
+        let r = sql_many(env, &[
+            ("UPDATE bd_files SET state='uploaded' WHERE state='storing' AND lease<? AND tries<?", vec![TursoArg::int(now), TursoArg::int(MAX_TRIES)]),
+            ("UPDATE bd_files SET state='failed' WHERE state='storing' AND lease<? AND tries>=?", vec![TursoArg::int(now), TursoArg::int(MAX_TRIES)]),
+            ("SELECT id,name,size,chunks,chunk_ids FROM bd_files WHERE state='uploaded' ORDER BY created LIMIT 1", vec![]),
+        ]).await?;
+        let Some(f) = first(&r[2]) else { break };
+        let id = f["id"].as_str().unwrap_or("").to_string();
+        let got = sql(env, "UPDATE bd_files SET state='storing', lease=?, tries=tries+1 WHERE id=? AND state='uploaded' RETURNING id",
+            vec![TursoArg::int(now + WORKER_LEASE_MS), TursoArg::text(&id)]).await?;
+        if first(&got).is_none() {
+            continue; // boshqa chaqiruv oldi
+        }
+        let name = f["name"].as_str().unwrap_or("fayl").to_string();
+        let size = f["size"].as_i64().unwrap_or(0).max(0) as u64;
+        let chunks = f["chunks"].as_i64().unwrap_or(0).max(0) as usize;
+        let mut list: Vec<String> = split_ids(f["chunk_ids"].as_str().unwrap_or("")).into_iter().map(String::from).collect();
+        let key = format!("{UP}{id}");
+        let token = tg_secret(env, "BD_BOT_TOKEN");
+        let channel = tg_channel_id(env);
+        let mut stopped = false;
+        let mut failed: Option<String> = None;
+        while list.len() < chunks {
+            if now_ms() - t0 > budget_ms - 6_000 {
+                stopped = true;
+                break;
+            }
+            let n = list.len() as u64;
+            let offset = n * CHUNK;
+            let length = CHUNK.min(size.saturating_sub(offset));
+            let res: Result<String> = async {
+                let obj = bk.get(&key).range(Range::OffsetWithLength { offset, length }).execute().await?
+                    .ok_or_else(|| Error::RustError("R2'da fayl yo'q".into()))?;
+                let bytes = obj.body().ok_or_else(|| Error::RustError("R2 tanasi yo'q".into()))?.bytes().await?;
+                if bytes.len() as u64 != length {
+                    return Err(Error::RustError(format!("R2 hajmi mos emas ({} != {length})", bytes.len())));
+                }
+                let (fid, _) = tg_send_document(&token, channel, &format!("{name}.part{n:04}"), &bytes, length).await?;
+                Ok(fid)
+            }.await;
+            match res {
+                Ok(fid) => {
+                    list.push(fid);
+                    // Bo'lak saqlandi: urinishlar hisobi nollanadi (katta fayl bir necha chaqiruvda tugashi mumkin), ijara yangilanadi.
+                    sql(env, "UPDATE bd_files SET chunk_ids=?, lease=?, tries=0 WHERE id=? AND state='storing'",
+                        vec![TursoArg::text(&list.join(",")), TursoArg::int(now_ms() + WORKER_LEASE_MS), TursoArg::text(&id)]).await?;
+                }
+                Err(e) => {
+                    failed = Some(e.to_string());
+                    break;
+                }
+            }
+        }
+        if let Some(e) = failed {
+            let _ = sql(env, "UPDATE bd_files SET state=CASE WHEN tries>=? THEN 'failed' ELSE 'uploaded' END, lease=0 WHERE id=? AND state='storing'",
+                vec![TursoArg::int(MAX_TRIES), TursoArg::text(&id)]).await;
+            out.push_str(&format!("{id}: xato: {e}\n"));
+            break;
+        }
+        if stopped {
+            let _ = sql(env, "UPDATE bd_files SET state='uploaded', lease=0 WHERE id=? AND state='storing'", vec![TursoArg::text(&id)]).await;
+            out.push_str(&format!("{id}: vaqt tugadi, {}/{chunks}\n", list.len()));
+            break;
+        }
+        sql(env, "UPDATE bd_files SET state='ready' WHERE id=? AND state='storing'", vec![TursoArg::text(&id)]).await?;
+        let _ = bk.delete(&key).await;
+        out.push_str(&format!("{id}: tayyor\n"));
+    }
+    Ok(out)
+}
+
 /// `a,b,c` -> ["a","b","c"] (bo'sh matn — bo'sh ro'yxat).
 pub(crate) fn split_ids(s: &str) -> Vec<&str> {
     if s.is_empty() { Vec::new() } else { s.split(',').collect() }
@@ -175,7 +259,7 @@ pub(crate) fn chunks_of(size: i64) -> i64 {
 
 // ── Asosiy yo'l ──────────────────────────────────────────────
 
-pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Response> {
+pub(crate) async fn route(mut req: Request, env: &Env, ctx: &Context, path: &str) -> Result<Response> {
     let method = req.method();
     let actions = matches!(path, "/api/bd/claim" | "/api/bd/read" | "/api/bd/chunkdone" | "/api/bd/done" | "/api/bd/fail");
     if actions && !encode_token_ok(&req, env) {
@@ -251,8 +335,12 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
                 return json_resp(&json!({"error": format!("hajm mos emas ({got:?} != {size})")}), 422);
             }
             sql(env, "UPDATE bd_files SET state='uploaded' WHERE id=? AND state='uploading'", vec![TursoArg::text(&id)]).await?;
-            let kick_msg = kick(env).await;
-            ok(json!({"ok": true, "kick": kick_msg}))
+            // Telegramga saqlashni WORKER O'ZI boshlaydi (javobdan keyin fonda, ~30 soniya); davomini har daqiqadagi cron oladi.
+            let e2 = env.clone();
+            ctx.wait_until(async move {
+                let _ = process(&e2, 22_000).await;
+            });
+            ok(json!({"ok": true}))
         }
         // Kichik rasm Telegram'ga (kanalga) saqlanadi; file_id `thumb_id` ustunida (R2 faqat asl fayl uchun).
         (Method::Post, "/api/bd/thumb") => {
@@ -268,6 +356,8 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
             sql(env, "UPDATE bd_files SET thumb_id=? WHERE id=?", vec![TursoArg::text(&fid), TursoArg::text(&id)]).await?;
             ok(json!({"ok": true}))
         }
+        // Qo'lda: ikkinchi akkauntdagi Actions'ni ishga tushirish (zaxira yo'l).
+        (Method::Post, "/api/bd/kick") => ok(json!({"kick": kick(env).await})),
         (Method::Get, "/api/bd/list") => {
             let res = sql(env,
                 "SELECT id,name,kind,mime,size,w,h,dur,state,created FROM bd_files WHERE state IN ('ready','uploaded','storing') ORDER BY created DESC LIMIT 200",

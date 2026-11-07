@@ -67,7 +67,7 @@ fun UploadScreen(onUploaded: () -> Unit) {
 
     Column(Modifier.fillMaxSize().background(AruColors.Bg).padding(20.dp)) {
         Text("Yuklash", color = AruColors.Text, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-        Text("Fayl avval R2 ga yuklanadi, keyin Actions uni 18 MB bo'laklab Telegram kanaliga saqlaydi.", color = AruColors.TextDim, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp, bottom = 20.dp))
+        Text("Fayl avval R2 ga yuklanadi, keyin worker uni 18 MB bo'laklab Telegram kanaliga saqlaydi.", color = AruColors.TextDim, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp, bottom = 20.dp))
 
         Text(
             if (waiting + storing == 0) "Telegramga saqlash navbati bo'sh"
