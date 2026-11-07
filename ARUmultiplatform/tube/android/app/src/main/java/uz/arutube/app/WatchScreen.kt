@@ -99,10 +99,8 @@ fun EmbedPlayer(embed: String, mode: PlayerMode, modifier: Modifier = Modifier) 
                         settings.setSupportMultipleWindows(false)
                         // "wv" belgisi olib tashlanadi: sayt oddiy Chrome deb biladi.
                         settings.userAgentString = settings.userAgentString.replace("; wv", "")
-                        CookieManager.getInstance().apply {
-                            setAcceptCookie(true)
-                            setAcceptThirdPartyCookies(this@apply, true)
-                        }
+                        CookieManager.getInstance().setAcceptCookie(true)
+                        CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
                         setBackgroundColor(AColor.BLACK)
                         webChromeClient = FsChrome(ctx as Activity)
                         val host = Uri.parse(embed).host.orEmpty()
