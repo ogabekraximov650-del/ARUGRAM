@@ -1,11 +1,32 @@
 package uz.arudrive.app.ui
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -17,20 +38,25 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import uz.arudrive.app.data.Api
+import uz.arudrive.app.data.Busy
 import uz.arudrive.app.data.DriveFile
 import uz.arudrive.app.data.Warm
 import uz.arudrive.app.player.AruPlayer
-import uz.arudrive.app.player.PlayerControls
 import uz.arudrive.app.player.PlayerSurface
+import kotlin.math.max
 
 /**
- * ARUMEDIATV pleyeri. Video KESH TAYYOR bo'lgandan keyingina ochiladi: avval worker `warm` (Telegram -> Cloudflare kesh),
- * keyin ExoPlayer; keyingi oynalar uchun `Warm` har bir o'qishdan oldin keshni tekshiradi.
+ * ARUMEDIATV support chatidagi video ko'rgich bilan bir xil ko'rinish: qora fon, yuqori chapda orqaga, video o'rtada,
+ * bosilsa play/pauza, pastda chiziq va vaqt. Video KESH TAYYOR bo'lgandan keyingina ochiladi (avval worker `warm`).
+ * Ochiq turganda `Busy` > 0: fon so'rovlari to'xtaydi (worker so'rovlari kamayadi).
  */
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
@@ -40,14 +66,17 @@ fun PlayerScreen(file: DriveFile, onBack: () -> Unit) {
     var cacheReady by remember(file.id) { mutableStateOf(false) }
     var cacheFailed by remember(file.id) { mutableStateOf(false) }
     var attempt by remember(file.id) { mutableIntStateOf(0) }
-    var fullscreen by remember { mutableStateOf(false) }
-    var locked by remember { mutableStateOf(false) }
+    var drag by remember { mutableStateOf<Float?>(null) }
 
-    DisposableEffect(player) { onDispose { player.release() } }
+    DisposableEffect(player) {
+        Busy.count.incrementAndGet()
+        onDispose { player.release(); Busy.count.decrementAndGet() }
+    }
 
     LaunchedEffect(file.id, attempt) {
         cacheReady = false
         cacheFailed = false
+        player.error = null
         if (Api.warm(file.id, 0)) {
             Warm.markWarm(file.id, 0)
             player.open(Api.playUrl(file.id), 0, true)
@@ -56,55 +85,67 @@ fun PlayerScreen(file: DriveFile, onBack: () -> Unit) {
             cacheFailed = true
         }
     }
-    LaunchedEffect(player) {
-        while (true) {
-            delay(500)
-            player.tick()
-        }
-    }
+    LaunchedEffect(player) { while (true) { delay(250); player.tick() } }
 
+    val err = player.error ?: if (cacheFailed) "Kesh tayyorlanmadi" else null
     Box(Modifier.fillMaxSize().background(Color.Black)) {
-        if (!cacheReady) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                if (cacheFailed) {
-                    Text(
-                        "Kesh tayyorlanmadi. Bosib qayta urinib ko'ring.", color = Color.White, fontSize = 14.sp,
-                        modifier = Modifier.padding(24.dp).let { m -> m.clickableNoRipple { attempt++ } },
+        if (err != null) {
+            Column(Modifier.align(Alignment.Center).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("Videoni ochib bo'lmadi", color = Color.White.copy(alpha = 0.54f))
+                Text(err, color = Color.White.copy(alpha = 0.38f), fontSize = 11.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 6.dp))
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "Qayta urinish", color = Color.White, fontSize = 14.sp,
+                    modifier = Modifier.clip(RoundedCornerShape(20.dp)).border(1.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(20.dp)).clickable { attempt++ }.padding(horizontal = 18.dp, vertical = 9.dp),
+                )
+            }
+        } else {
+            Column(Modifier.fillMaxSize()) {
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+                    if (cacheReady) PlayerSurface(player, Modifier.fillMaxSize())
+                    Box(
+                        Modifier.fillMaxSize().clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { if (cacheReady) player.toggle() },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (!cacheReady || !player.ready) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                CircularProgressIndicator(color = Color.White.copy(alpha = 0.54f), strokeWidth = 2.dp, modifier = Modifier.size(34.dp))
+                                if (!cacheReady) Text("Video keshga tayyorlanmoqda…", color = Color.White.copy(alpha = 0.54f), fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
+                            }
+                        } else {
+                            val a by animateFloatAsState(if (player.playing) 0f else 1f, tween(180), label = "pp")
+                            Box(
+                                Modifier.size(62.dp).graphicsLayer { alpha = a }.clip(CircleShape).background(Color.Black.copy(alpha = 0.5f)).border(1.dp, Color.White.copy(alpha = 0.25f), CircleShape),
+                                contentAlignment = Alignment.Center,
+                            ) { Icon(if (player.playing) AruIcons.Pause else Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(36.dp)) }
+                        }
+                    }
+                }
+                val total = player.durationMs.coerceAtLeast(0)
+                val shown = (drag ?: player.positionMs.toFloat()).coerceIn(0f, max(total, 1L).toFloat())
+                Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(start = 16.dp, end = 16.dp, bottom = 12.dp)) {
+                    Slider(
+                        value = if (total <= 0) 0f else shown, valueRange = 0f..max(total, 1L).toFloat(),
+                        onValueChange = { drag = it },
+                        onValueChangeFinished = { drag?.let { player.seekTo(it.toLong()) }; drag = null },
+                        colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = Color.White, inactiveTrackColor = Color.White.copy(alpha = 0.24f)),
                     )
-                } else {
-                    androidx.compose.foundation.layout.Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator(color = AruColors.Accent)
-                        Text("Video keshga tayyorlanmoqda…", color = Color.White, fontSize = 14.sp, modifier = Modifier.padding(top = 14.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(clock2(shown.toLong()), color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+                        Text(clock2(total), color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
                     }
                 }
             }
-        } else {
-            PlayerSurface(player, Modifier.fillMaxSize())
-            PlayerControls(
-                player = player,
-                title = file.name,
-                subtitle = "",
-                fullscreen = fullscreen,
-                locked = locked,
-                hasPrev = false,
-                hasNext = false,
-                introActive = false,
-                speedLabel = if (player.speed == player.speed.toInt().toFloat()) "${player.speed.toInt()}x" else "${player.speed}x",
-                onSkipIntro = {},
-                onPrev = {},
-                onNext = {},
-                onBack = { if (fullscreen) fullscreen = false else onBack() },
-                onToggleFullscreen = { fullscreen = !fullscreen },
-                onSettings = {},
-                onQuality = {},
-                onEpisodeList = {},
-                onToggleLock = { locked = !locked },
-                onRetry = { attempt++ },
-                modifier = Modifier.fillMaxSize(),
-            )
         }
+        Box(
+            Modifier.align(Alignment.TopStart).statusBarsPadding().padding(8.dp).size(48.dp).clip(CircleShape).clickable(onClick = onBack),
+            contentAlignment = Alignment.Center,
+        ) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Orqaga", tint = Color.White, modifier = Modifier.size(26.dp)) }
     }
 }
 
-private fun Modifier.clickableNoRipple(onClick: () -> Unit): Modifier =
-    this.then(Modifier.clickable(indication = null, interactionSource = androidx.compose.foundation.interaction.MutableInteractionSource(), onClick = onClick))
+private fun clock2(ms: Long): String {
+    val s = (ms / 1000).coerceAtLeast(0)
+    val h = s / 3600
+    return if (h > 0) String.format(java.util.Locale.US, "%d:%02d:%02d", h, (s / 60) % 60, s % 60) else String.format(java.util.Locale.US, "%02d:%02d", s / 60, s % 60)
+}

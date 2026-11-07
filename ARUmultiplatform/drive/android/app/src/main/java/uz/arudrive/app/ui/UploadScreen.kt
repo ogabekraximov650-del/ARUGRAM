@@ -49,6 +49,7 @@ fun UploadScreen(onUploaded: () -> Unit) {
     var queueTick by remember { mutableStateOf(0) }
     androidx.compose.runtime.LaunchedEffect(queueTick) {
         while (true) {
+            uz.arudrive.app.data.Busy.awaitIdle()
             runCatching { uz.arudrive.app.data.Api.list() }.onSuccess { l ->
                 waiting = l.count { it.state == "uploaded" }
                 storing = l.count { it.state == "storing" }
