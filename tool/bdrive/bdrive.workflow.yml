@@ -1,0 +1,32 @@
+name: ARUDRIVE — R2 -> Telegram bo'laklari (Bot API)
+
+# Worker `arudrive` (ARUmultiplatform/drive/worker) fayl R2'ga to'liq yuklangach shu workflow'ni ishga tushiradi. U navbatdagi
+# faylni 18 MB bo'laklarga bo'lib Bot API orqali kanalga saqlaydi (KODLASH YO'Q). Kod: `tool/bdrive/chunk.py`.
+# Bu fayl ARUMEDIATV repodagi `tool/bdrive/bdrive.workflow.yml` dan ko'chiriladi (`sync-packs.yml`) — shu yerda o'zgartirmang.
+
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: arudrive-bd
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  store:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      BD_API: ${{ secrets.BD_API || 'https://arudrive.uzcom.workers.dev' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: R2 -> Telegram
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+          START_BUDGET_MIN: '100'
+        run: python3 tool/bdrive/chunk.py

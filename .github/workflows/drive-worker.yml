@@ -1,0 +1,99 @@
+name: ARUDRIVE worker (Rust WASM) — deploy
+
+# `ARUmultiplatform/drive/worker/**` o'zgarganda: testlar + Cloudflare'ga deploy (worker nomi `arudrive`; ARUMEDIATV workeriga tegilmaydi).
+# Sirlar: `worker/secrets.enc` (ENCODE_TOKEN bilan shifrlangan: BD_BOT_TOKEN, BD_TURSO_URL, BD_TURSO_TOKEN) va GitHub Environment
+# secret'lari (APP_SIGN_SECRET, ENCODE_TOKEN, TG_CHANNEL_ID); Actions tokeni/repo — `tool/encode/gh_token.enc`, `gh_repo.txt`.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ARUmultiplatform/drive/worker/**'
+      - 'tool/encode/gh_token.enc'
+      - 'tool/encode/gh_repo.txt'
+      - '.github/workflows/drive-worker.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: drive-worker
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: secret
+    defaults:
+      run:
+        working-directory: ARUmultiplatform/drive/worker
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "ARUmultiplatform/drive/worker -> target"
+
+      - name: Testlar (xost) va wasm tekshiruvi
+        run: |
+          cargo test --lib
+          cargo check --target wasm32-unknown-unknown
+
+      - name: worker-build
+        run: cargo install worker-build --locked
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: wrangler
+        run: npm install -g wrangler
+
+      - name: Build (WASM)
+        run: worker-build --release
+
+      - name: Deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: wrangler deploy
+
+      - name: Sirlar
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          put() {
+            if [ -n "$2" ]; then
+              printf '%s' "$2" | wrangler secret put "$1"
+            else
+              echo "⚠️  $1 — yo'q, o'tkazib yuborildi (Cloudflare'dagi qiymat saqlanadi)"
+            fi
+          }
+          K=$(printf '%s' "${{ secrets.ENCODE_TOKEN }}" | tr -d '[:space:]')
+          # Shifrlangan sirlar: BD_BOT_TOKEN, BD_TURSO_URL, BD_TURSO_TOKEN.
+          S=$(K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in secrets.enc 2>/dev/null || true)
+          for N in BD_BOT_TOKEN BD_TURSO_URL BD_TURSO_TOKEN; do
+            V=$(printf '%s' "$S" | python3 -c 'import json,sys; print(json.load(sys.stdin).get(sys.argv[1],""), end="")' "$N" 2>/dev/null || true)
+            put "$N" "$V"
+          done
+          put ENCODE_TOKEN "$K"
+          put APP_SIGN_SECRET "${{ secrets.APP_SIGN_SECRET }}"
+          put TG_CHANNEL_ID "${{ secrets.TG_CHANNEL_ID }}"
+          # Ikkinchi akkauntdagi repo (Actions): token `gh_token.enc` da, repo nomi `gh_repo.txt` da (deploy-worker.yml dagidek).
+          if [ -f ../../../tool/encode/gh_token.enc ] && [ -f ../../../tool/encode/gh_repo.txt ]; then
+            GHT=$(K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in ../../../tool/encode/gh_token.enc 2>/dev/null | tr -d '[:space:]')
+            if [ -n "$GHT" ]; then
+              put GH_ACTIONS_TOKEN "$GHT"
+              GR=$(tr -d '[:space:]' < ../../../tool/encode/gh_repo.txt)
+              case "$GR" in
+                */*) ;;
+                *) GO=$(curl -fsS -H "Authorization: Bearer $GHT" -H "User-Agent: arudrive-deploy" https://api.github.com/user | python3 -c 'import json,sys; print(json.load(sys.stdin)["login"])' || true)
+                   [ -n "$GO" ] && GR="$GO/${GR:-avtoencode}" || GR="" ;;
+              esac
+              [ -n "$GR" ] && put GH_REPO "$GR" && echo "GH_REPO: $GR"
+            fi
+          fi
