@@ -514,32 +514,48 @@ pub(crate) async fn warm(env: &Env, id: &str, widx: u64, force: bool) -> Result<
     let env2 = env.clone();
     let first_n = win_start / CHUNK;
     let last_n = win_end / CHUNK;
+    // TEZLIK: joriy bo'lak quvurga oqayotgan paytda KEYINGI bo'lak ulanishi (`getFile` + Telegram ulanishi) ALLAQACHON
+    // parallel ochiladi (`join`) — bo'laklar orasidagi kutish yo'qoladi. Xotira o'smaydi: keyingi bo'lakning tanasi
+    // quvurga o'tgunga qadar o'qilmaydi (oqim to'xtab turadi).
     worker::wasm_bindgen_futures::spawn_local(async move {
+        let open = |n: u64| {
+            let env3 = env2.clone();
+            let tg = chunks.iter().find(|(k, _)| *k as u64 == n).map(|(_, t)| t.clone());
+            async move {
+                let Some(tg) = tg else { return Err(Error::RustError("bo'lak yo'q".into())) };
+                chunk_stream(&env3, &tg, CHUNK.min(total - n * CHUNK)).await
+            }
+        };
+        let mut pending: Option<web_sys::ReadableStream> = None;
         for n in first_n..=last_n {
-            let Some((_, tg)) = chunks.iter().find(|(k, _)| *k as u64 == n) else {
-                abort_pipe(&writable);
-                return;
-            };
-            let c_start = n * CHUNK;
-            let expect = CHUNK.min(total - c_start);
-            let rs = match chunk_stream(&env2, tg, expect).await {
-                Ok(s) => s,
-                Err(_) => {
-                    abort_pipe(&writable);
-                    return;
-                }
-            };
-            match pipe_keep_open(&rs, &writable) {
-                Ok(p) => {
-                    if worker::wasm_bindgen_futures::JsFuture::from(p).await.is_err() {
+            let rs = match pending.take() {
+                Some(s) => s,
+                None => match open(n).await {
+                    Ok(s) => s,
+                    Err(_) => {
                         abort_pipe(&writable);
                         return;
                     }
-                }
+                },
+            };
+            let p = match pipe_keep_open(&rs, &writable) {
+                Ok(p) => p,
                 Err(_) => {
                     abort_pipe(&writable);
                     return;
                 }
+            };
+            let pipe_fut = worker::wasm_bindgen_futures::JsFuture::from(p);
+            if n < last_n {
+                let (pr, nr) = futures_util::future::join(pipe_fut, open(n + 1)).await;
+                if pr.is_err() {
+                    abort_pipe(&writable);
+                    return;
+                }
+                pending = nr.ok(); // xato bo'lsa keyingi aylanishda qayta uriniladi
+            } else if pipe_fut.await.is_err() {
+                abort_pipe(&writable);
+                return;
             }
         }
         close_pipe(&writable);

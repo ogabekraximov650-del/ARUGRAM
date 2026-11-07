@@ -30,8 +30,9 @@ pub(crate) const CHUNK_CACHE_SECONDS: u64 = 1000 * 24 * 60 * 60; // 1000 kun
 pub(crate) const CLIENT_CACHE: &str = "public, max-age=86400000, immutable";
 
 
-/// ARUDRIVE: oyna 26 ta 18 MiB bo'lakka teng (≈468 MiB < 512 MB Cloudflare chegarasi) — oyna chegarasi bo'lak chegarasiga to'g'ri keladi.
-pub(crate) const WARM_WINDOW: u64 = 26 * 18 * 1024 * 1024;
+/// ARUDRIVE: oyna 4 ta 18 MiB bo'lak (72 MiB). Kichik oyna = video TEZ ochiladi (Telegram'dan 72 MiB olinib bo'lguncha kutiladi,
+/// 468 MiB emas); keyingi oyna ilova tomonidan oldindan isitiladi. Oyna chegarasi bo'lak chegarasiga to'g'ri keladi.
+pub(crate) const WARM_WINDOW: u64 = 4 * 18 * 1024 * 1024;
 
 pub(crate) const WARM_MARKER_SECONDS: u64 = 120;
 

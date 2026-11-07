@@ -7,6 +7,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.Interceptor
@@ -46,8 +47,8 @@ private class SignInterceptor : Interceptor {
 
 object Api {
     const val PART_FALLBACK = 18 * 1024 * 1024
-    /** Worker bilan bir xil: kesh oynasi 26 ta 18 MiB bo'lak. */
-    const val WARM_WINDOW = 26L * 18 * 1024 * 1024
+    /** Worker bilan bir xil: kesh oynasi 4 ta 18 MiB bo'lak (72 MiB) — kichik oyna tez isiydi. */
+    const val WARM_WINDOW = 4L * 18 * 1024 * 1024
     private val json = Json { ignoreUnknownKeys = true }
     private val JSON = "application/json".toMediaType()
 
@@ -140,7 +141,7 @@ object Api {
         call(Request.Builder().url(url("/api/bd/finish")).post(body).build())
     }
 
-    class WarmResult(val ok: Boolean, val text: String)
+    class WarmResult(val ok: Boolean, val text: String, val total: Long = 0)
 
     /** Bitta isitish so'rovi: natija va tashxis matni (HTTP kodi, worker holati, vaqt, Cloudflare markazi). */
     fun warmDetailed(id: String, window: Long, force: Boolean = false): WarmResult {
@@ -152,7 +153,10 @@ object Api {
                 val st = runCatching { json.parseToJsonElement(body).jsonObject["status"]?.jsonPrimitive?.contentOrNull }.getOrNull().orEmpty()
                 val ray = r.header("cf-ray")?.substringAfterLast('-').orEmpty()
                 val ms = System.currentTimeMillis() - t0
-                WarmResult(r.isSuccessful && (st == "cached" || st == "warmed"), "HTTP ${r.code} ${st.ifEmpty { body.take(60) }} · ${ms / 1000.0}s · $ray")
+                val total = runCatching { json.parseToJsonElement(body).jsonObject["total"]?.jsonPrimitive?.longOrNull }.getOrNull() ?: 0L
+                val ok = r.isSuccessful && (st == "cached" || st == "warmed")
+                if (ok && total > 0) Warm.totals[id] = total
+                WarmResult(ok, "HTTP ${r.code} ${st.ifEmpty { body.take(60) }} · ${ms / 1000.0}s · $ray", total)
             }
         } catch (e: Exception) {
             WarmResult(false, "Xato: ${e.javaClass.simpleName} ${e.message.orEmpty().take(80)} · ${(System.currentTimeMillis() - t0) / 1000.0}s")

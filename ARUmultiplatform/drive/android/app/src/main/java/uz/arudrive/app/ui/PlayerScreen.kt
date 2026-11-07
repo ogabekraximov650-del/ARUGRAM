@@ -113,7 +113,13 @@ fun PlayerScreen(file: DriveFile, onBack: () -> Unit) {
             }
         }
     }
-    LaunchedEffect(player) { while (true) { delay(250); player.tick() } }
+    LaunchedEffect(player) {
+        var n = 0
+        while (true) {
+            delay(250); player.tick()
+            if (++n % 8 == 0) Warm.maybePrefetch(file.id, player.positionMs, player.durationMs)
+        }
+    }
     // Kutish vaqti (tashxis): worker javobi qancha vaqt kelmayotganini ko'rsatadi.
     LaunchedEffect(file.id, attempt, cacheReady) { while (!cacheReady) { delay(1000); waited++ } }
 

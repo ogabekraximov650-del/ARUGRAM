@@ -15,6 +15,28 @@ import java.util.concurrent.ConcurrentHashMap
 @UnstableApi
 object Warm {
     private val done = ConcurrentHashMap.newKeySet<String>()
+    private val inflight = ConcurrentHashMap.newKeySet<String>()
+    /** Fayl hajmi (isitish javobidan) — keyingi oynani oldindan isitish uchun. */
+    val totals = ConcurrentHashMap<String, Long>()
+
+    /**
+     * TANBAL OLDINDAN ISITISH (ARUMEDIATV "tanbal keshlash" kabi): ijro joriy oynaning yarmidan o'tganda KEYINGI oyna fonda
+     * isitiladi — oyna chegarasida pleyer kutib qolmaydi, ko'rilmagan oyna esa isitilmaydi (Telegram trafigi behuda ketmaydi).
+     */
+    fun maybePrefetch(id: String, positionMs: Long, durationMs: Long) {
+        val total = totals[id] ?: return
+        if (durationMs <= 0 || total <= 0) return
+        val bytePos = (positionMs.toDouble() / durationMs * total).toLong()
+        val w = bytePos / Api.WARM_WINDOW
+        if (bytePos - w * Api.WARM_WINDOW < Api.WARM_WINDOW / 2) return
+        val next = w + 1
+        if (next * Api.WARM_WINDOW >= total) return
+        val key = "$id:$next"
+        if (done.contains(key) || !inflight.add(key)) return
+        Thread {
+            try { if (Api.warmBlocking(id, next)) done.add(key) } finally { inflight.remove(key) }
+        }.start()
+    }
 
     fun mediaSourceFactory(id: String, context: android.content.Context): DefaultMediaSourceFactory {
         val resolver = ResolvingDataSource.Resolver { spec: DataSpec ->
