@@ -6927,3 +6927,11 @@ Foydalanuvchi: model "sudo yo'q, o'rnatib bo'lmaydi" deb to'xtab qoldi ("Modelni
 ## ARUTUBE — DoodStream ilovasi (2026-11)
 
 `ARUmultiplatform/tube/` — YouTube'ga o'xshash ilova (Kotlin+Compose+Rust) va alohida worker `arutube-api` (Rust/WASM). Bazasiz: ro'yxat DoodStream `file/list` dan, muqova `single_img`, pleyer — iframe `<host>/e/<kod>`. Yuklash: fayl (Rust oqim, `upload/server` + `api_key`+`file` multipart) va havola (`upload/url`, worker orqali). Kalit `DOOD_KEY` — GitHub Environment secret, worker deploy uni Cloudflare secret qiladi. Workflow'lar: `tube-android.yml`, `tube-worker.yml`. Tafsilot: `ARUmultiplatform/tube/README.md`.
+
+## ARUDRIVE — Bot API fayl ombori (2026-11)
+
+- Nima: kichik alohida Android ilova (`ARUmultiplatform/drive/android`, Kotlin + Compose, paket `uz.arudrive.app`; ARUMEDIATV pleyer UI'si ko'chirilgan) + yangi worker `arudrive` (`ARUmultiplatform/drive/worker`).
+- Oqim: ilova faylni worker orqali R2'ga 18 MiB bo'laklab yuklaydi (`/api/bd/init|part|finish|thumb`) -> ikkinchi akkaunt repodagi `bdrive.yml` (`tool/bdrive/chunk.py`, qayta kodlashsiz) R2'dan bo'lak olib Bot API bilan ARUMEDIATV kanaliga yuboradi; metadata Turso `botapi-arumedia` (`bd_files`, `bd_chunks`).
+- Ko'rish: bo'laklar Telegram -> Cloudflare keshga TO'G'RIDAN-TO'G'RI (R2'siz), kesh oynasi 26x18 MiB (bo'lak chegarasiga mos), TTL 1000 kun, tizim arumediatv worker'idagidek. Video kesh tayyor bo'lmaguncha ochilmaydi (ilova `/api/warm/bd~<id>` ni kutadi; keyingi oynalar `ResolvingDataSource` orqali).
+- Auth: ilova `X-App-Sig` / `?t=` (APP_SIGN_SECRET CI'da BuildConfig'ga yoziladi), Actions `X-Encode-Token`. Bot tokeni ilovada YO'Q.
+- CI: `drive-worker.yml`, `drive-android.yml`. Yuklab olish (fayl turi) hozircha yo'q — faqat video ijrosi.
