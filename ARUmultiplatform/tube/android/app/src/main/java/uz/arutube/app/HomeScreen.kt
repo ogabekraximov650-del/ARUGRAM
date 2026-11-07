@@ -6,6 +6,7 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -74,6 +75,7 @@ fun Avatar(seed: String, size: Int = 36) {
 }
 
 /** YouTube'dagidek karta: to'liq kenglikdagi 16:9 muqova, davomiylik belgisi, kanal belgisi, nom, "ko'rish · vaqt". */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun VideoCard(v: Video, progress: Float = 0f, onClick: () -> Unit) {
     val quick = LocalQuickActions.current
@@ -141,6 +143,7 @@ fun ContinueCard(sv: Saved, onClick: () -> Unit) {
 }
 
 /** Shorts kartasi: vertikal 9:16, pastda nom (YouTube Shorts javonidagidek). */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ShortCard(v: Video, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val quick = LocalQuickActions.current

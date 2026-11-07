@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 
 /** Ixcham qator (chapda kichik muqova, o'ngda matn va ⋮): "keyingi videolar" ro'yxati uchun, Flow/YouTube dagidek. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun VideoRow(v: Video, progress: Float = 0f, onClick: () -> Unit) {
     val quick = LocalQuickActions.current
