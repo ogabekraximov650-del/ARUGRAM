@@ -79,6 +79,7 @@ dependencies {
     implementation(libs.compose.ui)
     implementation(libs.compose.foundation)
     implementation(libs.compose.material3)
+    implementation(libs.compose.material.icons.core)
 
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     // Muqova (thumbnail) rasmlari

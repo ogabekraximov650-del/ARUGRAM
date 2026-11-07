@@ -1,22 +1,38 @@
 package uz.arutube.app
 
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -31,7 +47,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -39,10 +57,21 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import kotlinx.coroutines.launch
 
-/** YouTube'dagidek karta: 16:9 muqova, davomiylik belgisi, nom, "ko'rishlar · sana". */
+private val AvatarColors = listOf(0xFFE53935, 0xFF8E24AA, 0xFF3949AB, 0xFF00897B, 0xFFF4511E, 0xFF6D4C41, 0xFF039BE5, 0xFF7CB342)
+
+/** Kanal belgisi o'rnida: nomning birinchi harfi, rangi nomdan olinadi. */
+@Composable
+fun Avatar(seed: String, size: Int = 36) {
+    val c = Color(AvatarColors[(seed.hashCode() and 0x7fffffff) % AvatarColors.size])
+    Box(Modifier.size(size.dp).clip(CircleShape).background(c), contentAlignment = Alignment.Center) {
+        Text(seed.trim().take(1).uppercase().ifEmpty { "A" }, color = Color.White, fontWeight = FontWeight.Bold, fontSize = (size * 0.45f).sp)
+    }
+}
+
+/** YouTube'dagidek karta: to'liq kenglikdagi 16:9 muqova, davomiylik belgisi, kanal belgisi, nom, "ko'rish · vaqt". */
 @Composable
 fun VideoCard(v: Video, onClick: () -> Unit) {
-    Column(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(bottom = 18.dp)) {
+    Column(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(bottom = 20.dp)) {
         Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(Color(0xFF222222))) {
             if (v.thumb.isNotBlank()) {
                 AsyncImage(
@@ -56,7 +85,7 @@ fun VideoCard(v: Video, onClick: () -> Unit) {
                 Format.duration(v.duration),
                 color = Color.White,
                 fontSize = 12.sp,
-                fontWeight = FontWeight.Medium,
+                fontWeight = FontWeight.SemiBold,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(8.dp)
@@ -65,20 +94,61 @@ fun VideoCard(v: Video, onClick: () -> Unit) {
                     .padding(horizontal = 5.dp, vertical = 2.dp),
             )
         }
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
-            Text(v.title.ifBlank { v.code }, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Text(
-                "${Format.count(v.views)} ko'rish · ${Format.date(v.uploaded)}",
-                fontSize = 12.sp,
-                color = Color(0xFFAAAAAA),
-                modifier = Modifier.padding(top = 2.dp),
-            )
+        Row(Modifier.padding(start = 12.dp, end = 12.dp, top = 12.dp), verticalAlignment = Alignment.Top) {
+            Avatar("ARUTUBE")
+            Spacer(Modifier.width(12.dp))
+            Column {
+                Text(v.title.ifBlank { v.code }, fontSize = 15.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                val ago = Format.ago(v.uploaded)
+                Text(
+                    "ARUTUBE · ${Format.count(v.views)} ko'rish" + if (ago.isNotEmpty()) " · $ago" else "",
+                    fontSize = 12.sp,
+                    color = TubeGray,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
         }
     }
 }
 
+/** Yuklanish paytida kartalar o'rnida miltillovchi joy. */
 @Composable
-fun HomeScreen(refreshKey: Int, onOpen: (Video) -> Unit, onUpload: () -> Unit) {
+fun SkeletonCard() {
+    val alpha by rememberInfiniteTransition(label = "sk").animateFloat(
+        initialValue = 0.35f,
+        targetValue = 0.75f,
+        animationSpec = infiniteRepeatable(tween(800), RepeatMode.Reverse),
+        label = "a",
+    )
+    val c = Color(0xFF2A2A2A).copy(alpha = alpha)
+    Column(Modifier.fillMaxWidth().padding(bottom = 20.dp)) {
+        Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(c))
+        Row(Modifier.padding(12.dp)) {
+            Box(Modifier.size(36.dp).clip(CircleShape).background(c))
+            Spacer(Modifier.width(12.dp))
+            Column {
+                Box(Modifier.fillMaxWidth(0.8f).height(14.dp).clip(RoundedCornerShape(4.dp)).background(c))
+                Spacer(Modifier.height(8.dp))
+                Box(Modifier.fillMaxWidth(0.5f).height(12.dp).clip(RoundedCornerShape(4.dp)).background(c))
+            }
+        }
+    }
+}
+
+private enum class Chip(val label: String) {
+    ALL("Hammasi"), NEW("Yangi"), POPULAR("Mashhur"), LONG("Uzun"), SHORT("Qisqa");
+
+    fun apply(list: List<Video>): List<Video> = when (this) {
+        ALL -> list
+        NEW -> list.sortedByDescending { it.uploaded }
+        POPULAR -> list.sortedByDescending { it.views }
+        LONG -> list.filter { it.duration >= 20 * 60 }
+        SHORT -> list.filter { it.duration < 20 * 60 }
+    }
+}
+
+@Composable
+fun HomeScreen(refreshKey: Int, onOpen: (Video) -> Unit) {
     val scope = rememberCoroutineScope()
     var videos by remember { mutableStateOf(listOf<Video>()) }
     var page by remember { mutableIntStateOf(1) }
@@ -86,6 +156,8 @@ fun HomeScreen(refreshKey: Int, onOpen: (Video) -> Unit, onUpload: () -> Unit) {
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var query by remember { mutableStateOf("") }
+    var searching by remember { mutableStateOf(false) }
+    var chip by remember { mutableStateOf(Chip.ALL) }
 
     suspend fun load(p: Int) {
         loading = true
@@ -103,36 +175,78 @@ fun HomeScreen(refreshKey: Int, onOpen: (Video) -> Unit, onUpload: () -> Unit) {
 
     LaunchedEffect(refreshKey) { load(1) }
 
-    val shown = if (query.isBlank()) videos else videos.filter { it.title.contains(query, ignoreCase = true) }
+    val byQuery = if (query.isBlank()) videos else videos.filter { it.title.contains(query, ignoreCase = true) }
+    val shown = chip.apply(byQuery)
 
-    LazyColumn(Modifier.fillMaxWidth().statusBarsPadding()) {
-        item {
-            Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("ARUTUBE", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                Row {
-                    TextButton(onClick = { scope.launch { load(1) } }) { Text("Yangilash") }
-                    Button(onClick = onUpload) { Text("Yuklash") }
+    Column(Modifier.statusBarsPadding()) {
+        // Yuqori panel: logotip (qizil "play" belgisi + nom), qidiruv va yangilash.
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (searching) {
+                Box(Modifier.weight(1f).clip(RoundedCornerShape(20.dp)).background(TubeChip).padding(horizontal = 14.dp, vertical = 10.dp)) {
+                    if (query.isEmpty()) Text("Qidirish", color = TubeGray, fontSize = 15.sp)
+                    BasicTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        singleLine = true,
+                        textStyle = TextStyle(color = Color.White, fontSize = 15.sp),
+                        cursorBrush = SolidColor(Color.White),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                 }
+                Icon(
+                    Icons.Filled.Close,
+                    contentDescription = "Yopish",
+                    tint = Color.White,
+                    modifier = Modifier.padding(start = 8.dp).size(36.dp).clip(CircleShape).clickable { searching = false; query = "" }.padding(6.dp),
+                )
+            } else {
+                Box(Modifier.size(width = 32.dp, height = 22.dp).clip(RoundedCornerShape(6.dp)).background(TubeRed), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                }
+                Text("ARUTUBE", fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 6.dp).weight(1f))
+                Icon(
+                    Icons.Filled.Refresh,
+                    contentDescription = "Yangilash",
+                    tint = Color.White,
+                    modifier = Modifier.size(40.dp).clip(CircleShape).clickable { scope.launch { load(1) } }.padding(8.dp),
+                )
+                Icon(
+                    Icons.Filled.Search,
+                    contentDescription = "Qidirish",
+                    tint = Color.White,
+                    modifier = Modifier.size(40.dp).clip(CircleShape).clickable { searching = true }.padding(8.dp),
+                )
             }
-            OutlinedTextField(
-                value = query,
-                onValueChange = { query = it },
-                singleLine = true,
-                placeholder = { Text("Qidirish") },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-            )
         }
-        items(shown, key = { it.code }) { v -> VideoCard(v) { onOpen(v) } }
-        item {
-            Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                when {
-                    loading -> CircularProgressIndicator()
-                    error != null -> {
-                        Text("❌ $error", color = Color(0xFFFF8080))
-                        TextButton(onClick = { scope.launch { load(if (videos.isEmpty()) 1 else page + 1) } }) { Text("Qayta urinish") }
+        // Toifa tugmalari (YouTube'dagi "chip"lar).
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Chip.values().forEach { c ->
+                val sel = c == chip
+                Text(
+                    c.label,
+                    color = if (sel) Color.Black else Color.White,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(if (sel) Color.White else TubeChip).clickable { chip = c }.padding(horizontal = 12.dp, vertical = 7.dp),
+                )
+            }
+        }
+        LazyColumn(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+            if (loading && videos.isEmpty()) {
+                items(3) { SkeletonCard() }
+            }
+            items(shown, key = { it.code }) { v -> VideoCard(v) { onOpen(v) } }
+            item {
+                Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    when {
+                        loading && videos.isNotEmpty() -> CircularProgressIndicator(color = TubeRed)
+                        error != null -> {
+                            Text("❌ $error", color = Color(0xFFFF8080))
+                            TextButton(onClick = { scope.launch { load(if (videos.isEmpty()) 1 else page + 1) } }) { Text("Qayta urinish") }
+                        }
+                        !loading && shown.isEmpty() -> Text("Video yo'q", color = TubeGray)
+                        page < pages && query.isBlank() -> TextButton(onClick = { scope.launch { load(page + 1) } }) { Text("Yana yuklash") }
                     }
-                    shown.isEmpty() -> Text("Video yo'q", color = Color(0xFFAAAAAA))
-                    page < pages && query.isBlank() -> TextButton(onClick = { scope.launch { load(page + 1) } }) { Text("Yana yuklash") }
                 }
             }
         }

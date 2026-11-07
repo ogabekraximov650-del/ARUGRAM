@@ -5,8 +5,19 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -23,10 +34,14 @@ sealed interface Screen {
     data object Upload : Screen
 }
 
+val TubeRed = Color(0xFFFF0000)
+val TubeGray = Color(0xFFAAAAAA)
+val TubeChip = Color(0xFF272727)
+
 private val TubeColors = darkColorScheme(
-    primary = Color(0xFFFF3D3D),
+    primary = TubeRed,
     background = Color(0xFF0F0F0F),
-    surface = Color(0xFF1B1B1B),
+    surface = Color(0xFF1F1F1F),
     onBackground = Color.White,
     onSurface = Color.White,
 )
@@ -50,15 +65,38 @@ fun TubeApp() {
     var refresh by remember { mutableIntStateOf(0) }
     BackHandler(enabled = screen !is Screen.Home) { screen = Screen.Home }
 
-    androidx.compose.foundation.layout.Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        when (val s = screen) {
-            is Screen.Home -> HomeScreen(
-                refreshKey = refresh,
-                onOpen = { screen = Screen.Watch(it) },
-                onUpload = { screen = Screen.Upload },
-            )
-            is Screen.Watch -> WatchScreen(video = s.video, onBack = { screen = Screen.Home }, onOpen = { screen = Screen.Watch(it) })
-            is Screen.Upload -> UploadScreen(onBack = { screen = Screen.Home }, onUploaded = { refresh++ })
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        Box(Modifier.weight(1f)) {
+            when (val s = screen) {
+                is Screen.Home -> HomeScreen(refreshKey = refresh, onOpen = { screen = Screen.Watch(it) })
+                is Screen.Watch -> WatchScreen(video = s.video, onBack = { screen = Screen.Home }, onOpen = { screen = Screen.Watch(it) })
+                is Screen.Upload -> UploadScreen(onBack = { screen = Screen.Home }, onUploaded = { refresh++ })
+            }
+        }
+        if (screen !is Screen.Watch) {
+            NavigationBar(containerColor = Color(0xFF0F0F0F), modifier = Modifier.navigationBarsPadding()) {
+                val colors = NavigationBarItemDefaults.colors(
+                    selectedIconColor = Color.White,
+                    selectedTextColor = Color.White,
+                    unselectedIconColor = TubeGray,
+                    unselectedTextColor = TubeGray,
+                    indicatorColor = Color(0xFF272727),
+                )
+                NavigationBarItem(
+                    selected = screen is Screen.Home,
+                    onClick = { screen = Screen.Home },
+                    icon = { Icon(Icons.Filled.Home, contentDescription = null) },
+                    label = { Text("Bosh sahifa") },
+                    colors = colors,
+                )
+                NavigationBarItem(
+                    selected = screen is Screen.Upload,
+                    onClick = { screen = Screen.Upload },
+                    icon = { Icon(Icons.Filled.Add, contentDescription = null) },
+                    label = { Text("Yuklash") },
+                    colors = colors,
+                )
+            }
         }
     }
 }

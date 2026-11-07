@@ -27,6 +27,15 @@ class FormatTest {
         assertEquals("2026-11-06", Format.date("2026-11-06 07:54:34"))
     }
 
+    @Test fun ago() {
+        val f = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
+        val now = f.parse("2026-11-08 07:54:34")!!.time
+        assertEquals("2 kun oldin", Format.ago("2026-11-06 07:54:34", now))
+        assertEquals("3 soat oldin", Format.ago("2026-11-08 04:54:34", now))
+        assertEquals("hozirgina", Format.ago("2026-11-08 07:54:30", now))
+        assertEquals("", Format.ago("xato", now))
+    }
+
     @Test fun listJavobi() {
         val j = Api.json.decodeFromString<VideoPage>(
             """{"videos":[{"code":"a","title":"T","duration":6001,"views":3,"thumb":"u","embed":"e","extra":1}],"page":1,"pages":2,"total":9}""",
