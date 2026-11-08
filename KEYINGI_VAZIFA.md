@@ -6976,3 +6976,9 @@ Foydalanuvchi: model "sudo yo'q, o'rnatib bo'lmaydi" deb to'xtab qoldi ("Modelni
 - **Xavfsizlik:** Workers Caching darvozadan OLDIN turadi, shu sabab ichki ro'yxatdan boshqa hamma javobga `no-store` qo'yiladi (`lib.rs::no_store`); ichki manzil sirli.
 - **Cheklov:** Turso konsolida qo'lda o'zgartirsangiz kesh bilmaydi: `POST /api/bd/bump` (X-Encode-Token) yoki `?fresh=1`.
 - **Fayllar:** `drive/worker/src/{bdrive,lib}.rs`, `wrangler.toml` (`[cache] enabled = true`), `.github/workflows/drive-worker.yml` (Node 22).
+
+## ARUDRIVE: ko'ringan videolarning birinchi bo'lagini oldindan keshlash
+
+- **Nima:** bosh sahifada ekranda 0,5 soniya ko'rinib turgan har bir video (`playable`) uchun, "keshda" belgisi (7 kun) bo'lmasa, fonda `GET /api/warm/bd~<id>?w=0` yuboriladi (bittadan ketma-ket). Kesh to'la bo'lsa worker faqat "cached" qaytaradi (Telegram'ga bormaydi); bo'sh bo'lsa birinchi bo'lak Telegram'dan keshga yoziladi. Muvaffaqiyatda belgi yoziladi, bosilganda video darhol ochiladi.
+- **Fayllar:** `drive/android/.../ui/HomeScreen.kt` (ko'rinadigan elementlarni kuzatish), `data/Warm.kt` (`prefetchFirst`).
+- **Eslatma:** kesh o'chib ketgan bo'lsa pleyer 503 oladi va avvalgidek majburan qayta isitadi.

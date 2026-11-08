@@ -69,6 +69,19 @@ object Warm {
         )
     }
 
+    private val prefetched = ConcurrentHashMap.newKeySet<String>()
+
+    /**
+     * Bosh sahifada ko'ringan videoning BIRINCHI bo'lagini keshga isitadi (belgi yangi bo'lsa yoki shu ishga tushishda urinilgan bo'lsa — hech narsa
+     * qilmaydi). Natija muvaffaqiyatli bo'lsa "keshda" belgisi yoziladi (pleyer darhol ochiladi). Xatoda keyingi ishga tushishgacha qayta urinilmaydi.
+     */
+    suspend fun prefetchFirst(ctx: android.content.Context, id: String) {
+        if (fresh(ctx, id) || !prefetched.add(id)) return
+        // NonCancellable: ro'yxat aylantirilib so'rov bekor qilinsa ham boshlangan isitish tugaydi va belgi yoziladi.
+        val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable + kotlinx.coroutines.Dispatchers.IO) { Api.warmDetailed(id, 0).ok }
+        if (ok) remember(ctx, id) else prefetched.remove(id)
+    }
+
     fun markWarm(id: String, window: Long = 0) { done.add("$id:$window") }
 
     // ── "BU OYNA KESHDA KO'RILGAN" BELGISI (ARUMEDIATV `write_warm_marker` kabi) ──

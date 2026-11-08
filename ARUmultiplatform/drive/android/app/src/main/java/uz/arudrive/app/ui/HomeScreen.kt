@@ -42,6 +42,7 @@ import uz.arudrive.app.data.Api
 import uz.arudrive.app.data.DriveFile
 import uz.arudrive.app.data.cardRatio
 import uz.arudrive.app.data.humanSize
+import kotlinx.coroutines.flow.collectLatest
 import uz.arudrive.app.player.formatClock
 
 /** Bosh sahifa: YouTube kabi, har qatorda bitta fayl; kichik rasm video o'lchamiga qarab yotiq yoki tik. */
@@ -68,6 +69,19 @@ fun HomeScreen(refreshKey: Int, listState: androidx.compose.foundation.lazy.Lazy
             .onSuccess { files = it; uz.arudrive.app.data.Store.save(ctx0, it); uz.arudrive.app.data.Store.markRefreshed(ctx0, refreshKey) }
             .onFailure { error = it.message ?: "Xato" }
         loading = false
+    }
+
+    // OLDINDAN KESHLASH (foydalanuvchi talabi): ekranda ko'ringan videolarning BIRINCHI bo'lagi keshda bo'lmasa fonda isitiladi,
+    // shunda bosilganda video darhol ochiladi. Tez o'tib ketilganlar isitilmaydi (0,5 s ko'rinib turishi kerak); bittadan ketma-ket.
+    LaunchedEffect(files) {
+        androidx.compose.runtime.snapshotFlow { listState.layoutInfo.visibleItemsInfo.mapNotNull { it.key as? String } }
+            .collectLatest { ids ->
+                kotlinx.coroutines.delay(500)
+                for (id in ids) {
+                    val f = files.firstOrNull { it.id == id } ?: continue
+                    if (f.isVideo && f.playable) uz.arudrive.app.data.Warm.prefetchFirst(ctx0, id)
+                }
+            }
     }
 
     Box(Modifier.fillMaxSize().background(AruColors.Bg)) {
