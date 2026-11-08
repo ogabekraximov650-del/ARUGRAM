@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import uz.arudrive.app.data.Api
 import uz.arudrive.app.data.Busy
+import uz.arudrive.app.data.PlayPos
 import uz.arudrive.app.data.DriveFile
 import uz.arudrive.app.data.Warm
 import uz.arudrive.app.player.AruPlayer
@@ -67,12 +68,19 @@ fun PlayerScreen(file: DriveFile, onBack: () -> Unit) {
     var cacheFailed by remember(file.id) { mutableStateOf(false) }
     var attempt by remember(file.id) { mutableIntStateOf(0) }
     var drag by remember { mutableStateOf<Float?>(null) }
+    // Oxirgi ko'rilgan joydan davom etadi (telefon xotirasidan).
+    val startMs = remember(file.id) { PlayPos.get(ctx, file.id) }
     var note by remember(file.id) { mutableStateOf("") }
     var waited by remember(file.id) { mutableIntStateOf(0) }
 
     DisposableEffect(player) {
         Busy.count.incrementAndGet()
-        onDispose { player.release(); Busy.count.decrementAndGet() }
+        onDispose {
+            // Chiqishda joriy joy saqlanadi (davomiylik noma'lum bo'lsa — faqat joy).
+            val dur = player.exo.duration.takeIf { it > 0 } ?: player.durationMs
+            if (player.ended) PlayPos.clear(ctx, file.id) else PlayPos.save(ctx, file.id, player.exo.currentPosition, dur)
+            player.release(); Busy.count.decrementAndGet()
+        }
     }
 
     var recoveries by remember(file.id) { mutableIntStateOf(0) }
@@ -85,13 +93,13 @@ fun PlayerScreen(file: DriveFile, onBack: () -> Unit) {
             // Belgi yangi: pleyer DARHOL ochiladi (isitish so'rovi kutilmaydi). Kesh o'chgan bo'lsa pleyer 503 oladi va
             // quyidagi tiklash oynani majburan qayta isitadi (ARUMEDIATV `_handleFatalError` kabi).
             Warm.markWarm(file.id, 0)
-            player.open(Api.playUrl(file.id), 0, true)
+            player.open(Api.playUrl(file.id), startMs, true)
             cacheReady = true
             // Fonda tekshiradi (ARUMEDIATV kabi): faylning hajmi ham shu javobdan keladi (keyingi bo'lakni oldindan isitish uchun).
             Api.warm(file.id, 0)
         } else if (Api.warm(file.id, 0, { note = it })) {
             Warm.remember(ctx, file.id)
-            player.open(Api.playUrl(file.id), 0, true)
+            player.open(Api.playUrl(file.id), startMs, true)
             cacheReady = true
         } else {
             cacheFailed = true
@@ -115,7 +123,16 @@ fun PlayerScreen(file: DriveFile, onBack: () -> Unit) {
             }
         }
     }
-    LaunchedEffect(player) { while (true) { delay(250); player.tick() } }
+    LaunchedEffect(player) {
+        var n = 0
+        while (true) {
+            delay(250)
+            player.tick()
+            // Har ~5 soniyada joy saqlanadi (ilova to'satdan yopilsa ham yo'qolmaydi).
+            if (++n % 20 == 0 && player.playing) PlayPos.save(ctx, file.id, player.positionMs, player.durationMs)
+            if (player.ended) PlayPos.clear(ctx, file.id)
+        }
+    }
     // Kutish vaqti (tashxis): worker javobi qancha vaqt kelmayotganini ko'rsatadi.
     LaunchedEffect(file.id, attempt, cacheReady) { while (!cacheReady) { delay(1000); waited++ } }
 

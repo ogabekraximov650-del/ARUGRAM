@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.padding
@@ -111,6 +112,11 @@ private fun FileCard(f: DriveFile, onPlay: (DriveFile) -> Unit) {
                     "Saqlanmoqda ${f.stored}/${f.chunks}", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.align(Alignment.TopStart).padding(8.dp).clip(RoundedCornerShape(6.dp)).background(Color(0xB3000000)).padding(horizontal = 6.dp, vertical = 2.dp),
                 )
+                // Ko'rilgan qism: kartaning pastida yupqa chiziq (YouTube kabi).
+                val seen = remember(f.id) { uz.arudrive.app.data.PlayPos.fraction(ctx, f.id, f.dur) }
+                if (seen > 0f) Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(3.dp).background(Color(0x66FFFFFF))) {
+                    Box(Modifier.fillMaxWidth(seen).height(3.dp).background(AruColors.Accent))
+                }
                 if (f.dur > 0) Text(
                     formatClock(f.dur), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp).clip(RoundedCornerShape(6.dp)).background(Color(0xB3000000)).padding(horizontal = 6.dp, vertical = 2.dp),
