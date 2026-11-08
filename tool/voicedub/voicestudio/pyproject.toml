@@ -198,7 +198,7 @@ dependencies = [
     # `uv pip install --system .` reads only project metadata and would try to
     # resolve a bare name from PyPI, where spaCy models don't exist. Same form
     # as kittentts above.
-    "en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl",
+    # en-core-web-sm (spaCy modeli) bu nusxadan OLIB TASHLANDI: faqat KittenTTS dvigateli uchun kerak, GitHub Releases'dan yuklash Actions'da osilib qoladi (ARUGRAM sinovi).
     # Security floors for pyannote-audio's checkpoint loader (GHSA-qqmf-gpg7-g8gw).
     # Declared here, not only in uv.lock, so `uv pip install .` (Docker, Colab)
     # cannot keep a preinstalled 2.6.5 that pyannote's `lightning>=2.0.1` allows.

@@ -1617,14 +1617,6 @@ wheels = [
 ]
 
 [[package]]
-name = "en-core-web-sm"
-version = "3.8.0"
-source = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" }
-wheels = [
-    { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl", hash = "sha256:1932429db727d4bff3deed6b34cfc05df17794f4a52eeb26cf8928f7c1a0fb85" },
-]
-
-[[package]]
 name = "espeakng-loader"
 version = "0.2.4"
 source = { registry = "https://pypi.org/simple" }
@@ -4099,7 +4091,6 @@ dependencies = [
     { name = "cryptography" },
     { name = "demucs", version = "4.0.1", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'darwin') or (platform_machine != 'x86_64' and extra == 'group-9-omnivoice-cpu' and extra == 'group-9-omnivoice-cuda') or (sys_platform != 'darwin' and extra == 'group-9-omnivoice-cpu' and extra == 'group-9-omnivoice-cuda')" },
     { name = "demucs", version = "4.1.0", source = { registry = "https://pypi.org/simple" }, marker = "platform_machine != 'x86_64' or sys_platform != 'darwin' or (extra == 'group-9-omnivoice-cpu' and extra == 'group-9-omnivoice-cuda')" },
-    { name = "en-core-web-sm" },
     { name = "fastapi" },
     { name = "faster-whisper" },
     { name = "google-auth" },
@@ -4209,7 +4200,6 @@ requires-dist = [
     { name = "boto3", specifier = ">=1.40" },
     { name = "cryptography", specifier = ">=41" },
     { name = "demucs", specifier = ">=4.0.1" },
-    { name = "en-core-web-sm", url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" },
     { name = "fastapi", specifier = "<0.137" },
     { name = "faster-whisper", specifier = ">=1.0.0" },
     { name = "funasr", marker = "extra == 'eval'" },
