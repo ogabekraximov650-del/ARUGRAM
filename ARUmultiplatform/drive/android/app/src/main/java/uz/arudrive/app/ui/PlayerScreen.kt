@@ -157,9 +157,9 @@ fun PlayerScreen(file: DriveFile, onBack: () -> Unit) {
             Column(Modifier.fillMaxSize()) {
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     if (cacheReady) PlayerSurface(player, Modifier.fillMaxSize())
-                    // 90 soniyadan uzun videoda ikki chetga ikki marta bosish: chap — 10 soniya orqaga, o'ng — 10 soniya oldinga
-                    // (o'rtada — pauza/davom). Qisqa videoda ikki marta bosish ham shunchaki pauza/davom.
-                    val longVideo = player.durationMs > 90_000
+                    // Ikki chetga ikki marta bosish (video davomiyligidan qat'i nazar): chap — 10 soniya orqaga, o'ng — 10 soniya oldinga
+                    // (o'rtada — pauza/davom).
+                    val longVideo = true
                     Box(
                         Modifier.fillMaxSize().pointerInput(longVideo, cacheReady) {
                             detectTapGestures(
