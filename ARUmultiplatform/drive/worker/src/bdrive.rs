@@ -677,6 +677,11 @@ pub(crate) async fn route(mut req: Request, env: &Env, ctx: &Context, path: &str
             list_invalidate(env).await;
             ok(json!({"ok": true}))
         }
+        // SINOV: Rust'dan yangi Workers Cache `cache.purge()` ni chaqirish (`cloudflare:workers` moduli, wasm-bindgen orqali).
+        (Method::Post, "/api/bd/purgetest") => match purge_tags(&["t1"]).await {
+            Ok(v) => ok(json!({"ok": true, "r": v})),
+            Err(e) => json_resp(&json!({"ok": false, "error": e}), 500),
+        },
         // Qo'lda: tashlab ketilgan (24 soatdan eski) yuklashlarni tozalash.
         (Method::Post, "/api/bd/cleanup") => match cleanup(env).await {
             Ok(log) => ok(json!({"ok": true, "log": log})),
@@ -1146,4 +1151,28 @@ mod tests {
         assert_eq!(clean_name("  a/b\\c.mp4 "), "abc.mp4");
         assert_eq!(clean_name("///"), "fayl");
     }
+}
+
+// UZ: `cloudflare:workers` modulidagi `cache` obyekti (Workers Caching). EN: the `cache` object from `cloudflare:workers`. RU: объект `cache` из `cloudflare:workers`.
+#[wasm_bindgen::prelude::wasm_bindgen(module = "cloudflare:workers")]
+extern "C" {
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = cache, thread_local_v2)]
+    static WORKERS_CACHE: wasm_bindgen::JsValue;
+}
+
+/// UZ: tag bo'yicha global o'chirish. EN: global purge by tag. RU: глобальная очистка по тегу.
+pub(crate) async fn purge_tags(tags: &[&str]) -> std::result::Result<String, String> {
+    use worker::wasm_bindgen::JsValue;
+    let cache = WORKERS_CACHE.with(|c| c.clone());
+    let f = js_sys::Reflect::get(&cache, &JsValue::from_str("purge")).map_err(|e| format!("{e:?}"))?;
+    let f: js_sys::Function = worker::wasm_bindgen::JsCast::dyn_into(f).map_err(|_| "purge funksiya emas".to_string())?;
+    let arr = js_sys::Array::new();
+    for t in tags {
+        arr.push(&JsValue::from_str(t));
+    }
+    let opts = js_sys::Object::new();
+    js_sys::Reflect::set(&opts, &JsValue::from_str("tags"), &arr).map_err(|e| format!("{e:?}"))?;
+    let p = f.call1(&cache, &opts).map_err(|e| format!("{e:?}"))?;
+    let r = wasm_bindgen_futures::JsFuture::from(js_sys::Promise::from(p)).await.map_err(|e| format!("{e:?}"))?;
+    Ok(js_sys::JSON::stringify(&r).ok().and_then(|s| s.as_string()).unwrap_or_default())
 }
