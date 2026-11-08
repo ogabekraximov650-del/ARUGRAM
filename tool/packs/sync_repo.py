@@ -60,6 +60,9 @@ FILES[".github/workflows/session.yml"] = HERE.parent / "session" / "session.work
 FILES["tool/session/session.py"] = HERE.parent / "session" / "session.py"
 # "Siqish" (kodlash botining "🗜 Siqish" bo'limi) — ALOHIDA workflow `compress.yml`.
 FILES[".github/workflows/compress.yml"] = HERE.parent / "compress" / "compress.workflow.yml"
+# "Dublyaj" (kodlash botining "🗣 Dublyaj" bo'limi) — ALOHIDA workflow `dub.yml` (VoiceStudio kodi ARUGRAM repodan olinadi).
+FILES[".github/workflows/dub.yml"] = HERE.parent / "dub" / "dub.workflow.yml"
+FILES["tool/dub/dub.py"] = HERE.parent / "dub" / "dub.py"
 FILES["tool/compress/compress.py"] = HERE.parent / "compress" / "compress.py"
 # albot: Actions'dagi mahalliy AI modeli (bot javoblari).
 FILES[".github/workflows/albot.yml"] = HERE.parent / "albot" / "albot.workflow.yml"

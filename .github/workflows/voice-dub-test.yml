@@ -2,11 +2,6 @@ name: VoiceStudio dublyaj sinovi (vaqtinchalik)
 
 # Sinov: kichik haqiqiy video -> VoiceStudio (CPU) -> o'zbekcha dublyaj (asl ovoz klonlanadi). Natija artifact sifatida yuklanadi.
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'tool/voicedub/**'
-      - '.github/workflows/voice-dub-test.yml'
   workflow_dispatch:
     inputs:
       video_url:

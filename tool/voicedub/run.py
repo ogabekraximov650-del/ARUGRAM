@@ -56,31 +56,34 @@ def call(method, path, body=None, files=None, raw=False):
 
 
 def sse(path):
-    """Yield (event_name, data_dict) from an SSE endpoint."""
+    """Yield (event_name, data_dict) from an SSE endpoint. Qator-qator o'qiladi: voqea keldi — darhol qaytadi (jonli foiz uchun)."""
     c = conn()
     c.request("GET", path)
     r = c.getresponse()
     if r.status >= 400:
         raise RuntimeError(f"GET {path} -> {r.status}: {r.read()[:400]!r}")
-    buf = b""
+    name, data = None, None
     while True:
-        chunk = r.read(4096)
-        if not chunk:
+        line = r.readline()
+        if not line:
             break
-        buf += chunk
-        while b"\n\n" in buf:
-            frame, buf = buf.split(b"\n\n", 1)
-            name, data = None, None
-            for line in frame.splitlines():
-                if line.startswith(b"event:"):
-                    name = line[6:].strip().decode()
-                elif line.startswith(b"data:"):
-                    try:
-                        data = json.loads(line[5:].strip())
-                    except Exception:
-                        data = {"raw": line[5:].decode(errors="replace")}
+        line = line.rstrip(b"\r\n")
+        if line.startswith(b"event:"):
+            name = line[6:].strip().decode()
+        elif line.startswith(b"data:"):
+            try:
+                data = json.loads(line[5:].strip())
+            except Exception:
+                data = {"raw": line[5:].decode(errors="replace")}
+        elif line == b"":
             if data is not None:
                 yield (name or (data.get("type") if isinstance(data, dict) else None) or "message"), data
+            name, data = None, None
+
+
+def prog(pct, text):
+    """Umumiy jarayon foizi (0..100) — Actions skripti (`tool/dub/dub.py`) shu qatorlarni o'qib botdagi xabarni yangilaydi."""
+    print(f"PROGRESS {max(0.0, min(100.0, pct)):.1f}\t{text}", flush=True)
 
 
 def safe_name(speaker_id):
@@ -111,6 +114,7 @@ def main():
     # 1. Yuklash
     data = open(video, "rb").read()
     log(f"yuklash: {video} ({len(data) / 1e6:.1f} MB)")
+    prog(1, "Video VoiceStudio'ga yuklanmoqda")
     res = call("POST", "/dub/upload", files={"video": (os.path.basename(video), data, "video/mp4")}, body={"input_type": "video"})
     job_id, task_id = res["job_id"], res["task_id"]
     log(f"job={job_id} task={task_id}")
@@ -120,19 +124,29 @@ def main():
         t = ev.get("type", name)
         if t in ("extract_start", "demucs_start", "scene_start", "demucs_done", "scene_done", "cached", "warning"):
             log(f"  prep: {t} {json.dumps(ev)[:160] if t == 'warning' else ''}")
+        if t == "extract_start":
+            prog(3, "Ovoz ajratib olinmoqda")
+        elif t == "demucs_start":
+            prog(4, "Ovoz va fon (musiqa) ajratilmoqda")
+        elif t == "demucs_progress":
+            prog(4 + 6 * float(ev.get("percent") or 0) / 100, f"Ovoz va fon ajratilmoqda {float(ev.get('percent') or 0):.0f}%")
         if t == "error":
             raise SystemExit(f"prep xato: {json.dumps(ev)[:800]}")
         if t == "ready":
             log(f"  prep tayyor: davomiyligi {ev.get('duration')} s")
+            prog(10, "Tayyorlandi")
             break
 
     # 3. Transkripsiya + spiker ovozlari (klon namunalari)
     log("transkripsiya (ASR + diarizatsiya + ovoz namunalari)...")
+    prog(11, "Nutq matnga aylantirilmoqda (Whisper)")
     final = None
     for name, ev in sse(f"/dub/transcribe-stream/{job_id}"):
         if name in ("start", "ping", "segments"):
             if name == "start":
                 log(f"  start: {json.dumps(ev)[:160]}")
+            elif name == "segments":
+                prog(17, "Gaplar ajratilmoqda, spikerlar aniqlanmoqda")
             continue
         if name in ("warning", "error"):
             log(f"  {name}: {json.dumps(ev)[:700]}")
@@ -146,6 +160,7 @@ def main():
         raise SystemExit("transkripsiya natija bermadi")
     segs = final["segments"]
     src_lang = final.get("source_lang")
+    prog(22, f"Matn tayyor: {len(segs)} ta gap, til: {src_lang}")
     log(f"  {len(segs)} segment, manba til={src_lang}, spikerlar={[s.get('speaker_id') for s in segs][:8]}")
     log(f"  klon manbalari: {json.dumps(final.get('cast_sources'))[:300]}")
     for s in segs:
@@ -169,6 +184,7 @@ def main():
             merged.append({**s, "text": txt})
     else:
         log(f"tarjima -> {target} ...")
+        prog(23, f"{target} tiliga tarjima qilinmoqda")
         tr = call("POST", "/dub/translate", {
             "segments": [{"id": s["id"], "text": s["text"], "target_lang": target,
                           "slot_seconds": s["end"] - s["start"], "start": s["start"], "end": s["end"]} for s in segs],
@@ -182,6 +198,7 @@ def main():
                 raise SystemExit(f"tarjima muvaffaqiyatsiz [{s['id']}]: {t.get('error') or 'matn yo`q'}")
             log(f"   -> {t['text']}")
             merged.append({**s, "text": t["text"]})
+    prog(30, "Tarjima tayyor")
     json.dump({"source": segs, "translated": merged, "raw": tr}, open(os.path.join(outdir, "segments.json"), "w"), ensure_ascii=False, indent=1)
 
     # 5. Ovozlash: har bir qator o'z spikerining klonlangan ovozi bilan
@@ -201,7 +218,9 @@ def main():
     for name, ev in sse(f"/tasks/stream/{gen['task_id']}"):
         t = ev.get("type", name)
         if t == "progress":
-            log(f"  segment {ev.get('current')}/{ev.get('total')}")
+            cur, tot = int(ev.get("current") or 0), max(1, int(ev.get("total") or 1))
+            log(f"  segment {cur}/{tot}")
+            prog(30 + 65 * cur / tot, f"Ovoz klonlanib gaplar aytilmoqda: {cur}/{tot}")
         elif t in ("error", "warning"):
             log(f"  {t}: {json.dumps(ev)[:600]}")
         if t == "done":
@@ -215,6 +234,7 @@ def main():
 
     # 6. Videoga qo'yish va yuklab olish
     log("eksport (video + dublyaj + fon) ...")
+    prog(96, "Video va dublyaj birlashtirilmoqda")
     mp4 = call("GET", f"/dub/download/{job_id}?preserve_bg=true&default_track={target}&include_tracks={target}", raw=True)
     open(os.path.join(outdir, f"dubbed_{target}.mp4"), "wb").write(mp4)
     log(f"  video: {len(mp4) / 1e6:.2f} MB")
@@ -223,6 +243,7 @@ def main():
         open(os.path.join(outdir, f"dubbed_{target}_voice.wav"), "wb").write(wav)
     except Exception as e:  # noqa: BLE001
         log(f"  ovoz fayli olinmadi: {e}")
+    prog(100, "Tayyor")
     log("TUGADI")
 
 

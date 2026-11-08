@@ -7001,3 +7001,13 @@ Foydalanuvchi: model "sudo yo'q, o'rnatib bo'lmaydi" deb to'xtab qoldi ("Modelni
 - **Worker:** `POST /api/bd/delete {id}` — qator bazadan, asl fayl R2'dan o'chadi, ro'yxat keshi global tozalanadi (`cache.purge` yo'l prefiksi). `storing` holatidagi fayl o'chirilmaydi (409). Telegram kanalidagi xabarlarga tegilmaydi.
 - **Ilova:** bosh sahifada kartani uzoq bosish -> tasdiq oynasi -> o'chirish; ro'yxat, telefondagi shifrlangan kesh (`BlockCache.remove`), davom etish joyi va "keshda" belgisi tozalanadi. Fayllar: `ui/HomeScreen.kt`, `data/Api.kt`, `data/BlockCache.kt`.
 - Sinov: worker orqali o'chirish ro'yxatdan 2 soniyada yo'qoldi, ilovada ham ko'rindi (foydalanuvchi tasdiqladi).
+
+
+## Kodlash botiga "🗣 Dublyaj" bo'limi (VoiceStudio, klon ovoz)
+
+- **Nima:** botning asosiy menyusida yangi tugma «🗣 Dublyaj». Video yuboriladi (izohga til kodi: `uz`, `en`, `ru`, `tr`...; bo'sh bo'lsa `uz`), videodagi ovoz klonlanib, gaplar tarjima qilinib shu ovozda aytiladi, tayyor video shu chatga keladi. Video 3 daqiqagacha (CPU'da ~10 daqiqa / 30 soniya video).
+- **Oqim** (`cmpbot.rs` "Siqish" bilan bir xil): video `copyMessage` bilan yopiq kanalga -> `dub_jobs` -> `dubbot::kick` -> ALOHIDA workflow `dub.yml` (avtoencode repoda, shablon `tool/dub/dub.workflow.yml`) -> `tool/dub/dub.py`: kanaldan yuklaydi, VoiceStudio backend (CPU torch) ni ko'taradi, `tool/voicedub/run.py` bilan: ASR (faster-whisper small) -> NLLB tarjima -> OmniVoice (klon, `num_step` 24) -> ffmpeg; tayyor videoni kanalga yuklaydi; `/api/dub/finish` — worker uni admin chatiga `copyMessage` qiladi va kanal nusxalarini o'chiradi.
+- **Foiz Actions'dan** (arudrivebot kabi): `run.py` `PROGRESS <foiz>\t<matn>` qatorlarini chiqaradi (yuklash 0-1, ovoz ajratish 3-10, transkripsiya 10-22, tarjima 22-30, har bir gap ovozlanishi 30-95, eksport 96-100); `dub.py` ularni `/api/dub/progress` orqali botdagi BITTA xabarda har ~8 soniyada yangilaydi (o'tgan va taxminiy qolgan vaqt bilan). Yuklash/yuborish — alohida foiz.
+- **Fayllar:** `worker/src/dubbot.rs` (+ `lib.rs`, `postbot.rs` menyu), `tool/dub/{dub.py,dub.workflow.yml}`, `tool/voicedub/` (driver `run.py`, VoiceStudio nusxasi `voicestudio/`), `tool/packs/sync_repo.py`, `.github/workflows/sync-packs.yml`.
+- **Cheklovlar:** GPU yo'q (sekin); spiker ajratish (pyannote) HF token talab qiladi, shu sabab bitta spiker deb olinadi; NLLB tarjimasi o'rtacha; OmniVoice/NLLB vaznlari CC-BY-NC (faqat shaxsiy foydalanish); VoiceStudio AGPL-3.0.
+- **Tekshiruv (qo'lda):** botda «🗣 Dublyaj» -> 30 soniyalik video yuborish -> holat xabarida foiz yangilanishi -> tayyor video chatga kelishi.

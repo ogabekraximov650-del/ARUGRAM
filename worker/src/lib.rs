@@ -40,6 +40,7 @@ mod channels;
 mod postbot;
 mod trbot;
 mod cmpbot;
+mod dubbot;
 mod announce;
 mod sessionbot;
 mod encupload;
@@ -1354,6 +1355,9 @@ async fn init_db(env: &Env) -> bool {
         (trbot::DDL[3], vec![]),
         (cmpbot::DDL[0], vec![]),
         (cmpbot::DDL[1], vec![]),
+        // ── DUBLYAJ (kodlash botining "🗣 Dublyaj" bo'limi, `dubbot.rs`) ──
+        (dubbot::DDL[0], vec![]),
+        (dubbot::DDL[1], vec![]),
         // ── ANIBLA YUKLASH NAVBATI (kodlash botining uchinchi bo'limi, `anibla.rs`) ──
         (anibla::DDL[0], vec![]),
         (anibla::DDL[1], vec![]),
@@ -12967,6 +12971,9 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
         if cmpbot::on_callback(env, chat, data).await {
             return ok(json!({"ok": true}));
         }
+        if dubbot::on_callback(env, chat, data).await {
+            return ok(json!({"ok": true}));
+        }
         if trbot::on_callback(env, chat, data).await {
             return ok(json!({"ok": true}));
         }
@@ -13019,6 +13026,10 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
     }
     if text == cmpbot::BTN {
         cmpbot::menu(env, chat).await;
+        return ok(json!({"ok": true}));
+    }
+    if text == dubbot::BTN {
+        dubbot::menu(env, chat).await;
         return ok(json!({"ok": true}));
     }
     if text == postbot::BTN_ANIBLA {
@@ -13080,6 +13091,7 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
             Some("post") => postbot::status(env, chat).await,
             Some("tr") => trbot::status(env, chat).await,
             Some("cmp") => cmpbot::status(env, chat).await,
+            Some("dub") => dubbot::status(env, chat).await,
             _ => {
                 encbot_queue_summary(env, chat).await;
                 livewatch::app_status(env, chat).await;
@@ -13108,6 +13120,10 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
     }
     if !is_status && config_get(env, "encbot_mode").await.as_deref() == Some("cmp") {
         cmpbot::on_message(env, msg, chat).await;
+        return ok(json!({"ok": true}));
+    }
+    if !is_status && config_get(env, "encbot_mode").await.as_deref() == Some("dub") {
+        dubbot::on_message(env, msg, chat).await;
         return ok(json!({"ok": true}));
     }
     if !is_status && config_get(env, "encbot_mode").await.as_deref() == Some("post") {
@@ -14172,6 +14188,8 @@ async fn scheduled(_ev: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
     let _ = trbot::kick(&env).await;
     // "Siqish" navbati — ALOHIDA workflow (`cmpbot::kick`).
     let _ = cmpbot::kick(&env).await;
+    // "Dublyaj" navbati — ALOHIDA workflow (`dubbot::kick`).
+    let _ = dubbot::kick(&env).await;
     // Mini App so'ragan eski qismlarning fMP4 nusxasi (`fmp4::kick`).
     let _ = fmp4::kick(&env).await;
     // R2 oraliq ombori: Telegram'ga yuklanmagan fayllar bo'lsa yuklovchi workflow ishga tushadi; eskirganlar tozalanadi.
@@ -14677,6 +14695,10 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
 
     if path.starts_with("/api/cmp/") {
         return cmpbot::route(req, &env, path, method.clone()).await;
+    }
+
+    if path.starts_with("/api/dub/") {
+        return dubbot::route(req, &env, path, method.clone()).await;
     }
 
     if path.starts_with("/api/anibla/") {

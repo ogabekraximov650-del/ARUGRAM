@@ -23,6 +23,7 @@ on:
       - 'tool/tgbot/**'
       - 'tool/albot/**'
       - 'tool/compress/**'
+      - 'tool/dub/**'
       - 'tool/emojifont/**'
       - 'fonts/TgEmoji.ttf'
       - '.github/workflows/sync-packs.yml'
