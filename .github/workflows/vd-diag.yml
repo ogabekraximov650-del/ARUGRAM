@@ -11,17 +11,37 @@ permissions:
 jobs:
   d:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     environment: secret
     env:
       API_BASE: https://arumediatv.uzcom.workers.dev
     steps:
-      - name: Navbat va ishga tushirish (faqat sonlar)
+      - run: pip install cryptography
+      - name: Navbat holati va shifrni tekshirish (kalit va nom logga chiqmaydi)
         env:
           ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
         run: |
-          call() { curl -sS -m 90 -X POST -H "X-Encode-Token: $ENCODE_TOKEN" -H "Content-Type: application/json" -H "User-Agent: arumediatv-vd" -d '{}' "$API_BASE$1"; echo; }
-          echo "peek:"; call /api/vd/peek
-          echo "enqueue:"; call /api/vd/mig/enqueue
-          sleep 60
-          echo "peek (1 daqiqadan keyin):"; call /api/vd/peek
+          python3 - <<'PY'
+          import json, os, time, urllib.request
+          from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+          A = os.environ["API_BASE"]; T = os.environ["ENCODE_TOKEN"].strip()
+          def call(p):
+              r = urllib.request.Request(A + p, data=b"{}", method="POST", headers={"X-Encode-Token": T, "Content-Type": "application/json", "User-Agent": "arumediatv-vd"})
+              try:
+                  with urllib.request.urlopen(r, timeout=120) as x: return json.loads(x.read())
+              except Exception as e: return {"error": str(e)[:80]}
+          print("peek:", call("/api/vd/peek"))
+          v = {}
+          for i in range(30):                      # deploy tugashini kutadi
+              v = call("/api/vd/verify")
+              if "head" in v or v.get("none"): break
+              time.sleep(20)
+          if v.get("none"): print("hali tayyor fayl yo'q")
+          elif "head" in v:
+              enc = bytes.fromhex(v["head"])
+              plain = Cipher(algorithms.AES(bytes.fromhex(v["key"])), modes.CTR(b"\0" * 16)).encryptor().update(enc)
+              print("hajm:", v["size"], "bo'laklar:", v["chunks"], "0-bo'lak uzunligi:", v["chunk0_len"])
+              print("ochilgan 4..8 bayt:", plain[4:8], "-> MP4 belgisi:", plain[4:8] in (b"ftyp", b"moov", b"mdat", b"free", b"wide", b"skip"))
+          else: print("javob:", {k: v[k] for k in v if k not in ("key", "name")})
+          print("peek (oxirida):", call("/api/vd/peek"))
+          PY

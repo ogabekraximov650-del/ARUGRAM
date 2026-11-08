@@ -212,7 +212,7 @@ pub(crate) async fn forget(env: &Env, name: &str) {
 
 pub(crate) fn is_actions_path(path: &str) -> bool {
     matches!(path, "/api/vd/mig/enqueue" | "/api/vd/mig/claim" | "/api/vd/mig/fail" | "/api/vd/init" | "/api/vd/put" | "/api/vd/finish"
-        | "/api/vd/peek" | "/api/vd/claim" | "/api/vd/read" | "/api/vd/chunkdone" | "/api/vd/done" | "/api/vd/fail")
+        | "/api/vd/peek" | "/api/vd/verify" | "/api/vd/claim" | "/api/vd/read" | "/api/vd/chunkdone" | "/api/vd/done" | "/api/vd/fail")
 }
 
 pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Response> {
@@ -369,6 +369,26 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
                 vec![TursoArg::int(now), TursoArg::int(now)]).await?;
             let r = first_row(&r).unwrap_or(json!({}));
             ok(json!({"store": jint(&r, "store"), "mig": jint(&r, "mig"), "full": staged_bytes(env).await >= cap_bytes(env)}))
+        }
+        // Tekshiruv (ENCODE_TOKEN): tayyor faylning 0-bo'lagini Telegram'dan olib, boshidagi 64 baytni (shifrlangan) va kalitni qaytaradi —
+        // Actions shifr ochilib MP4 chiqishini tekshiradi (kalit logga chiqmaydi). `name` berilmasa — eng so'nggi tayyor fayl.
+        "/api/vd/verify" => {
+            let row = if name.is_empty() {
+                turso_exec(env, "SELECT name,size,chunks,vkey,chunk_ids FROM vd_files WHERE state='ready' ORDER BY created DESC LIMIT 1", vec![]).await?.pipe_first()
+            } else {
+                turso_exec(env, "SELECT name,size,chunks,vkey,chunk_ids FROM vd_files WHERE name=? AND state='ready'", vec![TursoArg::text(&name)]).await?.pipe_first()
+            };
+            let Some(r) = row else { return ok(json!({"none": true})) };
+            let first = ids(r["chunk_ids"].as_str().unwrap_or("")).first().map(|s| s.to_string()).unwrap_or_default();
+            let size = jint(&r, "size") as u64;
+            let rs = chunk_stream(env, &first, CHUNK.min(size)).await?;
+            let resp = Response::from_body(ResponseBody::Stream(rs))?;
+            let mut resp = resp;
+            let bytes = resp.bytes().await?;
+            if bytes.len() < 64 {
+                return json_resp(&json!({"error": "bo'lak qisqa"}), 502);
+            }
+            ok(json!({"name": r["name"], "size": r["size"], "chunks": r["chunks"], "key": r["vkey"], "head": hex_of(&bytes[..64]), "chunk0_len": bytes.len()}))
         }
         "/api/vd/claim" => {
             turso_many(env, &[
