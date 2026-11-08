@@ -1,0 +1,20 @@
+name: VD sinovi
+
+# `tool/vd` (shifrlash, 18 MiB bo'laklash, migratsiya mantiqi) birlik sinovlari.
+on:
+  push:
+    branches: [main]
+    paths: ['tool/vd/**', '.github/workflows/vd-test.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  t:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install cryptography
+      - run: cd tool/vd && python3 -m unittest -v test_vd

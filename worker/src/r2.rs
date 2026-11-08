@@ -99,6 +99,16 @@ fn signed_url(env: &Env, method: &str, file: &str, expires: i64) -> Option<Strin
         &tg_secret(env, "R2_SECRET_ACCESS_KEY"), "auto", &amz_date(now_ms()), expires))
 }
 
+/// Istalgan R2 kaliti (`vd/up/<nom>` kabi, `/` bilan) uchun imzolangan havola — ilovaning to'g'ridan-to'g'ri yuklashi uchun (`vd.rs`).
+pub(crate) fn signed_key(env: &Env, method: &str, key: &str, expires: i64) -> Option<String> {
+    if !direct(env) || key.is_empty() || key.len() > 300 || key.contains("..") {
+        return None;
+    }
+    let host = format!("{}.r2.cloudflarestorage.com", tg_secret(env, "R2_ACCOUNT_ID"));
+    Some(presign(method, &host, &format!("/arumediatv/{key}"), &tg_secret(env, "R2_ACCESS_KEY_ID"),
+        &tg_secret(env, "R2_SECRET_ACCESS_KEY"), "auto", &amz_date(now_ms()), expires))
+}
+
 async fn signed_call(env: &Env, method: &str, file: &str) -> Option<(u16, Option<i64>)> {
     let u = signed_url(env, method, file, 300)?;
     let mut init = RequestInit::new();

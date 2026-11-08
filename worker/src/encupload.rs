@@ -103,6 +103,10 @@ pub(crate) async fn on_file(env: &Env, msg: &Value) -> bool {
             // Baza to'liq yozildi: chatdagi fayl, R2 obyekti va qator o'chadi; qism tugagan bo'lsa tozalanadi.
             let _ = tg_api(env, "deleteMessage", json!({"chat_id": chat, "message_id": msg_id})).await;
             r2::finish(env, &name).await;
+            // Yangi tizim (18 MiB shifrlangan bo'laklar): shu fayl ham migratsiya navbatiga tushadi.
+            if kind == "mp4" {
+                vd::enqueue_one(env, &name).await;
+            }
             encode_settle(env, a, s, e, queued_at).await;
         }
         Err(err) => {

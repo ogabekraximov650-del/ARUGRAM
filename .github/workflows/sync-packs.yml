@@ -24,6 +24,7 @@ on:
       - 'tool/albot/**'
       - 'tool/compress/**'
       - 'tool/dub/**'
+      - 'tool/vd/**'
       - 'tool/emojifont/**'
       - 'fonts/TgEmoji.ttf'
       - '.github/workflows/sync-packs.yml'

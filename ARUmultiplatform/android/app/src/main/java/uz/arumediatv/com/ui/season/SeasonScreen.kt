@@ -141,6 +141,7 @@ fun SeasonScreen(
     var current by remember { mutableStateOf<Episode?>(null) }
     var currentUrl by remember { mutableStateOf("") }
     var viaTelegram by remember { mutableStateOf(false) }
+    var viaVd by remember { mutableStateOf(false) }
     var viaLocal by remember { mutableStateOf(false) }
     var chosenQuality by remember { mutableStateOf<String?>(null) }
     var tab by rememberSaveable { mutableIntStateOf(0) }
@@ -200,6 +201,7 @@ fun SeasonScreen(
                 return@launch
             }
             viaTelegram = src.viaTelegram
+            viaVd = src.viaVd
             viaLocal = src.local
             player.open(src.uri, start, resumePlaying)
         }
@@ -272,6 +274,13 @@ fun SeasonScreen(
     // ── Xato: Telegram bo'lsa bir marta worker yo'liga o'tamiz ──
     LaunchedEffect(player.error) {
         val ep = current
+        // Yangi tizim (vd) ochilmadi — bir marta eski yo'l (Telegram) bilan qayta urinamiz.
+        if (player.error != null && viaVd && ep != null) {
+            uz.arumediatv.com.data.Names.fileNameOf(currentUrl).takeIf { it.isNotEmpty() }?.let { uz.arumediatv.com.data.PlaySource.vdFailed.add(it) }
+            viaVd = false
+            play(ep, resumeAt = player.positionMs, preferWorker = false)
+            return@LaunchedEffect
+        }
         if (player.error != null && (viaTelegram || viaLocal) && !workerRetried && ep != null) {
             workerRetried = true
             play(ep, resumeAt = player.positionMs, preferWorker = true)

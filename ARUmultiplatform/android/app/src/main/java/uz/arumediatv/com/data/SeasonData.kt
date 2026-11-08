@@ -289,7 +289,10 @@ class WatchProgress(context: Context) {
 
 /** Pleyer manbasi: avval Telegram (mahalliy server), bo'lmasa worker `/api/play/...` (Cloudflare keshidan oqim). */
 object PlaySource {
-    data class Source(val uri: String, val viaTelegram: Boolean, val local: Boolean = false)
+    data class Source(val uri: String, val viaTelegram: Boolean, val local: Boolean = false, val viaVd: Boolean = false)
+
+    /** Yangi tizimda (vd) ochilmagan fayllar: shu ishga tushishda eski yo'l (Telegram) bilan ochiladi. */
+    val vdFailed: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
 
     /**
      * Qoida: fayl telefonda TO'LIQ bor -> mahalliy kesh serveri (internet kerak emas); aks holda internet bor bo'lsa
@@ -298,6 +301,17 @@ object PlaySource {
     suspend fun resolve(url: String, tg: TelegramService, preferWorker: Boolean = false): Source? {
         val cache = uz.arumediatv.com.AppServices.videoCache
         if (!preferWorker && cache.isComplete(url)) cache.proxyUri(url)?.let { return Source(it, false, local = true) }
+        // YANGI TIZIM (vd, ARUDRIVE uslubi): fayl 18 MiB shifrlangan bo'laklarda (Telegram -> Cloudflare kesh), shifrni ilova ochadi;
+        // Telegram hisobi kerak emas, ko'rilgan joy telefonda shifrlangan holda qoladi. Yangi tizimda bo'lmasa — eski yo'l.
+        if (!preferWorker) {
+            val vname = Names.fileNameOf(url)
+            if (vname.isNotEmpty() && vname !in vdFailed) {
+                val info = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    uz.arumediatv.com.vd.VdApi.lookup(uz.arumediatv.com.AppServices.appContext, vname, uz.arumediatv.com.AppServices.auth.sessionToken)
+                }
+                if (info != null) return Source("vd://$vname", false, viaVd = true)
+            }
+        }
         if (!Net.isOnline(uz.arumediatv.com.AppServices.appContext)) return null
         // Telegram: pleyer Rust yadrosidan (AruDataSource) o'qiydi — bo'laklar shifrlanib diskka yoziladi (Flutterdagidek),
         // shuning uchun ko'rilgan joy "Yuklanmalar" va Xotirada hisoblanadi.

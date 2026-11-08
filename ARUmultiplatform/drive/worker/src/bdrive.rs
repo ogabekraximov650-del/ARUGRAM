@@ -282,6 +282,16 @@ pub(crate) async fn process_ex(env: &Env, budget_ms: i64) -> Result<(String, boo
     Ok((out, progressed, !drained))
 }
 
+/// Navbatda (yoki ijarasi tugagan) saqlash ishi bormi — cron shu bo'yicha `bdrive.yml` ni uyg'otadi (bo'sh bo'lsa GitHub'ga so'rov yo'q).
+pub(crate) async fn has_pending(env: &Env) -> bool {
+    if ensure(env).await.is_err() {
+        return false;
+    }
+    let now = now_ms();
+    sql(env, "SELECT 1 AS x FROM bd_files WHERE state='uploaded' OR (state='storing' AND lease<?) LIMIT 1", vec![TursoArg::int(now)]).await
+        .ok().and_then(|r| first(&r)).is_some()
+}
+
 /// ── TOZALASH: tashlab ketilgan yuklashlar ───────────────────────
 ///
 /// 24 soatdan eski `uploading` (yuklash yarmida uzilgan), `failed` (saqlab bo'lmadi) va `direct` (eski sinov yo'li) yozuvlari:
@@ -517,10 +527,10 @@ pub(crate) async fn route(mut req: Request, env: &Env, ctx: &Context, path: &str
             }
             sql(env, "UPDATE bd_files SET updated=CAST((julianday('now')-2440587.5)*86400000 AS INTEGER), state='uploaded' WHERE id=? AND state='uploading'", vec![TursoArg::text(&id)]).await?;
             list_invalidate(env).await;
-            // Telegramga saqlashni WORKER O'ZI boshlaydi (javobdan keyin fonda, ~30 soniya); davomini har daqiqadagi cron oladi.
+            // Telegramga saqlashni ACTIONS qiladi (foydalanuvchi talabi): `bdrive.yml` ishga tushiriladi (ishlab turgan bo'lsa tegilmaydi).
             let e2 = env.clone();
             ctx.wait_until(async move {
-                process_and_chain(&e2).await;
+                let _ = kick(&e2).await;
             });
             ok(json!({"ok": true}))
         }
@@ -582,7 +592,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, ctx: &Context, path: &str
             list_invalidate(env).await;
             let e2 = env.clone();
             ctx.wait_until(async move {
-                process_and_chain(&e2).await;
+                let _ = kick(&e2).await;
             });
             ok(json!({"ok": true}))
         }

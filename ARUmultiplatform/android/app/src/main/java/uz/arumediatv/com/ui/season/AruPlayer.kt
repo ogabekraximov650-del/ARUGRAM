@@ -20,6 +20,12 @@ import io.flutter.plugins.videoplayer.AruDataSource
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Stable
 class AruPlayer(context: Context) {
+    private val appCtx = context.applicationContext
+    private val ui = android.os.Handler(android.os.Looper.getMainLooper())
+    /** Yangi tizim (vd) fayl nomi (`vd://<nom>` ochilganda); 503 (kesh yo'q) bo'lsa oyna majburan qayta isitiladi, ko'pi bilan 2 marta. */
+    private var vdName: String? = null
+    private var vdRecoveries = 0
+
     val exo: ExoPlayer = ExoPlayer.Builder(
         context.applicationContext,
         androidx.media3.exoplayer.DefaultRenderersFactory(context.applicationContext)
@@ -79,7 +85,21 @@ class AruPlayer(context: Context) {
         override fun onPlayerError(e: PlaybackException) {
             val root = generateSequence<Throwable>(e) { it.cause }.last()
             val http = (e.cause as? androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException)?.responseCode
+            val vn = vdName
+            if (vn != null && vdRecoveries < 2 && (http == 503 || generateSequence<Throwable>(e) { it.cause }.any { it.message?.contains("Kesh tayyor emas") == true })) {
+                // Kesh o'chib ketgan (yoki oyna isitilmagan): belgi o'chadi, oyna MAJBURAN qayta isitiladi va ijro shu joydan davom etadi.
+                vdRecoveries++
+                val pos = exo.currentPosition.coerceAtLeast(0)
+                val uri = lastUri
+                Thread {
+                    uz.arumediatv.com.vd.VdWarm.forget(vn)
+                    uz.arumediatv.com.vd.VdApi.warmBlocking(vn, pos / uz.arumediatv.com.vd.VdApi.WARM_WINDOW, force = true)
+                    ui.post { open(uri, pos, true) }
+                }.start()
+                return
+            }
             val where = when {
+                lastUri.startsWith("vd://") -> "yangi tizim"
                 lastUri.startsWith("aru://") || (lastUri.contains("127.0.0.1") && lastUri.contains("/tg/")) -> "Telegram"
                 lastUri.contains("127.0.0.1") -> "mahalliy kesh"
                 else -> "worker"
@@ -107,7 +127,22 @@ class AruPlayer(context: Context) {
         ready = false
         positionMs = startMs
         durationMs = 0
-        if (uri.startsWith("aru://")) {
+        if (!uri.startsWith("vd://")) vdName = null
+        if (uri.startsWith("vd://")) {
+            // Yangi tizim: 18 MiB shifrlangan bo'laklar (Telegram -> Cloudflare kesh), shifrni ilova ochadi, ko'rilgan joy telefon keshida.
+            val name = uri.removePrefix("vd://")
+            if (vdName != name) vdRecoveries = 0
+            vdName = name
+            posName = null
+            val info = uz.arumediatv.com.vd.VdApi.cached(name)
+            if (info == null) {
+                error = "Video ma'lumoti topilmadi"
+                return
+            }
+            val item = MediaItem.Builder().setUri(uz.arumediatv.com.vd.VdApi.playUrl(name)).setMimeType(androidx.media3.common.MimeTypes.VIDEO_MP4).build()
+            val factory = uz.arumediatv.com.vd.VdWarm.mediaSourceFactory(name, appCtx, info.size, info.key)
+            exo.setMediaSource(factory.createMediaSource(item), startMs.coerceAtLeast(0))
+        } else if (uri.startsWith("aru://")) {
             val item = MediaItem.Builder().setUri(uri).setMimeType(androidx.media3.common.MimeTypes.VIDEO_MP4).build()
             val factory = androidx.media3.exoplayer.source.ProgressiveMediaSource.Factory(AruDataSource.Factory())
                 .setContinueLoadingCheckIntervalBytes(256 * 1024)

@@ -46,6 +46,8 @@ mod sessionbot;
 mod encupload;
 mod admins;
 mod r2;
+mod vcache;
+mod vd;
 // anibla.uz dan qidirib yuklash (kodlash botining uchinchi bo'limi).
 mod anibla;
 // Uchala bo'lim uchun bitta jonli "Holat" xabari.
@@ -10414,7 +10416,7 @@ fn needs_app_check(path: &str) -> bool {
         | "/api/dub/claim" | "/api/dub/peek" | "/api/dub/check" | "/api/dub/finish" | "/api/dub/progress" | "/api/dub/state" | "/api/dub/stage"
         | "/api/anibla/claim" | "/api/anibla/diag" | "/api/anibla/probe" | "/api/anibla/progress" | "/api/anibla/done"
         | "/api/fmp4/claim" | "/api/fmp4/done" | "/api/fmp4/r2put" | "/api/fmp4/r2ready" | "/api/session/poll" | "/api/session/report"
-        | "/api/encode/r2put" | "/api/encode/r2ready" | "/api/encode/qdiag" | "/api/encode/cancel" | "/api/encode/translate" | "/api/r2/claim" | "/api/r2/beat" | "/api/r2/fail" | "/api/r2/done" | "/api/r2/diag" | "/api/r2/dmsg" | "/api/r2/peek" | "/api/r2/put" | "/api/r2/ready" | "/api/r2/part" | "/api/r2/get")
+        | "/api/encode/r2put" | "/api/encode/r2ready" | "/api/encode/qdiag" | "/api/encode/cancel" | "/api/encode/translate" | "/api/vd/mig/enqueue" | "/api/vd/mig/claim" | "/api/vd/mig/fail" | "/api/vd/init" | "/api/vd/put" | "/api/vd/finish" | "/api/vd/peek" | "/api/vd/claim" | "/api/vd/read" | "/api/vd/chunkdone" | "/api/vd/done" | "/api/vd/fail" | "/api/r2/claim" | "/api/r2/beat" | "/api/r2/fail" | "/api/r2/done" | "/api/r2/diag" | "/api/r2/dmsg" | "/api/r2/peek" | "/api/r2/put" | "/api/r2/ready" | "/api/r2/part" | "/api/r2/get")
     {
         return false;
     }
@@ -10939,6 +10941,8 @@ async fn tg_forget_file(env: &Env, value: &str) {
     if !tg_safe_name(name) {
         return;
     }
+    // Yangi tizimdagi (18 MiB bo'lakli) nusxa ham ketadi.
+    vd::forget(env, name).await;
     let res = turso_exec(env, "SELECT msg_id FROM tg_files WHERE file_name=?",
         vec![TursoArg::text(name)]).await;
     let Some(msg_id) = res.ok().and_then(|r| first_row(&r)).and_then(|r| r["msg_id"].as_i64()) else {
@@ -14197,6 +14201,8 @@ async fn scheduled(_ev: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
     let _ = dubbot::kick(&env).await;
     // Mini App so'ragan eski qismlarning fMP4 nusxasi (`fmp4::kick`).
     let _ = fmp4::kick(&env).await;
+    // Video ombori (`vd`): saqlash / migratsiya navbati bo'lsa ALOHIDA workflow'lar uyg'otiladi.
+    vd::cron(&env).await;
     // R2 oraliq ombori: Telegram'ga yuklanmagan fayllar bo'lsa yuklovchi workflow ishga tushadi; eskirganlar tozalanadi.
     let _ = r2::kick(&env).await;
     r2::cleanup(&env).await;
@@ -14264,6 +14270,19 @@ async fn tg_route(mut req: Request, env: &Env, path: &str, method: Method) -> Re
         // KAMROQ SO'ROV: bazaga BITTA so'rov (pipeline), bazaga hech
         // narsa YOZILMAYDI, Telegram'ga bitta `copyMessages`. Nusxani
         // ilova o'zi o'chiradi (`rust_tg_clear_bot_chat`).
+        // ── VIDEO OMBORI (`vd`): ma'lumot + admin yuklashi ──
+        (Method::Post, "/api/vd/info") => {
+            let body: Value = req.json().await.unwrap_or(json!({}));
+            vd::info(env, &body).await
+        }
+        (Method::Post, "/api/vd/up/init") if is_admin(&u) => {
+            let body: Value = req.json().await.unwrap_or(json!({}));
+            vd::up_init(env, &body).await
+        }
+        (Method::Post, "/api/vd/up/complete") if is_admin(&u) => {
+            let body: Value = req.json().await.unwrap_or(json!({}));
+            vd::up_complete(env, &body).await
+        }
         (Method::Post, "/api/tg/deliver") => {
             let body: Value = req.json().await.unwrap_or(json!({}));
             let mut names: Vec<String> = match body["files"].as_array() {
@@ -14605,6 +14624,11 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
         let p = path.to_string();
         return r2::route(req, &env, &p).await;
     }
+    // Video ombori (18 MiB shifrlangan bo'laklar): Actions yo'llari ENCODE_TOKEN bilan (`vd::route`).
+    if vd::is_actions_path(path) {
+        let p = path.to_string();
+        return vd::route(req, &env, &p).await;
+    }
     if method == Method::Post && (path == "/api/fmp4/claim" || path == "/api/fmp4/done" || path == "/api/fmp4/r2put" || path == "/api/fmp4/r2ready") {
         let p = path.to_string();
         return fmp4::route(req, &env, &p).await;
@@ -14627,6 +14651,9 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
         // keshlash mantiqi umuman ishlatilmaydi — ya'ni pleyer
         // faqat o'zi so'ragan baytni oladi.
         if let Some(fname) = path.strip_prefix("/api/play/") {
+            if fname.starts_with("vd~") {
+                return vcache::b2_play(&env, &ctx, fname, range_header).await;
+            }
             return b2_play(&env, &ctx, fname, range_header).await;
         }
         // Oynani keshga isitish — ilova video ochilganda BIR MARTA
@@ -14641,6 +14668,9 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
             let force = url
                 .query_pairs()
                 .any(|(k, v)| k == "force" && (v == "1" || v == "true"));
+            if let Some(v) = fname.strip_prefix("vd~") {
+                return vd::warm(&env, v, widx, force).await;
+            }
             return b2_warm(&env, fname, widx, force).await;
         }
     }

@@ -251,10 +251,13 @@ fn gate(req: &Request, env: &Env, path: &str) -> bool {
     verify_app_sig(&secret, &got, req.method().to_string().as_str(), path)
 }
 
-/// Har 10 daqiqada (cron): R2 dagi yuklangan fayllarni Telegram'ga bo'laklab saqlaydi (Actions kerak emas), so'ng tashlab ketilgan yuklashlarni tozalaydi.
+/// Har 10 daqiqada (cron): R2 dagi yuklangan fayllar uchun saqlash Actions'ini uyg'otadi, so'ng tashlab ketilgan yuklashlarni tozalaydi.
 #[event(scheduled)]
 async fn scheduled(_e: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
-    bdrive::process_and_chain(&env).await;
+    // Saqlash ACTIONS'da (`bdrive.yml`): navbat bo'lsa uyg'otiladi; worker o'zi Telegram'ga yozmaydi.
+    if bdrive::has_pending(&env).await {
+        let _ = bdrive::kick(&env).await;
+    }
     let _ = bdrive::cleanup(&env).await;
 }
 

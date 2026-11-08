@@ -1,0 +1,79 @@
+name: VD — eski sifat fayllarini yangi tizimga o'tkazish
+
+# Bazadagi har bir eski sifat faylini kanaldan yuklab, eski kalit bilan ochadi, YANGI kalit bilan 18 MiB bo'laklarga bo'lib shifrlaydi va
+# bo'laklarni R2 ga yozadi (`tool/vd/mig.py`, worker `vd.rs`). Telegram'ga saqlashni `vdstore.yml` qiladi. Worker o'zi ishga tushiradi
+# (cron, `POST /api/vd/mig/enqueue`). Telegram sessiyasi — barcha sifat-workflow'lar bilan umumiy (`tool/encode/session.enc`).
+# Bu fayl ARUMEDIATV repodagi `tool/vd/vdmig.workflow.yml` dan ko'chiriladi (`sync-packs.yml`) — shu yerda o'zgartirmang.
+
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: arumediatv-vdmig
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  mig:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      API_BASE: ${{ secrets.API_BASE || 'https://arumediatv.uzcom.workers.dev' }}
+    steps:
+      - name: Navbat bormi
+        id: peek
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+        run: |
+          R=$(curl -fsS -X POST -H "X-Encode-Token: $ENCODE_TOKEN" -H "Content-Type: application/json" -d '{}' \
+            -H "User-Agent: arumediatv-vd" "$API_BASE/api/vd/peek")
+          N=$(echo "$R" | jq -r '.mig // 0')
+          echo "Migratsiya navbati: $N"
+          echo "pending=$N" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        if: steps.peek.outputs.pending != '0'
+      - uses: actions/setup-python@v5
+        if: steps.peek.outputs.pending != '0'
+        with:
+          python-version: '3.11'
+      - name: Python paketlari
+        if: steps.peek.outputs.pending != '0'
+        run: pip install --no-cache-dir -r tool/encode/requirements.txt
+      - name: Telegram sessiyasi
+        if: steps.peek.outputs.pending != '0'
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+        run: |
+          OUT=tool/vd/pyro_session.session
+          K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in tool/encode/session.enc -out "$OUT"
+          head -c 16 "$OUT" | grep -q "SQLite format 3" || { echo "::error::Sessiya ochilmadi (ENCODE_TOKEN noto'g'ri?)"; exit 1; }
+      - name: Migratsiya
+        id: mig
+        if: steps.peek.outputs.pending != '0'
+        working-directory: tool/vd
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+          START_BUDGET_MIN: '330'
+          PYTHONUNBUFFERED: '1'
+        run: python3 mig.py
+      - name: Sessiyani o'chirish
+        if: always()
+        run: rm -f tool/vd/pyro_session.session
+      # Navbat qolgan bo'lsa (vaqt tugagan) — yangi run ochiladi; R2 to'la bo'lsa cron (`vd::cron`) keyin uyg'otadi.
+      - name: Davom ettirish
+        if: success() && steps.mig.outputs.worked == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+        run: |
+          R=$(curl -fsS -X POST -H "X-Encode-Token: $ENCODE_TOKEN" -H "Content-Type: application/json" -d '{}' \
+            -H "User-Agent: arumediatv-vd" "$API_BASE/api/vd/peek")
+          N=$(echo "$R" | jq -r '.mig // 0'); F=$(echo "$R" | jq -r '.full // false')
+          echo "Qolgan: $N, R2 to'la: $F"
+          if [ "$N" != "0" ] && [ "$F" != "true" ]; then gh workflow run vdmig.yml --repo "$GITHUB_REPOSITORY"; fi

@@ -817,16 +817,29 @@ fun AdminEpisodeEditScreen(animeId: Long, seasonId: Long, initial: JSONObject?, 
     val pickVideo = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         val target = pending
         if (uri == null || target == null) return@rememberLauncherForActivityResult
-        if (!AppServices.telegram.state.value.authorized) { toast("Asl video Telegram orqali yuklanadi: Profil → \"Telegram'ni ulash\""); return@rememberLauncherForActivityResult }
+        // Asl video (kodlash uchun) hali Telegram hisobi bilan kanalga yuklanadi; tayyor sifat fayllari esa ACTIONS orqali (R2 -> Telegram, `VdUpload`).
+        if (target == "origin" && !AppServices.telegram.state.value.authorized) { toast("Asl video Telegram orqali yuklanadi: Profil → \"Telegram'ni ulash\""); return@rememberLauncherForActivityResult }
         scope.launch {
             upTarget = target; upSent = 0; upTotal = 0
+            var vdKey = ""
+            var vdUsed = false
             val uid = AppServices.auth.user.value?.id ?: 0L
             val res = withPickedFile(ctx, uri) { path, display, size ->
                 val ext = display.substringAfterLast('.', "mp4").lowercase().ifEmpty { "mp4" }
                 val mime = if (ext == "mkv") "video/x-matroska" else "video/mp4"
                 val fname = if (target == "origin") "orig_${uid}_${animeId}_${seasonId}_${System.currentTimeMillis()}.$ext" else "ep_${animeId}_${seasonId}_${target}_${System.currentTimeMillis()}.$ext"
                 upTotal = size
-                val err = AppServices.telegram.uploadFile(path, fname, mime, onProgress = { s, t -> upSent = s; if (t > 0) upTotal = t })
+                val err = if (target == "origin") {
+                    AppServices.telegram.uploadFile(path, fname, mime, onProgress = { s, t -> upSent = s; if (t > 0) upTotal = t })
+                } else {
+                    vdUsed = true
+                    val tok = AppServices.auth.sessionToken.orEmpty()
+                    val r = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        uz.arumediatv.com.vd.VdUpload.upload(path, fname, tok) { s, t -> upSent = s; if (t > 0) upTotal = t }
+                    }
+                    vdKey = r.key.orEmpty()
+                    r.error
+                }
                 Triple(err, fname, size)
             }
             upTarget = null
@@ -837,9 +850,9 @@ fun AdminEpisodeEditScreen(animeId: Long, seasonId: Long, initial: JSONObject?, 
                 origin = fname; originNew = true; job = null
                 toast("Asl video yuklandi — \"Saqlash\"dan keyin kodlash navbatiga qo'yiladi")
             } else {
-                if (err != null) { toast("$target: Telegram'ga yuklanmadi — $err"); return@launch }
-                qs.first { it.label == target }.apply { url = fname; this.size = size; key = AppServices.telegram.keyFor(fname) }; tick++
-                toast("$target Telegram kanaliga yuklandi — endi \"Saqlash\"ni bosing")
+                if (err != null) { toast("$target: yuklanmadi — $err"); return@launch }
+                qs.first { it.label == target }.apply { url = fname; this.size = size; key = if (vdUsed) vdKey else AppServices.telegram.keyFor(fname) }; tick++
+                toast("$target yuklandi (Actions Telegram'ga bo'laklab saqlaydi) — endi \"Saqlash\"ni bosing")
             }
         }
     }

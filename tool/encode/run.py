@@ -392,6 +392,19 @@ def put_direct(url: str, path: Path, label: str):
             r.read()
 
 
+def vd_stage(path: Path, name: str, key_hex: str, label: str):
+    """Video ombori (`vd`): tayyor shifrlangan faylni 18 MiB bo'laklarga bo'lib R2 ga yozadi (kalit shu fayl uchun yangi, bitta). Bo'laklarni
+    Telegram'ga `vdstore.yml` saqlaydi. Xato yoki R2 da joy yo'q bo'lsa — jim o'tadi (fayl baribir eski yo'l bilan yuklanadi, keyin migratsiya oladi)."""
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "vd"))
+        import vdlib  # noqa: PLC0415
+        vdlib.API, vdlib.TOKEN = API, "".join(TOKEN.split())
+        st = vdlib.stage_file(path, name, key_hex, progress=lambda c, t: log(f"  {label}: yangi tizim: bo'lak {c}/{t}") if c % 10 == 0 or c == t else None)
+        log(f"  {label}: yangi tizim (vd) — {st}")
+    except Exception as ex:  # noqa: BLE001
+        log(f"  {label}: yangi tizimga (vd) yozilmadi ({ex}) — keyinroq migratsiya o'tkazadi")
+
+
 async def upload_r2(ident: dict, path: Path, name: str, kind: str, key: str, label: str) -> bool:
     """Tayyor faylni R2'ga yozadi (`kind` — mp4|fmp4). Worker R2 sozlanmagan desa `False` (eski usulga qaytiladi)."""
     size = path.stat().st_size
@@ -1265,6 +1278,8 @@ async def process(app: Client, channel: int, job: dict):
             r2_used = False
             if QUALITY and R2:
                 qa = ident["queued_at"]
+                # Yangi tizim: shifrlangan fayl 18 MiB bo'laklarga bo'linib R2 ga yoziladi (sifat-run o'zi bloklaydi/shifrlaydi/yuklaydi).
+                await asyncio.to_thread(vd_stage, sealed, name, k.hex(), label)
                 r2_used = await upload_r2(ident, sealed, name, "mp4", k.hex(), label)
                 if r2_used:
                     sealed.unlink(missing_ok=True)

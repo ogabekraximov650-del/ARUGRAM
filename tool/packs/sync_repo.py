@@ -76,6 +76,12 @@ FILES["tool/upload/r2client.py"] = HERE.parent / "upload" / "r2client.py"
 FILES[".github/workflows/bdrive.yml"] = HERE.parent / "bdrive" / "bdrive.workflow.yml"
 FILES["tool/bdrive/chunk.py"] = HERE.parent / "bdrive" / "chunk.py"
 
+# Video ombori `vd` (18 MiB shifrlangan bo'laklar): migratsiya (`vdmig.yml`) va R2 -> Telegram saqlovchi (`vdstore.yml`) — ALOHIDA workflow'lar.
+FILES[".github/workflows/vdmig.yml"] = HERE.parent / "vd" / "vdmig.workflow.yml"
+FILES[".github/workflows/vdstore.yml"] = HERE.parent / "vd" / "vdstore.workflow.yml"
+for _n in ("vdlib.py", "mig.py", "store.py"):
+    FILES[f"tool/vd/{_n}"] = HERE.parent / "vd" / _n
+
 # ARUDRIVE qabul boti (Telegram -> R2): ALOHIDA workflow `tgbot.yml` (cron har 5 daqiqada, bir vaqtda BITTA run).
 FILES[".github/workflows/tgbot.yml"] = HERE.parent / "tgbot" / "tgbot.workflow.yml"
 FILES["tool/tgbot/bot.py"] = HERE.parent / "tgbot" / "bot.py"

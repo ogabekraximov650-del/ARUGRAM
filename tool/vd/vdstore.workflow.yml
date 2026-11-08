@@ -1,0 +1,47 @@
+name: VD — R2 -> Telegram (18 MiB bo'laklar)
+
+# Migratsiya (`vdmig.yml`), kodlovchilar (`tool/encode/run.py`) va ilova (admin yuklashi) tayyorlagan bo'laklar R2 da turadi; bu workflow ularni
+# Bot API bilan Telegram kanaliga saqlaydi va `file_id` larni bazaga yozadi (worker `vd.rs`). Worker o'zi ishga tushiradi (cron va yuklash tugaganda).
+# Bu fayl ARUMEDIATV repodagi `tool/vd/vdstore.workflow.yml` dan ko'chiriladi (`sync-packs.yml`) — shu yerda o'zgartirmang.
+
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: arumediatv-vdstore
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  store:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      API_BASE: ${{ secrets.API_BASE || 'https://arumediatv.uzcom.workers.dev' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install --no-cache-dir cryptography
+      - name: R2 -> Telegram
+        id: st
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+          START_BUDGET_MIN: '330'
+          PYTHONUNBUFFERED: '1'
+        run: python3 tool/vd/store.py
+      # Navbat qolgan bo'lsa (vaqt tugagan) — yangi run ochiladi.
+      - name: Davom ettirish
+        if: success() && steps.st.outputs.worked == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+        run: |
+          N=$(curl -fsS -X POST -H "X-Encode-Token: $ENCODE_TOKEN" -H "Content-Type: application/json" -d '{}' \
+            -H "User-Agent: arumediatv-vd" "$API_BASE/api/vd/peek" | jq -r '.store // 0')
+          echo "Saqlanmagan: $N"
+          if [ "$N" != "0" ]; then gh workflow run vdstore.yml --repo "$GITHUB_REPOSITORY"; fi
