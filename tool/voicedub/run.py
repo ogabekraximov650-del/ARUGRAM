@@ -258,6 +258,26 @@ def main():
         open(os.path.join(outdir, f"dubbed_{target}_voice.wav"), "wb").write(wav)
     except Exception as e:  # noqa: BLE001
         log(f"  ovoz fayli olinmadi: {e}")
+    # 7. Hissiyot: ovoz balandligi/ohangini asl aktyorga moslash (xato bo'lsa — oddiy dublyaj qoladi)
+    if os.environ.get("VS_PROSODY", "1") != "0" and os.environ.get("VS_PY"):
+        try:
+            prog(98, "Ovoz hissiyoti asl aktyorga moslanmoqda")
+            vw = os.path.join(outdir, f"dubbed_{target}_voice.wav")
+            mw = os.path.join(outdir, f"dubbed_{target}_mix.wav")
+            open(mw, "wb").write(call("GET", f"/dub/download-audio/{job_id}?lang={target}&preserve_bg=true", raw=True))
+            raw = os.path.join(outdir, f"dubbed_{target}.mp4")
+            new = os.path.join(outdir, f"dubbed_{target}_prosody.mp4")
+            import subprocess
+            r = subprocess.run([os.environ["VS_PY"], os.path.join(os.path.dirname(os.path.abspath(__file__)), "prosody.py"),
+                                video, os.path.join(outdir, "segments.json"), vw, mw, raw, new],
+                               capture_output=True, text=True, timeout=3000)
+            log((r.stdout or "")[-600:] + (r.stderr or "")[-600:])
+            if r.returncode == 0 and os.path.getsize(new) > 10000:
+                os.replace(raw, os.path.join(outdir, f"dubbed_{target}_plain.mp4"))
+                os.replace(new, raw)
+                log("  hissiyot moslashtirildi")
+        except Exception as e:  # noqa: BLE001
+            log(f"  hissiyot moslash o'tkazib yuborildi: {e}")
     prog(100, "Tayyor")
     log("TUGADI")
 

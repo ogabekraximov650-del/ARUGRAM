@@ -170,7 +170,7 @@ def probe(path):
 
 def run_driver(src, lang, outdir, live, scale=None, env_extra=None):
     """`tool/voicedub/run.py` — `PROGRESS <foiz>\\t<matn>` qatorlari holat xabariga (scale(pv) -> umumiy foiz), qolgani log'ga."""
-    env = {**os.environ, "VS_API": os.environ.get("VS_API", "http://127.0.0.1:8000"), **(env_extra or {})}
+    env = {**os.environ, "VS_API": os.environ.get("VS_API", "http://127.0.0.1:8000"), "VS_PY": str(VPY), **(env_extra or {})}
     p = subprocess.Popen([sys.executable, str(VD / "run.py"), str(src), lang, str(outdir)],
                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, env=env)
     tail = collections.deque(maxlen=30)

@@ -1,0 +1,47 @@
+name: Prosody sinovi
+
+# `tool/voicedub/prosody.py` ni sintetik ovoz bilan tekshiradi (VoiceStudio kerak emas).
+on:
+  push:
+    branches: [main]
+    paths: ['tool/voicedub/prosody.py', '.github/workflows/prosody-test.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  t:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg libsndfile1
+      - run: pip install numpy librosa soundfile
+      - name: Sintetik sinov
+        run: |
+          mkdir w && cd w
+          # asl: 1-gap past/jim, 2-gap baland/qichqiriq; dublyaj: ikkalasi bir xil
+          ffmpeg -loglevel error -y -f lavfi -i "sine=f=140:d=3,volume=0.1" -f lavfi -i "sine=f=260:d=3,volume=0.8" -filter_complex "[0][1]concat=n=2:v=0:a=1" orig.wav
+          ffmpeg -loglevel error -y -f lavfi -i testsrc=d=6:s=160x90:r=10 -i orig.wav -shortest src.mp4
+          ffmpeg -loglevel error -y -f lavfi -i "sine=f=200:d=6,volume=0.3" -ar 24000 voice.wav
+          ffmpeg -loglevel error -y -f lavfi -i "anoisesrc=d=6:a=0.02" -ar 24000 bg.wav
+          ffmpeg -loglevel error -y -i voice.wav -i bg.wav -filter_complex "amix=inputs=2:normalize=0" mix.wav
+          ffmpeg -loglevel error -y -f lavfi -i testsrc=d=6:s=160x90:r=10 -i mix.wav -shortest dubbed.mp4
+          python3 - <<'PY'
+          import json
+          json.dump({"translated":[{"start":0.1,"end":2.9,"speaker_id":"A"},{"start":3.1,"end":5.9,"speaker_id":"A"},
+                                   {"start":0.2,"end":1.0,"speaker_id":"A"},{"start":1.1,"end":1.9,"speaker_id":"A"}]},open("seg.json","w"))
+          PY
+          python3 ../tool/voicedub/prosody.py src.mp4 seg.json voice.wav mix.wav dubbed.mp4 out.mp4
+          ls -la out.mp4
+          ffmpeg -hide_banner -i out.mp4 -af volumedetect -f null - 2>&1 | grep -i "mean_volume\|max_volume"
+          python3 - <<'PY'
+          import soundfile as sf, numpy as np, subprocess
+          subprocess.run(["ffmpeg","-loglevel","error","-y","-i","out.mp4","-vn","o.wav"],check=True)
+          y,sr=sf.read("o.wav")
+          y=y if y.ndim==1 else y.mean(1)
+          a=np.sqrt((y[int(.2*sr):int(2.8*sr)]**2).mean()); b=np.sqrt((y[int(3.2*sr):int(5.8*sr)]**2).mean())
+          print("rms 1-gap",a,"2-gap",b)
+          assert b>a*2, "baland gap kuchaymagan"
+          PY
