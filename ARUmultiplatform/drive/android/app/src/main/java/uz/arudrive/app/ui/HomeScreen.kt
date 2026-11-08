@@ -55,10 +55,17 @@ fun HomeScreen(refreshKey: Int, listState: androidx.compose.foundation.lazy.Lazy
     var reload by remember { mutableStateOf(0) }
 
     LaunchedEffect(refreshKey, reload) {
+        // WORKER SO'ROVLARINI KAMAYTIRISH: ro'yxat telefon xotirasidan darhol ko'rinadi; tarmoqqa faqat kerak bo'lganda boriladi
+        // (ilova ochilganda bir marta, o'zim yuklagandan keyin, "Qayta urinish" bosilganda yoki 5 daqiqadan eski bo'lsa) —
+        // pleyerdan qaytganda har safar so'rov yuborilmaydi.
+        if (reload == 0 && !uz.arudrive.app.data.Store.needsRefresh(ctx0, refreshKey, files.isEmpty())) {
+            loading = false
+            return@LaunchedEffect
+        }
         loading = true
         error = null
         runCatching { Api.list() }
-            .onSuccess { files = it; uz.arudrive.app.data.Store.save(ctx0, it) }
+            .onSuccess { files = it; uz.arudrive.app.data.Store.save(ctx0, it); uz.arudrive.app.data.Store.markRefreshed(ctx0, refreshKey) }
             .onFailure { error = it.message ?: "Xato" }
         loading = false
     }

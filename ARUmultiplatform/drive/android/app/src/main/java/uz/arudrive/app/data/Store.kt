@@ -6,6 +6,23 @@ import java.io.File
 
 /** Worker'dan kelgan ro'yxat telefon xotirasida (`filesDir/list.json`) saqlanadi: ilova ochilishi bilan darhol ko'rinadi, tarmoqsiz ham. */
 object Store {
+    /** So'nggi tarmoq yangilanishi (jarayon xotirasida: kalit) va vaqti (doimiy). Pleyerdan qaytganda keraksiz so'rov yubormaslik uchun. */
+    @Volatile var lastKey: Int = -1
+    private const val STALE_MS = 5 * 60_000L
+
+    private fun meta(ctx: Context) = ctx.applicationContext.getSharedPreferences("list_meta", Context.MODE_PRIVATE)
+
+    /** Ro'yxatni tarmoqdan olish kerakmi: bo'sh, majburan (kalit o'zgardi) yoki 5 daqiqadan eski. */
+    fun needsRefresh(ctx: Context, key: Int, empty: Boolean): Boolean {
+        val stale = System.currentTimeMillis() - (try { meta(ctx).getLong("at", 0L) } catch (_: Exception) { 0L }) > STALE_MS
+        return empty || stale || key != lastKey
+    }
+
+    fun markRefreshed(ctx: Context, key: Int) {
+        lastKey = key
+        try { meta(ctx).edit().putLong("at", System.currentTimeMillis()).apply() } catch (_: Exception) {}
+    }
+
     private val json = Json { ignoreUnknownKeys = true }
     private fun file(ctx: Context) = File(ctx.applicationContext.filesDir, "list.json")
 

@@ -19,3 +19,13 @@ crons = ["*/10 * * * *"]
 [[services]]
 binding = "SELF"
 service = "arudrive"
+
+# Ro'yxat versiyasi (Durable Object `ListHub`, SQLite): kesh kaliti versiyani o'z ichiga oladi — o'zgarishda versiya oshadi va eski
+# kesh nusxalari butun dunyoda bir zumda yaroqsiz bo'ladi.
+[[durable_objects.bindings]]
+name = "LIST_HUB"
+class_name = "ListHub"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ListHub"]

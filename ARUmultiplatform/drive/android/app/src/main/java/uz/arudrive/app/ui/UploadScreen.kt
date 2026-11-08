@@ -54,7 +54,8 @@ fun UploadScreen(onUploaded: () -> Unit) {
                 waiting = l.count { it.state == "uploaded" }
                 storing = l.count { it.state == "storing" }
             }
-            kotlinx.coroutines.delay(8000)
+            // So'rovlarni kamaytirish: navbatda fayl bo'lsa 20 soniyada, bo'sh bo'lsa 5 daqiqada bir marta (ilgari har 8 soniyada).
+            kotlinx.coroutines.delay(if (waiting + storing > 0) 20_000 else 300_000)
         }
     }
 

@@ -240,7 +240,7 @@ pub(crate) async fn process_ex(env: &Env, budget_ms: i64) -> Result<(String, boo
                 Ok(fid) => {
                     list.push(fid);
                     progressed = true;
-                    list_cache_clear().await; // "Saqlanmoqda x/y" yangilanadi
+                    list_invalidate(env).await; // "Saqlanmoqda x/y" yangilanadi
                     // Bo'lak saqlandi: urinishlar hisobi nollanadi (katta fayl bir necha chaqiruvda tugashi mumkin), ijara yangilanadi.
                     sql(env, "UPDATE bd_files SET chunk_ids=?, lease=?, tries=0 WHERE id=? AND state='storing'",
                         vec![TursoArg::text(&list.join(",")), TursoArg::int(now_ms() + WORKER_LEASE_MS), TursoArg::text(&id)]).await?;
@@ -264,7 +264,7 @@ pub(crate) async fn process_ex(env: &Env, budget_ms: i64) -> Result<(String, boo
             break;
         }
         sql(env, "UPDATE bd_files SET state='ready' WHERE id=? AND state='storing'", vec![TursoArg::text(&id)]).await?;
-        list_cache_clear().await;
+        list_invalidate(env).await;
         let _ = bk.delete(&key).await;
         out.push_str(&format!("{id}: tayyor\n"));
     }
@@ -337,11 +337,60 @@ const LIST_CACHE_URL: &str = "https://arudrive.cache/list";
 const LIST_TTL: u64 = 3600;
 const LIST_TTL_BUSY: u64 = 15;
 
-/// Ro'yxat keshini tozalaydi (fayl qo'shilganda/saqlash o'zgarganda). Eslatma: Cloudflare keshi har ma'lumot markazida alohida —
-/// boshqa markazdagi nusxa eng ko'pi bilan `LIST_TTL` gacha eskirgan holda qolishi mumkin.
-pub(crate) async fn list_cache_clear() {
-    if let Ok(req) = Request::new(LIST_CACHE_URL, Method::Get) {
-        let _ = Cache::default().delete(&req, false).await;
+thread_local! {
+    /// (versiya, qachon olingan) — DO ga har so'rovda bormaslik uchun shu izolyatda 5 soniya eslab qolinadi.
+    static LIST_VER: std::cell::Cell<(i64, i64)> = const { std::cell::Cell::new((0, 0)) };
+}
+const LIST_VER_TTL_MS: i64 = 5_000;
+
+fn list_hub(env: &Env) -> Option<worker::Stub> {
+    env.durable_object("LIST_HUB").ok().and_then(|ns| ns.get_by_name("list").ok())
+}
+
+/// Ro'yxat VERSIYASI (butun dunyo uchun bitta, Durable Object). Kesh kaliti shu versiyani o'z ichiga oladi: ma'lumot o'zgarganda
+/// versiya oshadi va eski nusxalar HAMMA ma'lumot markazida bir zumda yaroqsiz bo'ladi (kesh o'chirish kerak emas). `None` — DO javob bermadi.
+async fn list_version(env: &Env) -> Option<i64> {
+    let (v, at) = LIST_VER.with(|c| c.get());
+    if v > 0 && now_ms() - at < LIST_VER_TTL_MS {
+        return Some(v);
+    }
+    let stub = list_hub(env)?;
+    let mut r = stub.fetch_with_str("https://hub/v").await.ok()?;
+    let nv = r.json::<Value>().await.ok()?["v"].as_i64()?;
+    LIST_VER.with(|c| c.set((nv, now_ms())));
+    Some(nv)
+}
+
+/// Ma'lumot o'zgardi (fayl qo'shildi / bo'lak saqlandi / tayyor): ro'yxat versiyasini oshiradi. Eski kesh nusxalari endi o'qilmaydi.
+pub(crate) async fn list_invalidate(env: &Env) {
+    let Some(stub) = list_hub(env) else { return };
+    let Ok(req) = Request::new_with_init("https://hub/bump", RequestInit::new().with_method(Method::Post)) else { return };
+    if let Ok(mut r) = stub.fetch_with_request(req).await {
+        if let Some(nv) = r.json::<Value>().await.ok().and_then(|j| j["v"].as_i64()) {
+            LIST_VER.with(|c| c.set((nv, now_ms())));
+        }
+    }
+}
+
+/// Durable Object: ro'yxat versiyasi (butun dunyo uchun BITTA nusxa; ARUMEDIATV'dagi `MarkHub` kabi).
+#[durable_object(fetch)]
+pub struct ListHub {
+    state: State,
+}
+
+impl DurableObject for ListHub {
+    fn new(state: State, _env: Env) -> Self {
+        Self { state }
+    }
+
+    async fn fetch(&self, req: Request) -> Result<Response> {
+        let storage = self.state.storage();
+        let mut v: i64 = storage.get("v").await.ok().flatten().unwrap_or(1);
+        if req.method() == Method::Post {
+            v += 1;
+            let _ = storage.put("v", v).await;
+        }
+        Response::from_json(&json!({"v": v}))
     }
 }
 
@@ -457,7 +506,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, ctx: &Context, path: &str
                 return json_resp(&json!({"error": format!("hajm mos emas ({got:?} != {size})")}), 422);
             }
             sql(env, "UPDATE bd_files SET state='uploaded' WHERE id=? AND state='uploading'", vec![TursoArg::text(&id)]).await?;
-            list_cache_clear().await;
+            list_invalidate(env).await;
             // Telegramga saqlashni WORKER O'ZI boshlaydi (javobdan keyin fonda, ~30 soniya); davomini har daqiqadagi cron oladi.
             let e2 = env.clone();
             ctx.wait_until(async move {
@@ -520,7 +569,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, ctx: &Context, path: &str
                 return json_resp(&json!({"error": format!("hajm mos emas ({got:?} != {size})")}), 422);
             }
             sql(env, "UPDATE bd_files SET state='uploaded' WHERE id=? AND state='uploading'", vec![TursoArg::text(&id)]).await?;
-            list_cache_clear().await;
+            list_invalidate(env).await;
             let e2 = env.clone();
             ctx.wait_until(async move {
                 process_and_chain(&e2).await;
@@ -578,7 +627,10 @@ pub(crate) async fn route(mut req: Request, env: &Env, ctx: &Context, path: &str
             // Yangi/o'zgargan narsa darhol ko'rinishi uchun: yozuv bo'lganda kesh tozalanadi (`list_cache_clear`), yuklash/saqlash
             // ketayotgan paytda (progress ko'rinishi uchun) yozuv atigi 15 soniya turadi; `?fresh=1` — keshni chetlab o'tadi.
             let cache = Cache::default();
-            let key = Request::new(LIST_CACHE_URL, Method::Get)?;
+            // Kesh kaliti versiyali: `list/v<versiya>`. Versiya DO dan (5 soniyalik izolyat eslashi bilan); DO javob bermasa — `v0` kalit
+            // va qisqa (15 soniya) muddat.
+            let ver = list_version(env).await;
+            let key = Request::new(&format!("{LIST_CACHE_URL}/v{}", ver.unwrap_or(0)), Method::Get)?;
             if qs(&url, "fresh") != "1" {
                 if let Some(mut hit) = cache.get(&key, false).await? {
                     let text = hit.text().await?;
@@ -603,7 +655,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, ctx: &Context, path: &str
             let body = json!({"files": rows}).to_string();
             let mut c = Response::ok(body.clone())?;
             let _ = c.headers_mut().set("Content-Type", "application/json");
-            let _ = c.headers_mut().set("Cache-Control", &format!("public, max-age={}", if busy { LIST_TTL_BUSY } else { LIST_TTL }));
+            let _ = c.headers_mut().set("Cache-Control", &format!("public, max-age={}", if busy || ver.is_none() { LIST_TTL_BUSY } else { LIST_TTL }));
             let _ = cache.put(&key, c).await;
             let mut r = Response::ok(body)?;
             set_cors(&mut r);
