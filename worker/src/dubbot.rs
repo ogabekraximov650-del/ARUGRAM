@@ -37,7 +37,8 @@ pub(crate) const DDL: [&str; 2] = [
         tr_msg INTEGER DEFAULT 0,
         nseg INTEGER DEFAULT 0,
         tl TEXT DEFAULT '',
-        parts TEXT DEFAULT ''
+        parts TEXT DEFAULT '',
+        smsg INTEGER DEFAULT 0
     )",
     "CREATE INDEX IF NOT EXISTS idx_dub_q ON dub_jobs(state, queued_at)",
 ];
@@ -53,6 +54,10 @@ const BTN_MANUAL: &str = "\u{270D}\u{FE0F} Qo'lda tarjima";
 
 /// Eski bazalar uchun ustunlar (bir marta; `ALTER` ikkinchi marta xato beradi — belgi `app_config` da).
 pub(crate) async fn migrate(env: &Env) {
+    if config_get(env, "mig_dub_smsg").await.is_none() {
+        let _ = turso_exec(env, "ALTER TABLE dub_jobs ADD COLUMN smsg INTEGER DEFAULT 0", vec![]).await;
+        config_put(env, "mig_dub_smsg", "1").await;
+    }
     if config_get(env, "mig_dub_manual").await.is_some() {
         return;
     }
@@ -199,9 +204,15 @@ pub(crate) async fn on_message(env: &Env, msg: &Value, chat: i64) -> bool {
     let n = turso_exec(env, "SELECT COUNT(*) AS n FROM dub_jobs WHERE state IN ('queued','running')", vec![]).await
         .ok().and_then(|r| first_row(&r)).map(|r| jint(&r, "n")).unwrap_or(1);
     let kick = kick(env).await;
-    encbot_send(env, chat, &format!(
+    // Shu xabar JONLI HOLAT xabari bo'ladi: Actions run boshlanishidan tugashigacha (`/api/dub/stage`, keyin `/api/dub/progress`) tahrirlanadi.
+    let ack = format!(
         "\u{2705} Navbatga qo'yildi: <b>#{id} {}</b>\n\u{1F310} Til: <code>{lang}</code>{}\n\u{1F4CB} Navbatda: {n} ta\n\n{kick}", html_escape(&short(&name)),
-        if manual { "\n\u{270D}\u{FE0F} Qo'lda tarjima: avval matn tayyorlanadi va sizga yuboriladi" } else { "" }), Some(keyboard())).await;
+        if manual { "\n\u{270D}\u{FE0F} Qo'lda tarjima: avval matn tayyorlanadi va sizga yuboriladi" } else { "" });
+    let sm = encbot_api(env, "sendMessage", json!({"chat_id": chat, "parse_mode": "HTML", "text": ack, "reply_markup": keyboard()})).await
+        .ok().and_then(|v| v["message_id"].as_i64()).unwrap_or(0);
+    if sm > 0 {
+        let _ = turso_exec(env, "UPDATE dub_jobs SET smsg=? WHERE id=?", vec![TursoArg::int(sm), TursoArg::int(id)]).await;
+    }
     true
 }
 
@@ -304,8 +315,12 @@ async fn intake(env: &Env, chat: i64, text: &str) -> bool {
         let _ = turso_exec(env, "UPDATE dub_jobs SET state='queued', runner='', lease_until=0, attempts=0 WHERE id=? AND state='wait'",
             vec![TursoArg::int(id)]).await;
         let kick = kick(env).await;
-        encbot_send(env, chat, &format!(
-            "\u{2705} #{id}: tarjima to'liq ({nseg}/{nseg}). Dublyaj navbatga qo'yildi.\n\n{kick}"), Some(keyboard())).await;
+        let sm = encbot_api(env, "sendMessage", json!({"chat_id": chat, "parse_mode": "HTML", "reply_markup": keyboard(),
+            "text": format!("\u{2705} #{id}: tarjima to'liq ({nseg}/{nseg}). Dublyaj navbatga qo'yildi.\n\n{kick}")})).await
+            .ok().and_then(|v| v["message_id"].as_i64()).unwrap_or(0);
+        if sm > 0 {
+            let _ = turso_exec(env, "UPDATE dub_jobs SET smsg=? WHERE id=?", vec![TursoArg::int(sm), TursoArg::int(id)]).await;
+        }
     } else {
         let list: Vec<String> = missing.iter().take(20).map(|n| format!("#{n}")).collect();
         encbot_send(env, chat, &format!(
@@ -393,6 +408,34 @@ fn state_icon(job: &Value) -> &'static str {
     }
 }
 
+/// Oxirgi `dub.yml` run'i: holati va havolasi (jonli foiz xabari ish Actions tomonidan olingandan keyingina chiqadi).
+async fn actions_info(env: &Env) -> String {
+    let repo = tg_secret(env, "GH_REPO");
+    if !repo.contains('/') {
+        return "\u{26A0}\u{FE0F} GH_REPO o'rnatilmagan.".into();
+    }
+    match gh_api(env, Method::Get, &format!("/repos/{repo}/actions/workflows/{DUB_WORKFLOW}/runs?per_page=1"), None).await {
+        Ok((200, v)) => match v["workflow_runs"].as_array().and_then(|a| a.first()) {
+            Some(r) => {
+                let st = r["status"].as_str().unwrap_or("");
+                let concl = r["conclusion"].as_str().unwrap_or("");
+                let url = r["html_url"].as_str().unwrap_or("");
+                let line = match (st, concl) {
+                    ("completed", "success") => "\u{2705} oxirgi run tugagan (muvaffaqiyatli)".to_string(),
+                    ("completed", c) => format!("\u{274C} oxirgi run tugagan: <b>{}</b> \u{2014} ish olinmagan bo'lsa run logini ko'ring", html_escape(c)),
+                    ("queued", _) => "\u{23F3} Actions run navbatda (GitHub hali serverni ajratmagan)".to_string(),
+                    _ => "\u{2699}\u{FE0F} Actions run ishlayapti \u{2014} muhit o'rnatilmoqda (modellar yuklanmoqda). Birinchi marta ~10\u{2013}15 daqiqa; ish olingach shu video uchun alohida foiz xabari chiqadi".to_string(),
+                };
+                format!("\u{25B6}\u{FE0F} {line}\n{}", html_escape(url))
+            }
+            None => "\u{26A0}\u{FE0F} Actions'da hech qanday dublyaj run'i yo'q (workflow ishga tushmagan).".into(),
+        },
+        Ok((404, _)) => "\u{26A0}\u{FE0F} `dub.yml` workflow avtoencode repoda topilmadi (sinxronlash o'tmagan bo'lishi mumkin).".into(),
+        Ok((code, v)) => format!("\u{26A0}\u{FE0F} GitHub javobi {code}: {}", html_escape(v["message"].as_str().unwrap_or(""))),
+        Err(e) => format!("\u{26A0}\u{FE0F} Actions holati o'qilmadi: {}", html_escape(&e.to_string())),
+    }
+}
+
 /// "📋 Holat" — "Dublyaj" bo'limida: hozirgi ish va navbat (jonli holat dublyaj ayotgan videoning o'z xabarida yangilanadi).
 pub(crate) async fn status(env: &Env, chat: i64) {
     let rows = turso_exec(env,
@@ -408,7 +451,16 @@ pub(crate) async fn status(env: &Env, chat: i64) {
     for r in &rows {
         text.push_str(&format!("{} <b>#{} {}</b>\n", state_icon(r), jint(r, "id"), html_escape(&short(r["name"].as_str().unwrap_or("")))));
     }
-    text.push_str("\n\u{2699}\u{FE0F} \u{2014} dublyaj moqda; jarayon shu video uchun yuborilgan holat xabarida ko'rinadi.");
+    text.push_str("\n\u{23F3} \u{2014} navbatda \u{00B7} \u{2699}\u{FE0F} \u{2014} ishlanmoqda \u{00B7} \u{270D}\u{FE0F} \u{2014} tarjima kutilmoqda\n");
+    // Nega yangilanmayapti: jonli foiz xabari ish Actions tomonidan OLINGANDAN keyin chiqadi. Run holati va havolasi shu yerda.
+    if rows.iter().any(|r| matches!(r["state"].as_str(), Some("queued") | Some("running"))) {
+        text.push_str(&format!("\n{}", actions_info(env).await));
+        // Navbatda ish bor-u, hech qanday run ishlamayotgan bo'lsa — qayta ishga tushiradi.
+        let k = kick(env).await;
+        if !k.is_empty() {
+            text.push_str(&format!("\n{k}"));
+        }
+    }
     text.push_str(&last_txt);
     encbot_send(env, chat, &text, Some(keyboard())).await;
 }
@@ -551,9 +603,19 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
                 continue;
             };
             let head = status_head(id, &name, jint(&got, "attempts"));
-            let status_msg = encbot_api(env, "sendMessage", json!({
-                "chat_id": chat, "parse_mode": "HTML", "text": format!("{head}\n\n\u{23F3} boshlanmoqda..."),
-            })).await.ok().and_then(|v| v["message_id"].as_i64()).unwrap_or(0);
+            let text0 = format!("{head}\n\n\u{23F3} boshlanmoqda...");
+            let prev = jint(&job, "smsg");
+            let status_msg = if prev > 0 {
+                edit_status(env, chat, prev, &text0).await;   // navbatga qo'yish / `stage` xabari davom etadi
+                prev
+            } else {
+                let m = encbot_api(env, "sendMessage", json!({"chat_id": chat, "parse_mode": "HTML", "text": text0}))
+                    .await.ok().and_then(|v| v["message_id"].as_i64()).unwrap_or(0);
+                if m > 0 {
+                    let _ = turso_exec(env, "UPDATE dub_jobs SET smsg=? WHERE id=?", vec![TursoArg::int(m), TursoArg::int(id)]).await;
+                }
+                m
+            };
             return ok(json!({"channel": channel, "status_msg": status_msg, "job": {
                 "id": id, "chat": chat, "name": name, "lang": job["lang"].as_str().unwrap_or("uz"), "ch_msg": jint(&job, "ch_msg"),
                 "mode": job["mode"].as_str().unwrap_or("auto"), "tr_msg": jint(&job, "tr_msg"), "nseg": jint(&job, "nseg"),
@@ -582,6 +644,26 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
             "SELECT COUNT(*) AS n FROM dub_jobs WHERE state='queued' OR (state='running' AND lease_until<=?)",
             vec![TursoArg::int(now)]).await.ok().and_then(|r| first_row(&r)).map(|r| jint(&r, "n")).unwrap_or(0);
         return ok_nostore(json!({"pending": n}));
+    }
+
+    // Run boshlanganidan `dub.py` ishni olgunicha (muhit, modellar, backend): workflow har ~15 soniyada bosqich matnini yuboradi,
+    // bot navbatdagi (birinchi) ishning holat xabarini tahrirlaydi. Bazaga yozmaydi.
+    if path == "/api/dub/stage" {
+        let text: String = b["text"].as_str().unwrap_or("").chars().take(1500).collect();
+        if text.is_empty() {
+            return ok_nostore(json!({"ok": true}));
+        }
+        let res = turso_exec(env,
+            "SELECT id, chat, name, attempts, smsg FROM dub_jobs WHERE state='queued' OR (state='running' AND lease_until<=?)
+              ORDER BY queued_at ASC LIMIT 1", vec![TursoArg::int(now)]).await?;
+        if let Some(j) = first_row(&res) {
+            let sm = jint(&j, "smsg");
+            if sm > 0 {
+                let head = status_head(jint(&j, "id"), j["name"].as_str().unwrap_or(""), jint(&j, "attempts").max(1));
+                edit_status(env, jint(&j, "chat"), sm, &format!("{head}\n\n{}", html_escape(&text))).await;
+            }
+        }
+        return ok_nostore(json!({"ok": true}));
     }
 
     // Jarayon holatini saqlash (run o'lsa ham davom etish uchun): transkripsiya fayli, gaplar soni, tarjima, tayyor bo'laklar.

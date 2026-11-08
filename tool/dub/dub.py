@@ -346,7 +346,7 @@ async def process(app, r, runner):
                 return
 
             # auto: NLLB bilan tarjima
-            live.pipeline(20, f"{lang} tiliga tarjima qilinmoqda (NLLB)")
+            live.pipeline(20, f"Tarjima modeli (NLLB 1.3B) yuklanmoqda va {lang} tiliga tarjima qilinmoqda")
             tin, tout = WORK / "tin.json", WORK / "tout.json"
             json.dump([{"text": s["text"]} for s in segs], open(tin, "w", encoding="utf-8"), ensure_ascii=False)
             await asyncio.to_thread(run_tool, "translate.py", tin, tout, src_lang, lang)

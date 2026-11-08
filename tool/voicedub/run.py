@@ -217,6 +217,7 @@ def main():
 
     # 5. Ovozlash: har bir qator o'z spikerining klonlangan ovozi bilan
     log("ovozlash (klon) ...")
+    prog(30, "Klon ovozi tayyorlanmoqda (OmniVoice modeli xotiraga yuklanmoqda)")
     gen = call("POST", f"/dub/generate/{job_id}", {
         "segments": [{
             "start": s["start"], "end": s["end"], "text": s["text"], "target_lang": target,
