@@ -227,6 +227,9 @@ fn gate(req: &Request, env: &Env, path: &str) -> bool {
     if ACTION_PATHS.contains(&path) {
         return true; // `bdrive::route` ichida `encode_token_ok` tekshiriladi
     }
+    if path == bdrive::list_path(env) {
+        return true; // ichki sirli ro'yxat manzili (faqat `SELF` biladi)
+    }
     if path == "/api/tg/hook" {
         return true; // `bdrive::tg_hook` ichida Telegram'ning `X-Telegram-Bot-Api-Secret-Token` sarlavhasi tekshiriladi
     }
@@ -253,6 +256,23 @@ fn gate(req: &Request, env: &Env, path: &str) -> bool {
 async fn scheduled(_e: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
     bdrive::process_and_chain(&env).await;
     let _ = bdrive::cleanup(&env).await;
+}
+
+/// Javobga `Cache-Control: no-store` qo'yadi (sarlavhalar o'zgarmas bo'lsa — javob nusxalanadi).
+fn no_store(mut r: Response) -> Response {
+    if r.headers_mut().set("Cache-Control", "no-store").is_ok() {
+        return r;
+    }
+    let status = r.status_code();
+    let headers = r.headers().clone();
+    let _ = headers.set("Cache-Control", "no-store");
+    match r.stream() {
+        Ok(stream) => match Response::from_stream(stream) {
+            Ok(n) => n.with_status(status).with_headers(headers),
+            Err(_) => r,
+        },
+        Err(_) => r,
+    }
 }
 
 #[event(fetch)]
@@ -293,8 +313,11 @@ async fn main(req: Request, env: Env, ctx: Context) -> Result<Response> {
     } else {
         err404("topilmadi")
     };
+    // Workers Caching (`[cache] enabled`) worker javoblarini `Cache-Control` bo'yicha darvozadan OLDIN keshlaydi: ichki ro'yxatdan boshqa hamma
+    // javob `no-store` bo'lishi shart (aks holda play/chunk/token javoblari darvozasiz keshdan chiqib ketadi).
+    let internal_list = path == bdrive::list_path(&env);
     match res {
-        Ok(r) => Ok(r),
+        Ok(r) => Ok(if internal_list { r } else { no_store(r) }),
         Err(e) => json_resp(&json!({"error": e.to_string()}), 502),
     }
 }

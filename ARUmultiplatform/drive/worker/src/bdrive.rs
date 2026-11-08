@@ -106,14 +106,10 @@ async fn ensure(env: &Env) -> Result<()> {
     let _ = sql(env, "ALTER TABLE bd_files ADD COLUMN updated INTEGER NOT NULL DEFAULT 0", vec![]).await;
     let _ = sql(env, "CREATE INDEX IF NOT EXISTS bd_updated ON bd_files(updated)", vec![]).await;
     let _ = sql(env, "UPDATE bd_files SET updated=created WHERE updated=0", vec![]).await;
-    // O'ZGARISHLAR JURNALI (DO'siz delta): har yozuvda (worker, qo'lda SQL — farqi yo'q) trigger bir tranzaksiyada jurnalga `seq` bilan
-    // yozadi; bir qator uchun jurnalda BITTA yozuv (eskisi o'chadi), shu sabab u o'smaydi. `bd_meta.floor` — tozalangan eng katta `seq`.
-    let _ = sql(env, "CREATE TABLE IF NOT EXISTS bd_journal (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL, op TEXT NOT NULL, at INTEGER NOT NULL)", vec![]).await;
-    let _ = sql(env, "CREATE INDEX IF NOT EXISTS bd_journal_id ON bd_journal(id)", vec![]).await;
-    let _ = sql(env, "CREATE TABLE IF NOT EXISTS bd_meta (k TEXT PRIMARY KEY, v INTEGER NOT NULL)", vec![]).await;
-    let _ = sql(env, "CREATE TRIGGER IF NOT EXISTS bd_files_ai AFTER INSERT ON bd_files BEGIN DELETE FROM bd_journal WHERE id=NEW.id; INSERT INTO bd_journal(id,op,at) VALUES (NEW.id,'u',CAST((julianday('now')-2440587.5)*86400000 AS INTEGER)); END", vec![]).await;
-    let _ = sql(env, "CREATE TRIGGER IF NOT EXISTS bd_files_au AFTER UPDATE ON bd_files BEGIN DELETE FROM bd_journal WHERE id=NEW.id; INSERT INTO bd_journal(id,op,at) VALUES (NEW.id,'u',CAST((julianday('now')-2440587.5)*86400000 AS INTEGER)); END", vec![]).await;
-    let _ = sql(env, "CREATE TRIGGER IF NOT EXISTS bd_files_ad AFTER DELETE ON bd_files BEGIN DELETE FROM bd_journal WHERE id=OLD.id; INSERT INTO bd_journal(id,op,at) VALUES (OLD.id,'d',CAST((julianday('now')-2440587.5)*86400000 AS INTEGER)); END", vec![]).await;
+    // Eski jurnal tizimi olib tashlandi (write-through kesh): triggerlar va jadvallar o'chiriladi (Turso'ga ortiqcha yozuv bo'lmasin).
+    for q in ["DROP TRIGGER IF EXISTS bd_files_ai", "DROP TRIGGER IF EXISTS bd_files_au", "DROP TRIGGER IF EXISTS bd_files_ad", "DROP TABLE IF EXISTS bd_journal", "DROP TABLE IF EXISTS bd_meta"] {
+        let _ = sql(env, q, vec![]).await;
+    }
     SCHEMA_OK.store(true, Ordering::Relaxed);
     Ok(())
 }
@@ -253,10 +249,10 @@ pub(crate) async fn process_ex(env: &Env, budget_ms: i64) -> Result<(String, boo
                 Ok(fid) => {
                     list.push(fid);
                     progressed = true;
-                    list_invalidate(env).await; // "Saqlanmoqda x/y" yangilanadi
                     // Bo'lak saqlandi: urinishlar hisobi nollanadi (katta fayl bir necha chaqiruvda tugashi mumkin), ijara yangilanadi.
                     sql(env, "UPDATE bd_files SET updated=CAST((julianday('now')-2440587.5)*86400000 AS INTEGER), chunk_ids=?, lease=?, tries=0 WHERE id=? AND state='storing'",
                         vec![TursoArg::text(&list.join(",")), TursoArg::int(now_ms() + WORKER_LEASE_MS), TursoArg::text(&id)]).await?;
+                    list_invalidate_throttled(env).await; // "Saqlanmoqda x/y" (yozuvdan KEYIN, 20 s da bir marta)
                 }
                 Err(e) => {
                     failed = Some(e.to_string());
@@ -313,13 +309,6 @@ pub(crate) async fn cleanup(env: &Env) -> Result<String> {
         sql(env, "DELETE FROM bd_files WHERE id=? AND state IN ('uploading','failed','direct')", vec![TursoArg::text(&id)]).await?;
         n += 1;
     }
-    // Jurnal: 30 kundan eski yozuvlar o'chadi, eng katta o'chirilgan `seq` `floor` ga yoziladi (shundan eski keshlar to'liq qayta o'qiladi).
-    let cut = now_ms() - 30 * 24 * 3600 * 1000;
-    let mx = sql(env, "SELECT MAX(seq) AS m FROM bd_journal WHERE at < ?", vec![TursoArg::int(cut)]).await?;
-    if let Some(m) = first(&mx).and_then(|r| r["m"].as_i64()) {
-        sql(env, "INSERT INTO bd_meta (k,v) VALUES ('floor', ?) ON CONFLICT(k) DO UPDATE SET v=MAX(v, excluded.v)", vec![TursoArg::int(m)]).await?;
-        sql(env, "DELETE FROM bd_journal WHERE seq <= ? AND at < ?", vec![TursoArg::int(m), TursoArg::int(cut)]).await?;
-    }
     Ok(format!("tozalandi: {n}"))
 }
 
@@ -354,14 +343,10 @@ fn r2_creds(env: &Env) -> Option<(String, String, String)> {
     if a.is_empty() || k.is_empty() || s.is_empty() { None } else { Some((a, k, s)) }
 }
 
-/// Delta shundan ko'p qator bo'lsa — to'liq qayta o'qiladi.
-const LIST_MAX_DELTA: usize = 500;
 const LIST_N: usize = 200;
 const LIST_COLS: &str = "id,name,kind,mime,size,w,h,dur,state,created,chunks,updated,CASE WHEN chunk_ids='' THEN 0 ELSE length(chunk_ids)-length(replace(chunk_ids,',',''))+1 END AS stored";
-
-fn listed(state: &str) -> bool {
-    matches!(state, "ready" | "uploaded" | "storing")
-}
+const LIST_TTL: u64 = 1000 * 24 * 3600;
+const LIST_TAG: &str = "list";
 
 /// To'liq o'qish: eng yangi 200 qator, indeks bo'yicha (indeks yo'q bo'lsa — oddiy so'rov).
 async fn list_full(env: &Env) -> Result<Vec<Value>> {
@@ -374,81 +359,48 @@ async fn list_full(env: &Env) -> Result<Vec<Value>> {
     Ok(rows_of(&res))
 }
 
-/// Ro'yxat keshi — ikki yozuv (DO'siz): (1) ASOSIY — qatorlar + `seq` (qaysi jurnal raqamigacha yangilangan), 1000 kun;
-/// (2) JURNAL BELGISI — bazadagi eng oxirgi `seq` va `floor`, 10 daqiqa. Ro'yxat so'ralganda belgi (10 daqiqada bir marta Turso'dan
-/// 1 qator o'qib) yangilanadi; asosiy yozuvning `seq` si eskirgan bo'lsa — jurnaldan FAQAT o'zgargan `id`lar olinib, o'sha qatorlargina
-/// Turso'dan o'qiladi va keshdagi eskilari almashtiriladi. O'zgarishni yozgan mintaqa belgini darhol o'chiradi (o'z o'zgarishini kutmasdan ko'radi);
-/// boshqa mintaqalar eng ko'pi bilan 10 daqiqada bilib oladi.
-const LIST_MAIN_URL: &str = "https://arudrive.cache/list/main";
-const LIST_SEQ_URL: &str = "https://arudrive.cache/list/seq";
-const LIST_MAIN_TTL: u64 = 1000 * 24 * 3600;
-const LIST_SEQ_TTL: u64 = 600;
+// WRITE-THROUGH KESH (Workers Caching): ro'yxat Cloudflare keshida (1000 kun) turadi va Turso'ga HECH QANDAY so'rov yubormaydi.
+// Hamma yozuv worker orqali o'tadi; yozgandan keyin `list_invalidate` keshni TAG bo'yicha GLOBAL (hamma mintaqada) o'chiradi,
+// keyingi so'rov bazadan bir marta o'qib qayta yozadi. Ichki manzil sirli (ENCODE_TOKEN'dan hosil) — kesh darvozadan oldin turgani uchun
+// uni faqat worker o'zi `SELF` orqali biladi; tashqi `/api/bd/list` esa darvozadan o'tadi va `no-store`.
 
-/// Jurnal belgisini (shu mintaqada) o'chiradi: keyingi ro'yxat so'rovi eng oxirgi `seq` ni Turso'dan qayta o'qiydi.
+/// Ichki ro'yxat manzili (sirli, deterministik).
+pub(crate) fn list_path(env: &Env) -> String {
+    use hmac::{Hmac, Mac};
+    let secret = tg_secret(env, "ENCODE_TOKEN");
+    let mut m = <Hmac<sha2::Sha256> as Mac>::new_from_slice(secret.as_bytes()).unwrap_or_else(|_| <Hmac<sha2::Sha256> as Mac>::new_from_slice(b"x").expect("hmac"));
+    m.update(b"arudrive-list-v1");
+    let hx = hex_of(&m.finalize().into_bytes());
+    format!("/api/bd/ld~{}", &hx[..24])
+}
+
+/// Ro'yxat keshini global o'chiradi (yozuvdan keyin chaqiriladi).
 pub(crate) async fn list_invalidate(_env: &Env) {
-    if let Ok(req) = Request::new(LIST_SEQ_URL, Method::Get) {
-        let _ = Cache::default().delete(&req, false).await;
+    let _ = purge_tags(&[LIST_TAG]).await;
+}
+
+/// Progress kabi tez-tez bo'ladigan yozuvlar uchun: bir mintaqada 20 soniyada ko'pi bilan bitta o'chirish (tozalash chegarasi).
+pub(crate) async fn list_invalidate_throttled(env: &Env) {
+    let Ok(req) = Request::new("https://arudrive.cache/list/purged", Method::Get) else { return };
+    if matches!(Cache::default().get(&req, false).await, Ok(Some(_))) {
+        return;
     }
-}
-
-async fn cache_json(url: &str) -> Option<Value> {
-    let req = Request::new(url, Method::Get).ok()?;
-    let mut hit = Cache::default().get(&req, false).await.ok()??;
-    hit.json::<Value>().await.ok()
-}
-
-async fn cache_put_json(url: &str, v: &Value, ttl: u64) {
-    if let (Ok(req), Ok(mut r)) = (Request::new(url, Method::Get), Response::ok(v.to_string())) {
-        let _ = r.headers_mut().set("Content-Type", "application/json");
-        let _ = r.headers_mut().set("Cache-Control", &format!("public, max-age={ttl}"));
+    if let Ok(mut r) = Response::ok("1") {
+        let _ = r.headers_mut().set("Cache-Control", "public, max-age=20");
         let _ = Cache::default().put(&req, r).await;
     }
+    list_invalidate(env).await;
 }
 
-/// Bazadagi eng oxirgi `seq` va `floor` (tozalangan eng katta `seq`): bitta so'rov, indeks bo'yicha 1–2 qator.
-async fn list_head(env: &Env) -> Result<(i64, i64)> {
-    let r = sql(env, "SELECT COALESCE(MAX(seq),0) AS latest, COALESCE((SELECT v FROM bd_meta WHERE k='floor'),0) AS floor FROM bd_journal", vec![]).await?;
-    let row = first(&r).unwrap_or(json!({}));
-    Ok((row["latest"].as_i64().unwrap_or(0), row["floor"].as_i64().unwrap_or(0)))
-}
-
-/// To'liq o'qiladi va asosiy yozuvga `seq` bilan saqlaydi. `seq` — o'qishdan OLDIN bilingan `latest` (eskiroq bo'lishi mumkin, lekin
-/// xavfsiz: keyingi delta ba'zi o'zgarishlarni qayta qo'llaydi, hech narsa o'tib ketmaydi).
-async fn list_full_cached(env: &Env, latest: i64) -> Result<Vec<Value>> {
+/// Ichki ro'yxat javobi (keshga tushadi): `Cache-Tag` va uzoq `Cache-Control` bilan.
+async fn list_data(env: &Env) -> Result<Response> {
     let rows = list_full(env).await?;
-    cache_put_json(LIST_MAIN_URL, &json!({"files": rows, "seq": latest}), LIST_MAIN_TTL).await;
-    Ok(rows)
-}
-
-/// Jurnaldan `seq` dan keyin o'zgargan (seq, id) lar (eng ko'pi bilan `LIST_MAX_DELTA + 1` ta — oshsa to'liq o'qiladi).
-async fn list_journal(env: &Env, after: i64) -> Result<Vec<(i64, String)>> {
-    let q = format!("SELECT seq,id FROM bd_journal WHERE seq > ? ORDER BY seq LIMIT {}", LIST_MAX_DELTA + 1);
-    let r = sql(env, &q, vec![TursoArg::int(after)]).await?;
-    Ok(rows_of(&r).iter().filter_map(|x| Some((x["seq"].as_i64()?, x["id"].as_str()?.to_string()))).collect())
-}
-
-/// Berilgan `id`li qatorlarni o'qiydi (faqat shular, indeks bo'yicha).
-async fn list_rows_by_ids(env: &Env, ids: &[String]) -> Result<Vec<Value>> {
-    if ids.is_empty() {
-        return Ok(vec![]);
-    }
-    let marks = vec!["?"; ids.len()].join(",");
-    let q = format!("SELECT {LIST_COLS} FROM bd_files WHERE id IN ({marks})");
-    let args = ids.iter().map(|i| TursoArg::text(i)).collect();
-    Ok(rows_of(&sql(env, &q, args).await?))
-}
-
-/// Delta'ni keshdagi qatorlarga qo'llaydi: o'zgargan `id`lar keshdan olib tashlanadi, bazadan qaytganlari (ro'yxatda bo'lsa) qo'yiladi
-/// (o'chirilgan qator qaytmaydi — shu bilan ketadi); tartib va 200 chegarasi saqlanadi.
-fn list_apply(rows: &mut Vec<Value>, changed: &[String], fetched: Vec<Value>) {
-    rows.retain(|r| !changed.iter().any(|c| r["id"].as_str() == Some(c.as_str())));
-    for d in fetched {
-        if listed(d["state"].as_str().unwrap_or("")) {
-            rows.push(d);
-        }
-    }
-    rows.sort_by(|a, b| b["created"].as_i64().cmp(&a["created"].as_i64()));
-    rows.truncate(LIST_N);
+    let mut r = Response::ok(json!({"files": rows, "gen": now_ms()}).to_string())?;
+    let h = r.headers_mut();
+    let _ = h.set("Content-Type", "application/json");
+    let _ = h.set("Cache-Control", &format!("public, max-age={LIST_TTL}"));
+    let _ = h.set("Cache-Tag", LIST_TAG);
+    Ok(r)
 }
 
 /// `a,b,c` -> ["a","b","c"] (bo'sh matn — bo'sh ro'yxat).
@@ -690,56 +642,24 @@ pub(crate) async fn route(mut req: Request, env: &Env, ctx: &Context, path: &str
         // Qo'lda: ikkinchi akkauntdagi Actions'ni ishga tushirish (zaxira yo'l).
         (Method::Post, "/api/bd/kick") => ok(json!({"kick": kick(env).await})),
         (Method::Get, "/api/bd/list") => {
-            // DO'SIZ JURNALLI KESH (foydalanuvchi rejasi): asosiy yozuv (qatorlar + `seq`, 1000 kun) va jurnal belgisi (`latest`, 10 daqiqa).
-            //   * belgi eskirgan/yo'q  -> Turso'dan eng oxirgi `seq` (1 qator) o'qiladi;
-            //   * asosiy `seq` >= latest -> keshdan (HIT-LIST);
-            //   * asosiy `seq` eskirgan  -> jurnaldan o'zgargan `id`lar, so'ng FAQAT shu qatorlar o'qilib almashtiriladi (DELTA-LIST);
-            //   * asosiy yo'q / `seq` jurnal tozalangan chegaradan eski / o'zgarish 500 dan ko'p / `?full=1` -> to'liq (MISS/FULL-LIST).
-            // `?fresh=1` — jurnal belgisini chetlab o'tadi (darhol tekshiradi).
+            // Ro'yxat Cloudflare keshidan (Workers Caching) `SELF` orqali olinadi; Turso'ga faqat kesh bo'sh bo'lganda boriladi.
             if qs(&url, "fresh") == "1" {
                 list_invalidate(env).await;
             }
-            let (latest, floor) = match cache_json(LIST_SEQ_URL).await {
-                Some(j) if j["latest"].is_i64() => (j["latest"].as_i64().unwrap_or(0), j["floor"].as_i64().unwrap_or(0)),
-                _ => {
-                    let (l, f) = list_head(env).await?;
-                    cache_put_json(LIST_SEQ_URL, &json!({"latest": l, "floor": f}), LIST_SEQ_TTL).await;
-                    (l, f)
-                }
-            };
-            let main = if qs(&url, "full") == "1" { None } else { cache_json(LIST_MAIN_URL).await };
-            let cached = main.and_then(|j| {
-                let rows = j["files"].as_array()?.clone();
-                Some((rows, j["seq"].as_i64()?))
-            });
-            let (rows, how) = match cached {
-                Some((rows, mseq)) if mseq >= latest => (rows, "HIT-LIST"),
-                Some((mut rows, mseq)) if mseq >= floor => {
-                    let j = list_journal(env, mseq).await?;
-                    if j.len() > LIST_MAX_DELTA {
-                        let r = list_full_cached(env, latest).await?;
-                        (r, "FULL-LIST")
-                    } else {
-                        let ids: Vec<String> = j.iter().map(|(_, id)| id.clone()).collect();
-                        let new_seq = j.iter().map(|(s, _)| *s).max().unwrap_or(mseq).max(latest);
-                        let fetched = list_rows_by_ids(env, &ids).await?;
-                        list_apply(&mut rows, &ids, fetched);
-                        cache_put_json(LIST_MAIN_URL, &json!({"files": rows, "seq": new_seq}), LIST_MAIN_TTL).await;
-                        (rows, "DELTA-LIST")
-                    }
-                }
-                _ => {
-                    let r = list_full_cached(env, latest).await?;
-                    (r, "MISS-LIST")
-                }
-            };
-            let mut r = Response::ok(json!({"files": rows}).to_string())?;
+            let svc = env.service("SELF")?;
+            let req = Request::new(&format!("https://self{}", list_path(env)), Method::Get)?;
+            let mut inner = svc.fetch_request(req).await?;
+            let text = inner.text().await?;
+            let gen = serde_json::from_str::<Value>(&text).ok().map(|j| j["gen"].to_string()).unwrap_or_default();
+            let mut r = Response::ok(text)?;
             set_cors(&mut r);
             let _ = r.headers_mut().set("Content-Type", "application/json");
             let _ = r.headers_mut().set("Cache-Control", "no-store");
-            let _ = r.headers_mut().set("X-Cache", how);
+            let _ = r.headers_mut().set("X-Gen", &gen);
             Ok(r)
         }
+        // Ichki (sirli) manzil: faqat `SELF` biladi, Cloudflare keshi shu javobni saqlaydi.
+        (Method::Get, p) if p == list_path(env) => list_data(env).await,
         // Kichik rasm: Telegram'dan olinib Cloudflare keshiga (1000 kun) saqlanadi.
         (Method::Get, p) if p.starts_with("/api/bd/thumb/") => {
             let id = p["/api/bd/thumb/".len()..].trim_end_matches(".jpg").to_string();
@@ -1097,49 +1017,6 @@ mod tests {
     fn vergulli_royxat() {
         assert!(split_ids("").is_empty());
         assert_eq!(split_ids("a_1,b-2"), vec!["a_1", "b-2"]);
-    }
-
-    fn row(id: &str, state: &str, created: i64, updated: i64) -> Value {
-        json!({"id": id, "state": state, "created": created, "updated": updated, "stored": 0})
-    }
-
-    #[test]
-    fn delta_qatorni_almashtiradi() {
-        let mut rows = vec![row("b", "storing", 20, 20), row("a", "ready", 10, 10)];
-        list_apply(&mut rows, &["b".to_string()], vec![row("b", "ready", 20, 99)]);
-        assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0]["id"], "b");
-        assert_eq!(rows[0]["state"], "ready");
-    }
-
-    #[test]
-    fn delta_royxatdan_chiqqan_va_ochirilganni_olib_tashlaydi() {
-        let mut rows = vec![row("b", "storing", 20, 20), row("a", "ready", 10, 10), row("c", "ready", 5, 5)];
-        // b failed bo'ldi (ro'yxatda ko'rinmaydi); c o'chirildi (bazadan qaytmadi)
-        list_apply(&mut rows, &["b".to_string(), "c".to_string()], vec![row("b", "failed", 20, 50)]);
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0]["id"], "a");
-        // hali yuklanayotgan (uploading) qator ro'yxatga qo'shilmaydi
-        list_apply(&mut rows, &["z".to_string()], vec![row("z", "uploading", 30, 60)]);
-        assert_eq!(rows.len(), 1);
-    }
-
-    #[test]
-    fn delta_yangi_qatorni_tartib_bilan_qoshadi_va_200_dan_oshirmaydi() {
-        let mut rows: Vec<Value> = (0..LIST_N as i64).map(|i| row(&format!("r{i}"), "ready", i, i)).collect();
-        list_apply(&mut rows, &["yangi".to_string()], vec![row("yangi", "uploaded", 10_000, 10_000)]);
-        assert_eq!(rows.len(), LIST_N);
-        assert_eq!(rows[0]["id"], "yangi"); // eng yangi tepada
-        assert!(rows.iter().all(|r| r["id"] != "r0")); // eng eskisi chiqib ketdi
-    }
-
-    #[test]
-    fn delta_o_zgarmagan_qatorlarga_tegmaydi() {
-        let mut rows = vec![row("b", "ready", 20, 20), row("a", "ready", 10, 10)];
-        list_apply(&mut rows, &["a".to_string()], vec![row("a", "ready", 10, 77)]);
-        assert_eq!(rows[0]["id"], "b");
-        assert_eq!(rows[0]["updated"], 20); // b tegilmadi
-        assert_eq!(rows[1]["updated"], 77);
     }
 
     #[test]

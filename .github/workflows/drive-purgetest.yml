@@ -11,7 +11,11 @@ jobs:
     runs-on: ubuntu-latest
     environment: secret
     steps:
-      - name: Rust purge sinovi
+      - name: Kesh sinovi (list, list, purge, list)
         run: |
           K=$(printf '%s' "${{ secrets.ENCODE_TOKEN }}" | tr -d '[:space:]')
-          curl -sS -X POST "https://arudrive.uzcom.workers.dev/api/bd/purgetest" -H "X-Encode-Token: $K"; echo
+          U=https://arudrive.uzcom.workers.dev
+          g() { curl -sS -D- -o /dev/null -H "X-Encode-Token: $K" "$U/api/bd/list" | grep -iE '^(HTTP/|x-gen|cf-cache)'; echo --; }
+          echo "1:"; g; echo "2:"; g
+          echo "purge:"; curl -sS -X POST -H "X-Encode-Token: $K" "$U/api/bd/purgetest"; echo
+          echo "3:"; g

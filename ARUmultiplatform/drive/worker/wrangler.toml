@@ -24,3 +24,8 @@ service = "arudrive"
 [[migrations]]
 tag = "v2"
 deleted_classes = ["ListHub"]
+
+# Workers Caching: ro'yxat Cloudflare keshida turadi, yozuvda `cache.purge()` (tag `list`) bilan GLOBAL o'chiriladi. Cache-Control'siz javob 2 soat keshlanadi,
+# shu sabab ichki ro'yxatdan boshqa hamma javobga kodda `no-store` qo'yiladi (lib.rs `no_store`).
+[cache]
+enabled = true
