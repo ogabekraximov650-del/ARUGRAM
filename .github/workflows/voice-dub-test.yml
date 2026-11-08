@@ -45,6 +45,10 @@ jobs:
         working-directory: vs
         run: uv sync --locked --no-group cuda --group cpu
 
+      - name: Tarjima paketi (Google, deep-translator)
+        working-directory: vs
+        run: uv pip install --python .venv/bin/python deep-translator
+
       - name: Modellar (HF kesh)
         working-directory: vs
         run: |
