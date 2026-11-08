@@ -631,8 +631,8 @@ pub(crate) async fn route(mut req: Request, env: &Env, ctx: &Context, path: &str
         }
         // SINOV: Rust'dan yangi Workers Cache `cache.purge()` ni chaqirish (`cloudflare:workers` moduli, wasm-bindgen orqali).
         (Method::Post, "/api/bd/purgetest") => match purge_tags(&["t1"]).await {
-            Ok(v) => ok(json!({"ok": true, "r": v})),
-            Err(e) => json_resp(&json!({"ok": false, "error": e}), 500),
+            Ok(v) => ok(json!({"ok": true, "r": v, "path": list_path(env)})),
+            Err(e) => json_resp(&json!({"ok": false, "error": e, "path": list_path(env)}), 500),
         },
         // Qo'lda: tashlab ketilgan (24 soatdan eski) yuklashlarni tozalash.
         (Method::Post, "/api/bd/cleanup") => match cleanup(env).await {
