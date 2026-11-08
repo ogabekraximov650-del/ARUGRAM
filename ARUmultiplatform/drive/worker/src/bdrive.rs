@@ -102,6 +102,10 @@ async fn ensure(env: &Env) -> Result<()> {
     //   bd_state — navbat/qayta navbat/tozalash: faqat kerakli holatdagi qatorlarni o'qiydi.
     let _ = sql(env, "CREATE INDEX IF NOT EXISTS bd_list ON bd_files(created DESC) WHERE state IN ('ready','uploaded','storing')", vec![]).await;
     let _ = sql(env, "CREATE INDEX IF NOT EXISTS bd_state ON bd_files(state, created)", vec![]).await;
+    // DELTA SINXRONLASH: har qatorda so'nggi o'zgarish vaqti (`updated`, ms, BAZA soati — ma'lumot markazlari soati farqi bo'lmaydi).
+    let _ = sql(env, "ALTER TABLE bd_files ADD COLUMN updated INTEGER NOT NULL DEFAULT 0", vec![]).await;
+    let _ = sql(env, "CREATE INDEX IF NOT EXISTS bd_updated ON bd_files(updated)", vec![]).await;
+    let _ = sql(env, "UPDATE bd_files SET updated=created WHERE updated=0", vec![]).await;
     SCHEMA_OK.store(true, Ordering::Relaxed);
     Ok(())
 }
@@ -195,8 +199,8 @@ pub(crate) async fn process_ex(env: &Env, budget_ms: i64) -> Result<(String, boo
     while now_ms() - t0 < budget_ms - 6_000 {
         let now = now_ms();
         let r = sql_many(env, &[
-            ("UPDATE bd_files SET state='uploaded' WHERE state='storing' AND lease<? AND tries<?", vec![TursoArg::int(now), TursoArg::int(MAX_TRIES)]),
-            ("UPDATE bd_files SET state='failed' WHERE state='storing' AND lease<? AND tries>=?", vec![TursoArg::int(now), TursoArg::int(MAX_TRIES)]),
+            ("UPDATE bd_files SET updated=CAST((julianday('now')-2440587.5)*86400000 AS INTEGER), state='uploaded' WHERE state='storing' AND lease<? AND tries<?", vec![TursoArg::int(now), TursoArg::int(MAX_TRIES)]),
+            ("UPDATE bd_files SET updated=CAST((julianday('now')-2440587.5)*86400000 AS INTEGER), state='failed' WHERE state='storing' AND lease<? AND tries>=?", vec![TursoArg::int(now), TursoArg::int(MAX_TRIES)]),
             ("SELECT id,name,size,chunks,chunk_ids FROM bd_files WHERE state='uploaded' ORDER BY created LIMIT 1", vec![]),
         ]).await?;
         let Some(f) = first(&r[2]) else {
@@ -204,11 +208,12 @@ pub(crate) async fn process_ex(env: &Env, budget_ms: i64) -> Result<(String, boo
             break;
         };
         let id = f["id"].as_str().unwrap_or("").to_string();
-        let got = sql(env, "UPDATE bd_files SET state='storing', lease=?, tries=tries+1 WHERE id=? AND state='uploaded' RETURNING id",
+        let got = sql(env, "UPDATE bd_files SET updated=CAST((julianday('now')-2440587.5)*86400000 AS INTEGER), state='storing', lease=?, tries=tries+1 WHERE id=? AND state='uploaded' RETURNING id",
             vec![TursoArg::int(now + WORKER_LEASE_MS), TursoArg::text(&id)]).await?;
         if first(&got).is_none() {
             continue; // boshqa chaqiruv oldi
         }
+        list_invalidate(env).await; // uploaded -> storing
         let name = f["name"].as_str().unwrap_or("fayl").to_string();
         let size = f["size"].as_i64().unwrap_or(0).max(0) as u64;
         let chunks = f["chunks"].as_i64().unwrap_or(0).max(0) as usize;
@@ -242,7 +247,7 @@ pub(crate) async fn process_ex(env: &Env, budget_ms: i64) -> Result<(String, boo
                     progressed = true;
                     list_invalidate(env).await; // "Saqlanmoqda x/y" yangilanadi
                     // Bo'lak saqlandi: urinishlar hisobi nollanadi (katta fayl bir necha chaqiruvda tugashi mumkin), ijara yangilanadi.
-                    sql(env, "UPDATE bd_files SET chunk_ids=?, lease=?, tries=0 WHERE id=? AND state='storing'",
+                    sql(env, "UPDATE bd_files SET updated=CAST((julianday('now')-2440587.5)*86400000 AS INTEGER), chunk_ids=?, lease=?, tries=0 WHERE id=? AND state='storing'",
                         vec![TursoArg::text(&list.join(",")), TursoArg::int(now_ms() + WORKER_LEASE_MS), TursoArg::text(&id)]).await?;
                 }
                 Err(e) => {
@@ -252,18 +257,20 @@ pub(crate) async fn process_ex(env: &Env, budget_ms: i64) -> Result<(String, boo
             }
         }
         if let Some(e) = failed {
-            let _ = sql(env, "UPDATE bd_files SET state=CASE WHEN tries>=? THEN 'failed' ELSE 'uploaded' END, lease=0 WHERE id=? AND state='storing'",
+            let _ = sql(env, "UPDATE bd_files SET updated=CAST((julianday('now')-2440587.5)*86400000 AS INTEGER), state=CASE WHEN tries>=? THEN 'failed' ELSE 'uploaded' END, lease=0 WHERE id=? AND state='storing'",
                 vec![TursoArg::int(MAX_TRIES), TursoArg::text(&id)]).await;
+            list_invalidate(env).await;
             out.push_str(&format!("{id}: xato: {e}\n"));
             drained = true; // xatoda zanjir to'xtaydi (cron keyin oladi)
             break;
         }
         if stopped {
-            let _ = sql(env, "UPDATE bd_files SET state='uploaded', lease=0 WHERE id=? AND state='storing'", vec![TursoArg::text(&id)]).await;
+            let _ = sql(env, "UPDATE bd_files SET updated=CAST((julianday('now')-2440587.5)*86400000 AS INTEGER), state='uploaded', lease=0 WHERE id=? AND state='storing'", vec![TursoArg::text(&id)]).await;
+            list_invalidate(env).await;
             out.push_str(&format!("{id}: vaqt tugadi, {}/{chunks}\n", list.len()));
             break;
         }
-        sql(env, "UPDATE bd_files SET state='ready' WHERE id=? AND state='storing'", vec![TursoArg::text(&id)]).await?;
+        sql(env, "UPDATE bd_files SET updated=CAST((julianday('now')-2440587.5)*86400000 AS INTEGER), state='ready' WHERE id=? AND state='storing'", vec![TursoArg::text(&id)]).await?;
         list_invalidate(env).await;
         let _ = bk.delete(&key).await;
         out.push_str(&format!("{id}: tayyor\n"));
@@ -333,6 +340,49 @@ fn r2_creds(env: &Env) -> Option<(String, String, String)> {
 }
 
 const LIST_CACHE_URL: &str = "https://arudrive.cache/list";
+/// Delta so'rovida chegara shuncha orqaroqdan olinadi (bir vaqtdagi yozuvlar va soat farqi o'tib ketmasin); qatorlar `id` bo'yicha almashtiriladi.
+const LIST_OVERLAP_MS: i64 = 5_000;
+/// Delta shundan ko'p qator bo'lsa — to'liq qayta o'qiladi.
+const LIST_MAX_DELTA: usize = 500;
+const LIST_N: usize = 200;
+const LIST_COLS: &str = "id,name,kind,mime,size,w,h,dur,state,created,chunks,updated,CASE WHEN chunk_ids='' THEN 0 ELSE length(chunk_ids)-length(replace(chunk_ids,',',''))+1 END AS stored";
+
+fn listed(state: &str) -> bool {
+    matches!(state, "ready" | "uploaded" | "storing")
+}
+
+/// To'liq o'qish: eng yangi 200 qator, indeks bo'yicha (indeks yo'q bo'lsa — oddiy so'rov).
+async fn list_full(env: &Env) -> Result<Vec<Value>> {
+    let q_fast = format!("SELECT {LIST_COLS} FROM bd_files INDEXED BY bd_list WHERE state IN ('ready','uploaded','storing') ORDER BY created DESC LIMIT {LIST_N}");
+    let q_plain = format!("SELECT {LIST_COLS} FROM bd_files WHERE state IN ('ready','uploaded','storing') ORDER BY created DESC LIMIT {LIST_N}");
+    let res = match sql(env, &q_fast, vec![]).await {
+        Ok(r) => r,
+        Err(_) => sql(env, &q_plain, vec![]).await?,
+    };
+    Ok(rows_of(&res))
+}
+
+/// Faqat `since` dan keyin o'zgargan qatorlar (har qanday holatda; ro'yxatda bo'lmaydiganlari keshdan olib tashlanadi).
+async fn list_delta(env: &Env, since: i64) -> Result<Vec<Value>> {
+    let q = format!("SELECT {LIST_COLS} FROM bd_files WHERE updated > ? ORDER BY updated LIMIT {}", LIST_MAX_DELTA + 1);
+    Ok(rows_of(&sql(env, &q, vec![TursoArg::int(since)]).await?))
+}
+
+fn list_as_of(rows: &[Value]) -> i64 {
+    rows.iter().filter_map(|x| x["updated"].as_i64()).max().unwrap_or(0)
+}
+
+/// Keshdagi qatorlarga delta'ni qo'llaydi: eski qator olib tashlanadi, yangisi (ro'yxatda bo'lsa) qo'yiladi; tartib va 200 chegarasi saqlanadi.
+fn list_merge(rows: &mut Vec<Value>, delta: Vec<Value>) {
+    for d in delta {
+        rows.retain(|r| r["id"] != d["id"]);
+        if listed(d["state"].as_str().unwrap_or("")) {
+            rows.push(d);
+        }
+    }
+    rows.sort_by(|a, b| b["created"].as_i64().cmp(&a["created"].as_i64()));
+    rows.truncate(LIST_N);
+}
 /// Ro'yxat keshda eng ko'pi bilan 1 soat; saqlash/yuklash ketayotgan paytda 15 soniya.
 const LIST_TTL: u64 = 3600;
 const LIST_TTL_BUSY: u64 = 15;
@@ -455,7 +505,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, ctx: &Context, path: &str
             let id = new_id();
             let up = bk.create_multipart_upload(format!("{UP}{id}")).execute().await?;
             let upload_id = up.upload_id().await;
-            sql(env, "INSERT INTO bd_files (id,name,kind,mime,size,w,h,dur,state,upload_id,chunks,created) VALUES (?,?,?,?,?,?,?,?,'uploading',?,?,?)",
+            sql(env, "INSERT INTO bd_files (id,name,kind,mime,size,w,h,dur,state,upload_id,chunks,created,updated) VALUES (?,?,?,?,?,?,?,?,'uploading',?,?,?,CAST((julianday('now')-2440587.5)*86400000 AS INTEGER))",
                 vec![TursoArg::text(&id), TursoArg::text(&name), TursoArg::text(kind), TursoArg::text(&mime), TursoArg::int(size),
                      TursoArg::int(jint(&b, "w")), TursoArg::int(jint(&b, "h")), TursoArg::int(jint(&b, "dur")),
                      TursoArg::text(&upload_id), TursoArg::int(chunks_of(size)), TursoArg::int(now_ms())]).await?;
@@ -502,10 +552,10 @@ pub(crate) async fn route(mut req: Request, env: &Env, ctx: &Context, path: &str
             let got = bk.head(&key).await.ok().flatten().map(|o| o.size() as i64);
             if got != Some(size) {
                 let _ = bk.delete(&key).await;
-                let _ = sql(env, "UPDATE bd_files SET state='failed' WHERE id=?", vec![TursoArg::text(&id)]).await;
+                let _ = sql(env, "UPDATE bd_files SET updated=CAST((julianday('now')-2440587.5)*86400000 AS INTEGER), state='failed' WHERE id=?", vec![TursoArg::text(&id)]).await;
                 return json_resp(&json!({"error": format!("hajm mos emas ({got:?} != {size})")}), 422);
             }
-            sql(env, "UPDATE bd_files SET state='uploaded' WHERE id=? AND state='uploading'", vec![TursoArg::text(&id)]).await?;
+            sql(env, "UPDATE bd_files SET updated=CAST((julianday('now')-2440587.5)*86400000 AS INTEGER), state='uploaded' WHERE id=? AND state='uploading'", vec![TursoArg::text(&id)]).await?;
             list_invalidate(env).await;
             // Telegramga saqlashni WORKER O'ZI boshlaydi (javobdan keyin fonda, ~30 soniya); davomini har daqiqadagi cron oladi.
             let e2 = env.clone();
@@ -542,7 +592,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, ctx: &Context, path: &str
                 let urls = (1..=n).map(|i| crate::s3sign::presign("PUT", &host, &path, &[("partNumber", &i.to_string()), ("uploadId", &uid)], &ak, &sk, "auto", &now, URL_TTL)).collect();
                 ("multi", uid, BIG_PART, urls)
             };
-            sql(env, "INSERT INTO bd_files (id,name,kind,mime,size,w,h,dur,state,upload_id,chunks,created) VALUES (?,?,?,?,?,?,?,?,'uploading',?,?,?)",
+            sql(env, "INSERT INTO bd_files (id,name,kind,mime,size,w,h,dur,state,upload_id,chunks,created,updated) VALUES (?,?,?,?,?,?,?,?,'uploading',?,?,?,CAST((julianday('now')-2440587.5)*86400000 AS INTEGER))",
                 vec![TursoArg::text(&id), TursoArg::text(&name), TursoArg::text(kind), TursoArg::text(&mime), TursoArg::int(size),
                      TursoArg::int(jint(&b, "w")), TursoArg::int(jint(&b, "h")), TursoArg::int(jint(&b, "dur")),
                      TursoArg::text(&upload_id), TursoArg::int(chunks_of(size)), TursoArg::int(now_ms())]).await?;
@@ -565,10 +615,10 @@ pub(crate) async fn route(mut req: Request, env: &Env, ctx: &Context, path: &str
             let size = row["size"].as_i64().unwrap_or(0);
             let got = bk.head(&format!("{UP}{id}")).await.ok().flatten().map(|o| o.size() as i64);
             if got != Some(size) {
-                let _ = sql(env, "UPDATE bd_files SET state='failed' WHERE id=?", vec![TursoArg::text(&id)]).await;
+                let _ = sql(env, "UPDATE bd_files SET updated=CAST((julianday('now')-2440587.5)*86400000 AS INTEGER), state='failed' WHERE id=?", vec![TursoArg::text(&id)]).await;
                 return json_resp(&json!({"error": format!("hajm mos emas ({got:?} != {size})")}), 422);
             }
-            sql(env, "UPDATE bd_files SET state='uploaded' WHERE id=? AND state='uploading'", vec![TursoArg::text(&id)]).await?;
+            sql(env, "UPDATE bd_files SET updated=CAST((julianday('now')-2440587.5)*86400000 AS INTEGER), state='uploaded' WHERE id=? AND state='uploading'", vec![TursoArg::text(&id)]).await?;
             list_invalidate(env).await;
             let e2 = env.clone();
             ctx.wait_until(async move {
@@ -587,7 +637,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, ctx: &Context, path: &str
                 return json_resp(&json!({"error": "hajm"}), 400);
             }
             let (fid, _) = tg_send_document(&tg_secret(env, "BD_BOT_TOKEN"), tg_channel_id(env), &format!("{id}.thumb.jpg"), &bytes, bytes.len() as u64).await?;
-            sql(env, "UPDATE bd_files SET thumb_id=? WHERE id=?", vec![TursoArg::text(&fid), TursoArg::text(&id)]).await?;
+            sql(env, "UPDATE bd_files SET updated=CAST((julianday('now')-2440587.5)*86400000 AS INTEGER), thumb_id=? WHERE id=?", vec![TursoArg::text(&fid), TursoArg::text(&id)]).await?;
             ok(json!({"ok": true}))
         }
         // Qo'lda: R2 -> Telegram saqlashni HOZIR ishga tushiradi va natijani (yoki xatoni) qaytaradi (tashxis).
@@ -615,6 +665,11 @@ pub(crate) async fn route(mut req: Request, env: &Env, ctx: &Context, path: &str
             Ok(log) => ok(json!({"ok": true, "log": log})),
             Err(e) => json_resp(&json!({"ok": false, "error": e.to_string()}), 500),
         },
+        // Qo'lda: bazani qo'lda o'zgartirgandan keyin ro'yxat versiyasini oshiradi (kesh keyingi so'rovda faqat o'zgargan qatorlarni oladi).
+        (Method::Post, "/api/bd/bump") => {
+            list_invalidate(env).await;
+            ok(json!({"ok": true}))
+        }
         // Qo'lda: tashlab ketilgan (24 soatdan eski) yuklashlarni tozalash.
         (Method::Post, "/api/bd/cleanup") => match cleanup(env).await {
             Ok(log) => ok(json!({"ok": true, "log": log})),
@@ -623,45 +678,57 @@ pub(crate) async fn route(mut req: Request, env: &Env, ctx: &Context, path: &str
         // Qo'lda: ikkinchi akkauntdagi Actions'ni ishga tushirish (zaxira yo'l).
         (Method::Post, "/api/bd/kick") => ok(json!({"kick": kick(env).await})),
         (Method::Get, "/api/bd/list") => {
-            // CLOUDFLARE KESHI (bepul): ro'yxat eng ko'pi bilan 1 SOAT saqlanadi — minglab foydalanuvchi kirsa ham Turso'ga bitta so'rov.
-            // Yangi/o'zgargan narsa darhol ko'rinishi uchun: yozuv bo'lganda kesh tozalanadi (`list_cache_clear`), yuklash/saqlash
-            // ketayotgan paytda (progress ko'rinishi uchun) yozuv atigi 15 soniya turadi; `?fresh=1` — keshni chetlab o'tadi.
+            // DELTA SINXRONLASH (foydalanuvchi g'oyasi): keshda qatorlar + `as_of` (qatorlar qaysi vaqtgacha yangilangan) + `ver` (DO versiyasi).
+            //   * ver mos     -> keshdan beriladi, Turso'ga bormaydi;
+            //   * ver eskirgan -> Turso'dan FAQAT `updated > as_of` qatorlari olinib keshdagilari almashtiriladi (1-2 qator, 200 emas);
+            //   * kesh yo'q / ?fresh=1 / o'zgarish juda ko'p -> to'liq (200 qator, indeks bo'yicha).
+            // Kesh eng ko'pi bilan 1 soat (keyin to'liq qayta o'qiladi).
             let cache = Cache::default();
-            // Kesh kaliti versiyali: `list/v<versiya>`. Versiya DO dan (5 soniyalik izolyat eslashi bilan); DO javob bermasa — `v0` kalit
-            // va qisqa (15 soniya) muddat.
+            let key = Request::new(LIST_CACHE_URL, Method::Get)?;
             let ver = list_version(env).await;
-            let key = Request::new(&format!("{LIST_CACHE_URL}/v{}", ver.unwrap_or(0)), Method::Get)?;
+            let v = ver.unwrap_or(0);
+            let mut cached: Option<(Vec<Value>, i64, i64)> = None;
             if qs(&url, "fresh") != "1" {
                 if let Some(mut hit) = cache.get(&key, false).await? {
-                    let text = hit.text().await?;
-                    let mut r = Response::ok(text)?;
-                    set_cors(&mut r);
-                    let h = r.headers_mut();
-                    let _ = h.set("Content-Type", "application/json");
-                    let _ = h.set("Cache-Control", "no-store");
-                    let _ = h.set("X-Cache", "HIT-LIST");
-                    return Ok(r);
+                    if let Ok(j) = hit.json::<Value>().await {
+                        if let Some(a) = j["files"].as_array() {
+                            cached = Some((a.clone(), j["as_of"].as_i64().unwrap_or(0), j["ver"].as_i64().unwrap_or(-1)));
+                        }
+                    }
                 }
             }
-            let q_fast = "SELECT id,name,kind,mime,size,w,h,dur,state,created,chunks,CASE WHEN chunk_ids='' THEN 0 ELSE length(chunk_ids)-length(replace(chunk_ids,',',''))+1 END AS stored FROM bd_files INDEXED BY bd_list WHERE state IN ('ready','uploaded','storing') ORDER BY created DESC LIMIT 200";
-            let q_plain = "SELECT id,name,kind,mime,size,w,h,dur,state,created,chunks,CASE WHEN chunk_ids='' THEN 0 ELSE length(chunk_ids)-length(replace(chunk_ids,',',''))+1 END AS stored FROM bd_files WHERE state IN ('ready','uploaded','storing') ORDER BY created DESC LIMIT 200";
-            // Tez yo'l: indeks bo'yicha (200 qator). Indeks hali yaratilmagan bo'lsa — oddiy so'rov.
-            let res = match sql(env, q_fast, vec![]).await {
-                Ok(r) => r,
-                Err(_) => sql(env, q_plain, vec![]).await?,
+            let (rows, as_of, how) = match cached {
+                Some((rows, as_of, cver)) if cver == v => (rows, as_of, "HIT-LIST"),
+                Some((mut rows, as_of0, _)) => {
+                    let d = list_delta(env, as_of0 - LIST_OVERLAP_MS).await?;
+                    if d.len() > LIST_MAX_DELTA {
+                        let r = list_full(env).await?;
+                        let a = list_as_of(&r);
+                        (r, a, "FULL-LIST")
+                    } else {
+                        let a = d.iter().filter_map(|x| x["updated"].as_i64()).max().unwrap_or(0).max(as_of0);
+                        list_merge(&mut rows, d);
+                        (rows, a, "DELTA-LIST")
+                    }
+                }
+                None => {
+                    let r = list_full(env).await?;
+                    let a = list_as_of(&r);
+                    (r, a, "MISS-LIST")
+                }
             };
-            let rows = rows_of(&res);
-            let busy = rows.iter().any(|f| f["state"].as_str() != Some("ready"));
-            let body = json!({"files": rows}).to_string();
-            let mut c = Response::ok(body.clone())?;
-            let _ = c.headers_mut().set("Content-Type", "application/json");
-            let _ = c.headers_mut().set("Cache-Control", &format!("public, max-age={}", if busy || ver.is_none() { LIST_TTL_BUSY } else { LIST_TTL }));
-            let _ = cache.put(&key, c).await;
-            let mut r = Response::ok(body)?;
+            if how != "HIT-LIST" {
+                let mut c = Response::ok(json!({"files": rows, "as_of": as_of, "ver": v}).to_string())?;
+                let _ = c.headers_mut().set("Content-Type", "application/json");
+                // DO javob bermasa (versiya noma'lum) — qisqa muddat; aks holda 1 soat.
+                let _ = c.headers_mut().set("Cache-Control", &format!("public, max-age={}", if ver.is_some() { LIST_TTL } else { LIST_TTL_BUSY }));
+                let _ = cache.put(&key, c).await;
+            }
+            let mut r = Response::ok(json!({"files": rows}).to_string())?;
             set_cors(&mut r);
             let _ = r.headers_mut().set("Content-Type", "application/json");
             let _ = r.headers_mut().set("Cache-Control", "no-store");
-            let _ = r.headers_mut().set("X-Cache", "MISS-LIST");
+            let _ = r.headers_mut().set("X-Cache", how);
             Ok(r)
         }
         // Kichik rasm: Telegram'dan olinib Cloudflare keshiga (1000 kun) saqlanadi.
@@ -698,13 +765,13 @@ pub(crate) async fn route(mut req: Request, env: &Env, ctx: &Context, path: &str
             let now = now_ms();
             let r = sql_many(env, &[
                 // Ijarasi tugagan (run o'lgan) ishlar qayta navbatga qaytadi.
-                ("UPDATE bd_files SET state='uploaded' WHERE state='storing' AND lease<? AND tries<?", vec![TursoArg::int(now), TursoArg::int(MAX_TRIES)]),
-                ("UPDATE bd_files SET state='failed' WHERE state='storing' AND lease<? AND tries>=?", vec![TursoArg::int(now), TursoArg::int(MAX_TRIES)]),
+                ("UPDATE bd_files SET updated=CAST((julianday('now')-2440587.5)*86400000 AS INTEGER), state='uploaded' WHERE state='storing' AND lease<? AND tries<?", vec![TursoArg::int(now), TursoArg::int(MAX_TRIES)]),
+                ("UPDATE bd_files SET updated=CAST((julianday('now')-2440587.5)*86400000 AS INTEGER), state='failed' WHERE state='storing' AND lease<? AND tries>=?", vec![TursoArg::int(now), TursoArg::int(MAX_TRIES)]),
                 ("SELECT id,name,size,chunks FROM bd_files WHERE state='uploaded' ORDER BY created LIMIT 1", vec![]),
             ]).await?;
             let Some(f) = first(&r[2]) else { return ok(json!({"none": true})) };
             let id = f["id"].as_str().unwrap_or("").to_string();
-            let got = sql(env, "UPDATE bd_files SET state='storing', lease=?, tries=tries+1 WHERE id=? AND state='uploaded' RETURNING id",
+            let got = sql(env, "UPDATE bd_files SET updated=CAST((julianday('now')-2440587.5)*86400000 AS INTEGER), state='storing', lease=?, tries=tries+1 WHERE id=? AND state='uploaded' RETURNING id",
                 vec![TursoArg::int(now + LEASE_MS), TursoArg::text(&id)]).await?;
             if first(&got).is_none() {
                 return ok(json!({"none": true}));
@@ -758,7 +825,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, ctx: &Context, path: &str
                 return json_resp(&json!({"error": "bo'laklar tartib bilan kelishi shart"}), 409);
             }
             if n == list.len() { list.push(tg) } else { list[n] = tg }
-            sql(env, "UPDATE bd_files SET chunk_ids=?, lease=? WHERE id=? AND state='storing'",
+            sql(env, "UPDATE bd_files SET updated=CAST((julianday('now')-2440587.5)*86400000 AS INTEGER), chunk_ids=?, lease=? WHERE id=? AND state='storing'",
                 vec![TursoArg::text(&list.join(",")), TursoArg::int(now_ms() + LEASE_MS), TursoArg::text(&id)]).await?;
             ok(json!({"ok": true}))
         }
@@ -775,7 +842,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, ctx: &Context, path: &str
             if want <= 0 || have != want {
                 return json_resp(&json!({"error": format!("bo'laklar yetarli emas ({have}/{want})")}), 409);
             }
-            sql(env, "UPDATE bd_files SET state='ready' WHERE id=? AND state='storing'", vec![TursoArg::text(&id)]).await?;
+            sql(env, "UPDATE bd_files SET updated=CAST((julianday('now')-2440587.5)*86400000 AS INTEGER), state='ready' WHERE id=? AND state='storing'", vec![TursoArg::text(&id)]).await?;
             // Asl fayl R2'dan o'chadi (bo'laklar Telegram'da).
             if let Some(bk) = bucket(env) {
                 let _ = bk.delete(format!("{UP}{id}")).await;
@@ -788,7 +855,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, ctx: &Context, path: &str
             if !id_ok(&id) {
                 return json_resp(&json!({"error": "so'rov"}), 400);
             }
-            sql(env, "UPDATE bd_files SET state=CASE WHEN tries>=? THEN 'failed' ELSE 'uploaded' END, lease=0 WHERE id=? AND state='storing'",
+            sql(env, "UPDATE bd_files SET updated=CAST((julianday('now')-2440587.5)*86400000 AS INTEGER), state=CASE WHEN tries>=? THEN 'failed' ELSE 'uploaded' END, lease=0 WHERE id=? AND state='storing'",
                 vec![TursoArg::int(MAX_TRIES), TursoArg::text(&id)]).await?;
             ok(json!({"ok": true}))
         }
@@ -1021,6 +1088,46 @@ mod tests {
     fn vergulli_royxat() {
         assert!(split_ids("").is_empty());
         assert_eq!(split_ids("a_1,b-2"), vec!["a_1", "b-2"]);
+    }
+
+    fn row(id: &str, state: &str, created: i64, updated: i64) -> Value {
+        json!({"id": id, "state": state, "created": created, "updated": updated, "stored": 0})
+    }
+
+    #[test]
+    fn delta_qatorni_almashtiradi() {
+        let mut rows = vec![row("b", "storing", 20, 20), row("a", "ready", 10, 10)];
+        list_merge(&mut rows, vec![row("b", "ready", 20, 99)]);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0]["id"], "b");
+        assert_eq!(rows[0]["state"], "ready");
+        assert_eq!(rows[0]["updated"], 99);
+    }
+
+    #[test]
+    fn delta_royxatdan_chiqqanni_olib_tashlaydi() {
+        let mut rows = vec![row("b", "storing", 20, 20), row("a", "ready", 10, 10)];
+        list_merge(&mut rows, vec![row("b", "failed", 20, 50)]); // xato bo'ldi: ro'yxatda ko'rinmaydi
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["id"], "a");
+        list_merge(&mut rows, vec![row("z", "uploading", 30, 60)]); // hali yuklanmoqda: qo'shilmaydi
+        assert_eq!(rows.len(), 1);
+    }
+
+    #[test]
+    fn delta_yangi_qatorni_tartib_bilan_qoshadi_va_200_dan_oshirmaydi() {
+        let mut rows: Vec<Value> = (0..LIST_N as i64).map(|i| row(&format!("r{i}"), "ready", i, i)).collect();
+        list_merge(&mut rows, vec![row("yangi", "uploaded", 10_000, 10_000)]);
+        assert_eq!(rows.len(), LIST_N);
+        assert_eq!(rows[0]["id"], "yangi"); // eng yangi tepada
+        assert!(rows.iter().all(|r| r["id"] != "r0")); // eng eskisi chiqib ketdi
+    }
+
+    #[test]
+    fn as_of_eng_katta_updated() {
+        let rows = vec![row("a", "ready", 1, 5), row("b", "ready", 2, 9), row("c", "ready", 3, 7)];
+        assert_eq!(list_as_of(&rows), 9);
+        assert_eq!(list_as_of(&[]), 0);
     }
 
     #[test]
