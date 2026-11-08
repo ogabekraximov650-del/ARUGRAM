@@ -30,6 +30,10 @@ HERE = Path(__file__).resolve().parent
 WORK = Path(os.environ.get("WORK_ROOT", os.environ.get("RUNNER_TEMP", "/tmp"))) / "arumediatv_dub"
 # ARUGRAM repodan olingan `tool/voicedub` (driver `run.py` shu yerda).
 VD = Path(os.environ.get("VD_DIR", HERE.parent / "voicedub"))
+# Actions job chegarasi 6 soat: run boshlanishi (JOB_T0, workflow yozadi) + byudjet; oxirgi 8 daqiqa yuborish uchun zaxira.
+JOB_T0 = float(os.environ.get("JOB_T0") or time.time())
+JOB_BUDGET_S = float(os.environ.get("JOB_BUDGET_MIN", "335")) * 60
+SEND_RESERVE_S = 8 * 60
 
 
 class Lost(Exception):
@@ -162,6 +166,7 @@ def run_driver(src, lang, outdir, live):
     p = subprocess.Popen([sys.executable, str(VD / "run.py"), str(src), lang, str(outdir)],
                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, env=env)
     tail = collections.deque(maxlen=30)
+    gen0 = None   # ovozlash (30..95%) boshlangan payt
     for line in p.stdout:
         line = line.rstrip()
         if not line:
@@ -170,7 +175,19 @@ def run_driver(src, lang, outdir, live):
         if line.startswith("PROGRESS "):
             pct, _, txt = line[9:].partition("\t")
             try:
-                live.pipeline(float(pct), txt)
+                pv = float(pct)
+                live.pipeline(pv, txt)
+                # Ovozlash tezligidan 6 soatlik chegaraga sig'ish-sig'masligi oldindan aniqlanadi (juda uzun video).
+                if pv >= 31 and gen0 is None:
+                    gen0 = (time.time(), pv)
+                if gen0 and pv >= 35 and pv > gen0[1]:
+                    rate = (pv - gen0[1]) / max(time.time() - gen0[0], 1)
+                    finish_at = time.time() + (96 - pv) / rate
+                    if finish_at > JOB_T0 + JOB_BUDGET_S - SEND_RESERVE_S:
+                        p.terminate()
+                        over = (finish_at - (JOB_T0 + JOB_BUDGET_S - SEND_RESERVE_S)) / 60
+                        raise Fatal(f"video juda uzun: ovozlash Actions'ning 6 soatlik chegarasiga sig'maydi "
+                                    f"(taxminan {over:.0f} daqiqa yetmaydi). Videoni qisqaroq bo'laklarga bo'lib yuboring")
             except ValueError:
                 pass
             log("  " + txt)
@@ -205,8 +222,6 @@ async def process(app, r, runner):
             raise RuntimeError("video yuklab olinmadi")
         src = Path(src)
         w, h, dur = probe(src)
-        if dur and dur > 190:
-            raise Fatal(f"video juda uzun ({hms(dur)}) — 3 daqiqagacha")
         live.done(f"Yuklab olindi: {mb(src.stat().st_size)} · {w}×{h} · {hms(dur)} ({hms(time.time() - t0)})")
 
         # VoiceStudio ASR/diarizatsiya uchun oddiy mp4 kutadi.

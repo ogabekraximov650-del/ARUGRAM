@@ -30,6 +30,9 @@ jobs:
       # VoiceStudio nusxasi shu ochiq repoda (`tool/voicedub`).
       SRC_REPO: ogabekraximov650-del/ARUGRAM
     steps:
+      - name: Run boshlangan vaqt (6 soatlik chegara hisobi uchun)
+        run: echo "JOB_T0=$(date +%s)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v4
 
       - name: VoiceStudio kodi (ARUGRAM/tool/voicedub)

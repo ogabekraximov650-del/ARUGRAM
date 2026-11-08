@@ -10,7 +10,7 @@
 // ishga tushiradi -> `tool/dub/dub.py` ishni oladi (`/api/dub/claim`), videoni kanaldan yuklaydi, VoiceStudio (CPU) bilan dublyaj
 // qiladi (`tool/voicedub/run.py`: Whisper -> NLLB tarjima -> OmniVoice klon ovozi -> ffmpeg), tayyor videoni kanalga yuklaydi va
 // `/api/dub/finish` — worker tayyor videoni `copyMessage` bilan admin chatiga ko'chiradi, kanal nusxalarini o'chiradi.
-// Bitta run — bitta video (CPU'da sekin: ~9 daqiqa / 30 soniya video), shu sabab video uzunligi `MAX_DUR_S` bilan cheklangan.
+// Bitta run — bitta video (CPU'da sekin: ~10 daqiqa / 30 soniya video). Uzunlik cheklanmagan: Actions (`dub.py`) generatsiya paytida 6 soatlik chegaraga sig'maslikni oldindan aniqlab, ishni xabar bilan to'xtatadi.
 //
 // Suhbat holati: `app_config.encbot_mode = dub`. Izohga (caption) maqsad til kodi yoziladi (uz, en, ru, tr...); bo'sh bo'lsa — uz.
 
@@ -39,8 +39,6 @@ pub(crate) const DDL: [&str; 2] = [
 const DUB_WORKFLOW: &str = "dub.yml";
 /// Bitta ish uchun ijara (run o'lsa shundan keyin qayta olinadi).
 const DUB_LEASE_MS: i64 = 330 * 60 * 1000;
-/// Video uzunligi chegarasi (soniya): CPU'da dublyaj sekin.
-const MAX_DUR_S: i64 = 180;
 const DUB_MAX_ATTEMPTS: i64 = 2;
 
 pub(crate) const BTN: &str = "\u{1F5E3} Dublyaj";
@@ -61,7 +59,7 @@ pub(crate) async fn menu(env: &Env, chat: i64) {
          Videoni yuboring \u{2014} videodagi ovoz <b>klonlanadi</b>, gaplar <b>o'zbekchaga</b> tarjima qilinadi va tarjima asl \
          spikerning ovozi bilan aytilib, videoga qo'yiladi.\n\n\
          \u{1F310} Boshqa tilga: video izohiga (caption) til kodini yozing (<code>uz</code>, <code>en</code>, <code>ru</code>, <code>tr</code>, ...). Bo'sh bo'lsa \u{2014} <code>uz</code>.\n\
-         \u{23F1} Video uzunligi <b>3 daqiqagacha</b> (jarayon GPU'siz, 30 soniya video ~10 daqiqa oladi).\n\
+         \u{23F1} Uzunlik cheklanmagan, lekin jarayon GPU'siz: 1 daqiqalik video ~20 daqiqa oladi, Actions'ning 6 soatlik chegarasiga sig'maydigan juda uzun video xabar bilan to'xtatiladi.\n\
          Bir nechta video ketma-ket yuborsangiz, navbat bilan ishlanadi. Tayyor video shu chatga keladi.",
         Some(keyboard())).await;
 }
@@ -119,10 +117,6 @@ pub(crate) async fn on_message(env: &Env, msg: &Value, chat: i64) -> bool {
         encbot_send(env, chat, "Dublyaj uchun video yuboring (oddiy video yoki video fayl).", Some(keyboard())).await;
         return true;
     };
-    if dur > MAX_DUR_S {
-        encbot_send(env, chat, &format!("\u{274C} Video juda uzun ({}:{:02}). Dublyaj GPU'siz ishlagani uchun {} daqiqagacha video qabul qilinadi.", dur / 60, dur % 60, MAX_DUR_S / 60), Some(keyboard())).await;
-        return true;
-    }
     let channel = tg_channel_id(env);
     if channel == 0 {
         encbot_send(env, chat, "\u{274C} TG_CHANNEL_ID sozlanmagan.", Some(keyboard())).await;
