@@ -2,6 +2,11 @@ name: VoiceStudio dublyaj sinovi (vaqtinchalik)
 
 # Sinov: kichik haqiqiy video -> VoiceStudio (CPU) -> o'zbekcha dublyaj (asl ovoz klonlanadi). Natija artifact sifatida yuklanadi.
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'tool/voicedub/**'
+      - '.github/workflows/voice-dub-test.yml'
   workflow_dispatch:
     inputs:
       video_url:
@@ -24,12 +29,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/checkout@v4
-        with:
-          repository: debpalash/VoiceStudio
-          path: vs
-          fetch-depth: 1
-
       - name: Tizim paketlari
         run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg espeak-ng libsndfile1
 
@@ -42,15 +41,15 @@ jobs:
           key: hf-voicestudio-v2
 
       - name: Python muhiti (CPU torch)
-        working-directory: vs
+        working-directory: tool/voicedub/voicestudio
         run: uv sync --locked --no-group cuda --group cpu
 
       - name: Tarjima paketi (Google, deep-translator)
-        working-directory: vs
+        working-directory: tool/voicedub/voicestudio
         run: uv pip install --python .venv/bin/python deep-translator
 
       - name: Modellar (HF kesh)
-        working-directory: vs
+        working-directory: tool/voicedub/voicestudio
         run: |
           uv run --no-sync python - <<'PY'
           from huggingface_hub import snapshot_download
@@ -63,14 +62,14 @@ jobs:
       - name: Video
         run: |
           mkdir -p work out
-          curl -fsSL -A 'arugram-ci/1.0 (https://github.com/ogabekraximov650-del/ARUGRAM)' -o work/src.bin "${{ inputs.video_url }}"
+          curl -fsSL -A 'arugram-ci/1.0 (https://github.com/ogabekraximov650-del/ARUGRAM)' -o work/src.bin "${{ inputs.video_url || 'https://commons.wikimedia.org/wiki/Special:FilePath/Weekly_Address_(2009-01-24),_small.ogv' }}"
           ls -la work/src.bin
-          ffmpeg -hide_banner -loglevel error -y -ss 3 -t ${{ inputs.seconds }} -i work/src.bin -c:v libx264 -preset veryfast -crf 28 -vf scale=-2:360 -c:a aac -ar 44100 work/clip.mp4
+          ffmpeg -hide_banner -loglevel error -y -ss 3 -t ${{ inputs.seconds || '30' }} -i work/src.bin -c:v libx264 -preset veryfast -crf 28 -vf scale=-2:360 -c:a aac -ar 44100 work/clip.mp4
           ffprobe -hide_banner -v error -show_entries format=duration -of csv=p=0 work/clip.mp4
           cp work/clip.mp4 out/original_clip.mp4
 
       - name: Backend
-        working-directory: vs
+        working-directory: tool/voicedub/voicestudio
         env:
           OMNIVOICE_DATA_DIR: ${{ runner.temp }}/ov_data
         run: |
@@ -86,7 +85,7 @@ jobs:
           OMNIVOICE_DATA_DIR: ${{ runner.temp }}/ov_data
         run: |
           set -o pipefail
-          python3 tool/voicedub/run.py work/clip.mp4 "${{ inputs.target }}" out 2>&1 | tee out/driver.log
+          python3 tool/voicedub/run.py work/clip.mp4 "${{ inputs.target || 'uz' }}" out 2>&1 | tee out/driver.log
 
       - name: Backend logi (oxiri)
         if: always()
