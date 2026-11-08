@@ -586,6 +586,27 @@ pub(crate) async fn route(mut req: Request, env: &Env, ctx: &Context, path: &str
             });
             ok(json!({"ok": true}))
         }
+        // O'chirish: qator bazadan, asl fayl R2'dan o'chadi va ro'yxat keshi global tozalanadi (hamma mintaqada ro'yxatdan yo'qoladi).
+        // Saqlanayotgan (`storing`) fayl o'chirilmaydi (zanjir yozib turibdi) — avval tugashini kuting.
+        (Method::Post, "/api/bd/delete") => {
+            let b: Value = req.json().await.unwrap_or(json!({}));
+            let id = b["id"].as_str().unwrap_or("").to_string();
+            if !id_ok(&id) {
+                return json_resp(&json!({"error": "so'rov"}), 400);
+            }
+            let Some(row) = first(&sql(env, "SELECT state FROM bd_files WHERE id=?", vec![TursoArg::text(&id)]).await?) else {
+                return err404("fayl yo'q");
+            };
+            if row["state"].as_str() == Some("storing") {
+                return json_resp(&json!({"error": "saqlanmoqda"}), 409);
+            }
+            sql(env, "DELETE FROM bd_files WHERE id=?", vec![TursoArg::text(&id)]).await?;
+            if let Some(bk) = bucket(env) {
+                let _ = bk.delete(format!("{UP}{id}")).await;
+            }
+            list_invalidate(env).await;
+            ok(json!({"ok": true}))
+        }
         // Kichik rasm Telegram'ga (kanalga) saqlanadi; file_id `thumb_id` ustunida (R2 faqat asl fayl uchun).
         (Method::Post, "/api/bd/thumb") => {
             let id = qs(&url, "id");
