@@ -33,6 +33,8 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg espeak-ng libsndfile1
 
       - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: false
 
       - name: HF kesh
         uses: actions/cache@v4
@@ -42,6 +44,9 @@ jobs:
 
       - name: Python muhiti (CPU torch)
         working-directory: tool/voicedub/voicestudio
+        env:
+          UV_HTTP_TIMEOUT: '120'
+          UV_HTTP_RETRIES: '6'
         run: uv sync --locked --no-group cuda --group cpu
 
       - name: Tarjima paketi (Google, deep-translator)
