@@ -6990,3 +6990,8 @@ Foydalanuvchi: model "sudo yo'q, o'rnatib bo'lmaydi" deb to'xtab qoldi ("Modelni
 - **Qanday ishlaydi:** `EncCacheDataSource` (ExoPlayer manbasi) avval keshdan o'qiydi; bo'lak yo'q bo'lsa worker'dan (`ResolvingDataSource` -> isitish) shu bo'lakdan ketma-ket o'qib, bo'lakni yozadi va pleyerga beradi. Fayl hajmi ro'yxatdan (`size`); noma'lum (0) bo'lsa kesh o'chiq.
 - **Fayllar:** `data/BlockCache.kt`, `data/EncCacheDataSource.kt`, `data/Warm.kt` (`mediaSourceFactory(id, ctx, size)`), `ui/PlayerScreen.kt` (birinchi bo'lak telefonda bo'lsa pleyer isitishni kutmaydi).
 - **Eslatma:** Rust `video_cache.rs` (ARUMEDIATV) ga tegilmadi — ARUDRIVE Kotlin ilovasi, shu g'oyaning Kotlin'dagi nusxasi.
+
+## ARUDRIVE: sek oynasi ARUMEDIATV (Kotlin) ilovasidagi kabi
+
+- Ikki marta bosish: ekranning chap/o'ng YARMIDA har bosish 5 soniya, jamlanib boradi (5s, 10s, 15s…), video haqiqiy chegaralari ichida; sek 350 ms tinchlikdan keyin bir marta bajariladi, oyna yana 350 ms dan keyin yo'qoladi. Oyna — ARUMEDIATV `SeekBadge` nusxasi (qora yarim shaffof doira, uchta yonib-o'chuvchi uchburchak, "Ns" yozuvi, markazdan ±0.5 siljigan).
+- Video davomiyligiga bog'liq emas (90 soniya sharti olib tashlangan). Fayl: `drive/android/.../ui/PlayerScreen.kt`.

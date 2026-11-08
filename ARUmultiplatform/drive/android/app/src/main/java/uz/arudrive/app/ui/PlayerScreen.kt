@@ -42,6 +42,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -69,8 +70,11 @@ fun PlayerScreen(file: DriveFile, onBack: () -> Unit) {
     var cacheFailed by remember(file.id) { mutableStateOf(false) }
     var attempt by remember(file.id) { mutableIntStateOf(0) }
     var drag by remember { mutableStateOf<Float?>(null) }
-    var flashDir by remember { mutableIntStateOf(0) }   // -1 chap, +1 o'ng: 10 soniya sakrash belgisi
-    var flashTick by remember { mutableIntStateOf(0) }
+    // Ikki marta bosib sek (ARUMEDIATV `PlayerUi.kt` bilan bir xil): har bosish 5 soniya, jamlanib boradi; sek qisqa tinchlikdan keyin bir marta bajariladi.
+    var leftAccum by remember { mutableIntStateOf(0) }
+    var rightAccum by remember { mutableIntStateOf(0) }
+    var pendingSec by remember { mutableIntStateOf(0) }
+    var seekTick by remember { mutableIntStateOf(0) }
     // Oxirgi ko'rilgan joydan davom etadi (telefon xotirasidan).
     val startMs = remember(file.id) { PlayPos.get(ctx, file.id) }
     var note by remember(file.id) { mutableStateOf("") }
@@ -126,7 +130,17 @@ fun PlayerScreen(file: DriveFile, onBack: () -> Unit) {
             }
         }
     }
-    LaunchedEffect(flashTick) { if (flashTick > 0) { delay(600); flashDir = 0 } }
+    LaunchedEffect(seekTick) {
+        if (seekTick == 0) return@LaunchedEffect
+        delay(350)
+        if (pendingSec != 0) {
+            player.seekBy(pendingSec * 1000L)
+            pendingSec = 0
+        }
+        delay(350)
+        leftAccum = 0
+        rightAccum = 0
+    }
     LaunchedEffect(player) {
         var n = 0
         while (true) {
@@ -157,29 +171,31 @@ fun PlayerScreen(file: DriveFile, onBack: () -> Unit) {
             Column(Modifier.fillMaxSize()) {
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     if (cacheReady) PlayerSurface(player, Modifier.fillMaxSize())
-                    // Ikki chetga ikki marta bosish (video davomiyligidan qat'i nazar): chap — 10 soniya orqaga, o'ng — 10 soniya oldinga
-                    // (o'rtada — pauza/davom).
-                    val longVideo = true
+                    // Ikki marta bosish — chap/o'ng YARMIDA 5 soniya (ARUMEDIATV bilan bir xil), bir bosish — pauza/davom.
                     Box(
-                        Modifier.fillMaxSize().pointerInput(longVideo, cacheReady) {
+                        Modifier.fillMaxSize().pointerInput(cacheReady) {
                             detectTapGestures(
                                 onTap = { if (cacheReady) player.toggle() },
                                 onDoubleTap = { off ->
                                     if (!cacheReady) return@detectTapGestures
-                                    val w = size.width
-                                    when {
-                                        longVideo && off.x < w * 0.35f -> { player.seekBy(-10_000); flashDir = -1; flashTick++ }
-                                        longVideo && off.x > w * 0.65f -> { player.seekBy(10_000); flashDir = 1; flashTick++ }
-                                        else -> player.toggle()
+                                    val left = off.x < size.width / 2
+                                    // Haqiqiy chegaralar ichida: ko'rsatilgan son bilan bajariladigan sakrash bir xil bo'ladi.
+                                    val eff = player.positionMs + pendingSec * 1000L
+                                    val dur = player.durationMs
+                                    val add = if (left) minOf(5L, (eff / 1000).coerceAtLeast(0)).toInt()
+                                    else if (dur > 0) minOf(5L, ((dur - eff) / 1000).coerceAtLeast(0)).toInt() else 5
+                                    if (add > 0) {
+                                        if (left) { leftAccum += add; rightAccum = 0; pendingSec -= add }
+                                        else { rightAccum += add; leftAccum = 0; pendingSec += add }
                                     }
+                                    seekTick++
                                 },
                             )
                         },
                         contentAlignment = Alignment.Center,
                     ) {
-                        if (flashDir != 0) Box(Modifier.align(if (flashDir < 0) Alignment.CenterStart else Alignment.CenterEnd).padding(horizontal = 36.dp)) {
-                            Text(if (flashDir < 0) "⏪ 10" else "10 ⏩", color = Color.White, fontSize = 18.sp, modifier = Modifier.clip(RoundedCornerShape(20.dp)).background(Color.Black.copy(alpha = 0.55f)).padding(horizontal = 14.dp, vertical = 8.dp))
-                        }
+                        if (leftAccum > 0) SeekBadge(leftAccum, true, Modifier.align(androidx.compose.ui.BiasAlignment(-0.5f, 0f)))
+                        if (rightAccum > 0) SeekBadge(rightAccum, false, Modifier.align(androidx.compose.ui.BiasAlignment(0.5f, 0f)))
                         if (!cacheReady || !player.ready) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 CircularProgressIndicator(color = Color.White.copy(alpha = 0.54f), strokeWidth = 2.dp, modifier = Modifier.size(34.dp))
@@ -224,4 +240,40 @@ private fun clock2(ms: Long): String {
     val s = (ms / 1000).coerceAtLeast(0)
     val h = s / 3600
     return if (h > 0) String.format(java.util.Locale.US, "%d:%02d:%02d", h, (s / 60) % 60, s % 60) else String.format(java.util.Locale.US, "%02d:%02d", s / 60, s % 60)
+}
+
+
+/** Sek ko'rsatkichi (ARUMEDIATV `SeekBadge` nusxasi): qora yarim shaffof doira, uchta ketma-ket yonib-o'chuvchi uchburchak va "5s" yozuvi. */
+@Composable
+private fun SeekBadge(seconds: Int, isLeft: Boolean, modifier: Modifier = Modifier) {
+    val d = 76.dp
+    val t by androidx.compose.animation.core.rememberInfiniteTransition(label = "seek").animateFloat(
+        0f, 1f,
+        androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(900, easing = androidx.compose.animation.core.LinearEasing)),
+        label = "seekT",
+    )
+    Column(
+        modifier.size(d).clip(CircleShape).background(Color.Black.copy(alpha = 0.55f)),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            val order = if (isLeft) intArrayOf(2, 1, 0) else intArrayOf(0, 1, 2)
+            for (i in 0 until 3) {
+                val start = order[i] * 0.15f
+                val x = (((t - start) % 1f) + 1f) % 1f
+                val op = (if (x < 0.5f) 0.3f + 0.7f * (x / 0.5f) else 1f - 0.7f * ((x - 0.5f) / 0.5f)).coerceIn(0.3f, 1f)
+                androidx.compose.foundation.Canvas(Modifier.size(width = 9.dp, height = 16.dp)) {
+                    val w = size.width; val h = size.height
+                    val path = androidx.compose.ui.graphics.Path().apply {
+                        if (isLeft) { moveTo(w, 0f); lineTo(0f, h / 2f); lineTo(w, h) } else { moveTo(0f, 0f); lineTo(w, h / 2f); lineTo(0f, h) }
+                        close()
+                    }
+                    drawPath(path, Color.White.copy(alpha = op))
+                }
+            }
+        }
+        Spacer(Modifier.height(5.dp))
+        Text("${seconds}s", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+    }
 }
