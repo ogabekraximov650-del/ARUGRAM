@@ -1,8 +1,0 @@
-name = "arudrive-cachetest"
-main = "index.js"
-compatibility_date = "2026-10-01"
-workers_dev = true
-
-# SINOV worker'i (vaqtinchalik): yangi "Workers Caching" + ctx.cache.purge() global ishlashini tekshiradi.
-[cache]
-enabled = true

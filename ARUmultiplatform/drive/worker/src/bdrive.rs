@@ -376,8 +376,7 @@ pub(crate) fn list_path(env: &Env) -> String {
 
 /// Ro'yxat keshini global o'chiradi (yozuvdan keyin chaqiriladi).
 pub(crate) async fn list_invalidate(env: &Env) {
-    // Tag bo'yicha ham, yo'l bo'yicha ham (sinovda tag purge ishlamadi — yo'l prefiksi ishonchliroq).
-    let _ = purge_keys("tags", &[LIST_TAG]).await;
+    // Yo'l prefiksi bo'yicha (sinovda tag bo'yicha o'chirish ishlamadi, prefiks esa darhol ishladi).
     let _ = purge_keys("pathPrefixes", &[list_path(env).as_str()]).await;
 }
 
@@ -631,11 +630,6 @@ pub(crate) async fn route(mut req: Request, env: &Env, ctx: &Context, path: &str
             list_invalidate(env).await;
             ok(json!({"ok": true}))
         }
-        // SINOV: Rust'dan yangi Workers Cache `cache.purge()` ni chaqirish (`cloudflare:workers` moduli, wasm-bindgen orqali).
-        (Method::Post, "/api/bd/purgetest") => match purge_keys("pathPrefixes", &[list_path(env).as_str()]).await {
-            Ok(v) => ok(json!({"ok": true, "r": v, "path": list_path(env)})),
-            Err(e) => json_resp(&json!({"ok": false, "error": e, "path": list_path(env)}), 500),
-        },
         // Qo'lda: tashlab ketilgan (24 soatdan eski) yuklashlarni tozalash.
         (Method::Post, "/api/bd/cleanup") => match cleanup(env).await {
             Ok(log) => ok(json!({"ok": true, "log": log})),

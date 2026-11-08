@@ -6971,7 +6971,7 @@ Foydalanuvchi: model "sudo yo'q, o'rnatib bo'lmaydi" deb to'xtab qoldi ("Modelni
 ## ARUDRIVE: write-through ro'yxat keshi (Workers Caching, jurnalsiz)
 
 - **Nima:** `/api/bd/list` endi Turso'ga o'qish yubormaydi. Ro'yxat Cloudflare "Workers Caching" keshida (1000 kun) turadi; worker uni `SELF` orqali sirli ichki manzildan (`/api/bd/ld~<hmac(ENCODE_TOKEN)>`) oladi. Kesh bo'sh bo'lsagina bitta so'rov (eng yangi 200 qator) Turso'ga boradi.
-- **Yangilanish:** hamma yozuv worker orqali o'tadi; yozgandan KEYIN `list_invalidate` -> `cache.purge({tags:["list"]})` (`cloudflare:workers` moduli, wasm-bindgen) hamma mintaqada keshni o'chiradi. Progress ("Saqlanmoqda x/y") uchun 20 soniyada bitta o'chirish (bepul reja purge chegarasi).
+- **Yangilanish:** hamma yozuv worker orqali o'tadi; yozgandan KEYIN `list_invalidate` -> `cache.purge({pathPrefixes:[<ichki manzil>]})` (tag bo'yicha purge sinovda ishlamadi, yo'l prefiksi darhol ishladi: MISS -> yangi `gen`) (`cloudflare:workers` moduli, wasm-bindgen) hamma mintaqada keshni o'chiradi. Progress ("Saqlanmoqda x/y") uchun 20 soniyada bitta o'chirish (bepul reja purge chegarasi).
 - **Olib tashlandi:** `bd_journal`, `bd_meta`, triggerlar `bd_files_*` (ensure() ularni DROP qiladi), delta/`seq` kodi. `updated` ustuni qoldi.
 - **Xavfsizlik:** Workers Caching darvozadan OLDIN turadi, shu sabab ichki ro'yxatdan boshqa hamma javobga `no-store` qo'yiladi (`lib.rs::no_store`); ichki manzil sirli.
 - **Cheklov:** Turso konsolida qo'lda o'zgartirsangiz kesh bilmaydi: `POST /api/bd/bump` (X-Encode-Token) yoki `?fresh=1`.
