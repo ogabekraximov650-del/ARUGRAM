@@ -1,13 +1,12 @@
 name: ARUDRIVE qabul boti (Telegram -> R2)
 
 # Botga (`@arudrivebot`) forward qilingan video/fayl sessiya orqali yuklab olinadi, R2 ga yuboriladi (worker faqat havola beradi),
-# keyin worker Telegram kanaliga saqlaydi. Run xabar bo'lsa ham, bo'lmasa ham 30 daqiqa o'chmay turadi, keyin o'zi to'xtaydi.
-# Cron har 5 daqiqada: `concurrency` tufayli bir vaqtda BITTA run bor, ishlab turganda yangi tick navbatda kutadi
-# (daqiqa sarflamaydi) va birinchisi tugashi bilan boshlanadi — bo'shliq ~0-5 daqiqa. Bot o'chiq paytdagi xabarlar
-# keyingi run boshida chat tarixidan olinadi (hech narsa yo'qolmaydi).
+# keyin worker Telegram kanaliga saqlaydi. Run xabar bo'lguncha ishlaydi (vaqt chegarasi yo'q, faqat GitHub'ning 6 soatlik
+# chegarasi), navbat bo'shagach ~2 daqiqa kutib o'zi o'chadi. `concurrency`: bir vaqtda BITTA run. Bot o'chiq paytdagi
+# xabarlar keyingi run boshida chat tarixidan olinadi (hech narsa yo'qolmaydi).
 on:
-  schedule:
-    - cron: '*/5 * * * *'
+  # Faqat worker uyg'otadi: botga xabar kelsa Telegram webhook -> worker (`/api/tg/hook`) -> shu workflow (`workflow_dispatch`).
+  # Ishlab turganda yana uyg'otilmaydi. Xabar bo'lmasa hech narsa ishlamaydi (cron YO'Q).
   workflow_dispatch: {}
 
 concurrency:
@@ -16,11 +15,12 @@ concurrency:
 
 permissions:
   contents: read
+  actions: write
 
 jobs:
   bot:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 360
     env:
       BD_API: ${{ secrets.BD_API || 'https://arudrive.uzcom.workers.dev' }}
       PYTHONUNBUFFERED: '1'
@@ -55,15 +55,24 @@ jobs:
           echo "::add-mask::$BT"
           echo "BOT_TOKEN=$BT" >> "$GITHUB_ENV"
 
-      - name: Bot (30 daqiqa o'chmay turadi)
+      - name: Bot (xabar bo'lguncha, keyin o'zi o'chadi)
+        id: bot
         env:
           ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
           TG_API_ID: ${{ secrets.TG_API_ID }}
           TG_API_HASH: ${{ secrets.TG_API_HASH }}
           SESSION: ${{ runner.temp }}/tgbot
-          RUN_MIN: '30'
+          RUN_MIN: '335'
+          IDLE_EXIT: '120'
         run: python3 tool/tgbot/bot.py
 
       - name: Sessiyani o'chirish
         if: always()
         run: rm -f "$RUNNER_TEMP/tgbot.session"
+
+      # GitHub bitta run'ni 6 soatda to'xtatadi: shu vaqtgacha ishlanmagan fayl qolgan bo'lsa — o'zini qayta ishga tushiradi.
+      - name: Davom ettirish
+        if: steps.bot.outputs.leftover == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run tgbot.yml --repo "$GITHUB_REPOSITORY"

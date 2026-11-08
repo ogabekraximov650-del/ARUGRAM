@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """ARUDRIVE qabul boti: botga forward qilingan video/fayl -> R2 -> Telegram kanali (worker saqlaydi).
 
-Ikkinchi akkauntdagi repoda `tgbot.yml` (cron har 5 daqiqada, bir vaqtda BITTA run) ishga tushiradi; run 30 daqiqa o'chmay turadi
-(xabar bo'lsa ham, bo'lmasa ham) va o'zi to'xtaydi (Actions to'xtatilsa — SIGTERM — ham tinchgina chiqadi).
+Ikkinchi akkauntdagi repoda `tgbot.yml` (cron har 5 daqiqada, bir vaqtda BITTA run) ishga tushiradi; run xabar bo'lguncha ishlaydi, navbat bo'shagach ~2 daqiqa kutib o'zi o'chadi va o'zi to'xtaydi (Actions to'xtatilsa — SIGTERM — ham tinchgina chiqadi).
 
 Qanday ishlaydi:
   * Foydalanuvchi videoni bot chatiga (`@arudrivebot`) forward qiladi. Sessiya akkaunti (MTProto, pyrogram) shu chatni tinglaydi va
@@ -33,7 +32,10 @@ from pyrogram.handlers import MessageHandler
 API = os.environ.get("BD_API", "https://arudrive.uzcom.workers.dev").rstrip("/")
 ENCODE_TOKEN = os.environ.get("ENCODE_TOKEN", "").strip()
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "").strip()
-RUN_MIN = int(os.environ.get("RUN_MIN", "30"))
+# Run xabar bo'lguncha ishlaydi: navbat bo'shagach IDLE_EXIT soniya kutib o'zi o'chadi. RUN_MIN — faqat GitHub'ning 6 soatlik chegarasidan
+# oldin YANGI fayl olishni to'xtatish uchun xavfsizlik chegarasi (ishlanmagan fayllar bo'lsa workflow o'zini qayta ishga tushiradi).
+RUN_MIN = int(os.environ.get("RUN_MIN", "335"))
+IDLE_EXIT = int(os.environ.get("IDLE_EXIT", "120"))
 HISTORY_HOURS = int(os.environ.get("HISTORY_HOURS", "48"))
 WORK = Path(os.environ.get("WORK_DIR", "/tmp/tgbot"))
 UA = "arudrive-tgbot"
@@ -306,28 +308,34 @@ async def main():
     def want(m):
         return bool(m.outgoing and media_of(m) and m.id not in queued)
 
-    # Run yangidan boshlangan: bo'sh vaqtda forward qilinib hali ishlanmaganlar (oxirgi xabarda `⟦id⟧` belgisi yo'q).
-    done, pending = set(), []
-    last_bot_ts = last_start_ts = 0.0
-    cutoff = time.time() - HISTORY_HOURS * 3600
-    async for m in app.get_chat_history(bot_id, limit=200):
-        ts = m.date.timestamp() if m.date else 0.0
-        if ts < cutoff:
-            break
-        if m.outgoing is False and m.text:
-            done.update(int(x) for x in MARK_RE.findall(m.text))
-            last_bot_ts = max(last_bot_ts, ts)
-        elif is_cmd(m, "/start", "/holat"):
-            last_start_ts = max(last_start_ts, ts)
-        elif want(m):
-            pending.append(m)
-    if last_start_ts > last_bot_ts:  # bot o'chiq paytda yozilgan /start javobsiz qolgan
-        notify(GREETING)
-    for m in reversed(pending):
-        if m.id not in done:
-            queued.add(m.id)
-            await queue.put(m)
-    log(f"Navbatda (o'tgan vaqtdan): {queue.qsize()}")
+    async def scan(greet):
+        """Chat tarixidan hali ishlanmagan fayllarni navbatga qo'yadi (oxirgi bot xabarida `⟦id⟧` belgisi yo'qlari). Qaytadi: soni."""
+        done, pending = set(), []
+        last_bot_ts = last_start_ts = 0.0
+        cutoff = time.time() - HISTORY_HOURS * 3600
+        async for m in app.get_chat_history(bot_id, limit=200):
+            ts = m.date.timestamp() if m.date else 0.0
+            if ts < cutoff:
+                break
+            if m.outgoing is False and m.text:
+                done.update(int(x) for x in MARK_RE.findall(m.text))
+                last_bot_ts = max(last_bot_ts, ts)
+            elif is_cmd(m, "/start", "/holat"):
+                last_start_ts = max(last_start_ts, ts)
+            elif want(m):
+                pending.append(m)
+        if greet and last_start_ts > last_bot_ts:  # bot o'chiq paytda yozilgan /start javobsiz qolgan
+            notify(GREETING)
+        n = 0
+        for m in reversed(pending):
+            if m.id not in done and m.id not in queued:
+                queued.add(m.id)
+                await queue.put(m)
+                n += 1
+        return n
+
+    log(f"Navbatda (o'tgan vaqtdan): {await scan(True)}")
+    state = {"busy": False, "last": time.time()}
 
     async def on_message(_, m):
         if is_cmd(m, "/start"):
@@ -338,6 +346,7 @@ async def main():
         elif want(m):
             queued.add(m.id)
             await queue.put(m)
+            state["last"] = time.time()
             log("Yangi fayl:", m.id)
 
     app.add_handler(MessageHandler(on_message, filters.chat(bot_id)))
@@ -345,20 +354,41 @@ async def main():
     async def worker_loop():
         while True:
             m = await queue.get()
+            state["busy"] = True
             try:
                 if time.time() > DEADLINE:
-                    continue  # muddat tugadi: yangi fayl olinmaydi, belgisiz qoladi — keyingi run boshida chat tarixidan olinadi
+                    continue  # xavfsizlik chegarasi: yangi fayl olinmaydi, belgisiz qoladi — workflow o'zini qayta ishga tushiradi
                 await handle(app, m, me.id)  # BIR VAQTDA BITTA fayl (navbat ketma-ket)
             finally:
+                state["busy"] = False
+                state["last"] = time.time()
                 queue.task_done()
 
     task = asyncio.create_task(worker_loop())
-    while not stop and time.time() < DEADLINE:
+    leftover = False
+    while not stop:
         await asyncio.sleep(1)
-    log("To'xtatilmoqda: yangi ish olinmaydi, joriy ish tugashi kutiladi")
-    grace = time.time() + 1500  # boshlangan fayl tugashiga ruxsat (yangisi olinmaydi)
-    while (queue.qsize() or not queue.empty() or getattr(queue, "_unfinished_tasks", 0)) and time.time() < grace and not stop:
+        if time.time() > DEADLINE:
+            leftover = True
+            log("Xavfsizlik chegarasi: yangi fayl olinmaydi")
+            break
+        if queue.empty() and not state["busy"] and time.time() - state["last"] > IDLE_EXIT:
+            # Chiqishdan oldin yana bir bor tarixni tekshiramiz: o'rtada kelib qolgan fayl bo'lsa davom etamiz.
+            if await scan(False):
+                state["last"] = time.time()
+                continue
+            log(f"Navbat bo'sh {IDLE_EXIT} soniya — o'chilmoqda")
+            break
+    # Boshlangan fayl tugashiga ruxsat (yangisi olinmaydi)
+    grace = time.time() + 1500
+    while (not queue.empty() or state["busy"]) and time.time() < grace and not stop:
         await asyncio.sleep(1)
+    if leftover and (not queue.empty() or await scan(False)):
+        out = os.environ.get("GITHUB_OUTPUT")
+        if out:
+            with open(out, "a") as f:
+                f.write("leftover=1\n")
+        log("Ishlanmagan fayllar qoldi — workflow o'zini qayta ishga tushiradi")
     task.cancel()
     await app.stop()
     log("Tugadi")
