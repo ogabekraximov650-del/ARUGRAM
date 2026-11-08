@@ -132,8 +132,9 @@ fun PlayerScreen(file: DriveFile, onBack: () -> Unit) {
         while (true) {
             delay(250)
             player.tick()
-            // Har ~5 soniyada joy saqlanadi (ilova to'satdan yopilsa ham yo'qolmaydi).
-            if (++n % 20 == 0 && player.playing) PlayPos.save(ctx, file.id, player.positionMs, player.durationMs)
+            // HAR SONIYADA joy telefon xotirasiga yoziladi (faqat mahalliy, serverga hech narsa ketmaydi): ilova to'satdan yopilsa ham
+            // eng ko'pi bilan 1 soniya yo'qoladi. 250 ms * 4 = 1 soniya.
+            if (++n % 4 == 0 && player.playing) PlayPos.save(ctx, file.id, player.positionMs, player.durationMs)
             if (player.ended) PlayPos.clear(ctx, file.id)
         }
     }
