@@ -96,6 +96,12 @@ async fn ensure(env: &Env) -> Result<()> {
     // Eski jadvalda ustun yo'q bo'lsa qo'shiladi (bor bo'lsa xato e'tiborsiz).
     let _ = sql(env, "ALTER TABLE bd_files ADD COLUMN chunk_ids TEXT NOT NULL DEFAULT ''", vec![]).await;
     let _ = sql(env, "ALTER TABLE bd_files ADD COLUMN thumb_id TEXT NOT NULL DEFAULT ''", vec![]).await;
+    // INDEKSLAR (Turso "o'qilgan qatorlar" bo'yicha hisoblaydi, LIMIT bunga yordam bermaydi): indeksiz har so'rov BUTUN jadvalni
+    // skanerlardi — 1 milliard qatorda bitta so'rov butun oylik chegarani yeb qo'yadi.
+    //   bd_list  — ro'yxat: eng yangi 200 qatorni indeks bo'yicha (saralashsiz) o'qiydi, jadval qancha katta bo'lmasin;
+    //   bd_state — navbat/qayta navbat/tozalash: faqat kerakli holatdagi qatorlarni o'qiydi.
+    let _ = sql(env, "CREATE INDEX IF NOT EXISTS bd_list ON bd_files(created DESC) WHERE state IN ('ready','uploaded','storing')", vec![]).await;
+    let _ = sql(env, "CREATE INDEX IF NOT EXISTS bd_state ON bd_files(state, created)", vec![]).await;
     SCHEMA_OK.store(true, Ordering::Relaxed);
     Ok(())
 }
@@ -234,6 +240,7 @@ pub(crate) async fn process_ex(env: &Env, budget_ms: i64) -> Result<(String, boo
                 Ok(fid) => {
                     list.push(fid);
                     progressed = true;
+                    list_cache_clear().await; // "Saqlanmoqda x/y" yangilanadi
                     // Bo'lak saqlandi: urinishlar hisobi nollanadi (katta fayl bir necha chaqiruvda tugashi mumkin), ijara yangilanadi.
                     sql(env, "UPDATE bd_files SET chunk_ids=?, lease=?, tries=0 WHERE id=? AND state='storing'",
                         vec![TursoArg::text(&list.join(",")), TursoArg::int(now_ms() + WORKER_LEASE_MS), TursoArg::text(&id)]).await?;
@@ -257,6 +264,7 @@ pub(crate) async fn process_ex(env: &Env, budget_ms: i64) -> Result<(String, boo
             break;
         }
         sql(env, "UPDATE bd_files SET state='ready' WHERE id=? AND state='storing'", vec![TursoArg::text(&id)]).await?;
+        list_cache_clear().await;
         let _ = bk.delete(&key).await;
         out.push_str(&format!("{id}: tayyor\n"));
     }
@@ -322,6 +330,19 @@ const URL_TTL: u64 = 24 * 3600;
 fn r2_creds(env: &Env) -> Option<(String, String, String)> {
     let (a, k, s) = (tg_secret(env, "R2_ACCOUNT_ID"), tg_secret(env, "R2_ACCESS_KEY_ID"), tg_secret(env, "R2_SECRET_ACCESS_KEY"));
     if a.is_empty() || k.is_empty() || s.is_empty() { None } else { Some((a, k, s)) }
+}
+
+const LIST_CACHE_URL: &str = "https://arudrive.cache/list";
+/// Ro'yxat keshda eng ko'pi bilan 1 soat; saqlash/yuklash ketayotgan paytda 15 soniya.
+const LIST_TTL: u64 = 3600;
+const LIST_TTL_BUSY: u64 = 15;
+
+/// Ro'yxat keshini tozalaydi (fayl qo'shilganda/saqlash o'zgarganda). Eslatma: Cloudflare keshi har ma'lumot markazida alohida —
+/// boshqa markazdagi nusxa eng ko'pi bilan `LIST_TTL` gacha eskirgan holda qolishi mumkin.
+pub(crate) async fn list_cache_clear() {
+    if let Ok(req) = Request::new(LIST_CACHE_URL, Method::Get) {
+        let _ = Cache::default().delete(&req, false).await;
+    }
 }
 
 /// `a,b,c` -> ["a","b","c"] (bo'sh matn — bo'sh ro'yxat).
@@ -436,6 +457,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, ctx: &Context, path: &str
                 return json_resp(&json!({"error": format!("hajm mos emas ({got:?} != {size})")}), 422);
             }
             sql(env, "UPDATE bd_files SET state='uploaded' WHERE id=? AND state='uploading'", vec![TursoArg::text(&id)]).await?;
+            list_cache_clear().await;
             // Telegramga saqlashni WORKER O'ZI boshlaydi (javobdan keyin fonda, ~30 soniya); davomini har daqiqadagi cron oladi.
             let e2 = env.clone();
             ctx.wait_until(async move {
@@ -498,6 +520,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, ctx: &Context, path: &str
                 return json_resp(&json!({"error": format!("hajm mos emas ({got:?} != {size})")}), 422);
             }
             sql(env, "UPDATE bd_files SET state='uploaded' WHERE id=? AND state='uploading'", vec![TursoArg::text(&id)]).await?;
+            list_cache_clear().await;
             let e2 = env.clone();
             ctx.wait_until(async move {
                 process_and_chain(&e2).await;
@@ -551,11 +574,42 @@ pub(crate) async fn route(mut req: Request, env: &Env, ctx: &Context, path: &str
         // Qo'lda: ikkinchi akkauntdagi Actions'ni ishga tushirish (zaxira yo'l).
         (Method::Post, "/api/bd/kick") => ok(json!({"kick": kick(env).await})),
         (Method::Get, "/api/bd/list") => {
-            let res = sql(env,
-                "SELECT id,name,kind,mime,size,w,h,dur,state,created,chunks,CASE WHEN chunk_ids='' THEN 0 ELSE length(chunk_ids)-length(replace(chunk_ids,',',''))+1 END AS stored FROM bd_files WHERE state IN ('ready','uploaded','storing') ORDER BY created DESC LIMIT 200",
-                vec![]).await?;
-            let mut r = ok(json!({"files": rows_of(&res)}))?;
+            // CLOUDFLARE KESHI (bepul): ro'yxat eng ko'pi bilan 1 SOAT saqlanadi — minglab foydalanuvchi kirsa ham Turso'ga bitta so'rov.
+            // Yangi/o'zgargan narsa darhol ko'rinishi uchun: yozuv bo'lganda kesh tozalanadi (`list_cache_clear`), yuklash/saqlash
+            // ketayotgan paytda (progress ko'rinishi uchun) yozuv atigi 15 soniya turadi; `?fresh=1` — keshni chetlab o'tadi.
+            let cache = Cache::default();
+            let key = Request::new(LIST_CACHE_URL, Method::Get)?;
+            if qs(&url, "fresh") != "1" {
+                if let Some(mut hit) = cache.get(&key, false).await? {
+                    let text = hit.text().await?;
+                    let mut r = Response::ok(text)?;
+                    set_cors(&mut r);
+                    let h = r.headers_mut();
+                    let _ = h.set("Content-Type", "application/json");
+                    let _ = h.set("Cache-Control", "no-store");
+                    let _ = h.set("X-Cache", "HIT-LIST");
+                    return Ok(r);
+                }
+            }
+            let q_fast = "SELECT id,name,kind,mime,size,w,h,dur,state,created,chunks,CASE WHEN chunk_ids='' THEN 0 ELSE length(chunk_ids)-length(replace(chunk_ids,',',''))+1 END AS stored FROM bd_files INDEXED BY bd_list WHERE state IN ('ready','uploaded','storing') ORDER BY created DESC LIMIT 200";
+            let q_plain = "SELECT id,name,kind,mime,size,w,h,dur,state,created,chunks,CASE WHEN chunk_ids='' THEN 0 ELSE length(chunk_ids)-length(replace(chunk_ids,',',''))+1 END AS stored FROM bd_files WHERE state IN ('ready','uploaded','storing') ORDER BY created DESC LIMIT 200";
+            // Tez yo'l: indeks bo'yicha (200 qator). Indeks hali yaratilmagan bo'lsa — oddiy so'rov.
+            let res = match sql(env, q_fast, vec![]).await {
+                Ok(r) => r,
+                Err(_) => sql(env, q_plain, vec![]).await?,
+            };
+            let rows = rows_of(&res);
+            let busy = rows.iter().any(|f| f["state"].as_str() != Some("ready"));
+            let body = json!({"files": rows}).to_string();
+            let mut c = Response::ok(body.clone())?;
+            let _ = c.headers_mut().set("Content-Type", "application/json");
+            let _ = c.headers_mut().set("Cache-Control", &format!("public, max-age={}", if busy { LIST_TTL_BUSY } else { LIST_TTL }));
+            let _ = cache.put(&key, c).await;
+            let mut r = Response::ok(body)?;
+            set_cors(&mut r);
+            let _ = r.headers_mut().set("Content-Type", "application/json");
             let _ = r.headers_mut().set("Cache-Control", "no-store");
+            let _ = r.headers_mut().set("X-Cache", "MISS-LIST");
             Ok(r)
         }
         // Kichik rasm: Telegram'dan olinib Cloudflare keshiga (1000 kun) saqlanadi.
