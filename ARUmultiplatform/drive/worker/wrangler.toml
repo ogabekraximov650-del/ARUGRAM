@@ -20,10 +20,7 @@ crons = ["*/10 * * * *"]
 binding = "SELF"
 service = "arudrive"
 
-# Durable Object `ListHub` OLIB TASHLANDI (foydalanuvchi talabi: DO'siz, jurnalli kesh) — sinf va uning ma'lumoti o'chiriladi.
-[[migrations]]
-tag = "v2"
-deleted_classes = ["ListHub"]
+# Durable Object `ListHub` o'chirilgan (migratsiya v2 serverda qo'llangan); yangi wrangler yo'q sinf uchun migratsiyani rad etadi, shu sabab blok olib tashlandi.
 
 # Workers Caching: ro'yxat Cloudflare keshida turadi, yozuvda `cache.purge()` (tag `list`) bilan GLOBAL o'chiriladi. Cache-Control'siz javob 2 soat keshlanadi,
 # shu sabab ichki ro'yxatdan boshqa hamma javobga kodda `no-store` qo'yiladi (lib.rs `no_store`).
