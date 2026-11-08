@@ -15,9 +15,14 @@ data class DriveFile(
     val dur: Long = 0,
     val state: String = "",
     val created: Long = 0,
+    /** Telegram bo'laklari: jami va hozirgacha saqlangani (fayl saqlanayotgan paytda ham birinchi bo'lak tayyor bo'lsa video ochiladi). */
+    val chunks: Int = 0,
+    val stored: Int = 0,
 ) {
     val isVideo get() = kind == "video"
     val ready get() = state == "ready"
+    /** Birinchi bo'lak saqlangan bo'lsa — saqlash tugamagan bo'lsa ham ijro etiladi. */
+    val playable get() = ready || stored > 0
 }
 
 @Serializable

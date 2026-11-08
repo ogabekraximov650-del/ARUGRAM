@@ -226,7 +226,7 @@ object Api {
         call(Request.Builder().url(url("/api/bd/finish")).post(body).build())
     }
 
-    class WarmResult(val ok: Boolean, val text: String, val total: Long = 0)
+    class WarmResult(val ok: Boolean, val text: String, val total: Long = 0, val pending: Boolean = false)
 
     /** Bitta isitish so'rovi: natija va tashxis matni (HTTP kodi, worker holati, vaqt, Cloudflare markazi). */
     fun warmDetailed(id: String, window: Long, force: Boolean = false): WarmResult {
@@ -241,7 +241,7 @@ object Api {
                 val total = runCatching { json.parseToJsonElement(body).jsonObject["total"]?.jsonPrimitive?.longOrNull }.getOrNull() ?: 0L
                 val ok = r.isSuccessful && (st == "cached" || st == "warmed")
                 if (ok && total > 0) Warm.totals[id] = total
-                WarmResult(ok, "HTTP ${r.code} ${st.ifEmpty { body.take(60) }} · ${ms / 1000.0}s · $ray", total)
+                WarmResult(ok, "HTTP ${r.code} ${st.ifEmpty { body.take(60) }} · ${ms / 1000.0}s · $ray", total, pending = st.startsWith("pending"))
             }
         } catch (e: Exception) {
             WarmResult(false, "Xato: ${e.javaClass.simpleName} ${e.message.orEmpty().take(80)} · ${(System.currentTimeMillis() - t0) / 1000.0}s")
@@ -255,18 +255,38 @@ object Api {
      * paytda bajaradi. Cloudflare fon vazifasiga (`waitUntil`) javobdan keyin atigi 30 soniya beradi, mijoz ulanib turganda esa
      * davomiylikka chegara yo'q — shuning uchun o'qish chegarasi 15 daqiqa (katta oyna ~468 MiB 180 soniyada ko'chmasligi mumkin).
      */
-    fun warmBlocking(id: String, window: Long): Boolean = warmDetailed(id, window).ok
+    fun warmBlocking(id: String, window: Long): Boolean {
+        // Bo'lak hali Telegram'ga saqlanmagan bo'lsa ("pending") — saqlanishini kutadi (10 daqiqagacha), keyin isitadi.
+        val end = System.currentTimeMillis() + 10 * 60_000
+        while (true) {
+            val r = warmDetailed(id, window)
+            if (r.ok) return true
+            if (!r.pending || System.currentTimeMillis() > end) return false
+            Thread.sleep(3000)
+        }
+    }
 
     /** ARUMEDIATV kabi: birinchi urinish oddiy, muvaffaqiyatsiz bo'lsa MAJBURAN (`force=1`) qayta isitiladi. */
-    suspend fun warm(id: String, window: Long = 0, note: (String) -> Unit = {}, forceFirst: Boolean = false): Boolean = withContext(Dispatchers.IO) {
-        repeat(3) { n ->
-            note("Worker'ga so'rov (${n + 1}/3)…")
-            val r = warmDetailed(id, window, force = forceFirst || n > 0)
-            note(r.text)
-            if (r.ok) return@withContext true
+    suspend fun warm(id: String, window: Long = 0, note: (String) -> Unit = {}, forceFirst: Boolean = false): Boolean =
+        withContext(Dispatchers.IO) { warmLoop(id, window, note, forceFirst) }
+
+    private suspend fun warmLoop(id: String, window: Long, note: (String) -> Unit, forceFirst: Boolean): Boolean {
+        val end = System.currentTimeMillis() + 10 * 60_000
+        var attempts = 0
+        while (true) {
+            note("Worker'ga so'rov…")
+            val r = warmDetailed(id, window, force = forceFirst || attempts > 0)
+            note(if (r.pending) "Telegramga saqlanmoqda, kutilmoqda… (${r.text})" else r.text)
+            if (r.ok) return true
+            if (r.pending) {
+                // Birinchi bo'lak saqlanishi bilan video ochiladi; hali saqlanmagan bo'lsa 3 soniyada qayta so'raymiz.
+                if (System.currentTimeMillis() > end) return false
+                kotlinx.coroutines.delay(3000)
+                continue
+            }
+            if (++attempts >= 3) return false
             kotlinx.coroutines.delay(1500)
         }
-        false
     }
 
     /** ExoPlayer manzili: yo'l imzolangan token bilan (1 soat). */

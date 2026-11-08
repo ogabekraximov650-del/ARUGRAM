@@ -552,7 +552,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, ctx: &Context, path: &str
         (Method::Post, "/api/bd/kick") => ok(json!({"kick": kick(env).await})),
         (Method::Get, "/api/bd/list") => {
             let res = sql(env,
-                "SELECT id,name,kind,mime,size,w,h,dur,state,created FROM bd_files WHERE state IN ('ready','uploaded','storing') ORDER BY created DESC LIMIT 200",
+                "SELECT id,name,kind,mime,size,w,h,dur,state,created,chunks,CASE WHEN chunk_ids='' THEN 0 ELSE length(chunk_ids)-length(replace(chunk_ids,',',''))+1 END AS stored FROM bd_files WHERE state IN ('ready','uploaded','storing') ORDER BY created DESC LIMIT 200",
                 vec![]).await?;
             let mut r = ok(json!({"files": rows_of(&res)}))?;
             let _ = r.headers_mut().set("Cache-Control", "no-store");
@@ -781,6 +781,24 @@ pub(crate) async fn warm(env: &Env, id: &str, widx: u64, force: bool) -> Result<
             }
         }
     }
+    ensure(env).await?;
+    // BIRINCHI BO'LAK SAQLANISHI BILAN video ochiladi: fayl hali saqlanayotgan bo'lsa ham (state='storing'), kerakli oyna
+    // (= bitta bo'lak) allaqachon saqlangan bo'lsa isitiladi; aks holda "pending" (xato emas) — ilova kutib qayta so'raydi.
+    let r = sql(env, "SELECT size,mime,chunk_ids,state FROM bd_files WHERE id=? AND state IN ('ready','storing','uploaded')", vec![TursoArg::text(id)]).await?;
+    let Some(f) = first(&r) else { return reply("error fayl topilmadi", 0) };
+    let total = f["size"].as_i64().unwrap_or(0).max(0) as u64;
+    let mime = f["mime"].as_str().filter(|m| !m.is_empty()).unwrap_or("application/octet-stream").to_string();
+    let chunks: Vec<(i64, String)> = split_ids(f["chunk_ids"].as_str().unwrap_or("")).into_iter().enumerate().map(|(i, s)| (i as i64, s.to_string())).collect();
+    if total == 0 || widx * WARM_WINDOW >= total {
+        return reply("error oyna", total);
+    }
+    let ready = f["state"].as_str() == Some("ready");
+    if ready && chunks.len() as i64 != chunks_of(total as i64) {
+        return reply("error bo'laklar to'liq emas", total);
+    }
+    if !ready && (chunks.len() as u64) <= widx {
+        return reply(&format!("pending saqlanmoqda {}/{}", chunks.len(), chunks_of(total as i64)), total);
+    }
     // Boshqa birov shu oynani isitayotgan bo'lsa — kutamiz (Telegram'ga ortiqcha so'rov ketmasin).
     let cache = Cache::default();
     let marker_key = Request::new(&warm_marker_url(&name, widx), Method::Get)?;
@@ -798,15 +816,6 @@ pub(crate) async fn warm(env: &Env, id: &str, widx: u64, force: bool) -> Result<
     marker.headers_mut().set("Cache-Control", &format!("public, max-age={WARM_MARKER_SECONDS}"))?;
     let _ = cache.put(&marker_key, marker).await;
 
-    ensure(env).await?;
-    let r = sql(env, "SELECT size,mime,chunk_ids FROM bd_files WHERE id=? AND state='ready'", vec![TursoArg::text(id)]).await?;
-    let Some(f) = first(&r) else { return reply("error fayl tayyor emas", 0) };
-    let total = f["size"].as_i64().unwrap_or(0).max(0) as u64;
-    let mime = f["mime"].as_str().filter(|m| !m.is_empty()).unwrap_or("application/octet-stream").to_string();
-    let chunks: Vec<(i64, String)> = split_ids(f["chunk_ids"].as_str().unwrap_or("")).into_iter().enumerate().map(|(i, s)| (i as i64, s.to_string())).collect();
-    if total == 0 || chunks.len() as i64 != chunks_of(total as i64) {
-        return reply("error bo'laklar to'liq emas", total);
-    }
     let win_start = widx * WARM_WINDOW;
     if win_start >= total {
         return reply("error oyna", total);

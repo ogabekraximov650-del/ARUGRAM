@@ -88,7 +88,7 @@ fun HomeScreen(refreshKey: Int, onPlay: (DriveFile) -> Unit) {
 private fun FileCard(f: DriveFile, onPlay: (DriveFile) -> Unit) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val shape = RoundedCornerShape(14.dp)
-    val clickable = f.ready && f.isVideo
+    val clickable = f.playable && f.isVideo
     Column(Modifier.fillMaxWidth()) {
         val ratio = if (f.isVideo) cardRatio(f.w, f.h) else 16f / 9f
         Box(
@@ -107,6 +107,10 @@ private fun FileCard(f: DriveFile, onPlay: (DriveFile) -> Unit) {
                 if (clickable) Box(Modifier.size(54.dp).clip(androidx.compose.foundation.shape.CircleShape).background(Color(0x99000000)), contentAlignment = Alignment.Center) {
                     Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(34.dp))
                 }
+                if (f.playable && !f.ready && f.chunks > 0) Text(
+                    "Saqlanmoqda ${f.stored}/${f.chunks}", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.align(Alignment.TopStart).padding(8.dp).clip(RoundedCornerShape(6.dp)).background(Color(0xB3000000)).padding(horizontal = 6.dp, vertical = 2.dp),
+                )
                 if (f.dur > 0) Text(
                     formatClock(f.dur), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp).clip(RoundedCornerShape(6.dp)).background(Color(0xB3000000)).padding(horizontal = 6.dp, vertical = 2.dp),
@@ -114,7 +118,7 @@ private fun FileCard(f: DriveFile, onPlay: (DriveFile) -> Unit) {
             } else {
                 Icon(AruIcons.Movie, null, tint = AruColors.TextFaint, modifier = Modifier.size(44.dp))
             }
-            if (!f.ready) Box(Modifier.fillMaxSize().background(Color(0x99000000)), contentAlignment = Alignment.Center) {
+            if (!f.playable) Box(Modifier.fillMaxSize().background(Color(0x99000000)), contentAlignment = Alignment.Center) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(color = AruColors.Accent, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
                     Text("  Telegramga saqlanmoqda…", color = Color.White, fontSize = 13.sp)
