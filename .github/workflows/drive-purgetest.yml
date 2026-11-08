@@ -1,0 +1,17 @@
+name: ARUDRIVE purgetest (vaqtinchalik)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  t:
+    runs-on: ubuntu-latest
+    environment: secret
+    steps:
+      - name: Rust purge sinovi
+        run: |
+          K=$(printf '%s' "${{ secrets.ENCODE_TOKEN }}" | tr -d '[:space:]')
+          curl -sS -X POST "https://arudrive.uzcom.workers.dev/api/bd/purgetest" -H "X-Encode-Token: $K"; echo
