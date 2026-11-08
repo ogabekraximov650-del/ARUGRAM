@@ -46,7 +46,7 @@ import uz.arudrive.app.player.formatClock
 
 /** Bosh sahifa: YouTube kabi, har qatorda bitta fayl; kichik rasm video o'lchamiga qarab yotiq yoki tik. */
 @Composable
-fun HomeScreen(refreshKey: Int, onPlay: (DriveFile) -> Unit) {
+fun HomeScreen(refreshKey: Int, listState: androidx.compose.foundation.lazy.LazyListState, onPlay: (DriveFile) -> Unit) {
     val ctx0 = androidx.compose.ui.platform.LocalContext.current
     // Oxirgi ro'yxat telefon xotirasidan darhol olinadi; yangisi tarmoqdan kelgach almashadi va qayta saqlanadi.
     var files by remember { mutableStateOf(uz.arudrive.app.data.Store.load(ctx0)) }
@@ -76,6 +76,7 @@ fun HomeScreen(refreshKey: Int, onPlay: (DriveFile) -> Unit) {
             }
             files.isEmpty() -> Text("Hali fayl yo'q. «Yuklash» bo'limidan qo'shing.", Modifier.align(Alignment.Center).padding(24.dp), color = AruColors.TextDim)
             else -> LazyColumn(
+                state = listState,
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(18.dp),
             ) {

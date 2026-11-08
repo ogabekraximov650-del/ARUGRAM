@@ -61,6 +61,8 @@ private fun Root() {
     var tab by remember { mutableIntStateOf(0) }
     var playing by remember { mutableStateOf<DriveFile?>(null) }
     var refresh by remember { mutableIntStateOf(0) }
+    // Ro'yxatning aylantirish joyi Root'da saqlanadi: pleyer ochilganda bosh sahifa ekrandan olinadi, qaytganda esa aynan shu joyda turadi.
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     val ctx = androidx.compose.ui.platform.LocalContext.current
 
     val p = playing
@@ -71,7 +73,7 @@ private fun Root() {
     }
     Column(Modifier.fillMaxSize().background(AruColors.Bg).statusBarsPadding()) {
         Box(Modifier.weight(1f)) {
-            if (tab == 0) HomeScreen(refresh) { playing = it } else UploadScreen { refresh++ }
+            if (tab == 0) HomeScreen(refresh, listState) { playing = it } else UploadScreen { refresh++ }
         }
         Row(Modifier.fillMaxWidth().background(AruColors.Surface).navigationBarsPadding()) {
             listOf("Bosh sahifa", "Yuklash").forEachIndexed { i, label ->
