@@ -4,6 +4,7 @@ name: Dublyaj (VoiceStudio, klon ovoz)
 # Botga video yuborilsa ish bazadagi navbatga (`dub_jobs`) tushadi va worker shu workflow'ni o'zi ishga tushiradi
 # (cron ham har 10 daqiqada tekshiradi). Bitta run — bitta video: yuklaydi, VoiceStudio (CPU) bilan ovozlarni klonlab, tarjima qilib
 # dublyaj qiladi (kod ARUGRAM repodagi `tool/voicedub`), tayyor videoni kanalga yuklaydi; bot uni chatga ko'chiradi.
+# Qo'lda tarjima rejimida avval matn (so'zlar vaqti bilan) yuboriladi, tarjima kelgach dublyaj; uzun video bo'laklab, kerak bo'lsa bir necha run'da.
 # Foiz va bosqichlar botdagi bitta xabarda shu run'ning o'zidan yangilanib turadi.
 # Navbatda yana ish qolsa yangi run ochiladi. Avto-kodlash, post, tarjima, siqish va anibla'dan ALOHIDA.
 #
@@ -61,7 +62,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/huggingface
-          key: hf-voicestudio-v3
+          key: hf-voicestudio-v4
 
       - name: VoiceStudio muhiti (CPU torch)
         working-directory: arugram/tool/voicedub/voicestudio
@@ -77,7 +78,7 @@ jobs:
         run: |
           uv run --no-sync python - <<'PY'
           from huggingface_hub import snapshot_download
-          for repo in ("k2-fsa/OmniVoice", "eustlb/higgs-audio-v2-tokenizer", "Systran/faster-whisper-small", "facebook/nllb-200-distilled-600M"):
+          for repo in ("k2-fsa/OmniVoice", "eustlb/higgs-audio-v2-tokenizer", "Systran/faster-whisper-small", "facebook/nllb-200-distilled-1.3B"):
               print("model:", repo, "->", snapshot_download(repo), flush=True)
           PY
 
@@ -112,8 +113,11 @@ jobs:
           TG_API_HASH: ${{ secrets.TG_API_HASH }}
           WORK_ROOT: ${{ runner.temp }}
           VD_DIR: ${{ github.workspace }}/arugram/tool/voicedub
-          VS_MODELS: k2-fsa/OmniVoice,eustlb/higgs-audio-v2-tokenizer,Systran/faster-whisper-small,facebook/nllb-200-distilled-600M
-          VS_TRANSLATE: nllb
+          VS_MODELS: k2-fsa/OmniVoice,eustlb/higgs-audio-v2-tokenizer,Systran/faster-whisper-small
+          # Tarjima VoiceStudio'dan tashqarida: tool/voicedub/translate.py (NLLB 1.3B distilled — sinovda 600M'dan aniq yaxshi).
+          NLLB_MODEL: facebook/nllb-200-distilled-1.3B
+          # Uzun video bo'laklab ishlanadi (har bo'lak ~PART_S soniya, gap chegarasida).
+          PART_S: '300'
           # Sifat/tezlik: CPU'da 24 qadam (standart 16, "sifatli" 32).
           VS_NUM_STEP: '24'
           VS_EFFECT: raw

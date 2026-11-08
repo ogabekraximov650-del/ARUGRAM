@@ -17,7 +17,8 @@
 use super::*;
 
 pub(crate) const DDL: [&str; 2] = [
-    // ch_msg — kanaldagi nusxa xabari; state: queued | running | error.
+    // ch_msg — kanaldagi nusxa xabari; state: queued | running | wait (qo'lda tarjima kutilmoqda) | error.
+    // mode: auto | manual; tr_msg — kanaldagi transkripsiya fayli (JSON); nseg — gaplar soni; tl — tarjima (JSON: {"1": "..."}); parts — tayyor bo'laklar (JSON).
     "CREATE TABLE IF NOT EXISTS dub_jobs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         chat INTEGER NOT NULL,
@@ -31,7 +32,12 @@ pub(crate) const DDL: [&str; 2] = [
         runner TEXT DEFAULT '',
         lease_until INTEGER DEFAULT 0,
         attempts INTEGER DEFAULT 0,
-        error TEXT DEFAULT ''
+        error TEXT DEFAULT '',
+        mode TEXT DEFAULT 'auto',
+        tr_msg INTEGER DEFAULT 0,
+        nseg INTEGER DEFAULT 0,
+        tl TEXT DEFAULT '',
+        parts TEXT DEFAULT ''
     )",
     "CREATE INDEX IF NOT EXISTS idx_dub_q ON dub_jobs(state, queued_at)",
 ];
@@ -43,9 +49,28 @@ const DUB_MAX_ATTEMPTS: i64 = 2;
 
 pub(crate) const BTN: &str = "\u{1F5E3} Dublyaj";
 const BTN_QUEUE: &str = "\u{1F4CB} Dublyaj navbati";
+const BTN_MANUAL: &str = "\u{270D}\u{FE0F} Qo'lda tarjima";
+
+/// Eski bazalar uchun ustunlar (bir marta; `ALTER` ikkinchi marta xato beradi — belgi `app_config` da).
+pub(crate) async fn migrate(env: &Env) {
+    if config_get(env, "mig_dub_manual").await.is_some() {
+        return;
+    }
+    for sql in [
+        "ALTER TABLE dub_jobs ADD COLUMN mode TEXT DEFAULT 'auto'",
+        "ALTER TABLE dub_jobs ADD COLUMN tr_msg INTEGER DEFAULT 0",
+        "ALTER TABLE dub_jobs ADD COLUMN nseg INTEGER DEFAULT 0",
+        "ALTER TABLE dub_jobs ADD COLUMN tl TEXT DEFAULT ''",
+        "ALTER TABLE dub_jobs ADD COLUMN parts TEXT DEFAULT ''",
+    ] {
+        let _ = turso_exec(env, sql, vec![]).await;
+    }
+    config_put(env, "mig_dub_manual", "1").await;
+}
 
 fn keyboard() -> Value {
     encbot_keyboard(vec![
+        vec![BTN_MANUAL.to_string()],
         vec![ENCBOT_BTN_STATUS.to_string(), BTN_QUEUE.to_string()],
         vec![postbot::BTN_HOME.to_string()],
     ])
@@ -53,6 +78,7 @@ fn keyboard() -> Value {
 
 pub(crate) async fn menu(env: &Env, chat: i64) {
     config_put(env, "encbot_mode", "dub").await;
+    config_put(env, "dub_manual", "0").await;
     config_put(env, "post_edit", "").await;
     encbot_send(env, chat,
         "\u{1F5E3} <b>Dublyaj</b>\n\n\
@@ -60,7 +86,8 @@ pub(crate) async fn menu(env: &Env, chat: i64) {
          spikerning ovozi bilan aytilib, videoga qo'yiladi.\n\n\
          \u{1F310} Boshqa tilga: video izohiga (caption) til kodini yozing (<code>uz</code>, <code>en</code>, <code>ru</code>, <code>tr</code>, ...). Bo'sh bo'lsa \u{2014} <code>uz</code>.\n\
          \u{23F1} Uzunlik cheklanmagan, lekin jarayon GPU'siz: 1 daqiqalik video ~20 daqiqa oladi, Actions'ning 6 soatlik chegarasiga sig'maydigan juda uzun video xabar bilan to'xtatiladi.\n\
-         Bir nechta video ketma-ket yuborsangiz, navbat bilan ishlanadi. Tayyor video shu chatga keladi.",
+         \u{1F4DD} <b>Qo'lda tarjima</b> \u{2014} o'zingiz tarjima qilmoqchi bo'lsangiz shu tugmani bosing, so'ng video yuboring: bot to'liq asl matnni (har bir so'zning millisekund vaqti bilan) beradi, siz <code>#1 tarjima</code> ko'rinishida yuborasiz.\n\
+         Uzun video bo'laklab ishlanadi. Bir nechta video ketma-ket yuborsangiz, navbat bilan ishlanadi. Tayyor video shu chatga keladi.",
         Some(keyboard())).await;
 }
 
@@ -113,10 +140,27 @@ pub(crate) async fn on_message(env: &Env, msg: &Value, chat: i64) -> bool {
         queue_list(env, chat).await;
         return true;
     }
+    if text == BTN_MANUAL {
+        config_put(env, "dub_manual", "1").await;
+        encbot_send(env, chat,
+            "\u{270D}\u{FE0F} <b>Qo'lda tarjima</b>\n\n\
+             Videoni yuboring. Bot uni matnga aylantirib, <b>to'liq asl matnni</b> beradi: har gap raqamlangan (<code>#1</code>, <code>#2</code>...), \
+             alohida fayl ichida esa <b>har bir so'z</b> millisekund bilan qayerda aytilgani (<code>word(2000\u{2013}2210)</code>) yoziladi.\n\n\
+             Keyin siz tarjimani <code>#1 tarjima matni</code> ko'rinishida yuborasiz (bir necha xabarda ham bo'ladi). Hamma gap kelgach dublyaj \
+             boshlanadi: ovoz klonlanib, sizning tarjimangiz asl ovozda aytiladi. Uzun video bo'laklab ishlanadi.\n\
+             Izohga (caption) til kodini yozishingiz mumkin (standart <code>uz</code>).",
+            Some(keyboard())).await;
+        return true;
+    }
     let Some((fname, size, dur)) = classify(msg) else {
-        encbot_send(env, chat, "Dublyaj uchun video yuboring (oddiy video yoki video fayl).", Some(keyboard())).await;
+        // Video emas: tarjima kutayotgan ish bo'lsa — bu tarjima matni.
+        if !text.is_empty() && intake(env, chat, &text).await {
+            return true;
+        }
+        encbot_send(env, chat, "Dublyaj uchun video yuboring (oddiy video yoki video fayl). Qo'lda tarjima uchun avval \u{00AB}\u{270D}\u{FE0F} Qo'lda tarjima\u{00BB} ni bosing.", Some(keyboard())).await;
         return true;
     };
+    let manual = config_get(env, "dub_manual").await.as_deref() == Some("1");
     let channel = tg_channel_id(env);
     if channel == 0 {
         encbot_send(env, chat, "\u{274C} TG_CHANNEL_ID sozlanmagan.", Some(keyboard())).await;
@@ -141,20 +185,148 @@ pub(crate) async fn on_message(env: &Env, msg: &Value, chat: i64) -> bool {
     let lang = parse_lang(&caption);
     let name: String = if caption.is_empty() { fname } else { caption }.chars().take(120).collect();
     let ins = turso_exec(env,
-        "INSERT INTO dub_jobs (chat, name, lang, dur, ch_msg, size, queued_at) VALUES (?,?,?,?,?,?,?) RETURNING id",
+        "INSERT INTO dub_jobs (chat, name, lang, dur, ch_msg, size, queued_at, mode) VALUES (?,?,?,?,?,?,?,?) RETURNING id",
         vec![TursoArg::int(chat), TursoArg::text(&name), TursoArg::text(&lang), TursoArg::int(dur), TursoArg::int(ch_msg),
-             TursoArg::int(size), TursoArg::int(now_ms())]).await;
+             TursoArg::int(size), TursoArg::int(now_ms()), TursoArg::text(if manual { "manual" } else { "auto" })]).await;
     let Some(id) = ins.ok().and_then(|r| first_row(&r)).map(|r| jint(&r, "id")) else {
         let _ = encbot_api(env, "deleteMessage", json!({"chat_id": channel, "message_id": ch_msg})).await;
         encbot_send(env, chat, "\u{274C} Navbatga qo'yib bo'lmadi (baza xatosi). Qayta yuboring.", Some(keyboard())).await;
         return true;
     };
+    if manual {
+        config_put(env, "dub_manual", "0").await; // keyingi video yana avtomatik (tugma qayta bosilmaguncha)
+    }
     let n = turso_exec(env, "SELECT COUNT(*) AS n FROM dub_jobs WHERE state IN ('queued','running')", vec![]).await
         .ok().and_then(|r| first_row(&r)).map(|r| jint(&r, "n")).unwrap_or(1);
     let kick = kick(env).await;
     encbot_send(env, chat, &format!(
-        "\u{2705} Navbatga qo'yildi: <b>#{id} {}</b>\n\u{1F310} Til: <code>{lang}</code>\n\u{1F4CB} Navbatda: {n} ta\n\n{kick}", html_escape(&short(&name))), Some(keyboard())).await;
+        "\u{2705} Navbatga qo'yildi: <b>#{id} {}</b>\n\u{1F310} Til: <code>{lang}</code>{}\n\u{1F4CB} Navbatda: {n} ta\n\n{kick}", html_escape(&short(&name)),
+        if manual { "\n\u{270D}\u{FE0F} Qo'lda tarjima: avval matn tayyorlanadi va sizga yuboriladi" } else { "" }), Some(keyboard())).await;
     true
+}
+
+/// "#12 matn", "12. matn", "12) matn" ko'rinishidagi qatorlardan (raqam, matn) ro'yxati. Raqamsiz qator oldingi gapga qo'shiladi.
+/// Belgisiz "12 ming dollar" raqam hisoblanmaydi: raqamdan keyin `.`, `)` yoki `:` shart (yoki `#` belgisi).
+fn parse_numbered(text: &str) -> Vec<(i64, String)> {
+    let mut out: Vec<(i64, String)> = Vec::new();
+    for raw in text.lines() {
+        let line = raw.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let hash = line.starts_with('#');
+        let body = line.trim_start_matches('#').trim_start();
+        let digits: String = body.chars().take_while(|c| c.is_ascii_digit()).collect();
+        let rest = &body[digits.len()..];
+        let mut head: Option<(i64, String)> = None;
+        if !digits.is_empty() && digits.len() <= 6 {
+            let n: i64 = digits.parse().unwrap_or(0);
+            let mut chars = rest.chars();
+            match chars.next() {
+                Some(c) if matches!(c, '.' | ')' | ':') => head = Some((n, chars.as_str().trim().to_string())),
+                Some(c) if hash && (c == ' ' || c == '-' || c == '\u{2014}' || c == '\u{2013}' || c == '\t') => {
+                    head = Some((n, chars.as_str().trim_start_matches(|c: char| c == '-' || c == '\u{2014}' || c == '\u{2013}' || c.is_whitespace()).to_string()))
+                }
+                None if hash => head = Some((n, String::new())),
+                _ => {}
+            }
+        }
+        match head {
+            Some((n, t)) if n > 0 => out.push((n, t)),
+            _ => {
+                if let Some(last) = out.last_mut() {
+                    if !last.1.is_empty() {
+                        last.1.push(' ');
+                    }
+                    last.1.push_str(line);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Uzun matnni Telegram chegarasiga (4096) sig'adigan bo'laklarga bo'ladi (bo'sh qator chegarasida).
+fn chunks(text: &str, max: usize) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    for para in text.split("\n\n") {
+        if !cur.is_empty() && cur.chars().count() + para.chars().count() + 2 > max {
+            out.push(std::mem::take(&mut cur));
+        }
+        if para.chars().count() > max {
+            let cs: Vec<char> = para.chars().collect();
+            for part in cs.chunks(max) {
+                out.push(part.iter().collect());
+            }
+            continue;
+        }
+        if !cur.is_empty() {
+            cur.push_str("\n\n");
+        }
+        cur.push_str(para);
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    out
+}
+
+/// Tarjima kutayotgan ish bo'lsa: matndagi raqamlangan gaplar saqlanadi; hamma gap kelgach ish navbatga qo'yiladi. `true` — ishlandi.
+async fn intake(env: &Env, chat: i64, text: &str) -> bool {
+    let Some(job) = turso_exec(env, "SELECT * FROM dub_jobs WHERE chat=? AND state='wait' ORDER BY queued_at ASC LIMIT 1",
+        vec![TursoArg::int(chat)]).await.ok().and_then(|r| first_row(&r)) else {
+        return false;
+    };
+    let id = jint(&job, "id");
+    let nseg = jint(&job, "nseg");
+    let items = parse_numbered(text);
+    if items.is_empty() {
+        encbot_send(env, chat, &format!(
+            "\u{270D}\u{FE0F} #{id} uchun tarjima kutilmoqda ({nseg} ta gap). Tarjimani <code>#1 matn</code>, <code>#2 matn</code>... ko'rinishida yuboring."),
+            Some(keyboard())).await;
+        return true;
+    }
+    let mut map: serde_json::Map<String, Value> = serde_json::from_str::<Value>(job["tl"].as_str().unwrap_or(""))
+        .ok().and_then(|v| v.as_object().cloned()).unwrap_or_default();
+    let mut ignored = 0;
+    for (n, t) in items {
+        if n >= 1 && n <= nseg && !t.trim().is_empty() {
+            map.insert(n.to_string(), Value::String(t.trim().to_string()));
+        } else {
+            ignored += 1;
+        }
+    }
+    let _ = turso_exec(env, "UPDATE dub_jobs SET tl=? WHERE id=?",
+        vec![TursoArg::text(&Value::Object(map.clone()).to_string()), TursoArg::int(id)]).await;
+    let missing: Vec<i64> = (1..=nseg).filter(|n| !map.contains_key(&n.to_string())).collect();
+    if missing.is_empty() {
+        let _ = turso_exec(env, "UPDATE dub_jobs SET state='queued', runner='', lease_until=0, attempts=0 WHERE id=? AND state='wait'",
+            vec![TursoArg::int(id)]).await;
+        let kick = kick(env).await;
+        encbot_send(env, chat, &format!(
+            "\u{2705} #{id}: tarjima to'liq ({nseg}/{nseg}). Dublyaj navbatga qo'yildi.\n\n{kick}"), Some(keyboard())).await;
+    } else {
+        let list: Vec<String> = missing.iter().take(20).map(|n| format!("#{n}")).collect();
+        encbot_send(env, chat, &format!(
+            "\u{270D}\u{FE0F} #{id}: {}/{nseg} gap keldi.{} Yetishmayotgan: {}{}\nDavom eting.",
+            nseg - missing.len() as i64,
+            if ignored > 0 { format!(" ({ignored} ta qator e'tiborsiz qoldi)") } else { String::new() },
+            list.join(", "), if missing.len() > 20 { " ..." } else { "" }), Some(keyboard())).await;
+    }
+    true
+}
+
+/// Ish tugagach/o'chirilganda kanaldagi hamma nusxalar: video, transkripsiya fayli va tayyor bo'laklar.
+async fn cleanup_job(env: &Env, job: &Value, extra: i64) {
+    channel_cleanup(env, jint(job, "ch_msg")).await;
+    channel_cleanup(env, jint(job, "tr_msg")).await;
+    if let Some(parts) = serde_json::from_str::<Value>(job["parts"].as_str().unwrap_or("")).ok().and_then(|v| v.as_array().cloned()) {
+        for p in parts {
+            channel_cleanup(env, jint(&p, "msg")).await;
+        }
+    }
+    channel_cleanup(env, extra).await;
 }
 
 /// Navbatda ish bo'lsa-yu, hech kim ishlamayotgan bo'lsa — `dub.yml` ni ishga tushiradi.
@@ -216,6 +388,7 @@ fn state_icon(job: &Value) -> &'static str {
     match job["state"].as_str().unwrap_or("") {
         "running" if jint(job, "lease_until") > now_ms() => "\u{2699}\u{FE0F}",
         "error" => "\u{274C}",
+        "wait" => "\u{270D}\u{FE0F}",
         _ => "\u{23F3}",
     }
 }
@@ -278,11 +451,11 @@ pub(crate) async fn on_callback(env: &Env, chat: i64, data: &str) -> bool {
             {"text": "\u{274C} Yo'q", "callback_data": format!("dn:{id}")},
         ]]}))).await,
         "dx" => {
-            let job = turso_exec(env, "DELETE FROM dub_jobs WHERE id=? RETURNING ch_msg", vec![TursoArg::int(id)]).await
+            let job = turso_exec(env, "DELETE FROM dub_jobs WHERE id=? RETURNING ch_msg, tr_msg, parts", vec![TursoArg::int(id)]).await
                 .ok().and_then(|r| first_row(&r));
             match job {
                 Some(j) => {
-                    channel_cleanup(env, jint(&j, "ch_msg")).await;
+                    cleanup_job(env, &j, 0).await;
                     encbot_send(env, chat, &format!("\u{1F5D1} #{id} o'chirildi."), Some(keyboard())).await;
                 }
                 None => encbot_send(env, chat, &format!("#{id} allaqachon yo'q."), Some(keyboard())).await,
@@ -383,6 +556,9 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
             })).await.ok().and_then(|v| v["message_id"].as_i64()).unwrap_or(0);
             return ok(json!({"channel": channel, "status_msg": status_msg, "job": {
                 "id": id, "chat": chat, "name": name, "lang": job["lang"].as_str().unwrap_or("uz"), "ch_msg": jint(&job, "ch_msg"),
+                "mode": job["mode"].as_str().unwrap_or("auto"), "tr_msg": jint(&job, "tr_msg"), "nseg": jint(&job, "nseg"),
+                "tl": serde_json::from_str::<Value>(job["tl"].as_str().unwrap_or("")).unwrap_or(json!({})),
+                "parts": serde_json::from_str::<Value>(job["parts"].as_str().unwrap_or("")).unwrap_or(json!([])),
                 "attempt": jint(&got, "attempts"),
             }}));
         }
@@ -408,6 +584,27 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
         return ok_nostore(json!({"pending": n}));
     }
 
+    // Jarayon holatini saqlash (run o'lsa ham davom etish uchun): transkripsiya fayli, gaplar soni, tarjima, tayyor bo'laklar.
+    if path == "/api/dub/state" {
+        let Some(job) = own(env, &b).await else {
+            return json_resp(&json!({"error": "lost"}), 409);
+        };
+        let id = jint(&job, "id");
+        if b["tr_msg"].as_i64().unwrap_or(0) > 0 {
+            turso_exec(env, "UPDATE dub_jobs SET tr_msg=? WHERE id=?", vec![TursoArg::int(jint(&b, "tr_msg")), TursoArg::int(id)]).await?;
+        }
+        if b["nseg"].as_i64().unwrap_or(0) > 0 {
+            turso_exec(env, "UPDATE dub_jobs SET nseg=? WHERE id=?", vec![TursoArg::int(jint(&b, "nseg")), TursoArg::int(id)]).await?;
+        }
+        if b["tl"].is_object() {
+            turso_exec(env, "UPDATE dub_jobs SET tl=? WHERE id=?", vec![TursoArg::text(&b["tl"].to_string()), TursoArg::int(id)]).await?;
+        }
+        if b["parts"].is_array() {
+            turso_exec(env, "UPDATE dub_jobs SET parts=? WHERE id=?", vec![TursoArg::text(&b["parts"].to_string()), TursoArg::int(id)]).await?;
+        }
+        return ok(json!({"ok": true}));
+    }
+
     // Yuborishdan oldin: ish hali shu run'nikimi (admin o'chirmaganmi).
     if path == "/api/dub/check" {
         return match own(env, &b).await {
@@ -425,6 +622,46 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
         let name = job["name"].as_str().unwrap_or("").to_string();
         let status_msg = jint(&b, "status_msg");
         let say = |line: String| format!("{}\n\n{line}", status_head(id, &name, jint(&job, "attempts")));
+        if b["ok"].as_bool() == Some(true) && b["phase"].as_str() == Some("transcribe") {
+            // QO'LDA TARJIMA, 1-bosqich: matn tayyor. Foydalanuvchiga to'liq asl matn (raqamlangan) va so'zlar vaqti fayli yuboriladi;
+            // ish `wait` holatiga o'tadi — tarjima to'liq kelguncha navbatga tushmaydi.
+            let nseg = jint(&b, "nseg");
+            turso_exec(env,
+                "UPDATE dub_jobs SET state='wait', runner='', lease_until=0, attempts=0, tr_msg=?, nseg=?, tl='{}' WHERE id=?",
+                vec![TursoArg::int(jint(&b, "tr_msg")), TursoArg::int(nseg), TursoArg::int(id)]).await?;
+            if status_msg > 0 {
+                edit_status(env, chat, status_msg, &say(format!("\u{2705} Matn tayyor ({}). Tarjima kutilmoqda \u{2014} pastdagi xabarlarga qarang.",
+                    html_escape(b["summary"].as_str().unwrap_or(""))))).await;
+            }
+            let txt_msg = jint(&b, "txt_msg");
+            if txt_msg > 0 {
+                let _ = encbot_api(env, "copyMessage", json!({
+                    "chat_id": chat, "from_chat_id": tg_channel_id(env), "message_id": txt_msg,
+                    "caption": format!("\u{1F4C4} #{id}: to'liq matn va HAR SO'ZNING vaqti (millisekund). Tarjima uchun asos."),
+                })).await;
+                channel_cleanup(env, txt_msg).await;
+            }
+            let text = b["text"].as_str().unwrap_or("");
+            for part in chunks(text, 3800) {
+                encbot_send(env, chat, &html_escape(&part), None).await;
+            }
+            encbot_send(env, chat, &format!(
+                "\u{270D}\u{FE0F} <b>#{id}</b> \u{2014} {nseg} ta gap. Tarjimani shu raqamlar bilan yuboring:\n\n\
+                 <code>#1 birinchi gap tarjimasi\n#2 ikkinchi gap tarjimasi</code>\n\n\
+                 Bir necha xabarda yuborishingiz mumkin; hamma gap kelgach dublyaj o'zi boshlanadi. Bekor qilish: \u{1F4CB} Dublyaj navbati."),
+                Some(keyboard())).await;
+            return ok(json!({"ok": true}));
+        }
+        if b["ok"].as_bool() == Some(true) && b["partial"].as_bool() == Some(true) {
+            // 6 soatlik chegara: tayyor bo'laklar saqlangan, ish navbatga qaytadi (workflow yangi run ochadi).
+            if status_msg > 0 {
+                edit_status(env, chat, status_msg, &say("\u{23F8} Vaqt chegarasi \u{2014} tayyor bo'laklar saqlandi, qolgani yangi run'da davom etadi".to_string())).await;
+            }
+            turso_exec(env,
+                "UPDATE dub_jobs SET state='queued', runner='', lease_until=0, attempts=MAX(attempts-1,0) WHERE id=?",
+                vec![TursoArg::int(id)]).await?;
+            return ok(json!({"ok": true}));
+        }
         if b["ok"].as_bool() == Some(true) {
             // Tayyor video Actions tomonidan kanalga yuklangan (`res_msg`): bot uni admin chatiga ko'chiradi.
             let res_msg = jint(&b, "res_msg");
@@ -446,10 +683,8 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
                     if delivered { "shu chatga yuborildi" } else { "kanalga yuklandi, lekin chatga ko'chirib bo'lmadi" },
                     html_escape(&summary)))).await;
             }
-            channel_cleanup(env, jint(&job, "ch_msg")).await;
-            if delivered {
-                channel_cleanup(env, res_msg).await;
-            }
+            // Kanal nusxalari: video, transkripsiya fayli va bo'laklar (yetkazilmagan bo'lsa tayyor video qoladi — qo'lda olish uchun).
+            cleanup_job(env, &job, if delivered { res_msg } else { 0 }).await;
             turso_exec(env, "DELETE FROM dub_jobs WHERE id=?", vec![TursoArg::int(id)]).await?;
             return ok(json!({"ok": true}));
         }
@@ -479,4 +714,47 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
     }
 
     err404("topilmadi")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn raqamlangan_qatorlar() {
+        let t = "#1 Salom dunyo\n#2. Ikkinchi gap\n2-qator davomi\n3) Uchinchi\n#4 \u{2014} To'rtinchi";
+        let v = parse_numbered(t);
+        assert_eq!(v.len(), 4);
+        assert_eq!(v[0], (1, "Salom dunyo".to_string()));
+        assert_eq!(v[1], (2, "Ikkinchi gap 2-qator davomi".to_string()));
+        assert_eq!(v[2], (3, "Uchinchi".to_string()));
+        assert_eq!(v[3], (4, "To'rtinchi".to_string()));
+    }
+
+    #[test]
+    fn belgisiz_raqam_gap_emas() {
+        // "12 ming dollar" — oldingi gapning davomi; boshida raqam bo'lsa ham yangi gap bo'lmaydi.
+        let v = parse_numbered("#1 Bu\n12 ming dollar yo'qotish\n#2 Ikkinchi");
+        assert_eq!(v.len(), 2);
+        assert_eq!(v[0].1, "Bu 12 ming dollar yo'qotish");
+        // Raqamdan oldingi matn e'tiborsiz
+        assert!(parse_numbered("Salom\nHech narsa").is_empty());
+    }
+
+    #[test]
+    fn bolaklarga_bolish() {
+        let long = (0..50).map(|i| format!("#{i} {}", "x".repeat(200))).collect::<Vec<_>>().join("\n\n");
+        let cs = chunks(&long, 3800);
+        assert!(cs.len() > 1);
+        assert!(cs.iter().all(|c| c.chars().count() <= 3800));
+        assert_eq!(cs.join("\n\n"), long);
+    }
+
+    #[test]
+    fn til_kodi() {
+        assert_eq!(parse_lang(""), "uz");
+        assert_eq!(parse_lang("ru"), "ru");
+        assert_eq!(parse_lang("Uzbek video"), "uz");
+        assert_eq!(parse_lang("Mening videom"), "uz");
+    }
 }

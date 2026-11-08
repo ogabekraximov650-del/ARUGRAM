@@ -160,6 +160,13 @@ def main():
         raise SystemExit("transkripsiya natija bermadi")
     segs = final["segments"]
     src_lang = final.get("source_lang")
+    if os.environ.get("VS_TRANSCRIBE_ONLY") == "1":
+        # Faqat transkripsiya (qo'lda tarjima / bo'laklab ishlash): gaplar va ularning vaqti saqlanadi, tarjima va ovozlash yo'q.
+        json.dump({"segments": [{k: s.get(k) for k in ("id", "start", "end", "text", "speaker_id")} for s in segs],
+                   "source_lang": src_lang, "duration": None}, open(os.path.join(outdir, "transcript.json"), "w"), ensure_ascii=False, indent=1)
+        prog(100, f"Transkripsiya tayyor: {len(segs)} ta gap")
+        log("TRANSKRIPSIYA TUGADI")
+        return
     prog(22, f"Matn tayyor: {len(segs)} ta gap, til: {src_lang}")
     log(f"  {len(segs)} segment, manba til={src_lang}, spikerlar={[s.get('speaker_id') for s in segs][:8]}")
     log(f"  klon manbalari: {json.dumps(final.get('cast_sources'))[:300]}")
@@ -169,8 +176,15 @@ def main():
     # 4. Tarjima (o'zbekcha). Tayyor tarjima fayli bo'lsa (VS_TRANSLATIONS) — shu ishlatiladi (qo'lda yozilgan, vaqtga sig'adigan),
     # aks holda VoiceStudio tarjimoni (VS_TRANSLATE, standart nllb).
     pre = None
+    sf = os.environ.get("VS_SEGMENTS")   # tayyor gaplar (vaqt + MATN): [{"start","end","text","speaker_id"?}] — ASR gaplari o'rniga ishlatiladi
+    if sf and os.path.exists(sf):
+        given = json.load(open(sf, encoding="utf-8"))
+        log(f"tayyor gaplar ishlatilmoqda: {len(given)} ta ({sf})")
+        segs = [{"id": i, "start": float(g["start"]), "end": float(g["end"]), "text": g["text"],
+                 "speaker_id": g.get("speaker_id") or (segs[0].get("speaker_id") if segs else None) or "Speaker 1"} for i, g in enumerate(given)]
+        pre = [g["text"] for g in given]
     tf = os.environ.get("VS_TRANSLATIONS")
-    if tf and os.path.exists(tf):
+    if pre is None and tf and os.path.exists(tf):
         pre = json.load(open(tf, encoding="utf-8"))
         if len(pre) != len(segs):
             log(f"  tayyor tarjima soni mos emas ({len(pre)} != {len(segs)}) — VoiceStudio tarjimoniga o'tiladi")

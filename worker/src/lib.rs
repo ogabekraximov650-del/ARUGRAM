@@ -1380,6 +1380,10 @@ async fn init_db(env: &Env) -> bool {
         }
         config_put(env, "mig_comment_media", "1").await;
     }
+    // "Dublyaj" jadvaliga qo'lda tarjima ustunlari (eski baza uchun, bir marta).
+    if ok {
+        dubbot::migrate(env).await;
+    }
     // Oxirgi qism vaqti (2026-10): mavjud bo'limlar uchun bir marta to'ldiriladi.
     // Qism "joylangan sana" = birinchi sifat joylangan vaqt (2026-10).
     if ok && config_get(env, "mig_ready_at").await.is_none() {

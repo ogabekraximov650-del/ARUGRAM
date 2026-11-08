@@ -2,14 +2,20 @@
 """Dublyaj — kodlash botining "🗣 Dublyaj" bo'limi (`worker/src/dubbot.rs`).
 
 ALOHIDA workflow (`avtoencode` repoda `.github/workflows/dub.yml`, shablon — `tool/dub/dub.workflow.yml`).
-Worker navbatda ish bo'lsa uni o'zi ishga tushiradi. Bitta run — bitta video.
+Worker navbatda ish bo'lsa uni o'zi ishga tushiradi. Bitta run — bitta ish (video yoki uning bir necha bo'lagi).
 
-Bitta ish:
-  1. video yopiq kanaldan yuklab olinadi (bot ko'chirgan nusxa), asosiy akkaunt (pyrogram sessiyasi) bilan;
-  2. VoiceStudio (CPU) bilan dublyaj — `tool/voicedub/run.py` (ARUGRAM repodan): Whisper -> tarjima -> OmniVoice (asl ovozni klonlab) -> ffmpeg;
-  3. tayyor video yopiq kanalga yuklanadi, `/api/dub/finish` — worker uni admin chatiga ko'chiradi.
-FOIZ ACTIONS'NING O'ZIDAN: har bosqich uchun umumiy foiz (yuklash, ovoz ajratish, transkripsiya, tarjima, har bir gap ovozlanishi,
-eksport, yuborish) botdagi bitta xabarda jonli yangilanib turadi (`/api/dub/progress`), arudrivebot kabi.
+IKKI REJIM (ish `mode`):
+  * auto   — transkripsiya -> NLLB tarjima -> dublyaj, hammasi bitta ishda;
+  * manual — 1-bosqich (`phase=transcribe`): gaplar va HAR BIR SO'ZNING vaqti (millisekund) botga yuboriladi, foydalanuvchi tarjimani
+             o'zi yuboradi; 2-bosqich (`phase=dub`): shu tarjima bilan dublyaj.
+
+UZUN VIDEO BO'LAKLAB: gaplar `PART_S` soniyalik bo'laklarga (gap chegarasida) bo'linadi; har bo'lak alohida dublyaj qilinib kanalga
+yuklanadi va botga yoziladi (`/api/dub/state`). 6 soatlik chegara yaqinlashsa run to'xtab (`partial`), worker yangi run ochadi va
+qolgan bo'laklardan davom etadi; oxirgi run bo'laklarni ulab (ffmpeg concat) bitta video qiladi.
+
+Jarayon: kanaldan yuklash -> (transkripsiya: `tool/voicedub/run.py`, so'z vaqtlari `words.py`) -> (tarjima `translate.py`, NLLB 1.3B) ->
+VoiceStudio (CPU) dublyaj (`run.py`: OmniVoice klon ovozi, ffmpeg) -> kanalga yuklash -> `/api/dub/finish`.
+FOIZ ACTIONS'NING O'ZIDAN: har bosqich uchun umumiy foiz botdagi bitta xabarda jonli yangilanadi (`/api/dub/progress`).
 """
 
 import asyncio
@@ -34,6 +40,8 @@ VD = Path(os.environ.get("VD_DIR", HERE.parent / "voicedub"))
 JOB_T0 = float(os.environ.get("JOB_T0") or time.time())
 JOB_BUDGET_S = float(os.environ.get("JOB_BUDGET_MIN", "335")) * 60
 SEND_RESERVE_S = 8 * 60
+PART_S = float(os.environ.get("PART_S", "300"))          # bo'lak uzunligi (soniya, gap chegarasida)
+VPY = VD / "voicestudio" / ".venv" / "bin" / "python"      # VoiceStudio venv (faster-whisper, transformers shu yerda)
 
 
 class Lost(Exception):
@@ -158,15 +166,14 @@ def probe(path):
         return 0, 0, 0.0
 
 
-# ── VoiceStudio (driver) ─────────────────────────────────────
+# ── VoiceStudio (driver) va yordamchi skriptlar ──────────────
 
-def run_driver(src, lang, outdir, live):
-    """`tool/voicedub/run.py` — `PROGRESS <foiz>\\t<matn>` qatorlari holat xabariga, qolgani Actions log'iga."""
-    env = {**os.environ, "VS_API": os.environ.get("VS_API", "http://127.0.0.1:8000")}
+def run_driver(src, lang, outdir, live, scale=None, env_extra=None):
+    """`tool/voicedub/run.py` — `PROGRESS <foiz>\\t<matn>` qatorlari holat xabariga (scale(pv) -> umumiy foiz), qolgani log'ga."""
+    env = {**os.environ, "VS_API": os.environ.get("VS_API", "http://127.0.0.1:8000"), **(env_extra or {})}
     p = subprocess.Popen([sys.executable, str(VD / "run.py"), str(src), lang, str(outdir)],
                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, env=env)
     tail = collections.deque(maxlen=30)
-    gen0 = None   # ovozlash (30..95%) boshlangan payt
     for line in p.stdout:
         line = line.rstrip()
         if not line:
@@ -175,19 +182,7 @@ def run_driver(src, lang, outdir, live):
         if line.startswith("PROGRESS "):
             pct, _, txt = line[9:].partition("\t")
             try:
-                pv = float(pct)
-                live.pipeline(pv, txt)
-                # Ovozlash tezligidan 6 soatlik chegaraga sig'ish-sig'masligi oldindan aniqlanadi (juda uzun video).
-                if pv >= 31 and gen0 is None:
-                    gen0 = (time.time(), pv)
-                if gen0 and pv >= 35 and pv > gen0[1]:
-                    rate = (pv - gen0[1]) / max(time.time() - gen0[0], 1)
-                    finish_at = time.time() + (96 - pv) / rate
-                    if finish_at > JOB_T0 + JOB_BUDGET_S - SEND_RESERVE_S:
-                        p.terminate()
-                        over = (finish_at - (JOB_T0 + JOB_BUDGET_S - SEND_RESERVE_S)) / 60
-                        raise Fatal(f"video juda uzun: ovozlash Actions'ning 6 soatlik chegarasiga sig'maydi "
-                                    f"(taxminan {over:.0f} daqiqa yetmaydi). Videoni qisqaroq bo'laklarga bo'lib yuboring")
+                live.pipeline(scale(float(pct)) if scale else float(pct), txt)
             except ValueError:
                 pass
             log("  " + txt)
@@ -196,18 +191,99 @@ def run_driver(src, lang, outdir, live):
     return p.wait(), list(tail)
 
 
+def run_tool(script, *args, env_extra=None):
+    """VoiceStudio venv'ida `tool/voicedub/<script>` ni ishga tushiradi; chiqishi log'ga."""
+    p = subprocess.Popen([str(VPY), str(VD / script), *map(str, args)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                         bufsize=1, env={**os.environ, **(env_extra or {})})
+    for line in p.stdout:
+        line = line.rstrip()
+        if line and not line.startswith("PROGRESS"):
+            log("  " + line)
+    code = p.wait()
+    if code != 0:
+        raise RuntimeError(f"{script} xato bilan tugadi (kod {code})")
+
+
+def fmt_ms(ms):
+    ms = int(ms)
+    return f"{ms // 60000:02}:{ms % 60000 // 1000:02}.{ms % 1000:03}"
+
+
+def attach_words(segs, words):
+    """Har so'z o'rtasi qaysi gap oralig'iga tushsa, o'sha gapga (yo'q bo'lsa — eng yaqiniga)."""
+    out = [{**s, "words": []} for s in segs]
+    for w in words:
+        mid = (w["s"] + w["e"]) / 2000.0
+        best, bd = None, 1e9
+        for o in out:
+            d = 0 if o["start"] - 0.25 <= mid <= o["end"] + 0.25 else min(abs(mid - o["start"]), abs(mid - o["end"]))
+            if d < bd:
+                best, bd = o, d
+        if best is not None:
+            best["words"].append(w)
+    return out
+
+
+def human_text(name, lang, dur, segs):
+    """Foydalanuvchiga fayl: har gap + HAR SO'Z millisekund vaqti bilan."""
+    lines = [f"MATN: {name}", f"Til: {lang} · Davomiyligi: {fmt_ms(dur * 1000)} · Gaplar: {len(segs)}",
+             'Tarjimani "#raqam matn" ko\'rinishida yuboring (masalan: "#1 Salom dunyo").', "=" * 60, ""]
+    for n, s in enumerate(segs, 1):
+        lines.append(f"#{n}  [{fmt_ms(s['start'] * 1000)} – {fmt_ms(s['end'] * 1000)}]  {int(s['start'] * 1000)}–{int(s['end'] * 1000)} ms")
+        lines.append("   " + " ".join(f"{w['w']}({w['s']}–{w['e']})" for w in s["words"]) if s["words"] else "   " + s["text"])
+        lines.append("")
+    return "\n".join(lines)
+
+
+def chat_text(segs):
+    return "\n\n".join(f"#{n} {s['text']}" for n, s in enumerate(segs, 1))
+
+
+def split_parts(segs, dur):
+    """Gaplarni ~PART_S soniyalik bo'laklarga bo'ladi (gap chegarasida). Har bo'lak: (i0, i1, t0, t1) — gaplar [i0, i1), vaqt oralig'i
+    [t0, t1): chegara qo'shni gaplar orasining o'rtasida, shuning uchun bo'laklar bo'shliqsiz ulanadi."""
+    groups, cur = [], []
+    for i, s in enumerate(segs):
+        if cur and s["end"] - segs[cur[0]]["start"] > PART_S:
+            groups.append(cur)
+            cur = []
+        cur.append(i)
+    if cur:
+        groups.append(cur)
+    parts = []
+    for gi, g in enumerate(groups):
+        t0 = 0.0 if gi == 0 else (segs[groups[gi - 1][-1]]["end"] + segs[g[0]]["start"]) / 2
+        t1 = dur if gi == len(groups) - 1 else (segs[g[-1]]["end"] + segs[groups[gi + 1][0]]["start"]) / 2
+        parts.append((g[0], g[-1] + 1, t0, t1))
+    return parts
+
+
 # ── Ish ──────────────────────────────────────────────────────
+
+async def download_doc(app, channel, msg_id, dst):
+    m = await app.get_messages(channel, int(msg_id))
+    if not m or m.empty:
+        raise Fatal(f"kanalda xabar {msg_id} topilmadi")
+    p = await app.download_media(m, file_name=str(dst))
+    if not p:
+        raise RuntimeError(f"xabar {msg_id} yuklab olinmadi")
+    return Path(p)
+
 
 async def process(app, r, runner):
     channel = int(r["channel"])
     job = r["job"]
     jid, name, lang = int(job["id"]), str(job.get("name") or "video"), str(job.get("lang") or "uz")
+    mode, tr_msg = str(job.get("mode") or "auto"), int(job.get("tr_msg") or 0)
+    tl = job.get("tl") or {}
+    parts_done = {int(p["k"]): int(p["msg"]) for p in (job.get("parts") or [])}
     live = Live(r)
     ident = {"runner": runner, "id": jid, "status_msg": live.base["status_msg"]}
     shutil.rmtree(WORK, ignore_errors=True)
     WORK.mkdir(parents=True)
+    t_run0 = time.time()
     try:
-        log(f"🗣 Dublyaj #{jid}: {name} -> {lang} (urinish {job.get('attempt')})")
+        log(f"🗣 Dublyaj #{jid}: {name} -> {lang} [{mode}] (urinish {job.get('attempt')})")
         live.send("⬇️ Video yuklab olinmoqda...", force=True)
         msg = await app.get_messages(channel, int(job["ch_msg"]))
         if not msg or msg.empty or not (msg.video or msg.document):
@@ -224,33 +300,143 @@ async def process(app, r, runner):
         w, h, dur = probe(src)
         live.done(f"Yuklab olindi: {mb(src.stat().st_size)} · {w}×{h} · {hms(dur)} ({hms(time.time() - t0)})")
 
-        # VoiceStudio ASR/diarizatsiya uchun oddiy mp4 kutadi.
-        clip = WORK / "clip.mp4"
+        clip = WORK / "clip.mp4"   # VoiceStudio uchun oddiy mp4
         subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(src), "-c:v", "libx264", "-preset", "veryfast",
                         "-crf", "26", "-vf", "scale='min(854,iw)':-2", "-c:a", "aac", "-ar", "44100", str(clip)], check=True)
         src.unlink(missing_ok=True)
+        _, _, dur = probe(clip)
 
-        out_dir = WORK / "out"
-        t1 = time.time()
-        live.pipeline(1, "VoiceStudio ishga tushmoqda")
-        code, tail = await asyncio.to_thread(run_driver, clip, lang, out_dir, live)
-        out = out_dir / f"dubbed_{lang}.mp4"
-        if code != 0 or not out.exists():
-            raise RuntimeError("dublyaj bajarilmadi: " + (tail[-1] if tail else f"kod {code}")[:200])
-        live.done(f"Dublyaj tayyor ({hms(time.time() - t1)})")
-        size = out.stat().st_size
-        ow, oh, od = probe(out)
+        # ── 1) TRANSKRIPSIYA (gaplar + har so'zning ms vaqti) ──────────
+        if not tr_msg:
+            out_t = WORK / "tr"
+            live.pipeline(0, "VoiceStudio ishga tushmoqda")
+            scale_t = (lambda pv: pv * (0.18 if mode == "auto" else 0.9))
+            code, tail = await asyncio.to_thread(run_driver, clip, lang, out_t, live, scale_t, {"VS_TRANSCRIBE_ONLY": "1"})
+            tj = out_t / "transcript.json"
+            if code != 0 or not tj.exists():
+                raise RuntimeError("transkripsiya bajarilmadi: " + (tail[-1] if tail else f"kod {code}")[:200])
+            tdata = json.load(open(tj, encoding="utf-8"))
+            segs = [{"start": float(s["start"]), "end": float(s["end"]), "text": (s["text"] or "").strip(),
+                     "speaker_id": s.get("speaker_id") or "Speaker 1"} for s in tdata["segments"] if (s.get("text") or "").strip()]
+            if not segs:
+                raise Fatal("videoda nutq topilmadi")
+            src_lang = tdata.get("source_lang") or "en"
+            live.pipeline(0.9 * 100 if mode == "manual" else 19, "So'zlarning aniq vaqti (millisekund) aniqlanmoqda")
+            wav = WORK / "audio.wav"
+            subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(clip), "-vn", "-ac", "1", "-ar", "16000", str(wav)], check=True)
+            wj = WORK / "words.json"
+            await asyncio.to_thread(run_tool, "words.py", wav, wj, src_lang)
+            words = json.load(open(wj, encoding="utf-8"))["words"]
+            segs = attach_words(segs, words)
+            full = {"language": src_lang, "duration": dur, "segments": segs}
+            tj_path = WORK / f"transcript_{jid}.json"
+            json.dump(full, open(tj_path, "w", encoding="utf-8"), ensure_ascii=False)
+            sent = await app.send_document(channel, str(tj_path), caption=f"dub_tr_{jid}")
+            tr_msg = int(sent.id)
+            live.done(f"Transkripsiya: {len(segs)} ta gap, {len(words)} ta so'z vaqti ({hms(time.time() - t_run0)})")
 
-        api("check", ident)   # admin shu orada o'chirgan bo'lsa — yuborilmaydi
+            if mode == "manual":
+                txt_path = WORK / f"matn_{jid}.txt"
+                txt_path.write_text(human_text(name, src_lang, dur, segs), encoding="utf-8")
+                sent2 = await app.send_document(channel, str(txt_path), caption=f"dub_txt_{jid}", file_name=f"matn_{jid}.txt")
+                api("finish", {**ident, "ok": True, "phase": "transcribe", "tr_msg": tr_msg, "txt_msg": int(sent2.id), "nseg": len(segs),
+                               "text": chat_text(segs), "src_lang": src_lang,
+                               "summary": f"{len(segs)} ta gap · {len(words)} ta so'z · {hms(dur)}"})
+                log(f"  ✅ transkripsiya #{jid} yuborildi — tarjima kutilmoqda")
+                return
 
-        def up_cb(cur, total):
-            live.send(f"⬆️ Tayyor video yuborilmoqda\n{bar(cur * 100 / max(total, 1))} {cur * 100 / max(total, 1):.0f}% · {mb(cur)} / {mb(total)}")
+            # auto: NLLB bilan tarjima
+            live.pipeline(20, f"{lang} tiliga tarjima qilinmoqda (NLLB)")
+            tin, tout = WORK / "tin.json", WORK / "tout.json"
+            json.dump([{"text": s["text"]} for s in segs], open(tin, "w", encoding="utf-8"), ensure_ascii=False)
+            await asyncio.to_thread(run_tool, "translate.py", tin, tout, src_lang, lang)
+            tr = json.load(open(tout, encoding="utf-8"))
+            if len(tr) != len(segs) or any(not t.strip() for t in tr):
+                raise RuntimeError("tarjima to'liq emas")
+            tl = {str(i + 1): t for i, t in enumerate(tr)}
+            api("state", {**ident, "tr_msg": tr_msg, "nseg": len(segs), "tl": tl})
+            live.done("Tarjima tayyor")
+        else:
+            tj_path = await download_doc(app, channel, tr_msg, WORK / "transcript.json")
+            full = json.load(open(tj_path, encoding="utf-8"))
+            segs = full["segments"]
 
-        live.send("⬆️ Tayyor video yuborilmoqda...", force=True)
-        sent = await app.send_video(channel, str(out), caption=f"dub_{jid}_{lang}", supports_streaming=True,
-                                    duration=int(od), width=ow, height=oh, file_name=f"dub_{jid}_{lang}.mp4", progress=up_cb)
-        summary = f"{lang} · {hms(od)} · {mb(size)} · jami {hms(time.time() - live.t0)}"
-        api("finish", {**ident, "ok": True, "res_msg": int(sent.id), "size": size, "summary": summary})
+        # ── 2) DUBLYAJ (bo'laklab) ─────────────────────────────────
+        for n in range(1, len(segs) + 1):
+            if not str(tl.get(str(n)) or "").strip():
+                raise Fatal(f"#{n} gap uchun tarjima yo'q")
+        parts = split_parts(segs, dur)
+        K = len(parts)
+        base = 28.0 if mode == "auto" and not job.get("tr_msg") else 0.0
+        rate = None   # sekund / video soniyasi (shu run'da o'lchangan)
+        did_this_run = 0
+        for k, (i0, i1, p0, p1) in enumerate(parts):
+            if k in parts_done:
+                continue
+            span = p1 - p0
+            remaining = JOB_T0 + JOB_BUDGET_S - SEND_RESERVE_S - time.time()
+            est = span * (rate if rate else 14.0)
+            if did_this_run and est > remaining:
+                log(f"  vaqt yetmaydi (kerak ~{est / 60:.0f} daq, qoldi {remaining / 60:.0f} daq) — run to'xtaydi, davom ettiriladi")
+                api("finish", {**ident, "ok": True, "partial": True})
+                return
+            part_clip = WORK / f"part_{k}.mp4"
+            subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-ss", f"{p0:.3f}", "-t", f"{span:.3f}", "-i", str(clip),
+                            "-c:v", "libx264", "-preset", "veryfast", "-crf", "24", "-c:a", "aac", "-ar", "44100", str(part_clip)], check=True)
+            sj = WORK / f"part_{k}.json"
+            json.dump([{"start": max(0.0, s["start"] - p0), "end": max(0.01, s["end"] - p0), "text": tl[str(i + 1)],
+                        "speaker_id": s.get("speaker_id") or "Speaker 1"} for i, s in zip(range(i0, i1), segs[i0:i1])],
+                      open(sj, "w", encoding="utf-8"), ensure_ascii=False)
+            out_p = WORK / f"out_{k}"
+            lo = base + (99 - base) * k / K
+            hi = base + (99 - base) * (k + 1) / K
+            tag = f"bo'lak {k + 1}/{K}" if K > 1 else ""
+            live.pipeline(lo, f"VoiceStudio ishga tushmoqda {tag}".strip())
+            tp = time.time()
+            code, tail = await asyncio.to_thread(
+                run_driver, part_clip, lang, out_p, live,
+                (lambda pv, lo=lo, hi=hi: lo + (hi - lo) * pv / 100), {"VS_SEGMENTS": str(sj), "VS_TRANSCRIBE_ONLY": "0"})
+            outv = out_p / f"dubbed_{lang}.mp4"
+            if code != 0 or not outv.exists():
+                raise RuntimeError(f"dublyaj bajarilmadi ({tag}): " + (tail[-1] if tail else f"kod {code}")[:200])
+            api("check", ident)
+            ow, oh, od = probe(outv)
+
+            def up_cb(cur, total, tag=tag):
+                live.send(f"⬆️ Tayyor video yuborilmoqda {tag}\n{bar(cur * 100 / max(total, 1))} {cur * 100 / max(total, 1):.0f}% · {mb(cur)} / {mb(total)}")
+
+            sent = await app.send_video(channel, str(outv), caption=f"dub_part_{jid}_{k}", supports_streaming=True, duration=int(od),
+                                        width=ow, height=oh, file_name=f"dub_{jid}_{lang}_{k}.mp4", progress=up_cb)
+            parts_done[k] = int(sent.id)
+            did_this_run += 1
+            sp = (time.time() - tp) / max(span, 1.0)
+            rate = sp if rate is None else (rate + sp) / 2
+            api("state", {**ident, "parts": [{"k": kk, "msg": mm} for kk, mm in sorted(parts_done.items())]})
+            live.done(f"Dublyaj {tag}: {hms(span)} video, {hms(time.time() - tp)} ish".strip())
+            shutil.rmtree(out_p, ignore_errors=True)
+            part_clip.unlink(missing_ok=True)
+
+        # ── 3) YAKUNIY VIDEO ────────────────────────────────────────
+        if K == 1:
+            res_msg = parts_done[0]
+        else:
+            live.send("🔗 Bo'laklar ulanmoqda...", force=True)
+            lst = WORK / "concat.txt"
+            files = []
+            for k in range(K):
+                pth = await download_doc(app, channel, parts_done[k], WORK / f"dl_{k}.mp4")
+                files.append(pth)
+            lst.write_text("".join(f"file '{p}'\n" for p in files), encoding="utf-8")
+            final = WORK / f"dub_{jid}_{lang}.mp4"
+            subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0", "-i", str(lst), "-c:v", "libx264",
+                            "-preset", "veryfast", "-crf", "23", "-c:a", "aac", "-movflags", "+faststart", str(final)], check=True)
+            fw, fh, fd = probe(final)
+            sent = await app.send_video(channel, str(final), caption=f"dub_{jid}_{lang}", supports_streaming=True, duration=int(fd),
+                                        width=fw, height=fh, file_name=final.name,
+                                        progress=lambda c, t: live.send(f"⬆️ Yakuniy video yuborilmoqda\n{bar(c * 100 / max(t, 1))} {c * 100 / max(t, 1):.0f}%"))
+            res_msg = int(sent.id)
+        summary = f"{lang} · {hms(dur)} · {K} bo'lak · jami {hms(time.time() - live.t0)}"
+        api("finish", {**ident, "ok": True, "res_msg": int(res_msg), "summary": summary})
         log(f"  ✅ dublyaj #{jid} yuborildi ({summary})")
     except Lost:
         log(f"  dublyaj #{jid} o'chirildi yoki boshqa run'ga o'tdi — yuborilmadi")
