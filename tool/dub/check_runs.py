@@ -73,7 +73,7 @@ if runs:
         for s in job["steps"]:
             if s["status"] != "pending":
                 print(f"    {s['number']:>2} {s['name'][:60]:<60} {s['status']}/{s['conclusion']}")
-        bad = [s for s in job["steps"] if s["conclusion"] == "failure"]
+        bad = [s for s in job["steps"] if s["conclusion"] == "failure" or "dublyaj qilish" in s["name"]]
         if bad:
             c2, zdata = api(f"/repos/{full}/actions/runs/{r['id']}/logs", raw=True)
             if c2 == 200:
@@ -81,7 +81,7 @@ if runs:
                 for s in bad:
                     name = next((n for n in z.namelist() if n.endswith(f"/{s['number']}_{s['name']}.txt") or f"_{s['name']}" in n and n.startswith(f"{job['name']}/")), None)
                     if name:
-                        lines = z.read(name).decode(errors="replace").splitlines()[-30:]
+                        lines = z.read(name).decode(errors="replace").splitlines()[-45:]
                         print(f"  --- '{s['name']}' log oxiri (tozalangan) ---")
                         for ln in lines:
                             print("   ", clean(ln))
