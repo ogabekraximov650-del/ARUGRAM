@@ -6995,3 +6995,9 @@ Foydalanuvchi: model "sudo yo'q, o'rnatib bo'lmaydi" deb to'xtab qoldi ("Modelni
 
 - Ikki marta bosish: ekranning chap/o'ng YARMIDA har bosish 5 soniya, jamlanib boradi (5s, 10s, 15s…), video haqiqiy chegaralari ichida; sek 350 ms tinchlikdan keyin bir marta bajariladi, oyna yana 350 ms dan keyin yo'qoladi. Oyna — ARUMEDIATV `SeekBadge` nusxasi (qora yarim shaffof doira, uchta yonib-o'chuvchi uchburchak, "Ns" yozuvi, markazdan ±0.5 siljigan).
 - Video davomiyligiga bog'liq emas (90 soniya sharti olib tashlangan). Fayl: `drive/android/.../ui/PlayerScreen.kt`.
+
+## ARUDRIVE: o'chirish (worker + ilova)
+
+- **Worker:** `POST /api/bd/delete {id}` — qator bazadan, asl fayl R2'dan o'chadi, ro'yxat keshi global tozalanadi (`cache.purge` yo'l prefiksi). `storing` holatidagi fayl o'chirilmaydi (409). Telegram kanalidagi xabarlarga tegilmaydi.
+- **Ilova:** bosh sahifada kartani uzoq bosish -> tasdiq oynasi -> o'chirish; ro'yxat, telefondagi shifrlangan kesh (`BlockCache.remove`), davom etish joyi va "keshda" belgisi tozalanadi. Fayllar: `ui/HomeScreen.kt`, `data/Api.kt`, `data/BlockCache.kt`.
+- Sinov: worker orqali o'chirish ro'yxatdan 2 soniyada yo'qoldi, ilovada ham ko'rindi (foydalanuvchi tasdiqladi).

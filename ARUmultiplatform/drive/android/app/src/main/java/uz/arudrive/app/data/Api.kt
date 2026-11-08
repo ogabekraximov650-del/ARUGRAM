@@ -226,6 +226,12 @@ object Api {
         call(Request.Builder().url(url("/api/bd/finish")).post(body).build())
     }
 
+    /** Faylni o'chiradi (worker: baza + R2 + ro'yxat keshi global tozalanadi). Saqlanayotgan fayl uchun 409 -> IOException. */
+    suspend fun delete(id: String) = withContext(Dispatchers.IO) {
+        val body = buildJsonObject { put("id", JsonPrimitive(id)) }.toString().toRequestBody(JSON)
+        call(Request.Builder().url(url("/api/bd/delete")).post(body).build())
+    }
+
     class WarmResult(val ok: Boolean, val text: String, val total: Long = 0, val pending: Boolean = false)
 
     /** Bitta isitish so'rovi: natija va tashxis matni (HTTP kodi, worker holati, vaqt, Cloudflare markazi). */

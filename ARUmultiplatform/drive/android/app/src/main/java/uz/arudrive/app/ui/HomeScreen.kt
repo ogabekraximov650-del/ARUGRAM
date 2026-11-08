@@ -1,7 +1,9 @@
 package uz.arudrive.app.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -43,6 +45,7 @@ import uz.arudrive.app.data.DriveFile
 import uz.arudrive.app.data.cardRatio
 import uz.arudrive.app.data.humanSize
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
 import uz.arudrive.app.player.formatClock
 
 /** Bosh sahifa: YouTube kabi, har qatorda bitta fayl; kichik rasm video o'lchamiga qarab yotiq yoki tik. */
@@ -69,6 +72,42 @@ fun HomeScreen(refreshKey: Int, listState: androidx.compose.foundation.lazy.Lazy
             .onSuccess { files = it; uz.arudrive.app.data.Store.save(ctx0, it); uz.arudrive.app.data.Store.markRefreshed(ctx0, refreshKey) }
             .onFailure { error = it.message ?: "Xato" }
         loading = false
+    }
+
+    // O'CHIRISH: kartani uzoq bosish -> tasdiq oynasi -> worker (`/api/bd/delete`) -> ro'yxat va telefondagi kesh tozalanadi.
+    var toDelete by remember { mutableStateOf<DriveFile?>(null) }
+    var deleting by remember { mutableStateOf(false) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    toDelete?.let { f ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { if (!deleting) toDelete = null },
+            title = { Text("O'chirishni tasdiqlang") },
+            text = { Text("«${f.name}» butunlay o'chiriladi (bazadan va omborxonadan). Bu amalni qaytarib bo'lmaydi.") },
+            confirmButton = {
+                androidx.compose.material3.TextButton(enabled = !deleting, onClick = {
+                    deleting = true
+                    scope.launch {
+                        runCatching { Api.delete(f.id) }
+                            .onSuccess {
+                                files = files.filter { it.id != f.id }
+                                uz.arudrive.app.data.Store.save(ctx0, files)
+                                uz.arudrive.app.data.BlockCache.remove(ctx0, f.id)
+                                uz.arudrive.app.data.PlayPos.clear(ctx0, f.id)
+                                uz.arudrive.app.data.Warm.forget(ctx0, f.id)
+                            }
+                            .onFailure {
+                                val m = if (it.message.orEmpty().contains("409")) "Hozir Telegramga saqlanmoqda — tugagach o'chiring" else "O'chirilmadi: ${it.message.orEmpty().take(80)}"
+                                android.widget.Toast.makeText(ctx0, m, android.widget.Toast.LENGTH_LONG).show()
+                            }
+                        deleting = false
+                        toDelete = null
+                    }
+                }) { Text("O'chirish", color = androidx.compose.ui.graphics.Color(0xFFE53935)) }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(enabled = !deleting, onClick = { toDelete = null }) { Text("Bekor qilish") }
+            },
+        )
     }
 
     // OLDINDAN KESHLASH (foydalanuvchi talabi): ekranda ko'ringan videolarning BIRINCHI bo'lagi keshda bo'lmasa fonda isitiladi,
@@ -101,14 +140,15 @@ fun HomeScreen(refreshKey: Int, listState: androidx.compose.foundation.lazy.Lazy
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(18.dp),
             ) {
-                items(files, key = { it.id }) { f -> FileCard(f, onPlay) }
+                items(files, key = { it.id }) { f -> FileCard(f, onPlay, onLongPress = { toDelete = f }) }
             }
         }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun FileCard(f: DriveFile, onPlay: (DriveFile) -> Unit) {
+private fun FileCard(f: DriveFile, onPlay: (DriveFile) -> Unit, onLongPress: () -> Unit) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val shape = RoundedCornerShape(14.dp)
     val clickable = f.playable && f.isVideo
@@ -116,7 +156,7 @@ private fun FileCard(f: DriveFile, onPlay: (DriveFile) -> Unit) {
         val ratio = if (f.isVideo) cardRatio(f.w, f.h) else 16f / 9f
         Box(
             Modifier.fillMaxWidth().aspectRatio(ratio).clip(shape).background(AruColors.CardAlt)
-                .then(if (clickable) Modifier.clickable { onPlay(f) } else Modifier),
+                .combinedClickable(onClick = { if (clickable) onPlay(f) }, onLongClick = onLongPress),
             contentAlignment = Alignment.Center,
         ) {
             if (f.isVideo) {

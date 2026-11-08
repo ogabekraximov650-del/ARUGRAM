@@ -42,6 +42,11 @@ object BlockCache {
     private fun file(ctx: Context, id: String, idx: Long) = File(File(root(ctx), id), idx.toString())
     private fun aad(id: String, idx: Long) = "$id:$idx".toByteArray()
 
+    /** Faylning hamma bo'laklarini telefondan o'chiradi (fayl o'chirilganda). */
+    fun remove(ctx: Context, id: String) {
+        try { File(root(ctx), id).deleteRecursively() } catch (_: Exception) {}
+    }
+
     fun has(ctx: Context, id: String, idx: Long): Boolean = file(ctx, id, idx).isFile
 
     /** Bo'lakni o'qib shifrini ochadi; yo'q yoki buzilgan (kalit yo'qolgan, teg mos emas) bo'lsa — null (buzilgan fayl o'chiriladi). */
