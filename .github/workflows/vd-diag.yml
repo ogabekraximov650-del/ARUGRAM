@@ -45,3 +45,4 @@ jobs:
           else: print("javob:", {k: v[k] for k in v if k not in ("key", "name")})
           print("peek (oxirida):", call("/api/vd/peek"))
           PY
+# ikkinchi tekshiruv
