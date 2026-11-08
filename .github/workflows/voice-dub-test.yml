@@ -39,11 +39,22 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/huggingface
-          key: hf-voicestudio-v1
+          key: hf-voicestudio-v2
 
       - name: Python muhiti (CPU torch)
         working-directory: vs
         run: uv sync --locked --no-group cuda --group cpu
+
+      - name: Modellar (HF kesh)
+        working-directory: vs
+        run: |
+          uv run --no-sync python - <<'PY'
+          from huggingface_hub import snapshot_download
+          for repo in ("k2-fsa/OmniVoice", "Systran/faster-whisper-small"):
+              p = snapshot_download(repo)
+              print("model:", repo, "->", p, flush=True)
+          PY
+          du -sh ~/.cache/huggingface
 
       - name: Video
         run: |
@@ -69,7 +80,9 @@ jobs:
       - name: Dublyaj
         env:
           OMNIVOICE_DATA_DIR: ${{ runner.temp }}/ov_data
-        run: python3 tool/voicedub/run.py work/clip.mp4 "${{ inputs.target }}" out 2>&1 | tee out/driver.log
+        run: |
+          set -o pipefail
+          python3 tool/voicedub/run.py work/clip.mp4 "${{ inputs.target }}" out 2>&1 | tee out/driver.log
 
       - name: Backend logi (oxiri)
         if: always()

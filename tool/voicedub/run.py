@@ -97,6 +97,17 @@ def main():
     video, target, outdir = sys.argv[1], sys.argv[2], sys.argv[3]
     os.makedirs(outdir, exist_ok=True)
 
+    # 0. Model litsenziyalari (sinov uchun ephemeral muhitda qabul qilinadi; OmniVoice vaznlari CC-BY-NC — faqat shaxsiy sinov)
+    for repo in os.environ.get("VS_MODELS", "k2-fsa/OmniVoice,Systran/faster-whisper-small").split(","):
+        try:
+            st = call("GET", "/models/licenses/acceptance/" + repo)
+            log(f"litsenziya {repo}: {st.get('state')} (kerak={st.get('required')}, litsenziya={st.get('license')})")
+            if st.get("required") and not st.get("accepted"):
+                r = call("POST", "/models/licenses/accept", {"repo_id": repo, "fingerprint": st["fingerprint"], "accepted": True})
+                log(f"  qabul qilindi: {r.get('state')}")
+        except Exception as e:  # noqa: BLE001
+            log(f"  litsenziya {repo}: {e}")
+
     # 1. Yuklash
     data = open(video, "rb").read()
     log(f"yuklash: {video} ({len(data) / 1e6:.1f} MB)")
@@ -126,7 +137,7 @@ def main():
         if name in ("warning", "error"):
             log(f"  {name}: {json.dumps(ev)[:700]}")
         if name == "error":
-            raise SystemExit("transkripsiya xato")
+            raise SystemExit("transkripsiya xato: " + json.dumps(ev)[:600])
         if name == "final":
             final = ev
         if name == "done":
