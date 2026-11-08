@@ -58,7 +58,7 @@ jobs:
         run: |
           uv run --no-sync python - <<'PY'
           from huggingface_hub import snapshot_download
-          for repo in ("k2-fsa/OmniVoice", "eustlb/higgs-audio-v2-tokenizer", "Systran/faster-whisper-small", "facebook/nllb-200-distilled-600M"):
+          for repo in ("k2-fsa/OmniVoice", "eustlb/higgs-audio-v2-tokenizer", "Systran/faster-whisper-small"):
               p = snapshot_download(repo)
               print("model:", repo, "->", p, flush=True)
           PY
@@ -90,7 +90,7 @@ jobs:
           OMNIVOICE_DATA_DIR: ${{ runner.temp }}/ov_data
         run: |
           set -o pipefail
-          python3 tool/voicedub/run.py work/clip.mp4 "${{ inputs.target || 'uz' }}" out 2>&1 | tee out/driver.log
+          VS_TRANSLATIONS=tool/voicedub/uz_translations.json python3 tool/voicedub/run.py work/clip.mp4 "${{ inputs.target || 'uz' }}" out 2>&1 | tee out/driver.log
 
       - name: Backend logi (oxiri)
         if: always()

@@ -98,7 +98,7 @@ def main():
     os.makedirs(outdir, exist_ok=True)
 
     # 0. Model litsenziyalari (sinov uchun ephemeral muhitda qabul qilinadi; OmniVoice va NLLB vaznlari CC-BY-NC — faqat shaxsiy sinov)
-    for repo in os.environ.get("VS_MODELS", "k2-fsa/OmniVoice,eustlb/higgs-audio-v2-tokenizer,Systran/faster-whisper-small,facebook/nllb-200-distilled-600M").split(","):
+    for repo in os.environ.get("VS_MODELS", "k2-fsa/OmniVoice,eustlb/higgs-audio-v2-tokenizer,Systran/faster-whisper-small").split(","):
         try:
             st = call("GET", "/models/licenses/acceptance/" + repo)
             log(f"litsenziya {repo}: {st.get('state')} (kerak={st.get('required')}, litsenziya={st.get('license')})")
@@ -151,23 +151,37 @@ def main():
     for s in segs:
         log(f"   [{s['start']:.1f}-{s['end']:.1f}] {s.get('speaker_id')}: {s.get('text')}")
 
-    # 4. Tarjima (o'zbekcha)
-    log(f"tarjima -> {target} ...")
-    tr = call("POST", "/dub/translate", {
-        "segments": [{"id": s["id"], "text": s["text"], "target_lang": target,
-                      "slot_seconds": s["end"] - s["start"], "start": s["start"], "end": s["end"]} for s in segs],
-        "target_lang": target, "job_id": job_id, "provider": os.environ.get("VS_TRANSLATE", "nllb"),
-        "source_lang": src_lang, "quality": "fast",
-    })
-    by_id = {t["id"]: t for t in tr.get("translated", [])}
+    # 4. Tarjima (o'zbekcha). Tayyor tarjima fayli bo'lsa (VS_TRANSLATIONS) — shu ishlatiladi (qo'lda yozilgan, vaqtga sig'adigan),
+    # aks holda VoiceStudio tarjimoni (VS_TRANSLATE, standart nllb).
+    pre = None
+    tf = os.environ.get("VS_TRANSLATIONS")
+    if tf and os.path.exists(tf):
+        pre = json.load(open(tf, encoding="utf-8"))
+        if len(pre) != len(segs):
+            log(f"  tayyor tarjima soni mos emas ({len(pre)} != {len(segs)}) — VoiceStudio tarjimoniga o'tiladi")
+            pre = None
+    tr = {}
     merged = []
-    for s in segs:
-        t = by_id.get(s["id"]) or {}
-        txt = t.get("text") or s["text"]
-        if t.get("error") or not t.get("text"):
-            raise SystemExit(f"tarjima muvaffaqiyatsiz [{s['id']}]: {t.get('error') or 'matn yo`q'}")
-        log(f"   -> {txt}")
-        merged.append({**s, "text": txt})
+    if pre is not None:
+        log(f"tayyor tarjima ishlatilmoqda ({tf})")
+        for s, txt in zip(segs, pre):
+            log(f"   -> {txt}")
+            merged.append({**s, "text": txt})
+    else:
+        log(f"tarjima -> {target} ...")
+        tr = call("POST", "/dub/translate", {
+            "segments": [{"id": s["id"], "text": s["text"], "target_lang": target,
+                          "slot_seconds": s["end"] - s["start"], "start": s["start"], "end": s["end"]} for s in segs],
+            "target_lang": target, "job_id": job_id, "provider": os.environ.get("VS_TRANSLATE", "nllb"),
+            "source_lang": src_lang, "quality": "fast",
+        })
+        by_id = {t["id"]: t for t in tr.get("translated", [])}
+        for s in segs:
+            t = by_id.get(s["id"]) or {}
+            if t.get("error") or not t.get("text"):
+                raise SystemExit(f"tarjima muvaffaqiyatsiz [{s['id']}]: {t.get('error') or 'matn yo`q'}")
+            log(f"   -> {t['text']}")
+            merged.append({**s, "text": t["text"]})
     json.dump({"source": segs, "translated": merged, "raw": tr}, open(os.path.join(outdir, "segments.json"), "w"), ensure_ascii=False, indent=1)
 
     # 5. Ovozlash: har bir qator o'z spikerining klonlangan ovozi bilan
@@ -176,7 +190,9 @@ def main():
         "segments": [{
             "start": s["start"], "end": s["end"], "text": s["text"], "target_lang": target,
             "profile_id": "auto:" + safe_name(s.get("speaker_id") or "Speaker 1"),
+            "effect_preset": os.environ.get("VS_EFFECT", "raw"),
         } for s in merged],
+        "num_step": int(os.environ.get("VS_NUM_STEP", "32")),
         "language": "Uzbek", "language_code": target,
         "timing_strategy": os.environ.get("VS_TIMING", "strict_slot"),
         "voice_match": "consistent",
