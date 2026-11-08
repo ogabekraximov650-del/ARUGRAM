@@ -1,7 +1,7 @@
 name: ARUDRIVE qabul boti (Telegram -> R2)
 
 # Botga (`@arudrivebot`) forward qilingan video/fayl sessiya orqali yuklab olinadi, R2 ga yuboriladi (worker faqat havola beradi),
-# keyin worker Telegram kanaliga saqlaydi. Run ko'pi bilan ~57 daqiqa ishlaydi va o'zi to'xtaydi.
+# keyin worker Telegram kanaliga saqlaydi. Run xabar bo'lsa ham, bo'lmasa ham 30 daqiqa o'chmay turadi, keyin o'zi to'xtaydi.
 # Cron har 5 daqiqada: `concurrency` tufayli bir vaqtda BITTA run bor, ishlab turganda yangi tick navbatda kutadi
 # (daqiqa sarflamaydi) va birinchisi tugashi bilan boshlanadi — bo'shliq ~0-5 daqiqa. Bot o'chiq paytdagi xabarlar
 # keyingi run boshida chat tarixidan olinadi (hech narsa yo'qolmaydi).
@@ -55,13 +55,13 @@ jobs:
           echo "::add-mask::$BT"
           echo "BOT_TOKEN=$BT" >> "$GITHUB_ENV"
 
-      - name: Bot (~57 daqiqa)
+      - name: Bot (30 daqiqa o'chmay turadi)
         env:
           ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
           TG_API_ID: ${{ secrets.TG_API_ID }}
           TG_API_HASH: ${{ secrets.TG_API_HASH }}
           SESSION: ${{ runner.temp }}/tgbot
-          RUN_MIN: '57'
+          RUN_MIN: '30'
         run: python3 tool/tgbot/bot.py
 
       - name: Sessiyani o'chirish

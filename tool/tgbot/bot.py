@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """ARUDRIVE qabul boti: botga forward qilingan video/fayl -> R2 -> Telegram kanali (worker saqlaydi).
 
-Ikkinchi akkauntdagi repoda `tgbot.yml` (cron har 5 daqiqada, bir vaqtda BITTA run) ishga tushiradi; run ko'pi bilan ~57 daqiqa
-ishlaydi va o'zi to'xtaydi (Actions to'xtatilsa — SIGTERM — ham tinchgina chiqadi).
+Ikkinchi akkauntdagi repoda `tgbot.yml` (cron har 5 daqiqada, bir vaqtda BITTA run) ishga tushiradi; run 30 daqiqa o'chmay turadi
+(xabar bo'lsa ham, bo'lmasa ham) va o'zi to'xtaydi (Actions to'xtatilsa — SIGTERM — ham tinchgina chiqadi).
 
 Qanday ishlaydi:
   * Foydalanuvchi videoni bot chatiga (`@arudrivebot`) forward qiladi. Sessiya akkaunti (MTProto, pyrogram) shu chatni tinglaydi va
@@ -33,7 +33,7 @@ from pyrogram.handlers import MessageHandler
 API = os.environ.get("BD_API", "https://arudrive.uzcom.workers.dev").rstrip("/")
 ENCODE_TOKEN = os.environ.get("ENCODE_TOKEN", "").strip()
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "").strip()
-RUN_MIN = int(os.environ.get("RUN_MIN", "57"))
+RUN_MIN = int(os.environ.get("RUN_MIN", "30"))
 HISTORY_HOURS = int(os.environ.get("HISTORY_HOURS", "48"))
 WORK = Path(os.environ.get("WORK_DIR", "/tmp/tgbot"))
 UA = "arudrive-tgbot"
@@ -334,7 +334,7 @@ async def main():
             notify(GREETING)
         elif is_cmd(m, "/holat"):
             left = max(0, int((DEADLINE - time.time()) / 60))
-            notify(f"✅ Bot ishlayapti. Navbatda: {queue.qsize()} ta fayl. Bu run yana ~{left} daqiqa ishlaydi.")
+            notify(f"✅ Bot ishlayapti. Navbatda: {queue.qsize()} ta fayl. Bu run yana ~{left} daqiqa o'chmay turadi.")
         elif want(m):
             queued.add(m.id)
             await queue.put(m)
@@ -346,6 +346,8 @@ async def main():
         while True:
             m = await queue.get()
             try:
+                if time.time() > DEADLINE:
+                    continue  # muddat tugadi: yangi fayl olinmaydi, belgisiz qoladi — keyingi run boshida chat tarixidan olinadi
                 await handle(app, m, me.id)  # BIR VAQTDA BITTA fayl (navbat ketma-ket)
             finally:
                 queue.task_done()
@@ -354,7 +356,7 @@ async def main():
     while not stop and time.time() < DEADLINE:
         await asyncio.sleep(1)
     log("To'xtatilmoqda: yangi ish olinmaydi, joriy ish tugashi kutiladi")
-    grace = time.time() + 120
+    grace = time.time() + 1500  # boshlangan fayl tugashiga ruxsat (yangisi olinmaydi)
     while (queue.qsize() or not queue.empty() or getattr(queue, "_unfinished_tasks", 0)) and time.time() < grace and not stop:
         await asyncio.sleep(1)
     task.cancel()
