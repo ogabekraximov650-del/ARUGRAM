@@ -227,6 +227,9 @@ fn gate(req: &Request, env: &Env, path: &str) -> bool {
     if ACTION_PATHS.contains(&path) {
         return true; // `bdrive::route` ichida `encode_token_ok` tekshiriladi
     }
+    if path == "/api/tg/hook" {
+        return true; // `bdrive::tg_hook` ichida Telegram'ning `X-Telegram-Bot-Api-Secret-Token` sarlavhasi tekshiriladi
+    }
     // Admin/diagnostika: `X-Encode-Token` (ENCODE_TOKEN) bilan hamma yo'l ochiq (ilova imzosisiz sinash uchun).
     if encode_token_ok(req, env) {
         return true;
@@ -283,6 +286,8 @@ async fn main(req: Request, env: Env, ctx: Context) -> Result<Response> {
             Some(id) => bdrive::warm(&env, id, widx, force).await,
             None => err404("topilmadi"),
         }
+    } else if path == "/api/tg/hook" && method == Method::Post {
+        bdrive::tg_hook(req, &env).await
     } else if path.starts_with("/api/bd/") {
         bdrive::route(req, &env, &ctx, &path).await
     } else {

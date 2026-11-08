@@ -692,20 +692,44 @@ pub(crate) async fn route(mut req: Request, env: &Env, ctx: &Context, path: &str
 
 /// Yuklangan fayl tayyor bo'lgach (yoki cron) ikkinchi akkauntdagi `bdrive.yml` ni ishga tushiradi.
 pub(crate) async fn kick(env: &Env) -> String {
+    kick_workflow(env, WORKFLOW).await
+}
+
+/// Ikkinchi akkauntdagi repoda `wf` workflow'ini ishga tushiradi (u allaqachon ishlayotgan/navbatda bo'lsa — tegmaydi).
+pub(crate) async fn kick_workflow(env: &Env, wf: &str) -> String {
     let repo = tg_secret(env, "GH_REPO");
     if !repo.contains('/') {
         return "GH_REPO yo'q".into();
     }
-    match gh_workflow_busy(env, &repo, WORKFLOW).await {
+    match gh_workflow_busy(env, &repo, wf).await {
         Ok(true) => return String::new(),
         Ok(false) => {}
         Err(e) => return e,
     }
-    match gh_api(env, Method::Post, &format!("/repos/{repo}/actions/workflows/{WORKFLOW}/dispatches"), Some(json!({"ref": "main"}))).await {
-        Ok((204, _)) => "bdrive.yml ishga tushirildi".into(),
-        Ok((code, v)) => format!("bdrive.yml ishga tushmadi (GitHub {code}): {}", v["message"].as_str().unwrap_or("")),
-        Err(e) => format!("bdrive.yml ishga tushmadi: {e}"),
+    match gh_api(env, Method::Post, &format!("/repos/{repo}/actions/workflows/{wf}/dispatches"), Some(json!({"ref": "main"}))).await {
+        Ok((204, _)) => format!("{wf} ishga tushirildi"),
+        Ok((code, v)) => format!("{wf} ishga tushmadi (GitHub {code}): {}", v["message"].as_str().unwrap_or("")),
+        Err(e) => format!("{wf} ishga tushmadi: {e}"),
     }
+}
+
+/// Telegram webhook sirli kaliti (ENCODE_TOKEN dan hosil qilinadi, alohida sir kerak emas): `setWebhook` da `secret_token` shu.
+pub(crate) fn tg_hook_secret(env: &Env) -> String {
+    use sha2::{Digest, Sha256};
+    let d = Sha256::digest(format!("arudrive-tghook:{}", tg_secret(env, "ENCODE_TOKEN")).as_bytes());
+    hex_of(&d)[..32].to_string()
+}
+
+/// `POST /api/tg/hook` — `@arudrivebot` ga xabar kelganda Telegram shu yerga yuboradi; worker qabul botining Actions'ini
+/// (`tgbot.yml`) ishga tushiradi (ishlab turgan bo'lsa tegmaydi). Xabarning o'zi bu yerda saqlanmaydi: bot uni sessiya orqali
+/// chat tarixidan oladi, shu sabab webhook faqat "uyg'otuvchi".
+pub(crate) async fn tg_hook(req: Request, env: &Env) -> Result<Response> {
+    let got = req.headers().get("X-Telegram-Bot-Api-Secret-Token").ok().flatten().unwrap_or_default();
+    if tg_secret(env, "ENCODE_TOKEN").len() < 16 || !ct_eq(got.trim(), &tg_hook_secret(env)) {
+        return json_resp(&json!({"error": "forbidden"}), 403);
+    }
+    let msg = kick_workflow(env, "tgbot.yml").await;
+    ok(json!({"ok": true, "kick": msg}))
 }
 
 // ── Ko'rish: Telegram -> Cloudflare keshi (R2'siz) ─────────────
