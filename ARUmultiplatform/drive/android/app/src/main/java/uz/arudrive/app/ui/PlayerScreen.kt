@@ -5,7 +5,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -39,6 +39,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.style.TextAlign
@@ -68,6 +69,8 @@ fun PlayerScreen(file: DriveFile, onBack: () -> Unit) {
     var cacheFailed by remember(file.id) { mutableStateOf(false) }
     var attempt by remember(file.id) { mutableIntStateOf(0) }
     var drag by remember { mutableStateOf<Float?>(null) }
+    var flashDir by remember { mutableIntStateOf(0) }   // -1 chap, +1 o'ng: 10 soniya sakrash belgisi
+    var flashTick by remember { mutableIntStateOf(0) }
     // Oxirgi ko'rilgan joydan davom etadi (telefon xotirasidan).
     val startMs = remember(file.id) { PlayPos.get(ctx, file.id) }
     var note by remember(file.id) { mutableStateOf("") }
@@ -123,6 +126,7 @@ fun PlayerScreen(file: DriveFile, onBack: () -> Unit) {
             }
         }
     }
+    LaunchedEffect(flashTick) { if (flashTick > 0) { delay(600); flashDir = 0 } }
     LaunchedEffect(player) {
         var n = 0
         while (true) {
@@ -152,10 +156,29 @@ fun PlayerScreen(file: DriveFile, onBack: () -> Unit) {
             Column(Modifier.fillMaxSize()) {
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     if (cacheReady) PlayerSurface(player, Modifier.fillMaxSize())
+                    // 90 soniyadan uzun videoda ikki chetga ikki marta bosish: chap — 10 soniya orqaga, o'ng — 10 soniya oldinga
+                    // (o'rtada — pauza/davom). Qisqa videoda ikki marta bosish ham shunchaki pauza/davom.
+                    val longVideo = player.durationMs > 90_000
                     Box(
-                        Modifier.fillMaxSize().clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { if (cacheReady) player.toggle() },
+                        Modifier.fillMaxSize().pointerInput(longVideo, cacheReady) {
+                            detectTapGestures(
+                                onTap = { if (cacheReady) player.toggle() },
+                                onDoubleTap = { off ->
+                                    if (!cacheReady) return@detectTapGestures
+                                    val w = size.width
+                                    when {
+                                        longVideo && off.x < w * 0.35f -> { player.seekBy(-10_000); flashDir = -1; flashTick++ }
+                                        longVideo && off.x > w * 0.65f -> { player.seekBy(10_000); flashDir = 1; flashTick++ }
+                                        else -> player.toggle()
+                                    }
+                                },
+                            )
+                        },
                         contentAlignment = Alignment.Center,
                     ) {
+                        if (flashDir != 0) Box(Modifier.align(if (flashDir < 0) Alignment.CenterStart else Alignment.CenterEnd).padding(horizontal = 36.dp)) {
+                            Text(if (flashDir < 0) "⏪ 10" else "10 ⏩", color = Color.White, fontSize = 18.sp, modifier = Modifier.clip(RoundedCornerShape(20.dp)).background(Color.Black.copy(alpha = 0.55f)).padding(horizontal = 14.dp, vertical = 8.dp))
+                        }
                         if (!cacheReady || !player.ready) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 CircularProgressIndicator(color = Color.White.copy(alpha = 0.54f), strokeWidth = 2.dp, modifier = Modifier.size(34.dp))
