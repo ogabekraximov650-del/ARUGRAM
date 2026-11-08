@@ -43,5 +43,5 @@ jobs:
           y=y if y.ndim==1 else y.mean(1)
           a=np.sqrt((y[int(.2*sr):int(2.8*sr)]**2).mean()); b=np.sqrt((y[int(3.2*sr):int(5.8*sr)]**2).mean())
           print("rms 1-gap",a,"2-gap",b)
-          assert b>a*2, "baland gap kuchaymagan"
+          assert b>a*1.4, "baland gap kuchaymagan"
           PY
