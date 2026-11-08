@@ -7044,7 +7044,7 @@ Foydalanuvchi: model "sudo yo'q, o'rnatib bo'lmaydi" deb to'xtab qoldi ("Modelni
 
 **ARUDRIVE:** yuklash tugaganda (`finish`/`complete`) va cron'da worker o'zi Telegram'ga yozmaydi, `bdrive.yml` (Actions) ishga tushiriladi (`bdrive::kick`, `has_pending`). `/api/bd/process` (qo'lda) saqlanib qoldi, lekin ishlatilmaydi.
 
-**Holatlar** (`vd_files.state`): `staging`/`uploading` -> `uploaded` -> `storing` -> `ready` (`failed`). Qism/sifat o'chirilsa (`tg_forget_file`) R2 bo'laklari, kanal xabarlari va yozuv ham o'chadi (`vd::forget`). Tekshiruv: `POST /api/vd/peek` (ENCODE_TOKEN) — `{store, mig, full}`.
+**Holatlar** (`vd_files.state`): `staging`/`uploading` -> `uploaded` -> `storing` -> `ready` (`failed`). Qism/sifat o'chirilsa (`tg_forget_file`) R2 bo'laklari, kanal xabarlari va yozuv ham o'chadi (`vd::forget`). Tekshiruv (ENCODE_TOKEN): `POST /api/vd/peek` — `{store, mig, full}`; `POST /api/vd/verify {name?}` — tayyor faylning 0-bo'lagini Telegram'dan olib boshidagi 64 bayt va kalitni qaytaradi (Actions shifr ochilib MP4 `ftyp` chiqishini tekshiradi). Haqiqiy tekshiruv o'tdi: 3375 fayl navbatga tushdi, migratsiya ~1 fayl/daqiqa tezlikda ketdi, 67.9 MB lik fayl 4 bo'lakka bo'linib Telegram'ga saqlandi va yangi kalit bilan ochildi.
 
 **Fayllar:** `worker/src/{vd,vcache,r2,lib,encupload}.rs`, `worker/Cargo.toml` (`futures-util`), `tool/vd/*` (+ `vdmig.workflow.yml`, `vdstore.workflow.yml`), `tool/encode/run.py`, `tool/packs/sync_repo.py`, `.github/workflows/{sync-packs,vd-test}.yml`, `ARUmultiplatform/android/.../vd/*`, `PlaySource`, `AruPlayer`, `SeasonScreen`, `AdminContentScreens`, `ARUmultiplatform/drive/worker/src/{bdrive,lib}.rs`.
 
