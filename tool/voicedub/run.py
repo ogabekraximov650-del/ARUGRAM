@@ -97,8 +97,8 @@ def main():
     video, target, outdir = sys.argv[1], sys.argv[2], sys.argv[3]
     os.makedirs(outdir, exist_ok=True)
 
-    # 0. Model litsenziyalari (sinov uchun ephemeral muhitda qabul qilinadi; OmniVoice vaznlari CC-BY-NC — faqat shaxsiy sinov)
-    for repo in os.environ.get("VS_MODELS", "k2-fsa/OmniVoice,Systran/faster-whisper-small").split(","):
+    # 0. Model litsenziyalari (sinov uchun ephemeral muhitda qabul qilinadi; OmniVoice va NLLB vaznlari CC-BY-NC — faqat shaxsiy sinov)
+    for repo in os.environ.get("VS_MODELS", "k2-fsa/OmniVoice,eustlb/higgs-audio-v2-tokenizer,Systran/faster-whisper-small,facebook/nllb-200-distilled-600M").split(","):
         try:
             st = call("GET", "/models/licenses/acceptance/" + repo)
             log(f"litsenziya {repo}: {st.get('state')} (kerak={st.get('required')}, litsenziya={st.get('license')})")
@@ -156,7 +156,7 @@ def main():
     tr = call("POST", "/dub/translate", {
         "segments": [{"id": s["id"], "text": s["text"], "target_lang": target,
                       "slot_seconds": s["end"] - s["start"], "start": s["start"], "end": s["end"]} for s in segs],
-        "target_lang": target, "job_id": job_id, "provider": os.environ.get("VS_TRANSLATE", "google"),
+        "target_lang": target, "job_id": job_id, "provider": os.environ.get("VS_TRANSLATE", "nllb"),
         "source_lang": src_lang, "quality": "fast",
     })
     by_id = {t["id"]: t for t in tr.get("translated", [])}
@@ -164,8 +164,8 @@ def main():
     for s in segs:
         t = by_id.get(s["id"]) or {}
         txt = t.get("text") or s["text"]
-        if t.get("error"):
-            log(f"  tarjima xatosi [{s['id']}]: {t['error']}")
+        if t.get("error") or not t.get("text"):
+            raise SystemExit(f"tarjima muvaffaqiyatsiz [{s['id']}]: {t.get('error') or 'matn yo`q'}")
         log(f"   -> {txt}")
         merged.append({**s, "text": txt})
     json.dump({"source": segs, "translated": merged, "raw": tr}, open(os.path.join(outdir, "segments.json"), "w"), ensure_ascii=False, indent=1)

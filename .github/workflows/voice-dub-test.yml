@@ -38,7 +38,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/huggingface
-          key: hf-voicestudio-v2
+          key: hf-voicestudio-v3
 
       - name: Python muhiti (CPU torch)
         working-directory: tool/voicedub/voicestudio
@@ -53,7 +53,7 @@ jobs:
         run: |
           uv run --no-sync python - <<'PY'
           from huggingface_hub import snapshot_download
-          for repo in ("k2-fsa/OmniVoice", "Systran/faster-whisper-small"):
+          for repo in ("k2-fsa/OmniVoice", "eustlb/higgs-audio-v2-tokenizer", "Systran/faster-whisper-small", "facebook/nllb-200-distilled-600M"):
               p = snapshot_download(repo)
               print("model:", repo, "->", p, flush=True)
           PY
