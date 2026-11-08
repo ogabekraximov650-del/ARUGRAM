@@ -1,0 +1,83 @@
+name: VoiceStudio dublyaj sinovi (vaqtinchalik)
+
+# Sinov: kichik haqiqiy video -> VoiceStudio (CPU) -> o'zbekcha dublyaj (asl ovoz klonlanadi). Natija artifact sifatida yuklanadi.
+on:
+  workflow_dispatch:
+    inputs:
+      video_url:
+        description: 'Video manzili (standart: AQSh hukumati nutqi, ommaviy mulk, Wikimedia Commons)'
+        default: 'https://commons.wikimedia.org/wiki/Special:FilePath/Weekly_Address_(2009-01-24),_small.ogv'
+      seconds:
+        description: 'Necha soniya kesib olinsin'
+        default: '30'
+      target:
+        description: 'Maqsad til'
+        default: 'uz'
+
+permissions:
+  contents: read
+
+jobs:
+  dub:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: debpalash/VoiceStudio
+          path: vs
+          fetch-depth: 1
+
+      - name: Tizim paketlari
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg espeak-ng libsndfile1
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: HF kesh
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-voicestudio-v1
+
+      - name: Python muhiti (CPU torch)
+        working-directory: vs
+        run: uv sync --locked --no-group cuda --group cpu
+
+      - name: Video
+        run: |
+          mkdir -p work out
+          curl -fsSL -A 'arugram-ci/1.0 (https://github.com/ogabekraximov650-del/ARUGRAM)' -o work/src.bin "${{ inputs.video_url }}"
+          ls -la work/src.bin
+          ffmpeg -hide_banner -loglevel error -y -ss 3 -t ${{ inputs.seconds }} -i work/src.bin -c:v libx264 -preset veryfast -crf 28 -vf scale=-2:360 -c:a aac -ar 44100 work/clip.mp4
+          ffprobe -hide_banner -v error -show_entries format=duration -of csv=p=0 work/clip.mp4
+          cp work/clip.mp4 out/original_clip.mp4
+
+      - name: Backend
+        working-directory: vs
+        env:
+          OMNIVOICE_DATA_DIR: ${{ runner.temp }}/ov_data
+        run: |
+          nohup uv run --no-sync uvicorn main:app --app-dir backend --host 127.0.0.1 --port 8000 > "$GITHUB_WORKSPACE/out/backend.log" 2>&1 &
+          for i in $(seq 1 90); do
+            if curl -fs http://127.0.0.1:8000/health >/dev/null; then echo "backend tayyor"; exit 0; fi
+            sleep 3
+          done
+          echo "backend ishga tushmadi"; tail -n 60 "$GITHUB_WORKSPACE/out/backend.log"; exit 1
+
+      - name: Dublyaj
+        env:
+          OMNIVOICE_DATA_DIR: ${{ runner.temp }}/ov_data
+        run: python3 tool/voicedub/run.py work/clip.mp4 "${{ inputs.target }}" out 2>&1 | tee out/driver.log
+
+      - name: Backend logi (oxiri)
+        if: always()
+        run: tail -n 120 out/backend.log || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dub-natija
+          path: out/
+          retention-days: 7
