@@ -64,7 +64,7 @@ import kotlin.math.max
 @Composable
 fun PlayerScreen(file: DriveFile, onBack: () -> Unit) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
-    val player = remember(file.id) { AruPlayer(ctx, Warm.mediaSourceFactory(file.id, ctx)) }
+    val player = remember(file.id) { AruPlayer(ctx, Warm.mediaSourceFactory(file.id, ctx, file.size)) }
     var cacheReady by remember(file.id) { mutableStateOf(false) }
     var cacheFailed by remember(file.id) { mutableStateOf(false) }
     var attempt by remember(file.id) { mutableIntStateOf(0) }
@@ -92,7 +92,7 @@ fun PlayerScreen(file: DriveFile, onBack: () -> Unit) {
         cacheFailed = false
         player.error = null
         waited = 0
-        if (Warm.fresh(ctx, file.id)) {
+        if (Warm.fresh(ctx, file.id) || uz.arudrive.app.data.BlockCache.has(ctx, file.id, 0)) {
             // Belgi yangi: pleyer DARHOL ochiladi (isitish so'rovi kutilmaydi). Kesh o'chgan bo'lsa pleyer 503 oladi va
             // quyidagi tiklash oynani majburan qayta isitadi (ARUMEDIATV `_handleFatalError` kabi).
             Warm.markWarm(file.id, 0)

@@ -6982,3 +6982,11 @@ Foydalanuvchi: model "sudo yo'q, o'rnatib bo'lmaydi" deb to'xtab qoldi ("Modelni
 - **Nima:** bosh sahifada ekranda 0,5 soniya ko'rinib turgan har bir video (`playable`) uchun, "keshda" belgisi (7 kun) bo'lmasa, fonda `GET /api/warm/bd~<id>?w=0` yuboriladi (bittadan ketma-ket). Kesh to'la bo'lsa worker faqat "cached" qaytaradi (Telegram'ga bormaydi); bo'sh bo'lsa birinchi bo'lak Telegram'dan keshga yoziladi. Muvaffaqiyatda belgi yoziladi, bosilganda video darhol ochiladi.
 - **Fayllar:** `drive/android/.../ui/HomeScreen.kt` (ko'rinadigan elementlarni kuzatish), `data/Warm.kt` (`prefetchFirst`).
 - **Eslatma:** kesh o'chib ketgan bo'lsa pleyer 503 oladi va avvalgidek majburan qayta isitadi.
+
+## ARUDRIVE: telefonda doimiy shifrlangan video keshi (1 MiB bo'laklar)
+
+- **Nima:** pleyer o'qigan video 1 MiB bo'laklarga bo'linib, har biri alohida AES-128-GCM bilan shifrlanib `filesDir/vcache/<id>/<raqam>` ga yoziladi (12 bayt nonce + shifrmatn + teg). Keyingi safar ko'rilgan joy tarmoqsiz va workersiz ochiladi. Hajm chegarasi 2 GiB, oshsa eng eski (oxirgi o'qilgan) bo'laklar o'chadi.
+- **Xavfsizlik:** kalit Android Keystore'da (chiqarib bo'lmaydi); AAD = `<id>:<raqam>` (bo'lakni almashtirib bo'lmaydi); buzilgan/kalit yo'qolgan bo'lak o'chirilib tarmoqdan qayta olinadi.
+- **Qanday ishlaydi:** `EncCacheDataSource` (ExoPlayer manbasi) avval keshdan o'qiydi; bo'lak yo'q bo'lsa worker'dan (`ResolvingDataSource` -> isitish) shu bo'lakdan ketma-ket o'qib, bo'lakni yozadi va pleyerga beradi. Fayl hajmi ro'yxatdan (`size`); noma'lum (0) bo'lsa kesh o'chiq.
+- **Fayllar:** `data/BlockCache.kt`, `data/EncCacheDataSource.kt`, `data/Warm.kt` (`mediaSourceFactory(id, ctx, size)`), `ui/PlayerScreen.kt` (birinchi bo'lak telefonda bo'lsa pleyer isitishni kutmaydi).
+- **Eslatma:** Rust `video_cache.rs` (ARUMEDIATV) ga tegilmadi — ARUDRIVE Kotlin ilovasi, shu g'oyaning Kotlin'dagi nusxasi.

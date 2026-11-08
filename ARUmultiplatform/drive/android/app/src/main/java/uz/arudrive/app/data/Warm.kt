@@ -54,7 +54,7 @@ object Warm {
         override fun onTransferEnd(source: androidx.media3.datasource.DataSource, dataSpec: DataSpec, isNetwork: Boolean) { reads.remove(dataSpec) }
     }
 
-    fun mediaSourceFactory(id: String, context: android.content.Context): DefaultMediaSourceFactory {
+    fun mediaSourceFactory(id: String, context: android.content.Context, size: Long): DefaultMediaSourceFactory {
         val resolver = ResolvingDataSource.Resolver { spec: DataSpec ->
             val w = spec.position / Api.WARM_WINDOW
             val key = "$id:$w"
@@ -64,8 +64,12 @@ object Warm {
             }
             spec
         }
+        val network = ResolvingDataSource.Factory(DefaultHttpDataSource.Factory().setConnectTimeoutMs(15_000).setReadTimeoutMs(60_000).setTransferListener(Tracker(id)), resolver)
+        // Telefondagi DOIMIY shifrlangan 1 MiB bo'laklar keshi: ko'rilgan joy tarmoqsiz ochiladi (ARUMEDIATV kabi).
+        val app = context.applicationContext
+        if (size <= 0) return DefaultMediaSourceFactory(context).setDataSourceFactory(network) // hajm noma'lum — keshsiz
         return DefaultMediaSourceFactory(context).setDataSourceFactory(
-            ResolvingDataSource.Factory(DefaultHttpDataSource.Factory().setConnectTimeoutMs(15_000).setReadTimeoutMs(60_000).setTransferListener(Tracker(id)), resolver),
+            androidx.media3.datasource.DataSource.Factory { EncCacheDataSource(app, id, size, network.createDataSource()) },
         )
     }
 
