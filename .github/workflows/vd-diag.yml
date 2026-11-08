@@ -1,0 +1,27 @@
+name: VD tashxis (vaqtinchalik)
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/vd-diag.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  d:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: secret
+    env:
+      API_BASE: https://arumediatv.uzcom.workers.dev
+    steps:
+      - name: Navbat va ishga tushirish (faqat sonlar)
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+        run: |
+          call() { curl -sS -m 90 -X POST -H "X-Encode-Token: $ENCODE_TOKEN" -H "Content-Type: application/json" -H "User-Agent: arumediatv-vd" -d '{}' "$API_BASE$1"; echo; }
+          echo "peek:"; call /api/vd/peek
+          echo "enqueue:"; call /api/vd/mig/enqueue
+          sleep 60
+          echo "peek (1 daqiqadan keyin):"; call /api/vd/peek
