@@ -4912,9 +4912,13 @@ async fn history_route(
                 .and_then(|u| u.query_pairs().find(|(k, _)| k == "since").and_then(|(_, v)| v.parse().ok()))
                 .unwrap_or(0);
             if since > 0 && since < now {
-                let (m, reliable) = marks_each(env, &["watch_history_db",
+                // Tarix belgisi SHU foydalanuvchiniki (`wh_<id>`, sinxronlashda yangilanadi): boshqa odamlarning tarixi o'zgarsa bu odam
+                // uchun Turso'ga borilmaydi. Belgi hali yo'q bo'lsa (yangi deploy) umumiy jadval belgisi ishlatiladi.
+                let own = format!("wh_{me}");
+                let (m, reliable) = marks_each(env, &[own.as_str(), "watch_history_db",
                     "anime_db", "season_db", "epizod_db", "del_watch_history_db"]).await;
-                let hist = m[0];
+                let hist = if m[0] > 0 { m[0] } else { m[1] };
+                let m = &m[1..];
                 let other = m[1..].iter().copied().max().unwrap_or(0);
                 if reliable && other <= since {
                     if hist <= since {
@@ -5562,6 +5566,10 @@ async fn sync_route(mut req: Request, env: &Env) -> Result<Response> {
     }
 
     turso_batch(env, &stmts).await?;
+    // Shu foydalanuvchining tarixi o'zgardi — uning shaxsiy belgisi (`/api/history?since=` Turso'siz javob berishi uchun).
+    if !hist_args.is_empty() || !hide_args.is_empty() {
+        marks_bump(env, &[format!("wh_{me}")]).await;
+    }
     if hidden_value.is_some() || consent_value.is_some() {
         forget_session_memo(&token);
     }
@@ -14564,13 +14572,20 @@ async fn main(req: Request, env: Env, ctx: Context) -> Result<Response> {
                 set_cors(&mut r);
                 return Ok(r);
             }
-            // ── UMUMIY RO'YXAT KESHI (Cloudflare): foydalanuvchiga bog'liq bo'lmagan ro'yxatlar (`/api/seasons`, `/api/seasons/anime/<id>`) javobi
-            // jadvallar belgisi (versiya) bilan shu mintaqa keshiga yoziladi — ETag'i yo'q yoki boshqa foydalanuvchi so'rasa ham Turso'ga
-            // BORILMAYDI. Jadval o'zgarsa belgi yangilanadi (butun dunyoda, `MarkHub`), kalit o'zgaradi va eski nusxa avtomatik e'tiborsiz qoladi.
-            let shared = path == "/api/seasons" || path.starts_with("/api/seasons/anime/");
-            let host = req.url().ok().and_then(|u| u.host_str().map(String::from)).unwrap_or_default();
-            let ckey = format!("https://fulutter-chunk-cache.internal/list/{host}{path}?m={mark}{bucket}");
-            if shared {
+            // ── JAVOB TANASI KESHI (Cloudflare, `etag_tables` dagi hamma GET yo'li) ──
+            // Kalit = yo'l + so'rov satri + jadvallar belgisi (versiya) + so'rovchi: foydalanuvchiga bog'liq bo'lmagan ro'yxatlar (`/api/seasons`,
+            // `/api/anime`...) uchun UMUMIY ("pub"), qolganlari uchun faqat shu sessiya (token xeshi) — boshqa odamga ko'rinmaydi. Jadval
+            // o'zgarsa belgi butun dunyoda yangilanadi (`MarkHub`) va eski nusxa o'zi e'tiborsiz qoladi; keyingi so'rov (istalgan mintaqadan)
+            // Turso'dan BIR marta o'qib keshga yozadi. Shaxsiy javob keshdan faqat YAROQLI sessiya bilan beriladi (chiqqan/bloklangan token olmaydi).
+            let shared = path == "/api/seasons" || path.starts_with("/api/seasons/anime/") || path == "/api/anime" || path.starts_with("/api/anime/janr/");
+            let tok = bearer(&req);
+            let cacheable = shared || (!tok.is_empty() && session_user(&env, &tok).await?.is_some());
+            let (host, query) = req.url().ok()
+                .map(|u| (u.host_str().map(String::from).unwrap_or_default(), u.query().map(String::from).unwrap_or_default()))
+                .unwrap_or_default();
+            let wkey = if shared { "pub".to_string() } else { who.clone() };
+            let ckey = format!("https://fulutter-chunk-cache.internal/list/{host}{path}?q={query}&w={wkey}&m={mark}{bucket}");
+            if cacheable {
                 if let Ok(creq) = Request::new(&ckey, Method::Get) {
                     if let Ok(Some(mut hit)) = Cache::default().get(&creq, false).await {
                         if let Ok(body) = hit.text().await {
@@ -14588,7 +14603,7 @@ async fn main(req: Request, env: Env, ctx: Context) -> Result<Response> {
             let mut resp = route(req, env, ctx).await?;
             if resp.status_code() == 200 {
                 let _ = resp.headers_mut().set("ETag", &etag);
-                if shared {
+                if cacheable {
                     // Tana o'qiladi, keshga yoziladi va xuddi shunday qayta yig'iladi.
                     if let Ok(body) = resp.text().await {
                         if let (Ok(creq), Ok(mut centry)) = (Request::new(&ckey, Method::Get), Response::ok(body.clone())) {
@@ -14624,7 +14639,10 @@ fn etag_tables(path: &str) -> Option<&'static [&'static str]> {
         "watch_history_db", "favorites_db", "ratings_db", "comments_db",
         "users_db", "anime_db", "season_db", "epizod_db",
     ];
+    const ANIMES: &[&str] = &["anime_db", "season_db"];
+    const ANIME_JANR: &[&str] = &["anime_db"];
     match path {
+        "/api/anime" => return Some(ANIMES),
         "/api/seasons" => return Some(SEASONS),
         "/api/favorites" => return Some(FAVS),
         "/api/me/stats" => return Some(ME_STATS),
@@ -14634,6 +14652,9 @@ fn etag_tables(path: &str) -> Option<&'static [&'static str]> {
         if rest.parse::<i64>().is_ok() {
             return Some(SEASONS);
         }
+    }
+    if path.strip_prefix("/api/anime/janr/").is_some_and(|j| !j.is_empty() && !j.contains('/')) {
+        return Some(ANIME_JANR);
     }
     if let Some(rest) = path.strip_prefix("/api/season/") {
         let p: Vec<&str> = rest.split('/').collect();
