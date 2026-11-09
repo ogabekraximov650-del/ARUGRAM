@@ -39,4 +39,4 @@ jobs:
         run: |
           T=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
           curl -sS -m 60 -X POST -H "X-Encode-Token: $T" -H "Content-Type: application/json" -d '{}' "$API_BASE/api/encode/qdiag" \
-            | python3 -c 'import json,sys,time; d=json.load(sys.stdin); print("live_keys:", d.get("live_keys")); print("now:", d.get("now")); print("q_states:", d.get("q_states")); print("pending:", d.get("pending")); print("holat:", (d.get("holat") or "")[:2500])'
+            | python3 -c 'import json,sys,time; d=json.load(sys.stdin); print("live_keys:", d.get("live_keys")); [print("LIVE", k, v.get("age_s"), "s |", (v.get("head") or "").replace(chr(10), " / ")[:420]) for k, v in (d.get("live_info") or {}).items()]; print("now:", d.get("now")); print("q_states:", d.get("q_states")); print("pending:", d.get("pending")); print("holat:", (d.get("holat") or "")[:2500])'

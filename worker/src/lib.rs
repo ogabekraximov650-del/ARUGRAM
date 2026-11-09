@@ -12119,7 +12119,12 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
         let up = live.get("upload").cloned().unwrap_or(Value::Null);
         let holat = livewatch::app_all_html(env).await;
         let keys: Vec<String> = live.keys().cloned().collect();
-        return ok_nostore(json!({"jobs": jobs, "queued_by_done_count": by_done, "q_states": qs, "pending": pend,
+        // Har sifat holati: necha soniya oldin yangilangan va matn boshi (tashxis: holat xabari nega almashib turadi).
+        let live_info: serde_json::Map<String, Value> = live.iter().map(|(k, v)| (k.clone(), json!({
+            "age_s": (now - jint(v, "at")) / 1000,
+            "head": v["t"].as_str().unwrap_or("").chars().take(500).collect::<String>(),
+        }))).collect();
+        return ok_nostore(json!({"live_info": live_info, "jobs": jobs, "queued_by_done_count": by_done, "q_states": qs, "pending": pend,
             "almost_done_sample": sample, "r2": r2s, "live_keys": keys, "live_upload": up, "now": now,
             "holat_len": holat.chars().count(), "holat": holat}));
     }
