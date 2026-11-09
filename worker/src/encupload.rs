@@ -155,10 +155,12 @@ async fn on_deliver(env: &Env, msg: &Value) -> bool {
         "chat_id": channel, "from_chat_id": chat, "message_id": msg_id,
         "caption": caption, "disable_notification": true,
     })).await;
+    let copy_err = copied.as_ref().err().map(|e| e.to_string()).unwrap_or_default();
     let ch_msg = copied.ok().and_then(|c| c["message_id"].as_i64()).unwrap_or(0);
     if ch_msg <= 0 {
         tg_send(env, ADMIN_TELEGRAM_ID, &format!(
-            "\u{274C} <code>{}</code> yopiq kanalga ko'chmadi (bot kanalda admin ekanini tekshiring).", html_escape(&name))).await;
+            "\u{274C} <code>{}</code> yopiq kanalga ko'chmadi (bot kanalda admin ekanini tekshiring).\n<code>{}</code>",
+            html_escape(&name), html_escape(&copy_err))).await;
         return true;
     }
     config_put(env, &format!("dlv_msg_{name}"), &ch_msg.to_string()).await;

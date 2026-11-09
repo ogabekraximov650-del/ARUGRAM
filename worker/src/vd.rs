@@ -551,19 +551,23 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
         }
         // Kanal tekshiruvi: bot shu kanalda adminmi va xabar yubora/o'chira oladimi.
         "/api/vd/channel" => {
-            let ch = vd_channel(env);
-            let chat = tg_api(env, "getChat", json!({"chat_id": ch})).await;
+            // Ikkala kanal: `vd` (yangi) va eski (`TG_CHANNEL_ID`): bot shu kanalda adminmi, xabar yubora/o'chira oladimi.
             let me = tg_api(env, "getMe", json!({})).await.ok().and_then(|m| m["id"].as_i64()).unwrap_or(0);
-            let member = tg_api(env, "getChatMember", json!({"chat_id": ch, "user_id": me})).await;
-            ok(json!({
-                "channel": ch, "separate": tg_secret(env, "VD_CHANNEL_ID").trim().parse::<i64>().is_ok(),
-                "chat": chat.as_ref().ok().map(|c| json!({"type": c["type"], "title": c["title"]})).unwrap_or(json!(null)),
-                "chat_error": chat.as_ref().err().map(|e| e.to_string()),
-                "bot_status": member.as_ref().ok().map(|m| m["status"].clone()),
-                "can_post": member.as_ref().ok().map(|m| m["can_post_messages"].clone()),
-                "can_delete": member.as_ref().ok().map(|m| m["can_delete_messages"].clone()),
-                "member_error": member.as_ref().err().map(|e| e.to_string()),
-            }))
+            let mut out = serde_json::Map::new();
+            for (label, ch) in [("vd", vd_channel(env)), ("legacy", tg_channel_id(env))] {
+                let chat = tg_api(env, "getChat", json!({"chat_id": ch})).await;
+                let member = tg_api(env, "getChatMember", json!({"chat_id": ch, "user_id": me})).await;
+                out.insert(label.to_string(), json!({
+                    "channel": ch,
+                    "chat": chat.as_ref().ok().map(|c| json!({"type": c["type"], "title": c["title"]})).unwrap_or(json!(null)),
+                    "chat_error": chat.as_ref().err().map(|e| e.to_string()),
+                    "bot_status": member.as_ref().ok().map(|m| m["status"].clone()),
+                    "can_post": member.as_ref().ok().map(|m| m["can_post_messages"].clone()),
+                    "can_delete": member.as_ref().ok().map(|m| m["can_delete_messages"].clone()),
+                    "member_error": member.as_ref().err().map(|e| e.to_string()),
+                }));
+            }
+            ok(Value::Object(out))
         }
         "/api/vd/claim" => {
             turso_many(env, &[
