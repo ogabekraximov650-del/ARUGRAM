@@ -60,6 +60,10 @@ jobs:
           EP=ep_4_1_1_360p_1794242367764.mp4; FONT=sys_emojifont_1794244734.bin
           echo "== warm vd~$EP w=0"
           curl -sS -m 120 -w "  [HTTP %{http_code} %{time_total}s]\n" -H "X-App-Sig: $(sig GET /api/warm/vd~$EP)" "$API_BASE/api/warm/vd~$EP?w=0"
+          echo "== play 3 marta ketma-ket, OLDINDAN warm'SIZ (yangi kesh yo'li)"
+          for r in 0-1023 19000000-19001023 40000000-40001023; do
+            curl -sS -m 90 -o /dev/null -D /tmp/hh.txt -w "  Range $r -> HTTP %{http_code} %{size_download} bayt %{time_total}s\n" -H "Range: bytes=$r" -H "X-App-Sig: $(sig GET /api/play/vd~$EP)" "$API_BASE/api/play/vd~$EP"; grep -i -E "x-cache|x-warm|cf-ray" /tmp/hh.txt | tr -d '\r'
+          done
           echo "== play vd~$EP Range 0-1023"
           curl -sS -m 60 -o /tmp/p.bin -D /tmp/h.txt -w "  [HTTP %{http_code} %{size_download} bayt %{time_total}s]\n" -H "Range: bytes=0-1023" -H "X-App-Sig: $(sig GET /api/play/vd~$EP)" "$API_BASE/api/play/vd~$EP"; cat /tmp/h.txt; echo "--- body:"; head -c 200 /tmp/p.bin | tr -c '[:print:]\n' '.'; echo
           echo "== play (2-nchi urinish, warm'dan keyin)"
