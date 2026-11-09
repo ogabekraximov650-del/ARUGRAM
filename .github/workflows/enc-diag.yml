@@ -73,3 +73,15 @@ jobs:
           curl -sS -m 30 -w "  [HTTP %{http_code}]\n" -X POST -H "X-App-Sig: $(sig POST /api/vd/imginfo)" -H "Content-Type: application/json" -d "{\"names\":[\"$FONT\"]}" "$API_BASE/api/vd/imginfo" | sed 's/"key":"[0-9a-f]*"/"key":"<yashirin>"/'
           echo "== img $FONT"
           curl -sS -m 60 -o /tmp/f.bin -D /tmp/h2.txt -w "  [HTTP %{http_code} %{size_download} bayt %{time_total}s]\n" -H "X-App-Sig: $(sig GET /api/vd/img/$FONT)" "$API_BASE/api/vd/img/$FONT"; grep -i -E "^HTTP|content-length" /tmp/h2.txt
+      - name: Ochiq diapazon (ExoPlayer kabi, faqat o'qish)
+        env:
+          API_BASE: ${{ secrets.API_BASE || 'https://arumediatv.uzcom.workers.dev' }}
+          SECRET: ${{ secrets.APP_SIGN_SECRET }}
+        run: |
+          sig() { ts=$(date +%s); mac=$(printf '%s' "$ts.$1.$2" | openssl dgst -sha256 -hmac "$SECRET" -hex | awk '{print $NF}'); printf 'v2.%s.%s' "$ts" "$mac"; }
+          EP=ep_4_1_1_360p_1794242367764.mp4
+          for r in "0-" "1048576-" "40000000-"; do
+            echo "== Range bytes=$r (25 s chegara)"
+            curl -sS -m 25 -o /tmp/o.bin -D /tmp/oh.txt -w "  kod=%{http_code} bayt=%{size_download} birinchi_bayt=%{time_starttransfer}s jami=%{time_total}s\n" -H "Range: bytes=$r" -H "X-App-Sig: $(sig GET /api/play/vd~$EP)" "$API_BASE/api/play/vd~$EP" || true
+            grep -i -E "^HTTP|x-cache|x-warm|content-range|content-length" /tmp/oh.txt | tr -d '\r'
+          done
