@@ -7154,3 +7154,10 @@ Foydalanuvchi: model "sudo yo'q, o'rnatib bo'lmaydi" deb to'xtab qoldi ("Modelni
 - Belgi: cron (har 10 daqiqada) 360p va 480p ni ishga tushirar, 1080p va 720p esa keyingi chaqiruvlarda (5-6 daqiqa keyin, bittadan). `encode_kicked_<sifat>` vaqtlari buni ko'rsatdi (`ci/enc_diag.py`, `enc-diag.yml` — faqat o'qish).
 - Sabab: Cloudflare bitta chaqiruvda ~50 ta ichki so'rov (subrequest) beradi. `scheduled` oldin hamma botlar/navbatlarni (packs, post, anibla, tarjima, siqish, dublyaj, vd, r2...) kezib chiqar, so'ng `encode_kick_full` ga kelganda so'rovlar tugab qolardi — ro'yxat oxiridagi sifatlar (720p, 1080p) ishga tushmasdi.
 - Tuzatish: `encode_kick_full` cron'ning BIRINCHI ishi qilib ko'chirildi (`lib.rs` `scheduled`). Tashqi tomondan tasdiqlash: keyingi kodlashda 4 sifat ham bir vaqtda boshlanishi kerak.
+
+## Video ochilmasdi: kesh boshqa data markazda (2026-11)
+
+- Belgi: ilova ochganda video cheksiz aylanardi; Actions'dan imzolangan sinov (`enc-diag.yml`): `warm` -> "warmed", lekin keyingi `play` ba'zan `503 NOT-WARMED, x-warm-reason: no-window`, ba'zan `206 HIT-WINDOW`.
+- Sabab: Cloudflare kesh (Cache API) har data markazda ALOHIDA. `warm` bir markazda, `play` boshqasida bo'lsa oyna yo'q. Mobil tarmoqda ikki so'rov turli markazga tushishi mumkin.
+- Tuzatish: `vcache::b2_play` vd fayli uchun "no-window"/"slice-miss" bo'lsa shu zahoti `vd::warm` bilan oynani SHU markazga Telegramdan isitadi va bir marta qayta urinadi (Telegram'dan olish bepul — B2 kabi chiqish haqi yo'q).
+- Emoji shrifti (`/api/vd/img/...`) sinovda 200 (7,4 MB) — serverdan muammo yo'q.

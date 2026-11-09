@@ -486,7 +486,7 @@ pub(crate) async fn play_from_warm_cache(
 }
 
 pub(crate) async fn b2_play(
-    _env: &Env,
+    env: &Env,
     ctx: &Context,
     file_name: &str,
     range: Option<String>,
@@ -498,6 +498,23 @@ pub(crate) async fn b2_play(
         play_from_warm_cache(ctx, file_name, range.as_deref(), &mut reason).await?
     {
         return Ok(resp);
+    }
+    // ── VD: KESH BU MINTAQADA YO'Q — O'SHA ZAHOTI TELEGRAMDAN ISITILADI ──
+    //
+    // Cloudflare kesh har data markazda ALOHIDA (`warm` bir markazda, `play` boshqasida bo'lishi mumkin — mobil tarmoqda shunday bo'ladi) —
+    // shu sabab ilova "isit, so'ng o'yna" qilganda ham ba'zan "no-window" chiqardi va video cheksiz aylanardi. Yangi tizimda (vd) asl manba
+    // Telegram (bepul, B2 kabi chiqish haqi yo'q), shuning uchun bu yerda oynani darhol shu mintaqaga isitamiz va bir marta qayta urinamiz.
+    if let Some(file) = file_name.strip_prefix("vd~") {
+        if reason == "no-window" || reason == "slice-miss" {
+            let widx = range.as_deref().and_then(parse_range).map(|(start, _)| start / WARM_WINDOW).unwrap_or(0);
+            let _ = crate::vd::warm(env, file, widx, false).await;
+            reason.clear();
+            if let Some(resp) =
+                play_from_warm_cache(ctx, file_name, range.as_deref(), &mut reason).await?
+            {
+                return Ok(resp);
+            }
+        }
     }
 
     // ── KESH TAYYOR EMAS: 503, B2'GA CHIQILMAYDI ─────────────
