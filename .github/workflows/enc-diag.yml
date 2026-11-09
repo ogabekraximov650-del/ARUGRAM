@@ -51,3 +51,18 @@ jobs:
           done
           echo "== channel"
           curl -sS -m 60 -X POST -H "X-Encode-Token: $T" -H "Content-Type: application/json" -d '{}' "$API_BASE/api/vd/channel"; echo
+      - name: Ilova yo'li (imzolangan so'rovlar, faqat o'qish)
+        env:
+          API_BASE: ${{ secrets.API_BASE || 'https://arumediatv.uzcom.workers.dev' }}
+          SECRET: ${{ secrets.APP_SIGN_SECRET }}
+        run: |
+          sig() { ts=$(date +%s); mac=$(printf '%s' "$ts.$1.$2" | openssl dgst -sha256 -hmac "$SECRET" -hex | awk '{print $NF}'); printf 'v2.%s.%s' "$ts" "$mac"; }
+          EP=ep_4_1_1_360p_1794242367764.mp4; FONT=sys_emojifont_1794244734.bin
+          echo "== warm vd~$EP w=0"
+          curl -sS -m 120 -w "  [HTTP %{http_code} %{time_total}s]\n" -H "X-App-Sig: $(sig GET /api/warm/vd~$EP)" "$API_BASE/api/warm/vd~$EP?w=0"
+          echo "== play vd~$EP Range 0-1023"
+          curl -sS -m 60 -o /tmp/p.bin -D /tmp/h.txt -w "  [HTTP %{http_code} %{size_download} bayt %{time_total}s]\n" -H "Range: bytes=0-1023" -H "X-App-Sig: $(sig GET /api/play/vd~$EP)" "$API_BASE/api/play/vd~$EP"; grep -i -E "^HTTP|content-range|content-length|content-type" /tmp/h.txt
+          echo "== imginfo $FONT"
+          curl -sS -m 30 -w "  [HTTP %{http_code}]\n" -X POST -H "X-App-Sig: $(sig POST /api/vd/imginfo)" -H "Content-Type: application/json" -d "{\"names\":[\"$FONT\"]}" "$API_BASE/api/vd/imginfo" | sed 's/"key":"[0-9a-f]*"/"key":"<yashirin>"/'
+          echo "== img $FONT"
+          curl -sS -m 60 -o /tmp/f.bin -D /tmp/h2.txt -w "  [HTTP %{http_code} %{size_download} bayt %{time_total}s]\n" -H "X-App-Sig: $(sig GET /api/vd/img/$FONT)" "$API_BASE/api/vd/img/$FONT"; grep -i -E "^HTTP|content-length" /tmp/h2.txt
