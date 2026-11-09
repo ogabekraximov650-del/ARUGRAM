@@ -23,8 +23,9 @@ suspend fun uploadAvatar(ctx: Context, uri: Uri, auth: AuthService, tg: Telegram
         val scale = 720f / maxOf(bmp.width, bmp.height)
         val out = if (scale < 1f) Bitmap.createScaledBitmap(bmp, (bmp.width * scale).toInt(), (bmp.height * scale).toInt(), true) else bmp
         file.outputStream().use { out.compress(Bitmap.CompressFormat.JPEG, 88, it) }
-        val err = tg.uploadFile(file.absolutePath, name, "image/jpeg", onProgress = { s, t -> if (t > 0) onProgress(s.toFloat() / t) })
-        if (err != null) return@withContext err
+        // Profil rasmi ACTIONS orqali (R2 -> Telegram bo'lagi, Cloudflare keshi); Telegram hisobi kerak emas.
+        val up = uz.arumediatv.com.vd.VdUpload.upload(file.absolutePath, name, auth.sessionToken.orEmpty()) { s, t -> if (t > 0) onProgress(s.toFloat() / t) }
+        if (up.error != null) return@withContext up.error
         auth.setAvatarFile(name)
     } catch (e: Exception) {
         "Tarmoq xatosi — qaytadan urinib ko'ring"

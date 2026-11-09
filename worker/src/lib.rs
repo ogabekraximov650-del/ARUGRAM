@@ -10416,7 +10416,7 @@ fn needs_app_check(path: &str) -> bool {
         | "/api/dub/claim" | "/api/dub/peek" | "/api/dub/check" | "/api/dub/finish" | "/api/dub/progress" | "/api/dub/state" | "/api/dub/stage"
         | "/api/anibla/claim" | "/api/anibla/diag" | "/api/anibla/probe" | "/api/anibla/progress" | "/api/anibla/done"
         | "/api/fmp4/claim" | "/api/fmp4/done" | "/api/fmp4/r2put" | "/api/fmp4/r2ready" | "/api/session/poll" | "/api/session/report"
-        | "/api/encode/r2put" | "/api/encode/r2ready" | "/api/encode/qdiag" | "/api/encode/cancel" | "/api/encode/translate" | "/api/vd/mig/enqueue" | "/api/vd/mig/claim" | "/api/vd/mig/fail" | "/api/vd/init" | "/api/vd/put" | "/api/vd/finish" | "/api/vd/peek" | "/api/vd/verify" | "/api/vd/wipe" | "/api/vd/channel" | "/api/vd/claim" | "/api/vd/read" | "/api/vd/chunkdone" | "/api/vd/done" | "/api/vd/fail" | "/api/r2/claim" | "/api/r2/beat" | "/api/r2/fail" | "/api/r2/done" | "/api/r2/diag" | "/api/r2/dmsg" | "/api/r2/peek" | "/api/r2/put" | "/api/r2/ready" | "/api/r2/part" | "/api/r2/get")
+        | "/api/encode/r2put" | "/api/encode/r2ready" | "/api/encode/qdiag" | "/api/encode/cancel" | "/api/encode/translate" | "/api/vd/mig/enqueue" | "/api/vd/mig/claim" | "/api/vd/mig/fail" | "/api/vd/init" | "/api/vd/put" | "/api/vd/finish" | "/api/vd/peek" | "/api/vd/verify" | "/api/vd/wipe" | "/api/vd/channel" | "/api/vd/forget" | "/api/vd/claim" | "/api/vd/read" | "/api/vd/chunkdone" | "/api/vd/done" | "/api/vd/fail" | "/api/r2/claim" | "/api/r2/beat" | "/api/r2/fail" | "/api/r2/done" | "/api/r2/diag" | "/api/r2/dmsg" | "/api/r2/peek" | "/api/r2/put" | "/api/r2/ready" | "/api/r2/part" | "/api/r2/get")
     {
         return false;
     }
@@ -14275,13 +14275,13 @@ async fn tg_route(mut req: Request, env: &Env, path: &str, method: Method) -> Re
             let body: Value = req.json().await.unwrap_or(json!({}));
             vd::info(env, &body).await
         }
-        (Method::Post, "/api/vd/up/init") if is_admin(&u) => {
+        (Method::Post, "/api/vd/up/init") => {
             let body: Value = req.json().await.unwrap_or(json!({}));
-            vd::up_init(env, &body).await
+            vd::up_init(env, me, is_admin(&u), &body).await
         }
-        (Method::Post, "/api/vd/up/complete") if is_admin(&u) => {
+        (Method::Post, "/api/vd/up/complete") => {
             let body: Value = req.json().await.unwrap_or(json!({}));
-            vd::up_complete(env, &body).await
+            vd::up_complete(env, me, is_admin(&u), &body).await
         }
         (Method::Post, "/api/tg/deliver") => {
             let body: Value = req.json().await.unwrap_or(json!({}));
@@ -14599,7 +14599,7 @@ fn etag_tables(path: &str) -> Option<&'static [&'static str]> {
     None
 }
 
-async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
+async fn route(mut req: Request, env: Env, ctx: Context) -> Result<Response> {
     let url = req.url()?;
     let path = url.path();
     let method = req.method();
@@ -14650,6 +14650,14 @@ async fn route(req: Request, env: Env, ctx: Context) -> Result<Response> {
         // Farqi: javob hech qachon sun'iy kesilmaydi va bo'laklab
         // keshlash mantiqi umuman ishlatilmaydi — ya'ni pleyer
         // faqat o'zi so'ragan baytni oladi.
+        // Video ombori rasmlari (poster, profil rasmi): faqat ilova imzosi, sessiyasiz (`vd::img`, `vd::img_info`).
+        if let Some(n) = path.strip_prefix("/api/vd/img/") {
+            return vd::img(&env, n).await;
+        }
+        if path == "/api/vd/imginfo" && method == Method::Post {
+            let body: Value = req.json().await.unwrap_or(json!({}));
+            return vd::img_info(&env, &body).await;
+        }
         if let Some(fname) = path.strip_prefix("/api/play/") {
             if fname.starts_with("vd~") {
                 return vcache::b2_play(&env, &ctx, fname, range_header).await;

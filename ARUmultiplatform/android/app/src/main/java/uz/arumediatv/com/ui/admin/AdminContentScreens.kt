@@ -143,8 +143,9 @@ private fun fileNameOfUrl(url: String): String {
 /** Rasmni Telegram'ga yuklaydi va fayl NOMINI qaytaradi (`<prefix>_<vaqt>.jpg`). */
 private suspend fun uploadPhoto(ctx: Context, uri: Uri, prefix: String): Pair<String?, String?> = withPickedFile(ctx, uri) { path, _, _ ->
     val name = "${prefix}_${System.currentTimeMillis()}.jpg"
-    val err = AppServices.telegram.uploadFile(path, name, "image/jpeg")
-    if (err == null) name to null else null to err
+    // Rasm ACTIONS orqali yuklanadi (R2 -> Telegram bo'lagi); tayyor bo'lgach (odatda 1-2 daqiqa) hamma joyda ko'rinadi.
+    val r = uz.arumediatv.com.vd.VdUpload.upload(path, name, AppServices.auth.sessionToken.orEmpty()) { _, _ -> }
+    if (r.error == null) name to null else null to r.error
 } ?: (null to "Faylni o'qib bo'lmadi")
 
 // ══════════════════════ BOSHQARISH OYNALARI (Flutter: anime/season/epizod_management_screen) ══════════════════════

@@ -74,7 +74,7 @@ fn bad(msg: &str) -> Result<Response> {
 /// 1000 kun (ARUDRIVE `LIST_TTL`/`CHUNK_CACHE_SECONDS` bilan bir xil). `META_V` — kesh kalitining versiyasi: o'zgartirib qayta deploy qilinsa
 /// eski yozuvlarning hammasi ko'rinmay qoladi (masalan, bazani noldan boshlaganda).
 const META_TTL: u64 = 1000 * 24 * 3600;
-const META_V: &str = "2";
+const META_V: &str = "3";
 
 fn meta_url(name: &str) -> String {
     cache_key_url(&format!("vd~{name}"), &format!("meta{META_V}"))
@@ -261,11 +261,17 @@ pub(crate) async fn forget(env: &Env, name: &str) {
     if ensure(env).await.is_err() {
         return;
     }
-    let row = turso_exec(env, "SELECT msg_ids FROM vd_files WHERE name=?", vec![TursoArg::text(name)]).await.ok().and_then(|r| first_row(&r));
+    let row = turso_exec(env, "SELECT msg_ids,chunks FROM vd_files WHERE name=?", vec![TursoArg::text(name)]).await.ok().and_then(|r| first_row(&r));
     let _ = turso_exec(env, "DELETE FROM vd_mig WHERE name=?", vec![TursoArg::text(name)]).await;
     let Some(row) = row else { return };
     if let Some(bk) = bucket(env) {
         r2_delete_all(&bk, name).await;
+    }
+    // Cloudflare keshidagi bo'laklar (oynalar): shu mintaqada darhol o'chadi; boshqa mintaqalardagi nusxalar hech kim so'ramasa o'zi ketadi.
+    let wname = format!("vd~{name}");
+    for n in 0..jint(&row, "chunks").clamp(0, 400) as u64 {
+        let _ = Cache::default().delete(&warm_window_url(&wname, n), false).await;
+        let _ = Cache::default().delete(&warm_marker_url(&wname, n), false).await;
     }
     let channel = vd_channel(env);
     if channel != 0 {
@@ -283,7 +289,7 @@ pub(crate) async fn forget(env: &Env, name: &str) {
 
 pub(crate) fn is_actions_path(path: &str) -> bool {
     matches!(path, "/api/vd/mig/enqueue" | "/api/vd/mig/claim" | "/api/vd/mig/fail" | "/api/vd/init" | "/api/vd/put" | "/api/vd/finish"
-        | "/api/vd/peek" | "/api/vd/verify" | "/api/vd/wipe" | "/api/vd/channel" | "/api/vd/claim" | "/api/vd/read" | "/api/vd/chunkdone" | "/api/vd/done" | "/api/vd/fail")
+        | "/api/vd/peek" | "/api/vd/verify" | "/api/vd/wipe" | "/api/vd/channel" | "/api/vd/forget" | "/api/vd/claim" | "/api/vd/read" | "/api/vd/chunkdone" | "/api/vd/done" | "/api/vd/fail")
 }
 
 pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Response> {
@@ -473,6 +479,11 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
                 return json_resp(&json!({"error": "bo'lak qisqa"}), 502);
             }
             ok(json!({"name": r["name"], "size": r["size"], "chunks": r["chunks"], "key": r["vkey"], "head": hex_of(&bytes[..64]), "chunk0_len": bytes.len()}))
+        }
+        // Faylni to'liq o'chirish (R2, kanal xabarlari, kesh, baza) — Actions/ENCODE_TOKEN (sinov fayllarini tozalash uchun).
+        "/api/vd/forget" => {
+            forget(env, &name).await;
+            ok(json!({"ok": true}))
         }
         // Kanal tekshiruvi: bot shu kanalda adminmi va xabar yubora/o'chira oladimi.
         "/api/vd/channel" => {
@@ -684,24 +695,14 @@ async fn wipe_files(env: &Env, bk: &Bucket) -> Result<Value> {
 
 // ── Foydalanuvchi yo'llari (sessiya bilan) ───────────────────
 
-/// `POST /api/vd/info {names:[...]}` -> `{files:{nom:{state,size,chunks,stored,key}}}`. Kalit faqat kirgan foydalanuvchiga
-/// beriladi (`/api/tg/deliver` bilan bir xil qoida); o'qish bitta so'rov. Yangi tizimda bo'lmagan nomlar javobda yo'q — ilova
-/// ularni eski yo'l (Telegram/MTProto) bilan ochadi.
-pub(crate) async fn info(env: &Env, body: &Value) -> Result<Response> {
-    let mut names: Vec<String> = body["names"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default();
-    names.retain(|n| tg_safe_name(n));
-    names.sort();
-    names.dedup();
-    names.truncate(100);
-    if names.is_empty() {
-        return bad("nom");
-    }
-    let mut files = serde_json::Map::new();
+/// Fayl ma'lumoti (to'liq): Cloudflare keshidan, yo'q bo'lsa bazadan (tugagan `ready` fayl keshlanadi). `chunk_ids` ichki — mijozga berilmaydi.
+async fn meta_many(env: &Env, names: &[String]) -> Result<serde_json::Map<String, Value>> {
+    let mut out = serde_json::Map::new();
     let mut miss: Vec<String> = Vec::new();
-    for n in &names {
-        match meta_get(n).await {
+    for n in names {
+        match meta_get(n).await.filter(|m| m["chunk_ids"].is_string()) {
             Some(m) => {
-                files.insert(n.clone(), m);
+                out.insert(n.clone(), m);
             }
             None => miss.push(n.clone()),
         }
@@ -714,28 +715,141 @@ pub(crate) async fn info(env: &Env, body: &Value) -> Result<Response> {
             miss.iter().map(|n| TursoArg::text(n)).collect()).await?;
         for row in rows_of(&r) {
             let n = row["name"].as_str().unwrap_or("").to_string();
-            let v = json!({
-                "state": row["state"], "size": row["size"], "chunks": row["chunks"], "key": row["vkey"],
-                "stored": ids(row["chunk_ids"].as_str().unwrap_or("")).len(),
-            });
+            let v = json!({"state": row["state"], "size": row["size"], "chunks": row["chunks"], "key": row["vkey"], "chunk_ids": row["chunk_ids"]});
             // Faqat TUGAGAN (`ready`) fayl keshlanadi — u o'zgarmaydi; saqlanayotgan fayl holati o'zgarib turadi.
             if row["state"].as_str() == Some("ready") {
                 meta_put(&n, &v).await;
             }
-            files.insert(n, v);
+            out.insert(n, v);
         }
     }
+    Ok(out)
+}
+
+/// Mijozga beriladigan ko'rinish: `{state,size,chunks,key,stored}` (`file_id` lar yashirin).
+fn client_view(m: &Value) -> Value {
+    json!({
+        "state": m["state"], "size": m["size"], "chunks": m["chunks"], "key": m["key"],
+        "stored": ids(m["chunk_ids"].as_str().unwrap_or("")).len(),
+    })
+}
+
+fn clean_names(body: &Value) -> Vec<String> {
+    let mut names: Vec<String> = body["names"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default();
+    names.retain(|n| tg_safe_name(n));
+    names.sort();
+    names.dedup();
+    names.truncate(100);
+    names
+}
+
+/// `POST /api/vd/info {names:[...]}` -> `{files:{nom:{state,size,chunks,stored,key}}}`. Kalit faqat kirgan foydalanuvchiga beriladi
+/// (`/api/tg/deliver` bilan bir xil qoida). Yangi tizimda bo'lmagan nomlar javobda yo'q — ilova ularni eski yo'l bilan ochadi.
+pub(crate) async fn info(env: &Env, body: &Value) -> Result<Response> {
+    let names = clean_names(body);
+    if names.is_empty() {
+        return bad("nom");
+    }
+    let m = meta_many(env, &names).await?;
+    let files: serde_json::Map<String, Value> = m.iter().map(|(k, v)| (k.clone(), client_view(v))).collect();
     ok_nostore(json!({"files": files}))
+}
+
+// ── Rasmlar (poster, bo'lim rasmi, profil rasmi): kirmagan foydalanuvchiga ham ko'rinadi ──
+
+/// Rasm nomi ommaviymi: qism (`ep_`), asl video (`orig_`), yozishma (`chat_`) va kutilayotgan to'plam (`pki_`) fayllari — YO'Q.
+fn public_image_name(n: &str) -> bool {
+    tg_safe_name(n) && !["ep_", "orig_", "chat_", "pki_"].iter().any(|p| n.starts_with(p)) && n.len() > 4
+}
+
+/// `POST /api/vd/imginfo {names}` (faqat ilova imzosi, sessiyasiz): tayyor (`ready`) ommaviy rasmlar uchun hajm va kalit.
+pub(crate) async fn img_info(env: &Env, body: &Value) -> Result<Response> {
+    let names: Vec<String> = clean_names(body).into_iter().filter(|n| public_image_name(n)).collect();
+    if names.is_empty() {
+        return bad("nom");
+    }
+    let m = meta_many(env, &names).await?;
+    let files: serde_json::Map<String, Value> = m.iter().filter(|(_, v)| v["state"].as_str() == Some("ready"))
+        .map(|(k, v)| (k.clone(), client_view(v))).collect();
+    ok_nostore(json!({"files": files}))
+}
+
+/// Telegram'dan bo'lakni to'liq baytlar bilan oladi (kichik fayllar uchun).
+async fn chunk_bytes(env: &Env, tg_file_id: &str, expect: u64) -> Result<Vec<u8>> {
+    let token = tg_secret(env, "TELEGRAM_BOT_TOKEN");
+    let f = tg_api_tok(&token, "getFile", json!({"file_id": tg_file_id})).await?;
+    let path = f["file_path"].as_str().unwrap_or("").to_string();
+    if path.is_empty() {
+        return Err(Error::RustError("Telegram fayl yo'lini bermadi".into()));
+    }
+    let mut r = Fetch::Request(Request::new(&format!("https://api.telegram.org/file/bot{token}/{path}"), Method::Get)?).send().await?;
+    if r.status_code() != 200 {
+        return Err(Error::RustError(format!("Telegram yuklash {}", r.status_code())));
+    }
+    let b = r.bytes().await?;
+    if b.len() as u64 != expect {
+        return Err(Error::RustError("hajm mos emas".into()));
+    }
+    Ok(b)
+}
+
+/// `GET /api/vd/img/<nom>` (faqat ilova imzosi): shifrlangan rasm baytlari. Bir so'rovda: Cloudflare keshidan, yo'q bo'lsa Telegram'dan olib
+/// keshga (1000 kun, `warm` bilan bir xil yozuv) yoziladi. Faqat bitta bo'lakka sig'adigan (<= 18 MiB) tayyor rasm.
+pub(crate) async fn img(env: &Env, name: &str) -> Result<Response> {
+    if !public_image_name(name) {
+        return err404("topilmadi");
+    }
+    let wname = format!("vd~{name}");
+    let cache = Cache::default();
+    let key = Request::new(&warm_window_url(&wname, 0), Method::Get)?;
+    let bytes: Vec<u8> = match cache.get(&key, false).await? {
+        Some(mut hit) => hit.bytes().await?,
+        None => {
+            let m = meta_many(env, &[name.to_string()]).await?;
+            let Some(m) = m.get(name) else { return err404("topilmadi") };
+            let size = jint(m, "size").max(0) as u64;
+            let first = ids(m["chunk_ids"].as_str().unwrap_or("")).first().map(|s| s.to_string()).unwrap_or_default();
+            if m["state"].as_str() != Some("ready") || size == 0 || size > CHUNK || first.is_empty() {
+                return err404("topilmadi");
+            }
+            let b = chunk_bytes(env, &first, size).await?;
+            let headers = Headers::new();
+            headers.set("Content-Type", "application/octet-stream")?;
+            headers.set("Cache-Control", &format!("public, max-age={CHUNK_CACHE_SECONDS}"))?;
+            headers.set("X-Total-Size", &size.to_string())?;
+            headers.set("X-Window-Start", "0")?;
+            let _ = cache.put(&key, Response::from_bytes(b.clone())?.with_headers(headers)).await;
+            b
+        }
+    };
+    let mut resp = Response::from_bytes(bytes)?;
+    set_cors(&mut resp);
+    resp.headers_mut().set("Content-Type", "application/octet-stream")?;
+    resp.headers_mut().set("Cache-Control", "no-store")?;
+    Ok(resp)
+}
+
+/// Kim nimani yuklay oladi: admin — qism (`ep_*`) va rasm fayllari (`.jpg/.jpeg/.png/.webp`); oddiy foydalanuvchi — faqat O'Z profil rasmi
+/// (`avatar_<id>_*.jpg`).
+fn upload_allowed(name: &str, me: i64, admin: bool) -> bool {
+    if !tg_safe_name(name) {
+        return false;
+    }
+    let img = [".jpg", ".jpeg", ".png", ".webp"].iter().any(|e| name.ends_with(e));
+    if name.starts_with(&format!("avatar_{me}_")) && me > 0 && img {
+        return true;
+    }
+    admin && (name.starts_with("ep_") || (img && !name.starts_with("orig_") && !name.starts_with("chat_")))
 }
 
 /// `POST /api/vd/up/init` (admin): ilova BUTUN (qurilmada shifrlangan) faylni R2 ga to'g'ridan-to'g'ri yozadi; worker faqat imzolangan
 /// PUT havolasini beradi. `{name, size, key}` -> `{url}`.
-pub(crate) async fn up_init(env: &Env, body: &Value) -> Result<Response> {
+pub(crate) async fn up_init(env: &Env, me: i64, admin: bool, body: &Value) -> Result<Response> {
     ensure(env).await?;
     let name = body["name"].as_str().unwrap_or("").to_string();
     let size = jint(body, "size");
     let key = body["key"].as_str().unwrap_or("").to_ascii_lowercase();
-    if !name.starts_with("ep_") || !tg_safe_name(&name) || size <= 0 || size > 5 * 1024 * 1024 * 1024 - CHUNK as i64 || !valid_file_key(&key) {
+    if !upload_allowed(&name, me, admin) || size <= 0 || size > 5 * 1024 * 1024 * 1024 - CHUNK as i64 || !valid_file_key(&key) {
         return bad("so'rov");
     }
     let Some(bk) = bucket(env) else { return json_resp(&json!({"error": "r2"}), 503) };
@@ -752,10 +866,10 @@ pub(crate) async fn up_init(env: &Env, body: &Value) -> Result<Response> {
 }
 
 /// `POST /api/vd/up/complete {name}` (admin): R2 dagi fayl hajmi tekshiriladi va saqlash navbatiga qo'yiladi (yuklovchi workflow uyg'otiladi).
-pub(crate) async fn up_complete(env: &Env, body: &Value) -> Result<Response> {
+pub(crate) async fn up_complete(env: &Env, me: i64, admin: bool, body: &Value) -> Result<Response> {
     ensure(env).await?;
     let name = body["name"].as_str().unwrap_or("").to_string();
-    if !tg_safe_name(&name) {
+    if !upload_allowed(&name, me, admin) {
         return bad("nom");
     }
     let Some(bk) = bucket(env) else { return json_resp(&json!({"error": "r2"}), 503) };
@@ -817,15 +931,8 @@ pub(crate) async fn warm(env: &Env, file: &str, widx: u64, force: bool) -> Resul
         }
     }
     // Fayl ma'lumoti: `ready` bo'lsa Cloudflare keshidan (bazaga bormaydi), aks holda bazadan.
-    let f = match meta_get(file).await.filter(|m| m["chunk_ids"].is_string()) {
-        Some(m) => m,
-        None => {
-            ensure(env).await?;
-            let r = turso_exec(env, "SELECT size,chunk_ids,state,chunks FROM vd_files WHERE name=? AND state IN ('ready','storing','uploaded')", vec![TursoArg::text(file)]).await?;
-            let Some(f) = first_row(&r) else { return reply("error fayl topilmadi", 0) };
-            f
-        }
-    };
+    let mm = meta_many(env, &[file.to_string()]).await?;
+    let Some(f) = mm.get(file).cloned() else { return reply("error fayl topilmadi", 0) };
     let total = jint(&f, "size").max(0) as u64;
     let chunks: Vec<(i64, String)> = ids(f["chunk_ids"].as_str().unwrap_or("")).into_iter().enumerate().map(|(i, s)| (i as i64, s.to_string())).collect();
     if total == 0 || widx * WARM_WINDOW >= total {
@@ -944,6 +1051,24 @@ mod tests {
     fn id_ajratish() {
         assert!(ids("").is_empty());
         assert_eq!(ids("a,b,c"), vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn yuklash_ruxsati() {
+        assert!(upload_allowed("avatar_7_1.jpg", 7, false));
+        assert!(!upload_allowed("avatar_8_1.jpg", 7, false));
+        assert!(!upload_allowed("ep_1_2_720p_3.mp4", 7, false));
+        assert!(upload_allowed("ep_1_2_720p_3.mp4", 7, true));
+        assert!(upload_allowed("poster_5.jpg", 7, true));
+        assert!(!upload_allowed("poster_5.jpg", 7, false));
+        assert!(!upload_allowed("orig_9.jpg", 7, true));
+    }
+
+    #[test]
+    fn ommaviy_rasm() {
+        assert!(public_image_name("avatar_7_1.jpg"));
+        assert!(!public_image_name("ep_1_2_720p_3.mp4"));
+        assert!(!public_image_name("chat_7_1.jpg"));
     }
 
     #[test]

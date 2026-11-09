@@ -1,0 +1,67 @@
+name: VD rasm yo'li sinovi (vaqtinchalik)
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/vd-diag.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  d:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: secret
+    steps:
+      - run: pip install cryptography
+      - name: Rasm: R2 -> Telegram -> Cloudflare keshi -> shifrni ochish
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+          APP_SIGN_SECRET: ${{ secrets.APP_SIGN_SECRET }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, hmac, json, os, time, urllib.request, urllib.error
+          from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+          A = "https://arumediatv.uzcom.workers.dev"; T = os.environ["ENCODE_TOKEN"].strip(); S = os.environ["APP_SIGN_SECRET"].strip()
+          def tok(p, body=None, method="POST", data=None, ct="application/json"):
+              r = urllib.request.Request(A + p, data=data if data is not None else json.dumps(body or {}).encode(), method=method,
+                                         headers={"X-Encode-Token": T, "Content-Type": ct, "User-Agent": "arumediatv-vd"})
+              with urllib.request.urlopen(r, timeout=120) as x: return json.loads(x.read() or b"{}")
+          def signed(path, method="GET", body=None, raw=False):
+              ts = str(int(time.time()))
+              sig = "v2.%s.%s" % (ts, hmac.new(S.encode(), ("%s.%s.%s" % (ts, method, path)).encode(), hashlib.sha256).hexdigest())
+              h = {"X-App-Sig": sig, "X-App-Version": "0.1.0+1", "User-Agent": "arumediatv-vd", "Content-Type": "application/json"}
+              r = urllib.request.Request(A + path, data=(json.dumps(body).encode() if body is not None else None), method=method, headers=h)
+              try:
+                  with urllib.request.urlopen(r, timeout=120) as x:
+                      b = x.read(); return b if raw else json.loads(b or b"{}")
+              except urllib.error.HTTPError as e:
+                  return {"error": e.code}
+          for i in range(40):                                  # deploy tugashini kutadi
+              try:
+                  if tok("/api/vd/forget", {"name": ""}).get("ok"): break
+              except Exception: pass
+              time.sleep(15)
+          name = "diag_img_%d.png" % int(time.time())
+          plain = b"\x89PNG\r\n\x1a\n" + os.urandom(3000)
+          key = os.urandom(16)
+          enc = Cipher(algorithms.AES(key), modes.CTR(b"\0" * 16)).encryptor().update(plain)
+          print("init:", tok("/api/vd/init", {"name": name, "size": len(enc), "key": key.hex()}))
+          print("put:", tok("/api/vd/put?name=%s&n=0" % name, method="PUT", data=enc, ct="application/octet-stream"))
+          print("finish:", {k: v for k, v in tok("/api/vd/finish", {"name": name}).items() if k != "kick"})
+          got = None
+          for i in range(60):                                  # saqlovchi workflow Telegram'ga yozguncha
+              r = signed("/api/vd/imginfo", "POST", {"names": [name]})
+              f = (r.get("files") or {}).get(name)
+              if f: got = f; break
+              time.sleep(15)
+          print("imginfo:", {k: v for k, v in (got or {}).items() if k != "key"})
+          if got:
+              assert got["key"] == key.hex(), "kalit mos emas"
+              for attempt in (1, 2):                            # 1-marta: Telegram'dan, 2-marta: Cloudflare keshidan
+                  b = signed("/api/vd/img/" + name, "GET", raw=True)
+                  ok = isinstance(b, bytes) and Cipher(algorithms.AES(bytes.fromhex(got["key"])), modes.CTR(b"\0" * 16)).decryptor().update(b) == plain
+                  print("img so'rov", attempt, "-> ochilgan rasm asl bilan bir xil:", ok)
+          print("forget:", tok("/api/vd/forget", {"name": name}))
+          PY

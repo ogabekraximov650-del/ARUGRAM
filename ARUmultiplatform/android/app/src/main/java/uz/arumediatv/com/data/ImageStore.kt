@@ -112,7 +112,8 @@ class ImageStore(context: Context, private val tg: TelegramService) {
             }
         }
         if (!network) return null
-        val bytes = tg.fetchBytes(url) ?: return null
+        // Avval YANGI TIZIM (Cloudflare keshi, Telegram hisobi shart emas), topilmasa eski yo'l (bot chati).
+        val bytes = uz.arumediatv.com.vd.VdImages.fetch(name) ?: tg.fetchBytes(url) ?: return null
         val bmp = decode(bytes, maxPx) ?: return null
         try {
             f.writeBytes(SecureStore.seal(bytes))
