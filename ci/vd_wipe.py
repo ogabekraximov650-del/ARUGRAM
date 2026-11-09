@@ -9,6 +9,7 @@ import json
 import os
 import sys
 import time
+import urllib.error
 import urllib.request
 
 KEEP = {"anime_db", "season_db", "season_janr"}
@@ -52,6 +53,9 @@ def worker(body, tries=5):
                                          headers={"X-Encode-Token": enc, "Content-Type": "application/json", "User-Agent": "arumediatv-wipe"})
             with urllib.request.urlopen(req, timeout=120) as r:
                 return json.loads(r.read() or b"{}")
+        except urllib.error.HTTPError as e:
+            last = f"HTTP {e.code}: {e.read()[:300]!r}"
+            time.sleep(5 * (i + 1))
         except Exception as e:  # noqa: BLE001
             last = e
             time.sleep(5 * (i + 1))
