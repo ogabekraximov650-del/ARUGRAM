@@ -7120,3 +7120,7 @@ Foydalanuvchi: model "sudo yo'q, o'rnatib bo'lmaydi" deb to'xtab qoldi ("Modelni
 
 ### Sessiya tugaganda ilova darhol biladi (401) (2026-11)
 - Baza noldan boshlangach (`users_db`/`sessions_db` = 0) eski tokenlar yaroqsiz bo'ldi, lekin ilova eski profilni ko'rsatib "Yuklanmadi (401)" chiqarardi. `Http.client` ga `SessionGuardInterceptor` qo'shildi: himoyalangan so'rov 401 qaytarsa (`/api/auth/*` dan tashqari, token hozirgi sessiya bo'lsa, 10 soniyada bir marta) `AuthService.refresh()` chaqiriladi — u 401 da sessiyani tozalaydi va ilova mehmon holatiga o'tadi (Profilda «Telegram orqali kirish»). Yordam chatida 401 matni: "Sessiya tugagan — Profil bo'limidan Telegram orqali qayta kiring".
+
+## vd foydalanuvchi yo'llari (tuzatish)
+
+`/api/vd/info`, `/api/vd/small`, `/api/vd/up/init`, `/api/vd/up/complete` avval `tg_route` ichida edi (faqat `/api/tg/*` ga yetadi) -> 404 "Not found". Endi `vd_user_route` (`worker/src/lib.rs`) va `route()` da `/api/vd/` dispatch. Yangi vd yo'llari FAQAT shu yerga qo'shilsin.

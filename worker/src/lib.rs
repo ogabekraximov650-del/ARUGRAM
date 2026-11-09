@@ -14244,6 +14244,36 @@ async fn scheduled(_ev: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
     }
 }
 
+/// Video ombori (`vd`) foydalanuvchi yo'llari (sessiya bilan): `info`, kichik fayl (`small`), katta fayl yuklashi (`up/init`, `up/complete`).
+/// DIQQAT: bular `/api/vd/` ostida — `tg_route` (`/api/tg/`) ga TUSHMAYDI, shu sabab alohida yo'naltiriladi.
+async fn vd_user_route(mut req: Request, env: &Env, path: &str, method: Method) -> Result<Response> {
+    let Some(u) = session_user(env, &bearer(&req)).await? else {
+        return json_resp(&json!({"error": "unauthorized"}), 401);
+    };
+    let me = u["id"].as_i64().unwrap_or(0);
+    let admin = is_admin(&u);
+    match (method, path) {
+        (Method::Post, "/api/vd/info") => {
+            let body: Value = req.json().await.unwrap_or(json!({}));
+            vd::info_for(env, me, admin, &body).await
+        }
+        // Kichik fayl (<= 18 MiB): worker o'zi shifrlab Telegram'ga saqlaydi (R2/Actions kerak emas).
+        (Method::Put, "/api/vd/small") => {
+            let name = req.url()?.query_pairs().find(|(k, _)| k == "name").map(|(_, v)| v.to_string()).unwrap_or_default();
+            vd::small(env, me, admin, &name, req).await
+        }
+        (Method::Post, "/api/vd/up/init") => {
+            let body: Value = req.json().await.unwrap_or(json!({}));
+            vd::up_init(env, me, admin, &body).await
+        }
+        (Method::Post, "/api/vd/up/complete") => {
+            let body: Value = req.json().await.unwrap_or(json!({}));
+            vd::up_complete(env, me, admin, &body).await
+        }
+        _ => err404("topilmadi"),
+    }
+}
+
 async fn tg_route(mut req: Request, env: &Env, path: &str, method: Method) -> Result<Response> {
     // Ilova Telegram'ga ulanishi uchun kerakli qiymatlar.
     //
@@ -14293,24 +14323,6 @@ async fn tg_route(mut req: Request, env: &Env, path: &str, method: Method) -> Re
         // KAMROQ SO'ROV: bazaga BITTA so'rov (pipeline), bazaga hech
         // narsa YOZILMAYDI, Telegram'ga bitta `copyMessages`. Nusxani
         // ilova o'zi o'chiradi (`rust_tg_clear_bot_chat`).
-        // ── VIDEO OMBORI (`vd`): ma'lumot + admin yuklashi ──
-        (Method::Post, "/api/vd/info") => {
-            let body: Value = req.json().await.unwrap_or(json!({}));
-            vd::info_for(env, me, is_admin(&u), &body).await
-        }
-        // Kichik fayl (<= 18 MiB): worker o'zi shifrlab Telegram'ga saqlaydi (R2/Actions kerak emas).
-        (Method::Put, "/api/vd/small") => {
-            let name = req.url()?.query_pairs().find(|(k, _)| k == "name").map(|(_, v)| v.to_string()).unwrap_or_default();
-            vd::small(env, me, is_admin(&u), &name, req).await
-        }
-        (Method::Post, "/api/vd/up/init") => {
-            let body: Value = req.json().await.unwrap_or(json!({}));
-            vd::up_init(env, me, is_admin(&u), &body).await
-        }
-        (Method::Post, "/api/vd/up/complete") => {
-            let body: Value = req.json().await.unwrap_or(json!({}));
-            vd::up_complete(env, me, is_admin(&u), &body).await
-        }
         (Method::Post, "/api/tg/deliver") => {
             let body: Value = req.json().await.unwrap_or(json!({}));
             let mut names: Vec<String> = match body["files"].as_array() {
@@ -14797,6 +14809,10 @@ async fn route(mut req: Request, env: Env, ctx: Context) -> Result<Response> {
             ensure_encbot_webhook(&env, &origin).await;
         }
         return auth_route(req, &env, &origin, path, method.clone()).await;
+    }
+
+    if path.starts_with("/api/vd/") {
+        return vd_user_route(req, &env, path, method.clone()).await;
     }
 
     if path.starts_with("/api/tg/") {
