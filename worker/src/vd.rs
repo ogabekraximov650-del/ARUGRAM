@@ -20,6 +20,8 @@ use crate::vcache::{
     abort_pipe, close_pipe, fixed_length_pipe, pipe_keep_open, warm_marker_url, warm_window_total, warm_window_url, CHUNK_CACHE_SECONDS,
     WARM_MARKER_SECONDS, WARM_VERIFY_TICKS, WARM_WAIT_STEP_MS, WARM_WAIT_TICKS, WARM_WINDOW,
 };
+use aes::Aes128;
+use ctr::cipher::{KeyIvInit, StreamCipher};
 use core::sync::atomic::{AtomicBool, Ordering};
 use worker::{Bucket, Range};
 
@@ -893,6 +895,109 @@ pub(crate) async fn img(env: &Env, name: &str) -> Result<Response> {
     Ok(resp)
 }
 
+// ── KICHIK FAYLLAR (<= 18 MiB): worker O'ZI shifrlab Telegram'ga saqlaydi (R2 va Actions kerak emas) ──
+
+/// Bot API `sendDocument` (qo'lda yig'ilgan multipart): `(file_id, message_id)`. Telegram 429 bersa bir marta qisqa kutib qayta uriniladi.
+async fn tg_send_document(token: &str, channel: i64, name: &str, data: &[u8]) -> Result<(String, i64)> {
+    if token.is_empty() || channel == 0 {
+        return Err(Error::RustError("bot tokeni yoki kanal yo'q".into()));
+    }
+    let boundary = format!("----vd{}", now_ms());
+    let safe: String = name.chars().map(|c| if c.is_ascii_graphic() && c != '"' && c != '\\' { c } else { '_' }).collect();
+    let mut last = String::new();
+    for attempt in 0..2 {
+        let mut body: Vec<u8> = Vec::with_capacity(data.len() + 512);
+        for (k, v) in [("chat_id", channel.to_string()), ("disable_notification", "true".to_string())] {
+            body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n").as_bytes());
+        }
+        body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"document\"; filename=\"{safe}\"\r\nContent-Type: application/octet-stream\r\n\r\n").as_bytes());
+        body.extend_from_slice(data);
+        body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+        let h = Headers::new();
+        h.set("Content-Type", &format!("multipart/form-data; boundary={boundary}"))?;
+        let arr = worker::js_sys::Uint8Array::from(&body[..]);
+        drop(body);
+        let treq = Request::new_with_init(
+            &format!("https://api.telegram.org/bot{token}/sendDocument"),
+            RequestInit::new().with_method(Method::Post).with_headers(h).with_body(Some(arr.into())),
+        )?;
+        let mut r = Fetch::Request(treq).send().await?;
+        let d: Value = r.json().await?;
+        if d["ok"] == json!(true) {
+            let doc = &d["result"]["document"];
+            let fid = doc["file_id"].as_str().unwrap_or("").to_string();
+            if doc["file_size"].as_u64().unwrap_or(data.len() as u64) != data.len() as u64 || fid.is_empty() {
+                return Err(Error::RustError("Telegram javobi mos emas".into()));
+            }
+            return Ok((fid, d["result"]["message_id"].as_i64().unwrap_or(0)));
+        }
+        last = d["description"].as_str().unwrap_or("noma'lum").to_string();
+        let wait = d["parameters"]["retry_after"].as_u64().unwrap_or(0);
+        if attempt == 0 && wait > 0 && wait <= 5 {
+            Delay::from(core::time::Duration::from_secs(wait + 1)).await;
+            continue;
+        }
+        break;
+    }
+    Err(Error::RustError(format!("Telegram rad etdi: {last}")))
+}
+
+fn hex_decode16(s: &str) -> Option<[u8; 16]> {
+    if s.len() != 32 {
+        return None;
+    }
+    let mut out = [0u8; 16];
+    for i in 0..16 {
+        out[i] = u8::from_str_radix(&s[i * 2..i * 2 + 2], 16).ok()?;
+    }
+    Some(out)
+}
+
+/// `PUT /api/vd/small?name=<nom>` (sessiya + ruxsat, tana = OCHIQ fayl, <= 18 MiB): worker yangi tasodifiy kalit yasaydi, AES-128-CTR bilan shifrlaydi,
+/// `.bin` hujjat sifatida YANGI kanalga yuboradi va bazaga `ready` yozadi (bitta bo'lak). Kesh ham shu zahoti to'ldiriladi (ma'lumot va
+/// shifrlangan bo'lak) — birinchi ochish ham tez. Qaytadi: `{ok, key, size}`; katta fayl uchun 413 (ilova R2 + Actions yo'liga o'tadi).
+pub(crate) async fn small(env: &Env, me: i64, admin: bool, name: &str, mut req: Request) -> Result<Response> {
+    if !upload_allowed(name, me, admin) {
+        return json_resp(&json!({"error": "ruxsat yo'q"}), 403);
+    }
+    let declared = req.headers().get("Content-Length").ok().flatten().and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+    if declared > CHUNK {
+        return json_resp(&json!({"error": "katta fayl", "limit": CHUNK}), 413);
+    }
+    ensure(env).await?;
+    // Xuddi shu nom allaqachon tayyor (qayta yuborilgan so'rov) — mavjud kalit qaytadi.
+    if let Some(r) = turso_exec(env, "SELECT vkey,size FROM vd_files WHERE name=? AND state='ready'", vec![TursoArg::text(name)]).await?.pipe_first() {
+        return ok(json!({"ok": true, "key": r["vkey"], "size": r["size"], "existing": true}));
+    }
+    let mut bytes = req.bytes().await?;
+    if bytes.is_empty() || bytes.len() as u64 > CHUNK {
+        return json_resp(&json!({"error": if bytes.is_empty() { "bo'sh fayl" } else { "katta fayl" }, "limit": CHUNK}), if bytes.is_empty() { 400 } else { 413 });
+    }
+    let size = bytes.len() as u64;
+    let key_hex = random_hex(32);
+    let Some(key) = hex_decode16(&key_hex) else { return json_resp(&json!({"error": "kalit"}), 500) };
+    ctr::Ctr128BE::<Aes128>::new(&key.into(), &[0u8; 16].into()).apply_keystream(&mut bytes);
+    let tag: String = hex_of(&<sha2::Sha256 as sha2::Digest>::digest(name.as_bytes())).chars().take(12).collect();
+    let (fid, mid) = tg_send_document(&tg_secret(env, "TELEGRAM_BOT_TOKEN"), vd_channel(env), &format!("vd_{tag}_0000.bin"), &bytes).await?;
+    turso_exec(env,
+        "INSERT INTO vd_files (name,size,chunks,vkey,state,layout,chunk_ids,msg_ids,created) VALUES (?,?,1,?,'ready','chunks',?,?,?) \
+         ON CONFLICT(name) DO UPDATE SET size=excluded.size, chunks=1, vkey=excluded.vkey, state='ready', layout='chunks', \
+           chunk_ids=excluded.chunk_ids, msg_ids=excluded.msg_ids, lease=0, tries=0, created=excluded.created",
+        vec![TursoArg::text(name), TursoArg::int(size as i64), TursoArg::text(&key_hex), TursoArg::text(&fid), TursoArg::text(&mid.to_string()), TursoArg::int(now_ms())]).await?;
+    // Write-through kesh: ma'lumot va shifrlangan bo'lak (oyna 0) shu mintaqada darrov tayyor.
+    meta_put(name, &json!({"state": "ready", "size": size, "chunks": 1, "key": key_hex, "chunk_ids": fid})).await;
+    let wname = format!("vd~{name}");
+    if let (Ok(creq), Ok(resp)) = (Request::new(&warm_window_url(&wname, 0), Method::Get), Response::from_bytes(bytes)) {
+        let headers = Headers::new();
+        let _ = headers.set("Content-Type", "application/octet-stream");
+        let _ = headers.set("Cache-Control", &format!("public, max-age={CHUNK_CACHE_SECONDS}"));
+        let _ = headers.set("X-Total-Size", &size.to_string());
+        let _ = headers.set("X-Window-Start", "0");
+        let _ = Cache::default().put(&creq, resp.with_headers(headers)).await;
+    }
+    ok_nostore(json!({"ok": true, "key": key_hex, "size": size}))
+}
+
 /// Kim nimani yuklay oladi: admin — qism (`ep_*`) va rasm fayllari (`.jpg/.jpeg/.png/.webp`); oddiy foydalanuvchi — faqat O'Z profil rasmi
 /// (`avatar_<id>_*.jpg`).
 fn upload_allowed(name: &str, me: i64, admin: bool) -> bool {
@@ -1135,6 +1240,13 @@ mod tests {
         assert!(upload_allowed("chat_7_5.m4a", 7, false));
         assert!(!upload_allowed("chat_8_5.m4a", 7, false));
         assert!(upload_allowed("chat_8_5.m4a", 7, true));
+    }
+
+    #[test]
+    fn kalit_hex() {
+        assert_eq!(hex_decode16("00112233445566778899aabbccddeeff").map(|k| k[15]), Some(0xff));
+        assert!(hex_decode16("zz").is_none());
+        assert!(hex_decode16(&"g".repeat(32)).is_none());
     }
 
     #[test]

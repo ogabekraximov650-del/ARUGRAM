@@ -14285,6 +14285,11 @@ async fn tg_route(mut req: Request, env: &Env, path: &str, method: Method) -> Re
             let body: Value = req.json().await.unwrap_or(json!({}));
             vd::info_for(env, me, is_admin(&u), &body).await
         }
+        // Kichik fayl (<= 18 MiB): worker o'zi shifrlab Telegram'ga saqlaydi (R2/Actions kerak emas).
+        (Method::Put, "/api/vd/small") => {
+            let name = req.url()?.query_pairs().find(|(k, _)| k == "name").map(|(_, v)| v.to_string()).unwrap_or_default();
+            vd::small(env, me, is_admin(&u), &name, req).await
+        }
         (Method::Post, "/api/vd/up/init") => {
             let body: Value = req.json().await.unwrap_or(json!({}));
             vd::up_init(env, me, is_admin(&u), &body).await
