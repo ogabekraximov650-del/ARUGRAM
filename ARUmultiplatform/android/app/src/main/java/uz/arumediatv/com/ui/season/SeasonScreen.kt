@@ -274,11 +274,14 @@ fun SeasonScreen(
     // ── Xato: Telegram bo'lsa bir marta worker yo'liga o'tamiz ──
     LaunchedEffect(player.error) {
         val ep = current
-        // Yangi tizim (vd) ochilmadi — bir marta eski yo'l (Telegram) bilan qayta urinamiz.
+        // Yangi tizim (vd) ochilmadi — eski yo'lga (Telegram) FAQAT Telegram hisobi ulangan bo'lsa o'tamiz. Aks holda eski yo'lda bu fayl YO'Q
+        // (worker `/api/play/<nom>` uni topa olmaydi): o'tsak sekin tarmoqdagi bitta vaqtinchalik xato videoni butunlay "o'ldirardi" (cheksiz aylanish).
         if (player.error != null && viaVd && ep != null) {
-            uz.arumediatv.com.data.Names.fileNameOf(currentUrl).takeIf { it.isNotEmpty() }?.let { uz.arumediatv.com.data.PlaySource.vdFailed.add(it) }
-            viaVd = false
-            play(ep, resumeAt = player.positionMs, preferWorker = false)
+            if (AppServices.telegram.state.value.authorized) {
+                uz.arumediatv.com.data.Names.fileNameOf(currentUrl).takeIf { it.isNotEmpty() }?.let { uz.arumediatv.com.data.PlaySource.vdFailed.add(it) }
+                viaVd = false
+                play(ep, resumeAt = player.positionMs, preferWorker = false)
+            }
             return@LaunchedEffect
         }
         if (player.error != null && (viaTelegram || viaLocal) && !workerRetried && ep != null) {

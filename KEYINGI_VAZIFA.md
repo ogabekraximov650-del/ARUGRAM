@@ -7161,3 +7161,9 @@ Foydalanuvchi: model "sudo yo'q, o'rnatib bo'lmaydi" deb to'xtab qoldi ("Modelni
 - Sabab: Cloudflare kesh (Cache API) har data markazda ALOHIDA. `warm` bir markazda, `play` boshqasida bo'lsa oyna yo'q. Mobil tarmoqda ikki so'rov turli markazga tushishi mumkin.
 - Tuzatish: `vcache::b2_play` vd fayli uchun "no-window"/"slice-miss" bo'lsa shu zahoti `vd::warm` bilan oynani SHU markazga Telegramdan isitadi va bir marta qayta urinadi (Telegram'dan olish bepul — B2 kabi chiqish haqi yo'q).
 - Emoji shrifti (`/api/vd/img/...`) sinovda 200 (7,4 MB) — serverdan muammo yo'q.
+
+## Pleyer: vd xatosida eski yo'lga o'tish videoni o'ldirardi (2026-11)
+
+- Belgi: Support chatda video ochiladi (`VdChat`: bo'laklab yuklab shifrini ochadi), lekin qism pleyerida cheksiz aylanadi; worker sinovida (`enc-diag.yml`: warm/play/ochiq diapazon) hammasi 206.
+- Sabab (ilova): `SeasonScreen` `LaunchedEffect(player.error)` vd xatosida faylni `PlaySource.vdFailed` ga qo'yib eski yo'lga (Telegram/worker `/api/play/<nom>`) o'tardi. Telegram hisobisiz foydalanuvchida eski yo'l bu faylni TOPA OLMAYDI -> sekin tarmoqdagi bitta vaqtinchalik xato (taymaut, 503) videoni butun sessiya davomida "o'ldirardi".
+- Tuzatish: eski yo'lga FAQAT Telegram ulangan bo'lsa o'tiladi (`SeasonScreen`, `PlaySource.resolve`); `AruPlayer` tarmoq/IO xatolarida (2000..2999, 503, "Kesh tayyor emas") oynani qayta isitib 3 martagacha davom etadi (oraliq 1,5 s * urinish); HTTP taymautlari 25 s / 120 s.

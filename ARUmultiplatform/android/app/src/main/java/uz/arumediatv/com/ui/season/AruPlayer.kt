@@ -86,12 +86,15 @@ class AruPlayer(context: Context) {
             val root = generateSequence<Throwable>(e) { it.cause }.last()
             val http = (e.cause as? androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException)?.responseCode
             val vn = vdName
-            if (vn != null && vdRecoveries < 2 && (http == 503 || generateSequence<Throwable>(e) { it.cause }.any { it.message?.contains("Kesh tayyor emas") == true })) {
+            // Tarmoq/IO xatolari (2000..2999: uzilish, taymaut, 503, "Kesh tayyor emas") — sekin tarmoqda oddiy hol: oyna qayta isitiladi va davom etadi (3 martagacha).
+            val ioErr = e.errorCode in 2000..2999
+            if (vn != null && vdRecoveries < 3 && (http == 503 || ioErr || generateSequence<Throwable>(e) { it.cause }.any { it.message?.contains("Kesh tayyor emas") == true })) {
                 // Kesh o'chib ketgan (yoki oyna isitilmagan): belgi o'chadi, oyna MAJBURAN qayta isitiladi va ijro shu joydan davom etadi.
                 vdRecoveries++
                 val pos = exo.currentPosition.coerceAtLeast(0)
                 val uri = lastUri
                 Thread {
+                    Thread.sleep(1_500L * vdRecoveries)
                     uz.arumediatv.com.vd.VdWarm.forget(vn)
                     uz.arumediatv.com.vd.VdApi.warmBlocking(vn, pos / uz.arumediatv.com.vd.VdApi.WARM_WINDOW, force = true)
                     ui.post { open(uri, pos, true) }

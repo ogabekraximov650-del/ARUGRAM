@@ -305,7 +305,7 @@ object PlaySource {
         // Telegram hisobi kerak emas, ko'rilgan joy telefonda shifrlangan holda qoladi. Yangi tizimda bo'lmasa — eski yo'l.
         if (!preferWorker) {
             val vname = Names.fileNameOf(url)
-            if (vname.isNotEmpty() && vname !in vdFailed) {
+            if (vname.isNotEmpty() && (vname !in vdFailed || !tg.state.value.authorized)) {
                 val info = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                     uz.arumediatv.com.vd.VdApi.lookup(uz.arumediatv.com.AppServices.appContext, vname, uz.arumediatv.com.AppServices.auth.sessionToken)
                 }

@@ -63,7 +63,7 @@ object VdWarm {
             spec
         }
         val network = ResolvingDataSource.Factory(
-            DefaultHttpDataSource.Factory().setConnectTimeoutMs(15_000).setReadTimeoutMs(60_000).setTransferListener(Tracker(name)), resolver)
+            DefaultHttpDataSource.Factory().setConnectTimeoutMs(25_000).setReadTimeoutMs(120_000).setTransferListener(Tracker(name)), resolver)
         val app = context.applicationContext
         val key = VdCtr.hex(keyHex)
         return DefaultMediaSourceFactory(context).setDataSourceFactory(
