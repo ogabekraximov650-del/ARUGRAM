@@ -40,3 +40,14 @@ jobs:
           T=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
           curl -sS -m 60 -X POST -H "X-Encode-Token: $T" -H "Content-Type: application/json" -d '{}' "$API_BASE/api/encode/qdiag" \
             | python3 -c 'import json,sys,time; d=json.load(sys.stdin); print("live_keys:", d.get("live_keys")); [print("LIVE", k, v.get("age_s"), "s |", (v.get("head") or "").replace(chr(10), " / ")[:420]) for k, v in (d.get("live_info") or {}).items()]; print("now:", d.get("now")); print("q_states:", d.get("q_states")); print("pending:", d.get("pending")); print("holat:", (d.get("holat") or "")[:2500])'
+      - name: vd verify (ochilish tekshiruvi, faqat o'qish)
+        env:
+          API_BASE: ${{ secrets.API_BASE || 'https://arumediatv.uzcom.workers.dev' }}
+        run: |
+          T=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          for n in ep_4_1_1_360p_1794242367764.mp4 sys_emojifont_1794244734.bin; do
+            echo "== verify $n"
+            curl -sS -m 90 -w "  [HTTP %{http_code}]\n" -X POST -H "X-Encode-Token: $T" -H "Content-Type: application/json" -d "{\"name\":\"$n\"}" "$API_BASE/api/vd/verify" | sed 's/"key":"[0-9a-f]*"/"key":"<yashirin>"/'
+          done
+          echo "== channel"
+          curl -sS -m 60 -X POST -H "X-Encode-Token: $T" -H "Content-Type: application/json" -d '{}' "$API_BASE/api/vd/channel"; echo
