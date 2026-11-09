@@ -264,9 +264,12 @@ fun SupportChatScreen(userId: Long?, title: String, onBack: () -> Unit, onPacks:
                 try { File(ctx.cacheDir, name).also { f -> ctx.contentResolver.openInputStream(uri)?.use { i -> f.outputStream().use { o -> i.copyTo(o) } } } } catch (_: Exception) { null }
             }
             if (local == null) { upProgress = null; toast("Faylni o'qib bo'lmadi"); return@launch }
-            val err = chatUpload(local.absolutePath, name) { upProgress = it }
+            // Rasm yuborishdan oldin kichraytiriladi (3-12 MB telefon rasmi sekin tarmoqda daqiqalab yuklanardi).
+            val toSend = if (type == "image" && ext in setOf("jpg", "jpeg", "png", "webp", "heic")) withContext(Dispatchers.IO) { uz.arumediatv.com.vd.ImagePrep.jpeg(ctx, local) } else local
+            val err = chatUpload(toSend.absolutePath, name) { upProgress = it }
             if (err != null) toast(err) else store.send(withReply(replyTo?.id, if (type == "file") display else body), mediaFile = name, mediaType = type, mediaMs = ms)?.let(::toast)
             if (err == null) replyTo = null
+            if (toSend !== local) runCatching { toSend.delete() }
             runCatching { local.delete() }
             upProgress = null
         }

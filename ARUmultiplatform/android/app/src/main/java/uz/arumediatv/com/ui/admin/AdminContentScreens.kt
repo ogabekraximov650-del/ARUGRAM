@@ -144,7 +144,9 @@ private fun fileNameOfUrl(url: String): String {
 private suspend fun uploadPhoto(ctx: Context, uri: Uri, prefix: String): Pair<String?, String?> = withPickedFile(ctx, uri) { path, _, _ ->
     val name = "${prefix}_${System.currentTimeMillis()}.jpg"
     // Rasm ACTIONS orqali yuklanadi (R2 -> Telegram bo'lagi); tayyor bo'lgach (odatda 1-2 daqiqa) hamma joyda ko'rinadi.
-    val r = uz.arumediatv.com.vd.VdUpload.upload(path, name, AppServices.auth.sessionToken.orEmpty()) { _, _ -> }
+    // Telefon rasmi katta — avval kichraytiriladi (sekin tarmoqda daqiqalab yuklanmasin).
+    val small = uz.arumediatv.com.vd.ImagePrep.jpeg(ctx, File(path))
+    val r = try { uz.arumediatv.com.vd.VdUpload.upload(small.absolutePath, name, AppServices.auth.sessionToken.orEmpty()) { _, _ -> } } finally { if (small.path != path) runCatching { small.delete() } }
     if (r.error == null) name to null else null to r.error
 } ?: (null to "Faylni o'qib bo'lmadi")
 
