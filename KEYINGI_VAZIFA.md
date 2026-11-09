@@ -7148,3 +7148,9 @@ Foydalanuvchi: model "sudo yo'q, o'rnatib bo'lmaydi" deb to'xtab qoldi ("Modelni
 - SABAB nega kun davomida 6 marta qayta yasalgan: ilova shriftni FAQAT Telegram hisobi orqali olardi (`telegram.fetchBytes`); bot orqali kirgan foydalanuvchida bu yo'q -> "yuklanmadi" deb workerga xabar -> 5 ta xabardan keyin Actions shriftni qayta yasardi (har safar Actions daqiqalari + kanal posti).
 - TUZATISH: ilova avval yangi tizimdan (`VdImages.fetch`, Cloudflare keshi) oladi; Telegram ulanmagan bo'lsa "yuklanmadi" xabari yuborilmaydi (qayta urinadi). Worker `emojifont::commit` shriftni vd migratsiyasiga qo'yadi (`enqueue_one`, `enqueue_all` ham `sys_emojifont_*` ni oladi); `tool/vd/mig.py` MP4 belgisini faqat `ep_*` uchun tekshiradi. Mavjud shrift keyingi migratsiyada (cron <= 6 soat) o'tadi.
 - Kanal hujjatlaridagi izohlar (matn) olib tashlandi: vid hujjatlari izohsiz, shrift ham.
+
+## Kodlash: nega 720p/1080p kech boshlanardi (2026-11)
+
+- Belgi: cron (har 10 daqiqada) 360p va 480p ni ishga tushirar, 1080p va 720p esa keyingi chaqiruvlarda (5-6 daqiqa keyin, bittadan). `encode_kicked_<sifat>` vaqtlari buni ko'rsatdi (`ci/enc_diag.py`, `enc-diag.yml` — faqat o'qish).
+- Sabab: Cloudflare bitta chaqiruvda ~50 ta ichki so'rov (subrequest) beradi. `scheduled` oldin hamma botlar/navbatlarni (packs, post, anibla, tarjima, siqish, dublyaj, vd, r2...) kezib chiqar, so'ng `encode_kick_full` ga kelganda so'rovlar tugab qolardi — ro'yxat oxiridagi sifatlar (720p, 1080p) ishga tushmasdi.
+- Tuzatish: `encode_kick_full` cron'ning BIRINCHI ishi qilib ko'chirildi (`lib.rs` `scheduled`). Tashqi tomondan tasdiqlash: keyingi kodlashda 4 sifat ham bir vaqtda boshlanishi kerak.

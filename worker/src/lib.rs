@@ -14207,6 +14207,9 @@ async fn cleanup_orphan_history(env: &Env) {
 
 #[event(scheduled)]
 async fn scheduled(_ev: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
+    // Kodlash navbati BIRINCHI: Cloudflare bitta chaqiruvda ~50 ta ichki so'rovga ruxsat beradi (subrequest). Quyidagi bot/navbatlar ularni
+    // ishlatib bo'lgach 720p/1080p workflow'lari ishga tushmay qolardi (har 10 daqiqada bitta-ikkita sifat, "oxirgi sifat kech boshlanadi").
+    let msg = encode_kick_full(&env, true).await;
     // Asosiy bot webhook'i: bot almashsa (token yangilansa) unga hech kim so'rov
     // yubormaguncha webhook qo'yilmasdi va bot /start'ga jim turardi. Cron uni
     // 10 daqiqa ichida o'zi qo'yadi (manzil — oldingi webhook'dan saqlangan).
@@ -14237,7 +14240,6 @@ async fn scheduled(_ev: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
     // R2 oraliq ombori: Telegram'ga yuklanmagan fayllar bo'lsa yuklovchi workflow ishga tushadi; eskirganlar tozalanadi.
     let _ = r2::kick(&env).await;
     r2::cleanup(&env).await;
-    let msg = encode_kick_full(&env, true).await;
     // Faqat ishga tushirilganda yoki xato bo'lsa adminga xabar. Xato
     // (masalan token yo'q) har 10 daqiqada takrorlanmasin — soatiga bir.
     let hourly = (now_ms() / 600_000) % 6 == 0;
