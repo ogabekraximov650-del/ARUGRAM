@@ -29,8 +29,9 @@ jobs:
           v = {}
           for i in range(40):                       # deploy tugashini kutadi: "legacy" kaliti chiqquncha
               v = call("/api/vd/channel")
-              if "legacy" in v: break
+              if v.get("legacy", {}).get("channel") == -1003816269380: break
               time.sleep(15)
           print(json.dumps(v, indent=1, ensure_ascii=False))
           PY
 # v2
+# v3
