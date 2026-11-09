@@ -60,6 +60,49 @@ fn bad(msg: &str) -> Result<Response> {
     json_resp(&json!({"error": msg}), 400)
 }
 
+// ── Turso o'qishlarini kamaytirish (ARUDRIVE kesh tizimi kabi) ───────────────────────────
+//
+// `ready` fayl ma'lumoti (hajm, kalit, `file_id` lar) o'zgarmaydi — Cloudflare keshida (Cache API) turadi: `info` va `warm` bazaga faqat
+// keshda yo'q bo'lsagina boradi. Fayl nomi HECH QACHON qayta ishlatilmaydi (nomda vaqt tamg'asi bor), shu sabab eskirish faqat o'chirishda
+// mumkin (`forget` o'z mintaqasida keshni o'chiradi; boshqa mintaqada eskirgan nusxa META_TTL dan keyin ketadi, `warm` esa baribir xato
+// qaytaradi va ilova eski yo'lga o'tadi).
+const META_TTL: u64 = 7 * 24 * 3600;
+
+fn meta_url(name: &str) -> String {
+    cache_key_url(&format!("vd~{name}"), "meta")
+}
+
+async fn meta_get(name: &str) -> Option<Value> {
+    let req = Request::new(&meta_url(name), Method::Get).ok()?;
+    let mut hit = Cache::default().get(&req, false).await.ok()??;
+    hit.json::<Value>().await.ok()
+}
+
+async fn meta_put(name: &str, v: &Value) {
+    let Ok(mut resp) = Response::from_json(v) else { return };
+    let _ = resp.headers_mut().set("Cache-Control", &format!("public, max-age={META_TTL}"));
+    if let Ok(req) = Request::new(&meta_url(name), Method::Get) {
+        let _ = Cache::default().put(&req, resp).await;
+    }
+}
+
+async fn meta_drop(name: &str) {
+    let _ = Cache::default().delete(&meta_url(name), false).await;
+}
+
+/// Qisqa muddatli "bo'sh" belgisi (Cloudflare keshida): cron navbat bo'sh deb bilgan bo'lsa keyingi daqiqalarda bazaga bormaydi.
+async fn marker_has(key: &str) -> bool {
+    let Ok(req) = Request::new(&cache_key_url("vd~marker", key), Method::Get) else { return false };
+    matches!(Cache::default().get(&req, false).await, Ok(Some(_)))
+}
+
+async fn marker_set(key: &str, secs: u64) {
+    if let (Ok(req), Ok(mut resp)) = (Request::new(&cache_key_url("vd~marker", key), Method::Get), Response::ok("1")) {
+        let _ = resp.headers_mut().set("Cache-Control", &format!("public, max-age={secs}"));
+        let _ = Cache::default().put(&req, resp).await;
+    }
+}
+
 /// R2 da bo'laklar uchun ajratilgan sig'im (bayt): `VD_R2_MAX_GB` (standart 4 GB). Qolgani kodlovchilarniki (`r2.rs`).
 fn cap_bytes(env: &Env) -> i64 {
     tg_secret(env, "VD_R2_MAX_GB").parse::<i64>().unwrap_or(4).max(1) * 1024 * 1024 * 1024
@@ -109,29 +152,44 @@ async fn kick_wf(env: &Env, wf: &str) -> String {
 
 /// Cron: saqlash yoki migratsiya navbati bo'lsa tegishli workflow uyg'otiladi (bo'sh bo'lsa GitHub'ga so'rov yo'q), eskirganlar tozalanadi.
 pub(crate) async fn cron(env: &Env) {
-    if bucket(env).is_none() || ensure(env).await.is_err() {
+    if bucket(env).is_none() {
         return;
     }
-    let now = now_ms();
-    let Some(r) = turso_exec(env,
-        "SELECT (SELECT COUNT(*) FROM vd_files WHERE state='uploaded' OR (state='storing' AND lease<?)) AS store,
-                (SELECT COUNT(*) FROM vd_mig WHERE state='queued' OR (state='running' AND lease<?)) AS mig",
-        vec![TursoArg::int(now), TursoArg::int(now)]).await.ok().and_then(|r| first_row(&r)) else { return };
-    if jint(&r, "store") > 0 {
-        let _ = kick_wf(env, WORKFLOW).await;
+    // Navbat bo'sh bo'lsa (50 daqiqalik belgi) bazaga umuman borilmaydi; yangi ish kelganda (`finish`, `up_complete`, `enqueue_one`)
+    // workflow to'g'ridan-to'g'ri ishga tushiriladi, shu sabab belgi ishni kechiktirmaydi.
+    if !marker_has("idle").await {
+        if ensure(env).await.is_err() {
+            return;
+        }
+        let now = now_ms();
+        let Some(r) = turso_exec(env,
+            "SELECT (SELECT COUNT(*) FROM vd_files WHERE state='uploaded' OR (state='storing' AND lease<?)) AS store,
+                    (SELECT COUNT(*) FROM vd_mig WHERE state='queued' OR (state='running' AND lease<?)) AS mig,
+                    (SELECT COUNT(*) FROM vd_files WHERE state IN ('storing','staging','uploading') AND lease>=?) AS busy",
+            vec![TursoArg::int(now), TursoArg::int(now), TursoArg::int(now)]).await.ok().and_then(|r| first_row(&r)) else { return };
+        if jint(&r, "store") > 0 {
+            let _ = kick_wf(env, WORKFLOW).await;
+        }
+        if jint(&r, "mig") > 0 && staged_bytes(env).await < cap_bytes(env) {
+            let _ = kick_wf(env, MIG_WORKFLOW).await;
+        }
+        if jint(&r, "store") == 0 && jint(&r, "mig") == 0 && jint(&r, "busy") == 0 {
+            marker_set("idle", 50 * 60).await;
+        }
     }
-    if jint(&r, "mig") > 0 && staged_bytes(env).await < cap_bytes(env) {
-        let _ = kick_wf(env, MIG_WORKFLOW).await;
-    }
-    // Har 6 soatda: hali yangi tizimda yo'q hamma eski sifat fayllari migratsiya navbatiga qo'yiladi (yangi kodlanganlari ham, o'tkazib yuborilganlari ham).
-    let last = config_get(env, "vd_enq_at").await.and_then(|v| v.parse::<i64>().ok()).unwrap_or(0);
-    if now - last > 6 * 3600 * 1000 {
-        config_put(env, "vd_enq_at", &now.to_string()).await;
-        if enqueue_all(env).await.unwrap_or(0) > 0 && staged_bytes(env).await < cap_bytes(env) {
+    // Har 6 soatda: hali yangi tizimda yo'q hamma eski sifat fayllari migratsiya navbatiga qo'yiladi (`tg_files` skaneri — qimmat, shu sabab kamdan-kam).
+    if !marker_has("enq").await {
+        marker_set("enq", 6 * 3600).await;
+        if ensure(env).await.is_ok() && enqueue_all(env).await.unwrap_or(0) > 0 && staged_bytes(env).await < cap_bytes(env) {
+            marker_set("idle", 1).await;
             let _ = kick_wf(env, MIG_WORKFLOW).await;
         }
     }
-    cleanup(env).await;
+    // Tozalash (bazaga bitta so'rov) 6 soatlik davr bilan bir xil.
+    if !marker_has("clean").await {
+        marker_set("clean", 6 * 3600).await;
+        cleanup(env).await;
+    }
 }
 
 /// 24 soatdan eski, tugamagan `staging`/`uploading` yuklashlar R2 dan va bazadan o'chadi. `ready`/`storing` ga tegilmaydi.
@@ -188,7 +246,11 @@ pub(crate) async fn enqueue_one(env: &Env, name: &str) {
 
 /// Qism/sifat o'chirilganda: R2 bo'laklari, kanal xabarlari va baza yozuvi ketadi.
 pub(crate) async fn forget(env: &Env, name: &str) {
-    if !tg_safe_name(name) || ensure(env).await.is_err() {
+    if !tg_safe_name(name) {
+        return;
+    }
+    meta_drop(name).await;
+    if ensure(env).await.is_err() {
         return;
     }
     let row = turso_exec(env, "SELECT msg_ids FROM vd_files WHERE name=?", vec![TursoArg::text(name)]).await.ok().and_then(|r| first_row(&r));
@@ -206,6 +268,7 @@ pub(crate) async fn forget(env: &Env, name: &str) {
         }
     }
     let _ = turso_exec(env, "DELETE FROM vd_files WHERE name=?", vec![TursoArg::text(name)]).await;
+    meta_drop(name).await;
 }
 
 // ── Actions yo'llari (ENCODE_TOKEN) ──────────────────────────
@@ -410,12 +473,12 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
             }))
         }
         "/api/vd/chunkdone" => {
-            let tg = b["tg_file_id"].as_str().unwrap_or("").to_string();
-            let msg = jint(&b, "msg_id");
-            let n = jint(&b, "n");
-            if !tg_safe_name(&name) || n < 0 || tg.is_empty() || tg.len() > 300 || msg <= 0
-                || !tg.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
-            {
+            // Bitta bo'lak (`n`, `tg_file_id`, `msg_id`) yoki bir nechta (`items: [...]`) — guruhlash bazaga so'rovlarni kamaytiradi.
+            let items: Vec<Value> = match b["items"].as_array() {
+                Some(a) => a.iter().take(40).cloned().collect(),
+                None => vec![b.clone()],
+            };
+            if !tg_safe_name(&name) || items.is_empty() {
                 return bad("so'rov");
             }
             let Some(row) = turso_exec(env, "SELECT chunk_ids,msg_ids,layout FROM vd_files WHERE name=? AND state='storing'", vec![TursoArg::text(&name)]).await?.pipe_first() else {
@@ -423,16 +486,27 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
             };
             let mut fids: Vec<String> = ids(row["chunk_ids"].as_str().unwrap_or("")).into_iter().map(String::from).collect();
             let mut mids: Vec<String> = ids(row["msg_ids"].as_str().unwrap_or("")).into_iter().map(String::from).collect();
-            let n = n as usize;
-            if n > fids.len() || n > mids.len() {
-                return json_resp(&json!({"error": "bo'laklar tartib bilan kelishi shart"}), 409);
+            let mut done_n: Vec<u64> = Vec::new();
+            for it in &items {
+                let tg = it["tg_file_id"].as_str().unwrap_or("").to_string();
+                let (msg, n) = (jint(it, "msg_id"), jint(it, "n"));
+                if n < 0 || tg.is_empty() || tg.len() > 300 || msg <= 0 || !tg.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+                    return bad("so'rov");
+                }
+                let n = n as usize;
+                if n > fids.len() || n > mids.len() {
+                    return json_resp(&json!({"error": "bo'laklar tartib bilan kelishi shart"}), 409);
+                }
+                if n == fids.len() { fids.push(tg); mids.push(msg.to_string()) } else { fids[n] = tg; mids[n] = msg.to_string() }
+                done_n.push(n as u64);
             }
-            if n == fids.len() { fids.push(tg); mids.push(msg.to_string()) } else { fids[n] = tg; mids[n] = msg.to_string() }
             turso_exec(env, "UPDATE vd_files SET chunk_ids=?, msg_ids=?, lease=?, tries=0 WHERE name=? AND state='storing'",
                 vec![TursoArg::text(&fids.join(",")), TursoArg::text(&mids.join(",")), TursoArg::int(now + LEASE_MS), TursoArg::text(&name)]).await?;
-            // Saqlangan bo'lak R2 dan darhol o'chadi (joy bo'shaydi — migratsiya davom etadi).
+            // Saqlangan bo'laklar R2 dan darhol o'chadi (joy bo'shaydi — migratsiya davom etadi).
             if row["layout"].as_str() != Some("single") {
-                let _ = bk.delete(part_key(&name, n as u64)).await;
+                for n in done_n {
+                    let _ = bk.delete(part_key(&name, n)).await;
+                }
             }
             ok(json!({"ok": true}))
         }
@@ -473,7 +547,6 @@ impl PipeFirst for Value {
 /// beriladi (`/api/tg/deliver` bilan bir xil qoida); o'qish bitta so'rov. Yangi tizimda bo'lmagan nomlar javobda yo'q — ilova
 /// ularni eski yo'l (Telegram/MTProto) bilan ochadi.
 pub(crate) async fn info(env: &Env, body: &Value) -> Result<Response> {
-    ensure(env).await?;
     let mut names: Vec<String> = body["names"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default();
     names.retain(|n| tg_safe_name(n));
     names.sort();
@@ -482,17 +555,34 @@ pub(crate) async fn info(env: &Env, body: &Value) -> Result<Response> {
     if names.is_empty() {
         return bad("nom");
     }
-    let marks = vec!["?"; names.len()].join(",");
-    let r = turso_exec(env,
-        &format!("SELECT name,size,chunks,vkey,state,chunk_ids FROM vd_files WHERE state IN ('ready','storing','uploaded') AND name IN ({marks})"),
-        names.iter().map(|n| TursoArg::text(n)).collect()).await?;
     let mut files = serde_json::Map::new();
-    for row in rows_of(&r) {
-        let n = row["name"].as_str().unwrap_or("").to_string();
-        files.insert(n, json!({
-            "state": row["state"], "size": row["size"], "chunks": row["chunks"], "key": row["vkey"],
-            "stored": ids(row["chunk_ids"].as_str().unwrap_or("")).len(),
-        }));
+    let mut miss: Vec<String> = Vec::new();
+    for n in &names {
+        match meta_get(n).await {
+            Some(m) => {
+                files.insert(n.clone(), m);
+            }
+            None => miss.push(n.clone()),
+        }
+    }
+    if !miss.is_empty() {
+        ensure(env).await?;
+        let marks = vec!["?"; miss.len()].join(",");
+        let r = turso_exec(env,
+            &format!("SELECT name,size,chunks,vkey,state,chunk_ids FROM vd_files WHERE state IN ('ready','storing','uploaded') AND name IN ({marks})"),
+            miss.iter().map(|n| TursoArg::text(n)).collect()).await?;
+        for row in rows_of(&r) {
+            let n = row["name"].as_str().unwrap_or("").to_string();
+            let v = json!({
+                "state": row["state"], "size": row["size"], "chunks": row["chunks"], "key": row["vkey"],
+                "stored": ids(row["chunk_ids"].as_str().unwrap_or("")).len(),
+            });
+            // Faqat TUGAGAN (`ready`) fayl keshlanadi — u o'zgarmaydi; saqlanayotgan fayl holati o'zgarib turadi.
+            if row["state"].as_str() == Some("ready") {
+                meta_put(&n, &v).await;
+            }
+            files.insert(n, v);
+        }
     }
     ok_nostore(json!({"files": files}))
 }
@@ -585,9 +675,16 @@ pub(crate) async fn warm(env: &Env, file: &str, widx: u64, force: bool) -> Resul
             }
         }
     }
-    ensure(env).await?;
-    let r = turso_exec(env, "SELECT size,chunk_ids,state,chunks FROM vd_files WHERE name=? AND state IN ('ready','storing','uploaded')", vec![TursoArg::text(file)]).await?;
-    let Some(f) = first_row(&r) else { return reply("error fayl topilmadi", 0) };
+    // Fayl ma'lumoti: `ready` bo'lsa Cloudflare keshidan (bazaga bormaydi), aks holda bazadan.
+    let f = match meta_get(file).await.filter(|m| m["chunk_ids"].is_string()) {
+        Some(m) => m,
+        None => {
+            ensure(env).await?;
+            let r = turso_exec(env, "SELECT size,chunk_ids,state,chunks FROM vd_files WHERE name=? AND state IN ('ready','storing','uploaded')", vec![TursoArg::text(file)]).await?;
+            let Some(f) = first_row(&r) else { return reply("error fayl topilmadi", 0) };
+            f
+        }
+    };
     let total = jint(&f, "size").max(0) as u64;
     let chunks: Vec<(i64, String)> = ids(f["chunk_ids"].as_str().unwrap_or("")).into_iter().enumerate().map(|(i, s)| (i as i64, s.to_string())).collect();
     if total == 0 || widx * WARM_WINDOW >= total {

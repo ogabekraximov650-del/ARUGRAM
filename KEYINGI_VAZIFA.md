@@ -7055,3 +7055,9 @@ Foydalanuvchi: model "sudo yo'q, o'rnatib bo'lmaydi" deb to'xtab qoldi ("Modelni
 - `AuthGate` endi hech narsani to'smaydi: saqlangan hisob aniqlangach ilova DARHOL bosh sahifa bilan ochiladi (ilgari hisob + Telegram ulanmaguncha butun ekran kirish oynasi edi).
 - **Profil:** mehmon kartasi va ro'yxatda «Telegram orqali kirish» (bot orqali) va, Telegram ulanmagan bo'lsa, «Telegram accountni ulash» (telefon raqami/QR, eski `LoginScreen`). Kirish kerak joyda (anime ochish, kutubxona) bot orqali kirish ochiladi.
 - **Bot orqali kirish oqimi (eski arumediatv'dagidek):** ilova `POST /api/auth/telegram/start` bilan bir martalik token oladi -> «Qaysi Telegram orqali kirasiz?» ro'yxati (telefonda `tg://` ni ochadigan hamma ilova: Telegram, Telegram X, Cherrygram...) -> tanlangan ilovada bot ochiladi -> foydalanuvchi «Start» bosib hisobni tasdiqlaydi -> ilova holatni har 0,8 s da so'rab kiradi. Fayllar: `ui/login/{TgClients,BotLoginScreen}.kt`, `MainActivity.kt`, `ui/profile/ProfileScreen.kt`, `AndroidManifest.xml` (`<queries>` tg sxemasi — Android 11+ da o'rnatilgan ilovalarni ko'rish uchun).
+
+### Video ombori `vd`: Turso o'qish/yozuvlarini kamaytirish (2026-11)
+
+- `ready` fayl ma'lumoti (hajm, kalit, `chunk_ids`) Cloudflare keshida (Cache API, 7 kun, `meta_get/meta_put`): `/api/vd/info` va `warm` bazaga faqat keshda yo'q bo'lsagina boradi. Nom hech qachon qayta ishlatilmaydi, shu sabab eskirish faqat o'chirishda (`forget` keshni o'chiradi).
+- Cron: navbat bo'sh bo'lsa 50 daqiqalik "bo'sh" belgisi (kesh) — bazaga bormaydi; `tg_files` skaneri (`enqueue_all`) va tozalash 6 soatlik belgi bilan.
+- Saqlash: `chunkdone` guruhlanadi (`items`, har 5 bo'lakda bitta so'rov: 1 o'qish + 1 yozuv); uzilsa yozilmagan bo'laklar qayta yuboriladi (Telegram'da yetim xabar qolishi mumkin, zarari yo'q).

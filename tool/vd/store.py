@@ -75,14 +75,24 @@ def process(job):
     done = {int(x) for x in job.get("done", [])}
     tag = hashlib.sha1(name.encode()).hexdigest()[:12]
     log(f"{name}: {chunks} bo'lak, tayyor {len(done)}")
+    pending = []   # bazaga yozilmagan bo'laklar: har 5 tasida bitta so'rov (Turso yozuvlari kamayadi); uzilsa ular qayta yuboriladi
+
+    def flush():
+        if pending:
+            api("/api/vd/chunkdone", {"name": name, "items": list(pending)})
+            pending.clear()
+
     for n in range(chunks):
         if n in done:
             continue
         data = vdlib._call(f"/api/vd/read?name={urllib.parse.quote(name)}&n={n}", method="GET", raw=True)
         fid, mid = tg_send(token, channel, f"vd_{tag}_{n:04d}.bin", data)
-        api("/api/vd/chunkdone", {"name": name, "n": n, "tg_file_id": fid, "msg_id": mid})
+        pending.append({"n": n, "tg_file_id": fid, "msg_id": mid})
+        if len(pending) >= 5 or n == chunks - 1:
+            flush()
         if n % 5 == 0 or n == chunks - 1:
             log(f"  bo'lak {n + 1}/{chunks} yuborildi ({len(data) // 1024} KB)")
+    flush()
     api("/api/vd/done", {"name": name})
     log(f"{name}: tayyor")
 
