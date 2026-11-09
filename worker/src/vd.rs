@@ -100,6 +100,32 @@ async fn meta_drop(name: &str) {
     let _ = Cache::default().delete(&meta_url(name), false).await;
 }
 
+/// "O'CHIRILGAN" BELGISI (butun dunyo bo'yicha): `forget` global `MarkHub` (Durable Object) da `vddel_<nom>` belgisini yangilaydi; keshdan o'qiladigan
+/// har joy (`meta_many`, `img`, `warm`) belgini tekshiradi — o'chirilgan fayl hech bir mintaqada qaytarilmaydi (keshdagi baytlar muddati
+/// tugaguncha yoki siqib chiqarilguncha qolishi mumkin, lekin ularsiz kalit yo'q). DO javob bermasa tekshiruv o'tkazib yuboriladi (hamma narsa
+/// "o'chirilgan" bo'lib qolmasin).
+fn del_key(name: &str) -> String {
+    format!("vddel_{name}")
+}
+
+async fn tombstoned_many(env: &Env, names: &[String]) -> std::collections::HashSet<String> {
+    let mut out = std::collections::HashSet::new();
+    if names.is_empty() {
+        return out;
+    }
+    let keys: Vec<String> = names.iter().map(|n| del_key(n)).collect();
+    let refs: Vec<&str> = keys.iter().map(|k| k.as_str()).collect();
+    let (each, reliable) = marks_each(env, &refs).await;
+    if reliable {
+        for (n, t) in names.iter().zip(each) {
+            if t > 0 {
+                out.insert(n.clone());
+            }
+        }
+    }
+    out
+}
+
 /// Qisqa muddatli "bo'sh" belgisi (Cloudflare keshida): cron navbat bo'sh deb bilgan bo'lsa keyingi daqiqalarda bazaga bormaydi.
 async fn marker_has(key: &str) -> bool {
     let Ok(req) = Request::new(&cache_key_url("vd~marker", key), Method::Get) else { return false };
@@ -305,6 +331,8 @@ pub(crate) async fn forget(env: &Env, name: &str) {
     }
     let _ = turso_exec(env, "DELETE FROM vd_files WHERE name=?", vec![TursoArg::text(name)]).await;
     meta_drop(name).await;
+    // Butun dunyo bo'yicha: boshqa mintaqalardagi kesh nusxalari endi "o'chirilgan" deb hisoblanadi (`tombstoned_many`).
+    marks_bump(env, &[del_key(name)]).await;
 }
 
 // ── Actions yo'llari (ENCODE_TOKEN) ──────────────────────────
@@ -743,6 +771,12 @@ async fn meta_many(env: &Env, names: &[String]) -> Result<serde_json::Map<String
             None => miss.push(n.clone()),
         }
     }
+    // Keshdan kelganlar eskirgan bo'lishi mumkin (boshqa mintaqada o'chirilgan) — global "o'chirilgan" belgisi tekshiriladi (bazadan kelganlar — haqiqat).
+    let hits: Vec<String> = out.keys().cloned().collect();
+    for n in tombstoned_many(env, &hits).await {
+        out.remove(&n);
+        meta_drop(&n).await;
+    }
     if !miss.is_empty() {
         ensure(env).await?;
         let marks = vec!["?"; miss.len()].join(",");
@@ -869,7 +903,13 @@ pub(crate) async fn img(env: &Env, name: &str) -> Result<Response> {
     let cache = Cache::default();
     let key = Request::new(&warm_window_url(&wname, 0), Method::Get)?;
     let bytes: Vec<u8> = match cache.get(&key, false).await? {
-        Some(mut hit) => hit.bytes().await?,
+        Some(mut hit) => {
+            if !tombstoned_many(env, &[name.to_string()]).await.is_empty() {
+                let _ = cache.delete(&key, false).await;
+                return err404("topilmadi");
+            }
+            hit.bytes().await?
+        }
         None => {
             let m = meta_many(env, &[name.to_string()]).await?;
             let Some(m) = m.get(name) else { return err404("topilmadi") };
@@ -1100,6 +1140,9 @@ pub(crate) async fn warm(env: &Env, file: &str, widx: u64, force: bool) -> Resul
     if !force {
         if let Some(t) = warm_window_total(&name, widx).await {
             if t > 0 {
+                if !tombstoned_many(env, &[file.to_string()]).await.is_empty() {
+                    return reply("error fayl topilmadi", 0);
+                }
                 return reply("cached", t);
             }
         }

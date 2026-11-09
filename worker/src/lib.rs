@@ -14564,9 +14564,45 @@ async fn main(req: Request, env: Env, ctx: Context) -> Result<Response> {
                 set_cors(&mut r);
                 return Ok(r);
             }
+            // ── UMUMIY RO'YXAT KESHI (Cloudflare): foydalanuvchiga bog'liq bo'lmagan ro'yxatlar (`/api/seasons`, `/api/seasons/anime/<id>`) javobi
+            // jadvallar belgisi (versiya) bilan shu mintaqa keshiga yoziladi — ETag'i yo'q yoki boshqa foydalanuvchi so'rasa ham Turso'ga
+            // BORILMAYDI. Jadval o'zgarsa belgi yangilanadi (butun dunyoda, `MarkHub`), kalit o'zgaradi va eski nusxa avtomatik e'tiborsiz qoladi.
+            let shared = path == "/api/seasons" || path.starts_with("/api/seasons/anime/");
+            let host = req.url().ok().and_then(|u| u.host_str().map(String::from)).unwrap_or_default();
+            let ckey = format!("https://fulutter-chunk-cache.internal/list/{host}{path}?m={mark}{bucket}");
+            if shared {
+                if let Ok(creq) = Request::new(&ckey, Method::Get) {
+                    if let Ok(Some(mut hit)) = Cache::default().get(&creq, false).await {
+                        if let Ok(body) = hit.text().await {
+                            saved("listcache", 1);
+                            let mut r = Response::ok(body)?;
+                            let _ = r.headers_mut().set("Content-Type", "application/json");
+                            let _ = r.headers_mut().set("ETag", &etag);
+                            let _ = r.headers_mut().set("Cache-Control", "no-cache");
+                            set_cors(&mut r);
+                            return Ok(r);
+                        }
+                    }
+                }
+            }
             let mut resp = route(req, env, ctx).await?;
             if resp.status_code() == 200 {
                 let _ = resp.headers_mut().set("ETag", &etag);
+                if shared {
+                    // Tana o'qiladi, keshga yoziladi va xuddi shunday qayta yig'iladi.
+                    if let Ok(body) = resp.text().await {
+                        if let (Ok(creq), Ok(mut centry)) = (Request::new(&ckey, Method::Get), Response::ok(body.clone())) {
+                            let _ = centry.headers_mut().set("Cache-Control", "public, max-age=86400");
+                            let _ = Cache::default().put(&creq, centry).await;
+                        }
+                        let mut r = Response::ok(body)?;
+                        let _ = r.headers_mut().set("Content-Type", "application/json");
+                        let _ = r.headers_mut().set("ETag", &etag);
+                        let _ = r.headers_mut().set("Cache-Control", "no-cache");
+                        set_cors(&mut r);
+                        return Ok(r);
+                    }
+                }
             }
             return Ok(resp);
         }
