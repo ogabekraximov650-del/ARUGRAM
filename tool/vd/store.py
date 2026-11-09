@@ -34,9 +34,12 @@ def multipart(fields, file_field, filename, data):
     return b"".join(parts), f"multipart/form-data; boundary={b}"
 
 
-def tg_send(token, channel, filename, data):
+def tg_send(token, channel, filename, data, caption=""):
     """Bot API `sendDocument`: (file_id, message_id). Telegram 429 bersa `retry_after` kutiladi; hajm Telegram javobi bilan solishtiriladi."""
-    body, ctype = multipart({"chat_id": channel, "disable_notification": "true"}, "document", filename, data)
+    fields = {"chat_id": channel, "disable_notification": "true"}
+    if caption:
+        fields["caption"] = caption
+    body, ctype = multipart(fields, "document", filename, data)
     url = f"https://api.telegram.org/bot{token}/sendDocument"
     last = None
     for i in range(6):
@@ -73,7 +76,8 @@ def process(job):
         raise RuntimeError("worker bot tokeni yoki kanalni bermadi")
     print("::add-mask::" + token)
     done = {int(x) for x in job.get("done", [])}
-    tag = hashlib.sha1(name.encode()).hexdigest()[:12]
+    vid = int(job.get("vid") or 0)          # fayl RAQAMI (bazadagi ketma-ket raqam): hujjat nomi `vid_<raqam>_<bo'lak>.bin`
+    label = job.get("label") or name
     log(f"{name}: {chunks} bo'lak, tayyor {len(done)}")
     pending = []   # bazaga yozilmagan bo'laklar: har 5 tasida bitta so'rov (Turso yozuvlari kamayadi); uzilsa ular qayta yuboriladi
 
@@ -86,7 +90,7 @@ def process(job):
         if n in done:
             continue
         data = vdlib._call(f"/api/vd/read?name={urllib.parse.quote(name)}&n={n}", method="GET", raw=True)
-        fid, mid = tg_send(token, channel, f"vd_{tag}_{n:04d}.bin", data)
+        fid, mid = tg_send(token, channel, f"vid_{vid}_{n + 1}.bin", data, caption=f"#{vid} \u00b7 {n + 1}/{chunks} \u00b7 {label}")
         pending.append({"n": n, "tg_file_id": fid, "msg_id": mid})
         if len(pending) >= 5 or n == chunks - 1:
             flush()

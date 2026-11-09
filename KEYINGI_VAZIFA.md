@@ -7135,3 +7135,9 @@ Foydalanuvchi: model "sudo yo'q, o'rnatib bo'lmaydi" deb to'xtab qoldi ("Modelni
 - **Bir martalik migratsiya** `mig_cleanup_2611` (`init_db`, `lib.rs`): yuqoridagilar + `orphan_files` jadvali (faqat yozilar edi, hech kim o'qimasdi) + eskirgan `app_config` kalitlari (`*_kicked_at`, bo'sh `sess_*`, `dlv_msg_*`, `mig_fmp4`) + fayli bazada (`vd_files`) yo'q yozishma xabarlari + muddati o'tgan `login_tokens`.
 - **Yozishma xabar raqami endi RAQAM**: `new_chat_id()` = `vaqt_ms*1000 + 3 xonali tasodifiy` (ustun matn turida, qiymat faqat raqam; javob belgisi `[re:<raqam>]` shu bilan ishlaydi). Eski `m<hex>` xabarlari o'zgarmadi.
 - Qoldirildi (hali ishlatiladi): `r2_files` (`r2.rs`), `encode_q`, `tg_files`, `announce*`, `anime_db.davlat/studiya/janri/tavsif` — kod ularga tayanadi; o'chirish alohida refaktor.
+
+## Kanal yozuvlari tushunarli: `vid_<raqam>_<bo'lak>.bin` (2026-11)
+
+- Telegram kanalidagi video ombori hujjatlari endi `vd_<hex>_0000.bin` EMAS, `vid_<raqam>_<bo'lak>.bin` (masalan `vid_17_1.bin`); raqam — `vd_files` ning ketma-ket `rowid` si (qism raqami kabi oddiy son, hex aralashmasi yo'q). Hujjat izohi: `#<raqam> · <bo'lak>/<jami> · <tavsif>` (tavsif `vd::label(nom)`: "Qism 3-1-12 (720p)", "Profil rasmi (foydalanuvchi 7)", "Yozishma fayli ...", "Asl video", "Emoji shrifti"). Kichik fayl yo'li (`store_small`) avval qator ochadi (`staging`, raqam olinadi), keyin yuboradi; xatoda qator o'chadi. Katta fayl: `claim` javobida `vid` va `label` (`tool/vd/store.py`). Eski hujjatlar nomi o'zgarmadi (ular `file_id` bo'yicha ochiladi, nom ahamiyatsiz).
+- Adminning bot xabari ("kanalga saqlandi") endi tavsif bilan: "✅ Emoji shrifti saqlandi · kanal posti #9" (nom o'rniga).
+- Yozishma xabari raqami allaqachon raqam (`new_chat_id`). Emoji shrift versiyasi (`sys_emojifont_<vaqt>`) O'ZGARTIRILMADI: ilova uni teng-tengga solib keshlaydi (eski katta versiyalar bilan to'qnashuv xavfi).

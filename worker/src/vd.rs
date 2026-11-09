@@ -592,12 +592,12 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
             };
             let nm = f["name"].as_str().unwrap_or("").to_string();
             let got = turso_exec(env, "UPDATE vd_files SET state='storing', lease=?, tries=tries+1 WHERE name=? AND state='uploaded' \
-                RETURNING size,chunks,chunk_ids,layout", vec![TursoArg::int(now + LEASE_MS), TursoArg::text(&nm)]).await?;
+                RETURNING rowid AS vid,size,chunks,chunk_ids,layout", vec![TursoArg::int(now + LEASE_MS), TursoArg::text(&nm)]).await?;
             let Some(r) = first_row(&got) else { return ok(json!({"none": true})) };
             let have = ids(r["chunk_ids"].as_str().unwrap_or("")).len() as i64;
             let done: Vec<i64> = (0..have).collect();
             ok(json!({
-                "name": nm, "size": r["size"], "chunks": r["chunks"], "chunk": CHUNK, "layout": r["layout"], "done": done,
+                "name": nm, "vid": r["vid"], "label": label(&nm), "size": r["size"], "chunks": r["chunks"], "chunk": CHUNK, "layout": r["layout"], "done": done,
                 "bot_token": tg_secret(env, "TELEGRAM_BOT_TOKEN"), "channel": vd_channel(env),
             }))
         }
@@ -955,7 +955,7 @@ pub(crate) async fn img(env: &Env, name: &str) -> Result<Response> {
 // ── KICHIK FAYLLAR (<= 18 MiB): worker O'ZI shifrlab Telegram'ga saqlaydi (R2 va Actions kerak emas) ──
 
 /// Bot API `sendDocument` (qo'lda yig'ilgan multipart): `(file_id, message_id)`. Telegram 429 bersa bir marta qisqa kutib qayta uriniladi.
-async fn tg_send_document(token: &str, channel: i64, name: &str, data: &[u8]) -> Result<(String, i64)> {
+async fn tg_send_document(token: &str, channel: i64, name: &str, caption: &str, data: &[u8]) -> Result<(String, i64)> {
     if token.is_empty() || channel == 0 {
         return Err(Error::RustError("bot tokeni yoki kanal yo'q".into()));
     }
@@ -964,7 +964,7 @@ async fn tg_send_document(token: &str, channel: i64, name: &str, data: &[u8]) ->
     let mut last = String::new();
     for attempt in 0..2 {
         let mut body: Vec<u8> = Vec::with_capacity(data.len() + 512);
-        for (k, v) in [("chat_id", channel.to_string()), ("disable_notification", "true".to_string())] {
+        for (k, v) in [("chat_id", channel.to_string()), ("disable_notification", "true".to_string()), ("caption", caption.to_string())] {
             body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n").as_bytes());
         }
         body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"document\"; filename=\"{safe}\"\r\nContent-Type: application/octet-stream\r\n\r\n").as_bytes());
@@ -1010,19 +1010,50 @@ fn hex_decode16(s: &str) -> Option<[u8; 16]> {
     Some(out)
 }
 
+/// Fayl nomining odam o'qiydigan tavsifi (kanal izohi va bot xabarlari uchun): `ep_1_2_3_720p_...` -> "Qism 1-2-3 (720p)".
+pub(crate) fn label(name: &str) -> String {
+    let p: Vec<&str> = name.trim_end_matches(".mp4").split('_').collect();
+    if name.starts_with("sys_emojifont_") {
+        return "Emoji shrifti".into();
+    }
+    if p.first() == Some(&"ep") && p.len() >= 5 {
+        return format!("Qism {}-{}-{} ({})", p[1], p[2], p[3], p[4]);
+    }
+    let uid = p.get(1).copied().unwrap_or("");
+    match p.first().copied().unwrap_or("") {
+        "orig" => "Asl video".into(),
+        "avatar" => format!("Profil rasmi (foydalanuvchi {uid})"),
+        "chat" => format!("Yozishma fayli (foydalanuvchi {uid})"),
+        "anime" => "Anime rasmi".into(),
+        "season" => "Bo'lim rasmi".into(),
+        _ => name.to_string(),
+    }
+}
+
 /// Kichik faylni shifrlab Telegram'ga saqlaydi, bazaga `ready` yozadi va keshni to'ldiradi: `(kalit_hex, hajm)`.
 async fn store_small(env: &Env, name: &str, mut bytes: Vec<u8>) -> Result<(String, u64)> {
     let size = bytes.len() as u64;
     let key_hex = random_hex(32);
     let Some(key) = hex_decode16(&key_hex) else { return Err(Error::RustError("kalit".into())) };
     ctr::Ctr128BE::<Aes128>::new(&key.into(), &[0u8; 16].into()).apply_keystream(&mut bytes);
-    let tag: String = hex_of(&<sha2::Sha256 as sha2::Digest>::digest(name.as_bytes())).chars().take(12).collect();
-    let (fid, mid) = tg_send_document(&tg_secret(env, "TELEGRAM_BOT_TOKEN"), vd_channel(env), &format!("vd_{tag}_0000.bin"), &bytes).await?;
-    turso_exec(env,
-        "INSERT INTO vd_files (name,size,chunks,vkey,state,layout,chunk_ids,msg_ids,created) VALUES (?,?,1,?,'ready','chunks',?,?,?) \
-         ON CONFLICT(name) DO UPDATE SET size=excluded.size, chunks=1, vkey=excluded.vkey, state='ready', layout='chunks', \
-           chunk_ids=excluded.chunk_ids, msg_ids=excluded.msg_ids, lease=0, tries=0, created=excluded.created",
-        vec![TursoArg::text(name), TursoArg::int(size as i64), TursoArg::text(&key_hex), TursoArg::text(&fid), TursoArg::text(&mid.to_string()), TursoArg::int(now_ms())]).await?;
+    // Fayl RAQAMI (`vid`): jadvalning ketma-ket `rowid` si — kanalda hujjat nomi `vid_<raqam>_<bo'lak>.bin` bo'ladi (o'qish oson, qism raqami kabi).
+    let r = turso_exec(env,
+        "INSERT INTO vd_files (name,size,chunks,vkey,state,layout,chunk_ids,msg_ids,created) VALUES (?,?,1,?,'staging','chunks','','',?) \
+         ON CONFLICT(name) DO UPDATE SET size=excluded.size, chunks=1, vkey=excluded.vkey, state='staging', layout='chunks', \
+           chunk_ids='', msg_ids='', lease=0, tries=0, created=excluded.created RETURNING rowid AS vid",
+        vec![TursoArg::text(name), TursoArg::int(size as i64), TursoArg::text(&key_hex), TursoArg::int(now_ms())]).await?;
+    let vid = first_row(&r).map(|x| jint(&x, "vid")).unwrap_or(0);
+    let sent = tg_send_document(&tg_secret(env, "TELEGRAM_BOT_TOKEN"), vd_channel(env), &format!("vid_{vid}_1.bin"),
+        &format!("#{vid} \u{b7} 1/1 \u{b7} {}", label(name)), &bytes).await;
+    let (fid, mid) = match sent {
+        Ok(v) => v,
+        Err(e) => {
+            let _ = turso_exec(env, "DELETE FROM vd_files WHERE name=? AND state='staging' AND chunk_ids=''", vec![TursoArg::text(name)]).await;
+            return Err(e);
+        }
+    };
+    turso_exec(env, "UPDATE vd_files SET state='ready', chunk_ids=?, msg_ids=? WHERE name=?",
+        vec![TursoArg::text(&fid), TursoArg::text(&mid.to_string()), TursoArg::text(name)]).await?;
     // Write-through kesh: ma'lumot va shifrlangan bo'lak (oyna 0) shu mintaqada darrov tayyor.
     meta_put(name, &json!({"state": "ready", "size": size, "chunks": 1, "key": key_hex, "chunk_ids": fid})).await;
     let wname = format!("vd~{name}");
@@ -1282,6 +1313,16 @@ pub(crate) async fn warm(env: &Env, file: &str, widx: u64, force: bool) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tavsif_nomi() {
+        assert_eq!(label("ep_3_1_12_720p_1794221272.mp4"), "Qism 3-1-12 (720p)");
+        assert_eq!(label("sys_emojifont_1794223126.bin"), "Emoji shrifti");
+        assert_eq!(label("avatar_7_1794.jpg"), "Profil rasmi (foydalanuvchi 7)");
+        assert_eq!(label("chat_7_1794.jpg"), "Yozishma fayli (foydalanuvchi 7)");
+        assert_eq!(label("orig_5.mp4"), "Asl video");
+        assert_eq!(label("boshqa.bin"), "boshqa.bin");
+    }
 
     #[test]
     fn bolaklar_soni() {

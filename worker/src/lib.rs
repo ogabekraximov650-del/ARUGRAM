@@ -11019,9 +11019,9 @@ async fn tg_channel_post(env: &Env, post: &Value) {
         return;
     }
     let text = if res.is_ok() {
-        format!("\u{2705} <code>{}</code> \u{2192} kanal posti #{msg_id}", html_escape(name))
+        format!("\u{2705} {} saqlandi \u{b7} kanal posti #{msg_id}", html_escape(&vd::label(name)))
     } else {
-        format!("\u{274C} <code>{}</code> saqlanmadi (baza xatosi)", html_escape(name))
+        format!("\u{274C} {} saqlanmadi (baza xatosi)", html_escape(&vd::label(name)))
     };
     tg_send(env, ADMIN_TELEGRAM_ID, &text).await;
 }
