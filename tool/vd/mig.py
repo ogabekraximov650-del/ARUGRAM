@@ -66,7 +66,7 @@ async def one(app, job: dict) -> bool:
         waited = 0
         while True:
             st = await asyncio.to_thread(
-                vdlib.stage_file, dst, name, new_key, old_key or None, bool(old_key),
+                vdlib.stage_file, dst, name, new_key, old_key or None, bool(old_key) and name.startswith("ep_"),
                 lambda c, t: log(f"  R2 ga: bo'lak {c}/{t}") if c % 10 == 0 or c == t else None, not old_key)
             if st != "wait":
                 break

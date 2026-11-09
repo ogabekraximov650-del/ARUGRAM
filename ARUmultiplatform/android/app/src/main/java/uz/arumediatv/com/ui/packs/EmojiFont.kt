@@ -81,7 +81,8 @@ object EmojiFonts {
                         checked = true
                         return@withContext
                     }
-                    val bytes = AppServices.telegram.fetchBytes(name)
+                    // Avval yangi tizim (Cloudflare keshi, Telegram hisobi shart emas), topilmasa eski yo'l.
+                    val bytes = uz.arumediatv.com.vd.VdImages.fetch(name) ?: AppServices.telegram.fetchBytes(name)
                     val f = File(d, "$ver.ttf")
                     var good: FontFamily? = null
                     if (bytes != null && looksLikeFont(bytes)) {
@@ -95,6 +96,9 @@ object EmojiFonts {
                         d.listFiles()?.filter { it.name.endsWith(".ttf") && it != f }?.forEach { it.delete() }
                         return@withContext
                     }
+                    // Telegram ulanmagan bo'lsa shrift hali yangi tizimga o'tmagan bo'lishi mumkin — fayl "buzuq" emas, workerga xabar BERILMAYDI
+                    // (aks holda har 5 urinishda shrift qayta yasalardi).
+                    if (bytes == null && !AppServices.telegram.state.value.authorized) { delay(3_000L * attempt); continue }
                     // Yuklanmadi/ochilmadi: workerga xabar (5 ta bo'lsa Actions faylni yangilaydi).
                     Http.client.callJson("${BuildConfig.API_BASE}/api/emojifont/fail", "POST", JSONObject().put("ver", ver), token)
                     delay(2_000L * attempt)

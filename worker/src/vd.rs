@@ -266,6 +266,7 @@ pub(crate) async fn enqueue_all(env: &Env) -> Result<i64> {
          SELECT file_name, 'queued', ? FROM tg_files \
          WHERE msg_id>0 AND file_name NOT IN (SELECT name FROM vd_files) AND ( \
             (file_name LIKE 'ep\\_%' ESCAPE '\\' AND file_name NOT LIKE '%\\_f.mp4' ESCAPE '\\' AND file_key<>'') \
+            OR (file_name LIKE 'sys\\_emojifont\\_%' ESCAPE '\\' AND file_key<>'') \
             OR (file_name NOT LIKE 'chat\\_%' ESCAPE '\\' AND file_name NOT LIKE 'orig\\_%' ESCAPE '\\' AND file_name NOT LIKE 'ep\\_%' ESCAPE '\\' \
                 AND (file_name LIKE '%.jpg' OR file_name LIKE '%.jpeg' OR file_name LIKE '%.png' OR file_name LIKE '%.webp')))",
         vec![TursoArg::int(now_ms())]).await?;
@@ -276,7 +277,7 @@ pub(crate) async fn enqueue_all(env: &Env) -> Result<i64> {
 /// Yangi kodlangan sifat (`encupload::on_file`) — shu faylni ham yangi tizimga o'tkazish uchun navbatga qo'yadi (xato e'tiborsiz).
 pub(crate) async fn enqueue_one(env: &Env, name: &str) {
     let img = [".jpg", ".jpeg", ".png", ".webp"].iter().any(|e| name.ends_with(e));
-    if !tg_safe_name(name) || name.ends_with("_f.mp4") || !(name.starts_with("ep_") || (img && !name.starts_with("chat_") && !name.starts_with("orig_")))
+    if !tg_safe_name(name) || name.ends_with("_f.mp4") || !(name.starts_with("ep_") || name.starts_with("sys_emojifont_") || (img && !name.starts_with("chat_") && !name.starts_with("orig_")))
         || ensure(env).await.is_err()
     {
         return;
@@ -964,7 +965,7 @@ async fn tg_send_document(token: &str, channel: i64, name: &str, caption: &str, 
     let mut last = String::new();
     for attempt in 0..2 {
         let mut body: Vec<u8> = Vec::with_capacity(data.len() + 512);
-        for (k, v) in [("chat_id", channel.to_string()), ("disable_notification", "true".to_string()), ("caption", caption.to_string())] {
+        for (k, v) in [("chat_id", channel.to_string()), ("disable_notification", "true".to_string()), ("caption", caption.to_string())].into_iter().filter(|(_, v)| !v.is_empty()) {
             body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n").as_bytes());
         }
         body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"document\"; filename=\"{safe}\"\r\nContent-Type: application/octet-stream\r\n\r\n").as_bytes());
@@ -1044,7 +1045,7 @@ async fn store_small(env: &Env, name: &str, mut bytes: Vec<u8>) -> Result<(Strin
         vec![TursoArg::text(name), TursoArg::int(size as i64), TursoArg::text(&key_hex), TursoArg::int(now_ms())]).await?;
     let vid = first_row(&r).map(|x| jint(&x, "vid")).unwrap_or(0);
     let sent = tg_send_document(&tg_secret(env, "TELEGRAM_BOT_TOKEN"), vd_channel(env), &format!("vid_{vid}_1.bin"),
-        &format!("#{vid} \u{b7} 1/1 \u{b7} {}", label(name)), &bytes).await;
+        "", &bytes).await;
     let (fid, mid) = match sent {
         Ok(v) => v,
         Err(e) => {

@@ -90,7 +90,7 @@ def process(job):
         if n in done:
             continue
         data = vdlib._call(f"/api/vd/read?name={urllib.parse.quote(name)}&n={n}", method="GET", raw=True)
-        fid, mid = tg_send(token, channel, f"vid_{vid}_{n + 1}.bin", data, caption=f"#{vid} \u00b7 {n + 1}/{chunks} \u00b7 {label}")
+        fid, mid = tg_send(token, channel, f"vid_{vid}_{n + 1}.bin", data)
         pending.append({"n": n, "tg_file_id": fid, "msg_id": mid})
         if len(pending) >= 5 or n == chunks - 1:
             flush()

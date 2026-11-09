@@ -153,6 +153,8 @@ async fn commit(env: &Env, b: &Value) -> Result<Response> {
          ON CONFLICT(file_name) DO UPDATE SET msg_id=excluded.msg_id, file_key=excluded.file_key",
         vec![arg_s(&name), arg_i(msg_id), arg_s(&key)]).await?;
     config_put(env, "emoji_font", &json!({"name": name, "size": size, "ver": ver}).to_string()).await;
+    // Yangi tizim (vd): shrift Telegram hisobisiz ham olinsin (Cloudflare keshi); migratsiya navbatiga qo'yiladi.
+    vd::enqueue_one(env, &name).await;
     config_put(env, "emoji_font_want", "0").await;
     config_put(env, "emoji_font_fails", &format!("{ver}:0")).await;
     if let Some(o) = old {

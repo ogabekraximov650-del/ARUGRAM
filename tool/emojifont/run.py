@@ -101,7 +101,7 @@ async def main():
             p.write_bytes(sealed)
             sent = await app.send_document(
                 channel, str(p), file_name=name, force_document=True,
-                caption=name, disable_notification=True)
+                disable_notification=True)
     api("commit", {"name": name, "ver": ver, "key": key.hex(), "msg_id": sent.id, "size": len(sealed)})
     log("Tayyor: shrift kanalga yuklandi va worker'ga yozildi")
 
