@@ -65,11 +65,14 @@ fn bad(msg: &str) -> Result<Response> {
 // `ready` fayl ma'lumoti (hajm, kalit, `file_id` lar) o'zgarmaydi — Cloudflare keshida (Cache API) turadi: `info` va `warm` bazaga faqat
 // keshda yo'q bo'lsagina boradi. Fayl nomi HECH QACHON qayta ishlatilmaydi (nomda vaqt tamg'asi bor), shu sabab eskirish faqat o'chirishda
 // mumkin (`forget` o'z mintaqasida keshni o'chiradi; boshqa mintaqada eskirgan nusxa META_TTL dan keyin ketadi, `warm` esa baribir xato
-// qaytaradi va ilova eski yo'lga o'tadi).
-const META_TTL: u64 = 7 * 24 * 3600;
+// qaytaradi va ilova eski yo'lga o'tadi). Muddat — 1000 kun, ARUDRIVE bilan bir xil.
+/// 1000 kun (ARUDRIVE `LIST_TTL`/`CHUNK_CACHE_SECONDS` bilan bir xil). `META_V` — kesh kalitining versiyasi: o'zgartirib qayta deploy qilinsa
+/// eski yozuvlarning hammasi ko'rinmay qoladi (masalan, bazani noldan boshlaganda).
+const META_TTL: u64 = 1000 * 24 * 3600;
+const META_V: &str = "1";
 
 fn meta_url(name: &str) -> String {
-    cache_key_url(&format!("vd~{name}"), "meta")
+    cache_key_url(&format!("vd~{name}"), &format!("meta{META_V}"))
 }
 
 async fn meta_get(name: &str) -> Option<Value> {

@@ -7058,6 +7058,6 @@ Foydalanuvchi: model "sudo yo'q, o'rnatib bo'lmaydi" deb to'xtab qoldi ("Modelni
 
 ### Video ombori `vd`: Turso o'qish/yozuvlarini kamaytirish (2026-11)
 
-- `ready` fayl ma'lumoti (hajm, kalit, `chunk_ids`) Cloudflare keshida (Cache API, 7 kun, `meta_get/meta_put`): `/api/vd/info` va `warm` bazaga faqat keshda yo'q bo'lsagina boradi. Nom hech qachon qayta ishlatilmaydi, shu sabab eskirish faqat o'chirishda (`forget` keshni o'chiradi).
+- `ready` fayl ma'lumoti (hajm, kalit, `chunk_ids`) Cloudflare keshida (Cache API, 1000 kun — ARUDRIVE kabi; `META_V` ni o'zgartirib deploy qilsa hammasi bekor bo'ladi, `meta_get/meta_put`): `/api/vd/info` va `warm` bazaga faqat keshda yo'q bo'lsagina boradi. Nom hech qachon qayta ishlatilmaydi, shu sabab eskirish faqat o'chirishda (`forget` keshni o'chiradi).
 - Cron: navbat bo'sh bo'lsa 50 daqiqalik "bo'sh" belgisi (kesh) — bazaga bormaydi; `tg_files` skaneri (`enqueue_all`) va tozalash 6 soatlik belgi bilan.
 - Saqlash: `chunkdone` guruhlanadi (`items`, har 5 bo'lakda bitta so'rov: 1 o'qish + 1 yozuv); uzilsa yozilmagan bo'laklar qayta yuboriladi (Telegram'da yetim xabar qolishi mumkin, zarari yo'q).
