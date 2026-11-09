@@ -61,7 +61,10 @@ jobs:
           echo "== warm vd~$EP w=0"
           curl -sS -m 120 -w "  [HTTP %{http_code} %{time_total}s]\n" -H "X-App-Sig: $(sig GET /api/warm/vd~$EP)" "$API_BASE/api/warm/vd~$EP?w=0"
           echo "== play vd~$EP Range 0-1023"
-          curl -sS -m 60 -o /tmp/p.bin -D /tmp/h.txt -w "  [HTTP %{http_code} %{size_download} bayt %{time_total}s]\n" -H "Range: bytes=0-1023" -H "X-App-Sig: $(sig GET /api/play/vd~$EP)" "$API_BASE/api/play/vd~$EP"; grep -i -E "^HTTP|content-range|content-length|content-type" /tmp/h.txt
+          curl -sS -m 60 -o /tmp/p.bin -D /tmp/h.txt -w "  [HTTP %{http_code} %{size_download} bayt %{time_total}s]\n" -H "Range: bytes=0-1023" -H "X-App-Sig: $(sig GET /api/play/vd~$EP)" "$API_BASE/api/play/vd~$EP"; cat /tmp/h.txt; echo "--- body:"; head -c 200 /tmp/p.bin | tr -c '[:print:]\n' '.'; echo
+          echo "== play (2-nchi urinish, warm'dan keyin)"
+          curl -sS -m 120 -o /dev/null "$API_BASE/api/warm/vd~$EP?w=0" -H "X-App-Sig: $(sig GET /api/warm/vd~$EP)"
+          curl -sS -m 60 -o /tmp/p2.bin -D /tmp/h3.txt -w "  [HTTP %{http_code} %{size_download} bayt]\n" -H "Range: bytes=0-1023" -H "X-App-Sig: $(sig GET /api/play/vd~$EP)" "$API_BASE/api/play/vd~$EP"; grep -i -E "^HTTP|x-warm|x-cache|content-range" /tmp/h3.txt
           echo "== imginfo $FONT"
           curl -sS -m 30 -w "  [HTTP %{http_code}]\n" -X POST -H "X-App-Sig: $(sig POST /api/vd/imginfo)" -H "Content-Type: application/json" -d "{\"names\":[\"$FONT\"]}" "$API_BASE/api/vd/imginfo" | sed 's/"key":"[0-9a-f]*"/"key":"<yashirin>"/'
           echo "== img $FONT"
