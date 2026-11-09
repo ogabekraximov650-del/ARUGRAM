@@ -65,6 +65,7 @@ object AppServices {
         private set
 
     fun trafficOrNull(): TrafficMeter? = if (::traffic.isInitialized) traffic else null
+    fun authOrNull(): AuthService? = if (::auth.isInitialized) auth else null
     lateinit var downloads: DownloadManager
         private set
     lateinit var downloadsIndex: DownloadsIndex

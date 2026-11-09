@@ -178,7 +178,11 @@ class ChatStore(
             loaded = true
             _error.value = null
             if (!adminView) uz.arumediatv.com.AppServices.unread.markRead()
-        } else if (!loaded) _error.value = if (r.code == 0) "Internet yo'q" else "Yuklanmadi (${r.code})"
+        } else if (!loaded) _error.value = when (r.code) {
+            0 -> "Internet yo'q"
+            401 -> "Sessiya tugagan — Profil bo'limidan Telegram orqali qayta kiring"
+            else -> "Yuklanmadi (${r.code})"
+        }
         _loading.value = false
     }
 
