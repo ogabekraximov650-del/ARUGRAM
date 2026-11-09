@@ -43,7 +43,7 @@ def chunks_of(size: int) -> int:
     return (size + CHUNK - 1) // CHUNK
 
 
-def iter_chunks(path, new_key: bytes, old_key: bytes | None = None, check_mp4: bool = False):
+def iter_chunks(path, new_key: bytes, old_key: bytes | None = None, check_mp4: bool = False, plain: bool = False):
     """Fayldan ketma-ket `(n, bo'lak_baytlari)`. `old_key` berilsa eski kalit bilan ochilib YANGI kalit bilan shifrlanadi (migratsiya);
     berilmasa bo'lak allaqachon `new_key` bilan shifrlangan deb olinadi (kodlovchi) va shunchaki kesib beriladi."""
     with open(path, "rb") as f:
@@ -52,11 +52,13 @@ def iter_chunks(path, new_key: bytes, old_key: bytes | None = None, check_mp4: b
             raw = f.read(CHUNK)
             if not raw:
                 break
-            if old_key is not None:
-                plain = apply(old_key, n * CHUNK, raw)
-                if check_mp4 and n == 0 and plain[4:8] not in MP4_ATOMS:
+            if plain:
+                raw = apply(new_key, n * CHUNK, raw)          # fayl ochiq (kalitsiz): faqat YANGI kalit bilan shifrlanadi
+            elif old_key is not None:
+                dec = apply(old_key, n * CHUNK, raw)
+                if check_mp4 and n == 0 and dec[4:8] not in MP4_ATOMS:
                     raise RuntimeError("eski kalit bilan ochilgan fayl MP4 emas (kalit mos kelmadi?)")
-                raw = apply(new_key, n * CHUNK, plain)
+                raw = apply(new_key, n * CHUNK, dec)
             yield n, raw
             n += 1
 
@@ -91,7 +93,7 @@ def api(path, body=None):
     return _call(path, body if body is not None else {})
 
 
-def stage_file(path, name: str, key_hex: str, old_key_hex: str | None = None, check_mp4: bool = False, progress=None) -> str:
+def stage_file(path, name: str, key_hex: str, old_key_hex: str | None = None, check_mp4: bool = False, progress=None, plain: bool = False) -> str:
     """Faylni 18 MiB bo'laklarga bo'lib R2 ga yozadi (`init` -> `put`... -> `finish`). Qaytadi: `ok` (R2 da, saqlash navbatida),
     `ready` (allaqachon yangi tizimda) yoki `wait` (R2 da joy yo'q — keyinroq urinib ko'ring). Xato bo'lsa istisno."""
     size = Path(path).stat().st_size
@@ -103,9 +105,45 @@ def stage_file(path, name: str, key_hex: str, old_key_hex: str | None = None, ch
     new_key = bytes.fromhex(key_hex)
     old_key = bytes.fromhex(old_key_hex) if old_key_hex else None
     total = chunks_of(size)
-    for n, data in iter_chunks(path, new_key, old_key, check_mp4):
+    for n, data in iter_chunks(path, new_key, old_key, check_mp4, plain):
         _call(f"/api/vd/put?name={urllib.parse.quote(name)}&n={n}", method="PUT", data=data, ctype="application/octet-stream", timeout=600)
         if progress:
             progress(n + 1, total)
     api("/api/vd/finish", {"name": name})
     return "ok"
+
+
+def download(name: str, dst, progress=None) -> int:
+    """Yangi tizimdagi (`vd`) tayyor faylni yuklab, shifrini ochib `dst` ga yozadi (kodlash uchun asl video). Bo'laklar Telegram'dan Bot API
+    (`getFile`, har biri <= 18 MiB) bilan olinadi; kalit worker'dan (ENCODE_TOKEN). Qaytadi: yozilgan bayt."""
+    m = api("/api/vd/dl", {"name": name})
+    token = m["bot_token"]
+    print("::add-mask::" + token)
+    key = bytes.fromhex(m["key"])
+    ids = m["chunk_ids"]
+    size = int(m["size"])
+    got = 0
+    with open(dst, "wb") as f:
+        for n, fid in enumerate(ids):
+            data = None
+            for attempt in range(6):
+                try:
+                    with urllib.request.urlopen(f"https://api.telegram.org/bot{token}/getFile?file_id={urllib.parse.quote(fid)}", timeout=60) as r:
+                        path = json.loads(r.read())["result"]["file_path"]
+                    with urllib.request.urlopen(f"https://api.telegram.org/file/bot{token}/{path}", timeout=300) as r:
+                        data = r.read()
+                    if len(data) == min(CHUNK, size - n * CHUNK):
+                        break
+                    data = None
+                except (urllib.error.URLError, TimeoutError, ConnectionError, KeyError, ValueError, OSError):
+                    data = None
+                time.sleep(3 * (attempt + 1))
+            if data is None:
+                raise RuntimeError(f"bo'lak {n} Telegram'dan olinmadi")
+            f.write(apply(key, n * CHUNK, data))
+            got += len(data)
+            if progress:
+                progress(got, size)
+    if got != size:
+        raise RuntimeError(f"hajm mos emas ({got} != {size})")
+    return got

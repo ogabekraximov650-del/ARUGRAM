@@ -231,11 +231,15 @@ async fn r2_delete_all(bk: &Bucket, name: &str) {
 /// kalitli va hali `vd_files` da yo'qlari. Qaytadi: navbatdagi (queued) fayllar soni.
 pub(crate) async fn enqueue_all(env: &Env) -> Result<i64> {
     ensure(env).await?;
+    // Sifat fayllari (kalitli `ep_*.mp4`) VA rasmlar (Anibla/Post/to'plam botlari yetkazgan, kalitsiz ochiq rasmlar ham): `.jpg/.jpeg/.png/.webp`,
+    // yozishma (`chat_`) va asl video (`orig_`) dan tashqari. Kalitsiz fayl migratsiyada yangi kalit bilan shifrlanadi.
     turso_exec(env,
         "INSERT OR IGNORE INTO vd_mig (name, state, queued) \
          SELECT file_name, 'queued', ? FROM tg_files \
-         WHERE file_name LIKE 'ep\\_%' ESCAPE '\\' AND file_name NOT LIKE '%\\_f.mp4' ESCAPE '\\' AND file_key<>'' AND msg_id>0 \
-           AND file_name NOT IN (SELECT name FROM vd_files)",
+         WHERE msg_id>0 AND file_name NOT IN (SELECT name FROM vd_files) AND ( \
+            (file_name LIKE 'ep\\_%' ESCAPE '\\' AND file_name NOT LIKE '%\\_f.mp4' ESCAPE '\\' AND file_key<>'') \
+            OR (file_name NOT LIKE 'chat\\_%' ESCAPE '\\' AND file_name NOT LIKE 'orig\\_%' ESCAPE '\\' AND file_name NOT LIKE 'ep\\_%' ESCAPE '\\' \
+                AND (file_name LIKE '%.jpg' OR file_name LIKE '%.jpeg' OR file_name LIKE '%.png' OR file_name LIKE '%.webp')))",
         vec![TursoArg::int(now_ms())]).await?;
     let r = turso_exec(env, "SELECT COUNT(*) AS n FROM vd_mig WHERE state IN ('queued','running')", vec![]).await?;
     Ok(first_row(&r).map(|r| jint(&r, "n")).unwrap_or(0))
@@ -243,13 +247,29 @@ pub(crate) async fn enqueue_all(env: &Env) -> Result<i64> {
 
 /// Yangi kodlangan sifat (`encupload::on_file`) — shu faylni ham yangi tizimga o'tkazish uchun navbatga qo'yadi (xato e'tiborsiz).
 pub(crate) async fn enqueue_one(env: &Env, name: &str) {
-    if !tg_safe_name(name) || name.ends_with("_f.mp4") || !name.starts_with("ep_") || ensure(env).await.is_err() {
+    let img = [".jpg", ".jpeg", ".png", ".webp"].iter().any(|e| name.ends_with(e));
+    if !tg_safe_name(name) || name.ends_with("_f.mp4") || !(name.starts_with("ep_") || (img && !name.starts_with("chat_") && !name.starts_with("orig_")))
+        || ensure(env).await.is_err()
+    {
         return;
     }
     let _ = turso_exec(env,
         "INSERT OR IGNORE INTO vd_mig (name, state, queued) SELECT ?, 'queued', ? WHERE NOT EXISTS (SELECT 1 FROM vd_files WHERE name=?)",
         vec![TursoArg::text(name), TursoArg::int(now_ms()), TursoArg::text(name)]).await;
     let _ = kick_wf(env, MIG_WORKFLOW).await;
+}
+
+/// Kodlash navbati uchun asl video yangi tizimda (`vd`) tayyormi: `{"msg_id":0,"file_key":<kalit>,"vd":true}` yoki `None` (yo'q / hali saqlanmoqda).
+pub(crate) async fn origin_src(env: &Env, name: &str) -> Option<Value> {
+    if !tg_safe_name(name) || ensure(env).await.is_err() {
+        return None;
+    }
+    let m = meta_many(env, &[name.to_string()]).await.ok()?;
+    let m = m.get(name)?;
+    if m["state"].as_str() != Some("ready") {
+        return None;
+    }
+    Some(json!({"msg_id": 0, "file_key": m["key"], "vd": true}))
 }
 
 /// Qism/sifat o'chirilganda: R2 bo'laklari, kanal xabarlari va baza yozuvi ketadi.
@@ -289,7 +309,7 @@ pub(crate) async fn forget(env: &Env, name: &str) {
 
 pub(crate) fn is_actions_path(path: &str) -> bool {
     matches!(path, "/api/vd/mig/enqueue" | "/api/vd/mig/claim" | "/api/vd/mig/fail" | "/api/vd/init" | "/api/vd/put" | "/api/vd/finish"
-        | "/api/vd/peek" | "/api/vd/verify" | "/api/vd/wipe" | "/api/vd/channel" | "/api/vd/forget" | "/api/vd/claim" | "/api/vd/read" | "/api/vd/chunkdone" | "/api/vd/done" | "/api/vd/fail")
+        | "/api/vd/peek" | "/api/vd/verify" | "/api/vd/wipe" | "/api/vd/channel" | "/api/vd/forget" | "/api/vd/dl" | "/api/vd/claim" | "/api/vd/read" | "/api/vd/chunkdone" | "/api/vd/done" | "/api/vd/fail")
 }
 
 pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Response> {
@@ -378,10 +398,11 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
                 }
                 let f = turso_exec(env, "SELECT msg_id,file_key FROM tg_files WHERE file_name=?", vec![TursoArg::text(&nm)]).await?.pipe_first();
                 match f {
-                    Some(f) if jint(&f, "msg_id") > 0 && valid_file_key(f["file_key"].as_str().unwrap_or("")) => {
+                    // Kalitli fayl (eski kalit bilan shifrlangan) yoki kalitsiz ochiq RASM (kalit bo'sh — yangi kalit bilan shifrlanadi).
+                    Some(f) if jint(&f, "msg_id") > 0 && (valid_file_key(f["file_key"].as_str().unwrap_or("")) || (f["file_key"].as_str().unwrap_or("").is_empty() && !nm.starts_with("ep_"))) => {
                         return ok(json!({"name": nm, "msg_id": f["msg_id"], "key": f["file_key"], "channel": tg_channel_id(env)}));
                     }
-                    // Fayl o'chirilgan yoki kalitsiz (ochiq) — migratsiya qilinmaydi.
+                    // Fayl o'chirilgan yoki kalitsiz video (ochiq) — migratsiya qilinmaydi.
                     _ => {
                         let _ = turso_exec(env, "DELETE FROM vd_mig WHERE name=?", vec![TursoArg::text(&nm)]).await;
                     }
@@ -479,6 +500,19 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
                 return json_resp(&json!({"error": "bo'lak qisqa"}), 502);
             }
             ok(json!({"name": r["name"], "size": r["size"], "chunks": r["chunks"], "key": r["vkey"], "head": hex_of(&bytes[..64]), "chunk0_len": bytes.len()}))
+        }
+        // Actions yuklab olishi (kodlash uchun asl video): hajm, kalit, bo'laklar `file_id` lari va bot tokeni (faqat ENCODE_TOKEN).
+        "/api/vd/dl" => {
+            let m = meta_many(env, &[name.clone()]).await?;
+            let Some(m) = m.get(&name) else { return err404("topilmadi") };
+            if m["state"].as_str() != Some("ready") {
+                return json_resp(&json!({"error": "tayyor emas"}), 409);
+            }
+            ok(json!({
+                "size": m["size"], "chunk": CHUNK, "key": m["key"],
+                "chunk_ids": ids(m["chunk_ids"].as_str().unwrap_or("")),
+                "bot_token": tg_secret(env, "TELEGRAM_BOT_TOKEN"),
+            }))
         }
         // Faylni to'liq o'chirish (R2, kanal xabarlari, kesh, baza) — Actions/ENCODE_TOKEN (sinov fayllarini tozalash uchun).
         "/api/vd/forget" => {
@@ -743,6 +777,35 @@ fn clean_names(body: &Value) -> Vec<String> {
     names
 }
 
+/// `info` + RUXSAT (kalit faqat egasiga): `orig_` — admin; `chat_<id>_` — egasi, admin yoki shu suhbatdagi xabar ishtirokchisi; `pki_<id>_` — egasi yoki admin.
+pub(crate) async fn info_for(env: &Env, me: i64, admin: bool, body: &Value) -> Result<Response> {
+    let mut names = clean_names(body);
+    names.retain(|n| {
+        if admin { return true }
+        if n.starts_with("orig_") { return false }
+        if n.starts_with("pki_") { return n.starts_with(&format!("pki_{me}_")) }
+        true
+    });
+    // Boshqa odamning `chat_` fayli: faqat shu foydalanuvchi suhbatidagi xabarda bo'lsa (admin yuborgan fayl).
+    let foreign: Vec<String> = if admin { Vec::new() } else {
+        names.iter().filter(|n| n.starts_with("chat_") && !n.starts_with(&format!("chat_{me}_"))).cloned().collect()
+    };
+    if !foreign.is_empty() {
+        let marks = vec!["?"; foreign.len()].join(",");
+        let mut args = vec![TursoArg::int(me)];
+        args.extend(foreign.iter().map(|n| TursoArg::text(n)));
+        let r = turso_exec(env, &format!("SELECT DISTINCT media_file FROM chat_messages WHERE user_id=? AND media_file IN ({marks})"), args).await?;
+        let allowed: std::collections::HashSet<String> = rows_of(&r).iter().filter_map(|x| x["media_file"].as_str().map(String::from)).collect();
+        names.retain(|n| !foreign.contains(n) || allowed.contains(n));
+    }
+    if names.is_empty() {
+        return ok_nostore(json!({"files": {}}));
+    }
+    let m = meta_many(env, &names).await?;
+    let files: serde_json::Map<String, Value> = m.iter().map(|(k, v)| (k.clone(), client_view(v))).collect();
+    ok_nostore(json!({"files": files}))
+}
+
 /// `POST /api/vd/info {names:[...]}` -> `{files:{nom:{state,size,chunks,stored,key}}}`. Kalit faqat kirgan foydalanuvchiga beriladi
 /// (`/api/tg/deliver` bilan bir xil qoida). Yangi tizimda bo'lmagan nomlar javobda yo'q — ilova ularni eski yo'l bilan ochadi.
 pub(crate) async fn info(env: &Env, body: &Value) -> Result<Response> {
@@ -796,7 +859,8 @@ async fn chunk_bytes(env: &Env, tg_file_id: &str, expect: u64) -> Result<Vec<u8>
 /// `GET /api/vd/img/<nom>` (faqat ilova imzosi): shifrlangan rasm baytlari. Bir so'rovda: Cloudflare keshidan, yo'q bo'lsa Telegram'dan olib
 /// keshga (1000 kun, `warm` bilan bir xil yozuv) yoziladi. Faqat bitta bo'lakka sig'adigan (<= 18 MiB) tayyor rasm.
 pub(crate) async fn img(env: &Env, name: &str) -> Result<Response> {
-    if !public_image_name(name) {
+    // Shifrlangan baytlar: yozishma (`chat_`) va to'plam (`pki_`) fayllari ham beriladi — ularning KALITI sessiya va ruxsat bilan (`info_for`).
+    if !tg_safe_name(name) || name.starts_with("ep_") || name.starts_with("orig_") || name.len() <= 4 {
         return err404("topilmadi");
     }
     let wname = format!("vd~{name}");
@@ -836,10 +900,15 @@ fn upload_allowed(name: &str, me: i64, admin: bool) -> bool {
         return false;
     }
     let img = [".jpg", ".jpeg", ".png", ".webp"].iter().any(|e| name.ends_with(e));
-    if name.starts_with(&format!("avatar_{me}_")) && me > 0 && img {
+    if me > 0 && name.starts_with(&format!("avatar_{me}_")) && img {
         return true;
     }
-    admin && (name.starts_with("ep_") || (img && !name.starts_with("orig_") && !name.starts_with("chat_")))
+    // Yozishma fayli: o'z `chat_<id>_*` fayli (rasm, video, ovoz, hujjat — hammasi).
+    if me > 0 && name.starts_with(&format!("chat_{me}_")) {
+        return true;
+    }
+    // Admin: qism, asl video (kodlash uchun), yozishma va rasm fayllari.
+    admin && (name.starts_with("ep_") || name.starts_with("orig_") || name.starts_with("chat_") || img)
 }
 
 /// `POST /api/vd/up/init` (admin): ilova BUTUN (qurilmada shifrlangan) faylni R2 ga to'g'ridan-to'g'ri yozadi; worker faqat imzolangan
@@ -1061,7 +1130,11 @@ mod tests {
         assert!(upload_allowed("ep_1_2_720p_3.mp4", 7, true));
         assert!(upload_allowed("poster_5.jpg", 7, true));
         assert!(!upload_allowed("poster_5.jpg", 7, false));
-        assert!(!upload_allowed("orig_9.jpg", 7, true));
+        assert!(upload_allowed("orig_9_1_2_3.mp4", 7, true));
+        assert!(!upload_allowed("orig_9_1_2_3.mp4", 7, false));
+        assert!(upload_allowed("chat_7_5.m4a", 7, false));
+        assert!(!upload_allowed("chat_8_5.m4a", 7, false));
+        assert!(upload_allowed("chat_8_5.m4a", 7, true));
     }
 
     #[test]

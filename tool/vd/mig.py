@@ -37,7 +37,7 @@ def session_api_id() -> int:
 
 
 async def one(app, job: dict) -> bool:
-    name, msg_id, old_key, channel = job["name"], int(job["msg_id"]), job["key"], int(job["channel"])
+    name, msg_id, old_key, channel = job["name"], int(job["msg_id"]), job.get("key") or "", int(job["channel"])
     log(f"{name}: kanal posti #{msg_id}")
     shutil.rmtree(WORK, ignore_errors=True)
     WORK.mkdir(parents=True)
@@ -66,8 +66,8 @@ async def one(app, job: dict) -> bool:
         waited = 0
         while True:
             st = await asyncio.to_thread(
-                vdlib.stage_file, dst, name, new_key, old_key, True,
-                lambda c, t: log(f"  R2 ga: bo'lak {c}/{t}") if c % 10 == 0 or c == t else None)
+                vdlib.stage_file, dst, name, new_key, old_key or None, bool(old_key),
+                lambda c, t: log(f"  R2 ga: bo'lak {c}/{t}") if c % 10 == 0 or c == t else None, not old_key)
             if st != "wait":
                 break
             waited += 60

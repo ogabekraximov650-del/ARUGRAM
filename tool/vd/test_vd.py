@@ -36,6 +36,13 @@ class T(unittest.TestCase):
         for n, enc in vdlib.iter_chunks(src, key):  # eski kalitsiz: shunchaki kesadi
             self.assertEqual(vdlib.apply(key, n * 64, enc), plain[n * 64:n * 64 + 64])
 
+    def test_ochiq_fayl_yangi_kalit_bilan(self):
+        plain = os.urandom(64 * 3 + 5)
+        key = os.urandom(16)
+        src = self._file(plain)
+        out = b"".join(b for _, b in vdlib.iter_chunks(src, key, None, False, True))
+        self.assertEqual(out, vdlib.apply(key, 0, plain))
+
     def test_bolaklar_soni(self):
         self.assertEqual(vdlib.chunks_of(1), 1)
         self.assertEqual(vdlib.chunks_of(64), 1)

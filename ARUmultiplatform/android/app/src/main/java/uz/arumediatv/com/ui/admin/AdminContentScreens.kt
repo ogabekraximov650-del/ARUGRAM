@@ -819,7 +819,6 @@ fun AdminEpisodeEditScreen(animeId: Long, seasonId: Long, initial: JSONObject?, 
         val target = pending
         if (uri == null || target == null) return@rememberLauncherForActivityResult
         // Asl video (kodlash uchun) hali Telegram hisobi bilan kanalga yuklanadi; tayyor sifat fayllari esa ACTIONS orqali (R2 -> Telegram, `VdUpload`).
-        if (target == "origin" && !AppServices.telegram.state.value.authorized) { toast("Asl video Telegram orqali yuklanadi: Profil → \"Telegram'ni ulash\""); return@rememberLauncherForActivityResult }
         scope.launch {
             upTarget = target; upSent = 0; upTotal = 0
             var vdKey = ""
@@ -830,17 +829,14 @@ fun AdminEpisodeEditScreen(animeId: Long, seasonId: Long, initial: JSONObject?, 
                 val mime = if (ext == "mkv") "video/x-matroska" else "video/mp4"
                 val fname = if (target == "origin") "orig_${uid}_${animeId}_${seasonId}_${System.currentTimeMillis()}.$ext" else "ep_${animeId}_${seasonId}_${target}_${System.currentTimeMillis()}.$ext"
                 upTotal = size
-                val err = if (target == "origin") {
-                    AppServices.telegram.uploadFile(path, fname, mime, onProgress = { s, t -> upSent = s; if (t > 0) upTotal = t })
-                } else {
-                    vdUsed = true
-                    val tok = AppServices.auth.sessionToken.orEmpty()
-                    val r = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        uz.arumediatv.com.vd.VdUpload.upload(path, fname, tok) { s, t -> upSent = s; if (t > 0) upTotal = t }
-                    }
-                    vdKey = r.key.orEmpty()
-                    r.error
+                // Asl video ham, tayyor sifat ham ACTIONS orqali (R2 -> Telegram, .bin bo'laklar, yangi kanal); Telegram hisobi kerak emas.
+                vdUsed = true
+                val tok = AppServices.auth.sessionToken.orEmpty()
+                val r = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    uz.arumediatv.com.vd.VdUpload.upload(path, fname, tok) { s, t -> upSent = s; if (t > 0) upTotal = t }
                 }
+                vdKey = r.key.orEmpty()
+                val err = r.error
                 Triple(err, fname, size)
             }
             upTarget = null
@@ -859,7 +855,7 @@ fun AdminEpisodeEditScreen(animeId: Long, seasonId: Long, initial: JSONObject?, 
     }
 
     suspend fun queueEncode(id: Long): String? {
-        val q = api.post("/api/encode/queue", JSONObject().put("anime_id", animeId).put("season_id", seasonId).put("epizod_id", id).put("origin", origin).put("key", AppServices.telegram.keyFor(origin)))
+        val q = api.post("/api/encode/queue", JSONObject().put("anime_id", animeId).put("season_id", seasonId).put("epizod_id", id).put("origin", origin).put("key", uz.arumediatv.com.vd.VdUpload.keyOf(origin).ifEmpty { AppServices.telegram.keyFor(origin) }))
         return if (q.ok) null else api.errorOf(q, "xato")
     }
 

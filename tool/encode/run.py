@@ -1175,6 +1175,16 @@ async def process(app: Client, channel: int, job: dict):
             await asyncio.to_thread(anibla_download, job["origin_url"], src)
             if not src.exists() or src.stat().st_size == 0:
                 raise RuntimeError("anibla.uz dan yuklab bo'lmadi")
+        elif job.get("origin_vd"):
+            # YANGI TIZIM (vd): ilova asl videoni Actions orqali yuklagan (18 MiB shifrlangan bo'laklar, Telegram'da) — bo'laklarni olib shifrini ochamiz.
+            log("  asl video yangi tizimdan (vd) yuklab olinmoqda...")
+            await asyncio.to_thread(hb.set, "download", True)
+            sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "vd"))
+            import vdlib  # noqa: PLC0415
+            vdlib.API, vdlib.TOKEN = API, "".join(TOKEN.split())
+            await asyncio.to_thread(vdlib.download, job["origin"], src)
+            if not src.exists() or src.stat().st_size == 0:
+                raise RuntimeError("asl video (vd) yuklab olinmadi")
         else:
             # Telegram YUKLAB OLISHNI cheklamaydi (cheklov faqat yuklashda) — asl video kanaldan umumiy sessiya bilan olinadi.
             bot_msg = None

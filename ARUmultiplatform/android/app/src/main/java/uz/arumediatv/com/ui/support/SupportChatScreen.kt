@@ -264,7 +264,7 @@ fun SupportChatScreen(userId: Long?, title: String, onBack: () -> Unit, onPacks:
                 try { File(ctx.cacheDir, name).also { f -> ctx.contentResolver.openInputStream(uri)?.use { i -> f.outputStream().use { o -> i.copyTo(o) } } } } catch (_: Exception) { null }
             }
             if (local == null) { upProgress = null; toast("Faylni o'qib bo'lmadi"); return@launch }
-            val err = AppServices.telegram.uploadFile(local.absolutePath, name, mime, onProgress = { s, t -> if (t > 0) upProgress = s.toFloat() / t })
+            val err = chatUpload(local.absolutePath, name) { upProgress = it }
             if (err != null) toast(err) else store.send(withReply(replyTo?.id, if (type == "file") display else body), mediaFile = name, mediaType = type, mediaMs = ms)?.let(::toast)
             if (err == null) replyTo = null
             runCatching { local.delete() }
@@ -308,7 +308,7 @@ fun SupportChatScreen(userId: Long?, title: String, onBack: () -> Unit, onPacks:
             val uid = me?.id ?: 0L
             val name = "chat_${uid}_${System.currentTimeMillis()}.m4a"
             upProgress = 0f; upLabel = ""
-            val err = AppServices.telegram.uploadFile(f.absolutePath, name, "audio/mp4", onProgress = { s, t -> if (t > 0) upProgress = s.toFloat() / t })
+            val err = chatUpload(f.absolutePath, name) { upProgress = it }
             if (err != null) toast(err) else store.send(withReply(replyTo?.id, ""), mediaFile = name, mediaType = "voice", mediaMs = ms)?.let(::toast)
             if (err == null) replyTo = null
             runCatching { f.delete() }
@@ -711,11 +711,13 @@ private fun MediaBlock(m: ChatMessage) {
             val scope = rememberCoroutineScope()
             Row(Modifier.clickable {
                 scope.launch {
-                    val u = AppServices.telegram.playUrl(m.mediaUrl)
+                    // Yangi tizim (vd): fayl Cloudflare keshidan olinib, shifri ochilib FileProvider orqali beriladi; bo'lmasa eski yo'l.
+                    val u = uz.arumediatv.com.vd.VdChat.contentUri(ctx, uz.arumediatv.com.data.Names.fileNameOf(m.mediaUrl))?.toString()
+                        ?: AppServices.telegram.playUrl(m.mediaUrl)
                     if (u == null) Toast.makeText(ctx, "Fayl ochilmadi", Toast.LENGTH_SHORT).show()
                     else try {
                         val ext = m.body.substringAfterLast('.', "").lowercase()
-                        ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(u), MIMES[ext] ?: "*/*"), "Faylni ochish").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                        ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(u), MIMES[ext] ?: "*/*").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Faylni ochish").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                     } catch (e: Exception) { Toast.makeText(ctx, "Fayl ochilmadi", Toast.LENGTH_SHORT).show() }
                 }
             }.padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -744,7 +746,7 @@ private fun VoiceRow(m: ChatMessage) {
         Box(
             Modifier.size(42.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.2f)).clickable {
                 if (on) VoicePlayer.stop() else scope.launch {
-                    val u = AppServices.telegram.playUrl(m.mediaUrl)
+                    val u = uz.arumediatv.com.vd.VdChat.path(ctx, uz.arumediatv.com.data.Names.fileNameOf(m.mediaUrl)) ?: AppServices.telegram.playUrl(m.mediaUrl)
                     if (u == null) Toast.makeText(ctx, "Ovozni ochib bo'lmadi", Toast.LENGTH_SHORT).show() else VoicePlayer.play(m.id, u)
                 }
             },
@@ -759,6 +761,11 @@ private fun VoiceRow(m: ChatMessage) {
         Spacer(Modifier.width(8.dp))
         Text(formatClock(m.mediaMs), color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
     }
+}
+
+/** Yozishma faylini ACTIONS orqali yuklaydi (R2 -> Telegram, `.bin` bo'laklar, yangi kanal). `null` — tayyor, aks holda xato matni. */
+private suspend fun chatUpload(path: String, name: String, onProgress: (Float) -> Unit): String? = withContext(Dispatchers.IO) {
+    uz.arumediatv.com.vd.VdUpload.upload(path, name, AppServices.auth.sessionToken.orEmpty()) { s, t -> if (t > 0) onProgress(s.toFloat() / t) }.error
 }
 
 /** Ovozli xabarlarni ijro etuvchi (bitta vaqtda bittasi). */

@@ -233,6 +233,7 @@ private fun AruApp() {
     LaunchedEffect(Unit) {
         kotlinx.coroutines.delay(4000)
         uz.arumediatv.com.ui.packs.EmojiFonts.ensure()
+        uz.arumediatv.com.vd.VdChat.trim(ctx)
     }
     crashText?.let { t ->
         androidx.compose.material3.AlertDialog(

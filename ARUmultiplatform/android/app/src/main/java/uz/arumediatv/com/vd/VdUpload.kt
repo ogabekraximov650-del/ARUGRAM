@@ -22,6 +22,10 @@ import java.util.concurrent.TimeUnit
 object VdUpload {
     class Result(val key: String?, val error: String?)
 
+    /** Shu ishga tushishda yuklangan fayllarning kalitlari (asl videoni kodlash navbatiga qo'yishda kerak). */
+    private val keys = java.util.concurrent.ConcurrentHashMap<String, String>()
+    fun keyOf(name: String): String = keys[name].orEmpty()
+
     private class EncryptedBody(val file: File, val key: ByteArray, val onProgress: (Long, Long) -> Unit) : RequestBody() {
         override fun contentType() = "application/octet-stream".toMediaType()
         override fun contentLength() = file.length()
@@ -62,7 +66,7 @@ object VdUpload {
                 plain.newCall(Request.Builder().url(url).put(EncryptedBody(f, key, onProgress)).build()).execute().use { r ->
                     if (r.isSuccessful) {
                         val done = Http.client.callJson("$base/api/vd/up/complete", "POST", JSONObject().put("name", name), bearer)
-                        return if (done.ok) Result(keyHex, null) else Result(null, done.error ?: "Tasdiqlanmadi (HTTP ${done.code})")
+                        return if (done.ok) { keys[name] = keyHex; Result(keyHex, null) } else Result(null, done.error ?: "Tasdiqlanmadi (HTTP ${done.code})")
                     }
                     last = "R2 HTTP ${r.code}"
                 }

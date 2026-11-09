@@ -47,10 +47,25 @@ object VdImages {
         while (batch.size < 100) batch.add(queue.poll() ?: break)
         if (batch.isEmpty()) return
         val names = batch.map { it.name }.distinct()
-        val res = Http.client.callJson("$base/api/vd/imginfo", "POST", JSONObject().put("names", JSONArray(names)))
-        val files = res.json?.optJSONObject("files")
+        // Ommaviy rasmlar sessiyasiz (`imginfo`), yozishma/to'plam fayllari (`chat_`, `pki_`) — sessiya va ruxsat bilan (`info`).
+        val priv = names.filter { it.startsWith("chat_") || it.startsWith("pki_") }
+        val pub = names - priv.toSet()
+        val files = JSONObject()
+        var netOk = true
+        if (pub.isNotEmpty()) {
+            val r = Http.client.callJson("$base/api/vd/imginfo", "POST", JSONObject().put("names", JSONArray(pub)))
+            if (!r.ok) netOk = false
+            r.json?.optJSONObject("files")?.let { f -> f.keys().forEach { k -> files.put(k, f.get(k)) } }
+        }
+        if (priv.isNotEmpty()) {
+            val tok = uz.arumediatv.com.AppServices.auth.sessionToken
+            val r = Http.client.callJson("$base/api/vd/info", "POST", JSONObject().put("names", JSONArray(priv)), tok)
+            if (!r.ok) netOk = false
+            r.json?.optJSONObject("files")?.let { f -> f.keys().forEach { k -> files.put(k, f.get(k)) } }
+        }
+        val res = object { val ok = netOk }
         for (r in batch) {
-            val f = files?.optJSONObject(r.name)
+            val f = files.optJSONObject(r.name)
             val i = f?.let { VdApi.Info(r.name, it.optLong("size"), it.optString("key"), it.optString("state"), it.optInt("chunks"), it.optInt("stored")) }
             if (i != null && i.ready && i.key.length == 32 && i.size > 0) {
                 known[r.name] = i

@@ -10416,7 +10416,7 @@ fn needs_app_check(path: &str) -> bool {
         | "/api/dub/claim" | "/api/dub/peek" | "/api/dub/check" | "/api/dub/finish" | "/api/dub/progress" | "/api/dub/state" | "/api/dub/stage"
         | "/api/anibla/claim" | "/api/anibla/diag" | "/api/anibla/probe" | "/api/anibla/progress" | "/api/anibla/done"
         | "/api/fmp4/claim" | "/api/fmp4/done" | "/api/fmp4/r2put" | "/api/fmp4/r2ready" | "/api/session/poll" | "/api/session/report"
-        | "/api/encode/r2put" | "/api/encode/r2ready" | "/api/encode/qdiag" | "/api/encode/cancel" | "/api/encode/translate" | "/api/vd/mig/enqueue" | "/api/vd/mig/claim" | "/api/vd/mig/fail" | "/api/vd/init" | "/api/vd/put" | "/api/vd/finish" | "/api/vd/peek" | "/api/vd/verify" | "/api/vd/wipe" | "/api/vd/channel" | "/api/vd/forget" | "/api/vd/claim" | "/api/vd/read" | "/api/vd/chunkdone" | "/api/vd/done" | "/api/vd/fail" | "/api/r2/claim" | "/api/r2/beat" | "/api/r2/fail" | "/api/r2/done" | "/api/r2/diag" | "/api/r2/dmsg" | "/api/r2/peek" | "/api/r2/put" | "/api/r2/ready" | "/api/r2/part" | "/api/r2/get")
+        | "/api/encode/r2put" | "/api/encode/r2ready" | "/api/encode/qdiag" | "/api/encode/cancel" | "/api/encode/translate" | "/api/vd/mig/enqueue" | "/api/vd/mig/claim" | "/api/vd/mig/fail" | "/api/vd/init" | "/api/vd/put" | "/api/vd/finish" | "/api/vd/peek" | "/api/vd/verify" | "/api/vd/wipe" | "/api/vd/channel" | "/api/vd/forget" | "/api/vd/dl" | "/api/vd/claim" | "/api/vd/read" | "/api/vd/chunkdone" | "/api/vd/done" | "/api/vd/fail" | "/api/r2/claim" | "/api/r2/beat" | "/api/r2/fail" | "/api/r2/done" | "/api/r2/diag" | "/api/r2/dmsg" | "/api/r2/peek" | "/api/r2/put" | "/api/r2/ready" | "/api/r2/part" | "/api/r2/get")
     {
         return false;
     }
@@ -11391,7 +11391,11 @@ async fn encode_claim_q(env: &Env, b: &Value, wq: &'static str, now: i64) -> Res
             } else {
                 let r = turso_exec(env, "SELECT msg_id, file_key FROM tg_files WHERE file_name=?",
                     vec![TursoArg::text(&origin)]).await?;
-                first_row(&r)
+                match first_row(&r) {
+                    Some(r) => Some(r),
+                    // Yangi tizim (vd): ilova asl videoni Actions orqali yuklagan — tayyor bo'lsa shu.
+                    None => vd::origin_src(env, &origin).await,
+                }
             };
             let Some(src) = src else {
                 if now - queued_at > ENCODE_ORIGIN_WAIT_MS {
@@ -11462,6 +11466,7 @@ async fn encode_claim_q(env: &Env, b: &Value, wq: &'static str, now: i64) -> Res
                     "wq": wq,
                     "src_h": h,
                     "origin_msg": src["msg_id"],
+                    "origin_vd": src["vd"].as_bool().unwrap_or(false),
                     "origin_url": anibla_url.unwrap_or_default(),
                     "origin_label": anibla_label,
                     "origin_key": match src["file_key"].as_str().unwrap_or("") {
@@ -12231,7 +12236,11 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
             } else {
                 let r = turso_exec(env, "SELECT msg_id, file_key FROM tg_files WHERE file_name=?",
                     vec![TursoArg::text(&origin)]).await?;
-                first_row(&r)
+                match first_row(&r) {
+                    Some(r) => Some(r),
+                    // Yangi tizim (vd): ilova asl videoni Actions orqali yuklagan — tayyor bo'lsa shu.
+                    None => vd::origin_src(env, &origin).await,
+                }
             };
             let Some(src) = src else {
                 if now - queued_at > ENCODE_ORIGIN_WAIT_MS {
@@ -12308,6 +12317,7 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
                     "done": done,
                     "uploaded": uploaded,
                     "origin_msg": src["msg_id"],
+                    "origin_vd": src["vd"].as_bool().unwrap_or(false),
                     "origin_url": anibla_url.unwrap_or_default(),
                     "origin_label": anibla_label,
                     // Kanal postidagi kalit; bo'lmasa bazadagisi.
@@ -14273,7 +14283,7 @@ async fn tg_route(mut req: Request, env: &Env, path: &str, method: Method) -> Re
         // ── VIDEO OMBORI (`vd`): ma'lumot + admin yuklashi ──
         (Method::Post, "/api/vd/info") => {
             let body: Value = req.json().await.unwrap_or(json!({}));
-            vd::info(env, &body).await
+            vd::info_for(env, me, is_admin(&u), &body).await
         }
         (Method::Post, "/api/vd/up/init") => {
             let body: Value = req.json().await.unwrap_or(json!({}));
