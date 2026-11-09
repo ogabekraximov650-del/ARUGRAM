@@ -133,6 +133,9 @@ jobs:
           put TG_API_ID "${{ secrets.TG_API_ID }}"
           put TG_API_HASH "${{ secrets.TG_API_HASH }}"
           put TG_CHANNEL_ID "${{ secrets.TG_CHANNEL_ID }}"
+          # Eski kanaldan bot chiqarib yuborilgan (2026-11) — hamma yo'l (bot nusxalash, Anibla/Post yetkazish) YANGI kanalga yozadi:
+          # `ci/TG_CHANNEL_ID` (kanal ID raqami, maxfiy emas) bo'lsa u GitHub Secret'dan USTUN turadi.
+          if [ -s ../ci/TG_CHANNEL_ID ]; then put TG_CHANNEL_ID "$(tr -d '[:space:]' < ../ci/TG_CHANNEL_ID)"; fi
           # Video ombori (`vd`) bo'laklari saqlanadigan YANGI kanal: `ci/VD_CHANNEL_ID` (kanal ID raqami, maxfiy emas). Bo'sh/yo'q bo'lsa — TG_CHANNEL_ID.
           if [ -s ../ci/VD_CHANNEL_ID ]; then put VD_CHANNEL_ID "$(tr -d '[:space:]' < ../ci/VD_CHANNEL_ID)"; fi
           # Avto-kodlash (`encode.yml`): Actions shu kalit bilan kiradi.
