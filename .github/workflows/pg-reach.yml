@@ -1,0 +1,27 @@
+name: Postgres tashqi ulanish tekshiruvi (vaqtincha)
+
+# Ample'dagi test Postgres internetdan (GitHub runner) 5432-portga ochiqmi — faqat TCP tekshiruvi, parol ishlatilmaydi.
+on:
+  workflow_dispatch:
+    inputs:
+      host:
+        description: Baza manzili (IP)
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  reach:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: TCP 5432
+        env:
+          H: ${{ inputs.host }}
+        run: |
+          for i in 1 2 3; do
+            if timeout 8 bash -c "echo > /dev/tcp/$H/5432"; then echo "OCHIQ: $H:5432 internetdan ulanadi"; exit 0; fi
+            sleep 3
+          done
+          echo "YOPIQ: $H:5432 internetdan ulanmaydi"
