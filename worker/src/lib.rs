@@ -14634,6 +14634,12 @@ async fn route(mut req: Request, env: Env, ctx: Context) -> Result<Response> {
         return fmp4::route(req, &env, &p).await;
     }
 
+    // Video ombori rasmlari: kalit va hajm (faqat ilova imzosi, sessiyasiz; POST — GET blokidan TASHQARIDA).
+    if method == Method::Post && path == "/api/vd/imginfo" {
+        let body: Value = req.json().await.unwrap_or(json!({}));
+        return vd::img_info(&env, &body).await;
+    }
+
     // B2 proxy — Range header bilan uzatiladi (video seek)
     if method == Method::Get {
         if let Some(fname) = path.strip_prefix("/api/image/") {
@@ -14653,10 +14659,6 @@ async fn route(mut req: Request, env: Env, ctx: Context) -> Result<Response> {
         // Video ombori rasmlari (poster, profil rasmi): faqat ilova imzosi, sessiyasiz (`vd::img`, `vd::img_info`).
         if let Some(n) = path.strip_prefix("/api/vd/img/") {
             return vd::img(&env, n).await;
-        }
-        if path == "/api/vd/imginfo" && method == Method::Post {
-            let body: Value = req.json().await.unwrap_or(json!({}));
-            return vd::img_info(&env, &body).await;
         }
         if let Some(fname) = path.strip_prefix("/api/play/") {
             if fname.starts_with("vd~") {
